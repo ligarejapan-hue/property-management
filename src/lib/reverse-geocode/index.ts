@@ -9,7 +9,7 @@
  *
  * ⚠既存規約（address-lookup と同型）: **env 未設定なら休眠(503)**。国土地理院はキー不要だが、
  * 「本番からの新しい外部接続はフラグ投入で明示的に有効化する」という運用を郵便番号補完と
- * 揃えるため、有効化フラグを必須にする。外部へ送るのは座標のみ（PIIなし）。
+ * 揃えるため、有効化フラグを必須にする。外部へ送るのは座標のみ（座標も保護対象の位置情報として扱い、UI で送信先を明示した上で利用者の明示操作時のみ送る）。
  */
 import { GsiReverseGeocodeProvider } from "./gsi-provider";
 import { MockReverseGeocodeProvider } from "./mock-provider";

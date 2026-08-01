@@ -34,6 +34,14 @@ describe("ConvertPinToPropertyModal", () => {
     expect(html).toContain("ピンの位置から住所を入力");
     expect(html).toContain("町丁目まで");
   });
+
+  it("押す前に外部送信の事前開示を表示する(Codex R4 P2: 座標は保護対象の位置情報)", () => {
+    // 初期表示(クリック前)の時点で「どこへ何を送るか」が見えること。
+    const html = renderToStaticMarkup(createElement(ConvertPinToPropertyModal, props));
+    expect(html).toContain("ピンの座標を国土地理院");
+    expect(html).toContain("送信して住所を調べます");
+    expect(html).toContain("座標以外の情報は送信しません");
+  });
 });
 
 describe("ConvertPinToPropertyModal 住所自動入力の配線(source)", () => {

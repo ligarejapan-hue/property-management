@@ -214,9 +214,13 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
                   ピンの位置から住所を入力
                 </button>
               </div>
-              {suggestNote && (
-                <p className="text-xs text-gray-500 dark:text-gray-400">{suggestNote}</p>
-              )}
+              {/* 位置情報(座標)は保護対象 → 押す前に「どこへ何を送るか」を明示する
+                  (Codex R4 P2: 事前開示なしに座標を外部送信しない)。結果表示後は
+                  suggestNote に置き換わる(1行ずつ・画面を混雑させない)。 */}
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {suggestNote ??
+                  "ボタンを押すと、ピンの座標を国土地理院（国の機関・無料）に送信して住所を調べます。座標以外の情報は送信しません。"}
+              </p>
               <AddressLookupControls
                 zip={postalCode}
                 address={address}
