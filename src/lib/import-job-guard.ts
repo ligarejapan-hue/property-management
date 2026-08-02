@@ -92,3 +92,16 @@ export function assertImportJobMutable(
     "FORBIDDEN",
   );
 }
+
+/**
+ * 変更操作が可能かを**例外ではなく真偽値**で返す（画面へ渡す canMutate 用）。
+ * 条件は assertImportJobMutable と同一（自分の実行分 or import:manage）。
+ */
+export function canMutateImportJobFor(
+  job: { executedBy: string | null },
+  sessionUserId: string,
+  permissions: PermissionEntry[],
+): boolean {
+  if (canManageOthersImportJobs(permissions)) return true;
+  return Boolean(job.executedBy && job.executedBy === sessionUserId);
+}

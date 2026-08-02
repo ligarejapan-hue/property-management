@@ -125,3 +125,26 @@ describe("権限カタログ（管理画面）に import:read_all が出てい�
     );
   });
 });
+
+describe("画面の変更操作は canMutate で出し分ける（Codex #349 R9 P2）", () => {
+  const PAGE = "src/app/(dashboard)/import/jobs/[jobId]/page.tsx";
+  const src = readFileSync(join(process.cwd(), PAGE), "utf-8");
+
+  it("route が canMutate を返す（判定を server 側1箇所に置く）", () => {
+    const routeSrc = readFileSync(
+      join(process.cwd(), "src/app/api/import/jobs/[jobId]/route.ts"),
+      "utf-8",
+    );
+    expect(routeSrc).toContain("canMutate: canMutateImportJobFor(");
+  });
+
+  it("画面が canMutate を導出し、ロールバック・一括操作・行操作を包む", () => {
+    expect(src).toContain("const canMutate = job?.canMutate === true;");
+    // ロールバックボタン
+    expect(src).toMatch(/\{canMutate && job\.jobType === "property_csv"/);
+    // 一括操作ブロック
+    expect(src).toMatch(/\{canMutate &&\s*\n\s*reason === "all"/);
+    // 行のアクション群
+    expect(src).toMatch(/Action buttons row[\s\S]{0,80}\{canMutate && \(/);
+  });
+});

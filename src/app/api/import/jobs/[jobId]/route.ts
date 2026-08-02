@@ -9,7 +9,10 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
-import { assertImportJobVisible } from "@/lib/import-job-guard";
+import {
+  assertImportJobVisible,
+  canMutateImportJobFor,
+} from "@/lib/import-job-guard";
 import {
   summaryFromStatusCounts,
   type StatusCounts,
@@ -287,6 +290,10 @@ export async function GET(
       pagination,
       pendingCount,
       isRegistryPdfBulkJob,
+      // 画面がロールバック等の**変更操作の導線を出してよいか**（Codex #349 R9 P2）。
+      // 判定を server 側の1箇所に置くことで、画面と route のズレ（押して入力してから
+      // 403 になる）を構造的に防ぐ。閲覧のみ（import:read_all）の他人ジョブでは false。
+      canMutate: canMutateImportJobFor(job, session.id, perms),
     });
   } catch (error) {
     return handleApiError(error);
