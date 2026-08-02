@@ -119,7 +119,12 @@ function realPathOrSelf(p: string): string {
 
 /**
  * public/uploads 配下の実ファイル（.gitkeep 等の空プレースホルダを除く）を列挙する。
- * 起動時検証のためだけの補助。存在しない/読めない場合は空扱い（起動を止めない）。
+ * 起動時検証のためだけの補助。
+ *
+ * ⚠**未作成(ENOENT)以外の読み取り失敗は throw する**（Codex #349 R5 P1）。
+ * 例えば実行のみ許可（一覧不可）のディレクトリは、列挙に失敗しても Next.js は
+ * 既知のパスのファイルを開けてしまう＝「読めない＝空」と見なすと、残存ファイルが
+ * 無認証で配られたまま起動を許すことになる。判断できないときは起動を止める。
  */
 function listPublicUploadFiles(limit = 5): string[] {
   const dir = path.resolve(process.cwd(), "public", "uploads");
@@ -129,8 +134,14 @@ function listPublicUploadFiles(limit = 5): string[] {
     let entries: import("node:fs").Dirent[];
     try {
       entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch {
-      return; // 未作成なら何もしない
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return; // 未作成＝残存ファイルも無い
+      throw new Error(
+        `public/uploads(${current}) を検査できません(${code ?? "unknown"})。` +
+          "残存ファイルの有無を確認できないため起動を中止します。" +
+          "ディレクトリの権限を確認するか、public 配下のアップロードを退避してください",
+      );
     }
     for (const e of entries) {
       if (found.length >= limit) return;

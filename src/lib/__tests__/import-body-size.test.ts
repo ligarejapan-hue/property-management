@@ -154,6 +154,24 @@ describe("起動時の保存先検証（Codex #349 P1: 遅延throwでは起動�
   });
 });
 
+describe("public/uploads の検査失敗は fail-closed(Codex #349 R5 P1)", () => {
+  const src = readFileSync(
+    join(process.cwd(), "src/lib/storage/local-paths.ts"),
+    "utf-8",
+  );
+
+  it("ENOENT(未作成)だけ無視し、それ以外の読み取り失敗は起動を止める", () => {
+    // 実行のみ許可のディレクトリ等で「読めない=空」と誤認すると、残存ファイルが
+    // 無認証で配られたまま起動してしまう。
+    expect(src).toContain('code === "ENOENT"');
+    expect(src).toMatch(/を検査できません/);
+    expect(src).toMatch(/起動を中止します/);
+    // catch 節で無条件 return していないこと(throw があること)。
+    const walkBlock = src.slice(src.indexOf("function listPublicUploadFiles"));
+    expect(walkBlock).toContain("throw new Error(");
+  });
+});
+
 describe("保存先の symlink 回避（Codex #349 R3/R4 P1・実測で挙動確認済み）", () => {
   const src = readFileSync(
     join(process.cwd(), "src/lib/storage/local-paths.ts"),
