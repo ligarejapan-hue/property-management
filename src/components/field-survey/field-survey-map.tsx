@@ -59,6 +59,7 @@ import {
   cameraFirstButtonState,
   type CameraFirstPhase,
 } from "@/lib/field-survey-camera-first";
+import { recenterZoom } from "@/lib/field-survey-map-recenter";
 import PinDetailPanel from "@/components/field-survey/pin-detail-panel";
 import { useFieldSurveyPinMutations } from "@/components/field-survey/use-field-survey-pin-mutations";
 import {
@@ -81,6 +82,7 @@ import CurrentLocationMarker from "@/components/field-survey/current-location-ma
 import PinMarkerLegend from "@/components/field-survey/pin-marker-legend";
 import { pinMarkerStyle } from "@/lib/field-survey-pin-marker";
 import CurrentLocationStatus from "@/components/field-survey/current-location-status";
+import MapRecenterButton from "@/components/field-survey/map-recenter-button";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 
 // 東京駅付近を初期表示の中心にする (海外案件用ではない国内利用前提)。
@@ -262,6 +264,47 @@ export default function FieldSurveyMap({
       m.panTo({ lat: pos.lat, lng: pos.lng });
     }
   }, [mapInstance, recorder.status, recorder.latestPositionForDisplay]);
+
+  // 地図左下の「現在地へ移動」FAB から呼ぶ pan (2026-08-03)。
+  // ⚠上の handlePanToCurrent との違い: あちらは**記録中の最新位置**専用で、
+  // 記録していない間は動かない。こちらは MapRecenterButton が決めた座標
+  // (記録中なら recorder の位置 / それ以外はその場の単発取得) を受け取るだけで、
+  // **地図側は位置を取りに行かない** (取得は MapRecenterButton に閉じる)。
+  const handleRecenterTo = useCallback(
+    (pos: { lat: number; lng: number }) => {
+      const m = mapInstance as
+        | {
+            panTo?: (p: { lat: number; lng: number }) => void;
+            getZoom?: () => number | undefined;
+            setZoom?: (z: number) => void;
+          }
+        | null;
+      if (!m || typeof m.panTo !== "function") return;
+      m.panTo({ lat: pos.lat, lng: pos.lng });
+      // 引きすぎているときだけ街歩き用の倍率まで上げる (判断は純関数側)。
+      if (typeof m.getZoom === "function" && typeof m.setZoom === "function") {
+        const next = recenterZoom({
+          currentZoom: m.getZoom(),
+          tripZoom: TRIP_START_ZOOM,
+        });
+        if (next !== null) m.setZoom(next);
+      }
+    },
+    [mapInstance],
+  );
+  // MapRecenterButton へ渡す「記録中の最新位置」。記録していない間は null にして
+  // 単発取得へ落とす (古い座標へ寄せない・handlePanToCurrent と同じ判断)。
+  // ⚠useMemo で参照を安定させる。毎レンダー新しい object を渡すと、記録中に
+  // 位置が届くたび (数秒ごと) ボタン側の useCallback も作り直しになる。
+  const recenterLivePos = recorder.latestPositionForDisplay;
+  const recenterLivePosition = useMemo(
+    () =>
+      recorder.status === "recording" && recenterLivePos
+        ? { lat: recenterLivePos.lat, lng: recenterLivePos.lng }
+        : null,
+    [recorder.status, recenterLivePos],
+  );
+
   // 位置記録中かつ最新位置が取得済の時のみ現在地マーカーを描画する。
   const showCurrentLocationMarker =
     !!activeSession &&
@@ -1001,6 +1044,16 @@ export default function FieldSurveyMap({
           hasActiveSession={!!activeSession}
           showOthersLegendHint={canSeeOtherPins}
           onPanToCurrent={handlePanToCurrent}
+        />
+
+        {/* 現在地へ移動 (地図左下・常設)。巡回の有無によらず出す = 街歩き中に
+            地図をずらしてから自分の場所へ戻る導線を 1 タップにする。
+            ⚠パネル展開中も消さない: パネルは右側 (w-56) を占め、この FAB は
+            左端 3 なので重ならない。右下は Google 既定 UI (ズーム / ペグマン) が
+            使うため左下に置いている。 */}
+        <MapRecenterButton
+          livePosition={recenterLivePosition}
+          onRecenter={handleRecenterTo}
         />
 
         {/* カメラファースト: 巡回中は「撮って登録」ボタンを地図下部に常設。
