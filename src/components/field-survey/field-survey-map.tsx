@@ -270,6 +270,11 @@ export default function FieldSurveyMap({
   // 記録していない間は動かない。こちらは MapRecenterButton が決めた座標
   // (記録中なら recorder の位置 / それ以外はその場の単発取得) を受け取るだけで、
   // **地図側は位置を取りに行かない** (取得は MapRecenterButton に閉じる)。
+  // ⚠地図がまだ用意できていないときの寄せ先を 1 件だけ預かる (@codex #351 P2)。
+  // 単発取得は最大 10 秒かかるので、取得が終わった時点でも地図が間に合って
+  // いないことがある。そこで捨てると**押しても何も起きない**ように見えるため、
+  // 用意できた時点で消化する。巡回開始時の autoCenterOnStartRef と同じ考え方。
+  const pendingRecenterRef = useRef<{ lat: number; lng: number } | null>(null);
   const handleRecenterTo = useCallback(
     (pos: { lat: number; lng: number }) => {
       const m = mapInstance as
@@ -279,7 +284,11 @@ export default function FieldSurveyMap({
             setZoom?: (z: number) => void;
           }
         | null;
-      if (!m || typeof m.panTo !== "function") return;
+      if (!m || typeof m.panTo !== "function") {
+        pendingRecenterRef.current = { lat: pos.lat, lng: pos.lng };
+        return;
+      }
+      pendingRecenterRef.current = null;
       m.panTo({ lat: pos.lat, lng: pos.lng });
       // 引きすぎているときだけ街歩き用の倍率まで上げる (判断は純関数側)。
       if (typeof m.getZoom === "function" && typeof m.setZoom === "function") {
@@ -292,6 +301,17 @@ export default function FieldSurveyMap({
     },
     [mapInstance],
   );
+  // 地図が用意できたら、預かっていた寄せ先を 1 回だけ消化する。
+  // ⚠**消化は 1 回きり** (消してから実行する)。残したままにすると、以後に
+  // 利用者が地図を動かすたび引き戻される。
+  useEffect(() => {
+    const pending = pendingRecenterRef.current;
+    if (!pending) return;
+    if (!mapInstance) return;
+    pendingRecenterRef.current = null;
+    handleRecenterTo(pending);
+  }, [mapInstance, handleRecenterTo]);
+
   // MapRecenterButton へ渡す「記録中の最新位置」。記録していない間は null にして
   // 単発取得へ落とす (古い座標へ寄せない・handlePanToCurrent と同じ判断)。
   // ⚠useMemo で参照を安定させる。毎レンダー新しい object を渡すと、記録中に

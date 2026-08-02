@@ -71,12 +71,23 @@ export default function MapRecenterButton({
     };
   }, []);
 
+  // ⚠**取得完了時は「そのときの最新の onRecenter」を呼ぶ** (@codex #351 P2)。
+  // 地図の初期化前にこのボタンを押すと、click 時点の onRecenter は
+  // mapInstance === null の closure を掴んでいる。単発取得には最大 10 秒
+  // かかるので、その間に地図が用意できても**古い closure が黙って何もせず
+  // 戻り、最初の 1 タップだけ効かない**ように見える。ref 経由で呼べば、
+  // 取得が終わった時点で有効になっている handler へ届く。
+  const onRecenterRef = useRef(onRecenter);
+  useEffect(() => {
+    onRecenterRef.current = onRecenter;
+  }, [onRecenter]);
+
   const handleClick = useCallback(() => {
     const plan = recenterPlan({ livePosition, locating });
     if (plan.kind === "busy") return;
     setError(null);
     if (plan.kind === "use-live") {
-      onRecenter(plan.pos);
+      onRecenterRef.current(plan.pos);
       return;
     }
     const geo =
@@ -92,7 +103,10 @@ export default function MapRecenterButton({
         if (!mountedRef.current) return;
         setLocating(false);
         // ⚠座標はここで親へ渡すだけ。state にも ref にも残さない。
-        onRecenter({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        onRecenterRef.current({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
       },
       (err) => {
         if (!mountedRef.current) return;
@@ -105,7 +119,8 @@ export default function MapRecenterButton({
         maximumAge: GEOLOCATION_MAX_AGE_MS,
       },
     );
-  }, [geolocation, livePosition, locating, onRecenter]);
+    // onRecenter は ref 経由で読むので依存に入れない (毎レンダーの作り直しを避ける)。
+  }, [geolocation, livePosition, locating]);
 
   return (
     <div className="pointer-events-none absolute bottom-14 left-3 z-10 flex flex-col items-start gap-1">

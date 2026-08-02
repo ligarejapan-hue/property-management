@@ -106,6 +106,15 @@ describe("MapRecenterButton — 位置情報の扱い (ソース制約)", () => 
     expect(BUTTON_SRC).toMatch(/mountedRef\.current = false/);
     expect(BUTTON_SRC).toMatch(/if \(!mountedRef\.current\) return/);
   });
+
+  it("⚠取得完了時は最新の onRecenter を呼ぶ (地図の初期化前に押した1タップを捨てない)", () => {
+    // click 時点の closure を掴むと、地図が未準備のまま固定され、取得が
+    // 終わる頃に地図が用意できていても黙って何もしない = 押しても効かない。
+    expect(BUTTON_SRC).toMatch(/onRecenterRef\.current = onRecenter/);
+    expect(BUTTON_SRC).toMatch(/onRecenterRef\.current\(\{/);
+    // 直接呼び出しが残っていないこと (呼び出しは ref 経由だけ)
+    expect(BUTTON_SRC).not.toMatch(/[^.]\bonRecenter\(/);
+  });
 });
 
 describe("field-survey-map.tsx との結線", () => {
@@ -121,6 +130,20 @@ describe("field-survey-map.tsx との結線", () => {
     // 記録中以外は null にして古い座標へ寄せない
     expect(MAP_SRC).toMatch(
       /recenterLivePosition[\s\S]{0,200}recorder\.status === "recording"/,
+    );
+  });
+
+  it("⚠地図が未準備なら寄せ先を預かり、用意でき次第1回だけ消化する", () => {
+    // 取得完了時にまだ地図が無いと、そのまま捨てれば「押しても何も起きない」。
+    expect(MAP_SRC).toMatch(/pendingRecenterRef\.current = \{ lat: pos\.lat/);
+    // 消化は「消してから実行」= 1回きり (残すと以後の地図操作が引き戻される)
+    const eff =
+      MAP_SRC.match(
+        /const pending = pendingRecenterRef\.current;[\s\S]*?handleRecenterTo\(pending\);/,
+      )?.[0] ?? "";
+    expect(eff).not.toBe("");
+    expect(eff.indexOf("pendingRecenterRef.current = null")).toBeLessThan(
+      eff.indexOf("handleRecenterTo(pending)"),
     );
   });
 
