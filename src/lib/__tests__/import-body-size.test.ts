@@ -73,16 +73,25 @@ describe("2ファイル経路(受付帳+所有者)の上限(Codex #349 P2)", () 
     ).not.toThrow();
   });
 
+  // ⚠2ファイル経路は受付帳+所有者の突合(reception-owner)だけ。reception-property は
+  // 受付帳1本なので通常の上限を使う(Codex #349 R6 P2)。
   it.each([
     "src/app/api/import/reception-owner/route.ts",
     "src/app/api/import/reception-owner/preview/route.ts",
-    "src/app/api/import/reception-property/route.ts",
-    "src/app/api/import/reception-property/preview/route.ts",
   ])("%s は2ファイル用の上限を渡す", (rel) => {
     const src = readFileSync(join(process.cwd(), rel), "utf-8");
     expect(src).toContain(
       "assertImportJsonBodySize(request, MAX_IMPORT_JSON_BODY_BYTES_PAIRED)",
     );
+  });
+
+  it.each([
+    "src/app/api/import/reception-property/route.ts",
+    "src/app/api/import/reception-property/preview/route.ts",
+  ])("%s は1ファイル経路なので通常の上限", (rel) => {
+    const src = readFileSync(join(process.cwd(), rel), "utf-8");
+    expect(src).toContain("assertImportJsonBodySize(request);");
+    expect(src).not.toContain("MAX_IMPORT_JSON_BODY_BYTES_PAIRED");
   });
 });
 

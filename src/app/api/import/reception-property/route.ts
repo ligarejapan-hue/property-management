@@ -19,10 +19,7 @@ import {
   type ShinkiFilterMode,
 } from "@/lib/reception-owner-match";
 import { normalizeAddress } from "@/lib/normalize";
-import {
-  assertImportJsonBodySize,
-  MAX_IMPORT_JSON_BODY_BYTES_PAIRED,
-} from "@/lib/import-body-size";
+import { assertImportJsonBodySize } from "@/lib/import-body-size";
 
 // 受付帳CSVから物件を新規作成する取込実行。
 // - フィルタ後のアクティブ行のうち、住所あり・住所未重複の行だけ Property を作成。
@@ -57,10 +54,9 @@ export async function POST(request: NextRequest) {
     }
 
     // body 全体をバッファする前に過大サイズを弾く(2026-08-02 監査)。
-    // ⚠この経路は2ファイル(受付帳+所有者)を同時に受けるため上限は2倍(Codex #349 P2)。
 
 
-    assertImportJsonBodySize(request, MAX_IMPORT_JSON_BODY_BYTES_PAIRED);
+    assertImportJsonBodySize(request);
 
 
     const body = await request.json();
