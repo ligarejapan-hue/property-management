@@ -212,3 +212,24 @@ describe(".env.example の記載が実装値と一致する（Codex #349 R7 P2�
     expect(env).toContain(`2ファイル分で${pairedMb}MB`);
   });
 });
+
+describe("起動時エラーに env 値・パスを含めない（Codex #349 R11 P2）", () => {
+  const src = readFileSync(
+    join(process.cwd(), "src/lib/storage/local-paths.ts"),
+    "utf-8",
+  );
+
+  it("public 配下判定・残存検知・検査失敗のいずれもパス値を埋め込まない", () => {
+    // journald に env 由来の値やホスト構成が残らないようにする。
+    // 起動時 throw を投げる 3 箇所のメッセージに ${root} / ${current} / legacy[0] が無いこと。
+    const startupBlock = src.slice(
+      src.indexOf("export function assertUploadRootSafeAtStartup"),
+      src.indexOf("export function resolveSafeUploadPath"),
+    );
+    expect(startupBlock).not.toContain("${root}");
+    expect(startupBlock).not.toContain("${current}");
+    expect(startupBlock).not.toContain("legacy[0]");
+    // 件数やエラーコードのような非機微な情報は残す（対処に必要なため）。
+    expect(startupBlock).toContain("${legacy.length}");
+  });
+});

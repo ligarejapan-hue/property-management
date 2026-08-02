@@ -63,7 +63,7 @@ export function assertUploadRootSafeAtStartup(): void {
     const legacy = listPublicUploadFiles();
     if (legacy.length > 0) {
       throw new Error(
-        `public/uploads に ${legacy.length} 件のファイルが残っています（例: ${legacy[0]}）。` +
+        `public/uploads に ${legacy.length} 件のファイルが残っています。` +
           "public 配下は静的配信され認可チェックを通らないため、" +
           "LOCAL_UPLOAD_ROOT の配下（例 /var/lib/property-management/uploads）へ移動してから起動してください",
       );
@@ -84,7 +84,9 @@ export function assertUploadRootSafeAtStartup(): void {
     rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
   if (insidePublic && isProduction) {
     throw new Error(
-      `LOCAL_UPLOAD_ROOT が public 配下(${root})を指しています。public 配下は静的配信され` +
+      // ⚠パス値そのものは出さない（env 由来の値・ホストの構成が journald に残るため・
+      // Codex #349 R11 P2）。何を直せばよいかは指示文で十分伝わる。
+      "LOCAL_UPLOAD_ROOT が public 配下を指しています。public 配下は静的配信され" +
         "認可チェックを通らないため、public の外（例 /var/lib/property-management/uploads）を指定してください",
     );
   }
@@ -138,7 +140,7 @@ function listPublicUploadFiles(limit = 5): string[] {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "ENOENT") return; // 未作成＝残存ファイルも無い
       throw new Error(
-        `public/uploads(${current}) を検査できません(${code ?? "unknown"})。` +
+        `public/uploads の配下を検査できません(${code ?? "unknown"})。` +
           "残存ファイルの有無を確認できないため起動を中止します。" +
           "ディレクトリの権限を確認するか、public 配下のアップロードを退避してください",
       );
