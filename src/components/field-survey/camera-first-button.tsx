@@ -3,6 +3,8 @@
 /**
  * カメラファースト撮影ボタン (巡回中に地図下部へ常設する FAB)。
  *
+ * - 見た目は**カメラマークだけの丸ボタン** (2026-08-03 発注者指示)。文字を持たない
+ *   ぶん、用途は aria-label / title で必ず伝える。
  * - タップで OS カメラを直接起動 (input accept="image/*" capture="environment")。
  *   撮影された file はそのまま親 (FieldSurveyMap) へ渡し、親が現在地取得→
  *   ピン作成 modal 起動を orchestrate する。ここでは位置情報を扱わない。
@@ -12,6 +14,7 @@
  */
 
 import { useRef } from "react";
+import { Camera } from "lucide-react";
 
 interface CameraFirstButtonProps {
   disabled: boolean;
@@ -58,17 +61,19 @@ export default function CameraFirstButton({
         data-testid="camera-first-input"
         onChange={handleChange}
       />
+      {/* ⚠**カメラマークだけの丸ボタン**にする (2026-08-03 発注者指示)。
+          文字を消すぶん「何のボタンか」を伝える手段は必ず残す:
+          aria-label (読み上げ) と title (PC のツールチップ)。 */}
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={disabled}
         data-testid="camera-first-button"
         aria-label="写真を撮ってピンを登録"
-        title={permissionDenied ? "ピン追加の権限がありません" : undefined}
-        className="pointer-events-auto flex items-center gap-2 rounded-full border border-indigo-700 bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-indigo-500"
+        title={permissionDenied ? "ピン追加の権限がありません" : "撮って登録"}
+        className="pointer-events-auto flex h-14 w-14 items-center justify-center rounded-full border border-indigo-700 bg-indigo-600 text-white shadow-lg hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-indigo-500"
       >
-        <span aria-hidden="true">📷</span>
-        撮って登録
+        <Camera className="h-7 w-7" aria-hidden="true" />
       </button>
       {/* title のツールチップはタッチ端末で出ないため、権限なしの理由は
           可視テキストでも示す (PinAddModeToggle と同文言)。 */}
