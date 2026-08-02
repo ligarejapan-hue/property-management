@@ -141,8 +141,8 @@ async function importPrefecture(
       }
       return stale;
     },
-    // 都道府県一括(東京都≒15万点)でも1txで置換できる余裕を持つ。
-    { timeout: 600_000 },
+    // 都道府県一括(埼玉≒149万点・実測)でも1txで置換できる余裕を持つ。
+    { timeout: 1_800_000 },
   );
 }
 
