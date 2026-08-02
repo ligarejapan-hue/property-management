@@ -233,3 +233,21 @@ describe("起動時エラーに env 値・パスを含めない（Codex #349 R11
     expect(startupBlock).toContain("${legacy.length}");
   });
 });
+
+describe("public 判定は「..で始まる名前」を外部と誤認しない（Codex #349 R12 P1・実測確認済み）", () => {
+  const src = readFileSync(
+    join(process.cwd(), "src/lib/storage/local-paths.ts"),
+    "utf-8",
+  );
+
+  it("親を指す形（.. / ../…）と絶対パスだけを外部扱いする", () => {
+    // public/..uploads → rel="..uploads" を startsWith("..") で外部と誤判定すると、
+    // 静的配信ディレクトリ配下に写真・謄本PDFが書かれてしまう。
+    expect(src).toContain('rel === ".."');
+    expect(src).toContain("rel.startsWith(`..${path.sep}`)");
+    expect(src).toContain('rel.startsWith("../")');
+    expect(src).toContain("const insidePublic = !escapesPublic;");
+    // 素朴な startsWith("..") が残っていないこと。
+    expect(src).not.toContain('!rel.startsWith("..")');
+  });
+});

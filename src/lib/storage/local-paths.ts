@@ -80,8 +80,14 @@ export function assertUploadRootSafeAtStartup(): void {
   // 以後のアップロードが静的配信ディレクトリへ書かれて無認証で配られる。
   const publicDir = realPathOrSelf(path.resolve(process.cwd(), "public"));
   const rel = path.relative(publicDir, realPathOrSelf(root));
-  const insidePublic =
-    rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  // ⚠「..」で始まる**名前**（例 public/..uploads → rel="..uploads"）を「public の外」と
+  // 誤判定しない（Codex #349 R12 P1）。親を指すのは "" / ".." / "../..." の形だけ。
+  const escapesPublic =
+    rel === ".." ||
+    rel.startsWith(`..${path.sep}`) ||
+    rel.startsWith("../") ||
+    path.isAbsolute(rel);
+  const insidePublic = !escapesPublic;
   if (insidePublic && isProduction) {
     throw new Error(
       // ⚠パス値そのものは出さない（env 由来の値・ホストの構成が journald に残るため・
