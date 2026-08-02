@@ -17,8 +17,9 @@ export type ReverseGeocodeResult =
       address: string;
       /** 町丁目。表示・デバッグ用。 */
       town: string;
-      /** 精度: "block"=番まで(ローカル照合) / "town"=町丁目まで(国土地理院)。 */
-      precision: "block" | "town";
+      /** 精度: "rsdt"=号まで / "block"=番まで(いずれもローカル照合) / "town"=町丁目まで(国土地理院)。
+       * この型を返す provider(GSI/mock) は "town" のみ。"rsdt"/"block" は route が組み立てる。 */
+      precision: "rsdt" | "block" | "town";
       /** 市区町村コード（正規化済み・先頭ゼロなし）。town 精度(GSI由来)のみ。 */
       municipalityCode?: string;
     }

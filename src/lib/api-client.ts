@@ -2810,13 +2810,13 @@ export async function convertPinToProperty(
   );
 }
 
-/** suggestPinAddress の応答。precision: "block"=番まで(ローカル照合) / "town"=町丁目まで。 */
+/** suggestPinAddress の応答。precision: "rsdt"=号まで / "block"=番まで(ローカル照合) / "town"=町丁目まで。 */
 export interface SuggestPinAddressResponse {
   result:
     | {
         found: true;
         address: string;
-        precision?: "block" | "town";
+        precision?: "rsdt" | "block" | "town";
         /** 住居表示未実施地域のみ: 最寄り街区点の**地番**(地番欄の初期値候補・要確認)。 */
         lotNumber?: string;
       }
@@ -2832,8 +2832,8 @@ export async function suggestPinAddress(
     return {
       result: {
         found: true,
-        address: "東京都杉並区西荻北3-1",
-        precision: "block",
+        address: "東京都杉並区西荻北3-19-4",
+        precision: "rsdt",
       },
     };
   }

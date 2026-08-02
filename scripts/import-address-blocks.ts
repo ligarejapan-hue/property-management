@@ -24,46 +24,12 @@
  *   - ⚠個人情報は扱わない(公開データの地点座標のみ)。
  */
 
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { PrismaClient } from "../src/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { parseIsjCsv, type IsjBlockRow } from "../src/lib/address-blocks/parse-isj";
 import { parseImportArgs } from "../src/lib/address-blocks/import-cli";
-
-/**
- * 指定パス(ファイル or フォルダ)から .csv を列挙する(フォルダは1階層下まで)。
- * 重複指定(フォルダとその中のファイルを両方渡す・同じファイルを2回渡す・symlink 経由等)は
- * **物理パス**(realpath)で dedupe する(Codex R4/R8 P2: 重複すると同じ点が二重挿入される)。
- */
-function collectCsvFiles(paths: string[]): string[] {
-  const seen = new Set<string>();
-  const files: string[] = [];
-  const push = (p: string) => {
-    const canonical = realpathSync(p);
-    if (seen.has(canonical)) return;
-    seen.add(canonical);
-    files.push(canonical);
-  };
-  for (const p of paths) {
-    const st = statSync(p);
-    if (st.isFile()) {
-      push(p);
-      continue;
-    }
-    for (const name of readdirSync(p)) {
-      const child = join(p, name);
-      if (statSync(child).isDirectory()) {
-        for (const inner of readdirSync(child)) {
-          if (inner.toLowerCase().endsWith(".csv")) push(join(child, inner));
-        }
-      } else if (name.toLowerCase().endsWith(".csv")) {
-        push(child);
-      }
-    }
-  }
-  return files;
-}
+import { collectCsvFiles } from "../src/lib/address-blocks/import-files";
 
 const CHUNK = 1000;
 
@@ -101,12 +67,33 @@ async function importPrefecture(
         const existing = await tx.addressBlockPoint.count({
           where: { prefecture: g.prefecture, city: g.city },
         });
-        if (existing > 0 && g.rows.length * 2 < existing && !allowShrink) {
+        if (existing > 0 && g.rows.length < existing * 0.95 && !allowShrink) {
           throw new Error(
-            `${g.prefecture}${g.city}: 新データ ${g.rows.length} 点が既存 ${existing} 点の半分未満です。` +
+            `${g.prefecture}${g.city}: 新データ ${g.rows.length} 点が既存 ${existing} 点より5%以上少ないです。` +
               "CSV が途中で切れている可能性があります。再ダウンロードして再実行してください" +
               "(意図した縮小なら --allow-shrink を付けてください)",
           );
+        }
+        // 市区町村の**途中**で切れた CSV(50%超が残る)は点数の縮小ガードを通過する
+        // (Codex #348 R3 P2 と同型の穴)。既存の町丁目が新データに全て存在することも
+        // 照合する。町名変更等の意図的な再編のみ --allow-shrink で続行。
+        if (existing > 0 && !allowShrink) {
+          const existingTowns = await tx.addressBlockPoint.findMany({
+            where: { prefecture: g.prefecture, city: g.city },
+            distinct: ["town"],
+            select: { town: true },
+          });
+          const incomingTowns = new Set(g.rows.map((r) => r.town));
+          const missingTowns = existingTowns
+            .map((t) => t.town)
+            .filter((t) => !incomingTowns.has(t));
+          if (missingTowns.length > 0) {
+            throw new Error(
+              `${g.prefecture}${g.city}: 既存の ${missingTowns.length} 町丁目(${missingTowns.slice(0, 5).join("、")}${missingTowns.length > 5 ? " ほか" : ""})が新データにありません。` +
+                "CSV が途中で切れているか、町名の再編の可能性があります。再ダウンロードして確認してください" +
+                "(意図した再編なら --allow-shrink を付けてください)",
+            );
+          }
         }
         await tx.addressBlockPoint.deleteMany({
           where: { prefecture: g.prefecture, city: g.city },
@@ -131,12 +118,31 @@ async function importPrefecture(
       const staleWhere = { prefecture, sourceVersion: { not: version } };
       const stale = await tx.addressBlockPoint.count({ where: staleWhere });
       if (stale > 0 && pruneStale) {
+        // 市区町村の境目でちょうど切れた CSV は「行ゼロ」でも「縮小」でもなく、
+        // 欠けた市区町村ごと cityGroups から消える(Codex #348 R2 P2 と同型の穴)。
+        // 既存の市区町村が新データに全て存在することを確認してから消す。
+        const existingCities = await tx.addressBlockPoint.findMany({
+          where: { prefecture },
+          distinct: ["city"],
+          select: { city: true },
+        });
+        const incoming = new Set(cityGroups.map((g) => g.city));
+        const missing = existingCities
+          .map((e) => e.city)
+          .filter((c) => !incoming.has(c));
+        if (missing.length > 0 && !allowShrink) {
+          throw new Error(
+            `${prefecture}: 既存の ${missing.length} 市区町村(${missing.slice(0, 5).join("、")}${missing.length > 5 ? " ほか" : ""})が新データにありません。` +
+              "CSV が途中で切れているか、市町村合併の可能性があります。再ダウンロードして確認してください" +
+              "(合併等で意図した消滅なら --allow-shrink を付けてください)",
+          );
+        }
         await tx.addressBlockPoint.deleteMany({ where: staleWhere });
       }
       return stale;
     },
-    // 都道府県一括(東京都≒15万点)でも1txで置換できる余裕を持つ。
-    { timeout: 600_000 },
+    // 都道府県一括(埼玉≒149万点・実測)でも1txで置換できる余裕を持つ。
+    { timeout: 1_800_000 },
   );
 }
 
@@ -178,6 +184,9 @@ async function main(): Promise<number> {
   // fatal:true で厳格に decode し、失敗ファイルは**強行オプションでも通さず**停止する
   // (文字化け住所を DB に入れる正当な理由は無い=再ダウンロード一択)。
   const broken: string[] = [];
+  // 同一市区町村が複数ファイルから来る正当なケースは無い(新旧2版の併用・市区町村zip
+  // と都道府県一括zipの併用等の誤り=Codex #348 R4 P2 と同型)。重複挿入になるため停止。
+  const citySources = new Map<string, Set<string>>();
   for (const file of files) {
     let text: string;
     try {
@@ -201,6 +210,9 @@ async function main(): Promise<number> {
     }
     for (const r of rows) {
       const key = `${r.prefecture}|${r.city}`;
+      const src = citySources.get(key) ?? new Set<string>();
+      src.add(file);
+      citySources.set(key, src);
       const g = groups.get(key) ?? { prefecture: r.prefecture, city: r.city, rows: [] };
       g.rows.push(r);
       groups.set(key, g);
@@ -212,6 +224,17 @@ async function main(): Promise<number> {
   console.log(
     `解析結果: ${groups.size} 市区町村 / ${totalRows} 点 (除外: 不正 ${totalSkipped} / 履歴 ${totalHistory})`,
   );
+
+  const overlapping = [...citySources.entries()].filter(([, s2]) => s2.size >= 2);
+  if (overlapping.length > 0) {
+    for (const [key, s2] of overlapping.slice(0, 5)) {
+      console.error(`  重複: ${key.replace("|", "")} が ${s2.size} ファイルに含まれています`);
+    }
+    console.error(
+      "停止: 同じ市区町村が複数の CSV に含まれています(新旧2版の併用・市区町村zipと都道府県一括zipの併用等)。取り込むフォルダを1版分だけにして再実行してください",
+    );
+    return 1;
+  }
 
   if (broken.length > 0) {
     for (const f of broken) {
