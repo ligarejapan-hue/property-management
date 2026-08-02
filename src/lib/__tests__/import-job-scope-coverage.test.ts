@@ -43,14 +43,19 @@ describe("取込ジョブ配下の route はすべてスコープ制限を通す
       // 一覧系は where 断片、単一ジョブ系は assert。どちらかが必須。
       const usesScope =
         r.src.includes("importJobScopeWhere") ||
-        r.src.includes("assertImportJobVisible");
+        r.src.includes("assertImportJobVisible") ||
+        r.src.includes("assertImportJobMutable");
       expect(usesScope).toBe(true);
     },
   );
 
   it.each(
     routes
-      .filter((r) => r.src.includes("assertImportJobVisible"))
+      .filter(
+        (r) =>
+          r.src.includes("assertImportJobVisible") ||
+          r.src.includes("assertImportJobMutable"),
+      )
       .map((r) => [r.rel, r] as const),
   )("%s は executedBy を取得している（判定材料の欠落防止）", (_rel, r) => {
     // include: { job: true } / include: { executor... } のように全列を取る形か、
@@ -62,6 +67,38 @@ describe("取込ジョブ配下の route はすべてスコープ制限を通す
       r.src.includes("include: { executor:");
     expect(hasExecutedBy).toBe(true);
   });
+
+  // 変更系(POST/PATCH)は read_all では通らない Mutable を使うこと(Codex #349 R8 P1:
+  // 画面上「全員分の閲覧」と表示される権限でロールバック等を許さない)。
+  it.each([
+    "mark-failed",
+    "resume-registry-pdf",
+    "rollback",
+    "bulk-resolve",
+    "retry",
+    "manual-attach-registry-pdf",
+    "manual-link-reception-owner",
+  ])("変更系 %s は Mutable ガードを使う", (name) => {
+    const r = routes.find((x) => x.rel.includes(name + "/route.ts"));
+    expect(r).toBeDefined();
+    expect(r!.src).toContain("assertImportJobMutable");
+    expect(r!.src).not.toContain("assertImportJobVisible");
+  });
+
+  it("行のPATCH(rows/[rowId]) も変更系", () => {
+    const r = routes.find((x) => x.rel.endsWith("rows/[rowId]/route.ts"));
+    expect(r).toBeDefined();
+    expect(r!.src).toContain("assertImportJobMutable");
+  });
+
+  it.each(["jobs/[jobId]/route.ts", "affected-properties", "export-errors"])(
+    "読み取り系 %s は Visible ガード",
+    (name) => {
+      const r = routes.find((x) => x.rel.includes(name));
+      expect(r).toBeDefined();
+      expect(r!.src).toContain("assertImportJobVisible");
+    },
+  );
 
   it("一覧系はスコープを任意フィルタの後にマージしている（他人IDの指定で漏れない）", () => {
     const list = routes.find((r) => r.rel.endsWith("api/import/jobs/route.ts"));

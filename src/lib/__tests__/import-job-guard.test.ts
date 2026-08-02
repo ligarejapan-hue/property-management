@@ -26,14 +26,21 @@ vi.mock("@/lib/api-helpers", () => {
 
 import {
   canSeeAllImportJobs,
+  canManageOthersImportJobs,
   importJobScopeWhere,
   assertImportJobVisible,
+  assertImportJobMutable,
 } from "@/lib/import-job-guard";
 
 const WRITE_ONLY = [{ resource: "import", action: "write", granted: true }];
 const WITH_READ_ALL = [
   ...WRITE_ONLY,
   { resource: "import", action: "read_all", granted: true },
+];
+// manage は「他人の分も操作できる」= read_all の上位互換。
+const WITH_MANAGE = [
+  ...WRITE_ONLY,
+  { resource: "import", action: "manage", granted: true },
 ];
 // granted:false は「持っていない」と同じ（明示的な否認）。
 const READ_ALL_DENIED = [
@@ -108,6 +115,41 @@ describe("assertImportJobVisible（単一ジョブ）", () => {
     expect(() =>
       assertImportJobVisible({ executedBy: null }, ME, WITH_READ_ALL),
     ).not.toThrow();
+  });
+});
+
+describe("閲覧と操作の分離（Codex #349 R8 P1）", () => {
+  it("manage は閲覧も当然できる（上位互換）", () => {
+    expect(canSeeAllImportJobs(WITH_MANAGE)).toBe(true);
+    expect(canManageOthersImportJobs(WITH_MANAGE)).toBe(true);
+  });
+
+  it("read_all は閲覧だけ。他人の取込は**変更できない**", () => {
+    expect(canSeeAllImportJobs(WITH_READ_ALL)).toBe(true);
+    expect(canManageOthersImportJobs(WITH_READ_ALL)).toBe(false);
+    // 閲覧は通る
+    expect(() =>
+      assertImportJobVisible({ executedBy: "other" }, ME, WITH_READ_ALL),
+    ).not.toThrow();
+    // 変更は 403（ロールバック等の破壊的操作を read_all で許さない）
+    expect(() =>
+      assertImportJobMutable({ executedBy: "other" }, ME, WITH_READ_ALL),
+    ).toThrowError(/変更できません/);
+  });
+
+  it("manage があれば他人の取込も変更できる", () => {
+    expect(() =>
+      assertImportJobMutable({ executedBy: "other" }, ME, WITH_MANAGE),
+    ).not.toThrow();
+  });
+
+  it("自分の取込は権限なしでも変更できる / 実行者不明は fail-closed", () => {
+    expect(() =>
+      assertImportJobMutable({ executedBy: ME }, ME, WRITE_ONLY),
+    ).not.toThrow();
+    expect(() =>
+      assertImportJobMutable({ executedBy: null }, ME, WRITE_ONLY),
+    ).toThrow();
   });
 });
 

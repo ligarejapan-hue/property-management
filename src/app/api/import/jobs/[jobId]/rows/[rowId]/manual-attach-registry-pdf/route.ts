@@ -9,7 +9,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
-import { assertImportJobVisible } from "@/lib/import-job-guard";
+import { assertImportJobMutable } from "@/lib/import-job-guard";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { writeAuditLog } from "@/lib/audit";
 import {
@@ -80,8 +80,9 @@ export async function POST(
       throw new ApiError(404, "行が見つかりません", "NOT_FOUND");
     }
 
-    // 他の担当者が実行した取込は見せない(2026-08-02 監査)。
-    assertImportJobVisible(row.job, session.id, perms);
+    // 他の担当者が実行した取込は**変更させない**(2026-08-02 監査)。
+    // 閲覧だけの import:read_all では通らず、import:manage が必要。
+    assertImportJobMutable(row.job, session.id, perms);
     if (row.job.jobType !== "registry_pdf_bulk") {
       throw new ApiError(
         422,

@@ -38,7 +38,7 @@ const RESOURCES = [
   // ⚠ templates 画面の RESOURCES と必ず同内容にすること。
   { key: "import_error_csv", label: "取込エラー行CSV", actions: ["read"] },
   // read_all = 他の担当者が実行した取込も見られる(既定は管理者のみ)。
-  { key: "import", label: "インポート", actions: ["write", "read_all"] },
+  { key: "import", label: "インポート", actions: ["write", "read_all", "manage"] },
   { key: "user_management", label: "ユーザー管理", actions: ["read", "write", "delete"] },
   { key: "audit_log", label: "監査ログ", actions: ["read"] },
   // 現地調査。quick_capture(巡回なしで撮影) は移動軌跡が残らないため既定 admin のみ。

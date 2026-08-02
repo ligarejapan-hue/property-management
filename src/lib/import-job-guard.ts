@@ -18,9 +18,28 @@ import { hasPermission } from "@/lib/permissions";
 
 type PermissionEntry = Parameters<typeof hasPermission>[0][number];
 
-/** 全員分の取込ジョブを見られるか（既定は管理者のみ）。 */
+/**
+ * 全員分の取込ジョブを**見られる**か（既定は管理者のみ）。
+ * `import:manage`（他人の分も操作できる）は上位互換なので閲覧も当然できる。
+ */
 export function canSeeAllImportJobs(permissions: PermissionEntry[]): boolean {
-  return hasPermission(permissions, "import", "read_all");
+  return (
+    hasPermission(permissions, "import", "read_all") ||
+    canManageOthersImportJobs(permissions)
+  );
+}
+
+/**
+ * 他人の取込ジョブを**操作**（ロールバック・行の再実行/解決・失敗マーク等）できるか。
+ *
+ * ⚠read_all と分ける理由（Codex #349 R8 P1）: 画面上「全員分の閲覧」と表示される
+ * 権限が、実際にはロールバック等の破壊的操作まで許してしまうと、権限名と実際の力が
+ * 食い違う。現地調査の read_all（見るだけ）/ manage（他の人の分も編集）と同じ分け方に揃える。
+ */
+export function canManageOthersImportJobs(
+  permissions: PermissionEntry[],
+): boolean {
+  return hasPermission(permissions, "import", "manage");
 }
 
 /**
@@ -51,6 +70,25 @@ export function assertImportJobVisible(
   throw new ApiError(
     403,
     "他の担当者が実行した取込にはアクセスできません",
+    "FORBIDDEN",
+  );
+}
+
+/**
+ * 単一ジョブへの**変更**（ロールバック・行の再実行/解決・失敗マーク・手動紐づけ等）の可否。
+ * 自分の実行分は常に可。他人の分は `import:manage` が必要（read_all では不可）。
+ * ⚠呼び出し側は job の select に `executedBy` を含めること。
+ */
+export function assertImportJobMutable(
+  job: { executedBy: string | null },
+  sessionUserId: string,
+  permissions: PermissionEntry[],
+): void {
+  if (canManageOthersImportJobs(permissions)) return;
+  if (job.executedBy && job.executedBy === sessionUserId) return;
+  throw new ApiError(
+    403,
+    "他の担当者が実行した取込は変更できません",
     "FORBIDDEN",
   );
 }
