@@ -8,6 +8,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { assertImportJobVisible } from "@/lib/import-job-guard";
 import { isUpdateMessage } from "@/lib/import-row-display";
 
 // ---------- GET /api/import/jobs/:jobId/affected-properties ----------
@@ -42,12 +43,14 @@ export async function GET(
     // ジョブ存在確認 + jobType / fileName の取得（rows まで一気に load しない）
     const job = await prisma.importJob.findUnique({
       where: { id: jobId },
-      select: { id: true, jobType: true, fileName: true },
+      select: { id: true, jobType: true, fileName: true, executedBy: true },
     });
 
     if (!job) {
       throw new ApiError(404, "ジョブが見つかりません", "NOT_FOUND");
     }
+    // 他の担当者が実行した取込は見せない(2026-08-02 監査)。
+    assertImportJobVisible(job, session.id, perms);
 
     // 物件CSV以外は対象外。UIに "対象外" を伝えるだけで affected は空配列。
     if (job.jobType !== "property_csv") {

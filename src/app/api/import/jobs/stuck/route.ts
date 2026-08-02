@@ -7,6 +7,10 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import {
+  importJobScopeWhere,
+  canMutateImportJobFor,
+} from "@/lib/import-job-guard";
 
 // ---------- GET /api/import/jobs/stuck ----------
 //
@@ -42,6 +46,8 @@ export async function GET() {
       where: {
         status: "processing",
         createdAt: { lt: thresholdAt },
+        // 他の担当者が実行した取込は見せない(2026-08-02 監査)。
+        ...importJobScopeWhere(session.id, perms),
       },
       include: {
         executor: { select: { id: true, name: true } },
@@ -63,6 +69,8 @@ export async function GET() {
       // 「経過時間（分）」: 切り捨てで返す。UI 側でそのまま表示できる。
       elapsedMinutes: Math.floor((now - job.createdAt.getTime()) / 60000),
       rowCount: job._count.rows,
+      // 「失敗にする」を出してよいか(Codex #349 R10 P2: 押して確認してから 403 を防ぐ)。
+      canMutate: canMutateImportJobFor(job, session.id, perms),
     }));
 
     return apiResponse({

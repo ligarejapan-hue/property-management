@@ -117,15 +117,19 @@ const pm = prisma as unknown as {
 };
 
 function makeRequest() {
-  return new Request("http://localhost/api/import/registry-pdf", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  const __payload = JSON.stringify({
       text: "dummy registry text",
       propertyId: PROPERTY_ID,
       fileName: "registry.pdf",
-    }),
-  }) as unknown as import("next/server").NextRequest;
+    });
+      return new Request("http://localhost/api/import/registry-pdf", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "content-length": String(Buffer.byteLength(__payload)),
+      },
+      body: __payload,
+      }) as unknown as import("next/server").NextRequest;
 }
 
 beforeEach(() => {

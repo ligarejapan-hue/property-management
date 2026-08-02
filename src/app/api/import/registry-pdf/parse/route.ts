@@ -14,6 +14,7 @@ import {
   isPdfBuffer,
   type PdfExtractionSource,
 } from "@/lib/pdf-extract";
+import { assertImportJsonBodySize } from "@/lib/import-body-size";
 
 const SCANNED_PDF_WARNING =
   "PDF本文を十分に抽出できませんでした。画像化された謄本PDFの可能性があります。OCRは未対応のため、抽出結果を手動で確認してください。";
@@ -73,6 +74,10 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // --- テキスト直接受信 (後方互換) ---
+      // body 全体をバッファする前に過大サイズを弾く(2026-08-02 監査: PDF 経路と姿勢を揃える)。
+
+      assertImportJsonBodySize(request);
+
       const body = await request.json();
       if (!body?.text || typeof body.text !== "string") {
         throw new ApiError(400, "text フィールドが必要です", "NO_TEXT");

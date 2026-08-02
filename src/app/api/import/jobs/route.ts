@@ -9,6 +9,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { importJobScopeWhere } from "@/lib/import-job-guard";
 import {
   summaryFromStatusCounts,
   type StatusCounts,
@@ -82,6 +83,21 @@ export async function GET(request: NextRequest) {
 
     if (executedByParam) {
       where.executedBy = executedByParam;
+    }
+
+    // ⚠スコープ限定は任意フィルタの**後**に適用する。全員分を見る権限が無い利用者が
+    // 他人の ID で絞り込んだ場合は、**自分の分にすり替えず空結果**を返す
+    // （Codex #349 R10 P2: 「他の人で絞り込み中」と表示したまま自分の取込が並ぶ
+    //   誤表示を防ぐ。見えないものは「無い」と示すのが正しい）。
+    const scope = importJobScopeWhere(session.id, perms);
+    if (scope.executedBy) {
+      if (where.executedBy && where.executedBy !== scope.executedBy) {
+        return apiResponse({
+          data: [],
+          pagination: { page, limit, total: 0, totalPages: 0 },
+        });
+      }
+      where.executedBy = scope.executedBy;
     }
 
     const fromDate = parseDateOrNull(fromParam);

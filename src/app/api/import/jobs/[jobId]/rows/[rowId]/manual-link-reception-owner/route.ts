@@ -8,6 +8,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { assertImportJobMutable } from "@/lib/import-job-guard";
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import {
@@ -68,11 +69,15 @@ export async function POST(
 
     const row = await prisma.importJobRow.findUnique({
       where: { id: rowId },
-      include: { job: { select: { id: true, jobType: true } } },
+      include: { job: { select: { id: true, jobType: true, executedBy: true } } },
     });
     if (!row || row.jobId !== jobId) {
       throw new ApiError(404, "行が見つかりません", "NOT_FOUND");
     }
+
+    // 他の担当者が実行した取込は**変更させない**(2026-08-02 監査)。
+    // 閲覧だけの import:read_all では通らず、import:manage が必要。
+    assertImportJobMutable(row.job, session.id, perms);
 
     // Phase 1: pre-check で早期失敗させる（status / createdId 両方を判定）。
     // ただし最終的な競合解消は transaction 内の atomic claim (updateMany) で行うため、

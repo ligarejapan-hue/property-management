@@ -105,7 +105,7 @@ const pm = prisma as unknown as {
 function jsonReq(body: unknown) {
   return new Request("http://test/api/import/registry-pdf", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json" , "content-length": String(Buffer.byteLength(JSON.stringify(body))) },
     body: JSON.stringify(body),
   }) as never;
 }

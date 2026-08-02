@@ -10,6 +10,10 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import {
+  assertImportJobVisible,
+  canMutateImportJobFor,
+} from "@/lib/import-job-guard";
+import {
   summaryFromStatusCounts,
   type StatusCounts,
 } from "@/lib/import-summary";
@@ -226,6 +230,9 @@ export async function GET(
       throw new ApiError(404, "ジョブが見つかりません", "NOT_FOUND");
     }
 
+    // 他の担当者が実行した取込は見せない(2026-08-02 監査)。
+    assertImportJobVisible(job, session.id, perms);
+
     // groupBy は 0 件 status を返さないため未指定キーは 0 埋め扱いになる。
     const statusCounts: StatusCounts = {};
     for (const g of statusGroups) {
@@ -283,6 +290,10 @@ export async function GET(
       pagination,
       pendingCount,
       isRegistryPdfBulkJob,
+      // 画面がロールバック等の**変更操作の導線を出してよいか**（Codex #349 R9 P2）。
+      // 判定を server 側の1箇所に置くことで、画面と route のズレ（押して入力してから
+      // 403 になる）を構造的に防ぐ。閲覧のみ（import:read_all）の他人ジョブでは false。
+      canMutate: canMutateImportJobFor(job, session.id, perms),
     });
   } catch (error) {
     return handleApiError(error);

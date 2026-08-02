@@ -87,6 +87,10 @@ export async function getUserPermissions(userId: string): Promise<PermissionEntr
       { resource: "csv_export", action: "read", granted: true },
       { resource: "csv_export_personal", action: "read", granted: true },
       { resource: "import", action: "write", granted: true },
+      // 取込ジョブの全員分閲覧（import:read_all）。mock は admin 相当のため付与
+      // （無いと mock 管理者が「自分の取込だけ」に絞られ、他人のジョブが見えない）。
+      { resource: "import", action: "read_all", granted: true },
+      { resource: "import", action: "manage", granted: true },
       { resource: "user_management", action: "read", granted: true },
       { resource: "user_management", action: "write", granted: true },
       { resource: "audit_log", action: "read", granted: true },

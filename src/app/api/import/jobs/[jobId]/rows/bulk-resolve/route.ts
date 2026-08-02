@@ -9,6 +9,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { assertImportJobMutable } from "@/lib/import-job-guard";
 import { writeAuditLog } from "@/lib/audit";
 import { recalculateJobCounts } from "@/lib/import-job-counts";
 import { getStorage } from "@/lib/storage";
@@ -77,11 +78,14 @@ export async function POST(
     // ジョブ存在確認（404）。jobType は registry_pdf_bulk の staging 一括削除判定に使う。
     const job = await prisma.importJob.findUnique({
       where: { id: jobId },
-      select: { id: true, jobType: true },
+      select: { id: true, jobType: true, executedBy: true },
     });
     if (!job) {
       throw new ApiError(404, "ジョブが見つかりません", "NOT_FOUND");
     }
+    // 他の担当者が実行した取込は**変更させない**(2026-08-02 監査)。
+    // 閲覧だけの import:read_all では通らず、import:manage が必要。
+    assertImportJobMutable(job, session.id, perms);
 
     // scope を where に変換する（"duplicate" は status ではないため status へ直接渡さない）。
     //   needs_review / error : その status 行のみ（B3 既存挙動・status==scope）

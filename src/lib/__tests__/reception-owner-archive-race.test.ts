@@ -174,16 +174,20 @@ const pm = prisma as unknown as {
 };
 
 function makeRequest() {
-  return new Request("http://localhost/api/import/reception-owner", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  const __payload = JSON.stringify({
       receptionCsv: "dummy reception csv",
       ownerCsv: "dummy owner csv",
       receptionFileName: "受付帳.csv",
       ownerFileName: "所有者.csv",
-    }),
-  }) as unknown as import("next/server").NextRequest;
+    });
+      return new Request("http://localhost/api/import/reception-owner", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "content-length": String(Buffer.byteLength(__payload)),
+      },
+      body: __payload,
+      }) as unknown as import("next/server").NextRequest;
 }
 
 beforeEach(() => {

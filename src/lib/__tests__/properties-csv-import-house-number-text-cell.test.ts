@@ -81,7 +81,7 @@ const PERMS = [{ resource: "import", action: "write", granted: true }];
 function makeRequest(body: unknown) {
   return new Request("http://localhost/api/import/csv", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json" , "content-length": String(Buffer.byteLength(JSON.stringify(body))) },
     body: JSON.stringify(body),
   }) as unknown as import("next/server").NextRequest;
 }

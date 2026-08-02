@@ -2313,6 +2313,9 @@ export default function ImportPage() {
                       {job.rowCount}
                     </td>
                     <td className="px-2 py-1.5 text-right">
+                      {/* 他人の取込は import:manage が無いと失敗にできない
+                          (Codex #349 R10 P2: 押して確認してから 403 を防ぐ)。 */}
+                      {job.canMutate !== false && (
                       <button
                         onClick={() => handleMarkStuckFailed(job.jobId)}
                         disabled={markingJobId === job.jobId}
@@ -2325,6 +2328,7 @@ export default function ImportPage() {
                         )}
                         失敗にする
                       </button>
+                      )}
                     </td>
                   </tr>
                 ))}

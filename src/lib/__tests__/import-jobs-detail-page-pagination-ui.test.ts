@@ -278,8 +278,10 @@ describe("import job detail page — 理由別 filter Phase 2 (source-assertion)
 
   it("reason 適用中は bulk ボタンを非表示にしヒントを出す（誤操作防止）", () => {
     // 一括操作ブロックは reason === "all" のときだけ描画する。
+    // ⚠2026-08-02 監査で先頭に canMutate 条件が付いた（他人の取込を閲覧のみで
+    // 開いているときは一括操作を出さない）ので、reason 以降の並びを見る。
     expect(pageSrc).toMatch(
-      /\{reason === "all" &&\s*\(filter === "needs_review" \|\| filter === "error"\) &&\s*counts\[filter\] > 0 &&/,
+      /\{canMutate &&\s*reason === "all" &&\s*\(filter === "needs_review" \|\| filter === "error"\) &&\s*counts\[filter\] > 0 &&/,
     );
     // 適用中は非表示の理由をヒントで明示する。
     expect(pageSrc).toMatch(/理由フィルタ解除後に一括操作できます/);

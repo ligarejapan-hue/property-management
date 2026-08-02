@@ -234,6 +234,10 @@ async function main() {
     { templateId: adminTemplate.id, resource: "csv_export", action: "read", granted: true },
     { templateId: adminTemplate.id, resource: "csv_export_personal", action: "read", granted: true },
     { templateId: adminTemplate.id, resource: "import", action: "write", granted: true },
+    // 取込ジョブの全員分閲覧(2026-08-02 監査)。無い利用者は自分の実行分のみ。
+    { templateId: adminTemplate.id, resource: "import", action: "read_all", granted: true },
+    // 他の人の取込も操作できる(ロールバック等)。read_all は閲覧のみ。
+    { templateId: adminTemplate.id, resource: "import", action: "manage", granted: true },
     { templateId: adminTemplate.id, resource: "user_management", action: "read", granted: true },
     { templateId: adminTemplate.id, resource: "user_management", action: "write", granted: true },
     { templateId: adminTemplate.id, resource: "audit_log", action: "read", granted: true },

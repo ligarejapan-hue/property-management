@@ -101,6 +101,9 @@ interface ImportJob {
   // Task 11 のウィザード進捗ポーリング/再開ボタンが依存する additive フィールド。
   pendingCount?: number;
   isRegistryPdfBulkJob?: boolean;
+  /** 変更操作(ロールバック/行の再実行・解決/手動紐づけ)を出してよいか。
+   * server 側で判定済み(自分の実行分 or import:manage)。未取得時は false 扱い。 */
+  canMutate?: boolean;
   pagination?: {
     page: number;
     limit: number;
@@ -449,6 +452,9 @@ export default function ImportJobDetailPage() {
   const isReceptionOwnerJob = job?.isReceptionOwnerJob ?? false;
   // Task 11: 所有者事項PDF一括ジョブかどうか(再開ボタン・手動添付の分岐に使う)。
   const isRegistryPdfBulkJob = job?.jobType === "registry_pdf_bulk";
+  // 他人の取込を閲覧しているだけ(import:read_all のみ)のときは変更操作を出さない
+  // (Codex #349 R9 P2: 押して入力してから 403 になるのを防ぐ)。
+  const canMutate = job?.canMutate === true;
   // 既存の owner_csv 単独取込のときだけ Owner 検索モード。
   const useOwnerSearch = job?.jobType === "owner_csv" && !isReceptionOwnerJob;
 
@@ -691,7 +697,7 @@ export default function ImportJobDetailPage() {
           </p>
         </div>
         {/* ロールバックボタン: 物件CSV かつ完了状態のみ。ロールバック済みはバッジ表示のみ */}
-        {job.jobType === "property_csv" && job.status === "completed" && (
+        {canMutate && job.jobType === "property_csv" && job.status === "completed" && (
           <button
             onClick={openRollbackDialog}
             className="inline-flex items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 dark:bg-gray-900 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
@@ -706,7 +712,8 @@ export default function ImportJobDetailPage() {
             pendingCount=0でもジョブが非終端(pending/processing)なら表示する
             (@codex指摘: 全件却下ジョブや、最終行処理後〜カウンタ確定前クラッシュの
             processing+pending0が pendingCount>0 条件のみだと永久にスタックするため)。 */}
-        {isRegistryPdfBulkJob &&
+        {canMutate &&
+          isRegistryPdfBulkJob &&
           ((job?.pendingCount ?? 0) > 0 ||
             job?.status === "pending" ||
             job?.status === "processing") && (
@@ -1059,7 +1066,8 @@ export default function ImportJobDetailPage() {
                 理由別 filter（Phase 2）適用中は **非表示** にする＝一括操作の対象は
                 常にジョブ全体の status/scope 集合（理由で絞らない）であり、絞った
                 表示と一括件数が食い違う誤操作を防ぐ（disabled ではなく非表示を採用）。 */}
-            {reason === "all" &&
+            {canMutate &&
+              reason === "all" &&
               (filter === "needs_review" || filter === "error") &&
               counts[filter] > 0 && (
                 <>
@@ -1402,7 +1410,8 @@ export default function ImportJobDetailPage() {
                     )}
 
                     {/* Building candidates (for unit import needs_review) */}
-                    {row.status === "needs_review" &&
+                    {canMutate &&
+                      row.status === "needs_review" &&
                       rawData["__building_candidates"] && (
                         <BuildingCandidates
                           candidatesJson={rawData["__building_candidates"]}
@@ -1423,8 +1432,9 @@ export default function ImportJobDetailPage() {
                         <h4 className="text-sm font-medium text-gray-700 dark:text-gray-200">
                           元データ
                         </h4>
-                        {(row.status === "error" ||
-                          row.status === "needs_review") &&
+                        {canMutate &&
+                          (row.status === "error" ||
+                            row.status === "needs_review") &&
                           !isEditing && (
                             <button
                               onClick={() => startEdit(row)}
@@ -1518,9 +1528,10 @@ export default function ImportJobDetailPage() {
                       </div>
                     </div>
 
-                    {/* Action buttons */}
-                    {(row.status === "needs_review" ||
-                      row.status === "error") && (
+                    {/* Action buttons（閲覧のみの他人ジョブでは丸ごと出さない） */}
+                    {canMutate &&
+                      (row.status === "needs_review" ||
+                        row.status === "error") && (
                       <div className="space-y-3">
                         {/* Search & link existing */}
                         {row.status === "needs_review" && (
@@ -1636,7 +1647,8 @@ export default function ImportJobDetailPage() {
                           </div>
                         )}
 
-                        {/* Action buttons row */}
+                        {/* Action buttons row（閲覧のみの他人ジョブでは出さない） */}
+                        {canMutate && (
                         <div className="flex flex-wrap gap-2">
                           {/* 所有者事項PDF一括ジョブは create_new/retry 未対応(サーバ側で
                               422になる)ため、検索&添付・スキップ・エラー確定のみを出す。 */}
@@ -1692,6 +1704,7 @@ export default function ImportJobDetailPage() {
                             エラー確定
                           </button>
                         </div>
+                        )}
                       </div>
                     )}
                   </div>

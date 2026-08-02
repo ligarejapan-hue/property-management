@@ -115,7 +115,8 @@ const adminPerms = [...officeBefore, p("csv_export_personal", "read")];
 beforeEach(() => {
   vi.clearAllMocks();
   (getApiSession as Mock).mockResolvedValue({ id: "u1", role: "office_staff" });
-  pm.importJob.findUnique.mockResolvedValue({ id: JOB });
+    // 2026-08-02 監査: 取込ジョブは「自分が実行した分だけ」が既定。既定 mock は自分のジョブ。
+  pm.importJob.findUnique.mockResolvedValue({ id: JOB, executedBy: "u1" });
   pm.importJobRow.findMany.mockResolvedValue([
     {
       rowNumber: 1,
@@ -174,6 +175,24 @@ describe("取込エラー行CSVの権限ゲート", () => {
     expect(serialized).not.toMatch(/山田太郎|東京都|03-0000/);
     expect(serialized).not.toMatch(/所有者名|住所|電話/);
     expect(call.detail.rowCount).toBe(1);
+  });
+
+  it("他の担当者が実行した取込は 403（2026-08-02 監査: 行データに氏名/住所/電話が入る）", async () => {
+    (getUserPermissions as Mock).mockResolvedValue(officeAfter);
+    pm.importJob.findUnique.mockResolvedValue({ id: JOB, executedBy: "someone-else" });
+    const res = await GET(req(), params);
+    expect(res.status).toBe(403);
+    expect(pm.importJobRow.findMany).not.toHaveBeenCalled();
+  });
+
+  it("import:read_all があれば他人の取込でも通る（管理者の運用は変えない）", async () => {
+    (getUserPermissions as Mock).mockResolvedValue([
+      ...officeAfter,
+      { resource: "import", action: "read_all", granted: true },
+    ]);
+    pm.importJob.findUnique.mockResolvedValue({ id: JOB, executedBy: "someone-else" });
+    const res = await GET(req(), params);
+    expect(res.status).toBe(200);
   });
 
   it("既に共有権限を持つ管理者は従来どおり通る（この反映で失う権限は無い）", async () => {

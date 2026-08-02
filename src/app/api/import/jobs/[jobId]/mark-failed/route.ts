@@ -8,6 +8,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { assertImportJobMutable } from "@/lib/import-job-guard";
 import { writeAuditLog } from "@/lib/audit";
 
 // ---------- PATCH /api/import/jobs/:jobId/mark-failed ----------
@@ -44,12 +45,15 @@ export async function PATCH(
 
     const existing = await prisma.importJob.findUnique({
       where: { id: jobId },
-      select: { id: true, status: true, jobType: true, fileName: true },
+      select: { id: true, status: true, jobType: true, fileName: true, executedBy: true },
     });
 
     if (!existing) {
       throw new ApiError(404, "ジョブが見つかりません", "NOT_FOUND");
     }
+    // 他の担当者が実行した取込は**変更させない**(2026-08-02 監査)。
+    // 閲覧だけの import:read_all では通らず、import:manage が必要。
+    assertImportJobMutable(existing, session.id, perms);
 
     // 既に終了済みのジョブは保護。
     // pending / rolled_back も同様に対象外。

@@ -9,13 +9,20 @@
  *   逃がしたい場合に使う。
  */
 
+import fs from "node:fs";
 import path from "path";
 
 /**
  * ローカルアップロード保存先のルート絶対パスを返す。
  *
  * - `LOCAL_UPLOAD_ROOT` が設定されていれば優先（trim 済みかつ非空）。
- * - 未設定または空文字なら `process.cwd()/public/uploads`。
+ * - 未設定または空文字なら `process.cwd()/public/uploads`（**開発時のみ**）。
+ *
+ * ⚠**本番(production)で未設定なら起動時に落とす**（2026-08-02 監査）。既定の
+ * `public/uploads` は Next.js の静的配信対象で、認可を実装した `/uploads/[...path]`
+ * route より**静的ファイルが優先される**ため、謄本PDF・現地写真が無認証で配信され得る。
+ * 「設定を1行消したら個人情報が公開される」構造を、fail-closed（起動不能）に変える。
+ * 本番は `LOCAL_UPLOAD_ROOT=/var/lib/property-management/uploads`（public 外）で運用中。
  *
  * 本関数は呼び出しごとに env を見るので、テストや本番起動後の変更にも追従する。
  */
@@ -24,7 +31,138 @@ export function getLocalUploadRoot(): string {
   if (fromEnv && fromEnv.trim() !== "") {
     return path.resolve(fromEnv.trim());
   }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "LOCAL_UPLOAD_ROOT が未設定です。既定の public/uploads は静的配信されるため、" +
+        "本番では public 配下以外の絶対パス（例 /var/lib/property-management/uploads）を必ず設定してください",
+    );
+  }
   return path.join(process.cwd(), "public", "uploads");
+}
+
+/**
+ * 起動時の保存先検証（src/instrumentation.ts から呼ぶ・Codex #349 P1）。
+ *
+ * getLocalUploadRoot() の遅延 throw だけでは**起動を止められない**。
+ * public 配下の既存ファイルは Next.js の静的配信で直接返るため、この関数を
+ * 一度も通らずに写真・謄本PDFが無認証で配られ得る。よって起動時に落とす。
+ *
+ * 検査:
+ *   1. STORAGE_BACKEND=local(既定) のときだけ対象
+ *   2. 本番で LOCAL_UPLOAD_ROOT 未設定 → 起動不可（getLocalUploadRoot が throw）
+ *   3. 設定されていても **public 配下を指していたら起動不可**（明示設定でも静的配信される）
+ */
+export function assertUploadRootSafeAtStartup(): void {
+  const isProduction = process.env.NODE_ENV === "production";
+
+  // (A) **backend に関係なく** public/uploads に実ファイルが残っていないか。
+  //     Next.js の静的配信は storage adapter と無関係に動くため、過去に local
+  //     運用していた頃のファイルが残っていると backend を server/s3 に変えても
+  //     無認証で配られ続ける（Codex #349 R2 P1）。
+  if (isProduction) {
+    const legacy = listPublicUploadFiles();
+    if (legacy.length > 0) {
+      throw new Error(
+        `public/uploads に ${legacy.length} 件のファイルが残っています。` +
+          "public 配下は静的配信され認可チェックを通らないため、" +
+          "LOCAL_UPLOAD_ROOT の配下（例 /var/lib/property-management/uploads）へ移動してから起動してください",
+      );
+    }
+  }
+
+  // (B) local backend のときは保存先そのものの妥当性も見る。
+  const backend = (process.env.STORAGE_BACKEND ?? "local").trim().toLowerCase();
+  if (backend !== "local") return;
+
+  const root = getLocalUploadRoot(); // 未設定の本番はここで throw
+  // ⚠**実体パス**で比較する（Codex #349 R3 P1）。文字列だけの比較だと、外部の
+  // パスに見える symlink が public/uploads を指しているケースを通してしまい、
+  // 以後のアップロードが静的配信ディレクトリへ書かれて無認証で配られる。
+  const publicDir = realPathOrSelf(path.resolve(process.cwd(), "public"));
+  const rel = path.relative(publicDir, realPathOrSelf(root));
+  // ⚠「..」で始まる**名前**（例 public/..uploads → rel="..uploads"）を「public の外」と
+  // 誤判定しない（Codex #349 R12 P1）。親を指すのは "" / ".." / "../..." の形だけ。
+  const escapesPublic =
+    rel === ".." ||
+    rel.startsWith(`..${path.sep}`) ||
+    rel.startsWith("../") ||
+    path.isAbsolute(rel);
+  const insidePublic = !escapesPublic;
+  if (insidePublic && isProduction) {
+    throw new Error(
+      // ⚠パス値そのものは出さない（env 由来の値・ホストの構成が journald に残るため・
+      // Codex #349 R11 P2）。何を直せばよいかは指示文で十分伝わる。
+      "LOCAL_UPLOAD_ROOT が public 配下を指しています。public 配下は静的配信され" +
+        "認可チェックを通らないため、public の外（例 /var/lib/property-management/uploads）を指定してください",
+    );
+  }
+}
+
+/**
+ * symlink を解決した実体パスを返す。パス自体が未作成でも、**実在する最深の祖先**まで
+ * 解決してから残りを継ぎ足す（Codex #349 R4 P1）。
+ *
+ * ⚠単純な try/catch で入力をそのまま返すと、`/safe/link/new-dir`（link が
+ * public/uploads を指す symlink・new-dir は未作成）のような指定が「外部パス」と
+ * 判定されて起動を通り、その後の再帰 mkdir が symlink 越しに静的配信ディレクトリへ
+ * ディレクトリを作ってしまう。
+ */
+function realPathOrSelf(p: string): string {
+  const absolute = path.resolve(p);
+  let current = absolute;
+  const tail: string[] = [];
+  // 実在する祖先が見つかるまで末尾のセグメントを退避していく。
+  for (;;) {
+    try {
+      const real = fs.realpathSync(current);
+      return tail.length === 0 ? real : path.join(real, ...tail.reverse());
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return absolute; // ルートまで解決できない＝そのまま
+      tail.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+/**
+ * public/uploads 配下の実ファイル（.gitkeep 等の空プレースホルダを除く）を列挙する。
+ * 起動時検証のためだけの補助。
+ *
+ * ⚠**未作成(ENOENT)以外の読み取り失敗は throw する**（Codex #349 R5 P1）。
+ * 例えば実行のみ許可（一覧不可）のディレクトリは、列挙に失敗しても Next.js は
+ * 既知のパスのファイルを開けてしまう＝「読めない＝空」と見なすと、残存ファイルが
+ * 無認証で配られたまま起動を許すことになる。判断できないときは起動を止める。
+ */
+function listPublicUploadFiles(limit = 5): string[] {
+  const dir = path.resolve(process.cwd(), "public", "uploads");
+  const found: string[] = [];
+  const walk = (current: string): void => {
+    if (found.length >= limit) return;
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return; // 未作成＝残存ファイルも無い
+      throw new Error(
+        `public/uploads の配下を検査できません(${code ?? "unknown"})。` +
+          "残存ファイルの有無を確認できないため起動を中止します。" +
+          "ディレクトリの権限を確認するか、public 配下のアップロードを退避してください",
+      );
+    }
+    for (const e of entries) {
+      if (found.length >= limit) return;
+      const p = path.join(current, e.name);
+      if (e.isDirectory()) {
+        walk(p);
+      } else if (e.name !== ".gitkeep") {
+        found.push(path.relative(dir, p));
+      }
+    }
+  };
+  walk(dir);
+  return found;
 }
 
 /**
