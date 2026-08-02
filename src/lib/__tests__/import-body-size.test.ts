@@ -22,6 +22,7 @@ vi.mock("@/lib/api-helpers", () => {
 import {
   assertImportJsonBodySize,
   MAX_IMPORT_JSON_BODY_BYTES,
+  MAX_IMPORT_JSON_BODY_BYTES_PAIRED,
 } from "@/lib/import-body-size";
 
 const req = (contentLength: string | null) => ({
@@ -61,6 +62,29 @@ describe("assertImportJsonBodySize", () => {
   });
 });
 
+describe("2ファイル経路(受付帳+所有者)の上限(Codex #349 P2)", () => {
+  it("1ファイル上限の2倍=正規の8MB×2(base64膨張込み)が通る", () => {
+    expect(MAX_IMPORT_JSON_BODY_BYTES_PAIRED).toBe(MAX_IMPORT_JSON_BODY_BYTES * 2);
+    const twoFilesBase64 = Math.ceil(2 * 10 * 1024 * 1024 * 1.34);
+    expect(MAX_IMPORT_JSON_BODY_BYTES_PAIRED).toBeGreaterThanOrEqual(twoFilesBase64);
+    expect(() =>
+      assertImportJsonBodySize(req(String(twoFilesBase64)), MAX_IMPORT_JSON_BODY_BYTES_PAIRED),
+    ).not.toThrow();
+  });
+
+  it.each([
+    "src/app/api/import/reception-owner/route.ts",
+    "src/app/api/import/reception-owner/preview/route.ts",
+    "src/app/api/import/reception-property/route.ts",
+    "src/app/api/import/reception-property/preview/route.ts",
+  ])("%s は2ファイル用の上限を渡す", (rel) => {
+    const src = readFileSync(join(process.cwd(), rel), "utf-8");
+    expect(src).toContain(
+      "assertImportJsonBodySize(request, MAX_IMPORT_JSON_BODY_BYTES_PAIRED)",
+    );
+  });
+});
+
 describe("JSON body を読む取込 route は全部ガードを通す", () => {
   const ROUTES = [
     "src/app/api/import/csv/route.ts",
@@ -76,7 +100,7 @@ describe("JSON body を読む取込 route は全部ガードを通す", () => {
 
   it.each(ROUTES)("%s がガードを body 読み取り**前**に呼ぶ", (rel) => {
     const src = readFileSync(join(process.cwd(), rel), "utf-8");
-    const guardIdx = src.indexOf("assertImportJsonBodySize(request)");
+    const guardIdx = src.indexOf("assertImportJsonBodySize(request");
     expect(guardIdx).toBeGreaterThan(0);
     // 実際の body 読み取り（await request.json() / parseJsonBody）より前にあること。
     const bodyIdx = src.search(/await\s+(request\.json\(\)|parseJsonBody\()/);
@@ -97,5 +121,29 @@ describe("ローカル保存先の fail-closed（本番で未設定なら起動�
     expect(src.indexOf('NODE_ENV === "production"')).toBeLessThan(
       src.indexOf('path.join(process.cwd(), "public", "uploads")'),
     );
+  });
+});
+
+describe("起動時の保存先検証（Codex #349 P1: 遅延throwでは起動を止められない）", () => {
+  it("instrumentation.ts が起動時フックで検証を呼ぶ", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src/instrumentation.ts"),
+      "utf-8",
+    );
+    expect(src).toContain("export async function register");
+    expect(src).toContain("assertUploadRootSafeAtStartup");
+    // Edge ランタイムでは node 依存の検証を走らせない。
+    expect(src).toContain('NEXT_RUNTIME !== "nodejs"');
+  });
+
+  it("検証は public 配下の明示指定も拒否する（静的配信で認可を素通りするため）", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src/lib/storage/local-paths.ts"),
+      "utf-8",
+    );
+    expect(src).toContain("export function assertUploadRootSafeAtStartup");
+    expect(src).toMatch(/public 配下.*を指しています/);
+    // STORAGE_BACKEND が local のときだけ対象（server backend には無関係）。
+    expect(src).toContain('backend !== "local"');
   });
 });

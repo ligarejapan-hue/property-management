@@ -40,6 +40,35 @@ export function getLocalUploadRoot(): string {
 }
 
 /**
+ * 起動時の保存先検証（src/instrumentation.ts から呼ぶ・Codex #349 P1）。
+ *
+ * getLocalUploadRoot() の遅延 throw だけでは**起動を止められない**。
+ * public 配下の既存ファイルは Next.js の静的配信で直接返るため、この関数を
+ * 一度も通らずに写真・謄本PDFが無認証で配られ得る。よって起動時に落とす。
+ *
+ * 検査:
+ *   1. STORAGE_BACKEND=local(既定) のときだけ対象
+ *   2. 本番で LOCAL_UPLOAD_ROOT 未設定 → 起動不可（getLocalUploadRoot が throw）
+ *   3. 設定されていても **public 配下を指していたら起動不可**（明示設定でも静的配信される）
+ */
+export function assertUploadRootSafeAtStartup(): void {
+  const backend = (process.env.STORAGE_BACKEND ?? "local").trim().toLowerCase();
+  if (backend !== "local") return;
+
+  const root = getLocalUploadRoot(); // 未設定の本番はここで throw
+  const publicDir = path.resolve(process.cwd(), "public");
+  const rel = path.relative(publicDir, root);
+  const insidePublic =
+    rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  if (insidePublic && process.env.NODE_ENV === "production") {
+    throw new Error(
+      `LOCAL_UPLOAD_ROOT が public 配下(${root})を指しています。public 配下は静的配信され` +
+        "認可チェックを通らないため、public の外（例 /var/lib/property-management/uploads）を指定してください",
+    );
+  }
+}
+
+/**
  * 与えられた storage key を絶対パスに解決し、
  * UPLOAD ROOT 配下に厳密に収まることを検証する。
  *

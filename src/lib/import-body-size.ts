@@ -11,8 +11,18 @@
  */
 import { ApiError } from "@/lib/api-helpers";
 
-/** JSON body の上限（バイト）。10MB のファイル + base64 膨張 + JSON 構造の余裕。 */
+/**
+ * JSON body の上限（バイト）。1ファイル経路: 10MB のファイル + base64 膨張(約1.34倍)
+ * + JSON 構造の余裕。
+ */
 export const MAX_IMPORT_JSON_BODY_BYTES = 20 * 1024 * 1024;
+
+/**
+ * **2ファイルを同時に受ける経路**（受付帳＋所有者の突合取込）の上限。
+ * 各ファイルが 10MB まで許されるため、1ファイル分の上限では正規の取込を
+ * 413 で弾いてしまう（Codex #349 P2）。2倍に取る。
+ */
+export const MAX_IMPORT_JSON_BODY_BYTES_PAIRED = 40 * 1024 * 1024;
 
 /**
  * Content-Length を検査し、欠落/非数値は 411、過大は 413 を投げる。

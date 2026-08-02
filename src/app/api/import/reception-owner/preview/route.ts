@@ -23,7 +23,10 @@ import {
   type DlFilterMode,
   type ShinkiFilterMode,
 } from "@/lib/reception-owner-match";
-import { assertImportJsonBodySize } from "@/lib/import-body-size";
+import {
+  assertImportJsonBodySize,
+  MAX_IMPORT_JSON_BODY_BYTES_PAIRED,
+} from "@/lib/import-body-size";
 
 // 受付帳CSV × 所有者CSV × 既存物件 の突合プレビュー。
 // 実データは書き換えない。
@@ -48,10 +51,11 @@ export async function POST(request: NextRequest) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
 
-    // body 全体をバッファする前に過大サイズを弾く(2026-08-02 監査: PDF 経路と姿勢を揃える)。
+    // body 全体をバッファする前に過大サイズを弾く(2026-08-02 監査)。
+    // ⚠この経路は2ファイル(受付帳+所有者)を同時に受けるため上限は2倍(Codex #349 P2)。
 
 
-    assertImportJsonBodySize(request);
+    assertImportJsonBodySize(request, MAX_IMPORT_JSON_BODY_BYTES_PAIRED);
 
 
     const body = await request.json();
