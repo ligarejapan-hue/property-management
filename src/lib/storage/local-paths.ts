@@ -91,14 +91,29 @@ export function assertUploadRootSafeAtStartup(): void {
 }
 
 /**
- * symlink を解決した実体パスを返す。未作成などで解決できなければ入力をそのまま返す
- * （存在しないパスは symlink 回避に使えないため、この時点では文字列比較で足りる）。
+ * symlink を解決した実体パスを返す。パス自体が未作成でも、**実在する最深の祖先**まで
+ * 解決してから残りを継ぎ足す（Codex #349 R4 P1）。
+ *
+ * ⚠単純な try/catch で入力をそのまま返すと、`/safe/link/new-dir`（link が
+ * public/uploads を指す symlink・new-dir は未作成）のような指定が「外部パス」と
+ * 判定されて起動を通り、その後の再帰 mkdir が symlink 越しに静的配信ディレクトリへ
+ * ディレクトリを作ってしまう。
  */
 function realPathOrSelf(p: string): string {
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    return p;
+  const absolute = path.resolve(p);
+  let current = absolute;
+  const tail: string[] = [];
+  // 実在する祖先が見つかるまで末尾のセグメントを退避していく。
+  for (;;) {
+    try {
+      const real = fs.realpathSync(current);
+      return tail.length === 0 ? real : path.join(real, ...tail.reverse());
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return absolute; // ルートまで解決できない＝そのまま
+      tail.push(path.basename(current));
+      current = parent;
+    }
   }
 }
 

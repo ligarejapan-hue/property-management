@@ -153,3 +153,25 @@ describe("起動時の保存先検証（Codex #349 P1: 遅延throwでは起動�
     expect(legacyIdx).toBeLessThan(backendIdx);
   });
 });
+
+describe("保存先の symlink 回避（Codex #349 R3/R4 P1・実測で挙動確認済み）", () => {
+  const src = readFileSync(
+    join(process.cwd(), "src/lib/storage/local-paths.ts"),
+    "utf-8",
+  );
+
+  it("実体パス(realpath)で比較する（見た目が外部の symlink を通さない）", () => {
+    expect(src).toContain("fs.realpathSync");
+    expect(src).toContain("realPathOrSelf(root)");
+    expect(src).toContain("realPathOrSelf(path.resolve(process.cwd(), \"public\"))");
+  });
+
+  it("未作成パスでも**実在する最深の祖先**まで解決する", () => {
+    // /safe/link/new-dir (link が public/uploads を指す) を通さないための実装。
+    expect(src).toMatch(/実在する最深の祖先/);
+    // 祖先を辿るループと、残りセグメントの継ぎ足しがあること。
+    expect(src).toContain("path.dirname(current)");
+    expect(src).toContain("tail.push(path.basename(current))");
+    expect(src).toContain("path.join(real, ...tail.reverse())");
+  });
+});
