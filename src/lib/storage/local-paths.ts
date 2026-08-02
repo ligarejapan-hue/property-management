@@ -9,6 +9,7 @@
  *   逃がしたい場合に使う。
  */
 
+import fs from "node:fs";
 import path from "path";
 
 /**
@@ -52,6 +53,24 @@ export function getLocalUploadRoot(): string {
  *   3. 設定されていても **public 配下を指していたら起動不可**（明示設定でも静的配信される）
  */
 export function assertUploadRootSafeAtStartup(): void {
+  const isProduction = process.env.NODE_ENV === "production";
+
+  // (A) **backend に関係なく** public/uploads に実ファイルが残っていないか。
+  //     Next.js の静的配信は storage adapter と無関係に動くため、過去に local
+  //     運用していた頃のファイルが残っていると backend を server/s3 に変えても
+  //     無認証で配られ続ける（Codex #349 R2 P1）。
+  if (isProduction) {
+    const legacy = listPublicUploadFiles();
+    if (legacy.length > 0) {
+      throw new Error(
+        `public/uploads に ${legacy.length} 件のファイルが残っています（例: ${legacy[0]}）。` +
+          "public 配下は静的配信され認可チェックを通らないため、" +
+          "LOCAL_UPLOAD_ROOT の配下（例 /var/lib/property-management/uploads）へ移動してから起動してください",
+      );
+    }
+  }
+
+  // (B) local backend のときは保存先そのものの妥当性も見る。
   const backend = (process.env.STORAGE_BACKEND ?? "local").trim().toLowerCase();
   if (backend !== "local") return;
 
@@ -60,12 +79,41 @@ export function assertUploadRootSafeAtStartup(): void {
   const rel = path.relative(publicDir, root);
   const insidePublic =
     rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
-  if (insidePublic && process.env.NODE_ENV === "production") {
+  if (insidePublic && isProduction) {
     throw new Error(
       `LOCAL_UPLOAD_ROOT が public 配下(${root})を指しています。public 配下は静的配信され` +
         "認可チェックを通らないため、public の外（例 /var/lib/property-management/uploads）を指定してください",
     );
   }
+}
+
+/**
+ * public/uploads 配下の実ファイル（.gitkeep 等の空プレースホルダを除く）を列挙する。
+ * 起動時検証のためだけの補助。存在しない/読めない場合は空扱い（起動を止めない）。
+ */
+function listPublicUploadFiles(limit = 5): string[] {
+  const dir = path.resolve(process.cwd(), "public", "uploads");
+  const found: string[] = [];
+  const walk = (current: string): void => {
+    if (found.length >= limit) return;
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return; // 未作成なら何もしない
+    }
+    for (const e of entries) {
+      if (found.length >= limit) return;
+      const p = path.join(current, e.name);
+      if (e.isDirectory()) {
+        walk(p);
+      } else if (e.name !== ".gitkeep") {
+        found.push(path.relative(dir, p));
+      }
+    }
+  };
+  walk(dir);
+  return found;
 }
 
 /**

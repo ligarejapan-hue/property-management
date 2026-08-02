@@ -35,9 +35,9 @@ describe("assertImportJsonBodySize", () => {
     expect(() =>
       assertImportJsonBodySize(req(String(MAX_IMPORT_JSON_BODY_BYTES))),
     ).not.toThrow();
-    expect(MAX_IMPORT_JSON_BODY_BYTES).toBeGreaterThanOrEqual(
-      Math.ceil(10 * 1024 * 1024 * 1.34),
-    );
+    // per-file 上限(10MB)が JSON 文字列化で最悪2倍に膨らんでも通ること
+    // (Codex R2 P2: ここで per-file 検証より厳しくしない)。
+    expect(MAX_IMPORT_JSON_BODY_BYTES).toBeGreaterThanOrEqual(2 * 10 * 1024 * 1024);
   });
 
   it("Content-Length 欠落・非数値は 411（chunked でのガード回避を防ぐ）", () => {
@@ -65,10 +65,11 @@ describe("assertImportJsonBodySize", () => {
 describe("2ファイル経路(受付帳+所有者)の上限(Codex #349 P2)", () => {
   it("1ファイル上限の2倍=正規の8MB×2(base64膨張込み)が通る", () => {
     expect(MAX_IMPORT_JSON_BODY_BYTES_PAIRED).toBe(MAX_IMPORT_JSON_BODY_BYTES * 2);
-    const twoFilesBase64 = Math.ceil(2 * 10 * 1024 * 1024 * 1.34);
-    expect(MAX_IMPORT_JSON_BODY_BYTES_PAIRED).toBeGreaterThanOrEqual(twoFilesBase64);
+    // 2ファイルとも最悪エスケープ(各10MB→20MB)でも通ること。
+    const worstCase = 2 * 2 * 10 * 1024 * 1024;
+    expect(MAX_IMPORT_JSON_BODY_BYTES_PAIRED).toBeGreaterThanOrEqual(worstCase);
     expect(() =>
-      assertImportJsonBodySize(req(String(twoFilesBase64)), MAX_IMPORT_JSON_BODY_BYTES_PAIRED),
+      assertImportJsonBodySize(req(String(worstCase)), MAX_IMPORT_JSON_BODY_BYTES_PAIRED),
     ).not.toThrow();
   });
 
@@ -143,7 +144,12 @@ describe("起動時の保存先検証（Codex #349 P1: 遅延throwでは起動�
     );
     expect(src).toContain("export function assertUploadRootSafeAtStartup");
     expect(src).toMatch(/public 配下.*を指しています/);
-    // STORAGE_BACKEND が local のときだけ対象（server backend には無関係）。
-    expect(src).toContain('backend !== "local"');
+    // ⚠public/uploads の残存チェックは backend に依存しない(Codex R2 P1:
+    // server/s3 へ切り替えても静的配信は残るため)。
+    expect(src).toContain("件のファイルが残っています");
+    const legacyIdx = src.indexOf("listPublicUploadFiles()");
+    const backendIdx = src.indexOf('backend !== "local"');
+    expect(legacyIdx).toBeGreaterThan(0);
+    expect(legacyIdx).toBeLessThan(backendIdx);
   });
 });

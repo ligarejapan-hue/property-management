@@ -12,17 +12,25 @@
 import { ApiError } from "@/lib/api-helpers";
 
 /**
- * JSON body の上限（バイト）。1ファイル経路: 10MB のファイル + base64 膨張(約1.34倍)
- * + JSON 構造の余裕。
+ * JSON body の上限（バイト・1ファイル経路）。
+ *
+ * ⚠このガードの目的は「**青天井の body を止める**」ことであって、per-file の
+ * 上限(MAX_IMPORT_DECODED_BYTES=10MB)を厳しくすることではない。よって
+ * per-file 検証が通す入力は必ずここも通るよう、十分な余裕を取る（Codex #349 R2 P2）:
+ *   - CSV テキストは JSON 文字列化で最悪 2 倍に膨らむ（`"` や `\` が全て2文字化）
+ *   - xlsx は base64 で約 1.34 倍
+ *   - さらにキー名・改行等の構造分
+ * → 10MB × 2 = 20MB を**下限**とし、その上に余白を足して 32MB。
  */
-export const MAX_IMPORT_JSON_BODY_BYTES = 20 * 1024 * 1024;
+export const MAX_IMPORT_JSON_BODY_BYTES = 32 * 1024 * 1024;
 
 /**
  * **2ファイルを同時に受ける経路**（受付帳＋所有者の突合取込）の上限。
  * 各ファイルが 10MB まで許されるため、1ファイル分の上限では正規の取込を
- * 413 で弾いてしまう（Codex #349 P2）。2倍に取る。
+ * 413 で弾いてしまう（Codex #349 P2）。1ファイル経路の 2 倍。
  */
-export const MAX_IMPORT_JSON_BODY_BYTES_PAIRED = 40 * 1024 * 1024;
+export const MAX_IMPORT_JSON_BODY_BYTES_PAIRED =
+  MAX_IMPORT_JSON_BODY_BYTES * 2;
 
 /**
  * Content-Length を検査し、欠落/非数値は 411、過大は 413 を投げる。
