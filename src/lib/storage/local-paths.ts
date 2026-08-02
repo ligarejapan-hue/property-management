@@ -75,8 +75,11 @@ export function assertUploadRootSafeAtStartup(): void {
   if (backend !== "local") return;
 
   const root = getLocalUploadRoot(); // 未設定の本番はここで throw
-  const publicDir = path.resolve(process.cwd(), "public");
-  const rel = path.relative(publicDir, root);
+  // ⚠**実体パス**で比較する（Codex #349 R3 P1）。文字列だけの比較だと、外部の
+  // パスに見える symlink が public/uploads を指しているケースを通してしまい、
+  // 以後のアップロードが静的配信ディレクトリへ書かれて無認証で配られる。
+  const publicDir = realPathOrSelf(path.resolve(process.cwd(), "public"));
+  const rel = path.relative(publicDir, realPathOrSelf(root));
   const insidePublic =
     rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
   if (insidePublic && isProduction) {
@@ -84,6 +87,18 @@ export function assertUploadRootSafeAtStartup(): void {
       `LOCAL_UPLOAD_ROOT が public 配下(${root})を指しています。public 配下は静的配信され` +
         "認可チェックを通らないため、public の外（例 /var/lib/property-management/uploads）を指定してください",
     );
+  }
+}
+
+/**
+ * symlink を解決した実体パスを返す。未作成などで解決できなければ入力をそのまま返す
+ * （存在しないパスは symlink 回避に使えないため、この時点では文字列比較で足りる）。
+ */
+function realPathOrSelf(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
   }
 }
 

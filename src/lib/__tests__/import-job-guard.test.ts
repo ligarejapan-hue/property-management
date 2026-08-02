@@ -6,6 +6,8 @@
  * 取込を誰でも横断閲覧できた。ここでその是正をロックする。
  */
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 // api-helpers は next-auth を引き込むため、ApiError の忠実な replica で差し替える
 // (他の route テストと同じ流儀)。
@@ -106,5 +108,30 @@ describe("assertImportJobVisible（単一ジョブ）", () => {
     expect(() =>
       assertImportJobVisible({ executedBy: null }, ME, WITH_READ_ALL),
     ).not.toThrow();
+  });
+});
+
+// ── mock mode の権限 payload（Codex #349 R3 P2） ───────────────────────────
+// NEXT_PUBLIC_USE_MOCK=true の hardcoded permission に import:read_all が無いと、
+// mock 管理者が「自分の取込だけ」に絞られ、ローカル確認で他人のジョブが見えない。
+// field-survey-mock-permissions.test.ts と同じ source assertion で固定する。
+describe("api-helpers.ts — mock permission payload (import)", () => {
+  const src = readFileSync(
+    join(process.cwd(), "src/lib/api-helpers.ts"),
+    "utf-8",
+  );
+  const mockBlock = src.match(/NEXT_PUBLIC_USE_MOCK[\s\S]*?return\s*\[[\s\S]*?\];/);
+
+  it("mock 配列に import:write がある（既存）", () => {
+    expect(mockBlock).not.toBeNull();
+    expect(mockBlock?.[0]).toMatch(
+      /resource:\s*"import",\s*action:\s*"write",\s*granted:\s*true/,
+    );
+  });
+
+  it("mock 配列に import:read_all がある（admin 相当なので全員分が見える）", () => {
+    expect(mockBlock?.[0]).toMatch(
+      /resource:\s*"import",\s*action:\s*"read_all",\s*granted:\s*true/,
+    );
   });
 });
