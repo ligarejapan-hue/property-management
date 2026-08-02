@@ -712,7 +712,8 @@ export default function ImportJobDetailPage() {
             pendingCount=0でもジョブが非終端(pending/processing)なら表示する
             (@codex指摘: 全件却下ジョブや、最終行処理後〜カウンタ確定前クラッシュの
             processing+pending0が pendingCount>0 条件のみだと永久にスタックするため)。 */}
-        {isRegistryPdfBulkJob &&
+        {canMutate &&
+          isRegistryPdfBulkJob &&
           ((job?.pendingCount ?? 0) > 0 ||
             job?.status === "pending" ||
             job?.status === "processing") && (
@@ -1409,7 +1410,8 @@ export default function ImportJobDetailPage() {
                     )}
 
                     {/* Building candidates (for unit import needs_review) */}
-                    {row.status === "needs_review" &&
+                    {canMutate &&
+                      row.status === "needs_review" &&
                       rawData["__building_candidates"] && (
                         <BuildingCandidates
                           candidatesJson={rawData["__building_candidates"]}
@@ -1430,8 +1432,9 @@ export default function ImportJobDetailPage() {
                         <h4 className="text-sm font-medium text-gray-700 dark:text-gray-200">
                           元データ
                         </h4>
-                        {(row.status === "error" ||
-                          row.status === "needs_review") &&
+                        {canMutate &&
+                          (row.status === "error" ||
+                            row.status === "needs_review") &&
                           !isEditing && (
                             <button
                               onClick={() => startEdit(row)}
@@ -1525,9 +1528,10 @@ export default function ImportJobDetailPage() {
                       </div>
                     </div>
 
-                    {/* Action buttons */}
-                    {(row.status === "needs_review" ||
-                      row.status === "error") && (
+                    {/* Action buttons（閲覧のみの他人ジョブでは丸ごと出さない） */}
+                    {canMutate &&
+                      (row.status === "needs_review" ||
+                        row.status === "error") && (
                       <div className="space-y-3">
                         {/* Search & link existing */}
                         {row.status === "needs_review" && (

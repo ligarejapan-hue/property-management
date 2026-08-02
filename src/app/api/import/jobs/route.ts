@@ -85,9 +85,20 @@ export async function GET(request: NextRequest) {
       where.executedBy = executedByParam;
     }
 
-    // ⚠スコープ限定は任意フィルタの**後**に適用する(上書き)。`import:read_all` が
-    // 無い利用者は、executedBy に他人の ID を指定しても自分の分しか返らない。
-    Object.assign(where, importJobScopeWhere(session.id, perms));
+    // ⚠スコープ限定は任意フィルタの**後**に適用する。全員分を見る権限が無い利用者が
+    // 他人の ID で絞り込んだ場合は、**自分の分にすり替えず空結果**を返す
+    // （Codex #349 R10 P2: 「他の人で絞り込み中」と表示したまま自分の取込が並ぶ
+    //   誤表示を防ぐ。見えないものは「無い」と示すのが正しい）。
+    const scope = importJobScopeWhere(session.id, perms);
+    if (scope.executedBy) {
+      if (where.executedBy && where.executedBy !== scope.executedBy) {
+        return apiResponse({
+          data: [],
+          pagination: { page, limit, total: 0, totalPages: 0 },
+        });
+      }
+      where.executedBy = scope.executedBy;
+    }
 
     const fromDate = parseDateOrNull(fromParam);
     const toDate = parseDateOrNull(toParam);

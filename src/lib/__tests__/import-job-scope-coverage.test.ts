@@ -104,13 +104,18 @@ describe("取込ジョブ配下の route はすべてスコープ制限を通す
     const list = routes.find((r) => r.rel.endsWith("api/import/jobs/route.ts"));
     expect(list).toBeDefined();
     const src = list!.src;
-    // executedBy クエリの代入より後に Object.assign(where, importJobScopeWhere(...))。
-    // ⚠import 文にも同名が出るため、**呼び出し箇所**(Object.assign)の位置で比較する。
-    const assignIdx = src.indexOf("Object.assign(where, importJobScopeWhere");
-    expect(assignIdx).toBeGreaterThan(0);
+    // executedBy クエリの代入より後にスコープを適用すること。
+    // ⚠import 文にも同名が出るため、**呼び出し箇所**の位置で比較する。
+    const scopeIdx = src.indexOf("const scope = importJobScopeWhere(");
+    expect(scopeIdx).toBeGreaterThan(0);
     expect(src.indexOf("where.executedBy = executedByParam")).toBeLessThan(
-      assignIdx,
+      scopeIdx,
     );
+    // 範囲外の executedBy 指定は**自分の分にすり替えず空結果**（誤表示防止）。
+    expect(src).toMatch(
+      /where\.executedBy !== scope\.executedBy[\s\S]{0,200}data: \[\]/,
+    );
+    expect(src).toContain("where.executedBy = scope.executedBy;");
   });
 });
 
@@ -146,5 +151,43 @@ describe("画面の変更操作は canMutate で出し分ける（Codex #349 R9 
     expect(src).toMatch(/\{canMutate &&\s*\n\s*reason === "all"/);
     // 行のアクション群
     expect(src).toMatch(/Action buttons row[\s\S]{0,80}\{canMutate && \(/);
+  });
+});
+
+describe("詰まったジョブ一覧も canMutate を返す（Codex #349 R10 P2）", () => {
+  it("stuck route が各ジョブに canMutate を付ける", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src/app/api/import/jobs/stuck/route.ts"),
+      "utf-8",
+    );
+    expect(src).toContain("canMutate: canMutateImportJobFor(job, session.id, perms)");
+  });
+
+  it("画面は canMutate=false の行に「失敗にする」を出さない", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src/app/(dashboard)/import/page.tsx"),
+      "utf-8",
+    );
+    expect(src).toContain("job.canMutate !== false && (");
+    // ボタン本体より前にガードがあること。
+    expect(src.indexOf("job.canMutate !== false && (")).toBeLessThan(
+      src.indexOf("handleMarkStuckFailed(job.jobId)"),
+    );
+  });
+});
+
+describe("ジョブ詳細の残りの変更操作もガードする（Codex #349 R10 P2）", () => {
+  const src = readFileSync(
+    join(process.cwd(), "src/app/(dashboard)/import/jobs/[jobId]/page.tsx"),
+    "utf-8",
+  );
+
+  it.each([
+    ["再開ボタン", /\{canMutate &&\s*\n\s*isRegistryPdfBulkJob &&/],
+    ["元データの編集ボタン", /\{canMutate &&\s*\n\s*\(row\.status === "error" \|\|/],
+    ["検索・紐付けを含む操作ブロック", /\{canMutate &&\s*\n\s*\(row\.status === "needs_review" \|\|/],
+    ["棟候補パネル", /\{canMutate &&\s*\n\s*row\.status === "needs_review" &&\s*\n\s*rawData\["__building_candidates"\]/],
+  ])("%s が canMutate で包まれている", (_label, pattern) => {
+    expect(src).toMatch(pattern);
   });
 });

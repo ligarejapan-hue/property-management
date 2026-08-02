@@ -888,6 +888,8 @@ export async function fetchImportJobDetail(
 
 // processing のまま残っているスタックジョブの一覧。
 export interface StuckImportJob {
+  /** 「失敗にする」を出してよいか(server 側判定: 自分の実行分 or import:manage)。 */
+  canMutate?: boolean;
   jobId: string;
   jobType: string;
   fileName: string;
