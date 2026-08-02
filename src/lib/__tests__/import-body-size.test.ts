@@ -202,3 +202,13 @@ describe("保存先の symlink 回避（Codex #349 R3/R4 P1・実測で挙動確
     expect(src).toContain("path.join(real, ...tail.reverse())");
   });
 });
+
+describe(".env.example の記載が実装値と一致する（Codex #349 R7 P2）", () => {
+  it("上限の数値が実装から乖離していない（プロキシ設定の根拠になるため）", () => {
+    const env = readFileSync(join(process.cwd(), ".env.example"), "utf-8");
+    const singleMb = MAX_IMPORT_JSON_BODY_BYTES / (1024 * 1024);
+    const pairedMb = MAX_IMPORT_JSON_BODY_BYTES_PAIRED / (1024 * 1024);
+    expect(env).toContain(`取込リクエスト全体の上限=${singleMb}MB`);
+    expect(env).toContain(`2ファイル分で${pairedMb}MB`);
+  });
+});
