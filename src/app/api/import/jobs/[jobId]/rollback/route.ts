@@ -10,6 +10,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { assertImportJobVisible } from "@/lib/import-job-guard";
 import {
   classifyRowsForRollback,
   classifyUpdateFieldsForRestore,
@@ -57,6 +58,9 @@ export async function POST(
       include: { rows: { orderBy: { rowNumber: "asc" } } },
     });
     if (!job) throw new ApiError(404, "ジョブが見つかりません", "NOT_FOUND");
+
+    // 他の担当者が実行した取込は見せない(2026-08-02 監査)。
+    assertImportJobVisible(job, session.id, perms);
 
     const baseSummary = { deletable: 0, restorable: 0, blocked: 0, skipped: 0 };
 

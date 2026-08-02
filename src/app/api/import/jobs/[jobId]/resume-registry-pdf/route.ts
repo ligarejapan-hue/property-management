@@ -8,6 +8,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { assertImportJobVisible } from "@/lib/import-job-guard";
 import { writeAuditLog } from "@/lib/audit";
 import { enqueueRegistryPdfBulkJob } from "@/lib/registry-pdf-bulk/worker";
 
@@ -34,11 +35,13 @@ export async function POST(
 
     const job = await prisma.importJob.findUnique({
       where: { id: jobId },
-      select: { id: true, jobType: true, status: true },
+      select: { id: true, jobType: true, status: true, executedBy: true },
     });
     if (!job) {
       throw new ApiError(404, "取込ジョブが見つかりません", "NOT_FOUND");
     }
+    // 他の担当者が実行した取込は見せない(2026-08-02 監査)。
+    assertImportJobVisible(job, session.id, perms);
     if (job.jobType !== "registry_pdf_bulk") {
       throw new ApiError(
         422,

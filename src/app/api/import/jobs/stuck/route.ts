@@ -7,6 +7,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { importJobScopeWhere } from "@/lib/import-job-guard";
 
 // ---------- GET /api/import/jobs/stuck ----------
 //
@@ -42,6 +43,8 @@ export async function GET() {
       where: {
         status: "processing",
         createdAt: { lt: thresholdAt },
+        // 他の担当者が実行した取込は見せない(2026-08-02 監査)。
+        ...importJobScopeWhere(session.id, perms),
       },
       include: {
         executor: { select: { id: true, name: true } },

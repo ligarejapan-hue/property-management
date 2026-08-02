@@ -43,6 +43,7 @@ import {
   tallyCorporateRepair,
   type CorporateRepairSummary,
 } from "@/lib/corporate-number-restore";
+import { assertImportJsonBodySize } from "@/lib/import-body-size";
 
 // 受付帳CSV × 所有者CSV × 既存物件 の本実行。
 // - 一意特定できた行だけ反映。それ以外は needs_review で記録。
@@ -72,6 +73,12 @@ export async function POST(request: NextRequest) {
     if (!hasPermission(perms, "import", "write")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
+
+    // body 全体をバッファする前に過大サイズを弾く(2026-08-02 監査: PDF 経路と姿勢を揃える)。
+
+
+    assertImportJsonBodySize(request);
+
 
     const body = await request.json();
     const {

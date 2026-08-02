@@ -9,6 +9,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { importJobScopeWhere } from "@/lib/import-job-guard";
 import {
   summaryFromStatusCounts,
   type StatusCounts,
@@ -83,6 +84,10 @@ export async function GET(request: NextRequest) {
     if (executedByParam) {
       where.executedBy = executedByParam;
     }
+
+    // ⚠スコープ限定は任意フィルタの**後**に適用する(上書き)。`import:read_all` が
+    // 無い利用者は、executedBy に他人の ID を指定しても自分の分しか返らない。
+    Object.assign(where, importJobScopeWhere(session.id, perms));
 
     const fromDate = parseDateOrNull(fromParam);
     const toDate = parseDateOrNull(toParam);

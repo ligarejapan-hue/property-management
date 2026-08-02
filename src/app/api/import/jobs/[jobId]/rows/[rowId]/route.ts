@@ -8,6 +8,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { assertImportJobVisible } from "@/lib/import-job-guard";
 import { writeAuditLog } from "@/lib/audit";
 import { normalizeCaseStatusInput, normalizeIntroductionRouteInput } from "@/lib/property-types";
 import { findDuplicateOwner } from "@/lib/owner-dedup";
@@ -185,6 +186,9 @@ export async function PATCH(
     if (!row || row.jobId !== jobId) {
       throw new ApiError(404, "行が見つかりません", "NOT_FOUND");
     }
+
+    // 他の担当者が実行した取込は見せない(2026-08-02 監査)。
+    assertImportJobVisible(row.job, session.id, perms);
 
     if (row.status !== "needs_review" && row.status !== "error") {
       throw new ApiError(

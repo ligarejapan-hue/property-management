@@ -15,7 +15,13 @@ import path from "path";
  * ローカルアップロード保存先のルート絶対パスを返す。
  *
  * - `LOCAL_UPLOAD_ROOT` が設定されていれば優先（trim 済みかつ非空）。
- * - 未設定または空文字なら `process.cwd()/public/uploads`。
+ * - 未設定または空文字なら `process.cwd()/public/uploads`（**開発時のみ**）。
+ *
+ * ⚠**本番(production)で未設定なら起動時に落とす**（2026-08-02 監査）。既定の
+ * `public/uploads` は Next.js の静的配信対象で、認可を実装した `/uploads/[...path]`
+ * route より**静的ファイルが優先される**ため、謄本PDF・現地写真が無認証で配信され得る。
+ * 「設定を1行消したら個人情報が公開される」構造を、fail-closed（起動不能）に変える。
+ * 本番は `LOCAL_UPLOAD_ROOT=/var/lib/property-management/uploads`（public 外）で運用中。
  *
  * 本関数は呼び出しごとに env を見るので、テストや本番起動後の変更にも追従する。
  */
@@ -23,6 +29,12 @@ export function getLocalUploadRoot(): string {
   const fromEnv = process.env.LOCAL_UPLOAD_ROOT;
   if (fromEnv && fromEnv.trim() !== "") {
     return path.resolve(fromEnv.trim());
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "LOCAL_UPLOAD_ROOT が未設定です。既定の public/uploads は静的配信されるため、" +
+        "本番では public 配下以外の絶対パス（例 /var/lib/property-management/uploads）を必ず設定してください",
+    );
   }
   return path.join(process.cwd(), "public", "uploads");
 }

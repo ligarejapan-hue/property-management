@@ -242,11 +242,15 @@ const PARSER_BASE = (): ParsedResult => ({
 });
 
 function makeRequest(edited: unknown) {
-  return new Request("http://localhost/api/import/registry-pdf", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: "dummy registry text", edited }),
-  }) as unknown as import("next/server").NextRequest;
+  const __payload = JSON.stringify({ text: "dummy registry text", edited });
+      return new Request("http://localhost/api/import/registry-pdf", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "content-length": String(Buffer.byteLength(__payload)),
+      },
+      body: __payload,
+      }) as unknown as import("next/server").NextRequest;
 }
 
 // edited を渡して POST を実行し、レスポンスにエコーされる merged parsed を返す。

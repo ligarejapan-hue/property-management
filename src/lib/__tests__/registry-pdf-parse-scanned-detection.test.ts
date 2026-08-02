@@ -99,10 +99,16 @@ function makeMultipartRequest(pdfBytes: Buffer, fileName = "registry.pdf") {
 }
 
 function makeJsonRequest(text: string, fileName = "paste.txt") {
+  // 取込 route は body を読む前に Content-Length を要求する(2026-08-02 監査)。
+  // ブラウザの fetch は自動で付けるが、テストの new Request では明示が必要。
+  const payload = JSON.stringify({ text, fileName });
   return new Request("http://test/api/import/registry-pdf/parse", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, fileName }),
+    headers: {
+      "Content-Type": "application/json",
+      "content-length": String(Buffer.byteLength(payload)),
+    },
+    body: payload,
   });
 }
 

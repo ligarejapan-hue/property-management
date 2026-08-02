@@ -118,11 +118,15 @@ const pm = prisma as unknown as {
 };
 
 function makeOwnerCsvRequest(csvText: string) {
-  return new Request("http://localhost/api/import/owner-csv", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileName: "test.csv", csvText }),
-  }) as unknown as import("next/server").NextRequest;
+  const __payload = JSON.stringify({ fileName: "test.csv", csvText });
+      return new Request("http://localhost/api/import/owner-csv", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "content-length": String(Buffer.byteLength(__payload)),
+      },
+      body: __payload,
+      }) as unknown as import("next/server").NextRequest;
 }
 
 beforeEach(() => {

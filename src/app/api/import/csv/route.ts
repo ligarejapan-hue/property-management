@@ -46,6 +46,7 @@ import {
   buildErrorRawDataExtras,
 } from "@/lib/import-error-display";
 import { unwrapCsvTextCell } from "@/lib/csv-encode";
+import { assertImportJsonBodySize } from "@/lib/import-body-size";
 
 const VALID_PROPERTY_TYPES: readonly string[] = PROPERTY_TYPE_VALUES;
 const VALID_REGISTRY_STATUS = ["unconfirmed", "scheduled", "obtained"];
@@ -293,6 +294,12 @@ export async function POST(request: NextRequest) {
     if (!hasPermission(perms, "import", "write")) {
       throw new ApiError(403, "CSV取込の権限がありません", "FORBIDDEN");
     }
+
+    // body 全体をバッファする前に過大サイズを弾く(2026-08-02 監査: PDF 経路と姿勢を揃える)。
+
+
+    assertImportJsonBodySize(request);
+
 
     const body = await request.json();
     const { fileName, csvText, xlsxBase64, columnMapping } = body as {

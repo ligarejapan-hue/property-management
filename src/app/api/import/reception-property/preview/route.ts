@@ -18,6 +18,7 @@ import {
   type ShinkiFilterMode,
 } from "@/lib/reception-owner-match";
 import { normalizeAddress } from "@/lib/normalize";
+import { assertImportJsonBodySize } from "@/lib/import-body-size";
 
 // 受付帳CSVから物件を新規作成するプレビュー。実データは書き換えない。
 
@@ -36,6 +37,12 @@ export async function POST(request: NextRequest) {
     if (!hasPermission(perms, "import", "write")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
+
+    // body 全体をバッファする前に過大サイズを弾く(2026-08-02 監査: PDF 経路と姿勢を揃える)。
+
+
+    assertImportJsonBodySize(request);
+
 
     const body = await request.json();
     const {

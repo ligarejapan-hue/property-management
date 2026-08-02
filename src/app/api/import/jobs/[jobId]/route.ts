@@ -9,6 +9,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { assertImportJobVisible } from "@/lib/import-job-guard";
 import {
   summaryFromStatusCounts,
   type StatusCounts,
@@ -225,6 +226,9 @@ export async function GET(
     if (!job) {
       throw new ApiError(404, "ジョブが見つかりません", "NOT_FOUND");
     }
+
+    // 他の担当者が実行した取込は見せない(2026-08-02 監査)。
+    assertImportJobVisible(job, session.id, perms);
 
     // groupBy は 0 件 status を返さないため未指定キーは 0 埋め扱いになる。
     const statusCounts: StatusCounts = {};

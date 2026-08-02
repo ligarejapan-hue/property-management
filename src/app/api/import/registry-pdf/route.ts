@@ -14,6 +14,7 @@ import {
   registryPdfJsonSchema,
   type EditedImport,
 } from "@/lib/registry-pdf/process";
+import { assertImportJsonBodySize } from "@/lib/import-body-size";
 
 // ---------- POST /api/import/registry-pdf ----------
 // リクエスト形式:
@@ -94,6 +95,10 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // --- テキスト直接受信 (後方互換) ---
+      // body 全体をバッファする前に過大サイズを弾く(2026-08-02 監査: PDF 経路と姿勢を揃える)。
+
+      assertImportJsonBodySize(request);
+
       const body = await request.json();
       const data = registryPdfJsonSchema.parse(body);
       text = data.text;

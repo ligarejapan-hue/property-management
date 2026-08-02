@@ -7,6 +7,7 @@ import {
   handleApiError,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { assertImportJobVisible } from "@/lib/import-job-guard";
 import { writeAuditLog } from "@/lib/audit";
 import { encodeCsv } from "@/lib/csv-encode";
 import { classifyImportError } from "@/lib/import-error-display";
@@ -77,12 +78,14 @@ export async function GET(
     // ジョブ存在確認のみ。fileName 等は今のところ使わないが将来のヘッダ拡張用。
     const job = await prisma.importJob.findUnique({
       where: { id: jobId },
-      select: { id: true },
+      select: { id: true, executedBy: true },
     });
 
     if (!job) {
       throw new ApiError(404, "ジョブが見つかりません", "NOT_FOUND");
     }
+    // 他の担当者が実行した取込は見せない(2026-08-02 監査)。
+    assertImportJobVisible(job, session.id, perms);
 
     const rows = await prisma.importJobRow.findMany({
       where: { jobId, status: { in: ["error", "needs_review"] } },
