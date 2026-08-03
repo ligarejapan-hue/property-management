@@ -21,6 +21,13 @@ const QUEUE_SRC = readFileSync(
   path.resolve(process.cwd(), "src/components/field-survey/candidate-queue.tsx"),
   "utf-8",
 );
+// 座標取得 (fetchPinLocation) は api-client に集約した。物件化 modal の
+// 「Googleマップで開く」でも同じ取り方をするため、2 か所に置くと片方だけ
+// 直る事故になる (2026-08-03)。エンドポイントの表明はそちらを見る。
+const API_CLIENT_SRC = readFileSync(
+  path.resolve(process.cwd(), "src/lib/api-client.ts"),
+  "utf-8",
+);
 
 function render(lat: number | null, lng: number | null): string {
   return renderToStaticMarkup(createElement(CandidatePlaceLinks, { lat, lng }));
@@ -105,9 +112,12 @@ describe("candidate-queue: 座標は押した行だけ取りに行く", () => {
   it("行のボタンを押した時だけ座標のみ射影 API から取得する", () => {
     expect(QUEUE_SRC).toMatch(/data-testid="candidate-place-toggle"/);
     expect(QUEUE_SRC).toMatch(/onClick=\{\(\) => \{\s*void showPlace\(r\.id\);/);
-    expect(QUEUE_SRC).toMatch(
+    // 取得先は座標のみ射影 API (詳細 GET = memo 本文つき は使わない)。
+    // 実装は api-client に集約済みなのでそちらで表明する。
+    expect(API_CLIENT_SRC).toMatch(
       /\/api\/field-survey\/pins\/\$\{encodeURIComponent\(pinId\)\}\/location/,
     );
+    expect(QUEUE_SRC).not.toMatch(/\/api\/field-survey\/pins\/[^`]*\/location/);
     // 一覧の読み直しをまたいだ遅延応答は捨てる (並び順切替と同じ世代ガード)
     const showPlace = QUEUE_SRC.match(
       /const showPlace = useCallback\([\s\S]*?\}, \[\]\);/,
