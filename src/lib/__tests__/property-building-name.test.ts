@@ -111,6 +111,24 @@ describe("配線 — 同じ判定を UI と API の両方が通る", () => {
     expect(update).toMatch(/!supportsBuildingName\(effectiveType\)/);
   });
 
+  it("⚠変更履歴は「実際に保存した値」で作る (@codex #354 P2)", () => {
+    const src = read("src/app/api/properties/[id]/route.ts");
+    // 変更前の値を読むために既存の物件名を select している。
+    // 選ばないと、書き換えても履歴が「空 → 〇〇」になり元の名前が残らない。
+    expect(src).toMatch(/buildingName: true,/);
+    // 履歴は正規化後の値を混ぜた persistedFields から作る。
+    expect(src).toMatch(
+      /const persistedFields = \{ \.\.\.updateFields, \.\.\.buildingNamePatch \}/,
+    );
+    expect(src).toMatch(/Object\.entries\(persistedFields\)/);
+    // 保存も同じ値を使う (二重に組み立てない = 履歴と実データがずれない)。
+    expect(src).toMatch(/data: \{\s*\.\.\.persistedFields,/);
+    // 履歴を作る前に patch が確定していること (順序が逆だと記録漏れ)。
+    expect(src.indexOf("const buildingNamePatch")).toBeLessThan(
+      src.indexOf("const changeLogs"),
+    );
+  });
+
   it("DB 列は任意 (既存データを壊さない)", () => {
     expect(read("prisma/schema.prisma")).toMatch(
       /buildingName\s+String\?\s+@map\("building_name"\)/,
