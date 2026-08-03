@@ -10,10 +10,27 @@
  * リンク自体は描画されない。よって配線はここで固定する。
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf-8");
+
+/** src 配下の .tsx を再帰列挙する (テストと生成物は除く)。 */
+function listSourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync(join(process.cwd(), dir), {
+    withFileTypes: true,
+  })) {
+    const rel = `${dir}/${e.name}`;
+    if (e.isDirectory()) {
+      if (e.name === "__tests__" || e.name === "generated") continue;
+      out.push(...listSourceFiles(rel));
+    } else if (e.name.endsWith(".tsx")) {
+      out.push(rel);
+    }
+  }
+  return out;
+}
 const MODAL_SRC = read(
   "src/components/field-survey/convert-pin-to-property-modal.tsx",
 );
@@ -73,13 +90,33 @@ describe("物件化 modal — Googleマップで開く", () => {
     );
   });
 
-  it("⚠詳細パネルは pin ごとに modal を作り直す (入力値の持ち越しを根で止める)", () => {
-    // パネルは pinId が変わっても unmount されず showConvert もリセットしない。
-    // key が無いと前の pin に入力した住所・種別・地番が次の pin に残る。
-    const PANEL_SRC = read("src/components/field-survey/pin-detail-panel.tsx");
-    expect(PANEL_SRC).toMatch(
-      /<ConvertPinToPropertyModal\s+key=\{pinId\}\s+pinId=\{pinId\}/,
+  it("⚠**すべての**呼び出し元が pin ごとに modal を作り直す (key 必須)", () => {
+    // この modal は焦点を閉じ込めず、背後の画面も操作不能にしていない。
+    // そのため pin A で開いたまま pinId だけ B に変わる経路がある
+    //   - 完成待ち一覧: キーボードで別の行の「物件にする」へ移動して押せる
+    //   - ピン詳細パネル: pinId が変わっても unmount されず showConvert も残る
+    // key が無いと instance が使い回され、**A に入力した住所・種別・地番・
+    // 家屋番号がそのまま B の物件として保存される**。
+    //
+    // ⚠1 箇所ずつ書かずに**全呼び出し元を走査する**。@codex #352 は
+    // 「片方だけ直して、もう片方が残っていた」を 2 度指摘している
+    // (P2 = 座標 / P1 = 一覧側の取りこぼし)。3 箇所目が生えたら落とす。
+    const callers = listSourceFiles("src").filter(
+      (f) =>
+        !f.endsWith("convert-pin-to-property-modal.tsx") &&
+        read(f).includes("<ConvertPinToPropertyModal"),
     );
+    expect(callers.length).toBeGreaterThanOrEqual(2);
+    for (const f of callers) {
+      const tags = read(f).match(/<ConvertPinToPropertyModal[\s\S]*?\/>/g) ?? [];
+      expect(tags.length).toBeGreaterThan(0);
+      for (const tag of tags) {
+        expect(
+          /\skey=\{/.test(tag),
+          `${f} の <ConvertPinToPropertyModal> に key がありません`,
+        ).toBe(true);
+      }
+    }
   });
 
   it("⚠住所の自動入力が無効な構成でも地図リンクは出す (別条件で出し分ける)", () => {

@@ -649,7 +649,13 @@ export default function CandidateQueue({
       )}
 
       {convertPinId && (
+        // ⚠**key で pin ごとに作り直す** (@codex #352 P1)。この modal は焦点を
+        // 閉じ込めず、背後の一覧も操作不能にしていない。そのため pin A で開いた
+        // まま**キーボードで別の行の「物件にする」へ移動して押せてしまい**、
+        // unmount されずに pinId だけ B へ変わる。key が無いと、A に入力した
+        // 住所・種別・地番・家屋番号がそのまま残り、**B の物件として保存される**。
         <ConvertPinToPropertyModal
+          key={convertPinId}
           pinId={convertPinId}
           onClose={() => setConvertPinId(null)}
           onConverted={(propertyId) => {
