@@ -153,6 +153,8 @@ interface ApiProperty {
   address: string;
   lotNumber: string | null;
   buildingNumber: string | null;
+  /** 物件名(任意)。集合住宅の種別のときだけ値が入る。 */
+  buildingName: string | null;
   realEstateNumber: string | null;
   registryStatus: string;
   dmStatus: string;
@@ -719,6 +721,11 @@ function BasicTab({
       )}
 
       <Field label="物件住所" value={property.address} />
+      {/* 物件名は集合住宅の種別でのみ入る (任意)。値があるときだけ出す＝
+          土地や戸建の詳細に空欄が増えない。 */}
+      {property.buildingName && (
+        <Field label="物件名" value={property.buildingName} />
+      )}
       <Field label="地番" value={property.lotNumber} />
       <Field label="家屋番号" value={property.buildingNumber} />
       <Field label="不動産番号" value={property.realEstateNumber} mono />

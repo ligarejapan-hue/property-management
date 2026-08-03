@@ -2775,6 +2775,8 @@ export async function createProperty(data: {
   address: string;
   postalCode?: string | null;
   lotNumber?: string | null;
+  /** 物件名(任意)。集合住宅の種別のときだけ値が入る。 */
+  buildingName?: string | null;
   introductionRoute?: string | null;
   note?: string | null;
 }): Promise<{ id: string }> {

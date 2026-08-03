@@ -296,6 +296,9 @@ model Property {
   lotNumber                String?           @map("lot_number")
   originalLotNumber        String?           @map("original_lot_number")
   buildingNumber           String?           @map("building_number")
+  // 物件名(マンション名・アパート名)。任意入力・集合住宅の種別でのみ使う
+  // (判定は src/lib/property-building-name.ts に集約・2026-08-03 発注者要望)。
+  buildingName             String?           @map("building_name")
   realEstateNumber         String?           @map("real_estate_number")
   externalLinkKey          String?           @map("external_link_key")
 

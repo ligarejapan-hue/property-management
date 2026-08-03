@@ -11,6 +11,10 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { updatePropertySchema } from "@/lib/validators";
+import {
+  normalizeBuildingName,
+  supportsBuildingName,
+} from "@/lib/property-building-name";
 import { applyDisplayToOwner } from "@/lib/display-level";
 import { getStorage } from "@/lib/storage";
 import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
@@ -247,11 +251,30 @@ export async function PATCH(
       }
     }
 
+    // 物件名は「更新後の種別」で判定する。
+    // ⚠**種別だけを対象外へ変えた更新**(buildingName を送ってこない)でも、
+    // 残っている物件名を消す。消さないと画面から入力欄が消えたのに値だけ DB に
+    // 残り、誰も直せないまま CSV 出力や DM 差込で表に出る。
+    const effectiveType = updateFields.propertyType ?? current.propertyType;
+    const buildingNamePatch: { buildingName?: string | null } =
+      updateFields.buildingName !== undefined
+        ? {
+            buildingName: normalizeBuildingName(
+              effectiveType,
+              updateFields.buildingName,
+            ),
+          }
+        : updateFields.propertyType !== undefined &&
+            !supportsBuildingName(effectiveType)
+          ? { buildingName: null }
+          : {};
+
     // Update property with version increment
     const updated = await prisma.property.update({
       where: { id },
       data: {
         ...updateFields,
+        ...buildingNamePatch,
         version: { increment: 1 },
       },
       include: {

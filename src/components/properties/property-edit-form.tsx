@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Loader2, X, Save, AlertTriangle } from "lucide-react";
 import { USE_MOCK, fetchUsers } from "@/lib/api-client";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
+import { supportsBuildingName } from "@/lib/property-building-name";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
 interface AssigneeOption {
@@ -17,6 +18,7 @@ interface PropertyData {
   address: string;
   lotNumber: string | null;
   buildingNumber: string | null;
+  buildingName: string | null;
   realEstateNumber: string | null;
   registryStatus: string;
   dmStatus: string;
@@ -63,6 +65,9 @@ const FORM_FIELDS: FormField[] = [
   { key: "address", label: "住所", type: "text", section: "基本" },
   { key: "lotNumber", label: "地番", type: "text", section: "基本" },
   { key: "buildingNumber", label: "家屋番号", type: "text", section: "基本" },
+  // 物件名(任意)。⚠**集合住宅の種別を選んでいるときだけ表示する**(描画側で判定)。
+  // 土地や戸建には無い項目なので、常時出すと入力欄が無駄に増える。
+  { key: "buildingName", label: "物件名", type: "text", section: "基本" },
   { key: "realEstateNumber", label: "不動産番号", type: "text", section: "基本" },
   { key: "registryStatus", label: "登記状況", type: "select", section: "基本", options: [
     { value: "unconfirmed", label: "未取得" },
@@ -229,7 +234,16 @@ export default function PropertyEditForm({
                 {section}情報
               </h4>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {FORM_FIELDS.filter((f) => f.section === section).map(
+                {FORM_FIELDS.filter((f) => f.section === section)
+                  // 物件名は集合住宅の種別のときだけ出す。⚠判定は**いま選んで
+                  // いる種別**(values.propertyType) で見る。保存前に種別を変えた
+                  // ら、その場で欄が出入りする方が分かりやすい。
+                  .filter(
+                    (f) =>
+                      f.key !== "buildingName" ||
+                      supportsBuildingName(values.propertyType),
+                  )
+                  .map(
                   (field) => (
                     <div
                       key={field.key}

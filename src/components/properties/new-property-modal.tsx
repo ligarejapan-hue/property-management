@@ -4,6 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { X, Loader2, AlertTriangle } from "lucide-react";
 import { PROPERTY_TYPE_OPTIONS, INTRODUCTION_ROUTE_OPTIONS } from "@/lib/property-types";
+import {
+  BUILDING_NAME_MAX_LENGTH,
+  normalizeBuildingName,
+  supportsBuildingName,
+} from "@/lib/property-building-name";
 import { createProperty } from "@/lib/api-client";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
@@ -33,6 +38,8 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
   // 住所補完の user-edit signal（Codex P2-G）。住所 input をユーザーが直接編集した時だけ true。
   const [addressEdited, setAddressEdited] = useState(false);
   const [lotNumber, setLotNumber] = useState("");
+  // 物件名(任意)。集合住宅の種別のときだけ入力欄を出す。
+  const [buildingName, setBuildingName] = useState("");
   const [introductionRoute, setIntroductionRoute] = useState("");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -58,6 +65,7 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
         postalCode: postalCode.trim() || null,
         address: address.trim(),
         lotNumber: lotNumber.trim() || null,
+        buildingName: normalizeBuildingName(propertyType, buildingName),
         introductionRoute: introductionRoute || null,
         note: note.trim() || null,
       });
@@ -99,7 +107,13 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
             </label>
             <select
               value={propertyType}
-              onChange={(e) => setPropertyType(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setPropertyType(next);
+                // ⚠対象外の種別に変えたら物件名を**その場で消す**。隠すだけだと
+                // 画面に無い値を送ることになり、入力した本人にも分からない。
+                if (!supportsBuildingName(next)) setBuildingName("");
+              }}
               disabled={submitting}
               className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
             >
@@ -115,6 +129,30 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
               ))}
             </select>
           </div>
+
+          {/* 物件名 — 集合住宅の種別のときだけ出す (任意)。
+              住所だけでは特定しづらく、現場でも所有者との会話でも建物名で通る。 */}
+          {supportsBuildingName(propertyType) && (
+            <div>
+              <label
+                htmlFor="new-property-building-name"
+                className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200"
+              >
+                物件名 <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
+              </label>
+              <input
+                id="new-property-building-name"
+                data-testid="new-property-building-name"
+                type="text"
+                value={buildingName}
+                onChange={(e) => setBuildingName(e.target.value)}
+                disabled={submitting}
+                maxLength={BUILDING_NAME_MAX_LENGTH}
+                placeholder="例: リガーレ西荻マンション"
+                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+              />
+            </div>
+          )}
 
           {/* 郵便番号 */}
           <div>
