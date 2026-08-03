@@ -50,9 +50,13 @@ describe("CandidatePlaceLinks: 座標があるとき", () => {
       // &amp; にエスケープされるので host 部分で判定する
       expect(href.startsWith("https://www.google.com/maps/")).toBe(true);
     }
-    // ストリートビュー = パノラマ / もう一方 = 地図検索
+    // ストリートビュー = パノラマ / もう一方 = 地図表示
+    // ⚠地図側は 2026-08-03 に検索形式から地図表示形式へ変えた。検索形式では
+    // 地図タイプを指定できず、利用者が一度「航空写真」にすると以後ずっと
+    // 航空写真で開いてしまうため (発注者が実機で遭遇)。
     expect(html).toContain("map_action=pano");
-    expect(html).toContain("/maps/search/");
+    expect(html).toContain("map_action=map");
+    expect(html).toContain("basemap=roadmap");
     // 座標は 2 本とも同じ地点
     expect(html.match(/35\.681236(%2C|,)139\.767125/g)?.length).toBe(2);
   });
