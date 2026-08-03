@@ -46,8 +46,29 @@ export function buildStreetViewUrl(
 }
 
 /**
+ * 建物を1棟ずつ見分けられる倍率。**ピンが立たない**形式なので、
+ * 引いた画で開くと「画面の中心がどの家か」が分からなくなる。
+ */
+const MAP_ZOOM = 19;
+
+/**
  * 座標から一般向け Google マップの地図表示を開く URL。
  * ストリートビューが無い場所の代替や、周辺を見たいときに使う。
+ *
+ * ⚠**「地図表示」形式 (`map_action=map`) を使う**。2026-08-03 発注者から
+ * 「開いた地図が航空写真になっているので、地図タイプを既定にしてほしい」。
+ * Google マップは**利用者が最後に選んだ地図タイプを憶えている**ため、一度
+ * 航空写真にすると以後ずっと航空写真で開く。URL 側で打ち消すには
+ * `basemap=roadmap` が要る。
+ *
+ * ⚠**`basemap` は「検索」形式では効かない**。公式仕様で検索形式が受け付ける
+ * のは `query` / `query_place_id` だけ (2026-08-03 に Maps URLs の公式ドキュメント
+ * で確認)。よって検索形式のままでは指定できず、地図表示形式へ切り替えた。
+ *
+ * ⚠**引き換えに赤いピンは立たない**(地図表示形式は marker を持てない)。
+ * 画面の中心がその場所になる。住所の確認用途では、番地の区画や建物名が
+ * 読める通常の地図のほうが航空写真より適しているため、この交換は妥当と判断。
+ * 中心が曖昧にならないよう倍率を建物単位まで寄せる。
  */
 export function buildExternalMapUrl(
   lat: number | null | undefined,
@@ -57,6 +78,11 @@ export function buildExternalMapUrl(
   const latNum = Number(lat);
   const lngNum = Number(lng);
   if (!isValidLat(latNum) || !isValidLng(lngNum)) return null;
-  const query = `${latNum.toFixed(COORD_DECIMALS)},${lngNum.toFixed(COORD_DECIMALS)}`;
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  const center = `${latNum.toFixed(COORD_DECIMALS)},${lngNum.toFixed(COORD_DECIMALS)}`;
+  return (
+    "https://www.google.com/maps/@?api=1&map_action=map" +
+    `&center=${encodeURIComponent(center)}` +
+    `&zoom=${MAP_ZOOM}` +
+    "&basemap=roadmap"
+  );
 }

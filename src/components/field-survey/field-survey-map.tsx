@@ -245,31 +245,18 @@ export default function FieldSurveyMap({
     return mergePolylinePoints(recorder.savedPoints, recorder.pendingPoints);
   }, [activeSession, recorder.savedPoints, recorder.pendingPoints]);
 
-  // Phase 1-F-3: 「現在地へ移動」ボタン用に Map インスタンスを保持する。
-  // ControlPanel は <Map> の外にあるため、Map 内で useMap() で捕捉した値を
-  // state に上げる (<MapInstanceCapture>)。クリック時のみ panTo を呼ぶ。
+  // 地図を動かすために Map インスタンスを保持する。ControlPanel / FAB は
+  // <Map> の外にあるため、Map 内で useMap() で捕捉した値を state に上げる
+  // (<MapInstanceCapture>)。押された時だけ panTo を呼ぶ (自動 pan しない)。
   const [mapInstance, setMapInstance] = useState<unknown>(null);
-  const handlePanToCurrent = useCallback(() => {
-    // Codex P2 (Phase 1-F-3 follow-up): recording 中以外 (idle / error / stopping /
-    // preparing) では古い座標への panTo を許可しない。CurrentLocationStatus 側でも
-    // disabled をかけているが、外部から直接呼ばれた場合 (将来の hotkey 等) に
-    // 備えた server-side ガード相当の二重防御。
-    if (recorder.status !== "recording") return;
-    const pos = recorder.latestPositionForDisplay;
-    if (!pos) return;
-    const m = mapInstance as
-      | { panTo?: (p: { lat: number; lng: number }) => void }
-      | null;
-    if (m && typeof m.panTo === "function") {
-      m.panTo({ lat: pos.lat, lng: pos.lng });
-    }
-  }, [mapInstance, recorder.status, recorder.latestPositionForDisplay]);
 
   // 地図左下の「現在地へ移動」FAB から呼ぶ pan (2026-08-03)。
-  // ⚠上の handlePanToCurrent との違い: あちらは**記録中の最新位置**専用で、
-  // 記録していない間は動かない。こちらは MapRecenterButton が決めた座標
-  // (記録中なら recorder の位置 / それ以外はその場の単発取得) を受け取るだけで、
-  // **地図側は位置を取りに行かない** (取得は MapRecenterButton に閉じる)。
+  // ⚠**パネル内にあった同名ボタンは廃止した** (2026-08-03 発注者指示)。
+  // パネル側は開いて最下部までスクロールしないと届かず、記録中しか効かな
+  // かった。同じ操作が 2 か所にあって片方だけ効かないのは分かりにくいので、
+  // 常設 FAB の 1 本にする。
+  // ⚠**地図側は位置を取りに行かない**。MapRecenterButton が決めた座標
+  // (記録中なら recorder の位置 / それ以外はその場の単発取得) を受け取るだけ。
   // ⚠地図がまだ用意できていないときの寄せ先を 1 件だけ預かる (@codex #351 P2)。
   // 単発取得は最大 10 秒かかるので、取得が終わった時点でも地図が間に合って
   // いないことがある。そこで捨てると**押しても何も起きない**ように見えるため、
@@ -313,7 +300,7 @@ export default function FieldSurveyMap({
   }, [mapInstance, handleRecenterTo]);
 
   // MapRecenterButton へ渡す「記録中の最新位置」。記録していない間は null にして
-  // 単発取得へ落とす (古い座標へ寄せない・handlePanToCurrent と同じ判断)。
+  // 単発取得へ落とす (古い座標へ寄せない)。
   // ⚠useMemo で参照を安定させる。毎レンダー新しい object を渡すと、記録中に
   // 位置が届くたび (数秒ごと) ボタン側の useCallback も作り直しになる。
   const recenterLivePos = recorder.latestPositionForDisplay;
@@ -1063,7 +1050,6 @@ export default function FieldSurveyMap({
           recorder={recorder}
           hasActiveSession={!!activeSession}
           showOthersLegendHint={canSeeOtherPins}
-          onPanToCurrent={handlePanToCurrent}
         />
 
         {/* 現在地へ移動 (地図左下・常設)。巡回の有無によらず出す = 街歩き中に
@@ -1301,7 +1287,6 @@ function ControlPanel({
   recorder,
   hasActiveSession,
   showOthersLegendHint,
-  onPanToCurrent,
 }: {
   layers: Record<Layer, boolean>;
   onToggle: (key: Layer) => void;
@@ -1352,7 +1337,6 @@ function ControlPanel({
   hasActiveSession: boolean;
   /** 凡例に「白いふちどり = 他の担当者」を出すか (read_all/manage 保持者のみ)。 */
   showOthersLegendHint: boolean;
-  onPanToCurrent: () => void;
 }) {
   // パネルは地図エリア(flex-1 overflow-hidden)に絶対配置されるため、内容が地図高より
   // 高いと下部が切れる(スマホで発生)。上限を viewport 固定値で見積もるとバナー
@@ -1609,7 +1593,6 @@ function ControlPanel({
           isWaitingForFirstLocation={recorder.isWaitingForFirstLocation}
           lastLocationErrorForDisplay={recorder.lastLocationErrorForDisplay}
           recording={recorder.status === "recording"}
-          onPanToCurrent={onPanToCurrent}
         />
       )}
 

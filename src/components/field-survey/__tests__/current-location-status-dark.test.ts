@@ -38,15 +38,17 @@ describe("current-location-status.tsx dark: 配色 (field-survey phase)", () => 
     expect(src).toContain("dark:border-amber-500/40");
   });
 
-  // --- blue accent 現在地へ移動ボタン ---
-  it("現在地パンボタン (bg-blue-50) に dark:bg-blue-500/20 がある", () => {
-    expect(src).toContain("dark:bg-blue-500/20");
-  });
-  it("現在地パンボタン (text-blue-700) に dark:text-blue-300 がある", () => {
-    expect(src).toContain("dark:text-blue-300");
-  });
-  it("現在地パンボタン (border-blue-300) に dark:border-blue-500/40 がある", () => {
-    expect(src).toContain("dark:border-blue-500/40");
+  // --- 現在地へ移動ボタンは廃止 (2026-08-03・地図左下の FAB へ一本化) ---
+  // 青系の配色はこのボタン専用だった。ライト/ダークの対で残っていないことを
+  // 見ることで、ボタンだけ消して配色が浮くのを防ぐ。復活させるなら FAB 側
+  // (map-recenter-button.tsx) に置く。
+  it("パン用の青系配色を残さない (ライト/ダークとも)", () => {
+    expect(src).not.toContain("bg-blue-50");
+    expect(src).not.toContain("text-blue-700");
+    expect(src).not.toContain("border-blue-300");
+    expect(src).not.toContain("hover:bg-blue-100");
+    expect(src).not.toContain("dark:bg-blue-500/20");
+    expect(src).not.toContain("dark:text-blue-300");
   });
 
   // --- ライト不変担保 ---
@@ -68,16 +70,6 @@ describe("current-location-status.tsx dark: 配色 (field-survey phase)", () => 
   it("ライトモード bg-gray-50 は残っている (取得中メッセージ)", () => {
     expect(src).toContain("bg-gray-50");
   });
-  it("ライトモード bg-blue-50 は残っている (パンボタン)", () => {
-    expect(src).toContain("bg-blue-50");
-  });
-  it("ライトモード text-blue-700 は残っている", () => {
-    expect(src).toContain("text-blue-700");
-  });
-  it("ライトモード border-blue-300 は残っている", () => {
-    expect(src).toContain("border-blue-300");
-  });
-  it("ライトモード hover:bg-blue-100 は残っている", () => {
-    expect(src).toContain("hover:bg-blue-100");
-  });
+  // ⚠青系(パンボタン専用)の「残っている」表明は、ボタン廃止に伴い上の
+  // 「残さない」表明へ置き換えた (2026-08-03)。
 });

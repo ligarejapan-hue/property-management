@@ -69,14 +69,45 @@ describe("ストリートビューのリンク（課金されない一般向け 
 });
 
 describe("一般向け Google マップの地図リンク（ストリートビューが無い場所の代替）", () => {
-  it("座標検索の公式スキームを組み立てる", () => {
+  it("地図表示の公式スキームを組み立てる", () => {
     expect(buildExternalMapUrl(35.681236, 139.767125)).toBe(
-      "https://www.google.com/maps/search/?api=1&query=35.681236%2C139.767125",
+      "https://www.google.com/maps/@?api=1&map_action=map" +
+        "&center=35.681236%2C139.767125&zoom=19&basemap=roadmap",
     );
+  });
+
+  it("⚠地図タイプを既定(通常の地図)に固定する", () => {
+    // Google マップは利用者が最後に選んだ地図タイプを憶えており、一度
+    // 航空写真にすると以後ずっと航空写真で開く (発注者が実機で遭遇)。
+    // URL 側で打ち消さないと、住所の確認に使えない画が出続ける。
+    const url = buildExternalMapUrl(35.681236, 139.767125) ?? "";
+    expect(url).toContain("basemap=roadmap");
+    expect(url).not.toContain("satellite");
+  });
+
+  it("⚠basemap が効く「地図表示」形式を使う（検索形式では指定できない）", () => {
+    // 公式仕様上、検索形式 (maps/search/?api=1) が受け付けるのは
+    // query / query_place_id だけで basemap は無視される。
+    const url = buildExternalMapUrl(35.681236, 139.767125) ?? "";
+    expect(url).toContain("map_action=map");
+    expect(url).not.toContain("/maps/search/");
+  });
+
+  it("建物を見分けられる倍率で開く（ピンが立たない形式のため中心を曖昧にしない）", () => {
+    expect(buildExternalMapUrl(35.681236, 139.767125)).toContain("zoom=19");
   });
 
   it("不正な座標ではリンクを出さない", () => {
     expect(buildExternalMapUrl(null, null)).toBeNull();
     expect(buildExternalMapUrl(100, 139.76)).toBeNull();
+  });
+
+  it("Decimal から来た文字列座標でも扱える（Prisma の Decimal 経由）", () => {
+    expect(
+      buildExternalMapUrl(
+        "35.681236" as unknown as number,
+        "139.767125" as unknown as number,
+      ),
+    ).toContain("center=35.681236%2C139.767125");
   });
 });

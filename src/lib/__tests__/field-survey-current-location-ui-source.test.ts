@@ -257,27 +257,27 @@ describe("current-location-status.tsx — UI / pan button", () => {
     expect(STATUS_SRC).toMatch(/現在地/);
   });
 
-  it("「現在地へ移動」ボタンが存在し、testid と onClick を持つ", () => {
-    expect(STATUS_SRC).toMatch(/data-testid="current-location-pan-button"/);
-    expect(STATUS_SRC).toMatch(/現在地へ移動/);
-    expect(STATUS_SRC).toMatch(/onClick=\{\s*\(\)\s*=>\s*onPanToCurrent\(\)\s*\}/);
+  // ⚠2026-08-03 発注者指示でパネル内の「現在地へ移動」は廃止した。同じ操作は
+  // 地図左下の FAB (MapRecenterButton) に常設され、パネルを開かずに押せる。
+  // 2 か所に置くと「片方だけ効かない」分かりにくさに戻るので、**戻ってこない
+  // こと**を表明する。
+  it("パネル内に「現在地へ移動」ボタンを置かない (FAB へ一本化)", () => {
+    // コメントでの言及は許容し、実行コードだけ見る (既存方針)。
+    expect(STATUS_CODE).not.toMatch(/data-testid="current-location-pan-button"/);
+    expect(STATUS_CODE).not.toMatch(/現在地へ移動/);
+    expect(STATUS_CODE).not.toMatch(/onPanToCurrent/);
   });
 
-  it("recording 中かつ latestPositionForDisplay がある時のみ pan ボタンが有効 (Codex P2)", () => {
-    // canPanToCurrent = recording && hasPosition の derive
-    expect(STATUS_SRC).toMatch(
-      /canPanToCurrent\s*=\s*recording\s*&&\s*hasPosition/,
-    );
-    // disabled は canPanToCurrent ベース (hasPosition 単独依存に戻っていない)
-    expect(STATUS_SRC).toMatch(/disabled=\{!canPanToCurrent\}/);
-    expect(STATUS_SRC).not.toMatch(/disabled=\{!hasPosition\}/);
-    // 早期に hasPosition を計算
+  it("状態表示に専念する (pan の可否判定を持たない)", () => {
+    // ボタンごと無くなったので、その有効/無効を決める derive も残さない。
+    expect(STATUS_CODE).not.toMatch(/canPanToCurrent/);
+    // 表示に使う hasPosition は引き続き必要
     expect(STATUS_SRC).toMatch(
       /hasPosition\s*=\s*latestPositionForDisplay\s*!==\s*null/,
     );
   });
 
-  it("自動 pan ロジック (useEffect 内で onPanToCurrent / panTo) を持たない", () => {
+  it("自動 pan ロジック (useEffect / panTo) を持たない", () => {
     // useEffect 自体を使わない (純 component) ことで自動 pan を構造的に禁止
     expect(STATUS_CODE).not.toMatch(/useEffect/);
     expect(STATUS_CODE).not.toMatch(/panTo/);
@@ -387,34 +387,27 @@ describe("field-survey-map.tsx — Phase 1-F-3 統合", () => {
     expect(m).toMatch(
       /lastLocationErrorForDisplay=\{recorder\.lastLocationErrorForDisplay\}/,
     );
-    expect(m).toMatch(/onPanToCurrent=\{onPanToCurrent\}/);
+    // ⚠pan の受け渡しは廃止 (パネル内ボタンを FAB へ一本化・2026-08-03)。
+    expect(m).not.toMatch(/onPanToCurrent/);
   });
 
   it("MapInstanceCapture が map を state に上げ、panTo はクリック時のみ呼ばれる", () => {
     expect(MAP_SRC).toMatch(/function MapInstanceCapture/);
-    // handlePanToCurrent: useCallback(() => { ... panTo({lat, lng}) ... })
-    // = ボタン経由でしか呼ばれない (useEffect 経由の自動 pan が無い)
+    // pan は FAB (MapRecenterButton) から handleRecenterTo 経由でのみ呼ばれる。
     const handler = MAP_SRC.match(
-      /const handlePanToCurrent\s*=\s*useCallback\(\(\)\s*=>\s*\{[\s\S]*?\}\,\s*\[[\s\S]*?\]\s*\);/,
+      /const handleRecenterTo\s*=\s*useCallback\([\s\S]*?\n  \);/,
     );
     expect(handler).not.toBeNull();
-    expect(handler?.[0]).toMatch(/panTo\(\{\s*lat:\s*pos\.lat,\s*lng:\s*pos\.lng\s*\}/);
-    // panTo を useEffect の中で呼ぶ自動 pan パターンが無いことを構造ガード
-    expect(MAP_SRC).not.toMatch(/useEffect\([\s\S]{0,200}panTo\(/);
+    expect(handler?.[0]).toMatch(
+      /panTo\(\{\s*lat:\s*pos\.lat,\s*lng:\s*pos\.lng\s*\}/,
+    );
   });
 
-  it("handlePanToCurrent は recording 中以外では早期 return する (Codex P2)", () => {
-    const handler = MAP_SRC.match(
-      /const handlePanToCurrent\s*=\s*useCallback\(\(\)\s*=>\s*\{[\s\S]*?\}\,\s*\[[\s\S]*?\]\s*\);/,
-    );
-    expect(handler).not.toBeNull();
-    const m = handler?.[0] ?? "";
-    // status !== "recording" で早期 return している
-    expect(m).toMatch(
-      /recorder\.status\s*!==\s*"recording"[\s\S]{0,40}return/,
-    );
-    // dep に recorder.status が含まれている (stale closure 回避)
-    expect(m).toMatch(/recorder\.status/);
+  it("⚠パネル内の pan ハンドラを残さない (FAB へ一本化)", () => {
+    // 同じ操作の入口が 2 つあると、片方だけ「記録中しか効かない」状態に
+    // 戻る。ハンドラごと消えていることを構造で固定する。
+    expect(MAP_SRC).not.toMatch(/handlePanToCurrent/);
+    expect(MAP_SRC).not.toMatch(/onPanToCurrent/);
   });
 
   // ⚠2026-07-29: 地図タップは「撮影後のタップ待ち」専用になった

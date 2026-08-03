@@ -8,8 +8,12 @@
  *   描画するだけ。navigator.geolocation は触らない。
  * - lat / lng / raw position / API key を UI / console に出さない。
  *   表示するのは「最終取得時刻 (HH:MM:SS)」と「精度 (約Nm)」のみ。
- * - 「現在地へ移動」ボタンはクリック時のみ panTo を呼ぶ (自動 pan しない)。
- *   latestPositionForDisplay が無い時は disabled。
+ *
+ * ⚠**「現在地へ移動」ボタンはここから外した** (2026-08-03 発注者指示)。
+ * 同じ操作は**地図左下の FAB (MapRecenterButton) に常設**され、パネルを開かずに
+ * 1 タップで押せる。パネル側は開いて最下部までスクロールしないと届かず、
+ * 位置記録中しか効かなかったため、残すと**同じ操作が 2 か所にあり、片方だけ
+ * 効かない**という分かりにくさになる。このコンポーネントは状態表示に専念する。
  */
 
 import {
@@ -30,7 +34,6 @@ export interface CurrentLocationStatusProps {
   isWaitingForFirstLocation: boolean;
   lastLocationErrorForDisplay: string | null;
   recording: boolean;
-  onPanToCurrent: () => void;
 }
 
 export default function CurrentLocationStatus({
@@ -38,19 +41,14 @@ export default function CurrentLocationStatus({
   isWaitingForFirstLocation,
   lastLocationErrorForDisplay,
   recording,
-  onPanToCurrent,
 }: CurrentLocationStatusProps) {
   const hasPosition = latestPositionForDisplay !== null;
   const accuracy = latestPositionForDisplay?.accuracy ?? null;
   const lowAccuracy = isLowAccuracyForDisplay(accuracy);
-  // Codex P2 (Phase 1-F-3 follow-up): hook 側で error / stop 時に
-  // latestPositionForDisplay を null にクリアするが、recording 中以外は
-  // pan ボタンを構造的にも有効にしない (古い座標への panTo を防ぐ二重ガード)。
-  const canPanToCurrent = recording && hasPosition;
 
   // Codex P2 (Phase 1-F-3): hook 側 stop / stopBeforeSessionEnd で
   // latestPositionForDisplay を null に倒すため、停止中は常に「停止中」のみ表示し、
-  // 「最後の取得値」を流用しない。pan ボタンも hasPosition が false で disabled。
+  // 「最後の取得値」を流用しない。
   const statusText = (() => {
     if (recording && !hasPosition) return "取得待ち…";
     if (recording && hasPosition) return "取得済";
@@ -106,15 +104,6 @@ export default function CurrentLocationStatus({
         </p>
       )}
 
-      <button
-        type="button"
-        onClick={() => onPanToCurrent()}
-        disabled={!canPanToCurrent}
-        className="mt-2 w-full rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/40 dark:bg-blue-500/20 dark:text-blue-300 dark:hover:bg-blue-500/30"
-        data-testid="current-location-pan-button"
-      >
-        現在地へ移動
-      </button>
     </div>
   );
 }
