@@ -80,3 +80,20 @@ export function supportsBuildingNameForType(
 ): boolean {
   return supportsBuildingName(propertyType);
 }
+
+/**
+ * 入力中の値が長すぎるか (画面に出す注意書き用)。
+ *
+ * ⚠**数える前に整える** (@codex #354 P2)。入力欄の `maxLength` は**生の文字数**で
+ * 打ち切るため、前後に空白のある 100 文字ちょうどの名前を貼り付けると、
+ * ブラウザが**黙って実文字を削る**。切り詰めを禁じておきながら入力側で切るのは
+ * 矛盾なので、`maxLength` は使わず「超えていることを画面で伝えて保存を止める」。
+ */
+export function isBuildingNameTooLong(
+  value: string | null | undefined,
+): boolean {
+  return (value ?? "").trim().length > BUILDING_NAME_MAX_LENGTH;
+}
+
+/** 長すぎるときに画面へ出す文言 (入力側・保存側で同じ言い回しにする)。 */
+export const BUILDING_NAME_TOO_LONG_MESSAGE = `物件名は${BUILDING_NAME_MAX_LENGTH}文字以内で入力してください（前後の空白は数えません）`;

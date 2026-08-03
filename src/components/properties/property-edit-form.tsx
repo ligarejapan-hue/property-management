@@ -59,8 +59,22 @@ interface FormField {
   type: "text" | "number" | "select" | "textarea";
   options?: Array<{ value: string; label: string }>;
   section: string;
-  /** 入力欄で止める文字数の上限 (保存時の検証と同じ値を渡す)。 */
+  /**
+   * 文字数の上限 (保存時の検証と同じ値)。
+   * ⚠input の `maxLength` には渡さない。生の文字数で打ち切ると、前後に空白の
+   * ある上限ちょうどの値を貼ったときに**黙って実文字が削られる**。
+   * 超過は注意書きで伝え、保存を止めるために使う。
+   */
   maxLength?: number;
+}
+
+/** その項目が上限を超えているか。⚠**数える前に整える**。 */
+function isOverMaxLength(
+  field: FormField,
+  value: string | undefined,
+): boolean {
+  if (field.maxLength == null) return false;
+  return (value ?? "").trim().length > field.maxLength;
 }
 
 const FORM_FIELDS: FormField[] = [
@@ -162,6 +176,15 @@ export default function PropertyEditForm({
   };
 
   const handleSave = async () => {
+    // 上限超過は保存前に止める (入力欄では打ち切っていないため)。
+    // ⚠API も 422 で弾くが、どの項目かを画面で示すほうが直しやすい。
+    const tooLong = FORM_FIELDS.find((f) => isOverMaxLength(f, values[f.key]));
+    if (tooLong) {
+      setError(
+        `${tooLong.label}は${tooLong.maxLength}文字以内で入力してください（前後の空白は数えません）`,
+      );
+      return;
+    }
     setSaving(true);
     setError(null);
 
@@ -305,10 +328,10 @@ export default function PropertyEditForm({
                       ) : (
                         <input
                           type={field.type}
-                          // ⚠上限のある項目は入力欄でも止める (@codex #354 P2)。
-                          // 保存時にだけ弾くと、長い名前を打ち終えてから 422 で
-                          // 返され、どこを削ればよいか分からない。
-                          maxLength={field.maxLength}
+                          // ⚠**maxLength は使わない** (@codex #354 P2)。生の文字数で
+                          // 打ち切るため、前後に空白のある上限ちょうどの値を貼ると
+                          // ブラウザが**黙って実文字を削る**。超過は下の注意書きで
+                          // 伝え、保存を止める。
                           value={values[field.key] ?? ""}
                           onChange={(e) => {
                             // 住所のユーザー直接編集だけ user-edit signal を立てる。
@@ -318,6 +341,18 @@ export default function PropertyEditForm({
                           step={field.type === "number" ? "any" : undefined}
                           className="w-full rounded-md border border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
                         />
+                      )}
+                      {/* 上限のある項目の超過を、打ち終える前に伝える。
+                          ⚠数える前に trim する (前後の空白で弾かない)。 */}
+                      {isOverMaxLength(field, values[field.key]) && (
+                        <p
+                          role="status"
+                          data-testid={`edit-too-long-${field.key}`}
+                          className="mt-1 text-xs text-amber-700 dark:text-amber-300"
+                        >
+                          {field.label}は{field.maxLength}
+                          文字以内で入力してください（前後の空白は数えません）
+                        </p>
                       )}
                       {field.key === "address" && (
                         <div className="mt-1.5">

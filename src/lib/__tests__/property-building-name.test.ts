@@ -11,6 +11,7 @@ import path from "node:path";
 import {
   BUILDING_NAME_MAX_LENGTH,
   PROPERTY_TYPES_WITH_BUILDING_NAME,
+  isBuildingNameTooLong,
   normalizeBuildingName,
   supportsBuildingName,
 } from "@/lib/property-building-name";
@@ -125,17 +126,27 @@ describe("長さの扱い — 整えてから測り、超えたら断る (@codex
     expect(ng.success).toBe(false);
   });
 
-  it("入力欄でも上限で止める (打ち終えてから 422 にしない)", () => {
+  it("isBuildingNameTooLong は数える前に整える", () => {
+    const name = "あ".repeat(BUILDING_NAME_MAX_LENGTH);
+    expect(isBuildingNameTooLong(`   ${name}   `)).toBe(false);
+    expect(isBuildingNameTooLong(name + "あ")).toBe(true);
+    expect(isBuildingNameTooLong("")).toBe(false);
+    expect(isBuildingNameTooLong(null)).toBe(false);
+  });
+
+  it("⚠入力欄に maxLength を付けない (ブラウザが黙って実文字を削る)", () => {
     const read = (p: string) =>
       fs.readFileSync(path.join(process.cwd(), p), "utf-8");
-    // 新規登録フォーム: 直接 maxLength を持つ
-    expect(read("src/components/properties/new-property-modal.tsx")).toMatch(
-      /maxLength=\{BUILDING_NAME_MAX_LENGTH\}/,
-    );
-    // 編集フォーム: 項目定義の maxLength を input へ渡す
+    // 生の文字数で打ち切ると、前後に空白のある上限ちょうどの名前を貼ったとき
+    // 先頭/末尾の空白のぶん実文字が消える。切り詰め禁止の方針と矛盾する。
+    const modal = read("src/components/properties/new-property-modal.tsx");
+    expect(modal).not.toMatch(/maxLength=/);
     const edit = read("src/components/properties/property-edit-form.tsx");
-    expect(edit).toMatch(/maxLength: BUILDING_NAME_MAX_LENGTH/);
-    expect(edit).toMatch(/maxLength=\{field\.maxLength\}/);
+    expect(edit).not.toMatch(/maxLength=\{field\.maxLength\}/);
+    // 代わりに超過を画面で伝え、保存も止める
+    expect(modal).toMatch(/isBuildingNameTooLong\(buildingName\)/);
+    expect(edit).toMatch(/isOverMaxLength\(field, values\[field\.key\]\)/);
+    expect(edit).toMatch(/FORM_FIELDS\.find\(\(f\) => isOverMaxLength/);
   });
 });
 

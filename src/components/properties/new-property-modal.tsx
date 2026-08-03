@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { X, Loader2, AlertTriangle } from "lucide-react";
 import { PROPERTY_TYPE_OPTIONS, INTRODUCTION_ROUTE_OPTIONS } from "@/lib/property-types";
 import {
-  BUILDING_NAME_MAX_LENGTH,
+  BUILDING_NAME_TOO_LONG_MESSAGE,
+  isBuildingNameTooLong,
   normalizeBuildingName,
   supportsBuildingName,
 } from "@/lib/property-building-name";
@@ -55,6 +56,11 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
     }
     if (!address.trim()) {
       setError("住所を入力してください");
+      return;
+    }
+    // 入力欄では打ち切っていない (黙って削らないため) ので、保存前に見る。
+    if (isBuildingNameTooLong(buildingName)) {
+      setError(BUILDING_NAME_TOO_LONG_MESSAGE);
       return;
     }
 
@@ -147,10 +153,21 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
                 value={buildingName}
                 onChange={(e) => setBuildingName(e.target.value)}
                 disabled={submitting}
-                maxLength={BUILDING_NAME_MAX_LENGTH}
                 placeholder="例: リガーレ西荻マンション"
                 className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
               />
+              {/* ⚠maxLength は使わない。生の文字数で打ち切るため、前後に空白の
+                  ある上限ちょうどの名前を貼ると**黙って実文字が削られる**。
+                  打ち終えてから 422 で返すのも不親切なので、入力中に伝える。 */}
+              {isBuildingNameTooLong(buildingName) && (
+                <p
+                  role="status"
+                  data-testid="new-property-building-name-error"
+                  className="mt-1 text-xs text-amber-700 dark:text-amber-300"
+                >
+                  {BUILDING_NAME_TOO_LONG_MESSAGE}
+                </p>
+              )}
             </div>
           )}
 
