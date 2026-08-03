@@ -77,6 +77,24 @@ function isOverMaxLength(
   return (value ?? "").trim().length > field.maxLength;
 }
 
+/**
+ * その項目をいま画面に出すか。
+ *
+ * ⚠**描画と保存前の検証で同じ判定を使う** (@codex #354 P2)。別々に書くと、
+ * 「隠れている項目のせいで保存できない」が起きる: 長すぎる物件名を入れたまま
+ * 種別を対象外へ変えると欄は消えるのに検証だけ残り、**画面に無い項目を理由に
+ * 保存が止まって直しようがなくなる**。
+ */
+function isFieldVisible(
+  field: FormField,
+  values: Record<string, string>,
+): boolean {
+  if (field.key === "buildingName") {
+    return supportsBuildingName(values.propertyType);
+  }
+  return true;
+}
+
 const FORM_FIELDS: FormField[] = [
   { key: "propertyType", label: "種別", type: "select", section: "基本",
     options: PROPERTY_TYPE_OPTIONS },
@@ -172,13 +190,26 @@ export default function PropertyEditForm({
   }, []);
 
   const handleChange = (key: string, value: string) => {
-    setValues((prev) => ({ ...prev, [key]: value }));
+    setValues((prev) => {
+      const next = { ...prev, [key]: value };
+      // ⚠種別を対象外へ変えたら物件名を**その場で消す**(新規登録フォームと同じ)。
+      // 隠すだけだと、画面に無い値を保存へ送ることになる。API 側も同じ判断で
+      // null にするが、画面上でも消えたことが見えるほうが分かりやすい。
+      if (key === "propertyType" && !supportsBuildingName(value)) {
+        next.buildingName = "";
+      }
+      return next;
+    });
   };
 
   const handleSave = async () => {
     // 上限超過は保存前に止める (入力欄では打ち切っていないため)。
     // ⚠API も 422 で弾くが、どの項目かを画面で示すほうが直しやすい。
-    const tooLong = FORM_FIELDS.find((f) => isOverMaxLength(f, values[f.key]));
+    // ⚠**いま表示している項目だけ**を見る。隠れている項目を理由に止めると、
+    // 画面に無いものを直せと言うことになり手詰まりになる。
+    const tooLong = FORM_FIELDS.find(
+      (f) => isFieldVisible(f, values) && isOverMaxLength(f, values[f.key]),
+    );
     if (tooLong) {
       setError(
         `${tooLong.label}は${tooLong.maxLength}文字以内で入力してください（前後の空白は数えません）`,
@@ -269,14 +300,9 @@ export default function PropertyEditForm({
               </h4>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 {FORM_FIELDS.filter((f) => f.section === section)
-                  // 物件名は集合住宅の種別のときだけ出す。⚠判定は**いま選んで
-                  // いる種別**(values.propertyType) で見る。保存前に種別を変えた
-                  // ら、その場で欄が出入りする方が分かりやすい。
-                  .filter(
-                    (f) =>
-                      f.key !== "buildingName" ||
-                      supportsBuildingName(values.propertyType),
-                  )
+                  // 条件つきの項目 (物件名など) はここで出し入れする。
+                  // ⚠判定は保存前の検証と共有する (isFieldVisible)。
+                  .filter((f) => isFieldVisible(f, values))
                   .map(
                   (field) => (
                     <div

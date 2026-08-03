@@ -146,7 +146,8 @@ describe("長さの扱い — 整えてから測り、超えたら断る (@codex
     // 代わりに超過を画面で伝え、保存も止める
     expect(modal).toMatch(/isBuildingNameTooLong\(buildingName\)/);
     expect(edit).toMatch(/isOverMaxLength\(field, values\[field\.key\]\)/);
-    expect(edit).toMatch(/FORM_FIELDS\.find\(\(f\) => isOverMaxLength/);
+    // 保存前の検査は「表示中の項目だけ」を見る (別テストで判定の共有も固定)
+    expect(edit).toMatch(/const tooLong = FORM_FIELDS\.find\(/);
   });
 });
 
@@ -166,6 +167,25 @@ describe("配線 — 同じ判定を UI と API の両方が通る", () => {
   it("編集: いま選んでいる種別で欄を出し入れする", () => {
     const src = read("src/components/properties/property-edit-form.tsx");
     expect(src).toMatch(/supportsBuildingName\(values\.propertyType\)/);
+  });
+
+  it("⚠編集: 描画と保存前の検証が同じ判定を使う (隠れた項目で詰まらない)", () => {
+    // 別々に書くと、長すぎる物件名を入れたまま種別を対象外へ変えたときに
+    // 欄は消えるのに検証だけ残り、**画面に無い項目を理由に保存できなくなる**。
+    const src = read("src/components/properties/property-edit-form.tsx");
+    expect(src).toMatch(/function isFieldVisible\(/);
+    expect(src).toMatch(/\.filter\(\(f\) => isFieldVisible\(f, values\)\)/);
+    expect(src).toMatch(
+      /isFieldVisible\(f, values\) && isOverMaxLength\(f, values\[f\.key\]\)/,
+    );
+  });
+
+  it("⚠編集: 種別を対象外へ変えたら物件名も消える (新規登録と同じ)", () => {
+    const src = read("src/components/properties/property-edit-form.tsx");
+    expect(src).toMatch(
+      /key === "propertyType" && !supportsBuildingName\(value\)/,
+    );
+    expect(src).toMatch(/next\.buildingName = ""/);
   });
 
   it("⚠API 側でも normalizeBuildingName を通す (画面だけの制御にしない)", () => {
