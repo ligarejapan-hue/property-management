@@ -2847,6 +2847,44 @@ export async function suggestPinAddress(
   );
 }
 
+/**
+ * ピン 1 件の座標だけを取る (`/pins/[id]/location` = 座標のみ射影)。
+ *
+ * ⚠詳細 GET (`/pins/[id]`) は memo 本文まで返すため、**位置だけ見る操作では使わない**
+ * (client のメモリに生 memo を乗せない)。
+ * ⚠**押した / 開いた 1 件だけ**取りに行く。他人の pin を見ると server が
+ * `field_survey_pin_view` を監査に残すので、一覧の全行分をまとめて取ると
+ * 「見た」記録が積み上がって監査が意味を失う。
+ *
+ * 403 / 404 / 通信失敗はすべて null にまとめ、理由を呼び出し元へ持ち出さない
+ * (fail-closed)。失敗を console にも出さない (座標・PII をログに残さない方針)。
+ */
+export async function fetchPinLocation(
+  pinId: string,
+): Promise<{ lat: number; lng: number } | null> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { lat: 35.7038, lng: 139.5989 };
+  }
+  try {
+    const res = await fetch(
+      `/api/field-survey/pins/${encodeURIComponent(pinId)}/location`,
+      { credentials: "same-origin" },
+    );
+    if (!res.ok) return null;
+    const body = (await res.json().catch(() => null)) as {
+      data?: { lat?: unknown; lng?: unknown };
+    } | null;
+    const lat = Number(body?.data?.lat);
+    const lng = Number(body?.data?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
+  } catch {
+    // 通信失敗 (オフライン等)。開き直しで再試行できるので静かに諦める。
+    return null;
+  }
+}
+
 export interface CandidatePinRow {
   id: string;
   staffUserId: string;

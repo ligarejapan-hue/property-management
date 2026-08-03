@@ -4,7 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
-import { listCandidatePins, type CandidatePinRow } from "@/lib/api-client";
+import {
+  fetchPinLocation,
+  listCandidatePins,
+  type CandidatePinRow,
+} from "@/lib/api-client";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import ConvertPinToPropertyModal from "@/components/field-survey/convert-pin-to-property-modal";
 import { useFieldSurveyPinMutations } from "@/components/field-survey/use-field-survey-pin-mutations";
@@ -40,35 +44,11 @@ import {
  *   ⚠この費用の話は利用者向けの文言には出さない (業務画面に費用の話は載せない)。
  */
 /**
- * 1 件分の座標を「座標のみ射影」API から取る。
- * - 詳細 GET (/pins/[id]) は memo 本文まで返すため、位置だけ見る操作では使わない
- *   (地図の ?focusPin と同じ endpoint / 同じ理由)。
- * - 認可はサーバー側 (own=field_survey:read / 他人=read_all|manage)。403/404 も
- *   通信失敗も null にまとめ、理由を呼び出し元・画面へ持ち出さない (fail-closed)。
- * - 失敗を console に出さない (座標・PII をログに残さない方針)。
- * component の外に置くのは、hook の中に try/finally を持ち込まないため。
+ * 座標取得 (`fetchPinLocation`) は api-client に集約した。
+ * 物件化 modal の「Googleマップで開く」でも同じ取り方をするため、
+ * 2 か所に同じ fetch を置くと**片方だけ直る**事故になる (2026-08-03)。
+ * 取り方の理由 (詳細 GET を使わない / 1 件ずつ / fail-closed) は api-client 側に記載。
  */
-async function fetchPinLocation(
-  pinId: string,
-): Promise<{ lat: number; lng: number } | null> {
-  try {
-    const res = await fetch(
-      `/api/field-survey/pins/${encodeURIComponent(pinId)}/location`,
-      { credentials: "same-origin" },
-    );
-    if (!res.ok) return null;
-    const body = (await res.json().catch(() => null)) as {
-      data?: { lat?: unknown; lng?: unknown };
-    } | null;
-    const lat = Number(body?.data?.lat);
-    const lng = Number(body?.data?.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-    return { lat, lng };
-  } catch {
-    // 通信失敗 (オフライン等)。押し直しで再試行できるので静かに諦める。
-    return null;
-  }
-}
 
 /**
  * 行内チップ (写真 / 地図 / 現地の様子) の共通スタイル。3 つ以上並ぶので

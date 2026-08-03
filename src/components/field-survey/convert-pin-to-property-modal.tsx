@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Loader2, AlertTriangle, MapPin } from "lucide-react";
+import { X, Loader2, AlertTriangle, MapPin, ExternalLink } from "lucide-react";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
-import { convertPinToProperty, suggestPinAddress } from "@/lib/api-client";
+import {
+  convertPinToProperty,
+  fetchPinLocation,
+  suggestPinAddress,
+} from "@/lib/api-client";
+import { buildExternalMapUrl } from "@/lib/external-maps-url";
 import { normalizeRealEstateNumber } from "@/lib/address-normalizer";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
@@ -44,6 +49,33 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   // 503 になるため・Codex R5 P2）。capabilities=null（未取得/失敗）も出さない側へ倒す。
   const { capabilities } = useScreenProtection();
   const reverseGeocodeEnabled = capabilities?.reverseGeocode === true;
+  // 「Googleマップで開く」用のピン座標 (2026-08-03 発注者要望)。自動で入った住所が
+  // 実際の場所と合っているかを、別タブの地図で見比べて確かめるための導線。
+  //
+  // ⚠**modal を開いた時点で取りに行く**。押した時に取ってから window.open すると、
+  // 待ち時間を挟むぶんブラウザのポップアップブロックに掛かる (利用者の操作から
+  // 離れた open と見なされる)。座標が揃ってから素の <a target="_blank"> を出せば、
+  // クリックがそのまま遷移になり確実に開く。
+  // ⚠取得は**この 1 件だけ**。他人の pin では server が閲覧を監査に残すが、物件化
+  // modal を開く操作はその pin を明確に扱う行為なので 1 件分の記録は妥当。
+  // ⚠座標は URL 組み立てにだけ使い、画面にも console にも出さない。
+  const [pinCoords, setPinCoords] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const c = await fetchPinLocation(pinId);
+      // 取得中に閉じられた場合は捨てる (unmount 後の setState を避ける)。
+      if (!cancelled) setPinCoords(c);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pinId]);
+  // 座標が取れない (権限なし / 通信失敗 / 範囲外) ときは null = リンクを出さない。
+  const externalMapUrl = buildExternalMapUrl(pinCoords?.lat, pinCoords?.lng);
   // 取得中(最長8秒)の手編集を応答で上書きしないための現在値 ref（Codex R2 P2）。
   const addressRef = useRef(address);
   useEffect(() => {
@@ -254,9 +286,12 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
               className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
             />
             <div className="mt-1.5 flex flex-col gap-1.5">
-              {reverseGeocodeEnabled && (
-                <>
-                  <div>
+              {/* ⚠2つのボタンは**別条件**で出す。住所の自動入力は逆ジオコーディングの
+                  設定が要る (無ければ押しても必ず 503) が、Googleマップは座標さえ
+                  取れれば開ける。片方が出ない構成でももう片方は使えるようにする。 */}
+              {(reverseGeocodeEnabled || externalMapUrl) && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {reverseGeocodeEnabled && (
                     <button
                       type="button"
                       onClick={handleSuggestAddress}
@@ -271,15 +306,34 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
                       )}
                       ピンの位置から住所を入力
                     </button>
-                  </div>
-                  {/* 位置情報(座標)は保護対象 → 押す前に「どこへ何を送るか」を明示する
-                      (Codex R4 P2: 事前開示なしに座標を外部送信しない)。結果表示後は
-                      suggestNote に置き換わる(1行ずつ・画面を混雑させない)。 */}
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {suggestNote ??
-                      "ボタンを押すと、ピンの位置から住所を調べます（無料）。手元の住所データで見つからない場合のみ、ピンの座標を国土地理院（国の機関）に送信します。座標以外の情報は送信しません。"}
-                  </p>
-                </>
+                  )}
+                  {/* ⚠**一般向け Google マップを別タブで開くだけ**なので課金されない
+                      (アプリ内に地図を描く Maps Platform とは別物)。完成待ち一覧の
+                      「Googleマップ」チップと同じ組み立て (external-maps-url.ts)。
+                      外部サイトへ出るので rel="noopener noreferrer" を必ず付ける。 */}
+                  {externalMapUrl && (
+                    <a
+                      data-testid="convert-external-map-link"
+                      href={externalMapUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2.5 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+                      title="ピンの位置を Google マップの別タブで開きます（無料）"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Googleマップで開く
+                    </a>
+                  )}
+                </div>
+              )}
+              {reverseGeocodeEnabled && (
+                /* 位置情報(座標)は保護対象 → 押す前に「どこへ何を送るか」を明示する
+                   (Codex R4 P2: 事前開示なしに座標を外部送信しない)。結果表示後は
+                   suggestNote に置き換わる(1行ずつ・画面を混雑させない)。 */
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {suggestNote ??
+                    "ボタンを押すと、ピンの位置から住所を調べます（無料）。手元の住所データで見つからない場合のみ、ピンの座標を国土地理院（国の機関）に送信します。座標以外の情報は送信しません。"}
+                </p>
               )}
               <AddressLookupControls
                 zip={postalCode}
