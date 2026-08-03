@@ -216,6 +216,24 @@ describe("配線 — 同じ判定を UI と API の両方が通る", () => {
     );
   });
 
+  it("⚠販売図面にも物件名が渡る (建物マスタが無くても空にしない・@codex #354 P2)", () => {
+    // 区分マンションを建物マスタ(building)を作らずに登録すると、名前は
+    // Property.buildingName にしか無い。販売図面が building relation だけを
+    // 見ていると**建物名称が空のまま**出力される。
+    const route = read(
+      "src/app/api/properties/[id]/sales-sheets/new/route.ts",
+    );
+    expect(route).toMatch(/buildingName: true,/);
+    // 建物マスタが無くても名前だけは渡す (丸ごと null にしない)
+    expect(route).toMatch(/property\.building \|\| property\.buildingName/);
+    expect(route).toMatch(
+      /name: property\.building\?\.name \?\? property\.buildingName/,
+    );
+    // 作成前のプレビューも同じ優先順位
+    const button = read("src/components/sales-sheet/SalesSheetCreateButton.tsx");
+    expect(button).toMatch(/b\?\.name \?\? data\.buildingName/);
+  });
+
   it("DB 列は任意 (既存データを壊さない)", () => {
     expect(read("prisma/schema.prisma")).toMatch(
       /buildingName\s+String\?\s+@map\("building_name"\)/,

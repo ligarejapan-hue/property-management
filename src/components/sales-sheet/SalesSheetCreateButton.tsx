@@ -187,6 +187,12 @@ const SECTIONS_BY_KIND: Record<SalesSheetTemplateKind, (readonly [string, SheetF
  */
 interface MansionAutoSource {
   address?: string | null;
+  /**
+   * 物件そのものに入れた物件名 (任意)。⚠**建物マスタ(building)を作らずに
+   * 登録した区分マンション**はこちらにしか名前が無い。両方を見ないと
+   * 販売図面の建物名称が空のままになる (@codex #354 P2)。
+   */
+  buildingName?: string | null;
   occupancyStatus?: string | null;
   zoningDistrict?: string | null;
   exclusiveArea?: number | string | null;
@@ -288,7 +294,8 @@ function computeMansionAutoValues(data: MansionAutoSource): FieldModelAutoValues
   }
   return {
     preview: {
-      buildingName: toPreviewString(b?.name),
+      // 建物マスタ優先・無ければ物件のスカラを使う。
+      buildingName: toPreviewString(b?.name ?? data.buildingName),
       managementFee: toPreviewString(data.managementFee),
       repairFee: toPreviewString(data.repairReserveFee),
       address: toPreviewString(data.address),
