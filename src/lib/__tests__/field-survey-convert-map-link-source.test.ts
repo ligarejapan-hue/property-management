@@ -27,9 +27,8 @@ describe("物件化 modal — Googleマップで開く", () => {
     expect(MODAL_SRC).toMatch(
       /import \{ buildExternalMapUrl \} from "@\/lib\/external-maps-url"/,
     );
-    expect(MODAL_SRC).toMatch(
-      /buildExternalMapUrl\(pinCoords\?\.lat, pinCoords\?\.lng\)/,
-    );
+    // 有料 API を直に叩く形が紛れ込んでいないこと (一覧側と同じ表明)
+    expect(MODAL_SRC).not.toContain("maps.googleapis.com");
   });
 
   it("素の <a target=\"_blank\"> で開く (window.open を使わない)", () => {
@@ -52,13 +51,35 @@ describe("物件化 modal — Googleマップで開く", () => {
         /useEffect\(\(\) => \{[\s\S]*?fetchPinLocation\(pinId\)[\s\S]*?\}, \[pinId\]\);/,
       )?.[0] ?? "";
     expect(eff).not.toBe("");
-    // 取得中に閉じられても setState しない
+    // 取得中に閉じられた / pin が変わったら setState しない
     expect(eff).toMatch(/cancelled = true/);
-    expect(eff).toMatch(/if \(!cancelled\) setPinCoords/);
+    expect(eff).toMatch(/if \(cancelled\) return;/);
   });
 
   it("座標が取れないときはリンクを出さない (fail-closed)", () => {
     expect(MODAL_SRC).toMatch(/\{externalMapUrl && \(/);
+  });
+
+  it("⚠取得した座標を pin に紐づけ、別の pin のものは使わない", () => {
+    // modal が unmount されずに pinId だけ差し替わると、cancel は新しい取得の
+    // 書き込みを止めるだけで**前の pin の座標が残る**。その間リンクは別の家を
+    // 指し、住所を確かめる導線が確かめる相手を間違える。
+    expect(MODAL_SRC).toMatch(/setPinCoords\(c \? \{ pinId, lat: c\.lat/);
+    expect(MODAL_SRC).toMatch(
+      /pinCoords && pinCoords\.pinId === pinId \? pinCoords : null/,
+    );
+    expect(MODAL_SRC).toMatch(
+      /buildExternalMapUrl\(\s*coordsForCurrentPin\?\.lat,\s*coordsForCurrentPin\?\.lng,\s*\)/,
+    );
+  });
+
+  it("⚠詳細パネルは pin ごとに modal を作り直す (入力値の持ち越しを根で止める)", () => {
+    // パネルは pinId が変わっても unmount されず showConvert もリセットしない。
+    // key が無いと前の pin に入力した住所・種別・地番が次の pin に残る。
+    const PANEL_SRC = read("src/components/field-survey/pin-detail-panel.tsx");
+    expect(PANEL_SRC).toMatch(
+      /<ConvertPinToPropertyModal\s+key=\{pinId\}\s+pinId=\{pinId\}/,
+    );
   });
 
   it("⚠住所の自動入力が無効な構成でも地図リンクは出す (別条件で出し分ける)", () => {

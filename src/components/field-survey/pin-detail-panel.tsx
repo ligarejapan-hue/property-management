@@ -387,7 +387,13 @@ export default function PinDetailPanel({
           </div>
         )}
         {showConvert && (
+          // ⚠**key で pin ごとに作り直す** (@codex #352 P2 の同類を根で止める)。
+          // このパネルは pinId が変わっても unmount されず、showConvert も
+          // リセットしない。key が無いと modal の instance が使い回され、
+          // **前の pin に入力した住所・種別・地番がそのまま次の pin の
+          // フォームに残る**(座標だけの問題ではない)。
           <ConvertPinToPropertyModal
+            key={pinId}
             pinId={pinId}
             onClose={() => setShowConvert(false)}
             onConverted={handleConverted}

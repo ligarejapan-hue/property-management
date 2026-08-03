@@ -59,7 +59,13 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   // ⚠取得は**この 1 件だけ**。他人の pin では server が閲覧を監査に残すが、物件化
   // modal を開く操作はその pin を明確に扱う行為なので 1 件分の記録は妥当。
   // ⚠座標は URL 組み立てにだけ使い、画面にも console にも出さない。
+  // ⚠**どの pin の座標か**を一緒に持つ (@codex #352 P2)。この modal が unmount
+  // されずに pinId だけ差し替わると、cancel は新しい取得の書き込みを止めるだけで
+  // **前の pin の座標が残ったまま**になり、その間リンクは**別の家**を指す。
+  // 住所が合っているか確かめるための導線が、確かめる相手を間違えるのは致命的。
+  // id を突き合わせて、一致しない間はリンクを出さない。
   const [pinCoords, setPinCoords] = useState<{
+    pinId: string;
     lat: number;
     lng: number;
   } | null>(null);
@@ -67,15 +73,23 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
     let cancelled = false;
     void (async () => {
       const c = await fetchPinLocation(pinId);
-      // 取得中に閉じられた場合は捨てる (unmount 後の setState を避ける)。
-      if (!cancelled) setPinCoords(c);
+      // 取得中に閉じられた / pin が変わった場合は捨てる
+      // (unmount 後の setState と、古い応答での上書きを避ける)。
+      if (cancelled) return;
+      setPinCoords(c ? { pinId, lat: c.lat, lng: c.lng } : null);
     })();
     return () => {
       cancelled = true;
     };
   }, [pinId]);
-  // 座標が取れない (権限なし / 通信失敗 / 範囲外) ときは null = リンクを出さない。
-  const externalMapUrl = buildExternalMapUrl(pinCoords?.lat, pinCoords?.lng);
+  // 座標が取れない (権限なし / 通信失敗 / 範囲外) ときと、いま開いている pin の
+  // ものでないときは null = リンクを出さない。
+  const coordsForCurrentPin =
+    pinCoords && pinCoords.pinId === pinId ? pinCoords : null;
+  const externalMapUrl = buildExternalMapUrl(
+    coordsForCurrentPin?.lat,
+    coordsForCurrentPin?.lng,
+  );
   // 取得中(最長8秒)の手編集を応答で上書きしないための現在値 ref（Codex R2 P2）。
   const addressRef = useRef(address);
   useEffect(() => {
