@@ -4,7 +4,10 @@ import { useState, useEffect } from "react";
 import { Loader2, X, Save, AlertTriangle } from "lucide-react";
 import { USE_MOCK, fetchUsers } from "@/lib/api-client";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
-import { supportsBuildingName } from "@/lib/property-building-name";
+import {
+  BUILDING_NAME_MAX_LENGTH,
+  supportsBuildingName,
+} from "@/lib/property-building-name";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
 interface AssigneeOption {
@@ -56,6 +59,8 @@ interface FormField {
   type: "text" | "number" | "select" | "textarea";
   options?: Array<{ value: string; label: string }>;
   section: string;
+  /** 入力欄で止める文字数の上限 (保存時の検証と同じ値を渡す)。 */
+  maxLength?: number;
 }
 
 const FORM_FIELDS: FormField[] = [
@@ -67,7 +72,13 @@ const FORM_FIELDS: FormField[] = [
   { key: "buildingNumber", label: "家屋番号", type: "text", section: "基本" },
   // 物件名(任意)。⚠**集合住宅の種別を選んでいるときだけ表示する**(描画側で判定)。
   // 土地や戸建には無い項目なので、常時出すと入力欄が無駄に増える。
-  { key: "buildingName", label: "物件名", type: "text", section: "基本" },
+  {
+    key: "buildingName",
+    label: "物件名",
+    type: "text",
+    section: "基本",
+    maxLength: BUILDING_NAME_MAX_LENGTH,
+  },
   { key: "realEstateNumber", label: "不動産番号", type: "text", section: "基本" },
   { key: "registryStatus", label: "登記状況", type: "select", section: "基本", options: [
     { value: "unconfirmed", label: "未取得" },
@@ -294,6 +305,10 @@ export default function PropertyEditForm({
                       ) : (
                         <input
                           type={field.type}
+                          // ⚠上限のある項目は入力欄でも止める (@codex #354 P2)。
+                          // 保存時にだけ弾くと、長い名前を打ち終えてから 422 で
+                          // 返され、どこを削ればよいか分からない。
+                          maxLength={field.maxLength}
                           value={values[field.key] ?? ""}
                           onChange={(e) => {
                             // 住所のユーザー直接編集だけ user-edit signal を立てる。

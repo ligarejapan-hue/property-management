@@ -29,7 +29,18 @@ export const PROPERTY_TYPES_WITH_BUILDING_NAME: readonly string[] = [
   "apartment_unit", // 区分マンション
 ];
 
-/** 物件名の最大文字数。実在の建物名はこれを超えない。 */
+/**
+ * 物件名の最大文字数。実在の建物名はこれを超えない。
+ *
+ * ⚠**超えたら切り詰めずに断る** (@codex #354 P2)。以前はこの関数で
+ * `slice` していたが、入力とバリデーションで扱いが食い違っていた:
+ *   - 保存側は「切り詰める」
+ *   - 入力検証は「生の文字数で弾く」
+ * その結果、**99文字の名前の前後に空白が付いただけで 422** になり、しかも
+ * 切り詰めの動きには一度も到達しなかった。黙って名前を切るのは利用者から
+ * 見て事故なので、**整えてから測り、超えていればエラーで返す**に統一する。
+ * 入力欄側にも同じ上限 (maxLength) を付けて、そもそも超えて入らないようにする。
+ */
 export const BUILDING_NAME_MAX_LENGTH = 100;
 
 /** その種別で物件名を入力できるか。 */
@@ -49,6 +60,9 @@ export function supportsBuildingName(
  * サーバー側でも同じ判定を通す。
  *
  * ⚠空白のみの入力は null にする (見た目は空なのに「入っている」状態を作らない)。
+ * ⚠**長すぎる入力をここで切り詰めない**。長さは入力検証 (zod) が
+ * 「整えてから測って超えていれば断る」で見る。ここで黙って切ると、利用者は
+ * 名前が削られたことに気づけない。
  */
 export function normalizeBuildingName(
   propertyType: string | null | undefined,
@@ -57,7 +71,7 @@ export function normalizeBuildingName(
   if (!supportsBuildingName(propertyType)) return null;
   const trimmed = (value ?? "").trim();
   if (trimmed.length === 0) return null;
-  return trimmed.slice(0, BUILDING_NAME_MAX_LENGTH);
+  return trimmed;
 }
 
 /** 型を絞りたい呼び出し側向け (PropertyTypeValue を受ける版)。 */

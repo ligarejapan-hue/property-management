@@ -143,6 +143,9 @@ export const createPropertySchema = z.object({
   // (normalizeBuildingName)。ここでは長さの上限だけ見る。
   buildingName: z
     .string()
+    // ⚠**整えてから測る** (@codex #354 P2)。生の文字数で見ると、100文字以内の
+    // 名前でも前後に空白が付いただけで 422 になる。trim 後の長さで判定する。
+    .trim()
     .max(BUILDING_NAME_MAX_LENGTH, "物件名が長すぎます")
     .optional()
     .nullable(),
@@ -181,6 +184,9 @@ export const updatePropertySchema = z.object({
   // 対象外の種別に変えたら自動で null になる (画面から消えた値が残らない)。
   buildingName: z
     .string()
+    // ⚠**整えてから測る** (@codex #354 P2)。生の文字数で見ると、100文字以内の
+    // 名前でも前後に空白が付いただけで 422 になる。trim 後の長さで判定する。
+    .trim()
     .max(BUILDING_NAME_MAX_LENGTH, "物件名が長すぎます")
     .optional()
     .nullable(),

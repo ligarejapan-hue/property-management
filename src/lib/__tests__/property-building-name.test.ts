@@ -15,6 +15,10 @@ import {
   supportsBuildingName,
 } from "@/lib/property-building-name";
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
+import {
+  createPropertySchema,
+  updatePropertySchema,
+} from "@/lib/validators";
 
 describe("supportsBuildingName — どの種別で出すか", () => {
   it("発注者が挙げた3種別で出す", () => {
@@ -75,11 +79,63 @@ describe("normalizeBuildingName — 保存する値", () => {
     expect(normalizeBuildingName("apartment_unit", undefined)).toBeNull();
   });
 
-  it("上限を超える入力は切り詰める", () => {
+  it("⚠長すぎてもここでは切り詰めない (黙って名前が削られない)", () => {
+    // 長さは入力検証が「整えてから測って超えていれば断る」で見る。
+    // ここで slice すると、利用者は名前が削られたことに気づけない。
     const long = "あ".repeat(BUILDING_NAME_MAX_LENGTH + 50);
-    const out = normalizeBuildingName("apartment_building", long);
-    expect(out).not.toBeNull();
-    expect(out!.length).toBe(BUILDING_NAME_MAX_LENGTH);
+    expect(normalizeBuildingName("apartment_building", long)).toBe(long);
+  });
+});
+
+describe("長さの扱い — 整えてから測り、超えたら断る (@codex #354 P2)", () => {
+  it("⚠上限ちょうどの名前は、前後に空白が付いていても通る", () => {
+    // 生の文字数で測ると「100文字＋空白」で 422 になり、利用者には
+    // なぜ弾かれたのか分からない。
+    const name = "あ".repeat(BUILDING_NAME_MAX_LENGTH);
+    const parsed = createPropertySchema.safeParse({
+      propertyType: "apartment_building",
+      address: "東京都杉並区西荻北3-19-4",
+      buildingName: `   ${name}   `,
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.buildingName).toBe(name);
+  });
+
+  it("整えても上限を超える名前は断る (切り詰めない)", () => {
+    const parsed = createPropertySchema.safeParse({
+      propertyType: "apartment_building",
+      address: "東京都杉並区西荻北3-19-4",
+      buildingName: "あ".repeat(BUILDING_NAME_MAX_LENGTH + 1),
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("更新側も同じ扱い", () => {
+    const name = "あ".repeat(BUILDING_NAME_MAX_LENGTH);
+    const ok = updatePropertySchema.safeParse({
+      version: 1,
+      buildingName: `  ${name}  `,
+    });
+    expect(ok.success).toBe(true);
+    if (ok.success) expect(ok.data.buildingName).toBe(name);
+    const ng = updatePropertySchema.safeParse({
+      version: 1,
+      buildingName: "あ".repeat(BUILDING_NAME_MAX_LENGTH + 1),
+    });
+    expect(ng.success).toBe(false);
+  });
+
+  it("入力欄でも上限で止める (打ち終えてから 422 にしない)", () => {
+    const read = (p: string) =>
+      fs.readFileSync(path.join(process.cwd(), p), "utf-8");
+    // 新規登録フォーム: 直接 maxLength を持つ
+    expect(read("src/components/properties/new-property-modal.tsx")).toMatch(
+      /maxLength=\{BUILDING_NAME_MAX_LENGTH\}/,
+    );
+    // 編集フォーム: 項目定義の maxLength を input へ渡す
+    const edit = read("src/components/properties/property-edit-form.tsx");
+    expect(edit).toMatch(/maxLength: BUILDING_NAME_MAX_LENGTH/);
+    expect(edit).toMatch(/maxLength=\{field\.maxLength\}/);
   });
 });
 
