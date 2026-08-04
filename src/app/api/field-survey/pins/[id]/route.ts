@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
+import { touchTripActivity } from "@/lib/field-survey-auto-end";
 import { patchFieldSurveyPinSchema } from "@/lib/validators";
 import { assertPropertyAccessible } from "@/lib/field-survey-property-access";
 
@@ -262,6 +263,11 @@ export async function PATCH(
           );
         }
       }
+      // ⚠**ピンの編集も巡回の活動として数える**(@codex #356 P2)。上の touch は
+      // 「巡回の紐付けを変えたとき」しか走らないため、メモや種類だけを直し続けて
+      // いる巡回が無操作扱いになり、自動終了(1時間)で切られてしまう。
+      // best-effort: 終了済みの巡回のピンを後から直すのは正常な操作なので throw しない。
+      await touchTripActivity(tx, nextSessionId);
       return tx.fieldSurveyPin.findUniqueOrThrow({
         where: { id },
         select: SELECT_PIN,

@@ -67,6 +67,40 @@ export function autoEndedAt(session: {
   return lastActivityAt(session);
 }
 
+/**
+ * 巡回の「まだ作業中です」を伝える心拍（@codex #356 P2）。
+ *
+ * ⚠**位置記録の送信とピン作成しか `updatedAt` を動かしていなかった**。
+ * 写真の追加はピン行だけを、ピンの編集は「巡回の紐付けを変えたとき」だけを
+ * 更新していたため、**写真を撮り続けている巡回が1時間で切られる**。
+ * 自動終了を入れる以上、現場で起きる更新はすべて活動として数える必要がある。
+ *
+ * ⚠**best-effort**。0 行更新（すでに終了した巡回のピンを後から編集した等）でも
+ * throw しない。終わった巡回のピンを事務所で直すのは正常な操作であり、
+ * それを 409 で拒む理由は無い。
+ */
+export async function touchTripActivity(
+  tx: {
+    fieldSurveySession: {
+      updateMany: (args: {
+        where: { id: string; status: "active" };
+        data: { updatedAt: Date };
+      }) => Promise<{ count: number }>;
+    };
+  },
+  sessionId: string | null | undefined,
+): Promise<void> {
+  if (!sessionId) return;
+  try {
+    await tx.fieldSurveySession.updateMany({
+      where: { id: sessionId, status: "active" },
+      data: { updatedAt: new Date() },
+    });
+  } catch {
+    // 心拍の失敗で本来の操作（写真追加・編集）を壊さない。
+  }
+}
+
 /** 実行結果の要約（件数のみ・PII を持たない）。 */
 export interface TripAutoEndResult {
   /** 判定対象として読んだ件数。 */

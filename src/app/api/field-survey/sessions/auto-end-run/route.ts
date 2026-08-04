@@ -79,12 +79,19 @@ export async function POST(request: Request) {
       // 監査は既存の action を使う（人が押した終了と区別できるよう reason を変える）。
       // ⚠識別子だけ。座標・メモ・氏名は載せない。
       await writeAuditLog({
-        userId: s.staffUserId,
+        // ⚠**担当者を実行者にしない**(@codex #356 P2)。押したのは誰でもなく
+        // 定期実行なので、`userId` に担当者を入れると監査画面の「ユーザー」欄に
+        // その社員が並び、**本人がやっていない操作が本人の記録として残る**
+        // (名前で検索しても引っかかる)。誰の巡回だったかは detail に残す。
+        userId: null,
         action: "field_survey_session_auto_end",
         targetTable: "field_survey_sessions",
         targetId: s.id,
         detail: {
           sessionId: s.id,
+          // 誰の巡回だったかは detail に残す(識別子のみ・氏名は入れない)。
+          // 実行者(userId)とは意味が違うので別のキーにする。
+          ownerStaffUserId: s.staffUserId,
           reason: "idle_timeout",
           idleMinutes: Math.floor(TRIP_AUTO_END_IDLE_MS / 60000),
           pointCount: s.pointCount,

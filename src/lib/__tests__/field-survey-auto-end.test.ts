@@ -4,7 +4,7 @@
  * 発注者決定 (2026-08-03): 巡回終了ボタンを押さずにブラウザから離れても、
  * **無操作1時間で自動的に終了する**。
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -12,6 +12,7 @@ import {
   autoEndedAt,
   lastActivityAt,
   shouldAutoEndTrip,
+  touchTripActivity,
 } from "@/lib/field-survey-auto-end";
 
 const MIN = 60 * 1000;
@@ -83,6 +84,60 @@ describe("autoEndedAt — 終了時刻は「気づいた時刻」ではなく「
     const ended = autoEndedAt({ startedAt: new Date("2026-08-04T20:00:00+09:00"), updatedAt: stopped });
     expect(ended).toEqual(stopped);
     expect(ended.getTime()).toBeLessThan(sweep.getTime());
+  });
+});
+
+describe("touchTripActivity — 現場の更新をすべて活動として数える", () => {
+  it("active な巡回を更新する", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    await touchTripActivity(
+      { fieldSurveySession: { updateMany } } as never,
+      "sess-1",
+    );
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: "sess-1", status: "active" },
+      data: { updatedAt: expect.any(Date) },
+    });
+  });
+
+  it("巡回に紐づかない操作では何もしない", async () => {
+    const updateMany = vi.fn();
+    await touchTripActivity({ fieldSurveySession: { updateMany } } as never, null);
+    await touchTripActivity(
+      { fieldSurveySession: { updateMany } } as never,
+      undefined,
+    );
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("⚠終了済みの巡回でも throw しない（事務所で後から直すのは正常な操作）", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    await expect(
+      touchTripActivity({ fieldSurveySession: { updateMany } } as never, "sess-1"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("⚠心拍の失敗で本来の操作を壊さない", async () => {
+    const updateMany = vi.fn().mockRejectedValue(new Error("db down"));
+    await expect(
+      touchTripActivity({ fieldSurveySession: { updateMany } } as never, "sess-1"),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe("⚠写真追加・ピン編集も活動に数える (@codex #356 P2)", () => {
+  const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf-8");
+
+  it("写真の追加が巡回を更新する", () => {
+    // ここが抜けると「撮って登録だけで回る巡回」が1時間で切られる=主動線が壊れる。
+    const src = read("src/app/api/field-survey/pins/[id]/photos/route.ts");
+    expect(src).toMatch(/touchTripActivity\(tx, owner\?\.sessionId\)/);
+  });
+
+  it("ピンの編集が巡回を更新する", () => {
+    // 従来は「巡回の紐付けを変えたとき」しか更新していなかった。
+    const src = read("src/app/api/field-survey/pins/[id]/route.ts");
+    expect(src).toMatch(/touchTripActivity\(tx, nextSessionId\)/);
   });
 });
 

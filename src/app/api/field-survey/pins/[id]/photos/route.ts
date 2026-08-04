@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
+import { touchTripActivity } from "@/lib/field-survey-auto-end";
 import { getStorage, validateFile, ALLOWED_PHOTO_MIMES } from "@/lib/storage";
 import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
 import { stripFieldSurveyPhotoMetadata } from "@/lib/field-survey/exif-strip";
@@ -195,6 +196,16 @@ export async function POST(
             "INVALID_STATE",
           );
         }
+        // ⚠**写真の追加も巡回の活動として数える**(@codex #356 P2)。ここは従来
+        // ピン行しか更新しておらず、**写真を撮り続けている巡回が無操作扱い**に
+        // なって自動終了(1時間)で切られてしまう。撮って登録だけで回る使い方が
+        // 主動線なので、ここが抜けると自動終了そのものが現場で使えない。
+        // best-effort: 終了済みの巡回のピンに後から写真を足すのは正常な操作。
+        const owner = await tx.fieldSurveyPin.findUnique({
+          where: { id },
+          select: { sessionId: true },
+        });
+        await touchTripActivity(tx, owner?.sessionId);
         const maxSort = await tx.fieldSurveyPinPhoto.aggregate({
           where: { pinId: id },
           _max: { sortOrder: true },
