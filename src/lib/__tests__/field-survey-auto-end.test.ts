@@ -319,6 +319,12 @@ describe("⚠まだ歩いている人を踏破マップに出さない (@codex #
     expect(points).toMatch(
       /if \(!isOwn && sess\.reconcilePending === true\) \{[\s\S]{0,200}?NOT_FOUND/,
     );
+    // ⚠事前の確認だけでは足りない。確認と読み取りの間に圏外から復帰した端末が
+    // 記録を送ると、送信と同じ commit で印が立ち直り、**届いたばかりの座標を
+    // そのまま返す**（踏破マップの線で塞いだのと同型）。読み取りの1文に含める。
+    expect(points).toMatch(
+      /where\.session = \{\s*\n\s*OR: \[\{ reconcilePending: false \}, \{ reconcilePending: null \}\],/,
+    );
   });
 
   it("⚠線は「点を読むとき」にも見直す (@codex #356 P1)", () => {

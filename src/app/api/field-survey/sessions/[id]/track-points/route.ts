@@ -236,7 +236,21 @@ export async function GET(
       sessionId: string;
       recordedAt?: { gte?: Date; lte?: Date };
       sequence?: { gt: number };
+      session?: { OR: Array<{ reconcilePending: false | null }> };
     } = { sessionId: id };
+    // ⚠**点を読むクエリ自体に「確定済みか」を含める**(@codex #356 P1)。
+    // 上の事前確認と、この読み取りの間に圏外から復帰した端末が記録を送ると、
+    // 送信と同じ commit で「まだ歩いているかも」の印が立ち直る。事前確認だけ
+    // だと、**届いたばかりの座標をそのまま返してしまう**(踏破マップの線で
+    // 同じ穴を塞いだのと同型)。1文の中で判定すれば隙間が無い。
+    // 本人は従来どおり見られる(自分の記録の確認を妨げない)。
+    // ⚠NULL の扱い: 既存行と通常の終了は NULL なので false と null を明示する
+    // (`not: true` は SQL 上 NULL になり、過去の巡回が読めなくなる)。
+    if (!isOwn) {
+      where.session = {
+        OR: [{ reconcilePending: false }, { reconcilePending: null }],
+      };
+    }
     if (from || to) {
       where.recordedAt = {};
       if (from) where.recordedAt.gte = new Date(from);
