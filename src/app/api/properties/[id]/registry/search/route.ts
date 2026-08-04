@@ -19,6 +19,7 @@ import {
   isValidLiveRef,
   isLiveViewCancelRequested,
   clearLiveViewCancel,
+  closeLiveViewCancelWindow,
 } from "@/lib/registry-fetch/live-view-store";
 
 // ---------- POST /api/properties/[id]/registry/search ----------
@@ -106,6 +107,12 @@ export async function POST(
           // ⚠課金後は provider 側の判断で無視される (cancel-safety.ts)。
           isCancelRequested(): boolean {
             return isLiveViewCancelRequested(session.id, id, liveRef);
+          },
+          // ⚠自動操作が終わったら中止の受け付けを閉じる (@codex #357 P2)。
+          // 以降は中止を見る場所がもう無いので、受け付けたままにすると
+          // 「中止しています…」と表示したまま結果が出る食い違いが起きる。
+          endCancelable(): void {
+            closeLiveViewCancelWindow(session.id, id, liveRef);
           },
         }
       : undefined;

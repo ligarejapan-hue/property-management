@@ -309,6 +309,25 @@ export function clearLiveViewCancel(
   activeOps.delete(k);
 }
 
+/**
+ * 中止を受け付ける期間を閉じる (@codex #357 P2)。
+ *
+ * ⚠**自動操作が終わった時点**で呼ぶ。以降は中止を見る場所がもう無いので、
+ * それでも受け付けると「中止しています…」と表示したまま検索が普通に完了し、
+ * **止めたつもりなのに結果が出る**という食い違いが起きる。
+ * 受け付けられないと分かれば、画面はボタンを戻して結果を出せる。
+ *
+ * ⚠実行そのものの後片付け (印の削除) は `clearLiveViewCancel` が行う。
+ * ここで印を消さないのは、**閉じる前に受け付けた中止**を有効に保つため。
+ */
+export function closeLiveViewCancelWindow(
+  userId: string,
+  propertyId: string,
+  liveRef: string,
+): void {
+  activeOps.delete(key(userId, propertyId, liveRef));
+}
+
 /** 中止が要求されているか (provider が節目ごとに見る)。 */
 export function isLiveViewCancelRequested(
   userId: string,

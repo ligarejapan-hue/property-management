@@ -153,6 +153,23 @@ describe("配線", () => {
     expect(store).toMatch(/activeOps\.delete\(k\)/);
   });
 
+  it("⚠自動操作が終わったら中止を受け付けない (@codex #357 P2)", () => {
+    // 自動操作が終わってから押された中止を受け付けると、押した人の画面は
+    // 「中止しています…」のまま検索が普通に完了して**結果が出る**。
+    // 受け付けないと分かれば、画面はボタンを戻して結果を出せる。
+    const store = read("src/lib/registry-fetch/live-view-store.ts");
+    expect(store).toMatch(/export function closeLiveViewCancelWindow/);
+    // ⚠閉じても印は消さない（閉じる前に受け付けた中止は有効なまま）
+    const body =
+      store.match(/export function closeLiveViewCancelWindow[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(body).toMatch(/activeOps\.delete/);
+    expect(body).not.toMatch(/cancelMarks\.delete/);
+    // 自動操作の終わり = provider の呼び出しが返った時点（成否とも）
+    expect(read("src/lib/registry-fetch/search.ts")).toMatch(
+      /\} finally \{[\s\S]{0,600}?args\.live\?\.endCancelable\?\.\(\)/,
+    );
+  });
+
   it("⚠受け付けた中止を件数上限で捨てない (@codex #357 P2)", () => {
     // 上限で古い印を追い出すと、その検索がまだ待ち行列に居た場合に
     // **「中止しました」と言ったのに動き出す**。印が付くのは実行中の検索

@@ -155,9 +155,19 @@ export async function runRegistrySearch(
 
   try {
     // 実況パネル通知先の接続 (認可・確認・searchable 判定を全て通過した後)。
-    const candidates = await provider.searchCandidates(
-      args.live ? { ...built.request, live: args.live } : built.request,
-    );
+    let candidates;
+    try {
+      candidates = await provider.searchCandidates(
+        args.live ? { ...built.request, live: args.live } : built.request,
+      );
+    } finally {
+      // ⚠**自動操作が終わった時点で中止の受け付けを閉じる** (@codex #357 P2)。
+      // ここから先 (候補の記憶・監査の書き込み) には中止を見る場所がもう無い。
+      // 受け付けたままにすると、押した人の画面は「中止しています…」のまま
+      // 検索が普通に完了して**結果が出る**という食い違いが起きる。
+      // ⚠閉じる前に受け付けた中止は有効なまま (印は route の finally で消す)。
+      args.live?.endCancelable?.();
+    }
 
     // 実サイトの所在検索は不動産番号を返さず、候補は**地番(candidateRef)**
     // （不動産番号は有料の請求まで進まないと得られない=サイト仕様）。
