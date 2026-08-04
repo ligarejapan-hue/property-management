@@ -55,6 +55,10 @@ const PROVIDER_ERROR_STATUS: Readonly<Record<RegistryFetchErrorCode, number>> = 
   rate_limited: 429,
   auth_failed: 502,
   not_found: 404,
+  // 所在の指定が受け付けられない=**入力の問題**。upstream 障害(502)でも
+  // 「存在しない」(404)でもないので 422(内容が処理できない)を返し、
+  // 利用者に「住所を直せば通る」と伝わる分類にする。
+  location_rejected: 422,
   provider_error: 502,
   service_hours: 503, // 利用時間外=一時的に利用不可(Service Unavailable)。
   service_unavailable: 503, // 接続不可(時間外の可能性)=同じく一時的利用不可。
