@@ -299,6 +299,28 @@ describe("⚠まだ歩いている人を踏破マップに出さない (@codex #
     }
   });
 
+  it("⚠履歴と生の軌跡からも隠す (@codex #356 P1)", () => {
+    // 踏破マップだけ塞いでも、履歴一覧は既定で「終了した巡回」を出すため、
+    // 管理者が履歴から開いて**歩いている最中の経路を追える**。
+    // 生の座標を返す口は「踏破マップ」と「軌跡の取得」の2本だけなので、
+    // 両方に同じ守りを掛ける。本人には見せる（自分の記録の確認を妨げない）。
+    const list = read("src/app/api/field-survey/sessions/route.ts");
+    expect(list).toMatch(/where\.OR = \[/);
+    expect(list).toMatch(/\{ staffUserId: session\.id \}/);
+    // ⚠NULL の扱い: 既存行と通常の終了は NULL。`not: true` だと SQL 上 NULL に
+    // なって**過去の巡回がまるごと履歴から消える**ので、false と null を明示。
+    expect(list).toMatch(/\{ reconcilePending: false \}/);
+    expect(list).toMatch(/\{ reconcilePending: null \}/);
+    expect(list).not.toMatch(/reconcilePending: \{ not: true \}/);
+
+    const points = read(
+      "src/app/api/field-survey/sessions/[id]/track-points/route.ts",
+    );
+    expect(points).toMatch(
+      /if \(!isOwn && sess\.reconcilePending === true\) \{[\s\S]{0,200}?NOT_FOUND/,
+    );
+  });
+
   it("⚠線は「点を読むとき」にも見直す (@codex #356 P1)", () => {
     // 線は2段階（候補の巡回を選ぶ → その点を読む）で引く。候補を選んでから
     // 点を読むまでの間に圏外から復帰した端末が記録を送ると、印が立ち直る。

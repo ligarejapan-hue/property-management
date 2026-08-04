@@ -197,7 +197,8 @@ export async function GET(
 
     const sess = await prisma.fieldSurveySession.findUnique({
       where: { id },
-      select: { id: true, staffUserId: true },
+      // reconcilePending: 未確定の自動終了を他スタッフに見せないための判定(下記)。
+      select: { id: true, staffUserId: true, reconcilePending: true },
     });
     if (!sess) {
       throw new ApiError(404, "session が見つかりません", "NOT_FOUND");
@@ -212,6 +213,15 @@ export async function GET(
         "他スタッフの session は閲覧できません",
         "FORBIDDEN",
       );
+    }
+    // ⚠**確定していない自動終了の生の軌跡は、他スタッフに見せない**
+    // (@codex #356 P1)。自動終了は「本人がまだ歩いているかもしれない」状態でも
+    // 起きるため、ここを開けたままにすると管理者が**歩いている最中の経路を
+    // 追える**(実行中の巡回を隠す守りを自動終了が迂回する)。
+    // 一覧から隠すのと同じ扱いにそろえ、直接の id 指定でも 404 にする。
+    // 本人は従来どおり見られる(自分の記録の確認を妨げない)。
+    if (!isOwn && sess.reconcilePending === true) {
+      throw new ApiError(404, "session が見つかりません", "NOT_FOUND");
     }
 
     const { searchParams } = new URL(request.url);

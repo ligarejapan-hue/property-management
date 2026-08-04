@@ -229,6 +229,9 @@ export async function GET(request: NextRequest) {
     const where: {
       staffUserId?: string;
       status?: "active" | "ended" | "cancelled";
+      OR?: Array<
+        { staffUserId: string } | { reconcilePending: false | null }
+      >;
     } = {};
 
     if (canSeeAll && staffUserId) {
@@ -243,6 +246,21 @@ export async function GET(request: NextRequest) {
       where.staffUserId = session.id;
     }
     if (status) where.status = status;
+    // ⚠**確定していない自動終了は、他スタッフの履歴に出さない**(@codex #356 P1)。
+    //
+    // 自動終了(無操作1時間)は「本人がまだ歩いているかもしれない」状態でも起きる。
+    // 踏破マップ側は既に隠しているが、**履歴一覧にも同じ守りが要る**:
+    // 一覧は既定で「終了した巡回」を出すため、管理者が履歴から開いて
+    // 生の軌跡を追えてしまう(＝実行中の巡回を隠す守りの迂回)。
+    // 本人には見せる(自分の記録の確認を妨げない)。
+    // ⚠NULL の扱いに注意: 既存行と通常の終了は NULL なので、`not: true` では
+    // なく「false または NULL」を明示する(SQL では NOT(NULL=true) が NULL に
+    // なり、**過去の巡回がまるごと履歴から消える**)。
+    where.OR = [
+      { staffUserId: session.id },
+      { reconcilePending: false },
+      { reconcilePending: null },
+    ];
 
     const [total, sessions] = await Promise.all([
       prisma.fieldSurveySession.count({ where }),
