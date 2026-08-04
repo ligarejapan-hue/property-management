@@ -87,7 +87,8 @@ export async function POST(
 
     const pin = await prisma.fieldSurveyPin.findUnique({
       where: { id },
-      select: { id: true, staffUserId: true, status: true },
+      // sessionId: アップロードの前に巡回へ心拍を打つために読む(下記)。
+      select: { id: true, staffUserId: true, status: true, sessionId: true },
     });
     if (!pin) {
       throw new ApiError(404, "pin が見つかりません", "NOT_FOUND");
@@ -104,6 +105,14 @@ export async function POST(
         "INVALID_STATE",
       );
     }
+
+    // ⚠**保存より前に一度、巡回へ心拍を打つ**(@codex #356 P2)。写真は EXIF の
+    // 除去とアップロードに時間がかかるため、1時間の境目でシャッターを切ると、
+    // その処理の最中に見回りが走って**撮っている最中の巡回が終了させられる**
+    // (後段の心拍は 0 行更新で黙って終わるので、気づかないまま終了が成立する)。
+    // ここで先に活動として数えれば、見回りの対象から外れる。
+    // best-effort: 終了済みの巡回のピンに後から足すのは正常な操作なので throw しない。
+    await touchTripActivity(prisma, pin.sessionId);
 
     const contentType = request.headers.get("content-type") ?? "";
     if (!contentType.includes("multipart/form-data")) {

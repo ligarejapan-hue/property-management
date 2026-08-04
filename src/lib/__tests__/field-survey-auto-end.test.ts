@@ -139,6 +139,16 @@ describe("⚠写真追加・ピン編集も活動に数える (@codex #356 P2)",
     expect(src).toMatch(/touchTripActivity\(tx, owner\?\.sessionId\)/);
   });
 
+  it("⚠写真は保存より前にも心拍を打つ (@codex #356 P2)", () => {
+    // EXIF の除去とアップロードに時間がかかるため、1時間の境目でシャッターを
+    // 切ると、その処理の最中に見回りが走って**撮っている最中の巡回が終了
+    // させられる**（後段の心拍は 0 行更新で黙って終わる）。
+    const src = read("src/app/api/field-survey/pins/[id]/photos/route.ts");
+    expect(src).toMatch(
+      /touchTripActivity\(prisma, pin\.sessionId\)[\s\S]{0,600}?multipart\/form-data/,
+    );
+  });
+
   it("ピンの編集が巡回を更新する", () => {
     // 従来は「巡回の紐付けを変えたとき」しか更新していなかった。
     const src = read("src/app/api/field-survey/pins/[id]/route.ts");

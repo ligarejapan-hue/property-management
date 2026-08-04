@@ -199,11 +199,20 @@ describe("trip-controls — 終了フローの ending 固着防止 (@codex R6 P2
     // 初期化され、**端末に貯めた記録がまるごと消える**。
     // 送信は reconcile (fetchActiveSession) より前。
     expect(TRIP_SRC).toMatch(
-      /known\.kind === "ended"[\s\S]{0,1200}?onBeforeSessionEnd\(\)[\s\S]{0,1600}?fetchActiveSession\(/,
+      /known\.kind === "ended"[\s\S]*?onBeforeSessionEnd\(\)[\s\S]*?fetchActiveSession\(/,
     );
     // 送れなかったら reconcile せず、記録を残したまま再試行/破棄へ倒す
     expect(TRIP_SRC).toMatch(
       /drained === false[\s\S]{0,600}?setEndBlockedByBuffer\(true\)[\s\S]{0,120}?setPhase\("active"\)[\s\S]{0,40}?return;/,
+    );
+  });
+
+  it("⚠送り切れたら「終わった」と伝える (@codex #356 P2)", () => {
+    // 記録が届いた巡回は「まだ歩いているかも」として踏破マップから外れている。
+    // 本人が終了を押したのだから、見回りの次の1時間を待たずに戻せる。
+    // 伝えないと、歩いた道が最大1時間以上（見回りが遅れればさらに）出ない。
+    expect(TRIP_SRC).toMatch(
+      /drained === false[\s\S]{0,900}?method: "PATCH"[\s\S]{0,300}?status: "ended"/,
     );
   });
 });

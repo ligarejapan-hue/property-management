@@ -612,6 +612,26 @@ export default function TripControls({
               setPhase("active");
               return;
             }
+            // ⚠**送り切れたら「終わった」と伝える** (@codex #356 P2)。
+            // 記録が届いた巡回は「まだ歩いているかも」として踏破マップから
+            // 外れている。本人が終了を押したのだから、見回りの次の1時間を
+            // 待たずに戻せる。ここで伝えないと、歩いた道が最大1時間以上
+            // (見回りが遅れればさらに) 地図に出ない。
+            // 失敗しても操作は止めない (見回りが後で必ず戻す)。
+            try {
+              await fetch(
+                `/api/field-survey/sessions/${encodeURIComponent(target.id)}`,
+                {
+                  method: "PATCH",
+                  credentials: "same-origin",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ status: "ended" }),
+                },
+              );
+            } catch {
+              // 通信失敗は無視 (踏破マップへの復帰が遅れるだけ)。
+            }
+            if (!mountedRef.current) return;
           }
           // 既に active でない (並行終了済み等)。全体 reconcile で UI を整合
           // させ、この終了操作は完了扱いにする。reconcile 自体が timeout 等で
