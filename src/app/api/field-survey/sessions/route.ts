@@ -104,6 +104,13 @@ export async function POST(request: NextRequest) {
               status: "ended",
               endedAt: existingActive.updatedAt,
               endReason: TRIP_AUTO_END_REASON,
+              // ⚠**自動終了の経路はすべて同じ扱いにする**(@codex #356 P2)。
+              // 見回りの自動終了と同じく、確定するまでは踏破マップ・履歴に
+              // 出さない。この経路は「新しい巡回を始めた」= 本人はここに居る
+              // ので生の現在地が漏れる話ではないが、**経路ごとに扱いを変えると
+              // その差が次の穴になる**(片方だけ直す事故を繰り返してきた)。
+              // 確定は本人が終了を押すか、次の見回りが無操作を再確認したとき。
+              reconcilePending: true,
             },
           });
           if (autoEnded.count > 0) {

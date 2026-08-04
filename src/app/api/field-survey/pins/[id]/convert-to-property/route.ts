@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
+import { touchTripActivity } from "@/lib/field-survey-auto-end";
 import { convertPinToPropertySchema } from "@/lib/validators";
 import { buildPropertyDataFromPin } from "@/lib/field-survey-convert";
 import { copyPinPhotosToProperty } from "@/lib/field-survey-photo-carryover";
@@ -46,7 +47,8 @@ export async function POST(
 
     const pin = await prisma.fieldSurveyPin.findUnique({
       where: { id },
-      select: { id: true, staffUserId: true, propertyId: true, pinType: true, lat: true, lng: true, status: true },
+      // sessionId: 物件化も巡回の活動として数えるために読む(下記)。
+      select: { id: true, staffUserId: true, propertyId: true, pinType: true, lat: true, lng: true, status: true, sessionId: true },
     });
     if (!pin) {
       throw new ApiError(404, "調査ピンが見つかりません", "NOT_FOUND");
@@ -89,6 +91,13 @@ export async function POST(
     // property 作成 + pin リンクを原子的に。リンクは propertyId=null 条件付き
     // (updateMany の count)にして、同一 pin の同時変換による二重物件化を防ぐ。
     const property = await prisma.$transaction(async (tx) => {
+      // ⚠**物件化も巡回の活動として数える**(@codex #356 P2)。この経路は物件行と
+      // ピン行しか触らないため、**候補を物件にする作業を1時間続けている巡回が
+      // 無操作扱い**になり、自動終了で切られてしまう(現地で候補を物件に起こす
+      // のは巡回中の主要な作業のひとつ)。
+      // ⚠巡回に触るのを先にして行ロックを取る。後にすると、その間に見回りが
+      // 割り込んで巡回を終了させられる(心拍は 0 行更新で黙って終わる)。
+      await touchTripActivity(tx, pin.sessionId);
       const created = await tx.property.create({ data, select: { id: true } });
       const linked = await tx.fieldSurveyPin.updateMany({
         // 前チェック後〜書込みの間の並行編集(アーカイブ / 種別変更 / 別変換)にも耐える:

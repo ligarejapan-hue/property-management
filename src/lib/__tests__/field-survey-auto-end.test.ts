@@ -139,6 +139,39 @@ describe("⚠写真追加・ピン編集も活動に数える (@codex #356 P2)",
     expect(src).toMatch(/touchTripActivity\(tx, owner\?\.sessionId\)/);
   });
 
+  it("物件化も巡回を更新する (@codex #356 P2)", () => {
+    // 現地で候補を物件に起こすのは巡回中の主要な作業のひとつ。ここが抜けると
+    // **物件化を1時間続けている巡回が無操作扱い**で切られる。
+    const src = read(
+      "src/app/api/field-survey/pins/[id]/convert-to-property/route.ts",
+    );
+    expect(src).toMatch(/touchTripActivity\(tx, pin\.sessionId\)/);
+    // 巡回に触るのが先（後にすると、その間に見回りが割り込める）
+    expect(src).toMatch(
+      /touchTripActivity\(tx, pin\.sessionId\);[\s\S]{0,200}?tx\.property\.create/,
+    );
+  });
+
+  it("⚠巡回配下を書き換える経路に心拍の抜けが無い", () => {
+    // 1か所直して報告する失敗を繰り返したので、走査型で固定する。
+    // ピン/写真を書き換える route は、必ず巡回への心拍を持つ。
+    const dir = path.join(process.cwd(), "src/app/api/field-survey/pins");
+    const walk = (d: string): string[] =>
+      fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+        const p = path.join(d, e.name);
+        return e.isDirectory() ? walk(p) : e.name === "route.ts" ? [p] : [];
+      });
+    for (const p of walk(dir)) {
+      const src = fs.readFileSync(p, "utf-8");
+      const writes = /\.(create|update|updateMany|delete|deleteMany)\(/.test(src);
+      if (!writes) continue;
+      expect(
+        /touchTripActivity|fieldSurveySession\.updateMany/.test(src),
+        `${path.relative(process.cwd(), p)} に巡回への心拍が無い`,
+      ).toBe(true);
+    }
+  });
+
   it("⚠写真は保存より前にも心拍を打つ (@codex #356 P2)", () => {
     // EXIF の除去とアップロードに時間がかかるため、1時間の境目でシャッターを
     // 切ると、その処理の最中に見回りが走って**撮っている最中の巡回が終了
@@ -423,6 +456,11 @@ describe("⚠自動終了の経路はすべて同じ印を付ける (@codex #356
     // 復帰後に捨てられる（見回りが止まっている間はこの経路だけが働く）。
     const src = read("src/app/api/field-survey/sessions/route.ts");
     expect(src).toMatch(/endReason: TRIP_AUTO_END_REASON/);
+    // ⚠確定するまで踏破マップ・履歴に出さないのも同じ扱いにする。
+    // 経路ごとに扱いを変えると、その差が次の穴になる。
+    expect(src).toMatch(
+      /endReason: TRIP_AUTO_END_REASON,[\s\S]{0,600}?reconcilePending: true,/,
+    );
     expect(src).toMatch(
       /from "@\/lib\/field-survey-auto-end"/,
     );
