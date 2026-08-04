@@ -153,6 +153,19 @@ describe("配線", () => {
     expect(store).toMatch(/activeOps\.delete\(k\)/);
   });
 
+  it("⚠順番待ちの中止で数分待たせない (@codex #357 P2)", () => {
+    // 検索は有料取得と同じ順番待ちに並ぶ。中止の確認が「自分の順番が来てから」
+    // だと、実際には何も始まっていないのに「中止しています…」のまま数分待つ。
+    const src = read("src/lib/registry-fetch/official-provider.ts");
+    expect(src).toMatch(/const QUEUE_CANCEL_POLL_MS = \d+/);
+    expect(src).toMatch(/const started = runExclusivePurchase/);
+    // 待ち行列に残る処理の失敗を握り潰す（未処理の rejection を出さない）
+    expect(src).toMatch(/void started\.catch\(\(\) => \{\}\)/);
+    // タイマーは必ず止める / プロセスの終了を妨げない
+    expect(src).toMatch(/clearInterval\(timer\)/);
+    expect(src).toMatch(/\(timer as \{ unref\?: \(\) => void \}\)\.unref\?\.\(\)/);
+  });
+
   it("⚠自動操作が終わったら中止を受け付けない (@codex #357 P2)", () => {
     // 自動操作が終わってから押された中止を受け付けると、押した人の画面は
     // 「中止しています…」のまま検索が普通に完了して**結果が出る**。

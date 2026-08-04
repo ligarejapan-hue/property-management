@@ -153,6 +153,13 @@ export interface OfficialRegistryProviderOptions {
 export const PAID_FLOW_EXTRA_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** 未分類の例外を provider_error に潰す（生メッセージ＝secret/PII を例外に載せない）。 */
+/**
+ * 順番待ちの間の中止を見に行く間隔 (@codex #357 P2)。
+ * 待ち行列は有料取得が前に居ると数分になり得るため、押した人を待たせない。
+ * 同一プロセス内のフラグを見るだけなので負荷は無視できる。
+ */
+const QUEUE_CANCEL_POLL_MS = 250;
+
 function classifyRegistryFetchError(err: unknown): RegistryFetchError {
   if (err instanceof RegistryFetchError) return err;
   // Playwright 等の生エラー（URL/入力/selector が混入しうる）は分類コードのみへ正規化。
@@ -398,7 +405,7 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     // ⚠アカウント同時1セッション制約(@codex #345 P1): **検索のログインも購入と同じ
     // ミューテックス**に通す。検索が購入と並行してログインすると、進行中の購入
     // セッションを強制ログアウトさせ、**課金だけ済んでPDFを取り逃す**。
-    return runExclusivePurchase(async () => {
+    const started = runExclusivePurchase(async () => {
       // ⚠**順番待ちの間に押された中止を、ここで拾う** (@codex #357 P2)。
       // アカウント同時1セッション制約のため、検索は上のミューテックスで
       // 待たされることがある。待っている間の中止に気づかないと、
@@ -485,6 +492,47 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
           // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
         }
       }
+    });
+
+    // ⚠**順番待ちの間に押された中止で、すぐ画面を解放する** (@codex #357 P2)。
+    //
+    // 検索は有料取得と同じ順番待ちに並ぶ。前が有料取得だと、順番が回るまで
+    // 数分かかることがある。上の中止確認は**自分の順番が来て初めて**動くため、
+    // 待っている間に中止を押した人は、実際には何も始まっていないのに
+    // 「中止しています…」の表示のまま数分待たされる。
+    //
+    // 待ち行列を抜けるのを待たずに中止として返す。実際の処理は、順番が回った
+    // ときに先頭の確認で自分から止まるので、放置しても外部サイトには触らない。
+    // 候補検索(段階①)はお金が動かないので、これで取り違えは起きない。
+    if (!request.live?.isCancelRequested) return started;
+    return await new Promise<RegistryCandidate[]>((resolve, reject) => {
+      let settled = false;
+      const finish = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearInterval(timer);
+        fn();
+      };
+      const timer = setInterval(() => {
+        if (request.live?.isCancelRequested?.() !== true) return;
+        finish(() => {
+          // 順番待ちのまま残る処理の失敗を拾っておく (握り潰さないと
+          // 未処理の rejection になる)。処理自体は順番が来たら自分で止まる。
+          void started.catch(() => {});
+          try {
+            request.live?.step(CANCEL_ACCEPTED_MESSAGE);
+          } catch {
+            /* 実況は best-effort */
+          }
+          reject(new RegistryFetchError("cancelled"));
+        });
+      }, QUEUE_CANCEL_POLL_MS);
+      // このタイマーでプロセスの終了を妨げない。
+      (timer as { unref?: () => void }).unref?.();
+      started.then(
+        (v) => finish(() => resolve(v)),
+        (e) => finish(() => reject(e)),
+      );
     });
   }
 
