@@ -165,8 +165,16 @@ describe("配線", () => {
     expect(body).toMatch(/activeOps\.delete/);
     expect(body).not.toMatch(/cancelMarks\.delete/);
     // 自動操作の終わり = provider の呼び出しが返った時点（成否とも）
-    expect(read("src/lib/registry-fetch/search.ts")).toMatch(
+    const search = read("src/lib/registry-fetch/search.ts");
+    expect(search).toMatch(
       /\} finally \{[\s\S]{0,600}?args\.live\?\.endCancelable\?\.\(\)/,
+    );
+    // ⚠**受け付けた中止は必ず効かせる**。provider の「最後に中止を見る場所」の
+    // 後にも外部サイトの後片付け（ダイアログ・ブラウザを閉じる）が残っており、
+    // その間の中止は受け付けたのに誰も見ない。閉じた直後にここで見ることで
+    // 「受け付けた ⟹ 必ず効く」が成り立つ。
+    expect(search).toMatch(
+      /endCancelable\?\.\(\);\s*\n\s*\}[\s\S]{0,900}?if \(args\.live\?\.isCancelRequested\?\.\(\) === true\) \{\s*\n\s*throw new RegistryFetchError\("cancelled"\)/,
     );
   });
 
