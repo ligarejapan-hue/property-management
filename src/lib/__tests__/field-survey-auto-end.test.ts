@@ -278,6 +278,16 @@ describe("⚠まだ歩いている人を踏破マップに出さない (@codex #
     }
   });
 
+  it("⚠線は「点を読むとき」にも見直す (@codex #356 P1)", () => {
+    // 線は2段階（候補の巡回を選ぶ → その点を読む）で引く。候補を選んでから
+    // 点を読むまでの間に圏外から復帰した端末が記録を送ると、印が立ち直る。
+    // 候補側だけで判定していると、届いたばかりの座標がそのまま線として出る。
+    const src = read("src/app/api/field-survey/coverage/tracks/route.ts");
+    expect(src).toMatch(/JOIN field_survey_sessions s2 ON s2\.id = tp\.session_id/);
+    expect(src).toMatch(/AND s2\.reconcile_pending IS NOT TRUE/);
+    expect(src).toMatch(/WHERE s2\.status::text = 'ended'/);
+  });
+
   it("⚠外した巡回を必ず戻す（二度歩きを避ける目的を損なわない）", () => {
     // 印を立てるだけで戻す経路が無いと、圏外から復帰した巡回が二度と
     // 踏破マップに出ない。見回りが再び無操作1時間を確認したら外す。
