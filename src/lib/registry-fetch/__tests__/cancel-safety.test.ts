@@ -98,27 +98,32 @@ describe("配線", () => {
   });
 
   it("⚠実況が期限切れでも中止の印が残る (@codex #357 P2)", () => {
-    // 検索は先行する有料取得の待ち行列で最大10分待たされる。実況エントリの寿命は
-    // 3分なので、待っている間に実況が消えて中止の印まで一緒に失われると
-    // **「中止しました」と言ったのに動き出す**。印だけ長く持つ。
+    // 検索は有料取得の待ち行列に入ると長く待たされる。実況エントリの寿命は3分
+    // なので、待っている間に実況が消えて中止の印まで一緒に失われると
+    // **「中止しました」と言ったのに動き出す**。印は実況とは別に持つ。
     const store = read("src/lib/registry-fetch/live-view-store.ts");
-    expect(store).toMatch(/cancelMarks\.set\(k, Date\.now\(\)\)/);
+    expect(store).toMatch(/cancelMarks\.add\(k\)/);
     expect(store).toMatch(
       /store\.get\(k\)\?\.cancelRequested === true \|\| cancelMarks\.has\(k\)/,
     );
-    // ⚠寿命を待ち時間から見積もらない (@codex #357 P2)。有料取得の待ち行列は
-    // 本数に上限が無く、2本詰まれば20分。**何分にしても足りない場合がある**。
-    // 印は「その検索が終わった時点」で消す。
+  });
+
+  it("⚠印の寿命を時間で見積もらない (@codex #357 P2)", () => {
+    // 待ち行列は本数に上限が無く、2本詰まれば20分。**何分にしても足りない
+    // 場合がある**ので、期限はどれだけ長くても「実行中なのに消える」窓になる。
+    // 片付けは「その検索が終わったとき」= route の finally。
+    const store = read("src/lib/registry-fetch/live-view-store.ts");
     expect(store).toMatch(/export function clearLiveViewCancel/);
+    expect(store).not.toMatch(/CANCEL_MARK_TTL_MS/);
     expect(
       read("src/app/api/properties/[id]/registry/search/route.ts"),
     ).toMatch(/clearLiveViewCancel\(session\.id, id, liveRef\)/);
   });
 
-  it("⚠長生きさせる印に秘匿情報を持たせない", () => {
-    // 保持するのは押された時刻(number)だけ。所在やスクショは入れない。
+  it("⚠印に秘匿情報を持たせない", () => {
+    // 保持するのは**鍵だけ**。所在・スクショ・時刻すら持たない。
     expect(read("src/lib/registry-fetch/live-view-store.ts")).toMatch(
-      /const cancelMarks = new Map<string, number>\(\)/,
+      /const cancelMarks = new Set<string>\(\)/,
     );
   });
 

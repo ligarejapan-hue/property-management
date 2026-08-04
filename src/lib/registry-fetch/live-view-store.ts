@@ -234,12 +234,17 @@ export function requestLiveViewCancel(
   entry.updatedAt = Date.now();
   scheduleExpiry(k, entry);
   // ⚠**実況とは別に印を残す**(@codex #357 P2)。実況エントリの寿命は最終更新から
-  // 3分だが、検索は**先行する有料取得の待ち行列**に入ると最大10分待たされる。
-  // 待っている間は更新が起きないので実況が先に期限切れで消え、順番が回ってきた
-  // ときには中止の印も一緒に消えている=**「中止しました」と言ったのに動き出す**。
-  // こちらは軽い印だけなので、実行の寿命に合わせて長めに持つ。
-  cancelMarks.set(k, Date.now());
-  scheduleCancelMarkExpiry(k);
+  // 3分だが、検索は**有料取得の待ち行列**に入ると長く待たされる(本数に上限が
+  // 無い)。待っている間は更新が起きないので実況が先に期限切れで消え、順番が
+  // 回ってきたときには中止の印も一緒に消えている
+  // = **「中止しました」と言ったのに動き出す**。
+  // この印は期限で消さない (片付けは route の finally とプロセス終了)。
+  // 暴走時の保険として件数上限だけ持ち、古いものから捨てる。
+  if (cancelMarks.size >= CANCEL_MARKS_MAX) {
+    const oldest = cancelMarks.keys().next();
+    if (!oldest.done) cancelMarks.delete(oldest.value);
+  }
+  cancelMarks.add(k);
   return true;
 }
 
@@ -248,35 +253,29 @@ export function requestLiveViewCancel(
  * ⚠ここに入れるのは**押された時刻だけ**。所在・スクショは持たない
  * (長生きさせてよいのは秘匿情報を含まないものに限る)。
  */
-const cancelMarks = new Map<string, number>();
-const cancelMarkTimers = new Map<string, ReturnType<typeof setTimeout>>();
+// ⚠保持するのは**鍵だけ**(所在・スクショ・時刻すら持たない)。
+const cancelMarks = new Set<string>();
 
 /**
- * 中止の印の寿命 — ⚠これは**取りこぼし防止の保険**であって、仕組みの本体ではない。
+ * ⚠**中止の印に期限は設けない** (@codex #357 P2)。
  *
- * 印は「その検索が終わったとき」(route の finally → clearLiveViewCancel) に消す。
- * 待ち時間から寿命を見積もる方式はやめた (@codex #357 P2): 有料取得の待ち行列は
- * 本数に上限が無く、2本以上詰まれば10分×本数だけ待たされる。**何分にしても
- * 足りない場合がある**ため、時間で見切るのは設計として誤り。
+ * 期限を置くと、それがどれだけ長くても「実行中なのに印が消える」窓になる。
+ * 有料取得の待ち行列は本数に上限が無く、**何分にしても足りない場合がある**。
+ * 15分→60分と延ばしたが、延ばす方向の対処は本質的に誤りだった。
  *
- * ここに残す TTL は「プロセスが落ちて finally が走らなかった」ときに Map が
- * 永久に膨らまないようにするためだけのもの。実運用の判断には使わない。
+ * 印は次の 2 つで確実に片付く:
+ *   1. その検索が終わったとき — route の finally → `clearLiveViewCancel`
+ *   2. プロセスが落ちたとき — この Map はメモリ内なのでプロセスと一緒に消える
+ * したがって残り続ける経路が無く、期限による掃除は不要。
+ *
+ * ⚠「印を付けたのに検索が始まらない」孤児は作れない: `requestLiveViewCancel` は
+ * 実況エントリが無い/完了済みなら false を返して印を作らず、route は
+ * `completeLiveView`(done=true) → `clearLiveViewCancel` の順で片付ける。
+ * その隙間に届いた中止は done=true を見て弾かれる。
+ *
+ * 万一の暴走に備えた上限だけ持つ (下記 MAX)。
  */
-export const CANCEL_MARK_TTL_MS = 60 * 60 * 1000;
-
-function scheduleCancelMarkExpiry(k: string): void {
-  const prev = cancelMarkTimers.get(k);
-  if (prev) clearTimeout(prev);
-  const t = setTimeout(() => {
-    cancelMarks.delete(k);
-    cancelMarkTimers.delete(k);
-  }, CANCEL_MARK_TTL_MS);
-  // Node のプロセス終了を妨げない (テスト・graceful shutdown 対策)。
-  if (typeof t === "object" && t && "unref" in t) {
-    (t as { unref: () => void }).unref();
-  }
-  cancelMarkTimers.set(k, t);
-}
+const CANCEL_MARKS_MAX = 1000;
 
 /**
  * 中止の印を消す (@codex #357 P2)。
@@ -292,11 +291,6 @@ export function clearLiveViewCancel(
 ): void {
   const k = key(userId, propertyId, liveRef);
   cancelMarks.delete(k);
-  const t = cancelMarkTimers.get(k);
-  if (t) {
-    clearTimeout(t);
-    cancelMarkTimers.delete(k);
-  }
 }
 
 /** 中止が要求されているか (provider が節目ごとに見る)。 */
@@ -352,8 +346,6 @@ export function __clearLiveViewStoreForTests(): void {
   for (const k of Array.from(store.keys())) deleteEntry(k);
   store.clear();
   // 中止の印は実況より長生きするので、テスト間で持ち越さないよう明示的に消す。
-  for (const t of cancelMarkTimers.values()) clearTimeout(t);
-  cancelMarkTimers.clear();
   cancelMarks.clear();
 }
 

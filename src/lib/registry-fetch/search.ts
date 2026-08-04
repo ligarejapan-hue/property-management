@@ -197,8 +197,11 @@ export async function runRegistrySearch(
   } catch (err) {
     // provider 失敗は安全な分類のみで応答（外部本文・認証情報・PII は載せない）。
     if (err instanceof RegistryFetchError) {
+      // ⚠**利用者が止めたものは「失敗」に数えない** (@codex #357 P2)。
+      // provider の障害と混ぜると、失敗率の集計も障害調査も歪む。
+      // 中止は課金前にしか起きないので、記録としても性質がまったく違う。
       await writeRegistrySearchAudit(session.id, propertyId, {
-        status: "failed",
+        status: err.code === "cancelled" ? "cancelled" : "failed",
         providerErrorCode: err.code,
       });
       // err.message は RegistryFetchError の固定文言のみ（errors.ts 参照・
@@ -222,7 +225,9 @@ async function writeRegistrySearchAudit(
   userId: string,
   propertyId: string,
   extra: {
-    status: "success" | "skipped" | "failed";
+    // ⚠"cancelled" を "failed" に含めない (@codex #357 P2)。利用者が自分で止めた
+    // 操作を「provider の失敗」として数えると、運用の集計(失敗率・障害調査)が歪む。
+    status: "success" | "skipped" | "failed" | "cancelled";
     reason?: string;
     candidateCount?: number;
     providerErrorCode?: RegistryFetchErrorCode;
