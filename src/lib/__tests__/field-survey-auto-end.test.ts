@@ -14,6 +14,10 @@ import {
   shouldAutoEndTrip,
   touchTripActivity,
 } from "@/lib/field-survey-auto-end";
+import {
+  REDACTED,
+  sanitizeAuditDetail,
+} from "@/lib/audit-log-detail-safety";
 
 const MIN = 60 * 1000;
 const now = new Date("2026-08-05T12:00:00+09:00");
@@ -138,6 +142,36 @@ describe("⚠写真追加・ピン編集も活動に数える (@codex #356 P2)",
     // 従来は「巡回の紐付けを変えたとき」しか更新していなかった。
     const src = read("src/app/api/field-survey/pins/[id]/route.ts");
     expect(src).toMatch(/touchTripActivity\(tx, nextSessionId\)/);
+  });
+});
+
+describe("⚠監査画面に実際に残る (@codex #356 P2)", () => {
+  it("自動終了の detail が [REDACTED] で消えない", () => {
+    // ⚠実行者(userId)を null にしたぶん、detail が全部伏せられると
+    // 「誰の巡回が・なぜ・いつ終わったか」が監査から完全に消える。
+    const out = sanitizeAuditDetail("field_survey_session_auto_end", {
+      sessionId: "11111111-2222-3333-4444-555555555555",
+      ownerStaffUserId: "66666666-7777-8888-9999-000000000000",
+      reason: "idle_timeout",
+      idleMinutes: 60,
+      pointCount: 12,
+    }) as Record<string, unknown>;
+    expect(out.sessionId).toBe("11111111-2222-3333-4444-555555555555");
+    // ⚠/owner/i の denylist に当たるので force-safe 側の登録が要る
+    expect(out.ownerStaffUserId).toBe("66666666-7777-8888-9999-000000000000");
+    expect(out.reason).toBe("idle_timeout");
+    expect(out.idleMinutes).toBe(60);
+    expect(out.pointCount).toBe(12);
+  });
+
+  it("許可していないキーは従来どおり伏せる", () => {
+    const out = sanitizeAuditDetail("field_survey_session_auto_end", {
+      sessionId: "11111111-2222-3333-4444-555555555555",
+      ownerName: "山田太郎",
+      memo: "現地メモ",
+    }) as Record<string, unknown>;
+    expect(out.ownerName).toBe(REDACTED);
+    expect(out.memo).toBe(REDACTED);
   });
 });
 

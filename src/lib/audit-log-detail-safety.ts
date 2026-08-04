@@ -187,6 +187,17 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   //   pinId / viewedStaffUserId は UUID 識別子、*Returned は件数、has* は boolean。
   //   ⚠ownerStaffUserId は /owner/i denylist に当たるため force-safe 側で扱う。
   field_survey_pin_view: new Set(["pinId", "hasProperty"]),
+  // 巡回の自動終了。⚠**実行者(userId)が null の記録**なので、detail が全部
+  // [REDACTED] だと「誰の巡回が・なぜ・いつ終わったか」が監査から完全に消える
+  // (@codex #356 P2)。押した人がいない自動処理ほど detail が頼りになる。
+  //   sessionId = UUID、reason = enum、idleMinutes/pointCount = 数値。
+  //   ⚠ownerStaffUserId は /owner/i denylist に当たるため force-safe 側で扱う。
+  field_survey_session_auto_end: new Set([
+    "sessionId",
+    "reason",
+    "idleMinutes",
+    "pointCount",
+  ]),
   field_survey_pin_list_others: new Set([
     "viewedStaffUserId",
     "pinsReturned",
@@ -400,6 +411,10 @@ const ACTION_FORCE_SAFE_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // 調査ピンの他人閲覧監査。「誰のピンを見たか」= ownerStaffUserId も UUID だが
   // /owner/i に当たるため force-safe 側で保持する（#337 と同じ型の取り残し）。
   field_survey_pin_view: new Set(["ownerStaffUserId"]),
+  // 巡回の自動終了。⚠**実行者(userId)を null にした**ぶん、「誰の巡回だったか」は
+  // ここでしか分からない。UUID だが /owner/i に当たるため force-safe 側で保持する
+  // (@codex #356 P2・上と同じ型の取り残し)。
+  field_survey_session_auto_end: new Set(["ownerStaffUserId"]),
   // 受付帳×所有者取込: 氏名住所を生保存する代わりに「項目が入っていたか」の
   // boolean を残す。hasAddress は /addr/i denylist に当たるため force-safe 側
   // （値は boolean ゆえ PII 流入余地なし。attachment_search の hasFileName と同型）。
