@@ -416,6 +416,23 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
         }
         throw new RegistryFetchError("cancelled");
       };
+      // ⚠**待っている最中に押された中止を、失敗に化けさせない** (@codex #357 P2)。
+      // ブラウザの起動やログインには時間がかかる。その待ちの最中に中止が押されて
+      // 待ちが失敗(timeout 等)で終わると、そのまま分類すると
+      // **利用者が自分で止めたのに「外部サービスの障害」として残る**
+      // (実況にも監査にも失敗として出る)。中止が押されていれば中止を優先する。
+      // 候補検索(段階①)は課金が動かないので、この扱いで取り違えは起きない。
+      const classifyOrCancelled = (err: unknown): RegistryFetchError => {
+        if (request.live?.isCancelRequested?.() === true) {
+          try {
+            request.live?.step(CANCEL_ACCEPTED_MESSAGE);
+          } catch {
+            /* 実況は best-effort */
+          }
+          return new RegistryFetchError("cancelled");
+        }
+        return classifyRegistryFetchError(err);
+      };
       abortIfCancelled();
       // 実況パネル (#317 とは別機能): ステップ進行の通知。label は固定文言のみ
       // (所在・地番・資格情報を入れない)。reporter は非 throw 契約だが、実況が
@@ -425,7 +442,7 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       try {
         page = await this.withStartupTimeout(() => this.browserFactory!());
       } catch (err) {
-        throw classifyRegistryFetchError(err);
+        throw classifyOrCancelled(err);
       }
 
       try {
@@ -459,7 +476,8 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
           });
         });
       } catch (err) {
-        throw classifyRegistryFetchError(err);
+        // ログインの待ちが中止と同時に失敗した場合も、中止として返す。
+        throw classifyOrCancelled(err);
       } finally {
         try {
           await page.close();

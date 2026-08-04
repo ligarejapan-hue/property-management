@@ -129,6 +129,17 @@ describe("配線", () => {
     );
   });
 
+  it("⚠待っている最中の中止を「障害」に化けさせない (@codex #357 P2)", () => {
+    // ブラウザ起動やログインの待ちの最中に中止が押され、その待ちが失敗
+    // (timeout 等)で終わると、そのまま分類すると**利用者が自分で止めたのに
+    // 「外部サービスの障害」として実況にも監査にも残る**。
+    const src = read("src/lib/registry-fetch/official-provider.ts");
+    expect(src).toMatch(/const classifyOrCancelled = \(err: unknown\)/);
+    expect(src).toMatch(/isCancelRequested\?\.\(\) === true[\s\S]{0,300}?"cancelled"/);
+    // 起動の catch とログイン/検索の catch の両方で使う（片方だけだと漏れる）
+    expect(src.match(/throw classifyOrCancelled\(err\)/g) ?? []).toHaveLength(2);
+  });
+
   it("⚠待たされている検索にも中止を受け付ける (@codex #357 P2)", () => {
     // 有料取得の待ち行列に入った検索は、順番が来るまで更新が起きない。実況
     // エントリは3分で消えるので、「実況があるか」で受け付けを判断すると
