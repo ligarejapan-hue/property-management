@@ -94,6 +94,10 @@ const PROVIDER_ERROR_STATUS: Readonly<Record<RegistryFetchErrorCode, number>> = 
   // 業務的 not found（対象謄本が存在しない）。upstream 障害（502）と区別し 404 を返す。
   // 502 だとクライアント/呼び出し側が「一時的な upstream 障害 → リトライ」と誤認しうるため。
   not_found: 404,
+  // 所在の指定が受け付けられない=**入力の問題**。upstream 障害(502)でも
+  // 「存在しない」(404)でもないので 422(内容が処理できない)を返し、
+  // 利用者に「住所を直せば通る」と伝わる分類にする。
+  location_rejected: 422,
   provider_error: 502,
   service_hours: 503, // 利用時間外=一時的に利用不可(Service Unavailable)。
   service_unavailable: 503, // 接続不可(時間外の可能性)=同じく一時的利用不可。
@@ -553,6 +557,53 @@ export function summarizeRegistryLoginError(
  * - どれにも一致しない/先頭が空 → prefecture=null(呼び出し側は全体を所在欄へ)。
  * ※ selectOption に渡す実際の option 値/ラベルの一致は実サイトでのみ確定(=[要live])。
  */
+/**
+ * 登記情報提供サービスが「所在の指定を受け付けなかった」ことを示す文言。
+ *
+ * 実機で採取した赤字(2026-08-04):
+ *   「請求できない所在です（入力が誤っている又は、所在に外字が含まれているか又は、
+ *     入力が不要な小字が含まれている等）。…直接入力のチェックを外し、所在選択ボタンを
+ *     クリックし、ダイアログから所在を選択してください。」
+ *
+ * ⚠**部分一致の語を短くしすぎない**。「所在」だけ等にすると、正常時の見出し
+ * (種別/所在 のラベル)にも当たり、候補が出ているのに失敗扱いになる。
+ */
+const LOCATION_REJECTED_MARKERS: readonly string[] = [
+  "請求できない所在",
+  "所在に外字が含まれて",
+  "所在選択ボタンをクリック",
+];
+
+/**
+ * ページ本文に上記の拒否文言が含まれるか（純関数・テスト可能）。
+ * ⚠受け取るのは本文、返すのは **boolean だけ**。所在を戻り値に載せない。
+ */
+export function looksLocationRejected(pageText: string): boolean {
+  return LOCATION_REJECTED_MARKERS.some((m) => pageText.includes(m));
+}
+
+/**
+ * ブラウザ側で拒否文言を判定する。⚠`evaluate` の戻り値も boolean に限定し、
+ * 所在の写った本文をプロセス側へ持ち出さない(ログ・例外への混入経路を作らない)。
+ */
+async function isLocationRejectedByProvider(
+  page: RegistryPageLike,
+): Promise<boolean> {
+  try {
+    // 既存の evaluate は「引数=文字列1つ」の形なので、区切り文字で連結して渡す
+    // (U+0001 は画面文言に現れない)。
+    const joined = LOCATION_REJECTED_MARKERS.join("\u0001");
+    const hit = await page.evaluate((arg: string) => {
+      const text = document.body?.innerText ?? "";
+      return arg.split("\u0001").some((m) => text.includes(m));
+    }, joined);
+    return hit === true;
+  } catch {
+    // 判定できない場合は従来どおり「候補ゼロ」として扱う(誤って失敗扱いにしない)。
+    return false;
+  }
+}
+
 export function splitAddressForLocationSearch(address: string): {
   prefecture: string | null;
   rest: string;
@@ -1096,6 +1147,21 @@ function createPlaywrightRegistryPage(
               summarizeRegistrySearchError(waitErr),
             );
             throw new RegistryFetchError("timeout");
+          }
+          // ⚠**候補ゼロと決める前に、サイトが所在を拒否していないか見る**
+          // (2026-08-04 実機で判明)。サイトは「請求できない所在です…」と赤字で
+          // 出すのに、こちらは候補チェックボックスの有無しか見ておらず「0件」と
+          // 報告していた。例外も出ないため journald にも何も残らず、
+          // **利用者は「登記の無い物件」と誤解し、開発側も原因に辿り着けない**。
+          // ⚠判定関数が返すのは **boolean だけ**(所在が写った本文は持ち出さない)。
+          if (await isLocationRejectedByProvider(page)) {
+            reportLive(
+              "所在の指定が受け付けられませんでした（住所に地番まで含まれている可能性があります）",
+            );
+            // 所在は載せない。分類コードのみで上位へ伝える。
+            console.warn("[registry-search] location rejected by provider");
+            await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
+            throw new RegistryFetchError("location_rejected");
           }
           reportLive("候補は見つかりませんでした (0 件)");
           await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
