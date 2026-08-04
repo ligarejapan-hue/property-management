@@ -101,7 +101,12 @@ export default function RegistryLivePanel({
     if (cancelling) return;
     setCancelling(true);
     try {
-      await cancelRegistryLiveView(propertyId, liveRef);
+      const res = await cancelRegistryLiveView(propertyId, liveRef);
+      // ⚠**受け付けられた時だけ「中止しています…」で固定する**(@codex #357 P2)。
+      // 検索 POST が実況を登録する前 (権限・資格情報・provider の解決中) に押すと
+      // まだ実況が無く accepted:false が返る。これを無視すると、実行は普通に続いて
+      // いるのにボタンだけ押せないまま固まり、**もう中止できなくなる**。
+      if (!res.data.accepted) setCancelling(false);
     } catch {
       // 通信失敗。押し直せるよう戻すだけ (理由は画面に出さない=秘匿情報の混入を避ける)。
       setCancelling(false);

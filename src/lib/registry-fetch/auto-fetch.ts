@@ -1165,6 +1165,11 @@ function createPlaywrightRegistryPage(
         reportLive("地番検索を実行しています…");
         await page.click(REGISTRY_SELECTORS.dialogSearch);
       } catch (err) {
+        // ⚠**分類済みの失敗はそのまま通す**(@codex #357 P2)。ここで一律に
+        // provider_error へ潰すと、利用者が押した「中止」まで**外部サービスの
+        // 障害(502)**として扱われ、実況にも監査にも「provider_error」と残る。
+        // 中止は成功であって障害ではない。後段の catch は既にこの形。
+        if (err instanceof RegistryFetchError) throw err;
         console.warn(
           "[registry-search] location search setup failed:",
           summarizeRegistrySearchError(err),

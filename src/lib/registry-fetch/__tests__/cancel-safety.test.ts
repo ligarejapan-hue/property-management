@@ -81,6 +81,22 @@ describe("配線", () => {
     expect(src).toMatch(/decideCancel\(requested, false\)/);
   });
 
+  it("⚠中止を「外部サービスの障害」に潰さない (@codex #357 P2)", () => {
+    // setup の catch が一律 provider_error に変換していると、利用者が押した
+    // 中止まで 502 になり、実況にも監査にも「障害」として残る。
+    const src = read("src/lib/registry-fetch/auto-fetch.ts");
+    expect(src).toMatch(
+      /if \(err instanceof RegistryFetchError\) throw err;[\s\S]{0,200}location search setup failed/,
+    );
+  });
+
+  it("⚠まだ実況が無いときは「中止しています…」で固まらない (@codex #357 P2)", () => {
+    // 検索 POST が実況を登録する前に押すと accepted:false が返る。無視すると
+    // 実行は続いているのにボタンだけ死に、二度と中止できなくなる。
+    const src = read("src/components/properties/registry-live-panel.tsx");
+    expect(src).toMatch(/if \(!res\.data\.accepted\) setCancelling\(false\)/);
+  });
+
   it("中止は「失敗」ではない分類で返す", () => {
     expect(read("src/lib/registry-fetch/errors.ts")).toMatch(
       /cancelled: "取得を中止しました。課金は発生していません。"/,
