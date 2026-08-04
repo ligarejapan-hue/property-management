@@ -170,6 +170,28 @@ describe("配線", () => {
     );
   });
 
+  it("⚠自分で押した中止を赤いエラーとして出さない (@codex #357 P2)", () => {
+    // 中止は 409 で返るが、通信の失敗と同じ経路を通ると赤いエラー表示になり
+    // 「止めたのに何か問題が起きた」と誤解させる（課金が無いことも伝わらない）。
+    // server は中止専用の分類を返し、client はそれを見て通常の案内として出す。
+    expect(read("src/lib/registry-fetch/search.ts")).toMatch(
+      /err\.code === "cancelled"\s*\n?\s*\? "REGISTRY_SEARCH_CANCELLED"/,
+    );
+    // ⚠分類コードが画面まで届かないと区別しようがない（文言一致は脆い）
+    const client = read("src/lib/api-client.ts");
+    expect(client).toMatch(/export function apiErrorCode/);
+    expect(client).toMatch(/code: typeof body\?\.error\?\.code === "string"/);
+    // 非2xx を Error にする箇所が分散すると片方だけ直る → 1か所に集約する
+    expect(client).not.toMatch(
+      /throw new Error\(body\?\.error\?\.message \?\? `Error: \$\{res\.status\}`\)/,
+    );
+    const ui = read("src/components/properties/registry-location-search-button.tsx");
+    expect(ui).toMatch(/apiErrorCode\(e\) === "REGISTRY_SEARCH_CANCELLED"/);
+    expect(ui).toMatch(/setState\("cancelled"\)/);
+    // 中止の表示は alert ではなく status（赤字の警告にしない）
+    expect(ui).toMatch(/state === "cancelled" &&[\s\S]{0,400}?role="status"/);
+  });
+
   it("中止は「失敗」ではない分類で返す", () => {
     expect(read("src/lib/registry-fetch/errors.ts")).toMatch(
       /cancelled: "取得を中止しました。課金は発生していません。"/,

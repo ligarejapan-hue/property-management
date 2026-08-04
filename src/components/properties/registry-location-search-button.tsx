@@ -5,6 +5,7 @@ import { MapPinned, Loader2 } from "lucide-react";
 import {
   searchRegistryCandidates,
   obtainRegistryByCandidate,
+  apiErrorCode,
   type RegistrySearchCandidate,
 } from "@/lib/api-client";
 import RegistryLivePanel from "@/components/properties/registry-live-panel";
@@ -35,6 +36,8 @@ type State =
   | "confirmObtain"
   | "obtaining"
   | "done"
+  // 利用者が自分で中止した (@codex #357 P2)。失敗ではないので "error" と分ける。
+  | "cancelled"
   | "error";
 
 // 謄本「所在検索」導線（PR-2b-3）。番号無し物件を所在/地番/家屋番号で候補検索し、候補を選んで取得する。
@@ -100,6 +103,14 @@ export default function RegistryLocationSearchButton({
       }
       setState("results");
     } catch (e) {
+      // ⚠**自分で押した中止を「失敗」として出さない**(@codex #357 P2)。
+      // 中止は 409 で返るが、通信の失敗と同じ経路を通ると赤いエラー表示になり、
+      // 「止めたのに何か問題が起きた」と誤解させる。課金が無いことも伝わらない。
+      if (apiErrorCode(e) === "REGISTRY_SEARCH_CANCELLED") {
+        setErrorMsg(e instanceof Error ? e.message : null);
+        setState("cancelled");
+        return;
+      }
       setErrorMsg(e instanceof Error ? e.message : "所在検索に失敗しました");
       setState("error");
     }
@@ -157,6 +168,17 @@ export default function RegistryLocationSearchButton({
         <p className="text-[11px] text-green-600 dark:text-green-400">謄本を取得しました。</p>
       )}
 
+      {state === "cancelled" && (
+        <div className="flex flex-col gap-1 text-[11px]">
+          <p className="text-gray-600 dark:text-gray-300" role="status">
+            {errorMsg ?? "取得を中止しました。課金は発生していません。"}
+          </p>
+          <button type="button" onClick={reset} className="w-fit text-indigo-600 dark:text-indigo-400 hover:underline">
+            閉じる
+          </button>
+        </div>
+      )}
+
       {state === "error" && errorMsg && (
         <div className="flex flex-col gap-1 text-[11px]">
           <p className="text-red-600 dark:text-red-400" role="alert">{errorMsg}</p>
@@ -198,6 +220,9 @@ export default function RegistryLocationSearchButton({
       {liveRef &&
         (state === "searching" ||
           state === "results" ||
+          // 中止のときも残す (@codex #357 P2)。どこまで進んで止まったかを
+          // 本人が確かめられないと「本当に止まったのか」が分からない。
+          state === "cancelled" ||
           state === "error") && (
           <RegistryLivePanel
             propertyId={propertyId}

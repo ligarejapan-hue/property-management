@@ -361,8 +361,11 @@ export function getLiveShot(
 export function __clearLiveViewStoreForTests(): void {
   for (const k of Array.from(store.keys())) deleteEntry(k);
   store.clear();
-  // 中止の印は実況より長生きするので、テスト間で持ち越さないよう明示的に消す。
+  // 中止の印と実行中の印は実況より長生きするので、テスト間で持ち越さないよう
+  // 明示的に消す (@codex #357 P3)。消し忘れると、前のテストの鍵が残ったまま
+  // 「実行していないのに中止が受け付けられる」= テストの実行順で結果が変わる。
   cancelMarks.clear();
+  activeOps.clear();
 }
 
 export function __liveViewStoreSizeForTests(): number {

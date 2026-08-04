@@ -35,12 +35,33 @@ const mockDelay = () => new Promise((r) => setTimeout(r, 200));
 
 // ---------- Generic fetcher ----------
 
+/**
+ * 非 2xx 応答を Error にする（分類コード付き）。
+ *
+ * ⚠**分類コードを画面まで届ける**(@codex #357 P2)。文言だけだと画面側は
+ * 「利用者が自分で中止した」と「本当に失敗した」を区別できず、押した本人の
+ * 操作まで赤いエラーとして出てしまう。追加のプロパティなので、既存の
+ * `instanceof Error` / `e.message` を見ている呼び出し元はそのまま動く。
+ */
+async function toApiError(res: Response): Promise<Error> {
+  const body = await res.json().catch(() => null);
+  const err = new Error(body?.error?.message ?? `Error: ${res.status}`);
+  return Object.assign(err, {
+    code: typeof body?.error?.code === "string" ? body.error.code : null,
+    status: res.status,
+  });
+}
+
+/** 応答エラーから分類コードを取り出す（型を絞る補助）。 */
+export function apiErrorCode(e: unknown): string | null {
+  if (!(e instanceof Error)) return null;
+  const code = (e as Error & { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
 async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.error?.message ?? `Error: ${res.status}`);
-  }
+  if (!res.ok) throw await toApiError(res);
   return res.json();
 }
 
@@ -1580,10 +1601,7 @@ export async function uploadRegistryPdfBulk(
     method: "POST",
     body: formData,
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.error?.message ?? `Error: ${res.status}`);
-  }
+  if (!res.ok) throw await toApiError(res);
   return res.json();
 }
 
@@ -2785,10 +2803,7 @@ export async function uploadFile(
       ? `/api/properties/${propertyId}/photos`
       : `/api/properties/${propertyId}/attachments`;
   const res = await fetch(endpoint, { method: "POST", body: formData });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.error?.message ?? `Error: ${res.status}`);
-  }
+  if (!res.ok) throw await toApiError(res);
   return res.json();
 }
 

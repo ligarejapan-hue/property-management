@@ -130,11 +130,13 @@ describe("registry-location-search-button — 実況パネル統合 (ソース�
     expect(BUTTON_SRC).toMatch(/searchRegistryCandidates\(propertyId, ref\)/);
   });
 
-  it("パネルは検索完了後 (results/error) も維持し、閉じるで消える (@codex P2)", () => {
+  it("パネルは検索完了後 (results/cancelled/error) も維持し、閉じるで消える (@codex P2)", () => {
     // searching 限定だと POST 完了と同時に unmount され「(完了)」表示も
     // 3 分の見返しもできない。reset (閉じる) が liveRef を null にして閉じる。
+    // ⚠中止 (cancelled) でも残す: どこまで進んで止まったかを本人が確かめ
+    // られないと「本当に止まったのか」が分からない (@codex #357 P2)。
     expect(BUTTON_SRC).toMatch(
-      /liveRef &&\s*\(state === "searching" \|\|\s*state === "results" \|\|\s*state === "error"\) && \(\s*<RegistryLivePanel/,
+      /liveRef &&\s*\(state === "searching" \|\|\s*state === "results" \|\|[\s\S]*?state === "cancelled" \|\|\s*state === "error"\) && \(\s*<RegistryLivePanel/,
     );
     const resetBlock =
       BUTTON_SRC.match(/const reset = \(\) => \{[\s\S]*?\};/)?.[0] ?? "";

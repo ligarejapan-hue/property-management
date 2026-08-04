@@ -209,7 +209,12 @@ export async function runRegistrySearch(
       throw new ApiError(
         PROVIDER_ERROR_STATUS[err.code],
         err.message,
-        "REGISTRY_SEARCH_PROVIDER_ERROR",
+        // ⚠**中止は「失敗」と別の分類にする**(@codex #357 P2)。同じ
+        // REGISTRY_SEARCH_PROVIDER_ERROR にすると、画面側が区別できず、
+        // 利用者が自分で押した中止まで**赤いエラー表示**になる。
+        err.code === "cancelled"
+          ? "REGISTRY_SEARCH_CANCELLED"
+          : "REGISTRY_SEARCH_PROVIDER_ERROR",
       );
     }
     // それ以外（Prisma 例外等）はそのまま route の handleApiError に委ねる。
