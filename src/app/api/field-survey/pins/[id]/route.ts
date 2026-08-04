@@ -370,17 +370,18 @@ export async function DELETE(
     }
 
     // 冪等な status 遷移。既に archived なら 0 行更新 = 再削除でも安全に成功扱い。
-    const result = await prisma.fieldSurveyPin.updateMany({
-      where: { id, status: { not: "archived" } },
-      data: { status: "archived" },
+    // ⚠**削除と心拍を同じ transaction で行う**(@codex #356 P2)。別々だと、
+    // 削除が commit してから心拍が走るまでの隙間に見回りが入り込み、
+    // 「本当に操作しているのに終了させられる」(心拍は 0 行更新で黙って終わる)。
+    // 同一 tx なら、心拍が勝てば見回りの CAS が外れ、見回りが勝てば削除の前に終わる。
+    const result = await prisma.$transaction(async (tx) => {
+      const r = await tx.fieldSurveyPin.updateMany({
+        where: { id, status: { not: "archived" } },
+        data: { status: "archived" },
+      });
+      if (r.count > 0) await touchTripActivity(tx, existing.sessionId);
+      return r;
     });
-
-    // ⚠**削除も巡回の活動として数える**(@codex #356 P2)。候補から外す操作を
-    // 続けている最中に自動終了(1時間)で切られない。PATCH/写真追加だけ直して
-    // 削除を取りこぼしていた。
-    if (result.count > 0) {
-      await touchTripActivity(prisma, existing.sessionId);
-    }
 
     // 実際に open/closed → archived へ遷移したときのみ監査ログを残す。
     if (result.count > 0) {

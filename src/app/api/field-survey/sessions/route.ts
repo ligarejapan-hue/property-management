@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
+import { TRIP_AUTO_END_REASON } from "@/lib/field-survey-auto-end";
 import {
   createFieldSurveySessionSchema,
   fieldSurveySessionListQuerySchema,
@@ -96,7 +97,14 @@ export async function POST(request: NextRequest) {
               status: "active",
               updatedAt: existingActive.updatedAt,
             },
-            data: { status: "ended", endedAt: existingActive.updatedAt },
+            // ⚠**自動終了の印を付ける**(@codex #356 P2)。付けないと人が押した
+            // 終了と区別できず、圏外で貯めた位置記録が復帰後に捨てられる。
+            // 自動終了の経路はすべて同じ印を付ける。
+            data: {
+              status: "ended",
+              endedAt: existingActive.updatedAt,
+              endReason: TRIP_AUTO_END_REASON,
+            },
           });
           if (autoEnded.count > 0) {
             endedSnapshot = existingActive;

@@ -189,14 +189,56 @@ describe("⚠削除も活動に数える (@codex #356 P2)", () => {
 
   it("ピンの削除（候補から外す）", () => {
     expect(read("src/app/api/field-survey/pins/[id]/route.ts")).toMatch(
-      /touchTripActivity\(prisma, existing\.sessionId\)/,
+      /touchTripActivity\(tx, existing\.sessionId\)/,
     );
   });
 
   it("写真の削除（撮り直し）", () => {
     expect(
       read("src/app/api/field-survey/pins/[id]/photos/[photoId]/route.ts"),
-    ).toMatch(/touchTripActivity\(prisma, photo\.pin\?\.sessionId/);
+    ).toMatch(/touchTripActivity\(tx, photo\.pin\?\.sessionId/);
+  });
+
+  it("⚠削除と心拍を同じ transaction で行う (@codex #356 P2)", () => {
+    // 別々だと、削除が確定してから心拍が走るまでの隙間に見回りが入り込み、
+    // **本当に操作しているのに終了させられる**（心拍は 0 行更新で黙って終わる）。
+    for (const p of [
+      "src/app/api/field-survey/pins/[id]/route.ts",
+      "src/app/api/field-survey/pins/[id]/photos/[photoId]/route.ts",
+    ]) {
+      const src = read(p);
+      // 削除（archive / delete）と touch が同じ $transaction の中にある
+      expect(src).toMatch(
+        /\$transaction\(async \(tx\) => \{[\s\S]{0,600}?touchTripActivity\(tx,/,
+      );
+      // 心拍が transaction の外（prisma 直）に残っていない
+      expect(src).not.toMatch(/touchTripActivity\(prisma,/);
+    }
+  });
+});
+
+describe("⚠自動終了の経路はすべて同じ印を付ける (@codex #356 P2)", () => {
+  const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf-8");
+
+  it("既存の24時間自動終了にも印を付ける", () => {
+    // 印が無いと人が押した終了と区別できず、圏外で貯めた位置記録が
+    // 復帰後に捨てられる（見回りが止まっている間はこの経路だけが働く）。
+    const src = read("src/app/api/field-survey/sessions/route.ts");
+    expect(src).toMatch(/endReason: TRIP_AUTO_END_REASON/);
+    expect(src).toMatch(
+      /from "@\/lib\/field-survey-auto-end"/,
+    );
+  });
+
+  it("印の文字列は1か所で定義する", () => {
+    // 経路ごとに文字列を書くと、片方だけ直して食い違う。
+    for (const p of [
+      "src/app/api/field-survey/sessions/route.ts",
+      "src/app/api/field-survey/sessions/auto-end-run/route.ts",
+      "src/app/api/field-survey/sessions/[id]/track-points/route.ts",
+    ]) {
+      expect(read(p)).not.toMatch(/endReason: "idle_timeout"/);
+    }
   });
 });
 

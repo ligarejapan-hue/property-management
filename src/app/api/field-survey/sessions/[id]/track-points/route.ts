@@ -53,7 +53,14 @@ export async function POST(
     const result = await prisma.$transaction(async (tx) => {
       const sess = await tx.fieldSurveySession.findUnique({
         where: { id },
-        select: { id: true, staffUserId: true, status: true, startedAt: true },
+        // endReason は「自動終了した巡回か」の判定に使う(@codex #356 P1)。
+        select: {
+          id: true,
+          staffUserId: true,
+          status: true,
+          startedAt: true,
+          endReason: true,
+        },
       });
       if (!sess) {
         throw new ApiError(404, "session が見つかりません", "NOT_FOUND");
@@ -65,7 +72,14 @@ export async function POST(
           "FORBIDDEN",
         );
       }
-      if (sess.status !== "active") {
+      // ⚠**自動終了した巡回も受け入れる**(@codex #356 P1)。ここで弾くと、後段で
+      // 用意した受け入れ条件に**到達しない**(前回の修正はこの関門に阻まれて
+      // 効いていなかった)。圏外で貯めた位置記録が復帰後に捨てられる。
+      // 人が押して終えた巡回(endReason=null)は従来どおり弾く。
+      const acceptable =
+        sess.status === "active" ||
+        (sess.status === "ended" && sess.endReason === TRIP_AUTO_END_REASON);
+      if (!acceptable) {
         throw new ApiError(
           409,
           "active 状態でない session には保存できません",

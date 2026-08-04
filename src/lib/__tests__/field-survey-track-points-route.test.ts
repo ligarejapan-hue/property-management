@@ -311,13 +311,42 @@ describe("POST track-points", () => {
     expect(pm._tx.pointTx.createMany).not.toHaveBeenCalled();
   });
 
-  it("ended session は 409 INVALID_STATE", async () => {
+  it("⚠自動終了した session は受け取る (@codex #356 P1)", async () => {
+    // 圏外で貯めた位置記録は、電波が戻ったときに送られる。その間に無操作
+    // 1時間で自動終了していると、ここで弾いた瞬間に**歩いた記録がまるごと
+    // 失われる**（利用者は送信済みのつもりでいる）。
+    // ⚠この手前の関門で弾くと、後段に用意した受け入れ条件に**到達しない**。
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
     pm._tx.sessionTx.findUnique.mockResolvedValue({
       id: SESSION_ID,
       staffUserId: fieldUser.id,
       status: "ended",
+      endReason: "idle_timeout",
+      startedAt: new Date(),
+    });
+    pm._tx.pointTx.createMany.mockResolvedValue({ count: 1 });
+    pm._tx.sessionTx.updateMany.mockResolvedValue({ count: 1 });
+    const res = await POST(
+      makeReq(`http://x/api/field-survey/sessions/${SESSION_ID}/track-points`, {
+        method: "POST",
+        body: JSON.stringify({ points: [makePoint()] }),
+      }),
+      { params },
+    );
+    expect(res.status).toBe(200);
+    expect(pm._tx.pointTx.createMany).toHaveBeenCalled();
+  });
+
+  it("人が終了した session は 409 INVALID_STATE", async () => {
+    // 意図して終えた巡回に後から足すのは誤り（自動終了とは区別する）。
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    pm._tx.sessionTx.findUnique.mockResolvedValue({
+      id: SESSION_ID,
+      staffUserId: fieldUser.id,
+      status: "ended",
+      endReason: null,
       startedAt: new Date(),
     });
     const res = await POST(
