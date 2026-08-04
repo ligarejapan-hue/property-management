@@ -229,9 +229,13 @@ describe("trip-controls.tsx — B-7 放置巡回の終了確認", () => {
   });
 
   it("終了は既存 PATCH を流用・続行は touch PATCH で活動のみ記録 (@codex R6/R7)", () => {
-    // 専用の別 API は増やさない (end 用 + 続行 touch 用の PATCH 2 箇所のみ)
+    // 専用の別 API は増やさない。PATCH は 3 箇所:
+    //   ① 終了 (status:"ended" + フェンストークン)
+    //   ② 続行の touch (活動のみ記録)
+    //   ③ 自動終了ぶんの確定 (@codex #356 P2)。貯めた記録を送り切った後に
+    //      「終わった」と伝える = 見回りの次の1時間を待たずに踏破マップへ戻す
     const patches = TRIP_SRC.match(/method:\s*"PATCH"/g) ?? [];
-    expect(patches.length).toBe(2);
+    expect(patches.length).toBe(3);
     // 続行 touch は活動記録専用 ({ touch: true }・fence 無し = 世代を進めない)。
     // memo 送信での代用は一覧 API が memo を返さないため既存 memo を消す (禁止)
     expect(TRIP_SRC).toMatch(/touchSession/);

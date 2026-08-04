@@ -15,6 +15,11 @@ import {
   isSessionStale,
   STALE_CONFIRM_THRESHOLD_MS,
 } from "@/lib/field-survey-trip-util";
+import {
+  TRIP_AUTO_END_REASON,
+  TRIP_AUTO_END_CONFIRMED_REASON,
+  settledEndedAt,
+} from "@/lib/field-survey-auto-end";
 
 // ---------- PATCH /api/field-survey/sessions/[id] ----------
 // 巡回終了 / cancel / memo 更新の最小対応。
@@ -140,7 +145,11 @@ export async function PATCH(
         staffUserId: true,
         startedAt: true,
         updatedAt: true,
+        // 自動終了ぶんを確定するときの終了時刻の基準に使う。
+        endedAt: true,
         status: true,
+        // 自動終了した巡回か (終了ボタンを押せるようにする判定に使う)。
+        endReason: true,
         pointCount: true,
       },
     });
@@ -167,7 +176,71 @@ export async function PATCH(
       isSessionStale(existing.updatedAt, now, STALE_CONFIRM_THRESHOLD_MS);
     const effectiveEndedAt = isStaleEnd ? existing.updatedAt : now;
 
-    if (patch.status === "ended" || patch.status === "cancelled") {
+    // ⚠**自動終了した巡回に「終了」を押せるようにする**(@codex #356 P1 の派生)。
+    // 無操作1時間で自動終了した後、圏外から戻ったスタッフが終了ボタンを押すと、
+    // 従来条件 (status:"active") では 0 行更新 → 409 になり、**何度押しても
+    // 終われない**(24時間の自動終了では滅多に起きなかったが、1時間では日常的に
+    // 起きる)。既に終わっているので望む状態には達している = 成功として扱い、
+    // 同時に「本人が終わったと言った」ことを踏破マップへの復帰の合図にする
+    // (見回りの1時間待ちを待たずに出せる)。
+    const existingEndedAt = existing.endedAt;
+    // 確定した終了時刻 (監査の巡回時間にも同じ値を使う)。
+    let settledAt: Date | null = null;
+    // 確定済み(=一度押された)も対象に含める。通信の失敗で押し直したときに
+    // 「もう終わっている」で弾くと、利用者から見れば何度押しても終われない。
+    const settlingAutoEnded =
+      patch.status === "ended" &&
+      existing.status === "ended" &&
+      (existing.endReason === TRIP_AUTO_END_REASON ||
+        existing.endReason === TRIP_AUTO_END_CONFIRMED_REASON);
+    if (settlingAutoEnded) {
+      // ⚠終了時刻は「押した時刻」でも「記録が届いた時刻」でもなく、
+      // **位置記録が持つ最後の記録時刻**にそろえる (@codex #356 P2)。
+      // 圏外で貯めた記録は電波が戻った時刻に届くため、届いた時刻を使うと
+      // 深夜に歩いた巡回が翌日の昼に終わったことになる (巡回時間が伸び、
+      // 踏破の日付もずれる)。見回り側の確定と同じ規則を使う。
+      const last = await prisma.fieldSurveyTrackPoint.aggregate({
+        where: { sessionId: id },
+        _max: { recordedAt: true },
+      });
+      settledAt =
+        settledEndedAt(existingEndedAt, last._max.recordedAt) ??
+        existing.updatedAt;
+      // ⚠**読み取った時点の updatedAt を条件に含める**(@codex #356 P1)。
+      // 別のタブ・端末が圏外から復帰して位置記録を送っている最中だと、
+      // 上の集計を読んでからここで書くまでの隙間に新しい記録が入り、
+      // その記録が立て直した「まだ歩いているかも」の印を**こちらが消してしまう**
+      // = 届いたばかりの、まだ進行中かもしれない経路が踏破マップに出る。
+      // 見回り側と同じ守り方にそろえる。
+      const settled = await prisma.fieldSurveySession.updateMany({
+        where: {
+          id,
+          status: "ended",
+          endReason: {
+            in: [TRIP_AUTO_END_REASON, TRIP_AUTO_END_CONFIRMED_REASON],
+          },
+          updatedAt: existing.updatedAt,
+        },
+        data: {
+          reconcilePending: false,
+          endedAt: settledAt,
+          // ⚠**本人が確定させた印に変える**(@codex #356 P2)。自動終了の印を
+          // 残したままだと、確定した後に届いた古い送信まで受け入れてしまい
+          // (開きっぱなしの別タブ等)、記録が伸びて踏破マップからも再び消える。
+          endReason: TRIP_AUTO_END_CONFIRMED_REASON,
+          ...(patch.memo !== undefined && { memo: patch.memo }),
+        },
+      });
+      if (settled.count === 0) {
+        // 送信中に割り込まれた。印は消さずに 409 を返し、client の既存の
+        // 再取得→再試行に載せる(次の試行では新しい updatedAt が見える)。
+        throw new ApiError(
+          409,
+          "session の状態が変わったため終了できませんでした",
+          "INVALID_STATE",
+        );
+      }
+    } else if (patch.status === "ended" || patch.status === "cancelled") {
       // status 変更は atomic な conditional update で実施。
       // 0 行更新は「既に終了/キャンセル済」または「読取後に活動が入った」を
       // 意味し 409 にマップ (client は既存 conflict 処理 = 再取得 → 再試行)。
@@ -263,10 +336,15 @@ export async function PATCH(
     }
 
     if (patch.status === "ended") {
+      // 自動終了ぶんを後から確定させた場合は、押した時刻ではなく最後に活動した
+      // 時刻までを巡回時間とする（歩いていない時間を巡回に数えない）。
+      const endedAtForDuration = settlingAutoEnded
+        ? (settledAt ?? existing.updatedAt)
+        : effectiveEndedAt;
       const durationSec = Math.max(
         0,
         Math.floor(
-          (effectiveEndedAt.getTime() - existing.startedAt.getTime()) / 1000,
+          (endedAtForDuration.getTime() - existing.startedAt.getTime()) / 1000,
         ),
       );
       await writeAuditLog({

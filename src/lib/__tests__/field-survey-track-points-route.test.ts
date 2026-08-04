@@ -311,13 +311,42 @@ describe("POST track-points", () => {
     expect(pm._tx.pointTx.createMany).not.toHaveBeenCalled();
   });
 
-  it("ended session は 409 INVALID_STATE", async () => {
+  it("⚠自動終了した session は受け取る (@codex #356 P1)", async () => {
+    // 圏外で貯めた位置記録は、電波が戻ったときに送られる。その間に無操作
+    // 1時間で自動終了していると、ここで弾いた瞬間に**歩いた記録がまるごと
+    // 失われる**（利用者は送信済みのつもりでいる）。
+    // ⚠この手前の関門で弾くと、後段に用意した受け入れ条件に**到達しない**。
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
     pm._tx.sessionTx.findUnique.mockResolvedValue({
       id: SESSION_ID,
       staffUserId: fieldUser.id,
       status: "ended",
+      endReason: "idle_timeout",
+      startedAt: new Date(),
+    });
+    pm._tx.pointTx.createMany.mockResolvedValue({ count: 1 });
+    pm._tx.sessionTx.updateMany.mockResolvedValue({ count: 1 });
+    const res = await POST(
+      makeReq(`http://x/api/field-survey/sessions/${SESSION_ID}/track-points`, {
+        method: "POST",
+        body: JSON.stringify({ points: [makePoint()] }),
+      }),
+      { params },
+    );
+    expect(res.status).toBe(200);
+    expect(pm._tx.pointTx.createMany).toHaveBeenCalled();
+  });
+
+  it("人が終了した session は 409 INVALID_STATE", async () => {
+    // 意図して終えた巡回に後から足すのは誤り（自動終了とは区別する）。
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    pm._tx.sessionTx.findUnique.mockResolvedValue({
+      id: SESSION_ID,
+      staffUserId: fieldUser.id,
+      status: "ended",
+      endReason: null,
       startedAt: new Date(),
     });
     const res = await POST(
@@ -393,7 +422,16 @@ describe("POST track-points", () => {
     expect(body.data.acceptedCount).toBe(2);
     expect(body.data.skippedCount).toBe(1);
     const updArgs = pm._tx.sessionTx.updateMany.mock.calls[0][0];
-    expect(updArgs.where).toEqual({ id: SESSION_ID, status: "active" });
+    // ⚠**自動終了した巡回も受け取る** (@codex #356 P1)。圏外で貯めた位置記録が
+    // 復帰後に 409 で捨てられると、歩いた記録がまるごと失われる。
+    // 人が押して終えた巡回 (endReason=null) は従来どおり弾く。
+    expect(updArgs.where).toEqual({
+      id: SESSION_ID,
+      OR: [
+        { status: "active" },
+        { status: "ended", endReason: "idle_timeout" },
+      ],
+    });
     expect(updArgs.data.pointCount).toEqual({ increment: 2 });
     // AuditLog は POST では書かない
     expect(writeAuditLog).not.toHaveBeenCalled();

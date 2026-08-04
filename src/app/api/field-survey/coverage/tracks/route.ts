@@ -134,6 +134,11 @@ export async function GET(request: NextRequest) {
       FROM field_survey_sessions s
       JOIN field_survey_track_points tp ON tp.session_id = s.id
       WHERE s.status::text = 'ended'
+        -- ⚠自動終了した後に位置記録が届いた巡回は除く (@codex #356 P1)。
+        -- 終了扱いのまま位置が更新され続けると、実行中の巡回を隠す守りを抜けて
+        -- **まだ歩いている人の経路が他スタッフに追える**（線はマスより直接的）。
+        -- NULL (既存行・通常の終了) は対象に含めるため IS NOT TRUE で判定する。
+        AND s.reconcile_pending IS NOT TRUE
         AND tp.lat >= ${south}::numeric
         AND tp.lat < ${north}::numeric
         AND tp.lng >= ${west}::numeric
@@ -267,7 +272,15 @@ export async function GET(request: NextRequest) {
               JOIN unnest(ARRAY[${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))}])
                    WITH ORDINALITY AS ord(sid, pos)
                 ON ord.sid = tp.session_id
-              WHERE (
+              -- ⚠**点を読むときにも巡回の状態を見直す** (@codex #356 P1)。
+              -- 候補を選んでから点を読むまでの間に、圏外から復帰した端末が
+              -- 記録を送ってくると「まだ歩いているかも」の印が立ち直る。
+              -- 候補側だけで判定していると、その**届いたばかりの座標**が
+              -- そのまま線として他スタッフに見える (この関門を置いた意味が消える)。
+              JOIN field_survey_sessions s2 ON s2.id = tp.session_id
+              WHERE s2.status::text = 'ended'
+                AND s2.reconcile_pending IS NOT TRUE
+                AND (
                   ${fromAtIso}::timestamptz IS NULL
                   OR tp.recorded_at >= (${fromAtIso}::timestamptz AT TIME ZONE 'UTC')
                 )

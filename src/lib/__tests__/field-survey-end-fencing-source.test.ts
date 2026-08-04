@@ -189,7 +189,30 @@ describe("trip-controls — 終了フローの ending 固着防止 (@codex R6 P2
     // fetchOwnActiveGeneration が ended を返した後の全体 reconcile が timeout
     // (unknown・state 未変更) だと phase="ending" のまま固まる → active へ戻す。
     expect(TRIP_SRC).toMatch(
-      /known\.kind === "ended"[\s\S]{0,900}?rec\.kind === "unknown"[\s\S]{0,300}?setPhase\("active"\)/,
+      /known\.kind === "ended"[\s\S]*?rec\.kind === "unknown"[\s\S]{0,300}?setPhase\("active"\)/,
+    );
+  });
+
+  it("⚠既 ended でも、先に貯めた位置記録を送り切る (@codex #356 P1)", () => {
+    // 無操作1時間の自動終了が入ると、圏外で歩き続けた人は必ずこの経路に来る。
+    // ここで送らずに reconcile へ進むと、巡回が null になった時点で記録係が
+    // 初期化され、**端末に貯めた記録がまるごと消える**。
+    // 送信は reconcile (fetchActiveSession) より前。
+    expect(TRIP_SRC).toMatch(
+      /known\.kind === "ended"[\s\S]*?onBeforeSessionEnd\(\)[\s\S]*?fetchActiveSession\(/,
+    );
+    // 送れなかったら reconcile せず、記録を残したまま再試行/破棄へ倒す
+    expect(TRIP_SRC).toMatch(
+      /drained === false[\s\S]{0,600}?setEndBlockedByBuffer\(true\)[\s\S]{0,120}?setPhase\("active"\)[\s\S]{0,40}?return;/,
+    );
+  });
+
+  it("⚠送り切れたら「終わった」と伝える (@codex #356 P2)", () => {
+    // 記録が届いた巡回は「まだ歩いているかも」として踏破マップから外れている。
+    // 本人が終了を押したのだから、見回りの次の1時間を待たずに戻せる。
+    // 伝えないと、歩いた道が最大1時間以上（見回りが遅れればさらに）出ない。
+    expect(TRIP_SRC).toMatch(
+      /drained === false[\s\S]{0,900}?method: "PATCH"[\s\S]{0,300}?status: "ended"/,
     );
   });
 });

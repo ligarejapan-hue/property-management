@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
+import { TRIP_AUTO_END_REASON } from "@/lib/field-survey-auto-end";
 import {
   createFieldSurveySessionSchema,
   fieldSurveySessionListQuerySchema,
@@ -96,7 +97,21 @@ export async function POST(request: NextRequest) {
               status: "active",
               updatedAt: existingActive.updatedAt,
             },
-            data: { status: "ended", endedAt: existingActive.updatedAt },
+            // ⚠**自動終了の印を付ける**(@codex #356 P2)。付けないと人が押した
+            // 終了と区別できず、圏外で貯めた位置記録が復帰後に捨てられる。
+            // 自動終了の経路はすべて同じ印を付ける。
+            data: {
+              status: "ended",
+              endedAt: existingActive.updatedAt,
+              endReason: TRIP_AUTO_END_REASON,
+              // ⚠**自動終了の経路はすべて同じ扱いにする**(@codex #356 P2)。
+              // 見回りの自動終了と同じく、確定するまでは踏破マップ・履歴に
+              // 出さない。この経路は「新しい巡回を始めた」= 本人はここに居る
+              // ので生の現在地が漏れる話ではないが、**経路ごとに扱いを変えると
+              // その差が次の穴になる**(片方だけ直す事故を繰り返してきた)。
+              // 確定は本人が終了を押すか、次の見回りが無操作を再確認したとき。
+              reconcilePending: true,
+            },
           });
           if (autoEnded.count > 0) {
             endedSnapshot = existingActive;
@@ -221,6 +236,9 @@ export async function GET(request: NextRequest) {
     const where: {
       staffUserId?: string;
       status?: "active" | "ended" | "cancelled";
+      OR?: Array<
+        { staffUserId: string } | { reconcilePending: false | null }
+      >;
     } = {};
 
     if (canSeeAll && staffUserId) {
@@ -235,6 +253,21 @@ export async function GET(request: NextRequest) {
       where.staffUserId = session.id;
     }
     if (status) where.status = status;
+    // ⚠**確定していない自動終了は、他スタッフの履歴に出さない**(@codex #356 P1)。
+    //
+    // 自動終了(無操作1時間)は「本人がまだ歩いているかもしれない」状態でも起きる。
+    // 踏破マップ側は既に隠しているが、**履歴一覧にも同じ守りが要る**:
+    // 一覧は既定で「終了した巡回」を出すため、管理者が履歴から開いて
+    // 生の軌跡を追えてしまう(＝実行中の巡回を隠す守りの迂回)。
+    // 本人には見せる(自分の記録の確認を妨げない)。
+    // ⚠NULL の扱いに注意: 既存行と通常の終了は NULL なので、`not: true` では
+    // なく「false または NULL」を明示する(SQL では NOT(NULL=true) が NULL に
+    // なり、**過去の巡回がまるごと履歴から消える**)。
+    where.OR = [
+      { staffUserId: session.id },
+      { reconcilePending: false },
+      { reconcilePending: null },
+    ];
 
     const [total, sessions] = await Promise.all([
       prisma.fieldSurveySession.count({ where }),

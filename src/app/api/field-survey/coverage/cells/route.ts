@@ -143,6 +143,11 @@ export async function GET(request: NextRequest) {
         AND tp.lng >= ${q.west}::numeric
         AND tp.lng < ${q.east}::numeric
         AND s.status::text = 'ended'
+        -- ⚠自動終了した後に位置記録が届いた巡回は除く (@codex #356 P1)。
+        -- 終了扱いのまま位置が更新され続けると、実行中の巡回を隠す守りを抜けて
+        -- **まだ歩いている人の現在位置が他スタッフに追える**。
+        -- NULL (既存行・通常の終了) は対象に含めるため IS NOT TRUE で判定する。
+        AND s.reconcile_pending IS NOT TRUE
         AND (
           ${fromAtIso}::timestamptz IS NULL
           OR tp.recorded_at >= (${fromAtIso}::timestamptz AT TIME ZONE 'UTC')

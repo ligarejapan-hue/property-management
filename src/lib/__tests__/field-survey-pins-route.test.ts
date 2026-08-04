@@ -1636,8 +1636,11 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
-  it("sessionId 解除 (null) では session を touch しない", async () => {
+  it("sessionId 解除 (null) では紐づけ先の検証をしない", async () => {
     // 解除は「どの session にも紐づかない」への遷移なので active 検証は不要。
+    // ⚠ただし**外された側の巡回は「触られた」ものとして数える** (@codex #356 P2)。
+    // 数えないと、その巡回の中身を今まさに整理しているのに無操作扱いになり、
+    // 1時間の境目では直後に自動終了され得る。
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue([
       ...fieldPerms,
@@ -1674,7 +1677,13 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
       { params },
     );
     expect(res.status).toBe(200);
-    expect(prisma.fieldSurveySession.updateMany).not.toHaveBeenCalled();
+    // 走ってよいのは「外された側の心拍」だけ（紐づけ先の active 検証ではない）。
+    const calls = (prisma.fieldSurveySession.updateMany as Mock).mock.calls;
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toEqual({
+      where: { id: SESSION_ID, status: "active" },
+      data: { updatedAt: expect.any(Date) },
+    });
   });
 
   it("既存の巡回なし×候補以外ピンでも、メモだけの更新は通す (旧データを編集不能にしない)", async () => {

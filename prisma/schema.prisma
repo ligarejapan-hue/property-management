@@ -867,6 +867,17 @@ model FieldSurveySession {
   startedAt   DateTime                @map("started_at")
   endedAt     DateTime?               @map("ended_at")
   status      FieldSurveySessionStatus @default(active)
+  // 終了のしかた。null = 人が終了ボタンを押した(従来)。"idle_timeout" = 無操作で
+  // 自動終了した。⚠**圏外で貯めた位置記録を後から受け取れるようにするため**に要る
+  // (@codex #356 P1): 自動終了した巡回にだけ、復帰後の送信を許す。
+  endReason   String?                 @map("end_reason")
+  // 自動終了した後に位置記録が届いた = **まだ歩いている可能性がある**印
+  // (@codex #356 P1)。true の間はこの巡回を踏破マップに出さない。
+  // ⚠これが無いと「自動終了した巡回に後から記録を受け取る」仕組みが、
+  // 実行中の巡回を隠す守り (踏破マップは終了した巡回だけを見せる) を抜けて、
+  // **まだ歩いている人の現在位置が他スタッフに見える**。
+  // 次の見回りで無操作1時間を再確認できたら false に戻す。
+  reconcilePending Boolean?            @map("reconcile_pending")
   memo        String?
   pointCount  Int                     @default(0) @map("point_count")
   // #317: 巡回終了フェンスの世代カウンタ。位置記録の開始 (フェンス touch =

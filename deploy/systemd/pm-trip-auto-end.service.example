@@ -1,0 +1,37 @@
+# =============================================================================
+# 巡回の自動終了 (無操作1時間) — 実行ユニット
+# =============================================================================
+# 使い方:
+#   sudo cp deploy/systemd/pm-trip-auto-end.service.example \
+#            /etc/systemd/system/pm-trip-auto-end.service
+#   sudo cp deploy/systemd/pm-trip-auto-end.timer.example \
+#            /etc/systemd/system/pm-trip-auto-end.timer
+#   # app.env に FIELD_SURVEY_AUTO_END_SECRET を設定してから:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now pm-trip-auto-end.timer
+#   # 確認: systemctl list-timers pm-trip-auto-end.timer
+#
+# ⚠合言葉が未設定なら route は 503 を返すだけで何も終了しない (安全側)。
+# ⚠?dryRun=1 を付けると件数だけ返して終了させない (投入前の確認に使う)。
+# =============================================================================
+
+[Unit]
+Description=Auto-end idle field-survey trips (property-management)
+After=network.target property-management.service
+
+[Service]
+Type=oneshot
+# app.env から合言葉だけを読む (root:600 のまま・値はログに出さない)。
+EnvironmentFile=/etc/property-management/app.env
+# ⚠**合言葉を curl の引数に置かない**。systemd が展開した値は argv に載るため、
+#   実行のたびに `ps` や /proc/<pid>/cmdline から**同一ホストの他プロセスに見える**
+#   (app.env を root:600 にしている意味が無くなる)。この合言葉は「巡回を終了させる
+#   口」を守るものなので漏らさない。
+#   → 値はシェル変数のまま標準入力へ流し、curl には `-H @-` で読ませる。
+#     argv に載るのは変数名だけで、値は載らない。
+# ⚠**`%` は必ず `%%` と書く** (@codex #356 P1)。systemd は ExecStart の `%x` を
+#   自分の記法として先に置き換える (`%s` = ログインシェル)。`printf "%s"` のまま
+#   置くと `printf "/bin/bash"` に化け、**合言葉ではない文字列が送られて 403**。
+#   自動終了が一度も動かないのに、systemd 上は成功して見えるため気づきにくい。
+ExecStart=/bin/sh -c 'printf "%%s" "x-auto-end-secret: $FIELD_SURVEY_AUTO_END_SECRET" | /usr/bin/curl --fail --silent --show-error --max-time 60 -X POST http://127.0.0.1:3000/api/field-survey/sessions/auto-end-run -H @-'
+# 失敗しても次回の tick で拾えるので再起動はしない。

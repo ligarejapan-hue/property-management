@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
+import { touchTripActivity } from "@/lib/field-survey-auto-end";
 import { patchFieldSurveyPinSchema } from "@/lib/validators";
 import { assertPropertyAccessible } from "@/lib/field-survey-property-access";
 
@@ -227,6 +228,38 @@ export async function PATCH(
     // 2 本 (例: status closed と archived) が双方成功し、読み直しで相手の結果を
     // 拾って応答と AuditLog の statusAfter が食い違う (@codex #328 R3 P2)。
     const updated = await prisma.$transaction(async (tx) => {
+      // ⚠**巡回に触るのを先にする**(@codex #356 P1)。ピンを書き換えてから
+      // 触ると、その間は巡回の行を掴んでいないため、見回りが横から巡回を
+      // 終了させられる (心拍は 0 行更新で黙って終わるので、操作中なのに
+      // 終了が成立する)。先に触れば行ロックを取るので、見回りの CAS は
+      // この tx の commit を待ち、待った先では最終活動時刻が変わって必ず外れる。
+      //
+      // ⚠session 紐付けは同一 tx 内の条件付き touch で確定させる（総点検P3）。
+      // tx の外の active 検証は check-then-write で、検証と書込のすき間に
+      // session が終了すると**終了済み巡回へピンが紐づく**。POST /pins と同じ
+      // 「touch の 0 行 = 並行終了の合図 → 409 で rollback」に揃える。
+      // ⚠この厳密な確認を心拍より先に置く: 心拍は 0 行でも通す約束なので、
+      // 先に走らせると「紐付け先が終了していた」を握り潰してしまう。
+      if (patch.sessionId !== undefined && patch.sessionId !== null) {
+        const touched = await tx.fieldSurveySession.updateMany({
+          where: { id: patch.sessionId, status: "active" },
+          data: { updatedAt: new Date() },
+        });
+        if (touched.count === 0) {
+          throw new ApiError(
+            409,
+            "active 状態でない session には紐付けられません",
+            "INVALID_STATE",
+          );
+        }
+      }
+      // ⚠残り (メモ/種類だけの編集・付け替えで**外された側**・解除) を数える。
+      // 外された側を数えないと、その巡回の中身を今まさに整理しているのに
+      // 無操作扱いになり、1時間の境目では直後に自動終了され得る。
+      for (const sid of new Set([nextSessionId, existing.sessionId])) {
+        if (sid === patch.sessionId) continue; // 直前の厳密な確認で済んでいる
+        await touchTripActivity(tx, sid);
+      }
       const casResult = await tx.fieldSurveyPin.updateMany({
         where: {
           id,
@@ -244,24 +277,6 @@ export async function PATCH(
         },
       });
       if (casResult.count === 0) return null;
-      // ⚠session 紐付けは同一 tx 内の条件付き touch で確定させる（総点検P3）。
-      // 上の active 検証は tx の外の check-then-write で、検証と書込のすき間に
-      // session が終了すると**終了済み巡回へピンが紐づく**。POST /pins と同じ
-      // 「touch の 0 行 = 並行終了の合図 → 409 で rollback」に揃える
-      // （touch は B-7 の最終活動時刻の更新も兼ねる）。
-      if (patch.sessionId !== undefined && patch.sessionId !== null) {
-        const touched = await tx.fieldSurveySession.updateMany({
-          where: { id: patch.sessionId, status: "active" },
-          data: { updatedAt: new Date() },
-        });
-        if (touched.count === 0) {
-          throw new ApiError(
-            409,
-            "active 状態でない session には紐付けられません",
-            "INVALID_STATE",
-          );
-        }
-      }
       return tx.fieldSurveyPin.findUniqueOrThrow({
         where: { id },
         select: SELECT_PIN,
@@ -350,7 +365,8 @@ export async function DELETE(
 
     const existing = await prisma.fieldSurveyPin.findUnique({
       where: { id },
-      select: { id: true, staffUserId: true, status: true },
+      // sessionId は巡回の活動更新に使う (@codex #356 P2)。
+      select: { id: true, staffUserId: true, status: true, sessionId: true },
     });
     if (!existing) {
       throw new ApiError(404, "pin が見つかりません", "NOT_FOUND");
@@ -363,9 +379,21 @@ export async function DELETE(
     }
 
     // 冪等な status 遷移。既に archived なら 0 行更新 = 再削除でも安全に成功扱い。
-    const result = await prisma.fieldSurveyPin.updateMany({
-      where: { id, status: { not: "archived" } },
-      data: { status: "archived" },
+    // ⚠**削除と心拍を同じ transaction で行う**(@codex #356 P2)。別々だと、
+    // 削除が commit してから心拍が走るまでの隙間に見回りが入り込み、
+    // 「本当に操作しているのに終了させられる」(心拍は 0 行更新で黙って終わる)。
+    // 同一 tx なら、心拍が勝てば見回りの CAS が外れ、見回りが勝てば削除の前に終わる。
+    // ⚠**心拍を先に打つ**(@codex #356 P1)。同じ tx でも、削除を先に走らせると
+    // その間は巡回の行に触っていないため、見回りが横から巡回を終了させられる
+    // (心拍は 0 行更新で黙って終わるので、操作中なのに終了が成立する)。
+    // 先に打てば巡回の行を掴むので、見回りの CAS はこの tx の commit を待ち、
+    // 待った先では最終活動時刻が変わっていて必ず外れる。
+    const result = await prisma.$transaction(async (tx) => {
+      await touchTripActivity(tx, existing.sessionId);
+      return tx.fieldSurveyPin.updateMany({
+        where: { id, status: { not: "archived" } },
+        data: { status: "archived" },
+      });
     });
 
     // 実際に open/closed → archived へ遷移したときのみ監査ログを残す。

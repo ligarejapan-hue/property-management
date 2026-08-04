@@ -572,6 +572,67 @@ export default function TripControls({
         const known = await fetchOwnActiveGeneration(target.id);
         if (!mountedRef.current) return;
         if (known.kind === "ended") {
+          // ⚠**先に、貯まっている位置記録を送り切る** (@codex #356 P1)。
+          //
+          // 無操作1時間の自動終了が入ると、圏外で歩き続けた人は**必ずこの経路**に
+          // 来る (戻って「巡回終了」を押した時点で、server 側は既に終了済み)。
+          // ここで送らずに reconcile へ進むと、巡回が null になった時点で記録係が
+          // 初期化され、**端末に貯めた記録がまるごと消える**。
+          // server 側は自動終了した巡回に限って後からの受け取りを許しているので、
+          // 送りさえすれば失われない。送れなかったときは reconcile せず、
+          // 記録を残したまま再試行 / 「破棄して終了」へ倒す。
+          if (onBeforeSessionEnd && !opts?.discardUnsent) {
+            let drained: boolean | void = undefined;
+            let drainTimedOut = false;
+            let drainTimer: ReturnType<typeof setTimeout> | undefined;
+            try {
+              drained = await Promise.race([
+                Promise.resolve(onBeforeSessionEnd()),
+                new Promise<false>((resolve) => {
+                  drainTimer = setTimeout(() => {
+                    drainTimedOut = true;
+                    resolve(false);
+                  }, END_FLUSH_SETTLE_TIMEOUT_MS);
+                }),
+              ]);
+            } catch {
+              // 送信の失敗で終了操作を壊さない (下の false 分岐で案内する)。
+            } finally {
+              if (drainTimer) clearTimeout(drainTimer);
+            }
+            if (!mountedRef.current) return;
+            if (drained === false) {
+              setError(
+                drainTimedOut
+                  ? "位置情報の送信が完了しません。電波の良い場所へ移動して、もう一度「巡回終了」を押すか、下の「破棄して終了」で終了できます。"
+                  : "未送信の位置情報が残っていて送信できません。電波の良い場所で、もう一度「巡回終了」を押すと再送信します。",
+              );
+              // 圏外のまま終業する日の脱出口 (「破棄して終了」) を出す。
+              setEndBlockedByBuffer(true);
+              setPhase("active");
+              return;
+            }
+            // ⚠**送り切れたら「終わった」と伝える** (@codex #356 P2)。
+            // 記録が届いた巡回は「まだ歩いているかも」として踏破マップから
+            // 外れている。本人が終了を押したのだから、見回りの次の1時間を
+            // 待たずに戻せる。ここで伝えないと、歩いた道が最大1時間以上
+            // (見回りが遅れればさらに) 地図に出ない。
+            // 失敗しても操作は止めない (見回りが後で必ず戻す)。
+            try {
+              await fetch(
+                `/api/field-survey/sessions/${encodeURIComponent(target.id)}`,
+                {
+                  method: "PATCH",
+                  credentials: "same-origin",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ status: "ended" }),
+                },
+              );
+            } catch {
+              // 通信失敗は無視 (踏破マップへの復帰が遅れるだけ)。
+            }
+            if (!mountedRef.current) return;
+          }
           // 既に active でない (並行終了済み等)。全体 reconcile で UI を整合
           // させ、この終了操作は完了扱いにする。reconcile 自体が timeout 等で
           // 判定不能 (unknown・state 未変更) の場合は phase="ending" のまま

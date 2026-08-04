@@ -287,13 +287,20 @@ describe("trip-controls.tsx — Phase 1-F-2 巡回終了の明示連動 (修正1
     expect(TRIP_SRC).toMatch(
       /beforeOk\s*===\s*false[\s\S]*?未送信の位置情報が残って[\s\S]*?setPhase\("active"\)[\s\S]*?return/,
     );
-    // false 分岐から PATCH に到達しない構造 (return がある)
+    // false 分岐から終了 PATCH に到達しない構造 (return がある)。
+    // ⚠終了 PATCH は「フェンストークンを同封する方」で特定する (@codex #356 P2)。
+    // 自動終了ぶんの確定 PATCH がこれより前に増えたため、単に「最初の PATCH」で
+    // 切ると別物を掴む。
     const endBlock = TRIP_SRC.match(
-      /const endSession[\s\S]*?method:\s*"PATCH"/,
+      /const endSession[\s\S]*?expectedActivitySeq: fenceToken/,
     );
     const m = endBlock?.[0] ?? "";
     expect(m).toMatch(/beforeOk\s*===\s*false/);
     expect(m).toMatch(/setPhase\("active"\)/);
+    // 自動終了ぶんの経路も、送れなかったら確定 PATCH を打たずに戻る
+    expect(m).toMatch(
+      /drained === false[\s\S]{0,600}?setPhase\("active"\)[\s\S]{0,40}?return;/,
+    );
   });
 });
 

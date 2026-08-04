@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
+import { touchTripActivity } from "@/lib/field-survey-auto-end";
 import { getStorage } from "@/lib/storage";
 import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
 
@@ -40,7 +41,8 @@ export async function DELETE(
         pinId: true,
         fileUrl: true,
         thumbnailUrl: true,
-        pin: { select: { staffUserId: true, status: true } },
+        // sessionId は巡回の活動更新に使う(@codex #356 P2)。
+        pin: { select: { staffUserId: true, status: true, sessionId: true } },
       },
     });
     if (!photo || photo.pinId !== id) {
@@ -60,7 +62,17 @@ export async function DELETE(
 
     const fileUrlBeforeDelete = photo.fileUrl;
     const thumbnailUrlBeforeDelete = photo.thumbnailUrl;
-    await prisma.fieldSurveyPinPhoto.delete({ where: { id: photoId } });
+    // ⚠**削除と心拍を同じ transaction で行う**(@codex #356 P2)。別々だと、
+    // 削除が commit してから心拍が走るまでの隙間に見回りが入り込み、
+    // 「本当に操作しているのに終了させられる」。撮り直し(消して撮る)を
+    // 繰り返している最中に切られないようにする。
+    // ⚠**心拍を先に打つ**(@codex #356 P1)。写真を消してから打つと、その間は
+    // 巡回の行に触っていないため、見回りが横から巡回を終了させられる
+    // (心拍は 0 行更新で黙って終わるので、操作中なのに終了が成立してしまう)。
+    await prisma.$transaction(async (tx) => {
+      await touchTripActivity(tx, photo.pin?.sessionId ?? null);
+      await tx.fieldSurveyPinPhoto.delete({ where: { id: photoId } });
+    });
 
     // best-effort: 本体 + (あれば) thumbnail の実体を消す。fileUrl は /uploads/...
     // proxy 相対なので extractStorageKeyFromUrl で key を復元できる。
