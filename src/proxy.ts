@@ -13,7 +13,13 @@ const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads
 // - /api/attachments/cleanup-run: cron 駆動の添付お掃除。人間 auth は持たず、
 //   ルート側の x-cleanup-secret で保護する（secret 未設定なら 503 で dormant）。
 //   ここで素通しできないと、合言葉付きの cron 呼び出しも /login へ redirect され実行されない。
-const PUBLIC_EXACT_PATHS = ["/api/health", "/api/attachments/cleanup-run"];
+// - /api/field-survey/sessions/auto-end-run: cron 駆動の巡回自動終了（無操作1時間）。
+//   同上（x-auto-end-secret で保護・未設定なら 503 dormant）。
+const PUBLIC_EXACT_PATHS = [
+  "/api/health",
+  "/api/attachments/cleanup-run",
+  "/api/field-survey/sessions/auto-end-run",
+];
 
 export function isPublicPath(pathname: string): boolean {
   if (PUBLIC_EXACT_PATHS.includes(pathname)) return true;

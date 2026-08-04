@@ -1,0 +1,103 @@
+import { timingSafeEqual } from "crypto";
+import prisma from "@/lib/prisma";
+import { ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
+import { writeAuditLog } from "@/lib/audit";
+import {
+  TRIP_AUTO_END_BATCH_LIMIT,
+  TRIP_AUTO_END_IDLE_MS,
+  autoEndedAt,
+  type TripAutoEndResult,
+} from "@/lib/field-survey-auto-end";
+
+/**
+ * POST /api/field-survey/sessions/auto-end-run — 巡回の自動終了の実行口（cron 用）。
+ *
+ * 発注者決定 (2026-08-03): **無操作1時間で巡回を自動終了する**。
+ * 「巡回終了ボタンを押さずにブラウザから離れても終わる」を実現する唯一の方法が
+ * サーバー側の定期実行（ブラウザは閉じた時点で JS が止まる）。
+ *
+ * 作りは添付お掃除 (`/api/attachments/cleanup-run`) と同型:
+ * - `FIELD_SURVEY_AUTO_END_SECRET` 未設定なら **503（dormant＝設定するまで何も終了しない）**
+ * - header `x-auto-end-secret` 不一致は 403。人間 auth は不要（cron 駆動）
+ * - `?dryRun=1` で件数のみ（終了させない）
+ * - ⚠`src/proxy.ts` の `PUBLIC_EXACT_PATHS` に本パスの追加が必要（無いと 307）
+ */
+export async function POST(request: Request) {
+  try {
+    const secret = process.env.FIELD_SURVEY_AUTO_END_SECRET;
+    if (!secret) {
+      throw new ApiError(503, "巡回の自動終了は未設定です", "NOT_CONFIGURED");
+    }
+    const headerSecret = request.headers.get("x-auto-end-secret") ?? "";
+    const secretBuf = Buffer.from(secret);
+    const headerBuf = Buffer.from(headerSecret);
+    if (
+      secretBuf.length !== headerBuf.length ||
+      !timingSafeEqual(secretBuf, headerBuf)
+    ) {
+      throw new ApiError(403, "権限がありません", "FORBIDDEN");
+    }
+    const dryRun = new URL(request.url).searchParams.get("dryRun") === "1";
+    const now = new Date();
+    const threshold = new Date(now.getTime() - TRIP_AUTO_END_IDLE_MS);
+
+    // 無操作が閾値を超えた active な巡回。⚠`updatedAt` は位置記録の送信でも
+    // ピン作成でも動くので、位置記録を使わない巡回も正しく「活動中」と見なせる。
+    const stale = await prisma.fieldSurveySession.findMany({
+      where: { status: "active", updatedAt: { lt: threshold } },
+      select: {
+        id: true,
+        staffUserId: true,
+        startedAt: true,
+        updatedAt: true,
+        pointCount: true,
+      },
+      orderBy: { updatedAt: "asc" },
+      take: TRIP_AUTO_END_BATCH_LIMIT,
+    });
+
+    const result: TripAutoEndResult = {
+      scanned: stale.length,
+      ended: 0,
+      skipped: 0,
+    };
+    if (dryRun) return apiResponse({ ...result, dryRun });
+
+    for (const s of stale) {
+      // ⚠**読み取った時点の updatedAt を条件に含める**。読んでから書くまでの間に
+      // 位置記録が届いていたら（＝まだ歩いている）終了させない。既存の24時間
+      // 自動終了と同じ守り方。
+      const upd = await prisma.fieldSurveySession.updateMany({
+        where: { id: s.id, status: "active", updatedAt: s.updatedAt },
+        data: { status: "ended", endedAt: autoEndedAt(s) },
+      });
+      if (upd.count === 0) {
+        result.skipped++;
+        continue;
+      }
+      result.ended++;
+      // 監査は既存の action を使う（人が押した終了と区別できるよう reason を変える）。
+      // ⚠識別子だけ。座標・メモ・氏名は載せない。
+      await writeAuditLog({
+        userId: s.staffUserId,
+        action: "field_survey_session_auto_end",
+        targetTable: "field_survey_sessions",
+        targetId: s.id,
+        detail: {
+          sessionId: s.id,
+          reason: "idle_timeout",
+          idleMinutes: Math.floor(TRIP_AUTO_END_IDLE_MS / 60000),
+          pointCount: s.pointCount,
+        },
+      });
+    }
+
+    // 非PII の運用ログ（件数のみ）。
+    console.log(
+      `[trip-auto-end] scanned=${result.scanned} ended=${result.ended} skipped=${result.skipped}`,
+    );
+    return apiResponse({ ...result, dryRun });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
