@@ -17,6 +17,9 @@ import {
   attachLiveShot,
   completeLiveView,
   isValidLiveRef,
+  isLiveViewCancelRequested,
+  clearLiveViewCancel,
+  closeLiveViewCancelWindow,
 } from "@/lib/registry-fetch/live-view-store";
 
 // ---------- POST /api/properties/[id]/registry/search ----------
@@ -99,6 +102,18 @@ export async function POST(
           attachShot(seq: number, shot: Uint8Array): void {
             attachLiveShot(session.id, id, liveRef, seq, shot);
           },
+          // 実況パネルの「中止」。⚠provider は節目ごとにこれを見て**自分で**止まる
+          // (外から処理を殺さない = 外部サイトを中途半端な状態で放り出さない)。
+          // ⚠課金後は provider 側の判断で無視される (cancel-safety.ts)。
+          isCancelRequested(): boolean {
+            return isLiveViewCancelRequested(session.id, id, liveRef);
+          },
+          // ⚠自動操作が終わったら中止の受け付けを閉じる (@codex #357 P2)。
+          // 以降は中止を見る場所がもう無いので、受け付けたままにすると
+          // 「中止しています…」と表示したまま結果が出る食い違いが起きる。
+          endCancelable(): void {
+            closeLiveViewCancelWindow(session.id, id, liveRef);
+          },
         }
       : undefined;
 
@@ -116,7 +131,13 @@ export async function POST(
     } finally {
       // 成否に関わらず実況を完了へ (パネルの「実行中」を残さない)。TTL 経過で
       // ストアから消える。
-      if (liveRef) completeLiveView(session.id, id, liveRef);
+      if (liveRef) {
+        completeLiveView(session.id, id, liveRef);
+        // ⚠**中止の印はここで消す** (@codex #357 P2)。この検索が終わった時点が
+        // 印の役目の終わり。寿命を待ち時間から見積もる方式だと、有料取得の
+        // 待ち行列が伸びたときに**中止したはずの検索が動き出す**。
+        clearLiveViewCancel(session.id, id, liveRef);
+      }
     }
   } catch (error) {
     return handleApiError(error);

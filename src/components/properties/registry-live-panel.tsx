@@ -16,6 +16,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  cancelRegistryLiveView,
   fetchRegistryLiveView,
   registryLiveShotUrl,
   type RegistryLiveViewStep,
@@ -63,6 +64,9 @@ export default function RegistryLivePanel({
 }) {
   const [steps, setSteps] = useState<RegistryLiveViewStep[]>([]);
   const [done, setDone] = useState(false);
+  // 中止の送信中。⚠押した瞬間に止まるわけではないので「中止しています…」と出す。
+  // 実際に止まるのは、自動操作が安全な節目まで進んでから。
+  const [cancelling, setCancelling] = useState(false);
   const [enlarged, setEnlarged] = useState(false);
   // 表示期限切れ (done 観測から PANEL_RETENTION_MS 経過)。スクショの描画を
   // 畳み、文言のみの終了表示に切り替える。
@@ -89,6 +93,26 @@ export default function RegistryLivePanel({
   // 失敗は静かに数えるだけ (表示のエラーは親の責務)・上限で停止 (無限
   // ポーリング防止の二重防御)。既に取得中なら、その取得の Promise を返す
   // (重ね撃ちせず、呼び出し側が完了を待てる)。
+  /**
+   * 「中止」押下。⚠要求を送るだけで、止まるのは自動操作が安全な節目に来てから。
+   * 失敗しても画面は壊さない (実行は続き、完了すれば通常どおり結果が出る)。
+   */
+  const handleCancel = async (): Promise<void> => {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      const res = await cancelRegistryLiveView(propertyId, liveRef);
+      // ⚠**受け付けられた時だけ「中止しています…」で固定する**(@codex #357 P2)。
+      // 検索 POST が実況を登録する前 (権限・資格情報・provider の解決中) に押すと
+      // まだ実況が無く accepted:false が返る。これを無視すると、実行は普通に続いて
+      // いるのにボタンだけ押せないまま固まり、**もう中止できなくなる**。
+      if (!res.data.accepted) setCancelling(false);
+    } catch {
+      // 通信失敗。押し直せるよう戻すだけ (理由は画面に出さない=秘匿情報の混入を避ける)。
+      setCancelling(false);
+    }
+  };
+
   const pollOnce = (isCancelled: () => boolean): Promise<void> => {
     if (inFlightRef.current) {
       return inFlightPromiseRef.current ?? Promise.resolve();
@@ -222,6 +246,22 @@ export default function RegistryLivePanel({
           <span className="text-[10px] font-normal text-gray-500 dark:text-gray-400">
             (完了)
           </span>
+        )}
+        {/* 中止 (発注者要望 2026-08-03)。実行中だけ出す。
+            ⚠押しても即座には止まらない。自動操作が**安全な節目**まで進んでから
+            自分で抜ける (途中で殺すと外部サイトを中途半端な状態で放り出す)。
+            この候補検索の経路では**お金は動かない**ので、いつ止めても課金は無い。 */}
+        {!done && !searchSettled && (
+          <button
+            type="button"
+            onClick={() => void handleCancel()}
+            disabled={cancelling}
+            data-testid="registry-live-cancel"
+            title="自動操作を中止します（この検索では課金は発生しません）"
+            className="ml-auto rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+          >
+            {cancelling ? "中止しています…" : "中止"}
+          </button>
         )}
       </div>
 

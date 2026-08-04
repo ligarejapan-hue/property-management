@@ -28,6 +28,11 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import {
+  CANCEL_ACCEPTED_MESSAGE,
+  CANCEL_IGNORED_CHARGED_MESSAGE,
+  decideCancel,
+} from "@/lib/registry-fetch/cancel-safety";
+import {
   processRegistryPdf,
   type RegistryPdfSession,
 } from "@/lib/registry-pdf/process";
@@ -98,6 +103,9 @@ const PROVIDER_ERROR_STATUS: Readonly<Record<RegistryFetchErrorCode, number>> = 
   // 「存在しない」(404)でもないので 422(内容が処理できない)を返し、
   // 利用者に「住所を直せば通る」と伝わる分類にする。
   location_rejected: 422,
+  // 利用者が自分で止めた=クライアント都合の中断。499 は非標準なので 409
+  // (現在の状態と衝突)を使い、サーバー障害(5xx)と明確に分ける。
+  cancelled: 409,
   provider_error: 502,
   service_hours: 503, // 利用時間外=一時的に利用不可(Service Unavailable)。
   service_unavailable: 503, // 接続不可(時間外の可能性)=同じく一時的利用不可。
@@ -1034,7 +1042,44 @@ function createPlaywrightRegistryPage(
       // LIVE_SCREENSHOT_TOTAL_BUDGET_MS で有界 (超過後は文字進行のみ)。
       let liveShotBudgetMs = LIVE_SCREENSHOT_TOTAL_BUDGET_MS;
       let liveShotInFlight = false;
+      /**
+       * 中止の節目。⚠**外から処理を殺さない**。ここで自分から throw して、外部
+       * サイトを安全な状態のまま抜ける。
+       * ⚠**課金後は止まらない**。請求を押した後に止めると「お金は払ったのに
+       * 書類が手に入らない」状態を作るため、取得しきる方を選ぶ (cancel-safety.ts)。
+       */
+      const checkCancel = (): void => {
+        const live = input.live;
+        if (!live?.isCancelRequested) return;
+        let requested = false;
+        try {
+          requested = live.isCancelRequested() === true;
+        } catch {
+          return; // 実況の不調で検索を壊さない
+        }
+        // ⚠この関数は**候補検索(段階①)**で、お金は一切動かない経路。
+        // よって charged は常に false = 中止はいつでも安全に受け付けられる。
+        // 有料取得(段階②)には**中止を用意しない**(下の設計判断を参照)。
+        const decision = decideCancel(requested, false);
+        if (decision.kind === "stop") {
+          try {
+            live.step(CANCEL_ACCEPTED_MESSAGE);
+          } catch {
+            /* 実況は best-effort */
+          }
+          throw new RegistryFetchError("cancelled");
+        }
+        if (decision.kind === "ignore-charged") {
+          try {
+            live.step(CANCEL_IGNORED_CHARGED_MESSAGE);
+          } catch {
+            /* 実況は best-effort */
+          }
+        }
+      };
       const reportLive = (label: string): void => {
+        // ⚠ステップを進めるたびに中止を見る。節目を別で数え上げると入れ忘れる。
+        checkCancel();
         const live = input.live;
         if (!live) return;
         let seq = -1;
@@ -1120,6 +1165,11 @@ function createPlaywrightRegistryPage(
         reportLive("地番検索を実行しています…");
         await page.click(REGISTRY_SELECTORS.dialogSearch);
       } catch (err) {
+        // ⚠**分類済みの失敗はそのまま通す**(@codex #357 P2)。ここで一律に
+        // provider_error へ潰すと、利用者が押した「中止」まで**外部サービスの
+        // 障害(502)**として扱われ、実況にも監査にも「provider_error」と残る。
+        // 中止は成功であって障害ではない。後段の catch は既にこの形。
+        if (err instanceof RegistryFetchError) throw err;
         console.warn(
           "[registry-search] location search setup failed:",
           summarizeRegistrySearchError(err),

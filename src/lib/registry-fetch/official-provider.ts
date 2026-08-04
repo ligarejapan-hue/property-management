@@ -34,6 +34,7 @@ import type {
   RegistryCandidate,
   RegistryLiveReporter,
 } from "./types";
+import { CANCEL_ACCEPTED_MESSAGE } from "./cancel-safety";
 import { RegistryFetchError } from "./errors";
 import { runExclusivePurchase } from "./purchase-safety";
 import type { RegistryFetchThrottle } from "./throttle";
@@ -152,6 +153,13 @@ export interface OfficialRegistryProviderOptions {
 export const PAID_FLOW_EXTRA_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** 未分類の例外を provider_error に潰す（生メッセージ＝secret/PII を例外に載せない）。 */
+/**
+ * 順番待ちの間の中止を見に行く間隔 (@codex #357 P2)。
+ * 待ち行列は有料取得が前に居ると数分になり得るため、押した人を待たせない。
+ * 同一プロセス内のフラグを見るだけなので負荷は無視できる。
+ */
+const QUEUE_CANCEL_POLL_MS = 250;
+
 function classifyRegistryFetchError(err: unknown): RegistryFetchError {
   if (err instanceof RegistryFetchError) return err;
   // Playwright 等の生エラー（URL/入力/selector が混入しうる）は分類コードのみへ正規化。
@@ -397,7 +405,50 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     // ⚠アカウント同時1セッション制約(@codex #345 P1): **検索のログインも購入と同じ
     // ミューテックス**に通す。検索が購入と並行してログインすると、進行中の購入
     // セッションを強制ログアウトさせ、**課金だけ済んでPDFを取り逃す**。
-    return runExclusivePurchase(async () => {
+    // ⚠**待ち行列に残る処理を確実に止めるための局所の印** (@codex #357 P2)。
+    // 早めに中止として返すと、route は後片付けで**共有の印を消す**。順番が
+    // 回ってきた処理が共有の印だけを見ていると「中止されていない」と判断し、
+    // **中止したはずの検索がブラウザを起動してログインしてしまう**。
+    // 共有の印の寿命に依存しないよう、この実行専用の印も併せて見る。
+    let cancelObserved = false;
+    const isCancelled = (): boolean =>
+      cancelObserved || request.live?.isCancelRequested?.() === true;
+    const started = runExclusivePurchase(async () => {
+      // ⚠**順番待ちの間に押された中止を、ここで拾う** (@codex #357 P2)。
+      // アカウント同時1セッション制約のため、検索は上のミューテックスで
+      // 待たされることがある。待っている間の中止に気づかないと、
+      //   (1) 中止したのに**登記情報提供サービスへログインしてしまう**
+      //   (2) 起動やログインが失敗すると「中止」ではなく**外部サービスの障害**
+      //       として利用者にも監査にも残る
+      // の2つが起きる。ブラウザを起動する前が最初の安全な節目。
+      // 候補検索(段階①)はお金が動かないので、いつ止めても安全。
+      const abortIfCancelled = (): void => {
+        if (!isCancelled()) return;
+        try {
+          request.live?.step(CANCEL_ACCEPTED_MESSAGE);
+        } catch {
+          /* 実況は best-effort */
+        }
+        throw new RegistryFetchError("cancelled");
+      };
+      // ⚠**待っている最中に押された中止を、失敗に化けさせない** (@codex #357 P2)。
+      // ブラウザの起動やログインには時間がかかる。その待ちの最中に中止が押されて
+      // 待ちが失敗(timeout 等)で終わると、そのまま分類すると
+      // **利用者が自分で止めたのに「外部サービスの障害」として残る**
+      // (実況にも監査にも失敗として出る)。中止が押されていれば中止を優先する。
+      // 候補検索(段階①)は課金が動かないので、この扱いで取り違えは起きない。
+      const classifyOrCancelled = (err: unknown): RegistryFetchError => {
+        if (isCancelled()) {
+          try {
+            request.live?.step(CANCEL_ACCEPTED_MESSAGE);
+          } catch {
+            /* 実況は best-effort */
+          }
+          return new RegistryFetchError("cancelled");
+        }
+        return classifyRegistryFetchError(err);
+      };
+      abortIfCancelled();
       // 実況パネル (#317 とは別機能): ステップ進行の通知。label は固定文言のみ
       // (所在・地番・資格情報を入れない)。reporter は非 throw 契約だが、実況が
       // 検索本体を壊さないよう optional chain のみで触る。
@@ -406,7 +457,7 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       try {
         page = await this.withStartupTimeout(() => this.browserFactory!());
       } catch (err) {
-        throw classifyRegistryFetchError(err);
+        throw classifyOrCancelled(err);
       }
 
       try {
@@ -418,6 +469,10 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
           throw new RegistryFetchError("provider_error");
         }
         return await this.withTimeout(async () => {
+          // ⚠ログインの直前でもう一度見る (@codex #357 P2)。ブラウザの起動には
+          // 時間がかかるので、その間に押された中止をここで拾う
+          // = **無駄な実ログインをしない**。
+          abortIfCancelled();
           // ログイン場面は撮影しない (ID/PW が画面に写り得るため文言のみ =
           // ユーザー合意済みの「ぼかし or 省略」の省略側)。
           request.live?.step(
@@ -436,7 +491,8 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
           });
         });
       } catch (err) {
-        throw classifyRegistryFetchError(err);
+        // ログインの待ちが中止と同時に失敗した場合も、中止として返す。
+        throw classifyOrCancelled(err);
       } finally {
         try {
           await page.close();
@@ -444,6 +500,50 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
           // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
         }
       }
+    });
+
+    // ⚠**順番待ちの間に押された中止で、すぐ画面を解放する** (@codex #357 P2)。
+    //
+    // 検索は有料取得と同じ順番待ちに並ぶ。前が有料取得だと、順番が回るまで
+    // 数分かかることがある。上の中止確認は**自分の順番が来て初めて**動くため、
+    // 待っている間に中止を押した人は、実際には何も始まっていないのに
+    // 「中止しています…」の表示のまま数分待たされる。
+    //
+    // 待ち行列を抜けるのを待たずに中止として返す。実際の処理は、順番が回った
+    // ときに先頭の確認で自分から止まるので、放置しても外部サイトには触らない。
+    // 候補検索(段階①)はお金が動かないので、これで取り違えは起きない。
+    if (!request.live?.isCancelRequested) return started;
+    return await new Promise<RegistryCandidate[]>((resolve, reject) => {
+      let settled = false;
+      const finish = (fn: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearInterval(timer);
+        fn();
+      };
+      const timer = setInterval(() => {
+        if (request.live?.isCancelRequested?.() !== true) return;
+        finish(() => {
+          // ⚠共有の印は route の後片付けで消えるので、**この実行専用の印**を
+          // 立ててから返す。順番が回ってきた処理はこれを見て自分から止まる。
+          cancelObserved = true;
+          // 順番待ちのまま残る処理の失敗を拾っておく (握り潰さないと
+          // 未処理の rejection になる)。処理自体は順番が来たら自分で止まる。
+          void started.catch(() => {});
+          try {
+            request.live?.step(CANCEL_ACCEPTED_MESSAGE);
+          } catch {
+            /* 実況は best-effort */
+          }
+          reject(new RegistryFetchError("cancelled"));
+        });
+      }, QUEUE_CANCEL_POLL_MS);
+      // このタイマーでプロセスの終了を妨げない。
+      (timer as { unref?: () => void }).unref?.();
+      started.then(
+        (v) => finish(() => resolve(v)),
+        (e) => finish(() => reject(e)),
+      );
     });
   }
 

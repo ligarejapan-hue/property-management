@@ -31,6 +31,12 @@ interface LiveViewEntry {
   shots: Map<number, Uint8Array>;
   totalShotBytes: number;
   done: boolean;
+  /**
+   * 実行者が「中止」を押した印。provider が節目ごとに見て**自分で**止まる。
+   * ⚠外から処理を殺さない。強制終了すると外部サイトを中途半端な状態
+   * (カートに行だけ残る等)で放り出す恐れがある。
+   */
+  cancelRequested?: boolean;
   updatedAt: number;
   /**
    * TTL 到達で自動削除するタイマー (@codex P2: prune がアクセス起点だけだと、
@@ -124,6 +130,8 @@ export function beginLiveView(
   };
   store.set(k, entry);
   scheduleExpiry(k, entry);
+  // 実行中の印 (実況の期限とは無関係に、終了まで残す)。
+  activeOps.add(k);
   // 並行数の上限 (最古から削除)。
   const p = prefix(userId, propertyId);
   const siblings: Array<[string, LiveViewEntry]> = [];
@@ -202,6 +210,135 @@ export function attachLiveShot(
   scheduleExpiry(k, entry);
 }
 
+/**
+ * 中止の要求 (実行者本人のみ = key に userId を含むため他人は触れない)。
+ *
+ * ⚠**フラグを立てるだけ**。ここで処理を殺さない。外から強制終了すると、外部サイトを
+ * 中途半端な状態 (カートに行だけ残る等) で放り出す恐れがある。実際に止まる場所は
+ * provider が「安全な節目」として選ぶ。
+ *
+ * ⚠**課金後は止められない** (判断は provider 側)。請求を押した後に止めると
+ * 「お金は払ったのに書類が手に入らない」状態を作るため、課金境界を越えたら
+ * この要求は無視して最後まで取得しきる。
+ *
+ * @returns エントリが無い (期限切れ / 別人 / 既に完了) なら false
+ */
+export function requestLiveViewCancel(
+  userId: string,
+  propertyId: string,
+  liveRef: string,
+): boolean {
+  const k = key(userId, propertyId, liveRef);
+  // ⚠**受け付けの可否は「実行中か」で決める**(@codex #357 P2)。実況エントリの
+  // 有無で決めると、有料取得の待ち行列で3分以上待たされている検索に中止を
+  // 受け付けられない(実況だけ先に期限切れで消える)。押しても accepted:false が
+  // 返り、利用者は「押しても止まらない」まま検索が動き出す。
+  if (!activeOps.has(k)) return false;
+  const entry = store.get(k);
+  if (entry?.done) return false; // 既に終わっている
+  if (entry) {
+    entry.cancelRequested = true;
+    entry.updatedAt = Date.now();
+    scheduleExpiry(k, entry);
+  }
+  // ⚠**実況とは別に印を残す**(@codex #357 P2)。実況エントリの寿命は最終更新から
+  // 3分だが、検索は**有料取得の待ち行列**に入ると長く待たされる(本数に上限が
+  // 無い)。待っている間は更新が起きないので実況が先に期限切れで消え、順番が
+  // 回ってきたときには中止の印も一緒に消えている
+  // = **「中止しました」と言ったのに動き出す**。
+  // この印は期限で消さない (片付けは route の finally とプロセス終了)。
+  // ⚠**件数上限で古い印を捨てない**(@codex #357 P2)。捨てられた印の検索がまだ
+  // 待ち行列に居ると、順番が回ってきたときに**受け付けたはずの中止が消えている**
+  // = 普通に検索が走る。印は実行中のものしか作られず(上の activeOps 判定)、
+  // 実行が終われば必ず消えるので、同時実行数以上には増えない。
+  cancelMarks.add(k);
+  return true;
+}
+
+/**
+ * 中止の印だけを、実況エントリより長く持つ置き場 (@codex #357 P2)。
+ * ⚠ここに入れるのは**押された時刻だけ**。所在・スクショは持たない
+ * (長生きさせてよいのは秘匿情報を含まないものに限る)。
+ */
+// ⚠保持するのは**鍵だけ**(所在・スクショ・時刻すら持たない)。
+const cancelMarks = new Set<string>();
+
+/**
+ * **実行中の検索**(@codex #357 P2)。
+ *
+ * ⚠実況エントリ(スクショ置き場)は3分で期限切れになるが、検索そのものは有料取得の
+ * 待ち行列でそれより長く生きる。「まだ動いているか」を実況の有無で判断すると、
+ * **待たされている検索に中止を受け付けられない**(押しても accepted:false)。
+ * 実行の生死は実況と切り離してここで持つ。
+ *
+ * 追加 = 検索の開始(beginLiveView)、削除 = 検索の終了(route の finally)。
+ * 件数は同時実行数で自然に頭打ちになるので上限は要らない
+ * (上限で古いものを捨てると、**実行中の中止を捨てる**ことになる)。
+ */
+const activeOps = new Set<string>();
+
+/**
+ * ⚠**中止の印に期限も件数上限も設けない** (@codex #357 P2)。
+ *
+ * 期限を置くと、それがどれだけ長くても「実行中なのに印が消える」窓になる。
+ * 有料取得の待ち行列は本数に上限が無く、**何分にしても足りない場合がある**。
+ * 件数上限も同じ理由で捨てられない (古い印の検索がまだ待ち行列に居る)。
+ *
+ * 印は次の 2 つで確実に片付く:
+ *   1. その検索が終わったとき — route の finally → clearLiveViewCancel
+ *   2. プロセスが落ちたとき — メモリ内なのでプロセスと一緒に消える
+ * 印が付くのは実行中の検索だけなので、同時実行数以上には増えない。
+ */
+
+/**
+ * 中止の印を消す (@codex #357 P2)。
+ *
+ * ⚠**その検索が終わった時点**で呼ぶ (route の finally)。印の寿命を
+ * 「待ち時間の見積もり」に任せると、待ち行列が伸びたときに
+ * **中止したはずの検索が動き出す**。終わりを知っている場所で消すのが正しい。
+ */
+export function clearLiveViewCancel(
+  userId: string,
+  propertyId: string,
+  liveRef: string,
+): void {
+  const k = key(userId, propertyId, liveRef);
+  cancelMarks.delete(k);
+  // ⚠**実行中の印も必ず外す**。ここで外し忘れると「終わった検索がいつまでも
+  // 実行中に見える」= 中止を受け付け続け、印も増え続ける。
+  activeOps.delete(k);
+}
+
+/**
+ * 中止を受け付ける期間を閉じる (@codex #357 P2)。
+ *
+ * ⚠**自動操作が終わった時点**で呼ぶ。以降は中止を見る場所がもう無いので、
+ * それでも受け付けると「中止しています…」と表示したまま検索が普通に完了し、
+ * **止めたつもりなのに結果が出る**という食い違いが起きる。
+ * 受け付けられないと分かれば、画面はボタンを戻して結果を出せる。
+ *
+ * ⚠実行そのものの後片付け (印の削除) は `clearLiveViewCancel` が行う。
+ * ここで印を消さないのは、**閉じる前に受け付けた中止**を有効に保つため。
+ */
+export function closeLiveViewCancelWindow(
+  userId: string,
+  propertyId: string,
+  liveRef: string,
+): void {
+  activeOps.delete(key(userId, propertyId, liveRef));
+}
+
+/** 中止が要求されているか (provider が節目ごとに見る)。 */
+export function isLiveViewCancelRequested(
+  userId: string,
+  propertyId: string,
+  liveRef: string,
+): boolean {
+  const k = key(userId, propertyId, liveRef);
+  // 実況エントリが期限切れで消えていても、中止の印が残っていれば止める。
+  return store.get(k)?.cancelRequested === true || cancelMarks.has(k);
+}
+
 /** 実行完了 (成功・失敗とも)。エントリは TTL まで閲覧可能なまま残る。 */
 export function completeLiveView(
   userId: string,
@@ -243,6 +380,11 @@ export function getLiveShot(
 export function __clearLiveViewStoreForTests(): void {
   for (const k of Array.from(store.keys())) deleteEntry(k);
   store.clear();
+  // 中止の印と実行中の印は実況より長生きするので、テスト間で持ち越さないよう
+  // 明示的に消す (@codex #357 P3)。消し忘れると、前のテストの鍵が残ったまま
+  // 「実行していないのに中止が受け付けられる」= テストの実行順で結果が変わる。
+  cancelMarks.clear();
+  activeOps.clear();
 }
 
 export function __liveViewStoreSizeForTests(): number {

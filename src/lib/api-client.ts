@@ -35,12 +35,33 @@ const mockDelay = () => new Promise((r) => setTimeout(r, 200));
 
 // ---------- Generic fetcher ----------
 
+/**
+ * 非 2xx 応答を Error にする（分類コード付き）。
+ *
+ * ⚠**分類コードを画面まで届ける**(@codex #357 P2)。文言だけだと画面側は
+ * 「利用者が自分で中止した」と「本当に失敗した」を区別できず、押した本人の
+ * 操作まで赤いエラーとして出てしまう。追加のプロパティなので、既存の
+ * `instanceof Error` / `e.message` を見ている呼び出し元はそのまま動く。
+ */
+async function toApiError(res: Response): Promise<Error> {
+  const body = await res.json().catch(() => null);
+  const err = new Error(body?.error?.message ?? `Error: ${res.status}`);
+  return Object.assign(err, {
+    code: typeof body?.error?.code === "string" ? body.error.code : null,
+    status: res.status,
+  });
+}
+
+/** 応答エラーから分類コードを取り出す（型を絞る補助）。 */
+export function apiErrorCode(e: unknown): string | null {
+  if (!(e instanceof Error)) return null;
+  const code = (e as Error & { code?: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
 async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.error?.message ?? `Error: ${res.status}`);
-  }
+  if (!res.ok) throw await toApiError(res);
   return res.json();
 }
 
@@ -1580,10 +1601,7 @@ export async function uploadRegistryPdfBulk(
     method: "POST",
     body: formData,
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.error?.message ?? `Error: ${res.status}`);
-  }
+  if (!res.ok) throw await toApiError(res);
   return res.json();
 }
 
@@ -1801,6 +1819,30 @@ export async function fetchRegistryLiveView(
   }
   return apiFetch(
     `/api/properties/${propertyId}/registry/search/live/${encodeURIComponent(liveRef)}`,
+  );
+}
+
+/**
+ * 実況パネルの「中止」を要求する (実行者本人のみ)。
+ *
+ * ⚠**押した瞬間に止まるわけではない**。要求を立てるだけで、実際に止まるのは
+ * 自動操作が**安全な節目**まで進んでから (途中で殺すと外部サイトを中途半端な
+ * 状態で放り出す)。
+ * ⚠候補検索の経路では**お金は動かない**ので、いつ止めても課金は発生しない。
+ *
+ * accepted:false = もう止める対象が無い (期限切れ / 既に完了)。
+ */
+export async function cancelRegistryLiveView(
+  propertyId: string,
+  liveRef: string,
+): Promise<{ data: { accepted: boolean } }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { accepted: true } };
+  }
+  return apiFetch(
+    `/api/properties/${propertyId}/registry/search/live/${encodeURIComponent(liveRef)}/cancel`,
+    { method: "POST" },
   );
 }
 
@@ -2761,10 +2803,7 @@ export async function uploadFile(
       ? `/api/properties/${propertyId}/photos`
       : `/api/properties/${propertyId}/attachments`;
   const res = await fetch(endpoint, { method: "POST", body: formData });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.error?.message ?? `Error: ${res.status}`);
-  }
+  if (!res.ok) throw await toApiError(res);
   return res.json();
 }
 

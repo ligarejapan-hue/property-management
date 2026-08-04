@@ -59,6 +59,9 @@ const PROVIDER_ERROR_STATUS: Readonly<Record<RegistryFetchErrorCode, number>> = 
   // 「存在しない」(404)でもないので 422(内容が処理できない)を返し、
   // 利用者に「住所を直せば通る」と伝わる分類にする。
   location_rejected: 422,
+  // 利用者が自分で止めた=クライアント都合の中断。499 は非標準なので 409
+  // (現在の状態と衝突)を使い、サーバー障害(5xx)と明確に分ける。
+  cancelled: 409,
   provider_error: 502,
   service_hours: 503, // 利用時間外=一時的に利用不可(Service Unavailable)。
   service_unavailable: 503, // 接続不可(時間外の可能性)=同じく一時的利用不可。
@@ -152,9 +155,35 @@ export async function runRegistrySearch(
 
   try {
     // 実況パネル通知先の接続 (認可・確認・searchable 判定を全て通過した後)。
-    const candidates = await provider.searchCandidates(
-      args.live ? { ...built.request, live: args.live } : built.request,
-    );
+    let candidates;
+    try {
+      candidates = await provider.searchCandidates(
+        args.live ? { ...built.request, live: args.live } : built.request,
+      );
+    } finally {
+      // ⚠**自動操作が終わった時点で中止の受け付けを閉じる** (@codex #357 P2)。
+      // ここから先 (候補の記憶・監査の書き込み) には中止を見る場所がもう無い。
+      // 受け付けたままにすると、押した人の画面は「中止しています…」のまま
+      // 検索が普通に完了して**結果が出る**という食い違いが起きる。
+      // ⚠閉じる前に受け付けた中止は有効なまま (印は route の finally で消す)。
+      args.live?.endCancelable?.();
+    }
+
+    // ⚠**受け付けた中止は必ず効かせる** (@codex #357 P2)。
+    //
+    // provider の中の「最後に中止を見る場所」より後にも、外部サイトの後片付け
+    // (ダイアログを閉じる・ブラウザを閉じる) が残っている。その間に押された
+    // 中止は**受け付けたのに誰も見ない**ため、「中止しました」と表示したのに
+    // 結果が出る、という食い違いが起きる。
+    //
+    // 受け付けを閉じた直後にここで見ることで、
+    //   受け付けた (＝閉じる前に押された) ⟹ 印が残っている ⟹ ここで必ず効く
+    // が成り立つ。閉じた後に押された中止は受け付け自体が false を返すので、
+    // 「効かない中止を受け付けた」状態は作れない。
+    // 候補検索(段階①)は課金が動かないので、ここで捨てても不利益は無い。
+    if (args.live?.isCancelRequested?.() === true) {
+      throw new RegistryFetchError("cancelled");
+    }
 
     // 実サイトの所在検索は不動産番号を返さず、候補は**地番(candidateRef)**
     // （不動産番号は有料の請求まで進まないと得られない=サイト仕様）。
@@ -194,8 +223,11 @@ export async function runRegistrySearch(
   } catch (err) {
     // provider 失敗は安全な分類のみで応答（外部本文・認証情報・PII は載せない）。
     if (err instanceof RegistryFetchError) {
+      // ⚠**利用者が止めたものは「失敗」に数えない** (@codex #357 P2)。
+      // provider の障害と混ぜると、失敗率の集計も障害調査も歪む。
+      // 中止は課金前にしか起きないので、記録としても性質がまったく違う。
       await writeRegistrySearchAudit(session.id, propertyId, {
-        status: "failed",
+        status: err.code === "cancelled" ? "cancelled" : "failed",
         providerErrorCode: err.code,
       });
       // err.message は RegistryFetchError の固定文言のみ（errors.ts 参照・
@@ -203,7 +235,12 @@ export async function runRegistrySearch(
       throw new ApiError(
         PROVIDER_ERROR_STATUS[err.code],
         err.message,
-        "REGISTRY_SEARCH_PROVIDER_ERROR",
+        // ⚠**中止は「失敗」と別の分類にする**(@codex #357 P2)。同じ
+        // REGISTRY_SEARCH_PROVIDER_ERROR にすると、画面側が区別できず、
+        // 利用者が自分で押した中止まで**赤いエラー表示**になる。
+        err.code === "cancelled"
+          ? "REGISTRY_SEARCH_CANCELLED"
+          : "REGISTRY_SEARCH_PROVIDER_ERROR",
       );
     }
     // それ以外（Prisma 例外等）はそのまま route の handleApiError に委ねる。
@@ -219,7 +256,9 @@ async function writeRegistrySearchAudit(
   userId: string,
   propertyId: string,
   extra: {
-    status: "success" | "skipped" | "failed";
+    // ⚠"cancelled" を "failed" に含めない (@codex #357 P2)。利用者が自分で止めた
+    // 操作を「provider の失敗」として数えると、運用の集計(失敗率・障害調査)が歪む。
+    status: "success" | "skipped" | "failed" | "cancelled";
     reason?: string;
     candidateCount?: number;
     providerErrorCode?: RegistryFetchErrorCode;
