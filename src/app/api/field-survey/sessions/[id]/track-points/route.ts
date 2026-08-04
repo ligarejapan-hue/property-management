@@ -135,7 +135,17 @@ export async function POST(
               { status: "ended", endReason: TRIP_AUTO_END_REASON },
             ],
           },
-          data: { pointCount: { increment: inserted.count } },
+          data: {
+            pointCount: { increment: inserted.count },
+            // ⚠**自動終了した巡回に記録が届いた = まだ歩いている可能性がある**
+            // (@codex #356 P1)。踏破マップは「終了した巡回」を全員に見せる一方
+            // 「実行中の巡回」は隠すことで、同僚の現在位置が追えないようにして
+            // いる。自動終了で終了扱いになった巡回に位置が届き続けると、この守り
+            // を抜けて**まだ歩いている人の現在位置が他スタッフに見える**。
+            // 印が立っている間は踏破マップに出さず、次の見回りで無操作1時間を
+            // 再確認できたら外す。
+            ...(sess.status === "ended" ? { reconcilePending: true } : {}),
+          },
         });
         if (upd.count === 0) {
           throw new ApiError(

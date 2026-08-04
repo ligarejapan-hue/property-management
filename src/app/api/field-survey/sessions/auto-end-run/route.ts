@@ -61,6 +61,7 @@ export async function POST(request: Request) {
       scanned: stale.length,
       ended: 0,
       skipped: 0,
+      settled: 0,
     };
     if (dryRun) return apiResponse({ ...result, dryRun });
 
@@ -106,9 +107,35 @@ export async function POST(request: Request) {
       });
     }
 
+    // ⚠**踏破マップへの復帰**(@codex #356 P1)。自動終了した後に位置記録が届いた
+    // 巡回は「まだ歩いているかもしれない」ので踏破マップから外してある。その巡回が
+    // 再び無操作1時間を超えたら、今度こそ歩き終えたと判断して印を外し、
+    // 終了時刻も最後の活動時刻に直す(記録が届いた分だけ後ろに伸びている)。
+    // ⚠ここを作らないと、圏外から復帰した巡回が**二度と踏破マップに出ない**
+    // = 二度歩きを避けるという機能の目的そのものを損なう。
+    const pending = await prisma.fieldSurveySession.findMany({
+      where: {
+        status: "ended",
+        endReason: TRIP_AUTO_END_REASON,
+        reconcilePending: true,
+        updatedAt: { lt: threshold },
+      },
+      select: { id: true, startedAt: true, updatedAt: true },
+      orderBy: { updatedAt: "asc" },
+      take: TRIP_AUTO_END_BATCH_LIMIT,
+    });
+    for (const s of pending) {
+      // 読み取ってから書くまでの間に記録が届いていたら見送る(次の見回りで拾う)。
+      const settled = await prisma.fieldSurveySession.updateMany({
+        where: { id: s.id, reconcilePending: true, updatedAt: s.updatedAt },
+        data: { reconcilePending: false, endedAt: autoEndedAt(s) },
+      });
+      if (settled.count > 0) result.settled++;
+    }
+
     // 非PII の運用ログ（件数のみ）。
     console.log(
-      `[trip-auto-end] scanned=${result.scanned} ended=${result.ended} skipped=${result.skipped}`,
+      `[trip-auto-end] scanned=${result.scanned} ended=${result.ended} skipped=${result.skipped} settled=${result.settled}`,
     );
     return apiResponse({ ...result, dryRun });
   } catch (error) {

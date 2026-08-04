@@ -217,6 +217,57 @@ describe("⚠削除も活動に数える (@codex #356 P2)", () => {
   });
 });
 
+describe("⚠まだ歩いている人を踏破マップに出さない (@codex #356 P1)", () => {
+  const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf-8");
+
+  it("自動終了後に位置記録が届いたら印を立てる", () => {
+    // 踏破マップは「終了した巡回」を全員に見せ、「実行中の巡回」は隠すことで
+    // 同僚の現在位置を追えないようにしている。自動終了で終了扱いになった巡回に
+    // 位置が届き続けると、この守りを抜ける。
+    const src = read(
+      "src/app/api/field-survey/sessions/[id]/track-points/route.ts",
+    );
+    expect(src).toMatch(
+      /sess\.status === "ended" \? \{ reconcilePending: true \} : \{\}/,
+    );
+  });
+
+  it("踏破マップ（マス・線）の両方で除外する", () => {
+    // 片方だけ塞いでも意味がない（線のほうが経路として直接的）。
+    for (const p of [
+      "src/app/api/field-survey/coverage/cells/route.ts",
+      "src/app/api/field-survey/coverage/tracks/route.ts",
+    ]) {
+      // NULL（既存行・通常の終了）は出す = IS NOT TRUE で判定する
+      expect(read(p)).toMatch(/AND s\.reconcile_pending IS NOT TRUE/);
+    }
+  });
+
+  it("⚠外した巡回を必ず戻す（二度歩きを避ける目的を損なわない）", () => {
+    // 印を立てるだけで戻す経路が無いと、圏外から復帰した巡回が二度と
+    // 踏破マップに出ない。見回りが再び無操作1時間を確認したら外す。
+    const src = read("src/app/api/field-survey/sessions/auto-end-run/route.ts");
+    expect(src).toMatch(/reconcilePending: true,\s*\n\s*updatedAt: \{ lt: threshold \}/);
+    expect(src).toMatch(
+      /data: \{ reconcilePending: false, endedAt: autoEndedAt\(s\) \}/,
+    );
+    // 読んでから書くまでに記録が届いていたら見送る
+    expect(src).toMatch(
+      /where: \{ id: s\.id, reconcilePending: true, updatedAt: s\.updatedAt \}/,
+    );
+  });
+
+  it("本人が終了ボタンを押したら待たずに戻す", () => {
+    // 自動終了した巡回に終了を押すと従来は 409 で何度押しても終われなかった。
+    // 1時間の自動終了では日常的に起きるので、成功として扱い踏破マップにも戻す。
+    const src = read("src/app/api/field-survey/sessions/[id]/route.ts");
+    expect(src).toMatch(/const settlingAutoEnded =/);
+    expect(src).toMatch(/reconcilePending: false/);
+    // 巡回時間は「押した時刻」ではなく最後の活動まで
+    expect(src).toMatch(/settlingAutoEnded\s*\n?\s*\? existing\.updatedAt/);
+  });
+});
+
 describe("⚠自動終了の経路はすべて同じ印を付ける (@codex #356 P2)", () => {
   const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf-8");
 

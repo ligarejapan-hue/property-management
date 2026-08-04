@@ -134,6 +134,11 @@ export async function GET(request: NextRequest) {
       FROM field_survey_sessions s
       JOIN field_survey_track_points tp ON tp.session_id = s.id
       WHERE s.status::text = 'ended'
+        -- ⚠自動終了した後に位置記録が届いた巡回は除く (@codex #356 P1)。
+        -- 終了扱いのまま位置が更新され続けると、実行中の巡回を隠す守りを抜けて
+        -- **まだ歩いている人の経路が他スタッフに追える**（線はマスより直接的）。
+        -- NULL (既存行・通常の終了) は対象に含めるため IS NOT TRUE で判定する。
+        AND s.reconcile_pending IS NOT TRUE
         AND tp.lat >= ${south}::numeric
         AND tp.lat < ${north}::numeric
         AND tp.lng >= ${west}::numeric

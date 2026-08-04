@@ -15,6 +15,7 @@ import {
   isSessionStale,
   STALE_CONFIRM_THRESHOLD_MS,
 } from "@/lib/field-survey-trip-util";
+import { TRIP_AUTO_END_REASON } from "@/lib/field-survey-auto-end";
 
 // ---------- PATCH /api/field-survey/sessions/[id] ----------
 // 巡回終了 / cancel / memo 更新の最小対応。
@@ -141,6 +142,8 @@ export async function PATCH(
         startedAt: true,
         updatedAt: true,
         status: true,
+        // 自動終了した巡回か (終了ボタンを押せるようにする判定に使う)。
+        endReason: true,
         pointCount: true,
       },
     });
@@ -167,7 +170,29 @@ export async function PATCH(
       isSessionStale(existing.updatedAt, now, STALE_CONFIRM_THRESHOLD_MS);
     const effectiveEndedAt = isStaleEnd ? existing.updatedAt : now;
 
-    if (patch.status === "ended" || patch.status === "cancelled") {
+    // ⚠**自動終了した巡回に「終了」を押せるようにする**(@codex #356 P1 の派生)。
+    // 無操作1時間で自動終了した後、圏外から戻ったスタッフが終了ボタンを押すと、
+    // 従来条件 (status:"active") では 0 行更新 → 409 になり、**何度押しても
+    // 終われない**(24時間の自動終了では滅多に起きなかったが、1時間では日常的に
+    // 起きる)。既に終わっているので望む状態には達している = 成功として扱い、
+    // 同時に「本人が終わったと言った」ことを踏破マップへの復帰の合図にする
+    // (見回りの1時間待ちを待たずに出せる)。
+    const settlingAutoEnded =
+      patch.status === "ended" &&
+      existing.status === "ended" &&
+      existing.endReason === TRIP_AUTO_END_REASON;
+    if (settlingAutoEnded) {
+      await prisma.fieldSurveySession.updateMany({
+        where: { id, status: "ended", endReason: TRIP_AUTO_END_REASON },
+        data: {
+          reconcilePending: false,
+          // 終了時刻は最後に活動した時刻のまま (押した時刻に伸ばすと、
+          // 歩いていない時間まで巡回時間に入る)。
+          endedAt: existing.updatedAt,
+          ...(patch.memo !== undefined && { memo: patch.memo }),
+        },
+      });
+    } else if (patch.status === "ended" || patch.status === "cancelled") {
       // status 変更は atomic な conditional update で実施。
       // 0 行更新は「既に終了/キャンセル済」または「読取後に活動が入った」を
       // 意味し 409 にマップ (client は既存 conflict 処理 = 再取得 → 再試行)。
@@ -263,10 +288,15 @@ export async function PATCH(
     }
 
     if (patch.status === "ended") {
+      // 自動終了ぶんを後から確定させた場合は、押した時刻ではなく最後に活動した
+      // 時刻までを巡回時間とする（歩いていない時間を巡回に数えない）。
+      const endedAtForDuration = settlingAutoEnded
+        ? existing.updatedAt
+        : effectiveEndedAt;
       const durationSec = Math.max(
         0,
         Math.floor(
-          (effectiveEndedAt.getTime() - existing.startedAt.getTime()) / 1000,
+          (endedAtForDuration.getTime() - existing.startedAt.getTime()) / 1000,
         ),
       );
       await writeAuditLog({

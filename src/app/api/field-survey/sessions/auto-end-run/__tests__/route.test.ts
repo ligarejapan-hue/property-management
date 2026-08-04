@@ -158,7 +158,60 @@ describe("終了の実行", () => {
     findMany.mockResolvedValue([]);
     const res = await POST(req({ secret: SECRET }));
     const body = await res.json();
-    expect(body).toMatchObject({ scanned: 0, ended: 0, skipped: 0 });
+    expect(body).toMatchObject({ scanned: 0, ended: 0, skipped: 0, settled: 0 });
     expect(updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("⚠踏破マップへの復帰 (@codex #356 P1)", () => {
+  // 自動終了した後に位置記録が届いた巡回は「まだ歩いているかもしれない」ので
+  // 踏破マップから外してある。再び無操作1時間を超えたら戻す。
+  // ⚠戻す経路が無いと、圏外から復帰した巡回が二度と踏破マップに出ない
+  // = 二度歩きを避けるという機能の目的そのものを損なう。
+  const pendingSession = {
+    id: "sess-pending",
+    startedAt: new Date("2026-08-05T00:00:00Z"),
+    updatedAt: new Date("2026-08-05T01:30:00Z"),
+  };
+
+  it("再び無操作1時間を超えたら印を外し、終了時刻を最後の活動に直す", async () => {
+    findMany
+      .mockResolvedValueOnce([]) // 1段目: 新たに自動終了する巡回は無し
+      .mockResolvedValueOnce([pendingSession]); // 2段目: 復帰待ちの巡回
+    updateMany.mockResolvedValue({ count: 1 });
+    const res = await POST(req({ secret: SECRET }));
+    const body = await res.json();
+    expect(body).toMatchObject({ ended: 0, settled: 1 });
+
+    const args = updateMany.mock.calls[0][0] as {
+      where: Record<string, unknown>;
+      data: Record<string, unknown>;
+    };
+    expect(args.data).toEqual({
+      reconcilePending: false,
+      endedAt: pendingSession.updatedAt,
+    });
+    // 読んでから書くまでに記録が届いていたら見送る（次の見回りで拾う）
+    expect(args.where).toEqual({
+      id: pendingSession.id,
+      reconcilePending: true,
+      updatedAt: pendingSession.updatedAt,
+    });
+  });
+
+  it("⚠dryRun では戻さない", async () => {
+    findMany.mockResolvedValue([pendingSession]);
+    const res = await POST(req({ secret: SECRET, dryRun: true }));
+    const body = await res.json();
+    expect(body.settled).toBe(0);
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("直前に記録が届いていたら戻さない", async () => {
+    findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingSession]);
+    updateMany.mockResolvedValue({ count: 0 }); // 競合 = まだ歩いている
+    const res = await POST(req({ secret: SECRET }));
+    const body = await res.json();
+    expect(body.settled).toBe(0);
   });
 });

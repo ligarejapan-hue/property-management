@@ -117,4 +117,10 @@ export interface TripAutoEndResult {
   ended: number;
   /** 直前に活動があり見送った件数（競合）。 */
   skipped: number;
+  /**
+   * 踏破マップへ復帰させた件数 (@codex #356 P1)。
+   * 自動終了した後に位置記録が届いて踏破マップから外していた巡回のうち、
+   * 再び無操作1時間を超えて「今度こそ歩き終えた」と判断できたもの。
+   */
+  settled: number;
 }
