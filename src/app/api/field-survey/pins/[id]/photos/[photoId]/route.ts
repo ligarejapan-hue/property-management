@@ -66,9 +66,12 @@ export async function DELETE(
     // 削除が commit してから心拍が走るまでの隙間に見回りが入り込み、
     // 「本当に操作しているのに終了させられる」。撮り直し(消して撮る)を
     // 繰り返している最中に切られないようにする。
+    // ⚠**心拍を先に打つ**(@codex #356 P1)。写真を消してから打つと、その間は
+    // 巡回の行に触っていないため、見回りが横から巡回を終了させられる
+    // (心拍は 0 行更新で黙って終わるので、操作中なのに終了が成立してしまう)。
     await prisma.$transaction(async (tx) => {
-      await tx.fieldSurveyPinPhoto.delete({ where: { id: photoId } });
       await touchTripActivity(tx, photo.pin?.sessionId ?? null);
+      await tx.fieldSurveyPinPhoto.delete({ where: { id: photoId } });
     });
 
     // best-effort: 本体 + (あれば) thumbnail の実体を消す。fileUrl は /uploads/...
