@@ -7,6 +7,7 @@ import {
   TRIP_AUTO_END_IDLE_MS,
   TRIP_AUTO_END_REASON,
   autoEndedAt,
+  settledEndedAt,
   type TripAutoEndResult,
 } from "@/lib/field-survey-auto-end";
 
@@ -120,15 +121,26 @@ export async function POST(request: Request) {
         reconcilePending: true,
         updatedAt: { lt: threshold },
       },
-      select: { id: true, startedAt: true, updatedAt: true },
+      select: { id: true, startedAt: true, updatedAt: true, endedAt: true },
       orderBy: { updatedAt: "asc" },
       take: TRIP_AUTO_END_BATCH_LIMIT,
     });
     for (const s of pending) {
+      // ⚠**終了時刻は「歩いた時刻」であって「送信できた時刻」ではない**
+      // (@codex #356 P2)。圏外で貯めた記録は電波が戻った時刻に届くため、
+      // その時刻を終了時刻にすると、深夜に歩いた巡回が翌日の昼に終わったこと
+      // になる = 巡回時間が伸び、踏破の日付もずれる。
+      // 位置記録そのものが持つ「記録した時刻」の最大値を使う。
+      const last = await prisma.fieldSurveyTrackPoint.aggregate({
+        where: { sessionId: s.id },
+        _max: { recordedAt: true },
+      });
+      const endedAt =
+        settledEndedAt(s.endedAt, last._max.recordedAt) ?? autoEndedAt(s);
       // 読み取ってから書くまでの間に記録が届いていたら見送る(次の見回りで拾う)。
       const settled = await prisma.fieldSurveySession.updateMany({
         where: { id: s.id, reconcilePending: true, updatedAt: s.updatedAt },
-        data: { reconcilePending: false, endedAt: autoEndedAt(s) },
+        data: { reconcilePending: false, endedAt },
       });
       if (settled.count > 0) result.settled++;
     }

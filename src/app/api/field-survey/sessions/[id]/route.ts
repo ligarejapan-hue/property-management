@@ -15,7 +15,10 @@ import {
   isSessionStale,
   STALE_CONFIRM_THRESHOLD_MS,
 } from "@/lib/field-survey-trip-util";
-import { TRIP_AUTO_END_REASON } from "@/lib/field-survey-auto-end";
+import {
+  TRIP_AUTO_END_REASON,
+  settledEndedAt,
+} from "@/lib/field-survey-auto-end";
 
 // ---------- PATCH /api/field-survey/sessions/[id] ----------
 // 巡回終了 / cancel / memo 更新の最小対応。
@@ -141,6 +144,8 @@ export async function PATCH(
         staffUserId: true,
         startedAt: true,
         updatedAt: true,
+        // 自動終了ぶんを確定するときの終了時刻の基準に使う。
+        endedAt: true,
         status: true,
         // 自動終了した巡回か (終了ボタンを押せるようにする判定に使う)。
         endReason: true,
@@ -177,18 +182,31 @@ export async function PATCH(
     // 起きる)。既に終わっているので望む状態には達している = 成功として扱い、
     // 同時に「本人が終わったと言った」ことを踏破マップへの復帰の合図にする
     // (見回りの1時間待ちを待たずに出せる)。
+    const existingEndedAt = existing.endedAt;
+    // 確定した終了時刻 (監査の巡回時間にも同じ値を使う)。
+    let settledAt: Date | null = null;
     const settlingAutoEnded =
       patch.status === "ended" &&
       existing.status === "ended" &&
       existing.endReason === TRIP_AUTO_END_REASON;
     if (settlingAutoEnded) {
+      // ⚠終了時刻は「押した時刻」でも「記録が届いた時刻」でもなく、
+      // **位置記録が持つ最後の記録時刻**にそろえる (@codex #356 P2)。
+      // 圏外で貯めた記録は電波が戻った時刻に届くため、届いた時刻を使うと
+      // 深夜に歩いた巡回が翌日の昼に終わったことになる (巡回時間が伸び、
+      // 踏破の日付もずれる)。見回り側の確定と同じ規則を使う。
+      const last = await prisma.fieldSurveyTrackPoint.aggregate({
+        where: { sessionId: id },
+        _max: { recordedAt: true },
+      });
+      settledAt =
+        settledEndedAt(existingEndedAt, last._max.recordedAt) ??
+        existing.updatedAt;
       await prisma.fieldSurveySession.updateMany({
         where: { id, status: "ended", endReason: TRIP_AUTO_END_REASON },
         data: {
           reconcilePending: false,
-          // 終了時刻は最後に活動した時刻のまま (押した時刻に伸ばすと、
-          // 歩いていない時間まで巡回時間に入る)。
-          endedAt: existing.updatedAt,
+          endedAt: settledAt,
           ...(patch.memo !== undefined && { memo: patch.memo }),
         },
       });
@@ -291,7 +309,7 @@ export async function PATCH(
       // 自動終了ぶんを後から確定させた場合は、押した時刻ではなく最後に活動した
       // 時刻までを巡回時間とする（歩いていない時間を巡回に数えない）。
       const endedAtForDuration = settlingAutoEnded
-        ? existing.updatedAt
+        ? (settledAt ?? existing.updatedAt)
         : effectiveEndedAt;
       const durationSec = Math.max(
         0,

@@ -13,6 +13,7 @@ import {
   lastActivityAt,
   shouldAutoEndTrip,
   touchTripActivity,
+  settledEndedAt,
 } from "@/lib/field-survey-auto-end";
 import {
   REDACTED,
@@ -141,7 +142,17 @@ describe("⚠写真追加・ピン編集も活動に数える (@codex #356 P2)",
   it("ピンの編集が巡回を更新する", () => {
     // 従来は「巡回の紐付けを変えたとき」しか更新していなかった。
     const src = read("src/app/api/field-survey/pins/[id]/route.ts");
-    expect(src).toMatch(/touchTripActivity\(tx, nextSessionId\)/);
+    expect(src).toMatch(/touchTripActivity\(tx, sid\)/);
+  });
+
+  it("⚠巡回から外したときは「外された側」を数える (@codex #356 P2)", () => {
+    // 巡回からピンを外す操作では更新後の巡回が null になるため、そのままだと
+    // **その巡回の中身を今まさに触っているのに無操作扱い**になり、
+    // 1時間の境目では直後に自動終了され得る。付け替えは両方が対象。
+    const src = read("src/app/api/field-survey/pins/[id]/route.ts");
+    expect(src).toMatch(
+      /new Set\(\[nextSessionId, existing\.sessionId\]\)/,
+    );
   });
 });
 
@@ -217,6 +228,30 @@ describe("⚠削除も活動に数える (@codex #356 P2)", () => {
   });
 });
 
+describe("settledEndedAt — 終了時刻は「歩いた時刻」(@codex #356 P2)", () => {
+  const walked = new Date("2026-08-04T23:40:00Z"); // 深夜に歩き終えた
+  const autoEnded = new Date("2026-08-04T23:10:00Z"); // 自動終了した時点
+
+  it("記録の時刻のほうが後なら、そこまで伸ばす", () => {
+    // 圏外で貯めた記録が翌日の昼に届いても、終わったのは深夜。
+    expect(settledEndedAt(autoEnded, walked)).toEqual(walked);
+  });
+
+  it("⚠前には戻さない（記録の抜けで巡回時間を縮めない）", () => {
+    const older = new Date("2026-08-04T22:00:00Z");
+    expect(settledEndedAt(autoEnded, older)).toEqual(autoEnded);
+  });
+
+  it("位置記録を使わない巡回（撮って登録だけ）はそのまま", () => {
+    expect(settledEndedAt(autoEnded, null)).toEqual(autoEnded);
+  });
+
+  it("終了時刻がまだ無ければ記録の時刻を使う", () => {
+    expect(settledEndedAt(null, walked)).toEqual(walked);
+    expect(settledEndedAt(null, null)).toBeNull();
+  });
+});
+
 describe("⚠まだ歩いている人を踏破マップに出さない (@codex #356 P1)", () => {
   const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf-8");
 
@@ -248,13 +283,24 @@ describe("⚠まだ歩いている人を踏破マップに出さない (@codex #
     // 踏破マップに出ない。見回りが再び無操作1時間を確認したら外す。
     const src = read("src/app/api/field-survey/sessions/auto-end-run/route.ts");
     expect(src).toMatch(/reconcilePending: true,\s*\n\s*updatedAt: \{ lt: threshold \}/);
-    expect(src).toMatch(
-      /data: \{ reconcilePending: false, endedAt: autoEndedAt\(s\) \}/,
-    );
+    expect(src).toMatch(/data: \{ reconcilePending: false, endedAt \}/);
     // 読んでから書くまでに記録が届いていたら見送る
     expect(src).toMatch(
       /where: \{ id: s\.id, reconcilePending: true, updatedAt: s\.updatedAt \}/,
     );
+  });
+
+  it("⚠終了時刻に「届いた時刻」を使わない（両方の経路で）", () => {
+    // updatedAt は圏外から復帰して送信できた時刻。これを終了時刻にすると
+    // 深夜に歩いた巡回が翌日の昼に終わったことになる。
+    for (const p of [
+      "src/app/api/field-survey/sessions/auto-end-run/route.ts",
+      "src/app/api/field-survey/sessions/[id]/route.ts",
+    ]) {
+      const src = read(p);
+      expect(src).toMatch(/_max: \{ recordedAt: true \}/);
+      expect(src).toMatch(/settledEndedAt\(/);
+    }
   });
 
   it("本人が終了ボタンを押したら待たずに戻す", () => {
@@ -263,8 +309,8 @@ describe("⚠まだ歩いている人を踏破マップに出さない (@codex #
     const src = read("src/app/api/field-survey/sessions/[id]/route.ts");
     expect(src).toMatch(/const settlingAutoEnded =/);
     expect(src).toMatch(/reconcilePending: false/);
-    // 巡回時間は「押した時刻」ではなく最後の活動まで
-    expect(src).toMatch(/settlingAutoEnded\s*\n?\s*\? existing\.updatedAt/);
+    // 巡回時間は「押した時刻」ではなく、記録が持つ最後の時刻まで
+    expect(src).toMatch(/settlingAutoEnded\s*\n?\s*\? \(settledAt \?\? existing\.updatedAt\)/);
   });
 });
 

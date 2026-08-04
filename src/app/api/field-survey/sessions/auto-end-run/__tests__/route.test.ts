@@ -10,12 +10,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const findMany = vi.fn();
 const updateMany = vi.fn();
 const auditLog = vi.fn();
+// 確定時に「位置記録が持つ最後の記録時刻」を引く (@codex #356 P2)。
+const aggregate = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   default: {
     fieldSurveySession: {
       findMany: (...a: unknown[]) => findMany(...a),
       updateMany: (...a: unknown[]) => updateMany(...a),
+    },
+    fieldSurveyTrackPoint: {
+      aggregate: (...a: unknown[]) => aggregate(...a),
     },
   },
 }));
@@ -69,6 +74,9 @@ beforeEach(() => {
   findMany.mockReset();
   updateMany.mockReset();
   auditLog.mockReset();
+  aggregate.mockReset();
+  // 既定は「位置記録なし」（撮って登録だけの巡回）。
+  aggregate.mockResolvedValue({ _max: { recordedAt: null } });
   process.env.FIELD_SURVEY_AUTO_END_SECRET = SECRET;
 });
 afterEach(() => {
@@ -171,7 +179,10 @@ describe("⚠踏破マップへの復帰 (@codex #356 P1)", () => {
   const pendingSession = {
     id: "sess-pending",
     startedAt: new Date("2026-08-05T00:00:00Z"),
-    updatedAt: new Date("2026-08-05T01:30:00Z"),
+    // 自動終了した時点で記録した終了時刻。
+    endedAt: new Date("2026-08-05T01:00:00Z"),
+    // 圏外から復帰して記録が届いた時刻（＝終了時刻に使ってはいけない値）。
+    updatedAt: new Date("2026-08-05T12:30:00Z"),
   };
 
   it("再び無操作1時間を超えたら印を外し、終了時刻を最後の活動に直す", async () => {
@@ -189,7 +200,7 @@ describe("⚠踏破マップへの復帰 (@codex #356 P1)", () => {
     };
     expect(args.data).toEqual({
       reconcilePending: false,
-      endedAt: pendingSession.updatedAt,
+      endedAt: pendingSession.endedAt,
     });
     // 読んでから書くまでに記録が届いていたら見送る（次の見回りで拾う）
     expect(args.where).toEqual({
@@ -197,6 +208,30 @@ describe("⚠踏破マップへの復帰 (@codex #356 P1)", () => {
       reconcilePending: true,
       updatedAt: pendingSession.updatedAt,
     });
+  });
+
+  it("⚠終了時刻に「届いた時刻」を使わない（歩いた時刻を使う）", async () => {
+    // 深夜に歩き終え、翌日の昼に電波が戻って記録が届いたケース。
+    // 届いた時刻(updatedAt=12:30)を終了時刻にすると、巡回時間が半日伸び、
+    // 踏破の日付も翌日にずれる。
+    const walkedUntil = new Date("2026-08-05T01:45:00Z");
+    findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingSession]);
+    aggregate.mockResolvedValue({ _max: { recordedAt: walkedUntil } });
+    updateMany.mockResolvedValue({ count: 1 });
+    await POST(req({ secret: SECRET }));
+    const args = updateMany.mock.calls[0][0] as { data: { endedAt: Date } };
+    expect(args.data.endedAt).toEqual(walkedUntil);
+    expect(args.data.endedAt).not.toEqual(pendingSession.updatedAt);
+  });
+
+  it("⚠終了時刻を前に戻さない（記録の抜けで巡回時間を縮めない）", async () => {
+    const older = new Date("2026-08-05T00:30:00Z"); // 自動終了時刻より前
+    findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingSession]);
+    aggregate.mockResolvedValue({ _max: { recordedAt: older } });
+    updateMany.mockResolvedValue({ count: 1 });
+    await POST(req({ secret: SECRET }));
+    const args = updateMany.mock.calls[0][0] as { data: { endedAt: Date } };
+    expect(args.data.endedAt).toEqual(pendingSession.endedAt);
   });
 
   it("⚠dryRun では戻さない", async () => {

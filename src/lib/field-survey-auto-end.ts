@@ -76,6 +76,31 @@ export function autoEndedAt(session: {
 }
 
 /**
+ * 圏外から復帰した巡回を確定させるときの「終了時刻」（@codex #356 P2）。
+ *
+ * ⚠**終了時刻は「歩いた時刻」であって「送信できた時刻」ではない**。
+ * 圏外で貯めた位置記録は電波が戻った時刻にまとめて届くため、`updatedAt`
+ * (＝届いた時刻) を終了時刻にすると、**深夜に歩いた巡回が翌日の昼に
+ * 終わったことになる**。巡回時間が実際より長くなり、踏破の日付もずれる
+ * (踏破ヒートは日付で数える)。位置記録そのものが持つ「記録した時刻」を使う。
+ *
+ * ⚠**前には戻さない**。自動終了した時点の終了時刻より古い記録しか無い場合に
+ * 巡回時間を縮めても意味がない（記録の抜けであって、早く終えた訳ではない）。
+ *
+ * @param endedAt 自動終了した時点で記録した終了時刻
+ * @param maxRecordedAt その巡回の位置記録が持つ「記録した時刻」の最大値
+ *                      (位置記録を使わない巡回＝撮って登録だけ、なら null)
+ */
+export function settledEndedAt(
+  endedAt: Date | null,
+  maxRecordedAt: Date | null,
+): Date | null {
+  if (!maxRecordedAt) return endedAt;
+  if (!endedAt) return maxRecordedAt;
+  return maxRecordedAt > endedAt ? maxRecordedAt : endedAt;
+}
+
+/**
  * 巡回の「まだ作業中です」を伝える心拍（@codex #356 P2）。
  *
  * ⚠**位置記録の送信とピン作成しか `updatedAt` を動かしていなかった**。

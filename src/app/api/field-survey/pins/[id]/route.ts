@@ -267,7 +267,15 @@ export async function PATCH(
       // 「巡回の紐付けを変えたとき」しか走らないため、メモや種類だけを直し続けて
       // いる巡回が無操作扱いになり、自動終了(1時間)で切られてしまう。
       // best-effort: 終了済みの巡回のピンを後から直すのは正常な操作なので throw しない。
-      await touchTripActivity(tx, nextSessionId);
+      //
+      // ⚠**紐付けを外したときは「外された側」の巡回を数える**(@codex #356 P2)。
+      // 巡回からピンを外す操作 (sessionId=null) では nextSessionId が null に
+      // なるため、これだけだと**その巡回の中身を今まさに触っているのに無操作
+      // 扱い**になり、1時間の境目では直後に自動終了され得る。
+      // 付け替え (A→B) はどちらも触られた巡回なので両方を数える。
+      for (const sid of new Set([nextSessionId, existing.sessionId])) {
+        await touchTripActivity(tx, sid);
+      }
       return tx.fieldSurveyPin.findUniqueOrThrow({
         where: { id },
         select: SELECT_PIN,
