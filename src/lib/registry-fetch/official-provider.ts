@@ -405,6 +405,14 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     // ⚠アカウント同時1セッション制約(@codex #345 P1): **検索のログインも購入と同じ
     // ミューテックス**に通す。検索が購入と並行してログインすると、進行中の購入
     // セッションを強制ログアウトさせ、**課金だけ済んでPDFを取り逃す**。
+    // ⚠**待ち行列に残る処理を確実に止めるための局所の印** (@codex #357 P2)。
+    // 早めに中止として返すと、route は後片付けで**共有の印を消す**。順番が
+    // 回ってきた処理が共有の印だけを見ていると「中止されていない」と判断し、
+    // **中止したはずの検索がブラウザを起動してログインしてしまう**。
+    // 共有の印の寿命に依存しないよう、この実行専用の印も併せて見る。
+    let cancelObserved = false;
+    const isCancelled = (): boolean =>
+      cancelObserved || request.live?.isCancelRequested?.() === true;
     const started = runExclusivePurchase(async () => {
       // ⚠**順番待ちの間に押された中止を、ここで拾う** (@codex #357 P2)。
       // アカウント同時1セッション制約のため、検索は上のミューテックスで
@@ -415,7 +423,7 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       // の2つが起きる。ブラウザを起動する前が最初の安全な節目。
       // 候補検索(段階①)はお金が動かないので、いつ止めても安全。
       const abortIfCancelled = (): void => {
-        if (request.live?.isCancelRequested?.() !== true) return;
+        if (!isCancelled()) return;
         try {
           request.live?.step(CANCEL_ACCEPTED_MESSAGE);
         } catch {
@@ -430,7 +438,7 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       // (実況にも監査にも失敗として出る)。中止が押されていれば中止を優先する。
       // 候補検索(段階①)は課金が動かないので、この扱いで取り違えは起きない。
       const classifyOrCancelled = (err: unknown): RegistryFetchError => {
-        if (request.live?.isCancelRequested?.() === true) {
+        if (isCancelled()) {
           try {
             request.live?.step(CANCEL_ACCEPTED_MESSAGE);
           } catch {
@@ -516,6 +524,9 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       const timer = setInterval(() => {
         if (request.live?.isCancelRequested?.() !== true) return;
         finish(() => {
+          // ⚠共有の印は route の後片付けで消えるので、**この実行専用の印**を
+          // 立ててから返す。順番が回ってきた処理はこれを見て自分から止まる。
+          cancelObserved = true;
           // 順番待ちのまま残る処理の失敗を拾っておく (握り潰さないと
           // 未処理の rejection になる)。処理自体は順番が来たら自分で止まる。
           void started.catch(() => {});

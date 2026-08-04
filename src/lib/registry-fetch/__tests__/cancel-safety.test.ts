@@ -135,7 +135,7 @@ describe("配線", () => {
     // 「外部サービスの障害」として実況にも監査にも残る**。
     const src = read("src/lib/registry-fetch/official-provider.ts");
     expect(src).toMatch(/const classifyOrCancelled = \(err: unknown\)/);
-    expect(src).toMatch(/isCancelRequested\?\.\(\) === true[\s\S]{0,300}?"cancelled"/);
+    expect(src).toMatch(/if \(isCancelled\(\)\) \{[\s\S]{0,300}?"cancelled"/);
     // 起動の catch とログイン/検索の catch の両方で使う（片方だけだと漏れる）
     expect(src.match(/throw classifyOrCancelled\(err\)/g) ?? []).toHaveLength(2);
   });
@@ -164,6 +164,17 @@ describe("配線", () => {
     // タイマーは必ず止める / プロセスの終了を妨げない
     expect(src).toMatch(/clearInterval\(timer\)/);
     expect(src).toMatch(/\(timer as \{ unref\?: \(\) => void \}\)\.unref\?\.\(\)/);
+    // ⚠早めに返すと route の後片付けで**共有の印が消える**。順番が回ってきた
+    // 処理が共有の印だけを見ていると「中止されていない」と判断し、
+    // **中止したはずの検索がブラウザを起動してログインしてしまう**。
+    expect(src).toMatch(/let cancelObserved = false/);
+    expect(src).toMatch(
+      /cancelObserved \|\| request\.live\?\.isCancelRequested\?\.\(\) === true/,
+    );
+    // 早期リターンの直前に局所の印を立てる
+    expect(src).toMatch(/cancelObserved = true;[\s\S]{0,300}?reject\(new RegistryFetchError\("cancelled"\)\)/);
+    // 節目の判定は局所の印を含む isCancelled を通す（生の共有印を直接見ない）
+    expect(src).toMatch(/const abortIfCancelled = \(\): void => \{\s*\n\s*if \(!isCancelled\(\)\) return;/);
   });
 
   it("⚠自動操作が終わったら中止を受け付けない (@codex #357 P2)", () => {
