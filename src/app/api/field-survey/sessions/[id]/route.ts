@@ -17,6 +17,7 @@ import {
 } from "@/lib/field-survey-trip-util";
 import {
   TRIP_AUTO_END_REASON,
+  TRIP_AUTO_END_CONFIRMED_REASON,
   settledEndedAt,
 } from "@/lib/field-survey-auto-end";
 
@@ -185,10 +186,13 @@ export async function PATCH(
     const existingEndedAt = existing.endedAt;
     // 確定した終了時刻 (監査の巡回時間にも同じ値を使う)。
     let settledAt: Date | null = null;
+    // 確定済み(=一度押された)も対象に含める。通信の失敗で押し直したときに
+    // 「もう終わっている」で弾くと、利用者から見れば何度押しても終われない。
     const settlingAutoEnded =
       patch.status === "ended" &&
       existing.status === "ended" &&
-      existing.endReason === TRIP_AUTO_END_REASON;
+      (existing.endReason === TRIP_AUTO_END_REASON ||
+        existing.endReason === TRIP_AUTO_END_CONFIRMED_REASON);
     if (settlingAutoEnded) {
       // ⚠終了時刻は「押した時刻」でも「記録が届いた時刻」でもなく、
       // **位置記録が持つ最後の記録時刻**にそろえる (@codex #356 P2)。
@@ -212,12 +216,18 @@ export async function PATCH(
         where: {
           id,
           status: "ended",
-          endReason: TRIP_AUTO_END_REASON,
+          endReason: {
+            in: [TRIP_AUTO_END_REASON, TRIP_AUTO_END_CONFIRMED_REASON],
+          },
           updatedAt: existing.updatedAt,
         },
         data: {
           reconcilePending: false,
           endedAt: settledAt,
+          // ⚠**本人が確定させた印に変える**(@codex #356 P2)。自動終了の印を
+          // 残したままだと、確定した後に届いた古い送信まで受け入れてしまい
+          // (開きっぱなしの別タブ等)、記録が伸びて踏破マップからも再び消える。
+          endReason: TRIP_AUTO_END_CONFIRMED_REASON,
           ...(patch.memo !== undefined && { memo: patch.memo }),
         },
       });

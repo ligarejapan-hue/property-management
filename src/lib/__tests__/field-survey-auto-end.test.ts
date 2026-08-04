@@ -334,6 +334,41 @@ describe("⚠まだ歩いている人を踏破マップに出さない (@codex #
     }
   });
 
+  it("⚠確定した後の遅れた送信は受け付けない (@codex #356 P2)", () => {
+    // 本人が終了を押して確定した巡回に、開きっぱなしの別タブが後から座標を
+    // 足せると、記録が伸び、踏破マップからも再び消える。
+    // ⚠ただし**見回りによる確定では受け付けを閉じない**。見回りの確定は
+    // 「1時間なにも起きなかった」という推測でしかないので、その後に圏外から
+    // 復帰した端末の送信は受け取る必要がある（受け取ればまた確認待ちに戻る）。
+    const lib = read("src/lib/field-survey-auto-end.ts");
+    expect(lib).toMatch(
+      /TRIP_AUTO_END_CONFIRMED_REASON = "idle_timeout_confirmed"/,
+    );
+    // 人が押したときだけ印を変える
+    const manual = read("src/app/api/field-survey/sessions/[id]/route.ts");
+    expect(manual).toMatch(/endReason: TRIP_AUTO_END_CONFIRMED_REASON/);
+    // 見回りの確定は印を変えない（受け付けを閉じない）
+    const sweep = read("src/app/api/field-survey/sessions/auto-end-run/route.ts");
+    expect(sweep).not.toMatch(/TRIP_AUTO_END_CONFIRMED_REASON/);
+    // 受け入れ条件は「自動終了のまま」= 確定済みは通らない
+    const flush = read(
+      "src/app/api/field-survey/sessions/[id]/track-points/route.ts",
+    );
+    expect(flush).not.toMatch(/TRIP_AUTO_END_CONFIRMED_REASON/);
+  });
+
+  it("⚠押し直しでも終われる（確定済みも受ける）", () => {
+    // 通信の失敗で押し直したときに「もう終わっている」で弾くと、
+    // 利用者から見れば何度押しても終われない。
+    const src = read("src/app/api/field-survey/sessions/[id]/route.ts");
+    expect(src).toMatch(
+      /existing\.endReason === TRIP_AUTO_END_REASON \|\|\s*\n?\s*existing\.endReason === TRIP_AUTO_END_CONFIRMED_REASON/,
+    );
+    expect(src).toMatch(
+      /in: \[TRIP_AUTO_END_REASON, TRIP_AUTO_END_CONFIRMED_REASON\]/,
+    );
+  });
+
   it("本人が終了ボタンを押したら待たずに戻す", () => {
     // 自動終了した巡回に終了を押すと従来は 409 で何度押しても終われなかった。
     // 1時間の自動終了では日常的に起きるので、成功として扱い踏破マップにも戻す。
@@ -346,7 +381,7 @@ describe("⚠まだ歩いている人を踏破マップに出さない (@codex #
     // 書くまでの隙間に新しい記録が入ると、その記録が立て直した「まだ歩いて
     // いるかも」の印をこちらが消してしまう＝進行中の経路が踏破マップに出る。
     expect(src).toMatch(
-      /endReason: TRIP_AUTO_END_REASON,\s*\n\s*updatedAt: existing\.updatedAt,/,
+      /in: \[TRIP_AUTO_END_REASON, TRIP_AUTO_END_CONFIRMED_REASON\],\s*\n\s*\},\s*\n\s*updatedAt: existing\.updatedAt,/,
     );
     expect(src).toMatch(/if \(settled\.count === 0\)/);
   });
