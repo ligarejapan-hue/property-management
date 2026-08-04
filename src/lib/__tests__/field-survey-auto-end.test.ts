@@ -356,6 +356,23 @@ describe("⚠自動終了の経路はすべて同じ印を付ける (@codex #356
   });
 });
 
+describe("⚠systemd の記法と衝突させない (@codex #356 P1)", () => {
+  const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf-8");
+
+  it("ExecStart の % は %% にする", () => {
+    // systemd は ExecStart の `%x` を自分の記法として先に置き換える
+    // (`%s` = ログインシェル)。素の `printf "%s"` は `printf "/bin/bash"` に
+    // 化け、合言葉でない文字列が送られて 403。**自動終了が一度も動かない**のに
+    // systemd 上は成功して見えるため気づきにくい。
+    const unit = read("deploy/systemd/pm-trip-auto-end.service.example");
+    const execStart =
+      unit.split("\n").find((l) => l.startsWith("ExecStart=")) ?? "";
+    expect(execStart).toContain('printf "%%s"');
+    // 単独の % が残っていない (%% は許す)
+    expect(execStart.replace(/%%/g, "")).not.toContain("%");
+  });
+});
+
 describe("⚠合言葉をプロセス一覧に晒さない (@codex #356 P2)", () => {
   const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf-8");
 

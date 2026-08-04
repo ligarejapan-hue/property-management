@@ -29,5 +29,9 @@ EnvironmentFile=/etc/property-management/app.env
 #   口」を守るものなので漏らさない。
 #   → 値はシェル変数のまま標準入力へ流し、curl には `-H @-` で読ませる。
 #     argv に載るのは変数名だけで、値は載らない。
-ExecStart=/bin/sh -c 'printf "%s" "x-auto-end-secret: $FIELD_SURVEY_AUTO_END_SECRET" | /usr/bin/curl --fail --silent --show-error --max-time 60 -X POST http://127.0.0.1:3000/api/field-survey/sessions/auto-end-run -H @-'
+# ⚠**`%` は必ず `%%` と書く** (@codex #356 P1)。systemd は ExecStart の `%x` を
+#   自分の記法として先に置き換える (`%s` = ログインシェル)。`printf "%s"` のまま
+#   置くと `printf "/bin/bash"` に化け、**合言葉ではない文字列が送られて 403**。
+#   自動終了が一度も動かないのに、systemd 上は成功して見えるため気づきにくい。
+ExecStart=/bin/sh -c 'printf "%%s" "x-auto-end-secret: $FIELD_SURVEY_AUTO_END_SECRET" | /usr/bin/curl --fail --silent --show-error --max-time 60 -X POST http://127.0.0.1:3000/api/field-survey/sessions/auto-end-run -H @-'
 # 失敗しても次回の tick で拾えるので再起動はしない。
