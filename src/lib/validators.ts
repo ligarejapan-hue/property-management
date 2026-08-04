@@ -10,6 +10,7 @@ import {
   FIELD_SURVEY_MEMO_MAX_LEN,
   FIELD_SURVEY_PIN_TYPES,
 } from "@/lib/field-survey-constants";
+import { BUILDING_NAME_MAX_LENGTH } from "@/lib/property-building-name";
 
 // 法人番号入力フィールド共通スキーマ:
 // - 空文字 / null / undefined → null（保存しない）
@@ -138,6 +139,16 @@ export const createPropertySchema = z.object({
   postalCode: optionalPostalCode,
   lotNumber: z.string().optional().nullable(),
   buildingNumber: z.string().optional().nullable(),
+  // 物件名(任意)。⚠**種別に合わない値は保存側で null に落とす**
+  // (normalizeBuildingName)。ここでは長さの上限だけ見る。
+  buildingName: z
+    .string()
+    // ⚠**整えてから測る** (@codex #354 P2)。生の文字数で見ると、100文字以内の
+    // 名前でも前後に空白が付いただけで 422 になる。trim 後の長さで判定する。
+    .trim()
+    .max(BUILDING_NAME_MAX_LENGTH, "物件名が長すぎます")
+    .optional()
+    .nullable(),
   realEstateNumber: optionalRealEstateNumber,
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).default("unconfirmed"),
   dmStatus: z.enum(["send", "hold", "no_send"]).default("hold"),
@@ -169,6 +180,16 @@ export const updatePropertySchema = z.object({
   postalCode: optionalPostalCode,
   lotNumber: z.string().optional().nullable(),
   buildingNumber: z.string().optional().nullable(),
+  // 物件名(任意)。種別を変えた保存でも normalizeBuildingName を通すので、
+  // 対象外の種別に変えたら自動で null になる (画面から消えた値が残らない)。
+  buildingName: z
+    .string()
+    // ⚠**整えてから測る** (@codex #354 P2)。生の文字数で見ると、100文字以内の
+    // 名前でも前後に空白が付いただけで 422 になる。trim 後の長さで判定する。
+    .trim()
+    .max(BUILDING_NAME_MAX_LENGTH, "物件名が長すぎます")
+    .optional()
+    .nullable(),
   realEstateNumber: optionalRealEstateNumber,
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).optional(),
   dmStatus: z.enum(["send", "hold", "no_send"]).optional(),

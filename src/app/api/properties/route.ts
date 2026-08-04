@@ -14,6 +14,7 @@ import {
   propertyListQuerySchema,
   createPropertySchema,
 } from "@/lib/validators";
+import { normalizeBuildingName } from "@/lib/property-building-name";
 import {
   buildPropertyListWhere,
   buildPropertyListOrderBy,
@@ -161,6 +162,11 @@ export async function POST(request: NextRequest) {
     const property = await prisma.property.create({
       data: {
         ...data,
+        // ⚠物件名は**種別に合うときだけ**保存する。画面は種別で入力欄を出し
+        // 分けるが、それだけだと API を直接叩けば「土地」にも物件名を入れられ、
+        // **画面に出ないデータが DB に残る**(誰も直せず、CSV 出力や DM 差込で
+        // 初めて表に出る)。判定は UI と同じ純関数を通す。
+        buildingName: normalizeBuildingName(data.propertyType, data.buildingName),
         createdBy: session.id,
       },
       include: {

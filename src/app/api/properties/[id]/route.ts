@@ -11,6 +11,10 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { updatePropertySchema } from "@/lib/validators";
+import {
+  normalizeBuildingName,
+  supportsBuildingName,
+} from "@/lib/property-building-name";
 import { applyDisplayToOwner } from "@/lib/display-level";
 import { getStorage } from "@/lib/storage";
 import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
@@ -171,6 +175,9 @@ export async function PATCH(
         postalCode: true,
         lotNumber: true,
         buildingNumber: true,
+        // ⚠変更履歴の「変更前」に使う。選ばないと、物件名を書き換えても
+        // 履歴が「空 → 〇〇」になり、元の名前が残らない (@codex #354 P2)。
+        buildingName: true,
         realEstateNumber: true,
         registryStatus: true,
         dmStatus: true,
@@ -218,6 +225,31 @@ export async function PATCH(
       throw new ApiError(403, "この物件を編集する権限がありません", "FORBIDDEN");
     }
 
+    // 物件名は「更新後の種別」で判定する。
+    // ⚠**種別だけを対象外へ変えた更新**(buildingName を送ってこない)でも、
+    // 残っている物件名を消す。消さないと画面から入力欄が消えたのに値だけ DB に
+    // 残り、誰も直せないまま CSV 出力や DM 差込で表に出る。
+    const effectiveType = updateFields.propertyType ?? current.propertyType;
+    const buildingNamePatch: { buildingName?: string | null } =
+      updateFields.buildingName !== undefined
+        ? {
+            buildingName: normalizeBuildingName(
+              effectiveType,
+              updateFields.buildingName,
+            ),
+          }
+        : updateFields.propertyType !== undefined &&
+            !supportsBuildingName(effectiveType)
+          ? { buildingName: null }
+          : {};
+
+    // ⚠**実際に保存する値**で履歴を作る (@codex #354 P2)。updateFields だけで
+    // 作ると次の3つが履歴に残らない/嘘になる:
+    //   - 種別だけ変えて物件名が消えたとき → 消えた事実が記録されない
+    //   - 物件名を書き換えたとき → 変更前が常に「空」になる (上の select で是正)
+    //   - 正規化(空白除去・上限切り詰め・対象外なら null)後の値でなく生の入力が残る
+    const persistedFields = { ...updateFields, ...buildingNamePatch };
+
     // Build change log entries
     const changeLogs: Array<{
       targetTable: string;
@@ -229,7 +261,7 @@ export async function PATCH(
       changedBy: string;
     }> = [];
 
-    for (const [key, newVal] of Object.entries(updateFields)) {
+    for (const [key, newVal] of Object.entries(persistedFields)) {
       if (newVal === undefined) continue;
       const oldVal = (current as Record<string, unknown>)[key];
       const oldStr = oldVal != null ? String(oldVal) : null;
@@ -248,10 +280,11 @@ export async function PATCH(
     }
 
     // Update property with version increment
+    // ⚠保存する値は履歴と同じ persistedFields を使う (二重に組み立てない)。
     const updated = await prisma.property.update({
       where: { id },
       data: {
-        ...updateFields,
+        ...persistedFields,
         version: { increment: 1 },
       },
       include: {

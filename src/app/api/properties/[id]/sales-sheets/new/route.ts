@@ -300,6 +300,9 @@ export async function POST(
         orientation: true,
         managementFee: true,
         repairReserveFee: true,
+        // ⚠物件そのものに入れた物件名。建物マスタを作らずに登録した区分
+        // マンションはこちらにしか名前が無い (@codex #354 P2)。
+        buildingName: true,
         building: {
           select: {
             name: true,
@@ -389,16 +392,21 @@ export async function POST(
           zoningDistrict: property.zoningDistrict,
           occupancyStatus: property.occupancyStatus,
         },
-        building: property.building
-          ? {
-              name: property.building.name,
-              totalFloors: property.building.totalFloors,
-              builtYear: property.building.builtYear,
-              structureType: property.building.structureType,
-              managementCompany: property.building.managementCompany,
-              totalUnits: property.building.totalUnits,
-            }
-          : null,
+        // ⚠**建物マスタが無くても物件名だけは渡す** (@codex #354 P2)。
+        // 建物マスタを作らずに登録した区分マンションは property.building が
+        // null で、ここを丸ごと null にすると**販売図面の建物名称が空**になる。
+        building:
+          property.building || property.buildingName
+            ? {
+                name: property.building?.name ?? property.buildingName,
+                totalFloors: property.building?.totalFloors ?? null,
+                builtYear: property.building?.builtYear ?? null,
+                structureType: property.building?.structureType ?? null,
+                managementCompany:
+                  property.building?.managementCompany ?? null,
+                totalUnits: property.building?.totalUnits ?? null,
+              }
+            : null,
         photos,
         overrides: o,
         company,
