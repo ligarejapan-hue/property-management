@@ -108,6 +108,28 @@ describe("配線", () => {
     );
   });
 
+  it("⚠待たされている検索にも中止を受け付ける (@codex #357 P2)", () => {
+    // 有料取得の待ち行列に入った検索は、順番が来るまで更新が起きない。実況
+    // エントリは3分で消えるので、「実況があるか」で受け付けを判断すると
+    // **待たされている検索ほど中止できない**（押しても accepted:false）。
+    // 実行の生死は実況と切り離して持つ。
+    const store = read("src/lib/registry-fetch/live-view-store.ts");
+    expect(store).toMatch(/const activeOps = new Set<string>\(\)/);
+    expect(store).toMatch(/if \(!activeOps\.has\(k\)\) return false/);
+    // 開始で登録し、終了で必ず外す（外し忘れると永久に実行中に見える）
+    expect(store).toMatch(/activeOps\.add\(k\)/);
+    expect(store).toMatch(/activeOps\.delete\(k\)/);
+  });
+
+  it("⚠受け付けた中止を件数上限で捨てない (@codex #357 P2)", () => {
+    // 上限で古い印を追い出すと、その検索がまだ待ち行列に居た場合に
+    // **「中止しました」と言ったのに動き出す**。印が付くのは実行中の検索
+    // だけなので、同時実行数以上には増えず上限は要らない。
+    const store = read("src/lib/registry-fetch/live-view-store.ts");
+    expect(store).not.toMatch(/CANCEL_MARKS_MAX/);
+    expect(store).not.toMatch(/cancelMarks\.keys\(\)/);
+  });
+
   it("⚠印の寿命を時間で見積もらない (@codex #357 P2)", () => {
     // 待ち行列は本数に上限が無く、2本詰まれば20分。**何分にしても足りない
     // 場合がある**ので、期限はどれだけ長くても「実行中なのに消える」窓になる。

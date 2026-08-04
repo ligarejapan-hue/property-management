@@ -130,6 +130,8 @@ export function beginLiveView(
   };
   store.set(k, entry);
   scheduleExpiry(k, entry);
+  // 実行中の印 (実況の期限とは無関係に、終了まで残す)。
+  activeOps.add(k);
   // 並行数の上限 (最古から削除)。
   const p = prefix(userId, propertyId);
   const siblings: Array<[string, LiveViewEntry]> = [];
@@ -227,23 +229,28 @@ export function requestLiveViewCancel(
   liveRef: string,
 ): boolean {
   const k = key(userId, propertyId, liveRef);
+  // ⚠**受け付けの可否は「実行中か」で決める**(@codex #357 P2)。実況エントリの
+  // 有無で決めると、有料取得の待ち行列で3分以上待たされている検索に中止を
+  // 受け付けられない(実況だけ先に期限切れで消える)。押しても accepted:false が
+  // 返り、利用者は「押しても止まらない」まま検索が動き出す。
+  if (!activeOps.has(k)) return false;
   const entry = store.get(k);
-  if (!entry) return false;
-  if (entry.done) return false; // 既に終わっている
-  entry.cancelRequested = true;
-  entry.updatedAt = Date.now();
-  scheduleExpiry(k, entry);
+  if (entry?.done) return false; // 既に終わっている
+  if (entry) {
+    entry.cancelRequested = true;
+    entry.updatedAt = Date.now();
+    scheduleExpiry(k, entry);
+  }
   // ⚠**実況とは別に印を残す**(@codex #357 P2)。実況エントリの寿命は最終更新から
   // 3分だが、検索は**有料取得の待ち行列**に入ると長く待たされる(本数に上限が
   // 無い)。待っている間は更新が起きないので実況が先に期限切れで消え、順番が
   // 回ってきたときには中止の印も一緒に消えている
   // = **「中止しました」と言ったのに動き出す**。
   // この印は期限で消さない (片付けは route の finally とプロセス終了)。
-  // 暴走時の保険として件数上限だけ持ち、古いものから捨てる。
-  if (cancelMarks.size >= CANCEL_MARKS_MAX) {
-    const oldest = cancelMarks.keys().next();
-    if (!oldest.done) cancelMarks.delete(oldest.value);
-  }
+  // ⚠**件数上限で古い印を捨てない**(@codex #357 P2)。捨てられた印の検索がまだ
+  // 待ち行列に居ると、順番が回ってきたときに**受け付けたはずの中止が消えている**
+  // = 普通に検索が走る。印は実行中のものしか作られず(上の activeOps 判定)、
+  // 実行が終われば必ず消えるので、同時実行数以上には増えない。
   cancelMarks.add(k);
   return true;
 }
@@ -257,25 +264,31 @@ export function requestLiveViewCancel(
 const cancelMarks = new Set<string>();
 
 /**
- * ⚠**中止の印に期限は設けない** (@codex #357 P2)。
+ * **実行中の検索**(@codex #357 P2)。
+ *
+ * ⚠実況エントリ(スクショ置き場)は3分で期限切れになるが、検索そのものは有料取得の
+ * 待ち行列でそれより長く生きる。「まだ動いているか」を実況の有無で判断すると、
+ * **待たされている検索に中止を受け付けられない**(押しても accepted:false)。
+ * 実行の生死は実況と切り離してここで持つ。
+ *
+ * 追加 = 検索の開始(beginLiveView)、削除 = 検索の終了(route の finally)。
+ * 件数は同時実行数で自然に頭打ちになるので上限は要らない
+ * (上限で古いものを捨てると、**実行中の中止を捨てる**ことになる)。
+ */
+const activeOps = new Set<string>();
+
+/**
+ * ⚠**中止の印に期限も件数上限も設けない** (@codex #357 P2)。
  *
  * 期限を置くと、それがどれだけ長くても「実行中なのに印が消える」窓になる。
  * 有料取得の待ち行列は本数に上限が無く、**何分にしても足りない場合がある**。
- * 15分→60分と延ばしたが、延ばす方向の対処は本質的に誤りだった。
+ * 件数上限も同じ理由で捨てられない (古い印の検索がまだ待ち行列に居る)。
  *
  * 印は次の 2 つで確実に片付く:
- *   1. その検索が終わったとき — route の finally → `clearLiveViewCancel`
- *   2. プロセスが落ちたとき — この Map はメモリ内なのでプロセスと一緒に消える
- * したがって残り続ける経路が無く、期限による掃除は不要。
- *
- * ⚠「印を付けたのに検索が始まらない」孤児は作れない: `requestLiveViewCancel` は
- * 実況エントリが無い/完了済みなら false を返して印を作らず、route は
- * `completeLiveView`(done=true) → `clearLiveViewCancel` の順で片付ける。
- * その隙間に届いた中止は done=true を見て弾かれる。
- *
- * 万一の暴走に備えた上限だけ持つ (下記 MAX)。
+ *   1. その検索が終わったとき — route の finally → clearLiveViewCancel
+ *   2. プロセスが落ちたとき — メモリ内なのでプロセスと一緒に消える
+ * 印が付くのは実行中の検索だけなので、同時実行数以上には増えない。
  */
-const CANCEL_MARKS_MAX = 1000;
 
 /**
  * 中止の印を消す (@codex #357 P2)。
@@ -291,6 +304,9 @@ export function clearLiveViewCancel(
 ): void {
   const k = key(userId, propertyId, liveRef);
   cancelMarks.delete(k);
+  // ⚠**実行中の印も必ず外す**。ここで外し忘れると「終わった検索がいつまでも
+  // 実行中に見える」= 中止を受け付け続け、印も増え続ける。
+  activeOps.delete(k);
 }
 
 /** 中止が要求されているか (provider が節目ごとに見る)。 */
