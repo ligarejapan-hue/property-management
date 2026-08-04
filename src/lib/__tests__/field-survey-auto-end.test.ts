@@ -265,6 +265,17 @@ describe("settledEndedAt — 終了時刻は「歩いた時刻」(@codex #356 P2
 describe("⚠まだ歩いている人を踏破マップに出さない (@codex #356 P1)", () => {
   const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf-8");
 
+  it("⚠自動終了した時点で外す（届く前から）", () => {
+    // 無操作1時間で終了させたということは「終了ボタンが押されていない」
+    // = **本人はまだ歩いているかもしれない**（圏外で送信できていないだけ）。
+    // 自動終了と同時に踏破マップへ出すと、それまでに届いていた経路が即座に
+    // 他スタッフへ共有され、実行中の巡回を隠す守りを自動終了が回避してしまう。
+    const src = read("src/app/api/field-survey/sessions/auto-end-run/route.ts");
+    expect(src).toMatch(
+      /endReason: TRIP_AUTO_END_REASON,[\s\S]{0,900}?reconcilePending: true,/,
+    );
+  });
+
   it("自動終了後に位置記録が届いたら印を立てる", () => {
     // 踏破マップは「終了した巡回」を全員に見せ、「実行中の巡回」は隠すことで
     // 同僚の現在位置を追えないようにしている。自動終了で終了扱いになった巡回に

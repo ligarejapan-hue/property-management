@@ -132,9 +132,12 @@ describe("終了の実行", () => {
     // ⚠終了時刻は「気づいた時刻」ではなく最後に活動した時刻
     const args = updateMany.mock.calls[0][0] as {
       where: Record<string, unknown>;
-      data: { endedAt: Date };
+      data: { endedAt: Date; reconcilePending?: boolean };
     };
     expect(args.data.endedAt).toEqual(staleSession.updatedAt);
+    // ⚠自動終了した時点では踏破マップに出さない（本人はまだ歩いているかも）。
+    // 終了ボタンが押されていないから自動終了になった、という事実がその根拠。
+    expect(args.data.reconcilePending).toBe(true);
     // ⚠読んだ時点の updatedAt を条件に含める(競合ガード)
     expect(args.where).toMatchObject({
       id: staleSession.id,
