@@ -106,8 +106,13 @@ describe("配線", () => {
     expect(store).toMatch(
       /store\.get\(k\)\?\.cancelRequested === true \|\| cancelMarks\.has\(k\)/,
     );
-    // 印の寿命は実況(3分)より長く、有料取得の待ち(最大10分)を超えること
-    expect(store).toMatch(/CANCEL_MARK_TTL_MS = 15 \* 60 \* 1000/);
+    // ⚠寿命を待ち時間から見積もらない (@codex #357 P2)。有料取得の待ち行列は
+    // 本数に上限が無く、2本詰まれば20分。**何分にしても足りない場合がある**。
+    // 印は「その検索が終わった時点」で消す。
+    expect(store).toMatch(/export function clearLiveViewCancel/);
+    expect(
+      read("src/app/api/properties/[id]/registry/search/route.ts"),
+    ).toMatch(/clearLiveViewCancel\(session\.id, id, liveRef\)/);
   });
 
   it("⚠長生きさせる印に秘匿情報を持たせない", () => {

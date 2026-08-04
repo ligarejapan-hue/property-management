@@ -18,6 +18,7 @@ import {
   completeLiveView,
   isValidLiveRef,
   isLiveViewCancelRequested,
+  clearLiveViewCancel,
 } from "@/lib/registry-fetch/live-view-store";
 
 // ---------- POST /api/properties/[id]/registry/search ----------
@@ -123,7 +124,13 @@ export async function POST(
     } finally {
       // 成否に関わらず実況を完了へ (パネルの「実行中」を残さない)。TTL 経過で
       // ストアから消える。
-      if (liveRef) completeLiveView(session.id, id, liveRef);
+      if (liveRef) {
+        completeLiveView(session.id, id, liveRef);
+        // ⚠**中止の印はここで消す** (@codex #357 P2)。この検索が終わった時点が
+        // 印の役目の終わり。寿命を待ち時間から見積もる方式だと、有料取得の
+        // 待ち行列が伸びたときに**中止したはずの検索が動き出す**。
+        clearLiveViewCancel(session.id, id, liveRef);
+      }
     }
   } catch (error) {
     return handleApiError(error);

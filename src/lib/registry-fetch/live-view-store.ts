@@ -252,10 +252,17 @@ const cancelMarks = new Map<string, number>();
 const cancelMarkTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
- * 中止の印の寿命。⚠**実行そのものの寿命に合わせる**。有料取得は待ち行列で
- * 最大10分かかり得るので、それを超える余裕を取る。
+ * 中止の印の寿命 — ⚠これは**取りこぼし防止の保険**であって、仕組みの本体ではない。
+ *
+ * 印は「その検索が終わったとき」(route の finally → clearLiveViewCancel) に消す。
+ * 待ち時間から寿命を見積もる方式はやめた (@codex #357 P2): 有料取得の待ち行列は
+ * 本数に上限が無く、2本以上詰まれば10分×本数だけ待たされる。**何分にしても
+ * 足りない場合がある**ため、時間で見切るのは設計として誤り。
+ *
+ * ここに残す TTL は「プロセスが落ちて finally が走らなかった」ときに Map が
+ * 永久に膨らまないようにするためだけのもの。実運用の判断には使わない。
  */
-export const CANCEL_MARK_TTL_MS = 15 * 60 * 1000;
+export const CANCEL_MARK_TTL_MS = 60 * 60 * 1000;
 
 function scheduleCancelMarkExpiry(k: string): void {
   const prev = cancelMarkTimers.get(k);
@@ -269,6 +276,27 @@ function scheduleCancelMarkExpiry(k: string): void {
     (t as { unref: () => void }).unref();
   }
   cancelMarkTimers.set(k, t);
+}
+
+/**
+ * 中止の印を消す (@codex #357 P2)。
+ *
+ * ⚠**その検索が終わった時点**で呼ぶ (route の finally)。印の寿命を
+ * 「待ち時間の見積もり」に任せると、待ち行列が伸びたときに
+ * **中止したはずの検索が動き出す**。終わりを知っている場所で消すのが正しい。
+ */
+export function clearLiveViewCancel(
+  userId: string,
+  propertyId: string,
+  liveRef: string,
+): void {
+  const k = key(userId, propertyId, liveRef);
+  cancelMarks.delete(k);
+  const t = cancelMarkTimers.get(k);
+  if (t) {
+    clearTimeout(t);
+    cancelMarkTimers.delete(k);
+  }
 }
 
 /** 中止が要求されているか (provider が節目ごとに見る)。 */
