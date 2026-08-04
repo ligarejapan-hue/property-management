@@ -34,6 +34,7 @@ import type {
   RegistryCandidate,
   RegistryLiveReporter,
 } from "./types";
+import { CANCEL_ACCEPTED_MESSAGE } from "./cancel-safety";
 import { RegistryFetchError } from "./errors";
 import { runExclusivePurchase } from "./purchase-safety";
 import type { RegistryFetchThrottle } from "./throttle";
@@ -398,6 +399,24 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     // ミューテックス**に通す。検索が購入と並行してログインすると、進行中の購入
     // セッションを強制ログアウトさせ、**課金だけ済んでPDFを取り逃す**。
     return runExclusivePurchase(async () => {
+      // ⚠**順番待ちの間に押された中止を、ここで拾う** (@codex #357 P2)。
+      // アカウント同時1セッション制約のため、検索は上のミューテックスで
+      // 待たされることがある。待っている間の中止に気づかないと、
+      //   (1) 中止したのに**登記情報提供サービスへログインしてしまう**
+      //   (2) 起動やログインが失敗すると「中止」ではなく**外部サービスの障害**
+      //       として利用者にも監査にも残る
+      // の2つが起きる。ブラウザを起動する前が最初の安全な節目。
+      // 候補検索(段階①)はお金が動かないので、いつ止めても安全。
+      const abortIfCancelled = (): void => {
+        if (request.live?.isCancelRequested?.() !== true) return;
+        try {
+          request.live?.step(CANCEL_ACCEPTED_MESSAGE);
+        } catch {
+          /* 実況は best-effort */
+        }
+        throw new RegistryFetchError("cancelled");
+      };
+      abortIfCancelled();
       // 実況パネル (#317 とは別機能): ステップ進行の通知。label は固定文言のみ
       // (所在・地番・資格情報を入れない)。reporter は非 throw 契約だが、実況が
       // 検索本体を壊さないよう optional chain のみで触る。
@@ -418,6 +437,10 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
           throw new RegistryFetchError("provider_error");
         }
         return await this.withTimeout(async () => {
+          // ⚠ログインの直前でもう一度見る (@codex #357 P2)。ブラウザの起動には
+          // 時間がかかるので、その間に押された中止をここで拾う
+          // = **無駄な実ログインをしない**。
+          abortIfCancelled();
           // ログイン場面は撮影しない (ID/PW が画面に写り得るため文言のみ =
           // ユーザー合意済みの「ぼかし or 省略」の省略側)。
           request.live?.step(

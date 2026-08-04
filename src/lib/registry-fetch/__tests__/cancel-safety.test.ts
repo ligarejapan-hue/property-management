@@ -108,6 +108,27 @@ describe("配線", () => {
     );
   });
 
+  it("⚠ログインの前に中止を見る (@codex #357 P2)", () => {
+    // 検索はアカウント同時1セッション制約のため順番待ちになることがある。
+    // 待っている間の中止に気づかないと、(1)中止したのに外部サービスへ
+    // ログインしてしまう (2)起動/ログインが失敗すると「中止」ではなく
+    // 「外部サービスの障害」として残る。ブラウザ起動前とログイン前で見る。
+    const src = read("src/lib/registry-fetch/official-provider.ts");
+    expect(src).toMatch(/const abortIfCancelled = \(\): void =>/);
+    // 順番待ちを抜けた直後（ブラウザ起動より前）
+    expect(src).toMatch(
+      /abortIfCancelled\(\);[\s\S]{0,400}?自動操作ブラウザを起動しています/,
+    );
+    // ログイン実行より前
+    expect(src).toMatch(
+      /abortIfCancelled\(\);[\s\S]{0,400}?登記情報提供サービスへログインしています/,
+    );
+    // 中止は「障害」に化けない（RegistryFetchError はそのまま通る）
+    expect(src).toMatch(
+      /if \(err instanceof RegistryFetchError\) return err;/,
+    );
+  });
+
   it("⚠待たされている検索にも中止を受け付ける (@codex #357 P2)", () => {
     // 有料取得の待ち行列に入った検索は、順番が来るまで更新が起きない。実況
     // エントリは3分で消えるので、「実況があるか」で受け付けを判断すると
