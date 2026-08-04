@@ -17,6 +17,7 @@ import {
   attachLiveShot,
   completeLiveView,
   isValidLiveRef,
+  isLiveViewCancelRequested,
 } from "@/lib/registry-fetch/live-view-store";
 
 // ---------- POST /api/properties/[id]/registry/search ----------
@@ -98,6 +99,12 @@ export async function POST(
           },
           attachShot(seq: number, shot: Uint8Array): void {
             attachLiveShot(session.id, id, liveRef, seq, shot);
+          },
+          // 実況パネルの「中止」。⚠provider は節目ごとにこれを見て**自分で**止まる
+          // (外から処理を殺さない = 外部サイトを中途半端な状態で放り出さない)。
+          // ⚠課金後は provider 側の判断で無視される (cancel-safety.ts)。
+          isCancelRequested(): boolean {
+            return isLiveViewCancelRequested(session.id, id, liveRef);
           },
         }
       : undefined;

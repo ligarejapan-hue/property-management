@@ -1804,6 +1804,30 @@ export async function fetchRegistryLiveView(
   );
 }
 
+/**
+ * 実況パネルの「中止」を要求する (実行者本人のみ)。
+ *
+ * ⚠**押した瞬間に止まるわけではない**。要求を立てるだけで、実際に止まるのは
+ * 自動操作が**安全な節目**まで進んでから (途中で殺すと外部サイトを中途半端な
+ * 状態で放り出す)。
+ * ⚠候補検索の経路では**お金は動かない**ので、いつ止めても課金は発生しない。
+ *
+ * accepted:false = もう止める対象が無い (期限切れ / 既に完了)。
+ */
+export async function cancelRegistryLiveView(
+  propertyId: string,
+  liveRef: string,
+): Promise<{ data: { accepted: boolean } }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { accepted: true } };
+  }
+  return apiFetch(
+    `/api/properties/${propertyId}/registry/search/live/${encodeURIComponent(liveRef)}/cancel`,
+    { method: "POST" },
+  );
+}
+
 /** 実況パネルのステップスクショ URL (img src 用・認可付き・no-store)。 */
 export function registryLiveShotUrl(
   propertyId: string,

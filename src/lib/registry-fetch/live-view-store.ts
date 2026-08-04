@@ -31,6 +31,12 @@ interface LiveViewEntry {
   shots: Map<number, Uint8Array>;
   totalShotBytes: number;
   done: boolean;
+  /**
+   * 実行者が「中止」を押した印。provider が節目ごとに見て**自分で**止まる。
+   * ⚠外から処理を殺さない。強制終了すると外部サイトを中途半端な状態
+   * (カートに行だけ残る等)で放り出す恐れがある。
+   */
+  cancelRequested?: boolean;
   updatedAt: number;
   /**
    * TTL 到達で自動削除するタイマー (@codex P2: prune がアクセス起点だけだと、
@@ -200,6 +206,43 @@ export function attachLiveShot(
   entry.steps[stepIdx] = { ...entry.steps[stepIdx], hasShot: true };
   entry.updatedAt = Date.now();
   scheduleExpiry(k, entry);
+}
+
+/**
+ * 中止の要求 (実行者本人のみ = key に userId を含むため他人は触れない)。
+ *
+ * ⚠**フラグを立てるだけ**。ここで処理を殺さない。外から強制終了すると、外部サイトを
+ * 中途半端な状態 (カートに行だけ残る等) で放り出す恐れがある。実際に止まる場所は
+ * provider が「安全な節目」として選ぶ。
+ *
+ * ⚠**課金後は止められない** (判断は provider 側)。請求を押した後に止めると
+ * 「お金は払ったのに書類が手に入らない」状態を作るため、課金境界を越えたら
+ * この要求は無視して最後まで取得しきる。
+ *
+ * @returns エントリが無い (期限切れ / 別人 / 既に完了) なら false
+ */
+export function requestLiveViewCancel(
+  userId: string,
+  propertyId: string,
+  liveRef: string,
+): boolean {
+  const k = key(userId, propertyId, liveRef);
+  const entry = store.get(k);
+  if (!entry) return false;
+  if (entry.done) return false; // 既に終わっている
+  entry.cancelRequested = true;
+  entry.updatedAt = Date.now();
+  scheduleExpiry(k, entry);
+  return true;
+}
+
+/** 中止が要求されているか (provider が節目ごとに見る)。 */
+export function isLiveViewCancelRequested(
+  userId: string,
+  propertyId: string,
+  liveRef: string,
+): boolean {
+  return store.get(key(userId, propertyId, liveRef))?.cancelRequested === true;
 }
 
 /** 実行完了 (成功・失敗とも)。エントリは TTL まで閲覧可能なまま残る。 */

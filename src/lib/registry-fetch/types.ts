@@ -73,6 +73,9 @@ export type RegistryFetchErrorCode =
   // 例外を投げないので journald にも何も出ず、利用者にも開発側にも
   // **入力の問題だと分からない**(この機能で最も診断を困難にしていた原因)。
   | "location_rejected"
+  // 利用者が実況パネルの「中止」を押して自分で止めた。⚠**失敗ではない**ので
+  // 障害として扱わない(再試行を促さない)。課金前にしか発生しない。
+  | "cancelled"
   | "provider_error"
   // 登記情報提供サービスの利用時間外(jikangai.html へ誘導される)。auth_failed と区別し、
   // 利用者に「時間外」と明示する(誤って資格情報を疑わせない)。
@@ -127,6 +130,14 @@ export interface RegistryLiveReporter {
   step(label: string): number;
   /** step() が返した seq へ viewport JPEG を後付けする (cap 超過・期限切れは黙って捨てる)。 */
   attachShot(seq: number, shot: Uint8Array): void;
+  /**
+   * 実況パネルの「中止」が押されたか。
+   * ⚠provider は**節目ごとに**これを見て自分で止まる (外から処理を殺さない =
+   * 外部サイトを中途半端な状態で放り出さない)。
+   * ⚠**課金後は無視する** (判断は cancel-safety.ts)。
+   * 実況を使わない呼び出し元もあるため任意。
+   */
+  isCancelRequested?(): boolean;
 }
 
 /**
