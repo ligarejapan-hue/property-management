@@ -1,0 +1,29 @@
+# =============================================================================
+# 巡回の自動終了 (無操作1時間) — 実行ユニット
+# =============================================================================
+# 使い方:
+#   sudo cp deploy/systemd/pm-trip-auto-end.service.example \
+#            /etc/systemd/system/pm-trip-auto-end.service
+#   sudo cp deploy/systemd/pm-trip-auto-end.timer.example \
+#            /etc/systemd/system/pm-trip-auto-end.timer
+#   # app.env に FIELD_SURVEY_AUTO_END_SECRET を設定してから:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now pm-trip-auto-end.timer
+#   # 確認: systemctl list-timers pm-trip-auto-end.timer
+#
+# ⚠合言葉が未設定なら route は 503 を返すだけで何も終了しない (安全側)。
+# ⚠?dryRun=1 を付けると件数だけ返して終了させない (投入前の確認に使う)。
+# =============================================================================
+
+[Unit]
+Description=Auto-end idle field-survey trips (property-management)
+After=network.target property-management.service
+
+[Service]
+Type=oneshot
+# app.env から合言葉だけを読む (root:600 のまま・値はログに出さない)。
+EnvironmentFile=/etc/property-management/app.env
+ExecStart=/usr/bin/curl --fail --silent --show-error --max-time 60 \
+  -X POST http://127.0.0.1:3000/api/field-survey/sessions/auto-end-run \
+  -H "x-auto-end-secret: ${FIELD_SURVEY_AUTO_END_SECRET}"
+# 失敗しても次回の tick で拾えるので再起動はしない。
