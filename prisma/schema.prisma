@@ -867,6 +867,10 @@ model FieldSurveySession {
   startedAt   DateTime                @map("started_at")
   endedAt     DateTime?               @map("ended_at")
   status      FieldSurveySessionStatus @default(active)
+  // 終了のしかた。null = 人が終了ボタンを押した(従来)。"idle_timeout" = 無操作で
+  // 自動終了した。⚠**圏外で貯めた位置記録を後から受け取れるようにするため**に要る
+  // (@codex #356 P1): 自動終了した巡回にだけ、復帰後の送信を許す。
+  endReason   String?                 @map("end_reason")
   memo        String?
   pointCount  Int                     @default(0) @map("point_count")
   // #317: 巡回終了フェンスの世代カウンタ。位置記録の開始 (フェンス touch =

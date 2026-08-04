@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
+import { touchTripActivity } from "@/lib/field-survey-auto-end";
 import { getStorage } from "@/lib/storage";
 import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
 
@@ -40,7 +41,8 @@ export async function DELETE(
         pinId: true,
         fileUrl: true,
         thumbnailUrl: true,
-        pin: { select: { staffUserId: true, status: true } },
+        // sessionId は巡回の活動更新に使う(@codex #356 P2)。
+        pin: { select: { staffUserId: true, status: true, sessionId: true } },
       },
     });
     if (!photo || photo.pinId !== id) {
@@ -61,6 +63,9 @@ export async function DELETE(
     const fileUrlBeforeDelete = photo.fileUrl;
     const thumbnailUrlBeforeDelete = photo.thumbnailUrl;
     await prisma.fieldSurveyPinPhoto.delete({ where: { id: photoId } });
+    // ⚠**写真の削除も巡回の活動として数える**(@codex #356 P2)。撮り直しで
+    // 消して撮る、を繰り返している最中に自動終了で切られない。
+    await touchTripActivity(prisma, photo.pin?.sessionId ?? null);
 
     // best-effort: 本体 + (あれば) thumbnail の実体を消す。fileUrl は /uploads/...
     // proxy 相対なので extractStorageKeyFromUrl で key を復元できる。

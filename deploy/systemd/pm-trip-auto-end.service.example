@@ -23,7 +23,11 @@ After=network.target property-management.service
 Type=oneshot
 # app.env から合言葉だけを読む (root:600 のまま・値はログに出さない)。
 EnvironmentFile=/etc/property-management/app.env
-ExecStart=/usr/bin/curl --fail --silent --show-error --max-time 60 \
-  -X POST http://127.0.0.1:3000/api/field-survey/sessions/auto-end-run \
-  -H "x-auto-end-secret: ${FIELD_SURVEY_AUTO_END_SECRET}"
+# ⚠**合言葉を curl の引数に置かない**。systemd が展開した値は argv に載るため、
+#   実行のたびに `ps` や /proc/<pid>/cmdline から**同一ホストの他プロセスに見える**
+#   (app.env を root:600 にしている意味が無くなる)。この合言葉は「巡回を終了させる
+#   口」を守るものなので漏らさない。
+#   → 値はシェル変数のまま標準入力へ流し、curl には `-H @-` で読ませる。
+#     argv に載るのは変数名だけで、値は載らない。
+ExecStart=/bin/sh -c 'printf "%s" "x-auto-end-secret: $FIELD_SURVEY_AUTO_END_SECRET" | /usr/bin/curl --fail --silent --show-error --max-time 60 -X POST http://127.0.0.1:3000/api/field-survey/sessions/auto-end-run -H @-'
 # 失敗しても次回の tick で拾えるので再起動はしない。

@@ -5,6 +5,7 @@ import { writeAuditLog } from "@/lib/audit";
 import {
   TRIP_AUTO_END_BATCH_LIMIT,
   TRIP_AUTO_END_IDLE_MS,
+  TRIP_AUTO_END_REASON,
   autoEndedAt,
   type TripAutoEndResult,
 } from "@/lib/field-survey-auto-end";
@@ -69,7 +70,13 @@ export async function POST(request: Request) {
       // 自動終了と同じ守り方。
       const upd = await prisma.fieldSurveySession.updateMany({
         where: { id: s.id, status: "active", updatedAt: s.updatedAt },
-        data: { status: "ended", endedAt: autoEndedAt(s) },
+        // ⚠**理由を残す**(@codex #356 P1)。圏外で貯めた位置記録を復帰後に
+        // 受け取れるようにするため、"人が押した終了" と区別する必要がある。
+        data: {
+          status: "ended",
+          endedAt: autoEndedAt(s),
+          endReason: TRIP_AUTO_END_REASON,
+        },
       });
       if (upd.count === 0) {
         result.skipped++;
@@ -92,7 +99,7 @@ export async function POST(request: Request) {
           // 誰の巡回だったかは detail に残す(識別子のみ・氏名は入れない)。
           // 実行者(userId)とは意味が違うので別のキーにする。
           ownerStaffUserId: s.staffUserId,
-          reason: "idle_timeout",
+          reason: TRIP_AUTO_END_REASON,
           idleMinutes: Math.floor(TRIP_AUTO_END_IDLE_MS / 60000),
           pointCount: s.pointCount,
         },

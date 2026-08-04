@@ -145,6 +145,73 @@ describe("⚠写真追加・ピン編集も活動に数える (@codex #356 P2)",
   });
 });
 
+describe("⚠圏外で貯めた記録を失わない (@codex #356 P1)", () => {
+  const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf-8");
+
+  it("自動終了には理由を残す（人が押した終了と区別する）", () => {
+    // 区別できないと、復帰後の送信を受け入れてよいか判断できない。
+    const route = read("src/app/api/field-survey/sessions/auto-end-run/route.ts");
+    expect(route).toMatch(/endReason: TRIP_AUTO_END_REASON/);
+  });
+
+  it("自動終了した巡回には、復帰後の位置記録を受け入れる", () => {
+    // 圏外では送信できず端末に貯まる。その間は活動が記録されないので無操作
+    // 扱いで自動終了され得る。ここで弾くと**歩いた記録がまるごと失われる**。
+    const flush = read(
+      "src/app/api/field-survey/sessions/[id]/track-points/route.ts",
+    );
+    expect(flush).toMatch(
+      /\{ status: "ended", endReason: TRIP_AUTO_END_REASON \}/,
+    );
+  });
+
+  it("⚠人が押して終えた巡回には後から足さない", () => {
+    // endReason が null のものは従来どおり弾く（意図して終えた巡回を汚さない）。
+    const flush = read(
+      "src/app/api/field-survey/sessions/[id]/track-points/route.ts",
+    );
+    // 受け入れ条件は active か「自動終了」のみ。無条件の ended を含めない。
+    expect(flush).not.toMatch(/\{ status: "ended" \}/);
+  });
+
+  it("列は任意（既存データを壊さない）", () => {
+    expect(read("prisma/schema.prisma")).toMatch(
+      /endReason\s+String\?\s+@map\("end_reason"\)/,
+    );
+    expect(
+      read("prisma/migrations/20260805020000_add_session_end_reason/migration.sql"),
+    ).toMatch(/ADD COLUMN "end_reason" TEXT;/);
+  });
+});
+
+describe("⚠削除も活動に数える (@codex #356 P2)", () => {
+  const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf-8");
+
+  it("ピンの削除（候補から外す）", () => {
+    expect(read("src/app/api/field-survey/pins/[id]/route.ts")).toMatch(
+      /touchTripActivity\(prisma, existing\.sessionId\)/,
+    );
+  });
+
+  it("写真の削除（撮り直し）", () => {
+    expect(
+      read("src/app/api/field-survey/pins/[id]/photos/[photoId]/route.ts"),
+    ).toMatch(/touchTripActivity\(prisma, photo\.pin\?\.sessionId/);
+  });
+});
+
+describe("⚠合言葉をプロセス一覧に晒さない (@codex #356 P2)", () => {
+  const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf-8");
+
+  it("curl の引数に値を置かない（ps / proc から読めてしまう）", () => {
+    const unit = read("deploy/systemd/pm-trip-auto-end.service.example");
+    // 値は標準入力へ流し、curl には -H @- で読ませる。
+    expect(unit).toMatch(/-H @-/);
+    // 展開済みの値を引数に置く形（-H "x-auto-end-secret: ${...}"）を残さない。
+    expect(unit).not.toMatch(/-H "x-auto-end-secret: \$\{/);
+  });
+});
+
 describe("⚠監査画面に実際に残る (@codex #356 P2)", () => {
   it("自動終了の detail が [REDACTED] で消えない", () => {
     // ⚠実行者(userId)を null にしたぶん、detail が全部伏せられると

@@ -9,6 +9,7 @@ import {
   ApiError,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { TRIP_AUTO_END_REASON } from "@/lib/field-survey-auto-end";
 import { writeAuditLog } from "@/lib/audit";
 import {
   fieldSurveyTrackPointBatchSchema,
@@ -107,8 +108,19 @@ export async function POST(
         // 「記録の開始 (フェンス)」だけが進める。これにより終了フローが
         // 意図時点でピンした世代が自分の drain (最終 flush) で壊れず、かつ
         // 他 client の記録再開 (フェンス) では必ず壊れる、が両立する。
+        // ⚠**自動終了した巡回も受け取る**(@codex #356 P1)。圏外では送信できず
+        // 端末に貯まるが、その間は活動が記録されないので無操作扱いで自動終了され
+        // 得る。ここで弾くと**歩いた記録がまるごと失われる**(電波の悪い場所を回る
+        // のがこの機能の主目的なので致命的)。人が押した終了(endReason=null)は
+        // 従来どおり弾く=意図して終えた巡回に後から足さない。
         const upd = await tx.fieldSurveySession.updateMany({
-          where: { id, status: "active" },
+          where: {
+            id,
+            OR: [
+              { status: "active" },
+              { status: "ended", endReason: TRIP_AUTO_END_REASON },
+            ],
+          },
           data: { pointCount: { increment: inserted.count } },
         });
         if (upd.count === 0) {

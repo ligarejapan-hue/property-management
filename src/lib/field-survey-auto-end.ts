@@ -20,6 +20,14 @@
 /** 無操作がこの時間を超えた巡回を自動終了する（発注者決定=1時間）。 */
 export const TRIP_AUTO_END_IDLE_MS = 60 * 60 * 1000;
 
+/**
+ * 自動終了したことを示す印 (session.endReason / 監査の reason)。
+ * ⚠**"人が終了ボタンを押した" と区別するために要る**(@codex #356 P1)。
+ * 圏外で貯めた位置記録は、自動終了した巡回にだけ後から受け取る。
+ * 意図して終えた巡回に後から足すのは誤りなので、そちらは従来どおり弾く。
+ */
+export const TRIP_AUTO_END_REASON = "idle_timeout";
+
 /** 1回の実行で終了させる上限。取りこぼしは次の実行で拾う。 */
 export const TRIP_AUTO_END_BATCH_LIMIT = 100;
 

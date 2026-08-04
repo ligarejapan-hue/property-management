@@ -393,7 +393,16 @@ describe("POST track-points", () => {
     expect(body.data.acceptedCount).toBe(2);
     expect(body.data.skippedCount).toBe(1);
     const updArgs = pm._tx.sessionTx.updateMany.mock.calls[0][0];
-    expect(updArgs.where).toEqual({ id: SESSION_ID, status: "active" });
+    // ⚠**自動終了した巡回も受け取る** (@codex #356 P1)。圏外で貯めた位置記録が
+    // 復帰後に 409 で捨てられると、歩いた記録がまるごと失われる。
+    // 人が押して終えた巡回 (endReason=null) は従来どおり弾く。
+    expect(updArgs.where).toEqual({
+      id: SESSION_ID,
+      OR: [
+        { status: "active" },
+        { status: "ended", endReason: "idle_timeout" },
+      ],
+    });
     expect(updArgs.data.pointCount).toEqual({ increment: 2 });
     // AuditLog は POST では書かない
     expect(writeAuditLog).not.toHaveBeenCalled();

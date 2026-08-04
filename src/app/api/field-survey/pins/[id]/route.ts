@@ -356,7 +356,8 @@ export async function DELETE(
 
     const existing = await prisma.fieldSurveyPin.findUnique({
       where: { id },
-      select: { id: true, staffUserId: true, status: true },
+      // sessionId は巡回の活動更新に使う (@codex #356 P2)。
+      select: { id: true, staffUserId: true, status: true, sessionId: true },
     });
     if (!existing) {
       throw new ApiError(404, "pin が見つかりません", "NOT_FOUND");
@@ -373,6 +374,13 @@ export async function DELETE(
       where: { id, status: { not: "archived" } },
       data: { status: "archived" },
     });
+
+    // ⚠**削除も巡回の活動として数える**(@codex #356 P2)。候補から外す操作を
+    // 続けている最中に自動終了(1時間)で切られない。PATCH/写真追加だけ直して
+    // 削除を取りこぼしていた。
+    if (result.count > 0) {
+      await touchTripActivity(prisma, existing.sessionId);
+    }
 
     // 実際に open/closed → archived へ遷移したときのみ監査ログを残す。
     if (result.count > 0) {
