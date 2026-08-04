@@ -233,7 +233,42 @@ export function requestLiveViewCancel(
   entry.cancelRequested = true;
   entry.updatedAt = Date.now();
   scheduleExpiry(k, entry);
+  // ⚠**実況とは別に印を残す**(@codex #357 P2)。実況エントリの寿命は最終更新から
+  // 3分だが、検索は**先行する有料取得の待ち行列**に入ると最大10分待たされる。
+  // 待っている間は更新が起きないので実況が先に期限切れで消え、順番が回ってきた
+  // ときには中止の印も一緒に消えている=**「中止しました」と言ったのに動き出す**。
+  // こちらは軽い印だけなので、実行の寿命に合わせて長めに持つ。
+  cancelMarks.set(k, Date.now());
+  scheduleCancelMarkExpiry(k);
   return true;
+}
+
+/**
+ * 中止の印だけを、実況エントリより長く持つ置き場 (@codex #357 P2)。
+ * ⚠ここに入れるのは**押された時刻だけ**。所在・スクショは持たない
+ * (長生きさせてよいのは秘匿情報を含まないものに限る)。
+ */
+const cancelMarks = new Map<string, number>();
+const cancelMarkTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * 中止の印の寿命。⚠**実行そのものの寿命に合わせる**。有料取得は待ち行列で
+ * 最大10分かかり得るので、それを超える余裕を取る。
+ */
+export const CANCEL_MARK_TTL_MS = 15 * 60 * 1000;
+
+function scheduleCancelMarkExpiry(k: string): void {
+  const prev = cancelMarkTimers.get(k);
+  if (prev) clearTimeout(prev);
+  const t = setTimeout(() => {
+    cancelMarks.delete(k);
+    cancelMarkTimers.delete(k);
+  }, CANCEL_MARK_TTL_MS);
+  // Node のプロセス終了を妨げない (テスト・graceful shutdown 対策)。
+  if (typeof t === "object" && t && "unref" in t) {
+    (t as { unref: () => void }).unref();
+  }
+  cancelMarkTimers.set(k, t);
 }
 
 /** 中止が要求されているか (provider が節目ごとに見る)。 */
@@ -242,7 +277,9 @@ export function isLiveViewCancelRequested(
   propertyId: string,
   liveRef: string,
 ): boolean {
-  return store.get(key(userId, propertyId, liveRef))?.cancelRequested === true;
+  const k = key(userId, propertyId, liveRef);
+  // 実況エントリが期限切れで消えていても、中止の印が残っていれば止める。
+  return store.get(k)?.cancelRequested === true || cancelMarks.has(k);
 }
 
 /** 実行完了 (成功・失敗とも)。エントリは TTL まで閲覧可能なまま残る。 */
@@ -286,6 +323,10 @@ export function getLiveShot(
 export function __clearLiveViewStoreForTests(): void {
   for (const k of Array.from(store.keys())) deleteEntry(k);
   store.clear();
+  // 中止の印は実況より長生きするので、テスト間で持ち越さないよう明示的に消す。
+  for (const t of cancelMarkTimers.values()) clearTimeout(t);
+  cancelMarkTimers.clear();
+  cancelMarks.clear();
 }
 
 export function __liveViewStoreSizeForTests(): number {

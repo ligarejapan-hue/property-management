@@ -97,6 +97,26 @@ describe("配線", () => {
     expect(src).toMatch(/if \(!res\.data\.accepted\) setCancelling\(false\)/);
   });
 
+  it("⚠実況が期限切れでも中止の印が残る (@codex #357 P2)", () => {
+    // 検索は先行する有料取得の待ち行列で最大10分待たされる。実況エントリの寿命は
+    // 3分なので、待っている間に実況が消えて中止の印まで一緒に失われると
+    // **「中止しました」と言ったのに動き出す**。印だけ長く持つ。
+    const store = read("src/lib/registry-fetch/live-view-store.ts");
+    expect(store).toMatch(/cancelMarks\.set\(k, Date\.now\(\)\)/);
+    expect(store).toMatch(
+      /store\.get\(k\)\?\.cancelRequested === true \|\| cancelMarks\.has\(k\)/,
+    );
+    // 印の寿命は実況(3分)より長く、有料取得の待ち(最大10分)を超えること
+    expect(store).toMatch(/CANCEL_MARK_TTL_MS = 15 \* 60 \* 1000/);
+  });
+
+  it("⚠長生きさせる印に秘匿情報を持たせない", () => {
+    // 保持するのは押された時刻(number)だけ。所在やスクショは入れない。
+    expect(read("src/lib/registry-fetch/live-view-store.ts")).toMatch(
+      /const cancelMarks = new Map<string, number>\(\)/,
+    );
+  });
+
   it("中止は「失敗」ではない分類で返す", () => {
     expect(read("src/lib/registry-fetch/errors.ts")).toMatch(
       /cancelled: "取得を中止しました。課金は発生していません。"/,
