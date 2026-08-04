@@ -202,14 +202,34 @@ export async function PATCH(
       settledAt =
         settledEndedAt(existingEndedAt, last._max.recordedAt) ??
         existing.updatedAt;
-      await prisma.fieldSurveySession.updateMany({
-        where: { id, status: "ended", endReason: TRIP_AUTO_END_REASON },
+      // ⚠**読み取った時点の updatedAt を条件に含める**(@codex #356 P1)。
+      // 別のタブ・端末が圏外から復帰して位置記録を送っている最中だと、
+      // 上の集計を読んでからここで書くまでの隙間に新しい記録が入り、
+      // その記録が立て直した「まだ歩いているかも」の印を**こちらが消してしまう**
+      // = 届いたばかりの、まだ進行中かもしれない経路が踏破マップに出る。
+      // 見回り側と同じ守り方にそろえる。
+      const settled = await prisma.fieldSurveySession.updateMany({
+        where: {
+          id,
+          status: "ended",
+          endReason: TRIP_AUTO_END_REASON,
+          updatedAt: existing.updatedAt,
+        },
         data: {
           reconcilePending: false,
           endedAt: settledAt,
           ...(patch.memo !== undefined && { memo: patch.memo }),
         },
       });
+      if (settled.count === 0) {
+        // 送信中に割り込まれた。印は消さずに 409 を返し、client の既存の
+        // 再取得→再試行に載せる(次の試行では新しい updatedAt が見える)。
+        throw new ApiError(
+          409,
+          "session の状態が変わったため終了できませんでした",
+          "INVALID_STATE",
+        );
+      }
     } else if (patch.status === "ended" || patch.status === "cancelled") {
       // status 変更は atomic な conditional update で実施。
       // 0 行更新は「既に終了/キャンセル済」または「読取後に活動が入った」を

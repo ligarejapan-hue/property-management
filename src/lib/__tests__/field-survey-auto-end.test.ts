@@ -311,6 +311,13 @@ describe("⚠まだ歩いている人を踏破マップに出さない (@codex #
     expect(src).toMatch(/reconcilePending: false/);
     // 巡回時間は「押した時刻」ではなく、記録が持つ最後の時刻まで
     expect(src).toMatch(/settlingAutoEnded\s*\n?\s*\? \(settledAt \?\? existing\.updatedAt\)/);
+    // ⚠送信中に割り込まれたら印を消さない (@codex #356 P1)。集計を読んでから
+    // 書くまでの隙間に新しい記録が入ると、その記録が立て直した「まだ歩いて
+    // いるかも」の印をこちらが消してしまう＝進行中の経路が踏破マップに出る。
+    expect(src).toMatch(
+      /endReason: TRIP_AUTO_END_REASON,\s*\n\s*updatedAt: existing\.updatedAt,/,
+    );
+    expect(src).toMatch(/if \(settled\.count === 0\)/);
   });
 });
 
