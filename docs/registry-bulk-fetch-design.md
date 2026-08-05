@@ -78,6 +78,11 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
                           根拠が無く**、動いている最中の項目を誤って課金不明に倒すか、
                           永久に固まるかのどちらかになる) / charge_attempted_at
                           / processed_at(終端に達した時刻)
+                          / charge_resolution(unresolved|not_charged|charged
+                          ・**課金不明を運用者が決着させた結果**。null/unresolved の間は
+                          二重課金ガードに残す。not_charged=マイページ確認で未課金と
+                          判明→ガードから外す / charged=課金済みと判明→台帳へ手動記録)
+                          / resolved_by / resolved_at(誰がいつ決着させたか・監査)
                           / lock_owner_token(物件ロックを取るたびに発行する乱数。
                           **自分の掛けた鍵か**を見分ける) / property_prev_registry_status
                           (ロック前の registryStatus。⚠これらが無いと、物件CASの後・
