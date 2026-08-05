@@ -88,7 +88,8 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
                           処理時に現在の物件から再計算したハッシュと突き合わせる)
 ```
 
-migration は additive(新テーブル2つのみ)。
+migration は additive(新テーブル2つ + attachments の種別列 + registry:manage
+権限行。すべて追加のみ)。
 
 ### 処理方式: **画面からの分割実行**(登記PDF一括取込と同型)
 
@@ -231,6 +232,12 @@ searchByRealEstateNumber はカートに触れる前に provider_error で停止
 - **ジョブの操作(進捗閲覧/次を処理/中止/再開)は作成者本人に限定**する
   (@codex 設計指摘)。URLを知った別のスタッフが、**他人が確認した課金ジョブ**を
   進めたり止めたりできてはいけない(取込ジョブの executedBy ガードと同型)。
+  - ⚠**代行に使う権限は registry:manage を新設する**(@codex 設計指摘: 今の
+    カタログに registry は auto_fetch しか無く、「明示の管理権限」の実体が
+    無い。auto_fetch を流用すると**一括を使える全員が他人の課金ジョブを
+    操作できてしまう**)。seed で管理者テンプレートに付与し、権限管理画面にも
+    表示する(import:manage と同じ owner-vs-operator 型の前例)。migration は
+    「テーブルのみ」ではなく権限行の追加も含む(どちらも additive)。
   - ⚠**管理者の代行だけは許す**(@codex 設計指摘)。課金不明で止まったジョブは
     マイページ確認が要るが、作成者が不在だと**誰も再開も中止もできず永久に
     塞がる**。明示の管理権限を持つ者に限り **進捗閲覧/次を処理/中止/再開の
