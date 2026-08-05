@@ -34,8 +34,8 @@ import {
 } from "@/lib/registry-fetch/cancel-safety";
 import {
   SHOZAI_DIALOG_BUTTON_SCOPE,
-  pickDialogItem,
-  splitLocationSegments,
+  matchDialogItemByPrefix,
+  normalizeForMatch,
   type ShozaiDialogItem,
 } from "@/lib/registry-fetch/shozai-dialog";
 import {
@@ -684,7 +684,7 @@ async function selectPrefectureByLabel(
  */
 async function selectShozaiViaDialog(
   page: RegistryPageLike,
-  segments: string[],
+  rest: string,
   report: (label: string) => void,
 ): Promise<void> {
   const S = REGISTRY_SELECTORS;
@@ -720,8 +720,12 @@ async function selectShozaiViaDialog(
     `${S.locationDialogArea}|${S.locationDialogLoading}`,
   );
 
-  // 3) 住所の断片を1段ずつ選ぶ。段数は決め打ちにしない。
-  for (const segment of segments) {
+  // 3) 住所の残りを、**出てきた選択肢に前方一致**で当てながら1段ずつ進む。
+  //    ⚠自前の規則(「市区町村郡」で切る)は使わない(@codex #358 P2)。
+    //  「東村山市」「四日市市」のように区切り文字を名前の途中に含む自治体で
+    //  壊れ、その住所が永久に検索できなくなる。正解はサイトの一覧が持っている。
+  let remaining = normalizeForMatch(rest);
+  while (remaining.length > 0) {
     const items = (await page.evaluate((sel: string) => {
       return Array.from(document.querySelectorAll(sel)).map((el) => ({
         id: (el as { id?: string }).id || "",
@@ -730,13 +734,14 @@ async function selectShozaiViaDialog(
     }, S.locationDialogItem)) as ShozaiDialogItem[] | undefined;
     if (!items || items.length === 0) break; // これ以上の段が無い＝ここまでで確定
 
-    const hit = pickDialogItem(items, segment);
+    const hit = matchDialogItemByPrefix(items, remaining);
     if (!hit) {
       // ⚠**当てずっぽうで選ばない**。別の区域を選ぶと、利用者が意図しない
       // 土地の謄本を後段で請求してしまう。所在の指定として扱って中止する。
       // 選択肢の中身(地名)はログに出さない(PII 方針)。
       console.warn(
-        `[registry-search] shozai dialog: no unique match (candidates=${items.length})`,
+        "[registry-search] shozai dialog: no unique match, candidates=" +
+          String(items.length),
       );
       await cancel();
       throw new RegistryFetchError("location_rejected");
@@ -745,25 +750,34 @@ async function selectShozaiViaDialog(
       return (document.querySelector(sel)?.textContent || "").trim();
     }, S.locationDialogSelectedPath)) ?? "") as string;
 
-    await page.click(`#${hit.id}`);
+    await page.click("#" + hit.item.id);
+    remaining = hit.rest;
 
-    // 次の段の読み込み、または「これで確定できる」状態への遷移を待つ。
-    // ⚠選択が効かないまま先へ進むと、1つ上の階層で確定してしまう。
+    // 次の段が読み込まれるまで待つ。
+    // ⚠**比較対象は「押す直前の階層表示」**(@codex #358 P1)。以前は
+    // ブラウザ側に渡していない変数と比べていたため**常に真**になり、待たずに
+    // 次の段へ進んでいた＝古い選択肢を読んで所在を弾いていた。
+    // 待てない作りの場合もあるので、失敗しても続行して最後の「確定」で判定する。
     try {
       await page.waitForFunction(
         (arg: unknown) => {
-          const [pathSel, loading, area] = String(arg).split("|");
+          const { pathSel, loading, area, before: was } = JSON.parse(
+            String(arg),
+          ) as { pathSel: string; loading: string; area: string; before: string };
           const d = document.querySelector(area);
           if (d && d.querySelector(loading)) return false; // まだ読み込み中
           const now = (document.querySelector(pathSel)?.textContent || "").trim();
-          return now !== (window as { __pmBefore?: string }).__pmBefore;
+          return now !== was;
         },
-        `${S.locationDialogSelectedPath}|${S.locationDialogLoading}|${S.locationDialogArea}`,
+        JSON.stringify({
+          pathSel: S.locationDialogSelectedPath,
+          loading: S.locationDialogLoading,
+          area: S.locationDialogArea,
+          before,
+        }),
       );
     } catch {
-      // 階層表示が変わらない作りの場合もあるので、待てなくても続行する
-      // (最後の「確定」が有効かどうかで最終判定する)。
-      void before;
+      // 階層表示が変わらない作りでも、最後の「確定」が押せるかで最終判定する。
     }
   }
 
@@ -1329,7 +1343,7 @@ function createPlaywrightRegistryPage(
         // サイトの持つコードで確定させないと請求まで進めない。
         await selectShozaiViaDialog(
           page,
-          splitLocationSegments(rest.length > 0 ? rest : input.address),
+          rest.length > 0 ? rest : input.address,
           reportLive,
         );
         // 検索キーは種別に合わせた番号(建物=家屋番号 / 土地=地番)。
@@ -1556,7 +1570,7 @@ function createPlaywrightRegistryPage(
         // サイトの持つコードで確定させないと請求まで進めない。
         await selectShozaiViaDialog(
           page,
-          splitLocationSegments(rest.length > 0 ? rest : input.address),
+          rest.length > 0 ? rest : input.address,
           // 有料取得の経路には実況の通知先が無い(候補検索とは別メソッド)。
           // 所在の確定そのものは同じ手順なので、通知だけ空にして共用する。
           () => {},

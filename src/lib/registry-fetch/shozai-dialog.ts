@@ -33,32 +33,51 @@ export function normalizeForMatch(s: string): string {
 }
 
 /**
- * 住所の「都道府県より後ろ」を、ダイアログで1段ずつ選ぶための断片に切る。
+ * ⚠**住所を自前の規則で切らない**(@codex #358 P2)。
  *
- * ⚠**地番は含めない**。ダイアログで選ぶのは地番区域までで、地番は別欄
- * (`#fuChibanKaoku`) に入れる。ここに地番まで混ぜたのが今回の不具合の原因。
+ * 「市区町村郡」の文字で切る方式は、**その文字を名前の途中に含む自治体**で壊れる:
+ *   東村山市 → 「東村」「山市」/ 四日市市 → 「四日市」「市」/ 大町市 → 「大町」「市」
+ * 切り損ねた断片は次の段の選択肢に一致せず、**その住所が永久に検索できなくなる**。
  *
- * 例: 「横浜市南区井土ケ谷中町」→ ["横浜市","南区","井土ケ谷中町"]
- *     「千代田区丸の内一丁目」→ ["千代田区","丸の内一丁目"]
- *
- * 市/区/町/村/郡 の区切りで切る。丁目は最後の断片に含めたまま残す
- * (ダイアログ側が「丸の内一丁目」を1項目として持つため)。
+ * 正解はサイトが持っている。各段で出てくる選択肢のうち、**住所の残りの先頭に
+ * 一致するもの**を選び、一致した分だけ residual を削って次の段へ進む。
+ * こうすれば自治体名の綴りを此方が知っている必要がない。
  */
-export function splitLocationSegments(rest: string): string[] {
-  const s = normalizeForMatch(rest);
-  if (!s) return [];
-  const out: string[] = [];
-  // 「◯◯市」「◯◯区」「◯◯町」「◯◯村」「◯◯郡」で区切る。ただし
-  // 「丸の内一丁目」のような丁目は切らない (最後にまとめて残す)。
-  const re = /(.+?[市区町村郡])/gu;
-  let last = 0;
-  for (const m of s.matchAll(re)) {
-    out.push(m[1]);
-    last = (m.index ?? 0) + m[1].length;
+
+/** 前方一致で1段ぶんを決めた結果。 */
+export interface DialogPrefixMatch {
+  item: ShozaiDialogItem;
+  /** 一致した分を取り除いた「住所の残り」。 */
+  rest: string;
+}
+
+/**
+ * いま出ている選択肢から、住所の残りの**先頭に一致するもの**を1つ決める。
+ *
+ * ⚠**最長一致**を採る。「大田区」と「大田」が両方あれば長い方が正しい段。
+ * ⚠**同じ長さで複数**に当たったら決めない(null)。当てずっぽうで選ぶと、
+ * 利用者が意図しない土地の謄本を後段で買うことになる。
+ */
+export function matchDialogItemByPrefix(
+  items: ShozaiDialogItem[],
+  remaining: string,
+): DialogPrefixMatch | null {
+  const want = normalizeForMatch(remaining);
+  if (!want) return null;
+  let best: { item: ShozaiDialogItem; len: number } | null = null;
+  let tie = false;
+  for (const it of items) {
+    const t = normalizeForMatch(it.text);
+    if (!t || !want.startsWith(t)) continue;
+    if (!best || t.length > best.len) {
+      best = { item: it, len: t.length };
+      tie = false;
+    } else if (t.length === best.len) {
+      tie = true; // 同じ長さの別候補＝どちらか決められない
+    }
   }
-  const tail = s.slice(last);
-  if (tail) out.push(tail);
-  return out.filter((x) => x.length > 0);
+  if (!best || tie) return null;
+  return { item: best.item, rest: want.slice(best.len) };
 }
 
 /** ダイアログの1項目 (probe で採った td の姿)。 */

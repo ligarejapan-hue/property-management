@@ -11,45 +11,11 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  matchDialogItemByPrefix,
   normalizeForMatch,
   parseSelectedPath,
-  pickDialogItem,
-  splitLocationSegments,
   SHOZAI_DIALOG_BUTTON_SCOPE,
 } from "@/lib/registry-fetch/shozai-dialog";
-
-describe("splitLocationSegments — ダイアログで1段ずつ選ぶための断片", () => {
-  it("政令市は 市 → 区 → 町 に分かれる", () => {
-    // 断片は比較用に正規化された形で返る（ケ/ヶ は「ヶ」に寄る）。
-    // 実際の照合も同じ正規化を通すので、表記が揃っていれば一致する。
-    expect(splitLocationSegments("横浜市南区井土ケ谷中町")).toEqual([
-      "横浜市",
-      "南区",
-      "井土ヶ谷中町",
-    ]);
-  });
-
-  it("特別区は 区 → 丁目まで", () => {
-    expect(splitLocationSegments("千代田区丸の内一丁目")).toEqual([
-      "千代田区",
-      "丸の内一丁目",
-    ]);
-  });
-
-  it("郡部は 郡 → 町 に分かれる", () => {
-    expect(splitLocationSegments("三浦郡葉山町")).toEqual(["三浦郡", "葉山町"]);
-  });
-
-  it("⚠丁目は切らない（サイト側が1項目として持つ）", () => {
-    // 「丸の内」「一丁目」に割ると、どちらの段にも一致しなくなる。
-    expect(splitLocationSegments("丸の内一丁目")).toEqual(["丸の内一丁目"]);
-  });
-
-  it("空文字は空配列", () => {
-    expect(splitLocationSegments("")).toEqual([]);
-    expect(splitLocationSegments("   ")).toEqual([]);
-  });
-});
 
 describe("normalizeForMatch — 表記ゆれを吸収する", () => {
   it("全角・空白を寄せる", () => {
@@ -65,52 +31,99 @@ describe("normalizeForMatch — 表記ゆれを吸収する", () => {
   });
 });
 
-describe("pickDialogItem — 選択肢から1つに決める", () => {
-  const items = [
-    { id: "GKuiki0", text: "南区" },
-    { id: "GKuiki1", text: "西区" },
-    { id: "GKuiki2", text: "港南区" },
-  ];
+describe("matchDialogItemByPrefix — サイトの一覧を正解として1段ずつ進む", () => {
+  it("政令市 → 区 → 町 を順に消化する", () => {
+    let rest = "横浜市南区井土ケ谷中町";
+    const m1 = matchDialogItemByPrefix(
+      [
+        { id: "a", text: "横浜市" },
+        { id: "b", text: "川崎市" },
+      ],
+      rest,
+    );
+    expect(m1?.item.id).toBe("a");
+    rest = m1!.rest;
 
-  it("完全一致で選ぶ", () => {
-    expect(pickDialogItem(items, "南区")?.id).toBe("GKuiki0");
+    const m2 = matchDialogItemByPrefix(
+      [
+        { id: "c", text: "南区" },
+        { id: "d", text: "港南区" },
+      ],
+      rest,
+    );
+    expect(m2?.item.id).toBe("c");
+    rest = m2!.rest;
+
+    const m3 = matchDialogItemByPrefix(
+      [{ id: "e", text: "井土ヶ谷中町" }],
+      rest,
+    );
+    expect(m3?.item.id).toBe("e");
+    expect(m3?.rest).toBe("");
   });
 
-  it("⚠部分一致で別の区を掴まない（「南区」が「港南区」に化けない）", () => {
-    // 「港南区」は「南区」を含むが、完全一致が1件あるのでそちらを採る。
-    expect(pickDialogItem(items, "南区")?.text).toBe("南区");
+  it("⚠自治体名の途中に「市区町村郡」が入っていても壊れない (@codex #358 P2)", () => {
+    // 自前で「市区町村郡」の字で切ると『東村山市』が『東村』『山市』に割れ、
+    // どの段にも一致せず**その住所が永久に検索できなくなる**。
+    // サイトの一覧に前方一致させる方式なら綴りを知らなくても正しく進む。
+    for (const [addr, name] of [
+      ["東村山市本町", "東村山市"],
+      ["四日市市諏訪町", "四日市市"],
+      ["大町市大町", "大町市"],
+      ["郡山市朝日", "郡山市"],
+      ["市川市市川", "市川市"],
+    ] as const) {
+      const m = matchDialogItemByPrefix([{ id: "x", text: name }], addr);
+      expect(m, `${addr} が ${name} に一致しない`).not.toBeNull();
+      expect(m!.rest).toBe(normalizeForMatch(addr).slice(name.length));
+    }
+  });
+
+  it("⚠最長一致を採る（「大田」より「大田区」）", () => {
+    const m = matchDialogItemByPrefix(
+      [
+        { id: "short", text: "大田" },
+        { id: "long", text: "大田区" },
+      ],
+      "大田区田園調布",
+    );
+    expect(m?.item.id).toBe("long");
+    expect(m?.rest).toBe("田園調布");
   });
 
   it("表記ゆれ（ケ/ヶ）でも一致する", () => {
-    const list = [{ id: "GKuiki9", text: "井土ヶ谷中町" }];
-    expect(pickDialogItem(list, "井土ケ谷中町")?.id).toBe("GKuiki9");
+    const m = matchDialogItemByPrefix(
+      [{ id: "z", text: "井土ヶ谷中町" }],
+      "井土ケ谷中町",
+    );
+    expect(m?.item.id).toBe("z");
   });
 
   it("⚠決められないときは選ばない（null）", () => {
-    // 同名が複数＝どちらか分からない。勝手に選ぶと別の土地を買う。
-    const dup = [
-      { id: "A", text: "中央区" },
-      { id: "B", text: "中央区" },
-    ];
-    expect(pickDialogItem(dup, "中央区")).toBeNull();
-    // 候補に無い
-    expect(pickDialogItem(items, "北区")).toBeNull();
+    // 同じ名前が2つ＝どちらか分からない。勝手に選ぶと別の土地を買う。
+    expect(
+      matchDialogItemByPrefix(
+        [
+          { id: "A", text: "中央区" },
+          { id: "B", text: "中央区" },
+        ],
+        "中央区銀座",
+      ),
+    ).toBeNull();
+    // 一覧に無い
+    expect(
+      matchDialogItemByPrefix([{ id: "A", text: "南区" }], "北区赤羽"),
+    ).toBeNull();
     // 空
-    expect(pickDialogItem(items, "")).toBeNull();
-    expect(pickDialogItem([], "南区")).toBeNull();
+    expect(matchDialogItemByPrefix([{ id: "A", text: "南区" }], "")).toBeNull();
+    expect(matchDialogItemByPrefix([], "南区")).toBeNull();
   });
 
-  it("前方一致が1件だけなら採る", () => {
-    const list = [{ id: "X", text: "丸の内一丁目" }];
-    expect(pickDialogItem(list, "丸の内一丁目")?.id).toBe("X");
-  });
-
-  it("⚠前方一致が複数なら採らない", () => {
-    const list = [
-      { id: "X", text: "丸の内一丁目" },
-      { id: "Y", text: "丸の内二丁目" },
-    ];
-    expect(pickDialogItem(list, "丸の内")).toBeNull();
+  it("⚠住所より長い選択肢は一致させない（先の段を飛ばさない）", () => {
+    // 残りが「丸の内」なのに「丸の内一丁目」を選ぶと、実際とは違う丁目になる。
+    expect(
+      matchDialogItemByPrefix([{ id: "A", text: "丸の内一丁目" }], "丸の内"),
+    ).toBeNull();
   });
 });
 
@@ -128,6 +141,8 @@ describe("parseSelectedPath — 選択済みの階層", () => {
 describe("配線（実サイト probe 2026-08-05 の結果を固定）", () => {
   const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf-8");
   const SRC = () => read("src/lib/registry-fetch/auto-fetch.ts");
+  const DIALOG_FN = () =>
+    SRC().match(/async function selectShozaiViaDialog[\s\S]*?\n\}/)?.[0] ?? "";
 
   it("採取したセレクタが入っている", () => {
     const s = SRC();
@@ -141,33 +156,40 @@ describe("配線（実サイト probe 2026-08-05 の結果を固定）", () => {
   it("⚠直接入力モードは使わない", () => {
     // 所在欄に住所を打ち込む方式は実機で「請求できない所在です」で止まる。
     const s = SRC();
-    expect(s).not.toMatch(/page\.check\(REGISTRY_SELECTORS\.locationDirectInputCheck\)/);
-    // 所在の指定は必ずダイアログ経由
+    expect(s).not.toMatch(
+      /page\.check\(REGISTRY_SELECTORS\.locationDirectInputCheck\)/,
+    );
     expect(s).toMatch(/await selectShozaiViaDialog\(/);
   });
 
   it("⚠候補検索と有料取得の**両方**を組み替える", () => {
     // 片方だけ直すと、検索は通るのに取得で同じ理由で止まる。
+    expect((SRC().match(/await selectShozaiViaDialog\(/g) ?? []).length).toBe(2);
+  });
+
+  it("⚠住所を自前の規則で切らない (@codex #358 P2)", () => {
+    // 「市区町村郡」で切る方式は東村山市などで壊れる。サイトの一覧に当てる。
     const s = SRC();
-    expect((s.match(/await selectShozaiViaDialog\(/g) ?? []).length).toBe(2);
+    expect(s).toMatch(/matchDialogItemByPrefix\(items, remaining\)/);
+    expect(s).not.toMatch(/splitLocationSegments/);
   });
 
   it("⚠都道府県は表示名ではなくコードで選ぶ", () => {
-    // probe 実測: 選択肢の値は都道府県コード（東京都 = "13"）。住所から切り出せる
-    // のは「東京都」という表示名なので、そのまま渡しても一致せず選べない。
-    // 選べないと所在選択ボタンが有効にならず、所在が空のまま「候補0件」に見える。
+    // probe 実測: 選択肢の値は都道府県コード（東京都 = "13"）。表示名をそのまま
+    // 渡すと選べず、所在選択ボタンが有効にならないまま「候補0件」に見える。
     const s = SRC();
     expect(s).toMatch(/async function selectPrefectureByLabel/);
     expect(s).toMatch(/await selectPrefectureByLabel\(page, prefecture\)/);
-    // 生の selectOption に表示名を直接渡していない
     expect(s).not.toMatch(
       /selectOption\(\s*REGISTRY_SELECTORS\.locationPrefectureSelect,\s*prefecture,/,
     );
-    // 見つからないときは黙って進まない
-    const fn = s.match(/async function selectPrefectureByLabel[\s\S]*?\n\}/)?.[0] ?? "";
+    const fn =
+      s.match(/async function selectPrefectureByLabel[\s\S]*?\n\}/)?.[0] ?? "";
     expect(fn).toMatch(/RegistryFetchError\("location_rejected"\)/);
     // 都道府県名はログに出さない（所在の一部＝PII）
-    expect(fn).toMatch(/console\.warn\("\[registry-search\] prefecture option not found"\)/);
+    expect(fn).toMatch(
+      /console\.warn\("\[registry-search\] prefecture option not found"\)/,
+    );
   });
 
   it("⚠所在は「都道府県を選んでから」でないと押せない", () => {
@@ -180,14 +202,23 @@ describe("配線（実サイト probe 2026-08-05 の結果を固定）", () => {
     expect(SRC()).toMatch(/locationDialogLoading/);
   });
 
+  it("⚠段の切り替わりは「押す直前の表示」と比べる (@codex #358 P1)", () => {
+    // ブラウザ側へ渡していない変数と比べると**常に真**になり、待たずに次の段へ
+    // 進んで古い選択肢を読む＝多段の住所がすべて弾かれる。
+    const fn = DIALOG_FN();
+    expect(fn).toMatch(/before: was/);
+    expect(fn).toMatch(/now !== was/);
+    expect(fn).toMatch(/JSON\.stringify\(\{/);
+    // 渡していない window 変数を参照しない
+    expect(fn).not.toMatch(/__pmBefore/);
+  });
+
   it("⚠ページ本体の「確定」と取り違えない", () => {
     // ページの確定(fuBtnForward)はカートに未請求の行を作る。ダイアログ内の
     // 確定は所在欄を埋めるだけ。文言が同じなので探す範囲で区別する。
     expect(SHOZAI_DIALOG_BUTTON_SCOPE).toBe(".ui-dialog-buttonpane button");
-    const s = SRC();
-    expect(s).toMatch(/SHOZAI_DIALOG_BUTTON_SCOPE/);
-    // ダイアログ操作の中で fuBtnForward を押していない
-    const fn = s.match(/async function selectShozaiViaDialog[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(SRC()).toMatch(/SHOZAI_DIALOG_BUTTON_SCOPE/);
+    const fn = DIALOG_FN();
     expect(fn).not.toMatch(/fuBtnForward/);
     expect(fn).not.toMatch(/requestConfirmButton/);
     expect(fn).not.toMatch(/myPageSeikyu/);
@@ -195,27 +226,24 @@ describe("配線（実サイト probe 2026-08-05 の結果を固定）", () => {
 
   it("⚠決められない/確定できないときは取消で閉じてから止める", () => {
     // 開いたまま放置すると、次の操作がダイアログに食われる。
-    const fn =
-      SRC().match(/async function selectShozaiViaDialog[\s\S]*?\n\}/)?.[0] ?? "";
+    const fn = DIALOG_FN();
     expect(fn).toMatch(/取消/);
     expect((fn.match(/await cancel\(\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(fn).toMatch(/RegistryFetchError\("location_rejected"\)/);
   });
 
   it("⚠所在欄が埋まったことを確かめてから次へ進む", () => {
-    const fn =
-      SRC().match(/async function selectShozaiViaDialog[\s\S]*?\n\}/)?.[0] ?? "";
+    const fn = DIALOG_FN();
     expect(fn).toMatch(/locationSearchAddress/);
     expect(fn).toMatch(/value\.trim\(\)\.length > 0/);
   });
 
   it("⚠地名をログに出さない（PII 方針）", () => {
-    const fn =
-      SRC().match(/async function selectShozaiViaDialog[\s\S]*?\n\}/)?.[0] ?? "";
+    const fn = DIALOG_FN();
     const warns = fn.match(/console\.warn\([\s\S]*?\);/g) ?? [];
     expect(warns.length).toBeGreaterThan(0);
     for (const w of warns) {
-      expect(w).not.toMatch(/segment|hit\.text|items\[/);
+      expect(w).not.toMatch(/remaining|hit\.item\.text|items\[/);
     }
   });
 });
