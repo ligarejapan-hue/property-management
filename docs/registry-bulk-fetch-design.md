@@ -96,7 +96,9 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
 ```
 
 migration は additive(新テーブル2つ + attachments の種別列 + registry:manage
-権限行。すべて追加のみ)。
+権限行 + **registry_fetch_config の課金停止列**(停止フラグ/理由/時刻/解除者/
+解除時刻。⚠これが無いと口座全体のブレーカーが**文章の上にしか存在せず**、
+onBeforeCharge が読む場所も解除操作が書く場所も無い)。すべて追加のみ)。
 
 ### 処理方式: **画面からの分割実行**(登記PDF一括取込と同型)
 
@@ -188,10 +190,14 @@ searchByRealEstateNumber はカートに触れる前に provider_error で停止
      (AuditLog)への記録は**PDFを受け取った後**なので、請求を押してから台帳を書く
      までの間に落ちた項目は**台帳に行が無い**。しかもその項目の課金段階は
      attempting とは限らない(押した後に onCharged で charged へ進んでから落ちる)。
-     ガードは「台帳 OR **終端に達していない項目のうち charge_phase が
-     attempting または charged のもの**」で判定し、運用者が課金の有無を記録して
-     項目を解決するまで新しい購入を許さない。charge_unknown だけを列挙すると
-     charged のまま落ちた行が漏れる。⚠照合は**項目に保存した purchase_key_hash**
+     ガードは「台帳 OR **charge_phase が attempting/charged に達した項目
+     (終端かどうかを問わない)**」で判定する(@codex 設計指摘 P1: 「非終端のみ」に
+     絞ると、**台帳を書く前に charged_but_failed で終端に達した行**が関所から
+     消える=ダウンロード失敗や台帳書き込み自体の失敗で台帳が無いまま、30日
+     ガードを素通りして同じ謄本を再購入できる)。関所から外れるのは、
+     (a)台帳に対応する行が書けたとき、または(b)運用者が「課金されていない」と
+     明示に記録したとき、のみ。charge_unknown だけを列挙すると charged のまま
+     落ちた行が漏れる。⚠照合は**項目に保存した purchase_key_hash**
      と行う(いまの物件から再計算しない=編集で鍵がずれても古い試行を見失わない)
    - ⚠**台帳の照合だけでは同時実行に勝てない**(@codex 設計指摘 P1)。台帳への
      記録は購入後なので、**同じ物件を含む2つのジョブ**(または一括と単発の同時
