@@ -34,6 +34,7 @@ import {
 } from "@/lib/registry-fetch/cancel-safety";
 import {
   SHOZAI_DIALOG_BUTTON_SCOPE,
+  looksLikeLotTail,
   matchDialogItemByPrefix,
   normalizeForMatch,
   type ShozaiDialogItem,
@@ -735,6 +736,12 @@ async function selectShozaiViaDialog(
     if (!items || items.length === 0) break; // これ以上の段が無い＝ここまでで確定
 
     const hit = matchDialogItemByPrefix(items, remaining);
+    if (!hit && looksLikeLotTail(remaining)) {
+      // ⚠**残っているのが地番なら、それは区域ではない**(@codex #358 P2)。
+      // 区域を選び終えた後に数字だけ残るのは正常(地番は別の欄に入れる)。
+      // ここで弾くと「丸の内1丁目1-1」のような普通の住所が通らなくなる。
+      break;
+    }
     if (!hit) {
       // ⚠**当てずっぽうで選ばない**。別の区域を選ぶと、利用者が意図しない
       // 土地の謄本を後段で請求してしまう。所在の指定として扱って中止する。
@@ -1333,10 +1340,16 @@ function createPlaywrightRegistryPage(
             : REGISTRY_SELECTORS.locationTypeLandRadio,
         );
         const { prefecture, rest } = splitAddressForLocationSearch(input.address);
-        if (prefecture) {
-          // ⚠選択肢の値は都道府県**コード**なので、表示名から引いて選ぶ。
-          await selectPrefectureByLabel(page, prefecture);
+        // ⚠**都道府県が取れない住所は、ここで止める**(@codex #358 P2)。
+        // 所在選択ボタンは都道府県を選ぶまで押せない作りなので、無いまま進むと
+        // ボタンが有効にならず待ち続け、最後は「外部サービスの障害」に化ける。
+        // 実際は**住所を直せば通る**話なので、そう伝わる分類で止める。
+        if (!prefecture) {
+          console.warn("[registry-search] address has no prefecture");
+          throw new RegistryFetchError("location_rejected");
         }
+        // ⚠選択肢の値は都道府県**コード**なので、表示名から引いて選ぶ。
+        await selectPrefectureByLabel(page, prefecture);
         // ⚠**直接入力は使わない**(発注者判断=B案)。所在欄に住所を打ち込む方式は
         // 実機で「請求できない所在です…所在選択ボタンからダイアログで選んで
         // ください」と赤字で止まる。登記の所在は住所ではなく**地番区域**で、
@@ -1560,10 +1573,16 @@ function createPlaywrightRegistryPage(
             : REGISTRY_SELECTORS.locationTypeLandRadio,
         );
         const { prefecture, rest } = splitAddressForLocationSearch(input.address);
-        if (prefecture) {
-          // ⚠選択肢の値は都道府県**コード**なので、表示名から引いて選ぶ。
-          await selectPrefectureByLabel(page, prefecture);
+        // ⚠**都道府県が取れない住所は、ここで止める**(@codex #358 P2)。
+        // 所在選択ボタンは都道府県を選ぶまで押せない作りなので、無いまま進むと
+        // ボタンが有効にならず待ち続け、最後は「外部サービスの障害」に化ける。
+        // 実際は**住所を直せば通る**話なので、そう伝わる分類で止める。
+        if (!prefecture) {
+          console.warn("[registry-search] address has no prefecture");
+          throw new RegistryFetchError("location_rejected");
         }
+        // ⚠選択肢の値は都道府県**コード**なので、表示名から引いて選ぶ。
+        await selectPrefectureByLabel(page, prefecture);
         // ⚠**直接入力は使わない**(発注者判断=B案)。所在欄に住所を打ち込む方式は
         // 実機で「請求できない所在です…所在選択ボタンからダイアログで選んで
         // ください」と赤字で止まる。登記の所在は住所ではなく**地番区域**で、

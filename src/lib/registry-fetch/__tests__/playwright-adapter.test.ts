@@ -1075,6 +1075,36 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(candidates.map((c) => c.candidateRef)).toEqual(["chk_1"]);
   });
 
+  it("C9r: ⚠都道府県が無い住所は、ダイアログを開く前に所在エラーで止まる (@codex #358 P2)", async () => {
+    // 所在選択ボタンは都道府県を選ぶまで押せない。無いまま進むとボタンが
+    // 有効にならず待ち続け、最後は「外部サービスの障害(502)」に化ける。
+    // 実際は**住所を直せば通る**話なので、そう伝わる分類で止める。
+    const f = makeFakeChromium();
+    const clicks: string[] = [];
+    f.page.click = vi.fn(async (s: string) => {
+      clicks.push(s);
+      return undefined;
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const factory = resolveDefaultRegistryBrowserFactory({
+        chromiumLoader: f.loader,
+      });
+      const page = await factory!();
+      await expect(
+        page.searchByLocation!({
+          address: "テスト市テスト町一丁目", // 都道府県が無い
+          lotNumber: "1",
+          buildingNumber: null,
+        }),
+      ).rejects.toMatchObject({ code: "location_rejected" });
+      // ダイアログは開いていない
+      expect(clicks).not.toContain("#fuShozaiSentaku");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("C9g: 検索が0件(checkbox 無し)でロード完了なら空配列を返す(timeout にしない・@codex P2)", async () => {
     const f = makeFakeChromium();
     f.page.waitForSelector = vi.fn(async (s: string) => {
@@ -1700,7 +1730,10 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
   }
 
   const INPUT = {
-    address: "テスト市テスト町一丁目",
+    // ⚠**都道府県から始まる住所にする**。所在選択ダイアログは都道府県を選ぶまで
+    // 開けないため、都道府県が無い住所は所在の指定エラーで先に止まる
+    // (実データも都道府県から入っている前提)。
+    address: "東京都テスト市テスト町一丁目",
     lotNumber: "1-1",
     buildingNumber: null,
     certificateType: "owner" as const,

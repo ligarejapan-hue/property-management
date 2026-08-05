@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  looksLikeLotTail,
   matchDialogItemByPrefix,
   normalizeForMatch,
   parseSelectedPath,
@@ -124,6 +125,47 @@ describe("matchDialogItemByPrefix — サイトの一覧を正解として1段�
     expect(
       matchDialogItemByPrefix([{ id: "A", text: "丸の内一丁目" }], "丸の内"),
     ).toBeNull();
+  });
+});
+
+describe("⚠実際の住所表記で通ること (@codex #358 P2)", () => {
+  // サイトの一覧は「丸の内一丁目」(漢数字)。アプリの住所は「丸の内1丁目」や
+  // 「丸の内1-1-1」(郵便表記)が普通。そろえないと**ごく一般的な住所が
+  // すべて弾かれる**。
+  const items = [{ id: "A", text: "丸の内一丁目" }];
+
+  it("算用数字の丁目が漢数字の一覧に一致する", () => {
+    const m = matchDialogItemByPrefix(items, "丸の内1丁目");
+    expect(m?.item.id).toBe("A");
+    expect(m?.rest).toBe("");
+  });
+
+  it("郵便表記（1-1-1）でも丁目として一致し、残りは地番になる", () => {
+    const m = matchDialogItemByPrefix(items, "丸の内1-1-1");
+    expect(m?.item.id).toBe("A");
+    expect(m?.rest).toBe("1-1");
+  });
+
+  it("十丁目以上も扱える", () => {
+    const m = matchDialogItemByPrefix(
+      [{ id: "B", text: "西新宿十丁目" }],
+      "西新宿10丁目",
+    );
+    expect(m?.item.id).toBe("B");
+  });
+
+  it("⚠地番そのものを丁目と誤読しない", () => {
+    // 区域の一覧に無い「1-1」を丁目に化かして別の区域を選ばない。
+    expect(matchDialogItemByPrefix(items, "1-1")).toBeNull();
+  });
+
+  it("looksLikeLotTail — 数字だけの残りは地番（区域ではない）", () => {
+    expect(looksLikeLotTail("1-1")).toBe(true);
+    expect(looksLikeLotTail("1番2の3")).toBe(true);
+    expect(looksLikeLotTail("")).toBe(true);
+    // 地名が残っているのは別の段がある証拠なので地番ではない
+    expect(looksLikeLotTail("井土ヶ谷中町")).toBe(false);
+    expect(looksLikeLotTail("丸の内1丁目")).toBe(false);
   });
 });
 
@@ -254,6 +296,23 @@ describe("配線（実サイト probe 2026-08-05 の結果を固定）", () => {
         "catch が RegistryFetchError を素通ししていない",
       ).toMatch(/if \(err instanceof RegistryFetchError\) throw err;/);
     }
+  });
+
+  it("⚠都道府県が無い住所はダイアログを開く前に止める (@codex #358 P2)", () => {
+    // 所在選択ボタンは都道府県を選ぶまで押せない。無いまま進むと待ち続け、
+    // 最後は「外部サービスの障害」に化ける。実際は住所を直せば通る話。
+    const s = SRC();
+    expect(s).toMatch(/if \(!prefecture\) \{/);
+    expect(s).toMatch(
+      /console\.warn\("\[registry-search\] address has no prefecture"\)/,
+    );
+    // 候補検索・有料取得の両方
+    expect((s.match(/address has no prefecture/g) ?? []).length).toBe(2);
+  });
+
+  it("⚠残りが地番だけなら所在を弾かない (@codex #358 P2)", () => {
+    // 区域を選び終えた後に数字だけ残るのは正常（地番は別の欄）。
+    expect(SRC()).toMatch(/if \(!hit && looksLikeLotTail\(remaining\)\) \{/);
   });
 
   it("⚠地名をログに出さない（PII 方針）", () => {

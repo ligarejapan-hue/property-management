@@ -23,13 +23,52 @@
  * 進めるところまで進む」形にする。
  */
 
-/** 全角英数字・記号を半角へ寄せ、空白を落とした比較用のかたち。 */
+/** 漢数字を算用数字にする（丁目の比較用・「十」までで足りる）。 */
+function kanjiNumToArabic(k: string): string {
+  const d = "〇一二三四五六七八九";
+  if (k === "十") return "10";
+  const m = k.match(/^十(.)$/u);
+  if (m) return `1${d.indexOf(m[1])}`;
+  const m2 = k.match(/^(.)十(.)?$/u);
+  if (m2) return `${d.indexOf(m2[1])}${m2[2] ? d.indexOf(m2[2]) : 0}`;
+  const i = d.indexOf(k);
+  return i >= 0 ? String(i) : k;
+}
+
+/**
+ * 比較用のかたち（全角→半角・空白除去・表記ゆれ吸収）。
+ *
+ * ⚠**丁目は算用数字にそろえる**(@codex #358 P2)。サイトの一覧は「丸の内一丁目」
+ * のように**漢数字**だが、アプリに登録された住所は「丸の内1丁目」のように
+ * **算用数字**であることが普通。そろえないと一致せず、
+ * **ごく一般的な住所がすべて弾かれる**。
+ */
 export function normalizeForMatch(s: string): string {
   return s
     .normalize("NFKC")
     .replace(/\s+/gu, "")
     .replace(/[ヶケヵカ]/gu, "ヶ") // 「青ヶ島/青ケ島」「井土ケ谷/井土ヶ谷」の揺れ
+    .replace(/([〇一二三四五六七八九十]{1,3})丁目/gu, (_m, k: string) =>
+      `${kanjiNumToArabic(k)}丁目`,
+    )
     .trim();
+}
+
+/**
+ * 「丸の内1-1-1」のような郵便表記から、**丁目の部分だけ**を復元する
+ * (@codex #358 P2)。
+ *
+ * アプリの住所欄は「丸の内1-1-1」(丁目-番-号)で入っていることがある。
+ * サイトの一覧は「丸の内1丁目」までしか持たない(その先は地番の欄)ので、
+ * そのままでは一致しない。先頭の「数字-」を丁目と読み替えて一致させ、
+ * 残り(番・号)は地番側の話として後ろに残す。
+ *
+ * ⚠**そのままで一致しなかったときだけ**使う保険。常に適用すると
+ * 「1-1」のような地番そのものを丁目と誤読しかねない。
+ */
+export function expandChomeShorthand(s: string): string {
+  // <地名><数字>-<数字…> の形のときだけ、最初の数字を丁目とみなす。
+  return s.replace(/^(\D+?)(\d{1,3})-(?=\d)/u, "$1$2丁目");
 }
 
 /**
@@ -62,7 +101,20 @@ export function matchDialogItemByPrefix(
   items: ShozaiDialogItem[],
   remaining: string,
 ): DialogPrefixMatch | null {
-  const want = normalizeForMatch(remaining);
+  const direct = matchOnce(items, normalizeForMatch(remaining));
+  if (direct) return direct;
+  // ⚠そのままで当たらないときだけ、郵便表記の丁目を復元して再挑戦する
+  // (「丸の内1-1-1」→「丸の内1丁目1-1」)。常に適用すると地番を丁目と誤読する。
+  const expanded = expandChomeShorthand(normalizeForMatch(remaining));
+  if (expanded === normalizeForMatch(remaining)) return null;
+  return matchOnce(items, expanded);
+}
+
+/** 一覧に対する最長前方一致を1回だけ試す（同じ長さで複数なら決めない）。 */
+function matchOnce(
+  items: ShozaiDialogItem[],
+  want: string,
+): DialogPrefixMatch | null {
   if (!want) return null;
   let best: { item: ShozaiDialogItem; len: number } | null = null;
   let tie = false;
@@ -78,6 +130,19 @@ export function matchDialogItemByPrefix(
   }
   if (!best || tie) return null;
   return { item: best.item, rest: want.slice(best.len) };
+}
+
+/**
+ * 残りが「地番のかたち」か（数字・ハイフン・番・号だけ）。
+ *
+ * ⚠ダイアログで選ぶのは**地番区域まで**で、地番は別の欄に入れる。
+ * 区域を選び終えた後に数字だけが残るのは正常なので、**それを理由に
+ * 所在を弾かない**。弾くと「丸の内1丁目1-1」のような普通の住所が通らない。
+ */
+export function looksLikeLotTail(s: string): boolean {
+  const t = normalizeForMatch(s);
+  if (!t) return true;
+  return /^[0-9\-番地号の]+$/u.test(t);
 }
 
 /** ダイアログの1項目 (probe で採った td の姿)。 */
