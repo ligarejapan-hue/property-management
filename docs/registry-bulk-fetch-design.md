@@ -58,7 +58,11 @@
 registry_fetch_jobs:      id / status(pending|processing|paused|completed|cancelled)
                           / certificate_type / requested_by / counts / timestamps
 registry_fetch_job_items: id / job_id / property_id / status(pending|processing|done
-                          |failed|skipped|charged_but_failed) / error_code / attachment_id
+                          |failed|skipped|charged_but_failed|charge_unknown)
+                          / charge_phase(none|attempting|charged・**請求を押す前に
+                          attempting をDBへ書く**。放置復旧はこの列で課金前/課金後を
+                          区別する=スキーマに無いと復旧規則が実装できない)
+                          / error_code / attachment_id
                           / processed_at / property_fingerprint_hash(作成時の物件指紋の
                           sha256。⚠**生の指紋は保存しない**=住所/地番/番号の直列化文字列
                           なので、行に持つと将来のジョブ詳細APIから漏れる。比較は
@@ -120,6 +124,12 @@ searchByRealEstateNumber はカートに触れる前に provider_error で停止
      から再開する(再開ボタン+確認済みチェック)。該当項目は再実行禁止を明示
 4. 台帳は従来どおり項目ごとに照合(30日以内の同一 物件×地番×種別 は再購入させない
    =**一括に同じ物件を2回入れても二重課金しない**)
+   - ⚠**台帳の照合だけでは同時実行に勝てない**(@codex 設計指摘 P1)。台帳への
+     記録は購入後なので、**同じ物件を含む2つのジョブ**(または一括と単発の同時
+     実行)が、どちらも「まだ台帳に無い」を見てから両方買う隙間がある。
+     単発の取得が外部に触れる前に掴む**物件行のロック**(registryStatus/version の
+     CAS)を、一括の処理APIも**同じ物件に対して**必ず通す。掴めなければその項目は
+     後回し(rate_limited と同じ「後で再試行」扱い・失敗にしない)
 5. **間隔は既存スロットルの実値に従う**(@codex 設計指摘)。コード既定は60秒
    (REGISTRY_FETCH_MIN_INTERVAL_MS で短縮可・本番は30秒設定)。
    ⚠スロットルは「待つ」のではなく**早すぎる呼び出しを rate_limited で弾く**。
