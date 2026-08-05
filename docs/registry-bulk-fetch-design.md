@@ -63,7 +63,11 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
                           attempting をDBへ書く**。放置復旧はこの列で課金前/課金後を
                           区別する=スキーマに無いと復旧規則が実装できない)
                           / error_code / attachment_id
-                          / processed_at / property_fingerprint_hash(作成時の物件指紋の
+                          / started_at / updated_at(status/charge_phase を書き換える
+                          たびに更新。⚠これが無いと「処理中のまま放置」を**見分ける
+                          根拠が無く**、動いている最中の項目を誤って課金不明に倒すか、
+                          永久に固まるかのどちらかになる) / charge_attempted_at
+                          / processed_at(終端に達した時刻) / property_fingerprint_hash(作成時の物件指紋の
                           sha256。⚠**生の指紋は保存しない**=住所/地番/番号の直列化文字列
                           なので、行に持つと将来のジョブ詳細APIから漏れる。比較は
                           処理時に現在の物件から再計算したハッシュと突き合わせる)
