@@ -178,6 +178,14 @@ searchByRealEstateNumber はカートに触れる前に provider_error で停止
    しまう。順序を「**throttle/ロックの確認 → 掴む**」にする(確認してから掴むまでの
    競合は掴みのCASが守る)。やむを得ず掴んだ後に弾かれた経路は、応答を返す前に
    **原子的に pending へ戻す**(戻せなかったら課金不明側に倒す)。
+   ⚠**事前確認は「消費しない覗き見(peek)」で行う**(@codex 設計指摘)。今の
+   tryAcquire は**確認と同時に権利を消費**し、provider も内部でもう一度
+   tryAcquire を呼ぶ。事前確認に tryAcquire を使うと**唯一の権利を事前確認が
+   食い潰し**、直後の provider 呼び出しが必ず rate_limited になる=正しく
+   待っているのに全件が後回しされ続ける。throttle に非消費の peek
+   (nextAvailableAt を返すだけ)を追加し、実際の取得は従来どおり provider が
+   自分で行う。peek 通過後の競合で provider が rate_limited を返した場合は、
+   上記の「掴んだ項目を pending へ戻す」経路で処理する。
    ⚠**「N秒後」を返すには throttle 側の拡張が要る**(@codex 設計指摘)。今の契約は
    tryAcquire の真偽だけで、rate_limited エラーも残り時間を持たない。
    throttle に nextAvailableAt(または retryAfterMs)を追加し、エラーに載せて
