@@ -55,6 +55,39 @@ function makeTimeoutError(): Error {
   return e;
 }
 
+/**
+ * 所在選択ダイアログ(B案)の既定の応答。
+ *
+ * ⚠テストが page.evaluate を差し替えるときは**必ずここへ委譲する**。
+ * 委譲を忘れると所在が確定できず location_rejected になり、そのテストが
+ * 見たかった地番ダイアログ以降に到達しない（原因が分かりにくい形で落ちる）。
+ */
+function shozaiDialogDefault(arg: string): unknown {
+  if (arg === '#kuikiDialogArea td[id^="GKuiki"]') return [];
+  if (arg === ".ui-dialog-buttonpane button") return true;
+  // 都道府県は「表示名 → コード」を引いてから選ぶ(実サイトの option 値はコード)。
+  // 引数は "<select のセレクタ>|<表示名>" 形式。
+  if (arg.startsWith("#fuTodofukenShozai|")) return "13";
+  return undefined;
+}
+
+/**
+ * その `waitForFunction` が「所在選択ダイアログの待ち」かどうか。
+ *
+ * ⚠候補一覧の**ページ送りの待ち**と区別するために要る。ダイアログ方式(B案)で
+ * 待ちが増えたため、`waitForFunction` を全部まとめて数えたり全部 timeout に
+ * させたりすると、ページ送りを見たいテストが**別の待ちに反応して**落ちる。
+ */
+function isShozaiDialogWait(arg: unknown): boolean {
+  if (typeof arg !== "string") return false;
+  return (
+    arg.includes("fuShozaiSentaku") ||
+    arg.includes("kuikiDialogArea") ||
+    arg.includes("GKuikiDialog") ||
+    arg.includes("fuChibanKuiki")
+  );
+}
+
 function makeFakeChromium() {
   const page = {
     setDefaultTimeout: vi.fn(),
@@ -78,14 +111,21 @@ function makeFakeChromium() {
       if (selector === REGISTRY_FORCE_LOGIN_MARKER) throw makeTimeoutError();
       return {};
     }),
-    waitForFunction: vi.fn(async () => ({})),
+    waitForFunction: vi.fn(async (_fn?: unknown, _arg?: unknown) => ({})),
     waitForEvent: vi.fn(async () => ({
       createReadStream: async () => Readable.from([Buffer.from("%PDF-1.4 dl")]),
     })),
     $$eval: vi.fn(async () => [] as unknown[]),
+    // 既定の evaluate。所在選択ダイアログ(B案)の最小の振る舞いを持たせる:
+    //  - 区域の一覧は空 = 都道府県だけで確定できる地域を模す
+    //  - ダイアログの「確定」は押せる状態
+    // ⚠ここを undefined のままにすると所在が確定できず location_rejected になり、
+    // 地番ダイアログ以降の既存テストが丸ごと落ちる。
     evaluate: vi.fn<
       (fn: (arg: string) => unknown, arg: string) => Promise<unknown>
-    >(async () => undefined),
+    >(async (_fn: (arg: string) => unknown, arg: string) =>
+      shozaiDialogDefault(arg),
+    ),
   };
   const context = {
     newPage: vi.fn(async () => page),
@@ -791,7 +831,7 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     const evaluatedArgs: string[] = [];
     f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) => {
       evaluatedArgs.push(arg);
-      return undefined;
+      return shozaiDialogDefault(arg);
     });
     const factory = resolveDefaultRegistryBrowserFactory({
       chromiumLoader: f.loader,
@@ -880,7 +920,7 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     });
     f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) => {
       calls.push("eval:" + arg);
-      return undefined;
+      return shozaiDialogDefault(arg);
     });
     f.page.$$eval = vi.fn(async () => [
       { candidateRef: "cbnDlgChibanChk_1", lotNumber: "１－１" },
@@ -897,7 +937,10 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(calls).toContain("eval:a[href*=\"menuClick('FUDOSAN')\"]");
     expect(calls).toContain("click:#fuSeikyuMethodSHOZAI");
     expect(calls).toContain("select:#fuTodofukenShozai");
-    expect(calls).toContain("check:#fuShozaiChokusetuNyuryoku");
+    // ⚠所在は**ダイアログで確定**する（直接入力は使わない）。所在欄に住所を
+    // 打ち込む方式は実機で「請求できない所在です」で止まる。
+    expect(calls).toContain("click:#fuShozaiSentaku");
+    expect(calls).not.toContain("check:#fuShozaiChokusetuNyuryoku");
     expect(calls).toContain("click:#fuChibanKaokuIchiran"); // 地番一覧ダイアログを開く
     expect(calls).toContain("click:#cbnDlgChibanSearch"); // ダイアログ検索
     // 非同期候補ロードを待つ。
@@ -925,7 +968,17 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
       lotNumber: "5番",
       buildingNumber: "12",
     });
-    expect(f.page.selectOption).toHaveBeenCalledWith(expect.any(String), "北海道");
+    // ⚠都道府県は**表示名ではなくコード**で選ぶ(実サイトの option 値はコード)。
+    // 表示名をそのまま渡すと一致せず選べず、所在選択ボタンが有効にならない。
+    // fake は「表示名 → コード」の引き当てを shozaiDialogDefault で模している。
+    expect(f.page.selectOption).toHaveBeenCalledWith(
+      "#fuTodofukenShozai",
+      "13",
+    );
+    expect(f.page.selectOption).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "北海道",
+    );
     // 家屋番号ありは種別=建物(#fuShozaiTypeTATEMONO)を選ぶ。
     expect(f.page.click).toHaveBeenCalledWith("#fuShozaiTypeTATEMONO");
     expect(f.page.click).not.toHaveBeenCalledWith("#fuShozaiTypeTOCHI");
@@ -974,7 +1027,7 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     // 次ページ有無(evaluate(#cbnDlgBtnPageNext)): 1ページ目後 true、2ページ目後 false。
     let nextChecks = 0;
     f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
-      arg === "#cbnDlgBtnPageNext" ? nextChecks++ === 0 : undefined,
+      arg === "#cbnDlgBtnPageNext" ? nextChecks++ === 0 : shozaiDialogDefault(arg),
     );
     const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
     const page = await factory!();
@@ -990,7 +1043,11 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(f.page.click).toHaveBeenCalledWith("#cbnDlgBtnPageNext");
     // @codex P1: 単純な checkbox attached 待ちでなく「ページが実際に切り替わる」まで待つ
     // (waitForFunction)。旧ページ残存 checkbox で即 resolve して1ページ目のみ返す退行を防ぐ。
-    expect(f.page.waitForFunction).toHaveBeenCalledTimes(1);
+    // ⚠数えるのは**ページ送りの待ち**だけ(所在選択ダイアログの待ちを含めない)。
+    const pageTurnWaits = (
+      f.page.waitForFunction as unknown as { mock: { calls: unknown[][] } }
+    ).mock.calls.filter((c) => !isShozaiDialogWait(c[1]));
+    expect(pageTurnWaits).toHaveLength(1);
   });
 
   it("C9q: ページ切替待ち(waitForFunction)が timeout したら以降を諦め既取得分を返す(退行なし・@codex P1)", async () => {
@@ -1000,9 +1057,12 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
       .mockResolvedValueOnce([{ candidateRef: "chk_1", lotNumber: "１－１" }]);
     // 次ページは常に有効を返すが、ページ切替待ちが timeout → 1ページ目で確定。
     f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
-      arg === "#cbnDlgBtnPageNext" ? true : undefined,
+      arg === "#cbnDlgBtnPageNext" ? true : shozaiDialogDefault(arg),
     );
-    f.page.waitForFunction = vi.fn(async () => {
+    // ⚠timeout させるのは**ページ送りの待ち**だけ。所在選択ダイアログの待ちまで
+    // 落とすと、このテストが見たいページ送りの挙動に到達しない。
+    f.page.waitForFunction = vi.fn(async (_fn: unknown, arg: unknown) => {
+      if (isShozaiDialogWait(arg)) return {};
       throw makeTimeoutError();
     });
     const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
@@ -1015,6 +1075,36 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(candidates.map((c) => c.candidateRef)).toEqual(["chk_1"]);
   });
 
+  it("C9r: ⚠都道府県が無い住所は、ダイアログを開く前に所在エラーで止まる (@codex #358 P2)", async () => {
+    // 所在選択ボタンは都道府県を選ぶまで押せない。無いまま進むとボタンが
+    // 有効にならず待ち続け、最後は「外部サービスの障害(502)」に化ける。
+    // 実際は**住所を直せば通る**話なので、そう伝わる分類で止める。
+    const f = makeFakeChromium();
+    const clicks: string[] = [];
+    f.page.click = vi.fn(async (s: string) => {
+      clicks.push(s);
+      return undefined;
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const factory = resolveDefaultRegistryBrowserFactory({
+        chromiumLoader: f.loader,
+      });
+      const page = await factory!();
+      await expect(
+        page.searchByLocation!({
+          address: "テスト市テスト町一丁目", // 都道府県が無い
+          lotNumber: "1",
+          buildingNumber: null,
+        }),
+      ).rejects.toMatchObject({ code: "location_rejected" });
+      // ダイアログは開いていない
+      expect(clicks).not.toContain("#fuShozaiSentaku");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("C9g: 検索が0件(checkbox 無し)でロード完了なら空配列を返す(timeout にしない・@codex P2)", async () => {
     const f = makeFakeChromium();
     f.page.waitForSelector = vi.fn(async (s: string) => {
@@ -1023,7 +1113,7 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     });
     // ロード完了(「データ取得中」が消えた)を模す → 0件として [] を返す。
     f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
-      arg === "#cbnDlgChibanCheckTbl" ? true : undefined,
+      arg === "#cbnDlgChibanCheckTbl" ? true : shozaiDialogDefault(arg),
     );
     const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
     const page = await factory!();
@@ -1043,7 +1133,7 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     });
     // まだロード中(「データ取得中」)を模す → timeout。
     f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
-      arg === "#cbnDlgChibanCheckTbl" ? false : undefined,
+      arg === "#cbnDlgChibanCheckTbl" ? false : shozaiDialogDefault(arg),
     );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -1591,7 +1681,10 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       }
       if (!parsed || typeof parsed !== "object") {
         clicked.push(arg); // domClick / hasNext 等のセレクタ引数
-        return undefined;
+        // ⚠所在選択ダイアログ(B案)の既定応答を返す。段階②も所在の確定を通る
+        // ため、undefined のままだと所在が確定できず location_rejected になり、
+        // 請求フローの検証に到達しない。
+        return shozaiDialogDefault(arg);
       }
       if (typeof parsed.ownerSel === "string") {
         return JSON.stringify(
@@ -1637,7 +1730,10 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
   }
 
   const INPUT = {
-    address: "テスト市テスト町一丁目",
+    // ⚠**都道府県から始まる住所にする**。所在選択ダイアログは都道府県を選ぶまで
+    // 開けないため、都道府県が無い住所は所在の指定エラーで先に止まる
+    // (実データも都道府県から入っている前提)。
+    address: "東京都テスト市テスト町一丁目",
     lotNumber: "1-1",
     buildingNumber: null,
     certificateType: "owner" as const,

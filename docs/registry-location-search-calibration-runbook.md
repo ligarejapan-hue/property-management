@@ -26,9 +26,34 @@
 - `locationSearchSubmit`(次へ/請求リストへ進むボタン)… 候補の暫定値は `#myPageTable_next`。実操作で確定。
 - `locationSearchRow` の**行内セル**(`$$eval` の `.address`/`.lot`/`.building`/`.ren`)…
   一覧テーブルの実際の列(td)構造に合わせる。
-- 都道府県 `selectOption` に渡す**実 option 値/ラベルの一致**(`splitAddressForLocationSearch` が
-  返す "東京都" 等がそのまま option value か、ラベル一致指定が要るか)。
-- 直接入力モードで**市区町村ダイアログを完全に回避できるか**(できなければダイアログ操作を追加)。
+- 都道府県 `selectOption` に渡す**実 option 値/ラベルの一致**
+  → ⚠**[要確認・2026-08-05 probe] option の value は都道府県コード**だった
+  (東京都 = `"13"`)。`splitAddressForLocationSearch` が返すのは "東京都" という
+  **ラベル**なので、そのまま value として渡すと選べない可能性がある。
+  実課金前の通し確認で必ず実測する(probe ではラベル→value の対応のみ確認済み)。
+- ~~直接入力モードで**市区町村ダイアログを完全に回避できるか**~~
+  → **[確定・2026-08-05 本番probe] 回避できない。ダイアログ方式が正**。
+  2026-08-04 の実機で、直接入力に住所を入れると赤字で
+  「**請求できない所在です**。直接入力のチェックを外し、所在選択ボタンをクリックし、
+  ダイアログから所在を選択してください」と出て先へ進まなかった
+  (原因=所在欄に**地番まで**入れていた。登記の所在は住所ではなく**地番区域**)。
+  発注者判断で **B案=サイト推奨のダイアログ方式**へ組み替え済み。
+  採取したセレクタ:
+  - 所在選択ボタン `#fuShozaiSentaku`(onclick=`fuBtnShozaiSentaku()`)
+    ⚠**都道府県を選ぶまで disabled**(`shozaiButton_disable` → `shozaiButton_enable`)。
+    押しても無反応なので、有効になるまで待ってから押す。
+  - ダイアログの器 `#kuikiDialogArea`(中身は**後から読み込む**)
+    ⚠読み込み中の目印 `.GKuikiDialogWaitMsg` が消えるまで待つ。器の出現だけで
+    読むと「読み込み中・・・・」を掴む。
+  - 区域の1件 `#kuikiDialogArea td[id^="GKuiki"]`
+    (実体 = `<td id="GKuiki0" onclick="GKuikiDialogFixed('402','青ヶ島村',…)">青ヶ島村</td>`)
+  - 選択済みの階層表示 `.GKuikiDialogSelectedText`(例「東京都>渋谷区>」)
+  - 確定/戻る/取消 = `.ui-dialog-buttonpane button`(**id を持たない**ので文言で引く)
+    ⚠ページ本体の「確定」(`fuBtnForward`)と**文言が同じ**。探す範囲をダイアログの
+    ボタン列に限定することでしか区別できない。ページ本体の確定は
+    **カートに未請求の行を作る**ので取り違えは重大。
+  - 所在が確定すると `#fuChibanKuiki`(表示)と `#fuChibanKuikiCode`(コード)が埋まる。
+  段数は地域で変わる(政令市は 市→区→町、特別区は 区→丁目)ため**決め打ちにしない**。
 - 番号取得側の `searchInput`(不動産番号入力欄)
   (請求方法=不動産番号 `#fuSeikyuMethodFUDOSAN_NO` は[確定])。
   ⚠**2026-07-31 更新**: 旧記載の `searchSubmit`/`downloadButton` は要校正ではなくなった。

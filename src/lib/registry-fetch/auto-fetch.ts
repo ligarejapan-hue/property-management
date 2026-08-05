@@ -33,6 +33,13 @@ import {
   decideCancel,
 } from "@/lib/registry-fetch/cancel-safety";
 import {
+  SHOZAI_DIALOG_BUTTON_SCOPE,
+  looksLikeLotTail,
+  matchDialogItemByPrefix,
+  normalizeForMatch,
+  type ShozaiDialogItem,
+} from "@/lib/registry-fetch/shozai-dialog";
+import {
   processRegistryPdf,
   type RegistryPdfSession,
 } from "@/lib/registry-pdf/process";
@@ -431,14 +438,32 @@ const REGISTRY_SELECTORS = {
   //   - PDFダウンロード = 旧 `#download-pdf`(**実サイトに存在しない**) → 下記
   requestConfirmButton: 'button[onclick*="fuBtnForward"]', // [確定] 請求条件の確定(無料・カートへ)
   downloadButton: 'button[onclick*="myPageDownload"]', // [確定] 「表示・保存」(請求済のみ)
-  // 所在検索: 実サイトは多段UI。直接入力モードでダイアログを避ける(堅牢)。
+  // 所在検索: 実サイトは多段UI。**サイト推奨の「所在選択ダイアログ」方式**で指定する。
+  //
+  // ⚠**直接入力モードは使わない**(2026-08-04 実機で判明)。所在欄に地番まで
+  //   入れるとサイトが赤字で「**請求できない所在です**…直接入力のチェックを外し、
+  //   所在選択ボタンをクリックし、ダイアログから所在を選択してください」と出して
+  //   先へ進まない。所在(地番区域)は**サイトが持つコード**で確定させるのが正しい。
   searchMethodLocationRadio: "#fuSeikyuMethodSHOZAI", // [確定] 請求方法=所在 ラジオ
   locationTypeLandRadio: "#fuShozaiTypeTOCHI", // [確定] 種別=土地
   locationTypeBuildingRadio: "#fuShozaiTypeTATEMONO", // [確定] 種別=建物
   locationPrefectureSelect: "#fuTodofukenShozai", // [確定] 都道府県 プルダウン
-  locationDirectInputCheck: "#fuShozaiChokusetuNyuryoku", // [確定] 所在の直接入力モード
-  locationSearchAddress: "#fuChibanKuiki", // [確定] 所在(地番区域=市区町村以下)入力
+  locationDirectInputCheck: "#fuShozaiChokusetuNyuryoku", // [確定] 所在の直接入力モード(使わない=OFFのまま)
+  locationSearchAddress: "#fuChibanKuiki", // [確定] 所在(地番区域)の表示欄。ダイアログが埋める
+  locationSearchAddressCode: "#fuChibanKuikiCode", // [確定・2026-08-05 probe] 所在のコード(ダイアログが埋める)
   locationSearchLotBuilding: "#fuChibanKaoku", // [確定] 地番・家屋番号入力
+  // ── 所在選択ダイアログ(2026-08-05 本番probe で採取) ───────────────────
+  // ⚠**都道府県を選ぶまで所在選択ボタンは押せない**(初期状態は disabled で
+  //   `shozaiButton_disable`)。押しても何も起きないため、待ってから押す。
+  locationSelectButton: "#fuShozaiSentaku", // [確定] 「所在選択」ボタン(onclick=fuBtnShozaiSentaku)
+  locationDialogArea: "#kuikiDialogArea", // [確定] 所在選択ダイアログの器(中身は非同期ロード)
+  locationDialogLoading: ".GKuikiDialogWaitMsg", // [確定] 「読み込み中・・・・」(消えるまで待つ)
+  locationDialogSelectedPath: ".GKuikiDialogSelectedText", // [確定] 選択済みの階層表示(例「東京都>」)
+  locationDialogItem: '#kuikiDialogArea td[id^="GKuiki"]', // [確定] 区域の1件(td・onclick=GKuikiDialogFixed)
+  locationDialogAllTab: "#btn-all", // [確定] 「全部」タブ(あかさたな絞り込みを使わない)
+  // ⚠ダイアログの確定/戻る/取消は jQuery UI の buttonpane にあり **id を持たない**。
+  //   文言で引く(ページ本体の「確定」= fuBtnForward とは**別物**なので取り違えない)。
+  locationDialogButtonPane: ".ui-dialog-buttonpane button", // [確定] 確定/戻る/取消
   // 所在検索フロー(2026-07-17 本番probe確定)。所在→不動産請求→地番検索ダイアログ方式。
   fudosanRequestLink: "a[href*=\"menuClick('FUDOSAN')\"]", // [確定] 不動産請求リンク(=loggedInMenuLinkと同値)
   dialogChibanKaokuListButton: "#fuChibanKaokuIchiran", // [確定] 地番・家屋番号一覧(ダイアログを開く)
@@ -610,6 +635,181 @@ async function isLocationRejectedByProvider(
     // 判定できない場合は従来どおり「候補ゼロ」として扱う(誤って失敗扱いにしない)。
     return false;
   }
+}
+
+/**
+ * 都道府県プルダウンを「表示名」で選ぶ。
+ *
+ * ⚠**選択肢の値は都道府県コード**(2026-08-05 本番probe: 東京都 = "13")。
+ * 住所から切り出せるのは「東京都」という**表示名**なので、そのまま値として
+ * 渡しても一致せず選べない。表示名から値を引いてから選ぶ。
+ *
+ * ⚠ここで選べないと**所在選択ボタンが有効にならない**(都道府県が前提条件)。
+ * 黙って先へ進むと所在が空のまま検索して「候補0件」に見え、原因が分からなく
+ * なるため、所在の指定の問題として止める。
+ */
+async function selectPrefectureByLabel(
+  page: RegistryPageLike,
+  label: string,
+): Promise<void> {
+  const value = (await page.evaluate((arg: string) => {
+    const [sel, want] = arg.split("|");
+    const el = document.querySelector(sel) as HTMLSelectElement | null;
+    if (!el) return "";
+    const norm = (s: string) => s.replace(/\s+/gu, "").trim();
+    const hit = Array.from(el.options).find(
+      (o) => norm(o.textContent || "") === norm(want),
+    );
+    return hit ? hit.value : "";
+  }, `${REGISTRY_SELECTORS.locationPrefectureSelect}|${label}`)) as string;
+  if (!value) {
+    // 都道府県名はログに出さない(所在の一部＝PII 方針)。
+    console.warn("[registry-search] prefecture option not found");
+    throw new RegistryFetchError("location_rejected");
+  }
+  await page.selectOption(REGISTRY_SELECTORS.locationPrefectureSelect, value);
+}
+
+/**
+ * 所在選択ダイアログで地番区域を確定させる（B案の中核）。
+ *
+ * ⚠**ページ本体の「確定」(fuBtnForward) には触れない**。押すとカートに
+ * 未請求の行ができる。ここで押すのはダイアログ内の「確定」だけで、
+ * 選んだ所在を欄に入れるだけ＝課金にもカートにも触れない。
+ * 取り違えを防ぐため、ボタンは**ダイアログのボタン列に限定して**探す。
+ *
+ * ⚠決められないときは**必ず取消で閉じて location_rejected を投げる**。
+ * あいまいなまま進むと、利用者が意図しない土地の謄本を後段で請求する。
+ *
+ * @returns 確定できたら true。呼び出し側は false を想定しない（例外で返す）。
+ */
+async function selectShozaiViaDialog(
+  page: RegistryPageLike,
+  rest: string,
+  report: (label: string) => void,
+): Promise<void> {
+  const S = REGISTRY_SELECTORS;
+  const cancel = async (): Promise<void> => {
+    try {
+      await page.evaluate((scope: string) => {
+        const b = Array.from(document.querySelectorAll(scope)).find(
+          (x) => (x.textContent || "").trim() === "取消",
+        );
+        (b as { click?: () => void } | undefined)?.click?.();
+      }, SHOZAI_DIALOG_BUTTON_SCOPE);
+    } catch {
+      // 閉じられなくても、この後の例外で検索自体は終わる。
+    }
+  };
+
+  // 1) 都道府県を選ぶまでボタンは disabled。有効になるまで待ってから押す。
+  await page.waitForFunction((arg: unknown) => {
+    const b = document.querySelector(String(arg)) as { disabled?: boolean } | null;
+    return !!b && b.disabled !== true;
+  }, S.locationSelectButton);
+  report("所在選択ダイアログを開いています…");
+  await page.click(S.locationSelectButton);
+
+  // 2) 中身は後から読み込まれる。「読み込み中・・・・」が消えるまで待つ。
+  await page.waitForFunction(
+    (arg: unknown) => {
+      const [area, loading] = String(arg).split("|");
+      const d = document.querySelector(area);
+      if (!d || d.children.length === 0) return false;
+      return !d.querySelector(loading);
+    },
+    `${S.locationDialogArea}|${S.locationDialogLoading}`,
+  );
+
+  // 3) 住所の残りを、**出てきた選択肢に前方一致**で当てながら1段ずつ進む。
+  //    ⚠自前の規則(「市区町村郡」で切る)は使わない(@codex #358 P2)。
+    //  「東村山市」「四日市市」のように区切り文字を名前の途中に含む自治体で
+    //  壊れ、その住所が永久に検索できなくなる。正解はサイトの一覧が持っている。
+  let remaining = normalizeForMatch(rest);
+  while (remaining.length > 0) {
+    const items = (await page.evaluate((sel: string) => {
+      return Array.from(document.querySelectorAll(sel)).map((el) => ({
+        id: (el as { id?: string }).id || "",
+        text: (el.textContent || "").trim(),
+      }));
+    }, S.locationDialogItem)) as ShozaiDialogItem[] | undefined;
+    if (!items || items.length === 0) break; // これ以上の段が無い＝ここまでで確定
+
+    const hit = matchDialogItemByPrefix(items, remaining);
+    if (!hit && looksLikeLotTail(remaining)) {
+      // ⚠**残っているのが地番なら、それは区域ではない**(@codex #358 P2)。
+      // 区域を選び終えた後に数字だけ残るのは正常(地番は別の欄に入れる)。
+      // ここで弾くと「丸の内1丁目1-1」のような普通の住所が通らなくなる。
+      break;
+    }
+    if (!hit) {
+      // ⚠**当てずっぽうで選ばない**。別の区域を選ぶと、利用者が意図しない
+      // 土地の謄本を後段で請求してしまう。所在の指定として扱って中止する。
+      // 選択肢の中身(地名)はログに出さない(PII 方針)。
+      console.warn(
+        "[registry-search] shozai dialog: no unique match, candidates=" +
+          String(items.length),
+      );
+      await cancel();
+      throw new RegistryFetchError("location_rejected");
+    }
+    const before = ((await page.evaluate((sel: string) => {
+      return (document.querySelector(sel)?.textContent || "").trim();
+    }, S.locationDialogSelectedPath)) ?? "") as string;
+
+    await page.click("#" + hit.item.id);
+    remaining = hit.rest;
+
+    // 次の段が読み込まれるまで待つ。
+    // ⚠**比較対象は「押す直前の階層表示」**(@codex #358 P1)。以前は
+    // ブラウザ側に渡していない変数と比べていたため**常に真**になり、待たずに
+    // 次の段へ進んでいた＝古い選択肢を読んで所在を弾いていた。
+    // 待てない作りの場合もあるので、失敗しても続行して最後の「確定」で判定する。
+    try {
+      await page.waitForFunction(
+        (arg: unknown) => {
+          const { pathSel, loading, area, before: was } = JSON.parse(
+            String(arg),
+          ) as { pathSel: string; loading: string; area: string; before: string };
+          const d = document.querySelector(area);
+          if (d && d.querySelector(loading)) return false; // まだ読み込み中
+          const now = (document.querySelector(pathSel)?.textContent || "").trim();
+          return now !== was;
+        },
+        JSON.stringify({
+          pathSel: S.locationDialogSelectedPath,
+          loading: S.locationDialogLoading,
+          area: S.locationDialogArea,
+          before,
+        }),
+      );
+    } catch {
+      // 階層表示が変わらない作りでも、最後の「確定」が押せるかで最終判定する。
+    }
+  }
+
+  // 4) ダイアログの「確定」を押す（⚠ページ本体の確定ではない）。
+  const fixed = await page.evaluate((scope: string) => {
+    const b = Array.from(document.querySelectorAll(scope)).find(
+      (x) => (x.textContent || "").trim() === "確定",
+    ) as ({ click?: () => void; disabled?: boolean } & Element) | undefined;
+    if (!b || b.disabled === true) return false;
+    b.click?.();
+    return true;
+  }, SHOZAI_DIALOG_BUTTON_SCOPE);
+  if (fixed !== true) {
+    // 確定できない＝所在が最後まで絞り込めていない。所在の問題として返す。
+    console.warn("[registry-search] shozai dialog: fix button not enabled");
+    await cancel();
+    throw new RegistryFetchError("location_rejected");
+  }
+
+  // 5) 所在欄が実際に埋まったことを確認する（埋まらないまま次へ進まない）。
+  await page.waitForFunction((arg: unknown) => {
+    const el = document.querySelector(String(arg)) as { value?: string } | null;
+    return !!el && typeof el.value === "string" && el.value.trim().length > 0;
+  }, S.locationSearchAddress);
+  report("所在を確定しました");
 }
 
 export function splitAddressForLocationSearch(address: string): {
@@ -1140,16 +1340,24 @@ function createPlaywrightRegistryPage(
             : REGISTRY_SELECTORS.locationTypeLandRadio,
         );
         const { prefecture, rest } = splitAddressForLocationSearch(input.address);
-        if (prefecture) {
-          await page.selectOption(
-            REGISTRY_SELECTORS.locationPrefectureSelect,
-            prefecture,
-          );
+        // ⚠**都道府県が取れない住所は、ここで止める**(@codex #358 P2)。
+        // 所在選択ボタンは都道府県を選ぶまで押せない作りなので、無いまま進むと
+        // ボタンが有効にならず待ち続け、最後は「外部サービスの障害」に化ける。
+        // 実際は**住所を直せば通る**話なので、そう伝わる分類で止める。
+        if (!prefecture) {
+          console.warn("[registry-search] address has no prefecture");
+          throw new RegistryFetchError("location_rejected");
         }
-        await page.check(REGISTRY_SELECTORS.locationDirectInputCheck);
-        await page.fill(
-          REGISTRY_SELECTORS.locationSearchAddress,
+        // ⚠選択肢の値は都道府県**コード**なので、表示名から引いて選ぶ。
+        await selectPrefectureByLabel(page, prefecture);
+        // ⚠**直接入力は使わない**(発注者判断=B案)。所在欄に住所を打ち込む方式は
+        // 実機で「請求できない所在です…所在選択ボタンからダイアログで選んで
+        // ください」と赤字で止まる。登記の所在は住所ではなく**地番区域**で、
+        // サイトの持つコードで確定させないと請求まで進めない。
+        await selectShozaiViaDialog(
+          page,
           rest.length > 0 ? rest : input.address,
+          reportLive,
         );
         // 検索キーは種別に合わせた番号(建物=家屋番号 / 土地=地番)。
         if (searchKey.length > 0) {
@@ -1365,16 +1573,26 @@ function createPlaywrightRegistryPage(
             : REGISTRY_SELECTORS.locationTypeLandRadio,
         );
         const { prefecture, rest } = splitAddressForLocationSearch(input.address);
-        if (prefecture) {
-          await page.selectOption(
-            REGISTRY_SELECTORS.locationPrefectureSelect,
-            prefecture,
-          );
+        // ⚠**都道府県が取れない住所は、ここで止める**(@codex #358 P2)。
+        // 所在選択ボタンは都道府県を選ぶまで押せない作りなので、無いまま進むと
+        // ボタンが有効にならず待ち続け、最後は「外部サービスの障害」に化ける。
+        // 実際は**住所を直せば通る**話なので、そう伝わる分類で止める。
+        if (!prefecture) {
+          console.warn("[registry-search] address has no prefecture");
+          throw new RegistryFetchError("location_rejected");
         }
-        await page.check(REGISTRY_SELECTORS.locationDirectInputCheck);
-        await page.fill(
-          REGISTRY_SELECTORS.locationSearchAddress,
+        // ⚠選択肢の値は都道府県**コード**なので、表示名から引いて選ぶ。
+        await selectPrefectureByLabel(page, prefecture);
+        // ⚠**直接入力は使わない**(発注者判断=B案)。所在欄に住所を打ち込む方式は
+        // 実機で「請求できない所在です…所在選択ボタンからダイアログで選んで
+        // ください」と赤字で止まる。登記の所在は住所ではなく**地番区域**で、
+        // サイトの持つコードで確定させないと請求まで進めない。
+        await selectShozaiViaDialog(
+          page,
           rest.length > 0 ? rest : input.address,
+          // 有料取得の経路には実況の通知先が無い(候補検索とは別メソッド)。
+          // 所在の確定そのものは同じ手順なので、通知だけ空にして共用する。
+          () => {},
         );
         await page.fill(REGISTRY_SELECTORS.locationSearchLotBuilding, targetKey);
         await page.click(REGISTRY_SELECTORS.dialogChibanKaokuListButton);
@@ -1382,6 +1600,12 @@ function createPlaywrightRegistryPage(
         await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, targetKey);
         await page.click(REGISTRY_SELECTORS.dialogSearch);
       } catch (err) {
+        // ⚠**分類済みの失敗はそのまま通す**(@codex #358 P2)。ここで一律に
+        // provider_error へ潰すと、所在が決められなかった場合
+        // (location_rejected) まで「外部サービスの障害(502)」になり、画面に
+        // **「住所を直せば通る」という案内が出ない**。利用者は原因が分からない
+        // まま**有料の取得を押し直す**ことになる。候補検索側は既にこの形。
+        if (err instanceof RegistryFetchError) throw err;
         console.warn(
           "[registry-fetch] paid flow setup failed (not charged):",
           summarizeRegistrySearchError(err),
