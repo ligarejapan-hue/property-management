@@ -1581,6 +1581,12 @@ function createPlaywrightRegistryPage(
         await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, targetKey);
         await page.click(REGISTRY_SELECTORS.dialogSearch);
       } catch (err) {
+        // ⚠**分類済みの失敗はそのまま通す**(@codex #358 P2)。ここで一律に
+        // provider_error へ潰すと、所在が決められなかった場合
+        // (location_rejected) まで「外部サービスの障害(502)」になり、画面に
+        // **「住所を直せば通る」という案内が出ない**。利用者は原因が分からない
+        // まま**有料の取得を押し直す**ことになる。候補検索側は既にこの形。
+        if (err instanceof RegistryFetchError) throw err;
         console.warn(
           "[registry-fetch] paid flow setup failed (not charged):",
           summarizeRegistrySearchError(err),

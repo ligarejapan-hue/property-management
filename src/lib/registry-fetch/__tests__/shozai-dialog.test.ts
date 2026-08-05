@@ -238,6 +238,24 @@ describe("配線（実サイト probe 2026-08-05 の結果を固定）", () => {
     expect(fn).toMatch(/value\.trim\(\)\.length > 0/);
   });
 
+  it("⚠分類済みの失敗を「外部サービスの障害」に潰さない (@codex #358 P2)", () => {
+    // 所在が決められなかった(location_rejected)のに 502 で返すと、画面に
+    // 「住所を直せば通る」という案内が出ず、利用者は原因が分からないまま
+    // **有料の取得を押し直す**。候補検索側・有料取得側の両方で素通しする。
+    const s = SRC();
+    // catch で provider_error に変換している箇所は、直前に素通しの門がある
+    const blocks = s.match(
+      /\} catch \(err\) \{[\s\S]{0,700}?throw new RegistryFetchError\("provider_error"\);\s*\n\s*\}/g,
+    ) ?? [];
+    expect(blocks.length).toBeGreaterThanOrEqual(2);
+    for (const b of blocks) {
+      expect(
+        b,
+        "catch が RegistryFetchError を素通ししていない",
+      ).toMatch(/if \(err instanceof RegistryFetchError\) throw err;/);
+    }
+  });
+
   it("⚠地名をログに出さない（PII 方針）", () => {
     const fn = DIALOG_FN();
     const warns = fn.match(/console\.warn\([\s\S]*?\);/g) ?? [];
