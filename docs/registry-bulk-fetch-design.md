@@ -138,7 +138,15 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
                           もう一度買える) / charged=課金済みで決着(=終端)。
                           正常成功の**自動決着**(添付確定と同じ tx)と、課金不明を
                           運用者が課金済みと確定した場合の両方でこの値にする
-                          (どちらも「未解決」の関所・ゲートから外れる)
+                          (どちらも「未解決」の関所・ゲートから外れる)。
+                          ⚠**charged の決着でも、同じ tx で対応する
+                          registry_charge_attempts の行も charged に解決する**
+                          (@codex 設計指摘 P1)。not_charged 側だけ共通台帳を解決して
+                          charged 側を項目のAuditLogだけにすると、**共通台帳の行が
+                          未解決のまま残って生きたガード・起動時ゲート・
+                          「未解決ゼロ」の関所に一致し続け、ブレーカーを解除できない**。
+                          決着(item + 共通台帳 + 恒久的な購入マーカー)は not_charged /
+                          charged のどちらも**原子的に伝播する**
                           / resolved_by / resolved_at(自動決着は system・運用者の決着は
                           その人。誰がいつ決着させたか・監査)
                           / lock_owner_token(物件ロックを取るたびに発行する乱数。
