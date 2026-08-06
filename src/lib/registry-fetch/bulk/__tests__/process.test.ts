@@ -118,6 +118,31 @@ describe("processNextBulkItem", () => {
     expect(finalizedItemData()).toMatchObject({ status: "done", attachmentId: "att-1" });
   });
 
+  it("number 候補でもジョブの種別(all)を単発へ渡す(owner に落とさない)", async () => {
+    (runRegistrySearch as Mock).mockResolvedValue({
+      searchable: true,
+      candidates: [{ candidateRef: "r1" }],
+    });
+    // 候補が number 種別に解決される。
+    (resolveRegistryCandidate as Mock).mockResolvedValue({
+      candidate: { kind: "number", realEstateNumber: "RN-1" },
+      fingerprint: "fp",
+    });
+    // ジョブは all。
+    pm.registryFetchJob.findUnique.mockResolvedValue({
+      id: "job-1", requestedById: "u1", status: "processing",
+      certificateType: "all", startedAt: new Date(), activeItemId: null,
+    });
+    (runRegistryAutoFetch as Mock).mockResolvedValue({ attachmentId: "att-1", status: "success" });
+
+    await processNextBulkItem({ session: SESSION, jobId: "job-1", provider });
+
+    expect((runRegistryAutoFetch as Mock).mock.calls[0][0]).toMatchObject({
+      certificateType: "all",
+      realEstateNumber: "RN-1",
+    });
+  });
+
   it("候補が複数 → 単発取得を呼ばず skipped(ambiguous)", async () => {
     (runRegistrySearch as Mock).mockResolvedValue({
       searchable: true,

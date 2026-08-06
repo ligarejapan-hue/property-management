@@ -64,7 +64,15 @@ export default function RegistryBulkFetchProgressPage() {
           setError(err instanceof Error ? err.message : "処理に失敗しました");
           break;
         }
-        await reload();
+        // ⚠進捗表示の更新失敗は**致命的にしない**(@codex #361 P2)。処理の判断は res で
+        // 行うため、progress GET が一時的に失敗してもループを止めない(次の反復で更新される)。
+        // ここを try で囲まないと、await していない runLoop の reject が握られず、ジョブが
+        // runnable のまま画面だけ止まる。
+        try {
+          await reload();
+        } catch {
+          // 表示更新のみの失敗=無視して処理を継続。
+        }
 
         if (res.outcome === "drained") {
           setNotice("すべての項目の処理が終わりました。");
@@ -96,6 +104,12 @@ export default function RegistryBulkFetchProgressPage() {
     } finally {
       loopActiveRef.current = false;
       setRunning(false);
+      // 最終状態を確実に表示に反映する(ループ中の更新が失敗していても最後に取り直す)。
+      try {
+        await reload();
+      } catch {
+        // ここも失敗したら表示は据え置き(利用者は再読み込みで更新できる)。
+      }
     }
   }, [jobId, reload]);
 

@@ -232,6 +232,10 @@ export async function processNextBulkItem(args: {
               session,
               propertyId,
               confirmed: true,
+              // ⚠種別は**どちらの候補でも渡す**(@codex #361 P2)。number 候補で省くと
+              // runRegistryAutoFetch が owner を既定にし、all を確認したのに owner 反映/
+              // ラベルになる。処理・添付ラベルはジョブの種別に一致させる。
+              certificateType,
               ...(candidate.kind === "number"
                 ? { realEstateNumber: candidate.realEstateNumber }
                 : {
@@ -239,7 +243,6 @@ export async function processNextBulkItem(args: {
                       lotNumber: candidate.lotNumber,
                       buildingNumber: candidate.buildingNumber,
                     },
-                    certificateType,
                   }),
               expectedFingerprint: fingerprint,
             },
