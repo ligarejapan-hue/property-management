@@ -169,6 +169,11 @@ property_prev_registry_status / lease_expires_at / execution_id を持たせる
 (課金境界より手前の検索段階でクラッシュしても、この行だけを頼りに token-CAS で
 物件を prev_status へ安全に戻せる)。一括は job_items がこの役割を担うので、
 単発だけこの台帳に復旧メタを載せる(bulk 行は item を指すだけでよい)。
+⚠**物件CAS(施錠)と予約行の insert は同一 transaction にする**(@codex 設計指摘 P1)。
+別々だと、registry_lock_token/scheduled を書いた後に予約 insert が失敗/プロセス
+終了すると、**トークンも prev_status も lease も持つ行が無い**まま物件が施錠され、
+起動時復旧が持ち主を証明できず(手動系も token 中は変更拒否)物件が塞がる。
+予約作成が失敗したら物件CASを**ロールバック**する。
 ⚠**課金前に確定した失敗では、単発の予約行を自動で not_charged 解決する**
 (@codex 設計指摘 P2)。予約は物件ロック取得時=**検索/ログインより前**に
 unresolved で作るが、生きたガードは未解決の共通台帳行を弾く。rate_limited /
@@ -276,6 +281,12 @@ onBeforeCharge が読む場所も解除操作が書く場所も無い)。すべ�
     - 単発の取得も施錠時に token を発行し、解錠は token-CAS にする(同じ規約に統一)
     - 手動系(一括更新/アクション)は **registry_lock_token が立っている間は
       registryStatus の変更を409で拒否**する(取得の進行中に手で状態を触らせない)
+    - ⚠**registryStatus だけでなく、指紋フィールド(address/lotNumber/
+      buildingNumber/realEstateNumber)を書く全 writer も token 中は拒否/token-CAS**
+      にする(@codex 設計指摘 P1)。指紋照合/物件CASの後・有料フロー完了前に
+      これらが編集されると、取得は**古いスナップショットで購入**した上で、
+      PDFと解析所有者を**今や別物になった物件レコード**に添付してしまう。
+      既存の PATCH /properties/[id] はこれらを scheduled 無視で受けるので要改修
     - 実装は「registryStatus を書く箇所を grep で全列挙→全てに適用」を必須とする
       ([[fix-all-call-sites-not-one]] と同じ走査型)
   - 放置項目のうち課金段階が「試行中」以降のものは**課金不明**として扱い、
