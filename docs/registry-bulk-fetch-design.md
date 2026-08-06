@@ -124,6 +124,14 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
                           素通りして同じ謄本をもう一度買える)
 ```
 
+⚠**物件の物理削除との関係を決める**(@codex 設計指摘)。job_items.property_id を
+必須リレーションにすると、既存の物件削除(properties/[id])が**その物件が一度でも
+ジョブに載ると恒久的に失敗**する。逆に通常のカスケードにすると、処理中の
+削除でロックや未解決課金の証跡が消える。方針: (a)**その物件に生きたロック
+(registry_lock_token)や未解決の課金試行がある間は物件削除を409で拒否**、
+(b)job_items.property_id は **nullable(onDelete: SetNull)** にして、決着済みの
+履歴は物件が消えても残す(監査・件数の整合)。
+
 migration は additive(新テーブル2つ + attachments の種別列 + **properties の
 registry_lock_token 列**(施錠の持ち主。物件側に無いと復旧の照合ができない)
 + registry:manage
@@ -186,6 +194,14 @@ onBeforeCharge が読む場所も解除操作が書く場所も無い)。すべ�
     二重課金ガードに永遠に残る。onChargeAborted/finally で **not_charged を
     自動記録**し(運用者の手作業を待たない)、上の回帰テストでこの永続状態まで
     検証する。
+    ⚠**中断の最終化は外側の後片付けより後でも書けるようにする**(@codex 設計指摘)。
+    外側リクエストが timeout で通常の終端後片付け(トークン/ロックのクリア)を
+    済ませてから遅延フックが settle すると、**所有トークン照合が既に外れていて
+    not_charged を書けない**。onBeforeCharge が同レースで attempting を書いていると
+    項目が二重課金ガードに残り続ける。対策: adapter が決着するまで**掴みを離さない**
+    (リースは心拍で延長)か、実行ごとの**不変の tombstone(実行トークンの記録)**を
+    持たせ、中断の最終化はそれに対して CAS する(新しい実行には触らず、自分の
+    実行の項目だけ not_charged にできる)。
     ⚠**遅れて走るフックは実行トークンで囲う**(@codex 設計指摘 P1)。timeout で
     呼び出し側が戻った後、リース切れで**別の実行が同じ項目を掴み直している**
     かもしれない。古い実行の onBeforeCharge(attempting)や onChargeAborted
@@ -300,6 +316,12 @@ searchByRealEstateNumber はカートに触れる前に provider_error で停止
      購入要求を受け付けない。プロセス内ラッチは
      即時停止の速報でしかなく、**恒久的な砦は必ずDB側**に置く。
      以後の課金は**運用者が明示に復旧するまで一律拒否**する(キューを進めない)。
+     ⚠**ブレーカー解除と課金決着(charge_resolution の記録)のAPIは
+     registry:manage を要求する**(@codex 設計指摘 P1)。通常の
+     registry:auto_fetch のままだと、購入を任された一般スタッフが
+     口座全体の停止を自分で解除したり、未解決の課金試行を勝手に not_charged と
+     記録して**運用者の確認を飛ばして再課金を許して**しまう。これらの状態変更は
+     必ず管理権限の壁の内側に置く。
      この書き込み失敗経路も回帰テストで覆う
    - **charged_but_failed が1件でも出たら、ジョブ全体を paused にする**。
      課金境界を越えた失敗の原因(ダウンロードのセレクタずれ・保存失敗・
