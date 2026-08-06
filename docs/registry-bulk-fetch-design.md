@@ -371,8 +371,14 @@ searchByRealEstateNumber はカートに触れる前に provider_error で停止
      までの間に落ちた項目は**台帳に行が無い**。しかもその項目の課金段階は
      attempting とは限らない(押した後に onCharged で charged へ進んでから落ちる)。
      ガードは「台帳 OR **charge_phase が attempting/charged に達した項目
-     (終端かどうかを問わない)**」で判定する(@codex 設計指摘 P1: 「非終端のみ」に
-     絞ると、**台帳を書く前に charged_but_failed で終端に達した行**が関所から
+     (終端かどうかを問わない) OR registry_charge_attempts の未解決行**」で判定する
+     (⚠**通常の二重課金ガードでも共通台帳を見る**=@codex 設計指摘 P1: 単発は
+     ジョブ項目を持たず registry_charge_attempts にしか残らない。この生きた
+     ガードが job_items と AuditLog しか見ないと、**ブレーカー解除後・再起動を
+     待たず**に、同じ purchase_key_hash の次の請求が素通りして再課金できる。
+     起動時ゲートだけでなく**毎回の課金判定でも共通台帳の未解決行を含める**)。
+     ⚠**「非終端のみ」に絞らない**(@codex 設計指摘 P1)
+     =**台帳を書く前に charged_but_failed で終端に達した行**が関所から
      消える=ダウンロード失敗や台帳書き込み自体の失敗で台帳が無いまま、30日
      ガードを素通りして同じ謄本を再購入できる)。関所から外れるのは、
      (a)台帳に対応する行が書けたとき、または(b)運用者が **charge_resolution=
