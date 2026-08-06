@@ -132,7 +132,12 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
 (b)job_items.property_id は **nullable(onDelete: SetNull)** にして、決着済みの
 履歴は物件が消えても残す(監査・件数の整合)。
 
-migration は additive(新テーブル2つ + attachments の種別列 + **properties の
+migration は additive(新テーブル**3つ**[ジョブ2つ + **共通の課金試行台帳
+registry_charge_attempts**(一括・単発が課金境界の直前に書く。id / source(bulk|single) /
+purchase_key_hash / property_id(nullable) / charge_phase / resolved(bool) /
+resolved_at / created_at + purchase_key_hash と (resolved,charge_phase) の索引。
+⚠単発はジョブ項目を持たないので、この台帳が**唯一の恒久的な起動時ゲートの
+参照先**) ] + attachments の種別列 + **properties の
 registry_lock_token 列**(施錠の持ち主。物件側に無いと復旧の照合ができない)
 + registry:manage
 権限行 + **registry_fetch_config の課金停止列**(停止フラグ/理由/時刻/解除者/
@@ -315,9 +320,15 @@ searchByRealEstateNumber はカートに触れる前に provider_error で停止
        ゲートはそこを見る。
      - **成功した課金でゲートを塞がない**。成功時も charge_phase=charged を通る
        ので「attempting/charged が残る間ブロック」を素直に書くと、**成功購入の
-       後の初回再起動で以後の課金が全部止まる**。ゲートは**対応する購入台帳
-       (成功記録)が無い試行だけ**を未解決とみなす(成功の最終化で試行を
-       resolved にする)。
+       後の初回再起動で以後の課金が全部止まる**。ゲートは試行を **resolved に
+       できたものだけ**未解決から外す。
+       ⚠**resolved は添付の最終化まで終えてから書く**(@codex 設計指摘 P1)。
+       購入台帳(AuditLog)は provider 応答直後・**PDF検証/保存(processRegistryPdf)
+       より前**に書かれるため、「台帳がある=成功」ではない。保存が失敗し
+       ブレーカーの書き込みも失敗した課金済み行を、台帳の存在だけで resolved と
+       みなすと、再起動後にゲートを素通りして再課金できる。**台帳の存在は
+       あくまで二重購入マーカー**として残し、起動時ゲートを外す resolved は
+       **添付/状態の最終化が commit された後**にのみ立てる。
      - ⚠**項目の status は問わない**: onCharged 後に charged_but_failed+
        ブレーカーの tx が落ちると行は processing のまま・ブレーカー未設定で残る。
        「終端行だけ」を見るゲートはこれを見逃す。
