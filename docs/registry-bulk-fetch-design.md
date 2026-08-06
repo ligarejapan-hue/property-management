@@ -157,6 +157,12 @@ resolution(unresolved|not_charged|charged・**bool では足りない**=@codex �
 未課金確認と課金済みを区別できず、**課金済みの謄本を再購入**するか**永久に
 ゲートが開かない**かになる) / resolved_by / resolved_at / created_at
 + purchase_key_hash と (resolution,charge_phase) の索引。
+**⚠この台帳は単発の「予約」も兼ねる**(@codex 設計指摘 P1)。単発は job_items を
+持たないので、**物件ロックを取った時点で**ここへ行を作り、lock_owner_token /
+property_prev_registry_status / lease_expires_at / execution_id を持たせる
+(課金境界より手前の検索段階でクラッシュしても、この行だけを頼りに token-CAS で
+物件を prev_status へ安全に戻せる)。一括は job_items がこの役割を担うので、
+単発だけこの台帳に復旧メタを載せる(bulk 行は item を指すだけでよい)。
 ⚠**resolution=charged で外すときは恒久的な購入マーカー(台帳)の存在を要求**する。
 ⚠単発はジョブ項目を持たないので、この台帳が**唯一の恒久的な起動時ゲートの
 参照先**) ] + attachments の種別列 + **properties の
