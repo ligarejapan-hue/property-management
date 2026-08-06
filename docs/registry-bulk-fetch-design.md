@@ -100,7 +100,11 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
                           する**(@codex 設計指摘: charge_unknown は終端状態なので、
                           外すだけだと**未購入と確認済みの謄本を恒久的に飛ばす**。
                           決着 tx で pending へ戻し、古い実行トークン/ロックの
-                          メタも消す) / charged=課金済みと判明→台帳へ手動記録
+                          メタも消す。⚠**charge_phase を none・charge_resolution を
+                          unresolved に原子的に初期化してから新トークンを発行する**
+                          =さもないと再取得が attempting/charged のまま二重課金
+                          ガードから外れ続け、本物の再課金後にクラッシュすると
+                          もう一度買える) / charged=課金済みと判明→台帳へ手動記録
                           (こちらは終端のまま)
                           / resolved_by / resolved_at(誰がいつ決着させたか・監査)
                           / lock_owner_token(物件ロックを取るたびに発行する乱数。
