@@ -110,12 +110,22 @@ describe("classifyItemError — 課金の安全に直結する対応表", () => 
     },
   );
 
-  it.each(["timeout", "provider_error", "auth_failed", "service_hours", "service_unavailable"] as const)(
-    "%s(一時的) → failed で次の項目へ",
+  it.each(["timeout", "provider_error"] as const)(
+    "%s(項目単位の一時的失敗) → failed で次の項目へ",
     (code) => {
       const o = classifyItemError(new RegistryFetchError(code));
       expect(o.status).toBe("failed");
       expect(o.pauseJob).toBe(false);
+    },
+  );
+
+  it.each(["auth_failed", "service_hours", "service_unavailable"] as const)(
+    "%s(口座/サービス全体) → ジョブ paused・項目は pending のまま(次々 failed にしない)",
+    (code) => {
+      const o = classifyItemError(new RegistryFetchError(code));
+      expect(o.status).toBe("pending");
+      expect(o.pauseJob).toBe(true);
+      expect(o.leavePending).toBe(true);
     },
   );
 

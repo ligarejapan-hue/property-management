@@ -266,13 +266,16 @@ export async function processNextBulkItem(args: {
     });
 
     if (outcome.leavePending) {
-      // rate_limited / cancelled: 項目は pending のまま。
+      // 項目は pending のまま。ジョブが paused に落ちた(口座/サービス全体の失敗)なら
+      // それを表に出す(画面は待たずに停止する)。それ以外は rate_limited / cancelled。
+      const leaveOutcome: ProcessNextResult["outcome"] =
+        jobStatus === "paused" ? "paused" : outcome.cancelled ? "cancelled" : "rate_limited";
       return {
-        outcome: outcome.cancelled ? "cancelled" : "rate_limited",
+        outcome: leaveOutcome,
         jobStatus,
         itemId: item.id,
         errorCode: outcome.errorCode,
-        morePending: outcome.cancelled ? false : true,
+        morePending: leaveOutcome === "cancelled" ? false : true,
       };
     }
     return {

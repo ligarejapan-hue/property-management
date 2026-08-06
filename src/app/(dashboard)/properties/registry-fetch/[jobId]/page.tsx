@@ -71,9 +71,7 @@ export default function RegistryBulkFetchProgressPage() {
           break;
         }
         if (res.outcome === "paused") {
-          setNotice(
-            "課金済みで確認が必要な項目があるため、一時停止しました。マイページで取得状況を確認してください。",
-          );
+          setNotice(pausedMessage(res.errorCode ?? null));
           break;
         }
         if (res.outcome === "cancelled") {
@@ -219,8 +217,7 @@ export default function RegistryBulkFetchProgressPage() {
 
       {progress.status === "paused" && (
         <div className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
-          課金済みで確認が必要な項目があるため一時停止しています。
-          法務局のマイページで取得状況を確認のうえ、再開してください。
+          {pausedMessage(progress.pausedReason)}
           <div className="mt-2">
             <button
               type="button"
@@ -253,6 +250,23 @@ export default function RegistryBulkFetchProgressPage() {
       )}
     </div>
   );
+}
+
+/** 一時停止の理由に応じた案内文。 */
+function pausedMessage(reason: string | null): string {
+  switch (reason) {
+    case "auth_failed":
+      return "ログイン情報が受け付けられませんでした。謄本取得の設定を確認してから再開してください。";
+    case "service_hours":
+    case "service_unavailable":
+      return "登記情報サービスの利用時間外か、一時的に利用できません。時間をおいてから再開してください。";
+    case "charged_but_failed":
+    case "already_charged_unverified":
+    case "finalize_failed":
+      return "課金済み（または課金された可能性がある）で確認が必要な項目があるため一時停止しています。法務局のマイページで取得状況を確認のうえ、再開してください。";
+    default:
+      return "処理を一時停止しました。状況を確認してから再開してください。";
+  }
 }
 
 function Tile({

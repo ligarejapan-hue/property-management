@@ -88,12 +88,17 @@ function classifyByProviderCode(code: string): ItemOutcome {
     case "not_found":
     case "location_rejected":
       return { status: "skipped", errorCode: code, ...base };
-    // 一時的な失敗(あとで再試行可能)=failed。次の項目へ進む。
-    case "timeout":
-    case "provider_error":
+    // ⚠**口座/サービス全体の失敗**(@codex #361 P2)。ログイン拒否・利用時間外・接続不可は
+    // どの項目でも同じく起きる=次々 failed にすると全項目を無駄に消費し、auth_failed は
+    // 無効な口座へログインを連打する。ジョブを止め、項目は pending のまま残して、条件が
+    // 直ってから再開で再試行できるようにする。
     case "auth_failed":
     case "service_hours":
     case "service_unavailable":
+      return { status: "pending", errorCode: code, pauseJob: true, leavePending: true, cancelled: false };
+    // 一時的・項目単位の失敗=failed。次の項目へ進む。
+    case "timeout":
+    case "provider_error":
       return { status: "failed", errorCode: code, ...base };
     default:
       return { status: "failed", errorCode: code, ...base };

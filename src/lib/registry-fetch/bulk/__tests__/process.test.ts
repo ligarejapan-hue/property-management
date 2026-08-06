@@ -161,6 +161,32 @@ describe("processNextBulkItem", () => {
     expect(pausedCall![0].where).toMatchObject({ status: { not: "cancelled" } });
   });
 
+  it("auth_failed(口座全体) → ジョブ paused・項目は pending のまま・outcome=paused", async () => {
+    (runRegistrySearch as Mock).mockResolvedValue({
+      searchable: true,
+      candidates: [{ candidateRef: "r1" }],
+    });
+    (runRegistryAutoFetch as Mock).mockRejectedValue(
+      new ApiError(502, "認証失敗", "REGISTRY_AUTO_FETCH_PROVIDER_ERROR", "auth_failed"),
+    );
+    pm.registryFetchJob.findUnique
+      .mockResolvedValueOnce({
+        id: "job-1", requestedById: "u1", status: "processing",
+        certificateType: "owner", startedAt: new Date(), activeItemId: null,
+      })
+      .mockResolvedValueOnce({ status: "paused" });
+
+    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", provider });
+    expect(res.outcome).toBe("paused");
+    // 項目は pending のまま(次々 failed にしない)。
+    expect(finalizedItemData()).toMatchObject({ status: "pending" });
+    // ジョブは paused(cancelled は尊重の条件付き)。
+    const pausedCall = pm.registryFetchJob.updateMany.mock.calls.find(
+      (c) => (c[0].data as { status?: string }).status === "paused",
+    );
+    expect(pausedCall).toBeTruthy();
+  });
+
   it("既取得(ALREADY_DONE)→ done にせず skipped(要確認)。鍵の存在=成功ではない", async () => {
     (runRegistrySearch as Mock).mockResolvedValue({
       searchable: true,
