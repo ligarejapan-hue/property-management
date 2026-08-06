@@ -148,6 +148,12 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
 (registry_lock_token)や未解決の課金試行がある間は物件削除を409で拒否**、
 (b)job_items.property_id は **nullable(onDelete: SetNull)** にして、決着済みの
 履歴は物件が消えても残す(監査・件数の整合)。
+⚠**削除の判定と削除本体は原子的に**(@codex 設計指摘 P1)。事前チェックと
+delete が別々だと、その隙間に取得が registry_lock_token を立てて予約を作れる
+(SetNull なので削除は成功してしまい、進行中の有料フローが添付を確定できず
+ロックも戻せない)。物件行の**行ロックを取る同一 tx**、または
+**条件付き delete(where token IS NULL AND 未解決課金なし)の CAS**で行い、
+トークンか未解決課金が現れたら削除を弾く。
 
 migration は additive(新テーブル**3つ**[ジョブ2つ + **共通の課金試行台帳
 registry_charge_attempts**(一括・単発が課金境界の直前に書く。id / source(bulk|single) /
