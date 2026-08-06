@@ -73,6 +73,9 @@
 ```
 registry_fetch_jobs:      id / status(pending|processing|paused|completed|cancelled)
                           / certificate_type / requested_by / counts / timestamps
+                          / active_item_id(実行中項目。**ジョブ単位の掴みの実体**=
+                          IS NULL への CAS で掴む。これが列に無いと原子的な掴みの
+                          規則が実装できない)
 registry_fetch_job_items: id / job_id / property_id / status(pending|processing|done
                           |failed|skipped|charged_but_failed|charge_unknown)
                           / charge_phase(none|attempting|charged・**請求を押す前に
