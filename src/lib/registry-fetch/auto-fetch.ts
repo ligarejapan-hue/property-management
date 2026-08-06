@@ -2443,6 +2443,17 @@ async function closeQuietly(
  */
 let sharedRegistryFetchThrottle: RegistryFetchThrottle | undefined;
 
+/**
+ * 有料取得の最小間隔(ms)。REGISTRY_FETCH_MIN_INTERVAL_MS があればそれ、無ければ既定 60000
+ * (throttle の DEFAULT_MIN_INTERVAL_MS と一致)。一括取得が rate_limited のときの再試行待ち
+ * (retryAfterMs)にも使う=固定値で待って何度も rate_limited になるのを避ける。
+ */
+export function getRegistryFetchMinIntervalMs(): number {
+  const raw = process.env.REGISTRY_FETCH_MIN_INTERVAL_MS;
+  const parsed = raw ? Number(raw) : undefined;
+  return parsed && Number.isFinite(parsed) && parsed > 0 ? parsed : 60_000;
+}
+
 function getSharedRegistryFetchThrottle(): RegistryFetchThrottle {
   if (!sharedRegistryFetchThrottle) {
     const raw = process.env.REGISTRY_FETCH_MIN_INTERVAL_MS;

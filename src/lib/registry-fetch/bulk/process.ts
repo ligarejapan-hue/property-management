@@ -19,7 +19,10 @@ import prisma from "@/lib/prisma";
 import { ApiError } from "@/lib/api-helpers";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { runRegistrySearch, resolveRegistryCandidate } from "@/lib/registry-fetch/search";
-import { runRegistryAutoFetch } from "@/lib/registry-fetch/auto-fetch";
+import {
+  runRegistryAutoFetch,
+  getRegistryFetchMinIntervalMs,
+} from "@/lib/registry-fetch/auto-fetch";
 import type { RegistryFetchProvider } from "@/lib/registry-fetch";
 import type { RegistryCertificateType } from "@/lib/registry-fetch/types";
 import {
@@ -58,6 +61,8 @@ export interface ProcessNextResult {
   errorCode?: string | null;
   /** まだ pending 項目が残っているか(画面が次を叩くべきか)。 */
   morePending: boolean;
+  /** rate_limited のとき、次の再試行まで待つべき最小 ms(サーバーの実効間隔)。 */
+  retryAfterMs?: number;
 }
 
 /** ジョブに pending 項目が残っているか。 */
@@ -287,6 +292,11 @@ export async function processNextBulkItem(args: {
         itemId: item.id,
         errorCode: outcome.errorCode,
         morePending: leaveOutcome === "cancelled" ? false : true,
+        // rate_limited は「サーバーの実効最小間隔 + 余裕」を待たせる(固定32sで何度も
+        // rate_limited になるのを避ける・@codex #361 P2)。
+        ...(leaveOutcome === "rate_limited"
+          ? { retryAfterMs: getRegistryFetchMinIntervalMs() + 1000 }
+          : {}),
       };
     }
     return {

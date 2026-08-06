@@ -1933,6 +1933,8 @@ export interface RegistryFetchProcessResult {
   itemStatus?: RegistryFetchItemStatus;
   errorCode?: string | null;
   morePending: boolean;
+  /** rate_limited のとき、次の再試行まで待つべき最小 ms(サーバーの実効間隔)。 */
+  retryAfterMs?: number;
 }
 
 /** 複数物件の一括取得ジョブを作る。idempotencyKey で再送時の二重作成を防ぐ。 */

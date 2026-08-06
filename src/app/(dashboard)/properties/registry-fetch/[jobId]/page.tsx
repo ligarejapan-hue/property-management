@@ -18,8 +18,9 @@ import {
   type RegistryFetchJobProgress,
 } from "@/lib/api-client";
 
-// rate_limited(順番待ち)で待つ間隔。実サイトの最小間隔(本番30秒)に合わせて余裕を持たせる。
-const RATE_LIMIT_WAIT_MS = 32_000;
+// rate_limited(順番待ち)の**フォールバック**待ち。通常はサーバーが返す retryAfterMs を使う。
+// 未指定時のみこの保守的既定(サーバーの既定最小間隔 60秒に合わせる)を使う。
+const RATE_LIMIT_WAIT_MS = 61_000;
 // busy(他タブ等が実行中)で待つ間隔。
 const BUSY_WAIT_MS = 4_000;
 
@@ -86,9 +87,10 @@ export default function RegistryBulkFetchProgressPage() {
           break;
         }
         if (res.outcome === "rate_limited") {
-          // まだ順番待ち。間隔を空けて同じ項目を再試行。
+          // まだ順番待ち。⚠**サーバーが返す実効間隔**で待つ(固定値で待って何度も
+          // rate_limited になるのを避ける・@codex #361 P2)。未指定なら保守的な既定。
           setNotice("取得の間隔調整のため待機しています…");
-          await sleep(RATE_LIMIT_WAIT_MS);
+          await sleep(res.retryAfterMs ?? RATE_LIMIT_WAIT_MS);
           continue;
         }
         if (res.outcome === "busy") {

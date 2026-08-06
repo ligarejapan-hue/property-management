@@ -40,6 +40,7 @@ vi.mock("@/lib/registry-fetch/search", () => ({
 }));
 vi.mock("@/lib/registry-fetch/auto-fetch", () => ({
   runRegistryAutoFetch: vi.fn(),
+  getRegistryFetchMinIntervalMs: () => 60_000,
 }));
 
 import prisma from "@/lib/prisma";
@@ -239,6 +240,8 @@ describe("processNextBulkItem", () => {
 
     expect(res.outcome).toBe("rate_limited");
     expect(finalizedItemData()).toMatchObject({ status: "pending" });
+    // サーバーの実効間隔(60s)+余裕を待たせる(固定値で何度も rate_limited を避ける)。
+    expect(res.retryAfterMs).toBeGreaterThan(60_000);
   });
 
   it("provider 取得後に finalize が失敗 → fail-closed(項目 charged_but_failed + ジョブ paused)", async () => {
