@@ -112,7 +112,15 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
                           する**(@codex 設計指摘: charge_unknown は終端状態なので、
                           外すだけだと**未購入と確認済みの謄本を恒久的に飛ばす**。
                           決着 tx で pending へ戻し、古い実行トークン/ロックの
-                          メタも消す。⚠**同じ tx で対応する registry_charge_attempts
+                          メタも消す。⚠**ただし古い実行が完全に終わったことを証明
+                          してからにする**(@codex 設計指摘 P1)。外側 timeout で
+                          charge_unknown に見えていても、adapter や遅延フックが**まだ
+                          走っている**ことがある。証明を待たずに not_charged→pending へ
+                          戻して保護(トークン/ロック)を外すと、生き残った古い実行が
+                          後から課金/確定して**同じ謄本を二度買う**。決着の CAS は
+                          purchase mutex と実行 tombstone に同期し、その実行が settle
+                          済み(mutex 解放・tombstone 確定)のときだけ通す。決着が遅延
+                          フックと競合するケースを回帰テストで覆う。⚠**同じ tx で対応する registry_charge_attempts
                           の未解決行も解決する**(@codex 設計指摘 P1)。一括の課金も
                           共通台帳に未解決行を作り、それが生きたガード・起動時ゲート
                           両方に効くため、項目だけ戻しても**同じ謄本がブロックされ
