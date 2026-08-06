@@ -74,6 +74,11 @@ export async function POST(
       );
     }
 
+    // 謄本の請求種別（owner=所有者事項/既定・all=全部事項）。不正値は既定 owner に倒す
+    // （fail-safe: 未知の値で高い方を勝手に買わない）。
+    const certRaw = (body as { certificateType?: unknown } | null)?.certificateType;
+    const certificateType: "owner" | "all" = certRaw === "all" ? "all" : "owner";
+
     // 所在検索の候補を選んで取得する場合（candidateRef 指定）。cond③: client の候補参照は信頼せず、
     // server 側で当該物件向けに再検索して不動産番号を解決してから取得する。
     const candidateRefRaw = (body as { candidateRef?: unknown } | null)?.candidateRef;
@@ -101,6 +106,8 @@ export async function POST(
                   lotNumber: candidate.lotNumber,
                   buildingNumber: candidate.buildingNumber,
                 },
+                // 有料の所在取得のときだけ種別を渡す（番号取得は従来どおり無関係）。
+                certificateType,
               }),
           // @codex P2: lock する行の指紋が resolve 時と一致する時だけ override を使う。
           expectedFingerprint: fingerprint,

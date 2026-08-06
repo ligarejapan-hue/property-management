@@ -32,6 +32,7 @@ import type {
   RegistryFetchResult,
   RegistrySearchRequest,
   RegistryCandidate,
+  RegistryCertificateType,
   RegistryLiveReporter,
 } from "./types";
 import { CANCEL_ACCEPTED_MESSAGE } from "./cancel-safety";
@@ -86,7 +87,7 @@ export interface RegistryBrowserPage {
     address: string;
     lotNumber?: string | null;
     buildingNumber?: string | null;
-    certificateType: "owner";
+    certificateType: RegistryCertificateType;
     /**
      * 課金境界の共有フラグ(@codex #345 P1)。adapter は**請求ボタンを押す直前**に
      * `charged = true` を立てる。provider は外側 timeout 等で adapter の catch を

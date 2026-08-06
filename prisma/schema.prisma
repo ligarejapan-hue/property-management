@@ -653,6 +653,9 @@ model Attachment {
   targetType String   @map("target_type") // "property" | "owner" | "comment"
   targetId   String   @map("target_id") @db.Uuid
   type       String   @default("general") // "general" | "registry"
+  // 謄本の請求種別 "owner"(所有者事項) | "all"(全部事項)。type="registry" のときだけ意味を持つ。
+  // ⚠生ファイル名は PII マスクで隠すが、種別は非PIIなので表示ラベルに使える(nullable・additive)。
+  registryCertificateType String? @map("registry_certificate_type")
   fileName   String   @map("file_name")
   fileUrl    String   @map("file_url")
   fileSize   Int      @map("file_size") // bytes
