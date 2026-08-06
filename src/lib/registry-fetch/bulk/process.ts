@@ -112,6 +112,10 @@ export async function processNextBulkItem(args: {
     return { outcome: "busy", jobStatus: job0.status as BulkJobStatus, morePending: await hasPending(jobId) };
   }
 
+  // fail-closed 判定用の局面フラグ(掴んだ item / provider 取得に入ったか)。
+  let claimedItemId: string | null = null;
+  let providerAttempted = false;
+
   try {
     // 3) 次の pending 項目を取る(古い順)。
     const item = await prisma.registryFetchJobItem.findFirst({
@@ -185,12 +189,15 @@ export async function processNextBulkItem(args: {
         data: { activeItemId: item.id },
       }),
     ]);
+    claimedItemId = item.id;
 
     // 5) 実処理: 検索 → 候補の自動選択 → 候補解決 → 単発取得。
     const certificateType = job0.certificateType as RegistryCertificateType;
     let outcome: ItemOutcome;
     let attachmentId: string | null = null;
 
+    // ⚠これ以降は provider に到達し得る=課金が起き得る。finalize 失敗時に fail-closed にする。
+    providerAttempted = true;
     try {
       const search = (await runRegistrySearch(
         { session, propertyId, confirmed: true },
@@ -277,12 +284,53 @@ export async function processNextBulkItem(args: {
       morePending: await hasPending(jobId),
     };
   } catch (err) {
-    // 想定外の失敗(掴んだ後・実処理の外)。ロックだけは必ず外す(項目は processing のまま=
-    // 次回は掴まれないので、利用者が中止 or 手当てする。課金前の可能性が高い経路)。
-    await prisma.registryFetchJob
-      .update({ where: { id: jobId }, data: { activeItemId: null } })
-      .catch(() => {});
+    // ⚠掴んだ後の想定外失敗(finalizeItem の commit 失敗など)。**fail-closed**にする
+    // (@codex #361 P1)。ここでロックだけ外して継続可能にすると、provider 取得を跨いだ
+    // (課金済みかもしれない)失敗が pause として表に出ず、進捗画面の再開が次の有料項目を
+    // 掴む/完了扱いにして追加課金し得る。
+    await failClosed(jobId, claimedItemId, providerAttempted);
     throw err;
+  }
+}
+
+/**
+ * 掴んだ後の失敗を fail-closed で締める。
+ *  - provider に到達し得た(providerAttempted): 課金済みかもしれない=最悪を仮定し、項目を
+ *    charged_but_failed に倒し、ジョブを **paused**(cancelled は尊重)。以降の課金を止める。
+ *  - まだ provider 未到達: 課金なし=項目を pending へ戻し、ロックだけ外して継続可能にする。
+ *  - ⚠DB 書き込みも不能なら activeItemId を**外さない**(=ロックしたまま=これ以上掴めない)。
+ */
+async function failClosed(
+  jobId: string,
+  claimedItemId: string | null,
+  providerAttempted: boolean,
+): Promise<void> {
+  try {
+    await prisma.$transaction(async (tx) => {
+      if (claimedItemId && providerAttempted) {
+        await tx.registryFetchJobItem.updateMany({
+          where: { id: claimedItemId, status: "processing" },
+          data: { status: "charged_but_failed", errorCode: "finalize_failed", processedAt: new Date() },
+        });
+        await tx.registryFetchJob.updateMany({
+          where: { id: jobId, status: { not: "cancelled" } },
+          data: { status: "paused", pausedReason: "finalize_failed", activeItemId: null },
+        });
+      } else {
+        if (claimedItemId) {
+          await tx.registryFetchJobItem.updateMany({
+            where: { id: claimedItemId, status: "processing" },
+            data: { status: "pending", startedAt: null },
+          });
+        }
+        await tx.registryFetchJob.update({
+          where: { id: jobId },
+          data: { activeItemId: null },
+        });
+      }
+    });
+  } catch {
+    // ここも失敗 → activeItemId を外さずロックしたまま止める(fail-closed)。
   }
 }
 

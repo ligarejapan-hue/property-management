@@ -14,6 +14,7 @@ vi.mock("@/lib/prisma", () => ({
     registryFetchJobItem: {
       findFirst: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       count: vi.fn(),
     },
     $transaction: vi.fn(),
@@ -50,7 +51,7 @@ import { processNextBulkItem } from "../process";
 const pm = prisma as unknown as {
   property: { findUnique: Mock };
   registryFetchJob: { findUnique: Mock; updateMany: Mock; update: Mock };
-  registryFetchJobItem: { findFirst: Mock; update: Mock; count: Mock };
+  registryFetchJobItem: { findFirst: Mock; update: Mock; updateMany: Mock; count: Mock };
   $transaction: Mock;
 };
 
@@ -75,6 +76,7 @@ beforeEach(() => {
     property: { id: "p1", createdBy: "u1", assignedTo: null },
   });
   pm.registryFetchJobItem.update.mockResolvedValue({});
+  pm.registryFetchJobItem.updateMany.mockResolvedValue({ count: 1 });
   pm.registryFetchJobItem.count.mockResolvedValue(0); // 以後 pending なし
   pm.property.findUnique.mockResolvedValue({ registryStatus: "obtained" });
   pm.$transaction.mockImplementation((arg: unknown) => {
@@ -186,6 +188,33 @@ describe("processNextBulkItem", () => {
 
     expect(res.outcome).toBe("rate_limited");
     expect(finalizedItemData()).toMatchObject({ status: "pending" });
+  });
+
+  it("provider 取得後に finalize が失敗 → fail-closed(項目 charged_but_failed + ジョブ paused)", async () => {
+    (runRegistrySearch as Mock).mockResolvedValue({
+      searchable: true,
+      candidates: [{ candidateRef: "r1" }],
+    });
+    (runRegistryAutoFetch as Mock).mockResolvedValue({ attachmentId: "att-1", status: "success" });
+    // step-4 の item.update は成功 → finalize の item.update で失敗させる。
+    pm.registryFetchJobItem.update
+      .mockResolvedValueOnce({}) // step-4(processing 化)
+      .mockRejectedValueOnce(new Error("db down during finalize")); // finalize
+
+    await expect(
+      processNextBulkItem({ session: SESSION, jobId: "job-1", provider }),
+    ).rejects.toThrow();
+
+    // fail-closed: 項目は charged_but_failed(最悪を仮定)・ジョブは paused。
+    const itemFail = pm.registryFetchJobItem.updateMany.mock.calls.find(
+      (c) => (c[0].data as { status?: string }).status === "charged_but_failed",
+    );
+    expect(itemFail).toBeTruthy();
+    const jobPause = pm.registryFetchJob.updateMany.mock.calls.find(
+      (c) => (c[0].data as { status?: string }).status === "paused",
+    );
+    expect(jobPause).toBeTruthy();
+    expect(jobPause![0].where).toMatchObject({ status: { not: "cancelled" } });
   });
 
   it("掴み失敗(他が実行中) → busy", async () => {

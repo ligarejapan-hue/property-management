@@ -25,18 +25,24 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
   const [certificateType, setCertificateType] = useState<"owner" | "all">("owner");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 二重作成(連打/再送)防止。1回の作成試行で1つ生成し、成功で破棄する。
+  // 二重作成(連打/再送)防止。⚠キーは**要求内容(対象物件+種別)に紐づける**
+  // (@codex #361 P2)。同じ内容の再送(通信失敗)ではキーを保ち冪等に、内容が変わったら
+  // 新しいキーにローテーションする(古いキーのまま送るとサーバーが指紋不一致 409 を返し
+  // 続けて詰まる)。
   const idemKeyRef = useRef<string | null>(null);
+  const idemSigRef = useRef<string | null>(null);
 
   const count = propertyIds.length;
 
   const handleConfirm = async () => {
     if (creating || count === 0) return;
-    if (!idemKeyRef.current) {
+    const sig = `${[...propertyIds].sort().join(",")}|${certificateType}`;
+    if (!idemKeyRef.current || idemSigRef.current !== sig) {
       idemKeyRef.current =
         typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
           : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      idemSigRef.current = sig;
     }
     setCreating(true);
     setError(null);
@@ -47,6 +53,7 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
         idemKeyRef.current, // 再送時の二重作成を防ぐ(サーバーが同じキーを冪等化)
       );
       idemKeyRef.current = null; // 成功 → 次は新しいキー
+      idemSigRef.current = null;
       setOpen(false);
       router.push(`/properties/registry-fetch/${res.jobId}`);
     } catch (err) {
