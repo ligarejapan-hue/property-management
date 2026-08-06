@@ -96,7 +96,12 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
                           / charge_resolution(unresolved|not_charged|charged
                           ・**課金不明を運用者が決着させた結果**。null/unresolved の間は
                           二重課金ガードに残す。not_charged=マイページ確認で未課金と
-                          判明→ガードから外す / charged=課金済みと判明→台帳へ手動記録)
+                          判明→ガードから外す**+項目を pending に戻して再取得可能に
+                          する**(@codex 設計指摘: charge_unknown は終端状態なので、
+                          外すだけだと**未購入と確認済みの謄本を恒久的に飛ばす**。
+                          決着 tx で pending へ戻し、古い実行トークン/ロックの
+                          メタも消す) / charged=課金済みと判明→台帳へ手動記録
+                          (こちらは終端のまま)
                           / resolved_by / resolved_at(誰がいつ決着させたか・監査)
                           / lock_owner_token(物件ロックを取るたびに発行する乱数。
                           **自分の掛けた鍵か**を見分ける) / property_prev_registry_status
