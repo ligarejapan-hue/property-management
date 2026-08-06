@@ -93,6 +93,14 @@ export interface ProcessRegistryPdfArgs {
   edited: EditedImport | undefined;
   /** multipart(PDF binary) のときのみ非 null。Attachment(type="registry") 保存用。 */
   pdfBuffer: Buffer | null;
+  /**
+   * 有料取得の請求種別（owner|all）。有料取得フローからのみ渡る（手動取込は undefined）。
+   * ⚠**"all"(全部事項)のときは所有者を物件へ反映しない**。全部事項には抹消された
+   * 旧所有者が載り、今の解析は現在/抹消を区別できないため、旧所有者を現在の所有者
+   * として登録して DM 宛先などを誤らせる恐れがある。all は PDF 添付のみに留める
+   * （安全側の既定・発注者確定の方針）。種別が分かる添付には別途ラベルを付ける。
+   */
+  certificateType?: "owner" | "all";
 }
 
 // parse 結果に UI 編集値をマージ（編集優先）。下流の Mode A/B は
@@ -341,6 +349,10 @@ export async function processRegistryPdf(
 ): Promise<Record<string, unknown>> {
   const { session, text, propertyId, fileName, edited, pdfBuffer } = args;
 
+  // ⚠**全部事項(all)は所有者を反映しない**。抹消された旧所有者を現在の所有者として
+  // 登録する事故を防ぐ安全既定(所有者事項=owner・手動取込=undefined は従来どおり反映)。
+  const reflectOwners = args.certificateType !== "all";
+
   // Parse the registry text（UI 編集値があれば再 parse より優先してマージ）
   const parsed = applyEditedToParsed(parseRegistryText(text), edited);
 
@@ -443,14 +455,17 @@ export async function processRegistryPdf(
       // A-2c: owner 反映を Mode A/B 共通関数へ委譲（挙動は従来の Mode A と同一）。
       // Mode A は L239 で canAccessPropertyRecord による 403 を通過済みのため、
       // ここに到達する時点でアクセス権は確認済み。
-      const modeAOwners = await reflectParsedOwners({
-        propertyId,
-        owners: parsed.owners,
-        recordCorporateDecision,
-      });
-      ownersMatched = modeAOwners.matched;
-      ownersCreated = modeAOwners.created;
-      ownersLinked = modeAOwners.linked;
+      // ⚠全部事項(all)は所有者を反映しない（旧所有者混入の防止・上記）。
+      if (reflectOwners) {
+        const modeAOwners = await reflectParsedOwners({
+          propertyId,
+          owners: parsed.owners,
+          recordCorporateDecision,
+        });
+        ownersMatched = modeAOwners.matched;
+        ownersCreated = modeAOwners.created;
+        ownersLinked = modeAOwners.linked;
+      }
     } else {
       // ---- Mode B: Try to match or create new ----
       let matchedProperty = null;
@@ -522,7 +537,8 @@ export async function processRegistryPdf(
       // ため常にアクセス可。owner 反映が例外を投げた場合は Mode A と同じく innerErr
       // catch に伝播し job failed になる（ハード失敗。best-effort warning ではない）。
       // owners が無ければ書き込み対象が無いため反映関連はすべてスキップする。
-      if (targetPropertyId && parsed.owners.length > 0) {
+      // ⚠全部事項(all)は所有者を反映しない（旧所有者混入の防止・上記）。
+      if (reflectOwners && targetPropertyId && parsed.owners.length > 0) {
         if (!canReflectOwners) {
           // 弱い住所 fallback で物件を特定 → owner 反映しない（取込本体は維持）。
           ownerWeakMatchSkipped = true;
@@ -740,6 +756,8 @@ export async function processRegistryPdf(
             targetId: targetPropertyId,
             propertyId: targetPropertyId,
             type: "registry",
+            // 有料取得の種別（owner|all）。手動取込(undefined)は null=種別不明のまま。
+            registryCertificateType: args.certificateType ?? null,
             fileName,
             fileUrl: uploaded.url,
             fileSize: pdfBuffer.length,

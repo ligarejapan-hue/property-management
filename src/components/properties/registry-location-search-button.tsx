@@ -58,6 +58,8 @@ export default function RegistryLocationSearchButton({
   const [candidates, setCandidates] = useState<RegistrySearchCandidate[]>([]);
   const [notSearchableReason, setNotSearchableReason] = useState<string | null>(null);
   const [selected, setSelected] = useState<RegistrySearchCandidate | null>(null);
+  // 請求種別（所有者事項=既定・安い方 / 全部事項=高い方）。取得の確認画面で選ぶ。
+  const [certificateType, setCertificateType] = useState<"owner" | "all">("owner");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   // 実況パネル用の参照 (client 発行・非PII)。検索のたびに発行し直す。
   // HTTP 本番でも動く safeRandomId を使う (crypto.randomUUID 禁止)。
@@ -125,7 +127,11 @@ export default function RegistryLocationSearchButton({
     try {
       // 成功レスポンス本文は参照しない（非 PII だが UI に持ち込まない）。取得結果は onComplete →
       // 物件再取得で既存の権限ガード付きタブに反映する。
-      await obtainRegistryByCandidate(propertyId, selected.candidateRef);
+      await obtainRegistryByCandidate(
+        propertyId,
+        selected.candidateRef,
+        certificateType,
+      );
       setState("done");
       onComplete();
     } catch (e) {
@@ -307,8 +313,36 @@ export default function RegistryLocationSearchButton({
               .filter(Boolean)
               .join(" / ")}
           </p>
+          <fieldset className="mt-1 flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 p-1.5">
+            <legend className="px-1 text-indigo-800 dark:text-indigo-300">取得する種類</legend>
+            <label className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
+              <input
+                type="radio"
+                name="certificateType"
+                checked={certificateType === "owner"}
+                onChange={() => setCertificateType("owner")}
+              />
+              所有者事項（所有者の確認向け・料金が安い）
+            </label>
+            <label className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
+              <input
+                type="radio"
+                name="certificateType"
+                checked={certificateType === "all"}
+                onChange={() => setCertificateType("all")}
+              />
+              全部事項（権利関係まで・料金が高い）
+            </label>
+          </fieldset>
           <p className="text-indigo-700 dark:text-indigo-300">
-            取得すると謄本1通分の利用料が発生します（所有者事項）。取得後は物件に自動で添付されます。
+            取得すると謄本1通分の利用料が発生します（
+            {certificateType === "all" ? "全部事項・料金が高い方" : "所有者事項"}
+            ）。取得後は物件に自動で添付されます。
+            {certificateType === "all" && (
+              <span className="mt-0.5 block text-[11px] text-indigo-600 dark:text-indigo-400">
+                ※全部事項は過去の所有者も載るため、所有者一覧への自動反映は行わず、PDFの添付のみになります。
+              </span>
+            )}
           </p>
           <div className="mt-1 flex gap-1">
             <button type="button" onClick={runObtain} className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700">

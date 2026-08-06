@@ -9,7 +9,9 @@ export type {
   RegistryFetchResult,
   RegistryFetchErrorCode,
   RegistryFetchProvider,
+  RegistryCertificateType,
 } from "./types";
+export { DEFAULT_CERTIFICATE_TYPE } from "./types";
 export {
   RegistryFetchError,
   REGISTRY_FETCH_ERROR_MESSAGES,

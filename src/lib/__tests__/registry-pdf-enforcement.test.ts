@@ -105,13 +105,15 @@ describe("S1b-4: attachment-tab の download intent", () => {
 });
 
 describe("S1b-registry-preview: client 表示名の PII 限定（17-A Phase 1）", () => {
-  it("registry は表示名・保存名を generic に統一（displayName = isRegistry ? REGISTRY_DOWNLOAD_NAME : att.fileName）", () => {
+  it("registry は表示名を種別ラベル(非PII)に、registry以外は att.fileName", () => {
+    // registry の表示名は生ファイル名を使わず、種別から固定ラベルを組み立てる。
     expect(attachSrc).toMatch(
-      /const displayName = isRegistry \? REGISTRY_DOWNLOAD_NAME : att\.fileName/,
+      /const displayName = isRegistry\s*\?\s*registryDisplayName\(att\.registryCertificateType\)\s*:\s*att\.fileName/,
     );
-    // registry 以外は従来どおり att.fileName（ternary の else 分岐）。
-    expect(attachSrc).toMatch(/REGISTRY_DOWNLOAD_NAME : att\.fileName/);
-    // generic 名は registry.pdf 固定。
+    // ラベルは種別から固定文字列(非PII)。生ファイル名は使わない。
+    expect(attachSrc).toMatch(/謄本\(所有者事項\)\.pdf/);
+    expect(attachSrc).toMatch(/謄本\(全部事項\)\.pdf/);
+    // 種別不明(手動取込)は従来どおり registry.pdf 固定。
     expect(attachSrc).toMatch(/REGISTRY_DOWNLOAD_NAME\s*=\s*"registry\.pdf"/);
   });
 

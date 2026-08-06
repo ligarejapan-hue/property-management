@@ -232,7 +232,12 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // 段階②(2026-07-31): 有料謄本取得の台帳。purchaseKeyHash=購入鍵(物件×地番×種別)の
   // sha256 先頭32桁(**地番そのものは載せない**=非PII)・outcome=succeeded|charged_but_failed。
   // 二重課金ガードが detail.purchaseKeyHash を検索するため、伏せると台帳が機能しない。
-  registry_location_purchase: new Set(["purchaseKeyHash", "outcome"]),
+  // certificateType(owner|all)=請求種別。種別文字列は非PIIなので平文で残してよい。
+  registry_location_purchase: new Set([
+    "purchaseKeyHash",
+    "outcome",
+    "certificateType",
+  ]),
   // 会社情報 設定更新(管理画面)。target=対象識別子("singleton")・fields=変更したフィールド名の配列
   // (値ではない・ALWAYS_SAFE)・updatedAt=ISO日時。会社情報の値そのものは detail に載せず、
   // 混入しても denylist(/name/i,/addr/i,tel,fax,mail 等)で [REDACTED]。
