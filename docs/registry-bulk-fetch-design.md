@@ -112,7 +112,12 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
                           する**(@codex 設計指摘: charge_unknown は終端状態なので、
                           外すだけだと**未購入と確認済みの謄本を恒久的に飛ばす**。
                           決着 tx で pending へ戻し、古い実行トークン/ロックの
-                          メタも消す。⚠**charge_phase を none・charge_resolution を
+                          メタも消す。⚠**同じ tx で対応する registry_charge_attempts
+                          の未解決行も解決する**(@codex 設計指摘 P1)。一括の課金も
+                          共通台帳に未解決行を作り、それが生きたガード・起動時ゲート
+                          両方に効くため、項目だけ戻しても**同じ謄本がブロックされ
+                          続ける/再起動後に全課金が止まる**。項目↔試行行を一意な鍵
+                          (attempt_id を item に持つ等)で結び、決着を原子的に伝播する。⚠**charge_phase を none・charge_resolution を
                           unresolved に原子的に初期化してから新トークンを発行する**
                           =さもないと再取得が attempting/charged のまま二重課金
                           ガードから外れ続け、本物の再課金後にクラッシュすると
@@ -419,6 +424,12 @@ searchByRealEstateNumber はカートに触れる前に provider_error で停止
    (nextAvailableAt を返すだけ)を追加し、実際の取得は従来どおり provider が
    自分で行う。peek 通過後の競合で provider が rate_limited を返した場合は、
    上記の「掴んだ項目を pending へ戻す」経路で処理する。
+   ⚠**消費する取得(tryAcquire)は排他区間(runExclusivePurchase)の中・外部アクセスの
+   直前に移す**(@codex 設計指摘 P2)。今の provider は runExclusivePurchase に入る
+   **前**に tryAcquire する。長い検索/取得が mutex を握っている間に、待ち行列の
+   各リクエストが**先に権利だけ消費**して並び、保持者が終わると**再確認なしで
+   立て続けにアクセス**し、最小間隔(既定60秒)より詰まる恐れがある。事前は
+   非消費の peek のまま、権利の消費は mutex の中に入れる。
    ⚠**「N秒後」を返すには throttle 側の拡張が要る**(@codex 設計指摘)。今の契約は
    tryAcquire の真偽だけで、rate_limited エラーも残り時間を持たない。
    throttle に nextAvailableAt(または retryAfterMs)を追加し、エラーに載せて
