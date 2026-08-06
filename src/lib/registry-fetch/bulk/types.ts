@@ -42,6 +42,16 @@ export const TERMINAL_ITEM_STATUSES: readonly BulkItemStatus[] = [
 /** 1ジョブの項目数上限(超過は分割案内)。 */
 export const MAX_BULK_ITEMS = 50;
 
+/** UUID(物件ID・ジョブID)の形式。@db.Uuid 列へ不正値を渡すと Prisma P2023=500 になるため事前に弾く。 */
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** ジョブIDを検証(不正なら 400)。progress/process-next/cancel/resume の共通ガード。 */
+export function assertJobId(jobId: string): void {
+  if (!UUID_RE.test(jobId)) {
+    throw new ApiError(400, "ジョブの指定が不正です", "REGISTRY_BULK_INVALID_JOB_ID");
+  }
+}
+
 /**
  * 1件処理の結果分類。process 層が単発取得の成功/例外をこの形へ畳み、
  * DB 更新(項目 status・件数・ジョブ paused 判定)を決める。

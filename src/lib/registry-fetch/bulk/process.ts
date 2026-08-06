@@ -27,6 +27,7 @@ import type { RegistryFetchProvider } from "@/lib/registry-fetch";
 import type { RegistryCertificateType } from "@/lib/registry-fetch/types";
 import {
   classifyItemError,
+  assertJobId,
   type BulkItemStatus,
   type BulkJobStatus,
   type ItemOutcome,
@@ -87,6 +88,7 @@ export async function processNextBulkItem(args: {
   resolveProvider: () => Promise<RegistryFetchProvider>;
 }): Promise<ProcessNextResult> {
   const { session, jobId, resolveProvider } = args;
+  assertJobId(jobId);
 
   // 1) ジョブの事前確認(作成者本人のみ・状態)。
   const job0 = await prisma.registryFetchJob.findUnique({ where: { id: jobId } });
@@ -187,8 +189,28 @@ export async function processNextBulkItem(args: {
     }
 
     // 処理する item が確定したので、ここで初めて有料 readiness を解決する(drain は不要)。
-    // 未 readiness なら 501 が投げられ、item は掴まないまま外側 catch がロックを外す。
-    const provider = await resolveProvider();
+    // ⚠readiness が消えた(作成後に課金スイッチOFF/資格情報無効化等)場合は 501 を投げっぱなしに
+    // せず、**ジョブを paused にして復旧フローへ**(@codex #361 P2)。item はまだ掴んでいない=
+    // pending のまま。これをしないと画面が「取得中…」のまま毎リロードで 501 を繰り返す。
+    let provider: RegistryFetchProvider;
+    try {
+      provider = await resolveProvider();
+    } catch {
+      await prisma.registryFetchJob.updateMany({
+        where: { id: jobId, status: { not: "cancelled" } },
+        data: { status: "paused", pausedReason: "provider_unavailable", activeItemId: null },
+      });
+      const after = await prisma.registryFetchJob.findUnique({
+        where: { id: jobId },
+        select: { status: true },
+      });
+      return {
+        outcome: "paused",
+        jobStatus: (after?.status ?? "paused") as BulkJobStatus,
+        errorCode: "provider_unavailable",
+        morePending: true,
+      };
+    }
 
     // 4) 項目を processing にし、activeItemId をトークン→実item.idへ差し替える。
     const propertyId = item.property.id;

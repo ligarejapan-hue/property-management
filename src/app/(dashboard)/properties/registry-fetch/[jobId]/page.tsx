@@ -284,6 +284,8 @@ function pausedMessage(reason: string | null): string {
     case "service_hours":
     case "service_unavailable":
       return "登記情報サービスの利用時間外か、一時的に利用できません。時間をおいてから再開してください。";
+    case "provider_unavailable":
+      return "謄本の有料取得が現在利用できません（設定が無効化された可能性があります）。管理者に確認してから再開してください。";
     case "charged_but_failed":
     case "already_charged_unverified":
     case "finalize_failed":

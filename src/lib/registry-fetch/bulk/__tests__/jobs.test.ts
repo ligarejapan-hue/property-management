@@ -46,6 +46,7 @@ const P2 = "22222222-2222-4222-8222-222222222222";
 const P3 = "33333333-3333-4333-8333-333333333333";
 const P4 = "44444444-4444-4444-8444-444444444444";
 const P9 = "99999999-9999-4999-8999-999999999999";
+const JOB_ID = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -171,13 +172,20 @@ describe("createBulkFetchJob", () => {
 });
 
 describe("getBulkJobProgress — 可視項目でフィルタ + 件数再計算", () => {
+  it("不正な jobId(UUIDでない) → 400(DB照会前に弾く)", async () => {
+    await expect(
+      getBulkJobProgress({ session: STAFF, jobId: "not-a-uuid" }),
+    ).rejects.toMatchObject({ status: 400, code: "REGISTRY_BULK_INVALID_JOB_ID" });
+    expect(pm.registryFetchJob.findUnique).not.toHaveBeenCalled();
+  });
+
   it("作成者以外は 403", async () => {
     pm.registryFetchJob.findUnique.mockResolvedValue({
       id: "job-1", requestedById: "u1", status: "processing", certificateType: "owner",
       pausedReason: null, activeItemId: null, items: [],
     });
     await expect(
-      getBulkJobProgress({ session: { id: "u2", role: "field_staff" }, jobId: "job-1" }),
+      getBulkJobProgress({ session: { id: "u2", role: "field_staff" }, jobId: JOB_ID }),
     ).rejects.toMatchObject({ status: 403 });
   });
 
@@ -199,7 +207,7 @@ describe("getBulkJobProgress — 可視項目でフィルタ + 件数再計算",
       ],
     });
 
-    const p = await getBulkJobProgress({ session: STAFF, jobId: "job-1" });
+    const p = await getBulkJobProgress({ session: STAFF, jobId: JOB_ID });
 
     // 可視は i1 のみ。
     expect(p.items.map((i) => i.id)).toEqual(["i1"]);

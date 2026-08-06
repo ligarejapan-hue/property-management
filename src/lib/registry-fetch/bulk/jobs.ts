@@ -15,6 +15,8 @@ import { buildRegistrySearchRequest } from "@/lib/registry-fetch/search-request"
 import type { RegistryCertificateType } from "@/lib/registry-fetch/types";
 import {
   MAX_BULK_ITEMS,
+  UUID_RE,
+  assertJobId,
   type BulkItemStatus,
   type BulkJobStatus,
 } from "./types";
@@ -23,9 +25,6 @@ interface BulkSession {
   id: string;
   role: string;
 }
-
-// 物件IDは UUID。@db.Uuid 列へ不正値を渡すと Prisma P2023 で 500 になるため、DB 照会の前に弾く。
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** 進捗の件数(可視項目から再計算した値)。 */
 export interface BulkJobCounts {
@@ -272,6 +271,7 @@ export async function createBulkFetchJob(
 
 /** ジョブを作成者本人に限定して読み込む(共通ガード)。 */
 async function loadOwnedJob(session: BulkSession, jobId: string) {
+  assertJobId(jobId);
   const job = await prisma.registryFetchJob.findUnique({
     where: { id: jobId },
   });
@@ -298,6 +298,7 @@ export async function getBulkJobProgress(args: {
   jobId: string;
 }): Promise<BulkJobProgress> {
   const { session, jobId } = args;
+  assertJobId(jobId);
   const job = await prisma.registryFetchJob.findUnique({
     where: { id: jobId },
     include: {
