@@ -195,6 +195,7 @@ model User {
   salesSheetDesignsUpdated SalesSheetDesign[]     @relation("SalesSheetDesignUpdatedBy")
   dmCampaigns             DmCampaign[]            @relation("DmCampaignCreator")
   dmRecipientDrafts       DmRecipientDraft[]      @relation("DmRecipientGenerator")
+  registryFetchJobs       RegistryFetchJob[]      @relation("RegistryFetchJobRequestedBy")
 
   @@map("users")
 }
@@ -376,6 +377,7 @@ model Property {
   fieldSurveyPins    FieldSurveyPin[]
   salesSheetDesigns  SalesSheetDesign[]
   dmRecipientDrafts  DmRecipientDraft[]
+  registryFetchJobItems RegistryFetchJobItem[]  @relation("RegistryFetchJobItemProperty")
 
   @@index([caseStatus])
   @@index([introductionRoute])
@@ -1135,6 +1137,61 @@ model RegistryFetchConfig {
   updatedById String?  @map("updated_by_id") @db.Uuid
 
   @@map("registry_fetch_config")
+}
+
+// 謄本の一括取得(PR-B・薄い版)。画面から複数物件を選んで作るジョブ。
+// 1件ずつ画面駆動で処理し、各項目は既存の単発取得(runRegistryAutoFetch)を呼ぶ。
+// ⚠status/certificate_type は TEXT + アプリ側 allowlist で縛る(新 enum を作らない
+//   = ALTER TYPE ADD VALUE の不可逆リスクを避ける)。
+// ⚠counts は保存用の全体値。進捗/詳細 API は保存値を返さず、可視項目集合から
+//   都度再計算する(伏せた物件の処理結果を数字から漏らさない)。
+model RegistryFetchJob {
+  id               String    @id @default(uuid()) @db.Uuid
+  status           String    @default("pending") // pending|processing|paused|completed|cancelled
+  certificateType  String    @map("certificate_type") // owner|all
+  requestedById    String    @map("requested_by_id") @db.Uuid
+  requestedBy      User      @relation("RegistryFetchJobRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  activeItemId     String?   @map("active_item_id") @db.Uuid // 実行中項目(FKなし・app enforced CAS)
+  pausedReason     String?   @map("paused_reason")
+  total            Int       @default(0)
+  done             Int       @default(0)
+  failed           Int       @default(0)
+  skipped          Int       @default(0)
+  chargedButFailed Int       @default(0) @map("charged_but_failed")
+  chargeUnknown    Int       @default(0) @map("charge_unknown")
+  startedAt        DateTime? @map("started_at")
+  completedAt      DateTime? @map("completed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  items            RegistryFetchJobItem[]
+
+  @@index([requestedById])
+  @@index([status])
+  @@map("registry_fetch_jobs")
+}
+
+// 一括ジョブの1物件ぶんの項目。property は SetNull(=一度載った物件も削除できる・
+// 決着済み履歴は残す)。指紋/購入鍵はハッシュのみ保存(PII を列に置かない)。
+model RegistryFetchJobItem {
+  id                      String    @id @default(uuid()) @db.Uuid
+  jobId                   String    @map("job_id") @db.Uuid
+  job                     RegistryFetchJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  propertyId              String?   @map("property_id") @db.Uuid
+  property                Property? @relation("RegistryFetchJobItemProperty", fields: [propertyId], references: [id], onDelete: SetNull)
+  status                  String    @default("pending") // pending|processing|done|failed|skipped|charged_but_failed
+  errorCode               String?   @map("error_code")
+  attachmentId            String?   @map("attachment_id") @db.Uuid // 表示用の参照(FKなし)
+  purchaseKeyHash         String?   @map("purchase_key_hash")
+  propertyFingerprintHash String?   @map("property_fingerprint_hash")
+  startedAt               DateTime? @map("started_at")
+  processedAt             DateTime? @map("processed_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+
+  @@index([jobId, status])
+  @@index([propertyId])
+  @@index([purchaseKeyHash])
+  @@map("registry_fetch_job_items")
 }
 
 // 会社情報（会社帯）の設定保管。管理画面から編集。1行のみ(id="singleton")。全項目 非秘匿・平文。
