@@ -40,6 +40,12 @@ const pm = prisma as unknown as {
 };
 
 const STAFF = { id: "u1", role: "field_staff" };
+// 物件IDは UUID 検証を通す必要がある(createBulkFetchJob が不正UUIDを 400 で弾く)。
+const P1 = "11111111-1111-4111-8111-111111111111";
+const P2 = "22222222-2222-4222-8222-222222222222";
+const P3 = "33333333-3333-4333-8333-333333333333";
+const P4 = "44444444-4444-4444-8444-444444444444";
+const P9 = "99999999-9999-4999-8999-999999999999";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -62,17 +68,24 @@ describe("createBulkFetchJob", () => {
     ).rejects.toMatchObject({ status: 400, code: "REGISTRY_BULK_TOO_MANY" });
   });
 
+  it("不正な物件ID(UUIDでない) → 400(DB照会前に弾く)", async () => {
+    await expect(
+      createBulkFetchJob({ session: STAFF, propertyIds: ["not-a-uuid"], certificateType: "owner" }),
+    ).rejects.toMatchObject({ status: 400, code: "REGISTRY_BULK_INVALID_PROPERTY_ID" });
+    expect(pm.property.findMany).not.toHaveBeenCalled();
+  });
+
   it("可視物件だけ項目化し、番号あり/所在不足は即 skipped、見えない物件は excluded", async () => {
     pm.property.findMany.mockResolvedValue([
-      { id: "p1", createdBy: "u1", assignedTo: null, address: "東京都A区1", lotNumber: "1", buildingNumber: null, realEstateNumber: null }, // 検索可 → pending
-      { id: "p2", createdBy: "u1", assignedTo: null, address: "東京都B区2", lotNumber: null, buildingNumber: null, realEstateNumber: "9999" }, // 番号あり → skipped
-      { id: "p3", createdBy: "u1", assignedTo: null, address: null, lotNumber: null, buildingNumber: null, realEstateNumber: null }, // 所在不足 → skipped
-      { id: "p4", createdBy: "other", assignedTo: "other", address: "東京都C区3", lotNumber: "3", buildingNumber: null, realEstateNumber: null }, // 見えない → excluded
+      { id: P1, createdBy: "u1", assignedTo: null, address: "東京都A区1", lotNumber: "1", buildingNumber: null, realEstateNumber: null }, // 検索可 → pending
+      { id: P2, createdBy: "u1", assignedTo: null, address: "東京都B区2", lotNumber: null, buildingNumber: null, realEstateNumber: "9999" }, // 番号あり → skipped
+      { id: P3, createdBy: "u1", assignedTo: null, address: null, lotNumber: null, buildingNumber: null, realEstateNumber: null }, // 所在不足 → skipped
+      { id: P4, createdBy: "other", assignedTo: "other", address: "東京都C区3", lotNumber: "3", buildingNumber: null, realEstateNumber: null }, // 見えない → excluded
     ]);
 
     const res = await createBulkFetchJob({
       session: STAFF,
-      propertyIds: ["p1", "p2", "p3", "p4"],
+      propertyIds: [P1, P2, P3, P4],
       certificateType: "owner",
     });
 
@@ -84,18 +97,18 @@ describe("createBulkFetchJob", () => {
       errorCode: string | null;
     }>;
     const byId = Object.fromEntries(items.map((i) => [i.propertyId, i]));
-    expect(byId["p1"].status).toBe("pending");
-    expect(byId["p2"]).toMatchObject({ status: "skipped", errorCode: "has_real_estate_number" });
-    expect(byId["p3"]).toMatchObject({ status: "skipped", errorCode: "insufficient_location" });
-    expect(byId["p4"]).toBeUndefined(); // 見えない物件は項目にしない
+    expect(byId[P1].status).toBe("pending");
+    expect(byId[P2]).toMatchObject({ status: "skipped", errorCode: "has_real_estate_number" });
+    expect(byId[P3]).toMatchObject({ status: "skipped", errorCode: "insufficient_location" });
+    expect(byId[P4]).toBeUndefined(); // 見えない物件は項目にしない
   });
 
   it("可視物件がゼロ → 403", async () => {
     pm.property.findMany.mockResolvedValue([
-      { id: "p9", createdBy: "other", assignedTo: "other", address: "x", lotNumber: null, buildingNumber: null, realEstateNumber: null },
+      { id: P9, createdBy: "other", assignedTo: "other", address: "x", lotNumber: null, buildingNumber: null, realEstateNumber: null },
     ]);
     await expect(
-      createBulkFetchJob({ session: STAFF, propertyIds: ["p9"], certificateType: "owner" }),
+      createBulkFetchJob({ session: STAFF, propertyIds: [P9], certificateType: "owner" }),
     ).rejects.toMatchObject({ status: 403, code: "REGISTRY_BULK_NO_VISIBLE" });
   });
 
@@ -108,7 +121,7 @@ describe("createBulkFetchJob", () => {
 
     const res = await createBulkFetchJob({
       session: STAFF,
-      propertyIds: ["p1"],
+      propertyIds: [P1],
       certificateType: "owner",
       idempotencyKey: "key-123",
     });
@@ -129,7 +142,7 @@ describe("createBulkFetchJob", () => {
     await expect(
       createBulkFetchJob({
         session: STAFF,
-        propertyIds: ["p1"],
+        propertyIds: [P1],
         certificateType: "owner",
         idempotencyKey: "key-123",
       }),
@@ -140,12 +153,12 @@ describe("createBulkFetchJob", () => {
   it("idempotencyKey を job 作成データに渡す", async () => {
     pm.registryFetchJob.findUnique.mockResolvedValue(null); // 既存なし
     pm.property.findMany.mockResolvedValue([
-      { id: "p1", createdBy: "u1", assignedTo: null, address: "東京都A区1", lotNumber: "1", buildingNumber: null, realEstateNumber: null },
+      { id: P1, createdBy: "u1", assignedTo: null, address: "東京都A区1", lotNumber: "1", buildingNumber: null, realEstateNumber: null },
     ]);
 
     await createBulkFetchJob({
       session: STAFF,
-      propertyIds: ["p1"],
+      propertyIds: [P1],
       certificateType: "owner",
       idempotencyKey: "key-xyz",
     });

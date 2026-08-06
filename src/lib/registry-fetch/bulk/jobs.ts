@@ -24,6 +24,9 @@ interface BulkSession {
   role: string;
 }
 
+// 物件IDは UUID。@db.Uuid 列へ不正値を渡すと Prisma P2023 で 500 になるため、DB 照会の前に弾く。
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** 進捗の件数(可視項目から再計算した値)。 */
 export interface BulkJobCounts {
   total: number;
@@ -136,6 +139,15 @@ export async function createBulkFetchJob(
       400,
       `一度に取得できるのは${MAX_BULK_ITEMS}件までです。分けて実行してください`,
       "REGISTRY_BULK_TOO_MANY",
+    );
+  }
+  // ⚠UUID でない物件IDは DB 照会前に 400 で弾く(@codex #361 P2)。@db.Uuid 列へ渡すと
+  //   Prisma P2023 で 500 になる。指紋計算・findMany の前に検証する。
+  if (!ids.every((id) => UUID_RE.test(id))) {
+    throw new ApiError(
+      400,
+      "物件の指定が不正です",
+      "REGISTRY_BULK_INVALID_PROPERTY_ID",
     );
   }
 
