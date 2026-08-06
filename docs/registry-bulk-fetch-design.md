@@ -134,8 +134,13 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
 
 migration は additive(新テーブル**3つ**[ジョブ2つ + **共通の課金試行台帳
 registry_charge_attempts**(一括・単発が課金境界の直前に書く。id / source(bulk|single) /
-purchase_key_hash / property_id(nullable) / charge_phase / resolved(bool) /
-resolved_at / created_at + purchase_key_hash と (resolved,charge_phase) の索引。
+purchase_key_hash / property_id(nullable) / charge_phase /
+resolution(unresolved|not_charged|charged・**bool では足りない**=@codex 設計指摘 P1:
+単発はジョブ項目が無く、この台帳だけが決着の記録先。単に resolved を落とすと
+未課金確認と課金済みを区別できず、**課金済みの謄本を再購入**するか**永久に
+ゲートが開かない**かになる) / resolved_by / resolved_at / created_at
++ purchase_key_hash と (resolution,charge_phase) の索引。
+⚠**resolution=charged で外すときは恒久的な購入マーカー(台帳)の存在を要求**する。
 ⚠単発はジョブ項目を持たないので、この台帳が**唯一の恒久的な起動時ゲートの
 参照先**) ] + attachments の種別列 + **properties の
 registry_lock_token 列**(施錠の持ち主。物件側に無いと復旧の照合ができない)
