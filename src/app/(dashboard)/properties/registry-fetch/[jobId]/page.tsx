@@ -232,13 +232,21 @@ export default function RegistryBulkFetchProgressPage() {
       {progress.status === "paused" && (
         <div className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
           {pausedMessage(progress.pausedReason)}
-          <div className="mt-2">
+          <div className="mt-2 flex gap-2">
             <button
               type="button"
               onClick={handleResume}
               className="rounded bg-amber-600 px-3 py-1.5 text-white hover:bg-amber-700"
             >
               残りの取得を再開する
+            </button>
+            {/* 一時停止中も中止できる(バックエンドは paused の中止を許可)。 */}
+            <button
+              type="button"
+              onClick={handleCancel}
+              className="rounded border border-amber-400 px-3 py-1.5 text-amber-800 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-900"
+            >
+              このジョブを中止する
             </button>
           </div>
         </div>

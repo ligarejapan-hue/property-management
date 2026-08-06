@@ -105,7 +105,7 @@ describe("processNextBulkItem", () => {
     });
     (runRegistryAutoFetch as Mock).mockResolvedValue({ attachmentId: "att-1", status: "success" });
 
-    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", provider });
+    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", resolveProvider: async () => provider });
 
     expect(runRegistryAutoFetch).toHaveBeenCalledTimes(1);
     // 種別はジョブ値(owner)が単発へ渡る。
@@ -135,7 +135,7 @@ describe("processNextBulkItem", () => {
     });
     (runRegistryAutoFetch as Mock).mockResolvedValue({ attachmentId: "att-1", status: "success" });
 
-    await processNextBulkItem({ session: SESSION, jobId: "job-1", provider });
+    await processNextBulkItem({ session: SESSION, jobId: "job-1", resolveProvider: async () => provider });
 
     expect((runRegistryAutoFetch as Mock).mock.calls[0][0]).toMatchObject({
       certificateType: "all",
@@ -149,7 +149,7 @@ describe("processNextBulkItem", () => {
       candidates: [{ candidateRef: "r1" }, { candidateRef: "r2" }],
     });
 
-    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", provider });
+    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", resolveProvider: async () => provider });
 
     expect(runRegistryAutoFetch).not.toHaveBeenCalled();
     expect(res.itemStatus).toBe("skipped");
@@ -174,7 +174,7 @@ describe("processNextBulkItem", () => {
       })
       .mockResolvedValueOnce({ status: "paused" });
 
-    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", provider });
+    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", resolveProvider: async () => provider });
 
     expect(res.jobStatus).toBe("paused");
     expect(finalizedItemData()).toMatchObject({ status: "charged_but_failed" });
@@ -201,7 +201,7 @@ describe("processNextBulkItem", () => {
       })
       .mockResolvedValueOnce({ status: "paused" });
 
-    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", provider });
+    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", resolveProvider: async () => provider });
     expect(res.outcome).toBe("paused");
     // 項目は pending のまま(次々 failed にしない)。
     expect(finalizedItemData()).toMatchObject({ status: "pending" });
@@ -221,7 +221,7 @@ describe("processNextBulkItem", () => {
       new ApiError(409, "既取得", "REGISTRY_PURCHASE_ALREADY_DONE"),
     );
 
-    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", provider });
+    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", resolveProvider: async () => provider });
     expect(res.itemStatus).toBe("skipped");
     expect(finalizedItemData()).toMatchObject({ status: "skipped", errorCode: "already_processed_manual_check" });
   });
@@ -235,7 +235,7 @@ describe("processNextBulkItem", () => {
       new ApiError(429, "順番待ち", "REGISTRY_AUTO_FETCH_PROVIDER_ERROR", "rate_limited"),
     );
 
-    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", provider });
+    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", resolveProvider: async () => provider });
 
     expect(res.outcome).toBe("rate_limited");
     expect(finalizedItemData()).toMatchObject({ status: "pending" });
@@ -253,7 +253,7 @@ describe("processNextBulkItem", () => {
       .mockRejectedValueOnce(new Error("db down during finalize")); // finalize
 
     await expect(
-      processNextBulkItem({ session: SESSION, jobId: "job-1", provider }),
+      processNextBulkItem({ session: SESSION, jobId: "job-1", resolveProvider: async () => provider }),
     ).rejects.toThrow();
 
     // fail-closed: 項目は charged_but_failed(最悪を仮定)・ジョブは paused。
@@ -268,16 +268,34 @@ describe("processNextBulkItem", () => {
     expect(jobPause![0].where).toMatchObject({ status: { not: "cancelled" } });
   });
 
+  it("残り項目なし(drained)は provider を要求せず completed に確定する", async () => {
+    pm.registryFetchJobItem.findFirst.mockResolvedValue(null); // pending なし
+    pm.registryFetchJob.findUnique
+      .mockResolvedValueOnce({
+        id: "job-1", requestedById: "u1", status: "processing",
+        certificateType: "owner", startedAt: new Date(), activeItemId: null,
+      })
+      .mockResolvedValueOnce({ status: "completed" }); // drain 後の再読み
+    // 課金 readiness が切れていても drain は completed にできる。
+    const resolveProvider = vi.fn(() => Promise.reject(new Error("readiness off")));
+
+    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", resolveProvider });
+
+    expect(res.outcome).toBe("drained");
+    expect(res.jobStatus).toBe("completed");
+    expect(resolveProvider).not.toHaveBeenCalled(); // provider を触っていない
+  });
+
   it("掴み失敗(他が実行中) → busy", async () => {
     pm.registryFetchJob.updateMany.mockResolvedValue({ count: 0 });
-    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", provider });
+    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", resolveProvider: async () => provider });
     expect(res.outcome).toBe("busy");
     expect(runRegistrySearch).not.toHaveBeenCalled();
   });
 
   it("作成者以外 → 403", async () => {
     await expect(
-      processNextBulkItem({ session: { id: "u2", role: "field_staff" }, jobId: "job-1", provider }),
+      processNextBulkItem({ session: { id: "u2", role: "field_staff" }, jobId: "job-1", resolveProvider: async () => provider }),
     ).rejects.toMatchObject({ status: 403 });
   });
 });

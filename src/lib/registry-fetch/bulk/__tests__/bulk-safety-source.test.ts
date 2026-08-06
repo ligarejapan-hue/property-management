@@ -41,11 +41,13 @@ describe("certificateType はジョブ値を貫通する(owner 直書きを残�
 });
 
 describe("有料 route は readiness(課金スイッチ+校正)を門にする", () => {
-  it("作成 route は requireBulkPurchaseProvider を通す", () => {
+  it("作成 route は requireBulkPurchaseProvider を通す(作成時に readiness を要求)", () => {
     expect(CREATE_ROUTE()).toMatch(/requireBulkPurchaseProvider\(/);
   });
-  it("process-next route は requireBulkPurchaseProvider を通す", () => {
-    expect(PROCESS_ROUTE()).toMatch(/requireBulkPurchaseProvider\(/);
+  it("process-next route は requireBulkPurchaseProvider を resolver として渡す(item がある時だけ要求)", () => {
+    // ⚠drain(残り項目なし)は provider を使わず completed に確定できるよう、
+    //   process-next は requireBulkPurchaseProvider を**遅延解決の resolver**として渡す。
+    expect(PROCESS_ROUTE()).toMatch(/resolveProvider:\s*requireBulkPurchaseProvider/);
   });
 });
 

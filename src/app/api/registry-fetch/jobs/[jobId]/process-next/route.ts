@@ -18,8 +18,13 @@ export async function POST(
   try {
     const { jobId } = await params;
     const session = await requireBulkSession();
-    const provider = await requireBulkPurchaseProvider();
-    const result = await processNextBulkItem({ session, jobId, provider });
+    // ⚠readiness(有料 provider)は**処理する item がある時だけ**要求する(@codex #361 P2)。
+    // 最後の項目の後の drain は provider 不要=課金スイッチが切られていても completed に確定できる。
+    const result = await processNextBulkItem({
+      session,
+      jobId,
+      resolveProvider: requireBulkPurchaseProvider,
+    });
     const res = apiResponse(result, 200);
     res.headers.set("Cache-Control", "no-store");
     return res;

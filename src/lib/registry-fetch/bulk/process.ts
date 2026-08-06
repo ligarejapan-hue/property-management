@@ -69,15 +69,19 @@ async function hasPending(jobId: string): Promise<boolean> {
 }
 
 /**
- * pending 項目を1件処理する。route が権限(registry:auto_fetch/property:read)と
- * readiness(課金スイッチ+校正=501判定)を通した後に呼ぶ。
+ * pending 項目を1件処理する。route が権限(registry:auto_fetch/property:read)を通した後に呼ぶ。
+ *
+ * ⚠**provider(有料 readiness)は「処理する item がある」と確定してから解決する**
+ * (@codex #361 P2)。最後の項目の後の drain 呼び出しは provider を使わないので、課金スイッチが
+ * その間に切られても drained→completed に確定できる(そうでないと 100% のまま止まる)。
+ * resolveProvider が 501 を投げたら未処理のまま(item は掴まず)伝播する。
  */
 export async function processNextBulkItem(args: {
   session: BulkSession;
   jobId: string;
-  provider: RegistryFetchProvider;
+  resolveProvider: () => Promise<RegistryFetchProvider>;
 }): Promise<ProcessNextResult> {
-  const { session, jobId, provider } = args;
+  const { session, jobId, resolveProvider } = args;
 
   // 1) ジョブの事前確認(作成者本人のみ・状態)。
   const job0 = await prisma.registryFetchJob.findUnique({ where: { id: jobId } });
@@ -176,6 +180,10 @@ export async function processNextBulkItem(args: {
         morePending: await hasPending(jobId),
       };
     }
+
+    // 処理する item が確定したので、ここで初めて有料 readiness を解決する(drain は不要)。
+    // 未 readiness なら 501 が投げられ、item は掴まないまま外側 catch がロックを外す。
+    const provider = await resolveProvider();
 
     // 4) 項目を processing にし、activeItemId をトークン→実item.idへ差し替える。
     const propertyId = item.property.id;
