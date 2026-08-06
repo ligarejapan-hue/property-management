@@ -85,7 +85,13 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
                           / started_at / updated_at(status/charge_phase を書き換える
                           たびに更新。⚠これが無いと「処理中のまま放置」を**見分ける
                           根拠が無く**、動いている最中の項目を誤って課金不明に倒すか、
-                          永久に固まるかのどちらかになる) / charge_attempted_at
+                          永久に固まるかのどちらかになる) / lease_expires_at
+                          (⚠**心拍で延長するリース**。有料処理は最長10分超動くので
+                          「10分無音=放置」とすると**取得中の項目を課金不明に倒し token を
+                          剥がす**。処理中は定期的に更新し、放置判定は
+                          lease_expires_at 超過+持ち主照合で行う。しきい値は
+                          provider の最長ハードタイムアウトより確実に長く取る)
+                          / charge_attempted_at
                           / processed_at(終端に達した時刻)
                           / charge_resolution(unresolved|not_charged|charged
                           ・**課金不明を運用者が決着させた結果**。null/unresolved の間は
@@ -163,7 +169,14 @@ onBeforeCharge が読む場所も解除操作が書く場所も無い)。すべ�
     **この守りが破れる**(フックを待っている間に provider が課金前 timeout で
     中断を立て、呼び出しは未課金 timeout として終わっているのに、続きが請求を
     押す=記録なき課金)。フック直後・クリック直前の再確認と、
-    「フック中に timeout」の回帰テストを実装の必須条件にする
+    「フック中に timeout」の回帰テストを実装の必須条件にする。
+    ⚠**フック待ちの間に中断され、クリックを回避できた項目は not_charged で
+    決着させる**(@codex 設計指摘 P2)。timeout が呼び出し側へ戻った後に
+    onBeforeCharge が attempting を書き、直後の再確認でクリックを回避した項目は
+    **確実に未課金**だが、呼び出し側は既に終わっているため誰も決着を書かない=
+    二重課金ガードに永遠に残る。onChargeAborted/finally で **not_charged を
+    自動記録**し(運用者の手作業を待たない)、上の回帰テストでこの永続状態まで
+    検証する
   - 放置/運用者による解決の際は、**自分の lock_owner_token と一致する場合に
     限り**物件ロックを元の状態へ戻す(一致しない=別の処理が新しく掛けた鍵なので
     触らない)。
@@ -232,7 +245,14 @@ searchByRealEstateNumber はカートに触れる前に provider_error で停止
      **課金停止フラグ**(理由・時刻つき)を持ち、charged_but_failed の記録と同時に
      立てる。一括の処理APIも**単発の取得も**、課金境界の直前(onBeforeCharge)で
      このフラグを確認し、立っていれば請求を押さない。解除は運用者がマイページを
-     確認してから(管理画面で明示操作・監査に記録)
+     確認してから(管理画面で明示操作・監査に記録)。
+     ⚠**ブレーカーは purchase mutex を握ったまま立てる**(@codex 設計指摘 P1)。
+     今の provider は fetchByLocation が reject した瞬間に runExclusivePurchase を
+     解放する。呼び出し側が charged_but_failed を記録する前に mutex が空くと、
+     **待ち行列の次の請求が onBeforeCharge に入り、まだ立っていないブレーカーを
+     見て同じ障害のまま課金**する。失敗フック(onChargeFailed 等)を mutex の
+     中で走らせてブレーカーを永続化するか、**永続化が終わるまで mutex を
+     離さない**。単発の失敗経路も同じフックを通す
    - **charged_but_failed が1件でも出たら、ジョブ全体を paused にする**。
      課金境界を越えた失敗の原因(ダウンロードのセレクタずれ・保存失敗・
      アカウント状態)は**次の項目でも再発する**可能性が高く、続行すると
