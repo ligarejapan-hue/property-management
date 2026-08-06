@@ -90,11 +90,10 @@ export default function RegistryBulkFetchProgressPage() {
           await sleep(BUSY_WAIT_MS);
           continue;
         }
-        // processed / skipped: 次の項目へ。残りが無ければ次回 drained で抜ける。
-        if (!res.morePending) {
-          await reload();
-          break;
-        }
+        // processed / skipped: 次の項目へ。⚠ここで morePending を見て break しない
+        // (@codex #361 P2)。最後の1件の後にもう一度 process-next を呼ぶことで drained 経路が
+        // ジョブを completed にする。早く抜けると 100% のまま「取得中…」で止まって見える。
+        // 残りが無ければ次の反復が drained を返してループが正常終了する。
       }
     } finally {
       loopActiveRef.current = false;

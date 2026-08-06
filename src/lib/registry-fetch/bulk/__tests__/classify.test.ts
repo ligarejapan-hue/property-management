@@ -33,11 +33,14 @@ describe("classifyItemError — 課金の安全に直結する対応表", () => 
     expect(o.leavePending).toBe(false);
   });
 
-  it("既取得(REGISTRY_PURCHASE_ALREADY_DONE) → done(二重課金にならない)", () => {
+  it("既取得(ALREADY_DONE)は classify では done にしない=安全側 skipped(done/要確認の判定は process 側)", () => {
+    // ⚠台帳の鍵は charged と charged_but_failed の両方で立つため、鍵の存在=成功ではない。
+    // process.ts が物件の obtained を確認して done/要確認を分ける。classify に落ちた場合は
+    // 409 分岐で skipped(=成功と誤報しない)。
     const o = classifyItemError(
       new ApiError(409, "既に取得済み", "REGISTRY_PURCHASE_ALREADY_DONE"),
     );
-    expect(o.status).toBe("done");
+    expect(o.status).toBe("skipped");
     expect(o.pauseJob).toBe(false);
   });
 

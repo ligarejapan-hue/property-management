@@ -107,10 +107,10 @@ export function classifyItemError(err: unknown): ItemOutcome {
 
   // route/lib の入力・認可・状態エラー(ApiError)。
   if (err instanceof ApiError) {
-    // 既取得=単発の二重課金ガードが弾いた。その物件は既に取れている(課金なし)=done。
-    if (err.code === "REGISTRY_PURCHASE_ALREADY_DONE") {
-      return { status: "done", errorCode: err.code, ...base };
-    }
+    // ⚠既取得(REGISTRY_PURCHASE_ALREADY_DONE)は**ここでは done にしない**(@codex #361 P1)。
+    // 台帳の鍵は charged と charged_but_failed の両方で立つため、鍵の存在=成功ではない。
+    // 呼び出し側(process.ts)が物件の obtained を確認して done/要確認を分ける。ここに
+    // 万一落ちてきたら安全側=下の 409 分岐で skipped(=成功と誤報しない)。
     // 課金スイッチが実行中に落ちた=readiness 崩れ。ジョブを止めて人手に委ねる。
     if (err.code === "REGISTRY_PURCHASE_NOT_ENABLED" || err.status === 501) {
       return { status: "pending", errorCode: err.code, pauseJob: true, leavePending: true, cancelled: false };

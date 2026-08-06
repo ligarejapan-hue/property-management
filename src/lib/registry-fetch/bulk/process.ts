@@ -230,7 +230,23 @@ export async function processNextBulkItem(args: {
         }
       }
     } catch (err) {
-      outcome = classifyItemError(err);
+      // ⚠既取得(REGISTRY_PURCHASE_ALREADY_DONE)を無条件に done にしない(@codex #361 P1)。
+      // 台帳は同じ鍵を charged と charged_but_failed の**両方**で記録するため、鍵の存在は
+      // 「成功で取得済み」を意味しない。物件が実際に obtained(=添付まで完了)なら done、
+      // そうでなければ「過去に払ったが添付が無いかも」=要確認としてジョブを止める。
+      if (err instanceof ApiError && err.code === "REGISTRY_PURCHASE_ALREADY_DONE") {
+        const prop = await prisma.property.findUnique({
+          where: { id: propertyId },
+          select: { registryStatus: true },
+        });
+        if (prop?.registryStatus === "obtained") {
+          outcome = { status: "done", errorCode: "already_obtained", pauseJob: false, leavePending: false, cancelled: false };
+        } else {
+          outcome = { status: "charged_but_failed", errorCode: "already_charged_unverified", pauseJob: true, leavePending: false, cancelled: false };
+        }
+      } else {
+        outcome = classifyItemError(err);
+      }
     }
 
     // 6) 結果を確定する(項目更新 + ロック解除 + ジョブ状態)。
@@ -283,8 +299,6 @@ async function finalizeItem(args: {
   const { jobId, itemId, outcome, attachmentId } = args;
 
   return prisma.$transaction(async (tx) => {
-    const jobNow = await tx.registryFetchJob.findUnique({ where: { id: jobId } });
-
     if (outcome.leavePending) {
       // まだ順番待ち/中止=処理していない。⚠掴んだ時に processing にしたので、
       // **pending へ戻す**(戻さないと processing のまま取り残され、二度と再試行されない)。
@@ -304,20 +318,26 @@ async function finalizeItem(args: {
       });
     }
 
-    // ジョブ状態の決定: 中止済みは維持 / 課金済み失敗は paused / それ以外は processing 継続。
-    let nextStatus: BulkJobStatus = "processing";
-    let pausedReason: string | null = null;
-    if (jobNow?.status === "cancelled") {
-      nextStatus = "cancelled";
-    } else if (outcome.pauseJob) {
-      nextStatus = "paused";
-      pausedReason = outcome.errorCode;
-    }
-
+    // ⚠**ジョブ status を "processing" で上書きしない**(@codex #361 P1)。掴みで既に
+    // processing にしてあるので、ここで書き直すと、別タブが finalize 中に走らせた中止
+    // (cancelled)を**上書きして復活**させ、実行中タブが次の項目へ進んで追加課金し得る。
+    // ロック(activeItemId)は常に外す(status とは別フィールドで安全)。
     await tx.registryFetchJob.update({
       where: { id: jobId },
-      data: { activeItemId: null, status: nextStatus, pausedReason },
+      data: { activeItemId: null },
     });
-    return nextStatus;
+    // 課金済み失敗のときだけ paused へ。⚠**cancelled は絶対に上書きしない**(条件付き更新)。
+    if (outcome.pauseJob) {
+      await tx.registryFetchJob.updateMany({
+        where: { id: jobId, status: { not: "cancelled" } },
+        data: { status: "paused", pausedReason: outcome.errorCode },
+      });
+    }
+    // 実効 status を読み直して返す(中止/一時停止/継続のいずれか)。
+    const after = await tx.registryFetchJob.findUnique({
+      where: { id: jobId },
+      select: { status: true },
+    });
+    return (after?.status ?? "processing") as BulkJobStatus;
   });
 }
