@@ -25,6 +25,8 @@ type AttachmentType = "general" | "registry";
 interface AttachmentData {
   id: string;
   type?: AttachmentType;
+  /** 謄本の請求種別（owner|all）。type="registry" のときだけ意味を持つ・非PII。 */
+  registryCertificateType?: string | null;
   fileName: string;
   fileUrl: string;
   fileSize: number;
@@ -78,6 +80,18 @@ function withDownloadIntent(url: string): string {
  * download 属性のいずれにも出さない（server も Content-Disposition を registry.pdf に伏せている）。
  */
 const REGISTRY_DOWNLOAD_NAME = "registry.pdf";
+
+/**
+ * registry 添付の表示名を、**種別が分かるときだけ固定ラベル**にする（非PII）。
+ * ⚠生ファイル名(所有者名・住所を含み得る)は使わない=マスク方針は不変。
+ * 種別(owner|all)は非PIIなので「謄本(所有者事項).pdf」「謄本(全部事項).pdf」を組み立ててよい。
+ * 種別不明(手動取込等)は従来どおり "registry.pdf"。
+ */
+export function registryDisplayName(certType?: string | null): string {
+  if (certType === "owner") return "謄本(所有者事項).pdf";
+  if (certType === "all") return "謄本(全部事項).pdf";
+  return REGISTRY_DOWNLOAD_NAME;
+}
 
 export default function AttachmentTab({
   propertyId,
@@ -386,7 +400,9 @@ function AttachmentRow({
   const normalizedUrl = normalizeFileUrl(att.fileUrl);
   const downloadHref = isRegistry ? withDownloadIntent(normalizedUrl) : normalizedUrl;
   // registry は表示名・保存名ともに generic（att.fileName の PII を client 表示にも出さない）。
-  const displayName = isRegistry ? REGISTRY_DOWNLOAD_NAME : att.fileName;
+  const displayName = isRegistry
+    ? registryDisplayName(att.registryCertificateType)
+    : att.fileName;
   return (
     <div className="flex items-center gap-3 rounded-md border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3">
       <Icon className="h-5 w-5 shrink-0 text-gray-500 dark:text-gray-400" />
@@ -457,7 +473,9 @@ function PreviewModal({
   // preview(iframe) は無 param のまま。download リンクのみ download intent を付ける。
   const downloadHref = isRegistry ? withDownloadIntent(safeUrl) : safeUrl;
   // registry は表示名・保存名ともに generic（att.fileName の PII を client 表示にも出さない）。
-  const displayName = isRegistry ? REGISTRY_DOWNLOAD_NAME : att.fileName;
+  const displayName = isRegistry
+    ? registryDisplayName(att.registryCertificateType)
+    : att.fileName;
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"

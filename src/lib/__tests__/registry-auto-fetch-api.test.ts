@@ -826,7 +826,12 @@ describe("PR4: source-assertion（スコープ固定）", () => {
 describe("段階②: 地番候補の有料取得（台帳=二重課金ガード）", () => {
   const LC = { lotNumber: "1-1", buildingNumber: null };
 
-  function runLocation(over: { locationCandidate?: typeof LC | null } = {}) {
+  function runLocation(
+    over: {
+      locationCandidate?: typeof LC | null;
+      certificateType?: "owner" | "all";
+    } = {},
+  ) {
     const provider = successProvider();
     const promise = runRegistryAutoFetch(
       {
@@ -834,6 +839,9 @@ describe("段階②: 地番候補の有料取得（台帳=二重課金ガード�
         propertyId: PROP_ID,
         confirmed: true,
         locationCandidate: over.locationCandidate ?? LC,
+        ...(over.certificateType
+          ? { certificateType: over.certificateType }
+          : {}),
         expectedFingerprint: fingerprintProperty({
           address: "テスト市テスト町一丁目",
           lotNumber: null,
@@ -1001,6 +1009,53 @@ describe("段階②: 地番候補の有料取得（台帳=二重課金ガード�
           ?.registryStatus === "unconfirmed",
     );
     expect(releaseCalls).toHaveLength(0);
+  });
+
+  it("⚠有料取得でPDFを添付できなければ成功にせず charged_but_failed（@codex #360 P1）", async () => {
+    // 有料取得はPDFの添付が成果物。保存に失敗(warning握りつぶし=attachmentId無し)なら、
+    // obtained にして成功表示せず、課金後失敗として台帳に残す(再取得は運用者確認)。
+    pm.attachment.create.mockRejectedValue(new Error("storage down"));
+    const { promise } = runLocation();
+    await expect(promise).rejects.toMatchObject({ status: 502 });
+    // 課金後失敗として台帳に残る（charged→charged_but_failed の2件）。
+    const ledger = pm.auditLog.create.mock.calls
+      .map(
+        (c) =>
+          (c[0] as { data: { action: string; detail: { outcome: string } } })
+            .data,
+      )
+      .filter((a) => a.action === "registry_location_purchase");
+    expect(ledger.map((l) => l.detail.outcome)).toContain("charged_but_failed");
+    // obtained に確定させない（PDFが無いのに取得済みにしない）。
+    const obtained = pm.property.update.mock.calls.filter(
+      (c) =>
+        (c[0] as { data?: { registryStatus?: unknown } })?.data
+          ?.registryStatus === "obtained",
+    );
+    expect(obtained).toHaveLength(0);
+  });
+
+  it("⚠全部事項(all)も添付できなければ charged_but_failed（所有者反映が無いので特に重要）", async () => {
+    pm.attachment.create.mockRejectedValue(new Error("storage down"));
+    const { promise } = runLocation({ certificateType: "all" });
+    await expect(promise).rejects.toMatchObject({ status: 502 });
+    const ledger = pm.auditLog.create.mock.calls
+      .map(
+        (c) =>
+          (c[0] as {
+            data: {
+              action: string;
+              detail: { outcome: string; certificateType?: string };
+            };
+          }).data,
+      )
+      .filter((a) => a.action === "registry_location_purchase");
+    expect(ledger.map((l) => l.detail.outcome)).toContain("charged_but_failed");
+    // 台帳の種別も all で残る。
+    expect(
+      ledger.find((l) => l.detail.outcome === "charged_but_failed")?.detail
+        .certificateType,
+    ).toBe("all");
   });
 
   it("課金前の失敗(provider_error等)は台帳に書かない（まだ買っていない=再実行してよい）", async () => {

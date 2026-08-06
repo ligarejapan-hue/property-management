@@ -1859,11 +1859,12 @@ export function registryLiveShotUrl(
 export async function obtainRegistryByCandidate(
   propertyId: string,
   candidateRef: string,
+  certificateType: "owner" | "all" = "owner",
 ): Promise<unknown> {
   return apiFetch(`/api/properties/${propertyId}/registry/auto-fetch`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ confirmed: true, candidateRef }),
+    body: JSON.stringify({ confirmed: true, candidateRef, certificateType }),
   });
 }
 

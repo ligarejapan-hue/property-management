@@ -19,8 +19,16 @@ describe("registry-location-search-button.tsx: 配線（所在検索→候補→
   it("検索は api-client searchRegistryCandidates を使う (実況パネル用 liveRef 同封)", () => {
     expect(src).toContain("searchRegistryCandidates(propertyId, ref)");
   });
-  it("取得は candidateRef を渡して obtainRegistryByCandidate を使う（cond③ server 再解決）", () => {
-    expect(src).toContain("obtainRegistryByCandidate(propertyId, selected.candidateRef)");
+  it("取得は candidateRef と種別を渡して obtainRegistryByCandidate を使う（cond③ server 再解決）", () => {
+    expect(src).toContain("obtainRegistryByCandidate(");
+    expect(src).toContain("selected.candidateRef");
+    // 請求種別(所有者事項/全部事項)を選んで渡す。
+    expect(src).toContain("certificateType");
+  });
+  it("取得の確認で種別(所有者事項=既定/全部事項)を選べる", () => {
+    expect(src).toContain("全部事項");
+    expect(src).toContain('setCertificateType("all")');
+    expect(src).toContain('setCertificateType("owner")');
   });
   it("cond①: 検索・取得の前に明示確認（confirm）を挟む", () => {
     expect(src).toContain('"confirmSearch"');

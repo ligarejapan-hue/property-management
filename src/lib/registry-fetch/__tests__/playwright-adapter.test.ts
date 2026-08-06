@@ -1658,7 +1658,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     f: ReturnType<typeof makeFakeChromium>,
     opts: {
       dialogFind?: string;
-      cert?: { owner: string; extraResults: string[] };
+      cert?: { on: string; offResults: string[] };
       myPageSeq?: unknown[];
       /** 確定前に存在した行ID(作成同一性の判定材料)。 */
       prevRowIds?: string[];
@@ -1686,11 +1686,12 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         // 請求フローの検証に到達しない。
         return shozaiDialogDefault(arg);
       }
-      if (typeof parsed.ownerSel === "string") {
+      if (typeof parsed.onSel === "string") {
         return JSON.stringify(
           opts.cert ?? {
-            owner: "ok",
-            extraResults: ["ok", "ok", "ok", "ok", "ok", "ok"],
+            on: "ok",
+            // off は「もう一方の買える種別1件 + 常時OFF図面類5件」= 6件。
+            offResults: ["ok", "ok", "ok", "ok", "ok", "ok"],
           },
         );
       }
@@ -1777,10 +1778,11 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(clicked).toContain("#cbnDlgBtnCancel"); // ダイアログは閉じる
   });
 
-  it("S3: ⚠請求事項を所有者事項だけに揃えられなければ、請求を押さずに中止（余計なものを買わない）", async () => {
+  it("S3: ⚠請求事項を選んだ種別だけに揃えられなければ、請求を押さずに中止（余計なものを買わない）", async () => {
     const f = makeFakeChromium();
     const { clicked } = wireStage2(f, {
-      cert: { owner: "ok", extraResults: ["failed", "ok", "ok", "ok", "ok", "ok"] },
+      // off にできない請求事項が1つでもある(=余計なものを買う)なら中止。
+      cert: { on: "ok", offResults: ["failed", "ok", "ok", "ok", "ok", "ok"] },
     });
     const page = await makeStage2Page(f);
     await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({

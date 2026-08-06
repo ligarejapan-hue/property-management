@@ -10,6 +10,20 @@
  */
 
 /**
+ * 謄本の請求種別。サイトの実物にあるのは全部事項/所有者事項/地図/図面類で、
+ * この機能で選べるのは有料の2種のみ（発注者確定・2026-08-05）:
+ *  - "owner" = 所有者事項(既定・安い方。今までの固定値と同じ)
+ *  - "all"   = 全部事項(権利関係まで載る・高い方)
+ * ⚠この値は二重課金の鍵(purchaseIdempotencyKey)にも畳み込まれるため、鍵の生成と
+ *   provider への請求で**必ず同じ値**を使う(片方だけ owner に残すと all を買ったのに
+ *   owner 鍵で照合して二重課金ガードが破れる)。
+ */
+export type RegistryCertificateType = "owner" | "all";
+
+/** 種別の既定値(発注者確定=所有者事項)。UI/route/args すべてこの既定に揃える。 */
+export const DEFAULT_CERTIFICATE_TYPE: RegistryCertificateType = "owner";
+
+/**
  * 取得対象の指定（非PII の検索キー）。
  * 実 provider が外部サービスへ問い合わせるための最小情報。所有者名・住所等の PII は含めない。
  */
@@ -28,8 +42,8 @@ export interface RegistryFetchRequest {
     lotNumber?: string | null;
     /** 家屋番号（建物）。 */
     buildingNumber?: string | null;
-    /** 謄本種別。現状は "owner"（所有者事項）のみ。 */
-    certificateType: "owner";
+    /** 謄本種別（所有者事項=owner / 全部事項=all）。 */
+    certificateType: RegistryCertificateType;
   } | null;
   /**
    * トレース用の非PII参照ラベル（例: ImportJobId / 物件UUID）。

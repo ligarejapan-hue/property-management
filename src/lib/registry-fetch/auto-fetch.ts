@@ -45,8 +45,10 @@ import {
 } from "@/lib/registry-pdf/process";
 import {
   RegistryFetchError,
+  DEFAULT_CERTIFICATE_TYPE,
   type RegistryFetchProvider,
   type RegistryFetchErrorCode,
+  type RegistryCertificateType,
 } from "@/lib/registry-fetch";
 import {
   createOfficialRegistryProvider,
@@ -86,6 +88,11 @@ export interface RunRegistryAutoFetchArgs {
     lotNumber: string | null;
     buildingNumber: string | null;
   } | null;
+  /**
+   * 謄本の請求種別（所有者事項=owner / 全部事項=all）。未指定は既定=owner。
+   * ⚠この値は**二重課金の鍵**にも provider への**請求**にも同じものが使われる。
+   */
+  certificateType?: RegistryCertificateType;
 }
 
 /**
@@ -477,8 +484,10 @@ const REGISTRY_SELECTORS = {
   dialogOk: "#cbnDlgBtnOk", // [確定] ダイアログ確定(選んだ地番を親フォームへ反映・無料)
   // 請求事項(謄本種別)のチェックボックス群。2026-07-31 実サイト校正で確定。
   // ⚠ラジオではなく**チェックボックス**で、複数同時に請求できる形。
-  certificateAllCheck: "#fuAll", // [確定] 全部事項
-  certificateOwnerCheck: "#fuShoyusya", // [確定] 所有者事項(アプリ既定 certificateType=owner)
+  // ⚠ON/OFF の実際の割り当ては種別で決まる=REGISTRY_CERTIFICATE_SELECTORS /
+  //   certificateCheckboxPlan を正とする(ここは実要素の記録)。
+  certificateAllCheck: "#fuAll", // [確定] 全部事項(certificateType=all で ON)
+  certificateOwnerCheck: "#fuShoyusya", // [確定] 所有者事項(certificateType=owner で ON・既定)
   // マイページ(請求一覧)。課金とPDF取得はここで行う。
   myPageTab: "a[onclick*=\"selectTab('tabMy')\"]", // [確定] マイページタブ
   myPageTable: "#myPageTable", // [確定] 請求一覧テーブル
@@ -519,20 +528,47 @@ export function registryRowMatchesChiban(
 export const PAID_DOWNLOAD_WAIT_MS = 120_000;
 
 /**
- * 請求事項のうち**所有者事項以外**のチェックボックス（段階②）。
- * 請求前にすべて外す＝所有者事項だけを買う。外し漏れは追加課金になるため、
- * 設定後に実際の checked 状態を読み戻して検証する（fail-closed・課金前）。
+ * 種別ごとに「ONにする請求事項」のセレクタ（段階②）。
+ * ⚠この2つ以外(#fuChizu/#fuShozai/#fuChieki/#fuZumen/#fuHeisaTokibo)は**常にOFF**。
+ * 選んだ種別だけをONにし、それ以外の請求事項は全部OFFにして、余計なものを買わない。
+ */
+const REGISTRY_CERTIFICATE_SELECTORS: Record<RegistryCertificateType, string> = {
+  owner: "#fuShoyusya", // 所有者事項
+  all: "#fuAll", // 全部事項
+};
+
+/**
+ * 請求事項のうち**選んだ種別以外**は必ずOFFにする対象（地図・図面類・閉鎖登記記録）。
  * ⚠`#fuHeisaTokibo`(閉鎖登記記録)は「全部事項の時のみ選択可」= disabled のことがあるので、
  * 操作は DOM click（actionability 待ちで固まらない）で行う。
  */
-const REGISTRY_CERTIFICATE_EXTRA_CHECKS: readonly string[] = [
-  "#fuAll", // 全部事項
+const REGISTRY_CERTIFICATE_ALWAYS_OFF: readonly string[] = [
   "#fuChizu", // 地図
   "#fuShozai", // 土地所在図/地積測量図
   "#fuChieki", // 地役権図面
   "#fuZumen", // 建物図面/各階平面図
   "#fuHeisaTokibo", // 閉鎖登記記録
 ];
+
+/**
+ * 選んだ種別から「ONにする1つ」と「OFFにする残り全部」を決める（純関数・テスト可能）。
+ *
+ * ⚠**買うのは1種だけ**。選んだ種別を on に、もう一方の買える種別 + 常時OFFの図面類を
+ * すべて off にする。off の中に「もう一方の種別」を必ず含めるのが肝で、これを忘れると
+ * サイト初期状態(全部事項ON)のまま所有者事項も足して**2通買う**ことになる。
+ */
+export function certificateCheckboxPlan(cert: RegistryCertificateType): {
+  on: string;
+  off: string[];
+} {
+  const on = REGISTRY_CERTIFICATE_SELECTORS[cert];
+  const off = [
+    // もう一方の「買える種別」も必ずOFFにする（両方ONで2通買わない）。
+    ...Object.values(REGISTRY_CERTIFICATE_SELECTORS).filter((s) => s !== on),
+    ...REGISTRY_CERTIFICATE_ALWAYS_OFF,
+  ];
+  return { on, off };
+}
 
 /**
  * CodexP1: REGISTRY_SELECTORS が **実サイトに校正済み** だと運用者が明示宣言したかを判定する。
@@ -1832,13 +1868,17 @@ function createPlaywrightRegistryPage(
         await domClick(REGISTRY_SELECTORS.dialogOk);
         await sleep(1500); // 確定値のフォーム反映を待つ(ダイアログは閉じる)
 
-        // ---- ⑤ 請求事項=**所有者事項のみ**(検証つき・課金前) ----
+        // ---- ⑤ 請求事項=**選んだ種別のみ**(検証つき・課金前) ----
+        // 所有者事項(既定)/全部事項 のどちらか一方だけをONにし、残りは全部OFF。
         // 外し漏れ=追加課金なので、操作後に checked を読み戻して検証する。
         // disabled があり得る(#fuHeisaTokibo)ため DOM click で操作する。
+        // ⚠on と off は種別から純関数(certificateCheckboxPlan)で導く=サイト初期状態の
+        // 全部事項ONを、選んだ種別へ確実に反転させる。
+        const certPlan = certificateCheckboxPlan(input.certificateType);
         const certJson = (await page.evaluate((json) => {
-          const { ownerSel, extras } = JSON.parse(json) as {
-            ownerSel: string;
-            extras: string[];
+          const { onSel, offSels } = JSON.parse(json) as {
+            onSel: string;
+            offSels: string[];
           };
           const set = (sel: string, want: boolean): string => {
             const el = document.querySelector(sel) as HTMLInputElement | null;
@@ -1846,20 +1886,20 @@ function createPlaywrightRegistryPage(
             if (el.checked !== want) el.click();
             return el.checked === want ? "ok" : "failed";
           };
-          const owner = set(ownerSel, true);
-          const extraResults = extras.map((sel) => set(sel, false));
-          return JSON.stringify({ owner, extraResults });
+          const on = set(onSel, true);
+          const offResults = offSels.map((sel) => set(sel, false));
+          return JSON.stringify({ on, offResults });
         }, JSON.stringify({
-          ownerSel: REGISTRY_SELECTORS.certificateOwnerCheck,
-          extras: [...REGISTRY_CERTIFICATE_EXTRA_CHECKS],
+          onSel: certPlan.on,
+          offSels: certPlan.off,
         }))) as string;
         const cert = JSON.parse(certJson) as {
-          owner: string;
-          extraResults: string[];
+          on: string;
+          offResults: string[];
         };
         if (
-          cert.owner !== "ok" ||
-          cert.extraResults.some((r) => r !== "ok" && r !== "absent-ok")
+          cert.on !== "ok" ||
+          cert.offResults.some((r) => r !== "ok" && r !== "absent-ok")
         ) {
           // 種別を意図どおりに揃えられない → 課金前に中止(余計なものを買わない)。
           throw new RegistryFetchError("provider_error");
@@ -2618,6 +2658,10 @@ export async function runRegistryAutoFetch(
   //     台帳に残すのは鍵の**ハッシュのみ**(地番=秘匿情報を監査に載せない)。
   // ⚠番号があれば番号取得(無料フローと同じ扱い)が優先され購入は起きない=台帳も見ない。
   let purchaseKeyHash: string | null = null;
+  // ⚠**種別は1か所で確定させ、鍵と provider 請求の両方で同じ値を使う**。
+  //   片方だけ owner に残すと all を買ったのに owner 鍵で照合し二重課金ガードが破れる。
+  const certificateType: RegistryCertificateType =
+    args.certificateType ?? DEFAULT_CERTIFICATE_TYPE;
   const willPurchaseByLocation =
     !!args.locationCandidate &&
     !(args.realEstateNumber ?? property.realEstateNumber)?.trim();
@@ -2650,7 +2694,7 @@ export async function runRegistryAutoFetch(
         purchaseIdempotencyKey({
           propertyId,
           lotOrBuilding,
-          certificateType: "owner",
+          certificateType,
         }),
       )
       .digest("hex")
@@ -2739,7 +2783,8 @@ export async function runRegistryAutoFetch(
               address: property.address ?? "",
               lotNumber: args.locationCandidate.lotNumber,
               buildingNumber: args.locationCandidate.buildingNumber,
-              certificateType: "owner",
+              // ⚠鍵(purchaseKeyHash)と同じ選択値を使う(上で確定した certificateType)。
+              certificateType,
             }
           : null,
       ref: property.id,
@@ -2761,7 +2806,7 @@ export async function runRegistryAutoFetch(
             action: REGISTRY_PURCHASE_AUDIT_ACTION,
             targetTable: "properties",
             targetId: propertyId,
-            detail: { purchaseKeyHash, outcome: "charged" },
+            detail: { purchaseKeyHash, outcome: "charged", certificateType },
           },
         });
       } catch {
@@ -2803,7 +2848,21 @@ export async function runRegistryAutoFetch(
       fileName: fetchResult.fileName,
       edited: undefined,
       pdfBuffer: fetchResult.pdfBuffer,
+      // 有料取得の種別を渡す。all のときは所有者を反映せず、添付に種別ラベルを付ける。
+      certificateType,
     });
+
+    // ⚠**有料取得は「PDFの添付」が成果物**。保存に失敗していたら成功にしない
+    // (@codex #360 P1)。processRegistryPdf は保存失敗を warning に握りつぶして
+    // attachmentId を返さない。有料購入なのにここが空だと、
+    //   - all: 所有者反映もしないので**払ったのに物件に何も残らない**
+    //   - owner: 所有者は反映されるが**買ったPDF自体は失われる**
+    // まま obtained にして成功表示され、台帳は30日再取得をブロックする。
+    // 課金境界の後なので **charged_but_failed** として下の catch に処理させる
+    // (台帳記録+ロック維持+マイページ確認の案内)。
+    if (purchaseKeyHash && !result.attachmentId) {
+      throw new RegistryFetchError("charged_but_failed");
+    }
 
     // 成功 → scheduled から obtained へ確定。
     await prisma.property.update({
@@ -2882,7 +2941,11 @@ export async function runRegistryAutoFetch(
             action: REGISTRY_PURCHASE_AUDIT_ACTION,
             targetTable: "properties",
             targetId: propertyId,
-            detail: { purchaseKeyHash, outcome: "charged_but_failed" },
+            detail: {
+              purchaseKeyHash,
+              outcome: "charged_but_failed",
+              certificateType,
+            },
           },
         });
       } catch {
