@@ -55,7 +55,13 @@
   マスクは壊さない。代わりに attachments へ**安全な定型値の列**
   (registry_certificate_type: owner|all・nullable・additive)を足し、
   マスク表示側がこの列から「謄本(所有者事項).pdf」「謄本(全部事項).pdf」の
-  **固定ラベル**を組み立てる(ダウンロード名も同じ)。生のファイル名は今後も出さない
+  **固定ラベル**を組み立てる(ダウンロード名も同じ)。生のファイル名は今後も出さない。
+  ⚠**null(種別不明)の既定を必ず定義する**(@codex 設計指摘)。この列は nullable
+  なので、**移行前の既存謄本添付と、手動アップロード(種別を持たない経路)は
+  すべて null** になる。owner/all だけラベルを定義すると、既存PDFが誤って
+  どちらかの種別に見えたり不正な名前になる。**null は従来どおり "registry.pdf"**
+  (種別不明の固定ラベル)にする。移行前の添付を UI・ダウンロードヘッダ両方の
+  テストで覆う。※PR-A で実装済(registryDisplayName(null)="registry.pdf")。
 - ⚠**選んだ種別を、台帳の鍵と provider リクエストの両方へ実際に通す**
   (@codex 設計指摘)。台帳の鍵は種別込みだが、今の呼び出し元は鍵の生成も
   provider への請求も **certificateType: "owner" を直書き**している。ここを
@@ -129,9 +135,12 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
                           unresolved に原子的に初期化してから新トークンを発行する**
                           =さもないと再取得が attempting/charged のまま二重課金
                           ガードから外れ続け、本物の再課金後にクラッシュすると
-                          もう一度買える) / charged=課金済みと判明→台帳へ手動記録
-                          (こちらは終端のまま)
-                          / resolved_by / resolved_at(誰がいつ決着させたか・監査)
+                          もう一度買える) / charged=課金済みで決着(=終端)。
+                          正常成功の**自動決着**(添付確定と同じ tx)と、課金不明を
+                          運用者が課金済みと確定した場合の両方でこの値にする
+                          (どちらも「未解決」の関所・ゲートから外れる)
+                          / resolved_by / resolved_at(自動決着は system・運用者の決着は
+                          その人。誰がいつ決着させたか・監査)
                           / lock_owner_token(物件ロックを取るたびに発行する乱数。
                           **自分の掛けた鍵か**を見分ける) / property_prev_registry_status
                           (ロック前の registryStatus。⚠これらが無いと、物件CASの後・
@@ -392,6 +401,14 @@ searchByRealEstateNumber はカートに触れる前に provider_error で停止
        みなすと、再起動後にゲートを素通りして再課金できる。**台帳の存在は
        あくまで二重購入マーカー**として残し、起動時ゲートを外す resolved は
        **添付/状態の最終化が commit された後**にのみ立てる。
+     - ⚠**成功した項目も添付確定後に charge_resolution=charged で決着させる**
+       (@codex 設計指摘 P1)。ブレーカー解除の関所は**未解決の job_items**も
+       見る。成功項目が charged/unresolved のまま残ると、後で無関係な課金失敗が
+       ブレーカーを立てたとき、**過去の成功がこの関所に永久に一致して運用者が
+       解除できない**。成功の最終化 tx(添付/状態を確定するのと同じ tx)で、
+       job item も **charge_resolution=charged(=決着済み)** にし、未解決の関所
+       から外す。ゲート/関所が「未解決」とみなすのは**恒久的な成功証跡
+       (charge_resolution!=charged)が無い課金試行だけ**にそろえる。
      - ⚠**項目の status は問わない**: onCharged 後に charged_but_failed+
        ブレーカーの tx が落ちると行は processing のまま・ブレーカー未設定で残る。
        「終端行だけ」を見るゲートはこれを見逃す。
