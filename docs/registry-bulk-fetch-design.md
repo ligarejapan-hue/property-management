@@ -106,7 +106,9 @@ registry_fetch_job_items: id / job_id / property_id / status(pending|processing|
                           素通りして同じ謄本をもう一度買える)
 ```
 
-migration は additive(新テーブル2つ + attachments の種別列 + registry:manage
+migration は additive(新テーブル2つ + attachments の種別列 + **properties の
+registry_lock_token 列**(施錠の持ち主。物件側に無いと復旧の照合ができない)
++ registry:manage
 権限行 + **registry_fetch_config の課金停止列**(停止フラグ/理由/時刻/解除者/
 解除時刻。⚠これが無いと口座全体のブレーカーが**文章の上にしか存在せず**、
 onBeforeCharge が読む場所も解除操作が書く場所も無い)。すべて追加のみ)。
@@ -148,6 +150,13 @@ onBeforeCharge が読む場所も解除操作が書く場所も無い)。すべ�
   - 放置/運用者による解決の際は、**自分の lock_owner_token と一致する場合に
     限り**物件ロックを元の状態へ戻す(一致しない=別の処理が新しく掛けた鍵なので
     触らない)。
+    ⚠**照合の相手は物件側に持たせる**(@codex 設計指摘)。項目側だけに token を
+    置いても、ロックの実体(Property.registryStatus)に**どの鍵で施錠されたか**が
+    残らないため比較のしようがない=古い項目の復旧が、**後から掛かった別の
+    有料取得のロックを上書きして剥がし得る**。properties に
+    registry_lock_token(nullable・additive)を追加し、施錠CASで設定・解錠で
+    クリア、復旧の書き戻しは **where registry_lock_token = 自分の token** で
+    行う(0行=他人の鍵なので触らない)。
   - 放置項目のうち課金段階が「試行中」以降のものは**課金不明**として扱い、
     ジョブごと paused にする。**自動では再実行しない**(運用者がマイページを
     確認して手で決める)。課金前で止まった項目だけ従来どおり失敗扱いにできる
