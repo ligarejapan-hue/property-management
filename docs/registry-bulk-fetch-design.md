@@ -237,7 +237,16 @@ onBeforeCharge が読む場所も解除操作が書く場所も無い)。すべ�
   ことを掴みの本体とし、項目の processing 化は同じ transaction 内で行う。
   終了/後回しの解放も同じ CAS で active_item_id を消す。さらに
   **課金境界の直前(onBeforeCharge の中)でジョブが paused/cancelled になって
-  いないかを再確認**してから請求を押す(なっていれば押さずに pending へ戻す)
+  いないかを再確認**してから請求を押す(なっていれば押さずに pending へ戻す)。
+  ⚠**同じ onBeforeCharge で物件アクセス(canAccessPropertyRecord)も再確認する**
+  (@codex 設計指摘 P1)。ジョブ状態だけの確認では足りない=作成者でない
+  field_staff の担当者が項目を掴んだ後、**検索や purchase mutex の順番待ちの間に
+  その物件が別担当へ付け替え**られると、掴んだ時点のアクセス確認は通ったのに
+  今は canAccessPropertyRecord なら拒否される状態で課金に進む(=アクセスが
+  外れた物件を有料取得できてしまう)。加えて**物件行ロックを握っている間は
+  assignedTo の変更を差し込ませない**(担当替えを課金境界とフェンスする)=
+  「掴む→アクセス確認→課金」を付け替えが割り込めない一区間にする。
+  付け替えが確定していれば押さず、掴みを解放して pending へ戻す
 - ⚠**サーバー常駐の自動実行(systemd timer)にはしない**。お金が動く処理を
   無人で回すのは、実課金の通しテストすら未実施の現段階では踏み込みすぎ。
   将来必要になったら別途設計する(前例: 添付お掃除・巡回の見回り)
@@ -409,6 +418,16 @@ searchByRealEstateNumber はカートに触れる前に provider_error で停止
        みなすと、再起動後にゲートを素通りして再課金できる。**台帳の存在は
        あくまで二重購入マーカー**として残し、起動時ゲートを外す resolved は
        **添付/状態の最終化が commit された後**にのみ立てる。
+       ⚠**「保存失敗=例外が飛ぶ」に頼らない。添付が付いたことを積極的に
+       確かめてから resolved にする**(@codex 設計指摘 P1)。processRegistryPdf は
+       ストレージ upload や attachment.create が落ちても**例外にせず、添付なしの
+       warning を返す**(処理は続行する設計のため)。ここを「例外が来なければ成功」と
+       読むと、**課金済みなのに PDF が永久に付かない**まま resolved=charged にされ、
+       ブレーカーも立たず次回以降も課金が通る。有料取得の最終化は
+       **attachmentId が非null であることを必須条件**にし、null(=warning 経路)は
+       **charged_but_failed に変換**して未解決のまま残す。
+       ※これは単発の有料取得では実装済み(取得結果に attachmentId が無ければ
+       charged_but_failed を投げる)。一括の項目最終化も同じ条件を共有する。
      - ⚠**成功した項目も添付確定後に charge_resolution=charged で決着させる**
        (@codex 設計指摘 P1)。ブレーカー解除の関所は**未解決の job_items**も
        見る。成功項目が charged/unresolved のまま残ると、後で無関係な課金失敗が
