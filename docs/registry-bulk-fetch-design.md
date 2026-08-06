@@ -169,6 +169,12 @@ property_prev_registry_status / lease_expires_at / execution_id を持たせる
 (課金境界より手前の検索段階でクラッシュしても、この行だけを頼りに token-CAS で
 物件を prev_status へ安全に戻せる)。一括は job_items がこの役割を担うので、
 単発だけこの台帳に復旧メタを載せる(bulk 行は item を指すだけでよい)。
+⚠**課金前に確定した失敗では、単発の予約行を自動で not_charged 解決する**
+(@codex 設計指摘 P2)。予約は物件ロック取得時=**検索/ログインより前**に
+unresolved で作るが、生きたガードは未解決の共通台帳行を弾く。rate_limited /
+auth_failed / service_hours / 中止 / 候補不一致 など**課金前と確実に分かる終了**
+では、所有トークンで予約を not_charged に解決しつつロックを解放する
+(手動決着・放置復旧を待たせない)。これらの経路を回帰テストで覆う。
 ⚠**resolution=charged で外すときは恒久的な購入マーカー(台帳)の存在を要求**する。
 ⚠単発はジョブ項目を持たないので、この台帳が**唯一の恒久的な起動時ゲートの
 参照先**) ] + attachments の種別列 + **properties の
