@@ -45,10 +45,15 @@ export async function POST(request: NextRequest) {
     const certRaw = (body as { certificateType?: unknown } | null)?.certificateType;
     const certificateType: "owner" | "all" = certRaw === "all" ? "all" : "owner";
 
+    // 二重作成防止キー(任意)。文字列以外は無視。
+    const keyRaw = (body as { idempotencyKey?: unknown } | null)?.idempotencyKey;
+    const idempotencyKey = typeof keyRaw === "string" ? keyRaw : null;
+
     const result = await createBulkFetchJob({
       session,
       propertyIds,
       certificateType,
+      idempotencyKey,
     });
     return apiResponse(result, 201);
   } catch (error) {

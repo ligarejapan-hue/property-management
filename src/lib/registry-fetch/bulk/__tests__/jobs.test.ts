@@ -98,6 +98,45 @@ describe("createBulkFetchJob", () => {
       createBulkFetchJob({ session: STAFF, propertyIds: ["p9"], certificateType: "owner" }),
     ).rejects.toMatchObject({ status: 403, code: "REGISTRY_BULK_NO_VISIBLE" });
   });
+
+  it("同じ idempotencyKey の既存ジョブがあれば作らず返す(二重作成防止)", async () => {
+    // 既存ジョブが見つかる → create を呼ばずそれを返す。
+    pm.registryFetchJob.findUnique.mockResolvedValue({
+      id: "job-existing",
+      items: [{ status: "pending" }, { status: "pending" }, { status: "skipped" }],
+    });
+
+    const res = await createBulkFetchJob({
+      session: STAFF,
+      propertyIds: ["p1"],
+      certificateType: "owner",
+      idempotencyKey: "key-123",
+    });
+
+    expect(res.jobId).toBe("job-existing");
+    expect(res).toMatchObject({ total: 3, pending: 2, skipped: 1 });
+    expect(pm.registryFetchJob.create).not.toHaveBeenCalled();
+    expect(pm.property.findMany).not.toHaveBeenCalled(); // 冪等ヒットは物件検索もしない
+  });
+
+  it("idempotencyKey を job 作成データに渡す", async () => {
+    pm.registryFetchJob.findUnique.mockResolvedValue(null); // 既存なし
+    pm.property.findMany.mockResolvedValue([
+      { id: "p1", createdBy: "u1", assignedTo: null, address: "東京都A区1", lotNumber: "1", buildingNumber: null, realEstateNumber: null },
+    ]);
+
+    await createBulkFetchJob({
+      session: STAFF,
+      propertyIds: ["p1"],
+      certificateType: "owner",
+      idempotencyKey: "key-xyz",
+    });
+
+    expect(pm.registryFetchJob.create.mock.calls[0][0].data).toMatchObject({
+      idempotencyKey: "key-xyz",
+      requestedById: "u1",
+    });
+  });
 });
 
 describe("getBulkJobProgress — 可視項目でフィルタ + 件数再計算", () => {

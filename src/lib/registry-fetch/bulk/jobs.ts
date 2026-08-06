@@ -80,6 +80,23 @@ export interface CreateBulkFetchJobArgs {
   session: BulkSession;
   propertyIds: string[];
   certificateType: RegistryCertificateType;
+  /** 二重作成防止キー(POST 応答が失われて再送しても同じジョブへ冪等化)。 */
+  idempotencyKey?: string | null;
+}
+
+/** ジョブの項目 status から作成結果の件数を組む(冪等ヒット時の返却にも使う)。 */
+function summarizeCreate(
+  jobId: string,
+  items: Array<{ status: string }>,
+  excluded: number,
+): CreateBulkFetchJobResult {
+  let pending = 0;
+  let skipped = 0;
+  for (const it of items) {
+    if (it.status === "pending") pending++;
+    else if (it.status === "skipped") skipped++;
+  }
+  return { jobId, total: items.length, pending, skipped, excluded };
 }
 
 export interface CreateBulkFetchJobResult {
@@ -119,6 +136,16 @@ export async function createBulkFetchJob(
       `一度に取得できるのは${MAX_BULK_ITEMS}件までです。分けて実行してください`,
       "REGISTRY_BULK_TOO_MANY",
     );
+  }
+
+  const idemKey = args.idempotencyKey?.trim() || null;
+  // 冪等: 同じキーの既存ジョブがあれば作らずそれを返す(再送で二重ジョブを作らない)。
+  if (idemKey) {
+    const existing = await prisma.registryFetchJob.findUnique({
+      where: { requestedById_idempotencyKey: { requestedById: session.id, idempotencyKey: idemKey } },
+      include: { items: { select: { status: true } } },
+    });
+    if (existing) return summarizeCreate(existing.id, existing.items, 0);
   }
 
   // 検索キーの最小カラムのみ(所有者PIIは取らない)。
@@ -165,35 +192,42 @@ export async function createBulkFetchJob(
   const preSkipped = itemsData.filter((i) => i.status === "skipped").length;
   const pendingCount = itemsData.length - preSkipped;
 
-  const job = await prisma.$transaction(async (tx) => {
-    const created = await tx.registryFetchJob.create({
-      data: {
-        status: "pending",
-        certificateType,
-        requestedById: session.id,
-        total: itemsData.length,
-        skipped: preSkipped,
-      },
+  try {
+    const job = await prisma.$transaction(async (tx) => {
+      const created = await tx.registryFetchJob.create({
+        data: {
+          status: "pending",
+          certificateType,
+          requestedById: session.id,
+          idempotencyKey: idemKey,
+          total: itemsData.length,
+          skipped: preSkipped,
+        },
+      });
+      await tx.registryFetchJobItem.createMany({
+        data: itemsData.map((i) => ({
+          jobId: created.id,
+          propertyId: i.propertyId,
+          status: i.status,
+          errorCode: i.errorCode,
+          processedAt: i.status === "skipped" ? new Date() : null,
+        })),
+      });
+      return created;
     });
-    await tx.registryFetchJobItem.createMany({
-      data: itemsData.map((i) => ({
-        jobId: created.id,
-        propertyId: i.propertyId,
-        status: i.status,
-        errorCode: i.errorCode,
-        processedAt: i.status === "skipped" ? new Date() : null,
-      })),
-    });
-    return created;
-  });
 
-  return {
-    jobId: job.id,
-    total: itemsData.length,
-    pending: pendingCount,
-    skipped: preSkipped,
-    excluded,
-  };
+    return { jobId: job.id, total: itemsData.length, pending: pendingCount, skipped: preSkipped, excluded };
+  } catch (e) {
+    // レース: 同じキーで別リクエストが先に作成した(一意制約違反 P2002)→ 既存を返す。
+    if (idemKey && (e as { code?: string }).code === "P2002") {
+      const existing = await prisma.registryFetchJob.findUnique({
+        where: { requestedById_idempotencyKey: { requestedById: session.id, idempotencyKey: idemKey } },
+        include: { items: { select: { status: true } } },
+      });
+      if (existing) return summarizeCreate(existing.id, existing.items, excluded);
+    }
+    throw e;
+  }
 }
 
 /** ジョブを作成者本人に限定して読み込む(共通ガード)。 */

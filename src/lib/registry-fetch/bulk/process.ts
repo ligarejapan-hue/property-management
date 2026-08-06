@@ -129,12 +129,26 @@ export async function processNextBulkItem(args: {
     });
 
     if (!item) {
-      // 残り pending なし → ジョブ完了。ロック解除。
+      // 残り pending なし → ジョブ完了。⚠**completed で cancelled を上書きしない**
+      // (@codex #361 P2)。掴んだ後・findFirst 判定中に別タブが cancel した場合、
+      // 無条件更新だと中止を completed に潰す。条件付き(status not cancelled)で立てる。
       await prisma.registryFetchJob.update({
         where: { id: jobId },
-        data: { activeItemId: null, status: "completed", completedAt: new Date() },
+        data: { activeItemId: null },
       });
-      return { outcome: "drained", jobStatus: "completed", morePending: false };
+      await prisma.registryFetchJob.updateMany({
+        where: { id: jobId, status: { not: "cancelled" } },
+        data: { status: "completed", completedAt: new Date() },
+      });
+      const after = await prisma.registryFetchJob.findUnique({
+        where: { id: jobId },
+        select: { status: true },
+      });
+      return {
+        outcome: "drained",
+        jobStatus: (after?.status ?? "completed") as BulkJobStatus,
+        morePending: false,
+      };
     }
 
     // 3b) 物件が削除された/担当替えで見えなくなった → 伏せて skipped(次へ)。
@@ -230,23 +244,10 @@ export async function processNextBulkItem(args: {
         }
       }
     } catch (err) {
-      // ⚠既取得(REGISTRY_PURCHASE_ALREADY_DONE)を無条件に done にしない(@codex #361 P1)。
-      // 台帳は同じ鍵を charged と charged_but_failed の**両方**で記録するため、鍵の存在は
-      // 「成功で取得済み」を意味しない。物件が実際に obtained(=添付まで完了)なら done、
-      // そうでなければ「過去に払ったが添付が無いかも」=要確認としてジョブを止める。
-      if (err instanceof ApiError && err.code === "REGISTRY_PURCHASE_ALREADY_DONE") {
-        const prop = await prisma.property.findUnique({
-          where: { id: propertyId },
-          select: { registryStatus: true },
-        });
-        if (prop?.registryStatus === "obtained") {
-          outcome = { status: "done", errorCode: "already_obtained", pauseJob: false, leavePending: false, cancelled: false };
-        } else {
-          outcome = { status: "charged_but_failed", errorCode: "already_charged_unverified", pauseJob: true, leavePending: false, cancelled: false };
-        }
-      } else {
-        outcome = classifyItemError(err);
-      }
+      // ⚠分類は classifyItemError に一本化(@codex #361 P1)。単発は RegistryFetchError を
+      // ApiError に包んで投げるため、providerCode を見て charged_but_failed→paused /
+      // rate_limited→pending を正しく拾う。既取得(ALREADY_DONE)は skipped(要確認)。
+      outcome = classifyItemError(err);
     }
 
     // 6) 結果を確定する(項目更新 + ロック解除 + ジョブ状態)。

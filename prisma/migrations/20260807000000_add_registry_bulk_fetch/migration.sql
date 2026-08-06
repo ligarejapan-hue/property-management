@@ -8,6 +8,7 @@ CREATE TABLE "registry_fetch_jobs" (
     "status" TEXT NOT NULL DEFAULT 'pending',
     "certificate_type" TEXT NOT NULL,
     "requested_by_id" UUID NOT NULL,
+    "idempotency_key" TEXT,
     "active_item_id" UUID,
     "paused_reason" TEXT,
     "total" INTEGER NOT NULL DEFAULT 0,
@@ -41,6 +42,9 @@ CREATE TABLE "registry_fetch_job_items" (
 
     CONSTRAINT "registry_fetch_job_items_pkey" PRIMARY KEY ("id")
 );
+
+-- CreateIndex
+CREATE UNIQUE INDEX "registry_fetch_jobs_requested_by_id_idempotency_key_key" ON "registry_fetch_jobs"("requested_by_id", "idempotency_key");
 
 -- CreateIndex
 CREATE INDEX "registry_fetch_jobs_requested_by_id_idx" ON "registry_fetch_jobs"("requested_by_id");

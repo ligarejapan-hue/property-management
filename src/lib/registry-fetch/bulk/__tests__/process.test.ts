@@ -23,10 +23,12 @@ vi.mock("@/lib/api-helpers", () => {
   class MockApiError extends Error {
     status: number;
     code: string;
-    constructor(status: number, message: string, code = "ERROR") {
+    providerCode?: string;
+    constructor(status: number, message: string, code = "ERROR", providerCode?: string) {
       super(message);
       this.status = status;
       this.code = code;
+      this.providerCode = providerCode;
     }
   }
   return { ApiError: MockApiError };
@@ -43,7 +45,6 @@ import prisma from "@/lib/prisma";
 import { ApiError } from "@/lib/api-helpers";
 import { runRegistrySearch, resolveRegistryCandidate } from "@/lib/registry-fetch/search";
 import { runRegistryAutoFetch } from "@/lib/registry-fetch/auto-fetch";
-import { RegistryFetchError } from "@/lib/registry-fetch";
 import { processNextBulkItem } from "../process";
 
 const pm = prisma as unknown as {
@@ -133,7 +134,11 @@ describe("processNextBulkItem", () => {
       searchable: true,
       candidates: [{ candidateRef: "r1" }],
     });
-    (runRegistryAutoFetch as Mock).mockRejectedValue(new RegistryFetchError("charged_but_failed"));
+    // ⚠実物は RegistryFetchError を ApiError(providerCode)に包んで投げる。テストも同型にする
+    // (生の RegistryFetchError を投げるとテストが実装と乖離して誤って緑になる=#361 P1 の教訓)。
+    (runRegistryAutoFetch as Mock).mockRejectedValue(
+      new ApiError(502, "課金後失敗", "REGISTRY_AUTO_FETCH_PROVIDER_ERROR", "charged_but_failed"),
+    );
     // finalize の再読み(after)が paused を返すよう順序付け(job0=processing → after=paused)。
     pm.registryFetchJob.findUnique
       .mockResolvedValueOnce({
@@ -154,7 +159,7 @@ describe("processNextBulkItem", () => {
     expect(pausedCall![0].where).toMatchObject({ status: { not: "cancelled" } });
   });
 
-  it("既取得 + 物件 obtained → done(本当に取得済み)", async () => {
+  it("既取得(ALREADY_DONE)→ done にせず skipped(要確認)。鍵の存在=成功ではない", async () => {
     (runRegistrySearch as Mock).mockResolvedValue({
       searchable: true,
       candidates: [{ candidateRef: "r1" }],
@@ -162,30 +167,10 @@ describe("processNextBulkItem", () => {
     (runRegistryAutoFetch as Mock).mockRejectedValue(
       new ApiError(409, "既取得", "REGISTRY_PURCHASE_ALREADY_DONE"),
     );
-    pm.property.findUnique.mockResolvedValue({ registryStatus: "obtained" });
 
     const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", provider });
-    expect(res.itemStatus).toBe("done");
-    expect(finalizedItemData()).toMatchObject({ status: "done" });
-  });
-
-  it("既取得 + 物件が未 obtained → charged_but_failed(要確認)でジョブ paused", async () => {
-    (runRegistrySearch as Mock).mockResolvedValue({
-      searchable: true,
-      candidates: [{ candidateRef: "r1" }],
-    });
-    (runRegistryAutoFetch as Mock).mockRejectedValue(
-      new ApiError(409, "既取得", "REGISTRY_PURCHASE_ALREADY_DONE"),
-    );
-    // 台帳に鍵はあるが物件は未 obtained=過去に払ったが添付が無いかも。
-    pm.property.findUnique.mockResolvedValue({ registryStatus: "unconfirmed" });
-
-    const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", provider });
-    expect(finalizedItemData()).toMatchObject({ status: "charged_but_failed" });
-    const pausedCall = pm.registryFetchJob.updateMany.mock.calls.find(
-      (c) => (c[0].data as { status?: string }).status === "paused",
-    );
-    expect(pausedCall).toBeTruthy();
+    expect(res.itemStatus).toBe("skipped");
+    expect(finalizedItemData()).toMatchObject({ status: "skipped", errorCode: "already_processed_manual_check" });
   });
 
   it("rate_limited → 項目を pending へ戻す(processing のまま取り残さない)", async () => {
@@ -193,7 +178,9 @@ describe("processNextBulkItem", () => {
       searchable: true,
       candidates: [{ candidateRef: "r1" }],
     });
-    (runRegistryAutoFetch as Mock).mockRejectedValue(new RegistryFetchError("rate_limited"));
+    (runRegistryAutoFetch as Mock).mockRejectedValue(
+      new ApiError(429, "順番待ち", "REGISTRY_AUTO_FETCH_PROVIDER_ERROR", "rate_limited"),
+    );
 
     const res = await processNextBulkItem({ session: SESSION, jobId: "job-1", provider });
 

@@ -68,55 +68,74 @@ export interface ItemOutcome {
 }
 
 /**
- * 単発取得(runRegistryAutoFetch / runRegistrySearch / resolveRegistryCandidate)が
- * 投げた例外を、一括の項目結果へ分類する純関数。
+ * provider 由来の安全分類コードから項目結果を決める(RegistryFetchError.code と
+ * ApiError.providerCode の両方で使う)。
  *
  * ⚠**課金済みの失敗(charged_but_failed)は必ず paused**。お金が動いた可能性がある項目を
  * 黙って次へ流さない(利用者にマイページ確認を促す)。
- * ⚠**既取得(REGISTRY_PURCHASE_ALREADY_DONE)は done 扱い**。単発の30日ガードが
- * 二重課金を弾いた=その物件は既に取れている(課金は起きていない)。
+ * ⚠**rate_limited は pending のまま**(件数に数えない=画面が間隔を空けて再試行)。
+ */
+function classifyByProviderCode(code: string): ItemOutcome {
+  const base = { pauseJob: false, leavePending: false, cancelled: false };
+  switch (code) {
+    case "charged_but_failed":
+      return { status: "charged_but_failed", errorCode: code, pauseJob: true, leavePending: false, cancelled: false };
+    case "rate_limited":
+      return { status: "pending", errorCode: code, pauseJob: false, leavePending: true, cancelled: false };
+    case "cancelled":
+      return { status: "pending", errorCode: code, pauseJob: false, leavePending: true, cancelled: true };
+    // 要手動(自動では拾えない)=skipped。次の項目へ進む。
+    case "not_found":
+    case "location_rejected":
+      return { status: "skipped", errorCode: code, ...base };
+    // 一時的な失敗(あとで再試行可能)=failed。次の項目へ進む。
+    case "timeout":
+    case "provider_error":
+    case "auth_failed":
+    case "service_hours":
+    case "service_unavailable":
+      return { status: "failed", errorCode: code, ...base };
+    default:
+      return { status: "failed", errorCode: code, ...base };
+  }
+}
+
+/**
+ * 単発取得(runRegistryAutoFetch / runRegistrySearch / resolveRegistryCandidate)が
+ * 投げた例外を、一括の項目結果へ分類する純関数。
+ *
+ * ⚠**最重要(@codex #361 P1)**: runRegistryAutoFetch/runRegistrySearch は
+ * RegistryFetchError を **ApiError に包んで** throw する(元コードは providerCode に載る)。
+ * このため charged_but_failed/rate_limited は `instanceof RegistryFetchError` では拾えない。
+ * **providerCode を最優先で見て**分類する(見落とすと課金済み失敗が failed 扱いになり次の
+ * 有料項目へ進んでしまう)。
+ * ⚠**既取得(ALREADY_DONE)は done にしない**。台帳の鍵は charged と charged_but_failed の
+ * 両方で立ち、registryStatus も物件全体で別種の取得で obtained になり得るため、鍵の存在は
+ * 「この請求で PDF が付いた」証明にならない。安全側=skipped(要確認)にする。
  */
 export function classifyItemError(err: unknown): ItemOutcome {
   const base = { pauseJob: false, leavePending: false, cancelled: false };
 
-  // provider 由来の分類(RegistryFetchError.code)。
+  // 生の RegistryFetchError(直接呼び出し等)。
   if (err instanceof RegistryFetchError) {
-    switch (err.code) {
-      case "charged_but_failed":
-        return { status: "charged_but_failed", errorCode: err.code, pauseJob: true, leavePending: false, cancelled: false };
-      case "rate_limited":
-        // まだ順番待ち。項目は pending のまま・画面が間隔を空けて再試行。
-        return { status: "pending", errorCode: err.code, pauseJob: false, leavePending: true, cancelled: false };
-      case "cancelled":
-        return { status: "pending", errorCode: err.code, pauseJob: false, leavePending: true, cancelled: true };
-      // 要手動(自動では拾えない)=skipped。次の項目へ進む。
-      case "not_found":
-      case "location_rejected":
-        return { status: "skipped", errorCode: err.code, ...base };
-      // 一時的な失敗(あとで再試行可能)=failed。次の項目へ進む。
-      case "timeout":
-      case "provider_error":
-      case "auth_failed":
-      case "service_hours":
-      case "service_unavailable":
-        return { status: "failed", errorCode: err.code, ...base };
-      default:
-        return { status: "failed", errorCode: err.code, ...base };
-    }
+    return classifyByProviderCode(err.code);
   }
 
   // route/lib の入力・認可・状態エラー(ApiError)。
   if (err instanceof ApiError) {
-    // ⚠既取得(REGISTRY_PURCHASE_ALREADY_DONE)は**ここでは done にしない**(@codex #361 P1)。
-    // 台帳の鍵は charged と charged_but_failed の両方で立つため、鍵の存在=成功ではない。
-    // 呼び出し側(process.ts)が物件の obtained を確認して done/要確認を分ける。ここに
-    // 万一落ちてきたら安全側=下の 409 分岐で skipped(=成功と誤報しない)。
+    // ⚠provider 分類が包まれている場合は元コードで判定(charged_but_failed→paused 等)。
+    if (err.providerCode) {
+      return classifyByProviderCode(err.providerCode);
+    }
+    // 既取得は done にしない=安全側 skipped(要確認)。
+    if (err.code === "REGISTRY_PURCHASE_ALREADY_DONE") {
+      return { status: "skipped", errorCode: "already_processed_manual_check", ...base };
+    }
     // 課金スイッチが実行中に落ちた=readiness 崩れ。ジョブを止めて人手に委ねる。
     if (err.code === "REGISTRY_PURCHASE_NOT_ENABLED" || err.status === 501) {
       return { status: "pending", errorCode: err.code, pauseJob: true, leavePending: true, cancelled: false };
     }
-    // 物件が変わった/候補が合わない/施錠競合(409)= 要手動 skipped。
-    // アクセス喪失(403)も skipped(進捗フィルタで隠すが、掴んだ後に外れたら伏せる)。
+    // 物件が変わった/候補が合わない/施錠競合(409)・アクセス喪失(403)= 要手動 skipped。
     if (err.status === 409 || err.status === 403 || err.status === 404 || err.status === 422) {
       return { status: "skipped", errorCode: err.code ?? String(err.status), ...base };
     }

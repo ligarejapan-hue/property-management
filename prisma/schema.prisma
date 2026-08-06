@@ -1151,6 +1151,9 @@ model RegistryFetchJob {
   certificateType  String    @map("certificate_type") // owner|all
   requestedById    String    @map("requested_by_id") @db.Uuid
   requestedBy      User      @relation("RegistryFetchJobRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  // 二重作成防止(POST 応答が失われて利用者が再送しても同じジョブに冪等化する)。
+  // (作成者, キー)で一意。null は複数可(キー無しの作成は従来どおり)。
+  idempotencyKey   String?   @map("idempotency_key")
   activeItemId     String?   @map("active_item_id") @db.Uuid // 実行中項目(FKなし・app enforced CAS)
   pausedReason     String?   @map("paused_reason")
   total            Int       @default(0)
@@ -1165,6 +1168,7 @@ model RegistryFetchJob {
   updatedAt        DateTime  @updatedAt @map("updated_at")
   items            RegistryFetchJobItem[]
 
+  @@unique([requestedById, idempotencyKey])
   @@index([requestedById])
   @@index([status])
   @@map("registry_fetch_jobs")

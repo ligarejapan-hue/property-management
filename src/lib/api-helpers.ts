@@ -12,11 +12,18 @@ import {
 export class ApiError extends Error {
   status: number;
   code: string;
+  /**
+   * provider 由来の安全分類コード(charged_but_failed / rate_limited 等)を保持する任意フィールド。
+   * RegistryFetchError を ApiError に包んで throw する箇所(謄本取得)が元コードを消さずに
+   * 呼び出し側(一括取得の分類)へ渡すために使う。HTTP 応答(status/code/message)には影響しない。
+   */
+  providerCode?: string;
 
-  constructor(status: number, message: string, code = "ERROR") {
+  constructor(status: number, message: string, code = "ERROR", providerCode?: string) {
     super(message);
     this.status = status;
     this.code = code;
+    this.providerCode = providerCode;
   }
 }
 

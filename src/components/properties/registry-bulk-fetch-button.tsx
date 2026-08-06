@@ -41,7 +41,11 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
     setCreating(true);
     setError(null);
     try {
-      const res = await createRegistryFetchJob(propertyIds, certificateType);
+      const res = await createRegistryFetchJob(
+        propertyIds,
+        certificateType,
+        idemKeyRef.current, // 再送時の二重作成を防ぐ(サーバーが同じキーを冪等化)
+      );
       idemKeyRef.current = null; // 成功 → 次は新しいキー
       setOpen(false);
       router.push(`/properties/registry-fetch/${res.jobId}`);

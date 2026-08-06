@@ -1935,15 +1935,16 @@ export interface RegistryFetchProcessResult {
   morePending: boolean;
 }
 
-/** 複数物件の一括取得ジョブを作る。 */
+/** 複数物件の一括取得ジョブを作る。idempotencyKey で再送時の二重作成を防ぐ。 */
 export async function createRegistryFetchJob(
   propertyIds: string[],
   certificateType: "owner" | "all" = "owner",
+  idempotencyKey?: string,
 ): Promise<RegistryFetchJobCreateResult> {
   return apiFetch<RegistryFetchJobCreateResult>("/api/registry-fetch/jobs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ confirmed: true, propertyIds, certificateType }),
+    body: JSON.stringify({ confirmed: true, propertyIds, certificateType, idempotencyKey }),
   });
 }
 

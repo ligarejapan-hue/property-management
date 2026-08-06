@@ -2982,6 +2982,9 @@ export async function runRegistryAutoFetch(
         PROVIDER_ERROR_STATUS[err.code],
         err.message,
         "REGISTRY_AUTO_FETCH_PROVIDER_ERROR",
+        // ⚠元の分類コード(charged_but_failed / rate_limited 等)を消さずに渡す。
+        // 一括取得の分類が code 文字列を変えずに安全に判定できるようにする(@codex #361 P1)。
+        err.code,
       );
     }
 
