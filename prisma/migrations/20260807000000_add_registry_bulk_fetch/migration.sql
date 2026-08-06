@@ -9,6 +9,7 @@ CREATE TABLE "registry_fetch_jobs" (
     "certificate_type" TEXT NOT NULL,
     "requested_by_id" UUID NOT NULL,
     "idempotency_key" TEXT,
+    "request_fingerprint" TEXT,
     "active_item_id" UUID,
     "paused_reason" TEXT,
     "total" INTEGER NOT NULL DEFAULT 0,

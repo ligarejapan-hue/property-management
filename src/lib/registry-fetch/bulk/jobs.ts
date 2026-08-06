@@ -7,6 +7,7 @@
  *
  * ⚠進捗は保存済み counts を返さず、可視項目集合から都度計算する(@codex 設計指摘)。
  */
+import { createHash } from "node:crypto";
 import prisma from "@/lib/prisma";
 import { ApiError } from "@/lib/api-helpers";
 import { canAccessPropertyRecord } from "@/lib/property-access";
@@ -139,13 +140,30 @@ export async function createBulkFetchJob(
   }
 
   const idemKey = args.idempotencyKey?.trim() || null;
+  // 要求内容の指紋(対象物件の集合 + 種別)。同じキーで違う要求が来たら弾くための照合値。
+  const fingerprint = createHash("sha256")
+    .update(`${[...ids].sort().join(",")}|${certificateType}`)
+    .digest("hex")
+    .slice(0, 32);
+
   // 冪等: 同じキーの既存ジョブがあれば作らずそれを返す(再送で二重ジョブを作らない)。
   if (idemKey) {
     const existing = await prisma.registryFetchJob.findUnique({
       where: { requestedById_idempotencyKey: { requestedById: session.id, idempotencyKey: idemKey } },
       include: { items: { select: { status: true } } },
     });
-    if (existing) return summarizeCreate(existing.id, existing.items, 0);
+    if (existing) {
+      // ⚠同じキーが**違う要求**(選択物件/種別を変えて再送)に使い回された場合は、古いジョブを
+      // 返さず弾く(@codex #361 P2)。利用者の最新の確認と処理内容が食い違うのを防ぐ。
+      if (existing.requestFingerprint && existing.requestFingerprint !== fingerprint) {
+        throw new ApiError(
+          409,
+          "同じ操作キーで内容の異なる取得が要求されました。もう一度やり直してください",
+          "REGISTRY_BULK_IDEMPOTENCY_MISMATCH",
+        );
+      }
+      return summarizeCreate(existing.id, existing.items, 0);
+    }
   }
 
   // 検索キーの最小カラムのみ(所有者PIIは取らない)。
@@ -200,6 +218,7 @@ export async function createBulkFetchJob(
           certificateType,
           requestedById: session.id,
           idempotencyKey: idemKey,
+          requestFingerprint: fingerprint,
           total: itemsData.length,
           skipped: preSkipped,
         },
@@ -224,7 +243,16 @@ export async function createBulkFetchJob(
         where: { requestedById_idempotencyKey: { requestedById: session.id, idempotencyKey: idemKey } },
         include: { items: { select: { status: true } } },
       });
-      if (existing) return summarizeCreate(existing.id, existing.items, excluded);
+      if (existing) {
+        if (existing.requestFingerprint && existing.requestFingerprint !== fingerprint) {
+          throw new ApiError(
+            409,
+            "同じ操作キーで内容の異なる取得が要求されました。もう一度やり直してください",
+            "REGISTRY_BULK_IDEMPOTENCY_MISMATCH",
+          );
+        }
+        return summarizeCreate(existing.id, existing.items, excluded);
+      }
     }
     throw e;
   }

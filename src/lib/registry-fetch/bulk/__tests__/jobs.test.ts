@@ -119,6 +119,24 @@ describe("createBulkFetchJob", () => {
     expect(pm.property.findMany).not.toHaveBeenCalled(); // 冪等ヒットは物件検索もしない
   });
 
+  it("同じキーで内容の異なる要求(指紋不一致)は 409 で弾く(古いジョブを返さない)", async () => {
+    // 既存ジョブは別の指紋(違う物件/種別で作られた)。
+    pm.registryFetchJob.findUnique.mockResolvedValue({
+      id: "job-old",
+      requestFingerprint: "DIFFERENT_FINGERPRINT_0000000000",
+      items: [{ status: "pending" }],
+    });
+    await expect(
+      createBulkFetchJob({
+        session: STAFF,
+        propertyIds: ["p1"],
+        certificateType: "owner",
+        idempotencyKey: "key-123",
+      }),
+    ).rejects.toMatchObject({ status: 409, code: "REGISTRY_BULK_IDEMPOTENCY_MISMATCH" });
+    expect(pm.registryFetchJob.create).not.toHaveBeenCalled();
+  });
+
   it("idempotencyKey を job 作成データに渡す", async () => {
     pm.registryFetchJob.findUnique.mockResolvedValue(null); // 既存なし
     pm.property.findMany.mockResolvedValue([

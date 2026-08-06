@@ -1154,6 +1154,9 @@ model RegistryFetchJob {
   // 二重作成防止(POST 応答が失われて利用者が再送しても同じジョブに冪等化する)。
   // (作成者, キー)で一意。null は複数可(キー無しの作成は従来どおり)。
   idempotencyKey   String?   @map("idempotency_key")
+  // 冪等キーに紐づく要求内容の指紋(対象物件+種別の sha256)。同じキーで**違う要求**が
+  // 来たら古いジョブを返さず弾く(選択や種別を変えて再送したケース・@codex #361 P2)。
+  requestFingerprint String? @map("request_fingerprint")
   activeItemId     String?   @map("active_item_id") @db.Uuid // 実行中項目(FKなし・app enforced CAS)
   pausedReason     String?   @map("paused_reason")
   total            Int       @default(0)
