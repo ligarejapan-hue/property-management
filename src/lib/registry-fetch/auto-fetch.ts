@@ -2852,6 +2852,18 @@ export async function runRegistryAutoFetch(
       certificateType,
     });
 
+    // ⚠**有料取得は「PDFの添付」が成果物**。保存に失敗していたら成功にしない
+    // (@codex #360 P1)。processRegistryPdf は保存失敗を warning に握りつぶして
+    // attachmentId を返さない。有料購入なのにここが空だと、
+    //   - all: 所有者反映もしないので**払ったのに物件に何も残らない**
+    //   - owner: 所有者は反映されるが**買ったPDF自体は失われる**
+    // まま obtained にして成功表示され、台帳は30日再取得をブロックする。
+    // 課金境界の後なので **charged_but_failed** として下の catch に処理させる
+    // (台帳記録+ロック維持+マイページ確認の案内)。
+    if (purchaseKeyHash && !result.attachmentId) {
+      throw new RegistryFetchError("charged_but_failed");
+    }
+
     // 成功 → scheduled から obtained へ確定。
     await prisma.property.update({
       where: { id: propertyId },
