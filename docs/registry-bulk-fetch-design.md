@@ -426,8 +426,12 @@ searchByRealEstateNumber はカートに触れる前に provider_error で停止
        ブレーカーも立たず次回以降も課金が通る。有料取得の最終化は
        **attachmentId が非null であることを必須条件**にし、null(=warning 経路)は
        **charged_but_failed に変換**して未解決のまま残す。
-       ※これは単発の有料取得では実装済み(取得結果に attachmentId が無ければ
-       charged_but_failed を投げる)。一括の項目最終化も同じ条件を共有する。
+       ※これは単発の有料取得では実装済み。実コードは
+       `src/lib/registry-fetch/auto-fetch.ts` の processRegistryPdf 呼び出し直後・
+       物件を obtained にする**前**に `if (purchaseKeyHash && !result.attachmentId)
+       throw charged_but_failed`(#360 で追加)。一括の項目最終化も同じ条件を
+       共有する。※このブランチには origin/main を取り込み済みで、上記ガードは
+       同一ツリー内で確認できる(@codex 指摘の「ブランチに未反映」への対応)。
      - ⚠**成功した項目も添付確定後に charge_resolution=charged で決着させる**
        (@codex 設計指摘 P1)。ブレーカー解除の関所は**未解決の job_items**も
        見る。成功項目が charged/unresolved のまま残ると、後で無関係な課金失敗が
