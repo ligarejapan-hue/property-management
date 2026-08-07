@@ -2443,6 +2443,17 @@ async function closeQuietly(
  */
 let sharedRegistryFetchThrottle: RegistryFetchThrottle | undefined;
 
+/**
+ * 有料取得の最小間隔(ms)。REGISTRY_FETCH_MIN_INTERVAL_MS があればそれ、無ければ既定 60000
+ * (throttle の DEFAULT_MIN_INTERVAL_MS と一致)。一括取得が rate_limited のときの再試行待ち
+ * (retryAfterMs)にも使う=固定値で待って何度も rate_limited になるのを避ける。
+ */
+export function getRegistryFetchMinIntervalMs(): number {
+  const raw = process.env.REGISTRY_FETCH_MIN_INTERVAL_MS;
+  const parsed = raw ? Number(raw) : undefined;
+  return parsed && Number.isFinite(parsed) && parsed > 0 ? parsed : 60_000;
+}
+
 function getSharedRegistryFetchThrottle(): RegistryFetchThrottle {
   if (!sharedRegistryFetchThrottle) {
     const raw = process.env.REGISTRY_FETCH_MIN_INTERVAL_MS;
@@ -2790,6 +2801,15 @@ export async function runRegistryAutoFetch(
       ref: property.id,
     });
 
+    // processRegistryPdf の結果は inner try の外(成功ログ/返却)でも使うため先に宣言する。
+    let result: Awaited<ReturnType<typeof processRegistryPdf>>;
+
+    // ⚠**課金境界(provider 返却)を越えた後の失敗はすべて charged_but_failed に統一**する
+    // (@codex #361 P1)。以降の PDF検証(422)・抽出(422)・processRegistryPdf の ApiError・
+    // Prisma 例外を**生のまま**投げると、呼び出し側(単発 route / 一括取得)が「未課金の失敗」と
+    // 誤分類し、一括では次の有料取得へ進んでしまう。ledger 書き込み失敗・添付なしガードの
+    // RegistryFetchError("charged_but_failed") は既に正しいのでそのまま通す。
+    try {
     // ⚠台帳は provider が返った**直後**に書く(@codex #345 P1)。ここまで来た時点で
     // 課金は済んでいる。後段(PDF検証・抽出・添付)で失敗しても台帳が無いと、
     // 再実行で**同じ謄本にもう一度課金**できてしまう。
@@ -2841,7 +2861,7 @@ export async function runRegistryAutoFetch(
     // 既存の手動取込コアへ接続（Mode A: 対象物件を直接更新）。ImportJob 作成・
     // Attachment(type="registry") 保存・pdf_import AuditLog（非PII）は processRegistryPdf
     // 側の既存方針をそのまま再利用する（新しい PII 保存先は増やさない）。
-    const result = await processRegistryPdf({
+    result = await processRegistryPdf({
       session,
       text,
       propertyId,
@@ -2869,6 +2889,16 @@ export async function runRegistryAutoFetch(
       where: { id: propertyId },
       data: { registryStatus: "obtained", version: { increment: 1 } },
     });
+    } catch (postErr) {
+      // 課金境界を越えた後の失敗=charged_but_failed に変換して外側 catch へ委ねる
+      // (台帳記録+ロック維持+マイページ確認の案内)。既に charged_but_failed 等の
+      // RegistryFetchError ならそのまま(二重変換しない)。無料経路(purchaseKeyHash なし)は
+      // 元のエラーを保つ(お金は動いていない)。
+      if (purchaseKeyHash && !(postErr instanceof RegistryFetchError)) {
+        throw new RegistryFetchError("charged_but_failed");
+      }
+      throw postErr;
+    }
 
     // 台帳は provider 返却直後に outcome:"charged" で記録済み(@codex #345 P1)。
     // ここでの追記は不要(照合は purchaseKeyHash のみで行い outcome は見ない)。
@@ -2982,6 +3012,9 @@ export async function runRegistryAutoFetch(
         PROVIDER_ERROR_STATUS[err.code],
         err.message,
         "REGISTRY_AUTO_FETCH_PROVIDER_ERROR",
+        // ⚠元の分類コード(charged_but_failed / rate_limited 等)を消さずに渡す。
+        // 一括取得の分類が code 文字列を変えずに安全に判定できるようにする(@codex #361 P1)。
+        err.code,
       );
     }
 

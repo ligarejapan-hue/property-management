@@ -241,6 +241,8 @@ export async function runRegistrySearch(
         err.code === "cancelled"
           ? "REGISTRY_SEARCH_CANCELLED"
           : "REGISTRY_SEARCH_PROVIDER_ERROR",
+        // 元の分類コードを消さずに渡す(一括取得が rate_limited/cancelled を安全に判定・@codex #361 P1)。
+        err.code,
       );
     }
     // それ以外（Prisma 例外等）はそのまま route の handleApiError に委ねる。
