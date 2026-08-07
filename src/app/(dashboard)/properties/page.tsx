@@ -9,6 +9,7 @@ import { canCreateSaleDm, buildSaleDmPartialNotice } from "@/lib/sale-dm-letter/
 import { debounce } from "@/lib/debounce";
 import { EXPORT_COLUMNS } from "@/lib/property-export-columns";
 import NewPropertyModal from "@/components/properties/new-property-modal";
+import { RegistryBulkFetchButton } from "@/components/properties/registry-bulk-fetch-button";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import StatusBadge, {
   badgeIntentClass,
@@ -220,6 +221,7 @@ function PropertiesPageInner() {
     canCreateDm,
     canWriteProperty,
     canDeleteProperty,
+    canBulkRegistry,
   } = useMemo(() => {
     // F12-2 Codex 対応(3): 進入時 refresh 中（pending）・provider 取得中（loading）は
     // stale な granted permissions を使わず空配列に倒す＝ボタン非表示（fail-safe 側）。
@@ -251,6 +253,11 @@ function PropertiesPageInner() {
       // 物件削除は DELETE /api/properties/[id] が property:delete を要求する。
       // 押しても必ず 403 になるボタンを出さないよう UI も同条件に揃える。
       canDeleteProperty: hasDelete("property"),
+      // 謄本の一括取得(registry:auto_fetch)。課金スイッチ+校正(capabilities.registryPurchase)
+      // との AND で最終的にボタンを出す(下の描画側)。
+      canBulkRegistry: effectivePermissions.some(
+        (p) => p.resource === "registry" && p.action === "auto_fetch" && p.granted,
+      ),
     };
   }, [permissionsRefreshPending, permissionsLoading, mePermissions]);
 
@@ -888,6 +895,16 @@ function PropertiesPageInner() {
             {creatingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             売却DMを作成{selectedIds.size > 0 ? `（${selectedIds.size}件）` : ""}
           </button>
+        )}
+        {/* 謄本の一括取得。権限(registry:auto_fetch)に加え、有料取得が使える設定
+            (capabilities.registryPurchase=課金スイッチ+校正)のときだけ出す。休眠中は隠す。 */}
+        {canBulkRegistry && capabilities?.registryPurchase && (
+          <RegistryBulkFetchButton
+            propertyIds={properties
+              .filter((p) => selectedIds.has(p.id))
+              .map((p) => p.id)}
+            disabled={loading || selectedIds.size === 0}
+          />
         )}
         <button
           type="button"

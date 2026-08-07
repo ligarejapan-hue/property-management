@@ -1868,6 +1868,119 @@ export async function obtainRegistryByCandidate(
   });
 }
 
+// ---- 謄本 一括取得(PR-B・薄い版) ----
+
+export interface RegistryFetchJobCreateResult {
+  jobId: string;
+  total: number;
+  pending: number;
+  skipped: number;
+  /** 権限が無い/存在しない等でジョブに含めなかった件数。 */
+  excluded: number;
+}
+
+export interface RegistryFetchJobCounts {
+  total: number;
+  pending: number;
+  processing: number;
+  done: number;
+  failed: number;
+  skipped: number;
+  chargedButFailed: number;
+}
+
+export type RegistryFetchJobStatus =
+  | "pending"
+  | "processing"
+  | "paused"
+  | "completed"
+  | "cancelled";
+
+export type RegistryFetchItemStatus =
+  | "pending"
+  | "processing"
+  | "done"
+  | "failed"
+  | "skipped"
+  | "charged_but_failed";
+
+export interface RegistryFetchJobProgress {
+  jobId: string;
+  status: RegistryFetchJobStatus;
+  certificateType: "owner" | "all";
+  pausedReason: string | null;
+  activeItemId: string | null;
+  counts: RegistryFetchJobCounts;
+  items: Array<{
+    id: string;
+    propertyId: string | null;
+    status: RegistryFetchItemStatus;
+    errorCode: string | null;
+  }>;
+}
+
+export interface RegistryFetchProcessResult {
+  outcome:
+    | "processed"
+    | "skipped"
+    | "rate_limited"
+    | "drained"
+    | "busy"
+    | "paused"
+    | "cancelled";
+  jobStatus: RegistryFetchJobStatus;
+  itemId?: string;
+  itemStatus?: RegistryFetchItemStatus;
+  errorCode?: string | null;
+  morePending: boolean;
+  /** rate_limited のとき、次の再試行まで待つべき最小 ms(サーバーの実効間隔)。 */
+  retryAfterMs?: number;
+}
+
+/** 複数物件の一括取得ジョブを作る。idempotencyKey で再送時の二重作成を防ぐ。 */
+export async function createRegistryFetchJob(
+  propertyIds: string[],
+  certificateType: "owner" | "all" = "owner",
+  idempotencyKey?: string,
+): Promise<RegistryFetchJobCreateResult> {
+  return apiFetch<RegistryFetchJobCreateResult>("/api/registry-fetch/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmed: true, propertyIds, certificateType, idempotencyKey }),
+  });
+}
+
+/** 一括ジョブの進捗を取得する(可視項目でフィルタ済み・件数は再計算値)。 */
+export async function fetchRegistryFetchJob(
+  jobId: string,
+): Promise<RegistryFetchJobProgress> {
+  return apiFetch<RegistryFetchJobProgress>(`/api/registry-fetch/jobs/${jobId}`);
+}
+
+/** pending 項目を1件だけ処理する(画面駆動の分割実行)。 */
+export async function processNextRegistryFetchItem(
+  jobId: string,
+): Promise<RegistryFetchProcessResult> {
+  return apiFetch<RegistryFetchProcessResult>(
+    `/api/registry-fetch/jobs/${jobId}/process-next`,
+    { method: "POST" },
+  );
+}
+
+/** ジョブを中止する(節目で止まる)。 */
+export async function cancelRegistryFetchJob(
+  jobId: string,
+): Promise<{ status: RegistryFetchJobStatus }> {
+  return apiFetch(`/api/registry-fetch/jobs/${jobId}/cancel`, { method: "POST" });
+}
+
+/** 一時停止したジョブを再開する。 */
+export async function resumeRegistryFetchJob(
+  jobId: string,
+): Promise<{ status: RegistryFetchJobStatus }> {
+  return apiFetch(`/api/registry-fetch/jobs/${jobId}/resume`, { method: "POST" });
+}
+
 /** テキスト貼り付けプレビュー専用 (DB書き込みなし) */
 export async function parseRegistryPdfText(text: string, fileName?: string) {
   if (USE_MOCK) {

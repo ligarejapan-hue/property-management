@@ -44,10 +44,12 @@ vi.mock("@/lib/api-helpers", () => {
   class MockApiError extends Error {
     status: number;
     code: string;
-    constructor(status: number, message: string, code = "ERROR") {
+    providerCode?: string;
+    constructor(status: number, message: string, code = "ERROR", providerCode?: string) {
       super(message);
       this.status = status;
       this.code = code;
+      this.providerCode = providerCode;
     }
   }
   return {
@@ -955,14 +957,22 @@ describe("段階②: 地番候補の有料取得（台帳=二重課金ガード�
   it("⚠provider 成功後に PDF 処理が失敗しても台帳は残る（@codex #345 P1: 台帳は provider 返却直後）", async () => {
     // 課金は provider が返った時点で済んでいる。後段（PDF検証）で失敗しても台帳が
     // 無いと再実行で同じ謄本にもう一度課金できてしまう。
-    (isPdfBuffer as Mock).mockReturnValue(false); // PDF検証で 422 に落とす
+    // ⚠課金境界(provider 返却)を越えた後の失敗は charged_but_failed に統一される
+    // (@codex #361 P1)。生の 422 ではなく 502(charged_but_failed)を返し、台帳には
+    // charged と charged_but_failed の両方が残る(再課金は charged マーカーで防がれる)。
+    (isPdfBuffer as Mock).mockReturnValue(false); // PDF検証で post-charge 失敗
     const { promise } = runLocation();
-    await expect(promise).rejects.toMatchObject({ status: 422 });
+    await expect(promise).rejects.toMatchObject({
+      status: 502,
+      providerCode: "charged_but_failed",
+    });
     const ledger = pm.auditLog.create.mock.calls
       .map((c) => (c[0] as { data: { action: string; detail: { outcome: string; purchaseKeyHash: string } } }).data)
       .filter((a) => a.action === "registry_location_purchase");
-    expect(ledger).toHaveLength(1);
-    expect(ledger[0].detail.outcome).toBe("charged");
+    // 再課金ガードの charged マーカーが残っている。
+    expect(ledger.some((l) => l.detail.outcome === "charged")).toBe(true);
+    // 課金後失敗も記録される(生の 422 で握りつぶさない)。
+    expect(ledger.some((l) => l.detail.outcome === "charged_but_failed")).toBe(true);
   });
 
   it("⚠課金後失敗の台帳が書けなければロックを解除しない（@codex #345 R3 P1: fail-closed）", async () => {
