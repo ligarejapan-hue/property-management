@@ -34,6 +34,7 @@ import {
 } from "@/lib/registry-fetch/cancel-safety";
 import {
   SHOZAI_DIALOG_BUTTON_SCOPE,
+  dedupeShozaiDialogItems,
   looksLikeLotTail,
   matchDialogItemByPrefix,
   normalizeForMatch,
@@ -466,8 +467,8 @@ const REGISTRY_SELECTORS = {
   locationDialogArea: "#kuikiDialogArea", // [確定] 所在選択ダイアログの器(中身は非同期ロード)
   locationDialogLoading: ".GKuikiDialogWaitMsg", // [確定] 「読み込み中・・・・」(消えるまで待つ)
   locationDialogSelectedPath: ".GKuikiDialogSelectedText", // [確定] 選択済みの階層表示(例「東京都>」)
-  locationDialogItem: '#kuikiDialogArea td[id^="GKuiki"]', // [確定] 区域の1件(td・onclick=GKuikiDialogFixed)
-  locationDialogAllTab: "#btn-all", // [確定] 「全部」タブ(あかさたな絞り込みを使わない)
+  locationDialogItem: '#kuikiDialogArea td[id^="GKuiki"]', // [確定] 区域の1件(td・onclick=GKuikiDialogNext/Fixed)。⚠全タブ(全部+五十音)分が同時にDOMへ載る=同一区域が重複して列挙される
+  locationDialogAllTab: "#btn-all", // [確定] 「全部」タブ(毎段ここへ寄せてから区域を押す)
   // ⚠ダイアログの確定/戻る/取消は jQuery UI の buttonpane にあり **id を持たない**。
   //   文言で引く(ページ本体の「確定」= fuBtnForward とは**別物**なので取り違えない)。
   locationDialogButtonPane: ".ui-dialog-buttonpane button", // [確定] 確定/戻る/取消
@@ -763,15 +764,48 @@ async function selectShozaiViaDialog(
     //  壊れ、その住所が永久に検索できなくなる。正解はサイトの一覧が持っている。
   let remaining = normalizeForMatch(rest);
   while (remaining.length > 0) {
+    // 3-0) 「全部」タブへ寄せる。⚠区域の td は**全タブ分が DOM に同時に存在**し
+    // (隠れタブ= ui-tabs-hide)、既定でどのタブが選ばれるかはサーバー次第。
+    // 見えているタブしかクリックできないため、毎段「全部」を明示的に選ぶ。
+    // 無い/押せない作りでも続行できる(下の重複畳み+不可視クリックの保険)。
+    try {
+      await page.evaluate((sel: string) => {
+        const el = document.querySelector(sel);
+        if (!el) return;
+        const a = el.matches("a") ? el : (el.querySelector("a") ?? el);
+        const li = a.closest("li");
+        // [確定] 選択中タブの印= ui-tabs-selected (実サイトの GKuikiDialog.js が
+        // `li.ui-tabs-selected.ui-state-active a` で選択タブを参照している)。
+        // 判定が外れても「選択済みタブをもう一度押す」だけ=無害。
+        if (li && li.classList.contains("ui-tabs-selected")) return; // 既に全部タブ
+        (a as { click?: () => void }).click?.();
+      }, S.locationDialogAllTab);
+    } catch {
+      // タブ切替に失敗しても、この後の畳み+不可視クリックで進められる。
+    }
     const items = (await page.evaluate((sel: string) => {
-      return Array.from(document.querySelectorAll(sel)).map((el) => ({
-        id: (el as { id?: string }).id || "",
-        text: (el.textContent || "").trim(),
-      }));
+      return Array.from(document.querySelectorAll(sel)).map((el) => {
+        // onclick=`GKuikiDialogNext('402','青ヶ島村',…)` の第1引数=区域コード。
+        // 同名の td がタブ重複のコピーか別区域かを見分ける手がかり(表示はしない)。
+        const oc = el.getAttribute("onclick") || "";
+        const m = /'([^']*)'/.exec(oc);
+        return {
+          id: (el as { id?: string }).id || "",
+          text: (el.textContent || "").trim(),
+          code: m ? m[1] : "",
+          visible: !el.closest(".ui-tabs-hide"),
+        };
+      });
     }, S.locationDialogItem)) as ShozaiDialogItem[] | undefined;
     if (!items || items.length === 0) break; // これ以上の段が無い＝ここまでで確定
 
-    const hit = matchDialogItemByPrefix(items, remaining);
+    // ⚠タブ重複(全部タブ+五十音タブの同一区域コピー)を畳んでから決める。
+    // 畳まないと「横浜市」が2件ヒット=「決められない」で**全住所が中止**になる
+    // (2026-08-07 本番実障害・候補126件=ユニーク63件×2)。
+    // ※ matchDialogItemByPrefix の入口でも畳む(冪等)。ここで畳むのは
+    //   失敗ログに「畳んだ後の件数」を出すため。
+    const deduped = dedupeShozaiDialogItems(items);
+    const hit = matchDialogItemByPrefix(deduped, remaining);
     if (!hit && looksLikeLotTail(remaining)) {
       // ⚠**残っているのが地番なら、それは区域ではない**(@codex #358 P2)。
       // 区域を選び終えた後に数字だけ残るのは正常(地番は別の欄に入れる)。
@@ -781,9 +815,11 @@ async function selectShozaiViaDialog(
     if (!hit) {
       // ⚠**当てずっぽうで選ばない**。別の区域を選ぶと、利用者が意図しない
       // 土地の謄本を後段で請求してしまう。所在の指定として扱って中止する。
-      // 選択肢の中身(地名)はログに出さない(PII 方針)。
+      // 選択肢の中身(地名)はログに出さない(PII 方針)。件数のみ(畳んだ後/生)。
       console.warn(
         "[registry-search] shozai dialog: no unique match, candidates=" +
+          String(deduped.length) +
+          " raw=" +
           String(items.length),
       );
       await cancel();
@@ -793,7 +829,16 @@ async function selectShozaiViaDialog(
       return (document.querySelector(sel)?.textContent || "").trim();
     }, S.locationDialogSelectedPath)) ?? "") as string;
 
-    await page.click("#" + hit.item.id);
+    if (hit.item.visible === false) {
+      // ⚠見えないコピーしか選べなかったとき(全部タブが選べない地域など)。
+      // 不可視要素は page.click が actionability 待ちで固まるため、DOM click で
+      // onclick を発火させる(ログインボタンの DOM click と同じ前例)。
+      await page.evaluate((sel: string) => {
+        (document.querySelector(sel) as { click?: () => void } | null)?.click?.();
+      }, "#" + hit.item.id);
+    } else {
+      await page.click("#" + hit.item.id);
+    }
     remaining = hit.rest;
 
     // 次の段が読み込まれるまで待つ。

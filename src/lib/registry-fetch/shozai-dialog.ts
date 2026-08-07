@@ -101,13 +101,16 @@ export function matchDialogItemByPrefix(
   items: ShozaiDialogItem[],
   remaining: string,
 ): DialogPrefixMatch | null {
-  const direct = matchOnce(items, normalizeForMatch(remaining));
+  // ⚠タブ重複(全部タブ+五十音タブの同一区域コピー)を先に畳む。畳まないと
+  // どの区域も「同名2件=決められない」に当たり全住所が中止になる(実障害)。
+  const deduped = dedupeShozaiDialogItems(items);
+  const direct = matchOnce(deduped, normalizeForMatch(remaining));
   if (direct) return direct;
   // ⚠そのままで当たらないときだけ、郵便表記の丁目を復元して再挑戦する
   // (「丸の内1-1-1」→「丸の内1丁目1-1」)。常に適用すると地番を丁目と誤読する。
   const expanded = expandChomeShorthand(normalizeForMatch(remaining));
   if (expanded === normalizeForMatch(remaining)) return null;
-  return matchOnce(items, expanded);
+  return matchOnce(deduped, expanded);
 }
 
 /** 一覧に対する最長前方一致を1回だけ試す（同じ長さで複数なら決めない）。 */
@@ -149,6 +152,62 @@ export function looksLikeLotTail(s: string): boolean {
 export interface ShozaiDialogItem {
   id: string;
   text: string;
+  /**
+   * 区域コード (td の onclick=`GKuikiDialogNext('402','青ヶ島村',…)` の第1引数)。
+   * 同名の td がコピー(タブ重複)なのか別区域なのかを見分ける唯一の手がかり。
+   */
+  code?: string;
+  /** 見えているタブの中の td か (隠れタブ= `.ui-tabs-hide` 配下は false)。 */
+  visible?: boolean;
+}
+
+/**
+ * ⚠**区域の td は全部タブ+五十音タブで DOM に2回ずつ現れる**(2026-08-07 本番実障害)。
+ *
+ * ダイアログはタブ構造(全部/あ/か/…)で、**全タブ分の td が同時に DOM にある**
+ * (隠れタブは `ui-tabs-hide` で見えないだけ)。そのまま突き合わせると
+ * 「横浜市」が2件ヒット=「同名2件は決められない」の安全装置に当たり、
+ * **すべての住所が1段目で中止**になっていた。
+ *
+ * 同じ名前でも**区域コードが同じならコピー**なので1件に畳む。押せるのは
+ * 見えている方だけなので、**visible のコピーを優先**して残す。
+ * ⚠コードが**違う**同名や、コードが**読めない**同名は畳まない(別区域の
+ * 可能性を潰せないときは、従来どおり「決められない=中止」に倒す)。
+ */
+export function dedupeShozaiDialogItems(
+  items: ShozaiDialogItem[],
+): ShozaiDialogItem[] {
+  const groups = new Map<string, ShozaiDialogItem[]>();
+  const order: string[] = [];
+  for (const it of items) {
+    const key = normalizeForMatch(it.text);
+    if (!key) continue;
+    const g = groups.get(key);
+    if (g) {
+      g.push(it);
+    } else {
+      groups.set(key, [it]);
+      order.push(key);
+    }
+  }
+  const out: ShozaiDialogItem[] = [];
+  for (const key of order) {
+    const g = groups.get(key)!;
+    if (g.length === 1) {
+      out.push(g[0]);
+      continue;
+    }
+    const codes = g.map((x) => (x.code ?? "").trim());
+    const distinct = new Set(codes.filter((c) => c.length > 0));
+    if (distinct.size !== 1 || codes.some((c) => c.length === 0)) {
+      // コード違い/コード不明の同名＝コピーと断定できない。全員残す
+      // (→ 呼び出し側の「同名2件=決められない」で安全に中止する)。
+      out.push(...g);
+      continue;
+    }
+    out.push(g.find((x) => x.visible !== false) ?? g[0]);
+  }
+  return out;
 }
 
 /**

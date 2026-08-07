@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  dedupeShozaiDialogItems,
   looksLikeLotTail,
   matchDialogItemByPrefix,
   normalizeForMatch,
@@ -128,6 +129,70 @@ describe("matchDialogItemByPrefix — サイトの一覧を正解として1段�
   });
 });
 
+describe("⚠タブ重複 — 区域のtdは全部タブ+五十音タブでDOMに2回ずつ現れる(2026-08-07 本番実障害)", () => {
+  // 実障害: 神奈川県の1段目でtdが126件列挙され、「横浜市」が全部タブと
+  // 五十音タブの2箇所にあるため「同名2件=決められない」で**すべての住所が
+  // 中止**になった。区域コード(onclick第1引数)が同じなら同じ区域のコピー
+  // なので、1件に畳んでから決める。
+  it("同名でもコードが同じなら1件に畳んで決める", () => {
+    const m = matchDialogItemByPrefix(
+      [
+        { id: "GKuiki0", text: "横浜市", code: "201", visible: true },
+        { id: "GKuiki1", text: "川崎市", code: "202", visible: true },
+        { id: "GKuiki63", text: "横浜市", code: "201", visible: false },
+        { id: "GKuiki64", text: "川崎市", code: "202", visible: false },
+      ],
+      "横浜市南区井土ケ谷中町69-2",
+    );
+    expect(m?.item.id).toBe("GKuiki0");
+    expect(m?.rest).toBe(normalizeForMatch("南区井土ケ谷中町69-2"));
+  });
+
+  it("見えているコピーを選ぶ（クリックできるのは見えている方）", () => {
+    const m = matchDialogItemByPrefix(
+      [
+        { id: "hidden", text: "横浜市", code: "201", visible: false },
+        { id: "shown", text: "横浜市", code: "201", visible: true },
+      ],
+      "横浜市南区",
+    );
+    expect(m?.item.id).toBe("shown");
+  });
+
+  it("⚠同名でもコードが違えば畳まない（取り違えは中止に倒す）", () => {
+    expect(
+      matchDialogItemByPrefix(
+        [
+          { id: "A", text: "中央区", code: "101" },
+          { id: "B", text: "中央区", code: "102" },
+        ],
+        "中央区銀座",
+      ),
+    ).toBeNull();
+  });
+
+  it("⚠コードが読めない同名重複も畳まない（既存の安全動作を維持）", () => {
+    expect(
+      matchDialogItemByPrefix(
+        [
+          { id: "A", text: "中央区" },
+          { id: "B", text: "中央区", code: "101" },
+        ],
+        "中央区銀座",
+      ),
+    ).toBeNull();
+  });
+
+  it("dedupeShozaiDialogItems — 畳んだ後も並び順は最初の出現位置を保つ", () => {
+    const out = dedupeShozaiDialogItems([
+      { id: "a", text: "横浜市", code: "201", visible: false },
+      { id: "b", text: "川崎市", code: "202", visible: true },
+      { id: "c", text: "横浜市", code: "201", visible: true },
+    ]);
+    expect(out.map((x) => x.id)).toEqual(["c", "b"]);
+  });
+});
+
 describe("⚠実際の住所表記で通ること (@codex #358 P2)", () => {
   // サイトの一覧は「丸の内一丁目」(漢数字)。アプリの住所は「丸の内1丁目」や
   // 「丸の内1-1-1」(郵便表記)が普通。そろえないと**ごく一般的な住所が
@@ -210,9 +275,10 @@ describe("配線（実サイト probe 2026-08-05 の結果を固定）", () => {
   });
 
   it("⚠住所を自前の規則で切らない (@codex #358 P2)", () => {
-    // 「市区町村郡」で切る方式は東村山市などで壊れる。サイトの一覧に当てる。
+    // 「市区町村郡」で切る方式は東村山市などで壊れる。サイトの一覧に当てる
+    // (タブ重複を畳んだ deduped を渡す=2026-08-07 実障害対応)。
     const s = SRC();
-    expect(s).toMatch(/matchDialogItemByPrefix\(items, remaining\)/);
+    expect(s).toMatch(/matchDialogItemByPrefix\(deduped, remaining\)/);
     expect(s).not.toMatch(/splitLocationSegments/);
   });
 
@@ -322,5 +388,22 @@ describe("配線（実サイト probe 2026-08-05 の結果を固定）", () => {
     for (const w of warns) {
       expect(w).not.toMatch(/remaining|hit\.item\.text|items\[/);
     }
+  });
+
+  it("⚠タブ重複を配線でも畳む — 可視性と区域コードを読み取り dedupe を通す(2026-08-07 実障害)", () => {
+    const fn = DIALOG_FN();
+    // 区域のtdは全タブ分がDOMに同時に存在する(隠れタブ= ui-tabs-hide)。
+    expect(fn).toContain('closest(".ui-tabs-hide")');
+    // onclick 第1引数 = 区域コード(同名の別区域と区別する唯一の手がかり)。
+    expect(fn).toContain('getAttribute("onclick")');
+    expect(fn).toContain("dedupeShozaiDialogItems(");
+  });
+
+  it("⚠毎段「全部」タブへ寄せる（既定の選択タブはサーバー次第で五十音になり得る）", () => {
+    expect(DIALOG_FN()).toContain("locationDialogAllTab");
+  });
+
+  it("⚠見えないコピーしか選べなかったときは DOM click で押す（不可視要素は page.click が固まる）", () => {
+    expect(DIALOG_FN()).toMatch(/visible === false/);
   });
 });
