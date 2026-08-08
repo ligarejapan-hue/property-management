@@ -41,6 +41,7 @@ model DmExportBatch {
   createdBy   String    @map("created_by") @db.Uuid
   createdAt   DateTime  @default(now()) @map("created_at")
   attemptKey  String    @unique @map("attempt_key") // 押下ごとの冪等キー(下記「出力は2段階」)
+  downloadedAt DateTime? @map("downloaded_at")      // 初回DLの刻印(配信集合の不変化境界・確定の前提)
   confirmedAt DateTime? @map("confirmed_at")        // null=未確定
   confirmedBy String?   @map("confirmed_by") @db.Uuid
   sentOn      DateTime? @map("sent_on") @db.Date    // 投函日(確定時に入力)
@@ -65,10 +66,13 @@ model DmExportBatchItem {
 
 - **出力は2段階 = 「POST で控え作成 → GET で CSV ダウンロード」**(R1〜R39 で到達した最終形。@codex R39 P2):
   - **POST `/api/properties/dm-batches`**(body=filters+attemptKey)が検索条件を評価し、**バッチ+items を作成して batchId を返す**。副作用は POST に置く(このリポの規約どおり=**cross-site のトップレベル GET 遷移では控えを作れない**。SameSite=Lax の直叩き/ブックマークで最大1万itemの控えが無限に積まれる穴(R38-39)を CSRF 境界で塞ぐ)。
-  - **GET `/api/properties/dm-batches/[id]/csv`** は**保存済みの items から CSV を生成して返すだけ**(書き込みなし・no-store)。ダウンロードは従来どおりブラウザ遷移で行える(UI は POST→返ってきた batchId の GET URL へ遷移)。⚠**GET にも既存 export と同一の4権限+PII表示レベル(plain)ゲートを適用**し、**現在の record scope でバッチをフルに描画できない場合(1件でも欠ける)は 403**(「担当範囲が変わったため再出力してください」)にする(@codex R40 P1 → R41 P2: 部分CSVを配ると「DLした集合」と「確定される集合」がずれ、郵送していない宛先に偽の送付記録が付く。作成者本人のバッチのみDL可)。
+  - **GET `/api/properties/dm-batches/[id]/csv`** は**保存済みの items から CSV を生成して返す**(no-store・作成者本人のみ・4権限+PII表示レベル(plain)ゲート)。ダウンロードは従来どおりブラウザ遷移(UI は POST→batchId の GET URL へ遷移)。**「初回ダウンロード」を境界とするライフサイクル**(@codex R40 P1 → R41/R42 で確定):
+    - **初回 GET(downloadedAt 未設定)**: 現在状態を検証してから配る。(1) record scope で1件でも欠ける→**403**(再出力案内) (2) **terminal 反響(refused/undeliverable)が付いた宛先が混ざった→409**(再出力案内。控えが古いまま除外済みの相手へ郵送するのを防ぐ=@codex R42 P1) (3) **owner 削除で null になった item は items から物理削除して除外**(件数報告)。残った items が**配信集合そのもの**になり、`downloadedAt` を刻む(列追加)。
+    - **再試行 GET(downloadedAt 設定済み)**: 同じ items から再生成(権限+本人+スコープ403のみ再検証。terminal/削除の再検証はしない=既に印刷し得るため集合を変えない)。
+    - **確定は downloadedAt 必須**(未DLの確定は 409「先にCSVを出力してください」)。確定は items 全件を記録し、**DL後に owner が削除された item は owner_id=null で記録**する(手紙は出ている=@codex R42 P2。DL前の削除は初回GETで既に除外済みなので混同しない)。
   - **冪等化**: attemptKey(UI が押下ごとに発行・POST body で必須・`attempt_key` unique)。同じキーの再 POST は既存バッチを FOR UPDATE で照会し**未確定なら再利用・確定済みなら 409**(確定側と行ロックで直列化=R4)。INSERT の unique 衝突は catch して勝者を取り直す(R5)。**別の押下は別のキー=別の控え**(内容ハッシュで畳むと同日2回の意図した郵送まで合流する=R6)。先例=売却DMキャンペーンの idempotencyKey。
   - **再試行とのズレは構造的に消滅**: CSV は常に**控えの items から**生成するため、「再試行が別の宛先集合を出力する」事態が起きない(R7 の content_digest 照合は不要になり**列ごと削除**)。owner が削除済み(SetNull)の item は CSV から除外し件数を表示(郵送不能のため)。
-- **所有者の削除(@codex R4→R41 P2 で規則統一)**: item の owner FK は SetNull。**ownerId が null になった item は CSV からも確定からも除外**し件数を報告する(CSVに載らなかった宛先=郵送されていないので記録も作らない。「DLした集合=確定される集合」の不変条件を守る。1件の欠けで全体は巻き戻さない)。
+- **所有者の削除(@codex R4→R41→R42 で確定)**: item の owner FK は SetNull。**DL前の削除=初回GETで items から除外**(郵送されていない=記録しない)/**DL後の削除=itemは残り、確定で owner_id=null として記録**(手紙は出ている)。「DLした集合=確定される集合」の不変条件は downloadedAt 境界で守る。
 - **共有者グループ全員の保持(@codex R29 P1)**: 1つのCSV行(=item)は**同一送付先住所の共有者を束ねた1通**であり、代表の ownerId だけを持つと、**代表以外の共有者**が別物件を持つ場合に拒否/宛先不明の記録がその共有者に紐づかず、§4 の所有者単位の除外から漏れる。連関テーブル **`dm_export_batch_item_owners`(item_id FK Cascade, owner_id FK Cascade)** に**グループ全員の ownerId** を保存し(export 時に selectGroupRepresentative のグループから採取)、確定時に **`property_dm_log_owners`(log_id FK Cascade, owner_id FK Cascade)** へコピーする。既存の owner_id 列(代表)は表示・ブリッジ用に維持。migration-A に2連関テーブルを追加。
 
 - **CSV の中身(氏名・住所)は保存しない**。控えは propertyId/代表 ownerId のみ=非PII寄りの最小構成。
@@ -220,3 +224,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R39(2026-08-08): P2(クライアント発行キーではcross-site作成を防げない)→**出力を「POSTで控え作成→GETでitemsからCSV」の2段階に再構成**。CSRF境界で無限作成を封じ、content_digest照合は構造的に不要化(列削除)。
 - R40(2026-08-08): P1(CSV GETにも4権限+現在スコープ再検証)・P2×3(確定/mark-sentの子先ロック記述をOwner先頭の型へ統一 / バッチsentOnは作成日以降 / 旧行への手動更新も保守的再適用)を反映。外部AI方式側のP2(個別PATCHのtrim検証)は別紙。
 - R41(2026-08-08): P2(「DLした集合=確定される集合」の不変条件: スコープで欠けるDLは403・owner削除itemはCSV/確定とも除外)を反映。
+- R42(2026-08-08): P1/P2(DL前後で逆向きの要請)→**downloadedAt境界のライフサイクルで確定**: 初回GET=最新状態検証(scope403/terminal反響409/削除item物理除外)+刻印・再試行=同集合再配信・確定=DL必須+DL後削除はnullで記録。
