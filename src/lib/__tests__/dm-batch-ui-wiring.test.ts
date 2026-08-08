@@ -61,7 +61,8 @@ describe("送付の確定モーダル", () => {
 describe("api-client の追加ヘルパー", () => {
   it("createDmBatch は safeRandomId で attemptKey を採番(crypto.randomUUID を使わない)", () => {
     expect(CLIENT).toMatch(/attemptKey: safeRandomId\(\)/);
-    expect(CLIENT).not.toContain("crypto.randomUUID");
+    // コメント中の言及は許容し、実呼び出し(crypto.randomUUID( )だけを禁止する。
+    expect(CLIENT).not.toContain("crypto.randomUUID(");
   });
 
   it("3ヘルパーとも USE_MOCK 分岐を持つ(dev モックで 403 にならない)", () => {
