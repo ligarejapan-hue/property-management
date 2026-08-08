@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import { updatePropertySchema } from "@/lib/validators";
 import {
   normalizeBuildingName,
@@ -391,6 +392,10 @@ export async function DELETE(
     // 取得と Property 削除は同一 transaction で atomic に行う。
     const photoFileUrls: string[] = [];
     await prisma.$transaction(async (tx) => {
+      // ⚠親の物件行を最初にロックする(書き込み規約+#364 R9): 子行(DMログ等)を先に
+      // 触ってから親を消すと、個別取消(親FOR UPDATE→子delete)と逆順になり 40P01 の
+      // デッドロックを作る。順序を「親→子」に統一する。
+      await lockPropertyRow(tx, id);
       const photos = await tx.propertyPhoto.findMany({
         where: { propertyId: id },
         select: { fileUrl: true },

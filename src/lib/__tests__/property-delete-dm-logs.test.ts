@@ -23,10 +23,13 @@ describe("物件削除tx: 所有者ゼロのDM記録の掃除(R52)", () => {
     );
   });
 
-  it("掃除→property.delete の順(tx 内・attachment処理は従来どおり残る)", () => {
+  it("親行ロック→掃除→property.delete の順(tx 内・attachment処理は従来どおり残る)", () => {
+    const lockIdx = ROUTE.indexOf("lockPropertyRow(tx, id)");
     const purgeIdx = ROUTE.indexOf("propertyDmLog.deleteMany");
     const deleteIdx = ROUTE.indexOf("tx.property.delete", purgeIdx);
     const attachmentIdx = ROUTE.indexOf("tx.attachment.updateMany");
+    expect(lockIdx).toBeGreaterThan(0); // 親→子の順序統一(#364 R9)
+    expect(lockIdx).toBeLessThan(attachmentIdx);
     expect(purgeIdx).toBeGreaterThan(0);
     expect(deleteIdx).toBeGreaterThan(purgeIdx);
     expect(attachmentIdx).toBeGreaterThan(0);
