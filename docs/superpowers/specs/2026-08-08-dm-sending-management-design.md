@@ -103,7 +103,7 @@ model DmExportBatchItem {
 - `DELETE /api/properties/[id]/dm-logs/[logId]` — 記録ミスの取消。**method="sale_dm" の行は 409**(売却DM側の状態と不整合になるため。案内文で売却DM画面へ誘導)。
   - **宛先不明フラグの再計算(@codex R8 P2)**: undeliverable の反響が付いた行を削除するときは、**親の物件行ロックを保持したまま**残りを数え、その物件に undeliverable のログも returned_undeliverable の売却DM下書きも残らないなら `dmUndeliverableAt` を解除する(dmStatus は人の判断=既存の訂正フローと同じ)。これをしないと「宛先不明のみ」フィルタに根拠のない物件が永久に残る。
 - どちらも property:write + record scope + `lockPropertyRecordForWrite` 規約を使う(採番 advisory の廃止(§2.2・R26)により、既存ガードの「txの最初に親行を取る」規約と**矛盾なくそのまま従える**。個別記録は ownerId を持たないため Owner ロックも不要)。
-- ⚠一括確定の tx の親ロック(@codex R4 P2 で条件付きに変更): **admin/office_staff の確定**(スコープ判定が常に真)は「INSERT のみ・親 FOR UPDATE なし」(FK の暗黙 FOR KEY SHARE のみ・親行の更新なし=循環の起点にならない)。**field_staff の確定**はスコープ判定が担当変更と競合し得る(FOR KEY SHARE は assignedTo 更新と衝突しない=判定後に担当が外れても確定が通る TOCTOU)ため、**advisory lock 取得後に対象物件の親行を id 順で FOR UPDATE し、保持したままスコープを検証してから** INSERT する。順序は常に「advisory→親→子」(§2.2-5)。
+- ⚠一括確定の tx の親ロック(@codex R4 P2 で条件付きに変更): **admin/office_staff の確定**(スコープ判定が常に真)は「INSERT のみ・親 FOR UPDATE なし」(FK の暗黙 FOR KEY SHARE のみ・親行の更新なし=循環の起点にならない)。**field_staff の確定**はスコープ判定が担当変更と競合し得る(FOR KEY SHARE は assignedTo 更新と衝突しない=判定後に担当が外れても確定が通る TOCTOU)ため、**Owner ロック(§2.2 の順序規約)の後に対象物件の親行を id 順で FOR UPDATE し、保持したままスコープを検証してから** INSERT する。順序は常に「Owner→親→子」(採番 advisory は R26 で廃止済み・@codex R28 P2)。
 
 ### 2.4 PropertyDmLog の列追加(migration-A・additive)
 
@@ -208,3 +208,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R25(2026-08-08): P2(作成側の複数OwnerのFOR SHAREも統合と同じ安定id順でソート)を反映。
 - R26(2026-08-08): P2(後入れの古い投函日でMAX+1が時系列を壊す)→**sequence列を廃止し「何通目」を表示時導出(sentAt,createdAt,id順)に方式変更**。採番系の対策(R2-2/R20/R7-4b/R8-4c/R24-1)は不要化・migrationはA(列追加のみ)1本に簡素化。
 - R27(2026-08-08): P1(代表選定〜ロックの隙間=ロック後にリンクとisArchivedを再検証・変化なら再解決)・P2(訂正の戻し先=shadow→draft現況の再導出→no_responseの順)を反映。外部AI方式側のP2(追加指示の直接入力を案内しない=注意書き方式)は別紙。
+- R28(2026-08-08): P2(field_staff確定の局所指示をOwner→親→子へ修正=旧advisory参照の残骸除去)を反映。外部AI方式側のP1(PR-D は PR-A 依存に固定)・P2(空白のみ本文の拒否)は別紙。
