@@ -42,6 +42,7 @@ model DmExportBatch {
   createdAt   DateTime  @default(now()) @map("created_at")
   attemptKey  String    @unique @map("attempt_key") // 押下ごとの冪等キー(下記「出力は2段階」)
   downloadedAt DateTime? @map("downloaded_at")      // 初回DLの刻印(配信集合の不変化境界・確定の前提)
+  csvDigest   String?   @map("csv_digest")          // 初回DLで配ったCSVのsha256(再試行の同一性検証・PIIは持たない。R39で廃止したcontent_digestとは別役割)
   confirmedAt DateTime? @map("confirmed_at")        // null=未確定
   confirmedBy String?   @map("confirmed_by") @db.Uuid
   sentOn      DateTime? @map("sent_on") @db.Date    // 投函日(確定時に入力)
@@ -67,8 +68,8 @@ model DmExportBatchItem {
 - **出力は2段階 = 「POST で控え作成 → GET で CSV ダウンロード」**(R1〜R39 で到達した最終形。@codex R39 P2):
   - **POST `/api/properties/dm-batches`**(body=filters+attemptKey)が検索条件を評価し、**バッチ+items を作成して batchId を返す**。副作用は POST に置く(このリポの規約どおり=**cross-site のトップレベル GET 遷移では控えを作れない**。SameSite=Lax の直叩き/ブックマークで最大1万itemの控えが無限に積まれる穴(R38-39)を CSRF 境界で塞ぐ)。
   - **GET `/api/properties/dm-batches/[id]/csv`** は**保存済みの items から CSV を生成して返す**(no-store・作成者本人のみ・4権限+PII表示レベル(plain)ゲート)。ダウンロードは従来どおりブラウザ遷移(UI は POST→batchId の GET URL へ遷移)。**「初回ダウンロード」を境界とするライフサイクル**(@codex R40 P1 → R41/R42 で確定):
-    - **初回 GET(downloadedAt 未設定)**: 現在状態を検証してから配る。(1) record scope で1件でも欠ける→**403**(再出力案内) (2) **terminal 反響(refused/undeliverable)が付いた宛先が混ざった→409**(再出力案内。控えが古いまま除外済みの相手へ郵送するのを防ぐ=@codex R42 P1) (3) **owner 削除で null になった item は items から物理削除して除外**(件数報告)。残った items が**配信集合そのもの**になり、`downloadedAt` を刻む(列追加)。
-    - **再試行 GET(downloadedAt 設定済み)**: 同じ items から再生成(権限+本人+スコープ403のみ再検証。terminal/削除の再検証はしない=既に印刷し得るため集合を変えない)。
+    - **初回 GET(downloadedAt 未設定)**: **tx 内でバッチ行を FOR UPDATE で取ってから**(@codex R43 P2: 初回GET同士のレースで別々の集合を凍結しない。ロック後に downloadedAt を再判定し、設定済みなら再試行経路へ落とす)、現在状態を検証してから配る。(1) record scope で1件でも欠ける→**403**(再出力案内) (2) **terminal 反響(refused/undeliverable)が付いた宛先が混ざった→409**(再出力案内。控えが古いまま除外済みの相手へ郵送するのを防ぐ=@codex R42 P1) (3) **owner 削除で null になった item は items から物理削除して除外**(件数報告)。残った items が**配信集合そのもの**になり、同一 tx 内で items/owners を再読取して CSV を描画し、**その CSV の sha256 を `csvDigest` に保存**+`downloadedAt` を刻む(いずれも列追加。digest はハッシュのみ=PII は保存しない)。
+    - **再試行 GET(downloadedAt 設定済み)**: 同じ items から再生成し、**csvDigest と一致した場合のみ配信**。不一致(owner の氏名/住所や物件情報が初回DL後に変わった・owner 削除で描画不能)は **409**(「内容が変わったため再出力してください」)にする(@codex R43 P1: 同一バッチから内容の異なるCSVが2度印刷され、確定は片方の集合しか記録しない事故を防ぐ。再試行は「初回と同一物の再取得」専用・変わっていたら新しいバッチを作り直す)。権限+本人+スコープ403も再検証。
     - **確定は downloadedAt 必須**(未DLの確定は 409「先にCSVを出力してください」)。確定は items 全件を記録し、**DL後に owner が削除された item は owner_id=null で記録**する(手紙は出ている=@codex R42 P2。DL前の削除は初回GETで既に除外済みなので混同しない)。
   - **冪等化**: attemptKey(UI が押下ごとに発行・POST body で必須・`attempt_key` unique)。同じキーの再 POST は既存バッチを FOR UPDATE で照会し**未確定なら再利用・確定済みなら 409**(確定側と行ロックで直列化=R4)。INSERT の unique 衝突は catch して勝者を取り直す(R5)。**別の押下は別のキー=別の控え**(内容ハッシュで畳むと同日2回の意図した郵送まで合流する=R6)。先例=売却DMキャンペーンの idempotencyKey。
   - **再試行とのズレは構造的に消滅**: CSV は常に**控えの items から**生成するため、「再試行が別の宛先集合を出力する」事態が起きない(R7 の content_digest 照合は不要になり**列ごと削除**)。owner が削除済み(SetNull)の item は CSV から除外し件数を表示(郵送不能のため)。
@@ -225,3 +226,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R40(2026-08-08): P1(CSV GETにも4権限+現在スコープ再検証)・P2×3(確定/mark-sentの子先ロック記述をOwner先頭の型へ統一 / バッチsentOnは作成日以降 / 旧行への手動更新も保守的再適用)を反映。外部AI方式側のP2(個別PATCHのtrim検証)は別紙。
 - R41(2026-08-08): P2(「DLした集合=確定される集合」の不変条件: スコープで欠けるDLは403・owner削除itemはCSV/確定とも除外)を反映。
 - R42(2026-08-08): P1/P2(DL前後で逆向きの要請)→**downloadedAt境界のライフサイクルで確定**: 初回GET=最新状態検証(scope403/terminal反響409/削除item物理除外)+刻印・再試行=同集合再配信・確定=DL必須+DL後削除はnullで記録。
+- R43(2026-08-08): P1(再試行の内容drift)→**csvDigest列**: 初回DLでCSVのsha256を保存し再試行は一致時のみ配信・不一致409(ハッシュのみ=PII非保存)。P2(初回GETレース)→**バッチ行FOR UPDATEのtxで凍結を直列化**(ロック後にdownloadedAt再判定・同tx内でitems/owners再読取→描画→digest+刻印)。
