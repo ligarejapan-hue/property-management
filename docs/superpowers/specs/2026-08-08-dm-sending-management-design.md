@@ -64,6 +64,7 @@ model DmExportBatchItem {
 
 - **出力の冪等化(@codex P2)**: export は GET のためリトライ/二度押しで再実行され得る。`DmExportBatch` に `fingerprint` を持たせ **unique**。同一内容の同日出力は**既存の未確定バッチを再利用**する(新規バッチを作らない)。日付をキーに含めるので、90日後の正当な再出力は新しいバッチになる。
   - fingerprint の中身(@codex R2 P1): **dmType + 当日日付 + ソート済みの「(propertyId, 代表ownerId) ペア列」の sha256**。物件ID集合だけだと、同じ物件集合でも所有者・住所・代表者が変わった2回目の出力(=宛先が違うCSV)が1回目の控えに合流し、**古い代表宛先で確定してしまう**。実際に出力した宛先行そのものを同一性の根拠にする。
+  - unique の範囲(@codex R3 P2): **未確定の控えに限定した部分unique**(`CREATE UNIQUE INDEX ... WHERE confirmed_at IS NULL`・raw SQL migration)。全体uniqueにすると、確定後の**同日の正当な再出力**(送り直し)が新しい控えを作れなくなる。再利用の対象も未確定のみ(確定済みは合流しない)。
 - **所有者の削除(@codex P2)**: item の owner FK は SetNull。確定時に ownerId が null の item は `PropertyDmLog.owner_id=null` で記録する(1件の欠けで全体を巻き戻さない)。
 
 - **CSV の中身(氏名・住所)は保存しない**。控えは propertyId/代表 ownerId のみ=非PII寄りの最小構成。
@@ -75,7 +76,8 @@ model DmExportBatchItem {
 
 - `GET /api/properties/dm-batches?unconfirmed=1` — 確定モーダル用の一覧(出力日時・件数・確定状態。中身の宛先は返さない)。
 - `POST /api/properties/dm-batches/[id]/confirm` body=`{ sentOn: "YYYY-MM-DD" }`
-- ゲート: 既存 export と同じ4権限+**property:write**(書込は mark-sent/outcome と同じ統一方針・新slugなし)。field_staff は record scope 内の item のみ記録(スコープ外はスキップし件数を返す)。
+- ゲート: 既存 export と同じ4権限+**property:write**(書込は mark-sent/outcome と同じ統一方針・新slugなし)。
+- **スコープ外 item の扱い(@codex R3 P2)**: field_staff の担当変更などで**1件でもスコープ外の item がある場合、確定を 403 で拒否**する(スキップして confirmedAt を立てると、その宛先の送付記録が**永久に欠ける**=後から権限のある人が確定しようとしても「確定済み」で弾かれるため)。エラーには「スコープ外が N 件・管理者/事務担当で確定してください」と理由を出す。部分確定(item単位の確定状態)は作らない=単純さ優先(実運用は管理者2名で、まず起きない)。
 - 冪等: `confirmedAt` が null の場合のみ、条件付き updateMany(勝者決定)→ 同一 tx で items から `PropertyDmLog` を生成。二重確定は 409。
 - 生成する行: `propertyId / ownerId(代表) / dmType="owner_address" / sequence(下記) / batchId / sentAt=sentOn / method="mail" / sentBy=操作者`。
 - **sequence の採番(@codex P1)**: 無ロックの採番は並行確定で重複する。対策:
@@ -159,3 +161,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 ### 対応履歴
 - R1(2026-08-08): P1×2(sequence採番の直列化→advisory lock+unique backstop+全writer共通ヘルパー / 売却DM反響の同期→draft_id紐付け+outcome同tx更新+backfill)・P2×2(item所有者削除→owner FK SetNull / export冪等化→fingerprint unique+同日再利用)を反映。
 - R2(2026-08-08): P1×3(採番はMAX(sequence)+1=取消後の衝突防止 / fingerprintは(propertyId,代表ownerId)ペア列=宛先変化の合流防止 / LP追跡recordTrackingHitも同期経路に=共通ヘルパー集約)・P2×1(ロック順序「advisory→親→子」の全writer統一)を反映。
+- R3(2026-08-08): P2×2(fingerprint uniqueは未確定限定の部分unique=確定後の同日再出力を塊がない / スコープ外itemがある確定は403で拒否=記録の永久欠落防止)を反映。
