@@ -11,6 +11,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges } from "@/lib/change-log";
 import { hasPermission } from "@/lib/permissions";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 
 // 物件×所有者単位のメモ更新（PropertyOwner.note）。
 // Owner.note (所有者全体のメモ) と混同しないこと。
@@ -124,9 +125,14 @@ export async function DELETE(
       );
     }
 
-    // Delete the link
-    await prisma.propertyOwner.delete({
-      where: { id: propertyOwner.id },
+    // Delete the link。⚠親の物件行を先にロックする(書き込み規約+#364 R6):
+    // 素の delete は DM 控えの凍結 tx(親行 FOR SHARE 保持で宛先資格を検証)と直列化されず、
+    // 解除直前のリンクを読んだ古いCSVがそのまま凍結・配布される。
+    await prisma.$transaction(async (tx) => {
+      await lockPropertyRow(tx, propertyId);
+      await tx.propertyOwner.delete({
+        where: { id: propertyOwner.id },
+      });
     });
 
     // Record change log for the unlink

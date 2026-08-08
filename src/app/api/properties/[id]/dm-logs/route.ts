@@ -82,6 +82,7 @@ export async function GET(
           sentAt: true,
           method: true,
           dmType: true,
+          batchId: true,
           note: true,
           createdAt: true,
           sender: { select: { id: true, name: true } },
@@ -112,6 +113,9 @@ export async function GET(
       method: log.method,
       dmType: log.dmType,
       sequence: sequenceById.get(log.id) ?? 0,
+      // 取消可否はサーバが決める(#364 R6): sale_dm=売却DM画面から・batchId あり=一括確定由来は
+      // 単独取消不可(DELETE も 409)。UI は必ず失敗するボタンを出さない。
+      deletable: log.method !== "sale_dm" && log.batchId == null,
       note: maskValue(log.note, ownerDisplayConfig.note),
       sentBy: { id: log.sender.id, name: log.sender.name },
       createdAt: log.createdAt,

@@ -13,6 +13,8 @@ interface DmLog {
   method: string | null;
   dmType: string | null;
   sequence: number;
+  /** サーバ判定の取消可否(売却DM由来・一括確定由来は false=ボタンを出さない)。 */
+  deletable: boolean;
   note: string | null;
   sentBy: { id: string; name: string } | null;
   createdAt: string;
@@ -317,8 +319,8 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
                     </td>
                     {canWrite && (
                       <td className="px-2 py-2">
-                        {/* 売却DM由来の行はサーバが 409 で拒否するため、取消ボタン自体を出さない。 */}
-                        {log.method !== "sale_dm" && (
+                        {/* 売却DM由来・一括確定由来はサーバが 409 で拒否するため、ボタン自体を出さない(#364 R6)。 */}
+                        {log.deletable && (
                           <button
                             type="button"
                             onClick={() => handleDelete(log.id)}

@@ -55,9 +55,11 @@ describe("dm-logs-view: 表示強化と個別記録UI", () => {
     expect(VIEW).toMatch(/setPage\(\(p\) => Math\.max\(1, p - 1\)\)/);
   });
 
-  it("取消は confirm を挟み、sale_dm 行にはボタンを出さない", () => {
+  it("取消は confirm を挟み、取消不可の行(売却DM/一括確定由来)にはボタンを出さない", () => {
     expect(VIEW).toContain("この送付記録を取り消しますか？");
-    expect(VIEW).toMatch(/log\.method !== "sale_dm" && \(/);
+    expect(VIEW).toMatch(/\{log\.deletable && \(/);
+    // 取消可否の判定はサーバ側(GET が deletable を返す)
+    expect(ROUTE).toMatch(/deletable: log\.method !== "sale_dm" && log\.batchId == null/);
   });
 
   it("投函日は今日既定・max=今日(未来はUIでも選べない)", () => {
