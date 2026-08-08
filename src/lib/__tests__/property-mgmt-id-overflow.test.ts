@@ -70,7 +70,7 @@ describe("CSV 出力経路は overflowed で必ず止める", () => {
   // (vitest は env=node で Next の route を素直に起動できない)。
   const ROUTES = [
     "src/app/api/properties/export/route.ts",
-    "src/app/api/properties/dm-export/route.ts",
+    "src/app/api/properties/dm-batches/route.ts",
     "src/app/api/properties/property-dm-export/route.ts",
     // 有料の AI 文面生成。並べ替えたうえで先頭 50 件を選ぶため、母集団が
     // 「取込行の並び順で先頭 10,000 件」に化けると**本来選ばれない宛先に

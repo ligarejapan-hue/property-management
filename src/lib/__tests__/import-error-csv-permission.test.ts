@@ -389,7 +389,7 @@ describe("専用権限であることの回帰ガード（全件CSVを解禁し�
   // 共有の csv_export_personal を配ると下記まで一度に解禁されてしまう。
   const BROAD_ROUTES = [
     "src/app/api/properties/export/route.ts",
-    "src/app/api/properties/dm-export/route.ts",
+    "src/app/api/properties/dm-batches/route.ts",
     "src/app/api/properties/property-dm-export/route.ts",
   ];
 
@@ -452,7 +452,7 @@ describe("全件CSVの許可（発注者判断 2026-07-31）", () => {
   it("全件CSV3経路のゲート自体は緩めていない（権限を配っただけ）", () => {
     for (const route of [
       "src/app/api/properties/export/route.ts",
-      "src/app/api/properties/dm-export/route.ts",
+      "src/app/api/properties/dm-batches/route.ts",
       "src/app/api/properties/property-dm-export/route.ts",
     ]) {
       const src = read(route);

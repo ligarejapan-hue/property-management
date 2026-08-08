@@ -7,7 +7,7 @@ import { sanitizeAuditDetail } from "@/lib/audit-log-detail-safety";
 // 監査ログの filtersForLog(AUDIT_FILTER_KEYS)にも載せる(非PII・@codex R5)。
 const routes = [
   "src/app/api/properties/export/route.ts",
-  "src/app/api/properties/dm-export/route.ts",
+  "src/app/api/properties/dm-batches/route.ts",
   "src/app/api/properties/property-dm-export/route.ts",
 ];
 
