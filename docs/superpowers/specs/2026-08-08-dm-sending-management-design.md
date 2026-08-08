@@ -68,7 +68,7 @@ model DmExportBatchItem {
   - **UI が「DM差込CSV出力」の押下ごとに attemptKey(uuid)を発行**し querystring に付与。route は attemptKey を `DmExportBatch.attempt_key`(**unique**)として保存する。
   - **同じキーの再実行**(ブラウザのダウンロード再試行・同一ナビゲーションの再実行)は、既存バッチを **`SELECT ... FOR UPDATE` で照会→confirmedAt を再検証して再利用**(確定側と行ロックで直列化=@codex R4 P2)。INSERT の unique 衝突は catch して勝者を取り直す(=@codex R5 P2)。
   - **別の押下は別のキー=別の控え**。⚠内容ハッシュで「同日同内容=同一」と畳むと、**別々の操作者が意図して行った同日2回の郵送**まで1つに合流し、確定が1回しかできず送付記録が過少になる(@codex R6 P2)。合流してよいのは「同じ1回のダウンロードの再試行」だけであり、それは attemptKey が正確に表す。
-  - attemptKey 無しの直叩き(API 直接呼び出し)はサーバーが発行する(重複排除なしで毎回新規=安全側)。
+  - **attemptKey 無しのリクエストは 400 で拒否**(@codex R38 P2 で「サーバー発行」を撤回): SameSite=Lax セッション下では cross-site のトップレベル遷移やブックマークの直叩きでも認証付き GET が通るため、鍵なしで毎回新規バッチ(最大1万item)を作れると**意図しない控えがDBと確定一覧に無限に積まれる**。UI が発行した鍵を必須にする(掃除機構を作らずに済む)。
   - 冪等キーの先例 = 売却DMキャンペーンの idempotencyKey(実装様式もこれに合わせる)。
   - **再試行と控えの中身の一致検証(@codex R7 P2)**: バッチに **content_digest**(=ソート済み宛先行全体の非PIIハッシュ。CSV本文は保存しない)を持たせる。同じ attemptKey の再実行は CSV を再生成するため、初回 commit 後に所有者・住所・代表者が変わっていると**再試行のCSVと控えの中身がずれる**。再実行時に digest を再計算して**一致しなければ 409**(「宛先が変わったため、もう一度出力してください」)=ずれた控えを黙って再利用しない。
 - **所有者の削除(@codex P2)**: item の owner FK は SetNull。確定時に ownerId が null の item は `PropertyDmLog.owner_id=null` で記録する(1件の欠けで全体を巻き戻さない)。
@@ -157,7 +157,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - 定義(すべて AND):
   1. `dmStatus = "send"`
   2. 送付記録が1件以上ある
-  3. **90日以内の送付記録が無い**(`dmLogs: { none: { sentAt: { gt: cutoff } } }`)
+  3. **90日以内の送付記録が無い**(`dmLogs: { none: { sentAt: { gt: cutoff } } }`)。⚠**cutoff は「JST の今日」の暦日から90日戻して導出**する(@codex R38 P2: sentAt は日付のみ(UTC真夜中表現)なので、素の instant 比較だと JST 朝9時まで判定が1日ずれる。深夜〜9時の境界テストを含める)
   4. replied / refused / undeliverable の反響が付いた記録が**1件も無い**
   5. **所有者単位の除外(@codex R8 P1 → R29 P1 で共有者全員に拡張)**: その物件の所有者(PropertyOwner 経由)の誰かに、**他物件も含めて** refused / undeliverable の反響が付いた記録が(**代表(owner_id)または共有者連関(property_dm_log_owners)経由で**)あれば除外する。同じ所有者が物件AとBに紐づくとき、Aで拒否された相手にBから再送する事故を防ぐ(Prisma: `owners: { none: { owner: { dmLogs: { some: { reactionStatus: { in: [refused, undeliverable] } } } } } }` 相当)。⚠限界: ownerId が null の記録(個別記録・旧sale_dm行)は物件単位でしか効かない。また「所有者行は別だが住所が同じ」相手は所有者の名寄せ(既存の品質チェック領域)の守備範囲とし、本機能では扱わない(§6 論点)。
   5b. ⚠**所有者の名寄せ(重複統合)で反響を置き去りにしない**(@codex R11 P1): 既存の統合 tx はメモと PropertyOwner 行を master へ移すが、このままだと **archive された旧所有者に付いた反響ログ**が述語から見えなくなり、統合後の所有者の他物件が再送候補に戻る。統合 tx に **`PropertyDmLog.ownerId`・未確定バッチ item の ownerId・`DmRecipientDraft.representativeOwnerId`(未送付の下書き=後で mark-sent が owner_id へコピーする「予約」)・連関3表(`dm_export_batch_item_owners`/`property_dm_log_owners`/`dm_recipient_draft_owners`)の owner_id の付け替え(source→master・重複行は畳む)**を追加する(@codex R11/R12 P1。PR-A のスコープ=merge route の改修。付け替えは既存の owner FK 群の移送と同じ場所に足し、対象は grep で全列挙して確認する)。
@@ -218,3 +218,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R34(2026-08-08): P2(スナップショット照合では同住所の共有者入替を検知不能)→**旧下書きの補完を撤回し「代表のみで記録」に単純化**(R33の補完手順は不要化)。全員連関は移行後に作成された draft のみ。
 - R36(2026-08-08): P2(sentOnは今日以前のみ=未来日の誤入力で再送抑止が壊れるのを防ぐ)を反映。
 - R37(2026-08-08): P2(旧行照合の送付日はJST暦日で比較・深夜境界テスト)を反映。外部AI方式側のP2×2は別紙。
+- R38(2026-08-08): P2×2(attemptKey必須化=鍵なし400・サーバー発行を撤回 / クールダウンcutoffもJST暦日で導出)を反映。
