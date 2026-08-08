@@ -55,10 +55,10 @@ model DmExportBatch {
 model DmExportBatchItem {
   id         String  @id @default(uuid()) @db.Uuid
   batchId    String  @map("batch_id") @db.Uuid
-  propertyId String  @map("property_id") @db.Uuid
+  propertyId String? @map("property_id") @db.Uuid  // R49: 物件削除で null 化(下記)
   ownerId    String? @map("owner_id") @db.Uuid      // 代表所有者(所有者宛)。物件宛は null
   batch      DmExportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  property   Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  property   Property?     @relation(fields: [propertyId], references: [id], onDelete: SetNull) // @codex R49 P1: 削除で控えを道連れにしない(DL後の郵送済み記録を守る)
   owner      Owner?        @relation(fields: [ownerId], references: [id], onDelete: SetNull) // @codex P2: 確定前に所有者が消えたら null 化(確定を巻き戻さない)
   @@index([batchId])
   @@map("dm_export_batch_items")
@@ -68,7 +68,7 @@ model DmExportBatchItem {
 - **出力は2段階 = 「POST で控え作成 → GET で CSV ダウンロード」**(R1〜R39 で到達した最終形。@codex R39 P2):
   - **POST `/api/properties/dm-batches`**(body=filters+attemptKey)が検索条件を評価し、**バッチ+items を作成して batchId を返す**。副作用は POST に置く(このリポの規約どおり=**cross-site のトップレベル GET 遷移では控えを作れない**。SameSite=Lax の直叩き/ブックマークで最大1万itemの控えが無限に積まれる穴(R38-39)を CSRF 境界で塞ぐ)。
   - **GET `/api/properties/dm-batches/[id]/csv`** は**保存済みの items から CSV を生成して返す**(no-store・作成者本人のみ・4権限+PII表示レベル(plain)ゲート)。ダウンロードは従来どおりブラウザ遷移(UI は POST→batchId の GET URL へ遷移)。**「初回ダウンロード」を境界とするライフサイクル**(@codex R40 P1 → R41/R42 で確定):
-    - **初回 GET(downloadedAt 未設定)**: 凍結 tx は全 writer 共通のロック順序規約に従う=**無ロックで items を先読み→参照 Owner 行(代表+連関全員・安定id順・FOR SHARE)→参照物件親行(安定id順)→バッチ行 FOR UPDATE→items 再読取(先読みと集合不一致なら中止して再試行)**(@codex R43 P2: 初回GET同士のレースで別々の集合を凍結しない+R44 P1: バッチ行だけでは record scope 検証と担当変更が競合しない=物件親行を先にロックすれば担当替えtx(親行ロック規約に従う)と直列化され、剥奪後のPII配信を塞ぐ。バッチ行ロック後に downloadedAt を再判定し、設定済みなら再試行経路へ落とす)。ロック保持中に現在状態を検証してから配る。(1) record scope で1件でも欠ける→**403**(再出力案内) (2) **terminal 反響(refused/undeliverable)が付いた宛先が混ざった→409**(再出力案内。控えが古いまま除外済みの相手へ郵送するのを防ぐ=@codex R42 P1。⚠この検査が並行する反響書込とすれ違わないよう、**terminal を書く全 writer は対象の所有者集合(代表+連関全員)を安定id順に FOR UPDATE してから親行→子行へ進む**=@codex R47 P1: 共有所有者の**別物件**への拒否/宛先不明の書込は、バッチが参照する物件・ログの行ロックとは競合しない。DL側の Owner FOR SHARE と writer 側の Owner FOR UPDATE が衝突することで直列化される。非terminalの反響書込(replied/no_response・LP追跡)は DL の妥当性に影響しないため Owner ロック不要=追跡ヒットのホットパスを重くしない) (3) **宛先資格の再検証**(@codex R48 P1): item ごとに「代表+連関の owner が**現在も PropertyOwner でその物件に紐づいているか**」「物件の dmStatus が **no_send に変わっていないか**」を検査し、1件でも該当すれば **409**(再出力案内。紐づけ解除・送付停止は Owner 行も item も残したまま起きるので (1)(2) では検出できず、CSV の中身もバイト同一になり得る。PropertyOwner の付け外しと dmStatus 更新はどちらも物件親行を先にロックする規約なので、本 tx の親行ロック(FOR SHARE)と直列化される) (4) **owner 削除で null になった item は items から物理削除して除外**(件数報告)し、**rowCount を残存 items 数で同一 tx 内に再計算**(@codex R45 P2: 未確定一覧のモーダルが表示する件数と凍結集合の件数がずれない)。残った items が**配信集合そのもの**になり、同一 tx 内で items/owners を再読取して CSV を描画し、**その CSV の sha256 を `csvDigest` に保存**+`downloadedAt` を刻む(いずれも列追加。digest はハッシュのみ=PII は保存しない)。
+    - **初回 GET(downloadedAt 未設定)**: 凍結 tx は全 writer 共通のロック順序規約に従う=**無ロックで items を先読み→参照 Owner 行(代表+連関全員・安定id順・FOR SHARE)→参照物件親行(安定id順)→バッチ行 FOR UPDATE→items 再読取(先読みと集合不一致なら中止して再試行)**(@codex R43 P2: 初回GET同士のレースで別々の集合を凍結しない+R44 P1: バッチ行だけでは record scope 検証と担当変更が競合しない=物件親行を先にロックすれば担当替えtx(親行ロック規約に従う)と直列化され、剥奪後のPII配信を塞ぐ。バッチ行ロック後に downloadedAt を再判定し、設定済みなら再試行経路へ落とす)。ロック保持中に現在状態を検証してから配る。(1) record scope で1件でも欠ける→**403**(再出力案内) (2) **terminal 反響(refused/undeliverable)が付いた宛先が混ざった→409**(再出力案内。控えが古いまま除外済みの相手へ郵送するのを防ぐ=@codex R42 P1。⚠この検査が並行する反響書込とすれ違わないよう、**terminal を書く全 writer は対象の所有者集合(代表+連関全員)を安定id順に FOR UPDATE してから親行→子行へ進む**=@codex R47 P1: 共有所有者の**別物件**への拒否/宛先不明の書込は、バッチが参照する物件・ログの行ロックとは競合しない。DL側の Owner FOR SHARE と writer 側の Owner FOR UPDATE が衝突することで直列化される。非terminalの反響書込(replied/no_response・LP追跡)は DL の妥当性に影響しないため Owner ロック不要=追跡ヒットのホットパスを重くしない) (3) **宛先資格の再検証**(@codex R48 P1): item ごとに「代表+連関の owner が**現在も PropertyOwner でその物件に紐づいているか**」「物件の dmStatus が **no_send に変わっていないか**」を検査し、1件でも該当すれば **409**(再出力案内。紐づけ解除・送付停止は Owner 行も item も残したまま起きるので (1)(2) では検出できず、CSV の中身もバイト同一になり得る。PropertyOwner の付け外しと dmStatus 更新はどちらも物件親行を先にロックする規約なので、本 tx の親行ロック(FOR SHARE)と直列化される) (4) **owner または物件の削除で null になった item は items から物理削除して除外**(件数報告)し、**rowCount を残存 items 数で同一 tx 内に再計算**(@codex R45 P2: 未確定一覧のモーダルが表示する件数と凍結集合の件数がずれない)。残った items が**配信集合そのもの**になり、同一 tx 内で items/owners を再読取して CSV を描画し、**その CSV の sha256 を `csvDigest` に保存**+`downloadedAt` を刻む(いずれも列追加。digest はハッシュのみ=PII は保存しない)。
     - **再試行 GET(downloadedAt 設定済み)**: **初回と同じロック手順の tx で実行**し(Owner FOR SHARE→物件親行→バッチ行→items 再読取。凍結はしないが検証と描画をロック保持中に行う=@codex R47 P1)、同じ items から再生成して **csvDigest と一致した場合のみ配信**。**terminal 反響と宛先資格((3)=PropertyOwner 紐づけ・no_send)の検査も初回と同様に毎回掛け、初回DL後に refused/undeliverable が付いた・紐づけが外れた・送付停止になった宛先が混ざったら 409**(再出力案内=@codex R45 P1: 反響は CSV 内容に現れず digest では検出できない。初回CSVを既に印刷済みの利用者は再試行しないので影響なし・確定は凍結集合のまま可能)。不一致(owner の氏名/住所や物件情報が初回DL後に変わった・owner 削除で描画不能)は **409**(「内容が変わったため再出力してください」)にする(@codex R43 P1: 同一バッチから内容の異なるCSVが2度印刷され、確定は片方の集合しか記録しない事故を防ぐ。再試行は「初回と同一物の再取得」専用・変わっていたら新しいバッチを作り直す)。権限+本人+スコープ403も再検証。
     - **確定は downloadedAt 必須**(未DLの確定は 409「先にCSVを出力してください」)。確定は items 全件を記録し、**DL後に owner が削除された item は owner_id=null で記録**する(手紙は出ている=@codex R42 P2。DL前の削除は初回GETで既に除外済みなので混同しない)。
   - **冪等化**: attemptKey(UI が押下ごとに発行・POST body で必須・`attempt_key` unique)。同じキーの再 POST は既存バッチを FOR UPDATE で照会し**未確定なら再利用・確定済みなら 409**(確定側と行ロックで直列化=R4)。INSERT の unique 衝突は catch して勝者を取り直す(R5)。**別の押下は別のキー=別の控え**(内容ハッシュで畳むと同日2回の意図した郵送まで合流する=R6)。先例=売却DMキャンペーンの idempotencyKey。
@@ -78,7 +78,7 @@ model DmExportBatchItem {
 
 - **CSV の中身(氏名・住所)は保存しない**。控えは propertyId/代表 ownerId のみ=非PII寄りの最小構成。
 - 既存の export GET(検索条件から直接CSV)は**新しい2段階フローに置き換える**(旧GETは撤去または新POSTへの誘導)。**PropertyDmLog はどの段でも書かない**(既存テストのピンは維持し、「POSTがbatchを書く」ことを明示する形にテストを更新)。
-- item の property FK は Cascade: 確定前に物件が消えたら控えからも消え、確定時に自然にスキップされる。
+- item の property FK は **SetNull**(@codex R49 P1 で Cascade から変更): owner 削除と同じ downloadedAt 境界に従う=**DL前の物件削除は初回GETで item を除外**(郵送されていない)/**DL後の削除は item が残り、確定で property_id=null として記録**(手紙は出ている。owner_id と連関は残るので所有者横断の除外は効き続ける)。
 - 物件宛 export(UI導線なし)は今回対象外。dmType 列は将来用に持つ(TEXT+アプリ側allowlist・enum は作らない=#361 と同方針)。
 
 ### 2.2 送付確定(一括)
@@ -96,7 +96,7 @@ model DmExportBatchItem {
   - これに伴い R2-2(MAX+1)・R20(backfill順序)・R7/R8/R24(migration-A2 の段階投入と advisory lock)の採番系対策は**不要化**(対応履歴に経緯として残す)。migration-A2 自体が消え、**migration は A(列追加のみ)の1本**になる。
   - 同一バッチ内の同物件複数行は sentAt が同日で同順位になり得る→表示は createdAt, id で安定に並ぶ(順位の重複表示は許容: 同日に2通は事実)。
 - **ロック順序の統一(@codex R2 P2 → R22 P1 → R26 で採番 advisory を除去)**: 全 DM writer の順序は **「Owner(代表所有者) → variant → 物件親行 → 子行(item/draft/log)」** の一方向。⚠log の insert は owner FK の暗黙ロックを**最後に**取るため、子行を先にロックする writer と「Owner→子」の統合 tx(5d)が混ざると相互待ちになる。子を読まないと所有者が分からない writer(一括確定・mark-sent)は **「先読み(ロックなし)→ Owner を id 順にロック → 子行を FOR UPDATE で再読取 → 所有者が先読みと不一致なら中止して再試行(409/リトライ)」** の型で順序を守る。⚠ロック対象の Owner は**代表だけでなく連関(item_owners/draft_owners)の全所有者**(@codex R31 P1: 代表以外の共有者が並行統合されると、掃き終わった後に archive 済み所有者への連関を作ってしまう)。配線テスト(呼び出し順のソース固定)で全経路を固定する。
-- **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。⚠あわせて mark-sent は **`DmRecipientDraft.representativeOwnerId` を `owner_id` にコピー**し、**下書きの共有者グループ全員を `property_dm_log_owners` にコピー**する(@codex R9/R30 P1)。グループの保存のため連関 **`dm_recipient_draft_owners`(draft_id FK Cascade, owner_id FK Cascade)** も migration-A に追加し、**キャンペーン作成(宛先生成)時にグループ全員を保存**する(現行は代表+人数しか持たない)。⚠**既存の未送付 draft(連関が空)は補完せず、代表のみで記録**する(@codex R31→R33→R34 で確定した最終形): 現在の所有者情報からグループを再計算しても「実際に手紙を受け取る宛先」と一致する保証が無く(R33 P2)、氏名・住所・人数のスナップショット照合でも**同住所での共有者の入れ替え**は検知できない(R34 P2)。不確かな拡張はせず、**移行後に作られた draft(作成時にグループを保存済み)だけが全員連関の対象**。旧 draft は従来どおり代表のみ(監査 detail に legacyGroup を記録)。対象は移行前の未送付下書きのみ=本番は売却DM休眠中でほぼゼロ。これが無いと新しい売却DM経由の拒否/宛先不明が「所有者なし」になり、§4-5 の所有者単位の除外が**新規行に対して効かない**(旧行だけの限界のはずが新規にも及ぶ)。⚠コピー元は **tx 内で(条件付き updateMany の勝者決定後に)draft を再読取した値**を使う(@codex R13 P1): tx 前のスナップショットを使うと、並行する名寄せが draft を master へ付け替えた後に **archive 済みの旧所有者の id でログを作ってしまう**(以後の拒否が所有者横断の除外から見えない)。mark-sent も同じ型=**draft を先読み→所有者集合(代表+連関)を id 順に FOR SHARE→条件付き updateMany(draft ロック)→draft を再読取→所有者不一致なら中止・再試行**(@codex R40 P2: 子ロックを直列化の根拠にせず、Owner 先頭の全体順序に従う)。
+- **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。⚠あわせて mark-sent は **`DmRecipientDraft.representativeOwnerId` を `owner_id` にコピー**し、**下書きの共有者グループ全員を `property_dm_log_owners` にコピー**する(@codex R9/R30 P1)。グループの保存のため連関 **`dm_recipient_draft_owners`(draft_id FK Cascade, owner_id FK Cascade)** も migration-A に追加し、**キャンペーン作成(宛先生成)時にグループ全員を保存**する(現行は代表+人数しか持たない)。⚠宛先生成 tx も順序規約に従い **Owner(FOR SHARE・安定id順)→対象物件の親行(FOR SHARE・id順)を取得し、保持したまま PropertyOwner リンクを再検証してから draft+連関を INSERT** する(@codex R49 P2: リンクの付け外しは親行ロック規約で書かれる=Owner ロックだけでは解除と直列化されず、所有者でなくなった相手への draft が生成後の印刷検査もすり抜ける)。⚠**既存の未送付 draft(連関が空)は補完せず、代表のみで記録**する(@codex R31→R33→R34 で確定した最終形): 現在の所有者情報からグループを再計算しても「実際に手紙を受け取る宛先」と一致する保証が無く(R33 P2)、氏名・住所・人数のスナップショット照合でも**同住所での共有者の入れ替え**は検知できない(R34 P2)。不確かな拡張はせず、**移行後に作られた draft(作成時にグループを保存済み)だけが全員連関の対象**。旧 draft は従来どおり代表のみ(監査 detail に legacyGroup を記録)。対象は移行前の未送付下書きのみ=本番は売却DM休眠中でほぼゼロ。これが無いと新しい売却DM経由の拒否/宛先不明が「所有者なし」になり、§4-5 の所有者単位の除外が**新規行に対して効かない**(旧行だけの限界のはずが新規にも及ぶ)。⚠コピー元は **tx 内で(条件付き updateMany の勝者決定後に)draft を再読取した値**を使う(@codex R13 P1): tx 前のスナップショットを使うと、並行する名寄せが draft を master へ付け替えた後に **archive 済みの旧所有者の id でログを作ってしまう**(以後の拒否が所有者横断の除外から見えない)。mark-sent も同じ型=**draft を先読み→所有者集合(代表+連関)を id 順に FOR SHARE→条件付き updateMany(draft ロック)→draft を再読取→所有者不一致なら中止・再試行**(@codex R40 P2: 子ロックを直列化の根拠にせず、Owner 先頭の全体順序に従う)。
 - UI: 物件一覧の「DM差込CSV出力」の隣に「**送付の確定**」→ 未確定バッチ一覧(出力日時・件数)→ 投函日(既定=今日)→ 確定。確定済み件数を表示して閉じる。
 - 未確定バッチが溜まった場合の掃除は当面しない(件数小・一覧は直近から表示)。必要になれば既存の日次クリーンアップに載せる(将来)。
 
@@ -106,7 +106,7 @@ model DmExportBatchItem {
 - `DELETE /api/properties/[id]/dm-logs/[logId]` — 記録ミスの取消。**method="sale_dm" の行は 409**(売却DM側の状態と不整合になるため。案内文で売却DM画面へ誘導)。
   - **宛先不明フラグの再計算(@codex R8 P2)**: undeliverable の反響が付いた行を削除するときは、**親の物件行ロックを保持したまま**残りを数え、その物件に undeliverable のログも returned_undeliverable の売却DM下書きも残らないなら `dmUndeliverableAt` を解除する(dmStatus は人の判断=既存の訂正フローと同じ)。これをしないと「宛先不明のみ」フィルタに根拠のない物件が永久に残る。
 - どちらも property:write + record scope + `lockPropertyRecordForWrite` 規約を使う(採番 advisory の廃止(§2.2・R26)により、既存ガードの「txの最初に親行を取る」規約と**矛盾なくそのまま従える**。個別記録は ownerId を持たないため Owner ロックも不要)。
-- ⚠一括確定の tx の親ロック(@codex R4 P2 で条件付きに変更): **admin/office_staff の確定**(スコープ判定が常に真)は「INSERT のみ・親 FOR UPDATE なし」(FK の暗黙 FOR KEY SHARE のみ・親行の更新なし=循環の起点にならない)。**field_staff の確定**はスコープ判定が担当変更と競合し得る(FOR KEY SHARE は assignedTo 更新と衝突しない=判定後に担当が外れても確定が通る TOCTOU)ため、**Owner ロック(§2.2 の順序規約)の後に対象物件の親行を id 順で FOR UPDATE し、保持したままスコープを検証してから** INSERT する。順序は常に「Owner→親→子」(採番 advisory は R26 で廃止済み・@codex R28 P2)。
+- ⚠一括確定の tx の親ロック(@codex R4 P2 → R49 P2 で**全ロール統一**に変更): 確定は権限を問わず **Owner ロック(§2.2 の順序規約)→対象物件の親行を id 順で FOR UPDATE→バッチ行→items 再読取→INSERT** の順で行う。admin/office を「INSERT のみ・親ロックなし」にすると、物件ハード削除(親行を保持して items へ SetNull で降りてくる)と**逆順のロック取得**になり、確定側が item FOR UPDATE→ログ INSERT の FK ロック待ち・削除側が親行→item 待ちの相互待ちでデッドロックする(@codex R49 P2)。field_staff はさらに親行ロック保持中にスコープを検証(FOR KEY SHARE は assignedTo 更新と衝突しない=TOCTOU 防止・R4)。親行が既に消えていた item は property_id=null の記録として扱う(R49 P1)。順序は常に「Owner→親→子」(採番 advisory は R26 で廃止済み・@codex R28 P2)。
 
 ### 2.4 PropertyDmLog の列追加(migration-A・additive)
 
@@ -116,6 +116,7 @@ dm_type    String?            // "owner_address"/"property_address"/既存行と
 batch_id   String? @db.Uuid   // 一括確定のトレース(FKは張らない=バッチ削除と独立)
 draft_id   String? @db.Uuid   // 売却DMブリッジ行→DmRecipientDraft の紐付け(反響同期用・FKは張らない)
 updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
+property_id を nullable 化+FK を ON DELETE SET NULL へ変更(@codex R49 P1: 現行の物件ハード削除はログを Cascade で道連れにし、**拒否/宛先不明の履歴ごと消える**→所有者Oが物件Aで拒否されていても、Aを削除するとOの他物件Bが再送候補に復活する。履歴は所有者側(owner_id+property_dm_log_owners)に残す。物件詳細の履歴表示は propertyId 指定クエリなので無影響・物件が消えた行は所有者横断の除外にだけ効く)
 索引追加: [propertyId, sentAt] / [ownerId] / [draftId](@codex R45 P2: 売却DMの outcome 更新・公開LPの追跡ヒットはブリッジ行を draft_id で引く=無索引だと履歴の成長に伴い全走査)
 ※ sequence 列は持たない(「何通目」は表示時に sentAt,createdAt,id 順で導出=§2.2・R26)
 ```
@@ -179,7 +180,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 
 ## 6. レビューで特に見てほしい論点
 
-1. 一括確定 tx の親ロック方針(§2.3 ⚠): admin/office は INSERT のみで親 FOR UPDATE を取らない(field_staff のみ Owner→親→子で取る)、で安全か。
+1. (解決済み・@codex R49 P2)一括確定 tx の親ロックは**全ロールで Owner→親→子に統一**した(§2.3)。
 2. export がバッチを書くことと、既存の「export は送付履歴を書かない」契約の整合。
 3. undeliverable 連動の解除条件(売却DM側と二重管理にならないか)。
 4. §3 の売却DM反響同期の写像(returned_undeliverable→undeliverable / inquiry・電話→replied)の妥当性。
@@ -232,3 +233,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R46(2026-08-08): P2(連関3表のowner_id側が無索引)→**owner_id先頭の索引を3表すべてに必須化**。外部AI側P2(extraInstructionの失効誤発火)は別紙。
 - R47(2026-08-08): P1(共有所有者の別物件へのterminal書込とDL検査がすれ違う)→**terminal反響を書く全writerにOwner先頭FOR UPDATEを義務付け+DL側(初回/再試行)はOwner FOR SHAREを検証〜描画まで保持**(非terminal書込はOwnerロック不要=追跡ホットパス維持)。
 - R48(2026-08-08): P1(紐づけ解除・no_send化はdigestにもロックにも現れない)→**宛先資格の再検証(PropertyOwnerリンク+dmStatus)をDL両経路の検査に追加**(409・親行FOR SHAREで既存writer規約と直列化)。
+- R49(2026-08-08): P1(物件ハード削除がterminal履歴を道連れ)→**PropertyDmLog/バッチitemの物件FKをSetNull化**(nullable・履歴は所有者側に残す・DL境界と整合)。P2(確定と物件削除のデッドロック)→**一括確定の親ロックを全ロールでOwner→親→子に統一**(§6論点1解消)。P2(宛先生成がOwnerロックのみ)→**親行FOR SHARE保持中にリンク再検証してからdraft INSERT**。
