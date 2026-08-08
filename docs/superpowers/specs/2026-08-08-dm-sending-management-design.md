@@ -40,6 +40,7 @@ model DmExportBatch {
   rowCount    Int       @map("row_count")           // CSV行数(=宛先件数)
   createdBy   String    @map("created_by") @db.Uuid
   createdAt   DateTime  @default(now()) @map("created_at")
+  attemptKey  String    @unique @map("attempt_key") // 押下ごとの冪等キー(下記「出力の冪等化」)
   confirmedAt DateTime? @map("confirmed_at")        // null=未確定
   confirmedBy String?   @map("confirmed_by") @db.Uuid
   sentOn      DateTime? @map("sent_on") @db.Date    // 投函日(確定時に入力)
@@ -62,11 +63,12 @@ model DmExportBatchItem {
 }
 ```
 
-- **出力の冪等化(@codex P2)**: export は GET のためリトライ/二度押しで再実行され得る。`DmExportBatch` に `fingerprint` を持たせ **unique**。同一内容の同日出力は**既存の未確定バッチを再利用**する(新規バッチを作らない)。日付をキーに含めるので、90日後の正当な再出力は新しいバッチになる。
-  - fingerprint の中身(@codex R2 P1): **dmType + 当日日付 + ソート済みの「(propertyId, 代表ownerId) ペア列」の sha256**。物件ID集合だけだと、同じ物件集合でも所有者・住所・代表者が変わった2回目の出力(=宛先が違うCSV)が1回目の控えに合流し、**古い代表宛先で確定してしまう**。実際に出力した宛先行そのものを同一性の根拠にする。
-  - unique の範囲(@codex R3 P2): **未確定の控えに限定した部分unique**(`CREATE UNIQUE INDEX ... WHERE confirmed_at IS NULL`・raw SQL migration)。全体uniqueにすると、確定後の**同日の正当な再出力**(送り直し)が新しい控えを作れなくなる。再利用の対象も未確定のみ(確定済みは合流しない)。
-  - 再利用と確定の直列化(@codex R4 P2): 再利用の照会は**バッチ行を `SELECT ... FOR UPDATE` で取り直して confirmedAt=null を再検証**する(確定側の updateMany と行ロックで直列化)。確定中の行を掴んだ場合はロック解放後に確定済みと分かるので**新しい控えを作る**(部分uniqueへの挿入は確定txの完了を待ってから通る)。これが無いと「返したCSVの控えが直後に確定済みになり、刷った郵送物を確定できない」レースが残る。
-  - 同時新規作成の回復(@codex R5 P2): 既存の控えが無い状態で同一出力が並走すると**両方が INSERT に進み、負けた側が部分uniqueの重複エラー**になる(まさに二度押しのケース)。INSERT は重複エラーを catch し、**勝った未確定バッチを FOR UPDATE で取り直して再利用**してから CSV を返す(利用者にはエラーを見せない)。
+- **出力の冪等化 = 押下ごとの冪等キー方式**(R1〜R6 で内容ハッシュ方式から到達した最終形。@codex R6 P2):
+  - **UI が「DM差込CSV出力」の押下ごとに attemptKey(uuid)を発行**し querystring に付与。route は attemptKey を `DmExportBatch.attempt_key`(**unique**)として保存する。
+  - **同じキーの再実行**(ブラウザのダウンロード再試行・同一ナビゲーションの再実行)は、既存バッチを **`SELECT ... FOR UPDATE` で照会→confirmedAt を再検証して再利用**(確定側と行ロックで直列化=@codex R4 P2)。INSERT の unique 衝突は catch して勝者を取り直す(=@codex R5 P2)。
+  - **別の押下は別のキー=別の控え**。⚠内容ハッシュで「同日同内容=同一」と畳むと、**別々の操作者が意図して行った同日2回の郵送**まで1つに合流し、確定が1回しかできず送付記録が過少になる(@codex R6 P2)。合流してよいのは「同じ1回のダウンロードの再試行」だけであり、それは attemptKey が正確に表す。
+  - attemptKey 無しの直叩き(API 直接呼び出し)はサーバーが発行する(重複排除なしで毎回新規=安全側)。
+  - 冪等キーの先例 = 売却DMキャンペーンの idempotencyKey(実装様式もこれに合わせる)。
 - **所有者の削除(@codex P2)**: item の owner FK は SetNull。確定時に ownerId が null の item は `PropertyDmLog.owner_id=null` で記録する(1件の欠けで全体を巻き戻さない)。
 
 - **CSV の中身(氏名・住所)は保存しない**。控えは propertyId/代表 ownerId のみ=非PII寄りの最小構成。
@@ -169,3 +171,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R3(2026-08-08): P2×2(fingerprint uniqueは未確定限定の部分unique=確定後の同日再出力を塞がない / スコープ外itemがある確定は403で拒否=記録の永久欠落防止)を反映。
 - R4(2026-08-08): P2×3(field_staff確定は親FOR UPDATE保持でスコープ検証=TOCTOU封じ / 再利用照会はFOR UPDATEで確定と直列化 / backfill曖昧行は反響あり側に倒す)を反映。外部AI方式側のP1(一括適用のscope除外)は別紙。
 - R5(2026-08-08): P1(手動反響の保護→reaction_source列で出所管理・手動が常に勝つ)・P2(同時新規作成のunique衝突をcatchして勝者を再利用)を反映。
+- R6(2026-08-08): P2(同日同内容の別操作の過剰合流→冪等化を内容ハッシュから**押下ごとのattemptKey方式**へ変更=再試行だけが合流)を反映。

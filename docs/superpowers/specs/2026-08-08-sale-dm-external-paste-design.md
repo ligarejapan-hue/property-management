@@ -39,9 +39,11 @@
 
 - variant の画面に「本文を貼り付け」欄 → 保存で variant に原本(body_template)を保存 → 「**この型の全宛先に適用**」で variant 配下の drafts の body へ、**差込タグを物件ごとに解決してから**一括セット(タグが解決できない物件=所在未入力等は適用スキップして件数を報告)。
 - **record scope の適用(@codex R4 P1)**: field_staff の担当変更で見えなくなった物件の draft は**適用対象から原子的に除外**する(既存の `filterDraftsByFieldStaffScope` と同じスコープ条件を update の where に含める)。CSV/印刷が既にこの規則で隠している宛先を、一括適用だけが書き換えられるのは認可の穴。除外した件数は結果に報告する(適用は残りのスコープ内へ行う=1件の担当変更でキャンペーン全体を止めない。送付記録の確定(§別紙2.2)と違い、後から埋め直せるので拒否方式にしない)。
+  - ⚠where 条件だけでは足りない(@codex R6 P2): リレーション述語はステートメントのスナップショットで評価され、**判定後〜commit の間の担当変更を防げない**(親の assignedTo 更新は draft 更新のロックと衝突しない=TOCTOU)。field_staff の一括適用は、**対象物件の親行を id 順に FOR UPDATE し、保持したままスコープを検証してから** draft を更新する(送付確定の field_staff 経路(§別紙2.3)と同じ手当て。admin/office は判定が常に真なので親ロック不要)。
 - 上書き保護: **confirmed/sent の draft には適用しない**。既定では **body が空の draft のみ**に適用し、「入力済みの本文も置き換える」チェックを入れた場合のみ draft 状態の全件に適用(個別の手直しを黙って消さない)。
 - **型の凍結(@codex R3 P1)**: variant 配下に confirmed/sent の draft が**1件でもできたら、その variant の prompt_text/body_template は読み取り専用**(貼り直し・再適用とも不可)。途中で差し替えると同じ型の中に旧文面と新文面が混在し、**A/B比較(variant単位の集計)が壊れ、送付済み文面の出所も失われる**。文面を変えたいときは**新しい型を追加**する(既存の variant 追加フローをそのまま使う)。
 - **凍結判定と確定の直列化(@codex R5 P2)**: 凍結チェック(confirmed/sent が無いこと)を無ロックで行うと、並行する確定(既存 confirm route の updateMany)と競合し「旧本文のまま確定された draft と、差し替わった body_template」の食い違いが起きる。**貼り付け/適用の tx と、drafts の確定の tx は、対象 variant 行を id 順に FOR UPDATE してから**状態を判定・書込する(両経路で同じロック順序。確定 route 側にも variant 行ロックを追加する)。
+- **variant を触る全経路でロック順序を統一(@codex R6 P2)**: ⚠既存の **variant 設定 PATCH は「draft 行→variant」の順でロックしており**(variants/[variantId]/route.ts L80-86)、新設の「variant→draft」経路と混ざるとデッドロックする。**既存 route も含めて「variant 行 → 物件親行(field_staffのみ) → draft 行」の一方向に揃える**(既存 PATCH の改修を本 PR-D のスコープに含める)。送付記録側(§別紙)の順序と合わせた全体規約: **採番 advisory → variant → 物件親行 → 子行**(各 tx は必要なものだけを、常にこの順で取る)。配線テストで順序を固定する。
 - 個別の手直しは既存の draft 編集をそのまま使う。
 - 空本文の draft は確定・印刷に進めない(既存の `body: { not: "" }` ガードと整合)。
 
@@ -86,3 +88,4 @@ dm_variants に追加:
 - R3(2026-08-08): P1(型の途中差し替えでA/B比較が壊れる→confirmed/sentが1件でもできたら凍結・文面変更は新しい型で)・P2(設定変更時に prompt_text/body_template も失効)を反映。
 - R4(2026-08-08): P1(一括適用にfield_staffのrecord scopeを適用=担当外draftを書き換えない・除外件数を報告)を反映。
 - R5(2026-08-08): P2(凍結判定と確定をvariant行FOR UPDATEで直列化・確定route側にもロック追加)を反映。
+- R6(2026-08-08): P2×2(既存variant設定PATCHのロック順を含め「variant→親→draft」へ全経路統一 / field_staffの一括適用は親行FOR UPDATE保持でスコープ検証=TOCTOU封じ)を反映。
