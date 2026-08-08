@@ -56,10 +56,14 @@ model DmExportBatchItem {
   ownerId    String? @map("owner_id") @db.Uuid      // 代表所有者(所有者宛)。物件宛は null
   batch      DmExportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
   property   Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  owner      Owner?        @relation(fields: [ownerId], references: [id], onDelete: SetNull) // @codex P2: 確定前に所有者が消えたら null 化(確定を巻き戻さない)
   @@index([batchId])
   @@map("dm_export_batch_items")
 }
 ```
+
+- **出力の冪等化(@codex P2)**: export は GET のためリトライ/二度押しで再実行され得る。`DmExportBatch` に `fingerprint`(=dmType+ソート済み propertyId 集合の sha256+**当日日付**)を持たせ **unique**。同一内容の同日出力は**既存の未確定バッチを再利用**する(新規バッチを作らない)。日付をキーに含めるので、90日後の正当な再出力は新しいバッチになる。
+- **所有者の削除(@codex P2)**: item の owner FK は SetNull。確定時に ownerId が null の item は `PropertyDmLog.owner_id=null` で記録する(1件の欠けで全体を巻き戻さない)。
 
 - **CSV の中身(氏名・住所)は保存しない**。控えは propertyId/代表 ownerId のみ=非PII寄りの最小構成。
 - 所有者宛 export route が CSV 生成と同一リクエスト内で batch+items を書く。**PropertyDmLog は引き続き書かない**(既存テストのピンは維持し、「batch は書く」ことを明示する形にテストを更新)。
@@ -72,7 +76,12 @@ model DmExportBatchItem {
 - `POST /api/properties/dm-batches/[id]/confirm` body=`{ sentOn: "YYYY-MM-DD" }`
 - ゲート: 既存 export と同じ4権限+**property:write**(書込は mark-sent/outcome と同じ統一方針・新slugなし)。field_staff は record scope 内の item のみ記録(スコープ外はスキップし件数を返す)。
 - 冪等: `confirmedAt` が null の場合のみ、条件付き updateMany(勝者決定)→ 同一 tx で items から `PropertyDmLog` を生成。二重確定は 409。
-- 生成する行: `propertyId / ownerId(代表) / dmType="owner_address" / sequence=**同一 propertyId の既存件数+1**(「この物件に何通目か」。既存の送信回数表示 _count.dmLogs と同じ物件単位で数える) / batchId / sentAt=sentOn / method="mail" / sentBy=操作者`。
+- 生成する行: `propertyId / ownerId(代表) / dmType="owner_address" / sequence(下記) / batchId / sentAt=sentOn / method="mail" / sentBy=操作者`。
+- **sequence の採番(@codex P1)**: 「同一 propertyId の既存件数+1」を無ロックで数えると並行確定で重複する。対策3点セット:
+  1. **採番は共通ヘルパー1本に集約**し、PropertyDmLog を書く**全writer**(一括確定・個別記録・売却DM mark-sent)がこれを使う。ヘルパーは tx 内で `pg_advisory_xact_lock`(採番専用の固定キー)を取ってから数える=全採番が直列化される(確定は週に数回・数百行なので直列で十分)。
+  2. 同一バッチ内に同じ物件の item が複数ある場合(送付先住所が複数の共有者グループ)は、item id 順で **基数+連番** を決定的に割り当てる。
+  3. **DB側の背水**: `@@unique([propertyId, sequence])`。migration-A で既存行の sequence を物件ごとに `sentAt,createdAt` 順で**振り直してから**(window関数・決定的)このuniqueを張る。⚠既存の売却DM行は default 1 のままだと重複でunique作成に失敗するため、この backfill は必須(本番は売却DM休眠中のため対象行は僅少/ゼロの見込みだが、手順としては必ず行う)。
+- **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。
 - UI: 物件一覧の「DM差込CSV出力」の隣に「**送付の確定**」→ 未確定バッチ一覧(出力日時・件数)→ 投函日(既定=今日)→ 確定。確定済み件数を表示して閉じる。
 - 未確定バッチが溜まった場合の掃除は当面しない(件数小・一覧は直近から表示)。必要になれば既存の日次クリーンアップに載せる(将来)。
 
@@ -88,10 +97,11 @@ model DmExportBatchItem {
 ```
 owner_id   String?  @db.Uuid  + FK Owner (ON DELETE SET NULL) + Owner側逆リレーション
 dm_type    String?            // "owner_address"/"property_address"/既存行とsale_dmブリッジはnull
-sequence   Int @default(1)    // 同一宛先の何通目か
+sequence   Int @default(1)    // 同一物件の何通目か(§2.2 の採番規則・既存行はbackfillで振り直し)
 batch_id   String? @db.Uuid   // 一括確定のトレース(FKは張らない=バッチ削除と独立)
+draft_id   String? @db.Uuid   // 売却DMブリッジ行→DmRecipientDraft の紐付け(反響同期用・FKは張らない)
 updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
-索引追加: [propertyId, sentAt] / [ownerId]
+索引追加: [propertyId, sentAt] / [ownerId] / unique [propertyId, sequence](backfill後)
 ```
 
 ### 2.5 監査
@@ -112,6 +122,10 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - reaction_note は note と同じく owner_note 表示レベルで server-side マスク。
 - 監査: `dm_reaction_update`{logId,status,reactedAt} — note 本文は載せない。
 - UI: DM送付履歴の行に反響の選択(4種)+日時+メモ。一覧の「宛先不明のみ」フィルタは既存のまま両モードで機能する。
+- **売却DM側の反響との同期(@codex P1)**: 売却DMの反響は `DmRecipientDraft.outcome/deliveryStatus` に入り、放置すると「売却DMで連絡が来た相手」が汎用側では no_response のまま=再送候補に出てしまう。対策:
+  - 売却DM outcome 更新 route が、`draft_id` で紐付いたブリッジ行(method="sale_dm")の reaction_status も**同じ tx で更新**する: `returned_undeliverable → undeliverable` / `phoneInquiryAt あり or outcome=inquiry → replied`。訂正時も同様に戻す。
+  - migration-B で既存の sale_dm 行を drafts の outcome から **backfill**(本番は売却DM休眠中のため対象は僅少/ゼロの見込みだが手順として行う。旧行に draft_id が無い場合は propertyId+送付日で対応付け、決められない行は no_response のまま)。
+  - これにより §4 の再送候補判定は **PropertyDmLog だけを見れば足りる**(2つの保存先を join しない=判定の単一情報源)。
 
 ## 4. 第3段(PR-C): 再送候補
 
@@ -133,7 +147,10 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 
 ## 6. レビューで特に見てほしい論点
 
-1. 一括確定 tx の親ロック方針(§2.3 ⚠): INSERT のみの tx は親 FOR UPDATE を取らない、で安全か。
+1. 一括確定 tx の親ロック方針(§2.3 ⚠): INSERT のみの tx は親 FOR UPDATE を取らない(採番は advisory lock で直列化)、で安全か。
 2. export がバッチを書くことと、既存の「export は送付履歴を書かない」契約の整合。
-3. sequence 採番の同時実行(同一宛先への並行確定)。
-4. undeliverable 連動の解除条件(売却DM側と二重管理にならないか)。
+3. undeliverable 連動の解除条件(売却DM側と二重管理にならないか)。
+4. §3 の売却DM反響同期の写像(returned_undeliverable→undeliverable / inquiry・電話→replied)の妥当性。
+
+### 対応履歴
+- R1(2026-08-08): P1×2(sequence採番の直列化→advisory lock+unique backstop+全writer共通ヘルパー / 売却DM反響の同期→draft_id紐付け+outcome同tx更新+backfill)・P2×2(item所有者削除→owner FK SetNull / export冪等化→fingerprint unique+同日再利用)を反映。
