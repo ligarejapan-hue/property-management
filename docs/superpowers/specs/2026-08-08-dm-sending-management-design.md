@@ -74,7 +74,7 @@ model DmExportBatchItem {
   - **冪等化**: attemptKey(UI が押下ごとに発行・POST body で必須・`attempt_key` unique)。同じキーの再 POST は既存バッチを FOR UPDATE で照会し**未確定なら再利用・確定済みなら 409**(確定側と行ロックで直列化=R4)。INSERT の unique 衝突は catch して勝者を取り直す(R5)。**別の押下は別のキー=別の控え**(内容ハッシュで畳むと同日2回の意図した郵送まで合流する=R6)。先例=売却DMキャンペーンの idempotencyKey。
   - **再試行とのズレは構造的に消滅**: CSV は常に**控えの items から**生成するため、「再試行が別の宛先集合を出力する」事態が起きない(R7 の content_digest 照合は不要になり**列ごと削除**)。owner が削除済み(SetNull)の item は CSV から除外し件数を表示(郵送不能のため)。
 - **所有者の削除(@codex R4→R41→R42 で確定)**: item の owner FK は SetNull。**DL前の削除=初回GETで items から除外**(郵送されていない=記録しない)/**DL後の削除=itemは残り、確定で owner_id=null として記録**(手紙は出ている)。「DLした集合=確定される集合」の不変条件は downloadedAt 境界で守る。
-- **共有者グループ全員の保持(@codex R29 P1)**: 1つのCSV行(=item)は**同一送付先住所の共有者を束ねた1通**であり、代表の ownerId だけを持つと、**代表以外の共有者**が別物件を持つ場合に拒否/宛先不明の記録がその共有者に紐づかず、§4 の所有者単位の除外から漏れる。連関テーブル **`dm_export_batch_item_owners`(item_id FK Cascade, owner_id FK Cascade)** に**グループ全員の ownerId** を保存し(export 時に selectGroupRepresentative のグループから採取)、確定時に **`property_dm_log_owners`(log_id FK Cascade, owner_id FK Cascade)** へコピーする。既存の owner_id 列(代表)は表示・ブリッジ用に維持。migration-A に2連関テーブルを追加。
+- **共有者グループ全員の保持(@codex R29 P1)**: 1つのCSV行(=item)は**同一送付先住所の共有者を束ねた1通**であり、代表の ownerId だけを持つと、**代表以外の共有者**が別物件を持つ場合に拒否/宛先不明の記録がその共有者に紐づかず、§4 の所有者単位の除外から漏れる。連関テーブル **`dm_export_batch_item_owners`(item_id FK Cascade, owner_id FK Cascade)** に**グループ全員の ownerId** を保存し(export 時に selectGroupRepresentative のグループから採取)、確定時に **`property_dm_log_owners`(log_id FK Cascade, owner_id FK Cascade)** へコピーする。既存の owner_id 列(代表)は表示・ブリッジ用に維持。migration-A に2連関テーブルを追加。⚠**連関3表(draft_owners 含む)はいずれも owner_id 先頭の索引を必須とする**(@codex R46 P2: 再送候補の所有者単位除外と名寄せの付け替えは owner_id 側から引く。Postgres は FK 参照列に自動で索引を張らず、(item_id, owner_id) 順の複合キーではこの向きの検索に使えない=履歴の成長で全走査になる。特に `property_dm_log_owners`)。
 
 - **CSV の中身(氏名・住所)は保存しない**。控えは propertyId/代表 ownerId のみ=非PII寄りの最小構成。
 - 既存の export GET(検索条件から直接CSV)は**新しい2段階フローに置き換える**(旧GETは撤去または新POSTへの誘導)。**PropertyDmLog はどの段でも書かない**(既存テストのピンは維持し、「POSTがbatchを書く」ことを明示する形にテストを更新)。
@@ -229,3 +229,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R43(2026-08-08): P1(再試行の内容drift)→**csvDigest列**: 初回DLでCSVのsha256を保存し再試行は一致時のみ配信・不一致409(ハッシュのみ=PII非保存)。P2(初回GETレース)→**バッチ行FOR UPDATEのtxで凍結を直列化**(ロック後にdownloadedAt再判定・同tx内でitems/owners再読取→描画→digest+刻印)。
 - R44(2026-08-08): P1(凍結txのscope検証が担当替えと競合しない)→凍結txを**共通ロック順序(Owner→物件親行→バッチ行→items再読取・不一致中止再試行)**に統一。P2(shadowがstatusのみ)→**manual_reaction_shadowをJSONB全量スナップショット**(status/reactedAt/note)に変更・復元も全量。外部AI側P2(個別PATCHのタグ検証)は別紙。
 - R45(2026-08-08): P1(再試行が反響を見ない)→**terminal反響検査を再試行GETにも毎回適用**(409)。P2(凍結時のrowCount不整合)→**残存items数で同一tx内に再計算**。P2(ブリッジ同期の全走査)→**[draftId]索引をmigration-Aに追加**。
+- R46(2026-08-08): P2(連関3表のowner_id側が無索引)→**owner_id先頭の索引を3表すべてに必須化**。外部AI側P2(extraInstructionの失効誤発火)は別紙。

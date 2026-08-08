@@ -67,7 +67,7 @@ dm_variants に追加:
 - **「確定の証拠」を消す前に凍結印を固定する**(@codex R24→R31→R35 で全経路化): **confirmed/sent の draft の所属や状態を変える全 mutation**(一括 assign・個別 draft PATCH の型移動・**個別 PATCH の本文編集による確定解除(confirmed→draft リセット)**)は、実行前に **その draft の variant の `template_frozen_at` を(未設定なら)variant ロック下で立ててから**変更する。「確定 draft を動かす/戻す操作」を grep で全列挙して確認([同種の穴は全箇所]の原則)。これで照合前の窓でも派生証拠の消失より先に列へ固定される。照合スクリプト完了前の窓で assign が「派生の証拠」を消しても、列に固定済みなので凍結が失われない。
 - **凍結印の初期投入は「restart 後の照合スクリプトのみ」で行う**(@codex R15→R16→R21 で段階化の最終形): PR-D の **migration は列追加のみ**とし、既存の confirmed/sent variant への `template_frozen_at` 立ては**冪等な照合スクリプトを restart 後に実行**して行う(値=既存 draft の confirmedAt/sentAt の最小値・無ければ実行時刻)。⚠migration 内で backfill すると、`migrate deploy → restart` の窓で**旧 variant ルート(凍結を知らない PATCH/DELETE)が凍結済み variant を書き換え・削除**でき、照合では復元できない(@codex R21 P2)。列が null の窓の間は誰も凍結印に依存しない=従来挙動のままなので退行は無く、ガード(新ルート)が稼働してから印を立てる順序が安全(本番は売却DM休眠中で対象ゼロの見込み)。⚠**migrate〜restart の窓では旧 PATCH が最後の confirmed draft を draft に戻して派生証拠ごと消し得る**(@codex R37 P2)。技術的に完全に塞ぐには停止が要るため、**反映手順に「migrate→restart→照合スクリプトを同一作業で連続実施し、その間(数分)は売却DMの操作をしない」を明記**して運用で塞ぐ(操作者は管理者2名・対象データはゼロ見込み=リスクは事実上ない。vps-deploy の手順に追記)。
 
-- **設定変更時の失効(@codex R3 P2)**: 既存の variant 更新 route は、トーン・訴求など**プロンプトに影響する設定を変えたとき drafts の body をクリア**する失効機構を持つ。同じ契機で **prompt_text/body_template も同時にクリア**する(古いプロンプトで作った本文を、新しい設定の型として再適用できてしまう不整合を防ぐ。§2.3 の凍結後は設定変更自体も不可)。
+- **設定変更時の失効(@codex R3 P2)**: 既存の variant 更新 route は、トーン・訴求など**プロンプトに影響する設定を変えたとき drafts の body をクリア**する失効機構を持つ。同じ契機で **prompt_text/body_template も同時にクリア**する(古いプロンプトで作った本文を、新しい設定の型として再適用できてしまう不整合を防ぐ。§2.3 の凍結後は設定変更自体も不可)。⚠**extraInstruction は失効の契機から除外**する(@codex R46 P2): 外部AIモードのプロンプトは extraInstruction を含めない(R12)ため、現行 PATCH の optionFieldChanged 判定(route.ts L39-41)をそのまま流用すると**プロンプトに影響しない欄の編集で prompt_text/body_template/全draft本文が無意味に消える**。実装は判定から extraInstruction を外し、UI でも外部モードでは入力欄を出さない(値は既存データ保全のため列は残す)。
 
 ### 2.5 権限と前提設定
 
@@ -123,3 +123,4 @@ dm_variants に追加:
 - R37(2026-08-08): P2×2(ロック順序の残骸をOwner先頭へ置換 / restart前の窓は反映手順の連続実施+操作禁止の運用で塞ぐ)を反映。
 - R40(2026-08-08): P2(個別draft PATCHにもtrim検証=白紙本文の確定防止)を反映。
 - R44(2026-08-08): P2(個別draft PATCHにもタグ検証)→本文検証を共通ヘルパー1本に統一(trim+allowlist展開+残存`{{`拒否を3経路すべてに適用)。
+- R46(2026-08-08): P2(extraInstructionが失効を誤発火)→optionFieldChanged判定から除外+外部モードではUI非表示(列は残す)。
