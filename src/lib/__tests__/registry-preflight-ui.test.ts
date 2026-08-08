@@ -37,7 +37,7 @@ describe("共通部品(registry-preflight-warnings)", () => {
 describe("3入口の配線", () => {
   it("単発ボタン: confirming で preflight を取得し警告行を出す(既存の取得済み文言とは重複させない)", () => {
     expect(AUTO).toMatch(/useRegistryPreflight\(\[propertyId\], state === "confirming"\)/);
-    expect(AUTO).toMatch(/<RegistryPreflightWarningLines[\s\S]{0,120}?showObtained=\{false\}/);
+    expect(AUTO).toMatch(/<RegistryPreflightWarningLines[\s\S]{0,140}?showObtained=\{!alreadyObtained\}/);
   });
 
   it("所在検索: 課金直前(confirmObtain)で preflight を取得し警告行を出す", () => {

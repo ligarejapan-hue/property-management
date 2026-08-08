@@ -132,7 +132,10 @@ export function RegistryPreflightCountLines({
         {attached > 0 && <li>謄本PDFの添付あり: {attached}件</li>}
         {withOwners > 0 && <li>所有者の入力あり: {withOwners}件</li>}
       </ul>
-      <p>これらの物件も取得(課金)の対象になります。よろしければそのまま実行してください。</p>
+      <p>
+        番号がある・所在が不足しているものは自動で対象外になりますが、それ以外は
+        取得(課金)の対象になります。ご確認のうえ実行してください。
+      </p>
     </div>
   );
 }

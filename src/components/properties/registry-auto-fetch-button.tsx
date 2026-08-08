@@ -134,11 +134,12 @@ export default function RegistryAutoFetchButton({
             </p>
           )}
           {/* 事前確認(サーバ判定): 謄本PDF添付あり/所有者入力あり(発注者要望 2026-08-08)。
-              取得済みは上の registryStatus 由来の警告があるため重複表示しない。 */}
+              取得済み行は、上の registryStatus(props)由来の警告が出ているときだけ抑制する。
+              props が古い(別タブで取得済みになった等)場合はサーバ判定の警告を出す(#365 R2)。 */}
           <RegistryPreflightWarningLines
             state={preflight}
             propertyId={propertyId}
-            showObtained={false}
+            showObtained={!alreadyObtained}
           />
           <div className="mt-1 flex gap-1">
             <button
