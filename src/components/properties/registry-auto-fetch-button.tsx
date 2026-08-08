@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 import { FileSearch, Loader2 } from "lucide-react";
+import {
+  useRegistryPreflight,
+  RegistryPreflightWarningLines,
+} from "@/components/properties/registry-preflight-warnings";
 
 interface RegistryAutoFetchButtonProps {
   propertyId: string;
@@ -32,6 +36,8 @@ export default function RegistryAutoFetchButton({
 }: RegistryAutoFetchButtonProps) {
   const [state, setState] = useState<State>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // 確認パネルを開いたときだけ事前確認(取得済み/添付あり/所有者あり)を取得する。
+  const preflight = useRegistryPreflight([propertyId], state === "confirming");
 
   // 非 admin には導線自体を出さない（サーバ側でも 403 で二重防御）。
   if (!canAutoFetch) return null;
@@ -127,6 +133,13 @@ export default function RegistryAutoFetchButton({
               この物件は既に取得済みです。再取得すると最新の謄本で上書きされます。
             </p>
           )}
+          {/* 事前確認(サーバ判定): 謄本PDF添付あり/所有者入力あり(発注者要望 2026-08-08)。
+              取得済みは上の registryStatus 由来の警告があるため重複表示しない。 */}
+          <RegistryPreflightWarningLines
+            state={preflight}
+            propertyId={propertyId}
+            showObtained={false}
+          />
           <div className="mt-1 flex gap-1">
             <button
               type="button"
