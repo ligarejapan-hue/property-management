@@ -41,6 +41,7 @@ model DmExportBatch {
   createdBy   String    @map("created_by") @db.Uuid
   createdAt   DateTime  @default(now()) @map("created_at")
   attemptKey  String    @unique @map("attempt_key") // 押下ごとの冪等キー(下記「出力の冪等化」)
+  contentDigest String  @map("content_digest")      // ソート済み宛先行全体の非PIIハッシュ(再試行の一致検証用)
   confirmedAt DateTime? @map("confirmed_at")        // null=未確定
   confirmedBy String?   @map("confirmed_by") @db.Uuid
   sentOn      DateTime? @map("sent_on") @db.Date    // 投函日(確定時に入力)
@@ -140,7 +141,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - `PATCH /api/properties/[id]/dm-logs/[logId]/reaction` body=`{ status, reactedAt?, note? }` — property:write + record scope + lock規約。
 - **undeliverable を付けたら 物件 dmStatus=no_send + dmUndeliverableAt=now に自動連動**(売却DM outcome と同じ挙動)。訂正時(undeliverable→他)は、他に undeliverable の記録が無ければ dmUndeliverableAt を解除(dmStatus は人の判断で戻す=売却DMと同じ)。
 - reaction_note は note と同じく owner_note 表示レベルで server-side マスク。
-- 監査: `dm_reaction_update`{logId,status,reactedAt} — note 本文は載せない。
+- 監査: `dm_reaction_update`{logId,status,reactedAt} — note 本文は載せない。⚠**PR-B で `ACTION_EXTRA_KEYS` にも登録**する(@codex R11 P2: 未登録だと logId/reactedAt が表示時に[REDACTED]へ潰れ、§2.5 で直す property_dm_log_view と同じ穴を新設してしまう)。
 - UI: DM送付履歴の行に反響の選択(4種)+日時+メモ。一覧の「宛先不明のみ」フィルタは既存のまま両モードで機能する。
 - **売却DM側の反響との同期(@codex P1)**: 売却DMの反響は `DmRecipientDraft.outcome/deliveryStatus` に入り、放置すると「売却DMで連絡が来た相手」が汎用側では no_response のまま=再送候補に出てしまう。対策:
   - **outcome を書く全経路**が、`draft_id` で紐付いたブリッジ行(method="sale_dm")の reaction_status を**同じ tx で更新**する。写像: `returned_undeliverable → undeliverable` / `phoneInquiryAt あり or outcome=inquiry → replied`。訂正時も同様に戻す。
@@ -156,6 +157,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
   3. **90日以内の送付記録が無い**(`dmLogs: { none: { sentAt: { gt: cutoff } } }`)
   4. replied / refused / undeliverable の反響が付いた記録が**1件も無い**
   5. **所有者単位の除外(@codex R8 P1)**: その物件の所有者(PropertyOwner 経由)の誰かに、**他物件も含めて** refused / undeliverable の反響ログ(`Owner.dmLogs`=migration-A の逆リレーション)が付いていれば除外する。同じ所有者が物件AとBに紐づくとき、Aで拒否された相手にBから再送する事故を防ぐ(Prisma: `owners: { none: { owner: { dmLogs: { some: { reactionStatus: { in: [refused, undeliverable] } } } } } }` 相当)。⚠限界: ownerId が null の記録(個別記録・旧sale_dm行)は物件単位でしか効かない。また「所有者行は別だが住所が同じ」相手は所有者の名寄せ(既存の品質チェック領域)の守備範囲とし、本機能では扱わない(§6 論点)。
+  5b. ⚠**所有者の名寄せ(重複統合)で反響を置き去りにしない**(@codex R11 P1): 既存の統合 tx はメモと PropertyOwner 行を master へ移すが、このままだと **archive された旧所有者に付いた反響ログ**が述語から見えなくなり、統合後の所有者の他物件が再送候補に戻る。統合 tx に **`PropertyDmLog.ownerId` の付け替え(source→master)と、未確定バッチ item の ownerId 付け替え**を追加する(PR-A のスコープ=merge route の改修。付け替えは既存の owner FK 群の移送と同じ場所に足す)。
 - replied を除外する理由: 連絡が来ている相手は人が個別対応する(定型の再送に乗せない)。
 - `COOLDOWN_DAYS = 90`(定数)。env `DM_RESEND_COOLDOWN_DAYS` で上書き可(業務値の変更にリリース不要)。上限(cap)は作らない。
 - 純関数 `decideResendCandidacy({logs, ownerHasTerminalReaction}, now, {cooldownDays})` → `{eligible, reason}`(表示とテストの単一情報源。一覧 where と同じ規則を対で維持)。⚠入力には物件自身の logs に加えて **所有者単位の除外状態**(その物件の所有者の誰かに他物件も含め refused/undeliverable があるか=@codex R9 P2)を渡す。呼び出し側が §4-5 と同じクエリでこのフラグを計算する=規則の組み合わせ自体は純関数に集約され、where と対で維持できる。
@@ -185,3 +187,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R8(2026-08-08): P1×2(migration-A2自身も採番advisory lockを取る=稼働中writerと直列化 / 再送候補に所有者単位の除外を追加=別物件経由の再送事故防止)・P2×1(undeliverableログ削除時にdmUndeliverableAtを親ロック下で再計算)を反映。
 - R9(2026-08-08): P1(mark-sentがrepresentativeOwnerIdをowner_idへコピー=新規行にも所有者除外を効かせる)・P2×3(配達失敗は手動repliedより優先 / 「何通目」表示はA2適用後のPR-Bから / decideResendCandidacyに所有者横断状態を入力)を反映。
 - R10(2026-08-08): P2(売却DM側のoutcome訂正の解除判定をdrafts+汎用ログ両方で再計算)を反映。外部AI方式側のP2×2(draft編集PATCHにもproperty:write / 確定にも親行ロック)は別紙。
+- R11(2026-08-08): P1(所有者の名寄せtxでdmLogs/バッチitemのownerId付け替え=統合後の反響置き去り防止)・P2×2(content_digest列をスキーマ表に明記 / dm_reaction_updateのACTION_EXTRA_KEYS登録)を反映。
