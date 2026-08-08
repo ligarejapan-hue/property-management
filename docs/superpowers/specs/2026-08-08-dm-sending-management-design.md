@@ -40,8 +40,7 @@ model DmExportBatch {
   rowCount    Int       @map("row_count")           // CSV行数(=宛先件数)
   createdBy   String    @map("created_by") @db.Uuid
   createdAt   DateTime  @default(now()) @map("created_at")
-  attemptKey  String    @unique @map("attempt_key") // 押下ごとの冪等キー(下記「出力の冪等化」)
-  contentDigest String  @map("content_digest")      // ソート済み宛先行全体の非PIIハッシュ(再試行の一致検証用)
+  attemptKey  String    @unique @map("attempt_key") // 押下ごとの冪等キー(下記「出力は2段階」)
   confirmedAt DateTime? @map("confirmed_at")        // null=未確定
   confirmedBy String?   @map("confirmed_by") @db.Uuid
   sentOn      DateTime? @map("sent_on") @db.Date    // 投函日(確定時に入力)
@@ -64,18 +63,16 @@ model DmExportBatchItem {
 }
 ```
 
-- **出力の冪等化 = 押下ごとの冪等キー方式**(R1〜R6 で内容ハッシュ方式から到達した最終形。@codex R6 P2):
-  - **UI が「DM差込CSV出力」の押下ごとに attemptKey(uuid)を発行**し querystring に付与。route は attemptKey を `DmExportBatch.attempt_key`(**unique**)として保存する。
-  - **同じキーの再実行**(ブラウザのダウンロード再試行・同一ナビゲーションの再実行)は、既存バッチを **`SELECT ... FOR UPDATE` で照会→confirmedAt を再検証して再利用**(確定側と行ロックで直列化=@codex R4 P2)。INSERT の unique 衝突は catch して勝者を取り直す(=@codex R5 P2)。
-  - **別の押下は別のキー=別の控え**。⚠内容ハッシュで「同日同内容=同一」と畳むと、**別々の操作者が意図して行った同日2回の郵送**まで1つに合流し、確定が1回しかできず送付記録が過少になる(@codex R6 P2)。合流してよいのは「同じ1回のダウンロードの再試行」だけであり、それは attemptKey が正確に表す。
-  - **attemptKey 無しのリクエストは 400 で拒否**(@codex R38 P2 で「サーバー発行」を撤回): SameSite=Lax セッション下では cross-site のトップレベル遷移やブックマークの直叩きでも認証付き GET が通るため、鍵なしで毎回新規バッチ(最大1万item)を作れると**意図しない控えがDBと確定一覧に無限に積まれる**。UI が発行した鍵を必須にする(掃除機構を作らずに済む)。
-  - 冪等キーの先例 = 売却DMキャンペーンの idempotencyKey(実装様式もこれに合わせる)。
-  - **再試行と控えの中身の一致検証(@codex R7 P2)**: バッチに **content_digest**(=ソート済み宛先行全体の非PIIハッシュ。CSV本文は保存しない)を持たせる。同じ attemptKey の再実行は CSV を再生成するため、初回 commit 後に所有者・住所・代表者が変わっていると**再試行のCSVと控えの中身がずれる**。再実行時に digest を再計算して**一致しなければ 409**(「宛先が変わったため、もう一度出力してください」)=ずれた控えを黙って再利用しない。
+- **出力は2段階 = 「POST で控え作成 → GET で CSV ダウンロード」**(R1〜R39 で到達した最終形。@codex R39 P2):
+  - **POST `/api/properties/dm-batches`**(body=filters+attemptKey)が検索条件を評価し、**バッチ+items を作成して batchId を返す**。副作用は POST に置く(このリポの規約どおり=**cross-site のトップレベル GET 遷移では控えを作れない**。SameSite=Lax の直叩き/ブックマークで最大1万itemの控えが無限に積まれる穴(R38-39)を CSRF 境界で塞ぐ)。
+  - **GET `/api/properties/dm-batches/[id]/csv`** は**保存済みの items から CSV を生成して返すだけ**(書き込みなし・no-store)。ダウンロードは従来どおりブラウザ遷移で行える(UI は POST→返ってきた batchId の GET URL へ遷移)。
+  - **冪等化**: attemptKey(UI が押下ごとに発行・POST body で必須・`attempt_key` unique)。同じキーの再 POST は既存バッチを FOR UPDATE で照会し**未確定なら再利用・確定済みなら 409**(確定側と行ロックで直列化=R4)。INSERT の unique 衝突は catch して勝者を取り直す(R5)。**別の押下は別のキー=別の控え**(内容ハッシュで畳むと同日2回の意図した郵送まで合流する=R6)。先例=売却DMキャンペーンの idempotencyKey。
+  - **再試行とのズレは構造的に消滅**: CSV は常に**控えの items から**生成するため、「再試行が別の宛先集合を出力する」事態が起きない(R7 の content_digest 照合は不要になり**列ごと削除**)。owner が削除済み(SetNull)の item は CSV から除外し件数を表示(郵送不能のため)。
 - **所有者の削除(@codex P2)**: item の owner FK は SetNull。確定時に ownerId が null の item は `PropertyDmLog.owner_id=null` で記録する(1件の欠けで全体を巻き戻さない)。
 - **共有者グループ全員の保持(@codex R29 P1)**: 1つのCSV行(=item)は**同一送付先住所の共有者を束ねた1通**であり、代表の ownerId だけを持つと、**代表以外の共有者**が別物件を持つ場合に拒否/宛先不明の記録がその共有者に紐づかず、§4 の所有者単位の除外から漏れる。連関テーブル **`dm_export_batch_item_owners`(item_id FK Cascade, owner_id FK Cascade)** に**グループ全員の ownerId** を保存し(export 時に selectGroupRepresentative のグループから採取)、確定時に **`property_dm_log_owners`(log_id FK Cascade, owner_id FK Cascade)** へコピーする。既存の owner_id 列(代表)は表示・ブリッジ用に維持。migration-A に2連関テーブルを追加。
 
 - **CSV の中身(氏名・住所)は保存しない**。控えは propertyId/代表 ownerId のみ=非PII寄りの最小構成。
-- 所有者宛 export route が CSV 生成と同一リクエスト内で batch+items を書く。**PropertyDmLog は引き続き書かない**(既存テストのピンは維持し、「batch は書く」ことを明示する形にテストを更新)。
+- 既存の export GET(検索条件から直接CSV)は**新しい2段階フローに置き換える**(旧GETは撤去または新POSTへの誘導)。**PropertyDmLog はどの段でも書かない**(既存テストのピンは維持し、「POSTがbatchを書く」ことを明示する形にテストを更新)。
 - item の property FK は Cascade: 確定前に物件が消えたら控えからも消え、確定時に自然にスキップされる。
 - 物件宛 export(UI導線なし)は今回対象外。dmType 列は将来用に持つ(TEXT+アプリ側allowlist・enum は作らない=#361 と同方針)。
 
@@ -219,3 +216,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R36(2026-08-08): P2(sentOnは今日以前のみ=未来日の誤入力で再送抑止が壊れるのを防ぐ)を反映。
 - R37(2026-08-08): P2(旧行照合の送付日はJST暦日で比較・深夜境界テスト)を反映。外部AI方式側のP2×2は別紙。
 - R38(2026-08-08): P2×2(attemptKey必須化=鍵なし400・サーバー発行を撤回 / クールダウンcutoffもJST暦日で導出)を反映。
+- R39(2026-08-08): P2(クライアント発行キーではcross-site作成を防げない)→**出力を「POSTで控え作成→GETでitemsからCSV」の2段階に再構成**。CSRF境界で無限作成を封じ、content_digest照合は構造的に不要化(列削除)。
