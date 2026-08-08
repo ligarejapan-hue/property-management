@@ -62,7 +62,8 @@ model DmExportBatchItem {
 }
 ```
 
-- **出力の冪等化(@codex P2)**: export は GET のためリトライ/二度押しで再実行され得る。`DmExportBatch` に `fingerprint`(=dmType+ソート済み propertyId 集合の sha256+**当日日付**)を持たせ **unique**。同一内容の同日出力は**既存の未確定バッチを再利用**する(新規バッチを作らない)。日付をキーに含めるので、90日後の正当な再出力は新しいバッチになる。
+- **出力の冪等化(@codex P2)**: export は GET のためリトライ/二度押しで再実行され得る。`DmExportBatch` に `fingerprint` を持たせ **unique**。同一内容の同日出力は**既存の未確定バッチを再利用**する(新規バッチを作らない)。日付をキーに含めるので、90日後の正当な再出力は新しいバッチになる。
+  - fingerprint の中身(@codex R2 P1): **dmType + 当日日付 + ソート済みの「(propertyId, 代表ownerId) ペア列」の sha256**。物件ID集合だけだと、同じ物件集合でも所有者・住所・代表者が変わった2回目の出力(=宛先が違うCSV)が1回目の控えに合流し、**古い代表宛先で確定してしまう**。実際に出力した宛先行そのものを同一性の根拠にする。
 - **所有者の削除(@codex P2)**: item の owner FK は SetNull。確定時に ownerId が null の item は `PropertyDmLog.owner_id=null` で記録する(1件の欠けで全体を巻き戻さない)。
 
 - **CSV の中身(氏名・住所)は保存しない**。控えは propertyId/代表 ownerId のみ=非PII寄りの最小構成。
@@ -77,10 +78,12 @@ model DmExportBatchItem {
 - ゲート: 既存 export と同じ4権限+**property:write**(書込は mark-sent/outcome と同じ統一方針・新slugなし)。field_staff は record scope 内の item のみ記録(スコープ外はスキップし件数を返す)。
 - 冪等: `confirmedAt` が null の場合のみ、条件付き updateMany(勝者決定)→ 同一 tx で items から `PropertyDmLog` を生成。二重確定は 409。
 - 生成する行: `propertyId / ownerId(代表) / dmType="owner_address" / sequence(下記) / batchId / sentAt=sentOn / method="mail" / sentBy=操作者`。
-- **sequence の採番(@codex P1)**: 「同一 propertyId の既存件数+1」を無ロックで数えると並行確定で重複する。対策3点セット:
-  1. **採番は共通ヘルパー1本に集約**し、PropertyDmLog を書く**全writer**(一括確定・個別記録・売却DM mark-sent)がこれを使う。ヘルパーは tx 内で `pg_advisory_xact_lock`(採番専用の固定キー)を取ってから数える=全採番が直列化される(確定は週に数回・数百行なので直列で十分)。
-  2. 同一バッチ内に同じ物件の item が複数ある場合(送付先住所が複数の共有者グループ)は、item id 順で **基数+連番** を決定的に割り当てる。
-  3. **DB側の背水**: `@@unique([propertyId, sequence])`。migration-A で既存行の sequence を物件ごとに `sentAt,createdAt` 順で**振り直してから**(window関数・決定的)このuniqueを張る。⚠既存の売却DM行は default 1 のままだと重複でunique作成に失敗するため、この backfill は必須(本番は売却DM休眠中のため対象行は僅少/ゼロの見込みだが、手順としては必ず行う)。
+- **sequence の採番(@codex P1)**: 無ロックの採番は並行確定で重複する。対策:
+  1. **採番は共通ヘルパー1本に集約**し、PropertyDmLog を書く**全writer**(一括確定・個別記録・売却DM mark-sent)がこれを使う。ヘルパーは tx 内で `pg_advisory_xact_lock`(採番専用の固定キー)を取ってから採番=全採番が直列化される(確定は週に数回・数百行なので直列で十分)。
+  2. 採番は **`MAX(sequence)+1`**(@codex R2 P1)。「既存件数+1」だと途中の記録を取消した後([1,2,3]の2を削除→count=2→次が3)に生き残りの3と衝突し、**その物件への記録が全部失敗し続ける**。MAX+1 なら削除に影響されない(欠番は許容=「何通目」表示は歴史の記録であり連番の詰め直しはしない)。
+  3. 同一バッチ内に同じ物件の item が複数ある場合(送付先住所が複数の共有者グループ)は、item id 順で **MAX+1 からの連番** を決定的に割り当てる。
+  4. **DB側の背水**: `@@unique([propertyId, sequence])`。migration-A で既存行の sequence を物件ごとに `sentAt,createdAt` 順で**振り直してから**(window関数・決定的)このuniqueを張る。⚠既存の売却DM行は default 1 のままだと重複でunique作成に失敗するため、この backfill は必須(本番は売却DM休眠中のため対象行は僅少/ゼロの見込みだが、手順としては必ず行う)。
+  5. **ロック順序の統一(@codex R2 P2)**: 採番の advisory lock は**常に親の物件行ロック(lockPropertyRecordForWrite / FKの暗黙ロック)より先**に取る。個別記録が「親ロック→advisory待ち」・一括確定が「advisory保持→FK待ち」になると相互待ちでデッドロックする。**「advisory→親→子」の一方向**を全writerの規約とし、配線テスト(呼び出し順のソース固定)で守る。
 - **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。
 - UI: 物件一覧の「DM差込CSV出力」の隣に「**送付の確定**」→ 未確定バッチ一覧(出力日時・件数)→ 投函日(既定=今日)→ 確定。確定済み件数を表示して閉じる。
 - 未確定バッチが溜まった場合の掃除は当面しない(件数小・一覧は直近から表示)。必要になれば既存の日次クリーンアップに載せる(将来)。
@@ -123,7 +126,8 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - 監査: `dm_reaction_update`{logId,status,reactedAt} — note 本文は載せない。
 - UI: DM送付履歴の行に反響の選択(4種)+日時+メモ。一覧の「宛先不明のみ」フィルタは既存のまま両モードで機能する。
 - **売却DM側の反響との同期(@codex P1)**: 売却DMの反響は `DmRecipientDraft.outcome/deliveryStatus` に入り、放置すると「売却DMで連絡が来た相手」が汎用側では no_response のまま=再送候補に出てしまう。対策:
-  - 売却DM outcome 更新 route が、`draft_id` で紐付いたブリッジ行(method="sale_dm")の reaction_status も**同じ tx で更新**する: `returned_undeliverable → undeliverable` / `phoneInquiryAt あり or outcome=inquiry → replied`。訂正時も同様に戻す。
+  - **outcome を書く全経路**が、`draft_id` で紐付いたブリッジ行(method="sale_dm")の reaction_status を**同じ tx で更新**する。写像: `returned_undeliverable → undeliverable` / `phoneInquiryAt あり or outcome=inquiry → replied`。訂正時も同様に戻す。
+  - ⚠経路は認証済み outcome route だけではない(@codex R2 P1): **公開LP追跡 `recordTrackingHit`**(`/t/<token>` 初回アクセス)が `lpFirstAccessAt + outcome="inquiry"` を直接書く。同期は**共通ヘルパー1本**に集約し、outcome route と recordTrackingHit の**両方**から同一 tx で呼ぶ(書く場所を1つでも取りこぼすと再送候補の判定が破れる=[同種の穴は全箇所]の原則。実装時に outcome/deliveryStatus の writer を grep で全列挙して確認する)。
   - migration-B で既存の sale_dm 行を drafts の outcome から **backfill**(本番は売却DM休眠中のため対象は僅少/ゼロの見込みだが手順として行う。旧行に draft_id が無い場合は propertyId+送付日で対応付け、決められない行は no_response のまま)。
   - これにより §4 の再送候補判定は **PropertyDmLog だけを見れば足りる**(2つの保存先を join しない=判定の単一情報源)。
 
@@ -154,3 +158,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 
 ### 対応履歴
 - R1(2026-08-08): P1×2(sequence採番の直列化→advisory lock+unique backstop+全writer共通ヘルパー / 売却DM反響の同期→draft_id紐付け+outcome同tx更新+backfill)・P2×2(item所有者削除→owner FK SetNull / export冪等化→fingerprint unique+同日再利用)を反映。
+- R2(2026-08-08): P1×3(採番はMAX(sequence)+1=取消後の衝突防止 / fingerprintは(propertyId,代表ownerId)ペア列=宛先変化の合流防止 / LP追跡recordTrackingHitも同期経路に=共通ヘルパー集約)・P2×1(ロック順序「advisory→親→子」の全writer統一)を反映。
