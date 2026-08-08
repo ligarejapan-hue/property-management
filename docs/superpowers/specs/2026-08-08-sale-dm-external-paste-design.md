@@ -61,7 +61,7 @@ dm_variants に追加:
   template_frozen_at TIMESTAMP? -- 凍結の永続印(下記。null=未凍結・一度立てたら解除しない)
 ```
 
-- **凍結は列で永続化する**(@codex R13 P2): 「配下に confirmed/sent が今あるか」から導出すると、**割当(assign)route が confirmed の draft を別 variant へ移して draft に戻す**等の既存操作で証拠が消え、印刷済みの型のテンプレを差し替えられてしまう。confirm が variant ロック下で `template_frozen_at` を立て(初回のみ)、**以後は状態に関係なくこの列だけで凍結を判定**する(不可逆)。
+- **凍結の判定は「列 OR 派生」の二重判定を恒久採用**(@codex R13 P2 → R22 P2 で確定): 判定=`template_frozen_at` が立っている **OR** 配下に confirmed/sent の draft が存在する。列は「assign で証拠(confirmed draft)が variant から離れても残る」永続の根拠、派生は「**列がまだ立っていない窓**(restart後〜照合スクリプト完了前・旧confirm由来)」を塞ぐ即効の根拠で、**互いの穴を補完**する。confirm は variant ロック下で `template_frozen_at` を立てる(初回のみ・不可逆)。
 - **凍結済み variant は削除不可**(@codex R14 P2): 既存の variant DELETE は「宛先が居ないこと」しか見ないため、assign で空にしてから削除すると **prompt_text/body_template/凍結印ごと消え、送付済み文面の出所が失われる**。`template_frozen_at` が立っている variant の DELETE は 409(「送付実績のある型は削除できません」)にする。
 - **凍結印の初期投入は「restart 後の照合スクリプトのみ」で行う**(@codex R15→R16→R21 で段階化の最終形): PR-D の **migration は列追加のみ**とし、既存の confirmed/sent variant への `template_frozen_at` 立ては**冪等な照合スクリプトを restart 後に実行**して行う(値=既存 draft の confirmedAt/sentAt の最小値・無ければ実行時刻)。⚠migration 内で backfill すると、`migrate deploy → restart` の窓で**旧 variant ルート(凍結を知らない PATCH/DELETE)が凍結済み variant を書き換え・削除**でき、照合では復元できない(@codex R21 P2)。列が null の窓の間は誰も凍結印に依存しない=従来挙動のままなので退行は無く、ガード(新ルート)が稼働してから印を立てる順序が安全(本番は売却DM休眠中で対象ゼロの見込み)。
 
@@ -112,3 +112,4 @@ dm_variants に追加:
 - R19(2026-08-08): P2(未凍結でのテンプレ差し替え保存は未確定draftのbodyを同一txで全クリア=新旧本文の混在防止)を反映。
 - R20(2026-08-08): P2(差し替えの失効に既存PATCHと同じガード=スコープ外未確定draftが居れば403)を反映。
 - R21(2026-08-08): P2(凍結印の初期投入をmigrationから外しrestart後の冪等照合のみに=旧ルート窓の書き換え/削除に耐える)を反映。
+- R22(2026-08-08): P2(凍結判定を「template_frozen_at OR 配下confirmed/sent」の恒久二重判定に=照合前の窓とassign消失を相互補完)を反映。
