@@ -61,6 +61,8 @@ vi.mock("@/lib/prisma", () => {
   const tx = {
     owner: { create: vi.fn() },
     propertyOwner: { updateMany: vi.fn(), create: vi.fn() },
+    // 親の物件行ロック(lockPropertyRow)用(#364 R6)。
+    $queryRaw: vi.fn(async () => [{ id: "p1" }]),
   };
   return {
     default: {

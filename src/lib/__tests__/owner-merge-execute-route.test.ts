@@ -68,6 +68,14 @@ vi.mock("@/lib/prisma", () => {
       deleteMany: vi.fn(),
     },
     changeLog: { count: vi.fn(), createMany: vi.fn() },
+    // PR-A(送付記録): DM 参照の付け替え(反響の置き去り防止・@codex R11/R32)。
+    propertyDmLog: { updateMany: vi.fn(async () => ({ count: 0 })) },
+    dmExportBatchItem: { updateMany: vi.fn(async () => ({ count: 0 })) },
+    dmRecipientDraft: { updateMany: vi.fn(async () => ({ count: 0 })) },
+    dmExportBatchItemOwner: { updateMany: vi.fn(async () => ({ count: 0 })) },
+    propertyDmLogOwner: { updateMany: vi.fn(async () => ({ count: 0 })) },
+    dmRecipientDraftOwner: { updateMany: vi.fn(async () => ({ count: 0 })) },
+    $executeRaw: vi.fn(async () => 0),
   };
   return {
     default: {

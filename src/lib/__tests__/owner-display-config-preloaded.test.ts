@@ -137,7 +137,7 @@ const ROUTES: Array<{ file: string; count: number; arg: "permissions" | "perms" 
   { file: "src/app/api/properties/route.ts", count: 1, arg: "permissions" },
   { file: "src/app/api/properties/[id]/route.ts", count: 2, arg: "permissions" },
   { file: "src/app/api/properties/export/route.ts", count: 1, arg: "permissions" },
-  { file: "src/app/api/properties/dm-export/route.ts", count: 1, arg: "permissions" },
+  { file: "src/app/api/properties/dm-batches/route.ts", count: 1, arg: "permissions" },
   { file: "src/app/api/properties/suggest/route.ts", count: 1, arg: "perms" },
   { file: "src/app/api/owners/route.ts", count: 1, arg: "permissions" },
   { file: "src/app/api/owners/[id]/route.ts", count: 2, arg: "perms" },

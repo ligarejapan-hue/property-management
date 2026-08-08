@@ -10,6 +10,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { createAndLinkOwnerSchema } from "@/lib/validators";
 import { hasPermission } from "@/lib/permissions";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import {
   findMissingOwnerFieldWritePerm,
   findDuplicateOwnerId,
@@ -94,6 +95,8 @@ export async function POST(
           companyRegistryNumber: ownerData.companyRegistryNumber ?? null,
         },
       });
+      // 親の物件行をロック(書き込み規約+#364 R6: 凍結 tx の宛先資格検証と直列化)。
+      await lockPropertyRow(tx, propertyId);
       // isPrimary なら既存の主所有者を解除してから link（/api/properties/[id]/owners POST と同方針）。
       if (isPrimary) {
         await tx.propertyOwner.updateMany({

@@ -9,7 +9,7 @@ function block(pid: string, count: number): { recipients: LetterRecipient[]; met
   const meta: RecipientMeta[] = [];
   for (let i = 0; i < count; i++) {
     recipients.push({ representativeName: `${pid}-${i}`, honorific: "様", coOwnerCount: 1, propertyAddress: "x", propertyTypeLabel: "土地", roomNo: null });
-    meta.push({ propertyId: pid, representativeOwnerId: null, recipientName: `${pid}-${i}`, recipientZip: null, recipientAddress: "x", honorific: "様", coOwnerCount: 1 });
+    meta.push({ propertyId: pid, representativeOwnerId: null, recipientName: `${pid}-${i}`, recipientZip: null, recipientAddress: "x", honorific: "様", coOwnerCount: 1, groupOwnerIds: [] });
   }
   return { recipients, meta };
 }

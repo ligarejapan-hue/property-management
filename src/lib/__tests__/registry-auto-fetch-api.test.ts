@@ -100,8 +100,8 @@ vi.mock("@/lib/storage", () => {
   };
 });
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
+vi.mock("@/lib/prisma", () => {
+  const db: Record<string, unknown> = {
     property: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
@@ -113,11 +113,15 @@ vi.mock("@/lib/prisma", () => ({
     propertyOwner: { findFirst: vi.fn(), create: vi.fn() },
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
-    attachment: { create: vi.fn() },
+    attachment: { create: vi.fn(), findFirst: vi.fn() },
     auditLog: { findFirst: vi.fn(), create: vi.fn() },
-    $transaction: vi.fn(),
-  },
-}));
+  };
+  // link の親行ロック(#364 R10)で $transaction/$queryRaw を実行するため、
+  // callback に同じ db を渡す(tx.* === pm.* で既存アサーションが効く)。
+  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  db.$queryRaw = vi.fn(async () => [{ id: "p1" }]);
+  return { default: db };
+});
 
 import prisma from "@/lib/prisma";
 import {

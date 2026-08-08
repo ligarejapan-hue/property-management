@@ -1,4 +1,5 @@
 import prisma from "@/lib/prisma";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import { normalizeAddress } from "@/lib/address-normalizer";
 
 /**
@@ -126,17 +127,21 @@ async function tryCreateLink(
   propertyId: string,
   ownerId: string,
 ): Promise<boolean> {
-  const existing = await prisma.propertyOwner.findUnique({
-    where: { propertyId_ownerId: { propertyId, ownerId } },
+  // 親の物件行をロックしてから link(書き込み規約+#364 R10: DM控えの凍結txと直列化)。
+  return prisma.$transaction(async (tx) => {
+    await lockPropertyRow(tx, propertyId);
+    const existing = await tx.propertyOwner.findUnique({
+      where: { propertyId_ownerId: { propertyId, ownerId } },
+    });
+    if (existing) return false;
+    await tx.propertyOwner.create({
+      data: {
+        propertyId,
+        ownerId,
+        relationship: "所有者",
+        isPrimary: false,
+      },
+    });
+    return true;
   });
-  if (existing) return false;
-  await prisma.propertyOwner.create({
-    data: {
-      propertyId,
-      ownerId,
-      relationship: "所有者",
-      isPrimary: false,
-    },
-  });
-  return true;
 }

@@ -10,6 +10,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { linkOwnerSchema } from "@/lib/validators";
 import { hasPermission } from "@/lib/permissions";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 
 export async function POST(
   request: NextRequest,
@@ -62,6 +63,10 @@ export async function POST(
         // owner が同時にアーカイブされた、または削除された
         throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
       }
+
+      // 親の物件行をロック(書き込み規約+#364 R6)。順序は DM writer 共通の
+      // 「Owner→物件親行→子行」に合わせる(逆順は凍結 tx と相互待ちになる)。
+      await lockPropertyRow(tx, propertyId);
 
       // If isPrimary, unset existing primary owner for this property
       if (data.isPrimary) {

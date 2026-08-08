@@ -55,6 +55,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const tx = {
     owner: { updateMany: vi.fn(), findUnique: vi.fn() },
+    $queryRaw: vi.fn(async () => [{ id: "p1" }]), // 親行ロック(#364 R10)
     property: { updateMany: vi.fn(), findUnique: vi.fn() },
     propertyOwner: {
       findUnique: vi.fn(),

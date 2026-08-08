@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import { parseSheet, SheetParseError } from "@/lib/sheet-parser";
 import { resolveImportFileType } from "@/lib/import-content-detect";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
@@ -582,6 +583,8 @@ async function upsertOwnerAndLink(
       if (lock.count === 0) {
         return { linked: false as const, newLinkCreated: false };
       }
+      // 親の物件行をロック(Owner→親の順・書き込み規約+#364 R10)。
+      await lockPropertyRow(tx, propertyId);
       const existingLink = await tx.propertyOwner.findUnique({
         where: {
           propertyId_ownerId: { propertyId, ownerId: candidateOwnerId! },
@@ -676,14 +679,17 @@ async function upsertOwnerAndLink(
   });
 
   // 新規 owner は他 tx から見えないため archive 競合はない。通常の link 処理。
-  const existingLink = await prisma.propertyOwner.findUnique({
-    where: {
-      propertyId_ownerId: { propertyId, ownerId },
-    },
-    select: { propertyId: true },
-  });
-  if (!existingLink) {
-    await prisma.propertyOwner.create({
+  // 親の物件行をロックしてから link(書き込み規約+#364 R10)。
+  const linkCreated = await prisma.$transaction(async (tx) => {
+    await lockPropertyRow(tx, propertyId);
+    const existingLink = await tx.propertyOwner.findUnique({
+      where: {
+        propertyId_ownerId: { propertyId, ownerId },
+      },
+      select: { propertyId: true },
+    });
+    if (existingLink) return false;
+    await tx.propertyOwner.create({
       data: {
         propertyId,
         ownerId,
@@ -691,6 +697,9 @@ async function upsertOwnerAndLink(
         isPrimary: false,
       },
     });
+    return true;
+  });
+  if (linkCreated) {
     onPropertyLinked();
   }
 

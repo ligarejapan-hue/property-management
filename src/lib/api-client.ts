@@ -27,6 +27,8 @@ import type { AddressLookupCandidate } from "./address-lookup/types";
 // 法人番号 lookup の候補型のみ取得する type-only import（runtime import なし＝
 // server 専用 orchestrator や NTA の appId(secret env) は client bundle に入らない）。
 import type { CorporateLookupRecord } from "./corporate-lookup/types";
+// DM控えの冪等キー採番(本番はHTTPのため crypto.randomUUID は使えない)。
+import { safeRandomId } from "./random-id";
 
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 
@@ -201,9 +203,9 @@ export interface CreateSaleDmCampaignBody {
 export async function createSaleDmCampaign(body: CreateSaleDmCampaignBody) {
   if (USE_MOCK) {
     await mockDelay();
-    return { campaignId: "mock-campaign", requested: 0, matchedProperties: 0, generated: 0, failed: 0, truncated: false };
+    return { campaignId: "mock-campaign", requested: 0, matchedProperties: 0, generated: 0, saved: 0, skippedByUnlink: 0, failed: 0, truncated: false };
   }
-  return apiFetch<{ campaignId: string; requested?: number; matchedProperties?: number; generated?: number; failed?: number; truncated?: boolean; idempotent?: boolean }>(
+  return apiFetch<{ campaignId: string; requested?: number; matchedProperties?: number; generated?: number; saved?: number; skippedByUnlink?: number; failed?: number; truncated?: boolean; idempotent?: boolean }>(
     "/api/properties/sale-dm/campaigns",
     {
       method: "POST",
@@ -3600,4 +3602,116 @@ export async function fetchPostalCodeAudit(): Promise<PostalCodeAuditResponse> {
     };
   }
   return apiFetch<PostalCodeAuditResponse>("/api/admin/postal-code-audit");
+}
+
+// ---------- DM送付管理(PR-A): 宛名CSVの控えと送付確定 ----------
+
+export interface DmBatchSummary {
+  id: string;
+  createdAt: string;
+  rowCount: number;
+  downloadedAt: string | null;
+  confirmedAt: string | null;
+  /** 作成者名(スタッフ名=非PII)。admin/office が複数人の控えを見分けるための表示。 */
+  creatorName: string;
+}
+
+/**
+ * 宛名CSV出力の第1段: 検索条件を評価して控え(バッチ)を作る。
+ * attemptKey は押下ごとに client で採番(本番はHTTPのため crypto.randomUUID は使わない)。
+ * 返った batchId の GET /csv へブラウザ遷移してダウンロードする(第2段)。
+ */
+export async function createDmBatch(
+  filters: Record<string, string>,
+): Promise<{ batchId: string; rowCount: number; reused: boolean }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { batchId: "mock-batch-1", rowCount: 3, reused: false };
+  }
+  return apiFetch<{ batchId: string; rowCount: number; reused: boolean }>(
+    "/api/properties/dm-batches",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filters, attemptKey: safeRandomId() }),
+    },
+  );
+}
+
+/** 送付確定モーダル用: 未確定の控え一覧(非PII・50件ページング)。 */
+export async function fetchUnconfirmedDmBatches(page = 1): Promise<{
+  data: DmBatchSummary[];
+  page: number;
+  hasMore: boolean;
+}> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      data: [
+        {
+          id: "mock-batch-1",
+          createdAt: new Date().toISOString(),
+          rowCount: 3,
+          downloadedAt: new Date().toISOString(),
+          confirmedAt: null,
+          creatorName: "モック 太郎",
+        },
+      ],
+      page: 1,
+      hasMore: false,
+    };
+  }
+  return apiFetch<{ data: DmBatchSummary[]; page: number; hasMore: boolean }>(
+    `/api/properties/dm-batches?unconfirmed=1&page=${page}`,
+  );
+}
+
+/** 送付確定: 投函日(YYYY-MM-DD)を入れて控えの宛先全件を送付記録にする。 */
+export async function confirmDmBatch(
+  batchId: string,
+  sentOn: string,
+): Promise<{ confirmed: number }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { confirmed: 3 };
+  }
+  return apiFetch<{ confirmed: number }>(
+    `/api/properties/dm-batches/${batchId}/confirm`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sentOn }),
+    },
+  );
+}
+
+/** 個別の送付記録(手渡し等)を追加する。sentOn=YYYY-MM-DD(過去日可・今日以前)。 */
+export async function createPropertyDmLog(
+  propertyId: string,
+  data: { sentOn: string; method?: "mail" | "hand_delivery" | "other"; note?: string },
+): Promise<{ id: string }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id: "mock-dm-log-1" };
+  }
+  return apiFetch<{ id: string }>(`/api/properties/${propertyId}/dm-logs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+/** 送付記録の取消(記録ミスの訂正)。売却DM由来の行はサーバが 409 で拒否する。 */
+export async function deletePropertyDmLog(
+  propertyId: string,
+  logId: string,
+): Promise<{ deleted: boolean }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { deleted: true };
+  }
+  return apiFetch<{ deleted: boolean }>(
+    `/api/properties/${propertyId}/dm-logs/${logId}`,
+    { method: "DELETE" },
+  );
 }

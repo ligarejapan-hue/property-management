@@ -204,10 +204,20 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "hasSessionFilter",
     "hasPropertyFilter",
   ]),
+  // DM送付記録(PR-A): 控えバッチと送付確定・個別記録の操作監査。detail は件数/UUID/日付のみ
+  // (氏名・住所・note 本文は載せない)。batchId/logId/sentOn は ALWAYS_SAFE 外のため action 固有で許可。
+  dm_batch_create: new Set(["batchId", "reused", "createdAt"]),
+  property_dm_csv_export: new Set(["batchId", "retry", "exportedAt"]),
+  dm_sent_confirm: new Set(["batchId", "sentOn"]),
+  dm_sent_record: new Set(["sentOn"]),
+  dm_sent_record_delete: new Set(["logId"]),
+  // 既存バグ修正(設計§2.5): property_dm_log_view の viewedAt が未登録で [REDACTED] に潰れていた。
+  // count/total/page は ALWAYS_SAFE のため viewedAt のみ追加。
+  property_dm_log_view: new Set(["viewedAt"]),
   // 売却促進DM: 操作事実の非PIIメタデータのみ allowlist(件数/enum/boolean/ISO日時)。
   // campaignId/variantId/propertyId/count/fields は ALWAYS_SAFE。本文・宛名・住所・メモ・trackingToken は
   // detail に載せておらず、ここにも含めない(perVariant の variantId キー別件数は redact のまま)。
-  sale_dm_campaign_create: new Set(["requested", "generated", "truncated", "createdAt"]),
+  sale_dm_campaign_create: new Set(["requested", "generated", "saved", "skippedByUnlink", "truncated", "createdAt"]),
   sale_dm_assign_variants: new Set(["mode", "order", "assigned", "assignedAt"]),
   sale_dm_campaign_print: new Set(["printedAt"]),
   sale_dm_variant_create: new Set(["createdAt"]),
@@ -216,7 +226,7 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   sale_dm_drafts_confirm: new Set(["confirmedAt"]),
   sale_dm_draft_update: new Set(["updatedAt"]),
   sale_dm_draft_regenerate: new Set(["regeneratedAt"]),
-  sale_dm_draft_mark_sent: new Set(["sentAt"]),
+  sale_dm_draft_mark_sent: new Set(["sentAt", "legacyGroup"]),
   sale_dm_draft_outcome_update: new Set(["deliveryStatus", "outcome", "undeliverableLinked", "undeliverableCleared", "updatedAt"]),
   sale_dm_undeliverable_clear: new Set(["restoredDmStatus", "clearedAt"]),
   // ワークスペース閲覧(PII の本文/宛名/住所を返す read)の監査。viewedAt=ISO日時のみ action 固有許可。
@@ -407,7 +417,7 @@ const ACTION_FORCE_SAFE_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // 限って force-safe で保持する（全 action 一律にすると ownerName 等の
   // 取りこぼしリスクが出るため、action を明示する）。
   owner_memo_create: new Set(["ownerId"]),
-  owner_correction_merge: new Set(["sourceOwnerId", "targetOwnerId"]),
+  owner_correction_merge: new Set(["sourceOwnerId", "targetOwnerId", "dmLogsMoved", "dmBatchItemsMoved", "dmDraftsMoved", "dmAssociationsMoved"]),
   owner_correction_mislink: new Set([
     "propertyOwnerId",
     "previousOwnerId",
@@ -450,6 +460,9 @@ const ACTION_NUMERIC_FORCE_SAFE_KEYS: Readonly<
   Record<string, ReadonlySet<string>>
 > = {
   pdf_import: new Set(["ownersMatched", "ownersCreated", "ownersLinked"]),
+  // 旧 dm-export から続く既知の表示劣化の修正: skippedAddressMissingCount は /addr/i denylist に
+  // 当たるが「住所が空欄の所有者数」という有限数値のときだけ保持する(非数値は [REDACTED])。
+  property_dm_csv_export: new Set(["skippedAddressMissingCount"]),
   // display_name_audit_view の owner 群件数。/owner/i denylist に当たるが有限数値
   // （群数）のときだけ保持する。非数値は PII 流入の恐れがあるため [REDACTED]。
   display_name_audit_view: new Set(["ownerGroupCount"]),

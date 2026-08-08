@@ -15,7 +15,11 @@ vi.mock("@/lib/api-helpers", () => {
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 // 下書き保存の引数(特に model)を検証するため tx 内の create を共有スパイにする。
-const { draftCreate } = vi.hoisted(() => ({ draftCreate: vi.fn() }));
+const { draftCreate, draftOwnerCreateMany, txPropertyOwnerFindMany } = vi.hoisted(() => ({
+  draftCreate: vi.fn(),
+  draftOwnerCreateMany: vi.fn(),
+  txPropertyOwnerFindMany: vi.fn(async () => [] as Array<{ propertyId: string; ownerId: string }>),
+}));
 vi.mock("@/lib/prisma", () => ({
   default: {
     property: { findMany: vi.fn() },
@@ -24,6 +28,10 @@ vi.mock("@/lib/prisma", () => ({
       dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), update: vi.fn() },
       dmVariant: { create: vi.fn(async () => ({ id: "v1" })) },
       dmRecipientDraft: { create: draftCreate },
+      // PR-A: 宛先生成 tx のロック(Owner/親行 FOR SHARE)・リンク再検証・共有者連関保存。
+      dmRecipientDraftOwner: { createMany: draftOwnerCreateMany },
+      propertyOwner: { findMany: txPropertyOwnerFindMany },
+      $queryRaw: vi.fn(async () => []),
     })),
   },
 }));
@@ -459,5 +467,69 @@ describe("isSenderConfigured", () => {
     expect(isSenderConfigured()).toBe(false);
     delete process.env.SALE_DM_SENDER_NAME;
     expect(isSenderConfigured()).toBe(false);
+  });
+});
+
+describe("PR-A: 宛先生成の共有者連関保存(設計§2.2)", () => {
+  const propWithIds = {
+    id: "p1",
+    address: "東京都〇〇区△△1-2-3",
+    propertyType: "land",
+    roomNo: null,
+    propertyOwners: [
+      { isPrimary: true, relationship: null, owner: { id: "o1", name: "田中 一郎", nameKana: null, zip: "1000001", address: "東京都X", corporateNumber: null } },
+      { isPrimary: false, relationship: null, owner: { id: "o2", name: "田中 花子", nameKana: null, zip: "1000001", address: "東京都X", corporateNumber: null } },
+    ],
+  };
+
+  it("リンクが現存すれば draft と連関(グループ全員)を保存する", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([propWithIds]);
+    txPropertyOwnerFindMany.mockResolvedValue([
+      { propertyId: "p1", ownerId: "o1" },
+      { propertyId: "p1", ownerId: "o2" },
+    ]);
+    draftCreate.mockResolvedValue({ id: "d1" });
+    const res = await POST(req(validBody) as never);
+    expect(res.status).toBe(200);
+    expect(draftCreate).toHaveBeenCalledTimes(1);
+    const links = draftOwnerCreateMany.mock.calls[0][0].data;
+    expect(links.map((l: { ownerId: string }) => l.ownerId).sort()).toEqual(["o1", "o2"]);
+    expect(links[0].draftId).toBe("d1");
+  });
+
+  it("全宛先がリンク切れなら 409(空キャンペーンを ready にしない=#364 R2)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([propWithIds]);
+    txPropertyOwnerFindMany.mockResolvedValue([
+      { propertyId: "p1", ownerId: "o1" }, // o2 のリンクが外れた=このグループは保存不能
+    ]);
+    const res = await POST(req(validBody) as never);
+    expect(res.status).toBe(409);
+    expect(draftCreate).not.toHaveBeenCalled();
+    expect(draftOwnerCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("一部だけリンク切れなら 200+saved/skippedByUnlink を正しく報告する(#364 R2)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const p2 = {
+      ...propWithIds,
+      id: "p2",
+      propertyOwners: [
+        { isPrimary: true, relationship: null, owner: { id: "o3", name: "別宅 三郎", nameKana: null, zip: "2000002", address: "神奈川県Y", corporateNumber: null } },
+      ],
+    };
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([propWithIds, p2]);
+    txPropertyOwnerFindMany.mockResolvedValue([
+      { propertyId: "p1", ownerId: "o1" }, // o2 が外れた=p1 はスキップ
+      { propertyId: "p2", ownerId: "o3" }, // p2 は健在
+    ]);
+    draftCreate.mockResolvedValue({ id: "d2" });
+    const res = await POST(req(validBody) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.saved).toBe(1);
+    expect(json.skippedByUnlink).toBe(1);
+    expect(draftCreate).toHaveBeenCalledTimes(1);
   });
 });

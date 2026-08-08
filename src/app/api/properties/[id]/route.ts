@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import { updatePropertySchema } from "@/lib/validators";
 import {
   normalizeBuildingName,
@@ -391,6 +392,10 @@ export async function DELETE(
     // 取得と Property 削除は同一 transaction で atomic に行う。
     const photoFileUrls: string[] = [];
     await prisma.$transaction(async (tx) => {
+      // ⚠親の物件行を最初にロックする(書き込み規約+#364 R9): 子行(DMログ等)を先に
+      // 触ってから親を消すと、個別取消(親FOR UPDATE→子delete)と逆順になり 40P01 の
+      // デッドロックを作る。順序を「親→子」に統一する。
+      await lockPropertyRow(tx, id);
       const photos = await tx.propertyPhoto.findMany({
         where: { propertyId: id },
         select: { fileUrl: true },
@@ -415,6 +420,14 @@ export async function DELETE(
           isDeleted: false,
         },
         data: { isDeleted: true, deletedAt: new Date() },
+      });
+      // DM送付記録(PR-A・@codex R52): 所有者の紐づけが全く無い行(個別記録・旧sale_dm行)は
+      // 孤児として残しても所有者横断の再送除外に寄与できず、所有者名検索の孤児管理からも
+      // 見えない=用途なく残るだけなので行ごと削除する。所有者付きの行は FK の SET NULL で
+      // property_id=null になり所有者側に履歴が残る(拒否/宛先不明の除外が破れない=R49)。
+      // 現在の PropertyOwner リンクから連関を後付けする補完はしない(R33/R34 と同じ判断)。
+      await tx.propertyDmLog.deleteMany({
+        where: { propertyId: id, ownerId: null, logOwners: { none: {} } },
       });
       await tx.property.delete({ where: { id } });
     });
