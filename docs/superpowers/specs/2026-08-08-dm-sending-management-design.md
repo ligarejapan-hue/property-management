@@ -91,7 +91,7 @@ model DmExportBatchItem {
   1. **採番は共通ヘルパー1本に集約**し、PropertyDmLog を書く**全writer**(一括確定・個別記録・売却DM mark-sent)がこれを使う。ヘルパーは tx 内で `pg_advisory_xact_lock`(採番専用の固定キー)を取ってから採番=全採番が直列化される(確定は週に数回・数百行なので直列で十分)。
   2. 採番は **`MAX(sequence)+1`**(@codex R2 P1)。「既存件数+1」だと途中の記録を取消した後([1,2,3]の2を削除→count=2→次が3)に生き残りの3と衝突し、**その物件への記録が全部失敗し続ける**。MAX+1 なら削除に影響されない(欠番は許容=「何通目」表示は歴史の記録であり連番の詰め直しはしない)。
   3. 同一バッチ内に同じ物件の item が複数ある場合(送付先住所が複数の共有者グループ)は、item id 順で **MAX+1 からの連番** を決定的に割り当てる。
-  4. **DB側の背水**: `@@unique([propertyId, sequence])`。既存行の sequence を物件ごとに `sentAt,createdAt` 順で**振り直してから**(window関数・決定的)このuniqueを張る。
+  4. **DB側の背水**: `@@unique([propertyId, sequence])`。既存行の sequence を物件ごとに **`sentAt, createdAt, sequence, id`** 順で振り直してから(window関数)このuniqueを張る。⚠最終キーに `id` を含める(@codex R20 P2): 同一バッチ由来の複数行は sentAt/createdAt が同値になり得るため、`id` まで含めないと**backfillの実行ごとに「何通目」が変わる**(非決定的)。
   4b. ⚠**uniqueとbackfillは「新writer稼働後の次の反映」に分離する**(@codex R7 P1): 本番の反映手順は `migrate deploy → build → restart` の順のため、migration と同じ反映で unique を張ると、**restart までの窓で旧 mark-sent(sequence を採番しない・default 1)が unique 違反で失敗**する。よって **migration-A = 列追加のみ**(unique なし・PR-A と同時反映)、**migration-A2 = backfill+unique**(PR-B の反映に同乗=採番する新 writer が稼働済みの状態で適用)。窓の間の新規行は default 1 だが、A2 の backfill が振り直すので整合する(expand→contract の段階投入)。
   4c. ⚠**migration-A2 自身も採番の advisory lock を取る**(@codex R8 P1): A2 適用中も PR-A のサービスは稼働中(手順は migrate→restart)で、並行する送付確定が backfill と同じ sequence を割り当てると **unique 作成が失敗し反映が中断**する。A2 の SQL は冒頭で `SELECT pg_advisory_xact_lock(採番と同じ固定キー)` を実行し、**backfill〜unique 作成を採番と同じロックの中で行う**(全 writer が同じキーで直列化されているため、migration も同じ列に並ぶだけで安全になる)。
   5. **ロック順序の統一(@codex R2 P2)**: 採番の advisory lock は**常に親の物件行ロック(lockPropertyRecordForWrite / FKの暗黙ロック)より先**に取る。個別記録が「親ロック→advisory待ち」・一括確定が「advisory保持→FK待ち」になると相互待ちでデッドロックする。**「advisory→親→子」の一方向**を全writerの規約とし、配線テスト(呼び出し順のソース固定)で守る。
@@ -200,3 +200,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R17(2026-08-08)は外部AI方式側のみ(別紙)。
 - R18(2026-08-08): P1(所有者参照の新規作成もFOR SHAREで名寄せと直列化=5c)を反映。外部AI方式側のP2(適用の専用監査)は別紙。
 - R19(2026-08-08): P1(統合txの付け替え順序=予約→最後にログ=5d)・P2(上書きされた手動反響をmanual_reaction_shadowへ退避・訂正時に復元)を反映。外部AI方式側のP2(差し替え時の未確定body全クリア)は別紙。
+- R20(2026-08-08): P2(backfillのwindow順序に最終キーid=決定性)を反映。外部AI方式側のP2(差し替えもスコープ外未確定draftで403)は別紙。
