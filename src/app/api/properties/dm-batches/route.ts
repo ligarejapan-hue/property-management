@@ -24,6 +24,11 @@ import {
   selectGroupRepresentative,
   type DmRowPropertyOwner,
 } from "@/lib/dm-export";
+import {
+  lockOwnersForShare,
+  lockPropertiesForShare,
+  type RawTx,
+} from "@/lib/dm-batch/locks";
 
 // ---------- POST /api/properties/dm-batches ----------
 //
@@ -313,7 +318,9 @@ export async function POST(request: NextRequest) {
     const batchId = randomUUID();
     try {
       await prisma.$transaction(async (tx) => {
+        const rawTx = tx as unknown as RawTx;
         // レースの最終防衛: attemptKey を FOR UPDATE で照会(確定APIと行ロックで直列化)。
+        // 通常は0行=何もロックしないため、後続の Owner→物件の順序規約と衝突しない。
         const existing = await tx.$queryRaw<
           { id: string; confirmed_at: Date | null }[]
         >`SELECT id, confirmed_at FROM dm_export_batches WHERE attempt_key = ${body.attemptKey} AND created_by = ${session.id}::uuid FOR UPDATE`;
@@ -322,6 +329,35 @@ export async function POST(request: NextRequest) {
           throw Object.assign(new Error("attempt_key exists"), {
             code: "P2002_LIKE",
           });
+        }
+        // 名寄せと直列化して控えを保存する(#364 R7): 無ロックで保存すると、物件読取と
+        // INSERT の間に統合が commit した場合に archive 済み所有者の id が控えに入り、
+        // DL が恒久的にグループ不一致 409 になる。Owner(FOR SHARE・id順)→物件親行
+        // (FOR SHARE・id順)を取ってからリンクを再検証し、変わっていたら 409 で再試行させる。
+        await lockOwnersForShare(rawTx, items.flatMap((it) => it.groupOwnerIds));
+        await lockPropertiesForShare(rawTx, items.map((it) => it.propertyId));
+        const currentLinks = await tx.propertyOwner.findMany({
+          where: {
+            propertyId: { in: [...new Set(items.map((it) => it.propertyId))] },
+            owner: { isArchived: false },
+          },
+          select: { propertyId: true, ownerId: true },
+        });
+        const linkSet = new Set(
+          currentLinks.map((l) => `${l.propertyId}\u0000${l.ownerId}`),
+        );
+        const stale = items.some(
+          (it) =>
+            !it.groupOwnerIds.every((oid) =>
+              linkSet.has(`${it.propertyId}\u0000${oid}`),
+            ),
+        );
+        if (stale) {
+          throw new ApiError(
+            409,
+            "宛先の状態が変わりました。もう一度お試しください",
+            "RETRY",
+          );
         }
         await tx.dmExportBatch.create({
           data: {

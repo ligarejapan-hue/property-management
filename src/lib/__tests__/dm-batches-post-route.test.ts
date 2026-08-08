@@ -70,7 +70,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     property: { findMany: vi.fn(), count: vi.fn() },
-    propertyOwner: { count: vi.fn() },
+    propertyOwner: { count: vi.fn(), findMany: vi.fn() },
     importJobRow: { findMany: vi.fn() },
     dmExportBatch: { create: vi.fn(), findFirst: vi.fn() },
     dmExportBatchItem: { createMany: vi.fn() },
@@ -94,7 +94,7 @@ import { POST } from "../../app/api/properties/dm-batches/route";
 
 const pm = prisma as unknown as {
   property: { findMany: Mock; count: Mock };
-  propertyOwner: { count: Mock };
+  propertyOwner: { count: Mock; findMany: Mock };
   importJobRow: { findMany: Mock };
   dmExportBatch: { create: Mock; findFirst: Mock };
   dmExportBatchItem: { createMany: Mock };
@@ -183,6 +183,11 @@ beforeEach(() => {
   pm.property.findMany.mockResolvedValue([]);
   pm.property.count.mockResolvedValue(0);
   pm.propertyOwner.count.mockResolvedValue(0);
+  // tx 内のリンク再検証(#364 R7)用: 既定 fixture(p1×o1,o2)のリンクは健在。
+  pm.propertyOwner.findMany.mockResolvedValue([
+    { propertyId: "p1", ownerId: "o1" },
+    { propertyId: "p1", ownerId: "o2" },
+  ]);
   pm.importJobRow.findMany.mockResolvedValue([]);
   pm.dmExportBatch.findFirst.mockResolvedValue(null);
   pm.dmExportBatch.create.mockResolvedValue({ id: "b1" });
@@ -380,5 +385,30 @@ describe("POST /api/properties/dm-batches", () => {
       )
       .find((q: string) => q.includes("dm_export_batches"));
     expect(sql).toContain("created_by");
+  });
+
+  it("控え保存前のリンク再検証: 名寄せ等で所有者が外れていたら 409(#364 R7)", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: [
+          makePropertyOwner({ owner: { id: "o1" } }),
+          makePropertyOwner({ owner: { id: "o2" }, isPrimary: false }),
+        ],
+      }),
+    ]);
+    pm.propertyOwner.findMany.mockResolvedValue([
+      { propertyId: "p1", ownerId: "o1" }, // o2 のリンクが tx 前に消えた(archive等)
+    ]);
+    const res = await POST(makeRequest(BODY));
+    expect(res.status).toBe(409);
+    expect(pm.dmExportBatch.create).not.toHaveBeenCalled();
+    // ロック順: Owner FOR SHARE → 物件 FOR SHARE(名寄せの Owner 先頭ロックと同順)
+    const sqls = pm.$queryRaw.mock.calls.map((c: unknown[]) =>
+      Array.isArray(c[0]) ? (c[0] as string[]).join("?").replace(/\s+/g, " ") : String(c[0]),
+    );
+    const ownersIdx = sqls.findIndex((q: string) => q.includes("FROM owners"));
+    const propsIdx = sqls.findIndex((q: string) => q.includes("FROM properties"));
+    expect(ownersIdx).toBeGreaterThan(-1);
+    expect(propsIdx).toBeGreaterThan(ownersIdx);
   });
 });
