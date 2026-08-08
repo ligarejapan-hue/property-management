@@ -182,6 +182,15 @@ describe("checkBatchEligibility", () => {
     expect(r.groupMismatchCount).toBe(1);
   });
 
+  it("(7) 同一物件で同じグループを指す item が2つあれば groupMismatch(#364 R8=名寄せ後の重複)", () => {
+    const r = checkBatchEligibility(
+      [item({ id: "i1" }), item({ id: "i2" })],
+      new Map([["p1", prop()]]),
+      ADMIN,
+    );
+    expect(r.groupMismatchCount).toBe(1);
+  });
+
   it("物件が Map に無い item は pruned 扱い(物件削除直後)", () => {
     const r = checkBatchEligibility([item()], new Map(), ADMIN);
     expect(r.prunedItemIds).toEqual(["i1"]);

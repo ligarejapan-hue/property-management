@@ -12,6 +12,9 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
 //   (3) 送付資格: PropertyOwner リンク切れ / dmStatus!="send" / isArchived → 409(stateIssueCount)
 //   (4) owner/property 削除で null の item → 初回GETで物理削除(prunedItemIds)
 //   (6) 住所グループ再計算との完全一致 → 409(groupMismatchCount)
+//   (7) 同一物件内で同じ現在グループを指す item の重複 → 409(groupMismatchCount。
+//       名寄せで別グループだった2itemが同一グループに合流すると、CSVが同じ宛先に
+//       2通出て確定も二重記録になる=#364 R8。再出力すれば1通に畳まれる)
 // (2) terminal反響は PR-B、(5) 再送候補述語の再評価は PR-C でこの関数に追加する。
 
 export interface BatchItemForCheck {
@@ -65,6 +68,7 @@ export function checkBatchEligibility(
   let scopeMissingCount = 0;
   let stateIssueCount = 0;
   let groupMismatchCount = 0;
+  const seenGroups = new Set<string>();
 
   for (const it of items) {
     const property = it.propertyId ? properties.get(it.propertyId) : undefined;
@@ -105,7 +109,15 @@ export function checkBatchEligibility(
       [...saved].every((x) => currentIds.has(x));
     if (!same) {
       groupMismatchCount += 1;
+      continue;
     }
+    // (7) 同一物件内の重複グループ検出(現在の代表で同定=#364 R8)。
+    const groupKey = `${it.propertyId}:${it.ownerId}`;
+    if (seenGroups.has(groupKey)) {
+      groupMismatchCount += 1;
+      continue;
+    }
+    seenGroups.add(groupKey);
   }
 
   return { prunedItemIds, scopeMissingCount, stateIssueCount, groupMismatchCount };

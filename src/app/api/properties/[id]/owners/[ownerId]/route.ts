@@ -54,17 +54,22 @@ export async function PATCH(
       updateData.relationship = data.relationship;
     if (data.isPrimary !== undefined) updateData.isPrimary = data.isPrimary;
 
-    // isPrimary を立てる場合は同一物件の他リンクを下ろす
-    if (data.isPrimary === true) {
-      await prisma.propertyOwner.updateMany({
-        where: { propertyId, isPrimary: true, NOT: { id: existing.id } },
-        data: { isPrimary: false },
+    // ⚠親の物件行を先にロックする(書き込み規約+#364 R8): 素の update は DM 控えの
+    // 凍結 tx(親行 FOR SHARE 保持で代表・グループを検証)と直列化されず、変更前の
+    // 代表/続柄で描いた古いCSVがそのまま凍結される。
+    const updated = await prisma.$transaction(async (tx) => {
+      await lockPropertyRow(tx, propertyId);
+      // isPrimary を立てる場合は同一物件の他リンクを下ろす
+      if (data.isPrimary === true) {
+        await tx.propertyOwner.updateMany({
+          where: { propertyId, isPrimary: true, NOT: { id: existing.id } },
+          data: { isPrimary: false },
+        });
+      }
+      return tx.propertyOwner.update({
+        where: { id: existing.id },
+        data: updateData,
       });
-    }
-
-    const updated = await prisma.propertyOwner.update({
-      where: { id: existing.id },
-      data: updateData,
     });
 
     await recordChanges({
