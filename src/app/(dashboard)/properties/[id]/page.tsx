@@ -231,7 +231,7 @@ export default function PropertyDetailPage({
     if (!property) return;
     const ok = window.confirm(
       `物件「${property.address}」を削除します。この操作は取り消せません。
-DMの反響・送付履歴は所有者情報に引き継がれます。よろしいですか？`,
+所有者に紐づくDMの反響・送付履歴は所有者情報に引き継がれます(紐づけの無い記録は削除されます)。よろしいですか？`,
     );
     if (!ok) return;
     setDeleting(true);

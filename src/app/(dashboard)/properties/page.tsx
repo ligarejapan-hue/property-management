@@ -372,6 +372,7 @@ function PropertiesPageInner() {
       const excluded = Math.max(0, ids.length - (res.matchedProperties ?? ids.length));
       const partialNotice = buildSaleDmPartialNotice({
         generated: res.generated, failed: res.failed, truncated: res.truncated, excluded,
+        skippedByUnlink: res.skippedByUnlink,
       });
       if (partialNotice) window.alert(partialNotice);
       router.push(`/properties/sale-dm/${res.campaignId}`);
@@ -717,7 +718,7 @@ function PropertiesPageInner() {
     if (deletingId) return;
     if (
       !window.confirm(
-        `物件「${address}」を削除します。\nこの操作は取り消せません。\nDMの反響・送付履歴は所有者情報に引き継がれます。よろしいですか？`,
+        `物件「${address}」を削除します。\nこの操作は取り消せません。\n所有者に紐づくDMの反響・送付履歴は所有者情報に引き継がれます(紐づけの無い記録は削除されます)。よろしいですか？`,
       )
     ) {
       return;
@@ -752,7 +753,7 @@ function PropertiesPageInner() {
     if (targets.length === 0) return;
     if (
       !window.confirm(
-        `選択した ${targets.length} 件の物件を削除します。\nこの操作は取り消せません。\nDMの反響・送付履歴は所有者情報に引き継がれます。よろしいですか？`,
+        `選択した ${targets.length} 件の物件を削除します。\nこの操作は取り消せません。\n所有者に紐づくDMの反響・送付履歴は所有者情報に引き継がれます(紐づけの無い記録は削除されます)。よろしいですか？`,
       )
     ) {
       return;

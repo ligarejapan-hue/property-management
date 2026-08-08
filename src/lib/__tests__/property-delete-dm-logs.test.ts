@@ -36,8 +36,8 @@ describe("物件削除tx: 所有者ゼロのDM記録の掃除(R52)", () => {
 
 describe("削除確認ダイアログの注意書き", () => {
   it("物件詳細・一覧(単体/一括)の確認文言に「所有者情報に引き継がれます」がある", () => {
-    expect(DETAIL_PAGE).toContain("DMの反響・送付履歴は所有者情報に引き継がれます");
-    const hits = LIST_PAGE.split("DMの反響・送付履歴は所有者情報に引き継がれます").length - 1;
+    expect(DETAIL_PAGE).toContain("所有者に紐づくDMの反響・送付履歴は所有者情報に引き継がれます(紐づけの無い記録は削除されます)");
+    const hits = LIST_PAGE.split("所有者に紐づくDMの反響・送付履歴は所有者情報に引き継がれます(紐づけの無い記録は削除されます)").length - 1;
     expect(hits).toBe(2); // 単体削除+一括削除
   });
 });

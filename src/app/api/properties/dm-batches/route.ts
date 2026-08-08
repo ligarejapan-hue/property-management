@@ -335,9 +335,11 @@ export async function POST(request: NextRequest) {
         });
         if (items.length > 0) {
           await tx.dmExportBatchItem.createMany({
-            data: items.map((it) => ({
+            data: items.map((it, index) => ({
               id: it.id,
               batchId,
+              // 検索の並び順を保存(CSV は常にこの順で描画する=#364 R5)。
+              position: index,
               propertyId: it.propertyId,
               ownerId: it.ownerId,
             })),

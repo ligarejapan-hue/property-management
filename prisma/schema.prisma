@@ -695,6 +695,8 @@ model DmExportBatch {
 model DmExportBatchItem {
   id         String  @id @default(uuid()) @db.Uuid
   batchId    String  @map("batch_id") @db.Uuid
+  // 出力時の並び順(検索の sort を CSV 行順に保存する=#364 R5。id は UUID で順序を持たない)
+  position   Int     @default(0)
   propertyId String? @map("property_id") @db.Uuid // 物件削除で null 化(R49・DL後の郵送済み記録を守る)
   ownerId    String? @map("owner_id") @db.Uuid // 代表所有者。削除で null 化(確定を巻き戻さない)
 

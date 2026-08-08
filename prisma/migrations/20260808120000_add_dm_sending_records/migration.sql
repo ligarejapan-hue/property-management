@@ -46,6 +46,7 @@ CREATE TABLE "dm_export_batches" (
 CREATE TABLE "dm_export_batch_items" (
     "id" UUID NOT NULL,
     "batch_id" UUID NOT NULL,
+    "position" INTEGER NOT NULL DEFAULT 0,
     "property_id" UUID,
     "owner_id" UUID,
 

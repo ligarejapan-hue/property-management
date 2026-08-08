@@ -28,7 +28,8 @@ export async function readItemsWithOwners(
       ownerId: true,
       itemOwners: { select: { ownerId: true } },
     },
-    orderBy: { id: "asc" },
+    // 出力時の並び順(position)で読む(#364 R5: id は UUID で並び順を持たない)。
+    orderBy: [{ position: "asc" }, { id: "asc" }],
   });
   return rows.map((r) => ({
     id: r.id,

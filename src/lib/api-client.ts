@@ -203,9 +203,9 @@ export interface CreateSaleDmCampaignBody {
 export async function createSaleDmCampaign(body: CreateSaleDmCampaignBody) {
   if (USE_MOCK) {
     await mockDelay();
-    return { campaignId: "mock-campaign", requested: 0, matchedProperties: 0, generated: 0, failed: 0, truncated: false };
+    return { campaignId: "mock-campaign", requested: 0, matchedProperties: 0, generated: 0, saved: 0, skippedByUnlink: 0, failed: 0, truncated: false };
   }
-  return apiFetch<{ campaignId: string; requested?: number; matchedProperties?: number; generated?: number; failed?: number; truncated?: boolean; idempotent?: boolean }>(
+  return apiFetch<{ campaignId: string; requested?: number; matchedProperties?: number; generated?: number; saved?: number; skippedByUnlink?: number; failed?: number; truncated?: boolean; idempotent?: boolean }>(
     "/api/properties/sale-dm/campaigns",
     {
       method: "POST",

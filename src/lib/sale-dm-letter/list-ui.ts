@@ -29,8 +29,15 @@ export function buildSaleDmPartialNotice(res: {
   truncated?: boolean;
   // 選択したが対象外(所有者の住所が無い/権限外等)で作成されなかった件数。
   excluded?: number;
+  // 生成中に所有者の紐づけが変わり保存されなかった通数(#364 R5)。
+  skippedByUnlink?: number;
 }): string | null {
   const lines: string[] = [];
+  if ((res.skippedByUnlink ?? 0) > 0) {
+    lines.push(
+      `${res.skippedByUnlink} 通は生成中に所有者情報が変わったため作成されませんでした(物件を確認して作り直してください)。`,
+    );
+  }
   if ((res.excluded ?? 0) > 0) {
     lines.push(
       `${res.excluded} 件は送付可でない(未判断/送付不可)・住所が無い等のため対象外で、DMは作成されませんでした。`,
