@@ -69,6 +69,7 @@ model DmExportBatchItem {
   - **別の押下は別のキー=別の控え**。⚠内容ハッシュで「同日同内容=同一」と畳むと、**別々の操作者が意図して行った同日2回の郵送**まで1つに合流し、確定が1回しかできず送付記録が過少になる(@codex R6 P2)。合流してよいのは「同じ1回のダウンロードの再試行」だけであり、それは attemptKey が正確に表す。
   - attemptKey 無しの直叩き(API 直接呼び出し)はサーバーが発行する(重複排除なしで毎回新規=安全側)。
   - 冪等キーの先例 = 売却DMキャンペーンの idempotencyKey(実装様式もこれに合わせる)。
+  - **再試行と控えの中身の一致検証(@codex R7 P2)**: バッチに **content_digest**(=ソート済み宛先行全体の非PIIハッシュ。CSV本文は保存しない)を持たせる。同じ attemptKey の再実行は CSV を再生成するため、初回 commit 後に所有者・住所・代表者が変わっていると**再試行のCSVと控えの中身がずれる**。再実行時に digest を再計算して**一致しなければ 409**(「宛先が変わったため、もう一度出力してください」)=ずれた控えを黙って再利用しない。
 - **所有者の削除(@codex P2)**: item の owner FK は SetNull。確定時に ownerId が null の item は `PropertyDmLog.owner_id=null` で記録する(1件の欠けで全体を巻き戻さない)。
 
 - **CSV の中身(氏名・住所)は保存しない**。控えは propertyId/代表 ownerId のみ=非PII寄りの最小構成。
@@ -88,7 +89,8 @@ model DmExportBatchItem {
   1. **採番は共通ヘルパー1本に集約**し、PropertyDmLog を書く**全writer**(一括確定・個別記録・売却DM mark-sent)がこれを使う。ヘルパーは tx 内で `pg_advisory_xact_lock`(採番専用の固定キー)を取ってから採番=全採番が直列化される(確定は週に数回・数百行なので直列で十分)。
   2. 採番は **`MAX(sequence)+1`**(@codex R2 P1)。「既存件数+1」だと途中の記録を取消した後([1,2,3]の2を削除→count=2→次が3)に生き残りの3と衝突し、**その物件への記録が全部失敗し続ける**。MAX+1 なら削除に影響されない(欠番は許容=「何通目」表示は歴史の記録であり連番の詰め直しはしない)。
   3. 同一バッチ内に同じ物件の item が複数ある場合(送付先住所が複数の共有者グループ)は、item id 順で **MAX+1 からの連番** を決定的に割り当てる。
-  4. **DB側の背水**: `@@unique([propertyId, sequence])`。migration-A で既存行の sequence を物件ごとに `sentAt,createdAt` 順で**振り直してから**(window関数・決定的)このuniqueを張る。⚠既存の売却DM行は default 1 のままだと重複でunique作成に失敗するため、この backfill は必須(本番は売却DM休眠中のため対象行は僅少/ゼロの見込みだが、手順としては必ず行う)。
+  4. **DB側の背水**: `@@unique([propertyId, sequence])`。既存行の sequence を物件ごとに `sentAt,createdAt` 順で**振り直してから**(window関数・決定的)このuniqueを張る。
+  4b. ⚠**uniqueとbackfillは「新writer稼働後の次の反映」に分離する**(@codex R7 P1): 本番の反映手順は `migrate deploy → build → restart` の順のため、migration と同じ反映で unique を張ると、**restart までの窓で旧 mark-sent(sequence を採番しない・default 1)が unique 違反で失敗**する。よって **migration-A = 列追加のみ**(unique なし・PR-A と同時反映)、**migration-A2 = backfill+unique**(PR-B の反映に同乗=採番する新 writer が稼働済みの状態で適用)。窓の間の新規行は default 1 だが、A2 の backfill が振り直すので整合する(expand→contract の段階投入)。
   5. **ロック順序の統一(@codex R2 P2)**: 採番の advisory lock は**常に親の物件行ロック(lockPropertyRecordForWrite / FKの暗黙ロック)より先**に取る。個別記録が「親ロック→advisory待ち」・一括確定が「advisory保持→FK待ち」になると相互待ちでデッドロックする。**「advisory→親→子」の一方向**を全writerの規約とし、配線テスト(呼び出し順のソース固定)で守る。
 - **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。
 - UI: 物件一覧の「DM差込CSV出力」の隣に「**送付の確定**」→ 未確定バッチ一覧(出力日時・件数)→ 投函日(既定=今日)→ 確定。確定済み件数を表示して閉じる。
@@ -126,9 +128,10 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 ## 3. 第2段(PR-B): 反響の記録
 
 - 列追加(migration-B・additive): `reaction_status TEXT DEFAULT 'no_response'`(allowlist: no_response/replied/refused/undeliverable。**enum は作らない**) / `reacted_at DateTime?` / `reaction_note TEXT?` / `reaction_source TEXT?`(下記・"manual"/"sale_dm_sync") + 索引 [reactionStatus]。
-- **手動反響の保護(@codex R5 P1)**: 汎用の反響入力で sale_dm 行に「拒否」等を手で付けた後、売却DM側のメモだけの編集が outcome 再計算→同期を走らせると、draft 側に「拒否」相当が無い(outcome=none)ため **no_response で上書き=拒否した相手に再送**が起き得る。対策=`reaction_source` 列で出所を持ち:
-  - 手動入力(PATCH reaction)は `manual` を立てる。
-  - 同期(§下記)は **reaction_source が null か "sale_dm_sync" の行だけ**を書く=**手動が常に勝つ**。訂正の戻し(undeliverable解除等)も sync 由来の値にしか触れない。
+- **手動反響と同期の優先規則(@codex R5 P1 → R7 P1 で精緻化)**: `reaction_source` 列("manual"/"sale_dm_sync")で出所を持ち、次の非対称な規則にする:
+  - 手動入力(PATCH reaction)は `manual` を立てる。**手動の実反響(replied/refused/undeliverable)は同期に上書きされない**(拒否を手で付けた後、売却DM側のメモ編集の再計算が outcome=none を根拠に no_response へ戻す事故を防ぐ)。
+  - ⚠ただし**手動の no_response は実反響をブロックしない**(@codex R7 P1): メモ目的で no_response のまま保存→sourceがmanual化→その後のLPアクセスや電話反響が同期できず**実際は反応があった相手が再送候補に残る**、の裏返しの事故。同期が書ける条件=「**現在の status が no_response**」OR「reaction_source が null/"sale_dm_sync"」。
+  - 同期は manual 行への **no_response への格下げを行わない**。訂正の戻し(undeliverable解除等)も sync 由来の値にしか触れない。
 - `PATCH /api/properties/[id]/dm-logs/[logId]/reaction` body=`{ status, reactedAt?, note? }` — property:write + record scope + lock規約。
 - **undeliverable を付けたら 物件 dmStatus=no_send + dmUndeliverableAt=now に自動連動**(売却DM outcome と同じ挙動)。訂正時(undeliverable→他)は、他に undeliverable の記録が無ければ dmUndeliverableAt を解除(dmStatus は人の判断で戻す=売却DMと同じ)。
 - reaction_note は note と同じく owner_note 表示レベルで server-side マスク。
@@ -137,7 +140,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - **売却DM側の反響との同期(@codex P1)**: 売却DMの反響は `DmRecipientDraft.outcome/deliveryStatus` に入り、放置すると「売却DMで連絡が来た相手」が汎用側では no_response のまま=再送候補に出てしまう。対策:
   - **outcome を書く全経路**が、`draft_id` で紐付いたブリッジ行(method="sale_dm")の reaction_status を**同じ tx で更新**する。写像: `returned_undeliverable → undeliverable` / `phoneInquiryAt あり or outcome=inquiry → replied`。訂正時も同様に戻す。
   - ⚠経路は認証済み outcome route だけではない(@codex R2 P1): **公開LP追跡 `recordTrackingHit`**(`/t/<token>` 初回アクセス)が `lpFirstAccessAt + outcome="inquiry"` を直接書く。同期は**共通ヘルパー1本**に集約し、outcome route と recordTrackingHit の**両方**から同一 tx で呼ぶ(書く場所を1つでも取りこぼすと再送候補の判定が破れる=[同種の穴は全箇所]の原則。実装時に outcome/deliveryStatus の writer を grep で全列挙して確認する)。
-  - migration-B で既存の sale_dm 行を drafts の outcome から **backfill**(本番は売却DM休眠中のため対象は僅少/ゼロの見込みだが手順として行う)。旧行に draft_id が無い場合は propertyId+送付日で対応付ける。⚠**対応付けが曖昧な行は「反響あり側」に倒す**(@codex R4 P2): 同日に複数 draft があり1対1に決められない場合、その物件の該当 drafts に inquiry/returned_undeliverable が1つでもあれば、曖昧な sale_dm 行へ該当反響(replied/undeliverable)を保守的に付与する。誤って再送候補から**外れる**のは許容(送りすぎ防止が目的)・誤って候補に**入る**のは不可、の非対称で判断する。
+  - 既存の sale_dm 行への **backfill は「再実行可能な照合(reconciliation)」として実装**し、**新コード稼働後に実行**する(@codex R7 P2)。migration-B は列追加のみとし、照合は §同期の共通ヘルパーを使う冪等スクリプト(全 sale_dm 行を draft と突き合わせて上の優先規則で更新)を **PR-B 反映の restart 後に実行**する。⚠migration の中で backfill すると、`migrate deploy → restart` の窓で旧プロセスが書いた反響(LPアクセス等)が draft 側だけに残り、照合済みの行が no_response のまま固定される。照合は冪等なので、窓の有無にかかわらず稼働後にもう一度流せば閉じる(本番は売却DM休眠中のため対象は僅少/ゼロの見込み)。旧行に draft_id が無い場合は propertyId+送付日で対応付ける。⚠**対応付けが曖昧な行は「反響あり側」に倒す**(@codex R4 P2): 同日に複数 draft があり1対1に決められない場合、その物件の該当 drafts に inquiry/returned_undeliverable が1つでもあれば、曖昧な sale_dm 行へ該当反響(replied/undeliverable)を保守的に付与する。誤って再送候補から**外れる**のは許容(送りすぎ防止が目的)・誤って候補に**入る**のは不可、の非対称で判断する。
   - これにより §4 の再送候補判定は **PropertyDmLog だけを見れば足りる**(2つの保存先を join しない=判定の単一情報源)。
 
 ## 4. 第3段(PR-C): 再送候補
@@ -172,3 +175,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R4(2026-08-08): P2×3(field_staff確定は親FOR UPDATE保持でスコープ検証=TOCTOU封じ / 再利用照会はFOR UPDATEで確定と直列化 / backfill曖昧行は反響あり側に倒す)を反映。外部AI方式側のP1(一括適用のscope除外)は別紙。
 - R5(2026-08-08): P1(手動反響の保護→reaction_source列で出所管理・手動が常に勝つ)・P2(同時新規作成のunique衝突をcatchして勝者を再利用)を反映。
 - R6(2026-08-08): P2(同日同内容の別操作の過剰合流→冪等化を内容ハッシュから**押下ごとのattemptKey方式**へ変更=再試行だけが合流)を反映。
+- R7(2026-08-08): P1×2(unique+backfillを新writer稼働後の次反映に分離=expand→contract / 手動no_responseは実反響をブロックしない)・P2×2(反響backfillは稼働後の冪等照合に / 再試行はcontent_digest一致検証・ずれたら409)を反映。
