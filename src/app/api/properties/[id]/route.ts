@@ -416,6 +416,14 @@ export async function DELETE(
         },
         data: { isDeleted: true, deletedAt: new Date() },
       });
+      // DM送付記録(PR-A・@codex R52): 所有者の紐づけが全く無い行(個別記録・旧sale_dm行)は
+      // 孤児として残しても所有者横断の再送除外に寄与できず、所有者名検索の孤児管理からも
+      // 見えない=用途なく残るだけなので行ごと削除する。所有者付きの行は FK の SET NULL で
+      // property_id=null になり所有者側に履歴が残る(拒否/宛先不明の除外が破れない=R49)。
+      // 現在の PropertyOwner リンクから連関を後付けする補完はしない(R33/R34 と同じ判断)。
+      await tx.propertyDmLog.deleteMany({
+        where: { propertyId: id, ownerId: null, logOwners: { none: {} } },
+      });
       await tx.property.delete({ where: { id } });
     });
 

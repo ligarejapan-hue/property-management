@@ -700,7 +700,7 @@ function PropertiesPageInner() {
     if (deletingId) return;
     if (
       !window.confirm(
-        `物件「${address}」を削除します。\nこの操作は取り消せません。よろしいですか？`,
+        `物件「${address}」を削除します。\nこの操作は取り消せません。\nDMの反響・送付履歴は所有者情報に引き継がれます。よろしいですか？`,
       )
     ) {
       return;
@@ -735,7 +735,7 @@ function PropertiesPageInner() {
     if (targets.length === 0) return;
     if (
       !window.confirm(
-        `選択した ${targets.length} 件の物件を削除します。\nこの操作は取り消せません。よろしいですか？`,
+        `選択した ${targets.length} 件の物件を削除します。\nこの操作は取り消せません。\nDMの反響・送付履歴は所有者情報に引き継がれます。よろしいですか？`,
       )
     ) {
       return;

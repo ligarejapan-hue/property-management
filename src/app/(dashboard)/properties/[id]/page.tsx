@@ -230,7 +230,8 @@ export default function PropertyDetailPage({
   const handleDelete = async () => {
     if (!property) return;
     const ok = window.confirm(
-      `物件「${property.address}」を削除します。この操作は取り消せません。よろしいですか？`,
+      `物件「${property.address}」を削除します。この操作は取り消せません。
+DMの反響・送付履歴は所有者情報に引き継がれます。よろしいですか？`,
     );
     if (!ok) return;
     setDeleting(true);
