@@ -4,6 +4,7 @@ import {
   getApiSession, getUserPermissions, getOwnerDisplayConfig, handleApiError, ApiError, parseJsonBody,
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
+import { lockOwnersForShare, lockPropertiesForShare, type RawTx } from "@/lib/dm-batch/locks";
 import { hasPermission } from "@/lib/permissions";
 import { propertyListQuerySchema } from "@/lib/validators";
 import { buildPropertyListWhere, buildPropertyListOrderBy, propertyVisibilityScopeWhere } from "@/lib/property-list-query";
@@ -240,6 +241,21 @@ export async function POST(request: NextRequest) {
       // 複数型(B/C)の追加と再割当は variants / assign route で行う。生成 route は「初期1型」を保証するのみ。
       // A/B 純度は割り当てられた variantId 基準(個別 override は本文の微修正で集計に影響しない)。
       await prisma.$transaction(async (tx) => {
+        // PR-A(設計§2.2・R49 P2): 宛先生成 tx も順序規約に従い Owner(FOR SHARE・id順)→
+        // 物件親行(FOR SHARE・id順)を取得し、保持したまま PropertyOwner リンクを再検証してから
+        // draft+共有者連関を INSERT する。リンクの付け外しは親行ロック規約で書かれるため、
+        // これで「所有者でなくなった相手への draft」が生成後の印刷検査をすり抜ける穴を塞ぐ。
+        const rawTx = tx as unknown as RawTx;
+        const sliced = capped.meta.slice(0, drafts.length);
+        await lockOwnersForShare(rawTx, sliced.flatMap((m) => m.groupOwnerIds));
+        await lockPropertiesForShare(rawTx, sliced.map((m) => m.propertyId));
+        const currentLinks = await tx.propertyOwner.findMany({
+          where: { propertyId: { in: [...new Set(sliced.map((m) => m.propertyId))] } },
+          select: { propertyId: true, ownerId: true },
+        });
+        const linkSet = new Set(
+          currentLinks.map((l) => `${l.propertyId} ${l.ownerId}`),
+        );
         const variant = await tx.dmVariant.create({
           data: {
             campaignId: claimed.id, label: "A",
@@ -248,22 +264,40 @@ export async function POST(request: NextRequest) {
             strength: body.options.strength, extraInstruction: body.options.extraInstruction ?? null,
           },
         });
-        const sliced = capped.meta.slice(0, drafts.length);
         for (let i = 0; i < sliced.length; i++) {
           const d = drafts[i];
-          await tx.dmRecipientDraft.create({
+          const m = sliced[i];
+          // ロック保持中の再検証: グループの誰かがこの物件の所有者でなくなっていたら生成しない。
+          if (
+            m.groupOwnerIds.length > 0 &&
+            !m.groupOwnerIds.every((oid) => linkSet.has(`${m.propertyId} ${oid}`))
+          ) {
+            continue;
+          }
+          const createdDraft = await tx.dmRecipientDraft.create({
             data: {
-              campaignId: claimed.id, variantId: variant.id, propertyId: sliced[i].propertyId,
-              representativeOwnerId: sliced[i].representativeOwnerId,
-              recipientName: sliced[i].recipientName, recipientZip: sliced[i].recipientZip,
-              recipientAddress: sliced[i].recipientAddress, honorific: sliced[i].honorific,
-              coOwnerCount: sliced[i].coOwnerCount,
+              campaignId: claimed.id, variantId: variant.id, propertyId: m.propertyId,
+              representativeOwnerId: m.representativeOwnerId,
+              recipientName: m.recipientName, recipientZip: m.recipientZip,
+              recipientAddress: m.recipientAddress, honorific: m.honorific,
+              coOwnerCount: m.coOwnerCount,
               body: d.body ?? "", model: resolveLetterModel(saleDmCfg),
               outcomeNote: d.error ? `生成失敗(${d.error})` : null,
               trackingToken: randomBytes(8).toString("base64url"),
               generatedBy: session.id,
             },
+            select: { id: true },
           });
+          // 共有者グループ全員を連関に保存(mark-sent がログの連関へコピーする元。設計§2.2)。
+          if (m.groupOwnerIds.length > 0) {
+            await tx.dmRecipientDraftOwner.createMany({
+              data: m.groupOwnerIds.map((ownerId) => ({
+                draftId: createdDraft.id,
+                ownerId,
+              })),
+              skipDuplicates: true,
+            });
+          }
         }
         // 生成+保存が完了したのでキャンペーンを ready にする(drafts と同一トランザクションでアトミックに確定)。
         // idempotency の pre-check / P2002 はこの完了マーカーで「冪等返却(ready)」と「孤児削除→作り直し(draft)」

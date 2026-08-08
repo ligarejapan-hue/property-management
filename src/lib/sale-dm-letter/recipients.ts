@@ -16,6 +16,9 @@ export interface RecipientMeta {
   recipientAddress: string | null;
   honorific: string;
   coOwnerCount: number;
+  /** 同一送付先住所グループの全所有者 id(代表含む)。draft 連関(dm_recipient_draft_owners)
+   *  の保存に使う(PR-A・設計§2.2: 代表以外の共有者にも反響の記録を紐づける)。 */
+  groupOwnerIds: string[];
 }
 
 // route の select は owner.id も取得するが、DmRowPropertyOwner の owner 型は id を含まないため widen する。
@@ -66,6 +69,9 @@ export function buildRecipientsFromProperties(
         recipientAddress: repOwner.address ?? null,
         honorific,
         coOwnerCount: group.length,
+        groupOwnerIds: group
+          .map((po) => (po.owner as OwnerWithId).id)
+          .filter((v): v is string => typeof v === "string" && v.length > 0),
       });
     }
   }

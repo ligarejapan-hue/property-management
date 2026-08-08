@@ -41,18 +41,16 @@ vi.mock("@/lib/prisma", () => {
   const draftUpdateMany = vi.fn();
   const dmLogCreate = vi.fn();
   const draftFindUnique = vi.fn();
-  return {
-    default: {
-      dmRecipientDraft: { findUnique: draftFindUnique, update: draftUpdate, updateMany: draftUpdateMany },
-      propertyDmLog: { create: dmLogCreate },
-      $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
-        fn({
-          dmRecipientDraft: { findUnique: draftFindUnique, update: draftUpdate, updateMany: draftUpdateMany },
-          propertyDmLog: { create: dmLogCreate },
-        }),
-      ),
-    },
+  const logOwnerCreateMany = vi.fn();
+  const queryRaw = vi.fn(async () => []); // Owner FOR SHARE / 親行 FOR UPDATE の行ロック
+  const db = {
+    dmRecipientDraft: { findUnique: draftFindUnique, update: draftUpdate, updateMany: draftUpdateMany },
+    propertyDmLog: { create: dmLogCreate },
+    propertyDmLogOwner: { createMany: logOwnerCreateMany },
+    $queryRaw: queryRaw,
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
   };
+  return { default: db };
 });
 
 import prismaMock from "@/lib/prisma";
@@ -63,6 +61,20 @@ import { POST } from "../../app/api/properties/sale-dm/drafts/[id]/mark-sent/rou
 const pm = prismaMock as never as {
   dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
   propertyDmLog: { create: ReturnType<typeof vi.fn> };
+  propertyDmLogOwner: { createMany: ReturnType<typeof vi.fn> };
+  $queryRaw: ReturnType<typeof vi.fn>;
+};
+
+// route 読取(campaign/property 込み)と tx 内読取(representativeOwnerId/draftOwners)の
+// 両方に応えられる合成 fixture(select は mock では無視されるため同一オブジェクトでよい)。
+const DRAFT_FULL = {
+  id: "r1",
+  propertyId: "p1",
+  status: "confirmed",
+  campaign: { createdBy: "u1" },
+  property: { createdBy: "u1", assignedTo: "u1" },
+  representativeOwnerId: "o1",
+  draftOwners: [] as Array<{ ownerId: string }>,
 };
 const req = () => new Request("http://x", { method: "POST", body: "{}" });
 const ctx = (id = "r1") => ({ params: Promise.resolve({ id }) });
@@ -70,10 +82,12 @@ const ctx = (id = "r1") => ({ params: Promise.resolve({ id }) });
 beforeEach(() => {
   vi.clearAllMocks();
   (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" }, permissions: [{ resource: "property", action: "write", granted: true }] });
-  pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", propertyId: "p1", status: "confirmed", campaign: { createdBy: "u1" }, property: { createdBy: "u1", assignedTo: "u1" } });
+  pm.dmRecipientDraft.findUnique.mockResolvedValue(DRAFT_FULL);
   pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1" });
   pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
   pm.propertyDmLog.create.mockResolvedValue({ id: "log1" });
+  pm.propertyDmLogOwner.createMany.mockResolvedValue({ count: 1 });
+  pm.$queryRaw.mockResolvedValue([]);
 });
 
 describe("POST mark-sent", () => {
@@ -119,9 +133,10 @@ describe("POST mark-sent", () => {
 
   it("並行POSTで他リクエストが先に送付(count=0 かつ tx 内 re-read が sent)なら 200 alreadySent(冪等)", async () => {
     pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
-    // 開始 read=confirmed(遷移を試みる)→ tx 内 re-read=sent(他リクエストが先に確定済み)。
+    // 開始 read=confirmed(遷移を試みる)→ tx 先読み → 状態 re-read=sent(他リクエストが先に確定済み)。
     pm.dmRecipientDraft.findUnique
-      .mockResolvedValueOnce({ id: "r1", propertyId: "p1", status: "confirmed", campaign: { createdBy: "u1" }, property: { createdBy: "u1", assignedTo: "u1" } })
+      .mockResolvedValueOnce(DRAFT_FULL)
+      .mockResolvedValueOnce(DRAFT_FULL)
       .mockResolvedValueOnce({ status: "sent" });
     const res = await POST(req() as never, ctx());
     expect(res.status).toBe(200);
@@ -133,9 +148,10 @@ describe("POST mark-sent", () => {
 
   it("並行編集で確定解除(count=0 かつ tx 内 re-read が draft)なら 409・送付済みと誤応答しない", async () => {
     pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
-    // 開始 read=confirmed → tx 内 re-read=draft(本文編集/再生成等で確定が解除された=未送付)。
+    // 開始 read=confirmed → tx 先読み → 状態 re-read=draft(本文編集/再生成等で確定が解除された=未送付)。
     pm.dmRecipientDraft.findUnique
-      .mockResolvedValueOnce({ id: "r1", propertyId: "p1", status: "confirmed", campaign: { createdBy: "u1" }, property: { createdBy: "u1", assignedTo: "u1" } })
+      .mockResolvedValueOnce(DRAFT_FULL)
+      .mockResolvedValueOnce(DRAFT_FULL)
       .mockResolvedValueOnce({ status: "draft" });
     const res = await POST(req() as never, ctx());
     expect(res.status).toBe(409); // sent ではない=冪等成功にしない
@@ -185,6 +201,58 @@ describe("POST mark-sent", () => {
     pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", propertyId: "p1", status: "confirmed", campaign: { createdBy: "u1" }, property: { createdBy: "other", assignedTo: "other" } });
     const res = await POST(req() as never, ctx());
     expect(res.status).toBe(403);
+    expect(pm.propertyDmLog.create).not.toHaveBeenCalled();
+  });
+
+  // ---------- PR-A ブリッジ(設計§2.2) ----------
+
+  it("ブリッジ: ログに ownerId(代表)+draftId が入り、連関(グループ全員)をコピーする", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({
+      ...DRAFT_FULL,
+      draftOwners: [{ ownerId: "o1" }, { ownerId: "o2" }],
+    });
+    const res = await POST(req() as never, ctx());
+    expect(res.status).toBe(200);
+    const logArg = pm.propertyDmLog.create.mock.calls[0][0];
+    expect(logArg.data.ownerId).toBe("o1");
+    expect(logArg.data.draftId).toBe("r1");
+    expect(logArg.data.dmType).toBeNull();
+    const links = pm.propertyDmLogOwner.createMany.mock.calls[0][0].data;
+    expect(links.map((l: { ownerId: string }) => l.ownerId).sort()).toEqual(["o1", "o2"]);
+    // 監査 detail: 連関ありは legacyGroup=false
+    const audit = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
+    expect(audit.detail.legacyGroup).toBe(false);
+  });
+
+  it("ブリッジ: 連関が空の旧 draft は代表のみで記録し legacyGroup=true(補完しない=R34)", async () => {
+    const res = await POST(req() as never, ctx());
+    expect(res.status).toBe(200);
+    const links = pm.propertyDmLogOwner.createMany.mock.calls[0][0].data;
+    expect(links.map((l: { ownerId: string }) => l.ownerId)).toEqual(["o1"]);
+    const audit = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
+    expect(audit.detail.legacyGroup).toBe(true);
+  });
+
+  it("ロック順: Owner FOR SHARE → 物件親行 FOR UPDATE が updateMany より先(R50)", async () => {
+    const res = await POST(req() as never, ctx());
+    expect(res.status).toBe(200);
+    const sqls = pm.$queryRaw.mock.calls.map((c: unknown[]) =>
+      Array.isArray(c[0]) ? (c[0] as string[]).join("?").replace(/\s+/g, " ") : String(c[0]),
+    );
+    expect(sqls[0]).toMatch(/FROM owners .*FOR SHARE/);
+    expect(sqls[1]).toMatch(/FROM properties .*FOR UPDATE/);
+    expect(pm.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      pm.dmRecipientDraft.updateMany.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("再読取で所有者集合が変わっていたら 409・ログを作らない(R13)", async () => {
+    pm.dmRecipientDraft.findUnique
+      .mockResolvedValueOnce(DRAFT_FULL) // route 読取
+      .mockResolvedValueOnce(DRAFT_FULL) // tx 先読み(o1)
+      .mockResolvedValueOnce({ ...DRAFT_FULL, representativeOwnerId: "o9" }); // 勝者決定後(統合で変化)
+    const res = await POST(req() as never, ctx());
+    expect(res.status).toBe(409);
     expect(pm.propertyDmLog.create).not.toHaveBeenCalled();
   });
 });

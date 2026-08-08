@@ -226,7 +226,7 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   sale_dm_drafts_confirm: new Set(["confirmedAt"]),
   sale_dm_draft_update: new Set(["updatedAt"]),
   sale_dm_draft_regenerate: new Set(["regeneratedAt"]),
-  sale_dm_draft_mark_sent: new Set(["sentAt"]),
+  sale_dm_draft_mark_sent: new Set(["sentAt", "legacyGroup"]),
   sale_dm_draft_outcome_update: new Set(["deliveryStatus", "outcome", "undeliverableLinked", "undeliverableCleared", "updatedAt"]),
   sale_dm_undeliverable_clear: new Set(["restoredDmStatus", "clearedAt"]),
   // ワークスペース閲覧(PII の本文/宛名/住所を返す read)の監査。viewedAt=ISO日時のみ action 固有許可。
