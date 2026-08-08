@@ -93,7 +93,7 @@ model DmExportBatchItem {
   4b. ⚠**uniqueとbackfillは「新writer稼働後の次の反映」に分離する**(@codex R7 P1): 本番の反映手順は `migrate deploy → build → restart` の順のため、migration と同じ反映で unique を張ると、**restart までの窓で旧 mark-sent(sequence を採番しない・default 1)が unique 違反で失敗**する。よって **migration-A = 列追加のみ**(unique なし・PR-A と同時反映)、**migration-A2 = backfill+unique**(PR-B の反映に同乗=採番する新 writer が稼働済みの状態で適用)。窓の間の新規行は default 1 だが、A2 の backfill が振り直すので整合する(expand→contract の段階投入)。
   4c. ⚠**migration-A2 自身も採番の advisory lock を取る**(@codex R8 P1): A2 適用中も PR-A のサービスは稼働中(手順は migrate→restart)で、並行する送付確定が backfill と同じ sequence を割り当てると **unique 作成が失敗し反映が中断**する。A2 の SQL は冒頭で `SELECT pg_advisory_xact_lock(採番と同じ固定キー)` を実行し、**backfill〜unique 作成を採番と同じロックの中で行う**(全 writer が同じキーで直列化されているため、migration も同じ列に並ぶだけで安全になる)。
   5. **ロック順序の統一(@codex R2 P2)**: 採番の advisory lock は**常に親の物件行ロック(lockPropertyRecordForWrite / FKの暗黙ロック)より先**に取る。個別記録が「親ロック→advisory待ち」・一括確定が「advisory保持→FK待ち」になると相互待ちでデッドロックする。**「advisory→親→子」の一方向**を全writerの規約とし、配線テスト(呼び出し順のソース固定)で守る。
-- **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。
+- **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。⚠あわせて mark-sent は **`DmRecipientDraft.representativeOwnerId` を `owner_id` にコピー**する(@codex R9 P1)。これが無いと新しい売却DM経由の拒否/宛先不明が「所有者なし」になり、§4-5 の所有者単位の除外が**新規行に対して効かない**(旧行だけの限界のはずが新規にも及ぶ)。
 - UI: 物件一覧の「DM差込CSV出力」の隣に「**送付の確定**」→ 未確定バッチ一覧(出力日時・件数)→ 投函日(既定=今日)→ 確定。確定済み件数を表示して閉じる。
 - 未確定バッチが溜まった場合の掃除は当面しない(件数小・一覧は直近から表示)。必要になれば既存の日次クリーンアップに載せる(将来)。
 
@@ -125,7 +125,8 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 
 ### 2.6 表示
 
-- DM送付履歴に「種別」「何通目」列を追加。method の表示を日本語ラベル化(sale_dm→「売却DM」・mail→「郵送」等。**生値の英字がそのまま出ている現状の直し**)。
+- DM送付履歴に「種別」列を追加。method の表示を日本語ラベル化(sale_dm→「売却DM」・mail→「郵送」等。**生値の英字がそのまま出ている現状の直し**)。
+- ⚠**「何通目」列の表示は PR-B(migration-A2 適用後)から**(@codex R9 P2): PR-A の期間は既存行が default 1 のままなので、複数回送った物件が全部「1通目」に見え、A2 適用でラベルが変わる。嘘の表示を出すくらいなら列自体を出さない(データは PR-A から正しく採番して貯める)。
 
 ## 3. 第2段(PR-B): 反響の記録
 
@@ -133,6 +134,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - **手動反響と同期の優先規則(@codex R5 P1 → R7 P1 で精緻化)**: `reaction_source` 列("manual"/"sale_dm_sync")で出所を持ち、次の非対称な規則にする:
   - 手動入力(PATCH reaction)は `manual` を立てる。**手動の実反響(replied/refused/undeliverable)は同期に上書きされない**(拒否を手で付けた後、売却DM側のメモ編集の再計算が outcome=none を根拠に no_response へ戻す事故を防ぐ)。
   - ⚠ただし**手動の no_response は実反響をブロックしない**(@codex R7 P1): メモ目的で no_response のまま保存→sourceがmanual化→その後のLPアクセスや電話反響が同期できず**実際は反応があった相手が再送候補に残る**、の裏返しの事故。同期が書ける条件=「**現在の status が no_response**」OR「reaction_source が null/"sale_dm_sync"」。
+  - ⚠**配達失敗(undeliverable)は手動の replied より優先**(@codex R9 P2): 手動で「連絡あり」を付けた後に返戻(returned_undeliverable)が記録された場合、住所が死んでいる事実の方が新しく強い。同期の undeliverable は、現在値が **manual の refused/undeliverable** 以外なら(manual の replied/no_response を含めて)上書きできる。まとめると優先順位: **同期undeliverable ≧ 手動(refused/undeliverable) > 手動(replied) > 同期replied > no_response**。
   - 同期は manual 行への **no_response への格下げを行わない**。訂正の戻し(undeliverable解除等)も sync 由来の値にしか触れない。
 - `PATCH /api/properties/[id]/dm-logs/[logId]/reaction` body=`{ status, reactedAt?, note? }` — property:write + record scope + lock規約。
 - **undeliverable を付けたら 物件 dmStatus=no_send + dmUndeliverableAt=now に自動連動**(売却DM outcome と同じ挙動)。訂正時(undeliverable→他)は、他に undeliverable の記録が無ければ dmUndeliverableAt を解除(dmStatus は人の判断で戻す=売却DMと同じ)。
@@ -155,7 +157,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
   5. **所有者単位の除外(@codex R8 P1)**: その物件の所有者(PropertyOwner 経由)の誰かに、**他物件も含めて** refused / undeliverable の反響ログ(`Owner.dmLogs`=migration-A の逆リレーション)が付いていれば除外する。同じ所有者が物件AとBに紐づくとき、Aで拒否された相手にBから再送する事故を防ぐ(Prisma: `owners: { none: { owner: { dmLogs: { some: { reactionStatus: { in: [refused, undeliverable] } } } } } }` 相当)。⚠限界: ownerId が null の記録(個別記録・旧sale_dm行)は物件単位でしか効かない。また「所有者行は別だが住所が同じ」相手は所有者の名寄せ(既存の品質チェック領域)の守備範囲とし、本機能では扱わない(§6 論点)。
 - replied を除外する理由: 連絡が来ている相手は人が個別対応する(定型の再送に乗せない)。
 - `COOLDOWN_DAYS = 90`(定数)。env `DM_RESEND_COOLDOWN_DAYS` で上書き可(業務値の変更にリリース不要)。上限(cap)は作らない。
-- 純関数 `decideResendCandidacy(logs, now, {cooldownDays})` → `{eligible, reason}`(表示とテストの単一情報源。一覧 where と同じ規則を対で維持)。
+- 純関数 `decideResendCandidacy({logs, ownerHasTerminalReaction}, now, {cooldownDays})` → `{eligible, reason}`(表示とテストの単一情報源。一覧 where と同じ規則を対で維持)。⚠入力には物件自身の logs に加えて **所有者単位の除外状態**(その物件の所有者の誰かに他物件も含め refused/undeliverable があるか=@codex R9 P2)を渡す。呼び出し側が §4-5 と同じクエリでこのフラグを計算する=規則の組み合わせ自体は純関数に集約され、where と対で維持できる。
 - UI: 物件一覧に「**再送候補のみ**」トグル → そのまま既存の「CSV出力→送付の確定」の流れに乗る(sequence が自動で増える)。
 
 ## 5. テスト方針
@@ -180,3 +182,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R6(2026-08-08): P2(同日同内容の別操作の過剰合流→冪等化を内容ハッシュから**押下ごとのattemptKey方式**へ変更=再試行だけが合流)を反映。
 - R7(2026-08-08): P1×2(unique+backfillを新writer稼働後の次反映に分離=expand→contract / 手動no_responseは実反響をブロックしない)・P2×2(反響backfillは稼働後の冪等照合に / 再試行はcontent_digest一致検証・ずれたら409)を反映。
 - R8(2026-08-08): P1×2(migration-A2自身も採番advisory lockを取る=稼働中writerと直列化 / 再送候補に所有者単位の除外を追加=別物件経由の再送事故防止)・P2×1(undeliverableログ削除時にdmUndeliverableAtを親ロック下で再計算)を反映。
+- R9(2026-08-08): P1(mark-sentがrepresentativeOwnerIdをowner_idへコピー=新規行にも所有者除外を効かせる)・P2×3(配達失敗は手動repliedより優先 / 「何通目」表示はA2適用後のPR-Bから / decideResendCandidacyに所有者横断状態を入力)を反映。
