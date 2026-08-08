@@ -94,7 +94,7 @@ model DmExportBatchItem {
   - これに伴い R2-2(MAX+1)・R20(backfill順序)・R7/R8/R24(migration-A2 の段階投入と advisory lock)の採番系対策は**不要化**(対応履歴に経緯として残す)。migration-A2 自体が消え、**migration は A(列追加のみ)の1本**になる。
   - 同一バッチ内の同物件複数行は sentAt が同日で同順位になり得る→表示は createdAt, id で安定に並ぶ(順位の重複表示は許容: 同日に2通は事実)。
 - **ロック順序の統一(@codex R2 P2 → R22 P1 → R26 で採番 advisory を除去)**: 全 DM writer の順序は **「Owner(代表所有者) → variant → 物件親行 → 子行(item/draft/log)」** の一方向。⚠log の insert は owner FK の暗黙ロックを**最後に**取るため、子行を先にロックする writer と「Owner→子」の統合 tx(5d)が混ざると相互待ちになる。子を読まないと所有者が分からない writer(一括確定・mark-sent)は **「先読み(ロックなし)→ Owner を id 順にロック → 子行を FOR UPDATE で再読取 → 所有者が先読みと不一致なら中止して再試行(409/リトライ)」** の型で順序を守る。配線テスト(呼び出し順のソース固定)で全経路を固定する。
-- **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。⚠あわせて mark-sent は **`DmRecipientDraft.representativeOwnerId` を `owner_id` にコピー**する(@codex R9 P1)。これが無いと新しい売却DM経由の拒否/宛先不明が「所有者なし」になり、§4-5 の所有者単位の除外が**新規行に対して効かない**(旧行だけの限界のはずが新規にも及ぶ)。⚠コピー元は **tx 内で(条件付き updateMany の勝者決定後に)draft を再読取した値**を使う(@codex R13 P1): tx 前のスナップショットを使うと、並行する名寄せが draft を master へ付け替えた後に **archive 済みの旧所有者の id でログを作ってしまう**(以後の拒否が所有者横断の除外から見えない)。updateMany が draft 行をロックするため、tx 内の再読取は名寄せと自然に直列化される。
+- **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。⚠あわせて mark-sent は **`DmRecipientDraft.representativeOwnerId` を `owner_id` にコピー**し、**下書きの共有者グループ全員を `property_dm_log_owners` にコピー**する(@codex R9/R30 P1)。グループの保存のため連関 **`dm_recipient_draft_owners`(draft_id FK Cascade, owner_id FK Cascade)** も migration-A に追加し、**キャンペーン作成(宛先生成)時にグループ全員を保存**する(現行は代表+人数しか持たない)。これが無いと新しい売却DM経由の拒否/宛先不明が「所有者なし」になり、§4-5 の所有者単位の除外が**新規行に対して効かない**(旧行だけの限界のはずが新規にも及ぶ)。⚠コピー元は **tx 内で(条件付き updateMany の勝者決定後に)draft を再読取した値**を使う(@codex R13 P1): tx 前のスナップショットを使うと、並行する名寄せが draft を master へ付け替えた後に **archive 済みの旧所有者の id でログを作ってしまう**(以後の拒否が所有者横断の除外から見えない)。updateMany が draft 行をロックするため、tx 内の再読取は名寄せと自然に直列化される。
 - UI: 物件一覧の「DM差込CSV出力」の隣に「**送付の確定**」→ 未確定バッチ一覧(出力日時・件数)→ 投函日(既定=今日)→ 確定。確定済み件数を表示して閉じる。
 - 未確定バッチが溜まった場合の掃除は当面しない(件数小・一覧は直近から表示)。必要になれば既存の日次クリーンアップに載せる(将来)。
 
@@ -134,7 +134,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - 列追加(migration-B・additive): `reaction_status TEXT DEFAULT 'no_response'`(allowlist: no_response/replied/refused/undeliverable。**enum は作らない**) / `reacted_at DateTime?` / `reaction_note TEXT?` / `reaction_source TEXT?`(下記・"manual"/"sale_dm_sync") + 索引 [reactionStatus]。
 - **手動反響と同期の優先規則(@codex R5 P1 → R7 P1 で精緻化)**: `reaction_source` 列("manual"/"sale_dm_sync")で出所を持ち、次の非対称な規則にする:
   - 手動入力(PATCH reaction)は `manual` を立てる。**手動の実反響(replied/refused/undeliverable)は同期に上書きされない**(拒否を手で付けた後、売却DM側のメモ編集の再計算が outcome=none を根拠に no_response へ戻す事故を防ぐ)。
-  - ⚠ただし**手動の no_response は実反響をブロックしない**(@codex R7 P1): メモ目的で no_response のまま保存→sourceがmanual化→その後のLPアクセスや電話反響が同期できず**実際は反応があった相手が再送候補に残る**、の裏返しの事故。同期が書ける条件=「**現在の status が no_response**」OR「reaction_source が null/"sale_dm_sync"」。
+  - ⚠ただし**手動の no_response は実反響をブロックしない**(@codex R7 P1): メモ目的で no_response のまま保存→sourceがmanual化→その後のLPアクセスや電話反響が同期できず**実際は反応があった相手が再送候補に残る**、の裏返しの事故。同期が書ける条件=「**現在の status が no_response**」OR「reaction_source が null/"sale_dm_sync"」。さらに**ブリッジ行(draft_id あり)へ手動で no_response を保存した直後は、リンク先 draft の現況から同期規則を即時再適用**する(@codex R30 P2: 将来の同期イベントが来る保証は無い。draft に inquiry 等が残っていれば結果は replied に戻る=証拠が残る間の格下げは実質不可)。
   - ⚠**配達失敗(undeliverable)は手動の replied より優先**(@codex R9 P2): 手動で「連絡あり」を付けた後に返戻(returned_undeliverable)が記録された場合、住所が死んでいる事実の方が新しく強い。同期の undeliverable は、現在値が **manual の refused/undeliverable** 以外なら(manual の replied/no_response を含めて)上書きできる。まとめると優先順位: **同期undeliverable ≧ 手動(refused/undeliverable) > 手動(replied) > 同期replied > no_response**。
   - ⚠**上書きされた手動値は退避して保全**(@codex R19 P2): 同期の undeliverable が手動の replied を上書きすると source が sync になり、後で返戻が**訂正**されたとき戻し先が no_response になって**本物の「連絡あり」が消える**。migration-B に退避列 `manual_reaction_shadow TEXT?` を足し、同期が手動値を上書きするときは旧値を退避、訂正の戻しは **shadow があればそれへ復元(source=manual)・無ければ no_response** とする。
   - shadow のライフサイクル(@codex R23 P2): **(1) 手動入力(PATCH)は常に shadow をクリア**(最新の手動入力だけが真実=古い退避値が後から蘇らない)、**(2) 退避は「同期が manual 値を上書きする瞬間」のみ**、**(3) 復元は shadow を消費(復元と同時にクリア)**。これが無いと、復元→手動で no_response に変更→再度の返戻と訂正、の流れで**廃止済みの replied が蘇り**再送候補から誤って外れる。
@@ -166,17 +166,17 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - replied を除外する理由: 連絡が来ている相手は人が個別対応する(定型の再送に乗せない)。
 - `COOLDOWN_DAYS = 90`(定数)。env `DM_RESEND_COOLDOWN_DAYS` で上書き可(業務値の変更にリリース不要)。上限(cap)は作らない。
 - 純関数 `decideResendCandidacy({logs, ownerHasTerminalReaction}, now, {cooldownDays})` → `{eligible, reason}`(表示とテストの単一情報源。一覧 where と同じ規則を対で維持)。⚠入力には物件自身の logs に加えて **所有者単位の除外状態**(その物件の所有者の誰かに他物件も含め refused/undeliverable があるか=@codex R9 P2)を渡す。呼び出し側が §4-5 と同じクエリでこのフラグを計算する=規則の組み合わせ自体は純関数に集約され、where と対で維持できる。
-- UI: 物件一覧に「**再送候補のみ**」トグル → そのまま既存の「CSV出力→送付の確定」の流れに乗る(sequence が自動で増える)。
+- UI: 物件一覧に「**再送候補のみ**」トグル → そのまま既存の「CSV出力→送付の確定」の流れに乗る(「何通目」は表示時導出(§2.2)なので特別な処理は不要)。
 
 ## 5. テスト方針
 
-- 純関数(sequence 採番・decideResendCandidacy・allowlist)はユニット。route は既存 dm-logs/route.test の型を踏襲(認可・マスク・監査・冪等)。
+- 純関数(「何通目」の表示時導出・decideResendCandidacy・allowlist)はユニット。route は既存 dm-logs/route.test の型を踏襲(認可・マスク・監査・冪等)。
 - export の「PropertyDmLog を書かない」ピンは維持し、「batch を書く」ことを明示的にアサート。
 - 権限/監査 allowlist/lock 順序はソース固定(source-assertion)で配線を固定。
 
 ## 6. レビューで特に見てほしい論点
 
-1. 一括確定 tx の親ロック方針(§2.3 ⚠): INSERT のみの tx は親 FOR UPDATE を取らない(採番は advisory lock で直列化)、で安全か。
+1. 一括確定 tx の親ロック方針(§2.3 ⚠): admin/office は INSERT のみで親 FOR UPDATE を取らない(field_staff のみ Owner→親→子で取る)、で安全か。
 2. export がバッチを書くことと、既存の「export は送付履歴を書かない」契約の整合。
 3. undeliverable 連動の解除条件(売却DM側と二重管理にならないか)。
 4. §3 の売却DM反響同期の写像(returned_undeliverable→undeliverable / inquiry・電話→replied)の妥当性。
@@ -211,3 +211,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R27(2026-08-08): P1(代表選定〜ロックの隙間=ロック後にリンクとisArchivedを再検証・変化なら再解決)・P2(訂正の戻し先=shadow→draft現況の再導出→no_responseの順)を反映。外部AI方式側のP2(追加指示の直接入力を案内しない=注意書き方式)は別紙。
 - R28(2026-08-08): P2(field_staff確定の局所指示をOwner→親→子へ修正=旧advisory参照の残骸除去)を反映。外部AI方式側のP1(PR-D は PR-A 依存に固定)・P2(空白のみ本文の拒否)は別紙。
 - R29(2026-08-08): P1(共有者グループ全員を連関2表(item_owners/log_owners)で保持し所有者除外を共有者全員に拡張・名寄せの付け替え対象にも追加)を反映。
+- R30(2026-08-08): P1(売却DM下書きにも共有者連関 dm_recipient_draft_owners を追加・mark-sentでlog_ownersへコピー)・P2×2(ブリッジ行への手動no_responseは即時再導出 / 採番廃止の残骸3箇所を表示時導出へ更新)を反映。外部AI方式側(ヘッダの依存明記/saleDmAi撤去)は別紙。

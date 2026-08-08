@@ -1,7 +1,7 @@
 # 売却DM文面の外部AI方式(プロンプト出力→貼り付け) 設計
 
 > **作成日**: 2026-08-08 / **性質**: 設計のみ(この PR にコード変更は無い)
-> 関連: `2026-08-08-dm-sending-management-design.md`(送付管理)とは独立。並行実装可(migration は直列運用)。
+> 関連: `2026-08-08-dm-sending-management-design.md`(送付管理)。⚠**本設計(PR-D)は送付管理の PR-A に依存する(順序は A→…→D 固定・並行実装不可)**=§3(@codex R28/R30)。migration は直列運用。
 
 ---
 
@@ -74,10 +74,7 @@ dm_variants に追加:
 - 外部AIモードに **`sale_dm:generate` は要求しない**(このゲートの根拠は API 課金+PII 外部送信であり、外部モードはどちらも無い)。
 - **新route(プロンプト表示/貼り付け/適用)にも `assertSaleDmCampaignOwned` を必須にする**(@codex R12 P1): requireSaleDmAccess は全体権限のみでキャンペーンの所有を見ない。既存の variant 系 route と同じく**作成者本人以外は同じ404**(存在秘匿)を、variant のロード/ロックより前に適用する。
 - 宛先 PII を扱う点は従来と同じ → `requireSaleDmAccess`(4権限+表示レベル plain)は全操作で維持。⚠**外部モードが露出する全 mutation に property:write を統一要求**(@codex R11 P2): 貼り付け/適用/draft編集だけでなく、**キャンペーン作成・variant 作成/更新/削除・variant 割当(campaigns/[id]/assign=draft の移動と本文クリアを行う mutation・@codex R13 P2)・drafts 確定**も対象(現行は requireSaleDmAccess のみ)。対象 route は実装時に grep で全列挙し、権限配線テストに1本ずつ載せる。従来これらの実質的な門は sale_dm:generate(生成なしでは何も作れない)だったが、外部モードでは生成なしで一式が作れるため、書込系の門を write に揃えないと **read権限だけの利用者が記録の作成・失効・確定までできてしまう**。read系(閲覧・印刷・CSV)は従来どおり。
-- ⚠**capability の分離(@codex P2)**: 現行 `saleDmLetter` は「AI設定」だけでなく**追跡URL・LP・差出人**の設定も要求しており、これらが無いと印刷 route が 503 を返す。外部モードがこれを無視すると「作れるのに印刷できない」キャンペーンができる。よって capability を2つに分ける:
-  - `saleDmAi` = provider+APIキーあり → 「AI で生成」ボタンの表示条件。
-  - `saleDmPrintReady` = 追跡URL・LP・差出人あり → **外部AIモードのキャンペーン作成の前提条件**(未設定なら作成ボタンを出さず、設定画面への案内を表示)。
-  - 既存の `saleDmLetter` は後方互換のため当面残し(=両方ANDの旧定義)、UI は新2値を使う。F12 の3点セット(route/provider/UI)を両値ぶん更新。
+- ⚠**capability は `saleDmPrintReady` のみ新設**(@codex R1 P2 → R24/R30 でAI直結廃止に伴い簡素化): 現行 `saleDmLetter` は「AI設定」だけでなく**追跡URL・LP・差出人**の設定も要求しており、これらが無いと印刷 route が 503 を返す。外部モードは **`saleDmPrintReady`(追跡URL・LP・差出人あり)をキャンペーン作成の前提条件**にする(未設定なら作成ボタンを出さず、設定画面への案内を表示)。⚠AI直結は §2.1 で廃止のため **`saleDmAi` は作らない**(生成ボタン自体が無い)。既存の `saleDmLetter` は使用箇所を printReady へ置換して撤去。F12 の3点セット(route/provider/UI)を更新。
 
 ### 2.6 監査
 
@@ -119,3 +116,4 @@ dm_variants に追加:
 - R24(2026-08-08): P2×3(AI直結の生成/再生成routeを無効化=発注者方針「やめる」に整合・sale_dm:generate/saleDmAiはUI撤去 / assignがconfirmed draftを移動する際に移動元へ凍結印を固定 / 貼り付け本文にサーバー側サイズ上限)を反映。
 - R27(2026-08-08): P2(「追加指示は外部AIへ直接」の案内を撤回=プロンプト末尾にPII非入力の注意書き)を反映。
 - R28(2026-08-08): P1(PR-DはPR-A前提=D先行の選択肢を撤回・名寄せ付け替え依存)・P2(空白のみ本文を保存/適用とも400)を反映。
+- R30(2026-08-08): P1(ヘッダの「独立・並行可」を依存明記へ修正)・P2(saleDmAi capabilityを作らない=printReadyのみ・saleDmLetterは置換撤去)を反映。
