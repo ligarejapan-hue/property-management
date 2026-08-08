@@ -59,6 +59,7 @@ dm_variants に追加:
 ```
 
 - **凍結は列で永続化する**(@codex R13 P2): 「配下に confirmed/sent が今あるか」から導出すると、**割当(assign)route が confirmed の draft を別 variant へ移して draft に戻す**等の既存操作で証拠が消え、印刷済みの型のテンプレを差し替えられてしまう。confirm が variant ロック下で `template_frozen_at` を立て(初回のみ)、**以後は状態に関係なくこの列だけで凍結を判定**する(不可逆)。
+- **凍結済み variant は削除不可**(@codex R14 P2): 既存の variant DELETE は「宛先が居ないこと」しか見ないため、assign で空にしてから削除すると **prompt_text/body_template/凍結印ごと消え、送付済み文面の出所が失われる**。`template_frozen_at` が立っている variant の DELETE は 409(「送付実績のある型は削除できません」)にする。
 
 - **設定変更時の失効(@codex R3 P2)**: 既存の variant 更新 route は、トーン・訴求など**プロンプトに影響する設定を変えたとき drafts の body をクリア**する失効機構を持つ。同じ契機で **prompt_text/body_template も同時にクリア**する(古いプロンプトで作った本文を、新しい設定の型として再適用できてしまう不整合を防ぐ。§2.3 の凍結後は設定変更自体も不可)。
 
@@ -99,3 +100,4 @@ dm_variants に追加:
 - R11(2026-08-08): P2×2(外部モードの全mutationにproperty:write統一 / 差出人名をプロンプトから除外=既存プロンプトの署名禁止不変条件を踏襲)を反映。
 - R12(2026-08-08): P1×2(新routeにassertSaleDmCampaignOwned必須 / extraInstructionを外部プロンプトから除外=PII非搬送を構造で保証)を反映。
 - R13(2026-08-08): P2×2(凍結をtemplate_frozen_at列で永続化=assignによる証拠消失に耐える / assign routeもwrite門の対象に明記)を反映。
+- R14(2026-08-08): P2(凍結済みvariantのDELETEは409=送付済み文面の出所を保全)を反映。

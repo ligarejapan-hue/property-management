@@ -85,6 +85,7 @@ model DmExportBatchItem {
 - ゲート: 既存 export と同じ4権限+**property:write**(書込は mark-sent/outcome と同じ統一方針・新slugなし)。
 - **スコープ外 item の扱い(@codex R3 P2)**: field_staff の担当変更などで**1件でもスコープ外の item がある場合、確定を 403 で拒否**する(スキップして confirmedAt を立てると、その宛先の送付記録が**永久に欠ける**=後から権限のある人が確定しようとしても「確定済み」で弾かれるため)。エラーには「スコープ外が N 件・管理者/事務担当で確定してください」と理由を出す。部分確定(item単位の確定状態)は作らない=単純さ優先(実運用は管理者2名で、まず起きない)。
 - 冪等: `confirmedAt` が null の場合のみ、条件付き updateMany(勝者決定)→ 同一 tx で items から `PropertyDmLog` を生成。二重確定は 409。
+- ⚠**items の読み取りは tx 内で `FOR UPDATE`**(@codex R14 P1): tx 前に読んだ item の ownerId を使うと、並行する所有者の名寄せが item を master へ付け替えた後に **archive 済みの旧所有者の id でログを作る**(mark-sent と同型の穴)。確定 tx はバッチ行ロック→**item 行を FOR UPDATE で読み直し**、その時点の ownerId で記録する(名寄せ側の item 付け替え(§4-5b)と行ロックで直列化される)。
 - 生成する行: `propertyId / ownerId(代表) / dmType="owner_address" / sequence(下記) / batchId / sentAt=sentOn / method="mail" / sentBy=操作者`。
 - **sequence の採番(@codex P1)**: 無ロックの採番は並行確定で重複する。対策:
   1. **採番は共通ヘルパー1本に集約**し、PropertyDmLog を書く**全writer**(一括確定・個別記録・売却DM mark-sent)がこれを使う。ヘルパーは tx 内で `pg_advisory_xact_lock`(採番専用の固定キー)を取ってから採番=全採番が直列化される(確定は週に数回・数百行なので直列で十分)。
@@ -190,3 +191,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R11(2026-08-08): P1(所有者の名寄せtxでdmLogs/バッチitemのownerId付け替え=統合後の反響置き去り防止)・P2×2(content_digest列をスキーマ表に明記 / dm_reaction_updateのACTION_EXTRA_KEYS登録)を反映。
 - R12(2026-08-08): P1(名寄せの付け替え対象にDmRecipientDraft.representativeOwnerIdも追加=未送付下書きの予約)・P2(個別記録はadvisory→親ガードの順を明文化・ガード規約の例外としてテスト更新)を反映。
 - R13(2026-08-08): P1(mark-sentのowner_idはtx内再読取=名寄せと直列化)を反映。外部AI方式側のP2×2(凍結の列永続化 / assign routeのwrite門)は別紙。
+- R14(2026-08-08): P1(一括確定のitemsもFOR UPDATEでtx内読み直し=名寄せと直列化)を反映。外部AI方式側のP2(凍結variantの削除禁止)は別紙。
