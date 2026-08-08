@@ -104,7 +104,7 @@ model DmExportBatchItem {
 ### 2.3 個別の記録・取消
 
 - `POST /api/properties/[id]/dm-logs` body=`{ sentOn, method?, note? }` — 手渡し等の1件記録。
-- `DELETE /api/properties/[id]/dm-logs/[logId]` — 記録ミスの取消。**method="sale_dm" の行は 409**(売却DM側の状態と不整合になるため。案内文で売却DM画面へ誘導)。
+- `DELETE /api/properties/[id]/dm-logs/[logId]` — 記録ミスの取消。**method="sale_dm" の行は 409**(売却DM側の状態と不整合になるため。案内文で売却DM画面へ誘導)。**batch_id を持つ行(一括確定由来)も 409**(実装PR #364 R3: 単独削除を許すと控えは確定済みのまま履歴だけ欠けて復元不能=確定APIは ALREADY_CONFIRMED。取り消しが要るならバッチ単位の機能として別途設計する)。
   - **宛先不明フラグの再計算(@codex R8 P2)**: undeliverable の反響が付いた行を削除するときは、**親の物件行ロックを保持したまま**残りを数え、その物件に undeliverable のログも returned_undeliverable の売却DM下書きも残らないなら `dmUndeliverableAt` を解除する(dmStatus は人の判断=既存の訂正フローと同じ)。これをしないと「宛先不明のみ」フィルタに根拠のない物件が永久に残る。
 - どちらも property:write + record scope + `lockPropertyRecordForWrite` 規約を使う(採番 advisory の廃止(§2.2・R26)により、既存ガードの「txの最初に親行を取る」規約と**矛盾なくそのまま従える**。個別記録は ownerId を持たないため Owner ロックも不要)。
 - ⚠一括確定の tx の親ロック(@codex R4 P2 → R49 P2 で**全ロール統一**に変更): 確定は権限を問わず **Owner ロック(§2.2 の順序規約)→対象物件の親行を id 順で FOR UPDATE→バッチ行→items 再読取→INSERT** の順で行う。admin/office を「INSERT のみ・親ロックなし」にすると、物件ハード削除(親行を保持して items へ SetNull で降りてくる)と**逆順のロック取得**になり、確定側が item FOR UPDATE→ログ INSERT の FK ロック待ち・削除側が親行→item 待ちの相互待ちでデッドロックする(@codex R49 P2)。field_staff はさらに親行ロック保持中にスコープを検証(FOR KEY SHARE は assignedTo 更新と衝突しない=TOCTOU 防止・R4)。親行が既に消えていた item は property_id=null の記録として扱う(R49 P1)。順序は常に「Owner→親→子」(採番 advisory は R26 で廃止済み・@codex R28 P2)。
