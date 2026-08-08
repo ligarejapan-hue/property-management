@@ -144,9 +144,11 @@ export default function RegistryAutoFetchButton({
             <button
               type="button"
               onClick={handleConfirm}
-              className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700"
+              disabled={preflight.pending}
+              title={preflight.pending ? "事前確認中です" : undefined}
+              className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              実行
+              {preflight.pending ? "確認中..." : "実行"}
             </button>
             <button
               type="button"

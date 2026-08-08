@@ -352,8 +352,14 @@ export default function RegistryLocationSearchButton({
             )}
           </p>
           <div className="mt-1 flex gap-1">
-            <button type="button" onClick={runObtain} className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700">
-              取得する
+            <button
+              type="button"
+              onClick={runObtain}
+              disabled={preflight.pending}
+              title={preflight.pending ? "事前確認中です" : undefined}
+              className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {preflight.pending ? "確認中..." : "取得する"}
             </button>
             <button
               type="button"

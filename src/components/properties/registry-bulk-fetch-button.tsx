@@ -159,12 +159,15 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={creating || count === 0}
+                disabled={creating || count === 0 || preflight.pending}
+                title={preflight.pending ? "事前確認中です" : undefined}
                 className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {creating
                   ? "作成中…"
-                  : `${certificateType === "all" ? "全部事項" : "所有者事項"}で取得を開始`}
+                  : preflight.pending
+                    ? "確認中..."
+                    : `${certificateType === "all" ? "全部事項" : "所有者事項"}で取得を開始`}
               </button>
             </div>
           </div>

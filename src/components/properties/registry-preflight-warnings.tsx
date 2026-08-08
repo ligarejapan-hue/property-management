@@ -15,6 +15,8 @@ import {
 export interface RegistryPreflightState {
   flagsById: Map<string, RegistryPreflightFlags>;
   failed: boolean;
+  /** 事前確認が未完了(実行ボタンはこの間 disabled にする=#365 R1: 警告を見る前に課金させない)。 */
+  pending: boolean;
 }
 
 /** active が true になったタイミングで preflight を1回取得する。 */
@@ -26,6 +28,9 @@ export function useRegistryPreflight(
     Map<string, RegistryPreflightFlags>
   >(new Map());
   const [failed, setFailed] = useState(false);
+  // 完了済みの対象集合キー。pending はここから導出する(effect 内の同期 setState を
+  // 使わずに「確認が済むまで実行を止める」を実現する=#365 R1)。
+  const [settledKey, setSettledKey] = useState<string | null>(null);
   // useEffect の依存を安定させる(選択順に依存しないようソートして結合)。
   const idsKey = [...propertyIds].sort().join(",");
 
@@ -39,18 +44,24 @@ export function useRegistryPreflight(
         if (cancelled) return;
         setFailed(false);
         setFlagsById(new Map(res.data.map((f) => [f.propertyId, f])));
+        setSettledKey(idsKey);
       })
       .catch(() => {
         if (cancelled) return;
         setFailed(true);
         setFlagsById(new Map());
+        setSettledKey(idsKey); // 失敗も「確定」= failed の注意書きを見せた上で実行可能にする
       });
     return () => {
       cancelled = true;
     };
   }, [active, idsKey]);
 
-  return { flagsById, failed };
+  return {
+    flagsById,
+    failed,
+    pending: active && idsKey.length > 0 && settledKey !== idsKey,
+  };
 }
 
 const LINE_CLASS = "text-amber-700 dark:text-amber-400";

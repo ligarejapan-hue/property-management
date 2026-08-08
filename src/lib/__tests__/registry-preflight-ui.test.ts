@@ -61,3 +61,15 @@ describe("api-client", () => {
     expect(body).toContain("/api/registry-fetch/preflight");
   });
 });
+
+describe("実行ボタンは事前確認が済むまで無効(#365 R1)", () => {
+  it("hook は pending を導出し、失敗も『確定』として注意書き表示後に実行可能へ戻す", () => {
+    expect(SHARED).toMatch(/pending: active && idsKey\.length > 0 && settledKey !== idsKey/);
+    expect(SHARED).toMatch(/setSettledKey\(idsKey\); \/\/ 失敗も「確定」/);
+  });
+  it("3入口の課金ボタンすべてが preflight\.pending で disabled になる", () => {
+    expect(AUTO).toMatch(/disabled=\{preflight\.pending\}/);
+    expect(LOC).toMatch(/disabled=\{preflight\.pending\}/);
+    expect(BULK).toMatch(/disabled=\{creating \|\| count === 0 \|\| preflight\.pending\}/);
+  });
+});
