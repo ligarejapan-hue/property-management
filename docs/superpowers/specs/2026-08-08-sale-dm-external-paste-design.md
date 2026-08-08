@@ -41,6 +41,7 @@
 - **record scope の適用(@codex R4 P1)**: field_staff の担当変更で見えなくなった物件の draft は**適用対象から原子的に除外**する(既存の `filterDraftsByFieldStaffScope` と同じスコープ条件を update の where に含める)。CSV/印刷が既にこの規則で隠している宛先を、一括適用だけが書き換えられるのは認可の穴。除外した件数は結果に報告する(適用は残りのスコープ内へ行う=1件の担当変更でキャンペーン全体を止めない。送付記録の確定(§別紙2.2)と違い、後から埋め直せるので拒否方式にしない)。
 - 上書き保護: **confirmed/sent の draft には適用しない**。既定では **body が空の draft のみ**に適用し、「入力済みの本文も置き換える」チェックを入れた場合のみ draft 状態の全件に適用(個別の手直しを黙って消さない)。
 - **型の凍結(@codex R3 P1)**: variant 配下に confirmed/sent の draft が**1件でもできたら、その variant の prompt_text/body_template は読み取り専用**(貼り直し・再適用とも不可)。途中で差し替えると同じ型の中に旧文面と新文面が混在し、**A/B比較(variant単位の集計)が壊れ、送付済み文面の出所も失われる**。文面を変えたいときは**新しい型を追加**する(既存の variant 追加フローをそのまま使う)。
+- **凍結判定と確定の直列化(@codex R5 P2)**: 凍結チェック(confirmed/sent が無いこと)を無ロックで行うと、並行する確定(既存 confirm route の updateMany)と競合し「旧本文のまま確定された draft と、差し替わった body_template」の食い違いが起きる。**貼り付け/適用の tx と、drafts の確定の tx は、対象 variant 行を id 順に FOR UPDATE してから**状態を判定・書込する(両経路で同じロック順序。確定 route 側にも variant 行ロックを追加する)。
 - 個別の手直しは既存の draft 編集をそのまま使う。
 - 空本文の draft は確定・印刷に進めない(既存の `body: { not: "" }` ガードと整合)。
 
@@ -84,3 +85,4 @@ dm_variants に追加:
 - R1(2026-08-08): P1(variant共通本文と複数物件の混在→物件事実をプロンプトから排除し差込タグでシステム差込)・P2(印刷前提設定の分離→ `saleDmAi`/`saleDmPrintReady` の2 capability 化+外部モード作成の前提ゲート)を反映。
 - R3(2026-08-08): P1(型の途中差し替えでA/B比較が壊れる→confirmed/sentが1件でもできたら凍結・文面変更は新しい型で)・P2(設定変更時に prompt_text/body_template も失効)を反映。
 - R4(2026-08-08): P1(一括適用にfield_staffのrecord scopeを適用=担当外draftを書き換えない・除外件数を報告)を反映。
+- R5(2026-08-08): P2(凍結判定と確定をvariant行FOR UPDATEで直列化・確定route側にもロック追加)を反映。

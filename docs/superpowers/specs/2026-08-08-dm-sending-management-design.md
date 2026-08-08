@@ -66,6 +66,7 @@ model DmExportBatchItem {
   - fingerprint の中身(@codex R2 P1): **dmType + 当日日付 + ソート済みの「(propertyId, 代表ownerId) ペア列」の sha256**。物件ID集合だけだと、同じ物件集合でも所有者・住所・代表者が変わった2回目の出力(=宛先が違うCSV)が1回目の控えに合流し、**古い代表宛先で確定してしまう**。実際に出力した宛先行そのものを同一性の根拠にする。
   - unique の範囲(@codex R3 P2): **未確定の控えに限定した部分unique**(`CREATE UNIQUE INDEX ... WHERE confirmed_at IS NULL`・raw SQL migration)。全体uniqueにすると、確定後の**同日の正当な再出力**(送り直し)が新しい控えを作れなくなる。再利用の対象も未確定のみ(確定済みは合流しない)。
   - 再利用と確定の直列化(@codex R4 P2): 再利用の照会は**バッチ行を `SELECT ... FOR UPDATE` で取り直して confirmedAt=null を再検証**する(確定側の updateMany と行ロックで直列化)。確定中の行を掴んだ場合はロック解放後に確定済みと分かるので**新しい控えを作る**(部分uniqueへの挿入は確定txの完了を待ってから通る)。これが無いと「返したCSVの控えが直後に確定済みになり、刷った郵送物を確定できない」レースが残る。
+  - 同時新規作成の回復(@codex R5 P2): 既存の控えが無い状態で同一出力が並走すると**両方が INSERT に進み、負けた側が部分uniqueの重複エラー**になる(まさに二度押しのケース)。INSERT は重複エラーを catch し、**勝った未確定バッチを FOR UPDATE で取り直して再利用**してから CSV を返す(利用者にはエラーを見せない)。
 - **所有者の削除(@codex P2)**: item の owner FK は SetNull。確定時に ownerId が null の item は `PropertyDmLog.owner_id=null` で記録する(1件の欠けで全体を巻き戻さない)。
 
 - **CSV の中身(氏名・住所)は保存しない**。控えは propertyId/代表 ownerId のみ=非PII寄りの最小構成。
@@ -122,7 +123,10 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 
 ## 3. 第2段(PR-B): 反響の記録
 
-- 列追加(migration-B・additive): `reaction_status TEXT DEFAULT 'no_response'`(allowlist: no_response/replied/refused/undeliverable。**enum は作らない**) / `reacted_at DateTime?` / `reaction_note TEXT?` + 索引 [reactionStatus]。
+- 列追加(migration-B・additive): `reaction_status TEXT DEFAULT 'no_response'`(allowlist: no_response/replied/refused/undeliverable。**enum は作らない**) / `reacted_at DateTime?` / `reaction_note TEXT?` / `reaction_source TEXT?`(下記・"manual"/"sale_dm_sync") + 索引 [reactionStatus]。
+- **手動反響の保護(@codex R5 P1)**: 汎用の反響入力で sale_dm 行に「拒否」等を手で付けた後、売却DM側のメモだけの編集が outcome 再計算→同期を走らせると、draft 側に「拒否」相当が無い(outcome=none)ため **no_response で上書き=拒否した相手に再送**が起き得る。対策=`reaction_source` 列で出所を持ち:
+  - 手動入力(PATCH reaction)は `manual` を立てる。
+  - 同期(§下記)は **reaction_source が null か "sale_dm_sync" の行だけ**を書く=**手動が常に勝つ**。訂正の戻し(undeliverable解除等)も sync 由来の値にしか触れない。
 - `PATCH /api/properties/[id]/dm-logs/[logId]/reaction` body=`{ status, reactedAt?, note? }` — property:write + record scope + lock規約。
 - **undeliverable を付けたら 物件 dmStatus=no_send + dmUndeliverableAt=now に自動連動**(売却DM outcome と同じ挙動)。訂正時(undeliverable→他)は、他に undeliverable の記録が無ければ dmUndeliverableAt を解除(dmStatus は人の判断で戻す=売却DMと同じ)。
 - reaction_note は note と同じく owner_note 表示レベルで server-side マスク。
@@ -164,3 +168,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R2(2026-08-08): P1×3(採番はMAX(sequence)+1=取消後の衝突防止 / fingerprintは(propertyId,代表ownerId)ペア列=宛先変化の合流防止 / LP追跡recordTrackingHitも同期経路に=共通ヘルパー集約)・P2×1(ロック順序「advisory→親→子」の全writer統一)を反映。
 - R3(2026-08-08): P2×2(fingerprint uniqueは未確定限定の部分unique=確定後の同日再出力を塞がない / スコープ外itemがある確定は403で拒否=記録の永久欠落防止)を反映。
 - R4(2026-08-08): P2×3(field_staff確定は親FOR UPDATE保持でスコープ検証=TOCTOU封じ / 再利用照会はFOR UPDATEで確定と直列化 / backfill曖昧行は反響あり側に倒す)を反映。外部AI方式側のP1(一括適用のscope除外)は別紙。
+- R5(2026-08-08): P1(手動反響の保護→reaction_source列で出所管理・手動が常に勝つ)・P2(同時新規作成のunique衝突をcatchして勝者を再利用)を反映。
