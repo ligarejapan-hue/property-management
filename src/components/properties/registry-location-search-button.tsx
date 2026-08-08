@@ -1,6 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import {
+  useRegistryPreflight,
+  RegistryPreflightWarningLines,
+} from "@/components/properties/registry-preflight-warnings";
 import { MapPinned, Loader2 } from "lucide-react";
 import {
   searchRegistryCandidates,
@@ -64,6 +68,8 @@ export default function RegistryLocationSearchButton({
   // 実況パネル用の参照 (client 発行・非PII)。検索のたびに発行し直す。
   // HTTP 本番でも動く safeRandomId を使う (crypto.randomUUID 禁止)。
   const [liveRef, setLiveRef] = useState<string | null>(null);
+  // 課金直前(取得確認)に事前確認(取得済み/添付あり/所有者あり)を表示する(発注者要望 2026-08-08)。
+  const preflight = useRegistryPreflight([propertyId], state === "confirmObtain");
 
   // 非 admin には導線自体を出さない（サーバ側でも 403 で二重防御）。
   if (!canAutoFetch) return null;
@@ -304,6 +310,7 @@ export default function RegistryLocationSearchButton({
       {state === "confirmObtain" && selected && (
         <div className="flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 p-2 text-xs">
           <p className="font-medium text-indigo-800 dark:text-indigo-300">この候補で謄本を取得しますか？</p>
+          <RegistryPreflightWarningLines state={preflight} propertyId={propertyId} />
           <p className="truncate text-indigo-700 dark:text-indigo-300">{selected.address ?? "（所在不明）"}</p>
           <p className="truncate text-indigo-700 dark:text-indigo-300">
             {[
@@ -345,8 +352,14 @@ export default function RegistryLocationSearchButton({
             )}
           </p>
           <div className="mt-1 flex gap-1">
-            <button type="button" onClick={runObtain} className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700">
-              取得する
+            <button
+              type="button"
+              onClick={runObtain}
+              disabled={preflight.pending}
+              title={preflight.pending ? "事前確認中です" : undefined}
+              className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {preflight.pending ? "確認中..." : "取得する"}
             </button>
             <button
               type="button"

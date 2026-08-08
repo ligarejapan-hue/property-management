@@ -3715,3 +3715,44 @@ export async function deletePropertyDmLog(
     { method: "DELETE" },
   );
 }
+
+// ---------- 謄本取得の事前確認(preflight・発注者要望 2026-08-08) ----------
+
+export interface RegistryPreflightFlags {
+  propertyId: string;
+  /** 登記状況が「取得済」か。 */
+  registryObtained: boolean;
+  /** 謄本PDF(未削除)が既に添付されているか。 */
+  hasRegistryAttachment: boolean;
+  /** 所有者が1名以上リンク済みか。 */
+  hasOwners: boolean;
+}
+
+/**
+ * 謄本取得(単発・所在検索・一括)の前に「取得済み/添付あり/所有者あり」を確認する。
+ * 3つの入口が同じサーバ判定を表示する(警告のみ・取得はブロックしない)。
+ */
+export async function fetchRegistryPreflight(
+  propertyIds: string[],
+): Promise<{ data: RegistryPreflightFlags[]; excluded: number }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      data: propertyIds.map((propertyId) => ({
+        propertyId,
+        registryObtained: false,
+        hasRegistryAttachment: false,
+        hasOwners: false,
+      })),
+      excluded: 0,
+    };
+  }
+  return apiFetch<{ data: RegistryPreflightFlags[]; excluded: number }>(
+    "/api/registry-fetch/preflight",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ propertyIds }),
+    },
+  );
+}

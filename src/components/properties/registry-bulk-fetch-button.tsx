@@ -9,6 +9,10 @@
  * 種別(所有者事項/全部事項)は単発取得の確認画面と同じ文言で選ばせる。
  */
 import { useRef, useState } from "react";
+import {
+  useRegistryPreflight,
+  RegistryPreflightCountLines,
+} from "@/components/properties/registry-preflight-warnings";
 import { useRouter } from "next/navigation";
 import { createRegistryFetchJob } from "@/lib/api-client";
 
@@ -25,6 +29,9 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
   const [certificateType, setCertificateType] = useState<"owner" | "all">("owner");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // モーダルを開いたときだけ事前確認(取得済み/添付あり/所有者あり)の件数を取得する
+  // (発注者要望 2026-08-08: 既に情報がある物件への課金前に気づけるようにする)。
+  const preflight = useRegistryPreflight(propertyIds, open);
   // 二重作成(連打/再送)防止。⚠キーは**要求内容(対象物件+種別)に紐づける**
   // (@codex #361 P2)。同じ内容の再送(通信失敗)ではキーを保ち冪等に、内容が変わったら
   // 新しいキーにローテーションする(古いキーのまま送るとサーバーが指紋不一致 409 を返し
@@ -105,6 +112,7 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
               ⚠ 取得した件数ぶんの<strong>利用料金が発生します</strong>。
               番号がある・所在が不足している物件は自動で対象外（要手動）になります。
             </p>
+            <RegistryPreflightCountLines state={preflight} />
 
             <fieldset className="mt-4 space-y-2 text-sm">
               <legend className="font-medium text-gray-700 dark:text-gray-200">
@@ -151,12 +159,15 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={creating || count === 0}
+                disabled={creating || count === 0 || preflight.pending}
+                title={preflight.pending ? "事前確認中です" : undefined}
                 className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {creating
                   ? "作成中…"
-                  : `${certificateType === "all" ? "全部事項" : "所有者事項"}で取得を開始`}
+                  : preflight.pending
+                    ? "確認中..."
+                    : `${certificateType === "all" ? "全部事項" : "所有者事項"}で取得を開始`}
               </button>
             </div>
           </div>
