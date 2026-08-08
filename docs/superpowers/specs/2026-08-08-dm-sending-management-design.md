@@ -137,6 +137,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
   - 手動入力(PATCH reaction)は `manual` を立てる。**手動の実反響(replied/refused/undeliverable)は同期に上書きされない**(拒否を手で付けた後、売却DM側のメモ編集の再計算が outcome=none を根拠に no_response へ戻す事故を防ぐ)。
   - ⚠ただし**手動の no_response は実反響をブロックしない**(@codex R7 P1): メモ目的で no_response のまま保存→sourceがmanual化→その後のLPアクセスや電話反響が同期できず**実際は反応があった相手が再送候補に残る**、の裏返しの事故。同期が書ける条件=「**現在の status が no_response**」OR「reaction_source が null/"sale_dm_sync"」。
   - ⚠**配達失敗(undeliverable)は手動の replied より優先**(@codex R9 P2): 手動で「連絡あり」を付けた後に返戻(returned_undeliverable)が記録された場合、住所が死んでいる事実の方が新しく強い。同期の undeliverable は、現在値が **manual の refused/undeliverable** 以外なら(manual の replied/no_response を含めて)上書きできる。まとめると優先順位: **同期undeliverable ≧ 手動(refused/undeliverable) > 手動(replied) > 同期replied > no_response**。
+  - ⚠**上書きされた手動値は退避して保全**(@codex R19 P2): 同期の undeliverable が手動の replied を上書きすると source が sync になり、後で返戻が**訂正**されたとき戻し先が no_response になって**本物の「連絡あり」が消える**。migration-B に退避列 `manual_reaction_shadow TEXT?` を足し、同期が手動値を上書きするときは旧値を退避、訂正の戻しは **shadow があればそれへ復元(source=manual)・無ければ no_response** とする。
   - 同期は manual 行への **no_response への格下げを行わない**。訂正の戻し(undeliverable解除等)も sync 由来の値にしか触れない。
   - ⚠**売却DM側の訂正による dmUndeliverableAt の再計算も両方を見る**(@codex R10 P2): 既存の outcome 訂正は **DmRecipientDraft の行だけ**を数えて dmUndeliverableAt を解除するため、汎用ログ側に undeliverable(手動含む)が残っていてもフラグが消え、「宛先不明のみ」フィルタから漏れる。outcome 訂正の解除判定を**drafts と PropertyDmLog の両方**を親ロック下で数える形に改修する(§2.3 の削除時再計算と対の規則)。
 - `PATCH /api/properties/[id]/dm-logs/[logId]/reaction` body=`{ status, reactedAt?, note? }` — property:write + record scope + lock規約。
@@ -159,6 +160,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
   4. replied / refused / undeliverable の反響が付いた記録が**1件も無い**
   5. **所有者単位の除外(@codex R8 P1)**: その物件の所有者(PropertyOwner 経由)の誰かに、**他物件も含めて** refused / undeliverable の反響ログ(`Owner.dmLogs`=migration-A の逆リレーション)が付いていれば除外する。同じ所有者が物件AとBに紐づくとき、Aで拒否された相手にBから再送する事故を防ぐ(Prisma: `owners: { none: { owner: { dmLogs: { some: { reactionStatus: { in: [refused, undeliverable] } } } } } }` 相当)。⚠限界: ownerId が null の記録(個別記録・旧sale_dm行)は物件単位でしか効かない。また「所有者行は別だが住所が同じ」相手は所有者の名寄せ(既存の品質チェック領域)の守備範囲とし、本機能では扱わない(§6 論点)。
   5b. ⚠**所有者の名寄せ(重複統合)で反響を置き去りにしない**(@codex R11 P1): 既存の統合 tx はメモと PropertyOwner 行を master へ移すが、このままだと **archive された旧所有者に付いた反響ログ**が述語から見えなくなり、統合後の所有者の他物件が再送候補に戻る。統合 tx に **`PropertyDmLog.ownerId`・未確定バッチ item の ownerId・`DmRecipientDraft.representativeOwnerId`(未送付の下書き=後で mark-sent が owner_id へコピーする「予約」)の付け替え(source→master)**を追加する(@codex R11/R12 P1。PR-A のスコープ=merge route の改修。付け替えは既存の owner FK 群の移送と同じ場所に足し、対象は grep で全列挙して確認する)。
+  5d. ⚠**統合 tx 内の付け替え順序は「予約→最後にログ」**(@codex R19 P1): 先に PropertyDmLog を付け替えてから item/draft の付け替えで確定 tx のロックに待たされると、**待っている間に確定が旧所有者のログを commit** し、ログ付け替えは既に通過済みで掬えない。**未確定バッチ item・drafts(予約)を先に付け替え、`PropertyDmLog` の付け替えを統合 tx の最後**に置けば、予約のロック待ち中に作られたログも最後の付け替えが掬う。
   5c. ⚠**所有者参照を「新規に作る」側も名寄せと直列化する**(@codex R18 P1): 付け替えは既存行にしか効かない。キャンペーン作成(宛先 drafts の representativeOwnerId)と export(控え item の ownerId)は、**tx 前のスナップショットで所有者を決めて後から insert** しており、その隙間で統合が完了すると **archive 済みの旧所有者を参照する新規行**ができる。対策: 所有者参照を新規作成する tx は、**代表所有者の確定(selectGroupRepresentative)を insert と同一 tx 内で行い、対象 Owner 行を `FOR SHARE` で保持したまま insert** する。統合 tx は source Owner 行を更新(archive)するため FOR SHARE と衝突して直列化され、(a) 統合が先なら再解決が master を掴み、(b) 作成が先なら commit 後に統合の一括付け替え(5b)が新規行も含めて移す。
 - replied を除外する理由: 連絡が来ている相手は人が個別対応する(定型の再送に乗せない)。
 - `COOLDOWN_DAYS = 90`(定数)。env `DM_RESEND_COOLDOWN_DAYS` で上書き可(業務値の変更にリリース不要)。上限(cap)は作らない。
@@ -197,3 +199,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R16(2026-08-08): P1(照合で一意対応した旧行へdraft_idを永続化+曖昧行への実行時の保守的同期規則)を反映。外部AI方式側のP2(凍結印の稼働後照合)は別紙。
 - R17(2026-08-08)は外部AI方式側のみ(別紙)。
 - R18(2026-08-08): P1(所有者参照の新規作成もFOR SHAREで名寄せと直列化=5c)を反映。外部AI方式側のP2(適用の専用監査)は別紙。
+- R19(2026-08-08): P1(統合txの付け替え順序=予約→最後にログ=5d)・P2(上書きされた手動反響をmanual_reaction_shadowへ退避・訂正時に復元)を反映。外部AI方式側のP2(差し替え時の未確定body全クリア)は別紙。
