@@ -64,9 +64,11 @@ const createBatchSchema = z.object({
 
 // ---------- GET /api/properties/dm-batches?unconfirmed=1 ----------
 //
-// 確定モーダル用の一覧(§2.2)。出力日時・件数・DL/確定状態のみ返し、宛先(PII)は返さない。
+// 確定モーダル用の一覧(§2.2)。出力日時・件数・作成者名・DL/確定状態のみ返し、宛先(PII)は返さない。
 // field_staff は自分が作成した控えのみ。admin/office は全員分(スコープ外 403 で止まった
-// field_staff の控えを引き継いで確定する導線)。直近50件。
+// field_staff の控えを引き継いで確定する導線)。
+// ⚠固定50件の壁を作らない(@codex #364 R2): 0件バッチ(確定しても記録が生まれない)を除外し、
+// page パラメータで古い控えにも到達できるようにする(hasMore で続きの有無を返す)。
 export async function GET(request: NextRequest) {
   try {
     const session = await getApiSession();
@@ -79,9 +81,11 @@ export async function GET(request: NextRequest) {
     }
     const { searchParams } = new URL(request.url);
     const unconfirmedOnly = searchParams.get("unconfirmed") === "1";
+    const page = Math.max(1, Number(searchParams.get("page")) || 1);
+    const PAGE_SIZE = 50;
     const batches = await prisma.dmExportBatch.findMany({
       where: {
-        ...(unconfirmedOnly ? { confirmedAt: null } : {}),
+        ...(unconfirmedOnly ? { confirmedAt: null, rowCount: { gt: 0 } } : {}),
         ...(session.role === "field_staff" ? { createdBy: session.id } : {}),
       },
       select: {
@@ -91,11 +95,25 @@ export async function GET(request: NextRequest) {
         downloadedAt: true,
         confirmedAt: true,
         createdBy: true,
+        // 作成者名(スタッフ名=非PII・change-logs と同方針)。admin が複数人の控えを
+        // 見分けるために必須(@codex #364 R2)。
+        creator: { select: { name: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: 50,
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE + 1,
     });
-    return apiResponse({ data: batches });
+    const hasMore = batches.length > PAGE_SIZE;
+    const data = batches.slice(0, PAGE_SIZE).map((b) => ({
+      id: b.id,
+      createdAt: b.createdAt,
+      rowCount: b.rowCount,
+      downloadedAt: b.downloadedAt,
+      confirmedAt: b.confirmedAt,
+      createdBy: b.createdBy,
+      creatorName: b.creator?.name ?? "",
+    }));
+    return apiResponse({ data, page, hasMore });
   } catch (error) {
     return handleApiError(error);
   }

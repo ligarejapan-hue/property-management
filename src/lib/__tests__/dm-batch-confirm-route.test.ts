@@ -310,7 +310,7 @@ describe("GET /api/properties/dm-batches?unconfirmed=1", () => {
     ) as unknown as import("next/server").NextRequest;
   }
 
-  it("未確定のみ・直近50件・PIIなしの select で返す", async () => {
+  it("未確定のみ・0件バッチ除外・ページング(+1件先読み)・宛先PIIなしの select", async () => {
     pm.dmExportBatch.findMany.mockResolvedValue([
       {
         id: "b1",
@@ -319,14 +319,38 @@ describe("GET /api/properties/dm-batches?unconfirmed=1", () => {
         downloadedAt: new Date(),
         confirmedAt: null,
         createdBy: "user-admin",
+        creator: { name: "管理 太郎" },
       },
     ]);
     const res = await LIST(listRequest());
     expect(res.status).toBe(200);
     const arg = pm.dmExportBatch.findMany.mock.calls[0][0];
     expect(arg.where.confirmedAt).toBeNull();
-    expect(arg.take).toBe(50);
-    expect(JSON.stringify(arg.select)).not.toMatch(/name|address|zip/i);
+    expect(arg.where.rowCount).toEqual({ gt: 0 }); // 0件バッチは確定不能=一覧に出さない(#364 R2)
+    expect(arg.take).toBe(51); // 50件+hasMore判定の先読み1件
+    // 宛先(所有者)のPIIは select しない。creator.name はスタッフ名=非PII(表示用)。
+    expect(JSON.stringify(arg.select)).not.toMatch(/address|zip|owner/i);
+    const body = (await res.json()) as { data: Array<{ creatorName: string }>; hasMore: boolean };
+    expect(body.data[0].creatorName).toBe("管理 太郎");
+    expect(body.hasMore).toBe(false);
+  });
+
+  it("51件返ると hasMore=true・50件に切って返す", async () => {
+    pm.dmExportBatch.findMany.mockResolvedValue(
+      Array.from({ length: 51 }, (_, i) => ({
+        id: `b${i}`,
+        createdAt: new Date(),
+        rowCount: 1,
+        downloadedAt: null,
+        confirmedAt: null,
+        createdBy: "user-admin",
+        creator: { name: "A" },
+      })),
+    );
+    const res = await LIST(listRequest());
+    const body = (await res.json()) as { data: unknown[]; hasMore: boolean };
+    expect(body.data).toHaveLength(50);
+    expect(body.hasMore).toBe(true);
   });
 
   it("field_staff は自分の控えのみ・admin は全員分", async () => {

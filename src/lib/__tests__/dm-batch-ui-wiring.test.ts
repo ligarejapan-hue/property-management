@@ -39,7 +39,7 @@ describe("出力ボタンの2段階化", () => {
 
 describe("送付の確定モーダル", () => {
   it("一覧は fetchUnconfirmedDmBatches・確定は confirmDmBatch を使う", () => {
-    expect(MODAL).toMatch(/fetchUnconfirmedDmBatches\(\)/);
+    expect(MODAL).toMatch(/fetchUnconfirmedDmBatches\(targetPage\)/);
     expect(MODAL).toMatch(/confirmDmBatch\(batchId, sentOn\)/);
   });
 

@@ -232,6 +232,10 @@ export async function POST(request: NextRequest) {
     // するため、空 campaign が残ると壊れた空キャンペーンに遷移してしまう。削除すれば再クレーム→再生成できる(R33)。
     let drafts: Awaited<ReturnType<typeof generateLetters>>["drafts"];
     let truncated: boolean;
+    // リンク切れスキップの実数(@codex #364 R2): 黙って落とすと「生成成功」の見かけのまま
+    // 手紙がDBに無い状態になる。実保存数を応答・監査に載せ、全滅なら 409 で再試行させる。
+    let persistedCount = 0;
+    let skippedByUnlinkCount = 0;
     try {
       const result = await generateLetters(capped.recipients.map((r) => ({ recipient: r, options: genOptions })), { provider: resolveProvider(saleDmCfg) });
       drafts = result.drafts;
@@ -272,6 +276,7 @@ export async function POST(request: NextRequest) {
             m.groupOwnerIds.length > 0 &&
             !m.groupOwnerIds.every((oid) => linkSet.has(`${m.propertyId}\u0000${oid}`))
           ) {
+            skippedByUnlinkCount += 1;
             continue;
           }
           const createdDraft = await tx.dmRecipientDraft.create({
@@ -298,6 +303,16 @@ export async function POST(request: NextRequest) {
               skipDuplicates: true,
             });
           }
+          persistedCount += 1;
+        }
+        // 全宛先がリンク切れで保存できなかった=空のキャンペーンを ready にしない。
+        // tx を巻き戻し、外側の catch がクレームを削除する(再試行で作り直せる)。
+        if (persistedCount === 0 && sliced.length > 0) {
+          throw new ApiError(
+            409,
+            "宛先の所有者情報が変わりました。もう一度お試しください",
+            "RECIPIENTS_CHANGED",
+          );
         }
         // 生成+保存が完了したのでキャンペーンを ready にする(drafts と同一トランザクションでアトミックに確定)。
         // idempotency の pre-check / P2002 はこの完了マーカーで「冪等返却(ready)」と「孤児削除→作り直し(draft)」
@@ -313,13 +328,13 @@ export async function POST(request: NextRequest) {
     // AuditLog は非PIIメタのみ(本文・宛名・住所は残さない)。
     await writeAuditLog({
       userId: session.id, action: "sale_dm_campaign_create", targetTable: "dm_campaigns",
-      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, failed: drafts.filter((d) => d.error).length, truncated, createdAt: new Date().toISOString() },
+      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, failed: drafts.filter((d) => d.error).length, truncated, createdAt: new Date().toISOString() },
     });
 
     return NextResponse.json(
       // requested=生成する手紙数(共有者ぶんで物件数より多くなり得る)。matchedProperties=対象になった物件数
       // (=選択のうち住所ありで生成対象になった物件)。UI の「対象外」通知は物件単位で出すため両方返す。
-      { campaignId: claimed.id, requested: recipients.length, matchedProperties, generated: drafts.length, failed: drafts.filter((d) => d.error).length, truncated },
+      { campaignId: claimed.id, requested: recipients.length, matchedProperties, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, failed: drafts.filter((d) => d.error).length, truncated },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

@@ -26,18 +26,22 @@ export default function DmBatchConfirmModal({
   onClose: () => void;
 }) {
   const [batches, setBatches] = useState<DmBatchSummary[]>([]);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [sentOn, setSentOn] = useState(todayJst());
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
-  const fetchBatches = useCallback(async () => {
-    setLoading(true);
+  const fetchBatches = useCallback(async (targetPage = 1, append = false) => {
+    setLoading(!append);
     setError(null);
     try {
-      const res = await fetchUnconfirmedDmBatches();
-      setBatches(res.data);
+      const res = await fetchUnconfirmedDmBatches(targetPage);
+      setBatches((prev) => (append ? [...prev, ...res.data] : res.data));
+      setPage(res.page);
+      setHasMore(res.hasMore);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "控えの取得に失敗しました",
@@ -51,7 +55,7 @@ export default function DmBatchConfirmModal({
     if (open) {
       setMessage(null);
       setSentOn(todayJst());
-      fetchBatches();
+      fetchBatches(1, false);
     }
   }, [open, fetchBatches]);
 
@@ -62,7 +66,7 @@ export default function DmBatchConfirmModal({
     try {
       const res = await confirmDmBatch(batchId, sentOn);
       setMessage(`${res.confirmed}件の送付を記録しました`);
-      await fetchBatches();
+      await fetchBatches(1, false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "確定に失敗しました");
     } finally {
@@ -139,6 +143,12 @@ export default function DmBatchConfirmModal({
                 <div className="min-w-0 flex-1 text-sm">
                   <div className="text-gray-900 dark:text-gray-100">
                     {formatJaDateTime(b.createdAt)} 出力・{b.rowCount}通
+                    {/* 作成者名: admin/office は全員分が並ぶため、誰の控えかを必ず出す(#364 R2)。 */}
+                    {b.creatorName && (
+                      <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">
+                        {b.creatorName}
+                      </span>
+                    )}
                   </div>
                   {!b.downloadedAt && (
                     <span className="mt-0.5 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700 dark:bg-amber-500/20 dark:text-amber-400">
@@ -166,6 +176,15 @@ export default function DmBatchConfirmModal({
               </li>
             ))}
           </ul>
+        )}
+        {hasMore && !loading && (
+          <button
+            type="button"
+            onClick={() => fetchBatches(page + 1, true)}
+            className="mt-2 w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+          >
+            さらに表示
+          </button>
         )}
       </div>
     </div>

@@ -3612,6 +3612,8 @@ export interface DmBatchSummary {
   rowCount: number;
   downloadedAt: string | null;
   confirmedAt: string | null;
+  /** 作成者名(スタッフ名=非PII)。admin/office が複数人の控えを見分けるための表示。 */
+  creatorName: string;
 }
 
 /**
@@ -3636,9 +3638,11 @@ export async function createDmBatch(
   );
 }
 
-/** 送付確定モーダル用: 未確定の控え一覧(非PII)。 */
-export async function fetchUnconfirmedDmBatches(): Promise<{
+/** 送付確定モーダル用: 未確定の控え一覧(非PII・50件ページング)。 */
+export async function fetchUnconfirmedDmBatches(page = 1): Promise<{
   data: DmBatchSummary[];
+  page: number;
+  hasMore: boolean;
 }> {
   if (USE_MOCK) {
     await mockDelay();
@@ -3650,12 +3654,15 @@ export async function fetchUnconfirmedDmBatches(): Promise<{
           rowCount: 3,
           downloadedAt: new Date().toISOString(),
           confirmedAt: null,
+          creatorName: "モック 太郎",
         },
       ],
+      page: 1,
+      hasMore: false,
     };
   }
-  return apiFetch<{ data: DmBatchSummary[] }>(
-    "/api/properties/dm-batches?unconfirmed=1",
+  return apiFetch<{ data: DmBatchSummary[]; page: number; hasMore: boolean }>(
+    `/api/properties/dm-batches?unconfirmed=1&page=${page}`,
   );
 }
 

@@ -498,15 +498,38 @@ describe("PR-A: 宛先生成の共有者連関保存(設計§2.2)", () => {
     expect(links[0].draftId).toBe("d1");
   });
 
-  it("ロック保持中の再検証でリンクが消えた宛先は draft を作らない(R49 P2)", async () => {
+  it("全宛先がリンク切れなら 409(空キャンペーンを ready にしない=#364 R2)", async () => {
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
     (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([propWithIds]);
     txPropertyOwnerFindMany.mockResolvedValue([
-      { propertyId: "p1", ownerId: "o1" }, // o2 のリンクが外れた
+      { propertyId: "p1", ownerId: "o1" }, // o2 のリンクが外れた=このグループは保存不能
     ]);
     const res = await POST(req(validBody) as never);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(409);
     expect(draftCreate).not.toHaveBeenCalled();
     expect(draftOwnerCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("一部だけリンク切れなら 200+saved/skippedByUnlink を正しく報告する(#364 R2)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const p2 = {
+      ...propWithIds,
+      id: "p2",
+      propertyOwners: [
+        { isPrimary: true, relationship: null, owner: { id: "o3", name: "別宅 三郎", nameKana: null, zip: "2000002", address: "神奈川県Y", corporateNumber: null } },
+      ],
+    };
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([propWithIds, p2]);
+    txPropertyOwnerFindMany.mockResolvedValue([
+      { propertyId: "p1", ownerId: "o1" }, // o2 が外れた=p1 はスキップ
+      { propertyId: "p2", ownerId: "o3" }, // p2 は健在
+    ]);
+    draftCreate.mockResolvedValue({ id: "d2" });
+    const res = await POST(req(validBody) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.saved).toBe(1);
+    expect(json.skippedByUnlink).toBe(1);
+    expect(draftCreate).toHaveBeenCalledTimes(1);
   });
 });
