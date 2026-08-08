@@ -8,6 +8,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import { writeAuditLog } from "@/lib/audit";
 import {
   checkOwnerMislinkSafety,
@@ -476,7 +477,9 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 5. 操作実行
+        // 5. 操作実行。⚠親の物件行を先にロック(書き込み規約+#364 R10: DM控えの
+        //    凍結txと直列化しないと、付け替え/解除前のリンクで描いた古いCSVが凍結される)。
+        await lockPropertyRow(tx, freshPO.propertyId);
         if (op === "remove") {
           await tx.propertyOwner.delete({
             where: { id: propertyOwnerId },

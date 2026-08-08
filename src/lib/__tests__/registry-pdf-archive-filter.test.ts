@@ -79,6 +79,7 @@ vi.mock("@/lib/prisma", () => {
   const tx = {
     owner: { updateMany: vi.fn() },
     propertyOwner: { findFirst: vi.fn(), create: vi.fn() },
+    $queryRaw: vi.fn(async () => [{ id: "p1" }]), // 親行ロック(#364 R10)
   };
   return {
     default: {
@@ -202,9 +203,9 @@ describe("POST /api/import/registry-pdf: archived owner を既存候補にしな
       data: { name: OWNER_NAME, address: OWNER_ADDRESS },
       select: { id: true },
     });
-    // PropertyOwner 作成（新規 Owner と link）
-    expect(pm.propertyOwner.create).toHaveBeenCalledTimes(1);
-    const linkArgs = pm.propertyOwner.create.mock.calls[0][0];
+    // PropertyOwner 作成(新規 Owner と link・tx 内=親行ロック #364 R10)
+    expect(pm._tx.propertyOwner.create).toHaveBeenCalledTimes(1);
+    const linkArgs = pm._tx.propertyOwner.create.mock.calls[0][0];
     expect(linkArgs.data.propertyId).toBe(PROPERTY_ID);
     expect(linkArgs.data.ownerId).toBe(`owner-${OWNER_NAME}`);
   });
@@ -242,13 +243,12 @@ describe("POST /api/import/registry-pdf: archived owner を既存候補にしな
 
     await REGISTRY_PDF_POST(makeRequest());
 
-    // archived owner には PropertyOwner を作らない（tx 内 createは呼ばれない）
-    expect(pm._tx.propertyOwner.create).not.toHaveBeenCalled();
     // fallback で新規 active Owner を作成
     expect(pm.owner.create).toHaveBeenCalledTimes(1);
-    // PropertyOwner は新規 owner と link（fallback パスは prisma 直叩き）
-    expect(pm.propertyOwner.create).toHaveBeenCalledTimes(1);
-    const linkArgs = pm.propertyOwner.create.mock.calls[0][0];
+    // PropertyOwner は新規 owner とだけ link(tx 内・親行ロック=#364 R10)。
+    // archived の "owner-raced" には作らない。
+    expect(pm._tx.propertyOwner.create).toHaveBeenCalledTimes(1);
+    const linkArgs = pm._tx.propertyOwner.create.mock.calls[0][0];
     expect(linkArgs.data.ownerId).toBe(`owner-${OWNER_NAME}`);
     expect(linkArgs.data.ownerId).not.toBe("owner-raced");
   });

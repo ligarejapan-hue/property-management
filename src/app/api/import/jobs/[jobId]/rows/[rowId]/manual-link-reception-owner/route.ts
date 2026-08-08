@@ -8,6 +8,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import { assertImportJobMutable } from "@/lib/import-job-guard";
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
@@ -290,6 +291,8 @@ export async function POST(
       //    並行リクエストで unique constraint error にならない。
       //    count は今回 INSERT された行数 → ownerLinkedCount として反映。
       if (ownerIds.length > 0) {
+        // 親の物件行をロック(書き込み規約+#364 R10: DM控えの凍結txと直列化)。
+        await lockPropertyRow(tx, propertyId);
         const linkResult = await tx.propertyOwner.createMany({
           data: ownerIds.map((ownerId) => ({
             propertyId,

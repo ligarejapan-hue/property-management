@@ -16,6 +16,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import { ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
@@ -220,6 +221,8 @@ async function reflectParsedOwners(args: {
           if (lock.count === 0) {
             return { reused: false, linkCreated: false };
           }
+          // 親の物件行をロック(Owner→親の順・書き込み規約+#364 R10)。
+          await lockPropertyRow(tx, propertyId);
           const existingLink = await tx.propertyOwner.findFirst({
             where: { propertyId, ownerId: candidateOwnerId! },
             select: { propertyId: true },
@@ -321,12 +324,18 @@ async function reflectParsedOwners(args: {
         // P2002 を握って冪等化する（同時実行で相手が先に link 済みなら既存扱い・
         // linkedCount は増やさない）。P2002 以外は従来どおり throw して失敗させる。
         try {
-          await prisma.propertyOwner.create({
-            data: {
-              propertyId,
-              ownerId: resolvedOwnerId,
-              relationship: ownerInfo.share ? "共有者" : "所有者",
-            },
+          // 親の物件行をロックしてから link(書き込み規約+#364 R10)。
+          // closure 内では narrowing が効かないため確定値を捕捉する。
+          const ownerIdForLink = resolvedOwnerId;
+          await prisma.$transaction(async (tx) => {
+            await lockPropertyRow(tx, propertyId);
+            await tx.propertyOwner.create({
+              data: {
+                propertyId,
+                ownerId: ownerIdForLink,
+                relationship: ownerInfo.share ? "共有者" : "所有者",
+              },
+            });
           });
           linkedCount++;
         } catch (err) {

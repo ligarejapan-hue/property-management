@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import { parseCsv, OWNER_CSV_COLUMN_MAP } from "@/lib/csv-parser";
 import { normalizeAddress as normalizeAddressForLink } from "@/lib/address-normalizer";
 import { buildOwnerDedupKey } from "@/lib/owner-dedup";
@@ -354,19 +355,23 @@ export async function POST(request: NextRequest) {
       propertyId: string,
       ownerId: string,
     ): Promise<boolean> => {
-      const existingLink = await prisma.propertyOwner.findUnique({
-        where: { propertyId_ownerId: { propertyId, ownerId } },
+      // 親の物件行をロックしてから link(書き込み規約+#364 R10: DM控えの凍結txと直列化)。
+      return prisma.$transaction(async (tx) => {
+        await lockPropertyRow(tx, propertyId);
+        const existingLink = await tx.propertyOwner.findUnique({
+          where: { propertyId_ownerId: { propertyId, ownerId } },
+        });
+        if (existingLink) return false;
+        await tx.propertyOwner.create({
+          data: {
+            propertyId,
+            ownerId,
+            relationship: "所有者",
+            isPrimary: false,
+          },
+        });
+        return true;
       });
-      if (existingLink) return false;
-      await prisma.propertyOwner.create({
-        data: {
-          propertyId,
-          ownerId,
-          relationship: "所有者",
-          isPrimary: false,
-        },
-      });
-      return true;
     };
 
     if (createdOwnerIds.length > 0) {

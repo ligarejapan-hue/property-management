@@ -123,6 +123,7 @@ vi.mock("@/lib/prisma", () => {
   const tx = {
     owner: { updateMany: vi.fn() },
     propertyOwner: { findUnique: vi.fn(), create: vi.fn() },
+    $queryRaw: vi.fn(async () => [{ id: "p1" }]), // 親行ロック(#364 R10)
   };
   return {
     default: {
@@ -307,11 +308,9 @@ describe("POST /api/import/reception-owner: archive race-safety", () => {
 
     // 新規 Owner 作成（prisma 直叩き）
     expect(pm.owner.create).toHaveBeenCalledTimes(1);
-    // tx 内 link は呼ばれない（fallback パスは prisma 直叩き）
-    expect(pm._tx.propertyOwner.create).not.toHaveBeenCalled();
-    // 通常 link
-    expect(pm.propertyOwner.create).toHaveBeenCalledTimes(1);
-    expect(pm.propertyOwner.create.mock.calls[0][0].data.ownerId).toBe(
+    // link は tx 内(親行ロック+link=#364 R10)。新規 owner への link が1回。
+    expect(pm._tx.propertyOwner.create).toHaveBeenCalledTimes(1);
+    expect(pm._tx.propertyOwner.create.mock.calls[0][0].data.ownerId).toBe(
       `owner-${OWNER_NAME}`,
     );
   });
@@ -331,14 +330,13 @@ describe("POST /api/import/reception-owner: archive race-safety", () => {
     const res = await POST(makeRequest());
     expect([200, 201]).toContain(res.status);
 
-    // archived owner には PropertyOwner を作らない
-    expect(pm._tx.propertyOwner.create).not.toHaveBeenCalled();
     // fallback で新規 active Owner を作成
     expect(pm.owner.create).toHaveBeenCalledTimes(1);
     expect(pm.owner.create.mock.calls[0][0].data.name).toBe(OWNER_NAME);
-    // PropertyOwner は新規 owner と link（fallback パス）
-    expect(pm.propertyOwner.create).toHaveBeenCalledTimes(1);
-    const linkArgs = pm.propertyOwner.create.mock.calls[0][0];
+    // PropertyOwner は新規 owner とだけ link(tx 内・親行ロック=#364 R10)。
+    // archived の "owner-raced" には作らない。
+    expect(pm._tx.propertyOwner.create).toHaveBeenCalledTimes(1);
+    const linkArgs = pm._tx.propertyOwner.create.mock.calls[0][0];
     expect(linkArgs.data.ownerId).toBe(`owner-${OWNER_NAME}`);
     expect(linkArgs.data.ownerId).not.toBe("owner-raced");
   });
