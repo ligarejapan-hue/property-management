@@ -94,7 +94,7 @@ model DmExportBatchItem {
   4b. ⚠**uniqueとbackfillは「新writer稼働後の次の反映」に分離する**(@codex R7 P1): 本番の反映手順は `migrate deploy → build → restart` の順のため、migration と同じ反映で unique を張ると、**restart までの窓で旧 mark-sent(sequence を採番しない・default 1)が unique 違反で失敗**する。よって **migration-A = 列追加のみ**(unique なし・PR-A と同時反映)、**migration-A2 = backfill+unique**(PR-B の反映に同乗=採番する新 writer が稼働済みの状態で適用)。窓の間の新規行は default 1 だが、A2 の backfill が振り直すので整合する(expand→contract の段階投入)。
   4c. ⚠**migration-A2 自身も採番の advisory lock を取る**(@codex R8 P1): A2 適用中も PR-A のサービスは稼働中(手順は migrate→restart)で、並行する送付確定が backfill と同じ sequence を割り当てると **unique 作成が失敗し反映が中断**する。A2 の SQL は冒頭で `SELECT pg_advisory_xact_lock(採番と同じ固定キー)` を実行し、**backfill〜unique 作成を採番と同じロックの中で行う**(全 writer が同じキーで直列化されているため、migration も同じ列に並ぶだけで安全になる)。
   5. **ロック順序の統一(@codex R2 P2)**: 採番の advisory lock は**常に親の物件行ロック(lockPropertyRecordForWrite / FKの暗黙ロック)より先**に取る。個別記録が「親ロック→advisory待ち」・一括確定が「advisory保持→FK待ち」になると相互待ちでデッドロックする。**「advisory→親→子」の一方向**を全writerの規約とし、配線テスト(呼び出し順のソース固定)で守る。
-- **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。⚠あわせて mark-sent は **`DmRecipientDraft.representativeOwnerId` を `owner_id` にコピー**する(@codex R9 P1)。これが無いと新しい売却DM経由の拒否/宛先不明が「所有者なし」になり、§4-5 の所有者単位の除外が**新規行に対して効かない**(旧行だけの限界のはずが新規にも及ぶ)。
+- **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。⚠あわせて mark-sent は **`DmRecipientDraft.representativeOwnerId` を `owner_id` にコピー**する(@codex R9 P1)。これが無いと新しい売却DM経由の拒否/宛先不明が「所有者なし」になり、§4-5 の所有者単位の除外が**新規行に対して効かない**(旧行だけの限界のはずが新規にも及ぶ)。⚠コピー元は **tx 内で(条件付き updateMany の勝者決定後に)draft を再読取した値**を使う(@codex R13 P1): tx 前のスナップショットを使うと、並行する名寄せが draft を master へ付け替えた後に **archive 済みの旧所有者の id でログを作ってしまう**(以後の拒否が所有者横断の除外から見えない)。updateMany が draft 行をロックするため、tx 内の再読取は名寄せと自然に直列化される。
 - UI: 物件一覧の「DM差込CSV出力」の隣に「**送付の確定**」→ 未確定バッチ一覧(出力日時・件数)→ 投函日(既定=今日)→ 確定。確定済み件数を表示して閉じる。
 - 未確定バッチが溜まった場合の掃除は当面しない(件数小・一覧は直近から表示)。必要になれば既存の日次クリーンアップに載せる(将来)。
 
@@ -189,3 +189,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R10(2026-08-08): P2(売却DM側のoutcome訂正の解除判定をdrafts+汎用ログ両方で再計算)を反映。外部AI方式側のP2×2(draft編集PATCHにもproperty:write / 確定にも親行ロック)は別紙。
 - R11(2026-08-08): P1(所有者の名寄せtxでdmLogs/バッチitemのownerId付け替え=統合後の反響置き去り防止)・P2×2(content_digest列をスキーマ表に明記 / dm_reaction_updateのACTION_EXTRA_KEYS登録)を反映。
 - R12(2026-08-08): P1(名寄せの付け替え対象にDmRecipientDraft.representativeOwnerIdも追加=未送付下書きの予約)・P2(個別記録はadvisory→親ガードの順を明文化・ガード規約の例外としてテスト更新)を反映。
+- R13(2026-08-08): P1(mark-sentのowner_idはtx内再読取=名寄せと直列化)を反映。外部AI方式側のP2×2(凍結の列永続化 / assign routeのwrite門)は別紙。
