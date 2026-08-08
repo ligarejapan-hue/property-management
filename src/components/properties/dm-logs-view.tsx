@@ -200,7 +200,13 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
     if (!window.confirm("この送付記録を取り消しますか？")) return;
     try {
       await deletePropertyDmLog(propertyId, logId);
-      fetchLogs();
+      // ページの最後の1件を消したら前のページへ戻る(#364 R4: 範囲外ページの再取得は
+      // 空配列になり「送付履歴はまだありません」に取り残される)。setPage が再取得を起こす。
+      if (logs.length === 1 && page > 1) {
+        setPage((p) => Math.max(1, p - 1));
+      } else {
+        fetchLogs();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "取消に失敗しました");
     }

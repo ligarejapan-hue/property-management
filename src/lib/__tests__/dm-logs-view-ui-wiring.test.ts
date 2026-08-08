@@ -50,6 +50,11 @@ describe("dm-logs-view: 表示強化と個別記録UI", () => {
     expect(VIEW).toMatch(/\{canWrite && \(/);
   });
 
+  it("ページ最後の1件を取り消したら前のページへ戻る(#364 R4)", () => {
+    expect(VIEW).toMatch(/logs\.length === 1 && page > 1/);
+    expect(VIEW).toMatch(/setPage\(\(p\) => Math\.max\(1, p - 1\)\)/);
+  });
+
   it("取消は confirm を挟み、sale_dm 行にはボタンを出さない", () => {
     expect(VIEW).toContain("この送付記録を取り消しますか？");
     expect(VIEW).toMatch(/log\.method !== "sale_dm" && \(/);
