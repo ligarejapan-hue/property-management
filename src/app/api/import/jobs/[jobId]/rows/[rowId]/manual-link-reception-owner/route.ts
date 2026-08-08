@@ -186,12 +186,9 @@ export async function POST(
         reception,
         null,
       );
-      if (Object.keys(propertyUpdates).length > 0) {
-        await tx.property.update({
-          where: { id: propertyId },
-          data: propertyUpdates,
-        });
-      }
+      // ⚠物件の補完(update)はここでは行わない(#364 R11): 所有者ロックより先に
+      // 物件行を取ると、DM控えの凍結tx(Owner FOR SHARE→物件 FOR SHARE)と逆順に
+      // なり相互待ち(40P01)を作る。補完は Owner 処理(2.)の後・link(3.)の直前で行う。
 
       // 2. Owner upsert（所有者ごと）。
       //    NOTE: Owner にスキーマ unique 制約がないため、極めて高い並行性下では
@@ -286,13 +283,20 @@ export async function POST(
         ownerIds.push(ownerId);
       }
 
-      // 3. PropertyOwner link （冪等）。
+      // 3. 物件の補完 + PropertyOwner link（冪等）。
+      //    順序規約「Owner→物件親行→子行」(#364 R10/R11): 所有者ロックを終えてから
+      //    親の物件行をロックし、物件の補完と link をこの順で行う。
       //    createMany + skipDuplicates により、既存 link がある場合は素通りし、
       //    並行リクエストで unique constraint error にならない。
       //    count は今回 INSERT された行数 → ownerLinkedCount として反映。
+      await lockPropertyRow(tx, propertyId);
+      if (Object.keys(propertyUpdates).length > 0) {
+        await tx.property.update({
+          where: { id: propertyId },
+          data: propertyUpdates,
+        });
+      }
       if (ownerIds.length > 0) {
-        // 親の物件行をロック(書き込み規約+#364 R10: DM控えの凍結txと直列化)。
-        await lockPropertyRow(tx, propertyId);
         const linkResult = await tx.propertyOwner.createMany({
           data: ownerIds.map((ownerId) => ({
             propertyId,
