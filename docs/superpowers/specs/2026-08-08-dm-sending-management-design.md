@@ -103,7 +103,7 @@ model DmExportBatchItem {
 - `POST /api/properties/[id]/dm-logs` body=`{ sentOn, method?, note? }` — 手渡し等の1件記録。
 - `DELETE /api/properties/[id]/dm-logs/[logId]` — 記録ミスの取消。**method="sale_dm" の行は 409**(売却DM側の状態と不整合になるため。案内文で売却DM画面へ誘導)。
   - **宛先不明フラグの再計算(@codex R8 P2)**: undeliverable の反響が付いた行を削除するときは、**親の物件行ロックを保持したまま**残りを数え、その物件に undeliverable のログも returned_undeliverable の売却DM下書きも残らないなら `dmUndeliverableAt` を解除する(dmStatus は人の判断=既存の訂正フローと同じ)。これをしないと「宛先不明のみ」フィルタに根拠のない物件が永久に残る。
-- どちらも property:write + record scope + **`lockPropertyRecordForWrite` 規約適用**(物件配下の書込は親行を先にロック)。
+- どちらも property:write + record scope + `lockPropertyRecordForWrite` を使う。⚠**呼び出し順は「採番 advisory → lockPropertyRecordForWrite → INSERT/DELETE」**(@codex R12 P2): 既存ガードの「txの最初に親行を取る」規約をそのまま守ると、§2.2-5 の「advisory が常に先」と矛盾し(親ロック保持で advisory 待ち vs advisory 保持で FK 待ち)デッドロックする。**PropertyDmLog を書く tx に限り advisory を先に取る**ことをガード規約の例外として明文化し(property-record-guard のコメントと順序固定テストを更新)、配線テストで順序を固定する。
 - ⚠一括確定の tx の親ロック(@codex R4 P2 で条件付きに変更): **admin/office_staff の確定**(スコープ判定が常に真)は「INSERT のみ・親 FOR UPDATE なし」(FK の暗黙 FOR KEY SHARE のみ・親行の更新なし=循環の起点にならない)。**field_staff の確定**はスコープ判定が担当変更と競合し得る(FOR KEY SHARE は assignedTo 更新と衝突しない=判定後に担当が外れても確定が通る TOCTOU)ため、**advisory lock 取得後に対象物件の親行を id 順で FOR UPDATE し、保持したままスコープを検証してから** INSERT する。順序は常に「advisory→親→子」(§2.2-5)。
 
 ### 2.4 PropertyDmLog の列追加(migration-A・additive)
@@ -157,7 +157,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
   3. **90日以内の送付記録が無い**(`dmLogs: { none: { sentAt: { gt: cutoff } } }`)
   4. replied / refused / undeliverable の反響が付いた記録が**1件も無い**
   5. **所有者単位の除外(@codex R8 P1)**: その物件の所有者(PropertyOwner 経由)の誰かに、**他物件も含めて** refused / undeliverable の反響ログ(`Owner.dmLogs`=migration-A の逆リレーション)が付いていれば除外する。同じ所有者が物件AとBに紐づくとき、Aで拒否された相手にBから再送する事故を防ぐ(Prisma: `owners: { none: { owner: { dmLogs: { some: { reactionStatus: { in: [refused, undeliverable] } } } } } }` 相当)。⚠限界: ownerId が null の記録(個別記録・旧sale_dm行)は物件単位でしか効かない。また「所有者行は別だが住所が同じ」相手は所有者の名寄せ(既存の品質チェック領域)の守備範囲とし、本機能では扱わない(§6 論点)。
-  5b. ⚠**所有者の名寄せ(重複統合)で反響を置き去りにしない**(@codex R11 P1): 既存の統合 tx はメモと PropertyOwner 行を master へ移すが、このままだと **archive された旧所有者に付いた反響ログ**が述語から見えなくなり、統合後の所有者の他物件が再送候補に戻る。統合 tx に **`PropertyDmLog.ownerId` の付け替え(source→master)と、未確定バッチ item の ownerId 付け替え**を追加する(PR-A のスコープ=merge route の改修。付け替えは既存の owner FK 群の移送と同じ場所に足す)。
+  5b. ⚠**所有者の名寄せ(重複統合)で反響を置き去りにしない**(@codex R11 P1): 既存の統合 tx はメモと PropertyOwner 行を master へ移すが、このままだと **archive された旧所有者に付いた反響ログ**が述語から見えなくなり、統合後の所有者の他物件が再送候補に戻る。統合 tx に **`PropertyDmLog.ownerId`・未確定バッチ item の ownerId・`DmRecipientDraft.representativeOwnerId`(未送付の下書き=後で mark-sent が owner_id へコピーする「予約」)の付け替え(source→master)**を追加する(@codex R11/R12 P1。PR-A のスコープ=merge route の改修。付け替えは既存の owner FK 群の移送と同じ場所に足し、対象は grep で全列挙して確認する)。
 - replied を除外する理由: 連絡が来ている相手は人が個別対応する(定型の再送に乗せない)。
 - `COOLDOWN_DAYS = 90`(定数)。env `DM_RESEND_COOLDOWN_DAYS` で上書き可(業務値の変更にリリース不要)。上限(cap)は作らない。
 - 純関数 `decideResendCandidacy({logs, ownerHasTerminalReaction}, now, {cooldownDays})` → `{eligible, reason}`(表示とテストの単一情報源。一覧 where と同じ規則を対で維持)。⚠入力には物件自身の logs に加えて **所有者単位の除外状態**(その物件の所有者の誰かに他物件も含め refused/undeliverable があるか=@codex R9 P2)を渡す。呼び出し側が §4-5 と同じクエリでこのフラグを計算する=規則の組み合わせ自体は純関数に集約され、where と対で維持できる。
@@ -188,3 +188,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R9(2026-08-08): P1(mark-sentがrepresentativeOwnerIdをowner_idへコピー=新規行にも所有者除外を効かせる)・P2×3(配達失敗は手動repliedより優先 / 「何通目」表示はA2適用後のPR-Bから / decideResendCandidacyに所有者横断状態を入力)を反映。
 - R10(2026-08-08): P2(売却DM側のoutcome訂正の解除判定をdrafts+汎用ログ両方で再計算)を反映。外部AI方式側のP2×2(draft編集PATCHにもproperty:write / 確定にも親行ロック)は別紙。
 - R11(2026-08-08): P1(所有者の名寄せtxでdmLogs/バッチitemのownerId付け替え=統合後の反響置き去り防止)・P2×2(content_digest列をスキーマ表に明記 / dm_reaction_updateのACTION_EXTRA_KEYS登録)を反映。
+- R12(2026-08-08): P1(名寄せの付け替え対象にDmRecipientDraft.representativeOwnerIdも追加=未送付下書きの予約)・P2(個別記録はadvisory→親ガードの順を明文化・ガード規約の例外としてテスト更新)を反映。
