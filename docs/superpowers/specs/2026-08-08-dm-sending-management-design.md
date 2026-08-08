@@ -138,6 +138,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
   - ⚠ただし**手動の no_response は実反響をブロックしない**(@codex R7 P1): メモ目的で no_response のまま保存→sourceがmanual化→その後のLPアクセスや電話反響が同期できず**実際は反応があった相手が再送候補に残る**、の裏返しの事故。同期が書ける条件=「**現在の status が no_response**」OR「reaction_source が null/"sale_dm_sync"」。
   - ⚠**配達失敗(undeliverable)は手動の replied より優先**(@codex R9 P2): 手動で「連絡あり」を付けた後に返戻(returned_undeliverable)が記録された場合、住所が死んでいる事実の方が新しく強い。同期の undeliverable は、現在値が **manual の refused/undeliverable** 以外なら(manual の replied/no_response を含めて)上書きできる。まとめると優先順位: **同期undeliverable ≧ 手動(refused/undeliverable) > 手動(replied) > 同期replied > no_response**。
   - ⚠**上書きされた手動値は退避して保全**(@codex R19 P2): 同期の undeliverable が手動の replied を上書きすると source が sync になり、後で返戻が**訂正**されたとき戻し先が no_response になって**本物の「連絡あり」が消える**。migration-B に退避列 `manual_reaction_shadow TEXT?` を足し、同期が手動値を上書きするときは旧値を退避、訂正の戻しは **shadow があればそれへ復元(source=manual)・無ければ no_response** とする。
+  - shadow のライフサイクル(@codex R23 P2): **(1) 手動入力(PATCH)は常に shadow をクリア**(最新の手動入力だけが真実=古い退避値が後から蘇らない)、**(2) 退避は「同期が manual 値を上書きする瞬間」のみ**、**(3) 復元は shadow を消費(復元と同時にクリア)**。これが無いと、復元→手動で no_response に変更→再度の返戻と訂正、の流れで**廃止済みの replied が蘇り**再送候補から誤って外れる。
   - 同期は manual 行への **no_response への格下げを行わない**。訂正の戻し(undeliverable解除等)も sync 由来の値にしか触れない。
   - ⚠**売却DM側の訂正による dmUndeliverableAt の再計算も両方を見る**(@codex R10 P2): 既存の outcome 訂正は **DmRecipientDraft の行だけ**を数えて dmUndeliverableAt を解除するため、汎用ログ側に undeliverable(手動含む)が残っていてもフラグが消え、「宛先不明のみ」フィルタから漏れる。outcome 訂正の解除判定を**drafts と PropertyDmLog の両方**を親ロック下で数える形に改修する(§2.3 の削除時再計算と対の規則)。
 - `PATCH /api/properties/[id]/dm-logs/[logId]/reaction` body=`{ status, reactedAt?, note? }` — property:write + record scope + lock規約。
@@ -203,3 +204,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R20(2026-08-08): P2(backfillのwindow順序に最終キーid=決定性)を反映。外部AI方式側のP2(差し替えもスコープ外未確定draftで403)は別紙。
 - R21(2026-08-08): P1(統合txは最初にsource Owner行をFOR UPDATE=作成側FOR SHAREと完全直列化)を反映。外部AI方式側のP2(凍結印はrestart後スクリプトのみで投入)は別紙。
 - R22(2026-08-08): P1(ロック順序にOwnerを追加=「advisory→Owner→variant→親→子」・子先読み→Owner→子再読取→不一致中止の型)を反映。外部AI方式側のP2(凍結判定=列OR派生の二重判定)は別紙。
+- R23(2026-08-08): P2(shadowのライフサイクル=手動でクリア/上書き時のみ退避/復元で消費)を反映。外部AI方式側のP2(DELETEも二重判定)は別紙。
