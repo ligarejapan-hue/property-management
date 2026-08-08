@@ -91,6 +91,7 @@ model DmExportBatchItem {
   3. 同一バッチ内に同じ物件の item が複数ある場合(送付先住所が複数の共有者グループ)は、item id 順で **MAX+1 からの連番** を決定的に割り当てる。
   4. **DB側の背水**: `@@unique([propertyId, sequence])`。既存行の sequence を物件ごとに `sentAt,createdAt` 順で**振り直してから**(window関数・決定的)このuniqueを張る。
   4b. ⚠**uniqueとbackfillは「新writer稼働後の次の反映」に分離する**(@codex R7 P1): 本番の反映手順は `migrate deploy → build → restart` の順のため、migration と同じ反映で unique を張ると、**restart までの窓で旧 mark-sent(sequence を採番しない・default 1)が unique 違反で失敗**する。よって **migration-A = 列追加のみ**(unique なし・PR-A と同時反映)、**migration-A2 = backfill+unique**(PR-B の反映に同乗=採番する新 writer が稼働済みの状態で適用)。窓の間の新規行は default 1 だが、A2 の backfill が振り直すので整合する(expand→contract の段階投入)。
+  4c. ⚠**migration-A2 自身も採番の advisory lock を取る**(@codex R8 P1): A2 適用中も PR-A のサービスは稼働中(手順は migrate→restart)で、並行する送付確定が backfill と同じ sequence を割り当てると **unique 作成が失敗し反映が中断**する。A2 の SQL は冒頭で `SELECT pg_advisory_xact_lock(採番と同じ固定キー)` を実行し、**backfill〜unique 作成を採番と同じロックの中で行う**(全 writer が同じキーで直列化されているため、migration も同じ列に並ぶだけで安全になる)。
   5. **ロック順序の統一(@codex R2 P2)**: 採番の advisory lock は**常に親の物件行ロック(lockPropertyRecordForWrite / FKの暗黙ロック)より先**に取る。個別記録が「親ロック→advisory待ち」・一括確定が「advisory保持→FK待ち」になると相互待ちでデッドロックする。**「advisory→親→子」の一方向**を全writerの規約とし、配線テスト(呼び出し順のソース固定)で守る。
 - **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。
 - UI: 物件一覧の「DM差込CSV出力」の隣に「**送付の確定**」→ 未確定バッチ一覧(出力日時・件数)→ 投函日(既定=今日)→ 確定。確定済み件数を表示して閉じる。
@@ -100,6 +101,7 @@ model DmExportBatchItem {
 
 - `POST /api/properties/[id]/dm-logs` body=`{ sentOn, method?, note? }` — 手渡し等の1件記録。
 - `DELETE /api/properties/[id]/dm-logs/[logId]` — 記録ミスの取消。**method="sale_dm" の行は 409**(売却DM側の状態と不整合になるため。案内文で売却DM画面へ誘導)。
+  - **宛先不明フラグの再計算(@codex R8 P2)**: undeliverable の反響が付いた行を削除するときは、**親の物件行ロックを保持したまま**残りを数え、その物件に undeliverable のログも returned_undeliverable の売却DM下書きも残らないなら `dmUndeliverableAt` を解除する(dmStatus は人の判断=既存の訂正フローと同じ)。これをしないと「宛先不明のみ」フィルタに根拠のない物件が永久に残る。
 - どちらも property:write + record scope + **`lockPropertyRecordForWrite` 規約適用**(物件配下の書込は親行を先にロック)。
 - ⚠一括確定の tx の親ロック(@codex R4 P2 で条件付きに変更): **admin/office_staff の確定**(スコープ判定が常に真)は「INSERT のみ・親 FOR UPDATE なし」(FK の暗黙 FOR KEY SHARE のみ・親行の更新なし=循環の起点にならない)。**field_staff の確定**はスコープ判定が担当変更と競合し得る(FOR KEY SHARE は assignedTo 更新と衝突しない=判定後に担当が外れても確定が通る TOCTOU)ため、**advisory lock 取得後に対象物件の親行を id 順で FOR UPDATE し、保持したままスコープを検証してから** INSERT する。順序は常に「advisory→親→子」(§2.2-5)。
 
@@ -150,6 +152,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
   2. 送付記録が1件以上ある
   3. **90日以内の送付記録が無い**(`dmLogs: { none: { sentAt: { gt: cutoff } } }`)
   4. replied / refused / undeliverable の反響が付いた記録が**1件も無い**
+  5. **所有者単位の除外(@codex R8 P1)**: その物件の所有者(PropertyOwner 経由)の誰かに、**他物件も含めて** refused / undeliverable の反響ログ(`Owner.dmLogs`=migration-A の逆リレーション)が付いていれば除外する。同じ所有者が物件AとBに紐づくとき、Aで拒否された相手にBから再送する事故を防ぐ(Prisma: `owners: { none: { owner: { dmLogs: { some: { reactionStatus: { in: [refused, undeliverable] } } } } } }` 相当)。⚠限界: ownerId が null の記録(個別記録・旧sale_dm行)は物件単位でしか効かない。また「所有者行は別だが住所が同じ」相手は所有者の名寄せ(既存の品質チェック領域)の守備範囲とし、本機能では扱わない(§6 論点)。
 - replied を除外する理由: 連絡が来ている相手は人が個別対応する(定型の再送に乗せない)。
 - `COOLDOWN_DAYS = 90`(定数)。env `DM_RESEND_COOLDOWN_DAYS` で上書き可(業務値の変更にリリース不要)。上限(cap)は作らない。
 - 純関数 `decideResendCandidacy(logs, now, {cooldownDays})` → `{eligible, reason}`(表示とテストの単一情報源。一覧 where と同じ規則を対で維持)。
@@ -176,3 +179,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R5(2026-08-08): P1(手動反響の保護→reaction_source列で出所管理・手動が常に勝つ)・P2(同時新規作成のunique衝突をcatchして勝者を再利用)を反映。
 - R6(2026-08-08): P2(同日同内容の別操作の過剰合流→冪等化を内容ハッシュから**押下ごとのattemptKey方式**へ変更=再試行だけが合流)を反映。
 - R7(2026-08-08): P1×2(unique+backfillを新writer稼働後の次反映に分離=expand→contract / 手動no_responseは実反響をブロックしない)・P2×2(反響backfillは稼働後の冪等照合に / 再試行はcontent_digest一致検証・ずれたら409)を反映。
+- R8(2026-08-08): P1×2(migration-A2自身も採番advisory lockを取る=稼働中writerと直列化 / 再送候補に所有者単位の除外を追加=別物件経由の再送事故防止)・P2×1(undeliverableログ削除時にdmUndeliverableAtを親ロック下で再計算)を反映。
