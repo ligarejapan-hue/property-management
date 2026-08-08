@@ -91,7 +91,7 @@ dm_variants に追加:
 2. 一括適用の上書き保護(confirmed/sent 除外・既定は空本文のみ)。
 3. `sale_dm:generate` を外部モードに要求しない判断(課金なし・PII 外部送信なしという根拠で十分か)。
 4. 空本文 drafts の存在期間(作成→貼り付けまで)に確定/印刷へ漏れる経路が無いか。
-5. capability 分離(§2.5)の後方互換(既存 `saleDmLetter` を残す判断)。
+5. capability の置換(§2.5): 既存 `saleDmLetter` の使用箇所を `saleDmPrintReady` へ置き換えて撤去する契約(取り残しが無いか grep で確認)。
 
 ### 対応履歴
 - R1(2026-08-08): P1(variant共通本文と複数物件の混在→物件事実をプロンプトから排除し差込タグでシステム差込)・P2(印刷前提設定の分離→ `saleDmAi`/`saleDmPrintReady` の2 capability 化+外部モード作成の前提ゲート)を反映。
@@ -119,3 +119,4 @@ dm_variants に追加:
 - R30(2026-08-08): P1(ヘッダの「独立・並行可」を依存明記へ修正)・P2(saleDmAi capabilityを作らない=printReadyのみ・saleDmLetterは置換撤去)を反映。
 - R31(2026-08-08): P2(variantを移動できる全route(assign+個別draft PATCH)に凍結固定を適用)を反映。
 - R35(2026-08-08): P2(凍結固定を「確定を解除しうる全mutation」(本文編集による確定解除含む)へ一般化)を反映。
+- R36(2026-08-08): P2(論点5の旧saleDmLetter残置記述を置換・撤去の契約へ更新)を反映。

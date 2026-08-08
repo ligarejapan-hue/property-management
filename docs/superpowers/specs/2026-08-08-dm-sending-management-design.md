@@ -82,7 +82,7 @@ model DmExportBatchItem {
 ### 2.2 送付確定(一括)
 
 - `GET /api/properties/dm-batches?unconfirmed=1` — 確定モーダル用の一覧(出力日時・件数・確定状態。中身の宛先は返さない)。
-- `POST /api/properties/dm-batches/[id]/confirm` body=`{ sentOn: "YYYY-MM-DD" }`
+- `POST /api/properties/dm-batches/[id]/confirm` body=`{ sentOn: "YYYY-MM-DD" }`。**sentOn は JST の今日以前のみ受理**(@codex R36 P2: 未来日の打ち間違いを通すと、実在しない送付が履歴に載り、再送候補がその未来日+90日まで誤って抑止される。個別記録 POST も同じ検証)。
 - ゲート: 既存 export と同じ4権限+**property:write**(書込は mark-sent/outcome と同じ統一方針・新slugなし)。
 - **スコープ外 item の扱い(@codex R3 P2)**: field_staff の担当変更などで**1件でもスコープ外の item がある場合、確定を 403 で拒否**する(スキップして confirmedAt を立てると、その宛先の送付記録が**永久に欠ける**=後から権限のある人が確定しようとしても「確定済み」で弾かれるため)。エラーには「スコープ外が N 件・管理者/事務担当で確定してください」と理由を出す。部分確定(item単位の確定状態)は作らない=単純さ優先(実運用は管理者2名で、まず起きない)。
 - 冪等: `confirmedAt` が null の場合のみ、条件付き updateMany(勝者決定)→ 同一 tx で items から `PropertyDmLog` を生成。二重確定は 409。
@@ -216,3 +216,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R32(2026-08-08): P1(名寄せの付け替えに第3連関 dm_recipient_draft_owners を追加)・P2(ブリッジ行への手動保存は値を問わず直後に再導出=優先規則の恒常担保)を反映。
 - R33(2026-08-08): P1(補完の所有者集合もロック+ロック後再検証)・P2(補完はスナップショット整合時のみ全員採用・不一致は代表のみ+監査記録)を反映。
 - R34(2026-08-08): P2(スナップショット照合では同住所の共有者入替を検知不能)→**旧下書きの補完を撤回し「代表のみで記録」に単純化**(R33の補完手順は不要化)。全員連関は移行後に作成された draft のみ。
+- R36(2026-08-08): P2(sentOnは今日以前のみ=未来日の誤入力で再送抑止が壊れるのを防ぐ)を反映。
