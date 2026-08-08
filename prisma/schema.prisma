@@ -196,6 +196,7 @@ model User {
   dmCampaigns             DmCampaign[]            @relation("DmCampaignCreator")
   dmRecipientDrafts       DmRecipientDraft[]      @relation("DmRecipientGenerator")
   registryFetchJobs       RegistryFetchJob[]      @relation("RegistryFetchJobRequestedBy")
+  dmExportBatches         DmExportBatch[]         @relation("DmExportBatchCreator")
 
   @@map("users")
 }
@@ -378,6 +379,7 @@ model Property {
   salesSheetDesigns  SalesSheetDesign[]
   dmRecipientDrafts  DmRecipientDraft[]
   registryFetchJobItems RegistryFetchJobItem[]  @relation("RegistryFetchJobItemProperty")
+  dmExportBatchItems DmExportBatchItem[]
 
   @@index([caseStatus])
   @@index([introductionRoute])
@@ -422,6 +424,11 @@ model Owner {
   propertyOwners PropertyOwner[]
   attachments    Attachment[]
   memos          OwnerMemo[]
+  dmLogs             PropertyDmLog[]
+  dmBatchItems       DmExportBatchItem[]
+  dmBatchItemOwners  DmExportBatchItemOwner[]
+  dmLogOwners        PropertyDmLogOwner[]
+  dmDraftOwners      DmRecipientDraftOwner[]
 
   @@index([nameKana])
   @@index([externalLinkKey])
@@ -630,20 +637,110 @@ model PropertyInvestigationAuditLog {
 }
 
 model PropertyDmLog {
-  id         String   @id @default(uuid()) @db.Uuid
-  propertyId String   @map("property_id") @db.Uuid
-  sentAt     DateTime @map("sent_at") @db.Date
+  id         String    @id @default(uuid()) @db.Uuid
+  // 物件削除で null 化(SetNull)。拒否/宛先不明の履歴を道連れにせず所有者側に残す(PR-A・R49)。
+  propertyId String?   @map("property_id") @db.Uuid
+  sentAt     DateTime  @map("sent_at") @db.Date
   method     String?
-  sentBy     String   @map("sent_by") @db.Uuid
+  sentBy     String    @map("sent_by") @db.Uuid
   note       String?
-  createdAt  DateTime @default(now()) @map("created_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  // --- PR-A(送付記録)追加列 ---
+  ownerId    String?   @map("owner_id") @db.Uuid // 代表所有者。個別記録・旧行は null
+  dmType     String?   @map("dm_type") // "owner_address"/"property_address"。旧行・sale_dmブリッジは null(TEXT+アプリ側allowlist)
+  batchId    String?   @map("batch_id") @db.Uuid // 一括確定のトレース(FKは張らない=バッチ削除と独立)
+  draftId    String?   @map("draft_id") @db.Uuid // 売却DMブリッジ→DmRecipientDraft(反響同期用・FKは張らない)
+  updatedAt  DateTime  @updatedAt @map("updated_at")
 
-  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  sender   User     @relation(fields: [sentBy], references: [id])
+  property  Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  owner     Owner?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  sender    User      @relation(fields: [sentBy], references: [id])
+  logOwners PropertyDmLogOwner[]
 
   // 送信回数の集計(_count / groupBy / リレーション件数ソート)を効率化する(Codex R3)。
   @@index([propertyId])
+  @@index([propertyId, sentAt])
+  @@index([ownerId])
+  @@index([draftId])
   @@map("property_dm_logs")
+}
+
+// 宛名CSV出力の「控え」(PR-A)。出力時点の宛先集合を保存し、確定はこの控えに対して行う。
+// 初回ダウンロードで集合を凍結(downloadedAt+csvDigest)。CSVの中身(氏名・住所)は保存しない。
+model DmExportBatch {
+  id                  String    @id @default(uuid()) @db.Uuid
+  dmType              String    @map("dm_type") // "owner_address"(現行UIはこれのみ。TEXT+アプリ側allowlist)
+  filters             Json? // 監査用の出力条件(allowlist済みキーのみ)
+  rowCount            Int       @map("row_count") // CSV行数(=宛先件数)
+  createdBy           String    @map("created_by") @db.Uuid
+  createdAt           DateTime  @default(now()) @map("created_at")
+  attemptKey          String    @unique @map("attempt_key") // 押下ごとの冪等キー
+  downloadedAt        DateTime? @map("downloaded_at") // 初回DLの刻印(配信集合の凍結境界・確定の前提)
+  csvDigest           String?   @map("csv_digest") // 初回DLのCSVのsha256(再試行の同一性検証・PIIは持たない)
+  resendFilterApplied Boolean   @default(false) @map("resend_filter_applied") // 再送候補フィルタ由来か(PR-Cで使用)
+  confirmedAt         DateTime? @map("confirmed_at") // null=未確定
+  confirmedBy         String?   @map("confirmed_by") @db.Uuid
+  sentOn              DateTime? @map("sent_on") @db.Date // 投函日(確定時に入力)
+
+  items   DmExportBatchItem[]
+  creator User                @relation("DmExportBatchCreator", fields: [createdBy], references: [id])
+
+  @@index([createdAt])
+  @@map("dm_export_batches")
+}
+
+model DmExportBatchItem {
+  id         String  @id @default(uuid()) @db.Uuid
+  batchId    String  @map("batch_id") @db.Uuid
+  propertyId String? @map("property_id") @db.Uuid // 物件削除で null 化(R49・DL後の郵送済み記録を守る)
+  ownerId    String? @map("owner_id") @db.Uuid // 代表所有者。削除で null 化(確定を巻き戻さない)
+
+  batch      DmExportBatch            @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  property   Property?                @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  owner      Owner?                   @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  itemOwners DmExportBatchItemOwner[]
+
+  @@index([batchId])
+  @@map("dm_export_batch_items")
+}
+
+// 共有者連関(1item=同一送付先住所の共有者を束ねた1通)。代表以外の共有者にも
+// 拒否/宛先不明の記録を紐づけ、所有者横断の再送除外(§4)から漏らさない(R29)。
+// owner_id 先頭の索引必須(R46: 除外判定・名寄せは owner 側から引く)。
+model DmExportBatchItemOwner {
+  itemId  String @map("item_id") @db.Uuid
+  ownerId String @map("owner_id") @db.Uuid
+
+  item  DmExportBatchItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  owner Owner             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@id([itemId, ownerId])
+  @@index([ownerId])
+  @@map("dm_export_batch_item_owners")
+}
+
+model PropertyDmLogOwner {
+  logId   String @map("log_id") @db.Uuid
+  ownerId String @map("owner_id") @db.Uuid
+
+  log   PropertyDmLog @relation(fields: [logId], references: [id], onDelete: Cascade)
+  owner Owner         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@id([logId, ownerId])
+  @@index([ownerId])
+  @@map("property_dm_log_owners")
+}
+
+model DmRecipientDraftOwner {
+  draftId String @map("draft_id") @db.Uuid
+  ownerId String @map("owner_id") @db.Uuid
+
+  draft DmRecipientDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  owner Owner            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@id([draftId, ownerId])
+  @@index([ownerId])
+  @@map("dm_recipient_draft_owners")
 }
 
 // ============================================================
@@ -1075,6 +1172,7 @@ model DmRecipientDraft {
   variant   DmVariant  @relation(fields: [variantId], references: [id])
   property  Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   generator User       @relation("DmRecipientGenerator", fields: [generatedBy], references: [id])
+  draftOwners DmRecipientDraftOwner[]
 
   @@index([campaignId])
   @@index([propertyId])
