@@ -63,6 +63,10 @@ describe("api-client", () => {
 });
 
 describe("実行ボタンは事前確認が済むまで無効(#365 R1)", () => {
+  it("再オープン時は前回の確定を無効化してから再確認する(#365 R3)", () => {
+    expect(SHARED).toMatch(/Promise\.resolve\(\)\.then\(\(\) => \{[\s\S]{0,200}?setSettledKey\(null\)/);
+  });
+
   it("hook は pending を導出し、失敗も『確定』として注意書き表示後に実行可能へ戻す", () => {
     expect(SHARED).toMatch(/pending: active && idsKey\.length > 0 && settledKey !== idsKey/);
     expect(SHARED).toMatch(/setSettledKey\(idsKey\); \/\/ 失敗も「確定」/);

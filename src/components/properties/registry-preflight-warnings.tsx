@@ -39,6 +39,14 @@ export function useRegistryPreflight(
   useEffect(() => {
     if (!active || idsKey.length === 0) return;
     let cancelled = false;
+    // 再オープン時は前回の確定を無効化する(#365 R3: 閉じている間に所有者追加・取得済み化が
+    // あり得るため、キャッシュ表示のまま即実行させない)。同期 setState は lint 規約で
+    // 禁止のため microtask で行う(実クリックまでには必ず反映される)。
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setSettledKey(null);
+      setFailed(false);
+    });
     fetchRegistryPreflight(idsKey.split(","))
       .then((res) => {
         if (cancelled) return;
