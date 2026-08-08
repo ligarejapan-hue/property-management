@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { z } from "zod";
 import prisma from "@/lib/prisma";
 import {
   getApiSession,
@@ -10,11 +11,15 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission, maskValue } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import {
+  assertPropertyRecordAccess,
+  lockPropertyRecordForWrite,
+} from "@/lib/property-record-guard";
 import { writeAuditLog } from "@/lib/audit";
 
-// ---------- GET /api/properties/:id/dm-logs ----------
+// ---------- GET / POST /api/properties/:id/dm-logs ----------
 //
-// 物件の DM 送付履歴（PropertyDmLog）を read-only で返す（B-3 PR-1）。
+// GET: 物件の DM 送付履歴（PropertyDmLog）を返す（B-3 PR-1）。
 //   - 認可: property:read + owner:read（DM 送付は所有者宛のため owner:read も要求）。
 //     いずれか欠ける場合は 403 とし、DB 取得・AuditLog 書き込みを一切行わない。
 //   - PII: note は所有者備考と同じ表示レベル（owner_note → ownerDisplayConfig.note）で
@@ -22,7 +27,11 @@ import { writeAuditLog } from "@/lib/audit";
 //   - 送信者名（staff）・method・日付は PII ではないため素表示（change-logs の changer.name と同方針）。
 //   - 非PII の AuditLog（件数・閲覧時刻のみ。note 本文・送信者名・owner 由来キーは残さない）。
 //
-// 送付確定 write / 反響 / 再送 / migration は対象外（PR-2 以降・別承認）。
+// POST: 手渡し等の1件記録(設計書§2.3・PR-A)。
+//   - 認可: property:write + record scope。tx は lockPropertyRecordForWrite で始める(親→子規約)。
+//   - sentOn は過去日可・今日(JST)以前のみ。method は allowlist(mail/hand_delivery/other)。
+//   - 個別記録は ownerId/dmType を持たない(null)=所有者宛バッチとは区別される。
+//   - 監査 dm_sent_record {propertyId, sentOn}(note 本文は載せない)。
 
 export async function GET(
   request: NextRequest,
@@ -117,6 +126,79 @@ export async function GET(
         totalPages: Math.ceil(total / limit),
       },
     });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
+const createLogSchema = z.object({
+  sentOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  method: z.enum(["mail", "hand_delivery", "other"]).optional(),
+  note: z.string().max(500).optional(),
+});
+
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id: propertyId } = await params;
+    const session = await getApiSession();
+    const permissions = await getUserPermissions(session.id);
+
+    // 書込は property:write(mark-sent/outcome/一括確定と同じ統一方針・新slugなし)。
+    if (!hasPermission(permissions, "property", "write")) {
+      throw new ApiError(403, "送付記録を追加する権限がありません", "FORBIDDEN");
+    }
+
+    const body = createLogSchema.parse(await request.json());
+
+    // 過去日可・今日(JST)以前のみ(未来の投函は実在しない送付を作る)。
+    const todayJst = new Date(Date.now() + JST_OFFSET_MS)
+      .toISOString()
+      .slice(0, 10);
+    if (body.sentOn > todayJst) {
+      throw new ApiError(
+        400,
+        "投函日に未来の日付は指定できません",
+        "SENT_ON_IN_FUTURE",
+      );
+    }
+
+    // 404/403 の出し分け(存在確認+record scope)。作成の原子性は tx 内の親行ロックで守る。
+    await assertPropertyRecordAccess(propertyId, session, "write");
+
+    const created = await prisma.$transaction(async (tx) => {
+      await lockPropertyRecordForWrite(tx, propertyId, session);
+      return tx.propertyDmLog.create({
+        data: {
+          propertyId,
+          // 個別記録は宛先(所有者)を特定しない: ownerId/dmType は null。
+          ownerId: null,
+          dmType: null,
+          batchId: null,
+          draftId: null,
+          // sentOn は UTC 00:00 の Date = @db.Date に「UTC暦日=JST暦日」で保存(既存規約)。
+          sentAt: new Date(`${body.sentOn}T00:00:00Z`),
+          method: body.method ?? null,
+          note: body.note?.trim() ? body.note.trim() : null,
+          sentBy: session.id,
+        },
+        select: { id: true },
+      });
+    });
+
+    await writeAuditLog({
+      userId: session.id,
+      action: "dm_sent_record",
+      targetTable: "property_dm_logs",
+      targetId: created.id,
+      detail: { propertyId, sentOn: body.sentOn },
+    });
+
+    return apiResponse({ id: created.id }, 201);
   } catch (error) {
     return handleApiError(error);
   }
