@@ -86,15 +86,13 @@ model DmExportBatchItem {
 - **スコープ外 item の扱い(@codex R3 P2)**: field_staff の担当変更などで**1件でもスコープ外の item がある場合、確定を 403 で拒否**する(スキップして confirmedAt を立てると、その宛先の送付記録が**永久に欠ける**=後から権限のある人が確定しようとしても「確定済み」で弾かれるため)。エラーには「スコープ外が N 件・管理者/事務担当で確定してください」と理由を出す。部分確定(item単位の確定状態)は作らない=単純さ優先(実運用は管理者2名で、まず起きない)。
 - 冪等: `confirmedAt` が null の場合のみ、条件付き updateMany(勝者決定)→ 同一 tx で items から `PropertyDmLog` を生成。二重確定は 409。
 - ⚠**items の読み取りは tx 内で `FOR UPDATE`**(@codex R14 P1): tx 前に読んだ item の ownerId を使うと、並行する所有者の名寄せが item を master へ付け替えた後に **archive 済みの旧所有者の id でログを作る**(mark-sent と同型の穴)。確定 tx はバッチ行ロック→**item 行を FOR UPDATE で読み直し**、その時点の ownerId で記録する(名寄せ側の item 付け替え(§4-5b)と行ロックで直列化される)。
-- 生成する行: `propertyId / ownerId(代表) / dmType="owner_address" / sequence(下記) / batchId / sentAt=sentOn / method="mail" / sentBy=操作者`。
-- **sequence の採番(@codex P1)**: 無ロックの採番は並行確定で重複する。対策:
-  1. **採番は共通ヘルパー1本に集約**し、PropertyDmLog を書く**全writer**(一括確定・個別記録・売却DM mark-sent)がこれを使う。ヘルパーは tx 内で `pg_advisory_xact_lock`(採番専用の固定キー)を取ってから採番=全採番が直列化される(確定は週に数回・数百行なので直列で十分)。
-  2. 採番は **`MAX(sequence)+1`**(@codex R2 P1)。「既存件数+1」だと途中の記録を取消した後([1,2,3]の2を削除→count=2→次が3)に生き残りの3と衝突し、**その物件への記録が全部失敗し続ける**。MAX+1 なら削除に影響されない(欠番は許容=「何通目」表示は歴史の記録であり連番の詰め直しはしない)。
-  3. 同一バッチ内に同じ物件の item が複数ある場合(送付先住所が複数の共有者グループ)は、item id 順で **MAX+1 からの連番** を決定的に割り当てる。
-  4. **DB側の背水**: `@@unique([propertyId, sequence])`。既存行の sequence を物件ごとに **`sentAt, createdAt, sequence, id`** 順で振り直してから(window関数)このuniqueを張る。⚠最終キーに `id` を含める(@codex R20 P2): 同一バッチ由来の複数行は sentAt/createdAt が同値になり得るため、`id` まで含めないと**backfillの実行ごとに「何通目」が変わる**(非決定的)。
-  4b. ⚠**uniqueとbackfillは「新writer稼働後の次の反映」に分離する**(@codex R7 P1): 本番の反映手順は `migrate deploy → build → restart` の順のため、migration と同じ反映で unique を張ると、**restart までの窓で旧 mark-sent(sequence を採番しない・default 1)が unique 違反で失敗**する。よって **migration-A = 列追加のみ**(unique なし・PR-A と同時反映)、**migration-A2 = backfill+unique**(PR-B の反映に同乗=採番する新 writer が稼働済みの状態で適用)。窓の間の新規行は default 1 だが、A2 の backfill が振り直すので整合する(expand→contract の段階投入)。
-  4c. ⚠**migration-A2 自身も採番の advisory lock を取る**(@codex R8 P1): A2 適用中も PR-A のサービスは稼働中(手順は migrate→restart)で、並行する送付確定が backfill と同じ sequence を割り当てると **unique 作成が失敗し反映が中断**する。A2 の SQL は **`BEGIN` 〜 `COMMIT` の明示 tx で全体を包み**、冒頭で `SELECT pg_advisory_xact_lock(採番と同じ固定キー)` を実行して **backfill〜unique 作成を同一 tx・同一ロックの中で行う**(@codex R24 P1: advisory **xact** lock は tx 終了で解放されるため、autocommit の逐次実行だと文と文の間に他 writer が割り込める。既存の transactional migration と同じ形にする)。
-  5. **ロック順序の統一(@codex R2 P2 → R22 P1 で Owner を追加)**: 全 DM writer の順序は **「採番 advisory → Owner(代表所有者) → variant → 物件親行 → 子行(item/draft/log)」** の一方向。⚠log の insert は owner FK の暗黙ロックを**最後に**取るため、子行を先にロックする writer と「Owner→子」の統合 tx(5d)が混ざると相互待ちになる。子を読まないと所有者が分からない writer(一括確定・mark-sent)は **「先読み(ロックなし)→ Owner を id 順にロック → 子行を FOR UPDATE で再読取 → 所有者が先読みと不一致なら中止して再試行(409/リトライ)」** の型で順序を守る。配線テスト(呼び出し順のソース固定)で全経路を固定する。
+- 生成する行: `propertyId / ownerId(代表) / dmType="owner_address" / batchId / sentAt=sentOn / method="mail" / sentBy=操作者`。
+- **「何通目」は列で持たず、表示時に導出する**(@codex R26 P2 を機に方式変更・採番系を全廃):
+  - 表示 API(DM送付履歴)が、物件ごとの記録を **`sentAt, createdAt, id` 順に並べた時系列の連番**を計算して返す(SQL window か app 側。1物件の記録は少数なので負荷は無視できる)。
+  - ⚠採番列(sequence)方式は、**後から入力した古い投函日の個別記録が MAX+1 で最大連番になり、「何通目」が時系列と永久に食い違う**(R26)。表示時導出なら遅れて入れた記録も自動的に正しい位置に入り、削除後の欠番・並行確定の重複・migration の段階投入(旧writer窓・backfill・明示tx)という**採番系の複雑さが構造ごと消える**。
+  - これに伴い R2-2(MAX+1)・R20(backfill順序)・R7/R8/R24(migration-A2 の段階投入と advisory lock)の採番系対策は**不要化**(対応履歴に経緯として残す)。migration-A2 自体が消え、**migration は A(列追加のみ)の1本**になる。
+  - 同一バッチ内の同物件複数行は sentAt が同日で同順位になり得る→表示は createdAt, id で安定に並ぶ(順位の重複表示は許容: 同日に2通は事実)。
+- **ロック順序の統一(@codex R2 P2 → R22 P1 → R26 で採番 advisory を除去)**: 全 DM writer の順序は **「Owner(代表所有者) → variant → 物件親行 → 子行(item/draft/log)」** の一方向。⚠log の insert は owner FK の暗黙ロックを**最後に**取るため、子行を先にロックする writer と「Owner→子」の統合 tx(5d)が混ざると相互待ちになる。子を読まないと所有者が分からない writer(一括確定・mark-sent)は **「先読み(ロックなし)→ Owner を id 順にロック → 子行を FOR UPDATE で再読取 → 所有者が先読みと不一致なら中止して再試行(409/リトライ)」** の型で順序を守る。配線テスト(呼び出し順のソース固定)で全経路を固定する。
 - **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。⚠あわせて mark-sent は **`DmRecipientDraft.representativeOwnerId` を `owner_id` にコピー**する(@codex R9 P1)。これが無いと新しい売却DM経由の拒否/宛先不明が「所有者なし」になり、§4-5 の所有者単位の除外が**新規行に対して効かない**(旧行だけの限界のはずが新規にも及ぶ)。⚠コピー元は **tx 内で(条件付き updateMany の勝者決定後に)draft を再読取した値**を使う(@codex R13 P1): tx 前のスナップショットを使うと、並行する名寄せが draft を master へ付け替えた後に **archive 済みの旧所有者の id でログを作ってしまう**(以後の拒否が所有者横断の除外から見えない)。updateMany が draft 行をロックするため、tx 内の再読取は名寄せと自然に直列化される。
 - UI: 物件一覧の「DM差込CSV出力」の隣に「**送付の確定**」→ 未確定バッチ一覧(出力日時・件数)→ 投函日(既定=今日)→ 確定。確定済み件数を表示して閉じる。
 - 未確定バッチが溜まった場合の掃除は当面しない(件数小・一覧は直近から表示)。必要になれば既存の日次クリーンアップに載せる(将来)。
@@ -104,7 +102,7 @@ model DmExportBatchItem {
 - `POST /api/properties/[id]/dm-logs` body=`{ sentOn, method?, note? }` — 手渡し等の1件記録。
 - `DELETE /api/properties/[id]/dm-logs/[logId]` — 記録ミスの取消。**method="sale_dm" の行は 409**(売却DM側の状態と不整合になるため。案内文で売却DM画面へ誘導)。
   - **宛先不明フラグの再計算(@codex R8 P2)**: undeliverable の反響が付いた行を削除するときは、**親の物件行ロックを保持したまま**残りを数え、その物件に undeliverable のログも returned_undeliverable の売却DM下書きも残らないなら `dmUndeliverableAt` を解除する(dmStatus は人の判断=既存の訂正フローと同じ)。これをしないと「宛先不明のみ」フィルタに根拠のない物件が永久に残る。
-- どちらも property:write + record scope + `lockPropertyRecordForWrite` を使う。⚠**呼び出し順は「採番 advisory → lockPropertyRecordForWrite → INSERT/DELETE」**(@codex R12 P2): 既存ガードの「txの最初に親行を取る」規約をそのまま守ると、§2.2-5 の「advisory が常に先」と矛盾し(親ロック保持で advisory 待ち vs advisory 保持で FK 待ち)デッドロックする。**PropertyDmLog を書く tx に限り advisory を先に取る**ことをガード規約の例外として明文化し(property-record-guard のコメントと順序固定テストを更新)、配線テストで順序を固定する。
+- どちらも property:write + record scope + `lockPropertyRecordForWrite` 規約を使う(採番 advisory の廃止(§2.2・R26)により、既存ガードの「txの最初に親行を取る」規約と**矛盾なくそのまま従える**。個別記録は ownerId を持たないため Owner ロックも不要)。
 - ⚠一括確定の tx の親ロック(@codex R4 P2 で条件付きに変更): **admin/office_staff の確定**(スコープ判定が常に真)は「INSERT のみ・親 FOR UPDATE なし」(FK の暗黙 FOR KEY SHARE のみ・親行の更新なし=循環の起点にならない)。**field_staff の確定**はスコープ判定が担当変更と競合し得る(FOR KEY SHARE は assignedTo 更新と衝突しない=判定後に担当が外れても確定が通る TOCTOU)ため、**advisory lock 取得後に対象物件の親行を id 順で FOR UPDATE し、保持したままスコープを検証してから** INSERT する。順序は常に「advisory→親→子」(§2.2-5)。
 
 ### 2.4 PropertyDmLog の列追加(migration-A・additive)
@@ -112,11 +110,11 @@ model DmExportBatchItem {
 ```
 owner_id   String?  @db.Uuid  + FK Owner (ON DELETE SET NULL) + Owner側逆リレーション
 dm_type    String?            // "owner_address"/"property_address"/既存行とsale_dmブリッジはnull
-sequence   Int @default(1)    // 同一物件の何通目か(§2.2 の採番規則・既存行はbackfillで振り直し)
 batch_id   String? @db.Uuid   // 一括確定のトレース(FKは張らない=バッチ削除と独立)
 draft_id   String? @db.Uuid   // 売却DMブリッジ行→DmRecipientDraft の紐付け(反響同期用・FKは張らない)
 updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
-索引追加: [propertyId, sentAt] / [ownerId] / unique [propertyId, sequence](backfill後)
+索引追加: [propertyId, sentAt] / [ownerId]
+※ sequence 列は持たない(「何通目」は表示時に sentAt,createdAt,id 順で導出=§2.2・R26)
 ```
 
 ### 2.5 監査
@@ -127,8 +125,8 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 
 ### 2.6 表示
 
-- DM送付履歴に「種別」列を追加。method の表示を日本語ラベル化(sale_dm→「売却DM」・mail→「郵送」等。**生値の英字がそのまま出ている現状の直し**)。
-- ⚠**「何通目」列の表示は PR-B(migration-A2 適用後)から**(@codex R9 P2): PR-A の期間は既存行が default 1 のままなので、複数回送った物件が全部「1通目」に見え、A2 適用でラベルが変わる。嘘の表示を出すくらいなら列自体を出さない(データは PR-A から正しく採番して貯める)。
+- DM送付履歴に「種別」「何通目」列を追加。method の表示を日本語ラベル化(sale_dm→「売却DM」・mail→「郵送」等。**生値の英字がそのまま出ている現状の直し**)。
+- 「何通目」は表示時導出(§2.2・R26)なので **PR-A から正しく表示できる**(旧方式で懸念だった「backfill 前の嘘の表示」(R9 P2)は方式変更で消滅)。
 
 ## 3. 第2段(PR-B): 反響の記録
 
@@ -207,3 +205,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R23(2026-08-08): P2(shadowのライフサイクル=手動でクリア/上書き時のみ退避/復元で消費)を反映。外部AI方式側のP2(DELETEも二重判定)は別紙。
 - R24(2026-08-08): P1(migration-A2を明示txで包む=advisory xact lockの持続)・P2(統合は両Owner行を安定id順で先頭ロック=既存の辞書順流儀を維持)を反映。外部AI方式側のP2×3(AI直結経路の無効化/assignの凍結印固定/本文サイズ上限)は別紙。
 - R25(2026-08-08): P2(作成側の複数OwnerのFOR SHAREも統合と同じ安定id順でソート)を反映。
+- R26(2026-08-08): P2(後入れの古い投函日でMAX+1が時系列を壊す)→**sequence列を廃止し「何通目」を表示時導出(sentAt,createdAt,id順)に方式変更**。採番系の対策(R2-2/R20/R7-4b/R8-4c/R24-1)は不要化・migrationはA(列追加のみ)1本に簡素化。
