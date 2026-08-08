@@ -65,7 +65,7 @@ model DmExportBatchItem {
 
 - **出力は2段階 = 「POST で控え作成 → GET で CSV ダウンロード」**(R1〜R39 で到達した最終形。@codex R39 P2):
   - **POST `/api/properties/dm-batches`**(body=filters+attemptKey)が検索条件を評価し、**バッチ+items を作成して batchId を返す**。副作用は POST に置く(このリポの規約どおり=**cross-site のトップレベル GET 遷移では控えを作れない**。SameSite=Lax の直叩き/ブックマークで最大1万itemの控えが無限に積まれる穴(R38-39)を CSRF 境界で塞ぐ)。
-  - **GET `/api/properties/dm-batches/[id]/csv`** は**保存済みの items から CSV を生成して返すだけ**(書き込みなし・no-store)。ダウンロードは従来どおりブラウザ遷移で行える(UI は POST→返ってきた batchId の GET URL へ遷移)。
+  - **GET `/api/properties/dm-batches/[id]/csv`** は**保存済みの items から CSV を生成して返すだけ**(書き込みなし・no-store)。ダウンロードは従来どおりブラウザ遷移で行える(UI は POST→返ってきた batchId の GET URL へ遷移)。⚠**GET にも既存 export と同一の4権限+PII表示レベル(plain)ゲートを適用し、field_staff は「現在の record scope」で item をフィルタ**する(@codex R40 P1: 控えからの直接描画は現在スコープを迂回し、担当を外れた後でも氏名・住所を落とせてしまう。作成者本人のバッチのみDL可)。
   - **冪等化**: attemptKey(UI が押下ごとに発行・POST body で必須・`attempt_key` unique)。同じキーの再 POST は既存バッチを FOR UPDATE で照会し**未確定なら再利用・確定済みなら 409**(確定側と行ロックで直列化=R4)。INSERT の unique 衝突は catch して勝者を取り直す(R5)。**別の押下は別のキー=別の控え**(内容ハッシュで畳むと同日2回の意図した郵送まで合流する=R6)。先例=売却DMキャンペーンの idempotencyKey。
   - **再試行とのズレは構造的に消滅**: CSV は常に**控えの items から**生成するため、「再試行が別の宛先集合を出力する」事態が起きない(R7 の content_digest 照合は不要になり**列ごと削除**)。owner が削除済み(SetNull)の item は CSV から除外し件数を表示(郵送不能のため)。
 - **所有者の削除(@codex P2)**: item の owner FK は SetNull。確定時に ownerId が null の item は `PropertyDmLog.owner_id=null` で記録する(1件の欠けで全体を巻き戻さない)。
@@ -79,11 +79,11 @@ model DmExportBatchItem {
 ### 2.2 送付確定(一括)
 
 - `GET /api/properties/dm-batches?unconfirmed=1` — 確定モーダル用の一覧(出力日時・件数・確定状態。中身の宛先は返さない)。
-- `POST /api/properties/dm-batches/[id]/confirm` body=`{ sentOn: "YYYY-MM-DD" }`。**sentOn は JST の今日以前のみ受理**(@codex R36 P2: 未来日の打ち間違いを通すと、実在しない送付が履歴に載り、再送候補がその未来日+90日まで誤って抑止される。個別記録 POST も同じ検証)。
+- `POST /api/properties/dm-batches/[id]/confirm` body=`{ sentOn: "YYYY-MM-DD" }`。**sentOn は「バッチ作成日(JST)以降〜今日以前」のみ受理**(@codex R36/R40 P2: 未来日は実在しない送付を作り、作成日より前の過去日(年の打ち間違い等)は90日経過扱いで全宛先が即再送候補になる。個別記録 POST は過去日可・今日以前のみ)。
 - ゲート: 既存 export と同じ4権限+**property:write**(書込は mark-sent/outcome と同じ統一方針・新slugなし)。
 - **スコープ外 item の扱い(@codex R3 P2)**: field_staff の担当変更などで**1件でもスコープ外の item がある場合、確定を 403 で拒否**する(スキップして confirmedAt を立てると、その宛先の送付記録が**永久に欠ける**=後から権限のある人が確定しようとしても「確定済み」で弾かれるため)。エラーには「スコープ外が N 件・管理者/事務担当で確定してください」と理由を出す。部分確定(item単位の確定状態)は作らない=単純さ優先(実運用は管理者2名で、まず起きない)。
 - 冪等: `confirmedAt` が null の場合のみ、条件付き updateMany(勝者決定)→ 同一 tx で items から `PropertyDmLog` を生成。二重確定は 409。
-- ⚠**items の読み取りは tx 内で `FOR UPDATE`**(@codex R14 P1): tx 前に読んだ item の ownerId を使うと、並行する所有者の名寄せが item を master へ付け替えた後に **archive 済みの旧所有者の id でログを作る**(mark-sent と同型の穴)。確定 tx はバッチ行ロック→**item 行を FOR UPDATE で読み直し**、その時点の ownerId で記録する(名寄せ側の item 付け替え(§4-5b)と行ロックで直列化される)。
+- ⚠**items の所有者は tx 内で読み直す**(@codex R14 P1 → R40 P2 で順序統一): 確定 tx は **「items を先読み(ロックなし)→ 所有者集合(代表+連関)を安定 id 順に FOR SHARE → バッチ行と item 行を FOR UPDATE で再読取 → 所有者が先読みと不一致なら中止・再試行」** の型(§下記ロック順序=Owner→親→子)で、その時点の ownerId で記録する。tx 前スナップショットの使用や「子を先にロックして直列化の根拠にする」ことはしない(名寄せの Owner 先頭ロックと相互待ちになる)。
 - 生成する行: `propertyId / ownerId(代表) / dmType="owner_address" / batchId / sentAt=sentOn / method="mail" / sentBy=操作者`。
 - **「何通目」は列で持たず、表示時に導出する**(@codex R26 P2 を機に方式変更・採番系を全廃):
   - 表示 API(DM送付履歴)が、物件ごとの記録を **`sentAt, createdAt, id` 順に並べた時系列の連番**を計算して返す(SQL window か app 側。1物件の記録は少数なので負荷は無視できる)。
@@ -91,7 +91,7 @@ model DmExportBatchItem {
   - これに伴い R2-2(MAX+1)・R20(backfill順序)・R7/R8/R24(migration-A2 の段階投入と advisory lock)の採番系対策は**不要化**(対応履歴に経緯として残す)。migration-A2 自体が消え、**migration は A(列追加のみ)の1本**になる。
   - 同一バッチ内の同物件複数行は sentAt が同日で同順位になり得る→表示は createdAt, id で安定に並ぶ(順位の重複表示は許容: 同日に2通は事実)。
 - **ロック順序の統一(@codex R2 P2 → R22 P1 → R26 で採番 advisory を除去)**: 全 DM writer の順序は **「Owner(代表所有者) → variant → 物件親行 → 子行(item/draft/log)」** の一方向。⚠log の insert は owner FK の暗黙ロックを**最後に**取るため、子行を先にロックする writer と「Owner→子」の統合 tx(5d)が混ざると相互待ちになる。子を読まないと所有者が分からない writer(一括確定・mark-sent)は **「先読み(ロックなし)→ Owner を id 順にロック → 子行を FOR UPDATE で再読取 → 所有者が先読みと不一致なら中止して再試行(409/リトライ)」** の型で順序を守る。⚠ロック対象の Owner は**代表だけでなく連関(item_owners/draft_owners)の全所有者**(@codex R31 P1: 代表以外の共有者が並行統合されると、掃き終わった後に archive 済み所有者への連関を作ってしまう)。配線テスト(呼び出し順のソース固定)で全経路を固定する。
-- **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。⚠あわせて mark-sent は **`DmRecipientDraft.representativeOwnerId` を `owner_id` にコピー**し、**下書きの共有者グループ全員を `property_dm_log_owners` にコピー**する(@codex R9/R30 P1)。グループの保存のため連関 **`dm_recipient_draft_owners`(draft_id FK Cascade, owner_id FK Cascade)** も migration-A に追加し、**キャンペーン作成(宛先生成)時にグループ全員を保存**する(現行は代表+人数しか持たない)。⚠**既存の未送付 draft(連関が空)は補完せず、代表のみで記録**する(@codex R31→R33→R34 で確定した最終形): 現在の所有者情報からグループを再計算しても「実際に手紙を受け取る宛先」と一致する保証が無く(R33 P2)、氏名・住所・人数のスナップショット照合でも**同住所での共有者の入れ替え**は検知できない(R34 P2)。不確かな拡張はせず、**移行後に作られた draft(作成時にグループを保存済み)だけが全員連関の対象**。旧 draft は従来どおり代表のみ(監査 detail に legacyGroup を記録)。対象は移行前の未送付下書きのみ=本番は売却DM休眠中でほぼゼロ。これが無いと新しい売却DM経由の拒否/宛先不明が「所有者なし」になり、§4-5 の所有者単位の除外が**新規行に対して効かない**(旧行だけの限界のはずが新規にも及ぶ)。⚠コピー元は **tx 内で(条件付き updateMany の勝者決定後に)draft を再読取した値**を使う(@codex R13 P1): tx 前のスナップショットを使うと、並行する名寄せが draft を master へ付け替えた後に **archive 済みの旧所有者の id でログを作ってしまう**(以後の拒否が所有者横断の除外から見えない)。updateMany が draft 行をロックするため、tx 内の再読取は名寄せと自然に直列化される。
+- **売却DMブリッジの紐付け**: migration-A で `draft_id String? @db.Uuid` も追加し、mark-sent が作る行に draft の id を残す(§3 の反響同期で使う)。⚠あわせて mark-sent は **`DmRecipientDraft.representativeOwnerId` を `owner_id` にコピー**し、**下書きの共有者グループ全員を `property_dm_log_owners` にコピー**する(@codex R9/R30 P1)。グループの保存のため連関 **`dm_recipient_draft_owners`(draft_id FK Cascade, owner_id FK Cascade)** も migration-A に追加し、**キャンペーン作成(宛先生成)時にグループ全員を保存**する(現行は代表+人数しか持たない)。⚠**既存の未送付 draft(連関が空)は補完せず、代表のみで記録**する(@codex R31→R33→R34 で確定した最終形): 現在の所有者情報からグループを再計算しても「実際に手紙を受け取る宛先」と一致する保証が無く(R33 P2)、氏名・住所・人数のスナップショット照合でも**同住所での共有者の入れ替え**は検知できない(R34 P2)。不確かな拡張はせず、**移行後に作られた draft(作成時にグループを保存済み)だけが全員連関の対象**。旧 draft は従来どおり代表のみ(監査 detail に legacyGroup を記録)。対象は移行前の未送付下書きのみ=本番は売却DM休眠中でほぼゼロ。これが無いと新しい売却DM経由の拒否/宛先不明が「所有者なし」になり、§4-5 の所有者単位の除外が**新規行に対して効かない**(旧行だけの限界のはずが新規にも及ぶ)。⚠コピー元は **tx 内で(条件付き updateMany の勝者決定後に)draft を再読取した値**を使う(@codex R13 P1): tx 前のスナップショットを使うと、並行する名寄せが draft を master へ付け替えた後に **archive 済みの旧所有者の id でログを作ってしまう**(以後の拒否が所有者横断の除外から見えない)。mark-sent も同じ型=**draft を先読み→所有者集合(代表+連関)を id 順に FOR SHARE→条件付き updateMany(draft ロック)→draft を再読取→所有者不一致なら中止・再試行**(@codex R40 P2: 子ロックを直列化の根拠にせず、Owner 先頭の全体順序に従う)。
 - UI: 物件一覧の「DM差込CSV出力」の隣に「**送付の確定**」→ 未確定バッチ一覧(出力日時・件数)→ 投函日(既定=今日)→ 確定。確定済み件数を表示して閉じる。
 - 未確定バッチが溜まった場合の掃除は当面しない(件数小・一覧は直近から表示)。必要になれば既存の日次クリーンアップに載せる(将来)。
 
@@ -136,6 +136,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
   - ⚠**上書きされた手動値は退避して保全**(@codex R19 P2): 同期の undeliverable が手動の replied を上書きすると source が sync になり、後で返戻が**訂正**されたとき戻し先が no_response になって**本物の「連絡あり」が消える**。migration-B に退避列 `manual_reaction_shadow TEXT?` を足し、同期が手動値を上書きするときは旧値を退避、訂正の戻しは **shadow があればそれへ復元(source=manual)・無ければ no_response** とする。
   - shadow のライフサイクル(@codex R23 P2): **(1) 手動入力(PATCH)は常に shadow をクリア**(最新の手動入力だけが真実=古い退避値が後から蘇らない)、**(2) 退避は「同期が manual 値を上書きする瞬間」のみ**、**(3) 復元は shadow を消費(復元と同時にクリア)**。これが無いと、復元→手動で no_response に変更→再度の返戻と訂正、の流れで**廃止済みの replied が蘇り**再送候補から誤って外れる。
   - 同期は manual 行への **no_response への格下げを行わない**。訂正の戻し(undeliverable解除等)も sync 由来の値にしか触れない。
+  - ⚠**draft_id が無い旧 sale_dm 行への手動更新も、保存直後に「propertyId+JST送付日の保守的フォールバック」を再適用**する(@codex R40 P2: 照合が付けた保守的な反響を手動 no_response で消しても、対応する draft に反響の証拠が残っていれば戻す。将来の同期イベントは保証されないため保存時に行う)。
   - ⚠**訂正の戻し先は「shadow → draft の現況から再導出 → no_response」の順**(@codex R27 P2): 同期の replied(LPアクセス・電話)が同期の undeliverable に上書きされた場合、shadow(手動専用)は空のままなので、盲目的に no_response へ戻すと**下書きに残っている反響(inquiry)が消える**。訂正時は shadow が無ければ **draft の現況(outcome/lpFirstAccessAt/phoneInquiryAt)に同期規則を再適用**して戻し先を導出する。
   - ⚠**売却DM側の訂正による dmUndeliverableAt の再計算も両方を見る**(@codex R10 P2): 既存の outcome 訂正は **DmRecipientDraft の行だけ**を数えて dmUndeliverableAt を解除するため、汎用ログ側に undeliverable(手動含む)が残っていてもフラグが消え、「宛先不明のみ」フィルタから漏れる。outcome 訂正の解除判定を**drafts と PropertyDmLog の両方**を親ロック下で数える形に改修する(§2.3 の削除時再計算と対の規則)。
 - `PATCH /api/properties/[id]/dm-logs/[logId]/reaction` body=`{ status, reactedAt?, note? }` — property:write + record scope + lock規約。
@@ -217,3 +218,4 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R37(2026-08-08): P2(旧行照合の送付日はJST暦日で比較・深夜境界テスト)を反映。外部AI方式側のP2×2は別紙。
 - R38(2026-08-08): P2×2(attemptKey必須化=鍵なし400・サーバー発行を撤回 / クールダウンcutoffもJST暦日で導出)を反映。
 - R39(2026-08-08): P2(クライアント発行キーではcross-site作成を防げない)→**出力を「POSTで控え作成→GETでitemsからCSV」の2段階に再構成**。CSRF境界で無限作成を封じ、content_digest照合は構造的に不要化(列削除)。
+- R40(2026-08-08): P1(CSV GETにも4権限+現在スコープ再検証)・P2×3(確定/mark-sentの子先ロック記述をOwner先頭の型へ統一 / バッチsentOnは作成日以降 / 旧行への手動更新も保守的再適用)を反映。外部AI方式側のP2(個別PATCHのtrim検証)は別紙。

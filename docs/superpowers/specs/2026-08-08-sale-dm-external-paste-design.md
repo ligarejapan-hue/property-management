@@ -49,7 +49,7 @@
 - **型の凍結(@codex R3 P1・R15 P2で精緻化)**: variant 配下に confirmed/sent の draft が**1件でもできたら、その variant の prompt_text/body_template は変更禁止**(貼り直し不可)。途中で差し替えると同じ型の中に旧文面と新文面が混在し、**A/B比較(variant単位の集計)が壊れ、送付済み文面の出所も失われる**。文面を変えたいときは**新しい型を追加**する。⚠ただし**「変更のない同一テンプレの適用」は凍結後も許可**する(@codex R15 P2): 既存の割当(assign)route は draft を凍結済み variant へも移せて、その際 body をクリアするため、再適用を全面禁止すると**空本文のまま進めない詰み**が生じる。同一テンプレを空本文の draft に適用しても文面の混在は起きない(禁止すべきは差し替えであって適用ではない)。
 - **凍結判定と確定の直列化(@codex R5 P2)**: 凍結チェック(confirmed/sent が無いこと)を無ロックで行うと、並行する確定(既存 confirm route の updateMany)と競合し「旧本文のまま確定された draft と、差し替わった body_template」の食い違いが起きる。**貼り付け/適用の tx と、drafts の確定の tx は、対象 variant 行を id 順に FOR UPDATE してから**状態を判定・書込する(両経路で同じロック順序。確定 route 側にも variant 行ロックを追加する)。
 - **variant を触る全経路でロック順序を統一(@codex R6 P2)**: ⚠既存の **variant 設定 PATCH は「draft 行→variant」の順でロックしており**(variants/[variantId]/route.ts L80-86)、新設の「variant→draft」経路と混ざるとデッドロックする。**既存 route も含めて「variant 行 → 物件親行(field_staffのみ) → draft 行」の一方向に揃える**(既存 PATCH の改修を本 PR-D のスコープに含める)。送付記録側(§別紙)の順序と合わせた全体規約: **Owner(代表所有者) → variant → 物件親行 → 子行**(採番 advisory は別紙 R26 で廃止済み・@codex R37 P2。各 tx は必要なものだけを、常にこの順で取る)。配線テストで順序を固定する。
-- 個別の手直しは既存の draft 編集を使う。⚠**既存の draft 編集 PATCH にも property:write を追加**する(@codex R10 P2): 現行は requireSaleDmAccess のみで、一括適用に write 門を付けても**1宛先ずつの編集で迂回できる**(権限を剥奪された作成者が本文を書き換えられる)。同じ結果を生む全経路に同じ門([同種の穴は全箇所]の原則)。
+- 個別の手直しは既存の draft 編集を使う。**既存 PATCH に trim 検証も追加**(空白・改行のみの本文は 400=@codex R40 P2: 貼り付け側だけ検証しても手編集で白紙が確定・印刷まで通る)。⚠**既存の draft 編集 PATCH にも property:write を追加**する(@codex R10 P2): 現行は requireSaleDmAccess のみで、一括適用に write 門を付けても**1宛先ずつの編集で迂回できる**(権限を剥奪された作成者が本文を書き換えられる)。同じ結果を生む全経路に同じ門([同種の穴は全箇所]の原則)。
 - ⚠**drafts 確定(confirm route)にも field_staff の親行ロックを追加**(@codex R10 P2): 確定はスコープ述語を無ロックで評価しており、担当変更と競合すると**アクセスを失った後の確定**が通る(TOCTOU)。本 PR-D で確定 route に variant 行ロックを足す際、field_staff の場合は**対象物件の親行も id 順に FOR UPDATE し、保持したままスコープを再検証**する(順序=variant→親→子)。
 - 空本文の draft は確定・印刷に進めない(既存の `body: { not: "" }` ガードと整合)。
 
@@ -121,3 +121,4 @@ dm_variants に追加:
 - R35(2026-08-08): P2(凍結固定を「確定を解除しうる全mutation」(本文編集による確定解除含む)へ一般化)を反映。
 - R36(2026-08-08): P2(論点5の旧saleDmLetter残置記述を置換・撤去の契約へ更新)を反映。
 - R37(2026-08-08): P2×2(ロック順序の残骸をOwner先頭へ置換 / restart前の窓は反映手順の連続実施+操作禁止の運用で塞ぐ)を反映。
+- R40(2026-08-08): P2(個別draft PATCHにもtrim検証=白紙本文の確定防止)を反映。
