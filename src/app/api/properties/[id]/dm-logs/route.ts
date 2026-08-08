@@ -73,13 +73,14 @@ export async function GET(
 
     const where = { propertyId };
 
-    const [logs, total] = await Promise.all([
+    const [logs, total, allIdsAsc] = await Promise.all([
       prisma.propertyDmLog.findMany({
         where,
         select: {
           id: true,
           sentAt: true,
           method: true,
+          dmType: true,
           note: true,
           createdAt: true,
           sender: { select: { id: true, name: true } },
@@ -89,7 +90,17 @@ export async function GET(
         take: limit,
       }),
       prisma.propertyDmLog.count({ where }),
+      // 「何通目」は列で持たず表示時に導出する(設計§2.2・R26): 物件内の全記録を
+      // sentAt,createdAt,id の時系列昇順で並べた連番。後から入れた古い投函日の個別記録も
+      // 自動的に正しい位置に入る(採番列だと MAX+1 で永久にずれる)。1物件の記録は少数。
+      prisma.propertyDmLog.findMany({
+        where,
+        select: { id: true },
+        orderBy: [{ sentAt: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      }),
     ]);
+
+    const sequenceById = new Map(allIdsAsc.map((row, i) => [row.id, i + 1]));
 
     // note は所有者備考と同じ表示レベルで server-side マスク（生値を返さない）。
     const data = logs.map((log) => ({
@@ -98,6 +109,8 @@ export async function GET(
       // クライアントでの TZ 依存の日付ずれ（負オフセットで前日表示）を防ぐ。
       sentAt: log.sentAt.toISOString().slice(0, 10),
       method: log.method,
+      dmType: log.dmType,
+      sequence: sequenceById.get(log.id) ?? 0,
       note: maskValue(log.note, ownerDisplayConfig.note),
       sentBy: { id: log.sender.id, name: log.sender.name },
       createdAt: log.createdAt,

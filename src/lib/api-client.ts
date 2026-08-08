@@ -3677,3 +3677,34 @@ export async function confirmDmBatch(
     },
   );
 }
+
+/** 個別の送付記録(手渡し等)を追加する。sentOn=YYYY-MM-DD(過去日可・今日以前)。 */
+export async function createPropertyDmLog(
+  propertyId: string,
+  data: { sentOn: string; method?: "mail" | "hand_delivery" | "other"; note?: string },
+): Promise<{ id: string }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id: "mock-dm-log-1" };
+  }
+  return apiFetch<{ id: string }>(`/api/properties/${propertyId}/dm-logs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+/** 送付記録の取消(記録ミスの訂正)。売却DM由来の行はサーバが 409 で拒否する。 */
+export async function deletePropertyDmLog(
+  propertyId: string,
+  logId: string,
+): Promise<{ deleted: boolean }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { deleted: true };
+  }
+  return apiFetch<{ deleted: boolean }>(
+    `/api/properties/${propertyId}/dm-logs/${logId}`,
+    { method: "DELETE" },
+  );
+}
