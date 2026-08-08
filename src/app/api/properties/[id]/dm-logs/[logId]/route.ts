@@ -42,7 +42,7 @@ export async function DELETE(
       await lockPropertyRecordForWrite(tx, propertyId, session);
       const log = await tx.propertyDmLog.findFirst({
         where: { id: logId, propertyId },
-        select: { id: true, method: true },
+        select: { id: true, method: true, batchId: true },
       });
       if (!log) {
         throw new ApiError(404, "送付記録が見つかりません", "NOT_FOUND");
@@ -52,6 +52,16 @@ export async function DELETE(
           409,
           "売却DMの送付記録はここでは取り消せません。売却DMの画面から操作してください",
           "SALE_DM_LOG",
+        );
+      }
+      // 一括確定で作られた行の単独削除は不可(@codex #364 R3): 控えは確定済みのまま
+      // 履歴だけが欠け、確定APIは ALREADY_CONFIRMED で二度と作り直せない(送付回数・
+      // 再送除外も「未送付」扱いに化ける)。取り消しはバッチ単位の機能として別途設ける。
+      if (log.batchId) {
+        throw new ApiError(
+          409,
+          "一括確定で記録された送付はここでは取り消せません",
+          "BATCH_LOG",
         );
       }
       await tx.propertyDmLog.delete({ where: { id: logId } });

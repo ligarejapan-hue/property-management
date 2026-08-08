@@ -132,7 +132,7 @@ beforeEach(() => {
   vi.mocked(assertPropertyRecordAccess).mockResolvedValue(undefined);
   vi.mocked(lockPropertyRecordForWrite).mockResolvedValue(undefined);
   pm.propertyDmLog.create.mockResolvedValue({ id: LOG_ID });
-  pm.propertyDmLog.findFirst.mockResolvedValue({ id: LOG_ID, method: "mail" });
+  pm.propertyDmLog.findFirst.mockResolvedValue({ id: LOG_ID, method: "mail", batchId: null });
   pm.propertyDmLog.delete.mockResolvedValue({});
 });
 
@@ -202,10 +202,24 @@ describe("POST /api/properties/[id]/dm-logs(個別記録)", () => {
 });
 
 describe("DELETE /api/properties/[id]/dm-logs/[logId](取消)", () => {
+  it("一括確定(batchId あり)の行は 409・削除しない(#364 R3)", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue({
+      id: LOG_ID,
+      method: "mail",
+      batchId: "batch-1",
+    });
+    const res = await DELETE(deleteRequest(), deleteCtx);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("一括確定");
+    expect(pm.propertyDmLog.delete).not.toHaveBeenCalled();
+  });
+
   it("sale_dm 行は 409(売却DM画面へ誘導)・削除しない", async () => {
     pm.propertyDmLog.findFirst.mockResolvedValue({
       id: LOG_ID,
       method: "sale_dm",
+      batchId: null,
     });
     const res = await DELETE(deleteRequest(), deleteCtx);
     expect(res.status).toBe(409);
