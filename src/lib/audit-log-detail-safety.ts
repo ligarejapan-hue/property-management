@@ -417,7 +417,7 @@ const ACTION_FORCE_SAFE_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // 限って force-safe で保持する（全 action 一律にすると ownerName 等の
   // 取りこぼしリスクが出るため、action を明示する）。
   owner_memo_create: new Set(["ownerId"]),
-  owner_correction_merge: new Set(["sourceOwnerId", "targetOwnerId"]),
+  owner_correction_merge: new Set(["sourceOwnerId", "targetOwnerId", "dmLogsMoved", "dmBatchItemsMoved", "dmDraftsMoved", "dmAssociationsMoved"]),
   owner_correction_mislink: new Set([
     "propertyOwnerId",
     "previousOwnerId",

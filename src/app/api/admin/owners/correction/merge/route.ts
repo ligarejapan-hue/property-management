@@ -372,6 +372,10 @@ export async function POST(request: NextRequest) {
     let propertyOwnersMoved = 0;
     let propertyOwnersDeduplicated = 0;
     let ownerMemosMoved = 0;
+    let dmLogsMoved = 0;
+    let dmBatchItemsMoved = 0;
+    let dmDraftsMoved = 0;
+    let dmAssociationsMoved = 0;
     const newMasterVersion = masterVersion + 1;
     const newSourceVersion = sourceVersion + 1;
 
@@ -508,6 +512,60 @@ export async function POST(request: NextRequest) {
         }
         propertyOwnersMoved = moveTargets.length;
 
+        // 7b. DM送付管理(PR-A)の付け替え: 反響・控え・下書きの所有者参照を master へ移す。
+        //     これをしないと archive された source に付いた拒否/宛先不明の記録が
+        //     所有者横断の再送除外(§4)から見えなくなる(@codex R11/R12/R32 P1)。
+        //     連関3表は master 側に同じ行がある source 行を先に消してから移す(複合PK衝突回避)。
+        dmLogsMoved = (
+          await tx.propertyDmLog.updateMany({
+            where: { ownerId: sourceFresh.id },
+            data: { ownerId: masterFresh.id },
+          })
+        ).count;
+        dmBatchItemsMoved = (
+          await tx.dmExportBatchItem.updateMany({
+            where: { ownerId: sourceFresh.id },
+            data: { ownerId: masterFresh.id },
+          })
+        ).count;
+        dmDraftsMoved = (
+          await tx.dmRecipientDraft.updateMany({
+            where: { representativeOwnerId: sourceFresh.id },
+            data: { representativeOwnerId: masterFresh.id },
+          })
+        ).count;
+        await tx.$executeRaw`DELETE FROM dm_export_batch_item_owners s
+          WHERE s.owner_id = ${sourceFresh.id}::uuid
+            AND EXISTS (SELECT 1 FROM dm_export_batch_item_owners m
+                        WHERE m.item_id = s.item_id AND m.owner_id = ${masterFresh.id}::uuid)`;
+        await tx.$executeRaw`DELETE FROM property_dm_log_owners s
+          WHERE s.owner_id = ${sourceFresh.id}::uuid
+            AND EXISTS (SELECT 1 FROM property_dm_log_owners m
+                        WHERE m.log_id = s.log_id AND m.owner_id = ${masterFresh.id}::uuid)`;
+        await tx.$executeRaw`DELETE FROM dm_recipient_draft_owners s
+          WHERE s.owner_id = ${sourceFresh.id}::uuid
+            AND EXISTS (SELECT 1 FROM dm_recipient_draft_owners m
+                        WHERE m.draft_id = s.draft_id AND m.owner_id = ${masterFresh.id}::uuid)`;
+        dmAssociationsMoved =
+          (
+            await tx.dmExportBatchItemOwner.updateMany({
+              where: { ownerId: sourceFresh.id },
+              data: { ownerId: masterFresh.id },
+            })
+          ).count +
+          (
+            await tx.propertyDmLogOwner.updateMany({
+              where: { ownerId: sourceFresh.id },
+              data: { ownerId: masterFresh.id },
+            })
+          ).count +
+          (
+            await tx.dmRecipientDraftOwner.updateMany({
+              where: { ownerId: sourceFresh.id },
+              data: { ownerId: masterFresh.id },
+            })
+          ).count;
+
         // 8. source を archive。防御的に propertyOwners: { none: {} } と
         //    ownerMemos: { none: {} } を where に含める。
         //    本来 6/7 + 5 で 0 件になっているはずだが、並行レースで増えていた
@@ -639,6 +697,10 @@ export async function POST(request: NextRequest) {
         propertyOwnersMoved,
         propertyOwnersDeduplicated,
         ownerMemosMoved,
+        dmLogsMoved,
+        dmBatchItemsMoved,
+        dmDraftsMoved,
+        dmAssociationsMoved,
         sourceArchived: true,
       },
     });
@@ -653,6 +715,10 @@ export async function POST(request: NextRequest) {
         propertyOwnersMoved,
         propertyOwnersDeduplicated,
         ownerMemosMoved,
+        dmLogsMoved,
+        dmBatchItemsMoved,
+        dmDraftsMoved,
+        dmAssociationsMoved,
         sourceArchived: true,
       },
     });
