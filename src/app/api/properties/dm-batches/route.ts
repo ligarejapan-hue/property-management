@@ -62,6 +62,45 @@ const createBatchSchema = z.object({
   attemptKey: z.string().min(8).max(128),
 });
 
+// ---------- GET /api/properties/dm-batches?unconfirmed=1 ----------
+//
+// 確定モーダル用の一覧(§2.2)。出力日時・件数・DL/確定状態のみ返し、宛先(PII)は返さない。
+// field_staff は自分が作成した控えのみ。admin/office は全員分(スコープ外 403 で止まった
+// field_staff の控えを引き継いで確定する導線)。直近50件。
+export async function GET(request: NextRequest) {
+  try {
+    const session = await getApiSession();
+    const permissions = await getUserPermissions(session.id);
+    if (!hasPermission(permissions, "property", "read")) {
+      throw new ApiError(403, "物件一覧の閲覧権限がありません", "FORBIDDEN");
+    }
+    if (!hasPermission(permissions, "csv_export", "read")) {
+      throw new ApiError(403, "CSV エクスポートの権限がありません", "FORBIDDEN");
+    }
+    const { searchParams } = new URL(request.url);
+    const unconfirmedOnly = searchParams.get("unconfirmed") === "1";
+    const batches = await prisma.dmExportBatch.findMany({
+      where: {
+        ...(unconfirmedOnly ? { confirmedAt: null } : {}),
+        ...(session.role === "field_staff" ? { createdBy: session.id } : {}),
+      },
+      select: {
+        id: true,
+        createdAt: true,
+        rowCount: true,
+        downloadedAt: true,
+        confirmedAt: true,
+        createdBy: true,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+    return apiResponse({ data: batches });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const session = await getApiSession();

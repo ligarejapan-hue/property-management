@@ -22,6 +22,13 @@ import {
   type PropertyStateForCheck,
 } from "@/lib/dm-batch/eligibility";
 import { buildBatchCsv, sha256Hex } from "@/lib/dm-batch/csv";
+import {
+  readItemsWithOwners,
+  itemSetKey,
+  collectOwnerIds,
+  collectPropertyIds,
+  type BatchItemTxLike,
+} from "@/lib/dm-batch/items";
 
 // ---------- GET /api/properties/dm-batches/[id]/csv ----------
 //
@@ -36,55 +43,6 @@ import { buildBatchCsv, sha256Hex } from "@/lib/dm-batch/csv";
 //
 // 資格検査(checkBatchEligibility)は (1)scope (3)送付可能+リンク (4)null除外 (6)グループ一致。
 // (2)terminal反響=PR-B / (5)再送候補述語=PR-C で同関数に追加される(本 route は不変)。
-
-interface LoadedItem extends BatchItemForCheck {
-  /** propertyId が null でない item のみ CSV 対象(null は資格検査で除外集合へ) */
-  propertyId: string | null;
-}
-
-async function readItemsWithOwners(
-  tx: {
-    dmExportBatchItem: {
-      findMany: (args: unknown) => Promise<
-        Array<{
-          id: string;
-          propertyId: string | null;
-          ownerId: string | null;
-          itemOwners: Array<{ ownerId: string }>;
-        }>
-      >;
-    };
-  },
-  batchId: string,
-): Promise<LoadedItem[]> {
-  const rows = await tx.dmExportBatchItem.findMany({
-    where: { batchId },
-    select: {
-      id: true,
-      propertyId: true,
-      ownerId: true,
-      itemOwners: { select: { ownerId: true } },
-    },
-    orderBy: { id: "asc" },
-  });
-  return rows.map((r) => ({
-    id: r.id,
-    propertyId: r.propertyId,
-    ownerId: r.ownerId,
-    groupOwnerIds: r.itemOwners.map((o) => o.ownerId),
-  }));
-}
-
-function itemSetKey(items: LoadedItem[]): string {
-  return JSON.stringify(
-    items.map((it) => [
-      it.id,
-      it.propertyId,
-      it.ownerId,
-      [...it.groupOwnerIds].sort(),
-    ]),
-  );
-}
 
 async function loadPropertyStates(
   tx: {
@@ -185,20 +143,13 @@ export async function GET(
 
     const result = await prisma.$transaction(async (tx) => {
       const rawTx = tx as unknown as RawTx;
-      const itemsTx = tx as unknown as Parameters<typeof readItemsWithOwners>[0];
+      const itemsTx = tx as unknown as BatchItemTxLike;
       const propsTx = tx as unknown as Parameters<typeof loadPropertyStates>[0];
 
       // 先読み(ロックなし)→ Owner→物件親行→バッチ行の順でロック(順序規約§2.2)。
       const pre = await readItemsWithOwners(itemsTx, batchId);
-      const preOwnerIds = pre.flatMap((it) => [
-        ...(it.ownerId ? [it.ownerId] : []),
-        ...it.groupOwnerIds,
-      ]);
-      const prePropertyIds = pre
-        .map((it) => it.propertyId)
-        .filter((v): v is string => v != null);
-      await lockOwnersForShare(rawTx, preOwnerIds);
-      await lockPropertiesForShare(rawTx, prePropertyIds);
+      await lockOwnersForShare(rawTx, collectOwnerIds(pre));
+      await lockPropertiesForShare(rawTx, collectPropertyIds(pre));
       const batchRows = await rawTx.$queryRaw<
         Array<{
           id: string;
@@ -222,10 +173,7 @@ export async function GET(
         );
       }
 
-      const propertyIds = items
-        .map((it) => it.propertyId)
-        .filter((v): v is string => v != null);
-      const properties = await loadPropertyStates(propsTx, propertyIds);
+      const properties = await loadPropertyStates(propsTx, collectPropertyIds(items));
       const elig = checkBatchEligibility(items, properties, session);
 
       if (elig.scopeMissingCount > 0) {
