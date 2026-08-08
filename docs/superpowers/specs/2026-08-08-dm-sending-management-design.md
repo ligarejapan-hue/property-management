@@ -159,6 +159,7 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
   4. replied / refused / undeliverable の反響が付いた記録が**1件も無い**
   5. **所有者単位の除外(@codex R8 P1)**: その物件の所有者(PropertyOwner 経由)の誰かに、**他物件も含めて** refused / undeliverable の反響ログ(`Owner.dmLogs`=migration-A の逆リレーション)が付いていれば除外する。同じ所有者が物件AとBに紐づくとき、Aで拒否された相手にBから再送する事故を防ぐ(Prisma: `owners: { none: { owner: { dmLogs: { some: { reactionStatus: { in: [refused, undeliverable] } } } } } }` 相当)。⚠限界: ownerId が null の記録(個別記録・旧sale_dm行)は物件単位でしか効かない。また「所有者行は別だが住所が同じ」相手は所有者の名寄せ(既存の品質チェック領域)の守備範囲とし、本機能では扱わない(§6 論点)。
   5b. ⚠**所有者の名寄せ(重複統合)で反響を置き去りにしない**(@codex R11 P1): 既存の統合 tx はメモと PropertyOwner 行を master へ移すが、このままだと **archive された旧所有者に付いた反響ログ**が述語から見えなくなり、統合後の所有者の他物件が再送候補に戻る。統合 tx に **`PropertyDmLog.ownerId`・未確定バッチ item の ownerId・`DmRecipientDraft.representativeOwnerId`(未送付の下書き=後で mark-sent が owner_id へコピーする「予約」)の付け替え(source→master)**を追加する(@codex R11/R12 P1。PR-A のスコープ=merge route の改修。付け替えは既存の owner FK 群の移送と同じ場所に足し、対象は grep で全列挙して確認する)。
+  5c. ⚠**所有者参照を「新規に作る」側も名寄せと直列化する**(@codex R18 P1): 付け替えは既存行にしか効かない。キャンペーン作成(宛先 drafts の representativeOwnerId)と export(控え item の ownerId)は、**tx 前のスナップショットで所有者を決めて後から insert** しており、その隙間で統合が完了すると **archive 済みの旧所有者を参照する新規行**ができる。対策: 所有者参照を新規作成する tx は、**代表所有者の確定(selectGroupRepresentative)を insert と同一 tx 内で行い、対象 Owner 行を `FOR SHARE` で保持したまま insert** する。統合 tx は source Owner 行を更新(archive)するため FOR SHARE と衝突して直列化され、(a) 統合が先なら再解決が master を掴み、(b) 作成が先なら commit 後に統合の一括付け替え(5b)が新規行も含めて移す。
 - replied を除外する理由: 連絡が来ている相手は人が個別対応する(定型の再送に乗せない)。
 - `COOLDOWN_DAYS = 90`(定数)。env `DM_RESEND_COOLDOWN_DAYS` で上書き可(業務値の変更にリリース不要)。上限(cap)は作らない。
 - 純関数 `decideResendCandidacy({logs, ownerHasTerminalReaction}, now, {cooldownDays})` → `{eligible, reason}`(表示とテストの単一情報源。一覧 where と同じ規則を対で維持)。⚠入力には物件自身の logs に加えて **所有者単位の除外状態**(その物件の所有者の誰かに他物件も含め refused/undeliverable があるか=@codex R9 P2)を渡す。呼び出し側が §4-5 と同じクエリでこのフラグを計算する=規則の組み合わせ自体は純関数に集約され、where と対で維持できる。
@@ -194,3 +195,5 @@ updated_at DateTime @updatedAt // 既存行は DEFAULT now() で埋める
 - R14(2026-08-08): P1(一括確定のitemsもFOR UPDATEでtx内読み直し=名寄せと直列化)を反映。外部AI方式側のP2(凍結variantの削除禁止)は別紙。
 - R15(2026-08-08)は外部AI方式側のみ(別紙)。
 - R16(2026-08-08): P1(照合で一意対応した旧行へdraft_idを永続化+曖昧行への実行時の保守的同期規則)を反映。外部AI方式側のP2(凍結印の稼働後照合)は別紙。
+- R17(2026-08-08)は外部AI方式側のみ(別紙)。
+- R18(2026-08-08): P1(所有者参照の新規作成もFOR SHAREで名寄せと直列化=5c)を反映。外部AI方式側のP2(適用の専用監査)は別紙。

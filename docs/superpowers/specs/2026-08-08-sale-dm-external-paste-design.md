@@ -79,7 +79,7 @@ dm_variants に追加:
 
 ### 2.6 監査
 
-- 新 action: `sale_dm_prompt_view`{variantId,viewedAt} / `sale_dm_body_paste`{variantId,appliedCount,pastedAt}。detail に本文・プロンプトは載せない(プロンプトは非PII設計だが、detail は件数/ID のみの慣例を維持)。
+- 新 action: `sale_dm_prompt_view`{variantId,viewedAt} / `sale_dm_body_paste`{variantId,pastedAt} / **`sale_dm_template_apply`{variantId,appliedCount,skippedScopeCount,skippedTagCount,appliedAt}**(@codex R18 P2: 貼り付けと適用は別操作。多数の draft 本文を書き換える「全宛先に適用」に専用の監査を残し、スコープ除外・タグ未解決のスキップ件数も記録する)。detail に本文・プロンプトは載せない(プロンプトは非PII設計だが、detail は件数/ID のみの慣例を維持)。
 - `ACTION_EXTRA_KEYS` へ登録。
 
 ## 3. 実装の段(PR-D)
@@ -108,3 +108,4 @@ dm_variants に追加:
 - R15(2026-08-08): P2×2(凍結印を既存confirmed/sent variantへbackfill / 凍結は「差し替え禁止・同一テンプレの適用は許可」に精緻化=assign後の空本文詰み解消)を反映。
 - R16(2026-08-08): P2(凍結印の照合を冪等スクリプト化しrestart後に再実行=migrate→restart窓を閉じる)を反映。
 - R17(2026-08-08): P2×2(タグallowlist厳格検証+適用後の残タグはスキップ / プロンプトdigestで貼り付けと版数一致・同一tx保存)を反映。
+- R18(2026-08-08): P2(「全宛先に適用」に専用監査 sale_dm_template_apply=適用/スキップ件数を記録)を反映。
