@@ -27,6 +27,8 @@ import type { AddressLookupCandidate } from "./address-lookup/types";
 // 法人番号 lookup の候補型のみ取得する type-only import（runtime import なし＝
 // server 専用 orchestrator や NTA の appId(secret env) は client bundle に入らない）。
 import type { CorporateLookupRecord } from "./corporate-lookup/types";
+// DM控えの冪等キー採番(本番はHTTPのため crypto.randomUUID は使えない)。
+import { safeRandomId } from "./random-id";
 
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 
@@ -3600,4 +3602,78 @@ export async function fetchPostalCodeAudit(): Promise<PostalCodeAuditResponse> {
     };
   }
   return apiFetch<PostalCodeAuditResponse>("/api/admin/postal-code-audit");
+}
+
+// ---------- DM送付管理(PR-A): 宛名CSVの控えと送付確定 ----------
+
+export interface DmBatchSummary {
+  id: string;
+  createdAt: string;
+  rowCount: number;
+  downloadedAt: string | null;
+  confirmedAt: string | null;
+}
+
+/**
+ * 宛名CSV出力の第1段: 検索条件を評価して控え(バッチ)を作る。
+ * attemptKey は押下ごとに client で採番(本番はHTTPのため crypto.randomUUID は使わない)。
+ * 返った batchId の GET /csv へブラウザ遷移してダウンロードする(第2段)。
+ */
+export async function createDmBatch(
+  filters: Record<string, string>,
+): Promise<{ batchId: string; rowCount: number; reused: boolean }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { batchId: "mock-batch-1", rowCount: 3, reused: false };
+  }
+  return apiFetch<{ batchId: string; rowCount: number; reused: boolean }>(
+    "/api/properties/dm-batches",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filters, attemptKey: safeRandomId() }),
+    },
+  );
+}
+
+/** 送付確定モーダル用: 未確定の控え一覧(非PII)。 */
+export async function fetchUnconfirmedDmBatches(): Promise<{
+  data: DmBatchSummary[];
+}> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      data: [
+        {
+          id: "mock-batch-1",
+          createdAt: new Date().toISOString(),
+          rowCount: 3,
+          downloadedAt: new Date().toISOString(),
+          confirmedAt: null,
+        },
+      ],
+    };
+  }
+  return apiFetch<{ data: DmBatchSummary[] }>(
+    "/api/properties/dm-batches?unconfirmed=1",
+  );
+}
+
+/** 送付確定: 投函日(YYYY-MM-DD)を入れて控えの宛先全件を送付記録にする。 */
+export async function confirmDmBatch(
+  batchId: string,
+  sentOn: string,
+): Promise<{ confirmed: number }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { confirmed: 3 };
+  }
+  return apiFetch<{ confirmed: number }>(
+    `/api/properties/dm-batches/${batchId}/confirm`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sentOn }),
+    },
+  );
 }

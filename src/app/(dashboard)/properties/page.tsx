@@ -4,11 +4,12 @@ import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "rea
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
-import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions, createSaleDmCampaign, clearSaleDmUndeliverable } from "@/lib/api-client";
+import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions, createSaleDmCampaign, clearSaleDmUndeliverable, createDmBatch } from "@/lib/api-client";
 import { canCreateSaleDm, buildSaleDmPartialNotice } from "@/lib/sale-dm-letter/list-ui";
 import { debounce } from "@/lib/debounce";
 import { EXPORT_COLUMNS } from "@/lib/property-export-columns";
 import NewPropertyModal from "@/components/properties/new-property-modal";
+import DmBatchConfirmModal from "@/components/properties/dm-batch-confirm-modal";
 import { RegistryBulkFetchButton } from "@/components/properties/registry-bulk-fetch-button";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import StatusBadge, {
@@ -462,12 +463,28 @@ function PropertiesPageInner() {
     });
   };
 
-  // DM差込CSV の出力: 現在の検索条件を引き継いで dm-export API を開く。
-  // サーバ側で dmStatus=send / isArchived=false を強制するため、
+  // DM差込CSV の出力(2段階・設計§2.1): POST で控え(バッチ)を作成し、返った batchId の
+  // CSV ダウンロード URL へ遷移する。控えがあることで、投函後に「実際に出力した相手にだけ」
+  // 送付記録を確定できる。サーバ側で dmStatus=send / isArchived=false を強制するため、
   // 画面の dmStatus フィルタが hold/no_send でもそのまま渡してよい。
-  const handleExportDm = () => {
-    const qs = new URLSearchParams(buildFilterParams()).toString();
-    window.location.href = `/api/properties/dm-export${qs ? `?${qs}` : ""}`;
+  const [exportingDm, setExportingDm] = useState(false);
+  const [dmConfirmOpen, setDmConfirmOpen] = useState(false);
+  const handleExportDm = async () => {
+    if (exportingDm) return;
+    setExportingDm(true);
+    setError(null);
+    try {
+      const res = await createDmBatch(buildFilterParams());
+      if (res.rowCount === 0) {
+        setError("出力対象がありません。検索条件を確認してください");
+        return;
+      }
+      window.location.href = `/api/properties/dm-batches/${res.batchId}/csv`;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "DM差込CSVの出力に失敗しました");
+    } finally {
+      setExportingDm(false);
+    }
   };
 
   useEffect(() => {
@@ -875,11 +892,24 @@ function PropertiesPageInner() {
           <button
             type="button"
             onClick={handleExportDm}
-            className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-            title="現在の検索条件で送付可の物件をDM差込CSV出力"
+            disabled={exportingDm}
+            className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            title="現在の検索条件で送付可の物件をDM差込CSV出力(控えが作られ、投函後に送付を確定できます)"
           >
-            <Download className="h-4 w-4" />
+            {exportingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             DM差込CSV出力
+          </button>
+        )}
+        {/* 送付の確定: CSV出力(控え)に対して投函日を入れて送付記録を付ける(設計§2.2)。
+            確定APIは property:write も要求するため、出力可否に加えて write 権限でゲートする。 */}
+        {canExportDm && canWriteProperty && (
+          <button
+            type="button"
+            onClick={() => setDmConfirmOpen(true)}
+            className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            title="出力したDMの投函が済んだら、日付を入れて送付記録を付ける"
+          >
+            送付の確定
           </button>
         )}
         {/* 権限(canCreateDm)に加え、文面生成が設定済み(capabilities.saleDmLetter)のときだけ出す。
@@ -919,6 +949,8 @@ function PropertiesPageInner() {
       {showNewModal && (
         <NewPropertyModal onClose={() => setShowNewModal(false)} />
       )}
+
+      <DmBatchConfirmModal open={dmConfirmOpen} onClose={() => setDmConfirmOpen(false)} />
 
       {/* Filter toggle (mobile only) */}
       <div className="mb-2 md:hidden">
