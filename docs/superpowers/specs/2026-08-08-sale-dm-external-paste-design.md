@@ -42,7 +42,7 @@
 - **record scope の適用(@codex R4 P1)**: field_staff の担当変更で見えなくなった物件の draft は**適用対象から原子的に除外**する(既存の `filterDraftsByFieldStaffScope` と同じスコープ条件を update の where に含める)。CSV/印刷が既にこの規則で隠している宛先を、一括適用だけが書き換えられるのは認可の穴。除外した件数は結果に報告する(適用は残りのスコープ内へ行う=1件の担当変更でキャンペーン全体を止めない。送付記録の確定(§別紙2.2)と違い、後から埋め直せるので拒否方式にしない)。
   - ⚠where 条件だけでは足りない(@codex R6 P2): リレーション述語はステートメントのスナップショットで評価され、**判定後〜commit の間の担当変更を防げない**(親の assignedTo 更新は draft 更新のロックと衝突しない=TOCTOU)。field_staff の一括適用は、**対象物件の親行を id 順に FOR UPDATE し、保持したままスコープを検証してから** draft を更新する(送付確定の field_staff 経路(§別紙2.3)と同じ手当て。admin/office は判定が常に真なので親ロック不要)。
 - 上書き保護: **confirmed/sent の draft には適用しない**。既定では **body が空の draft のみ**に適用し、「入力済みの本文も置き換える」チェックを入れた場合のみ draft 状態の全件に適用(個別の手直しを黙って消さない)。
-- **型の凍結(@codex R3 P1)**: variant 配下に confirmed/sent の draft が**1件でもできたら、その variant の prompt_text/body_template は読み取り専用**(貼り直し・再適用とも不可)。途中で差し替えると同じ型の中に旧文面と新文面が混在し、**A/B比較(variant単位の集計)が壊れ、送付済み文面の出所も失われる**。文面を変えたいときは**新しい型を追加**する(既存の variant 追加フローをそのまま使う)。
+- **型の凍結(@codex R3 P1・R15 P2で精緻化)**: variant 配下に confirmed/sent の draft が**1件でもできたら、その variant の prompt_text/body_template は変更禁止**(貼り直し不可)。途中で差し替えると同じ型の中に旧文面と新文面が混在し、**A/B比較(variant単位の集計)が壊れ、送付済み文面の出所も失われる**。文面を変えたいときは**新しい型を追加**する。⚠ただし**「変更のない同一テンプレの適用」は凍結後も許可**する(@codex R15 P2): 既存の割当(assign)route は draft を凍結済み variant へも移せて、その際 body をクリアするため、再適用を全面禁止すると**空本文のまま進めない詰み**が生じる。同一テンプレを空本文の draft に適用しても文面の混在は起きない(禁止すべきは差し替えであって適用ではない)。
 - **凍結判定と確定の直列化(@codex R5 P2)**: 凍結チェック(confirmed/sent が無いこと)を無ロックで行うと、並行する確定(既存 confirm route の updateMany)と競合し「旧本文のまま確定された draft と、差し替わった body_template」の食い違いが起きる。**貼り付け/適用の tx と、drafts の確定の tx は、対象 variant 行を id 順に FOR UPDATE してから**状態を判定・書込する(両経路で同じロック順序。確定 route 側にも variant 行ロックを追加する)。
 - **variant を触る全経路でロック順序を統一(@codex R6 P2)**: ⚠既存の **variant 設定 PATCH は「draft 行→variant」の順でロックしており**(variants/[variantId]/route.ts L80-86)、新設の「variant→draft」経路と混ざるとデッドロックする。**既存 route も含めて「variant 行 → 物件親行(field_staffのみ) → draft 行」の一方向に揃える**(既存 PATCH の改修を本 PR-D のスコープに含める)。送付記録側(§別紙)の順序と合わせた全体規約: **採番 advisory → variant → 物件親行 → 子行**(各 tx は必要なものだけを、常にこの順で取る)。配線テストで順序を固定する。
 - 個別の手直しは既存の draft 編集を使う。⚠**既存の draft 編集 PATCH にも property:write を追加**する(@codex R10 P2): 現行は requireSaleDmAccess のみで、一括適用に write 門を付けても**1宛先ずつの編集で迂回できる**(権限を剥奪された作成者が本文を書き換えられる)。同じ結果を生む全経路に同じ門([同種の穴は全箇所]の原則)。
@@ -60,6 +60,7 @@ dm_variants に追加:
 
 - **凍結は列で永続化する**(@codex R13 P2): 「配下に confirmed/sent が今あるか」から導出すると、**割当(assign)route が confirmed の draft を別 variant へ移して draft に戻す**等の既存操作で証拠が消え、印刷済みの型のテンプレを差し替えられてしまう。confirm が variant ロック下で `template_frozen_at` を立て(初回のみ)、**以後は状態に関係なくこの列だけで凍結を判定**する(不可逆)。
 - **凍結済み variant は削除不可**(@codex R14 P2): 既存の variant DELETE は「宛先が居ないこと」しか見ないため、assign で空にしてから削除すると **prompt_text/body_template/凍結印ごと消え、送付済み文面の出所が失われる**。`template_frozen_at` が立っている variant の DELETE は 409(「送付実績のある型は削除できません」)にする。
+- **凍結印の backfill**(@codex R15 P2): PR-D の migration で、**既に confirmed/sent の draft を持つ variant に `template_frozen_at` を立てる**(値=既存 draft の confirmedAt/sentAt の最小値・無ければ migration 時刻)。列が null のまま始まると、過去に印刷済みの型が編集・削除可能のままになる(本番は売却DM休眠中で対象ゼロの見込みだが手順として行う)。
 
 - **設定変更時の失効(@codex R3 P2)**: 既存の variant 更新 route は、トーン・訴求など**プロンプトに影響する設定を変えたとき drafts の body をクリア**する失効機構を持つ。同じ契機で **prompt_text/body_template も同時にクリア**する(古いプロンプトで作った本文を、新しい設定の型として再適用できてしまう不整合を防ぐ。§2.3 の凍結後は設定変更自体も不可)。
 
@@ -101,3 +102,4 @@ dm_variants に追加:
 - R12(2026-08-08): P1×2(新routeにassertSaleDmCampaignOwned必須 / extraInstructionを外部プロンプトから除外=PII非搬送を構造で保証)を反映。
 - R13(2026-08-08): P2×2(凍結をtemplate_frozen_at列で永続化=assignによる証拠消失に耐える / assign routeもwrite門の対象に明記)を反映。
 - R14(2026-08-08): P2(凍結済みvariantのDELETEは409=送付済み文面の出所を保全)を反映。
+- R15(2026-08-08): P2×2(凍結印を既存confirmed/sent variantへbackfill / 凍結は「差し替え禁止・同一テンプレの適用は許可」に精緻化=assign後の空本文詰み解消)を反映。
