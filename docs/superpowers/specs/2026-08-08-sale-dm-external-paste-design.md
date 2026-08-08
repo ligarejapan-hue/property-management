@@ -61,6 +61,7 @@ dm_variants に追加:
 - **凍結は列で永続化する**(@codex R13 P2): 「配下に confirmed/sent が今あるか」から導出すると、**割当(assign)route が confirmed の draft を別 variant へ移して draft に戻す**等の既存操作で証拠が消え、印刷済みの型のテンプレを差し替えられてしまう。confirm が variant ロック下で `template_frozen_at` を立て(初回のみ)、**以後は状態に関係なくこの列だけで凍結を判定**する(不可逆)。
 - **凍結済み variant は削除不可**(@codex R14 P2): 既存の variant DELETE は「宛先が居ないこと」しか見ないため、assign で空にしてから削除すると **prompt_text/body_template/凍結印ごと消え、送付済み文面の出所が失われる**。`template_frozen_at` が立っている variant の DELETE は 409(「送付実績のある型は削除できません」)にする。
 - **凍結印の backfill**(@codex R15 P2): PR-D の migration で、**既に confirmed/sent の draft を持つ variant に `template_frozen_at` を立てる**(値=既存 draft の confirmedAt/sentAt の最小値・無ければ migration 時刻)。列が null のまま始まると、過去に印刷済みの型が編集・削除可能のままになる(本番は売却DM休眠中で対象ゼロの見込みだが手順として行う)。
+  - ⚠`migrate deploy → restart` の窓で**旧 confirm route が凍結印を立てずに確定**し得る(@codex R16 P2)。backfill と同じ判定を**冪等な照合スクリプト**にし、**PR-D の restart 後にもう一度実行**して窓を閉じる(送付管理側の反響照合(§別紙3)と同じ運用の型)。
 
 - **設定変更時の失効(@codex R3 P2)**: 既存の variant 更新 route は、トーン・訴求など**プロンプトに影響する設定を変えたとき drafts の body をクリア**する失効機構を持つ。同じ契機で **prompt_text/body_template も同時にクリア**する(古いプロンプトで作った本文を、新しい設定の型として再適用できてしまう不整合を防ぐ。§2.3 の凍結後は設定変更自体も不可)。
 
@@ -103,3 +104,4 @@ dm_variants に追加:
 - R13(2026-08-08): P2×2(凍結をtemplate_frozen_at列で永続化=assignによる証拠消失に耐える / assign routeもwrite門の対象に明記)を反映。
 - R14(2026-08-08): P2(凍結済みvariantのDELETEは409=送付済み文面の出所を保全)を反映。
 - R15(2026-08-08): P2×2(凍結印を既存confirmed/sent variantへbackfill / 凍結は「差し替え禁止・同一テンプレの適用は許可」に精緻化=assign後の空本文詰み解消)を反映。
+- R16(2026-08-08): P2(凍結印の照合を冪等スクリプト化しrestart後に再実行=migrate→restart窓を閉じる)を反映。
