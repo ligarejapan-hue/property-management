@@ -62,8 +62,11 @@ describe("migration-A(DM送付記録)の安全性", () => {
     );
   });
 
-  it("attempt_key は unique(冪等キー)・sequence 列は作らない(R26=表示時導出)", () => {
-    expect(SQL).toMatch(/"dm_export_batches_attempt_key_key"/);
+  it("attempt_key は作成者との複合 unique(他ユーザーのキーと衝突しない=#364 R1)・sequence 列は作らない(R26)", () => {
+    expect(SQL).toMatch(
+      /CREATE UNIQUE INDEX "dm_export_batches_created_by_attempt_key_key" ON "dm_export_batches"\("created_by", "attempt_key"\)/,
+    );
+    expect(SQL).not.toMatch(/"dm_export_batches_attempt_key_key"/);
     expect(SQL).not.toMatch(/sequence/i);
   });
 });

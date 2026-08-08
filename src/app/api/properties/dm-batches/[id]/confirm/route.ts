@@ -11,6 +11,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { isRealCalendarDate } from "@/lib/calendar-date";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import {
   lockOwnersForShare,
@@ -43,7 +44,11 @@ import {
 //   batchId/sentAt=sentOn(UTC 00:00=JST暦日)/method=mail。共有者連関は property_dm_log_owners へコピー。
 
 const confirmSchema = z.object({
-  sentOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  // 形式に加えて実在日を検査(2026-02-31 等は 422・@codex #364 R1)。
+  sentOn: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .refine(isRealCalendarDate, "実在する日付を指定してください"),
 });
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;

@@ -147,6 +147,12 @@ describe("POST /api/properties/[id]/dm-logs(個別記録)", () => {
     expect(pm.propertyDmLog.create).not.toHaveBeenCalled();
   });
 
+  it("実在しない日付(2026-99-99)は 422(#364 R1)", async () => {
+    const res = await POST(postRequest({ sentOn: "2026-99-99" }), postCtx);
+    expect(res.status).toBe(422);
+    expect(pm.propertyDmLog.create).not.toHaveBeenCalled();
+  });
+
   it("未来日は 400・method allowlist 外は 422", async () => {
     const res1 = await POST(postRequest({ sentOn: jstToday(1) }), postCtx);
     expect(res1.status).toBe(400);

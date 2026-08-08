@@ -16,6 +16,7 @@ import {
   lockPropertyRecordForWrite,
 } from "@/lib/property-record-guard";
 import { writeAuditLog } from "@/lib/audit";
+import { isRealCalendarDate } from "@/lib/calendar-date";
 
 // ---------- GET / POST /api/properties/:id/dm-logs ----------
 //
@@ -145,7 +146,11 @@ export async function GET(
 }
 
 const createLogSchema = z.object({
-  sentOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  // 形式に加えて実在日を検査(2026-02-31 等は 422・@codex #364 R1)。
+  sentOn: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .refine(isRealCalendarDate, "実在する日付を指定してください"),
   method: z.enum(["mail", "hand_delivery", "other"]).optional(),
   note: z.string().max(500).optional(),
 });

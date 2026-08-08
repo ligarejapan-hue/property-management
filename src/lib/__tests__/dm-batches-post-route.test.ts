@@ -72,7 +72,7 @@ vi.mock("@/lib/prisma", () => {
     property: { findMany: vi.fn(), count: vi.fn() },
     propertyOwner: { count: vi.fn() },
     importJobRow: { findMany: vi.fn() },
-    dmExportBatch: { create: vi.fn(), findUnique: vi.fn() },
+    dmExportBatch: { create: vi.fn(), findFirst: vi.fn() },
     dmExportBatchItem: { createMany: vi.fn() },
     dmExportBatchItemOwner: { createMany: vi.fn() },
     // 送付記録は確定APIのみが書く。POST では一切書かないことを固定する。
@@ -96,7 +96,7 @@ const pm = prisma as unknown as {
   property: { findMany: Mock; count: Mock };
   propertyOwner: { count: Mock };
   importJobRow: { findMany: Mock };
-  dmExportBatch: { create: Mock; findUnique: Mock };
+  dmExportBatch: { create: Mock; findFirst: Mock };
   dmExportBatchItem: { createMany: Mock };
   dmExportBatchItemOwner: { createMany: Mock };
   propertyDmLog: { create: Mock; createMany: Mock; update: Mock };
@@ -184,7 +184,7 @@ beforeEach(() => {
   pm.property.count.mockResolvedValue(0);
   pm.propertyOwner.count.mockResolvedValue(0);
   pm.importJobRow.findMany.mockResolvedValue([]);
-  pm.dmExportBatch.findUnique.mockResolvedValue(null);
+  pm.dmExportBatch.findFirst.mockResolvedValue(null);
   pm.dmExportBatch.create.mockResolvedValue({ id: "b1" });
   pm.dmExportBatchItem.createMany.mockResolvedValue({ count: 0 });
   pm.dmExportBatchItemOwner.createMany.mockResolvedValue({ count: 0 });
@@ -281,7 +281,7 @@ describe("POST /api/properties/dm-batches", () => {
   });
 
   it("attemptKey 再POST: 未確定の既存バッチは reused=true・作り直さない", async () => {
-    pm.dmExportBatch.findUnique.mockResolvedValue({
+    pm.dmExportBatch.findFirst.mockResolvedValue({
       id: "b-exist",
       rowCount: 5,
       confirmedAt: null,
@@ -296,7 +296,7 @@ describe("POST /api/properties/dm-batches", () => {
   });
 
   it("attemptKey 再POST: 確定済みバッチは 409", async () => {
-    pm.dmExportBatch.findUnique.mockResolvedValue({
+    pm.dmExportBatch.findFirst.mockResolvedValue({
       id: "b-exist",
       rowCount: 5,
       confirmedAt: new Date(),
@@ -309,7 +309,7 @@ describe("POST /api/properties/dm-batches", () => {
   it("並行 POST の敗者(tx 内 FOR UPDATE で既存検出)は勝者の控えを返す", async () => {
     pm.property.findMany.mockResolvedValue([makeProp()]);
     pm.$queryRaw.mockResolvedValue([{ id: "b-winner", confirmed_at: null }]);
-    pm.dmExportBatch.findUnique
+    pm.dmExportBatch.findFirst
       .mockResolvedValueOnce(null) // 速路は空振り
       .mockResolvedValueOnce({ id: "b-winner", rowCount: 1, confirmedAt: null });
     const res = await POST(makeRequest(BODY));
@@ -362,5 +362,23 @@ describe("POST /api/properties/dm-batches", () => {
     const res = await POST(makeRequest({ filters: {}, attemptKey: "x" }));
     expect(res.status).toBe(422);
     expect(pm.property.findMany).not.toHaveBeenCalled();
+  });
+
+  it("冪等キーは作成者スコープ: 照会 where に createdBy が入る(#364 R1)", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+    const res = await POST(makeRequest(BODY));
+    expect(res.status).toBe(200);
+    // 速路の findFirst
+    expect(pm.dmExportBatch.findFirst.mock.calls[0][0].where).toEqual({
+      attemptKey: BODY.attemptKey,
+      createdBy: "user-admin",
+    });
+    // tx 内 FOR UPDATE 照会にも created_by 条件が入る
+    const sql = pm.$queryRaw.mock.calls
+      .map((c: unknown[]) =>
+        Array.isArray(c[0]) ? (c[0] as string[]).join("?").replace(/\s+/g, " ") : String(c[0]),
+      )
+      .find((q: string) => q.includes("dm_export_batches"));
+    expect(sql).toContain("created_by");
   });
 });

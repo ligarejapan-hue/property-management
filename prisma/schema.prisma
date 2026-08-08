@@ -674,7 +674,7 @@ model DmExportBatch {
   rowCount            Int       @map("row_count") // CSV行数(=宛先件数)
   createdBy           String    @map("created_by") @db.Uuid
   createdAt           DateTime  @default(now()) @map("created_at")
-  attemptKey          String    @unique @map("attempt_key") // 押下ごとの冪等キー
+  attemptKey          String    @map("attempt_key") // 押下ごとの冪等キー(unique は作成者との複合=下記)
   downloadedAt        DateTime? @map("downloaded_at") // 初回DLの刻印(配信集合の凍結境界・確定の前提)
   csvDigest           String?   @map("csv_digest") // 初回DLのCSVのsha256(再試行の同一性検証・PIIは持たない)
   resendFilterApplied Boolean   @default(false) @map("resend_filter_applied") // 再送候補フィルタ由来か(PR-Cで使用)
@@ -685,6 +685,9 @@ model DmExportBatch {
   items   DmExportBatchItem[]
   creator User                @relation("DmExportBatchCreator", fields: [createdBy], references: [id])
 
+  // 冪等キーは作成者スコープ(@codex #364 R1): グローバル unique だと他ユーザーの既存キーと
+  // 衝突して他人の batchId/件数が返る(本人しかDLできず出力フローも壊れる)。
+  @@unique([createdBy, attemptKey])
   @@index([createdAt])
   @@map("dm_export_batches")
 }

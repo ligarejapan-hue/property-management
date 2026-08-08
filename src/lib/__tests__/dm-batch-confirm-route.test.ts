@@ -173,6 +173,12 @@ describe("POST /api/properties/dm-batches/[id]/confirm", () => {
     expect(pm.propertyDmLog.createMany).not.toHaveBeenCalled();
   });
 
+  it("実在しない日付(2026-02-31)は 422(#364 R1)", async () => {
+    const res = await POST(makeRequest({ sentOn: "2026-02-31" }), ctx);
+    expect(res.status).toBe(422);
+    expect(pm.propertyDmLog.createMany).not.toHaveBeenCalled();
+  });
+
   it("sentOn が初回DLの JST 暦日より前は 400・未来日も 400", async () => {
     const res1 = await POST(makeRequest({ sentOn: jstDateString(-3) }), ctx);
     expect(res1.status).toBe(400);

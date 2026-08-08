@@ -141,8 +141,10 @@ export async function POST(request: NextRequest) {
 
     // 冪等の速路: 同じ attemptKey の控えが既にあれば再利用/409(レースの最終防衛は
     // 下の tx 内 FOR UPDATE 照会と P2002 catch)。
-    const preExisting = await prisma.dmExportBatch.findUnique({
-      where: { attemptKey: body.attemptKey },
+    // ⚠冪等キーは作成者スコープ(@codex #364 R1): キーだけで引くと他ユーザーの既存キーに
+    // 衝突して他人の batchId/件数を返してしまう(本人しかDLできないため出力も壊れる)。
+    const preExisting = await prisma.dmExportBatch.findFirst({
+      where: { attemptKey: body.attemptKey, createdBy: session.id },
       select: { id: true, rowCount: true, confirmedAt: true },
     });
     if (preExisting) {
@@ -296,7 +298,7 @@ export async function POST(request: NextRequest) {
         // レースの最終防衛: attemptKey を FOR UPDATE で照会(確定APIと行ロックで直列化)。
         const existing = await tx.$queryRaw<
           { id: string; confirmed_at: Date | null }[]
-        >`SELECT id, confirmed_at FROM dm_export_batches WHERE attempt_key = ${body.attemptKey} FOR UPDATE`;
+        >`SELECT id, confirmed_at FROM dm_export_batches WHERE attempt_key = ${body.attemptKey} AND created_by = ${session.id}::uuid FOR UPDATE`;
         if (existing.length > 0) {
           // 並行 POST が先に作った: 下の catch と同じ扱いにするため P2002 相当で抜ける。
           throw Object.assign(new Error("attempt_key exists"), {
@@ -334,8 +336,8 @@ export async function POST(request: NextRequest) {
       // unique(attempt_key) 衝突 = 並行 POST の敗者。勝者の控えを取り直して同じ応答にする。
       const code = (e as { code?: string }).code;
       if (code === "P2002" || code === "P2002_LIKE") {
-        const winner = await prisma.dmExportBatch.findUnique({
-          where: { attemptKey: body.attemptKey },
+        const winner = await prisma.dmExportBatch.findFirst({
+          where: { attemptKey: body.attemptKey, createdBy: session.id },
           select: { id: true, rowCount: true, confirmedAt: true },
         });
         if (winner) {

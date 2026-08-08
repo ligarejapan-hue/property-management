@@ -75,7 +75,7 @@ CREATE TABLE "dm_recipient_draft_owners" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "dm_export_batches_attempt_key_key" ON "dm_export_batches"("attempt_key");
+CREATE UNIQUE INDEX "dm_export_batches_created_by_attempt_key_key" ON "dm_export_batches"("created_by", "attempt_key");
 CREATE INDEX "dm_export_batches_created_at_idx" ON "dm_export_batches"("created_at");
 CREATE INDEX "dm_export_batch_items_batch_id_idx" ON "dm_export_batch_items"("batch_id");
 CREATE INDEX "dm_export_batch_item_owners_owner_id_idx" ON "dm_export_batch_item_owners"("owner_id");
