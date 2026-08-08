@@ -18,7 +18,6 @@ import {
 } from "@/lib/dm-batch/locks";
 import {
   checkBatchEligibility,
-  type BatchItemForCheck,
   type PropertyStateForCheck,
 } from "@/lib/dm-batch/eligibility";
 import { buildBatchCsv, sha256Hex } from "@/lib/dm-batch/csv";

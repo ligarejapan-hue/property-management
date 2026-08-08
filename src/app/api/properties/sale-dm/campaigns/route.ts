@@ -254,7 +254,7 @@ export async function POST(request: NextRequest) {
           select: { propertyId: true, ownerId: true },
         });
         const linkSet = new Set(
-          currentLinks.map((l) => `${l.propertyId} ${l.ownerId}`),
+          currentLinks.map((l) => `${l.propertyId}\u0000${l.ownerId}`),
         );
         const variant = await tx.dmVariant.create({
           data: {
@@ -270,7 +270,7 @@ export async function POST(request: NextRequest) {
           // ロック保持中の再検証: グループの誰かがこの物件の所有者でなくなっていたら生成しない。
           if (
             m.groupOwnerIds.length > 0 &&
-            !m.groupOwnerIds.every((oid) => linkSet.has(`${m.propertyId} ${oid}`))
+            !m.groupOwnerIds.every((oid) => linkSet.has(`${m.propertyId}\u0000${oid}`))
           ) {
             continue;
           }
