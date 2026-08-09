@@ -85,6 +85,10 @@ export async function GET(
           batchId: true,
           note: true,
           createdAt: true,
+          reactionStatus: true,
+          reactedAt: true,
+          reactionNote: true,
+          reactionSource: true,
           sender: { select: { id: true, name: true } },
         },
         orderBy: [{ sentAt: "desc" }, { createdAt: "desc" }],
@@ -117,6 +121,12 @@ export async function GET(
       // 単独取消不可(DELETE も 409)。UI は必ず失敗するボタンを出さない。
       deletable: log.method !== "sale_dm" && log.batchId == null,
       note: maskValue(log.note, ownerDisplayConfig.note),
+      // 反響(PR-B)。reactedAt は日付表示用の YYYY-MM-DD(sentAt と同じTZずれ防止)。
+      // reactionNote は note と同じ表示レベルで server-side マスク。
+      reactionStatus: log.reactionStatus,
+      reactedAt: log.reactedAt ? log.reactedAt.toISOString().slice(0, 10) : null,
+      reactionNote: maskValue(log.reactionNote, ownerDisplayConfig.note),
+      reactionSource: log.reactionSource,
       sentBy: { id: log.sender.id, name: log.sender.name },
       createdAt: log.createdAt,
     }));

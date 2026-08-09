@@ -266,6 +266,46 @@ describe("GET /api/properties/[id]/dm-logs — 一覧 / 整形", () => {
   });
 });
 
+describe("GET /api/properties/[id]/dm-logs — 反響4項目(PR-B)", () => {
+  it("reactionStatus/reactedAt/reactionSource を返す(reactedAt は YYYY-MM-DD)", async () => {
+    pm.propertyDmLog.findMany.mockResolvedValue([
+      makeLog({
+        reactionStatus: "replied",
+        reactedAt: new Date("2026-08-01T00:00:00Z"),
+        reactionSource: "manual",
+        reactionNote: null,
+      }),
+    ]);
+    pm.propertyDmLog.count.mockResolvedValue(1);
+    const res = await GET(makeRequest(), makeParams());
+    const json = await res.json();
+    expect(json.data[0].reactionStatus).toBe("replied");
+    expect(json.data[0].reactedAt).toBe("2026-08-01");
+    expect(json.data[0].reactionSource).toBe("manual");
+  });
+
+  it("reactionNote は note と同じ表示レベルで server-side マスク(生値を返さない)", async () => {
+    const RAW = "所有者から電話あり";
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
+      ...FULL_DISPLAY,
+      note: "masked",
+    });
+    pm.propertyDmLog.findMany.mockResolvedValue([
+      makeLog({
+        reactionStatus: "replied",
+        reactedAt: null,
+        reactionSource: "manual",
+        reactionNote: RAW,
+      }),
+    ]);
+    pm.propertyDmLog.count.mockResolvedValue(1);
+    const res = await GET(makeRequest(), makeParams());
+    const json = await res.json();
+    expect(json.data[0].reactionNote).toBe("***" + RAW.slice(-4));
+    expect(JSON.stringify(json)).not.toContain(RAW);
+  });
+});
+
 describe("GET /api/properties/[id]/dm-logs — note の server-side マスク", () => {
   const RAW_NOTE = "田中花子様 同居の長男宛";
 

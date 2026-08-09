@@ -3701,6 +3701,38 @@ export async function createPropertyDmLog(
   });
 }
 
+/** 送付記録の反響(4種)を手動記録する(PR-B)。売却DM由来の行(ブリッジ)は保存直後に
+ * サーバが draft の証拠から再導出する(手動 no_response で消しても証拠があれば戻る)。 */
+export async function updatePropertyDmLogReaction(
+  propertyId: string,
+  logId: string,
+  data: {
+    status: "no_response" | "replied" | "refused" | "undeliverable";
+    reactedAt?: string;
+    note?: string;
+  },
+): Promise<{
+  id: string;
+  reactionStatus: string;
+  undeliverableLinked: boolean;
+  undeliverableCleared: boolean;
+}> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      id: logId,
+      reactionStatus: data.status,
+      undeliverableLinked: false,
+      undeliverableCleared: false,
+    };
+  }
+  return apiFetch(`/api/properties/${propertyId}/dm-logs/${logId}/reaction`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
 /** 送付記録の取消(記録ミスの訂正)。売却DM由来の行はサーバが 409 で拒否する。 */
 export async function deletePropertyDmLog(
   propertyId: string,

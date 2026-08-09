@@ -1,12 +1,21 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Loader2, Mail, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { Loader2, Mail, ChevronLeft, ChevronRight, Plus, Trash2, MessageCircle } from "lucide-react";
 import { dmMethodLabel, dmTypeLabel } from "@/lib/dm-method-labels";
-import { createPropertyDmLog, deletePropertyDmLog } from "@/lib/api-client";
+import {
+  REACTION_STATUSES,
+  REACTION_LABELS,
+  type ReactionStatus,
+} from "@/lib/dm-reaction/core";
+import {
+  createPropertyDmLog,
+  deletePropertyDmLog,
+  updatePropertyDmLogReaction,
+} from "@/lib/api-client";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 
-// GET /api/properties/[id]/dm-logs のレスポンス形（note は server-side でマスク済み）。
+// GET /api/properties/[id]/dm-logs のレスポンス形（note/reactionNote は server-side でマスク済み）。
 interface DmLog {
   id: string;
   sentAt: string;
@@ -16,9 +25,21 @@ interface DmLog {
   /** サーバ判定の取消可否(売却DM由来・一括確定由来は false=ボタンを出さない)。 */
   deletable: boolean;
   note: string | null;
+  reactionStatus: string;
+  reactedAt: string | null;
+  reactionNote: string | null;
+  /** "manual" | "sale_dm_sync"(売却DMからの自動同期) | null */
+  reactionSource: string | null;
   sentBy: { id: string; name: string } | null;
   createdAt: string;
 }
+
+const REACTION_BADGE_COLORS: Record<string, string> = {
+  replied: "bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-300",
+  refused: "bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-300",
+  undeliverable: "bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-300",
+  no_response: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
+};
 
 interface Pagination {
   page: number;
@@ -139,10 +160,77 @@ function CreateLogForm({
   );
 }
 
+/** 反響のインライン編集(PR-B)。売却DM由来の行も編集可=優先規則はサーバが解決する。 */
+function ReactionEditor({
+  log,
+  onSave,
+  onCancel,
+  saving,
+}: {
+  log: DmLog;
+  onSave: (status: ReactionStatus, reactedAt: string, note: string) => void;
+  onCancel: () => void;
+  saving: boolean;
+}) {
+  const [status, setStatus] = useState<ReactionStatus>(
+    (REACTION_STATUSES as readonly string[]).includes(log.reactionStatus)
+      ? (log.reactionStatus as ReactionStatus)
+      : "no_response",
+  );
+  const [reactedAt, setReactedAt] = useState(log.reactedAt ?? "");
+  const [note, setNote] = useState(log.reactionNote ?? "");
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <select
+        value={status}
+        onChange={(e) => setStatus(e.target.value as ReactionStatus)}
+        className="rounded-md border border-gray-300 px-1.5 py-1 text-xs dark:border-gray-700 dark:bg-gray-800"
+      >
+        {REACTION_STATUSES.map((s) => (
+          <option key={s} value={s}>
+            {REACTION_LABELS[s]}
+          </option>
+        ))}
+      </select>
+      <input
+        type="date"
+        value={reactedAt}
+        max={todayJst()}
+        onChange={(e) => setReactedAt(e.target.value)}
+        className="rounded-md border border-gray-300 px-1.5 py-1 text-xs dark:border-gray-700 dark:bg-gray-800"
+      />
+      <input
+        type="text"
+        value={note}
+        maxLength={500}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="メモ(任意)"
+        className="w-28 rounded-md border border-gray-300 px-1.5 py-1 text-xs dark:border-gray-700 dark:bg-gray-800"
+      />
+      <button
+        type="button"
+        disabled={saving}
+        onClick={() => onSave(status, reactedAt, note)}
+        className="rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+      >
+        {saving ? "保存中..." : "保存"}
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 dark:border-gray-700 dark:text-gray-200"
+      >
+        やめる
+      </button>
+    </div>
+  );
+}
+
 /**
- * 物件の DM 送付履歴（PropertyDmLog）を表示し、個別の記録・取消を行う(PR-A)。
+ * 物件の DM 送付履歴（PropertyDmLog）を表示し、個別の記録・取消・反響の記録を行う(PR-A/B)。
  * 認可・PII マスク・監査は API(サーバ側)が担う。閲覧は直接 fetch(read-only 専用)、
- * 書き込み(追加/取消)は api-client 経由(USE_MOCK 分岐込み)。
+ * 書き込み(追加/取消/反響)は api-client 経由(USE_MOCK 分岐込み)。
  */
 export default function DmLogsView({ propertyId }: { propertyId: string }) {
   const [logs, setLogs] = useState<DmLog[]>([]);
@@ -156,6 +244,9 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [editingReactionId, setEditingReactionId] = useState<string | null>(null);
+  const [savingReaction, setSavingReaction] = useState(false);
+  const [info, setInfo] = useState<string | null>(null);
 
   // 追加/取消は property:write を要求(サーバも 403)。押しても必ず失敗するUIを出さない。
   const { permissions, permissionsLoading } = useScreenProtection();
@@ -197,6 +288,44 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
+
+  const handleSaveReaction = async (
+    logId: string,
+    status: ReactionStatus,
+    reactedAt: string,
+    note: string,
+  ) => {
+    if (savingReaction) return;
+    setSavingReaction(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const result = await updatePropertyDmLogReaction(propertyId, logId, {
+        status,
+        ...(reactedAt ? { reactedAt } : {}),
+        ...(note.trim() ? { note: note.trim() } : {}),
+      });
+      // 宛先不明の物件連動はサーバが行う。結果を平易な日本語で伝える。
+      if (result.undeliverableLinked) {
+        setInfo(
+          "宛先不明として記録し、この物件をDM送付の対象から外しました(DM可否=送らない)",
+        );
+      } else if (result.undeliverableCleared) {
+        setInfo(
+          "宛先不明の記録がなくなったため、物件の宛先不明フラグを解除しました(DM可否は手動で戻してください)",
+        );
+      } else if (result.reactionStatus !== status) {
+        // 売却DM側の証拠(返戻・LPアクセス)が優先されたケース
+        setInfo("売却DM側の記録があるため、反響は自動判定の値になりました");
+      }
+      setEditingReactionId(null);
+      fetchLogs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "反響の保存に失敗しました");
+    } finally {
+      setSavingReaction(false);
+    }
+  };
 
   const handleDelete = async (logId: string) => {
     if (!window.confirm("この送付記録を取り消しますか？")) return;
@@ -250,6 +379,23 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
         </div>
       )}
 
+      {info && (
+        <div className="mb-4 rounded-md border border-blue-200 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/10 p-4 text-sm text-blue-700 dark:text-blue-300">
+          {info}
+        </div>
+      )}
+
+      {canWrite && (
+        <p className="mb-4 flex items-start gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+          <MessageCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            返事や返送があったら「反響」に記録してください。「拒否」「宛先不明」にすると、
+            その相手は宛名CSVの出力時に検出され、送付の対象から外れます
+            (宛先不明は物件のDM可否も自動で「送らない」になります)。
+          </span>
+        </p>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
@@ -277,6 +423,9 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
                   </th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
                     種別
+                  </th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
+                    反響
                   </th>
                   <th className="whitespace-nowrap px-3 py-2 font-medium text-gray-600 dark:text-gray-300">
                     送信者
@@ -307,6 +456,50 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
                         dmTypeLabel(log.dmType)
                       ) : (
                         <span className="text-gray-300 dark:text-gray-600">-</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {editingReactionId === log.id ? (
+                        <ReactionEditor
+                          log={log}
+                          saving={savingReaction}
+                          onSave={(status, reactedAt, note) =>
+                            handleSaveReaction(log.id, status, reactedAt, note)
+                          }
+                          onCancel={() => setEditingReactionId(null)}
+                        />
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                              REACTION_BADGE_COLORS[log.reactionStatus] ??
+                              REACTION_BADGE_COLORS.no_response
+                            }`}
+                            title={
+                              [
+                                log.reactedAt ?? "",
+                                log.reactionNote ?? "",
+                              ]
+                                .filter(Boolean)
+                                .join(" ") || undefined
+                            }
+                          >
+                            {REACTION_LABELS[
+                              log.reactionStatus as ReactionStatus
+                            ] ?? log.reactionStatus}
+                            {/* 売却DMの返戻・LPアクセスからの自動同期 */}
+                            {log.reactionSource === "sale_dm_sync" && "(自動)"}
+                          </span>
+                          {canWrite && (
+                            <button
+                              type="button"
+                              onClick={() => setEditingReactionId(log.id)}
+                              className="rounded px-1 py-0.5 text-xs text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-500/10"
+                            >
+                              記録
+                            </button>
+                          )}
+                        </div>
                       )}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2">
