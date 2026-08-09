@@ -45,6 +45,16 @@ export type SaleDmReactionEvent = {
   at: Date;
 };
 
+/** ロック後の再読取で所有者集合が変わっていた(名寄せの付け替えレース)。呼び出し元の
+ *  route が 409(再試行案内)へ変換する。ApiError を直接投げない=next-auth 依存を
+ *  持ち込まない(one-shot スクリプトからも import されるため)。 */
+export class SyncOwnerSetChangedError extends Error {
+  constructor() {
+    super("所有者の情報が変わりました。もう一度お試しください");
+    this.name = "SyncOwnerSetChangedError";
+  }
+}
+
 /** draft の現在値から同期イベントを導出する(純関数)。 */
 export function deriveSaleDmReactionEvent(
   draft: SyncDraftRow,
@@ -156,13 +166,22 @@ export async function syncSaleDmReaction(
   if (event.kind === "undeliverable") {
     // terminal 書込は Owner 先頭 FOR UPDATE(R47)。上記の呼び出し規約どおり通常は
     // 取得済みロックの再取得=無害。ロック後に再読取して最新値へ適用し直す。
-    const ownerIds = [...logs, ...legacyLogs].flatMap((l) => [
-      ...(l.ownerId ? [l.ownerId] : []),
-      ...l.logOwners.map((o) => o.ownerId),
-    ]);
+    const collectOwnerIds = (rows: SyncLogRow[]) =>
+      rows.flatMap((l) => [
+        ...(l.ownerId ? [l.ownerId] : []),
+        ...l.logOwners.map((o) => o.ownerId),
+      ]);
+    const ownerIds = collectOwnerIds([...logs, ...legacyLogs]);
     await lockOwnersForUpdate(tx, ownerIds);
     logs = await readLogs();
     legacyLogs = await readLegacyLogs();
+    // 先読み→ロックの間に名寄せが所有者を付け替えていたら中止(@codex #366 R2 P1)。
+    // ロックしていない新所有者に terminal を書くと、その所有者の別物件の CSV 出力
+    // (Owner FOR SHARE で直列化)とすれ違う。中止→再試行で正しい集合を掴み直す。
+    const locked = new Set(ownerIds);
+    if (collectOwnerIds([...logs, ...legacyLogs]).some((id) => !locked.has(id))) {
+      throw new SyncOwnerSetChangedError();
+    }
     changed = collectChanged(logs, legacyLogs);
   }
 

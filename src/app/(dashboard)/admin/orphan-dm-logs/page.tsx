@@ -242,7 +242,9 @@ function OrphanRow({
   const [reactedAt, setReactedAt] = useState(
     log.reactedAt ? log.reactedAt.slice(0, 10) : "",
   );
-  const [note, setNote] = useState(log.reactionNote ?? "");
+  // メモは常に空で開始(一覧の値はマスク済みのことがある=往復で実メモを潰さない・#366 R2)。
+  // 未入力なら送らない=サーバ側は「省略=変更なし」。
+  const [note, setNote] = useState("");
 
   const names = [
     log.owner?.name ?? null,
@@ -286,7 +288,7 @@ function OrphanRow({
               type="text"
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="メモ(任意)"
+              placeholder={log.reactionNote ? "メモあり(入力すると上書き)" : "メモ(任意)"}
               maxLength={500}
               className="w-40 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-900 dark:text-gray-100"
             />

@@ -178,7 +178,9 @@ function ReactionEditor({
       : "no_response",
   );
   const [reactedAt, setReactedAt] = useState(log.reactedAt ?? "");
-  const [note, setNote] = useState(log.reactionNote ?? "");
+  // メモは常に空で開始する: 表示用の値はマスク済みのことがあり、往復させると実メモを
+  // マスク値で潰す(#366 R2)。未入力なら送らない=サーバ側は「省略=変更なし」。
+  const [note, setNote] = useState("");
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -205,7 +207,7 @@ function ReactionEditor({
         value={note}
         maxLength={500}
         onChange={(e) => setNote(e.target.value)}
-        placeholder="メモ(任意)"
+        placeholder={log.reactionNote ? "メモあり(入力すると上書き)" : "メモ(任意)"}
         className="w-28 rounded-md border border-gray-300 px-1.5 py-1 text-xs dark:border-gray-700 dark:bg-gray-800"
       />
       <button

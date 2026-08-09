@@ -37,7 +37,8 @@ const reactionSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .refine(isRealCalendarDate, "実在する日付を指定してください")
     .optional(),
-  note: z.string().max(500).optional(),
+  // 省略=変更なし / null・空文字=消す(一覧はマスク値を返すため往復で潰さない=#366 R2)。
+  note: z.string().max(500).nullable().optional(),
 });
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -92,27 +93,46 @@ export async function PATCH(
       }
 
       // terminal を書くときは Owner 先頭 FOR UPDATE(R47)。親行ロックは親が無いので無し。
-      if (isTerminalReaction(body.status)) {
-        const ownerIds = [
-          ...(pre.ownerId ? [pre.ownerId] : []),
-          ...pre.logOwners.map((o) => o.ownerId),
-        ];
-        await lockOwnersForUpdate(rawTx, ownerIds);
+      const needsOwnerLock = isTerminalReaction(body.status);
+      const preOwnerIds = [
+        ...(pre.ownerId ? [pre.ownerId] : []),
+        ...pre.logOwners.map((o) => o.ownerId),
+      ];
+      if (needsOwnerLock) {
+        await lockOwnersForUpdate(rawTx, preOwnerIds);
       }
 
       const fresh = await tx.propertyDmLog.findFirst({
         where: { id: logId, propertyId: null },
         select: {
           id: true,
+          ownerId: true,
           reactionStatus: true,
           reactedAt: true,
           reactionNote: true,
           reactionSource: true,
           manualReactionShadow: true,
+          logOwners: { select: { ownerId: true } },
         },
       });
       if (!fresh) {
         throw new ApiError(404, "孤児の送付記録が見つかりません", "NOT_FOUND");
+      }
+
+      // 先読み→ロックの間の名寄せ付け替えは中止→再試行(#366 R2・reaction route と同型)。
+      if (needsOwnerLock) {
+        const lockedSet = new Set(preOwnerIds);
+        const freshOwnerIds = [
+          ...(fresh.ownerId ? [fresh.ownerId] : []),
+          ...fresh.logOwners.map((o) => o.ownerId),
+        ];
+        if (freshOwnerIds.some((id) => !lockedSet.has(id))) {
+          throw new ApiError(
+            409,
+            "所有者の情報が変わりました。もう一度お試しください",
+            "RETRY",
+          );
+        }
       }
 
       const next = applyManualReaction(fresh, {
@@ -120,7 +140,13 @@ export async function PATCH(
         reactedAt: body.reactedAt
           ? new Date(`${body.reactedAt}T00:00:00Z`)
           : null,
-        note: body.note?.trim() ? body.note.trim() : null,
+        // 省略=既存メモを保持 / null・空文字=消す / 文字列=上書き。
+        note:
+          body.note === undefined
+            ? fresh.reactionNote
+            : body.note?.trim()
+              ? body.note.trim()
+              : null,
       });
       await tx.propertyDmLog.update({
         where: { id: logId },

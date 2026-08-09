@@ -69,9 +69,10 @@ vi.mock("@/lib/dm-batch/locks", () => ({
   lockOwnersForUpdate: vi.fn(),
 }));
 
-vi.mock("@/lib/dm-reaction/sync", () => ({
-  syncSaleDmReaction: vi.fn(),
-}));
+vi.mock("@/lib/dm-reaction/sync", () => {
+  class SyncOwnerSetChangedError extends Error {}
+  return { syncSaleDmReaction: vi.fn(), SyncOwnerSetChangedError };
+});
 
 vi.mock("@/lib/dm-reaction/reconcile", () => ({
   reconcileLegacySaleDmLog: vi.fn(),
@@ -261,6 +262,37 @@ describe("PATCH .../dm-logs/[logId]/reaction(手動反響)", () => {
     });
     expect(data.reactedAt).toEqual(new Date("2026-08-01T00:00:00Z"));
     expect(data.manualReactionShadow).toBe(Prisma.DbNull);
+  });
+
+  it("note 省略は既存メモを保持(マスク表示値の往復で実メモを消さない=#366 R2)", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue(
+      baseLog({ reactionNote: "実メモ(サーバ保存値)" }),
+    );
+    await PATCH(patchRequest({ status: "replied" }), ctx);
+    const data = pm.propertyDmLog.update.mock.calls[0][0].data;
+    expect(data.reactionNote).toBe("実メモ(サーバ保存値)");
+  });
+
+  it("note: null は明示的にメモを消す", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue(
+      baseLog({ reactionNote: "実メモ" }),
+    );
+    await PATCH(patchRequest({ status: "replied", note: null }), ctx);
+    const data = pm.propertyDmLog.update.mock.calls[0][0].data;
+    expect(data.reactionNote).toBeNull();
+  });
+
+  it("ロック後の再読取で所有者集合が変わっていたら 409・書き込まない(名寄せレース=#366 R2)", async () => {
+    pm.propertyDmLog.findFirst
+      .mockResolvedValueOnce(baseLog()) // 先読み: OWNER_1+OWNER_2 をロック
+      .mockResolvedValueOnce(
+        baseLog({ ownerId: "0a000000-0000-4000-8000-000000000009" }),
+      ); // ロック後: 名寄せで master へ付け替え済み
+    const res = await PATCH(patchRequest({ status: "refused" }), ctx);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("もう一度");
+    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
   });
 
   it("ブリッジ行(draftId あり)は保存直後に同一 tx で syncSaleDmReaction・Owner ロックも取る", async () => {

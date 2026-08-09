@@ -52,7 +52,10 @@ vi.mock("@/lib/sale-dm-letter/route-guard", () => ({
 }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 // ブリッジ同期とOwnerロックは呼び出し(順序・引数)を検証するため mock(実装は sync.test.ts で担保)。
-vi.mock("@/lib/dm-reaction/sync", () => ({ syncSaleDmReaction: vi.fn() }));
+vi.mock("@/lib/dm-reaction/sync", () => {
+  class SyncOwnerSetChangedError extends Error {}
+  return { syncSaleDmReaction: vi.fn(), SyncOwnerSetChangedError };
+});
 vi.mock("@/lib/dm-batch/locks", () => ({ lockOwnersForUpdate: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const draftUpdate = vi.fn();
@@ -84,7 +87,7 @@ vi.mock("@/lib/prisma", () => {
 import prismaMock from "@/lib/prisma";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
 import { writeAuditLog } from "@/lib/audit";
-import { syncSaleDmReaction } from "@/lib/dm-reaction/sync";
+import { syncSaleDmReaction, SyncOwnerSetChangedError } from "@/lib/dm-reaction/sync";
 import { lockOwnersForUpdate } from "@/lib/dm-batch/locks";
 import { PATCH } from "../../app/api/properties/sale-dm/drafts/[id]/outcome/route";
 
@@ -227,6 +230,15 @@ describe("PATCH outcome", () => {
     expect(res.status).toBe(200);
     expect(lockOwnersForUpdate).not.toHaveBeenCalled();
     expect(syncSaleDmReaction).toHaveBeenCalled();
+  });
+
+  it("同期側の所有者集合レース(名寄せ)は 409(再試行)へ変換する(#366 R2)", async () => {
+    (syncSaleDmReaction as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new SyncOwnerSetChangedError(),
+    );
+    const res = await PATCH(req({ deliveryStatus: "returned_undeliverable" }) as never, ctx());
+    expect(res.status).toBe(409);
+    expect(pm.property.update).not.toHaveBeenCalled();
   });
 
   it("配達状態を変えない編集(電話・メモ)でも draft が返送済みなら Owner ロックを取る(#366 R2)", async () => {

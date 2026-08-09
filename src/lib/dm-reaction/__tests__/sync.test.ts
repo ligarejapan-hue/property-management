@@ -3,6 +3,7 @@ import { Prisma } from "@/generated/prisma";
 import {
   deriveSaleDmReactionEvent,
   syncSaleDmReaction,
+  SyncOwnerSetChangedError,
   type ReactionSyncTx,
 } from "../sync";
 
@@ -325,6 +326,36 @@ describe("syncSaleDmReaction: 旧sale_dm行への保守的フォールバック(
       [legacyRow()],
     );
     await syncSaleDmReaction(tx, "d1");
+    expect(tx.propertyDmLog.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("syncSaleDmReaction: 所有者集合の再検証(#366 R2)", () => {
+  it("ロック後の再読取で所有者が変わっていたら中止(SyncOwnerSetChangedError)・書かない", async () => {
+    // 先読み: own-1+own-2 をロック → ロック後: 名寄せで own-9 へ付け替え済み
+    const before = [logRow()];
+    const after = [logRow({ ownerId: "own-9", logOwners: [] })];
+    let call = 0;
+    const tx = {
+      dmRecipientDraft: {
+        findUnique: vi.fn(async () =>
+          draftRow({ deliveryStatus: "returned_undeliverable", returnedAt: T_RET }),
+        ),
+      },
+      propertyDmLog: {
+        findMany: vi.fn(async () => (call++ === 0 ? before : after)),
+        update: vi.fn(async (args: unknown) => {
+          void args;
+          return {};
+        }),
+      },
+      $queryRaw: vi.fn(async () => []),
+    } as unknown as ReactionSyncTx & {
+      propertyDmLog: { update: ReturnType<typeof vi.fn> };
+    };
+    await expect(syncSaleDmReaction(tx, "d1")).rejects.toBeInstanceOf(
+      SyncOwnerSetChangedError,
+    );
     expect(tx.propertyDmLog.update).not.toHaveBeenCalled();
   });
 });

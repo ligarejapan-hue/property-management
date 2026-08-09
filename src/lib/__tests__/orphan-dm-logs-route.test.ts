@@ -274,6 +274,26 @@ describe("PATCH /api/admin/orphan-dm-logs/[logId](反響訂正)", () => {
     ).toBeLessThan(pm.propertyDmLog.update.mock.invocationCallOrder[0]);
   });
 
+  it("note 省略は既存メモを保持(マスク表示値の往復で消さない=#366 R2)", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue(
+      orphanLog({ reactionNote: "実メモ(サーバ保存値)" }),
+    );
+    await PATCH(patchRequest({ status: "replied" }), idCtx);
+    const data = pm.propertyDmLog.update.mock.calls[0][0].data;
+    expect(data.reactionNote).toBe("実メモ(サーバ保存値)");
+  });
+
+  it("ロック後の再読取で所有者集合が変わっていたら 409・書き込まない(名寄せレース=#366 R2)", async () => {
+    pm.propertyDmLog.findFirst
+      .mockResolvedValueOnce(orphanLog())
+      .mockResolvedValueOnce(
+        orphanLog({ ownerId: "0a000000-0000-4000-8000-000000000009" }),
+      );
+    const res = await PATCH(patchRequest({ status: "undeliverable" }), idCtx);
+    expect(res.status).toBe(409);
+    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
+  });
+
   it("非 terminal は Owner ロックなし・applyManualReaction の形で update", async () => {
     const res = await PATCH(
       patchRequest({ status: "replied", reactedAt: "2026-08-01", note: "電話" }),

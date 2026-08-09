@@ -21,7 +21,11 @@ import {
   isTerminalReaction,
   applyManualReaction,
 } from "@/lib/dm-reaction/core";
-import { syncSaleDmReaction, type ReactionSyncTx } from "@/lib/dm-reaction/sync";
+import {
+  syncSaleDmReaction,
+  SyncOwnerSetChangedError,
+  type ReactionSyncTx,
+} from "@/lib/dm-reaction/sync";
 import {
   reconcileLegacySaleDmLog,
   type LegacyReconcileTx,
@@ -50,7 +54,10 @@ const reactionSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .refine(isRealCalendarDate, "実在する日付を指定してください")
     .optional(),
-  note: z.string().max(500).optional(),
+  // note は「省略=変更なし」(@codex #366 R2 P1: 履歴 GET は表示レベルでマスクした値を
+  // 返すため、フォームがそれを往復させると実メモをマスク値や null で潰す)。
+  // 消すときは明示的に null(または空文字)を送る。
+  note: z.string().max(500).nullable().optional(),
 });
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -108,16 +115,16 @@ export async function PATCH(
       // 順序規約(R47): Owner(FOR UPDATE・id順)→物件親行→子行。terminal を書くとき、
       // またはブリッジ行/旧 sale_dm 行(再導出・照合が terminal を書き得る)は Owner を
       // 先にロックする。非 terminal の通常行はロック不要(ホットパス維持)。
-      if (
+      const needsOwnerLock =
         isTerminalReaction(body.status) ||
         pre.draftId != null ||
-        pre.method === "sale_dm"
-      ) {
-        const ownerIds = [
-          ...(pre.ownerId ? [pre.ownerId] : []),
-          ...pre.logOwners.map((o) => o.ownerId),
-        ];
-        await lockOwnersForUpdate(rawTx, ownerIds);
+        pre.method === "sale_dm";
+      const preOwnerIds = [
+        ...(pre.ownerId ? [pre.ownerId] : []),
+        ...pre.logOwners.map((o) => o.ownerId),
+      ];
+      if (needsOwnerLock) {
+        await lockOwnersForUpdate(rawTx, preOwnerIds);
       }
       await lockPropertyRecordForWrite(tx, propertyId, session);
 
@@ -126,6 +133,7 @@ export async function PATCH(
         where: { id: logId, propertyId },
         select: {
           id: true,
+          ownerId: true,
           draftId: true,
           method: true,
           sentAt: true,
@@ -134,10 +142,30 @@ export async function PATCH(
           reactionNote: true,
           reactionSource: true,
           manualReactionShadow: true,
+          logOwners: { select: { ownerId: true } },
         },
       });
       if (!fresh) {
         throw new ApiError(404, "送付記録が見つかりません", "NOT_FOUND");
+      }
+
+      // 先読み→ロックの間に名寄せが所有者を付け替えていたら中止(@codex #366 R2 P1)。
+      // ロックしたのは旧所有者で、terminal を書く行は新所有者に付いている=新所有者の
+      // 別物件の CSV 出力(Owner FOR SHARE)とすれ違う。中止→再試行で掴み直す
+      // (他の DM writer と同じ「先読み→ロック→再読取→不一致中止」の型)。
+      if (needsOwnerLock) {
+        const lockedSet = new Set(preOwnerIds);
+        const freshOwnerIds = [
+          ...(fresh.ownerId ? [fresh.ownerId] : []),
+          ...fresh.logOwners.map((o) => o.ownerId),
+        ];
+        if (freshOwnerIds.some((id) => !lockedSet.has(id))) {
+          throw new ApiError(
+            409,
+            "所有者の情報が変わりました。もう一度お試しください",
+            "RETRY",
+          );
+        }
       }
       const prevStatus = fresh.reactionStatus;
 
@@ -147,7 +175,13 @@ export async function PATCH(
         reactedAt: body.reactedAt
           ? new Date(`${body.reactedAt}T00:00:00Z`)
           : null,
-        note: body.note?.trim() ? body.note.trim() : null,
+        // 省略=既存メモを保持 / null・空文字=消す / 文字列=上書き。
+        note:
+          body.note === undefined
+            ? fresh.reactionNote
+            : body.note?.trim()
+              ? body.note.trim()
+              : null,
       });
       await tx.propertyDmLog.update({
         where: { id: logId },
@@ -163,14 +197,25 @@ export async function PATCH(
 
       // ブリッジ行は保存直後に同一 tx で再導出(draft 側に証拠があれば優先規則で戻る)。
       // 旧 sale_dm 行(draftId なし)は照合の保守的フォールバックを再適用(Task 6 共用)。
-      if (fresh.draftId != null) {
-        await syncSaleDmReaction(tx as unknown as ReactionSyncTx, fresh.draftId);
-      } else if (fresh.method === "sale_dm") {
-        await reconcileLegacySaleDmLog(tx as unknown as LegacyReconcileTx, {
-          id: logId,
-          propertyId,
-          sentAt: fresh.sentAt,
-        });
+      try {
+        if (fresh.draftId != null) {
+          await syncSaleDmReaction(
+            tx as unknown as ReactionSyncTx,
+            fresh.draftId,
+          );
+        } else if (fresh.method === "sale_dm") {
+          await reconcileLegacySaleDmLog(tx as unknown as LegacyReconcileTx, {
+            id: logId,
+            propertyId,
+            sentAt: fresh.sentAt,
+          });
+        }
+      } catch (e) {
+        // 同期側の所有者集合レース(名寄せ)は 409(再試行)へ変換する。
+        if (e instanceof SyncOwnerSetChangedError) {
+          throw new ApiError(409, e.message, "RETRY");
+        }
+        throw e;
       }
 
       // 物件の宛先不明フラグは「再導出後の最終状態」に連動させる。

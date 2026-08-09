@@ -8,7 +8,11 @@ import { writeAuditLog } from "@/lib/audit";
 import { deriveOutcome } from "@/lib/sale-dm-letter/outcome";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { lockOwnersForUpdate, type RawTx } from "@/lib/dm-batch/locks";
-import { syncSaleDmReaction, type ReactionSyncTx } from "@/lib/dm-reaction/sync";
+import {
+  syncSaleDmReaction,
+  SyncOwnerSetChangedError,
+  type ReactionSyncTx,
+} from "@/lib/dm-reaction/sync";
 import { jstCalendarDay } from "@/lib/dm-reaction/core";
 
 // 配達結果は明示指定された時のみ更新する(省略時は据え置き)。
@@ -186,7 +190,15 @@ export async function PATCH(
 
       // ブリッジ行(送付記録)へ反響を同期(PR-B): 返戻→宛先不明 / LP・電話→連絡あり / 訂正→復元。
       // 物件フラグの再計算より先に行い、下の残数カウントが同期後の最終状態を数えるようにする。
-      await syncSaleDmReaction(tx as unknown as ReactionSyncTx, id);
+      try {
+        await syncSaleDmReaction(tx as unknown as ReactionSyncTx, id);
+      } catch (e) {
+        // 同期側の所有者集合レース(名寄せ)は 409(再試行)へ変換する(#366 R2)。
+        if (e instanceof SyncOwnerSetChangedError) {
+          throw new ApiError(409, e.message, "RETRY");
+        }
+        throw e;
+      }
 
       let cleared = false;
       if (becameUndeliverable) {
