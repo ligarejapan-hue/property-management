@@ -26,7 +26,29 @@ describe("復帰時の権限再検証フック", () => {
   it("直近の取得から一定時間未満なら間引く(タブ切替の連打で叩かない)", () => {
     expect(HOOK).toMatch(/const PERMISSIONS_REVALIDATE_INTERVAL_MS = 60_000;/);
     expect(HOOK).toMatch(
-      /Date\.now\(\) - lastLoadedAtRef\.current <\s*PERMISSIONS_REVALIDATE_INTERVAL_MS/,
+      /const elapsed = Date\.now\(\) - lastLoadedAtRef\.current;/,
+    );
+    expect(HOOK).toMatch(
+      /if \(elapsed >= PERMISSIONS_REVALIDATE_INTERVAL_MS\) \{\s*onRevalidate\(\);\s*return;\s*\}/,
+    );
+  });
+
+  it("間引いた分は捨てずに残り時間で1回だけ予約する(#367 P2)", () => {
+    // 60秒以内に戻ってそのままタブに留まると、離席中の剥奪が次の切替まで反映されない。
+    expect(HOOK).toMatch(
+      /timerRef\.current = setTimeout\(\(\) => \{\s*timerRef\.current = null;\s*runIfVisible\(\);\s*\}, PERMISSIONS_REVALIDATE_INTERVAL_MS - elapsed\);/,
+    );
+    // 予約は同時に1本だけ(連打で増やさない)
+    expect(HOOK).toMatch(/if \(timerRef\.current !== null\) return;/);
+    // 予約実行時にも可視判定をやり直す(裏に回っている間に発火しても叩かない)
+    expect(HOOK).toMatch(
+      /const runIfVisible = \(\) => \{[\s\S]*?document\.visibilityState !== "visible"[\s\S]*?onRevalidate\(\);\s*\};/,
+    );
+  });
+
+  it("予約は unmount で必ず解除する(離脱後に叩かない)", () => {
+    expect(HOOK).toMatch(
+      /if \(timerRef\.current !== null\) \{\s*clearTimeout\(timerRef\.current\);\s*timerRef\.current = null;\s*\}/,
     );
   });
 

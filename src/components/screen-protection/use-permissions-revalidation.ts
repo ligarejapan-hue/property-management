@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 /**
  * タブへ復帰したときに権限を取り直す最短間隔(ms)。@codex #367 P2。
@@ -22,8 +22,10 @@ export const PERMISSIONS_REVALIDATE_INTERVAL_MS = 60_000;
  *
  * 呼ぶ条件:
  *   - タブが可視のときだけ(非表示タブでは叩かない)
- *   - 直近の取得から PERMISSIONS_REVALIDATE_INTERVAL_MS 未満なら間引く
- *   - listener は unmount で必ず解除する
+ *   - 直近の取得から PERMISSIONS_REVALIDATE_INTERVAL_MS 未満なら**間隔の残り時間だけ
+ *     遅らせて1回だけ実行する**(@codex #367 P2)。単に捨てると、60秒以内に戻ってきて
+ *     そのままタブに留まった場合、離席中の剥奪が**次の切替まで反映されない**まま残る。
+ *   - 予約は同時に1本だけ(多重予約しない)。listener と予約は unmount で必ず解除する。
  *
  * @param onRevalidate 取り直し処理。**背景取得**(ローディング状態を立てない)を想定。
  *   前景取得にすると復帰のたびにボタンが一瞬消える。
@@ -33,23 +35,40 @@ export function usePermissionsRevalidation(
   onRevalidate: () => void,
   lastLoadedAtRef: { current: number },
 ): void {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
+    const runIfVisible = () => {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState !== "visible") return;
+      onRevalidate();
+    };
+
     const handler = () => {
       if (typeof document === "undefined") return;
       if (document.visibilityState !== "visible") return;
-      if (
-        Date.now() - lastLoadedAtRef.current <
-        PERMISSIONS_REVALIDATE_INTERVAL_MS
-      ) {
+      const elapsed = Date.now() - lastLoadedAtRef.current;
+      if (elapsed >= PERMISSIONS_REVALIDATE_INTERVAL_MS) {
+        onRevalidate();
         return;
       }
-      onRevalidate();
+      // 間引き中: 捨てずに残り時間ぶん遅らせて1回だけ実行する。
+      if (timerRef.current !== null) return; // 予約済みなら増やさない
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        runIfVisible();
+      }, PERMISSIONS_REVALIDATE_INTERVAL_MS - elapsed);
     };
+
     document.addEventListener("visibilitychange", handler);
     window.addEventListener("focus", handler);
     return () => {
       document.removeEventListener("visibilitychange", handler);
       window.removeEventListener("focus", handler);
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
     };
   }, [onRevalidate, lastLoadedAtRef]);
 }

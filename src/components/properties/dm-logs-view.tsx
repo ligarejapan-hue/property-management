@@ -341,6 +341,14 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
     [effectivePermissions],
   );
 
+  // @codex #367 P2: 権限は画面に居たまま変わり得る(復帰時の再検証)。開いたままの
+  // 追加フォーム・反響エディタが権限剥奪後も残ると、送信できて 403 になる。
+  // **state を effect で消すのではなく描画条件を権限から導出**する(effect 内の同期
+  // setState は eslint 規約で禁止・derive の方が取りこぼしが無い)。
+  // 権限が戻れば開いていた状態に復帰する(state は保持したまま隠すだけ)。
+  const formOpen = canWrite && showForm;
+  const editingLogId = canWrite ? editingReactionId : null;
+
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -386,14 +394,20 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
     setInfo(null);
     try {
       // note: 省略=変更なし / null=消す / 文字列=上書き(サーバ仕様と対)。
+      // @codex #367 P2: 編集中にメモ権限が外れた場合(復帰時の再検証で剥奪を検知)は
+      // メモを一切送らない。送るとサーバが 403 で弾き、**反響の種別・日付の保存まで
+      // 巻き添えで失敗する**。権限のある部分だけ保存できるようにする。
+      const noteFields = !canWriteNote
+        ? {}
+        : clearNote
+          ? { note: null as string | null }
+          : note.trim()
+            ? { note: note.trim() }
+            : {};
       const result = await updatePropertyDmLogReaction(propertyId, logId, {
         status,
         ...(reactedAt ? { reactedAt } : {}),
-        ...(clearNote
-          ? { note: null }
-          : note.trim()
-            ? { note: note.trim() }
-            : {}),
+        ...noteFields,
       });
       // 宛先不明の物件連動はサーバが行う。結果を平易な日本語で伝える。
       if (result.undeliverableLinked) {
@@ -452,7 +466,7 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
         )}
       </div>
 
-      {showForm && (
+      {formOpen && (
         <CreateLogForm
           propertyId={propertyId}
           onCreated={() => {
@@ -549,7 +563,7 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
                       )}
                     </td>
                     <td className="px-3 py-2">
-                      {editingReactionId === log.id ? (
+                      {editingLogId === log.id ? (
                         <ReactionEditor
                           log={log}
                           canWriteNote={canWriteNote}

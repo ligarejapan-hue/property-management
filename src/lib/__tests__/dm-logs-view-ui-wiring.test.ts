@@ -105,7 +105,8 @@ describe("dm-logs-view: メモのマスク往復防止(#366 R2/R3)", () => {
     // マスク表示値をフォームに流し込まない(実メモをマスク値で潰さない)
     expect(VIEW).not.toMatch(/useState\(log\.reactionNote/);
     expect(VIEW).toContain("メモを消す");
-    expect(VIEW).toMatch(/\{ note: null \}/);
+    // #367 P2 で noteFields へ切り出した際に型注釈が付いた(送る値は null のまま)
+    expect(VIEW).toMatch(/\{ note: null as string \| null \}/);
   });
 });
 
@@ -114,5 +115,24 @@ describe("dm-logs-view: 反響メモのフィールドレベル権限(#366 R10)"
     expect(VIEW).toMatch(/owner_note/);
     expect(VIEW).toMatch(/canWriteNote/);
     expect(VIEW).toMatch(/\{canWriteNote && \(/);
+  });
+});
+
+describe("dm-logs-view: 権限が画面滞在中に変わった場合(#367 P2)", () => {
+  it("開いたままの追加フォーム・反響エディタは権限剥奪で隠れる(送信できない)", () => {
+    // 復帰時の再検証で権限が変わり得るため、開いていたUIが残ると押せて403になる。
+    // effect で state を消すのではなく描画条件を権限から導出する(eslint規約+取りこぼし防止)。
+    expect(VIEW).toMatch(/const formOpen = canWrite && showForm;/);
+    expect(VIEW).toMatch(/const editingLogId = canWrite \? editingReactionId : null;/);
+    expect(VIEW).toMatch(/\{formOpen && \(/);
+    expect(VIEW).toMatch(/\{editingLogId === log\.id \? \(/);
+    // 生の state を描画条件に直接使わない(導出を迂回しない)
+    expect(VIEW).not.toMatch(/\{showForm && \(/);
+    expect(VIEW).not.toMatch(/\{editingReactionId === log\.id \? \(/);
+  });
+
+  it("メモ権限が編集中に外れたらメモを送らない(反響本体の保存を巻き添えにしない)", () => {
+    expect(VIEW).toMatch(/const noteFields = !canWriteNote/);
+    expect(VIEW).toMatch(/\.\.\.noteFields,/);
   });
 });
