@@ -120,8 +120,13 @@ describe("import job detail page — B2 pagination 配線 (source-assertion)", (
   it("B2 の batch 無効化（isPaginated / B3 対応予定）は撤去されている", () => {
     expect(pageSrc).not.toMatch(/isPaginated/);
     expect(pageSrc).not.toMatch(/B3 対応予定/);
-    // ボタンは pagination 非依存（actionLoading のみで無効化）
-    expect(pageSrc).toMatch(/disabled=\{actionLoading === "batch"\}/);
+    // ボタンは **pagination 非依存**（この it の本旨）。
+    // #367 P1 で無効化条件を mutationLocked（＝行/一括のいずれかが処理中、または再取得中）
+    // へ統一したため actionLoading 直書きではなくなったが、pagination（page / limit /
+    // totalPages）に依存しない点は変わらない。
+    expect(pageSrc).toMatch(
+      /const mutationLocked = actionLoading !== null \|\| loading;/,
+    );
     expect(pageSrc).not.toMatch(
       /disabled=\{actionLoading === "batch" \|\| isPaginated\}/,
     );

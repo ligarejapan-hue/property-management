@@ -49,6 +49,23 @@ describe("取込ジョブ詳細: 再取得でちらつかせない", () => {
 
   it("行ごとの操作には別の進捗表示がある(再取得が静かでも無反応に見えない)", () => {
     expect(PAGE).toMatch(/actionLoading/);
+    // どの行を処理中かは従来どおり見せる(スピナー表示は行固有のまま)
+    expect(PAGE).toMatch(/const isLoading = actionLoading === row\.id;/);
+    expect(PAGE).toMatch(/\{isLoading \? \(/);
+  });
+
+  it("書き込み操作は「いずれかの処理中・再取得中」で全て止まる(二重作成の防止)", () => {
+    // @codex #367 P1: 行ごとの disabled が `actionLoading === row.id` だけだと、
+    // A行の処理中にB行を押せ、A の finally が共有 actionLoading を null に戻した
+    // 瞬間に B のリクエストが飛んだままB が再び押せる(create_new が2件作られ得る)。
+    expect(PAGE).toMatch(
+      /const mutationLocked = actionLoading !== null \|\| loading;/,
+    );
+    // 行操作・一括操作の disabled は全て mutationLocked に統一されている
+    expect(PAGE).not.toMatch(/disabled=\{isLoading\}/);
+    expect(PAGE).not.toMatch(/disabled=\{actionLoading === "batch"\}/);
+    const locked = PAGE.match(/disabled=\{mutationLocked\}/g) ?? [];
+    expect(locked.length).toBeGreaterThanOrEqual(8);
   });
 
   it("再取得の失敗は従来どおり画面に出す(黙って古い表示を残さない)", () => {

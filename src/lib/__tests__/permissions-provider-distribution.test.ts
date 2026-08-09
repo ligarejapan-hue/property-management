@@ -70,9 +70,11 @@ describe("ScreenProtectionProvider — permissions/capabilities 配布（F12-2�
     expect(providerSrc).toMatch(/permissionsError:\s*boolean/);
     // Codex 対応3: 完了を await できるよう Promise を返す
     expect(providerSrc).toMatch(/refetchPermissions:\s*\(\) => Promise<void>/);
-    // Provider value に 7 キーすべてが渡る
+    // Provider value に 7 キーすべてが渡る。
+    // #367 P2: refetchPermissions は loadPermissions を直接渡さず、options を context へ
+    // 漏らさない薄いラッパ(前景固定)経由にしたため shorthand になっている。
     expect(providerSrc).toMatch(
-      /value=\{\{\s*bypass,\s*watermarkText,\s*permissions,\s*capabilities,\s*permissionsLoading,\s*permissionsError,\s*refetchPermissions:\s*loadPermissions,?\s*\}\}/,
+      /value=\{\{\s*bypass,\s*watermarkText,\s*permissions,\s*capabilities,\s*permissionsLoading,\s*permissionsError,\s*refetchPermissions,?\s*\}\}/,
     );
   });
 
@@ -161,26 +163,47 @@ describe("ScreenProtectionProvider — permissions/capabilities 配布（F12-2�
 
 describe("ScreenProtectionProvider — refetchPermissions 復旧導線（F12-2 Codex 対応）", () => {
   it("mount 時 fetch と refetch は共通の loadPermissions（stable callback・deps=[]・Promise 返却）", () => {
+    // #367 P2: 復帰時の裏取得のため options?: { background?: boolean } を受ける形になった。
     expect(providerSrc).toMatch(
-      /const loadPermissions = useCallback\(\(\): Promise<void> => \{[\s\S]*?\}, \[\]\);/,
+      /const loadPermissions = useCallback\(\s*\(options\?: \{ background\?: boolean \}\): Promise<void> => \{[\s\S]*?\}, \[\]\);/,
     );
     // mount effect から共通関数を呼ぶ
     expect(providerSrc).toMatch(/loadPermissions\(\);/);
-    // context には同一関数を refetchPermissions として配布
-    expect(providerSrc).toMatch(/refetchPermissions:\s*loadPermissions/);
+    // context には前景固定のラッパを refetchPermissions として配布（options を漏らさない）
+    expect(providerSrc).toMatch(
+      /const refetchPermissions = useCallback\(\s*\(\): Promise<void> => loadPermissions\(\),\s*\[loadPermissions\],\s*\);/,
+    );
   });
 
   it("in-flight dedupe: 進行中は同一 Promise を返し fetch は同時 1 本（StrictMode 二重 effect・連続呼び出し対応）", () => {
     expect(providerSrc).toMatch(/if \(inFlightRef\.current\) return inFlightRef\.current;/);
     expect(providerSrc).toMatch(/inFlightRef\.current = run;/);
+    // #367 P2: finally で最終取得時刻も記録する（復帰時再検証の間引きに使う）
     expect(providerSrc).toMatch(
-      /\.finally\(\(\) => \{\s*inFlightRef\.current = null;\s*\}\);/,
+      /\.finally\(\(\) => \{\s*inFlightRef\.current = null;\s*lastPermissionsLoadRef\.current = Date\.now\(\);\s*\}\);/,
     );
   });
 
-  it("refetch 中は permissionsLoading=true（dedupe 判定の直後に設定）", () => {
+  it("前景 refetch 中は permissionsLoading=true（dedupe 判定の直後に設定）", () => {
+    // #367 P2: 背景（復帰時再検証）では立てない＝ボタンが一瞬消えない。
+    // 前景（mount・refetchPermissions）では従来どおり立てる。
     expect(providerSrc).toMatch(
-      /if \(inFlightRef\.current\) return inFlightRef\.current;\s*\n\s*setPermissionsLoading\(true\);/,
+      /if \(inFlightRef\.current\) return inFlightRef\.current;\s*\n\s*if \(!options\?\.background\) setPermissionsLoading\(true\);/,
+    );
+  });
+
+  it("復帰時の再検証を配線する（#367 P2・実体は専用フックへ分離）", () => {
+    // 開きっぱなしの画面で権限が剥奪されても、遷移・リロードまで反映されなかった問題への追従。
+    // ⚠監視の実体（可視状態の判定・間引き・listener 解除）は
+    // use-permissions-revalidation 側にあり、そのテストは
+    // permissions-revalidation-hook.test.ts が持つ（S1b-2 の線引きを守るための分離）。
+    expect(providerSrc).toMatch(
+      /import \{ usePermissionsRevalidation \} from "\.\/use-permissions-revalidation";/,
+    );
+    // 背景取得で呼ぶ（復帰のたびにボタンが一瞬消えない）
+    expect(providerSrc).toMatch(/loadPermissions\(\{ background: true \}\);/);
+    expect(providerSrc).toMatch(
+      /usePermissionsRevalidation\(revalidatePermissions, lastPermissionsLoadRef\);/,
     );
   });
 
