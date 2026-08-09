@@ -104,6 +104,17 @@ describe("checkBatchEligibility", () => {
     expect(r.terminalReactionCount).toBe(0);
   });
 
+  it("(2) 所有者紐づけの無い terminal 記録は物件単位で検出(個別記録の拒否=#366 R6)", () => {
+    const r = checkBatchEligibility(
+      [item()],
+      new Map([["p1", prop()]]),
+      ADMIN,
+      new Set(),
+      new Set(["p1"]),
+    );
+    expect(r.terminalReactionCount).toBe(1);
+  });
+
   it("(4) owner/property が null の item は pruned に入る(他の検査対象にしない)", () => {
     const r = checkBatchEligibility(
       [item({ id: "i-null", ownerId: null })],

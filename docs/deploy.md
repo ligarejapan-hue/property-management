@@ -538,13 +538,22 @@ sudo systemctl status property-management --no-pager
 照合スクリプトを実行する（冪等＝何度実行しても安全）。実行しないと、過去に返戻・返信のあった
 宛先が反響なし扱いのまま DM 出力の除外対象にならない。
 
-実行タイミング: `prisma migrate deploy`（更新手順ステップ4）適用後〜`npm prune`（ステップ6）前。
-`tsx` は devDependencies のため prune 後は実行できない（prune 済みなら `npm ci --include=dev` で
-入れ直してから実行し、終わったら再度 `npm prune --omit=dev`）。
+実行タイミング: **サービス再起動（ステップ7）で新コードが動き始めた後**。
+旧プロセスが動いている間に照合を先に実行すると、照合〜再起動のあいだに旧コード
+（送付記録への同期を持たない）が受けた LP アクセス・返戻の記録が draft にだけ残り、
+送付記録側が「反応なし」のまま恒久的に取り残される（新コードなら以後のイベントが同期する）。
+
+このリリースでは手順の順序を入れ替える: **ステップ5 build → ステップ7 再起動 →
+照合（下記 dry-run→apply）→ ステップ6 `npm prune`**。`tsx` は devDependencies のため
+prune を照合の後に回す（既に prune 済みなら `npm ci --include=dev` で入れ直してから実行し、
+終わったら再度 `npm prune --omit=dev`）。
 
 ```bash
 cd /opt/property-management
 set -a && source /etc/property-management/app.env && set +a
+
+# 0. 新プロセスが起動済みであることを確認
+sudo systemctl is-active property-management
 
 # 1. 事前確認（dry-run・書き込みなし・件数レポートのみ）
 sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm \

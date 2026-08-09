@@ -71,6 +71,9 @@ export function checkBatchEligibility(
   /** 拒否/宛先不明の反響を持つ所有者 id 集合(他物件も含む所有者横断=呼び出し側が
    *  Owner FOR SHARE 保持中に propertyDmLog から構築する。省略時=検査(2)なし)。 */
   terminalOwnerIds: ReadonlySet<string> = new Set(),
+  /** 所有者紐づけの無い terminal 記録(個別記録=ownerId null・連関0)が付いた物件 id 集合。
+   *  所有者横断はできないため物件単位で除外する(設計§4-5の限界の明示的な取り扱い=#366 R6)。 */
+  terminalPropertyIds: ReadonlySet<string> = new Set(),
 ): EligibilityResult {
   const prunedItemIds: string[] = [];
   let scopeMissingCount = 0;
@@ -91,10 +94,12 @@ export function checkBatchEligibility(
       scopeMissingCount += 1;
       continue;
     }
-    // (2) 代表or共有者の誰かに terminal 反響(拒否/宛先不明)が付いていれば除外対象(R29/R42)
+    // (2) 代表or共有者の誰かに terminal 反響(拒否/宛先不明)が付いていれば除外対象(R29/R42)。
+    // 所有者紐づけの無い terminal 記録(個別記録の拒否など)は物件単位で除外(#366 R6)。
     if (
       terminalOwnerIds.has(it.ownerId) ||
-      it.groupOwnerIds.some((oid) => terminalOwnerIds.has(oid))
+      it.groupOwnerIds.some((oid) => terminalOwnerIds.has(oid)) ||
+      terminalPropertyIds.has(it.propertyId)
     ) {
       terminalReactionCount += 1;
       continue;

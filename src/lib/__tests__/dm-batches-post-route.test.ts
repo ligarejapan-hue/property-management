@@ -321,17 +321,36 @@ describe("POST /api/properties/dm-batches", () => {
     const itemsData = pm.dmExportBatchItem.createMany.mock.calls[0][0].data;
     expect(itemsData).toHaveLength(1);
     expect(itemsData[0].ownerId).toBe("o1");
-    // 検出クエリ: terminal 2種のみ・代表と連関の両経路
+    // 検出クエリ: terminal 2種のみ・代表/連関/所有者なし記録の物件単位の3経路
     const where = pm.propertyDmLog.findMany.mock.calls[0][0].where;
     expect(where.reactionStatus).toEqual({ in: ["refused", "undeliverable"] });
     expect(where.OR).toEqual([
       { ownerId: { in: ["o1", "o2"] } },
       { logOwners: { some: { ownerId: { in: ["o1", "o2"] } } } },
+      { propertyId: { in: ["p1"] }, ownerId: null, logOwners: { none: {} } },
     ]);
     // 監査にも除外数(非PII)
     const audit = lastAudit();
     expect(audit?.detail?.excludedTerminal).toBe(1);
     expect(audit?.detail?.count).toBe(1);
+  });
+
+  it("個別記録(所有者紐づけなし)の拒否は物件単位で除外する(#366 R6)", async () => {
+    // 個別記録 POST は ownerId=null・連関0 で作られる。拒否は dmStatus を変えないため、
+    // 所有者ベースの述語だけだと同じ物件が新しい控えに入り続ける。
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+    pm.propertyDmLog.findMany.mockResolvedValue([
+      { ownerId: null, propertyId: "p1", logOwners: [] },
+    ]);
+    const res = await POST(makeRequest(BODY));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      rowCount: number;
+      excludedTerminalCount: number;
+    };
+    expect(body.rowCount).toBe(0);
+    expect(body.excludedTerminalCount).toBe(1);
+    expect(pm.dmExportBatchItem.createMany).not.toHaveBeenCalled();
   });
 
   it("attemptKey 再POST: 未確定の既存バッチは reused=true・作り直さない", async () => {

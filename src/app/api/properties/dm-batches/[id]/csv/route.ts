@@ -176,28 +176,50 @@ export async function GET(
       const properties = await loadPropertyStates(propsTx, collectPropertyIds(items));
 
       // (2) terminal 反響(拒否/宛先不明)の宛先検出(PR-B・設計§2.1)。他物件も含む所有者横断で、
-      // 代表(owner_id)と共有者連関(log_owners)の両経路から集合を作る(R29)。Owner FOR SHARE
-      // 保持中に読む=terminal を書く writer(Owner FOR UPDATE)と直列化され、すれ違わない(R47)。
+      // 代表(owner_id)と共有者連関(log_owners)の両経路から集合を作る(R29)。所有者紐づけの
+      // 無い terminal 記録(個別記録の拒否など=横断不能)は物件単位で拾う(#366 R6)。
+      // Owner FOR SHARE 保持中に読む=terminal を書く writer(Owner FOR UPDATE)と直列化(R47)。
       const allOwnerIds = sortUniqueIds(collectOwnerIds(items));
+      const allPropertyIds = collectPropertyIds(items);
       const terminalOwnerIds = new Set<string>();
-      if (allOwnerIds.length > 0) {
+      const terminalPropertyIds = new Set<string>();
+      if (allOwnerIds.length > 0 || allPropertyIds.length > 0) {
         const terminalLogs = await tx.propertyDmLog.findMany({
           where: {
             reactionStatus: { in: ["refused", "undeliverable"] },
             OR: [
               { ownerId: { in: allOwnerIds } },
               { logOwners: { some: { ownerId: { in: allOwnerIds } } } },
+              {
+                propertyId: { in: allPropertyIds },
+                ownerId: null,
+                logOwners: { none: {} },
+              },
             ],
           },
-          select: { ownerId: true, logOwners: { select: { ownerId: true } } },
+          select: {
+            ownerId: true,
+            propertyId: true,
+            logOwners: { select: { ownerId: true } },
+          },
         });
         for (const log of terminalLogs) {
-          if (log.ownerId) terminalOwnerIds.add(log.ownerId);
-          for (const lo of log.logOwners) terminalOwnerIds.add(lo.ownerId);
+          if (log.ownerId || log.logOwners.length > 0) {
+            if (log.ownerId) terminalOwnerIds.add(log.ownerId);
+            for (const lo of log.logOwners) terminalOwnerIds.add(lo.ownerId);
+          } else if (log.propertyId) {
+            terminalPropertyIds.add(log.propertyId);
+          }
         }
       }
 
-      const elig = checkBatchEligibility(items, properties, session, terminalOwnerIds);
+      const elig = checkBatchEligibility(
+        items,
+        properties,
+        session,
+        terminalOwnerIds,
+        terminalPropertyIds,
+      );
 
       if (elig.scopeMissingCount > 0) {
         throw new ApiError(

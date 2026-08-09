@@ -302,13 +302,24 @@ describe("GET /api/properties/dm-batches/[id]/csv", () => {
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toContain("拒否・宛先不明");
     expect(pm.dmExportBatch.update).not.toHaveBeenCalled();
-    // 検出クエリ: terminal 2種のみ・代表(owner_id)と連関(log_owners)の両経路
+    // 検出クエリ: terminal 2種のみ・代表(owner_id)/連関(log_owners)/所有者なし記録の物件単位の3経路
     const where = pm.propertyDmLog.findMany.mock.calls[0][0].where;
     expect(where.reactionStatus).toEqual({ in: ["refused", "undeliverable"] });
     expect(where.OR).toEqual([
       { ownerId: { in: ["o1"] } },
       { logOwners: { some: { ownerId: { in: ["o1"] } } } },
+      { propertyId: { in: ["p1"] }, ownerId: null, logOwners: { none: {} } },
     ]);
+  });
+
+  it("初回GET: 所有者紐づけの無い terminal 記録(個別記録の拒否)は物件単位で 409(#366 R6)", async () => {
+    pm.propertyDmLog.findMany.mockResolvedValue([
+      { ownerId: null, propertyId: "p1", logOwners: [] },
+    ]);
+    const res = await GET(makeRequest(), ctx);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("拒否・宛先不明");
   });
 
   it("初回GET: 連関(共有者)経由の terminal 反響も 409(代表だけ見ない=R29)", async () => {
