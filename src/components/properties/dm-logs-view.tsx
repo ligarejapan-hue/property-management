@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Loader2, Mail, ChevronLeft, ChevronRight, Plus, Trash2, MessageCircle } from "lucide-react";
 import { dmMethodLabel, dmTypeLabel } from "@/lib/dm-method-labels";
 import {
@@ -276,26 +276,78 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
   const [savingReaction, setSavingReaction] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
 
-  // 追加/取消は property:write を要求(サーバも 403)。押しても必ず失敗するUIを出さない。
-  const { permissions, permissionsLoading } = useScreenProtection();
-  const canWrite = useMemo(() => {
-    if (permissionsLoading) return false;
-    return (permissions ?? []).some(
-      (p) => p.resource === "property" && p.action === "write" && p.granted,
-    );
-  }, [permissions, permissionsLoading]);
+  // 追加/取消/反響は property:write を要求(サーバも 403)。押しても必ず失敗するUIを出さない。
+  const { permissions, permissionsLoading, refetchPermissions } =
+    useScreenProtection();
+
+  // 権限鮮度(17-C F12-2 と同じ3点セット): ScreenProtectionProvider は dashboard layout に
+  // 居座り client navigation で再 mount されないため、provider の mount 時 1 回 fetch だけ
+  // では滞在中の権限付与・剥奪に追従できない(剥奪後もボタンが残り、押すと 403 になる)。
+  // この画面への進入あたり最大1回だけ再確認する。
+  //   - provider の取得が進行中なら完了を待つ(同時2本にしない)
+  //   - mount 時に進行中だった取得が成功 → その結果が最新なので追加 fetch しない
+  //   - mount 時点で取得完了済み(再訪=stale の可能性)/失敗(復旧)は1回だけ再取得
+  //   - ref ガード+provider 側 in-flight dedupe の二重防御で多重 fetch・無限リトライなし
+  const permissionsRefreshRequestedRef = useRef(false);
+  const permissionsLoadingAtMountRef = useRef<boolean | null>(null);
+  if (permissionsLoadingAtMountRef.current === null) {
+    permissionsLoadingAtMountRef.current = permissionsLoading;
+  }
+  // 再確認が終わるまで stale な granted でボタンを出さない(一瞬表示の回帰防止)。
+  const [permissionsRefreshPending, setPermissionsRefreshPending] = useState(
+    () => !permissionsLoading,
+  );
+  useEffect(() => {
+    if (permissionsRefreshRequestedRef.current) return;
+    if (permissionsLoading) return;
+    if (permissionsLoadingAtMountRef.current === true && permissions !== null) {
+      permissionsRefreshRequestedRef.current = true;
+      return;
+    }
+    permissionsRefreshRequestedRef.current = true;
+    setPermissionsRefreshPending(true);
+    refetchPermissions().finally(() => {
+      setPermissionsRefreshPending(false);
+    });
+  }, [permissionsLoading, permissions, refetchPermissions]);
+
+  // 再確認中(pending)・取得中(loading)は空配列へ倒す=ボタン非表示(fail-safe)。
+  const effectivePermissions = useMemo(
+    () =>
+      permissionsRefreshPending || permissionsLoading
+        ? []
+        : (permissions ?? []),
+    [permissions, permissionsLoading, permissionsRefreshPending],
+  );
+
+  const canWrite = useMemo(
+    () =>
+      effectivePermissions.some(
+        (p) => p.resource === "property" && p.action === "write" && p.granted,
+      ),
+    [effectivePermissions],
+  );
 
   // 反響メモの変更はフィールドレベル owner_note の edit/full(サーバも 403)。
   // 無いユーザーにはメモ入力自体を出さない(必ず失敗するUIを出さない方針)。
-  const canWriteNote = useMemo(() => {
-    if (permissionsLoading) return false;
-    return (permissions ?? []).some(
-      (p) =>
-        p.resource === "owner_note" &&
-        (p.action === "edit" || p.action === "full") &&
-        p.granted,
-    );
-  }, [permissions, permissionsLoading]);
+  const canWriteNote = useMemo(
+    () =>
+      effectivePermissions.some(
+        (p) =>
+          p.resource === "owner_note" &&
+          (p.action === "edit" || p.action === "full") &&
+          p.granted,
+      ),
+    [effectivePermissions],
+  );
+
+  // @codex #367 P2: 権限は画面に居たまま変わり得る(復帰時の再検証)。開いたままの
+  // 追加フォーム・反響エディタが権限剥奪後も残ると、送信できて 403 になる。
+  // **state を effect で消すのではなく描画条件を権限から導出**する(effect 内の同期
+  // setState は eslint 規約で禁止・derive の方が取りこぼしが無い)。
+  // 権限が戻れば開いていた状態に復帰する(state は保持したまま隠すだけ)。
+  const formOpen = canWrite && showForm;
+  const editingLogId = canWrite ? editingReactionId : null;
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -342,14 +394,20 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
     setInfo(null);
     try {
       // note: 省略=変更なし / null=消す / 文字列=上書き(サーバ仕様と対)。
+      // @codex #367 P2: 編集中にメモ権限が外れた場合(復帰時の再検証で剥奪を検知)は
+      // メモを一切送らない。送るとサーバが 403 で弾き、**反響の種別・日付の保存まで
+      // 巻き添えで失敗する**。権限のある部分だけ保存できるようにする。
+      const noteFields = !canWriteNote
+        ? {}
+        : clearNote
+          ? { note: null as string | null }
+          : note.trim()
+            ? { note: note.trim() }
+            : {};
       const result = await updatePropertyDmLogReaction(propertyId, logId, {
         status,
         ...(reactedAt ? { reactedAt } : {}),
-        ...(clearNote
-          ? { note: null }
-          : note.trim()
-            ? { note: note.trim() }
-            : {}),
+        ...noteFields,
       });
       // 宛先不明の物件連動はサーバが行う。結果を平易な日本語で伝える。
       if (result.undeliverableLinked) {
@@ -408,7 +466,7 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
         )}
       </div>
 
-      {showForm && (
+      {formOpen && (
         <CreateLogForm
           propertyId={propertyId}
           onCreated={() => {
@@ -505,7 +563,7 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
                       )}
                     </td>
                     <td className="px-3 py-2">
-                      {editingReactionId === log.id ? (
+                      {editingLogId === log.id ? (
                         <ReactionEditor
                           log={log}
                           canWriteNote={canWriteNote}

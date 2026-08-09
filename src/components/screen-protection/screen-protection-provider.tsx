@@ -16,6 +16,7 @@ import {
   buildWatermarkText,
 } from "@/lib/screen-protection";
 import WatermarkOverlay from "./watermark-overlay";
+import { usePermissionsRevalidation } from "./use-permissions-revalidation";
 import ScreenProtectionGuard from "./screen-protection-guard";
 
 /**
@@ -127,9 +128,16 @@ export default function ScreenProtectionProvider({
   // transient な失敗（一時的な 5xx・ネットワーク断）で layout 生存中ずっと
   // permissions=null が残り、consumer のボタンが full reload まで復旧しない問題への
   // 復旧導線として、context の refetchPermissions からも再実行できるようにする。
-  const loadPermissions = useCallback((): Promise<void> => {
+  // @codex #367 P2: 最後に取得を試みた時刻(復帰時の再検証を間引くため)。
+  const lastPermissionsLoadRef = useRef(0);
+
+  // options.background=true は「画面に居たまま裏で最新化する」経路(復帰時の再検証)。
+  // permissionsLoading を立てない = consumer のボタンが一瞬消えない。剥奪の反映は応答が
+  // 返った時点(1RTT遅れ)になるが、従来は**リロードするまで反映されなかった**ので改善。
+  // 失敗時の fail-safe(permissions=null → ボタン非表示)は前景経路と完全に同一。
+  const loadPermissions = useCallback((options?: { background?: boolean }): Promise<void> => {
     if (inFlightRef.current) return inFlightRef.current;
-    setPermissionsLoading(true);
+    if (!options?.background) setPermissionsLoading(true);
     const run = fetch("/api/me/permissions")
       .then((res) => (res.ok ? res.json() : null))
       .then((json) => {
@@ -176,10 +184,18 @@ export default function ScreenProtectionProvider({
       })
       .finally(() => {
         inFlightRef.current = null;
+        lastPermissionsLoadRef.current = Date.now();
       });
     inFlightRef.current = run;
     return run;
   }, []);
+
+  // consumer へ配る refetch は常に前景(従来どおり permissionsLoading を立てる)。
+  // context に options を漏らさない=画面側から間引き規則を壊せないようにする。
+  const refetchPermissions = useCallback(
+    (): Promise<void> => loadPermissions(),
+    [loadPermissions],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -188,6 +204,20 @@ export default function ScreenProtectionProvider({
       mountedRef.current = false;
     };
   }, [loadPermissions]);
+
+  // @codex #367 P2: 画面に居続けている間の権限変更に追従する。各画面の「進入時に最大1回」
+  // だけでは、開きっぱなしの画面で管理者が権限を剥奪しても遷移・リロードまで反映されない。
+  // ここ1箇所で追従させる=全画面が同時に直り、画面ごとに実装がばらつかない。
+  // ⚠監視の実体(可視状態の判定・間引き・listener 解除)は use-permissions-revalidation へ
+  // 分離している。画面保護(S1b-2)は「この provider にタブの可視状態やフォーカスを監視する
+  // 挙動を持ち込まない」というスコープ線引きをしており、権限鮮度はその関心の外だから
+  // (透かし・コピー抑止・監査には一切触れない)。線引きはテストで固定している。
+  // in-flight 中の dedupe は loadPermissions 側の inFlightRef が担う。
+  // background=true = permissionsLoading を立てない → 復帰のたびにボタンが一瞬消えない。
+  const revalidatePermissions = useCallback(() => {
+    loadPermissions({ background: true });
+  }, [loadPermissions]);
+  usePermissionsRevalidation(revalidatePermissions, lastPermissionsLoadRef);
 
   // 認証確定 + mount 後、かつ識別情報がある場合のみ透かし文言を生成（汎用透かしを出さない）。
   const watermarkText =
@@ -211,7 +241,7 @@ export default function ScreenProtectionProvider({
         capabilities,
         permissionsLoading,
         permissionsError,
-        refetchPermissions: loadPermissions,
+        refetchPermissions,
       }}
     >
       {children}

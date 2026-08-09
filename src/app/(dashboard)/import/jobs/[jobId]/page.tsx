@@ -301,6 +301,17 @@ export default function ImportJobDetailPage() {
   // Row action state
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // 書き込み系(行の解決・一括操作)を止める条件。@codex #367 P1:
+  // 行ごとの disabled を `actionLoading === row.id` だけにすると、A行の処理中に B行を
+  // 押せてしまい、A の finally が共有の actionLoading を null に戻した瞬間に **B の
+  // リクエストが飛んだままなのに B が再び押せる**(create_new は対象行の状態を読んでから
+  // レコードを作り、その後で状態を更新するため、二重クリックで2件作られ得る)。
+  // 全画面スピナーの早期 return を初回限定にしたことでこの窓が開いたので、
+  // 「いずれかの処理中(行・一括)か再取得中は、すべての書き込み操作を止める」に統一する。
+  // ⚠行ごとのスピナー表示は従来どおり `actionLoading === row.id` を使う(どの行を
+  // 処理中かは見せる)。ここで統一するのは disabled だけ。
+  const mutationLocked = actionLoading !== null || loading;
   const [editingRow, setEditingRow] = useState<string | null>(null);
   const [editedData, setEditedData] = useState<Record<string, string>>({});
 
@@ -649,7 +660,12 @@ export default function ImportJobDetailPage() {
     }
   };
 
-  if (loading) {
+  // 全画面スピナーは**初回読み込みのときだけ**。行を1件解決するたびに fetchJob() が
+  // 走るため、`if (loading)` のままだと再取得のたびに画面全体が消えて「要確認」行を
+  // 連続で捌く作業の視界が飛ぶ。データを持っている間(job !== null)は画面を保ったまま
+  // 再取得し、操作の抑止は既存の disabled={loading}(ページ送り等)と、行ごとの
+  // actionLoading 表示に任せる。
+  if (loading && !job) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
@@ -1025,7 +1041,13 @@ export default function ImportJobDetailPage() {
           <button
             key={tab.key}
             onClick={() => changeFilter(tab.key)}
-            className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
+            // 再取得中はタブも押させない(ページ送り・理由セレクトと同じ抑止レベル)。
+            // 全画面スピナーの早期 return を初回限定にした結果、これまで「画面ごと
+            // 消えていた」ことで暗黙に効いていたガードが無くなったため明示する。
+            // 無いと fetchJob が in-flight のままタブ切替で2本目が走り、先に解決した
+            // 古い応答が job を上書きして「選択中のタブと表示行が食い違う」ことがある。
+            disabled={loading}
+            className={`rounded-full px-3 py-1 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
               filter === tab.key
                 ? "bg-indigo-600 text-white"
                 : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
@@ -1073,7 +1095,7 @@ export default function ImportJobDetailPage() {
                 <>
                   <button
                     onClick={() => handleBatchResolve("skip")}
-                    disabled={actionLoading === "batch"}
+                    disabled={mutationLocked}
                     className="flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                   >
                     <SkipForward className="h-3 w-3" />
@@ -1081,7 +1103,7 @@ export default function ImportJobDetailPage() {
                   </button>
                   <button
                     onClick={() => handleBatchResolve("mark_error")}
-                    disabled={actionLoading === "batch"}
+                    disabled={mutationLocked}
                     className="flex items-center gap-1 rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-900/20"
                   >
                     <Ban className="h-3 w-3" />
@@ -1093,7 +1115,7 @@ export default function ImportJobDetailPage() {
                     counts.duplicateActionable > 0 && (
                       <button
                         onClick={handleBulkResolveDuplicates}
-                        disabled={actionLoading === "batch"}
+                        disabled={mutationLocked}
                         title="取込時に検出された重複候補（要レビューの内数）だけをスキップします。非重複の要レビュー行は残ります。"
                         className="flex items-center gap-1 rounded-md border border-amber-300 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/20"
                       >
@@ -1632,7 +1654,7 @@ export default function ImportJobDetailPage() {
                                   onClick={() =>
                                     handleResolve(row.id, "link_existing")
                                   }
-                                  disabled={isLoading}
+                                  disabled={mutationLocked}
                                   className="flex items-center gap-1 rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
                                 >
                                   {isLoading ? (
@@ -1657,7 +1679,7 @@ export default function ImportJobDetailPage() {
                               onClick={() =>
                                 handleResolve(row.id, "create_new")
                               }
-                              disabled={isLoading}
+                              disabled={mutationLocked}
                               className="flex items-center gap-1 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
                             >
                               {isLoading ? (
@@ -1672,7 +1694,7 @@ export default function ImportJobDetailPage() {
                           {row.status === "error" && !isRegistryPdfBulkJob && (
                             <button
                               onClick={() => handleRetry(row.id)}
-                              disabled={isLoading}
+                              disabled={mutationLocked}
                               className="flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
                             >
                               {isLoading ? (
@@ -1686,7 +1708,7 @@ export default function ImportJobDetailPage() {
 
                           <button
                             onClick={() => handleResolve(row.id, "skip")}
-                            disabled={isLoading}
+                            disabled={mutationLocked}
                             className="flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
                           >
                             <SkipForward className="h-3 w-3" />
@@ -1697,7 +1719,7 @@ export default function ImportJobDetailPage() {
                             onClick={() =>
                               handleResolve(row.id, "mark_error")
                             }
-                            disabled={isLoading}
+                            disabled={mutationLocked}
                             className="flex items-center gap-1 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:bg-gray-900 dark:text-red-400 dark:hover:bg-red-900/20"
                           >
                             <Ban className="h-3 w-3" />
