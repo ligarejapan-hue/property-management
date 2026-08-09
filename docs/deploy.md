@@ -529,6 +529,40 @@ sudo systemctl status property-management --no-pager
 > `next` / `@prisma/client` は `dependencies` のため prune 後も残る。
 > （`@tailwindcss/postcss` / `tailwindcss` も build 時必須だが `dependencies` 側にあるため prune の影響を受けない。）
 
+### リリース同梱の一回限り作業（one-shot）
+
+#### 反響の記録リリース（migration `add_dm_reaction_columns`）: 旧 sale_dm 送付記録の照合
+
+この migration は既存の送付記録を全件「反応なし（no_response）」で初期化する。過去の売却DMで
+返戻・LP反響が既に付いている宛先へ反響を反映するため、**このリリースの反映時に1回だけ**
+照合スクリプトを実行する（冪等＝何度実行しても安全）。実行しないと、過去に返戻・返信のあった
+宛先が反響なし扱いのまま DM 出力の除外対象にならない。
+
+実行タイミング: `prisma migrate deploy`（更新手順ステップ4）適用後〜`npm prune`（ステップ6）前。
+`tsx` は devDependencies のため prune 後は実行できない（prune 済みなら `npm ci --include=dev` で
+入れ直してから実行し、終わったら再度 `npm prune --omit=dev`）。
+
+```bash
+cd /opt/property-management
+set -a && source /etc/property-management/app.env && set +a
+
+# 1. 事前確認（dry-run・書き込みなし・件数レポートのみ）
+sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm \
+  npx tsx scripts/reconcile-sale-dm-reactions.ts
+
+# 2. 実書込
+sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm \
+  npx tsx scripts/reconcile-sale-dm-reactions.ts --apply
+```
+
+検証: `--apply` の件数レポート（対象／ブリッジ済み同期／新規対応付け／保守的付与／対応付けなし）が
+dry-run と一致すること。反映後、物件詳細の「DM 送付履歴」で過去の売却DM行に反響
+（連絡あり／宛先不明）が表示される。
+
+ロールバック: スクリプトは反響列（`reaction_*`／`draft_id`）のみを更新する additive な処理。
+コードを旧版に戻せば列は読まれないため DB の巻き戻しは不要。適用結果をやり直したい場合は
+再実行（冪等）で現在の draft 状態へ再同期される。
+
 ---
 
 ## 8. ロールバック手順

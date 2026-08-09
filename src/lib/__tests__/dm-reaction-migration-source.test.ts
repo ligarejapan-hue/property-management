@@ -42,6 +42,15 @@ describe("migration-B(DM反響列)の安全性", () => {
     );
   });
 
+  it("デプロイ手順書に照合スクリプト(one-shot)の実行手順がある(#366 R5)", () => {
+    // migration は既存行を no_response で初期化する=照合を実行しないと過去の返戻・返信が
+    // 反響なし扱いのまま。運用手順書から漏れると誰も実行しない(@codex #366 R5 P1)。
+    const DEPLOY = read("docs/deploy.md");
+    expect(DEPLOY).toContain("reconcile-sale-dm-reactions.ts");
+    expect(DEPLOY).toContain("--apply");
+    expect(DEPLOY).toContain("add_dm_reaction_columns");
+  });
+
   it("schema.prisma: PropertyDmLog に反響5列+索引が定義されている", () => {
     const model = SCHEMA.match(/model PropertyDmLog \{[\s\S]*?\n\}/)?.[0] ?? "";
     expect(model).toMatch(
