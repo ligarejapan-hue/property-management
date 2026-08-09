@@ -56,6 +56,7 @@ vi.mock("@/lib/prisma", () => {
     dmExportBatchItem: { findMany: vi.fn(), deleteMany: vi.fn() },
     property: { findMany: vi.fn() },
     importJobRow: { findMany: vi.fn() },
+    propertyDmLog: { findMany: vi.fn(async () => []) },
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
   db.$queryRaw = vi.fn(async () => []);
@@ -76,6 +77,7 @@ const pm = prisma as unknown as {
   dmExportBatchItem: { findMany: Mock; deleteMany: Mock };
   property: { findMany: Mock };
   importJobRow: { findMany: Mock };
+  propertyDmLog: { findMany: Mock };
   $transaction: Mock;
   $queryRaw: Mock;
 };
@@ -181,6 +183,7 @@ beforeEach(() => {
   pm.dmExportBatchItem.deleteMany.mockResolvedValue({ count: 0 });
   pm.property.findMany.mockResolvedValue([makePropRow()]);
   pm.importJobRow.findMany.mockResolvedValue([]);
+  pm.propertyDmLog.findMany.mockResolvedValue([]);
   armQueryRaw({
     id: BATCH_ID,
     downloaded_at: null,
@@ -287,6 +290,77 @@ describe("GET /api/properties/dm-batches/[id]/csv", () => {
     const res = await GET(makeRequest(), ctx);
     expect(res.status).toBe(403);
     expect(pm.dmExportBatch.update).not.toHaveBeenCalled();
+  });
+
+  it("初回GET: 拒否・宛先不明の反響が付いた宛先が混ざると 409・凍結しない(検査(2)=R42/PR-B)", async () => {
+    // 他物件も含む所有者横断の terminal 反響(代表 or 連関経由)を検出する
+    pm.propertyDmLog.findMany.mockResolvedValue([
+      { ownerId: "o1", logOwners: [] },
+    ]);
+    const res = await GET(makeRequest(), ctx);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("拒否・宛先不明");
+    expect(pm.dmExportBatch.update).not.toHaveBeenCalled();
+    // 検出クエリ: terminal 2種のみ・代表(owner_id)と連関(log_owners)の両経路
+    const where = pm.propertyDmLog.findMany.mock.calls[0][0].where;
+    expect(where.reactionStatus).toEqual({ in: ["refused", "undeliverable"] });
+    expect(where.OR).toEqual([
+      { ownerId: { in: ["o1"] } },
+      { logOwners: { some: { ownerId: { in: ["o1"] } } } },
+    ]);
+  });
+
+  it("初回GET: 連関(共有者)経由の terminal 反響も 409(代表だけ見ない=R29)", async () => {
+    pm.dmExportBatchItem.findMany.mockResolvedValue([
+      makeItemRow({ itemOwners: [{ ownerId: "o1" }, { ownerId: "o2" }] }),
+    ]);
+    pm.property.findMany.mockResolvedValue([
+      makePropRow({
+        propertyOwners: [
+          ...makePropRow().propertyOwners,
+          {
+            isPrimary: false,
+            relationship: null,
+            owner: {
+              id: "o2",
+              name: "共有 太郎",
+              nameKana: null,
+              zip: "100-0001",
+              address: "東京都千代田区2-2",
+              corporateNumber: null,
+            },
+          },
+        ],
+      }),
+    ]);
+    // 共有者 o2 に別物件で拒否の記録(連関経由)
+    pm.propertyDmLog.findMany.mockResolvedValue([
+      { ownerId: null, logOwners: [{ ownerId: "o2" }] },
+    ]);
+    const res = await GET(makeRequest(), ctx);
+    expect(res.status).toBe(409);
+  });
+
+  it("再試行GET: terminal 反響検査は毎回掛かる(初回DL後の拒否は digest 一致でも 409=R45/R53)", async () => {
+    // 初回DLで実 digest を確定(digest 不一致による偽の 409 と区別するため)
+    const res1 = await GET(makeRequest(), ctx);
+    expect(res1.status).toBe(200);
+    const digest = pm.dmExportBatch.update.mock.calls[0][0].data.csvDigest;
+    armQueryRaw({
+      id: BATCH_ID,
+      downloaded_at: new Date(),
+      csv_digest: digest,
+      resend_filter_applied: false,
+    });
+    // 初回DL後に拒否の反響が付いた
+    pm.propertyDmLog.findMany.mockResolvedValue([
+      { ownerId: "o1", logOwners: [] },
+    ]);
+    const res2 = await GET(makeRequest(), ctx);
+    expect(res2.status).toBe(409);
+    const body = (await res2.json()) as { error: { message: string } };
+    expect(body.error.message).toContain("拒否・宛先不明");
   });
 
   it("再試行GET: digest 一致なら 200・凍結の再書き込みはしない(R43)", async () => {

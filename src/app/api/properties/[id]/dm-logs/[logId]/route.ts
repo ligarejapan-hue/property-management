@@ -19,8 +19,9 @@ import { writeAuditLog } from "@/lib/audit";
 // 送付記録の取消(記録ミスの訂正・設計書§2.3)。
 //   - 認可: property:write + record scope。tx は lockPropertyRecordForWrite で始める(親→子規約)。
 //   - method="sale_dm" の行(売却DMブリッジ)は 409: 売却DM側の draft 状態(sent)と食い違うため。
-//   - PR-B(反響列導入)で「undeliverable 反響付き行の削除時に dmUndeliverableAt を
-//     親行ロック保持のまま再計算する」処理をこの tx に追加する(設計§2.3)。
+//   - undeliverable 反響付き行の削除時は、親行ロック保持のまま残数(宛先不明の他ログ+
+//     returned_undeliverable の sent ドラフト)を数え、ゼロなら dmUndeliverableAt を
+//     自動解除する(PR-B・設計§2.3。dmStatus は人の判断で戻す=clear-dm-undeliverable と同方針)。
 //   - 監査 dm_sent_record_delete {logId}。
 
 export async function DELETE(
@@ -42,7 +43,7 @@ export async function DELETE(
       await lockPropertyRecordForWrite(tx, propertyId, session);
       const log = await tx.propertyDmLog.findFirst({
         where: { id: logId, propertyId },
-        select: { id: true, method: true, batchId: true },
+        select: { id: true, method: true, batchId: true, reactionStatus: true },
       });
       if (!log) {
         throw new ApiError(404, "送付記録が見つかりません", "NOT_FOUND");
@@ -65,6 +66,34 @@ export async function DELETE(
         );
       }
       await tx.propertyDmLog.delete({ where: { id: logId } });
+
+      // 宛先不明の反響が付いた行を消したら、物件の自動フラグを再計算する(PR-B)。
+      // 残数=自分以外の宛先不明ログ+returned_undeliverable の sent ドラフト。ゼロなら
+      // dmUndeliverableAt のみ解除(dmStatus は人の判断で戻す)。親行ロックは保持中。
+      if (log.reactionStatus === "undeliverable") {
+        const [logCount, draftCount] = await Promise.all([
+          tx.propertyDmLog.count({
+            where: {
+              propertyId,
+              reactionStatus: "undeliverable",
+              id: { not: logId },
+            },
+          }),
+          tx.dmRecipientDraft.count({
+            where: {
+              propertyId,
+              status: "sent",
+              deliveryStatus: "returned_undeliverable",
+            },
+          }),
+        ]);
+        if (logCount + draftCount === 0) {
+          await tx.property.update({
+            where: { id: propertyId },
+            data: { dmUndeliverableAt: null },
+          });
+        }
+      }
     });
 
     await writeAuditLog({

@@ -5,8 +5,8 @@ import {
   type PropertyStateForCheck,
 } from "../eligibility";
 
-// 宛先資格の再検証(設計書§2.1 検査(1)(3)(4)(6))。
-// (2)terminal反響=PR-B / (5)候補再評価=PR-C で本関数に追加する。
+// 宛先資格の再検証(設計書§2.1 検査(1)(2)(3)(4)(6)(7))。
+// (2)terminal反響=PR-B で追加済み / (5)候補再評価=PR-C で本関数に追加する。
 
 const ADMIN = { id: "u-admin", role: "admin" };
 const FIELD = { id: "u-field", role: "field_staff" };
@@ -52,7 +52,56 @@ describe("checkBatchEligibility", () => {
       scopeMissingCount: 0,
       stateIssueCount: 0,
       groupMismatchCount: 0,
+      terminalReactionCount: 0,
     });
+  });
+
+  it("(2) 代表が terminal 集合(拒否・宛先不明の反響持ち)にあれば terminalReactionCount(PR-B)", () => {
+    const r = checkBatchEligibility(
+      [item()],
+      new Map([["p1", prop()]]),
+      ADMIN,
+      new Set(["o1"]),
+    );
+    expect(r.terminalReactionCount).toBe(1);
+    expect(r.stateIssueCount).toBe(0);
+  });
+
+  it("(2) 共有者(連関)の1人が terminal でも検出する(代表だけ見ない=R29)", () => {
+    const shared = prop({
+      propertyOwners: [
+        ...prop().propertyOwners,
+        {
+          isPrimary: false,
+          relationship: null,
+          owner: {
+            id: "o2",
+            name: "乙",
+            nameKana: null,
+            zip: "100-0001",
+            address: "東京都A",
+            corporateNumber: null,
+          },
+        },
+      ],
+    });
+    const r = checkBatchEligibility(
+      [item({ groupOwnerIds: ["o1", "o2"] })],
+      new Map([["p1", shared]]),
+      ADMIN,
+      new Set(["o2"]),
+    );
+    expect(r.terminalReactionCount).toBe(1);
+  });
+
+  it("(2) terminal 集合が無関係の owner なら 0", () => {
+    const r = checkBatchEligibility(
+      [item()],
+      new Map([["p1", prop()]]),
+      ADMIN,
+      new Set(["o-other"]),
+    );
+    expect(r.terminalReactionCount).toBe(0);
   });
 
   it("(4) owner/property が null の item は pruned に入る(他の検査対象にしない)", () => {

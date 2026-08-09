@@ -14,6 +14,7 @@ import { isPlainOwnerLevel } from "@/lib/dm-export";
 import {
   lockOwnersForShare,
   lockPropertiesForShare,
+  sortUniqueIds,
   type RawTx,
 } from "@/lib/dm-batch/locks";
 import {
@@ -40,7 +41,7 @@ import {
 // 凍結 tx は共通ロック順序「Owner(FOR SHARE)→物件親行(FOR SHARE)→バッチ行(FOR UPDATE)
 // →items 再読取(不一致中止)」に従う(初回GET同士のレース・担当替え・所有者統合と直列化)。
 //
-// 資格検査(checkBatchEligibility)は (1)scope (3)送付可能+リンク (4)null除外 (6)グループ一致。
+// 資格検査(checkBatchEligibility)は (1)scope (2)terminal反響 (3)送付可能+リンク (4)null除外 (6)グループ一致。
 // (2)terminal反響=PR-B / (5)再送候補述語=PR-C で同関数に追加される(本 route は不変)。
 
 async function loadPropertyStates(
@@ -173,13 +174,43 @@ export async function GET(
       }
 
       const properties = await loadPropertyStates(propsTx, collectPropertyIds(items));
-      const elig = checkBatchEligibility(items, properties, session);
+
+      // (2) terminal 反響(拒否/宛先不明)の宛先検出(PR-B・設計§2.1)。他物件も含む所有者横断で、
+      // 代表(owner_id)と共有者連関(log_owners)の両経路から集合を作る(R29)。Owner FOR SHARE
+      // 保持中に読む=terminal を書く writer(Owner FOR UPDATE)と直列化され、すれ違わない(R47)。
+      const allOwnerIds = sortUniqueIds(collectOwnerIds(items));
+      const terminalOwnerIds = new Set<string>();
+      if (allOwnerIds.length > 0) {
+        const terminalLogs = await tx.propertyDmLog.findMany({
+          where: {
+            reactionStatus: { in: ["refused", "undeliverable"] },
+            OR: [
+              { ownerId: { in: allOwnerIds } },
+              { logOwners: { some: { ownerId: { in: allOwnerIds } } } },
+            ],
+          },
+          select: { ownerId: true, logOwners: { select: { ownerId: true } } },
+        });
+        for (const log of terminalLogs) {
+          if (log.ownerId) terminalOwnerIds.add(log.ownerId);
+          for (const lo of log.logOwners) terminalOwnerIds.add(lo.ownerId);
+        }
+      }
+
+      const elig = checkBatchEligibility(items, properties, session, terminalOwnerIds);
 
       if (elig.scopeMissingCount > 0) {
         throw new ApiError(
           403,
           `担当範囲が変わったため出力できません(${elig.scopeMissingCount}件)。再出力してください`,
           "FORBIDDEN",
+        );
+      }
+      if (elig.terminalReactionCount > 0) {
+        throw new ApiError(
+          409,
+          `拒否・宛先不明の反響が付いた宛先が含まれています(${elig.terminalReactionCount}件)。この控えは使えません。再出力してください`,
+          "TERMINAL_REACTION",
         );
       }
       if (elig.stateIssueCount > 0 || elig.groupMismatchCount > 0) {

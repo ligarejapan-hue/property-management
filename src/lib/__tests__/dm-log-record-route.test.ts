@@ -67,7 +67,14 @@ vi.mock("@/lib/property-record-guard", () => ({
 
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
-    propertyDmLog: { create: vi.fn(), findFirst: vi.fn(), delete: vi.fn() },
+    propertyDmLog: {
+      create: vi.fn(),
+      findFirst: vi.fn(),
+      delete: vi.fn(),
+      count: vi.fn(async () => 0),
+    },
+    dmRecipientDraft: { count: vi.fn(async () => 0) },
+    property: { update: vi.fn() },
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
   db.$queryRaw = vi.fn(async () => []);
@@ -86,7 +93,9 @@ import { POST } from "../../app/api/properties/[id]/dm-logs/route";
 import { DELETE } from "../../app/api/properties/[id]/dm-logs/[logId]/route";
 
 const pm = prisma as unknown as {
-  propertyDmLog: { create: Mock; findFirst: Mock; delete: Mock };
+  propertyDmLog: { create: Mock; findFirst: Mock; delete: Mock; count: Mock };
+  dmRecipientDraft: { count: Mock };
+  property: { update: Mock };
   $transaction: Mock;
 };
 
@@ -132,8 +141,14 @@ beforeEach(() => {
   vi.mocked(assertPropertyRecordAccess).mockResolvedValue(undefined);
   vi.mocked(lockPropertyRecordForWrite).mockResolvedValue(undefined);
   pm.propertyDmLog.create.mockResolvedValue({ id: LOG_ID });
-  pm.propertyDmLog.findFirst.mockResolvedValue({ id: LOG_ID, method: "mail", batchId: null });
+  pm.propertyDmLog.findFirst.mockResolvedValue({
+    id: LOG_ID,
+    method: "mail",
+    batchId: null,
+    reactionStatus: "no_response",
+  });
   pm.propertyDmLog.delete.mockResolvedValue({});
+  pm.property.update.mockResolvedValue({});
 });
 
 describe("POST /api/properties/[id]/dm-logs(個別記録)", () => {
@@ -250,6 +265,51 @@ describe("DELETE /api/properties/[id]/dm-logs/[logId](取消)", () => {
     };
     expect(audit.action).toBe("dm_sent_record_delete");
     expect(audit.detail).toEqual({ logId: LOG_ID });
+  });
+
+  it("宛先不明(undeliverable)反響付き行の削除: 残数ゼロなら dmUndeliverableAt=null(PR-B・親行ロック保持)", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue({
+      id: LOG_ID,
+      method: "mail",
+      batchId: null,
+      reactionStatus: "undeliverable",
+    });
+    const res = await DELETE(deleteRequest(), deleteCtx);
+    expect(res.status).toBe(200);
+    // 残数の数え方: 自分以外の宛先不明ログ+returned_undeliverable の sent ドラフト
+    expect(pm.propertyDmLog.count.mock.calls[0][0].where).toMatchObject({
+      propertyId: PROP_ID,
+      reactionStatus: "undeliverable",
+      id: { not: LOG_ID },
+    });
+    expect(pm.dmRecipientDraft.count.mock.calls[0][0].where).toMatchObject({
+      propertyId: PROP_ID,
+      status: "sent",
+      deliveryStatus: "returned_undeliverable",
+    });
+    const upd = pm.property.update.mock.calls[0][0];
+    expect(upd.where).toEqual({ id: PROP_ID });
+    expect(upd.data).toEqual({ dmUndeliverableAt: null });
+  });
+
+  it("宛先不明反響付き行の削除でも残数があれば物件フラグを消さない", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue({
+      id: LOG_ID,
+      method: "mail",
+      batchId: null,
+      reactionStatus: "undeliverable",
+    });
+    pm.dmRecipientDraft.count.mockResolvedValueOnce(1);
+    const res = await DELETE(deleteRequest(), deleteCtx);
+    expect(res.status).toBe(200);
+    expect(pm.property.update).not.toHaveBeenCalled();
+  });
+
+  it("宛先不明でない行の削除は再計算しない(物件を触らない)", async () => {
+    const res = await DELETE(deleteRequest(), deleteCtx);
+    expect(res.status).toBe(200);
+    expect(pm.propertyDmLog.count).not.toHaveBeenCalled();
+    expect(pm.property.update).not.toHaveBeenCalled();
   });
 });
 
