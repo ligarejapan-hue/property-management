@@ -568,9 +568,27 @@ sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm \
 dry-run と一致すること。反映後、物件詳細の「DM 送付履歴」で過去の売却DM行に反響
 （連絡あり／宛先不明）が表示される。
 
-ロールバック: スクリプトは反響列（`reaction_*`／`draft_id`）のみを更新する additive な処理。
-コードを旧版に戻せば列は読まれないため DB の巻き戻しは不要。適用結果をやり直したい場合は
-再実行（冪等）で現在の draft 状態へ再同期される。
+ロールバック: 冪等＝**再実行が安全**という意味であり、**再実行は取り消しにはならない**
+（一意一致で書いた `draft_id` は残り以後そのまま同期される／曖昧行への保守的付与は証拠が
+消えても残る）。誤適用を戻す手段は次の2つ。
+
+1. **第一手段＝実行前バックアップからの復元**。日次バックアップ（`pm-db-backup.timer`）に
+   加え、`--apply` 直前に手動スナップショットを取っておく:
+   `sudo -u postgres pg_dump -Fc property_management > /root/pre-reconcile-$(date +%Y%m%d).dump`
+2. **SQL での初期化**（バックアップが使えない場合）。照合が書くのは同期由来
+   （`reaction_source='sale_dm_sync'`）の反響と `draft_id` のみ＝手動入力の反響は触らずに戻せる:
+
+   ```sql
+   -- 照合・同期が書いた分を migration 直後の初期状態へ戻す(手動入力の反響は残る)。
+   -- 個別に戻す場合は id で絞る。戻した後に照合を再実行すれば現在の draft 状態から作り直せる。
+   UPDATE property_dm_logs
+   SET draft_id = NULL,
+       reaction_status = 'no_response', reacted_at = NULL, reaction_note = NULL,
+       reaction_source = NULL, manual_reaction_shadow = NULL
+   WHERE method = 'sale_dm' AND reaction_source = 'sale_dm_sync';
+   ```
+
+コード自体を旧版に戻す場合は反響列は読まれなくなるため、上記の DB 巻き戻しは必須ではない。
 
 ---
 
