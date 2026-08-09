@@ -21,6 +21,7 @@ import {
   BookOpen,
   Newspaper,
   Mail,
+  MailX,
 } from "lucide-react";
 import { canSee, type AppRole } from "@/lib/nav/roles";
 
@@ -99,6 +100,8 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       { label: "郵便番号×住所チェック", href: "/admin/postal-code-audit", icon: ic(MapPinned), minRole: "admin" },
       { label: "テキスト衛生監査", href: "/admin/owners/text-hygiene", icon: ic(ScanText), minRole: "admin" },
       { label: "氏名・連絡先チェック", href: "/admin/owners/quality-audit", icon: ic(ClipboardCheck), minRole: "admin" },
+      // 物件削除で孤児化した送付記録の訂正・取消(PR-B・設計§2.4)
+      { label: "孤児DM記録の訂正", href: "/admin/orphan-dm-logs", icon: ic(MailX), minRole: "admin" },
     ],
   },
   {

@@ -210,12 +210,13 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   property_dm_csv_export: new Set(["batchId", "retry", "exportedAt"]),
   dm_sent_confirm: new Set(["batchId", "sentOn"]),
   dm_sent_record: new Set(["sentOn"]),
-  dm_sent_record_delete: new Set(["logId"]),
+  // orphan=物件削除で孤児化した行への操作(admin 訂正経路=設計§2.4)を区別する boolean。
+  dm_sent_record_delete: new Set(["logId", "orphan"]),
   // PR-B: 反響の手動記録。status=反響4種(enum)/reactedAt=YYYY-MM-DD。note 本文は載せない。
-  dm_reaction_update: new Set(["logId", "status", "reactedAt"]),
+  dm_reaction_update: new Set(["logId", "status", "reactedAt", "orphan"]),
   // 既存バグ修正(設計§2.5): property_dm_log_view の viewedAt が未登録で [REDACTED] に潰れていた。
-  // count/total/page は ALWAYS_SAFE のため viewedAt のみ追加。
-  property_dm_log_view: new Set(["viewedAt"]),
+  // count/total/page は ALWAYS_SAFE のため viewedAt のみ追加。orphan=孤児一覧(admin)の閲覧。
+  property_dm_log_view: new Set(["viewedAt", "orphan"]),
   // 売却促進DM: 操作事実の非PIIメタデータのみ allowlist(件数/enum/boolean/ISO日時)。
   // campaignId/variantId/propertyId/count/fields は ALWAYS_SAFE。本文・宛名・住所・メモ・trackingToken は
   // detail に載せておらず、ここにも含めない(perVariant の variantId キー別件数は redact のまま)。
