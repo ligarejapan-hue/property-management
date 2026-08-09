@@ -543,25 +543,38 @@ sudo systemctl status property-management --no-pager
 （送付記録への同期を持たない）が受けた LP アクセス・返戻の記録が draft にだけ残り、
 送付記録側が「反応なし」のまま恒久的に取り残される（新コードなら以後のイベントが同期する）。
 
-このリリースでは手順の順序を入れ替える: **ステップ5 build → ステップ7 再起動 →
-照合（下記 dry-run→apply）→ ステップ6 `npm prune`**。`tsx` は devDependencies のため
-prune を照合の後に回す（既に prune 済みなら `npm ci --include=dev` で入れ直してから実行し、
+このリリースでは手順の順序を入れ替える: **ステップ5 build → ステップ7 再起動（新コードの
+稼働確認）→ サービス一時停止 → スナップショット → 照合（dry-run→apply）→ サービス再開 →
+ステップ6 `npm prune`**。`tsx` は devDependencies のため prune を照合の後に回す
+（既に prune 済みなら `npm ci --include=dev` で入れ直してから実行し、
 終わったら再度 `npm prune --omit=dev`）。
+
+⚠**スナップショット〜apply の間はサービスを停止して書き込みを静止する**（quiesce）。稼働した
+まま実行すると、スナップショットの後・apply の前に届いた正規の反響（LP アクセス・返戻・手動
+編集）が、万一の巻き戻しで一緒に消えてしまう（下記ロールバックの `updated_at` ガードでも
+この区間は守れない）。停止は数分・停止中は公開 LP 転送(`/t/`)も止まる点は許容する。
 
 ```bash
 cd /opt/property-management
 set -a && source /etc/property-management/app.env && set +a
 
-# 0. 新プロセスが起動済みであることを確認
+# 0. 新プロセスの稼働を確認してから、照合ウィンドウの書き込みを静止する
 sudo systemctl is-active property-management
+sudo systemctl stop property-management
 
-# 1. 事前確認（dry-run・書き込みなし・件数レポートのみ）
+# 1. 実行前スナップショット（唯一の完全な巻き戻し手段・--apply 前に必ず取得）
+sudo -u postgres pg_dump -Fc property_management > /root/pre-reconcile-$(date +%Y%m%d).dump
+
+# 2. 事前確認（dry-run・書き込みなし・件数レポートのみ）
 sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm \
   npx tsx scripts/reconcile-sale-dm-reactions.ts
 
-# 2. 実書込
+# 3. 実書込
 sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm \
   npx tsx scripts/reconcile-sale-dm-reactions.ts --apply
+
+# 4. サービス再開
+sudo systemctl start property-management
 ```
 
 検証: `--apply` の件数レポート（対象／ブリッジ済み同期／新規対応付け／保守的付与／対応付けなし）が
@@ -573,19 +586,14 @@ dry-run と一致すること。反映後、物件詳細の「DM 送付履歴」
 消えても残る）。また「現在の列値を条件にした初期化 SQL」も安全な巻き戻しには**ならない**
 （同期が手動反響を上書きした行は手動値が `manual_reaction_shadow` にしか残っておらず初期化で
 消える／`cleared` 導出で `draft_id` だけ書かれた行は `reaction_source` が null のまま＝source では
-拾えない）。**巻き戻しは実行前スナップショットからの復元のみを正とする**。
-
-```bash
-# --apply 直前に必ず取得（これが唯一の完全な巻き戻し手段）
-sudo -u postgres pg_dump -Fc property_management > /root/pre-reconcile-$(date +%Y%m%d).dump
-```
+拾えない）。**巻き戻しは実行前スナップショット（上記手順1で取得済み）からの復元のみを正とする**。
 
 戻すとき（`property_dm_logs` の反響列＋`draft_id` だけを実行前の値に書き戻す。手動反響・
 shadow 含め完全に戻る。全体復元より影響範囲が小さい）。⚠**巻き戻しは apply の検証で異常を
-見つけた直後に行う**。新サービスは稼働中のため、スナップショット後にも正規の反響更新
-（LP アクセス・返戻・手動編集）が入り得る＝時間が経つほど正規の更新と混ざる。安全のため
-（1）**巻き戻し中はサービスを停止**して書き込みを静止し、（2）**apply 完了時刻より後に更新された
-行はスキップ**する（`updated_at` ガード。その行は新しい正規の状態を保つ）:
+見つけた直後に行う**。スナップショット〜apply は上記のとおり書き込み停止中に行うため、この
+区間に正規の更新は存在しない。サービス再開後に入った正規の反響更新（LP アクセス・返戻・手動
+編集）を守るため、（1）**巻き戻し中もサービスを停止**して書き込みを静止し、（2）**apply 完了時刻
+より後に更新された行はスキップ**する（`updated_at` ガード。その行は新しい正規の状態を保つ）:
 
 ```bash
 # 巻き戻し中の書き込みを止める(quiesce)

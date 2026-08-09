@@ -105,6 +105,8 @@ const pm = prisma as unknown as {
 const PERMS_ADMIN = [
   { resource: "user_management", action: "read", granted: true },
   { resource: "owner", action: "read", granted: true },
+  { resource: "owner", action: "write", granted: true },
+  { resource: "owner", action: "delete", granted: true },
   { resource: "property", action: "write", granted: true },
   { resource: "owner_note", action: "edit", granted: true },
 ];
@@ -294,6 +296,17 @@ describe("PATCH /api/admin/orphan-dm-logs/[logId](反響訂正)", () => {
     ).toBeLessThan(pm.propertyDmLog.update.mock.invocationCallOrder[0]);
   });
 
+  it("owner:write が無ければ訂正は 403(terminal は所有者の全物件の送付可否を左右する=#366 R12)", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(
+      PERMS_ADMIN.filter(
+        (p) => !(p.resource === "owner" && p.action === "write"),
+      ) as never,
+    );
+    const res = await PATCH(patchRequest({ status: "refused" }), idCtx);
+    expect(res.status).toBe(403);
+    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
+  });
+
   it("owner_note の edit/full が無ければ note 付き保存は 403(#366 R10)", async () => {
     vi.mocked(getUserPermissions).mockResolvedValue(
       PERMS_ADMIN.filter((p) => p.resource !== "owner_note") as never,
@@ -371,6 +384,17 @@ describe("DELETE /api/admin/orphan-dm-logs/[logId](取消)", () => {
     pm.propertyDmLog.findFirst.mockResolvedValue(null);
     const res = await DELETE(deleteRequest(), idCtx);
     expect(res.status).toBe(404);
+    expect(pm.propertyDmLog.delete).not.toHaveBeenCalled();
+  });
+
+  it("owner:delete が無ければ削除は 403(所有者履歴の恒久削除=#366 R12)", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(
+      PERMS_ADMIN.filter(
+        (p) => !(p.resource === "owner" && p.action === "delete"),
+      ) as never,
+    );
+    const res = await DELETE(deleteRequest(), idCtx);
+    expect(res.status).toBe(403);
     expect(pm.propertyDmLog.delete).not.toHaveBeenCalled();
   });
 

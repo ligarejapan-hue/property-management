@@ -43,7 +43,7 @@ const reactionSchema = z.object({
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
-async function requireOrphanAdmin(): Promise<{
+async function requireOrphanAdmin(intent: "write" | "delete"): Promise<{
   session: { id: string; role: string };
   permissions: PermissionMap;
 }> {
@@ -55,6 +55,15 @@ async function requireOrphanAdmin(): Promise<{
   if (!hasPermission(permissions, "property", "write")) {
     throw new ApiError(403, "記録を更新する権限がありません", "FORBIDDEN");
   }
+  // 孤児行は所有者にだけ紐づき、terminal 反響はその所有者の全物件の送付可否を左右する。
+  // 訂正は owner:write・削除(所有者履歴の恒久削除)は owner:delete も要求する(#366 R12。
+  // 名寄せ(merge)route の複合ゲートと同じ考え方)。
+  if (intent === "write" && !hasPermission(permissions, "owner", "write")) {
+    throw new ApiError(403, "所有者情報を更新する権限がありません", "FORBIDDEN");
+  }
+  if (intent === "delete" && !hasPermission(permissions, "owner", "delete")) {
+    throw new ApiError(403, "所有者情報を削除する権限がありません", "FORBIDDEN");
+  }
   return { session, permissions };
 }
 
@@ -64,7 +73,7 @@ export async function PATCH(
 ) {
   try {
     const { logId } = await params;
-    const { session, permissions } = await requireOrphanAdmin();
+    const { session, permissions } = await requireOrphanAdmin("write");
     const body = reactionSchema.parse(await request.json());
 
     // 反響メモの変更はフィールドレベル権限 owner_note の edit/full が必要(#366 R10・
@@ -200,7 +209,7 @@ export async function DELETE(
 ) {
   try {
     const { logId } = await params;
-    const { session } = await requireOrphanAdmin();
+    const { session } = await requireOrphanAdmin("delete");
 
     await prisma.$transaction(async (tx) => {
       const log = await tx.propertyDmLog.findFirst({
