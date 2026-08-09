@@ -649,7 +649,12 @@ export default function ImportJobDetailPage() {
     }
   };
 
-  if (loading) {
+  // 全画面スピナーは**初回読み込みのときだけ**。行を1件解決するたびに fetchJob() が
+  // 走るため、`if (loading)` のままだと再取得のたびに画面全体が消えて「要確認」行を
+  // 連続で捌く作業の視界が飛ぶ。データを持っている間(job !== null)は画面を保ったまま
+  // 再取得し、操作の抑止は既存の disabled={loading}(ページ送り等)と、行ごとの
+  // actionLoading 表示に任せる。
+  if (loading && !job) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
@@ -1025,7 +1030,13 @@ export default function ImportJobDetailPage() {
           <button
             key={tab.key}
             onClick={() => changeFilter(tab.key)}
-            className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
+            // 再取得中はタブも押させない(ページ送り・理由セレクトと同じ抑止レベル)。
+            // 全画面スピナーの早期 return を初回限定にした結果、これまで「画面ごと
+            // 消えていた」ことで暗黙に効いていたガードが無くなったため明示する。
+            // 無いと fetchJob が in-flight のままタブ切替で2本目が走り、先に解決した
+            // 古い応答が job を上書きして「選択中のタブと表示行が食い違う」ことがある。
+            disabled={loading}
+            className={`rounded-full px-3 py-1 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
               filter === tab.key
                 ? "bg-indigo-600 text-white"
                 : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"

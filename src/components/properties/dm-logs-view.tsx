@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Loader2, Mail, ChevronLeft, ChevronRight, Plus, Trash2, MessageCircle } from "lucide-react";
 import { dmMethodLabel, dmTypeLabel } from "@/lib/dm-method-labels";
 import {
@@ -276,26 +276,70 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
   const [savingReaction, setSavingReaction] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
 
-  // 追加/取消は property:write を要求(サーバも 403)。押しても必ず失敗するUIを出さない。
-  const { permissions, permissionsLoading } = useScreenProtection();
-  const canWrite = useMemo(() => {
-    if (permissionsLoading) return false;
-    return (permissions ?? []).some(
-      (p) => p.resource === "property" && p.action === "write" && p.granted,
-    );
-  }, [permissions, permissionsLoading]);
+  // 追加/取消/反響は property:write を要求(サーバも 403)。押しても必ず失敗するUIを出さない。
+  const { permissions, permissionsLoading, refetchPermissions } =
+    useScreenProtection();
+
+  // 権限鮮度(17-C F12-2 と同じ3点セット): ScreenProtectionProvider は dashboard layout に
+  // 居座り client navigation で再 mount されないため、provider の mount 時 1 回 fetch だけ
+  // では滞在中の権限付与・剥奪に追従できない(剥奪後もボタンが残り、押すと 403 になる)。
+  // この画面への進入あたり最大1回だけ再確認する。
+  //   - provider の取得が進行中なら完了を待つ(同時2本にしない)
+  //   - mount 時に進行中だった取得が成功 → その結果が最新なので追加 fetch しない
+  //   - mount 時点で取得完了済み(再訪=stale の可能性)/失敗(復旧)は1回だけ再取得
+  //   - ref ガード+provider 側 in-flight dedupe の二重防御で多重 fetch・無限リトライなし
+  const permissionsRefreshRequestedRef = useRef(false);
+  const permissionsLoadingAtMountRef = useRef<boolean | null>(null);
+  if (permissionsLoadingAtMountRef.current === null) {
+    permissionsLoadingAtMountRef.current = permissionsLoading;
+  }
+  // 再確認が終わるまで stale な granted でボタンを出さない(一瞬表示の回帰防止)。
+  const [permissionsRefreshPending, setPermissionsRefreshPending] = useState(
+    () => !permissionsLoading,
+  );
+  useEffect(() => {
+    if (permissionsRefreshRequestedRef.current) return;
+    if (permissionsLoading) return;
+    if (permissionsLoadingAtMountRef.current === true && permissions !== null) {
+      permissionsRefreshRequestedRef.current = true;
+      return;
+    }
+    permissionsRefreshRequestedRef.current = true;
+    setPermissionsRefreshPending(true);
+    refetchPermissions().finally(() => {
+      setPermissionsRefreshPending(false);
+    });
+  }, [permissionsLoading, permissions, refetchPermissions]);
+
+  // 再確認中(pending)・取得中(loading)は空配列へ倒す=ボタン非表示(fail-safe)。
+  const effectivePermissions = useMemo(
+    () =>
+      permissionsRefreshPending || permissionsLoading
+        ? []
+        : (permissions ?? []),
+    [permissions, permissionsLoading, permissionsRefreshPending],
+  );
+
+  const canWrite = useMemo(
+    () =>
+      effectivePermissions.some(
+        (p) => p.resource === "property" && p.action === "write" && p.granted,
+      ),
+    [effectivePermissions],
+  );
 
   // 反響メモの変更はフィールドレベル owner_note の edit/full(サーバも 403)。
   // 無いユーザーにはメモ入力自体を出さない(必ず失敗するUIを出さない方針)。
-  const canWriteNote = useMemo(() => {
-    if (permissionsLoading) return false;
-    return (permissions ?? []).some(
-      (p) =>
-        p.resource === "owner_note" &&
-        (p.action === "edit" || p.action === "full") &&
-        p.granted,
-    );
-  }, [permissions, permissionsLoading]);
+  const canWriteNote = useMemo(
+    () =>
+      effectivePermissions.some(
+        (p) =>
+          p.resource === "owner_note" &&
+          (p.action === "edit" || p.action === "full") &&
+          p.granted,
+      ),
+    [effectivePermissions],
+  );
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
