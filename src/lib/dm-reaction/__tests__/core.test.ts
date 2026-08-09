@@ -170,6 +170,13 @@ describe("applySyncReaction(同期イベントの適用)", () => {
     expect(applySyncReaction(virgin, { kind: "cleared", at: T2 })).toBe(virgin);
   });
 
+  it("同値の同期の再適用は no-op(同一参照)=書込・ロックを省略できる冪等性", () => {
+    const synced = applySyncReaction(virgin, { kind: "undeliverable", at: T2 });
+    expect(
+      applySyncReaction(synced, { kind: "undeliverable", at: new Date(T2) }),
+    ).toBe(synced);
+  });
+
   it("壊れた shadow(不正な形)は無視して素へ戻す(fail-closed)", () => {
     const broken: ReactionFields = {
       reactionStatus: "undeliverable",

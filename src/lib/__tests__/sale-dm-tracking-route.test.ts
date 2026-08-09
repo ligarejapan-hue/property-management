@@ -10,47 +10,75 @@ vi.mock("next/server", () => {
   return { NextResponse: MockNextResponse };
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
-vi.mock("@/lib/prisma", () => ({
-  default: {
+// ブリッジ同期は呼び出し(引数・順序)を検証するため mock(実装は sync.test.ts で担保)。
+vi.mock("@/lib/dm-reaction/sync", () => ({ syncSaleDmReaction: vi.fn() }));
+// 親行ロックも呼び出し順の検証のため mock(実物は api-helpers 経由で next-auth を引き込む)。
+vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRow: vi.fn() }));
+vi.mock("@/lib/prisma", () => {
+  const client: Record<string, unknown> = {
     dmRecipientDraft: {
-      findUnique: vi.fn(async () => ({ id: "r1", lpFirstAccessAt: null, status: "sent" })),
+      findUnique: vi.fn(async () => ({ id: "r1", propertyId: "p1", lpFirstAccessAt: null, status: "sent" })),
       update: vi.fn(async () => ({ id: "r1" })),
     },
-  },
-}));
+    $queryRaw: vi.fn(async () => []),
+  };
+  client.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(client));
+  return { default: client };
+});
 
 import { describe, it, expect } from "vitest";
 import { recordTrackingHit } from "../sale-dm-letter/tracking-record";
+import { syncSaleDmReaction } from "@/lib/dm-reaction/sync";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 
-function makeTx(existing: { id: string; lpFirstAccessAt: Date | null; status?: string } | null) {
-  return {
+// recordTrackingHit は $transaction で「親行ロック→draft更新→ブリッジ同期」を行う。
+// tx コールバックへは自身を渡す(実 prisma と同じ形)。
+function makeClient(
+  existing: {
+    id: string;
+    propertyId?: string;
+    lpFirstAccessAt: Date | null;
+    status?: string;
+    variant?: { lpUrl: string | null };
+  } | null,
+  opts: { updateError?: Error } = {},
+) {
+  const client: {
+    dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
+    $queryRaw: ReturnType<typeof vi.fn>;
+    $transaction?: ReturnType<typeof vi.fn>;
+  } = {
     dmRecipientDraft: {
       findUnique: vi.fn(async () => existing),
       update: vi.fn(async (args: unknown) => {
         void args; // 呼び出し引数は mock.calls で検証する(本体では未使用)。
+        if (opts.updateError) throw opts.updateError;
         return { id: existing?.id };
       }),
     },
+    $queryRaw: vi.fn(async () => []),
   };
+  client.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(client));
+  return client as Required<typeof client>;
 }
 
 describe("recordTrackingHit", () => {
   it("未知トークンは matched=false・更新しない", async () => {
-    const tx = makeTx(null);
+    const tx = makeClient(null);
     const r = await recordTrackingHit(tx as never, "nope");
     expect(r.matched).toBe(false);
     expect(tx.dmRecipientDraft.update).not.toHaveBeenCalled();
   });
 
   it("送付前(confirmed)のヒットは matched=false・更新しない(送付前プレビュー由来でA/Bを汚さない)", async () => {
-    const tx = makeTx({ id: "r1", lpFirstAccessAt: null, status: "confirmed" });
+    const tx = makeClient({ id: "r1", lpFirstAccessAt: null, status: "confirmed" });
     const r = await recordTrackingHit(tx as never, "tok");
     expect(r.matched).toBe(false);
     expect(tx.dmRecipientDraft.update).not.toHaveBeenCalled();
   });
 
   it("初回アクセスは lpFirstAccessAt をセット + count++", async () => {
-    const tx = makeTx({ id: "r1", lpFirstAccessAt: null, status: "sent" });
+    const tx = makeClient({ id: "r1", lpFirstAccessAt: null, status: "sent" });
     const r = await recordTrackingHit(tx as never, "tok");
     expect(r.matched).toBe(true);
     expect(r.firstHit).toBe(true); // 初回ヒット(lpFirstAccessAt が null→セット)
@@ -63,7 +91,7 @@ describe("recordTrackingHit", () => {
   });
 
   it("2回目以降は lpFirstAccessAt を上書きしない(冪等)・count は ++・firstHit=false", async () => {
-    const tx = makeTx({ id: "r1", lpFirstAccessAt: new Date("2020-01-01"), status: "sent" });
+    const tx = makeClient({ id: "r1", lpFirstAccessAt: new Date("2020-01-01"), status: "sent" });
     const r = await recordTrackingHit(tx as never, "tok");
     expect(r.firstHit).toBe(false); // 再訪は初回でない → 監査しない判定に使う
     const arg = tx.dmRecipientDraft.update.mock.calls[0][0] as {
@@ -75,41 +103,26 @@ describe("recordTrackingHit", () => {
   });
 
   it("送付済み matched は variant.lpUrl を variantLpUrl で返す(型ごとLP振り分け)", async () => {
-    const tx = {
-      dmRecipientDraft: {
-        findUnique: vi.fn(async () => ({ id: "r1", lpFirstAccessAt: null, status: "sent", variant: { lpUrl: "https://lp1.example.com" } })),
-        update: vi.fn(async () => ({ id: "r1" })),
-      },
-    };
+    const tx = makeClient({ id: "r1", lpFirstAccessAt: null, status: "sent", variant: { lpUrl: "https://lp1.example.com" } });
     const r = await recordTrackingHit(tx as never, "tok");
     expect(r.matched).toBe(true);
     expect(r.variantLpUrl).toBe("https://lp1.example.com");
   });
 
   it("型に lpUrl が無ければ variantLpUrl=null(既定LPへフォールバックさせる)", async () => {
-    const tx = {
-      dmRecipientDraft: {
-        findUnique: vi.fn(async () => ({ id: "r1", lpFirstAccessAt: null, status: "sent", variant: { lpUrl: null } })),
-        update: vi.fn(async () => ({ id: "r1" })),
-      },
-    };
+    const tx = makeClient({ id: "r1", lpFirstAccessAt: null, status: "sent", variant: { lpUrl: null } });
     const r = await recordTrackingHit(tx as never, "tok");
     expect(r.variantLpUrl).toBeNull();
   });
 
   it("未知トークンは variantLpUrl=null", async () => {
-    const tx = makeTx(null);
+    const tx = makeClient(null);
     const r = await recordTrackingHit(tx as never, "nope");
     expect(r.variantLpUrl).toBeNull();
   });
 
   it("送付前(confirmed)でも variant.lpUrl は返す(計上はしないが転送先は型のLPにする・Codex)", async () => {
-    const tx = {
-      dmRecipientDraft: {
-        findUnique: vi.fn(async () => ({ id: "r1", lpFirstAccessAt: null, status: "confirmed", variant: { lpUrl: "https://lp-b.example.com" } })),
-        update: vi.fn(async () => ({ id: "r1" })),
-      },
-    };
+    const tx = makeClient({ id: "r1", lpFirstAccessAt: null, status: "confirmed", variant: { lpUrl: "https://lp-b.example.com" } });
     const r = await recordTrackingHit(tx as never, "tok");
     expect(r.matched).toBe(false); // 送付前=計上しない
     expect(r.variantLpUrl).toBe("https://lp-b.example.com"); // でも型のLPは返す(転送先を型LPに保つ)
@@ -117,16 +130,34 @@ describe("recordTrackingHit", () => {
   });
 
   it("計上(update)が失敗しても variantLpUrl は維持して返す(best-effort・転送先は型LPのまま・Codex)", async () => {
-    const tx = {
-      dmRecipientDraft: {
-        findUnique: vi.fn(async () => ({ id: "r1", lpFirstAccessAt: null, status: "sent", variant: { lpUrl: "https://lp-b.example.com" } })),
-        update: vi.fn(async () => { throw new Error("lock timeout"); }),
-      },
-    };
+    const tx = makeClient(
+      { id: "r1", lpFirstAccessAt: null, status: "sent", variant: { lpUrl: "https://lp-b.example.com" } },
+      { updateError: new Error("lock timeout") },
+    );
     const r = await recordTrackingHit(tx as never, "tok");
     expect(r.variantLpUrl).toBe("https://lp-b.example.com"); // 計上失敗でも転送先は維持(既定LPへ落とさない)
     expect(r.matched).toBe(false); // 計上自体は失敗
     expect(r.firstHit).toBe(false);
+  });
+
+  it("計上 tx は 親行ロック→draft更新→ブリッジ同期(allowTerminal:false)の順(R50)", async () => {
+    const tx = makeClient({ id: "r1", propertyId: "p1", lpFirstAccessAt: null, status: "sent" });
+    const r = await recordTrackingHit(tx as never, "tok");
+    expect(r.matched).toBe(true);
+    const sync = vi.mocked(syncSaleDmReaction);
+    // 公開ホットパスは terminal(宛先不明)を書かない=Owner ロック不要を保証
+    expect(sync.mock.calls.at(-1)).toEqual([
+      expect.anything(),
+      "r1",
+      { allowTerminal: false },
+    ]);
+    const lock = vi.mocked(lockPropertyRow);
+    expect(lock.mock.calls.at(-1)?.[1]).toBe("p1");
+    const lockOrder = lock.mock.invocationCallOrder.at(-1) as number;
+    const updateOrder = tx.dmRecipientDraft.update.mock.invocationCallOrder[0];
+    const syncOrder = sync.mock.invocationCallOrder.at(-1) as number;
+    expect(lockOrder).toBeLessThan(updateOrder);
+    expect(updateOrder).toBeLessThan(syncOrder);
   });
 });
 

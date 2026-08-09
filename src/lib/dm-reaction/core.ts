@@ -126,7 +126,7 @@ export function applySyncReaction(
     return current;
   }
 
-  return {
+  const next: ReactionFields = {
     reactionStatus: sync.kind,
     reactedAt: sync.at,
     reactionNote: null,
@@ -136,6 +136,22 @@ export function applySyncReaction(
       ? toShadow(current)
       : (current.manualReactionShadow ?? null),
   };
+  // 同値の同期を再適用しても同一参照を返す(冪等)。呼び出し側はこれで書込・ロックを省略する。
+  if (
+    current.reactionStatus === next.reactionStatus &&
+    sameInstant(current.reactedAt, next.reactedAt) &&
+    current.reactionNote === next.reactionNote &&
+    current.reactionSource === next.reactionSource &&
+    current.manualReactionShadow === next.manualReactionShadow
+  ) {
+    return current;
+  }
+  return next;
+}
+
+function sameInstant(a: Date | null, b: Date | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.getTime() === b.getTime();
 }
 
 /** 手動保存を適用(常に受理・source="manual"・shadowクリア)。 */

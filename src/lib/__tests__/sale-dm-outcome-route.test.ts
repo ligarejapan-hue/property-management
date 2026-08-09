@@ -51,21 +51,29 @@ vi.mock("@/lib/sale-dm-letter/route-guard", () => ({
   requireSaleDmAccess: vi.fn(),
 }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+// ブリッジ同期とOwnerロックは呼び出し(順序・引数)を検証するため mock(実装は sync.test.ts で担保)。
+vi.mock("@/lib/dm-reaction/sync", () => ({ syncSaleDmReaction: vi.fn() }));
+vi.mock("@/lib/dm-batch/locks", () => ({ lockOwnersForUpdate: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const draftUpdate = vi.fn();
   const draftCount = vi.fn();
   const propertyUpdate = vi.fn();
   const draftFindUnique = vi.fn();
+  const logFindMany = vi.fn(async () => []);
+  const logCount = vi.fn(async () => 0);
+  const logUpdate = vi.fn();
   const txQueryRaw = vi.fn(async () => []); // FOR UPDATE ロック(結果は使わない)。tx 内の再読込・直列化用。
   return {
     default: {
       dmRecipientDraft: { findUnique: draftFindUnique, update: draftUpdate, count: draftCount },
       property: { update: propertyUpdate },
+      propertyDmLog: { findMany: logFindMany, count: logCount, update: logUpdate },
       $queryRaw: txQueryRaw,
       $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
         fn({
           dmRecipientDraft: { update: draftUpdate, count: draftCount, findUnique: draftFindUnique },
           property: { update: propertyUpdate },
+          propertyDmLog: { findMany: logFindMany, count: logCount, update: logUpdate },
           $queryRaw: txQueryRaw,
         }),
       ),
@@ -76,11 +84,14 @@ vi.mock("@/lib/prisma", () => {
 import prismaMock from "@/lib/prisma";
 import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
 import { writeAuditLog } from "@/lib/audit";
+import { syncSaleDmReaction } from "@/lib/dm-reaction/sync";
+import { lockOwnersForUpdate } from "@/lib/dm-batch/locks";
 import { PATCH } from "../../app/api/properties/sale-dm/drafts/[id]/outcome/route";
 
 const pm = prismaMock as never as {
   dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; count: ReturnType<typeof vi.fn> };
   property: { update: ReturnType<typeof vi.fn> };
+  propertyDmLog: { findMany: ReturnType<typeof vi.fn>; count: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
   $queryRaw: ReturnType<typeof vi.fn>;
 };
 const req = (b: unknown) =>
@@ -188,6 +199,47 @@ describe("PATCH outcome", () => {
     const res = await PATCH(req({ deliveryStatus: "returned_other" }) as never, ctx());
     expect(res.status).toBe(200);
     expect(pm.property.update).not.toHaveBeenCalled();
+  });
+
+  it("返戻(returned_undeliverable)はブリッジ行の所有者を FOR UPDATE してから行ロックへ(Owner→親→子=R47)", async () => {
+    pm.propertyDmLog.findMany.mockResolvedValueOnce([
+      { ownerId: "o1", logOwners: [{ ownerId: "o2" }] },
+    ]);
+    const res = await PATCH(req({ deliveryStatus: "returned_undeliverable" }) as never, ctx());
+    expect(res.status).toBe(200);
+    const lockCall = (lockOwnersForUpdate as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect([...(lockCall[1] as string[])].sort()).toEqual(["o1", "o2"]);
+    // Owner ロックは最初の $queryRaw(親行・draft行ロック)より先
+    expect((lockOwnersForUpdate as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0])
+      .toBeLessThan(pm.$queryRaw.mock.invocationCallOrder[0]);
+  });
+
+  it("draft 更新後に syncSaleDmReaction を同一 tx で呼ぶ(ブリッジ行へ反響を同期)", async () => {
+    const res = await PATCH(req({ deliveryStatus: "returned_undeliverable" }) as never, ctx());
+    expect(res.status).toBe(200);
+    expect(syncSaleDmReaction).toHaveBeenCalledWith(expect.anything(), "r1");
+    expect(pm.dmRecipientDraft.update.mock.invocationCallOrder[0])
+      .toBeLessThan((syncSaleDmReaction as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]);
+  });
+
+  it("terminal でない更新(delivered)では Owner ロックを取らない・同期は常に呼ぶ", async () => {
+    const res = await PATCH(req({ deliveryStatus: "delivered" }) as never, ctx());
+    expect(res.status).toBe(200);
+    expect(lockOwnersForUpdate).not.toHaveBeenCalled();
+    expect(syncSaleDmReaction).toHaveBeenCalled();
+  });
+
+  it("宛先不明の解除でも汎用送付記録側に宛先不明が残っていれば物件フラグを消さない(整合)", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({
+      id: "r1", propertyId: "p1", deliveryStatus: "returned_undeliverable",
+      lpFirstAccessAt: null, phoneInquiryAt: null, status: "sent", campaign: { createdBy: "u1" },
+    });
+    pm.propertyDmLog.count.mockResolvedValueOnce(1); // 手動反響の宛先不明ログが残存
+    const res = await PATCH(req({ deliveryStatus: "delivered" }) as never, ctx());
+    expect(res.status).toBe(200);
+    expect(pm.property.update).not.toHaveBeenCalled();
+    const body = await res.json();
+    expect(body.undeliverableCleared).toBe(false);
   });
 
   it("宛先不明から配達済み等へ訂正すると物件の dmUndeliverableAt を null クリア(dmStatus は据え置き)・監査", async () => {

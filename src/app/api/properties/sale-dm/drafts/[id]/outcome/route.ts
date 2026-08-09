@@ -6,6 +6,9 @@ import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { deriveOutcome } from "@/lib/sale-dm-letter/outcome";
+import { lockPropertyRow } from "@/lib/property-record-guard";
+import { lockOwnersForUpdate, type RawTx } from "@/lib/dm-batch/locks";
+import { syncSaleDmReaction, type ReactionSyncTx } from "@/lib/dm-reaction/sync";
 
 // 配達結果は明示指定された時のみ更新する(省略時は据え置き)。
 // 反響(電話)は true/false で立て下げ可能にする(取り消し時は LP の有無で再導出)。
@@ -114,6 +117,22 @@ export async function PATCH(
     // 下書き更新と物件連動を 1 トランザクションで行う。並行(同一下書きへの公開/t/ヒット、同一物件への別宛先の
     // 同時 outcome 更新)に備え、関係行を FOR UPDATE でロックしてから最新値で判定する(R34 残レース対応)。
     const txResult = await prisma.$transaction(async (tx) => {
+      // R47(PR-B): terminal(returned_undeliverable)を書き込むリクエストは、ブリッジ行(送付記録)へ
+      // undeliverable が同期されるため、対象所有者集合(代表+連関全員)を親行より先に FOR UPDATE する
+      // (mark-sent と同じ「先読み→Owner→親→子」の型)。
+      if (input.deliveryStatus === "returned_undeliverable") {
+        const bridgeLogs = await tx.propertyDmLog.findMany({
+          where: { draftId: id },
+          select: { ownerId: true, logOwners: { select: { ownerId: true } } },
+        });
+        const ownerIds = bridgeLogs.flatMap((l) => [
+          ...(l.ownerId ? [l.ownerId] : []),
+          ...l.logOwners.map((o) => o.ownerId),
+        ]);
+        await lockOwnersForUpdate(tx as unknown as RawTx, ownerIds);
+      }
+      // ロック順序は親(物件)→子(draft)に統一(PR-B: 従来は解除分岐のみ物件ロック=子→親の順だった)。
+      await lockPropertyRow(tx, draft.propertyId);
       // C3(レース): 下書き行をロックして lpFirstAccessAt/phoneInquiryAt を最新で読み直し outcome を再導出する。
       // 公開 /t/ の同時ヒットが lpFirstAccessAt+outcome=inquiry を書いた直後に、進入時の古い snapshot 由来の
       // outcome(none)で上書きして自己矛盾(lpあり/outcome=none)になるのを防ぐ(/t/ の UPDATE と直列化)。
@@ -142,6 +161,10 @@ export async function PATCH(
 
       await tx.dmRecipientDraft.update({ where: { id }, data: { ...draftData, phoneInquiryAt: freshPhoneInquiryAt, outcome: freshOutcome } });
 
+      // ブリッジ行(送付記録)へ反響を同期(PR-B): 返戻→宛先不明 / LP・電話→連絡あり / 訂正→復元。
+      // 物件フラグの再計算より先に行い、下の残数カウントが同期後の最終状態を数えるようにする。
+      await syncSaleDmReaction(tx as unknown as ReactionSyncTx, id);
+
       let cleared = false;
       if (becameUndeliverable) {
         await tx.property.update({
@@ -149,19 +172,24 @@ export async function PATCH(
           data: { dmStatus: "no_send", dmUndeliverableAt: now },
         });
       } else if (clearedUndeliverable) {
-        // C2(レース): 物件行をロックしてから兄弟下書きを数える。同一物件への同時 outcome 更新を直列化し、互いの
-        // 未コミット変更を見落として「宛先不明」フラグを取り残す/誤って消すのを防ぐ。同一物件に「宛先不明」のまま
-        // 残る他の送付済み宛先(別の所有者住所グループや別キャンペーン)がなければ物件フラグを解除する。
-        await tx.$queryRaw`SELECT id FROM properties WHERE id = ${draft.propertyId}::uuid FOR UPDATE`;
-        const stillUndeliverable = await tx.dmRecipientDraft.count({
-          where: {
-            propertyId: draft.propertyId,
-            status: "sent",
-            deliveryStatus: "returned_undeliverable",
-            id: { not: id },
-          },
-        });
-        if (stillUndeliverable === 0) {
+        // C2(レース): 物件行ロック(tx 冒頭で取得済み)下で兄弟を数える。同一物件への同時 outcome 更新を
+        // 直列化し、互いの未コミット変更を見落として「宛先不明」フラグを取り残す/誤って消すのを防ぐ。
+        // 同一物件に「宛先不明」のまま残る他の送付済み宛先(別の所有者住所グループや別キャンペーン)や、
+        // 汎用送付記録側の宛先不明反響(手動記録=PR-B)がなければ物件フラグを解除する。
+        const [stillUndeliverable, undeliverableLogs] = await Promise.all([
+          tx.dmRecipientDraft.count({
+            where: {
+              propertyId: draft.propertyId,
+              status: "sent",
+              deliveryStatus: "returned_undeliverable",
+              id: { not: id },
+            },
+          }),
+          tx.propertyDmLog.count({
+            where: { propertyId: draft.propertyId, reactionStatus: "undeliverable" },
+          }),
+        ]);
+        if (stillUndeliverable + undeliverableLogs === 0) {
           await tx.property.update({
             where: { id: draft.propertyId },
             data: { dmUndeliverableAt: null },
