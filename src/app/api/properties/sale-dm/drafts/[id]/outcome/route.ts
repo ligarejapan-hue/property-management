@@ -128,10 +128,10 @@ export async function PATCH(
       // のときは、対象所有者集合(代表+連関全員)を親行より先に FOR UPDATE する
       // (mark-sent と同じ「先読み→Owner→親→子」の型)。同期対象の旧sale_dm行(同一物件+同日)も
       // 集合に含める(通常は連関なし=空)。
-      if (
+      const preLockedOwners =
         input.deliveryStatus === "returned_undeliverable" ||
-        draft.deliveryStatus === "returned_undeliverable"
-      ) {
+        draft.deliveryStatus === "returned_undeliverable";
+      if (preLockedOwners) {
         const syncTargets = await tx.propertyDmLog.findMany({
           where: {
             OR: [
@@ -178,6 +178,18 @@ export async function PATCH(
       // (例: 並行で delivered に解除された後にこの request が再設定→ becameUndeliverable を取りこぼし no_send 復帰を skip)。
       const currentDeliveryStatus = fresh?.deliveryStatus ?? draft.deliveryStatus;
       const nextDeliveryStatus = input.deliveryStatus ?? currentDeliveryStatus;
+
+      // #366 R3 P1: 事前Ownerロックの判定は進入時snapshotによる。ロック待ちの間に並行PATCHが
+      // returned_undeliverable を立てると、ロック下の実効状態はterminalなのにOwner未ロックの
+      // まま同期がterminalを書く(Owner→親の順序が崩れCSV出力とすれ違う)。その場合は中止し、
+      // 再試行(次回はsnapshotが返戻を見て正しくOwner先行ロックする)。
+      if (!preLockedOwners && nextDeliveryStatus === "returned_undeliverable") {
+        throw new ApiError(
+          409,
+          "配達状態が更新されました。もう一度お試しください",
+          "RETRY",
+        );
+      }
       const becameUndeliverable =
         input.deliveryStatus === "returned_undeliverable" && currentDeliveryStatus !== "returned_undeliverable";
       // 宛先不明から他状態へ訂正したら自動連動の物件フラグ(dmUndeliverableAt)を解除(dmStatus は人の判断で戻す)。

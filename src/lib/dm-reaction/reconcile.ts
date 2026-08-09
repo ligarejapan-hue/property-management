@@ -11,6 +11,7 @@ import { applySyncReaction, jstCalendarDay, type ReactionFields } from "./core";
 import {
   deriveSaleDmReactionEvent,
   syncSaleDmReaction,
+  SyncOwnerSetChangedError,
   type ReactionSyncTx,
   type SaleDmReactionEvent,
 } from "./sync";
@@ -244,24 +245,74 @@ export async function reconcileSaleDmReactions(
     skipped: 0,
   };
 
-  for (const log of logs) {
-    const ownerIds = [
-      ...(log.ownerId ? [log.ownerId] : []),
-      ...log.logOwners.map((o) => o.ownerId),
+  const rowOwnerIds = (row: {
+    ownerId: string | null;
+    logOwners: Array<{ ownerId: string }>;
+  }) =>
+    [
+      ...(row.ownerId ? [row.ownerId] : []),
+      ...row.logOwners.map((o) => o.ownerId),
     ];
 
+  const ROW_SELECT = {
+    ...REACTION_SELECT,
+    propertyId: true,
+    sentAt: true,
+    draftId: true,
+  };
+
+  // 1行分の書込 tx。全行スキャン→txの間に名寄せが所有者を付け替え得るため、Owner ロック後に
+  // 行を再読取して集合が変わっていたら中止する(@codex #366 R3 P1。中止は下の retry が拾う)。
+  const applyRow = async (row: ReconcileScanRow): Promise<void> => {
+    await client.$transaction(async (txRaw) => {
+      const tx = txRaw as LegacyReconcileTx;
+      const ownerIds = rowOwnerIds(row);
+      await lockOwnersForUpdate(tx as RawTx, ownerIds);
+      const freshRows = (await tx.propertyDmLog.findMany({
+        where: { id: row.id },
+        select: ROW_SELECT,
+      })) as unknown as ReconcileScanRow[];
+      const fresh = freshRows[0];
+      if (!fresh) return; // 行が消えていたら何もしない
+      const locked = new Set(ownerIds);
+      if (rowOwnerIds(fresh).some((id) => !locked.has(id))) {
+        throw new SyncOwnerSetChangedError();
+      }
+      if (fresh.propertyId) {
+        await lockPropertiesForUpdate(tx as RawTx, [fresh.propertyId]);
+      }
+      // 判定と書込はロック下の最新値(fresh)で行う。
+      if (fresh.draftId != null) {
+        await syncSaleDmReaction(tx, fresh.draftId);
+      } else {
+        await reconcileLegacySaleDmLog(tx, fresh, now);
+      }
+    });
+  };
+
+  // 所有者集合の変化(名寄せレース)は最新の行を読み直して再試行(最大3回)。
+  const applyRowWithRetry = async (row: ReconcileScanRow): Promise<void> => {
+    let current = row;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await applyRow(current);
+        return;
+      } catch (e) {
+        if (!(e instanceof SyncOwnerSetChangedError) || attempt >= 2) throw e;
+        const rows = (await client.propertyDmLog.findMany({
+          where: { id: row.id },
+          select: ROW_SELECT,
+        })) as ReconcileScanRow[];
+        if (rows.length === 0) return;
+        current = rows[0];
+      }
+    }
+  };
+
+  for (const log of logs) {
     if (log.draftId != null) {
       counts.matched += 1;
-      if (!dryRun) {
-        await client.$transaction(async (txRaw) => {
-          const tx = txRaw as LegacyReconcileTx;
-          await lockOwnersForUpdate(tx as RawTx, ownerIds);
-          if (log.propertyId) {
-            await lockPropertiesForUpdate(tx as RawTx, [log.propertyId]);
-          }
-          await syncSaleDmReaction(tx, log.draftId as string);
-        });
-      }
+      if (!dryRun) await applyRowWithRetry(log);
       continue;
     }
 
@@ -278,15 +329,7 @@ export async function reconcileSaleDmReactions(
     else counts.ambiguousConservative += 1;
     if (dryRun) continue;
 
-    await client.$transaction(async (txRaw) => {
-      const tx = txRaw as LegacyReconcileTx;
-      await lockOwnersForUpdate(tx as RawTx, ownerIds);
-      if (log.propertyId) {
-        await lockPropertiesForUpdate(tx as RawTx, [log.propertyId]);
-      }
-      // tx 内で drafts を読み直して決定し直す(先読みとの差は稀だが、判定と書込を同一 tx に閉じる)
-      await reconcileLegacySaleDmLog(tx, log, now);
-    });
+    await applyRowWithRetry(log);
   }
 
   return counts;

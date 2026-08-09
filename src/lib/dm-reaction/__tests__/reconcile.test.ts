@@ -283,4 +283,38 @@ describe("reconcileSaleDmReactions(全行照合・件数レポート)", () => {
     );
     expect(updates.some((u) => u.data.draftId === "d1")).toBe(true);
   });
+
+  it("apply: ロック後の再読取で所有者が変わっていたら読み直して再試行する(#366 R3)", async () => {
+    // 走査時: own-1(これをロック) → tx 内再読取: own-2(名寄せで付け替え済み)→ 中止 →
+    // 外で読み直して own-2 をロックし直し → 2度目の tx 内再読取も own-2 → 成功
+    const scanRow = legacyLog("l-race", { ownerId: "own-1" });
+    const repointed = legacyLog("l-race", { ownerId: "own-2" });
+    let idReads = 0;
+    const client: Record<string, unknown> = {
+      propertyDmLog: {
+        findMany: vi.fn(async (args: unknown) => {
+          const where = (args as { where: Record<string, unknown> }).where;
+          if (where.method === "sale_dm") return [scanRow]; // 全行スキャン
+          idReads += 1;
+          return [repointed]; // id 再読取(tx 内・retry 前の読み直しとも own-2)
+        }),
+        update: vi.fn(async () => ({})),
+      },
+      dmRecipientDraft: {
+        findMany: vi.fn(async () => [draft()]),
+        findUnique: vi.fn(async () => draft()),
+      },
+      $queryRaw: vi.fn(async () => []),
+    };
+    client.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(client));
+    const counts = await reconcileSaleDmReactions(client as never, { now: NOW });
+    expect(counts.linked).toBe(1);
+    // 1度目の tx は中止 → 読み直し → 2度目の tx で成功(tx は2回・id 読取は3回以上)
+    expect((client.$transaction as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2);
+    expect(idReads).toBeGreaterThanOrEqual(3);
+    const updates = (client.propertyDmLog as { update: ReturnType<typeof vi.fn> }).update.mock.calls.map(
+      (c) => c[0] as { data: Record<string, unknown> },
+    );
+    expect(updates.some((u) => u.data.draftId === "d1")).toBe(true);
+  });
 });

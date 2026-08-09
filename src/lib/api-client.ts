@@ -3709,7 +3709,8 @@ export async function updatePropertyDmLogReaction(
   data: {
     status: "no_response" | "replied" | "refused" | "undeliverable";
     reactedAt?: string;
-    note?: string;
+    /** 省略=変更なし / null=消す / 文字列=上書き(GET はマスク値を返すため往復させない)。 */
+    note?: string | null;
   },
 ): Promise<{
   id: string;

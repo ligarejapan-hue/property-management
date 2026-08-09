@@ -70,14 +70,20 @@ export default function OrphanDmLogsPage() {
     status: ReactionStatus,
     reactedAt: string,
     note: string,
+    clearNote: boolean,
   ) => {
+    // note: 省略=変更なし / null=消す / 文字列=上書き(サーバ仕様と対・マスク値を往復させない)。
     const res = await fetch(`/api/admin/orphan-dm-logs/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         status,
         ...(reactedAt ? { reactedAt } : {}),
-        ...(note.trim() ? { note: note.trim() } : {}),
+        ...(clearNote
+          ? { note: null }
+          : note.trim()
+            ? { note: note.trim() }
+            : {}),
       }),
     });
     if (res.ok) {
@@ -219,6 +225,94 @@ export default function OrphanDmLogsPage() {
   );
 }
 
+/** 反響の編集フォーム。編集開始時にマウントされ、log の最新値で初期化される
+ *  (行コンポーネントに state を持つと保存後の再取得が反映されない=#366 R3)。 */
+function OrphanReactionEditor({
+  log,
+  onSave,
+  onCancel,
+}: {
+  log: OrphanLog;
+  onSave: (
+    status: ReactionStatus,
+    reactedAt: string,
+    note: string,
+    clearNote: boolean,
+  ) => void;
+  onCancel: () => void;
+}) {
+  const [status, setStatus] = useState<ReactionStatus>(
+    (REACTION_STATUSES as readonly string[]).includes(log.reactionStatus)
+      ? (log.reactionStatus as ReactionStatus)
+      : "no_response",
+  );
+  const [reactedAt, setReactedAt] = useState(
+    log.reactedAt ? log.reactedAt.slice(0, 10) : "",
+  );
+  // メモは常に空で開始(一覧の値はマスク済みのことがある=往復で実メモを潰さない・#366 R2)。
+  // 未入力なら送らない=「省略=変更なし」。消すときは「メモを消す」を明示チェック(note:null)。
+  const [note, setNote] = useState("");
+  const [clearNote, setClearNote] = useState(false);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <select
+        value={status}
+        onChange={(e) => setStatus(e.target.value as ReactionStatus)}
+        className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-900 dark:text-gray-100"
+      >
+        {REACTION_STATUSES.map((s) => (
+          <option key={s} value={s}>
+            {REACTION_LABELS[s]}
+          </option>
+        ))}
+      </select>
+      <input
+        type="date"
+        value={reactedAt}
+        onChange={(e) => setReactedAt(e.target.value)}
+        className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-900 dark:text-gray-100"
+      />
+      <input
+        type="text"
+        value={note}
+        disabled={clearNote}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder={log.reactionNote ? "メモあり(入力すると上書き)" : "メモ(任意)"}
+        maxLength={500}
+        className="w-40 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-900 disabled:opacity-50 dark:text-gray-100"
+      />
+      {log.reactionNote && (
+        <label className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-300">
+          <input
+            type="checkbox"
+            checked={clearNote}
+            onChange={(e) => {
+              setClearNote(e.target.checked);
+              if (e.target.checked) setNote("");
+            }}
+          />
+          メモを消す
+        </label>
+      )}
+      <button
+        type="button"
+        onClick={() => onSave(status, reactedAt, note, clearNote)}
+        className="rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
+      >
+        保存
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-xs text-gray-700 dark:text-gray-200"
+      >
+        やめる
+      </button>
+    </div>
+  );
+}
+
 function OrphanRow({
   log,
   editing,
@@ -231,21 +325,15 @@ function OrphanRow({
   editing: boolean;
   onEdit: () => void;
   onCancel: () => void;
-  onSave: (id: string, status: ReactionStatus, reactedAt: string, note: string) => void;
+  onSave: (
+    id: string,
+    status: ReactionStatus,
+    reactedAt: string,
+    note: string,
+    clearNote: boolean,
+  ) => void;
   onDelete: (id: string) => void;
 }) {
-  const [status, setStatus] = useState<ReactionStatus>(
-    (REACTION_STATUSES as readonly string[]).includes(log.reactionStatus)
-      ? (log.reactionStatus as ReactionStatus)
-      : "no_response",
-  );
-  const [reactedAt, setReactedAt] = useState(
-    log.reactedAt ? log.reactedAt.slice(0, 10) : "",
-  );
-  // メモは常に空で開始(一覧の値はマスク済みのことがある=往復で実メモを潰さない・#366 R2)。
-  // 未入力なら送らない=サーバ側は「省略=変更なし」。
-  const [note, setNote] = useState("");
-
   const names = [
     log.owner?.name ?? null,
     ...log.coOwners
@@ -266,33 +354,14 @@ function OrphanRow({
       </td>
       <td className="px-4 py-3 text-sm">
         {editing ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as ReactionStatus)}
-              className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-900 dark:text-gray-100"
-            >
-              {REACTION_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {REACTION_LABELS[s]}
-                </option>
-              ))}
-            </select>
-            <input
-              type="date"
-              value={reactedAt}
-              onChange={(e) => setReactedAt(e.target.value)}
-              className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-900 dark:text-gray-100"
-            />
-            <input
-              type="text"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder={log.reactionNote ? "メモあり(入力すると上書き)" : "メモ(任意)"}
-              maxLength={500}
-              className="w-40 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-900 dark:text-gray-100"
-            />
-          </div>
+          // 編集中だけマウント=開くたびに最新の log で初期化される(#366 R3)
+          <OrphanReactionEditor
+            log={log}
+            onSave={(status, reactedAt, note, clearNote) =>
+              onSave(log.id, status, reactedAt, note, clearNote)
+            }
+            onCancel={onCancel}
+          />
         ) : (
           <span
             className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
@@ -304,24 +373,7 @@ function OrphanRow({
         )}
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-sm">
-        {editing ? (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => onSave(log.id, status, reactedAt, note)}
-              className="rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
-            >
-              保存
-            </button>
-            <button
-              type="button"
-              onClick={onCancel}
-              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-xs text-gray-700 dark:text-gray-200"
-            >
-              やめる
-            </button>
-          </div>
-        ) : (
+        {!editing && (
           <div className="flex gap-2">
             <button
               type="button"

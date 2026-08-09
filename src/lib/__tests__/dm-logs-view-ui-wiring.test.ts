@@ -99,3 +99,12 @@ describe("dm-logs-view: 反響の表示と入力(PR-B・設計§3)", () => {
     expect(VIEW).toMatch(/対象から外/);
   });
 });
+
+describe("dm-logs-view: メモのマスク往復防止(#366 R2/R3)", () => {
+  it("メモは空で開始+「メモを消す」明示チェック(note: null 送信)", () => {
+    // マスク表示値をフォームに流し込まない(実メモをマスク値で潰さない)
+    expect(VIEW).not.toMatch(/useState\(log\.reactionNote/);
+    expect(VIEW).toContain("メモを消す");
+    expect(VIEW).toMatch(/\{ note: null \}/);
+  });
+});

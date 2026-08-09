@@ -241,6 +241,19 @@ describe("PATCH outcome", () => {
     expect(pm.property.update).not.toHaveBeenCalled();
   });
 
+  it("ロック下の実効状態が返戻なのに Owner 未ロック(ロック待ち中の並行遷移)なら 409・書かない(#366 R3)", async () => {
+    // 進入時 snapshot は unknown(=Owner ロックしない)→ ロック取得までの間に別 PATCH が
+    // returned_undeliverable を立てた。ロック下の再読込がそれを見たら中止(再試行で正しく Owner 先行)。
+    pm.dmRecipientDraft.findUnique
+      .mockResolvedValueOnce({ id: "r1", propertyId: "p1", deliveryStatus: "unknown", lpFirstAccessAt: null, phoneInquiryAt: null, status: "sent", campaign: { createdBy: "u1" } })
+      .mockResolvedValueOnce({ lpFirstAccessAt: null, phoneInquiryAt: null, deliveryStatus: "returned_undeliverable" });
+    const res = await PATCH(req({ outcomeNote: "メモだけ更新" }) as never, ctx());
+    expect(res.status).toBe(409);
+    expect(lockOwnersForUpdate).not.toHaveBeenCalled();
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    expect(syncSaleDmReaction).not.toHaveBeenCalled();
+  });
+
   it("配達状態を変えない編集(電話・メモ)でも draft が返送済みなら Owner ロックを取る(#366 R2)", async () => {
     // 同期が terminal(undeliverable)を書き得るため、事前ロックの判定は入力値だけでなく
     // draft の現在値(既に returned_undeliverable)も見る。逆順ロック(親→Owner)のデッドロック防止。

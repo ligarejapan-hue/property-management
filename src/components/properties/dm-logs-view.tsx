@@ -168,7 +168,12 @@ function ReactionEditor({
   saving,
 }: {
   log: DmLog;
-  onSave: (status: ReactionStatus, reactedAt: string, note: string) => void;
+  onSave: (
+    status: ReactionStatus,
+    reactedAt: string,
+    note: string,
+    clearNote: boolean,
+  ) => void;
   onCancel: () => void;
   saving: boolean;
 }) {
@@ -180,7 +185,9 @@ function ReactionEditor({
   const [reactedAt, setReactedAt] = useState(log.reactedAt ?? "");
   // メモは常に空で開始する: 表示用の値はマスク済みのことがあり、往復させると実メモを
   // マスク値で潰す(#366 R2)。未入力なら送らない=サーバ側は「省略=変更なし」。
+  // 消したいときは「メモを消す」を明示チェック(note:null 送信=#366 R3)。
   const [note, setNote] = useState("");
+  const [clearNote, setClearNote] = useState(false);
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -206,14 +213,28 @@ function ReactionEditor({
         type="text"
         value={note}
         maxLength={500}
+        disabled={clearNote}
         onChange={(e) => setNote(e.target.value)}
         placeholder={log.reactionNote ? "メモあり(入力すると上書き)" : "メモ(任意)"}
-        className="w-28 rounded-md border border-gray-300 px-1.5 py-1 text-xs dark:border-gray-700 dark:bg-gray-800"
+        className="w-28 rounded-md border border-gray-300 px-1.5 py-1 text-xs disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800"
       />
+      {log.reactionNote && (
+        <label className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-300">
+          <input
+            type="checkbox"
+            checked={clearNote}
+            onChange={(e) => {
+              setClearNote(e.target.checked);
+              if (e.target.checked) setNote("");
+            }}
+          />
+          メモを消す
+        </label>
+      )}
       <button
         type="button"
         disabled={saving}
-        onClick={() => onSave(status, reactedAt, note)}
+        onClick={() => onSave(status, reactedAt, note, clearNote)}
         className="rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
       >
         {saving ? "保存中..." : "保存"}
@@ -296,16 +317,22 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
     status: ReactionStatus,
     reactedAt: string,
     note: string,
+    clearNote: boolean,
   ) => {
     if (savingReaction) return;
     setSavingReaction(true);
     setError(null);
     setInfo(null);
     try {
+      // note: 省略=変更なし / null=消す / 文字列=上書き(サーバ仕様と対)。
       const result = await updatePropertyDmLogReaction(propertyId, logId, {
         status,
         ...(reactedAt ? { reactedAt } : {}),
-        ...(note.trim() ? { note: note.trim() } : {}),
+        ...(clearNote
+          ? { note: null }
+          : note.trim()
+            ? { note: note.trim() }
+            : {}),
       });
       // 宛先不明の物件連動はサーバが行う。結果を平易な日本語で伝える。
       if (result.undeliverableLinked) {
@@ -465,8 +492,14 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
                         <ReactionEditor
                           log={log}
                           saving={savingReaction}
-                          onSave={(status, reactedAt, note) =>
-                            handleSaveReaction(log.id, status, reactedAt, note)
+                          onSave={(status, reactedAt, note, clearNote) =>
+                            handleSaveReaction(
+                              log.id,
+                              status,
+                              reactedAt,
+                              note,
+                              clearNote,
+                            )
                           }
                           onCancel={() => setEditingReactionId(null)}
                         />

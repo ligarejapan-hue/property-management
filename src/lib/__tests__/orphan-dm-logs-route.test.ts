@@ -385,4 +385,14 @@ describe("UI配線(source)", () => {
     expect(src).toContain("REACTION_LABELS");
     expect(src).toMatch(/confirm/);
   });
+
+  it("編集フォームは編集中だけマウント+メモはマスク値を往復させない(#366 R3)", () => {
+    const src = read("src/app/(dashboard)/admin/orphan-dm-logs/page.tsx");
+    // 行に state を持たず、編集開始時に最新 log で初期化されるフォーム部品
+    expect(src).toContain("OrphanReactionEditor");
+    expect(src).not.toMatch(/useState\(log\.reactionNote/);
+    // 消すのは明示操作(note: null 送信)
+    expect(src).toContain("メモを消す");
+    expect(src).toMatch(/\{ note: null \}/);
+  });
 });
