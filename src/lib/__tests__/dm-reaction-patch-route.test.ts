@@ -118,6 +118,7 @@ const PERMS_WRITE = [
   { resource: "property", action: "read", granted: true },
   { resource: "property", action: "write", granted: true },
   { resource: "owner", action: "read", granted: true },
+  { resource: "owner_note", action: "edit", granted: true },
 ];
 
 const PROP_ID = "0p000000-0000-4000-8000-000000000001";
@@ -280,6 +281,21 @@ describe("PATCH .../dm-logs/[logId]/reaction(手動反響)", () => {
     await PATCH(patchRequest({ status: "replied", note: null }), ctx);
     const data = pm.propertyDmLog.update.mock.calls[0][0].data;
     expect(data.reactionNote).toBeNull();
+  });
+
+  it("owner_note の edit/full が無ければ note 付き保存は 403・note 省略なら 200(#366 R10)", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(
+      PERMS_WRITE.filter((p) => p.resource !== "owner_note") as never,
+    );
+    // 見えないメモを上書き・消去できてしまうため、フィールドレベルで拒否
+    const res1 = await PATCH(patchRequest({ status: "replied", note: "上書き" }), ctx);
+    expect(res1.status).toBe(403);
+    const res2 = await PATCH(patchRequest({ status: "replied", note: null }), ctx);
+    expect(res2.status).toBe(403);
+    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
+    // 反響種別・日付だけの記録は従来どおり可能(メモは保持される)
+    const res3 = await PATCH(patchRequest({ status: "replied" }), ctx);
+    expect(res3.status).toBe(200);
   });
 
   it("ロック後の再読取で所有者集合が変わっていたら 409・書き込まない(名寄せレース=#366 R2)", async () => {

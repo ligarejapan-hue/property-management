@@ -9,7 +9,7 @@ import {
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, hasExplicitWritePerm, type PermissionMap } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { isRealCalendarDate } from "@/lib/calendar-date";
 import {
@@ -43,7 +43,10 @@ const reactionSchema = z.object({
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
-async function requireOrphanAdmin(): Promise<{ id: string; role: string }> {
+async function requireOrphanAdmin(): Promise<{
+  session: { id: string; role: string };
+  permissions: PermissionMap;
+}> {
   const session = await getApiSession();
   const permissions = await getUserPermissions(session.id);
   if (!hasPermission(permissions, "user_management", "read")) {
@@ -52,7 +55,7 @@ async function requireOrphanAdmin(): Promise<{ id: string; role: string }> {
   if (!hasPermission(permissions, "property", "write")) {
     throw new ApiError(403, "記録を更新する権限がありません", "FORBIDDEN");
   }
-  return session;
+  return { session, permissions };
 }
 
 export async function PATCH(
@@ -61,8 +64,14 @@ export async function PATCH(
 ) {
   try {
     const { logId } = await params;
-    const session = await requireOrphanAdmin();
+    const { session, permissions } = await requireOrphanAdmin();
     const body = reactionSchema.parse(await request.json());
+
+    // 反響メモの変更はフィールドレベル権限 owner_note の edit/full が必要(#366 R10・
+    // 反響 PATCH と同じゲート)。省略(変更なし)は権限不要。
+    if (body.note !== undefined && !hasExplicitWritePerm(permissions, "owner_note")) {
+      throw new ApiError(403, "メモを変更する権限がありません", "FORBIDDEN");
+    }
 
     if (body.reactedAt) {
       const todayJst = new Date(Date.now() + JST_OFFSET_MS)
@@ -191,7 +200,7 @@ export async function DELETE(
 ) {
   try {
     const { logId } = await params;
-    const session = await requireOrphanAdmin();
+    const { session } = await requireOrphanAdmin();
 
     await prisma.$transaction(async (tx) => {
       const log = await tx.propertyDmLog.findFirst({

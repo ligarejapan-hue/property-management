@@ -106,6 +106,7 @@ const PERMS_ADMIN = [
   { resource: "user_management", action: "read", granted: true },
   { resource: "owner", action: "read", granted: true },
   { resource: "property", action: "write", granted: true },
+  { resource: "owner_note", action: "edit", granted: true },
 ];
 
 const LOG_ID = "01000000-0000-4000-8000-000000000001";
@@ -291,6 +292,15 @@ describe("PATCH /api/admin/orphan-dm-logs/[logId](反響訂正)", () => {
     expect(
       vi.mocked(lockOwnersForUpdate).mock.invocationCallOrder[0],
     ).toBeLessThan(pm.propertyDmLog.update.mock.invocationCallOrder[0]);
+  });
+
+  it("owner_note の edit/full が無ければ note 付き保存は 403(#366 R10)", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(
+      PERMS_ADMIN.filter((p) => p.resource !== "owner_note") as never,
+    );
+    const res = await PATCH(patchRequest({ status: "replied", note: "上書き" }), idCtx);
+    expect(res.status).toBe(403);
+    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
   });
 
   it("note 省略は既存メモを保持(マスク表示値の往復で消さない=#366 R2)", async () => {

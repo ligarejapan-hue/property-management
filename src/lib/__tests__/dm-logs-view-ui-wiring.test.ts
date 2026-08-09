@@ -108,3 +108,11 @@ describe("dm-logs-view: メモのマスク往復防止(#366 R2/R3)", () => {
     expect(VIEW).toMatch(/\{ note: null \}/);
   });
 });
+
+describe("dm-logs-view: 反響メモのフィールドレベル権限(#366 R10)", () => {
+  it("owner_note の edit/full が無いユーザーにはメモ入力を出さない(サーバも403)", () => {
+    expect(VIEW).toMatch(/owner_note/);
+    expect(VIEW).toMatch(/canWriteNote/);
+    expect(VIEW).toMatch(/\{canWriteNote && \(/);
+  });
+});

@@ -163,11 +163,14 @@ function CreateLogForm({
 /** 反響のインライン編集(PR-B)。売却DM由来の行も編集可=優先規則はサーバが解決する。 */
 function ReactionEditor({
   log,
+  canWriteNote,
   onSave,
   onCancel,
   saving,
 }: {
   log: DmLog;
+  /** owner_note の edit/full を持つか(無ければメモ入力を出さない=サーバも 403 で拒否) */
+  canWriteNote: boolean;
   onSave: (
     status: ReactionStatus,
     reactedAt: string,
@@ -209,16 +212,18 @@ function ReactionEditor({
         onChange={(e) => setReactedAt(e.target.value)}
         className="rounded-md border border-gray-300 px-1.5 py-1 text-xs dark:border-gray-700 dark:bg-gray-800"
       />
-      <input
-        type="text"
-        value={note}
-        maxLength={500}
-        disabled={clearNote}
-        onChange={(e) => setNote(e.target.value)}
-        placeholder={log.reactionNote ? "メモあり(入力すると上書き)" : "メモ(任意)"}
-        className="w-28 rounded-md border border-gray-300 px-1.5 py-1 text-xs disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800"
-      />
-      {log.reactionNote && (
+      {canWriteNote && (
+        <input
+          type="text"
+          value={note}
+          maxLength={500}
+          disabled={clearNote}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder={log.reactionNote ? "メモあり(入力すると上書き)" : "メモ(任意)"}
+          className="w-28 rounded-md border border-gray-300 px-1.5 py-1 text-xs disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800"
+        />
+      )}
+      {canWriteNote && log.reactionNote && (
         <label className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-300">
           <input
             type="checkbox"
@@ -277,6 +282,18 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
     if (permissionsLoading) return false;
     return (permissions ?? []).some(
       (p) => p.resource === "property" && p.action === "write" && p.granted,
+    );
+  }, [permissions, permissionsLoading]);
+
+  // 反響メモの変更はフィールドレベル owner_note の edit/full(サーバも 403)。
+  // 無いユーザーにはメモ入力自体を出さない(必ず失敗するUIを出さない方針)。
+  const canWriteNote = useMemo(() => {
+    if (permissionsLoading) return false;
+    return (permissions ?? []).some(
+      (p) =>
+        p.resource === "owner_note" &&
+        (p.action === "edit" || p.action === "full") &&
+        p.granted,
     );
   }, [permissions, permissionsLoading]);
 
@@ -491,6 +508,7 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
                       {editingReactionId === log.id ? (
                         <ReactionEditor
                           log={log}
+                          canWriteNote={canWriteNote}
                           saving={savingReaction}
                           onSave={(status, reactedAt, note, clearNote) =>
                             handleSaveReaction(

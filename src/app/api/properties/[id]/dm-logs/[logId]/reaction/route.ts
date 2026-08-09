@@ -9,7 +9,7 @@ import {
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import {
   assertPropertyRecordAccess,
   lockPropertyRecordForWrite,
@@ -76,6 +76,13 @@ export async function PATCH(
     }
 
     const body = reactionSchema.parse(await request.json());
+
+    // 反響メモの変更(上書き・消去)はフィールドレベル権限 owner_note の edit/full が必要
+    // (#366 R10)。表示レベルがマスクのユーザーは既存メモを見えないまま破壊できてしまう。
+    // note 省略(変更なし)は権限不要=反響種別・日付だけの記録は従来どおり可能。
+    if (body.note !== undefined && !hasExplicitWritePerm(permissions, "owner_note")) {
+      throw new ApiError(403, "メモを変更する権限がありません", "FORBIDDEN");
+    }
 
     // 未来の反響日は実在しない出来事を作る(個別記録の sentOn と同じ扱いで 400)。
     if (body.reactedAt) {
