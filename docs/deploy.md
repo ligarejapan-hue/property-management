@@ -570,25 +570,38 @@ dry-run と一致すること。反映後、物件詳細の「DM 送付履歴」
 
 ロールバック: 冪等＝**再実行が安全**という意味であり、**再実行は取り消しにはならない**
 （一意一致で書いた `draft_id` は残り以後そのまま同期される／曖昧行への保守的付与は証拠が
-消えても残る）。誤適用を戻す手段は次の2つ。
+消えても残る）。また「現在の列値を条件にした初期化 SQL」も安全な巻き戻しには**ならない**
+（同期が手動反響を上書きした行は手動値が `manual_reaction_shadow` にしか残っておらず初期化で
+消える／`cleared` 導出で `draft_id` だけ書かれた行は `reaction_source` が null のまま＝source では
+拾えない）。**巻き戻しは実行前スナップショットからの復元のみを正とする**。
 
-1. **第一手段＝実行前バックアップからの復元**。日次バックアップ（`pm-db-backup.timer`）に
-   加え、`--apply` 直前に手動スナップショットを取っておく:
-   `sudo -u postgres pg_dump -Fc property_management > /root/pre-reconcile-$(date +%Y%m%d).dump`
-2. **SQL での初期化**（バックアップが使えない場合）。照合が書くのは同期由来
-   （`reaction_source='sale_dm_sync'`）の反響と `draft_id` のみ＝手動入力の反響は触らずに戻せる:
+```bash
+# --apply 直前に必ず取得（これが唯一の完全な巻き戻し手段）
+sudo -u postgres pg_dump -Fc property_management > /root/pre-reconcile-$(date +%Y%m%d).dump
+```
 
-   ```sql
-   -- 照合・同期が書いた分を migration 直後の初期状態へ戻す(手動入力の反響は残る)。
-   -- 個別に戻す場合は id で絞る。戻した後に照合を再実行すれば現在の draft 状態から作り直せる。
-   UPDATE property_dm_logs
-   SET draft_id = NULL,
-       reaction_status = 'no_response', reacted_at = NULL, reaction_note = NULL,
-       reaction_source = NULL, manual_reaction_shadow = NULL
-   WHERE method = 'sale_dm' AND reaction_source = 'sale_dm_sync';
-   ```
+戻すとき（`property_dm_logs` の反響列＋`draft_id` だけを実行前の値に書き戻す。手動反響・
+shadow 含め完全に戻る。全体復元より影響範囲が小さい）:
 
-コード自体を旧版に戻す場合は反響列は読まれなくなるため、上記の DB 巻き戻しは必須ではない。
+```bash
+sudo -u postgres createdb pm_undo
+sudo -u postgres pg_restore -d pm_undo /root/pre-reconcile-YYYYMMDD.dump
+sudo -u postgres psql -d pm_undo -c "\copy (SELECT id, draft_id, reaction_status, reacted_at, reaction_note, reaction_source, manual_reaction_shadow FROM property_dm_logs WHERE method='sale_dm') TO '/tmp/pm-undo.csv' CSV"
+sudo -u postgres psql -d property_management <<'SQL'
+CREATE TEMP TABLE undo_rows (id uuid, draft_id uuid, reaction_status text, reacted_at timestamp, reaction_note text, reaction_source text, manual_reaction_shadow jsonb);
+\copy undo_rows FROM '/tmp/pm-undo.csv' CSV
+UPDATE property_dm_logs t
+SET draft_id = u.draft_id, reaction_status = u.reaction_status, reacted_at = u.reacted_at,
+    reaction_note = u.reaction_note, reaction_source = u.reaction_source,
+    manual_reaction_shadow = u.manual_reaction_shadow
+FROM undo_rows u WHERE t.id = u.id;
+SQL
+sudo -u postgres dropdb pm_undo && sudo rm -f /tmp/pm-undo.csv
+```
+
+運用前提: 照合は**本番反映直後（手動の反響入力が始まる前）に1回だけ**実行する。この時点で
+実行すれば、上書きされ得る手動値がそもそも存在しない。コード自体を旧版に戻す場合は反響列は
+読まれなくなるため、DB の巻き戻しは必須ではない。
 
 ---
 

@@ -405,6 +405,12 @@ describe("UI配線(source)", () => {
     expect(src).toMatch(/confirm/);
   });
 
+  it("所有者名(PII)を表示するため画面保護の対象(#366 R9)", () => {
+    const src = read("src/app/(dashboard)/admin/orphan-dm-logs/page.tsx");
+    expect(src).toContain("data-pii-protected");
+    expect(src).toContain('data-pii-surface="owner"');
+  });
+
   it("編集フォームは編集中だけマウント+メモはマスク値を往復させない(#366 R3)", () => {
     const src = read("src/app/(dashboard)/admin/orphan-dm-logs/page.tsx");
     // 行に state を持たず、編集開始時に最新 log で初期化されるフォーム部品

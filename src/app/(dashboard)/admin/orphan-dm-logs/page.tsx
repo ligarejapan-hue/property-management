@@ -112,7 +112,12 @@ export default function OrphanDmLogsPage() {
   const totalPages = Math.ceil(total / limit);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
+    // 所有者名(PII)を表示するため画面保護の対象にする(コピー・右クリック・印刷ガード=#366 R9)
+    <div
+      data-pii-protected
+      data-pii-surface="owner"
+      className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6"
+    >
       <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
         <Link href="/admin" className="hover:text-gray-700 dark:hover:text-gray-300">管理</Link>
         <span className="mx-2">/</span>
