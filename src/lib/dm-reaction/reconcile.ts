@@ -7,7 +7,7 @@ import {
   lockPropertiesForUpdate,
   type RawTx,
 } from "@/lib/dm-batch/locks";
-import { applySyncReaction, type ReactionFields } from "./core";
+import { applySyncReaction, jstCalendarDay, type ReactionFields } from "./core";
 import {
   deriveSaleDmReactionEvent,
   syncSaleDmReaction,
@@ -23,12 +23,9 @@ import {
 //   あれば保守的に付与(格下げ・消去はしない=R4)。証拠なしは触らない。
 // - 手動反響 PATCH の旧行フォールバックは単一行版(reconcileLegacySaleDmLog)を共用する。
 
-export const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
-
-/** 実時刻 → JST 暦日 "YYYY-MM-DD" */
-export function jstCalendarDay(at: Date): string {
-  return new Date(at.getTime() + JST_OFFSET_MS).toISOString().slice(0, 10);
-}
+// JST 暦日ヘルパーは core へ移動(sync の旧行フォールバックと共用・循環import回避)。
+// 既存の import 互換のためここから再exportする。
+export { JST_OFFSET_MS, jstCalendarDay } from "./core";
 
 export interface LegacyCandidateDraft {
   id: string;

@@ -9,6 +9,7 @@ import { deriveOutcome } from "@/lib/sale-dm-letter/outcome";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { lockOwnersForUpdate, type RawTx } from "@/lib/dm-batch/locks";
 import { syncSaleDmReaction, type ReactionSyncTx } from "@/lib/dm-reaction/sync";
+import { jstCalendarDay } from "@/lib/dm-reaction/core";
 
 // 配達結果は明示指定された時のみ更新する(省略時は据え置き)。
 // 反響(電話)は true/false で立て下げ可能にする(取り消し時は LP の有無で再導出)。
@@ -47,6 +48,7 @@ export async function PATCH(
         lpFirstAccessAt: true,
         phoneInquiryAt: true,
         status: true,
+        sentAt: true,
         campaign: { select: { createdBy: true } },
         property: { select: { createdBy: true, assignedTo: true } },
       },
@@ -117,15 +119,36 @@ export async function PATCH(
     // 下書き更新と物件連動を 1 トランザクションで行う。並行(同一下書きへの公開/t/ヒット、同一物件への別宛先の
     // 同時 outcome 更新)に備え、関係行を FOR UPDATE でロックしてから最新値で判定する(R34 残レース対応)。
     const txResult = await prisma.$transaction(async (tx) => {
-      // R47(PR-B): terminal(returned_undeliverable)を書き込むリクエストは、ブリッジ行(送付記録)へ
-      // undeliverable が同期されるため、対象所有者集合(代表+連関全員)を親行より先に FOR UPDATE する
-      // (mark-sent と同じ「先読み→Owner→親→子」の型)。
-      if (input.deliveryStatus === "returned_undeliverable") {
-        const bridgeLogs = await tx.propertyDmLog.findMany({
-          where: { draftId: id },
+      // R47(PR-B): terminal(returned_undeliverable)を書き込むリクエスト、または draft が既に
+      // 返送済み(deliveryStatus を変えないメモ・電話編集でも同期が terminal を書き得る=@codex #366 R2 P2)
+      // のときは、対象所有者集合(代表+連関全員)を親行より先に FOR UPDATE する
+      // (mark-sent と同じ「先読み→Owner→親→子」の型)。同期対象の旧sale_dm行(同一物件+同日)も
+      // 集合に含める(通常は連関なし=空)。
+      if (
+        input.deliveryStatus === "returned_undeliverable" ||
+        draft.deliveryStatus === "returned_undeliverable"
+      ) {
+        const syncTargets = await tx.propertyDmLog.findMany({
+          where: {
+            OR: [
+              { draftId: id },
+              ...(draft.sentAt
+                ? [
+                    {
+                      method: "sale_dm",
+                      draftId: null,
+                      propertyId: draft.propertyId,
+                      sentAt: new Date(
+                        `${jstCalendarDay(draft.sentAt)}T00:00:00Z`,
+                      ),
+                    },
+                  ]
+                : []),
+            ],
+          },
           select: { ownerId: true, logOwners: { select: { ownerId: true } } },
         });
-        const ownerIds = bridgeLogs.flatMap((l) => [
+        const ownerIds = syncTargets.flatMap((l) => [
           ...(l.ownerId ? [l.ownerId] : []),
           ...l.logOwners.map((o) => o.ownerId),
         ]);

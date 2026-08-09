@@ -229,6 +229,21 @@ describe("PATCH outcome", () => {
     expect(syncSaleDmReaction).toHaveBeenCalled();
   });
 
+  it("配達状態を変えない編集(電話・メモ)でも draft が返送済みなら Owner ロックを取る(#366 R2)", async () => {
+    // 同期が terminal(undeliverable)を書き得るため、事前ロックの判定は入力値だけでなく
+    // draft の現在値(既に returned_undeliverable)も見る。逆順ロック(親→Owner)のデッドロック防止。
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({
+      id: "r1", propertyId: "p1", deliveryStatus: "returned_undeliverable",
+      lpFirstAccessAt: null, phoneInquiryAt: null, status: "sent", campaign: { createdBy: "u1" },
+    });
+    const res = await PATCH(req({ phoneInquiry: true }) as never, ctx());
+    expect(res.status).toBe(200);
+    expect(lockOwnersForUpdate).toHaveBeenCalled();
+    expect(
+      (lockOwnersForUpdate as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0],
+    ).toBeLessThan(pm.$queryRaw.mock.invocationCallOrder[0]);
+  });
+
   it("宛先不明の解除でも汎用送付記録側に宛先不明が残っていれば物件フラグを消さない(整合)", async () => {
     pm.dmRecipientDraft.findUnique.mockResolvedValue({
       id: "r1", propertyId: "p1", deliveryStatus: "returned_undeliverable",

@@ -149,16 +149,62 @@ describe("applySyncReaction(同期イベントの適用)", () => {
     });
   });
 
-  it("同期→同期の遷移は最新の導出に従う(undeliverable→replied も置き換わる・shadowは保持)", () => {
+  it("同期→同期の遷移(shadowなし)は最新の導出に従う(undeliverable→replied も置き換わる)", () => {
+    const undeliv = applySyncReaction(virgin, { kind: "undeliverable", at: T1 });
+    const next = applySyncReaction(undeliv, { kind: "replied", at: T2 });
+    expect(next.reactionStatus).toBe("replied");
+    expect(next.reactionSource).toBe("sale_dm_sync");
+    expect(next.manualReactionShadow).toBeNull();
+  });
+
+  it("宛先不明→連絡ありの訂正は退避した手動repliedを復元する(隠れたまま失われない=#366 R1)", () => {
+    // 手動replied → 同期undeliverableが退避 → 返戻訂正(ただしLP証拠は残る=replied導出)。
+    // 弱いrepliedを被せず、先に手動値を復元して優先規則を適用し直す(手動replied>同期replied)。
     const stashed = applySyncReaction(manualReplied, {
       kind: "undeliverable",
       at: T2,
     });
     const next = applySyncReaction(stashed, { kind: "replied", at: T2 });
+    expect(next).toEqual(manualReplied);
+  });
+
+  it("shadow が手動terminal(refused)なら復元されて同期repliedを退ける", () => {
+    const manualRefused: ReactionFields = {
+      reactionStatus: "refused",
+      reactedAt: T1,
+      reactionNote: "送らないでと連絡",
+      reactionSource: "manual",
+      manualReactionShadow: null,
+    };
+    const stashed = applySyncReaction(manualRefused, {
+      kind: "undeliverable",
+      at: T2,
+    });
+    const next = applySyncReaction(stashed, { kind: "replied", at: T2 });
+    expect(next).toEqual(manualRefused);
+  });
+
+  it("shadow が手動no_responseなら復元後も同期repliedが勝つ(no_responseはブロックしない)", () => {
+    const manualCleared: ReactionFields = {
+      reactionStatus: "no_response",
+      reactedAt: null,
+      reactionNote: null,
+      reactionSource: "manual",
+      manualReactionShadow: null,
+    };
+    const stashed = applySyncReaction(manualCleared, {
+      kind: "undeliverable",
+      at: T1,
+    });
+    const next = applySyncReaction(stashed, { kind: "replied", at: T2 });
     expect(next.reactionStatus).toBe("replied");
     expect(next.reactionSource).toBe("sale_dm_sync");
-    // 退避済みの手動値は温存(後の cleared で復元できる)
-    expect(next.manualReactionShadow).toEqual(stashed.manualReactionShadow);
+    // 復元した手動no_responseは再退避される
+    expect(next.manualReactionShadow).toEqual({
+      status: "no_response",
+      reactedAt: null,
+      note: null,
+    });
   });
 
   it("手動値がある状態の cleared は何もしない(手動の記録は同期の消失で消えない)", () => {

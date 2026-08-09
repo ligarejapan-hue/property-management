@@ -42,11 +42,15 @@ function logRow(over: Record<string, unknown> = {}) {
   };
 }
 
-function makeTx(draft: unknown, logs: unknown[]) {
+function makeTx(draft: unknown, logs: unknown[], legacyLogs: unknown[] = []) {
   const tx = {
     dmRecipientDraft: { findUnique: vi.fn(async () => draft) },
     propertyDmLog: {
-      findMany: vi.fn(async () => logs),
+      // 2種類の読取を where で振り分ける: draftId 一致=ブリッジ行 / draftId:null=旧行フォールバック
+      findMany: vi.fn(async (args: unknown) => {
+        const where = (args as { where: { draftId: string | null } }).where;
+        return where.draftId === null ? legacyLogs : logs;
+      }),
       update: vi.fn(async (args: unknown) => {
         void args; // 呼び出し引数は mock.calls で検証する
         return {};
@@ -225,6 +229,101 @@ describe("syncSaleDmReaction(配線)", () => {
       reactionSource: "manual",
     });
     const tx = makeTx(draftRow(), [manual]);
+    await syncSaleDmReaction(tx, "d1");
+    expect(tx.propertyDmLog.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("syncSaleDmReaction: 旧sale_dm行への保守的フォールバック(#366 R1)", () => {
+  // draft.sentAt=UTC 7/31 20:00 = JST 8/1 05:00 → 旧行の sentAt(@db.Date)=8/1 と対応(R37境界)
+  const SENT_AT = new Date("2026-07-31T20:00:00.000Z");
+  const legacyDraft = (over: Record<string, unknown> = {}) =>
+    draftRow({ propertyId: "p1", sentAt: SENT_AT, ...over });
+  const legacyRow = (over: Record<string, unknown> = {}) =>
+    logRow({ id: "legacy-1", ownerId: null, logOwners: [], ...over });
+
+  it("LP反響: 同一物件+同一JST暦日の未リンク旧行にも replied を反映(where をピン)", async () => {
+    const tx = makeTx(
+      legacyDraft({ outcome: "inquiry", lpFirstAccessAt: T_LP }),
+      [],
+      [legacyRow()],
+    );
+    await syncSaleDmReaction(tx, "d1");
+    const legacyCall = tx.propertyDmLog.findMany.mock.calls
+      .map((c) => (c[0] as { where: Record<string, unknown> }).where)
+      .find((w) => w.draftId === null);
+    expect(legacyCall).toEqual({
+      method: "sale_dm",
+      draftId: null,
+      propertyId: "p1",
+      sentAt: new Date("2026-08-01T00:00:00.000Z"),
+    });
+    const upd = tx.propertyDmLog.update.mock.calls[0][0] as {
+      where: { id: string };
+      data: Record<string, unknown>;
+    };
+    expect(upd.where).toEqual({ id: "legacy-1" });
+    expect(upd.data).toMatchObject({
+      reactionStatus: "replied",
+      reactionSource: "sale_dm_sync",
+    });
+  });
+
+  it("返戻: 旧行にも undeliverable を反映(旧行は連関なし=ロック集合は増えない)", async () => {
+    const tx = makeTx(
+      legacyDraft({ deliveryStatus: "returned_undeliverable", returnedAt: T_RET }),
+      [],
+      [legacyRow()],
+    );
+    await syncSaleDmReaction(tx, "d1");
+    const upd = tx.propertyDmLog.update.mock.calls[0][0] as {
+      data: Record<string, unknown>;
+    };
+    expect(upd.data).toMatchObject({
+      reactionStatus: "undeliverable",
+      reactedAt: T_RET,
+    });
+    expect(ownerLockCalls(tx)).toBe(0); // legacyRow は ownerId=null・連関0
+  });
+
+  it("cleared は旧行に適用しない(どの draft の証拠か確定しない=格下げなし)", async () => {
+    const synced = legacyRow({
+      reactionStatus: "replied",
+      reactedAt: T_LP,
+      reactionSource: "sale_dm_sync",
+    });
+    const tx = makeTx(legacyDraft(), [], [synced]);
+    await syncSaleDmReaction(tx, "d1");
+    // cleared のときは旧行を読みにすら行かない
+    expect(
+      tx.propertyDmLog.findMany.mock.calls
+        .map((c) => (c[0] as { where: Record<string, unknown> }).where)
+        .filter((w) => w.draftId === null),
+    ).toHaveLength(0);
+    expect(tx.propertyDmLog.update).not.toHaveBeenCalled();
+  });
+
+  it("replied で旧行の undeliverable を弱めない(別 draft の返戻証拠かもしれない)", async () => {
+    const undeliv = legacyRow({
+      reactionStatus: "undeliverable",
+      reactedAt: T_RET,
+      reactionSource: "sale_dm_sync",
+    });
+    const tx = makeTx(
+      legacyDraft({ outcome: "inquiry", lpFirstAccessAt: T_LP }),
+      [],
+      [undeliv],
+    );
+    await syncSaleDmReaction(tx, "d1");
+    expect(tx.propertyDmLog.update).not.toHaveBeenCalled();
+  });
+
+  it("draft に propertyId/sentAt が無ければ旧行フォールバックはしない", async () => {
+    const tx = makeTx(
+      draftRow({ outcome: "inquiry", lpFirstAccessAt: T_LP }),
+      [],
+      [legacyRow()],
+    );
     await syncSaleDmReaction(tx, "d1");
     expect(tx.propertyDmLog.update).not.toHaveBeenCalled();
   });

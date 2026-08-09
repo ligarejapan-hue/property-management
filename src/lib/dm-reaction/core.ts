@@ -32,6 +32,13 @@ export function isTerminalReaction(
   return status != null && TERMINAL_REACTIONS.has(status);
 }
 
+export const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+/** 実時刻 → JST 暦日 "YYYY-MM-DD"(深夜0-9時は UTC 前日でも当日扱い=R37)。 */
+export function jstCalendarDay(at: Date): string {
+  return new Date(at.getTime() + JST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
 export interface ReactionFields {
   reactionStatus: string;
   reactedAt: Date | null;
@@ -124,6 +131,24 @@ export function applySyncReaction(
     current.reactionStatus !== "no_response"
   ) {
     return current;
+  }
+
+  // 宛先不明→連絡ありへの訂正(@codex #366 R1 P2): 同期値が shadow(=undeliverable が
+  // 上書きしていた手動値)を抱えているとき、弱い replied をそのまま被せると手動値が
+  // shadow に隠れたまま生き返らない(次の手動保存で退避ごと消える)。先に手動値を
+  // 復元してから優先規則を適用し直す(手動の実反響は同期replied に勝つ)。
+  if (sync.kind === "replied" && current.reactionSource === "sale_dm_sync") {
+    const shadow = parseShadow(current.manualReactionShadow);
+    if (shadow) {
+      const restored: ReactionFields = {
+        reactionStatus: shadow.status,
+        reactedAt: shadow.reactedAt ? new Date(shadow.reactedAt) : null,
+        reactionNote: shadow.note,
+        reactionSource: "manual",
+        manualReactionShadow: null,
+      };
+      return applySyncReaction(restored, sync);
+    }
   }
 
   const next: ReactionFields = {
