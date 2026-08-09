@@ -9,6 +9,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission, maskValue } from "@/lib/permissions";
+import { isPlainOwnerLevel } from "@/lib/dm-export";
 import { writeAuditLog } from "@/lib/audit";
 
 // ---------- GET /api/admin/orphan-dm-logs ----------
@@ -38,6 +39,19 @@ export async function GET(request: NextRequest) {
     const page = Math.max(1, Number(searchParams.get("page")) || 1);
     const limit = Math.min(100, Math.max(1, Number(searchParams.get("limit")) || 50));
 
+    const ownerDisplayConfig = await getOwnerDisplayConfig(session.id, permissions);
+
+    // 氏名検索は生値表示レベル(edit/full/read)のみ(S1a・#366 R7): partial/masked/hidden の
+    // ユーザーが q を変えながらヒット件数を観察すると、マスク越しに名前当てのオラクルになる
+    // (物件サジェスト検索と同じ基準)。
+    if (q && !isPlainOwnerLevel(ownerDisplayConfig.name)) {
+      throw new ApiError(
+        403,
+        "所有者名で検索するには氏名の生値表示権限が必要です",
+        "FORBIDDEN",
+      );
+    }
+
     // 対象は孤児行(propertyId=null)のみ。所有者名検索は代表(owner)と共有者連関
     // (logOwners)の両経路(R29: 拒否の記録は共有者側にも紐づく)。
     const where = {
@@ -51,8 +65,6 @@ export async function GET(request: NextRequest) {
           }
         : {}),
     };
-
-    const ownerDisplayConfig = await getOwnerDisplayConfig(session.id, permissions);
 
     const [logs, total] = await Promise.all([
       prisma.propertyDmLog.findMany({

@@ -196,6 +196,25 @@ describe("GET /api/admin/orphan-dm-logs(検索・一覧)", () => {
     expect(pm.propertyDmLog.findMany).not.toHaveBeenCalled();
   });
 
+  it("氏名がマスク表示のユーザーの氏名検索は 403(ヒット件数の名前当てオラクル封じ=S1a/#366 R7)", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
+      ...FULL_DISPLAY,
+      name: "masked",
+    } as never);
+    const res = await GET(getRequest("?q=山田"));
+    expect(res.status).toBe(403);
+    expect(pm.propertyDmLog.findMany).not.toHaveBeenCalled();
+  });
+
+  it("氏名マスクでも q なしの一覧は 200(検索だけを塞ぐ)", async () => {
+    vi.mocked(getOwnerDisplayConfig).mockResolvedValue({
+      ...FULL_DISPLAY,
+      name: "masked",
+    } as never);
+    const res = await GET(getRequest());
+    expect(res.status).toBe(200);
+  });
+
   it("対象は propertyId=null の行のみ・所有者名検索は代表+連関の両経路", async () => {
     const res = await GET(getRequest("?q=山田"));
     expect(res.status).toBe(200);
