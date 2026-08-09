@@ -211,6 +211,8 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   dm_sent_confirm: new Set(["batchId", "sentOn"]),
   dm_sent_record: new Set(["sentOn"]),
   dm_sent_record_delete: new Set(["logId"]),
+  // PR-B: 反響の手動記録。status=反響4種(enum)/reactedAt=YYYY-MM-DD。note 本文は載せない。
+  dm_reaction_update: new Set(["logId", "status", "reactedAt"]),
   // 既存バグ修正(設計§2.5): property_dm_log_view の viewedAt が未登録で [REDACTED] に潰れていた。
   // count/total/page は ALWAYS_SAFE のため viewedAt のみ追加。
   property_dm_log_view: new Set(["viewedAt"]),
