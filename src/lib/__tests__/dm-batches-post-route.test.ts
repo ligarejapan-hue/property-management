@@ -75,8 +75,13 @@ vi.mock("@/lib/prisma", () => {
     dmExportBatch: { create: vi.fn(), findFirst: vi.fn() },
     dmExportBatchItem: { createMany: vi.fn() },
     dmExportBatchItemOwner: { createMany: vi.fn() },
-    // 送付記録は確定APIのみが書く。POST では一切書かないことを固定する。
-    propertyDmLog: { create: vi.fn(), createMany: vi.fn(), update: vi.fn() },
+    // 送付記録は確定APIのみが書く。POST では一切書かない(読取=terminal除外のみ)。
+    propertyDmLog: {
+      create: vi.fn(),
+      createMany: vi.fn(),
+      update: vi.fn(),
+      findMany: vi.fn(async () => []),
+    },
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
   db.$queryRaw = vi.fn(async () => []);
@@ -99,7 +104,7 @@ const pm = prisma as unknown as {
   dmExportBatch: { create: Mock; findFirst: Mock };
   dmExportBatchItem: { createMany: Mock };
   dmExportBatchItemOwner: { createMany: Mock };
-  propertyDmLog: { create: Mock; createMany: Mock; update: Mock };
+  propertyDmLog: { create: Mock; createMany: Mock; update: Mock; findMany: Mock };
   $transaction: Mock;
   $queryRaw: Mock;
 };
@@ -190,6 +195,7 @@ beforeEach(() => {
   ]);
   pm.importJobRow.findMany.mockResolvedValue([]);
   pm.dmExportBatch.findFirst.mockResolvedValue(null);
+  pm.propertyDmLog.findMany.mockResolvedValue([]);
   pm.dmExportBatch.create.mockResolvedValue({ id: "b1" });
   pm.dmExportBatchItem.createMany.mockResolvedValue({ count: 0 });
   pm.dmExportBatchItemOwner.createMany.mockResolvedValue({ count: 0 });
@@ -283,6 +289,49 @@ describe("POST /api/properties/dm-batches", () => {
     const res = await POST(makeRequest(BODY));
     const body = (await res.json()) as { rowCount: number };
     expect(body.rowCount).toBe(2);
+  });
+
+  it("拒否・宛先不明の反響が付いた宛先グループは控え作成時に自動除外する(#366 R4)", async () => {
+    // 拒否は物件の dmStatus を変えないため、DL 時の検査(2)だけだと再出力が恒久 409 になる。
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        propertyOwners: [
+          makePropertyOwner({ owner: { id: "o1", address: "東京都A" } }),
+          makePropertyOwner({
+            owner: { id: "o2", address: "神奈川県B" },
+            isPrimary: false,
+          }),
+        ],
+      }),
+    ]);
+    // o2 に他物件も含む拒否の記録(所有者横断)
+    pm.propertyDmLog.findMany.mockResolvedValue([
+      { ownerId: "o2", logOwners: [] },
+    ]);
+    const res = await POST(makeRequest(BODY));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      rowCount: number;
+      excludedTerminalCount: number;
+    };
+    expect(body.rowCount).toBe(1); // o2 のグループが除外される
+    expect(body.excludedTerminalCount).toBe(1);
+    // 保存も除外後(rowCount・items とも)
+    expect(pm.dmExportBatch.create.mock.calls[0][0].data.rowCount).toBe(1);
+    const itemsData = pm.dmExportBatchItem.createMany.mock.calls[0][0].data;
+    expect(itemsData).toHaveLength(1);
+    expect(itemsData[0].ownerId).toBe("o1");
+    // 検出クエリ: terminal 2種のみ・代表と連関の両経路
+    const where = pm.propertyDmLog.findMany.mock.calls[0][0].where;
+    expect(where.reactionStatus).toEqual({ in: ["refused", "undeliverable"] });
+    expect(where.OR).toEqual([
+      { ownerId: { in: ["o1", "o2"] } },
+      { logOwners: { some: { ownerId: { in: ["o1", "o2"] } } } },
+    ]);
+    // 監査にも除外数(非PII)
+    const audit = lastAudit();
+    expect(audit?.detail?.excludedTerminal).toBe(1);
+    expect(audit?.detail?.count).toBe(1);
   });
 
   it("attemptKey 再POST: 未確定の既存バッチは reused=true・作り直さない", async () => {

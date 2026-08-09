@@ -3621,21 +3621,27 @@ export interface DmBatchSummary {
  * attemptKey は押下ごとに client で採番(本番はHTTPのため crypto.randomUUID は使わない)。
  * 返った batchId の GET /csv へブラウザ遷移してダウンロードする(第2段)。
  */
-export async function createDmBatch(
-  filters: Record<string, string>,
-): Promise<{ batchId: string; rowCount: number; reused: boolean }> {
+export async function createDmBatch(filters: Record<string, string>): Promise<{
+  batchId: string;
+  rowCount: number;
+  reused: boolean;
+  /** 拒否・宛先不明の反響で自動除外した宛先数(再利用時は undefined)。 */
+  excludedTerminalCount?: number;
+}> {
   if (USE_MOCK) {
     await mockDelay();
-    return { batchId: "mock-batch-1", rowCount: 3, reused: false };
+    return {
+      batchId: "mock-batch-1",
+      rowCount: 3,
+      reused: false,
+      excludedTerminalCount: 0,
+    };
   }
-  return apiFetch<{ batchId: string; rowCount: number; reused: boolean }>(
-    "/api/properties/dm-batches",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filters, attemptKey: safeRandomId() }),
-    },
-  );
+  return apiFetch("/api/properties/dm-batches", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filters, attemptKey: safeRandomId() }),
+  });
 }
 
 /** 送付確定モーダル用: 未確定の控え一覧(非PII・50件ページング)。 */

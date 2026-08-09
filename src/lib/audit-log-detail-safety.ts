@@ -206,7 +206,8 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   ]),
   // DM送付記録(PR-A): 控えバッチと送付確定・個別記録の操作監査。detail は件数/UUID/日付のみ
   // (氏名・住所・note 本文は載せない)。batchId/logId/sentOn は ALWAYS_SAFE 外のため action 固有で許可。
-  dm_batch_create: new Set(["batchId", "reused", "createdAt"]),
+  // excludedTerminal=拒否・宛先不明の反響で控え作成時に自動除外した宛先数(PR-B・非PII)
+  dm_batch_create: new Set(["batchId", "reused", "createdAt", "excludedTerminal"]),
   property_dm_csv_export: new Set(["batchId", "retry", "exportedAt"]),
   dm_sent_confirm: new Set(["batchId", "sentOn"]),
   dm_sent_record: new Set(["sentOn"]),

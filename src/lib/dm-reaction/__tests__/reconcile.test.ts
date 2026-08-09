@@ -172,6 +172,33 @@ describe("reconcileLegacySaleDmLog(単一行版・PATCH フォールバック共
     });
   });
 
+  it("曖昧の replied で既存の undeliverable を弱めない(別 draft の返戻証拠かもしれない=#366 R4)", async () => {
+    const tx = makeTx({
+      drafts: [
+        draft({ outcome: "inquiry", lpFirstAccessAt: NOW }),
+        draft({ id: "d2" }),
+      ],
+      logRows: [
+        {
+          id: "log-1",
+          ownerId: null,
+          logOwners: [],
+          reactionStatus: "undeliverable",
+          reactedAt: new Date("2026-08-05T01:00:00.000Z"),
+          reactionNote: null,
+          reactionSource: "sale_dm_sync",
+          manualReactionShadow: null,
+        },
+      ],
+    });
+    await reconcileLegacySaleDmLog(
+      tx as never,
+      { id: "log-1", propertyId: "p1", sentAt: LOG_DAY },
+      NOW,
+    );
+    expect(tx.propertyDmLog.update).not.toHaveBeenCalled();
+  });
+
   it("曖昧+証拠ありでも現在値が同じなら書かない(冪等)", async () => {
     const returnedAt = new Date("2026-08-05T01:00:00.000Z");
     const tx = makeTx({

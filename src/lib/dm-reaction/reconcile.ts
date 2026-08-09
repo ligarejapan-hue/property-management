@@ -132,6 +132,14 @@ export async function reconcileLegacySaleDmLog(
     });
     const current = rows[0] as (ReactionFields & { id: string }) | undefined;
     if (!current) return;
+    // 格下げガード(@codex #366 R4 P2): 曖昧行の undeliverable は別 draft の返戻証拠かも
+    // しれない。sync の旧行フォールバックと同じく replied で弱めない。
+    if (
+      decision.event.kind === "replied" &&
+      current.reactionStatus === "undeliverable"
+    ) {
+      return;
+    }
     const next = applySyncReaction(current, decision.event);
     if (next === current) return;
     await tx.propertyDmLog.update({

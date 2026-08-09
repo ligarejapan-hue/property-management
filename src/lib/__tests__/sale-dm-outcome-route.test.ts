@@ -254,6 +254,17 @@ describe("PATCH outcome", () => {
     expect(syncSaleDmReaction).not.toHaveBeenCalled();
   });
 
+  it("事前ロックした所有者集合を全ロック取得後に再検証: 変わっていたら 409(名寄せレース=#366 R4)", async () => {
+    // 事前読取: o1 をロック → 親・draft ロック後の再読取: 名寄せで o9 へ付け替え済み
+    pm.propertyDmLog.findMany
+      .mockResolvedValueOnce([{ ownerId: "o1", logOwners: [] }])
+      .mockResolvedValueOnce([{ ownerId: "o9", logOwners: [] }]);
+    const res = await PATCH(req({ deliveryStatus: "returned_undeliverable" }) as never, ctx());
+    expect(res.status).toBe(409);
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    expect(syncSaleDmReaction).not.toHaveBeenCalled();
+  });
+
   it("配達状態を変えない編集(電話・メモ)でも draft が返送済みなら Owner ロックを取る(#366 R2)", async () => {
     // 同期が terminal(undeliverable)を書き得るため、事前ロックの判定は入力値だけでなく
     // draft の現在値(既に returned_undeliverable)も見る。逆順ロック(親→Owner)のデッドロック防止。

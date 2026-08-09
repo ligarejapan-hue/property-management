@@ -476,9 +476,20 @@ function PropertiesPageInner() {
     setError(null);
     try {
       const res = await createDmBatch(buildFilterParams());
+      const excluded = res.excludedTerminalCount ?? 0;
       if (res.rowCount === 0) {
-        setError("出力対象がありません。検索条件を確認してください");
+        setError(
+          excluded > 0
+            ? `出力対象がありません(拒否・宛先不明の反響が付いた ${excluded} 件は自動で除外されました)`
+            : "出力対象がありません。検索条件を確認してください",
+        );
         return;
+      }
+      if (excluded > 0) {
+        // 除外は黙って行わない。CSV は同一ページで DL されるため alert が見える(売却DMの部分成功通知と同型)。
+        window.alert(
+          `拒否・宛先不明の反響が付いた ${excluded} 件の宛先は自動で除外しました`,
+        );
       }
       window.location.href = `/api/properties/dm-batches/${res.batchId}/csv`;
     } catch (err) {

@@ -131,32 +131,36 @@ export async function PATCH(
       const preLockedOwners =
         input.deliveryStatus === "returned_undeliverable" ||
         draft.deliveryStatus === "returned_undeliverable";
-      if (preLockedOwners) {
-        const syncTargets = await tx.propertyDmLog.findMany({
-          where: {
-            OR: [
-              { draftId: id },
-              ...(draft.sentAt
-                ? [
-                    {
-                      method: "sale_dm",
-                      draftId: null,
-                      propertyId: draft.propertyId,
-                      sentAt: new Date(
-                        `${jstCalendarDay(draft.sentAt)}T00:00:00Z`,
-                      ),
-                    },
-                  ]
-                : []),
-            ],
-          },
-          select: { ownerId: true, logOwners: { select: { ownerId: true } } },
-        });
-        const ownerIds = syncTargets.flatMap((l) => [
+      const syncTargetWhere = {
+        OR: [
+          { draftId: id },
+          ...(draft.sentAt
+            ? [
+                {
+                  method: "sale_dm",
+                  draftId: null,
+                  propertyId: draft.propertyId,
+                  sentAt: new Date(`${jstCalendarDay(draft.sentAt)}T00:00:00Z`),
+                },
+              ]
+            : []),
+        ],
+      };
+      const collectTargetOwnerIds = (
+        rows: Array<{ ownerId: string | null; logOwners: Array<{ ownerId: string }> }>,
+      ) =>
+        rows.flatMap((l) => [
           ...(l.ownerId ? [l.ownerId] : []),
           ...l.logOwners.map((o) => o.ownerId),
         ]);
-        await lockOwnersForUpdate(tx as unknown as RawTx, ownerIds);
+      let preLockedOwnerIds: string[] = [];
+      if (preLockedOwners) {
+        const syncTargets = await tx.propertyDmLog.findMany({
+          where: syncTargetWhere,
+          select: { ownerId: true, logOwners: { select: { ownerId: true } } },
+        });
+        preLockedOwnerIds = collectTargetOwnerIds(syncTargets);
+        await lockOwnersForUpdate(tx as unknown as RawTx, preLockedOwnerIds);
       }
       // ロック順序は親(物件)→子(draft)に統一(PR-B: 従来は解除分岐のみ物件ロック=子→親の順だった)。
       await lockPropertyRow(tx, draft.propertyId);
@@ -189,6 +193,25 @@ export async function PATCH(
           "配達状態が更新されました。もう一度お試しください",
           "RETRY",
         );
+      }
+
+      // #366 R4 P1: 事前ロックした所有者集合そのものの再検証。syncTargets の読取→Owner ロックの
+      // 間に名寄せが commit すると、ロックしたのは旧(archive済み)所有者で、ブリッジ行は master を
+      // 指している=同期が master を親ロック後に内部ロックする(順序逆転)。全ロック取得後に
+      // 同期対象を読み直し、集合が変わっていたら中止→再試行で正しい集合を掴み直す。
+      if (preLockedOwners) {
+        const verifyTargets = await tx.propertyDmLog.findMany({
+          where: syncTargetWhere,
+          select: { ownerId: true, logOwners: { select: { ownerId: true } } },
+        });
+        const locked = new Set(preLockedOwnerIds);
+        if (collectTargetOwnerIds(verifyTargets).some((id) => !locked.has(id))) {
+          throw new ApiError(
+            409,
+            "所有者の情報が変わりました。もう一度お試しください",
+            "RETRY",
+          );
+        }
       }
       const becameUndeliverable =
         input.deliveryStatus === "returned_undeliverable" && currentDeliveryStatus !== "returned_undeliverable";
