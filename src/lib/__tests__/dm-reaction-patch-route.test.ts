@@ -73,6 +73,10 @@ vi.mock("@/lib/dm-reaction/sync", () => ({
   syncSaleDmReaction: vi.fn(),
 }));
 
+vi.mock("@/lib/dm-reaction/reconcile", () => ({
+  reconcileLegacySaleDmLog: vi.fn(),
+}));
+
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     propertyDmLog: {
@@ -97,6 +101,7 @@ import {
 } from "@/lib/property-record-guard";
 import { lockOwnersForUpdate } from "@/lib/dm-batch/locks";
 import { syncSaleDmReaction } from "@/lib/dm-reaction/sync";
+import { reconcileLegacySaleDmLog } from "@/lib/dm-reaction/reconcile";
 import { writeAuditLog } from "@/lib/audit";
 import { sanitizeAuditDetail } from "@/lib/audit-log-detail-safety";
 import { PATCH } from "../../app/api/properties/[id]/dm-logs/[logId]/reaction/route";
@@ -273,6 +278,30 @@ describe("PATCH .../dm-logs/[logId]/reaction(手動反響)", () => {
   it("通常行(draftId なし)は syncSaleDmReaction を呼ばない", async () => {
     await PATCH(patchRequest({ status: "replied" }), ctx);
     expect(syncSaleDmReaction).not.toHaveBeenCalled();
+    expect(reconcileLegacySaleDmLog).not.toHaveBeenCalled();
+  });
+
+  it("旧 sale_dm 行(draftId なし)は照合フォールバックを再適用・Owner ロックも取る", async () => {
+    const sentAt = new Date("2026-07-01T00:00:00Z");
+    pm.propertyDmLog.findFirst.mockResolvedValue(
+      baseLog({ method: "sale_dm", draftId: null, sentAt }),
+    );
+    const res = await PATCH(patchRequest({ status: "no_response" }), ctx);
+    expect(res.status).toBe(200);
+    // 照合が terminal(宛先不明)を書き得るため、非 terminal の手動保存でも Owner を先にロック
+    expect(lockOwnersForUpdate).toHaveBeenCalled();
+    expect(reconcileLegacySaleDmLog).toHaveBeenCalledWith(expect.anything(), {
+      id: LOG_ID,
+      propertyId: PROP_ID,
+      sentAt,
+    });
+    expect(syncSaleDmReaction).not.toHaveBeenCalled();
+    // 手動保存 → 照合の順
+    expect(
+      pm.propertyDmLog.update.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(reconcileLegacySaleDmLog).mock.invocationCallOrder[0],
+    );
   });
 
   it("undeliverable 連動: dmStatus=no_send + dmUndeliverableAt(親行ロック保持中)", async () => {

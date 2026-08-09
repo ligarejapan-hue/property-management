@@ -22,6 +22,10 @@ import {
   applyManualReaction,
 } from "@/lib/dm-reaction/core";
 import { syncSaleDmReaction, type ReactionSyncTx } from "@/lib/dm-reaction/sync";
+import {
+  reconcileLegacySaleDmLog,
+  type LegacyReconcileTx,
+} from "@/lib/dm-reaction/reconcile";
 import { lockOwnersForUpdate, type RawTx } from "@/lib/dm-batch/locks";
 
 // ---------- PATCH /api/properties/:id/dm-logs/:logId/reaction ----------
@@ -93,6 +97,7 @@ export async function PATCH(
           id: true,
           ownerId: true,
           draftId: true,
+          method: true,
           logOwners: { select: { ownerId: true } },
         },
       });
@@ -101,9 +106,13 @@ export async function PATCH(
       }
 
       // 順序規約(R47): Owner(FOR UPDATE・id順)→物件親行→子行。terminal を書くとき、
-      // またはブリッジ行(同期の再導出が terminal を書き得る)は Owner を先にロックする。
-      // 非 terminal の通常行はロック不要(ホットパス維持)。
-      if (isTerminalReaction(body.status) || pre.draftId != null) {
+      // またはブリッジ行/旧 sale_dm 行(再導出・照合が terminal を書き得る)は Owner を
+      // 先にロックする。非 terminal の通常行はロック不要(ホットパス維持)。
+      if (
+        isTerminalReaction(body.status) ||
+        pre.draftId != null ||
+        pre.method === "sale_dm"
+      ) {
         const ownerIds = [
           ...(pre.ownerId ? [pre.ownerId] : []),
           ...pre.logOwners.map((o) => o.ownerId),
@@ -118,6 +127,8 @@ export async function PATCH(
         select: {
           id: true,
           draftId: true,
+          method: true,
+          sentAt: true,
           reactionStatus: true,
           reactedAt: true,
           reactionNote: true,
@@ -151,8 +162,15 @@ export async function PATCH(
       });
 
       // ブリッジ行は保存直後に同一 tx で再導出(draft 側に証拠があれば優先規則で戻る)。
+      // 旧 sale_dm 行(draftId なし)は照合の保守的フォールバックを再適用(Task 6 共用)。
       if (fresh.draftId != null) {
         await syncSaleDmReaction(tx as unknown as ReactionSyncTx, fresh.draftId);
+      } else if (fresh.method === "sale_dm") {
+        await reconcileLegacySaleDmLog(tx as unknown as LegacyReconcileTx, {
+          id: logId,
+          propertyId,
+          sentAt: fresh.sentAt,
+        });
       }
 
       // 物件の宛先不明フラグは「再導出後の最終状態」に連動させる。
