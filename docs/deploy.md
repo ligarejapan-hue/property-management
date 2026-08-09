@@ -581,12 +581,21 @@ sudo -u postgres pg_dump -Fc property_management > /root/pre-reconcile-$(date +%
 ```
 
 戻すとき（`property_dm_logs` の反響列＋`draft_id` だけを実行前の値に書き戻す。手動反響・
-shadow 含め完全に戻る。全体復元より影響範囲が小さい）:
+shadow 含め完全に戻る。全体復元より影響範囲が小さい）。⚠**巻き戻しは apply の検証で異常を
+見つけた直後に行う**。新サービスは稼働中のため、スナップショット後にも正規の反響更新
+（LP アクセス・返戻・手動編集）が入り得る＝時間が経つほど正規の更新と混ざる。安全のため
+（1）**巻き戻し中はサービスを停止**して書き込みを静止し、（2）**apply 完了時刻より後に更新された
+行はスキップ**する（`updated_at` ガード。その行は新しい正規の状態を保つ）:
 
 ```bash
+# 巻き戻し中の書き込みを止める(quiesce)
+sudo systemctl stop property-management
+
 sudo -u postgres createdb pm_undo
 sudo -u postgres pg_restore -d pm_undo /root/pre-reconcile-YYYYMMDD.dump
 sudo -u postgres psql -d pm_undo -c "\copy (SELECT id, draft_id, reaction_status, reacted_at, reaction_note, reaction_source, manual_reaction_shadow FROM property_dm_logs WHERE method='sale_dm') TO '/tmp/pm-undo.csv' CSV"
+# <APPLY_END_UTC> は --apply 完了時刻(UTC・例 2026-08-12 03:15:00)。これより後に
+# 更新された行=apply 後の正規の反響更新が入った行は書き戻さない。
 sudo -u postgres psql -d property_management <<'SQL'
 CREATE TEMP TABLE undo_rows (id uuid, draft_id uuid, reaction_status text, reacted_at timestamp, reaction_note text, reaction_source text, manual_reaction_shadow jsonb);
 \copy undo_rows FROM '/tmp/pm-undo.csv' CSV
@@ -594,14 +603,19 @@ UPDATE property_dm_logs t
 SET draft_id = u.draft_id, reaction_status = u.reaction_status, reacted_at = u.reacted_at,
     reaction_note = u.reaction_note, reaction_source = u.reaction_source,
     manual_reaction_shadow = u.manual_reaction_shadow
-FROM undo_rows u WHERE t.id = u.id;
+FROM undo_rows u
+WHERE t.id = u.id
+  AND t.updated_at <= '<APPLY_END_UTC>'::timestamp;
 SQL
 sudo -u postgres dropdb pm_undo && sudo rm -f /tmp/pm-undo.csv
+
+sudo systemctl start property-management
 ```
 
-運用前提: 照合は**本番反映直後（手動の反響入力が始まる前）に1回だけ**実行する。この時点で
-実行すれば、上書きされ得る手動値がそもそも存在しない。コード自体を旧版に戻す場合は反響列は
-読まれなくなるため、DB の巻き戻しは必須ではない。
+運用前提: 照合は**本番反映直後（手動の反響入力が始まる前）に1回だけ**実行し、dry-run と apply の
+件数比較・履歴表示の確認までをその場で終える（巻き戻すなら即座に）。この時点で実行すれば、
+上書きされ得る手動値がそもそも存在しない。コード自体を旧版に戻す場合は反響列は読まれなく
+なるため、DB の巻き戻しは必須ではない。
 
 ---
 
