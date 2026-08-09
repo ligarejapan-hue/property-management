@@ -27,6 +27,7 @@ import {
 import {
   lockOwnersForShare,
   lockPropertiesForShare,
+  sortUniqueIds,
   type RawTx,
 } from "@/lib/dm-batch/locks";
 
@@ -316,6 +317,8 @@ export async function POST(request: NextRequest) {
     }
 
     const batchId = randomUUID();
+    let excludedTerminalCount = 0;
+    let savedRowCount = items.length;
     try {
       await prisma.$transaction(async (tx) => {
         const rawTx = tx as unknown as RawTx;
@@ -359,19 +362,67 @@ export async function POST(request: NextRequest) {
             "RETRY",
           );
         }
+        // 拒否・宛先不明(terminal反響)の付いた宛先グループは控え作成時に除外する
+        // (@codex #366 R4 P1)。DL時の検査(2)だけだと、拒否(物件の dmStatus を変えない)を
+        // 含む検索条件は再出力しても同じ宛先を含み続け、恒久的に 409 で出力不能になる。
+        // 所有者横断(代表 owner_id+共有者連関 log_owners の両経路)+所有者紐づけの無い
+        // terminal 記録(個別記録の拒否など)は物件単位(#366 R6)。Owner FOR SHARE
+        // 保持中に読む=terminal writer(Owner FOR UPDATE)と直列化(R47)。
+        const allOwnerIds = sortUniqueIds(items.flatMap((it) => it.groupOwnerIds));
+        const allPropertyIds = sortUniqueIds(items.map((it) => it.propertyId));
+        const terminalOwnerIds = new Set<string>();
+        const terminalPropertyIds = new Set<string>();
+        if (allOwnerIds.length > 0 || allPropertyIds.length > 0) {
+          const terminalLogs = await tx.propertyDmLog.findMany({
+            where: {
+              reactionStatus: { in: ["refused", "undeliverable"] },
+              OR: [
+                { ownerId: { in: allOwnerIds } },
+                { logOwners: { some: { ownerId: { in: allOwnerIds } } } },
+                {
+                  propertyId: { in: allPropertyIds },
+                  ownerId: null,
+                  logOwners: { none: {} },
+                },
+              ],
+            },
+            select: {
+              ownerId: true,
+              propertyId: true,
+              logOwners: { select: { ownerId: true } },
+            },
+          });
+          for (const log of terminalLogs) {
+            if (log.ownerId || log.logOwners.length > 0) {
+              if (log.ownerId) terminalOwnerIds.add(log.ownerId);
+              for (const lo of log.logOwners) terminalOwnerIds.add(lo.ownerId);
+            } else if (log.propertyId) {
+              terminalPropertyIds.add(log.propertyId);
+            }
+          }
+        }
+        const survivingItems = items.filter(
+          (it) =>
+            !terminalOwnerIds.has(it.ownerId) &&
+            !it.groupOwnerIds.some((oid) => terminalOwnerIds.has(oid)) &&
+            !terminalPropertyIds.has(it.propertyId),
+        );
+        excludedTerminalCount = items.length - survivingItems.length;
+        savedRowCount = survivingItems.length;
+
         await tx.dmExportBatch.create({
           data: {
             id: batchId,
             dmType: "owner_address",
             filters: filtersForLog,
-            rowCount: items.length,
+            rowCount: survivingItems.length,
             createdBy: session.id,
             attemptKey: body.attemptKey,
           },
         });
-        if (items.length > 0) {
+        if (survivingItems.length > 0) {
           await tx.dmExportBatchItem.createMany({
-            data: items.map((it, index) => ({
+            data: survivingItems.map((it, index) => ({
               id: it.id,
               batchId,
               // 検索の並び順を保存(CSV は常にこの順で描画する=#364 R5)。
@@ -381,7 +432,7 @@ export async function POST(request: NextRequest) {
             })),
           });
           await tx.dmExportBatchItemOwner.createMany({
-            data: items.flatMap((it) =>
+            data: survivingItems.flatMap((it) =>
               it.groupOwnerIds.map((ownerId) => ({ itemId: it.id, ownerId })),
             ),
             skipDuplicates: true,
@@ -444,7 +495,8 @@ export async function POST(request: NextRequest) {
       targetId: batchId,
       detail: {
         batchId,
-        count: items.length,
+        count: savedRowCount,
+        excludedTerminal: excludedTerminalCount,
         reused: false,
         createdAt: new Date().toISOString(),
       },
@@ -452,9 +504,11 @@ export async function POST(request: NextRequest) {
 
     return apiResponse({
       batchId,
-      rowCount: items.length,
+      rowCount: savedRowCount,
       skippedCount,
       skippedAddressMissingCount,
+      // 拒否・宛先不明の反響で自動除外した宛先数(UI が平易な文言で表示する)
+      excludedTerminalCount,
       reused: false,
       mailablePropertyCount,
     });

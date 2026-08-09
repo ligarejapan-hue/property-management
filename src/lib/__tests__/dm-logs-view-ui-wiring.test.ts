@@ -67,3 +67,52 @@ describe("dm-logs-view: 表示強化と個別記録UI", () => {
     expect(VIEW).toMatch(/max=\{todayJst\(\)\}/);
   });
 });
+
+describe("dm-logs-view: 反響の表示と入力(PR-B・設計§3)", () => {
+  it("GET が反響4項目を返し view の型に載っている", () => {
+    expect(ROUTE).toMatch(/reactionStatus: log\.reactionStatus/);
+    expect(ROUTE).toMatch(/reactionSource: log\.reactionSource/);
+    // reactionNote は note と同じ表示レベルでマスク
+    expect(ROUTE).toMatch(
+      /reactionNote: maskValue\(log\.reactionNote, ownerDisplayConfig\.note\)/,
+    );
+    expect(VIEW).toMatch(/reactionStatus: string/);
+  });
+
+  it("「反響」列があり REACTION_LABELS の日本語ラベルで表示(生値の英字を出さない)", () => {
+    expect(VIEW).toContain("反響");
+    expect(VIEW).toMatch(/REACTION_LABELS/);
+  });
+
+  it("編集は api-client(updatePropertyDmLogReaction)経由+canWrite ゲート", () => {
+    expect(VIEW).toMatch(/updatePropertyDmLogReaction\(propertyId,/);
+  });
+
+  it("売却DM由来(ブリッジ行)も編集可・同期由来は(自動)表示", () => {
+    // 反響編集ボタンは log.deletable でなく canWrite で出す(サーバが優先規則で解決)
+    expect(VIEW).toMatch(/sale_dm_sync/);
+    expect(VIEW).toContain("(自動)");
+  });
+
+  it("宛先不明の影響を平易な日本語で説明している", () => {
+    expect(VIEW).toContain("宛先不明");
+    expect(VIEW).toMatch(/対象から外/);
+  });
+});
+
+describe("dm-logs-view: メモのマスク往復防止(#366 R2/R3)", () => {
+  it("メモは空で開始+「メモを消す」明示チェック(note: null 送信)", () => {
+    // マスク表示値をフォームに流し込まない(実メモをマスク値で潰さない)
+    expect(VIEW).not.toMatch(/useState\(log\.reactionNote/);
+    expect(VIEW).toContain("メモを消す");
+    expect(VIEW).toMatch(/\{ note: null \}/);
+  });
+});
+
+describe("dm-logs-view: 反響メモのフィールドレベル権限(#366 R10)", () => {
+  it("owner_note の edit/full が無いユーザーにはメモ入力を出さない(サーバも403)", () => {
+    expect(VIEW).toMatch(/owner_note/);
+    expect(VIEW).toMatch(/canWriteNote/);
+    expect(VIEW).toMatch(/\{canWriteNote && \(/);
+  });
+});

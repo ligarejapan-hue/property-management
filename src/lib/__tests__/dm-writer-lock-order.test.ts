@@ -94,3 +94,79 @@ describe("DM writer のロック順序(Owner→親→子)", () => {
     expect(src).toMatch(/ORDER BY id FOR UPDATE/);
   });
 });
+
+describe("DM 反響 writer のロック順序(PR-B・R47: terminal は Owner FOR UPDATE 先頭)", () => {
+  it("手動反響 PATCH: 先読み→Owner FOR UPDATE→親行→更新→再導出", () => {
+    const tx = firstTx(
+      read("src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts"),
+    );
+    assertOrder("reaction PATCH", tx, [
+      "tx.propertyDmLog.findFirst", // 先読み(ロックなし・所有者集合の把握)
+      "lockOwnersForUpdate",
+      "lockPropertyRecordForWrite",
+      "tx.propertyDmLog.update",
+      "syncSaleDmReaction",
+    ]);
+  });
+
+  it("outcome route: ブリッジ行先読み→Owner FOR UPDATE→親行→draft行→更新→同期", () => {
+    const tx = firstTx(
+      read("src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts"),
+    );
+    assertOrder("outcome", tx, [
+      "tx.propertyDmLog.findMany", // ブリッジ行の所有者集合の先読み
+      "lockOwnersForUpdate",
+      "lockPropertyRow",
+      "FROM dm_recipient_drafts", // draft 行 FOR UPDATE(親→子)
+      "tx.dmRecipientDraft.update",
+      "syncSaleDmReaction",
+    ]);
+  });
+
+  it("公開LP追跡: 親行ロック→draft更新→同期(allowTerminal:false=Ownerロック不要)", () => {
+    const src = read("src/lib/sale-dm-letter/tracking-record.ts");
+    // import 文を含めない: 関数本体だけで順序を検証する
+    const body = src.slice(src.indexOf("export async function recordTrackingHit"));
+    assertOrder("tracking", body, [
+      "lockPropertyRow",
+      "tx.dmRecipientDraft.update",
+      "syncSaleDmReaction",
+      "allowTerminal: false",
+    ]);
+    expect(body).not.toMatch(/lockOwnersForUpdate/);
+  });
+
+  it("同期ヘルパー: terminal は Owner FOR UPDATE→再読取→適用(変化なしはロックしない)", () => {
+    const src = read("src/lib/dm-reaction/sync.ts");
+    const body = src.slice(src.indexOf("export async function syncSaleDmReaction"));
+    assertOrder("sync", body, [
+      "changed.length === 0", // 変化なし=ロック・書込なし
+      "lockOwnersForUpdate",
+      "\n    logs = await readLogs()", // ロック後の再読取(if ブロック内の再代入)
+      "tx.propertyDmLog.update",
+    ]);
+  });
+
+  it("orphan PATCH: Owner FOR UPDATE 先頭(親行ロックは親が無いので無し)", () => {
+    const src = read("src/app/api/admin/orphan-dm-logs/[logId]/route.ts");
+    const tx = firstTx(src);
+    assertOrder("orphan PATCH", tx, [
+      "tx.propertyDmLog.findFirst",
+      "lockOwnersForUpdate",
+      "tx.propertyDmLog.update",
+    ]);
+    expect(src).not.toMatch(/lockPropertyRow|lockPropertyRecordForWrite/);
+  });
+
+  it("照合(reconcile): 行ごとの tx で Owner FOR UPDATE→物件親行→子行", () => {
+    const src = read("src/lib/dm-reaction/reconcile.ts");
+    const start = src.indexOf("export async function reconcileSaleDmReactions");
+    expect(start).toBeGreaterThan(0);
+    const body = src.slice(start);
+    assertOrder("reconcile", body, [
+      "lockOwnersForUpdate",
+      "lockPropertiesForUpdate",
+      "syncSaleDmReaction",
+    ]);
+  });
+});

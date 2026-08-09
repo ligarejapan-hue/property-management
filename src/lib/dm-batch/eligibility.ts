@@ -9,13 +9,16 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
 // 控えの items を「現在の」物件・所有者状態と突き合わせる純関数。DL両経路(初回/再試行)と
 // 確定前の検査で共通利用し、条件の食い違い(R53)を作らない。
 //   (1) record scope 欠け → 403(scopeMissingCount)
+//   (2) terminal反響(拒否/宛先不明)が付いた宛先 → 409(terminalReactionCount。
+//       代表or共有者の誰かが terminalOwnerIds(他物件も含む所有者横断の集合=R29)に
+//       含まれれば検出。控えが古いまま除外済みの相手へ郵送するのを防ぐ=R42・PR-B)
 //   (3) 送付資格: PropertyOwner リンク切れ / dmStatus!="send" / isArchived → 409(stateIssueCount)
 //   (4) owner/property 削除で null の item → 初回GETで物理削除(prunedItemIds)
 //   (6) 住所グループ再計算との完全一致 → 409(groupMismatchCount)
 //   (7) 同一物件内で同じ現在グループを指す item の重複 → 409(groupMismatchCount。
 //       名寄せで別グループだった2itemが同一グループに合流すると、CSVが同じ宛先に
 //       2通出て確定も二重記録になる=#364 R8。再出力すれば1通に畳まれる)
-// (2) terminal反響は PR-B、(5) 再送候補述語の再評価は PR-C でこの関数に追加する。
+// (5) 再送候補述語の再評価は PR-C でこの関数に追加する。
 
 export interface BatchItemForCheck {
   id: string;
@@ -55,6 +58,8 @@ export interface EligibilityResult {
   stateIssueCount: number;
   /** (6) 住所グループ再計算と不一致の item 数 → 409 */
   groupMismatchCount: number;
+  /** (2) 拒否/宛先不明の反響が付いた所有者(代表or共有者)を含む item 数 → 409(PR-B) */
+  terminalReactionCount: number;
 }
 
 type OwnerWithId = DmRowPropertyOwner & { owner: { id: string } };
@@ -63,11 +68,18 @@ export function checkBatchEligibility(
   items: BatchItemForCheck[],
   properties: Map<string, PropertyStateForCheck>,
   session: { id: string; role: string },
+  /** 拒否/宛先不明の反響を持つ所有者 id 集合(他物件も含む所有者横断=呼び出し側が
+   *  Owner FOR SHARE 保持中に propertyDmLog から構築する。省略時=検査(2)なし)。 */
+  terminalOwnerIds: ReadonlySet<string> = new Set(),
+  /** 所有者紐づけの無い terminal 記録(個別記録=ownerId null・連関0)が付いた物件 id 集合。
+   *  所有者横断はできないため物件単位で除外する(設計§4-5の限界の明示的な取り扱い=#366 R6)。 */
+  terminalPropertyIds: ReadonlySet<string> = new Set(),
 ): EligibilityResult {
   const prunedItemIds: string[] = [];
   let scopeMissingCount = 0;
   let stateIssueCount = 0;
   let groupMismatchCount = 0;
+  let terminalReactionCount = 0;
   const seenGroups = new Set<string>();
 
   for (const it of items) {
@@ -80,6 +92,16 @@ export function checkBatchEligibility(
     // (1) record scope(担当替えで欠けたら全体を配らない)
     if (!canAccessPropertyRecord(session, property)) {
       scopeMissingCount += 1;
+      continue;
+    }
+    // (2) 代表or共有者の誰かに terminal 反響(拒否/宛先不明)が付いていれば除外対象(R29/R42)。
+    // 所有者紐づけの無い terminal 記録(個別記録の拒否など)は物件単位で除外(#366 R6)。
+    if (
+      terminalOwnerIds.has(it.ownerId) ||
+      it.groupOwnerIds.some((oid) => terminalOwnerIds.has(oid)) ||
+      terminalPropertyIds.has(it.propertyId)
+    ) {
+      terminalReactionCount += 1;
       continue;
     }
     // (3) 送付可能条件は既存 export と同一の完全形(dmStatus=send かつ 未アーカイブ=R52)
@@ -120,5 +142,11 @@ export function checkBatchEligibility(
     seenGroups.add(groupKey);
   }
 
-  return { prunedItemIds, scopeMissingCount, stateIssueCount, groupMismatchCount };
+  return {
+    prunedItemIds,
+    scopeMissingCount,
+    stateIssueCount,
+    groupMismatchCount,
+    terminalReactionCount,
+  };
 }

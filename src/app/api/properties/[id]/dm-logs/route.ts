@@ -17,6 +17,7 @@ import {
 } from "@/lib/property-record-guard";
 import { writeAuditLog } from "@/lib/audit";
 import { isRealCalendarDate } from "@/lib/calendar-date";
+import { jstCalendarDay } from "@/lib/dm-reaction/core";
 
 // ---------- GET / POST /api/properties/:id/dm-logs ----------
 //
@@ -85,6 +86,10 @@ export async function GET(
           batchId: true,
           note: true,
           createdAt: true,
+          reactionStatus: true,
+          reactedAt: true,
+          reactionNote: true,
+          reactionSource: true,
           sender: { select: { id: true, name: true } },
         },
         orderBy: [{ sentAt: "desc" }, { createdAt: "desc" }],
@@ -117,6 +122,14 @@ export async function GET(
       // 単独取消不可(DELETE も 409)。UI は必ず失敗するボタンを出さない。
       deletable: log.method !== "sale_dm" && log.batchId == null,
       note: maskValue(log.note, ownerDisplayConfig.note),
+      // 反響(PR-B)。reactedAt は日付表示用の YYYY-MM-DD。同期由来は実時刻(UTC)で保存される
+      // ため JST 暦日へ変換して返す(UTC のまま切ると JST 0-9時の反響が前日表示=#366 R8。
+      // 手動入力の UTC00:00 保存も +9h で同じ暦日になる)。
+      // reactionNote は note と同じ表示レベルで server-side マスク。
+      reactionStatus: log.reactionStatus,
+      reactedAt: log.reactedAt ? jstCalendarDay(log.reactedAt) : null,
+      reactionNote: maskValue(log.reactionNote, ownerDisplayConfig.note),
+      reactionSource: log.reactionSource,
       sentBy: { id: log.sender.id, name: log.sender.name },
       createdAt: log.createdAt,
     }));

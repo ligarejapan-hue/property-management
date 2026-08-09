@@ -529,6 +529,102 @@ sudo systemctl status property-management --no-pager
 > `next` / `@prisma/client` は `dependencies` のため prune 後も残る。
 > （`@tailwindcss/postcss` / `tailwindcss` も build 時必須だが `dependencies` 側にあるため prune の影響を受けない。）
 
+### リリース同梱の一回限り作業（one-shot）
+
+#### 反響の記録リリース（migration `add_dm_reaction_columns`）: 旧 sale_dm 送付記録の照合
+
+この migration は既存の送付記録を全件「反応なし（no_response）」で初期化する。過去の売却DMで
+返戻・LP反響が既に付いている宛先へ反響を反映するため、**このリリースの反映時に1回だけ**
+照合スクリプトを実行する（冪等＝何度実行しても安全）。実行しないと、過去に返戻・返信のあった
+宛先が反響なし扱いのまま DM 出力の除外対象にならない。
+
+実行タイミング: **サービス再起動（ステップ7）で新コードが動き始めた後**。
+旧プロセスが動いている間に照合を先に実行すると、照合〜再起動のあいだに旧コード
+（送付記録への同期を持たない）が受けた LP アクセス・返戻の記録が draft にだけ残り、
+送付記録側が「反応なし」のまま恒久的に取り残される（新コードなら以後のイベントが同期する）。
+
+このリリースでは手順の順序を入れ替える: **ステップ5 build → ステップ7 再起動（新コードの
+稼働確認）→ サービス一時停止 → スナップショット → 照合（dry-run→apply）→ サービス再開 →
+ステップ6 `npm prune`**。`tsx` は devDependencies のため prune を照合の後に回す
+（既に prune 済みなら `npm ci --include=dev` で入れ直してから実行し、
+終わったら再度 `npm prune --omit=dev`）。
+
+⚠**スナップショット〜apply の間はサービスを停止して書き込みを静止する**（quiesce）。稼働した
+まま実行すると、スナップショットの後・apply の前に届いた正規の反響（LP アクセス・返戻・手動
+編集）が、万一の巻き戻しで一緒に消えてしまう（下記ロールバックの `updated_at` ガードでも
+この区間は守れない）。停止は数分・停止中は公開 LP 転送(`/t/`)も止まる点は許容する。
+
+```bash
+cd /opt/property-management
+set -a && source /etc/property-management/app.env && set +a
+
+# 0. 新プロセスの稼働を確認してから、照合ウィンドウの書き込みを静止する
+sudo systemctl is-active property-management
+sudo systemctl stop property-management
+
+# 1. 実行前スナップショット（唯一の完全な巻き戻し手段・--apply 前に必ず取得）
+sudo -u postgres pg_dump -Fc property_management > /root/pre-reconcile-$(date +%Y%m%d).dump
+
+# 2. 事前確認（dry-run・書き込みなし・件数レポートのみ）
+sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm \
+  npx tsx scripts/reconcile-sale-dm-reactions.ts
+
+# 3. 実書込
+sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm \
+  npx tsx scripts/reconcile-sale-dm-reactions.ts --apply
+
+# 4. サービス再開
+sudo systemctl start property-management
+```
+
+検証: `--apply` の件数レポート（対象／ブリッジ済み同期／新規対応付け／保守的付与／対応付けなし）が
+dry-run と一致すること。反映後、物件詳細の「DM 送付履歴」で過去の売却DM行に反響
+（連絡あり／宛先不明）が表示される。
+
+ロールバック: 冪等＝**再実行が安全**という意味であり、**再実行は取り消しにはならない**
+（一意一致で書いた `draft_id` は残り以後そのまま同期される／曖昧行への保守的付与は証拠が
+消えても残る）。また「現在の列値を条件にした初期化 SQL」も安全な巻き戻しには**ならない**
+（同期が手動反響を上書きした行は手動値が `manual_reaction_shadow` にしか残っておらず初期化で
+消える／`cleared` 導出で `draft_id` だけ書かれた行は `reaction_source` が null のまま＝source では
+拾えない）。**巻き戻しは実行前スナップショット（上記手順1で取得済み）からの復元のみを正とする**。
+
+戻すとき（`property_dm_logs` の反響列＋`draft_id` だけを実行前の値に書き戻す。手動反響・
+shadow 含め完全に戻る。全体復元より影響範囲が小さい）。⚠**巻き戻しは apply の検証で異常を
+見つけた直後に行う**。スナップショット〜apply は上記のとおり書き込み停止中に行うため、この
+区間に正規の更新は存在しない。サービス再開後に入った正規の反響更新（LP アクセス・返戻・手動
+編集）を守るため、（1）**巻き戻し中もサービスを停止**して書き込みを静止し、（2）**apply 完了時刻
+より後に更新された行はスキップ**する（`updated_at` ガード。その行は新しい正規の状態を保つ）:
+
+```bash
+# 巻き戻し中の書き込みを止める(quiesce)
+sudo systemctl stop property-management
+
+sudo -u postgres createdb pm_undo
+sudo -u postgres pg_restore -d pm_undo /root/pre-reconcile-YYYYMMDD.dump
+sudo -u postgres psql -d pm_undo -c "\copy (SELECT id, draft_id, reaction_status, reacted_at, reaction_note, reaction_source, manual_reaction_shadow FROM property_dm_logs WHERE method='sale_dm') TO '/tmp/pm-undo.csv' CSV"
+# <APPLY_END_UTC> は --apply 完了時刻(UTC・例 2026-08-12 03:15:00)。これより後に
+# 更新された行=apply 後の正規の反響更新が入った行は書き戻さない。
+sudo -u postgres psql -d property_management <<'SQL'
+CREATE TEMP TABLE undo_rows (id uuid, draft_id uuid, reaction_status text, reacted_at timestamp, reaction_note text, reaction_source text, manual_reaction_shadow jsonb);
+\copy undo_rows FROM '/tmp/pm-undo.csv' CSV
+UPDATE property_dm_logs t
+SET draft_id = u.draft_id, reaction_status = u.reaction_status, reacted_at = u.reacted_at,
+    reaction_note = u.reaction_note, reaction_source = u.reaction_source,
+    manual_reaction_shadow = u.manual_reaction_shadow
+FROM undo_rows u
+WHERE t.id = u.id
+  AND t.updated_at <= '<APPLY_END_UTC>'::timestamp;
+SQL
+sudo -u postgres dropdb pm_undo && sudo rm -f /tmp/pm-undo.csv
+
+sudo systemctl start property-management
+```
+
+運用前提: 照合は**本番反映直後（手動の反響入力が始まる前）に1回だけ**実行し、dry-run と apply の
+件数比較・履歴表示の確認までをその場で終える（巻き戻すなら即座に）。この時点で実行すれば、
+上書きされ得る手動値がそもそも存在しない。コード自体を旧版に戻す場合は反響列は読まれなく
+なるため、DB の巻き戻しは必須ではない。
+
 ---
 
 ## 8. ロールバック手順
