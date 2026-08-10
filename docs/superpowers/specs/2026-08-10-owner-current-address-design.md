@@ -141,10 +141,16 @@ export function resolveMailingAddress(owner: {
 
 **記録する時点が2つの経路で違う**(@codex #369 R1 P1)。
 
+⚠ **出所は「所有者ごと」に持つ**(@codex #369 R3 P1)。1通は**同一送付先住所の共有者を束ねた1件**なので、**同じ住所に別々の出所からたどり着く**ことがある(所有者Aは現住所がX、所有者Bは登記上住所がX)。列を1つしか持たないと、返ってきた封筒が **Aにとっては現住所の失敗・Bにとっては登記上の失敗**という状態を表現できず、返戻の解釈が片方について必ず誤る。
+
 | 経路 | 列 | **書く時点** |
 |---|---|---|
-| 売却DM | `DmRecipientDraft.recipient_address_source` | **下書き作成時**。draft は作成時点の宛先スナップショット(`recipientZip`/`recipientAddress`)そのものなので、同じ tx で source も確定する |
-| 宛名CSV(控え方式) | `DmExportBatchItem.recipient_address_source` | ⚠**控えの作成時ではなく、初回ダウンロードの凍結時** |
+| 売却DM | **`DmRecipientDraftOwner.address_source`(所有者ごと・権威)** + `DmRecipientDraft.recipient_address_source`(代表の出所) | **下書き作成時**。draft は作成時点の宛先スナップショット(`recipientZip`/`recipientAddress`)そのものなので、同じ tx で source も確定する |
+| 宛名CSV(控え方式) | **`DmExportBatchItemOwner.address_source`(所有者ごと・権威)** + `DmExportBatchItem.recipient_address_source`(代表の出所) | ⚠**控えの作成時ではなく、初回ダウンロードの凍結時** |
+
+- **所有者ごとの列が権威**。返戻の解釈は必ずこちらを見る。
+- 代表側の1列は**連関を持たない旧行のためのフォールバック**として残す(既存設計で、移行前に作られた売却DM下書きは代表のみで連関が空)。連関がある行では代表側の値は参考情報。
+- **混在グループのテストを必須にする**(所有者Aは現住所・所有者Bは登記上で同じ住所 → 1通に畳まれ、所有者ごとの出所が別々に記録されること)。
 
 ⚠ **宛名CSV側で控え作成時に書いてはいけない理由**: `DmExportBatchItem` は控え作成(POST)の時点で作られるが、**CSV は初回ダウンロード時に所有者の現在値から作り直される**。控え作成とダウンロードの間に現住所が登録されると、**配られる CSV は現住所なのに item の記録は "registry" のまま**になり、返戻の解釈が逆になる。
 
@@ -185,7 +191,7 @@ export function resolveMailingAddress(owner: {
 |---|---|---|
 | 謄本PDF取込 (`registry-pdf/process.ts`) | **`address`/`zip`(登記上)** | 登記由来 |
 | 受付帳取込 (`import/reception-owner`) | **`address`/`zip`(登記上)** | 登記由来 |
-| 所有者CSV取込 (`import/owner-csv`) | **`address`/`zip`(登記上)** | 既存ヘッダ「住所」「郵便番号」の意味は据え置き。**新ヘッダ「現住所」「現住所郵便番号」を追加**して現住所側にも入れられるようにする |
+| 所有者CSV取込 (`import/owner-csv`) | **`address`/`zip`(登記上)** | 既存ヘッダ「住所」「郵便番号」の意味は据え置き。**新ヘッダ「現住所」「現住所郵便番号」を追加**して現住所側にも入れられるようにする。⚠下記の**3箇所すべて**を直す |
 | 取込エラー行の編集/再試行 | 同上 | ⚠ `rows/[rowId]/route.ts` と `rows/[rowId]/retry/route.ts` は**完全なコピペ重複**。片方だけ直す事故が最も起きやすい。**共通モジュールへ切り出してから**足す |
 | 住所補完 (address-fill) | **`address`(登記上)** | 取込 rawData 由来 = 登記由来 |
 | 登記文字列の除去 (registry-address-cleanup) | **`address`(登記上)** | 登記の記載にしか意味がない |
@@ -226,6 +232,16 @@ export function resolveMailingAddress(owner: {
 | `src/lib/csv-parser.ts` `OWNER_CSV_COLUMN_MAP` | 「現住所」「現住所郵便番号」ヘッダ | CSV から現住所を入れられない |
 
 ⚠ **CSV の列は末尾に追加する**。途中に挿すと既存の差込テンプレ(列位置ベース)が全部ずれる。
+
+⚠ **所有者CSV取込は「列の対応表」が2つある**(@codex #369 R3 P2)。`src/lib/csv-parser.ts` の `OWNER_CSV_COLUMN_MAP`(自動判定用)に足すだけでは取り込めない:
+
+| 直す箇所 | 内容 | 漏らすと |
+|---|---|---|
+| `src/lib/csv-parser.ts` `OWNER_CSV_COLUMN_MAP` | 新ヘッダ2つ | ヘッダ自動判定で拾われない |
+| `src/app/api/import/owner-csv/route.ts` の **route 内 `JAPANESE_FIELD_TO_PROPERTY`** | 同じ2つ | **利用者が列の対応を明示指定した取込だけ**新欄が無視される |
+| 同 route の **`createData` の明示列挙** | 新列2つを書込 | **自動判定の取込でも** `prisma.owner.create` の直前で捨てられる |
+
+テストは**「ヘッダ自動判定」と「列の対応を明示指定」の両方**で書く(片方だけだともう片方の経路が素通りする)。
 
 ## 9. migration
 
