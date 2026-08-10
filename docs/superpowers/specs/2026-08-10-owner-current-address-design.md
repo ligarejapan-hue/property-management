@@ -206,6 +206,8 @@ export function resolveMailingAddress(owner: {
 
 ⚠ **名寄せ(merge)に穴が1つ生まれる**: 現在の統合は source を archive するだけで住所を master へ移さない。新列を足すと、**現住所を持つ source を統合したときに現住所が完全に消える**(復元手段なし)。→ **統合 tx に「master が空欄なら source の `currentAddress`/`currentZip` を引き継ぐ」処理を追加する**。
 
+⚠ **その引き継ぎは変更履歴に残らない**(@codex #369 R2 P2)。統合 route は ChangeLog の行を**手で組み立てており、`recordChanges`(= `OWNER_TRACKED_FIELDS` を使う共通処理)を呼んでいない**。したがって §8 の定数に新列を足しただけでは**この経路だけ履歴が残らない**(所有者のデータが変わったのに前後が追えない)。→ **統合 tx の中で、引き継いだ2列それぞれについて ChangeLog 行を明示的に作る**(既存の手組みの並びに追加する)。
+
 ## 8. 変更履歴・権限・型
 
 | ファイル | 追加 | 漏らすと |
@@ -218,6 +220,9 @@ export function resolveMailingAddress(owner: {
 | `src/lib/validators.ts` `createOwnerSchema` / `updateOwnerSchema` | 新列2つ(**両方**) | 「新規は入るが編集で消せない」の非対称 |
 | `src/lib/owner-edit-utils.ts` | `OwnerEditableFields` / `OwnerFormValues` / `buildOwnerUpdatePayload` | 画面で入力できても保存されない(エラーも出ない) |
 | `src/lib/api-client.ts` | Owner 系レスポンス型 | 画面で受け取れない |
+| **`src/app/api/properties/[id]/route.ts`** の **GET と PATCH 両方**の owner `select` | 新列2つ | ⚠**登録済みの現住所が画面に出ず、編集フォームが空のまま保存して現住所を消す**(@codex #369 R2 P2)。所有者カードはこの応答で初期化される |
+
+⚠ **所有者を返す「明示 select」は他にもある**。実装時に `select` の中に `address: true` を含む箇所を**全部 grep して洗い出し**、同じ2列を足す(既知: 物件詳細 GET/PATCH・宛名CSV・売却DM キャンペーン作成)。**select 漏れは無言の劣化**(型は optional で通り、現住所が常に undefined → 登記上へフォールバックし続ける)。
 | `src/lib/csv-parser.ts` `OWNER_CSV_COLUMN_MAP` | 「現住所」「現住所郵便番号」ヘッダ | CSV から現住所を入れられない |
 
 ⚠ **CSV の列は末尾に追加する**。途中に挿すと既存の差込テンプレ(列位置ベース)が全部ずれる。
@@ -233,7 +238,21 @@ ALTER TABLE "dm_recipient_drafts" ADD COLUMN "recipient_address_source" TEXT;
 ALTER TABLE "dm_export_batch_items" ADD COLUMN "recipient_address_source" TEXT;
 ```
 
-- 既存行は全て NULL = 現住所未設定 = **従来どおりの動作**(既存データへの影響ゼロ)。
+**⚠ ただし `recipient_address_source` は NULL のままにしない**(@codex #369 R2 P2)。
+
+```sql
+-- 既存のDM記録は、現住所の列が存在しなかった時期に作られた = 必ず登記上の住所で送っている
+UPDATE "dm_recipient_drafts"   SET "recipient_address_source" = 'registry' WHERE "recipient_address_source" IS NULL;
+UPDATE "dm_export_batch_items" SET "recipient_address_source" = 'registry'
+  WHERE "recipient_address_source" IS NULL
+    AND "batch_id" IN (SELECT "id" FROM "dm_export_batches" WHERE "downloaded_at" IS NOT NULL);
+```
+
+理由:
+- 過去の返戻(宛先不明)を後から見たときに **source が無いと解釈できない**。既存分は定義上すべて登記上なので、そう埋めるのが事実に一致する。
+- ⚠**既にダウンロード済みで未確定の控えが残っていると、確定 route は `downloadedAt` しか見ない**ため §4.2 の「初回DLの凍結時に書く」を通らずに確定されてしまう。**ダウンロード済みの item を `registry` で埋めることでこの窓を塞ぐ**(埋めた値は事実と一致する)。未ダウンロードの item は NULL のままでよい(これから凍結時に書かれる)。
+
+- owners の新2列は既存行すべて NULL = 現住所未設定 = **従来どおりの動作**(既存データへの影響ゼロ)。
 - enum は作らない(TEXT + アプリ側 allowlist。#361 と同方針)。
 - 索引は張らない(現住所での検索・絞り込みは表示レベルが生値のときの `contains` 検索のみで、既存の `address` にも索引は無い)。
 
