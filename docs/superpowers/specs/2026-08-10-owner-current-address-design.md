@@ -175,6 +175,10 @@ export function resolveMailingAddress(owner: {
 
 ⚠ **売却DMの `mark-sent` も同じことをする**(@codex #369 R5 P2)。`src/app/api/properties/sale-dm/drafts/[id]/mark-sent/route.ts` は draft から `PropertyDmLog` と `PropertyDmLogOwner` を**直接**作っており、宛名CSVの確定とは別経路。ここを直さないと**売却DM由来の記録だけ出所が空**になり、履歴画面に出せない。draft と draft_owners の出所をコピーする(単一出所と混在出所の両方をテスト)。
 
+⚠ **連関を持たない旧下書きは、合成する連関行に「親の出所」を写す**(@codex #369 R8 P2)。`mark-sent` は、下書きに `draftOwners` が無いとき **代表所有者ぶんの `PropertyDmLogOwner` を合成**する既存挙動を持つ。`draft_owners` からコピーするだけだとこの行は空のままで、**§4.2 が「連関があればそれが権威」と決めている以上、親にバックフィルした `registry` は参照されず「出所不明」になる**。→ **合成する行には下書き側(親)の出所をコピーする**。
+
+> **本番実測(2026-08-10)**: 売却DMの下書きは **50件あり、その全件が連関なし**(`dm_recipient_draft_owners` は0行)・全件に宛先住所あり・送付済みは0件。つまり**この旧経路が現時点の本番の既定**であって、例外処理ではない。**連関が空の旧下書きのテストを必ず書く**。
+
 ⚠ **`mark-sent` は住所そのもの(§4.5)もコピーする**(@codex #369 R6 P1)。「draft を見ればよい」は成り立たない: **物件を削除すると draft は Cascade で消える**のに、`PropertyDmLog` は `propertyId=null` で**意図的に残す**設計。draft から読む前提だと、その孤児ログでは**実際に刷った住所が失われる**。→ `mark-sent` の同一 tx で `recipientZip`/`recipientAddress` を `deliveryZip`/`deliveryAddress` へコピーし、**物件削除後の孤児ログでも住所が残ることをテストする**。
 
 ### 4.5 ⚠**実際に刷った住所そのものを控える**(既存方針の変更を含む)
@@ -361,6 +365,23 @@ UPDATE "dm_export_batch_item_owners" SET "address_source" = 'registry'
       WHERE b."downloaded_at" IS NOT NULL
     );
 ```
+
+**実際に刷った住所も、分かるものは埋める**(@codex #369 R8 P2)。売却DM由来のログ(`draft_id` あり)は、印刷した宛先が下書きに残っている:
+
+```sql
+UPDATE "property_dm_logs" l
+   SET "delivery_zip"     = d."recipient_zip",
+       "delivery_address" = d."recipient_address"
+  FROM "dm_recipient_drafts" d
+ WHERE d."id" = l."draft_id"
+   AND l."delivery_address" IS NULL;
+```
+
+埋めないと、**その後に物件を削除した時点で下書きが消えて住所が復元不能**になる(ログは残す設計なので、履歴に宛先が出ない行が永久に残る)。
+
+**ダウンロード済みで未確定の控えの扱い**(@codex #369 R8 P2): この migration より前にダウンロードされた控えは `downloadedAt` が既に立っているため、**§4.5 の「初回DLで住所を控える」を通らない**。そのまま確定すると **NULL のままログへ写り、実際に配ったCSVの宛先が失われる**。→ **反映時に残っていれば「再出力してください」として無効化する**(`downloadedAt` と `csvDigest` を消して未DL状態へ戻す。控えの意味は「配った集合の凍結」なので、住所を控えていない控えは凍結として不完全)。
+
+> **本番実測(2026-08-10)**: 控え0件・ダウンロード済み未確定0件・送付記録0件。**現時点では上の2つはいずれも対象ゼロ**だが、反映日までに増える可能性があるため手順として残す。⚠**反映の直前にもう一度数える**。
 
 ⚠ **連関(所有者ごと)のバックフィルを忘れない**(@codex #369 R4 P1)。§4.2 で所有者ごとの値を**権威**と決めた以上、既存の連関行が NULL のままだと、**親のフォールバックは連関がある行では参照しない規則**に従って「出所不明」になる。
 
