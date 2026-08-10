@@ -459,6 +459,13 @@ export function resolveMailingAddress(owner: {
 | `src/app/api/import/reception-owner/route.ts` の **upsert(空欄補完 + create)** | §6 のとおり現住所は現住所側へ |
 | ⚠ `reception-owner/route.ts` が `rawData.__owner_link_data` へ**書き出す内容** | 現在は `name`/`address`/`zip` **だけ**。現住所のペアを**足す**(@codex #369 R22 P1) |
 | ⚠ `RecoveredOwner` 型と `manual-link-reception-owner/route.ts` の **create/update** | 同上。**要確認(needs_review)になった行を後から手で紐づけたとき**、所有者はこの控えからしか復元されない |
+| ⚠ **`parseSheet` の `formattedTextHeaders`**(プレビューと本取込の**両方**) | **郵便番号の2列(登記上・現住所)を必ず渡す**(@codex #369 R28 P1) |
+
+⚠ **Excel の取込で郵便番号の先頭のゼロが消える**(@codex #369 R28 P1)。ペア取込のファイルが XLSX で、`現住所郵便番号` のセルが**数値**(表示形式で `060-0001` と見えているだけ)の場合、`sheet-parser.ts` は**生の数値**を読むため **`600001`** になる。ペア取込の2つの route は **`parseSheet` に `formattedTextHeaders` を渡していない**ので、ヘッダの対応表と解析器をいくら直しても**この壊れ方は残る**。
+
+→ **プレビューと本取込の両方の `parseSheet` に、郵便番号の2列(登記上・現住所)を `formattedTextHeaders` として渡す**(表示されているとおりの文字列で読む)。
+
+⚠ **入れ直しでは全件に効く**: 先頭が `0` の郵便番号(北海道 `0xx`・東京の一部 `1xx` 以外にも多数)が**まとめて壊れた状態で保存される**。**先頭ゼロの現住所郵便番号を端から端まで通すテスト**を必ず書く。
 
 ⚠ **「既存の所有者に寄せる」で解決した行でも現住所が落ちる**(@codex #369 R26 P1)。所有者CSVの行が**氏名+登記上住所で既存の所有者に一致**すると `needs_review` になり、担当者は `rows/[rowId]/route.ts` の **`link_existing`(既存の所有者を選ぶ)** で解決する。この経路は**選んだ所有者のIDを記録するだけで、CSVの項目を一切適用しない**ため、**重複として解決した行の現住所は毎回捨てられる**。
 
