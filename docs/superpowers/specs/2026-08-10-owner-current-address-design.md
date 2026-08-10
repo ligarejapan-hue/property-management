@@ -172,6 +172,31 @@ export function resolveMailingAddress(owner: {
 
 → **確定(confirm)の時点で、item と item_owners の出所を `PropertyDmLog` / `PropertyDmLogOwner` へコピーする**(§9 の列追加)。遡る必要がなくなり、履歴の表示も返戻の判断もログだけで完結する。
 
+⚠ **売却DMの `mark-sent` も同じことをする**(@codex #369 R5 P2)。`src/app/api/properties/sale-dm/drafts/[id]/mark-sent/route.ts` は draft から `PropertyDmLog` と `PropertyDmLogOwner` を**直接**作っており、宛名CSVの確定とは別経路。ここを直さないと**売却DM由来の記録だけ出所が空**になり、履歴画面に出せない。draft と draft_owners の出所をコピーする(単一出所と混在出所の両方をテスト)。
+
+### 4.5 ⚠**実際に刷った住所そのものを控える**(既存方針の変更を含む)
+
+@codex #369 R5 P1: 出所の区分(現住所/登記上)だけでは足りない。**ダウンロード後に所有者の住所が訂正されると、実際に刷って郵送した住所がどこにも残らない**(csvDigest はハッシュなので復元不能)。返戻が来たとき、担当者が**訂正後の新しい現住所を「返ってきた住所」と取り違える**。
+
+→ **初回ダウンロードの凍結時に、解決後の郵便番号と住所そのものを控える**。確定時にログへ引き継ぐ。
+
+```sql
+ALTER TABLE "dm_export_batch_items" ADD COLUMN "delivery_zip" TEXT;
+ALTER TABLE "dm_export_batch_items" ADD COLUMN "delivery_address" TEXT;
+ALTER TABLE "property_dm_logs"      ADD COLUMN "delivery_zip" TEXT;
+ALTER TABLE "property_dm_logs"      ADD COLUMN "delivery_address" TEXT;
+```
+
+⚠ **これは既存の設計判断を変更する**([[dm-sending-management]] §2.1「CSV の中身(氏名・住所)は保存しない。控えは propertyId/代表 ownerId のみ=非PII寄りの最小構成」)。変更する理由:
+
+- 保存するのは**氏名ではなく住所のみ**、かつ**実際に郵送した事実の記録**である(送る前の控えではない。凍結＝ダウンロード後にだけ入る)。
+- 売却DM側は**既に同じものを保存している**(`DmRecipientDraft.recipientZip`/`recipientAddress`)。宛名CSV側だけ保存しないのは非対称で、同じ返戻の判断ができない。
+- 保存しないと、**訂正のたびに過去の郵送先が失われる**。返戻の解釈は「その時どこへ送ったか」がすべてなので、これが無いと機能自体が成り立たない。
+
+⚠ **表示は `owner_address` の表示レベルでマスクする**(生の住所を権限の無い利用者に出さない)。⚠ 未ダウンロードの item には入らない(凍結前は郵送していない)。
+
+**テスト**: ダウンロード → 所有者の住所を訂正 → 確定 → 履歴に**訂正前の(実際に刷った)住所**が出ること。
+
 読む/見せる箇所:
 
 | 画面・API | 表示 |
@@ -283,7 +308,15 @@ ALTER TABLE "dm_export_batch_item_owners" ADD COLUMN "address_source" TEXT;
 -- ⚠確定した送付記録にも持たせる(§4.4)
 ALTER TABLE "property_dm_logs"       ADD COLUMN "address_source" TEXT;
 ALTER TABLE "property_dm_log_owners" ADD COLUMN "address_source" TEXT;
+
+-- ⚠実際に刷った住所そのもの(§4.5)。凍結時に控え、確定でログへ引き継ぐ
+ALTER TABLE "dm_export_batch_items" ADD COLUMN "delivery_zip" TEXT;
+ALTER TABLE "dm_export_batch_items" ADD COLUMN "delivery_address" TEXT;
+ALTER TABLE "property_dm_logs"      ADD COLUMN "delivery_zip" TEXT;
+ALTER TABLE "property_dm_logs"      ADD COLUMN "delivery_address" TEXT;
 ```
+
+⚠ **手渡し等の個別記録(`POST /api/properties/[id]/dm-logs`)は対象外**(@codex #369 R5 P1)。この経路は `ownerId`・`dmType`・`batchId`・`draftId` をすべて null で作り、方法も「手渡し」等が入る=**そもそも所有者の登録住所へ送っていない**。ここを `registry` で埋めると、履歴画面に**嘘の「登記上の住所へ送付」**が出る。NULL のまま(=出所の記録なし)にして、画面でも何も出さない。
 
 **⚠ ただし `recipient_address_source` は NULL のままにしない**(@codex #369 R2 P2)。
 
@@ -291,8 +324,16 @@ ALTER TABLE "property_dm_log_owners" ADD COLUMN "address_source" TEXT;
 -- 既存のDM記録は、現住所の列が存在しなかった時期に作られた = 必ず登記上の住所で送っている
 UPDATE "dm_recipient_drafts"       SET "recipient_address_source" = 'registry' WHERE "recipient_address_source" IS NULL;
 UPDATE "dm_recipient_draft_owners" SET "address_source" = 'registry' WHERE "address_source" IS NULL;
-UPDATE "property_dm_logs"          SET "address_source" = 'registry' WHERE "address_source" IS NULL;
-UPDATE "property_dm_log_owners"    SET "address_source" = 'registry' WHERE "address_source" IS NULL;
+-- ⚠ログは「宛先が特定できる行」だけ。手渡し等の個別記録は対象外(@codex #369 R5 P1)
+UPDATE "property_dm_logs" SET "address_source" = 'registry'
+  WHERE "address_source" IS NULL
+    AND ("batch_id" IS NOT NULL OR "draft_id" IS NOT NULL OR "dm_type" = 'owner_address');
+UPDATE "property_dm_log_owners" SET "address_source" = 'registry'
+  WHERE "address_source" IS NULL
+    AND "log_id" IN (
+      SELECT "id" FROM "property_dm_logs"
+      WHERE "batch_id" IS NOT NULL OR "draft_id" IS NOT NULL OR "dm_type" = 'owner_address'
+    );
 
 -- 控え側はダウンロード済みのバッチのみ(未DLの item は凍結時に書かれる)
 UPDATE "dm_export_batch_items" SET "recipient_address_source" = 'registry'
