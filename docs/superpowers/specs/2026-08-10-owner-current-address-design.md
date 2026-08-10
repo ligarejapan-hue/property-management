@@ -98,7 +98,12 @@ DB 上は値が移動しないが、画面では指示どおりに見える:
 登記上住所     [ 横浜市南区井土ケ谷中町69-2    ]   ← 参考表示
 ```
 
-- ボタンを押した時点で、**現住所の初期値に登記上の値をコピーして開始**する(引っ越し先は多くの場合一部だけ違うため、まっさらより編集が速い)。
+- ボタンを押した時点で、**現住所の初期値に登記上の住所をコピーして開始**する(引っ越し先は多くの場合一部だけ違うため、まっさらより編集が速い)。
+- ⚠ **郵便番号はコピーしない**(@codex #369 R1 P1)。住所だけ書き換えて郵便番号が古いまま残ると、§4 の「ペアで解決する」規則が**そのズレたペアを正しい宛先として採用**し、**新しい住所に古い郵便番号を刷った郵便物**ができる。よって:
+  - 現住所の郵便番号は**空で開始**する
+  - **現住所を編集したら、現住所の郵便番号を空に戻す**(前の住所に対応した番号を残さない)
+  - `AddressLookupControls` で住所から引き直して入れる
+  - 保存時に「現住所はあるが現住所の郵便番号が空」なら**画面に注意を出す**(保存自体は妨げない。番号が分からないまま登録できないと運用が止まるため)
 - 現住所を空にして保存すれば「未設定」に戻る(= 登記上を使う状態へ戻せる)。専用の解除ボタンは作らない。
 - ⚠ **郵便番号⇄住所の自動補完(`AddressLookupControls`)は現住所側にだけ付ける**。登記上の欄に効かせると、郵便番号APIの正規化表記で**登記の記載を書き換えて**しまい、謄本との突合が壊れる。
 
@@ -132,10 +137,24 @@ export function resolveMailingAddress(owner: {
 
 ### 4.2 どちらの住所で送ったかを残す
 
-`DmRecipientDraft` に `recipient_address_source TEXT?`("current"/"registry")を additive で追加する。
 理由: 返戻(宛先不明)が来たとき、**登記上へ送って返ってきたのか、現住所へ送って返ってきたのか**で意味がまったく違う(前者は現住所を入れれば送れる/後者は現住所も誤り)。残さないと業務判断ができない。
 
-宛名CSV(控え方式)側は `DmExportBatchItem` に同じ列を持たせる。
+**記録する時点が2つの経路で違う**(@codex #369 R1 P1)。
+
+| 経路 | 列 | **書く時点** |
+|---|---|---|
+| 売却DM | `DmRecipientDraft.recipient_address_source` | **下書き作成時**。draft は作成時点の宛先スナップショット(`recipientZip`/`recipientAddress`)そのものなので、同じ tx で source も確定する |
+| 宛名CSV(控え方式) | `DmExportBatchItem.recipient_address_source` | ⚠**控えの作成時ではなく、初回ダウンロードの凍結時** |
+
+⚠ **宛名CSV側で控え作成時に書いてはいけない理由**: `DmExportBatchItem` は控え作成(POST)の時点で作られるが、**CSV は初回ダウンロード時に所有者の現在値から作り直される**。控え作成とダウンロードの間に現住所が登録されると、**配られる CSV は現住所なのに item の記録は "registry" のまま**になり、返戻の解釈が逆になる。
+
+さらに、既存の凍結時検査(§1 の `checkBatchEligibility`)は**所有者IDの集合とグループ構成しか比べていない**ため、**単独所有者の住所が登記上→現住所へ変わってもグループ不一致にならず検出できない**。
+
+よって:
+
+- `recipient_address_source` は **初回GETの凍結 tx 内で、`csvDigest` と `downloadedAt` と同時に書き込む**(=「配った CSV の中身」と「どちらの住所で送ったか」を必ず一致させる)。
+- 再試行GETは既存規則どおり `csvDigest` 一致のみ配信するので、記録とのズレは生じない。
+- ⚠ この列は**控え作成直後は NULL**(まだ配っていない)。確定(confirm)は `downloadedAt` 必須なので、**確定される item は必ず source を持つ**。NULL のまま確定される経路は無い。
 
 ### 4.3 返戻後に現住所を入れても自動で送付可へは戻さない
 
@@ -152,9 +171,13 @@ export function resolveMailingAddress(owner: {
 |---|---|---|
 | `src/lib/display-level.ts` | `OwnerDisplayConfig` / DEFAULT / full・hidden プリセット / `applyDisplayToOwner` / field masking 表 | **マスクされない生の住所がそのまま返る** |
 | `src/lib/api-helpers.ts` | `getOwnerDisplayConfig` の解決に新列を追加(`owner_address`/`owner_zip` の値を流用) | 全員 hidden になって消える |
-| `src/app/api/properties/suggest/route.ts` | 検索対象に新列を足すかを決める(表示レベルが生値のときのみ) | 現住所で検索できない/またはマスク中に検索オラクルができる |
+| `src/app/api/properties/suggest/route.ts` | 検索対象に新列を足す(表示レベルが生値のときのみ) | 現住所で検索できない/またはマスク中に検索オラクルができる |
+| `src/app/api/owners/search/route.ts` | 同上。⚠**この route は `applyDisplayToOwner` を通さず、住所の検索条件・select・マスクを手書きしている** | 所有者リンクのモーダルから現住所で所有者を探せない。後から素朴に足すと**フィールドレベルの検索オラクル封じとマスク規則を迂回**する |
+| `src/app/api/owners/route.ts`(一覧) | 同上。ここも手書きの検索とマスク | 同上 |
 
 **検索の扱い**: 現住所も**表示レベルが生値のときだけ**検索対象に加える(既存の `SEARCHABLE_LEVELS` と同じ規則)。
+
+⚠ **所有者住所で検索できる入口は3つある**(@codex #369 R1 P2)。`properties/suggest` だけでなく `owners/search`(所有者リンクのモーダルが使う)と `owners` 一覧も対象。**3つとも同じ規則で足し、生値のときとマスク時の両方のテストを書く**。1つでも漏らすと「現住所で探せない入口」が残り、後から足すときに検索オラクルの穴を作る。
 
 ## 6. 書込経路の振り分け
 
@@ -221,6 +244,12 @@ ALTER TABLE "dm_export_batch_items" ADD COLUMN "recipient_address_source" TEXT;
 - **表示レベルのテスト**: 新列がマスクされること(fail-open の検出)。
 - **配線のソース固定**: §4 の5系統すべてが `resolveMailingAddress` を通ること(1つでも直呼びが残ると宛先がズレる)。
 - **走査型ガード**: `owner` の列を足したとき `OWNER_TRACKED_FIELDS` / `display-level` / `fieldWriteChecks` の3点に入っていなければ落ちるテスト(今回と同種の抜けを将来も自動検出する)。
+
+### 10.1 追加のテスト(R1 対応分)
+
+- **郵便番号のズレ**: 分離ボタン→住所だけ編集→保存、で `currentZip` が空になっていること(古い番号が残らない)。
+- **控えの source**: 控え作成 → 現住所を登録 → 初回DL、の順で、配られた CSV の住所と item の `recipient_address_source` が**一致**すること。
+- **検索3入口**: `properties/suggest` / `owners/search` / `owners` 一覧のそれぞれで、表示レベルが生値なら現住所で当たり、マスク時は当たらない(検索オラクルにならない)こと。
 
 ## 11. レビューで特に見てほしい論点
 
