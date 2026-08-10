@@ -469,6 +469,11 @@ const REGISTRY_SELECTORS = {
   locationDialogSelectedPath: ".GKuikiDialogSelectedText", // [確定] 選択済みの階層表示(例「東京都>」)
   locationDialogItem: '#kuikiDialogArea td[id^="GKuiki"]', // [確定] 区域の1件(td・onclick=GKuikiDialogNext/Fixed)。⚠全タブ(全部+五十音)分が同時にDOMへ載る=同一区域が重複して列挙される
   locationDialogAllTab: "#btn-all", // [確定] 「全部」タブ(毎段ここへ寄せてから区域を押す)
+  // [確定・2026-08-10 実サイトJS] 「この段で確定してよいか」をサイトが返す隠し欄。
+  // GKuikiDialogSetButtonStatus() が `$("#canFix").val()=="YES"` のときだけ
+  // 確定ボタンを有効にする=**降り切れたかの唯一の正解**。ページ本体に同名idが
+  // 無いとは限らないのでダイアログの器に限定して引く。
+  locationDialogCanFix: "#kuikiDialogArea #canFix",
   // ⚠ダイアログの確定/戻る/取消は jQuery UI の buttonpane にあり **id を持たない**。
   //   文言で引く(ページ本体の「確定」= fuBtnForward とは**別物**なので取り違えない)。
   locationDialogButtonPane: ".ui-dialog-buttonpane button", // [確定] 確定/戻る/取消
@@ -720,6 +725,8 @@ async function selectPrefectureByLabel(
  *
  * @returns 確定できたら true。呼び出し側は false を想定しない（例外で返す）。
  */
+const MAX_SHOZAI_DIALOG_DEPTH = 8;
+
 async function selectShozaiViaDialog(
   page: RegistryPageLike,
   rest: string,
@@ -736,6 +743,46 @@ async function selectShozaiViaDialog(
       }, SHOZAI_DIALOG_BUTTON_SCOPE);
     } catch {
       // 閉じられなくても、この後の例外で検索自体は終わる。
+    }
+  };
+  /**
+   * サイトが返す「この段で確定してよいか」(YES/NO)。取れなければ空文字。
+   *
+   * [確定・2026-08-10 実サイトJS] GKuikiDialogSetButtonStatus() は
+   * `$("#canFix").val()=="YES"` のときだけ確定ボタンを有効にする。
+   * つまり**降り切れたかどうかの唯一の正解はサイトが持っている**。
+   * 取れない作り(モック等)では空文字＝従来どおりの判断に任せる。
+   */
+  const readCanFix = async (): Promise<string> => {
+    try {
+      const v = (await page.evaluate((sel: string) => {
+        const el = document.querySelector(sel) as { value?: string } | null;
+        return typeof el?.value === "string" ? el.value : "";
+      }, S.locationDialogCanFix)) as string | undefined;
+      return (v ?? "").trim().toUpperCase();
+    } catch {
+      return "";
+    }
+  };
+  /**
+   * 所在欄がもう埋まっているか。
+   *
+   * ⚠**最終段の区域は、押した時点でサイトが欄を埋めてダイアログを閉じる**
+   * (実サイトJS: td の onclick が GKuikiDialogNext ではなく GKuikiDialogFixed)。
+   * このときダイアログの「確定」はもう押せないが、**所在の選択は成功している**。
+   */
+  const locationFieldFilled = async (): Promise<boolean> => {
+    try {
+      return (
+        (await page.evaluate((sel: string) => {
+          const el = document.querySelector(sel) as { value?: string } | null;
+          return (
+            !!el && typeof el.value === "string" && el.value.trim().length > 0
+          );
+        }, S.locationSearchAddress)) === true
+      );
+    } catch {
+      return false;
     }
   };
 
@@ -763,7 +810,12 @@ async function selectShozaiViaDialog(
     //  「東村山市」「四日市市」のように区切り文字を名前の途中に含む自治体で
     //  壊れ、その住所が永久に検索できなくなる。正解はサイトの一覧が持っている。
   let remaining = normalizeForMatch(rest);
-  while (remaining.length > 0) {
+  // ⚠「もう確定してよいか」はサイトが `#canFix` で教えてくれる。これを見ずに
+  //   「残りが数字だけ＝地番」で降りるのをやめると、**丁目の段を選び残したまま**
+  //   確定できずに止まる(2026-08-10 本番実障害・世田谷区若林2-18-3)。
+  let canFix = "";
+  let depth = 0;
+  for (;;) {
     // 3-0) 「全部」タブへ寄せる。⚠区域の td は**全タブ分が DOM に同時に存在**し
     // (隠れタブ= ui-tabs-hide)、既定でどのタブが選ばれるかはサーバー次第。
     // 見えているタブしかクリックできないため、毎段「全部」を明示的に選ぶ。
@@ -797,6 +849,18 @@ async function selectShozaiViaDialog(
         };
       });
     }, S.locationDialogItem)) as ShozaiDialogItem[] | undefined;
+    // ⚠段数の上限。住所の残りは1段ごとに必ず短くなるので理屈の上では止まるが、
+    //   サイト側の作りが変わっても**待ち続けて「外部サービスの障害」に化けない**
+    //   ようにする。実際の階層は市区町村→大字→丁目→小字の4段程度。
+    if (depth > MAX_SHOZAI_DIALOG_DEPTH) {
+      console.warn(
+        "[registry-search] shozai dialog: too deep depth=" + String(depth),
+      );
+      await cancel();
+      throw new RegistryFetchError("location_rejected");
+    }
+    // この段を読み込み終えた時点でサイトが返す「確定してよいか」。
+    canFix = await readCanFix();
     if (!items || items.length === 0) break; // これ以上の段が無い＝ここまでで確定
 
     // ⚠タブ重複(全部タブ+五十音タブの同一区域コピー)を畳んでから決める。
@@ -805,22 +869,45 @@ async function selectShozaiViaDialog(
     // ※ matchDialogItemByPrefix の入口でも畳む(冪等)。ここで畳むのは
     //   失敗ログに「畳んだ後の件数」を出すため。
     const deduped = dedupeShozaiDialogItems(items);
+    if (remaining.length === 0) {
+      // 住所を使い切った。サイトが確定を許すなら確定へ進む。
+      if (canFix !== "NO") break;
+      // ⚠まだ段が残るのに住所側に手掛かりが無い＝決められない。当てずっぽうで
+      //   選ぶと利用者が意図しない土地の謄本を買うことになるので中止する。
+      console.warn(
+        "[registry-search] shozai dialog: address exhausted before fixable" +
+          " depth=" +
+          String(depth) +
+          " canFix=" +
+          canFix +
+          " candidates=" +
+          String(deduped.length),
+      );
+      await cancel();
+      throw new RegistryFetchError("location_rejected");
+    }
     const hit = matchDialogItemByPrefix(deduped, remaining);
-    if (!hit && looksLikeLotTail(remaining)) {
+    if (!hit && looksLikeLotTail(remaining) && canFix !== "NO") {
       // ⚠**残っているのが地番なら、それは区域ではない**(@codex #358 P2)。
       // 区域を選び終えた後に数字だけ残るのは正常(地番は別の欄に入れる)。
       // ここで弾くと「丸の内1丁目1-1」のような普通の住所が通らなくなる。
+      // ⚠ただし canFix=NO の間は**まだ降り切れていない**(丁目の選び残し)。
+      //   地番と早合点して抜けると、確定できないまま止まる(2026-08-10 実障害)。
       break;
     }
     if (!hit) {
       // ⚠**当てずっぽうで選ばない**。別の区域を選ぶと、利用者が意図しない
       // 土地の謄本を後段で請求してしまう。所在の指定として扱って中止する。
-      // 選択肢の中身(地名)はログに出さない(PII 方針)。件数のみ(畳んだ後/生)。
+      // 選択肢の中身(地名)はログに出さない(PII 方針)。件数と段だけ残す。
       console.warn(
         "[registry-search] shozai dialog: no unique match, candidates=" +
           String(deduped.length) +
           " raw=" +
-          String(items.length),
+          String(items.length) +
+          " depth=" +
+          String(depth) +
+          " canFix=" +
+          canFix,
       );
       await cancel();
       throw new RegistryFetchError("location_rejected");
@@ -840,6 +927,14 @@ async function selectShozaiViaDialog(
       await page.click("#" + hit.item.id);
     }
     remaining = hit.rest;
+    depth++;
+
+    // ⚠**押した時点で所在欄が埋まったら、そこで終わり**(@codex #368 R1 P1)。
+    // 最終段の区域は GKuikiDialogFixed が所在欄を埋めてダイアログを閉じる。
+    // 閉じ方が「隠すだけ」で区域の td が DOM に残る作りでも、ここで抜ければ
+    // **次の段として同じ丁目の一覧を読み直さない**。読み直すと、残った地番
+    // (「18-3」)を丁目として突き合わせて中止するか、見えない要素を待って固まる。
+    if (await locationFieldFilled()) break;
 
     // 次の段が読み込まれるまで待つ。
     // ⚠**比較対象は「押す直前の階層表示」**(@codex #358 P1)。以前は
@@ -870,19 +965,33 @@ async function selectShozaiViaDialog(
   }
 
   // 4) ダイアログの「確定」を押す（⚠ページ本体の確定ではない）。
-  const fixed = await page.evaluate((scope: string) => {
-    const b = Array.from(document.querySelectorAll(scope)).find(
-      (x) => (x.textContent || "").trim() === "確定",
-    ) as ({ click?: () => void; disabled?: boolean } & Element) | undefined;
-    if (!b || b.disabled === true) return false;
-    b.click?.();
-    return true;
-  }, SHOZAI_DIALOG_BUTTON_SCOPE);
-  if (fixed !== true) {
-    // 確定できない＝所在が最後まで絞り込めていない。所在の問題として返す。
-    console.warn("[registry-search] shozai dialog: fix button not enabled");
-    await cancel();
-    throw new RegistryFetchError("location_rejected");
+  //    ⚠**先に所在欄を見る**。最終段の区域は押した時点でサイトが欄を埋めて
+  //      ダイアログを閉じる作りがあり(実サイトJS: onclick=GKuikiDialogFixed)、
+  //      そのとき確定ボタンはもう押せない。順序を逆にすると**選択に成功して
+  //      いるのに「確定が押せない」で失敗**にしてしまう(2026-08-10 実障害)。
+  const alreadyFilled = await locationFieldFilled();
+  if (!alreadyFilled) {
+    const fixed = await page.evaluate((scope: string) => {
+      const b = Array.from(document.querySelectorAll(scope)).find(
+        (x) => (x.textContent || "").trim() === "確定",
+      ) as ({ click?: () => void; disabled?: boolean } & Element) | undefined;
+      if (!b || b.disabled === true) return false;
+      b.click?.();
+      return true;
+    }, SHOZAI_DIALOG_BUTTON_SCOPE);
+    if (fixed !== true) {
+      // 確定できない＝所在が最後まで絞り込めていない。所在の問題として返す。
+      // どの段で止まったかをログに残す(地名は残さない=PII 方針)。
+      console.warn(
+        "[registry-search] shozai dialog: fix button not enabled" +
+          " depth=" +
+          String(depth) +
+          " canFix=" +
+          canFix,
+      );
+      await cancel();
+      throw new RegistryFetchError("location_rejected");
+    }
   }
 
   // 5) 所在欄が実際に埋まったことを確認する（埋まらないまま次へ進まない）。

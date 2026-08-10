@@ -12,6 +12,8 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   dedupeShozaiDialogItems,
+  expandLeadingChome,
+  isChomeOnlyLevel,
   looksLikeLotTail,
   matchDialogItemByPrefix,
   normalizeForMatch,
@@ -234,6 +236,71 @@ describe("⚠実際の住所表記で通ること (@codex #358 P2)", () => {
   });
 });
 
+describe("⚠丁目だけが並ぶ段 — 町名の次に「一丁目」「二丁目」…が出る作り(2026-08-10 本番実障害)", () => {
+  // 実障害: 「東京都世田谷区若林2-18-3」で、区→町名まで降りた後に丁目だけの
+  // 段が出る。残り「2-18-3」を**地番とみなして降りるのをやめて**しまい、
+  // 丁目を選び残したままダイアログの「確定」が有効にならず中止していた
+  // (ログ: shozai dialog: fix button not enabled)。
+  const chome = [
+    { id: "A", text: "一丁目", code: "1" },
+    { id: "B", text: "二丁目", code: "2" },
+    { id: "C", text: "三丁目", code: "3" },
+  ];
+
+  it("郵便表記の残り「2-18-3」から丁目を読み取って選ぶ（残りは地番）", () => {
+    const m = matchDialogItemByPrefix(chome, "2-18-3");
+    expect(m?.item.id).toBe("B");
+    expect(m?.rest).toBe("18-3");
+  });
+
+  it("「2丁目18-3」のように丁目付きの表記はそのまま一致する", () => {
+    const m = matchDialogItemByPrefix(chome, "2丁目18-3");
+    expect(m?.item.id).toBe("B");
+    expect(m?.rest).toBe("18-3");
+  });
+
+  it("残りが丁目だけ（「2」）でも選べる", () => {
+    const m = matchDialogItemByPrefix(chome, "2");
+    expect(m?.item.id).toBe("B");
+    expect(m?.rest).toBe("");
+  });
+
+  it("⚠一覧に無い丁目は選ばない（当てずっぽう禁止＝取り違え防止）", () => {
+    expect(matchDialogItemByPrefix(chome, "9-18-3")).toBeNull();
+  });
+
+  it("⚠地名が並ぶ段では数字を丁目と読み替えない", () => {
+    // 「18-3」を「18丁目」と読み替えて、無関係な区域を選ばない。
+    const towns = [
+      { id: "T", text: "若林" },
+      { id: "U", text: "三軒茶屋" },
+    ];
+    expect(matchDialogItemByPrefix(towns, "18-3")).toBeNull();
+  });
+
+  it("isChomeOnlyLevel — 丁目だけの一覧かを見分ける", () => {
+    expect(isChomeOnlyLevel(chome)).toBe(true);
+    expect(isChomeOnlyLevel([{ id: "A", text: "十丁目" }])).toBe(true);
+    // 地名が混ざる段は「丁目だけ」ではない（読み替えを適用しない）
+    expect(
+      isChomeOnlyLevel([
+        { id: "A", text: "若林" },
+        { id: "B", text: "二丁目" },
+      ]),
+    ).toBe(false);
+    expect(isChomeOnlyLevel([])).toBe(false);
+  });
+
+  it("expandLeadingChome — 先頭の数字だけを丁目として読む", () => {
+    expect(expandLeadingChome("2-18-3")).toBe("2丁目18-3");
+    expect(expandLeadingChome("2")).toBe("2丁目");
+    // 丁目が既に書かれている・地名から始まるものには触らない
+    expect(expandLeadingChome("2丁目18-3")).toBe("2丁目18-3");
+    expect(expandLeadingChome("若林2-18-3")).toBe("若林2-18-3");
+    expect(expandLeadingChome("")).toBe("");
+  });
+});
+
 describe("parseSelectedPath — 選択済みの階層", () => {
   it("「東京都>渋谷区>」を段に分ける", () => {
     expect(parseSelectedPath("東京都>渋谷区>")).toEqual(["東京都", "渋谷区"]);
@@ -376,9 +443,45 @@ describe("配線（実サイト probe 2026-08-05 の結果を固定）", () => {
     expect((s.match(/address has no prefecture/g) ?? []).length).toBe(2);
   });
 
-  it("⚠残りが地番だけなら所在を弾かない (@codex #358 P2)", () => {
+  it("⚠残りが地番だけなら所在を弾かない (@codex #358 P2) — ただし確定できない段では降り続ける", () => {
     // 区域を選び終えた後に数字だけ残るのは正常（地番は別の欄）。
-    expect(SRC()).toMatch(/if \(!hit && looksLikeLotTail\(remaining\)\) \{/);
+    // ⚠ただしサイトが canFix=NO を返している間は**まだ段が残っている**
+    //   (丁目の選び残し=2026-08-10 本番実障害)。地番と早合点して抜けない。
+    expect(SRC()).toMatch(
+      /if \(!hit && looksLikeLotTail\(remaining\) && canFix !== "NO"\) \{/,
+    );
+  });
+
+  it("⚠「確定」が押せるかはサイトの canFix を見る（実サイトJS GKuikiDialogSetButtonStatus）", () => {
+    // 実サイトは #canFix の値が "YES" のときだけ確定ボタンを有効化する。
+    // これが「最後の段まで降り切れたか」の唯一の正解。
+    expect(SRC()).toMatch(/locationDialogCanFix: "#kuikiDialogArea #canFix"/);
+    expect(DIALOG_FN()).toMatch(/locationDialogCanFix/);
+  });
+
+  it("⚠ボタンの状態より先に所在欄を見る（最終段は押した時点で欄が埋まり閉じる）", () => {
+    // 実サイトJS: 最終段の区域の onclick は GKuikiDialogFixed で、押すと
+    // 所在欄を埋めてダイアログを閉じる。このとき確定ボタンはもう押せないが
+    // **所在の選択は成功している**。順序を逆にすると成功を失敗と報告する。
+    const fn = DIALOG_FN();
+    const fillIdx = fn.indexOf("alreadyFilled");
+    const btnIdx = fn.indexOf("fix button not enabled");
+    expect(fillIdx).toBeGreaterThan(-1);
+    expect(btnIdx).toBeGreaterThan(-1);
+    expect(fillIdx).toBeLessThan(btnIdx);
+  });
+
+  it("⚠段の上限を持つ（サイトの作りが変わっても待ち続けない）", () => {
+    // 住所の残りは1段ごとに必ず短くなるので理屈の上では止まるが、上限が無いと
+    // サイト側の変更で無限に回り「外部サービスの障害」に化ける。
+    expect(SRC()).toMatch(/const MAX_SHOZAI_DIALOG_DEPTH = \d+;/);
+    expect(DIALOG_FN()).toMatch(/depth > MAX_SHOZAI_DIALOG_DEPTH/);
+  });
+
+  it("⚠失敗ログにどの段で止まったかを残す（地名は残さない）", () => {
+    const fn = DIALOG_FN();
+    expect(fn).toMatch(/depth=/);
+    expect(fn).toMatch(/canFix=/);
   });
 
   it("⚠地名をログに出さない（PII 方針）", () => {
