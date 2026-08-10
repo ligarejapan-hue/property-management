@@ -312,6 +312,12 @@ export function resolveMailingAddress(owner: {
 
 ⚠ **名寄せ(merge)に穴が1つ生まれる**: 現在の統合は source を archive するだけで住所を master へ移さない。新列を足すと、**現住所を持つ source を統合したときに現住所が完全に消える**(復元手段なし)。→ **統合 tx に「master が空欄なら source の `currentAddress`/`currentZip` を引き継ぐ」処理を追加する**。⚠ 引き継ぐときは**必ずペアで**(片方だけ移してズレたペアを作らない)。
 
+⚠ **この引き継ぎには権限の検査が要る**(@codex #369 R18 P1)。統合 route が現在要求しているのは `user_management:read` + `owner:read` + `owner:delete` で、**`owner:write` も、住所・郵便番号のフィールドレベルの書込権限も見ていない**。引き継ぎ処理をそのまま足すと、**所有者の住所を書く権限が無い利用者が、統合を経由して master の現住所を書き換えられる**(通常の編集経路と補正経路が守っているフィールドレベルの境界を迂回する)。
+
+→ **引き継ぎを行う前に `owner:write` と `owner_address` / `owner_zip` の書込権限を要求する**。権限が無ければ、**引き継ぎだけ省略するのではなく統合そのものを 403 で拒否する**(省略すると source の現住所が archive とともに失われ、引き継ぎを足した意味が消えるため)。
+
+**テスト**: 統合はできるが住所の書込権限が無い利用者が、現住所を持つ source を統合しようとして **403** になること(かつ source の現住所が残っていること)。
+
 ⚠ **その引き継ぎは変更履歴に残らない**(@codex #369 R2 P2)。統合 route は ChangeLog の行を**手で組み立てており、`recordChanges`(= `OWNER_TRACKED_FIELDS` を使う共通処理)を呼んでいない**。したがって §8 の定数に新列を足しただけでは**この経路だけ履歴が残らない**(所有者のデータが変わったのに前後が追えない)。→ **統合 tx の中で、引き継いだ2列それぞれについて ChangeLog 行を明示的に作る**(既存の手組みの並びに追加する)。
 
 ## 8. 変更履歴・権限・型
@@ -361,10 +367,15 @@ ALTER TABLE "owners" ADD COLUMN "current_address" TEXT;
 
 **反映の順序(必ずこの順)**:
 
-1. `prisma migrate deploy`(列追加。**additive のみ**なので旧アプリは動き続ける)
-2. `npm run build` → `systemctl restart`(新アプリを出す)
+1. `npm ci`(devDeps込み)
+2. ⚠**`npx prisma generate`** — **絶対に飛ばさない**(@codex #369 R18 P1)
+3. `npx prisma migrate deploy`(列追加。**additive のみ**なので旧アプリは動き続ける)
+4. `npm run build` → `npm prune --omit=dev` → `systemctl restart`(新アプリを出す)
 
-= このリポの通常手順(`docs/deploy.md`: ci → generate → **migrate deploy** → build → restart)と同じ並びで、**追加の手当ては不要**。⚠ ただし「migrate は後でいい」と順序を入れ替えないこと。
+= このリポの通常手順(`docs/deploy.md`)と同じ並び。⚠ ただし:
+
+- **`prisma generate` を省いてはいけない**。このリポは **postinstall で generate しない**方針で、生成物は `src/generated/prisma` に置かれる。省くと生成物が古いままで、**`currentAddress`/`currentZip` を参照する build が再起動の前に失敗する**(`migrate deploy` は DB に migration を当てるだけで、生成物は作らない=別物)。
+- 「migrate は後でいい」と**順序を入れ替えない**。
 
 **戻し方(アプリだけ戻す)**:
 
