@@ -80,6 +80,8 @@ DB 上は値が移動しないが、画面では指示どおりに見える:
 - 物件詳細ページの所有者カード(`src/app/(dashboard)/properties/[id]/page.tsx`)
 - 所有者の新規作成モーダル(`src/components/owners/owner-link-modal.tsx`)
 
+⚠ **管理者用の所有者詳細も直す**(@codex #369 R4 P2)。`src/app/api/admin/owners/[id]/corporate-candidate/route.ts` は `ownerAddressMasked` を **`owner.address` から作っており**、`src/app/(dashboard)/admin/owners/[id]/page.tsx` はその値に「**現住所**」というラベルを付けている。§6 のとおり国税庁の本店所在地の反映(`corporate-apply` の `addressMode=nta`)は `currentAddress` へ書くので、**このままだと反映後に画面を開き直しても登記上の住所が「現住所」として出続け、更新が失敗したように見える**。→ この API と画面で**両方を返し・両方を表示**し、ラベルを「現住所」「登記上住所」に正す。
+
 ### 3.2 レイアウト
 
 ```
@@ -161,6 +163,24 @@ export function resolveMailingAddress(owner: {
 - `recipient_address_source` は **初回GETの凍結 tx 内で、`csvDigest` と `downloadedAt` と同時に書き込む**(=「配った CSV の中身」と「どちらの住所で送ったか」を必ず一致させる)。
 - 再試行GETは既存規則どおり `csvDigest` 一致のみ配信するので、記録とのズレは生じない。
 - ⚠ この列は**控え作成直後は NULL**(まだ配っていない)。確定(confirm)は `downloadedAt` 必須なので、**確定される item は必ず source を持つ**。NULL のまま確定される経路は無い。
+
+### 4.4 記録した出所を**返戻を扱う画面で実際に見せる**
+
+⚠ 出所を保存しても、**返戻を記録する画面がそれを読まないなら意味がない**(@codex #369 R4 P2)。「宛先不明」を付ける担当者が、**その所有者へどちらの住所で送ったのか**を見られないと、現住所を入れれば送れるのか、現住所も誤りなのかを判断できない。
+
+⚠ **確定した送付記録(`PropertyDmLog`)から控えの item へ遡れない**。ログは `batchId` は持つが **item の id は持たない**。`(batchId, propertyId)` で引く方法は、物件削除で `property_id` が null 化された行に対して破綻する。
+
+→ **確定(confirm)の時点で、item と item_owners の出所を `PropertyDmLog` / `PropertyDmLogOwner` へコピーする**(§9 の列追加)。遡る必要がなくなり、履歴の表示も返戻の判断もログだけで完結する。
+
+読む/見せる箇所:
+
+| 画面・API | 表示 |
+|---|---|
+| `GET /api/properties/[id]/dm-logs` + 物件詳細の「DM送付履歴」 | 行に**送付先の出所**を出す(例: 「現住所へ送付」/「登記上の住所へ送付」)。反響を「宛先不明」にするときの判断材料になる |
+| 売却DMの宛先一覧・反響(outcome)の画面 | 同様に出所を出す |
+| 共有者が複数いる行 | **所有者ごとに出所が違い得る**ので、行を開いたときに所有者別に出す |
+
+**混在グループの返戻テストを必須にする**(所有者Aは現住所・所有者Bは登記上で1通 → 返戻 → 画面で所有者ごとに別々の出所が出ること)。
 
 ### 4.3 返戻後に現住所を入れても自動で送付可へは戻さない
 
@@ -248,21 +268,46 @@ export function resolveMailingAddress(owner: {
 `add_owner_current_address`(additive・1本):
 
 ```sql
+-- 所有者の現住所
 ALTER TABLE "owners" ADD COLUMN "current_zip" TEXT;
 ALTER TABLE "owners" ADD COLUMN "current_address" TEXT;
-ALTER TABLE "dm_recipient_drafts" ADD COLUMN "recipient_address_source" TEXT;
+
+-- どちらの住所へ送ったか(代表: 連関を持たない旧行のフォールバック)
+ALTER TABLE "dm_recipient_drafts"   ADD COLUMN "recipient_address_source" TEXT;
 ALTER TABLE "dm_export_batch_items" ADD COLUMN "recipient_address_source" TEXT;
+
+-- ⚠どちらの住所へ送ったか(所有者ごと=権威・§4.2)。親テーブルだけでは足りない
+ALTER TABLE "dm_recipient_draft_owners"   ADD COLUMN "address_source" TEXT;
+ALTER TABLE "dm_export_batch_item_owners" ADD COLUMN "address_source" TEXT;
+
+-- ⚠確定した送付記録にも持たせる(§4.4)
+ALTER TABLE "property_dm_logs"       ADD COLUMN "address_source" TEXT;
+ALTER TABLE "property_dm_log_owners" ADD COLUMN "address_source" TEXT;
 ```
 
 **⚠ ただし `recipient_address_source` は NULL のままにしない**(@codex #369 R2 P2)。
 
 ```sql
 -- 既存のDM記録は、現住所の列が存在しなかった時期に作られた = 必ず登記上の住所で送っている
-UPDATE "dm_recipient_drafts"   SET "recipient_address_source" = 'registry' WHERE "recipient_address_source" IS NULL;
+UPDATE "dm_recipient_drafts"       SET "recipient_address_source" = 'registry' WHERE "recipient_address_source" IS NULL;
+UPDATE "dm_recipient_draft_owners" SET "address_source" = 'registry' WHERE "address_source" IS NULL;
+UPDATE "property_dm_logs"          SET "address_source" = 'registry' WHERE "address_source" IS NULL;
+UPDATE "property_dm_log_owners"    SET "address_source" = 'registry' WHERE "address_source" IS NULL;
+
+-- 控え側はダウンロード済みのバッチのみ(未DLの item は凍結時に書かれる)
 UPDATE "dm_export_batch_items" SET "recipient_address_source" = 'registry'
   WHERE "recipient_address_source" IS NULL
     AND "batch_id" IN (SELECT "id" FROM "dm_export_batches" WHERE "downloaded_at" IS NOT NULL);
+UPDATE "dm_export_batch_item_owners" SET "address_source" = 'registry'
+  WHERE "address_source" IS NULL
+    AND "item_id" IN (
+      SELECT i."id" FROM "dm_export_batch_items" i
+      JOIN "dm_export_batches" b ON b."id" = i."batch_id"
+      WHERE b."downloaded_at" IS NOT NULL
+    );
 ```
+
+⚠ **連関(所有者ごと)のバックフィルを忘れない**(@codex #369 R4 P1)。§4.2 で所有者ごとの値を**権威**と決めた以上、既存の連関行が NULL のままだと、**親のフォールバックは連関がある行では参照しない規則**に従って「出所不明」になる。
 
 理由:
 - 過去の返戻(宛先不明)を後から見たときに **source が無いと解釈できない**。既存分は定義上すべて登記上なので、そう埋めるのが事実に一致する。
