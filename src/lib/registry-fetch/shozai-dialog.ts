@@ -72,6 +72,36 @@ export function expandChomeShorthand(s: string): string {
 }
 
 /**
+ * **先頭の数字だけ**を丁目として読む(「2-18-3」→「2丁目18-3」)。
+ *
+ * ⚠`expandChomeShorthand` との違いは**地名が付いていない**こと。
+ * 町名を選び終えた次の段が「一丁目」「二丁目」…と**丁目だけを並べる**作りの
+ * 地域では、住所の残りが「2-18-3」のように数字から始まる。
+ *
+ * ⚠この読み替えは**丁目だけが並ぶ段でしか使ってはいけない**
+ * (`isChomeOnlyLevel` で確認する)。地名が並ぶ段で使うと、地番「18-3」を
+ * 「18丁目」と読み替えて**無関係な区域を選ぶ**恐れがある。
+ */
+export function expandLeadingChome(s: string): string {
+  const m = /^(\d{1,3})(?:-(?=\d)|$)/u.exec(s);
+  if (!m) return s;
+  return `${m[1]}丁目${s.slice(m[0].length)}`;
+}
+
+/**
+ * いま出ている選択肢が**丁目だけ**か(「一丁目」「二丁目」…)。
+ *
+ * ⚠2026-08-10 本番実障害の核心: 「世田谷区若林2-18-3」は
+ * 区 → 町名(若林) → **丁目** の3段で、3段目に来たとき残りは「2-18-3」。
+ * これを地番とみなして降りるのをやめると、丁目を選び残したまま
+ * サイトの「確定」が有効にならず(`canFix=NO`)、所在が決まらない。
+ */
+export function isChomeOnlyLevel(items: ShozaiDialogItem[]): boolean {
+  if (items.length === 0) return false;
+  return items.every((it) => /^\d{1,3}丁目$/u.test(normalizeForMatch(it.text)));
+}
+
+/**
  * ⚠**住所を自前の規則で切らない**(@codex #358 P2)。
  *
  * 「市区町村郡」の文字で切る方式は、**その文字を名前の途中に含む自治体**で壊れる:
@@ -104,13 +134,24 @@ export function matchDialogItemByPrefix(
   // ⚠タブ重複(全部タブ+五十音タブの同一区域コピー)を先に畳む。畳まないと
   // どの区域も「同名2件=決められない」に当たり全住所が中止になる(実障害)。
   const deduped = dedupeShozaiDialogItems(items);
-  const direct = matchOnce(deduped, normalizeForMatch(remaining));
+  const want = normalizeForMatch(remaining);
+  const direct = matchOnce(deduped, want);
   if (direct) return direct;
   // ⚠そのままで当たらないときだけ、郵便表記の丁目を復元して再挑戦する
   // (「丸の内1-1-1」→「丸の内1丁目1-1」)。常に適用すると地番を丁目と誤読する。
-  const expanded = expandChomeShorthand(normalizeForMatch(remaining));
-  if (expanded === normalizeForMatch(remaining)) return null;
-  return matchOnce(deduped, expanded);
+  const expanded = expandChomeShorthand(want);
+  if (expanded !== want) {
+    const hit = matchOnce(deduped, expanded);
+    if (hit) return hit;
+  }
+  // ⚠**丁目だけが並ぶ段**では、残りの先頭の数字が丁目そのもの
+  // (「2-18-3」→「2丁目」+地番「18-3」)。地名が並ぶ段では絶対に使わない
+  // =`isChomeOnlyLevel` で守る(2026-08-10 本番実障害)。
+  if (isChomeOnlyLevel(deduped)) {
+    const lead = expandLeadingChome(want);
+    if (lead !== want) return matchOnce(deduped, lead);
+  }
+  return null;
 }
 
 /** 一覧に対する最長前方一致を1回だけ試す（同じ長さで複数なら決めない）。 */

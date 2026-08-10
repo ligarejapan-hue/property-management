@@ -1973,3 +1973,207 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     expect(baseline).toContain("データ取得中");
   });
 });
+
+/**
+ * 所在選択ダイアログの**段送りを実際に動かす** fake。
+ *
+ * ⚠ソース走査型の配線テストでは、`canFix !== "NO"` を `===` に書き間違えても
+ * 通ってしまう(文字列は同じだけ並ぶ)。2026-08-10 の本番実障害は
+ * **動かさないと分からない状態機械のバグ**だったので、ここは実際に回す。
+ *
+ * 実サイトの2つの作りをそのまま持たせる (2026-08-10 `GKuikiDialog.js` 実測):
+ *  - ダイアログの「確定」は `#canFix` が "YES" のときだけ押せる
+ *    (`GKuikiDialogSetButtonStatus`)
+ *  - 最終段の区域は押した時点で所在欄が埋まり**ダイアログが閉じる**
+ *    (`GKuikiDialogFixed`)
+ */
+function makeShozaiLevels(opts: {
+  levels: {
+    items: { id: string; text: string; code: string }[];
+    canFix: "YES" | "NO";
+  }[];
+  closesOnFinalPick?: boolean;
+}) {
+  let level = 0;
+  let closed = false;
+  let filled = false;
+  const picks: string[] = [];
+  const canFixNow = (): string => {
+    if (closed) return "";
+    return level >= opts.levels.length ? "YES" : opts.levels[level].canFix;
+  };
+  const evaluate = (arg: string): unknown => {
+    if (arg === '#kuikiDialogArea td[id^="GKuiki"]') {
+      if (closed || level >= opts.levels.length) return [];
+      return opts.levels[level].items.map((it) => ({ ...it, visible: true }));
+    }
+    if (arg === "#kuikiDialogArea #canFix") return canFixNow();
+    if (arg === "#fuChibanKuiki") return filled; // 所在欄が埋まっているか
+    if (arg === ".GKuikiDialogSelectedText") return "path:" + String(level);
+    if (arg === ".ui-dialog-buttonpane button") return canFixNow() === "YES";
+    return shozaiDialogDefault(arg);
+  };
+  const click = (sel: string): void => {
+    if (!sel.startsWith("#GKuiki")) return;
+    picks.push(sel);
+    level += 1;
+    if (opts.closesOnFinalPick && level >= opts.levels.length) {
+      closed = true;
+      filled = true;
+    }
+  };
+  return { evaluate, click, picks };
+}
+
+describe("所在選択ダイアログの段送り（2026-08-10 本番実障害・実際に動かす）", () => {
+  const setup = (dialog: ReturnType<typeof makeShozaiLevels>) => {
+    const f = makeFakeChromium();
+    const clicks: string[] = [];
+    f.page.click = vi.fn(async (s: string) => {
+      clicks.push(s);
+      dialog.click(s);
+      return undefined;
+    });
+    f.page.evaluate = vi.fn(async (_fn: unknown, arg: string) =>
+      dialog.evaluate(arg),
+    );
+    f.page.$$eval = vi.fn(async () => [
+      { candidateRef: "cbnDlgChibanChk_1", lotNumber: "１８－３" },
+    ]);
+    return { f, clicks };
+  };
+
+  it("⚠町名の次に「丁目」だけが並ぶ段を降り切る（世田谷区若林2-18-3）", async () => {
+    // 実障害: 残り「2-18-3」を地番と早合点して降りるのをやめ、丁目を選び残した
+    // まま確定できずに止まっていた(ログ: fix button not enabled)。
+    const dialog = makeShozaiLevels({
+      levels: [
+        {
+          items: [{ id: "GKuiki0", text: "世田谷区", code: "13112" }],
+          canFix: "NO",
+        },
+        { items: [{ id: "GKuiki1", text: "若林", code: "0012" }], canFix: "NO" },
+        {
+          items: [
+            { id: "GKuiki2", text: "一丁目", code: "01" },
+            { id: "GKuiki3", text: "二丁目", code: "02" },
+            { id: "GKuiki4", text: "三丁目", code: "03" },
+          ],
+          canFix: "NO",
+        },
+      ],
+      closesOnFinalPick: true,
+    });
+    const { f, clicks } = setup(dialog);
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await page.searchByLocation!({
+      address: "東京都世田谷区若林2-18-3",
+      lotNumber: "18-3",
+      buildingNumber: null,
+    });
+    // 区 → 町名 → **二丁目**（丁目を選び残さない・別の丁目を選ばない）
+    expect(dialog.picks).toEqual(["#GKuiki0", "#GKuiki1", "#GKuiki3"]);
+    // ⚠カートに未請求行を作るページ本体の確定には触れない
+    expect(clicks).not.toContain("#fuBtnForward");
+    expect(clicks).not.toContain("#myPageSeikyu");
+  });
+
+  it("⚠最終段でダイアログが閉じる作りでも成功にする（確定ボタンはもう押せない）", async () => {
+    const dialog = makeShozaiLevels({
+      levels: [
+        {
+          items: [{ id: "GKuiki0", text: "千代田区", code: "13101" }],
+          canFix: "NO",
+        },
+        {
+          items: [{ id: "GKuiki1", text: "丸の内一丁目", code: "0001" }],
+          canFix: "NO",
+        },
+      ],
+      closesOnFinalPick: true,
+    });
+    const { f, clicks } = setup(dialog);
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await page.searchByLocation!({
+      address: "東京都千代田区丸の内1-1-1",
+      lotNumber: "1-1",
+      buildingNumber: null,
+    });
+    expect(dialog.picks).toEqual(["#GKuiki0", "#GKuiki1"]);
+    expect(clicks).not.toContain("#fuBtnForward");
+  });
+
+  it("⚠一覧に無い丁目は選ばずに中止する（取り違えて別の土地を買わない）", async () => {
+    const dialog = makeShozaiLevels({
+      levels: [
+        {
+          items: [{ id: "GKuiki0", text: "世田谷区", code: "13112" }],
+          canFix: "NO",
+        },
+        { items: [{ id: "GKuiki1", text: "若林", code: "0012" }], canFix: "NO" },
+        {
+          items: [
+            { id: "GKuiki2", text: "一丁目", code: "01" },
+            { id: "GKuiki3", text: "二丁目", code: "02" },
+          ],
+          canFix: "NO",
+        },
+      ],
+      closesOnFinalPick: true,
+    });
+    const { f } = setup(dialog);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const factory = resolveDefaultRegistryBrowserFactory({
+        chromiumLoader: f.loader,
+      });
+      const page = await factory!();
+      await expect(
+        page.searchByLocation!({
+          address: "東京都世田谷区若林9-18-3", // 9丁目は一覧に無い
+          lotNumber: "18-3",
+          buildingNumber: null,
+        }),
+      ).rejects.toMatchObject({ code: "location_rejected" });
+      // 丁目は1つも押していない
+      expect(dialog.picks).toEqual(["#GKuiki0", "#GKuiki1"]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("確定できる段まで来たら、残りが地番でもそこで確定する（従来の正常系）", async () => {
+    const dialog = makeShozaiLevels({
+      levels: [
+        {
+          items: [{ id: "GKuiki0", text: "千代田区", code: "13101" }],
+          canFix: "NO",
+        },
+        {
+          items: [{ id: "GKuiki1", text: "丸の内一丁目", code: "0001" }],
+          canFix: "NO",
+        },
+        { items: [{ id: "GKuiki2", text: "甲", code: "A" }], canFix: "YES" },
+      ],
+    });
+    const { f, clicks } = setup(dialog);
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await page.searchByLocation!({
+      address: "東京都千代田区丸の内1-1-1",
+      lotNumber: "1-1",
+      buildingNumber: null,
+    });
+    // 「甲」は住所に無いので押さない。確定できる段なのでそこで確定する。
+    expect(dialog.picks).toEqual(["#GKuiki0", "#GKuiki1"]);
+    expect(clicks).not.toContain("#fuBtnForward");
+  });
+});
