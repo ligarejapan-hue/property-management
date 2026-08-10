@@ -1993,18 +1993,29 @@ function makeShozaiLevels(opts: {
     canFix: "YES" | "NO";
   }[];
   closesOnFinalPick?: boolean;
+  /**
+   * 閉じ方が「**隠すだけ**」で、区域の td が DOM に残る作り(@codex #368 R1 P1)。
+   * jQuery UI の dialog("close") は中身を消さずに隠すことがあり、その場合
+   * 最終段を押した後も同じ丁目の一覧が読めてしまう。
+   */
+  keepItemsAfterClose?: boolean;
 }) {
   let level = 0;
   let closed = false;
   let filled = false;
   const picks: string[] = [];
+  const lastLevel = () => opts.levels[opts.levels.length - 1];
   const canFixNow = (): string => {
-    if (closed) return "";
+    if (closed) return opts.keepItemsAfterClose ? lastLevel().canFix : "";
     return level >= opts.levels.length ? "YES" : opts.levels[level].canFix;
   };
   const evaluate = (arg: string): unknown => {
     if (arg === '#kuikiDialogArea td[id^="GKuiki"]') {
-      if (closed || level >= opts.levels.length) return [];
+      if (closed) {
+        if (!opts.keepItemsAfterClose) return [];
+        return lastLevel().items.map((it) => ({ ...it, visible: true }));
+      }
+      if (level >= opts.levels.length) return [];
       return opts.levels[level].items.map((it) => ({ ...it, visible: true }));
     }
     if (arg === "#kuikiDialogArea #canFix") return canFixNow();
@@ -2106,6 +2117,44 @@ describe("所在選択ダイアログの段送り（2026-08-10 本番実障害�
       buildingNumber: null,
     });
     expect(dialog.picks).toEqual(["#GKuiki0", "#GKuiki1"]);
+    expect(clicks).not.toContain("#fuBtnForward");
+  });
+
+  it("⚠閉じ方が「隠すだけ」で区域が DOM に残っても、次の段を読みに行かない（@codex #368 R1 P1）", async () => {
+    // jQuery UI の dialog("close") は中身を消さずに隠すことがある。その作りだと
+    // 最終段を押した後も同じ丁目の一覧が読めてしまい、残った地番「18-3」を
+    // 丁目として突き合わせて中止する(＝直したはずの不具合が再発する)。
+    // 押した直後に所在欄を見て抜けることで、閉じ方に依存しなくなる。
+    const dialog = makeShozaiLevels({
+      levels: [
+        {
+          items: [{ id: "GKuiki0", text: "世田谷区", code: "13112" }],
+          canFix: "NO",
+        },
+        { items: [{ id: "GKuiki1", text: "若林", code: "0012" }], canFix: "NO" },
+        {
+          items: [
+            { id: "GKuiki2", text: "一丁目", code: "01" },
+            { id: "GKuiki3", text: "二丁目", code: "02" },
+          ],
+          canFix: "NO",
+        },
+      ],
+      closesOnFinalPick: true,
+      keepItemsAfterClose: true,
+    });
+    const { f, clicks } = setup(dialog);
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    const page = await factory!();
+    await page.searchByLocation!({
+      address: "東京都世田谷区若林2-18-3",
+      lotNumber: "18-3",
+      buildingNumber: null,
+    });
+    // 二丁目を押した時点で終わり（同じ段をもう一度読まない）
+    expect(dialog.picks).toEqual(["#GKuiki0", "#GKuiki1", "#GKuiki3"]);
     expect(clicks).not.toContain("#fuBtnForward");
   });
 
