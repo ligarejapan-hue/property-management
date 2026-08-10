@@ -106,6 +106,7 @@ DB 上は値が移動しないが、画面では指示どおりに見える:
   - **現住所を編集したら、現住所の郵便番号を空に戻す**(前の住所に対応した番号を残さない)
   - `AddressLookupControls` で住所から引き直して入れる
   - 保存時に「現住所はあるが現住所の郵便番号が空」なら**画面に注意を出す**(保存自体は妨げない。番号が分からないまま登録できないと運用が止まるため)
+- ⚠ **この打ち消しは画面だけでなく API 側でも効かせる**(@codex #369 R6 P1)。`updateOwnerSchema` は**部分更新**で、`PATCH /api/owners/[id]` は渡された項目をそのまま反映する。よって**`currentAddress` だけを送る呼び出し**(画面を経由しない更新・将来の一括処理・取込のリトライ)では**古い `currentZip` が残り**、§4 の解決規則がそのズレたペアを採用してしまう。→ **サーバー側で「`currentAddress` が変わるのに `currentZip` が同時に来ていなければ `currentZip` を null にする」**(= 郵便番号は住所と一緒にしか更新できない)。`POST`(新規作成)も同じ規則。
 - 現住所を空にして保存すれば「未設定」に戻る(= 登記上を使う状態へ戻せる)。専用の解除ボタンは作らない。
 - ⚠ **郵便番号⇄住所の自動補完(`AddressLookupControls`)は現住所側にだけ付ける**。登記上の欄に効かせると、郵便番号APIの正規化表記で**登記の記載を書き換えて**しまい、謄本との突合が壊れる。
 
@@ -173,6 +174,8 @@ export function resolveMailingAddress(owner: {
 → **確定(confirm)の時点で、item と item_owners の出所を `PropertyDmLog` / `PropertyDmLogOwner` へコピーする**(§9 の列追加)。遡る必要がなくなり、履歴の表示も返戻の判断もログだけで完結する。
 
 ⚠ **売却DMの `mark-sent` も同じことをする**(@codex #369 R5 P2)。`src/app/api/properties/sale-dm/drafts/[id]/mark-sent/route.ts` は draft から `PropertyDmLog` と `PropertyDmLogOwner` を**直接**作っており、宛名CSVの確定とは別経路。ここを直さないと**売却DM由来の記録だけ出所が空**になり、履歴画面に出せない。draft と draft_owners の出所をコピーする(単一出所と混在出所の両方をテスト)。
+
+⚠ **`mark-sent` は住所そのもの(§4.5)もコピーする**(@codex #369 R6 P1)。「draft を見ればよい」は成り立たない: **物件を削除すると draft は Cascade で消える**のに、`PropertyDmLog` は `propertyId=null` で**意図的に残す**設計。draft から読む前提だと、その孤児ログでは**実際に刷った住所が失われる**。→ `mark-sent` の同一 tx で `recipientZip`/`recipientAddress` を `deliveryZip`/`deliveryAddress` へコピーし、**物件削除後の孤児ログでも住所が残ることをテストする**。
 
 ### 4.5 ⚠**実際に刷った住所そのものを控える**(既存方針の変更を含む)
 
@@ -357,6 +360,23 @@ UPDATE "dm_export_batch_item_owners" SET "address_source" = 'registry'
 - owners の新2列は既存行すべて NULL = 現住所未設定 = **従来どおりの動作**(既存データへの影響ゼロ)。
 - enum は作らない(TEXT + アプリ側 allowlist。#361 と同方針)。
 - 索引は張らない(現住所での検索・絞り込みは表示レベルが生値のときの `contains` 検索のみで、既存の `address` にも索引は無い)。
+
+### 9.1 反映の順序と戻し方(@codex #369 R6 P2)
+
+実装後のアプリは新しい列を読み書きするので、**列が無い状態でアプリだけ先に出すと所有者とDMの画面が壊れる**。
+
+**反映の順序(必ずこの順)**:
+
+1. `prisma migrate deploy`(列追加+バックフィル。**additive のみ**なので旧アプリは動き続ける)
+2. `npm run build` → `systemctl restart`(新アプリを出す)
+
+= このリポの通常手順(`docs/deploy.md`: ci → generate → **migrate deploy** → build → restart)と同じ並びで、**追加の手当ては不要**。⚠ ただし「migrate は後でいい」と順序を入れ替えないこと。
+
+**戻し方(アプリだけ戻す)**:
+
+- **列は消さない**。旧アプリは新しい列を知らないので、**存在しても無害**(Prisma は自分が知る列しか読まない)。
+- したがって**アプリのコードだけ前のコミットへ戻して再起動**すれば復旧する。**新しく書かれた出所・住所のデータは消えない**(戻した後に前へ進めば、そのまま使える)。
+- ⚠ **列を落とす方向のロールバックはしない**。落とすと、戻すまでの間に記録された「どの住所へ送ったか」が**永久に失われる**(返戻の判断ができなくなる)。
 
 ## 10. テスト方針
 
