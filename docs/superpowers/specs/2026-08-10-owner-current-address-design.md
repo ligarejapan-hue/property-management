@@ -133,7 +133,11 @@ export function resolveMailingAddress(owner: {
 | `src/app/api/properties/dm-batches/route.ts` | 宛先資格の where `address: { not: "" }` → 「現住所 or 登記上のどちらかが非空」。住所なし件数の集計も同様。`select` に新列2つを追加 |
 | `src/app/api/properties/dm-batches/[id]/csv/route.ts` | `select` に新列2つを追加し、解決関数を通す |
 | `src/lib/dm-batch/eligibility.ts` | owner の型と資格判定を新列対応にする(控えの凍結時の住所グループ再計算がここ) |
-| `src/app/api/properties/sale-dm/campaigns/route.ts` + `src/lib/sale-dm-letter/recipients.ts` | `mailableOwner` の絞り込みと、`recipientZip`/`recipientAddress` への保存値を解決後の値にする |
+| `src/app/api/properties/sale-dm/campaigns/route.ts` + `src/lib/sale-dm-letter/recipients.ts` | `mailableOwner` の絞り込みと、`recipientZip`/`recipientAddress` への保存値を解決後の値にする。⚠**§4.0 のグループ単位の郵便番号の決め方も、ここで共有する**(下記) |
+
+⚠ **売却DMは `buildDmRow` を通っていない**(@codex #369 R20 P1)。`buildRecipientsFromProperties` は代表を選んで **`repOwner.zip` を直接 `recipientZip` へコピー**している。所有者ごとの解決(`resolveMailingAddress`)を入れるだけでは足りず、**§4.0 の「グループ内で食い違えば空」の決め方が適用されない**。その結果、**宛名CSVでは空にする番号を、売却DMの下書きでは刷ってしまう**(同じ物件・同じ宛先なのに経路で結果が違う)。
+
+→ **§4.0 のグループ単位の郵便番号の決め方も純関数として切り出し、宛名CSV(`buildDmRow`)と売却DM(`recipients.ts`)の両方から呼ぶ**。**食い違う番号を持つ共有者の売却DM下書き**をテストに入れる。
 
 ⚠ **グルーピングキーを解決後の値で作ること**が肝。ここだけ旧 `address` のままだと、**同一人物が現住所と登記上住所で2通に分裂**して二重送付になる。
 
@@ -310,7 +314,19 @@ export function resolveMailingAddress(owner: {
 | 物件との自動リンク (`owner-property-linker.ts`・owner-csv 内の同ロジック) | **登記上** | 「所有者住所 == 物件住所 = その物件に住んでいる」の推定。現住所基準にすると引っ越し済み所有者が別物件へ誤リンクされる |
 | 郵便番号監査 (`admin/postal-code-audit`) | **登記上の zip × 登記上の address** | 現住所の zip と登記上の address を突き合わせると全件「不一致」になる。⚠ **現住所側の監査は別途対応(本設計の範囲外)** |
 
-⚠ **名寄せ(merge)に穴が1つ生まれる**: 現在の統合は source を archive するだけで住所を master へ移さない。新列を足すと、**現住所を持つ source を統合したときに現住所が完全に消える**(復元手段なし)。→ **統合 tx に「master が空欄なら source の `currentAddress`/`currentZip` を引き継ぐ」処理を追加する**。⚠ 引き継ぐときは**必ずペアで**(片方だけ移してズレたペアを作らない)。
+⚠ **名寄せ(merge)に穴が1つ生まれる**: 現在の統合は source を archive するだけで住所を master へ移さない。新列を足すと、**現住所を持つ source を統合したときに現住所が完全に消える**(復元手段なし)。→ **統合 tx に引き継ぎ処理を追加する**。引き継ぎ方は**master の状態で3通り**(@codex #369 R20 P2):
+
+| master の状態 | source の状態 | 引き継ぎ |
+|---|---|---|
+| 現住所が**空** | 現住所あり | **ペアごと引き継ぐ**(住所+郵便番号) |
+| 現住所**あり・郵便番号が空** | **正規化して同じ住所**+郵便番号あり | ⚠**郵便番号だけ引き継ぐ** |
+| 現住所**あり** | 住所が**違う** | **引き継がない**(master 優先。どちらが新しいかは決められない) |
+
+⚠ **2番目を落とすと番号が失われる**: 統合前は「同じ住所グループ」として §4.0 が source の番号を使えていたのに、統合後は master の**番号なしの住所**だけが残り、**以後のDMから郵便番号が消える**。
+
+⚠ **2番目は §6.1「郵便番号だけの書き換えはできない」の例外にあたる**が、**住所が正規化して同一**なので**ペアは崩れない**(§6.1 の目的は「住所と番号が食い違わないこと」)。**住所が違うときは引き継がない**ことで担保する。
+
+⚠ 引き継ぎは**必ずペアの整合を保ったまま**行う(片方だけ移してズレたペアを作らない)。**3通りすべてをテストする**。
 
 ⚠ **この引き継ぎには権限の検査が要る**(@codex #369 R18 P1)。統合 route が現在要求しているのは `user_management:read` + `owner:read` + `owner:delete` で、**`owner:write` も、住所・郵便番号のフィールドレベルの書込権限も見ていない**。引き継ぎ処理をそのまま足すと、**所有者の住所を書く権限が無い利用者が、統合を経由して master の現住所を書き換えられる**(通常の編集経路と補正経路が守っているフィールドレベルの境界を迂回する)。
 
