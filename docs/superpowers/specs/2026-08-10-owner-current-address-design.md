@@ -246,7 +246,11 @@ ALTER TABLE "property_dm_logs"      ADD COLUMN "delivery_address" TEXT;
 | 文字化け補正 (text-fix) | **両方**を対象に(`FIELD_RESOURCE` に現住所を追加) | どちらにも制御文字は混入し得る |
 | 郵便番号の整形 (contact-fix) | **両方** | 同上 |
 | 法人番号の混入除去 (corporate-cleanup) | **`address`(登記上)** | 分断型の法人番号は登記由来の住所に混入する |
-| **国税庁の本店所在地の反映** (`corporate-apply` / `corporate-restore-apply` の addressMode=nta) | **`currentAddress`/`currentZip`(現住所)** | 国税庁が持つのは**現在の**本店所在地であって登記の記載ではない。ここを登記上へ書くと謄本と突合できなくなる |
+| **国税庁の本店所在地の反映** (`corporate-apply` / `corporate-restore-apply` の addressMode=nta) | **`currentAddress`/`currentZip`(現住所)** | 国税庁が持つのは**現在の**本店所在地であって登記の記載ではない。ここを登記上へ書くと謄本と突合できなくなる。⚠**住所と郵便番号を別々に反映させない**(下記) |
+
+⚠ **`corporate-apply` は住所と郵便番号を別々のチェックで選べる**(`corporate-lookup-panel.tsx`)。**郵便番号だけを反映**すると、国税庁の郵便番号が `currentZip` に入る一方で `currentAddress` は元のまま残り、§4 の解決規則が**そのズレたペアを郵送先として採用**する(@codex #369 R7 P1)。国税庁の郵便番号は**国税庁の住所に付いた番号**なので、片方だけ採ってはいけない。
+
+→ **住所と郵便番号は一組でしか反映できないようにする**(郵便番号だけの選択を許さない)。**郵便番号だけの選択のテストを必ず書く**。
 | 所有者の手入力(PATCH/POST/create-and-link) | **両方**(画面で入れた欄に入る) | — |
 | 名寄せ(merge) | §7 参照 | — |
 
@@ -259,6 +263,13 @@ ALTER TABLE "property_dm_logs"      ADD COLUMN "delivery_address" TEXT;
 | 郵便番号監査 (`admin/postal-code-audit`) | **登記上の zip × 登記上の address** | 現住所の zip と登記上の address を突き合わせると全件「不一致」になる。⚠ **現住所側の監査は別途対応(本設計の範囲外)** |
 
 ⚠ **名寄せ(merge)に穴が1つ生まれる**: 現在の統合は source を archive するだけで住所を master へ移さない。新列を足すと、**現住所を持つ source を統合したときに現住所が完全に消える**(復元手段なし)。→ **統合 tx に「master が空欄なら source の `currentAddress`/`currentZip` を引き継ぐ」処理を追加する**。
+
+⚠ **統合で「所有者ごとの出所」が消える**(@codex #369 R7 P1)。master と source が**同じ下書き・同じ控えの item・同じログ**に両方いる場合(共有者を統合したときに起きる)、既存の統合は複合キーの衝突を避けるため**source 側の連関行を先に削除してから付け替える**。混在グループではこの2行の `address_source` が**別々の値**を持ち得るので、素直に消すと**片方の権威な出所が復元不能に失われる**。さらに、source の現住所を master へ引き継いだ直後に、生き残った連関が `registry` のまま取り残される。
+
+→ **連関3表それぞれについて衝突時の扱いを決める**:
+- 生き残る行の `address_source` は、**「その所有者がその郵送物をどちらの住所で受け取ったか」を変えてはいけない**。統合は同一人物の名寄せであって、郵送の事実は変わらない。
+- したがって **master 行が既に値を持つならそれを維持し、master 行が NULL で source 行が値を持つ場合のみ source の値を採る**。両方が値を持ち**食い違う**場合は、**master 側を維持**し、監査に `addressSourceConflict` を残す(事実としては同じ封筒に2人が載っていただけで、どちらも正しい)。
+- **この統合のテストを必ず書く**(混在出所のグループを統合しても、生き残った行の出所が書き換わらないこと)。
 
 ⚠ **その引き継ぎは変更履歴に残らない**(@codex #369 R2 P2)。統合 route は ChangeLog の行を**手で組み立てており、`recordChanges`(= `OWNER_TRACKED_FIELDS` を使う共通処理)を呼んでいない**。したがって §8 の定数に新列を足しただけでは**この経路だけ履歴が残らない**(所有者のデータが変わったのに前後が追えない)。→ **統合 tx の中で、引き継いだ2列それぞれについて ChangeLog 行を明示的に作る**(既存の手組みの並びに追加する)。
 
