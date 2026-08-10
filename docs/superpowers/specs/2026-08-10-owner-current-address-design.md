@@ -211,6 +211,7 @@ ALTER TABLE "property_dm_logs"      ADD COLUMN "delivery_address" TEXT;
 | `GET /api/properties/[id]/dm-logs` + 物件詳細の「DM送付履歴」 | 行に**送付先の出所**を出す(例: 「現住所へ送付」/「登記上の住所へ送付」)。反響を「宛先不明」にするときの判断材料になる |
 | 売却DMの宛先一覧・反響(outcome)の画面 | 同様に出所を出す |
 | 共有者が複数いる行 | **所有者ごとに出所が違い得る**ので、行を開いたときに所有者別に出す |
+| ⚠**孤児DM記録の訂正**(`GET /api/admin/orphan-dm-logs` + `src/app/(dashboard)/admin/orphan-dm-logs/page.tsx`) | **必ず含める**(@codex #369 R9 P2)。§4.5 は「物件を削除しても住所を残す」ためにあるのに、**削除後は物件の履歴画面が開けず、孤児の画面が唯一の入口**。現状この API は新しい住所欄も所有者ごとの出所も返していない。→ **返す・表示する**。住所は `owner_address` の表示レベルでマスク。**孤児の返戻を扱うテストを書く** |
 
 **混在グループの返戻テストを必須にする**(所有者Aは現住所・所有者Bは登記上で1通 → 返戻 → 画面で所有者ごとに別々の出所が出ること)。
 
@@ -247,7 +248,9 @@ ALTER TABLE "property_dm_logs"      ADD COLUMN "delivery_address" TEXT;
 | 取込エラー行の編集/再試行 | 同上 | ⚠ `rows/[rowId]/route.ts` と `rows/[rowId]/retry/route.ts` は**完全なコピペ重複**。片方だけ直す事故が最も起きやすい。**共通モジュールへ切り出してから**足す |
 | 住所補完 (address-fill) | **`address`(登記上)** | 取込 rawData 由来 = 登記由来 |
 | 登記文字列の除去 (registry-address-cleanup) | **`address`(登記上)** | 登記の記載にしか意味がない |
-| 文字化け補正 (text-fix) | **両方**を対象に(`FIELD_RESOURCE` に現住所を追加) | どちらにも制御文字は混入し得る |
+| 文字化け補正 (text-fix) | **両方**を対象に(`FIELD_RESOURCE` に現住所を追加) | どちらにも制御文字は混入し得る。⚠**直す route だけでは足りない**(下記) |
+
+⚠ **文字化けの「候補探し」も直さないと現住所は永久に見つからない**(@codex #369 R9 P2)。`src/app/api/admin/owners/text-hygiene-candidates/route.ts` は `TextHygieneField` / `SCANNED_FIELDS` / Prisma の select / 値の対応表が**すべて `address` 決め打ち**で、品質チェックの画面側も型の並びを明示列挙している。直す route(`text-fix`)に現住所を足しても、**候補として出てこないので誰も直せない**。→ **候補APIと品質チェック画面の型・配線も含める**。⚠ 候補一覧は所有者の住所を出すので、**表示レベルによる見え方(検索オラクル封じ)のテストと、実際に補正できるテストの両方**を書く。
 | 郵便番号の整形 (contact-fix) | **両方** | 同上 |
 | 法人番号の混入除去 (corporate-cleanup) | **`address`(登記上)** | 分断型の法人番号は登記由来の住所に混入する |
 | **国税庁の本店所在地の反映** (`corporate-apply` / `corporate-restore-apply` の addressMode=nta) | **`currentAddress`/`currentZip`(現住所)** | 国税庁が持つのは**現在の**本店所在地であって登記の記載ではない。ここを登記上へ書くと謄本と突合できなくなる。⚠**住所と郵便番号を別々に反映させない**(下記) |
@@ -403,6 +406,12 @@ UPDATE "property_dm_logs" l
 2. `npm run build` → `systemctl restart`(新アプリを出す)
 
 = このリポの通常手順(`docs/deploy.md`: ci → generate → **migrate deploy** → build → restart)と同じ並びで、**追加の手当ては不要**。⚠ ただし「migrate は後でいい」と順序を入れ替えないこと。
+
+⚠ **ダウンロード済み控えの無効化は「再起動の後」に行う**(@codex #369 R9 P2)。migration と再起動の間は**旧アプリが動いたまま**なので、その窓で利用者が再ダウンロードすると、**旧アプリが `downloadedAt`/`csvDigest` を書き戻す**(住所の控えは持たないまま)。その後に新アプリの確定がそれを受け入れ、**NULL の宛先が永久の記録へ写る**。
+
+→ **2重に塞ぐ**:
+1. 無効化(§9 の「再出力してください」に倒す処理)は **restart の後**に実行する(順序: migrate → build → restart → **無効化** → prune)。
+2. **確定(confirm)側で「住所の控えが無いダウンロード済み item は受け付けない」**(409「再出力してください」)。タイミングに依存しない防御。こちらが本命で、1 は運用上の後始末。
 
 **戻し方(アプリだけ戻す)**:
 
