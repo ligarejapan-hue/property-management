@@ -181,7 +181,7 @@ export function resolveMailingAddress(owner: {
 |---|---|---|
 | `src/lib/display-level.ts` | `OwnerDisplayConfig` / DEFAULT / full・hidden プリセット / `applyDisplayToOwner` / field masking 表 | **マスクされない生の住所がそのまま返る** |
 | `src/lib/api-helpers.ts` | `getOwnerDisplayConfig` の解決に新列を追加(`owner_address`/`owner_zip` の値を流用) | 全員 hidden になって消える |
-| `src/app/api/properties/suggest/route.ts` | 検索対象に新列を足す(表示レベルが生値のときのみ) | 現住所で検索できない/またはマスク中に検索オラクルができる |
+| `src/app/api/properties/suggest/route.ts` | 検索対象に新列を足す(表示レベルが生値のときのみ)。⚠**応答と `src/app/(dashboard)/properties/page.tsx` の候補行の select/型/表示にも現住所(マスク済み)を足す**(@codex #369 R19 P2) | 現住所で検索できない/またはマスク中に検索オラクルができる。⚠さらに**当たった値が候補に出ないまま Enter で先頭が選ばれ、似た名前の所有者から誤った物件へ飛ぶ** |
 | `src/app/api/owners/search/route.ts` | 同上。⚠**この route は `applyDisplayToOwner` を通さず、住所の検索条件・select・マスクを手書きしている** | 所有者リンクのモーダルから現住所で所有者を探せない。後から素朴に足すと**フィールドレベルの検索オラクル封じとマスク規則を迂回**する |
 | ⚠ `searchOwners` / `OwnerSearchHit` と、**この検索結果を出す画面すべて**(@codex #369 R13 P2 → R15 P2) | **マスク済みの現住所を返して表示する** | **当たったのに、当たった値が画面に出ない**。担当者は「なぜこの人が出たのか」が分からず、**似た名前の別人を選ぶ** |
 
@@ -346,7 +346,18 @@ export function resolveMailingAddress(owner: {
 | `src/app/api/import/owner-csv/route.ts` の **route 内 `JAPANESE_FIELD_TO_PROPERTY`** | 同じ2つ | **利用者が列の対応を明示指定した取込だけ**新欄が無視される |
 | 同 route の **`createData` の明示列挙** | 新列2つを書込 | **自動判定の取込でも** `prisma.owner.create` の直前で捨てられる |
 
-テストは**「ヘッダ自動判定」と「列の対応を明示指定」の両方**で書く(片方だけだともう片方の経路が素通りする)。
+⚠ **さらに、いま実際に使われている取込経路はもう1系統ある**(@codex #369 R19 P1)。`/import` と `/import/registry-dm`(受付帳＋所有者のペア取込)は、**上記とは別の解析器**を通る:
+
+| 直す箇所 | 内容 |
+|---|---|
+| `src/lib/reception-owner-match.ts` の **`OWNER_HEADER_TO_FIELD`** | 新ヘッダ2つ |
+| 同 **`parseOwnerRows`** | ⚠ 登記上の住所は**4列を連結**して作っている。現住所は**別の列として**取り込む(連結ロジックを流用しない) |
+| 同 **`ParsedOwnerRow` 型**とプレビュー表示 | 新項目 |
+| `src/app/api/import/reception-owner/route.ts` の **upsert(空欄補完 + create)** | §6 のとおり現住所は現住所側へ |
+
+⚠ **これは最も影響が大きい漏れ**: 発注者は**システム完成後に全データを削除して入れ直す**予定であり、その入れ直しは**この経路**で行われる。ここが落ちていると、**入れ直した直後から現住所が1件も入っておらず**、DM はすべて登記上の住所へ送られる(=機能が存在しないのと同じ)。
+
+テストは**3経路それぞれ**で書く: (1) ヘッダ自動判定の所有者CSV (2) 列の対応を明示指定した所有者CSV (3) **受付帳＋所有者のペア取込(端から端まで)**。
 
 ## 9. migration
 
@@ -393,7 +404,10 @@ ALTER TABLE "owners" ADD COLUMN "current_address" TEXT;
 → **ロールバックの扱いを2段に分ける**:
 
 - **現住所がまだ1件も入っていない間**: アプリを戻すだけでよい(実質は反映前と同じ)。
-- **1件でも入った後**: 原則は**前へ倒す**(不具合を直して再反映)。どうしても戻す必要があるときは、**戻す前に「所有者の編集」と「DM出力」を止め**(運用ゲート)、**新アプリへ復帰するまで再開しない**。
+- **1件でも入った後**: 原則は**前へ倒す**(不具合を直して再反映)。どうしても戻す必要があるときは、**戻す前に下記をすべて止め**(運用ゲート)、**新アプリへ復帰するまで再開しない**:
+  - 所有者の編集(登記上の欄を現住所で汚す)
+  - DM出力(登記上の住所へ誤配する)
+  - ⚠**所有者の統合(merge)と品質チェックの補正**(@codex #369 R19 P1)。旧アプリの統合は §7 のとおり **source を archive するだけで現住所を引き継がない**ため、**現住所を持つ側を統合すると、その現住所が失われる**。新アプリへ復帰しても復元できず、DM は登記上の住所へ戻る。
 
 ⚠ **反映直後の確認として、`current_address` が非NULLの件数を数える**(0件のうちは軽く戻せる)。運用ゲートの具体手順は反映時の runbook に書く。
 
