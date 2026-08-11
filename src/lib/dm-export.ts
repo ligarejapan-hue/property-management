@@ -20,6 +20,10 @@ import { PROPERTY_TYPE_LABELS, DM_STATUS_LABELS } from "@/lib/property-types";
 import { honorificForOwner } from "@/lib/owner-honorific";
 import type { OwnerDisplayConfig } from "@/lib/api-helpers";
 import { OTHER_CO_OWNERS_SUFFIX } from "@/lib/sale-dm-letter/addressee";
+import {
+  normalizeZipForGroup,
+  normalizeAddressForGroup,
+} from "@/lib/owner-mailing-address";
 
 // CSV ヘッダ（差込テンプレートの列順に厳密一致させること）。
 // 先頭 11 列は従来の差込テンプレ互換（列順・列名を変えない）。
@@ -92,33 +96,17 @@ export interface DmRowPropertyOwner {
 }
 
 /**
- * グルーピング用に郵便番号を正規化する。
- *  - trim
- *  - ハイフン（半角 "-" / 全角 "－"）を除去
- *  - 内部空白（半角 / 全角 / タブ等）を除去
- * 表記揺れ（"100-0001" と "1000001"）を同一視するための比較専用の値。
- * 出力には使わず、グルーピングキーの算出にのみ使う。
+ * グルーピング用の正規化は `owner-mailing-address.ts` が定義元。
+ *
+ * ⚠ここで再定義せず**再エクスポート**する。宛先の解決（`resolveMailingAddress` /
+ * `resolveGroupZip`）が同じ正規化を使う必要があり、かつ本モジュールがそれらを
+ * import するため、逆向きに import すると循環参照になる。
+ * 既存の import 元（テスト等）を壊さないよう名前はそのまま出す。
  */
-export function normalizeZipForGroup(
-  zip: string | null | undefined,
-): string {
-  if (typeof zip !== "string") return "";
-  return zip.replace(/[\s　\-−－]/g, "").trim();
-}
-
-/**
- * グルーピング用に住所を正規化する。
- *  - trim
- *  - 連続する空白（半角 / 全角 / タブ / 改行）を 1 つの半角空白へ畳む
- * 空白の揺れだけが異なる住所を同一視するための比較専用の値。
- * 空文字（実質「住所なし」）の場合は "" を返す。
- */
-export function normalizeAddressForGroup(
-  address: string | null | undefined,
-): string {
-  if (typeof address !== "string") return "";
-  return address.replace(/[\s　]+/g, " ").trim();
-}
+export {
+  normalizeZipForGroup,
+  normalizeAddressForGroup,
+} from "@/lib/owner-mailing-address";
 
 /**
  * 「郵便番号 + 住所」のグルーピングキー。氏名は含めない。
