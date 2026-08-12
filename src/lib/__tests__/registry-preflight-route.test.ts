@@ -164,6 +164,9 @@ describe("POST /api/registry-fetch/preflight", () => {
         // ⚠「何を取りに行くか」は参考情報ではなく買う対象そのものなので必ず返す
         //   (画面はこれが読めるまで実行させない・設計 §3.1.1)。
         target: { kind: "none", mismatchWarning: null },
+        // ⚠画面が「この内容で承認した」と言えるようにする digest
+        //   (地番そのものではない)。一括の作成時に照合する。
+        fingerprintHash: expect.stringMatching(/^[0-9a-f]{32}$/),
       },
       {
         propertyId: P2,
@@ -171,6 +174,7 @@ describe("POST /api/registry-fetch/preflight", () => {
         hasRegistryAttachment: true,
         hasOwners: false,
         target: { kind: "none", mismatchWarning: null },
+        fingerprintHash: expect.stringMatching(/^[0-9a-f]{32}$/),
       },
     ]);
     // 住所・所有者名などの PII を返さない

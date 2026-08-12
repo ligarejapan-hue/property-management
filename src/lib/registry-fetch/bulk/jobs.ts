@@ -86,6 +86,16 @@ export interface CreateBulkFetchJobArgs {
   certificateType: RegistryCertificateType;
   /** 二重作成防止キー(POST 応答が失われて再送しても同じジョブへ冪等化)。 */
   idempotencyKey?: string | null;
+  /**
+   * ⚠画面が承認した内容の指紋(物件ID → digest・任意)。
+   *
+   * 確認画面は「土地の登記を取得します」のように**何を買うか**を見せて承認を取る。
+   * その表示から作成までの間に他の担当者が住所や番号を変えると、作成時に読み直した
+   * **新しい値**で指紋が作られ、処理は「変わっていない」と判断して自動購入まで進む
+   * (例: 承認したのは土地なのに、家屋番号が足されて建物を買う)。
+   * 一致しない物件は対象外にして、もう一度確認してもらう(@codex #373 R6 P1)。
+   */
+  approvedFingerprints?: Record<string, string>;
 }
 
 /** ジョブの項目 status から作成結果の件数を組む(冪等ヒット時の返却にも使う)。 */
@@ -212,18 +222,28 @@ export async function createBulkFetchJob(
       realEstateNumber: p.realEstateNumber,
       ref: p.id,
     });
-    const status: BulkItemStatus = built.searchable ? "pending" : "skipped";
+    const fingerprintHash = hashPropertyFingerprint(p);
+    // ⚠承認した内容から変わっていたら、その物件だけ対象外にする。
+    //   「消えた」ではなく「変わった」なので理由コードを分ける(処理時と同じ)。
+    const approved = args.approvedFingerprints?.[p.id];
+    const changedSinceApproval = !!approved && approved !== fingerprintHash;
+    const status: BulkItemStatus =
+      built.searchable && !changedSinceApproval ? "pending" : "skipped";
     return {
       propertyId: p.id,
       status,
-      errorCode: built.searchable ? null : built.reason,
+      errorCode: changedSinceApproval
+        ? "identifier_changed"
+        : built.searchable
+          ? null
+          : built.reason,
       // ⚠作成時点の「検索に渡すもの一式」を控える(設計 §3.1.0.1)。
       //   一括は作成から処理までに時間が空く。その間に**別の正しい値へ**
       //   書き換わっても、番号の有無/形式の検査は素通りし、候補が1件なら
       //   **確認したのと別の筆**を自動で買う。
       //   材料は住所・地番・家屋番号・不動産番号(= 処理時に検索へ渡るものと同じ)。
       //   ⚠地番は秘匿情報なので**値は残さない**(sha256 の先頭32桁だけ)。
-      propertyFingerprintHash: hashPropertyFingerprint(p),
+      propertyFingerprintHash: fingerprintHash,
     };
   });
   const preSkipped = itemsData.filter((i) => i.status === "skipped").length;

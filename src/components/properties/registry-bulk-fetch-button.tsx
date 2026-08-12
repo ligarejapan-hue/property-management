@@ -59,6 +59,15 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
         propertyIds,
         certificateType,
         idemKeyRef.current, // 再送時の二重作成を防ぐ(サーバーが同じキーを冪等化)
+        // ⚠**この画面で見せた内容**を承認の根拠として送る（@codex #373 R6 P1）。
+        //   見せてから作成するまでの間に他の担当者が住所や番号を変えると、
+        //   作成時に読み直した新しい値で処理が進み、承認していないものを買う。
+        Object.fromEntries(
+          [...preflight.flagsById.values()].map((f) => [
+            f.propertyId,
+            f.fingerprintHash,
+          ]),
+        ),
       );
       idemKeyRef.current = null; // 成功 → 次は新しいキー
       idemSigRef.current = null;

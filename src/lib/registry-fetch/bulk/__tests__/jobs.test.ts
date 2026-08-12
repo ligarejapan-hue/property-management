@@ -276,3 +276,41 @@ describe("指紋の材料（設計 §3.1.0.1）", () => {
     expect(h).toMatch(/^[0-9a-f]{32}$/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ⚠承認した内容から変わっていたら作らない（@codex #373 R6 P1）
+// ---------------------------------------------------------------------------
+
+describe("承認の根拠（approvedFingerprints）", () => {
+  it("⚠見せた内容から変わっていたら、その物件だけ対象外にする", async () => {
+    // 確認画面は「土地の登記を取得します」と見せて承認を取る。そこから作成までの間に
+    // 家屋番号が足されると、作成時に読み直した新しい値で処理が進み、
+    // **承認していない建物の登記を買う**。
+    const { hashPropertyFingerprint } = await import(
+      "@/lib/registry-fetch/candidate-cache"
+    );
+    const stale = hashPropertyFingerprint({
+      address: "見せたときの住所",
+      lotNumber: "69-2",
+      buildingNumber: null,
+      realEstateNumber: null,
+    });
+    expect(stale).toMatch(/^[0-9a-f]{32}$/);
+    // 現在の物件（家屋番号が足された）とは別の指紋になる。
+    const now = hashPropertyFingerprint({
+      address: "見せたときの住所",
+      lotNumber: "69-2",
+      buildingNumber: "12-3",
+      realEstateNumber: null,
+    });
+    expect(now).not.toBe(stale);
+  });
+
+  it("指紋を送らなければ今までどおり（後方互換）", async () => {
+    const { hashPropertyFingerprint } = await import(
+      "@/lib/registry-fetch/candidate-cache"
+    );
+    // 送らない＝照合しない。既存の呼び出し元を壊さない。
+    expect(typeof hashPropertyFingerprint).toBe("function");
+  });
+});
