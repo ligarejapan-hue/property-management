@@ -42,6 +42,8 @@ export async function GET(request: NextRequest) {
         { nameKana: { contains: keyword, mode: "insensitive" } },
         { phone: { contains: keyword } },
         { address: { contains: keyword, mode: "insensitive" } },
+        // ⚠現住所も検索対象にする(この route は手書きの検索。入口ごとの足し忘れを防ぐ)。
+        { currentAddress: { contains: keyword, mode: "insensitive" } },
       ];
     }
 
@@ -82,6 +84,9 @@ export async function GET(request: NextRequest) {
       phone: maskValue(owner.phone, displayConfig.phone),
       zip: maskValue(owner.zip, displayConfig.zip),
       address: maskValue(owner.address, displayConfig.address),
+      // ⚠当たった値を返さないと「なぜこの人が出たのか」が画面で分からない。
+      currentZip: maskValue(owner.currentZip, displayConfig.zip),
+      currentAddress: maskValue(owner.currentAddress, displayConfig.address),
       note: maskValue(owner.note, displayConfig.note),
       corporateNumber: maskValue(owner.corporateNumber, displayConfig.corporateNumber),
       externalLinkKey: owner.externalLinkKey,

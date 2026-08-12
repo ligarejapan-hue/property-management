@@ -2535,6 +2535,8 @@ export async function fetchPropertySuggestions(q: string) {
             address: string | null;
             phone: string | null;
             zip: string | null;
+            currentAddress: string | null;
+            currentZip: string | null;
           }>,
         })),
     };
@@ -2551,6 +2553,8 @@ export async function fetchPropertySuggestions(q: string) {
         address: string | null;
         phone: string | null;
         zip: string | null;
+        currentAddress: string | null;
+        currentZip: string | null;
       }>;
     }>;
   }>(`/api/properties/suggest`, {

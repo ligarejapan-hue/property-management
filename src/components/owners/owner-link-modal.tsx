@@ -26,6 +26,8 @@ interface OwnerSearchHit {
   nameKana: string | null;
   phone: string | null;
   address: string | null;
+  /** 現住所（マスク済み）。検索で当たった値を画面に出すために受け取る。 */
+  currentAddress: string | null;
   externalLinkKey: string | null;
 }
 
@@ -293,7 +295,20 @@ export function OwnerLinkModal({
                         )}
                       </div>
                       <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                        {[h.nameKana, h.address].filter(Boolean).join(" ")}
+                        {[
+                          h.nameKana,
+                          // ⚠現住所があれば現住所を出す（実際に届く住所）。
+                          h.currentAddress
+                            ? `現住所: ${h.currentAddress}`
+                            : null,
+                          h.address
+                            ? h.currentAddress
+                              ? `登記上: ${h.address}`
+                              : h.address
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
                       </div>
                     </li>
                   );
