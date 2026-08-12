@@ -37,8 +37,9 @@ interface RegistryLocationSearchButtonProps {
   propertyAddress: string;
   /** 地番の保存に必要な現在の版番号。 */
   propertyVersion: number;
-  gpsLat: number | null;
-  gpsLng: number | null;
+  /** ⚠number とは限らない（Decimal は JSON 上 string）。ポップアップ側で正規化する。 */
+  gpsLat: number | string | null;
+  gpsLng: number | string | null;
   /** property:write。無ければポップアップは入力欄を出さず案内だけにする。 */
   canWriteProperty: boolean;
   /** 建物系の種別か（ポップアップで2つの道を出す）。 */

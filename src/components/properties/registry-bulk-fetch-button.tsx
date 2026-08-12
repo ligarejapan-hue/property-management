@@ -12,6 +12,7 @@ import { useRef, useState } from "react";
 import {
   useRegistryPreflight,
   RegistryPreflightCountLines,
+  RegistryTargetSummary,
 } from "@/components/properties/registry-preflight-warnings";
 import { useRouter } from "next/navigation";
 import { createRegistryFetchJob } from "@/lib/api-client";
@@ -113,6 +114,8 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
               番号がある・所在が不足している物件は自動で対象外（要手動）になります。
             </p>
             <RegistryPreflightCountLines state={preflight} />
+            {/* ⚠一括は候補1件で自動購入するので、承認の前に「何を買うか」を見せる。 */}
+            <RegistryTargetSummary state={preflight} />
 
             <fieldset className="mt-4 space-y-2 text-sm">
               <legend className="font-medium text-gray-700 dark:text-gray-200">

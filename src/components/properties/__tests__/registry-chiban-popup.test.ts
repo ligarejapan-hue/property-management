@@ -202,3 +202,61 @@ describe("⚠必ず弾かれる分類では実行の導線を出さない（@cod
     expect(shared).toContain("住所が未入力です");
   });
 });
+
+describe("⚠座標は文字列で来る（@codex #373 R5 P2）", () => {
+  it("Decimal 由来の文字列でも地図をその位置で開く", () => {
+    // DBの緯度経度は Prisma の Decimal で、物件詳細APIはそのまま返すため
+    // JSON 上は string。number だけ受け付けると**本番の全物件でトップページ**しか
+    // 開かず、地図が現地に寄らない。
+    expect(chibanMapUrl("35.430368", "139.601094")).toBe(
+      "https://minji-houmu.rmp.glbs.jp/view/chiban_search/map/#18/35.430368/139.601094",
+    );
+  });
+
+  it("数値と文字列が混ざっても開ける", () => {
+    expect(chibanMapUrl(35.430368, "139.601094")).toContain("#18/");
+  });
+
+  it("数値にできない文字列はトップを開く（壊れた座標で誤誘導しない）", () => {
+    const top = "https://minji-houmu.rmp.glbs.jp/view/chiban_search/map/";
+    expect(chibanMapUrl("abc", "139.6")).toBe(top);
+    expect(chibanMapUrl("", "")).toBe(top);
+    expect(chibanMapUrl("NaN", "1")).toBe(top);
+  });
+});
+
+describe("⚠一括は「何を買うか」を承認の前に見せる（@codex #373 R5 P1）", () => {
+  const BULK = readFileSync(
+    join(
+      process.cwd(),
+      "src/components/properties/registry-bulk-fetch-button.tsx",
+    ),
+    "utf8",
+  );
+  const SHARED = readFileSync(
+    join(
+      process.cwd(),
+      "src/components/properties/registry-preflight-warnings.tsx",
+    ),
+    "utf8",
+  );
+
+  it("一括モーダルが取得内訳を描く", () => {
+    // 一括は候補1件で自動購入するので、見せないと
+    // 「土地のつもりで建物の謄本を買った」が起きる。
+    expect(BULK).toContain("<RegistryTargetSummary state={preflight} />");
+  });
+
+  it("種別と食い違う物件を件数と物件リンクで名指しする", () => {
+    expect(SHARED).toContain("物件の種別と食い違うものがあります");
+    expect(SHARED).toContain("/properties/${id}");
+  });
+
+  it("⚠出すのは物件IDの先頭だけ（住所・地番は出さない）", () => {
+    expect(SHARED).toContain("id.slice(0, 8)");
+  });
+
+  it("食い違いは見せるだけで止めない（発注者判断）", () => {
+    expect(SHARED).not.toMatch(/mismatchWarning[\s\S]{0,120}disabled/);
+  });
+});

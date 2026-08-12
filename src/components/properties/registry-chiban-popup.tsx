@@ -30,13 +30,25 @@ const CHIBAN_MAP_BASE = "https://minji-houmu.rmp.glbs.jp/view/chiban_search/map/
  * 地番検索サービスのURL。
  * ⚠ズーム18は**筆界と地番が見える倍率**（発注者の実機画面で確認済み。#15 では筆界が出ない）。
  * ⚠座標が無ければトップを開くだけ（住所は渡さない）。
+ *
+ * ⚠**座標は文字列で来る**（@codex #373 R5 P2）。DBの緯度経度は Prisma の Decimal で、
+ * 物件詳細APIはそのまま返すため JSON 上は string になる。number だけを受け付けると
+ * **本番のすべての物件でトップページしか開かない**（地図が現地に寄らない）。
+ * このリポは地図APIでも同じ変換をしている（field-survey-map-util の coerceLat/coerceLng）。
  */
 export function chibanMapUrl(
-  lat: number | null | undefined,
-  lng: number | null | undefined,
+  lat: number | string | null | undefined,
+  lng: number | string | null | undefined,
 ): string {
-  if (typeof lat !== "number" || typeof lng !== "number") return CHIBAN_MAP_BASE;
-  return `${CHIBAN_MAP_BASE}#18/${lat.toFixed(6)}/${lng.toFixed(6)}`;
+  const n = (v: number | string | null | undefined): number | null => {
+    if (v == null || v === "") return null;
+    const num = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(num) ? num : null;
+  };
+  const la = n(lat);
+  const ln = n(lng);
+  if (la == null || ln == null) return CHIBAN_MAP_BASE;
+  return `${CHIBAN_MAP_BASE}#18/${la.toFixed(6)}/${ln.toFixed(6)}`;
 }
 
 interface RegistryChibanPopupProps {
@@ -45,8 +57,9 @@ interface RegistryChibanPopupProps {
   propertyAddress: string;
   /** 保存に必要な現在の版番号。 */
   propertyVersion: number;
-  gpsLat: number | null;
-  gpsLng: number | null;
+  /** ⚠number とは限らない（Decimal は JSON 上 string）。 */
+  gpsLat: number | string | null;
+  gpsLng: number | string | null;
   /** property:write。無ければ入力欄を出さず案内だけにする。 */
   canWriteProperty: boolean;
   /** 建物系の種別か（2つの道を出す）。 */

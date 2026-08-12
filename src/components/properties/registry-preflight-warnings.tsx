@@ -5,7 +5,11 @@ import {
   fetchRegistryPreflight,
   type RegistryPreflightFlags,
 } from "@/lib/api-client";
-import type { RegistryTarget } from "@/lib/registry-fetch/registry-target";
+import Link from "next/link";
+import {
+  isSearchableTarget,
+  type RegistryTarget,
+} from "@/lib/registry-fetch/registry-target";
 
 // 謄本取得の事前警告(発注者要望 2026-08-08)。
 // 「既に取得済み/謄本PDF添付あり/所有者入力済み」の物件へ課金する前に気づけるようにする。
@@ -244,6 +248,71 @@ export function RegistryTargetNote({
         <span className="mt-0.5 block text-amber-700 dark:text-amber-300">
           ⚠ {target.mismatchWarning}
         </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 一括で「何を買うことになるのか」の内訳を出す。
+ *
+ * ⚠一括は**候補が1件なら自動で買う**ので、承認する前に見せないと
+ * 「土地のつもりで建物の謄本を買った」が起きる（@codex #373 R5 P1）。
+ * 種別と食い違う物件は**件数と物件へのリンク**で名指しする。
+ * ⚠出すのは物件IDの先頭だけ（住所・地番は出さない＝秘匿）。
+ */
+export function RegistryTargetSummary({
+  state,
+}: {
+  state: RegistryPreflightState;
+}) {
+  if (state.targetsUnavailable) {
+    return (
+      <p className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+        何を取りに行くか確認できませんでした。もう一度お試しください。
+      </p>
+    );
+  }
+  const entries = [...state.targetsById.entries()];
+  if (entries.length === 0) return null;
+
+  const land = entries.filter(([, t]) => t.kind === "land").length;
+  const building = entries.filter(([, t]) => t.kind === "building").length;
+  const notSearchable = entries.filter(
+    ([, t]) => !isSearchableTarget(t.kind),
+  ).length;
+  const mismatches = entries.filter(([, t]) => t.mismatchWarning);
+
+  return (
+    <div className="rounded border border-indigo-200 bg-indigo-50 p-2 text-xs text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
+      <p className="font-medium">取得するもの</p>
+      <ul className="ml-4 list-disc">
+        {land > 0 && <li>土地の登記: {land}件</li>}
+        {building > 0 && <li>建物の登記: {building}件</li>}
+        {notSearchable > 0 && (
+          <li>この経路では取得できない: {notSearchable}件（対象外になります）</li>
+        )}
+      </ul>
+      {mismatches.length > 0 && (
+        <div className="mt-1 text-amber-800 dark:text-amber-300">
+          {/* ⚠止めない。見せたうえで実行できる（発注者判断 2026-08-12）。 */}
+          <p className="font-medium">
+            ⚠物件の種別と食い違うものがあります（{mismatches.length}件）
+          </p>
+          <ul className="ml-4 list-disc">
+            {mismatches.map(([id, t]) => (
+              <li key={id}>
+                {t.mismatchWarning}{" "}
+                <Link
+                  href={`/properties/${id}`}
+                  className="font-mono underline hover:text-amber-900 dark:hover:text-amber-200"
+                >
+                  ({id.slice(0, 8)})
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
