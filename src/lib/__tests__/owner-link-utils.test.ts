@@ -19,6 +19,10 @@ const baseForm: OwnerCreateFormValues = {
   phone: "",
   zip: "",
   address: "",
+  // 現住所は未設定（＝登記上の住所を使う）を既定にする。
+  // 現住所そのものの挙動は owner-current-address-write.test.ts で固定している。
+  currentAddress: "",
+  currentZip: "",
   email: "",
 };
 
@@ -44,6 +48,8 @@ describe("buildCreateOwnerPayload", () => {
       phone: " 090-1234-5678 ",
       zip: " 100-0001 ",
       address: " 東京都千代田区 ",
+      currentAddress: "",
+      currentZip: "",
       email: " a@example.com ",
     });
     expect(payload.nameKana).toBe("ヤマダタロウ");
@@ -148,6 +154,8 @@ describe("buildCreateAndLinkPayload（atomic create-and-link 用 payload）", ()
     phone: " 090 ",
     zip: "",
     address: " 東京都 ",
+    currentAddress: "",
+    currentZip: "",
     email: "",
   };
 
@@ -159,6 +167,10 @@ describe("buildCreateAndLinkPayload（atomic create-and-link 用 payload）", ()
       phone: "090",
       zip: null,
       address: "東京都",
+      // ⚠現住所は**常にペアで**送る（片方だけ送るとサーバー側の規則で拒否/クリアされる）。
+      // 未設定なら両方 null＝「現住所は使わない＝登記上の住所へ送る」。
+      currentAddress: null,
+      currentZip: null,
       email: null,
       relationship: "本人",
       isPrimary: true,
