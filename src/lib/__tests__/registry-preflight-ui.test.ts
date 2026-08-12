@@ -70,9 +70,9 @@ describe("実行ボタンは事前確認が済むまで無効(#365 R1)", () => {
 
   it("hook は pending を導出し、失敗も『確定』として注意書き表示後に実行可能へ戻す", () => {
     expect(SHARED).toMatch(
-      /pending: active && propertyIds.length > 0 && settledKey !== idsKey/,
+      /pending: active && propertyIds.length > 0 && settledKey !== cacheKey/,
     );
-    expect(SHARED).toMatch(/setSettledKey\(idsKey\); \/\/ 失敗も「確定」/);
+    expect(SHARED).toContain('setSettledKey(cacheKey); // 失敗も「確定」');
   });
   it("3入口の課金ボタンすべてが preflight\.pending で disabled になる", () => {
     expect(AUTO).toMatch(/disabled=\{preflight\.pending\}/);
@@ -80,5 +80,18 @@ describe("実行ボタンは事前確認が済むまで無効(#365 R1)", () => {
       /disabled={preflight.pending || preflight.targetsUnavailable}/,
     );
     expect(BULK).toMatch(/preflight.targetsUnavailable/);
+  });
+});
+
+describe("⚠APIへ送るIDに取り直しの合図を混ぜない（@codex #373 P1）", () => {
+  it("送るのは idsKey（合図を含む cacheKey ではない）", () => {
+    // 混ぜると `0|<uuid>` が送られて 400 になり、分類が読めず
+    // 実行ボタンが永久に無効＝謄本の取得が全部できなくなる。
+    expect(SHARED).toContain("fetchRegistryPreflight(idsKey.split(\",\"))");
+    expect(SHARED).not.toMatch(/fetchRegistryPreflight\(cacheKey/);
+  });
+
+  it("キーの作り分けは純関数に切り出してある（ソース走査では捕まらない壊れ方のため）", () => {
+    expect(SHARED).toContain("export function buildPreflightKeys");
   });
 });

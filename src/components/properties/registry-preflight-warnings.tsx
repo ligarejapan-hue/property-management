@@ -31,6 +31,25 @@ export interface RegistryPreflightState {
   targetsUnavailable: boolean;
 }
 
+/**
+ * preflight で使う2つのキーを作る。
+ *
+ * ⚠**送るIDの並び**と**取り直しの合図を含むキー**は別物にする(@codex #373 P1)。
+ * 1つにまとめて `0|<uuid>` のような値を作ると、それがそのまま
+ * `fetchRegistryPreflight` へ渡って 400(物件IDの形式が不正)になり、
+ * **謄本の取得が全部できなくなる**(失敗 → 分類が読めない → 実行ボタンが永久に無効)。
+ *
+ * - `idsKey` … API へ送るID(ソートして結合。選択順に依存しない)
+ * - `cacheKey` … effect の依存と「確定したか」の比較にだけ使う
+ */
+export function buildPreflightKeys(
+  propertyIds: string[],
+  reloadToken: number,
+): { idsKey: string; cacheKey: string } {
+  const idsKey = [...propertyIds].sort().join(",");
+  return { idsKey, cacheKey: `${reloadToken}|${idsKey}` };
+}
+
 /** active が true になったタイミングで preflight を1回取得する。 */
 export function useRegistryPreflight(
   propertyIds: string[],
@@ -53,8 +72,7 @@ export function useRegistryPreflight(
   // 完了済みの対象集合キー。pending はここから導出する(effect 内の同期 setState を
   // 使わずに「確認が済むまで実行を止める」を実現する=#365 R1)。
   const [settledKey, setSettledKey] = useState<string | null>(null);
-  // useEffect の依存を安定させる(選択順に依存しないようソートして結合)。
-  const idsKey = `${reloadToken}|${[...propertyIds].sort().join(",")}`;
+  const { idsKey, cacheKey } = buildPreflightKeys(propertyIds, reloadToken);
 
   // ⚠effect 内の同期 setState は lint 規約(react-hooks/set-state-in-effect)で禁止。
   // 状態更新はすべて fetch の then/catch(非同期)内で行う。
@@ -78,7 +96,7 @@ export function useRegistryPreflight(
         setFlagsById(new Map(res.data.map((f) => [f.propertyId, f])));
         setTargetsById(new Map(res.data.map((f) => [f.propertyId, f.target])));
         setTargetsUnavailable(false);
-        setSettledKey(idsKey);
+        setSettledKey(cacheKey);
       })
       .catch(() => {
         if (cancelled) return;
@@ -88,18 +106,18 @@ export function useRegistryPreflight(
         // ⚠分類だけは「確定」させない。参考情報の失敗と違い、分からないまま
         //   実行すると候補1件で自動購入まで進む(設計 §3.1.1・fail closed)。
         setTargetsUnavailable(true);
-        setSettledKey(idsKey); // 失敗も「確定」= failed の注意書きを見せた上で実行可能にする
+        setSettledKey(cacheKey); // 失敗も「確定」= failed の注意書きを見せた上で実行可能にする
       });
     return () => {
       cancelled = true;
     };
-  }, [active, idsKey]);
+  }, [active, cacheKey, idsKey]);
 
   return {
     flagsById,
     targetsById,
     failed,
-    pending: active && propertyIds.length > 0 && settledKey !== idsKey,
+    pending: active && propertyIds.length > 0 && settledKey !== cacheKey,
     // 閉じているときは止める理由が無い(実行ボタン自体が出ない)。
     targetsUnavailable: active && targetsUnavailable,
   };
