@@ -11,6 +11,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges, OWNER_TRACKED_FIELDS } from "@/lib/change-log";
 import { updateOwnerSchema } from "@/lib/validators";
+import { resolveCurrentAddressWrite } from "@/lib/owner-current-address-write";
 import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { applyDisplayToOwner } from "@/lib/display-level";
 import { canAccessPropertyRecord } from "@/lib/property-access";
@@ -133,7 +134,20 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { version, ...updateFields } = updateOwnerSchema.parse(body);
+    const { version, ...parsedFields } = updateOwnerSchema.parse(body);
+
+    // ⚠現住所は「住所と郵便番号を必ずペアで扱う」規則を先に通す（設計 §6.1）。
+    //  - 住所だけ来たら郵便番号を null にする（古い番号を残すと、新しい住所に古い番号を刷る）
+    //  - 郵便番号だけの更新は 400 で拒否する（対になる住所が無い）
+    const pair = resolveCurrentAddressWrite(parsedFields);
+    if (!pair.ok) {
+      throw new ApiError(
+        400,
+        "現住所の郵便番号だけを更新することはできません（住所と一緒に指定してください）",
+        "CURRENT_ZIP_WITHOUT_ADDRESS",
+      );
+    }
+    const updateFields = { ...parsedFields, ...pair.fields };
 
     // Field-level write permission check: 各フィールドごとに明示的な full/edit 権限を要求する。
     // getOwnerDisplayConfig の owner_email fallback（表示用）は使わない。
@@ -144,6 +158,9 @@ export async function PATCH(
       { requestKey: "phone", resource: "owner_phone" },
       { requestKey: "zip", resource: "owner_zip" },
       { requestKey: "address", resource: "owner_address" },
+      // ⚠現住所は登記上の住所と同じ機微度＝同じ field-level 権限で扱う。
+      { requestKey: "currentZip", resource: "owner_zip" },
+      { requestKey: "currentAddress", resource: "owner_address" },
       { requestKey: "email", resource: "owner_email" },
       { requestKey: "note", resource: "owner_note" },
       { requestKey: "corporateNumber", resource: "owner_corporate_number" },
@@ -154,6 +171,18 @@ export async function PATCH(
       if (requestKey in updateFields && !hasExplicitWritePerm(perms, resource)) {
         throw new ApiError(403, `${requestKey} を更新する権限がありません`, "FORBIDDEN");
       }
+    }
+
+    // ⚠「住所だけ送られたので郵便番号を空にする」も**郵便番号への書き込み**なので、
+    //  owner_zip の書込権限を要求する（設計 §6.1.1）。権限が無いときにクリアだけ省略すると、
+    //  住所が変わって古い郵便番号が残る＝この規則が防ぎたい状態そのものになるため、
+    //  **住所の更新ごと 403 で拒否する**。
+    if (pair.impliesZipWrite && !hasExplicitWritePerm(perms, "owner_zip")) {
+      throw new ApiError(
+        403,
+        "現住所を変更すると郵便番号を空にする必要があるため、郵便番号の編集権限が必要です",
+        "FORBIDDEN",
+      );
     }
 
     // Get current owner for change tracking

@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { createAndLinkOwnerSchema } from "@/lib/validators";
+import { resolveCurrentAddressWrite } from "@/lib/owner-current-address-write";
 import { hasPermission } from "@/lib/permissions";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import {
@@ -37,8 +38,19 @@ export async function POST(
     }
 
     const body = await request.json();
-    const { relationship, isPrimary, ...ownerData } =
+    const { relationship, isPrimary, ...parsedOwner } =
       createAndLinkOwnerSchema.parse(body);
+
+    // ⚠現住所は「住所と郵便番号を必ずペアで扱う」規則を先に通す（設計 §6.1）。
+    const pair = resolveCurrentAddressWrite(parsedOwner);
+    if (!pair.ok) {
+      throw new ApiError(
+        400,
+        "現住所の郵便番号だけを指定することはできません（住所と一緒に指定してください）",
+        "CURRENT_ZIP_WITHOUT_ADDRESS",
+      );
+    }
+    const ownerData = { ...parsedOwner, ...pair.fields };
 
     // field-level write 権限チェック（/api/owners POST と同方針・owner-create で共有）。
     // 拒否は DB アクセス・AuditLog 生成の前なので生値はログに残らない。
@@ -86,6 +98,10 @@ export async function POST(
           phone: ownerData.phone,
           zip: ownerData.zip,
           address: ownerData.address,
+          // ⚠明示列挙なので、ここへ足さないと schema に足しても保存されない
+          //   （物件詳細から追加した所有者だけ現住所が消える）。
+          currentZip: ownerData.currentZip,
+          currentAddress: ownerData.currentAddress,
           note: ownerData.note,
           email: ownerData.email,
           externalLinkKey: ownerData.externalLinkKey,

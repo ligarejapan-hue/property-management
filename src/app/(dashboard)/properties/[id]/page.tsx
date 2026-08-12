@@ -992,6 +992,10 @@ function OwnerCard({
     phone: po.owner.phone ?? "",
     zip: po.owner.zip ?? "",
     address: po.owner.address ?? "",
+    // ⚠API が返した値で初期化する。返っていない（select 漏れ）と空で初期化され、
+    //   そのまま保存して登録済みの現住所を消す。
+    currentAddress: po.owner.currentAddress ?? "",
+    currentZip: po.owner.currentZip ?? "",
     email: po.owner.email ?? "",
     corporateNumber: po.owner.corporateNumber ?? "",
     companyRegistryNumber: po.owner.companyRegistryNumber ?? "",
@@ -1004,6 +1008,10 @@ function OwnerCard({
       phone: po.owner.phone ?? "",
       zip: po.owner.zip ?? "",
       address: po.owner.address ?? "",
+      // ⚠編集を開くたびに API の値で組み直す。ここを落とすと、開いて保存しただけで
+      //   登録済みの現住所が消える。
+      currentAddress: po.owner.currentAddress ?? "",
+      currentZip: po.owner.currentZip ?? "",
       email: po.owner.email ?? "",
       corporateNumber: po.owner.corporateNumber ?? "",
       companyRegistryNumber: po.owner.companyRegistryNumber ?? "",

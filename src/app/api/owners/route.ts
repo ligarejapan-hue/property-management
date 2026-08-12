@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { createOwnerSchema } from "@/lib/validators";
+import { resolveCurrentAddressWrite } from "@/lib/owner-current-address-write";
 import { hasPermission, maskValue, hasExplicitWritePerm } from "@/lib/permissions";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { canAccessPropertyRecord } from "@/lib/property-access";
@@ -137,7 +138,18 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const data = createOwnerSchema.parse(body);
+    const parsed = createOwnerSchema.parse(body);
+
+    // ⚠現住所は「住所と郵便番号を必ずペアで扱う」規則を先に通す（設計 §6.1）。
+    const pair = resolveCurrentAddressWrite(parsed);
+    if (!pair.ok) {
+      throw new ApiError(
+        400,
+        "現住所の郵便番号だけを指定することはできません（住所と一緒に指定してください）",
+        "CURRENT_ZIP_WITHOUT_ADDRESS",
+      );
+    }
+    const data = { ...parsed, ...pair.fields };
 
     // Field-level write permission check（PATCH /api/owners/[id] と同方針）。
     // null/undefined のフィールドはスキップ（省略は許可）。
@@ -149,6 +161,9 @@ export async function POST(request: NextRequest) {
       { value: data.phone, resource: "owner_phone", label: "phone" },
       { value: data.zip, resource: "owner_zip", label: "zip" },
       { value: data.address, resource: "owner_address", label: "address" },
+      // ⚠現住所は登記上の住所と同じ機微度＝同じ field-level 権限で扱う。
+      { value: data.currentZip, resource: "owner_zip", label: "currentZip" },
+      { value: data.currentAddress, resource: "owner_address", label: "currentAddress" },
       { value: data.email, resource: "owner_email", label: "email" },
       { value: data.note, resource: "owner_note", label: "note" },
       { value: data.corporateNumber, resource: "owner_corporate_number", label: "corporateNumber" },
@@ -189,6 +204,9 @@ export async function POST(request: NextRequest) {
         phone: data.phone,
         zip: data.zip,
         address: data.address,
+        // ⚠明示列挙なので、ここへ足さないと schema に足しても保存されない。
+        currentZip: data.currentZip,
+        currentAddress: data.currentAddress,
         note: data.note,
         email: data.email,
         externalLinkKey: data.externalLinkKey,

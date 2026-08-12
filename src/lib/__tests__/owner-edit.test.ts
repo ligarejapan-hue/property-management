@@ -621,6 +621,10 @@ const fullForm = {
   phone: "090-1234-5678",
   zip: "123-4567",
   address: "東京都渋谷区1-1",
+  // 現住所は未設定（＝登記上の住所を使う）を既定にする。
+  // 現住所そのものの挙動は owner-current-address-write.test.ts で固定している。
+  currentAddress: "",
+  currentZip: "",
   email: "yamada@example.com",
   corporateNumber: "",
   companyRegistryNumber: "",

@@ -12,8 +12,14 @@ export interface OwnerCreateData {
   name: string;
   nameKana?: string | null;
   phone?: string | null;
+  /** 登記上の郵便番号 */
   zip?: string | null;
+  /** 登記上の住所 */
   address?: string | null;
+  /** 現住所の郵便番号（⚠住所とペアでのみ書く。resolveCurrentAddressWrite 参照） */
+  currentZip?: string | null;
+  /** 現住所 */
+  currentAddress?: string | null;
   note?: string | null;
   email?: string | null;
   corporateNumber?: string | null;
@@ -32,6 +38,10 @@ const OWNER_FIELD_WRITE_RESOURCES: Array<{
   { key: "phone", resource: "owner_phone", label: "phone" },
   { key: "zip", resource: "owner_zip", label: "zip" },
   { key: "address", resource: "owner_address", label: "address" },
+  // ⚠現住所は登記上の住所と同じ機微度なので、同じ field-level 権限で扱う
+  // （専用の resource は作らない。companyRegistryNumber が corporateNumber を流用するのと同型）。
+  { key: "currentZip", resource: "owner_zip", label: "currentZip" },
+  { key: "currentAddress", resource: "owner_address", label: "currentAddress" },
   { key: "email", resource: "owner_email", label: "email" },
   { key: "note", resource: "owner_note", label: "note" },
   { key: "corporateNumber", resource: "owner_corporate_number", label: "corporateNumber" },
