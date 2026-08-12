@@ -67,7 +67,8 @@ vi.mock("@/lib/prisma", () => {
       updateMany: vi.fn(),
       deleteMany: vi.fn(),
     },
-    changeLog: { count: vi.fn(), createMany: vi.fn() },
+    // 履歴は「件数」だけでなく「項目名」も見る（現住所だけの編集は統合を許すため）。
+    changeLog: { count: vi.fn(), findMany: vi.fn(), createMany: vi.fn() },
     // PR-A(送付記録): DM 参照の付け替え(反響の置き去り防止・@codex R11/R32)。
     propertyDmLog: { updateMany: vi.fn(async () => ({ count: 0 })) },
     dmExportBatchItem: { updateMany: vi.fn(async () => ({ count: 0 })) },
@@ -81,7 +82,7 @@ vi.mock("@/lib/prisma", () => {
     default: {
       owner: { findUnique: vi.fn() },
       ownerMemo: { count: vi.fn() },
-      changeLog: { count: vi.fn() },
+      changeLog: { count: vi.fn(), findMany: vi.fn() },
       importJobRow: { findMany: vi.fn() },
       propertyOwner: { findMany: vi.fn() },
       $transaction: vi
@@ -118,7 +119,7 @@ const PERMS_NO_DELETE = [
 const pm = prisma as unknown as {
   owner: { findUnique: Mock };
   ownerMemo: { count: Mock };
-  changeLog: { count: Mock };
+  changeLog: { count: Mock; findMany: Mock };
   importJobRow: { findMany: Mock };
   propertyOwner: { findMany: Mock };
   $transaction: Mock;
@@ -130,7 +131,7 @@ const pm = prisma as unknown as {
       updateMany: Mock;
       deleteMany: Mock;
     };
-    changeLog: { count: Mock; createMany: Mock };
+    changeLog: { count: Mock; findMany: Mock; createMany: Mock };
   };
 };
 
@@ -192,6 +193,7 @@ function setupEligiblePair() {
     },
   );
   pm.changeLog.count.mockResolvedValue(0);
+  pm.changeLog.findMany.mockResolvedValue([]);
   pm.importJobRow.findMany.mockResolvedValue([]);
   pm.ownerMemo.count.mockResolvedValue(0);
   pm.propertyOwner.findMany.mockResolvedValue([]);
@@ -206,6 +208,7 @@ function setupEligiblePair() {
     },
   );
   pm._tx.changeLog.count.mockResolvedValue(0);
+  pm._tx.changeLog.findMany.mockResolvedValue([]);
   pm._tx.ownerMemo.count.mockResolvedValue(0);
   pm._tx.ownerMemo.updateMany.mockResolvedValue({ count: 0 });
   pm._tx.propertyOwner.findMany.mockResolvedValue([]);
@@ -386,6 +389,10 @@ describe("POST merge: dryRun=true", () => {
   it("source has ChangeLog → blocked", async () => {
     setupEligiblePair();
     pm.changeLog.count.mockResolvedValue(3);
+    // 現住所以外の項目が編集されている＝従来どおり拒否。
+    const rows3 = [{ fieldName: "phone" }, { fieldName: "name" }, { fieldName: "note" }];
+    pm.changeLog.findMany.mockResolvedValue(rows3);
+    pm._tx.changeLog.findMany.mockResolvedValue(rows3);
     const res = await POST(
       makeRequest({
         masterId: MASTER_ID,
@@ -701,6 +708,9 @@ describe("POST merge: dryRun=false 失敗系", () => {
   it("blocked safety violation → 422", async () => {
     setupEligiblePair();
     pm.changeLog.count.mockResolvedValue(2);
+    const rows2 = [{ fieldName: "phone" }, { fieldName: "name" }];
+    pm.changeLog.findMany.mockResolvedValue(rows2);
+    pm._tx.changeLog.findMany.mockResolvedValue(rows2);
     const res = await POST(
       makeRequest({
         masterId: MASTER_ID,
@@ -760,5 +770,171 @@ describe("POST merge: dryRun=false 失敗系", () => {
     expect(res.status).toBe(409);
     const json = await res.json();
     expect(json.error.blockReasons).toContain("version_mismatch");
+  });
+});
+
+// ── 現住所の引き継ぎ（設計 §7） ─────────────────────────────────────────────
+
+const PERMS_WITH_ADDRESS_WRITE = [
+  ...FULL_PERMS,
+  { resource: "owner", action: "write", granted: true },
+  { resource: "owner_address", action: "edit", granted: true },
+  { resource: "owner_zip", action: "edit", granted: true },
+];
+
+/** master / source の現住所を差し替えて、統合を実行する。 */
+function setupCurrentAddressPair(
+  masterCur: { currentAddress: string | null; currentZip: string | null },
+  sourceCur: { currentAddress: string | null; currentZip: string | null },
+  changeLogFields: string[] = [],
+) {
+  setupEligiblePair();
+  const master = {
+    ...makeOwner({ id: MASTER_ID, name: MASTER_NAME, address: MASTER_ADDRESS }),
+    ...masterCur,
+  };
+  const source = {
+    ...makeOwner({ id: SOURCE_ID, name: SOURCE_NAME, address: SOURCE_ADDRESS }),
+    ...sourceCur,
+    version: changeLogFields.length > 0 ? 2 : 1,
+  };
+  const resolve = ({ where }: { where: { id: string } }) => {
+    if (where.id === MASTER_ID) return Promise.resolve(master);
+    if (where.id === SOURCE_ID) return Promise.resolve(source);
+    return Promise.resolve(null);
+  };
+  pm.owner.findUnique.mockImplementation(resolve);
+  pm._tx.owner.findUnique.mockImplementation(resolve);
+  const rows = changeLogFields.map((f) => ({ fieldName: f }));
+  pm.changeLog.count.mockResolvedValue(rows.length);
+  pm.changeLog.findMany.mockResolvedValue(rows);
+  pm._tx.changeLog.findMany.mockResolvedValue(rows);
+}
+
+function execMerge(sourceVersion = 1) {
+  return POST(
+    makeRequest({
+      masterId: MASTER_ID,
+      sourceId: SOURCE_ID,
+      masterVersion: 1,
+      sourceVersion,
+      dryRun: false,
+    }),
+  );
+}
+
+describe("POST merge: 現住所の引き継ぎ", () => {
+  beforeEach(() => {
+    vi.mocked(getUserPermissions).mockResolvedValue(PERMS_WITH_ADDRESS_WRITE);
+  });
+
+  it("残す側が空なら、消える側の現住所をペアごと引き継ぐ", async () => {
+    setupCurrentAddressPair(
+      { currentAddress: null, currentZip: null },
+      { currentAddress: "渋谷区神宮前1-1-1", currentZip: "150-0001" },
+    );
+    const res = await execMerge();
+    expect(res.status).toBe(200);
+    // master の version bump と同じ更新で書かれる
+    const bump = pm._tx.owner.updateMany.mock.calls
+      .map((c: unknown[]) => c[0] as { data: Record<string, unknown> })
+      .find((c) => c.data.currentAddress !== undefined);
+    expect(bump?.data.currentAddress).toBe("渋谷区神宮前1-1-1");
+    expect(bump?.data.currentZip).toBe("150-0001");
+  });
+
+  it("引き継いだ2列が変更履歴に残る（前後が追える）", async () => {
+    setupCurrentAddressPair(
+      { currentAddress: null, currentZip: null },
+      { currentAddress: "渋谷区神宮前1-1-1", currentZip: "150-0001" },
+    );
+    await execMerge();
+    const logs = pm._tx.changeLog.createMany.mock.calls[0][0].data as Array<{
+      fieldName: string;
+      newValue: string | null;
+    }>;
+    const fields = logs.map((l) => l.fieldName);
+    expect(fields).toContain("currentAddress");
+    expect(fields).toContain("currentZip");
+  });
+
+  it("同じ宛先で残す側の郵便番号だけ空なら、番号だけ引き継ぐ", async () => {
+    setupCurrentAddressPair(
+      { currentAddress: "渋谷区神宮前1-1-1", currentZip: null },
+      { currentAddress: "渋谷区神宮前1-1-1", currentZip: "150-0001" },
+    );
+    const res = await execMerge();
+    expect(res.status).toBe(200);
+    const bump = pm._tx.owner.updateMany.mock.calls
+      .map((c: unknown[]) => c[0] as { data: Record<string, unknown> })
+      .find((c) => c.data.currentZip !== undefined);
+    expect(bump?.data.currentZip).toBe("150-0001");
+    expect(bump?.data.currentAddress).toBeUndefined();
+  });
+
+  it("⚠現住所が食い違うなら統合を拒否する", async () => {
+    setupCurrentAddressPair(
+      { currentAddress: "渋谷区神宮前1-1-1", currentZip: null },
+      { currentAddress: "横浜市南区井土ケ谷中町69-2", currentZip: null },
+    );
+    const res = await execMerge();
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error.blockReasons).toContain("current_address_conflict");
+  });
+
+  it("⚠同じ現住所で郵便番号だけ食い違うなら統合を拒否する", async () => {
+    setupCurrentAddressPair(
+      { currentAddress: "渋谷区神宮前1-1-1", currentZip: "150-0001" },
+      { currentAddress: "渋谷区神宮前1-1-1", currentZip: "231-0842" },
+    );
+    const res = await execMerge();
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error.blockReasons).toContain("current_zip_conflict");
+  });
+
+  it("⚠あとから現住所を足しただけの相手は統合できる（門が引き継ぎを殺さない）", async () => {
+    setupCurrentAddressPair(
+      { currentAddress: null, currentZip: null },
+      { currentAddress: "渋谷区神宮前1-1-1", currentZip: "150-0001" },
+      ["currentAddress", "currentZip"],
+    );
+    const res = await execMerge(2);
+    expect(res.status).toBe(200);
+  });
+
+  it("他の項目も編集されている相手は従来どおり拒否", async () => {
+    setupCurrentAddressPair(
+      { currentAddress: null, currentZip: null },
+      { currentAddress: "渋谷区神宮前1-1-1", currentZip: "150-0001" },
+      ["currentAddress", "phone"],
+    );
+    const res = await execMerge(2);
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error.blockReasons).toContain("source_has_changelog");
+  });
+
+  it("⚠住所の書込権限が無い利用者は 403（現住所を黙って捨てない）", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(FULL_PERMS);
+    setupCurrentAddressPair(
+      { currentAddress: null, currentZip: null },
+      { currentAddress: "渋谷区神宮前1-1-1", currentZip: "150-0001" },
+    );
+    const res = await execMerge();
+    expect(res.status).toBe(403);
+    // source は archive されない＝現住所が残る
+    expect(pm._tx.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("現住所を持たない相手なら、住所の書込権限が無くても従来どおり統合できる", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(FULL_PERMS);
+    setupCurrentAddressPair(
+      { currentAddress: null, currentZip: null },
+      { currentAddress: null, currentZip: null },
+    );
+    const res = await execMerge();
+    expect(res.status).toBe(200);
   });
 });

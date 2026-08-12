@@ -251,7 +251,14 @@ export default function CorporateLookupPanel({
   };
 
   const toggleTarget = (key: ApplyTarget) => {
-    setApplyTargets((s) => ({ ...s, [key]: !s[key] }));
+    setApplyTargets((s) => {
+      const next = { ...s, [key]: !s[key] };
+      // ⚠郵便番号は住所と一組でしか反映しない（設計 §6.1）。番号だけを入れると
+      //   「別の場所の郵便番号 + 今の住所」というズレた宛先ができる。
+      if (key === "zip" && next.zip) next.address = true;
+      if (key === "address" && !next.address) next.zip = false;
+      return next;
+    });
     setApplied(false);
     setApplyError(null);
   };
@@ -418,13 +425,13 @@ export default function CorporateLookupPanel({
                     onChange={() => toggleTarget("name")}
                   />
                   <ApplyCheckbox
-                    label="所在地 → 現住所"
+                    label="所在地 → 登記上住所"
                     checked={applyTargets.address}
                     editable={!!fieldEditable?.address}
                     onChange={() => toggleTarget("address")}
                   />
                   <ApplyCheckbox
-                    label="郵便番号"
+                    label="郵便番号（住所と一組）"
                     checked={applyTargets.zip}
                     editable={!!fieldEditable?.zip && !!result.record.postCode}
                     onChange={() => toggleTarget("zip")}

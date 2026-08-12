@@ -20,6 +20,11 @@ import { PROPERTY_TYPE_LABELS, DM_STATUS_LABELS } from "@/lib/property-types";
 import { honorificForOwner } from "@/lib/owner-honorific";
 import type { OwnerDisplayConfig } from "@/lib/api-helpers";
 import { OTHER_CO_OWNERS_SUFFIX } from "@/lib/sale-dm-letter/addressee";
+import {
+  normalizeAddressForGroup,
+  resolveMailingAddress,
+  resolveGroupZip,
+} from "@/lib/owner-mailing-address";
 
 // CSV ヘッダ（差込テンプレートの列順に厳密一致させること）。
 // 先頭 11 列は従来の差込テンプレ互換（列順・列名を変えない）。
@@ -80,9 +85,29 @@ export interface DmRowProperty {
 export interface DmRowOwner {
   name: string | null | undefined;
   nameKana: string | null | undefined;
+  /** 登記上の郵便番号 */
   zip: string | null | undefined;
+  /** 登記上の住所 */
   address: string | null | undefined;
+  /** 現住所の郵便番号（あればこちらを使う） */
+  currentZip?: string | null | undefined;
+  /** 現住所（あればこちらへ送る） */
+  currentAddress?: string | null | undefined;
   corporateNumber: string | null | undefined;
+}
+
+/**
+ * 所有者から「実際に郵送する宛先」を取り出す（現住所を優先）。
+ * ⚠必ずペアで取る（住所は現住所・郵便番号は登記上、の混在を作らない）。
+ */
+function mailingOf(owner: DmRowOwner): { zip: string | null; address: string | null } {
+  const r = resolveMailingAddress({
+    zip: owner.zip ?? null,
+    address: owner.address ?? null,
+    currentZip: owner.currentZip ?? null,
+    currentAddress: owner.currentAddress ?? null,
+  });
+  return { zip: r.zip, address: r.address };
 }
 
 export interface DmRowPropertyOwner {
@@ -92,33 +117,17 @@ export interface DmRowPropertyOwner {
 }
 
 /**
- * グルーピング用に郵便番号を正規化する。
- *  - trim
- *  - ハイフン（半角 "-" / 全角 "－"）を除去
- *  - 内部空白（半角 / 全角 / タブ等）を除去
- * 表記揺れ（"100-0001" と "1000001"）を同一視するための比較専用の値。
- * 出力には使わず、グルーピングキーの算出にのみ使う。
+ * グルーピング用の正規化は `owner-mailing-address.ts` が定義元。
+ *
+ * ⚠ここで再定義せず**再エクスポート**する。宛先の解決（`resolveMailingAddress` /
+ * `resolveGroupZip`）が同じ正規化を使う必要があり、かつ本モジュールがそれらを
+ * import するため、逆向きに import すると循環参照になる。
+ * 既存の import 元（テスト等）を壊さないよう名前はそのまま出す。
  */
-export function normalizeZipForGroup(
-  zip: string | null | undefined,
-): string {
-  if (typeof zip !== "string") return "";
-  return zip.replace(/[\s　\-−－]/g, "").trim();
-}
-
-/**
- * グルーピング用に住所を正規化する。
- *  - trim
- *  - 連続する空白（半角 / 全角 / タブ / 改行）を 1 つの半角空白へ畳む
- * 空白の揺れだけが異なる住所を同一視するための比較専用の値。
- * 空文字（実質「住所なし」）の場合は "" を返す。
- */
-export function normalizeAddressForGroup(
-  address: string | null | undefined,
-): string {
-  if (typeof address !== "string") return "";
-  return address.replace(/[\s　]+/g, " ").trim();
-}
+export {
+  normalizeZipForGroup,
+  normalizeAddressForGroup,
+} from "@/lib/owner-mailing-address";
 
 /**
  * 「郵便番号 + 住所」のグルーピングキー。氏名は含めない。
@@ -130,7 +139,11 @@ export function ownerAddressGroupKey(
   zip: string | null | undefined,
   address: string | null | undefined,
 ): string {
-  return `${normalizeZipForGroup(zip)}\u0000${normalizeAddressForGroup(address)}`;
+  // ⚠郵便番号は鍵に入れない（2026-08 現住所対応）。
+  // 「現住所はあるが番号は空」を許すため、番号を鍵に入れると同じ住所でも鍵が割れ、
+  // 同じ場所へ 2 通届く。番号は resolveGroupZip でグループ単位に決める。
+  void zip;
+  return `\u0000${normalizeAddressForGroup(address)}`;
 }
 
 export interface OwnerAddressGroupResult {
@@ -154,11 +167,14 @@ export function groupPropertyOwnersByAddress(
   let skippedAddressCount = 0;
 
   for (const po of propertyOwners) {
-    if (normalizeAddressForGroup(po.owner.address) === "") {
+    // ⚠**解決後の宛先**で判定する（現住所があればそちら）。登記上が空でも
+    // 現住所があれば送れるので、ここで skip すると宛先を落とす。
+    const mail = mailingOf(po.owner);
+    if (normalizeAddressForGroup(mail.address) === "") {
       skippedAddressCount += 1;
       continue;
     }
-    const key = ownerAddressGroupKey(po.owner.zip, po.owner.address);
+    const key = ownerAddressGroupKey(mail.zip, mail.address);
     const bucket = map.get(key);
     if (bucket) {
       bucket.push(po);
@@ -208,6 +224,9 @@ export function buildDmRow(
     repOwner.corporateNumber.length > 0;
   const baseHonorific = honorificForOwner(repOwner.name, hasCorporateNumber);
   const isShared = group.length > 1;
+  // ⚠住所は代表の解決結果、郵便番号は**グループ全体**で決める（設計 §4.0）。
+  const repMail = mailingOf(repOwner);
+  const groupZip = resolveGroupZip(group.map((po) => mailingOf(po.owner).zip));
 
   const names = group
     .map((po) => maskValue(po.owner.name, ownerDisplayConfig.name) ?? "")
@@ -220,8 +239,10 @@ export function buildDmRow(
     敬称: isShared
       ? `${baseHonorific} ${OTHER_CO_OWNERS_SUFFIX}`
       : baseHonorific,
-    郵便番号: maskValue(repOwner.zip, ownerDisplayConfig.zip) ?? "",
-    所有者住所: maskValue(repOwner.address, ownerDisplayConfig.address) ?? "",
+    // ⚠グループ単位で決めた郵便番号を刷る（食い違えば空＝住所だけで配達される）。
+    郵便番号: maskValue(groupZip, ownerDisplayConfig.zip) ?? "",
+    // ⚠代表の**解決後の住所**（現住所があればそちら）。
+    所有者住所: maskValue(repMail.address, ownerDisplayConfig.address) ?? "",
     物件種別: PROPERTY_TYPE_LABELS[property.propertyType] ?? property.propertyType,
     所有者名カナ: maskValue(repOwner.nameKana, ownerDisplayConfig.nameKana) ?? "",
     代表者: representative.isPrimary ? "代表" : "",

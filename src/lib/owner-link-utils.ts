@@ -8,8 +8,14 @@ export type OwnerCreateFormValues = {
   name: string;
   nameKana: string;
   phone: string;
+  /** 登記上の郵便番号 */
   zip: string;
+  /** 登記上の住所 */
   address: string;
+  /** 現住所（分けていなければ空文字＝未設定） */
+  currentAddress: string;
+  /** 現住所の郵便番号 */
+  currentZip: string;
   email: string;
 };
 
@@ -20,6 +26,9 @@ export interface OwnerCreatePayload {
   phone?: string | null;
   zip?: string | null;
   address?: string | null;
+  /** ⚠住所と郵便番号は必ずペアで送る（サーバー側 resolveCurrentAddressWrite が規則を持つ）。 */
+  currentAddress?: string | null;
+  currentZip?: string | null;
   email?: string | null;
 }
 
@@ -38,6 +47,10 @@ export function buildCreateOwnerPayload(
     phone: form.phone.trim() || null,
     zip: form.zip.trim() || null,
     address: form.address.trim() || null,
+    // ⚠現住所は**必ずペアで**送る。片方だけ送ると、サーバー側の規則で
+    // 400（郵便番号だけ）または郵便番号のクリア（住所だけ）になる。
+    currentAddress: form.currentAddress.trim() || null,
+    currentZip: form.currentZip.trim() || null,
     email: form.email.trim() || null,
   };
 }

@@ -12,7 +12,7 @@ type IssueCode =
   | "bidi"
   | "replacement_char"
   | "mojibake";
-type FieldKey = "name" | "nameKana" | "address" | "note";
+type FieldKey = "name" | "nameKana" | "address" | "currentAddress" | "note";
 type Severity = "error" | "warning" | "info";
 type RecommendedAction = "review" | "sanitize_candidate";
 
@@ -77,7 +77,8 @@ const ISSUE_LABEL: Record<IssueCode, string> = {
 const FIELD_LABEL: Record<FieldKey, string> = {
   name: "氏名",
   nameKana: "氏名カナ",
-  address: "住所",
+  address: "登記上住所",
+  currentAddress: "現住所",
   note: "備考",
 };
 

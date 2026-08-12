@@ -30,8 +30,13 @@ describe("Owner 新規作成（owner-link-modal create モード）への統合"
   });
 
   it("zip/address は form の永続フィールドに束ねる（owner は zip を持つ）", () => {
-    expect(modal).toContain("zip={form.zip}");
-    expect(modal).toContain("address={form.address}");
+    // ⚠現住所の2段化(2026-08)以降、補完の対象は「分けているかどうか」で切り替わる。
+    // 分けていないときは登記上(zip/address)、分けているときは現住所(currentZip/currentAddress)。
+    // 登記上の欄に補完を効かせると、郵便番号APIの正規化表記で登記の記載を書き換えてしまう。
+    expect(modal).toMatch(/zip=\{addressSplit \? form\.currentZip : form\.zip\}/);
+    expect(modal).toMatch(
+      /address=\{addressSplit \? form\.currentAddress : form\.address\}/,
+    );
     // 候補確定で zip/address をペア反映（form を更新）。
     expect(modal).toMatch(/onZipChange=\{[\s\S]*?zip:/);
     expect(modal).toMatch(/onAddressChange=\{[\s\S]*?address:/);

@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { createOwnerSchema } from "@/lib/validators";
+import { resolveCurrentAddressWrite } from "@/lib/owner-current-address-write";
 import { hasPermission, maskValue, hasExplicitWritePerm } from "@/lib/permissions";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { canAccessPropertyRecord } from "@/lib/property-access";
@@ -31,17 +32,47 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10)));
     const skip = (page - 1) * limit;
 
+    // Apply display-level masking based on user permissions
+    // ⚠**検索条件を組む前に**表示レベルを取る。マスクされている項目で contains 検索を
+    //   許すと、ヒットの有無・件数から見えないはずの値を当てられる（検索オラクル）。
+    //   owners/search・properties/suggest と同じ規則に揃える（3入口で同じであること）。
+    const displayConfig = await getOwnerDisplayConfig(session.id, permissions);
+    const SEARCHABLE_LEVELS = new Set(["edit", "full", "read"]);
+    const searchable = (level: string) => SEARCHABLE_LEVELS.has(level);
+
     // Build where clause
     // archived owner は通常リスト・検索に出さない（Phase 2-A）
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = { isArchived: false };
     if (keyword) {
-      where.OR = [
-        { name: { contains: keyword, mode: "insensitive" } },
-        { nameKana: { contains: keyword, mode: "insensitive" } },
-        { phone: { contains: keyword } },
-        { address: { contains: keyword, mode: "insensitive" } },
-      ];
+      const or: object[] = [];
+      if (searchable(displayConfig.name)) {
+        or.push({ name: { contains: keyword, mode: "insensitive" } });
+      }
+      if (searchable(displayConfig.nameKana)) {
+        or.push({ nameKana: { contains: keyword, mode: "insensitive" } });
+      }
+      if (searchable(displayConfig.phone)) {
+        or.push({ phone: { contains: keyword } });
+      }
+      if (searchable(displayConfig.address)) {
+        or.push({ address: { contains: keyword, mode: "insensitive" } });
+        // ⚠現住所も同じ規則で検索対象にする（登記上と現住所で扱いを変えない）。
+        or.push({ currentAddress: { contains: keyword, mode: "insensitive" } });
+      }
+      // 検索できる項目が1つも無ければ、DB を引かずに空で返す（無駄クエリも避ける）。
+      if (or.length === 0) {
+        await writeAuditLog({
+          userId: session.id,
+          action: "owner_list",
+          detail: { keywordLen: keyword.length, page, resultCount: 0 },
+        });
+        return apiResponse({
+          data: [],
+          pagination: { page, limit, total: 0, totalPages: 0 },
+        });
+      }
+      where.OR = or;
     }
 
     const [owners, total] = await Promise.all([
@@ -71,9 +102,6 @@ export async function GET(request: NextRequest) {
       prisma.owner.count({ where }),
     ]);
 
-    // Apply display-level masking based on user permissions
-    const displayConfig = await getOwnerDisplayConfig(session.id, permissions);
-
     const maskedOwners = owners.map((owner) => ({
       id: owner.id,
       name: maskValue(owner.name, displayConfig.name),
@@ -81,6 +109,9 @@ export async function GET(request: NextRequest) {
       phone: maskValue(owner.phone, displayConfig.phone),
       zip: maskValue(owner.zip, displayConfig.zip),
       address: maskValue(owner.address, displayConfig.address),
+      // ⚠当たった値を返さないと「なぜこの人が出たのか」が画面で分からない。
+      currentZip: maskValue(owner.currentZip, displayConfig.zip),
+      currentAddress: maskValue(owner.currentAddress, displayConfig.address),
       note: maskValue(owner.note, displayConfig.note),
       corporateNumber: maskValue(owner.corporateNumber, displayConfig.corporateNumber),
       externalLinkKey: owner.externalLinkKey,
@@ -137,7 +168,18 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const data = createOwnerSchema.parse(body);
+    const parsed = createOwnerSchema.parse(body);
+
+    // ⚠現住所は「住所と郵便番号を必ずペアで扱う」規則を先に通す（設計 §6.1）。
+    const pair = resolveCurrentAddressWrite(parsed);
+    if (!pair.ok) {
+      throw new ApiError(
+        400,
+        "現住所の郵便番号だけを指定することはできません（住所と一緒に指定してください）",
+        "CURRENT_ZIP_WITHOUT_ADDRESS",
+      );
+    }
+    const data = { ...parsed, ...pair.fields };
 
     // Field-level write permission check（PATCH /api/owners/[id] と同方針）。
     // null/undefined のフィールドはスキップ（省略は許可）。
@@ -149,6 +191,9 @@ export async function POST(request: NextRequest) {
       { value: data.phone, resource: "owner_phone", label: "phone" },
       { value: data.zip, resource: "owner_zip", label: "zip" },
       { value: data.address, resource: "owner_address", label: "address" },
+      // ⚠現住所は登記上の住所と同じ機微度＝同じ field-level 権限で扱う。
+      { value: data.currentZip, resource: "owner_zip", label: "currentZip" },
+      { value: data.currentAddress, resource: "owner_address", label: "currentAddress" },
       { value: data.email, resource: "owner_email", label: "email" },
       { value: data.note, resource: "owner_note", label: "note" },
       { value: data.corporateNumber, resource: "owner_corporate_number", label: "corporateNumber" },
@@ -189,6 +234,9 @@ export async function POST(request: NextRequest) {
         phone: data.phone,
         zip: data.zip,
         address: data.address,
+        // ⚠明示列挙なので、ここへ足さないと schema に足しても保存されない。
+        currentZip: data.currentZip,
+        currentAddress: data.currentAddress,
         note: data.note,
         email: data.email,
         externalLinkKey: data.externalLinkKey,

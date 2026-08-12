@@ -103,6 +103,8 @@ async function applyOne(
       name: true,
       address: true,
       zip: true,
+      currentAddress: true,
+      currentZip: true,
       corporateNumber: true,
       companyRegistryNumber: true,
       version: true,
@@ -165,10 +167,12 @@ async function applyOne(
   //       cleaned=断片除去後(元の登記住所を保つ)。どちらも null なら現状維持。
   const cleanedAddress = detection.cleanedAddress;
   const ntaAddress = record.address !== "" ? record.address : null;
-  const newAddress =
-    addressMode === "nta"
-      ? (ntaAddress ?? cleanedAddress)
-      : cleanedAddress;
+  // ⚠登記上の住所は**常に断片除去後**（元の登記住所）を保つ。
+  //   国税庁が返すのは「今の本店所在地」＝登記簿の住所とは限らないので、
+  //   そこへ上書きすると登記上の住所が失われる（§2 の前提が壊れる）。
+  const newAddress = cleanedAddress;
+  // 国税庁の住所と郵便番号は**現住所のペア**として入れる（実際に届く先）。
+  const ntaZip = formatPostCodeToZip(record.postCode);
 
   const data: {
     name: string;
@@ -177,6 +181,8 @@ async function applyOne(
     version: { increment: 1 };
     address?: string;
     zip?: string;
+    currentAddress?: string;
+    currentZip?: string | null;
   } = {
     name: record.name,
     corporateNumber: detection.corporateNumber13,
@@ -184,10 +190,10 @@ async function applyOne(
     version: { increment: 1 },
   };
   if (newAddress != null) data.address = newAddress;
-  if (addressMode === "nta") {
-    // Codex P2: 既存 corporate-apply と同じ XXX-XXXX 形式に整形してから保存する。
-    const formattedZip = formatPostCodeToZip(record.postCode);
-    if (formattedZip) data.zip = formattedZip;
+  if (addressMode === "nta" && ntaAddress != null) {
+    // ⚠住所と郵便番号は一組で入れる。番号だけ・住所だけにはしない。
+    data.currentAddress = ntaAddress;
+    data.currentZip = ntaZip; // 取れなければ null（古い番号を残さない）
   }
 
   // 楽観ロック: version に加えて読み取り時点の corporateNumber をスナップショット条件に
@@ -220,9 +226,13 @@ async function applyOne(
     oldValues.address = owner.address;
     newValues.address = newAddress;
   }
-  if (data.zip !== undefined && data.zip !== owner.zip) {
-    oldValues.zip = owner.zip;
-    newValues.zip = data.zip;
+  if (data.currentAddress !== undefined && data.currentAddress !== owner.currentAddress) {
+    oldValues.currentAddress = owner.currentAddress;
+    newValues.currentAddress = data.currentAddress;
+  }
+  if (data.currentZip !== undefined && data.currentZip !== owner.currentZip) {
+    oldValues.currentZip = owner.currentZip;
+    newValues.currentZip = data.currentZip;
   }
   await recordChanges({
     targetTable: "owners",

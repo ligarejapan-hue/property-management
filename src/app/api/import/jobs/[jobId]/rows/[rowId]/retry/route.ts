@@ -10,132 +10,13 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { assertImportJobMutable } from "@/lib/import-job-guard";
 import { writeAuditLog } from "@/lib/audit";
-import { normalizeCaseStatusInput, normalizeIntroductionRouteInput } from "@/lib/property-types";
 import { findDuplicateOwner } from "@/lib/owner-dedup";
 import { recalculateJobCounts } from "@/lib/import-job-counts";
 
-/** Map Japanese CSV header names to property model field names. */
-const JAPANESE_FIELD_MAP: Record<string, string> = {
-  "住所": "address",
-  "地番": "lotNumber",
-  "家屋番号": "buildingNumber",
-  "不動産番号": "realEstateNumber",
-  "種別": "propertyType",
-  "登記状況": "registryStatus",
-  "DM判断": "dmStatus",
-  "案件ステータス": "caseStatus",
-  "導入ルート": "introductionRoute",
-  "流入経路": "introductionRoute",
-  "獲得経路": "introductionRoute",
-  "introduction_route": "introductionRoute",
-  "acquisitionRoute": "introductionRoute",
-  "acquisition_route": "introductionRoute",
-  "leadSource": "introductionRoute",
-  "lead_source": "introductionRoute",
-  "用途地域": "zoningDistrict",
-  "路線価": "rosenkaValue",
-  "緯度": "gpsLat",
-  "経度": "gpsLng",
-  "備考": "note",
-  "リンクキー": "externalLinkKey",
-};
-
-/** Map Japanese CSV header names to owner model field names. */
-const JAPANESE_OWNER_FIELD_MAP: Record<string, string> = {
-  "氏名": "name",
-  "氏名カナ": "nameKana",
-  "電話番号": "phone",
-  "郵便番号": "zip",
-  "住所": "address",
-  "備考": "note",
-  "リンクキー": "externalLinkKey",
-};
-
-function resolvePropertyField(key: string): string | undefined {
-  const directFields = new Set([
-    "address", "lotNumber", "buildingNumber", "realEstateNumber",
-    "propertyType", "registryStatus", "dmStatus", "caseStatus",
-    "introductionRoute", "zoningDistrict", "rosenkaValue", "gpsLat", "gpsLng",
-    "note", "externalLinkKey",
-  ]);
-  if (directFields.has(key)) return key;
-  return JAPANESE_FIELD_MAP[key];
-}
-
-function resolveOwnerField(key: string): string | undefined {
-  const directFields = new Set([
-    "name", "nameKana", "phone", "zip", "address", "note", "externalLinkKey",
-  ]);
-  if (directFields.has(key)) return key;
-  return JAPANESE_OWNER_FIELD_MAP[key];
-}
-
-function buildPropertyCreateData(
-  data: Record<string, string>,
-  createdBy: string,
-): Record<string, unknown> {
-  const mapped: Record<string, string> = {};
-  for (const [key, value] of Object.entries(data)) {
-    const field = resolvePropertyField(key);
-    if (field && value) {
-      mapped[field] = value;
-    }
-  }
-
-  if (!mapped.address) {
-    throw new Error("住所が空です");
-  }
-
-  const createData: Record<string, unknown> = {
-    address: mapped.address,
-    propertyType: mapped.propertyType || "unknown",
-    registryStatus: mapped.registryStatus || "unconfirmed",
-    dmStatus: mapped.dmStatus || "hold",
-    caseStatus: normalizeCaseStatusInput(mapped.caseStatus) ?? "new_case",
-    createdBy,
-  };
-  const normalizedRoute = normalizeIntroductionRouteInput(mapped.introductionRoute);
-  if (normalizedRoute) createData.introductionRoute = normalizedRoute;
-  if (mapped.lotNumber) createData.lotNumber = mapped.lotNumber;
-  if (mapped.buildingNumber) createData.buildingNumber = mapped.buildingNumber;
-  if (mapped.realEstateNumber) createData.realEstateNumber = mapped.realEstateNumber;
-  if (mapped.externalLinkKey) createData.externalLinkKey = mapped.externalLinkKey;
-  if (mapped.zoningDistrict) createData.zoningDistrict = mapped.zoningDistrict;
-  if (mapped.rosenkaValue) createData.rosenkaValue = parseFloat(mapped.rosenkaValue) || null;
-  if (mapped.gpsLat) createData.gpsLat = parseFloat(mapped.gpsLat) || null;
-  if (mapped.gpsLng) createData.gpsLng = parseFloat(mapped.gpsLng) || null;
-  if (mapped.note) createData.note = mapped.note;
-
-  return createData;
-}
-
-function buildOwnerCreateData(
-  data: Record<string, string>,
-): Record<string, unknown> {
-  const mapped: Record<string, string> = {};
-  for (const [key, value] of Object.entries(data)) {
-    const field = resolveOwnerField(key);
-    if (field && value) {
-      mapped[field] = value;
-    }
-  }
-
-  if (!mapped.name || !mapped.name.trim()) {
-    throw new Error("氏名が空です");
-  }
-
-  const createData: Record<string, unknown> = {
-    name: mapped.name.trim(),
-  };
-  if (mapped.nameKana) createData.nameKana = mapped.nameKana.trim();
-  if (mapped.phone) createData.phone = mapped.phone.trim();
-  if (mapped.zip) createData.zip = mapped.zip.trim();
-  if (mapped.address) createData.address = mapped.address.trim();
-  if (mapped.note) createData.note = mapped.note.trim();
-  if (mapped.externalLinkKey) createData.externalLinkKey = mapped.externalLinkKey.trim();
-
-  return createData;
-}
+import {
+  buildPropertyCreateData,
+  buildOwnerCreateData,
+} from "@/lib/import-row-field-map";
 
 // ---------- POST /api/import/jobs/:jobId/rows/:rowId/retry ----------
 

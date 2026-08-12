@@ -97,6 +97,9 @@ const OWNER_ROW = {
   nameKana: "ヤマダタロウ",
   phone: "090-1234-5678",
   address: "東京都港区1-2-3",
+  // 現住所は登記上の住所と同じ機微度・同じ権限で扱う（2026-08 現住所対応）。
+  // ここに足すのは「意図して増やした列」だけ。増えたら必ずこのガードを更新する。
+  currentAddress: "渋谷区神宮前1-1-1",
   externalLinkKey: "EXT-1",
 };
 
@@ -148,6 +151,8 @@ describe("PII-S1a: GET /api/owners/search PII guard", () => {
     expect(res.status).toBe(200);
     expect(orKeysOf()).toEqual([
       "address",
+      // 住所が生値で見えるユーザーだけが現住所も検索できる（同じ規則）。
+      "currentAddress",
       "externalLinkKey",
       "name",
       "nameKana",
@@ -168,6 +173,8 @@ describe("PII-S1a: GET /api/owners/search PII guard", () => {
     expect(row.name).toBe("山田太郎"); // full
     expect(row.phone).toBe("***5678"); // masked: *** + 末尾4
     expect(row.address).toBe("東京都***"); // partial: 先頭3 + ***
+    // ⚠現住所も同じ表示レベルでマスクされる（片方だけ生値で漏れない）。
+    expect(row.currentAddress).toBe("渋谷区***");
     expect(row.externalLinkKey).toBeNull(); // full可視でない → null
   });
 
@@ -206,12 +213,13 @@ describe("PII-S1a: GET /api/owners/search PII guard", () => {
     expect(json).not.toContain("EXT-1"); // externalLinkKey
   });
 
-  it("応答キー形状（id,name,nameKana,phone,address,externalLinkKey）を維持する", async () => {
+  it("応答キー形状（id,name,nameKana,phone,address,currentAddress,externalLinkKey）を維持する", async () => {
     pm.owner.findMany.mockResolvedValue([{ ...OWNER_ROW }]);
     const res = await callRoute("山田");
     const body = await res.json();
     expect(Object.keys(body.data[0]).sort()).toEqual([
       "address",
+      "currentAddress",
       "externalLinkKey",
       "id",
       "name",

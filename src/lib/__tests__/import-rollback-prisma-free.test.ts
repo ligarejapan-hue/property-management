@@ -102,13 +102,18 @@ describe("property-field-constants.ts は Prisma-free (Codex P1)", () => {
     ]);
   });
 
-  it("OWNER_TRACKED_FIELDS の中身 (9 項目・21-D Phase3 で companyRegistryNumber 追加)", () => {
+  it("OWNER_TRACKED_FIELDS の中身 (11 項目・2026-08 で現住所 currentZip/currentAddress 追加)", () => {
+    // ⚠現住所を履歴に残さないと、(1)誰がいつ入れたかが追えない
+    // (2)住所補完(address-fill)が「変更履歴の有無」で安全判定しているガードが素通りする
+    // (3)所有者の統合の門が「変更されたのは現住所だけか」を判断できない。
     expect(OWNER_TRACKED_FIELDS).toEqual([
       "name",
       "nameKana",
       "phone",
       "zip",
       "address",
+      "currentZip",
+      "currentAddress",
       "note",
       "email",
       "corporateNumber",

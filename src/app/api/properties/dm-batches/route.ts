@@ -211,7 +211,12 @@ export async function POST(request: NextRequest) {
     // 上限判定は「最終CSV行数=送付先住所グループ数」で2段ガード(旧exportの方式と同一)。
     const eligibleOwnerWhere = { owner: { isArchived: false } };
     const mailableOwnerWhere = {
-      owner: { isArchived: false, address: { not: "" } },
+      // ⚠現住所があれば送れる。登記上が空でも現住所があれば対象に含める
+      //   （逆に登記上だけでも送れる）。どちらも無い所有者だけを外す。
+      owner: {
+        isArchived: false,
+        OR: [{ address: { not: "" } }, { currentAddress: { not: "" } }],
+      },
     };
     const whereWithMailableOwners = {
       ...where,
@@ -242,6 +247,10 @@ export async function POST(request: NextRequest) {
                     nameKana: true,
                     zip: true,
                     address: true,
+                    // ⚠宛先は現住所を優先して解決するため両方を取る（select 漏れは無言の劣化＝
+                    //   型は optional で通るのに現住所が常に undefined になり登記上へ戻り続ける）。
+                    currentZip: true,
+                    currentAddress: true,
                     corporateNumber: true,
                   },
                 },
@@ -481,7 +490,15 @@ export async function POST(request: NextRequest) {
       });
       skippedAddressMissingCount = await prisma.propertyOwner.count({
         where: {
-          owner: { isArchived: false, OR: [{ address: null }, { address: "" }] },
+          // ⚠「住所なし」= 登記上も現住所も無い。片方でもあれば送れるので数えない
+          //   （数えると、送れる相手を「住所なしで除外」と誤って報告する）。
+          owner: {
+            isArchived: false,
+            AND: [
+              { OR: [{ address: null }, { address: "" }] },
+              { OR: [{ currentAddress: null }, { currentAddress: "" }] },
+            ],
+          },
           property: where,
         },
       });

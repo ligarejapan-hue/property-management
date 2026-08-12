@@ -66,6 +66,11 @@ export async function GET(
                 phone: true,
                 zip: true,
                 address: true,
+                // ⚠現住所を落とすと、所有者カードの編集フォームが空で初期化され、
+                // そのまま保存して**登録済みの現住所を消す**。GET と PATCH の
+                // **両方**に必要(応答でフォームを組み直すため)。
+                currentZip: true,
+                currentAddress: true,
                 note: true,
                 email: true,
                 corporateNumber: true,
@@ -301,6 +306,11 @@ export async function PATCH(
                 phone: true,
                 zip: true,
                 address: true,
+                // ⚠現住所を落とすと、所有者カードの編集フォームが空で初期化され、
+                // そのまま保存して**登録済みの現住所を消す**。GET と PATCH の
+                // **両方**に必要(応答でフォームを組み直すため)。
+                currentZip: true,
+                currentAddress: true,
                 note: true,
                 email: true,
                 corporateNumber: true,

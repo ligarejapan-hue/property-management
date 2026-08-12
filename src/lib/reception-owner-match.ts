@@ -122,6 +122,15 @@ export interface ParsedOwnerRow {
   buildingName: string | null;
   roomNo: string | null;
   zip: string | null;
+  /**
+   * 現住所（登記上の住所とは別の、実際に届く住所）。
+   * ⚠登記上の住所のような**4列の連結では作らない**。現住所は1列で受け取る。
+   * 連結の材料（都道府県/市区郡/町名番地/建物名）は登記上のためのもので、
+   * 現住所に流用すると「登記上の一部＋現住所」という混ざった住所ができる。
+   */
+  currentAddress: string | null;
+  /** 現住所の郵便番号。⚠現住所と必ずペアで扱う。 */
+  currentZip: string | null;
   /** ヘッダ「DM」列の生値。DM対象フラグの判定材料として保持（Property.dmStatus は自動更新しない） */
   dm: string | null;
 }
@@ -270,6 +279,8 @@ type OwnerField =
   | "buildingName"
   | "roomNo"
   | "zip"
+  | "currentAddress"
+  | "currentZip"
   | "dm";
 
 /**
@@ -298,8 +309,26 @@ const OWNER_HEADER_TO_FIELD: Record<string, OwnerField> = {
   "号室": "roomNo",
   "郵便番号": "zip",
   "〒": "zip",
+  // ⚠現住所は専用の1列。「住所」(無印)は登記上の町名番地として扱う既存の約束を変えない。
+  "現住所": "currentAddress",
+  "現在の住所": "currentAddress",
+  "現住所郵便番号": "currentZip",
+  "現住所〒": "currentZip",
   "DM": "dm",
 };
+
+/**
+ * ⚠Excel の郵便番号列は「数値」として読むと**先頭の 0 が消える**（0100492 → 100492）。
+ * この集合のヘッダだけは表示上の文字列（.w）を採用する（parseSheet の formattedTextHeaders）。
+ *
+ * 現住所の郵便番号も**同じ扱い**にする。片方だけ入れると、
+ * 「登記上は正しいのに現住所の番号だけ先頭0が欠ける」という分かりにくい落ち方をする。
+ */
+export const OWNER_SHEET_POSTAL_HEADERS: ReadonlySet<string> = new Set(
+  Object.entries(OWNER_HEADER_TO_FIELD)
+    .filter(([, field]) => field === "zip" || field === "currentZip")
+    .map(([header]) => header),
+);
 
 /**
  * 所有者CSVの positional rows からパース。headers はヘッダ行の配列。
@@ -354,6 +383,9 @@ export function parseOwnerRows(
       buildingName,
       roomNo: pick("roomNo"),
       zip: pick("zip"),
+      // ⚠1列そのまま。登記上の連結（prefecture+city+street+building）は使わない。
+      currentAddress: pick("currentAddress"),
+      currentZip: pick("currentZip"),
       dm: pick("dm"),
     };
   });

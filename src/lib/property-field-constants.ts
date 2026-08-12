@@ -49,6 +49,10 @@ export const OWNER_TRACKED_FIELDS = [
   "phone",
   "zip",
   "address",
+  // ⚠現住所も履歴に残す。残さないと「誰がいつ現住所を入れたか」が追えないうえ、
+  // 住所補完(address-fill)が「変更履歴の有無」で安全判定しているガードも素通りする。
+  "currentZip",
+  "currentAddress",
   "note",
   "email",
   "corporateNumber",

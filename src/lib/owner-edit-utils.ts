@@ -24,8 +24,17 @@ export type OwnerFormValues = {
   name: string;
   nameKana: string;
   phone: string;
+  /** 登記上の郵便番号 */
   zip: string;
+  /** 登記上の住所 */
   address: string;
+  /**
+   * 現住所（分離していないときは空文字＝未設定）。
+   * ⚠郵便番号とペアで送る（片方だけ送るとサーバー側の規則で拒否/クリアされる）。
+   */
+  currentAddress: string;
+  /** 現住所の郵便番号 */
+  currentZip: string;
   email: string;
   corporateNumber: string;
   /** 会社法人等番号(12桁)。corporateNumber(13桁) と同じ owner_corporate_number 権限で編集。 */
@@ -69,6 +78,14 @@ export function buildOwnerUpdatePayload(
   if (fields.phone) payload.phone = form.phone.trim() || null;
   if (fields.zip) payload.zip = form.zip.trim() || null;
   if (fields.address) payload.address = form.address.trim() || null;
+  // ⚠現住所は**住所と郵便番号を必ずペアで送る**（設計 §6.1）。
+  //  ⚠送るのは**両方の編集権限があるときだけ**。現住所を送ると、サーバーは
+  //  「郵便番号も決め直す操作」とみなして owner_zip の書込権限を要求する。
+  //  住所だけ編集できる利用者から常に送ると、**電話番号を直すだけの保存まで 403** になる。
+  if (fields.address && fields.zip) {
+    payload.currentAddress = form.currentAddress.trim() || null;
+    payload.currentZip = form.currentZip.trim() || null;
+  }
   if (fields.email) payload.email = form.email.trim() || null;
   // 法人番号は input としては空文字許容 / 正規化はサーバ側 (validators.corporateNumberInputSchema)。
   // 空文字をクライアントから送れば null として扱われる。

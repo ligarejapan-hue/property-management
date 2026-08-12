@@ -108,7 +108,8 @@ export async function POST(request: NextRequest) {
     // 対象の決め方: (A) チェックで選んだ propertyIds があればそれを対象にする(明示選択優先)。無ければ
     // (B) 従来どおり絞り込み条件(filters)から送付可(send)物件を対象にする(後方互換)。手紙を作れるのは
     // 所有者に住所がある物件のみ(共通の mailableOwner)。
-    const mailableOwner = { propertyOwners: { some: { owner: { isArchived: false, address: { not: "" } } } } };
+    // ⚠現住所があれば送れる。登記上が空でも現住所があれば対象に含める。
+    const mailableOwner = { propertyOwners: { some: { owner: { isArchived: false, OR: [{ address: { not: "" } }, { currentAddress: { not: "" } }] } } } };
     // 生成(課金)は物件単位で最大 MAX_GENERATE_ITEMS(=50)通に抑える(下の capRecipientsByProperty)。物件を途中で
     // 分断しないので、共有者多数の1物件が数百通に膨らむ同期生成の暴走(Codex R9-P1)も、宛先が欠けたまま保存され
     // 再バッチで二重生成される事故(Codex R8)も防ぐ。上限は両経路で共通。
@@ -161,7 +162,7 @@ export async function POST(request: NextRequest) {
         id: true, address: true, propertyType: true, roomNo: true,
         propertyOwners: {
           where: { owner: { isArchived: false } },
-          select: { isPrimary: true, relationship: true, owner: { select: { id: true, name: true, nameKana: true, zip: true, address: true, corporateNumber: true } } },
+          select: { isPrimary: true, relationship: true, owner: { select: { id: true, name: true, nameKana: true, zip: true, address: true, currentZip: true, currentAddress: true, corporateNumber: true } } },
           orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
         },
       },

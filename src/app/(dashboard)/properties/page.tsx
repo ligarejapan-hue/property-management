@@ -73,6 +73,8 @@ interface SuggestResult {
     address: string | null;
     phone: string | null;
     zip: string | null;
+    currentAddress: string | null;
+    currentZip: string | null;
   }>;
 }
 
@@ -1097,7 +1099,9 @@ function PropertiesPageInner() {
                     {item.importSource && (
                       <span className="font-mono text-[11px] text-gray-400 dark:text-gray-500">{item.importSource}</span>
                     )}
-                    {item.owners.filter((o) => o.name || o.phone || o.address).map((o, i) => (
+                    {item.owners
+                      .filter((o) => o.name || o.phone || o.address || o.currentAddress)
+                      .map((o, i) => (
                       // 17-A/Codex P2: suggestion 内の所有者PII(name/phone/address)を owner surface に。
                       // button 全体ではなく PII 行(div)のみを最小限で保護する（guard 側で button 祖先でも有効）。
                       <div
@@ -1108,7 +1112,18 @@ function PropertiesPageInner() {
                       >
                         {o.name && <span>{o.name}</span>}
                         {o.phone && <span>{o.phone}</span>}
-                        {o.address && <span className="truncate">{o.address}</span>}
+                        {/* ⚠現住所があるときは「実際に届く住所」を先に出す。
+                            登記上だけを出すと、現住所で検索して当たった人が
+                            別人に見えてしまう。 */}
+                        {o.currentAddress && (
+                          <span className="truncate">現住所: {o.currentAddress}</span>
+                        )}
+                        {o.address && (
+                          <span className="truncate">
+                            {o.currentAddress ? "登記上: " : ""}
+                            {o.address}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </button>

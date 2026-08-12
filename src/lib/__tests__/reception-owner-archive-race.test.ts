@@ -113,6 +113,8 @@ vi.mock("@/lib/reception-owner-match", () => ({
   applyReceptionFilters: vi.fn(),
   DEFAULT_RECEPTION_FILTER_OPTIONS: { dl: "all", shinki: "all" },
   REVIEW_REASON_LABEL: {},
+  // 郵便番号列の集合（先頭0を落とさないために parseSheet へ渡す）。
+  OWNER_SHEET_POSTAL_HEADERS: new Set(["郵便番号", "〒"]),
 }));
 
 const PROPERTY_ID = "11111111-1111-4111-8111-111111111111";
@@ -121,7 +123,9 @@ const OWNER_ADDRESS = "北海道札幌市中央区1-1";
 
 vi.mock("@/lib/prisma", () => {
   const tx = {
-    owner: { updateMany: vi.fn() },
+    // 補完はロックの下で読み直してから決めるため、tx にも findUnique/update が要る。
+    owner: { updateMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+    changeLog: { createMany: vi.fn() },
     propertyOwner: { findUnique: vi.fn(), create: vi.fn() },
     $queryRaw: vi.fn(async () => [{ id: "p1" }]), // 親行ロック(#364 R10)
   };
@@ -169,7 +173,8 @@ const pm = prisma as unknown as {
   importJobRow: { create: Mock };
   $transaction: Mock;
   _tx: {
-    owner: { updateMany: Mock };
+    owner: { updateMany: Mock; findUnique: Mock; update: Mock };
+    changeLog: { createMany: Mock };
     propertyOwner: { findUnique: Mock; create: Mock };
   };
 };
@@ -265,6 +270,14 @@ beforeEach(() => {
     fn(pm._tx),
   );
   pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
+  pm._tx.owner.findUnique.mockResolvedValue({
+    zip: null,
+    address: null,
+    currentZip: null,
+    currentAddress: null,
+  });
+  pm._tx.owner.update.mockResolvedValue({});
+  pm._tx.changeLog.createMany.mockResolvedValue({ count: 0 });
   pm._tx.propertyOwner.findUnique.mockResolvedValue(null);
   pm._tx.propertyOwner.create.mockResolvedValue({});
 });
@@ -280,6 +293,14 @@ describe("POST /api/import/reception-owner: archive race-safety", () => {
       },
     ]);
     pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
+  pm._tx.owner.findUnique.mockResolvedValue({
+    zip: null,
+    address: null,
+    currentZip: null,
+    currentAddress: null,
+  });
+  pm._tx.owner.update.mockResolvedValue({});
+  pm._tx.changeLog.createMany.mockResolvedValue({ count: 0 });
 
     const res = await POST(makeRequest());
     expect([200, 201]).toContain(res.status);

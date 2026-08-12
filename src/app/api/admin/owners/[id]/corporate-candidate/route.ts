@@ -61,6 +61,7 @@ export async function GET(
         id: true,
         name: true,
         address: true,
+        currentAddress: true,
         note: true,
         corporateNumber: true,
         version: true,
@@ -105,6 +106,11 @@ export async function GET(
       ownerId: owner.id,
       ownerNameMasked: maskValue(owner.name, displayConfig.name),
       ownerAddressMasked: maskValue(owner.address, displayConfig.address),
+      // ⚠現住所も返す。返さないと画面が登記上の住所を「現住所」と呼ぶ嘘の表示になる。
+      ownerCurrentAddressMasked: maskValue(
+        owner.currentAddress,
+        displayConfig.address,
+      ),
       existingCorporateNumberMasked,
       version: owner.version,
       propertyOwnerCount: owner._count.propertyOwners,

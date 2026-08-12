@@ -403,8 +403,19 @@ model Owner {
   name             String
   nameKana         String?  @map("name_kana")
   phone            String?
+  /// **登記上の**郵便番号。取込(謄本PDF・受付帳・所有者CSV)が書く登記由来の値。
+  /// ⚠意味を変えない。実際に郵送する宛先は currentZip/currentAddress を優先して解決する
+  /// (src/lib/owner-mailing-address.ts)。名寄せ・物件との自動リンク・郵便番号監査は
+  /// この登記上の組を使う(設計 2026-08-10-owner-current-address-design.md §7)。
   zip              String?
+  /// **登記上の**住所。上と同じ理由で意味を変えない。
   address          String?
+  /// **現住所の**郵便番号。所有者が引っ越して登記を変更していない場合に使う。
+  /// ⚠address/zip とは独立に書き換えない。住所と必ずペアで扱う(設計 §4・§6.1)。
+  currentZip       String?  @map("current_zip")
+  /// **現住所**。空(または空白のみ)なら「未設定」= 登記上の住所を使う。
+  /// フラグ列は持たない(値そのものが状態)。
+  currentAddress   String?  @map("current_address")
   note             String?
   email            String?
   externalLinkKey  String?  @map("external_link_key")

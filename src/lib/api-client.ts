@@ -2535,6 +2535,8 @@ export async function fetchPropertySuggestions(q: string) {
             address: string | null;
             phone: string | null;
             zip: string | null;
+            currentAddress: string | null;
+            currentZip: string | null;
           }>,
         })),
     };
@@ -2551,6 +2553,8 @@ export async function fetchPropertySuggestions(q: string) {
         address: string | null;
         phone: string | null;
         zip: string | null;
+        currentAddress: string | null;
+        currentZip: string | null;
       }>;
     }>;
   }>(`/api/properties/suggest`, {
@@ -3226,8 +3230,11 @@ export interface CorporateCandidatesResponse {
 export interface AdminOwnerCorporateCandidateResponse {
   owner: {
     ownerId: string;
-    ownerNameMasked: string | null;
+    /** 登記上の住所（マスク済み） */
     ownerAddressMasked: string | null;
+    ownerNameMasked: string | null;
+    /** 現住所（マスク済み・未設定なら null） */
+    ownerCurrentAddressMasked: string | null;
     existingCorporateNumberMasked: string | null;
     version: number;
     propertyOwnerCount: number;
@@ -3245,6 +3252,7 @@ export async function fetchAdminOwnerCorporateCandidate(
         ownerId,
         ownerNameMasked: null,
         ownerAddressMasked: null,
+        ownerCurrentAddressMasked: null,
         existingCorporateNumberMasked: null,
         version: 1,
         propertyOwnerCount: 0,

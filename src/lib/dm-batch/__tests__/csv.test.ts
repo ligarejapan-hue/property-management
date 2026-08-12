@@ -32,12 +32,12 @@ function source(over: Partial<BatchCsvSource> = {}): BatchCsvSource {
             {
               isPrimary: true,
               relationship: null,
-              owner: { id: "o1", name: "甲 太郎", nameKana: null, zip: "100-0001", address: "東京都A", corporateNumber: null },
+              owner: { id: "o1", name: "甲 太郎", nameKana: null, zip: "100-0001", address: "東京都A", currentZip: null, currentAddress: null, corporateNumber: null },
             },
             {
               isPrimary: false,
               relationship: "子",
-              owner: { id: "o2", name: "甲 次郎", nameKana: null, zip: "100-0001", address: "東京都A", corporateNumber: null },
+              owner: { id: "o2", name: "甲 次郎", nameKana: null, zip: "100-0001", address: "東京都A", currentZip: null, currentAddress: null, corporateNumber: null },
             },
           ],
         },

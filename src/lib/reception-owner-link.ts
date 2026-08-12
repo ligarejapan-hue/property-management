@@ -13,6 +13,14 @@ export interface RecoveredOwner {
   name: string;
   address: string | null;
   zip: string | null;
+  /**
+   * ⚠現住所。**ここに載せ忘れると、手で紐づけた行だけ現住所が落ちる**。
+   * 要確認になった行は担当者が後から手で解決する経路を通り、その経路は
+   * 取込時に保存したこの情報だけを見て所有者を作り直すため、
+   * 解析器と upsert をいくら直しても手で解決した行は全部現住所なしになる。
+   */
+  currentAddress: string | null;
+  currentZip: string | null;
 }
 
 export const RECEPTION_OWNER_LINK_DATA_KEY = "__owner_link_data";
@@ -71,18 +79,26 @@ export function parseRecoveredOwners(
   if (!Array.isArray(parsed)) return [];
   return parsed
     .filter(
-      (v): v is { name: unknown; address?: unknown; zip?: unknown } =>
-        typeof v === "object" && v !== null,
+      (v): v is {
+        name: unknown;
+        address?: unknown;
+        zip?: unknown;
+        currentAddress?: unknown;
+        currentZip?: unknown;
+      } => typeof v === "object" && v !== null,
     )
     .map((v) => {
+      const text = (x: unknown): string | null =>
+        typeof x === "string" && x.trim() !== "" ? x.trim() : null;
       const name = typeof v.name === "string" ? v.name.trim() : "";
-      const address =
-        typeof v.address === "string" && v.address.trim() !== ""
-          ? v.address.trim()
-          : null;
-      const zip =
-        typeof v.zip === "string" && v.zip.trim() !== "" ? v.zip.trim() : null;
-      return { name, address, zip };
+      // 現住所を持たない古い行は null（=現住所なし）になる。既存の行を壊さない。
+      return {
+        name,
+        address: text(v.address),
+        zip: text(v.zip),
+        currentAddress: text(v.currentAddress),
+        currentZip: text(v.currentZip),
+      };
     })
     .filter((o) => o.name !== "");
 }

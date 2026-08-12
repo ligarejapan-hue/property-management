@@ -55,14 +55,14 @@ describe("parseRecoveredOwners", () => {
   it("__owner_link_data から所有者配列を復元する", () => {
     const rawData = {
       [RECEPTION_OWNER_LINK_DATA_KEY]: JSON.stringify([
-        { name: "田中太郎", address: "東京都...", zip: "100-0001" },
-        { name: "佐藤花子", address: null, zip: null },
+        { name: "田中太郎", address: "東京都...", zip: "100-0001", currentAddress: null, currentZip: null },
+        { name: "佐藤花子", address: null, zip: null, currentAddress: null, currentZip: null },
       ]),
     };
     const owners = parseRecoveredOwners(rawData);
     expect(owners).toEqual([
-      { name: "田中太郎", address: "東京都...", zip: "100-0001" },
-      { name: "佐藤花子", address: null, zip: null },
+      { name: "田中太郎", address: "東京都...", zip: "100-0001", currentAddress: null, currentZip: null },
+      { name: "佐藤花子", address: null, zip: null, currentAddress: null, currentZip: null },
     ]);
   });
 
@@ -77,18 +77,18 @@ describe("parseRecoveredOwners", () => {
       ]),
     };
     expect(parseRecoveredOwners(rawData)).toEqual([
-      { name: "田中", address: null, zip: null },
+      { name: "田中", address: null, zip: null, currentAddress: null, currentZip: null },
     ]);
   });
 
   it("address / zip の空文字は null に正規化", () => {
     const rawData = {
       [RECEPTION_OWNER_LINK_DATA_KEY]: JSON.stringify([
-        { name: "山田", address: "  ", zip: "" },
+        { name: "山田", address: "  ", zip: "", currentAddress: null, currentZip: null },
       ]),
     };
     expect(parseRecoveredOwners(rawData)).toEqual([
-      { name: "山田", address: null, zip: null },
+      { name: "山田", address: null, zip: null, currentAddress: null, currentZip: null },
     ]);
   });
 
@@ -115,13 +115,13 @@ describe("parseRecoveredOwners", () => {
 
 describe("hasUsableOwnerInfo", () => {
   it("name を持つ所有者が1件以上 → true", () => {
-    expect(hasUsableOwnerInfo([{ name: "田中", address: null, zip: null }])).toBe(
+    expect(hasUsableOwnerInfo([{ name: "田中", address: null, zip: null, currentAddress: null, currentZip: null }])).toBe(
       true,
     );
     expect(
       hasUsableOwnerInfo([
-        { name: "", address: null, zip: null },
-        { name: "佐藤", address: "x", zip: null },
+        { name: "", address: null, zip: null, currentAddress: null, currentZip: null },
+        { name: "佐藤", address: "x", zip: null, currentAddress: null, currentZip: null },
       ]),
     ).toBe(true);
   });
@@ -129,10 +129,10 @@ describe("hasUsableOwnerInfo", () => {
   it("空配列 / name 全部空 → false", () => {
     expect(hasUsableOwnerInfo([])).toBe(false);
     expect(
-      hasUsableOwnerInfo([{ name: "", address: "x", zip: null }]),
+      hasUsableOwnerInfo([{ name: "", address: "x", zip: null, currentAddress: null, currentZip: null }]),
     ).toBe(false);
     expect(
-      hasUsableOwnerInfo([{ name: "   ", address: null, zip: null }]),
+      hasUsableOwnerInfo([{ name: "   ", address: null, zip: null, currentAddress: null, currentZip: null }]),
     ).toBe(false);
   });
 });

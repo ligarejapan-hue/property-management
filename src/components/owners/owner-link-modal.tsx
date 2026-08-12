@@ -26,6 +26,8 @@ interface OwnerSearchHit {
   nameKana: string | null;
   phone: string | null;
   address: string | null;
+  /** 現住所（マスク済み）。検索で当たった値を画面に出すために受け取る。 */
+  currentAddress: string | null;
   externalLinkKey: string | null;
 }
 
@@ -37,6 +39,9 @@ const EMPTY_FORM: OwnerCreateFormValues = {
   phone: "",
   zip: "",
   address: "",
+  // 新規作成では既定で「分けない」（現住所は未設定＝登記上の住所を使う）。
+  currentAddress: "",
+  currentZip: "",
   email: "",
 };
 
@@ -80,6 +85,11 @@ export function OwnerLinkModal({
   // 住所補完の user-edit signal（Codex P2-G）。住所 input をユーザーが直接編集した時だけ
   // true。候補 apply（onAddressChange）では立てない＝開いた/反映されただけでは検索しない。
   const [addressEdited, setAddressEdited] = useState(false);
+  /**
+   * 現住所を「登記上住所」と分けて入力しているか。
+   * 新規作成なので既定は false（現住所は未設定＝登記上の住所を使う）。
+   */
+  const [addressSplit, setAddressSplit] = useState(false);
 
   // 紐付け実行
   const [submitting, setSubmitting] = useState(false);
@@ -285,7 +295,20 @@ export function OwnerLinkModal({
                         )}
                       </div>
                       <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                        {[h.nameKana, h.address].filter(Boolean).join(" ")}
+                        {[
+                          h.nameKana,
+                          // ⚠現住所があれば現住所を出す（実際に届く住所）。
+                          h.currentAddress
+                            ? `現住所: ${h.currentAddress}`
+                            : null,
+                          h.address
+                            ? h.currentAddress
+                              ? `登記上: ${h.address}`
+                              : h.address
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
                       </div>
                     </li>
                   );
@@ -340,33 +363,104 @@ export function OwnerLinkModal({
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-700 dark:text-gray-200">郵便番号</label>
+              <label className="text-xs font-medium text-gray-700 dark:text-gray-200">
+                {addressSplit ? "郵便番号（現住所）" : "郵便番号"}
+              </label>
               <input
                 type="text"
-                value={form.zip}
-                onChange={(e) => setForm((f) => ({ ...f, zip: e.target.value }))}
+                value={addressSplit ? form.currentZip : form.zip}
+                onChange={(e) =>
+                  setForm((f) =>
+                    addressSplit
+                      ? { ...f, currentZip: e.target.value }
+                      : { ...f, zip: e.target.value },
+                  )
+                }
                 className={`${inputClass} font-mono`}
               />
+              {addressSplit && (
+                <div className="space-y-1">
+                  <label className="text-xs text-gray-500 dark:text-gray-400">
+                    郵便番号（登記上）
+                  </label>
+                  <input
+                    type="text"
+                    value={form.zip}
+                    onChange={(e) => setForm((f) => ({ ...f, zip: e.target.value }))}
+                    className={`${inputClass} font-mono`}
+                  />
+                </div>
+              )}
             </div>
             <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-medium text-gray-700 dark:text-gray-200">現住所</label>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-medium text-gray-700 dark:text-gray-200">現住所</label>
+                {!addressSplit && (
+                  <button
+                    type="button"
+                    // ⚠ホバーで理由を出す（発注者指定の文言）。
+                    title="登記上の住所と現在の所在が違う場合はクリックしてください"
+                    onClick={() => {
+                      // ⚠住所と郵便番号を**ペアで**コピーして開始する。
+                      setForm((f) => ({
+                        ...f,
+                        currentAddress: f.address,
+                        currentZip: f.zip,
+                      }));
+                      setAddressSplit(true);
+                    }}
+                    className="rounded-md border border-gray-300 px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    ⇅ 現住所を分ける
+                  </button>
+                )}
+              </div>
               <input
                 type="text"
-                value={form.address}
+                value={addressSplit ? form.currentAddress : form.address}
                 onChange={(e) => {
                   // ユーザーの直接編集＝user-edit signal を立てる（住所検索のトリガー）。
                   setAddressEdited(true);
-                  setForm((f) => ({ ...f, address: e.target.value }));
+                  setForm((f) =>
+                    addressSplit
+                      ? {
+                          ...f,
+                          currentAddress: e.target.value,
+                          // ⚠住所を編集した時点で現住所の郵便番号を空にする。
+                          currentZip: "",
+                        }
+                      : { ...f, address: e.target.value },
+                  );
                 }}
                 className={inputClass}
               />
+              {addressSplit && (
+                <div className="space-y-1">
+                  <label className="text-xs text-gray-500 dark:text-gray-400">登記上住所</label>
+                  <input
+                    type="text"
+                    value={form.address}
+                    onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                    className={inputClass}
+                  />
+                </div>
+              )}
               {/* 郵便番号⇄住所 補完（社内 route 経由）。候補確定で zip/address をペア反映。
-                  onZipChange/onAddressChange は form 更新のみ＝addressEdited は立てない。 */}
+                  onZipChange/onAddressChange は form 更新のみ＝addressEdited は立てない。
+                  ⚠分けているときは**現住所側にだけ**効かせる（登記の記載を書き換えない）。 */}
               <AddressLookupControls
-                zip={form.zip}
-                address={form.address}
-                onZipChange={(z) => setForm((f) => ({ ...f, zip: z }))}
-                onAddressChange={(a) => setForm((f) => ({ ...f, address: a }))}
+                zip={addressSplit ? form.currentZip : form.zip}
+                address={addressSplit ? form.currentAddress : form.address}
+                onZipChange={(z) =>
+                  setForm((f) =>
+                    addressSplit ? { ...f, currentZip: z } : { ...f, zip: z },
+                  )
+                }
+                onAddressChange={(a) =>
+                  setForm((f) =>
+                    addressSplit ? { ...f, currentAddress: a } : { ...f, address: a },
+                  )
+                }
                 addressEdited={addressEdited}
                 disabled={submitting}
                 mode="both"

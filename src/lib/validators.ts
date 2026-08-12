@@ -225,8 +225,14 @@ export const createOwnerSchema = z.object({
   name: z.string().min(1, "氏名は必須です"),
   nameKana: z.string().optional().nullable(),
   phone: z.string().optional().nullable(),
+  // zip / address は「登記上」の値（謄本・受付帳・所有者CSVの取込が書く）。
   zip: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
+  // 現住所（引っ越して登記を変更していない場合に使う）。
+  // ⚠住所と郵便番号は必ずペアで扱う（resolveCurrentAddressWrite が規則を持つ）。
+  // ⚠形式の検査はしない（日本の7桁以外＝海外の郵便番号を捨てないため）。
+  currentZip: z.string().optional().nullable(),
+  currentAddress: z.string().optional().nullable(),
   note: z.string().optional().nullable(),
   email: z.string().email("メールアドレスの形式が正しくありません").optional().nullable(),
   externalLinkKey: z.string().optional().nullable(),
@@ -238,8 +244,14 @@ export const updateOwnerSchema = z.object({
   name: z.string().min(1).optional(),
   nameKana: z.string().optional().nullable(),
   phone: z.string().optional().nullable(),
+  // zip / address は「登記上」の値（謄本・受付帳・所有者CSVの取込が書く）。
   zip: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
+  // 現住所（引っ越して登記を変更していない場合に使う）。
+  // ⚠住所と郵便番号は必ずペアで扱う（resolveCurrentAddressWrite が規則を持つ）。
+  // ⚠形式の検査はしない（日本の7桁以外＝海外の郵便番号を捨てないため）。
+  currentZip: z.string().optional().nullable(),
+  currentAddress: z.string().optional().nullable(),
   note: z.string().optional().nullable(),
   email: z.string().email("メールアドレスの形式が正しくありません").optional().nullable(),
   corporateNumber: corporateNumberInputSchema.optional(),

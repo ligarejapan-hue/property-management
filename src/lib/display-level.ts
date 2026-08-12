@@ -244,6 +244,10 @@ export function applyDisplayToOwner(
     phone?: string | null;
     zip?: string | null;
     address?: string | null;
+    /** 現住所の郵便番号。owner_zip の表示レベルでマスクする。 */
+    currentZip?: string | null;
+    /** 現住所。owner_address の表示レベルでマスクする。 */
+    currentAddress?: string | null;
     note?: string | null;
     email?: string | null;
     corporateNumber?: string | null;
@@ -269,6 +273,11 @@ export function applyDisplayToOwner(
     { key: "corporateNumber", configKey: "corporateNumber", maskFn: maskCorporateNumber },
     // 会社法人等番号(12桁)は corporateNumber と同じ display level でマスクする。
     { key: "companyRegistryNumber", configKey: "corporateNumber", maskFn: maskCorporateNumber },
+    // ⚠現住所は「登記上の住所」と同じ機微度なので、専用の resource を作らず
+    //   owner_zip / owner_address の設定をそのまま流用する(companyRegistryNumber と同型)。
+    // ⚠ここへ足し忘れると、住所をマスクしている利用者に**現住所だけ生で見える**(fail-open)。
+    { key: "currentZip", configKey: "zip", maskFn: maskZip },
+    { key: "currentAddress", configKey: "address", maskFn: partialAddress },
   ];
 
   for (const { key, configKey, maskFn } of fieldMap) {

@@ -39,6 +39,10 @@ const JAPANESE_FIELD_TO_PROPERTY: Record<string, string> = {
   "電話番号": "phone",
   "郵便番号": "zip",
   "住所": "address",
+  // ⚠列の対応を画面で明示指定する経路。自動判定(OWNER_CSV_COLUMN_MAP)と
+  //   両方に足さないと「指定したのに入らない」片落ちになる。
+  "現住所": "currentAddress",
+  "現住所郵便番号": "currentZip",
   "備考": "note",
   "リンクキー": "externalLinkKey",
 };
@@ -259,6 +263,14 @@ export async function POST(request: NextRequest) {
         if (mapped.phone) createData.phone = mapped.phone.trim();
         if (mapped.zip) createData.zip = mapped.zip.trim();
         if (mapped.address) createData.address = mapped.address.trim();
+        // ⚠現住所は**ペアで**入れる。郵便番号だけが入ると
+        //   「別の場所の郵便番号 + この人の住所」という封筒ができる（設計 §6.1）。
+        if (mapped.currentAddress && mapped.currentAddress.trim()) {
+          createData.currentAddress = mapped.currentAddress.trim();
+          if (mapped.currentZip && mapped.currentZip.trim()) {
+            createData.currentZip = mapped.currentZip.trim();
+          }
+        }
         if (mapped.note) createData.note = mapped.note.trim();
         if (mapped.externalLinkKey) createData.externalLinkKey = mapped.externalLinkKey.trim();
 

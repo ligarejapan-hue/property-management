@@ -189,6 +189,18 @@ export async function POST(
       );
     }
 
+    // ⚠住所と郵便番号は**一組でしか反映しない**（設計 §6.1・両方向）。
+    //   郵便番号だけ → 「国税庁の番号 + 元の住所」
+    //   住所だけ     → 「国税庁の住所 + 古い番号」
+    //   どちらもズレた宛先で、封筒は届かないか別の場所へ行く。
+    if (body.apply.zip !== body.apply.address) {
+      throw new ApiError(
+        400,
+        "住所と郵便番号は一緒に反映してください（片方だけは選べません）",
+        "ADDRESS_ZIP_NOT_PAIRED",
+      );
+    }
+
     // ---- field-level write perm（要求された field だけ厳格に要求） ----
     // 拒否時は DB アクセス前に失敗するため、生値ログには到達しない。
     const fieldChecks: Array<{ flag: boolean; resource: string; label: string }> = [
@@ -300,16 +312,11 @@ export async function POST(
     if (body.apply.name) updateFields.name = fresh.record.name;
     if (body.apply.address) updateFields.address = fresh.record.address;
     if (body.apply.zip) {
-      const z = formatPostCodeToZip(fresh.record.postCode);
-      if (z === null) {
-        auditResult = "stale";
-        throw new ApiError(
-          422,
-          "再取得結果に有効な郵便番号がありません",
-          "LOOKUP_INVALID",
-        );
-      }
-      updateFields.zip = z;
+      // ⚠国税庁に使える郵便番号が無いときは**空にする**（住所とペアで動かす）。
+      //   ここで拒否すると住所も反映できなくなり、逆に古い番号を残すと
+      //   「国税庁の住所 + 前の場所の番号」というズレた宛先ができる。
+      //   corporate-restore-apply(nta) と同じ扱い。
+      updateFields.zip = formatPostCodeToZip(fresh.record.postCode);
     }
     if (body.apply.corporateNumber) {
       updateFields.corporateNumber = fresh.record.corporateNumber;

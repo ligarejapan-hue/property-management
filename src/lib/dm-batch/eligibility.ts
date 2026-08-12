@@ -44,6 +44,10 @@ export interface PropertyStateForCheck {
       nameKana: string | null;
       zip: string | null;
       address: string | null;
+      // ⚠住所グループの再計算は**解決後の宛先**で行うため、現住所も要る。
+      //   ここが欠けると、凍結時の照合が登記上の住所で行われて食い違う。
+      currentZip: string | null;
+      currentAddress: string | null;
       corporateNumber: string | null;
     };
   }>;

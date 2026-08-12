@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { createOwnerSchema, updateOwnerSchema } from "../validators";
 import {
@@ -621,6 +623,10 @@ const fullForm = {
   phone: "090-1234-5678",
   zip: "123-4567",
   address: "東京都渋谷区1-1",
+  // 現住所は未設定（＝登記上の住所を使う）を既定にする。
+  // 現住所そのものの挙動は owner-current-address-write.test.ts で固定している。
+  currentAddress: "",
+  currentZip: "",
   email: "yamada@example.com",
   corporateNumber: "",
   companyRegistryNumber: "",
@@ -1630,5 +1636,74 @@ describe("PATCH route source — response owner:read gate", () => {
   it("既存の owner_email / owner_note の field-level write check も維持されている", () => {
     expect(patchSource).toMatch(/resource:\s*"owner_email"/);
     expect(patchSource).toMatch(/resource:\s*"owner_note"/);
+  });
+});
+
+describe("buildOwnerUpdatePayload — 現住所は両方の権限があるときだけ送る", () => {
+  const form = {
+    ...fullForm,
+    currentAddress: "渋谷区神宮前1-1-1",
+    currentZip: "150-0001",
+  };
+
+  it("住所と郵便番号の両方が編集できるなら、ペアで送る", () => {
+    const payload = buildOwnerUpdatePayload(form, allEditable, 1);
+    expect(payload.currentAddress).toBe("渋谷区神宮前1-1-1");
+    expect(payload.currentZip).toBe("150-0001");
+  });
+
+  it("⚠郵便番号を編集できない利用者には現住所を送らない", () => {
+    // 現住所を送るとサーバーは「郵便番号も決め直す操作」とみなして
+    // owner_zip の書込権限を要求する。常に送ると、電話番号を直すだけの
+    // 保存まで 403 になる。
+    const payload = buildOwnerUpdatePayload(
+      form,
+      { ...allEditable, zip: false },
+      1,
+    );
+    expect(payload).not.toHaveProperty("currentAddress");
+    expect(payload).not.toHaveProperty("currentZip");
+    // 他の項目は今までどおり送れる
+    expect(payload.phone).toBe("090-1234-5678");
+    expect(payload.address).toBe("東京都渋谷区1-1");
+  });
+
+  it("住所を編集できない利用者にも送らない", () => {
+    const payload = buildOwnerUpdatePayload(
+      form,
+      { ...allEditable, address: false },
+      1,
+    );
+    expect(payload).not.toHaveProperty("currentAddress");
+    expect(payload).not.toHaveProperty("currentZip");
+  });
+});
+
+describe("現住所の欄と登記上の住所の編集は別（画面の走査）", () => {
+  const pageSrc = readFileSync(
+    join(process.cwd(), "src/app/(dashboard)/properties/[id]/page.tsx"),
+    "utf8",
+  );
+
+  it("⚠住所しか編集できない人からも住所の編集欄を奪わない", () => {
+    // この欄は登記上と現住所を1つの入力で切り替える作り。欄ごと隠すと登記上も消える。
+    expect(pageSrc).toContain("{editableFields.address && (");
+  });
+
+  it("分ける導線は住所と郵便番号の両方が編集できるときだけ出す", () => {
+    expect(pageSrc).toContain(
+      "const canSplitCurrentAddress = editableFields.address && editableFields.zip;",
+    );
+    expect(pageSrc).toContain("{canSplitCurrentAddress && !splitActive && (");
+  });
+
+  it("郵便番号を編集できない人には現住所を読み取り専用で見せる（黙って消さない）", () => {
+    expect(pageSrc).toContain("{addressSplit && !canSplitCurrentAddress && (");
+    expect(pageSrc).toContain("現住所（編集には郵便番号の編集権限が必要です）");
+  });
+
+  it("⚠閲覧時は郵便番号と住所を組で出す（現住所の隣に登記上の番号を並べない）", () => {
+    expect(pageSrc).toContain('label="郵便番号（現住所）" value={po.owner.currentZip}');
+    expect(pageSrc).toContain('label="郵便番号（登記上）" value={po.owner.zip}');
   });
 });

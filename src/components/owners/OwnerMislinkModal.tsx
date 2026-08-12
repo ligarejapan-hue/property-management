@@ -63,6 +63,9 @@ interface OwnerSearchHit {
   nameKana: string | null;
   phone: string | null;
   address: string | null;
+  /** 現住所（マスク済み）。⚠検索は現住所にも当たるので、当たった値を出さないと
+   *  「なぜこの人が出たのか」が分からないまま、付け替えという戻せない操作をしてしまう。 */
+  currentAddress: string | null;
   externalLinkKey: string | null;
 }
 
@@ -363,6 +366,20 @@ export function OwnerMislinkModal({
                     onClick={() => setSelectedTarget(h)}
                   >
                     <div className="font-medium text-gray-900 dark:text-gray-100">{h.name}</div>
+                    {/* ⚠同じ名前の別人を選ばないために、当たった住所を出す。
+                        現住所があれば実際に届く方を先に出す。 */}
+                    <div className="text-[10px] text-gray-500 dark:text-gray-400">
+                      {[
+                        h.currentAddress ? `現住所: ${h.currentAddress}` : null,
+                        h.address
+                          ? h.currentAddress
+                            ? `登記上: ${h.address}`
+                            : h.address
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" / ")}
+                    </div>
                     <div className="font-mono text-[10px] text-gray-500 dark:text-gray-400">
                       {h.id.slice(0, 8)}…
                     </div>

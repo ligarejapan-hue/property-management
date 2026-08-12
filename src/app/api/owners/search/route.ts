@@ -75,8 +75,11 @@ export async function GET(request: NextRequest) {
       orClauses.push({ nameKana: { contains: q, mode: "insensitive" } });
     if (searchableFields.phone)
       orClauses.push({ phone: { contains: q, mode: "insensitive" } });
-    if (searchableFields.address)
+    if (searchableFields.address) {
       orClauses.push({ address: { contains: q, mode: "insensitive" } });
+      // ⚠現住所も同じ規則で検索対象にする(owner_address が生値のときだけ)。
+      orClauses.push({ currentAddress: { contains: q, mode: "insensitive" } });
+    }
     if (searchableFields.externalLinkKey)
       orClauses.push({ externalLinkKey: { contains: q, mode: "insensitive" } });
 
@@ -96,6 +99,7 @@ export async function GET(request: NextRequest) {
         nameKana: true,
         phone: true,
         address: true,
+        currentAddress: true,
         externalLinkKey: true,
       },
       take: 10,
@@ -109,6 +113,9 @@ export async function GET(request: NextRequest) {
       nameKana: maskValue(owner.nameKana, displayConfig.nameKana),
       phone: maskValue(owner.phone, displayConfig.phone),
       address: maskValue(owner.address, displayConfig.address),
+      // ⚠当たった値を画面に出すために返す。返さないと「なぜこの人が出たのか」が
+      //   分からず、似た名前の別人を選ぶ。
+      currentAddress: maskValue(owner.currentAddress, displayConfig.address),
       externalLinkKey: allUnmasked ? owner.externalLinkKey : null,
     }));
 

@@ -61,6 +61,13 @@ const FORMAT_ISSUES = new Set<OwnerContactIssueCode>([
 interface ContactQualityRow {
   ownerId: string;
   zipMasked: string | null;
+  /**
+   * 現住所の郵便番号（マスク済み）。⚠実際に郵便が届くのはこちら側なので、
+   * ここを見ないと「壊れた番号のまま送り続ける」状態が残る。
+   */
+  currentZipMasked: string | null;
+  /** 現住所の郵便番号だけの検出結果（登記上と混ぜない）。 */
+  currentZipIssues: OwnerContactIssueCode[];
   phoneMasked: string | null;
   issues: OwnerContactIssueCode[];
   severity: ContactSeverity | null;
@@ -121,6 +128,8 @@ export async function GET(request: NextRequest) {
     // classifyOwnerContact をスキップし、issue/summary/分類由来情報を一切出さない。
     const zipVisible = isRawVisible(displayConfig.zip);
     const phoneVisible = isRawVisible(displayConfig.phone);
+    // 現住所の郵便番号は「住所とペアの片割れ」。住所が見えないユーザーには出さない。
+    const addressVisible = isRawVisible(displayConfig.address);
 
     const { searchParams } = new URL(request.url);
     const type = parseType(searchParams.get("type"));
@@ -137,6 +146,8 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         zip: true,
+        currentZip: true,
+        currentAddress: true,
         phone: true,
         note: true,
         externalLinkKey: true,
@@ -194,7 +205,24 @@ export async function GET(request: NextRequest) {
       );
       tallyOwnerContact(summary, result);
 
-      if (!matchesFilter(result.issues, type)) continue;
+      // ⚠現住所の郵便番号は**別に**分類する（登記上の検出結果と混ぜると
+      //   どちらの番号が壊れているのか分からなくなる）。
+      //   住所が見えないユーザーには判定させない（どの宛先の番号か分からないため）。
+      const currentZipResult = classifyOwnerContact(
+        { zip: owner.currentZip, phone: null },
+        { zip: zipVisible && addressVisible, phone: false },
+      );
+      // 現住所が空なら「番号だけある」状態＝この画面では扱わない（設計 §6.1）。
+      const currentZipIssues =
+        (owner.currentAddress ?? "").trim() === ""
+          ? []
+          : currentZipResult.issues;
+
+      if (
+        !matchesFilter(result.issues, type) &&
+        !matchesFilter(currentZipIssues, type)
+      )
+        continue;
 
       const changeLogCount = changeLogCountMap.get(owner.id) ?? 0;
       const importStatus = importStatusMap.get(owner.id) ?? null;
@@ -233,6 +261,10 @@ export async function GET(request: NextRequest) {
       matchedRows.push({
         ownerId: owner.id,
         zipMasked: maskValue(owner.zip, displayConfig.zip),
+        currentZipMasked: addressVisible
+          ? maskValue(owner.currentZip, displayConfig.zip)
+          : null,
+        currentZipIssues,
         phoneMasked: maskValue(owner.phone, displayConfig.phone),
         issues: result.issues,
         severity: result.severity,

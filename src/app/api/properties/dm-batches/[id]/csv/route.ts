@@ -82,6 +82,10 @@ async function loadPropertyStates(
               nameKana: true,
               zip: true,
               address: true,
+              // ⚠宛先は現住所を優先して解決するため両方を取る（select 漏れは無言の劣化＝
+              //   型は optional で通るのに現住所が常に undefined になり登記上へ戻り続ける）。
+              currentZip: true,
+              currentAddress: true,
               corporateNumber: true,
             },
           },

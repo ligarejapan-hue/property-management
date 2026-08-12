@@ -58,9 +58,13 @@ export async function POST(request: NextRequest) {
       }
       if (SEARCHABLE_LEVELS.has(displayConfig.address)) {
         ownerSearchConditions.push({ address: { contains: q, mode: "insensitive" } });
+        // ⚠現住所も同じ規則で検索対象にする(生値のときだけ)。
+        //   入口ごとに足し忘れると「現住所で探せない画面」が残る。
+        ownerSearchConditions.push({ currentAddress: { contains: q, mode: "insensitive" } });
       }
       if (SEARCHABLE_LEVELS.has(displayConfig.zip)) {
         ownerSearchConditions.push({ zip: { contains: q } });
+        ownerSearchConditions.push({ currentZip: { contains: q } });
       }
       // Phone: DB側・入力側両方のハイフン有無を吸収するため regexp_replace で正規化して比較。
       // regexp_replace は index が効かないため短すぎる入力では実行しない（090/03/0120 等を除外）。
@@ -130,6 +134,10 @@ export async function POST(request: NextRequest) {
                 address: true,
                 phone: true,
                 zip: true,
+                // ⚠現住所も返す。検索で当たった値が画面に出ないと
+                //   「なぜこの物件が候補に出たのか」が分からない。
+                currentAddress: true,
+                currentZip: true,
               },
             },
           },
@@ -178,8 +186,17 @@ export async function POST(request: NextRequest) {
               address: maskValue(o.address, displayConfig.address),
               phone: maskValue(o.phone, displayConfig.phone),
               zip: maskValue(o.zip, displayConfig.zip),
+              currentAddress: maskValue(o.currentAddress, displayConfig.address),
+              currentZip: maskValue(o.currentZip, displayConfig.zip),
             }
-          : { name: null, address: null, phone: null, zip: null },
+          : {
+              name: null,
+              address: null,
+              phone: null,
+              zip: null,
+              currentAddress: null,
+              currentZip: null,
+            },
       ),
     }));
 

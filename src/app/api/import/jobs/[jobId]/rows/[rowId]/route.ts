@@ -10,146 +10,16 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { assertImportJobMutable } from "@/lib/import-job-guard";
 import { writeAuditLog } from "@/lib/audit";
-import { normalizeCaseStatusInput, normalizeIntroductionRouteInput } from "@/lib/property-types";
 import { findDuplicateOwner } from "@/lib/owner-dedup";
 import { recalculateJobCounts } from "@/lib/import-job-counts";
 import { getStorage } from "@/lib/storage";
 
-/** Map Japanese CSV header names to property model field names. */
-const JAPANESE_FIELD_MAP: Record<string, string> = {
-  "住所": "address",
-  "地番": "lotNumber",
-  "家屋番号": "buildingNumber",
-  "不動産番号": "realEstateNumber",
-  "種別": "propertyType",
-  "登記状況": "registryStatus",
-  "DM判断": "dmStatus",
-  "案件ステータス": "caseStatus",
-  "導入ルート": "introductionRoute",
-  "流入経路": "introductionRoute",
-  "獲得経路": "introductionRoute",
-  "introduction_route": "introductionRoute",
-  "acquisitionRoute": "introductionRoute",
-  "acquisition_route": "introductionRoute",
-  "leadSource": "introductionRoute",
-  "lead_source": "introductionRoute",
-  "用途地域": "zoningDistrict",
-  "路線価": "rosenkaValue",
-  "緯度": "gpsLat",
-  "経度": "gpsLng",
-  "備考": "note",
-  "リンクキー": "externalLinkKey",
-};
-
-/** Map Japanese CSV header names to owner model field names. */
-const JAPANESE_OWNER_FIELD_MAP: Record<string, string> = {
-  "氏名": "name",
-  "氏名カナ": "nameKana",
-  "電話番号": "phone",
-  "郵便番号": "zip",
-  "住所": "address",
-  "備考": "note",
-  "リンクキー": "externalLinkKey",
-};
-
-/**
- * Resolve a rawData key to a property model field name.
- * Tries direct match first (already an English field name), then Japanese lookup.
- */
-function resolvePropertyField(key: string): string | undefined {
-  const directFields = new Set([
-    "address", "lotNumber", "buildingNumber", "realEstateNumber",
-    "propertyType", "registryStatus", "dmStatus", "caseStatus",
-    "introductionRoute", "zoningDistrict", "rosenkaValue", "gpsLat", "gpsLng",
-    "note", "externalLinkKey",
-  ]);
-  if (directFields.has(key)) return key;
-  return JAPANESE_FIELD_MAP[key];
-}
-
-/**
- * Resolve a rawData key to an owner model field name.
- */
-function resolveOwnerField(key: string): string | undefined {
-  const directFields = new Set([
-    "name", "nameKana", "phone", "zip", "address", "note", "externalLinkKey",
-  ]);
-  if (directFields.has(key)) return key;
-  return JAPANESE_OWNER_FIELD_MAP[key];
-}
-
-/**
- * Build property create data from a raw data record.
- */
-function buildPropertyCreateData(
-  data: Record<string, string>,
-  createdBy: string,
-): Record<string, unknown> {
-  const mapped: Record<string, string> = {};
-  for (const [key, value] of Object.entries(data)) {
-    const field = resolvePropertyField(key);
-    if (field && value) {
-      mapped[field] = value;
-    }
-  }
-
-  if (!mapped.address) {
-    throw new Error("住所が空です");
-  }
-
-  const createData: Record<string, unknown> = {
-    address: mapped.address,
-    propertyType: mapped.propertyType || "unknown",
-    registryStatus: mapped.registryStatus || "unconfirmed",
-    dmStatus: mapped.dmStatus || "hold",
-    caseStatus: normalizeCaseStatusInput(mapped.caseStatus) ?? "new_case",
-    createdBy,
-  };
-  const normalizedRoute = normalizeIntroductionRouteInput(mapped.introductionRoute);
-  if (normalizedRoute) createData.introductionRoute = normalizedRoute;
-  if (mapped.lotNumber) createData.lotNumber = mapped.lotNumber;
-  if (mapped.buildingNumber) createData.buildingNumber = mapped.buildingNumber;
-  if (mapped.realEstateNumber) createData.realEstateNumber = mapped.realEstateNumber;
-  if (mapped.externalLinkKey) createData.externalLinkKey = mapped.externalLinkKey;
-  if (mapped.zoningDistrict) createData.zoningDistrict = mapped.zoningDistrict;
-  if (mapped.rosenkaValue) createData.rosenkaValue = parseFloat(mapped.rosenkaValue) || null;
-  if (mapped.gpsLat) createData.gpsLat = parseFloat(mapped.gpsLat) || null;
-  if (mapped.gpsLng) createData.gpsLng = parseFloat(mapped.gpsLng) || null;
-  if (mapped.note) createData.note = mapped.note;
-
-  return createData;
-}
-
-/**
- * Build owner create data from a raw data record.
- */
-function buildOwnerCreateData(
-  data: Record<string, string>,
-): Record<string, unknown> {
-  const mapped: Record<string, string> = {};
-  for (const [key, value] of Object.entries(data)) {
-    const field = resolveOwnerField(key);
-    if (field && value) {
-      mapped[field] = value;
-    }
-  }
-
-  if (!mapped.name || !mapped.name.trim()) {
-    throw new Error("氏名が空です");
-  }
-
-  const createData: Record<string, unknown> = {
-    name: mapped.name.trim(),
-  };
-  if (mapped.nameKana) createData.nameKana = mapped.nameKana.trim();
-  if (mapped.phone) createData.phone = mapped.phone.trim();
-  if (mapped.zip) createData.zip = mapped.zip.trim();
-  if (mapped.address) createData.address = mapped.address.trim();
-  if (mapped.note) createData.note = mapped.note.trim();
-  if (mapped.externalLinkKey) createData.externalLinkKey = mapped.externalLinkKey.trim();
-
-  return createData;
-}
+import {
+  buildPropertyCreateData,
+  buildOwnerCreateData,
+  mapOwnerRawData,
+} from "@/lib/import-row-field-map";
+import { resolveAddressPairBackfill } from "@/lib/owner-address-backfill";
 
 // ---------- PATCH /api/import/jobs/:jobId/rows/:rowId ----------
 
@@ -280,13 +150,96 @@ export async function PATCH(
         );
       }
 
-      updatedRow = await prisma.importJobRow.update({
-        where: { id: rowId },
-        data: {
-          status: "success",
-          createdId: targetId,
-          errorMessage: null,
-        },
+      // ⚠「行の確保 → 相手の補完 → 履歴 → 行の完了」を**1つの tx** で行う（設計 §6.3(3)）。
+      //   2人が同じ行を別々の相手に解決すると、両方が相手を書き換えるのに行に残るのは
+      //   最後の1つだけになる。途中で失敗すると「相手だけ書き換わって行も履歴も無い」
+      //   状態が残る。確保できなければ 409（他の担当者が解決済み）。
+      updatedRow = await prisma.$transaction(async (tx) => {
+        const claim = await tx.importJobRow.updateMany({
+          where: { id: rowId, status: { in: ["needs_review", "error"] } },
+          data: {
+            status: "success",
+            createdId: targetId,
+            errorMessage: null,
+          },
+        });
+        if (claim.count === 0) {
+          throw new ApiError(
+            409,
+            "他の担当者が既にこの行を解決しています",
+            "ROW_ALREADY_RESOLVED",
+          );
+        }
+
+        if (row.job.jobType === "owner_csv") {
+          // 取込の値で、選んだ所有者の**空いている欄だけ**を補完する。
+          const sourceData =
+            editedData ?? (row.rawData as Record<string, string>);
+          const mapped = mapOwnerRawData(sourceData);
+          // 所有者の行をロックしてから読み直す（設計 §6.3(2)）。
+          const locked = await tx.owner.updateMany({
+            where: { id: targetId, isArchived: false },
+            data: { updatedAt: new Date() },
+          });
+          if (locked.count > 0) {
+            const fresh = await tx.owner.findUnique({
+              where: { id: targetId },
+              select: {
+                zip: true,
+                address: true,
+                currentZip: true,
+                currentAddress: true,
+              },
+            });
+            if (fresh) {
+              const registryPatch = resolveAddressPairBackfill(
+                { zip: fresh.zip, address: fresh.address },
+                { zip: mapped.zip ?? null, address: mapped.address ?? null },
+              );
+              const currentPatch = resolveAddressPairBackfill(
+                { zip: fresh.currentZip, address: fresh.currentAddress },
+                {
+                  zip: mapped.currentZip ?? null,
+                  address: mapped.currentAddress ?? null,
+                },
+              );
+              const fieldPatch: Record<string, string> = {
+                ...registryPatch,
+                ...(currentPatch.zip ? { currentZip: currentPatch.zip } : {}),
+                ...(currentPatch.address
+                  ? { currentAddress: currentPatch.address }
+                  : {}),
+              };
+              if (Object.keys(fieldPatch).length > 0) {
+                await tx.owner.update({
+                  where: { id: targetId },
+                  data: { ...fieldPatch, version: { increment: 1 } },
+                });
+                const before: Record<string, string | null> = {
+                  zip: fresh.zip,
+                  address: fresh.address,
+                  currentZip: fresh.currentZip,
+                  currentAddress: fresh.currentAddress,
+                };
+                await tx.changeLog.createMany({
+                  data: Object.entries(fieldPatch).map(
+                    ([fieldName, newValue]) => ({
+                      targetTable: "owners",
+                      targetId: targetId,
+                      fieldName,
+                      oldValue: before[fieldName] ?? null,
+                      newValue,
+                      source: "csv_import" as const,
+                      changedBy: session.id,
+                    }),
+                  ),
+                });
+              }
+            }
+          }
+        }
+
+        return tx.importJobRow.findUniqueOrThrow({ where: { id: rowId } });
       });
     } else if (action === "skip") {
       updatedRow = await prisma.importJobRow.update({
