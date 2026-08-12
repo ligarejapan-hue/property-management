@@ -14,6 +14,7 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
 import { buildRegistrySearchRequest } from "@/lib/registry-fetch/search-request";
 import { hashPropertyFingerprint } from "@/lib/registry-fetch/candidate-cache";
 import { describeSkipReasons } from "./skip-reasons";
+import { buildBulkIdempotencySignature } from "./idempotency";
 import type { RegistryCertificateType } from "@/lib/registry-fetch/types";
 import {
   MAX_BULK_ITEMS,
@@ -163,9 +164,19 @@ export async function createBulkFetchJob(
   }
 
   const idemKey = args.idempotencyKey?.trim() || null;
-  // 要求内容の指紋(対象物件の集合 + 種別)。同じキーで違う要求が来たら弾くための照合値。
+  // 要求内容の指紋(対象物件の集合 + 種別 + **承認の指紋**)。同じキーで違う要求が
+  // 来たら弾くための照合値。
+  // ⚠承認の指紋を材料に入れる(@codex #373 R9 P2)。入れないと、作成が成功したのに
+  //   応答が失われた後、利用者が物件を直して確認し直しても「同じ物件・同じ種別」
+  //   なら**古いジョブ**を返してしまう(直した物件が対象外のまま)。
   const fingerprint = createHash("sha256")
-    .update(`${[...ids].sort().join(",")}|${certificateType}`)
+    .update(
+      buildBulkIdempotencySignature(
+        ids,
+        certificateType,
+        args.approvedFingerprints,
+      ),
+    )
     .digest("hex")
     .slice(0, 32);
 

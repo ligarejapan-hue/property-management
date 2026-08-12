@@ -467,6 +467,82 @@ describe("承認の根拠（approvedFingerprints）", () => {
     expect((err as Error).message).not.toContain("0413234567890");
   });
 
+  it("⚠物件を直して確認し直したのに古いジョブを返さない（@codex #373 R9 P2）", async () => {
+    // 作成は成功したのに応答が失われた → 画面はキーを持ったまま → 利用者が
+    // モーダルを閉じ、地番を直して開き直す → 物件も種別も同じ。
+    // 承認の指紋を要求の指紋に入れていないと、サーバは物件を読み直す前に
+    // **直す前のジョブ**（その物件が対象外のまま）を返してしまう。
+    // ⚠保存される照合値は**サーバ自身に作らせる**。テストで式を書き写すと、
+    //   サーバが材料を減らしても気づけない（この不具合そのものを見逃す）。
+    pm.registryFetchJob.findUnique.mockResolvedValue(null);
+    pm.property.findMany.mockResolvedValue([prop(P1)]);
+    await createBulkFetchJob({
+      session: STAFF,
+      propertyIds: [P1],
+      certificateType: "owner",
+      idempotencyKey: "key-123",
+      approvedFingerprints: { [P1]: hashOf(prop(P1)) },
+    });
+    const storedFingerprint = pm.registryFetchJob.create.mock.calls[0][0].data
+      .requestFingerprint as string;
+    vi.clearAllMocks();
+    pm.$transaction.mockImplementation((cb: (tx: typeof prisma) => unknown) =>
+      cb(prisma),
+    );
+    pm.registryFetchJob.findUnique.mockResolvedValue({
+      id: "job-old",
+      requestFingerprint: storedFingerprint,
+      items: [{ status: "skipped" }],
+    });
+    await expect(
+      createBulkFetchJob({
+        session: STAFF,
+        propertyIds: [P1],
+        certificateType: "owner",
+        idempotencyKey: "key-123",
+        // 地番を直したので、確認し直した内容の指紋は別物になる。
+        approvedFingerprints: { [P1]: hashOf(prop(P1, { lotNumber: "69-2" })) },
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "REGISTRY_BULK_IDEMPOTENCY_MISMATCH",
+    });
+    expect(pm.registryFetchJob.create).not.toHaveBeenCalled();
+  });
+
+  it("同じ承認内容の再送はこれまでどおり冪等（応答が失われただけの送り直し）", async () => {
+    pm.registryFetchJob.findUnique.mockResolvedValue(null);
+    pm.property.findMany.mockResolvedValue([prop(P1)]);
+    const approved = { [P1]: hashOf(prop(P1)) };
+    await createBulkFetchJob({
+      session: STAFF,
+      propertyIds: [P1],
+      certificateType: "owner",
+      idempotencyKey: "key-123",
+      approvedFingerprints: approved,
+    });
+    const storedFingerprint = pm.registryFetchJob.create.mock.calls[0][0].data
+      .requestFingerprint as string;
+    vi.clearAllMocks();
+    pm.$transaction.mockImplementation((cb: (tx: typeof prisma) => unknown) =>
+      cb(prisma),
+    );
+    pm.registryFetchJob.findUnique.mockResolvedValue({
+      id: "job-existing",
+      requestFingerprint: storedFingerprint,
+      items: [{ status: "pending" }],
+    });
+    const res = await createBulkFetchJob({
+      session: STAFF,
+      propertyIds: [P1],
+      certificateType: "owner",
+      idempotencyKey: "key-123",
+      approvedFingerprints: approved,
+    });
+    expect(res.jobId).toBe("job-existing");
+    expect(pm.registryFetchJob.create).not.toHaveBeenCalled();
+  });
+
   it("⚠指紋の材料に地番の値そのものを残さない（秘匿）", async () => {
     const h = hashPropertyFingerprint({
       address: "横浜市南区井土ケ谷中町",

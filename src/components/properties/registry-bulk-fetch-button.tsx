@@ -16,6 +16,8 @@ import {
 } from "@/components/properties/registry-preflight-warnings";
 import { useRouter } from "next/navigation";
 import { createRegistryFetchJob } from "@/lib/api-client";
+// ⚠冪等キーの張り替え判定は**サーバの照合と同じ材料**で行う（定義元は1つ）。
+import { buildBulkIdempotencySignature } from "@/lib/registry-fetch/bulk/idempotency";
 
 interface Props {
   /** チェック中の物件ID(親が「今読み込んでいる物件 ∩ 選択」で確定して渡す)。 */
@@ -44,7 +46,23 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
 
   const handleConfirm = async () => {
     if (creating || count === 0) return;
-    const sig = `${[...propertyIds].sort().join(",")}|${certificateType}`;
+    // ⚠**この画面で見せた内容**を承認の根拠として送る（@codex #373 R6 P1）。
+    //   見せてから作成するまでの間に他の担当者が住所や番号を変えると、
+    //   作成時に読み直した新しい値で処理が進み、承認していないものを買う。
+    const approvedFingerprints = Object.fromEntries(
+      [...preflight.flagsById.values()].map((f) => [
+        f.propertyId,
+        f.fingerprintHash,
+      ]),
+    );
+    // ⚠承認の指紋もキーの材料に入れる（@codex #373 R9 P2）。物件を直して確認し
+    //   直したのに、選んだ物件と種別が同じだからと古いキーを使い回すと、
+    //   サーバーが**直す前のジョブ**を返してしまう。
+    const sig = buildBulkIdempotencySignature(
+      propertyIds,
+      certificateType,
+      approvedFingerprints,
+    );
     if (!idemKeyRef.current || idemSigRef.current !== sig) {
       idemKeyRef.current =
         typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -59,15 +77,7 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
         propertyIds,
         certificateType,
         idemKeyRef.current, // 再送時の二重作成を防ぐ(サーバーが同じキーを冪等化)
-        // ⚠**この画面で見せた内容**を承認の根拠として送る（@codex #373 R6 P1）。
-        //   見せてから作成するまでの間に他の担当者が住所や番号を変えると、
-        //   作成時に読み直した新しい値で処理が進み、承認していないものを買う。
-        Object.fromEntries(
-          [...preflight.flagsById.values()].map((f) => [
-            f.propertyId,
-            f.fingerprintHash,
-          ]),
-        ),
+        approvedFingerprints,
       );
       idemKeyRef.current = null; // 成功 → 次は新しいキー
       idemSigRef.current = null;
