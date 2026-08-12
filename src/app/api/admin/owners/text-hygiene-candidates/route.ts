@@ -46,18 +46,45 @@ const MAX_SCAN = 10_000;
 type RecommendedAction = "review" | "sanitize_candidate";
 
 // 走査対象の自由テキストフィールド。値キー・displayConfig キーと同名で揃える。
-type TextHygieneField = "name" | "nameKana" | "address" | "note";
+type TextHygieneField =
+  | "name"
+  | "nameKana"
+  | "address"
+  | "currentAddress"
+  | "note";
 
 const SCANNED_FIELDS: TextHygieneField[] = [
   "name",
   "nameKana",
   "address",
+  // ⚠現住所も走査する。ここに足さないと「現住所だけ文字化けが直せない」欄が残る。
+  "currentAddress",
   "note",
 ];
 
+/**
+ * 表示レベルを引くときのキー。現住所は登記上の住所と同じ表示レベルで扱う
+ * （専用の表示レベルは設けない＝設計 §5）。
+ */
+const DISPLAY_CONFIG_KEY: Record<
+  TextHygieneField,
+  "name" | "nameKana" | "address" | "note"
+> = {
+  name: "name",
+  nameKana: "nameKana",
+  address: "address",
+  currentAddress: "address",
+  note: "note",
+};
+
 // sanitize_candidate（自動除去推奨）にできるフィールド。note は除外（ZWJ 絵文字保護＝
 // 設計 §DQ-04 §4: note は inspectText 監査のみに留める）。
-const FIXABLE_FIELDS = new Set<TextHygieneField>(["name", "nameKana", "address"]);
+const FIXABLE_FIELDS = new Set<TextHygieneField>([
+  "name",
+  "nameKana",
+  "address",
+  "currentAddress",
+]);
 
 type FilterType = "all" | TextHygieneIssueCode;
 
@@ -161,6 +188,7 @@ export async function GET(request: NextRequest) {
         name: true,
         nameKana: true,
         address: true,
+        currentAddress: true,
         note: true,
         version: true,
       },
@@ -179,12 +207,13 @@ export async function GET(request: NextRequest) {
         name: owner.name,
         nameKana: owner.nameKana,
         address: owner.address,
+        currentAddress: owner.currentAddress,
         note: owner.note,
       };
 
       const fieldReports: FieldHygieneReport[] = [];
       for (const field of SCANNED_FIELDS) {
-        const level = displayConfig[field];
+        const level = displayConfig[DISPLAY_CONFIG_KEY[field]];
         if (!isRawVisible(level)) continue; // 不可視フィールドは分類しない（オラクル防止）
 
         const value = fieldValues[field];

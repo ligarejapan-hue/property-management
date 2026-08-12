@@ -189,6 +189,16 @@ export async function POST(
       );
     }
 
+    // ⚠郵便番号だけを反映すると「別の場所の郵便番号 + 今の住所」というズレたペアが
+    //   できる（設計 §6.1）。郵便番号を入れるなら住所と一組で入れる。
+    if (body.apply.zip && !body.apply.address) {
+      throw new ApiError(
+        400,
+        "郵便番号だけを反映することはできません（住所と一緒に反映してください）",
+        "ZIP_WITHOUT_ADDRESS",
+      );
+    }
+
     // ---- field-level write perm（要求された field だけ厳格に要求） ----
     // 拒否時は DB アクセス前に失敗するため、生値ログには到達しない。
     const fieldChecks: Array<{ flag: boolean; resource: string; label: string }> = [

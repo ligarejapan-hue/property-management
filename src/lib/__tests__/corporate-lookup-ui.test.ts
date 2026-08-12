@@ -46,7 +46,8 @@ describe("corporate-lookup-panel.tsx", () => {
   it("Phase C: 反映チェックボックスと apply ボタンが存在する", () => {
     // 反映対象選択チェックボックスが描画されている
     expect(panelSrc).toMatch(/会社名 → 所有者名/);
-    expect(panelSrc).toMatch(/所在地 → 現住所/);
+    // ラベルは「登記上住所」に正した（国税庁の所在地は登記上の欄へ入るため）。
+    expect(panelSrc).toMatch(/所在地 → 登記上住所/);
     expect(panelSrc).toMatch(/郵便番号/);
     // 反映ボタンと applyOwnerCorporate API 呼び出し
     expect(panelSrc).toMatch(/applyOwnerCorporate/);

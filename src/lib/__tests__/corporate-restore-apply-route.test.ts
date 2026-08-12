@@ -212,7 +212,7 @@ describe("認可・前提", () => {
 });
 
 describe("分断型の反映", () => {
-  it("addressMode=nta: 国税庁の会社名・最新本店住所・郵便番号・12/13桁を反映する", async () => {
+  it("addressMode=nta: 国税庁の住所は**現住所**へ入り、登記上は元の住所を保つ", async () => {
     const res = await POST(req([{ ownerId: SPLIT_ID, version: 2 }], "nta"));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -232,8 +232,15 @@ describe("分断型の反映", () => {
       corporateNumber: null,
     });
     expect(call.data.name).toBe("株式会社リガーレ商事");
-    expect(call.data.address).toBe("東京都渋谷区代々木一丁目1番1号");
-    expect(call.data.zip).toBe("151-0053"); // XXX-XXXX 形式に整形して保存
+    // ⚠登記上の住所は断片除去後のまま（国税庁が返すのは「今の本店所在地」で、
+    //   登記簿の住所とは限らない。上書きすると登記上の住所が失われる）。
+    expect(call.data.address).toBe(
+      "東京都渋谷区渋谷二丁目１７番１号渋谷アクシュ２１Ｆ",
+    );
+    expect(call.data).not.toHaveProperty("zip");
+    // 国税庁の住所と郵便番号は**現住所のペア**として入る（実際に届く先）。
+    expect(call.data.currentAddress).toBe("東京都渋谷区代々木一丁目1番1号");
+    expect(call.data.currentZip).toBe("151-0053"); // XXX-XXXX 形式に整形して保存
     expect(call.data.companyRegistryNumber).toBe("011001059442");
     expect(call.data.corporateNumber).toMatch(/^\d011001059442$/);
     expect(call.data.version).toEqual({ increment: 1 });

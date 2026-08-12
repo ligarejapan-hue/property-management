@@ -3230,8 +3230,11 @@ export interface CorporateCandidatesResponse {
 export interface AdminOwnerCorporateCandidateResponse {
   owner: {
     ownerId: string;
-    ownerNameMasked: string | null;
+    /** 登記上の住所（マスク済み） */
     ownerAddressMasked: string | null;
+    ownerNameMasked: string | null;
+    /** 現住所（マスク済み・未設定なら null） */
+    ownerCurrentAddressMasked: string | null;
     existingCorporateNumberMasked: string | null;
     version: number;
     propertyOwnerCount: number;
@@ -3249,6 +3252,7 @@ export async function fetchAdminOwnerCorporateCandidate(
         ownerId,
         ownerNameMasked: null,
         ownerAddressMasked: null,
+        ownerCurrentAddressMasked: null,
         existingCorporateNumberMasked: null,
         version: 1,
         propertyOwnerCount: 0,

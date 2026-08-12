@@ -48,7 +48,7 @@ const TYPE_BADGE: Record<string, string> = {
 
 const DETECTED_IN_LABEL: Record<string, string> = {
   name: "氏名",
-  address: "住所",
+  address: "登記上住所",
   note: "メモ",
 };
 
@@ -256,8 +256,16 @@ export default function AdminOwnerDetailPage() {
                 value={owner.existingCorporateNumberMasked}
                 mono
               />
+              {/* ⚠「現住所」は引っ越し先の住所を指す言葉になった。登記上の住所を
+                  そう呼ぶと、どちらを直しているのか分からなくなる。 */}
               <div className="md:col-span-2">
-                <Field label="現住所" value={owner.ownerAddressMasked} />
+                <Field label="登記上住所" value={owner.ownerAddressMasked} />
+              </div>
+              <div className="md:col-span-2">
+                <Field
+                  label="現住所"
+                  value={owner.ownerCurrentAddressMasked ?? "（未設定＝登記上へ送る）"}
+                />
               </div>
               <Field label="バージョン" value={String(owner.version)} mono />
               <Field

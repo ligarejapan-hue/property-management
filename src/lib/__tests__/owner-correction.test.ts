@@ -216,11 +216,17 @@ describe("extractAddressFromRawData", () => {
     expect(r?.sourceFieldNames).toEqual(["address"]);
   });
 
-  it("ownerAddress / currentAddress / 現住所 / 所有者住所 でも取得できる", () => {
-    for (const key of ["ownerAddress", "currentAddress", "現住所", "所有者住所"]) {
+  it("ownerAddress / 所有者住所 でも取得できる", () => {
+    for (const key of ["ownerAddress", "所有者住所"]) {
       const r = extractAddressFromRawData({ [key]: "愛知県名古屋市1-1" });
       expect(r?.address).toBe("愛知県名古屋市1-1");
       expect(r?.sourceFieldNames).toEqual([key]);
+    }
+  });
+
+  it("⚠現住所の列は登記上の住所の候補にしない（登記上を現住所で汚さない）", () => {
+    for (const key of ["currentAddress", "現住所"]) {
+      expect(extractAddressFromRawData({ [key]: "愛知県名古屋市1-1" })).toBeNull();
     }
   });
 

@@ -18,6 +18,7 @@ import {
   checkTextHygieneFixSafety,
   type TextHygieneFixBlockReason,
 } from "@/lib/owner-text-hygiene";
+import { normalizeAddress } from "@/lib/normalize";
 
 // ---------------------------------------------------------------------------
 // POST /api/admin/owners/:id/correction/text-fix
@@ -51,12 +52,14 @@ import {
 // ChangeLog（old/new）は内部変更履歴として記録するが、AuditLog detail には生値を入れない。
 // ---------------------------------------------------------------------------
 
-type TextFixField = "name" | "nameKana" | "address";
+type TextFixField = "name" | "nameKana" | "address" | "currentAddress";
 
 const FIELD_RESOURCE: Record<TextFixField, string> = {
   name: "owner_name",
   nameKana: "owner_name_kana",
   address: "owner_address",
+  // 現住所は登記上の住所と同じ機微度＝同じ field-level 権限で扱う。
+  currentAddress: "owner_address",
 };
 
 function statusFromReasons(reasons: string[]): number {
@@ -128,11 +131,12 @@ export async function POST(
     if (
       fieldRaw !== "name" &&
       fieldRaw !== "nameKana" &&
-      fieldRaw !== "address"
+      fieldRaw !== "address" &&
+      fieldRaw !== "currentAddress"
     ) {
       throw new ApiError(
         400,
-        "field は name / nameKana / address で指定してください",
+        "field は name / nameKana / address / currentAddress で指定してください",
         "INVALID_INPUT",
       );
     }
@@ -181,6 +185,9 @@ export async function POST(
         name: true,
         nameKana: true,
         address: true,
+        currentAddress: true,
+        // 現住所を直したときに郵便番号を据え置くか消すかの判断・履歴に使う。
+        currentZip: true,
         version: true,
         isArchived: true,
       },
@@ -193,7 +200,9 @@ export async function POST(
         ? owner.name
         : field === "nameKana"
           ? owner.nameKana
-          : owner.address;
+          : field === "currentAddress"
+            ? owner.currentAddress
+            : owner.address;
 
     // 1) targetValue（保存する値）と blockReasons を決定。
     let targetValue: string | null = null;
@@ -266,6 +275,21 @@ export async function POST(
 
     const newVersion = version + 1;
     const finalValue = targetValue;
+
+    // ⚠現住所を直した結果**宛先が変わる**なら、郵便番号は据え置けない（設計 §6.1）。
+    //   文字化けの除去や空白の整形だけで宛先が同じなら、郵便番号はそのまま使える。
+    //   宛先が変わるのに古い番号を残すと「別の場所の番号 + 新しい住所」になる。
+    const clearsCurrentZip =
+      field === "currentAddress" &&
+      owner.currentZip != null &&
+      normalizeAddress(currentValue) !== normalizeAddress(finalValue);
+    if (clearsCurrentZip && !hasExplicitWritePerm(perms, "owner_zip")) {
+      throw new ApiError(
+        403,
+        "現住所の郵便番号を更新する権限がありません",
+        "FORBIDDEN",
+      );
+    }
     const TX_BLOCKED_SENTINEL = "__text_fix_blocked_in_tx__";
     let txBlockedReasons: TextHygieneFixBlockReason[] | null = null;
     let txNotFound = false;
@@ -274,7 +298,11 @@ export async function POST(
       await prisma.$transaction(async (tx) => {
         const result = await tx.owner.updateMany({
           where: { id: ownerId, version, isArchived: false },
-          data: { [field]: finalValue, version: { increment: 1 } },
+          data: {
+            [field]: finalValue,
+            ...(clearsCurrentZip ? { currentZip: null } : {}),
+            version: { increment: 1 },
+          },
         });
         if (result.count === 0) {
           const cur = await tx.owner.findUnique({
@@ -305,6 +333,19 @@ export async function POST(
               source: "manual",
               changedBy: session.id,
             },
+            ...(clearsCurrentZip
+              ? [
+                  {
+                    targetTable: "owners",
+                    targetId: ownerId,
+                    fieldName: "currentZip",
+                    oldValue: owner.currentZip ?? null,
+                    newValue: null,
+                    source: "manual" as const,
+                    changedBy: session.id,
+                  },
+                ]
+              : []),
           ],
         });
       });
@@ -339,7 +380,7 @@ export async function POST(
         dryRun: false,
         field,
         mode,
-        updatedFields: [field],
+        updatedFields: clearsCurrentZip ? [field, "currentZip"] : [field],
       },
     });
 
@@ -347,7 +388,7 @@ export async function POST(
       executed: true,
       id: ownerId,
       version: newVersion,
-      updatedFields: [field],
+      updatedFields: clearsCurrentZip ? [field, "currentZip"] : [field],
     });
   } catch (error) {
     return handleApiError(error);

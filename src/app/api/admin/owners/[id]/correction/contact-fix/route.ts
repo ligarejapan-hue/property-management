@@ -50,9 +50,23 @@ import {
 // 値を入れない。
 // ---------------------------------------------------------------------------
 
-const FIELD_RESOURCE: Record<ContactField, string> = {
+/**
+ * この route が直せる欄。現住所の郵便番号（currentZip）は**値の種類としては zip**
+ * なので、整形・妥当性の判定は zip と同じものを使う（FIELD_KIND）。
+ */
+type TargetField = "zip" | "phone" | "currentZip";
+
+/** 値の種類（整形・妥当性判定の切り替えに使う）。 */
+const FIELD_KIND: Record<TargetField, ContactField> = {
+  zip: "zip",
+  phone: "phone",
+  currentZip: "zip",
+};
+
+const FIELD_RESOURCE: Record<TargetField, string> = {
   zip: "owner_zip",
   phone: "owner_phone",
+  currentZip: "owner_zip",
 };
 
 function statusFromReasons(reasons: string[]): number {
@@ -63,9 +77,17 @@ function statusFromReasons(reasons: string[]): number {
 /** 対象フィールドの生値が可視か（field-level が full/edit/read）。 */
 function canSeeField(
   perms: Parameters<typeof getOwnerFieldLevel>[0],
-  field: ContactField,
+  field: TargetField,
 ): boolean {
   const level = getOwnerFieldLevel(perms, FIELD_RESOURCE[field]);
+  return level === "full" || level === "edit" || level === "read";
+}
+
+/** 現住所そのものの生値が見えるか。現住所の郵便番号を直すには住所が見えている必要がある。 */
+function canSeeCurrentAddress(
+  perms: Parameters<typeof getOwnerFieldLevel>[0],
+): boolean {
+  const level = getOwnerFieldLevel(perms, "owner_address");
   return level === "full" || level === "edit" || level === "read";
 }
 
@@ -133,10 +155,19 @@ export async function POST(
       throw new ApiError(400, "version は正の整数で指定してください", "INVALID_INPUT");
     }
     const fieldRaw = body?.field;
-    if (fieldRaw !== "zip" && fieldRaw !== "phone") {
-      throw new ApiError(400, "field は zip / phone で指定してください", "INVALID_INPUT");
+    if (
+      fieldRaw !== "zip" &&
+      fieldRaw !== "phone" &&
+      fieldRaw !== "currentZip"
+    ) {
+      throw new ApiError(
+        400,
+        "field は zip / phone / currentZip で指定してください",
+        "INVALID_INPUT",
+      );
     }
-    const field: ContactField = fieldRaw;
+    const field: TargetField = fieldRaw;
+    const kind: ContactField = FIELD_KIND[field];
     const mode = body?.mode;
     if (mode !== "format" && mode !== "set") {
       throw new ApiError(400, "mode は format / set で指定してください", "INVALID_INPUT");
@@ -150,7 +181,11 @@ export async function POST(
     }
     const dryRun = body?.dryRun !== false; // default: true
 
-    const fieldVisible = canSeeField(perms, field);
+    // ⚠現住所の郵便番号は「住所とペアの片割れ」なので、住所が見えていないと直せない
+    //   （どの宛先の番号なのかを判断できないまま書き換えることになる）。
+    const fieldVisible =
+      canSeeField(perms, field) &&
+      (field !== "currentZip" || canSeeCurrentAddress(perms));
 
     if (!dryRun) {
       if (!hasPermission(perms, "owner", "write")) {
@@ -160,25 +195,58 @@ export async function POST(
       if (!hasExplicitWritePerm(perms, FIELD_RESOURCE[field])) {
         throw new ApiError(403, "対象フィールドを更新する権限がありません", "FORBIDDEN");
       }
+      // ⚠現住所の郵便番号を書くことは「この住所の番号はこれだ」と言うのと同じ。
+      //   住所側の書込権限も要求する（片方の権限だけでペアを動かさない）。
+      if (field === "currentZip" && !hasExplicitWritePerm(perms, "owner_address")) {
+        throw new ApiError(
+          403,
+          "現住所を更新する権限がありません",
+          "FORBIDDEN",
+        );
+      }
     }
 
     const owner = await prisma.owner.findUnique({
       where: { id: ownerId },
-      select: { id: true, zip: true, phone: true, version: true, isArchived: true },
+      select: {
+        id: true,
+        zip: true,
+        phone: true,
+        currentZip: true,
+        currentAddress: true,
+        version: true,
+        isArchived: true,
+      },
     });
     if (!owner) {
       throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
     }
-    const currentValue = field === "zip" ? owner.zip : owner.phone;
+    const currentValue =
+      field === "zip"
+        ? owner.zip
+        : field === "currentZip"
+          ? owner.currentZip
+          : owner.phone;
 
     // 1) finalValue（保存する canonical 値）と blockReasons を決定。
     let finalValue: string | null = null;
     let hasFinal = false;
     let blockReasons: string[] = [];
 
-    if (mode === "format") {
+    // ⚠現住所が無いのに郵便番号だけ直すと、宛先にならない番号だけが残る（設計 §6.1）。
+    //   住所を据え置いたままペアとして書き直す形でのみ許す。
+    if (
+      field === "currentZip" &&
+      (owner.currentAddress ?? "").trim() === ""
+    ) {
+      blockReasons = ["current_address_missing"];
+    }
+
+    if (blockReasons.length > 0) {
+      // 現住所が無い＝この欄は直せない。以降の判定はしない。
+    } else if (mode === "format") {
       const proposal =
-        field === "zip" ? decideZipFix(currentValue) : decidePhoneFix(currentValue);
+        kind === "zip" ? decideZipFix(currentValue) : decidePhoneFix(currentValue);
       if (proposal.action === "format") {
         finalValue = proposal.cleanedValue;
         hasFinal = true;
@@ -194,11 +262,11 @@ export async function POST(
         hasFinal = true;
       } else {
         const valid =
-          field === "zip" ? isValidPostalCode(raw) : classifyPhone(raw) === "valid";
+          kind === "zip" ? isValidPostalCode(raw) : classifyPhone(raw) === "valid";
         if (!valid) {
           blockReasons = ["forbidden_value"];
         } else {
-          finalValue = field === "zip" ? formatPostalCode(raw) : normalizePhone(raw);
+          finalValue = kind === "zip" ? formatPostalCode(raw) : normalizePhone(raw);
           hasFinal = true;
         }
       }
@@ -207,7 +275,7 @@ export async function POST(
     // 2) 共通 safety（archived / version / no_change を canonical 値で判定）。
     if (blockReasons.length === 0 && hasFinal) {
       const safety = checkContactFixSafety({
-        field,
+        field: kind,
         isArchived: owner.isArchived,
         versionMatches: owner.version === version,
         currentValue,

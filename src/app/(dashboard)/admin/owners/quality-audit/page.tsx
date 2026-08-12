@@ -46,6 +46,8 @@ interface NameRow {
 interface ContactRow {
   ownerId: string;
   zipMasked: string | null;
+  currentZipMasked: string | null;
+  currentZipIssues: OwnerContactIssueCode[];
   phoneMasked: string | null;
   issues: OwnerContactIssueCode[];
   severity: ContactSeverity | null;
@@ -586,7 +588,15 @@ export default function QualityAuditPage() {
           <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
             <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
-                {["所有者", "郵便番号", "電話", "検出", "推奨", "操作"].map((h) => (
+                {[
+                  "所有者",
+                  "郵便番号（登記上）",
+                  "郵便番号（現住所）",
+                  "電話",
+                  "検出",
+                  "推奨",
+                  "操作",
+                ].map((h) => (
                   <th
                     key={h}
                     className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400"
@@ -617,6 +627,13 @@ export default function QualityAuditPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-sm font-mono text-gray-900 break-all dark:text-gray-100">
+                      {row.currentZipMasked == null ? (
+                        <span className="text-gray-300 dark:text-gray-600">—</span>
+                      ) : (
+                        escapeControlForAudit(row.currentZipMasked)
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm font-mono text-gray-900 break-all dark:text-gray-100">
                       {row.phoneMasked == null ? (
                         <span className="text-gray-300 dark:text-gray-600">—</span>
                       ) : (
@@ -627,6 +644,12 @@ export default function QualityAuditPage() {
                       <div className="flex flex-wrap gap-1">
                         {row.issues.map((c) =>
                           renderIssueBadge(CONTACT_ISSUE_LABEL[c], row.severity),
+                        )}
+                        {row.currentZipIssues.map((c) =>
+                          renderIssueBadge(
+                            `現住所: ${CONTACT_ISSUE_LABEL[c]}`,
+                            row.severity,
+                          ),
                         )}
                       </div>
                     </td>

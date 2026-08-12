@@ -129,13 +129,14 @@ export function buildOwnerExternalLinkKeyDuplicateKey(
 
 // rawData の住所フィールド候補（直接値として使えるキー名）。
 // owner-csv ルートの OWNER_CSV_COLUMN_MAP と整合させた優先順序。
+// ⚠この経路が埋めるのは**登記上の住所**なので、現住所系のキーは候補にしない。
+//   現住所を登記上の欄へ入れると、登記上の住所が失われて名寄せと物件の紐づけが汚れる
+//   （設計 §7・復元できない）。
 const DIRECT_ADDRESS_KEYS_PRIMARY = [
   "住所",
   "所在地",
   "address",
   "ownerAddress",
-  "currentAddress",
-  "現住所",
 ];
 
 // 「所有者住所」は reception-owner フローでは結合フィールドの一部として使われる。
