@@ -432,3 +432,61 @@ describe("POST regenerate draft (再生成)", () => {
     expect(res.status).toBe(409);
   });
 });
+
+describe("POST confirm (bulk) — 共有者のまとまりが割れていないか", () => {
+  const D = "11111111-1111-4111-8111-111111111111";
+  const A = "aaaaaaaa-1111-4111-8111-111111111111";
+  const B = "bbbbbbbb-2222-4222-8222-222222222222";
+
+  /** 代表 + 共有者1人の下書き（2人まとめて1通）。 */
+  function setupSharedDraft(
+    ownerA: Record<string, string | null>,
+    ownerB: Record<string, string | null>,
+    saved = { recipientZip: "150-0001", recipientAddress: "渋谷区神宮前1-1-1" },
+  ) {
+    pm._tx.dmRecipientDraft.findMany.mockResolvedValue([
+      {
+        id: D,
+        recipientZip: saved.recipientZip,
+        recipientAddress: saved.recipientAddress,
+        representativeOwnerId: A,
+        draftOwners: [{ ownerId: A }, { ownerId: B }],
+      },
+    ]);
+    pm._tx.owner.findMany.mockResolvedValue([
+      { id: A, zip: null, address: null, currentZip: null, currentAddress: null, ...ownerA },
+      { id: B, zip: null, address: null, currentZip: null, currentAddress: null, ...ownerB },
+    ]);
+    pm._tx.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
+  }
+
+  const call = () =>
+    confirmDrafts(
+      new Request("http://x", {
+        method: "POST",
+        body: JSON.stringify({ ids: [D] }),
+      }) as never,
+    );
+
+  it("2人とも同じ宛先のままなら確定できる", async () => {
+    grant(...ALL);
+    setupSharedDraft(
+      { currentZip: "150-0001", currentAddress: "渋谷区神宮前1-1-1" },
+      { currentZip: "150-0001", currentAddress: "渋谷区神宮前1-1-1" },
+    );
+    const res = await call();
+    expect(res.status).toBe(200);
+  });
+
+  it("⚠代表ではない共有者だけが引っ越したら確定させない（作り直せば2通に割れる）", async () => {
+    grant(...ALL);
+    setupSharedDraft(
+      { currentZip: "150-0001", currentAddress: "渋谷区神宮前1-1-1" },
+      // 郵便番号は同じまま・住所だけ別の場所へ（代表の値からは変化が見えない）
+      { currentZip: "150-0001", currentAddress: "横浜市南区井土ケ谷中町69-2" },
+    );
+    const res = await call();
+    expect(res.status).toBe(409);
+    expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+});

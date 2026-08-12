@@ -1012,6 +1012,18 @@ function OwnerCard({
     (po.owner.currentAddress ?? "").trim() !== "",
   );
 
+  /**
+   * ⚠現住所を「分けて編集」できるのは、住所と郵便番号の**両方**を編集できる人だけ。
+   * 現住所を書くことは郵便番号を決め直すこと（空にする場合を含む）でもあるため。
+   *
+   * ⚠住所しか編集できない人から**登記上の住所の編集を奪わない**。
+   * 奪うと、今まで住所を直せていた担当者が何も直せなくなる（この欄は登記上と現住所を
+   * 1つの入力で切り替える作りなので、欄ごと隠すと登記上も消える）。
+   * その人には**分ける導線だけ出さない**。
+   */
+  const canSplitCurrentAddress = editableFields.address && editableFields.zip;
+  const splitActive = addressSplit && canSplitCurrentAddress;
+
   const handleEdit = () => {
     setForm({
       name: po.owner.name ?? "",
@@ -1180,21 +1192,21 @@ function OwnerCard({
             {editableFields.zip && (
               <div className="space-y-1">
                 <label className="text-xs font-medium text-gray-700 dark:text-gray-200">
-                  {addressSplit ? "郵便番号（現住所）" : "郵便番号"}
+                  {splitActive ? "郵便番号（現住所）" : "郵便番号"}
                 </label>
                 <input
                   type="text"
-                  value={addressSplit ? form.currentZip : form.zip}
+                  value={splitActive ? form.currentZip : form.zip}
                   onChange={(e) =>
                     setForm((f) =>
-                      addressSplit
+                      splitActive
                         ? { ...f, currentZip: e.target.value }
                         : { ...f, zip: e.target.value },
                     )
                   }
                   className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 />
-                {addressSplit && (
+                {splitActive && (
                   <div className="space-y-1">
                     <label className="text-xs text-gray-500 dark:text-gray-400">
                       郵便番号（登記上）
@@ -1209,14 +1221,11 @@ function OwnerCard({
                 )}
               </div>
             )}
-            {/* ⚠現住所の欄は**住所と郵便番号の両方**を編集できる人にだけ出す。
-                現住所を書くことは郵便番号を決め直すことでもあり（空にする場合を含む）、
-                片方の権限しか無い人に出すと保存が必ず 403 になる。 */}
-            {editableFields.address && editableFields.zip && (
+            {editableFields.address && (
               <div className="space-y-1 md:col-span-2">
                 <div className="flex items-center gap-2">
                   <label className="text-xs font-medium text-gray-700 dark:text-gray-200">現住所</label>
-                  {!addressSplit && (
+                  {canSplitCurrentAddress && !splitActive && (
                     <button
                       type="button"
                       // ⚠ホバーで理由を出す（発注者指定の文言）。
@@ -1240,12 +1249,12 @@ function OwnerCard({
                 </div>
                 <input
                   type="text"
-                  value={addressSplit ? form.currentAddress : form.address}
+                  value={splitActive ? form.currentAddress : form.address}
                   onChange={(e) => {
                     // ユーザーの直接編集＝user-edit signal を立てる（住所検索のトリガー）。
                     setAddressEdited(true);
                     setForm((f) =>
-                      addressSplit
+                      splitActive
                         ? {
                             ...f,
                             currentAddress: e.target.value,
@@ -1259,7 +1268,20 @@ function OwnerCard({
                   }}
                   className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 />
-                {addressSplit && (
+                {addressSplit && !canSplitCurrentAddress && (
+                  <div className="space-y-1">
+                    <label className="text-xs text-gray-500 dark:text-gray-400">
+                      現住所（編集には郵便番号の編集権限が必要です）
+                    </label>
+                    <input
+                      type="text"
+                      value={form.currentAddress}
+                      readOnly
+                      className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-600 dark:border-gray-800 dark:bg-gray-900/60 dark:text-gray-400"
+                    />
+                  </div>
+                )}
+                {splitActive && (
                   <div className="space-y-1">
                     <label className="text-xs text-gray-500 dark:text-gray-400">登記上住所</label>
                     <input
@@ -1280,16 +1302,16 @@ function OwnerCard({
                     郵便番号APIの正規化表記で登記の記載を書き換えてしまう。 */}
                 {editableFields.zip && editableFields.address && (
                   <AddressLookupControls
-                    zip={addressSplit ? form.currentZip : form.zip}
-                    address={addressSplit ? form.currentAddress : form.address}
+                    zip={splitActive ? form.currentZip : form.zip}
+                    address={splitActive ? form.currentAddress : form.address}
                     onZipChange={(z) =>
                       setForm((f) =>
-                        addressSplit ? { ...f, currentZip: z } : { ...f, zip: z },
+                        splitActive ? { ...f, currentZip: z } : { ...f, zip: z },
                       )
                     }
                     onAddressChange={(a) =>
                       setForm((f) =>
-                        addressSplit
+                        splitActive
                           ? { ...f, currentAddress: a }
                           : { ...f, address: a },
                       )
@@ -1300,7 +1322,7 @@ function OwnerCard({
                   />
                 )}
                 {/* 保存を妨げない注意（番号が分からないまま登録できないと運用が止まるため）。 */}
-                {addressSplit &&
+                {splitActive &&
                   form.currentAddress.trim() !== "" &&
                   form.currentZip.trim() === "" && (
                     <p className="text-[11px] text-amber-700 dark:text-amber-300">
@@ -1464,16 +1486,21 @@ function OwnerCard({
         <dl className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <OwnerField label="氏名カナ" value={po.owner.nameKana} />
           <OwnerField label="電話番号" value={po.owner.phone} mono />
-          <OwnerField label="郵便番号" value={po.owner.zip} mono />
+          {(po.owner.currentAddress ?? "").trim() === "" && (
+            <OwnerField label="郵便番号" value={po.owner.zip} mono />
+          )}
           {emailReturned && (
             <OwnerField label="メールアドレス" value={po.owner.email} />
           )}
           <div className="md:col-span-2">
             {/* ⚠現住所が入っていれば**それを主に出す**（DMはそちらへ送るため）。
-                入っていなければ従来どおり登記上の住所を「現住所」として出す。 */}
+                ⚠郵便番号と住所は**必ず組で**出す。現住所の隣に登記上の郵便番号を
+                並べると、実際に刷られる宛先を読み違える。 */}
             {(po.owner.currentAddress ?? "").trim() !== "" ? (
               <>
+                <OwnerField label="郵便番号（現住所）" value={po.owner.currentZip} mono />
                 <OwnerField label="現住所" value={po.owner.currentAddress} />
+                <OwnerField label="郵便番号（登記上）" value={po.owner.zip} mono />
                 <OwnerField label="登記上住所" value={po.owner.address} />
               </>
             ) : (

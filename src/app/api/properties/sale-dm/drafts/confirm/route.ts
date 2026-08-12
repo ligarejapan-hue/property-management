@@ -8,6 +8,7 @@ import { lockOwnersForShare } from "@/lib/dm-batch/locks";
 import {
   resolveDraftRecipient,
   isRecipientStale,
+  isGroupSplit,
 } from "@/lib/sale-dm-letter/stale-recipient";
 
 // id は UUID 厳格検証(非UUIDを Prisma に渡して 500 にしない=422)。上限で巨大配列も弾く。
@@ -79,11 +80,15 @@ export async function POST(request: NextRequest) {
         const group = d.draftOwners
           .map((o) => ownerById.get(o.ownerId))
           .filter((o): o is NonNullable<typeof o> => o != null);
-        const now = resolveDraftRecipient({
+        const owners = {
           representative: rep,
           group: group.length > 0 ? group : rep ? [rep] : [],
-        });
-        return isRecipientStale(d, now);
+        };
+        // ⚠代表の宛先が同じでも、**共有者の1人だけが引っ越した**なら作り直せば2通に割れる。
+        //   代表の値しか見ないと、その1通がそのまま確定され、引っ越した人には
+        //   別人の住所で届く。
+        if (isGroupSplit(owners)) return true;
+        return isRecipientStale(d, resolveDraftRecipient(owners));
       });
       if (stale.length > 0) {
         throw new ApiError(

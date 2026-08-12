@@ -50,6 +50,25 @@ export function resolveDraftRecipient(
 }
 
 /**
+ * ⚠**同じ宛先にまとまったままか**を見る。
+ *
+ * 下書きは「同じ送付先の共有者を1通にまとめた」もの。共有者の1人が別の場所へ引っ越すと、
+ * 作り直せば**2通に割れる**。ところが代表者の住所と郵便番号だけを見ていると、
+ * **代表以外が動いたときに何も変わって見えない**ので、割れるはずの1通がそのまま確定される
+ * （引っ越した共有者には**別人の住所**で届く）。
+ *
+ * → グループ全員の解決結果が**代表と同じ宛先**であることまで確かめる。
+ */
+export function isGroupSplit(owners: DraftOwnerSet): boolean {
+  const rep = owners.representative;
+  if (!rep) return false;
+  const repAddress = normalizeAddress(resolveMailingAddress(rep).address);
+  return owners.group.some(
+    (o) => normalizeAddress(resolveMailingAddress(o).address) !== repAddress,
+  );
+}
+
+/**
  * 控えた宛先と、いまの解決結果が食い違うか。
  *
  * ⚠書き方の違い（空白・ハイフン）では食い違い扱いにしない。

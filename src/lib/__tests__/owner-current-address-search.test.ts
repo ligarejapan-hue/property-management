@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 /**
  * 現住所で「探せる／見える」ことを、検索の 3 入口すべてで固定する。
  *
@@ -342,5 +344,25 @@ describe("GET /api/owners の検索オラクル封じ", () => {
     expect(mentionsField(where.OR, "name")).toBe(true);
     expect(mentionsField(where.OR, "phone")).toBe(false);
     expect(mentionsField(where.OR, "currentAddress")).toBe(false);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// ⚠検索が当たる画面はすべて、当たった値を出すこと
+// ---------------------------------------------------------------------------
+
+describe("検索の結果を出す画面", () => {
+  const read = (rel: string) =>
+    readFileSync(join(process.cwd(), rel), "utf8");
+
+  it.each([
+    "src/components/owners/owner-link-modal.tsx",
+    "src/components/owners/OwnerMislinkModal.tsx",
+  ])("%s が現住所を表示する", (file) => {
+    // ⚠付け替えは戻せない操作。なぜこの人が出たのか分からないまま選ばせない。
+    const src = read(file);
+    expect(src).toContain("currentAddress");
+    expect(src).toContain("現住所:");
   });
 });

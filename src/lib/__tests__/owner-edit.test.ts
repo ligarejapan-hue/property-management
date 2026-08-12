@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { createOwnerSchema, updateOwnerSchema } from "../validators";
 import {
@@ -1674,5 +1676,34 @@ describe("buildOwnerUpdatePayload — 現住所は両方の権限があるとき
     );
     expect(payload).not.toHaveProperty("currentAddress");
     expect(payload).not.toHaveProperty("currentZip");
+  });
+});
+
+describe("現住所の欄と登記上の住所の編集は別（画面の走査）", () => {
+  const pageSrc = readFileSync(
+    join(process.cwd(), "src/app/(dashboard)/properties/[id]/page.tsx"),
+    "utf8",
+  );
+
+  it("⚠住所しか編集できない人からも住所の編集欄を奪わない", () => {
+    // この欄は登記上と現住所を1つの入力で切り替える作り。欄ごと隠すと登記上も消える。
+    expect(pageSrc).toContain("{editableFields.address && (");
+  });
+
+  it("分ける導線は住所と郵便番号の両方が編集できるときだけ出す", () => {
+    expect(pageSrc).toContain(
+      "const canSplitCurrentAddress = editableFields.address && editableFields.zip;",
+    );
+    expect(pageSrc).toContain("{canSplitCurrentAddress && !splitActive && (");
+  });
+
+  it("郵便番号を編集できない人には現住所を読み取り専用で見せる（黙って消さない）", () => {
+    expect(pageSrc).toContain("{addressSplit && !canSplitCurrentAddress && (");
+    expect(pageSrc).toContain("現住所（編集には郵便番号の編集権限が必要です）");
+  });
+
+  it("⚠閲覧時は郵便番号と住所を組で出す（現住所の隣に登記上の番号を並べない）", () => {
+    expect(pageSrc).toContain('label="郵便番号（現住所）" value={po.owner.currentZip}');
+    expect(pageSrc).toContain('label="郵便番号（登記上）" value={po.owner.zip}');
   });
 });
