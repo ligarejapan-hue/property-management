@@ -231,6 +231,11 @@ export default function RegistryBulkFetchProgressPage() {
         <Tile label="要確認" value={c.chargedButFailed} tone="red" />
       </div>
 
+      {/* ⚠外れた物件を黙って減らさない（設計 §3.1.0）。理由によって利用者の
+          やることが違うので、すべてを「地番が未入力」と書かない。
+          ⚠住所や地番そのものは出さない（秘匿）。件数と理由だけ。 */}
+      <ExcludedReasons items={progress.items} />
+
       {progress.status === "paused" && (
         <div className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
           {pausedMessage(progress.pausedReason)}
@@ -314,6 +319,55 @@ function Tile({
     <div className="rounded border border-gray-200 bg-white p-2 text-center dark:border-gray-800 dark:bg-gray-900">
       <div className={`text-lg font-semibold ${toneClass[tone]}`}>{value}</div>
       <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
+    </div>
+  );
+}
+
+/**
+ * ⚠理由によって利用者のやることが違う（設計 §3.1.0）。
+ * すべてを「地番が未入力」と書くと、住所が無い物件や不動産番号を持つ物件の
+ * 担当者は何を直せばよいか分からず詰まる。
+ */
+const ITEM_REASON_LABEL: Record<string, string> = {
+  missing_identifier: "地番・家屋番号が未入力",
+  malformed_identifier: "地番/家屋番号の書き方",
+  insufficient_location: "住所が未入力",
+  // ⚠これは「直せば通る」ものではない（番号での取得は途中で止まる）。
+  has_real_estate_number: "所在検索の対象外",
+  identifier_changed: "内容が変わりました（確認して選び直してください）",
+  ambiguous_candidate: "候補が複数（手動で選んでください）",
+  no_candidate: "候補が見つかりません",
+  property_unavailable: "物件を参照できません",
+};
+
+/** 対象外になった物件を、理由ごとの件数で出す。⚠住所・地番は出さない（秘匿）。 */
+function ExcludedReasons({
+  items,
+}: {
+  items: RegistryFetchJobProgress["items"];
+}) {
+  const counts = new Map<string, number>();
+  for (const it of items ?? []) {
+    if (it.status !== "skipped" || !it.errorCode) continue;
+    counts.set(it.errorCode, (counts.get(it.errorCode) ?? 0) + 1);
+  }
+  if (counts.size === 0) return null;
+  return (
+    <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950/40">
+      <div className="font-medium text-amber-900 dark:text-amber-300">
+        対象外になった物件の内訳
+      </div>
+      <ul className="mt-1 space-y-0.5 text-xs text-amber-800 dark:text-amber-300">
+        {[...counts.entries()].map(([code, n]) => (
+          <li key={code}>
+            {ITEM_REASON_LABEL[code] ?? code}: {n}件
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-400">
+        物件ページから1件ずつ対応してください。地番は物件ページのポップアップから
+        地図で確認して入れられます。
+      </p>
     </div>
   );
 }
