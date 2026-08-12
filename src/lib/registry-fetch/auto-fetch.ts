@@ -28,6 +28,10 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import {
+  toHalfWidthDigits,
+  unifyChibanSeparators,
+} from "@/lib/registry-fetch/chiban-input";
+import {
   CANCEL_ACCEPTED_MESSAGE,
   CANCEL_IGNORED_CHARGED_MESSAGE,
   decideCancel,
@@ -1036,11 +1040,9 @@ export function summarizeRegistrySearchError(err: unknown): string {
  * 例: 「1番1」→「1-1」/「1937番31」→「1937-31」/「1番2の3」→「1-2-3」/「５番」→「5」/「１－１」→「1-1」。
  */
 export function normalizeChibanForDialog(raw: string): string {
-  return raw
-    .trim()
-    .replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0))
-    .replace(/番地|番|の|ノ/g, "-")
-    .replace(/[‐‑‒–—―−ー－]/g, "-")
+  // ⚠文字クラスの正本は chiban-input.ts。ここで別の表記を足さない
+  //   （入力の検査と正規化がずれると、検査は通ったのに別の筆を探すことになる）。
+  return unifyChibanSeparators(toHalfWidthDigits(raw.trim()))
     .replace(/[^0-9-]/g, "")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
