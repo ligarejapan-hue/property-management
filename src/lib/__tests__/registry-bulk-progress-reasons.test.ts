@@ -27,7 +27,7 @@ describe("除外理由の内訳", () => {
     ["missing_identifier", "地番・家屋番号が未入力"],
     ["malformed_identifier", "地番/家屋番号の書き方"],
     ["insufficient_location", "住所が未入力"],
-    ["has_real_estate_number", "所在検索の対象外"],
+    ["has_real_estate_number", "所在検索の対象外（この経路では取得できません）"],
     ["identifier_changed", "内容が変わりました"],
     ["ambiguous_candidate", "候補が複数"],
     ["no_candidate", "候補が見つかりません"],

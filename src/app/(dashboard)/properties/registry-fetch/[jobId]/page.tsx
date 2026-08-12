@@ -334,7 +334,9 @@ const ITEM_REASON_LABEL: Record<string, string> = {
   malformed_identifier: "地番/家屋番号の書き方",
   insufficient_location: "住所が未入力",
   // ⚠これは「直せば通る」ものではない（番号での取得は途中で止まる）。
-  has_real_estate_number: "所在検索の対象外",
+  // ⚠「直せば通る」ものではない。番号での取得は実サイトに触れる前に止まる
+  //   （段階②が未実装）ので、この経路では取得できない。
+  has_real_estate_number: "所在検索の対象外（この経路では取得できません）",
   identifier_changed: "内容が変わりました（確認して選び直してください）",
   ambiguous_candidate: "候補が複数（手動で選んでください）",
   no_candidate: "候補が見つかりません",
