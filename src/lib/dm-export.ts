@@ -21,7 +21,6 @@ import { honorificForOwner } from "@/lib/owner-honorific";
 import type { OwnerDisplayConfig } from "@/lib/api-helpers";
 import { OTHER_CO_OWNERS_SUFFIX } from "@/lib/sale-dm-letter/addressee";
 import {
-  normalizeZipForGroup,
   normalizeAddressForGroup,
   resolveMailingAddress,
   resolveGroupZip,
