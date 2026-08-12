@@ -1,0 +1,93 @@
+/**
+ * 「何を取りに行くか」の分類（設計 §3.1.1 / §3.1.2）。
+ *
+ * ⚠種別では**止めない**（発注者判断 2026-08-12）。建物でも地番があれば土地の謄本は
+ *   取れる。種別は警告の材料にしか使わない。
+ */
+import { describe, it, expect } from "vitest";
+import { classifyRegistryTarget } from "@/lib/registry-fetch/registry-target";
+
+const t = (
+  propertyType: string,
+  lotNumber: string | null,
+  buildingNumber: string | null,
+) => classifyRegistryTarget({ propertyType, lotNumber, buildingNumber });
+
+describe("土地か建物かは持っている番号で決まる（種別では決めない）", () => {
+  it("家屋番号があれば建物", () => {
+    expect(t("house", "69-2", "12-3").kind).toBe("building");
+  });
+
+  it("家屋番号が無く地番があれば土地", () => {
+    expect(t("land", "69-2", null).kind).toBe("land");
+  });
+
+  it("どちらも無ければ決められない", () => {
+    expect(t("land", null, null).kind).toBe("none");
+  });
+
+  it("⚠読めない形の番号は「持っていない」と同じ扱い", () => {
+    // 通すと、正規化で潰れた別の筆を取りに行く。
+    expect(t("land", "abc1x2", null).kind).toBe("none");
+    expect(t("house", "69-2", "abc").kind).toBe("land");
+  });
+
+  it("既存の表記（1番地2）は持っている扱い", () => {
+    expect(t("land", "1番地2", null).kind).toBe("land");
+  });
+});
+
+describe("種別と食い違えば警告する（止めない）", () => {
+  it("土地の物件に家屋番号が残っている → 建物を取る警告", () => {
+    const r = t("land", "69-2", "12-3");
+    expect(r.kind).toBe("building");
+    expect(r.mismatchWarning).toContain("土地");
+    expect(r.mismatchWarning).toContain("建物の登記を取得します");
+  });
+
+  it("建物の物件で家屋番号が無い → 土地を取る警告", () => {
+    const r = t("house", "69-2", null);
+    expect(r.kind).toBe("land");
+    expect(r.mismatchWarning).toContain("家屋番号");
+  });
+
+  it.each([
+    "apartment_unit",
+    "apartment_building",
+    "apartment_block",
+    "store",
+    "office",
+    "warehouse",
+    "factory",
+    "building",
+    "unit",
+  ])("%s も建物として扱う", (pt) => {
+    expect(t(pt, "69-2", null).mismatchWarning).not.toBeNull();
+  });
+
+  it("食い違わなければ警告は出ない", () => {
+    expect(t("land", "69-2", null).mismatchWarning).toBeNull();
+    expect(t("house", null, "12-3").mismatchWarning).toBeNull();
+  });
+
+  it.each(["parking", "other", "unknown"])(
+    "%s は決められないので警告を出さない（何を取りに行くかは kind で分かる）",
+    (pt) => {
+      const r = t(pt, "69-2", null);
+      expect(r.kind).toBe("land");
+      expect(r.mismatchWarning).toBeNull();
+    },
+  );
+
+  it("番号がまったく無いときは警告を出さない（取りに行くものが無い）", () => {
+    expect(t("house", null, null).mismatchWarning).toBeNull();
+  });
+});
+
+describe("⚠警告文に地番の値そのものを載せない（秘匿）", () => {
+  it("番号を含まない", () => {
+    const r = t("land", "69-2", "12-3");
+    expect(r.mismatchWarning).not.toContain("69");
+    expect(r.mismatchWarning).not.toContain("12-3");
+  });
+});

@@ -7,6 +7,7 @@ import {
   ApiError,
 } from "@/lib/api-helpers";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import { classifyRegistryTarget } from "@/lib/registry-fetch/registry-target";
 import { requireBulkSession } from "@/lib/registry-fetch/bulk/route-support";
 import { MAX_BULK_ITEMS, UUID_RE } from "@/lib/registry-fetch/bulk/types";
 
@@ -63,6 +64,10 @@ export async function POST(request: NextRequest) {
         createdBy: true,
         assignedTo: true,
         registryStatus: true,
+        // ⚠「何を取りに行くか(土地/建物)」の判定に使う。値は返さない(秘匿)。
+        propertyType: true,
+        lotNumber: true,
+        buildingNumber: true,
         _count: { select: { propertyOwners: true } },
       },
     });
@@ -91,6 +96,14 @@ export async function POST(request: NextRequest) {
       registryObtained: p.registryStatus === "obtained",
       hasRegistryAttachment: attachedSet.has(p.id),
       hasOwners: p._count.propertyOwners > 0,
+      // ⚠これは参考情報ではなく**買う対象そのもの**。画面はこれが読めるまで
+      //   実行させない(fail closed・設計 §3.1.1)。
+      //   ⚠返すのは分類と警告文だけ。地番の値そのものは返さない(秘匿)。
+      target: classifyRegistryTarget({
+        propertyType: p.propertyType,
+        lotNumber: p.lotNumber,
+        buildingNumber: p.buildingNumber,
+      }),
     }));
 
     return apiResponse({ data, excluded });
