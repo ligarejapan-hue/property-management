@@ -13,6 +13,7 @@ import { resolveImportFileType } from "@/lib/import-content-detect";
 import {
   parseReceptionRows,
   parseOwnerRows,
+  OWNER_SHEET_POSTAL_HEADERS,
   buildCombinedMatches,
   summarizeMatches,
   getReviewReason,
@@ -111,6 +112,8 @@ export async function POST(request: NextRequest) {
         fileName: ownerFileName,
         csvText: ownerCsv,
         xlsxBase64: ownerXlsxBase64,
+        // ⚠郵便番号の先頭0を落とさない（Excel は 0100492 を数値 100492 として読む）。
+        formattedTextHeaders: OWNER_SHEET_POSTAL_HEADERS,
       });
     } catch (e) {
       if (e instanceof SheetParseError) {

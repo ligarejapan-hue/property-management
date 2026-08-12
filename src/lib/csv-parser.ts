@@ -259,6 +259,12 @@ export const OWNER_CSV_COLUMN_MAP: Record<string, string> = {
   "郵便番号": "zip",
   "住所": "address",
   "所在地": "address",
+  // ⚠現住所（引っ越し済みで登記が未変更の人の、実際に届く住所）。
+  //   無印の「住所」は**登記上**のまま。ここを取り違えると DM が旧住所へ飛ぶ。
+  "現住所": "currentAddress",
+  "現在の住所": "currentAddress",
+  "現住所郵便番号": "currentZip",
+  "現住所〒": "currentZip",
   "備考": "note",
   "メモ": "note",
   "リンクキー": "externalLinkKey",
@@ -270,6 +276,10 @@ export const OWNER_CSV_COLUMN_MAP: Record<string, string> = {
   "phone": "phone",
   "zip": "zip",
   "address": "address",
+  "currentZip": "currentZip",
+  "current_zip": "currentZip",
+  "currentAddress": "currentAddress",
+  "current_address": "currentAddress",
   "note": "note",
   "externalLinkKey": "externalLinkKey",
   "external_link_key": "externalLinkKey",

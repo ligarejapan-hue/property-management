@@ -20,6 +20,7 @@ import {
   isRowEligibleForManualLink,
 } from "@/lib/reception-owner-link";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
+import { resolveAddressPairBackfill } from "@/lib/owner-address-backfill";
 
 // ============================================================
 // POST /api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner
@@ -201,10 +202,12 @@ export async function POST(
         if (!name) continue;
         const address = o.address;
         const zip = o.zip;
+        const currentAddress = o.currentAddress;
+        const currentZip = o.currentZip;
 
         let ownerId: string | null = null;
-        let existingZip: string | null = null;
-        let existingAddress: string | null = null;
+        // ⚠住所・郵便番号の「今の値」はここでは覚えない。補完はロックの下で
+        //   読み直してから決める（設計 §6.3(2)）。
         if (address) {
           const normName = normalizeName(name);
           const normAddr = normalizeAddress(address);
@@ -222,8 +225,6 @@ export async function POST(
             ) ?? null;
           if (hit) {
             ownerId = hit.id;
-            existingZip = hit.zip;
-            existingAddress = hit.address;
           }
         }
         if (!ownerId) {
@@ -234,8 +235,6 @@ export async function POST(
           });
           if (hit) {
             ownerId = hit.id;
-            existingZip = hit.zip;
-            existingAddress = hit.address;
           }
         }
 
@@ -245,6 +244,10 @@ export async function POST(
               name,
               ...(address ? { address } : {}),
               ...(zip ? { zip } : {}),
+              // ⚠現住所は住所があるときだけ・郵便番号とペアで入れる（設計 §6.1）。
+              ...(currentAddress
+                ? { currentAddress, ...(currentZip ? { currentZip } : {}) }
+                : {}),
             },
             select: { id: true },
           });
@@ -256,19 +259,9 @@ export async function POST(
           // owner 行のロックを取得 + isArchived=false を再確認する。
           // dedup find と PropertyOwner.create の間に concurrent archive が走った場合は
           // count=0 で検出してロールバックする（archived owner には PropertyOwner を作らない）。
-          const zipUpdate = zip && !existingZip ? { zip } : {};
-          const addressUpdate = address && !existingAddress ? { address } : {};
-          const fieldPatch = { ...zipUpdate, ...addressUpdate };
-          const hasFieldPatch = Object.keys(fieldPatch).length > 0;
           const lockResult = await tx.owner.updateMany({
             where: { id: ownerId, isArchived: false },
-            data: hasFieldPatch
-              ? {
-                  ...fieldPatch,
-                  version: { increment: 1 },
-                  updatedAt: new Date(),
-                }
-              : { updatedAt: new Date() },
+            data: { updatedAt: new Date() },
           });
           if (lockResult.count === 0) {
             // dedup find 時点では active だったが、その後 concurrent archive で
@@ -278,6 +271,59 @@ export async function POST(
               "対象所有者がアーカイブされています",
               "OWNER_ARCHIVED",
             );
+          }
+          // ⚠ロックの下で読み直してから、ペア単位で補完する（設計 §6.3(1)(2)）。
+          const fresh = await tx.owner.findUnique({
+            where: { id: ownerId },
+            select: {
+              zip: true,
+              address: true,
+              currentZip: true,
+              currentAddress: true,
+            },
+          });
+          if (fresh) {
+            const registryPatch = resolveAddressPairBackfill(
+              { zip: fresh.zip, address: fresh.address },
+              { zip, address },
+            );
+            const currentPatch = resolveAddressPairBackfill(
+              { zip: fresh.currentZip, address: fresh.currentAddress },
+              { zip: currentZip, address: currentAddress },
+            );
+            const fieldPatch: Record<string, string> = {
+              ...registryPatch,
+              ...(currentPatch.zip ? { currentZip: currentPatch.zip } : {}),
+              ...(currentPatch.address
+                ? { currentAddress: currentPatch.address }
+                : {}),
+            };
+            if (Object.keys(fieldPatch).length > 0) {
+              await tx.owner.update({
+                where: { id: ownerId },
+                data: { ...fieldPatch, version: { increment: 1 } },
+              });
+              // 項目ごとの変更履歴を同じ tx で残す。
+              const before: Record<string, string | null> = {
+                zip: fresh.zip,
+                address: fresh.address,
+                currentZip: fresh.currentZip,
+                currentAddress: fresh.currentAddress,
+              };
+              await tx.changeLog.createMany({
+                data: Object.entries(fieldPatch).map(
+                  ([fieldName, newValue]) => ({
+                    targetTable: "owners",
+                    targetId: ownerId!,
+                    fieldName,
+                    oldValue: before[fieldName] ?? null,
+                    newValue,
+                    source: "csv_import" as const,
+                    changedBy: session.id,
+                  }),
+                ),
+              });
+            }
           }
         }
         ownerIds.push(ownerId);

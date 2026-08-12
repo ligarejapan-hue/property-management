@@ -92,7 +92,11 @@ vi.mock("@/lib/prisma", () => {
       findFirst: vi.fn(),
       create: vi.fn(),
       updateMany: vi.fn(),
+      // 補完はロックの下で読み直してから決める（設計 §6.3(2)）。
+      findUnique: vi.fn(),
+      update: vi.fn(),
     },
+    changeLog: { createMany: vi.fn() },
     propertyOwner: { createMany: vi.fn() },
     importJob: { update: vi.fn() },
   };
@@ -129,7 +133,10 @@ const pm = prisma as unknown as {
       findFirst: Mock;
       create: Mock;
       updateMany: Mock;
+      findUnique: Mock;
+      update: Mock;
     };
+    changeLog: { createMany: Mock };
     propertyOwner: { createMany: Mock };
     importJob: { update: Mock };
   };
@@ -164,7 +171,7 @@ beforeEach(() => {
     createdId: null,
     rawData: {
       __owner_link_data: JSON.stringify([
-        { name: OWNER_NAME, address: OWNER_ADDRESS, zip: null },
+        { name: OWNER_NAME, address: OWNER_ADDRESS, zip: null, currentAddress: null, currentZip: null },
       ]),
       ownerCount: "1",
       所有者CSV物件住所: OWNER_ADDRESS,
@@ -173,7 +180,7 @@ beforeEach(() => {
   });
 
   vi.mocked(parseRecoveredOwners).mockReturnValue([
-    { name: OWNER_NAME, address: OWNER_ADDRESS, zip: null },
+    { name: OWNER_NAME, address: OWNER_ADDRESS, zip: null, currentAddress: null, currentZip: null },
   ]);
 
   pm._tx.importJobRow.updateMany.mockResolvedValue({ count: 1 });
@@ -187,6 +194,14 @@ beforeEach(() => {
       Promise.resolve({ id: `owner-new-${data.name}` }),
   );
   pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
+  pm._tx.owner.findUnique.mockResolvedValue({
+    zip: null,
+    address: null,
+    currentZip: null,
+    currentAddress: null,
+  });
+  pm._tx.owner.update.mockResolvedValue({});
+  pm._tx.changeLog.createMany.mockResolvedValue({ count: 0 });
   pm._tx.propertyOwner.createMany.mockResolvedValue({ count: 1 });
   pm._tx.importJobRow.update.mockResolvedValue({});
   pm._tx.importJobRow.findMany.mockResolvedValue([
@@ -218,7 +233,7 @@ describe("POST manual-link-reception-owner: archived owner を再利用しない
   it("name-only フォールバック findFirst の where にも isArchived:false が含まれる", async () => {
     // address=null の RecoveredOwner で fallback を走らせる
     vi.mocked(parseRecoveredOwners).mockReturnValue([
-      { name: OWNER_NAME, address: null, zip: null },
+      { name: OWNER_NAME, address: null, zip: null, currentAddress: null, currentZip: null },
     ]);
     pm._tx.owner.findFirst.mockResolvedValue(null);
 

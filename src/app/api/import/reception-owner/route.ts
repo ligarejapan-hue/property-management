@@ -16,6 +16,7 @@ import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import {
   parseReceptionRows,
   parseOwnerRows,
+  OWNER_SHEET_POSTAL_HEADERS,
   buildCombinedMatches,
   summarizeMatches,
   getReviewReason,
@@ -48,6 +49,7 @@ import {
   assertImportJsonBodySize,
   MAX_IMPORT_JSON_BODY_BYTES_PAIRED,
 } from "@/lib/import-body-size";
+import { resolveAddressPairBackfill } from "@/lib/owner-address-backfill";
 
 // 受付帳CSV × 所有者CSV × 既存物件 の本実行。
 // - 一意特定できた行だけ反映。それ以外は needs_review で記録。
@@ -138,6 +140,8 @@ export async function POST(request: NextRequest) {
         fileName: ownerFileName,
         csvText: ownerCsv,
         xlsxBase64: ownerXlsxBase64,
+        // ⚠郵便番号の先頭0を落とさない（Excel は 0100492 を数値 100492 として読む）。
+        formattedTextHeaders: OWNER_SHEET_POSTAL_HEADERS,
       });
     } catch (e) {
       if (e instanceof SheetParseError) {
@@ -250,7 +254,14 @@ export async function POST(request: NextRequest) {
       // __ プレフィックスは UI / export から除外される内部用フィールド。
       const ownerLinkData = c.owners
         .filter((o) => o.name && o.name.trim() !== "")
-        .map((o) => ({ name: o.name, address: o.address, zip: o.zip }));
+        .map((o) => ({
+          name: o.name,
+          address: o.address,
+          zip: o.zip,
+          // ⚠ここに載せないと、手で紐づけた行だけ現住所が落ちる（設計 §6.3）。
+          currentAddress: o.currentAddress,
+          currentZip: o.currentZip,
+        }));
       const rawData: Record<string, string> = {
         matchKey: c.reception.matchKey,
         fColumn: c.reception.fColumn,
@@ -505,12 +516,15 @@ async function upsertOwnerAndLink(
   const name = repair.name;
   const address = repair.address;
   const zip = nullIfBlank(o.zip);
+  // 現住所は登記上の修復（法人番号の分断）の対象外＝そのまま扱う。
+  const currentAddress = nullIfBlank(o.currentAddress);
+  const currentZip = nullIfBlank(o.currentZip);
 
   // 既存 Owner 検索: name + address → name のみ。
   // archived owner は既存候補として扱わない（Phase 2-A）。
   let candidateOwnerId: string | null = null;
-  let existingZip: string | null = null;
-  let existingAddress: string | null = null;
+  // ⚠住所・郵便番号の「今の値」はここでは覚えない。照合から更新までの間に人が
+  //   手で入れることがあるため、補完はロックの下で読み直してから決める（設計 §6.3(2)）。
   // Phase D: 既存 Owner ヒット時の corporateNumber 競合判定に使う
   let existingCorporateNumber: string | null = null;
   if (address) {
@@ -534,8 +548,6 @@ async function upsertOwnerAndLink(
       ) ?? null;
     if (hit) {
       candidateOwnerId = hit.id;
-      existingZip = hit.zip;
-      existingAddress = hit.address;
       existingCorporateNumber = hit.corporateNumber;
     }
   }
@@ -546,8 +558,6 @@ async function upsertOwnerAndLink(
     });
     if (hit) {
       candidateOwnerId = hit.id;
-      existingZip = hit.zip;
-      existingAddress = hit.address;
       existingCorporateNumber = hit.corporateNumber;
     }
   }
@@ -565,23 +575,71 @@ async function upsertOwnerAndLink(
   // count=0 ならアーカイブされたので false を返し、外側で新規 active Owner 作成に
   // フォールバックする。
   if (candidateOwnerId) {
-    const zipUpdate = zip && !existingZip ? { zip } : {};
-    const addressUpdate = address && !existingAddress ? { address } : {};
-    const fieldPatch = { ...zipUpdate, ...addressUpdate };
-    const hasFieldPatch = Object.keys(fieldPatch).length > 0;
     const reuseResult = await prisma.$transaction(async (tx) => {
+      // ①まず所有者の行をロックする（アーカイブ競合の検出も兼ねる）。
       const lock = await tx.owner.updateMany({
         where: { id: candidateOwnerId!, isArchived: false },
-        data: hasFieldPatch
-          ? {
-              ...fieldPatch,
-              version: { increment: 1 },
-              updatedAt: new Date(),
-            }
-          : { updatedAt: new Date() },
+        data: { updatedAt: new Date() },
       });
       if (lock.count === 0) {
         return { linked: false as const, newLinkCreated: false };
+      }
+      // ②⚠ロックの下で読み直す（設計 §6.3(2)）。照合の時点で「空だった」ことを
+      //   覚えたまま書くと、その間に人が手で入れた住所を取込の古い値で上書きする。
+      const fresh = await tx.owner.findUnique({
+        where: { id: candidateOwnerId! },
+        select: {
+          zip: true,
+          address: true,
+          currentZip: true,
+          currentAddress: true,
+        },
+      });
+      // ③⚠ペア単位で補完する（設計 §6.3(1)）。項目ごとに埋めると
+      //   「別の場所の郵便番号 + この人の住所」というズレた宛先ができる。
+      const registryPatch = fresh
+        ? resolveAddressPairBackfill(
+            { zip: fresh.zip, address: fresh.address },
+            { zip, address },
+          )
+        : {};
+      const currentPatch = fresh
+        ? resolveAddressPairBackfill(
+            { zip: fresh.currentZip, address: fresh.currentAddress },
+            { zip: currentZip, address: currentAddress },
+          )
+        : {};
+      const fieldPatch: Record<string, string> = {
+        ...registryPatch,
+        ...(currentPatch.zip ? { currentZip: currentPatch.zip } : {}),
+        ...(currentPatch.address
+          ? { currentAddress: currentPatch.address }
+          : {}),
+      };
+      if (fresh && Object.keys(fieldPatch).length > 0) {
+        await tx.owner.update({
+          where: { id: candidateOwnerId! },
+          data: { ...fieldPatch, version: { increment: 1 } },
+        });
+        // ④項目ごとの変更履歴を**同じ tx で**残す。あとから名寄せの安全確認が
+        //   「取込が入れたのか、人が入れたのか」を判断できるようにする。
+        const before: Record<string, string | null> = {
+          zip: fresh.zip,
+          address: fresh.address,
+          currentZip: fresh.currentZip,
+          currentAddress: fresh.currentAddress,
+        };
+        await tx.changeLog.createMany({
+          data: Object.entries(fieldPatch).map(([fieldName, newValue]) => ({
+            targetTable: "owners",
+            targetId: candidateOwnerId!,
+            fieldName,
+            oldValue: before[fieldName] ?? null,
+            newValue,
+            source: "csv_import" as const,
+            changedBy: userId,
+          })),
+        });
       }
       // 親の物件行をロック(Owner→親の順・書き込み規約+#364 R10)。
       await lockPropertyRow(tx, propertyId);
@@ -651,6 +709,11 @@ async function upsertOwnerAndLink(
       name,
       ...(address ? { address } : {}),
       ...(zip ? { zip } : {}),
+      // ⚠現住所は**住所があるときだけ**入れる。郵便番号だけの現住所は宛先にならず、
+      //   登記上の住所と組み合わさって誤配の元になる（設計 §6.1）。
+      ...(currentAddress
+        ? { currentAddress, ...(currentZip ? { currentZip } : {}) }
+        : {}),
       // 13桁の採用優先度: テキスト検出(cnDecision) > 取込ガードの復元値。
       // (両方が同時に成立するデータ形状は実務上ないが、既存挙動を優先する)
       ...(cnDecisionForCreate.action === "save" && cnDecisionForCreate.corporateNumber
@@ -675,7 +738,12 @@ async function upsertOwnerAndLink(
     // ⚠**氏名・住所・郵便番号を監査に生で残さない**（認可・PII 横断監査 2026-07-30）。
     // 対象は targetId=ownerId で辿れるので、監査には「どの項目が入っていたか」の
     // 有無だけを残す（同ファイルのジョブ監査が件数のみなのと同じ方針）。
-    detail: { hasAddress: address != null, hasZip: zip != null },
+    detail: {
+      hasAddress: address != null,
+      hasZip: zip != null,
+      hasCurrentAddress: currentAddress != null,
+      hasCurrentZip: currentZip != null,
+    },
   });
 
   // 新規 owner は他 tx から見えないため archive 競合はない。通常の link 処理。

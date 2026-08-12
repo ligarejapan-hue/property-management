@@ -269,6 +269,8 @@ describe("matchReceptionToOwners", () => {
     buildingName: null,
     roomNo: null,
     zip: null,
+    currentAddress: null,
+    currentZip: null,
     dm: null,
   });
 
@@ -538,6 +540,8 @@ describe("getReviewReason 優先順位", () => {
         buildingName: null,
         roomNo: null,
         zip: null,
+        currentAddress: null,
+        currentZip: null,
         dm: null,
       },
     ],

@@ -377,8 +377,8 @@ describe("checkAddressFillSafety", () => {
 // ── resolveReceptionOwnerEntry ────────────────────────────────────────────
 
 describe("resolveReceptionOwnerEntry", () => {
-  const entry1 = { name: "田中太郎", address: "東京都千代田区1-1", zip: "1000001" };
-  const entry2 = { name: "佐藤花子", address: "大阪府大阪市1-1", zip: "5300001" };
+  const entry1 = { name: "田中太郎", address: "東京都千代田区1-1", zip: "1000001", currentAddress: null, currentZip: null };
+  const entry2 = { name: "佐藤花子", address: "大阪府大阪市1-1", zip: "5300001", currentAddress: null, currentZip: null };
 
   it("名前が一致する entry が 1件 → ok=true で entry を返す", () => {
     const r = resolveReceptionOwnerEntry([entry1, entry2], "田中太郎", null);
@@ -387,11 +387,11 @@ describe("resolveReceptionOwnerEntry", () => {
 
   it("全角/半角スペース混在の名前も正規化して一致する", () => {
     const r = resolveReceptionOwnerEntry(
-      [{ name: "田中　太郎", address: "東京都千代田区1-1", zip: null }],
+      [{ name: "田中　太郎", address: "東京都千代田区1-1", zip: null, currentAddress: null, currentZip: null }],
       "田中 太郎",
       null,
     );
-    expect(r).toEqual({ ok: true, entry: { name: "田中　太郎", address: "東京都千代田区1-1", zip: null } });
+    expect(r).toEqual({ ok: true, entry: { name: "田中　太郎", address: "東京都千代田区1-1", zip: null, currentAddress: null, currentZip: null } });
   });
 
   it("名前一致 0件 → no_address_in_rawdata", () => {
@@ -405,26 +405,26 @@ describe("resolveReceptionOwnerEntry", () => {
   });
 
   it("名前一致が複数で zip なし → reception_owner_source_ambiguous", () => {
-    const dup = { name: "田中太郎", address: "神奈川県横浜市2-2", zip: null };
+    const dup = { name: "田中太郎", address: "神奈川県横浜市2-2", zip: null, currentAddress: null, currentZip: null };
     const r = resolveReceptionOwnerEntry([entry1, dup], "田中太郎", null);
     expect(r).toEqual({ ok: false, reason: "reception_owner_source_ambiguous" });
   });
 
   it("名前一致が複数で zip で絞り込み成功 → ok=true", () => {
-    const dup = { name: "田中太郎", address: "神奈川県横浜市2-2", zip: "2200001" };
+    const dup = { name: "田中太郎", address: "神奈川県横浜市2-2", zip: "2200001", currentAddress: null, currentZip: null };
     const r = resolveReceptionOwnerEntry([entry1, dup], "田中太郎", "1000001");
     expect(r).toEqual({ ok: true, entry: entry1 });
   });
 
   it("名前一致が複数で zip でも絞り込めない → reception_owner_source_ambiguous", () => {
-    const dup = { name: "田中太郎", address: "神奈川県横浜市2-2", zip: "1000001" };
+    const dup = { name: "田中太郎", address: "神奈川県横浜市2-2", zip: "1000001", currentAddress: null, currentZip: null };
     const r = resolveReceptionOwnerEntry([entry1, dup], "田中太郎", "1000001");
     expect(r).toEqual({ ok: false, reason: "reception_owner_source_ambiguous" });
   });
 
   it("名前一致 1件で address が null → no_address_in_rawdata", () => {
     const r = resolveReceptionOwnerEntry(
-      [{ name: "田中太郎", address: null, zip: null }],
+      [{ name: "田中太郎", address: null, zip: null, currentAddress: null, currentZip: null }],
       "田中太郎",
       null,
     );
@@ -448,6 +448,8 @@ describe("extractAddressFromRecoveredOwner", () => {
       name: "田中太郎",
       address: "東京都千代田区1-1",
       zip: null,
+      currentAddress: null,
+      currentZip: null,
     });
     expect(r?.address).toBe("東京都千代田区1-1");
     // sourceFieldNames には値を含まないフィールドパス名のみ
@@ -460,6 +462,8 @@ describe("extractAddressFromRecoveredOwner", () => {
       name: "田中太郎",
       address: null,
       zip: null,
+      currentAddress: null,
+      currentZip: null,
     });
     expect(r).toBeNull();
   });
@@ -469,6 +473,8 @@ describe("extractAddressFromRecoveredOwner", () => {
       name: "田中太郎",
       address: "",
       zip: null,
+      currentAddress: null,
+      currentZip: null,
     });
     expect(r).toBeNull();
   });
