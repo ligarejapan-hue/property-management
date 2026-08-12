@@ -7,6 +7,10 @@ import {
   type DmRowPropertyOwner,
 } from "@/lib/dm-export";
 import type { LetterRecipient } from "./types";
+import {
+  resolveMailingAddress,
+  resolveGroupZip,
+} from "@/lib/owner-mailing-address";
 
 export interface RecipientMeta {
   propertyId: string;
@@ -65,8 +69,22 @@ export function buildRecipientsFromProperties(
         propertyId: p.id,
         representativeOwnerId: repOwner.id ?? null,
         recipientName: repOwner.name ?? "",
-        recipientZip: repOwner.zip ?? null,
-        recipientAddress: repOwner.address ?? null,
+        // ⚠宛先は現住所を優先して解決する（必ずペアで取る）。
+        //   郵便番号は**グループ全体**で決める（食い違えば空＝住所だけで配達される）。
+        //   ここを代表の生値のままにすると、宛名CSVでは空にする番号を売却DMだけが刷る。
+        recipientZip: resolveGroupZip(
+          group.map((po) => {
+            const o = po.owner as OwnerWithId;
+            return resolveMailingAddress({
+              zip: o.zip ?? null, address: o.address ?? null,
+              currentZip: o.currentZip ?? null, currentAddress: o.currentAddress ?? null,
+            }).zip;
+          }),
+        ),
+        recipientAddress: resolveMailingAddress({
+          zip: repOwner.zip ?? null, address: repOwner.address ?? null,
+          currentZip: repOwner.currentZip ?? null, currentAddress: repOwner.currentAddress ?? null,
+        }).address,
         honorific,
         coOwnerCount: group.length,
         groupOwnerIds: group

@@ -106,8 +106,15 @@ describe("ownerAddressGroupKey", () => {
       ownerAddressGroupKey("100-0001", "東京都千代田区9-9"),
     );
   });
-  it("zip が空 vs 非空は別キー（安全側）", () => {
-    expect(ownerAddressGroupKey("", "東京都千代田区2-2")).not.toBe(
+  it("⚠住所が同じなら、郵便番号の有無で鍵は割れない（2026-08 現住所対応で変更）", () => {
+    // 旧: 「zip 空 vs 非空は別キー（安全側）」
+    // 新: **住所だけ**を鍵にする。
+    // 理由 = 現住所の設計は「現住所はあるが現住所の郵便番号は空」を明示的に許すため、
+    // 番号を鍵に入れると
+    //   共有者A: 住所X・番号あり ／ 共有者B: 住所X・番号なし
+    // で鍵が割れ、**同じ場所へ 2 通届く**。
+    // 郵便番号は resolveGroupZip がグループ単位で決める（食い違えば空で刷る）。
+    expect(ownerAddressGroupKey("", "東京都千代田区2-2")).toBe(
       ownerAddressGroupKey("100-0001", "東京都千代田区2-2"),
     );
   });
