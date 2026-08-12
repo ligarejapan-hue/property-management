@@ -110,6 +110,17 @@ interface ApiOwner {
   phone: string | null;
   zip: string | null;
   address: string | null;
+  /**
+   * 現住所の郵便番号。所有者が引っ越して登記を変更していない場合に使う。
+   * owner_zip と同じ表示レベルでマスク/非表示になる（hidden 時はキーが無い）。
+   */
+  currentZip?: string | null;
+  /**
+   * 現住所。空（未設定）なら登記上の住所を使う（送付先の解決は
+   * src/lib/owner-mailing-address.ts の resolveMailingAddress が行う）。
+   * owner_address と同じ表示レベルでマスク/非表示になる。
+   */
+  currentAddress?: string | null;
   note: string | null;
   /** hidden 時は API レスポンスにキーが存在しない（undefined）。null は「空値」と区別する。 */
   email?: string | null;
