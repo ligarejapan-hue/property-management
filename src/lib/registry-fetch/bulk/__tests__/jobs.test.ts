@@ -31,6 +31,7 @@ vi.mock("@/lib/api-helpers", () => {
 import prisma from "@/lib/prisma";
 import { ApiError } from "@/lib/api-helpers";
 import { createBulkFetchJob, getBulkJobProgress } from "../jobs";
+import { hashPropertyFingerprint } from "@/lib/registry-fetch/candidate-cache";
 
 const pm = prisma as unknown as {
   property: { findMany: Mock };
@@ -88,6 +89,15 @@ describe("createBulkFetchJob", () => {
       session: STAFF,
       propertyIds: [P1, P2, P3, P4],
       certificateType: "owner",
+      // ⚠検索できる物件は「確認画面で見せた内容」の指紋が要る（@codex #373 R7 P1）。
+      approvedFingerprints: {
+        [P1]: hashPropertyFingerprint({
+          address: "東京都A区1",
+          lotNumber: "1",
+          buildingNumber: null,
+          realEstateNumber: null,
+        }),
+      },
     });
 
     expect(res).toMatchObject({ jobId: "job-1", total: 3, pending: 1, skipped: 2, excluded: 1 });
@@ -162,6 +172,14 @@ describe("createBulkFetchJob", () => {
       propertyIds: [P1],
       certificateType: "owner",
       idempotencyKey: "key-xyz",
+      approvedFingerprints: {
+        [P1]: hashPropertyFingerprint({
+          address: "東京都A区1",
+          lotNumber: "1",
+          buildingNumber: null,
+          realEstateNumber: null,
+        }),
+      },
     });
 
     expect(pm.registryFetchJob.create.mock.calls[0][0].data).toMatchObject({
@@ -282,35 +300,150 @@ describe("指紋の材料（設計 §3.1.0.1）", () => {
 // ---------------------------------------------------------------------------
 
 describe("承認の根拠（approvedFingerprints）", () => {
+  /** 検索できる物件（住所+地番）。 */
+  const prop = (id: string, over: Record<string, unknown> = {}) => ({
+    id,
+    createdBy: "u1",
+    assignedTo: null,
+    address: "東京都A区1",
+    lotNumber: "1" as string | null,
+    buildingNumber: null as string | null,
+    realEstateNumber: null as string | null,
+    ...over,
+  });
+  const hashOf = (p: ReturnType<typeof prop>) =>
+    hashPropertyFingerprint({
+      address: p.address,
+      lotNumber: p.lotNumber,
+      buildingNumber: p.buildingNumber,
+      realEstateNumber: p.realEstateNumber,
+    });
+  const itemsOf = () =>
+    Object.fromEntries(
+      (
+        pm.registryFetchJobItem.createMany.mock.calls[0][0].data as Array<{
+          propertyId: string;
+          status: string;
+          errorCode: string | null;
+        }>
+      ).map((i) => [i.propertyId, i]),
+    );
+
+  it("見せた内容と一致していれば pending", async () => {
+    const p1 = prop(P1);
+    pm.property.findMany.mockResolvedValue([p1]);
+    const res = await createBulkFetchJob({
+      session: STAFF,
+      propertyIds: [P1],
+      certificateType: "owner",
+      approvedFingerprints: { [P1]: hashOf(p1) },
+    });
+    expect(res).toMatchObject({ pending: 1, skipped: 0 });
+  });
+
   it("⚠見せた内容から変わっていたら、その物件だけ対象外にする", async () => {
     // 確認画面は「土地の登記を取得します」と見せて承認を取る。そこから作成までの間に
     // 家屋番号が足されると、作成時に読み直した新しい値で処理が進み、
     // **承認していない建物の登記を買う**。
-    const { hashPropertyFingerprint } = await import(
-      "@/lib/registry-fetch/candidate-cache"
-    );
-    const stale = hashPropertyFingerprint({
-      address: "見せたときの住所",
+    const p1 = prop(P1);
+    const p2 = prop(P2, { address: "東京都B区2", lotNumber: "2" });
+    pm.property.findMany.mockResolvedValue([p1, p2]);
+    const res = await createBulkFetchJob({
+      session: STAFF,
+      propertyIds: [P1, P2],
+      certificateType: "owner",
+      approvedFingerprints: {
+        // P1 は見せたあとに家屋番号が足された想定（＝現物と食い違う指紋）
+        [P1]: hashOf(prop(P1, { buildingNumber: "12-3" })),
+        [P2]: hashOf(p2),
+      },
+    });
+    expect(res).toMatchObject({ pending: 1, skipped: 1 });
+    const byId = itemsOf();
+    expect(byId[P1]).toMatchObject({
+      status: "skipped",
+      errorCode: "identifier_changed",
+    });
+    expect(byId[P2].status).toBe("pending");
+  });
+
+  it("⚠指紋が付いていない物件は買わない（@codex #373 R7 P1）", async () => {
+    // 古い画面のまま送信された / 確認の後で見えるようになった物件が混ざった場合。
+    // 候補が1件なら処理は自動で購入まで進むので、通すと**見せていない対象を買う**。
+    const p1 = prop(P1);
+    const p2 = prop(P2, { address: "東京都B区2", lotNumber: "2" });
+    pm.property.findMany.mockResolvedValue([p1, p2]);
+    const res = await createBulkFetchJob({
+      session: STAFF,
+      propertyIds: [P1, P2],
+      certificateType: "owner",
+      approvedFingerprints: { [P1]: hashOf(p1) }, // P2 の分が無い
+    });
+    expect(res).toMatchObject({ pending: 1, skipped: 1 });
+    const byId = itemsOf();
+    expect(byId[P1].status).toBe("pending");
+    expect(byId[P2]).toMatchObject({
+      status: "skipped",
+      errorCode: "not_approved",
+    });
+  });
+
+  it("⚠指紋がまったく無ければ 1件も取りに行かない（後方互換より安全を採る）", async () => {
+    pm.property.findMany.mockResolvedValue([prop(P1)]);
+    await expect(
+      createBulkFetchJob({
+        session: STAFF,
+        propertyIds: [P1],
+        certificateType: "owner",
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "REGISTRY_BULK_APPROVAL_STALE",
+    });
+    expect(pm.registryFetchJob.create).not.toHaveBeenCalled();
+  });
+
+  it("⚠承認が古くて全部対象外になったら、ジョブを作らない（@codex #373 R7 P2）", async () => {
+    // 0件のジョブを作ると進捗画面へ飛ばされて即「完了」と出る＝何も取れていないのに
+    // 終わったように見える。
+    pm.property.findMany.mockResolvedValue([prop(P1)]);
+    await expect(
+      createBulkFetchJob({
+        session: STAFF,
+        propertyIds: [P1],
+        certificateType: "owner",
+        approvedFingerprints: { [P1]: "0".repeat(32) },
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "REGISTRY_BULK_APPROVAL_STALE",
+    });
+    expect(pm.registryFetchJob.create).not.toHaveBeenCalled();
+  });
+
+  it("番号不足だけで0件になったときは今までどおりジョブを作る（理由を見せる場所）", async () => {
+    // 進捗画面の理由一覧が「何を直せば通るか」を伝える唯一の場所なので、消さない。
+    pm.property.findMany.mockResolvedValue([
+      prop(P1, { lotNumber: null, buildingNumber: null }),
+    ]);
+    const res = await createBulkFetchJob({
+      session: STAFF,
+      propertyIds: [P1],
+      certificateType: "owner",
+      approvedFingerprints: {},
+    });
+    expect(res).toMatchObject({ pending: 0, skipped: 1 });
+    expect(itemsOf()[P1].errorCode).toBe("missing_identifier");
+  });
+
+  it("⚠指紋の材料に地番の値そのものを残さない（秘匿）", async () => {
+    const h = hashPropertyFingerprint({
+      address: "横浜市南区井土ケ谷中町",
       lotNumber: "69-2",
       buildingNumber: null,
       realEstateNumber: null,
     });
-    expect(stale).toMatch(/^[0-9a-f]{32}$/);
-    // 現在の物件（家屋番号が足された）とは別の指紋になる。
-    const now = hashPropertyFingerprint({
-      address: "見せたときの住所",
-      lotNumber: "69-2",
-      buildingNumber: "12-3",
-      realEstateNumber: null,
-    });
-    expect(now).not.toBe(stale);
-  });
-
-  it("指紋を送らなければ今までどおり（後方互換）", async () => {
-    const { hashPropertyFingerprint } = await import(
-      "@/lib/registry-fetch/candidate-cache"
-    );
-    // 送らない＝照合しない。既存の呼び出し元を壊さない。
-    expect(typeof hashPropertyFingerprint).toBe("function");
+    expect(h).not.toContain("69");
+    expect(h).toMatch(/^[0-9a-f]{32}$/);
   });
 });

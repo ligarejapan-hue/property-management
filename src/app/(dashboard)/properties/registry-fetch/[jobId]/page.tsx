@@ -338,6 +338,8 @@ const ITEM_REASON_LABEL: Record<string, string> = {
   //   （段階②が未実装）ので、この経路では取得できない。
   has_real_estate_number: "所在検索の対象外（この経路では取得できません）",
   identifier_changed: "内容が変わりました（確認して選び直してください）",
+  // ⚠確認画面を通していない物件（古い画面のまま実行された等）。
+  not_approved: "確認を通していません（選び直してください）",
   ambiguous_candidate: "候補が複数（手動で選んでください）",
   no_candidate: "候補が見つかりません",
   property_unavailable: "物件を参照できません",

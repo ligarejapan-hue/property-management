@@ -223,20 +223,33 @@ export async function createBulkFetchJob(
       ref: p.id,
     });
     const fingerprintHash = hashPropertyFingerprint(p);
-    // ⚠承認した内容から変わっていたら、その物件だけ対象外にする。
-    //   「消えた」ではなく「変わった」なので理由コードを分ける(処理時と同じ)。
+    // ⚠**承認の根拠が無いものは買わない**(@codex #373 R7 P1)。
+    //   確認画面は「土地の登記を取得します」と**何を買うか**を見せて承認を取り、
+    //   その内容の指紋を一緒に送ってくる。候補が1件なら処理は自動で購入まで進むので、
+    //   指紋が「無い」ものを通すと**見せていない対象を買う**ことになる。
+    //   無い状況は実際に起きる: 古い画面のまま送信された / 確認の後で見えるように
+    //   なった物件が混ざった。どちらも「利用者はこの対象を見ていない」。
+    //   食い違い(他の担当者が住所や番号を変えた)とは直し方が違うので理由を分ける。
     const approved = args.approvedFingerprints?.[p.id];
-    const changedSinceApproval = !!approved && approved !== fingerprintHash;
+    const approvalState: "ok" | "missing" | "changed" = !approved
+      ? "missing"
+      : approved === fingerprintHash
+        ? "ok"
+        : "changed";
     const status: BulkItemStatus =
-      built.searchable && !changedSinceApproval ? "pending" : "skipped";
+      built.searchable && approvalState === "ok" ? "pending" : "skipped";
     return {
       propertyId: p.id,
       status,
-      errorCode: changedSinceApproval
-        ? "identifier_changed"
-        : built.searchable
-          ? null
-          : built.reason,
+      // ⚠番号が足りない物件は、承認の話より先に**足りないこと**を伝える
+      //   (直す場所がそこなので)。
+      errorCode: !built.searchable
+        ? built.reason
+        : approvalState === "changed"
+          ? "identifier_changed"
+          : approvalState === "missing"
+            ? "not_approved"
+            : null,
       // ⚠作成時点の「検索に渡すもの一式」を控える(設計 §3.1.0.1)。
       //   一括は作成から処理までに時間が空く。その間に**別の正しい値へ**
       //   書き換わっても、番号の有無/形式の検査は素通りし、候補が1件なら
@@ -248,6 +261,23 @@ export async function createBulkFetchJob(
   });
   const preSkipped = itemsData.filter((i) => i.status === "skipped").length;
   const pendingCount = itemsData.length - preSkipped;
+
+  // ⚠承認が古くて取りに行くものが1件も残らなかったら、**ジョブを作らない**
+  //   (@codex #373 R7 P2)。0件のジョブを作ると進捗画面へ飛ばされて即「完了」と
+  //   出る=何も取れていないのに終わったように見える。確認からやり直してもらう。
+  //   ⚠番号不足だけで0件になったときは従来どおり作る(進捗画面の理由一覧が
+  //   「何を直せば通るか」を伝える唯一の場所なので、消すと直しようがなくなる)。
+  const approvalBlocked = itemsData.filter(
+    (i) =>
+      i.errorCode === "not_approved" || i.errorCode === "identifier_changed",
+  ).length;
+  if (pendingCount === 0 && approvalBlocked > 0) {
+    throw new ApiError(
+      409,
+      "確認した内容から変わっています。取得する物件を選び直してください",
+      "REGISTRY_BULK_APPROVAL_STALE",
+    );
+  }
 
   try {
     const job = await prisma.$transaction(async (tx) => {
