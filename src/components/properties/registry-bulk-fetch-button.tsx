@@ -159,7 +159,14 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={creating || count === 0 || preflight.pending}
+                disabled={
+                  creating ||
+                  count === 0 ||
+                  preflight.pending ||
+                  // ⚠何を取りに行くかが分からないうちは実行させない（fail closed）。
+                  //   一括は候補1件で自動購入まで進むので、参考情報の失敗とは扱いが違う。
+                  preflight.targetsUnavailable
+                }
                 title={preflight.pending ? "事前確認中です" : undefined}
                 className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
               >

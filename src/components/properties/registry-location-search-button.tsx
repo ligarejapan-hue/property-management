@@ -4,7 +4,9 @@ import { useState } from "react";
 import {
   useRegistryPreflight,
   RegistryPreflightWarningLines,
+  RegistryTargetNote,
 } from "@/components/properties/registry-preflight-warnings";
+import RegistryChibanPopup from "@/components/properties/registry-chiban-popup";
 import { MapPinned, Loader2 } from "lucide-react";
 import {
   searchRegistryCandidates,
@@ -30,6 +32,18 @@ interface RegistryLocationSearchButtonProps {
   purchaseEnabled: boolean;
   /** 取得成功時に親へ通知（物件を再取得し registryStatus 等を反映する）。 */
   onComplete: () => void;
+  /** 物件の所在（ポップアップで画面にコピーしてもらう。⚠外部へは渡さない）。 */
+  propertyAddress: string;
+  /** 地番の保存に必要な現在の版番号。 */
+  propertyVersion: number;
+  gpsLat: number | null;
+  gpsLng: number | null;
+  /** property:write。無ければポップアップは入力欄を出さず案内だけにする。 */
+  canWriteProperty: boolean;
+  /** 建物系の種別か（ポップアップで2つの道を出す）。 */
+  isBuildingType: boolean;
+  /** 地番を保存したので物件を取り直す（version と分類を新しくする）。 */
+  onPropertyRefresh: () => void;
 }
 
 type State =
@@ -57,6 +71,13 @@ export default function RegistryLocationSearchButton({
   providerConfigured,
   purchaseEnabled,
   onComplete,
+  propertyAddress,
+  propertyVersion,
+  gpsLat,
+  gpsLng,
+  canWriteProperty,
+  isBuildingType,
+  onPropertyRefresh,
 }: RegistryLocationSearchButtonProps) {
   const [state, setState] = useState<State>("idle");
   const [candidates, setCandidates] = useState<RegistrySearchCandidate[]>([]);
@@ -69,7 +90,17 @@ export default function RegistryLocationSearchButton({
   // HTTP 本番でも動く safeRandomId を使う (crypto.randomUUID 禁止)。
   const [liveRef, setLiveRef] = useState<string | null>(null);
   // 課金直前(取得確認)に事前確認(取得済み/添付あり/所有者あり)を表示する(発注者要望 2026-08-08)。
-  const preflight = useRegistryPreflight([propertyId], state === "confirmObtain");
+  // 地番を保存したら分類が変わるので、preflight を取り直す合図。
+  const [preflightReload, setPreflightReload] = useState(0);
+  // ⚠confirmSearch でも動かす。「何を取りに行くか」が分からないうちは
+  //   検索も取得も始めさせない（設計 §3.1.1・fail closed）。
+  //   ⚠番号が無い物件ではここでポップアップを出す（確認パネルの**前**）。
+  const preflight = useRegistryPreflight(
+    [propertyId],
+    state === "confirmSearch" || state === "confirmObtain",
+    preflightReload,
+  );
+  const target = preflight.targetsById.get(propertyId) ?? null;
 
   // 非 admin には導線自体を出さない（サーバ側でも 403 で二重防御）。
   if (!canAutoFetch) return null;
@@ -200,15 +231,42 @@ export default function RegistryLocationSearchButton({
         </div>
       )}
 
-      {state === "confirmSearch" && (
+      {/* ⚠番号が無い物件では、確認パネルの**前に**地番を入れてもらう（設計 §3.1）。
+          保存したら物件を取り直し、分類が変わって通常の確認パネルになる。 */}
+      {state === "confirmSearch" && target?.kind === "none" && (
+        <RegistryChibanPopup
+          propertyId={propertyId}
+          propertyAddress={propertyAddress}
+          propertyVersion={propertyVersion}
+          gpsLat={gpsLat}
+          gpsLng={gpsLng}
+          canWriteProperty={canWriteProperty}
+          isBuildingType={isBuildingType}
+          onSaved={() => {
+            // ⚠ここで検索を投げない。物件を取り直して、料金の確認へ進むだけ。
+            onPropertyRefresh();
+            setPreflightReload((n) => n + 1);
+          }}
+          onClose={reset}
+        />
+      )}
+
+      {state === "confirmSearch" && target?.kind !== "none" && (
         <div className="flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 p-2 text-xs">
           <p className="font-medium text-indigo-800 dark:text-indigo-300">所在で謄本候補を検索しますか？</p>
           <p className="text-indigo-700 dark:text-indigo-300">
             登記情報の検索は有料処理になり得ます。実行には明示的な確認が必要です。
           </p>
+          <RegistryTargetNote state={preflight} propertyId={propertyId} />
           <div className="mt-1 flex gap-1">
-            <button type="button" onClick={runSearch} className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700">
-              検索する
+            <button
+              type="button"
+              onClick={runSearch}
+              // ⚠何を取りに行くかが分からないうちは押させない（fail closed）。
+              disabled={preflight.pending || preflight.targetsUnavailable}
+              className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300 dark:disabled:bg-gray-700"
+            >
+              {preflight.pending ? "確認中..." : "検索する"}
             </button>
             <button type="button" onClick={reset} className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
               キャンセル
@@ -355,7 +413,7 @@ export default function RegistryLocationSearchButton({
             <button
               type="button"
               onClick={runObtain}
-              disabled={preflight.pending}
+              disabled={preflight.pending || preflight.targetsUnavailable}
               title={preflight.pending ? "事前確認中です" : undefined}
               className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
             >

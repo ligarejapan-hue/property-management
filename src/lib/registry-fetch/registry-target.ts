@@ -55,6 +55,15 @@ const BUILDING_TYPES = new Set([
 /** 土地として期待される種別。 */
 const LAND_TYPES = new Set(["land"]);
 
+/**
+ * 建物として期待される種別か。
+ * ⚠画面（ポップアップの2つの道）もこれを使う。種別の一覧を画面側に書き写すと、
+ * 種別が増えたときに片方だけずれる。
+ */
+export function isBuildingPropertyType(propertyType: string): boolean {
+  return BUILDING_TYPES.has(propertyType);
+}
+
 export function classifyRegistryTarget(input: {
   propertyType: string;
   lotNumber: string | null;

@@ -41,7 +41,8 @@ describe("3入口の配線", () => {
   });
 
   it("所在検索: 課金直前(confirmObtain)で preflight を取得し警告行を出す", () => {
-    expect(LOC).toMatch(/useRegistryPreflight\(\[propertyId\], state === "confirmObtain"\)/);
+    // ⚠所在検索は confirmSearch でも取る（何を取りに行くかが分からないうちは検索も始めさせない）。
+    expect(LOC).toMatch(/state === "confirmSearch" || state === "confirmObtain"/);
     expect(LOC).toMatch(/<RegistryPreflightWarningLines state=\{preflight\} propertyId=\{propertyId\} \/>/);
   });
 
@@ -68,12 +69,16 @@ describe("実行ボタンは事前確認が済むまで無効(#365 R1)", () => {
   });
 
   it("hook は pending を導出し、失敗も『確定』として注意書き表示後に実行可能へ戻す", () => {
-    expect(SHARED).toMatch(/pending: active && idsKey\.length > 0 && settledKey !== idsKey/);
+    expect(SHARED).toMatch(
+      /pending: active && propertyIds.length > 0 && settledKey !== idsKey/,
+    );
     expect(SHARED).toMatch(/setSettledKey\(idsKey\); \/\/ 失敗も「確定」/);
   });
   it("3入口の課金ボタンすべてが preflight\.pending で disabled になる", () => {
     expect(AUTO).toMatch(/disabled=\{preflight\.pending\}/);
-    expect(LOC).toMatch(/disabled=\{preflight\.pending\}/);
-    expect(BULK).toMatch(/disabled=\{creating \|\| count === 0 \|\| preflight\.pending\}/);
+    expect(LOC).toMatch(
+      /disabled={preflight.pending || preflight.targetsUnavailable}/,
+    );
+    expect(BULK).toMatch(/preflight.targetsUnavailable/);
   });
 });

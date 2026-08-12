@@ -5,6 +5,7 @@ import {
   fetchRegistryPreflight,
   type RegistryPreflightFlags,
 } from "@/lib/api-client";
+import type { RegistryTarget } from "@/lib/registry-fetch/registry-target";
 
 // 謄本取得の事前警告(発注者要望 2026-08-08)。
 // 「既に取得済み/謄本PDF添付あり/所有者入力済み」の物件へ課金する前に気づけるようにする。
@@ -14,25 +15,46 @@ import {
 
 export interface RegistryPreflightState {
   flagsById: Map<string, RegistryPreflightFlags>;
+  /** ⚠「何を取りに行くか(土地/建物)」。**買う対象そのもの**であって参考情報ではない。 */
+  targetsById: Map<string, RegistryTarget>;
   failed: boolean;
   /** 事前確認が未完了(実行ボタンはこの間 disabled にする=#365 R1: 警告を見る前に課金させない)。 */
   pending: boolean;
+  /**
+   * ⚠分類が読めていない。true の間は実行ボタンを**押せないままにする**(fail closed)。
+   *
+   * `failed` と別に持つ理由: 取得済み・所有者ありのような**参考情報**の失敗は
+   * 従来どおり「注意書きを出したうえで実行できる」ままにしたい。一方
+   * 「土地と建物のどちらを買うのか」は分からないまま実行すると**候補1件で
+   * 自動購入まで進む**ので、こちらだけ止める(設計 §3.1.1)。
+   */
+  targetsUnavailable: boolean;
 }
 
 /** active が true になったタイミングで preflight を1回取得する。 */
 export function useRegistryPreflight(
   propertyIds: string[],
   active: boolean,
+  /**
+   * 取り直しの合図。⚠ポップアップで地番を保存すると分類が変わるので、
+   * この値を変えて取り直す(対象も active も変わらないため、これが無いと古い分類のまま)。
+   */
+  reloadToken: number = 0,
 ): RegistryPreflightState {
   const [flagsById, setFlagsById] = useState<
     Map<string, RegistryPreflightFlags>
   >(new Map());
+  const [targetsById, setTargetsById] = useState<Map<string, RegistryTarget>>(
+    new Map(),
+  );
   const [failed, setFailed] = useState(false);
+  // ⚠既定は true(取れていない)。開いた直後から実行させない。
+  const [targetsUnavailable, setTargetsUnavailable] = useState(true);
   // 完了済みの対象集合キー。pending はここから導出する(effect 内の同期 setState を
   // 使わずに「確認が済むまで実行を止める」を実現する=#365 R1)。
   const [settledKey, setSettledKey] = useState<string | null>(null);
   // useEffect の依存を安定させる(選択順に依存しないようソートして結合)。
-  const idsKey = [...propertyIds].sort().join(",");
+  const idsKey = `${reloadToken}|${[...propertyIds].sort().join(",")}`;
 
   // ⚠effect 内の同期 setState は lint 規約(react-hooks/set-state-in-effect)で禁止。
   // 状態更新はすべて fetch の then/catch(非同期)内で行う。
@@ -46,18 +68,26 @@ export function useRegistryPreflight(
       if (cancelled) return;
       setSettledKey(null);
       setFailed(false);
+      // ⚠取り直しの間は分類を「読めていない」に戻す(古い分類で実行させない)。
+      setTargetsUnavailable(true);
     });
     fetchRegistryPreflight(idsKey.split(","))
       .then((res) => {
         if (cancelled) return;
         setFailed(false);
         setFlagsById(new Map(res.data.map((f) => [f.propertyId, f])));
+        setTargetsById(new Map(res.data.map((f) => [f.propertyId, f.target])));
+        setTargetsUnavailable(false);
         setSettledKey(idsKey);
       })
       .catch(() => {
         if (cancelled) return;
         setFailed(true);
         setFlagsById(new Map());
+        setTargetsById(new Map());
+        // ⚠分類だけは「確定」させない。参考情報の失敗と違い、分からないまま
+        //   実行すると候補1件で自動購入まで進む(設計 §3.1.1・fail closed)。
+        setTargetsUnavailable(true);
         setSettledKey(idsKey); // 失敗も「確定」= failed の注意書きを見せた上で実行可能にする
       });
     return () => {
@@ -67,8 +97,11 @@ export function useRegistryPreflight(
 
   return {
     flagsById,
+    targetsById,
     failed,
-    pending: active && idsKey.length > 0 && settledKey !== idsKey,
+    pending: active && propertyIds.length > 0 && settledKey !== idsKey,
+    // 閉じているときは止める理由が無い(実行ボタン自体が出ない)。
+    targetsUnavailable: active && targetsUnavailable,
   };
 }
 
@@ -144,6 +177,48 @@ export function RegistryPreflightCountLines({
         番号がある・所在が不足しているものは自動で対象外になりますが、それ以外は
         取得(課金)の対象になります。ご確認のうえ実行してください。
       </p>
+    </div>
+  );
+}
+
+/**
+ * 「何を取りに行くか（土地／建物）」を見せる。
+ *
+ * ⚠**見せるだけで止めない**（種別との食い違いは警告・発注者判断 2026-08-12）。
+ * 止めるのは「分類そのものが読めていない」ときだけで、それは呼び出し側が
+ * `targetsUnavailable` でボタンを disabled にすることで行う。
+ */
+export function RegistryTargetNote({
+  state,
+  propertyId,
+}: {
+  state: RegistryPreflightState;
+  propertyId: string;
+}) {
+  if (state.targetsUnavailable) {
+    return (
+      <p className="text-[11px] text-amber-700 dark:text-amber-300">
+        何を取りに行くか確認できませんでした。もう一度お試しください。
+      </p>
+    );
+  }
+  const target = state.targetsById.get(propertyId);
+  if (!target) return null;
+  return (
+    <div className="text-[11px] text-gray-700 dark:text-gray-300">
+      <span className="font-medium">
+        {target.kind === "building"
+          ? "建物の登記を取得します"
+          : target.kind === "land"
+            ? "土地の登記を取得します"
+            : "取得する登記を決められません（地番か家屋番号が必要です）"}
+      </span>
+      {/* ⚠食い違いは見せるだけ。確認したうえで実行できる。 */}
+      {target.mismatchWarning && (
+        <span className="mt-0.5 block text-amber-700 dark:text-amber-300">
+          ⚠ {target.mismatchWarning}
+        </span>
+      )}
     </div>
   );
 }
