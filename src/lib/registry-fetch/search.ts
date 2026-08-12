@@ -27,6 +27,7 @@ import {
 } from "@/lib/registry-fetch";
 import type { RegistryLiveReporter } from "@/lib/registry-fetch/types";
 import { buildRegistrySearchRequest } from "@/lib/registry-fetch/search-request";
+import { hashPropertyFingerprint } from "@/lib/registry-fetch/candidate-cache";
 import {
   rememberSearchCandidates,
   resolveCachedCandidate,
@@ -46,6 +47,16 @@ export interface RunRegistrySearchArgs {
    * ストアへ橋渡しする。認可・確認フラグを通過した後にのみ provider へ渡す。
    */
   live?: RegistryLiveReporter;
+  /**
+   * ⚠一括で「申し込んだときの内容」から変わっていないことを、**物件を読み込んだ直後に**
+   * 確かめるための指紋のハッシュ(任意)。
+   *
+   * 呼び出し側で照合してからここを呼ぶだけでは足りない(@codex #372 Blocker)。
+   * 照合と検索の間に provider の準備やDB更新が入るので、その隙に住所や番号が
+   * 書き換わると、**変更後の値で検索して候補1件なら自動で買う**。
+   * この関数が読む物件と同じ読み取りで照合して、隙を無くす。
+   */
+  expectedFingerprintHash?: string | null;
 }
 
 // provider 失敗（RegistryFetchError）の分類コード → 安全な HTTP ステータス。
@@ -78,7 +89,7 @@ export async function runRegistrySearch(
   args: RunRegistrySearchArgs,
   provider: RegistryFetchProvider,
 ): Promise<Record<string, unknown>> {
-  const { session, propertyId, confirmed } = args;
+  const { session, propertyId, confirmed, expectedFingerprintHash } = args;
 
   // 1. 確認フラグ必須（true 以外は DB / provider に一切到達しない／cond①）。
   //    route 側でも事前にガードするが、lib は直接呼出（テスト / 将来の別経路）からも
@@ -106,6 +117,19 @@ export async function runRegistrySearch(
   });
   if (!property) {
     throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+  }
+
+  // 2b. ⚠申し込んだときの内容から変わっていないか(この読み取りと同じ物件で照合する)。
+  //   呼び出し側で先に照合しても、そこから検索までの間に書き換われば素通りする。
+  if (
+    expectedFingerprintHash &&
+    hashPropertyFingerprint(property) !== expectedFingerprintHash
+  ) {
+    await writeRegistrySearchAudit(session.id, propertyId, {
+      status: "skipped",
+      reason: "identifier_changed",
+    });
+    return { searchable: false, reason: "identifier_changed" };
   }
 
   // 3. 物件スコープ（field_staff は担当/作成物件のみ）。物件詳細 API と同一方針。
@@ -288,6 +312,12 @@ export interface ResolveRegistryCandidateArgs {
   confirmed: boolean;
   /** client が選択した候補参照。信頼せず server で再解決する（cond③）。 */
   candidateRef: string;
+  /**
+   * ⚠一括で「申し込んだときの内容」から変わっていないことを、**課金の直前でも**
+   * 確かめるための指紋のハッシュ(任意)。検索が終わってから候補を解決するまでの
+   * 隙を塞ぐ(@codex #372 Blocker)。
+   */
+  expectedFingerprintHash?: string | null;
 }
 
 /**
@@ -303,7 +333,8 @@ export interface ResolveRegistryCandidateArgs {
 export async function resolveRegistryCandidate(
   args: ResolveRegistryCandidateArgs,
 ): Promise<{ candidate: ResolvedCandidate; fingerprint: string }> {
-  const { session, propertyId, confirmed, candidateRef } = args;
+  const { session, propertyId, confirmed, candidateRef, expectedFingerprintHash } =
+    args;
 
   // 確認フラグ必須（true 以外は解決しない／cond①）。
   if (confirmed !== true) {
@@ -343,6 +374,20 @@ export async function resolveRegistryCandidate(
       403,
       "この物件にアクセスする権限がありません",
       "FORBIDDEN",
+    );
+  }
+
+  // ⚠申し込んだときの内容から変わっていたら、課金の直前で止める。
+  //   候補キャッシュの指紋は「検索した時点」の値なので、検索より前の書き換えは
+  //   これでしか捕まえられない。
+  if (
+    expectedFingerprintHash &&
+    hashPropertyFingerprint(property) !== expectedFingerprintHash
+  ) {
+    throw new ApiError(
+      409,
+      "物件の内容が変わりました。確認して選び直してください",
+      "REGISTRY_OBTAIN_IDENTIFIER_CHANGED",
     );
   }
 

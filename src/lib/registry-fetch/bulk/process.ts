@@ -276,7 +276,16 @@ export async function processNextBulkItem(args: {
     providerAttempted = true;
     try {
       const search = (await runRegistrySearch(
-        { session, propertyId, confirmed: true },
+        {
+          session,
+          propertyId,
+          confirmed: true,
+          // ⚠**検索が読む物件と同じ読み取りで**照合させる(@codex #372 Blocker)。
+          //   上の 3c) で照合してからここへ来るまでに provider の準備やDB更新が入るので、
+          //   その隙に住所や番号が書き換わると、**変更後の値で検索して候補1件なら
+          //   自動で買う**。呼び出し側の照合だけでは隙が残る。
+          expectedFingerprintHash: item.propertyFingerprintHash,
+        },
         provider,
       )) as
         | { searchable: false; reason: string }
@@ -302,6 +311,9 @@ export async function processNextBulkItem(args: {
             propertyId,
             confirmed: true,
             candidateRef: ref,
+            // ⚠課金の直前でももう一度、申し込んだときの内容と同じか確かめる
+            //   (検索が終わってから候補を解決するまでの隙を塞ぐ)。
+            expectedFingerprintHash: item.propertyFingerprintHash,
           });
           const result = await runRegistryAutoFetch(
             {

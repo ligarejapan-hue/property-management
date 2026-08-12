@@ -126,10 +126,14 @@ function runSearch(opts: {
   confirmed?: boolean;
   session?: { id: string; role: string };
   provider?: RegistryFetchProvider;
+  extraArgs?: Record<string, unknown>;
 } = {}) {
   const { confirmed = true, session = SESSION } = opts;
   const provider = opts.provider ?? new MockRegistryFetchProvider();
-  return runRegistrySearch({ session, propertyId: PROP_ID, confirmed }, provider);
+  return runRegistrySearch(
+    { session, propertyId: PROP_ID, confirmed, ...(opts.extraArgs ?? {}) },
+    provider,
+  );
 }
 
 function callRoute(body: unknown) {
@@ -446,5 +450,42 @@ describe("PR-2b-2: audit allowlist（registry_search）", () => {
     expect(out.propertyId).toBe(PROP_ID);
     expect(out.address).toBe("[REDACTED]");
     expect(out.ownerName).toBe("[REDACTED]");
+  });
+});
+
+describe("⚠申し込んだときの内容から変わっていたら検索しない（@codex #372 Blocker）", () => {
+  it("指紋が違えば provider に触れず identifier_changed を返す", async () => {
+    // 一括は「照合 → provider の準備 → DB更新 → 検索」と進むので、呼び出し側の
+    // 照合だけでは隙が残る。検索が読む物件と同じ読み取りで照合する。
+    const provider = new MockRegistryFetchProvider({});
+    const spy = vi.spyOn(provider, "searchCandidates");
+    const body = await runSearch({
+      provider,
+      extraArgs: { expectedFingerprintHash: "hash-at-creation" },
+    });
+    expect(body).toEqual({ searchable: false, reason: "identifier_changed" });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("指紋が同じなら今までどおり検索する", async () => {
+    const { hashPropertyFingerprint } = await import(
+      "@/lib/registry-fetch/candidate-cache"
+    );
+    const body = await runSearch({
+      extraArgs: {
+        expectedFingerprintHash: hashPropertyFingerprint({
+          address: SECRET_ADDR,
+          lotNumber: "5番6",
+          buildingNumber: "7",
+          realEstateNumber: null,
+        }),
+      },
+    });
+    expect(body.searchable).toBe(true);
+  });
+
+  it("指紋を渡さなければ今までどおり（単発の検索は無関係）", async () => {
+    const body = await runSearch();
+    expect(body.searchable).toBe(true);
   });
 });

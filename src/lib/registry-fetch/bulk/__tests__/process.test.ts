@@ -392,3 +392,107 @@ describe("作成時の内容と変わっていたら skip する", () => {
     expect(res.errorCode).not.toBe("identifier_changed");
   });
 });
+
+// ---------------------------------------------------------------------------
+// ⚠照合と検索の間に書き換わっても買わない（@codex #372 Blocker）
+// ---------------------------------------------------------------------------
+
+describe("照合の直後に物件が変わっても、検索と購入へ進ませない", () => {
+  const PROP = {
+    id: "p1",
+    createdBy: "u1",
+    assignedTo: null,
+    address: "横浜市南区井土ケ谷中町",
+    lotNumber: "69-2",
+    buildingNumber: null,
+    realEstateNumber: null,
+  };
+
+  it("⚠検索へ「申し込んだときの指紋」を渡す（呼び出し側の照合だけでは隙が残る）", async () => {
+    const { hashPropertyFingerprint } = await import(
+      "@/lib/registry-fetch/candidate-cache"
+    );
+    const hash = hashPropertyFingerprint(PROP);
+    pm.registryFetchJobItem.findFirst.mockResolvedValue({
+      id: "item-1",
+      propertyFingerprintHash: hash,
+      property: PROP,
+    });
+    (runRegistrySearch as Mock).mockResolvedValue({
+      searchable: true,
+      candidates: [],
+    });
+
+    await processNextBulkItem({
+      session: SESSION,
+      jobId: JOB_ID,
+      resolveProvider: async () => provider,
+    });
+
+    expect((runRegistrySearch as Mock).mock.calls[0][0]).toMatchObject({
+      expectedFingerprintHash: hash,
+    });
+  });
+
+  it("⚠検索が identifier_changed を返したら skip する（provider の候補を使わない）", async () => {
+    // 検索は物件を読み直す。読み直した時点で変わっていれば、そこで止まる。
+    pm.registryFetchJobItem.findFirst.mockResolvedValue({
+      id: "item-1",
+      propertyFingerprintHash: "hash-at-creation",
+      property: { ...PROP },
+    });
+    // 呼び出し側の照合は通す（＝隙を再現するため同じハッシュを返させる）
+    const cc = await import("@/lib/registry-fetch/candidate-cache");
+    const spy = vi
+      .spyOn(cc, "hashPropertyFingerprint")
+      .mockReturnValue("hash-at-creation");
+    (runRegistrySearch as Mock).mockResolvedValue({
+      searchable: false,
+      reason: "identifier_changed",
+    });
+
+    const res = await processNextBulkItem({
+      session: SESSION,
+      jobId: JOB_ID,
+      resolveProvider: async () => provider,
+    });
+
+    expect(res.errorCode).toBe("identifier_changed");
+    expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("⚠候補の解決にも「申し込んだときの指紋」を渡す（課金の直前でもう一度見る）", async () => {
+    const { hashPropertyFingerprint } = await import(
+      "@/lib/registry-fetch/candidate-cache"
+    );
+    const hash = hashPropertyFingerprint(PROP);
+    pm.registryFetchJobItem.findFirst.mockResolvedValue({
+      id: "item-1",
+      propertyFingerprintHash: hash,
+      property: PROP,
+    });
+    (runRegistrySearch as Mock).mockResolvedValue({
+      searchable: true,
+      candidates: [{ candidateRef: "c1" }],
+    });
+    (resolveRegistryCandidate as Mock).mockResolvedValue({
+      candidate: { kind: "location", lotNumber: "69-2", buildingNumber: null },
+      fingerprint: "fp",
+    });
+    (runRegistryAutoFetch as Mock).mockResolvedValue({
+      attachmentId: "att-1",
+      status: "success",
+    });
+
+    await processNextBulkItem({
+      session: SESSION,
+      jobId: JOB_ID,
+      resolveProvider: async () => provider,
+    });
+
+    expect((resolveRegistryCandidate as Mock).mock.calls[0][0]).toMatchObject({
+      expectedFingerprintHash: hash,
+    });
+  });
+});
