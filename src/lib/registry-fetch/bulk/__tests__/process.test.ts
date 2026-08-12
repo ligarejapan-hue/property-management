@@ -335,3 +335,60 @@ describe("processNextBulkItem", () => {
     ).rejects.toMatchObject({ status: 403 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// ⚠順番待ちの間に「検索に渡すもの」が変わったら買わない（設計 §3.1.0.1）
+// ---------------------------------------------------------------------------
+
+describe("作成時の内容と変わっていたら skip する", () => {
+  const PROP = {
+    id: "p1",
+    createdBy: "u1",
+    assignedTo: null,
+    address: "横浜市南区井土ケ谷中町",
+    lotNumber: "69-2",
+    buildingNumber: null,
+    realEstateNumber: null,
+  };
+
+  it("⚠別の正しい値に書き換わっていたら skip（identifier_changed）", async () => {
+    // 番号の有無・形式の検査は素通りするので、これが無いと
+    // 「確認したのと別の筆」を候補1件で自動購入する。
+    pm.registryFetchJobItem.findFirst.mockResolvedValue({
+      id: "item-1",
+      // 作成時とは違うハッシュ
+      propertyFingerprintHash: "hash-at-creation",
+      property: PROP,
+    });
+    const res = await processNextBulkItem({ session: SESSION, jobId: JOB_ID, resolveProvider: async () => provider });
+    expect(res.outcome).toBe("skipped");
+    expect(res.errorCode).toBe("identifier_changed");
+    const update = pm.registryFetchJobItem.update.mock.calls.find(
+      (c) => c[0]?.data?.errorCode === "identifier_changed",
+    );
+    expect(update).toBeTruthy();
+  });
+
+  it("作成時と同じなら今までどおり進む", async () => {
+    const { hashPropertyFingerprint } = await import(
+      "@/lib/registry-fetch/candidate-cache"
+    );
+    pm.registryFetchJobItem.findFirst.mockResolvedValue({
+      id: "item-1",
+      propertyFingerprintHash: hashPropertyFingerprint(PROP),
+      property: PROP,
+    });
+    const res = await processNextBulkItem({ session: SESSION, jobId: JOB_ID, resolveProvider: async () => provider });
+    expect(res.errorCode).not.toBe("identifier_changed");
+  });
+
+  it("指紋を持たない古いジョブは今までどおり進む（後方互換）", async () => {
+    pm.registryFetchJobItem.findFirst.mockResolvedValue({
+      id: "item-1",
+      propertyFingerprintHash: null,
+      property: PROP,
+    });
+    const res = await processNextBulkItem({ session: SESSION, jobId: JOB_ID, resolveProvider: async () => provider });
+    expect(res.errorCode).not.toBe("identifier_changed");
+  });
+});

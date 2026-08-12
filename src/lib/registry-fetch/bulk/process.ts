@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import prisma from "@/lib/prisma";
 import { ApiError } from "@/lib/api-helpers";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import { hashPropertyFingerprint } from "@/lib/registry-fetch/candidate-cache";
 import { runRegistrySearch, resolveRegistryCandidate } from "@/lib/registry-fetch/search";
 import {
   runRegistryAutoFetch,
@@ -138,6 +139,11 @@ export async function processNextBulkItem(args: {
             id: true,
             createdBy: true,
             assignedTo: true,
+            // ⚠指紋の照合に使う(作成時と同じ材料で作り直す)。
+            address: true,
+            lotNumber: true,
+            buildingNumber: true,
+            realEstateNumber: true,
           },
         },
       },
@@ -184,6 +190,41 @@ export async function processNextBulkItem(args: {
         itemId: item.id,
         itemStatus: "skipped",
         errorCode: "property_unavailable",
+        morePending: await hasPending(jobId),
+      };
+    }
+
+    // 3c) ⚠順番待ちの間に「検索に渡すもの」が変わっていたら買わずに止める(設計 §3.1.0.1)。
+    //   番号が消えた/読めなくなったのは既存の検査で拾えるが、**別の正しい値へ
+    //   書き換わった**場合は素通りし、候補が1件なら自動購入まで進む。
+    //   利用者が確認したのは書き換え前の内容なので、黙って買わない。
+    //   ⚠「変わった」と「消えた」は別の理由コードにする(やることが違う=
+    //   前者はもう一度選ぶ・後者は番号を入れる)。
+    //   ⚠指紋を持たない古いジョブは従来どおり進める(後方互換)。
+    if (
+      item.propertyFingerprintHash &&
+      item.propertyFingerprintHash !== hashPropertyFingerprint(item.property)
+    ) {
+      await prisma.$transaction([
+        prisma.registryFetchJobItem.update({
+          where: { id: item.id },
+          data: {
+            status: "skipped",
+            errorCode: "identifier_changed",
+            processedAt: new Date(),
+          },
+        }),
+        prisma.registryFetchJob.update({
+          where: { id: jobId },
+          data: { activeItemId: null },
+        }),
+      ]);
+      return {
+        outcome: "skipped",
+        jobStatus: "processing",
+        itemId: item.id,
+        itemStatus: "skipped",
+        errorCode: "identifier_changed",
         morePending: await hasPending(jobId),
       };
     }

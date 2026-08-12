@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * PR-2b-3 (@codex P1): 所在検索の候補（candidateRef → 不動産番号）を「認可済みユーザーの検索」から
  * 取得側へ橋渡しする短命 in-memory マップ。
@@ -66,6 +67,20 @@ export function fingerprintProperty(p: PropertyFingerprintSource): string {
     normalize(p.buildingNumber),
     normalize(p.realEstateNumber),
   ]);
+}
+
+/**
+ * 指紋を保存用のハッシュにする（一括ジョブの各行に控える）。
+ *
+ * ⚠**地番は秘匿情報**なので値そのものを DB に残さない（sha256 の先頭32桁だけ）。
+ * ⚠指紋そのもの（JSON 配列）と混同しない。候補キャッシュの照合は指紋、
+ *   一括の行に控えるのはこのハッシュ。
+ */
+export function hashPropertyFingerprint(p: PropertyFingerprintSource): string {
+  return createHash("sha256")
+    .update(fingerprintProperty(p))
+    .digest("hex")
+    .slice(0, 32);
 }
 
 /**
