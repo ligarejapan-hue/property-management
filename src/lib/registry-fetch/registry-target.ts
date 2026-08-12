@@ -31,6 +31,15 @@ export type RegistryTargetKind =
   | "building"
   /** ⚠不動産番号がある＝**所在で探す経路の対象外**（番号があれば所在も地番も要らない）。 */
   | "number"
+  /**
+   * ⚠番号は入っているが**読めない形**。
+   *
+   * "none"（そもそも入っていない）と分ける理由（@codex #373 R2 P2）:
+   * 「地番が必要です」のポップアップは**地番しか保存できない**。読めない家屋番号が
+   * 入ったままだと、正しい地番を保存しても分類は家屋番号を優先して読めないままなので、
+   * **同じポップアップが何度でも出て先へ進めない**。直すのは入っている番号のほう。
+   */
+  | "malformed"
   | "none";
 
 export interface RegistryTarget {
@@ -96,12 +105,16 @@ export function classifyRegistryTarget(input: {
   const kind: RegistryTargetKind = !effective
     ? "none"
     : !isReadableChiban(effective)
-      ? "none"
+      ? // ⚠「入っていない」とは分ける。直すのは入っている番号のほうで、
+        //   地番を足しても解決しない。
+        "malformed"
       : building
         ? "building"
         : "land";
 
-  if (kind === "none") return { kind, mismatchWarning: null };
+  if (kind === "none" || kind === "malformed") {
+    return { kind, mismatchWarning: null };
+  }
 
   if (kind === "building" && LAND_TYPES.has(input.propertyType)) {
     return {

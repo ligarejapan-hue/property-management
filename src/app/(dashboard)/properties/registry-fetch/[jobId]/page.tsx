@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   fetchRegistryFetchJob,
   processNextRegistryFetchItem,
@@ -346,21 +347,42 @@ function ExcludedReasons({
 }: {
   items: RegistryFetchJobProgress["items"];
 }) {
-  const counts = new Map<string, number>();
+  // ⚠件数だけでは「どれを直せばよいか」が分からない(@codex #373 R2 P2)。
+  //   一覧へ戻ると選択も消えるので、物件へ行ける導線を理由ごとに残す。
+  //   ⚠出すのは物件IDだけ(住所・地番は出さない=秘匿)。
+  const byReason = new Map<string, string[]>();
   for (const it of items ?? []) {
     if (it.status !== "skipped" || !it.errorCode) continue;
-    counts.set(it.errorCode, (counts.get(it.errorCode) ?? 0) + 1);
+    const list = byReason.get(it.errorCode) ?? [];
+    if (it.propertyId) list.push(it.propertyId);
+    byReason.set(it.errorCode, list);
   }
-  if (counts.size === 0) return null;
+  if (byReason.size === 0) return null;
   return (
     <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950/40">
       <div className="font-medium text-amber-900 dark:text-amber-300">
         対象外になった物件の内訳
       </div>
-      <ul className="mt-1 space-y-0.5 text-xs text-amber-800 dark:text-amber-300">
-        {[...counts.entries()].map(([code, n]) => (
+      <ul className="mt-1 space-y-1 text-xs text-amber-800 dark:text-amber-300">
+        {[...byReason.entries()].map(([code, ids]) => (
           <li key={code}>
-            {ITEM_REASON_LABEL[code] ?? code}: {n}件
+            <span>
+              {ITEM_REASON_LABEL[code] ?? code}: {ids.length}件
+            </span>
+            {ids.length > 0 && (
+              <span className="ml-1 inline-flex flex-wrap gap-x-2">
+                {ids.map((id, i) => (
+                  <Link
+                    key={id}
+                    href={`/properties/${id}`}
+                    className="font-mono text-[11px] text-indigo-700 underline hover:text-indigo-900 dark:text-indigo-300 dark:hover:text-indigo-200"
+                  >
+                    {/* ⚠物件IDの先頭だけ。住所・地番は出さない(秘匿)。 */}
+                    {i + 1}件目({id.slice(0, 8)})
+                  </Link>
+                ))}
+              </span>
+            )}
           </li>
         ))}
       </ul>

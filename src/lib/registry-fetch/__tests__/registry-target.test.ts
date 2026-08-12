@@ -33,17 +33,17 @@ describe("土地か建物かは持っている番号で決まる（種別では�
     expect(t("land", null, null).kind).toBe("none");
   });
 
-  it("⚠読めない形の番号は「持っていない」と同じ扱い", () => {
+  it("⚠読めない形の番号は取りに行けない（malformed）", () => {
     // 通すと、正規化で潰れた別の筆を取りに行く。
-    expect(t("land", "abc1x2", null).kind).toBe("none");
+    expect(t("land", "abc1x2", null).kind).toBe("malformed");
   });
 
   it("⚠読めない家屋番号があるとき、地番へ落とさない（検索と同じ選び方）", () => {
     // 検索の入口は家屋番号を優先し、読めなければ地番へ落とさず弾く。
     // ここだけ落とすと「土地の登記を取得します」と出るのに検索は弾く、
     // という食い違いになる（@codex #372 R2 P2）。
-    expect(t("house", "69-2", "abc").kind).toBe("none");
-    expect(t("land", "69-2", "abc").kind).toBe("none");
+    expect(t("house", "69-2", "abc").kind).toBe("malformed");
+    expect(t("land", "69-2", "abc").kind).toBe("malformed");
   });
 
   it("家屋番号が空なら地番を使う（落とすのは「空」のときだけ）", () => {
@@ -130,5 +130,29 @@ describe("⚠不動産番号があれば所在検索の対象外（設計 §3.1 
   it("空白だけの番号は「無い」と同じ扱い", () => {
     expect(t("land", "69-2", null, "   ").kind).toBe("land");
     expect(t("land", null, null, "").kind).toBe("none");
+  });
+});
+
+describe("⚠「読めない形」と「入っていない」を分ける（@codex #373 R2 P2）", () => {
+  it("読めない家屋番号は malformed（none ではない）", () => {
+    // "none" にすると「地番が必要です」のポップアップが出るが、そこは
+    // **地番しか保存できない**。読めない家屋番号が残ったままだと分類は
+    // 家屋番号を優先し続けるので、正しい地番を入れても同じポップアップが
+    // 何度でも出て**先へ進めなくなる**。直すのは入っている番号のほう。
+    expect(t("house", "69-2", "abc").kind).toBe("malformed");
+    expect(t("land", null, "abc").kind).toBe("malformed");
+  });
+
+  it("読めない地番だけのときも malformed", () => {
+    expect(t("land", "abc1x2", null).kind).toBe("malformed");
+  });
+
+  it("本当に入っていないときだけ none", () => {
+    expect(t("land", null, null).kind).toBe("none");
+    expect(t("land", "  ", "").kind).toBe("none");
+  });
+
+  it("malformed でも種別の警告は出さない（先に番号を直してもらう）", () => {
+    expect(t("house", "abc", null).mismatchWarning).toBeNull();
   });
 });

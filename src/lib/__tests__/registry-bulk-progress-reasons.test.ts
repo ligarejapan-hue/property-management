@@ -55,3 +55,17 @@ describe("除外理由の内訳", () => {
     expect(src).toContain("物件ページから1件ずつ");
   });
 });
+
+describe("⚠どの物件が外れたか分かる（@codex #373 R2 P2）", () => {
+  it("理由ごとに物件へ行ける導線を出す", () => {
+    // 件数だけだと「1件ずつ直してください」と言われても、どれを直せばよいか
+    // 分からない。一覧へ戻ると選択も消える。
+    expect(src).toContain("byReason");
+    expect(src).toContain("/properties/${id}");
+  });
+
+  it("⚠出すのは物件IDの先頭だけ（住所・地番は出さない）", () => {
+    expect(src).toContain("id.slice(0, 8)");
+    expect(src).not.toMatch(/ExcludedReasons[\s\S]{0,600}address/);
+  });
+});
