@@ -68,6 +68,8 @@ export async function POST(request: NextRequest) {
         propertyType: true,
         lotNumber: true,
         buildingNumber: true,
+        // ⚠あれば所在検索の対象外＝地番を尋ねてはいけない（設計 §3.1）。
+        realEstateNumber: true,
         _count: { select: { propertyOwners: true } },
       },
     });
@@ -103,6 +105,7 @@ export async function POST(request: NextRequest) {
         propertyType: p.propertyType,
         lotNumber: p.lotNumber,
         buildingNumber: p.buildingNumber,
+        realEstateNumber: p.realEstateNumber,
       }),
     }));
 

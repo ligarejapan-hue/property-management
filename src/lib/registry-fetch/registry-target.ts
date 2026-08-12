@@ -26,7 +26,12 @@ function trimToNull(v: string | null | undefined): string | null {
   return t.length > 0 ? t : null;
 }
 
-export type RegistryTargetKind = "land" | "building" | "none";
+export type RegistryTargetKind =
+  | "land"
+  | "building"
+  /** ⚠不動産番号がある＝**所在で探す経路の対象外**（番号があれば所在も地番も要らない）。 */
+  | "number"
+  | "none";
 
 export interface RegistryTarget {
   kind: RegistryTargetKind;
@@ -68,7 +73,16 @@ export function classifyRegistryTarget(input: {
   propertyType: string;
   lotNumber: string | null;
   buildingNumber: string | null;
+  /** ⚠あれば所在検索の対象外。地番を尋ねてはいけない（設計 §3.1 / §3.1.1）。 */
+  realEstateNumber: string | null;
 }): RegistryTarget {
+  // ⚠**最初に見る**。検索の入口(buildRegistrySearchRequest)も番号を最優先で見て
+  //   has_real_estate_number を返す。ここで見落とすと「地番が必要です」と尋ねてしまい、
+  //   利用者は外部の地図で地番を調べて保存したのに、検索は結局「番号があります」と
+  //   返す＝**要らない地番が物件に残るだけ**になる。
+  if (trimToNull(input.realEstateNumber)) {
+    return { kind: "number", mismatchWarning: null };
+  }
   // ⚠**検索の入口(buildRegistrySearchRequest)とまったく同じ選び方**にする。
   //   あちらは家屋番号を優先し、それが読めない形なら**地番へ落とさず**弾く。
   //   ここだけ地番へ落とすと、画面は「土地の登記を取得します」と言うのに

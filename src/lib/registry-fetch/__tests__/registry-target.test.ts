@@ -11,7 +11,14 @@ const t = (
   propertyType: string,
   lotNumber: string | null,
   buildingNumber: string | null,
-) => classifyRegistryTarget({ propertyType, lotNumber, buildingNumber });
+  realEstateNumber: string | null = null,
+) =>
+  classifyRegistryTarget({
+    propertyType,
+    lotNumber,
+    buildingNumber,
+    realEstateNumber,
+  });
 
 describe("土地か建物かは持っている番号で決まる（種別では決めない）", () => {
   it("家屋番号があれば建物", () => {
@@ -101,5 +108,27 @@ describe("⚠警告文に地番の値そのものを載せない（秘匿）", (
     const r = t("land", "69-2", "12-3");
     expect(r.mismatchWarning).not.toContain("69");
     expect(r.mismatchWarning).not.toContain("12-3");
+  });
+});
+
+describe("⚠不動産番号があれば所在検索の対象外（設計 §3.1 / §3.1.1）", () => {
+  it("番号があれば kind=number（地番を尋ねない）", () => {
+    // ⚠"none" にすると「地番が必要です」のポップアップが出てしまい、
+    //   利用者は外部の地図で地番を調べて保存したのに、検索は結局
+    //   「番号があります」と返す＝**要らない地番が物件に残るだけ**になる。
+    expect(t("land", null, null, "0413234567890")).toEqual({
+      kind: "number",
+      mismatchWarning: null,
+    });
+  });
+
+  it("番号があれば種別も他の番号も見ない（検索の入口と同じ優先順）", () => {
+    expect(t("house", "69-2", "12-3", "0413234567890").kind).toBe("number");
+    expect(t("parking", "abc1x2", null, "0413234567890").kind).toBe("number");
+  });
+
+  it("空白だけの番号は「無い」と同じ扱い", () => {
+    expect(t("land", "69-2", null, "   ").kind).toBe("land");
+    expect(t("land", null, null, "").kind).toBe("none");
   });
 });

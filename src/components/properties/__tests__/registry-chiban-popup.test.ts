@@ -147,3 +147,31 @@ describe("導線への差し込み（設計 §3.1 / §4.1）", () => {
     expect(LOC).toContain("所在で謄本候補を検索しますか？");
   });
 });
+
+describe("⚠不動産番号を持つ物件では出さない（設計 §3.1）", () => {
+  it("ポップアップは kind === none のときだけ（number では出ない）", () => {
+    // 出してしまうと、利用者は外部の地図で地番を調べて保存したのに、
+    // 検索は結局「番号があります」と返す＝要らない地番が物件に残るだけになる。
+    expect(LOC).toContain('target?.kind === "none"');
+    expect(LOC).not.toContain('target?.kind === "number"');
+  });
+
+  it("分類に不動産番号を渡している（preflight）", () => {
+    const route = readFileSync(
+      join(process.cwd(), "src/app/api/registry-fetch/preflight/route.ts"),
+      "utf8",
+    );
+    expect(route).toContain("realEstateNumber: p.realEstateNumber");
+  });
+
+  it("番号ありのときは「所在検索の対象外」と案内する", () => {
+    const shared = readFileSync(
+      join(
+        process.cwd(),
+        "src/components/properties/registry-preflight-warnings.tsx",
+      ),
+      "utf8",
+    );
+    expect(shared).toContain("所在検索の対象外です");
+  });
+});
