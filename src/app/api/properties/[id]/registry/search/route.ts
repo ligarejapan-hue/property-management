@@ -127,6 +127,25 @@ export async function POST(
         },
         provider,
       );
+
+      // ⚠番号が無い/読めないのは**入力の問題**なので 422 で止める（設計 §4.4）。
+      //   200 で返すと画面は「対象外です」と出すだけで、利用者は何を直せばよいか
+      //   分からない。⚠一括は同じ理由コードを「除外」「skip」に読み替えるので、
+      //   止め方はこの呼び出し側でだけ決める（共通の入口は理由を返すだけ）。
+      const reason = (result as { searchable?: boolean; reason?: string })
+        .searchable === false
+        ? (result as { reason?: string }).reason
+        : undefined;
+      if (reason === "missing_identifier" || reason === "malformed_identifier") {
+        throw new ApiError(
+          422,
+          reason === "missing_identifier"
+            ? "地番（建物は家屋番号）を入力してから実行してください"
+            : "地番の書き方が読み取れません。地図に表示されたとおりに入力してください",
+          "REGISTRY_SEARCH_IDENTIFIER_INVALID",
+        );
+      }
+
       return apiResponse(result, 200);
     } finally {
       // 成否に関わらず実況を完了へ (パネルの「実行中」を残さない)。TTL 経過で
