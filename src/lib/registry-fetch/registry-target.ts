@@ -20,6 +20,12 @@
  */
 import { isReadableChiban } from "./chiban-input";
 
+function trimToNull(v: string | null | undefined): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return t.length > 0 ? t : null;
+}
+
 export type RegistryTargetKind = "land" | "building" | "none";
 
 export interface RegistryTarget {
@@ -54,16 +60,23 @@ export function classifyRegistryTarget(input: {
   lotNumber: string | null;
   buildingNumber: string | null;
 }): RegistryTarget {
+  // ⚠**検索の入口(buildRegistrySearchRequest)とまったく同じ選び方**にする。
+  //   あちらは家屋番号を優先し、それが読めない形なら**地番へ落とさず**弾く。
+  //   ここだけ地番へ落とすと、画面は「土地の登記を取得します」と言うのに
+  //   検索は弾く、という食い違いになる(@codex #372 R2 P2)。
+  const building = trimToNull(input.buildingNumber);
+  const lot = trimToNull(input.lotNumber);
+  const effective = building ?? lot;
+
   // ⚠読めない形の番号は「持っていない」と同じ扱い。
   //   通すと、正規化で潰れた別の筆を取りに行くことになる。
-  const hasBuilding = isReadableChiban(input.buildingNumber);
-  const hasLot = isReadableChiban(input.lotNumber);
-
-  const kind: RegistryTargetKind = hasBuilding
-    ? "building"
-    : hasLot
-      ? "land"
-      : "none";
+  const kind: RegistryTargetKind = !effective
+    ? "none"
+    : !isReadableChiban(effective)
+      ? "none"
+      : building
+        ? "building"
+        : "land";
 
   if (kind === "none") return { kind, mismatchWarning: null };
 

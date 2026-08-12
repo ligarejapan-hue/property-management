@@ -949,7 +949,9 @@ git commit -m "feat(registry): 一括は作成時の内容を指紋で固定し�
     buildingNumber: string | null;
   }): RegistryTarget;
   ```
-  preflight の応答に `targetsById: Record<string, RegistryTarget>` が増える
+  preflight の応答は `data[]` の**各要素に `target: RegistryTarget` が増える**
+  （既存の `flagsById` と同じく、画面側が `data` から Map を組む。
+  ⚠上位に別の map を足すと同じ情報が2か所に出て、片方だけ更新される）
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -1112,25 +1114,29 @@ export function classifyRegistryTarget(input: {
 
 - [ ] **Step 4: preflight に載せる**
 
-`src/app/api/registry-fetch/preflight/route.ts` の物件取得の select へ `propertyType` / `lotNumber` / `buildingNumber` を足し、応答へ `targetsById` を追加する:
+`src/app/api/registry-fetch/preflight/route.ts` の物件取得の select へ `propertyType` / `lotNumber` / `buildingNumber` を足し、**`data[]` の各要素へ `target` を追加**する（⚠上位に別の map を足さない＝同じ情報が2か所に出て片方だけ更新される）:
 
 ```ts
 import { classifyRegistryTarget } from "@/lib/registry-fetch/registry-target";
 
-// …既存の3フラグを組み立てているところの隣で…
-    const targetsById: Record<string, ReturnType<typeof classifyRegistryTarget>> = {};
-    for (const p of properties) {
-      // ⚠「何を取りに行くか」は参考情報ではなく**買う対象そのもの**なので必ず返す。
-      //   画面はこれが来るまで実行させない（設計 §3.1.1・fail closed）。
-      targetsById[p.id] = classifyRegistryTarget({
+// …物件取得の select へ propertyType / lotNumber / buildingNumber を足したうえで…
+    const data = visible.map((p) => ({
+      propertyId: p.id,
+      registryObtained: p.registryStatus === "obtained",
+      hasRegistryAttachment: attachedSet.has(p.id),
+      hasOwners: p._count.propertyOwners > 0,
+      // ⚠これは参考情報ではなく**買う対象そのもの**。画面はこれが読めるまで
+      //   実行させない(fail closed・設計 §3.1.1)。
+      //   ⚠返すのは分類と警告文だけ。地番の値そのものは返さない(秘匿)。
+      target: classifyRegistryTarget({
         propertyType: p.propertyType,
         lotNumber: p.lotNumber,
         buildingNumber: p.buildingNumber,
-      });
-    }
+      }),
+    }));
 ```
 
-`apiResponse` に `targetsById` を足す。⚠ **地番の値そのものは返さない**（分類と警告文だけ）。
+⚠ **地番の値そのものは返さない**（分類と警告文だけ）。画面側は `flagsById` を組むのと同じループで `targetsById` を組む（Task 7）。
 
 - [ ] **Step 5: 通ることを確認する**
 
@@ -1166,8 +1172,9 @@ git commit -m "feat(registry): 何を取りに行くか（土地/建物）の分
 - Test: `src/lib/__tests__/registry-preflight-ui.test.ts`（既存に追記）
 
 **Interfaces:**
-- Consumes: preflight の `targetsById`（Task 6）
+- Consumes: preflight の `data[].target`（Task 6）
 - Produces: `RegistryPreflightState` に `targetsById: Map<string, RegistryTarget>` と `targetsUnavailable: boolean` が増える
+  （`flagsById` を組むのと同じループで `targetsById` も組む）
 
 **背景（実測）**: 既存は **preflight が失敗しても `settledKey` を確定させて実行ボタンを戻す**（`registry-preflight-warnings.tsx:57`）。これは「取得済み・所有者あり」のような参考情報なら妥当だが、**分類は買う対象そのもの**なので同じ扱いにできない。
 
