@@ -421,19 +421,50 @@ describe("承認の根拠（approvedFingerprints）", () => {
     expect(pm.registryFetchJob.create).not.toHaveBeenCalled();
   });
 
-  it("番号不足だけで0件になったときは今までどおりジョブを作る（理由を見せる場所）", async () => {
-    // 進捗画面の理由一覧が「何を直せば通るか」を伝える唯一の場所なので、消さない。
+  it("⚠番号不足で0件になったときも作らない（設計 §3.1.0・@codex #373 R8 P2）", async () => {
+    // ジョブ作成が許されるのは「1件でも対象が残るとき」だけ。
     pm.property.findMany.mockResolvedValue([
       prop(P1, { lotNumber: null, buildingNumber: null }),
     ]);
-    const res = await createBulkFetchJob({
+    await expect(
+      createBulkFetchJob({
+        session: STAFF,
+        propertyIds: [P1],
+        certificateType: "owner",
+        approvedFingerprints: {},
+      }),
+    ).rejects.toMatchObject({ status: 409, code: "REGISTRY_BULK_NO_PENDING" });
+    expect(pm.registryFetchJob.create).not.toHaveBeenCalled();
+  });
+
+  it("⚠断るときは理由の内訳を出す（進捗画面を見せられないので、ここで言うしかない）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      prop(P1, { lotNumber: null, buildingNumber: null }),
+      prop(P2, { address: null, lotNumber: null, buildingNumber: null }),
+    ]);
+    const err = await createBulkFetchJob({
+      session: STAFF,
+      propertyIds: [P1, P2],
+      certificateType: "owner",
+      approvedFingerprints: {},
+    }).catch((e: Error) => e);
+    expect((err as Error).message).toContain("地番・家屋番号が未入力: 1件");
+    expect((err as Error).message).toContain("住所が未入力: 1件");
+  });
+
+  it("⚠断り文句に住所・地番の値そのものを載せない（秘匿）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      prop(P1, { address: "横浜市南区井土ケ谷中町", lotNumber: "69-2", realEstateNumber: "0413234567890" }),
+    ]);
+    const err = await createBulkFetchJob({
       session: STAFF,
       propertyIds: [P1],
       certificateType: "owner",
       approvedFingerprints: {},
-    });
-    expect(res).toMatchObject({ pending: 0, skipped: 1 });
-    expect(itemsOf()[P1].errorCode).toBe("missing_identifier");
+    }).catch((e: Error) => e);
+    expect((err as Error).message).not.toContain("井土ケ谷");
+    expect((err as Error).message).not.toContain("69-2");
+    expect((err as Error).message).not.toContain("0413234567890");
   });
 
   it("⚠指紋の材料に地番の値そのものを残さない（秘匿）", async () => {

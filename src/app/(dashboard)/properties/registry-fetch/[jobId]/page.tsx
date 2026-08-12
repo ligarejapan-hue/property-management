@@ -18,6 +18,8 @@ import {
   resumeRegistryFetchJob,
   type RegistryFetchJobProgress,
 } from "@/lib/api-client";
+// ⚠理由のラベルはサーバ(作成を断る文言)と共有する=定義元は1つ。
+import { BULK_SKIP_REASON_LABEL } from "@/lib/registry-fetch/bulk/skip-reasons";
 
 // rate_limited(順番待ち)の**フォールバック**待ち。通常はサーバーが返す retryAfterMs を使う。
 // 未指定時のみこの保守的既定(サーバーの既定最小間隔 60秒に合わせる)を使う。
@@ -324,27 +326,6 @@ function Tile({
   );
 }
 
-/**
- * ⚠理由によって利用者のやることが違う（設計 §3.1.0）。
- * すべてを「地番が未入力」と書くと、住所が無い物件や不動産番号を持つ物件の
- * 担当者は何を直せばよいか分からず詰まる。
- */
-const ITEM_REASON_LABEL: Record<string, string> = {
-  missing_identifier: "地番・家屋番号が未入力",
-  malformed_identifier: "地番/家屋番号の書き方",
-  insufficient_location: "住所が未入力",
-  // ⚠これは「直せば通る」ものではない（番号での取得は途中で止まる）。
-  // ⚠「直せば通る」ものではない。番号での取得は実サイトに触れる前に止まる
-  //   （段階②が未実装）ので、この経路では取得できない。
-  has_real_estate_number: "所在検索の対象外（この経路では取得できません）",
-  identifier_changed: "内容が変わりました（確認して選び直してください）",
-  // ⚠確認画面を通していない物件（古い画面のまま実行された等）。
-  not_approved: "確認を通していません（選び直してください）",
-  ambiguous_candidate: "候補が複数（手動で選んでください）",
-  no_candidate: "候補が見つかりません",
-  property_unavailable: "物件を参照できません",
-};
-
 /** 対象外になった物件を、理由ごとの件数で出す。⚠住所・地番は出さない（秘匿）。 */
 function ExcludedReasons({
   items,
@@ -371,7 +352,7 @@ function ExcludedReasons({
         {[...byReason.entries()].map(([code, ids]) => (
           <li key={code}>
             <span>
-              {ITEM_REASON_LABEL[code] ?? code}: {ids.length}件
+              {BULK_SKIP_REASON_LABEL[code] ?? code}: {ids.length}件
             </span>
             {ids.length > 0 && (
               <span className="ml-1 inline-flex flex-wrap gap-x-2">

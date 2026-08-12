@@ -13,6 +13,7 @@ import { ApiError } from "@/lib/api-helpers";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { buildRegistrySearchRequest } from "@/lib/registry-fetch/search-request";
 import { hashPropertyFingerprint } from "@/lib/registry-fetch/candidate-cache";
+import { describeSkipReasons } from "./skip-reasons";
 import type { RegistryCertificateType } from "@/lib/registry-fetch/types";
 import {
   MAX_BULK_ITEMS,
@@ -262,20 +263,27 @@ export async function createBulkFetchJob(
   const preSkipped = itemsData.filter((i) => i.status === "skipped").length;
   const pendingCount = itemsData.length - preSkipped;
 
-  // ⚠承認が古くて取りに行くものが1件も残らなかったら、**ジョブを作らない**
-  //   (@codex #373 R7 P2)。0件のジョブを作ると進捗画面へ飛ばされて即「完了」と
-  //   出る=何も取れていないのに終わったように見える。確認からやり直してもらう。
-  //   ⚠番号不足だけで0件になったときは従来どおり作る(進捗画面の理由一覧が
-  //   「何を直せば通るか」を伝える唯一の場所なので、消すと直しようがなくなる)。
-  const approvalBlocked = itemsData.filter(
-    (i) =>
-      i.errorCode === "not_approved" || i.errorCode === "identifier_changed",
-  ).length;
-  if (pendingCount === 0 && approvalBlocked > 0) {
+  // ⚠取りに行くものが1件も残らなかったら、**ジョブを作らない**
+  //   (設計 §3.1.0「ジョブ作成が許されるのは1件でも対象が残るとき」・
+  //    @codex #373 R7 P2 / R8 P2)。0件のジョブを作ると進捗画面へ飛ばされて
+  //   即「完了」と出る=何も取れていないのに終わったように見える。
+  //   ⚠代わりに**理由の内訳を断り文句に載せる**(件数だけ・住所や地番は出さない)。
+  //   進捗画面の内訳を見せられない以上、ここで言わないと何を直せばよいか分からない。
+  if (pendingCount === 0) {
+    const detail = describeSkipReasons(itemsData.map((i) => i.errorCode));
+    // ⚠直し方が違うので断り方を分ける。承認が古い=選び直す / 番号不足=物件を直す。
+    const approvalBlocked = itemsData.some(
+      (i) =>
+        i.errorCode === "not_approved" || i.errorCode === "identifier_changed",
+    );
     throw new ApiError(
       409,
-      "確認した内容から変わっています。取得する物件を選び直してください",
-      "REGISTRY_BULK_APPROVAL_STALE",
+      approvalBlocked
+        ? `確認した内容から変わっています。取得する物件を選び直してください(${detail})`
+        : `取得できる物件がありません(${detail})。物件ページで直してから、もう一度選んでください`,
+      approvalBlocked
+        ? "REGISTRY_BULK_APPROVAL_STALE"
+        : "REGISTRY_BULK_NO_PENDING",
     );
   }
 

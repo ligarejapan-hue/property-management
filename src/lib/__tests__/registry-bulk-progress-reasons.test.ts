@@ -7,6 +7,10 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  BULK_SKIP_REASON_LABEL,
+  describeSkipReasons,
+} from "@/lib/registry-fetch/bulk/skip-reasons";
 
 const src = readFileSync(
   join(
@@ -29,16 +33,26 @@ describe("除外理由の内訳", () => {
     ["insufficient_location", "住所が未入力"],
     ["has_real_estate_number", "所在検索の対象外（この経路では取得できません）"],
     ["identifier_changed", "内容が変わりました"],
+    ["not_approved", "確認を通していません"],
     ["ambiguous_candidate", "候補が複数"],
     ["no_candidate", "候補が見つかりません"],
     ["property_unavailable", "物件を参照できません"],
-  ])("%s の理由文言を持つ", (_code, label) => {
-    expect(src).toContain(label);
+  ])("%s の理由文言を持つ", (code, label) => {
+    expect(BULK_SKIP_REASON_LABEL[code]).toContain(label);
   });
 
   it("⚠不動産番号は「入力の不備」ではなく「対象外」として書く", () => {
     // 直せば通るものではない（番号での取得は途中で止まる既存の行き止まり）。
-    expect(src).toContain("所在検索の対象外");
+    expect(BULK_SKIP_REASON_LABEL.has_real_estate_number).toContain(
+      "所在検索の対象外",
+    );
+  });
+
+  it("⚠画面はラベルを自前で持たない（サーバの断り文句と同じ定義元を使う）", () => {
+    // 進捗画面とサーバー（0件で断るときの内訳）で言い方がずれると、
+    // 同じ理由が場所によって違う文になる。
+    expect(src).toContain("BULK_SKIP_REASON_LABEL");
+    expect(src).not.toMatch(/const\s+\w*REASON_LABEL\s*:/);
   });
 
   it("skipped 以外は内訳に出さない（失敗・要確認は別のタイルで出す）", () => {
@@ -67,5 +81,29 @@ describe("⚠どの物件が外れたか分かる（@codex #373 R2 P2）", () =>
   it("⚠出すのは物件IDの先頭だけ（住所・地番は出さない）", () => {
     expect(src).toContain("id.slice(0, 8)");
     expect(src).not.toMatch(/ExcludedReasons[\s\S]{0,600}address/);
+  });
+});
+
+describe("⚠1件も取りに行けないときの内訳（@codex #373 R8 P2）", () => {
+  it("理由ごとに件数をまとめる", () => {
+    expect(
+      describeSkipReasons([
+        "missing_identifier",
+        "missing_identifier",
+        "insufficient_location",
+      ]),
+    ).toBe("地番・家屋番号が未入力: 2件 / 住所が未入力: 1件");
+  });
+
+  it("理由の無い項目（取りに行けるもの）は数えない", () => {
+    expect(describeSkipReasons([null, undefined, "no_candidate"])).toBe(
+      "候補が見つかりません: 1件",
+    );
+    expect(describeSkipReasons([])).toBe("");
+  });
+
+  it("⚠知らないコードでも黙って消さない（そのまま出す）", () => {
+    // 消すと「対象外にした件数」と「理由の合計」が合わなくなる。
+    expect(describeSkipReasons(["unknown_code"])).toBe("unknown_code: 1件");
   });
 });
