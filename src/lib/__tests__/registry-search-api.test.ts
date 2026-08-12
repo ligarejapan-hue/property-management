@@ -201,7 +201,10 @@ describe("PR-2b-2: runRegistrySearch（provider 注入）", () => {
     expect(candidates[0].candidateRef).toBe(`mock-candidate-${PROP_ID}`);
     // 表示用フィールド（認可ユーザー向け本文）は返す
     expect(candidates[0].address).toBe(SECRET_ADDR);
-    expect(candidates[0].lotNumber).toBe("5番6");
+    // ⚠渡す番号は1つだけ（設計 §3.1.2）。この物件は家屋番号を持つので
+    //   家屋番号だけを送り、地番は送らない（provider の土地/建物の判定と
+    //   呼び出し側の意図を一致させる）。mock は送った値をそのまま返す。
+    expect(candidates[0].lotNumber).toBeNull();
     expect(candidates[0].buildingNumber).toBe("7");
     // realEstateNumber は応答に出さない（cond③ 改ざん対策・取得時 server 再解決の前提）
     expect(candidates[0]).not.toHaveProperty("realEstateNumber");
