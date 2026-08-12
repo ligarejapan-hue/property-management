@@ -873,6 +873,28 @@ describe("段階②: 地番候補の有料取得（台帳=二重課金ガード�
     else process.env[PURCHASE_ENV] = savedPurchaseEnv;
   });
 
+  it("⚠読めない形の地番では課金前に 422 で止まる（実サイトに触れない）", async () => {
+    // 編集画面・PATCH API・CSV取込から入った値は検索の検査を通っていない。
+    // ここを塞がないと normalizeChibanForDialog で潰れた**別の筆**を買う。
+    const { provider, promise } = runLocation({
+      locationCandidate: { lotNumber: "abc1x2", buildingNumber: null },
+    });
+    await expect(promise).rejects.toMatchObject({
+      status: 422,
+      code: "REGISTRY_OBTAIN_IDENTIFIER_INVALID",
+    });
+    expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("既存の表記（1番地2）は今までどおり取得できる", async () => {
+    // 受理する範囲を狭めると、既に保存されている物件が取れなくなる。
+    const { provider, promise } = runLocation({
+      locationCandidate: { lotNumber: "1番地2", buildingNumber: null },
+    });
+    await promise;
+    expect(provider.fetchRegistryPdf).toHaveBeenCalled();
+  });
+
   it("⚠専用オプトインが無ければ 501 で止まる（provider もロックも呼ばない）", async () => {
     delete process.env[PURCHASE_ENV];
     const { provider, promise } = runLocation();
