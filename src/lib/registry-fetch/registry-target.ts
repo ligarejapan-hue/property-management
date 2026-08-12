@@ -77,12 +77,14 @@ const BUILDING_TYPES = new Set([
 const LAND_TYPES = new Set(["land"]);
 
 /**
- * 建物として期待される種別か。
- * ⚠画面（ポップアップの2つの道）もこれを使う。種別の一覧を画面側に書き写すと、
- * 種別が増えたときに片方だけずれる。
+ * 土地だと分かっている種別か。
+ * ⚠ポップアップの「2つの道」を出すかの判定に使う（@codex #373 R10 P2）。
+ * 駐車場・その他・不明は**どちらもあり得る**ので、建物の道も見せる必要がある。
+ * 建物側の一覧で判定すると、これらの種別が土地の入力へ直行してしまい、
+ * 建物の謄本に家屋番号が要ることを知る機会が無くなる。
  */
-export function isBuildingPropertyType(propertyType: string): boolean {
-  return BUILDING_TYPES.has(propertyType);
+export function isLandPropertyType(propertyType: string): boolean {
+  return LAND_TYPES.has(propertyType);
 }
 
 /**

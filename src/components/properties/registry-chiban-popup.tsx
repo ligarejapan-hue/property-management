@@ -62,10 +62,19 @@ interface RegistryChibanPopupProps {
   gpsLng: number | string | null;
   /** property:write。無ければ入力欄を出さず案内だけにする。 */
   canWriteProperty: boolean;
-  /** 建物系の種別か（2つの道を出す）。 */
-  isBuildingType: boolean;
-  /** 保存できた。⚠呼び出し側は物件を取り直してから確認パネルへ進む。 */
-  onSaved: () => void;
+  /**
+   * 建物の道（家屋番号が要る案内）も見せるか。
+   * ⚠土地だと分かっている種別以外はすべて true（@codex #373 R10 P2）。
+   *   駐車場・その他・不明は土地とも建物とも決まっていないので、
+   *   黙って地番の入力へ送ると「建物の謄本が欲しかった」人が行き止まる。
+   */
+  offerBuildingPath: boolean;
+  /**
+   * 保存できた。引数は**保存後の版番号**（読めなければ null）。
+   * ⚠呼び出し側はこれを次の保存に使う。物件の取り直しを待たずに流れを続けるため
+   *   （取り直すとこの画面ごと作り直されて流れが消える・@codex #373 R10 P2）。
+   */
+  onSaved: (nextVersion: number | null) => void;
   onClose: () => void;
 }
 
@@ -76,13 +85,14 @@ export default function RegistryChibanPopup({
   gpsLat,
   gpsLng,
   canWriteProperty,
-  isBuildingType,
+  offerBuildingPath,
   onSaved,
   onClose,
 }: RegistryChibanPopupProps) {
-  // 建物系は「建物の登記／土地の登記」のどちらを取るかを先に選んでもらう（設計 §3.3）。
+  // 「建物の登記／土地の登記」のどちらを取るかを先に選んでもらう（設計 §3.3）。
+  // ⚠土地だと分かっている種別のときだけ、地番の入力へ直行する。
   const [route, setRoute] = useState<"choose" | "land">(
-    isBuildingType ? "choose" : "land",
+    offerBuildingPath ? "choose" : "land",
   );
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -106,8 +116,15 @@ export default function RegistryChibanPopup({
         body: JSON.stringify({ version: propertyVersion, lotNumber: value.trim() }),
       });
       if (res.ok) {
+        // ⚠保存後の版番号を持ち帰る。物件の取り直しを待たずに次の保存ができる
+        //   （取り直すと詳細ページが読み込み中に切り替わり、この画面ごと消える）。
+        const saved = (await res.json().catch(() => null)) as {
+          version?: unknown;
+        } | null;
+        const nextVersion =
+          typeof saved?.version === "number" ? saved.version : null;
         // ⚠ここで検索を投げない。料金の確認（既存の確認パネル）を必ず経由する。
-        onSaved();
+        onSaved(nextVersion);
         return;
       }
       const body = (await res.json().catch(() => null)) as {

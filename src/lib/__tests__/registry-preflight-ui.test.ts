@@ -81,6 +81,13 @@ describe("実行ボタンは事前確認が済むまで無効(#365 R1)", () => {
     );
     expect(BULK).toMatch(/preflight.targetsUnavailable/);
   });
+
+  it("⚠内訳が長くても操作できる（画面内に収めて中でスクロール・@codex #373 R10 P2）", () => {
+    // 食い違いの内訳は1物件1行で最大50行まで伸びる。上下にはみ出すと
+    // 種類の選択も実行ボタンも押せなくなる（特にスマホ）。
+    expect(BULK).toMatch(/max-h-\[\d+vh\]/);
+    expect(BULK).toContain("overflow-y-auto");
+  });
 });
 
 describe("⚠APIへ送るIDに取り直しの合図を混ぜない（@codex #373 P1）", () => {

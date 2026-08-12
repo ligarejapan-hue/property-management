@@ -118,8 +118,11 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
           aria-label="謄本の一括取得"
           onClick={() => !creating && setOpen(false)}
         >
+          {/* ⚠中身の高さを画面内に収める（@codex #373 R10 P2）。食い違いの内訳は
+              1物件1行で最大50行まで伸びるので、上下にはみ出すと種類の選択も
+              実行ボタンも押せなくなる（特にスマホ）。 */}
           <div
-            className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl dark:bg-gray-900"
+            className="flex max-h-[85vh] w-full max-w-md flex-col overflow-y-auto rounded-lg bg-white p-5 shadow-xl dark:bg-gray-900"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">

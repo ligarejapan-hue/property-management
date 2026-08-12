@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   useRegistryPreflight,
   RegistryPreflightWarningLines,
@@ -35,15 +35,18 @@ interface RegistryLocationSearchButtonProps {
   onComplete: () => void;
   /** 物件の所在（ポップアップで画面にコピーしてもらう。⚠外部へは渡さない）。 */
   propertyAddress: string;
-  /** 地番の保存に必要な現在の版番号。 */
+  /**
+   * 地番の保存に必要な現在の版番号。
+   * ⚠保存後は**この画面が持ち帰った版番号**を使う（親の取り直しを待たない）。
+   */
   propertyVersion: number;
   /** ⚠number とは限らない（Decimal は JSON 上 string）。ポップアップ側で正規化する。 */
   gpsLat: number | string | null;
   gpsLng: number | string | null;
   /** property:write。無ければポップアップは入力欄を出さず案内だけにする。 */
   canWriteProperty: boolean;
-  /** 建物系の種別か（ポップアップで2つの道を出す）。 */
-  isBuildingType: boolean;
+  /** 建物の道（家屋番号が要る案内）も見せるか。土地だと分かっている種別以外は true。 */
+  offerBuildingPath: boolean;
   /** 地番を保存したので物件を取り直す（version と分類を新しくする）。 */
   onPropertyRefresh: () => void;
 }
@@ -78,7 +81,7 @@ export default function RegistryLocationSearchButton({
   gpsLat,
   gpsLng,
   canWriteProperty,
-  isBuildingType,
+  offerBuildingPath,
   onPropertyRefresh,
 }: RegistryLocationSearchButtonProps) {
   const [state, setState] = useState<State>("idle");
@@ -94,6 +97,14 @@ export default function RegistryLocationSearchButton({
   // 課金直前(取得確認)に事前確認(取得済み/添付あり/所有者あり)を表示する(発注者要望 2026-08-08)。
   // 地番を保存したら分類が変わるので、preflight を取り直す合図。
   const [preflightReload, setPreflightReload] = useState(0);
+  // ⚠地番を保存したら物件も取り直したいが、**その場では呼べない**
+  //   （@codex #373 R10 P2）。親の再取得は物件詳細ページを読み込み中の画面へ
+  //   切り替えるので、このボタンごと作り直され、せっかく進んだ確認の流れが消える。
+  //   分類は preflight を取り直せば新しくなるので、親の取り直しは
+  //   流れを閉じるとき（reset）にまとめて行う。
+  const propertyRefreshPendingRef = useRef(false);
+  // 保存後の版番号（親から届く propertyVersion より新しい）。
+  const [savedVersion, setSavedVersion] = useState<number | null>(null);
   // ⚠confirmSearch でも動かす。「何を取りに行くか」が分からないうちは
   //   検索も取得も始めさせない（設計 §3.1.1・fail closed）。
   //   ⚠番号が無い物件ではここでポップアップを出す（確認パネルの**前**）。
@@ -117,6 +128,13 @@ export default function RegistryLocationSearchButton({
     setErrorMsg(null);
     // 実況パネルも閉じる (server 側のスクショは TTL で自動消滅)。
     setLiveRef(null);
+    // ⚠溜めておいた物件の取り直しをここで流す。流れは閉じたので、
+    //   親が読み込み中の画面へ切り替わっても失うものが無い。
+    if (propertyRefreshPendingRef.current) {
+      propertyRefreshPendingRef.current = false;
+      setSavedVersion(null);
+      onPropertyRefresh();
+    }
   };
 
   const reasonText = (reason: string): string =>
@@ -239,14 +257,18 @@ export default function RegistryLocationSearchButton({
         <RegistryChibanPopup
           propertyId={propertyId}
           propertyAddress={propertyAddress}
-          propertyVersion={propertyVersion}
+          propertyVersion={savedVersion ?? propertyVersion}
           gpsLat={gpsLat}
           gpsLng={gpsLng}
           canWriteProperty={canWriteProperty}
-          isBuildingType={isBuildingType}
-          onSaved={() => {
-            // ⚠ここで検索を投げない。物件を取り直して、料金の確認へ進むだけ。
-            onPropertyRefresh();
+          offerBuildingPath={offerBuildingPath}
+          onSaved={(nextVersion) => {
+            // ⚠ここで検索を投げない。分類を取り直して、料金の確認へ進むだけ。
+            // ⚠親の取り直し（onPropertyRefresh）はここでは呼ばない。呼ぶと詳細ページが
+            //   読み込み中の画面に切り替わり、このボタンごと作り直されて
+            //   確認パネルへ進めない（@codex #373 R10 P2）。閉じるときにまとめて流す。
+            if (nextVersion != null) setSavedVersion(nextVersion);
+            propertyRefreshPendingRef.current = true;
             setPreflightReload((n) => n + 1);
           }}
           onClose={reset}

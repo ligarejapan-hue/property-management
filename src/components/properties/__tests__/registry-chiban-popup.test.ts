@@ -22,6 +22,12 @@ const LOC = readFileSync(
   "utf8",
 );
 
+// 物件詳細ページ（どの種別で「2つの道」を出すかを決めている側）。
+const PAGE = readFileSync(
+  join(process.cwd(), "src/app/(dashboard)/properties/[id]/page.tsx"),
+  "utf8",
+);
+
 describe("地図サービスのURL（設計 §3.2）", () => {
   it("座標があればその位置をズーム18で開く", () => {
     // ⚠18 は筆界と地番が見える倍率（#15 では筆界が出ない・実機で確認済み）。
@@ -87,7 +93,13 @@ describe("保存（設計 §4.1）", () => {
 
   it("⚠保存しただけでは検索APIを呼ばない（料金の確認を必ず経由する）", () => {
     expect(src).not.toContain("/registry/search");
-    expect(src).toContain("onSaved()");
+    expect(src).toContain("onSaved(nextVersion)");
+  });
+
+  it("⚠保存後の版番号を持ち帰る（@codex #373 R10 P2）", () => {
+    // 物件の取り直しを待たずに流れを続けるため。取り直すと詳細ページが
+    // 読み込み中に切り替わり、この画面ごと作り直されて流れが消える。
+    expect(src).toContain("saved?.version");
   });
 
   it("409 は「開き直してください」と案内する（最新versionは返らない）", () => {
@@ -120,6 +132,15 @@ describe("建物のとき（設計 §3.3）", () => {
     expect(src).toContain("土地の登記を取る");
   });
 
+  it("⚠土地だと分かっている種別以外は2つの道から始める（@codex #373 R10 P2）", () => {
+    // 駐車場・その他・不明は土地とも建物とも決まっていない。地番の入力へ直行させると
+    // 「建物の謄本が欲しかった」人が、家屋番号の要ることを知らないまま行き止まる。
+    expect(src).toContain('offerBuildingPath ? "choose" : "land"');
+    expect(PAGE).toContain(
+      "offerBuildingPath={!isLandPropertyType(property.propertyType)}",
+    );
+  });
+
   it("⚠建物の側は案内だけ（家屋番号は地図では分からない）", () => {
     expect(src).toContain("地番検索サービスの地図では分かりません");
   });
@@ -137,9 +158,30 @@ describe("導線への差し込み（設計 §3.1 / §4.1）", () => {
     expect(LOC).toContain("RegistryChibanPopup");
   });
 
-  it("⚠保存したら物件を取り直すだけ（検索を直接投げない）", () => {
-    expect(LOC).toMatch(/onSaved=\{\(\) => \{[\s\S]{0,300}?onPropertyRefresh\(\)/);
-    expect(LOC).not.toMatch(/onSaved=\{\(\) => \{[\s\S]{0,300}?runSearch\(\)/);
+  it("⚠保存したら分類を取り直すだけ（検索を直接投げない）", () => {
+    expect(LOC).toMatch(
+      /onSaved=\{\(nextVersion\) => \{[\s\S]{0,600}?setPreflightReload/,
+    );
+    expect(LOC).not.toMatch(
+      /onSaved=\{\(nextVersion\) => \{[\s\S]{0,600}?runSearch\(\)/,
+    );
+  });
+
+  it("⚠保存の直後に親を取り直さない（流れが消える・@codex #373 R10 P2）", () => {
+    // 親（物件詳細ページ）の再取得は画面全体を読み込み中に差し替えるので、
+    // このボタンごと作り直され、約束した料金の確認パネルへ進めない。
+    expect(LOC).not.toMatch(
+      /onSaved=\{\(nextVersion\) => \{[\s\S]{0,600}?onPropertyRefresh\(\)/,
+    );
+    // 代わりに溜めておき、流れを閉じるとき（reset）に流す。
+    expect(LOC).toContain("propertyRefreshPendingRef");
+    expect(LOC).toMatch(
+      /const reset = \(\) => \{[\s\S]{0,800}?onPropertyRefresh\(\)/,
+    );
+  });
+
+  it("⚠保存後は持ち帰った版番号で保存する（2回目が必ず409にならない）", () => {
+    expect(LOC).toContain("propertyVersion={savedVersion ?? propertyVersion}");
   });
 
   it("番号があるときは従来どおり確認パネルを出す", () => {

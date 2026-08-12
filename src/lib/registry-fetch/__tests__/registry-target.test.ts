@@ -176,6 +176,35 @@ describe("⚠住所は番号より先に見る（@codex #373 R4 P2）", () => {
   });
 });
 
+describe("⚠2つの道を出すかの判定（isLandPropertyType・@codex #373 R10 P2）", () => {
+  it("土地だけ true", async () => {
+    const { isLandPropertyType } = await import(
+      "@/lib/registry-fetch/registry-target"
+    );
+    expect(isLandPropertyType("land")).toBe(true);
+  });
+
+  it("⚠決まっていない種別は false＝建物の道も見せる", async () => {
+    // 駐車場・その他・不明を「土地」として扱って地番の入力へ直行させると、
+    // 建物の謄本が欲しかった人は家屋番号の要ることを知らないまま行き止まる。
+    const { isLandPropertyType } = await import(
+      "@/lib/registry-fetch/registry-target"
+    );
+    for (const pt of ["parking", "other", "unknown"] as const) {
+      expect(isLandPropertyType(pt)).toBe(false);
+    }
+  });
+
+  it("建物系も false（従来どおり2つの道）", async () => {
+    const { isLandPropertyType } = await import(
+      "@/lib/registry-fetch/registry-target"
+    );
+    for (const pt of ["house", "apartment_unit", "store"] as const) {
+      expect(isLandPropertyType(pt)).toBe(false);
+    }
+  });
+});
+
 describe("所在検索を始めてよい分類（isSearchableTarget）", () => {
   it("土地・建物だけ true", async () => {
     const { isSearchableTarget } = await import(
