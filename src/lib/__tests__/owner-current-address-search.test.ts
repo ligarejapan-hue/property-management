@@ -300,3 +300,47 @@ describe("POST /api/properties/suggest", () => {
     expect(body.data[0].owners[0].currentZip).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// ⚠3入口すべてで同じ規則であること（1つでも緩いと、そこが穴になる）
+// ---------------------------------------------------------------------------
+
+describe("GET /api/owners の検索オラクル封じ", () => {
+  const call = (keyword: string) =>
+    ownersListGET(
+      new Request(
+        `http://localhost/api/owners?keyword=${encodeURIComponent(keyword)}`,
+      ) as never,
+    );
+
+  it("⚠住所がマスクの利用者では住所も現住所も検索対象にしない", async () => {
+    setDisplayConfig({ address: "partial" });
+    await call("神宮前");
+    const where = pm.owner.findMany.mock.calls[0][0].where;
+    expect(mentionsField(where.OR, "currentAddress")).toBe(false);
+    expect(mentionsField(where.OR, "address")).toBe(false);
+  });
+
+  it("⚠検索できる項目が1つも無ければ DB を引かず空で返す", async () => {
+    setDisplayConfig({
+      name: "hidden",
+      nameKana: "hidden",
+      phone: "hidden",
+      address: "hidden",
+    });
+    const res = await call("神宮前");
+    const body = await res.json();
+    expect(body.data).toEqual([]);
+    expect(body.pagination.total).toBe(0);
+    expect(pm.owner.findMany).not.toHaveBeenCalled();
+  });
+
+  it("氏名だけ見える利用者は氏名でだけ探せる", async () => {
+    setDisplayConfig({ address: "masked", phone: "hidden" });
+    await call("山田");
+    const where = pm.owner.findMany.mock.calls[0][0].where;
+    expect(mentionsField(where.OR, "name")).toBe(true);
+    expect(mentionsField(where.OR, "phone")).toBe(false);
+    expect(mentionsField(where.OR, "currentAddress")).toBe(false);
+  });
+});

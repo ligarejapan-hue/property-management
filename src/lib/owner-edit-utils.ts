@@ -79,9 +79,10 @@ export function buildOwnerUpdatePayload(
   if (fields.zip) payload.zip = form.zip.trim() || null;
   if (fields.address) payload.address = form.address.trim() || null;
   // ⚠現住所は**住所と郵便番号を必ずペアで送る**（設計 §6.1）。
-  //  片方だけ送るとサーバー側で 400（郵便番号だけ）または郵便番号のクリア（住所だけ）になる。
-  //  住所の編集権限があるときだけ送る（郵便番号側の権限はサーバーが判定する）。
-  if (fields.address) {
+  //  ⚠送るのは**両方の編集権限があるときだけ**。現住所を送ると、サーバーは
+  //  「郵便番号も決め直す操作」とみなして owner_zip の書込権限を要求する。
+  //  住所だけ編集できる利用者から常に送ると、**電話番号を直すだけの保存まで 403** になる。
+  if (fields.address && fields.zip) {
     payload.currentAddress = form.currentAddress.trim() || null;
     payload.currentZip = form.currentZip.trim() || null;
   }

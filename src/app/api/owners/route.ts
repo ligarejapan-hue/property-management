@@ -32,19 +32,47 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10)));
     const skip = (page - 1) * limit;
 
+    // Apply display-level masking based on user permissions
+    // ⚠**検索条件を組む前に**表示レベルを取る。マスクされている項目で contains 検索を
+    //   許すと、ヒットの有無・件数から見えないはずの値を当てられる（検索オラクル）。
+    //   owners/search・properties/suggest と同じ規則に揃える（3入口で同じであること）。
+    const displayConfig = await getOwnerDisplayConfig(session.id, permissions);
+    const SEARCHABLE_LEVELS = new Set(["edit", "full", "read"]);
+    const searchable = (level: string) => SEARCHABLE_LEVELS.has(level);
+
     // Build where clause
     // archived owner は通常リスト・検索に出さない（Phase 2-A）
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = { isArchived: false };
     if (keyword) {
-      where.OR = [
-        { name: { contains: keyword, mode: "insensitive" } },
-        { nameKana: { contains: keyword, mode: "insensitive" } },
-        { phone: { contains: keyword } },
-        { address: { contains: keyword, mode: "insensitive" } },
-        // ⚠現住所も検索対象にする(この route は手書きの検索。入口ごとの足し忘れを防ぐ)。
-        { currentAddress: { contains: keyword, mode: "insensitive" } },
-      ];
+      const or: object[] = [];
+      if (searchable(displayConfig.name)) {
+        or.push({ name: { contains: keyword, mode: "insensitive" } });
+      }
+      if (searchable(displayConfig.nameKana)) {
+        or.push({ nameKana: { contains: keyword, mode: "insensitive" } });
+      }
+      if (searchable(displayConfig.phone)) {
+        or.push({ phone: { contains: keyword } });
+      }
+      if (searchable(displayConfig.address)) {
+        or.push({ address: { contains: keyword, mode: "insensitive" } });
+        // ⚠現住所も同じ規則で検索対象にする（登記上と現住所で扱いを変えない）。
+        or.push({ currentAddress: { contains: keyword, mode: "insensitive" } });
+      }
+      // 検索できる項目が1つも無ければ、DB を引かずに空で返す（無駄クエリも避ける）。
+      if (or.length === 0) {
+        await writeAuditLog({
+          userId: session.id,
+          action: "owner_list",
+          detail: { keywordLen: keyword.length, page, resultCount: 0 },
+        });
+        return apiResponse({
+          data: [],
+          pagination: { page, limit, total: 0, totalPages: 0 },
+        });
+      }
+      where.OR = or;
     }
 
     const [owners, total] = await Promise.all([
@@ -73,9 +101,6 @@ export async function GET(request: NextRequest) {
       }),
       prisma.owner.count({ where }),
     ]);
-
-    // Apply display-level masking based on user permissions
-    const displayConfig = await getOwnerDisplayConfig(session.id, permissions);
 
     const maskedOwners = owners.map((owner) => ({
       id: owner.id,

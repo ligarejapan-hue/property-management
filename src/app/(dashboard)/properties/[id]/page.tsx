@@ -1209,7 +1209,10 @@ function OwnerCard({
                 )}
               </div>
             )}
-            {editableFields.address && (
+            {/* ⚠現住所の欄は**住所と郵便番号の両方**を編集できる人にだけ出す。
+                現住所を書くことは郵便番号を決め直すことでもあり（空にする場合を含む）、
+                片方の権限しか無い人に出すと保存が必ず 403 になる。 */}
+            {editableFields.address && editableFields.zip && (
               <div className="space-y-1 md:col-span-2">
                 <div className="flex items-center gap-2">
                   <label className="text-xs font-medium text-gray-700 dark:text-gray-200">現住所</label>

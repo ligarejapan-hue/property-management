@@ -270,23 +270,48 @@ describe("POST /api/owners/[id]/corporate-apply — 認可", () => {
   });
 
   it("field 権限不足でも apply=false ならその field はスキップ可", async () => {
-    // owner_zip 権限なし、apply.zip=false → 通る
+    // owner_corporate_number 権限なし、apply.corporateNumber=false → 通る。
+    // ⚠住所/郵便番号は一組でしか選べないので、この確認には法人番号を使う。
     vi.mocked(getUserPermissions).mockResolvedValueOnce([
       { resource: "owner", action: "read", granted: true },
       { resource: "owner", action: "write", granted: true },
       { resource: "owner_name", action: "full", granted: true },
       { resource: "owner_address", action: "full", granted: true },
-      { resource: "owner_corporate_number", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
     ]);
     const res = await POST(
       makeRequest(
         payload({
-          apply: { name: true, address: true, zip: false, corporateNumber: true },
+          apply: { name: true, address: true, zip: true, corporateNumber: false },
         }),
       ),
       makeParams(),
     );
     expect(res.status).toBe(200);
+  });
+
+  it("⚠住所だけの反映はできない（国税庁の住所 + 古い郵便番号を作らない）", async () => {
+    const res = await POST(
+      makeRequest(
+        payload({
+          apply: { name: false, address: true, zip: false, corporateNumber: false },
+        }),
+      ),
+      makeParams(),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("⚠郵便番号だけの反映もできない（国税庁の番号 + 元の住所を作らない）", async () => {
+    const res = await POST(
+      makeRequest(
+        payload({
+          apply: { name: false, address: false, zip: true, corporateNumber: false },
+        }),
+      ),
+      makeParams(),
+    );
+    expect(res.status).toBe(400);
   });
 });
 
@@ -445,7 +470,8 @@ describe("POST /api/owners/[id]/corporate-apply — owner / lookup 状態", () =
     expect(res.status).toBe(409);
   });
 
-  it("zip 反映時に postCode が 7桁でなければ 422", async () => {
+  it("⚠郵便番号が7桁でなければ空にする（住所は反映する）", async () => {
+    // 読めない番号を宛先に刷らない。番号だけ空にして住所は入れる。
     vi.mocked(lookupCorporateNumber).mockResolvedValueOnce(
       freshLookupOk({ postCode: "12345" }),
     );
@@ -463,17 +489,20 @@ describe("POST /api/owners/[id]/corporate-apply — owner / lookup 状態", () =
       ),
       makeParams(),
     );
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(200);
+    expect(pm.owner.updateMany.mock.calls[0][0].data.zip).toBeNull();
   });
 
-  it("zip を反映しない場合は postCode が無くても 200", async () => {
+  it("⚠国税庁に郵便番号が無いときは、住所を反映して郵便番号は空にする", async () => {
+    // 拒否すると住所も反映できなくなり、古い番号を残すと
+    // 「国税庁の住所 + 前の場所の番号」というズレた宛先になる。
     vi.mocked(lookupCorporateNumber).mockResolvedValueOnce(
       freshLookupOk({ postCode: null }),
     );
     const res = await POST(
       makeRequest(
         payload({
-          apply: { name: true, address: true, zip: false, corporateNumber: true },
+          apply: { name: true, address: true, zip: true, corporateNumber: true },
           expectedRecord: {
             corporateNumber: RAW_NUMBER,
             name: RAW_NAME,
@@ -486,6 +515,7 @@ describe("POST /api/owners/[id]/corporate-apply — owner / lookup 状態", () =
       makeParams(),
     );
     expect(res.status).toBe(200);
+    expect(pm.owner.updateMany.mock.calls[0][0].data.zip).toBeNull();
   });
 });
 

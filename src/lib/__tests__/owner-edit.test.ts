@@ -1636,3 +1636,43 @@ describe("PATCH route source — response owner:read gate", () => {
     expect(patchSource).toMatch(/resource:\s*"owner_note"/);
   });
 });
+
+describe("buildOwnerUpdatePayload — 現住所は両方の権限があるときだけ送る", () => {
+  const form = {
+    ...fullForm,
+    currentAddress: "渋谷区神宮前1-1-1",
+    currentZip: "150-0001",
+  };
+
+  it("住所と郵便番号の両方が編集できるなら、ペアで送る", () => {
+    const payload = buildOwnerUpdatePayload(form, allEditable, 1);
+    expect(payload.currentAddress).toBe("渋谷区神宮前1-1-1");
+    expect(payload.currentZip).toBe("150-0001");
+  });
+
+  it("⚠郵便番号を編集できない利用者には現住所を送らない", () => {
+    // 現住所を送るとサーバーは「郵便番号も決め直す操作」とみなして
+    // owner_zip の書込権限を要求する。常に送ると、電話番号を直すだけの
+    // 保存まで 403 になる。
+    const payload = buildOwnerUpdatePayload(
+      form,
+      { ...allEditable, zip: false },
+      1,
+    );
+    expect(payload).not.toHaveProperty("currentAddress");
+    expect(payload).not.toHaveProperty("currentZip");
+    // 他の項目は今までどおり送れる
+    expect(payload.phone).toBe("090-1234-5678");
+    expect(payload.address).toBe("東京都渋谷区1-1");
+  });
+
+  it("住所を編集できない利用者にも送らない", () => {
+    const payload = buildOwnerUpdatePayload(
+      form,
+      { ...allEditable, address: false },
+      1,
+    );
+    expect(payload).not.toHaveProperty("currentAddress");
+    expect(payload).not.toHaveProperty("currentZip");
+  });
+});
