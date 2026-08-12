@@ -1777,7 +1777,13 @@ export type RegistrySearchResult =
   | { searchable: true; candidates: RegistrySearchCandidate[] }
   | {
       searchable: false;
-      reason: "has_real_estate_number" | "insufficient_location";
+      reason:
+        | "has_real_estate_number"
+        | "insufficient_location"
+        // ⚠番号が無い/読めないは 422 で返るので画面のこの分岐には来ないが、
+        //   型は共通の入口(search-request.ts)と揃えておく。
+        | "missing_identifier"
+        | "malformed_identifier";
     };
 
 /**

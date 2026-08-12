@@ -158,12 +158,16 @@ describe("POST /api/registry-fetch/preflight", () => {
         registryObtained: true,
         hasRegistryAttachment: false,
         hasOwners: true,
+        // ⚠「何を取りに行くか」は参考情報ではなく買う対象そのものなので必ず返す
+        //   (画面はこれが読めるまで実行させない・設計 §3.1.1)。
+        target: { kind: "none", mismatchWarning: null },
       },
       {
         propertyId: P2,
         registryObtained: false,
         hasRegistryAttachment: true,
         hasOwners: false,
+        target: { kind: "none", mismatchWarning: null },
       },
     ]);
     // 住所・所有者名などの PII を返さない
@@ -199,5 +203,55 @@ describe("POST /api/registry-fetch/preflight", () => {
     const res = await POST(makeRequest({ propertyIds: [P1] }));
     expect(res.status).toBe(200);
     // prisma mock に write メソッドを用意していない=呼べば TypeError で落ちる構造で担保
+  });
+});
+
+describe("⚠何を取りに行くかを返す（設計 §3.1.1）", () => {
+  it("番号を持つ物件は土地/建物の分類が返る", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        id: P1,
+        propertyType: "land",
+        lotNumber: "69-2",
+        buildingNumber: null,
+      }),
+    ]);
+    pm.attachment.findMany.mockResolvedValue([]);
+    const res = await POST(makeRequest({ propertyIds: [P1] }));
+    const body = (await res.json()) as { data: Array<Record<string, unknown>> };
+    expect(body.data[0].target).toEqual({ kind: "land", mismatchWarning: null });
+  });
+
+  it("種別と食い違えば警告文も返る（止めない）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        id: P1,
+        propertyType: "house",
+        lotNumber: "69-2",
+        buildingNumber: null,
+      }),
+    ]);
+    pm.attachment.findMany.mockResolvedValue([]);
+    const res = await POST(makeRequest({ propertyIds: [P1] }));
+    const body = (await res.json()) as {
+      data: Array<{ target: { kind: string; mismatchWarning: string | null } }>;
+    };
+    expect(body.data[0].target.kind).toBe("land");
+    expect(body.data[0].target.mismatchWarning).toContain("家屋番号");
+  });
+
+  it("⚠地番の値そのものは返さない（秘匿）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({
+        id: P1,
+        propertyType: "land",
+        lotNumber: "69-2",
+        buildingNumber: null,
+      }),
+    ]);
+    pm.attachment.findMany.mockResolvedValue([]);
+    const res = await POST(makeRequest({ propertyIds: [P1] }));
+    const text = await res.text();
+    expect(text).not.toContain("69-2");
   });
 });

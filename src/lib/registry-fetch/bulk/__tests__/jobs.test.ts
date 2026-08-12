@@ -217,3 +217,62 @@ describe("getBulkJobProgress — 可視項目でフィルタ + 件数再計算",
     expect(p.counts.failed).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ⚠作成時に「検索に渡すもの一式」を控える（設計 §3.1.0.1）
+// ---------------------------------------------------------------------------
+
+describe("指紋の材料（設計 §3.1.0.1）", () => {
+  it("住所だけ違えば違う指紋になる", async () => {
+    // 番号が同じでも、処理時は住所も使って検索するので別の場所を探すことになる。
+    const { hashPropertyFingerprint } = await import(
+      "@/lib/registry-fetch/candidate-cache"
+    );
+    const a = hashPropertyFingerprint({
+      address: "横浜市南区井土ケ谷中町",
+      lotNumber: "69-2",
+      buildingNumber: null,
+      realEstateNumber: null,
+    });
+    const b = hashPropertyFingerprint({
+      address: "横浜市南区別の町",
+      lotNumber: "69-2",
+      buildingNumber: null,
+      realEstateNumber: null,
+    });
+    expect(a).not.toBe(b);
+  });
+
+  it("⚠同じ数字が地番から家屋番号へ移れば違う指紋になる（取りに行くものが変わる）", async () => {
+    const { hashPropertyFingerprint } = await import(
+      "@/lib/registry-fetch/candidate-cache"
+    );
+    const land = hashPropertyFingerprint({
+      address: "A",
+      lotNumber: "1-2",
+      buildingNumber: null,
+      realEstateNumber: null,
+    });
+    const building = hashPropertyFingerprint({
+      address: "A",
+      lotNumber: null,
+      buildingNumber: "1-2",
+      realEstateNumber: null,
+    });
+    expect(land).not.toBe(building);
+  });
+
+  it("⚠地番の値そのものをハッシュに残さない（秘匿）", async () => {
+    const { hashPropertyFingerprint } = await import(
+      "@/lib/registry-fetch/candidate-cache"
+    );
+    const h = hashPropertyFingerprint({
+      address: "横浜市南区井土ケ谷中町",
+      lotNumber: "69-2",
+      buildingNumber: null,
+      realEstateNumber: null,
+    });
+    expect(h).not.toContain("69");
+    expect(h).toMatch(/^[0-9a-f]{32}$/);
+  });
+});

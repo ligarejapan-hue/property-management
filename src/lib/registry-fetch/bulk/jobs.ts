@@ -12,6 +12,7 @@ import prisma from "@/lib/prisma";
 import { ApiError } from "@/lib/api-helpers";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { buildRegistrySearchRequest } from "@/lib/registry-fetch/search-request";
+import { hashPropertyFingerprint } from "@/lib/registry-fetch/candidate-cache";
 import type { RegistryCertificateType } from "@/lib/registry-fetch/types";
 import {
   MAX_BULK_ITEMS,
@@ -216,6 +217,13 @@ export async function createBulkFetchJob(
       propertyId: p.id,
       status,
       errorCode: built.searchable ? null : built.reason,
+      // ⚠作成時点の「検索に渡すもの一式」を控える(設計 §3.1.0.1)。
+      //   一括は作成から処理までに時間が空く。その間に**別の正しい値へ**
+      //   書き換わっても、番号の有無/形式の検査は素通りし、候補が1件なら
+      //   **確認したのと別の筆**を自動で買う。
+      //   材料は住所・地番・家屋番号・不動産番号(= 処理時に検索へ渡るものと同じ)。
+      //   ⚠地番は秘匿情報なので**値は残さない**(sha256 の先頭32桁だけ)。
+      propertyFingerprintHash: hashPropertyFingerprint(p),
     };
   });
   const preSkipped = itemsData.filter((i) => i.status === "skipped").length;
@@ -240,6 +248,7 @@ export async function createBulkFetchJob(
           propertyId: i.propertyId,
           status: i.status,
           errorCode: i.errorCode,
+          propertyFingerprintHash: i.propertyFingerprintHash,
           processedAt: i.status === "skipped" ? new Date() : null,
         })),
       });

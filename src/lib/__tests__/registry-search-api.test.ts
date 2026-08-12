@@ -126,10 +126,14 @@ function runSearch(opts: {
   confirmed?: boolean;
   session?: { id: string; role: string };
   provider?: RegistryFetchProvider;
+  extraArgs?: Record<string, unknown>;
 } = {}) {
   const { confirmed = true, session = SESSION } = opts;
   const provider = opts.provider ?? new MockRegistryFetchProvider();
-  return runRegistrySearch({ session, propertyId: PROP_ID, confirmed }, provider);
+  return runRegistrySearch(
+    { session, propertyId: PROP_ID, confirmed, ...(opts.extraArgs ?? {}) },
+    provider,
+  );
 }
 
 function callRoute(body: unknown) {
@@ -201,7 +205,10 @@ describe("PR-2b-2: runRegistrySearch（provider 注入）", () => {
     expect(candidates[0].candidateRef).toBe(`mock-candidate-${PROP_ID}`);
     // 表示用フィールド（認可ユーザー向け本文）は返す
     expect(candidates[0].address).toBe(SECRET_ADDR);
-    expect(candidates[0].lotNumber).toBe("5番6");
+    // ⚠渡す番号は1つだけ（設計 §3.1.2）。この物件は家屋番号を持つので
+    //   家屋番号だけを送り、地番は送らない（provider の土地/建物の判定と
+    //   呼び出し側の意図を一致させる）。mock は送った値をそのまま返す。
+    expect(candidates[0].lotNumber).toBeNull();
     expect(candidates[0].buildingNumber).toBe("7");
     // realEstateNumber は応答に出さない（cond③ 改ざん対策・取得時 server 再解決の前提）
     expect(candidates[0]).not.toHaveProperty("realEstateNumber");
@@ -443,5 +450,42 @@ describe("PR-2b-2: audit allowlist（registry_search）", () => {
     expect(out.propertyId).toBe(PROP_ID);
     expect(out.address).toBe("[REDACTED]");
     expect(out.ownerName).toBe("[REDACTED]");
+  });
+});
+
+describe("⚠申し込んだときの内容から変わっていたら検索しない（@codex #372 Blocker）", () => {
+  it("指紋が違えば provider に触れず identifier_changed を返す", async () => {
+    // 一括は「照合 → provider の準備 → DB更新 → 検索」と進むので、呼び出し側の
+    // 照合だけでは隙が残る。検索が読む物件と同じ読み取りで照合する。
+    const provider = new MockRegistryFetchProvider({});
+    const spy = vi.spyOn(provider, "searchCandidates");
+    const body = await runSearch({
+      provider,
+      extraArgs: { expectedFingerprintHash: "hash-at-creation" },
+    });
+    expect(body).toEqual({ searchable: false, reason: "identifier_changed" });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("指紋が同じなら今までどおり検索する", async () => {
+    const { hashPropertyFingerprint } = await import(
+      "@/lib/registry-fetch/candidate-cache"
+    );
+    const body = await runSearch({
+      extraArgs: {
+        expectedFingerprintHash: hashPropertyFingerprint({
+          address: SECRET_ADDR,
+          lotNumber: "5番6",
+          buildingNumber: "7",
+          realEstateNumber: null,
+        }),
+      },
+    });
+    expect(body.searchable).toBe(true);
+  });
+
+  it("指紋を渡さなければ今までどおり（単発の検索は無関係）", async () => {
+    const body = await runSearch();
+    expect(body.searchable).toBe(true);
   });
 });

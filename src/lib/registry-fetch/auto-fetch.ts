@@ -28,6 +28,11 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import {
+  isReadableChiban,
+  toHalfWidthDigits,
+  unifyChibanSeparators,
+} from "@/lib/registry-fetch/chiban-input";
+import {
   CANCEL_ACCEPTED_MESSAGE,
   CANCEL_IGNORED_CHARGED_MESSAGE,
   decideCancel,
@@ -1036,11 +1041,9 @@ export function summarizeRegistrySearchError(err: unknown): string {
  * 例: 「1番1」→「1-1」/「1937番31」→「1937-31」/「1番2の3」→「1-2-3」/「５番」→「5」/「１－１」→「1-1」。
  */
 export function normalizeChibanForDialog(raw: string): string {
-  return raw
-    .trim()
-    .replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0))
-    .replace(/番地|番|の|ノ/g, "-")
-    .replace(/[‐‑‒–—―−ー－]/g, "-")
+  // ⚠文字クラスの正本は chiban-input.ts。ここで別の表記を足さない
+  //   （入力の検査と正規化がずれると、検査は通ったのに別の筆を探すことになる）。
+  return unifyChibanSeparators(toHalfWidthDigits(raw.trim()))
     .replace(/[^0-9-]/g, "")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
@@ -2852,6 +2855,18 @@ export async function runRegistryAutoFetch(
         409,
         "選択した候補が見つかりません。物件情報が変わった可能性があります。もう一度検索してから取得してください",
         "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND",
+      );
+    }
+    // ⚠**形式まで見る**(設計 §4.4)。空でないことだけを見ると、編集画面・PATCH API・
+    //   CSV取込から入った `abc1x2` のような値が normalizeChibanForDialog で `12` に
+    //   潰され、**別の筆**を買うところまで進む。
+    //   ⚠取得は検索とは別の入口なので、検索側だけ塞いでも素通りする。
+    //   検索の入口と**同じ判定関数**を使う(2か所に書くとずれる)。
+    if (!isReadableChiban(lotOrBuilding)) {
+      throw new ApiError(
+        422,
+        "地番の書き方が読み取れません。地図に表示されたとおりに入力してください",
+        "REGISTRY_OBTAIN_IDENTIFIER_INVALID",
       );
     }
     purchaseKeyHash = createHash("sha256")
