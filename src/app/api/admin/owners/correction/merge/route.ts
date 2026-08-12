@@ -7,7 +7,8 @@ import {
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
+import { resolveCurrentAddressHandover } from "@/lib/owner-merge-current-address";
 import { writeAuditLog } from "@/lib/audit";
 import {
   checkOwnerMergeSafety,
@@ -82,6 +83,8 @@ interface OwnerState {
   name: string;
   address: string | null;
   zip: string | null;
+  currentAddress: string | null;
+  currentZip: string | null;
   phone: string | null;
   version: number;
   isArchived: boolean;
@@ -115,6 +118,9 @@ async function loadOwnerForMerge(id: string): Promise<OwnerState | null> {
       name: true,
       address: true,
       zip: true,
+      // ⚠現住所は統合で失われる筆頭（source を archive するだけでは移らない）。
+      currentAddress: true,
+      currentZip: true,
       phone: true,
       version: true,
       isArchived: true,
@@ -135,6 +141,9 @@ async function loadOwnerForMergeTx(
       name: true,
       address: true,
       zip: true,
+      // ⚠現住所は統合で失われる筆頭（source を archive するだけでは移らない）。
+      currentAddress: true,
+      currentZip: true,
       phone: true,
       version: true,
       isArchived: true,
@@ -296,6 +305,43 @@ export async function POST(request: NextRequest) {
 
     const normalizeKeyMatches = computeNormalizeKeyMatches(master, source);
 
+    // 現住所の引き継ぎ（設計 §7）。食い違いはここで拒否理由になる。
+    const currentAddressHandover =
+      master && source
+        ? resolveCurrentAddressHandover(master, source)
+        : ({ kind: "none" } as const);
+    // 履歴の「項目名」を見る。現住所の2列だけなら統合を許す（数だけでは判断しない）。
+    const sourceChangeLogFields = source
+      ? (
+          await prisma.changeLog.findMany({
+            where: { targetTable: "owners", targetId: source.id },
+            select: { fieldName: true },
+          })
+        ).map((r) => r.fieldName)
+      : [];
+
+    // ⚠引き継ぎは master の住所を書き換える行為。通常の編集経路が守っている
+    //   フィールドレベルの境界を、統合で迂回させない（設計 §7）。
+    //   権限が無いときは「引き継ぎだけ省く」のではなく統合そのものを断る
+    //   （省くと source の現住所が archive とともに失われる）。
+    const sourceHasCurrentAddress =
+      !!source &&
+      ((source.currentAddress ?? "").trim() !== "" ||
+        (source.currentZip ?? "").trim() !== "");
+    if (sourceHasCurrentAddress) {
+      const canWriteHandover =
+        hasPermission(perms, "owner", "write") &&
+        hasExplicitWritePerm(perms, "owner_address") &&
+        hasExplicitWritePerm(perms, "owner_zip");
+      if (!canWriteHandover) {
+        throw new ApiError(
+          403,
+          "現住所を引き継ぐ権限がありません（所有者の住所・郵便番号の編集権限が必要です）",
+          "FORBIDDEN",
+        );
+      }
+    }
+
     const safety = checkOwnerMergeSafety({
       sameOwnerId: false,
       masterExists: master !== null,
@@ -308,6 +354,8 @@ export async function POST(request: NextRequest) {
         !!source?.externalLinkKey && source.externalLinkKey.trim().length > 0,
       sourceVersion: source?.version ?? 1,
       normalizeKeyMatches,
+      currentAddressHandover,
+      sourceChangeLogFields,
     });
 
     // version 不一致は execute 時のみ blocker（preview ではチェックしない）。
@@ -413,13 +461,14 @@ export async function POST(request: NextRequest) {
         }
 
         const [
-          freshChangeLog,
+          freshChangeLogRows,
           freshMemoCount,
           freshSourcePOs,
           freshMasterPOs,
         ] = await Promise.all([
-          tx.changeLog.count({
+          tx.changeLog.findMany({
             where: { targetTable: "owners", targetId: sourceFresh.id },
+            select: { fieldName: true },
           }),
           tx.ownerMemo.count({ where: { ownerId: sourceFresh.id } }),
           tx.propertyOwner.findMany({
@@ -435,7 +484,14 @@ export async function POST(request: NextRequest) {
         const freshMasterPropertyIds = new Set(
           freshMasterPOs.map((p) => p.propertyId),
         );
+        const freshChangeLog = freshChangeLogRows.length;
+        const freshChangeLogFields = freshChangeLogRows.map((r) => r.fieldName);
         const freshNormalizeKeyMatches = computeNormalizeKeyMatches(
+          masterFresh,
+          sourceFresh,
+        );
+        // ロックの下で読み直した値で引き継ぎを決める。
+        const freshHandover = resolveCurrentAddressHandover(
           masterFresh,
           sourceFresh,
         );
@@ -455,6 +511,8 @@ export async function POST(request: NextRequest) {
             sourceFresh.externalLinkKey.trim().length > 0,
           sourceVersion: sourceFresh.version,
           normalizeKeyMatches: freshNormalizeKeyMatches,
+          currentAddressHandover: freshHandover,
+          sourceChangeLogFields: freshChangeLogFields,
         });
 
         // 4. version check
@@ -587,14 +645,22 @@ export async function POST(request: NextRequest) {
           throw new Error(TX_BLOCKED_SENTINEL);
         }
 
-        // 9. master の version も bump（stale client invalidate）
+        // 9. master の version bump（stale client invalidate）と、
+        //    現住所の引き継ぎを**同じ更新**で行う（設計 §7）。
+        const handoverData: Record<string, string | null> = {};
+        if (freshHandover.kind === "pair") {
+          handoverData.currentAddress = freshHandover.currentAddress;
+          handoverData.currentZip = freshHandover.currentZip;
+        } else if (freshHandover.kind === "zip_only") {
+          handoverData.currentZip = freshHandover.currentZip;
+        }
         const masterBump = await tx.owner.updateMany({
           where: {
             id: masterFresh.id,
             version: masterVersion,
             isArchived: false,
           },
-          data: { version: { increment: 1 } },
+          data: { ...handoverData, version: { increment: 1 } },
         });
         if (masterBump.count === 0) {
           txBlockedReasons = ["version_mismatch"];
@@ -622,6 +688,31 @@ export async function POST(request: NextRequest) {
           source: "manual",
           changedBy: session.id,
         });
+
+        // ⚠引き継いだ2列の履歴（この route は recordChanges を呼ばず手で組むので、
+        //   ここに書かないと「所有者のデータが変わったのに前後が追えない」状態になる）。
+        if (handoverData.currentAddress !== undefined) {
+          changeLogs.push({
+            targetTable: "owners",
+            targetId: masterFresh.id,
+            fieldName: "currentAddress",
+            oldValue: masterFresh.currentAddress ?? null,
+            newValue: handoverData.currentAddress,
+            source: "manual",
+            changedBy: session.id,
+          });
+        }
+        if (handoverData.currentZip !== undefined) {
+          changeLogs.push({
+            targetTable: "owners",
+            targetId: masterFresh.id,
+            fieldName: "currentZip",
+            oldValue: masterFresh.currentZip ?? null,
+            newValue: handoverData.currentZip,
+            source: "manual",
+            changedBy: session.id,
+          });
+        }
 
         // master への合成: どの source から統合されたかを記録
         changeLogs.push({

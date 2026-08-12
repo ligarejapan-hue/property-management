@@ -17,6 +17,12 @@
  *     blocker（情報が消える危険を operator に明示するため）。
  */
 
+import {
+  handoverWrites,
+  isCurrentAddressOnlyChangeLog,
+  type CurrentAddressHandover,
+} from "@/lib/owner-merge-current-address";
+
 export type OwnerMergeBlockReason =
   | "same_owner_id"                  // master と source の id が同一
   | "master_not_found"               // master owner が存在しない
@@ -28,6 +34,8 @@ export type OwnerMergeBlockReason =
   | "source_has_external_link_key"   // source.externalLinkKey 入力済み
   | "source_version_gt_1"            // source.version > 1（編集履歴あり）
   | "name_address_normalize_mismatch" // 正規化キーが master と一致しない（別人の可能性）
+  | "current_address_conflict"       // 現住所が食い違う（どちらが新しいか決められない）
+  | "current_zip_conflict"           // 同じ現住所なのに郵便番号が食い違う
   | "version_mismatch";              // execute 時: client 送信 version と DB version が一致しない
 
 export interface OwnerMergeSafetyInput {
@@ -49,6 +57,19 @@ export interface OwnerMergeSafetyInput {
   sourceHasExternalLinkKey: boolean;
   /** source.version 値。>1 なら手動編集履歴あり。 */
   sourceVersion: number;
+  /**
+   * 現住所の引き継ぎ結果（設計 §7）。
+   *
+   * ⚠これが無いと門が働かない: 現住所は通常の編集や補正で後から入るため、
+   * 現住所を持つ source は必ず変更履歴が付き version も上がる。
+   * 「履歴があれば拒否」のままでは**引き継ぎ処理が一度も動かない**。
+   */
+  currentAddressHandover?: CurrentAddressHandover;
+  /**
+   * source の変更履歴に出てくる項目名（重複可）。
+   * 現住所の2列だけなら、引き継ぎで値が残るので統合を許す。
+   */
+  sourceChangeLogFields?: readonly string[];
   /**
    * master と source の (normalizeName + normalizeAddress) が一致するか。
    * candidate API が出した duplicate グループは原則一致するはずだが、
@@ -81,11 +102,30 @@ export function checkOwnerMergeSafety(
   if (input.masterExists && input.masterIsArchived) reasons.push("master_archived");
   if (input.sourceExists && input.sourceIsArchived) reasons.push("source_archived");
 
+  const handover = input.currentAddressHandover ?? { kind: "none" as const };
+
+  // ⚠現住所が食い違う組み合わせは統合させない（設計 §7）。
+  //   通せば source が手で入れた現住所が archive とともに失われる。
+  if (handover.kind === "conflict_address") {
+    reasons.push("current_address_conflict");
+  }
+  if (handover.kind === "conflict_zip") {
+    reasons.push("current_zip_conflict");
+  }
+
+  // 変更が「現住所の2列だけ」で、かつ引き継ぎで実際に値が残るときだけ、
+  // 履歴・version の門を緩める。それ以外は従来どおり拒否（緩めない）。
+  const relaxForCurrentAddress =
+    handoverWrites(handover) &&
+    isCurrentAddressOnlyChangeLog(input.sourceChangeLogFields ?? []);
+
   // source 側の手動編集情報を慎重に保護
-  if (input.sourceChangeLogCount > 0) reasons.push("source_has_changelog");
+  if (input.sourceChangeLogCount > 0 && !relaxForCurrentAddress)
+    reasons.push("source_has_changelog");
   if (input.sourceHasNote) reasons.push("source_has_note");
   if (input.sourceHasExternalLinkKey) reasons.push("source_has_external_link_key");
-  if (input.sourceVersion > 1) reasons.push("source_version_gt_1");
+  if (input.sourceVersion > 1 && !relaxForCurrentAddress)
+    reasons.push("source_version_gt_1");
 
   // candidate API が出した duplicate ペアでも、preview 直前に再検証する。
   // master / source の正規化キーが揃わなければ別人の可能性 → blocker。
