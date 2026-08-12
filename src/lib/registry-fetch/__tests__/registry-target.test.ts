@@ -7,14 +7,17 @@
 import { describe, it, expect } from "vitest";
 import { classifyRegistryTarget } from "@/lib/registry-fetch/registry-target";
 
+/** 住所は「入っている」を既定にする（住所が無いケースは専用の describe で見る）。 */
 const t = (
   propertyType: string,
   lotNumber: string | null,
   buildingNumber: string | null,
   realEstateNumber: string | null = null,
+  address: string | null = "神奈川県横浜市南区井土ケ谷中町",
 ) =>
   classifyRegistryTarget({
     propertyType,
+    address,
     lotNumber,
     buildingNumber,
     realEstateNumber,
@@ -154,5 +157,40 @@ describe("⚠「読めない形」と「入っていない」を分ける（@cod
 
   it("malformed でも種別の警告は出さない（先に番号を直してもらう）", () => {
     expect(t("house", "abc", null).mismatchWarning).toBeNull();
+  });
+});
+
+describe("⚠住所は番号より先に見る（@codex #373 R4 P2）", () => {
+  it("住所が無ければ no_address（地番を尋ねない）", () => {
+    // 地番を調べて保存してもらっても、次の検索は住所不足で弾かれる＝二度手間。
+    expect(t("land", null, null, null, null).kind).toBe("no_address");
+    expect(t("land", "69-2", null, null, "   ").kind).toBe("no_address");
+  });
+
+  it("不動産番号のほうがさらに先（検索の入口と同じ順序）", () => {
+    expect(t("land", null, null, "0413234567890", null).kind).toBe("number");
+  });
+
+  it("住所があれば従来どおり番号で決まる", () => {
+    expect(t("land", "69-2", null, null, "横浜市南区").kind).toBe("land");
+  });
+});
+
+describe("所在検索を始めてよい分類（isSearchableTarget）", () => {
+  it("土地・建物だけ true", async () => {
+    const { isSearchableTarget } = await import(
+      "@/lib/registry-fetch/registry-target"
+    );
+    expect(isSearchableTarget("land")).toBe(true);
+    expect(isSearchableTarget("building")).toBe(true);
+  });
+
+  it("⚠サーバーが必ず弾く分類は false（押しても毎回断られるだけ）", async () => {
+    const { isSearchableTarget } = await import(
+      "@/lib/registry-fetch/registry-target"
+    );
+    for (const kind of ["none", "malformed", "number", "no_address"] as const) {
+      expect(isSearchableTarget(kind)).toBe(false);
+    }
   });
 });

@@ -179,3 +179,26 @@ describe("⚠不動産番号を持つ物件では出さない（設計 §3.1）"
     expect(shared).not.toContain("通常の「謄本を自動取得」をご利用ください");
   });
 });
+
+describe("⚠必ず弾かれる分類では実行の導線を出さない（@codex #373 R4 P2）", () => {
+  it("検索ボタンは土地・建物のときだけ描く", () => {
+    expect(LOC).toContain("isSearchableTarget(target.kind)");
+  });
+
+  it("分類がまだ読めていない間は、出したうえで押せなくする（fail closed）", () => {
+    expect(LOC).toContain(
+      "disabled={preflight.pending || preflight.targetsUnavailable}",
+    );
+  });
+
+  it("住所が無い物件には地番ではなく住所を入れてもらう", () => {
+    const shared = readFileSync(
+      join(
+        process.cwd(),
+        "src/components/properties/registry-preflight-warnings.tsx",
+      ),
+      "utf8",
+    );
+    expect(shared).toContain("住所が未入力です");
+  });
+});

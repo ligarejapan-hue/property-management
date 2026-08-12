@@ -66,6 +66,8 @@ export async function POST(request: NextRequest) {
         registryStatus: true,
         // ⚠「何を取りに行くか(土地/建物)」の判定に使う。値は返さない(秘匿)。
         propertyType: true,
+        // ⚠分類に使う（値は返さない＝秘匿）。検索の入口は番号より先に住所を見る。
+        address: true,
         lotNumber: true,
         buildingNumber: true,
         // ⚠あれば所在検索の対象外＝地番を尋ねてはいけない（設計 §3.1）。
@@ -103,6 +105,7 @@ export async function POST(request: NextRequest) {
       //   ⚠返すのは分類と警告文だけ。地番の値そのものは返さない(秘匿)。
       target: classifyRegistryTarget({
         propertyType: p.propertyType,
+        address: p.address,
         lotNumber: p.lotNumber,
         buildingNumber: p.buildingNumber,
         realEstateNumber: p.realEstateNumber,

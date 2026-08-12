@@ -32,6 +32,13 @@ export type RegistryTargetKind =
   /** ⚠不動産番号がある＝**所在で探す経路の対象外**（番号があれば所在も地番も要らない）。 */
   | "number"
   /**
+   * ⚠所在（住所）が入っていない。
+   *
+   * 検索の入口は住所を番号より先に見る。ここで見落とすと「地番が必要です」と尋ねてしまい、
+   * 利用者が地図で地番を調べて保存しても、**次の検索が住所不足で弾かれる**（二度手間）。
+   */
+  | "no_address"
+  /**
    * ⚠番号は入っているが**読めない形**。
    *
    * "none"（そもそも入っていない）と分ける理由（@codex #373 R2 P2）:
@@ -78,8 +85,30 @@ export function isBuildingPropertyType(propertyType: string): boolean {
   return BUILDING_TYPES.has(propertyType);
 }
 
+/**
+ * この分類で**所在検索を始めてよい**か。
+ *
+ * ⚠これ以外の分類（住所が無い・番号が読めない・不動産番号がある・番号が無い）で
+ * 検索を投げると、サーバーが必ず弾く。押せてしまうと「押したのに毎回断られる」
+ * だけなので、画面は実行の導線自体を出さない。
+ */
+export function isSearchableTarget(kind: RegistryTargetKind): boolean {
+  return kind === "land" || kind === "building";
+}
+
+/**
+ * ⚠この分類は **buildRegistrySearchRequest とまったく同じ順序・同じ条件**で書く。
+ * ずれると「画面が案内したとおりに直したのに、検索は別の理由で弾く」二度手間になる。
+ *   1. 不動産番号がある → 所在検索の対象外
+ *   2. 住所が無い → 検索できない
+ *   3. 地番も家屋番号も無い → 地番を尋ねる
+ *   4. 使う番号が読めない形 → その番号を直してもらう
+ *   5. それ以外 → 土地 / 建物
+ */
 export function classifyRegistryTarget(input: {
   propertyType: string;
+  /** ⚠所在（住所）。検索の入口は番号より先にこれを見る。 */
+  address: string | null;
   lotNumber: string | null;
   buildingNumber: string | null;
   /** ⚠あれば所在検索の対象外。地番を尋ねてはいけない（設計 §3.1 / §3.1.1）。 */
@@ -91,6 +120,10 @@ export function classifyRegistryTarget(input: {
   //   返す＝**要らない地番が物件に残るだけ**になる。
   if (trimToNull(input.realEstateNumber)) {
     return { kind: "number", mismatchWarning: null };
+  }
+  // ⚠住所は番号より先。地番を入れてもらっても住所が無ければ検索は弾かれる。
+  if (!trimToNull(input.address)) {
+    return { kind: "no_address", mismatchWarning: null };
   }
   // ⚠**検索の入口(buildRegistrySearchRequest)とまったく同じ選び方**にする。
   //   あちらは家屋番号を優先し、それが読めない形なら**地番へ落とさず**弾く。

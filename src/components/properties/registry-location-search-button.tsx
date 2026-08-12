@@ -7,6 +7,7 @@ import {
   RegistryTargetNote,
 } from "@/components/properties/registry-preflight-warnings";
 import RegistryChibanPopup from "@/components/properties/registry-chiban-popup";
+import { isSearchableTarget } from "@/lib/registry-fetch/registry-target";
 import { MapPinned, Loader2 } from "lucide-react";
 import {
   searchRegistryCandidates,
@@ -259,17 +260,22 @@ export default function RegistryLocationSearchButton({
           </p>
           <RegistryTargetNote state={preflight} propertyId={propertyId} />
           <div className="mt-1 flex gap-1">
-            <button
-              type="button"
-              onClick={runSearch}
-              // ⚠何を取りに行くかが分からないうちは押させない（fail closed）。
-              disabled={preflight.pending || preflight.targetsUnavailable}
-              className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300 dark:disabled:bg-gray-700"
-            >
-              {preflight.pending ? "確認中..." : "検索する"}
-            </button>
+            {/* ⚠サーバーが必ず弾く分類（住所が無い・番号が読めない・不動産番号がある）
+                では、実行の導線自体を出さない。出すと「押したのに毎回断られる」だけ。
+                ⚠分類がまだ読めていない間（pending / targetsUnavailable）は、
+                出したうえで押せなくする（fail closed・確認中であることが伝わる）。 */}
+            {(!target || isSearchableTarget(target.kind)) && (
+              <button
+                type="button"
+                onClick={runSearch}
+                disabled={preflight.pending || preflight.targetsUnavailable}
+                className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300 dark:disabled:bg-gray-700"
+              >
+                {preflight.pending ? "確認中..." : "検索する"}
+              </button>
+            )}
             <button type="button" onClick={reset} className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
-              キャンセル
+              {target && !isSearchableTarget(target.kind) ? "閉じる" : "キャンセル"}
             </button>
           </div>
         </div>

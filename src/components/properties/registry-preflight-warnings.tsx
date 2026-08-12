@@ -229,7 +229,9 @@ export function RegistryTargetNote({
           ? "建物の登記を取得します"
           : target.kind === "land"
             ? "土地の登記を取得します"
-            : target.kind === "malformed"
+            : target.kind === "no_address"
+              ? "住所が未入力です。物件の住所を入れてから実行してください"
+              : target.kind === "malformed"
               ? // ⚠地番を足しても解決しない。入っている番号を直すか空にしてもらう。
                 "地番/家屋番号の書き方が読み取れません。物件の欄を地図に表示されたとおりに直すか、空にしてください"
               : target.kind === "number"

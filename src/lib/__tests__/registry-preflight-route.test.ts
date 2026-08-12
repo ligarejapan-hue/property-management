@@ -89,6 +89,9 @@ function makeProp(over: Record<string, unknown> = {}) {
     createdBy: "user-admin",
     assignedTo: null,
     registryStatus: "unconfirmed",
+    // ⚠住所は「入っている」を既定にする。分類は住所を番号より先に見るので、
+    //   未設定にすると全部 no_address になって他の観点が確かめられない。
+    address: "神奈川県横浜市南区井土ケ谷中町",
     _count: { propertyOwners: 0 },
     ...over,
   };
@@ -253,5 +256,28 @@ describe("⚠何を取りに行くかを返す（設計 §3.1.1）", () => {
     const res = await POST(makeRequest({ propertyIds: [P1] }));
     const text = await res.text();
     expect(text).not.toContain("69-2");
+  });
+});
+
+describe("⚠住所が無い物件は地番ではなく住所を求める（@codex #373 R4 P2）", () => {
+  it("住所が空なら no_address", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ id: P1, address: null, lotNumber: null, buildingNumber: null }),
+    ]);
+    pm.attachment.findMany.mockResolvedValue([]);
+    const res = await POST(makeRequest({ propertyIds: [P1] }));
+    const body = (await res.json()) as {
+      data: Array<{ target: { kind: string } }>;
+    };
+    expect(body.data[0].target.kind).toBe("no_address");
+  });
+
+  it("⚠住所の値そのものは返さない（秘匿）", async () => {
+    pm.property.findMany.mockResolvedValue([
+      makeProp({ id: P1, address: "秘密の住所1-2-3" }),
+    ]);
+    pm.attachment.findMany.mockResolvedValue([]);
+    const res = await POST(makeRequest({ propertyIds: [P1] }));
+    expect(await res.text()).not.toContain("秘密の住所");
   });
 });
