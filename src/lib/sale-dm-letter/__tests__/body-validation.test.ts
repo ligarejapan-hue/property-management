@@ -1,0 +1,44 @@
+import { describe, it, expect } from "vitest";
+import {
+  LETTER_BODY_MAX_LENGTH,
+  letterBodyIssueMessage,
+  validateLetterBody,
+} from "../body-validation";
+
+describe("validateLetterBody", () => {
+  it("ふつうの本文は通る", () => {
+    expect(
+      validateLetterBody("拝啓 時下ますますご清祥のこととお喜び申し上げます。"),
+    ).toBeNull();
+  });
+
+  it("空・空白のみ・改行のみは弾く(白紙の手紙が確定・印刷まで通るのを防ぐ)", () => {
+    for (const body of ["", " ", "　", "\n", " \n\t 　\n"]) {
+      expect(validateLetterBody(body)).toBe("empty");
+    }
+  });
+
+  it("差込タグの書き方が残っている本文は弾く(プレースホルダのまま郵送されるのを防ぐ)", () => {
+    expect(validateLetterBody("{{所有者名}} 様へ")).toBe("unknown_tag");
+    expect(validateLetterBody("本文\n{{物件所在}}\n本文")).toBe("unknown_tag");
+  });
+
+  it("上限を超える本文は弾く", () => {
+    expect(validateLetterBody("あ".repeat(LETTER_BODY_MAX_LENGTH))).toBeNull();
+    expect(validateLetterBody("あ".repeat(LETTER_BODY_MAX_LENGTH + 1))).toBe(
+      "too_long",
+    );
+  });
+
+  it("検査の順番は 空→長さ→タグ(空文字に長さやタグの理由を出さない)", () => {
+    expect(validateLetterBody("   ")).toBe("empty");
+  });
+
+  it("理由ごとに日本語の説明が出る(そのまま画面に出せる)", () => {
+    for (const issue of ["empty", "unknown_tag", "too_long"] as const) {
+      const msg = letterBodyIssueMessage(issue);
+      expect(msg.length).toBeGreaterThan(5);
+      expect(msg).not.toMatch(/[A-Za-z_]{6,}/); // 内部識別子をそのまま出さない
+    }
+  });
+});
