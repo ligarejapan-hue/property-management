@@ -548,6 +548,22 @@ describe("GET /api/properties/dm-batches/[id]/csv: 再送候補の再評価(検�
     expect(pm.dmExportBatch.update).not.toHaveBeenCalled();
   });
 
+  it("409 の文言は原因(再送付か反響か)を断定しない(@codex #374 R2 P2)", async () => {
+    // 「あとに送付された」と言い切ると、送付されていない(連絡ありで止まった)ときに
+    // 担当者が存在しない二重郵送を探しに行く。どちらの理由でも正しい言い方にする。
+    armQueryRaw(RESEND_BATCH);
+    armDmLogRows([
+      { propertyId: "p1", reactionStatus: "replied", sentAt: OLD_SENT },
+    ]);
+    const res = await GET(makeRequest(), ctx);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).not.toMatch(/あとに送付された/);
+    expect(body.error.message).toContain("状況が変わった");
+    expect(body.error.message).toContain("1件");
+    expect(body.error.message).toContain("再送候補で出し直して");
+  });
+
   it("古い送付だけで反響が付いていなければ通常どおり配信する", async () => {
     armQueryRaw(RESEND_BATCH);
     armDmLogRows([
