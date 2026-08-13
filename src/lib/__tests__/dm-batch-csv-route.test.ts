@@ -472,9 +472,17 @@ describe("GET /api/properties/dm-batches/[id]/csv: 再送候補の再評価(検�
       (c) => (c[0] as { where?: Record<string, unknown> })?.where?.sentAt,
     );
     expect(call).toBeDefined();
-    const where = (call![0] as { where: Record<string, any> }).where;
+    const where = (
+      call![0] as {
+        where: {
+          propertyId?: { in: string[] };
+          sentAt?: { gt: Date };
+          reactionStatus?: unknown;
+        };
+      }
+    ).where;
     expect(where.propertyId).toEqual({ in: ["p1"] });
-    expect(where.sentAt.gt).toBeInstanceOf(Date);
+    expect(where.sentAt?.gt).toBeInstanceOf(Date);
     expect(where.reactionStatus).toBeUndefined();
   });
 
