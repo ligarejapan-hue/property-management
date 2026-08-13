@@ -40,6 +40,8 @@ vi.mock("@/lib/prisma", () => {
   const tx = {
     dmVariant: { findFirst: vi.fn() },
     dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn() },
+    // 担当範囲はロックの後に**読み直す**(先読みの値で判定しない・@codex #376 P1)。
+    property: { findMany: vi.fn(async () => []) },
     $queryRaw: vi.fn(async () => []),
   };
   return {
@@ -70,6 +72,7 @@ const pm = prismaMock as never as {
       findMany: ReturnType<typeof vi.fn>;
       updateMany: ReturnType<typeof vi.fn>;
     };
+    property: { findMany: ReturnType<typeof vi.fn> };
     $queryRaw: ReturnType<typeof vi.fn>;
   };
 };
@@ -128,6 +131,10 @@ beforeEach(() => {
     bodyTemplate: "{{物件所在}}の{{物件種別}}について。拝啓",
   });
   pm._tx.dmRecipientDraft.findMany.mockResolvedValue([draft("d1")]);
+  pm._tx.property.findMany.mockImplementation(
+    async (args: { where: { id: { in: string[] } } }) =>
+      args.where.id.in.map((id) => ({ id, createdBy: "u1", assignedTo: null })),
+  );
   pm._tx.dmRecipientDraft.updateMany.mockImplementation(
     async (args: { where: { id: { in: string[] } } }) => ({
       count: args.where.id.in.length,
@@ -207,6 +214,11 @@ describe("POST sale-dm variant apply（その型の全宛先へ適用）", () =>
       draft("d1"),
       draft("d2", { createdBy: "other", assignedTo: "other" }),
     ]);
+    // 判定はロック後の読み直しで行う(@codex #376 P1)。
+    pm._tx.property.findMany.mockResolvedValue([
+      { id: "p-d1", createdBy: "u1", assignedTo: null },
+      { id: "p-d2", createdBy: "other", assignedTo: "other" },
+    ]);
     const res = await POST(post(), ctx);
     const body = (await res.json()) as {
       appliedCount: number;
@@ -214,6 +226,39 @@ describe("POST sale-dm variant apply（その型の全宛先へ適用）", () =>
     };
     expect(body.appliedCount).toBe(1);
     expect(body.skippedScopeCount).toBe(1);
+  });
+
+  it("ロック後に担当が外れていたら、先読みの値ではなく読み直した値で飛ばす(@codex #376 P1)", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "u1",
+      role: "field_staff",
+    });
+    // 先読みの時点では自分の担当。ロックを取ってから読み直したら別人に変わっていた。
+    pm._tx.dmRecipientDraft.findMany.mockResolvedValue([draft("d1")]);
+    pm._tx.property.findMany.mockResolvedValue([
+      { id: "p-d1", createdBy: "other", assignedTo: "other" },
+    ]);
+    const res = await POST(post(), ctx);
+    const body = (await res.json()) as {
+      appliedCount: number;
+      skippedScopeCount: number;
+    };
+    expect(body.appliedCount).toBe(0);
+    expect(body.skippedScopeCount).toBe(1);
+    expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("既定(上書きしない)のとき、書き込み条件にも本文が空であることを残す(@codex #376 P2)", async () => {
+    // 読み取り〜書き込みの間に手直しされた本文を、黙って置き換えないため。
+    await POST(post(), ctx);
+    expect(pm._tx.dmRecipientDraft.updateMany.mock.calls[0][0].where.body).toBe("");
+  });
+
+  it("上書き指定のときは本文の条件を付けない(手直し分も置き換える)", async () => {
+    await POST(post({ overwriteExisting: true }), ctx);
+    expect(
+      pm._tx.dmRecipientDraft.updateMany.mock.calls[0][0].where.body,
+    ).toBeUndefined();
   });
 
   it("本文がまだ保存されていない型は 409(何も書かない)", async () => {

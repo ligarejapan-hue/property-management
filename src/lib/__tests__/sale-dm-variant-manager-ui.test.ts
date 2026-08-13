@@ -67,6 +67,21 @@ describe("型の管理パネル: 外部AI方式の導線", () => {
     expect(src).toMatch(/送付の実績があるため/);
   });
 
+  it("凍結済みでも「適用」は使える（@codex #376）", () => {
+    // 割当で別の型へ移された宛先は本文が空になる。ここを隠すと1件ずつ手で書くしかない。
+    // 禁止すべきは「差し替え」であって「保存済みの文面の適用」ではない。
+    // ⚠案内文にも同じ語が出るので、分岐より**後ろ**にあるボタンを探す。
+    const condAt = src.indexOf("letter.frozen ? (");
+    const applyAt = src.indexOf("onClick={() => applyTemplate(false)}", condAt);
+    expect(condAt).toBeGreaterThan(0);
+    expect(applyAt).toBeGreaterThan(condAt);
+    // 分岐は適用ボタンより前に閉じている（＝ボタンは分岐の外）。
+    const closeAt = src.indexOf("          )}", condAt);
+    expect(closeAt).toBeGreaterThan(condAt);
+    expect(closeAt).toBeLessThan(applyAt);
+    expect(src).toMatch(/入れ直すことはできます/);
+  });
+
   it("「追加の指示」の入力欄は出さない（外部プロンプトに載らないため）", () => {
     expect(src).not.toMatch(/setOpt\("extraInstruction"/);
   });

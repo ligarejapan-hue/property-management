@@ -343,10 +343,11 @@ function PropertiesPageInner() {
     // 送信対象は「今読み込んでいる物件」に選択(チェック)を intersect して確定する。フィルタ/ページ変更の
     // 読み込み中に古いページのIDが混ざって送られる競合(Codex R7/R11)を、送信の瞬間にも断つ。
     const ids = properties.filter((p) => selectedIds.has(p.id)).map((p) => p.id);
-    // 課金確認: 選択した(チェックした)物件の宛先ごとに AI が手紙を生成し、AI利用料金が発生する(オーナー
-    // 情報を AI提供元へ送信)。件数を明示して確認を取り、サーバーへ confirmed:true を送る(サーバー側でも必須)。
+    // ⚠AI直結は廃止した(設計 §2.1)ので、課金もオーナー情報の外部送信も起きない。
+    //   ここで作るのは**本文が空の宛先一覧**で、文面は型ごとにプロンプトを表示 → 手元のAIで
+    //   作成 → 貼り付け → 適用、の流れで入れる。誤った課金・PII の警告を出さない。
     if (ids.length === 0) return;
-    if (!window.confirm(`選択した ${ids.length} 件の物件にAIで手紙を生成します。\n共有者が複数いる物件は宛先ごとに複数通になることがあります。\nAI利用料金が発生し、オーナー情報がAI提供元へ送信されます。\n続けますか？`)) return;
+    if (!window.confirm(`選択した ${ids.length} 件の物件で宛先の一覧を作ります。\n共有者が複数いる物件は宛先ごとに複数通になることがあります。\n手紙の本文はこの時点では空で、次の画面で型ごとに作成して差し込みます。\n続けますか？`)) return;
     // 作成試行ごとに安定したキーを用意(secure context 外では randomUUID 不在ゆえ簡易フォールバック)。
     if (!saleDmIdemKeyRef.current) {
       saleDmIdemKeyRef.current =

@@ -291,6 +291,7 @@ export default function SaleDmVariantManager({
           {letter.frozen ? (
             <p className="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-800">
               この型はすでに送付の実績があるため、文面は変更できません。文面を変えるときは新しい型を追加してください。
+              なお、保存済みの文面を「まだ本文が入っていない宛先」へ入れ直すことはできます（下のボタン）。
             </p>
           ) : (
             <>
@@ -319,35 +320,40 @@ export default function SaleDmVariantManager({
                 rows={6}
                 className="mt-2 w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
               />
-              <div className="mt-1.5 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={saveTemplate}
-                  disabled={busy}
-                  className="rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  本文を保存
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyTemplate(false)}
-                  disabled={busy}
-                  className="rounded border border-indigo-300 bg-white px-2.5 py-1 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
-                >
-                  この型の全宛先に適用
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyTemplate(true)}
-                  disabled={busy}
-                  title="手直しした本文も置き換えます"
-                  className="rounded border border-gray-300 bg-white px-2.5 py-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                >
-                  手直し分も置き換えて適用
-                </button>
-              </div>
+
             </>
           )}
+
+          {/* ⚠適用は凍結済みでも使える（@codex #376）。割当で別の型へ移された宛先は
+              本文が空になるため、ここを隠すと1件ずつ手で書くしかなくなる。
+              禁止すべきは「差し替え」であって「保存済みの文面の適用」ではない。 */}
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={saveTemplate}
+                disabled={busy}
+                className="rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                本文を保存
+              </button>
+              <button
+                type="button"
+                onClick={() => applyTemplate(false)}
+                disabled={busy}
+                className="rounded border border-indigo-300 bg-white px-2.5 py-1 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+              >
+                この型の全宛先に適用
+              </button>
+              <button
+                type="button"
+                onClick={() => applyTemplate(true)}
+                disabled={busy}
+                title="手直しした本文も置き換えます"
+                className="rounded border border-gray-300 bg-white px-2.5 py-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              >
+                手直し分も置き換えて適用
+              </button>
+            </div>
 
           {letterNotice && (
             <p className="mt-2 rounded bg-white px-2 py-1.5 text-gray-700">{letterNotice}</p>

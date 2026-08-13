@@ -99,11 +99,20 @@ export async function POST(
         // ⚠where のリレーション述語だけでは判定〜commit の間の担当変更を防げないため、
         //   物件親行をロックしてから担当範囲を確定させる（設計 §2.3 @codex R6）。
         await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${propertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
-        inScope = targets.filter(
-          (t) =>
-            t.property.createdBy === session.id ||
-            t.property.assignedTo === session.id,
+        // ⚠**ロックを取ってから読み直す**(@codex #376 P1)。先読みの値で判定すると、
+        //   ロック待ちの間に確定した担当変更を見落とし、担当外になった宛先を書き換える。
+        const fresh = await tx.property.findMany({
+          where: { id: { in: propertyIds } },
+          select: { id: true, createdBy: true, assignedTo: true },
+        });
+        const visible = new Set(
+          fresh
+            .filter(
+              (p) => p.createdBy === session.id || p.assignedTo === session.id,
+            )
+            .map((p) => p.id),
         );
+        inScope = targets.filter((t) => visible.has(t.propertyId));
         skippedScopeCount = targets.length - inScope.length;
       }
 
@@ -130,7 +139,15 @@ export async function POST(
       for (const [body, ids] of byBody) {
         const r = await tx.dmRecipientDraft.updateMany({
           // 状態はもう一度 where で縛る（読み取り〜書き込みの間に確定/送付された分を書かない）。
-          where: { id: { in: ids }, campaignId: id, variantId, status: "draft" },
+          where: {
+            id: { in: ids },
+            campaignId: id,
+            variantId,
+            status: "draft",
+            // ⚠上書きしない指定のときは、書き込み条件にも「本文が空」を残す(@codex #376 P2)。
+            //   読み取り〜書き込みの間に手直しされた本文を、黙って置き換えないため。
+            ...(parsed.overwriteExisting ? {} : { body: "" }),
+          },
           data: { body },
         });
         appliedCount += r.count;
