@@ -351,6 +351,40 @@ describe("POST confirm (bulk)", () => {
     expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
+  it("先読みの後に本文が差し替わっても、ロック後の読み直しで弾く(@codex #375 R2)", () => {
+    // 再生成は型のロックを取らないため、先読み〜確定の間に本文を差し替えられる。
+    // 先読みの値だけで検査すると、検査を通っていない本文が確定される。
+    return (async () => {
+      grant(...ALL);
+      const row = (body: string) => ({
+        id: "11111111-1111-4111-8111-111111111111",
+        body,
+        recipientZip: null,
+        recipientAddress: "渋谷区神宮前1-1-1",
+        representativeOwnerId: "aaaaaaaa-1111-4111-8111-111111111111",
+        draftOwners: [{ ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+        variantId: "vvvvvvvv-1111-4111-8111-111111111111",
+        propertyId: "pppppppp-1111-4111-8111-111111111111",
+      });
+      setupFreshDrafts(
+        [{ id: "11111111-1111-4111-8111-111111111111", recipientZip: null, recipientAddress: "渋谷区神宮前1-1-1", ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+        [{ id: "aaaaaaaa-1111-4111-8111-111111111111", zip: null, address: null, currentZip: null, currentAddress: "渋谷区神宮前1-1-1" }],
+      );
+      let n = 0;
+      pm._tx.dmRecipientDraft.findMany.mockImplementation(async () => {
+        n += 1;
+        // 1回目=先読み(問題なし) / 2回目=ロック後の読み直し(再生成が差し替えた後)
+        return [row(n === 1 ? "拝啓 問題のない本文です。" : "   ")];
+      });
+      const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: ["11111111-1111-4111-8111-111111111111"] }) }) as never);
+      expect(n).toBeGreaterThanOrEqual(2);
+      expect(res.status).toBe(409);
+      const b = (await res.json()) as { error: { code: string } };
+      expect(b.error.code).toBe("INVALID_BODY");
+      expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+    })();
+  });
+
   it("field_staff: ロック後に担当が外れていたら 409(確定させない・PR-D1)", async () => {
     grant(...ALL);
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });

@@ -44,6 +44,14 @@ describe("宛先の確定(drafts/confirm)のロック順序", () => {
     expect(p).toBeGreaterThan(v);
   });
 
+  it("子行(draft)のロックは最後で、その後に読み直す(先読みの値で確定しない)", () => {
+    const v = s.search(/FROM dm_variants[\s\S]{0,200}FOR UPDATE/);
+    const d = s.search(/FROM dm_recipient_drafts[\s\S]{0,200}FOR UPDATE/);
+    expect(d).toBeGreaterThan(v);
+    // ロックの後に読み直し、その値で本文を検査していること。
+    expect(s.slice(d)).toMatch(/findMany[\s\S]{0,900}validateLetterBody/);
+  });
+
   it("field_staff のときだけ物件親行を取る(admin/office は不要)", () => {
     expect(s).toMatch(
       /field_staff[\s\S]{0,500}FROM properties[\s\S]{0,200}FOR UPDATE/,
