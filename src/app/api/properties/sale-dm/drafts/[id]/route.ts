@@ -102,7 +102,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     // 状態遷移をアトミックに行う: pre-check 後に並行で sent 確定した場合(別タブ/一括送付)は
     // 0 行となり stale 編集を弾く(送信済みの本文/型/上書き=A/B割付・集計の不変性を守る)。
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     // ⚠確定を戻す（本文編集）／別の型へ移す前に、いまの型へ凍結印を立てる（設計 §2.4）。
     //   どちらも「その型に確定があった」証拠を消すので、消える前に列へ固定する。
     const resetsConfirmation =
@@ -114,6 +113,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       });
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await prisma.dmRecipientDraft.updateMany({ where: { id, status: { not: "sent" } }, data: data as any });
     if (result.count === 0) {
       throw new ApiError(409, "送付済みの宛先は編集できません", "ALREADY_SENT");
