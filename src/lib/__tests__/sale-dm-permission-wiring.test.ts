@@ -58,9 +58,17 @@ describe("sale_dm:generate の mock(admin 相当)権限", () => {
 });
 
 describe("sale_dm:generate の gate と hasPermission", () => {
-  it("campaign 作成 route が sale_dm:generate を必須化している（既存）", () => {
-    expect(campaignsRouteSrc).toMatch(
+  it("campaign 作成 route は sale_dm:generate を要求しない(AI直結廃止・PR-D2)", () => {
+    // このゲートの根拠は「課金 + オーナーPIIを外部APIへ送る」ことだった。外部AI方式は
+    // どちらも無いので要求しない。書込門は property:write に統一(設計 §2.5)。
+    expect(campaignsRouteSrc).not.toMatch(
       /hasPermission\(permissions, "sale_dm", "generate"\)/,
+    );
+  });
+
+  it("campaign 作成 route は property:write を要求する", () => {
+    expect(campaignsRouteSrc).toMatch(
+      /hasPermission\(permissions, "property", "write"\)/,
     );
   });
 

@@ -12,7 +12,7 @@ import { isPlainOwnerLevel, type DmRowPropertyOwner } from "@/lib/dm-export";
 import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
 import { buildRecipientsFromProperties, capRecipientsByProperty } from "@/lib/sale-dm-letter/recipients";
 import { resolveSender, isSenderConfigured } from "@/lib/sale-dm-letter/sender";
-import { generateLetters, isSaleDmConfigured, MAX_GENERATE_ITEMS, DEFAULT_CONCURRENCY, AI_CALL_TIMEOUT_MS, AI_MAX_RETRIES, resolveLetterModel, resolveProvider } from "@/lib/sale-dm-letter";
+import { MAX_GENERATE_ITEMS, resolveLetterModel } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
 import { SaleDmError } from "@/lib/sale-dm-letter/types";
@@ -32,9 +32,9 @@ export async function POST(request: NextRequest) {
     // 生成なしで一式が作れるため、閲覧権限だけの利用者がキャンペーンを作れてしまう。
     if (!hasPermission(permissions, "property", "write")) throw new ApiError(403, "物件情報の編集権限がありません", "FORBIDDEN");
 
-    // AI生成は課金 + オーナーPII を外部AIへ送るため、専用権限 sale_dm:generate を必須化(謄本自動取得と同方針)。
-    // read系/CSV権限だけで誰でも有料生成を実行できないようにする(admin が明示付与する高リスク操作)。
-    if (!hasPermission(permissions, "sale_dm", "generate")) throw new ApiError(403, "AIによるDM生成の権限がありません", "FORBIDDEN");
+    // ⚠AI直結の生成は廃止した(設計 §2.1)ので sale_dm:generate は要求しない。
+    //   このゲートの根拠は「課金 + オーナーPIIを外部APIへ送る」ことだったが、外部AI方式は
+    //   どちらも無い(文面はプロンプトを表示して手元で作り、貼り付ける)。書込門は property:write。
 
     const ownerDisplayConfig = await getOwnerDisplayConfig(session.id, permissions);
     if (!isPlainOwnerLevel(ownerDisplayConfig.name) || !isPlainOwnerLevel(ownerDisplayConfig.zip) || !isPlainOwnerLevel(ownerDisplayConfig.address)) {
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
 
     // 売却DM 設定は DB→env で解決(管理画面で設定された値を反映)。未設定なら fail-closed(503)。DB に何も書かない。
     const saleDmCfg = await loadSaleDmConfig();
-    if (!isSaleDmConfigured(saleDmCfg)) throw new ApiError(503, "売却DM生成が未設定です", "NOT_CONFIGURED");
+    // ⚠AI設定(provider/APIキー)はもう要求しない。必要なのは印刷の前提(追跡URL・LP・差出人)だけ。
     // 印刷の郵送QRには絶対URL(追跡URL / LP URL)が必須。これらが未設定/不正だと、生成(課金)しても印刷 route が
     // 503 で出力できず、印刷不能な下書きに課金されるだけになる。有料生成の前に印刷必須URLも確認し、揃っていなければ
     // 生成を始めずに fail-closed(503)する(印刷 route と同じ前提)。
@@ -81,15 +81,11 @@ export async function POST(request: NextRequest) {
         // クレームを消すと同キーの2リクエストが二重に有料生成し冪等性が破れる(Codex 指摘)ため、必ず新旧を判定する。
         //
         // ⚠STALE_MS は生成の worst-case から**導出**する（総点検P3）。固定値(旧10分)だと、
-        // provider の timeout/リトライ設定と乖離した瞬間に「生成中のライブなクレームを孤児と
-        // 誤判定→削除→同キーで再生成＝AI 課金が二重」になる。worst-case =
-        // ワーカーあたりの直列呼び出し数 (MAX_GENERATE_ITEMS / DEFAULT_CONCURRENCY)
-        // × 1呼び出しの上限 (AI_CALL_TIMEOUT_MS × 試行回数(AI_MAX_RETRIES+1))。余裕×2。
-        const STALE_MS =
-          (MAX_GENERATE_ITEMS / DEFAULT_CONCURRENCY) *
-          AI_CALL_TIMEOUT_MS *
-          (AI_MAX_RETRIES + 1) *
-          2;
+        // ⚠AI生成を廃止したので、作成は DB 作業だけになった(設計 §2.1)。以前は AI の
+        //   timeout×リトライから算出していたが、その根拠が無くなったので固定の短い窓にする。
+        //   短すぎると「進行中のクレームを孤児と誤判定→削除→同キーで再作成」になるため、
+        //   大量件数の保存でも十分に収まる 2 分を採る。
+        const STALE_MS = 2 * 60 * 1000;
         if (Date.now() - new Date(existing.createdAt).getTime() < STALE_MS) {
           throw new ApiError(409, "同じ作成キーの処理が進行中です。少し待って再試行してください", "CAMPAIGN_PROCESSING");
         }
@@ -235,14 +231,17 @@ export async function POST(request: NextRequest) {
     // クレーム確保後に生成+保存。途中で失敗(生成の総失敗 / 保存トランザクション失敗=対象物件の削除・FK・DB
     // エラー等)したらクレームを削除し、孤児 campaign(空)を残さない。UI は失敗後に同じ idempotencyKey で再試行
     // するため、空 campaign が残ると壊れた空キャンペーンに遷移してしまう。削除すれば再クレーム→再生成できる(R33)。
-    let drafts: Awaited<ReturnType<typeof generateLetters>>["drafts"];
+    let drafts: Array<{ recipient: (typeof capped.recipients)[number]; body: string; error?: string }>;
     let truncated: boolean;
     // リンク切れスキップの実数(@codex #364 R2): 黙って落とすと「生成成功」の見かけのまま
     // 手紙がDBに無い状態になる。実保存数を応答・監査に載せ、全滅なら 409 で再試行させる。
     let persistedCount = 0;
     let skippedByUnlinkCount = 0;
     try {
-      const result = await generateLetters(capped.recipients.map((r) => ({ recipient: r, options: genOptions })), { provider: resolveProvider(saleDmCfg) });
+      // ⚠本文は**空のまま**作る(設計 §2.1)。文面は型ごとにプロンプトを表示 → 手元のAIで
+      //   作成 → 貼り付け → その型の全宛先へ適用、の順で入れる。空本文の下書きは
+      //   確定・印刷から除外される既存のガード(body != "")でそのまま守られる。
+      const result = { drafts: capped.recipients.map((r) => ({ recipient: r, body: "" })) };
       drafts = result.drafts;
       truncated = capped.truncated; // 切詰めは物件単位 cap で判定(generateLetters には既に cap 済みの list を渡す)
 

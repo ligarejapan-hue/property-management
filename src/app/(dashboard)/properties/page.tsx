@@ -950,9 +950,9 @@ function PropertiesPageInner() {
             送付の確定
           </button>
         )}
-        {/* 権限(canCreateDm)に加え、文面生成が設定済み(capabilities.saleDmLetter)のときだけ出す。
+        {/* 権限(canCreateDm)に加え、文面生成が設定済み(capabilities.saleDmPrintReady)のときだけ出す。
             未設定だと押しても 503 になるため導線自体を隠す。 */}
-        {canCreateDm && capabilities?.saleDmLetter && (
+        {canCreateDm && capabilities?.saleDmPrintReady && (
           <button
             type="button"
             onClick={handleCreateSaleDm}

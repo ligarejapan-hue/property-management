@@ -150,23 +150,23 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
     expect(body.permissions).toEqual(PERMS);
   });
 
-  it("saleDmLetter は AI provider + 印刷必須URL(tracking/LP) + 差出人(sender) が揃って初めて true", async () => {
+  it("saleDmPrintReady は AI provider + 印刷必須URL(tracking/LP) + 差出人(sender) が揃って初めて true", async () => {
     (isSaleDmConfigured as Mock).mockReturnValue(true);
     // provider + 両URL + 差出人 → true
     let body = await (await GET()).json();
-    expect(body.capabilities.saleDmLetter).toBe(true);
+    expect(body.capabilities.saleDmPrintReady).toBe(true);
     // tracking URL 欠落 → false(campaign 作成が 503 になるため一覧の作成導線を出さない)
     (resolveTrackingBaseUrl as Mock).mockReturnValueOnce(undefined);
     body = await (await GET()).json();
-    expect(body.capabilities.saleDmLetter).toBe(false);
+    expect(body.capabilities.saleDmPrintReady).toBe(false);
     // LP URL 欠落でも false
     (resolveLpUrl as Mock).mockReturnValueOnce(undefined);
     body = await (await GET()).json();
-    expect(body.capabilities.saleDmLetter).toBe(false);
+    expect(body.capabilities.saleDmPrintReady).toBe(false);
     // 差出人 env 欠落でも false(生成/印刷の fail-closed と UI を揃える・Codex)
     (isSenderConfigured as Mock).mockReturnValueOnce(false);
     body = await (await GET()).json();
-    expect(body.capabilities.saleDmLetter).toBe(false);
+    expect(body.capabilities.saleDmPrintReady).toBe(false);
   });
 
   it("capabilities は { corporateLookup, registryAutoFetch } の boolean を素通しで返す", async () => {
@@ -182,7 +182,8 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       registryOcrDraft: false,
       // 逆ジオコーディング(座標→住所) env 未設定 → false
       reverseGeocode: false,
-      saleDmLetter: false,
+      // ⚠AI設定は見なくなった(PR-D2)。印刷の前提(追跡URL/LP/差出人)が揃えば true。
+      saleDmPrintReady: true,
     });
     expect(isCorporateLookupConfigured).toHaveBeenCalledTimes(1);
     expect(isRegistryAutoFetchProviderConfigured).toHaveBeenCalledTimes(1);
@@ -199,7 +200,8 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       registryOcrDraft: false,
       registryPurchase: false,
       reverseGeocode: false,
-      saleDmLetter: false,
+      // ⚠AI設定は見なくなった(PR-D2)。印刷の前提(追跡URL/LP/差出人)が揃えば true。
+      saleDmPrintReady: true,
     });
   });
 
@@ -254,7 +256,7 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
       "registryOcrDraft",
       "registryPurchase",
       "reverseGeocode",
-      "saleDmLetter",
+      "saleDmPrintReady",
     ]);
   });
 

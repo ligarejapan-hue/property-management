@@ -257,8 +257,11 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect(draftCreate.mock.calls[0][0].data.model).toBe("gpt-4o");
   });
 
-  it("env 未設定(mock off + provider 未設定)で 503", async () => {
+  it("印刷の前提(追跡URL/LP/差出人)が未設定なら 503(AI設定はもう見ない・PR-D2)", async () => {
+    // AI直結は廃止したので provider/APIキーは要求しない。印刷できない下書きを作らせない
+    // ための前提(追跡URL・LP・差出人)だけが 503 の理由として残る(設計 §2.5)。
     delete process.env.NEXT_PUBLIC_USE_MOCK;
+    delete process.env.SALE_DM_SENDER_NAME; // 差出人が無い=印刷しても差出人欄が空になる
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
     const res = await POST(req(validBody) as never);
     expect(res.status).toBe(503);
@@ -273,12 +276,11 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
   });
 
-  it("sale_dm:generate なし(read系のみ)では 403・生成も保存もしない(有料AIの専用権限を必須化)", async () => {
+  it("sale_dm:generate は不要になった(外部AI方式は課金もPII外部送信も無い・PR-D2)", async () => {
+    // 旧: この権限が無ければ 403。新: 書込門は property:write のみ(設計 §2.5)。
     grant("property", "csv_export", "csv_export_personal", "owner"); // sale_dm を渡さない
     const res = await POST(req(validBody) as never);
-    expect(res.status).toBe(403);
-    expect(writeAuditLog).not.toHaveBeenCalled();
-    expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
   });
 
   it("課金確認なし(confirmed 未指定)で 400・生成も保存もしない", async () => {
@@ -419,20 +421,15 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect(pmc.$transaction).not.toHaveBeenCalled();
   });
 
-  it("冪等性キー: STALE_MS は生成の worst-case から導出され、旧固定値(10分)より長い draft も進行中扱いになる（総点検P3）", async () => {
-    // 旧実装は固定10分で、AI 呼び出しの worst-case(直列10回×timeout×試行回数)より
-    // 短く、生成中のライブなクレームを孤児と誤判定して削除→二重課金が起きていた。
-    // 30分前の draft = 旧実装なら削除・新実装(導出値40分)では進行中(409)。
+  it("冪等性キー: 少し前に作りかけたクレームは進行中扱いで 409(削除しない)", async () => {
+    // AI生成を廃止したので、作成は DB 作業だけ＝短い固定窓(2分)で十分(PR-D2)。
+    // 窓の中は「進行中」として 409 にし、孤児と誤判定して消さない。
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
     const pmc = prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; deleteMany: ReturnType<typeof vi.fn> } };
-    pmc.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c-slow", createdBy: "u1", status: "draft", createdAt: new Date(Date.now() - 30 * 60 * 1000) });
+    pmc.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c-slow", createdBy: "u1", status: "draft", createdAt: new Date(Date.now() - 30 * 1000) });
     const res = await POST(req({ ...validBody, idempotencyKey: "key-slow" }) as never);
     expect(res.status).toBe(409);
     expect(pmc.dmCampaign.deleteMany).not.toHaveBeenCalled();
-    // 導出の不変条件: STALE_MS(=worst-case×2) が worst-case を上回る
-    const worstCase = (MAX_GENERATE_ITEMS / DEFAULT_CONCURRENCY) * AI_CALL_TIMEOUT_MS * (AI_MAX_RETRIES + 1);
-    expect(worstCase * 2).toBeGreaterThan(worstCase);
-    expect(30 * 60 * 1000).toBeLessThan(worstCase * 2); // このテストの前提(30分<導出値)を自己検証
   });
 
   it("冪等性キー: 新規キーはクレーム→生成→保存し、キーを campaign に保存する", async () => {
