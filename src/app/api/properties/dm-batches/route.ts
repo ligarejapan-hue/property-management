@@ -59,6 +59,8 @@ const AUDIT_FILTER_KEYS = [
   "includeArchived",
   "hasWarning",
   "dmSentMax",
+  // 再送候補で絞った出力かを監査にも残す(何で絞ったかを後から辿れるように=PR-C)。
+  "resendOnly",
   "sortBy",
   "sortOrder",
 ] as const;
@@ -427,6 +429,9 @@ export async function POST(request: NextRequest) {
             rowCount: survivingItems.length,
             createdBy: session.id,
             attemptKey: body.attemptKey,
+            // 再送候補の絞り込みから作られた控えか(設計§4)。DL時に候補述語を
+            // 再評価する材料=作成〜DLの間に送付が入った宛先を配らない。
+            resendFilterApplied: query.resendOnly === "1",
           },
         });
         if (survivingItems.length > 0) {

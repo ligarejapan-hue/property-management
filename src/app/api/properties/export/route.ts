@@ -277,6 +277,10 @@ export async function GET(request: NextRequest) {
       "includeArchived",
       "hasWarning",
       "dmSentMax",
+      // 再送候補で絞った出力かを監査にも残す(非PIIのフラグ)。画面のCSVボタンは
+      // buildFilterParams をそのまま渡すので、ここに無いと**絞ったのに絞っていない
+      // 出力と区別できない**監査ログになる(@codex #374 R3・PR-C)。
+      "resendOnly",
       "sortBy",
       "sortOrder",
     ] as const;

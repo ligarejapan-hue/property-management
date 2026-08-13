@@ -84,6 +84,10 @@ export const propertyListQuerySchema = z.object({
   dmStatus: z.enum(["send", "hold", "no_send"]).optional(),
   // 宛先不明(返送連動)で絞り込む。"1" のときだけ有効(他の一覧フィルタと同じ文字列クエリ規約)。
   undeliverable: z.enum(["1"]).optional(),
+  // 再送候補のみ(設計 2026-08-08-dm-sending-management-design.md §4)。
+  // "1" のときだけ有効(undeliverable と同じ文字列クエリ規約)。
+  // 判定規則の定義元は src/lib/dm-resend/candidacy.ts。
+  resendOnly: z.enum(["1"]).optional(),
   // DM送信回数フィルタ。現状は「未送信(0回)」のみ有効(空文字/未指定は絞らない)。
   // 「N回以下(1/2/3)」は列を持たず大規模データで groupBy+巨大 notIn になり重いため廃止し、
   // 送信回数の並べ替え(sortBy=dmSendCount)で代替する(@codex R10-P2 + ユーザー判断)。

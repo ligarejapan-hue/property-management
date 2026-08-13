@@ -18,7 +18,14 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
 //   (7) 同一物件内で同じ現在グループを指す item の重複 → 409(groupMismatchCount。
 //       名寄せで別グループだった2itemが同一グループに合流すると、CSVが同じ宛先に
 //       2通出て確定も二重記録になる=#364 R8。再出力すれば1通に畳まれる)
-// (5) 再送候補述語の再評価は PR-C でこの関数に追加する。
+//   (5) 再送候補由来の控え(resend_filter_applied)だけ: 作成〜DLの間に**候補でなく
+//       なった**物件 → 409(resendStaleCount)。中身は §4-3 cutoff より新しい送付、
+//       および §4-4 候補から外す反響(拒否・宛先不明・**連絡あり**)。
+//       ⚠**検査(2)は拒否/宛先不明しか見ない**ので、replied(連絡あり)はここで止めないと
+//         配られる(@codex #374 P1)。§4-1/§4-2 は (3) が見ている/記録が消えても
+//         「送りすぎ」にはならないので見ない(誤って外れるのは許容・入るのは不可=設計§4)。
+//       同じ item が (2) と (5) の両方に当たるときは (2) の理由を優先する(下の順序)。
+//       判定値の定義元は src/lib/dm-resend/candidacy.ts。
 
 export interface BatchItemForCheck {
   id: string;
@@ -64,6 +71,8 @@ export interface EligibilityResult {
   groupMismatchCount: number;
   /** (2) 拒否/宛先不明の反響が付いた所有者(代表or共有者)を含む item 数 → 409(PR-B) */
   terminalReactionCount: number;
+  /** (5) 再送候補の条件から外れた(控え作成後に送付が入った)item 数 → 409(PR-C) */
+  resendStaleCount: number;
 }
 
 type OwnerWithId = DmRowPropertyOwner & { owner: { id: string } };
@@ -78,12 +87,17 @@ export function checkBatchEligibility(
   /** 所有者紐づけの無い terminal 記録(個別記録=ownerId null・連関0)が付いた物件 id 集合。
    *  所有者横断はできないため物件単位で除外する(設計§4-5の限界の明示的な取り扱い=#366 R6)。 */
   terminalPropertyIds: ReadonlySet<string> = new Set(),
+  /** (5) 再送候補でなくなった物件 id 集合(cutoff より新しい送付、または候補から外す
+   *  反響=拒否・宛先不明・連絡あり が付いた物件)。再送候補由来の控えのときだけ
+   *  呼び出し側が渡す(省略時=検査(5)なし=既存の控えの挙動は変わらない)。 */
+  resendStalePropertyIds: ReadonlySet<string> = new Set(),
 ): EligibilityResult {
   const prunedItemIds: string[] = [];
   let scopeMissingCount = 0;
   let stateIssueCount = 0;
   let groupMismatchCount = 0;
   let terminalReactionCount = 0;
+  let resendStaleCount = 0;
   const seenGroups = new Set<string>();
 
   for (const it of items) {
@@ -106,6 +120,14 @@ export function checkBatchEligibility(
       terminalPropertyIds.has(it.propertyId)
     ) {
       terminalReactionCount += 1;
+      continue;
+    }
+    // (5) 再送候補由来の控えのみ: 作成〜DLの間に送付が入った(=二重送付になる)か、
+    // 候補から外す反響(拒否・宛先不明・連絡あり)が付いた物件を弾く(PR-C)。
+    // terminal 反響(2)の後に置く=同じ item が両方に当たるときは (2) の理由を優先する
+    // (「拒否された相手」の方が「候補でなくなった」より具体的で、案内文も適切)。
+    if (resendStalePropertyIds.has(it.propertyId)) {
+      resendStaleCount += 1;
       continue;
     }
     // (3) 送付可能条件は既存 export と同一の完全形(dmStatus=send かつ 未アーカイブ=R52)
@@ -152,5 +174,6 @@ export function checkBatchEligibility(
     stateIssueCount,
     groupMismatchCount,
     terminalReactionCount,
+    resendStaleCount,
   };
 }

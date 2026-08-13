@@ -137,6 +137,8 @@ function PropertiesPageInner() {
   const [updatedToFilter, setUpdatedToFilter] = useState(() => sp.get("updatedTo") ?? "");
   const [warningOnly, setWarningOnly] = useState(() => sp.get("hasWarning") === "true");
   const [undeliverableOnly, setUndeliverableOnly] = useState(() => sp.get("undeliverable") === "1");
+  // 再送候補のみ(設計§4)。判定はサーバ側 dm-resend/candidacy.ts が単一定義元。
+  const [resendOnly, setResendOnly] = useState(() => sp.get("resendOnly") === "1");
   // DM送信回数「N回以下」で絞り込む(空=絞らない)。
   const [sendCountMaxFilter, setSendCountMaxFilter] = useState(() => sp.get("dmSentMax") ?? "");
   // 並び替え。 "<sortBy>:<sortOrder>" を1つの値として保持する。
@@ -322,12 +324,13 @@ function PropertiesPageInner() {
     if (updatedToFilter) params.updatedTo = updatedToFilter;
     if (warningOnly) params.hasWarning = "true";
     if (undeliverableOnly) params.undeliverable = "1";
+    if (resendOnly) params.resendOnly = "1";
     if (sendCountMaxFilter) params.dmSentMax = sendCountMaxFilter;
     const [sortBy, sortOrder] = sort.split(":");
     if (sortBy) params.sortBy = sortBy;
     if (sortOrder) params.sortOrder = sortOrder;
     return params;
-  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, sendCountMaxFilter, sort]);
+  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, resendOnly, sendCountMaxFilter, sort]);
 
   // 売却促進DM: 現在の検索条件で「送付可」物件から下書きを作成し、作業画面へ遷移する。
   // 差出人は env 既定を route が補完(初版・調整は作業画面)。集計・型は variant 基準。
@@ -533,12 +536,13 @@ function PropertiesPageInner() {
     if (updatedToFilter) params.set("updatedTo", updatedToFilter);
     if (warningOnly) params.set("hasWarning", "true");
     if (undeliverableOnly) params.set("undeliverable", "1");
+    if (resendOnly) params.set("resendOnly", "1");
     if (sendCountMaxFilter) params.set("dmSentMax", sendCountMaxFilter);
     if (sort !== "updatedAt:desc") params.set("sort", sort);
     if (page > 1) params.set("page", String(page));
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, sendCountMaxFilter, sort, page, pathname, router]);
+  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, resendOnly, sendCountMaxFilter, sort, page, pathname, router]);
 
   // 警告バッジは「現在ページに表示中の物件」だけに scope して取得する（17-C F2）。
   // properties が変わるたび（page/filter/sort 変更・mutation 後の再取得）に追従するため、
@@ -661,6 +665,25 @@ function PropertiesPageInner() {
     setPage(1);
   };
 
+  // 「再送候補のみ」と両立しない絞り込みを選んだら、再送候補を解除する。
+  // ⚠逆方向（トグルONで他を合わせる）だけ直すと、あとから DM判断や送信回数を
+  //   切り替えて「必ず0件」の組み合わせが作れてしまう（@codex #374 R3）。両方向を塞ぐ。
+  //   再送候補は「DM判断=送付可」かつ「送付記録が1件以上ある」が条件（設計§4-1/§4-2）。
+  const handleDmFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const v = e.target.value;
+    setDmFilter(v);
+    // "" (すべて) は矛盾しない（where 側で送付可に絞られる）ので解除しない。
+    if (v !== "" && v !== "send") setResendOnly(false);
+    setPage(1);
+  };
+
+  const handleSendCountMaxChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const v = e.target.value;
+    setSendCountMaxFilter(v);
+    if (v === "0") setResendOnly(false);
+    setPage(1);
+  };
+
   // 全フィルタを一括リセット（並び順は既定に戻し、page=1）
   const handleResetFilters = () => {
     // 保留中の検索 debounce を破棄してからリセットする
@@ -684,6 +707,7 @@ function PropertiesPageInner() {
     setUpdatedToFilter("");
     setWarningOnly(false);
     setUndeliverableOnly(false);
+    setResendOnly(false);
     setSendCountMaxFilter("");
     setSort("updatedAt:desc");
     setPage(1);
@@ -693,7 +717,7 @@ function PropertiesPageInner() {
   const hasActiveFilter =
     !!searchInput || !!searchText || !!searchDraft || !!mgmtIdText || !!mgmtIdDraft || !!typeFilter || !!registryFilter || !!dmFilter ||
     !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
-    warningOnly || undeliverableOnly || !!sendCountMaxFilter || sort !== "updatedAt:desc";
+    warningOnly || undeliverableOnly || resendOnly || !!sendCountMaxFilter || sort !== "updatedAt:desc";
 
   // 更新日の開始>終了(逆転)は結果が必ず0件になるので警告する(UI総点検 B-9)。YYYY-MM-DD は文字列比較で日付順になる。
   const dateRangeInvalid = !!updatedFromFilter && !!updatedToFilter && updatedFromFilter > updatedToFilter;
@@ -1006,7 +1030,7 @@ function PropertiesPageInner() {
 
         <select
           value={dmFilter}
-          onChange={handleFilterChange(setDmFilter)}
+          onChange={handleDmFilterChange}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
           <option value="">DM判断: すべて</option>
@@ -1017,7 +1041,7 @@ function PropertiesPageInner() {
 
         <select
           value={sendCountMaxFilter}
-          onChange={handleFilterChange(setSendCountMaxFilter)}
+          onChange={handleSendCountMaxChange}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           title="DM送信回数で絞り込む"
         >
@@ -1163,6 +1187,30 @@ function PropertiesPageInner() {
             className="rounded border-red-300"
           />
           宛先不明のみ
+        </label>
+
+        <label
+          className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-900/20 dark:text-emerald-300"
+          title="前回の送付から一定期間が過ぎていて、拒否・宛先不明・連絡ありの反響が付いていない物件だけを表示します。所有者が他の物件で拒否・宛先不明になっている場合も除きます。"
+        >
+          <input
+            type="checkbox"
+            checked={resendOnly}
+            onChange={(e) => {
+              const next = e.target.checked;
+              setResendOnly(next);
+              // 再送候補は「送る」かつ「送付記録が1件以上ある」物件が対象(設計§4-1/§4-2)。
+              // ONにしたら DM状況 を「送る」に、送信回数の「未送信(0回)」は解除して、
+              // 必ず0件になる組み合わせを画面から作れないようにする。
+              if (next) {
+                setDmFilter("send");
+                setSendCountMaxFilter("");
+              }
+              setPage(1);
+            }}
+            className="rounded border-emerald-300"
+          />
+          再送候補のみ
         </label>
 
         <select
