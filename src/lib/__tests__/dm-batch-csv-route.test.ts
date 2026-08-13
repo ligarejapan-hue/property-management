@@ -436,3 +436,60 @@ describe("GET /api/properties/dm-batches/[id]/csv", () => {
     expect(pm.dmExportBatchItem.deleteMany).not.toHaveBeenCalled();
   });
 });
+
+describe("GET /api/properties/dm-batches/[id]/csv: 再送候補の再評価(検査(5)=PR-C)", () => {
+  const RESEND_BATCH = {
+    id: BATCH_ID,
+    downloaded_at: null,
+    csv_digest: null,
+    resend_filter_applied: true,
+  };
+
+  /**
+   * propertyDmLog.findMany を**クエリの内容で**振り分ける。
+   * ⚠呼び出し順(mockResolvedValueOnce)で組むと、検査(5)が走らないケースで
+   * 2つ目の once が消費されずに次のテストへ漏れる(実際に踏んだ)。
+   */
+  function armDmLogs(opts: { terminal?: unknown[]; recent?: unknown[] } = {}) {
+    pm.propertyDmLog.findMany.mockImplementation(
+      async (args: { where?: Record<string, unknown> }) =>
+        args?.where?.sentAt ? (opts.recent ?? []) : (opts.terminal ?? []),
+    );
+  }
+
+  it("再送候補由来の控えは、作成後に送付が入った宛先があれば 409・凍結しない", async () => {
+    armQueryRaw(RESEND_BATCH);
+    armDmLogs({ recent: [{ propertyId: "p1" }] });
+    const res = await GET(makeRequest(), ctx);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as {
+      error: { message: string; code: string };
+    };
+    expect(body.error.code).toBe("RESEND_STALE");
+    expect(pm.dmExportBatch.update).not.toHaveBeenCalled();
+    // 検査(5)のクエリは cutoff より新しい送付だけを引く(反響の条件は付けない)
+    const call = pm.propertyDmLog.findMany.mock.calls.find(
+      (c) => (c[0] as { where?: Record<string, unknown> })?.where?.sentAt,
+    );
+    expect(call).toBeDefined();
+    const where = (call![0] as { where: Record<string, any> }).where;
+    expect(where.propertyId).toEqual({ in: ["p1"] });
+    expect(where.sentAt.gt).toBeInstanceOf(Date);
+    expect(where.reactionStatus).toBeUndefined();
+  });
+
+  it("再送候補由来でない控えは検査(5)のクエリ自体を出さない(既存の挙動を変えない)", async () => {
+    armDmLogs();
+    const res = await GET(makeRequest(), ctx);
+    expect(res.status).toBe(200);
+    expect(pm.propertyDmLog.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("再送候補由来でも、期間内の送付が無ければ通常どおり配信する", async () => {
+    armQueryRaw(RESEND_BATCH);
+    armDmLogs();
+    const res = await GET(makeRequest(), ctx);
+    expect(res.status).toBe(200);
+    expect(pm.propertyDmLog.findMany).toHaveBeenCalledTimes(2);
+  });
+});

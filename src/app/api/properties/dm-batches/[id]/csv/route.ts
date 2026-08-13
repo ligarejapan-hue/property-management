@@ -23,6 +23,10 @@ import {
 } from "@/lib/dm-batch/eligibility";
 import { buildBatchCsv, sha256Hex } from "@/lib/dm-batch/csv";
 import {
+  getResendCooldownDays,
+  resendCutoff,
+} from "@/lib/dm-resend/candidacy";
+import {
   readItemsWithOwners,
   itemSetKey,
   collectOwnerIds,
@@ -217,12 +221,29 @@ export async function GET(
         }
       }
 
+      // (5) 再送候補由来の控えだけ、候補述語のうち「期間内の送付が無い」を再評価する(PR-C)。
+      // 控えを作った後・配る前に誰かが送っていたら、この控えを配ると二重送付になる。
+      // Owner/物件を FOR SHARE で保持したままこの tx 内で読む=確定(ログ書込)と直列化される。
+      // 設計§4 の他の条件は (2)(3) が見ており、記録が消えた場合は送りすぎにならないので見ない。
+      const recentlySentPropertyIds = new Set<string>();
+      if (batchRow.resend_filter_applied && allPropertyIds.length > 0) {
+        const cutoff = resendCutoff(new Date(), getResendCooldownDays());
+        const recentLogs = await tx.propertyDmLog.findMany({
+          where: { propertyId: { in: allPropertyIds }, sentAt: { gt: cutoff } },
+          select: { propertyId: true },
+        });
+        for (const l of recentLogs) {
+          if (l.propertyId) recentlySentPropertyIds.add(l.propertyId);
+        }
+      }
+
       const elig = checkBatchEligibility(
         items,
         properties,
         session,
         terminalOwnerIds,
         terminalPropertyIds,
+        recentlySentPropertyIds,
       );
 
       if (elig.scopeMissingCount > 0) {
@@ -237,6 +258,13 @@ export async function GET(
           409,
           `拒否・宛先不明の反響が付いた宛先が含まれています(${elig.terminalReactionCount}件)。この控えは使えません。再出力してください`,
           "TERMINAL_REACTION",
+        );
+      }
+      if (elig.resendStaleCount > 0) {
+        throw new ApiError(
+          409,
+          `この控えを作ったあとに送付された宛先が含まれています(${elig.resendStaleCount}件)。再送候補で出し直してください`,
+          "RESEND_STALE",
         );
       }
       if (elig.stateIssueCount > 0 || elig.groupMismatchCount > 0) {

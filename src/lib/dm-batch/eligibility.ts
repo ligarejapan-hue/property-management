@@ -18,7 +18,11 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
 //   (7) 同一物件内で同じ現在グループを指す item の重複 → 409(groupMismatchCount。
 //       名寄せで別グループだった2itemが同一グループに合流すると、CSVが同じ宛先に
 //       2通出て確定も二重記録になる=#364 R8。再出力すれば1通に畳まれる)
-// (5) 再送候補述語の再評価は PR-C でこの関数に追加する。
+//   (5) 再送候補由来の控え(resend_filter_applied)だけ: 作成〜DLの間に **cutoff より
+//       新しい送付記録**が入った物件 → 409(resendStaleCount)。設計§4 の他の条件は
+//       (2)(3)が既に見ており、記録が消えた場合は「送りすぎ」にならないので見ない
+//       (誤って外れるのは許容・入るのは不可の非対称=設計§4)。判定の定義元は
+//       src/lib/dm-resend/candidacy.ts。
 
 export interface BatchItemForCheck {
   id: string;
@@ -64,6 +68,8 @@ export interface EligibilityResult {
   groupMismatchCount: number;
   /** (2) 拒否/宛先不明の反響が付いた所有者(代表or共有者)を含む item 数 → 409(PR-B) */
   terminalReactionCount: number;
+  /** (5) 再送候補の条件から外れた(控え作成後に送付が入った)item 数 → 409(PR-C) */
+  resendStaleCount: number;
 }
 
 type OwnerWithId = DmRowPropertyOwner & { owner: { id: string } };
@@ -78,12 +84,16 @@ export function checkBatchEligibility(
   /** 所有者紐づけの無い terminal 記録(個別記録=ownerId null・連関0)が付いた物件 id 集合。
    *  所有者横断はできないため物件単位で除外する(設計§4-5の限界の明示的な取り扱い=#366 R6)。 */
   terminalPropertyIds: ReadonlySet<string> = new Set(),
+  /** (5) cutoff より新しい送付記録がある物件 id 集合。再送候補由来の控えのときだけ
+   *  呼び出し側が渡す(省略時=検査(5)なし=既存の控えの挙動は変わらない)。 */
+  recentlySentPropertyIds: ReadonlySet<string> = new Set(),
 ): EligibilityResult {
   const prunedItemIds: string[] = [];
   let scopeMissingCount = 0;
   let stateIssueCount = 0;
   let groupMismatchCount = 0;
   let terminalReactionCount = 0;
+  let resendStaleCount = 0;
   const seenGroups = new Set<string>();
 
   for (const it of items) {
@@ -106,6 +116,13 @@ export function checkBatchEligibility(
       terminalPropertyIds.has(it.propertyId)
     ) {
       terminalReactionCount += 1;
+      continue;
+    }
+    // (5) 再送候補由来の控えのみ: 作成〜DLの間に送付が入っていたら二重送付になる(PR-C)。
+    // terminal 反響(2)の後に置く=同じ item が両方に当たるときは (2) の理由を優先する
+    // (「拒否された相手」の方が「期間が足りない」より重い)。
+    if (recentlySentPropertyIds.has(it.propertyId)) {
+      resendStaleCount += 1;
       continue;
     }
     // (3) 送付可能条件は既存 export と同一の完全形(dmStatus=send かつ 未アーカイブ=R52)
@@ -152,5 +169,6 @@ export function checkBatchEligibility(
     stateIssueCount,
     groupMismatchCount,
     terminalReactionCount,
+    resendStaleCount,
   };
 }

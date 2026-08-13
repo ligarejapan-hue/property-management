@@ -55,6 +55,7 @@ describe("checkBatchEligibility", () => {
       stateIssueCount: 0,
       groupMismatchCount: 0,
       terminalReactionCount: 0,
+      resendStaleCount: 0,
     });
   });
 
@@ -268,5 +269,45 @@ describe("checkBatchEligibility", () => {
   it("物件が Map に無い item は pruned 扱い(物件削除直後)", () => {
     const r = checkBatchEligibility([item()], new Map(), ADMIN);
     expect(r.prunedItemIds).toEqual(["i1"]);
+  });
+});
+
+describe("checkBatchEligibility 検査(5) 再送候補の再評価(PR-C)", () => {
+  it("cutoff より新しい送付が入った物件の item を resendStaleCount に数える", () => {
+    const r = checkBatchEligibility(
+      [item()],
+      new Map([["p1", prop()]]),
+      ADMIN,
+      new Set(),
+      new Set(),
+      new Set(["p1"]),
+    );
+    expect(r.resendStaleCount).toBe(1);
+  });
+
+  it("空集合(=再送候補由来でない控え)なら何も落とさない", () => {
+    const r = checkBatchEligibility(
+      [item()],
+      new Map([["p1", prop()]]),
+      ADMIN,
+      new Set(),
+      new Set(),
+    );
+    expect(r.resendStaleCount).toBe(0);
+    expect(r.stateIssueCount).toBe(0);
+    expect(r.groupMismatchCount).toBe(0);
+  });
+
+  it("terminal 反響の検出より後ろに置かない(理由が置き換わらない)", () => {
+    const r = checkBatchEligibility(
+      [item()],
+      new Map([["p1", prop()]]),
+      ADMIN,
+      new Set(["o1"]),
+      new Set(),
+      new Set(["p1"]),
+    );
+    expect(r.terminalReactionCount).toBe(1);
+    expect(r.resendStaleCount).toBe(0);
   });
 });
