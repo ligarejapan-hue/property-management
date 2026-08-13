@@ -23,6 +23,7 @@ import {
 } from "@/lib/dm-batch/eligibility";
 import { buildBatchCsv, sha256Hex } from "@/lib/dm-batch/csv";
 import {
+  SELF_EXCLUDING_REACTION_VALUES,
   getResendCooldownDays,
   resendCutoff,
 } from "@/lib/dm-resend/candidacy";
@@ -221,19 +222,32 @@ export async function GET(
         }
       }
 
-      // (5) 再送候補由来の控えだけ、候補述語のうち「期間内の送付が無い」を再評価する(PR-C)。
-      // 控えを作った後・配る前に誰かが送っていたら、この控えを配ると二重送付になる。
+      // (5) 再送候補由来の控えだけ、控え作成後に**候補でなくなった物件**を弾く(PR-C)。
+      // 見るのは物件自身の記録の2つ:
+      //   ・§4-3 cutoff より新しい送付 → 配ると二重送付になる
+      //   ・§4-4 候補から外す反響(拒否・宛先不明・**連絡あり**)
+      //     ⚠**検査(2)は拒否/宛先不明しか見ない**ので、replied(連絡あり)はここで
+      //       止めないと配られる(@codex #374 P1)。連絡が来た相手を定型の再送に
+      //       乗せないのが §4 の意図。
+      // §4-1/§4-2 は (3) が見ている/記録が消えても送りすぎにはならないので見ない。
       // Owner/物件を FOR SHARE で保持したままこの tx 内で読む=確定(ログ書込)と直列化される。
-      // 設計§4 の他の条件は (2)(3) が見ており、記録が消えた場合は送りすぎにならないので見ない。
-      const recentlySentPropertyIds = new Set<string>();
+      const resendStalePropertyIds = new Set<string>();
       if (batchRow.resend_filter_applied && allPropertyIds.length > 0) {
         const cutoff = resendCutoff(new Date(), getResendCooldownDays());
-        const recentLogs = await tx.propertyDmLog.findMany({
-          where: { propertyId: { in: allPropertyIds }, sentAt: { gt: cutoff } },
+        const staleLogs = await tx.propertyDmLog.findMany({
+          where: {
+            propertyId: { in: allPropertyIds },
+            OR: [
+              { sentAt: { gt: cutoff } },
+              {
+                reactionStatus: { in: [...SELF_EXCLUDING_REACTION_VALUES] },
+              },
+            ],
+          },
           select: { propertyId: true },
         });
-        for (const l of recentLogs) {
-          if (l.propertyId) recentlySentPropertyIds.add(l.propertyId);
+        for (const l of staleLogs) {
+          if (l.propertyId) resendStalePropertyIds.add(l.propertyId);
         }
       }
 
@@ -243,7 +257,7 @@ export async function GET(
         session,
         terminalOwnerIds,
         terminalPropertyIds,
-        recentlySentPropertyIds,
+        resendStalePropertyIds,
       );
 
       if (elig.scopeMissingCount > 0) {

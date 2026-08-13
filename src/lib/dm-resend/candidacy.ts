@@ -15,16 +15,19 @@ import { TERMINAL_REACTIONS, jstCalendarDay } from "@/lib/dm-reaction/core";
 export const DEFAULT_RESEND_COOLDOWN_DAYS = 90;
 
 /**
- * cooldown 日数。env `DM_RESEND_COOLDOWN_DAYS` があればそれ(正の数のみ)、
- * 無ければ既定 90。業務値の変更にリリースを要らなくするための上書き口(設計§4)。
+ * cooldown 日数。env `DM_RESEND_COOLDOWN_DAYS` があればそれ、無ければ既定 90。
+ * 業務値の変更にリリースを要らなくするための上書き口(設計§4)。
+ * ⚠**正の整数だけ**を受ける(@codex #374 P2)。「正の数」で通して floor すると
+ * `0.5` が **0 日**に潰れ、cutoff が今日になって**昨日送った相手まで候補に入る**=
+ * 安全でない側へ倒れる。読めない値は既定へ落とす(候補を増やさない側)。
  * ⚠ブラウザ側では process.env が無いため既定値になる=画面に日数を出さない
  * (出すと env を変えたときに文言だけ取り残される)。
  */
 export function getResendCooldownDays(): number {
   const raw = process.env.DM_RESEND_COOLDOWN_DAYS;
   const parsed = raw ? Number(raw) : undefined;
-  return parsed !== undefined && Number.isFinite(parsed) && parsed > 0
-    ? Math.floor(parsed)
+  return parsed !== undefined && Number.isInteger(parsed) && parsed > 0
+    ? parsed
     : DEFAULT_RESEND_COOLDOWN_DAYS;
 }
 

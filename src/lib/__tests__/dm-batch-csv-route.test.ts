@@ -445,59 +445,125 @@ describe("GET /api/properties/dm-batches/[id]/csv: 再送候補の再評価(検�
     resend_filter_applied: true,
   };
 
+  type LogRow = { propertyId: string; reactionStatus: string; sentAt: Date };
+  type WhereArg = {
+    propertyId?: { in: string[] };
+    reactionStatus?: { in: string[] };
+    sentAt?: { gt: Date };
+    OR?: Array<{ sentAt?: { gt: Date }; reactionStatus?: { in: string[] } }>;
+  };
+
   /**
-   * propertyDmLog.findMany を**クエリの内容で**振り分ける。
+   * propertyDmLog.findMany を**実DBのように絞り込んで**返す。
+   * ⚠「クエリ内容で固定値を返す」だけだと、実装がクエリから条件を落としても
+   * テストが通ってしまう(空振り)。行を条件で実際に絞ることで、条件が欠けたら
+   * 行が返らず 409 にならない=落ちる。
+   * 検査(2)は where.reactionStatus をトップレベルに持ち、検査(5)は where.OR のみ。
    * ⚠呼び出し順(mockResolvedValueOnce)で組むと、検査(5)が走らないケースで
    * 2つ目の once が消費されずに次のテストへ漏れる(実際に踏んだ)。
    */
-  function armDmLogs(opts: { terminal?: unknown[]; recent?: unknown[] } = {}) {
+  function armDmLogRows(rows: LogRow[]) {
     pm.propertyDmLog.findMany.mockImplementation(
-      async (args: { where?: Record<string, unknown> }) =>
-        args?.where?.sentAt ? (opts.recent ?? []) : (opts.terminal ?? []),
+      async (args: { where?: WhereArg }) => {
+        const w = args?.where ?? {};
+        return rows
+          .filter((r) => {
+            if (w.propertyId?.in && !w.propertyId.in.includes(r.propertyId)) {
+              return false;
+            }
+            // 検査(2): terminal 反響の検出(reactionStatus はトップレベル)
+            if (w.reactionStatus?.in) {
+              return w.reactionStatus.in.includes(r.reactionStatus);
+            }
+            // 期間だけを見る形(=修正前の検査(5))もそのまま再現する。
+            // これが無いと素通り(return true)して、条件を落とした実装でもテストが通る。
+            if (w.sentAt?.gt) {
+              return r.sentAt.getTime() > w.sentAt.gt.getTime();
+            }
+            // 検査(5): 期間 or 候補から外す反響
+            if (w.OR) {
+              return w.OR.some((c) =>
+                c.sentAt?.gt
+                  ? r.sentAt.getTime() > c.sentAt.gt.getTime()
+                  : c.reactionStatus?.in
+                    ? c.reactionStatus.in.includes(r.reactionStatus)
+                    : false,
+              );
+            }
+            return true;
+          })
+          .map((r) => ({
+            ownerId: null,
+            propertyId: r.propertyId,
+            logOwners: [],
+          }));
+      },
     );
   }
 
-  it("再送候補由来の控えは、作成後に送付が入った宛先があれば 409・凍結しない", async () => {
+  const OLD_SENT = new Date("2020-01-01T00:00:00.000Z");
+  const RECENT_SENT = new Date();
+
+  it("検査(5)は「期間内の送付」と「候補から外す反響(連絡ありを含む)」の両方を引く(@codex #374 P1)", async () => {
     armQueryRaw(RESEND_BATCH);
-    armDmLogs({ recent: [{ propertyId: "p1" }] });
+    armDmLogRows([]);
+    await GET(makeRequest(), ctx);
+    // ⚠検査(2)のクエリも where.OR を持つ(代表/連関/物件単位の3経路)。
+    // OR だけで拾うとそちらを掴むので、トップレベルの reactionStatus が
+    // **無い**方(=検査(5))を選ぶ。
+    const call = pm.propertyDmLog.findMany.mock.calls.find((c) => {
+      const w = (c[0] as { where?: WhereArg })?.where;
+      return !!w?.OR && !w?.reactionStatus;
+    });
+    expect(call).toBeDefined();
+    const where = (call![0] as { where: WhereArg }).where;
+    expect(where.propertyId).toEqual({ in: ["p1"] });
+    expect(where.OR).toEqual([
+      { sentAt: { gt: expect.any(Date) } },
+      { reactionStatus: { in: ["refused", "undeliverable", "replied"] } },
+    ]);
+  });
+
+  it("作成後に送付が入った宛先があれば 409・凍結しない", async () => {
+    armQueryRaw(RESEND_BATCH);
+    armDmLogRows([
+      { propertyId: "p1", reactionStatus: "no_response", sentAt: RECENT_SENT },
+    ]);
     const res = await GET(makeRequest(), ctx);
     expect(res.status).toBe(409);
-    const body = (await res.json()) as {
-      error: { message: string; code: string };
-    };
+    const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("RESEND_STALE");
     expect(pm.dmExportBatch.update).not.toHaveBeenCalled();
-    // 検査(5)のクエリは cutoff より新しい送付だけを引く(反響の条件は付けない)
-    const call = pm.propertyDmLog.findMany.mock.calls.find(
-      (c) => (c[0] as { where?: Record<string, unknown> })?.where?.sentAt,
-    );
-    expect(call).toBeDefined();
-    const where = (
-      call![0] as {
-        where: {
-          propertyId?: { in: string[] };
-          sentAt?: { gt: Date };
-          reactionStatus?: unknown;
-        };
-      }
-    ).where;
-    expect(where.propertyId).toEqual({ in: ["p1"] });
-    expect(where.sentAt?.gt).toBeInstanceOf(Date);
-    expect(where.reactionStatus).toBeUndefined();
   });
 
-  it("再送候補由来でない控えは検査(5)のクエリ自体を出さない(既存の挙動を変えない)", async () => {
-    armDmLogs();
-    const res = await GET(makeRequest(), ctx);
-    expect(res.status).toBe(200);
-    expect(pm.propertyDmLog.findMany).toHaveBeenCalledTimes(1);
-  });
-
-  it("再送候補由来でも、期間内の送付が無ければ通常どおり配信する", async () => {
+  it("作成後に「連絡あり」が付いた宛先があれば 409(§4-4・検査(2)は拒否/宛先不明しか見ない)", async () => {
     armQueryRaw(RESEND_BATCH);
-    armDmLogs();
+    armDmLogRows([
+      { propertyId: "p1", reactionStatus: "replied", sentAt: OLD_SENT },
+    ]);
+    const res = await GET(makeRequest(), ctx);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("RESEND_STALE");
+    expect(pm.dmExportBatch.update).not.toHaveBeenCalled();
+  });
+
+  it("古い送付だけで反響が付いていなければ通常どおり配信する", async () => {
+    armQueryRaw(RESEND_BATCH);
+    armDmLogRows([
+      { propertyId: "p1", reactionStatus: "no_response", sentAt: OLD_SENT },
+    ]);
     const res = await GET(makeRequest(), ctx);
     expect(res.status).toBe(200);
     expect(pm.propertyDmLog.findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("再送候補由来でない控えは検査(5)のクエリ自体を出さない(既存の挙動を変えない)", async () => {
+    armDmLogRows([
+      { propertyId: "p1", reactionStatus: "replied", sentAt: RECENT_SENT },
+    ]);
+    const res = await GET(makeRequest(), ctx);
+    expect(res.status).toBe(200);
+    expect(pm.propertyDmLog.findMany).toHaveBeenCalledTimes(1);
   });
 });

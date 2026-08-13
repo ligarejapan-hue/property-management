@@ -57,6 +57,15 @@ describe("getResendCooldownDays", () => {
     expect(getResendCooldownDays()).toBe(30);
   });
 
+  it("整数でない env は既定に戻す(@codex #374 P2)", () => {
+    // 0.5 は「正の数」を通ってしまい floor で 0 日 → cutoff が今日になり、
+    // 昨日送った相手まで候補に入る=安全でない側へ倒れる。
+    process.env.DM_RESEND_COOLDOWN_DAYS = "0.5";
+    expect(getResendCooldownDays()).toBe(90);
+    process.env.DM_RESEND_COOLDOWN_DAYS = "90.7";
+    expect(getResendCooldownDays()).toBe(90);
+  });
+
   it("数値でない/0以下の env は無視して既定に戻す", () => {
     process.env.DM_RESEND_COOLDOWN_DAYS = "abc";
     expect(getResendCooldownDays()).toBe(90);

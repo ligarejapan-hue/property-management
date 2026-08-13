@@ -273,7 +273,9 @@ describe("checkBatchEligibility", () => {
 });
 
 describe("checkBatchEligibility 検査(5) 再送候補の再評価(PR-C)", () => {
-  it("cutoff より新しい送付が入った物件の item を resendStaleCount に数える", () => {
+  // 集合の中身(期間切れ/連絡ありのどちらで入ったか)は呼び出し側の route が決める。
+  // ここでは「集合に入っていれば弾く・順序は(2)が優先」だけを固定する。
+  it("再送候補でなくなった物件の item を resendStaleCount に数える", () => {
     const r = checkBatchEligibility(
       [item()],
       new Map([["p1", prop()]]),
