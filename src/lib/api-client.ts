@@ -1950,11 +1950,22 @@ export async function createRegistryFetchJob(
   propertyIds: string[],
   certificateType: "owner" | "all" = "owner",
   idempotencyKey?: string,
+  /**
+   * ⚠承認の根拠（preflight が返した物件ごとの指紋）。作成までの間に内容が
+   * 変わっていたら、その物件だけ対象外にする（@codex #373 R6 P1）。
+   */
+  approvedFingerprints?: Record<string, string>,
 ): Promise<RegistryFetchJobCreateResult> {
   return apiFetch<RegistryFetchJobCreateResult>("/api/registry-fetch/jobs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ confirmed: true, propertyIds, certificateType, idempotencyKey }),
+    body: JSON.stringify({
+      confirmed: true,
+      propertyIds,
+      certificateType,
+      idempotencyKey,
+      approvedFingerprints,
+    }),
   });
 }
 
@@ -3771,6 +3782,8 @@ export async function deletePropertyDmLog(
 
 // ---------- 謄本取得の事前確認(preflight・発注者要望 2026-08-08) ----------
 
+import type { RegistryTarget } from "@/lib/registry-fetch/registry-target";
+
 export interface RegistryPreflightFlags {
   propertyId: string;
   /** 登記状況が「取得済」か。 */
@@ -3779,6 +3792,16 @@ export interface RegistryPreflightFlags {
   hasRegistryAttachment: boolean;
   /** 所有者が1名以上リンク済みか。 */
   hasOwners: boolean;
+  /**
+   * ⚠「何を取りに行くか(土地/建物)」。**参考情報ではなく買う対象そのもの**なので、
+   * 上の3つとは扱いが違う。これが読めないうちは実行させない(fail closed)。
+   */
+  target: RegistryTarget;
+  /**
+   * ⚠画面が見せた内容の指紋(digest)。一括の作成時に「この内容で承認した」と
+   * 伝えるために持ち回る。地番そのものではない。
+   */
+  fingerprintHash: string;
 }
 
 /**
@@ -3796,6 +3819,8 @@ export async function fetchRegistryPreflight(
         registryObtained: false,
         hasRegistryAttachment: false,
         hasOwners: false,
+        target: { kind: "none" as const, mismatchWarning: null },
+        fingerprintHash: "",
       })),
       excluded: 0,
     };

@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   fetchRegistryFetchJob,
   processNextRegistryFetchItem,
@@ -17,6 +18,8 @@ import {
   resumeRegistryFetchJob,
   type RegistryFetchJobProgress,
 } from "@/lib/api-client";
+// ⚠理由のラベルはサーバ(作成を断る文言)と共有する=定義元は1つ。
+import { BULK_SKIP_REASON_LABEL } from "@/lib/registry-fetch/bulk/skip-reasons";
 
 // rate_limited(順番待ち)の**フォールバック**待ち。通常はサーバーが返す retryAfterMs を使う。
 // 未指定時のみこの保守的既定(サーバーの既定最小間隔 60秒に合わせる)を使う。
@@ -231,6 +234,11 @@ export default function RegistryBulkFetchProgressPage() {
         <Tile label="要確認" value={c.chargedButFailed} tone="red" />
       </div>
 
+      {/* ⚠外れた物件を黙って減らさない（設計 §3.1.0）。理由によって利用者の
+          やることが違うので、すべてを「地番が未入力」と書かない。
+          ⚠住所や地番そのものは出さない（秘匿）。件数と理由だけ。 */}
+      <ExcludedReasons items={progress.items} />
+
       {progress.status === "paused" && (
         <div className="mt-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
           {pausedMessage(progress.pausedReason)}
@@ -314,6 +322,59 @@ function Tile({
     <div className="rounded border border-gray-200 bg-white p-2 text-center dark:border-gray-800 dark:bg-gray-900">
       <div className={`text-lg font-semibold ${toneClass[tone]}`}>{value}</div>
       <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
+    </div>
+  );
+}
+
+/** 対象外になった物件を、理由ごとの件数で出す。⚠住所・地番は出さない（秘匿）。 */
+function ExcludedReasons({
+  items,
+}: {
+  items: RegistryFetchJobProgress["items"];
+}) {
+  // ⚠件数だけでは「どれを直せばよいか」が分からない(@codex #373 R2 P2)。
+  //   一覧へ戻ると選択も消えるので、物件へ行ける導線を理由ごとに残す。
+  //   ⚠出すのは物件IDだけ(住所・地番は出さない=秘匿)。
+  const byReason = new Map<string, string[]>();
+  for (const it of items ?? []) {
+    if (it.status !== "skipped" || !it.errorCode) continue;
+    const list = byReason.get(it.errorCode) ?? [];
+    if (it.propertyId) list.push(it.propertyId);
+    byReason.set(it.errorCode, list);
+  }
+  if (byReason.size === 0) return null;
+  return (
+    <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950/40">
+      <div className="font-medium text-amber-900 dark:text-amber-300">
+        対象外になった物件の内訳
+      </div>
+      <ul className="mt-1 space-y-1 text-xs text-amber-800 dark:text-amber-300">
+        {[...byReason.entries()].map(([code, ids]) => (
+          <li key={code}>
+            <span>
+              {BULK_SKIP_REASON_LABEL[code] ?? code}: {ids.length}件
+            </span>
+            {ids.length > 0 && (
+              <span className="ml-1 inline-flex flex-wrap gap-x-2">
+                {ids.map((id, i) => (
+                  <Link
+                    key={id}
+                    href={`/properties/${id}`}
+                    className="font-mono text-[11px] text-indigo-700 underline hover:text-indigo-900 dark:text-indigo-300 dark:hover:text-indigo-200"
+                  >
+                    {/* ⚠物件IDの先頭だけ。住所・地番は出さない(秘匿)。 */}
+                    {i + 1}件目({id.slice(0, 8)})
+                  </Link>
+                ))}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-400">
+        物件ページから1件ずつ対応してください。地番は物件ページのポップアップから
+        地図で確認して入れられます。
+      </p>
     </div>
   );
 }

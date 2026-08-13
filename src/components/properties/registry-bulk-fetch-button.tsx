@@ -12,9 +12,12 @@ import { useRef, useState } from "react";
 import {
   useRegistryPreflight,
   RegistryPreflightCountLines,
+  RegistryTargetSummary,
 } from "@/components/properties/registry-preflight-warnings";
 import { useRouter } from "next/navigation";
 import { createRegistryFetchJob } from "@/lib/api-client";
+// ⚠冪等キーの張り替え判定は**サーバの照合と同じ材料**で行う（定義元は1つ）。
+import { buildBulkIdempotencySignature } from "@/lib/registry-fetch/bulk/idempotency";
 
 interface Props {
   /** チェック中の物件ID(親が「今読み込んでいる物件 ∩ 選択」で確定して渡す)。 */
@@ -43,7 +46,23 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
 
   const handleConfirm = async () => {
     if (creating || count === 0) return;
-    const sig = `${[...propertyIds].sort().join(",")}|${certificateType}`;
+    // ⚠**この画面で見せた内容**を承認の根拠として送る（@codex #373 R6 P1）。
+    //   見せてから作成するまでの間に他の担当者が住所や番号を変えると、
+    //   作成時に読み直した新しい値で処理が進み、承認していないものを買う。
+    const approvedFingerprints = Object.fromEntries(
+      [...preflight.flagsById.values()].map((f) => [
+        f.propertyId,
+        f.fingerprintHash,
+      ]),
+    );
+    // ⚠承認の指紋もキーの材料に入れる（@codex #373 R9 P2）。物件を直して確認し
+    //   直したのに、選んだ物件と種別が同じだからと古いキーを使い回すと、
+    //   サーバーが**直す前のジョブ**を返してしまう。
+    const sig = buildBulkIdempotencySignature(
+      propertyIds,
+      certificateType,
+      approvedFingerprints,
+    );
     if (!idemKeyRef.current || idemSigRef.current !== sig) {
       idemKeyRef.current =
         typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -58,6 +77,7 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
         propertyIds,
         certificateType,
         idemKeyRef.current, // 再送時の二重作成を防ぐ(サーバーが同じキーを冪等化)
+        approvedFingerprints,
       );
       idemKeyRef.current = null; // 成功 → 次は新しいキー
       idemSigRef.current = null;
@@ -98,8 +118,11 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
           aria-label="謄本の一括取得"
           onClick={() => !creating && setOpen(false)}
         >
+          {/* ⚠中身の高さを画面内に収める（@codex #373 R10 P2）。食い違いの内訳は
+              1物件1行で最大50行まで伸びるので、上下にはみ出すと種類の選択も
+              実行ボタンも押せなくなる（特にスマホ）。 */}
           <div
-            className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl dark:bg-gray-900"
+            className="flex max-h-[85vh] w-full max-w-md flex-col overflow-y-auto rounded-lg bg-white p-5 shadow-xl dark:bg-gray-900"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">
@@ -113,6 +136,8 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
               番号がある・所在が不足している物件は自動で対象外（要手動）になります。
             </p>
             <RegistryPreflightCountLines state={preflight} />
+            {/* ⚠一括は候補1件で自動購入するので、承認の前に「何を買うか」を見せる。 */}
+            <RegistryTargetSummary state={preflight} />
 
             <fieldset className="mt-4 space-y-2 text-sm">
               <legend className="font-medium text-gray-700 dark:text-gray-200">
@@ -159,7 +184,14 @@ export function RegistryBulkFetchButton({ propertyIds, disabled }: Props) {
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={creating || count === 0 || preflight.pending}
+                disabled={
+                  creating ||
+                  count === 0 ||
+                  preflight.pending ||
+                  // ⚠何を取りに行くかが分からないうちは実行させない（fail closed）。
+                  //   一括は候補1件で自動購入まで進むので、参考情報の失敗とは扱いが違う。
+                  preflight.targetsUnavailable
+                }
                 title={preflight.pending ? "事前確認中です" : undefined}
                 className="rounded bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
               >

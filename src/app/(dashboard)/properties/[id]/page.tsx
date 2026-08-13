@@ -27,6 +27,7 @@ import CandidateList from "@/components/properties/candidate-list";
 import ActionBar from "@/components/properties/action-bar";
 import RegistryAutoFetchButton from "@/components/properties/registry-auto-fetch-button";
 import RegistryLocationSearchButton from "@/components/properties/registry-location-search-button";
+import { isLandPropertyType } from "@/lib/registry-fetch/registry-target";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
 import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner, fetchQualityCheck } from "@/lib/api-client";
@@ -578,6 +579,17 @@ export default function PropertyDetailPage({
         providerConfigured={registryLocationSearchConfigured}
         purchaseEnabled={registryPurchaseConfigured}
         onComplete={fetchProperty}
+        propertyAddress={property.address}
+        // ⚠地番の保存に要る。保存後は fetchProperty で取り直す
+        //   （同じ画面で2回保存すると2回目が必ず 409 になるため）。
+        propertyVersion={property.version}
+        gpsLat={property.gpsLat}
+        gpsLng={property.gpsLng}
+        canWriteProperty={canWriteProperty}
+        // ⚠土地だと分かっている種別以外は建物の道も見せる（@codex #373 R10 P2）。
+        //   駐車場・その他・不明は土地とも建物とも決まっていない。
+        offerBuildingPath={!isLandPropertyType(property.propertyType)}
+        onPropertyRefresh={fetchProperty}
       />
 
       {/* Warning badge */}

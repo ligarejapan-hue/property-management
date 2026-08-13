@@ -49,9 +49,21 @@ export async function POST(request: NextRequest) {
     const keyRaw = (body as { idempotencyKey?: unknown } | null)?.idempotencyKey;
     const idempotencyKey = typeof keyRaw === "string" ? keyRaw : null;
 
+    // ⚠画面が承認した内容の指紋（任意）。作成までの間に他の担当者が住所や番号を
+    //   変えていたら、その物件だけ対象外にする（@codex #373 R6 P1）。
+    const fpRaw = (body as { approvedFingerprints?: unknown } | null)
+      ?.approvedFingerprints;
+    const approvedFingerprints: Record<string, string> = {};
+    if (fpRaw && typeof fpRaw === "object" && !Array.isArray(fpRaw)) {
+      for (const [k, v] of Object.entries(fpRaw as Record<string, unknown>)) {
+        if (typeof v === "string" && v.length > 0) approvedFingerprints[k] = v;
+      }
+    }
+
     const result = await createBulkFetchJob({
       session,
       propertyIds,
+      approvedFingerprints,
       certificateType,
       idempotencyKey,
     });

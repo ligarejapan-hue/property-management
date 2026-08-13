@@ -1364,7 +1364,9 @@ git commit -m "feat(registry): 何を取りに行くかと、種別との食い�
 **Files:**
 - Create: `src/components/properties/registry-chiban-popup.tsx`
 - Modify: `src/app/(dashboard)/properties/[id]/page.tsx:566`（`version` を渡す）
-- Modify: `src/lib/__tests__/permissions-direct-fetch-allowlist.test.ts`（新しい直接 fetch を許可リストへ）
+- ⚠(実装時に判明・不要だった) `permissions-direct-fetch-allowlist.test.ts` の許可リストは
+  **`/api/me/permissions` への直接 fetch だけ**を見張るもの（正規表現がそのURLに限定されている）。
+  物件の PATCH は対象外なので更新は要らない。
 - Test: `src/components/properties/__tests__/registry-chiban-popup.test.ts`
 
 **Interfaces:**
@@ -1386,7 +1388,8 @@ git commit -m "feat(registry): 何を取りに行くかと、種別との食い�
   ```
 
 **背景（実測）**:
-- 物件本体の PATCH を呼ぶ **api-client のラッパーは無い**（`src/lib/api-client.ts:128`）。既存は編集フォームが**素の fetch** で呼んでいる（`property-edit-form.tsx:247`）。⚠ 直接 fetch の call site は**走査型ガード**（`src/lib/__tests__/permissions-direct-fetch-allowlist.test.ts:42`）で固定されているので、**許可リストへ追記が要る**。
+- 物件本体の PATCH を呼ぶ **api-client のラッパーは無い**（`src/lib/api-client.ts:128`）。既存は編集フォームが**素の fetch** で呼んでいる（`property-edit-form.tsx:247`）。⚠ (実装時に確認) 走査型ガード `permissions-direct-fetch-allowlist.test.ts` が見張るのは
+  **`/api/me/permissions` への直接 fetch だけ**なので、物件の PATCH は許可リストの更新が要らない。
 - `updatePropertySchema` は **version が必須**（`src/lib/validators.ts:217`）。地番だけ送るときも `version` を同梱する。
 - 謄本ボタンには現在 `version` を渡していない（`page.tsx:566`）。
 - 409 は `VERSION_CONFLICT`（`route.ts:217`）で、**最新 version は返らない**（`api-helpers.ts:322`）→ 画面は「もう一度開き直してください」と案内する。
@@ -1589,18 +1592,7 @@ export function RegistryChibanPopup({
 - 権限が無いとき: 「地番を入力してから実行してください（**地番の編集権限**が必要です）」
 - 建物系の「建物の登記を取る」: 「⚠家屋番号は**地番検索サービスの地図では分かりません**（地図が示すのは土地の地番です）。権利証・固定資産税の通知・過去の謄本などでご確認のうえ、物件の『家屋番号』欄に入力してから実行してください。」
 
-- [ ] **Step 4: 走査型ガードの許可リストへ足す**
-
-`src/lib/__tests__/permissions-direct-fetch-allowlist.test.ts` の許可リストに
-`src/components/properties/registry-chiban-popup.tsx` を追記し、**理由をコメントで書く**:
-
-```ts
-  // 物件本体の PATCH は共通ラッパーが無く、編集フォームも素の fetch で呼んでいる。
-  // ポップアップも同じ形に揃える（新しいラッパーだけ1つ増やすと二重管理になる）。
-  "src/components/properties/registry-chiban-popup.tsx",
-```
-
-- [ ] **Step 5: 物件詳細から version を渡す**
+- [ ] **Step 4: 物件詳細から version を渡す**
 
 `src/app/(dashboard)/properties/[id]/page.tsx:566` の謄本ボタンへ `propertyVersion={property.version}` と `propertyAddress` / `gpsLat` / `gpsLng` / `canWriteProperty` を渡す。
 

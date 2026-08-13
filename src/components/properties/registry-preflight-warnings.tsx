@@ -5,6 +5,11 @@ import {
   fetchRegistryPreflight,
   type RegistryPreflightFlags,
 } from "@/lib/api-client";
+import Link from "next/link";
+import {
+  isSearchableTarget,
+  type RegistryTarget,
+} from "@/lib/registry-fetch/registry-target";
 
 // 謄本取得の事前警告(発注者要望 2026-08-08)。
 // 「既に取得済み/謄本PDF添付あり/所有者入力済み」の物件へ課金する前に気づけるようにする。
@@ -14,25 +19,64 @@ import {
 
 export interface RegistryPreflightState {
   flagsById: Map<string, RegistryPreflightFlags>;
+  /** ⚠「何を取りに行くか(土地/建物)」。**買う対象そのもの**であって参考情報ではない。 */
+  targetsById: Map<string, RegistryTarget>;
   failed: boolean;
   /** 事前確認が未完了(実行ボタンはこの間 disabled にする=#365 R1: 警告を見る前に課金させない)。 */
   pending: boolean;
+  /**
+   * ⚠分類が読めていない。true の間は実行ボタンを**押せないままにする**(fail closed)。
+   *
+   * `failed` と別に持つ理由: 取得済み・所有者ありのような**参考情報**の失敗は
+   * 従来どおり「注意書きを出したうえで実行できる」ままにしたい。一方
+   * 「土地と建物のどちらを買うのか」は分からないまま実行すると**候補1件で
+   * 自動購入まで進む**ので、こちらだけ止める(設計 §3.1.1)。
+   */
+  targetsUnavailable: boolean;
+}
+
+/**
+ * preflight で使う2つのキーを作る。
+ *
+ * ⚠**送るIDの並び**と**取り直しの合図を含むキー**は別物にする(@codex #373 P1)。
+ * 1つにまとめて `0|<uuid>` のような値を作ると、それがそのまま
+ * `fetchRegistryPreflight` へ渡って 400(物件IDの形式が不正)になり、
+ * **謄本の取得が全部できなくなる**(失敗 → 分類が読めない → 実行ボタンが永久に無効)。
+ *
+ * - `idsKey` … API へ送るID(ソートして結合。選択順に依存しない)
+ * - `cacheKey` … effect の依存と「確定したか」の比較にだけ使う
+ */
+export function buildPreflightKeys(
+  propertyIds: string[],
+  reloadToken: number,
+): { idsKey: string; cacheKey: string } {
+  const idsKey = [...propertyIds].sort().join(",");
+  return { idsKey, cacheKey: `${reloadToken}|${idsKey}` };
 }
 
 /** active が true になったタイミングで preflight を1回取得する。 */
 export function useRegistryPreflight(
   propertyIds: string[],
   active: boolean,
+  /**
+   * 取り直しの合図。⚠ポップアップで地番を保存すると分類が変わるので、
+   * この値を変えて取り直す(対象も active も変わらないため、これが無いと古い分類のまま)。
+   */
+  reloadToken: number = 0,
 ): RegistryPreflightState {
   const [flagsById, setFlagsById] = useState<
     Map<string, RegistryPreflightFlags>
   >(new Map());
+  const [targetsById, setTargetsById] = useState<Map<string, RegistryTarget>>(
+    new Map(),
+  );
   const [failed, setFailed] = useState(false);
+  // ⚠既定は true(取れていない)。開いた直後から実行させない。
+  const [targetsUnavailable, setTargetsUnavailable] = useState(true);
   // 完了済みの対象集合キー。pending はここから導出する(effect 内の同期 setState を
   // 使わずに「確認が済むまで実行を止める」を実現する=#365 R1)。
   const [settledKey, setSettledKey] = useState<string | null>(null);
-  // useEffect の依存を安定させる(選択順に依存しないようソートして結合)。
-  const idsKey = [...propertyIds].sort().join(",");
+  const { idsKey, cacheKey } = buildPreflightKeys(propertyIds, reloadToken);
 
   // ⚠effect 内の同期 setState は lint 規約(react-hooks/set-state-in-effect)で禁止。
   // 状態更新はすべて fetch の then/catch(非同期)内で行う。
@@ -46,29 +90,40 @@ export function useRegistryPreflight(
       if (cancelled) return;
       setSettledKey(null);
       setFailed(false);
+      // ⚠取り直しの間は分類を「読めていない」に戻す(古い分類で実行させない)。
+      setTargetsUnavailable(true);
     });
     fetchRegistryPreflight(idsKey.split(","))
       .then((res) => {
         if (cancelled) return;
         setFailed(false);
         setFlagsById(new Map(res.data.map((f) => [f.propertyId, f])));
-        setSettledKey(idsKey);
+        setTargetsById(new Map(res.data.map((f) => [f.propertyId, f.target])));
+        setTargetsUnavailable(false);
+        setSettledKey(cacheKey);
       })
       .catch(() => {
         if (cancelled) return;
         setFailed(true);
         setFlagsById(new Map());
-        setSettledKey(idsKey); // 失敗も「確定」= failed の注意書きを見せた上で実行可能にする
+        setTargetsById(new Map());
+        // ⚠分類だけは「確定」させない。参考情報の失敗と違い、分からないまま
+        //   実行すると候補1件で自動購入まで進む(設計 §3.1.1・fail closed)。
+        setTargetsUnavailable(true);
+        setSettledKey(cacheKey); // 失敗も「確定」= failed の注意書きを見せた上で実行可能にする
       });
     return () => {
       cancelled = true;
     };
-  }, [active, idsKey]);
+  }, [active, cacheKey, idsKey]);
 
   return {
     flagsById,
+    targetsById,
     failed,
-    pending: active && idsKey.length > 0 && settledKey !== idsKey,
+    pending: active && propertyIds.length > 0 && settledKey !== cacheKey,
+    // 閉じているときは止める理由が無い(実行ボタン自体が出ない)。
+    targetsUnavailable: active && targetsUnavailable,
   };
 }
 
@@ -144,6 +199,121 @@ export function RegistryPreflightCountLines({
         番号がある・所在が不足しているものは自動で対象外になりますが、それ以外は
         取得(課金)の対象になります。ご確認のうえ実行してください。
       </p>
+    </div>
+  );
+}
+
+/**
+ * 「何を取りに行くか（土地／建物）」を見せる。
+ *
+ * ⚠**見せるだけで止めない**（種別との食い違いは警告・発注者判断 2026-08-12）。
+ * 止めるのは「分類そのものが読めていない」ときだけで、それは呼び出し側が
+ * `targetsUnavailable` でボタンを disabled にすることで行う。
+ */
+export function RegistryTargetNote({
+  state,
+  propertyId,
+}: {
+  state: RegistryPreflightState;
+  propertyId: string;
+}) {
+  if (state.targetsUnavailable) {
+    return (
+      <p className="text-[11px] text-amber-700 dark:text-amber-300">
+        何を取りに行くか確認できませんでした。もう一度お試しください。
+      </p>
+    );
+  }
+  const target = state.targetsById.get(propertyId);
+  if (!target) return null;
+  return (
+    <div className="text-[11px] text-gray-700 dark:text-gray-300">
+      <span className="font-medium">
+        {target.kind === "building"
+          ? "建物の登記を取得します"
+          : target.kind === "land"
+            ? "土地の登記を取得します"
+            : target.kind === "no_address"
+              ? "住所が未入力です。物件の住所を入れてから実行してください"
+              : target.kind === "malformed"
+              ? // ⚠地番を足しても解決しない。入っている番号を直すか空にしてもらう。
+                "地番/家屋番号の書き方が読み取れません。物件の欄を地図に表示されたとおりに直すか、空にしてください"
+              : target.kind === "number"
+              ? // ⚠番号がある物件は所在で探す経路の対象外。地番を尋ねてはいけない。
+                "不動産番号があるため、所在検索の対象外です。⚠現在この経路では取得できません（番号での取得は準備中）。別の方法で取得してください"
+              : "取得する登記を決められません（地番か家屋番号が必要です）"}
+      </span>
+      {/* ⚠食い違いは見せるだけ。確認したうえで実行できる。 */}
+      {target.mismatchWarning && (
+        <span className="mt-0.5 block text-amber-700 dark:text-amber-300">
+          ⚠ {target.mismatchWarning}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 一括で「何を買うことになるのか」の内訳を出す。
+ *
+ * ⚠一括は**候補が1件なら自動で買う**ので、承認する前に見せないと
+ * 「土地のつもりで建物の謄本を買った」が起きる（@codex #373 R5 P1）。
+ * 種別と食い違う物件は**件数と物件へのリンク**で名指しする。
+ * ⚠出すのは物件IDの先頭だけ（住所・地番は出さない＝秘匿）。
+ */
+export function RegistryTargetSummary({
+  state,
+}: {
+  state: RegistryPreflightState;
+}) {
+  if (state.targetsUnavailable) {
+    return (
+      <p className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+        何を取りに行くか確認できませんでした。もう一度お試しください。
+      </p>
+    );
+  }
+  const entries = [...state.targetsById.entries()];
+  if (entries.length === 0) return null;
+
+  const land = entries.filter(([, t]) => t.kind === "land").length;
+  const building = entries.filter(([, t]) => t.kind === "building").length;
+  const notSearchable = entries.filter(
+    ([, t]) => !isSearchableTarget(t.kind),
+  ).length;
+  const mismatches = entries.filter(([, t]) => t.mismatchWarning);
+
+  return (
+    <div className="rounded border border-indigo-200 bg-indigo-50 p-2 text-xs text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
+      <p className="font-medium">取得するもの</p>
+      <ul className="ml-4 list-disc">
+        {land > 0 && <li>土地の登記: {land}件</li>}
+        {building > 0 && <li>建物の登記: {building}件</li>}
+        {notSearchable > 0 && (
+          <li>この経路では取得できない: {notSearchable}件（対象外になります）</li>
+        )}
+      </ul>
+      {mismatches.length > 0 && (
+        <div className="mt-1 text-amber-800 dark:text-amber-300">
+          {/* ⚠止めない。見せたうえで実行できる（発注者判断 2026-08-12）。 */}
+          <p className="font-medium">
+            ⚠物件の種別と食い違うものがあります（{mismatches.length}件）
+          </p>
+          <ul className="ml-4 list-disc">
+            {mismatches.map(([id, t]) => (
+              <li key={id}>
+                {t.mismatchWarning}{" "}
+                <Link
+                  href={`/properties/${id}`}
+                  className="font-mono underline hover:text-amber-900 dark:hover:text-amber-200"
+                >
+                  ({id.slice(0, 8)})
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

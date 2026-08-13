@@ -8,6 +8,7 @@ import {
 } from "@/lib/api-helpers";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { classifyRegistryTarget } from "@/lib/registry-fetch/registry-target";
+import { hashPropertyFingerprint } from "@/lib/registry-fetch/candidate-cache";
 import { requireBulkSession } from "@/lib/registry-fetch/bulk/route-support";
 import { MAX_BULK_ITEMS, UUID_RE } from "@/lib/registry-fetch/bulk/types";
 
@@ -66,8 +67,12 @@ export async function POST(request: NextRequest) {
         registryStatus: true,
         // ⚠「何を取りに行くか(土地/建物)」の判定に使う。値は返さない(秘匿)。
         propertyType: true,
+        // ⚠分類に使う（値は返さない＝秘匿）。検索の入口は番号より先に住所を見る。
+        address: true,
         lotNumber: true,
         buildingNumber: true,
+        // ⚠あれば所在検索の対象外＝地番を尋ねてはいけない（設計 §3.1）。
+        realEstateNumber: true,
         _count: { select: { propertyOwners: true } },
       },
     });
@@ -99,10 +104,18 @@ export async function POST(request: NextRequest) {
       // ⚠これは参考情報ではなく**買う対象そのもの**。画面はこれが読めるまで
       //   実行させない(fail closed・設計 §3.1.1)。
       //   ⚠返すのは分類と警告文だけ。地番の値そのものは返さない(秘匿)。
+      // ⚠画面が「この内容で承認した」と言えるようにする（@codex #373 R6 P1）。
+      //   preflight から一括の作成までの間に他の担当者が住所や番号を変えると、
+      //   作成時に読み直した**新しい値**で指紋が作られ、処理は「変わっていない」と
+      //   判断して自動購入まで進む。承認の根拠を持ち回るための値。
+      //   ⚠これは digest（sha256 の先頭32桁）で、地番そのものではない。
+      fingerprintHash: hashPropertyFingerprint(p),
       target: classifyRegistryTarget({
         propertyType: p.propertyType,
+        address: p.address,
         lotNumber: p.lotNumber,
         buildingNumber: p.buildingNumber,
+        realEstateNumber: p.realEstateNumber,
       }),
     }));
 

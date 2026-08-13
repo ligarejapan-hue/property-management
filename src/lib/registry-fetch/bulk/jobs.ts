@@ -13,6 +13,8 @@ import { ApiError } from "@/lib/api-helpers";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { buildRegistrySearchRequest } from "@/lib/registry-fetch/search-request";
 import { hashPropertyFingerprint } from "@/lib/registry-fetch/candidate-cache";
+import { describeSkipReasons } from "./skip-reasons";
+import { buildBulkIdempotencySignature } from "./idempotency";
 import type { RegistryCertificateType } from "@/lib/registry-fetch/types";
 import {
   MAX_BULK_ITEMS,
@@ -86,6 +88,16 @@ export interface CreateBulkFetchJobArgs {
   certificateType: RegistryCertificateType;
   /** 二重作成防止キー(POST 応答が失われて再送しても同じジョブへ冪等化)。 */
   idempotencyKey?: string | null;
+  /**
+   * ⚠画面が承認した内容の指紋(物件ID → digest・任意)。
+   *
+   * 確認画面は「土地の登記を取得します」のように**何を買うか**を見せて承認を取る。
+   * その表示から作成までの間に他の担当者が住所や番号を変えると、作成時に読み直した
+   * **新しい値**で指紋が作られ、処理は「変わっていない」と判断して自動購入まで進む
+   * (例: 承認したのは土地なのに、家屋番号が足されて建物を買う)。
+   * 一致しない物件は対象外にして、もう一度確認してもらう(@codex #373 R6 P1)。
+   */
+  approvedFingerprints?: Record<string, string>;
 }
 
 /** ジョブの項目 status から作成結果の件数を組む(冪等ヒット時の返却にも使う)。 */
@@ -152,9 +164,19 @@ export async function createBulkFetchJob(
   }
 
   const idemKey = args.idempotencyKey?.trim() || null;
-  // 要求内容の指紋(対象物件の集合 + 種別)。同じキーで違う要求が来たら弾くための照合値。
+  // 要求内容の指紋(対象物件の集合 + 種別 + **承認の指紋**)。同じキーで違う要求が
+  // 来たら弾くための照合値。
+  // ⚠承認の指紋を材料に入れる(@codex #373 R9 P2)。入れないと、作成が成功したのに
+  //   応答が失われた後、利用者が物件を直して確認し直しても「同じ物件・同じ種別」
+  //   なら**古いジョブ**を返してしまう(直した物件が対象外のまま)。
   const fingerprint = createHash("sha256")
-    .update(`${[...ids].sort().join(",")}|${certificateType}`)
+    .update(
+      buildBulkIdempotencySignature(
+        ids,
+        certificateType,
+        args.approvedFingerprints,
+      ),
+    )
     .digest("hex")
     .slice(0, 32);
 
@@ -212,22 +234,69 @@ export async function createBulkFetchJob(
       realEstateNumber: p.realEstateNumber,
       ref: p.id,
     });
-    const status: BulkItemStatus = built.searchable ? "pending" : "skipped";
+    const fingerprintHash = hashPropertyFingerprint(p);
+    // ⚠**承認の根拠が無いものは買わない**(@codex #373 R7 P1)。
+    //   確認画面は「土地の登記を取得します」と**何を買うか**を見せて承認を取り、
+    //   その内容の指紋を一緒に送ってくる。候補が1件なら処理は自動で購入まで進むので、
+    //   指紋が「無い」ものを通すと**見せていない対象を買う**ことになる。
+    //   無い状況は実際に起きる: 古い画面のまま送信された / 確認の後で見えるように
+    //   なった物件が混ざった。どちらも「利用者はこの対象を見ていない」。
+    //   食い違い(他の担当者が住所や番号を変えた)とは直し方が違うので理由を分ける。
+    const approved = args.approvedFingerprints?.[p.id];
+    const approvalState: "ok" | "missing" | "changed" = !approved
+      ? "missing"
+      : approved === fingerprintHash
+        ? "ok"
+        : "changed";
+    const status: BulkItemStatus =
+      built.searchable && approvalState === "ok" ? "pending" : "skipped";
     return {
       propertyId: p.id,
       status,
-      errorCode: built.searchable ? null : built.reason,
+      // ⚠番号が足りない物件は、承認の話より先に**足りないこと**を伝える
+      //   (直す場所がそこなので)。
+      errorCode: !built.searchable
+        ? built.reason
+        : approvalState === "changed"
+          ? "identifier_changed"
+          : approvalState === "missing"
+            ? "not_approved"
+            : null,
       // ⚠作成時点の「検索に渡すもの一式」を控える(設計 §3.1.0.1)。
       //   一括は作成から処理までに時間が空く。その間に**別の正しい値へ**
       //   書き換わっても、番号の有無/形式の検査は素通りし、候補が1件なら
       //   **確認したのと別の筆**を自動で買う。
       //   材料は住所・地番・家屋番号・不動産番号(= 処理時に検索へ渡るものと同じ)。
       //   ⚠地番は秘匿情報なので**値は残さない**(sha256 の先頭32桁だけ)。
-      propertyFingerprintHash: hashPropertyFingerprint(p),
+      propertyFingerprintHash: fingerprintHash,
     };
   });
   const preSkipped = itemsData.filter((i) => i.status === "skipped").length;
   const pendingCount = itemsData.length - preSkipped;
+
+  // ⚠取りに行くものが1件も残らなかったら、**ジョブを作らない**
+  //   (設計 §3.1.0「ジョブ作成が許されるのは1件でも対象が残るとき」・
+  //    @codex #373 R7 P2 / R8 P2)。0件のジョブを作ると進捗画面へ飛ばされて
+  //   即「完了」と出る=何も取れていないのに終わったように見える。
+  //   ⚠代わりに**理由の内訳を断り文句に載せる**(件数だけ・住所や地番は出さない)。
+  //   進捗画面の内訳を見せられない以上、ここで言わないと何を直せばよいか分からない。
+  if (pendingCount === 0) {
+    const detail = describeSkipReasons(itemsData.map((i) => i.errorCode));
+    // ⚠直し方が違うので断り方を分ける。承認が古い=選び直す / 番号不足=物件を直す。
+    const approvalBlocked = itemsData.some(
+      (i) =>
+        i.errorCode === "not_approved" || i.errorCode === "identifier_changed",
+    );
+    throw new ApiError(
+      409,
+      approvalBlocked
+        ? `確認した内容から変わっています。取得する物件を選び直してください(${detail})`
+        : `取得できる物件がありません(${detail})。物件ページで直してから、もう一度選んでください`,
+      approvalBlocked
+        ? "REGISTRY_BULK_APPROVAL_STALE"
+        : "REGISTRY_BULK_NO_PENDING",
+    );
+  }
 
   try {
     const job = await prisma.$transaction(async (tx) => {
