@@ -15,7 +15,11 @@ const CASES: Array<{ action: string; detail: Record<string, unknown> }> = [
   },
   {
     action: "sale_dm_body_paste",
-    detail: { campaignId: "c1", pastedAt: "2026-08-14T00:00:00.000Z" },
+    detail: {
+      campaignId: "c1",
+      clearedCount: 2,
+      pastedAt: "2026-08-14T00:00:00.000Z",
+    },
   },
   {
     action: "sale_dm_template_apply",

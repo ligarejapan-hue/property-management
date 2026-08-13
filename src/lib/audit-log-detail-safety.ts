@@ -230,7 +230,7 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   sale_dm_variant_delete: new Set(["deletedAt"]),
   // 外部AI方式(PR-D2)。⚠プロンプト本文・手紙本文は detail に載せない(件数/ID/日時のみ)。
   sale_dm_prompt_view: new Set(["viewedAt"]),
-  sale_dm_body_paste: new Set(["pastedAt"]),
+  sale_dm_body_paste: new Set(["clearedCount", "pastedAt"]),
   // 「全宛先に適用」は多数の本文を書き換えるので、除外・スキップの件数も残す(設計§2.6)。
   sale_dm_template_apply: new Set([
     "appliedCount",
