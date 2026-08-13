@@ -665,6 +665,25 @@ function PropertiesPageInner() {
     setPage(1);
   };
 
+  // 「再送候補のみ」と両立しない絞り込みを選んだら、再送候補を解除する。
+  // ⚠逆方向（トグルONで他を合わせる）だけ直すと、あとから DM判断や送信回数を
+  //   切り替えて「必ず0件」の組み合わせが作れてしまう（@codex #374 R3）。両方向を塞ぐ。
+  //   再送候補は「DM判断=送付可」かつ「送付記録が1件以上ある」が条件（設計§4-1/§4-2）。
+  const handleDmFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const v = e.target.value;
+    setDmFilter(v);
+    // "" (すべて) は矛盾しない（where 側で送付可に絞られる）ので解除しない。
+    if (v !== "" && v !== "send") setResendOnly(false);
+    setPage(1);
+  };
+
+  const handleSendCountMaxChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const v = e.target.value;
+    setSendCountMaxFilter(v);
+    if (v === "0") setResendOnly(false);
+    setPage(1);
+  };
+
   // 全フィルタを一括リセット（並び順は既定に戻し、page=1）
   const handleResetFilters = () => {
     // 保留中の検索 debounce を破棄してからリセットする
@@ -1011,7 +1030,7 @@ function PropertiesPageInner() {
 
         <select
           value={dmFilter}
-          onChange={handleFilterChange(setDmFilter)}
+          onChange={handleDmFilterChange}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
           <option value="">DM判断: すべて</option>
@@ -1022,7 +1041,7 @@ function PropertiesPageInner() {
 
         <select
           value={sendCountMaxFilter}
-          onChange={handleFilterChange(setSendCountMaxFilter)}
+          onChange={handleSendCountMaxChange}
           className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           title="DM送信回数で絞り込む"
         >

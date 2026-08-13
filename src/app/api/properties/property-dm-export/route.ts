@@ -57,6 +57,9 @@ const AUDIT_FILTER_KEYS = [
   "includeArchived",
   "hasWarning",
   "dmSentMax",
+  // 再送候補で絞った出力かを監査にも残す(非PIIのフラグ)。3つの export 系 route で
+  // 揃えないと、同じ条件の出力なのに route ごとに監査の見え方が変わる(PR-C)。
+  "resendOnly",
   "sortBy",
   "sortOrder",
 ] as const;

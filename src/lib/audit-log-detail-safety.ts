@@ -106,6 +106,7 @@ const ALWAYS_SAFE_KEYS: ReadonlySet<string> = new Set([
   "registryStatus",
   "dmStatus",
   "dmSentMax", // DM送信回数フィルタ(未送信=0 のみ・非PIIの整数)。export 監査 detail.filters に載るので表示許可。
+  "resendOnly", // 再送候補フィルタ("1" のみ・非PIIのフラグ)。⚠route の AUDIT_FILTER_KEYS に足すだけでは表示で [REDACTED] になる(PR-C)。
   "caseStatus",
   "introductionRoute",
   "assignedTo",

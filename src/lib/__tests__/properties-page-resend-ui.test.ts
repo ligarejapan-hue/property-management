@@ -66,6 +66,38 @@ describe("properties page: 再送候補のみトグル", () => {
     expect(toggleHandler).toContain('setSendCountMaxFilter("")');
   });
 
+  /** 名前付きハンドラの本体を切り出す(距離窓は脆いのでこの形にそろえる)。 */
+  function handlerBody(decl: string): string {
+    const from = pageSrc.indexOf(decl);
+    if (from < 0) return "";
+    // 宣言から先の一定範囲だけを見て、最初の閉じ括弧までを本体とみなす。
+    const rest = pageSrc.slice(from, from + 800);
+    const end = rest.indexOf("};");
+    return end < 0 ? "" : rest.slice(0, end);
+  }
+
+  // ⚠トグルON側だけ直すと、後から DM判断や送信回数を切り替えて
+  // 「必ず0件」の組み合わせが作れてしまう(@codex #374 R3)。両方向を塞ぐ。
+  it("DM判断を「送付可」以外にすると再送候補を解除する", () => {
+    const body = handlerBody("const handleDmFilterChange");
+    expect(body.length).toBeGreaterThan(20);
+    expect(body.length).toBeLessThan(600);
+    expect(body).toContain("setResendOnly(false)");
+    expect(body).toContain('"send"');
+    expect(pageSrc).toMatch(/value=\{dmFilter\}[\s\S]{0,40}onChange=\{handleDmFilterChange\}/);
+  });
+
+  it("送信回数を「未送信(0回)」にすると再送候補を解除する", () => {
+    const body = handlerBody("const handleSendCountMaxChange");
+    expect(body.length).toBeGreaterThan(20);
+    expect(body.length).toBeLessThan(600);
+    expect(body).toContain("setResendOnly(false)");
+    expect(body).toContain('"0"');
+    expect(pageSrc).toMatch(
+      /value=\{sendCountMaxFilter\}[\s\S]{0,40}onChange=\{handleSendCountMaxChange\}/,
+    );
+  });
+
   it("日数を画面の文言に焼き込んでいない(env で変えられるため)", () => {
     expect(pageSrc).not.toMatch(/90日/);
   });
