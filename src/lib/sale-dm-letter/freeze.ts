@@ -28,3 +28,31 @@ export interface VariantFreezeState {
 export function isVariantFrozen(state: VariantFreezeState): boolean {
   return state.templateFrozenAt != null || state.settledCount > 0;
 }
+
+/**
+ * 凍結印を立てる（未設定のときだけ・一度立てたら解除しない）。
+ *
+ * ⚠**確定を作る／別の型へ動かす／確定を戻す**、そのどれもが「凍結の証拠」を
+ * 消し得るので、実行の**前に**呼ぶ（設計 §2.4 @codex R24→R31→R35）。
+ * 呼び出し側は variant 行をロック済みであること。
+ */
+export async function markVariantsFrozen(
+  tx: {
+    dmVariant: {
+      updateMany: (args: {
+        where: Record<string, unknown>;
+        data: Record<string, unknown>;
+      }) => Promise<{ count: number }>;
+    };
+  },
+  variantIds: string[],
+  at: Date = new Date(),
+): Promise<number> {
+  const ids = [...new Set(variantIds)].sort();
+  if (ids.length === 0) return 0;
+  const r = await tx.dmVariant.updateMany({
+    where: { id: { in: ids }, templateFrozenAt: null },
+    data: { templateFrozenAt: at },
+  });
+  return r.count;
+}

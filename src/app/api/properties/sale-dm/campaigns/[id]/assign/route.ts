@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess, assertSaleDmCampaignOwned, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
+import { markVariantsFrozen, SETTLED_DRAFT_STATUSES } from "@/lib/sale-dm-letter/freeze";
 import { saleDmAssignSchema } from "@/lib/validators-sale-dm";
 import { assignVariantsEvenly, applyManualAssignment } from "@/lib/sale-dm-letter/assign";
 
@@ -55,6 +56,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (lockVariantIds.length > 0) {
         await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ANY(${lockVariantIds}::uuid[]) AND campaign_id = ${id}::uuid ORDER BY id FOR UPDATE`;
       }
+      // ⚠確定済み/送付済みの下書きを別の型へ移すと、移動元の型から「確定があった」
+      //   証拠が消える。移す前に**移動元**の型へ凍結印を立てる（設計 §2.4 @codex R24/R31）。
+      const movingSettled = await tx.dmRecipientDraft.findMany({
+        where: {
+          id: { in: [...byVariant.values()].flat() },
+          campaignId: id,
+          status: { in: [...SETTLED_DRAFT_STATUSES] },
+        },
+        select: { variantId: true },
+      });
+      await markVariantsFrozen(tx, movingSettled.map((d) => d.variantId));
+
       for (const [variantId, ids] of byVariant) {
         if (ids.length === 0) continue;
         const result = await tx.dmRecipientDraft.updateMany({

@@ -5,6 +5,7 @@ import { handleApiError, parseJsonBody, ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess } from "@/lib/sale-dm-letter/route-guard";
 import { validateLetterBody } from "@/lib/sale-dm-letter/body-validation";
+import { markVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
 import { lockOwnersForShare } from "@/lib/dm-batch/locks";
 import {
   resolveDraftRecipient,
@@ -173,6 +174,10 @@ export async function POST(request: NextRequest) {
           "RECIPIENT_STALE",
         );
       }
+
+      // ⚠確定を作る前に、その型へ凍結印を立てる（設計 §2.4）。確定の証拠は割当や
+      //   個別編集で型から離れる／解除されるので、消える前に列へ固定する。
+      await markVariantsFrozen(tx, drafts.map((d) => d.variantId));
 
       const result = await tx.dmRecipientDraft.updateMany({
         where: { ...where, id: { in: drafts.map((d) => d.id) } },

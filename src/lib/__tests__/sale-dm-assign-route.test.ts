@@ -17,7 +17,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     dmCampaign: { findFirst: vi.fn() },
-    dmVariant: { findMany: vi.fn() },
+    dmVariant: { findMany: vi.fn(), updateMany: vi.fn(async () => ({ count: 0 })) },
     dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn() },
     // 割当は updateMany の前に型行をロックする(PR-D1・デッドロック回避)。
     $queryRaw: vi.fn(async () => []),
@@ -34,7 +34,7 @@ import { POST as assign } from "../../app/api/properties/sale-dm/campaigns/[id]/
 
 const pm = prismaMock as never as {
   dmCampaign: { findFirst: ReturnType<typeof vi.fn> };
-  dmVariant: { findMany: ReturnType<typeof vi.fn> };
+  dmVariant: { findMany: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
   dmRecipientDraft: { findMany: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
 };
 const ALL = ["property", "csv_export", "csv_export_personal", "owner"];

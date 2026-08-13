@@ -5,6 +5,7 @@ import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmVariantUpdateSchema } from "@/lib/validators-sale-dm";
+import { SETTLED_DRAFT_STATUSES, isVariantFrozen } from "@/lib/sale-dm-letter/freeze";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string; variantId: string }> }) {
   try {
@@ -82,15 +83,35 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       // デッドロックする。
       await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ${variantId}::uuid AND campaign_id = ${id}::uuid FOR UPDATE`;
       await tx.$queryRaw`SELECT id FROM dm_recipient_drafts WHERE campaign_id = ${id}::uuid AND variant_id = ${variantId}::uuid FOR UPDATE`;
-      const sentBefore = await tx.dmRecipientDraft.count({ where: { campaignId: id, variantId, status: "sent" } });
-      if (sentBefore > 0) {
-        throw new ApiError(409, "送付済みの宛先がある型は設定を変更できません(A/B履歴の整合のため)", "VARIANT_LOCKED");
+      // 凍結の二重判定（列 template_frozen_at OR 配下に confirmed/sent）。
+      // 送付済みだけでなく**確定済み**でも設定を変えさせない＝文面と A/B 構成の出所を守る
+      // （設計 §2.4）。列も見るので、割当で確定が型から離れた後でも凍結は失われない。
+      const frozenRow = await tx.dmVariant.findFirst({
+        where: { id: variantId, campaignId: id },
+        select: { templateFrozenAt: true },
+      });
+      const sentBefore = await tx.dmRecipientDraft.count({
+        where: { campaignId: id, variantId, status: { in: [...SETTLED_DRAFT_STATUSES] } },
+      });
+      if (
+        isVariantFrozen({
+          templateFrozenAt: frozenRow?.templateFrozenAt ?? null,
+          settledCount: sentBefore,
+        })
+      ) {
+        throw new ApiError(409, "送付実績のある型は設定を変更できません(A/B履歴の整合のため)", "VARIANT_LOCKED");
       }
       // campaignId で縛り、他キャンペーンの型を更新させない。
       const updated = await tx.dmVariant.update({ where: { id: variantId, campaignId: id }, data });
       // options(design/tone/length/appeal/strength/extraInstruction)を実際に変えたら、この型を使う未送付の
       // 下書きは旧設定で生成済みのため無効化(本文クリア→draft へ・要再生成)。label のみ/空 options は本文不変。
       if (optionFieldChanged) {
+        // 古いプロンプトで作った本文を、新しい設定の型として再適用できてしまう不整合を
+        // 防ぐため、原本とプロンプトの控えも同時に消す（設計 §2.4）。
+        await tx.dmVariant.update({
+          where: { id: variantId },
+          data: { promptText: null, bodyTemplate: null },
+        });
         await tx.dmRecipientDraft.updateMany({
           where: { campaignId: id, variantId, status: { not: "sent" }, body: { not: "" } },
           data: { body: "", status: "draft", confirmedAt: null },
@@ -141,8 +162,29 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     // (チェックと削除の間に assign が下書きをこの型へ割り当てると、削除済み variant を参照する孤児 draft が
     // 残り A/B 集計から恒久的に消える)を避けるため、関係フィルタ `recipients: { none: {} }` で「下書きを
     // 1件も持たない場合のみ削除」をアトミックに実行する。0 行 = 割当済み(または並行割当の発生)→ 409。
-    const deleted = await prisma.dmVariant.deleteMany({
-      where: { id: variantId, campaignId: id, recipients: { none: {} } },
+    // 凍結済みの型は削除できない（設計 §2.4 @codex R14/R23）。既存判定は「宛先が居ない
+    // こと」しか見ないため、割当で空にしてから削除すると**送付済み文面の出所ごと**消える。
+    // 判定は PATCH と同じ二重判定を、variant 行のロックの下で行う。
+    const deleted = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ${variantId}::uuid AND campaign_id = ${id}::uuid FOR UPDATE`;
+      const row = await tx.dmVariant.findFirst({
+        where: { id: variantId, campaignId: id },
+        select: { templateFrozenAt: true },
+      });
+      const settledCount = await tx.dmRecipientDraft.count({
+        where: { campaignId: id, variantId, status: { in: [...SETTLED_DRAFT_STATUSES] } },
+      });
+      if (
+        isVariantFrozen({
+          templateFrozenAt: row?.templateFrozenAt ?? null,
+          settledCount,
+        })
+      ) {
+        throw new ApiError(409, "送付実績のある型は削除できません", "VARIANT_FROZEN");
+      }
+      return tx.dmVariant.deleteMany({
+        where: { id: variantId, campaignId: id, recipients: { none: {} } },
+      });
     });
     if (deleted.count === 0) {
       throw new ApiError(409, "この型は宛先に割り当てられているため削除できません", "VARIANT_IN_USE");

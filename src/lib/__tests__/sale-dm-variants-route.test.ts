@@ -291,13 +291,15 @@ describe("PATCH variant (更新)", () => {
     expect(pm.dmVariant.update.mock.calls[0][0].data.lpUrl).toBe("https://lp-new.example.com");
   });
 
-  it("送付済みの宛先がある型は設定変更を拒否(409 VARIANT_LOCKED)・更新しない", async () => {
-    pm.dmRecipientDraft.count.mockResolvedValue(2); // この型を使った送付済みドラフトが存在
+  it("確定済み/送付済みの宛先がある型は設定変更を拒否(409 VARIANT_LOCKED)・更新しない", async () => {
+    // PR-D2: 送付済みだけでなく**確定済み**でも止める(文面と A/B 構成の出所を守る・設計§2.4)。
+    pm.dmRecipientDraft.count.mockResolvedValue(2);
     const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { tone: "soft" } }) }) as never, ctxV);
     expect(res.status).toBe(409);
     expect(pm.dmVariant.update).not.toHaveBeenCalled();
     const countArg = pm.dmRecipientDraft.count.mock.calls[0][0];
-    expect(countArg.where).toMatchObject({ campaignId: "c1", variantId: "v1", status: "sent" });
+    expect(countArg.where).toMatchObject({ campaignId: "c1", variantId: "v1" });
+    expect(countArg.where.status).toEqual({ in: ["confirmed", "sent"] });
   });
 
   it("更新中に別requestがこの型の宛先をsent化したら 409(TOCTOU・トランザクション前後でsentチェック)", async () => {
@@ -323,7 +325,10 @@ describe("PATCH variant (更新)", () => {
 });
 
 describe("DELETE variant (削除ガード)", () => {
+  // ⚠vi.clearAllMocks は mockResolvedValue の実装を消さない。PATCH のテストが入れた
+  //   count=2 が残ると、削除の凍結判定が誤って発火する(実際に踏んだ)。明示的に戻す。
   it("割当済みドラフトが無ければ削除し 200(下書きを持たない場合のみのアトミック条件付き削除)", async () => {
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
     pm.dmVariant.deleteMany.mockResolvedValue({ count: 1 });
     const res = await deleteVariant(new Request("http://x", { method: "DELETE" }) as never, ctxV);
     expect(res.status).toBe(200);
@@ -331,6 +336,7 @@ describe("DELETE variant (削除ガード)", () => {
     expect(pm.dmVariant.deleteMany).toHaveBeenCalledWith({ where: { id: "v1", campaignId: "c1", recipients: { none: {} } } });
   });
   it("割当済みドラフトがあれば 409・削除しない(count=0)", async () => {
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
     pm.dmVariant.deleteMany.mockResolvedValue({ count: 0 }); // 下書きが存在=条件不一致で 0 行
     const res = await deleteVariant(new Request("http://x", { method: "DELETE" }) as never, ctxV);
     expect(res.status).toBe(409);
