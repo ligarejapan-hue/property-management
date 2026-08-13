@@ -38,7 +38,7 @@ const pm = prismaMock as never as { dmRecipientDraft: { findUnique: ReturnType<t
 const ALL = ["property", "csv_export", "csv_export_personal", "owner", "sale_dm"];
 const grant = (...keys: string[]) =>
   (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(
-    keys.map((k) => ({ resource: k, action: k === "sale_dm" ? "generate" : "read", granted: true })),
+    [...keys.map((k) => ({ resource: k, action: k === "sale_dm" ? "generate" : "read", granted: true })), { resource: "property", action: "write", granted: true }],
   );
 const ctx = { params: Promise.resolve({ id: "r1" }) };
 

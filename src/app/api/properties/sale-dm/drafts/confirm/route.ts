@@ -3,7 +3,7 @@ import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { handleApiError, parseJsonBody, ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmWriteAccess } from "@/lib/sale-dm-letter/route-guard";
 import { lockOwnersForShare } from "@/lib/dm-batch/locks";
 import {
   resolveDraftRecipient,
@@ -16,7 +16,7 @@ const confirmSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500)
 
 export async function POST(request: NextRequest) {
   try {
-    const { session } = await requireSaleDmAccess();
+    const { session } = await requireSaleDmWriteAccess();
     const { ids } = confirmSchema.parse(await parseJsonBody(request));
     // 作成者本人のキャンペーン配下の draft のみ確定(他人のキャンペーンの draft は対象外)。
     // 生成失敗(body="")は確定対象から除外(空letterの確定→印刷→送付を防ぐ)。

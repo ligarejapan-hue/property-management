@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
-import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmWriteAccess } from "@/lib/sale-dm-letter/route-guard";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { isSaleDmConfigured, generateLetters, resolveProvider } from "@/lib/sale-dm-letter";
@@ -13,7 +13,7 @@ import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { session, permissions } = await requireSaleDmAccess();
+    const { session, permissions } = await requireSaleDmWriteAccess();
     // 再生成も有料AI呼び出し(1通)+ オーナーPII の外部送信のため sale_dm:generate を必須化(campaign 作成と統一)。
     if (!hasPermission(permissions, "sale_dm", "generate")) throw new ApiError(403, "AIによるDM生成の権限がありません", "FORBIDDEN");
     // 売却DM 設定は DB→env で解決(管理画面の設定を反映)。

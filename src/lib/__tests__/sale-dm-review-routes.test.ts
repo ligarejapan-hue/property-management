@@ -103,6 +103,7 @@ function setupFreshDrafts(
 }
 const grant = (...keys: string[]) => (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([
   ...["property", "csv_export", "csv_export_personal", "owner"].map((r) => ({ resource: r, action: "read", granted: keys.includes(r) })),
+  { resource: "property", action: "write", granted: true },
   // 有料AI生成の専用権限(action=generate)。regenerate route が要求する。
   { resource: "sale_dm", action: "generate", granted: keys.includes("sale_dm") },
 ]);

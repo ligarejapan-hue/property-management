@@ -40,7 +40,7 @@ const pm = prismaMock as never as {
 };
 const ALL = ["property", "csv_export", "csv_export_personal", "owner"];
 const grant = (...keys: string[]) =>
-  (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(keys.map((k) => ({ resource: k, action: "read", granted: true })));
+  (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([...keys.map((k) => ({ resource: k, action: "read", granted: true })), { resource: "property", action: "write", granted: true }]);
 const ctx = { params: Promise.resolve({ id: "r1" }) };
 const patch = (b: unknown) => new Request("http://x", { method: "PATCH", body: JSON.stringify(b) });
 

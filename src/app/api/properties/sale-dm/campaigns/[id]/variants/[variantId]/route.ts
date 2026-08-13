@@ -3,12 +3,12 @@ import type { Prisma } from "@/generated/prisma";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { requireSaleDmAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmWriteAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmVariantUpdateSchema } from "@/lib/validators-sale-dm";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string; variantId: string }> }) {
   try {
-    const { session } = await requireSaleDmAccess();
+    const { session } = await requireSaleDmWriteAccess();
     const { id, variantId } = await params;
     await assertSaleDmCampaignOwned(id, session.id); // 作成者本人のキャンペーンの型のみ更新可。
     const parsed = saleDmVariantUpdateSchema.parse(await parseJsonBody(request));
@@ -127,7 +127,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string; variantId: string }> }) {
   try {
-    const { session } = await requireSaleDmAccess();
+    const { session } = await requireSaleDmWriteAccess();
     const { id, variantId } = await params;
     await assertSaleDmCampaignOwned(id, session.id); // 作成者本人のキャンペーンの型のみ削除可。
 

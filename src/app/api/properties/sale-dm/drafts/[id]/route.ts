@@ -4,7 +4,7 @@ import prisma from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmWriteAccess } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmOptionsOverrideSchema } from "@/lib/validators-sale-dm";
 import {
   letterBodyIssueMessage,
@@ -25,7 +25,7 @@ const patchSchema = z
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { session } = await requireSaleDmAccess();
+    const { session } = await requireSaleDmWriteAccess();
     const { id } = await params;
     const parsed = patchSchema.parse(await parseJsonBody(request));
 
