@@ -3,7 +3,8 @@ import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { handleApiError, parseJsonBody, ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmWriteAccess } from "@/lib/sale-dm-letter/route-guard";
+import { validateLetterBody } from "@/lib/sale-dm-letter/body-validation";
 import { lockOwnersForShare } from "@/lib/dm-batch/locks";
 import {
   resolveDraftRecipient,
@@ -16,7 +17,7 @@ const confirmSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500)
 
 export async function POST(request: NextRequest) {
   try {
-    const { session } = await requireSaleDmAccess();
+    const { session } = await requireSaleDmWriteAccess();
     const { ids } = confirmSchema.parse(await parseJsonBody(request));
     // 作成者本人のキャンペーン配下の draft のみ確定(他人のキャンペーンの draft は対象外)。
     // 生成失敗(body="")は確定対象から除外(空letterの確定→印刷→送付を防ぐ)。
@@ -42,10 +43,83 @@ export async function POST(request: NextRequest) {
     const count = await prisma.$transaction(async (tx) => {
       // ⚠確定の対象を、所有者をロックした**同じ処理の中で**読み直して判定する。
       //   ロックの外で判定すると、判定した直後に住所が変わっても確定が通ってしまう。
-      const drafts = await tx.dmRecipientDraft.findMany({
+      // ①先読み（ロック無し）。ここでは対象の id と所有者だけを拾う。
+      const pre = await tx.dmRecipientDraft.findMany({
         where,
         select: {
           id: true,
+          body: true,
+          variantId: true,
+          propertyId: true,
+          recipientZip: true,
+          recipientAddress: true,
+          representativeOwnerId: true,
+          draftOwners: { select: { ownerId: true } },
+        },
+      });
+      if (pre.length === 0) return 0;
+
+      const ownerIds = [
+        ...new Set(
+          pre.flatMap((d) => [
+            ...(d.representativeOwnerId ? [d.representativeOwnerId] : []),
+            ...d.draftOwners.map((o) => o.ownerId),
+          ]),
+        ),
+      ];
+      // 既定のロック順（Owner → 物件 → 子行）に合わせて所有者を先に取る。
+      await lockOwnersForShare(tx, ownerIds);
+
+      // ロック順序（設計 §2.3）: Owner → variant → 物件親行 → 子行。
+      // variant を掴むのは、PR-D2 の「貼り付け／適用」（凍結判定）と直列化するため。
+      const variantIds = [...new Set(pre.map((d) => d.variantId))].sort();
+      if (variantIds.length > 0) {
+        await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ANY(${variantIds}::uuid[]) ORDER BY id FOR UPDATE`;
+      }
+
+      // field_staff は担当範囲を**ロックを保持したまま**見直す。where のリレーション述語は
+      // ステートメントのスナップショットで評価されるため、判定〜commit の間の担当変更を
+      // 防げない（アクセスを失った後の確定が通る）。admin/office は判定が常に真なので不要。
+      if (session.role === "field_staff") {
+        const propertyIds = [...new Set(pre.map((d) => d.propertyId))].sort();
+        if (propertyIds.length > 0) {
+          await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${propertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
+          const visible = await tx.property.findMany({
+            where: {
+              id: { in: propertyIds },
+              OR: [{ createdBy: session.id }, { assignedTo: session.id }],
+            },
+            select: { id: true },
+          });
+          if (visible.length !== propertyIds.length) {
+            throw new ApiError(
+              409,
+              "担当が変わった宛先が含まれています。画面を開き直してから確定してください",
+              "SCOPE_CHANGED",
+            );
+          }
+        }
+      }
+
+      // ②子行（draft）をロックしてから**読み直す**（順序 Owner → variant → 物件親行 → 子行）。
+      // ⚠再生成は型のロックを取らないため、先読み〜確定の間に本文を差し替えられる。
+      //   先読みの値だけで検査すると、検査を通っていない本文がそのまま確定される
+      //   (@codex #375 R2)。ロック下で読み直した値で検査し、同じ tx で status を進める。
+      const draftIds = pre.map((d) => d.id).sort();
+      await tx.$queryRaw`SELECT id FROM dm_recipient_drafts WHERE id = ANY(${draftIds}::uuid[]) ORDER BY id FOR UPDATE`;
+      // ⚠読み直しでは `body != ""` を**外す**(@codex #375 R3)。型の設定変更や割当は
+      //   本文を "" にするため、条件を残すとその宛先だけ黙って対象から消え、残りが
+      //   確定される(空白なら全体を止めるのに、空だと素通り=扱いが不一致)。空になって
+      //   いれば下の検査が "empty" として拾い、確定全体を断る。
+      const { body: _bodyNotEmpty, ...whereForReread } = where;
+      void _bodyNotEmpty;
+      const drafts = await tx.dmRecipientDraft.findMany({
+        where: { ...whereForReread, id: { in: draftIds } },
+        select: {
+          id: true,
+          body: true,
+          variantId: true,
+          propertyId: true,
           recipientZip: true,
           recipientAddress: true,
           representativeOwnerId: true,
@@ -54,16 +128,18 @@ export async function POST(request: NextRequest) {
       });
       if (drafts.length === 0) return 0;
 
-      const ownerIds = [
-        ...new Set(
-          drafts.flatMap((d) => [
-            ...(d.representativeOwnerId ? [d.representativeOwnerId] : []),
-            ...d.draftOwners.map((o) => o.ownerId),
-          ]),
-        ),
-      ];
-      // 既定のロック順（Owner → 物件 → 子行）に合わせて所有者を先に取る。
-      await lockOwnersForShare(tx, ownerIds);
+      // ⚠確定は**印刷の直前の唯一の関所**。個別編集の入口だけを塞いでも、AI生成の出力や
+      //   この反映より前からあるデータに不正な本文があれば通ってしまう(@codex #375)。
+      //   where の `body != ""` では空白のみ・差込記号の残り・長すぎる本文を止められない。
+      //   1件でも不正なら確定全体を断る(黙って減らさない=既存の宛先変更の扱いと同じ)。
+      const invalidCount = drafts.filter((d) => validateLetterBody(d.body) !== null).length;
+      if (invalidCount > 0) {
+        throw new ApiError(
+          409,
+          `本文に問題がある宛先が ${invalidCount} 件あります。空白だけ・差し込みの記号が残っている・長すぎる本文は確定できません`,
+          "INVALID_BODY",
+        );
+      }
 
       const owners = await tx.owner.findMany({
         where: { id: { in: ownerIds } },

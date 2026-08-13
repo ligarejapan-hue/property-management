@@ -19,6 +19,8 @@ vi.mock("@/lib/prisma", () => {
     dmCampaign: { findFirst: vi.fn() },
     dmVariant: { findMany: vi.fn() },
     dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn() },
+    // 割当は updateMany の前に型行をロックする(PR-D1・デッドロック回避)。
+    $queryRaw: vi.fn(async () => []),
   };
   // 型ごとの updateMany を1トランザクションにまとめる(部分破壊防止)。tx=同db委譲ゆえ既存アサーション維持。
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
@@ -37,7 +39,7 @@ const pm = prismaMock as never as {
 };
 const ALL = ["property", "csv_export", "csv_export_personal", "owner"];
 const grant = (...keys: string[]) =>
-  (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(ALL.map((r) => ({ resource: r, action: "read", granted: keys.includes(r) })));
+  (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([...ALL.map((r) => ({ resource: r, action: "read", granted: keys.includes(r) })), { resource: "property", action: "write", granted: true }]);
 const ctxC = { params: Promise.resolve({ id: "c1" }) };
 const post = (b: unknown) => new Request("http://x", { method: "POST", body: JSON.stringify(b) });
 
@@ -51,6 +53,24 @@ beforeEach(() => {
   pm.dmVariant.findMany.mockResolvedValue([{ id: "vA" }, { id: "vB" }]);
   pm.dmRecipientDraft.findMany.mockResolvedValue([{ id: "r1" }, { id: "r2" }, { id: "r3" }, { id: "r4" }]);
   pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 2 });
+});
+
+// 書き込み門(設計 §2.5)。これまでの実質的な門は sale_dm:generate だったが、外部AI方式では
+// 生成なしで一式が作れるため外れる。閲覧権限だけの利用者が割当・失効をできないことを実測する。
+describe("書き込み権限(property:write)の門", () => {
+  it("閲覧権限がそろっていても write が無ければ 403・何も更新しない", async () => {
+    (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue(
+      ALL.map((r) => ({ resource: r, action: "read", granted: true })),
+    );
+    const res = await assign(post({ mode: "auto", order: "sequential" }) as never, ctxC);
+    expect(res.status).toBe(403);
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("write があれば従来どおり通る", async () => {
+    const res = await assign(post({ mode: "auto", order: "sequential" }) as never, ctxC);
+    expect(res.status).toBe(200);
+  });
 });
 
 describe("POST assign (auto)", () => {

@@ -3,12 +3,12 @@ import type { Prisma } from "@/generated/prisma";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { requireSaleDmAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmWriteAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmVariantUpdateSchema } from "@/lib/validators-sale-dm";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string; variantId: string }> }) {
   try {
-    const { session } = await requireSaleDmAccess();
+    const { session } = await requireSaleDmWriteAccess();
     const { id, variantId } = await params;
     await assertSaleDmCampaignOwned(id, session.id); // 作成者本人のキャンペーンの型のみ更新可。
     const parsed = saleDmVariantUpdateSchema.parse(await parseJsonBody(request));
@@ -77,6 +77,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       // 食い違う)を防ぐため、この型の宛先行を FOR UPDATE でロックして mark-sent と直列化する。sentBefore/
       // sentAfter のみでは mark-sent の未コミット更新を見落とす(label のみ編集は下書き行に触れずロックもしない)。
       // ロック後はどちらの順序でも整合(編集→送付=送付時点の型で送る / 送付→編集=sent検知で VARIANT_LOCKED)。
+      // ロック順序（設計 §2.3）: variant → 物件親行 → draft。PR-D2 の「貼り付け／適用」は
+      // 凍結判定のため variant を先に取るので、こちらも先に取らないと互いに待ち合って
+      // デッドロックする。
+      await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ${variantId}::uuid AND campaign_id = ${id}::uuid FOR UPDATE`;
       await tx.$queryRaw`SELECT id FROM dm_recipient_drafts WHERE campaign_id = ${id}::uuid AND variant_id = ${variantId}::uuid FOR UPDATE`;
       const sentBefore = await tx.dmRecipientDraft.count({ where: { campaignId: id, variantId, status: "sent" } });
       if (sentBefore > 0) {
@@ -123,7 +127,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string; variantId: string }> }) {
   try {
-    const { session } = await requireSaleDmAccess();
+    const { session } = await requireSaleDmWriteAccess();
     const { id, variantId } = await params;
     await assertSaleDmCampaignOwned(id, session.id); // 作成者本人のキャンペーンの型のみ削除可。
 

@@ -28,6 +28,10 @@ export async function POST(request: NextRequest) {
     if (!hasPermission(permissions, "csv_export", "read")) throw new ApiError(403, "CSV エクスポートの権限がありません", "FORBIDDEN");
     if (!hasPermission(permissions, "csv_export_personal", "read")) throw new ApiError(403, "個人情報を含む出力の権限がありません", "FORBIDDEN");
     if (!hasPermission(permissions, "owner", "read")) throw new ApiError(403, "所有者情報の閲覧権限がありません", "FORBIDDEN");
+    // 書き込み門(設計 §2.5)。これまでの実質的な門は sale_dm:generate だったが、外部AI方式では
+    // 生成なしで一式が作れるため、閲覧権限だけの利用者がキャンペーンを作れてしまう。
+    if (!hasPermission(permissions, "property", "write")) throw new ApiError(403, "物件情報の編集権限がありません", "FORBIDDEN");
+
     // AI生成は課金 + オーナーPII を外部AIへ送るため、専用権限 sale_dm:generate を必須化(謄本自動取得と同方針)。
     // read系/CSV権限だけで誰でも有料生成を実行できないようにする(admin が明示付与する高リスク操作)。
     if (!hasPermission(permissions, "sale_dm", "generate")) throw new ApiError(403, "AIによるDM生成の権限がありません", "FORBIDDEN");

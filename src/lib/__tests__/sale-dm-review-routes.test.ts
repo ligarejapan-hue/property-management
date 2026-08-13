@@ -25,6 +25,8 @@ vi.mock("@/lib/prisma", () => {
   const tx = {
     dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn() },
     owner: { findMany: vi.fn() },
+    // 確定は field_staff のとき、物件親行をロックしたまま担当範囲を見直す(PR-D1)。
+    property: { findMany: vi.fn(async () => []) },
     $queryRaw: vi.fn(async () => []),
   };
   return {
@@ -58,6 +60,7 @@ const pm = prismaMock as never as {
   _tx: {
     dmRecipientDraft: { findMany: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
     owner: { findMany: ReturnType<typeof vi.fn> };
+    property: { findMany: ReturnType<typeof vi.fn> };
   };
 };
 
@@ -80,11 +83,20 @@ function setupFreshDrafts(
   pm._tx.dmRecipientDraft.findMany.mockResolvedValue(
     drafts.map((d) => ({
       id: d.id,
+      // 確定は本文も検査する(PR-D1)。既定は問題のない本文。
+      body: "拝啓 時下ますますご清祥のこととお喜び申し上げます。",
       recipientZip: d.recipientZip,
       recipientAddress: d.recipientAddress,
       representativeOwnerId: d.ownerId,
       draftOwners: [{ ownerId: d.ownerId }],
+      // 確定 tx が variant → 物件親行の順にロックするため、両 id を返す(PR-D1)。
+      variantId: "vvvvvvvv-1111-4111-8111-111111111111",
+      propertyId: `pppppppp-1111-4111-8111-${d.id.slice(-12)}`,
     })),
+  );
+  // 既定は「担当範囲が変わっていない」= 全物件が見える。
+  pm._tx.property.findMany.mockResolvedValue(
+    drafts.map((d) => ({ id: `pppppppp-1111-4111-8111-${d.id.slice(-12)}` })),
   );
   pm._tx.owner.findMany.mockResolvedValue(owners);
   pm._tx.dmRecipientDraft.updateMany.mockResolvedValue({
@@ -93,6 +105,7 @@ function setupFreshDrafts(
 }
 const grant = (...keys: string[]) => (getUserPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([
   ...["property", "csv_export", "csv_export_personal", "owner"].map((r) => ({ resource: r, action: "read", granted: keys.includes(r) })),
+  { resource: "property", action: "write", granted: true },
   // 有料AI生成の専用権限(action=generate)。regenerate route が要求する。
   { resource: "sale_dm", action: "generate", granted: keys.includes("sale_dm") },
 ]);
@@ -305,6 +318,134 @@ describe("POST confirm (bulk)", () => {
     expect(where.property).toEqual({ OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] });
   });
 
+  // ⚠確定は「印刷の直前の唯一の関所」。手編集の入口だけ塞いでも、AI生成の出力や
+  //   反映前からあるデータに不正な本文があれば通ってしまう(@codex #375)。
+  it.each([
+    ["空白だけ", "   "],
+    ["差込の記号が残っている", "拝啓 {{owner_name}} 様"],
+    ["長すぎる", "あ".repeat(20_001)],
+  ])("本文が%sの宛先は確定できない(409・1件も確定しない)", async (_label, body) => {
+    grant(...ALL);
+    setupFreshDrafts(
+      [{ id: "11111111-1111-4111-8111-111111111111", recipientZip: null, recipientAddress: "渋谷区神宮前1-1-1", ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+      [{ id: "aaaaaaaa-1111-4111-8111-111111111111", zip: null, address: null, currentZip: null, currentAddress: "渋谷区神宮前1-1-1" }],
+    );
+    const rows = pm._tx.dmRecipientDraft.findMany.mock.results;
+    pm._tx.dmRecipientDraft.findMany.mockImplementation(async () => {
+      void rows;
+      return [{
+        id: "11111111-1111-4111-8111-111111111111",
+        body,
+        recipientZip: null,
+        recipientAddress: "渋谷区神宮前1-1-1",
+        representativeOwnerId: "aaaaaaaa-1111-4111-8111-111111111111",
+        draftOwners: [{ ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+        variantId: "vvvvvvvv-1111-4111-8111-111111111111",
+        propertyId: "pppppppp-1111-4111-8111-111111111111",
+      }];
+    });
+    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: ["11111111-1111-4111-8111-111111111111"] }) }) as never);
+    expect(res.status).toBe(409);
+    const b = (await res.json()) as { error: { code: string } };
+    expect(b.error.code).toBe("INVALID_BODY");
+    expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("先読みの後に本文が**空**にされた宛先も黙って外さず 409(@codex #375 R3)", () => {
+    // 型の設定変更や割当は本文を "" にする。読み直しの条件に body!="" が残っていると、
+    // その宛先だけ対象から消え、残りが確定される(空白なら全体を止めるのに空だと素通り)。
+    return (async () => {
+      grant(...ALL);
+      const row = (id: string, body: string) => ({
+        id,
+        body,
+        recipientZip: null,
+        recipientAddress: "渋谷区神宮前1-1-1",
+        representativeOwnerId: "aaaaaaaa-1111-4111-8111-111111111111",
+        draftOwners: [{ ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+        variantId: "vvvvvvvv-1111-4111-8111-111111111111",
+        propertyId: "pppppppp-1111-4111-8111-111111111111",
+      });
+      const ID1 = "11111111-1111-4111-8111-111111111111";
+      const ID2 = "22222222-2222-4222-8222-222222222222";
+      setupFreshDrafts(
+        [{ id: ID1, recipientZip: null, recipientAddress: "渋谷区神宮前1-1-1", ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+        [{ id: "aaaaaaaa-1111-4111-8111-111111111111", zip: null, address: null, currentZip: null, currentAddress: "渋谷区神宮前1-1-1" }],
+      );
+      let n = 0;
+      // ⚠実DBと同じく where の body 条件で**絞り込む**。絞り込みを再現しないと、
+      //   実装が空の行を落としていてもテストが通ってしまう(空振り)。
+      pm._tx.dmRecipientDraft.findMany.mockImplementation(
+        async (args: { where?: { body?: { not?: string } } }) => {
+          n += 1;
+          // 1回目=先読み(2件とも本文あり) / 2回目=ロック後(1件が空にされた)
+          const rows =
+            n === 1
+              ? [row(ID1, "拝啓 本文A"), row(ID2, "拝啓 本文B")]
+              : [row(ID1, "拝啓 本文A"), row(ID2, "")];
+          const excludeEmpty = args?.where?.body?.not === "";
+          return excludeEmpty ? rows.filter((r) => r.body !== "") : rows;
+        },
+      );
+      const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: [ID1, ID2] }) }) as never);
+      expect(res.status).toBe(409);
+      const b = (await res.json()) as { error: { code: string } };
+      expect(b.error.code).toBe("INVALID_BODY");
+      // 残りだけを黙って確定しない(全体を断る)。
+      expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+    })();
+  });
+
+  it("先読みの後に本文が差し替わっても、ロック後の読み直しで弾く(@codex #375 R2)", () => {
+    // 再生成は型のロックを取らないため、先読み〜確定の間に本文を差し替えられる。
+    // 先読みの値だけで検査すると、検査を通っていない本文が確定される。
+    return (async () => {
+      grant(...ALL);
+      const row = (body: string) => ({
+        id: "11111111-1111-4111-8111-111111111111",
+        body,
+        recipientZip: null,
+        recipientAddress: "渋谷区神宮前1-1-1",
+        representativeOwnerId: "aaaaaaaa-1111-4111-8111-111111111111",
+        draftOwners: [{ ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+        variantId: "vvvvvvvv-1111-4111-8111-111111111111",
+        propertyId: "pppppppp-1111-4111-8111-111111111111",
+      });
+      setupFreshDrafts(
+        [{ id: "11111111-1111-4111-8111-111111111111", recipientZip: null, recipientAddress: "渋谷区神宮前1-1-1", ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+        [{ id: "aaaaaaaa-1111-4111-8111-111111111111", zip: null, address: null, currentZip: null, currentAddress: "渋谷区神宮前1-1-1" }],
+      );
+      let n = 0;
+      pm._tx.dmRecipientDraft.findMany.mockImplementation(async () => {
+        n += 1;
+        // 1回目=先読み(問題なし) / 2回目=ロック後の読み直し(再生成が差し替えた後)
+        return [row(n === 1 ? "拝啓 問題のない本文です。" : "   ")];
+      });
+      const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: ["11111111-1111-4111-8111-111111111111"] }) }) as never);
+      expect(n).toBeGreaterThanOrEqual(2);
+      expect(res.status).toBe(409);
+      const b = (await res.json()) as { error: { code: string } };
+      expect(b.error.code).toBe("INVALID_BODY");
+      expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+    })();
+  });
+
+  it("field_staff: ロック後に担当が外れていたら 409(確定させない・PR-D1)", async () => {
+    grant(...ALL);
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    setupFreshDrafts(
+      [{ id: "11111111-1111-4111-8111-111111111111", recipientZip: null, recipientAddress: "渋谷区神宮前1-1-1", ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+      [{ id: "aaaaaaaa-1111-4111-8111-111111111111", zip: null, address: null, currentZip: null, currentAddress: "渋谷区神宮前1-1-1" }],
+    );
+    // ロックを取ってから見直したら、その物件はもう自分の担当ではなかった。
+    pm._tx.property.findMany.mockResolvedValue([]);
+    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: ["11111111-1111-4111-8111-111111111111"] }) }) as never);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("SCOPE_CHANGED");
+    expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
   it("非 field_staff(管理者等)は confirm に property scope を付与しない", async () => {
     grant(...ALL);
     setupFreshDrafts(
@@ -447,6 +588,9 @@ describe("POST confirm (bulk) — 共有者のまとまりが割れていない�
     pm._tx.dmRecipientDraft.findMany.mockResolvedValue([
       {
         id: D,
+        body: "拝啓 時下ますますご清祥のこととお喜び申し上げます。",
+        variantId: "vvvvvvvv-1111-4111-8111-111111111111",
+        propertyId: "pppppppp-1111-4111-8111-111111111111",
         recipientZip: saved.recipientZip,
         recipientAddress: saved.recipientAddress,
         representativeOwnerId: A,

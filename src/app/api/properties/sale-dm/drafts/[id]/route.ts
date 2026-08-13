@@ -4,8 +4,12 @@ import prisma from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmWriteAccess } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmOptionsOverrideSchema } from "@/lib/validators-sale-dm";
+import {
+  letterBodyIssueMessage,
+  validateLetterBody,
+} from "@/lib/sale-dm-letter/body-validation";
 
 // body / variantId / override の部分更新。最低1フィールドは必須。
 const patchSchema = z
@@ -21,7 +25,7 @@ const patchSchema = z
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { session } = await requireSaleDmAccess();
+    const { session } = await requireSaleDmWriteAccess();
     const { id } = await params;
     const parsed = patchSchema.parse(await parseJsonBody(request));
 
@@ -59,6 +63,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const data: Record<string, any> = {};
 
     if (parsed.body !== undefined) {
+      // 本文の検証は貼り付け・一括適用(PR-D2)と同じ関数を通す。1宛先ずつの編集で
+      // 迂回できると、白紙やプレースホルダ入りの手紙がそのまま印刷・郵送される。
+      const issue = validateLetterBody(parsed.body);
+      if (issue) throw new ApiError(400, letterBodyIssueMessage(issue), "INVALID_BODY");
       data.body = parsed.body;
       // 確定済みの本文を直接編集したら確定を解除(draft へ・confirmedAt 消去)。承認した文面と
       // 実際に印刷/送付する文面を一致させ、本文変更で "OK→確定→印刷/送付" の承認ゲートを迂回させない。

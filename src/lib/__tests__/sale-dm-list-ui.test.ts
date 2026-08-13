@@ -3,6 +3,7 @@ import { isDmUndeliverable, canCreateSaleDm, buildSaleDmPartialNotice } from "..
 
 const perm = (resource: string) => ({ resource, action: "read", granted: true });
 const genPerm = { resource: "sale_dm", action: "generate", granted: true };
+const writePerm = { resource: "property", action: "write", granted: true };
 
 describe("isDmUndeliverable", () => {
   it("日時文字列があれば true", () => {
@@ -17,8 +18,12 @@ describe("isDmUndeliverable", () => {
 
 describe("canCreateSaleDm", () => {
   it("csv_export + csv_export_personal + owner の read + sale_dm:generate が揃えば true", () => {
-    expect(canCreateSaleDm([perm("csv_export"), perm("csv_export_personal"), perm("owner"), genPerm])).toBe(true);
+    expect(canCreateSaleDm([perm("csv_export"), perm("csv_export_personal"), perm("owner"), genPerm, writePerm])).toBe(true);
   });
+  it("property:write が無ければ false(押せるのに 403 になる作成ボタンを見せない・PR-D1)", () => {
+    expect(canCreateSaleDm([perm("csv_export"), perm("csv_export_personal"), perm("owner"), genPerm])).toBe(false);
+  });
+
   it("owner が欠けたら false", () => {
     expect(canCreateSaleDm([perm("csv_export"), perm("csv_export_personal"), genPerm])).toBe(false);
   });

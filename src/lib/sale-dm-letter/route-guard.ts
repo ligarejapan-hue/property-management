@@ -42,3 +42,15 @@ export function filterDraftsByFieldStaffScope<
     (d) => d.property.createdBy === session.id || d.property.assignedTo === session.id,
   );
 }
+
+// 書き込み系（キャンペーン作成・型の作成/更新/削除・割当・確定・下書き編集・再生成）の共通門。
+// これまでの実質的な門は sale_dm:generate（生成できなければ何も作れない）だったが、
+// 外部AI方式では生成なしで一式が作れるため、閲覧権限だけの利用者が記録の作成・失効・
+// 確定までできてしまう。同じ結果を生む全経路に同じ門を置く（設計 §2.5）。
+export async function requireSaleDmWriteAccess() {
+  const ctx = await requireSaleDmAccess();
+  if (!hasPermission(ctx.permissions, "property", "write")) {
+    throw new ApiError(403, "物件情報の編集権限がありません", "FORBIDDEN");
+  }
+  return ctx;
+}

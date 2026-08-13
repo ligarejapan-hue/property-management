@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { requireSaleDmAccess, assertSaleDmCampaignOwned, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
+import { requireSaleDmWriteAccess, assertSaleDmCampaignOwned, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmAssignSchema } from "@/lib/validators-sale-dm";
 import { assignVariantsEvenly, applyManualAssignment } from "@/lib/sale-dm-letter/assign";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { session } = await requireSaleDmAccess();
+    const { session } = await requireSaleDmWriteAccess();
     const { id } = await params;
     await assertSaleDmCampaignOwned(id, session.id); // 作成者本人のキャンペーンのみ割当可。
     const body = saleDmAssignSchema.parse(await parseJsonBody(request));
@@ -46,6 +46,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // 型ごとの updateMany を1トランザクションにまとめる。途中失敗(例: 対象 variant が並行削除されFK違反)で
     // 一部の宛先だけ本文がクリアされる部分破壊(=一部だけ要再生成の半端な状態)を防ぐ(all-or-nothing)。
     await prisma.$transaction(async (tx) => {
+      // ⚠ロック順序（設計 §2.3: Owner → variant → 物件親行 → 子行）。
+      //   下の updateMany は draft の variantId を書き換えるため、PostgreSQL が参照先の
+      //   型行に KEY SHARE ロックを**後から**取る。確定(drafts/confirm)は型を先に掴むので、
+      //   ここで先に取らないと「割当が draft を持って型を待ち、確定が型を持って draft を待つ」
+      //   デッドロックになる(@codex #375)。id 順に揃えて取り、経路間で順序を一致させる。
+      const lockVariantIds = [...byVariant.keys()].sort();
+      if (lockVariantIds.length > 0) {
+        await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ANY(${lockVariantIds}::uuid[]) AND campaign_id = ${id}::uuid ORDER BY id FOR UPDATE`;
+      }
       for (const [variantId, ids] of byVariant) {
         if (ids.length === 0) continue;
         const result = await tx.dmRecipientDraft.updateMany({

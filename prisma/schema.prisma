@@ -1158,6 +1158,13 @@ model DmVariant {
   // A/B 型ごとの LP(印刷QR /t/<token> の遷移先)。未設定の型は SALE_DM_LP_URL(既定)へ。
   // 型A→LP1 / 型B→LP2 のように LP の A/B 振り分けを可能にする。
   lpUrl            String? @map("lp_url")
+  /// 外部AI方式(PR-D2)で表示したプロンプトの控え。⚠この PR では書き手が居ない(expand のみ)。
+  promptText       String?   @map("prompt_text")
+  /// 外部AI方式(PR-D2)で貼り付けた本文の原本(drafts への適用元)。同上。
+  bodyTemplate     String?   @map("body_template")
+  /// 型の凍結印。null=未凍結・一度立てたら解除しない。判定は「この列 OR 配下に confirmed/sent」の
+  /// 二重判定(設計 §2.4)。⚠立てるのは PR-D2。この PR では常に null のまま。
+  templateFrozenAt DateTime? @map("template_frozen_at")
 
   campaign   DmCampaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   recipients DmRecipientDraft[]
