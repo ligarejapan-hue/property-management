@@ -107,8 +107,14 @@ export async function POST(request: NextRequest) {
       //   (@codex #375 R2)。ロック下で読み直した値で検査し、同じ tx で status を進める。
       const draftIds = pre.map((d) => d.id).sort();
       await tx.$queryRaw`SELECT id FROM dm_recipient_drafts WHERE id = ANY(${draftIds}::uuid[]) ORDER BY id FOR UPDATE`;
+      // ⚠読み直しでは `body != ""` を**外す**(@codex #375 R3)。型の設定変更や割当は
+      //   本文を "" にするため、条件を残すとその宛先だけ黙って対象から消え、残りが
+      //   確定される(空白なら全体を止めるのに、空だと素通り=扱いが不一致)。空になって
+      //   いれば下の検査が "empty" として拾い、確定全体を断る。
+      const { body: _bodyNotEmpty, ...whereForReread } = where;
+      void _bodyNotEmpty;
       const drafts = await tx.dmRecipientDraft.findMany({
-        where: { ...where, id: { in: draftIds } },
+        where: { ...whereForReread, id: { in: draftIds } },
         select: {
           id: true,
           body: true,

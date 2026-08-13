@@ -351,6 +351,51 @@ describe("POST confirm (bulk)", () => {
     expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
+  it("先読みの後に本文が**空**にされた宛先も黙って外さず 409(@codex #375 R3)", () => {
+    // 型の設定変更や割当は本文を "" にする。読み直しの条件に body!="" が残っていると、
+    // その宛先だけ対象から消え、残りが確定される(空白なら全体を止めるのに空だと素通り)。
+    return (async () => {
+      grant(...ALL);
+      const row = (id: string, body: string) => ({
+        id,
+        body,
+        recipientZip: null,
+        recipientAddress: "渋谷区神宮前1-1-1",
+        representativeOwnerId: "aaaaaaaa-1111-4111-8111-111111111111",
+        draftOwners: [{ ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+        variantId: "vvvvvvvv-1111-4111-8111-111111111111",
+        propertyId: "pppppppp-1111-4111-8111-111111111111",
+      });
+      const ID1 = "11111111-1111-4111-8111-111111111111";
+      const ID2 = "22222222-2222-4222-8222-222222222222";
+      setupFreshDrafts(
+        [{ id: ID1, recipientZip: null, recipientAddress: "渋谷区神宮前1-1-1", ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+        [{ id: "aaaaaaaa-1111-4111-8111-111111111111", zip: null, address: null, currentZip: null, currentAddress: "渋谷区神宮前1-1-1" }],
+      );
+      let n = 0;
+      // ⚠実DBと同じく where の body 条件で**絞り込む**。絞り込みを再現しないと、
+      //   実装が空の行を落としていてもテストが通ってしまう(空振り)。
+      pm._tx.dmRecipientDraft.findMany.mockImplementation(
+        async (args: { where?: { body?: { not?: string } } }) => {
+          n += 1;
+          // 1回目=先読み(2件とも本文あり) / 2回目=ロック後(1件が空にされた)
+          const rows =
+            n === 1
+              ? [row(ID1, "拝啓 本文A"), row(ID2, "拝啓 本文B")]
+              : [row(ID1, "拝啓 本文A"), row(ID2, "")];
+          const excludeEmpty = args?.where?.body?.not === "";
+          return excludeEmpty ? rows.filter((r) => r.body !== "") : rows;
+        },
+      );
+      const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: [ID1, ID2] }) }) as never);
+      expect(res.status).toBe(409);
+      const b = (await res.json()) as { error: { code: string } };
+      expect(b.error.code).toBe("INVALID_BODY");
+      // 残りだけを黙って確定しない(全体を断る)。
+      expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+    })();
+  });
+
   it("先読みの後に本文が差し替わっても、ロック後の読み直しで弾く(@codex #375 R2)", () => {
     // 再生成は型のロックを取らないため、先読み〜確定の間に本文を差し替えられる。
     // 先読みの値だけで検査すると、検査を通っていない本文が確定される。
