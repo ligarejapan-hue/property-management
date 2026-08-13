@@ -1,0 +1,50 @@
+/**
+ * 物件一覧ページ「再送候補のみ」トグルの source assertion。
+ *
+ * ⚠この画面はフィルタを **2箇所**(fetch 用 buildFilterParams / URL sync)で組み立てる。
+ * 片方に足し忘れると「絞り込めない」または「共有したURLで再現しない」ので、
+ * 両方に現れることを別々に固定する。
+ */
+import { describe, it, expect } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+
+const pageSrc = fs.readFileSync(
+  path.resolve(process.cwd(), "src/app/(dashboard)/properties/page.tsx"),
+  "utf8",
+);
+
+describe("properties page: 再送候補のみトグル", () => {
+  it("resendOnly state を URL から初期化する", () => {
+    expect(pageSrc).toMatch(/setResendOnly/);
+    expect(pageSrc).toMatch(/sp\.get\("resendOnly"\)\s*===\s*"1"/);
+  });
+
+  it("fetchProperties のクエリに resendOnly を送る", () => {
+    expect(pageSrc).toMatch(/params\.resendOnly\s*=\s*"1"/);
+  });
+
+  it("URL query にも resendOnly を sync する", () => {
+    expect(pageSrc).toMatch(/params\.set\("resendOnly",\s*"1"\)/);
+  });
+
+  it("リセットで resendOnly も消える", () => {
+    expect(pageSrc).toMatch(/setResendOnly\(false\)/);
+  });
+
+  it("有効フィルタ判定に resendOnly が入っている", () => {
+    expect(pageSrc).toMatch(/warningOnly \|\| undeliverableOnly \|\| resendOnly/);
+  });
+
+  it("チェックボックスのラベルが「再送候補のみ」", () => {
+    expect(pageSrc).toMatch(/再送候補のみ/);
+  });
+
+  it("トグルONで DM状況 を「送る」に合わせる(0件になる組み合わせを画面から作らせない)", () => {
+    expect(pageSrc).toMatch(/setResendOnly\(next\);[\s\S]{0,200}setDmFilter\("send"\)/);
+  });
+
+  it("日数を画面の文言に焼き込んでいない(env で変えられるため)", () => {
+    expect(pageSrc).not.toMatch(/90日/);
+  });
+});

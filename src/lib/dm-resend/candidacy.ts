@@ -115,6 +115,30 @@ export function decideResendCandidacy(
 }
 
 /**
+ * 一覧 where に AND で足す断片の形。
+ * Prisma の生成型ではなく必要な形だけを書く(この repo の where は any 運用のため)。
+ * ⚠テストがこの型で断片を読むので、形を変えるとテストがコンパイルで落ちる=
+ * 条件を黙って組み替えられない。
+ */
+export interface ResendCandidateWhereFragment {
+  dmStatus?: string;
+  dmLogs?: {
+    some?: { reactionStatus?: { in: string[] } };
+    none?: { sentAt?: { gt: Date }; reactionStatus?: { in: string[] } };
+  };
+  propertyOwners?: {
+    none?: {
+      owner?: {
+        OR?: Array<{
+          dmLogs?: { some: { reactionStatus: { in: string[] } } };
+          dmLogOwners?: { some: { log: { reactionStatus: { in: string[] } } } };
+        }>;
+      };
+    };
+  };
+}
+
+/**
  * 一覧 where 用の Prisma 断片(AND で足す)。上の decideResendCandidacy と**同じ5条件**。
  * ⚠§4-5 は代表(`Owner.dmLogs`)と共有者連関(`Owner.dmLogOwners`)の**両経路**を見る。
  * 片方だけだと、共有者としてだけ拒否された相手の別物件が候補に残る。
@@ -123,7 +147,7 @@ export function decideResendCandidacy(
 export function buildResendCandidateWhere(
   now: Date,
   cooldownDays: number,
-): unknown[] {
+): ResendCandidateWhereFragment[] {
   const cutoff = resendCutoff(now, cooldownDays);
   const terminalIn = { in: [...TERMINAL_REACTION_VALUES] };
   return [

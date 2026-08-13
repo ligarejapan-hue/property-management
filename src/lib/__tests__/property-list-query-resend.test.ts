@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import type { ResendCandidateWhereFragment } from "@/lib/dm-resend/candidacy";
 import { buildPropertyListWhere } from "../property-list-query";
 import { propertyListQuerySchema } from "../validators";
 
@@ -9,7 +10,7 @@ describe("buildPropertyListWhere resendOnly filter", () => {
   it("resendOnly=1 で §4 の5条件を where.AND に足す", async () => {
     const query = propertyListQuerySchema.parse({ resendOnly: "1" });
     const { where } = await buildPropertyListWhere(query, adminSession);
-    const and = (where.AND ?? []) as Array<Record<string, any>>;
+    const and = (where.AND ?? []) as ResendCandidateWhereFragment[];
     expect(and).toContainEqual({ dmStatus: "send" });
     expect(and).toContainEqual({ dmLogs: { some: {} } });
     expect(and.some((f) => f.dmLogs?.none?.sentAt?.gt instanceof Date)).toBe(true);
@@ -20,7 +21,7 @@ describe("buildPropertyListWhere resendOnly filter", () => {
   it("resendOnly 未指定なら候補条件を足さない", async () => {
     const query = propertyListQuerySchema.parse({});
     const { where } = await buildPropertyListWhere(query, adminSession);
-    const and = (where.AND ?? []) as Array<Record<string, any>>;
+    const and = (where.AND ?? []) as ResendCandidateWhereFragment[];
     expect(and.some((f) => f.dmLogs?.some !== undefined)).toBe(false);
     expect(and.some((f) => f.propertyOwners?.none !== undefined)).toBe(false);
   });
@@ -41,7 +42,7 @@ describe("buildPropertyListWhere resendOnly filter", () => {
       dmSentMax: "0",
     });
     const { where } = await buildPropertyListWhere(query, adminSession);
-    const and = (where.AND ?? []) as Array<Record<string, any>>;
+    const and = (where.AND ?? []) as ResendCandidateWhereFragment[];
     expect(and).toContainEqual({ dmLogs: { none: {} } });
     expect(and).toContainEqual({ dmLogs: { some: {} } });
   });

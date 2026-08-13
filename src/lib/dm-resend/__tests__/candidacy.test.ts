@@ -143,7 +143,7 @@ describe("buildResendCandidateWhere", () => {
   const fragments = buildResendCandidateWhere(
     new Date("2026-08-13T00:30:00.000Z"),
     90,
-  ) as Array<Record<string, any>>;
+  );
 
   // §4 の5条件が where にすべて現れることを構造で固定する(1つ落ちたら落ちる)。
   it("§4-1 dmStatus=send を強制する", () => {
@@ -161,28 +161,22 @@ describe("buildResendCandidateWhere", () => {
   });
 
   it("§4-4 物件の記録に terminal/replied の反響が無いことを要求する", () => {
-    const f = fragments.find(
-      (x) => x.dmLogs?.none?.reactionStatus?.in !== undefined,
-    );
-    expect(f).toBeDefined();
-    expect([...f!.dmLogs.none.reactionStatus.in].sort()).toEqual([
-      "refused",
-      "replied",
-      "undeliverable",
-    ]);
+    const values = fragments.find((x) => x.dmLogs?.none?.reactionStatus)?.dmLogs
+      ?.none?.reactionStatus?.in;
+    expect(values).toBeDefined();
+    // ⚠`.sort()` は破壊的。where 断片の配列をその場で並べ替えないよう必ずコピーしてから。
+    expect([...values!].sort()).toEqual(["refused", "replied", "undeliverable"]);
   });
 
   it("§4-5 所有者の他物件も含めた拒否/宛先不明を、代表と共有者連関の両経路で見る", () => {
-    const f = fragments.find((x) => x.propertyOwners?.none !== undefined);
-    expect(f).toBeDefined();
-    const or = f!.propertyOwners.none.owner.OR;
+    const or = fragments.find((x) => x.propertyOwners?.none)?.propertyOwners
+      ?.none?.owner?.OR;
     expect(or).toHaveLength(2);
-    // ⚠`.sort()` は破壊的。where 断片の配列をその場で並べ替えないよう必ずコピーしてから。
-    expect([...or[0].dmLogs.some.reactionStatus.in].sort()).toEqual([
+    expect([...or![0].dmLogs!.some.reactionStatus.in].sort()).toEqual([
       "refused",
       "undeliverable",
     ]);
-    expect([...or[1].dmLogOwners.some.log.reactionStatus.in].sort()).toEqual([
+    expect([...or![1].dmLogOwners!.some.log.reactionStatus.in].sort()).toEqual([
       "refused",
       "undeliverable",
     ]);
