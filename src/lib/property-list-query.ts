@@ -9,6 +9,10 @@
  *    （挙動が変わると既存テスト properties-route-mgmt-id.test.ts が落ちる）
  *  - PII（mgmtId 生値・所有者名など）はここでは扱わず、呼び出し側の責務とする。
  */
+import {
+  buildResendCandidateWhere,
+  getResendCooldownDays,
+} from "@/lib/dm-resend/candidacy";
 import prisma from "@/lib/prisma";
 import { resolveMgmtIdMatches } from "@/lib/property-mgmt-id-search";
 import { propertyListQuerySchema } from "@/lib/validators";
@@ -71,6 +75,7 @@ export async function buildPropertyListWhere(
     registryStatus,
     dmStatus,
     undeliverable,
+    resendOnly,
     dmSentMax,
     caseStatus,
     introductionRoute,
@@ -180,6 +185,17 @@ export async function buildPropertyListWhere(
   // し得たため廃止した(送信回数の並べ替え sortBy=dmSendCount で代替・@codex R10-P2 + ユーザー判断)。
   if (dmSentMax === 0) {
     where.AND = [...(where.AND ?? []), { dmLogs: { none: {} } }];
+  }
+
+  // 再送候補のみ(設計§4)。5条件は dm-resend/candidacy.ts が単一定義元。
+  // ⚠dmStatus=send は AND で**強制**する(URL直打ちで dmStatus=hold を混ぜても
+  //   候補に入らない=「候補から外れるのは許容・候補に入るのは不可」の非対称)。
+  //   条件が矛盾したときは 0 件になるが、それは安全側の失敗。
+  if (resendOnly === "1") {
+    where.AND = [
+      ...(where.AND ?? []),
+      ...buildResendCandidateWhere(new Date(), getResendCooldownDays()),
+    ];
   }
 
   return {
