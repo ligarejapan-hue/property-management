@@ -14,6 +14,7 @@
  * lib テスト(dm-export.test.ts / dm-batch/csv.test.ts)で担保する。
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import type { ResendCandidateWhereFragment } from "@/lib/dm-resend/candidacy";
 
 vi.mock("next/server", () => {
   class MockNextRequest extends Request {}
@@ -478,5 +479,43 @@ describe("POST /api/properties/dm-batches", () => {
     const propsIdx = sqls.findIndex((q: string) => q.includes("FROM properties"));
     expect(ownersIdx).toBeGreaterThan(-1);
     expect(propsIdx).toBeGreaterThan(ownersIdx);
+  });
+});
+
+describe("POST /api/properties/dm-batches: 再送候補由来の控え(PR-C)", () => {
+  beforeEach(() => {
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+  });
+
+  it("resendOnly=1 の検索条件で作った控えに resendFilterApplied=true を刻む", async () => {
+    const res = await POST(makeRequest({ ...BODY, filters: { resendOnly: "1" } }));
+    expect(res.status).toBe(200);
+    expect(pm.dmExportBatch.create.mock.calls[0][0].data.resendFilterApplied).toBe(
+      true,
+    );
+  });
+
+  it("再送候補の述語が実際の検索条件に乗る(設計§4)", async () => {
+    await POST(makeRequest({ ...BODY, filters: { resendOnly: "1" } }));
+    const and = pm.property.findMany.mock.calls[0][0].where
+      .AND as ResendCandidateWhereFragment[];
+    expect(and).toContainEqual({ dmLogs: { some: {} } });
+    expect(and.some((f) => f.dmLogs?.none?.sentAt?.gt instanceof Date)).toBe(true);
+    expect(and.some((f) => f.propertyOwners?.none?.owner?.OR)).toBe(true);
+  });
+
+  it("監査の検索条件に resendOnly が残る(何で絞ったかを後から辿れる)", async () => {
+    await POST(makeRequest({ ...BODY, filters: { resendOnly: "1" } }));
+    expect(
+      pm.dmExportBatch.create.mock.calls[0][0].data.filters.resendOnly,
+    ).toBe("1");
+  });
+
+  it("通常の出力では resendFilterApplied=false(既存の控えの挙動は変えない)", async () => {
+    const res = await POST(makeRequest(BODY));
+    expect(res.status).toBe(200);
+    expect(pm.dmExportBatch.create.mock.calls[0][0].data.resendFilterApplied).toBe(
+      false,
+    );
   });
 });
