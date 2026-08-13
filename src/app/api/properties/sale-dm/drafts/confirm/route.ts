@@ -46,6 +46,8 @@ export async function POST(request: NextRequest) {
         where,
         select: {
           id: true,
+          variantId: true,
+          propertyId: true,
           recipientZip: true,
           recipientAddress: true,
           representativeOwnerId: true,
@@ -64,6 +66,37 @@ export async function POST(request: NextRequest) {
       ];
       // 既定のロック順（Owner → 物件 → 子行）に合わせて所有者を先に取る。
       await lockOwnersForShare(tx, ownerIds);
+
+      // ロック順序（設計 §2.3）: Owner → variant → 物件親行 → 子行。
+      // variant を掴むのは、PR-D2 の「貼り付け／適用」（凍結判定）と直列化するため。
+      const variantIds = [...new Set(drafts.map((d) => d.variantId))].sort();
+      if (variantIds.length > 0) {
+        await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ANY(${variantIds}::uuid[]) ORDER BY id FOR UPDATE`;
+      }
+
+      // field_staff は担当範囲を**ロックを保持したまま**見直す。where のリレーション述語は
+      // ステートメントのスナップショットで評価されるため、判定〜commit の間の担当変更を
+      // 防げない（アクセスを失った後の確定が通る）。admin/office は判定が常に真なので不要。
+      if (session.role === "field_staff") {
+        const propertyIds = [...new Set(drafts.map((d) => d.propertyId))].sort();
+        if (propertyIds.length > 0) {
+          await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${propertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
+          const visible = await tx.property.findMany({
+            where: {
+              id: { in: propertyIds },
+              OR: [{ createdBy: session.id }, { assignedTo: session.id }],
+            },
+            select: { id: true },
+          });
+          if (visible.length !== propertyIds.length) {
+            throw new ApiError(
+              409,
+              "担当が変わった宛先が含まれています。画面を開き直してから確定してください",
+              "SCOPE_CHANGED",
+            );
+          }
+        }
+      }
 
       const owners = await tx.owner.findMany({
         where: { id: { in: ownerIds } },

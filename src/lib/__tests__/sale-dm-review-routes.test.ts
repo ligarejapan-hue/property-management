@@ -25,6 +25,8 @@ vi.mock("@/lib/prisma", () => {
   const tx = {
     dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn() },
     owner: { findMany: vi.fn() },
+    // 確定は field_staff のとき、物件親行をロックしたまま担当範囲を見直す(PR-D1)。
+    property: { findMany: vi.fn(async () => []) },
     $queryRaw: vi.fn(async () => []),
   };
   return {
@@ -58,6 +60,7 @@ const pm = prismaMock as never as {
   _tx: {
     dmRecipientDraft: { findMany: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
     owner: { findMany: ReturnType<typeof vi.fn> };
+    property: { findMany: ReturnType<typeof vi.fn> };
   };
 };
 
@@ -84,7 +87,14 @@ function setupFreshDrafts(
       recipientAddress: d.recipientAddress,
       representativeOwnerId: d.ownerId,
       draftOwners: [{ ownerId: d.ownerId }],
+      // 確定 tx が variant → 物件親行の順にロックするため、両 id を返す(PR-D1)。
+      variantId: "vvvvvvvv-1111-4111-8111-111111111111",
+      propertyId: `pppppppp-1111-4111-8111-${d.id.slice(-12)}`,
     })),
+  );
+  // 既定は「担当範囲が変わっていない」= 全物件が見える。
+  pm._tx.property.findMany.mockResolvedValue(
+    drafts.map((d) => ({ id: `pppppppp-1111-4111-8111-${d.id.slice(-12)}` })),
   );
   pm._tx.owner.findMany.mockResolvedValue(owners);
   pm._tx.dmRecipientDraft.updateMany.mockResolvedValue({
@@ -303,6 +313,22 @@ describe("POST confirm (bulk)", () => {
     const where = pm._tx.dmRecipientDraft.updateMany.mock.calls[0][0].where;
     // 担当外(再割当で隠れた)宛先は DB 側で確定対象から除外される。
     expect(where.property).toEqual({ OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] });
+  });
+
+  it("field_staff: ロック後に担当が外れていたら 409(確定させない・PR-D1)", async () => {
+    grant(...ALL);
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    setupFreshDrafts(
+      [{ id: "11111111-1111-4111-8111-111111111111", recipientZip: null, recipientAddress: "渋谷区神宮前1-1-1", ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+      [{ id: "aaaaaaaa-1111-4111-8111-111111111111", zip: null, address: null, currentZip: null, currentAddress: "渋谷区神宮前1-1-1" }],
+    );
+    // ロックを取ってから見直したら、その物件はもう自分の担当ではなかった。
+    pm._tx.property.findMany.mockResolvedValue([]);
+    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: ["11111111-1111-4111-8111-111111111111"] }) }) as never);
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("SCOPE_CHANGED");
+    expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
   it("非 field_staff(管理者等)は confirm に property scope を付与しない", async () => {
