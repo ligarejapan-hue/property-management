@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { handleApiError, parseJsonBody, ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess } from "@/lib/sale-dm-letter/route-guard";
+import { validateLetterBody } from "@/lib/sale-dm-letter/body-validation";
 import { lockOwnersForShare } from "@/lib/dm-batch/locks";
 import {
   resolveDraftRecipient,
@@ -46,6 +47,7 @@ export async function POST(request: NextRequest) {
         where,
         select: {
           id: true,
+          body: true,
           variantId: true,
           propertyId: true,
           recipientZip: true,
@@ -55,6 +57,19 @@ export async function POST(request: NextRequest) {
         },
       });
       if (drafts.length === 0) return 0;
+
+      // ⚠確定は**印刷の直前の唯一の関所**。個別編集の入口だけを塞いでも、AI生成の出力や
+      //   この反映より前からあるデータに不正な本文があれば通ってしまう(@codex #375)。
+      //   where の `body != ""` では空白のみ・差込記号の残り・長すぎる本文を止められない。
+      //   1件でも不正なら確定全体を断る(黙って減らさない=既存の宛先変更の扱いと同じ)。
+      const invalidCount = drafts.filter((d) => validateLetterBody(d.body) !== null).length;
+      if (invalidCount > 0) {
+        throw new ApiError(
+          409,
+          `本文に問題がある宛先が ${invalidCount} 件あります。空白だけ・差し込みの記号が残っている・長すぎる本文は確定できません`,
+          "INVALID_BODY",
+        );
+      }
 
       const ownerIds = [
         ...new Set(

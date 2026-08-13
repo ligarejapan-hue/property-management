@@ -56,3 +56,23 @@ describe("宛先の確定(drafts/confirm)のロック順序", () => {
     expect(s.slice(p)).toMatch(/assignedTo/);
   });
 });
+
+describe("型の割当(assign)のロック順序", () => {
+  const s = src("src/app/api/properties/sale-dm/campaigns/[id]/assign/route.ts");
+
+  // ⚠割当は draft の variantId を書き換える=PostgreSQL が参照先の型行に
+  //   KEY SHARE ロックを**後から**取る。確定側が型を先に掴むため、割当が
+  //   「draft を持って型を待つ」状態になり両者が止まる(@codex #375)。
+  it("updateMany の前に型行を FOR UPDATE でロックする", () => {
+    const v = s.search(/FROM dm_variants[\s\S]{0,200}FOR UPDATE/);
+    // ⚠コメント中の updateMany を拾わないよう、実際の呼び出しを探す。
+    const u = s.indexOf("tx.dmRecipientDraft.updateMany");
+    expect(v).toBeGreaterThan(-1);
+    expect(u).toBeGreaterThan(-1);
+    expect(v).toBeLessThan(u);
+  });
+
+  it("型 id を並べ替えてから取る(取得順を全経路でそろえる)", () => {
+    expect(s).toMatch(/\.sort\(\)[\s\S]{0,400}FROM dm_variants/);
+  });
+});

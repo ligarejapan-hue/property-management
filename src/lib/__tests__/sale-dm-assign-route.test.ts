@@ -19,6 +19,8 @@ vi.mock("@/lib/prisma", () => {
     dmCampaign: { findFirst: vi.fn() },
     dmVariant: { findMany: vi.fn() },
     dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn() },
+    // 割当は updateMany の前に型行をロックする(PR-D1・デッドロック回避)。
+    $queryRaw: vi.fn(async () => []),
   };
   // 型ごとの updateMany を1トランザクションにまとめる(部分破壊防止)。tx=同db委譲ゆえ既存アサーション維持。
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));

@@ -83,6 +83,8 @@ function setupFreshDrafts(
   pm._tx.dmRecipientDraft.findMany.mockResolvedValue(
     drafts.map((d) => ({
       id: d.id,
+      // 確定は本文も検査する(PR-D1)。既定は問題のない本文。
+      body: "拝啓 時下ますますご清祥のこととお喜び申し上げます。",
       recipientZip: d.recipientZip,
       recipientAddress: d.recipientAddress,
       representativeOwnerId: d.ownerId,
@@ -316,6 +318,39 @@ describe("POST confirm (bulk)", () => {
     expect(where.property).toEqual({ OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] });
   });
 
+  // ⚠確定は「印刷の直前の唯一の関所」。手編集の入口だけ塞いでも、AI生成の出力や
+  //   反映前からあるデータに不正な本文があれば通ってしまう(@codex #375)。
+  it.each([
+    ["空白だけ", "   "],
+    ["差込の記号が残っている", "拝啓 {{owner_name}} 様"],
+    ["長すぎる", "あ".repeat(20_001)],
+  ])("本文が%sの宛先は確定できない(409・1件も確定しない)", async (_label, body) => {
+    grant(...ALL);
+    setupFreshDrafts(
+      [{ id: "11111111-1111-4111-8111-111111111111", recipientZip: null, recipientAddress: "渋谷区神宮前1-1-1", ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+      [{ id: "aaaaaaaa-1111-4111-8111-111111111111", zip: null, address: null, currentZip: null, currentAddress: "渋谷区神宮前1-1-1" }],
+    );
+    const rows = pm._tx.dmRecipientDraft.findMany.mock.results;
+    pm._tx.dmRecipientDraft.findMany.mockImplementation(async () => {
+      void rows;
+      return [{
+        id: "11111111-1111-4111-8111-111111111111",
+        body,
+        recipientZip: null,
+        recipientAddress: "渋谷区神宮前1-1-1",
+        representativeOwnerId: "aaaaaaaa-1111-4111-8111-111111111111",
+        draftOwners: [{ ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+        variantId: "vvvvvvvv-1111-4111-8111-111111111111",
+        propertyId: "pppppppp-1111-4111-8111-111111111111",
+      }];
+    });
+    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: ["11111111-1111-4111-8111-111111111111"] }) }) as never);
+    expect(res.status).toBe(409);
+    const b = (await res.json()) as { error: { code: string } };
+    expect(b.error.code).toBe("INVALID_BODY");
+    expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
   it("field_staff: ロック後に担当が外れていたら 409(確定させない・PR-D1)", async () => {
     grant(...ALL);
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
@@ -474,6 +509,9 @@ describe("POST confirm (bulk) — 共有者のまとまりが割れていない�
     pm._tx.dmRecipientDraft.findMany.mockResolvedValue([
       {
         id: D,
+        body: "拝啓 時下ますますご清祥のこととお喜び申し上げます。",
+        variantId: "vvvvvvvv-1111-4111-8111-111111111111",
+        propertyId: "pppppppp-1111-4111-8111-111111111111",
         recipientZip: saved.recipientZip,
         recipientAddress: saved.recipientAddress,
         representativeOwnerId: A,
