@@ -5,11 +5,14 @@
  * 「貼り付け保存」「全宛先に適用」も同じ関数に通す（同じ結果を生む全経路に同じ門）。
  * DB を触らない純関数のみ。HTTP ステータス化は呼び出し側 route の責務。
  *
- * ⚠差込タグ（`{{...}}`）は **PR-D2 で導入する**。この PR の時点では正規のタグが
- * 存在しないので、`{{` を含む本文はすべて弾く（未知タグ＝プレースホルダのまま
- * 郵送される事故を先に塞ぐ）。PR-D2 で許可タグ（物件所在／物件種別）を
- * この関数に足し、許可タグだけを通す形へ広げる。
+ * ⚠差込タグ（`{{...}}`）の扱いは呼び出し側が選ぶ。
+ *   - 既定（`allowTags` なし）= `{{` を含む本文をすべて弾く。**個別の下書き編集**は
+ *     物件が確定しているので、タグではなく展開後の本文が入るべき。
+ *   - `allowTags: true` = tags.ts の許可タグだけを通す。**型の本文（貼り付け）**は
+ *     複数物件にまたがるのでタグが必要（設計 §2.2）。
+ *   どちらも「知らないタグ・綴り違い」は弾く＝プレースホルダのまま郵送されない。
  */
+import { LETTER_TAGS } from "./tags";
 
 /** 貼り付け・編集で受け付ける本文の上限。印刷レイアウトの最大想定に対して十分な余裕（設計 §2.3）。 */
 export const LETTER_BODY_MAX_LENGTH = 20_000;
@@ -17,11 +20,19 @@ export const LETTER_BODY_MAX_LENGTH = 20_000;
 export type LetterBodyIssue = "empty" | "unknown_tag" | "too_long";
 
 /** 問題があればその種類を、無ければ null を返す。 */
-export function validateLetterBody(body: string): LetterBodyIssue | null {
+export function validateLetterBody(
+  body: string,
+  options: { allowTags?: boolean } = {},
+): LetterBodyIssue | null {
   // 空判定を最初に（空文字に「長すぎ」「タグ」の理由を出さない）。
   if (body.trim().length === 0) return "empty";
   if (body.length > LETTER_BODY_MAX_LENGTH) return "too_long";
-  if (body.includes("{{")) return "unknown_tag";
+  // 許可タグを取り除いてから残りを見る。⚠取り除く対象は tags.ts の語彙だけ
+  //（同じ表を2か所に書かない）。取り除いた後に `{{` が残る＝未知タグ・綴り違い。
+  const rest = options.allowTags
+    ? LETTER_TAGS.reduce((acc, tag) => acc.split(`{{${tag}}}`).join(""), body)
+    : body;
+  if (rest.includes("{{")) return "unknown_tag";
   return null;
 }
 

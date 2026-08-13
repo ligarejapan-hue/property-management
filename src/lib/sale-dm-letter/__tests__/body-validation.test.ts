@@ -23,6 +23,24 @@ describe("validateLetterBody", () => {
     expect(validateLetterBody("本文\n{{物件所在}}\n本文")).toBe("unknown_tag");
   });
 
+  it("許可タグは通す(貼り付け保存の検証・PR-D2)", () => {
+    expect(
+      validateLetterBody("{{物件所在}}の{{物件種別}}について", { allowTags: true }),
+    ).toBeNull();
+  });
+
+  it("許可タグ以外は allowTags でも弾く", () => {
+    expect(validateLetterBody("{{所有者名}}", { allowTags: true })).toBe("unknown_tag");
+  });
+
+  it("綴り違いのタグも allowTags で弾く", () => {
+    expect(validateLetterBody("{{物件所在 }}", { allowTags: true })).toBe("unknown_tag");
+  });
+
+  it("既定(allowTags なし)は従来どおり全部の {{ を弾く", () => {
+    expect(validateLetterBody("{{物件所在}}")).toBe("unknown_tag");
+  });
+
   it("上限を超える本文は弾く", () => {
     expect(validateLetterBody("あ".repeat(LETTER_BODY_MAX_LENGTH))).toBeNull();
     expect(validateLetterBody("あ".repeat(LETTER_BODY_MAX_LENGTH + 1))).toBe(
