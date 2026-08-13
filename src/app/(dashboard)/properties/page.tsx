@@ -1180,9 +1180,13 @@ function PropertiesPageInner() {
             onChange={(e) => {
               const next = e.target.checked;
               setResendOnly(next);
-              // 再送候補は「送る」の物件だけが対象(設計§4-1)。ONにしたら DM状況 も
-              // 合わせて、必ず0件になる組み合わせを画面から作れないようにする。
-              if (next) setDmFilter("send");
+              // 再送候補は「送る」かつ「送付記録が1件以上ある」物件が対象(設計§4-1/§4-2)。
+              // ONにしたら DM状況 を「送る」に、送信回数の「未送信(0回)」は解除して、
+              // 必ず0件になる組み合わせを画面から作れないようにする。
+              if (next) {
+                setDmFilter("send");
+                setSendCountMaxFilter("");
+              }
               setPage(1);
             }}
             className="rounded border-emerald-300"
