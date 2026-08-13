@@ -354,6 +354,47 @@ export async function deleteSaleDmVariant(campaignId: string, variantId: string)
 }
 
 // 宛先を型へ割り当て。auto=均等割り(sequential/random)、manual=指定(recipientId→variantId)。送付済みは対象外。
+// 外部AI方式（設計 §2.2/§2.3）: プロンプトを表示 → 手元のAIで本文を作る → 貼り付け保存 → 全宛先へ適用。
+export async function fetchSaleDmVariantPrompt(campaignId: string, variantId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { prompt: "（モック）プロンプト", digest: "0".repeat(64), frozen: false, bodyTemplate: null as string | null };
+  }
+  return apiFetch<{ prompt: string; digest: string; frozen: boolean; bodyTemplate: string | null }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/variants/${variantId}/prompt`,
+  );
+}
+
+export async function saveSaleDmVariantTemplate(
+  campaignId: string,
+  variantId: string,
+  body: { body: string; promptDigest: string },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { changed: true, clearedCount: 0 };
+  }
+  return apiFetch<{ changed: boolean; clearedCount?: number }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/variants/${variantId}/template`,
+    { method: "PUT", body: JSON.stringify(body) },
+  );
+}
+
+export async function applySaleDmVariantTemplate(
+  campaignId: string,
+  variantId: string,
+  body: { overwriteExisting?: boolean } = {},
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { appliedCount: 0, skippedScopeCount: 0, skippedTagCount: 0 };
+  }
+  return apiFetch<{ appliedCount: number; skippedScopeCount: number; skippedTagCount: number }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/variants/${variantId}/apply`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
 export async function assignSaleDmVariants(
   campaignId: string,
   body: { mode: "auto" | "manual"; order?: "sequential" | "random"; assignments?: { recipientId: string; variantId: string }[] },
