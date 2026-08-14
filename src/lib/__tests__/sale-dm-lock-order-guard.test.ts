@@ -80,6 +80,15 @@ describe("型の割当(assign)のロック順序", () => {
     expect(v).toBeLessThan(u);
   });
 
+  it("移動元の型もロック対象に含める(@codex #376 R4)", () => {
+    // 確定済みを移すときは移動元へ凍結印を立てるので、移動先だけ掴むと
+    // 確定側と互い違いになって止まる。両方をまとめて id 順に取る。
+    const lockAt = s.search(/FROM dm_variants[\s\S]{0,200}FOR UPDATE/);
+    const before = s.slice(0, lockAt);
+    expect(before).toContain("sourcesPre");
+    expect(before).toMatch(/byVariant\.keys\(\)[\s\S]{0,200}sourcesPre|sourcesPre[\s\S]{0,200}byVariant\.keys\(\)/);
+  });
+
   it("型 id を並べ替えてから取る(取得順を全経路でそろえる)", () => {
     expect(s).toMatch(/\.sort\(\)[\s\S]{0,400}FROM dm_variants/);
   });

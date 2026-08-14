@@ -29,6 +29,26 @@ describe("coarsePropertyLocation", () => {
     );
   });
 
+  it("番地のあとに建物名が続いても、町名までで切る(@codex #376 R4)", () => {
+    // ⚠末尾だけを削る作りだと「…2丁目8番1号 新宿ビル」が残り、共通の文面に
+    //   建物が特定できる住所が載ってしまう。
+    expect(coarsePropertyLocation("東京都新宿区西新宿2丁目8番1号 新宿ビル101")).toBe(
+      "東京都新宿区西新宿2丁目",
+    );
+    expect(coarsePropertyLocation("東京都杉並区西荻北3-19-4 メゾン西荻203")).toBe(
+      "東京都杉並区西荻北",
+    );
+  });
+
+  it("番地が無くても、空白のあとの建物名は落とす", () => {
+    expect(coarsePropertyLocation("東京都千代田区丸の内 サンプルビル")).toBe(
+      "東京都千代田区丸の内",
+    );
+    expect(coarsePropertyLocation("東京都千代田区丸の内　サンプルビル")).toBe(
+      "東京都千代田区丸の内",
+    );
+  });
+
   it("番地が無い住所はそのまま", () => {
     expect(coarsePropertyLocation("東京都千代田区丸の内")).toBe(
       "東京都千代田区丸の内",

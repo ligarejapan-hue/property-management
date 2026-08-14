@@ -21,16 +21,41 @@ export type LetterTag = (typeof LETTER_TAGS)[number];
 export function coarsePropertyLocation(address: string | null): string | null {
   const s = (address ?? "").trim();
   if (s.length === 0) return null;
-  // 末尾の「番地部分」（数字で始まり、数字・各種ハイフン・番・号・の が続く）を落とす。
-  // 「◯丁目」で終わる場合はそこまでを残す。
-  const trimmed = s.replace(
-    /[0-9０-９][0-9０-９\-－‐―ー番号の]*$/,
-    "",
-  );
-  const head = trimmed.replace(/[-－‐―ー\s]+$/, "").trim();
+
+  // ⚠**末尾を削るのではなく、番地が始まる位置で切る**（@codex #376 R4）。
+  //   末尾だけ見る作りだと「…2丁目8番1号 新宿ビル101」から `101` しか落ちず、
+  //   建物が特定できる住所が共通の文面に載ってしまう。
+  //   ・数字の並びが「◯丁目」なら町名の一部として残し、その先を見続ける
+  //   ・そうでない数字の並びが出たら、そこで切る（＝番地の始まり）
+  //   ・空白が出たらそこで切る（日本の住所は建物名の前に空白が入る）
+  const DIGITS = /[0-9０-９]/;
+  let cut = s.length;
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (/[\s　]/.test(ch)) {
+      cut = i;
+      break;
+    }
+    if (DIGITS.test(ch)) {
+      let j = i;
+      while (j < s.length && DIGITS.test(s[j])) j += 1;
+      if (s.slice(j, j + 2) === "丁目") {
+        i = j + 2; // 町名の一部。ここまでは残して先を見る
+        continue;
+      }
+      cut = i; // 番地の始まり
+      break;
+    }
+    i += 1;
+  }
+
+  const head = s
+    .slice(0, cut)
+    .replace(/[-－‐―ー\s　]+$/, "")
+    .trim();
   return head.length > 0 ? head : null;
 }
-
 /** 物件種別の表示名（既存の一覧・CSVと同じ出所）。 */
 export function propertyTypeLabel(propertyType: string | null): string | null {
   if (!propertyType) return null;

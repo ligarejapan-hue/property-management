@@ -50,24 +50,41 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       // ⚠ロック順序（設計 §2.3: Owner → variant → 物件親行 → 子行）。
       //   下の updateMany は draft の variantId を書き換えるため、PostgreSQL が参照先の
       //   型行に KEY SHARE ロックを**後から**取る。確定(drafts/confirm)は型を先に掴むので、
-      //   ここで先に取らないと「割当が draft を持って型を待ち、確定が型を持って draft を待つ」
-      //   デッドロックになる(@codex #375)。id 順に揃えて取り、経路間で順序を一致させる。
-      const lockVariantIds = [...byVariant.keys()].sort();
+      //   ここで先に取らないとデッドロックになる。
+      // ⚠**移動元の型もロック対象に含める**（@codex #376 R4）。確定済みを移すときは移動元へ
+      //   凍結印を立てるので、移動先だけ掴んで移動元を後から触ると、確定側が A→B の順で
+      //   掴んでいる場合と互い違いになって止まる。**両方をまとめて id 順に**取る。
+      const allIds = [...byVariant.values()].flat();
+      const sourcesPre = await tx.dmRecipientDraft.findMany({
+        where: {
+          id: { in: allIds },
+          campaignId: id,
+          status: { in: [...SETTLED_DRAFT_STATUSES] },
+        },
+        select: { variantId: true },
+      });
+      const lockVariantIds = [
+        ...new Set([
+          ...byVariant.keys(),
+          ...sourcesPre.map((d) => d.variantId),
+        ]),
+      ].sort();
       if (lockVariantIds.length > 0) {
         await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ANY(${lockVariantIds}::uuid[]) AND campaign_id = ${id}::uuid ORDER BY id FOR UPDATE`;
       }
+
       // ⚠確定済み/送付済みの下書きを別の型へ移すと、移動元の型から「確定があった」
       //   証拠が消える。移す前に**移動元**の型へ凍結印を立てる（設計 §2.4 @codex R24/R31）。
+      //   ロックを保持したまま読み直す（先読み〜ロックの間の移動を取りこぼさない）。
       const movingSettled = await tx.dmRecipientDraft.findMany({
         where: {
-          id: { in: [...byVariant.values()].flat() },
+          id: { in: allIds },
           campaignId: id,
           status: { in: [...SETTLED_DRAFT_STATUSES] },
         },
         select: { variantId: true },
       });
       await markVariantsFrozen(tx, movingSettled.map((d) => d.variantId));
-
       for (const [variantId, ids] of byVariant) {
         if (ids.length === 0) continue;
         const result = await tx.dmRecipientDraft.updateMany({
