@@ -368,7 +368,6 @@ function PropertiesPageInner() {
           strength: "low",
         },
         propertyIds: ids,
-        confirmed: true,
         idempotencyKey: saleDmIdemKeyRef.current,
       });
       saleDmIdemKeyRef.current = null; // 成功 → 次の作成は新しいキー

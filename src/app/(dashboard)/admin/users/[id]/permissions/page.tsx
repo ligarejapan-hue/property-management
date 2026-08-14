@@ -52,7 +52,9 @@ const RESOURCES = [
   // PR2: 謄本自動取得（admin のみ既定付与。実 API/UIボタンは後続 PR）。
   { key: "registry", label: "謄本自動取得", actions: ["auto_fetch"] },
   // 売却促進DM の AI 生成（課金を伴う高リスク操作。謄本自動取得と同様に専用権限で限定）。
-  { key: "sale_dm", label: "売却促進DM(AI生成・課金)", actions: ["generate"] },
+  // ⚠廃止（@codex #376 R7）。AI直結をやめたのでこの権限は何の効果も持たない。
+  //   既存の付与を隠さないよう選択肢は残すが、ラベルで「効果なし」と明示する。
+  { key: "sale_dm", label: "売却促進DM(廃止・効果なし)", actions: ["generate"] },
   // S1b-1: 画面保護・謄本PDF権限の土台（enforcement は後続 PR）。
   { key: "screen_protection", label: "画面保護", actions: ["bypass"] },
   { key: "registry_pdf", label: "謄本PDF", actions: ["preview", "download"] },
