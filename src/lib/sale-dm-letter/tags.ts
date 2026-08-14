@@ -13,6 +13,9 @@ import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 export const LETTER_TAGS = ["物件所在", "物件種別"] as const;
 export type LetterTag = (typeof LETTER_TAGS)[number];
 
+/** 番地の区切りに使われる各種ハイフン（全角/半角・ダッシュ・長音記号の代用まで）。 */
+const HYPHENS = /[-－‐‑–—―−ー]/;
+
 /**
  * 物件所在を「市区町村＋町名（丁目まで）」に丸める。
  * ⚠番地・号は落とす＝共通本文に**建物が特定できる粒度**を載せない。
@@ -43,8 +46,12 @@ export function coarsePropertyLocation(address: string | null): string | null {
   const townSuffixAt = (at: number) =>
     TOWN_SUFFIXES.find((suffix) => s.startsWith(suffix, at));
   // 町名の字（上の表）でないことを確かめた上で呼ぶ＝ここに来た 番/号 は番地。
+  // ⚠**ハイフンも番地の区切り**（@codex #376 R13）。「二丁目八－一」のように 番/号 を
+  //   書かない番地があり、記号だけを見ないと地名の一部と誤解して**建物が特定できる
+  //   住所がそのまま**共通の文面に載る。地名の漢数字（六本木・四谷）の直後に
+  //   ハイフンが来ることは無いので、番地の始まりと判断してよい。
   const isUnitAt = (at: number) =>
-    s.startsWith("番", at) || s.startsWith("号", at);
+    s.startsWith("番", at) || s.startsWith("号", at) || HYPHENS.test(s[at] ?? "");
   let cut = s.length;
   let i = 0;
   while (i < s.length) {

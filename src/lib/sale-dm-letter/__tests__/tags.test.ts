@@ -110,6 +110,20 @@ describe("coarsePropertyLocation", () => {
     );
   });
 
+  it("漢数字＋ハイフンの番地も落とす(@codex #376 R13)", () => {
+    // ⚠「八－一」は 番/号 を書かない番地の書き方。番/号 だけを見ていると地名の一部と
+    //   誤解して**建物が特定できる住所がそのまま**共通の文面に載る。
+    expect(coarsePropertyLocation("東京都新宿区西新宿二丁目八－一")).toBe(
+      "東京都新宿区西新宿二丁目",
+    );
+    expect(coarsePropertyLocation("東京都新宿区西新宿二丁目八-一")).toBe(
+      "東京都新宿区西新宿二丁目",
+    );
+    expect(coarsePropertyLocation("東京都千代田区丸の内一丁目三―五")).toBe(
+      "東京都千代田区丸の内一丁目",
+    );
+  });
+
   it("番地が無い住所はそのまま", () => {
     expect(coarsePropertyLocation("東京都千代田区丸の内")).toBe(
       "東京都千代田区丸の内",
