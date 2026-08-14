@@ -124,10 +124,42 @@ describe("coarsePropertyLocation", () => {
     );
   });
 
+  it("⚠北海道の「◯条」「◯線」も町名(@codex #376 R17)", () => {
+    // 札幌・旭川・帯広に多い書き方。条/線 を町名と見ないと「中央区北」で切れて
+    // 意味の通らない文になる（その文が全宛先の手紙に載る）。
+    expect(coarsePropertyLocation("北海道札幌市中央区北1条西2丁目3-4")).toBe(
+      "北海道札幌市中央区北1条西2丁目",
+    );
+    expect(coarsePropertyLocation("北海道札幌市中央区北一条西二丁目三-四")).toBe(
+      "北海道札幌市中央区北一条西二丁目",
+    );
+    expect(coarsePropertyLocation("北海道旭川市1条通8丁目")).toBe(
+      "北海道旭川市1条通8丁目",
+    );
+    expect(coarsePropertyLocation("北海道河西郡芽室町東2線")).toBe(
+      "北海道河西郡芽室町東2線",
+    );
+  });
+
   it("番地が無い住所はそのまま", () => {
     expect(coarsePropertyLocation("東京都千代田区丸の内")).toBe(
       "東京都千代田区丸の内",
     );
+  });
+
+  it("⚠知らない書き方は「途中で切った町名」を名乗らず null にする", () => {
+    // この関数は表記から番地の始まりを推定しているので、知らない語尾は必ず出てくる
+    // (実際 条/線 で作り直した)。そのとき**途中で切れた町名**を返すと、意味の通らない
+    // 住所が全宛先の手紙に載る。数字の並びのあとが番地の始まりに見えない＝知らない形
+    // なので、名乗らずに null を返す＝適用時に飛ばして件数で報告される。
+    expect(coarsePropertyLocation("北海道○○市△△1坪2丁目")).toBeNull();
+    expect(coarsePropertyLocation("東京都○○市××3阝")).toBeNull();
+  });
+
+  it("番地の始まりだと分かる形は今までどおり切る(の・番・号・ハイフン・空白・行末)", () => {
+    expect(coarsePropertyLocation("東京都○○市××町3の5")).toBe("東京都○○市××町");
+    expect(coarsePropertyLocation("東京都○○市××町3番5号")).toBe("東京都○○市××町");
+    expect(coarsePropertyLocation("東京都○○市××町3")).toBe("東京都○○市××町");
   });
 
   it("空・null は null(タグを解決できない=適用をスキップする材料)", () => {

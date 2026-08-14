@@ -40,9 +40,14 @@ export function coarsePropertyLocation(address: string | null): string | null {
   //   ・丁目 = 町名の一部として自然に読める
   //   ・番町 = 千代田区一番町〜六番町（@codex #376 R6）
   //   ・番丁 = 仙台市青葉区一番丁〜五番丁・和歌山市一番丁〜七番丁（@codex #376 R8）
+  //   ・条 / 線 = 北海道の書き方（札幌市中央区北1条西2丁目・旭川市1条通・
+  //     芽室町東2線）。町名と見ないと「中央区北」で切れて意味の通らない文になる
+  //     （@codex #376 R17）
   //   「丁」も「町」と同じく町名の字。**漢数字でも算用数字でも同じ扱い**にする
   //   （「1番町」のような表記ゆれで町名が消えないように）。
-  const TOWN_SUFFIXES = ["丁目", "番町", "番丁"] as const;
+  // ⚠**号 は入れない**。地名として使う地域（芽室町の「南7号」など）もあるが、
+  //   圧倒的多数は番地なので、迷ったら**切る**側に倒す（残しすぎ＝住所が漏れる）。
+  const TOWN_SUFFIXES = ["丁目", "番町", "番丁", "条", "線"] as const;
   const townSuffixAt = (at: number) =>
     TOWN_SUFFIXES.find((suffix) => s.startsWith(suffix, at));
   // 町名の字（上の表）でないことを確かめた上で呼ぶ＝ここに来た 番/号 は番地。
@@ -68,6 +73,21 @@ export function coarsePropertyLocation(address: string | null): string | null {
         i = j + suffix.length; // 「2丁目」「1番町」は町名の一部。残して先を見る
         continue;
       }
+      // ⚠数字のあとが**番地の始まりだと分かる形**のときだけ切る。そうでなければ
+      //   「知らない書き方」＝この関数が理解できていない住所なので、**途中で切れた
+      //   町名を名乗らない**（null＝未解決。適用時に飛ばして件数で報告される）。
+      //   この関数は表記からの推定なので知らない語尾は必ず出てくる（実際 条/線 で
+      //   作り直した）。そのとき意味の通らない住所が全宛先の手紙に載るより、
+      //   飛ばして人に見せるほうが安全。
+      const after = s[j] ?? "";
+      const isLotBoundary =
+        j >= s.length ||
+        HYPHENS.test(after) ||
+        /[\s　]/.test(after) ||
+        after === "番" ||
+        after === "号" ||
+        after === "の";
+      if (!isLotBoundary) return null;
       cut = i; // 番地の始まり
       break;
     }
