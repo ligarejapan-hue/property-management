@@ -33,10 +33,12 @@ export function coarsePropertyLocation(address: string | null): string | null {
   //   してはいけない（@codex #376 R5）。**直後が 丁目/番/号/番地 のときだけ**
   //   番地の一部と判断する。
   const KANJI_NUM = /[〇零一二三四五六七八九十百]/;
+  //   ⚠「◯番町」は町名（千代田区一番町〜六番町）なので、ここの 番 は番地ではない
+  //   （@codex #376 R6）。番 の直後が 町 のときは町名の一部として扱う。
   const isUnitAt = (at: number) =>
     s.startsWith("丁目", at) ||
     s.startsWith("番地", at) ||
-    s.startsWith("番", at) ||
+    (s.startsWith("番", at) && !s.startsWith("番町", at)) ||
     s.startsWith("号", at);
   let cut = s.length;
   let i = 0;

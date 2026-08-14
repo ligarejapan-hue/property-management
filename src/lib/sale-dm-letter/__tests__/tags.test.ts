@@ -70,6 +70,23 @@ describe("coarsePropertyLocation", () => {
     expect(coarsePropertyLocation("東京都港区六本木7-1-1")).toBe("東京都港区六本木");
   });
 
+  it("⚠「◯番町」は町名なので切らない(千代田区一番町〜六番町・@codex #376 R6)", () => {
+    for (const a of [
+      "東京都千代田区一番町",
+      "東京都千代田区二番町",
+      "東京都千代田区五番町",
+    ]) {
+      expect(coarsePropertyLocation(a)).toBe(a);
+    }
+    // 町名のあとに番地が続く場合は、番地の手前で切る。
+    expect(coarsePropertyLocation("東京都千代田区一番町6-4")).toBe(
+      "東京都千代田区一番町",
+    );
+    expect(coarsePropertyLocation("東京都千代田区一番町六番二号")).toBe(
+      "東京都千代田区一番町",
+    );
+  });
+
   it("番地が無い住所はそのまま", () => {
     expect(coarsePropertyLocation("東京都千代田区丸の内")).toBe(
       "東京都千代田区丸の内",

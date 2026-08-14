@@ -286,13 +286,15 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect(res.status).toBe(200);
   });
 
-  it("課金確認なし(confirmed 未指定)で 400・生成も保存もしない", async () => {
+  it("課金確認(confirmed)は不要になった(@codex #376 R6)", async () => {
+    // この門の根拠は「有料AI呼び出し + オーナーPII の外部送信」だったが、外部AI方式では
+    // どちらも起きない。要求を残すと、新しい意味に従う利用者が起きない課金を認めない限り
+    // 400 になる。フィールドは後方互換で受けるが判定はしない。
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
-    const { confirmed, ...noConfirm } = validBody; // confirmed を外す
-    void confirmed;
+    const { confirmed: _drop, ...noConfirm } = validBody as Record<string, unknown>;
+    void _drop;
     const res = await POST(req(noConfirm) as never);
-    expect(res.status).toBe(400);
-    expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
   });
 
   it("送付可(send)以外の dmStatus 絞り込みでは 400・生成しない(確認対象と実際の生成対象のズレを防ぐ)", async () => {

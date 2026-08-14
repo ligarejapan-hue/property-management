@@ -53,11 +53,11 @@ export async function POST(request: NextRequest) {
 
     // 不正JSON は parseJsonBody で 400(request.json() の素の 500 を避ける。他 mutation route と統一)。
     const body = saleDmCampaignBodySchema.parse(await parseJsonBody(request));
-    // 課金確認: 最大50通の有料AI呼び出し + オーナーPII の外部送信を伴うため、明示確認(confirmed:true)を要求。
-    // 謄本自動取得の confirmed ゲートと同方針(UI は実行前に確認ダイアログを出してから true を送る)。
-    if (body.confirmed !== true) {
-      throw new ApiError(400, "AI生成には課金確認(confirmed:true)が必要です", "SALE_DM_CONFIRMATION_REQUIRED");
-    }
+    // ⚠**課金確認(confirmed:true)は要求しない**（@codex #376 R6）。この門の根拠は
+    //   「有料AI呼び出し + オーナーPII の外部送信」だったが、外部AI方式ではどちらも起きない
+    //   （作るのは本文が空の宛先一覧だけ）。要求を残すと、新しい意味に従うAPI利用者が
+    //   「もう起きない課金とPII送信」を認めない限り 400 になる。フィールド自体は
+    //   後方互換のため schema に残すが（送られても無視）、判定はしない。
     // 差出人は env 既定(SALE_DM_SENDER_NAME/CONTACT)のみを使う。印刷・再生成も resolveSender(env)を使い、
     // body 指定の差出人は保存されず印刷で env 既定にズレる(不整合)ため、body の抜け道は塞ぎ env を必須にする。
     // 未設定なら使えない手紙を有料生成しないよう生成前に fail-closed(503・印刷URL チェックと同方針・Codex R33)。
