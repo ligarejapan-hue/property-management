@@ -375,9 +375,10 @@ export async function saveSaleDmVariantTemplate(
 ) {
   if (USE_MOCK) {
     await mockDelay();
-    return { changed: true, clearedCount: 0 };
+    return { changed: true, clearedCount: 0, bodyDigest: "0".repeat(64) };
   }
-  return apiFetch<{ changed: boolean; clearedCount?: number }>(
+  // bodyDigest = 保存後の原本の指紋。画面はこれを次の保存に使う（取り直さない）。
+  return apiFetch<{ changed: boolean; clearedCount?: number; bodyDigest: string }>(
     `/api/properties/sale-dm/campaigns/${campaignId}/variants/${variantId}/template`,
     { method: "PUT", body: JSON.stringify(body) },
   );

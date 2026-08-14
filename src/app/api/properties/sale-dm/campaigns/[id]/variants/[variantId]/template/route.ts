@@ -75,7 +75,10 @@ export async function PUT(
       //   差し替えでない保存で未確定の下書きを全消しすると、適用済み・手直し済みの本文が
       //   まとめて失われる。
       if (variant.bodyTemplate === parsed.body) {
-        return { changed: false as const };
+        // 指紋も返す。⚠画面が保存後に取り直すと、その一瞬に別の画面が保存していた場合
+        //   **相手の指紋**を自分の古い入力欄と組み合わせて持ってしまい、次の保存で
+        //   版ずれ検出をすり抜ける（@codex #376 R15）。**書いた値から作ってここで返す**。
+        return { changed: false as const, bodyDigest: bodyTemplateDigest(parsed.body) };
       }
 
       // 凍結の二重判定（列 OR 配下の確定/送付済み）。ロックの下で数える。
@@ -195,7 +198,12 @@ export async function PUT(
         });
         clearedCount = cleared.count;
       }
-      return { changed: true as const, clearedCount };
+      // 保存後の指紋を同じ tx から返す（画面は取り直さずにこれを持つ）。
+      return {
+        changed: true as const,
+        clearedCount,
+        bodyDigest: bodyTemplateDigest(parsed.body),
+      };
     });
 
     if (result.changed) {

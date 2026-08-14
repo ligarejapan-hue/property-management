@@ -100,9 +100,11 @@ export default function SaleDmVariantManager({
         // 開いたときに見えていた原本。ほかの画面が先に保存していれば 409 で止まる。
         baseBodyDigest: letter.bodyDigest,
       });
-      // 保存できたら最新の指紋へ更新する（開き直さずに続けて直すとき、
-      // 自分の保存が原因で「先に保存されています」と言われないように）。
-      setLetter(await fetchSaleDmVariantPrompt(campaign.id, letterFor.id));
+      // 保存の応答が返した指紋へ更新する（開き直さずに続けて直せる）。
+      // ⚠ここで取り直してはいけない（@codex #376 R15）。取り直すと、その一瞬に別の画面が
+      //   保存していた場合に**相手の指紋**を自分の古い入力欄と組み合わせて持つことになり、
+      //   次の保存が版ずれ検出をすり抜けて相手の文面を消す。書いた値の指紋を使う。
+      setLetter({ ...letter, bodyTemplate: pasteBody, bodyDigest: r.bodyDigest });
       setLetterNotice(
         r.changed
           ? "本文を保存しました。続けて「この型の全宛先に適用」を押してください"

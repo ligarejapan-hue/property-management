@@ -51,6 +51,15 @@ describe("型の管理パネル: 外部AI方式の導線", () => {
     expect(b).toContain("promptDigest");
   });
 
+  it("保存後の指紋は**保存の応答**から取る(取り直さない・@codex #376 R15)", () => {
+    // ⚠保存のあとにプロンプトを取り直すと、その一瞬に別の画面が保存していた場合、
+    //   **相手の新しい指紋**を自分の古い入力欄と組み合わせて持つことになり、
+    //   次の保存で版ずれ検出をすり抜けて相手の文面を消す。
+    const b = handlerBody("const saveTemplate");
+    expect(b).toContain("bodyDigest");
+    expect(b).not.toContain("fetchSaleDmVariantPrompt");
+  });
+
   it("適用は結果を件数で伝える（黙って減らさない）", () => {
     const b = handlerBody("const applyTemplate");
     expect(b).toContain("applySaleDmVariantTemplate");

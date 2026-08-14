@@ -223,6 +223,23 @@ describe("PUT sale-dm variant template（本文の貼り付け保存）", () => 
     expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
+  it("保存の応答に、保存後の原本の指紋を返す(取り直しの競合を作らない・@codex #376 R15)", async () => {
+    armVariant({ bodyTemplate: "古い本文" });
+    const res = await PUT(put({ body: "新しい本文", promptDigest: DIGEST }), ctx);
+    expect(res.status).toBe(200);
+    const b = (await res.json()) as { changed: boolean; bodyDigest: string };
+    expect(b.changed).toBe(true);
+    expect(b.bodyDigest).toBe(bodyTemplateDigest("新しい本文"));
+  });
+
+  it("中身が同じ保存でも、いまの指紋を返す(画面が持ち続けられる)", async () => {
+    armVariant({ bodyTemplate: "同じ本文" });
+    const res = await PUT(put({ body: "同じ本文", promptDigest: DIGEST }), ctx);
+    const b = (await res.json()) as { changed: boolean; bodyDigest: string };
+    expect(b.changed).toBe(false);
+    expect(b.bodyDigest).toBe(bodyTemplateDigest("同じ本文"));
+  });
+
   it("凍結済みの型は差し替えできない 409(送付済み文面の出所を守る)", async () => {
     armVariant({ bodyTemplate: "古い本文" });
     pm._tx.dmRecipientDraft.count.mockResolvedValue(1); // 配下に確定/送付済み
