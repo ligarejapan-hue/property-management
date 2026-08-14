@@ -25,7 +25,6 @@ import HistoryTab from "@/components/properties/history-tab";
 import PhotoTab from "@/components/properties/photo-tab";
 import CandidateList from "@/components/properties/candidate-list";
 import ActionBar from "@/components/properties/action-bar";
-import RegistryAutoFetchButton from "@/components/properties/registry-auto-fetch-button";
 import RegistryLocationSearchButton from "@/components/properties/registry-location-search-button";
 import { isLandPropertyType } from "@/lib/registry-fetch/registry-target";
 import PropertyEditForm from "@/components/properties/property-edit-form";
@@ -377,7 +376,6 @@ export default function PropertyDetailPage({
     canCreateOwnerMemo,
     corporateLookupConfigured,
     canAutoFetchRegistry,
-    registryAutoFetchConfigured,
     registryLocationSearchConfigured,
     registryPurchaseConfigured,
     ownerEditableFields,
@@ -390,10 +388,8 @@ export default function PropertyDetailPage({
     const corporateLookupConfigured = collapseCapabilities
       ? false
       : meCapabilities?.corporateLookup === true;
-    const registryAutoFetchConfigured = collapseCapabilities
-      ? false
-      : meCapabilities?.registryAutoFetch === true;
-    // 所在検索は自動取得より厳しい capability（provider が所在検索対応のときのみ）。
+    // ⚠謄本の取得の入口は「所在で謄本を検索」だけ（2026-08-15 に自動取得ボタンを撤去）。
+    //   registryAutoFetch capability はここでは読まない（読み手が居ない派生値を置かない）。
     const registryLocationSearchConfigured = collapseCapabilities
       ? false
       : meCapabilities?.registryLocationSearch === true;
@@ -449,7 +445,6 @@ export default function PropertyDetailPage({
       canCreateOwnerMemo,
       corporateLookupConfigured,
       canAutoFetchRegistry,
-      registryAutoFetchConfigured,
       registryLocationSearchConfigured,
       registryPurchaseConfigured,
       ownerEditableFields,
@@ -563,14 +558,9 @@ export default function PropertyDetailPage({
         onActionComplete={fetchProperty}
       />
 
-      {/* 謄本を自動取得（PR5・registry:auto_fetch / admin のみ。provider 未設定中は disabled 表示） */}
-      <RegistryAutoFetchButton
-        propertyId={property.id}
-        registryStatus={property.registryStatus}
-        canAutoFetch={canAutoFetchRegistry}
-        providerConfigured={registryAutoFetchConfigured}
-        onComplete={fetchProperty}
-      />
+      {/* ⚠「謄本を自動取得」(不動産番号で引く導線)は 2026-08-15 に撤去した。番号取得は
+          実サイトへ未配線・本番の不動産番号は0件・発注者判断で今後も入れない運用のため、
+          押しても必ず失敗する導線だった。取得の入口は下の「所在で謄本を検索」に一本化。 */}
 
       {/* 謄本 所在検索（PR-2b-3・番号無し物件を所在で検索→候補選択→取得。所在検索対応 provider のときのみ有効） */}
       <RegistryLocationSearchButton

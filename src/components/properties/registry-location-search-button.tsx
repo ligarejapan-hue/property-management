@@ -137,9 +137,13 @@ export default function RegistryLocationSearchButton({
     }
   };
 
+  // ⚠**共通部品(registry-preflight-warnings)の同じ判定と、文言をそろえる**。
+  //   以前ここだけ「通常の『謄本を自動取得』をご利用ください」と案内していたが、
+  //   その導線は 2026-08-15 に撤去した（番号取得は実サイトへ未配線＝必ず失敗する）。
+  //   **消えたボタンへ誘導しない**（同じ文言を2か所に書くと、片方だけ直してずれる）。
   const reasonText = (reason: string): string =>
     reason === "has_real_estate_number"
-      ? "この物件は既に不動産番号があります。通常の「謄本を自動取得」をご利用ください。"
+      ? "不動産番号があるため、所在検索の対象外です。⚠現在この経路では取得できません（番号での取得は準備中）。"
       : reason === "insufficient_location"
         ? "所在（住所）が未登録のため検索できません。物件情報に所在を登録してください。"
         : "この物件は所在検索の対象外です。";

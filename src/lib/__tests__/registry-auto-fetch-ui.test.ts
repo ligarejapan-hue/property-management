@@ -1,17 +1,26 @@
 /**
- * PR5: 謄本「自動取得」UI 導線の確認。
+ * 謄本「自動取得」導線の**撤去**を固定する（2026-08-15・発注者判断）。
  *
- * house 規約（vitest environment:"node"・jsdom 無し）に合わせ、コンポーネント / ページ /
- * route のソースを fs で読む source-assertion を中心に確認し、provider capability ヘルパは
- * runtime（null → false）+ 実装関係（getRegistryFetchProvider() != null）で確認する。
+ * ⚠**なぜ消したか**（復活させる前に必ず読む）:
+ *   このボタンは物件の `realEstateNumber`（不動産番号）で引く経路の入口だった。ところが
+ *   ①番号取得は**実サイトへ配線されていない**（`searchByRealEstateNumber` は「確定」が
+ *   カートに `未請求` 行を作るため、外部に触れる前に停止する＝@codex #344 P1）、
+ *   ②本番の不動産番号は**0件**、③発注者判断（2026-08-12）で**不動産番号は今後も
+ *   作らない・入れない運用**。＝**押しても必ず失敗する導線**だったため撤去し、取得の
+ *   入口は「所在で謄本を検索」（住所→候補→人が選ぶ）に一本化した。
+ *   ⚠**列（realEstateNumber）と番号取得コードは残す**。列は謄本PDF取込が読み取って保存し、
+ *   重複判定の最優先キーになっている（[[import-dedupe]]）。番号経路は一括取得・候補解決と
+ *   同じ道を共有しており、入口を塞げば実害は無い。
  *
- * 確認観点（指示対応）:
- *  - registry:auto_fetch 権限がある場合だけ描画（非 admin 非表示）
- *  - capabilities.registryAutoFetch を参照し、provider 未設定時は disabled + 理由文
- *  - 確認後の submit 経路でのみ confirmed:true を送る / POST 先が /registry/auto-fetch
- *  - 501 / 409 を成功扱いしない / owner 名・住所など PII を UI で参照しない・console.log しない
+ * house 規約（vitest environment:"node"・jsdom 無し）に合わせ、ページ / route のソースを
+ * fs で読む source-assertion で確認する。
+ *
+ * 確認観点:
+ *  - 物件詳細ページに自動取得ボタンが**無い**（import も描画も・復活したら落ちる）
+ *  - コンポーネント本体のファイルが**存在しない**
+ *  - registry:auto_fetch 権限の導出は残る（所在検索ボタンが使う）
  *  - ActionBar の ACTIONS[] には載せない
- *  - permissions route が registryAutoFetch capability を返す
+ *  - permissions route が registryAutoFetch capability を返す（一括取得が使う）
  *  - null provider → false（runtime）/ provider あり → true（実装が != null 関係）
  */
 import { describe, it, expect, vi } from "vitest";
@@ -42,68 +51,61 @@ import {
 const read = (rel: string) =>
   fs.readFileSync(path.resolve(process.cwd(), rel), "utf8");
 
-const buttonSrc = read(
-  "src/components/properties/registry-auto-fetch-button.tsx",
-);
+const BUTTON_PATH = "src/components/properties/registry-auto-fetch-button.tsx";
+
+/** 画面側(components / dashboard)の実装ソースを [相対パス, 中身] で列挙する（テストは除く）。 */
+function clientSources(): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  const walk = (dir: string) => {
+    const abs = path.resolve(process.cwd(), dir);
+    if (!fs.existsSync(abs)) return;
+    for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
+      const rel = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== "__tests__") walk(rel);
+        continue;
+      }
+      if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+      out.push([rel, fs.readFileSync(path.resolve(process.cwd(), rel), "utf8")]);
+    }
+  };
+  walk("src/components");
+  walk("src/app/(dashboard)");
+  return out;
+}
 const pageSrc = read("src/app/(dashboard)/properties/[id]/page.tsx");
 const actionBarSrc = read("src/components/properties/action-bar.tsx");
 const permRouteSrc = read("src/app/api/me/permissions/route.ts");
 const autoFetchSrc = read("src/lib/registry-fetch/auto-fetch.ts");
 
-describe("RegistryAutoFetchButton — 描画ゲートと安全性 (source assertion)", () => {
-  it("registry:auto_fetch が無ければ何も描画しない（非 admin 非表示）", () => {
-    expect(buttonSrc).toMatch(/canAutoFetch/);
-    expect(buttonSrc).toMatch(/if\s*\(\s*!canAutoFetch\s*\)\s*return null/);
+describe("謄本「自動取得」導線は撤去済み (source assertion)", () => {
+  it("コンポーネント本体のファイルが存在しない", () => {
+    expect(fs.existsSync(path.resolve(process.cwd(), BUTTON_PATH))).toBe(false);
   });
 
-  it("provider 未設定（providerConfigured=false）は disabled + 理由文を表示する", () => {
-    expect(buttonSrc).toMatch(/providerConfigured/);
-    expect(buttonSrc).toMatch(/disabled=\{[^}]*providerDisabled[^}]*\}/);
-    expect(buttonSrc).toMatch(
-      /謄本自動取得プロバイダが未設定のため現在実行できません。/,
-    );
+  it("物件詳細ページが import も描画もしていない", () => {
+    expect(pageSrc).not.toMatch(/registry-auto-fetch-button/);
+    expect(pageSrc).not.toMatch(/RegistryAutoFetchButton/);
   });
 
-  it("POST 先は /registry/auto-fetch（method=POST）", () => {
-    expect(buttonSrc).toMatch(
-      /\/api\/properties\/\$\{propertyId\}\/registry\/auto-fetch/,
-    );
-    expect(buttonSrc).toMatch(/method:\s*"POST"/);
+  it("どの画面からも番号取得の入口（candidateRef 無しの auto-fetch POST）を出さない", () => {
+    // ⚠所在検索の取得は candidateRef 付きで同じ route を叩く（api-client の
+    //   obtainRegistryByCandidate）。ここで禁じるのは「番号だけで叩く」入口。
+    const offenders = clientSources()
+      .filter(([, src]) => /registry\/auto-fetch/.test(src))
+      .filter(([, src]) => !/candidateRef/.test(src))
+      .map(([rel]) => rel);
+    expect(offenders).toEqual([]);
   });
 
-  it("確認(confirming)を経た submit 経路でのみ課金確認フラグを 1 回だけ送る", () => {
-    expect(buttonSrc).toMatch(/state\s*===\s*"confirming"/);
-    expect(buttonSrc).toMatch(/handleConfirm/);
-    expect(buttonSrc).toMatch(/JSON\.stringify\(\{\s*confirmed:\s*true\s*\}\)/);
-    const occurrences = buttonSrc.match(/confirmed:\s*true/g) ?? [];
-    expect(occurrences.length).toBe(1);
-  });
-
-  it("501 / 409 等の非 2xx を成功扱いしない（res.ok 以外は throw、done は ok 後）", () => {
-    expect(buttonSrc).toMatch(/if\s*\(\s*!res\.ok\s*\)/);
-    expect(buttonSrc).toMatch(/throw new Error/);
-    const okIdx = buttonSrc.indexOf("!res.ok");
-    const doneIdx = buttonSrc.indexOf('setState("done")');
-    expect(okIdx).toBeGreaterThan(-1);
-    expect(doneIdx).toBeGreaterThan(okIdx);
-  });
-
-  it("所有者氏名 / 住所など PII を UI で参照せず console.log もしない", () => {
-    expect(buttonSrc).not.toMatch(/console\.log/);
-    expect(buttonSrc).not.toMatch(
-      /ownerName|owner_name|ownerAddress|owner_address|nameKana|name_kana|parsedOwners/i,
-    );
-  });
-
-  it("成功時は onComplete を呼ぶ", () => {
-    expect(buttonSrc).toMatch(/onComplete\(\)/);
-  });
-
-  it("確認文に有料・明示確認・再取得(obtained 時)の注意がある", () => {
-    expect(buttonSrc).toMatch(/有料/);
-    expect(buttonSrc).toMatch(/明示/);
-    expect(buttonSrc).toMatch(/registryStatus\s*===\s*"obtained"/);
-    expect(buttonSrc).toMatch(/再取得/);
+  it("消えたボタンへ利用者を誘導する文言を残さない", () => {
+    // ⚠実例(2026-08-15): 共通部品の文言は #373 で直っていたのに、所在検索ボタンの
+    //   reasonText に**同じ案内の古い版が残って**いた（[[fix-all-call-sites-not-one]]）。
+    //   撤去した導線の名前で「ご利用ください」と案内する文字列を全面禁止する。
+    const offenders = clientSources()
+      .filter(([, src]) => /「謄本を自動取得」\s*をご利用ください/.test(src))
+      .map(([rel]) => rel);
+    expect(offenders).toEqual([]);
   });
 });
 
@@ -117,24 +119,24 @@ describe("PropertyDetailPage — 自動取得導線の配線 (source assertion)"
     );
   });
 
-  it("registryAutoFetch capability を provider 配布値から導出する", () => {
-    // F12 展開(19-A 第3実装): inline fetch 型 + setter を撤去し meCapabilities から導出。
-    expect(pageSrc).not.toMatch(/setRegistryAutoFetchConfigured/);
-    expect(pageSrc).not.toMatch(/registryAutoFetch\?:\s*boolean/);
-    expect(pageSrc).toMatch(/meCapabilities\?\.registryAutoFetch === true/);
+  it("使わなくなった registryAutoFetch capability の導出をページに残さない", () => {
+    // ⚠所在検索は registryLocationSearch / registryPurchase を使う。自動取得ボタンを
+    //   撤去した以上、registryAutoFetch をページで導出しても誰も読まない（読まれない
+    //   派生値が残ると「まだ使っている」と誤読される）。
+    expect(pageSrc).not.toMatch(/registryAutoFetchConfigured/);
+    expect(pageSrc).not.toMatch(/meCapabilities\?\.registryAutoFetch/);
   });
 
-  it("ActionBar の直後に RegistryAutoFetchButton を 1 箇所だけ描画する", () => {
-    expect(pageSrc).toMatch(/<RegistryAutoFetchButton/);
+  it("ActionBar の直後に描くのは所在検索ボタンだけ（自動取得は無い）", () => {
     const actionBarIdx = pageSrc.indexOf("<ActionBar");
-    const buttonIdx = pageSrc.indexOf("<RegistryAutoFetchButton");
+    const searchIdx = pageSrc.indexOf("<RegistryLocationSearchButton");
     expect(actionBarIdx).toBeGreaterThan(-1);
-    expect(buttonIdx).toBeGreaterThan(actionBarIdx);
+    expect(searchIdx).toBeGreaterThan(actionBarIdx);
     expect(pageSrc).toMatch(/canAutoFetch=\{canAutoFetchRegistry\}/);
     expect(pageSrc).toMatch(
-      /providerConfigured=\{registryAutoFetchConfigured\}/,
+      /providerConfigured=\{registryLocationSearchConfigured\}/,
     );
-    const matches = pageSrc.match(/<RegistryAutoFetchButton/g) ?? [];
+    const matches = pageSrc.match(/<RegistryLocationSearchButton/g) ?? [];
     expect(matches.length).toBe(1);
   });
 });

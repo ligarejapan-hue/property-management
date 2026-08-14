@@ -1,7 +1,9 @@
 /**
  * 謄本取得の事前警告UIの配線(発注者要望 2026-08-08)。
- * 3つの入口(単発ボタン・所在検索・一括モーダル)が共通の preflight(サーバ判定)を
- * 使うことをソース表明で固定する([同種の穴は全箇所]: 1入口だけの警告にしない)。
+ * 入口すべてが共通の preflight(サーバ判定)を使うことをソース表明で固定する
+ * ([同種の穴は全箇所]: 1入口だけの警告にしない)。
+ * ⚠2026-08-15に**単発の「謄本を自動取得」ボタンを撤去**したので、入口は
+ *   **所在検索・一括モーダルの2つ**([[registry-auto-fetch-ui.test.ts]]に撤去の理由)。
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
@@ -11,7 +13,6 @@ const read = (p: string) =>
   readFileSync(path.join(process.cwd(), p), "utf8").replace(/\r\n/g, "\n");
 
 const SHARED = read("src/components/properties/registry-preflight-warnings.tsx");
-const AUTO = read("src/components/properties/registry-auto-fetch-button.tsx");
 const LOC = read("src/components/properties/registry-location-search-button.tsx");
 const BULK = read("src/components/properties/registry-bulk-fetch-button.tsx");
 const CLIENT = read("src/lib/api-client.ts");
@@ -34,12 +35,7 @@ describe("共通部品(registry-preflight-warnings)", () => {
   });
 });
 
-describe("3入口の配線", () => {
-  it("単発ボタン: confirming で preflight を取得し警告行を出す(既存の取得済み文言とは重複させない)", () => {
-    expect(AUTO).toMatch(/useRegistryPreflight\(\[propertyId\], state === "confirming"\)/);
-    expect(AUTO).toMatch(/<RegistryPreflightWarningLines[\s\S]{0,140}?showObtained=\{!alreadyObtained\}/);
-  });
-
+describe("各入口の配線", () => {
   it("所在検索: 課金直前(confirmObtain)で preflight を取得し警告行を出す", () => {
     // ⚠所在検索は confirmSearch でも取る（何を取りに行くかが分からないうちは検索も始めさせない）。
     expect(LOC).toMatch(/state === "confirmSearch" || state === "confirmObtain"/);
@@ -74,8 +70,7 @@ describe("実行ボタンは事前確認が済むまで無効(#365 R1)", () => {
     );
     expect(SHARED).toContain('setSettledKey(cacheKey); // 失敗も「確定」');
   });
-  it("3入口の課金ボタンすべてが preflight\.pending で disabled になる", () => {
-    expect(AUTO).toMatch(/disabled=\{preflight\.pending\}/);
+  it("各入口の課金ボタンすべてが preflight\.pending で disabled になる", () => {
     expect(LOC).toMatch(
       /disabled={preflight.pending || preflight.targetsUnavailable}/,
     );
