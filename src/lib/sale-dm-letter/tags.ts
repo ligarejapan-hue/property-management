@@ -29,6 +29,15 @@ export function coarsePropertyLocation(address: string | null): string | null {
   //   ・そうでない数字の並びが出たら、そこで切る（＝番地の始まり）
   //   ・空白が出たらそこで切る（日本の住所は建物名の前に空白が入る）
   const DIGITS = /[0-9０-９]/;
+  // ⚠漢数字は「地名の一部」でもあり得る（六本木・四谷・三田・九段）ので、数字扱いに
+  //   してはいけない（@codex #376 R5）。**直後が 丁目/番/号/番地 のときだけ**
+  //   番地の一部と判断する。
+  const KANJI_NUM = /[〇零一二三四五六七八九十百]/;
+  const isUnitAt = (at: number) =>
+    s.startsWith("丁目", at) ||
+    s.startsWith("番地", at) ||
+    s.startsWith("番", at) ||
+    s.startsWith("号", at);
   let cut = s.length;
   let i = 0;
   while (i < s.length) {
@@ -46,6 +55,20 @@ export function coarsePropertyLocation(address: string | null): string | null {
       }
       cut = i; // 番地の始まり
       break;
+    }
+    if (KANJI_NUM.test(ch)) {
+      let j = i;
+      while (j < s.length && KANJI_NUM.test(s[j])) j += 1;
+      if (s.slice(j, j + 2) === "丁目") {
+        i = j + 2; // 「二丁目」は町名の一部
+        continue;
+      }
+      if (isUnitAt(j)) {
+        cut = i; // 「八番」「一号」= 番地の始まり
+        break;
+      }
+      i = j; // 地名の一部（六本木など）。切らずに先へ
+      continue;
     }
     i += 1;
   }

@@ -290,7 +290,11 @@ export async function POST(request: NextRequest) {
               recipientName: m.recipientName, recipientZip: m.recipientZip,
               recipientAddress: m.recipientAddress, honorific: m.honorific,
               coOwnerCount: m.coOwnerCount,
-              body: d.body ?? "", model: resolveLetterModel(saleDmCfg),
+              body: d.body ?? "",
+              // ⚠AIを呼んでいないので**モデル名を記録しない**（@codex #376 R5）。
+              //   ここで既定値を書くと、外部AI（ChatGPT/Gemini等）や手書きで入れた文面にも
+              //   「このモデルが作った」という嘘の出所が残る。
+              model: null,
               outcomeNote: d.error ? `生成失敗(${d.error})` : null,
               trackingToken: randomBytes(8).toString("base64url"),
               generatedBy: session.id,

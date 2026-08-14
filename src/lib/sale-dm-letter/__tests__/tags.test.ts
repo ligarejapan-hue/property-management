@@ -49,6 +49,27 @@ describe("coarsePropertyLocation", () => {
     );
   });
 
+  it("漢数字の番地でも町名までで切る(@codex #376 R5)", () => {
+    expect(
+      coarsePropertyLocation("東京都新宿区西新宿二丁目八番一号 新宿ビル"),
+    ).toBe("東京都新宿区西新宿二丁目");
+    expect(coarsePropertyLocation("東京都千代田区丸の内一丁目三番")).toBe(
+      "東京都千代田区丸の内一丁目",
+    );
+  });
+
+  it("⚠地名に含まれる漢数字では切らない(六本木・四谷・三田・九段)", () => {
+    for (const a of [
+      "東京都港区六本木",
+      "東京都新宿区四谷",
+      "東京都港区三田",
+      "東京都千代田区九段北",
+    ]) {
+      expect(coarsePropertyLocation(a)).toBe(a);
+    }
+    expect(coarsePropertyLocation("東京都港区六本木7-1-1")).toBe("東京都港区六本木");
+  });
+
   it("番地が無い住所はそのまま", () => {
     expect(coarsePropertyLocation("東京都千代田区丸の内")).toBe(
       "東京都千代田区丸の内",

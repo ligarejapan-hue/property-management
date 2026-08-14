@@ -246,15 +246,18 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect(findMany.mock.calls[0][0].take).toBeUndefined(); // 明示選択は take しない
   });
 
-  it("provider=openai のとき下書きに保存する model は gpt-4o(生成モデルと一致・claude既定にしない・Codex)", async () => {
+  it("AIを呼ばないのでモデル名は記録しない(@codex #376 R5)", async () => {
+    // 外部AI方式では作成時に本文を作らない。既定のモデル名を書くと、実際には
+    // ChatGPT/Gemini や手書きで入れた文面にも「このモデルが作った」という嘘の出所が残る。
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
-    process.env.SALE_DM_LETTER_PROVIDER = "openai"; // 永続モデルは provider 既定に追従すべき
+    process.env.SALE_DM_LETTER_PROVIDER = "openai";
     (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([property as never]);
     const res = await POST(req(validBody) as never);
     expect(res.status).toBe(200);
     expect(draftCreate).toHaveBeenCalled();
-    // 旧実装は SALE_DM_LETTER_MODEL ?? DEFAULT_MODEL(=claude-sonnet-4-6)を保存していた(OpenAI生成でも claude記録)。
-    expect(draftCreate.mock.calls[0][0].data.model).toBe("gpt-4o");
+    expect(draftCreate.mock.calls[0][0].data.model).toBeNull();
+    // 本文も空で作られる（文面は型ごとに貼り付けて適用する）。
+    expect(draftCreate.mock.calls[0][0].data.body).toBe("");
   });
 
   it("印刷の前提(追跡URL/LP/差出人)が未設定なら 503(AI設定はもう見ない・PR-D2)", async () => {
