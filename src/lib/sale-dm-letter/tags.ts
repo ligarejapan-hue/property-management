@@ -50,13 +50,24 @@ export function coarsePropertyLocation(address: string | null): string | null {
   const TOWN_SUFFIXES = ["丁目", "番町", "番丁", "条", "線"] as const;
   const townSuffixAt = (at: number) =>
     TOWN_SUFFIXES.find((suffix) => s.startsWith(suffix, at));
-  // 町名の字（上の表）でないことを確かめた上で呼ぶ＝ここに来た 番/号 は番地。
-  // ⚠**ハイフンも番地の区切り**（@codex #376 R13）。「二丁目八－一」のように 番/号 を
-  //   書かない番地があり、記号だけを見ないと地名の一部と誤解して**建物が特定できる
-  //   住所がそのまま**共通の文面に載る。地名の漢数字（六本木・四谷）の直後に
-  //   ハイフンが来ることは無いので、番地の始まりと判断してよい。
-  const isUnitAt = (at: number) =>
-    s.startsWith("番", at) || s.startsWith("号", at) || HYPHENS.test(s[at] ?? "");
+  // 数字の並びのあとが「番地の始まり」だと分かる形か。町名の字（上の表）でないことを
+  // 確かめた上で呼ぶ＝ここに来た 番/号 は番地。
+  // ⚠**ハイフンと「の」も番地の区切り**（@codex #376 R13/R18）。「二丁目八－一」「三の四」
+  //   のように 番/号 を書かない番地があり、記号だけを見ないと地名の一部と誤解して
+  //   **建物が特定できる住所がそのまま**共通の文面に載る。地名の漢数字（六本木・四谷）の
+  //   直後にハイフンや「の」が来ることは無いので、番地の始まりと判断してよい。
+  // ⚠**算用数字と漢数字で同じ判定を使う**（片側だけ塞ぐと、もう片側から同じ住所が漏れる）。
+  const isLotBoundaryAt = (at: number) => {
+    if (at >= s.length) return true;
+    const c = s[at];
+    return (
+      HYPHENS.test(c) ||
+      /[\s　]/.test(c) ||
+      c === "番" ||
+      c === "号" ||
+      c === "の"
+    );
+  };
   let cut = s.length;
   let i = 0;
   while (i < s.length) {
@@ -79,15 +90,7 @@ export function coarsePropertyLocation(address: string | null): string | null {
       //   この関数は表記からの推定なので知らない語尾は必ず出てくる（実際 条/線 で
       //   作り直した）。そのとき意味の通らない住所が全宛先の手紙に載るより、
       //   飛ばして人に見せるほうが安全。
-      const after = s[j] ?? "";
-      const isLotBoundary =
-        j >= s.length ||
-        HYPHENS.test(after) ||
-        /[\s　]/.test(after) ||
-        after === "番" ||
-        after === "号" ||
-        after === "の";
-      if (!isLotBoundary) return null;
+      if (!isLotBoundaryAt(j)) return null;
       cut = i; // 番地の始まり
       break;
     }
@@ -99,10 +102,12 @@ export function coarsePropertyLocation(address: string | null): string | null {
         i = j + suffix.length; // 「二丁目」「一番町」「二番丁」は町名の一部
         continue;
       }
-      if (isUnitAt(j)) {
-        cut = i; // 「八番」「一号」= 番地の始まり
+      if (isLotBoundaryAt(j)) {
+        cut = i; // 「八番」「一号」「三の四」「八－一」= 番地の始まり
         break;
       }
+      // ⚠ここで null にはしない。算用数字と違い、漢数字は**地名の一部**であることが
+      //   多い（六本木・四谷・三田・九段）。知らない字が続くだけなら地名として読み進める。
       i = j; // 地名の一部（六本木など）。切らずに先へ
       continue;
     }

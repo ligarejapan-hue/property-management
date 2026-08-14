@@ -156,6 +156,17 @@ describe("coarsePropertyLocation", () => {
     expect(coarsePropertyLocation("東京都○○市××3阝")).toBeNull();
   });
 
+  it("⚠漢数字の番地でも「の」で切る(@codex #376 R18)", () => {
+    // 「三の四」は 番/号/ハイフン を書かない番地。算用数字側にだけ境界の判定を入れて
+    // 漢数字側に入れないと、**住所がまるごと**手紙に載る（同じ穴を片側だけ塞いだ形）。
+    expect(coarsePropertyLocation("北海道札幌市中央区北一条西二丁目三の四")).toBe(
+      "北海道札幌市中央区北一条西二丁目",
+    );
+    expect(coarsePropertyLocation("東京都千代田区丸の内一丁目三の五")).toBe(
+      "東京都千代田区丸の内一丁目",
+    );
+  });
+
   it("番地の始まりだと分かる形は今までどおり切る(の・番・号・ハイフン・空白・行末)", () => {
     expect(coarsePropertyLocation("東京都○○市××町3の5")).toBe("東京都○○市××町");
     expect(coarsePropertyLocation("東京都○○市××町3番5号")).toBe("東京都○○市××町");
