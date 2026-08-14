@@ -80,22 +80,30 @@ describe("F12 展開(19-A 第3実装) — properties 詳細は provider 経由�
     );
   });
 
-  it("effectiveCapabilities: 2つの capability(corporateLookup / registryAutoFetch)を collapseCapabilities 経由で pending/loading 中は false に倒す(両方 collapse・片方のみ不可)", () => {
-    expect(pageSrc).toMatch(/meCapabilities\?\.corporateLookup === true/);
-    expect(pageSrc).toMatch(/meCapabilities\?\.registryAutoFetch === true/);
+  it("effectiveCapabilities: ページが読む capability を**すべて** collapseCapabilities 経由で pending/loading 中は false に倒す(1つでも素通りは不可)", () => {
     // collapse フラグは permissions と同じ pending/loading で立てる。
     expect(pageSrc).toMatch(
       /const collapseCapabilities =\s*\n?\s*permissionsRefreshPending \|\| permissionsLoading/,
     );
-    // 非交渉 #1: 本ページは 2 つとも collapse する(admin-owners 雛形は corporateLookup 1 つ
-    // だけ)。=== true リテラルの存在だけでなく collapse の ternary 自体を明示ロックし、
+    // 非交渉 #1: === true リテラルの存在だけでなく collapse の ternary 自体を明示ロックし、
     // 将来の refactor が capability の collapse を黙って外す silent drift を防ぐ。
-    expect(pageSrc).toMatch(
-      /corporateLookupConfigured = collapseCapabilities\s*\n?\s*\?\s*false\s*\n?\s*:\s*meCapabilities\?\.corporateLookup === true/,
-    );
-    expect(pageSrc).toMatch(
-      /registryAutoFetchConfigured = collapseCapabilities\s*\n?\s*\?\s*false\s*\n?\s*:\s*meCapabilities\?\.registryAutoFetch === true/,
-    );
+    // ⚠**capability 名を手で並べない**。並べる作りだと、ページが新しい capability を
+    //   読み始めたときに素通りする(2026-08-15: registryAutoFetch を撤去した際、
+    //   名指しの配列だったこのテストが「2つ」を前提にしていて落ちた)。
+    //   実際に読んでいる `meCapabilities?.X` を**走査して**全部に collapse を要求する。
+    const used = [
+      ...pageSrc.matchAll(/meCapabilities\?\.([A-Za-z0-9_]+)\s*===\s*true/g),
+    ].map((m) => m[1]);
+    expect(used.length).toBeGreaterThan(0);
+    for (const cap of new Set(used)) {
+      expect(pageSrc).toMatch(
+        new RegExp(
+          `= collapseCapabilities\\s*\\n?\\s*\\?\\s*false\\s*\\n?\\s*:\\s*meCapabilities\\?\\.${cap} === true`,
+        ),
+      );
+    }
+    // 撤去した自動取得ボタンの capability は、このページではもう読まない。
+    expect(used).not.toContain("registryAutoFetch");
   });
 
   it("導出は単一 useMemo の純関数(setter / state 持ち越しなし)で 8 状態を返す", () => {
@@ -141,6 +149,11 @@ describe("F12 展開(19-A 第3実装) — properties 詳細は provider 経由�
     expect(pageSrc).toMatch(/canWrite=\{canWriteOwner\}/);
     expect(pageSrc).toMatch(/editableFields=\{ownerEditableFields\}/);
     expect(pageSrc).toMatch(/canAutoFetch=\{canAutoFetchRegistry\}/);
-    expect(pageSrc).toMatch(/providerConfigured=\{registryAutoFetchConfigured\}/);
+    // ⚠2026-08-15: 自動取得ボタンを撤去したので、providerConfigured を受け取るのは
+    //   所在検索ボタン（より厳しい capability）だけになった。
+    expect(pageSrc).toMatch(
+      /providerConfigured=\{registryLocationSearchConfigured\}/,
+    );
+    expect(pageSrc).not.toMatch(/registryAutoFetchConfigured/);
   });
 });
