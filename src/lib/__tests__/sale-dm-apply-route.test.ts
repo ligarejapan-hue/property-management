@@ -133,7 +133,13 @@ beforeEach(() => {
   pm._tx.dmRecipientDraft.findMany.mockResolvedValue([draft("d1")]);
   pm._tx.property.findMany.mockImplementation(
     async (args: { where: { id: { in: string[] } } }) =>
-      args.where.id.in.map((id) => ({ id, createdBy: "u1", assignedTo: null })),
+      args.where.id.in.map((id) => ({
+        id,
+        createdBy: "u1",
+        assignedTo: null,
+        address: "東京都杉並区西荻北3-19-4",
+        propertyType: "land",
+      })),
   );
   pm._tx.dmRecipientDraft.updateMany.mockImplementation(
     async (args: { where: { id: { in: string[] } } }) => ({
@@ -189,9 +195,11 @@ describe("POST sale-dm variant apply（その型の全宛先へ適用）", () =>
   });
 
   it("所在が無い物件はタグを解決できないので飛ばし、件数で報告する", async () => {
-    pm._tx.dmRecipientDraft.findMany.mockResolvedValue([
-      draft("d1"),
-      draft("d2", { address: null }),
+    pm._tx.dmRecipientDraft.findMany.mockResolvedValue([draft("d1"), draft("d2")]);
+    // 差し込みはロック後に読み直した値で行う（@codex #376 R2 P2）。
+    pm._tx.property.findMany.mockResolvedValue([
+      { id: "p-d1", createdBy: "u1", assignedTo: null, address: "東京都杉並区西荻北3-19-4", propertyType: "land" },
+      { id: "p-d2", createdBy: "u1", assignedTo: null, address: null, propertyType: "land" },
     ]);
     const res = await POST(post(), ctx);
     const body = (await res.json()) as {
@@ -214,10 +222,10 @@ describe("POST sale-dm variant apply（その型の全宛先へ適用）", () =>
       draft("d1"),
       draft("d2", { createdBy: "other", assignedTo: "other" }),
     ]);
-    // 判定はロック後の読み直しで行う(@codex #376 P1)。
+    // 判定も差し込みもロック後の読み直しで行う(@codex #376 P1/P2)。
     pm._tx.property.findMany.mockResolvedValue([
-      { id: "p-d1", createdBy: "u1", assignedTo: null },
-      { id: "p-d2", createdBy: "other", assignedTo: "other" },
+      { id: "p-d1", createdBy: "u1", assignedTo: null, address: "東京都杉並区西荻北3-19-4", propertyType: "land" },
+      { id: "p-d2", createdBy: "other", assignedTo: "other", address: "東京都杉並区西荻北3-19-4", propertyType: "land" },
     ]);
     const res = await POST(post(), ctx);
     const body = (await res.json()) as {
@@ -236,7 +244,7 @@ describe("POST sale-dm variant apply（その型の全宛先へ適用）", () =>
     // 先読みの時点では自分の担当。ロックを取ってから読み直したら別人に変わっていた。
     pm._tx.dmRecipientDraft.findMany.mockResolvedValue([draft("d1")]);
     pm._tx.property.findMany.mockResolvedValue([
-      { id: "p-d1", createdBy: "other", assignedTo: "other" },
+      { id: "p-d1", createdBy: "other", assignedTo: "other", address: "東京都杉並区西荻北3-19-4", propertyType: "land" },
     ]);
     const res = await POST(post(), ctx);
     const body = (await res.json()) as {
@@ -259,6 +267,23 @@ describe("POST sale-dm variant apply（その型の全宛先へ適用）", () =>
     expect(
       pm._tx.dmRecipientDraft.updateMany.mock.calls[0][0].where.body,
     ).toBeUndefined();
+  });
+
+  it("所在・種別もロック後に読み直した値を差し込む(@codex #376 R2 P2)", async () => {
+    // 先読みの値のまま差し込むと、実行中に住所や種別が変わった宛先へ古い内容が刷られる。
+    pm._tx.property.findMany.mockResolvedValue([
+      {
+        id: "p-d1",
+        createdBy: "u1",
+        assignedTo: null,
+        address: "神奈川県横浜市南区井土ケ谷中町69-2",
+        propertyType: "house",
+      },
+    ]);
+    await POST(post(), ctx);
+    expect(pm._tx.dmRecipientDraft.updateMany.mock.calls[0][0].data.body).toBe(
+      "神奈川県横浜市南区井土ケ谷中町の戸建について。拝啓",
+    );
   });
 
   it("本文がまだ保存されていない型は 409(何も書かない)", async () => {
@@ -291,9 +316,10 @@ describe("POST sale-dm variant apply（その型の全宛先へ適用）", () =>
   });
 
   it("監査に適用・スキップの件数を残す(本文は残さない)", async () => {
-    pm._tx.dmRecipientDraft.findMany.mockResolvedValue([
-      draft("d1"),
-      draft("d2", { address: null }),
+    pm._tx.dmRecipientDraft.findMany.mockResolvedValue([draft("d1"), draft("d2")]);
+    pm._tx.property.findMany.mockResolvedValue([
+      { id: "p-d1", createdBy: "u1", assignedTo: null, address: "東京都杉並区西荻北3-19-4", propertyType: "land" },
+      { id: "p-d2", createdBy: "u1", assignedTo: null, address: null, propertyType: "land" },
     ]);
     await POST(post(), ctx);
     const arg = vi.mocked(writeAuditLog).mock.calls[0][0] as {

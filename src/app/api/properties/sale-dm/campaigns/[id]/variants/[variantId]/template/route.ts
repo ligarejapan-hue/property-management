@@ -66,6 +66,13 @@ export async function PUT(
         );
       }
 
+      // ⚠**中身が同じ保存は、凍結の有無に関わらず何も書かない**(@codex #376 R2 P1)。
+      //   差し替えでない保存で未確定の下書きを全消しすると、適用済み・手直し済みの本文が
+      //   まとめて失われる。
+      if (variant.bodyTemplate === parsed.body) {
+        return { changed: false as const };
+      }
+
       // 凍結の二重判定（列 OR 配下の確定/送付済み）。ロックの下で数える。
       const settledCount = await tx.dmRecipientDraft.count({
         where: {
@@ -74,25 +81,23 @@ export async function PUT(
           status: { in: [...SETTLED_DRAFT_STATUSES] },
         },
       });
-      if (
-        isVariantFrozen({
-          templateFrozenAt: variant.templateFrozenAt,
-          settledCount,
-        })
-      ) {
-        // ⚠禁止すべきは「差し替え」であって「同じ本文の保存」ではない。中身が同じなら
-        //   何も変わらないので通す（何も書かない）。違えば断る＝送付済み文面と新文面が
-        //   同じ型に混ざり、A/B比較と出所が壊れるのを防ぐ（設計 §2.3 @codex R3/R15）。
-        if (variant.bodyTemplate === parsed.body) {
-          return { changed: false as const };
-        }
+      const frozen = isVariantFrozen({
+        templateFrozenAt: variant.templateFrozenAt,
+        settledCount,
+      });
+      // ⚠**まだ原本が無い型への保存は「初期化」として凍結中でも許可**する(@codex #376 R2 P2)。
+      //   PR-D2 以前からある型は、確定/送付済みの宛先を持つ＝凍結だが原本は空。ここを断ると、
+      //   割当でその型へ移された宛先（本文は空になる）に何も入れられず詰む。
+      //   禁止すべきは「差し替え」であって「最初の1回」ではない。
+      const isInitialization =
+        !variant.bodyTemplate || variant.bodyTemplate.trim().length === 0;
+      if (frozen && !isInitialization) {
         throw new ApiError(
           409,
           "送付実績のある型の文面は変更できません。文面を変えるときは新しい型を追加してください",
           "VARIANT_FROZEN",
         );
       }
-
       // 表示したときの設定と同じか。コピーしてから型の設定を変えていた場合を弾く。
       const prompt = buildExternalPrompt(variant);
       if (promptDigest(prompt) !== parsed.promptDigest) {
@@ -111,28 +116,33 @@ export async function PUT(
       }
 
       // field_staff は、担当外（再割当で隠れた）の未確定下書きが1件でもあれば拒否。
-      // 保存は下の一括クリアを伴うため、担当外の宛先の本文を消せてしまう穴を作らない
-      // （既存の型設定 PATCH が採る規則と同じ）。
+      // 保存は下の一括クリアを伴うため、担当外の宛先の本文を消せてしまう穴を作らない。
+      // ⚠**物件親行をロックしてから読み直す**(@codex #376 R2 P1)。ロックなしで数えると、
+      //   数えた後〜クリアの間に担当が変わった宛先を書き換えてしまう。
       if (session.role === "field_staff") {
-        const outOfScope = await tx.dmRecipientDraft.count({
-          where: {
-            campaignId: id,
-            variantId,
-            status: { not: "sent" },
-            property: {
-              NOT: { OR: [{ createdBy: session.id }, { assignedTo: session.id }] },
-            },
-          },
+        const unsent = await tx.dmRecipientDraft.findMany({
+          where: { campaignId: id, variantId, status: { not: "sent" } },
+          select: { propertyId: true },
         });
-        if (outOfScope > 0) {
-          throw new ApiError(
-            403,
-            "担当外の宛先を含む型は本文を保存できません",
-            "FORBIDDEN",
-          );
+        const propertyIds = [...new Set(unsent.map((d) => d.propertyId))].sort();
+        if (propertyIds.length > 0) {
+          await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${propertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
+          const visible = await tx.property.findMany({
+            where: {
+              id: { in: propertyIds },
+              OR: [{ createdBy: session.id }, { assignedTo: session.id }],
+            },
+            select: { id: true },
+          });
+          if (visible.length !== propertyIds.length) {
+            throw new ApiError(
+              403,
+              "担当外の宛先を含む型は本文を保存できません",
+              "FORBIDDEN",
+            );
+          }
         }
       }
-
       // 原本と「その本文を作ったときのプロンプト」を同じ処理で保存する
       // （出所の記録が別のプロンプトを指す事故を防ぐ）。
       await tx.dmVariant.update({
@@ -143,17 +153,33 @@ export async function PUT(
       // 差し替えの失効: 未確定の下書きの本文を全部クリアする。これをしないと、
       // 旧テンプレを適用済みの下書きが「空だけに適用」をすり抜け、
       // **記録は新・実際の手紙は旧**の食い違いが確定時に固定される（設計 §2.3 @codex R19）。
-      const cleared = await tx.dmRecipientDraft.updateMany({
-        where: {
-          campaignId: id,
-          variantId,
-          status: { not: "sent" },
-          body: { not: "" },
-        },
-        data: { body: "", status: "draft", confirmedAt: null },
-      });
-
-      return { changed: true as const, clearedCount: cleared.count };
+      // ⚠初期化（原本がまだ無かった）のときは消さない。消すべき「旧テンプレ由来の本文」が
+      //   存在せず、消すと以前の作り方で入っていた本文を壊すだけになる。
+      let clearedCount = 0;
+      if (!isInitialization) {
+        const cleared = await tx.dmRecipientDraft.updateMany({
+          where: {
+            campaignId: id,
+            variantId,
+            status: { not: "sent" },
+            body: { not: "" },
+            // 担当範囲は上でロック下に確認済みだが、書込条件にも残す（防御の二重化）。
+            ...(session.role === "field_staff"
+              ? {
+                  property: {
+                    OR: [
+                      { createdBy: session.id },
+                      { assignedTo: session.id },
+                    ],
+                  },
+                }
+              : {}),
+          },
+          data: { body: "", status: "draft", confirmedAt: null },
+        });
+        clearedCount = cleared.count;
+      }
+      return { changed: true as const, clearedCount };
     });
 
     if (result.changed) {

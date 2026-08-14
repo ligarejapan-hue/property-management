@@ -39,7 +39,9 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const tx = {
     dmVariant: { findFirst: vi.fn(), update: vi.fn() },
-    dmRecipientDraft: { count: vi.fn(), updateMany: vi.fn() },
+    dmRecipientDraft: { count: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(async () => []) },
+    // 担当範囲はロックの後に読み直す(@codex #376 R2 P1)。
+    property: { findMany: vi.fn(async () => []) },
     $queryRaw: vi.fn(async () => []),
   };
   return {
@@ -76,7 +78,9 @@ const pm = prismaMock as never as {
     dmRecipientDraft: {
       count: ReturnType<typeof vi.fn>;
       updateMany: ReturnType<typeof vi.fn>;
+      findMany: ReturnType<typeof vi.fn>;
     };
+    property: { findMany: ReturnType<typeof vi.fn> };
     $queryRaw: ReturnType<typeof vi.fn>;
   };
 };
@@ -139,10 +143,25 @@ describe("PUT sale-dm variant template（本文の貼り付け保存）", () => 
   });
 
   it("差し替え保存は未確定の下書きの本文を同じ処理でクリアする(新旧の混在を防ぐ)", async () => {
+    armVariant({ bodyTemplate: "古い本文" }); // 既に原本がある=差し替え
     await PUT(put({ body: "拝啓 本文", promptDigest: DIGEST }), ctx);
     const arg = pm._tx.dmRecipientDraft.updateMany.mock.calls[0][0];
     expect(arg.data.body).toBe("");
     expect(arg.data.status).toBe("draft");
+  });
+
+  it("原本がまだ無い型への保存は初期化として通し、下書きを消さない(@codex #376 R2 P2)", async () => {
+    // PR-D2 以前からある型は「確定済みの宛先はあるが原本は空」＝凍結だが初期化は要る。
+    // ここを断ると、割当でその型へ移された宛先（本文は空）に何も入れられず詰む。
+    armVariant({ bodyTemplate: null });
+    pm._tx.dmRecipientDraft.count.mockResolvedValue(1); // 凍結（確定済みがある）
+    const res = await PUT(put({ body: "はじめての本文", promptDigest: DIGEST }), ctx);
+    expect(res.status).toBe(200);
+    expect(pm._tx.dmVariant.update.mock.calls[0][0].data.bodyTemplate).toBe(
+      "はじめての本文",
+    );
+    // 消すべき「旧テンプレ由来の本文」が無いので消さない。
+    expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
   it("許可タグは通す", async () => {
@@ -193,6 +212,49 @@ describe("PUT sale-dm variant template（本文の貼り付け保存）", () => 
     expect(res.status).toBe(200);
     expect(pm._tx.dmVariant.update).not.toHaveBeenCalled();
     expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("凍結していなくても、中身が同じ保存は何も書かない(@codex #376 R2 P1)", async () => {
+    // ⚠差し替えでない保存で未確定の下書きを全消しすると、適用済み・手直し済みの本文が
+    //   まとめて失われる。同じ本文なら no-op にする。
+    armVariant({ bodyTemplate: "同じ本文" });
+    pm._tx.dmRecipientDraft.count.mockResolvedValue(0); // 凍結していない
+    const res = await PUT(put({ body: "同じ本文", promptDigest: DIGEST }), ctx);
+    expect(res.status).toBe(200);
+    expect(pm._tx.dmVariant.update).not.toHaveBeenCalled();
+    expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("現地担当は物件をロックして読み直した担当範囲で判定する(@codex #376 R2 P1)", async () => {
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "u1",
+      role: "field_staff",
+    });
+    pm._tx.dmRecipientDraft.findMany.mockResolvedValue([{ propertyId: "p1" }]);
+    // ⚠実DBと同じく where の担当条件で**絞り込む**。絞り込みを再現しないと、
+    //   実装が条件を落としてもテストが通ってしまう（空振り）。
+    const rows = [{ id: "p1", createdBy: "other", assignedTo: "other" }];
+    pm._tx.property.findMany.mockImplementation(
+      async (args: {
+        where: { OR?: Array<{ createdBy?: string; assignedTo?: string }> };
+      }) =>
+        rows.filter((r) =>
+          (args.where.OR ?? []).some(
+            (c) =>
+              (c.createdBy !== undefined && c.createdBy === r.createdBy) ||
+              (c.assignedTo !== undefined && c.assignedTo === r.assignedTo),
+          ),
+        ),
+    );
+    const res = await PUT(put({ body: "拝啓 本文", promptDigest: DIGEST }), ctx);
+    expect(res.status).toBe(403);
+    expect(pm._tx.dmVariant.update).not.toHaveBeenCalled();
+    const sql = pm._tx.$queryRaw.mock.calls
+      .map((c: unknown[]) =>
+        Array.isArray(c[0]) ? (c[0] as string[]).join("?") : String(c[0]),
+      )
+      .join(" | ");
+    expect(sql).toMatch(/FROM properties[\s\S]*FOR UPDATE/);
   });
 
   it("型は variant 行のロックから始める(順序 variant → draft)", async () => {

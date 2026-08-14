@@ -89,40 +89,46 @@ export async function POST(
         return { appliedCount: 0, skippedScopeCount: 0, skippedTagCount: 0 };
       }
 
+      // ⚠**物件はロックしてから読み直し、その値を「認可」と「差し込み」の両方に使う**
+      //   (@codex #376 R2 P1/P2)。先読みの値のままだと、実行中の担当変更を見落とすうえ、
+      //   住所や種別が変わった宛先へ**古い内容が刷られる**（確定側は所在・種別を検査しない）。
+      const propertyIds = [...new Set(targets.map((t) => t.propertyId))].sort();
+      await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${propertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
+      const fresh = await tx.property.findMany({
+        where: { id: { in: propertyIds } },
+        select: {
+          id: true,
+          address: true,
+          propertyType: true,
+          createdBy: true,
+          assignedTo: true,
+        },
+      });
+      const freshById = new Map(fresh.map((p) => [p.id, p]));
+
       // field_staff は担当外の宛先を**原子的に除外**する。CSV/印刷が既に隠している
       // 宛先を一括適用だけが書き換えられるのは認可の穴（設計 §2.3 @codex R4）。
       // 1件の担当変更でキャンペーン全体を止めないよう、拒否ではなく除外＋件数報告。
       let inScope = targets;
       let skippedScopeCount = 0;
       if (session.role === "field_staff") {
-        const propertyIds = [...new Set(targets.map((t) => t.propertyId))].sort();
-        // ⚠where のリレーション述語だけでは判定〜commit の間の担当変更を防げないため、
-        //   物件親行をロックしてから担当範囲を確定させる（設計 §2.3 @codex R6）。
-        await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${propertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
-        // ⚠**ロックを取ってから読み直す**(@codex #376 P1)。先読みの値で判定すると、
-        //   ロック待ちの間に確定した担当変更を見落とし、担当外になった宛先を書き換える。
-        const fresh = await tx.property.findMany({
-          where: { id: { in: propertyIds } },
-          select: { id: true, createdBy: true, assignedTo: true },
+        inScope = targets.filter((t) => {
+          const p = freshById.get(t.propertyId);
+          return (
+            p != null &&
+            (p.createdBy === session.id || p.assignedTo === session.id)
+          );
         });
-        const visible = new Set(
-          fresh
-            .filter(
-              (p) => p.createdBy === session.id || p.assignedTo === session.id,
-            )
-            .map((p) => p.id),
-        );
-        inScope = targets.filter((t) => visible.has(t.propertyId));
         skippedScopeCount = targets.length - inScope.length;
       }
-
       // 同じ本文になる宛先はまとめて1回で書く（タグを使わない文面なら全件が1回）。
       const byBody = new Map<string, string[]>();
       let skippedTagCount = 0;
       for (const t of inScope) {
+        const p = freshById.get(t.propertyId);
         const expanded = expandLetterTags(variant.bodyTemplate, {
-          location: coarsePropertyLocation(t.property.address),
-          propertyType: propertyTypeLabel(t.property.propertyType),
+          location: coarsePropertyLocation(p?.address ?? null),
+          propertyType: propertyTypeLabel(p?.propertyType ?? null),
         });
         // 差し込めなかった宛先（所在が空など）は飛ばす。プレースホルダのまま
         // 郵送されるのを防ぐ保険（設計 §2.3）。展開後は厳密版で検査する。

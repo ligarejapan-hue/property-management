@@ -7,7 +7,8 @@
  *
  * ⚠**migration では埋めない**。`migrate deploy → restart` の窓では凍結を知らない旧ルートが
  * 動いており、印を先に立てると凍結済みの型を書き換え・削除できてしまう（復元不能）。
- * **restart のあとに1回**流す。
+ * **restart のあとに1回**流す。⚠このスクリプトは tsx(devDependencies)で動くので、
+ * **`npm prune --omit=dev` より前**に実行すること（prune を最後へ回す・@codex #376）。
  *
  * 安全のためデフォルトは **dry-run**（件数レポートのみ）。`--apply` で実書込。
  *

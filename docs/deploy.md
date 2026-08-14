@@ -548,7 +548,20 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 ```
 
 冪等（印がまだ無い型だけを拾う）なので、何度流しても結果は変わらない。
-⚠**このリリース自体に migration は無い**（列は PR-D1 で追加済み）。順序は `restart → 照合`。
+⚠**このリリース自体に migration は無い**（列は PR-D1 で追加済み）。
+
+⚠**実行の順番（重要・@codex #376）**: このスクリプトは `tsx`（devDependencies）で動く。
+通常手順どおり先に `npm prune --omit=dev` してしまうと **`tsx` が消えて実行できない**。
+このリリースでは、**依存の後片付け（prune）を最後へ回す**:
+
+1. `npm ci --include=dev`
+2. build
+3. restart
+4. 照合（下のコマンド）
+5. 依存の後片付け（prune）
+
+反響の照合（PR-B）と同じ並びで、実績のある手順。
+
 その数分間は売却DMの操作をしないこと（旧ルートと新ルートが混ざる窓を作らない）。
 
 
