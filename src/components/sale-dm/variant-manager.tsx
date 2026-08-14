@@ -115,9 +115,12 @@ export default function SaleDmVariantManager({
 
   const applyTemplate = (overwriteExisting: boolean) =>
     runLetter(async () => {
-      if (!letterFor) return;
+      if (!letterFor || !letter) return;
       const r = await applySaleDmVariantTemplate(campaign.id, letterFor.id, {
         overwriteExisting,
+        // 画面が見ている原本。ほかの画面が差し替えていれば 409 で止まる
+        // （見ていない文面を宛先へ書き込まない）。
+        bodyDigest: letter.bodyDigest,
       });
       const parts = [`${r.appliedCount} 件に反映しました`];
       // 黙って減らさない: 飛ばした宛先は理由ごとに件数で伝える。

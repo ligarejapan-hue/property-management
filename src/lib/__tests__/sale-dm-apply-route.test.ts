@@ -62,6 +62,7 @@ import {
   getOwnerDisplayConfig,
 } from "@/lib/api-helpers";
 import { POST } from "../../app/api/properties/sale-dm/campaigns/[id]/variants/[variantId]/apply/route";
+import { bodyTemplateDigest } from "../sale-dm-letter/external-prompt";
 
 const pm = prismaMock as never as {
   dmCampaign: { findFirst: ReturnType<typeof vi.fn> };
@@ -79,8 +80,14 @@ const pm = prismaMock as never as {
 
 const READS = ["property", "csv_export", "csv_export_personal", "owner"];
 const ctx = { params: Promise.resolve({ id: "c1", variantId: "v1" }) };
-const post = (b: unknown = {}) =>
-  new Request("http://x", { method: "POST", body: JSON.stringify(b) }) as never;
+// 適用も「画面が見ていた原本」を送る（別の画面が差し替えた文面を、古い画面の操作で
+// 宛先へ書き込まないため・@codex #376 R16）。既定は beforeEach で仕込む原本と一致する値。
+const TEMPLATE = "{{物件所在}}の{{物件種別}}について。拝啓";
+const post = (b: Record<string, unknown> = {}) =>
+  new Request("http://x", {
+    method: "POST",
+    body: JSON.stringify({ bodyDigest: bodyTemplateDigest(TEMPLATE), ...b }),
+  }) as never;
 
 /** 下書き1件ぶんの模擬（物件の所在・種別・担当を持つ）。 */
 function draft(
@@ -128,7 +135,7 @@ beforeEach(() => {
   pm.dmCampaign.findFirst.mockResolvedValue({ id: "c1" });
   pm._tx.dmVariant.findFirst.mockResolvedValue({
     id: "v1",
-    bodyTemplate: "{{物件所在}}の{{物件種別}}について。拝啓",
+    bodyTemplate: TEMPLATE,
   });
   pm._tx.dmRecipientDraft.findMany.mockResolvedValue([draft("d1")]);
   pm._tx.property.findMany.mockImplementation(
@@ -182,10 +189,20 @@ describe("POST sale-dm variant apply（その型の全宛先へ適用）", () =>
     });
     pm._tx.dmRecipientDraft.findMany.mockResolvedValue([draft("d1")]);
     pm._tx.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
-    await POST(post({ overwriteExisting: true }), ctx);
+    await POST(post({ overwriteExisting: true, bodyDigest: bodyTemplateDigest("拝啓") }), ctx);
     expect(
       pm._tx.dmRecipientDraft.findMany.mock.calls[0][0].where.body,
     ).toBeUndefined();
+  });
+
+  it("画面が見ていた原本と違えば適用しない(409・@codex #376 R16)", async () => {
+    // ⚠適用は「いまの原本」を差し込む。別の画面が差し替えたあとに古い画面で押すと、
+    //   **操作した人が見ていない文面**が宛先に書き込まれる(上書き指定なら手直しごと)。
+    const res = await POST(post({ bodyDigest: bodyTemplateDigest("古い文面") }), ctx);
+    expect(res.status).toBe(409);
+    const b = (await res.json()) as { error: { code: string } };
+    expect(b.error.code).toBe("TEMPLATE_STALE");
+    expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
   it("確定済み・送付済みには触らない", async () => {

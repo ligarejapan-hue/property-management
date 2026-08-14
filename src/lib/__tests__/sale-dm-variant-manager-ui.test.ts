@@ -64,6 +64,8 @@ describe("型の管理パネル: 外部AI方式の導線", () => {
     const b = handlerBody("const applyTemplate");
     expect(b).toContain("applySaleDmVariantTemplate");
     expect(b).toContain("skippedTagCount");
+    // 適用も「画面が見ていた原本」を送る(@codex #376 R16)。
+    expect(b).toContain("bodyDigest");
     expect(b).toContain("skippedScopeCount");
   });
 

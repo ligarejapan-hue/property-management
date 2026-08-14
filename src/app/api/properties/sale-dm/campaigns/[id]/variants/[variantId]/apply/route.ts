@@ -14,10 +14,15 @@ import {
   propertyTypeLabel,
 } from "@/lib/sale-dm-letter/tags";
 import { validateLetterBody } from "@/lib/sale-dm-letter/body-validation";
+import { bodyTemplateDigest } from "@/lib/sale-dm-letter/external-prompt";
 
 const postSchema = z.object({
   // 既定は「本文が空の宛先だけ」。個別の手直しを黙って消さないため（設計 §2.3）。
   overwriteExisting: z.boolean().optional(),
+  // 画面が表示している原本の指紋。⚠これが無いと、別の画面が差し替えたあとに古い画面で
+  // 適用を押したとき、**操作した人が見ていない文面**が宛先へ書き込まれる（上書き指定なら
+  // 手直しごと置き換わる・@codex #376 R16）。
+  bodyDigest: z.string().length(64),
 });
 
 /**
@@ -58,6 +63,16 @@ export async function POST(
           409,
           "この型にはまだ本文が保存されていません。先に本文を貼り付けてください",
           "TEMPLATE_MISSING",
+        );
+      }
+
+      // 画面が見ていた原本と、いまの原本が同じか（@codex #376 R16）。貼り付け保存と同じ
+      // 版ずれ検出を適用にもかける（見ていない文面を宛先へ書かない）。
+      if (bodyTemplateDigest(variant.bodyTemplate) !== parsed.bodyDigest) {
+        throw new ApiError(
+          409,
+          "この型の文面は、ほかの画面で先に保存されています。開き直して最新の文面を確認してから適用してください",
+          "TEMPLATE_STALE",
         );
       }
 

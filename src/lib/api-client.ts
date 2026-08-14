@@ -387,7 +387,8 @@ export async function saveSaleDmVariantTemplate(
 export async function applySaleDmVariantTemplate(
   campaignId: string,
   variantId: string,
-  body: { overwriteExisting?: boolean } = {},
+  // bodyDigest = 画面が表示している原本の指紋。別の画面が差し替えていたら 409。
+  body: { overwriteExisting?: boolean; bodyDigest: string },
 ) {
   if (USE_MOCK) {
     await mockDelay();
