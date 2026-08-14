@@ -1,22 +1,22 @@
 import type { LetterRecipient, LetterOptions, BuiltPrompt } from "./types";
 
-const TONE_JA: Record<string, string> = {
+export const TONE_JA: Record<string, string> = {
   formal: "フォーマルで丁寧",
   standard: "標準的な丁寧さ",
   soft: "やわらかく親しみやすい",
 };
-const LENGTH_JA: Record<string, string> = {
+export const LENGTH_JA: Record<string, string> = {
   short: "はがき向けに短く(200〜300字目安)",
   medium: "封書向けに中程度(350〜500字目安)",
   long: "封書向けにやや長め(500〜700字目安)",
 };
-const APPEAL_JA: Record<string, string> = {
+export const APPEAL_JA: Record<string, string> = {
   price: "需要が高く好条件での売却が見込めること",
   inheritance: "相続・税の観点での早めの検討",
   vacant: "空き家・管理負担の軽減",
   buyer: "この地域で購入を希望する顧客がいること",
 };
-const STRENGTH_JA: Record<string, string> = {
+export const STRENGTH_JA: Record<string, string> = {
   low: "控えめ・押し付けない",
   medium: "標準的な後押し",
   high: "積極的に売却を勧める(ただし誇張はしない)",

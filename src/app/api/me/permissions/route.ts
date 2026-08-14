@@ -49,11 +49,11 @@ export async function GET() {
       reverseGeocode: isReverseGeocodeConfigured(),
       registryOcrDraft:
         isRegistryOcrConfigured() && session.role === "admin",
-      // 売却促進DM を「作成して印刷できる」前提が揃っているか（boolean のみ）。AI provider 設定に加え、郵送QRに
-      // 必須の絶対URL（SALE_DM_TRACKING_BASE_URL / SALE_DM_LP_URL）と差出人（SALE_DM_SENDER_NAME / CONTACT）も
-      // 要求する。いずれか未設定だと campaign 作成が 503 になるため「売却DMを作成」導線自体を出さない（生成/印刷の
-      // fail-closed と UI を揃え、押して 503 になるのを防ぐ）。
-      saleDmLetter: isSaleDmConfigured(saleDmCfg) && !!resolveTrackingBaseUrl(saleDmCfg) && !!resolveLpUrl(saleDmCfg) && isSenderConfigured(saleDmCfg),
+      // 売却促進DM を「作成して印刷できる」前提が揃っているか（boolean のみ）。⚠AI直結は廃止したので
+      // provider/APIキーは見ない（設計 §2.5）。郵送QRに必須の絶対URL（SALE_DM_TRACKING_BASE_URL /
+      // SALE_DM_LP_URL）と差出人（SALE_DM_SENDER_NAME / CONTACT）だけを要求する。いずれか未設定だと
+      // campaign 作成が 503 になるため「売却DMを作成」導線自体を出さない（押して 503 を防ぐ）。
+      saleDmPrintReady: !!resolveTrackingBaseUrl(saleDmCfg) && !!resolveLpUrl(saleDmCfg) && isSenderConfigured(saleDmCfg),
     };
     return apiResponse({ permissions, capabilities });
   } catch (error) {

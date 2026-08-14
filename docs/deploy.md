@@ -531,6 +531,40 @@ sudo systemctl status property-management --no-pager
 
 ### リリース同梱の一回限り作業（one-shot）
 
+#### 売却DM 外部AI方式リリース（PR-D2）: 型の凍結印の照合
+
+送付実績のある型（variant）の文面を後から差し替えられないようにするため、`dm_variants.template_frozen_at`
+に印を入れる。**この照合を流さないと**、既に確定/送付済みの宛先を持つ型でも、割当で宛先が別の型へ
+移った後に「確定の証拠」が消え、文面を差し替えられてしまう（送付済み文面の出所が失われる）。
+
+⚠**migration では埋めていない**。`migrate deploy → restart` の窓では凍結を知らない旧ルート
+（型の設定 PATCH / DELETE）がまだ動いており、印を先に立てると**凍結済みの型を書き換え・削除**
+できてしまい、照合では復元できない。**新コードが動き始めた後（再起動のステップの後）に1回**流す。
+
+```bash
+# root で app.env を source して DATABASE_URL を通し、www-data で実行（devDeps の tsx が要る＝prune 前）
+npx tsx scripts/reconcile-sale-dm-template-freeze.ts           # dry-run（件数だけ）
+npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
+```
+
+冪等（印がまだ無い型だけを拾う）なので、何度流しても結果は変わらない。
+⚠**このリリース自体に migration は無い**（列は PR-D1 で追加済み）。
+
+⚠**実行の順番（重要・@codex #376）**: このスクリプトは `tsx`（devDependencies）で動く。
+通常手順どおり先に `npm prune --omit=dev` してしまうと **`tsx` が消えて実行できない**。
+このリリースでは、**依存の後片付け（prune）を最後へ回す**:
+
+1. `npm ci --include=dev`
+2. build
+3. restart
+4. 照合（下のコマンド）
+5. 依存の後片付け（prune）
+
+反響の照合（PR-B）と同じ並びで、実績のある手順。
+
+その数分間は売却DMの操作をしないこと（旧ルートと新ルートが混ざる窓を作らない）。
+
+
 #### 反響の記録リリース（migration `add_dm_reaction_columns`）: 旧 sale_dm 送付記録の照合
 
 この migration は既存の送付記録を全件「反応なし（no_response）」で初期化する。過去の売却DMで

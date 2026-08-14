@@ -39,8 +39,11 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     dmRecipientDraft: { findUnique: vi.fn(), updateMany: vi.fn() },
-    dmVariant: { findFirst: vi.fn() },
+    dmVariant: { findFirst: vi.fn(), updateMany: vi.fn(async () => ({ count: 0 })) },
+    // 確定を戻す/型を移す前に凍結印を立てる(PR-D2 設計§2.4)。
+    $queryRaw: vi.fn(async () => []),
   };
+  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
   return { default: db };
 });
 

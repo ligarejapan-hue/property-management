@@ -23,7 +23,12 @@ function routeFiles(dir: string): string[] {
 }
 
 /** 書き込み門を要求しない route（理由を必ず書く）。 */
-const WRITE_GATE_EXCEPTIONS: Record<string, string> = {};
+const WRITE_GATE_EXCEPTIONS: Record<string, string> = {
+  // AI直結の再生成は廃止(設計§2.1)。設定も権限も見ずに 410 を返すだけの入口なので、
+  // 書き込み門は不要(そもそも何も読まない・書かない)。
+  "src/app/api/properties/sale-dm/drafts/[id]/regenerate/route.ts":
+    "410 を返すだけ(データに触れない)",
+};
 
 const FILES = routeFiles(ROOT);
 

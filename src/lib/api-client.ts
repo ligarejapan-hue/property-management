@@ -195,7 +195,9 @@ export interface CreateSaleDmCampaignBody {
   filters?: Record<string, string>;
   // チェックで選んだ物件から作成する(指定時は filters より優先=対象=選択物件)。
   propertyIds?: string[];
-  confirmed: boolean; // 課金確認(AI生成は有料+オーナーPII外部送信)。UI は確認後 true を送る。
+  /** ⚠廃止（@codex #376 R7）。AI直結をやめたので課金も PII の外部送信も起きない。
+   *  後方互換のため受け取るが、送っても無視される。新しい呼び出しでは付けない。 */
+  confirmed?: boolean;
   // 二重作成(再送信/別タブ/連打)防止の冪等性キー。作成試行ごとに安定生成し、成功で更新する。
   idempotencyKey?: string;
 }
@@ -354,6 +356,50 @@ export async function deleteSaleDmVariant(campaignId: string, variantId: string)
 }
 
 // 宛先を型へ割り当て。auto=均等割り(sequential/random)、manual=指定(recipientId→variantId)。送付済みは対象外。
+// 外部AI方式（設計 §2.2/§2.3）: プロンプトを表示 → 手元のAIで本文を作る → 貼り付け保存 → 全宛先へ適用。
+export async function fetchSaleDmVariantPrompt(campaignId: string, variantId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { prompt: "（モック）プロンプト", digest: "0".repeat(64), frozen: false, bodyTemplate: null as string | null, bodyDigest: "0".repeat(64) };
+  }
+  return apiFetch<{ prompt: string; digest: string; frozen: boolean; bodyTemplate: string | null; bodyDigest: string }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/variants/${variantId}/prompt`,
+  );
+}
+
+export async function saveSaleDmVariantTemplate(
+  campaignId: string,
+  variantId: string,
+  // baseBodyDigest = プロンプト表示時に返された bodyDigest。別の画面が先に保存していたら 409。
+  body: { body: string; promptDigest: string; baseBodyDigest: string },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { changed: true, clearedCount: 0, bodyDigest: "0".repeat(64) };
+  }
+  // bodyDigest = 保存後の原本の指紋。画面はこれを次の保存に使う（取り直さない）。
+  return apiFetch<{ changed: boolean; clearedCount?: number; bodyDigest: string }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/variants/${variantId}/template`,
+    { method: "PUT", body: JSON.stringify(body) },
+  );
+}
+
+export async function applySaleDmVariantTemplate(
+  campaignId: string,
+  variantId: string,
+  // bodyDigest = 画面が表示している原本の指紋。別の画面が差し替えていたら 409。
+  body: { overwriteExisting?: boolean; bodyDigest: string },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { appliedCount: 0, skippedScopeCount: 0, skippedTagCount: 0 };
+  }
+  return apiFetch<{ appliedCount: number; skippedScopeCount: number; skippedTagCount: number }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/variants/${variantId}/apply`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
 export async function assignSaleDmVariants(
   campaignId: string,
   body: { mode: "auto" | "manual"; order?: "sequential" | "random"; assignments?: { recipientId: string; variantId: string }[] },

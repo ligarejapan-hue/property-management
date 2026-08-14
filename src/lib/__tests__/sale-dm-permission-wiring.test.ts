@@ -29,15 +29,17 @@ const campaignsRouteSrc = read(
   "src/app/api/properties/sale-dm/campaigns/route.ts",
 );
 
+// ⚠PR-D2 で AI直結を廃止したため、この権限は**効果を持たない**。既存の付与を隠さない
+//   よう選択肢は残すが、ラベルで「廃止・効果なし」と明示する（@codex #376 R7）。
 const SALE_DM_ROW =
-  /key: "sale_dm", label: "売却促進DM\(AI生成・課金\)", actions: \["generate"\]/;
+  /key: "sale_dm", label: "売却促進DM\(廃止・効果なし\)", actions: \["generate"\]/;
 
-describe("sale_dm:generate の権限編集UI 配線", () => {
-  it("users 権限編集UI に sale_dm(generate) がある（既存）", () => {
+describe("sale_dm:generate の権限編集UI 配線(廃止済みだが選択肢は残す)", () => {
+  it("users 権限編集UI に sale_dm の行が「廃止」ラベルで残っている", () => {
     expect(usersPermPageSrc).toMatch(SALE_DM_ROW);
   });
 
-  it("templates 編集UI にも sale_dm(generate) がある（=テンプレートで付与できる）", () => {
+  it("templates 編集UI にも同じラベルで残っている", () => {
     expect(templatesPageSrc).toMatch(SALE_DM_ROW);
   });
 
@@ -58,9 +60,17 @@ describe("sale_dm:generate の mock(admin 相当)権限", () => {
 });
 
 describe("sale_dm:generate の gate と hasPermission", () => {
-  it("campaign 作成 route が sale_dm:generate を必須化している（既存）", () => {
-    expect(campaignsRouteSrc).toMatch(
+  it("campaign 作成 route は sale_dm:generate を要求しない(AI直結廃止・PR-D2)", () => {
+    // このゲートの根拠は「課金 + オーナーPIIを外部APIへ送る」ことだった。外部AI方式は
+    // どちらも無いので要求しない。書込門は property:write に統一(設計 §2.5)。
+    expect(campaignsRouteSrc).not.toMatch(
       /hasPermission\(permissions, "sale_dm", "generate"\)/,
+    );
+  });
+
+  it("campaign 作成 route は property:write を要求する", () => {
+    expect(campaignsRouteSrc).toMatch(
+      /hasPermission\(permissions, "property", "write"\)/,
     );
   });
 

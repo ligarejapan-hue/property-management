@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState, type ChangeEvent } from "react";
-import { Loader2, RotateCcw } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import type { SaleDmCampaign, SaleDmDraft } from "@/lib/api-client";
-import { patchSaleDmDraft, regenerateSaleDmDraft } from "@/lib/api-client";
+import { patchSaleDmDraft } from "@/lib/api-client";
 import {
   resolveAdjustTarget,
   buildDraftPatch,
@@ -74,22 +74,9 @@ export default function SaleDmAdjustPanel({
     }
   };
 
-  const regenerate = async () => {
-    if (!selected) return;
-    // 課金確認: 再生成は AI 呼び出し(有料)+ オーナー情報の外部送信を伴うため、実行前に確認する
-    // (キャンペーン作成と同方針)。サーバーも confirmed:true を必須にしている。
-    if (!window.confirm("この宛先の手紙をAIで作り直します。\nAI利用料金が発生し、オーナー情報がAI提供元へ送信されます。\n続けますか？")) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await regenerateSaleDmDraft(selected.id);
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "再生成に失敗しました");
-    } finally {
-      setBusy(false);
-    }
-  };
+  // ⚠AI直結の再生成は廃止した(設計 §2.1)。押しても必ずエラーになる導線を残さないため、
+  //   ボタンごと外す。文面は「型」の管理パネルから、プロンプトを表示 → 手元のAIで作成 →
+  //   貼り付け → その型の全宛先へ適用、の流れで入れる。
 
   return (
     <div className="space-y-3">
@@ -160,15 +147,9 @@ export default function SaleDmAdjustPanel({
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
               この通を保存
             </button>
-            <button
-              type="button"
-              onClick={regenerate}
-              disabled={busy}
-              className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              再生成
-            </button>
+            <span className="text-[11px] text-gray-500">
+              文面を作り直すときは、型の管理から「文面」を開いてください
+            </span>
           </div>
         </div>
       ) : (

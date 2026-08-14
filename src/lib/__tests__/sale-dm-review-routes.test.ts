@@ -25,6 +25,8 @@ vi.mock("@/lib/prisma", () => {
   const tx = {
     dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn() },
     owner: { findMany: vi.fn() },
+    // 確定は「確定を作る前に型へ凍結印を立てる」(PR-D2 設計§2.4)。
+    dmVariant: { updateMany: vi.fn(async () => ({ count: 0 })) },
     // 確定は field_staff のとき、物件親行をロックしたまま担当範囲を見直す(PR-D1)。
     property: { findMany: vi.fn(async () => []) },
     $queryRaw: vi.fn(async () => []),
@@ -60,6 +62,7 @@ const pm = prismaMock as never as {
   _tx: {
     dmRecipientDraft: { findMany: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
     owner: { findMany: ReturnType<typeof vi.fn> };
+    dmVariant: { updateMany: ReturnType<typeof vi.fn> };
     property: { findMany: ReturnType<typeof vi.fn> };
   };
 };
@@ -290,6 +293,37 @@ describe("POST confirm (bulk)", () => {
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
+  it("読み直しでロックしていない型が出てきたら中止する(@codex #376 R11)", async () => {
+    // ⚠ロックする型は**ロック前の先読み**から決めている。先読み〜ロックの間に割当が
+    //   別の型へ移すと、読み直しにはロックしていない型が現れる。そのまま凍結印を
+    //   立てると、子行を掴んだあとに親(型)を掴むことになり、型を先に掴む処理と
+    //   互い違いになって片方が異常終了する。**中止して取り直してもらう**。
+    grant(...ALL);
+    setupFreshDrafts(
+      [{ id: "11111111-1111-4111-8111-111111111111", recipientZip: null, recipientAddress: "渋谷区神宮前1-1-1", ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+      [{ id: "aaaaaaaa-1111-4111-8111-111111111111", zip: null, address: null, currentZip: null, currentAddress: "渋谷区神宮前1-1-1" }],
+    );
+    const row = {
+      id: "11111111-1111-4111-8111-111111111111",
+      body: "拝啓 時下ますますご清祥のこととお喜び申し上げます。",
+      recipientZip: null,
+      recipientAddress: "渋谷区神宮前1-1-1",
+      representativeOwnerId: "aaaaaaaa-1111-4111-8111-111111111111",
+      draftOwners: [{ ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+      propertyId: "pppppppp-1111-4111-8111-111111111111",
+    };
+    pm._tx.dmRecipientDraft.findMany.mockImplementation(
+      async (args: { where?: { body?: unknown } }) =>
+        args?.where?.body !== undefined
+          ? [{ ...row, variantId: "vvvvvvvv-1111-4111-8111-111111111111" }] // 先読み: 元の型
+          : [{ ...row, variantId: "vvvvvvvv-2222-4111-8111-222222222222" }], // 読み直し: 別の型へ移動済み
+    );
+    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: ["11111111-1111-4111-8111-111111111111"] }) }) as never);
+    expect(res.status).toBe(409);
+    expect(pm._tx.dmVariant.updateMany).not.toHaveBeenCalled();   // 凍結印を立てない
+    expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled(); // 確定もしない
+  });
+
   it("不正な JSON ボディは 400(500 でなく)・更新しない", async () => {
     grant(...ALL);
     const res = await confirmDrafts(new Request("http://x", { method: "POST", body: "{ broken" }) as never);
@@ -458,119 +492,17 @@ describe("POST confirm (bulk)", () => {
   });
 });
 
-describe("POST regenerate draft (再生成)", () => {
-  const mockDraft = {
-    id: "r1",
-    recipientName: "田中 一郎",
-    honorific: "様",
-    coOwnerCount: 1,
-    status: "confirmed",
-    campaign: { createdBy: "u1" },
-    property: { address: "東京都〇〇区", propertyType: "land", roomNo: null },
-    variant: { designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null },
-  };
-
-  it("未設定の場合 503", async () => {
-    grant(...ALL);
-    (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
-    (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
-    expect(res.status).toBe(503);
-  });
-
-  it("差出人(env)未設定なら 503・生成しない(差出人名/連絡先が空の使えない手紙を有料生成しない)", async () => {
+describe("POST regenerate draft (再生成=廃止)", () => {
+  // AI 直結の生成は廃止した(設計 §2.1)。ボタンを隠すだけだと、設定が入っている環境で
+  // 宛先の個人情報を外部APIへ送る旧経路が生き残るため、設定の有無に関わらず閉じる。
+  it("設定の有無に関わらず 410(生成を呼ばない)", async () => {
     grant(...ALL);
     (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    (isSenderConfigured as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
-    expect(res.status).toBe(503);
+    const res = await regenerateDraft(
+      new Request("http://x", { method: "POST" }) as never,
+    );
+    expect(res.status).toBe(410);
     expect(generateLetters).not.toHaveBeenCalled();
-  });
-
-  it("印刷必須URL(env)未設定なら 503・生成しない(印刷不能な下書きへの課金防止・campaign POST と統一・R34)", async () => {
-    grant(...ALL);
-    (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    (isSenderConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    delete process.env.SALE_DM_TRACKING_BASE_URL; // 郵送QRの絶対URLが無い=印刷不能
-    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
-    expect(res.status).toBe(503);
-    expect(generateLetters).not.toHaveBeenCalled();
-  });
-
-  it("課金確認なし(confirmed 未指定)の再生成は 400・生成しない(campaign 作成と同じ確認ゲート)", async () => {
-    grant(...ALL);
-    (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
-    (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    const res = await regenerateDraft(new Request("http://x", { method: "POST" }) as never, { params: Promise.resolve({ id: "r1" }) });
-    expect(res.status).toBe(400);
-    expect(generateLetters).not.toHaveBeenCalled();
-    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
-  });
-
-  it("draft が存在しない場合 404", async () => {
-    grant(...ALL);
-    (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
-    (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    pm.dmRecipientDraft.findUnique.mockResolvedValue(null);
-    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
-    expect(res.status).toBe(404);
-  });
-
-  it("field_staff が作成/担当でない物件の再生成は 403(record scope)", async () => {
-    grant(...ALL);
-    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
-    (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
-    (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({
-      ...mockDraft,
-      property: { address: "東京都〇〇区", propertyType: "land", roomNo: null, createdBy: "other", assignedTo: "other" },
-    });
-    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
-    expect(res.status).toBe(403);
-  });
-
-  it("正常に再生成し 200・条件付き updateMany(status!=sent)で本文書込+確定解除(draft へ)", async () => {
-    grant(...ALL);
-    (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
-    (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    pm.dmRecipientDraft.findUnique.mockResolvedValue(mockDraft);
-    (generateLetters as ReturnType<typeof vi.fn>).mockResolvedValue({ drafts: [{ recipientIndex: 0, body: "再生成本文", error: null }], truncated: false });
-    pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
-    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
-    expect(res.status).toBe(200);
-    // 本文が変わるため確定を解除=再生成後の新文面を再確認なしで印刷/送付させない(承認ゲート維持)。
-    // where は status!=sent に加え、生成時の variant options を relational filter で要求する(生成中の型変更で
-    // 旧設定本文を書き戻さない=variant 無効化を打ち消さない)。
-    expect(pm.dmRecipientDraft.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: {
-        id: "r1",
-        status: { not: "sent" },
-        variant: { designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null },
-      },
-      data: { body: "再生成本文", status: "draft", confirmedAt: null },
-    }));
-  });
-
-  it("生成中に割当 variant が変更された場合は 409・旧設定本文を書き戻さない(updateMany count=0)", async () => {
-    grant(...ALL);
-    (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
-    (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    pm.dmRecipientDraft.findUnique.mockResolvedValue(mockDraft);
-    (generateLetters as ReturnType<typeof vi.fn>).mockResolvedValue({ drafts: [{ recipientIndex: 0, body: "再生成本文", error: null }], truncated: false });
-    pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 }); // variant options 不一致 or sent 化で 0 行
-    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
-    expect(res.status).toBe(409);
-  });
-
-  it("生成中に並行で sent 確定(updateMany count=0)なら 409・本文を上書きしない", async () => {
-    grant(...ALL);
-    (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
-    (isSaleDmConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    pm.dmRecipientDraft.findUnique.mockResolvedValue(mockDraft);
-    (generateLetters as ReturnType<typeof vi.fn>).mockResolvedValue({ drafts: [{ recipientIndex: 0, body: "再生成本文", error: null }], truncated: false });
-    pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
-    const res = await regenerateDraft(new Request("http://x", { method: "POST", body: JSON.stringify({ confirmed: true }) }) as never, { params: Promise.resolve({ id: "r1" }) });
-    expect(res.status).toBe(409);
   });
 });
 

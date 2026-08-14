@@ -49,7 +49,12 @@ describe("宛先の確定(drafts/confirm)のロック順序", () => {
     const d = s.search(/FROM dm_recipient_drafts[\s\S]{0,200}FOR UPDATE/);
     expect(d).toBeGreaterThan(v);
     // ロックの後に読み直し、その値で本文を検査していること。
-    expect(s.slice(d)).toMatch(/findMany[\s\S]{0,900}validateLetterBody/);
+    // ⚠距離窓(`[\s\S]{0,N}`)で書くと、間に1行足すだけで落ちる(PR-C の教訓)。
+    //   出現位置の前後関係だけを見る。
+    const reread = s.indexOf("findMany", d);
+    const validate = s.indexOf("validateLetterBody", reread);
+    expect(reread).toBeGreaterThan(d);
+    expect(validate).toBeGreaterThan(reread);
   });
 
   it("field_staff のときだけ物件親行を取る(admin/office は不要)", () => {
@@ -78,6 +83,26 @@ describe("型の割当(assign)のロック順序", () => {
     expect(v).toBeGreaterThan(-1);
     expect(u).toBeGreaterThan(-1);
     expect(v).toBeLessThan(u);
+  });
+
+  it("移動元の型もロック対象に含める(@codex #376 R4)", () => {
+    // 確定済みを移すときは移動元へ凍結印を立てるので、移動先だけ掴むと
+    // 確定側と互い違いになって止まる。両方をまとめて id 順に取る。
+    const lockAt = s.search(/FROM dm_variants[\s\S]{0,200}FOR UPDATE/);
+    const before = s.slice(0, lockAt);
+    expect(before).toContain("sourcesPre");
+    expect(before).toMatch(/byVariant\.keys\(\)[\s\S]{0,200}sourcesPre|sourcesPre[\s\S]{0,200}byVariant\.keys\(\)/);
+  });
+
+  it("移動元の収集に状態の条件を付けない(@codex #376 R9)", () => {
+    // ⚠状態から集合を作ると、先読みのあとに確定された下書きの移動元が漏れる。
+    //   漏れた型へ凍結印を立てる＝ロックしていない型を更新することになり、
+    //   取得順の保証が崩れる。振る舞いの実測は sale-dm-assign-route.test.ts。
+    const start = s.indexOf("const sourcesPre = await");
+    expect(start).toBeGreaterThan(-1);
+    const query = s.slice(start, s.indexOf("});", start));
+    expect(query.length).toBeGreaterThan(40); // 切り出し失敗の空振り検出
+    expect(query).not.toContain("status");
   });
 
   it("型 id を並べ替えてから取る(取得順を全経路でそろえる)", () => {

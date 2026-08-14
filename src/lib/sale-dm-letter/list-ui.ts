@@ -16,11 +16,12 @@ export function canCreateSaleDm(perms: PermissionLike[] | null): boolean {
   if (!perms) return false;
   const has = (resource: string) =>
     perms.some((p) => p.resource === resource && p.action === "read" && p.granted);
-  const canGenerate = perms.some((p) => p.resource === "sale_dm" && p.action === "generate" && p.granted);
+  // ⚠AI直結は廃止したので sale_dm:generate は要求しない（設計 §2.5）。
+  //   このゲートの根拠は「課金 + PIIの外部送信」で、外部AI方式はどちらも無い。
   // 書き込み門(設計 §2.5・PR-D1)。作成 API は property:write を要求するようになったため、
   // ここでも要求しないと「押せるのに 403」のボタンを見せることになる。
   const canWrite = perms.some((p) => p.resource === "property" && p.action === "write" && p.granted);
-  return has("csv_export") && has("csv_export_personal") && has("owner") && canGenerate && canWrite;
+  return has("csv_export") && has("csv_export_personal") && has("owner") && canWrite;
 }
 
 // 作成API の部分生成を操作者に伝える文面。確認文は「現在の絞り込み対象を生成」と言うため、

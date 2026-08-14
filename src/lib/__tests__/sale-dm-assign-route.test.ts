@@ -17,7 +17,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     dmCampaign: { findFirst: vi.fn() },
-    dmVariant: { findMany: vi.fn() },
+    dmVariant: { findMany: vi.fn(), updateMany: vi.fn(async () => ({ count: 0 })) },
     dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn() },
     // 割当は updateMany の前に型行をロックする(PR-D1・デッドロック回避)。
     $queryRaw: vi.fn(async () => []),
@@ -34,8 +34,9 @@ import { POST as assign } from "../../app/api/properties/sale-dm/campaigns/[id]/
 
 const pm = prismaMock as never as {
   dmCampaign: { findFirst: ReturnType<typeof vi.fn> };
-  dmVariant: { findMany: ReturnType<typeof vi.fn> };
+  dmVariant: { findMany: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
   dmRecipientDraft: { findMany: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
+  $queryRaw: ReturnType<typeof vi.fn>;
 };
 const ALL = ["property", "csv_export", "csv_export_personal", "owner"];
 const grant = (...keys: string[]) =>
@@ -122,6 +123,31 @@ describe("POST assign (auto)", () => {
     const allIds = pm.dmRecipientDraft.updateMany.mock.calls.flatMap((c) => c[0].where.id.in as string[]);
     expect(allIds).toContain("r1");
     expect(allIds).not.toContain("r2");
+  });
+
+  it("移動元の型は、まだ確定していなくてもロック対象に含める(@codex #376 R9)", async () => {
+    // ⚠ロックする型を「確定済みかどうか」から決めると、先読みのあとに確定された
+    //   下書きの移動元が集合から漏れる。凍結印を立てる markVariantsFrozen は
+    //   「その型をロック済みであること」が前提なので、漏れた型へ印を立てると
+    //   取得順の保証が崩れる(取り方の違う2つの処理が互い違いに待ち合う)。
+    //   **状態に関わらず**移動元を掴む。
+    pm.dmRecipientDraft.findMany.mockImplementation(async (args: { where?: Record<string, unknown> }) => {
+      const where = args?.where ?? {};
+      // ① route 冒頭(tx外)の対象一覧
+      if (!where.id) return [{ id: "r1", property: { createdBy: "u1", assignedTo: "u1" } }];
+      // ② 状態で絞る読み = まだ確定していない(0件)
+      if (where.status) return [];
+      // ③ 状態で絞らない読み = 移動元の収集
+      return [{ id: "r1", variantId: "vA" }];
+    });
+    const res = await assign(post({ mode: "manual", assignments: [{ recipientId: "r1", variantId: "vB" }] }) as never, ctxC);
+    expect(res.status).toBe(200);
+    const lockCall = (pm.$queryRaw.mock.calls as unknown[][]).find((c) =>
+      (c[0] as string[]).join("?").includes("dm_variants"),
+    );
+    expect(lockCall).toBeDefined();
+    expect(lockCall?.[1] as string[]).toContain("vA"); // 移動元
+    expect(lockCall?.[1] as string[]).toContain("vB"); // 移動先
   });
 
   it("権限不足で 403・更新しない", async () => {

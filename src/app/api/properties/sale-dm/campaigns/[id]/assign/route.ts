@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess, assertSaleDmCampaignOwned, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
+import { markVariantsFrozen, SETTLED_DRAFT_STATUSES } from "@/lib/sale-dm-letter/freeze";
 import { saleDmAssignSchema } from "@/lib/validators-sale-dm";
 import { assignVariantsEvenly, applyManualAssignment } from "@/lib/sale-dm-letter/assign";
 
@@ -49,12 +50,42 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       // ⚠ロック順序（設計 §2.3: Owner → variant → 物件親行 → 子行）。
       //   下の updateMany は draft の variantId を書き換えるため、PostgreSQL が参照先の
       //   型行に KEY SHARE ロックを**後から**取る。確定(drafts/confirm)は型を先に掴むので、
-      //   ここで先に取らないと「割当が draft を持って型を待ち、確定が型を持って draft を待つ」
-      //   デッドロックになる(@codex #375)。id 順に揃えて取り、経路間で順序を一致させる。
-      const lockVariantIds = [...byVariant.keys()].sort();
+      //   ここで先に取らないとデッドロックになる。
+      // ⚠**移動元の型もロック対象に含める**（@codex #376 R4）。確定済みを移すときは移動元へ
+      //   凍結印を立てるので、移動先だけ掴んで移動元を後から触ると、確定側が A→B の順で
+      //   掴んでいる場合と互い違いになって止まる。**両方をまとめて id 順に**取る。
+      // ⚠移動元の収集に**状態(確定済みか)の条件を付けない**（@codex #376 R9）。付けると、
+      //   先読みのあとに確定された下書きの移動元がロック集合から漏れる。凍結印を立てる
+      //   markVariantsFrozen は「その型をロック済みであること」が前提なので、漏れた型へ
+      //   印を立てると取得順の保証が崩れる（型の取り方が違う処理どうしが互い違いに待つ）。
+      //   移動する下書きの移動元は、状態に関わらず**全部**掴む（型はキャンペーン内で数個）。
+      const allIds = [...byVariant.values()].flat();
+      const sourcesPre = await tx.dmRecipientDraft.findMany({
+        where: { id: { in: allIds }, campaignId: id },
+        select: { variantId: true },
+      });
+      const lockVariantIds = [
+        ...new Set([
+          ...byVariant.keys(),
+          ...sourcesPre.map((d) => d.variantId),
+        ]),
+      ].sort();
       if (lockVariantIds.length > 0) {
         await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ANY(${lockVariantIds}::uuid[]) AND campaign_id = ${id}::uuid ORDER BY id FOR UPDATE`;
       }
+
+      // ⚠確定済み/送付済みの下書きを別の型へ移すと、移動元の型から「確定があった」
+      //   証拠が消える。移す前に**移動元**の型へ凍結印を立てる（設計 §2.4 @codex R24/R31）。
+      //   ロックを保持したまま読み直す（先読み〜ロックの間の移動を取りこぼさない）。
+      const movingSettled = await tx.dmRecipientDraft.findMany({
+        where: {
+          id: { in: allIds },
+          campaignId: id,
+          status: { in: [...SETTLED_DRAFT_STATUSES] },
+        },
+        select: { variantId: true },
+      });
+      await markVariantsFrozen(tx, movingSettled.map((d) => d.variantId));
       for (const [variantId, ids] of byVariant) {
         if (ids.length === 0) continue;
         const result = await tx.dmRecipientDraft.updateMany({

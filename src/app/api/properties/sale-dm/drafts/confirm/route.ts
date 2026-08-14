@@ -5,6 +5,7 @@ import { handleApiError, parseJsonBody, ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess } from "@/lib/sale-dm-letter/route-guard";
 import { validateLetterBody } from "@/lib/sale-dm-letter/body-validation";
+import { markVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
 import { lockOwnersForShare } from "@/lib/dm-batch/locks";
 import {
   resolveDraftRecipient,
@@ -128,6 +129,21 @@ export async function POST(request: NextRequest) {
       });
       if (drafts.length === 0) return 0;
 
+      // ⚠ロックした型は**先読み**から決めている。先読み〜ロックの間に割当（assign）が
+      //   宛先を別の型へ移すと、読み直しに**ロックしていない型**が現れる。そのまま
+      //   凍結印を立てると、子行を掴んだあとに親（型）を掴むことになり、型を先に掴む
+      //   処理（貼り付け・設定変更・割当）と互い違いになって片方が異常終了する
+      //   （@codex #376 R11）。ここでは**中止して取り直してもらう**
+      //   （既存の「先読み〜ロックで集合が変わったら中止」と同じ扱い）。
+      const lockedVariantIds = new Set(variantIds);
+      if (drafts.some((d) => !lockedVariantIds.has(d.variantId))) {
+        throw new ApiError(
+          409,
+          "宛先の型が変わりました。画面を開き直してから確定してください",
+          "VARIANT_CHANGED",
+        );
+      }
+
       // ⚠確定は**印刷の直前の唯一の関所**。個別編集の入口だけを塞いでも、AI生成の出力や
       //   この反映より前からあるデータに不正な本文があれば通ってしまう(@codex #375)。
       //   where の `body != ""` では空白のみ・差込記号の残り・長すぎる本文を止められない。
@@ -173,6 +189,10 @@ export async function POST(request: NextRequest) {
           "RECIPIENT_STALE",
         );
       }
+
+      // ⚠確定を作る前に、その型へ凍結印を立てる（設計 §2.4）。確定の証拠は割当や
+      //   個別編集で型から離れる／解除されるので、消える前に列へ固定する。
+      await markVariantsFrozen(tx, drafts.map((d) => d.variantId));
 
       const result = await tx.dmRecipientDraft.updateMany({
         where: { ...where, id: { in: drafts.map((d) => d.id) } },
