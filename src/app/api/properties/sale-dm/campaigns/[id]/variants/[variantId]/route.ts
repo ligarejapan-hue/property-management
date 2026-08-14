@@ -39,7 +39,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (o.strength !== undefined) { data.strength = o.strength; if (o.strength !== existing.strength) optionFieldChanged = true; }
       // 空文字と null は「追加指示なし」で等価。label のみ変更でもフォームは extraInstruction:"" を送るため、
       // ""↔null の差を「変更」とみなして生成/確定済みの本文を消さない(両辺を "" に正規化して比較)。
-      if (o.extraInstruction !== undefined) { const next = o.extraInstruction ?? null; data.extraInstruction = next; if ((next ?? "") !== (existing.extraInstruction ?? "")) optionFieldChanged = true; }
+      // ⚠**追加の指示は失効の契機にしない**（設計 §2.4 @codex R46 / #376 R3）。外部AI方式の
+      //   プロンプトはこの欄を含めないので、変えても文面は変わらない。にもかかわらず失効させると、
+      //   原本・プロンプトの控え・全下書きの本文が「得るもの無しに」消える。値は保存だけする。
+      if (o.extraInstruction !== undefined) { data.extraInstruction = o.extraInstruction ?? null; }
     }
     // 型ごとLP は本文に影響しない(QR は /t/<token> で、遷移先はスキャン時に型の lpUrl から解決)。
     // よって optionFieldChanged にはせず、未送付下書きの本文を消さない(要再生成にしない)。null=既定LPへ戻す。

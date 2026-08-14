@@ -230,7 +230,9 @@ describe("PATCH variant (更新)", () => {
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
-  it("extraInstruction を null から実テキストへ変えると無効化する(実変更は確実に検出)", async () => {
+  it("extraInstruction は保存するが失効の契機にしない(外部AI方式・設計§2.4 R46)", async () => {
+    // 旧(AI直結)はこの欄がプロンプトに逐語で入るため失効させていた。外部AI方式では
+    // プロンプトに含めないので、変えても文面は変わらない=失効させると失うだけ。
     pm.dmRecipientDraft.count.mockResolvedValue(0);
     pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields });
     const res = await updateVariant(
@@ -238,7 +240,10 @@ describe("PATCH variant (更新)", () => {
       ctxV,
     );
     expect(res.status).toBe(200);
-    expect(pm.dmRecipientDraft.updateMany).toHaveBeenCalled();
+    // 値は保存される。
+    expect(pm.dmVariant.update.mock.calls[0][0].data.extraInstruction).toBe("丁寧な文面で");
+    // 下書きの本文は消さない。
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
   it("field_staff は担当外の未送付下書きを含む型の options 変更を拒否(403・本文消去させない)", async () => {
@@ -289,6 +294,29 @@ describe("PATCH variant (更新)", () => {
     const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ lpUrl: "https://lp-new.example.com" }) }) as never, ctxV);
     expect(res.status).toBe(200);
     expect(pm.dmVariant.update.mock.calls[0][0].data.lpUrl).toBe("https://lp-new.example.com");
+  });
+
+  it("追加の指示だけの変更では原本も下書きも消さない(@codex #376 R3)", async () => {
+    // 外部AI方式のプロンプトは追加の指示を含めない(設計§2.2)。含まれない設定の編集で
+    // 原本・プロンプトの控え・全下書きの本文が消えるのは、失う一方で得るものがない。
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    const res = await updateVariant(
+      new Request("http://x", {
+        method: "PATCH",
+        body: JSON.stringify({ options: { extraInstruction: "少し柔らかく" } }),
+      }) as never,
+      ctxV,
+    );
+    expect(res.status).toBe(200);
+    // 本文クリアの updateMany は呼ばれない。
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+    // 原本・プロンプトの控えを消す update も呼ばれない。
+    const clearedTemplate = pm.dmVariant.update.mock.calls.some(
+      (c: unknown[]) =>
+        (c[0] as { data?: { bodyTemplate?: unknown } })?.data?.bodyTemplate ===
+        null,
+    );
+    expect(clearedTemplate).toBe(false);
   });
 
   it("確定済み/送付済みの宛先がある型は設定変更を拒否(409 VARIANT_LOCKED)・更新しない", async () => {

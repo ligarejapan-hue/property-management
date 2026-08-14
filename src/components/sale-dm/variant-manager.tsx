@@ -288,13 +288,21 @@ export default function SaleDmVariantManager({
             </button>
           </div>
 
-          {letter.frozen ? (
+          {/* ⚠凍結でも**原本がまだ無い型**は入力欄を出す（@codex #376 R3）。反映前からある型は
+              「確定済みの宛先はあるが原本は空」なので、ここを隠すと初期化ができず、
+              割当で移ってきた宛先（本文は空）に何も入れられない。 */}
+          {letter.frozen && letter.bodyTemplate ? (
             <p className="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-800">
               この型はすでに送付の実績があるため、文面は変更できません。文面を変えるときは新しい型を追加してください。
               なお、保存済みの文面を「まだ本文が入っていない宛先」へ入れ直すことはできます（下のボタン）。
             </p>
           ) : (
             <>
+              {letter.frozen && (
+                <p className="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-800">
+                  この型には送付の実績がありますが、文面がまだ保存されていません。最初の1回だけ登録できます（登録済みの宛先の文面は変わりません）。
+                </p>
+              )}
               <p className="mt-2 text-gray-600">
                 下の指示文をコピーして、お手元のAIに貼り付けてください。できた本文をこの下の欄に貼り付けて保存します。
               </p>

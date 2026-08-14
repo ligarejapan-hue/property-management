@@ -62,16 +62,24 @@ describe("型の管理パネル: 外部AI方式の導線", () => {
     expect(handlerBody("const copyPrompt")).toContain("clipboard");
   });
 
-  it("凍結済みの型は貼り付けの導線を出さない", () => {
-    expect(src).toContain("letter.frozen");
+  it("凍結済み**かつ原本がある**型は貼り付けの導線を出さない", () => {
+    expect(src).toContain("letter.frozen && letter.bodyTemplate ? (");
     expect(src).toMatch(/送付の実績があるため/);
+  });
+
+  it("凍結済みでも原本が無ければ入力欄を出す（初期化・@codex #376 R3）", () => {
+    // 反映前からある型は「確定済みの宛先はあるが原本は空」。ここを隠すと初期化できず、
+    // 割当で移ってきた宛先（本文は空）に何も入れられない。
+    expect(src).toMatch(/文面がまだ保存されていません/);
+    // 判定は frozen 単独ではなく、原本の有無との組み合わせ。
+    expect(src).not.toMatch(/\{letter\.frozen \? \(/);
   });
 
   it("凍結済みでも「適用」は使える（@codex #376）", () => {
     // 割当で別の型へ移された宛先は本文が空になる。ここを隠すと1件ずつ手で書くしかない。
     // 禁止すべきは「差し替え」であって「保存済みの文面の適用」ではない。
     // ⚠案内文にも同じ語が出るので、分岐より**後ろ**にあるボタンを探す。
-    const condAt = src.indexOf("letter.frozen ? (");
+    const condAt = src.indexOf("letter.frozen && letter.bodyTemplate ? (");
     const applyAt = src.indexOf("onClick={() => applyTemplate(false)}", condAt);
     expect(condAt).toBeGreaterThan(0);
     expect(applyAt).toBeGreaterThan(condAt);
