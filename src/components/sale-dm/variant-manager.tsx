@@ -185,13 +185,15 @@ export default function SaleDmVariantManager({
         if (optionChanged && !window.confirm("文面の設定(トーン・長さ・訴求・押しの強さ)を変えると、この型の文面と、まだ送っていない手紙の本文が消えます。プロンプトを取り直して文面を作り直し、貼り付け直してください。続けますか？")) {
           return;
         }
-        // lpUrl は本文に影響しない(QR遷移先のみ・空欄=null=既定LPへ戻す)が、変更するとサーバー側でこの型の
-        // 確定済み(印刷待ち)宛先が確定解除され再確認が必要になる。option 変更で既に警告済みなら二重に出さない。
+        // LP(QRの遷移先)とデザイン(紙面の体裁)は本文を変えないが、**刷り上がり**が変わるため、
+        // サーバー側で確定済み(印刷待ち)の宛先が確定解除され再確認が必要になる(@codex #376 R10)。
+        // option 変更で既に警告済みなら二重に出さない。確定が0件なら何も起きないので黙って進む。
         const nextLp = form.lpUrl.trim() === "" ? null : form.lpUrl.trim();
         const lpUrlChanged = nextLp !== (cur?.lpUrl ?? null);
+        const designChanged = !cur || form.options.designTemplate !== cur.designTemplate;
         const confirmedCount = campaign.recipients.filter((r) => r.variantId === editing && r.status === "confirmed").length;
-        if (!optionChanged && lpUrlChanged && confirmedCount > 0 &&
-            !window.confirm(`この型のLPを変更すると、確定済み(印刷待ち)の ${confirmedCount} 件は確定が解除され、再確認が必要になります(本文の作り直しは不要)。続けますか？`)) {
+        if (!optionChanged && (lpUrlChanged || designChanged) && confirmedCount > 0 &&
+            !window.confirm(`印刷に関わる設定(デザイン・LP)を変更すると、確定済み(印刷待ち)の ${confirmedCount} 件は確定が解除され、再確認が必要になります(手紙の文面はそのまま残ります)。続けますか？`)) {
           return;
         }
         await updateSaleDmVariant(campaign.id, editing, { label: form.label, options: form.options, lpUrl: nextLp });

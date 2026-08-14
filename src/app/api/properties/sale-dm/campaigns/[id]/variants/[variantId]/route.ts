@@ -119,16 +119,34 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         where: { id: variantId, campaignId: id },
         select: { templateFrozenAt: true },
       });
-      const sentBefore = await tx.dmRecipientDraft.count({
+      const settledCount = await tx.dmRecipientDraft.count({
         where: { campaignId: id, variantId, status: { in: [...SETTLED_DRAFT_STATUSES] } },
       });
+      const sentBefore = await tx.dmRecipientDraft.count({
+        where: { campaignId: id, variantId, status: "sent" },
+      });
+      // ①送付済みが1件でもあれば、これまでどおり**何ひとつ**変えさせない
+      //   (送った構成と CSV・送付履歴・A/B 集計が食い違う)。
+      if (sentBefore > 0) {
+        throw new ApiError(409, "送付済みの宛先がある型は設定を変更できません(A/B履歴の整合のため)", "VARIANT_LOCKED");
+      }
+      // ②凍結が守るのは**文面**（prompt_text / body_template・設計 §2.4）。確定ができた型は
+      //   文面に関わる設定（プロンプトに載る4項目）を変えられない＝変えたければ新しい型。
+      // ⚠**デザイン・LP・ラベルまで止めない**（@codex #376 R10）。止めると、確定(印刷待ち)の
+      //   段階で見た目やLPの誤りに気づいても直せない（確定をまとめて戻す導線は無い）。
+      //   これらは下で確定を解除し、再確認してもらう＝承認した見た目のまま印刷される。
       if (
+        optionFieldChanged &&
         isVariantFrozen({
           templateFrozenAt: frozenRow?.templateFrozenAt ?? null,
-          settledCount: sentBefore,
+          settledCount,
         })
       ) {
-        throw new ApiError(409, "送付実績のある型は設定を変更できません(A/B履歴の整合のため)", "VARIANT_LOCKED");
+        throw new ApiError(
+          409,
+          "送付実績のある型の文面の設定(トーン・長さ・訴求・押しの強さ)は変更できません。文面を変えるときは新しい型を追加してください",
+          "VARIANT_LOCKED",
+        );
       }
       // campaignId で縛り、他キャンペーンの型を更新させない。
       const updated = await tx.dmVariant.update({ where: { id: variantId, campaignId: id }, data });
@@ -146,9 +164,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           where: { campaignId: id, variantId, status: { not: "sent" }, body: { not: "" } },
           data: { body: "", status: "draft", confirmedAt: null },
         });
-      } else if (lpUrlChanged) {
-        // LP変更は本文を変えないが、確定済み(=印刷対象)の宛先の遷移先(/t/ がスキャン時に解決する先)を変える。
-        // committed バッチが黙って別LPへ飛ぶのを防ぐため確定を解除し再承認を促す(本文は保持=再生成不要・Codex)。
+      } else if (lpUrlChanged || designChanged) {
+        // LP・デザインの変更は本文を変えないが、確定済み(=印刷対象)の宛先の**刷り上がり**を変える
+        // (LP=QRの遷移先・デザイン=紙面の体裁)。承認したものと違うものが刷られるのを防ぐため
+        // 確定を解除し再承認を促す(本文は保持=貼り直し不要・Codex / @codex #376 R10)。
         await tx.dmRecipientDraft.updateMany({
           where: { campaignId: id, variantId, status: "confirmed" },
           data: { status: "draft", confirmedAt: null },

@@ -337,8 +337,10 @@ describe("PATCH variant (更新)", () => {
     expect(res.status).toBe(200);
     // 値は保存される。
     expect(pm.dmVariant.update.mock.calls[0][0].data.designTemplate).toBe("soft");
-    // 下書きの本文は消さない。
-    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+    // 下書きの本文は消さない(確定解除だけは行う=刷り上がりが変わるため・R10)。
+    for (const [arg] of pm.dmRecipientDraft.updateMany.mock.calls as { data: { body?: unknown } }[][]) {
+      expect(arg.data.body).toBeUndefined();
+    }
     // 原本・プロンプトの控えを消す update も呼ばれない。
     const clearedTemplate = pm.dmVariant.update.mock.calls.some(
       (c: unknown[]) =>
@@ -365,6 +367,72 @@ describe("PATCH variant (更新)", () => {
     const where = pm.dmRecipientDraft.count.mock.calls[0][0].where;
     expect(where).toMatchObject({ campaignId: "c1", variantId: "v1", status: { not: "sent" } });
     expect(where.property).toEqual({ NOT: { OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] } });
+  });
+
+  // 件数の問い合わせを内容で振り分ける(1つの mockResolvedValue だと、確定済みと送付済みを
+  // 別々に置けず「確定はあるが送付はまだ」の状態を作れない=R10 の場面が作れない)。
+  const counts = ({ scope = 0, settled = 0, sent = 0 }: { scope?: number; settled?: number; sent?: number }) =>
+    pm.dmRecipientDraft.count.mockImplementation(
+      async (args: { where?: { property?: unknown; status?: unknown } }) => {
+        const w = args?.where ?? {};
+        if (w.property !== undefined) return scope;       // 担当外の数え直し
+        if (w.status === "sent") return sent;             // 送付済み
+        return settled;                                   // 確定済み+送付済み
+      },
+    );
+
+  it("確定済み(未送付)があってもLPだけの変更はできる(確定は解除される・@codex #376 R10)", async () => {
+    // ⚠凍結は**文面(プロンプトに載る設定)**を守るためのもの(設計§2.4)。LPは文面ではないので、
+    //   まだ1通も送っていないなら直せる。直せないと、印刷待ちの段階でLPの誤りに気づいても
+    //   手の打ちようがない(確定を戻す一括の導線は無い)。
+    counts({ settled: 1, sent: 0 });
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields, lpUrl: "https://lp-new.example.com" });
+    const res = await updateVariant(
+      new Request("http://x", { method: "PATCH", body: JSON.stringify({ lpUrl: "https://lp-new.example.com" }) }) as never,
+      ctxV,
+    );
+    expect(res.status).toBe(200);
+    const inval = pm.dmRecipientDraft.updateMany.mock.calls[0][0];
+    expect(inval.where).toMatchObject({ status: "confirmed" }); // 確定解除=再確認を促す
+    expect(inval.data.body).toBeUndefined();                    // 本文は消さない
+  });
+
+  it("確定済み(未送付)があってもデザインだけの変更はできる(確定は解除される)", async () => {
+    counts({ settled: 1, sent: 0 });
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields, designTemplate: "soft" });
+    const res = await updateVariant(
+      new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { designTemplate: "soft" } }) }) as never,
+      ctxV,
+    );
+    expect(res.status).toBe(200);
+    const inval = pm.dmRecipientDraft.updateMany.mock.calls[0][0];
+    expect(inval.where).toMatchObject({ status: "confirmed" });
+    expect(inval.data.body).toBeUndefined();
+  });
+
+  it("確定済み(未送付)があると文面の設定は変更できない(409・凍結が守るのは文面)", async () => {
+    counts({ settled: 1, sent: 0 });
+    const res = await updateVariant(
+      new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { tone: "soft" } }) }) as never,
+      ctxV,
+    );
+    expect(res.status).toBe(409);
+    expect(pm.dmVariant.update).not.toHaveBeenCalled();
+  });
+
+  it("送付済みがあればデザインもLPも変更できない(送った構成は動かさない)", async () => {
+    counts({ settled: 1, sent: 1 });
+    const design = await updateVariant(
+      new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { designTemplate: "soft" } }) }) as never,
+      ctxV,
+    );
+    expect(design.status).toBe(409);
+    const lp = await updateVariant(
+      new Request("http://x", { method: "PATCH", body: JSON.stringify({ lpUrl: "https://lp-new.example.com" }) }) as never,
+      ctxV,
+    );
+    expect(lp.status).toBe(409);
+    expect(pm.dmVariant.update).not.toHaveBeenCalled();
   });
 
   it("field_staff の担当範囲は、物件行をロックしてから見直す(@codex #376 R9)", async () => {
