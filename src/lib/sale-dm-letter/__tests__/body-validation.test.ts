@@ -41,6 +41,17 @@ describe("validateLetterBody", () => {
     expect(validateLetterBody("{{物件所在}}")).toBe("unknown_tag");
   });
 
+  it("閉じ側だけ・片方だけの記号も弾く(@codex #376 R12)", () => {
+    // ⚠`{{` だけを見ると、許可タグを取り除いた**残り**に `}` が残っても素通りする。
+    //   そのまま刷ると手紙に記号が残る。開き side・閉じ side の両方を見る。
+    expect(validateLetterBody("{{物件所在}}} の件", { allowTags: true })).toBe("unknown_tag");
+    expect(validateLetterBody("{物件所在}} の件", { allowTags: true })).toBe("unknown_tag");
+    expect(validateLetterBody("{物件所在} の件", { allowTags: true })).toBe("unknown_tag");
+    expect(validateLetterBody("本文 }} 本文", { allowTags: true })).toBe("unknown_tag");
+    // 既定(タグを許さない側)でも同じ。
+    expect(validateLetterBody("{物件所在}")).toBe("unknown_tag");
+  });
+
   it("上限を超える本文は弾く", () => {
     expect(validateLetterBody("あ".repeat(LETTER_BODY_MAX_LENGTH))).toBeNull();
     expect(validateLetterBody("あ".repeat(LETTER_BODY_MAX_LENGTH + 1))).toBe(

@@ -28,11 +28,15 @@ export function validateLetterBody(
   if (body.trim().length === 0) return "empty";
   if (body.length > LETTER_BODY_MAX_LENGTH) return "too_long";
   // 許可タグを取り除いてから残りを見る。⚠取り除く対象は tags.ts の語彙だけ
-  //（同じ表を2か所に書かない）。取り除いた後に `{{` が残る＝未知タグ・綴り違い。
+  //（同じ表を2か所に書かない）。取り除いた後に波かっこが残る＝未知タグ・綴り違い・書き損じ。
   const rest = options.allowTags
     ? LETTER_TAGS.reduce((acc, tag) => acc.split(`{{${tag}}}`).join(""), body)
     : body;
-  if (rest.includes("{{")) return "unknown_tag";
+  // ⚠**開き側だけを見ない**（@codex #376 R12）。`{{物件所在}}}` は許可タグを取り除くと
+  //   `}` だけが残り、`{{` を探す検査では素通りして**手紙に記号が残ったまま刷られる**。
+  //   `{物件所在}`（かっこ1つ）も同じく素通りしていた。手紙の本文に波かっこが要る場面は
+  //   無いので、**残っていたら1文字でも弾く**。
+  if (rest.includes("{") || rest.includes("}")) return "unknown_tag";
   return null;
 }
 
@@ -44,6 +48,6 @@ export function letterBodyIssueMessage(issue: LetterBodyIssue): string {
     case "too_long":
       return `本文が長すぎます（${LETTER_BODY_MAX_LENGTH.toLocaleString()}字まで）`;
     case "unknown_tag":
-      return "本文に差し込みの記号（{{ }}）が残っています。そのまま印刷されてしまうため保存できません";
+      return "本文に差し込みの記号（{ }）が残っています。そのまま印刷されてしまうため保存できません";
   }
 }

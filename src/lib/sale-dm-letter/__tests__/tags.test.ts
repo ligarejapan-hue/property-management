@@ -171,4 +171,10 @@ describe("hasUnresolvedTag", () => {
     expect(hasUnresolvedTag("残り{{所有者名}}")).toBe(true);
     expect(hasUnresolvedTag("問題なし")).toBe(false);
   });
+
+  it("片方だけ・閉じ側だけの記号も true(@codex #376 R12)", () => {
+    // 展開で開き側が消え、閉じ側だけが残る形（{{物件所在}}} など）を見逃さない。
+    expect(hasUnresolvedTag("東京都杉並区西荻北} の件")).toBe(true);
+    expect(hasUnresolvedTag("{物件所在} の件")).toBe(true);
+  });
 });

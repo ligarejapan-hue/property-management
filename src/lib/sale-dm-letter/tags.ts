@@ -112,7 +112,13 @@ export function expandLetterTags(
   return out;
 }
 
-/** 展開後に差込の記号が残っているか（未知タグ・綴り違い・値が無いタグ）。 */
+/**
+ * 展開後に差込の記号が残っているか（未知タグ・綴り違い・値が無いタグ・書き損じ）。
+ *
+ * ⚠**開き側だけを見ない**（@codex #376 R12）。`{{物件所在}}}` は展開すると閉じ側の `}` が
+ * 残るが、`{{` を探す検査では見逃して手紙に記号が残ったまま刷られる。差し込む値（住所・
+ * 種別）に波かっこは入らないので、残っていたら1文字でも未解決とみなす。
+ */
 export function hasUnresolvedTag(text: string): boolean {
-  return text.includes("{{");
+  return text.includes("{") || text.includes("}");
 }
