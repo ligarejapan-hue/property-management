@@ -62,23 +62,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     // field_staff は campaign-level の型 options 変更で「担当外(再割当で隠れた)の未送付下書き」の本文まで
     // 無効化してしまう(型は campaign 横断で多数の宛先に共有)。GET/print/export/aggregate の scope 絞り込みと
-    // 整合させるため、担当外の未送付下書きが1件でもあれば options 変更を拒否する(label のみ=本文不変は許可)。
-    if ((optionFieldChanged || designChanged || lpUrlChanged) && session.role === "field_staff") {
-      const outOfScope = await prisma.dmRecipientDraft.count({
-        where: {
-          campaignId: id,
-          variantId,
-          status: { not: "sent" },
-          // 「担当外」= 可視条件(createdBy==me OR assignedTo==me)の否定。assignedTo が NULL の未割当物件も
-          // 担当外として数える必要があるため、`{not}` の AND ではなく NOT(OR) を使う(SQL では `assignedTo != me`
-          // が NULL にマッチせず取りこぼす)。filterDraftsByFieldStaffScope の可視判定と厳密に一致させる。
-          property: { NOT: { OR: [{ createdBy: session.id }, { assignedTo: session.id }] } },
-        },
-      });
-      if (outOfScope > 0) {
-        throw new ApiError(403, "担当外の宛先を含む型は設定を変更できません", "FORBIDDEN");
-      }
-    }
+    // 整合させるため、担当外の未送付下書きが1件でもあれば変更を拒否する(label のみ=何も変わらないは許可)。
+    // ⚠判定は**トランザクションの中で、物件親行をロックしてから**行う(下記・@codex #376 R9)。
+    const needsScopeCheck =
+      (optionFieldChanged || designChanged || lpUrlChanged) && session.role === "field_staff";
 
     // 送付済みの宛先が使っている型は設定変更不可(送付後に設計/トーン/訴求やラベルを変えると CSV・送付履歴・
     // A/B 集計が実際に送った構成と食い違う)。sent チェック→型更新→下書き無効化を 1 トランザクションにまとめ、
@@ -93,6 +80,37 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       // 凍結判定のため variant を先に取るので、こちらも先に取らないと互いに待ち合って
       // デッドロックする。
       await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ${variantId}::uuid AND campaign_id = ${id}::uuid FOR UPDATE`;
+
+      // ⚠担当範囲は**物件親行をロックしてから数え直す**(@codex #376 R9)。ロックの外で数えると、
+      //   数えた直後〜commit の間に担当が変わった宛先の本文・印刷結果まで変えてしまう
+      //   (貼り付け/適用/確定の各経路と同じ形にそろえる)。型行を掴んでいる間はこの型へ
+      //   新しい宛先が入ってこない(割当は移動先の型を FOR UPDATE で掴む)ので、
+      //   先読みした物件の集合はロックの下でも欠けない。
+      if (needsScopeCheck) {
+        const targets = await tx.dmRecipientDraft.findMany({
+          where: { campaignId: id, variantId, status: { not: "sent" } },
+          select: { propertyId: true },
+        });
+        const propertyIds = [...new Set(targets.map((t) => t.propertyId))].sort();
+        if (propertyIds.length > 0) {
+          await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${propertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
+          const outOfScope = await tx.dmRecipientDraft.count({
+            where: {
+              campaignId: id,
+              variantId,
+              status: { not: "sent" },
+              // 「担当外」= 可視条件(createdBy==me OR assignedTo==me)の否定。assignedTo が NULL の未割当物件も
+              // 担当外として数える必要があるため、`{not}` の AND ではなく NOT(OR) を使う(SQL では `assignedTo != me`
+              // が NULL にマッチせず取りこぼす)。filterDraftsByFieldStaffScope の可視判定と厳密に一致させる。
+              property: { NOT: { OR: [{ createdBy: session.id }, { assignedTo: session.id }] } },
+            },
+          });
+          if (outOfScope > 0) {
+            throw new ApiError(403, "担当外の宛先を含む型は設定を変更できません", "FORBIDDEN");
+          }
+        }
+      }
+
       await tx.$queryRaw`SELECT id FROM dm_recipient_drafts WHERE campaign_id = ${id}::uuid AND variant_id = ${variantId}::uuid FOR UPDATE`;
       // 凍結の二重判定（列 template_frozen_at OR 配下に confirmed/sent）。
       // 送付済みだけでなく**確定済み**でも設定を変えさせない＝文面と A/B 構成の出所を守る

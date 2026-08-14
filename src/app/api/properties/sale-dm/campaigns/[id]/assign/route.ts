@@ -54,13 +54,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       // ⚠**移動元の型もロック対象に含める**（@codex #376 R4）。確定済みを移すときは移動元へ
       //   凍結印を立てるので、移動先だけ掴んで移動元を後から触ると、確定側が A→B の順で
       //   掴んでいる場合と互い違いになって止まる。**両方をまとめて id 順に**取る。
+      // ⚠移動元の収集に**状態(確定済みか)の条件を付けない**（@codex #376 R9）。付けると、
+      //   先読みのあとに確定された下書きの移動元がロック集合から漏れる。凍結印を立てる
+      //   markVariantsFrozen は「その型をロック済みであること」が前提なので、漏れた型へ
+      //   印を立てると取得順の保証が崩れる（型の取り方が違う処理どうしが互い違いに待つ）。
+      //   移動する下書きの移動元は、状態に関わらず**全部**掴む（型はキャンペーン内で数個）。
       const allIds = [...byVariant.values()].flat();
       const sourcesPre = await tx.dmRecipientDraft.findMany({
-        where: {
-          id: { in: allIds },
-          campaignId: id,
-          status: { in: [...SETTLED_DRAFT_STATUSES] },
-        },
+        where: { id: { in: allIds }, campaignId: id },
         select: { variantId: true },
       });
       const lockVariantIds = [

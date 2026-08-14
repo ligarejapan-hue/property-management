@@ -171,19 +171,18 @@ export default function SaleDmVariantManager({
         return;
       }
       if (editing) {
-        // options を「実際に」変えたときだけ未送付下書きが無効化(本文クリア+確定解除=要再生成)される
-        // (サーバー側 R24: label のみ/同値は無効化しない)。option が変わる場合のみ確認ダイアログを出す
-        // (label だけの変更で誤った「作り直し」警告を出さない)。
+        // ⚠警告を出すのは**プロンプトに載る4項目**を実際に変えたときだけ(@codex #376 R9)。
+        //   サーバーはこの4つを変えたときにだけ文面と未送付の本文を消す。デザイン(見た目)と
+        //   追加の指示は消さないので、ここで警告すると「消えないのに消える覚悟をさせる」ことに
+        //   なる。label のみ・同じ値の再保存でも消えない(サーバー側 R24)。
         const cur = campaign.variants.find((v) => v.id === editing);
         const optionChanged =
           !cur ||
-          form.options.designTemplate !== cur.designTemplate ||
           form.options.tone !== cur.tone ||
           form.options.length !== cur.length ||
           form.options.appeal !== cur.appeal ||
-          form.options.strength !== cur.strength ||
-          (form.options.extraInstruction ?? "") !== (cur.extraInstruction ?? "");
-        if (optionChanged && !window.confirm("型の設定を変更すると、この型を使う未送付の手紙は作り直しが必要になります(確定も解除されます)。続けますか？")) {
+          form.options.strength !== cur.strength;
+        if (optionChanged && !window.confirm("文面の設定(トーン・長さ・訴求・押しの強さ)を変えると、この型の文面と、まだ送っていない手紙の本文が消えます。プロンプトを取り直して文面を作り直し、貼り付け直してください。続けますか？")) {
           return;
         }
         // lpUrl は本文に影響しない(QR遷移先のみ・空欄=null=既定LPへ戻す)が、変更するとサーバー側でこの型の

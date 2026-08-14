@@ -25,7 +25,7 @@ vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     dmCampaign: { findUnique: vi.fn(), findFirst: vi.fn() },
     dmVariant: { findMany: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), deleteMany: vi.fn(), findFirst: vi.fn() },
-    dmRecipientDraft: { count: vi.fn(), updateMany: vi.fn() },
+    dmRecipientDraft: { count: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(async () => []) },
   };
   // $transaction はコールバックに同じ db を tx として渡す(tx.* === pm.* なので既存アサーションがそのまま効く)。
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
@@ -45,7 +45,7 @@ import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
 const pm = prismaMock as never as {
   dmCampaign: { findUnique: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
   dmVariant: { findMany: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn>; deleteMany: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
-  dmRecipientDraft: { count: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
+  dmRecipientDraft: { count: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
   $queryRaw: ReturnType<typeof vi.fn>;
 };
 const ALL = ["property", "csv_export", "csv_export_personal", "owner"];
@@ -248,6 +248,7 @@ describe("PATCH variant (更新)", () => {
 
   it("field_staff は担当外の未送付下書きを含む型の options 変更を拒否(403・本文消去させない)", async () => {
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.findMany.mockResolvedValue([{ propertyId: "p1" }]); // 判定はロック配下(R9)
     pm.dmRecipientDraft.count.mockResolvedValue(2); // 担当外(再割当で隠れた)の未送付下書きが存在
     const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { tone: "soft" } }) }) as never, ctxV);
     expect(res.status).toBe(403);
@@ -278,6 +279,7 @@ describe("PATCH variant (更新)", () => {
   it("field_staff は担当外の未送付下書きを含む型の lpUrl 変更を拒否(403・隠れ宛先の転送先を変えさせない・Codex)", async () => {
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
     // 1回目=担当外チェック(>0)→403。lpUrl 変更でも option 変更と同じ field_staff scope を適用する。
+    pm.dmRecipientDraft.findMany.mockResolvedValue([{ propertyId: "p1" }]); // 判定はロック配下(R9)
     pm.dmRecipientDraft.count.mockResolvedValueOnce(1).mockResolvedValue(0);
     const res = await updateVariant(new Request("http://x", { method: "PATCH", body: JSON.stringify({ lpUrl: "https://lp-new.example.com" }) }) as never, ctxV);
     expect(res.status).toBe(403);
@@ -349,6 +351,7 @@ describe("PATCH variant (更新)", () => {
     // 本文は消さない変更でも、デザインは**この型の全宛先**(担当外で見えない宛先を含む)の
     // 印刷結果を変える → lpUrl と同じ scope を要求する。
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.findMany.mockResolvedValue([{ propertyId: "p1" }]); // 判定はロック配下(R9)
     pm.dmRecipientDraft.count.mockResolvedValueOnce(1).mockResolvedValue(0);
     const res = await updateVariant(
       new Request("http://x", {
@@ -362,6 +365,41 @@ describe("PATCH variant (更新)", () => {
     const where = pm.dmRecipientDraft.count.mock.calls[0][0].where;
     expect(where).toMatchObject({ campaignId: "c1", variantId: "v1", status: { not: "sent" } });
     expect(where.property).toEqual({ NOT: { OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] } });
+  });
+
+  it("field_staff の担当範囲は、物件行をロックしてから見直す(@codex #376 R9)", async () => {
+    // ⚠ロックの外で数えると、数えた直後〜commit の間に担当が変わった宛先の
+    //   印刷結果まで変えてしまう(貼り付け/適用の経路と同じ形にそろえる)。
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.findMany.mockResolvedValue([{ propertyId: "p1" }, { propertyId: "p2" }]);
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields });
+    const res = await updateVariant(
+      new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { tone: "soft" } }) }) as never,
+      ctxV,
+    );
+    expect(res.status).toBe(200);
+    // 物件行の FOR UPDATE が発行されている。
+    const lockIdx = (pm.$queryRaw.mock.calls as unknown[][]).findIndex((c) =>
+      (c[0] as string[]).join("?").includes("FROM properties"),
+    );
+    expect(lockIdx).toBeGreaterThan(-1);
+    // 担当外の数え直しは、そのロックの**あと**。
+    const scopeIdx = (pm.dmRecipientDraft.count.mock.calls as { where?: { property?: unknown } }[][]).findIndex(
+      (c) => c[0]?.where?.property !== undefined,
+    );
+    expect(scopeIdx).toBeGreaterThan(-1);
+    expect(pm.$queryRaw.mock.invocationCallOrder[lockIdx]).toBeLessThan(
+      pm.dmRecipientDraft.count.mock.invocationCallOrder[scopeIdx],
+    );
+    // 型行のロックが物件行より先(設計§2.3: variant → 物件親行 → 子行)。
+    const variantLockIdx = (pm.$queryRaw.mock.calls as unknown[][]).findIndex((c) =>
+      (c[0] as string[]).join("?").includes("FROM dm_variants"),
+    );
+    expect(variantLockIdx).toBeGreaterThan(-1);
+    expect(pm.$queryRaw.mock.invocationCallOrder[variantLockIdx]).toBeLessThan(
+      pm.$queryRaw.mock.invocationCallOrder[lockIdx],
+    );
   });
 
   it("確定済み/送付済みの宛先がある型は設定変更を拒否(409 VARIANT_LOCKED)・更新しない", async () => {

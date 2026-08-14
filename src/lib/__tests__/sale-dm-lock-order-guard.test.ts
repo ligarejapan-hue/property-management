@@ -89,6 +89,17 @@ describe("型の割当(assign)のロック順序", () => {
     expect(before).toMatch(/byVariant\.keys\(\)[\s\S]{0,200}sourcesPre|sourcesPre[\s\S]{0,200}byVariant\.keys\(\)/);
   });
 
+  it("移動元の収集に状態の条件を付けない(@codex #376 R9)", () => {
+    // ⚠状態から集合を作ると、先読みのあとに確定された下書きの移動元が漏れる。
+    //   漏れた型へ凍結印を立てる＝ロックしていない型を更新することになり、
+    //   取得順の保証が崩れる。振る舞いの実測は sale-dm-assign-route.test.ts。
+    const start = s.indexOf("const sourcesPre = await");
+    expect(start).toBeGreaterThan(-1);
+    const query = s.slice(start, s.indexOf("});", start));
+    expect(query.length).toBeGreaterThan(40); // 切り出し失敗の空振り検出
+    expect(query).not.toContain("status");
+  });
+
   it("型 id を並べ替えてから取る(取得順を全経路でそろえる)", () => {
     expect(s).toMatch(/\.sort\(\)[\s\S]{0,400}FROM dm_variants/);
   });

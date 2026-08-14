@@ -97,4 +97,20 @@ describe("型の管理パネル: 外部AI方式の導線", () => {
   it("日数や件数を文言に焼き込んでいない", () => {
     expect(src).not.toMatch(/90日|20,000字/);
   });
+
+  it("見た目・追加の指示だけの変更で「作り直し」警告を出さない(@codex #376 R9)", () => {
+    // ⚠サーバーは**プロンプトに載る4項目**を変えたときだけ本文を消す。画面の警告が
+    //   それより広いと、消えないのに「作り直しが必要」と脅すことになる（デザインを
+    //   変えただけの人が、消える覚悟をさせられる）。判定はサーバーとそろえる。
+    const start = src.indexOf("const optionChanged =");
+    expect(start).toBeGreaterThan(-1);
+    const predicate = src.slice(start, src.indexOf(";", start));
+    expect(predicate.length).toBeGreaterThan(40); // 切り出し失敗の空振り検出
+    for (const k of ["tone", "length", "appeal", "strength"]) {
+      expect(predicate).toContain(`options.${k}`);
+    }
+    for (const k of ["designTemplate", "extraInstruction"]) {
+      expect(predicate).not.toContain(k);
+    }
+  });
 });
