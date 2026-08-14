@@ -65,6 +65,7 @@ import { PUT } from "../../app/api/properties/sale-dm/campaigns/[id]/variants/[v
 import {
   buildExternalPrompt,
   promptDigest,
+  bodyTemplateDigest,
 } from "../sale-dm-letter/external-prompt";
 
 const pm = prismaMock as never as {
@@ -94,11 +95,19 @@ const SETTINGS = {
 const DIGEST = promptDigest(buildExternalPrompt(SETTINGS));
 const READS = ["property", "csv_export", "csv_export_personal", "owner"];
 const ctx = { params: Promise.resolve({ id: "c1", variantId: "v1" }) };
-const put = (b: unknown) =>
-  new Request("http://x", { method: "PUT", body: JSON.stringify(b) }) as never;
+// 保存は「表示したときの設定の指紋」に加えて「そのとき見えていた原本の指紋」も送る
+// （別のタブが先に保存した文面を黙って上書きしないため・@codex #376 R14）。
+// 既定では armVariant で仕込んだ原本と一致する値を自動で入れ、ずれを試すテストだけ明示する。
+let armedBody: string | null = null;
+const put = (b: Record<string, unknown>) =>
+  new Request("http://x", {
+    method: "PUT",
+    body: JSON.stringify({ baseBodyDigest: bodyTemplateDigest(armedBody), ...b }),
+  }) as never;
 
 /** 型の状態を差し替える（凍結・保存済み本文）。 */
 function armVariant(over: Record<string, unknown> = {}) {
+  armedBody = ("bodyTemplate" in over ? over.bodyTemplate : null) as string | null;
   pm._tx.dmVariant.findFirst.mockResolvedValue({
     id: "v1",
     ...SETTINGS,
@@ -193,6 +202,25 @@ describe("PUT sale-dm variant template（本文の貼り付け保存）", () => 
     const b = (await res.json()) as { error: { code: string } };
     expect(b.error.code).toBe("PROMPT_STALE");
     expect(pm._tx.dmVariant.update).not.toHaveBeenCalled();
+  });
+
+  it("別のタブが先に保存していたら 409(見えていた原本の指紋が違う・@codex #376 R14)", async () => {
+    // ⚠指紋が設定だけを見ていると、2つのタブで同じ値になる。先に保存・適用された文面を、
+    //   古い画面からの保存が黙って差し替え、適用済みの下書きまで消してしまう。
+    armVariant({ bodyTemplate: "先に保存された本文" });
+    const res = await PUT(
+      put({
+        body: "あとから来た本文",
+        promptDigest: DIGEST,
+        baseBodyDigest: bodyTemplateDigest(null), // 開いたときは空だと思っていた
+      }),
+      ctx,
+    );
+    expect(res.status).toBe(409);
+    const b = (await res.json()) as { error: { code: string } };
+    expect(b.error.code).toBe("TEMPLATE_STALE");
+    expect(pm._tx.dmVariant.update).not.toHaveBeenCalled();
+    expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
   it("凍結済みの型は差し替えできない 409(送付済み文面の出所を守る)", async () => {

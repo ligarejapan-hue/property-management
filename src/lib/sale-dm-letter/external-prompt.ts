@@ -58,3 +58,16 @@ export function buildExternalPrompt(options: ExternalPromptOptions): string {
 export function promptDigest(prompt: string): string {
   return sha256Hex(prompt);
 }
+
+/**
+ * 原本（body_template）の指紋。**画面を開いたときに見えていた原本**と、保存する瞬間の
+ * 原本が同じかを照合するために使う（@codex #376 R14）。
+ *
+ * ⚠プロンプトの指紋は**設定だけ**から作られるので、2つのタブで同じ値になる。それだけを
+ * 見ていると、先に保存・適用された文面を古い画面からの保存が黙って差し替え、適用済みの
+ * 下書きまで消える。**作る側（表示）と照合する側（保存）で同じ関数を使う**（同じ計算を
+ * 2か所に書くとずれる）。未設定と空文字は同じ扱い＝「まだ原本が無い」。
+ */
+export function bodyTemplateDigest(bodyTemplate: string | null): string {
+  return sha256Hex(bodyTemplate ?? "");
+}

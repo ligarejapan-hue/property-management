@@ -360,9 +360,9 @@ export async function deleteSaleDmVariant(campaignId: string, variantId: string)
 export async function fetchSaleDmVariantPrompt(campaignId: string, variantId: string) {
   if (USE_MOCK) {
     await mockDelay();
-    return { prompt: "（モック）プロンプト", digest: "0".repeat(64), frozen: false, bodyTemplate: null as string | null };
+    return { prompt: "（モック）プロンプト", digest: "0".repeat(64), frozen: false, bodyTemplate: null as string | null, bodyDigest: "0".repeat(64) };
   }
-  return apiFetch<{ prompt: string; digest: string; frozen: boolean; bodyTemplate: string | null }>(
+  return apiFetch<{ prompt: string; digest: string; frozen: boolean; bodyTemplate: string | null; bodyDigest: string }>(
     `/api/properties/sale-dm/campaigns/${campaignId}/variants/${variantId}/prompt`,
   );
 }
@@ -370,7 +370,8 @@ export async function fetchSaleDmVariantPrompt(campaignId: string, variantId: st
 export async function saveSaleDmVariantTemplate(
   campaignId: string,
   variantId: string,
-  body: { body: string; promptDigest: string },
+  // baseBodyDigest = プロンプト表示時に返された bodyDigest。別の画面が先に保存していたら 409。
+  body: { body: string; promptDigest: string; baseBodyDigest: string },
 ) {
   if (USE_MOCK) {
     await mockDelay();

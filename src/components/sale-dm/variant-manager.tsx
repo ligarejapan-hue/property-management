@@ -56,6 +56,7 @@ export default function SaleDmVariantManager({
     digest: string;
     frozen: boolean;
     bodyTemplate: string | null;
+    bodyDigest: string;
   } | null>(null);
   const [pasteBody, setPasteBody] = useState("");
   const [letterNotice, setLetterNotice] = useState<string | null>(null);
@@ -96,7 +97,12 @@ export default function SaleDmVariantManager({
       const r = await saveSaleDmVariantTemplate(campaign.id, letterFor.id, {
         body: pasteBody,
         promptDigest: letter.digest,
+        // 開いたときに見えていた原本。ほかの画面が先に保存していれば 409 で止まる。
+        baseBodyDigest: letter.bodyDigest,
       });
+      // 保存できたら最新の指紋へ更新する（開き直さずに続けて直すとき、
+      // 自分の保存が原因で「先に保存されています」と言われないように）。
+      setLetter(await fetchSaleDmVariantPrompt(campaign.id, letterFor.id));
       setLetterNotice(
         r.changed
           ? "本文を保存しました。続けて「この型の全宛先に適用」を押してください"

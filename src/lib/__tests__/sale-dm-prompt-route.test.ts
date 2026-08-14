@@ -50,7 +50,7 @@ import {
   getOwnerDisplayConfig,
 } from "@/lib/api-helpers";
 import { GET } from "../../app/api/properties/sale-dm/campaigns/[id]/variants/[variantId]/prompt/route";
-import { promptDigest } from "../sale-dm-letter/external-prompt";
+import { promptDigest, bodyTemplateDigest } from "../sale-dm-letter/external-prompt";
 
 const pm = prismaMock as never as {
   dmCampaign: { findFirst: ReturnType<typeof vi.fn> };
@@ -140,6 +140,35 @@ describe("GET sale-dm variant prompt", () => {
     const body = (await res.json()) as { frozen: boolean; bodyTemplate: string };
     expect(body.frozen).toBe(true);
     expect(body.bodyTemplate).toBe("保存済み本文");
+  });
+
+  it("いまの原本の指紋も返す(保存時の版ずれ検出に使う・@codex #376 R14)", async () => {
+    // ⚠設定の指紋(digest)は2つのタブで同じ値になる。原本の指紋を返さないと、
+    //   先に保存・適用された文面を古い画面からの保存が黙って差し替えられる。
+    pm.dmVariant.findFirst.mockResolvedValue({
+      id: "v1",
+      tone: "formal",
+      length: "medium",
+      appeal: "price",
+      strength: "medium",
+      templateFrozenAt: null,
+      bodyTemplate: "保存済み本文",
+    });
+    const saved = (await (await GET(req(), ctx)).json()) as { bodyDigest: string };
+    expect(saved.bodyDigest).toBe(bodyTemplateDigest("保存済み本文"));
+    // 原本がまだ無い型は「空」の指紋(未設定と空文字は同じ扱い)。
+    pm.dmVariant.findFirst.mockResolvedValue({
+      id: "v1",
+      tone: "formal",
+      length: "medium",
+      appeal: "price",
+      strength: "medium",
+      templateFrozenAt: null,
+      bodyTemplate: null,
+    });
+    const empty = (await (await GET(req(), ctx)).json()) as { bodyDigest: string };
+    expect(empty.bodyDigest).toBe(bodyTemplateDigest(null));
+    expect(empty.bodyDigest).not.toBe(saved.bodyDigest);
   });
 
   it("監査は1件・本文やプロンプトを残さない", async () => {

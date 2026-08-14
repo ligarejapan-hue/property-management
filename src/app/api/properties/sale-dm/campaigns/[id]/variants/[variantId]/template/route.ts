@@ -10,6 +10,7 @@ import {
 import {
   buildExternalPrompt,
   promptDigest,
+  bodyTemplateDigest,
 } from "@/lib/sale-dm-letter/external-prompt";
 import {
   SETTLED_DRAFT_STATUSES,
@@ -24,6 +25,10 @@ const putSchema = z.object({
   body: z.string(),
   // 表示したプロンプトの指紋。表示〜貼り付けの間に型の設定が変わっていないかを見る。
   promptDigest: z.string().length(64),
+  // 画面を開いたときに見えていた**原本**の指紋。⚠プロンプトの指紋は設定だけから作られる
+  // ので2つのタブで同じ値になる（@codex #376 R14）。原本の指紋も一緒に見ないと、
+  // 先に保存・適用された文面を古い画面からの保存が黙って差し替えてしまう。
+  baseBodyDigest: z.string().length(64),
 });
 
 /**
@@ -105,6 +110,17 @@ export async function PUT(
           409,
           "型の設定が変わっています。プロンプトを表示し直してから貼り付けてください",
           "PROMPT_STALE",
+        );
+      }
+      // 画面を開いたときに見えていた原本と、いまの原本が同じか（@codex #376 R14）。
+      // ⚠設定の指紋は2つのタブで同じ値になるので、これを見ないと**先に保存・適用された
+      //   文面**を古い画面からの保存が黙って差し替え、適用済みの下書きまで消える。
+      //   理由が違えば文言も分ける（設定が変わった／別の人が先に保存した）。
+      if (bodyTemplateDigest(variant.bodyTemplate) !== parsed.baseBodyDigest) {
+        throw new ApiError(
+          409,
+          "この型の文面は、ほかの画面で先に保存されています。開き直して最新の文面を確認してから貼り付けてください",
+          "TEMPLATE_STALE",
         );
       }
 

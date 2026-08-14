@@ -9,6 +9,7 @@ import {
 import {
   buildExternalPrompt,
   promptDigest,
+  bodyTemplateDigest,
 } from "@/lib/sale-dm-letter/external-prompt";
 import {
   SETTLED_DRAFT_STATUSES,
@@ -24,6 +25,8 @@ import {
  *
  * digest は「表示した時の設定」の指紋。貼り付け保存はこれと一致することを要求し、
  * コピーしてから設定が変わっていた場合に版ずれを検出する（§2.3）。
+ * bodyDigest は「表示した時の原本」の指紋。保存はこれも一致することを要求し、
+ * 別の画面が先に保存した文面を黙って差し替えるのを防ぐ（@codex #376 R14）。
  */
 export async function GET(
   _req: NextRequest,
@@ -81,6 +84,10 @@ export async function GET(
           settledCount,
         }),
         bodyTemplate: variant.bodyTemplate,
+        // 保存時に「開いたときの原本と同じか」を照合するための指紋（@codex #376 R14）。
+        // ⚠digest（設定の指紋）は2つのタブで同じ値になるため、これが無いと先に保存された
+        //   文面を古い画面が黙って差し替えられる。
+        bodyDigest: bodyTemplateDigest(variant.bodyTemplate),
       },
       { headers: { "Cache-Control": "no-store" } },
     );
