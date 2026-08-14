@@ -49,7 +49,12 @@ describe("宛先の確定(drafts/confirm)のロック順序", () => {
     const d = s.search(/FROM dm_recipient_drafts[\s\S]{0,200}FOR UPDATE/);
     expect(d).toBeGreaterThan(v);
     // ロックの後に読み直し、その値で本文を検査していること。
-    expect(s.slice(d)).toMatch(/findMany[\s\S]{0,900}validateLetterBody/);
+    // ⚠距離窓(`[\s\S]{0,N}`)で書くと、間に1行足すだけで落ちる(PR-C の教訓)。
+    //   出現位置の前後関係だけを見る。
+    const reread = s.indexOf("findMany", d);
+    const validate = s.indexOf("validateLetterBody", reread);
+    expect(reread).toBeGreaterThan(d);
+    expect(validate).toBeGreaterThan(reread);
   });
 
   it("field_staff のときだけ物件親行を取る(admin/office は不要)", () => {

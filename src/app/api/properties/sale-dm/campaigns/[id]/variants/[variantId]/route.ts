@@ -5,7 +5,7 @@ import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmVariantUpdateSchema } from "@/lib/validators-sale-dm";
-import { SETTLED_DRAFT_STATUSES, isVariantFrozen } from "@/lib/sale-dm-letter/freeze";
+import { SETTLED_DRAFT_STATUSES, isVariantFrozen, markVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string; variantId: string }> }) {
   try {
@@ -165,6 +165,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           data: { body: "", status: "draft", confirmedAt: null },
         });
       } else if (lpUrlChanged || designChanged) {
+        // ⚠**確定を解除する前に凍結印を立てる**（設計 §2.4「証拠を消す前に列へ固定する」・
+        //   @codex #376 R11）。印がまだ無く確定だけがある型（照合スクリプト実行前の状態）で
+        //   ここを通ると、解除で**最後の証拠が消え**、そのあと文面を差し替え放題になる。
+        //   確定が1件も無い型には立てない（見た目を変えただけの型の文面まで縛らない）。
+        if (settledCount > 0) {
+          await markVariantsFrozen(tx, [variantId]);
+        }
         // LP・デザインの変更は本文を変えないが、確定済み(=印刷対象)の宛先の**刷り上がり**を変える
         // (LP=QRの遷移先・デザイン=紙面の体裁)。承認したものと違うものが刷られるのを防ぐため
         // 確定を解除し再承認を促す(本文は保持=貼り直し不要・Codex / @codex #376 R10)。

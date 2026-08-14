@@ -24,7 +24,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     dmCampaign: { findUnique: vi.fn(), findFirst: vi.fn() },
-    dmVariant: { findMany: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), deleteMany: vi.fn(), findFirst: vi.fn() },
+    dmVariant: { findMany: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), deleteMany: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn(async () => ({ count: 0 })) },
     dmRecipientDraft: { count: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(async () => []) },
   };
   // $transaction はコールバックに同じ db を tx として渡す(tx.* === pm.* なので既存アサーションがそのまま効く)。
@@ -44,7 +44,7 @@ import { saleDmCampaignBodySchema } from "@/lib/validators-sale-dm";
 
 const pm = prismaMock as never as {
   dmCampaign: { findUnique: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
-  dmVariant: { findMany: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn>; deleteMany: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn> };
+  dmVariant: { findMany: ReturnType<typeof vi.fn>; create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; delete: ReturnType<typeof vi.fn>; deleteMany: ReturnType<typeof vi.fn>; findFirst: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
   dmRecipientDraft: { count: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
   $queryRaw: ReturnType<typeof vi.fn>;
 };
@@ -408,6 +408,42 @@ describe("PATCH variant (更新)", () => {
     const inval = pm.dmRecipientDraft.updateMany.mock.calls[0][0];
     expect(inval.where).toMatchObject({ status: "confirmed" });
     expect(inval.data.body).toBeUndefined();
+  });
+
+  it("確定を解除する前に凍結印を立てる(証拠を消してから消し得る状態にしない・@codex #376 R11)", async () => {
+    // ⚠印がまだ無く確定だけがある型(照合スクリプト前の状態)で LP/デザインを変えると、
+    //   確定解除で**最後の証拠が消え**、そのあと文面を差し替え放題になる。
+    //   解除の前に、同じ処理の中で印を立てる(設計§2.4「証拠を消す前に固定する」)。
+    counts({ settled: 1, sent: 0 });
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields, lpUrl: "https://lp-new.example.com" });
+    const res = await updateVariant(
+      new Request("http://x", { method: "PATCH", body: JSON.stringify({ lpUrl: "https://lp-new.example.com" }) }) as never,
+      ctxV,
+    );
+    expect(res.status).toBe(200);
+    const freezeIdx = (pm.dmVariant.updateMany.mock.calls as { data?: { templateFrozenAt?: unknown } }[][]).findIndex(
+      (c) => c[0]?.data?.templateFrozenAt != null,
+    );
+    expect(freezeIdx).toBeGreaterThan(-1);
+    expect(pm.dmVariant.updateMany.mock.calls[freezeIdx][0].where).toMatchObject({ templateFrozenAt: null });
+    // 確定解除より**前**に立てる。
+    expect(pm.dmVariant.updateMany.mock.invocationCallOrder[freezeIdx]).toBeLessThan(
+      pm.dmRecipientDraft.updateMany.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("確定が1件も無ければ凍結印は立てない(見た目を変えただけの型の文面を縛らない)", async () => {
+    counts({ settled: 0, sent: 0 });
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields, designTemplate: "soft" });
+    const res = await updateVariant(
+      new Request("http://x", { method: "PATCH", body: JSON.stringify({ options: { designTemplate: "soft" } }) }) as never,
+      ctxV,
+    );
+    expect(res.status).toBe(200);
+    const froze = (pm.dmVariant.updateMany.mock.calls as { data?: { templateFrozenAt?: unknown } }[][]).some(
+      (c) => c[0]?.data?.templateFrozenAt != null,
+    );
+    expect(froze).toBe(false);
   });
 
   it("確定済み(未送付)があると文面の設定は変更できない(409・凍結が守るのは文面)", async () => {

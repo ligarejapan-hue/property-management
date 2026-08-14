@@ -293,6 +293,37 @@ describe("POST confirm (bulk)", () => {
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
+  it("読み直しでロックしていない型が出てきたら中止する(@codex #376 R11)", async () => {
+    // ⚠ロックする型は**ロック前の先読み**から決めている。先読み〜ロックの間に割当が
+    //   別の型へ移すと、読み直しにはロックしていない型が現れる。そのまま凍結印を
+    //   立てると、子行を掴んだあとに親(型)を掴むことになり、型を先に掴む処理と
+    //   互い違いになって片方が異常終了する。**中止して取り直してもらう**。
+    grant(...ALL);
+    setupFreshDrafts(
+      [{ id: "11111111-1111-4111-8111-111111111111", recipientZip: null, recipientAddress: "渋谷区神宮前1-1-1", ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+      [{ id: "aaaaaaaa-1111-4111-8111-111111111111", zip: null, address: null, currentZip: null, currentAddress: "渋谷区神宮前1-1-1" }],
+    );
+    const row = {
+      id: "11111111-1111-4111-8111-111111111111",
+      body: "拝啓 時下ますますご清祥のこととお喜び申し上げます。",
+      recipientZip: null,
+      recipientAddress: "渋谷区神宮前1-1-1",
+      representativeOwnerId: "aaaaaaaa-1111-4111-8111-111111111111",
+      draftOwners: [{ ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+      propertyId: "pppppppp-1111-4111-8111-111111111111",
+    };
+    pm._tx.dmRecipientDraft.findMany.mockImplementation(
+      async (args: { where?: { body?: unknown } }) =>
+        args?.where?.body !== undefined
+          ? [{ ...row, variantId: "vvvvvvvv-1111-4111-8111-111111111111" }] // 先読み: 元の型
+          : [{ ...row, variantId: "vvvvvvvv-2222-4111-8111-222222222222" }], // 読み直し: 別の型へ移動済み
+    );
+    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: ["11111111-1111-4111-8111-111111111111"] }) }) as never);
+    expect(res.status).toBe(409);
+    expect(pm._tx.dmVariant.updateMany).not.toHaveBeenCalled();   // 凍結印を立てない
+    expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled(); // 確定もしない
+  });
+
   it("不正な JSON ボディは 400(500 でなく)・更新しない", async () => {
     grant(...ALL);
     const res = await confirmDrafts(new Request("http://x", { method: "POST", body: "{ broken" }) as never);

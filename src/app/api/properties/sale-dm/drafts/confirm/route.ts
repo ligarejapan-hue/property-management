@@ -129,6 +129,21 @@ export async function POST(request: NextRequest) {
       });
       if (drafts.length === 0) return 0;
 
+      // ⚠ロックした型は**先読み**から決めている。先読み〜ロックの間に割当（assign）が
+      //   宛先を別の型へ移すと、読み直しに**ロックしていない型**が現れる。そのまま
+      //   凍結印を立てると、子行を掴んだあとに親（型）を掴むことになり、型を先に掴む
+      //   処理（貼り付け・設定変更・割当）と互い違いになって片方が異常終了する
+      //   （@codex #376 R11）。ここでは**中止して取り直してもらう**
+      //   （既存の「先読み〜ロックで集合が変わったら中止」と同じ扱い）。
+      const lockedVariantIds = new Set(variantIds);
+      if (drafts.some((d) => !lockedVariantIds.has(d.variantId))) {
+        throw new ApiError(
+          409,
+          "宛先の型が変わりました。画面を開き直してから確定してください",
+          "VARIANT_CHANGED",
+        );
+      }
+
       // ⚠確定は**印刷の直前の唯一の関所**。個別編集の入口だけを塞いでも、AI生成の出力や
       //   この反映より前からあるデータに不正な本文があれば通ってしまう(@codex #375)。
       //   where の `body != ""` では空白のみ・差込記号の残り・長すぎる本文を止められない。
