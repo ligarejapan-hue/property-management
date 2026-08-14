@@ -30,9 +30,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     // full-form UI が現在値ごと再送する no-op 保存(や空 options)で生成/承認済みの本文を消さないため、
     // 「項目が来たか」ではなく「値が実際に変わったか」で無効化を判定する。
     let optionFieldChanged = false;
+    // 印刷デザインは「本文を失効させないが、担当外の宛先の印刷結果は変える」ので別枠。
+    let designChanged = false;
     if (parsed.options) {
       const o = parsed.options;
-      if (o.designTemplate !== undefined) { data.designTemplate = o.designTemplate; if (o.designTemplate !== existing.designTemplate) optionFieldChanged = true; }
+      // ⚠**印刷デザインは失効の契機にしない**（@codex #376 R8）。デザインは印刷時に別途
+      //   あてがわれる見た目の設定で、外部AI方式のプロンプト（設計 §2.2）には含めない
+      //   ＝変えても文面は変わらない。にもかかわらず失効させると、原本・プロンプトの控え・
+      //   全下書きの本文が「得るもの無しに」消える（追加の指示と同じ型の穴）。
+      //   ただし**この型の全宛先（担当外で見えない宛先を含む）の印刷結果を変える**ので、
+      //   field_staff の担当範囲チェックは lpUrl と同じく要求する。
+      if (o.designTemplate !== undefined) { data.designTemplate = o.designTemplate; if (o.designTemplate !== existing.designTemplate) designChanged = true; }
       if (o.tone !== undefined) { data.tone = o.tone; if (o.tone !== existing.tone) optionFieldChanged = true; }
       if (o.length !== undefined) { data.length = o.length; if (o.length !== existing.length) optionFieldChanged = true; }
       if (o.appeal !== undefined) { data.appeal = o.appeal; if (o.appeal !== existing.appeal) optionFieldChanged = true; }
@@ -55,7 +63,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     // field_staff は campaign-level の型 options 変更で「担当外(再割当で隠れた)の未送付下書き」の本文まで
     // 無効化してしまう(型は campaign 横断で多数の宛先に共有)。GET/print/export/aggregate の scope 絞り込みと
     // 整合させるため、担当外の未送付下書きが1件でもあれば options 変更を拒否する(label のみ=本文不変は許可)。
-    if ((optionFieldChanged || lpUrlChanged) && session.role === "field_staff") {
+    if ((optionFieldChanged || designChanged || lpUrlChanged) && session.role === "field_staff") {
       const outOfScope = await prisma.dmRecipientDraft.count({
         where: {
           campaignId: id,
@@ -106,8 +114,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       }
       // campaignId で縛り、他キャンペーンの型を更新させない。
       const updated = await tx.dmVariant.update({ where: { id: variantId, campaignId: id }, data });
-      // options(design/tone/length/appeal/strength/extraInstruction)を実際に変えたら、この型を使う未送付の
-      // 下書きは旧設定で生成済みのため無効化(本文クリア→draft へ・要再生成)。label のみ/空 options は本文不変。
+      // **プロンプトに載る設定**(tone/length/appeal/strength)を実際に変えたら、この型を使う未送付の
+      // 下書きは旧いプロンプトで作った本文のため無効化(本文クリア→draft へ・貼り直しが要る)。
+      // label のみ/空 options/デザイン/追加の指示は本文不変＝ここを通さない。
       if (optionFieldChanged) {
         // 古いプロンプトで作った本文を、新しい設定の型として再適用できてしまう不整合を
         // 防ぐため、原本とプロンプトの控えも同時に消す（設計 §2.4）。

@@ -319,6 +319,51 @@ describe("PATCH variant (更新)", () => {
     expect(clearedTemplate).toBe(false);
   });
 
+  it("印刷デザインだけの変更では原本も下書きも消さない(@codex #376 R8)", async () => {
+    // デザインは印刷時に別途あてがわれる見た目の設定で、外部AI方式のプロンプト(設計§2.2)には
+    // 含まれない。含まれない設定の編集で原本・プロンプトの控え・全下書きの本文が消えるのは、
+    // 失う一方で得るものがない(追加の指示と同じ型の穴)。
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    pm.dmVariant.update.mockResolvedValue({ id: "v1", label: "A", ...optionFields, designTemplate: "soft" });
+    const res = await updateVariant(
+      new Request("http://x", {
+        method: "PATCH",
+        body: JSON.stringify({ options: { designTemplate: "soft" } }),
+      }) as never,
+      ctxV,
+    );
+    expect(res.status).toBe(200);
+    // 値は保存される。
+    expect(pm.dmVariant.update.mock.calls[0][0].data.designTemplate).toBe("soft");
+    // 下書きの本文は消さない。
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+    // 原本・プロンプトの控えを消す update も呼ばれない。
+    const clearedTemplate = pm.dmVariant.update.mock.calls.some(
+      (c: unknown[]) =>
+        (c[0] as { data?: { bodyTemplate?: unknown } })?.data?.bodyTemplate === null,
+    );
+    expect(clearedTemplate).toBe(false);
+  });
+
+  it("field_staff は担当外の未送付下書きを含む型のデザイン変更を拒否(403・隠れ宛先の印刷結果を変えさせない)", async () => {
+    // 本文は消さない変更でも、デザインは**この型の全宛先**(担当外で見えない宛先を含む)の
+    // 印刷結果を変える → lpUrl と同じ scope を要求する。
+    (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.count.mockResolvedValueOnce(1).mockResolvedValue(0);
+    const res = await updateVariant(
+      new Request("http://x", {
+        method: "PATCH",
+        body: JSON.stringify({ options: { designTemplate: "soft" } }),
+      }) as never,
+      ctxV,
+    );
+    expect(res.status).toBe(403);
+    expect(pm.dmVariant.update).not.toHaveBeenCalled();
+    const where = pm.dmRecipientDraft.count.mock.calls[0][0].where;
+    expect(where).toMatchObject({ campaignId: "c1", variantId: "v1", status: { not: "sent" } });
+    expect(where.property).toEqual({ NOT: { OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] } });
+  });
+
   it("確定済み/送付済みの宛先がある型は設定変更を拒否(409 VARIANT_LOCKED)・更新しない", async () => {
     // PR-D2: 送付済みだけでなく**確定済み**でも止める(文面と A/B 構成の出所を守る・設計§2.4)。
     pm.dmRecipientDraft.count.mockResolvedValue(2);

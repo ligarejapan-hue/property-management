@@ -33,13 +33,18 @@ export function coarsePropertyLocation(address: string | null): string | null {
   //   してはいけない（@codex #376 R5）。**直後が 丁目/番/号/番地 のときだけ**
   //   番地の一部と判断する。
   const KANJI_NUM = /[〇零一二三四五六七八九十百]/;
-  //   ⚠「◯番町」は町名（千代田区一番町〜六番町）なので、ここの 番 は番地ではない
-  //   （@codex #376 R6）。番 の直後が 町 のときは町名の一部として扱う。
+  // ⚠数字の並びの直後がこれらのときは、その数字ごと**町名の一部**（番地ではない）。
+  //   ・丁目 = 町名の一部として自然に読める
+  //   ・番町 = 千代田区一番町〜六番町（@codex #376 R6）
+  //   ・番丁 = 仙台市青葉区一番丁〜五番丁・和歌山市一番丁〜七番丁（@codex #376 R8）
+  //   「丁」も「町」と同じく町名の字。**漢数字でも算用数字でも同じ扱い**にする
+  //   （「1番町」のような表記ゆれで町名が消えないように）。
+  const TOWN_SUFFIXES = ["丁目", "番町", "番丁"] as const;
+  const townSuffixAt = (at: number) =>
+    TOWN_SUFFIXES.find((suffix) => s.startsWith(suffix, at));
+  // 町名の字（上の表）でないことを確かめた上で呼ぶ＝ここに来た 番/号 は番地。
   const isUnitAt = (at: number) =>
-    s.startsWith("丁目", at) ||
-    s.startsWith("番地", at) ||
-    (s.startsWith("番", at) && !s.startsWith("番町", at)) ||
-    s.startsWith("号", at);
+    s.startsWith("番", at) || s.startsWith("号", at);
   let cut = s.length;
   let i = 0;
   while (i < s.length) {
@@ -51,8 +56,9 @@ export function coarsePropertyLocation(address: string | null): string | null {
     if (DIGITS.test(ch)) {
       let j = i;
       while (j < s.length && DIGITS.test(s[j])) j += 1;
-      if (s.slice(j, j + 2) === "丁目") {
-        i = j + 2; // 町名の一部。ここまでは残して先を見る
+      const suffix = townSuffixAt(j);
+      if (suffix) {
+        i = j + suffix.length; // 「2丁目」「1番町」は町名の一部。残して先を見る
         continue;
       }
       cut = i; // 番地の始まり
@@ -61,8 +67,9 @@ export function coarsePropertyLocation(address: string | null): string | null {
     if (KANJI_NUM.test(ch)) {
       let j = i;
       while (j < s.length && KANJI_NUM.test(s[j])) j += 1;
-      if (s.slice(j, j + 2) === "丁目") {
-        i = j + 2; // 「二丁目」は町名の一部
+      const suffix = townSuffixAt(j);
+      if (suffix) {
+        i = j + suffix.length; // 「二丁目」「一番町」「二番丁」は町名の一部
         continue;
       }
       if (isUnitAt(j)) {

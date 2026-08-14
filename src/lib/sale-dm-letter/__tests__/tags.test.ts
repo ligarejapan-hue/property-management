@@ -87,6 +87,29 @@ describe("coarsePropertyLocation", () => {
     );
   });
 
+  it("⚠「◯番丁」も町名なので切らない(仙台市青葉区・和歌山市・@codex #376 R8)", () => {
+    // 「丁」は「町」と同じく町名の字。仙台の一番丁〜五番丁、和歌山の一番丁〜七番丁は実在の町名。
+    for (const a of [
+      "宮城県仙台市青葉区一番丁",
+      "宮城県仙台市青葉区二番丁",
+      "和歌山県和歌山市一番丁",
+    ]) {
+      expect(coarsePropertyLocation(a)).toBe(a);
+    }
+    expect(coarsePropertyLocation("宮城県仙台市青葉区二番丁3-5")).toBe(
+      "宮城県仙台市青葉区二番丁",
+    );
+  });
+
+  it("算用数字で書かれた「1番町/1番丁」も町名として残す(表記ゆれ)", () => {
+    expect(coarsePropertyLocation("東京都千代田区1番町6-4")).toBe(
+      "東京都千代田区1番町",
+    );
+    expect(coarsePropertyLocation("宮城県仙台市青葉区2番丁")).toBe(
+      "宮城県仙台市青葉区2番丁",
+    );
+  });
+
   it("番地が無い住所はそのまま", () => {
     expect(coarsePropertyLocation("東京都千代田区丸の内")).toBe(
       "東京都千代田区丸の内",
