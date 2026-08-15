@@ -60,6 +60,13 @@ describe("RegistryLivePanel — SSR (初期状態)", () => {
     // 親は「無料の検索中」だけ cancelable を立てる。
     expect(BUTTON_SRC).toMatch(/cancelable=\{state === "searching"\}/);
   });
+
+  it("⚠パネルは liveRef ごとに作り直す(@codex #380 P2)", () => {
+    // 検索の3分の見返し期限が切れた後に「取得」を押すと、同じ部品が使い回されて
+    // 内部状態(steps/done/expired/ポーリング停止)が残り、有料取得中なのに
+    // 「表示期限が切れました」のまま固まる。key={liveRef} で remount する。
+    expect(BUTTON_SRC).toMatch(/key=\{liveRef\}/);
+  });
 });
 
 describe("RegistryLivePanel — ポーリング規約 (ソース静的検証)", () => {

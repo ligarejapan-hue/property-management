@@ -340,6 +340,11 @@ export default function RegistryLocationSearchButton({
           state === "cancelled" ||
           state === "error") && (
           <RegistryLivePanel
+            // ⚠liveRef ごとに**作り直す**(@codex #380 P2)。検索の3分の見返し期限が
+            //   切れた後に「取得」を押すと、同じ部品が使い回されて内部状態
+            //   (steps/done/expired/ポーリング停止)が残り、有料取得が走っているのに
+            //   「表示期限が切れました」のまま固まる。key で remount して全部リセット。
+            key={liveRef}
             propertyId={propertyId}
             liveRef={liveRef}
             searchSettled={state !== "searching" && state !== "obtaining"}
