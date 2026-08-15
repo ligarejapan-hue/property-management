@@ -34,6 +34,39 @@ describe("RegistryLivePanel — SSR (初期状態)", () => {
     expect(html).toContain("自動操作の実況");
     expect(html).toContain("実況に接続しています…");
   });
+
+  it("⚠cancelable=false(有料取得)では「中止」を出さない(2026-08-15 提出前レビュー指摘)", () => {
+    // server が cancel 窓を閉じていても、ボタンの表示は client 状態だけで決まる。
+    // これが無いと**課金中**に「中止(この検索では課金は発生しません)」という
+    // 嘘の説明つきボタンが出る(押しても無視されるが、表示が矛盾する)。
+    const paid = renderToStaticMarkup(
+      createElement(RegistryLivePanel, {
+        propertyId: "p1",
+        liveRef: "ref-12345678",
+        searchSettled: false,
+        cancelable: false,
+      }),
+    );
+    expect(paid).not.toContain('data-testid="registry-live-cancel"');
+    // 既定(検索)では従来どおり出る。
+    const search = renderToStaticMarkup(
+      createElement(RegistryLivePanel, {
+        propertyId: "p1",
+        liveRef: "ref-12345678",
+        searchSettled: false,
+      }),
+    );
+    expect(search).toContain('data-testid="registry-live-cancel"');
+    // 親は「無料の検索中」だけ cancelable を立てる。
+    expect(BUTTON_SRC).toMatch(/cancelable=\{state === "searching"\}/);
+  });
+
+  it("⚠パネルは liveRef ごとに作り直す(@codex #380 P2)", () => {
+    // 検索の3分の見返し期限が切れた後に「取得」を押すと、同じ部品が使い回されて
+    // 内部状態(steps/done/expired/ポーリング停止)が残り、有料取得中なのに
+    // 「表示期限が切れました」のまま固まる。key={liveRef} で remount する。
+    expect(BUTTON_SRC).toMatch(/key=\{liveRef\}/);
+  });
 });
 
 describe("RegistryLivePanel — ポーリング規約 (ソース静的検証)", () => {
@@ -64,8 +97,11 @@ describe("RegistryLivePanel — ポーリング規約 (ソース静的検証)", 
     expect(PANEL_SRC).toMatch(
       /failStreakRef\.current >= MAX_CONSECUTIVE_POLL_FAILURES/,
     );
-    // 親は POST 決着 (state !== "searching") を伝える
-    expect(BUTTON_SRC).toMatch(/searchSettled=\{state !== "searching"\}/);
+    // 親は POST 決着を伝える。2026-08-15 から有料取得(obtaining)も実況するため、
+    // 「決着」= searching でも obtaining でもない、に広がった。
+    expect(BUTTON_SRC).toMatch(
+      /searchSettled=\{state !== "searching" && state !== "obtaining"\}/,
+    );
   });
 
   it("決着時の最終取得は in-flight を待ってから必ず実取得する (@codex P1)", () => {

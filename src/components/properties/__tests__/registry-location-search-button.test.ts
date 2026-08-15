@@ -39,8 +39,13 @@ describe("registry-location-search-button.tsx: 配線（所在検索→候補→
     expect(src).toContain("has_real_estate_number");
     expect(src).toContain("insufficient_location");
   });
-  it("成功レスポンス本文を UI に持ち込まず onComplete で親再取得に委ねる", () => {
-    expect(src).toContain("onComplete()");
+  it("取得成功で**その場では**親を再取得しない(@codex #380 R3 P2)", () => {
+    // その場で再取得すると詳細ページが読み込み中の画面に差し替わり、このボタンごと
+    // 作り直される=実況の見返し(最後のスクショ・3分)が即座に消える。
+    // 地番保存(#373 R10 P2)と同じく、閉じるとき(reset)にまとめて流す。
+    expect(src).toContain("propertyRefreshPendingRef.current = true;");
+    expect(src).not.toContain("onComplete");
+    expect(src).toContain("閉じる（物件情報を更新）");
   });
   it("cond②: 候補（所在等）を console/log に出さない", () => {
     expect(src).not.toContain("console.");

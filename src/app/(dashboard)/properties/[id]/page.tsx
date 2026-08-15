@@ -568,7 +568,6 @@ export default function PropertyDetailPage({
         canAutoFetch={canAutoFetchRegistry}
         providerConfigured={registryLocationSearchConfigured}
         purchaseEnabled={registryPurchaseConfigured}
-        onComplete={fetchProperty}
         propertyAddress={property.address}
         // ⚠地番の保存に要る。保存後は fetchProperty で取り直す
         //   （同じ画面で2回保存すると2回目が必ず 409 になるため）。

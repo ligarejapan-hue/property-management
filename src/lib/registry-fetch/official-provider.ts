@@ -100,6 +100,11 @@ export interface RegistryBrowserPage {
      * 中止する(charged への代入と同一同期区間で確認する=競合の隙間なし)。
      */
     chargeState?: { charged: boolean; aborted?: boolean };
+    /**
+     * 実況パネル(2026-08-15)。検索と同じ contract(固定文言のみ・非throw)。
+     * ⚠有料フローは中止を受け付けないので isCancelRequested は配線されない。
+     */
+    live?: RegistryLiveReporter;
   }): Promise<Buffer>;
   /** 検索ヒット後、謄本PDFを取得して Buffer で返す。 */
   downloadRegistryPdf(): Promise<Buffer>;
@@ -161,6 +166,15 @@ export const PAID_FLOW_EXTRA_TIMEOUT_MS = 10 * 60 * 1000;
  */
 const QUEUE_CANCEL_POLL_MS = 250;
 
+/**
+ * 有料取得が購入ミューテックスの順番待ちに費やせる上限(@codex #380 R4/R6 P2)。
+ * ⚠心拍だけを止める(R4の初版)と、上限後も待ち続ける取得の実況が期限切れで消え、
+ * 開始後の全 step が no-op になる(R6)。**待ちそのものに同じ寿命を与え**、超えたら
+ * 「外部に一切触れる前に」rate_limited で失敗させる(=課金ゼロ・実況も正直)。
+ * 30分は対話操作の待ちとしては十分すぎる上限(正常系では届かない)。
+ */
+const QUEUE_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
+
 function classifyRegistryFetchError(err: unknown): RegistryFetchError {
   if (err instanceof RegistryFetchError) return err;
   // Playwright 等の生エラー（URL/入力/selector が混入しうる）は分類コードのみへ正規化。
@@ -214,7 +228,7 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     const location = request.location ?? null;
     const realEstateNumber = request.realEstateNumber?.trim();
     if (!realEstateNumber && location) {
-      return this.fetchByLocation(location);
+      return this.fetchByLocation(location, request.live);
     }
     // PR-2: 不動産番号がある物件に限定。空なら検索キーが無く取得不能（非PII前提を維持）。
     if (!realEstateNumber) {
@@ -306,6 +320,8 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
    */
   private async fetchByLocation(
     location: NonNullable<RegistryFetchRequest["location"]>,
+    // 実況(2026-08-15・任意)。呼び出し元 fetchRegistryPdf から request.live を受け取る。
+    live?: RegistryLiveReporter,
   ): Promise<RegistryFetchResult> {
     // レート制御は番号取得と同じ fetch キー（公式アクセス前に判定）。
     if (
@@ -319,7 +335,35 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     }
     const requestId = this.requestIdFactory();
 
-    return runExclusivePurchase(async () => {
+    // ⚠順番待ちの間も実況を生かす(@codex #380 R2 P2)。購入ミューテックスは一括取得と
+    //   共有なので、先客(一括の数件分)で3分を超えると、この取得の実況は初手1行のまま
+    //   保管期限(LIVE_VIEW_TTL_MS=3分)で**消え**、以降の step は -1 の no-op になる
+    //   (=一番の目的だった診断が丸ごと失われる)。取得開始まで60秒ごとに固定文言を
+    //   刻んで期限を更新する。step は同期・非throw契約なので interval から安全に呼べる。
+    const queueHeartbeat = live
+      ? setInterval(() => {
+          try {
+            live.step("他の取得の完了を待っています(まだ課金されていません)");
+          } catch {
+            /* 実況の失敗で待ちを壊さない */
+          }
+        }, 60_000)
+      : null;
+    // ⚠待ちそのものに寿命を与える(@codex #380 R4/R6 P2)。上限を超えたら
+    //   gaveUp を立てて rate_limited で即座に失敗し、**あとから順番が回ってきた
+    //   コールバックは冒頭で何もせず抜ける**(page 生成もログインもしない=外部無接触・
+    //   課金ゼロ)。gaveUp の判定と acquired の代入はどちらも同期区間なので競合しない。
+    let acquired = false;
+    let gaveUp = false;
+
+    const run = runExclusivePurchase(async () => {
+      if (gaveUp) {
+        // 呼び出し元はすでに rate_limited で決着済み。ここで外部に触れると
+        // 「記録なき課金」への入口になるため、何もせずに終わる。
+        throw new RegistryFetchError("rate_limited");
+      }
+      acquired = true;
+      if (queueHeartbeat) clearInterval(queueHeartbeat);
       let page: RegistryBrowserPage;
       try {
         page = await this.withStartupTimeout(() => this.browserFactory!());
@@ -347,7 +391,13 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
             password: this.password,
             baseUrl: this.baseUrl,
           });
-          return fetchByLocationCandidate.call(page, { ...location, chargeState });
+          // 実況(あれば)を adapter へ渡す(2026-08-15)。login は provider 側なので、
+          // ここまでの進行は route の受付ステップが埋める。
+          return fetchByLocationCandidate.call(page, {
+            ...location,
+            chargeState,
+            live,
+          });
         }, chargeState);
         return {
           pdfBuffer,
@@ -376,6 +426,40 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
           // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
         }
       }
+    });
+
+    // 待ちの寿命。acquired 前に満了したら gaveUp を立てて即座に失敗させる。
+    // run 側の遅延 throw(rate_limited) は既に決着済みの guarded に届かないため
+    // catch で握る(未処理拒否の警告を出さない)。
+    const guarded = new Promise<RegistryFetchResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (!acquired) {
+          gaveUp = true;
+          try {
+            live?.step(
+              "⚠混み合っているため取得を開始できませんでした(課金されていません)。時間をおいて再実行してください",
+            );
+          } catch {
+            /* 実況は best-effort */
+          }
+          reject(new RegistryFetchError("rate_limited"));
+        }
+      }, QUEUE_WAIT_TIMEOUT_MS);
+      run.then(
+        (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      );
+    });
+    return guarded.finally(() => {
+      // ⚠取得開始時にも clear しているが、**待ちのまま満了した経路**では
+      // コールバックが走らない。二重 clear は無害。
+      if (queueHeartbeat) clearInterval(queueHeartbeat);
     });
   }
 

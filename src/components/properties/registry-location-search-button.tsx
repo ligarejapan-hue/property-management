@@ -31,8 +31,6 @@ interface RegistryLocationSearchButtonProps {
    * server 側も 501 で enforce)。
    */
   purchaseEnabled: boolean;
-  /** 取得成功時に親へ通知（物件を再取得し registryStatus 等を反映する）。 */
-  onComplete: () => void;
   /** 物件の所在（ポップアップで画面にコピーしてもらう。⚠外部へは渡さない）。 */
   propertyAddress: string;
   /**
@@ -75,7 +73,6 @@ export default function RegistryLocationSearchButton({
   canAutoFetch,
   providerConfigured,
   purchaseEnabled,
-  onComplete,
   propertyAddress,
   propertyVersion,
   gpsLat,
@@ -185,23 +182,39 @@ export default function RegistryLocationSearchButton({
     if (!selected) return;
     setState("obtaining");
     setErrorMsg(null);
+    // 実況(2026-08-15)。取得のたびに新しい参照を発行し、検索と同じパネルで
+    // 「いまサイトのどの画面で何をしているか」を追えるようにする。
+    // 前回2回の実課金テストが**手がかり1行だけ**で原因を特定できなかった反省。
+    // ⚠有料取得は中止不可なので、パネルに「中止」は出ない(server が窓を開けない)。
+    const obtainLiveRef = safeRandomId();
+    setLiveRef(obtainLiveRef);
     try {
-      // 成功レスポンス本文は参照しない（非 PII だが UI に持ち込まない）。取得結果は onComplete →
-      // 物件再取得で既存の権限ガード付きタブに反映する。
+      // 成功レスポンス本文は参照しない（非 PII だが UI に持ち込まない）。取得結果は
+      // 「閉じる」時の物件再取得(onPropertyRefresh)で既存の権限ガード付きタブに反映する。
       await obtainRegistryByCandidate(
         propertyId,
         selected.candidateRef,
         certificateType,
+        obtainLiveRef,
       );
       setState("done");
-      onComplete();
+      // ⚠その場で親の再取得を呼ばない(@codex #380 R3 P2)。再取得は詳細ページを
+      //   読み込み中の画面へ差し替え、このボタンごと作り直される=**取得成功の実況
+      //   (最後のスクショと3分の見返し)が即座に消える**。地番保存(#373 R10 P2)と
+      //   同じく、流れを閉じるとき(reset)にまとめて流す。
+      propertyRefreshPendingRef.current = true;
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "謄本の取得に失敗しました");
       setState("error");
     }
   };
 
-  const showButton = state === "idle" || state === "done";
+  // ⚠done では検索ボタンを出さない(@codex #380 R4 P2)。done 中は物件の再取得が
+  //   保留されており(propertyRefreshPendingRef)、このボタンの handler は reset() で
+  //   それを流してから confirmSearch に入る=親が読み込み中に差し替わって
+  //   **始めたばかりの確認の流れごと捨てられる**。done で出すのは「閉じる」だけにし、
+  //   閉じて(=再取得して)から改めて検索してもらう。
+  const showButton = state === "idle";
 
   return (
     <div className="mb-4 flex flex-col gap-1">
@@ -232,7 +245,20 @@ export default function RegistryLocationSearchButton({
       )}
 
       {state === "done" && (
-        <p className="text-[11px] text-green-600 dark:text-green-400">謄本を取得しました。</p>
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          <p className="text-green-600 dark:text-green-400" role="status">
+            謄本を取得しました。下の実況で仕上がりを確認できます。
+          </p>
+          {/* ⚠閉じたときに初めて物件を取り直す(@codex #380 R3 P2)。その場で取り直すと
+              詳細ページが読み込み中の画面に差し替わり、実況の見返しが即座に消える。 */}
+          <button
+            type="button"
+            onClick={reset}
+            className="rounded border border-gray-300 bg-white px-2 py-0.5 font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+          >
+            閉じる（物件情報を更新）
+          </button>
+        </div>
       )}
 
       {state === "cancelled" && (
@@ -323,14 +349,28 @@ export default function RegistryLocationSearchButton({
       {liveRef &&
         (state === "searching" ||
           state === "results" ||
+          // 有料取得の間と後も残す(2026-08-15)。取得は数十秒〜数分かかるうえ、
+          // 失敗時に「どの画面のどの段で止まったか」を本人が見返せることが
+          // この実況の主目的(実課金テスト2回が手がかり1行で終わった反省)。
+          state === "obtaining" ||
+          state === "done" ||
           // 中止のときも残す (@codex #357 P2)。どこまで進んで止まったかを
           // 本人が確かめられないと「本当に止まったのか」が分からない。
           state === "cancelled" ||
           state === "error") && (
           <RegistryLivePanel
+            // ⚠liveRef ごとに**作り直す**(@codex #380 P2)。検索の3分の見返し期限が
+            //   切れた後に「取得」を押すと、同じ部品が使い回されて内部状態
+            //   (steps/done/expired/ポーリング停止)が残り、有料取得が走っているのに
+            //   「表示期限が切れました」のまま固まる。key で remount して全部リセット。
+            key={liveRef}
             propertyId={propertyId}
             liveRef={liveRef}
-            searchSettled={state !== "searching"}
+            searchSettled={state !== "searching" && state !== "obtaining"}
+            // ⚠「中止」は無料の検索中だけ。有料取得(obtaining)で出すと、課金中に
+            //   「課金は発生しません」という嘘の説明つきボタンが出る(server は
+            //   受け付けないが表示が矛盾する)。
+            cancelable={state === "searching"}
           />
         )}
 
