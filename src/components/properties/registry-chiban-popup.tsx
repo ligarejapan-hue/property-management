@@ -24,32 +24,22 @@ import { isReadableChiban } from "@/lib/registry-fetch/chiban-input";
  * 一括なら候補1件で自動購入まで進む（設計 §3.3）。
  */
 
-const CHIBAN_MAP_BASE = "https://minji-houmu.rmp.glbs.jp/view/chiban_search/map/";
-
 /**
- * 地番検索サービスのURL。
- * ⚠ズーム18は**筆界と地番が見える倍率**（発注者の実機画面で確認済み。#15 では筆界が出ない）。
- * ⚠座標が無ければトップを開くだけ（住所は渡さない）。
+ * 登記情報提供サービスの入口(ログイン画面)。A案(発注者判断 2026-08-15)。
  *
- * ⚠**座標は文字列で来る**（@codex #373 R5 P2）。DBの緯度経度は Prisma の Decimal で、
- * 物件詳細APIはそのまま返すため JSON 上は string になる。number だけを受け付けると
- * **本番のすべての物件でトップページしか開かない**（地図が現地に寄らない）。
- * このリポは地図APIでも同じ変換をしている（field-survey-map-util の coerceLat/coerceLng）。
+ * ⚠地図(地番検索)への直リンクは**廃止**した。実機(iPhone・世田谷区若林2-18-3)で
+ * 「現在サービスを利用できません。再度登記情報提供サービスの不動産請求画面から
+ *  利用を開始してください。」と拒否され、**地図はサービスの中からしか開けない**と
+ * 実証されたため。座標つきの深リンクも一緒に消えた=**外部へ何も渡さない**。
+ *
+ * ⚠この値の正はサーバ側の自動操作定数
+ *   (auto-fetch.ts の DEFAULT_REGISTRY_BASE_URL + DEFAULT_REGISTRY_LOGIN_PATH)。
+ *   client からは import できない(サーバ専用の重い模块)ため、リテラルを複製し、
+ *   ずれはテスト(registry-chiban-popup.test.ts)が両ファイルを読み合わせて検出する。
+ * ⚠**資格情報は絶対に画面側へ配らない**(自動ログインは作らない)。ログインは
+ *   ブラウザの保存パスワード等、利用者自身の手段で行ってもらう。
  */
-export function chibanMapUrl(
-  lat: number | string | null | undefined,
-  lng: number | string | null | undefined,
-): string {
-  const n = (v: number | string | null | undefined): number | null => {
-    if (v == null || v === "") return null;
-    const num = typeof v === "number" ? v : Number(v);
-    return Number.isFinite(num) ? num : null;
-  };
-  const la = n(lat);
-  const ln = n(lng);
-  if (la == null || ln == null) return CHIBAN_MAP_BASE;
-  return `${CHIBAN_MAP_BASE}#18/${la.toFixed(6)}/${ln.toFixed(6)}`;
-}
+const REGISTRY_SERVICE_LOGIN_URL = "https://www.touki.or.jp/TeikyoUketsuke/";
 
 interface RegistryChibanPopupProps {
   propertyId: string;
@@ -57,9 +47,6 @@ interface RegistryChibanPopupProps {
   propertyAddress: string;
   /** 保存に必要な現在の版番号。 */
   propertyVersion: number;
-  /** ⚠number とは限らない（Decimal は JSON 上 string）。 */
-  gpsLat: number | string | null;
-  gpsLng: number | string | null;
   /** property:write。無ければ入力欄を出さず案内だけにする。 */
   canWriteProperty: boolean;
   /**
@@ -82,8 +69,6 @@ export default function RegistryChibanPopup({
   propertyId,
   propertyAddress,
   propertyVersion,
-  gpsLat,
-  gpsLng,
   canWriteProperty,
   offerBuildingPath,
   onSaved,
@@ -142,7 +127,7 @@ export default function RegistryChibanPopup({
     }
   }
 
-  const mapUrl = chibanMapUrl(gpsLat, gpsLng);
+
 
   return (
     <div className="mt-2 space-y-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-400/30 dark:bg-amber-500/10">
@@ -220,51 +205,32 @@ export default function RegistryChibanPopup({
             </div>
           </div>
 
-          {/* ⚠**この地図は単独では開けない**（2026-08-15 実機で判明）。押すと地図ではなく
-              「現在サービスを利用できません。再度登記情報提供サービスの不動産請求画面から
-              利用を開始してください。」が返る＝登記情報提供サービスのセッションが要る。
-              ボタンは残す（住所のコピーと地番の入力欄が同じ場所にある利点があるため）が、
-              **前提をリンクより前に置く**（押してから気づく順にしない）。 */}
-          <div className="rounded border border-amber-300 bg-amber-50 p-2 dark:border-amber-400/30 dark:bg-amber-950/40">
-            <p className="font-medium text-amber-900 dark:text-amber-200">
-              先に登記情報提供サービスへログインしてください
-            </p>
-            <p className="mt-0.5 text-[11px] leading-relaxed text-amber-900/90 dark:text-amber-200/90">
-              この地図は<strong>単独では開けません</strong>
-              。登記情報提供サービスにログインし、
-              <strong>不動産請求画面</strong>
-              から始めた状態でないと「現在サービスを利用できません」と表示されます。
-            </p>
-          </div>
-
-          {/* ⚠外部サービスへ物件の位置を渡す導線。自動では開かない・自動では送らない。
-              ⚠「相手に渡っていない」とは書かない（フラグメントでも相手の JavaScript が読み、
-              地図データの取得もその範囲について行われる＝座標は渡っている）。 */}
+          {/* A案(発注者判断 2026-08-15): ボタンは**ログイン画面**を開く。
+              地図(地番検索)はサービスの中からしか開けないと実機で実証されたため、
+              地図への直リンクは廃止した(押しても拒否されるだけだった)。
+              説明はリンクより前に置く(押してから気づく順にしない)。
+              ⚠外部へは何も渡さない(座標の深リンクも廃止=URLは固定の入口だけ)。 */}
           <div className="space-y-1">
+            <p className="text-[11px] leading-relaxed text-gray-600 dark:text-gray-400">
+              地図（地番検索）は登記情報提供サービスの
+              <strong>中からしか開けません</strong>。このボタンは
+              <strong>ログイン画面</strong>
+              を開きます（ブラウザに保存したID・パスワードが使えます）。
+            </p>
             <a
-              href={mapUrl}
+              href={REGISTRY_SERVICE_LOGIN_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 rounded border border-indigo-300 bg-white px-2.5 py-1 font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-400/30 dark:bg-gray-900 dark:text-indigo-300 dark:hover:bg-gray-800"
             >
               <ExternalLink className="h-3 w-3" />
-              地番検索サービスを開く（無料・別タブ）
+              登記情報提供サービスを開く（別タブ）
             </a>
-            {/* ⚠**このボタンを「地図を開く手段」として案内しない**（@codex #378 P2）。
-                ボタンは `chiban_search/map/` を直接開くだけなので、ログインしていても
-                サービス側が「不動産請求画面から開始してください」と拒む可能性がある。
-                正しい入口は**サービス自身の「地番検索」**。ボタンは、そこで開始済みの
-                ときに**物件の位置で**同じ地図を開く近道として説明する。 */}
             <p className="text-[11px] leading-relaxed text-gray-600 dark:text-gray-400">
-              このボタンは、下の③まで済んで地図を開ける状態のとき、
-              <strong>この物件の位置</strong>を地図サービスへ渡して開きます
-              （法務省の無料サービス）。開けないときは③からやり直してください。
-            </p>
-            <p className="text-[11px] leading-relaxed text-gray-600 dark:text-gray-400">
-              ①登記情報提供サービスに<strong>ログイン</strong> → ②
-              <strong>不動産請求画面</strong>へ進む → ③
-              <strong>その画面の「地番検索」から地図を開く</strong> → ④住所で検索 →
-              ⑤地図を拡大 → ⑥<strong>該当の筆をクリック</strong> →
+              ①<strong>ログイン</strong> → ②<strong>不動産請求画面</strong>へ進む → ③
+              <strong>その画面の「地番検索」から地図を開く</strong> →
+              ④上の住所をコピーして検索 → ⑤地図を拡大 →
+              ⑥<strong>該当の筆をクリック</strong> →
               ⑦出てきた地番をここへ入れてください。
             </p>
           </div>

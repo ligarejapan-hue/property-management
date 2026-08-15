@@ -38,9 +38,6 @@ interface RegistryLocationSearchButtonProps {
    * ⚠保存後は**この画面が持ち帰った版番号**を使う（親の取り直しを待たない）。
    */
   propertyVersion: number;
-  /** ⚠number とは限らない（Decimal は JSON 上 string）。ポップアップ側で正規化する。 */
-  gpsLat: number | string | null;
-  gpsLng: number | string | null;
   /** property:write。無ければポップアップは入力欄を出さず案内だけにする。 */
   canWriteProperty: boolean;
   /** 建物の道（家屋番号が要る案内）も見せるか。土地だと分かっている種別以外は true。 */
@@ -75,8 +72,6 @@ export default function RegistryLocationSearchButton({
   purchaseEnabled,
   propertyAddress,
   propertyVersion,
-  gpsLat,
-  gpsLng,
   canWriteProperty,
   offerBuildingPath,
   onPropertyRefresh,
@@ -288,8 +283,6 @@ export default function RegistryLocationSearchButton({
           propertyId={propertyId}
           propertyAddress={propertyAddress}
           propertyVersion={savedVersion ?? propertyVersion}
-          gpsLat={gpsLat}
-          gpsLng={gpsLng}
           canWriteProperty={canWriteProperty}
           offerBuildingPath={offerBuildingPath}
           onSaved={(nextVersion) => {

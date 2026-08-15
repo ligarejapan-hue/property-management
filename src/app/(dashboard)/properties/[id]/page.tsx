@@ -572,8 +572,6 @@ export default function PropertyDetailPage({
         // ⚠地番の保存に要る。保存後は fetchProperty で取り直す
         //   （同じ画面で2回保存すると2回目が必ず 409 になるため）。
         propertyVersion={property.version}
-        gpsLat={property.gpsLat}
-        gpsLng={property.gpsLng}
         canWriteProperty={canWriteProperty}
         // ⚠土地だと分かっている種別以外は建物の道も見せる（@codex #373 R10 P2）。
         //   駐車場・その他・不明は土地とも建物とも決まっていない。
