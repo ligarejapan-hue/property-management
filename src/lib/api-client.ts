@@ -1909,16 +1909,26 @@ export function registryLiveShotUrl(
   return `/api/properties/${propertyId}/registry/search/live/${encodeURIComponent(liveRef)}/shot/${seq}`;
 }
 
-/** 候補を選んで謄本取得（cond③: candidateRef は取得時に server 側で再解決）。confirmed 必須。 */
+/**
+ * 候補を選んで謄本取得（cond③: candidateRef は取得時に server 側で再解決）。confirmed 必須。
+ * liveRef(任意・2026-08-15)を渡すと取得中の自動操作を実況パネルで追える(検索と同じ仕組み)。
+ * ⚠有料取得は中止不可のため、パネルに「中止」は出ない(server が cancel 窓を開けない)。
+ */
 export async function obtainRegistryByCandidate(
   propertyId: string,
   candidateRef: string,
   certificateType: "owner" | "all" = "owner",
+  liveRef?: string,
 ): Promise<unknown> {
   return apiFetch(`/api/properties/${propertyId}/registry/auto-fetch`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ confirmed: true, candidateRef, certificateType }),
+    body: JSON.stringify({
+      confirmed: true,
+      candidateRef,
+      certificateType,
+      ...(liveRef ? { liveRef } : {}),
+    }),
   });
 }
 

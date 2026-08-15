@@ -51,6 +51,7 @@ export default function RegistryLivePanel({
   propertyId,
   liveRef,
   searchSettled,
+  cancelable = true,
 }: {
   propertyId: string;
   liveRef: string;
@@ -61,6 +62,14 @@ export default function RegistryLivePanel({
    * 404) の無限ポーリングをここで確実に断つ (@codex P2)。
    */
   searchSettled: boolean;
+  /**
+   * 「中止」ボタンを出してよい実況か(2026-08-15・提出前レビュー指摘)。
+   * ⚠**有料取得(obtaining)は false を渡す**。server が cancel 窓を閉じていても、
+   * ボタンの表示は client の状態だけで決まるため、これが無いと課金中に
+   * 「中止(この検索では課金は発生しません)」という**嘘の表示**が出る
+   * (押しても server は accepted:false で無視するが、表示が矛盾する)。
+   */
+  cancelable?: boolean;
 }) {
   const [steps, setSteps] = useState<RegistryLiveViewStep[]>([]);
   const [done, setDone] = useState(false);
@@ -250,8 +259,10 @@ export default function RegistryLivePanel({
         {/* 中止 (発注者要望 2026-08-03)。実行中だけ出す。
             ⚠押しても即座には止まらない。自動操作が**安全な節目**まで進んでから
             自分で抜ける (途中で殺すと外部サイトを中途半端な状態で放り出す)。
-            この候補検索の経路では**お金は動かない**ので、いつ止めても課金は無い。 */}
-        {!done && !searchSettled && (
+            この候補検索の経路では**お金は動かない**ので、いつ止めても課金は無い。
+            ⚠cancelable=false(有料取得)では出さない(課金中に「課金は発生しません」の
+            嘘が出るため・2026-08-15)。 */}
+        {cancelable && !done && !searchSettled && (
           <button
             type="button"
             onClick={() => void handleCancel()}

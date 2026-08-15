@@ -50,6 +50,14 @@ export interface RegistryFetchRequest {
    * 所有者名・住所等の PII を入れてはならない。
    */
   ref?: string | null;
+  /**
+   * 実況パネルのステップ通知先（任意・2026-08-15）。検索(RegistrySearchRequest.live)と
+   * 同じ contract: label は**固定文言のみ**（所在・地番・資格情報を入れない）、非 throw、
+   * 撮影は本体の await チェーンに乗せない。
+   * ⚠有料取得は**中止を受け付けない**（課金だけ残る状態を作らない既存方針）。route は
+   * begin 直後に cancel 窓を閉じてから渡す＝reporter に isCancelRequested を配線しない。
+   */
+  live?: RegistryLiveReporter;
 }
 
 /**

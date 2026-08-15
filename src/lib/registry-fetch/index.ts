@@ -10,6 +10,7 @@ export type {
   RegistryFetchErrorCode,
   RegistryFetchProvider,
   RegistryCertificateType,
+  RegistryLiveReporter,
 } from "./types";
 export { DEFAULT_CERTIFICATE_TYPE } from "./types";
 export {

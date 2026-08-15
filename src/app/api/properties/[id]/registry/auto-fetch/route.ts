@@ -14,6 +14,14 @@ import {
 } from "@/lib/registry-fetch/auto-fetch";
 import { loadRegistryFetchCredentials } from "@/lib/registry-fetch/config-store";
 import { resolveRegistryCandidate } from "@/lib/registry-fetch/search";
+import {
+  beginLiveView,
+  reportLiveStep,
+  attachLiveShot,
+  completeLiveView,
+  isValidLiveRef,
+  closeLiveViewCancelWindow,
+} from "@/lib/registry-fetch/live-view-store";
 
 // ---------- POST /api/properties/[id]/registry/auto-fetch ----------
 // 謄本自動取得（PR4・mock provider のみ）。本番外部接続・Playwright・課金・env 追加・
@@ -92,29 +100,65 @@ export async function POST(
         confirmed,
         candidateRef,
       });
-      const obtained = await runRegistryAutoFetch(
-        {
-          session: { id: session.id, role: session.role },
-          propertyId: id,
-          confirmed,
-          // 候補の種類で取得キーを分ける。number=従来の番号取得 /
-          // location=段階②(2026-07-31)の有料請求→PDF取得(地番/家屋番号)。
-          ...(candidate.kind === "number"
-            ? { realEstateNumber: candidate.realEstateNumber }
-            : {
-                locationCandidate: {
-                  lotNumber: candidate.lotNumber,
-                  buildingNumber: candidate.buildingNumber,
-                },
-                // 有料の所在取得のときだけ種別を渡す（番号取得は従来どおり無関係）。
-                certificateType,
-              }),
-          // @codex P2: lock する行の指紋が resolve 時と一致する時だけ override を使う。
-          expectedFingerprint: fingerprint,
-        },
-        provider,
-      );
-      return apiResponse(obtained, 200);
+      // 実況パネル(2026-08-15・任意)。検索 route と同じ橋渡しだが、**有料取得は中止を
+      // 受け付けない**(課金だけ残る状態を作らない既存方針)ので、begin 直後に cancel 窓を
+      // 閉じ、reporter にも isCancelRequested を配線しない。液晶に映る「中止」ボタンが
+      // 効かないのに出ている、という食い違いを作らないため。
+      const liveRefRaw = (body as { liveRef?: unknown } | null)?.liveRef;
+      const liveRef =
+        typeof liveRefRaw === "string" && isValidLiveRef(liveRefRaw)
+          ? liveRefRaw
+          : null;
+      if (liveRef) {
+        beginLiveView(session.id, id, liveRef);
+        closeLiveViewCancelWindow(session.id, id, liveRef);
+        reportLiveStep(
+          session.id,
+          id,
+          liveRef,
+          "自動取得を受け付けました(この処理は中止できません)",
+          null,
+        );
+      }
+      const live = liveRef
+        ? {
+            step(label: string): number {
+              return reportLiveStep(session.id, id, liveRef, label, null);
+            },
+            attachShot(seq: number, shot: Uint8Array): void {
+              attachLiveShot(session.id, id, liveRef, seq, shot);
+            },
+          }
+        : undefined;
+      try {
+        const obtained = await runRegistryAutoFetch(
+          {
+            session: { id: session.id, role: session.role },
+            propertyId: id,
+            confirmed,
+            // 候補の種類で取得キーを分ける。number=従来の番号取得 /
+            // location=段階②(2026-07-31)の有料請求→PDF取得(地番/家屋番号)。
+            ...(candidate.kind === "number"
+              ? { realEstateNumber: candidate.realEstateNumber }
+              : {
+                  locationCandidate: {
+                    lotNumber: candidate.lotNumber,
+                    buildingNumber: candidate.buildingNumber,
+                  },
+                  // 有料の所在取得のときだけ種別を渡す（番号取得は従来どおり無関係）。
+                  certificateType,
+                }),
+            // @codex P2: lock する行の指紋が resolve 時と一致する時だけ override を使う。
+            expectedFingerprint: fingerprint,
+            live,
+          },
+          provider,
+        );
+        return apiResponse(obtained, 200);
+      } finally {
+        // 成否によらず「完了」を刻む(パネルは3分間の見返しつきで自動消滅)。
+        if (liveRef) completeLiveView(session.id, id, liveRef);
+      }
     }
 
     const result = await runRegistryAutoFetch(

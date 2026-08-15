@@ -185,6 +185,12 @@ export default function RegistryLocationSearchButton({
     if (!selected) return;
     setState("obtaining");
     setErrorMsg(null);
+    // 実況(2026-08-15)。取得のたびに新しい参照を発行し、検索と同じパネルで
+    // 「いまサイトのどの画面で何をしているか」を追えるようにする。
+    // 前回2回の実課金テストが**手がかり1行だけ**で原因を特定できなかった反省。
+    // ⚠有料取得は中止不可なので、パネルに「中止」は出ない(server が窓を開けない)。
+    const obtainLiveRef = safeRandomId();
+    setLiveRef(obtainLiveRef);
     try {
       // 成功レスポンス本文は参照しない（非 PII だが UI に持ち込まない）。取得結果は onComplete →
       // 物件再取得で既存の権限ガード付きタブに反映する。
@@ -192,6 +198,7 @@ export default function RegistryLocationSearchButton({
         propertyId,
         selected.candidateRef,
         certificateType,
+        obtainLiveRef,
       );
       setState("done");
       onComplete();
@@ -323,6 +330,11 @@ export default function RegistryLocationSearchButton({
       {liveRef &&
         (state === "searching" ||
           state === "results" ||
+          // 有料取得の間と後も残す(2026-08-15)。取得は数十秒〜数分かかるうえ、
+          // 失敗時に「どの画面のどの段で止まったか」を本人が見返せることが
+          // この実況の主目的(実課金テスト2回が手がかり1行で終わった反省)。
+          state === "obtaining" ||
+          state === "done" ||
           // 中止のときも残す (@codex #357 P2)。どこまで進んで止まったかを
           // 本人が確かめられないと「本当に止まったのか」が分からない。
           state === "cancelled" ||
@@ -330,7 +342,11 @@ export default function RegistryLocationSearchButton({
           <RegistryLivePanel
             propertyId={propertyId}
             liveRef={liveRef}
-            searchSettled={state !== "searching"}
+            searchSettled={state !== "searching" && state !== "obtaining"}
+            // ⚠「中止」は無料の検索中だけ。有料取得(obtaining)で出すと、課金中に
+            //   「課金は発生しません」という嘘の説明つきボタンが出る(server は
+            //   受け付けないが表示が矛盾する)。
+            cancelable={state === "searching"}
           />
         )}
 

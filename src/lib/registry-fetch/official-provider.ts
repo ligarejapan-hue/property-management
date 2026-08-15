@@ -100,6 +100,11 @@ export interface RegistryBrowserPage {
      * 中止する(charged への代入と同一同期区間で確認する=競合の隙間なし)。
      */
     chargeState?: { charged: boolean; aborted?: boolean };
+    /**
+     * 実況パネル(2026-08-15)。検索と同じ contract(固定文言のみ・非throw)。
+     * ⚠有料フローは中止を受け付けないので isCancelRequested は配線されない。
+     */
+    live?: RegistryLiveReporter;
   }): Promise<Buffer>;
   /** 検索ヒット後、謄本PDFを取得して Buffer で返す。 */
   downloadRegistryPdf(): Promise<Buffer>;
@@ -214,7 +219,7 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     const location = request.location ?? null;
     const realEstateNumber = request.realEstateNumber?.trim();
     if (!realEstateNumber && location) {
-      return this.fetchByLocation(location);
+      return this.fetchByLocation(location, request.live);
     }
     // PR-2: 不動産番号がある物件に限定。空なら検索キーが無く取得不能（非PII前提を維持）。
     if (!realEstateNumber) {
@@ -306,6 +311,8 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
    */
   private async fetchByLocation(
     location: NonNullable<RegistryFetchRequest["location"]>,
+    // 実況(2026-08-15・任意)。呼び出し元 fetchRegistryPdf から request.live を受け取る。
+    live?: RegistryLiveReporter,
   ): Promise<RegistryFetchResult> {
     // レート制御は番号取得と同じ fetch キー（公式アクセス前に判定）。
     if (
@@ -347,7 +354,13 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
             password: this.password,
             baseUrl: this.baseUrl,
           });
-          return fetchByLocationCandidate.call(page, { ...location, chargeState });
+          // 実況(あれば)を adapter へ渡す(2026-08-15)。login は provider 側なので、
+          // ここまでの進行は route の受付ステップが埋める。
+          return fetchByLocationCandidate.call(page, {
+            ...location,
+            chargeState,
+            live,
+          });
         }, chargeState);
         return {
           pdfBuffer,

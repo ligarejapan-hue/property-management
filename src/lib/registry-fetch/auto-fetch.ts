@@ -55,6 +55,7 @@ import {
   type RegistryFetchProvider,
   type RegistryFetchErrorCode,
   type RegistryCertificateType,
+  type RegistryLiveReporter,
 } from "@/lib/registry-fetch";
 import {
   createOfficialRegistryProvider,
@@ -99,6 +100,11 @@ export interface RunRegistryAutoFetchArgs {
    * ⚠この値は**二重課金の鍵**にも provider への**請求**にも同じものが使われる。
    */
   certificateType?: RegistryCertificateType;
+  /**
+   * 実況パネル(2026-08-15・任意)。route が実行者本人限定のメモリ内ストアへ橋渡しする。
+   * ⚠有料取得は中止を受け付けない=reporter に isCancelRequested は配線されない。
+   */
+  live?: RegistryLiveReporter;
 }
 
 /**
@@ -496,6 +502,11 @@ const REGISTRY_SELECTORS = {
   dialogSearch: "#cbnDlgChibanSearch", // [確定] ダイアログ内検索(結果は非同期ロード)
   dialogResultTable: "#cbnDlgChibanCheckTbl", // [確定] 候補テーブル(非同期ロード)
   dialogResultCheckbox: "#cbnDlgChibanCheckTbl input[type=checkbox]", // [確定] 候補行チェックボックス
+  // 選択の簿記(2026-07-17 probe 確定)。チェックが**サイト側に登録された**証拠は
+  // checkbox.checked ではなくこの欄(選択済みの地番・家屋番号)が埋まること。
+  dialogSelectedString: "#cbnDlgCheckedChibanString", // [確定] 選択済み地番(値)
+  dialogSelectedDisplay: "#cbnDlgCheckedChibanDsp", // [確定] 選択済み地番(表示)
+  dialogRoot: "#cbnDlgChibanDialog", // [確定] ダイアログ本体(閉じ確認に使う)
   dialogPageNext: "#cbnDlgBtnPageNext", // [確定] 候補一覧の次ページ(複数ページ時)
   dialogCancel: "#cbnDlgBtnCancel", // [確定] ダイアログ取消(課金しない閉じ方)
   dialogOk: "#cbnDlgBtnOk", // [確定] ダイアログ確定(選んだ地番を親フォームへ反映・無料)
@@ -1760,11 +1771,54 @@ function createPlaywrightRegistryPage(
           .waitForFunction(() => false, undefined, { timeout: ms })
           .catch(() => {});
 
+      // 実況(2026-08-15)。検索側 reportLive と同じ contract だが、**中止は見ない**
+      // (有料取得は中止を受け付けない既存方針=課金だけ残る状態を作らない)。
+      // 撮影は本体の await チェーンに乗せない・累計予算制も検索側と同じ。
+      // ⚠label は固定文言のみ。所在・地番・資格情報を**絶対に**埋め込まない
+      // (スクショには写るが、閲覧はストア側で実行者本人に限定される)。
+      let liveShotBudgetMs = LIVE_SCREENSHOT_TOTAL_BUDGET_MS;
+      let liveShotInFlight = false;
+      const reportLive = (label: string): void => {
+        const live = input.live;
+        if (!live) return;
+        let seq = -1;
+        try {
+          seq = live.step(label);
+        } catch {
+          return; // 実況の失敗で取得本体を壊さない(非throw契約の二重防御)
+        }
+        if (seq < 0) return;
+        if (liveShotBudgetMs <= 0 || liveShotInFlight) return;
+        liveShotInFlight = true;
+        const startedAt = Date.now();
+        void (async () => {
+          try {
+            const raw = await page.screenshot?.({
+              type: "jpeg",
+              quality: 55,
+              timeout: Math.min(LIVE_SCREENSHOT_TIMEOUT_MS, liveShotBudgetMs),
+            });
+            if (raw) {
+              live.attachShot(
+                seq,
+                raw instanceof Uint8Array ? raw : new Uint8Array(raw),
+              );
+            }
+          } catch {
+            // 撮影失敗は文字進行のみで続行。
+          } finally {
+            liveShotBudgetMs -= Date.now() - startedAt;
+            liveShotInFlight = false;
+          }
+        })();
+      };
+
       // ---- 課金前ゾーン(①〜③: ナビゲーション+条件入力+ダイアログ検索) ----
       try {
         await page.waitForSelector(REGISTRY_SELECTORS.fudosanRequestLink, {
           state: "attached",
         });
+        reportLive("ログインしました。不動産請求メニューへ移動します(まだ課金されていません)");
         await domClick(REGISTRY_SELECTORS.fudosanRequestLink);
         await page.waitForSelector(REGISTRY_SELECTORS.searchMethodLocationRadio);
         await page.click(REGISTRY_SELECTORS.searchMethodLocationRadio);
@@ -1802,6 +1856,7 @@ function createPlaywrightRegistryPage(
         //   無料検索と有料取得で結果集合がずれる([同種の穴は全箇所を洗ってから直す])。
         await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, targetKey);
         await page.fill(REGISTRY_SELECTORS.dialogChibanRangeEnd, targetKey);
+        reportLive("所在と地番を入力し、地番検索を実行しています(まだ課金されていません)");
         await page.click(REGISTRY_SELECTORS.dialogSearch);
       } catch (err) {
         // ⚠**分類済みの失敗はそのまま通す**(@codex #358 P2)。ここで一律に
@@ -2033,9 +2088,82 @@ function createPlaywrightRegistryPage(
           await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
           throw new RegistryFetchError("not_found");
         }
+        // ⚠**チェックが効いたかを実測してから確定を押す**(発注者指示 2026-08-15:
+        //   「検索結果の地番が物件と同一ならチェックボックスにチェックを入れて確定
+        //   ボタンを押すようにしてください」)。従来は cb.click() を発行するだけで、
+        //   サイト側の選択簿記(選択済み欄)に載ったかを**見ずに**確定へ進んでいた。
+        //   登録されていなければ確定はグレーの no-op → 後段のマイページ待ちで
+        //   timeout(実課金テスト 2026-08-15 の2回連続失敗と同じ形)。
+        //   判定はサイト自身の簿記(#cbnDlgCheckedChibanString / ...Dsp が非空)で行う。
+        //   checkbox.checked は cb.click() 自体が立ててしまうので証拠にならない。
+        const selVerifyJson = (await page.evaluate((json) => {
+          const { stringSel, dspSel, okSel } = JSON.parse(json) as {
+            stringSel: string;
+            dspSel: string;
+            okSel: string;
+          };
+          const readVal = (sel: string): string => {
+            const el = document.querySelector(sel);
+            if (!el) return "";
+            const v = (el as { value?: unknown }).value;
+            const s = typeof v === "string" && v.length > 0 ? v : (el.textContent ?? "");
+            return s.trim();
+          };
+          const ok = document.querySelector(okSel) as { disabled?: boolean } | null;
+          return JSON.stringify({
+            registered:
+              readVal(stringSel).length > 0 || readVal(dspSel).length > 0,
+            // disabled 属性が無い作り(class で灰色化)なら false のまま=閉じ確認が拾う。
+            okDisabled: !ok || ok.disabled === true,
+          });
+        }, JSON.stringify({
+          probe: "verify-chiban-selection",
+          stringSel: REGISTRY_SELECTORS.dialogSelectedString,
+          dspSel: REGISTRY_SELECTORS.dialogSelectedDisplay,
+          okSel: REGISTRY_SELECTORS.dialogOk,
+        }))) as string;
+        const selVerify = JSON.parse(selVerifyJson) as {
+          registered: boolean;
+          okDisabled: boolean;
+        };
+        if (!selVerify.registered || selVerify.okDisabled) {
+          console.warn(
+            "[registry-fetch] candidate selection did not register on site; refusing before confirm (not charged)",
+          );
+          reportLive("⚠選択がサイト側に反映されませんでした。課金せず中止します");
+          await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
+          throw new RegistryFetchError("provider_error");
+        }
+        reportLive("対象の地番を選択しました。確定します(まだ課金されていません)");
         await domClick(REGISTRY_SELECTORS.dialogOk);
-        await sleep(1500); // 確定値のフォーム反映を待つ(ダイアログは閉じる)
+        // ⚠**閉じたことを実測する**。従来の sleep だけだと、確定が効いていなくても
+        //   素通りして後段で分かりにくく死ぬ。⚠ダイアログは「隠すだけ」の閉じ方にも
+        //   備える(#368 の教訓)＝getClientRects()===0(祖先の display:none を含めて
+        //   不可視)か visibility:hidden を「閉じた」とみなす。
+        try {
+          await page.waitForFunction(
+            (arg) => {
+              const { sel } = arg as { probe: string; sel: string };
+              const d = document.querySelector(sel);
+              if (!d) return true;
+              if (d.getClientRects().length === 0) return true;
+              return getComputedStyle(d).visibility === "hidden";
+            },
+            { probe: "chiban-dialog-closed", sel: REGISTRY_SELECTORS.dialogRoot },
+            { timeout: DIALOG_RESULT_TIMEOUT_MS },
+          );
+        } catch (closeErr) {
+          if (!isTimeoutError(closeErr)) throw closeErr;
+          console.warn(
+            "[registry-fetch] chiban dialog did not close after OK; refusing before confirm (not charged)",
+          );
+          reportLive("⚠確定を押しましたがダイアログが閉じません。課金せず中止します");
+          throw new RegistryFetchError("provider_error");
+        }
+        reportLive("地番を確定しました(まだ課金されていません)");
+        await sleep(1000); // 確定値のフォーム反映を待つ
 
+        reportLive("請求する書類の種類を選択しています(まだ課金されていません)");
         // ---- ⑤ 請求事項=**選んだ種別のみ**(検証つき・課金前) ----
         // 所有者事項(既定)/全部事項 のどちらか一方だけをONにし、残りは全部OFF。
         // 外し漏れ=追加課金なので、操作後に checked を読み戻して検証する。
@@ -2151,12 +2279,14 @@ function createPlaywrightRegistryPage(
           throw new RegistryFetchError("provider_error");
         }
 
+        reportLive("請求条件を確定しています(まだ課金されていません)");
         await domClick(REGISTRY_SELECTORS.requestConfirmButton);
         // 遷移先は請求リスト(#fudosanIchiranTbl)またはマイページ(#myPageTable) [要live]。
         await page.waitForSelector(
           `${REGISTRY_SELECTORS.searchResult}, ${REGISTRY_SELECTORS.myPageTable}`,
           { state: "attached", timeout: DIALOG_RESULT_TIMEOUT_MS },
         );
+        reportLive("マイページの請求一覧へ移動しています(まだ課金されていません)");
         await domClick(REGISTRY_SELECTORS.myPageTab);
         await page.waitForSelector(REGISTRY_SELECTORS.myPageTable, {
           state: "attached",
@@ -2307,6 +2437,9 @@ function createPlaywrightRegistryPage(
         throw new RegistryFetchError("provider_error");
       }
 
+      // ⚠実況はこの位置(=aborted確認より前)で刻む。下の確認〜charged代入の
+      // 「同一同期区間」に await を挟まないため(reportLive は同期・撮影は void)。
+      reportLive("⚠ここから請求(課金)を実行します");
       // ⚠中止の印を**請求ボタンの直前**で確認(@codex R10 P1)。provider が課金前
       // タイムアウトで reject した後も、この関数は裏で走り続けている可能性がある。
       // ここで確認せず押すと、呼び出し側は timeout(=台帳なし・ロック解除済み)として
@@ -2324,6 +2457,7 @@ function createPlaywrightRegistryPage(
         // ここ以降で発火しても provider が charged_but_failed に分類できる。
         if (input.chargeState) input.chargeState.charged = true;
         await domClick(REGISTRY_SELECTORS.myPageSeikyuButton);
+        reportLive("請求しました(課金済み)。書類の準備を待っています");
         // ⑨⑩ 課金した行が「請求済+PDF準備完了」になるのを待ち、**見つけたその場で**
         // 選択して DL へ進む(探索と選択を分けるとページ跨ぎで取り違え得る)。
         // 課金後はフィルタを「請求済」へ(課金した行が状態遷移後も見えるように)。
@@ -2334,6 +2468,14 @@ function createPlaywrightRegistryPage(
         let ready = false;
         for (let attempt = 0; attempt < 20 && !ready; attempt++) {
           await sleep(3000);
+          // ⚠実況の心拍(2026-08-15)。このループは最悪 20周×(3秒+最大10ページ走査)で
+          //   3分を超えるが、実況ストアの保管期限(LIVE_VIEW_TTL_MS=3分)は**最終書き込み**
+          //   から数える。無言のまま超えると、課金済みで一番不安な待ちの最中に
+          //   パネルごと消える(steps/shots も削除=見返し不能)。5周ごとに固定文言を
+          //   刻んで期限を更新する(最大3行の増加・非PII)。
+          if (attempt > 0 && attempt % 5 === 0) {
+            reportLive("書類の準備を待っています(課金済み)");
+          }
           // ⚠各走査は**先頭ページから**(@codex R6 P1)。前回の走査で末尾ページに
           // 居座ったままだと、リロード後に先頭側へ入った行を以降ずっと見逃す。
           await resetMyPageToFirst();
@@ -2426,6 +2568,7 @@ function createPlaywrightRegistryPage(
         if (!ready) {
           throw new RegistryFetchError("charged_but_failed");
         }
+        reportLive("書類(PDF)を保存しています(課金済み)");
         // ⚠課金後の待ちには明示予算を渡す(@codex R9 P1)。渡さないと page の既定
         // timeout(通常予算=例30秒)が provider の延長予算(10分)より先に打ち切る。
         const [download] = await Promise.all([
@@ -2979,6 +3122,8 @@ export async function runRegistryAutoFetch(
             }
           : null,
       ref: property.id,
+      // 実況(あれば)。文字は固定文言のみ・撮影はストア側で本人限定(検索と同じ)。
+      live: args.live,
     });
 
     // processRegistryPdf の結果は inner try の外(成功ログ/返却)でも使うため先に宣言する。

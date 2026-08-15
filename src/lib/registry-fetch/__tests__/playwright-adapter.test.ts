@@ -1036,9 +1036,10 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     const f = makeFakeChromium();
     const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
     const page = await factory!();
-    // ⚠この経路は擬似ページでは最後(マイページ以降=実サイト依存)まで通らない。
-    //   ここで固定したいのは**ダイアログに何を入れるか**だけなので失敗は無視する。
-    //   ⚠2026-08-15 時点でこの関数を叩くテストは**1本も無かった**(初の振る舞いテスト)。
+    // ⚠この経路は素の fake では最後(マイページ以降)まで通らない。ここで固定したいのは
+    //   **ダイアログに何を入れるか**だけなので失敗は無視する(全経路の振る舞いは下の
+    //   「段階②」describe の S 系が wireStage2 で通している。⚠#379 で「この関数を叩く
+    //   テストは1本も無かった」と書いたのは**誤り**=S系が既にあった)。
     await page
       .fetchByLocationCandidate!({
         address: "東京都千代田区丸の内一丁目",
@@ -1064,6 +1065,124 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
       src.match(/fill\(\s*REGISTRY_SELECTORS\.dialogChibanRangeEnd/g) ?? [];
     expect(starts.length).toBeGreaterThan(0);
     expect(ends.length).toBe(starts.length);
+  });
+
+  // ⚠2026-08-15 実課金テストが2回連続で同じ形(課金ゼロ・#myPageTable 待ちの timeout)で
+  //   失敗したのを受けた発注者の指示:「検索結果の地番が物件と同一ならチェックボックスに
+  //   チェックを入れて確定ボタンを押すようにしてください」。
+  //   既存実装は cb.click() を**発行するだけで効いたかを確認せず**、確定(OK)の後も
+  //   **ダイアログが閉じたかを確認せず** sleep で素通りしていた。選択が登録されない→
+  //   確定はグレーのまま no-op→後段のマイページ待ちで死ぬ、という連鎖が観測と一致する。
+  //   ここでは「登録の実測 → 確定 → 閉じたことの実測」を固定する。
+  const paidDialogEvaluate =
+    (scenario: { registered: boolean; okDisabled: boolean }) =>
+    async (_fn: unknown, arg: unknown): Promise<unknown> => {
+      if (typeof arg === "string" && arg.startsWith("{")) {
+        const p = JSON.parse(arg) as { target?: string; probe?: string };
+        if (p.probe === "verify-chiban-selection")
+          return JSON.stringify(scenario);
+        if (p.target) return "checked";
+      }
+      return shozaiDialogDefault(arg as string);
+    };
+
+  it("C9v: 選択がサイト側に登録されなければ、確定を押さずに課金前に中止する", async () => {
+    const f = makeFakeChromium();
+    f.page.evaluate.mockImplementation(
+      paidDialogEvaluate({ registered: false, okDisabled: true }) as never,
+    );
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    await expect(
+      page.fetchByLocationCandidate!({
+        address: "東京都千代田区丸の内一丁目",
+        lotNumber: "1番1",
+        buildingNumber: null,
+        certificateType: "owner",
+      }),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    // 確定(#cbnDlgBtnOk)には一度も触れていない(domClick は evaluate にセレクタを渡す)。
+    const evalArgs = f.page.evaluate.mock.calls.map((c) => c[1]);
+    expect(evalArgs).not.toContain("#cbnDlgBtnOk");
+  });
+
+  it("C9w: 確定後にダイアログが閉じなければ、請求へ進まず課金前に中止する", async () => {
+    const f = makeFakeChromium();
+    f.page.evaluate.mockImplementation(
+      paidDialogEvaluate({ registered: true, okDisabled: false }) as never,
+    );
+    f.page.waitForFunction.mockImplementation(async (_fn?: unknown, arg?: unknown) => {
+      if (
+        arg &&
+        typeof arg === "object" &&
+        (arg as { probe?: string }).probe === "chiban-dialog-closed"
+      ) {
+        throw makeTimeoutError();
+      }
+      return {};
+    });
+    const chargeState = { charged: false, aborted: false };
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    await expect(
+      page.fetchByLocationCandidate!({
+        address: "東京都千代田区丸の内一丁目",
+        lotNumber: "1番1",
+        buildingNumber: null,
+        certificateType: "owner",
+        chargeState,
+      }),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    const evalArgs = f.page.evaluate.mock.calls.map((c) => c[1]);
+    expect(evalArgs).toContain("#cbnDlgBtnOk"); // 確定は押した
+    // ⚠「閉じたかの確認」を**実際に呼んだ**こと(これが無いと、確定後に別の理由で
+    //   落ちただけでもこのテストが通ってしまう=空振り)。
+    expect(f.page.waitForFunction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ probe: "chiban-dialog-closed" }),
+      expect.anything(),
+    );
+    // 請求条件の確定(課金へ向かう最初のボタン)には触れていない。
+    expect(evalArgs).not.toContain('button[onclick*="fuBtnForward"]');
+    // 課金境界フラグも立っていない。
+    expect(chargeState.charged).toBe(false);
+  });
+
+  it("C9x: 有料取得も実況へ段を刻む。文言に住所・地番(秘匿情報)を入れない", async () => {
+    const f = makeFakeChromium();
+    f.page.evaluate.mockImplementation(
+      paidDialogEvaluate({ registered: true, okDisabled: false }) as never,
+    );
+    f.page.waitForFunction.mockImplementation(async (_fn?: unknown, arg?: unknown) => {
+      if (
+        arg &&
+        typeof arg === "object" &&
+        (arg as { probe?: string }).probe === "chiban-dialog-closed"
+      ) {
+        throw makeTimeoutError();
+      }
+      return {};
+    });
+    const step = vi.fn((_label: string) => 1);
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    await page
+      .fetchByLocationCandidate!({
+        address: "東京都千代田区丸の内一丁目",
+        lotNumber: "1番1",
+        buildingNumber: null,
+        certificateType: "owner",
+        live: { step, attachShot: vi.fn() },
+      })
+      .catch(() => undefined);
+    const labels = step.mock.calls.map((c) => String(c[0]));
+    expect(labels.length).toBeGreaterThanOrEqual(3);
+    // 「課金していない」ことが段の文言で分かる(お金の不安を実況で解消する)。
+    expect(labels.some((l) => l.includes("課金"))).toBe(true);
+    for (const l of labels) {
+      expect(l).not.toContain("丸の内"); // 所在(秘匿情報)を実況の文字に載せない
+      expect(l).not.toMatch(/1-1|1番1/); // 地番も同様(スクショには写るが文字は固定文言のみ)
+    }
   });
 
   it("C9p: 複数ページの候補を次ページボタンで全て集める(@codex P1)", async () => {
@@ -1718,6 +1837,8 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       baselineUnreadable?: boolean;
       /** 絞り込みが確認できない状態を模す(@codex R6 P1: 未検証の絞り込みで課金しない)。 */
       filterUnverified?: boolean;
+      /** 選択の登録確認の応答(発注者指示 2026-08-15)。既定=登録済み。 */
+      selectionVerify?: { registered: boolean; okDisabled: boolean };
     } = {},
   ) {
     const clicked: string[] = [];
@@ -1749,6 +1870,12 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       }
       if (parsed.tableSel === "#cbnDlgChibanCheckTbl") {
         return opts.dialogFind ?? "checked";
+      }
+      // 選択の登録確認(発注者指示 2026-08-15)。既定=登録済み・確定は押せる。
+      if (parsed.probe === "verify-chiban-selection") {
+        return JSON.stringify(
+          opts.selectionVerify ?? { registered: true, okDisabled: false },
+        );
       }
       // 絞り込みの検証(@codex R6 P1)。既定は「効いている」。myPageSeq は消費しない。
       if (
