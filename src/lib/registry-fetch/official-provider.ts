@@ -167,12 +167,13 @@ export const PAID_FLOW_EXTRA_TIMEOUT_MS = 10 * 60 * 1000;
 const QUEUE_CANCEL_POLL_MS = 250;
 
 /**
- * 順番待ちの実況心拍(60秒毎)の回数上限(@codex #380 R4 P2)。
- * 先客が永久に解放しない故障では .finally が走らず interval が漏れるため、
- * 自走で止まる上限を持つ。30回=30分は正常系では届かない
- * (クライアントのHTTP待ちがずっと手前で切れる)。届いたら故障=実況より復旧が先。
+ * 有料取得が購入ミューテックスの順番待ちに費やせる上限(@codex #380 R4/R6 P2)。
+ * ⚠心拍だけを止める(R4の初版)と、上限後も待ち続ける取得の実況が期限切れで消え、
+ * 開始後の全 step が no-op になる(R6)。**待ちそのものに同じ寿命を与え**、超えたら
+ * 「外部に一切触れる前に」rate_limited で失敗させる(=課金ゼロ・実況も正直)。
+ * 30分は対話操作の待ちとしては十分すぎる上限(正常系では届かない)。
  */
-const MAX_QUEUE_HEARTBEATS = 30;
+const QUEUE_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 
 function classifyRegistryFetchError(err: unknown): RegistryFetchError {
   if (err instanceof RegistryFetchError) return err;
@@ -339,18 +340,8 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     //   保管期限(LIVE_VIEW_TTL_MS=3分)で**消え**、以降の step は -1 の no-op になる
     //   (=一番の目的だった診断が丸ごと失われる)。取得開始まで60秒ごとに固定文言を
     //   刻んで期限を更新する。step は同期・非throw契約なので interval から安全に呼べる。
-    // ⚠**回数の上限つき**(@codex #380 R4 P2)。先客が永久に解放しない故障だと
-    //   .finally も走らず interval が生き続け、詰まった行列の後続の数だけタイマーと
-    //   closure が漏れ、実況エントリの期限も無限に更新される。上限で自走停止する
-    //   (正常系はクライアントのHTTP待ちがずっと手前で切れる=上限に届くのは故障だけ)。
-    let queueBeats = 0;
     const queueHeartbeat = live
       ? setInterval(() => {
-          queueBeats += 1;
-          if (queueBeats > MAX_QUEUE_HEARTBEATS) {
-            clearInterval(queueHeartbeat!);
-            return;
-          }
           try {
             live.step("他の取得の完了を待っています(まだ課金されていません)");
           } catch {
@@ -358,8 +349,20 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
           }
         }, 60_000)
       : null;
+    // ⚠待ちそのものに寿命を与える(@codex #380 R4/R6 P2)。上限を超えたら
+    //   gaveUp を立てて rate_limited で即座に失敗し、**あとから順番が回ってきた
+    //   コールバックは冒頭で何もせず抜ける**(page 生成もログインもしない=外部無接触・
+    //   課金ゼロ)。gaveUp の判定と acquired の代入はどちらも同期区間なので競合しない。
+    let acquired = false;
+    let gaveUp = false;
 
-    return runExclusivePurchase(async () => {
+    const run = runExclusivePurchase(async () => {
+      if (gaveUp) {
+        // 呼び出し元はすでに rate_limited で決着済み。ここで外部に触れると
+        // 「記録なき課金」への入口になるため、何もせずに終わる。
+        throw new RegistryFetchError("rate_limited");
+      }
+      acquired = true;
       if (queueHeartbeat) clearInterval(queueHeartbeat);
       let page: RegistryBrowserPage;
       try {
@@ -423,9 +426,39 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
           // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
         }
       }
-    }).finally(() => {
-      // ⚠取得開始時にも clear しているが、**待ちのまま不成立で終わる経路**
-      // (呼び出し側の中断等)ではコールバックが走らない。二重 clear は無害。
+    });
+
+    // 待ちの寿命。acquired 前に満了したら gaveUp を立てて即座に失敗させる。
+    // run 側の遅延 throw(rate_limited) は既に決着済みの guarded に届かないため
+    // catch で握る(未処理拒否の警告を出さない)。
+    const guarded = new Promise<RegistryFetchResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (!acquired) {
+          gaveUp = true;
+          try {
+            live?.step(
+              "⚠混み合っているため取得を開始できませんでした(課金されていません)。時間をおいて再実行してください",
+            );
+          } catch {
+            /* 実況は best-effort */
+          }
+          reject(new RegistryFetchError("rate_limited"));
+        }
+      }, QUEUE_WAIT_TIMEOUT_MS);
+      run.then(
+        (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      );
+    });
+    return guarded.finally(() => {
+      // ⚠取得開始時にも clear しているが、**待ちのまま満了した経路**では
+      // コールバックが走らない。二重 clear は無害。
       if (queueHeartbeat) clearInterval(queueHeartbeat);
     });
   }

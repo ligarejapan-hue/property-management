@@ -2094,14 +2094,30 @@ function createPlaywrightRegistryPage(
         //   サイト側の選択簿記(選択済み欄)に載ったかを**見ずに**確定へ進んでいた。
         //   登録されていなければ確定はグレーの no-op → 後段のマイページ待ちで
         //   timeout(実課金テスト 2026-08-15 の2回連続失敗と同じ形)。
-        //   判定はサイト自身の簿記(#cbnDlgCheckedChibanString / ...Dsp が非空)で行う。
+        //   判定はサイト自身の簿記(#cbnDlgCheckedChibanString / ...Dsp)で行う。
         //   checkbox.checked は cb.click() 自体が立ててしまうので証拠にならない。
+        //   ⚠**非空では足りない**(@codex #380 R6 P2): 古い選択が簿記に残っていると
+        //   非空判定は素通りし、**意図しない筆**を確定→請求してしまう。簿記の中身を
+        //   同じ正規化(check ループと同一の norm)で **targetKey と厳密一致**させる。
+        //   複数選択が載っている場合も結合文字列は一致しない=中止(複数課金の防止)。
         const selVerifyJson = (await page.evaluate((json) => {
-          const { stringSel, dspSel, okSel } = JSON.parse(json) as {
+          const { stringSel, dspSel, okSel, target } = JSON.parse(json) as {
             stringSel: string;
             dspSel: string;
             okSel: string;
+            target: string;
           };
+          // normalizeChibanForDialog と同じ規則(browser 内で自己完結させるため複製)。
+          const norm = (s: string) =>
+            s
+              .normalize("NFKC")
+              .replace(/[‐‑‒–—―ー−]/g, "-")
+              .replace(/番地/g, "-")
+              .replace(/[番号の]/g, "-")
+              .replace(/\s+/g, "")
+              .replace(/-+/g, "-")
+              .replace(/^-+|-+$/g, "")
+              .toLowerCase();
           const readVal = (sel: string): string => {
             const el = document.querySelector(sel);
             if (!el) return "";
@@ -2112,7 +2128,8 @@ function createPlaywrightRegistryPage(
           const ok = document.querySelector(okSel) as { disabled?: boolean } | null;
           return JSON.stringify({
             registered:
-              readVal(stringSel).length > 0 || readVal(dspSel).length > 0,
+              norm(readVal(stringSel)) === target ||
+              norm(readVal(dspSel)) === target,
             // disabled 属性が無い作り(class で灰色化)なら false のまま=閉じ確認が拾う。
             okDisabled: !ok || ok.disabled === true,
           });
@@ -2121,6 +2138,7 @@ function createPlaywrightRegistryPage(
           stringSel: REGISTRY_SELECTORS.dialogSelectedString,
           dspSel: REGISTRY_SELECTORS.dialogSelectedDisplay,
           okSel: REGISTRY_SELECTORS.dialogOk,
+          target: targetKey,
         }))) as string;
         const selVerify = JSON.parse(selVerifyJson) as {
           registered: boolean;
@@ -2128,9 +2146,9 @@ function createPlaywrightRegistryPage(
         };
         if (!selVerify.registered || selVerify.okDisabled) {
           console.warn(
-            "[registry-fetch] candidate selection did not register on site; refusing before confirm (not charged)",
+            "[registry-fetch] candidate selection did not register as the requested parcel; refusing before confirm (not charged)",
           );
-          reportLive("⚠選択がサイト側に反映されませんでした。課金せず中止します");
+          reportLive("⚠選択が対象の地番として反映されませんでした。課金せず中止します");
           await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
           throw new RegistryFetchError("provider_error");
         }

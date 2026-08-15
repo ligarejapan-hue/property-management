@@ -81,16 +81,22 @@ describe("orchestration→provider→adapter の受け渡し", () => {
       /queueHeartbeat = live[\s\S]{0,400}?他の取得の完了を待っています\(まだ課金されていません\)/,
     );
     const clears =
-      PROVIDER.match(/clearInterval\(queueHeartbeat\!?\)/g) ?? [];
-    // 自走停止(上限) + 取得開始時 + finally(不成立経路の漏れ防止) の3箇所。
-    expect(clears.length).toBe(3);
+      PROVIDER.match(/clearInterval\(queueHeartbeat\)/g) ?? [];
+    // 取得開始時 + finally(待ちのまま満了した経路の漏れ防止) の2箇所。
+    expect(clears.length).toBe(2);
   });
 
-  it("⚠心拍には回数上限がある(@codex #380 R4 P2: 行列が永久に詰まる故障でタイマーを漏らさない)", () => {
-    expect(PROVIDER).toMatch(/const MAX_QUEUE_HEARTBEATS = 30;/);
+  it("⚠順番待ちそのものに寿命がある(@codex #380 R4/R6 P2)", () => {
+    // 心拍だけ止めると(R4初版)、上限後も待つ取得の実況が期限切れで消え、開始後の
+    // 全 step が no-op になる(R6)。待ちに寿命を与え、満了は rate_limited で即失敗。
+    expect(PROVIDER).toMatch(/const QUEUE_WAIT_TIMEOUT_MS = 30 \* 60 \* 1000;/);
+    // ⚠満了後に順番が回ってきたコールバックは、**page 生成もログインもする前に**
+    //   何もせず抜ける(外部無接触=記録なき課金の入口を作らない)。
     expect(PROVIDER).toMatch(
-      /queueBeats > MAX_QUEUE_HEARTBEATS[\s\S]{0,80}?clearInterval\(queueHeartbeat!\)/,
+      /runExclusivePurchase\(async \(\) => \{\s*\n\s*if \(gaveUp\) \{[\s\S]{0,300}?rate_limited/,
     );
+    // gaveUp を立てるのは acquired が偽のときだけ(開始済みの取得を止めない)。
+    expect(PROVIDER).toMatch(/if \(!acquired\) \{\s*\n\s*gaveUp = true;/);
   });
 
   it("⚠課金後の待ちループに心拍を刻む(実況の保管期限3分を無言で超えない)", () => {
