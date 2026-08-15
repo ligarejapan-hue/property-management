@@ -254,4 +254,20 @@ describe("publicRegistryLoginUrl — 画面のログインリンク(A案・@code
       expect(publicRegistryLoginUrl()).toBe(OFFICIAL);
     });
   });
+
+  it("⚠userinfo 入りURLは既定値へ(埋め込み資格情報を全クライアントへ配らない・R3)", () => {
+    withEnv(
+      { REGISTRY_FETCH_PUBLIC_LOGIN_URL: "https://user:secret@example.invalid/Login/" },
+      () => {
+        expect(publicRegistryLoginUrl()).toBe(OFFICIAL);
+        expect(publicRegistryLoginUrl()).not.toContain("secret");
+      },
+    );
+    withEnv(
+      { REGISTRY_FETCH_PUBLIC_LOGIN_URL: "https://user@example.invalid/Login/" },
+      () => {
+        expect(publicRegistryLoginUrl()).toBe(OFFICIAL);
+      },
+    );
+  });
 });

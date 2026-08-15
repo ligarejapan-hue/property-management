@@ -290,7 +290,12 @@ export function publicRegistryLoginUrl(): string {
     try {
       const u = new URL(raw);
       // http は不可(資格情報を打つ画面へ平文で誘導しない)。読めない値も既定へ。
-      if (u.protocol === "https:") return u.toString();
+      // ⚠userinfo(https://user:pass@host/)も不可(@codex #381 R3 P2)。toString() は
+      //   埋め込み資格情報を保持するため、通すと preflight 応答で全認可クライアントへ
+      //   その資格情報を配ってしまう。
+      if (u.protocol === "https:" && u.username === "" && u.password === "") {
+        return u.toString();
+      }
     } catch {
       /* 既定値へ */
     }
