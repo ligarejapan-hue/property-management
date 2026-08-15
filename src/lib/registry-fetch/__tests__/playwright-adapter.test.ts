@@ -1014,6 +1014,58 @@ describe("resolveDefaultRegistryBrowserFactory（PR-2 adapter・fake chromium）
     expect(f.page.fill).not.toHaveBeenCalledWith("#cbnDlgSearchChibanStart", "1番1");
   });
 
+  // ⚠2026-08-15 発注者の指摘で判明した実害: 地番範囲は**開始と終わりの2欄**があり
+  //   (設計 2026-07-17 probe: `#cbnDlgSearchChibanStart` 〜 `#cbnDlgSearchChibanEnd`)、
+  //   実装は**開始しか埋めていなかった**。開始だけだと「そこから先が全部」返る
+  //   (同 probe: 丸の内一丁目・範囲1 → 59件)。**発注者は手作業では両端に同じ地番を
+  //   入れている**と確認済み＝1筆に絞るのが正しい使い方。
+  it("C9s: 地番範囲は開始と終わりの**両方**へ同じ値を入れる(所在検索)", async () => {
+    const f = makeFakeChromium();
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    await page.searchByLocation!({
+      address: "東京都千代田区丸の内一丁目",
+      lotNumber: "1番1",
+      buildingNumber: null,
+    });
+    expect(f.page.fill).toHaveBeenCalledWith("#cbnDlgSearchChibanStart", "1-1");
+    expect(f.page.fill).toHaveBeenCalledWith("#cbnDlgSearchChibanEnd", "1-1");
+  });
+
+  it("C9t: 有料取得(候補から取得)でも範囲の両端を入れる([同種の穴は全箇所])", async () => {
+    const f = makeFakeChromium();
+    const factory = resolveDefaultRegistryBrowserFactory({ chromiumLoader: f.loader });
+    const page = await factory!();
+    // ⚠この経路は擬似ページでは最後(マイページ以降=実サイト依存)まで通らない。
+    //   ここで固定したいのは**ダイアログに何を入れるか**だけなので失敗は無視する。
+    //   ⚠2026-08-15 時点でこの関数を叩くテストは**1本も無かった**(初の振る舞いテスト)。
+    await page
+      .fetchByLocationCandidate!({
+        address: "東京都千代田区丸の内一丁目",
+        lotNumber: "1番1",
+        buildingNumber: null,
+        certificateType: "owner",
+      })
+      .catch(() => undefined);
+    expect(f.page.fill).toHaveBeenCalledWith("#cbnDlgSearchChibanStart", "1-1");
+    expect(f.page.fill).toHaveBeenCalledWith("#cbnDlgSearchChibanEnd", "1-1");
+  });
+
+  it("C9u: 範囲(開始)を埋める箇所には必ず範囲(終わり)も埋める(将来の3箇所目を自動検出)", () => {
+    // ⚠上の2本は「いまある2経路」を押さえるだけ。3箇所目が足されたとき、
+    //   片側だけ埋める実装が黙って通らないよう**回数で**縛る。
+    const src = readFileSync(
+      joinPath(process.cwd(), "src/lib/registry-fetch/auto-fetch.ts"),
+      "utf8",
+    );
+    const starts =
+      src.match(/fill\(\s*REGISTRY_SELECTORS\.dialogChibanRangeStart/g) ?? [];
+    const ends =
+      src.match(/fill\(\s*REGISTRY_SELECTORS\.dialogChibanRangeEnd/g) ?? [];
+    expect(starts.length).toBeGreaterThan(0);
+    expect(ends.length).toBe(starts.length);
+  });
+
   it("C9p: 複数ページの候補を次ページボタンで全て集める(@codex P1)", async () => {
     const f = makeFakeChromium();
     // $$eval: 1回目=1ページ目、2回目=2ページ目。

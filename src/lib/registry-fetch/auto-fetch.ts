@@ -487,6 +487,12 @@ const REGISTRY_SELECTORS = {
   dialogChibanKaokuListButton: "#fuChibanKaokuIchiran", // [確定] 地番・家屋番号一覧(ダイアログを開く)
   dialogChibanTypeNumeric: "#cbnDlgChibanType0", // [確定] 地番種別=数字/ハイフンのみ
   dialogChibanRangeStart: "#cbnDlgSearchChibanStart", // [確定] 地番範囲(開始)
+  // [確定] 地番範囲(終わり)。設計 2026-07-17 probe に
+  //   「地番範囲: #cbnDlgSearchChibanStart（〜#cbnDlgSearchChibanEnd）」と記録がありながら、
+  //   **実装は開始しか埋めていなかった**(2026-08-15 発注者の指摘で判明)。
+  // ⚠開始だけだと「そこから先が全部」返る(同 probe: 丸の内一丁目・範囲1 → 59件)。
+  //   **両端に同じ地番を入れて1筆に絞る**のが正しい使い方(発注者の手作業と同じ)。
+  dialogChibanRangeEnd: "#cbnDlgSearchChibanEnd",
   dialogSearch: "#cbnDlgChibanSearch", // [確定] ダイアログ内検索(結果は非同期ロード)
   dialogResultTable: "#cbnDlgChibanCheckTbl", // [確定] 候補テーブル(非同期ロード)
   dialogResultCheckbox: "#cbnDlgChibanCheckTbl input[type=checkbox]", // [確定] 候補行チェックボックス
@@ -1561,7 +1567,9 @@ function createPlaywrightRegistryPage(
         await page.click(REGISTRY_SELECTORS.dialogChibanKaokuListButton);
         await page.click(REGISTRY_SELECTORS.dialogChibanTypeNumeric);
         if (searchKey.length > 0) {
+          // ⚠**両端に同じ値**を入れて1筆に絞る。開始だけだと「そこから先が全部」返る。
           await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, searchKey);
+          await page.fill(REGISTRY_SELECTORS.dialogChibanRangeEnd, searchKey);
         }
         reportLive("地番検索を実行しています…");
         await page.click(REGISTRY_SELECTORS.dialogSearch);
@@ -1790,7 +1798,10 @@ function createPlaywrightRegistryPage(
         await page.fill(REGISTRY_SELECTORS.locationSearchLotBuilding, targetKey);
         await page.click(REGISTRY_SELECTORS.dialogChibanKaokuListButton);
         await page.click(REGISTRY_SELECTORS.dialogChibanTypeNumeric);
+        // ⚠所在検索と**同じ入れ方**にする(両端に同じ値=1筆に絞る)。片方だけ直すと
+        //   無料検索と有料取得で結果集合がずれる([同種の穴は全箇所を洗ってから直す])。
         await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, targetKey);
+        await page.fill(REGISTRY_SELECTORS.dialogChibanRangeEnd, targetKey);
         await page.click(REGISTRY_SELECTORS.dialogSearch);
       } catch (err) {
         // ⚠**分類済みの失敗はそのまま通す**(@codex #358 P2)。ここで一律に
