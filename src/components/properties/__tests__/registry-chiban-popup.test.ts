@@ -7,7 +7,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { chibanMapUrl } from "@/components/properties/registry-chiban-popup";
 
 const src = readFileSync(
   join(process.cwd(), "src/components/properties/registry-chiban-popup.tsx"),
@@ -28,24 +27,62 @@ const PAGE = readFileSync(
   "utf8",
 );
 
-describe("地図サービスのURL（設計 §3.2）", () => {
-  it("座標があればその位置をズーム18で開く", () => {
-    // ⚠18 は筆界と地番が見える倍率（#15 では筆界が出ない・実機で確認済み）。
-    expect(chibanMapUrl(35.430368, 139.601094)).toBe(
-      "https://minji-houmu.rmp.glbs.jp/view/chiban_search/map/#18/35.430368/139.601094",
+describe("ボタンの飛び先=ログイン画面（A案・発注者判断 2026-08-15）", () => {
+  // 実機で「地図は登記情報提供サービスの中からしか開けない」と判明したため、
+  // ボタンは**ログイン画面**を開く(ブラウザの保存パスワードで1タップ)。
+  // ⚠資格情報は絶対に画面側へ配らない(自動ログインは作らない=発注者に説明済み)。
+  it("飛び先の正は**サーバの実効値**(preflightで受け取る)。既定値はフォールバックのみ", () => {
+    // ⚠既定値の直書きだけだと、本番が REGISTRY_FETCH_BASE_URL/LOGIN_PATH で
+    //   URLを差し替えたとき(サイト改修時の即応用)に**画面だけ古いURLへ飛ぶ**
+    //   (@codex #381 P2)。サーバが計算した実効値を優先し、届く前・失敗時だけ
+    //   既定値へフォールバックする。
+    expect(src).toMatch(/registryLoginUrl \?\? REGISTRY_SERVICE_LOGIN_URL/);
+  });
+
+  it("フォールバックの既定値は自動操作の既定値と一致(両ファイル読み合わせ)", () => {
+    const auto = readFileSync(
+      join(process.cwd(), "src/lib/registry-fetch/auto-fetch.ts"),
+      "utf8",
     );
+    const base = auto.match(
+      /DEFAULT_REGISTRY_BASE_URL = "([^"]+)"/,
+    )?.[1];
+    const path = auto.match(
+      /DEFAULT_REGISTRY_LOGIN_PATH = "([^"]+)"/,
+    )?.[1];
+    expect(base).toBeTruthy();
+    expect(path).toBeTruthy();
+    expect(src).toContain(`"${base}${path}"`);
   });
 
-  it("座標が無ければサービスのトップを開くだけ（住所は渡さない）", () => {
-    const top = "https://minji-houmu.rmp.glbs.jp/view/chiban_search/map/";
-    expect(chibanMapUrl(null, null)).toBe(top);
-    expect(chibanMapUrl(35.4, null)).toBe(top);
-    expect(chibanMapUrl(null, 139.6)).toBe(top);
-    expect(chibanMapUrl(undefined, undefined)).toBe(top);
+  it("サーバの実効値が preflight 経由で配線されている(route→hook→button→popup)", () => {
+    const route = readFileSync(
+      join(process.cwd(), "src/app/api/registry-fetch/preflight/route.ts"),
+      "utf8",
+    );
+    // ⚠public 専用ヘルパー(R2: 自動操作用の BASE_URL は内部を指し得るため配らない)。
+    expect(route).toMatch(/registryLoginUrl: publicRegistryLoginUrl\(\)/);
+    expect(route).not.toMatch(/effectiveRegistryLoginUrl/);
+    const shared = readFileSync(
+      join(
+        process.cwd(),
+        "src/components/properties/registry-preflight-warnings.tsx",
+      ),
+      "utf8",
+    );
+    expect(shared).toMatch(/loginUrl/);
+    expect(LOC).toMatch(/registryLoginUrl=\{preflight\.loginUrl\}/);
   });
 
-  it("⚠本番の大半は座標が無い（668件中667件）ので、開けなくならないこと", () => {
-    expect(chibanMapUrl(null, null)).toContain("chiban_search/map/");
+  it("⚠旧・地図への直リンクを残さない(単独では開けないと実証済み)", () => {
+    expect(src).not.toContain("minji-houmu");
+    expect(src).not.toContain("chibanMapUrl");
+    expect(src).not.toContain("#18/");
+  });
+
+  it("⚠座標を受け取らない(外部に何も渡さないことを構造で担保)", () => {
+    // 旧実装は座標からURLを組み立てて渡していた。ログイン画面には何も要らない。
+    expect(src).not.toMatch(/gpsLat|gpsLng/);
   });
 });
 
@@ -55,11 +92,8 @@ describe("外部へ渡すことの扱い（設計 §3.2）", () => {
     expect(src).toContain('target="_blank"');
   });
 
-  it("⚠位置を渡すことを画面に書く", () => {
-    expect(src).toContain("地図サービスへ渡して開きます");
-  });
-
-  it("⚠「送信されない」とは書かない（フラグメントでも相手のJSが読む）", () => {
+  it("⚠位置を渡す説明を残さない(もう渡していない)・「送信されない」の断定もしない", () => {
+    expect(src).not.toContain("地図サービスへ渡して開きます");
     expect(src).not.toContain("送信されません");
     expect(src).not.toContain("送信されない");
   });
@@ -70,33 +104,29 @@ describe("外部へ渡すことの扱い（設計 §3.2）", () => {
   });
 });
 
-describe("⚠この地図は単独では開けない（2026-08-15 実機で判明）", () => {
-  // 発注者のiPhoneで「地番検索サービスを開く」を押したところ、地図ではなく
+describe("⚠地図はサービスの中からしか開けない（2026-08-15 実機で判明・A案）", () => {
+  // 発注者のiPhoneで旧ボタン(地図への直リンク)を押したところ、地図ではなく
   //   「現在サービスを利用できません。再度登記情報提供サービスの不動産請求画面から
   //    利用を開始してください。」
-  // が出た（座標を持つ唯一の物件=世田谷区若林2-18-3。座標の有無ではなくセッションの問題）。
-  // ＝この地図は登記情報提供サービスにログインし、不動産請求画面から起動しないと使えない。
-  // ボタンは残す（住所のコピーと地番の入力欄が同じ場所にある利点があるため）が、
-  // **前提を書かないと「壊れている」と読まれる**。
-  it("ログインと不動産請求画面からの起動が前提だと画面に書く", () => {
-    expect(src).toContain("先に登記情報提供サービスへログインしてください");
-    expect(src).toContain("不動産請求画面");
-    expect(src).toContain("単独では開けません");
+  // が出た。＝ボタンはログイン画面を開き、地図はサービス内の「地番検索」から開く。
+  it("ボタンがログイン画面を開くことと、その理由を画面に書く", () => {
+    expect(src).toContain("ログイン画面");
+    expect(src).toContain("中からしか開けません");
+    expect(src).toContain("登記情報提供サービスを開く（別タブ）");
+    expect(src).not.toContain("地番検索サービスを開く（無料・別タブ）");
   });
 
-  it("⚠前提はリンクより前に置く（押してから気づく順にしない）", () => {
-    const noticeIdx = src.indexOf("先に登記情報提供サービスへログインしてください");
-    const linkIdx = src.indexOf("地番検索サービスを開く（無料・別タブ）");
+  it("⚠説明はリンクより前に置く（押してから気づく順にしない）", () => {
+    const noticeIdx = src.indexOf("中からしか開けません");
+    const linkIdx = src.indexOf("登記情報提供サービスを開く（別タブ）");
     expect(noticeIdx).toBeGreaterThan(-1);
     expect(linkIdx).toBeGreaterThan(-1);
     expect(noticeIdx).toBeLessThan(linkIdx);
   });
 
-  it("⚠地図を開く入口は**サービス自身の「地番検索」**と書く（このボタンを入口にしない・@codex #378 P2）", () => {
-    // 不動産請求画面まで進んでも、このボタンは chiban_search/map/ を直接開くだけなので
-    // 同じ拒否に戻りうる。「このボタンで地図を開く」と手順に書いてはいけない。
+  it("⚠地図を開く入口は**サービス自身の「地番検索」**と書く（@codex #378 P2の維持）", () => {
     expect(src).toContain("その画面の「地番検索」から地図を開く");
-    expect(src).not.toContain("③このボタンで地図を開く");
+    expect(src).not.toContain("このボタンで地図を開く");
   });
 
   it("⚠手順にログインの段を含める（住所検索から始まる書き方にしない）", () => {
@@ -284,27 +314,8 @@ describe("⚠必ず弾かれる分類では実行の導線を出さない（@cod
   });
 });
 
-describe("⚠座標は文字列で来る（@codex #373 R5 P2）", () => {
-  it("Decimal 由来の文字列でも地図をその位置で開く", () => {
-    // DBの緯度経度は Prisma の Decimal で、物件詳細APIはそのまま返すため
-    // JSON 上は string。number だけ受け付けると**本番の全物件でトップページ**しか
-    // 開かず、地図が現地に寄らない。
-    expect(chibanMapUrl("35.430368", "139.601094")).toBe(
-      "https://minji-houmu.rmp.glbs.jp/view/chiban_search/map/#18/35.430368/139.601094",
-    );
-  });
-
-  it("数値と文字列が混ざっても開ける", () => {
-    expect(chibanMapUrl(35.430368, "139.601094")).toContain("#18/");
-  });
-
-  it("数値にできない文字列はトップを開く（壊れた座標で誤誘導しない）", () => {
-    const top = "https://minji-houmu.rmp.glbs.jp/view/chiban_search/map/";
-    expect(chibanMapUrl("abc", "139.6")).toBe(top);
-    expect(chibanMapUrl("", "")).toBe(top);
-    expect(chibanMapUrl("NaN", "1")).toBe(top);
-  });
-});
+// (旧「⚠座標は文字列で来る(@codex #373 R5 P2)」describe は A案で削除。
+//  座標からURLを作る機能ごと無くなった=Decimal文字列の変換問題も消滅。)
 
 describe("⚠一括は「何を買うか」を承認の前に見せる（@codex #373 R5 P1）", () => {
   const BULK = readFileSync(

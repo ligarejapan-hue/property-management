@@ -273,6 +273,37 @@ export const DEFAULT_REGISTRY_BASE_URL = "https://www.touki.or.jp";
 export const DEFAULT_REGISTRY_LOGIN_PATH = "/TeikyoUketsuke/";
 
 /**
+ * 利用者のブラウザに開かせるログイン画面URL(A案・@codex #381 R1/R2 P2)。
+ *
+ * ⚠**自動操作用の REGISTRY_FETCH_BASE_URL / LOGIN_PATH は絶対に使わない**(R2)。
+ *   それらは内部エンドポイントを指し得る値で、この模块自身が診断ログからも
+ *   伏せている(baseUrl/loginUrl の redact)。応答に載せれば全認可クライアントへ
+ *   構成が漏れ、ブラウザから届かないURLをリンクにもしてしまう。
+ * ⚠かといってコンパイル時の既定値だけだと、公式サイトのURL変更に画面が
+ *   追従できない(R1)。→**公開専用の env `REGISTRY_FETCH_PUBLIC_LOGIN_URL`** を新設し、
+ *   https の絶対URLとして読めたときだけ採用・それ以外は公式既定値に固定する。
+ *   任意設定(未設定で従来どおり)・非secret。
+ */
+export function publicRegistryLoginUrl(): string {
+  const raw = process.env.REGISTRY_FETCH_PUBLIC_LOGIN_URL?.trim();
+  if (raw) {
+    try {
+      const u = new URL(raw);
+      // http は不可(資格情報を打つ画面へ平文で誘導しない)。読めない値も既定へ。
+      // ⚠userinfo(https://user:pass@host/)も不可(@codex #381 R3 P2)。toString() は
+      //   埋め込み資格情報を保持するため、通すと preflight 応答で全認可クライアントへ
+      //   その資格情報を配ってしまう。
+      if (u.protocol === "https:" && u.username === "" && u.password === "") {
+        return u.toString();
+      }
+    } catch {
+      /* 既定値へ */
+    }
+  }
+  return `${DEFAULT_REGISTRY_BASE_URL}${DEFAULT_REGISTRY_LOGIN_PATH}`;
+}
+
+/**
  * 二重ログイン確認画面「ご利用中の方へ」(force-login-confirm)の判定マーカー。
  *
  * 登記情報提供サービスは1IDにつき同時1セッションのため、前回セッションが残っていると

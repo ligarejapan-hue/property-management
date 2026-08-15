@@ -3866,7 +3866,12 @@ export interface RegistryPreflightFlags {
  */
 export async function fetchRegistryPreflight(
   propertyIds: string[],
-): Promise<{ data: RegistryPreflightFlags[]; excluded: number }> {
+): Promise<{
+  data: RegistryPreflightFlags[];
+  excluded: number;
+  /** ログイン画面のサーバ実効URL(A案・env上書きに追従)。旧応答は未返却=undefined。 */
+  registryLoginUrl?: string;
+}> {
   if (USE_MOCK) {
     await mockDelay();
     return {
@@ -3881,7 +3886,11 @@ export async function fetchRegistryPreflight(
       excluded: 0,
     };
   }
-  return apiFetch<{ data: RegistryPreflightFlags[]; excluded: number }>(
+  return apiFetch<{
+    data: RegistryPreflightFlags[];
+    excluded: number;
+    registryLoginUrl?: string;
+  }>(
     "/api/registry-fetch/preflight",
     {
       method: "POST",

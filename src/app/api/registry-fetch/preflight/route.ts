@@ -10,6 +10,7 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
 import { classifyRegistryTarget } from "@/lib/registry-fetch/registry-target";
 import { hashPropertyFingerprint } from "@/lib/registry-fetch/candidate-cache";
 import { requireBulkSession } from "@/lib/registry-fetch/bulk/route-support";
+import { publicRegistryLoginUrl } from "@/lib/registry-fetch/auto-fetch";
 import { MAX_BULK_ITEMS, UUID_RE } from "@/lib/registry-fetch/bulk/types";
 
 // ---------- POST /api/registry-fetch/preflight ----------
@@ -119,7 +120,9 @@ export async function POST(request: NextRequest) {
       }),
     }));
 
-    return apiResponse({ data, excluded });
+    // A案(@codex #381 R1/R2 P2): 画面のログインリンクは**公開専用**の実効値に従わせる
+    // (自動操作用 REGISTRY_FETCH_BASE_URL は内部を指し得るため配らない)。
+    return apiResponse({ data, excluded, registryLoginUrl: publicRegistryLoginUrl() });
   } catch (error) {
     return handleApiError(error);
   }
