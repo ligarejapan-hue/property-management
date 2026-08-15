@@ -10,6 +10,7 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
 import { classifyRegistryTarget } from "@/lib/registry-fetch/registry-target";
 import { hashPropertyFingerprint } from "@/lib/registry-fetch/candidate-cache";
 import { requireBulkSession } from "@/lib/registry-fetch/bulk/route-support";
+import { effectiveRegistryLoginUrl } from "@/lib/registry-fetch/auto-fetch";
 import { MAX_BULK_ITEMS, UUID_RE } from "@/lib/registry-fetch/bulk/types";
 
 // ---------- POST /api/registry-fetch/preflight ----------
@@ -119,7 +120,9 @@ export async function POST(request: NextRequest) {
       }),
     }));
 
-    return apiResponse({ data, excluded });
+    // A案(@codex #381 P2): 画面のログインリンクはサーバの実効値に従わせる
+    // (env で URL を差し替えたとき、画面だけ古い既定値へ飛ばないように)。
+    return apiResponse({ data, excluded, registryLoginUrl: effectiveRegistryLoginUrl() });
   } catch (error) {
     return handleApiError(error);
   }

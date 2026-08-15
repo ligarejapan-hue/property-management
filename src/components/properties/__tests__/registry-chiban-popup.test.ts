@@ -31,10 +31,15 @@ describe("ボタンの飛び先=ログイン画面（A案・発注者判断 2026
   // 実機で「地図は登記情報提供サービスの中からしか開けない」と判明したため、
   // ボタンは**ログイン画面**を開く(ブラウザの保存パスワードで1タップ)。
   // ⚠資格情報は絶対に画面側へ配らない(自動ログインは作らない=発注者に説明済み)。
-  it("飛び先は自動操作と同じログインURL(推測のURLを画面に出さない)", () => {
-    // 正はサーバ側の定数(DEFAULT_REGISTRY_BASE_URL + DEFAULT_REGISTRY_LOGIN_PATH)。
-    // client からは import できない(auto-fetch はサーバ専用の重い模块)ので、
-    // **両ファイルのリテラルを読み合わせて**ずれを検出する。
+  it("飛び先の正は**サーバの実効値**(preflightで受け取る)。既定値はフォールバックのみ", () => {
+    // ⚠既定値の直書きだけだと、本番が REGISTRY_FETCH_BASE_URL/LOGIN_PATH で
+    //   URLを差し替えたとき(サイト改修時の即応用)に**画面だけ古いURLへ飛ぶ**
+    //   (@codex #381 P2)。サーバが計算した実効値を優先し、届く前・失敗時だけ
+    //   既定値へフォールバックする。
+    expect(src).toMatch(/registryLoginUrl \?\? REGISTRY_SERVICE_LOGIN_URL/);
+  });
+
+  it("フォールバックの既定値は自動操作の既定値と一致(両ファイル読み合わせ)", () => {
     const auto = readFileSync(
       join(process.cwd(), "src/lib/registry-fetch/auto-fetch.ts"),
       "utf8",
@@ -48,6 +53,23 @@ describe("ボタンの飛び先=ログイン画面（A案・発注者判断 2026
     expect(base).toBeTruthy();
     expect(path).toBeTruthy();
     expect(src).toContain(`"${base}${path}"`);
+  });
+
+  it("サーバの実効値が preflight 経由で配線されている(route→hook→button→popup)", () => {
+    const route = readFileSync(
+      join(process.cwd(), "src/app/api/registry-fetch/preflight/route.ts"),
+      "utf8",
+    );
+    expect(route).toMatch(/registryLoginUrl: effectiveRegistryLoginUrl\(\)/);
+    const shared = readFileSync(
+      join(
+        process.cwd(),
+        "src/components/properties/registry-preflight-warnings.tsx",
+      ),
+      "utf8",
+    );
+    expect(shared).toMatch(/loginUrl/);
+    expect(LOC).toMatch(/registryLoginUrl=\{preflight\.loginUrl\}/);
   });
 
   it("⚠旧・地図への直リンクを残さない(単独では開けないと実証済み)", () => {

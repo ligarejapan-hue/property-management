@@ -47,6 +47,12 @@ interface RegistryChibanPopupProps {
   propertyAddress: string;
   /** 保存に必要な現在の版番号。 */
   propertyVersion: number;
+  /**
+   * ログイン画面の**サーバ実効URL**(preflight 由来・@codex #381 P2)。
+   * env で URL を差し替えたとき画面だけ古い既定値へ飛ばないようにする。
+   * null(未着・失敗)は既定値へフォールバック。
+   */
+  registryLoginUrl: string | null;
   /** property:write。無ければ入力欄を出さず案内だけにする。 */
   canWriteProperty: boolean;
   /**
@@ -69,11 +75,14 @@ export default function RegistryChibanPopup({
   propertyId,
   propertyAddress,
   propertyVersion,
+  registryLoginUrl,
   canWriteProperty,
   offerBuildingPath,
   onSaved,
   onClose,
 }: RegistryChibanPopupProps) {
+  // サーバの実効値を優先し、届く前・失敗時だけコンパイル時の既定値に頼る。
+  const loginHref = registryLoginUrl ?? REGISTRY_SERVICE_LOGIN_URL;
   // 「建物の登記／土地の登記」のどちらを取るかを先に選んでもらう（設計 §3.3）。
   // ⚠土地だと分かっている種別のときだけ、地番の入力へ直行する。
   const [route, setRoute] = useState<"choose" | "land">(
@@ -218,7 +227,7 @@ export default function RegistryChibanPopup({
               を開きます（ブラウザに保存したID・パスワードが使えます）。
             </p>
             <a
-              href={REGISTRY_SERVICE_LOGIN_URL}
+              href={loginHref}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 rounded border border-indigo-300 bg-white px-2.5 py-1 font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-400/30 dark:bg-gray-900 dark:text-indigo-300 dark:hover:bg-gray-800"

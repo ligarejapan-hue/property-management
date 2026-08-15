@@ -283,6 +283,7 @@ export default function RegistryLocationSearchButton({
           propertyId={propertyId}
           propertyAddress={propertyAddress}
           propertyVersion={savedVersion ?? propertyVersion}
+          registryLoginUrl={preflight.loginUrl}
           canWriteProperty={canWriteProperty}
           offerBuildingPath={offerBuildingPath}
           onSaved={(nextVersion) => {

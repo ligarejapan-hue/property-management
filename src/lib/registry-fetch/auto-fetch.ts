@@ -273,6 +273,20 @@ export const DEFAULT_REGISTRY_BASE_URL = "https://www.touki.or.jp";
 export const DEFAULT_REGISTRY_LOGIN_PATH = "/TeikyoUketsuke/";
 
 /**
+ * 利用者に開いてもらうログイン画面の**実効URL**(A案・@codex #381 P2)。
+ * 自動操作と同じ優先順(env 上書き→既定値)で組む。既定値の直書きだけだと、
+ * 本番が REGISTRY_FETCH_BASE_URL/LOGIN_PATH でURLを差し替えたとき
+ * (サイト改修時の即応用)に**画面のリンクだけ古いURLへ飛ぶ**。
+ * 非PII・非secret(公開された公式サービスの入口)。
+ */
+export function effectiveRegistryLoginUrl(): string {
+  const base = process.env.REGISTRY_FETCH_BASE_URL || DEFAULT_REGISTRY_BASE_URL;
+  const path =
+    process.env.REGISTRY_FETCH_LOGIN_PATH || DEFAULT_REGISTRY_LOGIN_PATH;
+  return `${base}${path}`;
+}
+
+/**
  * 二重ログイン確認画面「ご利用中の方へ」(force-login-confirm)の判定マーカー。
  *
  * 登記情報提供サービスは1IDにつき同時1セッションのため、前回セッションが残っていると

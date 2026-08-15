@@ -46,6 +46,9 @@ vi.mock("@/lib/registry-fetch", () => ({
 import {
   getRegistryFetchProvider,
   isRegistryAutoFetchProviderConfigured,
+  effectiveRegistryLoginUrl,
+  DEFAULT_REGISTRY_BASE_URL,
+  DEFAULT_REGISTRY_LOGIN_PATH,
 } from "@/lib/registry-fetch/auto-fetch";
 
 const read = (rel: string) =>
@@ -188,5 +191,55 @@ describe("isRegistryAutoFetchProviderConfigured — provider capability", () => 
         else process.env[k] = saved[k];
       }
     }
+  });
+});
+
+describe("effectiveRegistryLoginUrl — 画面のログインリンクの実効値(A案・@codex #381 P2)", () => {
+  const KEYS = ["REGISTRY_FETCH_BASE_URL", "REGISTRY_FETCH_LOGIN_PATH"] as const;
+  const withEnv = (
+    env: Partial<Record<(typeof KEYS)[number], string>>,
+    fn: () => void,
+  ) => {
+    const saved: Record<string, string | undefined> = {};
+    for (const k of KEYS) saved[k] = process.env[k];
+    try {
+      for (const k of KEYS) {
+        if (env[k] === undefined) delete process.env[k];
+        else process.env[k] = env[k];
+      }
+      fn();
+    } finally {
+      for (const k of KEYS) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    }
+  };
+
+  it("env 未設定なら既定値(自動操作と同じ入口)", () => {
+    withEnv({}, () => {
+      expect(effectiveRegistryLoginUrl()).toBe(
+        `${DEFAULT_REGISTRY_BASE_URL}${DEFAULT_REGISTRY_LOGIN_PATH}`,
+      );
+    });
+  });
+
+  it("env 上書きに追従する(サイト改修時の即応=自動操作と同じ優先順)", () => {
+    withEnv(
+      {
+        REGISTRY_FETCH_BASE_URL: "https://example.invalid",
+        REGISTRY_FETCH_LOGIN_PATH: "/NewLogin/",
+      },
+      () => {
+        expect(effectiveRegistryLoginUrl()).toBe(
+          "https://example.invalid/NewLogin/",
+        );
+      },
+    );
+    withEnv({ REGISTRY_FETCH_LOGIN_PATH: "/NewLogin/" }, () => {
+      expect(effectiveRegistryLoginUrl()).toBe(
+        `${DEFAULT_REGISTRY_BASE_URL}/NewLogin/`,
+      );
+    });
   });
 });

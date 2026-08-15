@@ -21,6 +21,11 @@ export interface RegistryPreflightState {
   flagsById: Map<string, RegistryPreflightFlags>;
   /** ⚠「何を取りに行くか(土地/建物)」。**買う対象そのもの**であって参考情報ではない。 */
   targetsById: Map<string, RegistryTarget>;
+  /**
+   * 登記情報提供サービスのログイン画面の**サーバ実効URL**(A案・@codex #381 P2)。
+   * env 上書きに追従する。届く前・失敗時は null=画面側が既定値へフォールバック。
+   */
+  loginUrl: string | null;
   failed: boolean;
   /** 事前確認が未完了(実行ボタンはこの間 disabled にする=#365 R1: 警告を見る前に課金させない)。 */
   pending: boolean;
@@ -71,6 +76,8 @@ export function useRegistryPreflight(
     new Map(),
   );
   const [failed, setFailed] = useState(false);
+  // サーバ実効のログインURL(A案)。失敗時は null のまま=画面が既定値へフォールバック。
+  const [loginUrl, setLoginUrl] = useState<string | null>(null);
   // ⚠既定は true(取れていない)。開いた直後から実行させない。
   const [targetsUnavailable, setTargetsUnavailable] = useState(true);
   // 完了済みの対象集合キー。pending はここから導出する(effect 内の同期 setState を
@@ -99,6 +106,7 @@ export function useRegistryPreflight(
         setFailed(false);
         setFlagsById(new Map(res.data.map((f) => [f.propertyId, f])));
         setTargetsById(new Map(res.data.map((f) => [f.propertyId, f.target])));
+        setLoginUrl(res.registryLoginUrl ?? null);
         setTargetsUnavailable(false);
         setSettledKey(cacheKey);
       })
@@ -120,6 +128,7 @@ export function useRegistryPreflight(
   return {
     flagsById,
     targetsById,
+    loginUrl,
     failed,
     pending: active && propertyIds.length > 0 && settledKey !== cacheKey,
     // 閉じているときは止める理由が無い(実行ボタン自体が出ない)。
