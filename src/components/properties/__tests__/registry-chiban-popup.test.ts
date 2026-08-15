@@ -60,7 +60,9 @@ describe("ボタンの飛び先=ログイン画面（A案・発注者判断 2026
       join(process.cwd(), "src/app/api/registry-fetch/preflight/route.ts"),
       "utf8",
     );
-    expect(route).toMatch(/registryLoginUrl: effectiveRegistryLoginUrl\(\)/);
+    // ⚠public 専用ヘルパー(R2: 自動操作用の BASE_URL は内部を指し得るため配らない)。
+    expect(route).toMatch(/registryLoginUrl: publicRegistryLoginUrl\(\)/);
+    expect(route).not.toMatch(/effectiveRegistryLoginUrl/);
     const shared = readFileSync(
       join(
         process.cwd(),

@@ -46,7 +46,7 @@ vi.mock("@/lib/registry-fetch", () => ({
 import {
   getRegistryFetchProvider,
   isRegistryAutoFetchProviderConfigured,
-  effectiveRegistryLoginUrl,
+  publicRegistryLoginUrl,
   DEFAULT_REGISTRY_BASE_URL,
   DEFAULT_REGISTRY_LOGIN_PATH,
 } from "@/lib/registry-fetch/auto-fetch";
@@ -194,8 +194,12 @@ describe("isRegistryAutoFetchProviderConfigured — provider capability", () => 
   });
 });
 
-describe("effectiveRegistryLoginUrl — 画面のログインリンクの実効値(A案・@codex #381 P2)", () => {
-  const KEYS = ["REGISTRY_FETCH_BASE_URL", "REGISTRY_FETCH_LOGIN_PATH"] as const;
+describe("publicRegistryLoginUrl — 画面のログインリンク(A案・@codex #381 R1/R2 P2)", () => {
+  const KEYS = [
+    "REGISTRY_FETCH_PUBLIC_LOGIN_URL",
+    "REGISTRY_FETCH_BASE_URL",
+    "REGISTRY_FETCH_LOGIN_PATH",
+  ] as const;
   const withEnv = (
     env: Partial<Record<(typeof KEYS)[number], string>>,
     fn: () => void,
@@ -215,31 +219,39 @@ describe("effectiveRegistryLoginUrl — 画面のログインリンクの実効�
       }
     }
   };
+  const OFFICIAL = `${DEFAULT_REGISTRY_BASE_URL}${DEFAULT_REGISTRY_LOGIN_PATH}`;
 
-  it("env 未設定なら既定値(自動操作と同じ入口)", () => {
+  it("env 未設定なら公式の既定値", () => {
     withEnv({}, () => {
-      expect(effectiveRegistryLoginUrl()).toBe(
-        `${DEFAULT_REGISTRY_BASE_URL}${DEFAULT_REGISTRY_LOGIN_PATH}`,
-      );
+      expect(publicRegistryLoginUrl()).toBe(OFFICIAL);
     });
   });
 
-  it("env 上書きに追従する(サイト改修時の即応=自動操作と同じ優先順)", () => {
+  it("公開専用 env(REGISTRY_FETCH_PUBLIC_LOGIN_URL)には追従する(https のみ)", () => {
+    withEnv({ REGISTRY_FETCH_PUBLIC_LOGIN_URL: "https://example.invalid/Login/" }, () => {
+      expect(publicRegistryLoginUrl()).toBe("https://example.invalid/Login/");
+    });
+  });
+
+  it("⚠自動操作用の REGISTRY_FETCH_BASE_URL/LOGIN_PATH は**配らない**(内部を指し得る・R2)", () => {
     withEnv(
       {
-        REGISTRY_FETCH_BASE_URL: "https://example.invalid",
-        REGISTRY_FETCH_LOGIN_PATH: "/NewLogin/",
+        REGISTRY_FETCH_BASE_URL: "https://internal.example.invalid",
+        REGISTRY_FETCH_LOGIN_PATH: "/InternalLogin/",
       },
       () => {
-        expect(effectiveRegistryLoginUrl()).toBe(
-          "https://example.invalid/NewLogin/",
-        );
+        expect(publicRegistryLoginUrl()).toBe(OFFICIAL);
+        expect(publicRegistryLoginUrl()).not.toContain("internal");
       },
     );
-    withEnv({ REGISTRY_FETCH_LOGIN_PATH: "/NewLogin/" }, () => {
-      expect(effectiveRegistryLoginUrl()).toBe(
-        `${DEFAULT_REGISTRY_BASE_URL}/NewLogin/`,
-      );
+  });
+
+  it("⚠http・読めない値は既定値へ(資格情報を打つ画面へ平文で誘導しない)", () => {
+    withEnv({ REGISTRY_FETCH_PUBLIC_LOGIN_URL: "http://example.invalid/Login/" }, () => {
+      expect(publicRegistryLoginUrl()).toBe(OFFICIAL);
+    });
+    withEnv({ REGISTRY_FETCH_PUBLIC_LOGIN_URL: "not a url" }, () => {
+      expect(publicRegistryLoginUrl()).toBe(OFFICIAL);
     });
   });
 });
