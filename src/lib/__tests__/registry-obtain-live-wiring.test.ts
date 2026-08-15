@@ -68,6 +68,17 @@ describe("orchestration→provider→adapter の受け渡し", () => {
     expect(AUTO).toContain("対象の地番を選択しました。確定します(まだ課金されていません)");
   });
 
+  it("⚠順番待ち(購入ミューテックス)の間も心拍を刻む(@codex #380 R2 P2)", () => {
+    // 一括取得と同じ直列化を共有するため、先客で3分を超えると初手1行のまま
+    // 実況が消える。60秒ごとの keepalive + 取得開始と finally の両方で clear。
+    expect(PROVIDER).toMatch(
+      /queueHeartbeat = live[\s\S]{0,200}?他の取得の完了を待っています\(まだ課金されていません\)/,
+    );
+    const clears =
+      PROVIDER.match(/clearInterval\(queueHeartbeat\)/g) ?? [];
+    expect(clears.length).toBe(2); // 取得開始時 + finally(不成立経路の漏れ防止)
+  });
+
   it("⚠課金後の待ちループに心拍を刻む(実況の保管期限3分を無言で超えない)", () => {
     // ループは最悪3分を超えるが、ストアの期限は**最終書き込み**から数える。
     // 無言だと課金済みの待ち最中にパネルごと消える(steps/shotsも削除)。

@@ -326,7 +326,23 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     }
     const requestId = this.requestIdFactory();
 
+    // ⚠順番待ちの間も実況を生かす(@codex #380 R2 P2)。購入ミューテックスは一括取得と
+    //   共有なので、先客(一括の数件分)で3分を超えると、この取得の実況は初手1行のまま
+    //   保管期限(LIVE_VIEW_TTL_MS=3分)で**消え**、以降の step は -1 の no-op になる
+    //   (=一番の目的だった診断が丸ごと失われる)。取得開始まで60秒ごとに固定文言を
+    //   刻んで期限を更新する。step は同期・非throw契約なので interval から安全に呼べる。
+    const queueHeartbeat = live
+      ? setInterval(() => {
+          try {
+            live.step("他の取得の完了を待っています(まだ課金されていません)");
+          } catch {
+            /* 実況の失敗で待ちを壊さない */
+          }
+        }, 60_000)
+      : null;
+
     return runExclusivePurchase(async () => {
+      if (queueHeartbeat) clearInterval(queueHeartbeat);
       let page: RegistryBrowserPage;
       try {
         page = await this.withStartupTimeout(() => this.browserFactory!());
@@ -389,6 +405,10 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
           // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
         }
       }
+    }).finally(() => {
+      // ⚠取得開始時にも clear しているが、**待ちのまま不成立で終わる経路**
+      // (呼び出し側の中断等)ではコールバックが走らない。二重 clear は無害。
+      if (queueHeartbeat) clearInterval(queueHeartbeat);
     });
   }
 
