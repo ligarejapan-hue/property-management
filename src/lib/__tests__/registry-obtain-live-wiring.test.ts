@@ -63,7 +63,13 @@ describe("orchestration→provider→adapter の受け渡し", () => {
   it("adapter の有料フローは課金境界の前後で固定文言を刻む(文言に所在・地番を入れない)", () => {
     // 課金境界の直前・直後の文言(実況の主目的=お金の不安の解消)。
     expect(AUTO).toContain("⚠ここから請求(課金)を実行します");
-    expect(AUTO).toContain("請求しました(課金済み)。書類の準備を待っています");
+    // ⚠押した直後は「課金済み」と**断定しない**(@codex #380 R5 P2)。domClick は
+    //   ボタン不在/無効で黙って no-op になるため、断定は「請求済」を実測してから。
+    expect(AUTO).toContain("請求を実行しました。サイト側の反映を確認しています");
+    expect(AUTO).toContain(
+      "請求済みを確認しました(課金済み)。書類(PDF)を保存しています",
+    );
+    expect(AUTO).not.toContain("請求しました(課金済み)");
     // 選択検証(発注者指示)の文言。
     expect(AUTO).toContain("対象の地番を選択しました。確定します(まだ課金されていません)");
   });
@@ -91,7 +97,7 @@ describe("orchestration→provider→adapter の受け渡し", () => {
     // ループは最悪3分を超えるが、ストアの期限は**最終書き込み**から数える。
     // 無言だと課金済みの待ち最中にパネルごと消える(steps/shotsも削除)。
     expect(AUTO).toMatch(
-      /attempt % 5 === 0[\s\S]{0,80}?reportLive\("書類の準備を待っています\(課金済み\)"\)/,
+      /attempt % 5 === 0[\s\S]{0,160}?reportLive\("請求の反映を待っています…"\)/,
     );
   });
 });

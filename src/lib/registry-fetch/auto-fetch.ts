@@ -2457,7 +2457,13 @@ function createPlaywrightRegistryPage(
         // ここ以降で発火しても provider が charged_but_failed に分類できる。
         if (input.chargeState) input.chargeState.charged = true;
         await domClick(REGISTRY_SELECTORS.myPageSeikyuButton);
-        reportLive("請求しました(課金済み)。書類の準備を待っています");
+        // ⚠ここではまだ「課金済み」と**断定しない**(@codex #380 R5 P2)。domClick は
+        //   ボタンが不在/無効なら黙って何もしないため、受け付けられていないのに
+        //   「課金済み」と実況すると、後で charged_but_failed になったとき利用者と
+        //   診断の両方が誤る。断定は下で行が「請求済」と実測できてから。
+        //   (chargeState.charged=true は**安全側の会計**なのでこの直前のまま維持=
+        //    疑わしきは課金済み扱い。実況の文言だけを事実に合わせる。)
+        reportLive("請求を実行しました。サイト側の反映を確認しています");
         // ⑨⑩ 課金した行が「請求済+PDF準備完了」になるのを待ち、**見つけたその場で**
         // 選択して DL へ進む(探索と選択を分けるとページ跨ぎで取り違え得る)。
         // 課金後はフィルタを「請求済」へ(課金した行が状態遷移後も見えるように)。
@@ -2474,7 +2480,8 @@ function createPlaywrightRegistryPage(
           //   パネルごと消える(steps/shots も削除=見返し不能)。5周ごとに固定文言を
           //   刻んで期限を更新する(最大3行の増加・非PII)。
           if (attempt > 0 && attempt % 5 === 0) {
-            reportLive("書類の準備を待っています(課金済み)");
+            // ⚠ここも断定しない(まだ「請求済」を実測できていない)。
+            reportLive("請求の反映を待っています…");
           }
           // ⚠各走査は**先頭ページから**(@codex R6 P1)。前回の走査で末尾ページに
           // 居座ったままだと、リロード後に先頭側へ入った行を以降ずっと見逃す。
@@ -2568,7 +2575,8 @@ function createPlaywrightRegistryPage(
         if (!ready) {
           throw new RegistryFetchError("charged_but_failed");
         }
-        reportLive("書類(PDF)を保存しています(課金済み)");
+        // ここは断定してよい: ready=true は対象行が「請求済」かつDL可能と**実測**できた後。
+        reportLive("請求済みを確認しました(課金済み)。書類(PDF)を保存しています");
         // ⚠課金後の待ちには明示予算を渡す(@codex R9 P1)。渡さないと page の既定
         // timeout(通常予算=例30秒)が provider の延長予算(10分)より先に打ち切る。
         const [download] = await Promise.all([
