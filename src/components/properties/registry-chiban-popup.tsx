@@ -220,6 +220,23 @@ export default function RegistryChibanPopup({
             </div>
           </div>
 
+          {/* ⚠**この地図は単独では開けない**（2026-08-15 実機で判明）。押すと地図ではなく
+              「現在サービスを利用できません。再度登記情報提供サービスの不動産請求画面から
+              利用を開始してください。」が返る＝登記情報提供サービスのセッションが要る。
+              ボタンは残す（住所のコピーと地番の入力欄が同じ場所にある利点があるため）が、
+              **前提をリンクより前に置く**（押してから気づく順にしない）。 */}
+          <div className="rounded border border-amber-300 bg-amber-50 p-2 dark:border-amber-400/30 dark:bg-amber-950/40">
+            <p className="font-medium text-amber-900 dark:text-amber-200">
+              先に登記情報提供サービスへログインしてください
+            </p>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-amber-900/90 dark:text-amber-200/90">
+              この地図は<strong>単独では開けません</strong>
+              。登記情報提供サービスにログインし、
+              <strong>不動産請求画面</strong>
+              から始めた状態でないと「現在サービスを利用できません」と表示されます。
+            </p>
+          </div>
+
           {/* ⚠外部サービスへ物件の位置を渡す導線。自動では開かない・自動では送らない。
               ⚠「相手に渡っていない」とは書かない（フラグメントでも相手の JavaScript が読み、
               地図データの取得もその範囲について行われる＝座標は渡っている）。 */}
@@ -236,10 +253,11 @@ export default function RegistryChibanPopup({
             <p className="text-[11px] text-gray-600 dark:text-gray-400">
               この物件の位置を地図サービスへ渡して開きます（法務省の無料サービス）。
             </p>
-            <p className="text-[11px] text-gray-600 dark:text-gray-400">
-              開いたら住所で検索 → 地図を拡大 →{" "}
-              <strong>該当の筆をクリック</strong> →
-              出てきた地番をここへ入れてください。
+            <p className="text-[11px] leading-relaxed text-gray-600 dark:text-gray-400">
+              ①登記情報提供サービスに<strong>ログイン</strong> → ②
+              <strong>不動産請求画面</strong>へ進む → ③このボタンで地図を開く →
+              ④住所で検索 → ⑤地図を拡大 → ⑥<strong>該当の筆をクリック</strong> →
+              ⑦出てきた地番をここへ入れてください。
             </p>
           </div>
 

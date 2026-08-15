@@ -70,6 +70,38 @@ describe("外部へ渡すことの扱い（設計 §3.2）", () => {
   });
 });
 
+describe("⚠この地図は単独では開けない（2026-08-15 実機で判明）", () => {
+  // 発注者のiPhoneで「地番検索サービスを開く」を押したところ、地図ではなく
+  //   「現在サービスを利用できません。再度登記情報提供サービスの不動産請求画面から
+  //    利用を開始してください。」
+  // が出た（座標を持つ唯一の物件=世田谷区若林2-18-3。座標の有無ではなくセッションの問題）。
+  // ＝この地図は登記情報提供サービスにログインし、不動産請求画面から起動しないと使えない。
+  // ボタンは残す（住所のコピーと地番の入力欄が同じ場所にある利点があるため）が、
+  // **前提を書かないと「壊れている」と読まれる**。
+  it("ログインと不動産請求画面からの起動が前提だと画面に書く", () => {
+    expect(src).toContain("先に登記情報提供サービスへログインしてください");
+    expect(src).toContain("不動産請求画面");
+    expect(src).toContain("単独では開けません");
+  });
+
+  it("⚠前提はリンクより前に置く（押してから気づく順にしない）", () => {
+    const noticeIdx = src.indexOf("先に登記情報提供サービスへログインしてください");
+    const linkIdx = src.indexOf("地番検索サービスを開く（無料・別タブ）");
+    expect(noticeIdx).toBeGreaterThan(-1);
+    expect(linkIdx).toBeGreaterThan(-1);
+    expect(noticeIdx).toBeLessThan(linkIdx);
+  });
+
+  it("⚠手順にログインの段を含める（住所検索から始まる書き方にしない）", () => {
+    // ⚠`indexOf` はファイル冒頭のドキュメントコメントに当たる（同じ語がそこにもある）。
+    //   手順の文は画面の下の方にあるので `lastIndexOf` で拾う。
+    const clickIdx = src.lastIndexOf("該当の筆をクリック");
+    expect(clickIdx).toBeGreaterThan(-1);
+    const steps = src.slice(Math.max(0, clickIdx - 700), clickIdx);
+    expect(steps).toMatch(/ログイン/);
+  });
+});
+
 describe("費用の書き分け（設計 §3.2）", () => {
   it("この画面では課金されないこと・課金は次の取得であることを書く", () => {
     expect(src).toContain("この画面の操作では課金されません");
