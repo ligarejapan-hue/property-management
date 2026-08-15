@@ -250,13 +250,21 @@ export default function RegistryChibanPopup({
               <ExternalLink className="h-3 w-3" />
               地番検索サービスを開く（無料・別タブ）
             </a>
-            <p className="text-[11px] text-gray-600 dark:text-gray-400">
-              この物件の位置を地図サービスへ渡して開きます（法務省の無料サービス）。
+            {/* ⚠**このボタンを「地図を開く手段」として案内しない**（@codex #378 P2）。
+                ボタンは `chiban_search/map/` を直接開くだけなので、ログインしていても
+                サービス側が「不動産請求画面から開始してください」と拒む可能性がある。
+                正しい入口は**サービス自身の「地番検索」**。ボタンは、そこで開始済みの
+                ときに**物件の位置で**同じ地図を開く近道として説明する。 */}
+            <p className="text-[11px] leading-relaxed text-gray-600 dark:text-gray-400">
+              このボタンは、下の③まで済んで地図を開ける状態のとき、
+              <strong>この物件の位置</strong>を地図サービスへ渡して開きます
+              （法務省の無料サービス）。開けないときは③からやり直してください。
             </p>
             <p className="text-[11px] leading-relaxed text-gray-600 dark:text-gray-400">
               ①登記情報提供サービスに<strong>ログイン</strong> → ②
-              <strong>不動産請求画面</strong>へ進む → ③このボタンで地図を開く →
-              ④住所で検索 → ⑤地図を拡大 → ⑥<strong>該当の筆をクリック</strong> →
+              <strong>不動産請求画面</strong>へ進む → ③
+              <strong>その画面の「地番検索」から地図を開く</strong> → ④住所で検索 →
+              ⑤地図を拡大 → ⑥<strong>該当の筆をクリック</strong> →
               ⑦出てきた地番をここへ入れてください。
             </p>
           </div>
