@@ -209,7 +209,12 @@ export default function RegistryLocationSearchButton({
     }
   };
 
-  const showButton = state === "idle" || state === "done";
+  // ⚠done では検索ボタンを出さない(@codex #380 R4 P2)。done 中は物件の再取得が
+  //   保留されており(propertyRefreshPendingRef)、このボタンの handler は reset() で
+  //   それを流してから confirmSearch に入る=親が読み込み中に差し替わって
+  //   **始めたばかりの確認の流れごと捨てられる**。done で出すのは「閉じる」だけにし、
+  //   閉じて(=再取得して)から改めて検索してもらう。
+  const showButton = state === "idle";
 
   return (
     <div className="mb-4 flex flex-col gap-1">

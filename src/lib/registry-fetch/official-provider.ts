@@ -166,6 +166,14 @@ export const PAID_FLOW_EXTRA_TIMEOUT_MS = 10 * 60 * 1000;
  */
 const QUEUE_CANCEL_POLL_MS = 250;
 
+/**
+ * 順番待ちの実況心拍(60秒毎)の回数上限(@codex #380 R4 P2)。
+ * 先客が永久に解放しない故障では .finally が走らず interval が漏れるため、
+ * 自走で止まる上限を持つ。30回=30分は正常系では届かない
+ * (クライアントのHTTP待ちがずっと手前で切れる)。届いたら故障=実況より復旧が先。
+ */
+const MAX_QUEUE_HEARTBEATS = 30;
+
 function classifyRegistryFetchError(err: unknown): RegistryFetchError {
   if (err instanceof RegistryFetchError) return err;
   // Playwright 等の生エラー（URL/入力/selector が混入しうる）は分類コードのみへ正規化。
@@ -331,8 +339,18 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     //   保管期限(LIVE_VIEW_TTL_MS=3分)で**消え**、以降の step は -1 の no-op になる
     //   (=一番の目的だった診断が丸ごと失われる)。取得開始まで60秒ごとに固定文言を
     //   刻んで期限を更新する。step は同期・非throw契約なので interval から安全に呼べる。
+    // ⚠**回数の上限つき**(@codex #380 R4 P2)。先客が永久に解放しない故障だと
+    //   .finally も走らず interval が生き続け、詰まった行列の後続の数だけタイマーと
+    //   closure が漏れ、実況エントリの期限も無限に更新される。上限で自走停止する
+    //   (正常系はクライアントのHTTP待ちがずっと手前で切れる=上限に届くのは故障だけ)。
+    let queueBeats = 0;
     const queueHeartbeat = live
       ? setInterval(() => {
+          queueBeats += 1;
+          if (queueBeats > MAX_QUEUE_HEARTBEATS) {
+            clearInterval(queueHeartbeat!);
+            return;
+          }
           try {
             live.step("他の取得の完了を待っています(まだ課金されていません)");
           } catch {

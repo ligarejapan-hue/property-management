@@ -72,11 +72,19 @@ describe("orchestration→provider→adapter の受け渡し", () => {
     // 一括取得と同じ直列化を共有するため、先客で3分を超えると初手1行のまま
     // 実況が消える。60秒ごとの keepalive + 取得開始と finally の両方で clear。
     expect(PROVIDER).toMatch(
-      /queueHeartbeat = live[\s\S]{0,200}?他の取得の完了を待っています\(まだ課金されていません\)/,
+      /queueHeartbeat = live[\s\S]{0,400}?他の取得の完了を待っています\(まだ課金されていません\)/,
     );
     const clears =
-      PROVIDER.match(/clearInterval\(queueHeartbeat\)/g) ?? [];
-    expect(clears.length).toBe(2); // 取得開始時 + finally(不成立経路の漏れ防止)
+      PROVIDER.match(/clearInterval\(queueHeartbeat\!?\)/g) ?? [];
+    // 自走停止(上限) + 取得開始時 + finally(不成立経路の漏れ防止) の3箇所。
+    expect(clears.length).toBe(3);
+  });
+
+  it("⚠心拍には回数上限がある(@codex #380 R4 P2: 行列が永久に詰まる故障でタイマーを漏らさない)", () => {
+    expect(PROVIDER).toMatch(/const MAX_QUEUE_HEARTBEATS = 30;/);
+    expect(PROVIDER).toMatch(
+      /queueBeats > MAX_QUEUE_HEARTBEATS[\s\S]{0,80}?clearInterval\(queueHeartbeat!\)/,
+    );
   });
 
   it("⚠課金後の待ちループに心拍を刻む(実況の保管期限3分を無言で超えない)", () => {
