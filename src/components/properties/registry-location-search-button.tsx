@@ -31,8 +31,6 @@ interface RegistryLocationSearchButtonProps {
    * server 側も 501 で enforce)。
    */
   purchaseEnabled: boolean;
-  /** 取得成功時に親へ通知（物件を再取得し registryStatus 等を反映する）。 */
-  onComplete: () => void;
   /** 物件の所在（ポップアップで画面にコピーしてもらう。⚠外部へは渡さない）。 */
   propertyAddress: string;
   /**
@@ -75,7 +73,6 @@ export default function RegistryLocationSearchButton({
   canAutoFetch,
   providerConfigured,
   purchaseEnabled,
-  onComplete,
   propertyAddress,
   propertyVersion,
   gpsLat,
@@ -192,8 +189,8 @@ export default function RegistryLocationSearchButton({
     const obtainLiveRef = safeRandomId();
     setLiveRef(obtainLiveRef);
     try {
-      // 成功レスポンス本文は参照しない（非 PII だが UI に持ち込まない）。取得結果は onComplete →
-      // 物件再取得で既存の権限ガード付きタブに反映する。
+      // 成功レスポンス本文は参照しない（非 PII だが UI に持ち込まない）。取得結果は
+      // 「閉じる」時の物件再取得(onPropertyRefresh)で既存の権限ガード付きタブに反映する。
       await obtainRegistryByCandidate(
         propertyId,
         selected.candidateRef,
@@ -201,7 +198,11 @@ export default function RegistryLocationSearchButton({
         obtainLiveRef,
       );
       setState("done");
-      onComplete();
+      // ⚠その場で親の再取得を呼ばない(@codex #380 R3 P2)。再取得は詳細ページを
+      //   読み込み中の画面へ差し替え、このボタンごと作り直される=**取得成功の実況
+      //   (最後のスクショと3分の見返し)が即座に消える**。地番保存(#373 R10 P2)と
+      //   同じく、流れを閉じるとき(reset)にまとめて流す。
+      propertyRefreshPendingRef.current = true;
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "謄本の取得に失敗しました");
       setState("error");
@@ -239,7 +240,20 @@ export default function RegistryLocationSearchButton({
       )}
 
       {state === "done" && (
-        <p className="text-[11px] text-green-600 dark:text-green-400">謄本を取得しました。</p>
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          <p className="text-green-600 dark:text-green-400" role="status">
+            謄本を取得しました。下の実況で仕上がりを確認できます。
+          </p>
+          {/* ⚠閉じたときに初めて物件を取り直す(@codex #380 R3 P2)。その場で取り直すと
+              詳細ページが読み込み中の画面に差し替わり、実況の見返しが即座に消える。 */}
+          <button
+            type="button"
+            onClick={reset}
+            className="rounded border border-gray-300 bg-white px-2 py-0.5 font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+          >
+            閉じる（物件情報を更新）
+          </button>
+        </div>
       )}
 
       {state === "cancelled" && (
