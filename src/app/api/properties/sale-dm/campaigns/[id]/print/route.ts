@@ -70,13 +70,12 @@ export async function GET(
     }
 
     // 拒否・宛先不明(terminal 反響)は**印刷の直前にもう一度**検査して除外する
-    // (@codex #384 R1 P1)。作成時の除外だけだと、作成〜印刷の間に記録された拒否が
-    // 素通りする。A(宛名CSV)の DL 時再検査と同じ関所を、B の最終出力(印刷)にも置く。
-    // Owner FOR SHARE を保持した tx 内で読む=terminal writer と直列化(除外判定だけを
-    // tx で行い、レンダリングは外で行う)。
-    const terminalDraftIds = visibleDrafts.length === 0
-      ? new Set<string>()
-      : await prisma.$transaction(async (tx) => {
+    // (@codex #384 R1 P1)。さらに、**印刷物(QR+HTML)の実体化までロック内で行う**
+    // (@codex #384 R2 P1): 除外判定だけ tx に入れて描画を外へ出すと、tx 終了〜描画の
+    // すき間に terminal writer が commit でき、選ばれ済みの宛先がそのまま刷られる。
+    // A(宛名CSV)が CSV の実体化を関所の内側で行うのと同じ境界の置き方。
+    // 宛先ゼロでもこの経路を通る(ロックは空で no-op・空ドキュメントを返す)。
+    const materialized = await prisma.$transaction(async (tx) => {
       const ownerIds = [
         ...new Set(
           visibleDrafts.flatMap((d) => [
@@ -91,55 +90,57 @@ export async function GET(
         ownerIds,
         [...new Set(visibleDrafts.map((d) => d.propertyId))],
       );
-      return new Set(
-        visibleDrafts
-          .filter((d) =>
-            isTerminalExcluded(exclusionSets, {
-              propertyId: d.propertyId,
-              ownerIds: [
-                ...(d.representativeOwnerId ? [d.representativeOwnerId] : []),
-                ...(d.draftOwners ?? []).map((o) => o.ownerId),
-              ],
-            }),
-          )
-          .map((d) => d.id),
+      const printableDrafts = visibleDrafts.filter(
+        (d) =>
+          !isTerminalExcluded(exclusionSets, {
+            propertyId: d.propertyId,
+            ownerIds: [
+              ...(d.representativeOwnerId ? [d.representativeOwnerId] : []),
+              ...(d.draftOwners ?? []).map((o) => o.ownerId),
+            ],
+          }),
       );
+      const excludedTerminalCount = visibleDrafts.length - printableDrafts.length;
+      // 全滅なら白紙を刷らせず理由を返す(作成時の ALL_EXCLUDED_TERMINAL と同じ扱い)。
+      if (printableDrafts.length === 0 && visibleDrafts.length > 0) {
+        throw new ApiError(
+          409,
+          "確定済みの宛先はすべて拒否・宛先不明が記録されたため印刷できません。宛先を作り直してください",
+          "ALL_EXCLUDED_TERMINAL",
+        );
+      }
+      const letters: LetterRenderInput[] = await Promise.all(
+        printableDrafts.map(async (d) => {
+          const artifacts = await buildTrackingArtifacts(d.trackingToken, trackingBaseUrl);
+          return {
+            designTemplate: d.variant.designTemplate,
+            body: d.body,
+            addresseeName: d.recipientName,
+            honorific: composeAddresseeHonorific(d.honorific, d.coOwnerCount),
+            recipientZip: d.recipientZip,
+            recipientAddress: d.recipientAddress,
+            senderName,
+            senderContact,
+            trackingToken: d.trackingToken,
+            trackingSlotHtml: renderTrackingSlotHtml(artifacts, { caption: "スマホで読み取り(無料査定)" }),
+          };
+        }),
+      );
+      return {
+        html: renderLetterSheetHtml(campaign.name, letters),
+        excludedTerminalCount,
+        printedCount: printableDrafts.length,
+      };
     });
-    const printableDrafts = visibleDrafts.filter((d) => !terminalDraftIds.has(d.id));
-    const excludedTerminalCount = visibleDrafts.length - printableDrafts.length;
-    // 全滅なら白紙を刷らせず理由を返す(作成時の ALL_EXCLUDED_TERMINAL と同じ扱い)。
-    if (printableDrafts.length === 0 && visibleDrafts.length > 0) {
-      throw new ApiError(
-        409,
-        "確定済みの宛先はすべて拒否・宛先不明が記録されたため印刷できません。宛先を作り直してください",
-        "ALL_EXCLUDED_TERMINAL",
-      );
-    }
-
-    const letters: LetterRenderInput[] = await Promise.all(
-      printableDrafts.map(async (d) => {
-        const artifacts = await buildTrackingArtifacts(d.trackingToken, trackingBaseUrl);
-        return {
-          designTemplate: d.variant.designTemplate,
-          body: d.body,
-          addresseeName: d.recipientName,
-          honorific: composeAddresseeHonorific(d.honorific, d.coOwnerCount),
-          recipientZip: d.recipientZip,
-          recipientAddress: d.recipientAddress,
-          senderName,
-          senderContact,
-          trackingToken: d.trackingToken,
-          trackingSlotHtml: renderTrackingSlotHtml(artifacts, { caption: "スマホで読み取り(無料査定)" }),
-        };
-      }),
-    );
-
-    let html = renderLetterSheetHtml(campaign.name, letters);
+    const { excludedTerminalCount, printedCount } = materialized;
+    let html = materialized.html;
     if (excludedTerminalCount > 0) {
-      // 黙って減らさない: 何通除外したかを印刷物の先頭に1行で示す(非PII=件数のみ)。
+      // 黙って減らさない: 何通除外したかを**画面にだけ**示す(@codex #384 R2 P2)。
+      // この文書は印刷用に開かれるため、素の div だと1通目の手紙の直前に
+      // 内部運用の注意書きが**お客様の紙面へ**刷り込まれる。@media print で隠す。
       html = html.replace(
         /<body([^>]*)>/,
-        `<body$1><div style="padding:8px 12px;border:2px solid #a00;margin:8px;font-size:14px">⚠拒否・宛先不明が記録された ${excludedTerminalCount} 件の宛先は、この印刷から除外しました。</div>`,
+        `<body$1><style>@media print{.pm-terminal-note{display:none !important}}</style><div class="pm-terminal-note" style="padding:8px 12px;border:2px solid #a00;margin:8px;font-size:14px">⚠拒否・宛先不明が記録された ${excludedTerminalCount} 件の宛先は、この印刷から除外しました(画面表示のみ・印刷には出ません)。</div>`,
       );
     }
 
@@ -150,7 +151,7 @@ export async function GET(
       targetTable: "dm_campaigns",
       // field_staff は visibleDrafts のみ印刷されるため、監査件数も実際に出力した可視分を記録する
       // (drafts.length だと担当外で隠れた宛先まで数えて実出力数を過大計上する)。
-      detail: { campaignId: id, count: printableDrafts.length, excludedTerminal: excludedTerminalCount, printedAt: new Date().toISOString() },
+      detail: { campaignId: id, count: printedCount, excludedTerminal: excludedTerminalCount, printedAt: new Date().toISOString() },
     });
 
     return new NextResponse(html, {

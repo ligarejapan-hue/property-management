@@ -123,9 +123,10 @@ describe("出力境界(確定・印刷・送付済み)にも同じ関所があ�
   const CONFIRM = read("src/app/api/properties/sale-dm/drafts/confirm/route.ts");
   const PRINT = read("src/app/api/properties/sale-dm/campaigns/[id]/print/route.ts");
   const MARK_SENT = read("src/app/api/properties/sale-dm/drafts/[id]/mark-sent/route.ts");
+  const EXPORT = read("src/app/api/properties/sale-dm/campaigns/[id]/export/route.ts");
 
   it("3つの route すべてが共有部品を import し、Owner ロック取得後に再評価する", () => {
-    for (const src of [CONFIRM, PRINT, MARK_SENT]) {
+    for (const src of [CONFIRM, PRINT, MARK_SENT, EXPORT]) {
       expect(src).toContain('from "@/lib/dm-batch/terminal-exclusion"');
       const lock = src.indexOf("lockOwnersForShare(");
       const excl = src.indexOf("findTerminalExclusions(");
@@ -141,6 +142,15 @@ describe("出力境界(確定・印刷・送付済み)にも同じ関所があ�
     expect(MARK_SENT.indexOf("findTerminalExclusions(")).toBeLessThan(
       MARK_SENT.indexOf('data: { status: "sent"'),
     );
+  });
+
+  it("⚠印刷とCSVは**実体化までロック内**(検査と出力の間に terminal writer の窓を作らない)", () => {
+    // @codex #384 R2 P1: 除外判定だけ tx に入れて描画/行構築を外に出すと、
+    // tx 終了〜実体化のすき間に記録された拒否が素通りする。
+    expect(PRINT.indexOf("renderLetterSheetHtml(")).toBeGreaterThan(PRINT.indexOf("$transaction"));
+    expect(EXPORT.indexOf("encodeCsv(")).toBeGreaterThan(EXPORT.indexOf("$transaction"));
+    // 除外注記は画面専用(お客様の紙面に刷らない)。
+    expect(PRINT).toContain("@media print{.pm-terminal-note{display:none");
   });
 
   it("印刷は除外件数を監査 detail に載せ、allowlist が通す(実物検証)", () => {

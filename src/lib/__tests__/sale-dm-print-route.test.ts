@@ -244,3 +244,20 @@ describe("印刷直前の terminal 再検査", () => {
     expect(detail.count).toBe(2);
   });
 });
+
+// 注記は**画面専用**(@codex #384 R2 P2): 印刷媒体ではお客様の紙面に内部運用の
+// 文言を刷り込まない。
+describe("除外注記は印刷に出ない", () => {
+  it("@media print で非表示にするスタイルと画面専用クラスが入る", async () => {
+    const dA2 = { ...draft, id: "rA", propertyId: "pA", representativeOwnerId: "oA", draftOwners: [{ ownerId: "oA" }], trackingToken: "tokA" };
+    const dB2 = { ...draft, id: "rB", propertyId: "pB", representativeOwnerId: "oB", draftOwners: [{ ownerId: "oB" }], trackingToken: "tokB" };
+    pm.dmRecipientDraft.findMany.mockResolvedValue([dA2, dB2]);
+    pm.propertyDmLog.findMany.mockResolvedValueOnce([
+      { ownerId: "oA", propertyId: null, logOwners: [] },
+    ]);
+    const res = await GET(req() as never, ctx);
+    const html = await res.text();
+    expect(html).toContain('class="pm-terminal-note"');
+    expect(html).toContain("@media print{.pm-terminal-note{display:none");
+  });
+});
