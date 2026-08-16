@@ -225,6 +225,58 @@ describe("⚠端から端まで：どんな入力を渡しても PII は出な�
   });
 });
 
+describe("⚠出力の語彙が閉じている（個別の抜け道でなく性質を固定する）", () => {
+  /**
+   * この診断は7回破られた。破られ方はすべて「入力のこの形は想定していなかった」。
+   * ⇒ **抜け道を1つずつ潰すのをやめ、「出力に載り得る語彙」そのものを固定する**。
+   *
+   * 許可リストに1つも当たらない入力だけを与えたとき、出力に残ってよいのは
+   * **自前の枠組み（tables/buttons/…）と数字・記号だけ**で、
+   * **英字も日本語も1文字も残らない**——これが成り立つ限り、未知の書き方が来ても漏れない。
+   */
+  const ADVERSARIAL = [
+    "井土ケ谷中町69-2", "田中太郎", "東京都千代田区丸の内", "yamada@example.com",
+    "090-1234-5678", "Yamada", "Tanaka_Taro", "tabitha", "Marunouchi",
+    "<script>alert(1)</script>", "山田 花子", "owner.Yamada", "＊＊＊",
+  ];
+
+  it("許可リストに当たらない入力だけを与えると、出力に英字も日本語も残らない", () => {
+    const out = formatRegistryPageProbe({
+      tables: ADVERSARIAL.map((v) => ({ id: v, headers: ADVERSARIAL, rowCount: 7 })),
+      buttons: ADVERSARIAL.flatMap((v) => [
+        { id: v, onclick: "", label: v, disabled: false },
+        { id: "", onclick: `${v}()`, label: v, disabled: true },
+        { id: "", onclick: `go('${v}')`, label: v, disabled: false },
+        { id: "", onclick: "go(`" + v + "`)", label: v, disabled: false },
+        { id: "", onclick: `go('${v}`, label: v, disabled: false },
+        { id: "", onclick: v, label: v, disabled: false },
+      ]),
+      tabs: ADVERSARIAL.map((v) => ({ label: v, onclick: `sel("${v}")` })),
+      known: {},
+    });
+
+    // 自前の枠組み（この検査の外側で決めた固定文字列）を取り除く。
+    const SCAFFOLD = [
+      "tables", "buttons", "tabs", "known", "rows", "no-id", "disabled",
+      "不明な形式", "切れた引数は伏せました", "不明", "他", "字",
+    ];
+    let residue = out;
+    for (const w of SCAFFOLD) residue = residue.split(w).join("");
+
+    // 残ってよいのは数字と記号だけ。英字・かな・漢字が1文字でもあれば漏れている。
+    const leaked = residue.match(/[A-Za-z぀-ヿ一-鿿]/g) ?? [];
+    expect(leaked.join(""), `出力に外部由来の文字が残っている: ${out.slice(0, 300)}`).toBe("");
+  });
+
+  it("この検査が空振りでないこと（素通しの整形なら落ちる）", () => {
+    // 同じ判定を「伏せていない出力」に当てて、ちゃんと検出できることを確かめる。
+    const naive = `tables{${ADVERSARIAL.join("|")}}`;
+    let residue = naive;
+    for (const w of ["tables"]) residue = residue.split(w).join("");
+    expect((residue.match(/[A-Za-z぀-ヿ一-鿿]/g) ?? []).length).toBeGreaterThan(0);
+  });
+});
+
 describe("識別子の許可リストは実際のセレクタ定義に由来する", () => {
   it("⚠許可した識別子はすべて auto-fetch のセレクタに実在する（推測で足していない）", () => {
     for (const id of KNOWN_SITE_IDENTIFIERS) {
