@@ -230,7 +230,13 @@ export function applyManualReaction(
     reactionStatus: manual.status,
     reactedAt: manual.reactedAt,
     reactionNote: manual.note,
-    reactionSource: "manual",
+    // ⚠**退避を残すときは「状態の出所」も残す**(@codex #385 R5 P2)。
+    //   見た目の status は同期由来のままで、利用者が直したのは日付・メモだけ。
+    //   ここで出所を manual に変えると、あとで返戻が取り消された(cleared)ときに
+    //   `if (isManual) return current` で早期 return し、**undeliverable のまま
+    //   固定されて物件の宛先不明フラグも解除されない**。出所を保てば cleared が
+    //   退避(refused)を正しく復元する。
+    reactionSource: keepRefusedShadow ? current.reactionSource : "manual",
     manualReactionShadow: keepRefusedShadow
       ? (current.manualReactionShadow ?? null)
       : null,

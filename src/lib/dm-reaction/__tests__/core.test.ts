@@ -424,3 +424,58 @@ describe("applySyncReaction: 退避拒否は同期undeliverableでも守る", ()
     expect(next.reactionSource).toBe("sale_dm_sync");
   });
 });
+
+// 返戻が取り消された(cleared)ときに退避拒否が復元されること(@codex #385 R5 P2)。
+// 退避を残すとき出所まで manual にすると、cleared が早期 return して
+// undeliverable のまま固定され、物件の宛先不明フラグも解除されない。
+describe("退避拒否と cleared の相互作用", () => {
+  const legacy: ReactionFields = {
+    reactionStatus: "undeliverable",
+    reactedAt: T1,
+    reactionNote: null,
+    reactionSource: "sale_dm_sync",
+    manualReactionShadow: { status: "refused", reactedAt: T1.toISOString(), note: null },
+  };
+
+  it("同status訂正では出所(sale_dm_sync)を保つ=退避を残すときだけ", () => {
+    const next = applyManualReaction(legacy, {
+      status: "undeliverable",
+      reactedAt: T2,
+      note: "メモ訂正",
+    });
+    expect(next.reactionSource).toBe("sale_dm_sync"); // 出所は維持
+    expect(next.reactedAt).toBe(T2); // 訂正は反映
+    expect(next.reactionNote).toBe("メモ訂正");
+    expect(isRefusalProtected(next)).toBe(true);
+  });
+
+  it("訂正 → 返戻の取り消し(cleared)で拒否が復元される(undeliverable固定にならない)", () => {
+    const corrected = applyManualReaction(legacy, {
+      status: "undeliverable",
+      reactedAt: T2,
+      note: null,
+    });
+    const cleared = applySyncReaction(corrected, { kind: "cleared", at: T2 });
+    expect(cleared.reactionStatus).toBe("refused");
+    expect(cleared.reactionSource).toBe("manual");
+    expect(cleared.manualReactionShadow).toBeNull();
+  });
+
+  it("別種別へ書き換えるときは従来どおり出所も manual になる", () => {
+    const next = applyManualReaction(legacy, { status: "replied", reactedAt: T2, note: null });
+    expect(next.reactionSource).toBe("manual");
+    expect(next.manualReactionShadow).toBeNull();
+  });
+
+  it("退避が無い通常行の訂正は従来どおり manual", () => {
+    const plain: ReactionFields = {
+      reactionStatus: "replied",
+      reactedAt: T1,
+      reactionNote: null,
+      reactionSource: "sale_dm_sync",
+      manualReactionShadow: null,
+    };
+    const next = applyManualReaction(plain, { status: "replied", reactedAt: T2, note: null });
+    expect(next.reactionSource).toBe("manual");
+  });
+});
