@@ -3,7 +3,10 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { KNOWN_PROBE_SELECTORS } from "@/lib/registry-fetch/page-probe";
+import {
+  KNOWN_PROBE_SELECTORS,
+  formatRegistryPageProbe,
+} from "@/lib/registry-fetch/page-probe";
 
 /**
  * 画面構造の診断（page-probe）が **PII / 物件特定情報を読まない**ことを、
@@ -87,6 +90,21 @@ describe("page-probe が読む範囲（PII 防御）", () => {
   it("診断が失敗しても本流を壊さない（握って警告のみ）", () => {
     expect(probeBody()).toMatch(/catch\s*\{[\s\S]*page-probe[\s\S]*unavailable/);
   });
+
+  it("⚠診断自身に期限がある（レンダラが固まっても元の失敗を投げ直せる）", () => {
+    // @codex #383 P2: 期限が無いと page.evaluate が解決せず、元の失敗が投げ直されない
+    // ＝ブラウザの後始末が走らず物件の取得ロックが解けない。
+    const body = probeBody();
+    expect(body).toContain("Promise.race");
+    expect(body).toContain("PAGE_PROBE_BUDGET_MS");
+    expect(body).toMatch(/budget exceeded/);
+  });
+
+  it("⚠期限は環境変数に依存しない（未設定の本番でも必ず効く）", () => {
+    expect(AUTO_FETCH).toMatch(/const PAGE_PROBE_BUDGET_MS = \d+;/);
+    const decl = AUTO_FETCH.match(/const PAGE_PROBE_BUDGET_MS = [^;]+;/)?.[0] ?? "";
+    expect(decl).not.toContain("process.env");
+  });
 });
 
 describe("診断を仕掛ける場所", () => {
@@ -109,6 +127,37 @@ describe("診断を仕掛ける場所", () => {
     expect(probeAt).toBeGreaterThan(-1);
     expect(chargeAt).toBeGreaterThan(-1);
     expect(probeAt).toBeLessThan(chargeAt);
+  });
+});
+
+describe("⚠端から端まで：どんな入力を渡しても PII は出ない", () => {
+  it("表・ボタン・タブに実データを詰めても、ログ文字列に原文が残らない", () => {
+    // 整形の入口に「実サイトから採れてしまい得る最悪の値」を入れ、出口を検査する。
+    const leaky = [
+      "井土ケ谷中町69-2",
+      "田中",
+      "東京都千代田区丸の内",
+      "yamada@example.com",
+      "090-1234-5678",
+    ];
+    const out = formatRegistryPageProbe({
+      tables: [{ id: "t", headers: leaky, rowCount: 1 }],
+      buttons: leaky.map((s) => ({
+        id: "",
+        onclick: `showOwner('${s}')`,
+        label: s,
+        disabled: false,
+      })),
+      tabs: leaky.map((s) => ({ label: s, onclick: `go('${s}')` })),
+      known: {},
+    });
+    for (const s of leaky) {
+      expect(out, `「${s}」が漏れている`).not.toContain(s);
+    }
+    // 部分片も残さない（前方一致で拾えないこと）。
+    for (const frag of ["井土ケ谷", "丸の内", "yamada", "1234"]) {
+      expect(out, `「${frag}」が漏れている`).not.toContain(frag);
+    }
   });
 });
 

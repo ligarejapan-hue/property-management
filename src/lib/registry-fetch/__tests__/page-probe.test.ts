@@ -4,7 +4,7 @@ import {
   KNOWN_PROBE_SELECTORS,
   formatRegistryPageProbe,
   maskProbeOnclick,
-  maskProbeText,
+  safeLabel,
   type RegistryPageProbe,
 } from "../page-probe";
 
@@ -15,26 +15,32 @@ import {
  * 個人情報および物件特定情報なので、**絶対にログへ出さない**。持ち帰るのは
  * 「どの表・ボタン・タブが在るか」という**構造だけ**。
  */
-describe("maskProbeText（見えている文字のマスク）", () => {
-  it("⚠数字は1桁でも伏せる（地番・所在が混ざっても部分的にも読めない）", () => {
-    expect(maskProbeText("井土ケ谷中町69-2")).toBe("井土ケ谷中町＊-＊");
-    expect(maskProbeText("令和7年8月16日")).toBe("令和＊年＊月＊日");
-    // 全角も同じ（サイトは全角で返すことがある）。
-    expect(maskProbeText("６９－２")).toBe("＊－＊");
+describe("safeLabel（見えている文字は許可リストだけ通す）", () => {
+  it("⚠許可リストに無い文字はそのまま出さない（数字を含まないPIIも塞ぐ）", () => {
+    // @codex #383 P1: 数字マスクだけでは所有者名・番地の無い町名が素通りしていた。
+    expect(safeLabel("田中")).toBe("(他:2字)");
+    expect(safeLabel("東京都千代田区丸の内")).toBe("(他:10字)");
+    expect(safeLabel("井土ケ谷中町69-2")).not.toContain("井土ケ谷");
+    expect(safeLabel("yamada@example.com")).toBe("(他:18字)");
   });
 
-  it("列見出しやボタン名はそのまま残る（構造の手がかりを潰さない）", () => {
-    expect(maskProbeText("請求種別")).toBe("請求種別");
-    expect(maskProbeText("請求")).toBe("請求");
-    expect(maskProbeText("次へ")).toBe("次へ");
+  it("サイトの固定文言はそのまま残る（構造の手がかりを潰さない）", () => {
+    expect(safeLabel("請求")).toBe("請求");
+    expect(safeLabel("請求種別")).toBe("請求種別");
+    expect(safeLabel("マイページ")).toBe("マイページ");
+    expect(safeLabel("未請求")).toBe("未請求");
   });
 
-  it("長すぎる文字は切り詰める", () => {
-    expect(maskProbeText("あ".repeat(80)).length).toBeLessThanOrEqual(40);
+  it("空白を潰してから照合する", () => {
+    expect(safeLabel("  請求 \n ")).toBe("請求");
   });
 
-  it("空白を潰し、前後を落とす", () => {
-    expect(maskProbeText("  請求  種別 \n ")).toBe("請求 種別");
+  it("空文字は空のまま", () => {
+    expect(safeLabel("   ")).toBe("");
+  });
+
+  it("長さの上限を持つ（極端な値でもログを壊さない）", () => {
+    expect(safeLabel("あ".repeat(5000))).toBe("(他:999字)");
   });
 });
 
@@ -118,13 +124,15 @@ describe("formatRegistryPageProbe（1行の診断ログ）", () => {
     expect(out).toContain("#fudosanIchiranTbl=yes");
   });
 
-  it("⚠数字を含む見出しは伏せられた形で出る（表の中身が紛れても漏れない）", () => {
+  it("⚠表の中身が見出しに紛れても漏れない（許可リストに無いので文字数だけ）", () => {
     const out = formatRegistryPageProbe({
       ...base,
-      tables: [{ id: "t1", headers: ["井土ケ谷中町69-2"], rowCount: 1 }],
+      tables: [{ id: "t1", headers: ["井土ケ谷中町69-2", "田中"], rowCount: 1 }],
     });
     expect(out).not.toContain("69-2");
-    expect(out).toContain("＊");
+    expect(out).not.toContain("井土ケ谷");
+    expect(out).not.toContain("田中");
+    expect(out).toContain("(他:");
   });
 
   it("要素が多くても打ち切る（ログを溢れさせない）", () => {

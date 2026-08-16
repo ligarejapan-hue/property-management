@@ -10,9 +10,13 @@
  *
  * ⚠**PII と物件特定情報を出さないこと**が本モジュールの最重要要件。
  *  - 表の**中身（tbody のセル）は一切読まない**。読むのは `thead` の列見出しと行数だけ。
- *  - 見えている文字（列見出し・ボタン名）は {@link maskProbeText} で **2桁以上の数字列を伏せる**。
- *    所在・地番・受付番号は必ず数字を含むため、万一まぎれても復元できない。
- *  - id / onclick は**コード上の識別子**（静的）なのでそのまま残す。これが無いと
+ *  - 表の**行の中にあるボタン・リンクも走査しない**。行アクションは id を持たず onclick に
+ *    その行の識別子が埋まる（@codex 提出前レビュー）。
+ *  - 見えている文字（列見出し・ボタン名）は {@link safeLabel} の**許可リスト**を通す。
+ *    ⚠当初は「数字を伏せれば安全」としたが、**数字を含まない PII は素通り**した
+ *    （所有者名、番地の無い町名。@codex #383 P1）。**伏せ字は匿名化ではない**。
+ *  - onclick は {@link maskProbeOnclick} で数字と非 ASCII を落とす（`selectTab('tabMy')` は残す）。
+ *  - id / name だけは**コード上の静的な識別子**なのでそのまま残す。これが無いと
  *    セレクタを特定できず診断の意味が無い。
  */
 
@@ -21,8 +25,6 @@ const MAX_TABLES = 12;
 const MAX_BUTTONS = 24;
 const MAX_TABS = 12;
 const MAX_HEADERS = 8;
-/** 見えている文字の最大長。 */
-export const MAX_PROBE_TEXT = 40;
 /** id / onclick の最大長。 */
 const MAX_ID = 60;
 
@@ -48,18 +50,80 @@ export interface RegistryPageProbe {
 }
 
 /**
- * 見えている文字を安全な形にする。**数字列は1桁でも `＊` へ潰す**。
- *
- * ⚠当初「2桁以上」にしたが、地番「69-2」が「＊-2」になり**末尾の1桁が残る**＝
- * 部分的に読めてしまう。列見出し・ボタン名に数字は要らない（要るのは id 側で、
- * そちらは {@link clipId} が数字を保つ）ので、**全桁潰すほうが安全で失うものが無い**。
+ * 見えている文字として**そのまま出してよい語**。サイトの固定 UI 文言だけを並べる。
+ * ⚠ここに無い語は一切出さない（{@link safeLabel}）。
  */
-export function maskProbeText(raw: string): string {
+export const STRUCTURAL_LABELS: readonly string[] = [
+  // 操作
+  "請求",
+  "確定",
+  "検索",
+  "選択",
+  "取消",
+  "キャンセル",
+  "閉じる",
+  "戻る",
+  "次へ",
+  "前へ",
+  "最新表示",
+  "表示・保存",
+  "ダウンロード",
+  "ログアウト",
+  "ログイン",
+  "すべての選択を取り消す",
+  "確定する",
+  // 画面・タブ
+  "マイページ",
+  "不動産請求",
+  "地番検索",
+  "請求内容選択",
+  "お知らせ",
+  "社内",
+  // 列見出し・状態
+  "種別",
+  "所在",
+  "地番",
+  "家屋番号",
+  "状態",
+  "請求種別",
+  "受付番号",
+  "請求日時",
+  "未請求",
+  "請求済",
+  "すべて",
+  "選択件数",
+  "一覧",
+  // 請求事項
+  "全部事項",
+  "所有者事項",
+  "地図",
+  "土地所在図/地積測量図",
+  "地役権図面",
+  "建物図面/各階平面図",
+  "共同担保目録",
+  "信託目録",
+  "要",
+  "不要",
+];
+
+const LABEL_SET = new Set(STRUCTURAL_LABELS);
+
+/**
+ * 見えている文字を**許可リスト方式**で安全にする。
+ *
+ * ⚠当初は「数字を潰せば安全」としたが、**数字を含まない PII は素通り**した
+ * （所有者名「田中」、番地を含まない町名「東京都千代田区丸の内」など。@codex #383 P1）。
+ * 伏せ字は匿名化ではない。この診断が読むのは**外部サイトの生きたページ**なので、
+ * **既知の固定文言だけを通し、それ以外は文字数だけにする**。
+ *
+ * 診断の価値は落ちない: どのボタン・列が在るかは id と {@link KNOWN_PROBE_SELECTORS} の
+ * 在/不在で分かる。未知の文言は「未知が N 個ある」と分かれば足りる。
+ */
+export function safeLabel(raw: string): string {
   const collapsed = raw.replace(/\s+/g, " ").trim();
-  const masked = collapsed.replace(/[0-9０-９]+/g, "＊");
-  return masked.length > MAX_PROBE_TEXT
-    ? `${masked.slice(0, MAX_PROBE_TEXT - 1)}…`
-    : masked;
+  if (collapsed === "") return "";
+  if (LABEL_SET.has(collapsed)) return collapsed;
+  return `(他:${Math.min(collapsed.length, 999)}字)`;
 }
 
 /** id / name は静的な識別子なので数字を保つ（`#cbnDlgChibanType0` の 0 が要る）。長さだけ切る。 */
@@ -69,14 +133,28 @@ function clipId(raw: string): string {
 }
 
 /**
- * onclick は**関数名だけ**を残し、引数の数字を潰す。
+ * onclick は**関数名と ASCII の引数だけ**を残す。
  *
- * ⚠id と扱いを分ける理由: onclick は `myPageDownload(12345)` のように**その行の識別子**
- * （受付番号相当）を引数に取り得る。診断に要るのは関数名（`selectTab`・`fuBtnForward`）
- * だけなので、数字を落としても情報は失われない。
+ * ⚠id と扱いを分ける理由:
+ *  - `myPageDownload(12345)` のように**その行の識別子**（受付番号相当）を取り得る → 数字を潰す。
+ *  - `showOwner('田中')` のように**日本語の引数**を取り得る → **非 ASCII は落とす**。
+ * 残したいのは `selectTab('tabMy')` / `fuBtnForward()` のような**ASCII の関数名と引数**で、
+ * これがセレクタを組み立てる手がかりになる。日本語も数字も、そこには要らない。
  */
 export function maskProbeOnclick(raw: string): string {
-  return clipId(raw.replace(/[0-9０-９]+/g, "＊"));
+  const noDigits = raw.replace(/[0-9０-９]+/g, "＊");
+  // ⚠**文字列引数は「短い英字の識別子」だけ残す**。非 ASCII を落とすだけでは
+  // `showOwner('yamada@example.com')` のような **ASCII の PII が素通り**した
+  // （このモジュールの端から端までの検査が自力で検出）。`selectTab('tabMy')` は残し、
+  // メールアドレス・ローマ字氏名・パス等は落とす。
+  const argsMasked = noDigits.replace(/(['"])(.*?)\1/g, (_m, quote, body) =>
+    /^[A-Za-z][A-Za-z＊_]{0,20}$/.test(body)
+      ? `${quote}${body}${quote}`
+      : `${quote}…${quote}`,
+  );
+  // 引用符の外に残った非 ASCII（日本語など）も連続ごとに 1 文字へ。
+  const asciiOnly = argsMasked.replace(/[^\x20-\x7E＊…]+/g, "…");
+  return clipId(asciiOnly);
 }
 
 function take<T>(items: T[], max: number): { shown: T[]; rest: number } {
@@ -96,7 +174,7 @@ export function formatRegistryPageProbe(probe: RegistryPageProbe): string {
   const tables = t.shown
     .map((tbl) => {
       const h = take(tbl.headers, MAX_HEADERS);
-      const headers = h.shown.map(maskProbeText).join("|") + suffix(h.rest);
+      const headers = h.shown.map(safeLabel).join("|") + suffix(h.rest);
       return `${clipId(tbl.id) || "(no-id)"}(rows=${tbl.rowCount}${headers ? `:${headers}` : ""})`;
     })
     .join(" ");
@@ -104,15 +182,14 @@ export function formatRegistryPageProbe(probe: RegistryPageProbe): string {
   const b = take(probe.buttons, MAX_BUTTONS);
   const buttons = b.shown
     .map((btn) => {
-      const who =
-        clipId(btn.id) || maskProbeOnclick(btn.onclick ?? "") || "(no-id)";
-      return `${who}[${maskProbeText(btn.label)}${btn.disabled ? ",disabled" : ""}]`;
+      const who = clipId(btn.id) || maskProbeOnclick(btn.onclick ?? "") || "(no-id)";
+      return `${who}[${safeLabel(btn.label)}${btn.disabled ? ",disabled" : ""}]`;
     })
     .join(" ");
 
   const tb = take(probe.tabs, MAX_TABS);
   const tabs = tb.shown
-    .map((tab) => `${maskProbeText(tab.label)}->${maskProbeOnclick(tab.onclick)}`)
+    .map((tab) => `${safeLabel(tab.label)}->${maskProbeOnclick(tab.onclick)}`)
     .join(" ");
 
   const known = Object.entries(probe.known)
