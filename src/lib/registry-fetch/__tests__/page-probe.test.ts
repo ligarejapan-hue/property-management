@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   KNOWN_PROBE_SELECTORS,
   formatRegistryPageProbe,
+  isSafeOnclickArg,
   maskProbeOnclick,
   safeLabel,
   type RegistryPageProbe,
@@ -52,6 +53,25 @@ describe("maskProbeOnclick（onclick は関数名だけ残す）", () => {
   it("関数名は残る＝セレクタの手がかりを潰さない", () => {
     expect(maskProbeOnclick("selectTab('tabMy')")).toBe("selectTab('tabMy')");
     expect(maskProbeOnclick("fuBtnForward()")).toBe("fuBtnForward()");
+  });
+
+  it("⚠英字だけの引数も通さない（氏名のローマ字が素通りしていた）", () => {
+    // @codex #383 P1(2度目): 「短い英字なら安全」という推測が誤りだった。
+    expect(maskProbeOnclick("showOwner('Yamada')")).toBe("showOwner('…6字')");
+    expect(maskProbeOnclick("showOwner('Tanaka_Taro')")).toBe("showOwner('…11字')");
+    expect(maskProbeOnclick("go('yamada@example.com')")).not.toContain("yamada");
+  });
+
+  it("通すのはタブの識別子だけ（診断に要るのはこれだけ）", () => {
+    expect(isSafeOnclickArg("tabMy")).toBe(true);
+    expect(isSafeOnclickArg("tabFudosan")).toBe(true);
+    expect(isSafeOnclickArg("Yamada")).toBe(false);
+    expect(isSafeOnclickArg("tab")).toBe(false);
+    expect(isSafeOnclickArg("")).toBe(false);
+  });
+
+  it("未知のタブ名は文字数で分かる（必要になったら明示的に足せる）", () => {
+    expect(maskProbeOnclick("selectTab('Mypage')")).toBe("selectTab('…6字')");
   });
 
   it("長すぎるものは切る", () => {

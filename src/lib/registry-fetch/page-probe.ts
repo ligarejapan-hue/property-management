@@ -143,18 +143,29 @@ function clipId(raw: string): string {
  */
 export function maskProbeOnclick(raw: string): string {
   const noDigits = raw.replace(/[0-9０-９]+/g, "＊");
-  // ⚠**文字列引数は「短い英字の識別子」だけ残す**。非 ASCII を落とすだけでは
-  // `showOwner('yamada@example.com')` のような **ASCII の PII が素通り**した
-  // （このモジュールの端から端までの検査が自力で検出）。`selectTab('tabMy')` は残し、
-  // メールアドレス・ローマ字氏名・パス等は落とす。
-  const argsMasked = noDigits.replace(/(['"])(.*?)\1/g, (_m, quote, body) =>
-    /^[A-Za-z][A-Za-z＊_]{0,20}$/.test(body)
+  // ⚠**文字列引数も許可リストで通す**。ここは2度間違えた場所（@codex #383 P1×2）。
+  //   1度目: 非 ASCII を落とすだけ → `showOwner('yamada@example.com')` が素通り。
+  //   2度目: 「短い英字なら安全」 → `showOwner('Yamada')` `showOwner('Tanaka_Taro')` が素通り。
+  // **「たぶん安全な形」を推測するのをやめる**。この診断が引数として必要なのは
+  // **タブの識別子だけ**（`selectTab('tabMy')` からセレクタを組み立てる）なので、
+  // `tab` で始まるものだけ通し、それ以外は**文字数だけ**にする。
+  // 未知のタブ名が出たら `'…9字'` と分かるので、必要ならその時に明示的に足す。
+  const argsMasked = noDigits.replace(/(['"])(.*?)\1/g, (_m, quote, body: string) =>
+    isSafeOnclickArg(body)
       ? `${quote}${body}${quote}`
-      : `${quote}…${quote}`,
+      : `${quote}…${Math.min(body.length, 99)}字${quote}`,
   );
   // 引用符の外に残った非 ASCII（日本語など）も連続ごとに 1 文字へ。
-  const asciiOnly = argsMasked.replace(/[^\x20-\x7E＊…]+/g, "…");
+  const asciiOnly = argsMasked.replace(/[^\x20-\x7E＊…字]+/g, "…");
   return clipId(asciiOnly);
+}
+
+/**
+ * onclick の文字列引数のうち、そのまま出してよいもの。
+ * ⚠**タブの識別子だけ**。ここを緩めると PII が出る（過去に2度やった）。
+ */
+export function isSafeOnclickArg(body: string): boolean {
+  return /^tab[A-Za-z＊]{1,15}$/.test(body);
 }
 
 function take<T>(items: T[], max: number): { shown: T[]; rest: number } {

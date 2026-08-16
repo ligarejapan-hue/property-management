@@ -2375,8 +2375,12 @@ function createPlaywrightRegistryPage(
           { state: "attached", timeout: DIALOG_RESULT_TIMEOUT_MS },
         );
         reportLive("マイページの請求一覧へ移動しています(まだ課金されていません)");
-        await domClick(REGISTRY_SELECTORS.myPageTab);
+        // ⚠**タブのクリックも try の中に入れる**(@codex #383 P2)。クリックの最中に
+        // ページが遷移して実行コンテキストが壊れると domClick 自体が reject し、
+        // 待ちの外で失敗する＝**診断がまったく走らない**。診断が欲しいのは
+        // 「マイページへ移れなかった」という事象そのものなので、移動の試行ごと囲う。
         try {
+          await domClick(REGISTRY_SELECTORS.myPageTab);
           await page.waitForSelector(REGISTRY_SELECTORS.myPageTable, {
             state: "attached",
             timeout: DIALOG_RESULT_TIMEOUT_MS,

@@ -115,6 +115,20 @@ describe("診断を仕掛ける場所", () => {
     );
   });
 
+  it("⚠タブのクリックも try の内側にある（クリック自体が失敗しても診断が走る）", () => {
+    // @codex #383 P2: クリック中にページが遷移して実行コンテキストが壊れると
+    // domClick が reject する。try の外だと診断がまったく走らない。
+    const tabAt = AUTO_FETCH.indexOf("domClick(REGISTRY_SELECTORS.myPageTab)");
+    const probeAt = AUTO_FETCH.indexOf('logRegistryPageProbe(page, "mypage-transition")');
+    expect(tabAt).toBeGreaterThan(-1);
+    expect(probeAt).toBeGreaterThan(tabAt);
+    // クリックの直前に try があること（間に catch を挟まない）。
+    const before = AUTO_FETCH.slice(0, tabAt);
+    const lastTry = before.lastIndexOf("try {");
+    const lastCatch = before.lastIndexOf("catch");
+    expect(lastTry).toBeGreaterThan(lastCatch);
+  });
+
   it("採取しても例外は握りつぶさず投げ直す（失敗は失敗のまま扱う）", () => {
     expect(AUTO_FETCH).toMatch(
       /logRegistryPageProbe\(\s*page,\s*"mypage-transition"\s*\);\s*throw transitionErr;/,
@@ -139,6 +153,10 @@ describe("⚠端から端まで：どんな入力を渡しても PII は出な�
       "東京都千代田区丸の内",
       "yamada@example.com",
       "090-1234-5678",
+      // ⚠ASCII の英字だけの値も PII になる（@codex #383 P1 の2度目の指摘）。
+      "Yamada",
+      "Tanaka_Taro",
+      "Marunouchi",
     ];
     const out = formatRegistryPageProbe({
       tables: [{ id: "t", headers: leaky, rowCount: 1 }],
