@@ -143,30 +143,38 @@ function clipId(raw: string): string {
  */
 export function maskProbeOnclick(raw: string): string {
   const noDigits = raw.replace(/[0-9０-９]+/g, "＊");
-  // ⚠**引用符が閉じていない＝どこかで切れている**。この形だと下の「引用符で囲まれた
-  // 引数」の正規表現が一致せず、中身が**素通り**する（@codex #383 P1・3度目。
-  // 採取側が長い onclick を切り詰めると閉じ引用符が落ちて実際に起きる）。
-  // **閉じていないものは失敗側に倒す**＝最初の引用符から後ろを丸ごと捨てる。
-  if (hasUnbalancedQuotes(noDigits)) {
-    const cut = noDigits.search(/['"]/);
-    const head = cut === -1 ? noDigits : noDigits.slice(0, cut);
-    return clipId(`${head.replace(/[^\x20-\x7E＊]+/g, "…")}…(切れた引数は伏せました)`);
+
+  // ⚠**入力から危ないものを取り除く方式をやめる**。この関数は4度破られた
+  // （@codex #383 P1×4）。数字だけ伏せる → 非 ASCII も落とす → 短い英字は通す →
+  // 手前で切ると引用符が落ちる → **バッククォート（テンプレート文字列）を見ていない**。
+  // 「取り除き漏れ」を1つずつ塞ぐ限り、次の書き方でまた破られる。
+  //
+  // **許可したものだけで出力を組み立てる**方式に変える。出力に載るのは
+  //   ①先頭の関数名（ASCII の識別子）②許可リストに通った引数 ③伏せた引数の文字数
+  // だけで、**入力のそれ以外の文字は一切出力へ運ばれない**。
+  const head = noDigits.match(/^\s*([A-Za-z_$][A-Za-z_$.＊]{0,40})\s*\(/);
+  if (!head) return "(不明な形式)";
+  const fnName = head[1];
+  const argsPart = noDigits.slice(head[0].length);
+
+  // 引用符が閉じていない＝どこかで切れている。中身を信用できないので失敗側へ倒す。
+  if (hasUnbalancedQuotes(argsPart)) return clipId(`${fnName}(…切れた引数は伏せました)`);
+
+  // 引用符（' " ` の3種すべて）で囲まれた引数だけを見る。
+  const quoted = [...argsPart.matchAll(/(['"`])(.*?)\1/g)];
+  if (quoted.length > 0) {
+    const args = quoted
+      .slice(0, 4)
+      .map(([, , body]) =>
+        isSafeOnclickArg(body)
+          ? `'${body}'`
+          : `'…${Math.min(body.length, 99)}字'`,
+      );
+    return clipId(`${fnName}(${args.join(",")})`);
   }
-  // ⚠**文字列引数も許可リストで通す**。ここは2度間違えた場所（@codex #383 P1×2）。
-  //   1度目: 非 ASCII を落とすだけ → `showOwner('yamada@example.com')` が素通り。
-  //   2度目: 「短い英字なら安全」 → `showOwner('Yamada')` `showOwner('Tanaka_Taro')` が素通り。
-  // **「たぶん安全な形」を推測するのをやめる**。この診断が引数として必要なのは
-  // **タブの識別子だけ**（`selectTab('tabMy')` からセレクタを組み立てる）なので、
-  // `tab` で始まるものだけ通し、それ以外は**文字数だけ**にする。
-  // 未知のタブ名が出たら `'…9字'` と分かるので、必要ならその時に明示的に足す。
-  const argsMasked = noDigits.replace(/(['"])(.*?)\1/g, (_m, quote, body: string) =>
-    isSafeOnclickArg(body)
-      ? `${quote}${body}${quote}`
-      : `${quote}…${Math.min(body.length, 99)}字${quote}`,
-  );
-  // 引用符の外に残った非 ASCII（日本語など）も連続ごとに 1 文字へ。
-  const asciiOnly = argsMasked.replace(/[^\x20-\x7E＊…字]+/g, "…");
-  return clipId(asciiOnly);
+  // 引用符で囲まれていない引数は**中身を出さない**（数字は既に ＊ なのでその印だけ残す）。
+  const inner = argsPart.slice(0, argsPart.lastIndexOf(")"));
+  return clipId(`${fnName}(${inner.trim() === "" ? "" : "＊"})`);
 }
 
 /**
@@ -177,10 +185,16 @@ export function isSafeOnclickArg(body: string): boolean {
   return /^tab[A-Za-z＊]{1,15}$/.test(body);
 }
 
-/** 引用符が閉じていない（＝途中で切れている）か。閉じていなければ失敗側に倒す。 */
+/**
+ * 引用符が閉じていない（＝途中で切れている）か。閉じていなければ失敗側に倒す。
+ * ⚠**バッククォートも数える**。テンプレート文字列 `showOwner(`Yamada`)` を見落として
+ * 素通りさせた（@codex #383 P1・4度目）。
+ */
 export function hasUnbalancedQuotes(s: string): boolean {
   return (
-    (s.match(/'/g)?.length ?? 0) % 2 !== 0 || (s.match(/"/g)?.length ?? 0) % 2 !== 0
+    (s.match(/'/g)?.length ?? 0) % 2 !== 0 ||
+    (s.match(/"/g)?.length ?? 0) % 2 !== 0 ||
+    (s.match(/`/g)?.length ?? 0) % 2 !== 0
   );
 }
 

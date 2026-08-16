@@ -49,11 +49,24 @@ describe("safeLabel（見えている文字は許可リストだけ通す）", (
 describe("maskProbeOnclick（onclick は関数名だけ残す）", () => {
   it("⚠引数の数字を潰す（行アクションの onclick に受付番号が入り得る）", () => {
     expect(maskProbeOnclick("myPageDownload(12345)")).toBe("myPageDownload(＊)");
+    expect(maskProbeOnclick("go(12345, 67)")).toBe("go(＊)");
   });
 
   it("関数名は残る＝セレクタの手がかりを潰さない", () => {
     expect(maskProbeOnclick("selectTab('tabMy')")).toBe("selectTab('tabMy')");
     expect(maskProbeOnclick("fuBtnForward()")).toBe("fuBtnForward()");
+  });
+
+  it("⚠バッククォート（テンプレート文字列）も通さない", () => {
+    // @codex #383 P1(4度目): ' と " しか見ておらず ` が素通りしていた。
+    expect(maskProbeOnclick("showOwner(`Yamada`)")).toBe("showOwner('…6字')");
+    expect(maskProbeOnclick("go(`井土ケ谷中町`)")).not.toContain("井土ケ谷");
+  });
+
+  it("⚠関数呼び出しの形でないものは出さない（未知の書き方に負けない）", () => {
+    expect(maskProbeOnclick("Yamada")).toBe("(不明な形式)");
+    expect(maskProbeOnclick("this.x='田中'")).toBe("(不明な形式)");
+    expect(maskProbeOnclick("")).toBe("(不明な形式)");
   });
 
   it("⚠英字だけの引数も通さない（氏名のローマ字が素通りしていた）", () => {

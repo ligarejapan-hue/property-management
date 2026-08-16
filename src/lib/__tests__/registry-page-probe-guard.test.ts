@@ -126,6 +126,23 @@ describe("診断を仕掛ける場所", () => {
     );
   });
 
+  it("⚠確定の直後から診断の内側にある（どの遷移で転んでも診断が走る）", () => {
+    // @codex #383 P2(2度目): 最後の待ちだけ囲うと、その手前の「遷移先の待ち」で
+    // 転んだときに診断がまったく走らない。確定を押した後をひとまとまりで囲う。
+    const confirmAt = AUTO_FETCH.indexOf("domClick(REGISTRY_SELECTORS.requestConfirmButton)");
+    const probeAt = AUTO_FETCH.indexOf('logRegistryPageProbe(page, "mypage-transition")');
+    expect(confirmAt).toBeGreaterThan(-1);
+    const between = AUTO_FETCH.slice(confirmAt, probeAt);
+    // 確定と診断のあいだに try が1つだけあり、その try より後に
+    // 「遷移先の待ち」「タブのクリック」「一覧の待ち」が全部入っている。
+    const tryAt = between.indexOf("try {");
+    expect(tryAt).toBeGreaterThan(-1);
+    const guarded = between.slice(tryAt);
+    expect(guarded).toContain("REGISTRY_SELECTORS.searchResult");
+    expect(guarded).toContain("domClick(REGISTRY_SELECTORS.myPageTab)");
+    expect(guarded).toContain("REGISTRY_SELECTORS.myPageTable");
+  });
+
   it("⚠タブのクリックも try の内側にある（クリック自体が失敗しても診断が走る）", () => {
     // @codex #383 P2: クリック中にページが遷移して実行コンテキストが壊れると
     // domClick が reject する。try の外だと診断がまったく走らない。
@@ -177,10 +194,15 @@ describe("⚠端から端まで：どんな入力を渡しても PII は出な�
         label: s,
         disabled: false,
       })),
-      // ⚠**閉じ引用符が落ちた形**も入れる（採取側の切り詰めで実際に起きる）。
+      // ⚠**引用符の3種すべて**と、**閉じ引用符が落ちた形**、**関数呼び出しでない形**を入れる。
+      // このPRで破られた経路（' " ` / 切れた引数 / 素の代入）を全部並べる。
       tabs: leaky.flatMap((s) => [
         { label: s, onclick: `go('${s}')` },
+        { label: s, onclick: `go("${s}")` },
+        { label: s, onclick: "go(`" + s + "`)" },
         { label: s, onclick: `go('${s}` },
+        { label: s, onclick: `this.owner='${s}'` },
+        { label: s, onclick: s },
       ]),
       known: {},
     });

@@ -2374,17 +2374,20 @@ function createPlaywrightRegistryPage(
 
         reportLive("請求条件を確定しています(まだ課金されていません)");
         await domClick(REGISTRY_SELECTORS.requestConfirmButton);
-        // 遷移先は請求リスト(#fudosanIchiranTbl)またはマイページ(#myPageTable) [要live]。
-        await page.waitForSelector(
-          `${REGISTRY_SELECTORS.searchResult}, ${REGISTRY_SELECTORS.myPageTable}`,
-          { state: "attached", timeout: DIALOG_RESULT_TIMEOUT_MS },
-        );
-        reportLive("マイページの請求一覧へ移動しています(まだ課金されていません)");
-        // ⚠**タブのクリックも try の中に入れる**(@codex #383 P2)。クリックの最中に
-        // ページが遷移して実行コンテキストが壊れると domClick 自体が reject し、
-        // 待ちの外で失敗する＝**診断がまったく走らない**。診断が欲しいのは
-        // 「マイページへ移れなかった」という事象そのものなので、移動の試行ごと囲う。
+        // ⚠**確定の直後から診断の内側にする**(@codex #383 P2×2)。当初は最後の
+        // 「一覧待ち」だけを囲ったが、その手前の待ち・クリックで失敗すると
+        // **診断がまったく走らない**。ここで知りたいのは「確定の後どの画面に居るのか」
+        // なので、**確定を押した後の遷移をひとまとまりで囲う**。
+        //   ①遷移先の待ち(請求リスト or マイページ) ②マイページタブのクリック
+        //   ③マイページ一覧の待ち
+        // どれで転んでも同じ診断（その瞬間の画面構造）が要る。投げ直しは従来どおり。
         try {
+          // 遷移先は請求リスト(#fudosanIchiranTbl)またはマイページ(#myPageTable) [要live]。
+          await page.waitForSelector(
+            `${REGISTRY_SELECTORS.searchResult}, ${REGISTRY_SELECTORS.myPageTable}`,
+            { state: "attached", timeout: DIALOG_RESULT_TIMEOUT_MS },
+          );
+          reportLive("マイページの請求一覧へ移動しています(まだ課金されていません)");
           await domClick(REGISTRY_SELECTORS.myPageTab);
           await page.waitForSelector(REGISTRY_SELECTORS.myPageTable, {
             state: "attached",
