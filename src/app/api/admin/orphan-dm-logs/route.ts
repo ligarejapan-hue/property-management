@@ -10,7 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission, maskValue } from "@/lib/permissions";
 import { isPlainOwnerLevel } from "@/lib/dm-export";
-import { jstCalendarDay } from "@/lib/dm-reaction/core";
+import { isRefusalProtected, jstCalendarDay } from "@/lib/dm-reaction/core";
 import { writeAuditLog } from "@/lib/audit";
 
 // ---------- GET /api/admin/orphan-dm-logs ----------
@@ -81,6 +81,7 @@ export async function GET(request: NextRequest) {
           reactedAt: true,
           reactionNote: true,
           reactionSource: true,
+        manualReactionShadow: true,
           createdAt: true,
           owner: { select: { id: true, name: true } },
           logOwners: { select: { owner: { select: { id: true, name: true } } } },
@@ -100,6 +101,7 @@ export async function GET(request: NextRequest) {
       draftId: log.draftId,
       note: maskValue(log.note, ownerDisplayConfig.note),
       reactionStatus: log.reactionStatus,
+      refusalLocked: isRefusalProtected(log),
       // 同期由来の実時刻を UTC のまま切ると JST 0-9時が前日表示になる(#366 R8)
       reactedAt: log.reactedAt ? jstCalendarDay(log.reactedAt) : null,
       reactionNote: maskValue(log.reactionNote, ownerDisplayConfig.note),

@@ -343,3 +343,29 @@ describe("監査キー登録(ACTION_EXTRA_KEYS)", () => {
     expect(del).toEqual({ logId: "l1" });
   });
 });
+
+// 「拒否」が付いた記録の取消は管理者のみ(発注者指示 2026-08-17)。削除を許すと
+// 「拒否→変更は管理者のみ」の縛りが素通りになる(消して記録し直せば外せる)。
+describe("DELETE: 拒否付き記録の取消は管理者のみ", () => {
+  it("office_staff → 403 REFUSED_DELETE_ADMIN_ONLY・削除なし", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue({
+      id: LOG_ID, method: "mail", batchId: null, reactionStatus: "refused",
+    });
+    const res = await DELETE(deleteRequest(), deleteCtx);
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error.code).toBe("REFUSED_DELETE_ADMIN_ONLY");
+    expect(pm.propertyDmLog.delete).not.toHaveBeenCalled();
+  });
+
+  it("admin は取り消せる(200)", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u1", role: "admin" } as never);
+    pm.propertyDmLog.findFirst.mockResolvedValue({
+      id: LOG_ID, method: "mail", batchId: null, reactionStatus: "refused",
+    });
+    pm.propertyDmLog.count.mockResolvedValue(0);
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    const res = await DELETE(deleteRequest(), deleteCtx);
+    expect(res.status).toBe(200);
+  });
+});

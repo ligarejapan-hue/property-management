@@ -98,6 +98,23 @@ const VIRGIN: Omit<ReactionFields, "manualReactionShadow"> = {
 
 /** 同期イベント(replied|undeliverable|cleared)を現在値に適用した次状態を返す純関数。
  *  変化がなければ current と同一参照を返す(呼び出し側は書き込みを省略できる)。 */
+/**
+ * この行の「拒否」は守られているか(**退避=shadow も含む**・@codex #385 R2 P1)。
+ *
+ * 旧優先規則(2026-08-17以前)では同期 undeliverable が手動 refused を上書きし、
+ * 元の拒否は manualReactionShadow に退避されていた。見えている reactionStatus だけで
+ * 認可すると、この既存データの拒否を非管理者が編集・削除で消せてしまう。
+ * DB の書き換え(正規化スクリプト)は別承認が要るため、**判定側を広げる**方式で守る。
+ * 認可(PATCH/DELETE)・deletable 計算・UI施錠は必ずこの関数を使う(条件を散らさない)。
+ */
+export function isRefusalProtected(fields: {
+  reactionStatus: string | null;
+  manualReactionShadow: unknown;
+}): boolean {
+  if (fields.reactionStatus === "refused") return true;
+  return parseShadow(fields.manualReactionShadow)?.status === "refused";
+}
+
 export function applySyncReaction(
   current: ReactionFields,
   sync: { kind: "replied" | "undeliverable" | "cleared"; at: Date },
@@ -123,7 +140,22 @@ export function applySyncReaction(
   }
 
   // 同期replied は手動の実反響(replied/refused/undeliverable)には負ける。
-  // 同期undeliverable はここを素通り(≧手動terminal)。
+  // 同期undeliverable は原則ここを素通り(≧手動terminal)だが、**手動の「拒否」だけは
+  // 上書きしない**(発注者指示 2026-08-17)。拒否は「変更・取消は管理者のみ」の縛りの
+  // 根拠で、同期が undeliverable へ差し替えると reactionStatus が refused でなくなり、
+  // **縛りが自動処理経由で外れる**(提出前レビュー Important)。除外の効果はどちらも
+  // terminal で同じなので、拒否を保持しても宛先が復活することはない。物件側の
+  // 宛先不明フラグは返戻ドラフト(deliveryStatus)の実数から別途立つ=そちらも失わない。
+  // ⚠判定は **isRefusalProtected**(見た目 refused **または** 退避 refused)で行う
+  //   (@codex #385 R4 P1)。見えている status だけを見ると、旧データ
+  //   (見た目 undeliverable + 退避 refused)が「見た目のままの訂正」で
+  //   reactionSource=manual になった直後の再同期をここで止められず、
+  //   toShadow(current) が**退避の拒否を undeliverable の退避で上書き**して
+  //   保護が外れる(=2手目で任意種別へ変更できる)。isManual も外す:
+  //   同期由来のまま退避に拒否を抱えている行(まさに旧データ)を守るため。
+  if (sync.kind === "undeliverable" && isRefusalProtected(current)) {
+    return current;
+  }
   if (
     sync.kind === "replied" &&
     isManual &&
@@ -183,12 +215,30 @@ export function applyManualReaction(
   current: ReactionFields,
   manual: { status: ReactionStatus; reactedAt: Date | null; note: string | null },
 ): ReactionFields {
-  void current;
+  // ⚠**退避された拒否は、拒否以外へ書き換えるとき以外は消さない**(@codex #385 R3 P1)。
+  //   旧規則の既存データ(見た目 undeliverable + shadow=refused)に対し、非管理者でも
+  //   許している「見た目のままの日付・メモ訂正」で shadow を無条件クリアしていたため、
+  //   ①同じ status で訂正 → shadow が消えて isRefusalProtected が false になる
+  //   ②次の要求で任意の種別へ変更、の**2手で拒否を外せる**抜け道になっていた。
+  //   保持する条件は「退避が refused」かつ「今回 refused 以外へ書き換えていない」。
+  //   refused を明示的に書くとき/管理者が別種別へ変えるときは、その値が正になるので
+  //   退避は不要(=クリア)。
+  const shadow = parseShadow(current.manualReactionShadow);
+  const keepRefusedShadow =
+    shadow?.status === "refused" && manual.status === current.reactionStatus;
   return {
     reactionStatus: manual.status,
     reactedAt: manual.reactedAt,
     reactionNote: manual.note,
-    reactionSource: "manual",
-    manualReactionShadow: null,
+    // ⚠**退避を残すときは「状態の出所」も残す**(@codex #385 R5 P2)。
+    //   見た目の status は同期由来のままで、利用者が直したのは日付・メモだけ。
+    //   ここで出所を manual に変えると、あとで返戻が取り消された(cleared)ときに
+    //   `if (isManual) return current` で早期 return し、**undeliverable のまま
+    //   固定されて物件の宛先不明フラグも解除されない**。出所を保てば cleared が
+    //   退避(refused)を正しく復元する。
+    reactionSource: keepRefusedShadow ? current.reactionSource : "manual",
+    manualReactionShadow: keepRefusedShadow
+      ? (current.manualReactionShadow ?? null)
+      : null,
   };
 }

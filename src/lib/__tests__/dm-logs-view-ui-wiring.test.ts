@@ -59,7 +59,14 @@ describe("dm-logs-view: 表示強化と個別記録UI", () => {
     expect(VIEW).toContain("この送付記録を取り消しますか？");
     expect(VIEW).toMatch(/\{log\.deletable && \(/);
     // 取消可否の判定はサーバ側(GET が deletable を返す)
-    expect(ROUTE).toMatch(/deletable: log\.method !== "sale_dm" && log\.batchId == null/);
+    expect(ROUTE).toContain('log.method !== "sale_dm"');
+    expect(ROUTE).toContain("log.batchId == null");
+    // 拒否付きの取消は管理者のみ(発注者指示 2026-08-17)。DELETE 側の 403 と対で、
+    // deletable の計算にも同じ条件を織り込む(押しても必ず失敗するボタンを出さない)。
+    // 退避(shadow)された拒否も守るため isRefusalProtected に一本化(@codex #385 R2 P1)。
+    expect(ROUTE).toContain("!isRefusalProtected(log) || session.role === \"admin\"");
+    // UI施錠用に refusalLocked も返す(見えている status だけでは旧データを守れない)。
+    expect(ROUTE).toContain("refusalLocked: isRefusalProtected(log)");
   });
 
   it("投函日は今日既定・max=今日(未来はUIでも選べない)", () => {
@@ -134,5 +141,80 @@ describe("dm-logs-view: 権限が画面滞在中に変わった場合(#367 P2)",
   it("メモ権限が編集中に外れたらメモを送らない(反響本体の保存を巻き添えにしない)", () => {
     expect(VIEW).toMatch(/const noteFields = !canWriteNote/);
     expect(VIEW).toMatch(/\.\.\.noteFields,/);
+  });
+});
+
+// 「拒否」の二段確認と管理者施錠(発注者指示 2026-08-17)。
+describe("拒否の確認ボタンと管理者ロック(UI配線)", () => {
+  it("拒否への変更は1回目=予告のみ・2回目で保存(2回押しの作法)", () => {
+    expect(VIEW).toContain("refusalArmed");
+    // 予告文: 影響(全DMから外れる・戻せるのは管理者)を先に伝える。
+    expect(VIEW).toContain("宛名CSV・売却DMの両方から自動で外れます");
+    expect(VIEW).toContain("取り消し・変更は管理者のみになります");
+    // 1回目の押下では onSave せず予告を立てるだけ。
+    expect(VIEW).toMatch(/status === "refused" && log\.reactionStatus !== "refused" && !refusalArmed/);
+    expect(VIEW).toContain("拒否として保存（確定）");
+    // 種別を変えたら予告は解除(別種別で確定される事故を防ぐ)。
+    expect(VIEW).toContain("setRefusalArmed(false)");
+  });
+
+  it("既に拒否の記録は、管理者以外は**種別だけ**固定(日付・メモ訂正は許す=@codex #385 ③)", () => {
+    // 当初はフォーム全体を早期returnで塞いだが、サーバは status:"refused" のままの
+    // 日付・メモ訂正を意図的に許している=塞ぎすぎだった。selectのみ disabled。
+    // サーバ計算の refusalLocked(退避=shadow の拒否も含む)を正とする(@codex #385 R2 P1)。
+    expect(VIEW).toMatch(/log\.refusalLocked \?\? log\.reactionStatus === "refused"/);
+    expect(VIEW).toContain("disabled={refusedLocked}");
+    expect(VIEW).toContain("日付・メモは訂正できます。別の反響への変更・取消は管理者のみです");
+    // isAdmin は useSession の role 由来(F12 permissions 配列に role は無い)。
+    expect(VIEW).toContain('useSession');
+    expect(VIEW).toMatch(/role === "admin"/);
+    // ⚠モードのモック管理者を落とさない(@codex #385 R6 P2)。サーバは role:"admin" を
+    // 返すのに useSession は未認証=開発環境だけ操作不能になる。
+    expect(VIEW).toContain("USE_MOCK ||");
+    expect(VIEW).toContain('import { USE_MOCK } from "@/lib/api-client"');
+  });
+
+  it("孤児DM訂正の編集フォームにも同じ二段確認と種別固定がある(@codex #385 ④)", () => {
+    const ORPHAN = read("src/app/(dashboard)/admin/orphan-dm-logs/page.tsx");
+    expect(ORPHAN).toContain("refusalArmed");
+    expect(ORPHAN).toContain("拒否として保存（確定）");
+    expect(ORPHAN).toContain("disabled={refusedLocked}");
+    // 取消ボタンだけを隠す(訂正ボタンは出す=許可された訂正を塞がない)。
+    expect(ORPHAN).toContain("取消は管理者のみ");
+    expect(ORPHAN).toContain("USE_MOCK ||");
+  });
+});
+
+// ⚠再発源そのものを塞ぐ(@codex #385 R2/R3/R4 で同じ穴を3回踏んだ)。
+// 「保存済みの行が拒否か」の判定は必ず isRefusalProtected を通す。生の
+// `<行>.reactionStatus === "refused"` を認可経路に書くと、退避(shadow)された
+// 拒否を見落として保護が外れる。
+describe("守られた拒否の判定は1関数に集約されている", () => {
+  const AUTH_FILES = [
+    "src/app/api/properties/[id]/dm-logs/route.ts",
+    "src/app/api/properties/[id]/dm-logs/[logId]/route.ts",
+    "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts",
+    "src/app/api/admin/orphan-dm-logs/[logId]/route.ts",
+    "src/lib/dm-reaction/core.ts",
+  ];
+
+  it("認可4経路+coreは isRefusalProtected を使い、保存済み行の生比較を書かない", () => {
+    for (const rel of AUTH_FILES) {
+      const src = read(rel);
+      expect(src, `${rel} が isRefusalProtected を使っていない`).toContain("isRefusalProtected");
+      // 保存済みレコード(log/fresh/pre/current)の状態を直接 "refused" と比べない。
+      // ⚠body.status(=要求された新しい値)との比較は対象外(そちらは生で正しい)。
+      for (const varName of ["log", "fresh", "pre", "current"]) {
+        expect(
+          src.includes(`${varName}.reactionStatus === "refused"`),
+          `${rel}: ${varName}.reactionStatus === "refused" は isRefusalProtected を使うこと`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it("core の同期ガード(undeliverable)も isRefusalProtected 基準", () => {
+    const core = read("src/lib/dm-reaction/core.ts");
+    expect(core).toMatch(/sync\.kind === "undeliverable" && isRefusalProtected\(current\)/);
   });
 });

@@ -5,6 +5,7 @@ import {
   REACTION_LABELS,
   isTerminalReaction,
   applySyncReaction,
+  isRefusalProtected,
   applyManualReaction,
   type ReactionFields,
 } from "../core";
@@ -128,7 +129,10 @@ describe("applySyncReaction(同期イベントの適用)", () => {
     });
   });
 
-  it("(f) 同期undeliverable≧手動terminal: 手動refusedも上書きし退避する", () => {
+  it("(f) 同期undeliverable≧手動terminal——ただし手動refusedだけは保持する(2026-08-17仕様変更)", () => {
+    // 旧規則は「手動refusedも上書きし退避する」だった。発注者指示(拒否の変更は管理者のみ)
+    // により、同期が refused を undeliverable へ差し替えると縛りの根拠が消えるため、
+    // **手動の拒否だけは同期に負けない**へ変更。除外効果はどちらも terminal で同じ。
     const manualRefused: ReactionFields = {
       reactionStatus: "refused",
       reactedAt: T1,
@@ -140,13 +144,18 @@ describe("applySyncReaction(同期イベントの適用)", () => {
       kind: "undeliverable",
       at: T2,
     });
-    expect(next.reactionStatus).toBe("undeliverable");
-    expect(next.reactionSource).toBe("sale_dm_sync");
-    expect(next.manualReactionShadow).toEqual({
-      status: "refused",
-      reactedAt: T1.toISOString(),
-      note: null,
-    });
+    expect(next).toBe(manualRefused); // 参照ごと不変=書き込み自体が起きない
+
+    // 手動undeliverable は従来どおり同期undeliverableで更新される(規則変更は refused のみ)。
+    const manualUndeliv: ReactionFields = {
+      reactionStatus: "undeliverable",
+      reactedAt: T1,
+      reactionNote: null,
+      reactionSource: "manual",
+      manualReactionShadow: null,
+    };
+    const next2 = applySyncReaction(manualUndeliv, { kind: "undeliverable", at: T2 });
+    expect(next2.reactionSource).toBe("sale_dm_sync");
   });
 
   it("同期→同期の遷移(shadowなし)は最新の導出に従う(undeliverable→replied も置き換わる)", () => {
@@ -265,5 +274,208 @@ describe("applyManualReaction(手動保存の適用)", () => {
     expect(next.reactionStatus).toBe("no_response");
     expect(next.reactionSource).toBe("manual");
     expect(next.manualReactionShadow).toBeNull();
+  });
+});
+
+// 手動の「拒否」は同期 undeliverable にも負けない(発注者指示 2026-08-17)。
+// 同期が undeliverable へ差し替えると reactionStatus が refused でなくなり、
+// 「拒否の変更は管理者のみ」の縛りが自動処理経由で外れてしまう(提出前レビュー)。
+describe("applySyncReaction: 手動refusedの保持", () => {
+  it("manual refused は sync undeliverable に上書きされない", () => {
+    const current = {
+      reactionStatus: "refused",
+      reactedAt: new Date("2026-08-01T00:00:00Z"),
+      reactionNote: null,
+      reactionSource: "manual",
+      manualReactionShadow: null,
+    } as never;
+    const out = applySyncReaction(current, { kind: "undeliverable", at: new Date() } as never);
+    expect(out).toBe(current);
+  });
+
+  it("manual replied は従来どおり sync undeliverable に負ける(優先規則は拒否だけ変更)", () => {
+    const current = {
+      reactionStatus: "replied",
+      reactedAt: new Date("2026-08-01T00:00:00Z"),
+      reactionNote: null,
+      reactionSource: "manual",
+      manualReactionShadow: null,
+    } as never;
+    const out = applySyncReaction(current, { kind: "undeliverable", at: new Date() } as never);
+    expect((out as { reactionStatus: string }).reactionStatus).toBe("undeliverable");
+  });
+});
+
+// 退避(shadow)された拒否も「守られた拒否」(@codex #385 R2 P1)。
+describe("isRefusalProtected", () => {
+  it("見えている refused / shadow の refused の両方で true", () => {
+    expect(isRefusalProtected({ reactionStatus: "refused", manualReactionShadow: null })).toBe(true);
+    expect(
+      isRefusalProtected({
+        reactionStatus: "undeliverable",
+        manualReactionShadow: { status: "refused", reactedAt: null, note: null },
+      }),
+    ).toBe(true);
+  });
+
+  it("それ以外は false(壊れた shadow も false=施錠しすぎない)", () => {
+    expect(isRefusalProtected({ reactionStatus: "replied", manualReactionShadow: null })).toBe(false);
+    expect(
+      isRefusalProtected({
+        reactionStatus: "undeliverable",
+        manualReactionShadow: { status: "replied", reactedAt: null, note: null },
+      }),
+    ).toBe(false);
+    expect(isRefusalProtected({ reactionStatus: "no_response", manualReactionShadow: "壊れたJSON" })).toBe(false);
+  });
+});
+
+// 退避された拒否は「見た目のままの訂正」では消さない(@codex #385 R3 P1)。
+// 消してしまうと ①同status訂正でshadow消去 ②次に任意種別へ変更 の2手で拒否を外せる。
+describe("applyManualReaction: 退避拒否の保持", () => {
+  const shadowed: ReactionFields = {
+    reactionStatus: "undeliverable",
+    reactedAt: T1,
+    reactionNote: null,
+    reactionSource: "sale_dm_sync",
+    manualReactionShadow: { status: "refused", reactedAt: T1.toISOString(), note: null },
+  };
+
+  it("同じ見た目(undeliverable)のまま日付を直しても shadow の拒否は残る", () => {
+    const next = applyManualReaction(shadowed, {
+      status: "undeliverable",
+      reactedAt: T2,
+      note: null,
+    });
+    expect(next.reactedAt).toBe(T2);
+    expect(next.manualReactionShadow).toEqual(shadowed.manualReactionShadow);
+    expect(isRefusalProtected(next)).toBe(true); // 2手目の抜け道が塞がっている
+  });
+
+  it("別種別へ書き換えるときは shadow を消す(その値が正になる=admin操作)", () => {
+    const next = applyManualReaction(shadowed, { status: "replied", reactedAt: T2, note: null });
+    expect(next.manualReactionShadow).toBeNull();
+  });
+
+  it("refused を明示保存したときも shadow は不要(見た目が拒否になる)", () => {
+    const next = applyManualReaction(shadowed, { status: "refused", reactedAt: T2, note: null });
+    expect(next.manualReactionShadow).toBeNull();
+    expect(isRefusalProtected(next)).toBe(true);
+  });
+
+  it("拒否でない shadow は従来どおりクリア(規則変更は refused のみ)", () => {
+    const other: ReactionFields = {
+      ...shadowed,
+      manualReactionShadow: { status: "replied", reactedAt: T1.toISOString(), note: null },
+    };
+    const next = applyManualReaction(other, { status: "undeliverable", reactedAt: T2, note: null });
+    expect(next.manualReactionShadow).toBeNull();
+  });
+});
+
+// 保存直後の再同期でも退避拒否は守られる(@codex #385 R4 P1)。
+// 見た目 undeliverable + 退避 refused の旧データで、同status訂正→即再同期の連鎖。
+describe("applySyncReaction: 退避拒否は同期undeliverableでも守る", () => {
+  it("見た目 undeliverable + 退避 refused は sync undeliverable で不変(source 問わず)", () => {
+    for (const source of ["manual", "sale_dm_sync"] as const) {
+      const legacy: ReactionFields = {
+        reactionStatus: "undeliverable",
+        reactedAt: T1,
+        reactionNote: null,
+        reactionSource: source,
+        manualReactionShadow: { status: "refused", reactedAt: T1.toISOString(), note: null },
+      };
+      const next = applySyncReaction(legacy, { kind: "undeliverable", at: T2 });
+      expect(next, `source=${source}`).toBe(legacy);
+      expect(isRefusalProtected(next)).toBe(true);
+    }
+  });
+
+  it("2手の連鎖(同status訂正→再同期)を通しても保護が残る", () => {
+    const legacy: ReactionFields = {
+      reactionStatus: "undeliverable",
+      reactedAt: T1,
+      reactionNote: null,
+      reactionSource: "sale_dm_sync",
+      manualReactionShadow: { status: "refused", reactedAt: T1.toISOString(), note: null },
+    };
+    // ①非adminが許された「見た目のままの日付訂正」
+    const afterManual = applyManualReaction(legacy, {
+      status: "undeliverable",
+      reactedAt: T2,
+      note: null,
+    });
+    expect(isRefusalProtected(afterManual)).toBe(true);
+    // ②保存直後の再同期(reaction route が呼ぶ)
+    const afterSync = applySyncReaction(afterManual, { kind: "undeliverable", at: T2 });
+    expect(isRefusalProtected(afterSync)).toBe(true); // ここが false だと2手目で外せる
+  });
+
+  it("退避が拒否でない行は従来どおり同期undeliverableで更新される", () => {
+    const plain: ReactionFields = {
+      reactionStatus: "no_response",
+      reactedAt: null,
+      reactionNote: null,
+      reactionSource: "manual",
+      manualReactionShadow: null,
+    };
+    const next = applySyncReaction(plain, { kind: "undeliverable", at: T2 });
+    expect(next.reactionStatus).toBe("undeliverable");
+    expect(next.reactionSource).toBe("sale_dm_sync");
+  });
+});
+
+// 返戻が取り消された(cleared)ときに退避拒否が復元されること(@codex #385 R5 P2)。
+// 退避を残すとき出所まで manual にすると、cleared が早期 return して
+// undeliverable のまま固定され、物件の宛先不明フラグも解除されない。
+describe("退避拒否と cleared の相互作用", () => {
+  const legacy: ReactionFields = {
+    reactionStatus: "undeliverable",
+    reactedAt: T1,
+    reactionNote: null,
+    reactionSource: "sale_dm_sync",
+    manualReactionShadow: { status: "refused", reactedAt: T1.toISOString(), note: null },
+  };
+
+  it("同status訂正では出所(sale_dm_sync)を保つ=退避を残すときだけ", () => {
+    const next = applyManualReaction(legacy, {
+      status: "undeliverable",
+      reactedAt: T2,
+      note: "メモ訂正",
+    });
+    expect(next.reactionSource).toBe("sale_dm_sync"); // 出所は維持
+    expect(next.reactedAt).toBe(T2); // 訂正は反映
+    expect(next.reactionNote).toBe("メモ訂正");
+    expect(isRefusalProtected(next)).toBe(true);
+  });
+
+  it("訂正 → 返戻の取り消し(cleared)で拒否が復元される(undeliverable固定にならない)", () => {
+    const corrected = applyManualReaction(legacy, {
+      status: "undeliverable",
+      reactedAt: T2,
+      note: null,
+    });
+    const cleared = applySyncReaction(corrected, { kind: "cleared", at: T2 });
+    expect(cleared.reactionStatus).toBe("refused");
+    expect(cleared.reactionSource).toBe("manual");
+    expect(cleared.manualReactionShadow).toBeNull();
+  });
+
+  it("別種別へ書き換えるときは従来どおり出所も manual になる", () => {
+    const next = applyManualReaction(legacy, { status: "replied", reactedAt: T2, note: null });
+    expect(next.reactionSource).toBe("manual");
+    expect(next.manualReactionShadow).toBeNull();
+  });
+
+  it("退避が無い通常行の訂正は従来どおり manual", () => {
+    const plain: ReactionFields = {
+      reactionStatus: "replied",
+      reactedAt: T1,
+      reactionNote: null,
+      reactionSource: "sale_dm_sync",
+      manualReactionShadow: null,
+    };
+    const next = applyManualReaction(plain, { status: "replied", reactedAt: T2, note: null });
+    expect(next.reactionSource).toBe("manual");
   });
 });

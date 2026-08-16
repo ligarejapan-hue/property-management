@@ -12,7 +12,7 @@ import {
 import { hasPermission, hasExplicitWritePerm, type PermissionMap } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { isRealCalendarDate } from "@/lib/calendar-date";
-import {
+import { isRefusalProtected,
   REACTION_STATUSES,
   isTerminalReaction,
   applyManualReaction,
@@ -103,6 +103,9 @@ export async function PATCH(
         select: {
           id: true,
           ownerId: true,
+          // 拒否からの変更ガード用(下の needsOwnerLock)。退避(shadow)も見る。
+          reactionStatus: true,
+          manualReactionShadow: true,
           logOwners: { select: { ownerId: true } },
         },
       });
@@ -111,7 +114,10 @@ export async function PATCH(
       }
 
       // terminal を書くときは Owner 先頭 FOR UPDATE(R47)。親行ロックは親が無いので無し。
-      const needsOwnerLock = isTerminalReaction(body.status);
+      // ⚠現在値が「拒否」のときもロックする(@codex #385 R1 P2)。非terminalへの変更
+      // (拒否→連絡あり等)は従来条件だとロック無し=並行の拒否書込を上書きし得る。
+      const needsOwnerLock =
+        isTerminalReaction(body.status) || isRefusalProtected(pre);
       const preOwnerIds = [
         ...(pre.ownerId ? [pre.ownerId] : []),
         ...pre.logOwners.map((o) => o.ownerId),
@@ -153,6 +159,24 @@ export async function PATCH(
         }
       }
 
+      // 一度「拒否」と記録した相手を別の反響へ戻せるのは管理者だけ(発注者指示 2026-08-17)。
+      // ⚠この画面の入口(requireOrphanAdmin)は**権限ベース**(user_management:read 等)で、
+      // 個別付与により admin 以外も通り得る。物件側 reaction route と同じ縛りをここにも
+      // 敷かないと「1箇所だけ直した」抜け道になる(提出前レビュー Critical)。
+      // 退避(shadow)された拒否も守る(@codex #385 R2 P1・物件側と同条件)。
+      if (
+        isRefusalProtected(fresh) &&
+        body.status !== fresh.reactionStatus &&
+        body.status !== "refused" &&
+        session.role !== "admin"
+      ) {
+        throw new ApiError(
+          403,
+          "「拒否」を別の反響へ変更できるのは管理者のみです",
+          "REFUSED_CHANGE_ADMIN_ONLY",
+        );
+      }
+
       const next = applyManualReaction(fresh, {
         status: body.status,
         reactedAt: body.reactedAt
@@ -166,16 +190,32 @@ export async function PATCH(
               ? body.note.trim()
               : null,
       });
-      await tx.propertyDmLog.update({
-        where: { id: logId },
+      // 判定に使った状態のまま書く(条件付き更新・@codex #385 R1 P2)。所有者なしの
+      // 孤児はロック錨が無く、読取〜書込の間に並行の拒否が入り得る。状態が変わって
+      // いたら負けを認めて 409(再読込して判定し直してもらう)。
+      const updated = await tx.propertyDmLog.updateMany({
+        where: { id: logId, reactionStatus: fresh.reactionStatus },
         data: {
           reactionStatus: next.reactionStatus,
           reactedAt: next.reactedAt,
           reactionNote: next.reactionNote,
           reactionSource: next.reactionSource,
-          manualReactionShadow: Prisma.DbNull,
+          // ⚠**shadow は applyManualReaction の判断に従う**(@codex #385 R3 P1)。
+          // 常に DbNull にすると、退避された拒否が「見た目のままの日付訂正」で消え、
+          // 2手で拒否を外せる抜け道になる。next.manualReactionShadow が null のときだけ消す。
+          manualReactionShadow:
+            next.manualReactionShadow == null
+              ? Prisma.DbNull
+              : (next.manualReactionShadow as Prisma.InputJsonValue),
         },
       });
+      if (updated.count === 0) {
+        throw new ApiError(
+          409,
+          "記録の状態が変わりました。もう一度お試しください",
+          "RETRY",
+        );
+      }
       return next;
     });
 
@@ -214,12 +254,31 @@ export async function DELETE(
     await prisma.$transaction(async (tx) => {
       const log = await tx.propertyDmLog.findFirst({
         where: { id: logId, propertyId: null },
-        select: { id: true },
+        select: { id: true, reactionStatus: true, manualReactionShadow: true },
       });
       if (!log) {
         throw new ApiError(404, "孤児の送付記録が見つかりません", "NOT_FOUND");
       }
-      await tx.propertyDmLog.delete({ where: { id: logId } });
+      // 「拒否」が付いた記録の取消は管理者のみ(発注者指示 2026-08-17・物件側 DELETE と対)。
+      if (isRefusalProtected(log) && session.role !== "admin") {
+        throw new ApiError(
+          403,
+          "「拒否」が記録された送付記録を取り消せるのは管理者のみです",
+          "REFUSED_DELETE_ADMIN_ONLY",
+        );
+      }
+      // 認可した状態(判定に使った reactionStatus)のままの行だけ消す(条件付き削除・
+      // @codex #385 R1 P2)。読取〜削除の間に拒否が付いたら count=0 → 409。
+      const deleted = await tx.propertyDmLog.deleteMany({
+        where: { id: logId, reactionStatus: log.reactionStatus },
+      });
+      if (deleted.count === 0) {
+        throw new ApiError(
+          409,
+          "記録の状態が変わりました。もう一度お試しください",
+          "RETRY",
+        );
+      }
     });
 
     await writeAuditLog({

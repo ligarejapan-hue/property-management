@@ -16,7 +16,7 @@ import {
 } from "@/lib/property-record-guard";
 import { writeAuditLog } from "@/lib/audit";
 import { isRealCalendarDate } from "@/lib/calendar-date";
-import {
+import { isRefusalProtected,
   REACTION_STATUSES,
   isTerminalReaction,
   applyManualReaction,
@@ -112,6 +112,9 @@ export async function PATCH(
           ownerId: true,
           draftId: true,
           method: true,
+          // 拒否からの変更ガード用(下の needsOwnerLock)。退避(shadow)も見る。
+          reactionStatus: true,
+          manualReactionShadow: true,
           logOwners: { select: { ownerId: true } },
         },
       });
@@ -124,6 +127,11 @@ export async function PATCH(
       // 先にロックする。非 terminal の通常行はロック不要(ホットパス維持)。
       const needsOwnerLock =
         isTerminalReaction(body.status) ||
+        // ⚠現在値が「拒否」のときもロックする(発注者指示 2026-08-17 の管理者ガード)。
+        // body.status が非terminal(拒否→連絡あり等)だと従来条件ではロック無しになり、
+        // 「fresh 読取の直後に別tx が拒否を commit → こちらの update が上書き」の
+        // 競合窓で非管理者が拒否を外せてしまう。ロック下の fresh で判定して初めて確実。
+        isRefusalProtected(pre) ||
         pre.draftId != null ||
         pre.method === "sale_dm";
       const preOwnerIds = [
@@ -175,6 +183,27 @@ export async function PATCH(
         }
       }
       const prevStatus = fresh.reactionStatus;
+      // 一度「拒否」と記録した相手を別の反響へ戻せるのは管理者だけ(発注者指示 2026-08-17)。
+      // 拒否は宛名CSV・売却DMの全出口(作成/確定/印刷/CSV/送付済み)で自動除外の根拠に
+      // なる記録なので、外す操作は権限を絞る。**拒否のまま**日付・メモを直すのは
+      // 従来どおり誰でも可(誤記の訂正を塞がない)。ロック下で読み直した fresh の値で
+      // 判定する=先読みとの差し替え(TOCTOU)に負けない。
+      // ⚠**退避(shadow)された拒否も守る**(@codex #385 R2 P1)。旧優先規則の既存データは
+      // 見た目 undeliverable+shadow に refused を持つ。見えている status だけで認可すると
+      // その拒否を非管理者が消せる。許すのは「今の見た目のまま(日付/メモ訂正)」と
+      // 「refused へ戻す(強める方向)」だけ。
+      if (
+        isRefusalProtected(fresh) &&
+        body.status !== prevStatus &&
+        body.status !== "refused" &&
+        session.role !== "admin"
+      ) {
+        throw new ApiError(
+          403,
+          "「拒否」を別の反響へ変更できるのは管理者のみです",
+          "REFUSED_CHANGE_ADMIN_ONLY",
+        );
+      }
 
       const next = applyManualReaction(fresh, {
         status: body.status,
@@ -197,8 +226,13 @@ export async function PATCH(
           reactedAt: next.reactedAt,
           reactionNote: next.reactionNote,
           reactionSource: next.reactionSource,
-          // 手動保存は shadow を常にクリア(applyManualReaction の契約)
-          manualReactionShadow: Prisma.DbNull,
+          // ⚠**shadow は applyManualReaction の判断に従う**(@codex #385 R3 P1)。
+          // 常に DbNull にすると、退避された拒否が「見た目のままの日付訂正」で消え、
+          // 2手で拒否を外せる抜け道になる。next.manualReactionShadow が null のときだけ消す。
+          manualReactionShadow:
+            next.manualReactionShadow == null
+              ? Prisma.DbNull
+              : (next.manualReactionShadow as Prisma.InputJsonValue),
         },
       });
 

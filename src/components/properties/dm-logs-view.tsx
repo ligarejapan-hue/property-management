@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { USE_MOCK } from "@/lib/api-client";
 import { Loader2, Mail, ChevronLeft, ChevronRight, Plus, Trash2, MessageCircle } from "lucide-react";
 import { dmMethodLabel, dmTypeLabel } from "@/lib/dm-method-labels";
 import {
@@ -14,6 +15,7 @@ import {
   updatePropertyDmLogReaction,
 } from "@/lib/api-client";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
+import { useSession } from "next-auth/react";
 
 // GET /api/properties/[id]/dm-logs のレスポンス形（note/reactionNote は server-side でマスク済み）。
 interface DmLog {
@@ -26,6 +28,8 @@ interface DmLog {
   deletable: boolean;
   note: string | null;
   reactionStatus: string;
+  /** 退避(shadow)も含めた「守られた拒否」(サーバ計算・@codex #385 R2 P1)。 */
+  refusalLocked?: boolean;
   reactedAt: string | null;
   reactionNote: string | null;
   /** "manual" | "sale_dm_sync"(売却DMからの自動同期) | null */
@@ -164,6 +168,7 @@ function CreateLogForm({
 function ReactionEditor({
   log,
   canWriteNote,
+  isAdmin,
   onSave,
   onCancel,
   saving,
@@ -171,6 +176,8 @@ function ReactionEditor({
   log: DmLog;
   /** owner_note の edit/full を持つか(無ければメモ入力を出さない=サーバも 403 で拒否) */
   canWriteNote: boolean;
+  /** 拒否からの変更は管理者のみ(サーバも 403)。施錠表示の出し分けに使う。 */
+  isAdmin: boolean;
   onSave: (
     status: ReactionStatus,
     reactedAt: string,
@@ -191,12 +198,29 @@ function ReactionEditor({
   // 消したいときは「メモを消す」を明示チェック(note:null 送信=#366 R3)。
   const [note, setNote] = useState("");
   const [clearNote, setClearNote] = useState(false);
+  // 「拒否」は宛名CSV・売却DMの全出口で自動除外の根拠になる重い記録なので、
+  // **1回目は予告だけ**を出し、もう一度押したときだけ保存する(発注者指示 2026-08-17・
+  // 物件化モーダルの2回押し(Codex R9 P2)と同じ作法)。種別を変えたら予告は解除。
+  const [refusalArmed, setRefusalArmed] = useState(false);
+
+  // 既に「拒否」の記録は、管理者以外は**種別だけ**固定する(@codex #385 R1 P2 ③)。
+  // サーバは status:"refused" のままの日付・メモ訂正を意図的に許しているので、
+  // フォーム全体を塞ぐと許可された訂正まで潰す(塞ぎすぎ)。selectのみ disabled。
+  // サーバ計算の refusalLocked(退避された拒否も含む)を正とし、旧応答(フィールド無し)
+  // では見えている reactionStatus に落ちる(後方互換)。
+  const refusedLocked =
+    (log.refusalLocked ?? log.reactionStatus === "refused") && !isAdmin;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <select
         value={status}
-        onChange={(e) => setStatus(e.target.value as ReactionStatus)}
+        disabled={refusedLocked}
+        title={refusedLocked ? "別の反響への変更・取消は管理者のみです" : undefined}
+        onChange={(e) => {
+          setStatus(e.target.value as ReactionStatus);
+          setRefusalArmed(false);
+        }}
         className="rounded-md border border-gray-300 px-1.5 py-1 text-xs dark:border-gray-700 dark:bg-gray-800"
       >
         {REACTION_STATUSES.map((s) => (
@@ -236,13 +260,31 @@ function ReactionEditor({
           メモを消す
         </label>
       )}
+      {refusedLocked && (
+        <span className="basis-full text-xs text-amber-700 dark:text-amber-300">
+          日付・メモは訂正できます。別の反響への変更・取消は管理者のみです。
+        </span>
+      )}
+      {refusalArmed && (
+        <span className="basis-full text-xs text-red-700 dark:text-red-300">
+          この方は今後、宛名CSV・売却DMの両方から自動で外れます（別の物件も含む）。
+          取り消し・変更は管理者のみになります。もう一度押すと確定します。
+        </span>
+      )}
       <button
         type="button"
         disabled={saving}
-        onClick={() => onSave(status, reactedAt, note, clearNote)}
+        onClick={() => {
+          // 「拒否」への変更だけ 2 回押し(既に拒否の記録を拒否のまま保存するのは対象外)。
+          if (status === "refused" && log.reactionStatus !== "refused" && !refusalArmed) {
+            setRefusalArmed(true);
+            return;
+          }
+          onSave(status, reactedAt, note, clearNote);
+        }}
         className="rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
       >
-        {saving ? "保存中..." : "保存"}
+        {saving ? "保存中..." : refusalArmed ? "拒否として保存（確定）" : "保存"}
       </button>
       <button
         type="button"
@@ -319,6 +361,17 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
         : (permissions ?? []),
     [permissions, permissionsLoading, permissionsRefreshPending],
   );
+
+  // 拒否からの変更・取消は管理者のみ(サーバも 403)。透かし(screen-protection)と同じく
+  // useSession の role を使う(F12 の permissions 配列に role は載らないため)。
+  const { data: authSession } = useSession();
+  // ⚠モック(NEXT_PUBLIC_USE_MOCK=true)は auth をバイパスし、サーバ側 getApiSession が
+  // **role: "admin" のモック管理者**を返す(api-helpers.ts)。useSession は未認証のままなので、
+  // ここで役割を見ると開発環境だけ「管理者ではない」と判定され、モックAPIが許可している
+  // 操作を画面が塞ぐ(@codex #385 R6 P2)。dashboard-layout と同じ USE_MOCK フォールバックを使う。
+  const isAdmin =
+    USE_MOCK ||
+    (authSession?.user as { role?: string } | undefined)?.role === "admin";
 
   const canWrite = useMemo(
     () =>
@@ -567,6 +620,7 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
                         <ReactionEditor
                           log={log}
                           canWriteNote={canWriteNote}
+                          isAdmin={isAdmin}
                           saving={savingReaction}
                           onSave={(status, reactedAt, note, clearNote) =>
                             handleSaveReaction(

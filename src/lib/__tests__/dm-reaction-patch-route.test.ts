@@ -446,3 +446,97 @@ describe("監査キー登録(ACTION_EXTRA_KEYS)", () => {
     });
   });
 });
+
+// ============================================================================
+// 「拒否」からの変更は管理者のみ(発注者指示 2026-08-17)。拒否は宛名CSV・売却DMの
+// 全出口で自動除外の根拠になる記録なので、外す操作の権限を絞る。
+// ============================================================================
+describe("拒否からの変更は管理者のみ", () => {
+  it("office_staff が拒否→連絡あり → 403 REFUSED_CHANGE_ADMIN_ONLY・更新なし", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue(baseLog({ reactionStatus: "refused" }));
+    const res = await PATCH(patchRequest({ status: "replied" }), ctx);
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error.code).toBe("REFUSED_CHANGE_ADMIN_ONLY");
+    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
+  });
+
+  it("admin は拒否→連絡ありへ変更できる(200)", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u1", role: "admin" } as never);
+    pm.propertyDmLog.findFirst.mockResolvedValue(baseLog({ reactionStatus: "refused" }));
+    const res = await PATCH(patchRequest({ status: "replied" }), ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("office_staff でも拒否のまま(status=refused)の日付訂正は通る(誤記の修正を塞がない)", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue(baseLog({ reactionStatus: "refused" }));
+    const res = await PATCH(patchRequest({ status: "refused", reactedAt: "2026-08-01" }), ctx);
+    expect(res.status).toBe(200);
+  });
+});
+
+// 競合窓の封鎖: 現在値が拒否なら(変更先が非terminalでも)Owner ロックを取ってから判定する。
+describe("拒否からの変更はロック下で判定", () => {
+  it("拒否→連絡あり(admin)でも lockOwnersForUpdate が呼ばれる", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u1", role: "admin" } as never);
+    pm.propertyDmLog.findFirst.mockResolvedValue(baseLog({ reactionStatus: "refused" }));
+    const res = await PATCH(patchRequest({ status: "replied" }), ctx);
+    expect(res.status).toBe(200);
+    expect(vi.mocked(lockOwnersForUpdate)).toHaveBeenCalled();
+  });
+});
+
+// 退避(shadow)された拒否も守る(@codex #385 R2 P1)。旧優先規則の既存データ対応。
+describe("shadowに退避された拒否の保護", () => {
+  const shadowed = () => baseLog({
+    reactionStatus: "undeliverable",
+    reactionSource: "sale_dm_sync",
+    manualReactionShadow: { status: "refused", reactedAt: "2026-08-01T00:00:00.000Z", note: null },
+  });
+
+  it("非adminが別種別(replied)へ → 403・更新なし", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue(shadowed());
+    const res = await PATCH(patchRequest({ status: "replied" }), ctx);
+    expect(res.status).toBe(403);
+    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
+  });
+
+  it("非adminでも見た目のまま(undeliverable)の日付訂正は通る", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue(shadowed());
+    const res = await PATCH(patchRequest({ status: "undeliverable", reactedAt: "2026-08-02" }), ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("非adminでも refused へ戻す(強める方向)は通る", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue(shadowed());
+    const res = await PATCH(patchRequest({ status: "refused" }), ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("admin は別種別へ変更できる", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u1", role: "admin" } as never);
+    pm.propertyDmLog.findFirst.mockResolvedValue(shadowed());
+    const res = await PATCH(patchRequest({ status: "replied" }), ctx);
+    expect(res.status).toBe(200);
+  });
+});
+
+// 2手の抜け道が塞がっていること(@codex #385 R3 P1): 同status訂正でshadowが残る。
+describe("退避拒否は同status訂正で消えない(route)", () => {
+  it("undeliverable のまま日付訂正 → 保存データに shadow が残る", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue(baseLog({
+      reactionStatus: "undeliverable",
+      reactionSource: "sale_dm_sync",
+      manualReactionShadow: { status: "refused", reactedAt: "2026-08-01T00:00:00.000Z", note: null },
+    }));
+    const res = await PATCH(patchRequest({ status: "undeliverable", reactedAt: "2026-08-02" }), ctx);
+    expect(res.status).toBe(200);
+    const data = pm.propertyDmLog.update.mock.calls[0][0].data;
+    // Prisma.DbNull ではなく元の shadow が入る(=次の要求でも保護が効く)。
+    expect(data.manualReactionShadow).toEqual({
+      status: "refused",
+      reactedAt: "2026-08-01T00:00:00.000Z",
+      note: null,
+    });
+  });
+});

@@ -13,6 +13,7 @@ import {
   lockPropertyRecordForWrite,
 } from "@/lib/property-record-guard";
 import { writeAuditLog } from "@/lib/audit";
+import { isRefusalProtected } from "@/lib/dm-reaction/core";
 
 // ---------- DELETE /api/properties/:id/dm-logs/:logId ----------
 //
@@ -43,7 +44,7 @@ export async function DELETE(
       await lockPropertyRecordForWrite(tx, propertyId, session);
       const log = await tx.propertyDmLog.findFirst({
         where: { id: logId, propertyId },
-        select: { id: true, method: true, batchId: true, reactionStatus: true },
+        select: { id: true, method: true, batchId: true, reactionStatus: true, manualReactionShadow: true },
       });
       if (!log) {
         throw new ApiError(404, "送付記録が見つかりません", "NOT_FOUND");
@@ -63,6 +64,16 @@ export async function DELETE(
           409,
           "一括確定で記録された送付はここでは取り消せません",
           "BATCH_LOG",
+        );
+      }
+      // 「拒否」が付いた記録の取消は管理者のみ(発注者指示 2026-08-17)。削除を許すと
+      // 「拒否→変更は管理者のみ」(reaction route)の縛りが素通りになる(消して記録し
+      // 直せば拒否を外せる)。親行ロック保持中に読んだ値で判定。
+      if (isRefusalProtected(log) && session.role !== "admin") {
+        throw new ApiError(
+          403,
+          "「拒否」が記録された送付記録を取り消せるのは管理者のみです",
+          "REFUSED_DELETE_ADMIN_ONLY",
         );
       }
       await tx.propertyDmLog.delete({ where: { id: logId } });

@@ -71,7 +71,9 @@ vi.mock("@/lib/prisma", () => {
       count: vi.fn(async () => 0),
       findFirst: vi.fn(),
       update: vi.fn(async () => ({})),
+      updateMany: vi.fn(async () => ({ count: 1 })),
       delete: vi.fn(async () => ({})),
+      deleteMany: vi.fn(async () => ({ count: 1 })),
     },
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
@@ -97,7 +99,9 @@ const pm = prisma as unknown as {
     count: Mock;
     findFirst: Mock;
     update: Mock;
+    updateMany: Mock;
     delete: Mock;
+    deleteMany: Mock;
   };
   $transaction: Mock;
 };
@@ -177,7 +181,9 @@ beforeEach(() => {
   pm.propertyDmLog.count.mockResolvedValue(0);
   pm.propertyDmLog.findFirst.mockResolvedValue(orphanLog());
   pm.propertyDmLog.update.mockResolvedValue({});
+  pm.propertyDmLog.updateMany.mockResolvedValue({ count: 1 });
   pm.propertyDmLog.delete.mockResolvedValue({});
+  pm.propertyDmLog.deleteMany.mockResolvedValue({ count: 1 });
 });
 
 describe("GET /api/admin/orphan-dm-logs(検索・一覧)", () => {
@@ -260,7 +266,7 @@ describe("PATCH /api/admin/orphan-dm-logs/[logId](反響訂正)", () => {
     );
     const res = await PATCH(patchRequest({ status: "replied" }), idCtx);
     expect(res.status).toBe(403);
-    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
+    expect(pm.propertyDmLog.updateMany).not.toHaveBeenCalled();
   });
 
   it("propertyId 付きの行(孤児でない=findFirst 空振り)は 404", async () => {
@@ -281,7 +287,7 @@ describe("PATCH /api/admin/orphan-dm-logs/[logId](反響訂正)", () => {
       idCtx,
     );
     expect(res2.status).toBe(422);
-    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
+    expect(pm.propertyDmLog.updateMany).not.toHaveBeenCalled();
   });
 
   it("terminal(refused)は Owner FOR UPDATE(代表+連関)→更新の順(親行ロックは無し=R47)", async () => {
@@ -293,7 +299,7 @@ describe("PATCH /api/admin/orphan-dm-logs/[logId](反響訂正)", () => {
     );
     expect(
       vi.mocked(lockOwnersForUpdate).mock.invocationCallOrder[0],
-    ).toBeLessThan(pm.propertyDmLog.update.mock.invocationCallOrder[0]);
+    ).toBeLessThan(pm.propertyDmLog.updateMany.mock.invocationCallOrder[0]);
   });
 
   it("owner:write が無ければ訂正は 403(terminal は所有者の全物件の送付可否を左右する=#366 R12)", async () => {
@@ -304,7 +310,7 @@ describe("PATCH /api/admin/orphan-dm-logs/[logId](反響訂正)", () => {
     );
     const res = await PATCH(patchRequest({ status: "refused" }), idCtx);
     expect(res.status).toBe(403);
-    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
+    expect(pm.propertyDmLog.updateMany).not.toHaveBeenCalled();
   });
 
   it("owner_note の edit/full が無ければ note 付き保存は 403(#366 R10)", async () => {
@@ -313,7 +319,7 @@ describe("PATCH /api/admin/orphan-dm-logs/[logId](反響訂正)", () => {
     );
     const res = await PATCH(patchRequest({ status: "replied", note: "上書き" }), idCtx);
     expect(res.status).toBe(403);
-    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
+    expect(pm.propertyDmLog.updateMany).not.toHaveBeenCalled();
   });
 
   it("note 省略は既存メモを保持(マスク表示値の往復で消さない=#366 R2)", async () => {
@@ -321,7 +327,7 @@ describe("PATCH /api/admin/orphan-dm-logs/[logId](反響訂正)", () => {
       orphanLog({ reactionNote: "実メモ(サーバ保存値)" }),
     );
     await PATCH(patchRequest({ status: "replied" }), idCtx);
-    const data = pm.propertyDmLog.update.mock.calls[0][0].data;
+    const data = pm.propertyDmLog.updateMany.mock.calls[0][0].data;
     expect(data.reactionNote).toBe("実メモ(サーバ保存値)");
   });
 
@@ -333,7 +339,7 @@ describe("PATCH /api/admin/orphan-dm-logs/[logId](反響訂正)", () => {
       );
     const res = await PATCH(patchRequest({ status: "undeliverable" }), idCtx);
     expect(res.status).toBe(409);
-    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
+    expect(pm.propertyDmLog.updateMany).not.toHaveBeenCalled();
   });
 
   it("非 terminal は Owner ロックなし・applyManualReaction の形で update", async () => {
@@ -343,7 +349,7 @@ describe("PATCH /api/admin/orphan-dm-logs/[logId](反響訂正)", () => {
     );
     expect(res.status).toBe(200);
     expect(lockOwnersForUpdate).not.toHaveBeenCalled();
-    const data = pm.propertyDmLog.update.mock.calls[0][0].data;
+    const data = pm.propertyDmLog.updateMany.mock.calls[0][0].data;
     expect(data).toMatchObject({
       reactionStatus: "replied",
       reactionNote: "電話",
@@ -375,8 +381,8 @@ describe("DELETE /api/admin/orphan-dm-logs/[logId](取消)", () => {
     );
     const res = await DELETE(deleteRequest(), idCtx);
     expect(res.status).toBe(200);
-    expect(pm.propertyDmLog.delete).toHaveBeenCalledWith({
-      where: { id: LOG_ID },
+    expect(pm.propertyDmLog.deleteMany).toHaveBeenCalledWith({
+      where: { id: LOG_ID, reactionStatus: "no_response" },
     });
   });
 
@@ -384,7 +390,7 @@ describe("DELETE /api/admin/orphan-dm-logs/[logId](取消)", () => {
     pm.propertyDmLog.findFirst.mockResolvedValue(null);
     const res = await DELETE(deleteRequest(), idCtx);
     expect(res.status).toBe(404);
-    expect(pm.propertyDmLog.delete).not.toHaveBeenCalled();
+    expect(pm.propertyDmLog.deleteMany).not.toHaveBeenCalled();
   });
 
   it("owner:delete が無ければ削除は 403(所有者履歴の恒久削除=#366 R12)", async () => {
@@ -395,7 +401,7 @@ describe("DELETE /api/admin/orphan-dm-logs/[logId](取消)", () => {
     );
     const res = await DELETE(deleteRequest(), idCtx);
     expect(res.status).toBe(403);
-    expect(pm.propertyDmLog.delete).not.toHaveBeenCalled();
+    expect(pm.propertyDmLog.deleteMany).not.toHaveBeenCalled();
   });
 
   it("監査 dm_sent_record_delete {logId,orphan:true}", async () => {
@@ -453,5 +459,61 @@ describe("UI配線(source)", () => {
     // 消すのは明示操作(note: null 送信)
     expect(src).toContain("メモを消す");
     expect(src).toMatch(/\{ note: null \}/);
+  });
+});
+
+// 「拒否」の変更・取消は管理者のみ(発注者指示 2026-08-17)。この画面の入口は権限ベース
+// (user_management:read 等)で個別付与により admin 以外も通り得るため、物件側の
+// reaction/DELETE と同じ縛りをここにも敷く(1箇所だけ直した抜け道にしない)。
+describe("orphan: 拒否の変更・取消は管理者のみ", () => {
+  it("非admin(権限は満たす)が拒否→連絡あり → 403 REFUSED_CHANGE_ADMIN_ONLY・更新なし", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u1", role: "office_staff" } as never);
+    pm.propertyDmLog.findFirst.mockResolvedValue(orphanLog({ reactionStatus: "refused" }));
+    const res = await PATCH(patchRequest({ status: "replied" }) as never, idCtx);
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error.code).toBe("REFUSED_CHANGE_ADMIN_ONLY");
+    expect(pm.propertyDmLog.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("非adminが拒否付き記録を削除 → 403 REFUSED_DELETE_ADMIN_ONLY・削除なし", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u1", role: "office_staff" } as never);
+    pm.propertyDmLog.findFirst.mockResolvedValue(orphanLog({ reactionStatus: "refused" }));
+    const res = await DELETE(deleteRequest() as never, idCtx);
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error.code).toBe("REFUSED_DELETE_ADMIN_ONLY");
+    expect(pm.propertyDmLog.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("admin は拒否→連絡ありへ訂正できる(200)", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue(orphanLog({ reactionStatus: "refused" }));
+    const res = await PATCH(patchRequest({ status: "replied" }) as never, idCtx);
+    expect(res.status).toBe(200);
+  });
+});
+
+// 退避(shadow)された拒否も守る(@codex #385 R2 P1・物件側と同条件)。
+describe("orphan: shadow退避拒否の保護", () => {
+  const shadowed = () => orphanLog({
+    reactionStatus: "undeliverable",
+    reactionSource: "sale_dm_sync",
+    manualReactionShadow: { status: "refused", reactedAt: "2026-08-01T00:00:00.000Z", note: null },
+  });
+
+  it("非adminの別種別への変更は 403", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u1", role: "office_staff" } as never);
+    pm.propertyDmLog.findFirst.mockResolvedValue(shadowed());
+    const res = await PATCH(patchRequest({ status: "replied" }) as never, idCtx);
+    expect(res.status).toBe(403);
+    expect(pm.propertyDmLog.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("非adminの削除は 403", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u1", role: "office_staff" } as never);
+    pm.propertyDmLog.findFirst.mockResolvedValue(shadowed());
+    const res = await DELETE(deleteRequest() as never, idCtx);
+    expect(res.status).toBe(403);
+    expect(pm.propertyDmLog.deleteMany).not.toHaveBeenCalled();
   });
 });
