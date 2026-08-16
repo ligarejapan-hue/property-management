@@ -178,11 +178,23 @@ export function maskProbeOnclick(raw: string): string {
 }
 
 /**
- * onclick の文字列引数のうち、そのまま出してよいもの。
- * ⚠**タブの識別子だけ**。ここを緩めると PII が出る（過去に2度やった）。
+ * onclick の文字列引数のうち、そのまま出してよいもの。**完全一致の集合**。
+ *
+ * ⚠**パターン（前方一致・字数制限）にしない**。`^tab[A-Za-z]{1,15}$` にしたところ
+ * **`showOwner('tabitha')`（人名）が通った**（@codex #383 P1・6度目）。
+ * 「◯◯で始まれば安全」も推測。安全と言い切れるのは**列挙したものだけ**。
+ *
+ * ここに載せてよいのは、**コード側が実際にセレクタとして参照している値**に限る。
+ * 未知のタブ名は `'…9字'` と文字数だけ出るので、必要になったら**その値を確認してから**
+ * 明示的に足す（推測で足さない）。
  */
+export const SAFE_ONCLICK_ARGS: ReadonlySet<string> = new Set([
+  // auto-fetch.ts の myPageTab セレクタ `a[onclick*="selectTab('tabMy')"]` が参照する値。
+  "tabMy",
+]);
+
 export function isSafeOnclickArg(body: string): boolean {
-  return /^tab[A-Za-z＊]{1,15}$/.test(body);
+  return SAFE_ONCLICK_ARGS.has(body);
 }
 
 /**

@@ -185,6 +185,9 @@ describe("⚠端から端まで：どんな入力を渡しても PII は出な�
       "Yamada",
       "Tanaka_Taro",
       "Marunouchi",
+      // ⚠許可リストの前方一致を突いた値（@codex #383 P1・6度目）。
+      "tabitha",
+      "tabata",
     ];
     const out = formatRegistryPageProbe({
       tables: [{ id: "t", headers: leaky, rowCount: 1 }],

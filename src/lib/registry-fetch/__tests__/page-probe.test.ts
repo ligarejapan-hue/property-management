@@ -4,6 +4,7 @@ import {
   KNOWN_PROBE_SELECTORS,
   formatRegistryPageProbe,
   hasUnbalancedQuotes,
+  SAFE_ONCLICK_ARGS,
   isSafeOnclickArg,
   maskProbeOnclick,
   safeLabel,
@@ -76,12 +77,23 @@ describe("maskProbeOnclick（onclick は関数名だけ残す）", () => {
     expect(maskProbeOnclick("go('yamada@example.com')")).not.toContain("yamada");
   });
 
-  it("通すのはタブの識別子だけ（診断に要るのはこれだけ）", () => {
+  it("通すのは列挙した識別子だけ（前方一致にしない）", () => {
+    // @codex #383 P1(6度目): `^tab...` の前方一致だと人名 tabitha が通った。
     expect(isSafeOnclickArg("tabMy")).toBe(true);
-    expect(isSafeOnclickArg("tabFudosan")).toBe(true);
+    expect(isSafeOnclickArg("tabitha")).toBe(false);
+    expect(isSafeOnclickArg("tabFudosan")).toBe(false); // 未確認の値は足さない
     expect(isSafeOnclickArg("Yamada")).toBe(false);
     expect(isSafeOnclickArg("tab")).toBe(false);
     expect(isSafeOnclickArg("")).toBe(false);
+  });
+
+  it("⚠tab で始まる人名も伏せる", () => {
+    expect(maskProbeOnclick("showOwner('tabitha')")).toBe("showOwner('…7字')");
+    expect(maskProbeOnclick("showOwner('tabata')")).not.toContain("tabata");
+  });
+
+  it("許可リストは実際に参照しているセレクタの値だけ（推測で足さない）", () => {
+    expect([...SAFE_ONCLICK_ARGS]).toEqual(["tabMy"]);
   });
 
   it("未知のタブ名は文字数で分かる（必要になったら明示的に足せる）", () => {
