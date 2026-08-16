@@ -28,6 +28,11 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import {
+  KNOWN_PROBE_SELECTORS,
+  formatRegistryPageProbe,
+  type RegistryPageProbe,
+} from "@/lib/registry-fetch/page-probe";
+import {
   isReadableChiban,
   toHalfWidthDigits,
   unifyChibanSeparators,
@@ -1075,6 +1080,85 @@ export function summarizeRegistrySearchError(err: unknown): string {
   const raw = err instanceof Error ? err.message : "";
   const waiting = raw.split("\n").find((l) => l.includes("waiting for"));
   return waiting ? `${name}: ${waiting.trim()}` : name;
+}
+
+/**
+ * 画面構造だけを1行のログに落とす診断（[要live] の区間を実サイトで確定させるため）。
+ *
+ * ⚠**PII と物件特定情報を出さない**のがこの関数の存在理由。
+ *  - 表は `thead` の列見出しと行数だけ読む。**`tbody` のセルは読まない**
+ *    （所在・地番・所有者が入るのはそこ）。
+ *  - 見えている文字は maskProbeText が数字を全桁 `＊` に潰す。
+ *  - id / onclick はコード上の識別子なのでそのまま（これが無いと診断の意味が無い）。
+ *
+ * best-effort。**失敗しても本流に影響させない**（診断のせいで取得が壊れるのは本末転倒）。
+ */
+async function logRegistryPageProbe(
+  page: RegistryPageLike,
+  where: string,
+): Promise<void> {
+  try {
+    const json = (await page.evaluate((arg) => {
+      const { knownSels } = JSON.parse(arg) as {
+        probe: string;
+        knownSels: string[];
+      };
+      const text = (el: Element | null): string =>
+        (el?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+      const tables = Array.from(document.querySelectorAll("table")).map((tbl) => ({
+        id: tbl.id ?? "",
+        // ⚠**thead の th だけ**。tbody のセルは読まない（中身＝PII/物件特定情報）。
+        headers: Array.from(tbl.querySelectorAll("thead th")).map(text),
+        // 行数は件数の手がかり。中身は読まない。
+        rowCount: tbl.querySelectorAll("tbody tr").length,
+      }));
+      // ⚠**表の行の中にある要素は一切見ない**。行アクション（「表示・保存」等）は
+      // id を持たず onclick に**その行の識別子**が埋まる作りで、拾うと受付番号相当が
+      // 生で出る。見出し・タブ・ページ全体のボタンだけが診断に必要なので、tbody 配下は
+      // 丸ごと除外する（「表の中身は読まない」を要素走査にも同じ規則で適用）。
+      const outsideRows = (el: Element): boolean => el.closest("tbody") === null;
+      const buttons = Array.from(
+        document.querySelectorAll("button, input[type=button], input[type=submit]"),
+      )
+        .filter(outsideRows)
+        .map((el) => {
+          const b = el as HTMLButtonElement & { value?: string };
+          return {
+            id: b.id || b.name || "",
+            // id も name も無い要素は onclick で識別するしかないが、引数に識別子が
+            // 入り得るので**数字は落として**関数名だけ残す。
+            onclick: (b.getAttribute("onclick") ?? "").slice(0, 60),
+            label: text(b) || b.value || "",
+            disabled: b.disabled === true,
+          };
+        });
+      const tabs = Array.from(document.querySelectorAll("a[onclick]"))
+        .filter(outsideRows)
+        .map((el) => ({
+          label: text(el),
+          onclick: (el.getAttribute("onclick") ?? "").slice(0, 60),
+        }));
+      const known: Record<string, boolean> = {};
+      for (const sel of knownSels) {
+        try {
+          known[sel] = document.querySelector(sel) !== null;
+        } catch {
+          known[sel] = false;
+        }
+      }
+      return JSON.stringify({ tables, buttons, tabs, known });
+    }, JSON.stringify({
+      probe: "page-structure",
+      knownSels: [...KNOWN_PROBE_SELECTORS],
+    }))) as string;
+    console.warn(
+      `[registry-fetch] page-probe(${where}) ${formatRegistryPageProbe(
+        JSON.parse(json) as RegistryPageProbe,
+      )}`,
+    );
+  } catch {
+    console.warn(`[registry-fetch] page-probe(${where}) unavailable`);
+  }
 }
 
 /**
@@ -2337,10 +2421,19 @@ function createPlaywrightRegistryPage(
         );
         reportLive("マイページの請求一覧へ移動しています(まだ課金されていません)");
         await domClick(REGISTRY_SELECTORS.myPageTab);
-        await page.waitForSelector(REGISTRY_SELECTORS.myPageTable, {
-          state: "attached",
-          timeout: DIALOG_RESULT_TIMEOUT_MS,
-        });
+        try {
+          await page.waitForSelector(REGISTRY_SELECTORS.myPageTable, {
+            state: "attached",
+            timeout: DIALOG_RESULT_TIMEOUT_MS,
+          });
+        } catch (err) {
+          // ⚠**2026-08-16 の立ち会いテストが実際に止まった地点**(課金ゼロ)。「確定」までは
+          // 通り、マイページの一覧が現れない。ここは開発当初から [要live] のままで、
+          // 実サイトを見ないと直せない。推測で直すと立ち会いを1回無駄にするので、
+          // **この瞬間の画面構造だけ**を記録して持ち帰る(表の中身は読まない=page-probe の契約)。
+          await logRegistryPageProbe(page, "mypage-transition");
+          throw err;
+        }
         await sleep(1000);
         // 遷移でフィルタが既定に戻り得るため、選択フェーズも「未請求(検証つき)×1ページ」
         // を要求する(@codex R5/R6 P1)。満たさなければ課金前に中止(基準と同じ規則)。
