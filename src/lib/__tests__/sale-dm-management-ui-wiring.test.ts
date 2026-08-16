@@ -115,3 +115,28 @@ describe("売却DM 管理UI の配線", () => {
     expect(client).toContain("idempotencyKey");
   });
 });
+
+// 一括「確定分を送付済みに」は terminal(拒否/宛先不明)を**失敗ではなくスキップ**として
+// 扱い、成功分の反映(reload)を殺さない(@codex #384 R4 P2)。
+describe("一括送付済みの terminal スキップ(workspace)", () => {
+  const src = readFileSync(
+    join(process.cwd(), "src/app/(dashboard)/properties/sale-dm/[campaignId]/page.tsx"),
+    "utf8",
+  ).replace(/\r\n/g, "\n");
+
+  it("Promise.all の一括ではなく allSettled+TERMINAL_RECIPIENT の仕分けを通る", () => {
+    expect(src).not.toContain("Promise.all(confirmedIds");
+    expect(src).toContain("Promise.allSettled(ids.map((id) => markSaleDmDraftSent(id)))");
+    expect(src).toContain('apiErrorCode(r.reason) === "TERMINAL_RECIPIENT"');
+    // スキップ通知(件数)を出す=黙って減らさない。
+    expect(src).toContain("送付済みにしませんでした");
+    // helper 内で throw しない=runAction の reload(成功分の反映)を殺さない。
+    // ⚠説明コメントに「throw」の語が出るため、コメント行を除いたコードだけを検査する。
+    const helper = src.slice(src.indexOf("markConfirmedSentBulk = useCallback"), src.indexOf("], []);"));
+    const codeOnly = helper
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("//"))
+      .join("\n");
+    expect(codeOnly).not.toMatch(/\bthrow\b/);
+  });
+});
