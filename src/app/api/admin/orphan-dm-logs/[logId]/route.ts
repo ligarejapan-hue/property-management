@@ -103,6 +103,8 @@ export async function PATCH(
         select: {
           id: true,
           ownerId: true,
+          // 拒否からの変更ガード用(下の needsOwnerLock)。
+          reactionStatus: true,
           logOwners: { select: { ownerId: true } },
         },
       });
@@ -111,7 +113,10 @@ export async function PATCH(
       }
 
       // terminal を書くときは Owner 先頭 FOR UPDATE(R47)。親行ロックは親が無いので無し。
-      const needsOwnerLock = isTerminalReaction(body.status);
+      // ⚠現在値が「拒否」のときもロックする(@codex #385 R1 P2)。非terminalへの変更
+      // (拒否→連絡あり等)は従来条件だとロック無し=並行の拒否書込を上書きし得る。
+      const needsOwnerLock =
+        isTerminalReaction(body.status) || pre.reactionStatus === "refused";
       const preOwnerIds = [
         ...(pre.ownerId ? [pre.ownerId] : []),
         ...pre.logOwners.map((o) => o.ownerId),
@@ -182,8 +187,11 @@ export async function PATCH(
               ? body.note.trim()
               : null,
       });
-      await tx.propertyDmLog.update({
-        where: { id: logId },
+      // 判定に使った状態のまま書く(条件付き更新・@codex #385 R1 P2)。所有者なしの
+      // 孤児はロック錨が無く、読取〜書込の間に並行の拒否が入り得る。状態が変わって
+      // いたら負けを認めて 409(再読込して判定し直してもらう)。
+      const updated = await tx.propertyDmLog.updateMany({
+        where: { id: logId, reactionStatus: fresh.reactionStatus },
         data: {
           reactionStatus: next.reactionStatus,
           reactedAt: next.reactedAt,
@@ -192,6 +200,13 @@ export async function PATCH(
           manualReactionShadow: Prisma.DbNull,
         },
       });
+      if (updated.count === 0) {
+        throw new ApiError(
+          409,
+          "記録の状態が変わりました。もう一度お試しください",
+          "RETRY",
+        );
+      }
       return next;
     });
 
@@ -243,7 +258,18 @@ export async function DELETE(
           "REFUSED_DELETE_ADMIN_ONLY",
         );
       }
-      await tx.propertyDmLog.delete({ where: { id: logId } });
+      // 認可した状態(判定に使った reactionStatus)のままの行だけ消す(条件付き削除・
+      // @codex #385 R1 P2)。読取〜削除の間に拒否が付いたら count=0 → 409。
+      const deleted = await tx.propertyDmLog.deleteMany({
+        where: { id: logId, reactionStatus: log.reactionStatus },
+      });
+      if (deleted.count === 0) {
+        throw new ApiError(
+          409,
+          "記録の状態が変わりました。もう一度お試しください",
+          "RETRY",
+        );
+      }
     });
 
     await writeAuditLog({
