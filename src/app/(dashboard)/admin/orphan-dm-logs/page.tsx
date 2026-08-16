@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { USE_MOCK } from "@/lib/api-client";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
@@ -372,7 +373,12 @@ function OrphanRow({
   onDelete: (id: string) => void;
 }) {
   const { data: authSession } = useSession();
+  // ⚠モック(NEXT_PUBLIC_USE_MOCK=true)は auth をバイパスし、サーバ側 getApiSession が
+  // **role: "admin" のモック管理者**を返す(api-helpers.ts)。useSession は未認証のままなので、
+  // ここで役割を見ると開発環境だけ「管理者ではない」と判定され、モックAPIが許可している
+  // 操作を画面が塞ぐ(@codex #385 R6 P2)。dashboard-layout と同じ USE_MOCK フォールバックを使う。
   const isAdmin =
+    USE_MOCK ||
     (authSession?.user as { role?: string } | undefined)?.role === "admin";
   const names = [
     log.owner?.name ?? null,

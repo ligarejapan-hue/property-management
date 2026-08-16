@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { USE_MOCK } from "@/lib/api-client";
 import { Loader2, Mail, ChevronLeft, ChevronRight, Plus, Trash2, MessageCircle } from "lucide-react";
 import { dmMethodLabel, dmTypeLabel } from "@/lib/dm-method-labels";
 import {
@@ -364,7 +365,12 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
   // 拒否からの変更・取消は管理者のみ(サーバも 403)。透かし(screen-protection)と同じく
   // useSession の role を使う(F12 の permissions 配列に role は載らないため)。
   const { data: authSession } = useSession();
+  // ⚠モック(NEXT_PUBLIC_USE_MOCK=true)は auth をバイパスし、サーバ側 getApiSession が
+  // **role: "admin" のモック管理者**を返す(api-helpers.ts)。useSession は未認証のままなので、
+  // ここで役割を見ると開発環境だけ「管理者ではない」と判定され、モックAPIが許可している
+  // 操作を画面が塞ぐ(@codex #385 R6 P2)。dashboard-layout と同じ USE_MOCK フォールバックを使う。
   const isAdmin =
+    USE_MOCK ||
     (authSession?.user as { role?: string } | undefined)?.role === "admin";
 
   const canWrite = useMemo(

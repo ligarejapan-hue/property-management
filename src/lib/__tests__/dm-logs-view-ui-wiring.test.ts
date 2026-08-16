@@ -168,6 +168,10 @@ describe("拒否の確認ボタンと管理者ロック(UI配線)", () => {
     // isAdmin は useSession の role 由来(F12 permissions 配列に role は無い)。
     expect(VIEW).toContain('useSession');
     expect(VIEW).toMatch(/role === "admin"/);
+    // ⚠モードのモック管理者を落とさない(@codex #385 R6 P2)。サーバは role:"admin" を
+    // 返すのに useSession は未認証=開発環境だけ操作不能になる。
+    expect(VIEW).toContain("USE_MOCK ||");
+    expect(VIEW).toContain('import { USE_MOCK } from "@/lib/api-client"');
   });
 
   it("孤児DM訂正の編集フォームにも同じ二段確認と種別固定がある(@codex #385 ④)", () => {
@@ -177,6 +181,7 @@ describe("拒否の確認ボタンと管理者ロック(UI配線)", () => {
     expect(ORPHAN).toContain("disabled={refusedLocked}");
     // 取消ボタンだけを隠す(訂正ボタンは出す=許可された訂正を塞がない)。
     expect(ORPHAN).toContain("取消は管理者のみ");
+    expect(ORPHAN).toContain("USE_MOCK ||");
   });
 });
 
