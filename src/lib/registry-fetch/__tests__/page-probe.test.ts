@@ -219,6 +219,46 @@ describe("formatRegistryPageProbe（1行の診断ログ）", () => {
   });
 });
 
+describe("⚠この診断は「知りたいこと」に答えられるか（作って役に立たない、を防ぐ）", () => {
+  it("確定後に請求リスト画面で止まった場合、次の一手が決められる情報が出る", () => {
+    // 2026-08-16 の立ち会いで実際に起きた状況を想定して整形する。
+    // 表の中には所在・地番・所有者が居るが、診断はそこを読まない。
+    const out = formatRegistryPageProbe({
+      tables: [
+        { id: "fudosanIchiranTbl", headers: ["請求種別", "所在", "地番"], rowCount: 1 },
+        { id: "seikyuNaiyoTbl", headers: ["全部事項", "所有者事項"], rowCount: 0 },
+      ],
+      buttons: [
+        { id: "fuBtnForward", onclick: "", label: "確定", disabled: false },
+        { id: "seikyuJikkou", onclick: "", label: "請求", disabled: false },
+      ],
+      tabs: [
+        { label: "マイページ", onclick: "selectTab('tabMy')" },
+        { label: "不動産請求", onclick: "selectTab('tabFudosan')" },
+      ],
+      known: {
+        "#myPageTable": false,
+        "#myPageSeikyu": false,
+        "#fudosanIchiranTbl": true,
+        "a[onclick*=\"selectTab('tabMy')\"]": true,
+      },
+    });
+
+    // ①どの画面に居るか: 請求リストは在り、マイページの一覧は無い。
+    expect(out).toContain("#fudosanIchiranTbl=yes");
+    expect(out).toContain("#myPageTable=no");
+    // ②マイページのタブ自体は在る＝セレクタは合っている（押しても一覧が出ないのが問題）。
+    expect(out).toContain("selectTab('tabMy')\"]=yes");
+    // ③いまの画面に「請求」ボタンが在る＝id は想定と違うが**表示名で狙える**。
+    //   これが「マイページへ行かず、この画面で請求する」という修正方針の根拠になる。
+    expect(out).toMatch(/\(不明:\d+字\)\[請求\]/);
+    expect(out).toContain("#myPageSeikyu=no");
+
+    // ⚠それでいて、表の中身は1文字も出ていない。
+    for (const leak of ["井土ケ谷", "田中", "69-2"]) expect(out).not.toContain(leak);
+  });
+});
+
 describe("KNOWN_PROBE_SELECTORS", () => {
   it("マイページ遷移の失敗を切り分けるのに要る4つを含む", () => {
     for (const sel of [
