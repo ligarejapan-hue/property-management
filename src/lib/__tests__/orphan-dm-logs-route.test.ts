@@ -455,3 +455,34 @@ describe("UI配線(source)", () => {
     expect(src).toMatch(/\{ note: null \}/);
   });
 });
+
+// 「拒否」の変更・取消は管理者のみ(発注者指示 2026-08-17)。この画面の入口は権限ベース
+// (user_management:read 等)で個別付与により admin 以外も通り得るため、物件側の
+// reaction/DELETE と同じ縛りをここにも敷く(1箇所だけ直した抜け道にしない)。
+describe("orphan: 拒否の変更・取消は管理者のみ", () => {
+  it("非admin(権限は満たす)が拒否→連絡あり → 403 REFUSED_CHANGE_ADMIN_ONLY・更新なし", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u1", role: "office_staff" } as never);
+    pm.propertyDmLog.findFirst.mockResolvedValue(orphanLog({ reactionStatus: "refused" }));
+    const res = await PATCH(patchRequest({ status: "replied" }) as never, idCtx);
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error.code).toBe("REFUSED_CHANGE_ADMIN_ONLY");
+    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
+  });
+
+  it("非adminが拒否付き記録を削除 → 403 REFUSED_DELETE_ADMIN_ONLY・削除なし", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u1", role: "office_staff" } as never);
+    pm.propertyDmLog.findFirst.mockResolvedValue(orphanLog({ reactionStatus: "refused" }));
+    const res = await DELETE(deleteRequest() as never, idCtx);
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error.code).toBe("REFUSED_DELETE_ADMIN_ONLY");
+    expect(pm.propertyDmLog.delete).not.toHaveBeenCalled();
+  });
+
+  it("admin は拒否→連絡ありへ訂正できる(200)", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue(orphanLog({ reactionStatus: "refused" }));
+    const res = await PATCH(patchRequest({ status: "replied" }) as never, idCtx);
+    expect(res.status).toBe(200);
+  });
+});

@@ -120,7 +120,12 @@ export async function GET(
       sequence: sequenceById.get(log.id) ?? 0,
       // 取消可否はサーバが決める(#364 R6): sale_dm=売却DM画面から・batchId あり=一括確定由来は
       // 単独取消不可(DELETE も 409)。UI は必ず失敗するボタンを出さない。
-      deletable: log.method !== "sale_dm" && log.batchId == null,
+      // 拒否付きの取消は管理者のみ(発注者指示 2026-08-17)。DELETE 側の 403 と対で、
+      // 押しても必ず失敗するボタンを出さない(このリポの方針)。
+      deletable:
+        log.method !== "sale_dm" &&
+        log.batchId == null &&
+        (log.reactionStatus !== "refused" || session.role === "admin"),
       note: maskValue(log.note, ownerDisplayConfig.note),
       // 反響(PR-B)。reactedAt は日付表示用の YYYY-MM-DD。同期由来は実時刻(UTC)で保存される
       // ため JST 暦日へ変換して返す(UTC のまま切ると JST 0-9時の反響が前日表示=#366 R8。

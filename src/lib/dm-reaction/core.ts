@@ -123,7 +123,19 @@ export function applySyncReaction(
   }
 
   // 同期replied は手動の実反響(replied/refused/undeliverable)には負ける。
-  // 同期undeliverable はここを素通り(≧手動terminal)。
+  // 同期undeliverable は原則ここを素通り(≧手動terminal)だが、**手動の「拒否」だけは
+  // 上書きしない**(発注者指示 2026-08-17)。拒否は「変更・取消は管理者のみ」の縛りの
+  // 根拠で、同期が undeliverable へ差し替えると reactionStatus が refused でなくなり、
+  // **縛りが自動処理経由で外れる**(提出前レビュー Important)。除外の効果はどちらも
+  // terminal で同じなので、拒否を保持しても宛先が復活することはない。物件側の
+  // 宛先不明フラグは返戻ドラフト(deliveryStatus)の実数から別途立つ=そちらも失わない。
+  if (
+    sync.kind === "undeliverable" &&
+    isManual &&
+    current.reactionStatus === "refused"
+  ) {
+    return current;
+  }
   if (
     sync.kind === "replied" &&
     isManual &&

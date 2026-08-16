@@ -65,6 +65,16 @@ export async function DELETE(
           "BATCH_LOG",
         );
       }
+      // 「拒否」が付いた記録の取消は管理者のみ(発注者指示 2026-08-17)。削除を許すと
+      // 「拒否→変更は管理者のみ」(reaction route)の縛りが素通りになる(消して記録し
+      // 直せば拒否を外せる)。親行ロック保持中に読んだ値で判定。
+      if (log.reactionStatus === "refused" && session.role !== "admin") {
+        throw new ApiError(
+          403,
+          "「拒否」が記録された送付記録を取り消せるのは管理者のみです",
+          "REFUSED_DELETE_ADMIN_ONLY",
+        );
+      }
       await tx.propertyDmLog.delete({ where: { id: logId } });
 
       // 宛先不明の反響が付いた行を消したら、物件の自動フラグを再計算する(PR-B)。

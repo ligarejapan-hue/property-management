@@ -128,7 +128,10 @@ describe("applySyncReaction(同期イベントの適用)", () => {
     });
   });
 
-  it("(f) 同期undeliverable≧手動terminal: 手動refusedも上書きし退避する", () => {
+  it("(f) 同期undeliverable≧手動terminal——ただし手動refusedだけは保持する(2026-08-17仕様変更)", () => {
+    // 旧規則は「手動refusedも上書きし退避する」だった。発注者指示(拒否の変更は管理者のみ)
+    // により、同期が refused を undeliverable へ差し替えると縛りの根拠が消えるため、
+    // **手動の拒否だけは同期に負けない**へ変更。除外効果はどちらも terminal で同じ。
     const manualRefused: ReactionFields = {
       reactionStatus: "refused",
       reactedAt: T1,
@@ -140,13 +143,18 @@ describe("applySyncReaction(同期イベントの適用)", () => {
       kind: "undeliverable",
       at: T2,
     });
-    expect(next.reactionStatus).toBe("undeliverable");
-    expect(next.reactionSource).toBe("sale_dm_sync");
-    expect(next.manualReactionShadow).toEqual({
-      status: "refused",
-      reactedAt: T1.toISOString(),
-      note: null,
-    });
+    expect(next).toBe(manualRefused); // 参照ごと不変=書き込み自体が起きない
+
+    // 手動undeliverable は従来どおり同期undeliverableで更新される(規則変更は refused のみ)。
+    const manualUndeliv: ReactionFields = {
+      reactionStatus: "undeliverable",
+      reactedAt: T1,
+      reactionNote: null,
+      reactionSource: "manual",
+      manualReactionShadow: null,
+    };
+    const next2 = applySyncReaction(manualUndeliv, { kind: "undeliverable", at: T2 });
+    expect(next2.reactionSource).toBe("sale_dm_sync");
   });
 
   it("同期→同期の遷移(shadowなし)は最新の導出に従う(undeliverable→replied も置き換わる)", () => {
@@ -265,5 +273,34 @@ describe("applyManualReaction(手動保存の適用)", () => {
     expect(next.reactionStatus).toBe("no_response");
     expect(next.reactionSource).toBe("manual");
     expect(next.manualReactionShadow).toBeNull();
+  });
+});
+
+// 手動の「拒否」は同期 undeliverable にも負けない(発注者指示 2026-08-17)。
+// 同期が undeliverable へ差し替えると reactionStatus が refused でなくなり、
+// 「拒否の変更は管理者のみ」の縛りが自動処理経由で外れてしまう(提出前レビュー)。
+describe("applySyncReaction: 手動refusedの保持", () => {
+  it("manual refused は sync undeliverable に上書きされない", () => {
+    const current = {
+      reactionStatus: "refused",
+      reactedAt: new Date("2026-08-01T00:00:00Z"),
+      reactionNote: null,
+      reactionSource: "manual",
+      manualReactionShadow: null,
+    } as never;
+    const out = applySyncReaction(current, { kind: "undeliverable", at: new Date() } as never);
+    expect(out).toBe(current);
+  });
+
+  it("manual replied は従来どおり sync undeliverable に負ける(優先規則は拒否だけ変更)", () => {
+    const current = {
+      reactionStatus: "replied",
+      reactedAt: new Date("2026-08-01T00:00:00Z"),
+      reactionNote: null,
+      reactionSource: "manual",
+      manualReactionShadow: null,
+    } as never;
+    const out = applySyncReaction(current, { kind: "undeliverable", at: new Date() } as never);
+    expect((out as { reactionStatus: string }).reactionStatus).toBe("undeliverable");
   });
 });

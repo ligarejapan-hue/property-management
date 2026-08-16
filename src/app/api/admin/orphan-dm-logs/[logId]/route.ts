@@ -153,6 +153,22 @@ export async function PATCH(
         }
       }
 
+      // 一度「拒否」と記録した相手を別の反響へ戻せるのは管理者だけ(発注者指示 2026-08-17)。
+      // ⚠この画面の入口(requireOrphanAdmin)は**権限ベース**(user_management:read 等)で、
+      // 個別付与により admin 以外も通り得る。物件側 reaction route と同じ縛りをここにも
+      // 敷かないと「1箇所だけ直した」抜け道になる(提出前レビュー Critical)。
+      if (
+        fresh.reactionStatus === "refused" &&
+        body.status !== "refused" &&
+        session.role !== "admin"
+      ) {
+        throw new ApiError(
+          403,
+          "「拒否」を別の反響へ変更できるのは管理者のみです",
+          "REFUSED_CHANGE_ADMIN_ONLY",
+        );
+      }
+
       const next = applyManualReaction(fresh, {
         status: body.status,
         reactedAt: body.reactedAt
@@ -214,10 +230,18 @@ export async function DELETE(
     await prisma.$transaction(async (tx) => {
       const log = await tx.propertyDmLog.findFirst({
         where: { id: logId, propertyId: null },
-        select: { id: true },
+        select: { id: true, reactionStatus: true },
       });
       if (!log) {
         throw new ApiError(404, "孤児の送付記録が見つかりません", "NOT_FOUND");
+      }
+      // 「拒否」が付いた記録の取消は管理者のみ(発注者指示 2026-08-17・物件側 DELETE と対)。
+      if (log.reactionStatus === "refused" && session.role !== "admin") {
+        throw new ApiError(
+          403,
+          "「拒否」が記録された送付記録を取り消せるのは管理者のみです",
+          "REFUSED_DELETE_ADMIN_ONLY",
+        );
       }
       await tx.propertyDmLog.delete({ where: { id: logId } });
     });

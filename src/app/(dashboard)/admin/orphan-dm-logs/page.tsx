@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import {
@@ -339,6 +340,9 @@ function OrphanRow({
   ) => void;
   onDelete: (id: string) => void;
 }) {
+  const { data: authSession } = useSession();
+  const isAdmin =
+    (authSession?.user as { role?: string } | undefined)?.role === "admin";
   const names = [
     log.owner?.name ?? null,
     ...log.coOwners
@@ -378,7 +382,14 @@ function OrphanRow({
         )}
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-sm">
-        {!editing && (
+        {/* 拒否の変更・取消は管理者のみ(発注者指示 2026-08-17)。この画面の入口は
+            権限ベースで admin 以外も通り得るため、サーバ403と対で施錠表示にする。 */}
+        {!editing && log.reactionStatus === "refused" && !isAdmin && (
+          <span className="text-xs text-amber-700 dark:text-amber-300">
+            「拒否」の変更・取消は管理者のみです
+          </span>
+        )}
+        {!editing && !(log.reactionStatus === "refused" && !isAdmin) && (
           <div className="flex gap-2">
             <button
               type="button"

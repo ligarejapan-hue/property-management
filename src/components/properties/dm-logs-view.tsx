@@ -14,6 +14,7 @@ import {
   updatePropertyDmLogReaction,
 } from "@/lib/api-client";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
+import { useSession } from "next-auth/react";
 
 // GET /api/properties/[id]/dm-logs のレスポンス形（note/reactionNote は server-side でマスク済み）。
 interface DmLog {
@@ -164,6 +165,7 @@ function CreateLogForm({
 function ReactionEditor({
   log,
   canWriteNote,
+  isAdmin,
   onSave,
   onCancel,
   saving,
@@ -171,6 +173,8 @@ function ReactionEditor({
   log: DmLog;
   /** owner_note の edit/full を持つか(無ければメモ入力を出さない=サーバも 403 で拒否) */
   canWriteNote: boolean;
+  /** 拒否からの変更は管理者のみ(サーバも 403)。施錠表示の出し分けに使う。 */
+  isAdmin: boolean;
   onSave: (
     status: ReactionStatus,
     reactedAt: string,
@@ -191,12 +195,36 @@ function ReactionEditor({
   // 消したいときは「メモを消す」を明示チェック(note:null 送信=#366 R3)。
   const [note, setNote] = useState("");
   const [clearNote, setClearNote] = useState(false);
+  // 「拒否」は宛名CSV・売却DMの全出口で自動除外の根拠になる重い記録なので、
+  // **1回目は予告だけ**を出し、もう一度押したときだけ保存する(発注者指示 2026-08-17・
+  // 物件化モーダルの2回押し(Codex R9 P2)と同じ作法)。種別を変えたら予告は解除。
+  const [refusalArmed, setRefusalArmed] = useState(false);
+
+  // 既に「拒否」の記録は、管理者以外は変更フォーム自体を出さない(サーバも 403)。
+  // 押しても必ず失敗するUIを出さない方針(canWrite などと同じ)。
+  if (log.reactionStatus === "refused" && !isAdmin) {
+    return (
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+        <span>「拒否」の変更・取消は管理者のみです</span>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 dark:border-gray-700 dark:text-gray-200"
+        >
+          閉じる
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <select
         value={status}
-        onChange={(e) => setStatus(e.target.value as ReactionStatus)}
+        onChange={(e) => {
+          setStatus(e.target.value as ReactionStatus);
+          setRefusalArmed(false);
+        }}
         className="rounded-md border border-gray-300 px-1.5 py-1 text-xs dark:border-gray-700 dark:bg-gray-800"
       >
         {REACTION_STATUSES.map((s) => (
@@ -236,13 +264,26 @@ function ReactionEditor({
           メモを消す
         </label>
       )}
+      {refusalArmed && (
+        <span className="basis-full text-xs text-red-700 dark:text-red-300">
+          この方は今後、宛名CSV・売却DMの両方から自動で外れます（別の物件も含む）。
+          取り消し・変更は管理者のみになります。もう一度押すと確定します。
+        </span>
+      )}
       <button
         type="button"
         disabled={saving}
-        onClick={() => onSave(status, reactedAt, note, clearNote)}
+        onClick={() => {
+          // 「拒否」への変更だけ 2 回押し(既に拒否の記録を拒否のまま保存するのは対象外)。
+          if (status === "refused" && log.reactionStatus !== "refused" && !refusalArmed) {
+            setRefusalArmed(true);
+            return;
+          }
+          onSave(status, reactedAt, note, clearNote);
+        }}
         className="rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
       >
-        {saving ? "保存中..." : "保存"}
+        {saving ? "保存中..." : refusalArmed ? "拒否として保存（確定）" : "保存"}
       </button>
       <button
         type="button"
@@ -319,6 +360,12 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
         : (permissions ?? []),
     [permissions, permissionsLoading, permissionsRefreshPending],
   );
+
+  // 拒否からの変更・取消は管理者のみ(サーバも 403)。透かし(screen-protection)と同じく
+  // useSession の role を使う(F12 の permissions 配列に role は載らないため)。
+  const { data: authSession } = useSession();
+  const isAdmin =
+    (authSession?.user as { role?: string } | undefined)?.role === "admin";
 
   const canWrite = useMemo(
     () =>
@@ -567,6 +614,7 @@ export default function DmLogsView({ propertyId }: { propertyId: string }) {
                         <ReactionEditor
                           log={log}
                           canWriteNote={canWriteNote}
+                          isAdmin={isAdmin}
                           saving={savingReaction}
                           onSave={(status, reactedAt, note, clearNote) =>
                             handleSaveReaction(

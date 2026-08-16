@@ -59,7 +59,11 @@ describe("dm-logs-view: 表示強化と個別記録UI", () => {
     expect(VIEW).toContain("この送付記録を取り消しますか？");
     expect(VIEW).toMatch(/\{log\.deletable && \(/);
     // 取消可否の判定はサーバ側(GET が deletable を返す)
-    expect(ROUTE).toMatch(/deletable: log\.method !== "sale_dm" && log\.batchId == null/);
+    expect(ROUTE).toContain('log.method !== "sale_dm"');
+    expect(ROUTE).toContain("log.batchId == null");
+    // 拒否付きの取消は管理者のみ(発注者指示 2026-08-17)。DELETE 側の 403 と対で、
+    // deletable の計算にも同じ条件を織り込む(押しても必ず失敗するボタンを出さない)。
+    expect(ROUTE).toContain('log.reactionStatus !== "refused" || session.role === "admin"');
   });
 
   it("投函日は今日既定・max=今日(未来はUIでも選べない)", () => {
@@ -134,5 +138,28 @@ describe("dm-logs-view: 権限が画面滞在中に変わった場合(#367 P2)",
   it("メモ権限が編集中に外れたらメモを送らない(反響本体の保存を巻き添えにしない)", () => {
     expect(VIEW).toMatch(/const noteFields = !canWriteNote/);
     expect(VIEW).toMatch(/\.\.\.noteFields,/);
+  });
+});
+
+// 「拒否」の二段確認と管理者施錠(発注者指示 2026-08-17)。
+describe("拒否の確認ボタンと管理者ロック(UI配線)", () => {
+  it("拒否への変更は1回目=予告のみ・2回目で保存(2回押しの作法)", () => {
+    expect(VIEW).toContain("refusalArmed");
+    // 予告文: 影響(全DMから外れる・戻せるのは管理者)を先に伝える。
+    expect(VIEW).toContain("宛名CSV・売却DMの両方から自動で外れます");
+    expect(VIEW).toContain("取り消し・変更は管理者のみになります");
+    // 1回目の押下では onSave せず予告を立てるだけ。
+    expect(VIEW).toMatch(/status === "refused" && log\.reactionStatus !== "refused" && !refusalArmed/);
+    expect(VIEW).toContain("拒否として保存（確定）");
+    // 種別を変えたら予告は解除(別種別で確定される事故を防ぐ)。
+    expect(VIEW).toContain("setRefusalArmed(false)");
+  });
+
+  it("既に拒否の記録は、管理者以外に変更フォームを出さない(サーバ 403 と対)", () => {
+    expect(VIEW).toMatch(/log\.reactionStatus === "refused" && !isAdmin/);
+    expect(VIEW).toContain("「拒否」の変更・取消は管理者のみです");
+    // isAdmin は useSession の role 由来(F12 permissions 配列に role は無い)。
+    expect(VIEW).toContain('useSession');
+    expect(VIEW).toMatch(/role === "admin"/);
   });
 });

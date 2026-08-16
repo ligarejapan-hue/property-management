@@ -446,3 +446,42 @@ describe("監査キー登録(ACTION_EXTRA_KEYS)", () => {
     });
   });
 });
+
+// ============================================================================
+// 「拒否」からの変更は管理者のみ(発注者指示 2026-08-17)。拒否は宛名CSV・売却DMの
+// 全出口で自動除外の根拠になる記録なので、外す操作の権限を絞る。
+// ============================================================================
+describe("拒否からの変更は管理者のみ", () => {
+  it("office_staff が拒否→連絡あり → 403 REFUSED_CHANGE_ADMIN_ONLY・更新なし", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue(baseLog({ reactionStatus: "refused" }));
+    const res = await PATCH(patchRequest({ status: "replied" }), ctx);
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error.code).toBe("REFUSED_CHANGE_ADMIN_ONLY");
+    expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
+  });
+
+  it("admin は拒否→連絡ありへ変更できる(200)", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u1", role: "admin" } as never);
+    pm.propertyDmLog.findFirst.mockResolvedValue(baseLog({ reactionStatus: "refused" }));
+    const res = await PATCH(patchRequest({ status: "replied" }), ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("office_staff でも拒否のまま(status=refused)の日付訂正は通る(誤記の修正を塞がない)", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue(baseLog({ reactionStatus: "refused" }));
+    const res = await PATCH(patchRequest({ status: "refused", reactedAt: "2026-08-01" }), ctx);
+    expect(res.status).toBe(200);
+  });
+});
+
+// 競合窓の封鎖: 現在値が拒否なら(変更先が非terminalでも)Owner ロックを取ってから判定する。
+describe("拒否からの変更はロック下で判定", () => {
+  it("拒否→連絡あり(admin)でも lockOwnersForUpdate が呼ばれる", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u1", role: "admin" } as never);
+    pm.propertyDmLog.findFirst.mockResolvedValue(baseLog({ reactionStatus: "refused" }));
+    const res = await PATCH(patchRequest({ status: "replied" }), ctx);
+    expect(res.status).toBe(200);
+    expect(vi.mocked(lockOwnersForUpdate)).toHaveBeenCalled();
+  });
+});
