@@ -212,12 +212,24 @@ export function applyManualReaction(
   current: ReactionFields,
   manual: { status: ReactionStatus; reactedAt: Date | null; note: string | null },
 ): ReactionFields {
-  void current;
+  // ⚠**退避された拒否は、拒否以外へ書き換えるとき以外は消さない**(@codex #385 R3 P1)。
+  //   旧規則の既存データ(見た目 undeliverable + shadow=refused)に対し、非管理者でも
+  //   許している「見た目のままの日付・メモ訂正」で shadow を無条件クリアしていたため、
+  //   ①同じ status で訂正 → shadow が消えて isRefusalProtected が false になる
+  //   ②次の要求で任意の種別へ変更、の**2手で拒否を外せる**抜け道になっていた。
+  //   保持する条件は「退避が refused」かつ「今回 refused 以外へ書き換えていない」。
+  //   refused を明示的に書くとき/管理者が別種別へ変えるときは、その値が正になるので
+  //   退避は不要(=クリア)。
+  const shadow = parseShadow(current.manualReactionShadow);
+  const keepRefusedShadow =
+    shadow?.status === "refused" && manual.status === current.reactionStatus;
   return {
     reactionStatus: manual.status,
     reactedAt: manual.reactedAt,
     reactionNote: manual.note,
     reactionSource: "manual",
-    manualReactionShadow: null,
+    manualReactionShadow: keepRefusedShadow
+      ? (current.manualReactionShadow ?? null)
+      : null,
   };
 }

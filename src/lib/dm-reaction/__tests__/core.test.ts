@@ -329,3 +329,46 @@ describe("isRefusalProtected", () => {
     expect(isRefusalProtected({ reactionStatus: "no_response", manualReactionShadow: "壊れたJSON" })).toBe(false);
   });
 });
+
+// 退避された拒否は「見た目のままの訂正」では消さない(@codex #385 R3 P1)。
+// 消してしまうと ①同status訂正でshadow消去 ②次に任意種別へ変更 の2手で拒否を外せる。
+describe("applyManualReaction: 退避拒否の保持", () => {
+  const shadowed: ReactionFields = {
+    reactionStatus: "undeliverable",
+    reactedAt: T1,
+    reactionNote: null,
+    reactionSource: "sale_dm_sync",
+    manualReactionShadow: { status: "refused", reactedAt: T1.toISOString(), note: null },
+  };
+
+  it("同じ見た目(undeliverable)のまま日付を直しても shadow の拒否は残る", () => {
+    const next = applyManualReaction(shadowed, {
+      status: "undeliverable",
+      reactedAt: T2,
+      note: null,
+    });
+    expect(next.reactedAt).toBe(T2);
+    expect(next.manualReactionShadow).toEqual(shadowed.manualReactionShadow);
+    expect(isRefusalProtected(next)).toBe(true); // 2手目の抜け道が塞がっている
+  });
+
+  it("別種別へ書き換えるときは shadow を消す(その値が正になる=admin操作)", () => {
+    const next = applyManualReaction(shadowed, { status: "replied", reactedAt: T2, note: null });
+    expect(next.manualReactionShadow).toBeNull();
+  });
+
+  it("refused を明示保存したときも shadow は不要(見た目が拒否になる)", () => {
+    const next = applyManualReaction(shadowed, { status: "refused", reactedAt: T2, note: null });
+    expect(next.manualReactionShadow).toBeNull();
+    expect(isRefusalProtected(next)).toBe(true);
+  });
+
+  it("拒否でない shadow は従来どおりクリア(規則変更は refused のみ)", () => {
+    const other: ReactionFields = {
+      ...shadowed,
+      manualReactionShadow: { status: "replied", reactedAt: T1.toISOString(), note: null },
+    };
+    const next = applyManualReaction(other, { status: "undeliverable", reactedAt: T2, note: null });
+    expect(next.manualReactionShadow).toBeNull();
+  });
+});

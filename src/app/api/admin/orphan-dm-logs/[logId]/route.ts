@@ -200,7 +200,13 @@ export async function PATCH(
           reactedAt: next.reactedAt,
           reactionNote: next.reactionNote,
           reactionSource: next.reactionSource,
-          manualReactionShadow: Prisma.DbNull,
+          // ⚠**shadow は applyManualReaction の判断に従う**(@codex #385 R3 P1)。
+          // 常に DbNull にすると、退避された拒否が「見た目のままの日付訂正」で消え、
+          // 2手で拒否を外せる抜け道になる。next.manualReactionShadow が null のときだけ消す。
+          manualReactionShadow:
+            next.manualReactionShadow == null
+              ? Prisma.DbNull
+              : (next.manualReactionShadow as Prisma.InputJsonValue),
         },
       });
       if (updated.count === 0) {

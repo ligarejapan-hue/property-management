@@ -520,3 +520,23 @@ describe("shadowに退避された拒否の保護", () => {
     expect(res.status).toBe(200);
   });
 });
+
+// 2手の抜け道が塞がっていること(@codex #385 R3 P1): 同status訂正でshadowが残る。
+describe("退避拒否は同status訂正で消えない(route)", () => {
+  it("undeliverable のまま日付訂正 → 保存データに shadow が残る", async () => {
+    pm.propertyDmLog.findFirst.mockResolvedValue(baseLog({
+      reactionStatus: "undeliverable",
+      reactionSource: "sale_dm_sync",
+      manualReactionShadow: { status: "refused", reactedAt: "2026-08-01T00:00:00.000Z", note: null },
+    }));
+    const res = await PATCH(patchRequest({ status: "undeliverable", reactedAt: "2026-08-02" }), ctx);
+    expect(res.status).toBe(200);
+    const data = pm.propertyDmLog.update.mock.calls[0][0].data;
+    // Prisma.DbNull ではなく元の shadow が入る(=次の要求でも保護が効く)。
+    expect(data.manualReactionShadow).toEqual({
+      status: "refused",
+      reactedAt: "2026-08-01T00:00:00.000Z",
+      note: null,
+    });
+  });
+});
