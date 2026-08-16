@@ -372,3 +372,55 @@ describe("applyManualReaction: 退避拒否の保持", () => {
     expect(next.manualReactionShadow).toBeNull();
   });
 });
+
+// 保存直後の再同期でも退避拒否は守られる(@codex #385 R4 P1)。
+// 見た目 undeliverable + 退避 refused の旧データで、同status訂正→即再同期の連鎖。
+describe("applySyncReaction: 退避拒否は同期undeliverableでも守る", () => {
+  it("見た目 undeliverable + 退避 refused は sync undeliverable で不変(source 問わず)", () => {
+    for (const source of ["manual", "sale_dm_sync"] as const) {
+      const legacy: ReactionFields = {
+        reactionStatus: "undeliverable",
+        reactedAt: T1,
+        reactionNote: null,
+        reactionSource: source,
+        manualReactionShadow: { status: "refused", reactedAt: T1.toISOString(), note: null },
+      };
+      const next = applySyncReaction(legacy, { kind: "undeliverable", at: T2 });
+      expect(next, `source=${source}`).toBe(legacy);
+      expect(isRefusalProtected(next)).toBe(true);
+    }
+  });
+
+  it("2手の連鎖(同status訂正→再同期)を通しても保護が残る", () => {
+    const legacy: ReactionFields = {
+      reactionStatus: "undeliverable",
+      reactedAt: T1,
+      reactionNote: null,
+      reactionSource: "sale_dm_sync",
+      manualReactionShadow: { status: "refused", reactedAt: T1.toISOString(), note: null },
+    };
+    // ①非adminが許された「見た目のままの日付訂正」
+    const afterManual = applyManualReaction(legacy, {
+      status: "undeliverable",
+      reactedAt: T2,
+      note: null,
+    });
+    expect(isRefusalProtected(afterManual)).toBe(true);
+    // ②保存直後の再同期(reaction route が呼ぶ)
+    const afterSync = applySyncReaction(afterManual, { kind: "undeliverable", at: T2 });
+    expect(isRefusalProtected(afterSync)).toBe(true); // ここが false だと2手目で外せる
+  });
+
+  it("退避が拒否でない行は従来どおり同期undeliverableで更新される", () => {
+    const plain: ReactionFields = {
+      reactionStatus: "no_response",
+      reactedAt: null,
+      reactionNote: null,
+      reactionSource: "manual",
+      manualReactionShadow: null,
+    };
+    const next = applySyncReaction(plain, { kind: "undeliverable", at: T2 });
+    expect(next.reactionStatus).toBe("undeliverable");
+    expect(next.reactionSource).toBe("sale_dm_sync");
+  });
+});

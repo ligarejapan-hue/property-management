@@ -146,11 +146,14 @@ export function applySyncReaction(
   // **縛りが自動処理経由で外れる**(提出前レビュー Important)。除外の効果はどちらも
   // terminal で同じなので、拒否を保持しても宛先が復活することはない。物件側の
   // 宛先不明フラグは返戻ドラフト(deliveryStatus)の実数から別途立つ=そちらも失わない。
-  if (
-    sync.kind === "undeliverable" &&
-    isManual &&
-    current.reactionStatus === "refused"
-  ) {
+  // ⚠判定は **isRefusalProtected**(見た目 refused **または** 退避 refused)で行う
+  //   (@codex #385 R4 P1)。見えている status だけを見ると、旧データ
+  //   (見た目 undeliverable + 退避 refused)が「見た目のままの訂正」で
+  //   reactionSource=manual になった直後の再同期をここで止められず、
+  //   toShadow(current) が**退避の拒否を undeliverable の退避で上書き**して
+  //   保護が外れる(=2手目で任意種別へ変更できる)。isManual も外す:
+  //   同期由来のまま退避に拒否を抱えている行(まさに旧データ)を守るため。
+  if (sync.kind === "undeliverable" && isRefusalProtected(current)) {
     return current;
   }
   if (
