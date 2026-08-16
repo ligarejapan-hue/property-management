@@ -5,6 +5,7 @@ import {
   REACTION_LABELS,
   isTerminalReaction,
   applySyncReaction,
+  isRefusalProtected,
   applyManualReaction,
   type ReactionFields,
 } from "../core";
@@ -302,5 +303,29 @@ describe("applySyncReaction: 手動refusedの保持", () => {
     } as never;
     const out = applySyncReaction(current, { kind: "undeliverable", at: new Date() } as never);
     expect((out as { reactionStatus: string }).reactionStatus).toBe("undeliverable");
+  });
+});
+
+// 退避(shadow)された拒否も「守られた拒否」(@codex #385 R2 P1)。
+describe("isRefusalProtected", () => {
+  it("見えている refused / shadow の refused の両方で true", () => {
+    expect(isRefusalProtected({ reactionStatus: "refused", manualReactionShadow: null })).toBe(true);
+    expect(
+      isRefusalProtected({
+        reactionStatus: "undeliverable",
+        manualReactionShadow: { status: "refused", reactedAt: null, note: null },
+      }),
+    ).toBe(true);
+  });
+
+  it("それ以外は false(壊れた shadow も false=施錠しすぎない)", () => {
+    expect(isRefusalProtected({ reactionStatus: "replied", manualReactionShadow: null })).toBe(false);
+    expect(
+      isRefusalProtected({
+        reactionStatus: "undeliverable",
+        manualReactionShadow: { status: "replied", reactedAt: null, note: null },
+      }),
+    ).toBe(false);
+    expect(isRefusalProtected({ reactionStatus: "no_response", manualReactionShadow: "壊れたJSON" })).toBe(false);
   });
 });

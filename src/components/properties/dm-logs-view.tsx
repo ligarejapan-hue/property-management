@@ -27,6 +27,8 @@ interface DmLog {
   deletable: boolean;
   note: string | null;
   reactionStatus: string;
+  /** 退避(shadow)も含めた「守られた拒否」(サーバ計算・@codex #385 R2 P1)。 */
+  refusalLocked?: boolean;
   reactedAt: string | null;
   reactionNote: string | null;
   /** "manual" | "sale_dm_sync"(売却DMからの自動同期) | null */
@@ -203,7 +205,10 @@ function ReactionEditor({
   // 既に「拒否」の記録は、管理者以外は**種別だけ**固定する(@codex #385 R1 P2 ③)。
   // サーバは status:"refused" のままの日付・メモ訂正を意図的に許しているので、
   // フォーム全体を塞ぐと許可された訂正まで潰す(塞ぎすぎ)。selectのみ disabled。
-  const refusedLocked = log.reactionStatus === "refused" && !isAdmin;
+  // サーバ計算の refusalLocked(退避された拒否も含む)を正とし、旧応答(フィールド無し)
+  // では見えている reactionStatus に落ちる(後方互換)。
+  const refusedLocked =
+    (log.refusalLocked ?? log.reactionStatus === "refused") && !isAdmin;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">

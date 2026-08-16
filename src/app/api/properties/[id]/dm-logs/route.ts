@@ -17,7 +17,7 @@ import {
 } from "@/lib/property-record-guard";
 import { writeAuditLog } from "@/lib/audit";
 import { isRealCalendarDate } from "@/lib/calendar-date";
-import { jstCalendarDay } from "@/lib/dm-reaction/core";
+import { isRefusalProtected, jstCalendarDay } from "@/lib/dm-reaction/core";
 
 // ---------- GET / POST /api/properties/:id/dm-logs ----------
 //
@@ -90,6 +90,7 @@ export async function GET(
           reactedAt: true,
           reactionNote: true,
           reactionSource: true,
+        manualReactionShadow: true,
           sender: { select: { id: true, name: true } },
         },
         orderBy: [{ sentAt: "desc" }, { createdAt: "desc" }],
@@ -125,7 +126,10 @@ export async function GET(
       deletable:
         log.method !== "sale_dm" &&
         log.batchId == null &&
-        (log.reactionStatus !== "refused" || session.role === "admin"),
+        (!isRefusalProtected(log) || session.role === "admin"),
+      // 退避(shadow)も含めた「守られた拒否」か(@codex #385 R2 P1)。UIの施錠は
+      // この値を使う(見えている reactionStatus だけだと旧データの退避拒否を守れない)。
+      refusalLocked: isRefusalProtected(log),
       note: maskValue(log.note, ownerDisplayConfig.note),
       // 反響(PR-B)。reactedAt は日付表示用の YYYY-MM-DD。同期由来は実時刻(UTC)で保存される
       // ため JST 暦日へ変換して返す(UTC のまま切ると JST 0-9時の反響が前日表示=#366 R8。

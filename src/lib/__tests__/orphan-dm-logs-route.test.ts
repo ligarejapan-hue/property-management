@@ -492,3 +492,28 @@ describe("orphan: 拒否の変更・取消は管理者のみ", () => {
     expect(res.status).toBe(200);
   });
 });
+
+// 退避(shadow)された拒否も守る(@codex #385 R2 P1・物件側と同条件)。
+describe("orphan: shadow退避拒否の保護", () => {
+  const shadowed = () => orphanLog({
+    reactionStatus: "undeliverable",
+    reactionSource: "sale_dm_sync",
+    manualReactionShadow: { status: "refused", reactedAt: "2026-08-01T00:00:00.000Z", note: null },
+  });
+
+  it("非adminの別種別への変更は 403", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u1", role: "office_staff" } as never);
+    pm.propertyDmLog.findFirst.mockResolvedValue(shadowed());
+    const res = await PATCH(patchRequest({ status: "replied" }) as never, idCtx);
+    expect(res.status).toBe(403);
+    expect(pm.propertyDmLog.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("非adminの削除は 403", async () => {
+    vi.mocked(getApiSession).mockResolvedValue({ id: "u1", role: "office_staff" } as never);
+    pm.propertyDmLog.findFirst.mockResolvedValue(shadowed());
+    const res = await DELETE(deleteRequest() as never, idCtx);
+    expect(res.status).toBe(403);
+    expect(pm.propertyDmLog.deleteMany).not.toHaveBeenCalled();
+  });
+});

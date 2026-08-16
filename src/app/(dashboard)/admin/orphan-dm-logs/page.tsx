@@ -20,6 +20,7 @@ interface OrphanLog {
   sentAt: string;
   method: string | null;
   reactionStatus: string;
+  refusalLocked?: boolean;
   reactedAt: string | null;
   reactionNote: string | null;
   reactionSource: string | null;
@@ -265,7 +266,8 @@ function OrphanReactionEditor({
   // 「拒否」への変更は1回目=予告のみ・2回目で確定(物件側 ReactionEditor と同じ作法・
   // @codex #385 R1 P2 ④)。種別を変えたら予告は解除。
   const [refusalArmed, setRefusalArmed] = useState(false);
-  const refusedLocked = log.reactionStatus === "refused" && !isAdmin;
+  const refusedLocked =
+    (log.refusalLocked ?? log.reactionStatus === "refused") && !isAdmin;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -424,7 +426,7 @@ function OrphanRow({
             >
               反響を訂正
             </button>
-            {log.reactionStatus === "refused" && !isAdmin ? (
+            {(log.refusalLocked ?? log.reactionStatus === "refused") && !isAdmin ? (
               <span className="text-xs text-amber-700 dark:text-amber-300">取消は管理者のみ</span>
             ) : (
               <button

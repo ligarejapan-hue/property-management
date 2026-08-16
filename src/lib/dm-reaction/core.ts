@@ -98,6 +98,23 @@ const VIRGIN: Omit<ReactionFields, "manualReactionShadow"> = {
 
 /** 同期イベント(replied|undeliverable|cleared)を現在値に適用した次状態を返す純関数。
  *  変化がなければ current と同一参照を返す(呼び出し側は書き込みを省略できる)。 */
+/**
+ * この行の「拒否」は守られているか(**退避=shadow も含む**・@codex #385 R2 P1)。
+ *
+ * 旧優先規則(2026-08-17以前)では同期 undeliverable が手動 refused を上書きし、
+ * 元の拒否は manualReactionShadow に退避されていた。見えている reactionStatus だけで
+ * 認可すると、この既存データの拒否を非管理者が編集・削除で消せてしまう。
+ * DB の書き換え(正規化スクリプト)は別承認が要るため、**判定側を広げる**方式で守る。
+ * 認可(PATCH/DELETE)・deletable 計算・UI施錠は必ずこの関数を使う(条件を散らさない)。
+ */
+export function isRefusalProtected(fields: {
+  reactionStatus: string | null;
+  manualReactionShadow: unknown;
+}): boolean {
+  if (fields.reactionStatus === "refused") return true;
+  return parseShadow(fields.manualReactionShadow)?.status === "refused";
+}
+
 export function applySyncReaction(
   current: ReactionFields,
   sync: { kind: "replied" | "undeliverable" | "cleared"; at: Date },

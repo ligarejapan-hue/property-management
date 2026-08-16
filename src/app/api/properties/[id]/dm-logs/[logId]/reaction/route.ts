@@ -16,7 +16,7 @@ import {
 } from "@/lib/property-record-guard";
 import { writeAuditLog } from "@/lib/audit";
 import { isRealCalendarDate } from "@/lib/calendar-date";
-import {
+import { isRefusalProtected,
   REACTION_STATUSES,
   isTerminalReaction,
   applyManualReaction,
@@ -112,8 +112,9 @@ export async function PATCH(
           ownerId: true,
           draftId: true,
           method: true,
-          // 拒否からの変更ガード用(下の needsOwnerLock)。
+          // 拒否からの変更ガード用(下の needsOwnerLock)。退避(shadow)も見る。
           reactionStatus: true,
+          manualReactionShadow: true,
           logOwners: { select: { ownerId: true } },
         },
       });
@@ -130,7 +131,7 @@ export async function PATCH(
         // body.status が非terminal(拒否→連絡あり等)だと従来条件ではロック無しになり、
         // 「fresh 読取の直後に別tx が拒否を commit → こちらの update が上書き」の
         // 競合窓で非管理者が拒否を外せてしまう。ロック下の fresh で判定して初めて確実。
-        pre.reactionStatus === "refused" ||
+        isRefusalProtected(pre) ||
         pre.draftId != null ||
         pre.method === "sale_dm";
       const preOwnerIds = [
@@ -187,8 +188,13 @@ export async function PATCH(
       // なる記録なので、外す操作は権限を絞る。**拒否のまま**日付・メモを直すのは
       // 従来どおり誰でも可(誤記の訂正を塞がない)。ロック下で読み直した fresh の値で
       // 判定する=先読みとの差し替え(TOCTOU)に負けない。
+      // ⚠**退避(shadow)された拒否も守る**(@codex #385 R2 P1)。旧優先規則の既存データは
+      // 見た目 undeliverable+shadow に refused を持つ。見えている status だけで認可すると
+      // その拒否を非管理者が消せる。許すのは「今の見た目のまま(日付/メモ訂正)」と
+      // 「refused へ戻す(強める方向)」だけ。
       if (
-        prevStatus === "refused" &&
+        isRefusalProtected(fresh) &&
+        body.status !== prevStatus &&
         body.status !== "refused" &&
         session.role !== "admin"
       ) {

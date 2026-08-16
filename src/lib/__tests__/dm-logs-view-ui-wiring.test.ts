@@ -63,7 +63,10 @@ describe("dm-logs-view: 表示強化と個別記録UI", () => {
     expect(ROUTE).toContain("log.batchId == null");
     // 拒否付きの取消は管理者のみ(発注者指示 2026-08-17)。DELETE 側の 403 と対で、
     // deletable の計算にも同じ条件を織り込む(押しても必ず失敗するボタンを出さない)。
-    expect(ROUTE).toContain('log.reactionStatus !== "refused" || session.role === "admin"');
+    // 退避(shadow)された拒否も守るため isRefusalProtected に一本化(@codex #385 R2 P1)。
+    expect(ROUTE).toContain("!isRefusalProtected(log) || session.role === \"admin\"");
+    // UI施錠用に refusalLocked も返す(見えている status だけでは旧データを守れない)。
+    expect(ROUTE).toContain("refusalLocked: isRefusalProtected(log)");
   });
 
   it("投函日は今日既定・max=今日(未来はUIでも選べない)", () => {
@@ -158,7 +161,8 @@ describe("拒否の確認ボタンと管理者ロック(UI配線)", () => {
   it("既に拒否の記録は、管理者以外は**種別だけ**固定(日付・メモ訂正は許す=@codex #385 ③)", () => {
     // 当初はフォーム全体を早期returnで塞いだが、サーバは status:"refused" のままの
     // 日付・メモ訂正を意図的に許している=塞ぎすぎだった。selectのみ disabled。
-    expect(VIEW).toMatch(/refusedLocked = log\.reactionStatus === "refused" && !isAdmin/);
+    // サーバ計算の refusalLocked(退避=shadow の拒否も含む)を正とする(@codex #385 R2 P1)。
+    expect(VIEW).toMatch(/log\.refusalLocked \?\? log\.reactionStatus === "refused"/);
     expect(VIEW).toContain("disabled={refusedLocked}");
     expect(VIEW).toContain("日付・メモは訂正できます。別の反響への変更・取消は管理者のみです");
     // isAdmin は useSession の role 由来(F12 permissions 配列に role は無い)。

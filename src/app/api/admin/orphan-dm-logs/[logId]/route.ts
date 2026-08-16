@@ -12,7 +12,7 @@ import {
 import { hasPermission, hasExplicitWritePerm, type PermissionMap } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { isRealCalendarDate } from "@/lib/calendar-date";
-import {
+import { isRefusalProtected,
   REACTION_STATUSES,
   isTerminalReaction,
   applyManualReaction,
@@ -103,8 +103,9 @@ export async function PATCH(
         select: {
           id: true,
           ownerId: true,
-          // 拒否からの変更ガード用(下の needsOwnerLock)。
+          // 拒否からの変更ガード用(下の needsOwnerLock)。退避(shadow)も見る。
           reactionStatus: true,
+          manualReactionShadow: true,
           logOwners: { select: { ownerId: true } },
         },
       });
@@ -116,7 +117,7 @@ export async function PATCH(
       // ⚠現在値が「拒否」のときもロックする(@codex #385 R1 P2)。非terminalへの変更
       // (拒否→連絡あり等)は従来条件だとロック無し=並行の拒否書込を上書きし得る。
       const needsOwnerLock =
-        isTerminalReaction(body.status) || pre.reactionStatus === "refused";
+        isTerminalReaction(body.status) || isRefusalProtected(pre);
       const preOwnerIds = [
         ...(pre.ownerId ? [pre.ownerId] : []),
         ...pre.logOwners.map((o) => o.ownerId),
@@ -162,8 +163,10 @@ export async function PATCH(
       // ⚠この画面の入口(requireOrphanAdmin)は**権限ベース**(user_management:read 等)で、
       // 個別付与により admin 以外も通り得る。物件側 reaction route と同じ縛りをここにも
       // 敷かないと「1箇所だけ直した」抜け道になる(提出前レビュー Critical)。
+      // 退避(shadow)された拒否も守る(@codex #385 R2 P1・物件側と同条件)。
       if (
-        fresh.reactionStatus === "refused" &&
+        isRefusalProtected(fresh) &&
+        body.status !== fresh.reactionStatus &&
         body.status !== "refused" &&
         session.role !== "admin"
       ) {
@@ -245,13 +248,13 @@ export async function DELETE(
     await prisma.$transaction(async (tx) => {
       const log = await tx.propertyDmLog.findFirst({
         where: { id: logId, propertyId: null },
-        select: { id: true, reactionStatus: true },
+        select: { id: true, reactionStatus: true, manualReactionShadow: true },
       });
       if (!log) {
         throw new ApiError(404, "孤児の送付記録が見つかりません", "NOT_FOUND");
       }
       // 「拒否」が付いた記録の取消は管理者のみ(発注者指示 2026-08-17・物件側 DELETE と対)。
-      if (log.reactionStatus === "refused" && session.role !== "admin") {
+      if (isRefusalProtected(log) && session.role !== "admin") {
         throw new ApiError(
           403,
           "「拒否」が記録された送付記録を取り消せるのは管理者のみです",
