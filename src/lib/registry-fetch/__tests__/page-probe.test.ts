@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   KNOWN_PROBE_SELECTORS,
   formatRegistryPageProbe,
+  hasUnbalancedQuotes,
   isSafeOnclickArg,
   maskProbeOnclick,
   safeLabel,
@@ -72,6 +73,23 @@ describe("maskProbeOnclick（onclick は関数名だけ残す）", () => {
 
   it("未知のタブ名は文字数で分かる（必要になったら明示的に足せる）", () => {
     expect(maskProbeOnclick("selectTab('Mypage')")).toBe("selectTab('…6字')");
+  });
+
+  it("⚠引用符が閉じていない（途中で切れた）ものは失敗側に倒す", () => {
+    // @codex #383 P1(3度目): 採取側が長い onclick を切り詰めると閉じ引用符が落ち、
+    // 「引用符で囲まれた引数」の判定が一致せず中身が素通りしていた。
+    const cut = "showOwner('Yamada_Taro_Very_Long_Name_That_Got_Truncated";
+    const out = maskProbeOnclick(cut);
+    expect(out).not.toContain("Yamada");
+    expect(out).not.toContain("Taro");
+    expect(out).toContain("showOwner");
+    expect(hasUnbalancedQuotes(cut)).toBe(true);
+    expect(hasUnbalancedQuotes("showOwner('Yamada')")).toBe(false);
+  });
+
+  it("引用符が1つも無いものは通常どおり扱う", () => {
+    expect(hasUnbalancedQuotes("fuBtnForward()")).toBe(false);
+    expect(maskProbeOnclick("fuBtnForward()")).toBe("fuBtnForward()");
   });
 
   it("長すぎるものは切る", () => {

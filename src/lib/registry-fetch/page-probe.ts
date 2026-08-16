@@ -143,6 +143,15 @@ function clipId(raw: string): string {
  */
 export function maskProbeOnclick(raw: string): string {
   const noDigits = raw.replace(/[0-9０-９]+/g, "＊");
+  // ⚠**引用符が閉じていない＝どこかで切れている**。この形だと下の「引用符で囲まれた
+  // 引数」の正規表現が一致せず、中身が**素通り**する（@codex #383 P1・3度目。
+  // 採取側が長い onclick を切り詰めると閉じ引用符が落ちて実際に起きる）。
+  // **閉じていないものは失敗側に倒す**＝最初の引用符から後ろを丸ごと捨てる。
+  if (hasUnbalancedQuotes(noDigits)) {
+    const cut = noDigits.search(/['"]/);
+    const head = cut === -1 ? noDigits : noDigits.slice(0, cut);
+    return clipId(`${head.replace(/[^\x20-\x7E＊]+/g, "…")}…(切れた引数は伏せました)`);
+  }
   // ⚠**文字列引数も許可リストで通す**。ここは2度間違えた場所（@codex #383 P1×2）。
   //   1度目: 非 ASCII を落とすだけ → `showOwner('yamada@example.com')` が素通り。
   //   2度目: 「短い英字なら安全」 → `showOwner('Yamada')` `showOwner('Tanaka_Taro')` が素通り。
@@ -166,6 +175,13 @@ export function maskProbeOnclick(raw: string): string {
  */
 export function isSafeOnclickArg(body: string): boolean {
   return /^tab[A-Za-z＊]{1,15}$/.test(body);
+}
+
+/** 引用符が閉じていない（＝途中で切れている）か。閉じていなければ失敗側に倒す。 */
+export function hasUnbalancedQuotes(s: string): boolean {
+  return (
+    (s.match(/'/g)?.length ?? 0) % 2 !== 0 || (s.match(/"/g)?.length ?? 0) % 2 !== 0
+  );
 }
 
 function take<T>(items: T[], max: number): { shown: T[]; rest: number } {

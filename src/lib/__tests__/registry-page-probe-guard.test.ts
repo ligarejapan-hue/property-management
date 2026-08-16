@@ -65,6 +65,17 @@ describe("page-probe が読む範囲（PII 防御）", () => {
     expect(probeBody()).not.toMatch(/id:\s*b\.id\s*\|\|\s*b\.name\s*\|\|\s*\(?b?\.?getAttribute\(["'`]onclick/);
   });
 
+  it("⚠採取側で onclick を短く切らない（伏せ字より先に切ると引用符が落ちて素通りする）", () => {
+    // @codex #383 P1(3度目)。転送量の歯止めとして広い上限は可だが、
+    // 引用符が落ちるほど短く切ってはいけない（整形側の判定が一致しなくなる）。
+    const body = probeBody();
+    for (const m of body.matchAll(/getAttribute\(["'`]onclick["'`]\)\s*\?\?\s*""\)\.slice\(0,\s*(\d+)\)/g)) {
+      expect(Number(m[1]), "onclick の切り詰めが短すぎる").toBeGreaterThanOrEqual(1000);
+    }
+    // 少なくとも2箇所（ボタン・タブ）で採取している。
+    expect((body.match(/getAttribute\(["'`]onclick["'`]\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
   it("診断の出力は必ず整形関数を通す（生データを直接ログへ出さない）", () => {
     const body = probeBody();
     // ⚠当初 /console\.warn\([^)]*json/ で書いたが、`[^)]*` は `)` を跨げず、
@@ -166,7 +177,11 @@ describe("⚠端から端まで：どんな入力を渡しても PII は出な�
         label: s,
         disabled: false,
       })),
-      tabs: leaky.map((s) => ({ label: s, onclick: `go('${s}')` })),
+      // ⚠**閉じ引用符が落ちた形**も入れる（採取側の切り詰めで実際に起きる）。
+      tabs: leaky.flatMap((s) => [
+        { label: s, onclick: `go('${s}')` },
+        { label: s, onclick: `go('${s}` },
+      ]),
       known: {},
     });
     for (const s of leaky) {

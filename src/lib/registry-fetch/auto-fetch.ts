@@ -1102,9 +1102,13 @@ async function logRegistryPageProbe(page: RegistryPageLike, where: string): Prom
               const b = el as HTMLButtonElement & { value?: string };
               return {
                 id: b.id || b.name || "",
-                // id も name も無い要素は onclick で識別するしかないが、引数に識別子が
-                // 入り得るので**数字は落として**関数名だけ残す。
-                onclick: (b.getAttribute("onclick") ?? "").slice(0, 60),
+                // id も name も無い要素は onclick で識別するしかない。
+                // ⚠**ここで短く切らない**(@codex #383 P1・3度目)。60文字で切ると
+                // 引数の**閉じ引用符が落ちて**、整形側の「引用符で囲まれた引数」の
+                // 判定が一致せず中身が素通りする。**伏せ字は必ず全文に対してかける**。
+                // 転送量の歯止めとして広めの上限だけ置き、切れた場合は整形側が
+                // 引用符の不整合を見て失敗側へ倒す。
+                onclick: (b.getAttribute("onclick") ?? "").slice(0, 2000),
                 label: text(b) || b.value || "",
                 disabled: b.disabled === true,
               };
@@ -1113,7 +1117,8 @@ async function logRegistryPageProbe(page: RegistryPageLike, where: string): Prom
             .filter(outsideRows)
             .map((el) => ({
               label: text(el),
-              onclick: (el.getAttribute("onclick") ?? "").slice(0, 60),
+              // ⚠上と同じ理由で短く切らない。
+              onclick: (el.getAttribute("onclick") ?? "").slice(0, 2000),
             }));
           const known: Record<string, boolean> = {};
           for (const sel of knownSels) {
