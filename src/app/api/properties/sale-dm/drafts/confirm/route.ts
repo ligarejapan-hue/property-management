@@ -8,6 +8,11 @@ import { validateLetterBody } from "@/lib/sale-dm-letter/body-validation";
 import { markVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
 import { lockOwnersForShare } from "@/lib/dm-batch/locks";
 import {
+  findTerminalExclusions,
+  isTerminalExcluded,
+  type TerminalExclusionTx,
+} from "@/lib/dm-batch/terminal-exclusion";
+import {
   resolveDraftRecipient,
   isRecipientStale,
   isGroupSplit,
@@ -70,6 +75,35 @@ export async function POST(request: NextRequest) {
       ];
       // 既定のロック順（Owner → 物件 → 子行）に合わせて所有者を先に取る。
       await lockOwnersForShare(tx, ownerIds);
+
+      // 拒否・宛先不明(terminal 反響)の宛先が混ざっていたら**確定全体を断る**(@codex #384 R1 P1)。
+      // 作成時の除外だけだと、作成〜確定の間に記録された拒否が素通りする。A(宛名CSV)が
+      // DL時に再検査して止めるのと同じく、確定=印刷手前の関所でも同じ述語を再評価する。
+      // 部分確定にしない理由はこの route の既存方針と同じ(「1件でも不正なら確定全体を
+      // 断る=黙って減らさない」)。Owner FOR SHARE 保持中=terminal writer と直列化。
+      {
+        const exclusionSets = await findTerminalExclusions(
+          tx as unknown as TerminalExclusionTx,
+          ownerIds,
+          [...new Set(pre.map((d) => d.propertyId))],
+        );
+        const terminalCount = pre.filter((d) =>
+          isTerminalExcluded(exclusionSets, {
+            propertyId: d.propertyId,
+            ownerIds: [
+              ...(d.representativeOwnerId ? [d.representativeOwnerId] : []),
+              ...d.draftOwners.map((o) => o.ownerId),
+            ],
+          }),
+        ).length;
+        if (terminalCount > 0) {
+          throw new ApiError(
+            409,
+            `拒否・宛先不明が記録された宛先が ${terminalCount} 件含まれています(その方の別物件での記録も含みます)。宛先を作り直してから確定してください`,
+            "TERMINAL_RECIPIENTS",
+          );
+        }
+      }
 
       // ロック順序（設計 §2.3）: Owner → variant → 物件親行 → 子行。
       // variant を掴むのは、PR-D2 の「貼り付け／適用」（凍結判定）と直列化するため。

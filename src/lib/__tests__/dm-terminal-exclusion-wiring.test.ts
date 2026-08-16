@@ -118,3 +118,37 @@ describe("terminal 集合の定義は 1 か所(dm-reaction/core.ts)", () => {
     expect(lib).not.toContain('"refused"');
   });
 });
+
+describe("出力境界(確定・印刷・送付済み)にも同じ関所がある(@codex #384 R1 P1)", () => {
+  const CONFIRM = read("src/app/api/properties/sale-dm/drafts/confirm/route.ts");
+  const PRINT = read("src/app/api/properties/sale-dm/campaigns/[id]/print/route.ts");
+  const MARK_SENT = read("src/app/api/properties/sale-dm/drafts/[id]/mark-sent/route.ts");
+
+  it("3つの route すべてが共有部品を import し、Owner ロック取得後に再評価する", () => {
+    for (const src of [CONFIRM, PRINT, MARK_SENT]) {
+      expect(src).toContain('from "@/lib/dm-batch/terminal-exclusion"');
+      const lock = src.indexOf("lockOwnersForShare(");
+      const excl = src.indexOf("findTerminalExclusions(");
+      expect(lock).toBeGreaterThan(-1);
+      expect(excl).toBeGreaterThan(lock);
+    }
+  });
+
+  it("確定は検査が状態遷移(updateMany)より前・送付済みも遷移より前", () => {
+    expect(CONFIRM.indexOf("findTerminalExclusions(")).toBeLessThan(
+      CONFIRM.indexOf('data: { status: "confirmed"'),
+    );
+    expect(MARK_SENT.indexOf("findTerminalExclusions(")).toBeLessThan(
+      MARK_SENT.indexOf('data: { status: "sent"'),
+    );
+  });
+
+  it("印刷は除外件数を監査 detail に載せ、allowlist が通す(実物検証)", () => {
+    expect(PRINT).toContain("excludedTerminal: excludedTerminalCount");
+    const out = sanitizeAuditDetail("sale_dm_campaign_print", {
+      campaignId: "c1",
+      excludedTerminal: 2,
+    }) as Record<string, unknown>;
+    expect(out.excludedTerminal).toBe(2);
+  });
+});

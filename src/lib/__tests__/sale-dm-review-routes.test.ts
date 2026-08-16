@@ -30,6 +30,8 @@ vi.mock("@/lib/prisma", () => {
     // 確定は field_staff のとき、物件親行をロックしたまま担当範囲を見直す(PR-D1)。
     property: { findMany: vi.fn(async () => []) },
     $queryRaw: vi.fn(async () => []),
+    // 確定前の terminal(拒否/宛先不明)再検査(@codex #384 R1 P1)。既定=記録なし。
+    propertyDmLog: { findMany: vi.fn(async () => []) },
   };
   return {
     default: {
@@ -64,6 +66,7 @@ const pm = prismaMock as never as {
     owner: { findMany: ReturnType<typeof vi.fn> };
     dmVariant: { updateMany: ReturnType<typeof vi.fn> };
     property: { findMany: ReturnType<typeof vi.fn> };
+    propertyDmLog: { findMany: ReturnType<typeof vi.fn> };
   };
 };
 
@@ -563,6 +566,27 @@ describe("POST confirm (bulk) — 共有者のまとまりが割れていない�
     );
     const res = await call();
     expect(res.status).toBe(409);
+    expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+// terminal(拒否/宛先不明)が付いた宛先が混ざっていたら確定全体を断る(@codex #384 R1 P1)。
+// この route の既存方針(「1件でも不正なら確定全体を断る=黙って減らさない」)に合わせる。
+describe("confirm: terminal 記録の再検査", () => {
+  it("拒否が記録された宛先が混ざると 409 TERMINAL_RECIPIENTS・確定しない", async () => {
+    grant(...ALL);
+    const oid = "aaaaaaaa-1111-4111-8111-111111111111";
+    setupFreshDrafts(
+      [{ id: "11111111-1111-4111-8111-111111111111", recipientZip: "100-0001", recipientAddress: "東京都千代田区1-1", ownerId: oid }],
+      [{ id: oid, zip: "100-0001", address: "東京都千代田区1-1", currentZip: null, currentAddress: null }],
+    );
+    pm._tx.propertyDmLog.findMany.mockResolvedValueOnce([
+      { ownerId: oid, propertyId: null, logOwners: [] },
+    ]);
+    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: ["11111111-1111-4111-8111-111111111111"] }) }) as never);
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error.code).toBe("TERMINAL_RECIPIENTS");
     expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 });

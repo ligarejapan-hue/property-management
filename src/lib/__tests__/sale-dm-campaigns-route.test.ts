@@ -15,19 +15,21 @@ vi.mock("@/lib/api-helpers", () => {
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 // 下書き保存の引数(特に model)を検証するため tx 内の create を共有スパイにする。
-const { draftCreate, draftOwnerCreateMany, txPropertyOwnerFindMany, txDmLogFindMany } = vi.hoisted(() => ({
+const { draftCreate, draftOwnerCreateMany, txPropertyOwnerFindMany, txDmLogFindMany, txCampaignUpdate } = vi.hoisted(() => ({
   draftCreate: vi.fn(),
   draftOwnerCreateMany: vi.fn(),
   txPropertyOwnerFindMany: vi.fn(async () => [] as Array<{ propertyId: string; ownerId: string }>),
   // terminal(拒否・宛先不明)除外の照会。既定=記録なし(除外ゼロ)。
   txDmLogFindMany: vi.fn(async (_args?: unknown) => [] as Array<{ ownerId: string | null; propertyId: string | null; logOwners: { ownerId: string }[] }>),
+  // ready 更新(結果メタ __result の保存先)を検証するため共有スパイに。
+  txCampaignUpdate: vi.fn(async (_args?: unknown) => ({})),
 }));
 vi.mock("@/lib/prisma", () => ({
   default: {
     property: { findMany: vi.fn() },
     dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), findUnique: vi.fn(async () => null), delete: vi.fn(async () => ({ id: "deleted" })), deleteMany: vi.fn(async () => ({ count: 1 })) }, dmVariant: { create: vi.fn() }, dmRecipientDraft: { create: draftCreate },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({
-      dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), update: vi.fn() },
+      dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), update: txCampaignUpdate },
       dmVariant: { create: vi.fn(async () => ({ id: "v1" })) },
       dmRecipientDraft: { create: draftCreate },
       // PR-A: 宛先生成 tx のロック(Owner/親行 FOR SHARE)・リンク再検証・共有者連関保存。
@@ -577,6 +579,11 @@ describe("POST /campaigns — 拒否・宛先不明の宛先を保存しない",
     expect(draftCreate.mock.calls[0][0].data.propertyId).toBe("pB");
     const detail = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].detail;
     expect(detail.excludedTerminal).toBe(1);
+    // 冪等再返却用の結果メタが ready 更新と同時に保存される(@codex #384 R1 P2)。
+    const upd = txCampaignUpdate.mock.calls[0][0] as { data: { status: string; filterSnapshot: { __result: Record<string, unknown> } } };
+    expect(upd.data.status).toBe("ready");
+    expect(upd.data.filterSnapshot.__result.excludedTerminal).toBe(1);
+    expect(upd.data.filterSnapshot.__result.saved).toBe(1);
   });
 
   it("共有者連関(logOwners)経由の terminal でも外れる=所有者横断(別物件での拒否を含む)", async () => {
@@ -637,5 +644,38 @@ describe("POST /campaigns — 拒否・宛先不明の宛先を保存しない",
     expect(json.excludedTerminal).toBe(0);
     expect(json.saved).toBe(2);
     expect(draftCreate).toHaveBeenCalledTimes(2);
+  });
+});
+
+// 冪等再試行でも件数(excludedTerminal 等)が消えない(@codex #384 R1 P2)。
+// 応答が届かず同キーで再試行したとき {campaignId} だけだと「◯件除外」の通知が失われる。
+describe("idempotent 再返却に結果メタを含める", () => {
+  it("ready 済みキャンペーンの再試行は保存済みの excludedTerminal を返す", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    (prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn> } }).dmCampaign.findUnique.mockResolvedValueOnce({
+      id: "c9",
+      createdBy: "u1",
+      status: "ready",
+      createdAt: new Date().toISOString(),
+      filterSnapshot: { __result: { excludedTerminal: 2, saved: 3, requested: 5 } },
+    });
+    const res = await POST(req({ ...validBody, idempotencyKey: "33333333-3333-4333-8333-333333333333" }) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.idempotent).toBe(true);
+    expect(json.campaignId).toBe("c9");
+    expect(json.excludedTerminal).toBe(2);
+    expect(json.saved).toBe(3);
+  });
+
+  it("結果メタが無い古いキャンペーンでも従来どおり {campaignId, idempotent} を返す(壊れない)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    (prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn> } }).dmCampaign.findUnique.mockResolvedValueOnce({
+      id: "c8", createdBy: "u1", status: "ready", createdAt: new Date().toISOString(), filterSnapshot: { dmStatus: "send" },
+    });
+    const res = await POST(req({ ...validBody, idempotencyKey: "44444444-4444-4444-8444-444444444444" }) as never);
+    const json = await res.json();
+    expect(json.idempotent).toBe(true);
+    expect(json.excludedTerminal).toBeUndefined();
   });
 });

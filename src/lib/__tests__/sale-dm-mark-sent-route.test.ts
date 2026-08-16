@@ -45,7 +45,7 @@ vi.mock("@/lib/prisma", () => {
   const queryRaw = vi.fn(async () => []); // Owner FOR SHARE / 親行 FOR UPDATE の行ロック
   const db = {
     dmRecipientDraft: { findUnique: draftFindUnique, update: draftUpdate, updateMany: draftUpdateMany },
-    propertyDmLog: { create: dmLogCreate },
+    propertyDmLog: { create: dmLogCreate, findMany: vi.fn(async () => []) },
     propertyDmLogOwner: { createMany: logOwnerCreateMany },
     $queryRaw: queryRaw,
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
@@ -60,7 +60,7 @@ import { POST } from "../../app/api/properties/sale-dm/drafts/[id]/mark-sent/rou
 
 const pm = prismaMock as never as {
   dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
-  propertyDmLog: { create: ReturnType<typeof vi.fn> };
+  propertyDmLog: { create: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
   propertyDmLogOwner: { createMany: ReturnType<typeof vi.fn> };
   $queryRaw: ReturnType<typeof vi.fn>;
 };
@@ -253,6 +253,24 @@ describe("POST mark-sent", () => {
       .mockResolvedValueOnce({ ...DRAFT_FULL, representativeOwnerId: "o9" }); // 勝者決定後(統合で変化)
     const res = await POST(req() as never, ctx());
     expect(res.status).toBe(409);
+    expect(pm.propertyDmLog.create).not.toHaveBeenCalled();
+  });
+});
+// terminal(拒否/宛先不明)が記録済みの宛先は「送付済み」にしない(@codex #384 R1 P1)。
+// 印刷から除外された宛先を一括操作で sent に化けさせると偽の送付記録が残る。
+describe("terminal 記録がある宛先の mark-sent 拒絶", () => {
+  it("409 TERMINAL_RECIPIENT・状態遷移もログ作成もしない", async () => {
+    pm.dmRecipientDraft.findUnique
+      .mockResolvedValueOnce(DRAFT_FULL) // route 読取
+      .mockResolvedValueOnce(DRAFT_FULL); // tx 先読み
+    pm.propertyDmLog.findMany.mockResolvedValueOnce([
+      { ownerId: "o1", propertyId: null, logOwners: [] },
+    ]);
+    const res = await POST(req() as never, ctx() as never);
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error.code).toBe("TERMINAL_RECIPIENT");
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
     expect(pm.propertyDmLog.create).not.toHaveBeenCalled();
   });
 });

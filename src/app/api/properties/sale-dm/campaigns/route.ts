@@ -23,6 +23,25 @@ import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
 import { SaleDmError } from "@/lib/sale-dm-letter/types";
 import { randomBytes } from "crypto";
 
+// 冪等再返却でも作成時と同じ件数(excludedTerminal 等)を返すための結果メタの取り出し。
+// 応答が届かず client が同キーで再試行したとき {campaignId} だけ返すと「◯件除外しました」の
+// 通知が消える(@codex #384 R1 P2)。schema に列を増やさず(migration は別承認のため)、
+// filterSnapshot(Json・アプリ内に他の読者が無いことを実測済み)へ同居させる。
+const RESULT_META_KEY = "__result";
+const idempotentPayload = (id: string, snapshot: unknown): Record<string, unknown> => {
+  const meta =
+    snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+      ? (snapshot as Record<string, unknown>)[RESULT_META_KEY]
+      : undefined;
+  return {
+    campaignId: id,
+    idempotent: true,
+    ...(meta && typeof meta === "object" && !Array.isArray(meta)
+      ? (meta as Record<string, unknown>)
+      : {}),
+  };
+};
+
 export async function POST(request: NextRequest) {
   try {
     const session = await getApiSession();
@@ -73,12 +92,12 @@ export async function POST(request: NextRequest) {
     // 既存 campaign を返す(再送信/別タブ/連打での二重課金・二重作成を防ぐ)。キー未指定なら従来通り。
     const idempotencyKey = body.idempotencyKey;
     if (idempotencyKey) {
-      const existing = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true, status: true, createdAt: true } });
+      const existing = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true, status: true, createdAt: true, filterSnapshot: true } });
       if (existing) {
         if (existing.createdBy !== session.id) throw new ApiError(409, "この作成キーは既に使用されています", "IDEMPOTENCY_CONFLICT");
         // status!=="draft"(=ready 以降)= 生成+保存が完了済み → そのまま返す(冪等)。
         if (existing.status !== "draft") {
-          return NextResponse.json({ campaignId: existing.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
+          return NextResponse.json(idempotentPayload(existing.id, existing.filterSnapshot), { headers: { "Cache-Control": "no-store" } });
         }
         // status==="draft" = クレーム後・保存完了前。並行生成中(ライブ)か、プロセス死の孤児か区別が要る。
         // 生成時間を大きく超えて古い(STALE_MS 超)draft のみ孤児として削除し作り直す。
@@ -102,9 +121,9 @@ export async function POST(request: NextRequest) {
         // それ以外は 409 で再試行を促す。
         const del = await prisma.dmCampaign.deleteMany({ where: { id: existing.id, status: "draft" } });
         if (del.count === 0) {
-          const settled = await prisma.dmCampaign.findUnique({ where: { id: existing.id }, select: { status: true } });
+          const settled = await prisma.dmCampaign.findUnique({ where: { id: existing.id }, select: { status: true, filterSnapshot: true } });
           if (settled && settled.status !== "draft") {
-            return NextResponse.json({ campaignId: existing.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
+            return NextResponse.json(idempotentPayload(existing.id, settled.filterSnapshot), { headers: { "Cache-Control": "no-store" } });
           }
           throw new ApiError(409, "同じ作成キーの処理が進行中です。少し待って再試行してください", "CAMPAIGN_PROCESSING");
         }
@@ -219,13 +238,13 @@ export async function POST(request: NextRequest) {
       });
     } catch (e) {
       if (idempotencyKey && e && typeof e === "object" && (e as { code?: unknown }).code === "P2002") {
-        const won = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true, status: true } });
+        const won = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true, status: true, filterSnapshot: true } });
         if (won) {
           if (won.createdBy !== session.id) throw new ApiError(409, "この作成キーは既に使用されています", "IDEMPOTENCY_CONFLICT");
           // 完了済み(ready 以降)なら冪等返却。status==="draft"=並行勝者が生成中(未完)→ 勝者の生成を壊さない
           // よう削除せず、少し待っての再試行を促す(完了すれば ready で冪等返却される・R34)。
           if (won.status !== "draft") {
-            return NextResponse.json({ campaignId: won.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
+            return NextResponse.json(idempotentPayload(won.id, won.filterSnapshot), { headers: { "Cache-Control": "no-store" } });
           }
           throw new ApiError(409, "同じ作成キーの処理が進行中です。少し待って再試行してください", "CAMPAIGN_PROCESSING");
         }
@@ -361,7 +380,26 @@ export async function POST(request: NextRequest) {
         // 生成+保存が完了したのでキャンペーンを ready にする(drafts と同一トランザクションでアトミックに確定)。
         // idempotency の pre-check / P2002 はこの完了マーカーで「冪等返却(ready)」と「孤児削除→作り直し(draft)」
         // を区別する。途中でプロセスが落ちれば status は draft のままで孤児として検出・回収される(R34)。
-        await tx.dmCampaign.update({ where: { id: claimed.id }, data: { status: "ready" } });
+        await tx.dmCampaign.update({
+          where: { id: claimed.id },
+          data: {
+            status: "ready",
+            // 冪等再返却用の結果メタ(非PII・件数のみ)。→ idempotentPayload
+            filterSnapshot: {
+              ...(body.filters ?? {}),
+              [RESULT_META_KEY]: {
+                requested: recipients.length,
+                matchedProperties,
+                generated: drafts.length,
+                saved: persistedCount,
+                skippedByUnlink: skippedByUnlinkCount,
+                excludedTerminal: excludedTerminalCount,
+                failed: drafts.filter((d) => d.error).length,
+                truncated,
+              },
+            },
+          },
+        });
       });
     } catch (e) {
       // 生成 or 保存の失敗 → クレームを削除(孤児の空 campaign を残さない。再試行で再クレームできる)。

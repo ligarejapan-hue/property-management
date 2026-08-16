@@ -38,12 +38,17 @@ vi.mock("@/lib/sale-dm-letter/route-guard", () => ({
     session.role === "field_staff" ? drafts.filter((d) => d.property.createdBy === session.id || d.property.assignedTo === session.id) : drafts,
 }));
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
+vi.mock("@/lib/prisma", () => {
+  const db = {
     dmCampaign: { findUnique: vi.fn() },
     dmRecipientDraft: { findMany: vi.fn() },
-  },
-}));
+    // 印刷直前の terminal(拒否/宛先不明)再検査(@codex #384 R1 P1)。既定=記録なし。
+    propertyDmLog: { findMany: vi.fn(async () => []) },
+    $queryRaw: vi.fn(async () => []), // Owner FOR SHARE
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
+  };
+  return { default: db };
+});
 
 import { describe, it, expect, beforeEach } from "vitest";
 import prismaMock from "@/lib/prisma";
@@ -54,6 +59,7 @@ import { GET } from "../../app/api/properties/sale-dm/campaigns/[id]/print/route
 const pm = prismaMock as never as {
   dmCampaign: { findUnique: ReturnType<typeof vi.fn> };
   dmRecipientDraft: { findMany: ReturnType<typeof vi.fn> };
+  propertyDmLog: { findMany: ReturnType<typeof vi.fn> };
 };
 
 const variant = {
@@ -193,5 +199,48 @@ describe("GET .../campaigns/[id]/print", () => {
     const res = await GET(req() as never, ctx);
     expect(res.status).toBe(403);
     expect(pm.dmCampaign.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// 拒否・宛先不明(terminal)の**印刷直前**再検査(@codex #384 R1 P1)。
+// 作成〜印刷の間に記録された拒否を素通りさせない(A=宛名CSVのDL時再検査と同じ関所)。
+// ============================================================================
+describe("印刷直前の terminal 再検査", () => {
+  const dA = { ...draft, id: "rA", propertyId: "pA", representativeOwnerId: "oA", draftOwners: [{ ownerId: "oA" }], recipientName: "甲野 太郎", trackingToken: "tokA" };
+  const dB = { ...draft, id: "rB", propertyId: "pB", representativeOwnerId: "oB", draftOwners: [{ ownerId: "oB" }], recipientName: "乙山 次郎", trackingToken: "tokB" };
+
+  it("拒否が付いた宛先は印刷から除外し、件数を紙面と監査に出す", async () => {
+    pm.dmRecipientDraft.findMany.mockResolvedValue([dA, dB]);
+    pm.propertyDmLog.findMany.mockResolvedValueOnce([
+      { ownerId: "oA", propertyId: null, logOwners: [] },
+    ]);
+    const res = await GET(req() as never, ctx);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("1 件の宛先は、この印刷から除外しました");
+    expect(html).not.toContain("甲野 太郎"); // 除外された手紙は紙面に載らない
+    expect(html).toContain("乙山 次郎");
+    const detail = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].detail;
+    expect(detail.excludedTerminal).toBe(1);
+    expect(detail.count).toBe(1); // 実際に刷った数
+  });
+
+  it("全宛先が terminal なら 409 ALL_EXCLUDED_TERMINAL(白紙を刷らせない)", async () => {
+    pm.dmRecipientDraft.findMany.mockResolvedValue([dA]);
+    pm.propertyDmLog.findMany.mockResolvedValueOnce([
+      { ownerId: "oA", propertyId: null, logOwners: [] },
+    ]);
+    const res = await GET(req() as never, ctx);
+    expect(res.status).toBe(409);
+  });
+
+  it("terminal 記録が無ければ従来どおり全件印刷・excludedTerminal=0", async () => {
+    pm.dmRecipientDraft.findMany.mockResolvedValue([dA, dB]);
+    const res = await GET(req() as never, ctx);
+    expect(res.status).toBe(200);
+    const detail = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].detail;
+    expect(detail.excludedTerminal).toBe(0);
+    expect(detail.count).toBe(2);
   });
 });

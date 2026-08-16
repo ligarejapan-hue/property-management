@@ -6,6 +6,11 @@ import { requireSaleDmAccess } from "@/lib/sale-dm-letter/route-guard";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { lockOwnersForShare, type RawTx } from "@/lib/dm-batch/locks";
+import {
+  findTerminalExclusions,
+  isTerminalExcluded,
+  type TerminalExclusionTx,
+} from "@/lib/dm-batch/terminal-exclusion";
 
 // 送付確定: 確定済み(confirmed)の下書きを sent にし、既存「送付履歴」(PropertyDmLog)へ
 // 1 件記録して既存画面に連携する。冪等(既に sent なら再記録しない)。
@@ -91,6 +96,28 @@ export async function POST(
       ];
       // 順序規約: Owner(FOR SHARE・id順)→物件親行(FOR UPDATE)→子行(draft/log)。
       await lockOwnersForShare(rawTx, preOwners);
+      // 拒否・宛先不明が記録済みなら「送付済み」にしない(@codex #384 R1 P1)。印刷から
+      // 除外された宛先を一括操作で送付済みにすると、**送っていないのに送付記録が残り**、
+      // その偽記録が以後の運用(再送候補・履歴)を汚す。ロック保持中に同じ述語で再評価。
+      {
+        const exclusionSets = await findTerminalExclusions(
+          tx as unknown as TerminalExclusionTx,
+          preOwners,
+          [pre.propertyId],
+        );
+        if (
+          isTerminalExcluded(exclusionSets, {
+            propertyId: pre.propertyId,
+            ownerIds: preOwners,
+          })
+        ) {
+          throw new ApiError(
+            409,
+            "この宛先には拒否・宛先不明が記録されています。送付済みにはできません",
+            "TERMINAL_RECIPIENT",
+          );
+        }
+      }
       await rawTx.$queryRaw`SELECT id FROM properties WHERE id = ${pre.propertyId}::uuid FOR UPDATE`;
       const transitioned = await tx.dmRecipientDraft.updateMany({
         where: { id, status: "confirmed" },

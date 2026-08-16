@@ -224,7 +224,7 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // detail に載せておらず、ここにも含めない(perVariant の variantId キー別件数は redact のまま)。
   sale_dm_campaign_create: new Set(["requested", "generated", "saved", "skippedByUnlink", "excludedTerminal", "truncated", "createdAt"]),
   sale_dm_assign_variants: new Set(["mode", "order", "assigned", "assignedAt"]),
-  sale_dm_campaign_print: new Set(["printedAt"]),
+  sale_dm_campaign_print: new Set(["printedAt", "excludedTerminal"]),
   sale_dm_variant_create: new Set(["createdAt"]),
   sale_dm_variant_update: new Set(["updatedAt"]),
   sale_dm_variant_delete: new Set(["deletedAt"]),
