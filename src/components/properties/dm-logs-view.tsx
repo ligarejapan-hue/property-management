@@ -200,27 +200,17 @@ function ReactionEditor({
   // 物件化モーダルの2回押し(Codex R9 P2)と同じ作法)。種別を変えたら予告は解除。
   const [refusalArmed, setRefusalArmed] = useState(false);
 
-  // 既に「拒否」の記録は、管理者以外は変更フォーム自体を出さない(サーバも 403)。
-  // 押しても必ず失敗するUIを出さない方針(canWrite などと同じ)。
-  if (log.reactionStatus === "refused" && !isAdmin) {
-    return (
-      <div className="flex flex-wrap items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300">
-        <span>「拒否」の変更・取消は管理者のみです</span>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 dark:border-gray-700 dark:text-gray-200"
-        >
-          閉じる
-        </button>
-      </div>
-    );
-  }
+  // 既に「拒否」の記録は、管理者以外は**種別だけ**固定する(@codex #385 R1 P2 ③)。
+  // サーバは status:"refused" のままの日付・メモ訂正を意図的に許しているので、
+  // フォーム全体を塞ぐと許可された訂正まで潰す(塞ぎすぎ)。selectのみ disabled。
+  const refusedLocked = log.reactionStatus === "refused" && !isAdmin;
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <select
         value={status}
+        disabled={refusedLocked}
+        title={refusedLocked ? "別の反響への変更・取消は管理者のみです" : undefined}
         onChange={(e) => {
           setStatus(e.target.value as ReactionStatus);
           setRefusalArmed(false);
@@ -263,6 +253,11 @@ function ReactionEditor({
           />
           メモを消す
         </label>
+      )}
+      {refusedLocked && (
+        <span className="basis-full text-xs text-amber-700 dark:text-amber-300">
+          日付・メモは訂正できます。別の反響への変更・取消は管理者のみです。
+        </span>
       )}
       {refusalArmed && (
         <span className="basis-full text-xs text-red-700 dark:text-red-300">

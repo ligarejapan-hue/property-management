@@ -235,10 +235,13 @@ export default function OrphanDmLogsPage() {
  *  (行コンポーネントに state を持つと保存後の再取得が反映されない=#366 R3)。 */
 function OrphanReactionEditor({
   log,
+  isAdmin,
   onSave,
   onCancel,
 }: {
   log: OrphanLog;
+  /** 拒否からの変更は管理者のみ(サーバ403)。種別selectの固定に使う。 */
+  isAdmin: boolean;
   onSave: (
     status: ReactionStatus,
     reactedAt: string,
@@ -259,12 +262,21 @@ function OrphanReactionEditor({
   // 未入力なら送らない=「省略=変更なし」。消すときは「メモを消す」を明示チェック(note:null)。
   const [note, setNote] = useState("");
   const [clearNote, setClearNote] = useState(false);
+  // 「拒否」への変更は1回目=予告のみ・2回目で確定(物件側 ReactionEditor と同じ作法・
+  // @codex #385 R1 P2 ④)。種別を変えたら予告は解除。
+  const [refusalArmed, setRefusalArmed] = useState(false);
+  const refusedLocked = log.reactionStatus === "refused" && !isAdmin;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
       <select
         value={status}
-        onChange={(e) => setStatus(e.target.value as ReactionStatus)}
+        disabled={refusedLocked}
+        title={refusedLocked ? "別の反響への変更・取消は管理者のみです" : undefined}
+        onChange={(e) => {
+          setStatus(e.target.value as ReactionStatus);
+          setRefusalArmed(false);
+        }}
         className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm text-gray-900 dark:text-gray-100"
       >
         {REACTION_STATUSES.map((s) => (
@@ -301,12 +313,29 @@ function OrphanReactionEditor({
           メモを消す
         </label>
       )}
+      {refusedLocked && (
+        <span className="basis-full text-xs text-amber-700 dark:text-amber-300">
+          日付・メモは訂正できます。別の反響への変更・取消は管理者のみです。
+        </span>
+      )}
+      {refusalArmed && (
+        <span className="basis-full text-xs text-red-700 dark:text-red-300">
+          この方は今後、宛名CSV・売却DMの両方から自動で外れます（別の物件も含む）。
+          取り消し・変更は管理者のみになります。もう一度押すと確定します。
+        </span>
+      )}
       <button
         type="button"
-        onClick={() => onSave(status, reactedAt, note, clearNote)}
+        onClick={() => {
+          if (status === "refused" && log.reactionStatus !== "refused" && !refusalArmed) {
+            setRefusalArmed(true);
+            return;
+          }
+          onSave(status, reactedAt, note, clearNote);
+        }}
         className="rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
       >
-        保存
+        {refusalArmed ? "拒否として保存（確定）" : "保存"}
       </button>
       <button
         type="button"
@@ -366,6 +395,7 @@ function OrphanRow({
           // 編集中だけマウント=開くたびに最新の log で初期化される(#366 R3)
           <OrphanReactionEditor
             log={log}
+            isAdmin={isAdmin}
             onSave={(status, reactedAt, note, clearNote) =>
               onSave(log.id, status, reactedAt, note, clearNote)
             }
@@ -382,15 +412,11 @@ function OrphanRow({
         )}
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-sm">
-        {/* 拒否の変更・取消は管理者のみ(発注者指示 2026-08-17)。この画面の入口は
-            権限ベースで admin 以外も通り得るため、サーバ403と対で施錠表示にする。 */}
-        {!editing && log.reactionStatus === "refused" && !isAdmin && (
-          <span className="text-xs text-amber-700 dark:text-amber-300">
-            「拒否」の変更・取消は管理者のみです
-          </span>
-        )}
-        {!editing && !(log.reactionStatus === "refused" && !isAdmin) && (
-          <div className="flex gap-2">
+        {/* 拒否の取消は管理者のみ(発注者指示 2026-08-17)。訂正ボタンは出す=サーバは
+            拒否のままの日付・メモ訂正を許しているため(@codex #385 R1 P2 ③)。
+            エディタ側で種別selectを固定する。 */}
+        {!editing && (
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onEdit}
@@ -398,13 +424,17 @@ function OrphanRow({
             >
               反響を訂正
             </button>
-            <button
-              type="button"
-              onClick={() => onDelete(log.id)}
-              className="rounded-md border border-red-300 dark:border-red-800 px-3 py-1 text-xs text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10"
-            >
-              記録を取消
-            </button>
+            {log.reactionStatus === "refused" && !isAdmin ? (
+              <span className="text-xs text-amber-700 dark:text-amber-300">取消は管理者のみ</span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onDelete(log.id)}
+                className="rounded-md border border-red-300 dark:border-red-800 px-3 py-1 text-xs text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-500/10"
+              >
+                記録を取消
+              </button>
+            )}
           </div>
         )}
       </td>

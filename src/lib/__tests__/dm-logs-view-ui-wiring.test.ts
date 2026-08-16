@@ -155,11 +155,23 @@ describe("拒否の確認ボタンと管理者ロック(UI配線)", () => {
     expect(VIEW).toContain("setRefusalArmed(false)");
   });
 
-  it("既に拒否の記録は、管理者以外に変更フォームを出さない(サーバ 403 と対)", () => {
-    expect(VIEW).toMatch(/log\.reactionStatus === "refused" && !isAdmin/);
-    expect(VIEW).toContain("「拒否」の変更・取消は管理者のみです");
+  it("既に拒否の記録は、管理者以外は**種別だけ**固定(日付・メモ訂正は許す=@codex #385 ③)", () => {
+    // 当初はフォーム全体を早期returnで塞いだが、サーバは status:"refused" のままの
+    // 日付・メモ訂正を意図的に許している=塞ぎすぎだった。selectのみ disabled。
+    expect(VIEW).toMatch(/refusedLocked = log\.reactionStatus === "refused" && !isAdmin/);
+    expect(VIEW).toContain("disabled={refusedLocked}");
+    expect(VIEW).toContain("日付・メモは訂正できます。別の反響への変更・取消は管理者のみです");
     // isAdmin は useSession の role 由来(F12 permissions 配列に role は無い)。
     expect(VIEW).toContain('useSession');
     expect(VIEW).toMatch(/role === "admin"/);
+  });
+
+  it("孤児DM訂正の編集フォームにも同じ二段確認と種別固定がある(@codex #385 ④)", () => {
+    const ORPHAN = read("src/app/(dashboard)/admin/orphan-dm-logs/page.tsx");
+    expect(ORPHAN).toContain("refusalArmed");
+    expect(ORPHAN).toContain("拒否として保存（確定）");
+    expect(ORPHAN).toContain("disabled={refusedLocked}");
+    // 取消ボタンだけを隠す(訂正ボタンは出す=許可された訂正を塞がない)。
+    expect(ORPHAN).toContain("取消は管理者のみ");
   });
 });
