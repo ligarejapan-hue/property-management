@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   KNOWN_PROBE_SELECTORS,
+  KNOWN_SITE_IDENTIFIERS,
   formatRegistryPageProbe,
+  safeIdentifier,
 } from "@/lib/registry-fetch/page-probe";
 
 /**
@@ -191,12 +193,16 @@ describe("⚠端から端まで：どんな入力を渡しても PII は出な�
     ];
     const out = formatRegistryPageProbe({
       tables: [{ id: "t", headers: leaky, rowCount: 1 }],
-      buttons: leaky.map((s) => ({
+      // ⚠**id と関数名そのもの**が PII のこともある（@codex #383 P1・7度目）。
+      buttons: leaky.flatMap((s) => [
+        { id: s, onclick: "", label: s, disabled: false },
+        { id: "", onclick: `${s}()`, label: s, disabled: false },
+      ]).concat(leaky.map((s) => ({
         id: "",
         onclick: `showOwner('${s}')`,
         label: s,
         disabled: false,
-      })),
+      }))),
       // ⚠**引用符の3種すべて**と、**閉じ引用符が落ちた形**、**関数呼び出しでない形**を入れる。
       // このPRで破られた経路（' " ` / 切れた引数 / 素の代入）を全部並べる。
       tabs: leaky.flatMap((s) => [
@@ -216,6 +222,19 @@ describe("⚠端から端まで：どんな入力を渡しても PII は出な�
     for (const frag of ["井土ケ谷", "丸の内", "yamada", "1234"]) {
       expect(out, `「${frag}」が漏れている`).not.toContain(frag);
     }
+  });
+});
+
+describe("識別子の許可リストは実際のセレクタ定義に由来する", () => {
+  it("⚠許可した識別子はすべて auto-fetch のセレクタに実在する（推測で足していない）", () => {
+    for (const id of KNOWN_SITE_IDENTIFIERS) {
+      expect(AUTO_FETCH, `${id} は auto-fetch に無い`).toContain(id);
+    }
+  });
+
+  it("未知の識別子は文字数だけになる", () => {
+    expect(safeIdentifier("Yamada")).toBe("(不明:6字)");
+    expect(safeIdentifier("myPageTable")).toBe("myPageTable");
   });
 });
 

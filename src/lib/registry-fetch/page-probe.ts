@@ -12,12 +12,21 @@
  *  - 表の**中身（tbody のセル）は一切読まない**。読むのは `thead` の列見出しと行数だけ。
  *  - 表の**行の中にあるボタン・リンクも走査しない**。行アクションは id を持たず onclick に
  *    その行の識別子が埋まる（@codex 提出前レビュー）。
- *  - 見えている文字（列見出し・ボタン名）は {@link safeLabel} の**許可リスト**を通す。
- *    ⚠当初は「数字を伏せれば安全」としたが、**数字を含まない PII は素通り**した
- *    （所有者名、番地の無い町名。@codex #383 P1）。**伏せ字は匿名化ではない**。
- *  - onclick は {@link maskProbeOnclick} で数字と非 ASCII を落とす（`selectTab('tabMy')` は残す）。
- *  - id / name だけは**コード上の静的な識別子**なのでそのまま残す。これが無いと
- *    セレクタを特定できず診断の意味が無い。
+ *
+ * ⚠**出力に載るのは「こちらが知っている値」だけ**。外部由来の文字は、どんな見た目でも
+ * そのままは出さない（このモジュールは 7 回破られて、この結論に落ち着いた）。
+ *  - 列見出し・ボタン名 → {@link safeLabel}（サイトの固定 UI 文言の**完全一致**のみ）
+ *  - id / name / onclick の関数名 → {@link safeIdentifier}
+ *    （auto-fetch のセレクタが**実際に参照している識別子**の完全一致のみ）
+ *  - onclick の文字列引数 → {@link SAFE_ONCLICK_ARGS}（完全一致のみ）
+ *  - 通らなかったものは **文字数だけ**（`(他:10字)` `(不明:6字)` `'…6字'`）
+ *
+ * ⚠**やってはいけないこと**（全部一度やって破られた）:
+ *  - 「数字を伏せれば安全」→ 数字を含まない氏名・町名が素通り
+ *  - 「非 ASCII を落とせば安全」→ メールアドレスが素通り
+ *  - 「短い英字なら安全」「tab で始まれば安全」→ ローマ字氏名・`tabitha` が素通り
+ *  - 「識別子なら安全」→ ハンドラ名が `Yamada()` のこともある
+ *  - **伏せる前に切る**（切ると引用符が落ち、後段の判定が効かなくなる）
  */
 
 /** ログ1行に載せる上限（journald を溢れさせない）。 */
@@ -126,10 +135,52 @@ export function safeLabel(raw: string): string {
   return `(他:${Math.min(collapsed.length, 999)}字)`;
 }
 
-/** id / name は静的な識別子なので数字を保つ（`#cbnDlgChibanType0` の 0 が要る）。長さだけ切る。 */
+/** 長さだけ切る（許可リストを通った値にのみ使う）。 */
 function clipId(raw: string): string {
   const collapsed = raw.replace(/\s+/g, " ").trim();
   return collapsed.length > MAX_ID ? `${collapsed.slice(0, MAX_ID - 1)}…` : collapsed;
+}
+
+/**
+ * 登記情報提供サービス側の**既知の識別子**（id / name / onclick の関数名）。
+ *
+ * ⚠**`id` も関数名も「ASCII の識別子なら通す」ではいけない**（@codex #383 P1・7度目）。
+ * ページ側のハンドラ名が `Yamada()` や `owner.Yamada()` だった場合、そのまま出てしまう。
+ * **識別子だからといって安全とは限らない**——安全なのは**こちらが知っている値**だけ。
+ *
+ * ここに並べるのは **auto-fetch.ts の REGISTRY_SELECTORS が実際に参照している値**
+ * （走査ガードで一致を検査する）。未知の識別子は {@link safeIdentifier} が
+ * `(不明:N字)` にする。**「未知の表/ボタンが N 個ある・長さはこれ」まで分かれば、
+ * 既知セレクタの在/不在と併せて切り分けはできる**。
+ */
+export const KNOWN_SITE_IDENTIFIERS: ReadonlySet<string> = new Set([
+  // マイページ（今回の失敗地点）
+  "myPageTable", "myPageSeikyu", "myPageTable_next", "myPageTable_previous",
+  "myReloadButton", "siborikomi", "selectTab", "myPageDownload",
+  // 不動産請求
+  "fudosanIchiranTbl", "fuAll", "fuChibanKaoku", "fuChibanKaokuIchiran",
+  "fuChibanKuiki", "fuChibanKuikiCode", "fuFudosanNo", "fuShoyusya",
+  "fuSeikyuMethodFUDOSAN_NO", "fuSeikyuMethodSHOZAI", "fuShozaiChokusetuNyuryoku",
+  "fuShozaiSentaku", "fuShozaiTypeTATEMONO", "fuShozaiTypeTOCHI",
+  "fuTodofukenShozai", "fuBtnForward",
+  // 地番検索ダイアログ
+  "cbnDlgBtnCancel", "cbnDlgBtnOk", "cbnDlgBtnPageNext", "cbnDlgCheckedChibanDsp",
+  "cbnDlgCheckedChibanString", "cbnDlgChibanCheckTbl", "cbnDlgChibanDialog",
+  "cbnDlgChibanSearch", "cbnDlgChibanType0", "cbnDlgSearchChibanEnd",
+  "cbnDlgSearchChibanStart", "kuikiDialogArea",
+  // ログイン
+  "userId", "password",
+]);
+
+/**
+ * id / name / 関数名を安全にする。**既知の識別子だけそのまま出し、それ以外は文字数だけ**。
+ * ⚠ここを「ASCII なら通す」に戻すと PII が出る（7度目の指摘の中身そのもの）。
+ */
+export function safeIdentifier(raw: string): string {
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  if (collapsed === "") return "";
+  if (KNOWN_SITE_IDENTIFIERS.has(collapsed)) return collapsed;
+  return `(不明:${Math.min(collapsed.length, 999)}字)`;
 }
 
 /**
@@ -154,7 +205,9 @@ export function maskProbeOnclick(raw: string): string {
   // だけで、**入力のそれ以外の文字は一切出力へ運ばれない**。
   const head = noDigits.match(/^\s*([A-Za-z_$][A-Za-z_$.＊]{0,40})\s*\(/);
   if (!head) return "(不明な形式)";
-  const fnName = head[1];
+  // ⚠**関数名も許可リストを通す**（@codex #383 P1・7度目）。ページ側のハンドラ名が
+  // `Yamada()` `owner.Yamada()` のこともあり、**識別子＝安全ではない**。
+  const fnName = safeIdentifier(head[1]);
   const argsPart = noDigits.slice(head[0].length);
 
   // 引用符が閉じていない＝どこかで切れている。中身を信用できないので失敗側へ倒す。
@@ -228,14 +281,14 @@ export function formatRegistryPageProbe(probe: RegistryPageProbe): string {
     .map((tbl) => {
       const h = take(tbl.headers, MAX_HEADERS);
       const headers = h.shown.map(safeLabel).join("|") + suffix(h.rest);
-      return `${clipId(tbl.id) || "(no-id)"}(rows=${tbl.rowCount}${headers ? `:${headers}` : ""})`;
+      return `${safeIdentifier(tbl.id) || "(no-id)"}(rows=${tbl.rowCount}${headers ? `:${headers}` : ""})`;
     })
     .join(" ");
 
   const b = take(probe.buttons, MAX_BUTTONS);
   const buttons = b.shown
     .map((btn) => {
-      const who = clipId(btn.id) || maskProbeOnclick(btn.onclick ?? "") || "(no-id)";
+      const who = safeIdentifier(btn.id) || maskProbeOnclick(btn.onclick ?? "") || "(no-id)";
       return `${who}[${safeLabel(btn.label)}${btn.disabled ? ",disabled" : ""}]`;
     })
     .join(" ");

@@ -50,7 +50,7 @@ describe("safeLabel（見えている文字は許可リストだけ通す）", (
 describe("maskProbeOnclick（onclick は関数名だけ残す）", () => {
   it("⚠引数の数字を潰す（行アクションの onclick に受付番号が入り得る）", () => {
     expect(maskProbeOnclick("myPageDownload(12345)")).toBe("myPageDownload(＊)");
-    expect(maskProbeOnclick("go(12345, 67)")).toBe("go(＊)");
+    expect(maskProbeOnclick("go(12345, 67)")).toBe("(不明:2字)(＊)");
   });
 
   it("関数名は残る＝セレクタの手がかりを潰さない", () => {
@@ -60,7 +60,7 @@ describe("maskProbeOnclick（onclick は関数名だけ残す）", () => {
 
   it("⚠バッククォート（テンプレート文字列）も通さない", () => {
     // @codex #383 P1(4度目): ' と " しか見ておらず ` が素通りしていた。
-    expect(maskProbeOnclick("showOwner(`Yamada`)")).toBe("showOwner('…6字')");
+    expect(maskProbeOnclick("showOwner(`Yamada`)")).toBe("(不明:9字)('…6字')");
     expect(maskProbeOnclick("go(`井土ケ谷中町`)")).not.toContain("井土ケ谷");
   });
 
@@ -72,8 +72,8 @@ describe("maskProbeOnclick（onclick は関数名だけ残す）", () => {
 
   it("⚠英字だけの引数も通さない（氏名のローマ字が素通りしていた）", () => {
     // @codex #383 P1(2度目): 「短い英字なら安全」という推測が誤りだった。
-    expect(maskProbeOnclick("showOwner('Yamada')")).toBe("showOwner('…6字')");
-    expect(maskProbeOnclick("showOwner('Tanaka_Taro')")).toBe("showOwner('…11字')");
+    expect(maskProbeOnclick("showOwner('Yamada')")).toBe("(不明:9字)('…6字')");
+    expect(maskProbeOnclick("showOwner('Tanaka_Taro')")).toBe("(不明:9字)('…11字')");
     expect(maskProbeOnclick("go('yamada@example.com')")).not.toContain("yamada");
   });
 
@@ -88,7 +88,7 @@ describe("maskProbeOnclick（onclick は関数名だけ残す）", () => {
   });
 
   it("⚠tab で始まる人名も伏せる", () => {
-    expect(maskProbeOnclick("showOwner('tabitha')")).toBe("showOwner('…7字')");
+    expect(maskProbeOnclick("showOwner('tabitha')")).toBe("(不明:9字)('…7字')");
     expect(maskProbeOnclick("showOwner('tabata')")).not.toContain("tabata");
   });
 
@@ -107,7 +107,8 @@ describe("maskProbeOnclick（onclick は関数名だけ残す）", () => {
     const out = maskProbeOnclick(cut);
     expect(out).not.toContain("Yamada");
     expect(out).not.toContain("Taro");
-    expect(out).toContain("showOwner");
+    expect(out).not.toContain("showOwner");
+    expect(out).toContain("切れた引数は伏せました");
     expect(hasUnbalancedQuotes(cut)).toBe(true);
     expect(hasUnbalancedQuotes("showOwner('Yamada')")).toBe(false);
   });
@@ -167,7 +168,9 @@ describe("formatRegistryPageProbe（1行の診断ログ）", () => {
       tabs: [{ label: "明細", onclick: "showDetail(24680)" }],
     });
     expect(out).not.toContain("24680");
-    expect(out).toContain("showDetail");
+    // ⚠未知の関数名も伏せる（@codex #383 P1・7度目）。
+    expect(out).not.toContain("showDetail");
+    expect(out).toContain("(不明:");
   });
 
   it("タブは onclick をそのまま出す（セレクタ特定の要）", () => {
