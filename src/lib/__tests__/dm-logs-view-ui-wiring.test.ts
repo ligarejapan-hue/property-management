@@ -179,3 +179,37 @@ describe("拒否の確認ボタンと管理者ロック(UI配線)", () => {
     expect(ORPHAN).toContain("取消は管理者のみ");
   });
 });
+
+// ⚠再発源そのものを塞ぐ(@codex #385 R2/R3/R4 で同じ穴を3回踏んだ)。
+// 「保存済みの行が拒否か」の判定は必ず isRefusalProtected を通す。生の
+// `<行>.reactionStatus === "refused"` を認可経路に書くと、退避(shadow)された
+// 拒否を見落として保護が外れる。
+describe("守られた拒否の判定は1関数に集約されている", () => {
+  const AUTH_FILES = [
+    "src/app/api/properties/[id]/dm-logs/route.ts",
+    "src/app/api/properties/[id]/dm-logs/[logId]/route.ts",
+    "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts",
+    "src/app/api/admin/orphan-dm-logs/[logId]/route.ts",
+    "src/lib/dm-reaction/core.ts",
+  ];
+
+  it("認可4経路+coreは isRefusalProtected を使い、保存済み行の生比較を書かない", () => {
+    for (const rel of AUTH_FILES) {
+      const src = read(rel);
+      expect(src, `${rel} が isRefusalProtected を使っていない`).toContain("isRefusalProtected");
+      // 保存済みレコード(log/fresh/pre/current)の状態を直接 "refused" と比べない。
+      // ⚠body.status(=要求された新しい値)との比較は対象外(そちらは生で正しい)。
+      for (const varName of ["log", "fresh", "pre", "current"]) {
+        expect(
+          src.includes(`${varName}.reactionStatus === "refused"`),
+          `${rel}: ${varName}.reactionStatus === "refused" は isRefusalProtected を使うこと`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it("core の同期ガード(undeliverable)も isRefusalProtected 基準", () => {
+    const core = read("src/lib/dm-reaction/core.ts");
+    expect(core).toMatch(/sync\.kind === "undeliverable" && isRefusalProtected\(current\)/);
+  });
+});
