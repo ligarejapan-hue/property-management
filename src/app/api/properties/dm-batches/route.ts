@@ -27,9 +27,13 @@ import {
 import {
   lockOwnersForShare,
   lockPropertiesForShare,
-  sortUniqueIds,
   type RawTx,
 } from "@/lib/dm-batch/locks";
+import {
+  findTerminalExclusions,
+  isTerminalExcluded,
+  type TerminalExclusionTx,
+} from "@/lib/dm-batch/terminal-exclusion";
 
 // ---------- POST /api/properties/dm-batches ----------
 //
@@ -379,44 +383,19 @@ export async function POST(request: NextRequest) {
         // 所有者横断(代表 owner_id+共有者連関 log_owners の両経路)+所有者紐づけの無い
         // terminal 記録(個別記録の拒否など)は物件単位(#366 R6)。Owner FOR SHARE
         // 保持中に読む=terminal writer(Owner FOR UPDATE)と直列化(R47)。
-        const allOwnerIds = sortUniqueIds(items.flatMap((it) => it.groupOwnerIds));
-        const allPropertyIds = sortUniqueIds(items.map((it) => it.propertyId));
-        const terminalOwnerIds = new Set<string>();
-        const terminalPropertyIds = new Set<string>();
-        if (allOwnerIds.length > 0 || allPropertyIds.length > 0) {
-          const terminalLogs = await tx.propertyDmLog.findMany({
-            where: {
-              reactionStatus: { in: ["refused", "undeliverable"] },
-              OR: [
-                { ownerId: { in: allOwnerIds } },
-                { logOwners: { some: { ownerId: { in: allOwnerIds } } } },
-                {
-                  propertyId: { in: allPropertyIds },
-                  ownerId: null,
-                  logOwners: { none: {} },
-                },
-              ],
-            },
-            select: {
-              ownerId: true,
-              propertyId: true,
-              logOwners: { select: { ownerId: true } },
-            },
-          });
-          for (const log of terminalLogs) {
-            if (log.ownerId || log.logOwners.length > 0) {
-              if (log.ownerId) terminalOwnerIds.add(log.ownerId);
-              for (const lo of log.logOwners) terminalOwnerIds.add(lo.ownerId);
-            } else if (log.propertyId) {
-              terminalPropertyIds.add(log.propertyId);
-            }
-          }
-        }
+        // ⚠実装は terminal-exclusion.ts の 1 本(売却DM=B と共用)。2026-08-16 に
+        // 「A にはあるこの除外が B に無い」穴が見つかったため、条件を 2 か所に書かない。
+        const exclusionSets = await findTerminalExclusions(
+          tx as unknown as TerminalExclusionTx,
+          items.flatMap((it) => it.groupOwnerIds),
+          items.map((it) => it.propertyId),
+        );
         const survivingItems = items.filter(
           (it) =>
-            !terminalOwnerIds.has(it.ownerId) &&
-            !it.groupOwnerIds.some((oid) => terminalOwnerIds.has(oid)) &&
-            !terminalPropertyIds.has(it.propertyId),
+            !isTerminalExcluded(exclusionSets, {
+              propertyId: it.propertyId,
+              ownerIds: [it.ownerId, ...it.groupOwnerIds],
+            }),
         );
         excludedTerminalCount = items.length - survivingItems.length;
         savedRowCount = survivingItems.length;

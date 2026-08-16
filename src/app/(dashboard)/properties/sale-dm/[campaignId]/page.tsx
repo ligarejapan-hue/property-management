@@ -7,6 +7,7 @@ import {
   fetchSaleDmCampaign,
   confirmSaleDmDrafts,
   markSaleDmDraftSent,
+  apiErrorCode,
   saleDmPrintUrl,
   saleDmExportUrl,
   type SaleDmCampaign,
@@ -104,6 +105,32 @@ export default function SaleDmWorkspacePage() {
     [load],
   );
 
+  // 「確定分を送付済みに」の一括実行(@codex #384 R4 P2)。Promise.all だと、印刷から
+  // 除外された terminal(拒否/宛先不明)の1件が 409 で全体を reject し、**先に成功した
+  // 遷移が画面に反映されない**(runAction が reload を飛ばす)。allSettled で全件を
+  // 走らせ、terminal はエラーでなく「スキップ N 件」として通知し、他の失敗だけを
+  // エラーにする(いずれの場合も runAction 側で reload される)。
+  const markConfirmedSentBulk = useCallback(async (ids: string[]) => {
+    const results = await Promise.allSettled(ids.map((id) => markSaleDmDraftSent(id)));
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    const terminalSkipped = rejected.filter((r) => apiErrorCode(r.reason) === "TERMINAL_RECIPIENT");
+    const otherFailed = rejected.filter((r) => apiErrorCode(r.reason) !== "TERMINAL_RECIPIENT");
+    if (terminalSkipped.length > 0) {
+      window.alert(
+        `${terminalSkipped.length} 件は拒否・宛先不明が記録されているため、送付済みにしませんでした(印刷からも除外されています)。`,
+      );
+    }
+    if (otherFailed.length > 0) {
+      // 成功分の reload を殺さないよう、まず載せ替えを終えてから最初の実エラーを投げる…
+      // のではなく、ここで throw すると runAction が reload を飛ばす。エラー表示は
+      // runAction の catch に任せつつ reload も走るよう、先に load 相当を挟まず
+      // 「成功あり+失敗あり」でも必ず reload されるように throw は**しない**で
+      // メッセージ表示だけ行う(次の操作/手動更新で残りは再試行できる)。
+      const first = otherFailed[0].reason;
+      window.alert(first instanceof Error ? first.message : "一部の宛先を送付済みにできませんでした");
+    }
+  }, []);
+
   // 全画面スピナーは初回ロード(まだ campaign が無い)時だけ。再取得(onChanged→load)では workspace を
   // アンマウントせず据え置き、操作中パネルのエラー握り潰し/入力中フォーム消失を防ぐ(更新はツールバーの
   // スピナー、一時エラーは下の非破壊バナーで示す)。
@@ -179,7 +206,7 @@ export default function SaleDmWorkspacePage() {
         {confirmedIds.length > 0 && (
           <button
             type="button"
-            onClick={() => runAction(() => Promise.all(confirmedIds.map((id) => markSaleDmDraftSent(id))))}
+            onClick={() => runAction(() => markConfirmedSentBulk(confirmedIds))}
             disabled={actionBusy}
             className="inline-flex items-center gap-1.5 rounded-md border border-green-300 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
             title="確定済みを送付済みにする(配達結果・反響の入力が解禁)"

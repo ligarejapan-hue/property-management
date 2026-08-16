@@ -35,11 +35,18 @@ export function buildSaleDmPartialNotice(res: {
   excluded?: number;
   // 生成中に所有者の紐づけが変わり保存されなかった通数(#364 R5)。
   skippedByUnlink?: number;
+  // 拒否・宛先不明(terminal 反響)の記録があり自動で除外した宛先数(A=宛名CSVと同じ規則)。
+  excludedTerminal?: number;
 }): string | null {
   const lines: string[] = [];
   if ((res.skippedByUnlink ?? 0) > 0) {
     lines.push(
       `${res.skippedByUnlink} 通は生成中に所有者情報が変わったため作成されませんでした(物件を確認して作り直してください)。`,
+    );
+  }
+  if ((res.excludedTerminal ?? 0) > 0) {
+    lines.push(
+      `拒否・宛先不明の反響が付いた ${res.excludedTerminal} 件の宛先は自動で除外しました(その方が別の物件で断られた記録も含みます)。`,
     );
   }
   if ((res.excluded ?? 0) > 0) {

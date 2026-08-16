@@ -15,22 +15,27 @@ vi.mock("@/lib/api-helpers", () => {
 });
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 // 下書き保存の引数(特に model)を検証するため tx 内の create を共有スパイにする。
-const { draftCreate, draftOwnerCreateMany, txPropertyOwnerFindMany } = vi.hoisted(() => ({
+const { draftCreate, draftOwnerCreateMany, txPropertyOwnerFindMany, txDmLogFindMany, txCampaignUpdate } = vi.hoisted(() => ({
   draftCreate: vi.fn(),
   draftOwnerCreateMany: vi.fn(),
   txPropertyOwnerFindMany: vi.fn(async () => [] as Array<{ propertyId: string; ownerId: string }>),
+  // terminal(拒否・宛先不明)除外の照会。既定=記録なし(除外ゼロ)。
+  txDmLogFindMany: vi.fn(async (_args?: unknown) => [] as Array<{ ownerId: string | null; propertyId: string | null; logOwners: { ownerId: string }[] }>),
+  // ready 更新(結果メタ __result の保存先)を検証するため共有スパイに。
+  txCampaignUpdate: vi.fn(async (_args?: unknown) => ({})),
 }));
 vi.mock("@/lib/prisma", () => ({
   default: {
     property: { findMany: vi.fn() },
     dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), findUnique: vi.fn(async () => null), delete: vi.fn(async () => ({ id: "deleted" })), deleteMany: vi.fn(async () => ({ count: 1 })) }, dmVariant: { create: vi.fn() }, dmRecipientDraft: { create: draftCreate },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({
-      dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), update: vi.fn() },
+      dmCampaign: { create: vi.fn(async () => ({ id: "c1" })), update: txCampaignUpdate },
       dmVariant: { create: vi.fn(async () => ({ id: "v1" })) },
       dmRecipientDraft: { create: draftCreate },
       // PR-A: 宛先生成 tx のロック(Owner/親行 FOR SHARE)・リンク再検証・共有者連関保存。
       dmRecipientDraftOwner: { createMany: draftOwnerCreateMany },
       propertyOwner: { findMany: txPropertyOwnerFindMany },
+      propertyDmLog: { findMany: txDmLogFindMany },
       $queryRaw: vi.fn(async () => []),
     })),
   },
@@ -534,5 +539,143 @@ describe("PR-A: 宛先生成の共有者連関保存(設計§2.2)", () => {
     expect(json.saved).toBe(1);
     expect(json.skippedByUnlink).toBe(1);
     expect(draftCreate).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ============================================================================
+// 拒否・宛先不明(terminal 反響)の除外 — A(宛名CSV)と同じ規則を B(売却DM)にも。
+// 2026-08-16 に「B に除外が無い=一度断った方へ手紙が作られ得る」穴が見つかった。
+// 除外の実装は src/lib/dm-batch/terminal-exclusion.ts の 1 本(A/B 共用)。
+// ============================================================================
+describe("POST /campaigns — 拒否・宛先不明の宛先を保存しない", () => {
+  const uuidA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const uuidB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const own = (id: string, name: string) => ({
+    isPrimary: true, relationship: null,
+    owner: { id, name, nameKana: null, zip: "1000001", address: `東京都${name}1-1`, currentZip: null, currentAddress: null, corporateNumber: null },
+  });
+  const pA = { id: "pA", address: "東京都A町1-1", propertyType: "land", roomNo: null, propertyOwners: [own("o1", "甲")] };
+  const pB = { id: "pB", address: "東京都B町2-2", propertyType: "land", roomNo: null, propertyOwners: [own("o2", "乙")] };
+  const setup = () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([pA, pB] as never);
+    // リンク再検証を通す(除外だけを検証するため、所有者リンクは現存とする)。
+    txPropertyOwnerFindMany.mockResolvedValueOnce([
+      { propertyId: "pA", ownerId: "o1" },
+      { propertyId: "pB", ownerId: "o2" },
+    ]);
+  };
+  const post = () => POST(req({ ...validBody, propertyIds: [uuidA, uuidB] }) as never);
+
+  it("代表所有者に terminal 記録 → その宛先は保存されず excludedTerminal に数える(応答+監査)", async () => {
+    setup();
+    txDmLogFindMany.mockResolvedValueOnce([{ ownerId: "o1", propertyId: null, logOwners: [] }]);
+    const res = await post();
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.excludedTerminal).toBe(1);
+    expect(json.saved).toBe(1);
+    expect(draftCreate).toHaveBeenCalledTimes(1);
+    expect(draftCreate.mock.calls[0][0].data.propertyId).toBe("pB");
+    const detail = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].detail;
+    expect(detail.excludedTerminal).toBe(1);
+    // 冪等再返却用の結果メタが ready 更新と同時に保存される(@codex #384 R1 P2)。
+    const upd = txCampaignUpdate.mock.calls[0][0] as { data: { status: string; filterSnapshot: { __result: Record<string, unknown> } } };
+    expect(upd.data.status).toBe("ready");
+    expect(upd.data.filterSnapshot.__result.excludedTerminal).toBe(1);
+    expect(upd.data.filterSnapshot.__result.saved).toBe(1);
+  });
+
+  it("共有者連関(logOwners)経由の terminal でも外れる=所有者横断(別物件での拒否を含む)", async () => {
+    setup();
+    // 別物件(pZ)での拒否だが、共有者 o2 に紐づく → o2 の宛先(pB)を外す。
+    txDmLogFindMany.mockResolvedValueOnce([{ ownerId: null, propertyId: "pZ", logOwners: [{ ownerId: "o2" }] }]);
+    const res = await post();
+    const json = await res.json();
+    expect(json.excludedTerminal).toBe(1);
+    expect(draftCreate).toHaveBeenCalledTimes(1);
+    expect(draftCreate.mock.calls[0][0].data.propertyId).toBe("pA");
+  });
+
+  it("所有者に紐づかない物件単位の terminal でも外れる", async () => {
+    setup();
+    txDmLogFindMany.mockResolvedValueOnce([{ ownerId: null, propertyId: "pA", logOwners: [] }]);
+    const res = await post();
+    const json = await res.json();
+    expect(json.excludedTerminal).toBe(1);
+    expect(draftCreate).toHaveBeenCalledTimes(1);
+    expect(draftCreate.mock.calls[0][0].data.propertyId).toBe("pB");
+  });
+
+  it("全宛先が terminal → 400 ALL_EXCLUDED_TERMINAL・クレーム削除・空キャンペーンを作らない", async () => {
+    setup();
+    txDmLogFindMany.mockResolvedValueOnce([
+      { ownerId: "o1", propertyId: null, logOwners: [] },
+      { ownerId: "o2", propertyId: null, logOwners: [] },
+    ]);
+    const res = await post();
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error.code).toBe("ALL_EXCLUDED_TERMINAL");
+    expect(draftCreate).not.toHaveBeenCalled();
+    expect((prismaMock as never as { dmCampaign: { delete: ReturnType<typeof vi.fn> } }).dmCampaign.delete).toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("⚠除外の照会はリンク再検証(Owner FOR SHARE 保持中)の後に走る=terminal writer と直列化", async () => {
+    setup();
+    txDmLogFindMany.mockResolvedValueOnce([]);
+    await post();
+    expect(txDmLogFindMany).toHaveBeenCalledTimes(1);
+    expect(txPropertyOwnerFindMany.mock.invocationCallOrder[0]).toBeLessThan(
+      txDmLogFindMany.mock.invocationCallOrder[0],
+    );
+    // 照会対象=対象宛先の所有者と物件の両方
+    const arg = txDmLogFindMany.mock.calls[0][0] as unknown as { where: { OR: Array<Record<string, unknown>> } };
+    expect(JSON.stringify(arg.where.OR)).toContain("o1");
+    expect(JSON.stringify(arg.where.OR)).toContain("pB");
+  });
+
+  it("terminal 記録が無ければ全件保存・excludedTerminal=0", async () => {
+    setup();
+    txDmLogFindMany.mockResolvedValueOnce([]);
+    const res = await post();
+    const json = await res.json();
+    expect(json.excludedTerminal).toBe(0);
+    expect(json.saved).toBe(2);
+    expect(draftCreate).toHaveBeenCalledTimes(2);
+  });
+});
+
+// 冪等再試行でも件数(excludedTerminal 等)が消えない(@codex #384 R1 P2)。
+// 応答が届かず同キーで再試行したとき {campaignId} だけだと「◯件除外」の通知が失われる。
+describe("idempotent 再返却に結果メタを含める", () => {
+  it("ready 済みキャンペーンの再試行は保存済みの excludedTerminal を返す", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    (prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn> } }).dmCampaign.findUnique.mockResolvedValueOnce({
+      id: "c9",
+      createdBy: "u1",
+      status: "ready",
+      createdAt: new Date().toISOString(),
+      filterSnapshot: { __result: { excludedTerminal: 2, saved: 3, requested: 5 } },
+    });
+    const res = await POST(req({ ...validBody, idempotencyKey: "33333333-3333-4333-8333-333333333333" }) as never);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.idempotent).toBe(true);
+    expect(json.campaignId).toBe("c9");
+    expect(json.excludedTerminal).toBe(2);
+    expect(json.saved).toBe(3);
+  });
+
+  it("結果メタが無い古いキャンペーンでも従来どおり {campaignId, idempotent} を返す(壊れない)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    (prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn> } }).dmCampaign.findUnique.mockResolvedValueOnce({
+      id: "c8", createdBy: "u1", status: "ready", createdAt: new Date().toISOString(), filterSnapshot: { dmStatus: "send" },
+    });
+    const res = await POST(req({ ...validBody, idempotencyKey: "44444444-4444-4444-8444-444444444444" }) as never);
+    const json = await res.json();
+    expect(json.idempotent).toBe(true);
+    expect(json.excludedTerminal).toBeUndefined();
   });
 });

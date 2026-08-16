@@ -8,6 +8,11 @@ import { validateLetterBody } from "@/lib/sale-dm-letter/body-validation";
 import { markVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
 import { lockOwnersForShare } from "@/lib/dm-batch/locks";
 import {
+  findTerminalExclusions,
+  isTerminalExcluded,
+  type TerminalExclusionTx,
+} from "@/lib/dm-batch/terminal-exclusion";
+import {
   resolveDraftRecipient,
   isRecipientStale,
   isGroupSplit,
@@ -71,6 +76,7 @@ export async function POST(request: NextRequest) {
       // 既定のロック順（Owner → 物件 → 子行）に合わせて所有者を先に取る。
       await lockOwnersForShare(tx, ownerIds);
 
+
       // ロック順序（設計 §2.3）: Owner → variant → 物件親行 → 子行。
       // variant を掴むのは、PR-D2 の「貼り付け／適用」（凍結判定）と直列化するため。
       const variantIds = [...new Set(pre.map((d) => d.variantId))].sort();
@@ -78,13 +84,51 @@ export async function POST(request: NextRequest) {
         await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ANY(${variantIds}::uuid[]) ORDER BY id FOR UPDATE`;
       }
 
+      // 物件親行を**全ロールで**先にロックする(@codex #384 R3 P1)。所有者なしの
+      // terminal 記録(物件単位の拒否)の書き手は Owner 行を持たず**物件行で直列化**する
+      // ため、Owner ロックだけでは「照会の直後に物件単位の拒否が commit」の窓が残る。
+      // 順序は §2.3(Owner → variant → 物件親行 → 子行)のまま。従来 field_staff だけが
+      // 取っていた FOR UPDATE を全ロールに広げた(下の担当範囲の見直しはこのロックを再利用)。
+      const confirmPropertyIds = [...new Set(pre.map((d) => d.propertyId))].sort();
+      if (confirmPropertyIds.length > 0) {
+        await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${confirmPropertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
+      }
+      // 拒否・宛先不明(terminal 反響)の宛先が混ざっていたら**確定全体を断る**(@codex #384 R1 P1)。
+      // 作成時の除外だけだと、作成〜確定の間に記録された拒否が素通りする。A(宛名CSV)が
+      // DL時に再検査して止めるのと同じく、確定=印刷手前の関所でも同じ述語を再評価する。
+      // 部分確定にしない理由はこの route の既存方針と同じ(「1件でも不正なら確定全体を
+      // 断る=黙って減らさない」)。Owner FOR SHARE+物件 FOR UPDATE 保持中=所有者経由・物件単位の両方の terminal writer と直列化。
+      {
+        const exclusionSets = await findTerminalExclusions(
+          tx as unknown as TerminalExclusionTx,
+          ownerIds,
+          [...new Set(pre.map((d) => d.propertyId))],
+        );
+        const terminalCount = pre.filter((d) =>
+          isTerminalExcluded(exclusionSets, {
+            propertyId: d.propertyId,
+            ownerIds: [
+              ...(d.representativeOwnerId ? [d.representativeOwnerId] : []),
+              ...d.draftOwners.map((o) => o.ownerId),
+            ],
+          }),
+        ).length;
+        if (terminalCount > 0) {
+          throw new ApiError(
+            409,
+            `拒否・宛先不明が記録された宛先が ${terminalCount} 件含まれています(その方の別物件での記録も含みます)。宛先を作り直してから確定してください`,
+            "TERMINAL_RECIPIENTS",
+          );
+        }
+      }
+
       // field_staff は担当範囲を**ロックを保持したまま**見直す。where のリレーション述語は
       // ステートメントのスナップショットで評価されるため、判定〜commit の間の担当変更を
       // 防げない（アクセスを失った後の確定が通る）。admin/office は判定が常に真なので不要。
       if (session.role === "field_staff") {
-        const propertyIds = [...new Set(pre.map((d) => d.propertyId))].sort();
+        const propertyIds = confirmPropertyIds;
         if (propertyIds.length > 0) {
-          await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${propertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
+          // 親行ロックは上で全ロール分を取得済み(二重に FOR UPDATE を取らない)。
           const visible = await tx.property.findMany({
             where: {
               id: { in: propertyIds },

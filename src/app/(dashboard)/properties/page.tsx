@@ -378,6 +378,8 @@ function PropertiesPageInner() {
       const partialNotice = buildSaleDmPartialNotice({
         generated: res.generated, failed: res.failed, truncated: res.truncated, excluded,
         skippedByUnlink: res.skippedByUnlink,
+        // 拒否・宛先不明の自動除外(A=宛名CSVと同じ規則)。黙って外さない。
+        excludedTerminal: res.excludedTerminal,
       });
       if (partialNotice) window.alert(partialNotice);
       router.push(`/properties/sale-dm/${res.campaignId}`);

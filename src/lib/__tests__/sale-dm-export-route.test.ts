@@ -38,12 +38,17 @@ vi.mock("@/lib/sale-dm-letter/route-guard", () => ({
     session.role === "field_staff" ? drafts.filter((d) => d.property.createdBy === session.id || d.property.assignedTo === session.id) : drafts,
 }));
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
+vi.mock("@/lib/prisma", () => {
+  const db = {
     dmCampaign: { findUnique: vi.fn() },
     dmRecipientDraft: { findMany: vi.fn() },
-  },
-}));
+    // CSV出力直前の terminal(拒否/宛先不明)再検査(@codex #384 R2 P1)。既定=記録なし。
+    propertyDmLog: { findMany: vi.fn(async () => []) },
+    $queryRaw: vi.fn(async () => []), // Owner FOR SHARE
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
+  };
+  return { default: db };
+});
 
 import { describe, it, expect, beforeEach } from "vitest";
 import prismaMock from "@/lib/prisma";
@@ -53,6 +58,7 @@ import { GET } from "../../app/api/properties/sale-dm/campaigns/[id]/export/rout
 const pm = prismaMock as never as {
   dmCampaign: { findUnique: ReturnType<typeof vi.fn> };
   dmRecipientDraft: { findMany: ReturnType<typeof vi.fn> };
+  propertyDmLog: { findMany: ReturnType<typeof vi.fn> };
 };
 
 const variant = {
@@ -157,5 +163,23 @@ describe("GET .../campaigns/[id]/export", () => {
     const res = await GET(req() as never, ctx);
     expect(res.status).toBe(403);
     expect(pm.dmCampaign.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+// CSV出力も最終出力の1つ=terminal(拒否/宛先不明)が混ざっていたら出力全体を断る
+// (@codex #384 R2 P1)。差し込み印刷の元が素通りすると、印刷・確定の関所が無意味になる。
+describe("CSV出力: terminal 記録の再検査", () => {
+  it("拒否が記録された宛先が混ざると 409 TERMINAL_RECIPIENTS・CSVを返さない", async () => {
+    (prismaMock as never as { dmCampaign: { findUnique: ReturnType<typeof vi.fn> } }).dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "x", createdBy: "u1" });
+    (prismaMock as never as { dmRecipientDraft: { findMany: ReturnType<typeof vi.fn> } }).dmRecipientDraft.findMany.mockResolvedValue([
+      { id: "r1", propertyId: "pA", representativeOwnerId: "oA", draftOwners: [{ ownerId: "oA" }], recipientName: "甲", honorific: "様", coOwnerCount: 1, recipientZip: "1000001", recipientAddress: "東京都", status: "confirmed", body: "本文", variant: { label: "A", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low" }, property: { createdBy: "u1", assignedTo: "u1" } },
+    ]);
+    (prismaMock as never as { propertyDmLog: { findMany: ReturnType<typeof vi.fn> } }).propertyDmLog.findMany.mockResolvedValueOnce([
+      { ownerId: "oA", propertyId: null, logOwners: [] },
+    ]);
+    const res = await GET(new Request("http://x") as never, { params: Promise.resolve({ id: "c1" }) });
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error.code).toBe("TERMINAL_RECIPIENTS");
   });
 });

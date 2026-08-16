@@ -222,9 +222,9 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // 売却促進DM: 操作事実の非PIIメタデータのみ allowlist(件数/enum/boolean/ISO日時)。
   // campaignId/variantId/propertyId/count/fields は ALWAYS_SAFE。本文・宛名・住所・メモ・trackingToken は
   // detail に載せておらず、ここにも含めない(perVariant の variantId キー別件数は redact のまま)。
-  sale_dm_campaign_create: new Set(["requested", "generated", "saved", "skippedByUnlink", "truncated", "createdAt"]),
+  sale_dm_campaign_create: new Set(["requested", "generated", "saved", "skippedByUnlink", "excludedTerminal", "truncated", "createdAt"]),
   sale_dm_assign_variants: new Set(["mode", "order", "assigned", "assignedAt"]),
-  sale_dm_campaign_print: new Set(["printedAt"]),
+  sale_dm_campaign_print: new Set(["printedAt", "excludedTerminal"]),
   sale_dm_variant_create: new Set(["createdAt"]),
   sale_dm_variant_update: new Set(["updatedAt"]),
   sale_dm_variant_delete: new Set(["deletedAt"]),

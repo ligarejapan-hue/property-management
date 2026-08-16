@@ -5,6 +5,11 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { lockOwnersForShare, lockPropertiesForShare, type RawTx } from "@/lib/dm-batch/locks";
+import {
+  findTerminalExclusions,
+  isTerminalExcluded,
+  type TerminalExclusionTx,
+} from "@/lib/dm-batch/terminal-exclusion";
 import { hasPermission } from "@/lib/permissions";
 import { propertyListQuerySchema } from "@/lib/validators";
 import { buildPropertyListWhere, buildPropertyListOrderBy, propertyVisibilityScopeWhere } from "@/lib/property-list-query";
@@ -17,6 +22,25 @@ import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/track
 import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
 import { SaleDmError } from "@/lib/sale-dm-letter/types";
 import { randomBytes } from "crypto";
+
+// 冪等再返却でも作成時と同じ件数(excludedTerminal 等)を返すための結果メタの取り出し。
+// 応答が届かず client が同キーで再試行したとき {campaignId} だけ返すと「◯件除外しました」の
+// 通知が消える(@codex #384 R1 P2)。schema に列を増やさず(migration は別承認のため)、
+// filterSnapshot(Json・アプリ内に他の読者が無いことを実測済み)へ同居させる。
+const RESULT_META_KEY = "__result";
+const idempotentPayload = (id: string, snapshot: unknown): Record<string, unknown> => {
+  const meta =
+    snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+      ? (snapshot as Record<string, unknown>)[RESULT_META_KEY]
+      : undefined;
+  return {
+    campaignId: id,
+    idempotent: true,
+    ...(meta && typeof meta === "object" && !Array.isArray(meta)
+      ? (meta as Record<string, unknown>)
+      : {}),
+  };
+};
 
 export async function POST(request: NextRequest) {
   try {
@@ -68,12 +92,12 @@ export async function POST(request: NextRequest) {
     // 既存 campaign を返す(再送信/別タブ/連打での二重課金・二重作成を防ぐ)。キー未指定なら従来通り。
     const idempotencyKey = body.idempotencyKey;
     if (idempotencyKey) {
-      const existing = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true, status: true, createdAt: true } });
+      const existing = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true, status: true, createdAt: true, filterSnapshot: true } });
       if (existing) {
         if (existing.createdBy !== session.id) throw new ApiError(409, "この作成キーは既に使用されています", "IDEMPOTENCY_CONFLICT");
         // status!=="draft"(=ready 以降)= 生成+保存が完了済み → そのまま返す(冪等)。
         if (existing.status !== "draft") {
-          return NextResponse.json({ campaignId: existing.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
+          return NextResponse.json(idempotentPayload(existing.id, existing.filterSnapshot), { headers: { "Cache-Control": "no-store" } });
         }
         // status==="draft" = クレーム後・保存完了前。並行生成中(ライブ)か、プロセス死の孤児か区別が要る。
         // 生成時間を大きく超えて古い(STALE_MS 超)draft のみ孤児として削除し作り直す。
@@ -97,9 +121,9 @@ export async function POST(request: NextRequest) {
         // それ以外は 409 で再試行を促す。
         const del = await prisma.dmCampaign.deleteMany({ where: { id: existing.id, status: "draft" } });
         if (del.count === 0) {
-          const settled = await prisma.dmCampaign.findUnique({ where: { id: existing.id }, select: { status: true } });
+          const settled = await prisma.dmCampaign.findUnique({ where: { id: existing.id }, select: { status: true, filterSnapshot: true } });
           if (settled && settled.status !== "draft") {
-            return NextResponse.json({ campaignId: existing.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
+            return NextResponse.json(idempotentPayload(existing.id, settled.filterSnapshot), { headers: { "Cache-Control": "no-store" } });
           }
           throw new ApiError(409, "同じ作成キーの処理が進行中です。少し待って再試行してください", "CAMPAIGN_PROCESSING");
         }
@@ -214,13 +238,13 @@ export async function POST(request: NextRequest) {
       });
     } catch (e) {
       if (idempotencyKey && e && typeof e === "object" && (e as { code?: unknown }).code === "P2002") {
-        const won = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true, status: true } });
+        const won = await prisma.dmCampaign.findUnique({ where: { idempotencyKey }, select: { id: true, createdBy: true, status: true, filterSnapshot: true } });
         if (won) {
           if (won.createdBy !== session.id) throw new ApiError(409, "この作成キーは既に使用されています", "IDEMPOTENCY_CONFLICT");
           // 完了済み(ready 以降)なら冪等返却。status==="draft"=並行勝者が生成中(未完)→ 勝者の生成を壊さない
           // よう削除せず、少し待っての再試行を促す(完了すれば ready で冪等返却される・R34)。
           if (won.status !== "draft") {
-            return NextResponse.json({ campaignId: won.id, idempotent: true }, { headers: { "Cache-Control": "no-store" } });
+            return NextResponse.json(idempotentPayload(won.id, won.filterSnapshot), { headers: { "Cache-Control": "no-store" } });
           }
           throw new ApiError(409, "同じ作成キーの処理が進行中です。少し待って再試行してください", "CAMPAIGN_PROCESSING");
         }
@@ -237,6 +261,8 @@ export async function POST(request: NextRequest) {
     // 手紙がDBに無い状態になる。実保存数を応答・監査に載せ、全滅なら 409 で再試行させる。
     let persistedCount = 0;
     let skippedByUnlinkCount = 0;
+    // 拒否・宛先不明(terminal 反響)で除外した宛先数(応答・監査に載せる=黙って外さない)。
+    let excludedTerminalCount = 0;
     try {
       // ⚠本文は**空のまま**作る(設計 §2.1)。文面は型ごとにプロンプトを表示 → 手元のAIで
       //   作成 → 貼り付け → その型の全宛先へ適用、の順で入れる。空本文の下書きは
@@ -264,6 +290,37 @@ export async function POST(request: NextRequest) {
         const linkSet = new Set(
           currentLinks.map((l) => `${l.propertyId}\u0000${l.ownerId}`),
         );
+        // 拒否・宛先不明(terminal 反響)の宛先グループは**保存前に**除外する。
+        // A(宛名CSV)には #366 R4 P1 で入った除外が B(売却DM)に無く、一度お断りを
+        // いただいた方へ手紙が作られ得た(2026-08-16 発見・資料PR #382 の @codex 指摘)。
+        // 実装は terminal-exclusion.ts の 1 本を A/B で共用(2 か所に書くと必ずずれる)。
+        // ⚠Owner FOR SHARE 保持中に照会する=terminal を書く側(Owner FOR UPDATE)と直列化。
+        const exclusionSets = await findTerminalExclusions(
+          tx as unknown as TerminalExclusionTx,
+          sliced.flatMap((m) => m.groupOwnerIds),
+          sliced.map((m) => m.propertyId),
+        );
+        const pairs = sliced.map((m, i) => ({ m, d: drafts[i] }));
+        const surviving = pairs.filter(
+          ({ m }) =>
+            !isTerminalExcluded(exclusionSets, {
+              propertyId: m.propertyId,
+              // 代表と共有者の両方で判定(A と同じ)。所有者横断=別物件での拒否も効く。
+              ownerIds: [m.representativeOwnerId, ...m.groupOwnerIds].filter(
+                (v): v is string => typeof v === "string" && v.length > 0,
+              ),
+            }),
+        );
+        excludedTerminalCount = pairs.length - surviving.length;
+        // 全宛先が除外 → 空のキャンペーンを作らない。RECIPIENTS_CHANGED(409=再試行)とは
+        // 別の恒久的な状態なので、原因が分かる文言で 400 を返す(catch がクレームを削除)。
+        if (surviving.length === 0 && pairs.length > 0) {
+          throw new ApiError(
+            400,
+            "選択した宛先はすべて「拒否・宛先不明」の記録があるため除外されました(その方の別物件での記録も含みます)。物件のDM送付履歴をご確認ください",
+            "ALL_EXCLUDED_TERMINAL",
+          );
+        }
         const variant = await tx.dmVariant.create({
           data: {
             campaignId: claimed.id, label: "A",
@@ -272,9 +329,7 @@ export async function POST(request: NextRequest) {
             strength: body.options.strength, extraInstruction: body.options.extraInstruction ?? null,
           },
         });
-        for (let i = 0; i < sliced.length; i++) {
-          const d = drafts[i];
-          const m = sliced[i];
+        for (const { m, d } of surviving) {
           // ロック保持中の再検証: グループの誰かがこの物件の所有者でなくなっていたら生成しない。
           if (
             m.groupOwnerIds.length > 0 &&
@@ -315,7 +370,7 @@ export async function POST(request: NextRequest) {
         }
         // 全宛先がリンク切れで保存できなかった=空のキャンペーンを ready にしない。
         // tx を巻き戻し、外側の catch がクレームを削除する(再試行で作り直せる)。
-        if (persistedCount === 0 && sliced.length > 0) {
+        if (persistedCount === 0 && surviving.length > 0) {
           throw new ApiError(
             409,
             "宛先の所有者情報が変わりました。もう一度お試しください",
@@ -325,7 +380,26 @@ export async function POST(request: NextRequest) {
         // 生成+保存が完了したのでキャンペーンを ready にする(drafts と同一トランザクションでアトミックに確定)。
         // idempotency の pre-check / P2002 はこの完了マーカーで「冪等返却(ready)」と「孤児削除→作り直し(draft)」
         // を区別する。途中でプロセスが落ちれば status は draft のままで孤児として検出・回収される(R34)。
-        await tx.dmCampaign.update({ where: { id: claimed.id }, data: { status: "ready" } });
+        await tx.dmCampaign.update({
+          where: { id: claimed.id },
+          data: {
+            status: "ready",
+            // 冪等再返却用の結果メタ(非PII・件数のみ)。→ idempotentPayload
+            filterSnapshot: {
+              ...(body.filters ?? {}),
+              [RESULT_META_KEY]: {
+                requested: recipients.length,
+                matchedProperties,
+                generated: drafts.length,
+                saved: persistedCount,
+                skippedByUnlink: skippedByUnlinkCount,
+                excludedTerminal: excludedTerminalCount,
+                failed: drafts.filter((d) => d.error).length,
+                truncated,
+              },
+            },
+          },
+        });
       });
     } catch (e) {
       // 生成 or 保存の失敗 → クレームを削除(孤児の空 campaign を残さない。再試行で再クレームできる)。
@@ -336,13 +410,13 @@ export async function POST(request: NextRequest) {
     // AuditLog は非PIIメタのみ(本文・宛名・住所は残さない)。
     await writeAuditLog({
       userId: session.id, action: "sale_dm_campaign_create", targetTable: "dm_campaigns",
-      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, failed: drafts.filter((d) => d.error).length, truncated, createdAt: new Date().toISOString() },
+      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, failed: drafts.filter((d) => d.error).length, truncated, createdAt: new Date().toISOString() },
     });
 
     return NextResponse.json(
       // requested=生成する手紙数(共有者ぶんで物件数より多くなり得る)。matchedProperties=対象になった物件数
       // (=選択のうち住所ありで生成対象になった物件)。UI の「対象外」通知は物件単位で出すため両方返す。
-      { campaignId: claimed.id, requested: recipients.length, matchedProperties, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, failed: drafts.filter((d) => d.error).length, truncated },
+      { campaignId: claimed.id, requested: recipients.length, matchedProperties, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, failed: drafts.filter((d) => d.error).length, truncated },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
