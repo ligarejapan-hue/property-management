@@ -18,7 +18,6 @@ export const TERMINAL_REACTIONS: ReadonlySet<string> = new Set([
   "refused",
   "undeliverable",
 ]);
-
 export const REACTION_LABELS: Readonly<Record<ReactionStatus, string>> = {
   no_response: "反応なし",
   replied: "連絡あり",

@@ -20,3 +20,16 @@ describe("buildSaleDmPartialNotice: 対象外(住所なし等)の通知", () => 
     expect(msg).toContain("2 件");
   });
 });
+
+describe("拒否・宛先不明の除外通知(2026-08-17)", () => {
+  it("excludedTerminal>0 で「拒否・宛先不明」と件数を出す(黙って外さない)", () => {
+    const msg = buildSaleDmPartialNotice({ generated: 3, failed: 0, truncated: false, excludedTerminal: 2 });
+    expect(msg).toContain("拒否・宛先不明");
+    expect(msg).toContain("2 件");
+    expect(msg).toContain("別の物件");
+  });
+
+  it("excludedTerminal=0 なら何も足さない", () => {
+    expect(buildSaleDmPartialNotice({ generated: 3, failed: 0, truncated: false, excludedTerminal: 0 })).toBeNull();
+  });
+});

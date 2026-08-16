@@ -1,3 +1,4 @@
+import { TERMINAL_REACTIONS } from "@/lib/dm-reaction/core";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import {
@@ -195,7 +196,7 @@ export async function GET(
       if (allOwnerIds.length > 0 || allPropertyIds.length > 0) {
         const terminalLogs = await tx.propertyDmLog.findMany({
           where: {
-            reactionStatus: { in: ["refused", "undeliverable"] },
+            reactionStatus: { in: [...TERMINAL_REACTIONS] },
             OR: [
               { ownerId: { in: allOwnerIds } },
               { logOwners: { some: { ownerId: { in: allOwnerIds } } } },
