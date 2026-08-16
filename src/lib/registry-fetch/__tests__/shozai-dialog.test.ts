@@ -313,7 +313,13 @@ describe("parseSelectedPath — 選択済みの階層", () => {
 });
 
 describe("配線（実サイト probe 2026-08-05 の結果を固定）", () => {
-  const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), "utf-8");
+  // ⚠**改行を LF に正規化してから走査する**（2026-08-16 に追加）。この describe には
+  // `[\s\S]{0,700}` のように**文字数で距離を測る**検査が有る。Windows の作業ツリーは
+  // CRLF なので1行につき1文字伸び、**同じコードでも手元は一致せず CI(LF)でだけ一致**する
+  // ＝手元のフル緑が根拠にならない。実際 PR #383 でこれを踏み、手元 11,297件 緑のまま
+  // CI だけが落ちた。読み込みで潰して、どこで走らせても同じ判定にする。
+  const read = (p: string) =>
+    fs.readFileSync(path.join(process.cwd(), p), "utf-8").replace(/\r\n/g, "\n");
   const SRC = () => read("src/lib/registry-fetch/auto-fetch.ts");
   const DIALOG_FN = () =>
     SRC().match(/async function selectShozaiViaDialog[\s\S]*?\n\}/)?.[0] ?? "";

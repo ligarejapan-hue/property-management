@@ -2426,13 +2426,18 @@ function createPlaywrightRegistryPage(
             state: "attached",
             timeout: DIALOG_RESULT_TIMEOUT_MS,
           });
-        } catch (err) {
+        } catch (transitionErr) {
           // ⚠**2026-08-16 の立ち会いテストが実際に止まった地点**(課金ゼロ)。「確定」までは
           // 通り、マイページの一覧が現れない。ここは開発当初から [要live] のままで、
           // 実サイトを見ないと直せない。推測で直すと立ち会いを1回無駄にするので、
           // **この瞬間の画面構造だけ**を記録して持ち帰る(表の中身は読まない=page-probe の契約)。
+          //
+          // ⚠変数名を `err` にしない。この catch は**診断を足してそのまま投げ直すだけ**で、
+          // 失敗を provider_error へ**変換しない**。`catch (err)` だと「provider_error へ
+          // 変換する catch は RegistryFetchError を素通しせよ」という既存の走査ガード
+          // (shozai-dialog.test.ts)の網に紛れ込み、意味の違う要求で縛られる。
           await logRegistryPageProbe(page, "mypage-transition");
-          throw err;
+          throw transitionErr;
         }
         await sleep(1000);
         // 遷移でフィルタが既定に戻り得るため、選択フェーズも「未請求(検証つき)×1ページ」

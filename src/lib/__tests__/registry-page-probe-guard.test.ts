@@ -13,10 +13,16 @@ import { KNOWN_PROBE_SELECTORS } from "@/lib/registry-fetch/page-probe";
  * 実DOMを再現できない。「tbody のセルを読まない」という約束は**書き方でしか守れない**ので、
  * 書き方そのものを検査する。個別の行番号や関数名では固定しない（動くと嘘になる）。
  */
+/**
+ * ⚠**改行を LF に正規化してから走査する**。下の検査には `[\s\S]{0,900}` のように
+ * **文字数で距離を測る**ものが有り、Windows の作業ツリー（CRLF）では1行につき1文字伸びる。
+ * 正規化しないと**同じコードでも手元と CI で判定が変わる**＝手元のフル緑が根拠にならない。
+ * 実際 PR #383 で既存テストがこれを踏み、手元 11,297件 緑のまま CI だけが落ちた。
+ */
 const AUTO_FETCH = readFileSync(
   join(process.cwd(), "src/lib/registry-fetch/auto-fetch.ts"),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 
 /** logRegistryPageProbe の本体（次の関数宣言まで）を切り出す。 */
 function probeBody(): string {
@@ -87,13 +93,13 @@ describe("診断を仕掛ける場所", () => {
   it("⚠マイページ遷移の待ちが失敗したときに採取する（2026-08-16 に実際に止まった地点）", () => {
     // 「myPageTab を押す → myPageTable を待つ」が try で囲われ、catch で採取している。
     expect(AUTO_FETCH).toMatch(
-      /myPageTab[\s\S]{0,400}?catch[\s\S]{0,600}?logRegistryPageProbe\(\s*page,\s*"mypage-transition"/,
+      /myPageTab[\s\S]{0,400}?catch[\s\S]{0,900}?logRegistryPageProbe\(\s*page,\s*"mypage-transition"/,
     );
   });
 
   it("採取しても例外は握りつぶさず投げ直す（失敗は失敗のまま扱う）", () => {
     expect(AUTO_FETCH).toMatch(
-      /logRegistryPageProbe\(\s*page,\s*"mypage-transition"\s*\);\s*throw err;/,
+      /logRegistryPageProbe\(\s*page,\s*"mypage-transition"\s*\);\s*throw transitionErr;/,
     );
   });
 
