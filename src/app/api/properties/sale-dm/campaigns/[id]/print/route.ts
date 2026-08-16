@@ -3,7 +3,7 @@ import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
 import { writeAuditLog } from "@/lib/audit";
-import { lockOwnersForShare, type RawTx } from "@/lib/dm-batch/locks";
+import { lockOwnersForShare, lockPropertiesForShare, type RawTx } from "@/lib/dm-batch/locks";
 import {
   findTerminalExclusions,
   isTerminalExcluded,
@@ -85,19 +85,60 @@ export async function GET(
         ),
       ];
       await lockOwnersForShare(tx as unknown as RawTx, ownerIds);
+      // 所有者なしの terminal 記録の書き手は**物件行**で直列化するため、物件親行も取る
+      // (@codex #384 R3 P1)。順序は Owner → 物件親行(§2.3 に整合・variant は読まない)。
+      const propertyIds = [...new Set(visibleDrafts.map((d) => d.propertyId))];
+      await lockPropertiesForShare(tx as unknown as RawTx, propertyIds);
+      // ⚠**ロック取得後に読み直す**(@codex #384 R3 P1)。事前読取〜ロックの間に所有者
+      // 統合(merge)が commit すると、draft の連関と terminal 記録は master 所有者へ
+      // 付け替わり、**古い所有者IDだけをロック・照会**して除外を取りこぼす。
+      // 読み直した所有者集合がロック済み集合の中に収まらなければ、負けを認めて 409。
+      const reread = await tx.dmRecipientDraft.findMany({
+        where: { id: { in: visibleDrafts.map((d) => d.id) } },
+        select: {
+          id: true,
+          propertyId: true,
+          representativeOwnerId: true,
+          draftOwners: { select: { ownerId: true } },
+        },
+      });
+      const lockedOwners = new Set(ownerIds);
+      const rereadById = new Map(reread.map((r) => [r.id, r]));
+      const changed = visibleDrafts.some((d) => {
+        const r = rereadById.get(d.id);
+        if (!r || r.propertyId !== d.propertyId) return true;
+        const owners = [
+          ...(r.representativeOwnerId ? [r.representativeOwnerId] : []),
+          ...(r.draftOwners ?? []).map((o) => o.ownerId),
+        ];
+        return owners.some((oid) => !lockedOwners.has(oid));
+      });
+      if (changed) {
+        throw new ApiError(
+          409,
+          "宛先の状態が変わりました。もう一度お試しください",
+          "RETRY",
+        );
+      }
+      const ownerIdsByDraft = new Map(
+        reread.map((r) => [
+          r.id,
+          [
+            ...(r.representativeOwnerId ? [r.representativeOwnerId] : []),
+            ...(r.draftOwners ?? []).map((o) => o.ownerId),
+          ],
+        ]),
+      );
       const exclusionSets = await findTerminalExclusions(
         tx as unknown as TerminalExclusionTx,
         ownerIds,
-        [...new Set(visibleDrafts.map((d) => d.propertyId))],
+        propertyIds,
       );
       const printableDrafts = visibleDrafts.filter(
         (d) =>
           !isTerminalExcluded(exclusionSets, {
             propertyId: d.propertyId,
-            ownerIds: [
-              ...(d.representativeOwnerId ? [d.representativeOwnerId] : []),
-              ...(d.draftOwners ?? []).map((o) => o.ownerId),
-            ],
+            ownerIds: ownerIdsByDraft.get(d.id) ?? [],
           }),
       );
       const excludedTerminalCount = visibleDrafts.length - printableDrafts.length;

@@ -96,7 +96,8 @@ export async function POST(
       ];
       // 順序規約: Owner(FOR SHARE・id順)→物件親行(FOR UPDATE)→子行(draft/log)。
       await lockOwnersForShare(rawTx, preOwners);
-      // 拒否・宛先不明が記録済みなら「送付済み」にしない(@codex #384 R1 P1)。印刷から
+      await rawTx.$queryRaw`SELECT id FROM properties WHERE id = ${pre.propertyId}::uuid FOR UPDATE`;
+      // 拒否・宛先不明が記録済みなら「送付済み」にしない(@codex #384 R1 P1)。⚠物件 FOR UPDATE の**後**で照会する(@codex R3 P1: 所有者なしの terminal 記録の書き手は物件行で直列化するため、Owner ロックだけでは競合窓が残る)。印刷から
       // 除外された宛先を一括操作で送付済みにすると、**送っていないのに送付記録が残り**、
       // その偽記録が以後の運用(再送候補・履歴)を汚す。ロック保持中に同じ述語で再評価。
       {
@@ -118,7 +119,6 @@ export async function POST(
           );
         }
       }
-      await rawTx.$queryRaw`SELECT id FROM properties WHERE id = ${pre.propertyId}::uuid FOR UPDATE`;
       const transitioned = await tx.dmRecipientDraft.updateMany({
         where: { id, status: "confirmed" },
         data: { status: "sent", sentAt: now },

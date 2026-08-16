@@ -13,9 +13,14 @@
  *  ② 共有者連関 log_owners に terminal — 共有名義の誰かが断った場合も外す
  *  ③ 所有者に紐づかない terminal(物件の個別記録の拒否など) — その**物件**を外す
  *
- * ⚠呼び出し側の義務: この照会は **Owner FOR SHARE を保持した tx の中**で行う
- * (terminal を書く側は Owner FOR UPDATE を取る=直列化される・@codex R47)。
- * ロック無しで呼ぶと、除外の読み取りと terminal 記録の書き込みが競合する。
+ * ⚠呼び出し側の義務(@codex R47 / #384 R3 P1):
+ *  1. **Owner FOR SHARE を保持した tx の中**で照会する(所有者に紐づく terminal の
+ *     書き手は Owner FOR UPDATE を取る=直列化)。
+ *  2. **物件親行のロックも保持する**(経路③=所有者なしの terminal の書き手は Owner 行を
+ *     持たず**物件行**で直列化するため、Owner ロックだけでは窓が残る)。
+ *  3. 対象(draft 等)を事前読取している場合は**ロック取得後に読み直して**所有者集合を
+ *     検証する(所有者統合が連関を master へ付け替えると、古いIDだけの照会になる)。
+ *  4. 出力(CSV/HTML)の実体化・状態遷移まで**ロックを保持したまま**行う。
  */
 
 import { TERMINAL_REACTIONS } from "@/lib/dm-reaction/core";

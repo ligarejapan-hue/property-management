@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { lockOwnersForShare, type RawTx } from "@/lib/dm-batch/locks";
+import { lockOwnersForShare, lockPropertiesForShare, type RawTx } from "@/lib/dm-batch/locks";
 import {
   findTerminalExclusions,
   isTerminalExcluded,
@@ -56,20 +56,48 @@ export async function GET(
         ),
       ];
       await lockOwnersForShare(tx as unknown as RawTx, ownerIds);
+      // 所有者なしの terminal 記録の書き手は物件行で直列化するため物件親行も取る(@codex R3 P1)。
+      const propertyIds = [...new Set(visibleDrafts.map((d) => d.propertyId))];
+      await lockPropertiesForShare(tx as unknown as RawTx, propertyIds);
+      // ロック取得後に読み直す(@codex R3 P1: 事前読取〜ロックの間の所有者統合で
+      // 連関が master へ付け替わると、古いIDだけを照会して除外を取りこぼす)。
+      const reread = await tx.dmRecipientDraft.findMany({
+        where: { id: { in: visibleDrafts.map((d) => d.id) } },
+        select: {
+          id: true,
+          propertyId: true,
+          representativeOwnerId: true,
+          draftOwners: { select: { ownerId: true } },
+        },
+      });
+      const lockedOwners = new Set(ownerIds);
+      const rereadById = new Map(reread.map((r) => [r.id, r]));
+      const changed = visibleDrafts.some((d) => {
+        const r = rereadById.get(d.id);
+        if (!r || r.propertyId !== d.propertyId) return true;
+        return [
+          ...(r.representativeOwnerId ? [r.representativeOwnerId] : []),
+          ...(r.draftOwners ?? []).map((o) => o.ownerId),
+        ].some((oid) => !lockedOwners.has(oid));
+      });
+      if (changed) {
+        throw new ApiError(409, "宛先の状態が変わりました。もう一度お試しください", "RETRY");
+      }
       const exclusionSets = await findTerminalExclusions(
         tx as unknown as TerminalExclusionTx,
         ownerIds,
-        [...new Set(visibleDrafts.map((d) => d.propertyId))],
+        propertyIds,
       );
-      const terminalCount = visibleDrafts.filter((d) =>
-        isTerminalExcluded(exclusionSets, {
+      const terminalCount = visibleDrafts.filter((d) => {
+        const r = rereadById.get(d.id);
+        return isTerminalExcluded(exclusionSets, {
           propertyId: d.propertyId,
           ownerIds: [
-            ...(d.representativeOwnerId ? [d.representativeOwnerId] : []),
-            ...(d.draftOwners ?? []).map((o) => o.ownerId),
+            ...(r?.representativeOwnerId ? [r.representativeOwnerId] : []),
+            ...(r?.draftOwners ?? []).map((o) => o.ownerId),
           ],
-        }),
-      ).length;
+        });
+      }).length;
       if (terminalCount > 0) {
         throw new ApiError(
           409,

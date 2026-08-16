@@ -125,13 +125,39 @@ describe("出力境界(確定・印刷・送付済み)にも同じ関所があ�
   const MARK_SENT = read("src/app/api/properties/sale-dm/drafts/[id]/mark-sent/route.ts");
   const EXPORT = read("src/app/api/properties/sale-dm/campaigns/[id]/export/route.ts");
 
-  it("3つの route すべてが共有部品を import し、Owner ロック取得後に再評価する", () => {
+  it("4つの route すべてが共有部品を import し、Owner ロック取得後に再評価する", () => {
     for (const src of [CONFIRM, PRINT, MARK_SENT, EXPORT]) {
       expect(src).toContain('from "@/lib/dm-batch/terminal-exclusion"');
       const lock = src.indexOf("lockOwnersForShare(");
       const excl = src.indexOf("findTerminalExclusions(");
       expect(lock).toBeGreaterThan(-1);
       expect(excl).toBeGreaterThan(lock);
+    }
+  });
+
+  it("⚠物件ロックも除外より前(@codex #384 R3 P1: 所有者なし terminal の書き手は物件行で直列化)", () => {
+    // print/export = lockPropertiesForShare / confirm・mark-sent = FROM properties ... FOR UPDATE
+    for (const [src, propLock] of [
+      [PRINT, "lockPropertiesForShare("],
+      [EXPORT, "lockPropertiesForShare("],
+      [CONFIRM, "FROM properties"],
+      [MARK_SENT, "FROM properties"],
+    ] as const) {
+      const lockAt = src.indexOf(propLock);
+      const exclAt = src.indexOf("findTerminalExclusions(");
+      expect(lockAt).toBeGreaterThan(-1);
+      expect(exclAt).toBeGreaterThan(lockAt);
+    }
+  });
+
+  it("⚠印刷とCSVはロック取得後に draft を読み直し、集合が変わっていたら 409 RETRY", () => {
+    // 事前読取〜ロックの間の所有者統合(merge)で連関が付け替わる穴(@codex #384 R3 P1)。
+    for (const src of [PRINT, EXPORT]) {
+      const tx = src.indexOf("$transaction");
+      const reread = src.indexOf("dmRecipientDraft.findMany", tx);
+      expect(reread).toBeGreaterThan(tx); // tx 内に2度目の読み(読み直し)がある
+      expect(src.indexOf('"RETRY"', tx)).toBeGreaterThan(tx);
+      expect(src.indexOf("findTerminalExclusions(", tx)).toBeGreaterThan(reread);
     }
   });
 

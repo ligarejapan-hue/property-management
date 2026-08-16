@@ -261,3 +261,18 @@ describe("除外注記は印刷に出ない", () => {
     expect(html).toContain("@media print{.pm-terminal-note{display:none");
   });
 });
+
+// 事前読取〜ロックの間に所有者統合が入ったら負けを認めて 409(@codex #384 R3 P1)。
+describe("ロック後の読み直しで所有者集合が変わったら 409 RETRY", () => {
+  it("読み直しの owner がロック集合の外なら印刷しない", async () => {
+    const d1 = { ...draft, id: "rA", propertyId: "pA", representativeOwnerId: "oA", draftOwners: [{ ownerId: "oA" }], trackingToken: "tokA" };
+    // 1回目(事前読取)=oA / 2回目(tx内読み直し)=oMaster(統合後)
+    pm.dmRecipientDraft.findMany
+      .mockResolvedValueOnce([d1])
+      .mockResolvedValueOnce([{ id: "rA", propertyId: "pA", representativeOwnerId: "oMaster", draftOwners: [{ ownerId: "oMaster" }] }]);
+    const res = await GET(req() as never, ctx);
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error.code).toBe("RETRY");
+  });
+});
