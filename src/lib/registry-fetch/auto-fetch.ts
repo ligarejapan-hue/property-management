@@ -1722,7 +1722,7 @@ function createPlaywrightRegistryPage(
             await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
             throw new RegistryFetchError("location_rejected");
           }
-          reportLive("候補は見つかりませんでした (0 件)");
+          reportLive("候補は見つかりませんでした (0 件)。サイト側で一時的に0件になることがあります。時間をおかず、もう一度お試しください");
           await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
           return [];
         }
@@ -2061,21 +2061,50 @@ function createPlaywrightRegistryPage(
       };
       // ---- 課金前ゾーン(④: 対象行の特定と確定) ----
       try {
-        try {
-          await page.waitForSelector(REGISTRY_SELECTORS.dialogResultCheckbox, {
-            state: "attached",
-            timeout: DIALOG_RESULT_TIMEOUT_MS,
-          });
-        } catch (waitErr) {
-          if (!isTimeoutError(waitErr)) throw waitErr;
-          const loaded = await page.evaluate((sel) => {
-            const t = document.querySelector(sel);
-            return !!t && !/データ取得中/.test(t.textContent ?? "");
-          }, REGISTRY_SELECTORS.dialogResultTable);
-          if (!loaded) throw new RegistryFetchError("timeout");
-          // 真の0件=検索時の候補が消えた(登記側の変化)。課金せず not_found。
-          await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
-          throw new RegistryFetchError("not_found");
+        // ⚠**0件は1回だけ検索し直す**(2026-08-17 実測)。同一条件で無料検索が
+        // 0件→1件→1件と揺れる(サイト側の一過性)ことを確認した。無料検索は
+        // 人がもう一度押して吸収しているが、こちらの内部検索は再試行が無く
+        // 0件を引いた瞬間に not_found で終わっていた(同日2回連続)。
+        // 再試行はダイアログを閉じて開き直し、**種別と範囲の両端まで**入れ直す
+        // (開き直しで条件が空に戻るため。片方でも欠けると必ず0件)。
+        let zeroRetried = false;
+        for (;;) {
+          try {
+            await page.waitForSelector(REGISTRY_SELECTORS.dialogResultCheckbox, {
+              state: "attached",
+              timeout: DIALOG_RESULT_TIMEOUT_MS,
+            });
+            break; // 候補行が出た
+          } catch (waitErr) {
+            if (!isTimeoutError(waitErr)) throw waitErr;
+            const loaded = await page.evaluate((sel) => {
+              const t = document.querySelector(sel);
+              return !!t && !/データ取得中/.test(t.textContent ?? "");
+            }, REGISTRY_SELECTORS.dialogResultTable);
+            if (!loaded) throw new RegistryFetchError("timeout");
+            if (!zeroRetried) {
+              zeroRetried = true;
+              reportLive(
+                "候補が0件でした。サイト側で一時的に0件になることがあるため、もう一度だけ検索し直します(まだ課金されていません)",
+              );
+              console.warn(
+                "[registry-fetch] dialog returned 0 rows; retrying once (not charged)",
+              );
+              await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
+              await sleep(1500);
+              await page.click(REGISTRY_SELECTORS.dialogChibanKaokuListButton);
+              await page.click(REGISTRY_SELECTORS.dialogChibanTypeNumeric);
+              await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, targetKey);
+              await page.fill(REGISTRY_SELECTORS.dialogChibanRangeEnd, targetKey);
+              await page.click(REGISTRY_SELECTORS.dialogSearch);
+              continue;
+            }
+            // 2回目も0件=揺らぎでは説明がつかない。**画面の間取りを持ち帰ってから**
+            // 課金せず not_found(診断より先に閉じると画面が消えるので順序厳守)。
+            await logRegistryPageProbe(page, "paid-dialog-zero");
+            await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
+            throw new RegistryFetchError("not_found");
+          }
         }
         // 対象の地番セルを探して check(複数ページは searchByLocation と同じ防御で送る)。
         let found = false;
