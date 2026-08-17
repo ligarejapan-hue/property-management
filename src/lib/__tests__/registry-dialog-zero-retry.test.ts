@@ -57,3 +57,42 @@ describe("有料取得: ダイアログ0件の1回リトライ", () => {
     expect(SRC).toMatch(/候補は見つかりませんでした \(0 件\)。[^"]*もう一度/);
   });
 });
+
+// 予算配分の挙動テスト(@codex #386 P2: 走査だけでなく挙動で固定する)。
+import {
+  ZERO_RETRY_MIN_WAIT_MS,
+  ZERO_RETRY_PROBE_MARGIN_MS,
+  ZERO_RETRY_SLEEP_MS,
+  resolveZeroRetryPlan,
+} from "@/lib/registry-fetch/zero-retry-plan";
+
+describe("resolveZeroRetryPlan(残り予算→再試行の可否と待ち時間)", () => {
+  it("予算未設定(null)は従来どおりフルで再試行+診断", () => {
+    expect(resolveZeroRetryPlan(null)).toEqual({ retry: true, waitMs: 15000, probe: true });
+  });
+
+  it("既定の外側30秒: 1回目の待ち後(残り約10秒)でも、切り詰めた待ちで再試行できる", () => {
+    const plan = resolveZeroRetryPlan(10000);
+    expect(plan.retry).toBe(true);
+    expect(plan.waitMs).toBe(10000 - ZERO_RETRY_SLEEP_MS - ZERO_RETRY_PROBE_MARGIN_MS); // 4500
+    expect(plan.waitMs).toBeGreaterThanOrEqual(ZERO_RETRY_MIN_WAIT_MS);
+    expect(plan.probe).toBe(true);
+    // 再試行しても sleep+待ち+診断が残り予算に収まる=外側 timeout に化けない。
+    expect(ZERO_RETRY_SLEEP_MS + plan.waitMs + ZERO_RETRY_PROBE_MARGIN_MS).toBeLessThanOrEqual(10000);
+  });
+
+  it("残りが潤沢なら待ちは15秒で頭打ち", () => {
+    expect(resolveZeroRetryPlan(60000).waitMs).toBe(15000);
+  });
+
+  it("再試行の余裕が無い残量では再試行せず、診断だけ打つ", () => {
+    const plan = resolveZeroRetryPlan(8000); // waitBudget=2500 < 3000
+    expect(plan.retry).toBe(false);
+    expect(plan.probe).toBe(true); // 8000 > 4000
+  });
+
+  it("診断の余裕すら無ければ診断も打たず即分類(timeout に化けるより良い)", () => {
+    const plan = resolveZeroRetryPlan(3000);
+    expect(plan).toEqual({ retry: false, waitMs: 0, probe: false });
+  });
+});

@@ -28,6 +28,10 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import {
+  ZERO_RETRY_SLEEP_MS,
+  resolveZeroRetryPlan,
+} from "@/lib/registry-fetch/zero-retry-plan";
+import {
   KNOWN_PROBE_SELECTORS,
   formatRegistryPageProbe,
   type RegistryPageProbe,
@@ -1833,6 +1837,13 @@ function createPlaywrightRegistryPage(
       // ⚠⑧より前の失敗は provider_error/not_found(お金は動いていない)。
       // ⚠⑧より後の失敗は **charged_but_failed**(課金済みの可能性。呼び出し側が再試行禁止+台帳記録)。
       // ⚠[要live] ⑥以降の画面遷移・請求後の反映時間は実課金テストで最終確定する。
+      // 外側の provider 予算(REGISTRY_FETCH_TIMEOUT_MS)に対する自前の残量計算用。
+      // withPaidTimeout の開始とほぼ同時刻(メソッド入口)を基準にする(@codex #386 P2)。
+      const paidBudgetRaw = Number(process.env.REGISTRY_FETCH_TIMEOUT_MS ?? "");
+      const paidDeadline =
+        Number.isFinite(paidBudgetRaw) && paidBudgetRaw > 0
+          ? Date.now() + paidBudgetRaw
+          : null;
       const isBuilding = !!(input.buildingNumber && input.buildingNumber.trim().length > 0);
       const rawTarget = ((isBuilding ? input.buildingNumber : input.lotNumber) ?? "").trim();
       const targetKey = normalizeChibanForDialog(rawTarget);
@@ -2068,11 +2079,12 @@ function createPlaywrightRegistryPage(
         // 再試行はダイアログを閉じて開き直し、**種別と範囲の両端まで**入れ直す
         // (開き直しで条件が空に戻るため。片方でも欠けると必ず0件)。
         let zeroRetried = false;
+        let retryWaitMs = DIALOG_RESULT_TIMEOUT_MS;
         for (;;) {
           try {
             await page.waitForSelector(REGISTRY_SELECTORS.dialogResultCheckbox, {
               state: "attached",
-              timeout: DIALOG_RESULT_TIMEOUT_MS,
+              timeout: retryWaitMs,
             });
             break; // 候補行が出た
           } catch (waitErr) {
@@ -2082,7 +2094,10 @@ function createPlaywrightRegistryPage(
               return !!t && !/データ取得中/.test(t.textContent ?? "");
             }, REGISTRY_SELECTORS.dialogResultTable);
             if (!loaded) throw new RegistryFetchError("timeout");
-            if (!zeroRetried) {
+            const plan = resolveZeroRetryPlan(
+              paidDeadline === null ? null : paidDeadline - Date.now(),
+            );
+            if (!zeroRetried && plan.retry) {
               zeroRetried = true;
               reportLive(
                 "候補が0件でした。サイト側で一時的に0件になることがあるため、もう一度だけ検索し直します(まだ課金されていません)",
@@ -2091,17 +2106,24 @@ function createPlaywrightRegistryPage(
                 "[registry-fetch] dialog returned 0 rows; retrying once (not charged)",
               );
               await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
-              await sleep(1500);
+              await sleep(ZERO_RETRY_SLEEP_MS);
               await page.click(REGISTRY_SELECTORS.dialogChibanKaokuListButton);
               await page.click(REGISTRY_SELECTORS.dialogChibanTypeNumeric);
               await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, targetKey);
               await page.fill(REGISTRY_SELECTORS.dialogChibanRangeEnd, targetKey);
               await page.click(REGISTRY_SELECTORS.dialogSearch);
+              // ⚠2回目の待ちは**残り予算に収まる長さ**へ切り詰める(@codex #386 P2)。
+              // フル15秒のまま待つと、外側予算(例30秒)を超えて not_found にも診断にも
+              // 到達できず、呼び出し側には timeout が返る(0件の事実が消える)。
+              retryWaitMs = plan.waitMs;
               continue;
             }
-            // 2回目も0件=揺らぎでは説明がつかない。**画面の間取りを持ち帰ってから**
+            // 再試行の余裕なし or 2回目も0件。**画面の間取りを持ち帰ってから**
             // 課金せず not_found(診断より先に閉じると画面が消えるので順序厳守)。
-            await logRegistryPageProbe(page, "paid-dialog-zero");
+            // 予算が診断ぶんも無いときは診断を諦めて即分類(timeout に化けるより良い)。
+            if (plan.probe) {
+              await logRegistryPageProbe(page, "paid-dialog-zero");
+            }
             await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
             throw new RegistryFetchError("not_found");
           }
