@@ -89,6 +89,15 @@ import { useScreenProtection } from "@/components/screen-protection/screen-prote
 // 東京駅付近を初期表示の中心にする (海外案件用ではない国内利用前提)。
 const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
 const DEFAULT_ZOOM = 14;
+
+// 長押しでピン (発注者要望 2026-08-17) の自前検知パラメータ。
+// iOS が DOM contextmenu を発火しないため touch から合成する (MapDataLayer 内)。
+/** これより長く押し続けたら長押しとみなす。 */
+const LONG_PRESS_MS = 600;
+/** これ以上動いたらパンの意図とみなして長押しを諦める (指の震えは許容)。 */
+const LONG_PRESS_SLOP_PX = 10;
+/** ネイティブ contextmenu と自前長押しの二重発火を捨てる窓。 */
+const CONTEXT_FIRE_DEDUPE_MS = 800;
 // 巡回開始時に寄せる倍率。既定 (14) は市区町村が入る広さで、街を歩きながら
 // 使うには広すぎる。17 なら建物の並びが判別できる。
 const TRIP_START_ZOOM = 17;
@@ -948,6 +957,46 @@ export default function FieldSurveyMap({
     [createCandidate, cameraFirstPhase, detailPinId, activeSession, canQuickCapture],
   );
 
+  // 地図の長押し(携帯)/右クリック(PC)からその場でピンを立てる (発注者要望
+  // 2026-08-17)。Google Maps の contextmenu は両ジェスチャで発火する統一
+  // イベントで、ボタンを経由しない最短経路。写真なしで作成モーダルを開く
+  // (=写真は任意・種類は候補既定の photoOptional 経路に合流)。
+  // タップ待ち中(撮影後/写真なしボタン後)は通常のタップと同じ扱い=保持中の
+  // 写真の有無ごと handleMapClick に委譲する(長押しでも位置が決められる)。
+  const handleMapContextCreate = useCallback(
+    (latLng: { lat: number; lng: number }) => {
+      if (cameraFirstPhase === "awaiting-map-tap") {
+        handleMapClick(latLng);
+        return;
+      }
+      // 既に modal 表示中はスルー (誤操作防止=click 側と同じ)。
+      if (createCandidate) return;
+      // 詳細パネルで作業中なら新規作成のジェスチャを無視する (パネルは維持)。
+      if (detailPinId && detailPanelBusyRef.current) return;
+      // ⚠ゲートはボタン(cameraFirstButtonState)と同じ条件に揃える:
+      // 巡回中 or 巡回なし登録の権限が true 確定のときだけ。null(判定不能)で
+      // 通すと権限が無い人に 403 を踏ませるだけなので安全側に倒す。
+      // 書込権限なし確定も無反応(ボタン側は disabled で伝えている)。
+      if (!activeSession && canQuickCapture !== true) return;
+      if (canWritePin === false) return;
+      cameraPhotoFileRef.current = null;
+      createdFromCameraRef.current = true;
+      setClientCreateError(null);
+      // 開いたままの詳細パネルは閉じる (click 側と同じ理由)。
+      setDetailPinId(null);
+      setCreateCandidate({ lat: latLng.lat, lng: latLng.lng });
+    },
+    [
+      cameraFirstPhase,
+      handleMapClick,
+      createCandidate,
+      detailPinId,
+      activeSession,
+      canQuickCapture,
+      canWritePin,
+    ],
+  );
+
   // 「置き直す」: タップ位置を間違えたときに、**写真を保持したまま**もう一度
   // タップ待ちへ戻す。これが無いと直し方が「キャンセル＝写真ごと破棄」しか
   // 無くなる（ドラッグ移動は作らない方針のため。2026-07-29）。
@@ -997,6 +1046,7 @@ export default function FieldSurveyMap({
             currentUserId={currentUserId}
             captureMapClick={cameraFirstPhase === "awaiting-map-tap"}
             onMapClick={handleMapClick}
+            onMapContextMenu={handleMapContextCreate}
             onOpenPinDetail={setDetailPinId}
           />
           <MapInstanceCapture onMap={setMapInstance} />
@@ -1669,6 +1719,7 @@ function MapDataLayer({
   currentUserId,
   captureMapClick,
   onMapClick,
+  onMapContextMenu,
   onOpenPinDetail,
   coverageDays,
   onCoverageState,
@@ -1700,6 +1751,11 @@ function MapDataLayer({
   /** pin 追加モード中またはカメラファーストの地図タップ待ち中に map click を転送する。 */
   captureMapClick: boolean;
   onMapClick: (latLng: { lat: number; lng: number }) => void;
+  /**
+   * 長押し(携帯)/右クリック(PC)=contextmenu を常時転送する (発注者要望
+   * 2026-08-17)。受け側 (handleMapContextCreate) が権限・状況で判断する。
+   */
+  onMapContextMenu: (latLng: { lat: number; lng: number }) => void;
   onOpenPinDetail: (pinId: string) => void;
 }) {
   const map = useMap();
@@ -2073,6 +2129,123 @@ function MapDataLayer({
     );
     return () => listener.remove();
   }, [map, captureMapClick, onMapClick]);
+
+  // 長押し(携帯)/右クリック(PC)の共通発火口 (発注者要望 2026-08-17)。
+  // ⚠Android はネイティブ contextmenu と下の自前長押し検知の**両方**が発火し
+  // 得るため、直近の発火から一定時間は2発目を捨てる(同じ地点で modal が
+  // 二重に開こうとするのを防ぐ。click 側の吹き出し閉じもここで揃える)。
+  const lastContextFireAtRef = useRef(0);
+  const fireMapContextMenu = useCallback(
+    (latLng: { lat: number; lng: number }) => {
+      const now = Date.now();
+      if (now - lastContextFireAtRef.current < CONTEXT_FIRE_DEDUPE_MS) return;
+      lastContextFireAtRef.current = now;
+      // 開いていた吹き出しは閉じる (作成モーダルの背後に残さない)。
+      setSelected(null);
+      onMapContextMenu(latLng);
+    },
+    [onMapContextMenu],
+  );
+
+  // 右クリック(PC)/長押し(Android)。Google Maps の "contextmenu" は DOM の
+  // contextmenu が出る環境ならどちらでも発火する。click と違い
+  // **captureMapClick でゲートしない**(タップ待ちに入っていなくてもいつでも
+  // 立てられるのがこの導線の価値。可否は親の handler が権限で判断)。
+  // raw 座標は console に出さない。
+  useEffect(() => {
+    if (!map) return;
+    const listener = map.addListener(
+      "contextmenu",
+      (e: {
+        latLng?: { lat: () => number; lng: () => number };
+        domEvent?: { preventDefault?: () => void };
+      }) => {
+        const ll = e?.latLng;
+        if (!ll) return;
+        const lat = ll.lat();
+        const lng = ll.lng();
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        // PC のブラウザ標準の右クリックメニューを出さない。
+        e?.domEvent?.preventDefault?.();
+        fireMapContextMenu({ lat, lng });
+      },
+    );
+    return () => listener.remove();
+  }, [map, fireMapContextMenu]);
+
+  // ⚠iOS(全ブラウザ=WebKit)は長押しで DOM contextmenu を**発火しない**既知の
+  // 制約(iOS 13以降・リンク/画像以外の要素)。Google 側が合成してくれる確証も
+  // 無いため、touch イベントで長押し(1本指・LONG_PRESS_MS・移動 SLOP 未満)を
+  // 自前検知して同じ発火口へ流す。パン/ピンチは touchmove/2本目で即キャンセル。
+  // 座標は OverlayView の投影(px→緯度経度)で変換する(傾き/回転でも正確)。
+  useEffect(() => {
+    if (!map) return;
+    if (typeof google === "undefined" || !google.maps?.OverlayView) return;
+    const div = map.getDiv();
+    // 投影(MapCanvasProjection)を得るためだけの描画なし overlay。
+    class ProjectionProbe extends google.maps.OverlayView {
+      onAdd() {}
+      draw() {}
+      onRemove() {}
+    }
+    const probe = new ProjectionProbe();
+    probe.setMap(map);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let start: { x: number; y: number } | null = null;
+    const cancel = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      start = null;
+    };
+    const onTouchStart = (ev: TouchEvent) => {
+      if (ev.touches.length !== 1) {
+        cancel(); // 2本目=ピンチの意図
+        return;
+      }
+      const t = ev.touches[0];
+      start = { x: t.clientX, y: t.clientY };
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (!start) return;
+        const proj = probe.getProjection();
+        if (!proj) {
+          cancel(); // overlay の準備前(稀)。次の長押しでやり直せる
+          return;
+        }
+        const rect = div.getBoundingClientRect();
+        const ll = proj.fromContainerPixelToLatLng(
+          new google.maps.Point(start.x - rect.left, start.y - rect.top),
+        );
+        cancel();
+        if (!ll) return;
+        const lat = ll.lat();
+        const lng = ll.lng();
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        fireMapContextMenu({ lat, lng });
+      }, LONG_PRESS_MS);
+    };
+    const onTouchMove = (ev: TouchEvent) => {
+      if (!start) return;
+      const t = ev.touches[0];
+      if (!t) return;
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      // 指の震え(SLOP 未満)は許容し、それ以上はパンの意図とみなす。
+      if (dx * dx + dy * dy > LONG_PRESS_SLOP_PX * LONG_PRESS_SLOP_PX) cancel();
+    };
+    div.addEventListener("touchstart", onTouchStart, { passive: true });
+    div.addEventListener("touchmove", onTouchMove, { passive: true });
+    div.addEventListener("touchend", cancel, { passive: true });
+    div.addEventListener("touchcancel", cancel, { passive: true });
+    return () => {
+      cancel();
+      probe.setMap(null);
+      div.removeEventListener("touchstart", onTouchStart);
+      div.removeEventListener("touchmove", onTouchMove);
+      div.removeEventListener("touchend", cancel);
+      div.removeEventListener("touchcancel", cancel);
+    };
+  }, [map, fireMapContextMenu]);
 
   return (
     <>
