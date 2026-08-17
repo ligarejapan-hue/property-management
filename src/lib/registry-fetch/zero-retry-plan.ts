@@ -44,3 +44,24 @@ export function resolveZeroRetryPlan(remainingMs: number | null): {
     probe: true,
   };
 }
+
+/**
+ * 再オープンのブラウザ操作(閉じる→開き直す→種別→両端→検索。各操作にセレクタ待ちあり)
+ * が実際に食った時間ぶん、2回目の待ちを切り詰める(@codex #386 R3 P2)。
+ * 計画(resolveZeroRetryPlan)の式は sleep と診断しか確保しておらず、操作コストは
+ * 事前に見積もれない(サイトの応答次第)。→ **操作が終わった時点の実測残量**から
+ * 診断の予約(margin)だけ守って再計算する。予約した診断は最後まで打てる。
+ * ⚠戻り値は最小1ms。0 は Playwright の waitForSelector で「無制限」の意味になり、
+ * 切り詰めたつもりが永遠に待つ逆効果になる。
+ * remainingMs=null は予算未設定=計画値のまま。純関数(挙動テスト用)。
+ */
+export function truncateZeroRetryWait(
+  plannedWaitMs: number,
+  remainingMs: number | null,
+): number {
+  if (remainingMs === null || !Number.isFinite(remainingMs)) return plannedWaitMs;
+  return Math.max(
+    1,
+    Math.min(plannedWaitMs, remainingMs - ZERO_RETRY_PROBE_MARGIN_MS),
+  );
+}

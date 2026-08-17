@@ -58,6 +58,19 @@ describe("有料取得: ダイアログ0件の1回リトライ", () => {
     expect(SRC).toContain("zeroRetried ? carriedProbe : plan.probe");
   });
 
+  it("⚠待ちの切り詰めは**開き直し操作の後**に実測残量で行う(@codex #386 R3)", () => {
+    // 計画時点の残量には閉じ→開き直し→入れ直しの操作コスト(セレクタ待ち)が
+    // 載っていない。操作の後に truncateZeroRetryWait で再計算しないと、操作が
+    // 食った時間ぶん外側予算を超え、not_found が timeout に化ける。
+    const retryAt = SRC.indexOf("zeroRetried = true");
+    const searchClickAt = SRC.indexOf("REGISTRY_SELECTORS.dialogSearch", retryAt);
+    const truncateAt = SRC.indexOf("truncateZeroRetryWait", retryAt);
+    const continueAt = SRC.indexOf("continue;", retryAt);
+    expect(searchClickAt).toBeGreaterThan(retryAt);
+    expect(truncateAt).toBeGreaterThan(searchClickAt); // 操作の後
+    expect(continueAt).toBeGreaterThan(truncateAt); // 待ちに入る前
+  });
+
   it("⚠残量の基準は provider が渡す外側タイマー開始時刻(input.paidDeadlineAt)", () => {
     // adapter 側で env から測り直すとログイン時間ぶん過大評価する(@codex #386 R2)。
     expect(SRC).toContain("input.paidDeadlineAt");
@@ -85,6 +98,7 @@ import {
   ZERO_RETRY_PROBE_MARGIN_MS,
   ZERO_RETRY_SLEEP_MS,
   resolveZeroRetryPlan,
+  truncateZeroRetryWait,
 } from "@/lib/registry-fetch/zero-retry-plan";
 
 describe("resolveZeroRetryPlan(残り予算→再試行の可否と待ち時間)", () => {
@@ -131,5 +145,34 @@ describe("resolveZeroRetryPlan(残り予算→再試行の可否と待ち時間)
   it("診断の余裕すら無ければ診断も打たず即分類(timeout に化けるより良い)", () => {
     const plan = resolveZeroRetryPlan(3000);
     expect(plan).toEqual({ retry: false, waitMs: 0, probe: false });
+  });
+});
+
+describe("truncateZeroRetryWait(開き直し操作の実コストを待ちから差し引く・@codex #386 R3)", () => {
+  it("操作が食った時間ぶん待ちが縮む(sleep+操作+待ち+診断が予算に収まる)", () => {
+    // 残10秒で計画: 待ち3000を予約(=resolveZeroRetryPlan(10000).waitMs)。
+    const plan = resolveZeroRetryPlan(10000);
+    // sleep(1500)+ブラウザ操作(実測200ms)の後の残量=8300。
+    const opsCostMs = 200;
+    const remainingAfterOps = 10000 - ZERO_RETRY_SLEEP_MS - opsCostMs;
+    const wait = truncateZeroRetryWait(plan.waitMs, remainingAfterOps);
+    expect(wait).toBe(remainingAfterOps - ZERO_RETRY_PROBE_MARGIN_MS); // 2800
+    // 総和が予算に収まる=操作コストが載っても外側 timeout に化けない。
+    expect(ZERO_RETRY_SLEEP_MS + opsCostMs + wait + ZERO_RETRY_PROBE_MARGIN_MS).toBeLessThanOrEqual(10000);
+  });
+
+  it("⚠操作が遅くても診断の予約(margin)は最後まで守る(待ちは1msまで潰れる)", () => {
+    // 操作が4秒食った: 残量4500 < margin(5500)。待ちを実質0にして診断へ進む。
+    // ただし0でなく1ms: Playwright の timeout:0 は「無制限」の意味で逆効果。
+    expect(truncateZeroRetryWait(3000, 4500)).toBe(1);
+    expect(truncateZeroRetryWait(3000, 0)).toBe(1);
+  });
+
+  it("速い操作では計画した待ちをそのまま使う(縮めすぎない)", () => {
+    expect(truncateZeroRetryWait(3000, 60000)).toBe(3000);
+  });
+
+  it("予算未設定(null)は計画値のまま", () => {
+    expect(truncateZeroRetryWait(15000, null)).toBe(15000);
   });
 });

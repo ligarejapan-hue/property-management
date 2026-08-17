@@ -30,6 +30,7 @@ import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import {
   ZERO_RETRY_SLEEP_MS,
   resolveZeroRetryPlan,
+  truncateZeroRetryWait,
 } from "@/lib/registry-fetch/zero-retry-plan";
 import {
   KNOWN_PROBE_SELECTORS,
@@ -2120,7 +2121,13 @@ function createPlaywrightRegistryPage(
               // ⚠2回目の待ちは**残り予算に収まる長さ**へ切り詰める(@codex #386 P2)。
               // フル15秒のまま待つと、外側予算(例30秒)を超えて not_found にも診断にも
               // 到達できず、呼び出し側には timeout が返る(0件の事実が消える)。
-              retryWaitMs = plan.waitMs;
+              // さらに⚠上の閉じ→開き直し→入れ直しのブラウザ操作は計画に載っていない
+              // (コストがサイトの応答次第で事前に見積もれない)ため、**操作が終わった
+              // いま**の実測残量から診断の予約だけ守って待ちを再計算する(@codex R3)。
+              retryWaitMs = truncateZeroRetryWait(
+                plan.waitMs,
+                paidDeadline === null ? null : paidDeadline - Date.now(),
+              );
               carriedProbe = plan.probe;
               continue;
             }
