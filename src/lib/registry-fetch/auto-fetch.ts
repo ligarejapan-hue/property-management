@@ -30,9 +30,9 @@ import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import {
   ZERO_RETRY_PROBE_CLEANUP_MS,
   ZERO_RETRY_SLEEP_MS,
+  resolveRetryWaitAfterSetup,
   resolveSecondZeroProbe,
   resolveZeroRetryPlan,
-  truncateZeroRetryWait,
 } from "@/lib/registry-fetch/zero-retry-plan";
 import {
   KNOWN_PROBE_SELECTORS,
@@ -2124,19 +2124,30 @@ function createPlaywrightRegistryPage(
               await page.click(REGISTRY_SELECTORS.dialogChibanTypeNumeric);
               await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, targetKey);
               await page.fill(REGISTRY_SELECTORS.dialogChibanRangeEnd, targetKey);
-              await page.click(REGISTRY_SELECTORS.dialogSearch);
-              // ⚠2回目の待ちは**残り予算に収まる長さ**へ切り詰める(@codex #386 P2)。
-              // フル15秒のまま待つと、外側予算(例30秒)を超えて not_found にも診断にも
-              // 到達できず、呼び出し側には timeout が返る(0件の事実が消える)。
-              // さらに⚠上の閉じ→開き直し→入れ直しのブラウザ操作は計画に載っていない
-              // (コストがサイトの応答次第で事前に見積もれない)ため、**操作が終わった
-              // いま**の実測残量から診断の予約だけ守って待ちを再計算する(@codex R3)。
-              retryWaitMs = truncateZeroRetryWait(
+              // ⚠2回目の待ちは**検索を打つ前に**確定する(@codex #386 R3/R7)。
+              // 計画には開き直しのブラウザ操作コストが載っていない(サイトの応答
+              // 次第で事前に見積もれない)ため、操作が終わったいまの実測残量から
+              // 診断の予約を守って再計算する。フル15秒のまま待つと外側予算を
+              // 超えて timeout に化け、逆に最低値(3秒)を割る待ちでは非同期ロード
+              // が終わらず**見かけだけの再試行**になる=検索せず断念して、1回目の
+              // 0件の観測に基づき診断→not_found へ進む。
+              const retryWait = resolveRetryWaitAfterSetup(
                 plan.waitMs,
                 paidDeadline === null ? null : paidDeadline - Date.now(),
               );
               carriedProbe = plan.probe;
-              continue;
+              if (retryWait.proceed) {
+                await page.click(REGISTRY_SELECTORS.dialogSearch);
+                retryWaitMs = retryWait.waitMs;
+                continue;
+              }
+              reportLive(
+                "開き直しに時間がかかったため、検索し直しを断念しました(まだ課金されていません)",
+              );
+              console.warn(
+                "[registry-fetch] zero-retry abandoned: setup consumed the wait budget (not charged)",
+              );
+              // ↓そのまま下の分類(診断→キャンセル→not_found)へ落ちる。
             }
             // 再試行の余裕なし or 2回目も0件。**画面の間取りを持ち帰ってから**
             // 課金せず not_found(診断より先に閉じると画面が消えるので順序厳守)。

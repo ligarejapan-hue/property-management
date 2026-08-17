@@ -46,24 +46,30 @@ export function resolveZeroRetryPlan(remainingMs: number | null): {
 }
 
 /**
- * 再オープンのブラウザ操作(閉じる→開き直す→種別→両端→検索。各操作にセレクタ待ちあり)
- * が実際に食った時間ぶん、2回目の待ちを切り詰める(@codex #386 R3 P2)。
- * 計画(resolveZeroRetryPlan)の式は sleep と診断しか確保しておらず、操作コストは
- * 事前に見積もれない(サイトの応答次第)。→ **操作が終わった時点の実測残量**から
- * 診断の予約(margin)だけ守って再計算する。予約した診断は最後まで打てる。
- * ⚠戻り値は最小1ms。0 は Playwright の waitForSelector で「無制限」の意味になり、
- * 切り詰めたつもりが永遠に待つ逆効果になる。
- * remainingMs=null は予算未設定=計画値のまま。純関数(挙動テスト用)。
+ * 再オープンのブラウザ操作(閉じる→開き直す→種別→両端の入れ直し。各操作にセレクタ
+ * 待ちあり)が実際に食った時間を差し引いて、**2回目の検索を打つ前に**待ちを確定する
+ * (@codex #386 R3/R7 P2)。計画(resolveZeroRetryPlan)の式は sleep と診断しか確保して
+ * おらず、操作コストは事前に見積もれない(サイトの応答次第)。→ 操作が終わった時点の
+ * 実測残量から診断の予約(margin)を守って再計算し、
+ * ⚠**ZERO_RETRY_MIN_WAIT_MS を割る待ちしか残らないなら再試行を断念する**(@codex R7)。
+ * この最低値未満ではサイトの非同期ロードが終わらず、検索を打っても結果が届く前に
+ * 分類してしまう=見かけだけの再試行になる。断念した場合は1回目の0件の観測に基づき
+ * 診断→not_found へ進む(呼び出し側)。
+ * remainingMs=null は予算未設定=計画値のまま実行。純関数(挙動テスト用)。
  */
-export function truncateZeroRetryWait(
+export function resolveRetryWaitAfterSetup(
   plannedWaitMs: number,
   remainingMs: number | null,
-): number {
-  if (remainingMs === null || !Number.isFinite(remainingMs)) return plannedWaitMs;
-  return Math.max(
-    1,
-    Math.min(plannedWaitMs, remainingMs - ZERO_RETRY_PROBE_MARGIN_MS),
+): { proceed: boolean; waitMs: number } {
+  if (remainingMs === null || !Number.isFinite(remainingMs)) {
+    return { proceed: true, waitMs: plannedWaitMs };
+  }
+  const waitMs = Math.min(
+    plannedWaitMs,
+    remainingMs - ZERO_RETRY_PROBE_MARGIN_MS,
   );
+  if (waitMs < ZERO_RETRY_MIN_WAIT_MS) return { proceed: false, waitMs: 0 };
+  return { proceed: true, waitMs };
 }
 
 /** 診断1回に最低限意味のある時間。これ未満なら診断せず即分類する。 */
