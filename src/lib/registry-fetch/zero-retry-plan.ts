@@ -70,6 +70,13 @@ export function truncateZeroRetryWait(
 export const ZERO_RETRY_PROBE_MIN_MS = 1500;
 /** 診断の後始末(キャンセル+分類)に残す時間。margin(5500)−これ=診断の既定内部予算(5000)。 */
 export const ZERO_RETRY_PROBE_CLEANUP_MS = 500;
+/**
+ * 外側タイマーより**必ず先に**分類へ到達するための余白(@codex #386 R6)。
+ * 診断とキャンセルが両方とも予算を使い切ると、合計がちょうど残量になる。
+ * 外側の soft timer は同じ締切で**先に登録**されているため、同時刻なら外側が勝ち
+ * timeout が返る(等号の負け)。予算の合計を締切より確実に手前で終わらせる。
+ */
+export const ZERO_RETRY_TIMER_HEADROOM_MS = 250;
 
 /**
  * 2回目の0件時点の診断の実行判定(@codex #386 R4 P2)。
@@ -90,9 +97,13 @@ export function resolveSecondZeroProbe(
   if (remainingMs === null || !Number.isFinite(remainingMs)) {
     return { probe: true, budgetMs: null };
   }
+  // ⚠headroom も引く(@codex R6): 診断が budgetMs を使い切り、続くキャンセルも
+  // 上限(CLEANUP)まで固まる最悪ケースで、合計を残量ちょうどにしない。同じ締切で
+  // 先に登録された外側 soft timer と同時刻に並ぶと、等号で外側が勝ち timeout に
+  // 化ける。budgetMs + CLEANUP <= 残量 − HEADROOM を常に保つ。
   const budgetMs = Math.min(
     ZERO_RETRY_PROBE_MARGIN_MS - ZERO_RETRY_PROBE_CLEANUP_MS,
-    remainingMs - ZERO_RETRY_PROBE_CLEANUP_MS,
+    remainingMs - ZERO_RETRY_PROBE_CLEANUP_MS - ZERO_RETRY_TIMER_HEADROOM_MS,
   );
   if (budgetMs < ZERO_RETRY_PROBE_MIN_MS) return { probe: false, budgetMs: 0 };
   return { probe: true, budgetMs };

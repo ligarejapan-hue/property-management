@@ -127,6 +127,7 @@ import {
   ZERO_RETRY_PROBE_MARGIN_MS,
   ZERO_RETRY_PROBE_MIN_MS,
   ZERO_RETRY_SLEEP_MS,
+  ZERO_RETRY_TIMER_HEADROOM_MS,
   resolveSecondZeroProbe,
   resolveZeroRetryPlan,
   truncateZeroRetryWait,
@@ -209,27 +210,51 @@ describe("truncateZeroRetryWait(開き直し操作の実コストを待ちから
 });
 
 describe("resolveSecondZeroProbe(2回目の0件時点で診断の要否と予算を決め直す・@codex #386 R4)", () => {
-  it("予約が無傷(残量=margin ちょうど)なら既定の内部予算で打つ(R2の自己矛盾を再導入しない)", () => {
-    expect(resolveSecondZeroProbe(true, ZERO_RETRY_PROBE_MARGIN_MS)).toEqual({
-      probe: true,
-      budgetMs: ZERO_RETRY_PROBE_MARGIN_MS - ZERO_RETRY_PROBE_CLEANUP_MS, // 5000=既定と同値
-    });
+  it("予約が無傷(残量=margin ちょうど)でも headroom ぶんは譲って打つ(R2の自己矛盾は再導入しない)", () => {
+    // 予約どおり残っていても、診断+キャンセルが両方とも上限まで固まる最悪ケースで
+    // 外側タイマーと同時刻に並ばないよう、既定予算から headroom を引いた値になる。
+    const p = resolveSecondZeroProbe(true, ZERO_RETRY_PROBE_MARGIN_MS);
+    expect(p.probe).toBe(true); // 予約が生きていれば必ず打てる(>= 判定)
+    expect(p.budgetMs).toBe(
+      ZERO_RETRY_PROBE_MARGIN_MS -
+        ZERO_RETRY_PROBE_CLEANUP_MS -
+        ZERO_RETRY_TIMER_HEADROOM_MS, // 4750
+    );
   });
 
   it("⚠開き直しの操作が margin に食い込んだら、内部予算を切り詰めて打つ(遅い操作+遅い診断でも外側に収まる)", () => {
     // R3 の挙動テストと同じ場面: 操作が4秒食って残量4500(< margin 5500)。
     const p = resolveSecondZeroProbe(true, 4500);
     expect(p.probe).toBe(true);
-    expect(p.budgetMs).toBe(4500 - ZERO_RETRY_PROBE_CLEANUP_MS); // 4000
-    // 診断+後始末が実測残量に収まる=診断のせいで timeout に化けない。
-    expect((p.budgetMs ?? 0) + ZERO_RETRY_PROBE_CLEANUP_MS).toBeLessThanOrEqual(4500);
+    expect(p.budgetMs).toBe(
+      4500 - ZERO_RETRY_PROBE_CLEANUP_MS - ZERO_RETRY_TIMER_HEADROOM_MS, // 3750
+    );
+  });
+
+  it("⚠遅い診断+遅いキャンセルの最悪ケースでも締切より headroom 手前で終わる(@codex #386 R6)", () => {
+    // 診断が budgetMs を使い切り、キャンセルも上限(CLEANUP)まで固まっても、
+    // 合計は残量−HEADROOM 以下=同じ締切で先に登録された外側 soft timer より
+    // **必ず先に** not_found の分類へ到達する(等号で負けない)。
+    for (const remaining of [ZERO_RETRY_PROBE_MARGIN_MS, 4500, 10000, 2250]) {
+      const p = resolveSecondZeroProbe(true, remaining);
+      if (!p.probe) continue;
+      expect(
+        (p.budgetMs ?? 0) + ZERO_RETRY_PROBE_CLEANUP_MS + ZERO_RETRY_TIMER_HEADROOM_MS,
+        `remaining=${remaining}`,
+      ).toBeLessThanOrEqual(remaining);
+    }
   });
 
   it("意味のある診断すら入らない残量なら諦めて即分類(not_found が timeout に化けるより良い)", () => {
-    expect(resolveSecondZeroProbe(true, ZERO_RETRY_PROBE_MIN_MS + ZERO_RETRY_PROBE_CLEANUP_MS - 1)).toEqual({
-      probe: false,
-      budgetMs: 0,
-    });
+    expect(
+      resolveSecondZeroProbe(
+        true,
+        ZERO_RETRY_PROBE_MIN_MS +
+          ZERO_RETRY_PROBE_CLEANUP_MS +
+          ZERO_RETRY_TIMER_HEADROOM_MS -
+          1,
+      ),
+    ).toEqual({ probe: false, budgetMs: 0 });
   });
 
   it("予約が無ければ残量に関わらず打たない(1回目の計画の判断を覆さない)", () => {
