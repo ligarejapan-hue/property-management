@@ -11,7 +11,9 @@ export const ZERO_RETRY_MAX_WAIT_MS = 15000;
 /** 0件リトライ1回に使う固定コスト(閉じて開き直すまでの待ち)。 */
 export const ZERO_RETRY_SLEEP_MS = 1500;
 /** 診断(page-probe)+キャンセル+分類に残す安全マージン。 */
-export const ZERO_RETRY_PROBE_MARGIN_MS = 4000;
+// ⚠診断(page-probe)の内部予算は 5000ms(auto-fetch の PAGE_PROBE_BUDGET_MS)。
+// margin がそれ未満だと「予約したのに診断が途中で切られる」ため、+後始末500ms で 5500。
+export const ZERO_RETRY_PROBE_MARGIN_MS = 5500;
 /** これ未満の待ちで再検索しても意味がない(サイトの非同期ロードが終わらない)。 */
 export const ZERO_RETRY_MIN_WAIT_MS = 3000;
 

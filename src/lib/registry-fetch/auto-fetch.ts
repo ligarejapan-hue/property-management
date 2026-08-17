@@ -1837,12 +1837,12 @@ function createPlaywrightRegistryPage(
       // ⚠⑧より前の失敗は provider_error/not_found(お金は動いていない)。
       // ⚠⑧より後の失敗は **charged_but_failed**(課金済みの可能性。呼び出し側が再試行禁止+台帳記録)。
       // ⚠[要live] ⑥以降の画面遷移・請求後の反映時間は実課金テストで最終確定する。
-      // 外側の provider 予算(REGISTRY_FETCH_TIMEOUT_MS)に対する自前の残量計算用。
-      // withPaidTimeout の開始とほぼ同時刻(メソッド入口)を基準にする(@codex #386 P2)。
-      const paidBudgetRaw = Number(process.env.REGISTRY_FETCH_TIMEOUT_MS ?? "");
+      // 外側の provider 予算に対する残量計算用。⚠基準は provider が withPaidTimeout の
+      // **開始時刻**で確定して渡してくる deadline(@codex #386 R2: ここで測り直すと
+      // ログインが食った時間ぶん残量を過大評価し、リトライが外側 timeout を再び踏む)。
       const paidDeadline =
-        Number.isFinite(paidBudgetRaw) && paidBudgetRaw > 0
-          ? Date.now() + paidBudgetRaw
+        typeof input.paidDeadlineAt === "number" && Number.isFinite(input.paidDeadlineAt)
+          ? input.paidDeadlineAt
           : null;
       const isBuilding = !!(input.buildingNumber && input.buildingNumber.trim().length > 0);
       const rawTarget = ((isBuilding ? input.buildingNumber : input.lotNumber) ?? "").trim();
@@ -2080,6 +2080,7 @@ function createPlaywrightRegistryPage(
         // (開き直しで条件が空に戻るため。片方でも欠けると必ず0件)。
         let zeroRetried = false;
         let retryWaitMs = DIALOG_RESULT_TIMEOUT_MS;
+        let carriedProbe = true;
         for (;;) {
           try {
             await page.waitForSelector(REGISTRY_SELECTORS.dialogResultCheckbox, {
@@ -2094,6 +2095,10 @@ function createPlaywrightRegistryPage(
               return !!t && !/データ取得中/.test(t.textContent ?? "");
             }, REGISTRY_SELECTORS.dialogResultTable);
             if (!loaded) throw new RegistryFetchError("timeout");
+            // ⚠計画は**最初の0件で1回だけ**立て、診断の予約(probe)を2回目へ持ち越す
+            // (@codex #386 R2 P2)。2回目の時点で再計画すると、予約して残した margin
+            // ちょうどの残量が「診断の余裕なし」と判定され、**診断のために取って
+            // おいた予算で診断が打てない**という自己矛盾になる。
             const plan = resolveZeroRetryPlan(
               paidDeadline === null ? null : paidDeadline - Date.now(),
             );
@@ -2116,12 +2121,15 @@ function createPlaywrightRegistryPage(
               // フル15秒のまま待つと、外側予算(例30秒)を超えて not_found にも診断にも
               // 到達できず、呼び出し側には timeout が返る(0件の事実が消える)。
               retryWaitMs = plan.waitMs;
+              carriedProbe = plan.probe;
               continue;
             }
             // 再試行の余裕なし or 2回目も0件。**画面の間取りを持ち帰ってから**
             // 課金せず not_found(診断より先に閉じると画面が消えるので順序厳守)。
             // 予算が診断ぶんも無いときは診断を諦めて即分類(timeout に化けるより良い)。
-            if (plan.probe) {
+            // 2回目の0件では**持ち越した予約**で判定(再計画しない)。1回目で
+            // 再試行の余裕が無かった場合はその場の plan.probe で判定。
+            if (zeroRetried ? carriedProbe : plan.probe) {
               await logRegistryPageProbe(page, "paid-dialog-zero");
             }
             await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});

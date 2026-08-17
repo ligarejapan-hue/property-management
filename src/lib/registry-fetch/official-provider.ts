@@ -89,6 +89,12 @@ export interface RegistryBrowserPage {
     buildingNumber?: string | null;
     certificateType: RegistryCertificateType;
     /**
+     * 外側予算(withPaidTimeout)の**開始時刻基準**の締切(epoch ms・@codex #386 R2)。
+     * 0件リトライの残量計算に使う。adapter 側で測り直すとログインが食った時間ぶん
+     * 残量を過大評価するため、provider が確定して渡す。
+     */
+    paidDeadlineAt?: number | null;
+    /**
      * 課金境界の共有フラグ(@codex #345 P1)。adapter は**請求ボタンを押す直前**に
      * `charged = true` を立てる。provider は外側 timeout 等で adapter の catch を
      * 経由せず失敗した場合でも、これを見て charged_but_failed に分類できる。
@@ -385,6 +391,13 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
         }
         // ⚠有料フローは二段タイムアウト(@codex R8 P1): 課金前=通常予算 /
         // 課金後=延長予算(支払済みPDFを取り切るため)。
+        // ⚠0件リトライの予算計算は**外側タイマーの開始時刻**を基準にする(@codex #386 R2)。
+        // adapter 側入口(=ログイン後)で測ると、ログインが食った時間ぶん残量を過大評価し、
+        // リトライが外側 timeout を再び踏む。ここで deadline を確定して渡す。
+        const paidDeadlineAt =
+          this.timeoutMs && Number.isFinite(this.timeoutMs) && this.timeoutMs > 0
+            ? Date.now() + this.timeoutMs
+            : null;
         const pdfBuffer = await this.withPaidTimeout(async () => {
           await page.login({
             loginId: this.loginId,
@@ -397,6 +410,7 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
             ...location,
             chargeState,
             live,
+            paidDeadlineAt,
           });
         }, chargeState);
         return {
