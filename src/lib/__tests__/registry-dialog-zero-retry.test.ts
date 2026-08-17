@@ -38,12 +38,25 @@ describe("有料取得: ダイアログ0件の1回リトライ", () => {
   });
 
   it("⚠2回目も0件なら画面診断(paid-dialog-zero)を採ってから not_found", () => {
-    expect(SRC).toContain('logRegistryPageProbe(page, "paid-dialog-zero")');
-    const probeAt = SRC.indexOf('logRegistryPageProbe(page, "paid-dialog-zero")');
+    expect(SRC).toContain('"paid-dialog-zero"');
+    const probeAt = SRC.indexOf('"paid-dialog-zero"');
     // 診断 → キャンセル → not_found の順(診断より先に閉じると画面が消える)。
-    const after = SRC.slice(probeAt, probeAt + 400);
+    const after = SRC.slice(probeAt, probeAt + 500);
     expect(after).toContain("dialogCancel");
     expect(after).toContain('"not_found"');
+  });
+
+  it("⚠診断の実行は実測残量で決め直し、内部予算も切り詰めて渡す(@codex #386 R4)", () => {
+    // 予約(carriedProbe)は計画時点の余裕しか保証しない。開き直しの操作が margin
+    // に食い込んだ場合、予約どおり5秒の診断を打つと外側 timeout が先に切れる。
+    expect(SRC).toContain("resolveSecondZeroProbe(");
+    const at = SRC.indexOf("resolveSecondZeroProbe(");
+    const block = SRC.slice(at, at + 500);
+    expect(block).toContain("zeroRetried ? carriedProbe : plan.probe");
+    expect(block).toContain("probePlan.probe");
+    expect(block).toContain("probePlan.budgetMs");
+    // logRegistryPageProbe は予算の上書きを受け付ける(既定は従来の固定値)。
+    expect(SRC).toContain("budgetMs ?? PAGE_PROBE_BUDGET_MS");
   });
 
   it("⚠再試行も診断も課金境界(chargeState.charged = true)より前", () => {
@@ -95,8 +108,11 @@ describe("有料取得: ダイアログ0件の1回リトライ", () => {
 // 予算配分の挙動テスト(@codex #386 P2: 走査だけでなく挙動で固定する)。
 import {
   ZERO_RETRY_MIN_WAIT_MS,
+  ZERO_RETRY_PROBE_CLEANUP_MS,
   ZERO_RETRY_PROBE_MARGIN_MS,
+  ZERO_RETRY_PROBE_MIN_MS,
   ZERO_RETRY_SLEEP_MS,
+  resolveSecondZeroProbe,
   resolveZeroRetryPlan,
   truncateZeroRetryWait,
 } from "@/lib/registry-fetch/zero-retry-plan";
@@ -174,5 +190,42 @@ describe("truncateZeroRetryWait(開き直し操作の実コストを待ちから
 
   it("予算未設定(null)は計画値のまま", () => {
     expect(truncateZeroRetryWait(15000, null)).toBe(15000);
+  });
+});
+
+describe("resolveSecondZeroProbe(2回目の0件時点で診断の要否と予算を決め直す・@codex #386 R4)", () => {
+  it("予約が無傷(残量=margin ちょうど)なら既定の内部予算で打つ(R2の自己矛盾を再導入しない)", () => {
+    expect(resolveSecondZeroProbe(true, ZERO_RETRY_PROBE_MARGIN_MS)).toEqual({
+      probe: true,
+      budgetMs: ZERO_RETRY_PROBE_MARGIN_MS - ZERO_RETRY_PROBE_CLEANUP_MS, // 5000=既定と同値
+    });
+  });
+
+  it("⚠開き直しの操作が margin に食い込んだら、内部予算を切り詰めて打つ(遅い操作+遅い診断でも外側に収まる)", () => {
+    // R3 の挙動テストと同じ場面: 操作が4秒食って残量4500(< margin 5500)。
+    const p = resolveSecondZeroProbe(true, 4500);
+    expect(p.probe).toBe(true);
+    expect(p.budgetMs).toBe(4500 - ZERO_RETRY_PROBE_CLEANUP_MS); // 4000
+    // 診断+後始末が実測残量に収まる=診断のせいで timeout に化けない。
+    expect((p.budgetMs ?? 0) + ZERO_RETRY_PROBE_CLEANUP_MS).toBeLessThanOrEqual(4500);
+  });
+
+  it("意味のある診断すら入らない残量なら諦めて即分類(not_found が timeout に化けるより良い)", () => {
+    expect(resolveSecondZeroProbe(true, ZERO_RETRY_PROBE_MIN_MS + ZERO_RETRY_PROBE_CLEANUP_MS - 1)).toEqual({
+      probe: false,
+      budgetMs: 0,
+    });
+  });
+
+  it("予約が無ければ残量に関わらず打たない(1回目の計画の判断を覆さない)", () => {
+    expect(resolveSecondZeroProbe(false, 60000)).toEqual({ probe: false, budgetMs: 0 });
+  });
+
+  it("予算未設定(null)は既定の内部予算(上書きなし)", () => {
+    expect(resolveSecondZeroProbe(true, null)).toEqual({ probe: true, budgetMs: null });
+  });
+
+  it("margin−後始末=診断の既定内部予算(5000ms)と一致する(定数のドリフト検知)", () => {
+    expect(ZERO_RETRY_PROBE_MARGIN_MS - ZERO_RETRY_PROBE_CLEANUP_MS).toBe(5000);
   });
 });

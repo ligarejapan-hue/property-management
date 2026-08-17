@@ -29,6 +29,7 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import {
   ZERO_RETRY_SLEEP_MS,
+  resolveSecondZeroProbe,
   resolveZeroRetryPlan,
   truncateZeroRetryWait,
 } from "@/lib/registry-fetch/zero-retry-plan";
@@ -1071,7 +1072,12 @@ export function summarizeRegistrySearchError(err: unknown): string {
 /** 画面構造の診断に許す時間。⚠環境変数に依存させない＝未設定の本番でも必ず効く。 */
 const PAGE_PROBE_BUDGET_MS = 5000;
 
-async function logRegistryPageProbe(page: RegistryPageLike, where: string): Promise<void> {
+async function logRegistryPageProbe(
+  page: RegistryPageLike,
+  where: string,
+  /** 内部予算の上書き(ms)。外側タイマーの残量が既定予算に満たない場面で切り詰める。 */
+  budgetMs?: number,
+): Promise<void> {
   try {
     // ⚠**診断自身に必ず期限を付ける**(@codex #383 P2)。セレクタ待ちが落ちた原因が
     // 「要素が無い」ではなく**レンダラが応答しない**ことだった場合、page.evaluate は
@@ -1144,7 +1150,7 @@ async function logRegistryPageProbe(page: RegistryPageLike, where: string): Prom
       new Promise<never>((_, reject) => {
         setTimeout(
           () => reject(new Error("page-probe budget exceeded")),
-          PAGE_PROBE_BUDGET_MS,
+          budgetMs ?? PAGE_PROBE_BUDGET_MS,
         ).unref?.();
       }),
     ])) as string;
@@ -2136,8 +2142,19 @@ function createPlaywrightRegistryPage(
             // 予算が診断ぶんも無いときは診断を諦めて即分類(timeout に化けるより良い)。
             // 2回目の0件では**持ち越した予約**で判定(再計画しない)。1回目で
             // 再試行の余裕が無かった場合はその場の plan.probe で判定。
-            if (zeroRetried ? carriedProbe : plan.probe) {
-              await logRegistryPageProbe(page, "paid-dialog-zero");
+            // ⚠ただし予約は「計画時点の余裕」しか保証しない(@codex R4)。開き直しの
+            // 操作が margin に食い込んでいたら、実測残量で診断の内部予算を切り詰め、
+            // それすら入らなければ諦める(診断で外側 timeout を踏んだら本末転倒)。
+            const probePlan = resolveSecondZeroProbe(
+              zeroRetried ? carriedProbe : plan.probe,
+              paidDeadline === null ? null : paidDeadline - Date.now(),
+            );
+            if (probePlan.probe) {
+              await logRegistryPageProbe(
+                page,
+                "paid-dialog-zero",
+                probePlan.budgetMs ?? undefined,
+              );
             }
             await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
             throw new RegistryFetchError("not_found");

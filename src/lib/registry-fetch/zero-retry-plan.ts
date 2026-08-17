@@ -65,3 +65,35 @@ export function truncateZeroRetryWait(
     Math.min(plannedWaitMs, remainingMs - ZERO_RETRY_PROBE_MARGIN_MS),
   );
 }
+
+/** 診断1回に最低限意味のある時間。これ未満なら診断せず即分類する。 */
+export const ZERO_RETRY_PROBE_MIN_MS = 1500;
+/** 診断の後始末(キャンセル+分類)に残す時間。margin(5500)−これ=診断の既定内部予算(5000)。 */
+export const ZERO_RETRY_PROBE_CLEANUP_MS = 500;
+
+/**
+ * 2回目の0件時点の診断の実行判定(@codex #386 R4 P2)。
+ * 予約(carriedProbe)は「**計画時点では**余裕があった」ことしか保証しない。開き直しの
+ * ブラウザ操作が margin まで食い込んだ場合、予約どおり5秒の診断を打つと外側タイマー
+ * が先に切れ、診断も not_found も届かず timeout に化ける。→ 実測残量から
+ *  - 診断がまだ入るか(後始末を引いて最低 ZERO_RETRY_PROBE_MIN_MS 残るか)
+ *  - 入るなら内部予算をいくらへ切り詰めるか(上限=診断の既定内部予算)
+ * を決め直す。予約が無傷(残量=margin ちょうど)なら既定予算のまま=R2 の
+ * 「予約したのに打てない」自己矛盾は起こさない(>= 判定になる)。
+ * remainingMs=null は予算未設定=既定の内部予算のまま。純関数(挙動テスト用)。
+ */
+export function resolveSecondZeroProbe(
+  reservedProbe: boolean,
+  remainingMs: number | null,
+): { probe: boolean; budgetMs: number | null } {
+  if (!reservedProbe) return { probe: false, budgetMs: 0 };
+  if (remainingMs === null || !Number.isFinite(remainingMs)) {
+    return { probe: true, budgetMs: null };
+  }
+  const budgetMs = Math.min(
+    ZERO_RETRY_PROBE_MARGIN_MS - ZERO_RETRY_PROBE_CLEANUP_MS,
+    remainingMs - ZERO_RETRY_PROBE_CLEANUP_MS,
+  );
+  if (budgetMs < ZERO_RETRY_PROBE_MIN_MS) return { probe: false, budgetMs: 0 };
+  return { probe: true, budgetMs };
+}
