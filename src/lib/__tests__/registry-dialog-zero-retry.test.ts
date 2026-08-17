@@ -41,9 +41,24 @@ describe("有料取得: ダイアログ0件の1回リトライ", () => {
     expect(SRC).toContain('"paid-dialog-zero"');
     const probeAt = SRC.indexOf('"paid-dialog-zero"');
     // 診断 → キャンセル → not_found の順(診断より先に閉じると画面が消える)。
-    const after = SRC.slice(probeAt, probeAt + 500);
+    const after = SRC.slice(probeAt, probeAt + 1400);
     expect(after).toContain("dialogCancel");
     expect(after).toContain('"not_found"');
+  });
+
+  it("⚠診断後のキャンセルは期限でレースして見切る(@codex #386 R5)", () => {
+    // 診断が予算切れになる原因が「レンダラ無応答」なら、キャンセル(page.evaluate)も
+    // 同じ理由で固まる。best-effort のキャンセルを待ち続けて not_found の宣言を
+    // 逃さない(sleep は Playwright の Node 側 timeout で終端=レンダラ非依存)。
+    const probeAt = SRC.indexOf('"paid-dialog-zero"');
+    const after = SRC.slice(probeAt, probeAt + 1400);
+    const raceAt = after.indexOf("Promise.race");
+    expect(raceAt).toBeGreaterThan(-1);
+    const raceBlock = after.slice(raceAt, raceAt + 300);
+    expect(raceBlock).toContain("dialogCancel");
+    expect(raceBlock).toContain("sleep(ZERO_RETRY_PROBE_CLEANUP_MS)");
+    // レースの後に not_found(=分類が後始末に飲まれない順序)。
+    expect(after.indexOf('"not_found"')).toBeGreaterThan(raceAt);
   });
 
   it("⚠診断の実行は実測残量で決め直し、内部予算も切り詰めて渡す(@codex #386 R4)", () => {

@@ -28,6 +28,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import {
+  ZERO_RETRY_PROBE_CLEANUP_MS,
   ZERO_RETRY_SLEEP_MS,
   resolveSecondZeroProbe,
   resolveZeroRetryPlan,
@@ -2156,7 +2157,16 @@ function createPlaywrightRegistryPage(
                 probePlan.budgetMs ?? undefined,
               );
             }
-            await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
+            // ⚠後始末のキャンセルも**期限内に見切る**(@codex R5)。診断が予算切れに
+            // なる原因が「レンダラ無応答」だった場合、このキャンセル(page.evaluate)も
+            // 同じ理由で固まり、not_found の宣言に到達できない(外側 timeout が先に
+            // 切れて 0件の事実が消える)。キャンセルは元々 best-effort(.catch で握る)
+            // なので、後始末の予約(ZERO_RETRY_PROBE_CLEANUP_MS)と同じ時間で打ち切って
+            // 分類を優先する。page の後始末は provider の finally(close)がやる。
+            await Promise.race([
+              domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {}),
+              sleep(ZERO_RETRY_PROBE_CLEANUP_MS),
+            ]);
             throw new RegistryFetchError("not_found");
           }
         }
