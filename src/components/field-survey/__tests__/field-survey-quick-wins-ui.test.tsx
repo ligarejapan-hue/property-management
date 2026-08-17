@@ -18,6 +18,12 @@ function renderModal(initialPinType?: FieldSurveyPinType): string {
       initialLat: 35.0,
       initialLng: 139.0,
       sessionId: "session-1",
+      // 種類の引き継ぎは**撮影経由**(写真付きで開く)の UX。写真なしで開くと
+      // 引き継ぎを無視して candidate 既定になる (@codex #387 P2・そちらは
+      // pin-create-modal-photo-optional.test.tsx が固定) ため、ここでは
+      // 撮影経由を模して写真付きで開く。
+      initialPhotoFile: new File(["x"], "p.jpg", { type: "image/jpeg" }),
+      initialPhotoPreviewUrl: "blob:preview",
       saving: false,
       serverError: null,
       photoUploading: false,

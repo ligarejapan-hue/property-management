@@ -139,9 +139,11 @@ const CREATE_MODAL_SRC = read("src/components/field-survey/pin-create-modal.tsx"
 describe("巡回外は種類を候補に固定する (@codex R1: 初期値だけでは固定にならない)", () => {
   it("modal は sessionId 無しのとき種類のラジオを出さず候補固定を表示する", () => {
     expect(CREATE_MODAL_SRC).toMatch(/const lockPinType = sessionId === null;/);
-    // 固定時は初期引き継ぎ (lastPinType) より候補を優先する
+    // 固定時は初期引き継ぎ (lastPinType) より候補を優先する。写真なし導線
+    // (photoOptional) も既定は候補 (@codex #387 P2・ただしこちらはロックせず
+    // 変更可能=固定は巡回外だけ)。
     expect(CREATE_MODAL_SRC).toMatch(
-      /lockPinType \? "candidate" : \(initialPinType \?\? "candidate"\)/,
+      /lockPinType \|\| photoOptional \? "candidate" : \(initialPinType \?\? "candidate"\)/,
     );
     // ラジオ群は固定時に描画しない (選べてしまうと孤児ピンが作れる)
     expect(CREATE_MODAL_SRC).toMatch(

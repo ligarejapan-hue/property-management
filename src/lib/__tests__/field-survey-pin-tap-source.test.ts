@@ -160,18 +160,27 @@ describe("3. タップし直せる（間違えても写真を捨てない）", (
   });
 });
 
-describe("3-b. 写真必須（写真なしピンをこの画面から作らせない・@codex #336 P2）", () => {
-  it("保存には写真が要る（canSubmit が photoFile を要求）", () => {
+describe("3-b. 写真の要否は入口で決まる（撮影経由=必須のまま・@codex #336 P2 / 2026-08-17 発注者要望）", () => {
+  it("⚠必須の免除は photoOptional(=写真なしで開いた)だけ（撮影経由の必須を骨抜きにしない）", () => {
+    // photoOptional は「写真を持たずに開いた」ことだけで決まる。これ以外の
+    // 条件(権限・phase 等)を混ぜると、撮影経由が誤って任意化する穴になる。
+    expect(MODAL_SRC).toContain("const photoOptional = initialPhotoFile == null;");
     const canSubmit = MODAL_SRC.match(/const canSubmit =[\s\S]*?;/)?.[0] ?? "";
-    expect(canSubmit).toContain("photoFile !== null");
+    // 旧形の素の photoFile !== null では写真なし導線が保存できず、photoOptional
+    // 単独では撮影経由まで任意化する。「任意は photoOptional のときだけ」の
+    // OR 形を厳密に固定する(部分一致で旧形も通ってしまう緩い検査にしない)。
+    expect(canSubmit).toContain("(photoOptional || photoFile !== null)");
+  });
+
+  it("ラベルも入口に連動（撮影経由=「写真（必須）」/ 写真なし導線=「写真（任意）」）", () => {
+    expect(MODAL_SRC).toContain('{photoOptional ? "写真（任意）" : "写真（必須）"}');
   });
 
   it("「写真を取り消す」を置かない（撮り直し/選び直しの差し替えのみ許す）", () => {
-    // 外して保存できると、廃止したはずの写真なしピンがこの画面から作れて
-    // しまう（全てのピンが写真とセット = 2026-07-29 業務判断）。
+    // 撮影経由で外して保存できると「撮った写真を捨てて保存」がこの画面から
+    // 作れてしまう（@codex #336 P2 の懸念は写真なし導線の追加後も維持）。
     expect(MODAL_SRC).not.toContain("写真を取り消す");
     expect(MODAL_SRC).not.toContain("pin-create-photo-clear");
-    expect(MODAL_SRC).toContain("写真（必須）");
   });
 });
 
