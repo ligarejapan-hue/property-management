@@ -121,10 +121,10 @@ describe("page-probe が読む範囲（PII 防御）", () => {
 });
 
 describe("診断を仕掛ける場所", () => {
-  it("⚠マイページ遷移の待ちが失敗したときに採取する（2026-08-16 に実際に止まった地点）", () => {
-    // 「myPageTab を押す → myPageTable を待つ」が try で囲われ、catch で採取している。
+  it("⚠遷移の待ちが失敗したときに採取する（第1回・第5回に実際に止まった区間）", () => {
+    // 「登録ボタンを押す → myPageTable を待つ」が try で囲われ、catch で採取している。
     expect(AUTO_FETCH).toMatch(
-      /myPageTab[\s\S]{0,400}?catch[\s\S]{0,900}?logRegistryPageProbe\(\s*page,\s*"mypage-transition"/,
+      /fudosanListRegisterButton[\s\S]{0,400}?catch[\s\S]{0,900}?logRegistryPageProbe\(\s*page,\s*"mypage-transition"/,
     );
   });
 
@@ -140,26 +140,61 @@ describe("診断を仕掛ける場所", () => {
     const before = AUTO_FETCH.slice(0, confirmAt);
     expect(before.lastIndexOf("try {")).toBeGreaterThan(before.lastIndexOf("catch"));
 
-    // その try の内側に、確定〜一覧待ちまでの4手が全部入っている。
+    // その try の内側に、確定〜登録〜一覧待ちまでの一式が全部入っている
+    // (probe13 で確定した正しい遷移: 確定→請求リスト→行選択→登録→マイページ)。
     const guarded = AUTO_FETCH.slice(before.lastIndexOf("try {"), probeAt);
     expect(guarded).toContain("domClick(REGISTRY_SELECTORS.requestConfirmButton)");
     expect(guarded).toContain("REGISTRY_SELECTORS.searchResult");
-    expect(guarded).toContain("domClick(REGISTRY_SELECTORS.myPageTab)");
+    expect(guarded).toContain("selectFudosanListRow(");
+    expect(guarded).toContain("domClick(REGISTRY_SELECTORS.fudosanListRegisterButton)");
     expect(guarded).toContain("REGISTRY_SELECTORS.myPageTable");
   });
 
-  it("⚠タブのクリックも try の内側にある（クリック自体が失敗しても診断が走る）", () => {
+  it("⚠登録ボタンのクリックも try の内側にある（クリック自体が失敗しても診断が走る）", () => {
     // @codex #383 P2: クリック中にページが遷移して実行コンテキストが壊れると
     // domClick が reject する。try の外だと診断がまったく走らない。
-    const tabAt = AUTO_FETCH.indexOf("domClick(REGISTRY_SELECTORS.myPageTab)");
+    const registerAt = AUTO_FETCH.indexOf(
+      "domClick(REGISTRY_SELECTORS.fudosanListRegisterButton)",
+    );
     const probeAt = AUTO_FETCH.indexOf('logRegistryPageProbe(page, "mypage-transition")');
-    expect(tabAt).toBeGreaterThan(-1);
-    expect(probeAt).toBeGreaterThan(tabAt);
+    expect(registerAt).toBeGreaterThan(-1);
+    expect(probeAt).toBeGreaterThan(registerAt);
     // クリックの直前に try があること（間に catch を挟まない）。
-    const before = AUTO_FETCH.slice(0, tabAt);
+    const before = AUTO_FETCH.slice(0, registerAt);
     const lastTry = before.lastIndexOf("try {");
     const lastCatch = before.lastIndexOf("catch");
     expect(lastTry).toBeGreaterThan(lastCatch);
+  });
+
+  it("⚠旧遷移(selectTab('tabMy')のタブ)を復活させない（probe13: 着地に存在しない）", () => {
+    // 第1回・第5回のテストが止まった直接原因。探して無音no-op→timeoutになる。
+    // (コメント中の説明は許す=**セレクタとしての定義と使用**が無いことを見る)
+    expect(AUTO_FETCH).not.toContain("myPageTab:");
+    expect(AUTO_FETCH).not.toContain("domClick(REGISTRY_SELECTORS.myPageTab)");
+    expect(AUTO_FETCH).not.toMatch(/a\[onclick\*=\\?"selectTab/);
+  });
+
+  it("⚠請求リストの行は「ちょうど1件」を read-back で実測してから登録する（二重課金の入口）", () => {
+    const applyAt = AUTO_FETCH.indexOf('probe: "fudosan-list-apply"');
+    const checkedAt = AUTO_FETCH.indexOf('probe: "fudosan-list-checked"');
+    const registerAt = AUTO_FETCH.indexOf(
+      "domClick(REGISTRY_SELECTORS.fudosanListRegisterButton)",
+    );
+    expect(applyAt).toBeGreaterThan(-1);
+    expect(checkedAt).toBeGreaterThan(applyAt); // 適用→読み直し
+    expect(registerAt).toBeGreaterThan(checkedAt); // 読み直し→登録
+    const verify = AUTO_FETCH.slice(checkedAt, registerAt);
+    expect(verify).toContain("checkedIndexes.length !== 1");
+    expect(verify).toContain("not charged");
+  });
+
+  it("⚠行照合の所在(kuiki)は確定を押す前に読んで持っておく（押すと欄ごと消える）", () => {
+    const kuikiAt = AUTO_FETCH.indexOf('probe: "kuiki-value"');
+    const confirmAt = AUTO_FETCH.indexOf(
+      "domClick(REGISTRY_SELECTORS.requestConfirmButton)",
+    );
+    expect(kuikiAt).toBeGreaterThan(-1);
+    expect(kuikiAt).toBeLessThan(confirmAt);
   });
 
   it("採取しても例外は握りつぶさず投げ直す（失敗は失敗のまま扱う）", () => {

@@ -54,8 +54,19 @@ describe("maskProbeOnclick（onclick は関数名だけ残す）", () => {
   });
 
   it("関数名は残る＝セレクタの手がかりを潰さない", () => {
-    expect(maskProbeOnclick("selectTab('tabMy')")).toBe("selectTab('tabMy')");
+    // ⚠'tabMy' は myPageTab 撤去(2026-08-17 probe13)で引数許可リストから外れた=
+    // 関数名 selectTab は残り、引数は文字数だけになる(推測で残さない)。
+    expect(maskProbeOnclick("selectTab('tabMy')")).toBe("selectTab('…5字')");
     expect(maskProbeOnclick("fuBtnForward()")).toBe("fuBtnForward()");
+    // ⚠数字入りの既知名(btnForward2)が名前ごと潰れないこと(2026-08-17):
+    // かつては数字潰しが名前より先に走り btnForward＊ になって一致しなかった。
+    expect(maskProbeOnclick("btnForward2(); return false;")).toBe(
+      "btnForward2()",
+    );
+    // 数字入りでも**未知**の名前は従来どおり文字数だけ(許可リスト方式は不変)。
+    expect(maskProbeOnclick("owner2Show('Yamada')")).toBe(
+      "(不明:10字)('…6字')",
+    );
   });
 
   it("⚠バッククォート（テンプレート文字列）も通さない", () => {
@@ -79,7 +90,8 @@ describe("maskProbeOnclick（onclick は関数名だけ残す）", () => {
 
   it("通すのは列挙した識別子だけ（前方一致にしない）", () => {
     // @codex #383 P1(6度目): `^tab...` の前方一致だと人名 tabitha が通った。
-    expect(isSafeOnclickArg("tabMy")).toBe(true);
+    // 'tabMy' も myPageTab 撤去(probe13)でリストから外れた=今は空。
+    expect(isSafeOnclickArg("tabMy")).toBe(false);
     expect(isSafeOnclickArg("tabitha")).toBe(false);
     expect(isSafeOnclickArg("tabFudosan")).toBe(false); // 未確認の値は足さない
     expect(isSafeOnclickArg("Yamada")).toBe(false);
@@ -93,7 +105,8 @@ describe("maskProbeOnclick（onclick は関数名だけ残す）", () => {
   });
 
   it("許可リストは実際に参照しているセレクタの値だけ（推測で足さない）", () => {
-    expect([...SAFE_ONCLICK_ARGS]).toEqual(["tabMy"]);
+    // myPageTab 撤去(probe13)以降、コードがセレクタとして参照する引数値はゼロ。
+    expect([...SAFE_ONCLICK_ARGS]).toEqual([]);
   });
 
   it("未知のタブ名は文字数で分かる（必要になったら明示的に足せる）", () => {
@@ -173,12 +186,15 @@ describe("formatRegistryPageProbe（1行の診断ログ）", () => {
     expect(out).toContain("(不明:");
   });
 
-  it("タブは onclick をそのまま出す（セレクタ特定の要）", () => {
+  it("タブは onclick を関数名まで出す（セレクタ特定の要・引数は許可リスト制）", () => {
     const out = formatRegistryPageProbe({
       ...base,
       tabs: [{ label: "マイページ", onclick: "selectTab('tabMy')" }],
     });
-    expect(out).toContain("selectTab('tabMy')");
+    // 関数名 selectTab は KNOWN_SITE_IDENTIFIERS で残る。引数 'tabMy' は
+    // myPageTab 撤去(probe13)で許可リストから外れ、文字数だけになる。
+    expect(out).toContain("selectTab(");
+    expect(out).toContain("'…5字'");
   });
 
   it("既知セレクタの在/不在を出す＝どれが外れたか一目で分かる", () => {
