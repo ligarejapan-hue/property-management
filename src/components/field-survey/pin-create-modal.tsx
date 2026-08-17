@@ -126,10 +126,18 @@ export default function PinCreateModal({
   // (candidate / open / 未物件化のみ) にも出ず、地図でしか辿れない孤児ピンになる。
   // 現場の判断も1つ減る (ユーザー決定: 巡回外は候補に固定)。
   const lockPinType = sessionId === null;
+  // 写真の要否は入口で決まる (発注者要望 2026-08-17「写真なしでピン」):
+  // 写真を持たずに開いた = 写真なし導線。詳細は canSubmit 側のコメント。
+  const photoOptional = initialPhotoFile == null;
   // 初期値は親から引き継いだ直前の種類 (未指定は candidate)。modal は作成の
   // たびに mount し直されるため、開いた時点の引き継ぎ値で確定する。
+  // ⚠写真なし導線は引き継ぎを無視して candidate 既定 (@codex #387 P2)。
+  // このボタンの約束は「物件化候補を立てる」であり、直前に blocked 等を保存
+  // していた場合に引き継いだまま保存すると候補でないピンができ、完成待ち一覧
+  // (/pins/candidates = candidate のみ) に出ない。変更は可能なまま (ロックは
+  // 巡回外だけ) にして、既定だけ約束に合わせる。
   const [pinType, setPinType] = useState<FieldSurveyPinType>(
-    lockPinType ? "candidate" : (initialPinType ?? "candidate"),
+    lockPinType || photoOptional ? "candidate" : (initialPinType ?? "candidate"),
   );
   // 開いている最中に巡回が終了すると (親が sessionId を null に差し替え) 初期化子は
   // 再実行されないため、選択済みの候補以外がそのまま送られ POST が 422 になる
@@ -164,10 +172,10 @@ export default function PinCreateModal({
   // - 撮影経由 (写真が付いて開く) = 従来どおり**必須のまま**。外す導線も置かない
   //   (@codex #336 P2 の懸念=「勝手に写真なしピンが作れてしまう」をそのまま維持。
   //   撮った写真をここで捨てる正当な理由は無い)。
-  // - 写真なし導線 (写真を持たずに開く) = **任意**。あとから添付もできる。
+  // - 写真なし導線 (写真を持たずに開く・photoOptional=上で導出) = **任意**。
+  //   あとから添付もできる。
   // 写真送信の失敗後 (photoUploadFailed) は pin 作成済みで、この保存ボタン自体が
   // 出ない (回復用の再試行/終了ボタンに切り替わる)。
-  const photoOptional = initialPhotoFile == null;
   const canSubmit =
     !busy &&
     Number.isFinite(initialLat) &&
