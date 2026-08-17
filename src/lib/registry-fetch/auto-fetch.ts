@@ -2497,8 +2497,13 @@ function createPlaywrightRegistryPage(
         // ⚠ここより手前（請求事項の選択など）は意図的に RegistryFetchError を投げる
         // 自前の検査なので、画面構造の診断は要らない（採ると雑音になる）。
         // ⚠確定を押すと所在欄(#fuChibanKuiki)ごと画面が消えるため、行照合に使う
-        // 所在は**押す前に**読んで持っておく(probe13: 請求リストの行 hidden
-        // chibanKuiki_N は都道府県から始まる所在=この欄と同じ出所)。
+        // 所在は**押す前に**読んで持っておく。⚠この欄は**市区町村以下だけ**
+        // (都道府県は #fuTodofukenShozai の select に分離)なので、行 hidden
+        // (都道府県から始まる完全形・probe13実測)と比べる期待値は、住所から
+        // 同じ純関数で導いた都道府県を連結して組み立てる(@codex #389 R1 P1)。
+        const { prefecture: prefectureForPick } = splitAddressForLocationSearch(
+          input.address,
+        );
         const kuikiForPick = (await page.evaluate(
           (json) => {
             const { sel } = JSON.parse(json) as { sel: string };
@@ -2562,9 +2567,14 @@ function createPlaywrightRegistryPage(
             }),
           )) as string;
           const listRows = JSON.parse(listRowsJson) as FudosanListRow[];
+          // ⚠期待値は**都道府県を連結して**組み立てる(@codex #389 R1 P1)。
+          // 素の #fuChibanKuiki 値(市区町村以下)と行 hidden(都道府県込みの完全形)
+          // の厳密比較だと全件 no-match になり、確定後に必ず中止してしまう。
           const pick = selectFudosanListRow(listRows, {
             targetKey,
-            kuiki: kuikiForPick,
+            kuiki: kuikiForPick.trim()
+              ? `${prefectureForPick ?? ""}${kuikiForPick}`
+              : kuikiForPick,
             seikyuTypeLabel:
               input.certificateType === "all" ? "全部事項" : "所有者事項",
           });

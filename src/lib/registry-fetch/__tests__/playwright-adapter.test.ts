@@ -1929,8 +1929,11 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         });
       }
       // 確定前の所在(kuiki)読み取り(probe13: 行照合の材料。押すと欄ごと消える)。
+      // ⚠実サイトどおり**市区町村以下だけ**を返す(@codex #389 R1: 都道府県は
+      // #fuTodofukenShozai の select に分離)。行 hidden 側は都道府県込み=
+      // この非対称を fake が模すことで、連結を怠る実装はここで落ちる。
       if (parsed.probe === "kuiki-value") {
-        return opts.kuikiValue ?? INPUT.address;
+        return opts.kuikiValue ?? INPUT_REST;
       }
       // 請求リスト(確定の着地・probe13)の行一覧。既定=対象1行(未チェック)。
       if (parsed.probe === "fudosan-list-rows") {
@@ -1975,6 +1978,9 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     buildingNumber: null,
     certificateType: "owner" as const,
   };
+  // #fuChibanKuiki 相当(市区町村以下)。実サイトは都道府県を select に分離して
+  // 持つ(@codex #389 R1)ので、欄の値には都道府県が入らない。
+  const INPUT_REST = "テスト市テスト町一丁目";
 
   async function makeStage2Page(f: ReturnType<typeof makeFakeChromium>) {
     const factory = resolveDefaultRegistryBrowserFactory({
