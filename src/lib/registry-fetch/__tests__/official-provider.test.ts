@@ -449,13 +449,10 @@ describe("段階②: 所在候補の有料取得（fetchByLocation・fake page �
   });
 
   it("L2: login → fetchByLocationCandidate の順で実行し PDF を返す", async () => {
+    let received: unknown;
     const page = makeFakePage({
       fetchByLocationCandidate: async (input) => {
-        // 課金境界フラグ(chargeState)が provider から注入される(@codex #345 P1/R10)。
-        expect(input).toEqual({
-          ...LOCATION,
-          chargeState: { charged: false, aborted: false },
-        });
+        received = input;
         return VALID_PDF;
       },
     });
@@ -464,11 +461,44 @@ describe("段階②: 所在候補の有料取得（fetchByLocation・fake page �
       location: LOCATION,
       ref: "p1",
     });
+    // 課金境界フラグ(chargeState)が provider から注入される(@codex #345 P1/R10)。
+    // paidDeadlineAt(外側タイマーの締切)も provider が注入する(@codex #386 R2)。
+    // timeoutMs 未指定=外側タイマー無し(withPaidTimeout と同じ判定)→ 締切も null。
+    // ⚠fake の中で expect すると reject が classify に飲まれ原因が見えない → 外で検証。
+    expect(received).toEqual({
+      ...LOCATION,
+      chargeState: { charged: false, aborted: false },
+      paidDeadlineAt: null,
+    });
     expect(result.pdfBuffer).toBe(VALID_PDF);
     expect(result.source).toBe("official");
     // 非PII filename（地番・所有者名を含まない）
     expect(result.fileName).toBe("registry-auto-req-fixed.pdf");
     expect(page.calls).toEqual(["login", "fetchByLocation", "close"]);
+  });
+
+  it("L2b: ⚠paidDeadlineAt の基準は外側タイマー開始時刻=ログインの所要時間で締切が伸びない(@codex #386 R2)", async () => {
+    // adapter 入口(=ログイン後)で残量を測り直すと、ログインが食った時間ぶん
+    // 残りを過大評価し、0件リトライが外側 timeout を再び踏む。
+    const LOGIN_DELAY_MS = 500;
+    let received: number | null | undefined;
+    const page = makeFakePage({
+      login: async () => {
+        await new Promise((resolve) => setTimeout(resolve, LOGIN_DELAY_MS));
+      },
+      fetchByLocationCandidate: async (input) => {
+        received = (input as { paidDeadlineAt?: number | null }).paidDeadlineAt;
+        return VALID_PDF;
+      },
+    });
+    const { provider } = makeProvider({ page, timeoutMs: 30000 });
+    const before = Date.now();
+    await provider.fetchRegistryPdf({ location: LOCATION, ref: "p1" });
+    expect(typeof received).toBe("number");
+    // 開始時刻基準: before + 30000 + 僅少な起動オーバーヘッドに収まる。
+    // ログイン後に測っていたら before + LOGIN_DELAY_MS + 30000 以上になり失敗する。
+    expect((received as number) - before).toBeGreaterThanOrEqual(30000);
+    expect((received as number) - before).toBeLessThan(30000 + LOGIN_DELAY_MS);
   });
 
   it("L3: ⚠課金後の失敗(charged_but_failed)は分類を変えずに上げる（provider_error に潰さない）", async () => {

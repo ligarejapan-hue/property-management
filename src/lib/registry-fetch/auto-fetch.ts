@@ -28,6 +28,13 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import {
+  ZERO_RETRY_SLEEP_MS,
+  resolveCleanupBound,
+  resolveRetryWaitAfterSetup,
+  resolveSecondZeroProbe,
+  resolveZeroRetryPlan,
+} from "@/lib/registry-fetch/zero-retry-plan";
+import {
   KNOWN_PROBE_SELECTORS,
   formatRegistryPageProbe,
   type RegistryPageProbe,
@@ -1066,7 +1073,12 @@ export function summarizeRegistrySearchError(err: unknown): string {
 /** 画面構造の診断に許す時間。⚠環境変数に依存させない＝未設定の本番でも必ず効く。 */
 const PAGE_PROBE_BUDGET_MS = 5000;
 
-async function logRegistryPageProbe(page: RegistryPageLike, where: string): Promise<void> {
+async function logRegistryPageProbe(
+  page: RegistryPageLike,
+  where: string,
+  /** 内部予算の上書き(ms)。外側タイマーの残量が既定予算に満たない場面で切り詰める。 */
+  budgetMs?: number,
+): Promise<void> {
   try {
     // ⚠**診断自身に必ず期限を付ける**(@codex #383 P2)。セレクタ待ちが落ちた原因が
     // 「要素が無い」ではなく**レンダラが応答しない**ことだった場合、page.evaluate は
@@ -1139,7 +1151,7 @@ async function logRegistryPageProbe(page: RegistryPageLike, where: string): Prom
       new Promise<never>((_, reject) => {
         setTimeout(
           () => reject(new Error("page-probe budget exceeded")),
-          PAGE_PROBE_BUDGET_MS,
+          budgetMs ?? PAGE_PROBE_BUDGET_MS,
         ).unref?.();
       }),
     ])) as string;
@@ -1722,7 +1734,7 @@ function createPlaywrightRegistryPage(
             await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
             throw new RegistryFetchError("location_rejected");
           }
-          reportLive("候補は見つかりませんでした (0 件)");
+          reportLive("候補は見つかりませんでした (0 件)。サイト側で一時的に0件になることがあります。時間をおかず、もう一度お試しください");
           await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
           return [];
         }
@@ -1833,6 +1845,13 @@ function createPlaywrightRegistryPage(
       // ⚠⑧より前の失敗は provider_error/not_found(お金は動いていない)。
       // ⚠⑧より後の失敗は **charged_but_failed**(課金済みの可能性。呼び出し側が再試行禁止+台帳記録)。
       // ⚠[要live] ⑥以降の画面遷移・請求後の反映時間は実課金テストで最終確定する。
+      // 外側の provider 予算に対する残量計算用。⚠基準は provider が withPaidTimeout の
+      // **開始時刻**で確定して渡してくる deadline(@codex #386 R2: ここで測り直すと
+      // ログインが食った時間ぶん残量を過大評価し、リトライが外側 timeout を再び踏む)。
+      const paidDeadline =
+        typeof input.paidDeadlineAt === "number" && Number.isFinite(input.paidDeadlineAt)
+          ? input.paidDeadlineAt
+          : null;
       const isBuilding = !!(input.buildingNumber && input.buildingNumber.trim().length > 0);
       const rawTarget = ((isBuilding ? input.buildingNumber : input.lotNumber) ?? "").trim();
       const targetKey = normalizeChibanForDialog(rawTarget);
@@ -2061,21 +2080,114 @@ function createPlaywrightRegistryPage(
       };
       // ---- 課金前ゾーン(④: 対象行の特定と確定) ----
       try {
-        try {
-          await page.waitForSelector(REGISTRY_SELECTORS.dialogResultCheckbox, {
-            state: "attached",
-            timeout: DIALOG_RESULT_TIMEOUT_MS,
-          });
-        } catch (waitErr) {
-          if (!isTimeoutError(waitErr)) throw waitErr;
-          const loaded = await page.evaluate((sel) => {
-            const t = document.querySelector(sel);
-            return !!t && !/データ取得中/.test(t.textContent ?? "");
-          }, REGISTRY_SELECTORS.dialogResultTable);
-          if (!loaded) throw new RegistryFetchError("timeout");
-          // 真の0件=検索時の候補が消えた(登記側の変化)。課金せず not_found。
-          await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
-          throw new RegistryFetchError("not_found");
+        // ⚠**0件は1回だけ検索し直す**(2026-08-17 実測)。同一条件で無料検索が
+        // 0件→1件→1件と揺れる(サイト側の一過性)ことを確認した。無料検索は
+        // 人がもう一度押して吸収しているが、こちらの内部検索は再試行が無く
+        // 0件を引いた瞬間に not_found で終わっていた(同日2回連続)。
+        // 再試行はダイアログを閉じて開き直し、**種別と範囲の両端まで**入れ直す
+        // (開き直しで条件が空に戻るため。片方でも欠けると必ず0件)。
+        let zeroRetried = false;
+        let retryWaitMs = DIALOG_RESULT_TIMEOUT_MS;
+        let carriedProbe = true;
+        for (;;) {
+          try {
+            await page.waitForSelector(REGISTRY_SELECTORS.dialogResultCheckbox, {
+              state: "attached",
+              timeout: retryWaitMs,
+            });
+            break; // 候補行が出た
+          } catch (waitErr) {
+            if (!isTimeoutError(waitErr)) throw waitErr;
+            const loaded = await page.evaluate((sel) => {
+              const t = document.querySelector(sel);
+              return !!t && !/データ取得中/.test(t.textContent ?? "");
+            }, REGISTRY_SELECTORS.dialogResultTable);
+            if (!loaded) throw new RegistryFetchError("timeout");
+            // ⚠計画は**最初の0件で1回だけ**立て、診断の予約(probe)を2回目へ持ち越す
+            // (@codex #386 R2 P2)。2回目の時点で再計画すると、予約して残した margin
+            // ちょうどの残量が「診断の余裕なし」と判定され、**診断のために取って
+            // おいた予算で診断が打てない**という自己矛盾になる。
+            const plan = resolveZeroRetryPlan(
+              paidDeadline === null ? null : paidDeadline - Date.now(),
+            );
+            if (!zeroRetried && plan.retry) {
+              zeroRetried = true;
+              reportLive(
+                "候補が0件でした。サイト側で一時的に0件になることがあるため、もう一度だけ検索し直します(まだ課金されていません)",
+              );
+              console.warn(
+                "[registry-fetch] dialog returned 0 rows; retrying once (not charged)",
+              );
+              await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
+              await sleep(ZERO_RETRY_SLEEP_MS);
+              await page.click(REGISTRY_SELECTORS.dialogChibanKaokuListButton);
+              await page.click(REGISTRY_SELECTORS.dialogChibanTypeNumeric);
+              await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, targetKey);
+              await page.fill(REGISTRY_SELECTORS.dialogChibanRangeEnd, targetKey);
+              // ⚠2回目の待ちは**検索を打つ前に**確定する(@codex #386 R3/R7)。
+              // 計画には開き直しのブラウザ操作コストが載っていない(サイトの応答
+              // 次第で事前に見積もれない)ため、操作が終わったいまの実測残量から
+              // 診断の予約を守って再計算する。フル15秒のまま待つと外側予算を
+              // 超えて timeout に化け、逆に最低値(3秒)を割る待ちでは非同期ロード
+              // が終わらず**見かけだけの再試行**になる=検索せず断念して、1回目の
+              // 0件の観測に基づき診断→not_found へ進む。
+              const retryWait = resolveRetryWaitAfterSetup(
+                plan.waitMs,
+                paidDeadline === null ? null : paidDeadline - Date.now(),
+                plan.probe,
+              );
+              carriedProbe = plan.probe;
+              if (retryWait.proceed) {
+                await page.click(REGISTRY_SELECTORS.dialogSearch);
+                retryWaitMs = retryWait.waitMs;
+                continue;
+              }
+              reportLive(
+                "開き直しに時間がかかったため、検索し直しを断念しました(まだ課金されていません)",
+              );
+              console.warn(
+                "[registry-fetch] zero-retry abandoned: setup consumed the wait budget (not charged)",
+              );
+              // ↓そのまま下の分類(診断→キャンセル→not_found)へ落ちる。
+            }
+            // 再試行の余裕なし or 2回目も0件。**画面の間取りを持ち帰ってから**
+            // 課金せず not_found(診断より先に閉じると画面が消えるので順序厳守)。
+            // 予算が診断ぶんも無いときは診断を諦めて即分類(timeout に化けるより良い)。
+            // 2回目の0件では**持ち越した予約**で判定(再計画しない)。1回目で
+            // 再試行の余裕が無かった場合はその場の plan.probe で判定。
+            // ⚠ただし予約は「計画時点の余裕」しか保証しない(@codex R4)。開き直しの
+            // 操作が margin に食い込んでいたら、実測残量で診断の内部予算を切り詰め、
+            // それすら入らなければ諦める(診断で外側 timeout を踏んだら本末転倒)。
+            const probePlan = resolveSecondZeroProbe(
+              zeroRetried ? carriedProbe : plan.probe,
+              paidDeadline === null ? null : paidDeadline - Date.now(),
+            );
+            if (probePlan.probe) {
+              await logRegistryPageProbe(
+                page,
+                "paid-dialog-zero",
+                probePlan.budgetMs ?? undefined,
+              );
+            }
+            // ⚠後始末のキャンセルも**期限内に見切る**(@codex R5)。診断が予算切れに
+            // なる原因が「レンダラ無応答」だった場合、このキャンセル(page.evaluate)も
+            // 同じ理由で固まり、not_found の宣言に到達できない(外側 timeout が先に
+            // 切れて 0件の事実が消える)。キャンセルは元々 best-effort(.catch で握る)
+            // ので撃ちっぱなしで試み、**待ってよい時間だけ**待つ。固定500msだと
+            // 残量500ms未満(診断を打たない僅少経路)で外側タイマーに負けるため、
+            // 実測残量から headroom を守って切り詰める(0=待たずに投げる・@codex R8)。
+            // page の後始末は provider の finally(close)がやる。
+            const cancelAttempt = domClick(REGISTRY_SELECTORS.dialogCancel).catch(
+              () => {},
+            );
+            const cleanupBoundMs = resolveCleanupBound(
+              paidDeadline === null ? null : paidDeadline - Date.now(),
+            );
+            if (cleanupBoundMs > 0) {
+              await Promise.race([cancelAttempt, sleep(cleanupBoundMs)]);
+            }
+            throw new RegistryFetchError("not_found");
+          }
         }
         // 対象の地番セルを探して check(複数ページは searchByLocation と同じ防御で送る)。
         let found = false;
