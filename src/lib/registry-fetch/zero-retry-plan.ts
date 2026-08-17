@@ -95,6 +95,27 @@ export const ZERO_RETRY_TIMER_HEADROOM_MS = 250;
  * 「予約したのに打てない」自己矛盾は起こさない(>= 判定になる)。
  * remainingMs=null は予算未設定=既定の内部予算のまま。純関数(挙動テスト用)。
  */
+/**
+ * 分類直前のキャンセル(best-effort)を待ってよい時間(@codex #386 R8)。
+ * 診断を打たない経路(残量が僅少で probe:false)でも、固定500msのレースで待つと
+ * 残量500ms未満の場面で外側タイマーが先に切れ、not_found が timeout に化ける。
+ * 実測残量から headroom を守って切り詰める。0 のときは**待たずに**投げる
+ * (キャンセル自体は撃ちっぱなしで試みる。page の後始末は provider の close が担う)。
+ * remainingMs=null は予算未設定=既定の500msまで待ってよい。純関数(挙動テスト用)。
+ */
+export function resolveCleanupBound(remainingMs: number | null): number {
+  if (remainingMs === null || !Number.isFinite(remainingMs)) {
+    return ZERO_RETRY_PROBE_CLEANUP_MS;
+  }
+  return Math.max(
+    0,
+    Math.min(
+      ZERO_RETRY_PROBE_CLEANUP_MS,
+      remainingMs - ZERO_RETRY_TIMER_HEADROOM_MS,
+    ),
+  );
+}
+
 export function resolveSecondZeroProbe(
   reservedProbe: boolean,
   remainingMs: number | null,

@@ -46,17 +46,27 @@ describe("有料取得: ダイアログ0件の1回リトライ", () => {
     expect(after).toContain('"not_found"');
   });
 
-  it("⚠診断後のキャンセルは期限でレースして見切る(@codex #386 R5)", () => {
+  it("⚠診断後のキャンセルは期限でレースして見切る(@codex #386 R5/R8)", () => {
     // 診断が予算切れになる原因が「レンダラ無応答」なら、キャンセル(page.evaluate)も
     // 同じ理由で固まる。best-effort のキャンセルを待ち続けて not_found の宣言を
     // 逃さない(sleep は Playwright の Node 側 timeout で終端=レンダラ非依存)。
+    // 待ってよい時間は固定500msでなく実測残量から導く(resolveCleanupBound・R8):
+    // 残量500ms未満(診断を打たない僅少経路)では待たずに投げる。
     const probeAt = SRC.indexOf('"paid-dialog-zero"');
-    const after = SRC.slice(probeAt, probeAt + 1400);
+    const after = SRC.slice(probeAt, probeAt + 2200);
+    // キャンセルは撃ちっぱなしで先に発射(待つかどうかは bound 次第)。
+    const attemptAt = after.indexOf("const cancelAttempt = domClick");
+    expect(attemptAt).toBeGreaterThan(-1);
+    const boundAt = after.indexOf("resolveCleanupBound(");
+    expect(boundAt).toBeGreaterThan(attemptAt);
+    // bound > 0 のときだけレースで待つ。
+    const guardAt = after.indexOf("cleanupBoundMs > 0");
     const raceAt = after.indexOf("Promise.race");
-    expect(raceAt).toBeGreaterThan(-1);
-    const raceBlock = after.slice(raceAt, raceAt + 300);
-    expect(raceBlock).toContain("dialogCancel");
-    expect(raceBlock).toContain("sleep(ZERO_RETRY_PROBE_CLEANUP_MS)");
+    expect(guardAt).toBeGreaterThan(boundAt);
+    expect(raceAt).toBeGreaterThan(guardAt);
+    const raceBlock = after.slice(raceAt, raceAt + 200);
+    expect(raceBlock).toContain("cancelAttempt");
+    expect(raceBlock).toContain("sleep(cleanupBoundMs)");
     // レースの後に not_found(=分類が後始末に飲まれない順序)。
     expect(after.indexOf('"not_found"')).toBeGreaterThan(raceAt);
   });
@@ -138,6 +148,7 @@ import {
   ZERO_RETRY_PROBE_MIN_MS,
   ZERO_RETRY_SLEEP_MS,
   ZERO_RETRY_TIMER_HEADROOM_MS,
+  resolveCleanupBound,
   resolveRetryWaitAfterSetup,
   resolveSecondZeroProbe,
   resolveZeroRetryPlan,
@@ -310,5 +321,31 @@ describe("resolveSecondZeroProbe(2回目の0件時点で診断の要否と予算
 
   it("margin−後始末=診断の既定内部予算(5000ms)と一致する(定数のドリフト検知)", () => {
     expect(ZERO_RETRY_PROBE_MARGIN_MS - ZERO_RETRY_PROBE_CLEANUP_MS).toBe(5000);
+  });
+});
+
+describe("resolveCleanupBound(分類直前のキャンセルを待ってよい時間・@codex #386 R8)", () => {
+  it("残りが潤沢なら既定の後始末予約(500ms)まで待つ", () => {
+    expect(resolveCleanupBound(60000)).toBe(ZERO_RETRY_PROBE_CLEANUP_MS);
+    expect(resolveCleanupBound(null)).toBe(ZERO_RETRY_PROBE_CLEANUP_MS);
+  });
+
+  it("⚠残量500ms未満(診断を打たない僅少経路)では固定500msで待たない", () => {
+    // 残300ms: headroom(250)を守って 50ms だけ待つ=外側タイマーより先に分類へ。
+    expect(resolveCleanupBound(300)).toBe(300 - ZERO_RETRY_TIMER_HEADROOM_MS);
+    // headroom 以下なら待たずに投げる(キャンセルは撃ちっぱなしで試みる)。
+    expect(resolveCleanupBound(ZERO_RETRY_TIMER_HEADROOM_MS)).toBe(0);
+    expect(resolveCleanupBound(100)).toBe(0);
+    expect(resolveCleanupBound(0)).toBe(0);
+  });
+
+  it("待つ場合も bound + headroom <= 残量(キャンセルが上限まで固まっても外側に負けない)", () => {
+    for (const remaining of [300, 500, 750, 5500, 60000]) {
+      const bound = resolveCleanupBound(remaining);
+      if (bound === 0) continue;
+      expect(bound + ZERO_RETRY_TIMER_HEADROOM_MS, `remaining=${remaining}`).toBeLessThanOrEqual(
+        remaining,
+      );
+    }
   });
 });

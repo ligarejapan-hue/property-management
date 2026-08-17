@@ -28,8 +28,8 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import {
-  ZERO_RETRY_PROBE_CLEANUP_MS,
   ZERO_RETRY_SLEEP_MS,
+  resolveCleanupBound,
   resolveRetryWaitAfterSetup,
   resolveSecondZeroProbe,
   resolveZeroRetryPlan,
@@ -2172,12 +2172,19 @@ function createPlaywrightRegistryPage(
             // なる原因が「レンダラ無応答」だった場合、このキャンセル(page.evaluate)も
             // 同じ理由で固まり、not_found の宣言に到達できない(外側 timeout が先に
             // 切れて 0件の事実が消える)。キャンセルは元々 best-effort(.catch で握る)
-            // なので、後始末の予約(ZERO_RETRY_PROBE_CLEANUP_MS)と同じ時間で打ち切って
-            // 分類を優先する。page の後始末は provider の finally(close)がやる。
-            await Promise.race([
-              domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {}),
-              sleep(ZERO_RETRY_PROBE_CLEANUP_MS),
-            ]);
+            // ので撃ちっぱなしで試み、**待ってよい時間だけ**待つ。固定500msだと
+            // 残量500ms未満(診断を打たない僅少経路)で外側タイマーに負けるため、
+            // 実測残量から headroom を守って切り詰める(0=待たずに投げる・@codex R8)。
+            // page の後始末は provider の finally(close)がやる。
+            const cancelAttempt = domClick(REGISTRY_SELECTORS.dialogCancel).catch(
+              () => {},
+            );
+            const cleanupBoundMs = resolveCleanupBound(
+              paidDeadline === null ? null : paidDeadline - Date.now(),
+            );
+            if (cleanupBoundMs > 0) {
+              await Promise.race([cancelAttempt, sleep(cleanupBoundMs)]);
+            }
             throw new RegistryFetchError("not_found");
           }
         }
