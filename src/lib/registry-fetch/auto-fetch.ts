@@ -41,9 +41,16 @@ import {
 } from "@/lib/registry-fetch/page-probe";
 import {
   isReadableChiban,
-  toHalfWidthDigits,
-  unifyChibanSeparators,
+  normalizeChibanForDialog,
 } from "@/lib/registry-fetch/chiban-input";
+import {
+  FUDOSAN_LIST_HIDDEN_PREFIX,
+  selectFudosanListRow,
+  type FudosanListRow,
+} from "@/lib/registry-fetch/fudosan-list-select";
+
+// 既存の import 元(テスト等)向けに再エクスポート(実体は chiban-input.ts へ移動)。
+export { normalizeChibanForDialog } from "@/lib/registry-fetch/chiban-input";
 import {
   CANCEL_ACCEPTED_MESSAGE,
   CANCEL_IGNORED_CHARGED_MESSAGE,
@@ -542,7 +549,15 @@ const REGISTRY_SELECTORS = {
   certificateAllCheck: "#fuAll", // [確定] 全部事項(certificateType=all で ON)
   certificateOwnerCheck: "#fuShoyusya", // [確定] 所有者事項(certificateType=owner で ON・既定)
   // マイページ(請求一覧)。課金とPDF取得はここで行う。
-  myPageTab: "a[onclick*=\"selectTab('tabMy')\"]", // [確定] マイページタブ
+  // ⚠myPageTab(selectTab('tabMy'))は撤去(2026-08-17 probe13)。確定(fuBtnForward)の
+  // 着地=請求リスト(/reqf/fudosan-list)にはこのタブが**存在しない**(第1回・第5回の
+  // 実課金テストが止まった直接原因=探して無音no-op→#myPageTable待ちtimeout)。
+  // 正しい遷移は「行check→マイページへ登録(btnForward2)」。
+  /** [確定・2026-08-17 probe13] 請求リストの【マイページへ登録】(id無し・onclick=btnForward2())。 */
+  fudosanListRegisterButton:
+    'button[onclick*="btnForward2"], input[onclick*="btnForward2"]',
+  /** [確定・2026-08-17 probe13] 請求リストの行checkbox(#sentaku_N・onclick=chkSentaku(this))。 */
+  fudosanListRowCheckbox: 'input[name="sentaku"]',
   myPageTable: "#myPageTable", // [確定] 請求一覧テーブル
   myPageFilter: "#siborikomi", // [確定] 状態の絞り込み(すべて/未請求/請求済…)
   myPageSeikyuButton: "#myPageSeikyu", // [確定] **請求=課金**(状態が「未請求」の行のみ)
@@ -1165,25 +1180,8 @@ async function logRegistryPageProbe(
   }
 }
 
-/**
- * 地番/家屋番号を、地番検索ダイアログの「数字・ハイフンのみ」欄(#cbnDlgChibanType0 +
- * #cbnDlgSearchChibanStart)が受理する形へ正規化する(@codex P1)。リポジトリの通常表記
- * (pdf-registry-parser 由来の「1番1」「1937番31」や全角「１－１」)をそのまま数字専用欄へ
- * 渡すと弾かれ候補ゼロになるため、全角数字→半角・「番(地)」→ハイフン・各種ダッシュ→半角
- * ハイフンに変換し、数字/ハイフン以外を除去する。純関数(テスト可能)。
- * 区切り「番(地)」「の(ノ)」はハイフンへ変換する(@codex P2)。「の」は registry-address-cleanup が
- * 地番/家屋番号の区切りとして認識する形式(例「1番2の3」)で、除去して隣接数字を連結すると別物件に
- * なるため、除去前にハイフン化する。
- * 例: 「1番1」→「1-1」/「1937番31」→「1937-31」/「1番2の3」→「1-2-3」/「５番」→「5」/「１－１」→「1-1」。
- */
-export function normalizeChibanForDialog(raw: string): string {
-  // ⚠文字クラスの正本は chiban-input.ts。ここで別の表記を足さない
-  //   （入力の検査と正規化がずれると、検査は通ったのに別の筆を探すことになる）。
-  return unifyChibanSeparators(toHalfWidthDigits(raw.trim()))
-    .replace(/[^0-9-]/g, "")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
+// normalizeChibanForDialog は chiban-input.ts(文字クラスの正本)へ移動した。
+// 請求リストの行照合(fudosan-list-select.ts)と共有するため。冒頭で再エクスポート済み。
 
 /**
  * 地番検索ダイアログ(#cbnDlgChibanCheckTbl)の各行(tr)を候補へ変換する。$$eval に渡すため
@@ -2498,24 +2496,163 @@ function createPlaywrightRegistryPage(
         // のどれで転んでも、同じ診断（その瞬間の画面構造）を採ってから投げ直す。
         // ⚠ここより手前（請求事項の選択など）は意図的に RegistryFetchError を投げる
         // 自前の検査なので、画面構造の診断は要らない（採ると雑音になる）。
+        // ⚠確定を押すと所在欄(#fuChibanKuiki)ごと画面が消えるため、行照合に使う
+        // 所在は**押す前に**読んで持っておく(probe13: 請求リストの行 hidden
+        // chibanKuiki_N は都道府県から始まる所在=この欄と同じ出所)。
+        const kuikiForPick = (await page.evaluate(
+          (json) => {
+            const { sel } = JSON.parse(json) as { sel: string };
+            const el = document.querySelector(sel) as HTMLInputElement | null;
+            return el?.value ?? "";
+          },
+          JSON.stringify({
+            probe: "kuiki-value",
+            sel: REGISTRY_SELECTORS.locationSearchAddress,
+          }),
+        )) as string;
         try {
           await domClick(REGISTRY_SELECTORS.requestConfirmButton);
-          // 遷移先は請求リスト(#fudosanIchiranTbl)またはマイページ(#myPageTable) [要live]。
-          await page.waitForSelector(
-            `${REGISTRY_SELECTORS.searchResult}, ${REGISTRY_SELECTORS.myPageTable}`,
-            { state: "attached", timeout: DIALOG_RESULT_TIMEOUT_MS },
+          // ⚠確定(fuBtnForward)の着地は**請求リスト(/reqf/fudosan-list)**
+          // (2026-08-17 probe13で実測確定。マイページではない。selectTab('tabMy')
+          // のタブもこのページには存在しない=第1回・第5回のテストが止まった原因)。
+          await page.waitForSelector(REGISTRY_SELECTORS.searchResult, {
+            state: "attached",
+            timeout: DIALOG_RESULT_TIMEOUT_MS,
+          });
+          reportLive("請求リストで対象の行を選んでいます(まだ課金されていません)");
+          // 行の照合材料は各行の hidden(#chiban_N/#chibanKuiki_N/#seikyuType_N/
+          // #seikyuzumi_N)。⚠**check した行がそのまま請求対象**=お金の一歩手前
+          // なので、地番+所在+種別+未請求の全一致だけを選ぶ(過去テストの未請求が
+          // 同じカートに累積し得る。同一内容の重複は同じ商品=先頭の1件を使う)。
+          const listRowsJson = (await page.evaluate(
+            (json) => {
+              const { prefix, checkboxSel } = JSON.parse(json) as {
+                prefix: Record<string, string>;
+                checkboxSel: string;
+              };
+              const rows: Array<Record<string, unknown>> = [];
+              const boxes = Array.from(
+                document.querySelectorAll(checkboxSel),
+              ) as HTMLInputElement[];
+              for (const box of boxes) {
+                const m = box.id.match(/_(\d+)$/);
+                if (!m) continue;
+                const n = m[1];
+                const read = (p: string): string => {
+                  const el = document.getElementById(`${p}${n}`) as
+                    | HTMLInputElement
+                    | null;
+                  return el?.value ?? "";
+                };
+                rows.push({
+                  index: Number(n),
+                  chiban: read(prefix.chiban),
+                  kuiki: read(prefix.kuiki),
+                  seikyuType: read(prefix.seikyuType),
+                  seikyuzumi: read(prefix.seikyuzumi),
+                  checked: box.checked === true,
+                });
+              }
+              return JSON.stringify(rows);
+            },
+            JSON.stringify({
+              probe: "fudosan-list-rows",
+              prefix: FUDOSAN_LIST_HIDDEN_PREFIX,
+              checkboxSel: REGISTRY_SELECTORS.fudosanListRowCheckbox,
+            }),
+          )) as string;
+          const listRows = JSON.parse(listRowsJson) as FudosanListRow[];
+          const pick = selectFudosanListRow(listRows, {
+            targetKey,
+            kuiki: kuikiForPick,
+            seikyuTypeLabel:
+              input.certificateType === "all" ? "全部事項" : "所有者事項",
+          });
+          if (!pick.ok) {
+            // 迷ったら選ばない(課金前中止・カートに未請求が残るだけで無害)。
+            reportLive(
+              "請求リストで対象の行を特定できませんでした(課金していません)",
+            );
+            console.warn(
+              `[registry-fetch] fudosan-list row pick failed (${pick.reason}); refusing (not charged)`,
+            );
+            throw new RegistryFetchError("provider_error");
+          }
+          if (pick.duplicateCount > 0) {
+            // 過去のテストで積まれた同一内容の未請求が残っている状態。同じ商品なので
+            // 先頭の1件を使う(害はないが、状況として journal に残す)。
+            console.warn(
+              `[registry-fetch] fudosan-list has ${pick.duplicateCount} duplicate pending row(s); using the first (not charged yet)`,
+            );
+          }
+          // 対象行だけを check し、それ以外は必ず外す(2件 check=二重課金の入口)。
+          // checkbox は onclick=chkSentaku(this) を持つため、状態を変えるときは
+          // click で site 側の簿記も発火させる。
+          await page.evaluate(
+            (json) => {
+              const { checkboxSel, targetIndex } = JSON.parse(json) as {
+                checkboxSel: string;
+                targetIndex: number;
+              };
+              const boxes = Array.from(
+                document.querySelectorAll(checkboxSel),
+              ) as HTMLInputElement[];
+              for (const box of boxes) {
+                const m = box.id.match(/_(\d+)$/);
+                if (!m) continue;
+                const want = Number(m[1]) === targetIndex;
+                if (box.checked !== want) box.click();
+              }
+            },
+            JSON.stringify({
+              probe: "fudosan-list-apply",
+              checkboxSel: REGISTRY_SELECTORS.fudosanListRowCheckbox,
+              targetIndex: pick.index,
+            }),
           );
-          reportLive("マイページの請求一覧へ移動しています(まだ課金されていません)");
-          await domClick(REGISTRY_SELECTORS.myPageTab);
+          // ⚠押した「つもり」で進まない(@codex #380 R5/R6 と同じ型)。read-back で
+          // 「ちょうど対象の1件だけが check されている」ことを実測してから登録へ。
+          const checkedStateJson = (await page.evaluate(
+            (json) => {
+              const { checkboxSel } = JSON.parse(json) as {
+                checkboxSel: string;
+              };
+              const boxes = Array.from(
+                document.querySelectorAll(checkboxSel),
+              ) as HTMLInputElement[];
+              const checked: number[] = [];
+              for (const box of boxes) {
+                const m = box.id.match(/_(\d+)$/);
+                if (m && box.checked === true) checked.push(Number(m[1]));
+              }
+              return JSON.stringify(checked);
+            },
+            JSON.stringify({
+              probe: "fudosan-list-checked",
+              checkboxSel: REGISTRY_SELECTORS.fudosanListRowCheckbox,
+            }),
+          )) as string;
+          const checkedIndexes = JSON.parse(checkedStateJson) as number[];
+          if (checkedIndexes.length !== 1 || checkedIndexes[0] !== pick.index) {
+            reportLive(
+              "請求リストの選択を確認できませんでした(課金していません)",
+            );
+            console.warn(
+              "[registry-fetch] fudosan-list check verification failed; refusing (not charged)",
+            );
+            throw new RegistryFetchError("provider_error");
+          }
+          reportLive("マイページへ登録しています(まだ課金されていません)");
+          await domClick(REGISTRY_SELECTORS.fudosanListRegisterButton);
           await page.waitForSelector(REGISTRY_SELECTORS.myPageTable, {
             state: "attached",
             timeout: DIALOG_RESULT_TIMEOUT_MS,
           });
         } catch (transitionErr) {
-          // ⚠**2026-08-16 の立ち会いテストが実際に止まった地点**(課金ゼロ)。「確定」までは
-          // 通り、マイページの一覧が現れない。ここは開発当初から [要live] のままで、
-          // 実サイトを見ないと直せない。推測で直すと立ち会いを1回無駄にするので、
-          // **この瞬間の画面構造だけ**を記録して持ち帰る(表の中身は読まない=page-probe の契約)。
+          // ⚠**第1回・第5回の立ち会いテストが実際に止まった区間**(課金ゼロ)。probe13 で
+          // 正しい遷移(行check→マイページへ登録)を実測して直したが、次に想定外の画面が
+          // 出たときも**この瞬間の画面構造だけ**を記録して持ち帰る(表の中身は読まない=
+          // page-probe の契約)。
           //
           // ⚠変数名を `err` にしない。この catch は**診断を足してそのまま投げ直すだけ**で、
           // 失敗を provider_error へ**変換しない**。`catch (err)` だと「provider_error へ

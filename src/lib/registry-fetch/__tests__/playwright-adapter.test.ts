@@ -1839,11 +1839,40 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       filterUnverified?: boolean;
       /** 選択の登録確認の応答(発注者指示 2026-08-15)。既定=登録済み。 */
       selectionVerify?: { registered: boolean; okDisabled: boolean };
+      /** 確定前に読む所在(kuiki)。既定=INPUT.address(空文字で取得失敗を模す)。 */
+      kuikiValue?: string;
+      /** 請求リスト(確定の着地・probe13)の行。既定=対象1行(未チェック)。 */
+      fudosanRows?: Array<{
+        index: number;
+        chiban: string;
+        kuiki: string;
+        seikyuType: string;
+        seikyuzumi: string;
+      }>;
+      /** 事前にチェック済みの行番号(過去操作の残りを模す)。 */
+      fudosanPreChecked?: number[];
+      /** 行checkboxの適用が効かない画面を模す(read-back検証の RED 用)。 */
+      applyIgnored?: boolean;
     } = {},
   ) {
     const clicked: string[] = [];
     const myPageSeq = [...(opts.myPageSeq ?? [])];
     let lastMyPage: unknown = myPageSeq[myPageSeq.length - 1];
+    // 請求リストの行と check 状態(fudosan-list-apply がここを書き換える)。
+    const listState = {
+      rows:
+        opts.fudosanRows ??
+        [
+          {
+            index: 1,
+            chiban: "１－１", // サイトは全角(probe13)。INPUT.lotNumber の全角形
+            kuiki: INPUT.address,
+            seikyuType: "所有者事項",
+            seikyuzumi: "false",
+          },
+        ],
+      checked: new Set<number>(opts.fudosanPreChecked ?? []),
+    };
     f.page.evaluate.mockImplementation(async (_fn, arg: string) => {
       if (typeof arg !== "string") return undefined;
       let parsed: Record<string, unknown> | null = null;
@@ -1899,6 +1928,34 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
           ids: opts.prevRowIds ?? [],
         });
       }
+      // 確定前の所在(kuiki)読み取り(probe13: 行照合の材料。押すと欄ごと消える)。
+      if (parsed.probe === "kuiki-value") {
+        return opts.kuikiValue ?? INPUT.address;
+      }
+      // 請求リスト(確定の着地・probe13)の行一覧。既定=対象1行(未チェック)。
+      if (parsed.probe === "fudosan-list-rows") {
+        return JSON.stringify(
+          listState.rows.map((r) => ({ ...r, checked: listState.checked.has(r.index) })),
+        );
+      }
+      // 行checkboxの適用(対象だけON・他はOFF)。click 相当なのでトグルで模す。
+      if (parsed.probe === "fudosan-list-apply") {
+        const target = Number(parsed.targetIndex);
+        if (opts.applyIgnored) return undefined; // 押しても効かない画面を模す
+        for (const r of listState.rows) {
+          const want = r.index === target;
+          const has = listState.checked.has(r.index);
+          if (has !== want) {
+            if (want) listState.checked.add(r.index);
+            else listState.checked.delete(r.index);
+          }
+        }
+        return undefined;
+      }
+      // 適用後の read-back(ちょうど1件の実測)。
+      if (parsed.probe === "fudosan-list-checked") {
+        return JSON.stringify([...listState.checked].sort((a, b) => a - b));
+      }
       if (parsed.tableSel === "#myPageTable") {
         const next = myPageSeq.length > 0 ? myPageSeq.shift() : lastMyPage;
         lastMyPage = next;
@@ -1928,6 +1985,9 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     };
   }
 
+  const REGISTER =
+    'button[onclick*="btnForward2"], input[onclick*="btnForward2"]';
+
   it("S1: 幸せ経路 — 確定→行選択→請求→請求済→表示・保存で PDF を返す(請求は1回だけ)", async () => {
     const f = makeFakeChromium();
     const { clicked } = wireStage2(f, {
@@ -1941,7 +2001,103 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(Buffer.isBuffer(buf)).toBe(true);
     expect(clicked).toContain(DIALOG_OK);
     expect(clicked).toContain(CONFIRM);
+    // probe13: 確定の着地=請求リスト。行check→【マイページへ登録】を経て
+    // はじめてマイページに着く(旧 selectTab('tabMy') タブは押さない=存在しない)。
+    expect(clicked).toContain(REGISTER);
+    expect(clicked).not.toContain("a[onclick*=\"selectTab('tabMy')\"]");
     expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
+  });
+
+  it("SL1: ⚠請求リストに対象の行が無ければ、登録も請求も押さずに中止(別の筆を買わない)", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      fudosanRows: [
+        // 地番が違う行だけがある(過去操作の残り等)。
+        { index: 1, chiban: "９９－９", kuiki: INPUT.address, seikyuType: "所有者事項", seikyuzumi: "false" },
+      ],
+    });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).toContain(CONFIRM); // 確定までは進む(無料)
+    expect(clicked).not.toContain(REGISTER);
+    expect(clicked).not.toContain(SEIKYU);
+  });
+
+  it("SL2: ⚠同一内容の未請求が複数残っていても、先頭の1件だけで進める(2件checkしない)", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      fudosanRows: [
+        { index: 2, chiban: "１－１", kuiki: INPUT.address, seikyuType: "所有者事項", seikyuzumi: "false" },
+        { index: 1, chiban: "１－１", kuiki: INPUT.address, seikyuType: "所有者事項", seikyuzumi: "false" },
+      ],
+      myPageSeq: [
+        { result: "checked", checkedCount: 1, rowId: "ROW-9" },
+        { result: "ready" },
+      ],
+    });
+    const page = await makeStage2Page(f);
+    const buf = await page.fetchByLocationCandidate(INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(clicked).toContain(REGISTER);
+  });
+
+  it("SL3: ⚠checkの適用が画面に効かなければ、read-backで見抜いて登録前に中止", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, { applyIgnored: true });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(REGISTER);
+    expect(clicked).not.toContain(SEIKYU);
+  });
+
+  it("SL4: ⚠所在(kuiki)が読めていなければ行を選ばない(照合の土台なし=中止)", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, { kuikiValue: "" });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(REGISTER);
+    expect(clicked).not.toContain(SEIKYU);
+  });
+
+  it("SL5: ⚠過去操作でcheck済みの別行が残っていても、対象1件だけに直してから登録する", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      fudosanRows: [
+        { index: 1, chiban: "１－１", kuiki: INPUT.address, seikyuType: "所有者事項", seikyuzumi: "false" },
+        // 地番違い(選ばれてはいけない)がなぜか check 済みで残っている。
+        { index: 2, chiban: "９９－９", kuiki: INPUT.address, seikyuType: "所有者事項", seikyuzumi: "false" },
+      ],
+      fudosanPreChecked: [2],
+      myPageSeq: [
+        { result: "checked", checkedCount: 1, rowId: "ROW-9" },
+        { result: "ready" },
+      ],
+    });
+    const page = await makeStage2Page(f);
+    const buf = await page.fetchByLocationCandidate(INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(clicked).toContain(REGISTER);
+  });
+
+  it("SL6: ⚠請求済みの行しか無ければ選ばない(再請求の入口を作らない)", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      fudosanRows: [
+        { index: 1, chiban: "１－１", kuiki: INPUT.address, seikyuType: "所有者事項", seikyuzumi: "true" },
+      ],
+    });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(REGISTER);
+    expect(clicked).not.toContain(SEIKYU);
   });
 
   it("S2: ⚠対象の地番が見つからなければ not_found で終了し、確定も請求も押さない", async () => {
