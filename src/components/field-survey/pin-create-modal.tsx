@@ -160,16 +160,19 @@ export default function PinCreateModal({
   // sessionId=null は「巡回なしで撮影」(field_survey:quick_capture) の正常系。
   // 巡回の有無を保存可否の条件にしない (権限判定はサーバーの POST /pins が行い、
   // 権限が無ければ 403 QUICK_CAPTURE_FORBIDDEN が serverError に出る)。
-  // ⚠**写真は必須** (@codex #336 P2)。この画面は撮影経由でしか開かない
-  // (ピン追加モード廃止 = 「写真なしのピンは作らない」2026-07-29 業務判断)。
-  // 写真を外して保存できると、廃止したはずの写真なしピンがここから作れて
-  // しまう。写真送信の失敗後 (photoUploadFailed) は pin 作成済みで、この
-  // 保存ボタン自体が出ない (回復用の再試行/終了ボタンに切り替わる)。
+  // ⚠**写真の要否は入口で決まる** (発注者要望 2026-08-17「写真なしでピン」):
+  // - 撮影経由 (写真が付いて開く) = 従来どおり**必須のまま**。外す導線も置かない
+  //   (@codex #336 P2 の懸念=「勝手に写真なしピンが作れてしまう」をそのまま維持。
+  //   撮った写真をここで捨てる正当な理由は無い)。
+  // - 写真なし導線 (写真を持たずに開く) = **任意**。あとから添付もできる。
+  // 写真送信の失敗後 (photoUploadFailed) は pin 作成済みで、この保存ボタン自体が
+  // 出ない (回復用の再試行/終了ボタンに切り替わる)。
+  const photoOptional = initialPhotoFile == null;
   const canSubmit =
     !busy &&
     Number.isFinite(initialLat) &&
     Number.isFinite(initialLng) &&
-    photoFile !== null;
+    (photoOptional || photoFile !== null);
 
   const handleFilePicked = (file: File | null) => {
     if (!file) return;
@@ -290,13 +293,14 @@ export default function PinCreateModal({
           </span>
         </label>
 
-        {/* 写真 (必須 / 1 枚)。撮影 = 単発の写真取得。動画 / 連続撮影はしない。
-            ⚠「取り消す」は置かない (@codex #336 P2)。全てのピンが写真とセット
-            (2026-07-29 業務判断) なので、外せると廃止したはずの写真なしピンが
-            ここから作れてしまう。撮り直し/選び直し (差し替え) だけを許す。 */}
+        {/* 写真 (1 枚)。撮影 = 単発の写真取得。動画 / 連続撮影はしない。
+            要否は入口で決まる (発注者要望 2026-08-17): 撮影経由=必須 / 写真なし
+            導線=任意。⚠「取り消す」はどちらでも置かない (@codex #336 P2)。
+            撮影経由で外せると「撮った写真を捨てて保存」が作れてしまう。
+            撮り直し/選び直し (差し替え) だけを許す。 */}
         <div className="mb-3">
           <span className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-200">
-            写真（必須）
+            {photoOptional ? "写真（任意）" : "写真（必須）"}
           </span>
           <input
             ref={cameraInputRef}

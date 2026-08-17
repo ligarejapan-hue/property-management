@@ -55,6 +55,7 @@ import type { ActiveSessionLike } from "@/lib/field-survey-trip-util";
 import PinCreateModal from "@/components/field-survey/pin-create-modal";
 import CameraFirstButton from "@/components/field-survey/camera-first-button";
 import CameraFirstBanner from "@/components/field-survey/camera-first-banner";
+import PinWithoutPhotoButton from "@/components/field-survey/pin-without-photo-button";
 import {
   cameraFirstButtonState,
   type CameraFirstPhase,
@@ -536,6 +537,10 @@ export default function FieldSurveyMap({
   }, [cameraFirstPhase]);
   // 撮影済みで位置未確定の写真 (地図タップ待ちの間だけ保持)。
   const cameraPhotoFileRef = useRef<File | null>(null);
+  // タップ待ちが写真を持っているか (発注者要望 2026-08-17「写真なしでピン」)。
+  // banner の文言切替に使う。ref (cameraPhotoFileRef) は描画から読めないため、
+  // 入口の handler で phase と同時に確定する (常に ref と同期)。
+  const [cameraFirstHasPhoto, setCameraFirstHasPhoto] = useState(true);
   // 今回の作成候補がカメラファースト由来か。finalize で詳細パネルを開かず
   // トースト表示にして、次の撮影へすぐ移れるようにする。
   const createdFromCameraRef = useRef(false);
@@ -724,6 +729,18 @@ export default function FieldSurveyMap({
     // 作成 modal が既に開いているなら二重に開かない (別経路との衝突防止)。
     if (createCandidateOpenRef.current) return;
     cameraPhotoFileRef.current = file;
+    setCameraFirstHasPhoto(true);
+    setCameraFirstPhase("awaiting-map-tap");
+  }, []);
+
+  // 「写真なしでピン」(発注者要望 2026-08-17)。撮影と同じ地図タップ待ちに入るが
+  // 写真は持たない (撮れない/撮る必要がない場面でも候補を立てられるように)。
+  // ref を空に確定してから phase を変える (撮影側の不変条件の対称適用)。
+  const handlePinWithoutPhoto = useCallback(() => {
+    // 作成 modal が既に開いているなら二重に開かない (撮影側と同じガード)。
+    if (createCandidateOpenRef.current) return;
+    cameraPhotoFileRef.current = null;
+    setCameraFirstHasPhoto(false);
     setCameraFirstPhase("awaiting-map-tap");
   }, []);
 
@@ -888,7 +905,9 @@ export default function FieldSurveyMap({
   }, []);
 
   // 地図タップで**ピンの位置を決める**。これが唯一のピン作成経路
-  // (2026-07-29 業務判断: 写真なしのピンは作らない / 現在地への自動配置もしない)。
+  // (2026-07-29 業務判断: 現在地への自動配置はしない。写真なしのピンは
+  //  2026-08-17 発注者要望で「写真なしでピン」導線から**作れるようになった**が、
+  //  位置決めは引き続きこのタップ経路だけ)。
   const handleMapClick = useCallback(
     (latLng: { lat: number; lng: number }) => {
       // 既に modal 表示中はスルー (誤操作防止)。
@@ -937,6 +956,9 @@ export default function FieldSurveyMap({
   // 写真が黙って元に戻り、次のタップで**別の家の写真**が付く。
   const handleReplaceLocation = useCallback((currentPhoto: File | null) => {
     cameraPhotoFileRef.current = currentPhoto;
+    // 写真なし導線で開いた modal から戻る場合は写真なしの案内のまま
+    // (逆に modal 内で写真を付けてから戻れば撮影と同じ案内になる)。
+    setCameraFirstHasPhoto(currentPhoto !== null);
     setCreateCandidate((c) => {
       if (c?.cameraPhotoPreviewUrl) URL.revokeObjectURL(c.cameraPhotoPreviewUrl);
       return null;
@@ -1066,22 +1088,35 @@ export default function FieldSurveyMap({
             表示切替パネルを開かなくても撮影→ピン登録へ直行できる。
             モバイルでパネル展開中 (panelOpen) はパネル下部を覆いタップを
             遮るため FAB / banner を描画しない (md+ はトグル自体が無い)。 */}
-        {/* 巡回中は「撮って登録」だけを中央に置く (従来どおり)。 */}
+        {/* 巡回中は「撮って登録」を主に、「写真なしでピン」を隣に置く
+            (発注者要望 2026-08-17。行レイアウトで中央寄せ=巡回外と同じ作り)。 */}
         {activeSession && cameraButton.visible && !panelOpen && (
-          <CameraFirstButton
-            disabled={cameraButton.disabled}
-            permissionDenied={canWritePin === false}
-            onPhotoCaptured={handleCameraPhotoCaptured}
-          />
+          <div className="pointer-events-none absolute bottom-14 left-1/2 z-10 flex -translate-x-1/2 items-start gap-2">
+            <CameraFirstButton
+              inline
+              disabled={cameraButton.disabled}
+              permissionDenied={canWritePin === false}
+              onPhotoCaptured={handleCameraPhotoCaptured}
+            />
+            <PinWithoutPhotoButton
+              disabled={cameraButton.disabled}
+              permissionDenied={canWritePin === false}
+              onStart={handlePinWithoutPhoto}
+            />
+          </div>
         )}
         {cameraFirstPhase === "awaiting-map-tap" && !panelOpen && (
-          <CameraFirstBanner onCancel={resetCameraFirst} />
+          <CameraFirstBanner
+            hasPhoto={cameraFirstHasPhoto}
+            onCancel={resetCameraFirst}
+          />
         )}
 
         {/* 巡回していない時の地図下部。「巡回なしで撮影」権限があれば
             「📷撮って登録」を主ボタンとして左に、「🚶巡回を開始」を副ボタンとして
             右に横並びで置く (両方 bottom-14 left-1/2 だと完全に重なるため、
             ここでは行レイアウトにして CameraFirstButton を inline で描画する)。
+            「写真なしでピン」も同じ権限条件で撮影の隣に置く (2026-08-17)。
             権限が無ければ従来どおり「巡回を開始」だけを中央に出す。 */}
         {!activeSession && !panelOpen && (
           <div className="pointer-events-none absolute bottom-14 left-1/2 z-10 flex -translate-x-1/2 items-start gap-2">
@@ -1091,6 +1126,13 @@ export default function FieldSurveyMap({
                 disabled={cameraButton.disabled}
                 permissionDenied={canWritePin === false}
                 onPhotoCaptured={handleCameraPhotoCaptured}
+              />
+            )}
+            {cameraButton.visible && (
+              <PinWithoutPhotoButton
+                disabled={cameraButton.disabled}
+                permissionDenied={canWritePin === false}
+                onStart={handlePinWithoutPhoto}
               />
             )}
             <button

@@ -81,6 +81,79 @@ describe("camera-first-banner.tsx — 位置指定待ち banner", () => {
   });
 });
 
+describe("pin-without-photo-button.tsx — 写真なしでピン (発注者要望 2026-08-17)", () => {
+  const PWP_SRC = readSrc(
+    "src/components/field-survey/pin-without-photo-button.tsx",
+  );
+  const PWP_CODE = stripComments(PWP_SRC);
+
+  it("'use client' で始まる", () => {
+    expect(PWP_SRC.trim().startsWith('"use client"')).toBe(true);
+  });
+
+  it("console / storage を使わない", () => {
+    expect(PWP_CODE).not.toMatch(/console\./);
+    expect(PWP_CODE).not.toMatch(/localStorage|sessionStorage|indexedDB/i);
+  });
+
+  it("file input を持たない (写真を扱わない導線)", () => {
+    expect(PWP_CODE).not.toMatch(/type="file"|accept=|capture=/);
+  });
+});
+
+describe("field-survey-map.tsx — 写真なしでピンの統合 (発注者要望 2026-08-17)", () => {
+  it("PinWithoutPhotoButton を import し、巡回中と巡回外の**両方の入口**に置く", () => {
+    expect(MAP_SRC).toMatch(
+      /from\s*["']@\/components\/field-survey\/pin-without-photo-button["']/,
+    );
+    // 巡回中の行 (activeSession) と巡回外の行 (!activeSession) の両方で描画
+    // = JSX の出現が2回以上あること。
+    const renders = MAP_SRC.match(/<PinWithoutPhotoButton/g) ?? [];
+    expect(renders.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("開始handlerは photo ref を空にしてからタップ待ちへ (撮影と同じ不変条件・同期のみ)", () => {
+    const fn =
+      MAP_SRC.match(
+        /const handlePinWithoutPhoto = useCallback\([\s\S]*?\n  \}, \[\]\);/,
+      )?.[0] ?? "";
+    expect(fn).not.toBe("");
+    // modal 表示中の二重開始ガード (撮影側と同じ)
+    expect(fn).toContain("createCandidateOpenRef.current");
+    // ref を先に確定してから phase (先に phase を変えるとその瞬間の描画が
+    // 古い写真を掴む=撮影側の不変条件の対称適用)
+    expect(fn.indexOf("cameraPhotoFileRef.current = null")).toBeLessThan(
+      fn.indexOf('setCameraFirstPhase("awaiting-map-tap")'),
+    );
+    // ⚠banner 文言用の hasPhoto=false も phase より前に確定する (提出前レビュー
+    // 指摘: この1行が消えても他のピンは緑のまま=「写真を撮りました」と嘘の
+    // banner が出る退行を、ここで名指しで検出する)。
+    expect(fn.indexOf("setCameraFirstHasPhoto(false)")).toBeGreaterThan(-1);
+    expect(fn.indexOf("setCameraFirstHasPhoto(false)")).toBeLessThan(
+      fn.indexOf('setCameraFirstPhase("awaiting-map-tap")'),
+    );
+    expect(fn).not.toMatch(/await |\.then\(/);
+  });
+
+  it("撮影handlerは hasPhoto=true を、置き直しは現在の写真の有無を banner へ反映する", () => {
+    const capture =
+      MAP_SRC.match(
+        /const handleCameraPhotoCaptured = useCallback\([\s\S]*?\n  \}, \[\]\);/,
+      )?.[0] ?? "";
+    expect(capture).toContain("setCameraFirstHasPhoto(true)");
+    const replace =
+      MAP_SRC.match(
+        /const handleReplaceLocation = useCallback\([\s\S]*?\n  \}, \[\]\);/,
+      )?.[0] ?? "";
+    // modal 内で写真を付けた/付けずに「置き直す」で戻った場合も文言が実態と一致
+    expect(replace).toContain("setCameraFirstHasPhoto(currentPhoto !== null)");
+  });
+
+  it("banner には写真の有無 (hasPhoto) を渡して文言を切り替える", () => {
+    expect(MAP_SRC).toMatch(/<CameraFirstBanner[\s\S]{0,120}hasPhoto=\{/);
+  });
+});
+
 describe("field-survey-map.tsx — カメラファースト統合", () => {
   it("CameraFirstButton / CameraFirstBanner を import している", () => {
     expect(MAP_SRC).toMatch(
@@ -126,7 +199,7 @@ describe("field-survey-map.tsx — カメラファースト統合", () => {
     expect(fn).toContain("createCandidateOpenRef.current");
   });
 
-  it("地図タップはタップ待ちの時だけ受け付ける（写真なしのピンを作らない）", () => {
+  it("地図タップはタップ待ちの時だけ受け付ける（旧ピン追加モードを復活させない）", () => {
     const m = MAP_SRC.match(/const handleMapClick = useCallback\([\s\S]*?\n  \);/)?.[0] ?? "";
     expect(m).not.toBe("");
     expect(m).toContain('if (cameraFirstPhase !== "awaiting-map-tap") return;');

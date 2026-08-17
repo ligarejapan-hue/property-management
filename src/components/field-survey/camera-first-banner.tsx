@@ -17,10 +17,18 @@
 
 interface CameraFirstBannerProps {
   onCancel: () => void;
+  /**
+   * タップ待ちが写真を持っているか (発注者要望 2026-08-17「写真なしでピン」)。
+   * false のときは「写真を撮りました」が嘘になるので、見出しと取消ボタンの
+   * 言葉を切り替える (「撮り直す」も捨てる写真が無いのに嘘になる)。
+   * 既定 true = 従来の撮影導線。
+   */
+  hasPhoto?: boolean;
 }
 
 export default function CameraFirstBanner({
   onCancel,
+  hasPhoto = true,
 }: CameraFirstBannerProps) {
   return (
     <div
@@ -28,7 +36,9 @@ export default function CameraFirstBanner({
       data-testid="camera-first-banner"
       className="pointer-events-auto absolute bottom-14 left-1/2 z-10 w-[calc(100%-1.5rem)] max-w-sm -translate-x-1/2 rounded-md border border-indigo-300 bg-indigo-50 p-3 text-xs text-indigo-900 shadow dark:border-indigo-500/40 dark:bg-indigo-500/15 dark:text-indigo-200"
     >
-      <p className="font-semibold">写真を撮りました</p>
+      <p className="font-semibold">
+        {hasPhoto ? "写真を撮りました" : "写真なしでピンを立てます"}
+      </p>
       <p className="mt-1">
         地図で<b>家の上をタップ</b>してください。そこにピンを立てます。
       </p>
@@ -39,7 +49,7 @@ export default function CameraFirstBanner({
           data-testid="camera-first-cancel"
           className="rounded border border-indigo-300 bg-white px-3 py-1 text-[11px] text-indigo-900 hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-gray-900 dark:text-indigo-200 dark:hover:bg-gray-800"
         >
-          撮り直す
+          {hasPhoto ? "撮り直す" : "やめる"}
         </button>
       </div>
     </div>

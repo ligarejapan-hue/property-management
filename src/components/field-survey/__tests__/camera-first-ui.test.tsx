@@ -9,6 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import CameraFirstButton from "@/components/field-survey/camera-first-button";
 import CameraFirstBanner from "@/components/field-survey/camera-first-banner";
+import PinWithoutPhotoButton from "@/components/field-survey/pin-without-photo-button";
 
 const noop = () => {};
 
@@ -81,6 +82,41 @@ describe("CameraFirstButton", () => {
   });
 });
 
+describe("PinWithoutPhotoButton", () => {
+  // 発注者要望 2026-08-17「写真なしでも物件化候補を立てたい」。撮影 FAB の隣に
+  // 置く副ボタン。カメラと同じくアイコンのみ+aria-label/title で用途を伝える。
+  it("既定状態: アイコンのみの丸ボタンで有効 + 用途を伝える2経路", () => {
+    const html = renderToStaticMarkup(
+      createElement(PinWithoutPhotoButton, {
+        disabled: false,
+        permissionDenied: false,
+        onStart: noop,
+      }),
+    );
+    expect(html).toContain('data-testid="pin-without-photo-button"');
+    expect(html).toContain('aria-label="写真なしでピンを登録"');
+    expect(html).toContain('title="写真なしでピン"');
+    expect(html).toMatch(/class="[^"]*rounded-full[^"]*"/);
+    expect(html).not.toContain('disabled=""');
+    // ボタン面にテキストを出さない (撮影 FAB と同じ流儀)
+    const inner = html.match(/<button[^>]*>([\s\S]*?)<\/button>/)?.[1] ?? "";
+    expect(inner.replace(/<[^>]*>/g, "").trim()).toBe("");
+  });
+
+  it("権限なし確定時は無効 + 理由の title (可視 note は撮影 FAB 側に任せて重複させない)", () => {
+    const html = renderToStaticMarkup(
+      createElement(PinWithoutPhotoButton, {
+        disabled: true,
+        permissionDenied: true,
+        onStart: noop,
+      }),
+    );
+    expect(html).toContain('disabled=""');
+    expect(html).toContain('title="ピン追加の権限がありません"');
+    expect(html).not.toContain("camera-first-permission-note");
+  });
+});
+
 describe("CameraFirstBanner", () => {
   // ⚠2026-07-29: これは「現在地が取れなかった時の代替」ではなく**通常の手順**に
   // なった。失敗理由 (notice) を出す口は無くし、次にやることだけを書く。
@@ -107,5 +143,26 @@ describe("CameraFirstBanner", () => {
     );
     expect(html).toContain('data-testid="camera-first-cancel"');
     expect(html).toContain("撮り直す");
+  });
+
+  // 写真なし導線 (発注者要望 2026-08-17): 同じ「地図タップ待ち」を写真なしで使う。
+  // 「写真を撮りました」は嘘になるので、文言と取消ボタンの言葉を切り替える。
+  it("hasPhoto=false: 写真なしの案内文になり「写真を撮りました」を出さない", () => {
+    const html = renderToStaticMarkup(
+      createElement(CameraFirstBanner, { onCancel: noop, hasPhoto: false }),
+    );
+    expect(html).not.toContain("写真を撮りました");
+    expect(html).toContain("写真なしでピンを立てます");
+    // タップの案内 (家の上) は写真の有無に関わらず同じ業務ルール
+    expect(html).toContain("家の上をタップ");
+  });
+
+  it("hasPhoto=false: 取消ボタンは「やめる」(捨てる写真が無いのに「撮り直す」は嘘)", () => {
+    const html = renderToStaticMarkup(
+      createElement(CameraFirstBanner, { onCancel: noop, hasPhoto: false }),
+    );
+    expect(html).toContain('data-testid="camera-first-cancel"');
+    expect(html).toContain("やめる");
+    expect(html).not.toContain("撮り直す");
   });
 });
