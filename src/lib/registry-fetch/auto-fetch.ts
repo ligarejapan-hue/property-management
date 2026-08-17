@@ -2134,6 +2134,7 @@ function createPlaywrightRegistryPage(
               const retryWait = resolveRetryWaitAfterSetup(
                 plan.waitMs,
                 paidDeadline === null ? null : paidDeadline - Date.now(),
+                plan.probe,
               );
               carriedProbe = plan.probe;
               if (retryWait.proceed) {

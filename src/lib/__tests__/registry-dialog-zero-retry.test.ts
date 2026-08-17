@@ -114,6 +114,10 @@ describe("有料取得: ダイアログ0件の1回リトライ", () => {
     const proceedAt = SRC.indexOf("retryWait.proceed", retryAt);
     expect(proceedAt).toBeGreaterThan(resolveAt);
     expect(searchClickAt).toBeGreaterThan(proceedAt);
+    // 診断の予約の有無(plan.probe)を渡す(@codex R9: 診断なし計画では margin を
+    // 引かず、存在しない診断のために待ちを削らない)。
+    const resolveCall = SRC.slice(resolveAt, resolveAt + 220);
+    expect(resolveCall).toContain("plan.probe");
     // 断念時は実況+journal に残す(黙って諦めない)。
     expect(SRC).toContain("検索し直しを断念しました");
     expect(SRC).toContain("zero-retry abandoned");
@@ -143,6 +147,7 @@ describe("有料取得: ダイアログ0件の1回リトライ", () => {
 // 予算配分の挙動テスト(@codex #386 P2: 走査だけでなく挙動で固定する)。
 import {
   ZERO_RETRY_MIN_WAIT_MS,
+  ZERO_RETRY_NO_PROBE_TAIL_MS,
   ZERO_RETRY_PROBE_CLEANUP_MS,
   ZERO_RETRY_PROBE_MARGIN_MS,
   ZERO_RETRY_PROBE_MIN_MS,
@@ -189,10 +194,29 @@ describe("resolveZeroRetryPlan(残り予算→再試行の可否と待ち時間)
     expect(resolveZeroRetryPlan(60000).waitMs).toBe(15000);
   });
 
-  it("再試行の余裕が無い残量では再試行せず、診断だけ打つ", () => {
-    const plan = resolveZeroRetryPlan(9000); // waitBudget=2000 < 3000
-    expect(plan.retry).toBe(false);
-    expect(plan.probe).toBe(true); // 9000 > 5500
+  it("⚠再試行と診断の両方は入らない残量では、診断を捨てて再試行を優先する(@codex #386 R9)", () => {
+    // 残9秒: margin(5500)込みでは待ち2000<3000 で従来は「診断だけ」だった。
+    // だが0件は大抵一過性=再試行は候補を見つけ得る/診断は一過性の0件を記録する
+    // だけ。診断なし再試行(尻尾750msのみ)なら待ち6750が確保できる。
+    const plan = resolveZeroRetryPlan(9000);
+    expect(plan).toEqual({
+      retry: true,
+      waitMs: 9000 - ZERO_RETRY_SLEEP_MS - ZERO_RETRY_NO_PROBE_TAIL_MS, // 6750
+      probe: false,
+    });
+    expect(plan.waitMs).toBeGreaterThanOrEqual(ZERO_RETRY_MIN_WAIT_MS);
+    // 総和が予算内(sleep+待ち+尻尾)。
+    expect(
+      ZERO_RETRY_SLEEP_MS + plan.waitMs + ZERO_RETRY_NO_PROBE_TAIL_MS,
+    ).toBeLessThanOrEqual(9000);
+  });
+
+  it("診断なし再試行すら入らない残量では再試行しない(見かけだけの再試行を作らない)", () => {
+    // 尻尾込みの下限 = SLEEP + MIN_WAIT + NO_PROBE_TAIL = 5250。それ未満は不可。
+    const floor =
+      ZERO_RETRY_SLEEP_MS + ZERO_RETRY_MIN_WAIT_MS + ZERO_RETRY_NO_PROBE_TAIL_MS;
+    expect(resolveZeroRetryPlan(floor).retry).toBe(true); // ちょうど=可(waitMs=MIN)
+    expect(resolveZeroRetryPlan(floor - 1).retry).toBe(false);
   });
 
   it("診断の余裕すら無ければ診断も打たず即分類(timeout に化けるより良い)", () => {
@@ -201,7 +225,7 @@ describe("resolveZeroRetryPlan(残り予算→再試行の可否と待ち時間)
   });
 });
 
-describe("resolveRetryWaitAfterSetup(検索を打つ前に待ちを確定・@codex #386 R3/R7)", () => {
+describe("resolveRetryWaitAfterSetup(検索を打つ前に待ちを確定・@codex #386 R3/R7/R9)", () => {
   it("操作が食った時間ぶん待ちが縮む(sleep+操作+待ち+診断が予算に収まる)", () => {
     // 残20秒で計画: 待ち13000を予約(=resolveZeroRetryPlan(20000).waitMs)。
     const plan = resolveZeroRetryPlan(20000);
@@ -209,7 +233,7 @@ describe("resolveRetryWaitAfterSetup(検索を打つ前に待ちを確定・@cod
     // sleep(1500)+ブラウザ操作(実測3秒)の後の残量=15500。
     const opsCostMs = 3000;
     const remainingAfterOps = 20000 - ZERO_RETRY_SLEEP_MS - opsCostMs;
-    const w = resolveRetryWaitAfterSetup(plan.waitMs, remainingAfterOps);
+    const w = resolveRetryWaitAfterSetup(plan.waitMs, remainingAfterOps, plan.probe);
     expect(w.proceed).toBe(true);
     expect(w.waitMs).toBe(remainingAfterOps - ZERO_RETRY_PROBE_MARGIN_MS); // 10000
     // 総和が予算に収まる=操作コストが載っても外側 timeout に化けない。
@@ -221,42 +245,64 @@ describe("resolveRetryWaitAfterSetup(検索を打つ前に待ちを確定・@cod
   it("⚠最低値(3秒)を割る待ちしか残らないなら再試行を**断念**する(@codex #386 R7)", () => {
     // 最低値未満ではサイトの非同期ロードが終わらず、検索を打っても結果が届く前に
     // 分類してしまう=見かけだけの再試行。1〜2999ms の待ちで検索しない。
-    expect(resolveRetryWaitAfterSetup(3000, 4500)).toEqual({ proceed: false, waitMs: 0 });
-    expect(resolveRetryWaitAfterSetup(3000, 0)).toEqual({ proceed: false, waitMs: 0 });
-    // 計画がちょうど最低値(残10秒→待ち3000)のとき、操作コストが1msでも載れば断念。
-    const plan = resolveZeroRetryPlan(10000);
-    expect(plan.waitMs).toBe(ZERO_RETRY_MIN_WAIT_MS);
-    expect(
-      resolveRetryWaitAfterSetup(plan.waitMs, 10000 - ZERO_RETRY_SLEEP_MS - 200).proceed,
-    ).toBe(false);
+    expect(resolveRetryWaitAfterSetup(3000, 4500, true)).toEqual({
+      proceed: false,
+      waitMs: 0,
+    });
+    expect(resolveRetryWaitAfterSetup(3000, 0, true)).toEqual({
+      proceed: false,
+      waitMs: 0,
+    });
+    // 診断なし計画でも同じ(尻尾750を守れなければ断念)。
+    expect(resolveRetryWaitAfterSetup(3000, 3700, false)).toEqual({
+      proceed: false,
+      waitMs: 0,
+    });
+  });
+
+  it("⚠診断なし計画では margin でなく尻尾(750ms)だけ守る=存在しない診断のために待ちを削らない(@codex #386 R9)", () => {
+    // 残9秒の診断なし計画(待ち6750)。setup が2秒食って残量5500になっても、
+    // margin(5500)を引いたら 0 で断念になるところ、尻尾(750)なら 4750 で実行できる。
+    const plan = resolveZeroRetryPlan(9000);
+    expect(plan.probe).toBe(false);
+    const w = resolveRetryWaitAfterSetup(plan.waitMs, 5500, plan.probe);
+    expect(w).toEqual({ proceed: true, waitMs: 5500 - ZERO_RETRY_NO_PROBE_TAIL_MS }); // 4750
+    // 待ち+尻尾が残量内=キャンセル見切り+headroom まで含めて外側に負けない。
+    expect(w.waitMs + ZERO_RETRY_NO_PROBE_TAIL_MS).toBeLessThanOrEqual(5500);
   });
 
   it("実行するなら待ちは必ず最低値以上(遅れて届く結果を待ち切れる)", () => {
     // 境界: 残量= MIN + margin ちょうど → waitMs=MIN で実行。
     const boundary = ZERO_RETRY_MIN_WAIT_MS + ZERO_RETRY_PROBE_MARGIN_MS;
-    expect(resolveRetryWaitAfterSetup(15000, boundary)).toEqual({
+    expect(resolveRetryWaitAfterSetup(15000, boundary, true)).toEqual({
       proceed: true,
       waitMs: ZERO_RETRY_MIN_WAIT_MS,
     });
-    for (const remaining of [boundary, 10000, 60000]) {
-      const w = resolveRetryWaitAfterSetup(15000, remaining);
-      if (!w.proceed) continue;
-      expect(w.waitMs, `remaining=${remaining}`).toBeGreaterThanOrEqual(
-        ZERO_RETRY_MIN_WAIT_MS,
-      );
-      expect(w.waitMs + ZERO_RETRY_PROBE_MARGIN_MS).toBeLessThanOrEqual(remaining);
+    for (const reserveProbe of [true, false]) {
+      for (const remaining of [boundary, 10000, 60000]) {
+        const w = resolveRetryWaitAfterSetup(15000, remaining, reserveProbe);
+        if (!w.proceed) continue;
+        expect(
+          w.waitMs,
+          `remaining=${remaining} probe=${reserveProbe}`,
+        ).toBeGreaterThanOrEqual(ZERO_RETRY_MIN_WAIT_MS);
+        const tail = reserveProbe
+          ? ZERO_RETRY_PROBE_MARGIN_MS
+          : ZERO_RETRY_NO_PROBE_TAIL_MS;
+        expect(w.waitMs + tail).toBeLessThanOrEqual(remaining);
+      }
     }
   });
 
   it("速い操作では計画した待ちをそのまま使う(縮めすぎない)", () => {
-    expect(resolveRetryWaitAfterSetup(3000, 60000)).toEqual({
+    expect(resolveRetryWaitAfterSetup(3000, 60000, true)).toEqual({
       proceed: true,
       waitMs: 3000,
     });
   });
 
   it("予算未設定(null)は計画値のまま実行", () => {
-    expect(resolveRetryWaitAfterSetup(15000, null)).toEqual({
+    expect(resolveRetryWaitAfterSetup(15000, null, true)).toEqual({
       proceed: true,
       waitMs: 15000,
     });
