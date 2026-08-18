@@ -1962,27 +1962,31 @@ function createPlaywrightRegistryPage(
       // 絞る=課金され得る行の全体集合を最小化し、ページ分割の可能性も下げる。
       // 値は option の表示ラベルで選ぶ(実 value は[要live]のため)。change を発火して
       // 一覧の再描画を促す(ハンドラ未接続でも後段のページ分割チェックが守る)。
-      const applyMyPageFilter = (label: string) =>
-        page.evaluate(
+      // 戻り値=change を**発火したか**(@codex #390 R6: 発火直後は表の再描画が
+      // 非同期に走るため、呼び出し側は猶予と安定確認を足す)。
+      const applyMyPageFilter = async (label: string): Promise<boolean> =>
+        (await page.evaluate(
           (json) => {
             const { filterSel, label } = JSON.parse(json) as {
               filterSel: string;
               label: string;
             };
             const el = document.querySelector(filterSel) as HTMLSelectElement | null;
-            if (!el) return;
+            if (!el) return false;
             const opt = Array.from(el.options).find((o) => (o.textContent ?? "").trim() === label);
-            if (!opt) return;
+            if (!opt) return false;
             if (el.value !== opt.value) {
               el.value = opt.value;
               el.dispatchEvent(new Event("change", { bubbles: true }));
+              return true;
             }
+            return false;
           },
           JSON.stringify({
             filterSel: REGISTRY_SELECTORS.myPageFilter,
             label,
           }),
-        );
+        )) === true;
       // 絞り込みが**実際に「すべて」になっている**ことの実測(@codex #390 R4 P1)。
       // select には前回操作の選択が残り得る。掛けたつもりを信用せず、選択中
       // option のラベルで確認する(確認できない回の走査は基準/同定に使わない)。
@@ -2402,24 +2406,16 @@ function createPlaywrightRegistryPage(
         // 押す前に全ページの受付番号を控え、課金後は**基準に無い行**だけから同定する。
         // ⚠読み切れなければ課金前に中止(不完全な基準は古い行を「新規」に化けさせる)。
         {
-          let baselineOk = false;
-          for (let attempt = 0; attempt < 3 && !baselineOk; attempt++) {
-            if (attempt > 0) await sleep(1500);
-            baselineTrIds.clear();
-            // ⚠基準は**全履歴**から(@codex #390 R4 P1)。select に前回の
-            // 「未請求」等が残っていると、隠れていた古い購入が基準から漏れ、
-            // 課金後(すべて表示)に「新規」へ化ける。適用+実測検証を通った回だけ
-            // を基準として採用する。
-            await applyMyPageFilter("すべて");
-            if (!(await verifyAllFilter())) continue;
+          // 1回分の全ページ走査。ok=false は「この読みを基準に使えない」
+          // (読み込み中/空ID混入/10ページ超)。
+          const collectBaselineOnce = async (): Promise<{
+            ok: boolean;
+            ids: Set<string>;
+          }> => {
+            const ids = new Set<string>();
             await resetMyPageToFirst();
-            let loading = false;
-            let overflow = false;
             for (let pageNo = 0; ; pageNo++) {
-              if (pageNo >= 10) {
-                overflow = true; // 10ページ超の履歴=基準の完全性を保証できない
-                break;
-              }
+              if (pageNo >= 10) return { ok: false, ids }; // 完全性を保証できない
               const scanJson = (await page.evaluate(
                 (json) => {
                   const { tableSel } = JSON.parse(json) as { tableSel: string };
@@ -2444,26 +2440,48 @@ function createPlaywrightRegistryPage(
                 loading: boolean;
                 rows: Array<{ trId: string }>;
               };
-              if (scan.loading) {
-                loading = true;
-                break;
-              }
+              if (scan.loading) return { ok: false, ids };
               // ⚠基準は**全行のIDが読めた時だけ**成立(@codex #345 R4 P1の復元・
               // #390 R3)。空IDの行を黙って飛ばすと、その行が課金後にIDを得て
-              // 「基準に無い行=新規」に化け、古いPDFを掴む。1行でも空なら
-              // この回の基準を無効にして取り直す(だめなら課金前に中止)。
-              if (scan.rows.some((r) => !r.trId)) {
-                loading = true; // 取り直し(リトライ経路はローディングと同じ)
-                break;
-              }
-              for (const r of scan.rows) {
-                baselineTrIds.add(r.trId);
-              }
+              // 「基準に無い行=新規」に化け、古いPDFを掴む。
+              if (scan.rows.some((r) => !r.trId)) return { ok: false, ids };
+              for (const r of scan.rows) ids.add(r.trId);
               if (!(await myPageHasNext())) break;
               await page.click(REGISTRY_SELECTORS.myPageNextButton);
               await sleep(1200);
             }
-            if (!loading && !overflow) baselineOk = true;
+            return { ok: true, ids };
+          };
+          let baselineOk = false;
+          for (let attempt = 0; attempt < 3 && !baselineOk; attempt++) {
+            if (attempt > 0) await sleep(1500);
+            baselineTrIds.clear();
+            // ⚠基準は**全履歴**から(@codex #390 R4 P1)。select に前回の
+            // 「未請求」等が残っていると、隠れていた古い購入が基準から漏れ、
+            // 課金後(すべて表示)に「新規」へ化ける。適用+実測検証を通った回だけ
+            // を基準として採用する。
+            const changed = await applyMyPageFilter("すべて");
+            if (!(await verifyAllFilter())) continue;
+            // ⚠select の値は同期・**表の再描画は非同期**(@codex #390 R6 P1)。
+            // いま change を発火した直後なら、旧フィルタのままの表を読んで
+            // 「完全な基準」と誤認し得る。猶予を置いたうえで**二重読み**し、
+            // 受付番号の集合が完全一致した読みだけを基準として採用する
+            // (再描画が途中で挟まれば集合がずれ、この回は捨てられる)。
+            if (changed) await sleep(2000);
+            const first = await collectBaselineOnce();
+            if (!first.ok) continue;
+            await sleep(800);
+            if (!(await verifyAllFilter())) continue;
+            const second = await collectBaselineOnce();
+            if (!second.ok) continue;
+            if (
+              first.ids.size !== second.ids.size ||
+              [...first.ids].some((id) => !second.ids.has(id))
+            ) {
+              continue; // 読みの間に描画が動いた=安定していない
+            }
+            for (const id of second.ids) baselineTrIds.add(id);
+            baselineOk = true;
           }
           if (!baselineOk) {
             console.warn(

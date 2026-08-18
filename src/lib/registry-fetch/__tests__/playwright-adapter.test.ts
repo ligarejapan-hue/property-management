@@ -1848,6 +1848,8 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       mypagePendingForever?: boolean;
       /** 絞り込みが「すべて」に切り替わらない画面を模す(SM8)。 */
       filterStuck?: boolean;
+      /** 基準の二重読みが毎回ずれる(再描画が落ち着かない)画面を模す(SM9)。 */
+      baselineUnstable?: boolean;
       /** 選択フェーズで選ばれた受付番号の観測用フック(SM3)。 */
       onMypageSelect?: (trId: string) => void;
       /**
@@ -1884,6 +1886,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     // 課金(#btn_seikyu)を押したかで mypage-scan の見え方を切り替える(実サイト:
     // 新行は課金後に現れる。課金前の走査=基準採取には既存行だけが見える)。
     let seikyuClicked = false;
+    let scanCallCount = 0;
     const mypageRows =
       opts.mypageRows ??
       [
@@ -1989,6 +1992,22 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       }
       // マイページ走査(課金前=基準採取/課金後=同定)。単一ページ想定。
       if (parsed.probe === "mypage-scan") {
+        if (!seikyuClicked && opts.baselineUnstable) {
+          // 呼ばれるたびに違う受付番号を返す=二重読みが一致しない。
+          scanCallCount += 1;
+          return JSON.stringify({
+            loading: false,
+            rows: [
+              {
+                trId: `FLAKY-${scanCallCount}`,
+                shozai: `${INPUT.address}１－１`,
+                status: "請求済",
+                when: "2026/08/01 09:00",
+                expiry: "2026/09/01",
+              },
+            ],
+          });
+        }
         return JSON.stringify({
           loading: false,
           rows: seikyuClicked
@@ -2381,6 +2400,19 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
   });
 
+  it("SM9: ⚠基準の二重読みが安定しない間は課金前に中止する(@codex #390 R6 P1)", async () => {
+    // select の値は同期・表の再描画は非同期。読みのたびに集合がずれる=描画が
+    // 落ち着いていない基準を採用すると、隠れていた行が「新規」に化ける。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, { baselineUnstable: true });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(CONFIRM);
+    expect(clicked).not.toContain(SEIKYU);
+  });
+
   it("S9: ⚠中止の印(aborted)が立っていたら請求ボタンを押さない（@codex R10 P1）", async () => {
     // provider が課金前タイムアウトで reject した後も、この関数は裏で走り続ける。
     // 印を見ずに押すと、呼び出し側は timeout(台帳なし・ロック解除済み)として処理を
@@ -2435,6 +2467,15 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     joinPath(process.cwd(), "src", "lib", "registry-fetch", "auto-fetch.ts"),
     "utf8",
   );
+
+  it("⚠基準は二重読みの集合一致で採用する(@codex #390 R6: 非同期再描画の旧表示を掴まない)", () => {
+    expect(src).toContain("const collectBaselineOnce");
+    expect(src).toContain("if (changed) await sleep(2000);");
+    // 二重読み(first/second)と集合一致の検査。
+    expect(src).toContain("const first = await collectBaselineOnce();");
+    expect(src).toContain("const second = await collectBaselineOnce();");
+    expect(src).toContain("first.ids.size !== second.ids.size");
+  });
 
   it("⚠基準の走査は「すべて」適用+実測検証の後(@codex #390 R4: 残留フィルタで部分集合にしない)", () => {
     const verifyAt = src.indexOf("const verifyAllFilter");
