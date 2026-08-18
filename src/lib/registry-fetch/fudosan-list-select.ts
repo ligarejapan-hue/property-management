@@ -2,9 +2,10 @@
  * 請求リスト(/TeikyoUketsuke/reqf/fudosan-list)の行選択(純関数)。
  *
  * probe13(2026-08-17)で実測確定した迷子箇所の修正の心臓部:
- * 確定(fuBtnForward)の着地はマイページではなく**請求リスト**で、そこから
- * 「対象行の checkbox(#sentaku_N)を1つだけ check →【マイページへ登録】
- * (btnForward2)」を経てはじめて #myPageTable のある画面に着く。
+ * 確定(fuBtnForward)の着地はマイページではなく**請求リスト**。発注者指示
+ * (2026-08-18・過去にも同指摘)によりここから**直接請求**する:
+ * 「対象行の checkbox(#sentaku_N)を1つだけ check →【請求】(#btn_seikyu)」。
+ * マイページへ登録してから請求する遠回りはしない。
  *
  * ⚠ここは**お金の一歩手前**: check した行がそのまま請求対象になる。
  *  - 過去のテスト/probe の未請求行が同じカートに累積し得る(実測で複数あり)。
@@ -92,4 +93,68 @@ export function selectFudosanListRow(
     .sort((a, b) => a.index - b.index);
   if (matches.length === 0) return { ok: false, reason: "no-match" };
   return { ok: true, index: matches[0].index, duplicateCount: matches.length - 1 };
+}
+
+/**
+ * マイページ一覧の「所在」セルが対象の地番/家屋番号を指しているかの判定。
+ * ⚠部分一致は禁物(@codex #345 P1): 「1-1」は「1-10」「11-1」にも部分一致し
+ * 別の登記を掴む。正規化後の**末尾一致+直前文字が数字/ハイフンでない**を要求。
+ * (auto-fetch.ts から移動。ブラウザ内 evaluate と対で維持=片方だけ直さない)
+ */
+export function registryRowMatchesChiban(
+  cellText: string,
+  normalizedTarget: string,
+): boolean {
+  const norm = normalizeChibanForDialog(cellText);
+  if (normalizedTarget.length === 0) return false;
+  if (!norm.endsWith(normalizedTarget)) return false;
+  const prev = norm[norm.length - normalizedTarget.length - 1];
+  return prev === undefined || !/[0-9-]/.test(prev);
+}
+
+/** マイページ一覧の1行(課金後の同定用に読む列だけ)。 */
+export interface MyPageScanRow {
+  /** 受付番号(列1)。選択フェーズの強い同定キー。 */
+  trId: string;
+  /** 所在セル(列4)=地番区域+地番。⚠PII: Node のメモリ内のみで扱い、ログに出さない。 */
+  shozai: string;
+  /** 状態(列5)。「請求済」のみDL可。 */
+  status: string;
+  /** 受付日時(列6)。文字列比較で新しさを判定(サイトの表示順序に依存しない)。 */
+  when: string;
+  /** PDF有効期限(列9)。空=準備前・「期間超過」=DL不可。 */
+  expiry: string;
+}
+
+/**
+ * 課金直後の「いま買った行」をマイページ全履歴から同定する(提出前レビュー指摘・
+ * confidence 82 対応)。⚠マイページは**口座の全物件の履歴**であり、地番の末尾一致
+ * だけでは**別の町の同一地番**(例: どこにでもある「1-1」)の行を掴み、他人の筆の
+ * PDF を添付し得る。同定は
+ *   ①所在の前半が期待の地番区域(都道府県込み)で始まる(別の町を排除)
+ *   ②所在の末尾が対象地番に境界つきで一致(1-1 が 11-1 に化けない)
+ *   ③その中で**受付日時が最新**の行(=いま課金した行。過去の同じ筆の購入より新しい)
+ * の3段。**同一性が先・準備状態(readyNow)は後**: 最新行がまだ準備中でも、古い
+ * ready 行へ乗り換えない(乗り換えると古い購入のPDFを「今回の結果」として添付する)。
+ */
+export function pickChargedMyPageRow(
+  rows: MyPageScanRow[],
+  expected: { targetKey: string; kuiki: string },
+): { trId: string; readyNow: boolean; status: string } | null {
+  const kuikiKey = normalizeKuikiForCompare(expected.kuiki);
+  if (!kuikiKey) return null;
+  const matches = rows
+    .filter(
+      (r) =>
+        r.trId.trim() !== "" &&
+        normalizeKuikiForCompare(r.shozai).startsWith(kuikiKey) &&
+        registryRowMatchesChiban(r.shozai, expected.targetKey),
+    )
+    .sort((a, b) => (a.when < b.when ? 1 : a.when > b.when ? -1 : 0));
+  if (matches.length === 0) return null;
+  const best = matches[0];
+  const status = best.status.trim();
+  const expiry = best.expiry.trim();
+  const readyNow = status === "請求済" && expiry !== "" && expiry !== "期間超過";
+  return { trId: best.trId.trim(), readyNow, status };
 }

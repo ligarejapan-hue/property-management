@@ -54,15 +54,13 @@ describe("maskProbeOnclick（onclick は関数名だけ残す）", () => {
   });
 
   it("関数名は残る＝セレクタの手がかりを潰さない", () => {
-    // ⚠'tabMy' は myPageTab 撤去(2026-08-17 probe13)で引数許可リストから外れた=
-    // 関数名 selectTab は残り、引数は文字数だけになる(推測で残さない)。
-    expect(maskProbeOnclick("selectTab('tabMy')")).toBe("selectTab('…5字')");
+    // ⚠selectTab/tabMy は旧マイページ遷移ごと撤去(2026-08-18 直接請求化)=
+    // 名前も引数も許可リストから外れ、どちらも文字数だけになる(推測で残さない)。
+    expect(maskProbeOnclick("selectTab('tabMy')")).toBe("(不明:9字)('…5字')");
     expect(maskProbeOnclick("fuBtnForward()")).toBe("fuBtnForward()");
-    // ⚠数字入りの既知名(btnForward2)が名前ごと潰れないこと(2026-08-17):
-    // かつては数字潰しが名前より先に走り btnForward＊ になって一致しなかった。
-    expect(maskProbeOnclick("btnForward2(); return false;")).toBe(
-      "btnForward2()",
-    );
+    // ⚠数字入りの既知名が名前ごと潰れないこと(2026-08-17):
+    // かつては数字潰しが名前より先に走り `…Type＊` になって一致しなかった。
+    expect(maskProbeOnclick("cbnDlgChibanType0()")).toBe("cbnDlgChibanType0()");
     // 数字入りでも**未知**の名前は従来どおり文字数だけ(許可リスト方式は不変)。
     expect(maskProbeOnclick("owner2Show('Yamada')")).toBe(
       "(不明:10字)('…6字')",
@@ -110,7 +108,9 @@ describe("maskProbeOnclick（onclick は関数名だけ残す）", () => {
   });
 
   it("未知のタブ名は文字数で分かる（必要になったら明示的に足せる）", () => {
-    expect(maskProbeOnclick("selectTab('Mypage')")).toBe("selectTab('…6字')");
+    expect(maskProbeOnclick("myPageDownload('Mypage')")).toBe(
+      "myPageDownload('…6字')",
+    );
   });
 
   it("⚠引用符が閉じていない（途中で切れた）ものは失敗側に倒す", () => {
@@ -157,9 +157,9 @@ describe("formatRegistryPageProbe（1行の診断ログ）", () => {
   it("ボタンはid・名前・押せるかを出す", () => {
     const out = formatRegistryPageProbe({
       ...base,
-      buttons: [{ id: "myPageSeikyu", label: "請求", disabled: true }],
+      buttons: [{ id: "btn_seikyu", label: "請求", disabled: true }],
     });
-    expect(out).toContain("myPageSeikyu");
+    expect(out).toContain("btn_seikyu");
     expect(out).toContain("請求");
     expect(out).toContain("disabled");
   });
@@ -191,9 +191,9 @@ describe("formatRegistryPageProbe（1行の診断ログ）", () => {
       ...base,
       tabs: [{ label: "マイページ", onclick: "selectTab('tabMy')" }],
     });
-    // 関数名 selectTab は KNOWN_SITE_IDENTIFIERS で残る。引数 'tabMy' は
-    // myPageTab 撤去(probe13)で許可リストから外れ、文字数だけになる。
-    expect(out).toContain("selectTab(");
+    // selectTab/tabMy は撤去済み=名前も引数も文字数だけになる(残っている
+    // 既知名 myPageDownload 等はそのまま出る)。
+    expect(out).toContain("(不明:9字)(");
     expect(out).toContain("'…5字'");
   });
 
@@ -254,7 +254,7 @@ describe("⚠この診断は「知りたいこと」に答えられるか（作�
       ],
       known: {
         "#myPageTable": false,
-        "#myPageSeikyu": false,
+        "#btn_seikyu": false,
         "#fudosanIchiranTbl": true,
         "a[onclick*=\"selectTab('tabMy')\"]": true,
       },
@@ -268,7 +268,7 @@ describe("⚠この診断は「知りたいこと」に答えられるか（作�
     // ③いまの画面に「請求」ボタンが在る＝id は想定と違うが**表示名で狙える**。
     //   これが「マイページへ行かず、この画面で請求する」という修正方針の根拠になる。
     expect(out).toMatch(/\(不明:\d+字\)\[請求\]/);
-    expect(out).toContain("#myPageSeikyu=no");
+    expect(out).toContain("#btn_seikyu=no");
 
     // ⚠それでいて、表の中身は1文字も出ていない。
     for (const leak of ["井土ケ谷", "田中", "69-2"]) expect(out).not.toContain(leak);
@@ -279,7 +279,7 @@ describe("KNOWN_PROBE_SELECTORS", () => {
   it("マイページ遷移の失敗を切り分けるのに要る4つを含む", () => {
     for (const sel of [
       "#myPageTable",
-      "#myPageSeikyu",
+      "#btn_seikyu",
       "#fudosanIchiranTbl",
       "#siborikomi",
     ]) {

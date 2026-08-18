@@ -1821,7 +1821,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
   //  - JSON(tableSel=ダイアログ) = 対象地番の探索結果
   //  - JSON(ownerSel) = 請求事項チェックの結果
   //  - JSON(tableSel=マイページ) = 呼び出し順に [行選択, 状態確認…, 再選択] を返す
-  const SEIKYU = "#myPageSeikyu";
+  const SEIKYU = "#btn_seikyu"; // 発注者指示 2026-08-18: 請求リストから直接課金
   const DIALOG_OK = "#cbnDlgBtnOk";
   const CONFIRM = 'button[onclick*="fuBtnForward"]';
 
@@ -1830,15 +1830,24 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     opts: {
       dialogFind?: string;
       cert?: { on: string; offResults: string[] };
-      myPageSeq?: unknown[];
-      /** 確定前に存在した行ID(作成同一性の判定材料)。 */
-      prevRowIds?: string[];
-      /** 確定前の一覧が読めない状態を模す(@codex R3 P1: 基準なしでは課金しない)。 */
-      baselineUnreadable?: boolean;
-      /** 絞り込みが確認できない状態を模す(@codex R6 P1: 未検証の絞り込みで課金しない)。 */
-      filterUnverified?: boolean;
       /** 選択の登録確認の応答(発注者指示 2026-08-15)。既定=登録済み。 */
       selectionVerify?: { registered: boolean; okDisabled: boolean };
+      /**
+       * 課金後のマイページ走査(mypage-scan)が返す行。既定=いま買った行が
+       * 請求済+期限内で1件。⚠shozai は「都道府県込みの所在+地番」の形
+       * (実サイト同様)。別の町の行を混ぜる等で同定の誤りを炙り出す。
+       */
+      mypageRows?: Array<{
+        trId: string;
+        shozai: string;
+        status: string;
+        when: string;
+        expiry: string;
+      }>;
+      /** 課金後の行が永遠に準備前(請求中)のままの画面を模す(S5)。 */
+      mypagePendingForever?: boolean;
+      /** 選択フェーズで選ばれた受付番号の観測用フック(SM3)。 */
+      onMypageSelect?: (trId: string) => void;
       /** 確定前に読む所在(kuiki)。既定=INPUT.address(空文字で取得失敗を模す)。 */
       kuikiValue?: string;
       /** 請求リスト(確定の着地・probe13)の行。既定=対象1行(未チェック)。 */
@@ -1856,8 +1865,17 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     } = {},
   ) {
     const clicked: string[] = [];
-    const myPageSeq = [...(opts.myPageSeq ?? [])];
-    let lastMyPage: unknown = myPageSeq[myPageSeq.length - 1];
+    const mypageRows =
+      opts.mypageRows ??
+      [
+        {
+          trId: "ROW-9",
+          shozai: `${INPUT.address}１－１`, // 都道府県込み所在+全角地番(実サイト形)
+          status: opts.mypagePendingForever ? "請求中" : "請求済",
+          when: "2026/08/18 12:00",
+          expiry: opts.mypagePendingForever ? "" : "2026/09/18",
+        },
+      ];
     // 請求リストの行と check 状態(fudosan-list-apply がここを書き換える)。
     const listState = {
       rows:
@@ -1906,27 +1924,9 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
           opts.selectionVerify ?? { registered: true, okDisabled: false },
         );
       }
-      // 絞り込みの検証(@codex R6 P1)。既定は「効いている」。myPageSeq は消費しない。
-      if (
-        typeof parsed.filterSel === "string" &&
-        typeof parsed.tableSel === "string"
-      ) {
-        return JSON.stringify(
-          opts.filterUnverified
-            ? { ok: false, hard: true }
-            : { ok: true, hard: false },
-        );
-      }
       // 絞り込みの適用(戻り値は使われない)。
       if (typeof parsed.filterSel === "string") {
         return undefined;
-      }
-      // 確定前の既存行ID読み取り(@codex R2 P1: 作成同一性の土台)。myPageSeq は消費しない。
-      if (parsed.probe === "row-ids") {
-        return JSON.stringify({
-          present: opts.baselineUnreadable ? false : true,
-          ids: opts.prevRowIds ?? [],
-        });
       }
       // 確定前の所在(kuiki)読み取り(probe13: 行照合の材料。押すと欄ごと消える)。
       // ⚠実サイトどおり**市区町村以下だけ**を返す(@codex #389 R1: 都道府県は
@@ -1959,10 +1959,15 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       if (parsed.probe === "fudosan-list-checked") {
         return JSON.stringify([...listState.checked].sort((a, b) => a - b));
       }
-      if (parsed.tableSel === "#myPageTable") {
-        const next = myPageSeq.length > 0 ? myPageSeq.shift() : lastMyPage;
-        lastMyPage = next;
-        return typeof next === "string" ? next : JSON.stringify(next);
+      // 課金後の走査(同定フェーズ)。毎回同じ行集合を返す(単一ページ想定)。
+      if (parsed.probe === "mypage-scan") {
+        return JSON.stringify({ loading: false, rows: mypageRows });
+      }
+      // 課金後の選択フェーズ(受付番号で選ぶ)。対象が居れば ready。
+      if (parsed.probe === "mypage-select") {
+        const hit = mypageRows.some((r) => r.trId === parsed.trId);
+        if (hit) opts.onMypageSelect?.(String(parsed.trId));
+        return JSON.stringify({ result: hit ? "ready" : "not-found" });
       }
       return undefined;
     });
@@ -1991,26 +1996,19 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     };
   }
 
-  const REGISTER =
-    'button[onclick*="btnForward2"], input[onclick*="btnForward2"]';
 
   it("S1: 幸せ経路 — 確定→行選択→請求→請求済→表示・保存で PDF を返す(請求は1回だけ)", async () => {
     const f = makeFakeChromium();
-    const { clicked } = wireStage2(f, {
-      myPageSeq: [
-        { result: "checked", checkedCount: 1, rowId: "ROW-9" }, // 行選択(行ID付き)
-        { result: "ready" }, // 請求済+PDF準備完了(見つけたその場で選択済み)
-      ],
-    });
+    const { clicked } = wireStage2(f);
     const page = await makeStage2Page(f);
     const buf = await page.fetchByLocationCandidate(INPUT);
     expect(Buffer.isBuffer(buf)).toBe(true);
     expect(clicked).toContain(DIALOG_OK);
     expect(clicked).toContain(CONFIRM);
-    // probe13: 確定の着地=請求リスト。行check→【マイページへ登録】を経て
-    // はじめてマイページに着く(旧 selectTab('tabMy') タブは押さない=存在しない)。
-    expect(clicked).toContain(REGISTER);
+    // probe13+発注者指示: 確定の着地=請求リストで行をcheckし、【請求】を**直接**押す。
+    // マイページへ登録するボタンや旧 selectTab('tabMy') タブは押さない。
     expect(clicked).not.toContain("a[onclick*=\"selectTab('tabMy')\"]");
+    expect(clicked.join(" ")).not.toContain("btnForward2");
     expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
   });
 
@@ -2027,8 +2025,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       code: "provider_error",
     });
     expect(clicked).toContain(CONFIRM); // 確定までは進む(無料)
-    expect(clicked).not.toContain(REGISTER);
-    expect(clicked).not.toContain(SEIKYU);
+    expect(clicked).not.toContain(SEIKYU); // 課金ボタンには触れない
   });
 
   it("SL2: ⚠同一内容の未請求が複数残っていても、先頭の1件だけで進める(2件checkしない)", async () => {
@@ -2038,15 +2035,11 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         { index: 2, chiban: "１－１", kuiki: INPUT.address, seikyuType: "所有者事項", seikyuzumi: "false" },
         { index: 1, chiban: "１－１", kuiki: INPUT.address, seikyuType: "所有者事項", seikyuzumi: "false" },
       ],
-      myPageSeq: [
-        { result: "checked", checkedCount: 1, rowId: "ROW-9" },
-        { result: "ready" },
-      ],
     });
     const page = await makeStage2Page(f);
     const buf = await page.fetchByLocationCandidate(INPUT);
     expect(Buffer.isBuffer(buf)).toBe(true);
-    expect(clicked).toContain(REGISTER);
+    expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
   });
 
   it("SL3: ⚠checkの適用が画面に効かなければ、read-backで見抜いて登録前に中止", async () => {
@@ -2056,8 +2049,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
       code: "provider_error",
     });
-    expect(clicked).not.toContain(REGISTER);
-    expect(clicked).not.toContain(SEIKYU);
+    expect(clicked).not.toContain(SEIKYU); // 課金ボタンには触れない
   });
 
   it("SL4: ⚠所在(kuiki)が読めていなければ行を選ばない(照合の土台なし=中止)", async () => {
@@ -2067,8 +2059,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
       code: "provider_error",
     });
-    expect(clicked).not.toContain(REGISTER);
-    expect(clicked).not.toContain(SEIKYU);
+    expect(clicked).not.toContain(SEIKYU); // 課金ボタンには触れない
   });
 
   it("SL5: ⚠過去操作でcheck済みの別行が残っていても、対象1件だけに直してから登録する", async () => {
@@ -2080,15 +2071,11 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         { index: 2, chiban: "９９－９", kuiki: INPUT.address, seikyuType: "所有者事項", seikyuzumi: "false" },
       ],
       fudosanPreChecked: [2],
-      myPageSeq: [
-        { result: "checked", checkedCount: 1, rowId: "ROW-9" },
-        { result: "ready" },
-      ],
     });
     const page = await makeStage2Page(f);
     const buf = await page.fetchByLocationCandidate(INPUT);
     expect(Buffer.isBuffer(buf)).toBe(true);
-    expect(clicked).toContain(REGISTER);
+    expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
   });
 
   it("SL6: ⚠請求済みの行しか無ければ選ばない(再請求の入口を作らない)", async () => {
@@ -2102,8 +2089,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
       code: "provider_error",
     });
-    expect(clicked).not.toContain(REGISTER);
-    expect(clicked).not.toContain(SEIKYU);
+    expect(clicked).not.toContain(SEIKYU); // 課金ボタンには触れない
   });
 
   it("S2: ⚠対象の地番が見つからなければ not_found で終了し、確定も請求も押さない", async () => {
@@ -2133,26 +2119,9 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(clicked).not.toContain(SEIKYU);
   });
 
-  it("S4: ⚠マイページで対象行を1件に確定できなければ請求しない（別の行を買わない）", async () => {
-    const f = makeFakeChromium();
-    const { clicked } = wireStage2(f, {
-      myPageSeq: [{ result: "ambiguous", count: 2 }],
-    });
-    const page = await makeStage2Page(f);
-    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
-      code: "provider_error",
-    });
-    expect(clicked).not.toContain(SEIKYU);
-  });
-
   it("S5: ⚠請求後に行が準備完了に到達しなければ charged_but_failed（provider_error にしない）", async () => {
     const f = makeFakeChromium();
-    const { clicked } = wireStage2(f, {
-      myPageSeq: [
-        { result: "checked", checkedCount: 1, rowId: "ROW-9" },
-        { result: "not-found" }, // 課金後、行が見つからないまま(以降も繰り返し)
-      ],
-    });
+    const { clicked } = wireStage2(f, { mypagePendingForever: true });
     const page = await makeStage2Page(f);
     await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
       code: "charged_but_failed",
@@ -2160,30 +2129,87 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(clicked).toContain(SEIKYU); // 課金は押している=だから分類が変わる
   });
 
-  it("S8: ⚠絞り込みが効いたことを確認できなければ、確定の前に中止する（@codex R6 P1）", async () => {
-    // 「掛けたつもり」の絞り込みを信用すると、隠れていた未請求残骸が確定後に
-    // 「新規」へ化ける。検証は結果そのもの(選択中ラベル+全行の状態列)で行う。
+  it("SM1: ⚠別の町の同一地番の請求済行を掴んでDLしない(提出前レビュー confidence82)", async () => {
+    // 口座のマイページ全履歴に「別の町の 1-1」(請求済・期限内・日時も新しい)しか
+    // 見えない状況。旧実装(地番末尾×最新)はこれを掴んで他人の筆のPDFを添付した。
     const f = makeFakeChromium();
-    const { clicked } = wireStage2(f, { filterUnverified: true });
+    const { clicked } = wireStage2(f, {
+      mypageRows: [
+        {
+          trId: "ROW-OTHER",
+          shozai: "東京都別の市別の町１－１", // 地番は同じ・所在(町)が違う
+          status: "請求済",
+          when: "2026/08/18 23:59",
+          expiry: "2026/09/18",
+        },
+      ],
+    });
     const page = await makeStage2Page(f);
     await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
-      code: "provider_error",
+      code: "charged_but_failed", // 課金はした(押した)が、取り違えず「見つからない」で終える
     });
-    expect(clicked).not.toContain(CONFIRM); // 確定を押していない=カート行なし
-    expect(clicked).not.toContain(SEIKYU);
+    expect(clicked).toContain(SEIKYU);
+    // ⚠取り違えのDL(表示・保存)を押していないことが本題。
+    expect(clicked.join(" ")).not.toContain("myPageDownload");
   });
 
-  it("S7: ⚠確定前の一覧(基準)が読めなければ、確定の前に中止する（カート行も作らない）", async () => {
-    // 基準なしで進むと「ちょうど1件」規則に落ち、既存の未請求残骸へ課金し得る
-    // (@codex #345 R3 P1)。確定前に止めれば外部は完全に無傷。
+  it("SM2: ⚠同じ筆の古い請求済行が居ても、最新(いま買った)行が準備前なら乗り換えない", async () => {
+    // 乗り換えると「古い購入のPDF」を今回の結果として添付してしまう。
+    // 同一性が先・準備状態は後(準備が済むまで待ち、済まなければ charged_but_failed)。
     const f = makeFakeChromium();
-    const { clicked } = wireStage2(f, { baselineUnreadable: true });
+    const { clicked } = wireStage2(f, {
+      mypageRows: [
+        {
+          trId: "ROW-OLD",
+          shozai: `${INPUT.address}１－１`,
+          status: "請求済",
+          when: "2026/08/01 09:00", // 古い
+          expiry: "2026/09/01",
+        },
+        {
+          trId: "ROW-NEW",
+          shozai: `${INPUT.address}１－１`,
+          status: "請求中", // いま買った行はまだ準備前のまま
+          when: "2026/08/18 12:00",
+          expiry: "",
+        },
+      ],
+    });
     const page = await makeStage2Page(f);
     await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
-      code: "provider_error",
+      code: "charged_but_failed",
     });
-    expect(clicked).not.toContain(CONFIRM); // 確定を押していない=カート行なし
-    expect(clicked).not.toContain(SEIKYU);
+    expect(clicked).toContain(SEIKYU);
+    expect(clicked.join(" ")).not.toContain("myPageDownload");
+  });
+
+  it("SM3: 同じ筆の古い行と新しい行(準備完了)が並んだら、新しい行を受付番号で選ぶ", async () => {
+    const f = makeFakeChromium();
+    const selects: string[] = [];
+    const { clicked } = wireStage2(f, {
+      mypageRows: [
+        {
+          trId: "ROW-OLD",
+          shozai: `${INPUT.address}１－１`,
+          status: "請求済",
+          when: "2026/08/01 09:00",
+          expiry: "2026/09/01",
+        },
+        {
+          trId: "ROW-NEW",
+          shozai: `${INPUT.address}１－１`,
+          status: "請求済",
+          when: "2026/08/18 12:00",
+          expiry: "2026/09/18",
+        },
+      ],
+      onMypageSelect: (trId) => selects.push(trId),
+    });
+    const page = await makeStage2Page(f);
+    const buf = await page.fetchByLocationCandidate(INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
+    expect(selects).toEqual(["ROW-NEW"]); // 最新=いま買った行だけを選ぶ
   });
 
   it("S9: ⚠中止の印(aborted)が立っていたら請求ボタンを押さない（@codex R10 P1）", async () => {
@@ -2191,9 +2217,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     // 印を見ずに押すと、呼び出し側は timeout(台帳なし・ロック解除済み)として処理を
     // 終えているのに課金だけが起きる=記録なき課金。
     const f = makeFakeChromium();
-    const { clicked } = wireStage2(f, {
-      myPageSeq: [{ result: "checked", checkedCount: 1, rowId: "ROW-9" }],
-    });
+    const { clicked } = wireStage2(f);
     const page = await makeStage2Page(f);
     await expect(
       (page as unknown as {
@@ -2243,22 +2267,44 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     "utf8",
   );
 
-  it("確定の前に既存行IDを控える(作成同一性の材料)", () => {
-    expect(src).toContain('probe: "row-ids"');
-    // 読み取りは確定クリックより前
-    expect(src.indexOf('probe: "row-ids"')).toBeLessThan(
-      src.indexOf("REGISTRY_SELECTORS.requestConfirmButton)"),
+  it("⚠マイページの基準控え(row-ids)を復活させない(発注者指示 2026-08-18=直接請求)", () => {
+    // 旧: 確定前にマイページの行IDを控え、確定後の「新規行」をマイページで選んで
+    // 課金していた。発注者指示「マイページに登録はせずに直接請求します」で、
+    // 課金対象の選択は請求リスト側の行照合(fudosan-list-select)に一本化された。
+    expect(src).not.toContain('probe: "row-ids"');
+    expect(src).not.toContain("prevIds.includes(rowId)");
+    // 課金前の未請求絞込・単一ページ要求も旧経路専用(行が溜まると誤中止を生む)。
+    expect(src).not.toContain('applyMyPageFilter("未請求")');
+    expect(src).not.toContain("await myPageIsSinglePage()");
+  });
+
+  it("⚠課金は請求リストの【請求】(#btn_seikyu)を直接押す(マイページ側の請求ボタンは使わない)", () => {
+    expect(src).toContain("domClick(REGISTRY_SELECTORS.fudosanListSeikyuButton)");
+    expect(src).not.toContain("myPageSeikyuButton");
+    // charged=true(安全側の会計)はクリックの直前(間に await を挟まない同一同期区間)。
+    const clickAt = src.indexOf(
+      "await domClick(REGISTRY_SELECTORS.fudosanListSeikyuButton)",
     );
+    const chargedAt = src.lastIndexOf("chargeState.charged = true", clickAt);
+    expect(chargedAt).toBeGreaterThan(-1);
+    expect(clickAt).toBeGreaterThan(chargedAt);
+    expect(src.slice(chargedAt, clickAt)).not.toContain("await ");
+    // 請求の submit の着地(マイページ一覧)を待ってから請求済の実測へ。
+    const landAt = src.indexOf("REGISTRY_SELECTORS.myPageTable", clickAt);
+    expect(landAt).toBeGreaterThan(clickAt);
+    expect(src).toContain("domClick(REGISTRY_SELECTORS.fudosanListSeikyuButton)");
   });
 
-  it("行選択は「確定前から存在した行」を除外する", () => {
-    expect(src).toContain("prevIds.includes(rowId)");
-  });
-
-  it("課金後の探索・選択は行IDに紐付ける(地番の再一致より強い同定)", () => {
-    // R5 で状態待ちと再選択を1つの探索へ統合(見つけたその場で選択)。紐付けは1箇所。
-    expect(src).toContain("rowId: chargedRowId,");
-    expect(src).toContain("rowId ? trId !== rowId :");
+  it("課金後の同定は純関数 pickChargedMyPageRow(所在前半+地番境界+最新)で行う", () => {
+    // 提出前レビュー(confidence82)対応: 地番末尾だけの同定は**別の町の同一地番**を
+    // 掴む。走査(mypage-scan)→Node側で同定→受付番号で選択(mypage-select)の二相。
+    expect(src).toContain(String.raw`applyMyPageFilter("請求済")`);
+    expect(src).toContain("pickChargedMyPageRow(");
+    expect(src).toContain('probe: "mypage-scan"');
+    expect(src).toContain('probe: "mypage-select"');
+    // 旧: 地番末尾×最新×最初のページ、の evaluate 内同定は撤去。
+    expect(src).not.toContain(String.raw`rowId: "",`);
+    expect(src).not.toContain("rowId ? trId !== rowId :");
   });
 
   it("⚠課金後の各走査は先頭ページから始める(@codex R6 P1: 末尾に居座って見逃さない)", () => {
@@ -2269,13 +2315,6 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     );
   });
 
-  it("⚠絞り込みは結果で検証する(@codex R6 P1: ラベル一致+全行の状態列が未請求)", () => {
-    expect(src).toContain("verifyPendingView");
-    expect(src).toContain("selectedOptions");
-    // 全行の状態列チェック(効いていない絞り込みを見抜く)
-    expect(src).toContain("if (status !== label)");
-  });
-
   it("⚠課金後のダウンロード待ちは明示予算を渡す(@codex R9 P1: 既定30秒に先取りされない)", () => {
     // page.setDefaultTimeout は通常予算のまま。timeout を渡さないと provider の
     // 延長予算(10分)より先にブラウザ側の既定が打ち切り、支払済みが台帳固定される。
@@ -2284,35 +2323,6 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     );
   });
 
-  it("⚠単一ページ判定は前後両方のページ送りが無効であること(@codex R7 P1)", () => {
-    // 次ページだけ見ると最終ページ(次=無効・前=有効)を単一ページと誤認し、
-    // 先頭側の行が基準から漏れる。基準・選択の前には先頭復帰も行う。
-    expect(src).toContain("myPageIsSinglePage");
-    expect(src).toContain("myPagePrevButton))");
-    // 基準(row-ids 読み取り)より前に先頭復帰+単一ページ判定がある
-    const baselineIdx = src.indexOf('probe: "row-ids"');
-    const resetIdx = src.indexOf("await resetMyPageToFirst();");
-    const singleIdx = src.indexOf("await myPageIsSinglePage()");
-    expect(resetIdx).toBeGreaterThan(-1);
-    expect(singleIdx).toBeGreaterThan(-1);
-    expect(resetIdx).toBeLessThan(baselineIdx);
-    expect(singleIdx).toBeLessThan(baselineIdx);
-  });
-
-  it("⚠基準は全行のIDが読めた時だけ成立する(@codex R4 P1: 不完全な基準で課金しない)", () => {
-    // ID欠けの行を黙って落とすと present:true のまま不完全な基準になり、
-    // 確定後にその行がIDを得て「新規」に見え、残骸へ課金し得る。
-    const baseline = src.slice(
-      src.indexOf('probe: "row-ids"') - 2600,
-      src.indexOf('probe: "row-ids"'),
-    );
-    // all-or-nothing: ID が読めない行が1つでもあれば基準不成立
-    expect(baseline).toContain(
-      'if (!id) return JSON.stringify({ present: false, ids: [] });',
-    );
-    // 読み込み中の表は基準にしない
-    expect(baseline).toContain("データ取得中");
-  });
 });
 
 /**

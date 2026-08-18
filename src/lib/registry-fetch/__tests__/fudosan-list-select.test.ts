@@ -11,8 +11,10 @@ import {
   FUDOSAN_LIST_CHECKBOX_NAME,
   FUDOSAN_LIST_HIDDEN_PREFIX,
   normalizeKuikiForCompare,
+  pickChargedMyPageRow,
   selectFudosanListRow,
   type FudosanListRow,
+  type MyPageScanRow,
 } from "@/lib/registry-fetch/fudosan-list-select";
 
 const KUIKI = "神奈川県横浜市南区井土ケ谷中町";
@@ -106,5 +108,72 @@ describe("selectFudosanListRow", () => {
       ryokin: "ryokin_",
     });
     expect(FUDOSAN_LIST_CHECKBOX_NAME).toBe("sentaku");
+  });
+});
+
+describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー confidence82 対応)", () => {
+  const KU = "神奈川県横浜市南区井土ケ谷中町";
+  function mrow(over: Partial<MyPageScanRow>): MyPageScanRow {
+    return {
+      trId: "R1",
+      shozai: `${KU}６９－２`,
+      status: "請求済",
+      when: "2026/08/18 12:00",
+      expiry: "2026/09/18",
+      ...over,
+    };
+  }
+  const EXP = { targetKey: "69-2", kuiki: KU };
+
+  it("⚠別の町の同一地番は選ばない(地番末尾一致だけでは他人の筆を掴む)", () => {
+    expect(
+      pickChargedMyPageRow(
+        [mrow({ shozai: "東京都別の市別の町６９－２", trId: "OTHER" })],
+        EXP,
+      ),
+    ).toBeNull();
+  });
+
+  it("⚠「69-2」は「169-2」の行に化けない(境界つき末尾一致)", () => {
+    expect(
+      pickChargedMyPageRow([mrow({ shozai: `${KU}１６９－２` })], EXP),
+    ).toBeNull();
+  });
+
+  it("同じ筆が複数(過去の購入履歴)なら**最新の行**=いま買った行を選ぶ", () => {
+    const picked = pickChargedMyPageRow(
+      [
+        mrow({ trId: "OLD", when: "2026/08/01 09:00" }),
+        mrow({ trId: "NEW", when: "2026/08/18 12:00" }),
+      ],
+      EXP,
+    );
+    expect(picked?.trId).toBe("NEW");
+    expect(picked?.readyNow).toBe(true);
+  });
+
+  it("⚠最新行が準備前でも、古い ready 行へ乗り換えない(同一性が先・準備状態は後)", () => {
+    const picked = pickChargedMyPageRow(
+      [
+        mrow({ trId: "OLD", when: "2026/08/01 09:00" }), // ready な古い購入
+        mrow({ trId: "NEW", when: "2026/08/18 12:00", status: "請求中", expiry: "" }),
+      ],
+      EXP,
+    );
+    expect(picked?.trId).toBe("NEW");
+    expect(picked?.readyNow).toBe(false); // 呼び出し側は待つ(乗り換えない)
+  });
+
+  it("期限切れ(期間超過)・期限空(準備前)は readyNow=false", () => {
+    expect(
+      pickChargedMyPageRow([mrow({ expiry: "期間超過" })], EXP)?.readyNow,
+    ).toBe(false);
+    expect(pickChargedMyPageRow([mrow({ expiry: "" })], EXP)?.readyNow).toBe(false);
+  });
+
+  it("該当なし/受付番号なし/期待所在が空なら null(進めない=安全側)", () => {
+    expect(pickChargedMyPageRow([], EXP)).toBeNull();
+    expect(pickChargedMyPageRow([mrow({ trId: " " })], EXP)).toBeNull();
+    expect(pickChargedMyPageRow([mrow({})], { ...EXP, kuiki: " " })).toBeNull();
   });
 });
