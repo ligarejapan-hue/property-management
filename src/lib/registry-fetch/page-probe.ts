@@ -43,13 +43,12 @@ const MAX_ID = 60;
  */
 export const KNOWN_PROBE_SELECTORS = [
   "#myPageTable",
-  "#myPageSeikyu",
   "#siborikomi",
   "#myReloadButton",
   "#fudosanIchiranTbl",
   // 請求リスト(確定の着地・2026-08-17 probe13)の遷移部品。旧 tabMy は撤去
   // (「その不在」が第5回テストの決め手になった役目を終え、現行フローの部品に置換)。
-  'button[onclick*="btnForward2"], input[onclick*="btnForward2"]',
+  "#btn_seikyu",
   'input[name="sentaku"]',
 ] as const;
 
@@ -158,8 +157,8 @@ function clipId(raw: string): string {
  */
 export const KNOWN_SITE_IDENTIFIERS: ReadonlySet<string> = new Set([
   // マイページ（今回の失敗地点）
-  "myPageTable", "myPageSeikyu", "myPageTable_next", "myPageTable_previous",
-  "myReloadButton", "siborikomi", "selectTab", "myPageDownload",
+  "myPageTable", "myPageTable_next", "myPageTable_previous",
+  "myReloadButton", "siborikomi", "myPageDownload",
   // 不動産請求
   "fudosanIchiranTbl", "fuAll", "fuChibanKaoku", "fuChibanKaokuIchiran",
   "fuChibanKuiki", "fuChibanKuikiCode", "fuFudosanNo", "fuShoyusya",
@@ -167,7 +166,7 @@ export const KNOWN_SITE_IDENTIFIERS: ReadonlySet<string> = new Set([
   "fuShozaiSentaku", "fuShozaiTypeTATEMONO", "fuShozaiTypeTOCHI",
   "fuTodofukenShozai", "fuBtnForward",
   // 請求リスト(確定の着地・2026-08-17 probe13。fudosan-list-select.ts が参照)
-  "btnForward2", "sentaku", "chkSentaku",
+  "btn_seikyu", "sentaku", "chkSentaku",
   // 地番検索ダイアログ
   "cbnDlgBtnCancel", "cbnDlgBtnOk", "cbnDlgBtnPageNext", "cbnDlgCheckedChibanDsp",
   "cbnDlgCheckedChibanString", "cbnDlgChibanCheckTbl", "cbnDlgChibanDialog",
@@ -208,7 +207,7 @@ export function maskProbeOnclick(raw: string): string {
   // だけで、**入力のそれ以外の文字は一切出力へ運ばれない**。
   //
   // ⚠関数名は **raw のまま**切り出して許可リストへ通す(2026-08-17)。先に数字を
-  // 潰すと `btnForward2` が `btnForward＊` になり、正しい既知名まで一致しなくなる。
+  // 潰すと数字入りの既知名(例 `cbnDlgChibanType0`)が `…Type＊` になり一致しなくなる。
   // 未知の名前は safeIdentifier が文字数だけにするので、数字入りの未知名も
   // そのまま出ることはない(出力は許可リスト経由のみ=方式は不変)。
   const head = raw.match(/^\s*([A-Za-z_$][A-Za-z_$.0-9]{0,40})\s*\(/);

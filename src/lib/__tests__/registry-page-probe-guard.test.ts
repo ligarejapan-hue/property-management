@@ -122,9 +122,10 @@ describe("page-probe が読む範囲（PII 防御）", () => {
 
 describe("診断を仕掛ける場所", () => {
   it("⚠遷移の待ちが失敗したときに採取する（第1回・第5回に実際に止まった区間）", () => {
-    // 「登録ボタンを押す → myPageTable を待つ」が try で囲われ、catch で採取している。
+    // 「行選択のread-backまで」が try で囲われ、catch で採取している
+    // (課金クリック以降は try の外=課金前のみ採取の原則)。
     expect(AUTO_FETCH).toMatch(
-      /fudosanListRegisterButton[\s\S]{0,400}?catch[\s\S]{0,900}?logRegistryPageProbe\(\s*page,\s*"mypage-transition"/,
+      /fudosan-list-checked[\s\S]{0,1600}?catch[\s\S]{0,900}?logRegistryPageProbe\(\s*page,\s*"mypage-transition"/,
     );
   });
 
@@ -140,30 +141,27 @@ describe("診断を仕掛ける場所", () => {
     const before = AUTO_FETCH.slice(0, confirmAt);
     expect(before.lastIndexOf("try {")).toBeGreaterThan(before.lastIndexOf("catch"));
 
-    // その try の内側に、確定〜登録〜一覧待ちまでの一式が全部入っている
-    // (probe13 で確定した正しい遷移: 確定→請求リスト→行選択→登録→マイページ)。
+    // その try の内側に、確定〜行選択〜read-backまでの一式が入っている
+    // (直接請求: 確定→請求リスト→行選択→実測。課金クリックは try の外)。
     const guarded = AUTO_FETCH.slice(before.lastIndexOf("try {"), probeAt);
     expect(guarded).toContain("domClick(REGISTRY_SELECTORS.requestConfirmButton)");
     expect(guarded).toContain("REGISTRY_SELECTORS.searchResult");
     expect(guarded).toContain("selectFudosanListRow(");
-    expect(guarded).toContain("domClick(REGISTRY_SELECTORS.fudosanListRegisterButton)");
-    expect(guarded).toContain("REGISTRY_SELECTORS.myPageTable");
+    expect(guarded).toContain('probe: "fudosan-list-checked"');
+    expect(guarded).not.toContain("fudosanListSeikyuButton");
   });
 
-  it("⚠登録ボタンのクリックも try の内側にある（クリック自体が失敗しても診断が走る）", () => {
-    // @codex #383 P2: クリック中にページが遷移して実行コンテキストが壊れると
-    // domClick が reject する。try の外だと診断がまったく走らない。
-    const registerAt = AUTO_FETCH.indexOf(
-      "domClick(REGISTRY_SELECTORS.fudosanListRegisterButton)",
+  it("⚠課金クリック(【請求】)は診断 try の**外**にある（課金後に診断を採らない）", () => {
+    // 発注者指示 2026-08-18: マイページへ登録せず請求リストから直接請求。
+    // 旧【マイページへ登録】ボタンは撤去(復活させない)。
+    expect(AUTO_FETCH).not.toContain("fudosanListRegisterButton");
+    const seikyuAt = AUTO_FETCH.indexOf(
+      "domClick(REGISTRY_SELECTORS.fudosanListSeikyuButton)",
     );
     const probeAt = AUTO_FETCH.indexOf('logRegistryPageProbe(page, "mypage-transition")');
-    expect(registerAt).toBeGreaterThan(-1);
-    expect(probeAt).toBeGreaterThan(registerAt);
-    // クリックの直前に try があること（間に catch を挟まない）。
-    const before = AUTO_FETCH.slice(0, registerAt);
-    const lastTry = before.lastIndexOf("try {");
-    const lastCatch = before.lastIndexOf("catch");
-    expect(lastTry).toBeGreaterThan(lastCatch);
+    expect(seikyuAt).toBeGreaterThan(-1);
+    // 診断(catch内)より後=課金前のみ採取の原則。
+    expect(seikyuAt).toBeGreaterThan(probeAt);
   });
 
   it("⚠旧遷移(selectTab('tabMy')のタブ)を復活させない（probe13: 着地に存在しない）", () => {
@@ -174,16 +172,16 @@ describe("診断を仕掛ける場所", () => {
     expect(AUTO_FETCH).not.toMatch(/a\[onclick\*=\\?"selectTab/);
   });
 
-  it("⚠請求リストの行は「ちょうど1件」を read-back で実測してから登録する（二重課金の入口）", () => {
+  it("⚠請求リストの行は「ちょうど1件」を read-back で実測してから請求する（二重課金の入口）", () => {
     const applyAt = AUTO_FETCH.indexOf('probe: "fudosan-list-apply"');
     const checkedAt = AUTO_FETCH.indexOf('probe: "fudosan-list-checked"');
-    const registerAt = AUTO_FETCH.indexOf(
-      "domClick(REGISTRY_SELECTORS.fudosanListRegisterButton)",
+    const seikyuAt = AUTO_FETCH.indexOf(
+      "domClick(REGISTRY_SELECTORS.fudosanListSeikyuButton)",
     );
     expect(applyAt).toBeGreaterThan(-1);
     expect(checkedAt).toBeGreaterThan(applyAt); // 適用→読み直し
-    expect(registerAt).toBeGreaterThan(checkedAt); // 読み直し→登録
-    const verify = AUTO_FETCH.slice(checkedAt, registerAt);
+    expect(seikyuAt).toBeGreaterThan(checkedAt); // 読み直し→請求(課金)
+    const verify = AUTO_FETCH.slice(checkedAt, seikyuAt);
     expect(verify).toContain("checkedIndexes.length !== 1");
     expect(verify).toContain("not charged");
   });
