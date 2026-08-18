@@ -1846,6 +1846,8 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       }>;
       /** 課金後の行が永遠に準備前(請求中)のままの画面を模す(S5)。 */
       mypagePendingForever?: boolean;
+      /** 絞り込みが「すべて」に切り替わらない画面を模す(SM8)。 */
+      filterStuck?: boolean;
       /** 選択フェーズで選ばれた受付番号の観測用フック(SM3)。 */
       onMypageSelect?: (trId: string) => void;
       /**
@@ -1939,6 +1941,10 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         return JSON.stringify(
           opts.selectionVerify ?? { registered: true, okDisabled: false },
         );
+      }
+      // 絞り込みが「すべて」かの実測(@codex #390 R4)。既定=効いている。
+      if (parsed.probe === "filter-verify") {
+        return opts.filterStuck !== true;
       }
       // 絞り込みの適用(戻り値は使われない)。
       if (typeof parsed.filterSel === "string") {
@@ -2342,6 +2348,19 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(selects).toEqual(["ROW-TARGET"]);
   });
 
+  it("SM8: ⚠絞り込みを「すべて」へ切り替えられない間は基準を成立させない(@codex #390 R4 P1)", async () => {
+    // select に前回の「未請求」等が残ったままだと基準が部分集合になり、
+    // 隠れていた古い購入が課金後に「新規」へ化ける。検証できなければ課金前に中止。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, { filterStuck: true });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(CONFIRM); // 確定前に止まる=カート行も作らない
+    expect(clicked).not.toContain(SEIKYU);
+  });
+
   it("S9: ⚠中止の印(aborted)が立っていたら請求ボタンを押さない（@codex R10 P1）", async () => {
     // provider が課金前タイムアウトで reject した後も、この関数は裏で走り続ける。
     // 印を見ずに押すと、呼び出し側は timeout(台帳なし・ロック解除済み)として処理を
@@ -2396,6 +2415,19 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     joinPath(process.cwd(), "src", "lib", "registry-fetch", "auto-fetch.ts"),
     "utf8",
   );
+
+  it("⚠基準の走査は「すべて」適用+実測検証の後(@codex #390 R4: 残留フィルタで部分集合にしない)", () => {
+    const verifyAt = src.indexOf("const verifyAllFilter");
+    expect(verifyAt).toBeGreaterThan(-1);
+    // 基準ブロック内で apply→verify→reset の順。
+    const blockAt = src.indexOf("baselineTrIds.clear()");
+    const applyAt = src.indexOf(String.raw`applyMyPageFilter("すべて")`, blockAt);
+    const verifyCallAt = src.indexOf("verifyAllFilter()", blockAt);
+    const resetAt = src.indexOf("resetMyPageToFirst()", blockAt);
+    expect(applyAt).toBeGreaterThan(blockAt);
+    expect(verifyCallAt).toBeGreaterThan(applyAt);
+    expect(resetAt).toBeGreaterThan(verifyCallAt);
+  });
 
   it("⚠基準は全行の受付番号が読めた時だけ成立する(空IDは取り直し・@codex #390 R3)", () => {
     const baselineAt = src.indexOf("const baselineTrIds");

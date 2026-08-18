@@ -1983,6 +1983,22 @@ function createPlaywrightRegistryPage(
             label,
           }),
         );
+      // 絞り込みが**実際に「すべて」になっている**ことの実測(@codex #390 R4 P1)。
+      // select には前回操作の選択が残り得る。掛けたつもりを信用せず、選択中
+      // option のラベルで確認する(確認できない回の走査は基準/同定に使わない)。
+      const verifyAllFilter = async (): Promise<boolean> =>
+        (await page.evaluate(
+          (json) => {
+            const { filterSel } = JSON.parse(json) as { filterSel: string };
+            const el = document.querySelector(filterSel) as HTMLSelectElement | null;
+            const opt = el?.selectedOptions?.[0];
+            return ((opt?.textContent ?? "").trim() === "すべて") === true;
+          },
+          JSON.stringify({
+            probe: "filter-verify",
+            filterSel: REGISTRY_SELECTORS.myPageFilter,
+          }),
+        )) === true;
       // 一覧に次ページがあるか。基準/行選択は**1ページに収まっている時だけ**進める
       // (見えていない行がある状態の一覧は、基準としても選択対象としても不完全)。
       const pagerEnabled = async (sel: string): Promise<boolean> =>
@@ -2390,6 +2406,12 @@ function createPlaywrightRegistryPage(
           for (let attempt = 0; attempt < 3 && !baselineOk; attempt++) {
             if (attempt > 0) await sleep(1500);
             baselineTrIds.clear();
+            // ⚠基準は**全履歴**から(@codex #390 R4 P1)。select に前回の
+            // 「未請求」等が残っていると、隠れていた古い購入が基準から漏れ、
+            // 課金後(すべて表示)に「新規」へ化ける。適用+実測検証を通った回だけ
+            // を基準として採用する。
+            await applyMyPageFilter("すべて");
+            if (!(await verifyAllFilter())) continue;
             await resetMyPageToFirst();
             let loading = false;
             let overflow = false;
@@ -2667,10 +2689,17 @@ function createPlaywrightRegistryPage(
         // ⚠一覧はページ分割され得るため、行IDが見つからない時は次ページを最大10ページ
         // 探索する(@codex R5 P1)。課金後なので中止はせず、見つからなければ再試行→
         // 使い切ったら charged_but_failed(台帳は記録済み・マイページ確認を案内)。
-        await applyMyPageFilter("すべて");
         let ready = false;
         for (let attempt = 0; attempt < 20 && !ready; attempt++) {
           await sleep(3000);
+          // ⚠各走査の前に「すべて」を適用+実測検証(@codex #390 R4 P1)。リロード等で
+          // 絞り込みが戻ると走査が部分集合になり、新行が見えず charged_but_failed に
+          // 化ける。検証できない回はこの attempt を捨てて次へ(課金後なので中止しない)。
+          await applyMyPageFilter("すべて");
+          if (!(await verifyAllFilter())) {
+            await domClick(REGISTRY_SELECTORS.myPageReloadButton).catch(() => {});
+            continue;
+          }
           // ⚠実況の心拍(2026-08-15)。このループは最悪 20周×(3秒+最大10ページ走査)で
           //   3分を超えるが、実況ストアの保管期限(LIVE_VIEW_TTL_MS=3分)は**最終書き込み**
           //   から数える。無言のまま超えると、課金済みで一番不安な待ちの最中に
