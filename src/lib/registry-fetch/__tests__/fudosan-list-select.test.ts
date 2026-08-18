@@ -26,6 +26,7 @@ function row(over: Partial<FudosanListRow> & { index: number }): FudosanListRow 
     seikyuType: "所有者事項",
     seikyuzumi: "false",
     checked: false,
+    kind: "土地",
     ...over,
   };
 }
@@ -34,6 +35,7 @@ const EXPECTED = {
   targetKey: "69-2", // normalizeChibanForDialog 済みの形
   kuiki: KUIKI,
   seikyuTypeLabel: "所有者事項",
+  kindLabel: "土地",
 };
 
 describe("selectFudosanListRow", () => {
@@ -67,6 +69,19 @@ describe("selectFudosanListRow", () => {
       EXPECTED,
     );
     expect(pick).toEqual({ ok: false, reason: "no-match" });
+  });
+
+  it("⚠不動産種別違い(同番号の建物の行)は選ばない(@codex #390 R5 P1)", () => {
+    // 同じ区域に地番69-2の土地と家屋番号69-2の建物が両方未請求で並ぶと、
+    // 種別を見ない照合は先頭(index最小)=別種の登記へ課金し得る。
+    const pickKind = selectFudosanListRow(
+      [row({ index: 1, kind: "建物" }), row({ index: 2, kind: "土地" })],
+      EXPECTED,
+    );
+    expect(pickKind).toEqual({ ok: true, index: 2, duplicateCount: 0 });
+    expect(
+      selectFudosanListRow([row({ index: 1, kind: "建物" })], EXPECTED),
+    ).toEqual({ ok: false, reason: "no-match" });
   });
 
   it("⚠種別違い(全部事項の行など)は選ばない", () => {

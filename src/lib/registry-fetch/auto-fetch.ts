@@ -2506,6 +2506,12 @@ function createPlaywrightRegistryPage(
                     | null;
                   return el?.value ?? "";
                 };
+                // 種別(土地/建物)は hidden に無く、行の可視セル td[3] が持つ
+                // (probe13 実測・@codex #390 R5: 同番号の土地と建物の取り違え防止)。
+                const tr = box.closest("tr");
+                const kindCell = tr
+                  ? (tr.querySelectorAll("td")[3]?.textContent ?? "")
+                  : "";
                 rows.push({
                   index: Number(n),
                   chiban: read(prefix.chiban),
@@ -2513,6 +2519,7 @@ function createPlaywrightRegistryPage(
                   seikyuType: read(prefix.seikyuType),
                   seikyuzumi: read(prefix.seikyuzumi),
                   checked: box.checked === true,
+                  kind: kindCell.trim(),
                 });
               }
               return JSON.stringify(rows);
@@ -2536,6 +2543,8 @@ function createPlaywrightRegistryPage(
             kuiki: expectedKuiki,
             seikyuTypeLabel:
               input.certificateType === "all" ? "全部事項" : "所有者事項",
+            // 家屋番号での請求=建物/地番での請求=土地(@codex #390 R5)。
+            kindLabel: isBuilding ? "建物" : "土地",
           });
           if (!pick.ok) {
             // 迷ったら選ばない(課金前中止・カートに未請求が残るだけで無害)。

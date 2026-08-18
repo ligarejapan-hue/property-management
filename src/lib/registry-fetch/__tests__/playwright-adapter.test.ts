@@ -1871,6 +1871,8 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         kuiki: string;
         seikyuType: string;
         seikyuzumi: string;
+        /** 種別セル(td[3])。既定=土地。 */
+        kind?: string;
       }>;
       /** 事前にチェック済みの行番号(過去操作の残りを模す)。 */
       fudosanPreChecked?: number[];
@@ -1960,7 +1962,11 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       // 請求リスト(確定の着地・probe13)の行一覧。既定=対象1行(未チェック)。
       if (parsed.probe === "fudosan-list-rows") {
         return JSON.stringify(
-          listState.rows.map((r) => ({ ...r, checked: listState.checked.has(r.index) })),
+          listState.rows.map((r) => ({
+            kind: "土地",
+            ...r,
+            checked: listState.checked.has(r.index),
+          })),
         );
       }
       // 行checkboxの適用(対象だけON・他はOFF)。click 相当なのでトグルで模す。
@@ -2359,6 +2365,20 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     });
     expect(clicked).not.toContain(CONFIRM); // 確定前に止まる=カート行も作らない
     expect(clicked).not.toContain(SEIKYU);
+  });
+
+  it("SL7: ⚠同番号の土地と建物が並んでも、請求対象の種別の行だけをcheckする(@codex #390 R5 P1)", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      fudosanRows: [
+        { index: 1, chiban: "１－１", kuiki: INPUT.address, seikyuType: "所有者事項", seikyuzumi: "false", kind: "建物" },
+        { index: 2, chiban: "１－１", kuiki: INPUT.address, seikyuType: "所有者事項", seikyuzumi: "false", kind: "土地" },
+      ],
+    });
+    const page = await makeStage2Page(f);
+    const buf = await page.fetchByLocationCandidate(INPUT); // INPUT=地番のみ=土地
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
   });
 
   it("S9: ⚠中止の印(aborted)が立っていたら請求ボタンを押さない（@codex R10 P1）", async () => {

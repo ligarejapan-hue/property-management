@@ -49,6 +49,8 @@ export interface FudosanListRow {
   seikyuzumi: string;
   /** checkbox の現在の状態(着地時点は未チェックが既定・probe13 実測)。 */
   checked: boolean;
+  /** 種別セル(td[3]・「土地」/「建物」・probe13 実測)。 */
+  kind: string;
 }
 
 /**
@@ -80,6 +82,12 @@ export function selectFudosanListRow(
     kuiki: string;
     /** 期待する請求種別ラベル(owner=「所有者事項」/ all=「全部事項」)。 */
     seikyuTypeLabel: string;
+    /**
+     * 期待する不動産種別(「土地」/「建物」・@codex #390 R5 P1)。同じ区域に
+     * 同番号の土地(地番)と建物(家屋番号)が両方未請求で居ると、他の4条件だけ
+     * では両方一致し、**別種の登記に課金**し得る。
+     */
+    kindLabel: string;
   },
 ): FudosanListPick {
   if (!expected.kuiki.trim()) return { ok: false, reason: "kuiki-empty" };
@@ -91,6 +99,7 @@ export function selectFudosanListRow(
         normalizeChibanForDialog(r.chiban) === expected.targetKey &&
         normalizeKuikiForCompare(r.kuiki) === kuikiKey &&
         r.seikyuType.trim() === expected.seikyuTypeLabel &&
+        r.kind.trim() === expected.kindLabel &&
         r.seikyuzumi.trim() === "false",
     )
     .sort((a, b) => a.index - b.index);
