@@ -2426,8 +2426,16 @@ function createPlaywrightRegistryPage(
                 loading = true;
                 break;
               }
+              // ⚠基準は**全行のIDが読めた時だけ**成立(@codex #345 R4 P1の復元・
+              // #390 R3)。空IDの行を黙って飛ばすと、その行が課金後にIDを得て
+              // 「基準に無い行=新規」に化け、古いPDFを掴む。1行でも空なら
+              // この回の基準を無効にして取り直す(だめなら課金前に中止)。
+              if (scan.rows.some((r) => !r.trId)) {
+                loading = true; // 取り直し(リトライ経路はローディングと同じ)
+                break;
+              }
               for (const r of scan.rows) {
-                if (r.trId) baselineTrIds.add(r.trId);
+                baselineTrIds.add(r.trId);
               }
               if (!(await myPageHasNext())) break;
               await page.click(REGISTRY_SELECTORS.myPageNextButton);

@@ -2206,6 +2206,29 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(clicked.join(" ")).not.toContain("myPageDownload");
   });
 
+  it("SM7: ⚠基準の走査に受付番号が空の行が混ざったら、課金前に中止する(@codex #390 R3 P1)", async () => {
+    // 空IDの行を黙って飛ばして基準を成立させると、その行が課金後にIDを得て
+    // 「新規」に化け、古いPDFを掴む(旧 #345 R4 P1 の all-or-nothing の復元)。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [
+        {
+          trId: "", // 一時的にIDが描画されていない行
+          shozai: `${INPUT.address}１－１`,
+          status: "請求済",
+          when: "2026/08/01 09:00",
+          expiry: "2026/09/01",
+        },
+      ],
+    });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(CONFIRM); // 確定前に止まる=カート行も作らない
+    expect(clicked).not.toContain(SEIKYU);
+  });
+
   it("SM5: ⚠新行が最後まで表に現れなくても、基準内の古いready行をDLしない(@codex #390 R2 P1)", async () => {
     // 旧実装は「見えている最新」が古い行しか無い局面でそれを ready として掴んだ。
     const f = makeFakeChromium();
@@ -2373,6 +2396,14 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     joinPath(process.cwd(), "src", "lib", "registry-fetch", "auto-fetch.ts"),
     "utf8",
   );
+
+  it("⚠基準は全行の受付番号が読めた時だけ成立する(空IDは取り直し・@codex #390 R3)", () => {
+    const baselineAt = src.indexOf("const baselineTrIds");
+    const confirmAt = src.indexOf("domClick(REGISTRY_SELECTORS.requestConfirmButton)");
+    expect(baselineAt).toBeGreaterThan(-1);
+    expect(baselineAt).toBeLessThan(confirmAt); // 基準採取は確定より前
+    expect(src).toContain("scan.rows.some((r) => !r.trId)");
+  });
 
   it("⚠マイページの基準控え(row-ids)を復活させない(発注者指示 2026-08-18=直接請求)", () => {
     // 旧: 確定前にマイページの行IDを控え、確定後の「新規行」をマイページで選んで
