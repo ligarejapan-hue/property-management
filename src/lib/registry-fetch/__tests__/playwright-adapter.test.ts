@@ -1848,6 +1848,18 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       mypagePendingForever?: boolean;
       /** 選択フェーズで選ばれた受付番号の観測用フック(SM3)。 */
       onMypageSelect?: (trId: string) => void;
+      /**
+       * **課金前**の走査(基準採取)が返す行。既定=空(初回購入の口座)。
+       * 課金前から存在する行(過去の購入)を模すときに使う=その受付番号は
+       * 基準に入り、課金後の同定から除外される(@codex #390 R2 P1)。
+       */
+      mypageBaselineRows?: Array<{
+        trId: string;
+        shozai: string;
+        status: string;
+        when: string;
+        expiry: string;
+      }>;
       /** 確定前に読む所在(kuiki)。既定=INPUT.address(空文字で取得失敗を模す)。 */
       kuikiValue?: string;
       /** 請求リスト(確定の着地・probe13)の行。既定=対象1行(未チェック)。 */
@@ -1865,6 +1877,9 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     } = {},
   ) {
     const clicked: string[] = [];
+    // 課金(#btn_seikyu)を押したかで mypage-scan の見え方を切り替える(実サイト:
+    // 新行は課金後に現れる。課金前の走査=基準採取には既存行だけが見える)。
+    let seikyuClicked = false;
     const mypageRows =
       opts.mypageRows ??
       [
@@ -1901,6 +1916,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       }
       if (!parsed || typeof parsed !== "object") {
         clicked.push(arg); // domClick / hasNext 等のセレクタ引数
+        if (arg === "#btn_seikyu") seikyuClicked = true;
         // ⚠所在選択ダイアログ(B案)の既定応答を返す。段階②も所在の確定を通る
         // ため、undefined のままだと所在が確定できず location_rejected になり、
         // 請求フローの検証に到達しない。
@@ -1959,9 +1975,14 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       if (parsed.probe === "fudosan-list-checked") {
         return JSON.stringify([...listState.checked].sort((a, b) => a - b));
       }
-      // 課金後の走査(同定フェーズ)。毎回同じ行集合を返す(単一ページ想定)。
+      // マイページ走査(課金前=基準採取/課金後=同定)。単一ページ想定。
       if (parsed.probe === "mypage-scan") {
-        return JSON.stringify({ loading: false, rows: mypageRows });
+        return JSON.stringify({
+          loading: false,
+          rows: seikyuClicked
+            ? [...(opts.mypageBaselineRows ?? []), ...mypageRows]
+            : opts.mypageBaselineRows ?? [],
+        });
       }
       // 課金後の選択フェーズ(受付番号で選ぶ)。対象が居れば ready。
       if (parsed.probe === "mypage-select") {
@@ -2153,19 +2174,21 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(clicked.join(" ")).not.toContain("myPageDownload");
   });
 
-  it("SM2: ⚠同じ筆の古い請求済行が居ても、最新(いま買った)行が準備前なら乗り換えない", async () => {
+  it("SM2: ⚠同じ筆の古い請求済行(課金前から存在)へ乗り換えない=新行が準備前の間は待つ", async () => {
     // 乗り換えると「古い購入のPDF」を今回の結果として添付してしまう。
-    // 同一性が先・準備状態は後(準備が済むまで待ち、済まなければ charged_but_failed)。
+    // 古い行は**基準**(課金前の走査)で控えられ、同定から除外される(@codex R2 P1)。
     const f = makeFakeChromium();
     const { clicked } = wireStage2(f, {
-      mypageRows: [
+      mypageBaselineRows: [
         {
           trId: "ROW-OLD",
           shozai: `${INPUT.address}１－１`,
           status: "請求済",
-          when: "2026/08/01 09:00", // 古い
+          when: "2026/08/01 09:00", // 古い(課金前から存在)
           expiry: "2026/09/01",
         },
+      ],
+      mypageRows: [
         {
           trId: "ROW-NEW",
           shozai: `${INPUT.address}１－１`,
@@ -2181,6 +2204,61 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     });
     expect(clicked).toContain(SEIKYU);
     expect(clicked.join(" ")).not.toContain("myPageDownload");
+  });
+
+  it("SM5: ⚠新行が最後まで表に現れなくても、基準内の古いready行をDLしない(@codex #390 R2 P1)", async () => {
+    // 旧実装は「見えている最新」が古い行しか無い局面でそれを ready として掴んだ。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [
+        {
+          trId: "ROW-OLD",
+          shozai: `${INPUT.address}１－１`,
+          status: "請求済",
+          when: "2026/08/01 09:00",
+          expiry: "2026/09/01",
+        },
+      ],
+      mypageRows: [], // 新行が(異常に)最後まで現れない
+    });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "charged_but_failed",
+    });
+    expect(clicked).toContain(SEIKYU);
+    expect(clicked.join(" ")).not.toContain("myPageDownload");
+  });
+
+  it("SM6: 基準内の古い行と、遅れて現れた新行(ready)が並んだら、新行を受付番号で選ぶ", async () => {
+    const f = makeFakeChromium();
+    const selects: string[] = [];
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [
+        {
+          trId: "ROW-OLD",
+          shozai: `${INPUT.address}１－１`,
+          status: "請求済",
+          when: "2026/08/30 09:00", // わざと日時は新行より新しくしておく
+          expiry: "2026/09/30",
+        },
+      ],
+      mypageRows: [
+        {
+          trId: "ROW-NEW",
+          shozai: `${INPUT.address}１－１`,
+          status: "請求済",
+          when: "2026/08/18 12:00",
+          expiry: "2026/09/18",
+        },
+      ],
+      onMypageSelect: (trId) => selects.push(trId),
+    });
+    const page = await makeStage2Page(f);
+    const buf = await page.fetchByLocationCandidate(INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    // 基準除外により、日時の新旧に関わらず「基準に無い行」だけが同定対象。
+    expect(selects).toEqual(["ROW-NEW"]);
+    expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
   });
 
   it("SM3: 同じ筆の古い行と新しい行(準備完了)が並んだら、新しい行を受付番号で選ぶ", async () => {

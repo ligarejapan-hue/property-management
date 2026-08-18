@@ -146,13 +146,25 @@ export interface MyPageScanRow {
  */
 export function pickChargedMyPageRow(
   rows: MyPageScanRow[],
-  expected: { targetKey: string; kuiki: string },
+  expected: {
+    targetKey: string;
+    kuiki: string;
+    /**
+     * 課金**前**に控えた既存行の受付番号(@codex #390 R2 P1)。ここに載っている
+     * 行は「今回の課金で作られた行」ではあり得ないため同定から除外する。
+     * 新行が非同期でまだ表に出ていない間に、同じ筆の**古い**請求済行だけが
+     * 見えている局面で、それを「最新の見えている行」として掴む事故を塞ぐ
+     * (最新性は可視の中でしか比べられない=新規性の証明には基準が要る)。
+     */
+    baselineTrIds: ReadonlySet<string>;
+  },
 ): { trId: string; readyNow: boolean; status: string } | null {
   const kuikiKey = normalizeKuikiForCompare(expected.kuiki);
   if (!kuikiKey) return null;
   const matches = rows
     .filter((r) => {
       if (r.trId.trim() === "") return false;
+      if (expected.baselineTrIds.has(r.trId.trim())) return false;
       const cellKey = normalizeKuikiForCompare(r.shozai);
       if (!cellKey.startsWith(kuikiKey)) return false;
       const remainder = cellKey.slice(kuikiKey.length);

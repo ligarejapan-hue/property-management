@@ -1843,6 +1843,8 @@ function createPlaywrightRegistryPage(
       // 課金前(請求リストの行選択)と課金後(マイページの行同定)で共有する
       // 期待所在(都道府県込み)。確定前の #fuChibanKuiki 読み取り時に確定する。
       let expectedKuiki = "";
+      // 課金前に控える既存行の受付番号(基準)。課金後の同定は基準に無い行だけ。
+      const baselineTrIds = new Set<string>();
       if (targetKey.length === 0) {
         // 取得対象(地番/家屋番号)が無い候補は買えない(課金前・fail-closed)。
         throw new RegistryFetchError("provider_error");
@@ -2377,6 +2379,69 @@ function createPlaywrightRegistryPage(
             sel: REGISTRY_SELECTORS.locationSearchAddress,
           }),
         )) as string;
+        // ---- 課金前の基準: 既存行の受付番号を控える(@codex #390 R2 P1) ----
+        // 「いま課金した行」の証明には**新規性**が要る。可視の中の最新だけでは、
+        // 新行が非同期でまだ表に出ていない間に同じ筆の古い請求済行を掴む。
+        // この画面(不動産請求タブ)には #myPageTable が同居しているので、確定を
+        // 押す前に全ページの受付番号を控え、課金後は**基準に無い行**だけから同定する。
+        // ⚠読み切れなければ課金前に中止(不完全な基準は古い行を「新規」に化けさせる)。
+        {
+          let baselineOk = false;
+          for (let attempt = 0; attempt < 3 && !baselineOk; attempt++) {
+            if (attempt > 0) await sleep(1500);
+            baselineTrIds.clear();
+            await resetMyPageToFirst();
+            let loading = false;
+            let overflow = false;
+            for (let pageNo = 0; ; pageNo++) {
+              if (pageNo >= 10) {
+                overflow = true; // 10ページ超の履歴=基準の完全性を保証できない
+                break;
+              }
+              const scanJson = (await page.evaluate(
+                (json) => {
+                  const { tableSel } = JSON.parse(json) as { tableSel: string };
+                  const t = document.querySelector(tableSel);
+                  if (!t || /データ取得中/.test(t.textContent ?? "")) {
+                    return JSON.stringify({ loading: true, rows: [] });
+                  }
+                  const rows: Array<Record<string, string>> = [];
+                  for (const tr of Array.from(t.querySelectorAll("tbody tr"))) {
+                    const tds = tr.querySelectorAll("td");
+                    if (tds.length < 7) continue;
+                    rows.push({ trId: (tds[1]?.textContent ?? "").trim() });
+                  }
+                  return JSON.stringify({ loading: false, rows });
+                },
+                JSON.stringify({
+                  probe: "mypage-scan",
+                  tableSel: REGISTRY_SELECTORS.myPageTable,
+                }),
+              )) as string;
+              const scan = JSON.parse(scanJson) as {
+                loading: boolean;
+                rows: Array<{ trId: string }>;
+              };
+              if (scan.loading) {
+                loading = true;
+                break;
+              }
+              for (const r of scan.rows) {
+                if (r.trId) baselineTrIds.add(r.trId);
+              }
+              if (!(await myPageHasNext())) break;
+              await page.click(REGISTRY_SELECTORS.myPageNextButton);
+              await sleep(1200);
+            }
+            if (!loading && !overflow) baselineOk = true;
+          }
+          if (!baselineOk) {
+            console.warn(
+              "[registry-fetch] my-page baseline unreadable; refusing before confirm (not charged)",
+            );
+            throw new RegistryFetchError("provider_error");
+          }
+        }
         try {
           await domClick(REGISTRY_SELECTORS.requestConfirmButton);
           // ⚠確定(fuBtnForward)の着地は**請求リスト(/reqf/fudosan-list)**
@@ -2564,7 +2629,13 @@ function createPlaywrightRegistryPage(
         if (input.chargeState) input.chargeState.charged = true;
         // 発注者指示(2026-08-18・過去にも同指摘): **請求リストの【請求】を直接押す**。
         // マイページへ登録してから請求する遠回りはしない。
-        await domClick(REGISTRY_SELECTORS.fudosanListSeikyuButton);
+        // ⚠クリック直後に submit の遷移が走ると、evaluate の実行コンテキストが
+        // 破棄されて domClick 自体が reject し得る(確定クリックと同じ既知挙動・
+        // @codex #390 R2 P1)。課金は受理されているのに charged_but_failed で
+        // 打ち切ると支払済みPDFを取りに行けないため、ここは握って**着地の実測**
+        // (下の #myPageTable 待ち)に判定を委ねる。本当に押せていなければ着地が
+        // 来ずに timeout → charged_but_failed(安全側の会計のまま)。
+        await domClick(REGISTRY_SELECTORS.fudosanListSeikyuButton).catch(() => {});
         // 請求の submit で /reqf/fudosan-seikyu(マイページ一覧のある画面)へ遷移する
         // (probe13: form action で実測)。課金後なので中止せず、一覧の出現を待って
         // 「請求済」の実測(下のループ)へ。⚠診断(page-probe)は課金前のみの原則の
@@ -2659,6 +2730,7 @@ function createPlaywrightRegistryPage(
             : pickChargedMyPageRow(scannedRows, {
                 targetKey,
                 kuiki: expectedKuiki,
+                baselineTrIds,
               });
           if (picked && picked.readyNow) {
             // ---- 選択フェーズ: 同定した行を**受付番号(trId)で**選び直す。

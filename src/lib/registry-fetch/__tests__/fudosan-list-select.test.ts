@@ -123,7 +123,7 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
       ...over,
     };
   }
-  const EXP = { targetKey: "69-2", kuiki: KU };
+  const EXP = { targetKey: "69-2", kuiki: KU, baselineTrIds: new Set<string>() };
 
   it("⚠別の町の同一地番は選ばない(地番末尾一致だけでは他人の筆を掴む)", () => {
     expect(
@@ -190,6 +190,21 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
       pickChargedMyPageRow([mrow({ expiry: "期間超過" })], EXP)?.readyNow,
     ).toBe(false);
     expect(pickChargedMyPageRow([mrow({ expiry: "" })], EXP)?.readyNow).toBe(false);
+  });
+
+  it("⚠基準(課金前に控えた受付番号)に載っている行は選ばない(@codex #390 R2 P1)", () => {
+    // 新行が非同期でまだ見えず、同じ筆の**古い**請求済行だけが見えている局面。
+    // 基準が無いと「見えている最新」として古い行を掴み、古いPDFを添付する。
+    const old_ = mrow({ trId: "OLD", when: "2026/08/01 09:00" });
+    expect(
+      pickChargedMyPageRow([old_], { ...EXP, baselineTrIds: new Set(["OLD"]) }),
+    ).toBeNull(); // 基準内しか見えない=まだ新行が出ていない→呼び出し側は待つ
+    // 新行が現れたら、基準外のそれを選ぶ(古い方がreadyでも乗り換えない設計と両立)。
+    const picked = pickChargedMyPageRow(
+      [old_, mrow({ trId: "NEW", when: "2026/08/18 12:00" })],
+      { ...EXP, baselineTrIds: new Set(["OLD"]) },
+    );
+    expect(picked?.trId).toBe("NEW");
   });
 
   it("該当なし/受付番号なし/期待所在が空なら null(進めない=安全側)", () => {
