@@ -19,7 +19,10 @@
  * (テストが auto-fetch を import すると依存ごと引き込んで node 環境で落ちる)。
  */
 
-import { normalizeChibanForDialog } from "@/lib/registry-fetch/chiban-input";
+import {
+  isReadableChiban,
+  normalizeChibanForDialog,
+} from "@/lib/registry-fetch/chiban-input";
 
 /** 行の hidden input の id 接頭辞(probe13 実測・例 #chiban_1)。 */
 export const FUDOSAN_LIST_HIDDEN_PREFIX = {
@@ -132,7 +135,11 @@ export interface MyPageScanRow {
  * だけでは**別の町の同一地番**(例: どこにでもある「1-1」)の行を掴み、他人の筆の
  * PDF を添付し得る。同定は
  *   ①所在の前半が期待の地番区域(都道府県込み)で始まる(別の町を排除)
- *   ②所在の末尾が対象地番に境界つきで一致(1-1 が 11-1 に化けない)
+ *   ②**前半を除いた残り**が、地番として全部説明でき(isReadableChiban)、かつ
+ *     正規化して対象地番と**完全一致**する(@codex #390 R1 P1: startsWith だけだと
+ *     「中町」が「中町東」を通す=町名が延長された別区域に化ける。残り完全一致なら
+ *     「中町東６９－２」の残り「東６９－２」は説明不能で弾かれ、「１６９－２」は
+ *     「169-2」≠「69-2」で弾かれる)
  *   ③その中で**受付日時が最新**の行(=いま課金した行。過去の同じ筆の購入より新しい)
  * の3段。**同一性が先・準備状態(readyNow)は後**: 最新行がまだ準備中でも、古い
  * ready 行へ乗り換えない(乗り換えると古い購入のPDFを「今回の結果」として添付する)。
@@ -144,12 +151,17 @@ export function pickChargedMyPageRow(
   const kuikiKey = normalizeKuikiForCompare(expected.kuiki);
   if (!kuikiKey) return null;
   const matches = rows
-    .filter(
-      (r) =>
-        r.trId.trim() !== "" &&
-        normalizeKuikiForCompare(r.shozai).startsWith(kuikiKey) &&
-        registryRowMatchesChiban(r.shozai, expected.targetKey),
-    )
+    .filter((r) => {
+      if (r.trId.trim() === "") return false;
+      const cellKey = normalizeKuikiForCompare(r.shozai);
+      if (!cellKey.startsWith(kuikiKey)) return false;
+      const remainder = cellKey.slice(kuikiKey.length);
+      return (
+        remainder !== "" &&
+        isReadableChiban(remainder) &&
+        normalizeChibanForDialog(remainder) === expected.targetKey
+      );
+    })
     .sort((a, b) => (a.when < b.when ? 1 : a.when > b.when ? -1 : 0));
   if (matches.length === 0) return null;
   const best = matches[0];

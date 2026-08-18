@@ -134,10 +134,31 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
     ).toBeNull();
   });
 
-  it("⚠「69-2」は「169-2」の行に化けない(境界つき末尾一致)", () => {
+  it("⚠「69-2」は「169-2」の行に化けない(残り完全一致)", () => {
     expect(
       pickChargedMyPageRow([mrow({ shozai: `${KU}１６９－２` })], EXP),
     ).toBeNull();
+  });
+
+  it("⚠町名が延長された別区域(中町→中町東)の行を選ばない(@codex #390 R1 P1)", () => {
+    // startsWith だけだと「中町」は「中町東６９－２」も通す。残り「東６９－２」は
+    // 地番として説明できない(isReadableChiban=false)ので弾く。
+    expect(
+      pickChargedMyPageRow(
+        [mrow({ shozai: `${KU}東６９－２`, when: "2026/08/18 23:59" })],
+        EXP,
+      ),
+    ).toBeNull();
+  });
+
+  it("同じ筆の別表記(69番地2)は同定できる(残りが説明可能+正規化一致)", () => {
+    expect(
+      pickChargedMyPageRow([mrow({ shozai: `${KU}６９番地２` })], EXP)?.trId,
+    ).toBe("R1");
+  });
+
+  it("所在だけで地番が無い行(残り空)は選ばない", () => {
+    expect(pickChargedMyPageRow([mrow({ shozai: KU })], EXP)).toBeNull();
   });
 
   it("同じ筆が複数(過去の購入履歴)なら**最新の行**=いま買った行を選ぶ", () => {

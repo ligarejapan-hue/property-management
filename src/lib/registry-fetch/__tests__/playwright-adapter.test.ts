@@ -2212,6 +2212,35 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(selects).toEqual(["ROW-NEW"]); // 最新=いま買った行だけを選ぶ
   });
 
+  it("SM4: ⚠町名延長の別区域(…町東)の新しい行があっても、対象区域の行を受付番号で選ぶ(@codex #390 R1 P1)", async () => {
+    const f = makeFakeChromium();
+    const selects: string[] = [];
+    const { clicked } = wireStage2(f, {
+      mypageRows: [
+        {
+          trId: "ROW-EAST", // 別区域(テスト町一丁目東)・より新しい・ready
+          shozai: `${INPUT.address}東１－１`,
+          status: "請求済",
+          when: "2026/08/18 23:59",
+          expiry: "2026/09/18",
+        },
+        {
+          trId: "ROW-TARGET",
+          shozai: `${INPUT.address}１－１`,
+          status: "請求済",
+          when: "2026/08/18 12:00",
+          expiry: "2026/09/18",
+        },
+      ],
+      onMypageSelect: (trId) => selects.push(trId),
+    });
+    const page = await makeStage2Page(f);
+    const buf = await page.fetchByLocationCandidate(INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
+    expect(selects).toEqual(["ROW-TARGET"]);
+  });
+
   it("S9: ⚠中止の印(aborted)が立っていたら請求ボタンを押さない（@codex R10 P1）", async () => {
     // provider が課金前タイムアウトで reject した後も、この関数は裏で走り続ける。
     // 印を見ずに押すと、呼び出し側は timeout(台帳なし・ロック解除済み)として処理を
@@ -2298,7 +2327,10 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
   it("課金後の同定は純関数 pickChargedMyPageRow(所在前半+地番境界+最新)で行う", () => {
     // 提出前レビュー(confidence82)対応: 地番末尾だけの同定は**別の町の同一地番**を
     // 掴む。走査(mypage-scan)→Node側で同定→受付番号で選択(mypage-select)の二相。
-    expect(src).toContain(String.raw`applyMyPageFilter("請求済")`);
+    // ⚠走査フィルタは「すべて」(@codex #390 R1 P1: 請求済に絞ると請求中の
+    // 新行が隠れ、同じ筆の古い請求済行を「見えている最新」として掴む)。
+    expect(src).toContain(String.raw`applyMyPageFilter("すべて")`);
+    expect(src).not.toContain(String.raw`applyMyPageFilter("請求済")`);
     expect(src).toContain("pickChargedMyPageRow(");
     expect(src).toContain('probe: "mypage-scan"');
     expect(src).toContain('probe: "mypage-select"');
