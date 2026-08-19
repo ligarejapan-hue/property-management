@@ -40,6 +40,7 @@ import {
   type RegistryPageProbe,
 } from "@/lib/registry-fetch/page-probe";
 import {
+  effectiveLocationIdentifier,
   isReadableChiban,
   normalizeChibanForDialog,
 } from "@/lib/registry-fetch/chiban-input";
@@ -1564,8 +1565,8 @@ function createPlaywrightRegistryPage(
       // secret/PII(所在/地番)を除去して残す。
       // 種別(土地/建物)を家屋番号の有無で判定し、検索キーも種別に合わせる(@codex P1)。
       // 建物なら家屋番号、土地なら地番で検索する(建物なのに地番で検索すると別物になる)。
-      const isBuilding = !!(input.buildingNumber && input.buildingNumber.trim().length > 0);
-      const rawKey = ((isBuilding ? input.buildingNumber : input.lotNumber) ?? "").trim();
+      // 選び方は純関数に集約(検査側とずれない・@codex #394 R8 P2)。
+      const { isBuilding, value: rawKey } = effectiveLocationIdentifier(input);
       // ダイアログの数字/ハイフン専用欄に合わせて正規化(「1番1」→「1-1」等・@codex P1)。
       const searchKey = normalizeChibanForDialog(rawKey);
       // 実況パネル: ステップは即時に文字で通知し、viewport スクショ (JPEG) は
@@ -1873,8 +1874,8 @@ function createPlaywrightRegistryPage(
         typeof input.paidDeadlineAt === "number" && Number.isFinite(input.paidDeadlineAt)
           ? input.paidDeadlineAt
           : null;
-      const isBuilding = !!(input.buildingNumber && input.buildingNumber.trim().length > 0);
-      const rawTarget = ((isBuilding ? input.buildingNumber : input.lotNumber) ?? "").trim();
+      // 選び方は純関数に集約(検査側とずれない・@codex #394 R8 P2)。
+      const { isBuilding, value: rawTarget } = effectiveLocationIdentifier(input);
       const targetKey = normalizeChibanForDialog(rawTarget);
       // 課金前(請求リストの行選択)と課金後(マイページの行同定)で共有する
       // 期待所在(都道府県込み)。確定前の #fuChibanKuiki 読み取り時に確定する。
@@ -3227,12 +3228,9 @@ function createPlaywrightRegistryPage(
         );
         throw new RegistryFetchError("provider_error");
       };
-      const isBuilding = !!(
-        input.buildingNumber && input.buildingNumber.trim().length > 0
-      );
-      const rawTarget = isBuilding
-        ? String(input.buildingNumber ?? "")
-        : String(input.lotNumber ?? "");
+      // 選び方は純関数に集約(検査側とずれない)。
+      const { isBuilding, value: rawTarget } =
+        effectiveLocationIdentifier(input);
       const targetKey = normalizeChibanForDialog(rawTarget);
       if (targetKey.length === 0) {
         throw new RegistryFetchError("provider_error");
@@ -3874,11 +3872,10 @@ export async function runRegistryAutoFetch(
       })
     : args.locationCandidate;
   if (isRecover) {
-    const lotOrBuilding = (
-      recoverLocation?.lotNumber ??
-      recoverLocation?.buildingNumber ??
-      ""
-    ).trim();
+    // ⚠**provider が実際に使う識別子**を検査する(建物優先。@codex #394 R8 P2)。
+    const lotOrBuilding = effectiveLocationIdentifier(
+      recoverLocation ?? {},
+    ).value;
     if (!lotOrBuilding || !(property.address ?? "").trim()) {
       throw new ApiError(
         409,
@@ -3905,11 +3902,10 @@ export async function runRegistryAutoFetch(
         "REGISTRY_PURCHASE_NOT_ENABLED",
       );
     }
-    const lotOrBuilding = (
-      args.locationCandidate.lotNumber ??
-      args.locationCandidate.buildingNumber ??
-      ""
-    ).trim();
+    // ⚠検査する値と provider が探す値を必ず一致させる(建物優先。@codex #394 R8 P2)。
+    const lotOrBuilding = effectiveLocationIdentifier(
+      args.locationCandidate,
+    ).value;
     if (!lotOrBuilding || !(property.address ?? "").trim()) {
       // 買う対象(地番/家屋番号)か所在が無い候補は購入できない(課金前・fail-closed)。
       throw new ApiError(

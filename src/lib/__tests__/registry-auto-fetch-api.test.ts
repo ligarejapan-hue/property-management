@@ -1306,6 +1306,19 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
     expect(provider.recoverRegistryPdf).not.toHaveBeenCalled();
   });
 
+  it("⚠地番が正しくても家屋番号が壊れていれば止める(探す値と検査値をそろえる)", async () => {
+    // provider は家屋番号が入っていれば建物として探す。地番だけ検査して通すと、
+    // 壊れた家屋番号を正規化した別の値で探し別の登記を掴む(@codex #394 R8 P2)。
+    const { provider, promise } = runRecover({
+      locationCandidate: { lotNumber: "1-1", buildingNumber: "abc1x2" },
+    });
+    await expect(promise).rejects.toMatchObject({
+      status: 422,
+      code: "REGISTRY_OBTAIN_IDENTIFIER_INVALID",
+    });
+    expect(provider.recoverRegistryPdf).not.toHaveBeenCalled();
+  });
+
   it("回収に未対応の provider では 501(黙って課金経路へ落ちない)", async () => {
     const provider = successProvider() as unknown as RegistryFetchProvider;
     const { promise } = runRecover({ provider });
