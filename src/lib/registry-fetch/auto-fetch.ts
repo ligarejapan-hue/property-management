@@ -50,6 +50,7 @@ import {
 } from "@/lib/registry-fetch/seikyu-confirm";
 import {
   collectBaselineReceiptNos,
+  parseMyPageRowCells,
   FUDOSAN_LIST_HIDDEN_PREFIX,
   pickChargedMyPageRow,
   selectFudosanListRow,
@@ -2433,19 +2434,16 @@ function createPlaywrightRegistryPage(
                   if (!t || /データ取得中/.test(t.textContent ?? "")) {
                     return JSON.stringify({ loading: true, rows: [] });
                   }
-                  const rows: Array<Record<string, string>> = [];
+                  const rows: string[][] = [];
                   for (const tr of Array.from(t.querySelectorAll("tbody tr"))) {
                     const tds = tr.querySelectorAll("td");
                     if (tds.length < 7) continue;
-                    // ⚠受付番号は td[6] の**2段目**(<br>で請求日時と同居)。td[1] は
-                    // 画面上の連番(No.)で並び順により変わる(2026-08-19 実測)。
-                    const parts = (tds[6]?.innerHTML ?? "")
-                      .split(/<br\s*\/?>/i)
-                      .map((x) => x.replace(/<[^>]*>/g, "").trim());
-                    rows.push({
-                      receiptNo: (parts[1] ?? "").trim(),
-                      status: (tds[5]?.textContent ?? "").trim(),
-                    });
+                    // ⚠**解釈はNode側の純関数(parseMyPageRowCells)に集約**。
+                    // ここは列の生データを返すだけ(@codex #393 R1)。
+                    const cellHtmls = Array.from(tds)
+                      .slice(0, 12)
+                      .map((td) => (td as HTMLElement).innerHTML ?? "");
+                    rows.push(cellHtmls);
                   }
                   return JSON.stringify({ loading: false, rows });
                 },
@@ -2456,14 +2454,17 @@ function createPlaywrightRegistryPage(
               )) as string;
               const scan = JSON.parse(scanJson) as {
                 loading: boolean;
-                rows: Array<{ receiptNo: string; status: string }>;
+                rows: string[][];
               };
               if (scan.loading) return { ok: false, ids };
               // ⚠基準は**全行のIDが読めた時だけ**成立(@codex #345 R4 P1の復元・
               // #390 R3)。空IDの行を黙って飛ばすと、その行が課金後にIDを得て
               // 「基準に無い行=新規」に化け、古いPDFを掴む。
               // ⚠基準の成立規則は純関数に集約(未請求行は受付番号を持たないのが正常)。
-              const built = collectBaselineReceiptNos(scan.rows);
+              const parsedRows = scan.rows
+                .map((cells) => parseMyPageRowCells(cells))
+                .filter((r): r is MyPageScanRow => r !== null);
+              const built = collectBaselineReceiptNos(parsedRows);
               if (!built.ok) return { ok: false, ids };
               for (const id of built.receiptNos) ids.add(id);
               if (!(await myPageHasNext())) break;
@@ -2900,21 +2901,15 @@ function createPlaywrightRegistryPage(
                 if (!t || /データ取得中/.test(t.textContent ?? "")) {
                   return JSON.stringify({ loading: true, rows: [] });
                 }
-                const rows: Array<Record<string, string>> = [];
+                const rows: string[][] = [];
                 for (const tr of Array.from(t.querySelectorAll("tbody tr"))) {
                   const tds = tr.querySelectorAll("td");
                   if (tds.length < 7) continue;
-                  // ⚠td[6] は「請求日時」と「受付番号」の2段(<br>区切り)。
-                  const parts = (tds[6]?.innerHTML ?? "")
-                      .split(/<br\s*\/?>/i)
-                      .map((x) => x.replace(/<[^>]*>/g, "").trim());
-                  rows.push({
-                    receiptNo: (parts[1] ?? "").trim(),
-                    shozai: (tds[4]?.textContent ?? "").trim(),
-                    status: (tds[5]?.textContent ?? "").trim(),
-                    when: (parts[0] ?? "").trim(),
-                    expiry: (tds[9]?.textContent ?? "").trim(),
-                  });
+                  // ⚠解釈はNode側(parseMyPageRowCells)。ここは生データのみ。
+                  const cellHtmls = Array.from(tds)
+                      .slice(0, 12)
+                      .map((td) => (td as HTMLElement).innerHTML ?? "");
+                  rows.push(cellHtmls);
                 }
                 return JSON.stringify({ loading: false, rows });
               },
@@ -2925,13 +2920,16 @@ function createPlaywrightRegistryPage(
             )) as string;
             const scan = JSON.parse(scanJson) as {
               loading: boolean;
-              rows: MyPageScanRow[];
+              rows: string[][];
             };
             if (scan.loading) {
               scanLoading = true;
               break; // 読み込み中はこの attempt を諦め、リロード後にやり直す
             }
-            scannedRows.push(...scan.rows);
+            for (const cells of scan.rows) {
+              const parsed = parseMyPageRowCells(cells);
+              if (parsed) scannedRows.push(parsed);
+            }
             if (!(await myPageHasNext())) break;
             await page.click(REGISTRY_SELECTORS.myPageNextButton);
             await sleep(1200);
@@ -2947,29 +2945,24 @@ function createPlaywrightRegistryPage(
             // ---- 選択フェーズ: 同定した行を**受付番号**で選び直す。
             // 走査と選択を分けたぶん、選択は強いキーで行い取り違えを塞ぐ。
             await resetMyPageToFirst();
-            for (let pageNo = 0; pageNo < 10 && !ready; pageNo++) {
+            // 受付番号→**走査順での位置**へ変換(scannedRows は各ページの
+            // 実データ行を順に積んだもの=DOM の並びと一致)。
+            const pickedIndex = scannedRows.findIndex(
+              (r) => r.receiptNo === picked.receiptNo,
+            );
+            for (let pageNo = 0; pageNo < 10 && !ready && pickedIndex >= 0; pageNo++) {
               const selJson = (await page.evaluate(
                 (json) => {
-                  const { tableSel, receiptNo } = JSON.parse(json) as {
+                  const { tableSel, rowIndex } = JSON.parse(json) as {
                     tableSel: string;
-                    receiptNo: string;
+                    rowIndex: number;
                   };
+                  // ⚠どの行かの判断は**Node側**(受付番号で決めた行の位置)。
+                  // ここは位置で掴むだけ(@codex #393 R1: DOM側に解釈を置かない)。
                   const rows = Array.from(
                     document.querySelectorAll(`${tableSel} tbody tr`),
-                  );
-                  let target: Element | null = null;
-                  for (const tr of rows) {
-                    const tds = tr.querySelectorAll("td");
-                    if (tds.length < 7) continue;
-                    // ⚠並び順で変わる No.(td[1])ではなく**受付番号**で引く。
-                    const parts = (tds[6]?.innerHTML ?? "")
-                      .split(/<br\s*\/?>/i)
-                      .map((x) => x.replace(/<[^>]*>/g, "").trim());
-                    if ((parts[1] ?? "").trim() === receiptNo) {
-                      target = tr;
-                      break;
-                    }
-                  }
+                  ).filter((tr) => tr.querySelectorAll("td").length >= 7);
+                  const target: Element | null = rows[rowIndex] ?? null;
                   if (!target) return JSON.stringify({ result: "not-found" });
                   // 他の行の check を全て外してから対象だけ check する。
                   for (const cb of Array.from(
@@ -3000,7 +2993,7 @@ function createPlaywrightRegistryPage(
                 JSON.stringify({
                   probe: "mypage-select",
                   tableSel: REGISTRY_SELECTORS.myPageTable,
-                  receiptNo: picked.receiptNo,
+                  rowIndex: pickedIndex,
                 }),
               )) as string;
               const sel = JSON.parse(selJson) as { result: string };

@@ -248,3 +248,41 @@ export function collectBaselineReceiptNos(
   }
   return { ok: true, receiptNos };
 }
+
+/**
+ * マイページ一覧の1行を、**セルの innerHTML 配列**から組み立てる(純関数)。
+ *
+ * ⚠**解釈は必ずここに集約する**(@codex #393 R1)。ブラウザ側(evaluate)は
+ * 「td の innerHTML を順に返すだけ」に留め、どの列が何かの判断・`<br>` の分解は
+ * この関数だけが持つ。列を取り違えても走査テストが緑のまま実運用で落ちる、という
+ * 事故(2026-08-19 第8回: td[1]=No. を受付番号と誤認し、課金済みでPDF未取得)を
+ * 二度と起こさないため、**実HTMLのセル並びをそのままテストに置く**。
+ *
+ * 実測の列(2026-08-19 probe16・td数=10):
+ *   0=checkbox / 1=No. / 2=請求種別 / 3=請求詳細 / 4=所在 / 5=ステータス /
+ *   6=請求日時<br>受付番号 / 7=金額 / 8=PDFサイズ / 9=PDF取得期限
+ */
+export function parseMyPageRowCells(cellHtmls: string[]): MyPageScanRow | null {
+  if (cellHtmls.length < 7) return null; // 実データ行でない(空状態の行など)
+  const plain = (html: string): string =>
+    html
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const lines = (html: string): string[] =>
+    html
+      .split(/<br\s*\/?>/i)
+      .map((part) => plain(part))
+      .filter((part) => part !== "");
+  const dateAndReceipt = lines(cellHtmls[6] ?? "");
+  return {
+    // ⚠受付番号は td[6] の2段目。td[1](No.)は並び順で変わるので使わない。
+    receiptNo: dateAndReceipt[1] ?? "",
+    when: dateAndReceipt[0] ?? "",
+    shozai: plain(cellHtmls[4] ?? ""),
+    status: plain(cellHtmls[5] ?? ""),
+    // 期限も `2026/<br>08/24` のように改行を含むため、行を連結して1つの文字列にする。
+    expiry: lines(cellHtmls[9] ?? "").join(""),
+  };
+}

@@ -1895,6 +1895,27 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     } = {},
   ) {
     const clicked: string[] = [];
+    // 行データ→**実サイトと同じセル並び**(td数=10・td[6]は日時<br>受付番号)へ。
+    // ⚠ここを実HTMLに合わせることで、Node側の抽出(parseMyPageRowCells)まで
+    // 通しで検証される(@codex #393 R1: DOM抽出が未テストだと列取り違えを見逃す)。
+    const toCells = (r: {
+      receiptNo: string;
+      shozai: string;
+      status: string;
+      when: string;
+      expiry: string;
+    }): string[] => [
+      '<input type="checkbox">',
+      "1", // No.(並び順で変わる=同定に使ってはいけない列)
+      "不動産登記<br>（所有者事項）",
+      "QRコード:要",
+      r.shozai,
+      r.status,
+      `${r.when}<br>${r.receiptNo}`,
+      r.receiptNo ? "140" : "",
+      r.receiptNo ? "40KB" : "",
+      r.expiry ? r.expiry.replace("/", "/<br>") : "",
+    ];
     // 課金(#btn_seikyu)を押したかで mypage-scan の見え方を切り替える(実サイト:
     // 新行は課金後に現れる。課金前の走査=基準採取には既存行だけが見える)。
     let seikyuClicked = false; // ＯＫ押下(=課金)まで到達したか
@@ -2038,28 +2059,31 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
           return JSON.stringify({
             loading: false,
             rows: [
-              {
-                receiptNo: `FLAKY-${scanCallCount}`,
+              toCells({
+                receiptNo: `2026081900FLAKY${scanCallCount}`,
                 shozai: `${INPUT.address}１－１`,
                 status: "請求済",
                 when: "2026/08/01 09:00",
                 expiry: "2026/09/01",
-              },
+              }),
             ],
           });
         }
-        return JSON.stringify({
-          loading: false,
-          rows: seikyuClicked
-            ? [...(opts.mypageBaselineRows ?? []), ...mypageRows]
-            : opts.mypageBaselineRows ?? [],
-        });
+        const visible = seikyuClicked
+          ? [...(opts.mypageBaselineRows ?? []), ...mypageRows]
+          : opts.mypageBaselineRows ?? [];
+        return JSON.stringify({ loading: false, rows: visible.map(toCells) });
       }
       // 課金後の選択フェーズ(受付番号で選ぶ)。対象が居れば ready。
       if (parsed.probe === "mypage-select") {
-        const hit = mypageRows.some((r) => r.receiptNo === parsed.receiptNo);
-        if (hit) opts.onMypageSelect?.(String(parsed.receiptNo));
-        return JSON.stringify({ result: hit ? "ready" : "not-found" });
+        // 走査順(基準行→課金で生まれた行)の位置で掴む=実装と同じ契約。
+        const visible = seikyuClicked
+          ? [...(opts.mypageBaselineRows ?? []), ...mypageRows]
+          : opts.mypageBaselineRows ?? [];
+        const row = visible[Number(parsed.rowIndex)];
+        if (!row) return JSON.stringify({ result: "not-found" });
+        opts.onMypageSelect?.(row.receiptNo);
+        return JSON.stringify({ result: "ready" });
       }
       return undefined;
     });
@@ -2667,8 +2691,10 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     expect(baselineAt).toBeLessThan(confirmAt); // 基準採取は確定より前
     // 受付番号ベース(2026-08-19 第8回)。未請求行は受付番号を持たないのが正常なので、
     // 成立規則は純関数(collectBaselineReceiptNos)に集約した。
-    expect(src).toContain("collectBaselineReceiptNos(scan.rows)");
-    expect(src).not.toContain("(tds[1]?.textContent ?? \"\").trim()"); // No.列は使わない
+        // 受付番号ベース(2026-08-19 第8回)。解釈は純関数へ集約し、DOM側は生セルのみ。
+    expect(src).toContain("collectBaselineReceiptNos(parsedRows)");
+    expect(src).toContain("parseMyPageRowCells(cells)");
+    expect(src).not.toContain("tds[1]?.textContent"); // No.列は使わない
   });
 
   it("⚠マイページの基準控え(row-ids)を復活させない(発注者指示 2026-08-18=直接請求)", () => {
