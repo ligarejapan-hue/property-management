@@ -8,6 +8,7 @@ import {
 } from "@/components/properties/registry-preflight-warnings";
 import RegistryChibanPopup from "@/components/properties/registry-chiban-popup";
 import { isSearchableTarget } from "@/lib/registry-fetch/registry-target";
+import { resolveRecoverEntry } from "@/lib/registry-fetch/recover-entry";
 import { MapPinned, Loader2 } from "lucide-react";
 import {
   searchRegistryCandidates,
@@ -223,14 +224,20 @@ export default function RegistryLocationSearchButton({
    *   (所在検索が対象外になった物件でも救えるようにするため)。
    */
   const runRecover = async (fromProperty = false) => {
-    if (!fromProperty && !selected) return;
+    // ⚠**候補が無い=押しても無反応、にしない**(@codex #394 R10 P1)。
+    //   検索できない物件からの入口は候補を持たないので、以前の早期 return では
+    //   確認パネルのボタンが**何もしない**状態だった。判断は純関数に出す。
+    const entry = resolveRecoverEntry({
+      fromProperty,
+      hasSelection: !!selected,
+    });
     setLastAction("recover");
     setState("recovering");
     setErrorMsg(null);
     const recoverLiveRef = safeRandomId();
     setLiveRef(recoverLiveRef);
     try {
-      if (fromProperty || !selected) {
+      if (entry === "property") {
         await recoverRegistryFromProperty(
           propertyId,
           certificateType,
@@ -239,7 +246,7 @@ export default function RegistryLocationSearchButton({
       } else {
         await recoverRegistryByCandidate(
           propertyId,
-          selected.candidateRef,
+          selected!.candidateRef,
           certificateType,
           recoverLiveRef,
         );
@@ -594,7 +601,7 @@ export default function RegistryLocationSearchButton({
                 (課金操作をしないため)。押しても新たな料金は発生しない。 */}
             <button
               type="button"
-              onClick={() => runRecover()}
+              onClick={() => runRecover(!selected)}
               disabled={preflight.pending || preflight.targetsUnavailable}
               title={preflight.pending ? "事前確認中です" : undefined}
               className="rounded border border-indigo-300 dark:border-indigo-500/40 bg-white dark:bg-gray-900 px-2 py-1 font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-60"

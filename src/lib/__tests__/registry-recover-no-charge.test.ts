@@ -130,7 +130,7 @@ describe("回収の入口(画面)", () => {
   });
 
   it("⚠回収ボタンは有料スイッチ(purchaseEnabled)で塞がない=切れている本番でも使える", () => {
-    expect(buttonTag("runRecover()")).not.toContain("purchaseEnabled");
+    expect(buttonTag("runRecover(")).not.toContain("purchaseEnabled");
   });
 
   it("⚠有料取得ボタンの方は今までどおりスイッチで塞ぐ(準備中に課金させない)", () => {
@@ -143,7 +143,11 @@ describe("回収の入口(画面)", () => {
     // その経路は候補を使わず物件自身の地番で探す(課金なし)。
     expect(SEARCH_BUTTON_UI).toContain("recoverRegistryFromProperty(");
     // 候補が無いとき(selected===null)は物件由来で走らせる。
-    expect(SEARCH_BUTTON_UI).toContain("fromProperty || !selected");
+    // 判断は純関数(resolveRecoverEntry)に出してある=画面には埋めない。
+    expect(SEARCH_BUTTON_UI).toContain("resolveRecoverEntry({");
+    expect(SEARCH_BUTTON_UI).toContain('entry === "property"');
+    // ⚠候補が無いのに『何もしない』早期returnを戻さない。
+    expect(SEARCH_BUTTON_UI).not.toContain("if (!fromProperty && !selected) return;");
   });
 
   it("⚠候補なしの回収も**種類を選ぶ画面**を通る(全部事項の購入も取り込める)", () => {
