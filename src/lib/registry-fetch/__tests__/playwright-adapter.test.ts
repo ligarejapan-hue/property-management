@@ -1854,6 +1854,11 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
        * 実サイトはページ送り直後に表が空のまま少し置かれることがある。
        */
       loadingPage?: number;
+      /**
+       * そのページに**移動するたび**、最初の読みを「データ取得中」にする(SV20)。
+       * 走査中だけでなく**ページ送りの最中**にも起きる状況を模す。
+       */
+      slowPage?: number;
       /** 絞り込みが「すべて」に切り替わらない画面を模す(SM8)。 */
       filterStuck?: boolean;
       /** 1ページに表示する行数(既定=全件1ページ)。複数ページの検証に使う。 */
@@ -1943,6 +1948,8 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     let mypageCurrentPage = 0; // マイページのページ送り位置(rowsPerPage 指定時)
     let dialogOpen = false; // 【請求】クリックで開く確認ダイアログ
     let scanCallCount = 0;
+    let pageAtLastRead = -1;
+    let readsOnCurrentPage = 0;
     const mypageRows =
       opts.mypageRows ??
       [
@@ -2098,6 +2105,18 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         if (opts.loadingPage !== undefined && mypageCurrentPage === opts.loadingPage) {
           return JSON.stringify({ loading: true, rows: [] });
         }
+        if (pageAtLastRead !== mypageCurrentPage) {
+          pageAtLastRead = mypageCurrentPage;
+          readsOnCurrentPage = 0;
+        }
+        readsOnCurrentPage += 1;
+        if (
+          opts.slowPage !== undefined &&
+          mypageCurrentPage === opts.slowPage &&
+          readsOnCurrentPage === 1
+        ) {
+          return JSON.stringify({ loading: true, rows: [] });
+        }
         if (!seikyuClicked && opts.baselineUnstable) {
           // 呼ばれるたびに違う受付番号を返す=二重読みが一致しない。
           scanCallCount += 1;
@@ -2141,6 +2160,15 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         );
       }
       if (parsed.probe === "mypage-select") {
+        // ⚠読み込み中の表には行が無い(実サイトの『データ取得中』と同じ)。
+        //   待たずに選びに来た実装はここで空振りする(SV20)。
+        if (
+          opts.slowPage !== undefined &&
+          mypageCurrentPage === opts.slowPage &&
+          pageAtLastRead !== mypageCurrentPage
+        ) {
+          return JSON.stringify({ result: "not-found" });
+        }
         // 走査順(基準行→課金で生まれた行)の位置で掴む=実装と同じ契約。
         const visible = seikyuClicked
           ? [...(opts.mypageBaselineRows ?? []), ...mypageRows]
@@ -3159,6 +3187,41 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     ).rejects.toMatchObject({ code: "provider_error" });
     expect(clicked).not.toContain(DOWNLOAD);
     expect(clicked).not.toContain(SEIKYU);
+  });
+
+  it("SV20: ページ送りの途中で読み込み中でも、待ってから正しい行を取り込む", async () => {
+    // 固定待ちのまま次の判定へ進むと、途中で止まったり別のページで行を選ぶ
+    // (@codex #394 R11 P2)。
+    const f = makeFakeChromium();
+    const seen: string[] = [];
+    wireStage2(f, {
+      rowsPerPage: 1,
+      slowPage: 1, // 2ページ目は移動のたびに最初の読みが「データ取得中」
+      mypageBaselineRows: [
+        boughtRow({
+          receiptNo: "2026081900002000",
+          shozai: `${INPUT.address}９９－１`,
+        }),
+        boughtRow(),
+      ],
+      onMypageSelect: (r) => seen.push(r),
+    });
+    const page = await makeRecoverPage(f);
+    const buf = await page.recoverRegistryPdfByLocation(RECOVER_INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(seen).toEqual(["2026081900727233"]);
+  });
+
+  it("SV21: ⚠謄本の種類が読み取れない行は取り込まない(回収は裏付けが無い)", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [boughtRow({ seikyuType: "図面" })],
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation(RECOVER_INPUT),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(clicked).not.toContain(DOWNLOAD);
   });
 
   it("SV9: 買う対象(地番/家屋番号)が空なら何もしない(ページに触れない)", async () => {

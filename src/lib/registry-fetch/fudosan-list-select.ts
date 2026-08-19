@@ -289,6 +289,14 @@ export function pickChargedMyPageRow(
      * 回収は逆に『買ってあるもののうち、いま取り込めるもの』が目的なので true。
      */
     requireReady?: boolean;
+    /**
+     * 【回収】謄本の種類が**読み取れた行だけ**を候補にする(@codex #394 R11 P2)。
+     * 回収には『どの種類を買ったか』の裏付け(課金前の基準)が無いので、表記が
+     * 読めない行を通すと、所有者事項と全部事項を取り違えたまま添付し得る。
+     * ⚠有料取得では **false のまま**: あちらは『いま買った行』が分かっている。
+     *   表記が想定と違うだけで弾くと、**払ったのにPDFを失う**(損害が逆転)。
+     */
+    strictCertificateType?: boolean;
   },
 ): { receiptNo: string; readyNow: boolean; status: string } | null {
   const kuikiKey = normalizeKuikiForCompare(expected.kuiki);
@@ -303,7 +311,12 @@ export function pickChargedMyPageRow(
       if (split.kindLabel !== expected.kindLabel) return false;
       // 請求種別(所有者事項/全部事項)。読めた場合だけ突き合わせる。
       const rowCert = mypageCertificateTypeOf(r.seikyuType);
-      if (rowCert !== null && rowCert !== expected.certificateType) return false;
+      if (rowCert === null) {
+        // 読めない表記: 回収は採らない/有料取得は採る(上のコメントの理由)。
+        if (expected.strictCertificateType === true) return false;
+      } else if (rowCert !== expected.certificateType) {
+        return false;
+      }
       const cellKey = normalizeKuikiForCompare(split.rest);
       if (!cellKey.startsWith(kuikiKey)) return false;
       const remainder = cellKey.slice(kuikiKey.length);

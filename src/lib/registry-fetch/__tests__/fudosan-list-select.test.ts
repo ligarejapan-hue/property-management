@@ -447,6 +447,18 @@ describe("謄本の種類(所有者事項/全部事項)まで一致させる(@co
     ).toBeNull();
   });
 
+  it("⚠回収は種類が読めない行を採らない(裏付けが無いので取り違え得る)", () => {
+    // 回収には『どの種類を買ったか』の基準が無い。読めない行を通すと
+    // 所有者事項/全部事項を取り違えたまま添付し得る(@codex #394 R11 P2)。
+    expect(
+      pickChargedMyPageRow([row({ seikyuType: "不動産登記" })], {
+        ...EXPECT,
+        certificateType: "owner",
+        strictCertificateType: true,
+      }),
+    ).toBeNull();
+  });
+
   it("種類が読めない表記の行は落とさない(課金後に『払ったのに失う』を作らない)", () => {
     // 表記が想定と違うだけで課金済みのPDFを取り逃す方が損害が大きい。
     const picked = pickChargedMyPageRow(

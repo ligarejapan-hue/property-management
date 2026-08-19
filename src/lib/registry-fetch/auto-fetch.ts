@@ -3333,18 +3333,26 @@ function createPlaywrightRegistryPage(
           )) as string;
           return JSON.parse(raw) as { loading: boolean; rows: string[][] };
         };
-        for (let pageNo = 0; pageNo < RECOVER_MAX_PAGES; pageNo++) {
-          let scan = await readCurrentPage();
-          // ⚠『データ取得中』はまだ結論が出ていない。数回待ち直し、それでも
-          //   読めなければ**『無い』とは言わず**見切れた扱いにする(@codex R5 P2)。
-          for (let retry = 0; scan.loading && retry < 3; retry++) {
+        /**
+         * 表の読み込みが終わるまで待つ(@codex #394 R11 P2)。
+         * ⚠固定待ちのままページ送りの判定や行の選択へ進むと、途中で止まったり
+         *   読み込み中の表を見て『無い』と言ったりする。
+         */
+        const waitPageLoaded = async (): Promise<boolean> => {
+          for (let i = 0; i < 4; i++) {
+            if (!(await readCurrentPage()).loading) return true;
             await sleep(1500);
-            scan = await readCurrentPage();
           }
-          if (scan.loading) {
+          return !(await readCurrentPage()).loading;
+        };
+        for (let pageNo = 0; pageNo < RECOVER_MAX_PAGES; pageNo++) {
+          // ⚠『データ取得中』はまだ結論が出ていない。待ってから読む。それでも
+          //   読めなければ**『無い』とは言わず**見切れた扱いにする(@codex R5 P2)。
+          if (!(await waitPageLoaded())) {
             truncated = true;
             break;
           }
+          const scan = await readCurrentPage();
           let indexInPage = 0;
           for (const cells of scan.rows) {
             const parsed = parseMyPageRowCells(cells);
@@ -3380,6 +3388,8 @@ function createPlaywrightRegistryPage(
           // 回収は『いま取り込めるもの』が目的。最新が期限切れでも、
           // まだ生きている購入があればそれを取り込む(@codex #394 R9 P2)。
           requireReady: true,
+          // 種類が読めない行は採らない(回収には裏付けが無い・@codex R11 P2)。
+          strictCertificateType: true,
         });
         if ((!picked || !picked.readyNow) && truncated) {
           // 履歴を最後まで見ていない=『無い』と断定できない。
@@ -3412,11 +3422,21 @@ function createPlaywrightRegistryPage(
         if (!(await resetToFirst())) failNotRewound();
         let hopped = 0;
         for (; hopped < target.pageNo; hopped++) {
+          // ⚠**各ページの読み込み完了を待ってから**次の判定へ(@codex #394 R11 P2)。
+          //   読み込み中に hasNext を見ると途中で止まり、別のページで行を選ぶ。
+          if (!(await waitPageLoaded())) break;
           if (!(await hasNext())) break;
           await page.click(REGISTRY_SELECTORS.myPageNextButton);
           await sleep(1200);
         }
         if (hopped !== target.pageNo) throw new RegistryFetchError("not_found");
+        // 目的のページでも、選ぶ前に読み込み完了を確かめる。
+        if (!(await waitPageLoaded())) {
+          reportLive(
+            "一覧の読み込みが終わりませんでした(課金はしていません)。時間をおいて再度お試しください",
+          );
+          throw new RegistryFetchError("provider_error");
+        }
         // 選んだ行の受付番号を読み戻して一致を実測(位置ズレで別の筆を取り込まない)。
         const selJson = (await page.evaluate(
           (json) => {
