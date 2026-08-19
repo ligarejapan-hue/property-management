@@ -309,7 +309,18 @@ export const DEFAULT_REGISTRY_LOGIN_PATH = "/TeikyoUketsuke/";
  * ⚠**回収(既に課金済みのPDFを取り込む)専用**の入口。ここから先で請求ボタンには
  * 一切触れない(課金しない)。
  */
-export const REGISTRY_MYPAGE_PATH = "/TeikyoUketsuke/mypage/my-page";
+export /**
+ * 【回収】マイページ走査の上限ページ数(@codex #394 R4 P2)。
+ *
+ * ⚠回収の対象は**過去に買ったもの**なので、口座の履歴を遡る必要がある。
+ * 上限が小さいと、まだ期限内の購入が奥のページにあっても『見つかりません』と
+ * 言ってしまう(=嘘)。上限は大きく取り、それでも尽きたら**見つからないとは**
+ * **言わず**に『最後まで確認できなかった』として返す。
+ * 全体の予算(withRecoverTimeout)が別にあるので、走り続けることにはならない。
+ */
+const RECOVER_MAX_PAGES = 60;
+
+const REGISTRY_MYPAGE_PATH = "/TeikyoUketsuke/mypage/my-page";
 
 /**
  * 利用者のブラウザに開かせるログイン画面URL(A案・@codex #381 R1/R2 P2)。
@@ -3244,7 +3255,10 @@ function createPlaywrightRegistryPage(
           MyPageScanRow & { pageNo: number; indexInPage: number }
         > = [];
         await resetToFirst();
-        for (let pageNo = 0; pageNo < 10; pageNo++) {
+        // ⚠**途中で諦めたことを覚えておく**(@codex #394 R4 P2)。上限で抜けたのに
+        //   『見つかりません』と言うと、まだ期限内の購入を『無い』ことにしてしまう。
+        let truncated = false;
+        for (let pageNo = 0; pageNo < RECOVER_MAX_PAGES; pageNo++) {
           const scanJson = (await page.evaluate(
             (json) => {
               const { tableSel } = JSON.parse(json) as { tableSel: string };
@@ -3283,6 +3297,10 @@ function createPlaywrightRegistryPage(
             }
           }
           if (!(await hasNext())) break;
+          if (pageNo === RECOVER_MAX_PAGES - 1) {
+            truncated = true; // まだ次があるのに上限で抜ける
+            break;
+          }
           await page.click(REGISTRY_SELECTORS.myPageNextButton);
           await sleep(1200);
         }
@@ -3298,6 +3316,17 @@ function createPlaywrightRegistryPage(
           certificateType: input.certificateType,
           baselineReceiptNos: new Set<string>(),
         });
+        if ((!picked || !picked.readyNow) && truncated) {
+          // 履歴を最後まで見ていない=『無い』と断定できない。
+          console.warn(
+            "[registry-fetch] recover: history truncated (not charged)",
+            { pages: RECOVER_MAX_PAGES, scanned: scanned.length },
+          );
+          reportLive(
+            `履歴が多く、最後まで確認できませんでした(${RECOVER_MAX_PAGES}ページ分を確認・課金はしていません)`,
+          );
+          throw new RegistryFetchError("provider_error");
+        }
         if (!picked || !picked.readyNow) {
           // ⚠原因の切り分けは**数だけ**で行う(所在・地番・受付番号は出さない)。
           //   一覧0件=たどり着けていない / 一覧はあるのに0一致=同定の問題、と分かれる。

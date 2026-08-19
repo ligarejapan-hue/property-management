@@ -3048,6 +3048,50 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     ).rejects.toMatchObject({ code: "not_found" });
     expect(clicked).not.toContain(DOWNLOAD);
   });
+  it("SV15: 奥のページ(11ページ目)にある購入も取り込む", async () => {
+    // 回収の対象は**過去に買ったもの**。上限が小さいと、まだ期限内の購入が
+    // 奥にあっても『見つかりません』と嘘をつく(@codex #394 R4 P2)。
+    const f = makeFakeChromium();
+    const seen: string[] = [];
+    const filler = Array.from({ length: 10 }, (_, i) =>
+      boughtRow({
+        receiptNo: `20260819000000${String(i).padStart(2, "0")}`,
+        shozai: `${INPUT.address}９９－${i + 1}`,
+      }),
+    );
+    wireStage2(f, {
+      rowsPerPage: 1,
+      mypageBaselineRows: [...filler, boughtRow()],
+      onMypageSelect: (r) => seen.push(r),
+    });
+    const page = await makeRecoverPage(f);
+    const buf = await page.recoverRegistryPdfByLocation(RECOVER_INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(seen).toEqual(["2026081900727233"]);
+  });
+
+  it("SV16: ⚠履歴を最後まで見られなかったときは『無い』と言わない", async () => {
+    // 上限で打ち切ったのに not_found にすると、まだ期限内の購入を『無い』ことに
+    // してしまい、利用者は諦めて期限を過ぎる(=買った分が消える)。
+    const f = makeFakeChromium();
+    const many = Array.from({ length: 70 }, (_, i) =>
+      boughtRow({
+        receiptNo: `20260819000001${String(i).padStart(2, "0")}`,
+        shozai: `${INPUT.address}９９－${i + 1}`,
+      }),
+    );
+    const { clicked } = wireStage2(f, {
+      rowsPerPage: 1,
+      mypageBaselineRows: many,
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation(RECOVER_INPUT),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    expect(clicked).not.toContain(DOWNLOAD);
+    expect(clicked).not.toContain(SEIKYU); // 課金は一切しない
+  });
+
   it("SV9: 買う対象(地番/家屋番号)が空なら何もしない(ページに触れない)", async () => {
     const f = makeFakeChromium();
     const { clicked } = wireStage2(f, { mypageBaselineRows: [boughtRow()] });
