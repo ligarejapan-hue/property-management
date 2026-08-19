@@ -116,7 +116,7 @@ const API_CLIENT = readFileSync(
 describe("回収の入口(画面)", () => {
   /** 指定の onClick を持つ <button> の開始タグを切り出す。 */
   function buttonTag(onClick: string): string {
-    const at = SEARCH_BUTTON_UI.indexOf(`onClick={${onClick}}`);
+    const at = SEARCH_BUTTON_UI.indexOf(onClick);
     expect(at).toBeGreaterThan(-1);
     const start = SEARCH_BUTTON_UI.lastIndexOf("<button", at);
     const end = SEARCH_BUTTON_UI.indexOf(">", SEARCH_BUTTON_UI.indexOf("</button>", at) - 200);
@@ -126,15 +126,23 @@ describe("回収の入口(画面)", () => {
 
   it("課金なしで取り込むボタンがある(文言に『課金なし』を明記)", () => {
     expect(SEARCH_BUTTON_UI).toContain("取得済みを取り込む（課金なし）");
-    expect(SEARCH_BUTTON_UI).toContain("onClick={runRecover}");
+    expect(SEARCH_BUTTON_UI).toContain("runRecover(");
   });
 
   it("⚠回収ボタンは有料スイッチ(purchaseEnabled)で塞がない=切れている本番でも使える", () => {
-    expect(buttonTag("runRecover")).not.toContain("purchaseEnabled");
+    expect(buttonTag("runRecover()")).not.toContain("purchaseEnabled");
   });
 
   it("⚠有料取得ボタンの方は今までどおりスイッチで塞ぐ(準備中に課金させない)", () => {
-    expect(buttonTag("runObtain")).toContain("purchaseEnabled");
+    expect(buttonTag("runObtain}")).toContain("purchaseEnabled");
+  });
+
+  it("⚠検索できない物件にも回収の入口がある(買った書類に手が届かなくならない)", () => {
+    // 取込が途中まで進むと不動産番号が入って所在検索が対象外になる。
+    expect(SEARCH_BUTTON_UI).toContain("!isSearchableTarget(target.kind) && (");
+    expect(SEARCH_BUTTON_UI).toContain("runRecover(true)");
+    // その経路は候補を使わず物件自身の地番で探す(課金なし)。
+    expect(SEARCH_BUTTON_UI).toContain("recoverRegistryFromProperty(");
   });
 
   it("回収は専用の通信関数を使い、mode:recover を必ず送る", () => {

@@ -1318,6 +1318,28 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
     ).not.toHaveBeenCalled();
   });
 
+  it("候補が無ければ**物件自身の地番**で探す(検索できない物件でも救える)", async () => {
+    // 取込が途中まで進むと物件に不動産番号が入り、所在検索が対象外になる。
+    // 候補が取れなくなっても、買った書類に手が届くようにする(@codex #394 R6 P1)。
+    setProperty({
+      address: "テスト市テスト町一丁目",
+      lotNumber: "5-6",
+      realEstateNumber: "0123456789012",
+    });
+    const { provider, promise } = runRecover({ locationCandidate: null });
+    await promise;
+    const req = provider.recoverRegistryPdf.mock.calls[0][0];
+    expect(req.location).toMatchObject({ lotNumber: "5-6" });
+    expect(req.realEstateNumber).toBeFalsy();
+  });
+
+  it("⚠物件にも地番が無ければ取り込まない(別の筆を掴まない)", async () => {
+    setProperty({ address: "テスト市テスト町一丁目", lotNumber: null });
+    const { provider, promise } = runRecover({ locationCandidate: null });
+    await expect(promise).rejects.toMatchObject({ status: 409 });
+    expect(provider.recoverRegistryPdf).not.toHaveBeenCalled();
+  });
+
   it("⚠物件に不動産番号があっても所在(地番)で探す=番号経路に落ちない", async () => {
     setProperty({
       address: "テスト市テスト町一丁目",

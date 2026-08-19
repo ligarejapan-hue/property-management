@@ -208,23 +208,33 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
   );
 
   it.each([undefined, "", "   "])(
-    "⚠候補(%s)が無い回収は 400 で止める(課金し得る従来経路へ落とさない)",
+    "候補(%s)が無い回収は**物件自身の地番**で実行する(課金経路へは落とさない)",
     async (candidateRef) => {
+      // 取込が途中まで進むと物件に不動産番号が入り、所在検索が対象外になる。
+      // 検索の中にある入口しか無いと、買った書類に二度と手が届かない
+      // (@codex #394 R6 P1)。
       const res = await callRoute({
         confirmed: true,
         mode: "recover",
         ...(candidateRef === undefined ? {} : { candidateRef }),
       });
-      expect(res.status).toBe(400);
-      expect(await res.json()).toMatchObject({
-        error: { code: "REGISTRY_RECOVER_CANDIDATE_REQUIRED" },
-      });
-      // 候補の再解決にも取得にも進まない(=外部にも触れない)。
+      expect(res.status).toBe(200);
+      // 候補キャッシュ(誤課金防止の仕組み)には依存しない=解決を呼ばない。
       expect(resolveRegistryCandidate).not.toHaveBeenCalled();
-      expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+      const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
+      expect(arg.mode).toBe("recover");
+      // 地番は server 側(物件行)から採る=client からは受け取らない。
+      expect(arg.locationCandidate).toBeUndefined();
+      expect(arg.realEstateNumber).toBeUndefined();
     },
   );
 
+  it("⚠候補が無いのは回収のときだけ通す(従来の取得は今までどおり)", async () => {
+    // mode 未指定で候補も無ければ、従来経路(番号での取得)がそのまま走る。
+    await callRoute({ confirmed: true });
+    const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
+    expect(arg.mode).toBeUndefined();
+  });
   it("⚠回収でも確認(confirmed)は要る(誤操作で走らせない)", async () => {
     const res = await callRoute({ candidateRef: "cand-1", mode: "recover" });
     expect(res.status).toBe(400);

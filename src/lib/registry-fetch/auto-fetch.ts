@@ -3835,10 +3835,21 @@ export async function runRegistryAutoFetch(
     !(args.realEstateNumber ?? property.realEstateNumber)?.trim();
   // ⚠回収でも「対象と所在があること・地番の書き方が読めること」は同じ規則で検査する
   // (別の筆を取り込まないため)。違うのは課金スイッチと台帳ガードを通らない点だけ。
+  // ⚠回収は**候補が無くても物件自身の地番で実行できる**(@codex #394 R6 P1)。
+  //   取込が途中まで進むと物件に不動産番号が入り、所在検索が「対象外」になるため、
+  //   検索の中にある入口だけだと**買った書類に二度と手が届かない**。
+  //   ⚠課金しない経路なので候補キャッシュ(誤課金防止の仕組み)に依存しなくてよい。
+  //   取り違え防止は同定側(区域+地番+種別+謄本の種類+請求済+期限内)が担う。
+  const recoverLocation = isRecover
+    ? (args.locationCandidate ?? {
+        lotNumber: property.lotNumber,
+        buildingNumber: property.buildingNumber,
+      })
+    : args.locationCandidate;
   if (isRecover) {
     const lotOrBuilding = (
-      args.locationCandidate?.lotNumber ??
-      args.locationCandidate?.buildingNumber ??
+      recoverLocation?.lotNumber ??
+      recoverLocation?.buildingNumber ??
       ""
     ).trim();
     if (!lotOrBuilding || !(property.address ?? "").trim()) {
@@ -3997,11 +4008,15 @@ export async function runRegistryAutoFetch(
       //   (確定→請求)へ落ちる余地が残る。回収は所在だけで引く。
       realEstateNumber: isRecover ? null : effectiveNumber,
       location:
-        args.locationCandidate && (isRecover || !effectiveNumber?.trim())
+        (isRecover ? recoverLocation : args.locationCandidate) &&
+        (isRecover || !effectiveNumber?.trim())
           ? {
               address: property.address ?? "",
-              lotNumber: args.locationCandidate.lotNumber,
-              buildingNumber: args.locationCandidate.buildingNumber,
+              lotNumber: (isRecover ? recoverLocation : args.locationCandidate)!
+                .lotNumber,
+              buildingNumber: (isRecover
+                ? recoverLocation
+                : args.locationCandidate)!.buildingNumber,
               // ⚠鍵(purchaseKeyHash)と同じ選択値を使う(上で確定した certificateType)。
               certificateType,
             }
@@ -4099,7 +4114,10 @@ export async function runRegistryAutoFetch(
       if (isRecover && !result.attachmentId) {
         throw new ApiError(
           422,
-          "取得済みの謄本を保存できませんでした。時間をおいて再度お試しください",
+          // ⚠やり直せることは伝えるが、**取込の記録が重複し得る**ことも隠さない
+        //   (@codex #394 R6 P2: 保存の前段(取込記録・物件の項目・所有者)は既に
+        //   確定しているため、再実行は同じPDFをもう一度取り込む)。
+        "取得済みの謄本を保存できませんでした。物件の添付をご確認ください(やり直せますが、取込の記録が重複することがあります)",
           "REGISTRY_RECOVER_ATTACH_FAILED",
         );
       }

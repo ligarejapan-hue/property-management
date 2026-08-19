@@ -114,15 +114,76 @@ export async function POST(
     const candidateRef =
       typeof candidateRefRaw === "string" ? candidateRefRaw.trim() : "";
 
-    // ⚠回収は**候補(地番)が無ければ実行しない**(@codex #394 R3 P2)。
-    //   候補が無いと下の従来経路(番号での取得=課金し得る道)へ落ち、mode も
-    //   落ちるため、『課金しません』と言いながら課金経路に入ってしまう。
-    if (isRecover && !candidateRef) {
-      throw new ApiError(
-        400,
-        "取り込む候補が指定されていません",
-        "REGISTRY_RECOVER_CANDIDATE_REQUIRED",
+    // 実況パネル(2026-08-15・任意)。取得も回収も同じ橋渡しを使う。
+    // ⚠**有料取得は中止を受け付けない**(課金だけ残る状態を作らない既存方針)ので、
+    //   begin 直後に cancel 窓を閉じ、reporter にも isCancelRequested を配線しない。
+    //   効かない「中止」ボタンが画面に出る食い違いを作らないため。
+    const liveRefRaw = (body as { liveRef?: unknown } | null)?.liveRef;
+    const liveRef =
+      typeof liveRefRaw === "string" && isValidLiveRef(liveRefRaw)
+        ? liveRefRaw
+        : null;
+    // ⚠**画面の写真は『全物件を見られる役割』にだけ渡す**(@codex #394 R2 P1)。
+    //   自動操作は登記情報提供サービスの**マイページ(口座全体の履歴)**を開くため、
+    //   全画面の写真には**他の物件の所在・受付番号**まで写る。担当分しか見られない
+    //   役割(field_staff)に見せると、物件単位の認可を写真が素通りさせてしまう。
+    //   文字の進行(固定文言)は誰でも見られるので、進み具合は分かる。
+    const canSeeShots = !isPropertyScopedRole(session.role);
+    if (liveRef) {
+      beginLiveView(session.id, id, liveRef);
+      closeLiveViewCancelWindow(session.id, id, liveRef);
+      reportLiveStep(
+        session.id,
+        id,
+        liveRef,
+        isRecover
+          ? "取得済みの書類の取り込みを受け付けました(課金はしません)"
+          : "自動取得を受け付けました(この処理は中止できません)",
+        null,
       );
+      if (!canSeeShots) {
+        reportLiveStep(
+          session.id,
+          id,
+          liveRef,
+          "この権限では画面の写真は記録しません(進行状況は文字でお伝えします)",
+          null,
+        );
+      }
+    }
+    const live = liveRef
+      ? {
+          step(label: string): number {
+            return reportLiveStep(session.id, id, liveRef, label, null);
+          },
+          attachShot(seq: number, shot: Uint8Array): void {
+            if (!canSeeShots) return;
+            attachLiveShot(session.id, id, liveRef, seq, shot);
+          },
+        }
+      : undefined;
+
+    // 【回収】候補が無くても物件自身の地番で取り込む(@codex #394 R6 P1)。
+    // ⚠取込が途中まで進むと物件に不動産番号が入り、所在検索が「対象外」になる。
+    //   検索の中にある入口しか無いと、**買った書類に二度と手が届かない**。
+    //   ⚠ここは**課金しない経路だけ**が通る。従来の(課金し得る)経路へは落とさない。
+    if (isRecover && !candidateRef) {
+      try {
+        const recovered = await runRegistryAutoFetch(
+          {
+            session: { id: session.id, role: session.role },
+            propertyId: id,
+            confirmed,
+            mode: "recover",
+            certificateType,
+            live,
+          },
+          provider,
+        );
+        return apiResponse(recovered, 200);
+      } finally {
+        if (liveRef) completeLiveView(session.id, id, liveRef);
+      }
     }
 
     if (candidateRef) {
@@ -132,54 +193,6 @@ export async function POST(
         confirmed,
         candidateRef,
       });
-      // 実況パネル(2026-08-15・任意)。検索 route と同じ橋渡しだが、**有料取得は中止を
-      // 受け付けない**(課金だけ残る状態を作らない既存方針)ので、begin 直後に cancel 窓を
-      // 閉じ、reporter にも isCancelRequested を配線しない。液晶に映る「中止」ボタンが
-      // 効かないのに出ている、という食い違いを作らないため。
-      const liveRefRaw = (body as { liveRef?: unknown } | null)?.liveRef;
-      const liveRef =
-        typeof liveRefRaw === "string" && isValidLiveRef(liveRefRaw)
-          ? liveRefRaw
-          : null;
-      if (liveRef) {
-        beginLiveView(session.id, id, liveRef);
-        closeLiveViewCancelWindow(session.id, id, liveRef);
-        reportLiveStep(
-          session.id,
-          id,
-          liveRef,
-          isRecover
-            ? "取得済みの書類の取り込みを受け付けました(課金はしません)"
-            : "自動取得を受け付けました(この処理は中止できません)",
-          null,
-        );
-      }
-      // ⚠**画面の写真は『全物件を見られる役割』にだけ渡す**(@codex #394 R2 P1)。
-      //   自動操作は登記情報提供サービスの**マイページ(口座全体の履歴)**を開くため、
-      //   全画面の写真には**他の物件の所在・受付番号**まで写る。担当分しか見られない
-      //   役割(field_staff)に見せると、物件単位の認可を写真が素通りさせてしまう。
-      //   文字の進行(固定文言)は誰でも見られるので、進み具合は分かる。
-      const canSeeShots = !isPropertyScopedRole(session.role);
-      if (liveRef && !canSeeShots) {
-        reportLiveStep(
-          session.id,
-          id,
-          liveRef,
-          "この権限では画面の写真は記録しません(進行状況は文字でお伝えします)",
-          null,
-        );
-      }
-      const live = liveRef
-        ? {
-            step(label: string): number {
-              return reportLiveStep(session.id, id, liveRef, label, null);
-            },
-            attachShot(seq: number, shot: Uint8Array): void {
-              if (!canSeeShots) return;
-              attachLiveShot(session.id, id, liveRef, seq, shot);
-            },
-          }
-        : undefined;
       try {
         const obtained = await runRegistryAutoFetch(
           {

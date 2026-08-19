@@ -1956,6 +1956,28 @@ export async function recoverRegistryByCandidate(
   });
 }
 
+/**
+ * 【回収・候補なし】物件自身の地番で、購入済みの謄本を取り込む(2026-08-19)。
+ * 取込が途中まで進んだ物件は不動産番号が入って所在検索の対象外になるため、
+ * 候補が取れない状態でも救えるようにする(課金しない経路)。
+ */
+export async function recoverRegistryFromProperty(
+  propertyId: string,
+  certificateType: "owner" | "all" = "owner",
+  liveRef?: string,
+): Promise<unknown> {
+  return apiFetch(`/api/properties/${propertyId}/registry/auto-fetch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      confirmed: true,
+      certificateType,
+      mode: "recover",
+      ...(liveRef ? { liveRef } : {}),
+    }),
+  });
+}
+
 // ---- 謄本 一括取得(PR-B・薄い版) ----
 
 export interface RegistryFetchJobCreateResult {

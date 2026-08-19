@@ -13,6 +13,7 @@ import {
   searchRegistryCandidates,
   obtainRegistryByCandidate,
   recoverRegistryByCandidate,
+  recoverRegistryFromProperty,
   apiErrorCode,
   type RegistrySearchCandidate,
 } from "@/lib/api-client";
@@ -217,20 +218,32 @@ export default function RegistryLocationSearchButton({
   // 背景: 請求は成立したのにPDFの取り込みに失敗すると、二重課金ガードが効いて
   // 取り直せない=**払ったのに手元に残らない**。期限内なら課金せず回収できる。
   // ⚠この経路は有料取得のスイッチが入っていなくても使える(課金操作をしないため)。
-  const runRecover = async () => {
-    if (!selected) return;
+  /**
+   * @param fromProperty 候補を使わず**物件自身の地番**で取り込む
+   *   (所在検索が対象外になった物件でも救えるようにするため)。
+   */
+  const runRecover = async (fromProperty = false) => {
+    if (!fromProperty && !selected) return;
     setLastAction("recover");
     setState("recovering");
     setErrorMsg(null);
     const recoverLiveRef = safeRandomId();
     setLiveRef(recoverLiveRef);
     try {
-      await recoverRegistryByCandidate(
-        propertyId,
-        selected.candidateRef,
-        certificateType,
-        recoverLiveRef,
-      );
+      if (fromProperty || !selected) {
+        await recoverRegistryFromProperty(
+          propertyId,
+          certificateType,
+          recoverLiveRef,
+        );
+      } else {
+        await recoverRegistryByCandidate(
+          propertyId,
+          selected.candidateRef,
+          certificateType,
+          recoverLiveRef,
+        );
+      }
       setState("done");
       propertyRefreshPendingRef.current = true;
     } catch (e) {
@@ -360,6 +373,19 @@ export default function RegistryLocationSearchButton({
                 className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300 dark:disabled:bg-gray-700"
               >
                 {preflight.pending ? "確認中..." : "検索する"}
+              </button>
+            )}
+            {/* ⚠検索できない物件にも**回収**の入口を出す(@codex #394 R6 P1)。
+                取込が途中まで進むと不動産番号が入って所在検索の対象外になり、
+                候補経由の入口だけだと**買った書類に二度と手が届かない**。
+                この経路は物件自身の地番で探すので候補が要らず、課金もしない。 */}
+            {target && !isSearchableTarget(target.kind) && (
+              <button
+                type="button"
+                onClick={() => runRecover(true)}
+                className="rounded border border-indigo-300 dark:border-indigo-500/40 bg-white dark:bg-gray-900 px-2 py-1 font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/10"
+              >
+                取得済みを取り込む（課金なし）
               </button>
             )}
             <button type="button" onClick={reset} className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
@@ -545,7 +571,7 @@ export default function RegistryLocationSearchButton({
                 (課金操作をしないため)。押しても新たな料金は発生しない。 */}
             <button
               type="button"
-              onClick={runRecover}
+              onClick={() => runRecover()}
               disabled={preflight.pending || preflight.targetsUnavailable}
               title={preflight.pending ? "事前確認中です" : undefined}
               className="rounded border border-indigo-300 dark:border-indigo-500/40 bg-white dark:bg-gray-900 px-2 py-1 font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-60"
