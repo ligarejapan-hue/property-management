@@ -44,6 +44,11 @@ import {
   normalizeChibanForDialog,
 } from "@/lib/registry-fetch/chiban-input";
 import {
+  dialogAmountMatches,
+  pickConfirmButtonIndex,
+  resolveSeikyuConfirm,
+} from "@/lib/registry-fetch/seikyu-confirm";
+import {
   FUDOSAN_LIST_HIDDEN_PREFIX,
   pickChargedMyPageRow,
   selectFudosanListRow,
@@ -560,6 +565,8 @@ const REGISTRY_SELECTORS = {
   fudosanListSeikyuButton: "#btn_seikyu",
   /** [確定・2026-08-17 probe13] 請求リストの行checkbox(#sentaku_N・onclick=chkSentaku(this))。 */
   fudosanListRowCheckbox: 'input[name="sentaku"]',
+  /** [確定・2026-08-19 probe15] 請求金額合計(サイトが計算・課金前の裏取りに使う)。 */
+  seikyuTotalAmount: "#GSeikyuKingakuGokei",
   myPageTable: "#myPageTable", // [確定] 請求一覧テーブル
   myPageFilter: "#siborikomi", // [確定] 状態の絞り込み(すべて/未請求/請求済…)
   myPageReloadButton: "#myReloadButton", // [要live] 一覧の「最新表示」(請求済への遷移を待つのに使う)
@@ -1845,6 +1852,8 @@ function createPlaywrightRegistryPage(
       let expectedKuiki = "";
       // 課金前に控える既存行の受付番号(基準)。課金後の同定は基準に無い行だけ。
       const baselineTrIds = new Set<string>();
+      // 請求リストで選んだ行の番号(料金の裏取りに使う)。
+      let pickedRowIndex = -1;
       if (targetKey.length === 0) {
         // 取得対象(地番/家屋番号)が無い候補は買えない(課金前・fail-closed)。
         throw new RegistryFetchError("provider_error");
@@ -2629,6 +2638,7 @@ function createPlaywrightRegistryPage(
             }),
           )) as string;
           const checkedIndexes = JSON.parse(checkedStateJson) as number[];
+          pickedRowIndex = pick.index;
           if (checkedIndexes.length !== 1 || checkedIndexes[0] !== pick.index) {
             reportLive(
               "請求リストの選択を確認できませんでした(課金していません)",
@@ -2679,20 +2689,142 @@ function createPlaywrightRegistryPage(
         throw new RegistryFetchError("provider_error");
       }
 
-      // ---- ⑧ ここから課金。以降の失敗はすべて charged_but_failed ----
+      // ---- ⑧ 請求。⚠**課金の瞬間は「確認ダイアログのＯＫ」**(2026-08-19 実測) ----
+      // 【請求】(#btn_seikyu)は押しても submit されず、金額入りの確認ダイアログ
+      // (jQuery UI modal・既定ラベル「ＯＫ/キャンセル」)を出すだけ。第7回テストは
+      // ここでＯＫを押さずに画面遷移を待ち、課金ゼロのまま timeout していた。
+      // ⇒ ①合計金額の裏取り(課金前) ②請求クリック(無料) ③ダイアログ待ち
+      //    ④本文の金額照合 ⑤**ＯＫ直前で charged=true** ⑥ＯＫ押下(=課金)。
+      let confirmedAmountYen = 0;
+      {
+        // 選択行の料金と、サイトが計算した請求金額合計が**一致**することを実測する。
+        // 一致=「いま選ばれているのは対象の1件だけ」をサイトの数字で裏取りしたのと同じ
+        // (選択が増えていれば合計が跳ね上がる)。読めなければ課金前に中止(fail-closed)。
+        const amountsJson = (await page.evaluate(
+          (json) => {
+            const { feeId, totalSel } = JSON.parse(json) as {
+              feeId: string;
+              totalSel: string;
+            };
+            const fee = document.getElementById(feeId) as HTMLInputElement | null;
+            const total = document.querySelector(totalSel);
+            return JSON.stringify({
+              rowFeeText: fee?.value ?? "",
+              totalText: (total?.textContent ?? "").trim(),
+            });
+          },
+          JSON.stringify({
+            probe: "seikyu-amounts",
+            feeId: `${FUDOSAN_LIST_HIDDEN_PREFIX.ryokin}${pickedRowIndex}`,
+            totalSel: REGISTRY_SELECTORS.seikyuTotalAmount,
+          }),
+        )) as string;
+        const amounts = JSON.parse(amountsJson) as {
+          rowFeeText: string;
+          totalText: string;
+        };
+        const decision = resolveSeikyuConfirm(amounts);
+        if (!decision.proceed) {
+          reportLive(`請求金額を確認できませんでした(課金していません): ${decision.detail}`);
+          console.warn(
+            `[registry-fetch] seikyu amount gate failed (${decision.reason}); refusing (not charged)`,
+          );
+          throw new RegistryFetchError("provider_error");
+        }
+        confirmedAmountYen = decision.amountYen;
+        reportLive(
+          `請求金額の合計が${confirmedAmountYen}円(対象1件)であることを確認しました(まだ課金されていません)`,
+        );
+      }
+      // 【請求】のクリック自体は**無料**(確認ダイアログを出すだけ)。
+      await domClick(REGISTRY_SELECTORS.fudosanListSeikyuButton).catch(() => {});
+      // 確認ダイアログの出現を待ち、本文の金額を最終照合する(まだ課金していない)。
+      let confirmButtonIndex = -1;
+      {
+        const deadline = Date.now() + DIALOG_RESULT_TIMEOUT_MS;
+        for (;;) {
+          const dlgJson = (await page.evaluate(
+            (_json) => {
+              const panes = Array.from(
+                document.querySelectorAll(".ui-dialog"),
+              ).filter((d) => (d as HTMLElement).offsetParent !== null);
+              if (panes.length === 0) return JSON.stringify({ open: false });
+              const pane = panes[panes.length - 1];
+              const buttons = Array.from(
+                pane.querySelectorAll(".ui-dialog-buttonpane button"),
+              ).map((b) => (b.textContent ?? "").trim());
+              const content = pane.querySelector(".ui-dialog-content");
+              return JSON.stringify({
+                open: buttons.length > 0,
+                buttons,
+                text: (content?.textContent ?? "").trim().slice(0, 400),
+              });
+            },
+            JSON.stringify({ probe: "seikyu-dialog" }),
+          )) as string;
+          const dlg = JSON.parse(dlgJson) as {
+            open: boolean;
+            buttons?: string[];
+            text?: string;
+          };
+          if (dlg.open && dlg.buttons) {
+            const match = dialogAmountMatches(dlg.text ?? "", confirmedAmountYen);
+            if (!match.ok) {
+              reportLive(
+                `確認画面の金額(${match.found ?? "不明"}円)が想定(${confirmedAmountYen}円)と違うため中止しました(課金していません)`,
+              );
+              console.warn(
+                "[registry-fetch] seikyu dialog amount mismatch; refusing (not charged)",
+              );
+              throw new RegistryFetchError("provider_error");
+            }
+            confirmButtonIndex = pickConfirmButtonIndex(dlg.buttons);
+            break;
+          }
+          if (Date.now() >= deadline) {
+            reportLive("請求の確認画面が出ませんでした(課金していません)");
+            console.warn(
+              "[registry-fetch] seikyu confirm dialog did not appear; refusing (not charged)",
+            );
+            throw new RegistryFetchError("provider_error");
+          }
+          await sleep(500);
+        }
+        if (confirmButtonIndex < 0) {
+          // 押してよいボタンが分からない=押さない(取り消し側を誤って押すより安全)。
+          reportLive("請求の確認画面のボタンを判別できませんでした(課金していません)");
+          console.warn(
+            "[registry-fetch] seikyu confirm button not identified; refusing (not charged)",
+          );
+          throw new RegistryFetchError("provider_error");
+        }
+      }
+      // ⚠中止の印は**ＯＫを押す直前**で最終確認(ここまで課金していない)。
+      if (input.chargeState?.aborted) {
+        throw new RegistryFetchError("provider_error");
+      }
       try {
-        // ⚠課金境界フラグ(@codex #345 P1)。押す**直前**に立てる=外側 timeout が
-        // ここ以降で発火しても provider が charged_but_failed に分類できる。
+        // ⚠課金境界フラグ(@codex #345 P1)。**ＯＫを押す直前**に立てる(第7回の
+        // 誤判定=請求クリック時点で立てていたため、未課金なのに課金済み扱いになった)。
         if (input.chargeState) input.chargeState.charged = true;
-        // 発注者指示(2026-08-18・過去にも同指摘): **請求リストの【請求】を直接押す**。
-        // マイページへ登録してから請求する遠回りはしない。
-        // ⚠クリック直後に submit の遷移が走ると、evaluate の実行コンテキストが
-        // 破棄されて domClick 自体が reject し得る(確定クリックと同じ既知挙動・
-        // @codex #390 R2 P1)。課金は受理されているのに charged_but_failed で
-        // 打ち切ると支払済みPDFを取りに行けないため、ここは握って**着地の実測**
-        // (下の #myPageTable 待ち)に判定を委ねる。本当に押せていなければ着地が
-        // 来ずに timeout → charged_but_failed(安全側の会計のまま)。
-        await domClick(REGISTRY_SELECTORS.fudosanListSeikyuButton).catch(() => {});
+        // ⚠ＯＫ押下で submit が走り、実行コンテキストが壊れて evaluate が reject し得る。
+        // 課金は受理されている可能性があるため握り、**着地の実測**へ委ねる。
+        await page
+          .evaluate(
+            (json) => {
+              const { idx } = JSON.parse(json) as { idx: number };
+              const panes = Array.from(
+                document.querySelectorAll(".ui-dialog"),
+              ).filter((d) => (d as HTMLElement).offsetParent !== null);
+              const pane = panes[panes.length - 1];
+              const buttons = Array.from(
+                pane?.querySelectorAll(".ui-dialog-buttonpane button") ?? [],
+              ) as HTMLButtonElement[];
+              buttons[idx]?.click();
+            },
+            JSON.stringify({ probe: "seikyu-confirm-ok", idx: confirmButtonIndex }),
+          )
+          .catch(() => {});
         // 請求の submit で /reqf/fudosan-seikyu(マイページ一覧のある画面)へ遷移する
         // (probe13: form action で実測)。課金後なので中止せず、一覧の出現を待って
         // 「請求済」の実測(下のループ)へ。⚠診断(page-probe)は課金前のみの原則の
