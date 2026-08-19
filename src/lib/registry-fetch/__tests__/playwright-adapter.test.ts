@@ -1916,7 +1916,10 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       "1", // No.(並び順で変わる=同定に使ってはいけない列)
       "不動産登記<br>（所有者事項）",
       "QRコード:要",
-      r.shozai,
+      // ⚠マイページの所在は先頭に種別が付く(probe16 実測)。fake も実物に合わせる。
+      r.shozai.startsWith("土地・") || r.shozai.startsWith("建物・")
+        ? r.shozai
+        : `土地・${r.shozai}`,
       r.status,
       `${r.when}<br>${r.receiptNo}`,
       r.receiptNo ? "140" : "",

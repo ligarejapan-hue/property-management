@@ -189,6 +189,11 @@ export function pickChargedMyPageRow(
     targetKey: string;
     kuiki: string;
     /**
+     * 期待する不動産種別(「土地」/「建物」)。マイページの所在セルは先頭に
+     * 種別が付く(2026-08-19 probe16 実測)。地番での請求=土地 / 家屋番号=建物。
+     */
+    kindLabel: string;
+    /**
      * 課金**前**に控えた既存行の**受付番号**(@codex #390 R2 P1)。ここに載っている
      * 行は「今回の課金で作られた行」ではあり得ないため同定から除外する。
      * 新行が非同期でまだ表に出ていない間に、同じ筆の**古い**請求済行だけが
@@ -206,7 +211,10 @@ export function pickChargedMyPageRow(
       // 受付番号を持たない行=未請求(まだ買っていない)。買った行は必ず持つ。
       if (r.receiptNo.trim() === "") return false;
       if (expected.baselineReceiptNos.has(r.receiptNo.trim())) return false;
-      const cellKey = normalizeKuikiForCompare(r.shozai);
+      // ⚠所在セルの先頭の「土地・」「建物・」を外してから比べる(実測)。
+      const split = splitMyPageShozai(r.shozai);
+      if (split.kindLabel !== expected.kindLabel) return false;
+      const cellKey = normalizeKuikiForCompare(split.rest);
       if (!cellKey.startsWith(kuikiKey)) return false;
       const remainder = cellKey.slice(kuikiKey.length);
       return (
@@ -285,4 +293,29 @@ export function parseMyPageRowCells(cellHtmls: string[]): MyPageScanRow | null {
     // 期限も `2026/<br>08/24` のように改行を含むため、行を連結して1つの文字列にする。
     expiry: lines(cellHtmls[9] ?? "").join(""),
   };
+}
+
+/** マイページの所在セルの先頭に付く不動産種別(2026-08-19 probe16 実測)。 */
+export const MYPAGE_KIND_PREFIXES = ["土地・", "建物・"] as const;
+
+/**
+ * マイページ一覧の所在セルから**種別の接頭辞**を分離する。
+ *
+ * ⚠実測(probe16): マイページの所在は `土地・神奈川県横浜市南区井土ケ谷中町６９－２`
+ * のように**先頭に「土地・」「建物・」が付く**(請求リスト側の hidden とは形が違う)。
+ * これを外さずに「所在の前半が期待の地番区域で始まる」を判定すると**常に不一致**に
+ * なり、課金後に自分が買った行を永久に見つけられない。
+ * 接頭辞は種別の裏取りにも使える(地番での請求=土地 / 家屋番号での請求=建物)。
+ */
+export function splitMyPageShozai(raw: string): {
+  kindLabel: string;
+  rest: string;
+} {
+  const text = raw.trim();
+  for (const prefix of MYPAGE_KIND_PREFIXES) {
+    if (text.startsWith(prefix)) {
+      return { kindLabel: prefix.slice(0, -1), rest: text.slice(prefix.length) };
+    }
+  }
+  return { kindLabel: "", rest: text };
 }

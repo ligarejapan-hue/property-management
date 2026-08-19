@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   collectBaselineReceiptNos,
+  splitMyPageShozai,
   decodeSiteNumericEntities,
   FUDOSAN_LIST_CHECKBOX_NAME,
   FUDOSAN_LIST_HIDDEN_PREFIX,
@@ -155,28 +156,56 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
   function mrow(over: Partial<MyPageScanRow>): MyPageScanRow {
     return {
       receiptNo: "2026081900727233",
-      shozai: `${KU}６９－２`,
+      shozai: `土地・${KU}６９－２`, // ⚠実サイト形(先頭に種別)
       status: "請求済",
       when: "2026/08/18 12:00",
       expiry: "2026/09/18",
       ...over,
     };
   }
-  const EXP = { targetKey: "69-2", kuiki: KU, baselineReceiptNos: new Set<string>() };
+  const EXP = {
+    targetKey: "69-2",
+    kuiki: KU,
+    kindLabel: "土地",
+    baselineReceiptNos: new Set<string>(),
+  };
 
   it("課金後の同定も文字参照を解いてから比べる(可視セルは素の日本語だが対で維持)", () => {
     const ENTITY_KU = "&#31070;&#22856;&#24029;&#30476;&#27178;&#27996;&#24066;&#21335;&#21306;&#20117;&#22303;&#12465;&#35895;&#20013;&#30010;";
     const picked = pickChargedMyPageRow(
-      [mrow({ shozai: `${ENTITY_KU}６９－２` })],
+      [mrow({ shozai: `土地・${ENTITY_KU}６９－２` })],
       EXP,
     );
     expect(picked?.receiptNo).toBe("2026081900727233");
   });
 
+  it("⚠所在の先頭の種別が違う行は選ばない(土地の請求で建物の行を掴まない・probe16実測形)", () => {
+    expect(
+      pickChargedMyPageRow([mrow({ shozai: `建物・${KU}６９－２` })], EXP),
+    ).toBeNull();
+    // 建物を請求したときは建物の行を選ぶ。
+    expect(
+      pickChargedMyPageRow([mrow({ shozai: `建物・${KU}６９－２` })], {
+        ...EXP,
+        kindLabel: "建物",
+      })?.receiptNo,
+    ).toBe("2026081900727233");
+  });
+
+  it("⚠種別接頭辞を外さずに比べると常に不一致になる(第8回の次に待っていた穴)", () => {
+    const { kindLabel, rest } = splitMyPageShozai(`土地・${KU}６９－２`);
+    expect(kindLabel).toBe("土地");
+    expect(rest).toBe(`${KU}６９－２`);
+    expect(splitMyPageShozai(`${KU}６９－２`)).toEqual({
+      kindLabel: "",
+      rest: `${KU}６９－２`,
+    });
+  });
+
   it("⚠別の町の同一地番は選ばない(地番末尾一致だけでは他人の筆を掴む)", () => {
     expect(
       pickChargedMyPageRow(
-        [mrow({ shozai: "東京都別の市別の町６９－２", receiptNo: "2026081900000009" })],
+        [mrow({ shozai: "土地・東京都別の市別の町６９－２", receiptNo: "2026081900000009" })],
         EXP,
       ),
     ).toBeNull();
@@ -184,7 +213,7 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
 
   it("⚠「69-2」は「169-2」の行に化けない(残り完全一致)", () => {
     expect(
-      pickChargedMyPageRow([mrow({ shozai: `${KU}１６９－２` })], EXP),
+      pickChargedMyPageRow([mrow({ shozai: `土地・${KU}１６９－２` })], EXP),
     ).toBeNull();
   });
 
@@ -193,7 +222,7 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
     // 地番として説明できない(isReadableChiban=false)ので弾く。
     expect(
       pickChargedMyPageRow(
-        [mrow({ shozai: `${KU}東６９－２`, when: "2026/08/18 23:59" })],
+        [mrow({ shozai: `土地・${KU}東６９－２`, when: "2026/08/18 23:59" })],
         EXP,
       ),
     ).toBeNull();
@@ -201,12 +230,12 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
 
   it("同じ筆の別表記(69番地2)は同定できる(残りが説明可能+正規化一致)", () => {
     expect(
-      pickChargedMyPageRow([mrow({ shozai: `${KU}６９番地２` })], EXP)?.receiptNo,
+      pickChargedMyPageRow([mrow({ shozai: `土地・${KU}６９番地２` })], EXP)?.receiptNo,
     ).toBe("2026081900727233");
   });
 
   it("所在だけで地番が無い行(残り空)は選ばない", () => {
-    expect(pickChargedMyPageRow([mrow({ shozai: KU })], EXP)).toBeNull();
+    expect(pickChargedMyPageRow([mrow({ shozai: `土地・${KU}` })], EXP)).toBeNull();
   });
 
   it("同じ筆が複数(過去の購入履歴)なら**最新の行**=いま買った行を選ぶ", () => {

@@ -2949,6 +2949,8 @@ function createPlaywrightRegistryPage(
             : pickChargedMyPageRow(scannedRows, {
                 targetKey,
                 kuiki: expectedKuiki,
+                // マイページの所在は先頭に種別が付く(probe16 実測)。
+                kindLabel: isBuilding ? "建物" : "土地",
                 baselineReceiptNos: baselineTrIds,
               });
           if (picked && picked.readyNow) {
