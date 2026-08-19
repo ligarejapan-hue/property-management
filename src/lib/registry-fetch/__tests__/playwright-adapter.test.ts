@@ -1852,6 +1852,11 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       filterStuck?: boolean;
       /** 1ページに表示する行数(既定=全件1ページ)。複数ページの検証に使う。 */
       rowsPerPage?: number;
+      /**
+       * 走査の**後**、選択の直前に表が1ページ目へ戻る画面を模す(SP2)。
+       * 位置(ページ番号+ページ内位置)だけで掴むと**別の行**を選んでしまう。
+       */
+      resetPageBeforeSelect?: boolean;
       /** 画面の請求金額合計(#GSeikyuKingakuGokei)。既定=行の料金と同額=140。 */
       seikyuTotalText?: string;
       /** 行の料金(hidden ryokin_N)。既定=140。 */
@@ -2103,6 +2108,21 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         });
       }
       // 課金後の選択フェーズ(受付番号で選ぶ)。対象が居れば ready。
+      // 走査の後に表が戻る画面(SP2)。peek/select の直前で1ページ目へ。
+      if (parsed.probe === "mypage-peek" || parsed.probe === "mypage-select") {
+        if (opts.resetPageBeforeSelect) mypageCurrentPage = 0;
+      }
+      // 選ぶ前の下見: 位置の行のセルを返すだけ(解釈は実装側の純関数)。
+      if (parsed.probe === "mypage-peek") {
+        const visible = seikyuClicked
+          ? [...(opts.mypageBaselineRows ?? []), ...mypageRows]
+          : opts.mypageBaselineRows ?? [];
+        const per = opts.rowsPerPage ?? visible.length ?? 1;
+        const row = visible[mypageCurrentPage * per + Number(parsed.rowIndex)];
+        return JSON.stringify(
+          row ? { found: true, cells: toCells(row) } : { found: false, cells: [] },
+        );
+      }
       if (parsed.probe === "mypage-select") {
         // 走査順(基準行→課金で生まれた行)の位置で掴む=実装と同じ契約。
         const visible = seikyuClicked
@@ -2113,7 +2133,8 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         const row = visible[mypageCurrentPage * per + Number(parsed.rowIndex)];
         if (!row) return JSON.stringify({ result: "not-found" });
         opts.onMypageSelect?.(row.receiptNo);
-        return JSON.stringify({ result: "ready" });
+        // ⚠read-back は**選ばれた行のセル**を返す(受付番号の一致は実装側が判定)。
+        return JSON.stringify({ result: "checked", cells: toCells(row) });
       }
       return undefined;
     });
@@ -2678,6 +2699,44 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(chargedNow()).toBe(true);
     expect(selects).toEqual(["2026081900727233"]); // 2ページ目の先頭を正しく選ぶ
   }, 30_000);
+
+  it("SP2: ⚠選択の直前に表が1ページ目へ戻っても、別の行を選ばない(@codex #393 R3 P1)", async () => {
+    // 走査時は2ページ目に対象が見えていたが、選択の直前に表が戻る(ページ送りが
+    // 一瞬無効になる等)。位置だけで掴むと1ページ目の**別の筆**を選び、支払って
+    // いないPDFを添付し得る。⇒ 選ぶ前と後の両方で受付番号を実測して弾く。
+    const f = makeFakeChromium();
+    const selects: string[] = [];
+    const { chargedNow } = wireStage2(f, {
+      rowsPerPage: 1,
+      resetPageBeforeSelect: true,
+      mypageBaselineRows: [
+        {
+          receiptNo: "2026080100000001",
+          shozai: `${INPUT.address}９－９`,
+          status: "請求済",
+          when: "2026/08/01 09:00",
+          expiry: "2026/09/01",
+        },
+      ],
+      mypageRows: [
+        {
+          receiptNo: "2026081900727233",
+          shozai: `${INPUT.address}１－１`,
+          status: "請求済",
+          when: "2026/08/19 15:20",
+          expiry: "2026/08/24",
+        },
+      ],
+      onMypageSelect: (receiptNo) => selects.push(receiptNo),
+    });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "charged_but_failed",
+    });
+    expect(chargedNow()).toBe(true);
+    // ⚠**別の筆の行を選んでいない**(ここが本題)。
+    expect(selects).toEqual([]);
+  }, 90_000);
 
   it("S9: ⚠中止の印(aborted)が立っていたら請求ボタンを押さない（@codex R10 P1）", async () => {
     // provider が課金前タイムアウトで reject した後も、この関数は裏で走り続ける。

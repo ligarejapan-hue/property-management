@@ -2959,28 +2959,61 @@ function createPlaywrightRegistryPage(
             const target = scannedRows.find(
               (r) => r.receiptNo === picked.receiptNo,
             );
-            // 対象ページまでページ送りしてから掴む(1ページ目に居るなら送らない)。
-            for (let hop = 0; target && hop < target.pageNo; hop++) {
+            // 対象ページまでページ送り。⚠**届かなければ選ばない**(@codex #393 R3 P1)。
+            // 送りが途中で止まった状態で位置だけ当てると、同じ位置の**別の行**を
+            // 選び、支払済みでない/別の筆のPDFを添付し得る。
+            let hopped = 0;
+            for (; target && hopped < target.pageNo; hopped++) {
               if (!(await myPageHasNext())) break;
               await page.click(REGISTRY_SELECTORS.myPageNextButton);
               await sleep(1200);
             }
-            // 位置が確定しているので選択は1回だけ試す(失敗したら走査からやり直す)。
-            for (let once = 0; once < 1 && !ready && target; once++) {
+            const reachedPage = !!target && hopped === target.pageNo;
+            // 位置が確定していても**受付番号を選ぶ前後で実測**する(位置ズレ検出)。
+            for (let once = 0; once < 1 && !ready && target && reachedPage; once++) {
+              // ①選ぶ前: その位置の行のセルを読む(解釈は Node 側)。
+              const peekJson = (await page.evaluate(
+                (json) => {
+                  const { tableSel, rowIndex } = JSON.parse(json) as {
+                    tableSel: string;
+                    rowIndex: number;
+                  };
+                  const rows = Array.from(
+                    document.querySelectorAll(`${tableSel} tbody tr`),
+                  ).filter((tr) => tr.querySelectorAll("td").length >= 7);
+                  const row = rows[rowIndex];
+                  if (!row) return JSON.stringify({ found: false, cells: [] });
+                  const cells = Array.from(row.querySelectorAll("td"))
+                    .slice(0, 12)
+                    .map((td) => (td as HTMLElement).innerHTML ?? "");
+                  return JSON.stringify({ found: true, cells });
+                },
+                JSON.stringify({
+                  probe: "mypage-peek",
+                  tableSel: REGISTRY_SELECTORS.myPageTable,
+                  rowIndex: target.indexInPage,
+                }),
+              )) as string;
+              const peek = JSON.parse(peekJson) as {
+                found: boolean;
+                cells: string[];
+              };
+              const peeked = peek.found ? parseMyPageRowCells(peek.cells) : null;
+              if (!peeked || peeked.receiptNo !== picked.receiptNo) {
+                break; // 表が動いた=走査からやり直す(課金後なので中止はしない)
+              }
+              // ②選ぶ: 位置で check し、**選ばれた行のセル**を読み戻す。
               const selJson = (await page.evaluate(
                 (json) => {
                   const { tableSel, rowIndex } = JSON.parse(json) as {
                     tableSel: string;
                     rowIndex: number;
                   };
-                  // ⚠どの行かの判断は**Node側**(受付番号で決めた行の位置)。
-                  // ここは位置で掴むだけ(@codex #393 R1: DOM側に解釈を置かない)。
                   const rows = Array.from(
                     document.querySelectorAll(`${tableSel} tbody tr`),
                   ).filter((tr) => tr.querySelectorAll("td").length >= 7);
-                  const target: Element | null = rows[rowIndex] ?? null;
-                  if (!target) return JSON.stringify({ result: "not-found" });
-                  // 他の行の check を全て外してから対象だけ check する。
+                  const row = rows[rowIndex] ?? null;
+                  if (!row) return JSON.stringify({ result: "not-found" });
                   for (const cb of Array.from(
                     document.querySelectorAll(
                       `${tableSel} tbody input[type="checkbox"]`,
@@ -2988,23 +3021,28 @@ function createPlaywrightRegistryPage(
                   ) as HTMLInputElement[]) {
                     if (cb.checked) cb.click();
                   }
-                  const cb = target.querySelector(
+                  const cb = row.querySelector(
                     'input[type="checkbox"]',
                   ) as HTMLInputElement | null;
                   if (!cb) return JSON.stringify({ result: "select-failed" });
                   if (!cb.checked) cb.click();
-                  // read-back: いま check されているのが対象行の1件だけか実測。
-                  const checked = (
-                    Array.from(
-                      document.querySelectorAll(
-                        `${tableSel} tbody input[type="checkbox"]`,
-                      ),
-                    ) as HTMLInputElement[]
-                  ).filter((x) => x.checked);
-                  if (checked.length !== 1 || checked[0] !== cb) {
+                  // read-back: check されているのは1件か + **その行のセル**を返す
+                  // (受付番号の一致は Node 側で確かめる)。
+                  const checkedRows = Array.from(
+                    document.querySelectorAll(`${tableSel} tbody tr`),
+                  ).filter((tr) => {
+                    const x = tr.querySelector(
+                      'input[type="checkbox"]',
+                    ) as HTMLInputElement | null;
+                    return x?.checked === true;
+                  });
+                  if (checkedRows.length !== 1) {
                     return JSON.stringify({ result: "select-failed" });
                   }
-                  return JSON.stringify({ result: "ready" });
+                  const cells = Array.from(checkedRows[0].querySelectorAll("td"))
+                    .slice(0, 12)
+                    .map((td) => (td as HTMLElement).innerHTML ?? "");
+                  return JSON.stringify({ result: "checked", cells });
                 },
                 JSON.stringify({
                   probe: "mypage-select",
@@ -3012,9 +3050,16 @@ function createPlaywrightRegistryPage(
                   rowIndex: target.indexInPage,
                 }),
               )) as string;
-              const sel = JSON.parse(selJson) as { result: string };
-              if (sel.result === "ready") {
-                ready = true;
+              const sel = JSON.parse(selJson) as {
+                result: string;
+                cells?: string[];
+              };
+              if (sel.result === "checked") {
+                const selected = parseMyPageRowCells(sel.cells ?? []);
+                // ⚠**選んだ行の受付番号が一致して初めて ready**(位置だけでは信じない)。
+                if (selected && selected.receiptNo === picked.receiptNo) {
+                  ready = true;
+                }
                 break;
               }
               // not-found / select-failed: ページ送りで探し回らない(位置は走査で
