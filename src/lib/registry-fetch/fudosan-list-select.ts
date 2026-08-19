@@ -222,7 +222,7 @@ export function stripTrailingIdentifierFromKuiki(
   address: string,
   keys: Array<string | null | undefined>,
 ): string {
-  let out = normalizeKuikiForCompare(address);
+  const out = normalizeKuikiForCompare(address);
   for (const key of keys) {
     const k = (key ?? "").trim();
     if (!k) continue;
