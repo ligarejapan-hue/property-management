@@ -2967,6 +2967,8 @@ function createPlaywrightRegistryPage(
                 kuiki: expectedKuiki,
                 // マイページの所在は先頭に種別が付く(probe16 実測)。
                 kindLabel: isBuilding ? "建物" : "土地",
+                // 同じ筆で所有者事項と全部事項の両方を買っていると取り違える。
+                certificateType: input.certificateType,
                 baselineReceiptNos: baselineTrIds,
               });
           if (picked && picked.readyNow) {
@@ -3292,6 +3294,8 @@ function createPlaywrightRegistryPage(
           //   区域だけにしてから照合する(そのままだと残りが空になり正しい行を弾く)。
           kuiki: stripTrailingChibanFromKuiki(input.address, targetKey),
           kindLabel: isBuilding ? "建物" : "土地",
+          // 同じ筆で両方買っている場合に、要求した種類の行だけを取り込む。
+          certificateType: input.certificateType,
           baselineReceiptNos: new Set<string>(),
         });
         if (!picked || !picked.readyNow) {

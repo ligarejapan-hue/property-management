@@ -1845,6 +1845,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         status: string;
         when: string;
         expiry: string;
+        seikyuType?: string;
       }>;
       /** 課金後の行が永遠に準備前(請求中)のままの画面を模す(S5)。 */
       mypagePendingForever?: boolean;
@@ -1882,6 +1883,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         status: string;
         when: string;
         expiry: string;
+        seikyuType?: string;
       }>;
       /** 確定前に読む所在(kuiki)。既定=INPUT.address(空文字で取得失敗を模す)。 */
       kuikiValue?: string;
@@ -1911,10 +1913,14 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       status: string;
       when: string;
       expiry: string;
+      /** 請求種別セル(td[2])。既定=所有者事項(probe16 実測形)。 */
+      seikyuType?: string;
     }): string[] => [
       '<input type="checkbox">',
       "1", // No.(並び順で変わる=同定に使ってはいけない列)
-      "不動産登記<br>（所有者事項）",
+      // ⚠実物どおり「不動産登記<br>（種別）」。所有者事項と全部事項は別の商品
+      //   なので、fake も行ごとに変えられるようにする(@codex #394 P1)。
+      `不動産登記<br>（${r.seikyuType ?? "所有者事項"}）`,
       "QRコード:要",
       // ⚠マイページの所在は先頭に種別が付く(probe16 実測)。fake も実物に合わせる。
       r.shozai.startsWith("土地・") || r.shozai.startsWith("建物・")
@@ -2630,6 +2636,37 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(selects).toEqual(["2026081900727233"]);
   });
 
+  it("SM10: ⚠課金後の同定も謄本の種類まで一致させる(所有者事項を買って全部事項を掴まない)", async () => {
+    // 同じ筆の別種別の行が同時に現れると、種類を見ない実装は**新しい方**を掴む。
+    // 添付されるPDFと『買った種類』がずれると、所有者反映の有無まで食い違う。
+    const f = makeFakeChromium();
+    const selects: string[] = [];
+    const { chargedNow } = wireStage2(f, {
+      mypageRows: [
+        {
+          receiptNo: "2026081900000ALL",
+          shozai: `${INPUT.address}１－１`,
+          status: "請求済",
+          when: "2026/08/19 15:30",
+          expiry: "2026/09/18",
+          seikyuType: "全部事項",
+        },
+        {
+          receiptNo: "2026081900000OWN",
+          shozai: `${INPUT.address}１－１`,
+          status: "請求済",
+          when: "2026/08/19 15:20",
+          expiry: "2026/09/18",
+        },
+      ],
+      onMypageSelect: (receiptNo) => selects.push(receiptNo),
+    });
+    const page = await makeStage2Page(f);
+    const buf = await page.fetchByLocationCandidate(INPUT); // certificateType=owner
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(chargedNow()).toBe(true);
+    expect(selects).toEqual(["2026081900000OWN"]);
+  });
   it("SR2: ⚠未請求行(受付番号なし)が基準にあっても中止しない(all-or-nothingの誤爆防止)", async () => {
     // 旧規則(空IDがあれば基準無効)を受付番号へ機械的に移すと、未請求行が1件あるだけで
     // 永久に課金前中止になる。無効にするのは「未請求でないのに受付番号が空」のときだけ。
@@ -2977,6 +3014,40 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(clicked).not.toContain(DOWNLOAD);
   });
 
+  it("SV13: ⚠同じ筆で両方買っていても、要求した種類の行だけを取り込む", async () => {
+    // 所有者事項と全部事項は別の商品。取り違えると、所有者事項のPDFを全部事項
+    // として添付したり、全部事項で所有者を反映してしまう(@codex #394 P1)。
+    const f = makeFakeChromium();
+    const seen: string[] = [];
+    wireStage2(f, {
+      mypageBaselineRows: [
+        // 全部事項の方が**新しい**=種類を見ないとこちらを掴む。
+        boughtRow({
+          receiptNo: "2026081900000ALL",
+          when: "2026/08/19 15:30",
+          seikyuType: "全部事項",
+        }),
+        boughtRow({ receiptNo: "2026081900000OWN", when: "2026/08/19 15:20" }),
+      ],
+      onMypageSelect: (r) => seen.push(r),
+    });
+    const page = await makeRecoverPage(f);
+    const buf = await page.recoverRegistryPdfByLocation(RECOVER_INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(seen).toEqual(["2026081900000OWN"]);
+  });
+
+  it("SV14: ⚠要求した種類が1件も無ければ取り込まない", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [boughtRow({ seikyuType: "全部事項" })],
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation(RECOVER_INPUT),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(clicked).not.toContain(DOWNLOAD);
+  });
   it("SV9: 買う対象(地番/家屋番号)が空なら何もしない(ページに触れない)", async () => {
     const f = makeFakeChromium();
     const { clicked } = wireStage2(f, { mypageBaselineRows: [boughtRow()] });

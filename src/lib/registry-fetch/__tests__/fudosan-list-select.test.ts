@@ -15,6 +15,7 @@ import {
   FUDOSAN_LIST_HIDDEN_PREFIX,
   normalizeKuikiForCompare,
   pickChargedMyPageRow,
+  mypageCertificateTypeOf,
   stripTrailingChibanFromKuiki,
   selectFudosanListRow,
   type FudosanListRow,
@@ -158,6 +159,7 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
     return {
       receiptNo: "2026081900727233",
       shozai: `土地・${KU}６９－２`, // ⚠実サイト形(先頭に種別)
+      seikyuType: "不動産登記 （所有者事項）", // ⚠実サイト形(probe16 実測)
       status: "請求済",
       when: "2026/08/18 12:00",
       expiry: "2026/09/18",
@@ -168,6 +170,7 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
     targetKey: "69-2",
     kuiki: KU,
     kindLabel: "土地",
+    certificateType: "owner" as const,
     baselineReceiptNos: new Set<string>(),
   };
 
@@ -374,5 +377,81 @@ describe("所在の末尾に入っている地番を外す(照合キーは区域
 
   it("対象地番が空なら何もしない(正規化だけ)", () => {
     expect(stripTrailingChibanFromKuiki(`${AREA}69-2`, "  ")).toBe(`${AREA}69-2`);
+  });
+});
+
+describe("謄本の種類(所有者事項/全部事項)まで一致させる(@codex #394 P1)", () => {
+  // 同じ筆で両方買っていると、種類を見ずに最新行を掴む=**別の商品のPDFを**
+  // 別の商品として扱う(所有者事項を全部事項として添付/全部事項で所有者反映)。
+  const KU2 = "神奈川県横浜市南区井土ケ谷中町";
+  const row = (over: Partial<MyPageScanRow>): MyPageScanRow => ({
+    receiptNo: "2026081900727233",
+    shozai: `土地・${KU2}６９－２`,
+    seikyuType: "不動産登記 （所有者事項）",
+    status: "請求済",
+    when: "2026/08/18 12:00",
+    expiry: "2026/09/18",
+    ...over,
+  });
+  const EXPECT = {
+    targetKey: "69-2",
+    kuiki: KU2,
+    kindLabel: "土地",
+    baselineReceiptNos: new Set<string>(),
+  };
+
+  it("表記から種類を読む(読めなければ null)", () => {
+    expect(mypageCertificateTypeOf("不動産登記 （所有者事項）")).toBe("owner");
+    expect(mypageCertificateTypeOf("不動産登記（全部事項）")).toBe("all");
+    expect(mypageCertificateTypeOf("地図・図面")).toBeNull();
+    expect(mypageCertificateTypeOf("")).toBeNull();
+  });
+
+  it("⚠同じ筆で両方買っていても、要求した種類の行を選ぶ(所有者事項)", () => {
+    const picked = pickChargedMyPageRow(
+      [
+        row({
+          receiptNo: "2026081900000ALL",
+          seikyuType: "不動産登記 （全部事項）",
+          when: "2026/08/19 15:30", // 全部事項の方が新しい
+        }),
+        row({ receiptNo: "2026081900000OWN", when: "2026/08/19 15:20" }),
+      ],
+      { ...EXPECT, certificateType: "owner" },
+    );
+    expect(picked?.receiptNo).toBe("2026081900000OWN");
+  });
+
+  it("⚠同じ筆で両方買っていても、要求した種類の行を選ぶ(全部事項)", () => {
+    const picked = pickChargedMyPageRow(
+      [
+        row({ receiptNo: "2026081900000OWN", when: "2026/08/19 15:30" }),
+        row({
+          receiptNo: "2026081900000ALL",
+          seikyuType: "不動産登記 （全部事項）",
+          when: "2026/08/19 15:20",
+        }),
+      ],
+      { ...EXPECT, certificateType: "all" },
+    );
+    expect(picked?.receiptNo).toBe("2026081900000ALL");
+  });
+
+  it("⚠読めた上での不一致しか無ければ選ばない", () => {
+    expect(
+      pickChargedMyPageRow(
+        [row({ seikyuType: "不動産登記 （全部事項）" })],
+        { ...EXPECT, certificateType: "owner" },
+      ),
+    ).toBeNull();
+  });
+
+  it("種類が読めない表記の行は落とさない(課金後に『払ったのに失う』を作らない)", () => {
+    // 表記が想定と違うだけで課金済みのPDFを取り逃す方が損害が大きい。
+    const picked = pickChargedMyPageRow(
+      [row({ seikyuType: "不動産登記" })],
+      { ...EXPECT, certificateType: "owner" },
+    );
+    expect(picked?.receiptNo).toBe("2026081900727233");
   });
 });

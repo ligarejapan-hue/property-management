@@ -160,6 +160,12 @@ export interface MyPageScanRow {
   receiptNo: string;
   /** 所在セル(列4)=地番区域+地番。⚠PII: Node のメモリ内のみで扱い、ログに出さない。 */
   shozai: string;
+  /**
+   * 請求種別セル(列2)の文字。例「不動産登記 （所有者事項）」(probe16 実測)。
+   * ⚠所有者事項と全部事項は**別の商品**。同じ筆で両方買っていると、ここを見ないと
+   *   取り違える(@codex #394 P1)。
+   */
+  seikyuType: string;
   /** 状態(列5)。「請求済」のみDL可。 */
   status: string;
   /** 請求日時(td[6] の1段目)。文字列比較で新しさを判定(表示順に依存しない)。 */
@@ -239,6 +245,13 @@ export function pickChargedMyPageRow(
      * (2026-08-19 第8回テストの実害: 買った行が基準に含まれ永久に見つからなかった)。
      */
     baselineReceiptNos: ReadonlySet<string>;
+    /**
+     * 期待する謄本の種類(owner=所有者事項 / all=全部事項)。同じ筆で両方買って
+     * いると種別を見ないと取り違える(@codex #394 P1)。
+     * ⚠**読めた上での不一致だけ弾く**。表記が読めない行は落とさない: 課金後の
+     *   同定でここを fail-closed にすると、表記違いだけで**払ったのにPDFを失う**。
+     */
+    certificateType: "owner" | "all";
   },
 ): { receiptNo: string; readyNow: boolean; status: string } | null {
   const kuikiKey = normalizeKuikiForCompare(expected.kuiki);
@@ -251,6 +264,9 @@ export function pickChargedMyPageRow(
       // ⚠所在セルの先頭の「土地・」「建物・」を外してから比べる(実測)。
       const split = splitMyPageShozai(r.shozai);
       if (split.kindLabel !== expected.kindLabel) return false;
+      // 請求種別(所有者事項/全部事項)。読めた場合だけ突き合わせる。
+      const rowCert = mypageCertificateTypeOf(r.seikyuType);
+      if (rowCert !== null && rowCert !== expected.certificateType) return false;
       const cellKey = normalizeKuikiForCompare(split.rest);
       if (!cellKey.startsWith(kuikiKey)) return false;
       const remainder = cellKey.slice(kuikiKey.length);
@@ -325,11 +341,27 @@ export function parseMyPageRowCells(cellHtmls: string[]): MyPageScanRow | null {
     // ⚠受付番号は td[6] の2段目。td[1](No.)は並び順で変わるので使わない。
     receiptNo: dateAndReceipt[1] ?? "",
     when: dateAndReceipt[0] ?? "",
+    seikyuType: plain(cellHtmls[2] ?? ""),
     shozai: plain(cellHtmls[4] ?? ""),
     status: plain(cellHtmls[5] ?? ""),
     // 期限も `2026/<br>08/24` のように改行を含むため、行を連結して1つの文字列にする。
     expiry: lines(cellHtmls[9] ?? "").join(""),
   };
+}
+
+/**
+ * マイページの請求種別セルから**謄本の種類**を読む(読めなければ null)。
+ *
+ * 実測(probe16): 「不動産登記（所有者事項）」。全部事項の表記は未実測のため、
+ * **読めた場合だけ**判断材料にする(下の照合は『読めた上での不一致』だけ弾く)。
+ */
+export function mypageCertificateTypeOf(
+  raw: string,
+): "owner" | "all" | null {
+  const text = (raw ?? "").normalize("NFKC").replace(/\s+/g, "");
+  if (text.includes("所有者事項")) return "owner";
+  if (text.includes("全部事項")) return "all";
+  return null;
 }
 
 /** マイページの所在セルの先頭に付く不動産種別(2026-08-19 probe16 実測)。 */
