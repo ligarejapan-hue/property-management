@@ -49,6 +49,8 @@ import {
   resolveSeikyuConfirm,
 } from "@/lib/registry-fetch/seikyu-confirm";
 import {
+  collectBaselineReceiptNos,
+  parseMyPageRowCells,
   FUDOSAN_LIST_HIDDEN_PREFIX,
   pickChargedMyPageRow,
   selectFudosanListRow,
@@ -2432,11 +2434,16 @@ function createPlaywrightRegistryPage(
                   if (!t || /データ取得中/.test(t.textContent ?? "")) {
                     return JSON.stringify({ loading: true, rows: [] });
                   }
-                  const rows: Array<Record<string, string>> = [];
+                  const rows: string[][] = [];
                   for (const tr of Array.from(t.querySelectorAll("tbody tr"))) {
                     const tds = tr.querySelectorAll("td");
                     if (tds.length < 7) continue;
-                    rows.push({ trId: (tds[1]?.textContent ?? "").trim() });
+                    // ⚠**解釈はNode側の純関数(parseMyPageRowCells)に集約**。
+                    // ここは列の生データを返すだけ(@codex #393 R1)。
+                    const cellHtmls = Array.from(tds)
+                      .slice(0, 12)
+                      .map((td) => (td as HTMLElement).innerHTML ?? "");
+                    rows.push(cellHtmls);
                   }
                   return JSON.stringify({ loading: false, rows });
                 },
@@ -2447,14 +2454,19 @@ function createPlaywrightRegistryPage(
               )) as string;
               const scan = JSON.parse(scanJson) as {
                 loading: boolean;
-                rows: Array<{ trId: string }>;
+                rows: string[][];
               };
               if (scan.loading) return { ok: false, ids };
               // ⚠基準は**全行のIDが読めた時だけ**成立(@codex #345 R4 P1の復元・
               // #390 R3)。空IDの行を黙って飛ばすと、その行が課金後にIDを得て
               // 「基準に無い行=新規」に化け、古いPDFを掴む。
-              if (scan.rows.some((r) => !r.trId)) return { ok: false, ids };
-              for (const r of scan.rows) ids.add(r.trId);
+              // ⚠基準の成立規則は純関数に集約(未請求行は受付番号を持たないのが正常)。
+              const parsedRows = scan.rows
+                .map((cells) => parseMyPageRowCells(cells))
+                .filter((r): r is MyPageScanRow => r !== null);
+              const built = collectBaselineReceiptNos(parsedRows);
+              if (!built.ok) return { ok: false, ids };
+              for (const id of built.receiptNos) ids.add(id);
               if (!(await myPageHasNext())) break;
               await page.click(REGISTRY_SELECTORS.myPageNextButton);
               await sleep(1200);
@@ -2879,7 +2891,12 @@ function createPlaywrightRegistryPage(
           // 所在の前半(地番区域・都道府県込み)+末尾の地番(境界つき)+全ページ中の
           // 受付日時最新、を pickChargedMyPageRow(単体テスト済み)で行う。
           // ⚠所在セルの値は PII: Node のメモリ内でのみ扱い、ログ・実況に出さない。
-          const scannedRows: MyPageScanRow[] = [];
+          // ⚠行の位置は**ページ番号+そのページ内の位置**で持つ(@codex #393 R2 P1)。
+          // 全ページを平らに繋いだ通し番号をページ内の位置として渡すと、2ページ目
+          // 以降で必ず外し、課金済みなのにPDFを取り逃す。
+          const scannedRows: Array<
+            MyPageScanRow & { pageNo: number; indexInPage: number }
+          > = [];
           let scanLoading = false;
           for (let pageNo = 0; pageNo < 10; pageNo++) {
             const scanJson = (await page.evaluate(
@@ -2889,17 +2906,15 @@ function createPlaywrightRegistryPage(
                 if (!t || /データ取得中/.test(t.textContent ?? "")) {
                   return JSON.stringify({ loading: true, rows: [] });
                 }
-                const rows: Array<Record<string, string>> = [];
+                const rows: string[][] = [];
                 for (const tr of Array.from(t.querySelectorAll("tbody tr"))) {
                   const tds = tr.querySelectorAll("td");
                   if (tds.length < 7) continue;
-                  rows.push({
-                    trId: (tds[1]?.textContent ?? "").trim(),
-                    shozai: (tds[4]?.textContent ?? "").trim(),
-                    status: (tds[5]?.textContent ?? "").trim(),
-                    when: (tds[6]?.textContent ?? "").trim(),
-                    expiry: (tds[9]?.textContent ?? "").trim(),
-                  });
+                  // ⚠解釈はNode側(parseMyPageRowCells)。ここは生データのみ。
+                  const cellHtmls = Array.from(tds)
+                      .slice(0, 12)
+                      .map((td) => (td as HTMLElement).innerHTML ?? "");
+                  rows.push(cellHtmls);
                 }
                 return JSON.stringify({ loading: false, rows });
               },
@@ -2910,13 +2925,21 @@ function createPlaywrightRegistryPage(
             )) as string;
             const scan = JSON.parse(scanJson) as {
               loading: boolean;
-              rows: MyPageScanRow[];
+              rows: string[][];
             };
             if (scan.loading) {
               scanLoading = true;
               break; // 読み込み中はこの attempt を諦め、リロード後にやり直す
             }
-            scannedRows.push(...scan.rows);
+            let indexInPage = 0;
+            for (const cells of scan.rows) {
+              const parsed = parseMyPageRowCells(cells);
+              // ⚠位置は**実データ行だけを数えた並び**(DOM側も同じ条件で絞る)。
+              if (parsed) {
+                scannedRows.push({ ...parsed, pageNo, indexInPage });
+                indexInPage += 1;
+              }
+            }
             if (!(await myPageHasNext())) break;
             await page.click(REGISTRY_SELECTORS.myPageNextButton);
             await sleep(1200);
@@ -2926,33 +2949,71 @@ function createPlaywrightRegistryPage(
             : pickChargedMyPageRow(scannedRows, {
                 targetKey,
                 kuiki: expectedKuiki,
-                baselineTrIds,
+                baselineReceiptNos: baselineTrIds,
               });
           if (picked && picked.readyNow) {
-            // ---- 選択フェーズ: 同定した行を**受付番号(trId)で**選び直す。
+            // ---- 選択フェーズ: 同定した行を**受付番号**で選び直す。
             // 走査と選択を分けたぶん、選択は強いキーで行い取り違えを塞ぐ。
             await resetMyPageToFirst();
-            for (let pageNo = 0; pageNo < 10 && !ready; pageNo++) {
-              const selJson = (await page.evaluate(
+            // 受付番号→**(ページ番号, ページ内位置)**へ変換(@codex #393 R2 P1)。
+            const target = scannedRows.find(
+              (r) => r.receiptNo === picked.receiptNo,
+            );
+            // 対象ページまでページ送り。⚠**届かなければ選ばない**(@codex #393 R3 P1)。
+            // 送りが途中で止まった状態で位置だけ当てると、同じ位置の**別の行**を
+            // 選び、支払済みでない/別の筆のPDFを添付し得る。
+            let hopped = 0;
+            for (; target && hopped < target.pageNo; hopped++) {
+              if (!(await myPageHasNext())) break;
+              await page.click(REGISTRY_SELECTORS.myPageNextButton);
+              await sleep(1200);
+            }
+            const reachedPage = !!target && hopped === target.pageNo;
+            // 位置が確定していても**受付番号を選ぶ前後で実測**する(位置ズレ検出)。
+            for (let once = 0; once < 1 && !ready && target && reachedPage; once++) {
+              // ①選ぶ前: その位置の行のセルを読む(解釈は Node 側)。
+              const peekJson = (await page.evaluate(
                 (json) => {
-                  const { tableSel, trId } = JSON.parse(json) as {
+                  const { tableSel, rowIndex } = JSON.parse(json) as {
                     tableSel: string;
-                    trId: string;
+                    rowIndex: number;
                   };
                   const rows = Array.from(
                     document.querySelectorAll(`${tableSel} tbody tr`),
-                  );
-                  let target: Element | null = null;
-                  for (const tr of rows) {
-                    const tds = tr.querySelectorAll("td");
-                    if (tds.length < 7) continue;
-                    if ((tds[1]?.textContent ?? "").trim() === trId) {
-                      target = tr;
-                      break;
-                    }
-                  }
-                  if (!target) return JSON.stringify({ result: "not-found" });
-                  // 他の行の check を全て外してから対象だけ check する。
+                  ).filter((tr) => tr.querySelectorAll("td").length >= 7);
+                  const row = rows[rowIndex];
+                  if (!row) return JSON.stringify({ found: false, cells: [] });
+                  const cells = Array.from(row.querySelectorAll("td"))
+                    .slice(0, 12)
+                    .map((td) => (td as HTMLElement).innerHTML ?? "");
+                  return JSON.stringify({ found: true, cells });
+                },
+                JSON.stringify({
+                  probe: "mypage-peek",
+                  tableSel: REGISTRY_SELECTORS.myPageTable,
+                  rowIndex: target.indexInPage,
+                }),
+              )) as string;
+              const peek = JSON.parse(peekJson) as {
+                found: boolean;
+                cells: string[];
+              };
+              const peeked = peek.found ? parseMyPageRowCells(peek.cells) : null;
+              if (!peeked || peeked.receiptNo !== picked.receiptNo) {
+                break; // 表が動いた=走査からやり直す(課金後なので中止はしない)
+              }
+              // ②選ぶ: 位置で check し、**選ばれた行のセル**を読み戻す。
+              const selJson = (await page.evaluate(
+                (json) => {
+                  const { tableSel, rowIndex } = JSON.parse(json) as {
+                    tableSel: string;
+                    rowIndex: number;
+                  };
+                  const rows = Array.from(
+                    document.querySelectorAll(`${tableSel} tbody tr`),
+                  ).filter((tr) => tr.querySelectorAll("td").length >= 7);
+                  const row = rows[rowIndex] ?? null;
+                  if (!row) return JSON.stringify({ result: "not-found" });
                   for (const cb of Array.from(
                     document.querySelectorAll(
                       `${tableSel} tbody input[type="checkbox"]`,
@@ -2960,39 +3021,51 @@ function createPlaywrightRegistryPage(
                   ) as HTMLInputElement[]) {
                     if (cb.checked) cb.click();
                   }
-                  const cb = target.querySelector(
+                  const cb = row.querySelector(
                     'input[type="checkbox"]',
                   ) as HTMLInputElement | null;
                   if (!cb) return JSON.stringify({ result: "select-failed" });
                   if (!cb.checked) cb.click();
-                  // read-back: いま check されているのが対象行の1件だけか実測。
-                  const checked = (
-                    Array.from(
-                      document.querySelectorAll(
-                        `${tableSel} tbody input[type="checkbox"]`,
-                      ),
-                    ) as HTMLInputElement[]
-                  ).filter((x) => x.checked);
-                  if (checked.length !== 1 || checked[0] !== cb) {
+                  // read-back: check されているのは1件か + **その行のセル**を返す
+                  // (受付番号の一致は Node 側で確かめる)。
+                  const checkedRows = Array.from(
+                    document.querySelectorAll(`${tableSel} tbody tr`),
+                  ).filter((tr) => {
+                    const x = tr.querySelector(
+                      'input[type="checkbox"]',
+                    ) as HTMLInputElement | null;
+                    return x?.checked === true;
+                  });
+                  if (checkedRows.length !== 1) {
                     return JSON.stringify({ result: "select-failed" });
                   }
-                  return JSON.stringify({ result: "ready" });
+                  const cells = Array.from(checkedRows[0].querySelectorAll("td"))
+                    .slice(0, 12)
+                    .map((td) => (td as HTMLElement).innerHTML ?? "");
+                  return JSON.stringify({ result: "checked", cells });
                 },
                 JSON.stringify({
                   probe: "mypage-select",
                   tableSel: REGISTRY_SELECTORS.myPageTable,
-                  trId: picked.trId,
+                  rowIndex: target.indexInPage,
                 }),
               )) as string;
-              const sel = JSON.parse(selJson) as { result: string };
-              if (sel.result === "ready") {
-                ready = true;
+              const sel = JSON.parse(selJson) as {
+                result: string;
+                cells?: string[];
+              };
+              if (sel.result === "checked") {
+                const selected = parseMyPageRowCells(sel.cells ?? []);
+                // ⚠**選んだ行の受付番号が一致して初めて ready**(位置だけでは信じない)。
+                if (selected && selected.receiptNo === picked.receiptNo) {
+                  ready = true;
+                }
                 break;
               }
-              if (sel.result === "select-failed") break; // リロードして次の attempt
-              if (!(await myPageHasNext())) break;
-              await page.click(REGISTRY_SELECTORS.myPageNextButton);
-              await sleep(1200);
+              // not-found / select-failed: ページ送りで探し回らない(位置は走査で
+              // 確定済み。ずれていたら**表が動いた**ということなので、リロードして
+              // 走査からやり直す=次の attempt へ)。
+              break;
             }
           }
           // picked が null(まだ行が出ない)/準備前(readyNow=false)は次の attempt へ。
