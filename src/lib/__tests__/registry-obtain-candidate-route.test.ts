@@ -207,6 +207,24 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
     },
   );
 
+  it.each([undefined, "", "   "])(
+    "⚠候補(%s)が無い回収は 400 で止める(課金し得る従来経路へ落とさない)",
+    async (candidateRef) => {
+      const res = await callRoute({
+        confirmed: true,
+        mode: "recover",
+        ...(candidateRef === undefined ? {} : { candidateRef }),
+      });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        error: { code: "REGISTRY_RECOVER_CANDIDATE_REQUIRED" },
+      });
+      // 候補の再解決にも取得にも進まない(=外部にも触れない)。
+      expect(resolveRegistryCandidate).not.toHaveBeenCalled();
+      expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+    },
+  );
+
   it("⚠回収でも確認(confirmed)は要る(誤操作で走らせない)", async () => {
     const res = await callRoute({ candidateRef: "cand-1", mode: "recover" });
     expect(res.status).toBe(400);

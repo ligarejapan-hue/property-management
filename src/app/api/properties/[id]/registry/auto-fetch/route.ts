@@ -114,6 +114,17 @@ export async function POST(
     const candidateRef =
       typeof candidateRefRaw === "string" ? candidateRefRaw.trim() : "";
 
+    // ⚠回収は**候補(地番)が無ければ実行しない**(@codex #394 R3 P2)。
+    //   候補が無いと下の従来経路(番号での取得=課金し得る道)へ落ち、mode も
+    //   落ちるため、『課金しません』と言いながら課金経路に入ってしまう。
+    if (isRecover && !candidateRef) {
+      throw new ApiError(
+        400,
+        "取り込む候補が指定されていません",
+        "REGISTRY_RECOVER_CANDIDATE_REQUIRED",
+      );
+    }
+
     if (candidateRef) {
       const { candidate, fingerprint } = await resolveRegistryCandidate({
         session: { id: session.id, role: session.role },
