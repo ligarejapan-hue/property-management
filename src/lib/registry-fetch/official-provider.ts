@@ -94,6 +94,8 @@ export interface RegistryBrowserPage {
     lotNumber?: string | null;
     buildingNumber?: string | null;
     certificateType: RegistryCertificateType;
+    /** 区域キーを作るときに末尾から外してよい候補(物件行の実値)。 */
+    addressIdentifiers?: Array<string | null | undefined>;
     baseUrl?: string;
     live?: RegistryLiveReporter;
   }): Promise<Buffer>;

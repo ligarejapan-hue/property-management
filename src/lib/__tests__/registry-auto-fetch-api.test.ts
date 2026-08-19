@@ -1319,6 +1319,22 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
     expect(provider.recoverRegistryPdf).not.toHaveBeenCalled();
   });
 
+  it("回収では**物件行の識別子**も一緒に渡す(建物候補で区域が合わなくならない)", async () => {
+    // 所在検索の建物候補は地番を持たないため、所在末尾の地番を外せずに
+    // 『見つかりません』になっていた(@codex #394 R12 P2)。
+    setProperty({
+      address: "テスト市テスト町一丁目69-2",
+      lotNumber: "69-2",
+      buildingNumber: "5-2",
+    });
+    const { provider, promise } = runRecover({
+      locationCandidate: { lotNumber: null, buildingNumber: "5-2" },
+    });
+    await promise;
+    const req = provider.recoverRegistryPdf.mock.calls[0][0];
+    expect(req.location.addressIdentifiers).toEqual(["69-2", "5-2"]);
+  });
+
   it("回収に未対応の provider では 501(黙って課金経路へ落ちない)", async () => {
     const provider = successProvider() as unknown as RegistryFetchProvider;
     const { promise } = runRecover({ provider });

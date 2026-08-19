@@ -44,6 +44,14 @@ export interface RegistryFetchRequest {
     buildingNumber?: string | null;
     /** 謄本種別（所有者事項=owner / 全部事項=all）。 */
     certificateType: RegistryCertificateType;
+    /**
+     * 【回収のみ】物件行が持っている識別子(地番・家屋番号)。
+     * 物件の所在は末尾に地番/家屋番号が入っていることがあり、区域キーを作るときに
+     * **末尾から外してよい候補**として使う(@codex #394 R12 P2)。
+     * ⚠探す対象は変えない(選ぶのは effectiveLocationIdentifier)。候補経由の建物取得は
+     *   lotNumber を持たないため、これが無いと区域が合わず『見つかりません』になる。
+     */
+    addressIdentifiers?: Array<string | null | undefined>;
   } | null;
   /**
    * トレース用の非PII参照ラベル（例: ImportJobId / 物件UUID）。

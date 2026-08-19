@@ -3149,6 +3149,8 @@ function createPlaywrightRegistryPage(
       lotNumber?: string | null;
       buildingNumber?: string | null;
       certificateType: RegistryCertificateType;
+      /** 区域キーを作るときに末尾から外してよい候補(物件行の実値・@codex R12 P2)。 */
+      addressIdentifiers?: Array<string | null | undefined>;
       baseUrl?: string;
       live?: RegistryLiveReporter;
     }): Promise<Buffer> {
@@ -3377,9 +3379,12 @@ function createPlaywrightRegistryPage(
           //   区域だけにしてから照合する(そのままだと残りが空になり正しい行を弾く)。
           // ⚠所在の末尾には**対象でない方の識別子**(建物で探すときの地番)が
           //   入っていることがある。対象→もう一方の順に外して区域だけにする。
+          // ⚠外してよい候補は「対象 → もう一方 → 物件行の実値」の順。
+          //   候補経由の建物取得は lotNumber を持たないので、物件行の値で補う。
           kuiki: stripTrailingIdentifierFromKuiki(input.address, [
             rawTarget,
             isBuilding ? input.lotNumber : input.buildingNumber,
+            ...(input.addressIdentifiers ?? []),
           ]),
           kindLabel: isBuilding ? "建物" : "土地",
           // 同じ筆で両方買っている場合に、要求した種類の行だけを取り込む。
@@ -4070,6 +4075,16 @@ export async function runRegistryAutoFetch(
                 : args.locationCandidate)!.buildingNumber,
               // ⚠鍵(purchaseKeyHash)と同じ選択値を使う(上で確定した certificateType)。
               certificateType,
+              // 【回収】区域キーを作るときに末尾から外してよい候補(物件行の実値)。
+              // 候補経由の建物取得は地番を持たないため、ここで補う(@codex R12 P2)。
+              ...(isRecover
+                ? {
+                    addressIdentifiers: [
+                      property.lotNumber,
+                      property.buildingNumber,
+                    ],
+                  }
+                : {}),
             }
           : null,
       ref: property.id,

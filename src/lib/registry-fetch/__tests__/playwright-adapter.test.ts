@@ -2858,6 +2858,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         lotNumber?: string | null;
         buildingNumber?: string | null;
         certificateType: "owner" | "all";
+        addressIdentifiers?: Array<string | null | undefined>;
       }) => Promise<Buffer>;
     };
   }
@@ -3220,6 +3221,47 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const page = await makeRecoverPage(f);
     await expect(
       page.recoverRegistryPdfByLocation(RECOVER_INPUT),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(clicked).not.toContain(DOWNLOAD);
+  });
+
+  it("SV22: 建物の候補(地番を持たない)でも、所在末尾の地番を外して取り込む", async () => {
+    // 所在検索の建物候補は buildingNumber だけを持つ。物件の所在の末尾に地番が
+    // 入っていると区域が合わず『無い』になる(@codex #394 R12 P2)。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [
+        boughtRow({ shozai: `建物・${INPUT.address}５－２` }),
+      ],
+    });
+    const page = await makeRecoverPage(f);
+    const buf = await page.recoverRegistryPdfByLocation({
+      address: `${INPUT.address}69-2`, // 末尾は**地番**(建物ではない)
+      lotNumber: null, // 候補は地番を持たない
+      buildingNumber: "5-2",
+      certificateType: "owner",
+      // 物件行が持っている実値を別に渡す=ここで補える。
+      addressIdentifiers: ["69-2", "5-2"],
+    });
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(clicked).toContain(DOWNLOAD);
+  });
+
+  it("SV23: ⚠補いが無ければ取り込まない(勝手に区域を縮めない)", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [
+        boughtRow({ shozai: `建物・${INPUT.address}５－２` }),
+      ],
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation({
+        address: `${INPUT.address}69-2`,
+        lotNumber: null,
+        buildingNumber: "5-2",
+        certificateType: "owner",
+      }),
     ).rejects.toMatchObject({ code: "not_found" });
     expect(clicked).not.toContain(DOWNLOAD);
   });
