@@ -16,11 +16,22 @@ export interface PropertyAccessRecord {
   assignedTo: string | null;
 }
 
+/**
+ * **担当分しか見られない役割**か(現状 field_staff だけ)。
+ *
+ * ⚠この判定を各所にベタ書きしない。役割が増えたときに片方だけ直り、
+ * 「認可は絞れているのに画面の写真では全部見えている」のような穴になる
+ * (@codex #394 R2 P1 の実例: マイページの写真には**口座全体**の履歴が写る)。
+ */
+export function isPropertyScopedRole(role: string): boolean {
+  return role === "field_staff";
+}
+
 export function canAccessPropertyRecord(
   session: { id: string; role: string },
   property: PropertyAccessRecord,
 ): boolean {
-  if (session.role !== "field_staff") return true;
+  if (!isPropertyScopedRole(session.role)) return true;
   return (
     property.createdBy === session.id || property.assignedTo === session.id
   );

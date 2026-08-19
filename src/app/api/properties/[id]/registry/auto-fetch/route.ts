@@ -8,6 +8,7 @@ import {
   parseJsonBody,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { isPropertyScopedRole } from "@/lib/property-access";
 import {
   runRegistryAutoFetch,
   getRegistryFetchProvider,
@@ -92,6 +93,19 @@ export async function POST(
     //   のではなく、明示的に "recover" のときだけ回収にする(fail-safe: 不明値で
     //   勝手に課金経路へ落ちるのは避けたいが、既定は従来どおりの有料取得)。
     const modeRaw = (body as { mode?: unknown } | null)?.mode;
+    // ⚠**知らない値は課金扱いにしない**(@codex #394 R2 P2)。打ち間違い("RECOVER"、
+    //   末尾の空白など)が既定の有料取得へ落ちると、確認フラグは両方の導線が立てて
+    //   いるため**意図しない課金**になり得る。未指定だけを従来どおり(有料取得)とし、
+    //   値が入っているのに知らない値なら 400 で止める。
+    if (modeRaw !== undefined && modeRaw !== null) {
+      if (modeRaw !== "purchase" && modeRaw !== "recover") {
+        throw new ApiError(
+          400,
+          "取得方法の指定が正しくありません",
+          "REGISTRY_MODE_INVALID",
+        );
+      }
+    }
     const isRecover = modeRaw === "recover";
 
     // 所在検索の候補を選んで取得する場合（candidateRef 指定）。cond③: client の候補参照は信頼せず、
@@ -129,12 +143,28 @@ export async function POST(
           null,
         );
       }
+      // ⚠**画面の写真は『全物件を見られる役割』にだけ渡す**(@codex #394 R2 P1)。
+      //   自動操作は登記情報提供サービスの**マイページ(口座全体の履歴)**を開くため、
+      //   全画面の写真には**他の物件の所在・受付番号**まで写る。担当分しか見られない
+      //   役割(field_staff)に見せると、物件単位の認可を写真が素通りさせてしまう。
+      //   文字の進行(固定文言)は誰でも見られるので、進み具合は分かる。
+      const canSeeShots = !isPropertyScopedRole(session.role);
+      if (liveRef && !canSeeShots) {
+        reportLiveStep(
+          session.id,
+          id,
+          liveRef,
+          "この権限では画面の写真は記録しません(進行状況は文字でお伝えします)",
+          null,
+        );
+      }
       const live = liveRef
         ? {
             step(label: string): number {
               return reportLiveStep(session.id, id, liveRef, label, null);
             },
             attachShot(seq: number, shot: Uint8Array): void {
+              if (!canSeeShots) return;
               attachLiveShot(session.id, id, liveRef, seq, shot);
             },
           }

@@ -45,6 +45,14 @@ vi.mock("@/lib/registry-fetch/auto-fetch", () => ({
   getRegistryFetchProvider: vi.fn(),
   runRegistryAutoFetch: vi.fn(),
 }));
+vi.mock("@/lib/registry-fetch/live-view-store", () => ({
+  beginLiveView: vi.fn(),
+  reportLiveStep: vi.fn(() => 1),
+  attachLiveShot: vi.fn(),
+  completeLiveView: vi.fn(),
+  closeLiveViewCancelWindow: vi.fn(),
+  isValidLiveRef: vi.fn(() => true),
+}));
 vi.mock("@/lib/registry-fetch/search", () => ({
   resolveRegistryCandidate: vi.fn(),
 }));
@@ -52,6 +60,10 @@ vi.mock("@/lib/registry-fetch/search", () => ({
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { getRegistryFetchProvider, runRegistryAutoFetch } from "@/lib/registry-fetch/auto-fetch";
 import { resolveRegistryCandidate } from "@/lib/registry-fetch/search";
+import {
+  attachLiveShot,
+  reportLiveStep,
+} from "@/lib/registry-fetch/live-view-store";
 import * as routeModule from "@/app/api/properties/[id]/registry/auto-fetch/route";
 
 const { POST } = routeModule;
@@ -170,13 +182,28 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
     expect(arg.mode).toBeUndefined();
   });
 
-  it.each(["purchase", "RECOVER", "recover ", "", null, 1, true])(
-    "⚠%s は回収にしない(既定=有料取得のまま・厳密一致だけ受ける)",
+  it.each(["purchase", null])(
+    "%s は従来どおりの有料取得(回収にしない)",
     async (mode) => {
       (resolveRegistryCandidate as Mock).mockResolvedValue(LOCATION_CANDIDATE);
-      await callRoute({ confirmed: true, candidateRef: "cand-1", mode });
+      const res = await callRoute({ confirmed: true, candidateRef: "cand-1", mode });
+      expect(res.status).toBe(200);
       const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
       expect(arg.mode).toBeUndefined();
+    },
+  );
+
+  it.each(["RECOVER", "recover ", "", "obtain", 1, true])(
+    "⚠知らない値(%s)は課金扱いにせず 400 で止める(打ち間違いで課金しない)",
+    async (mode) => {
+      (resolveRegistryCandidate as Mock).mockResolvedValue(LOCATION_CANDIDATE);
+      const res = await callRoute({ confirmed: true, candidateRef: "cand-1", mode });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        error: { code: "REGISTRY_MODE_INVALID" },
+      });
+      expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+      expect(resolveRegistryCandidate).not.toHaveBeenCalled();
     },
   );
 
@@ -184,5 +211,57 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
     const res = await callRoute({ candidateRef: "cand-1", mode: "recover" });
     expect(res.status).toBe(400);
     expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("実況の画面写真は『全物件を見られる役割』にだけ渡す(@codex #394 R2 P1)", () => {
+  // 自動操作はマイページ/請求リスト(**口座全体**)を開くので、全画面の写真には
+  // 他の物件の所在・受付番号まで写る。物件単位の認可を写真が素通りさせない。
+  const LOCATION_CANDIDATE = {
+    candidate: { kind: "location", lotNumber: "1-1", buildingNumber: null },
+    fingerprint: "FP-RESOLVE",
+  };
+
+  async function runWithRole(role: string) {
+    (getApiSession as Mock).mockResolvedValue({
+      id: "user-1",
+      role,
+      email: "u@t",
+      name: "U",
+    });
+    (resolveRegistryCandidate as Mock).mockResolvedValue(LOCATION_CANDIDATE);
+    const res = await callRoute({
+      confirmed: true,
+      candidateRef: "cand-1",
+      liveRef: "live-1",
+    });
+    expect(res.status).toBe(200);
+    const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
+    // route が組んだ live をそのまま動かして、行き先を実測する。
+    arg.live.attachShot(1, new Uint8Array([1, 2, 3]));
+    return arg;
+  }
+
+  it("管理者(全物件を見られる)には写真が渡る", async () => {
+    await runWithRole("admin");
+    expect(attachLiveShot).toHaveBeenCalledTimes(1);
+  });
+
+  it("⚠担当分しか見られない役割(field_staff)には写真を渡さない", async () => {
+    await runWithRole("field_staff");
+    expect(attachLiveShot).not.toHaveBeenCalled();
+  });
+
+  it("写真を出さないことは文字で伝える(黙って消さない)", async () => {
+    await runWithRole("field_staff");
+    const labels = (reportLiveStep as Mock).mock.calls.map((c) => c[3]);
+    expect(labels.join(" ")).toContain("画面の写真は記録しません");
+  });
+
+  it("文字の進行そのものは役割に関係なく届く", async () => {
+    const arg = await runWithRole("field_staff");
+    arg.live.step("テスト進行");
+    const labels = (reportLiveStep as Mock).mock.calls.map((c) => c[3]);
+    expect(labels).toContain("テスト進行");
   });
 });
