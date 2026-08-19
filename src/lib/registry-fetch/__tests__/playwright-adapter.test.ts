@@ -1821,7 +1821,9 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
   //  - JSON(tableSel=ダイアログ) = 対象地番の探索結果
   //  - JSON(ownerSel) = 請求事項チェックの結果
   //  - JSON(tableSel=マイページ) = 呼び出し順に [行選択, 状態確認…, 再選択] を返す
-  const SEIKYU = "#btn_seikyu"; // 発注者指示 2026-08-18: 請求リストから直接課金
+  // ⚠課金の瞬間は**確認ダイアログのＯＫ**(2026-08-19 実測)。clicked には
+  // 【請求】(#btn_seikyu)しか載らないため、課金の有無は chargedNow() で見る。
+  const SEIKYU = "#btn_seikyu"; // 請求ボタン=ダイアログを出すだけ(無料)
   const DIALOG_OK = "#cbnDlgBtnOk";
   const CONFIRM = 'button[onclick*="fuBtnForward"]';
 
@@ -1848,6 +1850,16 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       mypagePendingForever?: boolean;
       /** 絞り込みが「すべて」に切り替わらない画面を模す(SM8)。 */
       filterStuck?: boolean;
+      /** 画面の請求金額合計(#GSeikyuKingakuGokei)。既定=行の料金と同額=140。 */
+      seikyuTotalText?: string;
+      /** 行の料金(hidden ryokin_N)。既定=140。 */
+      rowFeeText?: string;
+      /** 確認ダイアログを出さない画面を模す(SC2)。 */
+      noConfirmDialog?: boolean;
+      /** 確認ダイアログの本文(既定=金額入り)。 */
+      dialogText?: string;
+      /** 確認ダイアログのボタン(既定=ＯＫ/キャンセル)。 */
+      dialogButtons?: string[];
       /** 基準の二重読みが毎回ずれる(再描画が落ち着かない)画面を模す(SM9)。 */
       baselineUnstable?: boolean;
       /** 選択フェーズで選ばれた受付番号の観測用フック(SM3)。 */
@@ -1885,7 +1897,8 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const clicked: string[] = [];
     // 課金(#btn_seikyu)を押したかで mypage-scan の見え方を切り替える(実サイト:
     // 新行は課金後に現れる。課金前の走査=基準採取には既存行だけが見える)。
-    let seikyuClicked = false;
+    let seikyuClicked = false; // ＯＫ押下(=課金)まで到達したか
+    let dialogOpen = false; // 【請求】クリックで開く確認ダイアログ
     let scanCallCount = 0;
     const mypageRows =
       opts.mypageRows ??
@@ -1923,7 +1936,10 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       }
       if (!parsed || typeof parsed !== "object") {
         clicked.push(arg); // domClick / hasNext 等のセレクタ引数
-        if (arg === "#btn_seikyu") seikyuClicked = true;
+        // 【請求】は**ダイアログを出すだけ**(実サイト実測・課金しない)。
+        if (arg === "#btn_seikyu") {
+          if (!opts.noConfirmDialog) dialogOpen = true;
+        }
         // ⚠所在選択ダイアログ(B案)の既定応答を返す。段階②も所在の確定を通る
         // ため、undefined のままだと所在が確定できず location_rejected になり、
         // 請求フローの検証に到達しない。
@@ -1946,6 +1962,28 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         return JSON.stringify(
           opts.selectionVerify ?? { registered: true, okDisabled: false },
         );
+      }
+      // 課金前の金額裏取り(行の料金と請求金額合計)。
+      if (parsed.probe === "seikyu-amounts") {
+        return JSON.stringify({
+          rowFeeText: opts.rowFeeText ?? "140",
+          totalText: opts.seikyuTotalText ?? "140",
+        });
+      }
+      // 確認ダイアログの状態(【請求】クリック後にだけ開く)。
+      if (parsed.probe === "seikyu-dialog") {
+        if (!dialogOpen) return JSON.stringify({ open: false });
+        return JSON.stringify({
+          open: true,
+          buttons: opts.dialogButtons ?? ["ＯＫ", "キャンセル"],
+          text: opts.dialogText ?? "請求金額は140円です。よろしいですか？",
+        });
+      }
+      // ＯＫ押下=**ここが課金**(submit されてマイページへ遷移する)。
+      if (parsed.probe === "seikyu-confirm-ok") {
+        seikyuClicked = true;
+        dialogOpen = false;
+        return undefined;
       }
       // 絞り込みが「すべて」かの実測(@codex #390 R4)。既定=効いている。
       if (parsed.probe === "filter-verify") {
@@ -2025,7 +2063,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       }
       return undefined;
     });
-    return { clicked };
+    return { clicked, chargedNow: () => seikyuClicked };
   }
 
   const INPUT = {
@@ -2070,7 +2108,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     // マイページへ登録するボタンや旧 selectTab('tabMy') タブは押さない。
     expect(clicked).not.toContain("a[onclick*=\"selectTab('tabMy')\"]");
     expect(clicked.join(" ")).not.toContain("btnForward2");
-    expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
+    expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1); // 請求ボタンは1回
   });
 
   it("SL1: ⚠請求リストに対象の行が無ければ、登録も請求も押さずに中止(別の筆を買わない)", async () => {
@@ -2422,6 +2460,62 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(clicked).not.toContain(SEIKYU);
   });
 
+  it("SC1: ⚠請求金額合計が行の料金と違えば、確認ダイアログも出さずに中止(課金ゼロ)", async () => {
+    const f = makeFakeChromium();
+    const { clicked, chargedNow } = wireStage2(f, { seikyuTotalText: "280" });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(SEIKYU); // 請求ボタンにも触れない
+    expect(chargedNow()).toBe(false);
+  });
+
+  it("SC2: ⚠確認ダイアログが出なければ課金しない(第7回はここで止まっていた)", async () => {
+    const f = makeFakeChromium();
+    const { clicked, chargedNow } = wireStage2(f, { noConfirmDialog: true });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error", // 課金していないので charged_but_failed にしない
+    });
+    expect(clicked).toContain(SEIKYU); // 請求ボタンは押した(無料)
+    expect(chargedNow()).toBe(false);
+  }, 25_000); // ダイアログ待ちの実時間(15秒)を含むため長め
+
+  it("SC3: ⚠確認ダイアログの金額が想定と違えばＯＫを押さない", async () => {
+    const f = makeFakeChromium();
+    const { chargedNow } = wireStage2(f, {
+      dialogText: "請求金額は280円です。よろしいですか？",
+    });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(chargedNow()).toBe(false);
+  });
+
+  it("SC4: ⚠押してよいボタンが判別できなければ押さない(取り消し側を誤爆しない)", async () => {
+    const f = makeFakeChromium();
+    const { chargedNow } = wireStage2(f, { dialogButtons: ["続行", "戻る"] });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(chargedNow()).toBe(false);
+  });
+
+  it("SC5: 「はい/いいえ」形式の確認でも「はい」を押して完走する", async () => {
+    const f = makeFakeChromium();
+    const { chargedNow } = wireStage2(f, {
+      dialogButtons: ["はい", "いいえ"],
+      dialogText: "140円を請求します。よろしいですか？",
+    });
+    const page = await makeStage2Page(f);
+    const buf = await page.fetchByLocationCandidate(INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(chargedNow()).toBe(true);
+  });
+
   it("S9: ⚠中止の印(aborted)が立っていたら請求ボタンを押さない（@codex R10 P1）", async () => {
     // provider が課金前タイムアウトで reject した後も、この関数は裏で走り続ける。
     // 印を見ずに押すと、呼び出し側は timeout(台帳なし・ロック解除済み)として処理を
@@ -2518,21 +2612,35 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     expect(src).not.toContain("await myPageIsSinglePage()");
   });
 
-  it("⚠課金は請求リストの【請求】(#btn_seikyu)を直接押す(マイページ側の請求ボタンは使わない)", () => {
+  it("⚠課金の瞬間は**確認ダイアログのＯＫ**(2026-08-19 実測)。charged=true はその直前", () => {
     expect(src).toContain("domClick(REGISTRY_SELECTORS.fudosanListSeikyuButton)");
     expect(src).not.toContain("myPageSeikyuButton");
-    // charged=true(安全側の会計)はクリックの直前(間に await を挟まない同一同期区間)。
-    const clickAt = src.indexOf(
+    // 【請求】クリック(無料)→ダイアログ待ち→ＯＫ(課金)の順。
+    const seikyuClickAt = src.indexOf(
       "await domClick(REGISTRY_SELECTORS.fudosanListSeikyuButton)",
     );
-    const chargedAt = src.lastIndexOf("chargeState.charged = true", clickAt);
-    expect(chargedAt).toBeGreaterThan(-1);
-    expect(clickAt).toBeGreaterThan(chargedAt);
-    expect(src.slice(chargedAt, clickAt)).not.toContain("await ");
-    // 請求の submit の着地(マイページ一覧)を待ってから請求済の実測へ。
-    const landAt = src.indexOf("REGISTRY_SELECTORS.myPageTable", clickAt);
-    expect(landAt).toBeGreaterThan(clickAt);
-    expect(src).toContain("domClick(REGISTRY_SELECTORS.fudosanListSeikyuButton)");
+    const dialogAt = src.indexOf('probe: "seikyu-dialog"');
+    const okAt = src.indexOf('probe: "seikyu-confirm-ok"');
+    expect(seikyuClickAt).toBeGreaterThan(-1);
+    expect(dialogAt).toBeGreaterThan(seikyuClickAt);
+    expect(okAt).toBeGreaterThan(dialogAt);
+    // charged=true は**ＯＫの直前**(請求クリック時点ではまだ課金していない)。
+    const chargedAt = src.lastIndexOf("chargeState.charged = true", okAt);
+    expect(chargedAt).toBeGreaterThan(seikyuClickAt);
+    expect(chargedAt).toBeLessThan(okAt);
+    // 着地(マイページ一覧)待ちはＯＫの後。
+    expect(src.indexOf("REGISTRY_SELECTORS.myPageTable", okAt)).toBeGreaterThan(okAt);
+  });
+
+  it("⚠課金前に「行の料金=請求金額合計」を実測する(選択が増えていたら課金しない)", () => {
+    expect(src).toContain('probe: "seikyu-amounts"');
+    expect(src).toContain("resolveSeikyuConfirm(");
+    const gateAt = src.indexOf("resolveSeikyuConfirm(");
+    const seikyuClickAt = src.indexOf(
+      "await domClick(REGISTRY_SELECTORS.fudosanListSeikyuButton)",
+    );
+    expect(gateAt).toBeLessThan(seikyuClickAt); // 押す前に裏取り
+    expect(src).toContain("REGISTRY_SELECTORS.seikyuTotalAmount");
   });
 
   it("課金後の同定は純関数 pickChargedMyPageRow(所在前半+地番境界+最新)で行う", () => {
