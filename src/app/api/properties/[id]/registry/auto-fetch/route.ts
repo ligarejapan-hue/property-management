@@ -187,13 +187,16 @@ export async function POST(
     }
 
     if (candidateRef) {
-      const { candidate, fingerprint } = await resolveRegistryCandidate({
-        session: { id: session.id, role: session.role },
-        propertyId: id,
-        confirmed,
-        candidateRef,
-      });
+      // ⚠**候補の解決も try の中で行う**(@codex #394 R7 P2)。実況は既に始まって
+      //   いるので、ここで throw すると finally を通らず、パネルが閉じられないまま
+      //   期限切れまでポーリングし続ける(利用者には『固まった』ように見える)。
       try {
+        const { candidate, fingerprint } = await resolveRegistryCandidate({
+          session: { id: session.id, role: session.role },
+          propertyId: id,
+          confirmed,
+          candidateRef,
+        });
         const obtained = await runRegistryAutoFetch(
           {
             session: { id: session.id, role: session.role },

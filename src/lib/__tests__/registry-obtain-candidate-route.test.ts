@@ -63,6 +63,7 @@ import { resolveRegistryCandidate } from "@/lib/registry-fetch/search";
 import {
   attachLiveShot,
   reportLiveStep,
+  completeLiveView,
 } from "@/lib/registry-fetch/live-view-store";
 import * as routeModule from "@/app/api/properties/[id]/registry/auto-fetch/route";
 
@@ -239,6 +240,24 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
     const res = await callRoute({ candidateRef: "cand-1", mode: "recover" });
     expect(res.status).toBe(400);
     expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("実況は必ず閉じる(パネルが固まったように見えない)", () => {
+  it("⚠候補の解決が失敗しても実況を完了させる(期限切れまで回り続けない)", async () => {
+    (resolveRegistryCandidate as Mock).mockRejectedValue(
+      Object.assign(new Error("stale"), {
+        status: 409,
+        code: "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND",
+      }),
+    );
+    const res = await callRoute({
+      confirmed: true,
+      candidateRef: "cand-x",
+      liveRef: "live-1",
+    });
+    expect(res.status).toBe(409);
+    expect(completeLiveView).toHaveBeenCalledTimes(1);
   });
 });
 

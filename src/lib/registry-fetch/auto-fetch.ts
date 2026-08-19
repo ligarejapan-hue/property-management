@@ -3270,6 +3270,33 @@ function createPlaywrightRegistryPage(
           }),
         );
         await sleep(2000);
+        // ⚠**掛けたつもりを信用しない**(@codex #394 R7 P2)。select には前回操作の
+        //   選択(「未請求」等)が残り得る。絞り込まれた一部だけを全履歴と思って走査
+        //   すると、買った書類を『無い』ことにしてしまう。選択中 option を実測する。
+        const allSelected =
+          (await page.evaluate(
+            (json) => {
+              const { filterSel } = JSON.parse(json) as { filterSel: string };
+              const el = document.querySelector(
+                filterSel,
+              ) as HTMLSelectElement | null;
+              const opt = el?.selectedOptions?.[0];
+              return ((opt?.textContent ?? "").trim() === "すべて") === true;
+            },
+            JSON.stringify({
+              probe: "filter-verify",
+              filterSel: REGISTRY_SELECTORS.myPageFilter,
+            }),
+          )) === true;
+        if (!allSelected) {
+          console.warn(
+            "[registry-fetch] recover: history filter not verified (not charged)",
+          );
+          reportLive(
+            "一覧の表示を『すべて』に切り替えられませんでした(課金はしていません)。時間をおいて再度お試しください",
+          );
+          throw new RegistryFetchError("provider_error");
+        }
         const scanned: Array<
           MyPageScanRow & { pageNo: number; indexInPage: number }
         > = [];

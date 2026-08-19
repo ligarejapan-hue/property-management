@@ -3145,6 +3145,22 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(clicked).not.toContain(SEIKYU);
   });
 
+  it("SV19: ⚠一覧を『すべて』にできなければ走査しない(一部だけ見て『無い』と言わない)", async () => {
+    // select には前回操作(未請求など)が残り得る。絞り込まれた一部を全履歴と
+    // 思って走ると、買った書類を『無い』ことにしてしまう(@codex #394 R7 P2)。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      filterStuck: true,
+      mypageBaselineRows: [boughtRow()],
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation(RECOVER_INPUT),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    expect(clicked).not.toContain(DOWNLOAD);
+    expect(clicked).not.toContain(SEIKYU);
+  });
+
   it("SV9: 買う対象(地番/家屋番号)が空なら何もしない(ページに触れない)", async () => {
     const f = makeFakeChromium();
     const { clicked } = wireStage2(f, { mypageBaselineRows: [boughtRow()] });
