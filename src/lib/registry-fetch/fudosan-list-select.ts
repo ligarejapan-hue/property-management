@@ -54,11 +54,34 @@ export interface FudosanListRow {
 }
 
 /**
- * 所在の比較用正規化。全角/半角・空白の揺れだけ吸収する(NFKC+全空白除去)。
- * 数字抽出はしない(所在は文字列そのものが同一性)。
+ * サイトが埋め込む数値文字参照(&#31070; / &#x795E; 形式)を実文字へ戻す。
+ *
+ * ⚠**実測(2026-08-19 第6回テスト・課金ゼロで停止)**: 請求リストの行の
+ * 隠しデータ `#chibanKuiki_N` だけは値が**二重エスケープ**されており、
+ * 実行時に読める文字列は「神奈川県横浜市南区井土ケ谷中町」ではなく
+ * `&#31070;&#22856;…` という ASCII 文字列だった(地番・請求種別・土地/建物は
+ * 素の日本語)。素のまま比較すると所在が永久に一致せず、確定後に必ず
+ * 「対象の行を特定できません」で止まる(=課金前中止だが取得もできない)。
+ * 実在の住所に `&#...;` は現れないので、比較前に解くのは安全。
+ */
+export function decodeSiteNumericEntities(raw: string): string {
+  // ⚠16進は `&#x…;` / `&#X…;` の両方が正しい形(@codex #391 R1: 大文字Xを
+  // 受けないと下の startsWith("X") 分岐が死に、解けないまま no-match になる)。
+  return raw.replace(/&#([xX][0-9a-fA-F]+|[0-9]+);/g, (_m, code: string) => {
+    const isHex = code[0] === "x" || code[0] === "X";
+    const n = isHex
+      ? Number.parseInt(code.slice(1), 16)
+      : Number.parseInt(code, 10);
+    return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : _m;
+  });
+}
+
+/**
+ * 所在の比較用正規化。数値文字参照を解いたうえで、全角/半角・空白の揺れを
+ * 吸収する(NFKC+全空白除去)。数字抽出はしない(所在は文字列そのものが同一性)。
  */
 export function normalizeKuikiForCompare(raw: string): string {
-  return raw.normalize("NFKC").replace(/\s+/g, "");
+  return decodeSiteNumericEntities(raw).normalize("NFKC").replace(/\s+/g, "");
 }
 
 export type FudosanListPick =

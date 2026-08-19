@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  decodeSiteNumericEntities,
   FUDOSAN_LIST_CHECKBOX_NAME,
   FUDOSAN_LIST_HIDDEN_PREFIX,
   normalizeKuikiForCompare,
@@ -92,6 +93,28 @@ describe("selectFudosanListRow", () => {
     expect(pick).toEqual({ ok: false, reason: "no-match" });
   });
 
+  it("⚠所在の隠しデータが数値文字参照でも一致する(2026-08-19 第6回テストの実測値)", () => {
+    // サイトは #chibanKuiki_N だけ二重エスケープして持つ(実行時に読める値は
+    // 「神奈川県横浜市南区井土ケ谷中町」ではなく下の ASCII 文字列)。
+    const ENTITY = "&#31070;&#22856;&#24029;&#30476;&#27178;&#27996;&#24066;&#21335;&#21306;&#20117;&#22303;&#12465;&#35895;&#20013;&#30010;";
+    expect(decodeSiteNumericEntities(ENTITY)).toBe("神奈川県横浜市南区井土ケ谷中町");
+    const pick = selectFudosanListRow(
+      [row({ index: 1, kuiki: ENTITY })],
+      EXPECTED,
+    );
+    expect(pick).toEqual({ ok: true, index: 1, duplicateCount: 0 });
+  });
+
+  it("16進の文字参照(&#x…;)も解ける・実在住所の文字列は変えない", () => {
+    expect(decodeSiteNumericEntities("&#x795E;&#x5948;")).toBe("神奈");
+    // 大文字X形式も正しい書き方(@codex #391 R1)。混在も解ける。
+    expect(decodeSiteNumericEntities("&#X795E;&#X5948;")).toBe("神奈");
+    expect(decodeSiteNumericEntities("&#X795E;&#22856;&#x5DDD;")).toBe("神奈川");
+    expect(decodeSiteNumericEntities("神奈川県横浜市南区")).toBe("神奈川県横浜市南区");
+    // 参照の形をしていない & はそのまま(壊さない)。
+    expect(decodeSiteNumericEntities("A&B&#;")).toBe("A&B&#;");
+  });
+
   it("所在の全角/空白の揺れは吸収する(NFKC+空白除去)", () => {
     const pick = selectFudosanListRow(
       [row({ index: 1, kuiki: "神奈川県 横浜市南区　井土ケ谷中町" })],
@@ -139,6 +162,15 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
     };
   }
   const EXP = { targetKey: "69-2", kuiki: KU, baselineTrIds: new Set<string>() };
+
+  it("課金後の同定も文字参照を解いてから比べる(可視セルは素の日本語だが対で維持)", () => {
+    const ENTITY_KU = "&#31070;&#22856;&#24029;&#30476;&#27178;&#27996;&#24066;&#21335;&#21306;&#20117;&#22303;&#12465;&#35895;&#20013;&#30010;";
+    const picked = pickChargedMyPageRow(
+      [mrow({ shozai: `${ENTITY_KU}６９－２` })],
+      EXP,
+    );
+    expect(picked?.trId).toBe("R1");
+  });
 
   it("⚠別の町の同一地番は選ばない(地番末尾一致だけでは他人の筆を掴む)", () => {
     expect(
