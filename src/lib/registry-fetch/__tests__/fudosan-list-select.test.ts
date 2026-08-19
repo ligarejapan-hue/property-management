@@ -17,6 +17,7 @@ import {
   pickChargedMyPageRow,
   mypageCertificateTypeOf,
   stripTrailingChibanFromKuiki,
+  stripTrailingIdentifierFromKuiki,
   selectFudosanListRow,
   type FudosanListRow,
   type MyPageScanRow,
@@ -453,5 +454,83 @@ describe("謄本の種類(所有者事項/全部事項)まで一致させる(@co
       { ...EXPECT, certificateType: "owner" },
     );
     expect(picked?.receiptNo).toBe("2026081900727233");
+  });
+});
+
+describe("回収は『いま取り込める行』の中から最新を選ぶ(@codex #394 R9 P2)", () => {
+  const KU3 = "神奈川県横浜市南区井土ケ谷中町";
+  const row = (over: Partial<MyPageScanRow>): MyPageScanRow => ({
+    receiptNo: "2026081900727233",
+    shozai: `土地・${KU3}６９－２`,
+    seikyuType: "不動産登記 （所有者事項）",
+    status: "請求済",
+    when: "2026/08/18 12:00",
+    expiry: "2026/09/18",
+    ...over,
+  });
+  const EXP3 = {
+    targetKey: "69-2",
+    kuiki: KU3,
+    kindLabel: "土地",
+    certificateType: "owner" as const,
+    baselineReceiptNos: new Set<string>(),
+  };
+
+  it("⚠最新が期限切れでも、まだ生きている購入があればそれを取り込む", () => {
+    const picked = pickChargedMyPageRow(
+      [
+        row({
+          receiptNo: "2026081900000NEW",
+          when: "2026/08/19 15:30",
+          expiry: "期間超過",
+        }),
+        row({ receiptNo: "2026081900000OLD", when: "2026/08/10 09:00" }),
+      ],
+      { ...EXP3, requireReady: true },
+    );
+    expect(picked?.receiptNo).toBe("2026081900000OLD");
+    expect(picked?.readyNow).toBe(true);
+  });
+
+  it("⚠有料取得(requireReady なし)は『いま買った行』を譲らない", () => {
+    // 準備中(請求中)でもその行でなければならない。古い ready 行へ乗り換えると
+    // 払った分と違うPDFを『今回の結果』として添付してしまう。
+    const picked = pickChargedMyPageRow(
+      [
+        row({
+          receiptNo: "2026081900000NEW",
+          when: "2026/08/19 15:30",
+          status: "請求中",
+          expiry: "",
+        }),
+        row({ receiptNo: "2026081900000OLD", when: "2026/08/10 09:00" }),
+      ],
+      EXP3,
+    );
+    expect(picked?.receiptNo).toBe("2026081900000NEW");
+    expect(picked?.readyNow).toBe(false);
+  });
+});
+
+describe("所在の末尾は『対象でない方の識別子』でも外す(@codex #394 R9 P2)", () => {
+  const AREA2 = "神奈川県横浜市南区井土ケ谷中町";
+
+  it("建物で探すとき、所在の末尾に残った地番を外す", () => {
+    // 対象キー(家屋番号5-2)だけ見ると外せず、区域が合わずに『無い』になる。
+    expect(
+      stripTrailingIdentifierFromKuiki(`${AREA2}69-2`, ["5-2", "69-2"]),
+    ).toBe(AREA2);
+  });
+
+  it("対象キーで外せるならそれを優先する", () => {
+    expect(
+      stripTrailingIdentifierFromKuiki(`${AREA2}5-2`, ["5-2", "69-2"]),
+    ).toBe(AREA2);
+  });
+
+  it("どちらでも外せなければ1文字も削らない", () => {
+    expect(
+      stripTrailingIdentifierFromKuiki(`${AREA2}70-1`, ["5-2", "69-2"]),
+    ).toBe(`${AREA2}70-1`);
   });
 });

@@ -54,7 +54,7 @@ import {
   parseMyPageRowCells,
   FUDOSAN_LIST_HIDDEN_PREFIX,
   pickChargedMyPageRow,
-  stripTrailingChibanFromKuiki,
+  stripTrailingIdentifierFromKuiki,
   selectFudosanListRow,
   type FudosanListRow,
   type MyPageScanRow,
@@ -3367,11 +3367,19 @@ function createPlaywrightRegistryPage(
           targetKey,
           // ⚠物件の所在は末尾に地番まで入っていることがある(本番データ実測)。
           //   区域だけにしてから照合する(そのままだと残りが空になり正しい行を弾く)。
-          kuiki: stripTrailingChibanFromKuiki(input.address, targetKey),
+          // ⚠所在の末尾には**対象でない方の識別子**(建物で探すときの地番)が
+          //   入っていることがある。対象→もう一方の順に外して区域だけにする。
+          kuiki: stripTrailingIdentifierFromKuiki(input.address, [
+            rawTarget,
+            isBuilding ? input.lotNumber : input.buildingNumber,
+          ]),
           kindLabel: isBuilding ? "建物" : "土地",
           // 同じ筆で両方買っている場合に、要求した種類の行だけを取り込む。
           certificateType: input.certificateType,
           baselineReceiptNos: new Set<string>(),
+          // 回収は『いま取り込めるもの』が目的。最新が期限切れでも、
+          // まだ生きている購入があればそれを取り込む(@codex #394 R9 P2)。
+          requireReady: true,
         });
         if ((!picked || !picked.readyNow) && truncated) {
           // 履歴を最後まで見ていない=『無い』と断定できない。

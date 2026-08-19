@@ -212,6 +212,35 @@ export function stripTrailingChibanFromKuiki(
 }
 
 /**
+ * 所在の末尾に付いている識別子を外して区域だけにする(@codex #394 R9 P2)。
+ *
+ * ⚠建物(家屋番号)で探すとき、物件の所在の末尾には**地番**が入っていることが
+ * ある(実データ: 「…中町69-2」)。対象キー(家屋番号)しか見ないと外せず、
+ * 区域が合わずに『見つかりません』になる。**対象 → もう一方**の順に試す。
+ */
+export function stripTrailingIdentifierFromKuiki(
+  address: string,
+  keys: Array<string | null | undefined>,
+): string {
+  let out = normalizeKuikiForCompare(address);
+  for (const key of keys) {
+    const k = (key ?? "").trim();
+    if (!k) continue;
+    const stripped = stripTrailingChibanFromKuiki(out, normalizeChibanForDialog(k));
+    if (stripped !== out) return stripped;
+  }
+  return out;
+}
+
+
+/** 取り込める行か(請求済 × 期限が入っていて期間超過でない)。 */
+function isDownloadableRow(r: { status: string; expiry: string }): boolean {
+  const status = r.status.trim();
+  const expiry = r.expiry.trim();
+  return status === "請求済" && expiry !== "" && expiry !== "期間超過";
+}
+
+/**
  * 課金直後の「いま買った行」をマイページ全履歴から同定する(提出前レビュー指摘・
  * confidence 82 対応)。⚠マイページは**口座の全物件の履歴**であり、地番の末尾一致
  * だけでは**別の町の同一地番**(例: どこにでもある「1-1」)の行を掴み、他人の筆の
@@ -252,6 +281,14 @@ export function pickChargedMyPageRow(
      *   同定でここを fail-closed にすると、表記違いだけで**払ったのにPDFを失う**。
      */
     certificateType: "owner" | "all";
+    /**
+     * 【回収】**取り込める行**(請求済 × 期限内)だけを候補にする(@codex #394 R9 P2)。
+     * ⚠有料取得では **false のまま**にする: あちらは『いま買った行』の同定なので、
+     *   まだ準備中(請求中)でも**その行**でなければならない。古い ready 行へ
+     *   乗り換えると、払った分と違うPDFを『今回の結果』として添付してしまう。
+     * 回収は逆に『買ってあるもののうち、いま取り込めるもの』が目的なので true。
+     */
+    requireReady?: boolean;
   },
 ): { receiptNo: string; readyNow: boolean; status: string } | null {
   const kuikiKey = normalizeKuikiForCompare(expected.kuiki);
@@ -276,12 +313,14 @@ export function pickChargedMyPageRow(
         normalizeChibanForDialog(remainder) === expected.targetKey
       );
     })
+    .filter((r) =>
+      expected.requireReady === true ? isDownloadableRow(r) : true,
+    )
     .sort((a, b) => (a.when < b.when ? 1 : a.when > b.when ? -1 : 0));
   if (matches.length === 0) return null;
   const best = matches[0];
   const status = best.status.trim();
-  const expiry = best.expiry.trim();
-  const readyNow = status === "請求済" && expiry !== "" && expiry !== "期間超過";
+  const readyNow = isDownloadableRow(best);
   return { receiptNo: best.receiptNo.trim(), readyNow, status };
 }
 

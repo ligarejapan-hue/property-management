@@ -382,7 +382,13 @@ export default function RegistryLocationSearchButton({
             {target && !isSearchableTarget(target.kind) && (
               <button
                 type="button"
-                onClick={() => runRecover(true)}
+                onClick={() => {
+                  // ⚠**種類(所有者事項/全部事項)を選ばせてから**走らせる
+                  //   (@codex #394 R9 P1)。既定のまま固定すると、全部事項で
+                  //   買ったものが永久に取り込めない(同定が種類まで見るため)。
+                  setSelected(null);
+                  setState("confirmObtain");
+                }}
                 className="rounded border border-indigo-300 dark:border-indigo-500/40 bg-white dark:bg-gray-900 px-2 py-1 font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/10"
               >
                 取得済みを取り込む（課金なし）
@@ -503,19 +509,31 @@ export default function RegistryLocationSearchButton({
         </div>
       )}
 
-      {state === "confirmObtain" && selected && (
+      {state === "confirmObtain" && (
         <div className="flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 p-2 text-xs">
-          <p className="font-medium text-indigo-800 dark:text-indigo-300">この候補で何をしますか？</p>
-          <RegistryPreflightWarningLines state={preflight} propertyId={propertyId} />
-          <p className="truncate text-indigo-700 dark:text-indigo-300">{selected.address ?? "（所在不明）"}</p>
-          <p className="truncate text-indigo-700 dark:text-indigo-300">
-            {[
-              selected.lotNumber && `地番 ${selected.lotNumber}`,
-              selected.buildingNumber && `家屋番号 ${selected.buildingNumber}`,
-            ]
-              .filter(Boolean)
-              .join(" / ")}
+          <p className="font-medium text-indigo-800 dark:text-indigo-300">
+            {selected
+              ? "この候補で何をしますか？"
+              : "取得済みの謄本を取り込みますか？（課金なし）"}
           </p>
+          <RegistryPreflightWarningLines state={preflight} propertyId={propertyId} />
+          {selected ? (
+            <>
+              <p className="truncate text-indigo-700 dark:text-indigo-300">{selected.address ?? "（所在不明）"}</p>
+              <p className="truncate text-indigo-700 dark:text-indigo-300">
+                {[
+                  selected.lotNumber && `地番 ${selected.lotNumber}`,
+                  selected.buildingNumber && `家屋番号 ${selected.buildingNumber}`,
+                ]
+                  .filter(Boolean)
+                  .join(" / ")}
+              </p>
+            </>
+          ) : (
+            <p className="text-indigo-700 dark:text-indigo-300">
+              この物件に登録されている所在・地番で、購入済みの謄本を探します。
+            </p>
+          )}
           <fieldset className="mt-1 flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 p-1.5">
             <legend className="px-1 text-indigo-800 dark:text-indigo-300">取得する種類</legend>
             <label className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
@@ -537,6 +555,7 @@ export default function RegistryLocationSearchButton({
               全部事項（権利関係まで・料金が高い）
             </label>
           </fieldset>
+          {selected && (
           <p className="text-indigo-700 dark:text-indigo-300">
             取得すると謄本1通分の利用料が発生します（
             {certificateType === "all" ? "全部事項・料金が高い方" : "所有者事項"}
@@ -547,7 +566,10 @@ export default function RegistryLocationSearchButton({
               </span>
             )}
           </p>
+          )}
           <div className="mt-1 flex flex-wrap gap-1">
+            {/* 有料取得は候補を選んだときだけ(候補なしの入口は回収専用)。 */}
+            {selected && (
             <button
               type="button"
               onClick={runObtain}
@@ -567,6 +589,7 @@ export default function RegistryLocationSearchButton({
             >
               {preflight.pending ? "確認中..." : "取得する（有料）"}
             </button>
+            )}
             {/* 【回収】既に買った書類の取り込み。⚠有料スイッチと無関係に使える
                 (課金操作をしないため)。押しても新たな料金は発生しない。 */}
             <button
@@ -581,6 +604,10 @@ export default function RegistryLocationSearchButton({
             <button
               type="button"
               onClick={() => {
+                if (!selected) {
+                  reset();
+                  return;
+                }
                 setSelected(null);
                 setState("results");
               }}

@@ -140,9 +140,30 @@ describe("回収の入口(画面)", () => {
   it("⚠検索できない物件にも回収の入口がある(買った書類に手が届かなくならない)", () => {
     // 取込が途中まで進むと不動産番号が入って所在検索が対象外になる。
     expect(SEARCH_BUTTON_UI).toContain("!isSearchableTarget(target.kind) && (");
-    expect(SEARCH_BUTTON_UI).toContain("runRecover(true)");
     // その経路は候補を使わず物件自身の地番で探す(課金なし)。
     expect(SEARCH_BUTTON_UI).toContain("recoverRegistryFromProperty(");
+    // 候補が無いとき(selected===null)は物件由来で走らせる。
+    expect(SEARCH_BUTTON_UI).toContain("fromProperty || !selected");
+  });
+
+  it("⚠候補なしの回収も**種類を選ぶ画面**を通る(全部事項の購入も取り込める)", () => {
+    // 既定(所有者事項)のまま走らせると、全部事項で買ったものは同定で外れて
+    // 永久に取り込めない(@codex #394 R9 P1)。
+    const at = SEARCH_BUTTON_UI.indexOf("!isSearchableTarget(target.kind) && (");
+    expect(at).toBeGreaterThan(-1);
+    const seg = SEARCH_BUTTON_UI.slice(at, at + 900);
+    expect(seg).toContain('setState("confirmObtain")');
+    expect(seg).not.toContain("runRecover(true)");
+    // 確認パネルは候補が無くても出る(=種類の選択も出る)。
+    expect(SEARCH_BUTTON_UI).toContain('{state === "confirmObtain" && (');
+    expect(SEARCH_BUTTON_UI).toContain('name="certificateType"');
+  });
+
+  it("⚠候補が無いときは有料取得のボタンを出さない(回収専用の入口)", () => {
+    const at = SEARCH_BUTTON_UI.indexOf("onClick={runObtain}");
+    expect(at).toBeGreaterThan(-1);
+    const before = SEARCH_BUTTON_UI.slice(Math.max(0, at - 300), at);
+    expect(before).toContain("{selected && (");
   });
 
   it("回収は専用の通信関数を使い、mode:recover を必ず送る", () => {
