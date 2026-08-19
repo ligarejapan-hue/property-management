@@ -15,6 +15,7 @@ import {
   FUDOSAN_LIST_HIDDEN_PREFIX,
   normalizeKuikiForCompare,
   pickChargedMyPageRow,
+  stripTrailingChibanFromKuiki,
   selectFudosanListRow,
   type FudosanListRow,
   type MyPageScanRow,
@@ -324,5 +325,54 @@ describe("collectBaselineReceiptNos(課金前の基準・2026-08-19 第8回の�
       ok: true,
       receiptNos: new Set<string>(),
     });
+  });
+});
+
+describe("所在の末尾に入っている地番を外す(照合キーは区域だけ)", () => {
+  // 本番データ実測(2026-08-19): properties.address は地番まで入っていることがある。
+  // 「神奈川県横浜市南区井土ケ谷中町69-2」+ 地番 69-2 が実在の形。
+  const AREA = "神奈川県横浜市南区井土ケ谷中町";
+
+  it("末尾が対象の地番なら外して区域だけにする", () => {
+    expect(stripTrailingChibanFromKuiki(`${AREA}69-2`, "69-2")).toBe(AREA);
+  });
+
+  it.each([
+    ["全角", "６９－２"],
+    ["登記の慣用表記(番)", "69番2"],
+    ["空白入り", " 69 - 2 "],
+  ])("%s で書かれていても外せる(表記ゆれで取りこぼさない)", (_label, tail) => {
+    expect(stripTrailingChibanFromKuiki(`${AREA}${tail}`, "69-2")).toBe(AREA);
+  });
+
+  it("地番が入っていない所在は1文字も削らない", () => {
+    expect(stripTrailingChibanFromKuiki(AREA, "69-2")).toBe(AREA);
+  });
+
+  it("⚠末尾が**別の**地番なら削らない(対象と違う筆の区域を作らない)", () => {
+    expect(stripTrailingChibanFromKuiki(`${AREA}70-1`, "69-2")).toBe(`${AREA}70-1`);
+  });
+
+  it("⚠町名が延びた区域は延びたまま返す(中町東は中町にしない)", () => {
+    // ここを縮めると、区域「中町」として中町の別の筆に当たり得る。
+    expect(stripTrailingChibanFromKuiki(`${AREA}東69-2`, "69-2")).toBe(`${AREA}東`);
+  });
+
+  it("⚠数字の途中では切らない(169-2 の物件を 69-2 として扱わない)", () => {
+    // 切ると区域が「…中町1」になり、マイページの「…中町１６９－２」の行が
+    // 残り「69-2」で一致=**別の筆のPDFを貼る**。見つからない扱いの方が安全。
+    expect(stripTrailingChibanFromKuiki(`${AREA}169-2`, "69-2")).toBe(
+      `${AREA}169-2`,
+    );
+  });
+
+  it("⚠ハイフンの途中でも切らない", () => {
+    expect(stripTrailingChibanFromKuiki(`${AREA}5-69-2`, "69-2")).toBe(
+      `${AREA}5-69-2`,
+    );
+  });
+
+  it("対象地番が空なら何もしない(正規化だけ)", () => {
+    expect(stripTrailingChibanFromKuiki(`${AREA}69-2`, "  ")).toBe(`${AREA}69-2`);
   });
 });

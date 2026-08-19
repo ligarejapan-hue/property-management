@@ -207,6 +207,13 @@ export interface RegistryFetchProvider {
    */
   searchCandidates?(request: RegistrySearchRequest): Promise<RegistryCandidate[]>;
   /**
+   * 【回収】既に**課金済み**の謄本PDFを、再課金なしで取り込む(2026-08-19・任意実装)。
+   * ⚠課金操作(請求・確定・確認ダイアログのＯＫ)を**一切行わない**こと。
+   * 対象が見つからない/期限切れは RegistryFetchError("not_found")。
+   */
+  recoverRegistryPdf?(request: RegistryFetchRequest): Promise<RegistryFetchResult>;
+
+  /**
    * 所在検索（searchCandidates）が実際に利用可能かの宣言（PR-2b-2）。
    * searchCandidates メソッドが存在しても、実 adapter の searchByLocation が未実装の provider
    * （official・本 PR 時点）は true にしない。呼び出し側（runRegistrySearch）はこれが true の

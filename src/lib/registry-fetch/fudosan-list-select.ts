@@ -169,6 +169,43 @@ export interface MyPageScanRow {
 }
 
 /**
+ * 物件の所在(address)の**末尾に入っている対象地番**を外し、照合用の区域だけにする。
+ *
+ * ⚠なぜ要るか(2026-08-19 本番データ実測): properties.address は
+ * 「神奈川県横浜市南区井土ケ谷中町69-2」のように**地番まで入っている**ことがある。
+ * これをそのまま区域キーにすると、マイページの所在「土地・…中町６９－２」から
+ * 前半を除いた残りが**空**になり、`pickChargedMyPageRow` の②(残りが地番として
+ * 説明でき、対象地番と完全一致)を満たせず、**正しい行まで弾いてしまう**。
+ *
+ * ⚠外すのは**末尾が対象地番と一致するときだけ**。それ以外は1文字も削らない
+ * (削ると区域が短くなり「中町」が「中町東」の行を通す=別の筆に化ける)。
+ * 判定は正規化後(NFKC・空白除去)の文字列で行い、戻り値も正規化後の区域キー。
+ */
+export function stripTrailingChibanFromKuiki(
+  address: string,
+  targetKey: string,
+): string {
+  const full = normalizeKuikiForCompare(address);
+  const target = targetKey.trim();
+  if (!full || !target) return full;
+  // 末尾から順に切り出し、対象地番そのものになる切れ目を探す(通常は1つだけ)。
+  for (let cut = full.length - 1; cut >= 1; cut--) {
+    // ⚠**数字/ハイフンの途中では切らない**(提出前レビュー指摘)。
+    //   「…中町169-2」から「69-2」を切り出すと区域が「…中町1」になり、
+    //   マイページの「…中町１６９－２」の行が残り「69-2」で一致してしまう
+    //   =**別の筆(169-2)のPDFを69-2の物件に貼る**。境界でなければ諦める
+    //   (=見つからない扱い)方が安全。registryRowMatchesChiban と同じ規則。
+    const prev = full[cut - 1];
+    if (prev !== undefined && /[0-9-]/.test(prev)) continue;
+    const tail = full.slice(cut);
+    if (!isReadableChiban(tail)) continue;
+    if (normalizeChibanForDialog(tail) !== target) continue;
+    return full.slice(0, cut);
+  }
+  return full;
+}
+
+/**
  * 課金直後の「いま買った行」をマイページ全履歴から同定する(提出前レビュー指摘・
  * confidence 82 対応)。⚠マイページは**口座の全物件の履歴**であり、地番の末尾一致
  * だけでは**別の町の同一地番**(例: どこにでもある「1-1」)の行を掴み、他人の筆の

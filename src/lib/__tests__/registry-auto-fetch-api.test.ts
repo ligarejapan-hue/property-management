@@ -1152,3 +1152,183 @@ describe("段階②: 地番候補の有料取得（台帳=二重課金ガード�
     expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
   });
 });
+
+describe("【回収】購入済みの謄本を再課金なしで取り込む(mode:recover)", () => {
+  // 2026-08-19: 実課金テスト第8回で請求は成立(課金済み)したのに、行の同定に失敗して
+  // PDFを取り逃した。二重課金ガードが効いて取り直せない=**払ったのに手元に残らない**。
+  // 期限内なら課金せず回収できるので、その経路をここで固定する。
+  const LC = { lotNumber: "1-1", buildingNumber: null };
+  const RECOVERED_PDF = Buffer.from([0x25, 0x50, 0x44, 0x46, 9, 9, 9, 9, 9, 9]);
+
+  type RecoverProvider = RegistryFetchProvider & {
+    fetchRegistryPdf: Mock;
+    recoverRegistryPdf: Mock;
+  };
+
+  function recoverProvider(): RecoverProvider {
+    return {
+      name: "mock",
+      fetchRegistryPdf: vi.fn(),
+      recoverRegistryPdf: vi.fn().mockResolvedValue({
+        pdfBuffer: RECOVERED_PDF,
+        fileName: "registry-recovered-req-1.pdf",
+        source: "mock",
+        fetchedAt: new Date(0),
+        providerRequestId: "req-1",
+      }),
+    } as unknown as RecoverProvider;
+  }
+
+  function runRecover(
+    over: {
+      locationCandidate?: {
+        lotNumber: string | null;
+        buildingNumber: string | null;
+      } | null;
+      provider?: RegistryFetchProvider;
+    } = {},
+  ) {
+    const provider = (over.provider ?? recoverProvider()) as RecoverProvider;
+    const promise = runRegistryAutoFetch(
+      {
+        session: SESSION,
+        propertyId: PROP_ID,
+        confirmed: true,
+        mode: "recover",
+        locationCandidate:
+          over.locationCandidate === undefined ? LC : over.locationCandidate,
+      },
+      provider,
+    );
+    return { provider, promise };
+  }
+
+  const PURCHASE_ENV = "REGISTRY_FETCH_PURCHASE_ENABLED";
+  let savedPurchaseEnv: string | undefined;
+  beforeEach(() => {
+    savedPurchaseEnv = process.env[PURCHASE_ENV];
+    // ⚠回収は**有料取得のスイッチが切れている本番でも使える**ことが要件。
+    delete process.env[PURCHASE_ENV];
+    setProperty({ address: "テスト市テスト町一丁目" });
+  });
+  afterEach(() => {
+    if (savedPurchaseEnv === undefined) delete process.env[PURCHASE_ENV];
+    else process.env[PURCHASE_ENV] = savedPurchaseEnv;
+  });
+
+  it("⚠有料取得のスイッチが切れていても実行できる(課金操作をしないため)", async () => {
+    const { provider, promise } = runRecover();
+    await promise;
+    expect(provider.recoverRegistryPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it("⚠課金の入口(fetchRegistryPdf)は呼ばない", async () => {
+    const { provider, promise } = runRecover();
+    await promise;
+    expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("⚠課金台帳を書かない(お金は動いていない)", async () => {
+    const { promise } = runRecover();
+    await promise;
+    const ledger = pm.auditLog.create.mock.calls
+      .map((c) => (c[0] as { data: { action: string } }).data)
+      .filter((a) => a.action === "registry_location_purchase");
+    expect(ledger).toHaveLength(0);
+  });
+
+  it("⚠二重課金ガード(過去の課金記録)があっても止めない=これが回収の目的", async () => {
+    // 有料取得なら 409 で止まる状況。回収は「その課金済みの書類を取りに行く」ので通す。
+    pm.auditLog.findFirst.mockResolvedValue({
+      id: "ledger-old",
+      createdAt: new Date(),
+    });
+    const { provider, promise } = runRecover();
+    await promise;
+    expect(provider.recoverRegistryPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it("回収したPDFは物件に添付され、取得済み(obtained)になる", async () => {
+    const { promise } = runRecover();
+    await promise;
+    expect(uploadMock()).toHaveBeenCalled();
+    expect(pm.attachment.create).toHaveBeenCalled();
+    const obtained = pm.property.update.mock.calls.filter(
+      (c) =>
+        (c[0] as { data?: { registryStatus?: unknown } })?.data
+          ?.registryStatus === "obtained",
+    );
+    expect(obtained.length).toBeGreaterThan(0);
+  });
+
+  it("⚠取り込みに失敗しても「課金の可能性」にはしない(502/charged_but_failed にしない)", async () => {
+    // 第7回テストの反省: 課金していないのに「お金が動いたかも」と出すと、
+    // 利用者は取り直しを恐れて動けなくなる。回収は課金境界を持たない。
+    (isPdfBuffer as Mock).mockReturnValue(false);
+    const { promise } = runRecover();
+    await expect(promise).rejects.toMatchObject({ status: 422 });
+    await promise.catch((e: unknown) => {
+      expect((e as { providerCode?: string }).providerCode).not.toBe(
+        "charged_but_failed",
+      );
+    });
+    const ledger = pm.auditLog.create.mock.calls
+      .map((c) => (c[0] as { data: { action: string } }).data)
+      .filter((a) => a.action === "registry_location_purchase");
+    expect(ledger).toHaveLength(0);
+  });
+
+  it("⚠保存できなければ成功にしない(422・課金扱いにはしない)", async () => {
+    pm.attachment.create.mockRejectedValue(new Error("storage down"));
+    const { promise } = runRecover();
+    await expect(promise).rejects.toMatchObject({
+      status: 422,
+      code: "REGISTRY_RECOVER_ATTACH_FAILED",
+    });
+  });
+
+  it("⚠地番も家屋番号も無ければ取り込まない(別の筆を掴まない)", async () => {
+    const { provider, promise } = runRecover({
+      locationCandidate: { lotNumber: null, buildingNumber: null },
+    });
+    await expect(promise).rejects.toMatchObject({ status: 409 });
+    expect(provider.recoverRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("⚠地番の書き方が読めなければ取り込まない(取得と同じ規則)", async () => {
+    const { provider, promise } = runRecover({
+      locationCandidate: { lotNumber: "abc1x2", buildingNumber: null },
+    });
+    await expect(promise).rejects.toMatchObject({
+      status: 422,
+      code: "REGISTRY_OBTAIN_IDENTIFIER_INVALID",
+    });
+    expect(provider.recoverRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("回収に未対応の provider では 501(黙って課金経路へ落ちない)", async () => {
+    const provider = successProvider() as unknown as RegistryFetchProvider;
+    const { promise } = runRecover({ provider });
+    await expect(promise).rejects.toMatchObject({
+      status: 501,
+      code: "REGISTRY_RECOVER_NOT_SUPPORTED",
+    });
+    expect(
+      (provider as unknown as { fetchRegistryPdf: Mock }).fetchRegistryPdf,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("⚠物件に不動産番号があっても所在(地番)で探す=番号経路に落ちない", async () => {
+    setProperty({
+      address: "テスト市テスト町一丁目",
+      realEstateNumber: "0123456789012",
+    });
+    const { provider, promise } = runRecover();
+    await promise;
+    const req = provider.recoverRegistryPdf.mock.calls[0][0];
+    expect(req.location).toMatchObject({ lotNumber: "1-1" });
+    // ⚠番号は**渡さない**。渡すと provider 側の「番号があれば番号を優先」に
+    //   乗って課金フロー(確定→請求)へ落ちる余地が残る。
+    expect(req.realEstateNumber).toBeFalsy();
+  });
+});

@@ -46,7 +46,8 @@ describe("route: liveRef の受け付けと橋渡し", () => {
   });
 
   it("runRegistryAutoFetch へ live を渡す", () => {
-    expect(ROUTE).toMatch(/expectedFingerprint: fingerprint,\s*\n\s*live,/);
+    // ⚠間に mode(回収)の受け渡しが入っても、live は同じ引数で渡る。
+    expect(ROUTE).toMatch(/expectedFingerprint: fingerprint,[\s\S]*?\n\s*live,/);
   });
 });
 
@@ -82,8 +83,12 @@ describe("orchestration→provider→adapter の受け渡し", () => {
     );
     const clears =
       PROVIDER.match(/clearInterval\(queueHeartbeat\)/g) ?? [];
-    // 取得開始時 + finally(待ちのまま満了した経路の漏れ防止) の2箇所。
-    expect(clears.length).toBe(2);
+    // 順番待ちを持つ経路(有料取得 / 回収)ごとに、取得開始時 + finally
+    // (待ちのまま満了した経路の漏れ防止)の**2箇所**で clear する。
+    const heartbeats =
+      PROVIDER.match(/const queueHeartbeat = live/g) ?? [];
+    expect(heartbeats.length).toBeGreaterThanOrEqual(1);
+    expect(clears.length).toBe(heartbeats.length * 2);
   });
 
   it("⚠順番待ちそのものに寿命がある(@codex #380 R4/R6 P2)", () => {
@@ -127,8 +132,9 @@ describe("client 側", () => {
     //   state が obtaining になりパネルが**消える**=一番見たい場面で見えない。
     expect(BUTTON).toMatch(/state === "obtaining" \|\|/);
     expect(BUTTON).toMatch(/state === "done" \|\|/);
+    // 回収(課金なし)も「まだ決着していない」側に含める(2026-08-19)。
     expect(BUTTON).toMatch(
-      /searchSettled=\{state !== "searching" && state !== "obtaining"\}/,
+      /searchSettled=\{[\s\S]*?state !== "searching" &&[\s\S]*?state !== "obtaining" &&[\s\S]*?state !== "recovering"[\s\S]*?\}/,
     );
   });
 });

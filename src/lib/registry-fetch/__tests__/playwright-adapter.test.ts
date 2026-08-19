@@ -2768,6 +2768,223 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     ).rejects.toMatchObject({ code: "provider_error" });
     expect(clicked).toHaveLength(0);
     expect(f.page.fill).not.toHaveBeenCalled();
+
+  });
+
+  const DOWNLOAD = 'button[onclick*="myPageDownload"]'; // 「表示・保存」=無料
+  // ---- 【回収】既に購入済みの書類を、課金せずに取り込む(2026-08-19) ----
+  // 背景: 第8回テストで請求は成立(140円)したのにPDFを取り逃した。期限内なら
+  // 課金せず回収できる。⚠この経路が課金ボタンに触れないことを**実際に動かして**確かめる。
+  async function makeRecoverPage(f: ReturnType<typeof makeFakeChromium>) {
+    const factory = resolveDefaultRegistryBrowserFactory({
+      chromiumLoader: f.loader,
+    });
+    return (await factory!()) as unknown as {
+      recoverRegistryPdfByLocation: (input: {
+        address: string;
+        lotNumber?: string | null;
+        buildingNumber?: string | null;
+        certificateType: "owner" | "all";
+      }) => Promise<Buffer>;
+    };
+  }
+  const RECOVER_INPUT = {
+    address: INPUT.address,
+    lotNumber: INPUT.lotNumber,
+    buildingNumber: null,
+    certificateType: "owner" as const,
+  };
+  /** マイページに**既にある**行(課金前から見えている=回収の対象)。 */
+  const boughtRow = (over: Record<string, string> = {}) => ({
+    receiptNo: "2026081900727233",
+    shozai: `${INPUT.address}１－１`,
+    status: "請求済",
+    when: "2026/08/19 15:21",
+    expiry: "2026/08/24",
+    ...over,
+  });
+
+  it("SV1: 回収 — 請求済・期限内の行を見つけて PDF を返す(請求ボタンに触れない)", async () => {
+    const f = makeFakeChromium();
+    const { clicked, chargedNow } = wireStage2(f, {
+      mypageBaselineRows: [boughtRow()],
+    });
+    const page = await makeRecoverPage(f);
+    const buf = await page.recoverRegistryPdfByLocation(RECOVER_INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    // ⚠お金の操作を一切していない。
+    expect(clicked).not.toContain(SEIKYU);
+    expect(clicked).not.toContain(CONFIRM);
+    expect(clicked).not.toContain(DIALOG_OK);
+    expect(chargedNow()).toBe(false);
+    // 使ったのは表示・保存だけ。
+    expect(clicked).toContain(DOWNLOAD);
+  });
+
+  it("SV2: ⚠まだ買っていない(未請求)行しか無ければ取り込まない=課金もしない", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [boughtRow({ status: "未請求", expiry: "" })],
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation(RECOVER_INPUT),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(clicked).not.toContain(SEIKYU);
+    expect(clicked).not.toContain(DOWNLOAD);
+  });
+
+  it("SV3: ⚠期限切れ(取得期限が空)の行は取り込まない", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [boughtRow({ expiry: "" })],
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation(RECOVER_INPUT),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(clicked).not.toContain(DOWNLOAD);
+  });
+
+  it("SV4: ⚠地番が違う行は取り込まない(別の筆のPDFを物件に貼らない)", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [boughtRow({ shozai: `${INPUT.address}１－１０` })],
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation(RECOVER_INPUT),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(clicked).not.toContain(DOWNLOAD);
+  });
+
+  it("SV5: ⚠所在(町)が違う行は取り込まない", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [boughtRow({ shozai: "東京都別市別町二丁目１－１" })],
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation(RECOVER_INPUT),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(clicked).not.toContain(DOWNLOAD);
+  });
+
+  it("SV6: ⚠土地を探しているのに建物の行しか無ければ取り込まない(種別の取り違え)", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [boughtRow({ shozai: `建物・${INPUT.address}１－１` })],
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation(RECOVER_INPUT),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(clicked).not.toContain(DOWNLOAD);
+  });
+
+  it("SV7: 対象が2ページ目にあってもページを送って取り込む", async () => {
+    const f = makeFakeChromium();
+    const seen: string[] = [];
+    wireStage2(f, {
+      rowsPerPage: 1,
+      mypageBaselineRows: [
+        boughtRow({
+          receiptNo: "2026081900000001",
+          shozai: `${INPUT.address}９９－９`,
+        }),
+        boughtRow(),
+      ],
+      onMypageSelect: (r) => seen.push(r),
+    });
+    const page = await makeRecoverPage(f);
+    const buf = await page.recoverRegistryPdfByLocation(RECOVER_INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    // 掴んだのは対象の受付番号(位置ではなく中身で選んでいる)。
+    expect(seen).toEqual(["2026081900727233"]);
+  });
+
+  it("SV8: ⚠選ぶ直前に表が1ページ目へ戻ったら、別の行をDLせず中止する", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      rowsPerPage: 1,
+      resetPageBeforeSelect: true,
+      mypageBaselineRows: [
+        boughtRow({
+          receiptNo: "2026081900000001",
+          shozai: `${INPUT.address}９９－９`,
+        }),
+        boughtRow(),
+      ],
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation(RECOVER_INPUT),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(clicked).not.toContain(DOWNLOAD);
+  });
+
+  it("SV10: ⚠物件の所在が地番まで入っていても取り込める(本番データの実形)", async () => {
+    // 実データ実測(2026-08-19): properties.address =「神奈川県横浜市南区井土ケ谷中町69-2」
+    // のように**末尾に地番が入っている**。所在をそのまま照合キーにすると、
+    // マイページの所在「土地・…中町６９－２」から前半を除いた残りが空になり、
+    // 正しい行まで弾かれる=回収したいそのものが取り込めない。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [boughtRow()],
+    });
+    const page = await makeRecoverPage(f);
+    const buf = await page.recoverRegistryPdfByLocation({
+      ...RECOVER_INPUT,
+      // 所在の末尾に地番(全角)まで入っている状態。
+      address: `${INPUT.address}１－１`,
+    });
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(clicked).toContain(DOWNLOAD);
+  });
+
+  it("SV11: ⚠末尾が対象の地番でなければ所在は削らない(別の町を通さない)", async () => {
+    // 「…中町東」のように町名が延びた別区域は、地番を外す処理があっても
+    // 通ってはいけない(区域の取り違え=別人の筆)。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [boughtRow({ shozai: `${INPUT.address}東１－１` })],
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation({
+        ...RECOVER_INPUT,
+        address: `${INPUT.address}１－１`,
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(clicked).not.toContain(DOWNLOAD);
+  });
+
+  it("SV12: ⚠所在の末尾が数字続きのときは取り込まない(169-2 を 69-2 として掴まない)", async () => {
+    // 物件の所在が「…一丁目169-2」で対象地番が「69-2」という食い違いがあると、
+    // 数字の途中で切る実装は区域を「…一丁目1」にしてしまい、マイページの
+    // 「…一丁目１６９－２」の行に一致する=**別の筆のPDFを貼る**。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      mypageBaselineRows: [boughtRow({ shozai: `${INPUT.address}１６９－２` })],
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation({
+        ...RECOVER_INPUT,
+        address: `${INPUT.address}169-2`,
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(clicked).not.toContain(DOWNLOAD);
+  });
+
+  it("SV9: 買う対象(地番/家屋番号)が空なら何もしない(ページに触れない)", async () => {
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, { mypageBaselineRows: [boughtRow()] });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation({ ...RECOVER_INPUT, lotNumber: "  " }),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    expect(clicked).toHaveLength(0);
   });
 });
 

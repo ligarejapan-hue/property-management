@@ -12,6 +12,7 @@ import { MapPinned, Loader2 } from "lucide-react";
 import {
   searchRegistryCandidates,
   obtainRegistryByCandidate,
+  recoverRegistryByCandidate,
   apiErrorCode,
   type RegistrySearchCandidate,
 } from "@/lib/api-client";
@@ -53,6 +54,8 @@ type State =
   | "results"
   | "confirmObtain"
   | "obtaining"
+  // 【回収】購入済みの書類を取り込んでいる最中(課金なし)。
+  | "recovering"
   | "done"
   // 利用者が自分で中止した (@codex #357 P2)。失敗ではないので "error" と分ける。
   | "cancelled"
@@ -83,6 +86,8 @@ export default function RegistryLocationSearchButton({
   // 請求種別（所有者事項=既定・安い方 / 全部事項=高い方）。取得の確認画面で選ぶ。
   const [certificateType, setCertificateType] = useState<"owner" | "all">("owner");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // 完了表示の文言を分けるため、直前に実行したのが取得(有料)か回収(課金なし)かを覚える。
+  const [lastAction, setLastAction] = useState<"obtain" | "recover">("obtain");
   // 実況パネル用の参照 (client 発行・非PII)。検索のたびに発行し直す。
   // HTTP 本番でも動く safeRandomId を使う (crypto.randomUUID 禁止)。
   const [liveRef, setLiveRef] = useState<string | null>(null);
@@ -175,6 +180,10 @@ export default function RegistryLocationSearchButton({
   // 二重課金台帳→直列化→請求→PDF→物件添付まで行う。confirmed:true は api-client が付ける。
   const runObtain = async () => {
     if (!selected) return;
+    // ボタンの disabled だけに頼らない(迂回への二重防御)。
+    // 回収(runRecover)にはこのガードを入れない=課金しないのでスイッチと無関係。
+    if (!purchaseEnabled) return;
+    setLastAction("obtain");
     setState("obtaining");
     setErrorMsg(null);
     // 実況(2026-08-15)。取得のたびに新しい参照を発行し、検索と同じパネルで
@@ -200,6 +209,36 @@ export default function RegistryLocationSearchButton({
       propertyRefreshPendingRef.current = true;
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "謄本の取得に失敗しました");
+      setState("error");
+    }
+  };
+
+  // 【回収】既に購入済みの謄本を、再課金なしで取り込む(2026-08-19)。
+  // 背景: 請求は成立したのにPDFの取り込みに失敗すると、二重課金ガードが効いて
+  // 取り直せない=**払ったのに手元に残らない**。期限内なら課金せず回収できる。
+  // ⚠この経路は有料取得のスイッチが入っていなくても使える(課金操作をしないため)。
+  const runRecover = async () => {
+    if (!selected) return;
+    setLastAction("recover");
+    setState("recovering");
+    setErrorMsg(null);
+    const recoverLiveRef = safeRandomId();
+    setLiveRef(recoverLiveRef);
+    try {
+      await recoverRegistryByCandidate(
+        propertyId,
+        selected.candidateRef,
+        certificateType,
+        recoverLiveRef,
+      );
+      setState("done");
+      propertyRefreshPendingRef.current = true;
+    } catch (e) {
+      setErrorMsg(
+        e instanceof Error
+          ? e.message
+          : "取得済みの謄本を取り込めませんでした（課金は発生していません）",
+      );
       setState("error");
     }
   };
@@ -242,7 +281,9 @@ export default function RegistryLocationSearchButton({
       {state === "done" && (
         <div className="flex flex-wrap items-center gap-2 text-[11px]">
           <p className="text-green-600 dark:text-green-400" role="status">
-            謄本を取得しました。下の実況で仕上がりを確認できます。
+            {lastAction === "recover"
+              ? "取得済みの謄本を取り込みました（今回の料金は発生していません）。"
+              : "謄本を取得しました。下の実況で仕上がりを確認できます。"}
           </p>
           {/* ⚠閉じたときに初めて物件を取り直す(@codex #380 R3 P2)。その場で取り直すと
               詳細ページが読み込み中の画面に差し替わり、実況の見返しが即座に消える。 */}
@@ -328,10 +369,14 @@ export default function RegistryLocationSearchButton({
         </div>
       )}
 
-      {(state === "searching" || state === "obtaining") && (
+      {(state === "searching" || state === "obtaining" || state === "recovering") && (
         <span className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
           <Loader2 className="h-3 w-3 animate-spin" />
-          {state === "searching" ? "検索中..." : "取得中..."}
+          {state === "searching"
+            ? "検索中..."
+            : state === "recovering"
+              ? "取り込み中...（課金はしません）"
+              : "取得中..."}
         </span>
       )}
 
@@ -347,6 +392,8 @@ export default function RegistryLocationSearchButton({
           // 失敗時に「どの画面のどの段で止まったか」を本人が見返せることが
           // この実況の主目的(実課金テスト2回が手がかり1行で終わった反省)。
           state === "obtaining" ||
+          // 回収(課金なし)の間も同じパネルで進行を見せる。
+          state === "recovering" ||
           state === "done" ||
           // 中止のときも残す (@codex #357 P2)。どこまで進んで止まったかを
           // 本人が確かめられないと「本当に止まったのか」が分からない。
@@ -360,7 +407,11 @@ export default function RegistryLocationSearchButton({
             key={liveRef}
             propertyId={propertyId}
             liveRef={liveRef}
-            searchSettled={state !== "searching" && state !== "obtaining"}
+            searchSettled={
+              state !== "searching" &&
+              state !== "obtaining" &&
+              state !== "recovering"
+            }
             // ⚠「中止」は無料の検索中だけ。有料取得(obtaining)で出すと、課金中に
             //   「課金は発生しません」という嘘の説明つきボタンが出る(server は
             //   受け付けないが表示が矛盾する)。
@@ -402,24 +453,18 @@ export default function RegistryLocationSearchButton({
                           .join(" / ") || "（地番・家屋番号なし）"}
                       </span>
                     </span>
+                    {/* ⚠有料スイッチが入っていなくても押せる。次の画面で
+                        「取得(有料)」と「取得済みを取り込む(課金なし)」を選ぶため。
+                        取得の方は次の画面で押せなくなる(準備中)。 */}
                     <button
                       type="button"
-                      disabled={!purchaseEnabled}
-                      title={
-                        purchaseEnabled ? undefined : "有料取得は準備中です"
-                      }
                       onClick={() => {
-                        if (!purchaseEnabled) return;
                         setSelected(c);
                         setState("confirmObtain");
                       }}
-                      className={
-                        purchaseEnabled
-                          ? "shrink-0 rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700"
-                          : "shrink-0 rounded bg-gray-300 dark:bg-gray-700 px-2 py-1 font-medium text-gray-500 dark:text-gray-400 cursor-not-allowed"
-                      }
+                      className="shrink-0 rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700"
                     >
-                      取得
+                      選ぶ
                     </button>
                   </li>
                 ))}
@@ -434,7 +479,7 @@ export default function RegistryLocationSearchButton({
 
       {state === "confirmObtain" && selected && (
         <div className="flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 p-2 text-xs">
-          <p className="font-medium text-indigo-800 dark:text-indigo-300">この候補で謄本を取得しますか？</p>
+          <p className="font-medium text-indigo-800 dark:text-indigo-300">この候補で何をしますか？</p>
           <RegistryPreflightWarningLines state={preflight} propertyId={propertyId} />
           <p className="truncate text-indigo-700 dark:text-indigo-300">{selected.address ?? "（所在不明）"}</p>
           <p className="truncate text-indigo-700 dark:text-indigo-300">
@@ -476,15 +521,36 @@ export default function RegistryLocationSearchButton({
               </span>
             )}
           </p>
-          <div className="mt-1 flex gap-1">
+          <div className="mt-1 flex flex-wrap gap-1">
             <button
               type="button"
               onClick={runObtain}
-              disabled={preflight.pending || preflight.targetsUnavailable}
-              title={preflight.pending ? "事前確認中です" : undefined}
+              disabled={
+                !purchaseEnabled ||
+                preflight.pending ||
+                preflight.targetsUnavailable
+              }
+              title={
+                !purchaseEnabled
+                  ? "有料取得は準備中です"
+                  : preflight.pending
+                    ? "事前確認中です"
+                    : undefined
+              }
               className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {preflight.pending ? "確認中..." : "取得する"}
+              {preflight.pending ? "確認中..." : "取得する（有料）"}
+            </button>
+            {/* 【回収】既に買った書類の取り込み。⚠有料スイッチと無関係に使える
+                (課金操作をしないため)。押しても新たな料金は発生しない。 */}
+            <button
+              type="button"
+              onClick={runRecover}
+              disabled={preflight.pending || preflight.targetsUnavailable}
+              title={preflight.pending ? "事前確認中です" : undefined}
+              className="rounded border border-indigo-300 dark:border-indigo-500/40 bg-white dark:bg-gray-900 px-2 py-1 font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              取得済みを取り込む（課金なし）
             </button>
             <button
               type="button"
@@ -497,6 +563,11 @@ export default function RegistryLocationSearchButton({
               戻る
             </button>
           </div>
+          <p className="mt-0.5 text-[11px] text-gray-600 dark:text-gray-400">
+            ※「取得済みを取り込む」は、以前この地番で購入した謄本が登記情報提供サービスに
+            残っている場合だけ使えます（購入から一定期間内）。新たな料金はかかりません。
+            見つからないときは何も起きません。
+          </p>
         </div>
       )}
     </div>

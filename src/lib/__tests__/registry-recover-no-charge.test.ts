@@ -1,0 +1,156 @@
+/**
+ * 【回収】既に課金済みのPDFを取り込む経路が、**絶対に課金しない**ことの走査ガード。
+ *
+ * 背景: 2026-08-19 第8回テストで請求は成立(140円)したが、行の同定に失敗して
+ * PDFを取り逃した。期限(PDF取得期限)内なら再課金なしで取り込めるため、回収の
+ * 導線を用意した。⚠この経路に課金操作が1つでも混ざると、**同じ書類を二度買う**。
+ *
+ * ⚠走査型にする理由: 課金ボタンを押さないことは「実行して確かめる」より
+ * 「コードに書かれていないこと」で担保するほうが確実(fake が押下を見逃す余地を
+ * 残さない)。挙動テストは playwright-adapter 側にある。
+ */
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+/** 手元(CRLF)とCIで走査結果が変わらないよう改行を揃える。 */
+const CR = String.fromCharCode(13);
+
+const AUTO_FETCH = readFileSync(
+  join(process.cwd(), "src/lib/registry-fetch/auto-fetch.ts"),
+  "utf8",
+).split(CR).join("");
+
+/** 回収メソッドの本体だけを切り出す(前後の課金フローを巻き込まないため)。 */
+function recoverBody(): string {
+  const start = AUTO_FETCH.indexOf("async recoverRegistryPdfByLocation(input: {");
+  expect(start).toBeGreaterThan(-1);
+  const end = AUTO_FETCH.indexOf("\n    async downloadRegistryPdf() {", start);
+  expect(end).toBeGreaterThan(start);
+  return AUTO_FETCH.slice(start, end);
+}
+
+describe("回収経路は課金操作を一切含まない", () => {
+  const body = recoverBody();
+
+  it("⚠請求ボタン(#btn_seikyu)に触れない", () => {
+    expect(body).not.toContain("fudosanListSeikyuButton");
+    expect(body).not.toContain("btn_seikyu");
+  });
+
+  it("⚠確定(fuBtnForward)・請求リストの操作を含まない", () => {
+    expect(body).not.toContain("requestConfirmButton");
+    expect(body).not.toContain("fuBtnForward");
+    expect(body).not.toContain("fudosanListRowCheckbox");
+  });
+
+  it("⚠確認ダイアログのＯＫを押す仕掛けを含まない", () => {
+    expect(body).not.toContain("seikyu-confirm-ok");
+    expect(body).not.toContain("pickConfirmButtonIndex");
+    expect(body).not.toContain("ui-dialog-buttonpane");
+  });
+
+  it("⚠課金境界フラグ(chargeState.charged)を立てない", () => {
+    expect(body).not.toContain("chargeState");
+    expect(body).not.toContain("charged = true");
+  });
+
+  it("旧マイページ課金ボタン(myPageSeikyu)も含まない", () => {
+    expect(body).not.toContain("myPageSeikyu");
+  });
+
+  it("使うのは表示・保存(downloadButton)だけ=無料の操作", () => {
+    expect(body).toContain("REGISTRY_SELECTORS.downloadButton");
+  });
+});
+
+describe("回収経路の同定は取得と同じ規則を使う(緩めない)", () => {
+  const body = recoverBody();
+
+  it("純関数(parseMyPageRowCells / pickChargedMyPageRow)で同定する", () => {
+    expect(body).toContain("parseMyPageRowCells(");
+    expect(body).toContain("pickChargedMyPageRow(");
+  });
+
+  it("⚠請求済かつ期限内(readyNow)でなければ取り込まない=未請求の行を掴まない", () => {
+    expect(body).toContain("!picked || !picked.readyNow");
+    expect(body).toContain('"not_found"');
+  });
+
+  it("⚠基準は空で呼ぶ(回収は課金前の基準を持たない)+種別も一致させる", () => {
+    expect(body).toContain("baselineReceiptNos: new Set<string>()");
+    expect(body).toContain("kindLabel:");
+  });
+
+  it("⚠選んだ行の受付番号を読み戻して一致を実測してからDLする", () => {
+    const selectAt = body.indexOf('probe: "mypage-select"');
+    const verifyAt = body.indexOf("selected.receiptNo !== picked.receiptNo");
+    const downloadAt = body.indexOf("REGISTRY_SELECTORS.downloadButton");
+    expect(selectAt).toBeGreaterThan(-1);
+    expect(verifyAt).toBeGreaterThan(selectAt);
+    expect(downloadAt).toBeGreaterThan(verifyAt);
+  });
+
+  it("⚠目的ページに届かなければ取り込まない(位置ズレで別の筆を掴まない)", () => {
+    expect(body).toContain("hopped !== target.pageNo");
+  });
+});
+
+/**
+ * 画面側の入口。⚠**有料取得のスイッチが切れている本番でも押せる**ことが要件。
+ * (回収は課金しないので、課金スイッチに巻き込まれてはいけない。)
+ */
+const SEARCH_BUTTON_UI = readFileSync(
+  join(
+    process.cwd(),
+    "src/components/properties/registry-location-search-button.tsx",
+  ),
+  "utf8",
+).split(CR).join("");
+
+const API_CLIENT = readFileSync(
+  join(process.cwd(), "src/lib/api-client.ts"),
+  "utf8",
+).split(CR).join("");
+
+describe("回収の入口(画面)", () => {
+  /** 指定の onClick を持つ <button> の開始タグを切り出す。 */
+  function buttonTag(onClick: string): string {
+    const at = SEARCH_BUTTON_UI.indexOf(`onClick={${onClick}}`);
+    expect(at).toBeGreaterThan(-1);
+    const start = SEARCH_BUTTON_UI.lastIndexOf("<button", at);
+    const end = SEARCH_BUTTON_UI.indexOf(">", SEARCH_BUTTON_UI.indexOf("</button>", at) - 200);
+    expect(start).toBeGreaterThan(-1);
+    return SEARCH_BUTTON_UI.slice(start, Math.max(end, at));
+  }
+
+  it("課金なしで取り込むボタンがある(文言に『課金なし』を明記)", () => {
+    expect(SEARCH_BUTTON_UI).toContain("取得済みを取り込む（課金なし）");
+    expect(SEARCH_BUTTON_UI).toContain("onClick={runRecover}");
+  });
+
+  it("⚠回収ボタンは有料スイッチ(purchaseEnabled)で塞がない=切れている本番でも使える", () => {
+    expect(buttonTag("runRecover")).not.toContain("purchaseEnabled");
+  });
+
+  it("⚠有料取得ボタンの方は今までどおりスイッチで塞ぐ(準備中に課金させない)", () => {
+    expect(buttonTag("runObtain")).toContain("purchaseEnabled");
+  });
+
+  it("回収は専用の通信関数を使い、mode:recover を必ず送る", () => {
+    expect(SEARCH_BUTTON_UI).toContain("recoverRegistryByCandidate(");
+    const fn = API_CLIENT.slice(
+      API_CLIENT.indexOf("export async function recoverRegistryByCandidate"),
+      API_CLIENT.indexOf("// ---- 謄本 一括取得"),
+    );
+    expect(fn).toContain('mode: "recover"');
+  });
+
+  it("⚠有料取得の通信関数には mode を混ぜない(取り違えで課金経路が回収に化けない)", () => {
+    const fn = API_CLIENT.slice(
+      API_CLIENT.indexOf("export async function obtainRegistryByCandidate"),
+      API_CLIENT.indexOf("export async function recoverRegistryByCandidate"),
+    );
+    expect(fn).not.toContain("mode");
+  });
+});

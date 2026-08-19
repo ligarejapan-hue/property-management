@@ -83,6 +83,20 @@ export interface RegistryBrowserPage {
    * ⚠課金を伴う。**請求ボタンを押した後**の失敗は RegistryFetchError("charged_but_failed")
    * で返すこと（呼び出し側が再試行禁止・台帳記録に使う）。
    */
+  /**
+   * 【回収】既に**課金済み**の謄本PDFを、再課金なしで取り込む(2026-08-19・任意実装)。
+   * ⚠**課金しない**: 請求・確定・確認ダイアログのＯＫには一切触れない実装であること。
+   * マイページの「請求済 × 対象の所在/地番 × 期限内」の行を受付番号で選び、
+   * 表示・保存(無料)で PDF を得る。見つからなければ RegistryFetchError("not_found")。
+   */
+  recoverRegistryPdfByLocation?(input: {
+    address: string;
+    lotNumber?: string | null;
+    buildingNumber?: string | null;
+    certificateType: RegistryCertificateType;
+    baseUrl?: string;
+    live?: RegistryLiveReporter;
+  }): Promise<Buffer>;
   fetchByLocationCandidate?(input: {
     address: string;
     lotNumber?: string | null;
@@ -308,6 +322,136 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
           // close 失敗は握りつぶす（元のエラー / 成功結果を優先）。
         }
       }
+    });
+  }
+
+  /**
+   * 【回収】既に購入済みの謄本PDFを、**再課金なしで**取り込む(2026-08-19)。
+   *
+   * 背景: 請求(課金)は成立したのに行の同定に失敗してPDFを取り逃すと、二重課金
+   * ガードが働いて取り直せない=**払ったのに手元に残らない**。期限内ならサイトに
+   * 残っているので、マイページから**表示・保存だけ**して回収する。
+   *
+   * ⚠構造は fetchByLocation と同じ(throttle → 直列化 → 起動timeout → login →
+   * 実行 → 必ず close)。**直列化(runExclusivePurchase)は省略できない**: 登記
+   * サービスは1IDにつき同時1セッションで、回収のログインが進行中の購入を強制
+   * ログアウトさせると、**まさにこの機能が直そうとしている事故**(課金だけ済んで
+   * PDFを取り逃す)を自分で起こす。
+   *
+   * ⚠課金しないので chargeState は持たず、charged_but_failed へも**倒さない**
+   * (お金が動いていないのに『動いたかも』と伝える方が有害)。
+   */
+  async recoverRegistryPdf(
+    request: RegistryFetchRequest,
+  ): Promise<RegistryFetchResult> {
+    // 回収は所在(地番/家屋番号)でしか引けない。番号経路(=課金フロー)は使わない。
+    const location = request.location ?? null;
+    if (!location) {
+      throw new RegistryFetchError("provider_error");
+    }
+    if (
+      this.throttle &&
+      !this.throttle.tryAcquire(`${this.name}:fetch`, this.now().getTime())
+    ) {
+      throw new RegistryFetchError("rate_limited");
+    }
+    if (!this.browserFactory) {
+      throw new RegistryFetchError("provider_error");
+    }
+    const requestId = this.requestIdFactory();
+    const live = request.live;
+    // 順番待ちの実況(有料取得と同じ理由: 3分の保管期限で診断が消えないように)。
+    const queueHeartbeat = live
+      ? setInterval(() => {
+          try {
+            live.step("他の取得の完了を待っています(課金はしません)");
+          } catch {
+            /* 実況の失敗で待ちを壊さない */
+          }
+        }, 60_000)
+      : null;
+    let acquired = false;
+    let gaveUp = false;
+
+    const run = runExclusivePurchase(async () => {
+      if (gaveUp) {
+        // 呼び出し元は rate_limited で決着済み。外部に触れずに終わる。
+        throw new RegistryFetchError("rate_limited");
+      }
+      acquired = true;
+      if (queueHeartbeat) clearInterval(queueHeartbeat);
+      let page: RegistryBrowserPage;
+      try {
+        page = await this.withStartupTimeout(() => this.browserFactory!());
+      } catch (err) {
+        throw classifyRegistryFetchError(err);
+      }
+      try {
+        // adapter 未対応(fake page 等)は login(実外部接続)の**前に** fail-fast。
+        const recover = page.recoverRegistryPdfByLocation;
+        if (!recover) {
+          throw new RegistryFetchError("provider_error");
+        }
+        const pdfBuffer = await this.withRecoverTimeout(async () => {
+          await page.login({
+            loginId: this.loginId,
+            password: this.password,
+            baseUrl: this.baseUrl,
+          });
+          return recover.call(page, {
+            ...location,
+            certificateType: location.certificateType,
+            baseUrl: this.baseUrl,
+            live,
+          });
+        });
+        return {
+          pdfBuffer,
+          // 非PII の generic filename(地番・所有者名を埋め込まない)。
+          fileName: `registry-recovered-${requestId}.pdf`,
+          source: this.name,
+          fetchedAt: this.now(),
+          providerRequestId: requestId,
+        };
+      } catch (err) {
+        // ⚠課金していないので charged_but_failed には**倒さない**(分類を汚さない)。
+        throw classifyRegistryFetchError(err);
+      } finally {
+        try {
+          await page.close();
+        } catch {
+          // close 失敗は握りつぶす。
+        }
+      }
+    });
+
+    const guarded = new Promise<RegistryFetchResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (!acquired) {
+          gaveUp = true;
+          try {
+            live?.step(
+              "⚠混み合っているため取り込みを開始できませんでした(課金はしていません)。時間をおいて再実行してください",
+            );
+          } catch {
+            /* 実況は best-effort */
+          }
+          reject(new RegistryFetchError("rate_limited"));
+        }
+      }, QUEUE_WAIT_TIMEOUT_MS);
+      run.then(
+        (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      );
+    });
+    return guarded.finally(() => {
+      if (queueHeartbeat) clearInterval(queueHeartbeat);
     });
   }
 
@@ -666,6 +810,32 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
    *    延長は暴走ではなく「支払済みPDFを取り切るための予算」。それでも尽きたら
    *    charged_but_failed(台帳記録は呼び出し側で行われる)。
    */
+  /**
+   * 回収(課金なし)の予算。ログイン〜マイページ走査〜PDF保存まで通すため、
+   * 課金後と同じ延長予算を使う(短い通常予算だとPDF保存の途中で切れる)。
+   */
+  private async withRecoverTimeout<T>(op: () => Promise<T>): Promise<T> {
+    const timeoutMs = this.timeoutMs;
+    if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      return op();
+    }
+    const budget = timeoutMs + (this.paidFlowExtraTimeoutMs ?? 0);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race([
+        op(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new RegistryFetchError("timeout"));
+          }, budget);
+          timer.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   private withPaidTimeout<T>(
     op: () => Promise<T>,
     chargeState: { charged: boolean; aborted?: boolean },

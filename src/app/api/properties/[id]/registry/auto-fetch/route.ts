@@ -87,6 +87,13 @@ export async function POST(
     const certRaw = (body as { certificateType?: unknown } | null)?.certificateType;
     const certificateType: "owner" | "all" = certRaw === "all" ? "all" : "owner";
 
+    // 【回収】既に購入済みの謄本を、再課金なしで取り込むモード(2026-08-19)。
+    // ⚠"recover" 以外の値は既定(有料取得)に倒さず**そのまま既定**=購入扱いにする
+    //   のではなく、明示的に "recover" のときだけ回収にする(fail-safe: 不明値で
+    //   勝手に課金経路へ落ちるのは避けたいが、既定は従来どおりの有料取得)。
+    const modeRaw = (body as { mode?: unknown } | null)?.mode;
+    const isRecover = modeRaw === "recover";
+
     // 所在検索の候補を選んで取得する場合（candidateRef 指定）。cond③: client の候補参照は信頼せず、
     // server 側で当該物件向けに再検索して不動産番号を解決してから取得する。
     const candidateRefRaw = (body as { candidateRef?: unknown } | null)?.candidateRef;
@@ -116,7 +123,9 @@ export async function POST(
           session.id,
           id,
           liveRef,
-          "自動取得を受け付けました(この処理は中止できません)",
+          isRecover
+            ? "取得済みの書類の取り込みを受け付けました(課金はしません)"
+            : "自動取得を受け付けました(この処理は中止できません)",
           null,
         );
       }
@@ -150,6 +159,9 @@ export async function POST(
                 }),
             // @codex P2: lock する行の指紋が resolve 時と一致する時だけ override を使う。
             expectedFingerprint: fingerprint,
+            // 回収は課金しない経路(スイッチ・二重課金ガードを通らない代わりに、
+            // 請求済み・期限内の行しか取り込まない)。
+            ...(isRecover ? ({ mode: "recover" } as const) : {}),
             live,
           },
           provider,

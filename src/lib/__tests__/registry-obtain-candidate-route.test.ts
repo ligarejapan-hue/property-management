@@ -143,3 +143,46 @@ describe("auto-fetch route: candidateRef 分岐（cond③ 再解決の配線）"
     expect(runRegistryAutoFetch).not.toHaveBeenCalled();
   });
 });
+
+describe("【回収】mode:recover の受け渡し(課金経路と取り違えない)", () => {
+  const LOCATION_CANDIDATE = {
+    candidate: { kind: "location", lotNumber: "1-1", buildingNumber: null },
+    fingerprint: "FP-RESOLVE",
+  };
+
+  it("mode:recover は lib へそのまま渡る(回収として実行される)", async () => {
+    (resolveRegistryCandidate as Mock).mockResolvedValue(LOCATION_CANDIDATE);
+    const res = await callRoute({
+      confirmed: true,
+      candidateRef: "cand-1",
+      mode: "recover",
+    });
+    expect(res.status).toBe(200);
+    const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
+    expect(arg.mode).toBe("recover");
+    expect(arg.locationCandidate).toEqual({ lotNumber: "1-1", buildingNumber: null });
+  });
+
+  it("⚠mode 未指定は従来どおりの有料取得(回収に化けない)", async () => {
+    (resolveRegistryCandidate as Mock).mockResolvedValue(LOCATION_CANDIDATE);
+    await callRoute({ confirmed: true, candidateRef: "cand-1" });
+    const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
+    expect(arg.mode).toBeUndefined();
+  });
+
+  it.each(["purchase", "RECOVER", "recover ", "", null, 1, true])(
+    "⚠%s は回収にしない(既定=有料取得のまま・厳密一致だけ受ける)",
+    async (mode) => {
+      (resolveRegistryCandidate as Mock).mockResolvedValue(LOCATION_CANDIDATE);
+      await callRoute({ confirmed: true, candidateRef: "cand-1", mode });
+      const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
+      expect(arg.mode).toBeUndefined();
+    },
+  );
+
+  it("⚠回収でも確認(confirmed)は要る(誤操作で走らせない)", async () => {
+    const res = await callRoute({ candidateRef: "cand-1", mode: "recover" });
+    expect(res.status).toBe(400);
+    expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+  });
+});

@@ -55,12 +55,17 @@ describe("registry-location-search-button.tsx: 配線（所在検索→候補→
     // capabilities.registryPurchase(=REGISTRY_FETCH_PURCHASE_ENABLED)が false のとき
     // 取得ボタンは disabled + 準備中表示(server 側も 501 で enforce)。
     expect(src).toContain("purchaseEnabled: boolean");
-    expect(src).toContain("disabled={!purchaseEnabled}");
+    // 2026-08-19: ゲートは**候補一覧の行**から**確認画面の「取得する（有料）」**へ移した
+    //   (同じ画面に課金しない「取り込む」を並べるため)。塞ぐ強さは変えない。
+    expect(src).toContain("取得する（有料）");
+    expect(src).toMatch(
+      /onClick=\{runObtain\}[\s\S]{0,200}?disabled=\{[\s\S]{0,80}?!purchaseEnabled/,
+    );
     expect(src).toContain("有料取得は準備中です");
-    // 有効時も**ワンクリック課金にはしない**: 「取得」→確認画面→「取得する」の2段。
+    // 有効時も**ワンクリック課金にはしない**: 「選ぶ」→確認画面→「取得する（有料）」の2段。
     expect(src).toContain('setState("confirmObtain")');
     expect(src).toContain("利用料が発生します");
-    expect(src).toContain("この候補で謄本を取得しますか？");
+    expect(src).toContain("この候補で何をしますか？");
     // 押下ハンドラも purchaseEnabled を再確認する(disabled 迂回への二重防御)。
     expect(src).toContain("if (!purchaseEnabled) return;");
   });

@@ -1932,6 +1932,30 @@ export async function obtainRegistryByCandidate(
   });
 }
 
+/**
+ * 【回収】既に購入済みの謄本を、再課金なしで取り込む(2026-08-19)。
+ * 課金経路(obtainRegistryByCandidate)とは server 側で別扱いになり、
+ * 有料取得のスイッチが入っていなくても使える(課金操作を一切しないため)。
+ */
+export async function recoverRegistryByCandidate(
+  propertyId: string,
+  candidateRef: string,
+  certificateType: "owner" | "all" = "owner",
+  liveRef?: string,
+): Promise<unknown> {
+  return apiFetch(`/api/properties/${propertyId}/registry/auto-fetch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      confirmed: true,
+      candidateRef,
+      certificateType,
+      mode: "recover",
+      ...(liveRef ? { liveRef } : {}),
+    }),
+  });
+}
+
 // ---- 謄本 一括取得(PR-B・薄い版) ----
 
 export interface RegistryFetchJobCreateResult {

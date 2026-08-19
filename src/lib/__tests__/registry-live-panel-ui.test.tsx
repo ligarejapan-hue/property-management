@@ -100,7 +100,9 @@ describe("RegistryLivePanel — ポーリング規約 (ソース静的検証)", 
     // 親は POST 決着を伝える。2026-08-15 から有料取得(obtaining)も実況するため、
     // 「決着」= searching でも obtaining でもない、に広がった。
     expect(BUTTON_SRC).toMatch(
-      /searchSettled=\{state !== "searching" && state !== "obtaining"\}/,
+      // ⚠回収(課金なし)も「まだ決着していない」側に入れる(2026-08-19)。
+      // ここから漏れると、取り込み中なのに最終1回で止まり進行が見えなくなる。
+      /searchSettled=\{[\s\S]*?state !== "searching" &&[\s\S]*?state !== "obtaining" &&[\s\S]*?state !== "recovering"[\s\S]*?\}/,
     );
   });
 
