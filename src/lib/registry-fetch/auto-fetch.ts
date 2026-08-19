@@ -2891,7 +2891,12 @@ function createPlaywrightRegistryPage(
           // 所在の前半(地番区域・都道府県込み)+末尾の地番(境界つき)+全ページ中の
           // 受付日時最新、を pickChargedMyPageRow(単体テスト済み)で行う。
           // ⚠所在セルの値は PII: Node のメモリ内でのみ扱い、ログ・実況に出さない。
-          const scannedRows: MyPageScanRow[] = [];
+          // ⚠行の位置は**ページ番号+そのページ内の位置**で持つ(@codex #393 R2 P1)。
+          // 全ページを平らに繋いだ通し番号をページ内の位置として渡すと、2ページ目
+          // 以降で必ず外し、課金済みなのにPDFを取り逃す。
+          const scannedRows: Array<
+            MyPageScanRow & { pageNo: number; indexInPage: number }
+          > = [];
           let scanLoading = false;
           for (let pageNo = 0; pageNo < 10; pageNo++) {
             const scanJson = (await page.evaluate(
@@ -2926,9 +2931,14 @@ function createPlaywrightRegistryPage(
               scanLoading = true;
               break; // 読み込み中はこの attempt を諦め、リロード後にやり直す
             }
+            let indexInPage = 0;
             for (const cells of scan.rows) {
               const parsed = parseMyPageRowCells(cells);
-              if (parsed) scannedRows.push(parsed);
+              // ⚠位置は**実データ行だけを数えた並び**(DOM側も同じ条件で絞る)。
+              if (parsed) {
+                scannedRows.push({ ...parsed, pageNo, indexInPage });
+                indexInPage += 1;
+              }
             }
             if (!(await myPageHasNext())) break;
             await page.click(REGISTRY_SELECTORS.myPageNextButton);
@@ -2945,12 +2955,18 @@ function createPlaywrightRegistryPage(
             // ---- 選択フェーズ: 同定した行を**受付番号**で選び直す。
             // 走査と選択を分けたぶん、選択は強いキーで行い取り違えを塞ぐ。
             await resetMyPageToFirst();
-            // 受付番号→**走査順での位置**へ変換(scannedRows は各ページの
-            // 実データ行を順に積んだもの=DOM の並びと一致)。
-            const pickedIndex = scannedRows.findIndex(
+            // 受付番号→**(ページ番号, ページ内位置)**へ変換(@codex #393 R2 P1)。
+            const target = scannedRows.find(
               (r) => r.receiptNo === picked.receiptNo,
             );
-            for (let pageNo = 0; pageNo < 10 && !ready && pickedIndex >= 0; pageNo++) {
+            // 対象ページまでページ送りしてから掴む(1ページ目に居るなら送らない)。
+            for (let hop = 0; target && hop < target.pageNo; hop++) {
+              if (!(await myPageHasNext())) break;
+              await page.click(REGISTRY_SELECTORS.myPageNextButton);
+              await sleep(1200);
+            }
+            // 位置が確定しているので選択は1回だけ試す(失敗したら走査からやり直す)。
+            for (let once = 0; once < 1 && !ready && target; once++) {
               const selJson = (await page.evaluate(
                 (json) => {
                   const { tableSel, rowIndex } = JSON.parse(json) as {
@@ -2993,7 +3009,7 @@ function createPlaywrightRegistryPage(
                 JSON.stringify({
                   probe: "mypage-select",
                   tableSel: REGISTRY_SELECTORS.myPageTable,
-                  rowIndex: pickedIndex,
+                  rowIndex: target.indexInPage,
                 }),
               )) as string;
               const sel = JSON.parse(selJson) as { result: string };
@@ -3001,10 +3017,10 @@ function createPlaywrightRegistryPage(
                 ready = true;
                 break;
               }
-              if (sel.result === "select-failed") break; // リロードして次の attempt
-              if (!(await myPageHasNext())) break;
-              await page.click(REGISTRY_SELECTORS.myPageNextButton);
-              await sleep(1200);
+              // not-found / select-failed: ページ送りで探し回らない(位置は走査で
+              // 確定済み。ずれていたら**表が動いた**ということなので、リロードして
+              // 走査からやり直す=次の attempt へ)。
+              break;
             }
           }
           // picked が null(まだ行が出ない)/準備前(readyNow=false)は次の attempt へ。
