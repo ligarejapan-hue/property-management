@@ -65,8 +65,11 @@ export interface FudosanListRow {
  * 実在の住所に `&#...;` は現れないので、比較前に解くのは安全。
  */
 export function decodeSiteNumericEntities(raw: string): string {
-  return raw.replace(/&#(x[0-9a-fA-F]+|[0-9]+);/g, (_m, code: string) => {
-    const n = code.startsWith("x") || code.startsWith("X")
+  // ⚠16進は `&#x…;` / `&#X…;` の両方が正しい形(@codex #391 R1: 大文字Xを
+  // 受けないと下の startsWith("X") 分岐が死に、解けないまま no-match になる)。
+  return raw.replace(/&#([xX][0-9a-fA-F]+|[0-9]+);/g, (_m, code: string) => {
+    const isHex = code[0] === "x" || code[0] === "X";
+    const n = isHex
       ? Number.parseInt(code.slice(1), 16)
       : Number.parseInt(code, 10);
     return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : _m;

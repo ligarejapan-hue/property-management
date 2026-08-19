@@ -107,6 +107,9 @@ describe("selectFudosanListRow", () => {
 
   it("16進の文字参照(&#x…;)も解ける・実在住所の文字列は変えない", () => {
     expect(decodeSiteNumericEntities("&#x795E;&#x5948;")).toBe("神奈");
+    // 大文字X形式も正しい書き方(@codex #391 R1)。混在も解ける。
+    expect(decodeSiteNumericEntities("&#X795E;&#X5948;")).toBe("神奈");
+    expect(decodeSiteNumericEntities("&#X795E;&#22856;&#x5DDD;")).toBe("神奈川");
     expect(decodeSiteNumericEntities("神奈川県横浜市南区")).toBe("神奈川県横浜市南区");
     // 参照の形をしていない & はそのまま(壊さない)。
     expect(decodeSiteNumericEntities("A&B&#;")).toBe("A&B&#;");
