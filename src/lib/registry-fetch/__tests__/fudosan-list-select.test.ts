@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  collectBaselineReceiptNos,
   decodeSiteNumericEntities,
   FUDOSAN_LIST_CHECKBOX_NAME,
   FUDOSAN_LIST_HIDDEN_PREFIX,
@@ -153,7 +154,7 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
   const KU = "神奈川県横浜市南区井土ケ谷中町";
   function mrow(over: Partial<MyPageScanRow>): MyPageScanRow {
     return {
-      trId: "R1",
+      receiptNo: "2026081900727233",
       shozai: `${KU}６９－２`,
       status: "請求済",
       when: "2026/08/18 12:00",
@@ -161,7 +162,7 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
       ...over,
     };
   }
-  const EXP = { targetKey: "69-2", kuiki: KU, baselineTrIds: new Set<string>() };
+  const EXP = { targetKey: "69-2", kuiki: KU, baselineReceiptNos: new Set<string>() };
 
   it("課金後の同定も文字参照を解いてから比べる(可視セルは素の日本語だが対で維持)", () => {
     const ENTITY_KU = "&#31070;&#22856;&#24029;&#30476;&#27178;&#27996;&#24066;&#21335;&#21306;&#20117;&#22303;&#12465;&#35895;&#20013;&#30010;";
@@ -169,13 +170,13 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
       [mrow({ shozai: `${ENTITY_KU}６９－２` })],
       EXP,
     );
-    expect(picked?.trId).toBe("R1");
+    expect(picked?.receiptNo).toBe("2026081900727233");
   });
 
   it("⚠別の町の同一地番は選ばない(地番末尾一致だけでは他人の筆を掴む)", () => {
     expect(
       pickChargedMyPageRow(
-        [mrow({ shozai: "東京都別の市別の町６９－２", trId: "OTHER" })],
+        [mrow({ shozai: "東京都別の市別の町６９－２", receiptNo: "2026081900000009" })],
         EXP,
       ),
     ).toBeNull();
@@ -200,8 +201,8 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
 
   it("同じ筆の別表記(69番地2)は同定できる(残りが説明可能+正規化一致)", () => {
     expect(
-      pickChargedMyPageRow([mrow({ shozai: `${KU}６９番地２` })], EXP)?.trId,
-    ).toBe("R1");
+      pickChargedMyPageRow([mrow({ shozai: `${KU}６９番地２` })], EXP)?.receiptNo,
+    ).toBe("2026081900727233");
   });
 
   it("所在だけで地番が無い行(残り空)は選ばない", () => {
@@ -211,24 +212,24 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
   it("同じ筆が複数(過去の購入履歴)なら**最新の行**=いま買った行を選ぶ", () => {
     const picked = pickChargedMyPageRow(
       [
-        mrow({ trId: "OLD", when: "2026/08/01 09:00" }),
-        mrow({ trId: "NEW", when: "2026/08/18 12:00" }),
+        mrow({ receiptNo: "2026080100000001", when: "2026/08/01 09:00" }),
+        mrow({ receiptNo: "2026081900727233", when: "2026/08/18 12:00" }),
       ],
       EXP,
     );
-    expect(picked?.trId).toBe("NEW");
+    expect(picked?.receiptNo).toBe("2026081900727233");
     expect(picked?.readyNow).toBe(true);
   });
 
   it("⚠最新行が準備前でも、古い ready 行へ乗り換えない(同一性が先・準備状態は後)", () => {
     const picked = pickChargedMyPageRow(
       [
-        mrow({ trId: "OLD", when: "2026/08/01 09:00" }), // ready な古い購入
-        mrow({ trId: "NEW", when: "2026/08/18 12:00", status: "請求中", expiry: "" }),
+        mrow({ receiptNo: "2026080100000001", when: "2026/08/01 09:00" }), // ready な古い購入
+        mrow({ receiptNo: "2026081900727233", when: "2026/08/18 12:00", status: "請求中", expiry: "" }),
       ],
       EXP,
     );
-    expect(picked?.trId).toBe("NEW");
+    expect(picked?.receiptNo).toBe("2026081900727233");
     expect(picked?.readyNow).toBe(false); // 呼び出し側は待つ(乗り換えない)
   });
 
@@ -242,21 +243,57 @@ describe("pickChargedMyPageRow(課金直後の行同定・提出前レビュー 
   it("⚠基準(課金前に控えた受付番号)に載っている行は選ばない(@codex #390 R2 P1)", () => {
     // 新行が非同期でまだ見えず、同じ筆の**古い**請求済行だけが見えている局面。
     // 基準が無いと「見えている最新」として古い行を掴み、古いPDFを添付する。
-    const old_ = mrow({ trId: "OLD", when: "2026/08/01 09:00" });
+    const old_ = mrow({ receiptNo: "2026080100000001", when: "2026/08/01 09:00" });
     expect(
-      pickChargedMyPageRow([old_], { ...EXP, baselineTrIds: new Set(["OLD"]) }),
+      pickChargedMyPageRow([old_], { ...EXP, baselineReceiptNos: new Set(["2026080100000001"]) }),
     ).toBeNull(); // 基準内しか見えない=まだ新行が出ていない→呼び出し側は待つ
     // 新行が現れたら、基準外のそれを選ぶ(古い方がreadyでも乗り換えない設計と両立)。
     const picked = pickChargedMyPageRow(
-      [old_, mrow({ trId: "NEW", when: "2026/08/18 12:00" })],
-      { ...EXP, baselineTrIds: new Set(["OLD"]) },
+      [old_, mrow({ receiptNo: "2026081900727233", when: "2026/08/18 12:00" })],
+      { ...EXP, baselineReceiptNos: new Set(["2026080100000001"]) },
     );
-    expect(picked?.trId).toBe("NEW");
+    expect(picked?.receiptNo).toBe("2026081900727233");
   });
 
   it("該当なし/受付番号なし/期待所在が空なら null(進めない=安全側)", () => {
     expect(pickChargedMyPageRow([], EXP)).toBeNull();
-    expect(pickChargedMyPageRow([mrow({ trId: " " })], EXP)).toBeNull();
+    expect(pickChargedMyPageRow([mrow({ receiptNo: " " })], EXP)).toBeNull();
     expect(pickChargedMyPageRow([mrow({})], { ...EXP, kuiki: " " })).toBeNull();
+  });
+});
+
+describe("collectBaselineReceiptNos(課金前の基準・2026-08-19 第8回の実測反映)", () => {
+  it("受付番号を持つ行だけを基準にする(未請求は持たないのが正常)", () => {
+    const r = collectBaselineReceiptNos([
+      { receiptNo: "2026080100000001", status: "請求済" },
+      { receiptNo: "", status: "未請求" },
+    ]);
+    expect(r.ok).toBe(true);
+    expect([...r.receiptNos]).toEqual(["2026080100000001"]);
+  });
+
+  it("⚠未請求だけの一覧でも基準は成立する(all-or-nothingの誤爆防止)", () => {
+    const r = collectBaselineReceiptNos([
+      { receiptNo: "", status: "未請求" },
+      { receiptNo: "", status: "未請求" },
+    ]);
+    expect(r.ok).toBe(true);
+    expect(r.receiptNos.size).toBe(0);
+  });
+
+  it("⚠未請求でないのに受付番号が空なら基準を無効にする(読み取り途中/構造想定違い)", () => {
+    expect(
+      collectBaselineReceiptNos([{ receiptNo: "", status: "請求済" }]).ok,
+    ).toBe(false);
+    expect(
+      collectBaselineReceiptNos([{ receiptNo: "", status: "取得中" }]).ok,
+    ).toBe(false);
+  });
+
+  it("空の一覧は基準ゼロで成立(初回購入の口座)", () => {
+    expect(collectBaselineReceiptNos([])).toEqual({
+      ok: true,
+      receiptNos: new Set<string>(),
+    });
   });
 });

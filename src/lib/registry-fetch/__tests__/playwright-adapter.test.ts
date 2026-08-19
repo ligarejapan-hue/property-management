@@ -1840,7 +1840,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
        * (実サイト同様)。別の町の行を混ぜる等で同定の誤りを炙り出す。
        */
       mypageRows?: Array<{
-        trId: string;
+        receiptNo: string;
         shozai: string;
         status: string;
         when: string;
@@ -1863,14 +1863,14 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       /** 基準の二重読みが毎回ずれる(再描画が落ち着かない)画面を模す(SM9)。 */
       baselineUnstable?: boolean;
       /** 選択フェーズで選ばれた受付番号の観測用フック(SM3)。 */
-      onMypageSelect?: (trId: string) => void;
+      onMypageSelect?: (receiptNo: string) => void;
       /**
        * **課金前**の走査(基準採取)が返す行。既定=空(初回購入の口座)。
        * 課金前から存在する行(過去の購入)を模すときに使う=その受付番号は
        * 基準に入り、課金後の同定から除外される(@codex #390 R2 P1)。
        */
       mypageBaselineRows?: Array<{
-        trId: string;
+        receiptNo: string;
         shozai: string;
         status: string;
         when: string;
@@ -1904,7 +1904,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       opts.mypageRows ??
       [
         {
-          trId: "ROW-9",
+          receiptNo: "2026081900727233",
           shozai: `${INPUT.address}１－１`, // 都道府県込み所在+全角地番(実サイト形)
           status: opts.mypagePendingForever ? "請求中" : "請求済",
           when: "2026/08/18 12:00",
@@ -2039,7 +2039,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
             loading: false,
             rows: [
               {
-                trId: `FLAKY-${scanCallCount}`,
+                receiptNo: `FLAKY-${scanCallCount}`,
                 shozai: `${INPUT.address}１－１`,
                 status: "請求済",
                 when: "2026/08/01 09:00",
@@ -2057,8 +2057,8 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       }
       // 課金後の選択フェーズ(受付番号で選ぶ)。対象が居れば ready。
       if (parsed.probe === "mypage-select") {
-        const hit = mypageRows.some((r) => r.trId === parsed.trId);
-        if (hit) opts.onMypageSelect?.(String(parsed.trId));
+        const hit = mypageRows.some((r) => r.receiptNo === parsed.receiptNo);
+        if (hit) opts.onMypageSelect?.(String(parsed.receiptNo));
         return JSON.stringify({ result: hit ? "ready" : "not-found" });
       }
       return undefined;
@@ -2235,7 +2235,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const { clicked } = wireStage2(f, {
       mypageRows: [
         {
-          trId: "ROW-OTHER",
+          receiptNo: "2026081900000009",
           shozai: "東京都別の市別の町１－１", // 地番は同じ・所在(町)が違う
           status: "請求済",
           when: "2026/08/18 23:59",
@@ -2259,7 +2259,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const { clicked } = wireStage2(f, {
       mypageBaselineRows: [
         {
-          trId: "ROW-OLD",
+          receiptNo: "2026080100000001",
           shozai: `${INPUT.address}１－１`,
           status: "請求済",
           when: "2026/08/01 09:00", // 古い(課金前から存在)
@@ -2268,7 +2268,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       ],
       mypageRows: [
         {
-          trId: "ROW-NEW",
+          receiptNo: "2026081900727233",
           shozai: `${INPUT.address}１－１`,
           status: "請求中", // いま買った行はまだ準備前のまま
           when: "2026/08/18 12:00",
@@ -2291,7 +2291,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const { clicked } = wireStage2(f, {
       mypageBaselineRows: [
         {
-          trId: "", // 一時的にIDが描画されていない行
+          receiptNo: "", // 一時的にIDが描画されていない行
           shozai: `${INPUT.address}１－１`,
           status: "請求済",
           when: "2026/08/01 09:00",
@@ -2313,7 +2313,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const { clicked } = wireStage2(f, {
       mypageBaselineRows: [
         {
-          trId: "ROW-OLD",
+          receiptNo: "2026080100000001",
           shozai: `${INPUT.address}１－１`,
           status: "請求済",
           when: "2026/08/01 09:00",
@@ -2336,7 +2336,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const { clicked } = wireStage2(f, {
       mypageBaselineRows: [
         {
-          trId: "ROW-OLD",
+          receiptNo: "2026080100000001",
           shozai: `${INPUT.address}１－１`,
           status: "請求済",
           when: "2026/08/30 09:00", // わざと日時は新行より新しくしておく
@@ -2345,7 +2345,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       ],
       mypageRows: [
         {
-          trId: "ROW-NEW",
+          receiptNo: "2026081900727233",
           shozai: `${INPUT.address}１－１`,
           status: "請求済",
           when: "2026/08/18 12:00",
@@ -2358,7 +2358,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const buf = await page.fetchByLocationCandidate(INPUT);
     expect(Buffer.isBuffer(buf)).toBe(true);
     // 基準除外により、日時の新旧に関わらず「基準に無い行」だけが同定対象。
-    expect(selects).toEqual(["ROW-NEW"]);
+    expect(selects).toEqual(["2026081900727233"]);
     expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
   });
 
@@ -2368,14 +2368,14 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const { clicked } = wireStage2(f, {
       mypageRows: [
         {
-          trId: "ROW-OLD",
+          receiptNo: "2026080100000001",
           shozai: `${INPUT.address}１－１`,
           status: "請求済",
           when: "2026/08/01 09:00",
           expiry: "2026/09/01",
         },
         {
-          trId: "ROW-NEW",
+          receiptNo: "2026081900727233",
           shozai: `${INPUT.address}１－１`,
           status: "請求済",
           when: "2026/08/18 12:00",
@@ -2388,7 +2388,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const buf = await page.fetchByLocationCandidate(INPUT);
     expect(Buffer.isBuffer(buf)).toBe(true);
     expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
-    expect(selects).toEqual(["ROW-NEW"]); // 最新=いま買った行だけを選ぶ
+    expect(selects).toEqual(["2026081900727233"]); // 最新=いま買った行だけを選ぶ
   });
 
   it("SM4: ⚠町名延長の別区域(…町東)の新しい行があっても、対象区域の行を受付番号で選ぶ(@codex #390 R1 P1)", async () => {
@@ -2397,14 +2397,14 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const { clicked } = wireStage2(f, {
       mypageRows: [
         {
-          trId: "ROW-EAST", // 別区域(テスト町一丁目東)・より新しい・ready
+          receiptNo: "2026081900000077", // 別区域(テスト町一丁目東)・より新しい・ready
           shozai: `${INPUT.address}東１－１`,
           status: "請求済",
           when: "2026/08/18 23:59",
           expiry: "2026/09/18",
         },
         {
-          trId: "ROW-TARGET",
+          receiptNo: "2026081900727233",
           shozai: `${INPUT.address}１－１`,
           status: "請求済",
           when: "2026/08/18 12:00",
@@ -2417,7 +2417,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const buf = await page.fetchByLocationCandidate(INPUT);
     expect(Buffer.isBuffer(buf)).toBe(true);
     expect(clicked.filter((s) => s === SEIKYU)).toHaveLength(1);
-    expect(selects).toEqual(["ROW-TARGET"]);
+    expect(selects).toEqual(["2026081900727233"]);
   });
 
   it("SM8: ⚠絞り込みを「すべて」へ切り替えられない間は基準を成立させない(@codex #390 R4 P1)", async () => {
@@ -2516,6 +2516,73 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(chargedNow()).toBe(true);
   });
 
+  it("SR1: ⚠受付番号で同定する(No.列は使わない)=第8回の「買った行を古い行と誤認」の再発防止", async () => {
+    // 実サイトの td[1] は画面上の連番(No.)で、請求直後は**新しい行が No=1** になる。
+    // 基準を No で作ると「いま買った行」が基準に含まれ、永久に見つからない(課金済み・
+    // PDF未取得で終わる)。受付番号(td[6]の2段目)は行に固有で並び順に影響されない。
+    const f = makeFakeChromium();
+    const selects: string[] = [];
+    const { chargedNow } = wireStage2(f, {
+      // 課金前から在る未請求行(受付番号なし=実サイトどおり)。
+      mypageBaselineRows: [
+        {
+          receiptNo: "",
+          shozai: `${INPUT.address}１－１`,
+          status: "未請求",
+          when: "",
+          expiry: "",
+        },
+      ],
+      // 課金で生まれた行(受付番号つき・請求済)。
+      mypageRows: [
+        {
+          receiptNo: "2026081900727233",
+          shozai: `${INPUT.address}１－１`,
+          status: "請求済",
+          when: "2026/08/19 15:20",
+          expiry: "2026/08/24",
+        },
+      ],
+      onMypageSelect: (receiptNo) => selects.push(receiptNo),
+    });
+    const page = await makeStage2Page(f);
+    const buf = await page.fetchByLocationCandidate(INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(chargedNow()).toBe(true);
+    expect(selects).toEqual(["2026081900727233"]);
+  });
+
+  it("SR2: ⚠未請求行(受付番号なし)が基準にあっても中止しない(all-or-nothingの誤爆防止)", async () => {
+    // 旧規則(空IDがあれば基準無効)を受付番号へ機械的に移すと、未請求行が1件あるだけで
+    // 永久に課金前中止になる。無効にするのは「未請求でないのに受付番号が空」のときだけ。
+    const f = makeFakeChromium();
+    const { chargedNow } = wireStage2(f, {
+      mypageBaselineRows: [
+        { receiptNo: "", shozai: "x", status: "未請求", when: "", expiry: "" },
+        { receiptNo: "", shozai: "y", status: "未請求", when: "", expiry: "" },
+      ],
+    });
+    const page = await makeStage2Page(f);
+    const buf = await page.fetchByLocationCandidate(INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(chargedNow()).toBe(true);
+  });
+
+  it("SR3: ⚠「未請求でないのに受付番号が空」の行があれば基準を無効にして課金前に中止", async () => {
+    const f = makeFakeChromium();
+    const { clicked, chargedNow } = wireStage2(f, {
+      mypageBaselineRows: [
+        { receiptNo: "", shozai: "x", status: "請求済", when: "2026/08/01 09:00", expiry: "2026/09/01" },
+      ],
+    });
+    const page = await makeStage2Page(f);
+    await expect(page.fetchByLocationCandidate(INPUT)).rejects.toMatchObject({
+      code: "provider_error",
+    });
+    expect(clicked).not.toContain(CONFIRM);
+    expect(chargedNow()).toBe(false);
+  });
+
   it("S9: ⚠中止の印(aborted)が立っていたら請求ボタンを押さない（@codex R10 P1）", async () => {
     // provider が課金前タイムアウトで reject した後も、この関数は裏で走り続ける。
     // 印を見ずに押すと、呼び出し側は timeout(台帳なし・ロック解除済み)として処理を
@@ -2598,7 +2665,10 @@ describe("段階②: 課金対象は「確定で作られた行」に紐付け�
     const confirmAt = src.indexOf("domClick(REGISTRY_SELECTORS.requestConfirmButton)");
     expect(baselineAt).toBeGreaterThan(-1);
     expect(baselineAt).toBeLessThan(confirmAt); // 基準採取は確定より前
-    expect(src).toContain("scan.rows.some((r) => !r.trId)");
+    // 受付番号ベース(2026-08-19 第8回)。未請求行は受付番号を持たないのが正常なので、
+    // 成立規則は純関数(collectBaselineReceiptNos)に集約した。
+    expect(src).toContain("collectBaselineReceiptNos(scan.rows)");
+    expect(src).not.toContain("(tds[1]?.textContent ?? \"\").trim()"); // No.列は使わない
   });
 
   it("⚠マイページの基準控え(row-ids)を復活させない(発注者指示 2026-08-18=直接請求)", () => {

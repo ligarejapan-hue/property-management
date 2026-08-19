@@ -49,6 +49,7 @@ import {
   resolveSeikyuConfirm,
 } from "@/lib/registry-fetch/seikyu-confirm";
 import {
+  collectBaselineReceiptNos,
   FUDOSAN_LIST_HIDDEN_PREFIX,
   pickChargedMyPageRow,
   selectFudosanListRow,
@@ -2436,7 +2437,15 @@ function createPlaywrightRegistryPage(
                   for (const tr of Array.from(t.querySelectorAll("tbody tr"))) {
                     const tds = tr.querySelectorAll("td");
                     if (tds.length < 7) continue;
-                    rows.push({ trId: (tds[1]?.textContent ?? "").trim() });
+                    // ⚠受付番号は td[6] の**2段目**(<br>で請求日時と同居)。td[1] は
+                    // 画面上の連番(No.)で並び順により変わる(2026-08-19 実測)。
+                    const parts = (tds[6]?.innerHTML ?? "")
+                      .split(/<br\s*\/?>/i)
+                      .map((x) => x.replace(/<[^>]*>/g, "").trim());
+                    rows.push({
+                      receiptNo: (parts[1] ?? "").trim(),
+                      status: (tds[5]?.textContent ?? "").trim(),
+                    });
                   }
                   return JSON.stringify({ loading: false, rows });
                 },
@@ -2447,14 +2456,16 @@ function createPlaywrightRegistryPage(
               )) as string;
               const scan = JSON.parse(scanJson) as {
                 loading: boolean;
-                rows: Array<{ trId: string }>;
+                rows: Array<{ receiptNo: string; status: string }>;
               };
               if (scan.loading) return { ok: false, ids };
               // ⚠基準は**全行のIDが読めた時だけ**成立(@codex #345 R4 P1の復元・
               // #390 R3)。空IDの行を黙って飛ばすと、その行が課金後にIDを得て
               // 「基準に無い行=新規」に化け、古いPDFを掴む。
-              if (scan.rows.some((r) => !r.trId)) return { ok: false, ids };
-              for (const r of scan.rows) ids.add(r.trId);
+              // ⚠基準の成立規則は純関数に集約(未請求行は受付番号を持たないのが正常)。
+              const built = collectBaselineReceiptNos(scan.rows);
+              if (!built.ok) return { ok: false, ids };
+              for (const id of built.receiptNos) ids.add(id);
               if (!(await myPageHasNext())) break;
               await page.click(REGISTRY_SELECTORS.myPageNextButton);
               await sleep(1200);
@@ -2893,11 +2904,15 @@ function createPlaywrightRegistryPage(
                 for (const tr of Array.from(t.querySelectorAll("tbody tr"))) {
                   const tds = tr.querySelectorAll("td");
                   if (tds.length < 7) continue;
+                  // ⚠td[6] は「請求日時」と「受付番号」の2段(<br>区切り)。
+                  const parts = (tds[6]?.innerHTML ?? "")
+                      .split(/<br\s*\/?>/i)
+                      .map((x) => x.replace(/<[^>]*>/g, "").trim());
                   rows.push({
-                    trId: (tds[1]?.textContent ?? "").trim(),
+                    receiptNo: (parts[1] ?? "").trim(),
                     shozai: (tds[4]?.textContent ?? "").trim(),
                     status: (tds[5]?.textContent ?? "").trim(),
-                    when: (tds[6]?.textContent ?? "").trim(),
+                    when: (parts[0] ?? "").trim(),
                     expiry: (tds[9]?.textContent ?? "").trim(),
                   });
                 }
@@ -2926,18 +2941,18 @@ function createPlaywrightRegistryPage(
             : pickChargedMyPageRow(scannedRows, {
                 targetKey,
                 kuiki: expectedKuiki,
-                baselineTrIds,
+                baselineReceiptNos: baselineTrIds,
               });
           if (picked && picked.readyNow) {
-            // ---- 選択フェーズ: 同定した行を**受付番号(trId)で**選び直す。
+            // ---- 選択フェーズ: 同定した行を**受付番号**で選び直す。
             // 走査と選択を分けたぶん、選択は強いキーで行い取り違えを塞ぐ。
             await resetMyPageToFirst();
             for (let pageNo = 0; pageNo < 10 && !ready; pageNo++) {
               const selJson = (await page.evaluate(
                 (json) => {
-                  const { tableSel, trId } = JSON.parse(json) as {
+                  const { tableSel, receiptNo } = JSON.parse(json) as {
                     tableSel: string;
-                    trId: string;
+                    receiptNo: string;
                   };
                   const rows = Array.from(
                     document.querySelectorAll(`${tableSel} tbody tr`),
@@ -2946,7 +2961,11 @@ function createPlaywrightRegistryPage(
                   for (const tr of rows) {
                     const tds = tr.querySelectorAll("td");
                     if (tds.length < 7) continue;
-                    if ((tds[1]?.textContent ?? "").trim() === trId) {
+                    // ⚠並び順で変わる No.(td[1])ではなく**受付番号**で引く。
+                    const parts = (tds[6]?.innerHTML ?? "")
+                      .split(/<br\s*\/?>/i)
+                      .map((x) => x.replace(/<[^>]*>/g, "").trim());
+                    if ((parts[1] ?? "").trim() === receiptNo) {
                       target = tr;
                       break;
                     }
@@ -2981,7 +3000,7 @@ function createPlaywrightRegistryPage(
                 JSON.stringify({
                   probe: "mypage-select",
                   tableSel: REGISTRY_SELECTORS.myPageTable,
-                  trId: picked.trId,
+                  receiptNo: picked.receiptNo,
                 }),
               )) as string;
               const sel = JSON.parse(selJson) as { result: string };

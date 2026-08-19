@@ -149,13 +149,20 @@ export function registryRowMatchesChiban(
 
 /** マイページ一覧の1行(課金後の同定用に読む列だけ)。 */
 export interface MyPageScanRow {
-  /** 受付番号(列1)。選択フェーズの強い同定キー。 */
-  trId: string;
+  /**
+   * **受付番号**(td[6] の2段目・16桁。`<br>` で請求日時と同居)。
+   * ⚠2026-08-19 第8回テストで実測: `td[1]`(class=myPageRowId)は受付番号ではなく
+   * **画面上の連番(No.)**で、並び順が変わると同じ値が別の行に付く。これを同定キーに
+   * していたため、課金直後に最上段へ来た「いま買った行」が No=1 のまま基準に含まれ、
+   * 「新規ではない」と除外されて永久に見つからなかった(課金済み・PDF未取得)。
+   * 受付番号は行に固有で並び順に影響されない。**必ずこちらを使う**。
+   */
+  receiptNo: string;
   /** 所在セル(列4)=地番区域+地番。⚠PII: Node のメモリ内のみで扱い、ログに出さない。 */
   shozai: string;
   /** 状態(列5)。「請求済」のみDL可。 */
   status: string;
-  /** 受付日時(列6)。文字列比較で新しさを判定(サイトの表示順序に依存しない)。 */
+  /** 請求日時(td[6] の1段目)。文字列比較で新しさを判定(表示順に依存しない)。 */
   when: string;
   /** PDF有効期限(列9)。空=準備前・「期間超過」=DL不可。 */
   expiry: string;
@@ -182,21 +189,23 @@ export function pickChargedMyPageRow(
     targetKey: string;
     kuiki: string;
     /**
-     * 課金**前**に控えた既存行の受付番号(@codex #390 R2 P1)。ここに載っている
+     * 課金**前**に控えた既存行の**受付番号**(@codex #390 R2 P1)。ここに載っている
      * 行は「今回の課金で作られた行」ではあり得ないため同定から除外する。
      * 新行が非同期でまだ表に出ていない間に、同じ筆の**古い**請求済行だけが
-     * 見えている局面で、それを「最新の見えている行」として掴む事故を塞ぐ
-     * (最新性は可視の中でしか比べられない=新規性の証明には基準が要る)。
+     * 見えている局面で、それを「最新の見えている行」として掴む事故を塞ぐ。
+     * ⚠キーは受付番号(td[6]2段目)。並び順で変わる No.(td[1])を使ってはいけない
+     * (2026-08-19 第8回テストの実害: 買った行が基準に含まれ永久に見つからなかった)。
      */
-    baselineTrIds: ReadonlySet<string>;
+    baselineReceiptNos: ReadonlySet<string>;
   },
-): { trId: string; readyNow: boolean; status: string } | null {
+): { receiptNo: string; readyNow: boolean; status: string } | null {
   const kuikiKey = normalizeKuikiForCompare(expected.kuiki);
   if (!kuikiKey) return null;
   const matches = rows
     .filter((r) => {
-      if (r.trId.trim() === "") return false;
-      if (expected.baselineTrIds.has(r.trId.trim())) return false;
+      // 受付番号を持たない行=未請求(まだ買っていない)。買った行は必ず持つ。
+      if (r.receiptNo.trim() === "") return false;
+      if (expected.baselineReceiptNos.has(r.receiptNo.trim())) return false;
       const cellKey = normalizeKuikiForCompare(r.shozai);
       if (!cellKey.startsWith(kuikiKey)) return false;
       const remainder = cellKey.slice(kuikiKey.length);
@@ -212,5 +221,30 @@ export function pickChargedMyPageRow(
   const status = best.status.trim();
   const expiry = best.expiry.trim();
   const readyNow = status === "請求済" && expiry !== "" && expiry !== "期間超過";
-  return { trId: best.trId.trim(), readyNow, status };
+  return { receiptNo: best.receiptNo.trim(), readyNow, status };
+}
+
+/**
+ * 課金前の基準(既存行の受付番号)を1回分の走査から組み立てる(@codex #390 R3 の
+ * all-or-nothing を、受付番号ベースへ移した版)。
+ *
+ * ⚠**未請求の行は受付番号を持たないのが正常**(2026-08-19 実測: td[6] が空)。
+ * 旧実装は「空IDが1つでもあれば基準無効」だったが、それを受付番号に適用すると
+ * 未請求行があるだけで永久に中止してしまう。⇒ 無効にするのは
+ * **「未請求でないのに受付番号が空」**(=読み取り途中/構造想定違い)のときだけ。
+ */
+export function collectBaselineReceiptNos(
+  rows: Array<{ receiptNo: string; status: string }>,
+): { ok: boolean; receiptNos: Set<string> } {
+  const receiptNos = new Set<string>();
+  for (const r of rows) {
+    const receiptNo = r.receiptNo.trim();
+    const status = r.status.trim();
+    if (receiptNo === "") {
+      if (status !== "未請求") return { ok: false, receiptNos };
+      continue; // 未請求=まだ受付番号が無い(正常)
+    }
+    receiptNos.add(receiptNo);
+  }
+  return { ok: true, receiptNos };
 }
