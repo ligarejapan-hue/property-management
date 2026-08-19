@@ -1849,6 +1849,11 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       }>;
       /** 課金後の行が永遠に準備前(請求中)のままの画面を模す(S5)。 */
       mypagePendingForever?: boolean;
+      /**
+       * 走査中、指定ページを**ずっと**「データ取得中」にする(SV18)。
+       * 実サイトはページ送り直後に表が空のまま少し置かれることがある。
+       */
+      loadingPage?: number;
       /** 絞り込みが「すべて」に切り替わらない画面を模す(SM8)。 */
       filterStuck?: boolean;
       /** 1ページに表示する行数(既定=全件1ページ)。複数ページの検証に使う。 */
@@ -2090,6 +2095,9 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       }
       // マイページ走査(課金前=基準採取/課金後=同定)。単一ページ想定。
       if (parsed.probe === "mypage-scan") {
+        if (opts.loadingPage !== undefined && mypageCurrentPage === opts.loadingPage) {
+          return JSON.stringify({ loading: true, rows: [] });
+        }
         if (!seikyuClicked && opts.baselineUnstable) {
           // 呼ばれるたびに違う受付番号を返す=二重読みが一致しない。
           scanCallCount += 1;
@@ -3090,6 +3098,51 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     ).rejects.toMatchObject({ code: "provider_error" });
     expect(clicked).not.toContain(DOWNLOAD);
     expect(clicked).not.toContain(SEIKYU); // 課金は一切しない
+  });
+
+  it("SV17: 履歴が15ページあっても、先頭まで戻って正しい行を取り込む", async () => {
+    // 走査は深くまで行けるのに戻りが浅いと、位置の意味がずれて受付番号の
+    // 読み戻しで必ず外れる=取り込めるはずのPDFを取り逃す(@codex #394 R5 P2)。
+    const f = makeFakeChromium();
+    const seen: string[] = [];
+    const filler = Array.from({ length: 14 }, (_, i) =>
+      boughtRow({
+        receiptNo: `20260819000010${String(i).padStart(2, "0")}`,
+        shozai: `${INPUT.address}９９－${i + 1}`,
+      }),
+    );
+    wireStage2(f, {
+      rowsPerPage: 1,
+      mypageBaselineRows: [...filler, boughtRow()],
+      onMypageSelect: (r) => seen.push(r),
+    });
+    const page = await makeRecoverPage(f);
+    const buf = await page.recoverRegistryPdfByLocation(RECOVER_INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(seen).toEqual(["2026081900727233"]);
+  });
+
+  it("SV18: ⚠読み込み中のページがあったら『無い』と言わない", async () => {
+    // 表が「データ取得中」のまま抜けて not_found にすると、買った書類が
+    // その先にあっても利用者は諦め、期限切れで失う。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      rowsPerPage: 1,
+      loadingPage: 1, // 2ページ目がいつまでも読み込み中
+      mypageBaselineRows: [
+        boughtRow({
+          receiptNo: "2026081900001000",
+          shozai: `${INPUT.address}９９－１`,
+        }),
+        boughtRow(),
+      ],
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation(RECOVER_INPUT),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    expect(clicked).not.toContain(DOWNLOAD);
+    expect(clicked).not.toContain(SEIKYU);
   });
 
   it("SV9: 買う対象(地番/家屋番号)が空なら何もしない(ページに触れない)", async () => {

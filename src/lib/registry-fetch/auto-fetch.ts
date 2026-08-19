@@ -3201,12 +3201,31 @@ function createPlaywrightRegistryPage(
           return !/disabled/.test(String(b.className ?? ""));
         }, sel)) === true;
       const hasNext = () => pagerEnabled(REGISTRY_SELECTORS.myPageNextButton);
-      const resetToFirst = async (): Promise<void> => {
-        for (let i = 0; i < 10; i++) {
-          if (!(await pagerEnabled(REGISTRY_SELECTORS.myPagePrevButton))) break;
+      /**
+       * 1ページ目まで戻る。**戻り切れたかを返す**(@codex #394 R5 P2)。
+       * ⚠戻り切れないまま選択に進むと、位置(ページ番号)の意味がずれ、
+       *   受付番号の読み戻しで必ず外れる=取り込めるはずのPDFを取り逃す。
+       *   走査が60ページまで進む以上、戻りも同じだけ必要。
+       */
+      const resetToFirst = async (): Promise<boolean> => {
+        for (let i = 0; i < RECOVER_MAX_PAGES + 2; i++) {
+          if (!(await pagerEnabled(REGISTRY_SELECTORS.myPagePrevButton))) {
+            return true;
+          }
           await page.click(REGISTRY_SELECTORS.myPagePrevButton);
           await sleep(800);
         }
+        return !(await pagerEnabled(REGISTRY_SELECTORS.myPagePrevButton));
+      };
+      /** 戻り切れないときの共通の切り上げ(『無い』とは言わない)。 */
+      const failNotRewound = (): never => {
+        console.warn(
+          "[registry-fetch] recover: could not rewind to first page (not charged)",
+        );
+        reportLive(
+          "一覧を先頭まで戻せませんでした(課金はしていません)。時間をおいて再度お試しください",
+        );
+        throw new RegistryFetchError("provider_error");
       };
       const isBuilding = !!(
         input.buildingNumber && input.buildingNumber.trim().length > 0
@@ -3254,12 +3273,16 @@ function createPlaywrightRegistryPage(
         const scanned: Array<
           MyPageScanRow & { pageNo: number; indexInPage: number }
         > = [];
-        await resetToFirst();
+        if (!(await resetToFirst())) failNotRewound();
         // ⚠**途中で諦めたことを覚えておく**(@codex #394 R4 P2)。上限で抜けたのに
         //   『見つかりません』と言うと、まだ期限内の購入を『無い』ことにしてしまう。
         let truncated = false;
-        for (let pageNo = 0; pageNo < RECOVER_MAX_PAGES; pageNo++) {
-          const scanJson = (await page.evaluate(
+        /** いま表示中のページを読む(表が『データ取得中』なら loading)。 */
+        const readCurrentPage = async (): Promise<{
+          loading: boolean;
+          rows: string[][];
+        }> => {
+          const raw = (await page.evaluate(
             (json) => {
               const { tableSel } = JSON.parse(json) as { tableSel: string };
               const t = document.querySelector(tableSel);
@@ -3283,11 +3306,20 @@ function createPlaywrightRegistryPage(
               tableSel: REGISTRY_SELECTORS.myPageTable,
             }),
           )) as string;
-          const scan = JSON.parse(scanJson) as {
-            loading: boolean;
-            rows: string[][];
-          };
-          if (scan.loading) break;
+          return JSON.parse(raw) as { loading: boolean; rows: string[][] };
+        };
+        for (let pageNo = 0; pageNo < RECOVER_MAX_PAGES; pageNo++) {
+          let scan = await readCurrentPage();
+          // ⚠『データ取得中』はまだ結論が出ていない。数回待ち直し、それでも
+          //   読めなければ**『無い』とは言わず**見切れた扱いにする(@codex R5 P2)。
+          for (let retry = 0; scan.loading && retry < 3; retry++) {
+            await sleep(1500);
+            scan = await readCurrentPage();
+          }
+          if (scan.loading) {
+            truncated = true;
+            break;
+          }
           let indexInPage = 0;
           for (const cells of scan.rows) {
             const parsed = parseMyPageRowCells(cells);
@@ -3344,7 +3376,7 @@ function createPlaywrightRegistryPage(
         }
         const target = scanned.find((r) => r.receiptNo === picked.receiptNo);
         if (!target) throw new RegistryFetchError("not_found");
-        await resetToFirst();
+        if (!(await resetToFirst())) failNotRewound();
         let hopped = 0;
         for (; hopped < target.pageNo; hopped++) {
           if (!(await hasNext())) break;
