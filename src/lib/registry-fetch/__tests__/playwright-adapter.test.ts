@@ -1968,6 +1968,8 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
           listState.rows.map((r) => ({
             kind: "土地",
             ...r,
+            // ⚠所在の隠しだけ実サイト同様に数値文字参照で返す(実測)。
+            kuiki: toEntities(r.kuiki),
             checked: listState.checked.has(r.index),
           })),
         );
@@ -2038,6 +2040,13 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
   // #fuChibanKuiki 相当(市区町村以下)。実サイトは都道府県を select に分離して
   // 持つ(@codex #389 R1)ので、欄の値には都道府県が入らない。
   const INPUT_REST = "テスト市テスト町一丁目";
+  /**
+   * 請求リストの行の隠し所在(#chibanKuiki_N)。⚠実サイトはここ**だけ**を
+   * 数値文字参照で持つ(2026-08-19 第6回テストで no-match の原因として実測)。
+   * fake もその形で返し、解かない実装が通らないようにする。
+   */
+  const toEntities = (t: string): string =>
+    [...t].map((ch) => `&#${ch.codePointAt(0)};`).join("");
 
   async function makeStage2Page(f: ReturnType<typeof makeFakeChromium>) {
     const factory = resolveDefaultRegistryBrowserFactory({
