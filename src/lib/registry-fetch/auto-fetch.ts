@@ -4272,6 +4272,36 @@ export async function runRegistryAutoFetch(
         }
       }
 
+      // ⚠**貼る直前にもう一度、対象が同じ物件のままかを確かめる**(@codex #394 R26 P1)。
+      //   ロックの一致条件は updateMany の**その瞬間**しか効かない。数分かかる取得の
+      //   最中に、scheduled を見ない・version を上げない経路(CSV取込の重複更新)で
+      //   所在や地番が変わると、**別の対象になった物件**にPDFと所有者情報を貼る。
+      //   ⚠回収は課金していないので、ここで中止しても失うものは無い(やり直せる)。
+      if (isRecover) {
+        const fresh = await prisma.property.findUnique({
+          where: { id: propertyId },
+          select: {
+            address: true,
+            lotNumber: true,
+            buildingNumber: true,
+            realEstateNumber: true,
+          },
+        });
+        if (
+          !fresh ||
+          fresh.address !== property.address ||
+          fresh.lotNumber !== property.lotNumber ||
+          fresh.buildingNumber !== property.buildingNumber ||
+          fresh.realEstateNumber !== property.realEstateNumber
+        ) {
+          throw new ApiError(
+            409,
+            "取り込みの途中で物件情報が変わりました。画面を開き直してからもう一度お試しください",
+            "REGISTRY_RECOVER_PROPERTY_CHANGED",
+          );
+        }
+      }
+
       // 取得物が PDF でなければ取込に進まない（real provider 差し替え時の防御）。
       if (!isPdfBuffer(fetchResult.pdfBuffer)) {
         throw new ApiError(

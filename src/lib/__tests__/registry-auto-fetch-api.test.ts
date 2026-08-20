@@ -1395,6 +1395,49 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
     expect(provider.recoverRegistryPdf).not.toHaveBeenCalled();
   });
 
+  it("⚠取得中に物件が書き換わったらPDFを貼らない(貼る直前に再確認)", async () => {
+    // ロックの一致条件は updateMany のその瞬間しか効かない。数分かかる取得の間に
+    // scheduled を見ない経路(CSV取込)で所在が変われば、別の対象になった物件に
+    // PDFと所有者情報を貼ってしまう(@codex #394 R26 P1)。
+    setProperty({
+      address: "テスト市テスト町一丁目",
+      lotNumber: "69-2",
+      version: 5,
+    });
+    // 2回目の findUnique(貼る直前の再確認)では所在が変わっている。
+    pm.property.findUnique
+      .mockResolvedValueOnce({
+        id: PROP_ID,
+        createdBy: "user-1",
+        assignedTo: null,
+        registryStatus: "unconfirmed",
+        version: 5,
+        realEstateNumber: null,
+        address: "テスト市テスト町一丁目",
+        lotNumber: "69-2",
+        buildingNumber: null,
+      })
+      .mockResolvedValueOnce({
+        address: "テスト市テスト町二丁目", // 取込で書き換わった
+        lotNumber: "69-2",
+        buildingNumber: null,
+        realEstateNumber: null,
+      });
+    const { promise } = runRecover({
+      locationCandidate: null,
+      recoverExpectedVersion: 5,
+      recoverExpectedIdentifier: "69-2",
+      recoverExpectedAddress: "テスト市テスト町一丁目",
+    });
+    await expect(promise).rejects.toMatchObject({
+      status: 409,
+      code: "REGISTRY_RECOVER_PROPERTY_CHANGED",
+    });
+    // ⚠貼っていない(取込ジョブも添付も作らない)。
+    expect(pm.importJob.create).not.toHaveBeenCalled();
+    expect(pm.attachment.create).not.toHaveBeenCalled();
+  });
+
   it("⚠回収のロックは取得キー項目も条件に含める(検査の後に変わっても掴まない)", async () => {
     // 確認時点の検査を通っても、その後に version を上げない経路で所在や地番が
     // 変わると、別の対象になった物件にPDFを貼ってしまう(@codex #394 R24 P1)。
