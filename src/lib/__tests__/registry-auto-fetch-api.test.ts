@@ -1189,6 +1189,7 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
       recoverKind?: "land" | "building";
       recoverExpectedVersion?: number;
       recoverExpectedIdentifier?: string | null;
+      recoverExpectedAddress?: string | null;
     } = {},
   ) {
     const provider = (over.provider ?? recoverProvider()) as RecoverProvider;
@@ -1204,6 +1205,9 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
           : {}),
         ...(over.recoverExpectedIdentifier !== undefined
           ? { recoverExpectedIdentifier: over.recoverExpectedIdentifier }
+          : {}),
+        ...(over.recoverExpectedAddress !== undefined
+          ? { recoverExpectedAddress: over.recoverExpectedAddress }
           : {}),
         locationCandidate:
           over.locationCandidate === undefined ? LC : over.locationCandidate,
@@ -1389,6 +1393,43 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
       code: "REGISTRY_RECOVER_PROPERTY_CHANGED",
     });
     expect(provider.recoverRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("⚠所在だけが書き換わっていても取り込まない(版番号が上がらない経路がある)", async () => {
+    // CSV取込の重複更新は version を上げずに所在を書き換える。所在が変わると
+    // 探す区域が変わり、**別の物件の書類**を取り込みかねない(@codex #394 R23 P1)。
+    setProperty({
+      address: "テスト市テスト町二丁目", // 取込で書き換わった後
+      lotNumber: "69-2",
+      version: 5,
+    });
+    const { provider, promise } = runRecover({
+      locationCandidate: null,
+      recoverExpectedVersion: 5, // 版番号は同じ
+      recoverExpectedIdentifier: "69-2", // 地番も同じ
+      recoverExpectedAddress: "テスト市テスト町一丁目", // 画面が見せていた所在
+    });
+    await expect(promise).rejects.toMatchObject({
+      status: 409,
+      code: "REGISTRY_RECOVER_PROPERTY_CHANGED",
+    });
+    expect(provider.recoverRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("所在の表記ゆれ(空白・全角)は同じものとして通す", async () => {
+    setProperty({
+      address: "テスト市テスト町一丁目",
+      lotNumber: "69-2",
+      version: 5,
+    });
+    const { provider, promise } = runRecover({
+      locationCandidate: null,
+      recoverExpectedVersion: 5,
+      recoverExpectedIdentifier: "69-2",
+      recoverExpectedAddress: " テスト市 テスト町一丁目 ",
+    });
+    await promise;
+    expect(provider.recoverRegistryPdf).toHaveBeenCalledTimes(1);
   });
 
   it("⚠画面が見せていた地番と現在値が違えば取り込まない", async () => {

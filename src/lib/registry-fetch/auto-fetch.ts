@@ -55,6 +55,7 @@ import {
   FUDOSAN_LIST_HIDDEN_PREFIX,
   pickChargedMyPageRow,
   stripTrailingIdentifierFromKuiki,
+  normalizeKuikiForCompare,
   selectFudosanListRow,
   type FudosanListRow,
   type MyPageScanRow,
@@ -133,6 +134,13 @@ export interface RunRegistryAutoFetchArgs {
    * ⚠**一致判定にのみ使う**(取得キーは常にDBの値)。表記ゆれは正規化して比べる。
    */
   recoverExpectedIdentifier?: string | null;
+  /**
+   * 【回収・候補なし】画面が見せていた所在(@codex #394 R23 P1)。
+   * ⚠**版番号だけでは足りない**: CSV取込の重複更新は version を上げずに address を
+   *   書き換える経路がある。所在が変わると探す区域が変わり、**別の物件の書類**を
+   *   取り込みかねない。provider が使う値は全部この検査に含める。
+   */
+  recoverExpectedAddress?: string | null;
   /**
    * 取得キーの上書き（所在検索で server 側再解決した候補の不動産番号／cond③）。
    * 指定時はこれを fetchRegistryPdf に使う（物件は番号未保持のため）。未指定は物件の realEstateNumber。
@@ -4009,6 +4017,18 @@ export async function runRegistryAutoFetch(
       if (
         args.recoverExpectedVersion !== undefined &&
         property.version !== args.recoverExpectedVersion
+      ) {
+        throw new ApiError(
+          409,
+          "物件情報が変わりました。画面を開き直してからもう一度お試しください",
+          "REGISTRY_RECOVER_PROPERTY_CHANGED",
+        );
+      }
+      const expectedAddress = (args.recoverExpectedAddress ?? "").trim();
+      if (
+        expectedAddress &&
+        normalizeKuikiForCompare(expectedAddress) !==
+          normalizeKuikiForCompare(property.address ?? "")
       ) {
         throw new ApiError(
           409,

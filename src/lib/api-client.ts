@@ -1971,7 +1971,11 @@ export async function recoverRegistryFromProperty(
    * 画面が見せていた版番号と識別子(@codex #394 R20 P1)。
    * ⚠server は**一致判定にのみ使う**(取得キーは常にDBの値)。ずれていれば 409。
    */
-  expected?: { version: number; identifier?: string | null },
+  expected?: {
+    version: number;
+    identifier?: string | null;
+    address?: string | null;
+  },
 ): Promise<unknown> {
   return apiFetch(`/api/properties/${propertyId}/registry/auto-fetch`, {
     method: "POST",
@@ -1983,6 +1987,7 @@ export async function recoverRegistryFromProperty(
       ...(recoverKind ? { recoverKind } : {}),
       ...(expected ? { expectedVersion: expected.version } : {}),
       ...(expected?.identifier ? { expectedIdentifier: expected.identifier } : {}),
+      ...(expected?.address ? { expectedAddress: expected.address } : {}),
       ...(liveRef ? { liveRef } : {}),
     }),
   });

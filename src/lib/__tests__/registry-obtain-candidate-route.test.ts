@@ -220,6 +220,7 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
         mode: "recover",
         expectedVersion: 3,
         expectedIdentifier: "69-2",
+        expectedAddress: "テスト市テスト町一丁目",
         ...(candidateRef === undefined ? {} : { candidateRef }),
       });
       expect(res.status).toBe(200);
@@ -256,6 +257,7 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
       certificateType,
       expectedVersion: 3,
       expectedIdentifier: "69-2",
+      expectedAddress: "テスト市テスト町一丁目",
     });
     expect(res.status).toBe(200);
     const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
@@ -284,6 +286,7 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
       mode: "recover",
       expectedVersion: 7,
       expectedIdentifier: "69-2",
+      expectedAddress: "テスト市テスト町一丁目",
     });
     expect(res.status).toBe(200);
     const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
@@ -316,6 +319,7 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
         recoverKind: kind,
         expectedVersion: 3,
         expectedIdentifier: "69-2",
+        expectedAddress: "テスト市テスト町一丁目",
       });
       expect(res.status).toBe(200);
       const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
@@ -367,9 +371,10 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
   });
 
   it.each([
-    ["版番号なし", { expectedIdentifier: "69-2" }],
-    ["識別子なし", { expectedVersion: 3 }],
-    ["どちらも無し", {}],
+    ["版番号なし", { expectedIdentifier: "69-2", expectedAddress: "A町" }],
+    ["識別子なし", { expectedVersion: 3, expectedAddress: "A町" }],
+    ["所在なし", { expectedVersion: 3, expectedIdentifier: "69-2" }],
+    ["すべて無し", {}],
   ])(
     "⚠候補なしの回収で確認情報(%s)が欠けていたら 400(検査を省略させない)",
     async (_label, extra) => {

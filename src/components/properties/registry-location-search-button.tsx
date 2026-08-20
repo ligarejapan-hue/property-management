@@ -268,6 +268,7 @@ export default function RegistryLocationSearchButton({
           //   誰かが地番を編集していたら、server 側で 409 にして取り違えを防ぐ。
           {
             version: savedVersion ?? propertyVersion,
+            address: propertyAddress,
             identifier: hasBothIdentifiers
               ? recoverKind === "land"
                 ? propertyLotNumber

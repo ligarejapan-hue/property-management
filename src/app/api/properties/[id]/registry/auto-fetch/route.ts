@@ -162,6 +162,12 @@ export async function POST(
       ?.expectedIdentifier;
     const recoverExpectedIdentifier =
       typeof identifierRaw === "string" ? identifierRaw : undefined;
+    // ⚠所在も確認情報に含める(@codex #394 R23 P1)。CSV取込の重複更新は version を
+    //   上げずに所在を書き換えるため、版番号だけでは変化を捕まえられない。
+    const addressRaw = (body as { expectedAddress?: unknown } | null)
+      ?.expectedAddress;
+    const recoverExpectedAddress =
+      typeof addressRaw === "string" ? addressRaw : undefined;
 
     // 所在検索の候補を選んで取得する場合（candidateRef 指定）。cond③: client の候補参照は信頼せず、
     // server 側で当該物件向けに再検索して不動産番号を解決してから取得する。
@@ -191,7 +197,8 @@ export async function POST(
     if (isRecover && !candidateRef) {
       if (
         recoverExpectedVersion === undefined ||
-        !(recoverExpectedIdentifier ?? "").trim()
+        !(recoverExpectedIdentifier ?? "").trim() ||
+        !(recoverExpectedAddress ?? "").trim()
       ) {
         throw new ApiError(
           400,
@@ -269,6 +276,9 @@ export async function POST(
               : {}),
             ...(recoverExpectedIdentifier !== undefined
               ? { recoverExpectedIdentifier }
+              : {}),
+            ...(recoverExpectedAddress !== undefined
+              ? { recoverExpectedAddress }
               : {}),
             live,
           },
