@@ -204,6 +204,22 @@ describe("回収の入口(画面)", () => {
     ).split(CR).join("");
     expect(csv).toContain('registryStatus: { not: "scheduled" }');
     expect(csv).toContain("謄本の自動取得の処理中です");
+    // ⚠弾いた行では建物の郵便番号も反映しない(@codex #394 R28 P2)。
+    const guardAt = csv.indexOf("if (guarded.count === 0) {");
+    const guardSeg = csv.slice(guardAt, csv.indexOf("continue;", guardAt));
+    expect(guardSeg).not.toContain("commitBuildingPostalCode");
+  });
+
+  it("⚠手動編集も取得中は鍵の項目(所在・地番など)を変えられない", () => {
+    // CSVだけ塞いでも、通常の編集APIから同じ書き換えができては意味が無い
+    // (@codex #394 R28 P1)。メモ等、鍵に関係ない編集は止めない。
+    const patch = readFileSync(
+      join(process.cwd(), "src/app/api/properties/[id]/route.ts"),
+      "utf8",
+    ).split(CR).join("");
+    expect(patch).toContain('current.registryStatus === "scheduled"');
+    expect(patch).toContain("REGISTRY_FETCH_IN_PROGRESS");
+    expect(patch).toContain('"realEstateNumber",');
   });
 
   it("⚠画面は『見せていた内容』を一緒に送る(取り違えをserverで止められる)", () => {

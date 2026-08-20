@@ -720,7 +720,9 @@ export async function POST(request: NextRequest) {
             >[0]["data"],
           });
           if (guarded.count === 0) {
-            await commitBuildingPostalCode();
+            // ⚠エラー行では建物の郵便番号も反映しない(@codex #394 R28 P2)。
+            //   「成功した行だけがマスタを更新する」という近くの契約に合わせる
+            //   (失敗と報告した行が裏で建物を書き換えるのは不意打ち)。
             jobRows.push({
               jobId: job.id,
               rowNumber,

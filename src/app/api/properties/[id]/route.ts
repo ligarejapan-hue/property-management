@@ -222,6 +222,33 @@ export async function PATCH(
       );
     }
 
+    // ⚠**謄本の自動取得(scheduled)中は、取得の鍵になる項目を変えさせない**
+    //   (@codex #394 R28 P1)。取得は所在・地番を鍵にサイトから書類を選ぶ。
+    //   取得中にここが変わると、選んだ書類が**別の対象になった物件**へ添付され、
+    //   所有者の紐付けまで変わる。CSV取込は既に同じガードを持つ(R27)。
+    //   ⚠メモ等、鍵に関係ない項目の編集は止めない(取得は数分かかるため)。
+    if (current.registryStatus === "scheduled") {
+      const keyFields = [
+        "address",
+        "lotNumber",
+        "buildingNumber",
+        "realEstateNumber",
+      ] as const;
+      const touchesKey = keyFields.some((f) => {
+        if (!(f in updateFields)) return false;
+        const next = (updateFields as Record<string, unknown>)[f];
+        const prev = current[f];
+        return String(next ?? "").trim() !== String(prev ?? "").trim();
+      });
+      if (touchesKey) {
+        throw new ApiError(
+          409,
+          "謄本の自動取得の処理中です。所在・地番・家屋番号・不動産番号の変更は完了後にお試しください",
+          "REGISTRY_FETCH_IN_PROGRESS",
+        );
+      }
+    }
+
     // field_staff scope check
     if (
       session.role === "field_staff" &&
