@@ -147,6 +147,21 @@ export async function POST(
     const candidateRef =
       typeof candidateRefRaw === "string" ? candidateRefRaw.trim() : "";
 
+    // ⚠**「指定しなかった」と「指定したが壊れている」を区別する**(@codex #394 R18 P2)。
+    //   回収は候補なしでも動く(物件自身の地番)ため、壊れた候補が黙って
+    //   物件経由へ落ちる。地番と家屋番号の両方を持つ物件では、候補経由なら
+    //   土地を指していたはずが**建物優先の規則で建物のPDFを取り込み**かねない。
+    //   ⚠従来の有料取得の挙動は変えない(回収のときだけ厳しくする)。
+    if (isRecover && candidateRefRaw !== undefined && candidateRefRaw !== null) {
+      if (typeof candidateRefRaw !== "string" || candidateRef === "") {
+        throw new ApiError(
+          400,
+          "取り込む候補の指定が正しくありません",
+          "REGISTRY_RECOVER_CANDIDATE_REF_INVALID",
+        );
+      }
+    }
+
     // 実況パネル(2026-08-15・任意)。取得も回収も同じ橋渡しを使う。
     // ⚠**有料取得は中止を受け付けない**(課金だけ残る状態を作らない既存方針)ので、
     //   begin 直後に cancel 窓を閉じ、reporter にも isCancelRequested を配線しない。

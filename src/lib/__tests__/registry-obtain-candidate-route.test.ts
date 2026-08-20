@@ -208,7 +208,7 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
     },
   );
 
-  it.each([undefined, "", "   "])(
+  it.each([undefined])(
     "候補(%s)が無い回収は**物件自身の地番**で実行する(課金経路へは落とさない)",
     async (candidateRef) => {
       // 取込が途中まで進むと物件に不動産番号が入り、所在検索が対象外になる。
@@ -302,6 +302,33 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
       expect(runRegistryAutoFetch).not.toHaveBeenCalled();
     },
   );
+
+  it.each(["", "   ", 123, true, {}])(
+    "⚠候補を指定したのに壊れている(%s)回収は 400(黙って別の探し方に落とさない)",
+    async (candidateRef) => {
+      // 未指定(物件自身の地番で探す)と、壊れた指定は**別物**として扱う。
+      // 両方の識別子を持つ物件では、土地の候補を落とすと建物優先の規則で
+      // 建物のPDFを取り込みかねない(@codex #394 R18 P2)。
+      const res = await callRoute({
+        confirmed: true,
+        mode: "recover",
+        candidateRef,
+      });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        error: { code: "REGISTRY_RECOVER_CANDIDATE_REF_INVALID" },
+      });
+      expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+      expect(resolveRegistryCandidate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("⚠従来の有料取得は今までどおり(空の候補は従来経路へ)", async () => {
+    const res = await callRoute({ confirmed: true, candidateRef: "   " });
+    expect(res.status).toBe(200);
+    expect(resolveRegistryCandidate).not.toHaveBeenCalled();
+    expect(runRegistryAutoFetch).toHaveBeenCalledTimes(1);
+  });
 
   it("⚠候補が無いのは回収のときだけ通す(従来の取得は今までどおり)", async () => {
     // mode 未指定で候補も無ければ、従来経路(番号での取得)がそのまま走る。
