@@ -115,10 +115,12 @@ export async function POST(
     //   全部事項を頼んだ人に所有者事項を取り込み、しかも**所有者の自動反映**まで
     //   走る(all では抑止される処理)。従来の有料取得は既定 owner のまま(安い方に
     //   倒す fail-safe)で挙動を変えない。
+    // ⚠**回収では明示的な null も『指定した』扱い**(@codex #394 R25 P2)。
+    //   null を素通りさせると既定(所有者事項)に化け、全部事項を頼んだ人に
+    //   別の種類を取り込み、所有者の自動反映まで走る。省略だけを既定とする。
     if (
       isRecover &&
       certRaw !== undefined &&
-      certRaw !== null &&
       certRaw !== "owner" &&
       certRaw !== "all"
     ) {
@@ -131,7 +133,7 @@ export async function POST(
 
     // 【回収・候補なし】土地/建物の明示指定(@codex #394 R13 P1)。知らない値は 400。
     const kindRaw = (body as { recoverKind?: unknown } | null)?.recoverKind;
-    if (kindRaw !== undefined && kindRaw !== null) {
+    if (isRecover && kindRaw !== undefined) {
       if (kindRaw !== "land" && kindRaw !== "building") {
         throw new ApiError(
           400,
@@ -147,7 +149,7 @@ export async function POST(
     // (@codex #394 R20 P1)。⚠数値でない版番号は黙って無視しない(検査が効かなくなる)。
     const versionRaw = (body as { expectedVersion?: unknown } | null)
       ?.expectedVersion;
-    if (isRecover && versionRaw !== undefined && versionRaw !== null) {
+    if (isRecover && versionRaw !== undefined) {
       if (typeof versionRaw !== "number" || !Number.isFinite(versionRaw)) {
         throw new ApiError(
           400,

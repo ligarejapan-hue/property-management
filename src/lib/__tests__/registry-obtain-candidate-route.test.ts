@@ -234,7 +234,7 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
     },
   );
 
-  it.each(["ALL", "owner ", "全部事項", 1, true])(
+  it.each(["ALL", "owner ", "全部事項", 1, true, null])(
     "⚠回収で謄本の種類(%s)が読めない値なら 400(黙って所有者事項にしない)",
     async (certificateType) => {
       const res = await callRoute({
@@ -294,7 +294,7 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
     expect(arg.recoverExpectedIdentifier).toBe("69-2");
   });
 
-  it.each(["7", true, {}])(
+  it.each(["7", true, {}, null])(
     "⚠版番号が数値でない(%s)なら 400(検査を黙って無効化しない)",
     async (expectedVersion) => {
       const res = await callRoute({
@@ -327,7 +327,7 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
     },
   );
 
-  it.each(["LAND", "土地", "", 1, true])(
+  it.each(["LAND", "土地", "", 1, true, null])(
     "⚠知らない種別(%s)は 400 で止める(黙って別の登記を探さない)",
     async (kind) => {
       const res = await callRoute({
@@ -400,6 +400,39 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
   it("⚠回収でも確認(confirmed)は要る(誤操作で走らせない)", async () => {
     const res = await callRoute({ candidateRef: "cand-1", mode: "recover" });
     expect(res.status).toBe(400);
+    expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("⚠回収では『明示的な null』を素通りさせない(@codex #394 R25)", () => {
+  // null を『未指定』と同じに扱うと、既定値へ黙って倒れて別のものを取り込む。
+  // 省略(フィールドを送らない)だけが既定の合図。
+  it.each([
+    ["mode", { mode: null }, "REGISTRY_MODE_INVALID"],
+    [
+      "certificateType",
+      { mode: "recover", certificateType: null },
+      "REGISTRY_RECOVER_CERTIFICATE_TYPE_INVALID",
+    ],
+    [
+      "recoverKind",
+      { mode: "recover", recoverKind: null },
+      "REGISTRY_RECOVER_KIND_INVALID",
+    ],
+    [
+      "expectedVersion",
+      { mode: "recover", expectedVersion: null },
+      "REGISTRY_RECOVER_EXPECTED_VERSION_INVALID",
+    ],
+    [
+      "candidateRef",
+      { mode: "recover", candidateRef: null },
+      "REGISTRY_RECOVER_CANDIDATE_REF_INVALID",
+    ],
+  ])("%s の null は 400", async (_label, extra, code) => {
+    const res = await callRoute({ confirmed: true, ...(extra as object) });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: { code } });
     expect(runRegistryAutoFetch).not.toHaveBeenCalled();
   });
 });
