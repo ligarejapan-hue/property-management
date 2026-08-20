@@ -3468,50 +3468,83 @@ function createPlaywrightRegistryPage(
           throw new RegistryFetchError("provider_error");
         }
         // 選んだ行の受付番号を読み戻して一致を実測(位置ズレで別の筆を取り込まない)。
-        const selJson = (await page.evaluate(
-          (json) => {
-            const { tableSel, rowIndex } = JSON.parse(json) as {
-              tableSel: string;
-              rowIndex: number;
-            };
-            const rows = Array.from(
-              document.querySelectorAll(tableSel + " tbody tr"),
-            ).filter((tr) => tr.querySelectorAll("td").length >= 7);
-            const row = rows[rowIndex] ?? null;
-            if (!row) return JSON.stringify({ result: "not-found" });
-            for (const cb of Array.from(
-              document.querySelectorAll(tableSel + " tbody " + 'input[type="checkbox"]'),
-            ) as HTMLInputElement[]) {
-              if (cb.checked) cb.click();
-            }
-            const cb = row.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
-            if (!cb) return JSON.stringify({ result: "select-failed" });
-            if (!cb.checked) cb.click();
-            const checkedRows = Array.from(
-              document.querySelectorAll(tableSel + " tbody tr"),
-            ).filter((tr) => {
-              const x = tr.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
-              return x?.checked === true;
-            });
-            if (checkedRows.length !== 1) {
-              return JSON.stringify({ result: "select-failed" });
-            }
-            const cells = Array.from(checkedRows[0].querySelectorAll("td"))
-              .slice(0, 12)
-              .map((td) => (td as HTMLElement).innerHTML ?? "");
-            return JSON.stringify({ result: "checked", cells });
-          },
-          JSON.stringify({
-            probe: "mypage-select",
-            tableSel: REGISTRY_SELECTORS.myPageTable,
-            rowIndex: target.indexInPage,
-          }),
-        )) as string;
-        const sel = JSON.parse(selJson) as { result: string; cells?: string[] };
-        if (sel.result !== "checked") throw new RegistryFetchError("not_found");
-        const selected = parseMyPageRowCells(sel.cells ?? []);
+        // ⚠走査と選択の間に口座へ**別の購入が入る**と位置がずれる(共有口座)。
+        //   検知したら**いまのページを読み直して受付番号で位置を取り直す**
+        //   (@codex #394 R15 P2)。それでも駄目なら『無い』ではなく一時的な失敗。
+        const selectRowAt = async (
+          rowIndex: number,
+        ): Promise<MyPageScanRow | null> => {
+          const json = (await page.evaluate(
+            (raw) => {
+              const { tableSel, rowIndex: idx } = JSON.parse(raw) as {
+                tableSel: string;
+                rowIndex: number;
+              };
+              const rows = Array.from(
+                document.querySelectorAll(tableSel + " tbody tr"),
+              ).filter((tr) => tr.querySelectorAll("td").length >= 7);
+              const row = rows[idx] ?? null;
+              if (!row) return JSON.stringify({ result: "not-found" });
+              for (const cb of Array.from(
+                document.querySelectorAll(
+                  tableSel + " tbody " + 'input[type="checkbox"]',
+                ),
+              ) as HTMLInputElement[]) {
+                if (cb.checked) cb.click();
+              }
+              const cb = row.querySelector(
+                'input[type="checkbox"]',
+              ) as HTMLInputElement | null;
+              if (!cb) return JSON.stringify({ result: "select-failed" });
+              if (!cb.checked) cb.click();
+              const checkedRows = Array.from(
+                document.querySelectorAll(tableSel + " tbody tr"),
+              ).filter((tr) => {
+                const x = tr.querySelector(
+                  'input[type="checkbox"]',
+                ) as HTMLInputElement | null;
+                return x?.checked === true;
+              });
+              if (checkedRows.length !== 1) {
+                return JSON.stringify({ result: "select-failed" });
+              }
+              const cells = Array.from(checkedRows[0].querySelectorAll("td"))
+                .slice(0, 12)
+                .map((td) => (td as HTMLElement).innerHTML ?? "");
+              return JSON.stringify({ result: "checked", cells });
+            },
+            JSON.stringify({
+              probe: "mypage-select",
+              tableSel: REGISTRY_SELECTORS.myPageTable,
+              rowIndex,
+            }),
+          )) as string;
+          const parsedSel = JSON.parse(json) as {
+            result: string;
+            cells?: string[];
+          };
+          if (parsedSel.result !== "checked") return null;
+          return parseMyPageRowCells(parsedSel.cells ?? []);
+        };
+        let selected = await selectRowAt(target.indexInPage);
         if (!selected || selected.receiptNo !== picked.receiptNo) {
-          throw new RegistryFetchError("not_found");
+          // 位置がずれた。いまのページを読み直し、受付番号で位置を取り直す。
+          const rescan = await readCurrentPage();
+          const movedTo = rescan.loading
+            ? -1
+            : rescan.rows
+                .map((cells) => parseMyPageRowCells(cells))
+                .findIndex((row) => row?.receiptNo === picked.receiptNo);
+          selected = movedTo >= 0 ? await selectRowAt(movedTo) : null;
+        }
+        if (!selected || selected.receiptNo !== picked.receiptNo) {
+          console.warn(
+            "[registry-fetch] recover: row moved before selection (not charged)",
+          );
+          reportLive(
+            "一覧が更新されて対象の行を選べませんでした(課金はしていません)。時間をおいて再度お試しください",
+          );
+          throw new RegistryFetchError("provider_error");
         }
         reportLive("取得済みの書類(PDF)を保存しています(課金はしていません)");
         const [download] = await Promise.all([

@@ -1855,6 +1855,18 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
        */
       loadingPage?: number;
       /**
+       * **選択の直前に**口座へ新しい購入が入る状況(SV26/SV27)。共有口座では
+       * 走査と選択の間に他の人の購入が入り、控えた位置がずれる。
+       */
+      insertBeforeSelect?: {
+        receiptNo: string;
+        shozai: string;
+        status: string;
+        when: string;
+        expiry: string;
+        seikyuType?: string;
+      };
+      /**
        * 「次へ」を押せる回数の上限(SV25)。走査は通るが**選択のための移動**で
        * 進めなくなる画面を模す(実サイトの一時的な不調)。
        */
@@ -1953,6 +1965,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     let mypageCurrentPage = 0; // マイページのページ送り位置(rowsPerPage 指定時)
     let dialogOpen = false; // 【請求】クリックで開く確認ダイアログ
     let scanCallCount = 0;
+    let insertedBeforeSelect = false;
     let nextClicks = 0;
     let pageAtLastRead = -1;
     let readsOnCurrentPage = 0;
@@ -2185,6 +2198,10 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         );
       }
       if (parsed.probe === "mypage-select") {
+        if (opts.insertBeforeSelect && !insertedBeforeSelect) {
+          insertedBeforeSelect = true;
+          (opts.mypageBaselineRows ?? []).unshift(opts.insertBeforeSelect);
+        }
         // ⚠読み込み中の表には行が無い(実サイトの『データ取得中』と同じ)。
         //   待たずに選びに来た実装はここで空振りする(SV20)。
         if (
@@ -3003,6 +3020,8 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
   });
 
   it("SV8: ⚠選ぶ直前に表が1ページ目へ戻ったら、別の行をDLせず中止する", async () => {
+    // ⚠分類は provider_error(一時的な失敗)。受付番号は走査で見つけているので
+    //   『無い』とは言わない(@codex #394 R15 P2)。
     const f = makeFakeChromium();
     const { clicked } = wireStage2(f, {
       rowsPerPage: 1,
@@ -3018,7 +3037,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     const page = await makeRecoverPage(f);
     await expect(
       page.recoverRegistryPdfByLocation(RECOVER_INPUT),
-    ).rejects.toMatchObject({ code: "not_found" });
+    ).rejects.toMatchObject({ code: "provider_error" });
     expect(clicked).not.toContain(DOWNLOAD);
   });
 
@@ -3336,6 +3355,38 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     ).rejects.toMatchObject({ code: "provider_error" });
     expect(clicked).not.toContain(DOWNLOAD);
   });
+  it("SV26: 走査後に別の購入が入って行がずれても、受付番号で選び直して取り込む", async () => {
+    // 共有口座なので、走査と選択の間に他の購入が入り得る(@codex #394 R15 P2)。
+    const f = makeFakeChromium();
+    const seen: string[] = [];
+    const rows = [
+      boughtRow({
+        receiptNo: "2026081900005001",
+        shozai: `${INPUT.address}９９－１`,
+      }),
+      boughtRow(), // 対象
+      boughtRow({
+        receiptNo: "2026081900005003",
+        shozai: `${INPUT.address}９９－３`,
+      }),
+    ];
+    wireStage2(f, {
+      rowsPerPage: 5, // 全部1ページに収まる=ページ内で位置だけがずれる
+      mypageBaselineRows: rows,
+      insertBeforeSelect: boughtRow({
+        receiptNo: "2026081900009999",
+        shozai: `${INPUT.address}９９－９`,
+        when: "2026/08/19 23:59",
+      }),
+      onMypageSelect: (r) => seen.push(r),
+    });
+    const page = await makeRecoverPage(f);
+    const buf = await page.recoverRegistryPdfByLocation(RECOVER_INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    // 1回目は位置ズレで別の行→読み直して受付番号で選び直している。
+    expect(seen[seen.length - 1]).toBe("2026081900727233");
+  });
+
   it("SV9: 買う対象(地番/家屋番号)が空なら何もしない(ページに触れない)", async () => {
     const f = makeFakeChromium();
     const { clicked } = wireStage2(f, { mypageBaselineRows: [boughtRow()] });
