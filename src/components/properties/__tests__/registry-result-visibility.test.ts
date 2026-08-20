@@ -103,6 +103,22 @@ describe("謄本の結果が画面に出る(2026-08-20 の誤解の再発防止)
     expect(fin).not.toContain("if (seq === propertyReqSeq.current) setLoading(false)");
   });
 
+  it("失敗した静かな取り直しは世代を進めない(成功した取り直しを無効にしない)", () => {
+    // @codex #395 R3 P2: 通常の取り直しが走っている最中に取り込みが成功すると、
+    //   静かな取り直しが世代を進める。そこで静かな取り直しが**失敗**すると
+    //   (エラーは握りつぶす設計)、ちゃんと返ってきた通常の取り直しの結果まで
+    //   「古い」と判定されて捨てられ、**画面が古いまま残る**。
+    // ⇒ 世代を進めるのは「中身を反映できたとき」だけ。
+    const qBegin = PAGE.indexOf("const refreshPropertyQuietly");
+    expect(qBegin).toBeGreaterThan(-1);
+    const qBody = PAGE.slice(qBegin, PAGE.indexOf("}, [id, loadQualityIssues]);", qBegin));
+    // 成功したときは進める。
+    expect(qBody).toContain("propertyAppliedSeq.current = seq;");
+    // 失敗したとき(catch)は触らない。
+    const qCatch = qBody.slice(qBody.indexOf("} catch {"));
+    expect(qCatch).not.toContain("propertyAppliedSeq.current =");
+  });
+
   it("静かな取り直しは『読み込み中』の世代を触らない(取り残しの再発防止)", () => {
     const qBegin = PAGE.indexOf("const refreshPropertyQuietly");
     expect(qBegin).toBeGreaterThan(-1);

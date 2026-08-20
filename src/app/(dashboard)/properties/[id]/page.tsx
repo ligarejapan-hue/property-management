@@ -266,7 +266,12 @@ export default function PropertyDetailPage({
   // void 呼び出しでも cancelled フラグを誰も true にしない問題を解消（ref シーケンス方式）。
   const qualityReqSeq = useRef(0);
   // 物件本体の取り直しの世代（通常の取り直しと静かな取り直しで共有する）。
+  // ⚠**発行**(Req)と**反映できた**(Applied)を分ける（@codex R3 P2）。まとめてしまうと、
+  //   best-effort の静かな取り直しが**失敗しただけ**で、ちゃんと返ってきた通常の
+  //   取り直しの結果まで「古い」と判定されて捨てられ、画面が古いまま残る。
+  //   ⇒ 世代を進めるのは**中身を反映できたときだけ**にする。
   const propertyReqSeq = useRef(0);
+  const propertyAppliedSeq = useRef(0);
   // 「読み込み中」の持ち主を決める世代。⚠**通常の取り直しだけ**が進める
   //   （静かな取り直しが触ると、割り込んだときに誰も解除できなくなる）。
   const fullRefreshSeq = useRef(0);
@@ -308,10 +313,12 @@ export default function PropertyDetailPage({
     setError(null);
     try {
       const data = await fetchPropertyDetail(id);
-      if (seq !== propertyReqSeq.current) return; // 後発が来ていたら破棄
+      if (seq < propertyAppliedSeq.current) return; // より新しい結果が反映済み
+      propertyAppliedSeq.current = seq;
       setProperty(data as unknown as ApiProperty);
     } catch (err) {
-      if (seq !== propertyReqSeq.current) return;
+      if (seq < propertyAppliedSeq.current) return;
+      propertyAppliedSeq.current = seq;
       setError(
         err instanceof Error ? err.message : "データ取得に失敗しました",
       );
@@ -337,12 +344,15 @@ export default function PropertyDetailPage({
     const seq = ++propertyReqSeq.current;
     try {
       const data = await fetchPropertyDetail(id);
-      if (seq !== propertyReqSeq.current) return; // 後発が来ていたら破棄（後着勝ち）
+      if (seq < propertyAppliedSeq.current) return; // より新しい結果が反映済み
+      propertyAppliedSeq.current = seq;
       setProperty(data as unknown as ApiProperty);
       void loadQualityIssues();
     } catch {
       // 何もしない（意図的）。静かな更新なので画面は壊さず、利用者は
       // 「閉じる（物件情報を更新）」で従来どおり取り直せる。
+      // ⚠ここで**世代を進めてはいけない**（@codex R3 P2）。進めると、ちゃんと返ってきた
+      //   通常の取り直しの結果まで捨てられ、画面が古いまま残る。
     }
   }, [id, loadQualityIssues]);
 
