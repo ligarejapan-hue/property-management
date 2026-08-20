@@ -8,6 +8,7 @@ import {
   parseJsonBody,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { isPropertyScopedRole } from "@/lib/property-access";
 import { getRegistryFetchProvider } from "@/lib/registry-fetch/auto-fetch";
 import { loadRegistryFetchCredentials } from "@/lib/registry-fetch/config-store";
 import { runRegistrySearch } from "@/lib/registry-fetch/search";
@@ -90,9 +91,23 @@ export async function POST(
       typeof liveRefRaw === "string" && isValidLiveRef(liveRefRaw)
         ? liveRefRaw
         : null;
+    // ⚠**画面の写真は『全物件を見られる役割』にだけ渡す**(@codex #394 R2 P1)。
+    //   自動操作は請求リスト(口座のカート)を開き、そこには過去の操作で積み上がった
+    //   **他の物件の行**が並ぶ(実測)。担当分しか見られない役割に写真を見せると、
+    //   物件単位の認可を写真が素通りさせてしまう。文字の進行は誰でも見られる。
+    const canSeeShots = !isPropertyScopedRole(session.role);
     if (liveRef) {
       beginLiveView(session.id, id, liveRef);
       reportLiveStep(session.id, id, liveRef, "自動検索を受け付けました", null);
+      if (!canSeeShots) {
+        reportLiveStep(
+          session.id,
+          id,
+          liveRef,
+          "この権限では画面の写真は記録しません(進行状況は文字でお伝えします)",
+          null,
+        );
+      }
     }
     const live = liveRef
       ? {
@@ -100,6 +115,7 @@ export async function POST(
             return reportLiveStep(session.id, id, liveRef, label, null);
           },
           attachShot(seq: number, shot: Uint8Array): void {
+            if (!canSeeShots) return;
             attachLiveShot(session.id, id, liveRef, seq, shot);
           },
           // 実況パネルの「中止」。⚠provider は節目ごとにこれを見て**自分で**止まる

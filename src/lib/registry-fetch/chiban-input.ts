@@ -96,3 +96,20 @@ export function normalizeChibanForDialog(raw: string): string {
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
+
+/**
+ * 所在の候補から、**実際に登記を引く識別子**を1つ選ぶ(@codex #394 R8 P2)。
+ *
+ * ⚠**家屋番号が入っていれば建物**(建物優先)。adapter がこの規則で動くので、
+ * 検査側が別の規則(地番優先)で選ぶと、**検査した値と探す値が食い違う**。
+ * 例: 地番が正しく家屋番号が壊れている物件は検査を通り、壊れた家屋番号を
+ * 正規化した別の値で探して**別の登記を掴む**。選び方はここ1か所に置く。
+ */
+export function effectiveLocationIdentifier(location: {
+  lotNumber?: string | null;
+  buildingNumber?: string | null;
+}): { isBuilding: boolean; value: string } {
+  const building = (location.buildingNumber ?? "").trim();
+  if (building.length > 0) return { isBuilding: true, value: building };
+  return { isBuilding: false, value: (location.lotNumber ?? "").trim() };
+}

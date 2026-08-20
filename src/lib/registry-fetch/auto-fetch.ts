@@ -40,6 +40,7 @@ import {
   type RegistryPageProbe,
 } from "@/lib/registry-fetch/page-probe";
 import {
+  effectiveLocationIdentifier,
   isReadableChiban,
   normalizeChibanForDialog,
 } from "@/lib/registry-fetch/chiban-input";
@@ -53,6 +54,8 @@ import {
   parseMyPageRowCells,
   FUDOSAN_LIST_HIDDEN_PREFIX,
   pickChargedMyPageRow,
+  stripTrailingIdentifierFromKuiki,
+  normalizeKuikiForCompare,
   selectFudosanListRow,
   type FudosanListRow,
   type MyPageScanRow,
@@ -103,6 +106,41 @@ export interface RunRegistryAutoFetchArgs {
   propertyId: string;
   /** 課金を伴う操作のため明示確認フラグ。true 以外は実行しない。 */
   confirmed: boolean;
+  /**
+   * 実行モード(2026-08-19)。
+   * - "purchase"(既定): 従来の有料取得(請求→課金→PDF)。
+   * - "recover": **既に課金済み**の書類をマイページから取り込むだけ(課金しない)。
+   *   第8回テストのように「請求は成立したがPDFを取り逃した」場合の救済。
+   *   ⚠課金しないので、有料取得のスイッチ(REGISTRY_FETCH_PURCHASE_ENABLED)も
+   *   二重課金ガード(台帳照合)も通さない(むしろ台帳に記録がある状態で使う)。
+   */
+  mode?: "purchase" | "recover";
+  /**
+   * 【回収・候補なし】どちらの登記を取り込むか(@codex #394 R13 P1)。
+   * 物件が地番と家屋番号の**両方**を持つ場合、既定の選び方(家屋番号優先)だと
+   * 土地の購入を永久に取り込めず、条件次第では**建物のPDFを土地の物件へ**
+   * 取り込みかねない。利用者に選ばせた結果をここで受ける。
+   */
+  recoverKind?: "land" | "building";
+  /**
+   * 【回収・候補なし】画面が見せていた版番号(@codex #394 R20 P1)。
+   * ⚠候補経由には指紋(expectedFingerprint)があるが、物件経由には無かった。
+   *   確認の後に地番が編集されると**見たものと違う筆**を取り込み、所有者事項なら
+   *   所有者の紐付けまで書き換わる。一致しなければ 409。
+   */
+  recoverExpectedVersion?: number;
+  /**
+   * 【回収・候補なし】画面が見せていた識別子(地番 or 家屋番号)。
+   * ⚠**一致判定にのみ使う**(取得キーは常にDBの値)。表記ゆれは正規化して比べる。
+   */
+  recoverExpectedIdentifier?: string | null;
+  /**
+   * 【回収・候補なし】画面が見せていた所在(@codex #394 R23 P1)。
+   * ⚠**版番号だけでは足りない**: CSV取込の重複更新は version を上げずに address を
+   *   書き換える経路がある。所在が変わると探す区域が変わり、**別の物件の書類**を
+   *   取り込みかねない。provider が使う値は全部この検査に含める。
+   */
+  recoverExpectedAddress?: string | null;
   /**
    * 取得キーの上書き（所在検索で server 側再解決した候補の不動産番号／cond③）。
    * 指定時はこれを fetchRegistryPdf に使う（物件は番号未保持のため）。未指定は物件の realEstateNumber。
@@ -294,6 +332,23 @@ export const DEFAULT_REGISTRY_BASE_URL = "https://www.touki.or.jp";
  * 非PII・非secret（公開された公式サービスのパス）。
  */
 export const DEFAULT_REGISTRY_LOGIN_PATH = "/TeikyoUketsuke/";
+/**
+ * マイページ(請求一覧)のパス [確定・2026-08-19 probe15/16]。
+ * ⚠**回収(既に課金済みのPDFを取り込む)専用**の入口。ここから先で請求ボタンには
+ * 一切触れない(課金しない)。
+ */
+export /**
+ * 【回収】マイページ走査の上限ページ数(@codex #394 R4 P2)。
+ *
+ * ⚠回収の対象は**過去に買ったもの**なので、口座の履歴を遡る必要がある。
+ * 上限が小さいと、まだ期限内の購入が奥のページにあっても『見つかりません』と
+ * 言ってしまう(=嘘)。上限は大きく取り、それでも尽きたら**見つからないとは**
+ * **言わず**に『最後まで確認できなかった』として返す。
+ * 全体の予算(withRecoverTimeout)が別にあるので、走り続けることにはならない。
+ */
+const RECOVER_MAX_PAGES = 60;
+
+const REGISTRY_MYPAGE_PATH = "/TeikyoUketsuke/mypage/my-page";
 
 /**
  * 利用者のブラウザに開かせるログイン画面URL(A案・@codex #381 R1/R2 P2)。
@@ -1537,8 +1592,8 @@ function createPlaywrightRegistryPage(
       // secret/PII(所在/地番)を除去して残す。
       // 種別(土地/建物)を家屋番号の有無で判定し、検索キーも種別に合わせる(@codex P1)。
       // 建物なら家屋番号、土地なら地番で検索する(建物なのに地番で検索すると別物になる)。
-      const isBuilding = !!(input.buildingNumber && input.buildingNumber.trim().length > 0);
-      const rawKey = ((isBuilding ? input.buildingNumber : input.lotNumber) ?? "").trim();
+      // 選び方は純関数に集約(検査側とずれない・@codex #394 R8 P2)。
+      const { isBuilding, value: rawKey } = effectiveLocationIdentifier(input);
       // ダイアログの数字/ハイフン専用欄に合わせて正規化(「1番1」→「1-1」等・@codex P1)。
       const searchKey = normalizeChibanForDialog(rawKey);
       // 実況パネル: ステップは即時に文字で通知し、viewport スクショ (JPEG) は
@@ -1846,8 +1901,8 @@ function createPlaywrightRegistryPage(
         typeof input.paidDeadlineAt === "number" && Number.isFinite(input.paidDeadlineAt)
           ? input.paidDeadlineAt
           : null;
-      const isBuilding = !!(input.buildingNumber && input.buildingNumber.trim().length > 0);
-      const rawTarget = ((isBuilding ? input.buildingNumber : input.lotNumber) ?? "").trim();
+      // 選び方は純関数に集約(検査側とずれない・@codex #394 R8 P2)。
+      const { isBuilding, value: rawTarget } = effectiveLocationIdentifier(input);
       const targetKey = normalizeChibanForDialog(rawTarget);
       // 課金前(請求リストの行選択)と課金後(マイページの行同定)で共有する
       // 期待所在(都道府県込み)。確定前の #fuChibanKuiki 読み取り時に確定する。
@@ -2949,6 +3004,10 @@ function createPlaywrightRegistryPage(
             : pickChargedMyPageRow(scannedRows, {
                 targetKey,
                 kuiki: expectedKuiki,
+                // マイページの所在は先頭に種別が付く(probe16 実測)。
+                kindLabel: isBuilding ? "建物" : "土地",
+                // 同じ筆で所有者事項と全部事項の両方を買っていると取り違える。
+                certificateType: input.certificateType,
                 baselineReceiptNos: baselineTrIds,
               });
           if (picked && picked.readyNow) {
@@ -3101,6 +3160,428 @@ function createPlaywrightRegistryPage(
           throw err;
         }
         throw new RegistryFetchError("charged_but_failed");
+      }
+    },
+    /**
+     * 【回収】既に**課金済み**の謄本PDFを、再課金なしで取り込む(2026-08-19)。
+     *
+     * ⚠**このメソッドは課金しない**。請求(#btn_seikyu)・確定(fuBtnForward)・
+     * 確認ダイアログのＯＫには**一切触れない**(コードに呼び出しを書かない)。
+     * やることは「ログイン → マイページ → 請求済かつ対象の行を受付番号で選ぶ →
+     * 表示・保存(無料)」だけ。第8回テストのように課金は成立したのにPDFを
+     * 取り逃した場合の救済で、PDF取得期限内なら何度でも取り直せる。
+     */
+    async recoverRegistryPdfByLocation(input: {
+      address: string;
+      lotNumber?: string | null;
+      buildingNumber?: string | null;
+      certificateType: RegistryCertificateType;
+      /** 区域キーを作るときに末尾から外してよい候補(物件行の実値・@codex R12 P2)。 */
+      addressIdentifiers?: Array<string | null | undefined>;
+      baseUrl?: string;
+      live?: RegistryLiveReporter;
+    }): Promise<Buffer> {
+      const reportLive = (label: string): void => {
+        try {
+          const live = input.live;
+          if (!live) return;
+          const seq = live.step(label);
+          // 撮影は本流の await チェーンに乗せない(既存の実況と同じ流儀)。
+          void (async () => {
+            try {
+              const raw = await page.screenshot?.({
+                type: "jpeg",
+                quality: 55,
+                timeout: LIVE_SCREENSHOT_TIMEOUT_MS,
+              });
+              if (raw) {
+                live.attachShot(
+                  seq,
+                  raw instanceof Uint8Array ? raw : new Uint8Array(raw),
+                );
+              }
+            } catch {
+              // 撮影失敗は文字進行のみで続行。
+            }
+          })();
+        } catch {
+          // 実況は best-effort(本流を止めない)。
+        }
+      };
+      const domClick = (sel: string) =>
+        page.evaluate((s) => {
+          const el = document.querySelector(s);
+          if (el && typeof (el as { click?: unknown }).click === "function") {
+            (el as unknown as { click: () => void }).click();
+          }
+        }, sel);
+      const sleep = (ms: number) =>
+        page
+          .waitForFunction(() => false, undefined, { timeout: ms })
+          .catch(() => {});
+      const pagerEnabled = async (sel: string): Promise<boolean> =>
+        (await page.evaluate((s) => {
+          const b = document.querySelector(s) as {
+            disabled?: boolean;
+            className?: string;
+          } | null;
+          if (!b || b.disabled) return false;
+          const st = getComputedStyle(b as unknown as Element);
+          if (st.display === "none" || st.visibility === "hidden") return false;
+          return !/disabled/.test(String(b.className ?? ""));
+        }, sel)) === true;
+      const hasNext = () => pagerEnabled(REGISTRY_SELECTORS.myPageNextButton);
+      /** いま表示中のページを読む(表が『データ取得中』なら loading)。 */
+      const readCurrentPage = async (): Promise<{
+        loading: boolean;
+        rows: string[][];
+      }> => {
+        const raw = (await page.evaluate(
+          (json) => {
+            const { tableSel } = JSON.parse(json) as { tableSel: string };
+            const t = document.querySelector(tableSel);
+            if (!t || /データ取得中/.test(t.textContent ?? "")) {
+              return JSON.stringify({ loading: true, rows: [] });
+            }
+            const rows: string[][] = [];
+            for (const tr of Array.from(t.querySelectorAll("tbody tr"))) {
+              const tds = tr.querySelectorAll("td");
+              if (tds.length < 7) continue;
+              rows.push(
+                Array.from(tds)
+                  .slice(0, 12)
+                  .map((td) => (td as HTMLElement).innerHTML ?? ""),
+              );
+            }
+            return JSON.stringify({ loading: false, rows });
+          },
+          JSON.stringify({
+            probe: "mypage-scan",
+            tableSel: REGISTRY_SELECTORS.myPageTable,
+          }),
+        )) as string;
+        return JSON.parse(raw) as { loading: boolean; rows: string[][] };
+      };
+      /**
+       * 表の読み込みが終わるまで待つ(@codex #394 R11 P2)。
+       * ⚠固定待ちのままページ送りの判定や行の選択へ進むと、途中で止まったり
+       *   読み込み中の表を見て『無い』と言ったりする。
+       */
+      const waitPageLoaded = async (): Promise<boolean> => {
+        for (let i = 0; i < 4; i++) {
+          if (!(await readCurrentPage()).loading) return true;
+          await sleep(1500);
+        }
+        return !(await readCurrentPage()).loading;
+      };
+      /**
+       * 1ページ目まで戻る。**戻り切れたかを返す**(@codex #394 R5 P2)。
+       * ⚠戻り切れないまま選択に進むと、位置(ページ番号)の意味がずれ、
+       *   受付番号の読み戻しで必ず外れる=取り込めるはずのPDFを取り逃す。
+       *   走査が60ページまで進む以上、戻りも同じだけ必要。
+       */
+      const resetToFirst = async (): Promise<boolean> => {
+        for (let i = 0; i < RECOVER_MAX_PAGES + 2; i++) {
+          // ⚠**読み込み完了を待ってから** prev の状態を見る(@codex #394 R13 P2)。
+          //   『データ取得中』の間は prev が一時的に押せなくなることがあり、それを
+          //   「1ページ目に着いた」と読むと、以降のページ番号の意味がずれて
+          //   受付番号の読み戻しで必ず外す=取り込めるPDFを取り逃す。
+          if (!(await waitPageLoaded())) return false;
+          if (!(await pagerEnabled(REGISTRY_SELECTORS.myPagePrevButton))) {
+            return true;
+          }
+          await page.click(REGISTRY_SELECTORS.myPagePrevButton);
+          await sleep(800);
+        }
+        if (!(await waitPageLoaded())) return false;
+        return !(await pagerEnabled(REGISTRY_SELECTORS.myPagePrevButton));
+      };
+      /** 戻り切れないときの共通の切り上げ(『無い』とは言わない)。 */
+      const failNotRewound = (): never => {
+        console.warn(
+          "[registry-fetch] recover: could not rewind to first page (not charged)",
+        );
+        reportLive(
+          "一覧を先頭まで戻せませんでした(課金はしていません)。時間をおいて再度お試しください",
+        );
+        throw new RegistryFetchError("provider_error");
+      };
+      // 選び方は純関数に集約(検査側とずれない)。
+      const { isBuilding, value: rawTarget } =
+        effectiveLocationIdentifier(input);
+      const targetKey = normalizeChibanForDialog(rawTarget);
+      if (targetKey.length === 0) {
+        throw new RegistryFetchError("provider_error");
+      }
+      const base = input.baseUrl ?? DEFAULT_REGISTRY_BASE_URL;
+      try {
+        reportLive("取得済みの書類を探しています(課金はしません)");
+        await page.goto(base + REGISTRY_MYPAGE_PATH, {});
+        await page.waitForSelector(REGISTRY_SELECTORS.myPageTable, {
+          state: "attached",
+          timeout: DIALOG_RESULT_TIMEOUT_MS,
+        });
+        // 「すべて」表示にしてから全ページ走査(請求済に絞ると取りこぼす場面がある)。
+        await page.evaluate(
+          (json) => {
+            const { filterSel, label } = JSON.parse(json) as {
+              filterSel: string;
+              label: string;
+            };
+            const el = document.querySelector(filterSel) as HTMLSelectElement | null;
+            if (!el) return;
+            const opt = Array.from(el.options).find(
+              (o) => (o.textContent ?? "").trim() === label,
+            );
+            if (!opt) return;
+            if (el.value !== opt.value) {
+              el.value = opt.value;
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+          },
+          JSON.stringify({
+            probe: "recover-filter",
+            filterSel: REGISTRY_SELECTORS.myPageFilter,
+            label: "すべて",
+          }),
+        );
+        await sleep(2000);
+        // ⚠**掛けたつもりを信用しない**(@codex #394 R7 P2)。select には前回操作の
+        //   選択(「未請求」等)が残り得る。絞り込まれた一部だけを全履歴と思って走査
+        //   すると、買った書類を『無い』ことにしてしまう。選択中 option を実測する。
+        const allSelected =
+          (await page.evaluate(
+            (json) => {
+              const { filterSel } = JSON.parse(json) as { filterSel: string };
+              const el = document.querySelector(
+                filterSel,
+              ) as HTMLSelectElement | null;
+              const opt = el?.selectedOptions?.[0];
+              return ((opt?.textContent ?? "").trim() === "すべて") === true;
+            },
+            JSON.stringify({
+              probe: "filter-verify",
+              filterSel: REGISTRY_SELECTORS.myPageFilter,
+            }),
+          )) === true;
+        if (!allSelected) {
+          console.warn(
+            "[registry-fetch] recover: history filter not verified (not charged)",
+          );
+          reportLive(
+            "一覧の表示を『すべて』に切り替えられませんでした(課金はしていません)。時間をおいて再度お試しください",
+          );
+          throw new RegistryFetchError("provider_error");
+        }
+        const scanned: Array<
+          MyPageScanRow & { pageNo: number; indexInPage: number }
+        > = [];
+        if (!(await resetToFirst())) failNotRewound();
+        // ⚠**途中で諦めたことを覚えておく**(@codex #394 R4 P2)。上限で抜けたのに
+        //   『見つかりません』と言うと、まだ期限内の購入を『無い』ことにしてしまう。
+        let truncated = false;
+        for (let pageNo = 0; pageNo < RECOVER_MAX_PAGES; pageNo++) {
+          // ⚠『データ取得中』はまだ結論が出ていない。待ってから読む。それでも
+          //   読めなければ**『無い』とは言わず**見切れた扱いにする(@codex R5 P2)。
+          if (!(await waitPageLoaded())) {
+            truncated = true;
+            break;
+          }
+          const scan = await readCurrentPage();
+          let indexInPage = 0;
+          for (const cells of scan.rows) {
+            const parsed = parseMyPageRowCells(cells);
+            if (parsed) {
+              scanned.push({ ...parsed, pageNo, indexInPage });
+              indexInPage += 1;
+            }
+          }
+          if (!(await hasNext())) break;
+          if (pageNo === RECOVER_MAX_PAGES - 1) {
+            truncated = true; // まだ次があるのに上限で抜ける
+            break;
+          }
+          await page.click(REGISTRY_SELECTORS.myPageNextButton);
+          await sleep(1200);
+        }
+        // ⚠回収では基準(課金前の受付番号)が無いので、**請求済 × 期限内**を必須にする
+        // (未請求の行=まだ買っていない行を掴まない)。
+        const picked = pickChargedMyPageRow(scanned, {
+          targetKey,
+          // ⚠物件の所在は末尾に地番まで入っていることがある(本番データ実測)。
+          //   区域だけにしてから照合する(そのままだと残りが空になり正しい行を弾く)。
+          // ⚠所在の末尾には**対象でない方の識別子**(建物で探すときの地番)が
+          //   入っていることがある。対象→もう一方の順に外して区域だけにする。
+          // ⚠外してよい候補は「対象 → もう一方 → 物件行の実値」の順。
+          //   候補経由の建物取得は lotNumber を持たないので、物件行の値で補う。
+          kuiki: stripTrailingIdentifierFromKuiki(input.address, [
+            rawTarget,
+            isBuilding ? input.lotNumber : input.buildingNumber,
+            ...(input.addressIdentifiers ?? []),
+          ]),
+          kindLabel: isBuilding ? "建物" : "土地",
+          // 同じ筆で両方買っている場合に、要求した種類の行だけを取り込む。
+          certificateType: input.certificateType,
+          baselineReceiptNos: new Set<string>(),
+          // 回収は『いま取り込めるもの』が目的。最新が期限切れでも、
+          // まだ生きている購入があればそれを取り込む(@codex #394 R9 P2)。
+          requireReady: true,
+          // 種類が読めない行は採らない(回収には裏付けが無い・@codex R11 P2)。
+          strictCertificateType: true,
+        });
+        if ((!picked || !picked.readyNow) && truncated) {
+          // 履歴を最後まで見ていない=『無い』と断定できない。
+          console.warn(
+            "[registry-fetch] recover: history truncated (not charged)",
+            { pages: RECOVER_MAX_PAGES, scanned: scanned.length },
+          );
+          reportLive(
+            `履歴が多く、最後まで確認できませんでした(${RECOVER_MAX_PAGES}ページ分を確認・課金はしていません)`,
+          );
+          throw new RegistryFetchError("provider_error");
+        }
+        if (!picked || !picked.readyNow) {
+          // ⚠原因の切り分けは**数だけ**で行う(所在・地番・受付番号は出さない)。
+          //   一覧0件=たどり着けていない / 一覧はあるのに0一致=同定の問題、と分かれる。
+          const readyCount = scanned.filter(
+            (r) => r.status.trim() === "請求済" && r.expiry.trim() !== "",
+          ).length;
+          console.warn(
+            "[registry-fetch] recover: no matching row (not charged)",
+            { scanned: scanned.length, ready: readyCount },
+          );
+          reportLive(
+            `取得済みの書類が見つかりませんでした(一覧${scanned.length}件・取り込める状態${readyCount}件を確認・課金はしていません)`,
+          );
+          throw new RegistryFetchError("not_found");
+        }
+        const target = scanned.find((r) => r.receiptNo === picked.receiptNo);
+        if (!target) throw new RegistryFetchError("not_found");
+        if (!(await resetToFirst())) failNotRewound();
+        let hopped = 0;
+        for (; hopped < target.pageNo; hopped++) {
+          // ⚠**各ページの読み込み完了を待ってから**次の判定へ(@codex #394 R11 P2)。
+          //   読み込み中に hasNext を見ると途中で止まり、別のページで行を選ぶ。
+          if (!(await waitPageLoaded())) break;
+          if (!(await hasNext())) break;
+          await page.click(REGISTRY_SELECTORS.myPageNextButton);
+          await sleep(1200);
+        }
+        if (hopped !== target.pageNo) {
+          // ⚠**『無い』ではない**(@codex #394 R14 P2)。受付番号は走査で見つけて
+          //   いる。移動できなかっただけなので、そう伝える(『無い』と言うと
+          //   期限内の書類を諦めさせてしまう)。
+          console.warn(
+            "[registry-fetch] recover: could not reach the target page (not charged)",
+            { wanted: target.pageNo, reached: hopped },
+          );
+          reportLive(
+            "一覧の目的のページまで進めませんでした(課金はしていません)。時間をおいて再度お試しください",
+          );
+          throw new RegistryFetchError("provider_error");
+        }
+        // 目的のページでも、選ぶ前に読み込み完了を確かめる。
+        if (!(await waitPageLoaded())) {
+          reportLive(
+            "一覧の読み込みが終わりませんでした(課金はしていません)。時間をおいて再度お試しください",
+          );
+          throw new RegistryFetchError("provider_error");
+        }
+        // 選んだ行の受付番号を読み戻して一致を実測(位置ズレで別の筆を取り込まない)。
+        // ⚠走査と選択の間に口座へ**別の購入が入る**と位置がずれる(共有口座)。
+        //   検知したら**いまのページを読み直して受付番号で位置を取り直す**
+        //   (@codex #394 R15 P2)。それでも駄目なら『無い』ではなく一時的な失敗。
+        const selectRowAt = async (
+          rowIndex: number,
+        ): Promise<MyPageScanRow | null> => {
+          const json = (await page.evaluate(
+            (raw) => {
+              const { tableSel, rowIndex: idx } = JSON.parse(raw) as {
+                tableSel: string;
+                rowIndex: number;
+              };
+              const rows = Array.from(
+                document.querySelectorAll(tableSel + " tbody tr"),
+              ).filter((tr) => tr.querySelectorAll("td").length >= 7);
+              const row = rows[idx] ?? null;
+              if (!row) return JSON.stringify({ result: "not-found" });
+              for (const cb of Array.from(
+                document.querySelectorAll(
+                  tableSel + " tbody " + 'input[type="checkbox"]',
+                ),
+              ) as HTMLInputElement[]) {
+                if (cb.checked) cb.click();
+              }
+              const cb = row.querySelector(
+                'input[type="checkbox"]',
+              ) as HTMLInputElement | null;
+              if (!cb) return JSON.stringify({ result: "select-failed" });
+              if (!cb.checked) cb.click();
+              const checkedRows = Array.from(
+                document.querySelectorAll(tableSel + " tbody tr"),
+              ).filter((tr) => {
+                const x = tr.querySelector(
+                  'input[type="checkbox"]',
+                ) as HTMLInputElement | null;
+                return x?.checked === true;
+              });
+              if (checkedRows.length !== 1) {
+                return JSON.stringify({ result: "select-failed" });
+              }
+              const cells = Array.from(checkedRows[0].querySelectorAll("td"))
+                .slice(0, 12)
+                .map((td) => (td as HTMLElement).innerHTML ?? "");
+              return JSON.stringify({ result: "checked", cells });
+            },
+            JSON.stringify({
+              probe: "mypage-select",
+              tableSel: REGISTRY_SELECTORS.myPageTable,
+              rowIndex,
+            }),
+          )) as string;
+          const parsedSel = JSON.parse(json) as {
+            result: string;
+            cells?: string[];
+          };
+          if (parsedSel.result !== "checked") return null;
+          return parseMyPageRowCells(parsedSel.cells ?? []);
+        };
+        let selected = await selectRowAt(target.indexInPage);
+        if (!selected || selected.receiptNo !== picked.receiptNo) {
+          // 位置がずれた。いまのページを読み直し、受付番号で位置を取り直す。
+          const rescan = await readCurrentPage();
+          const movedTo = rescan.loading
+            ? -1
+            : rescan.rows
+                .map((cells) => parseMyPageRowCells(cells))
+                .findIndex((row) => row?.receiptNo === picked.receiptNo);
+          selected = movedTo >= 0 ? await selectRowAt(movedTo) : null;
+        }
+        if (!selected || selected.receiptNo !== picked.receiptNo) {
+          console.warn(
+            "[registry-fetch] recover: row moved before selection (not charged)",
+          );
+          reportLive(
+            "一覧が更新されて対象の行を選べませんでした(課金はしていません)。時間をおいて再度お試しください",
+          );
+          throw new RegistryFetchError("provider_error");
+        }
+        reportLive("取得済みの書類(PDF)を保存しています(課金はしていません)");
+        const [download] = await Promise.all([
+          page.waitForEvent("download", { timeout: PAID_DOWNLOAD_WAIT_MS }),
+          domClick(REGISTRY_SELECTORS.downloadButton),
+        ]);
+        const stream = await download.createReadStream();
+        if (!stream) throw new RegistryFetchError("provider_error");
+        return await readStreamToBuffer(stream);
+      } catch (err) {
+        if (err instanceof RegistryFetchError) throw err;
+        console.warn(
+          "[registry-fetch] recover failed (not charged):",
+          summarizeRegistrySearchError(err),
+        );
+        if (isTimeoutError(err)) throw new RegistryFetchError("timeout");
+        throw new RegistryFetchError("provider_error");
       }
     },
     async downloadRegistryPdf() {
@@ -3482,8 +3963,107 @@ export async function runRegistryAutoFetch(
   // ⚠**種別は1か所で確定させ、鍵と provider 請求の両方で同じ値を使う**。
   //   片方だけ owner に残すと all を買ったのに owner 鍵で照合し二重課金ガードが破れる。
   const certificateType: RegistryCertificateType = args.certificateType ?? DEFAULT_CERTIFICATE_TYPE;
+  // 回収モード: 課金しない経路(既に買った書類の取り込み)。
+  const isRecover = args.mode === "recover";
   const willPurchaseByLocation =
-    !!args.locationCandidate && !(args.realEstateNumber ?? property.realEstateNumber)?.trim();
+    !isRecover &&
+    !!args.locationCandidate &&
+    !(args.realEstateNumber ?? property.realEstateNumber)?.trim();
+  // ⚠回収でも「対象と所在があること・地番の書き方が読めること」は同じ規則で検査する
+  // (別の筆を取り込まないため)。違うのは課金スイッチと台帳ガードを通らない点だけ。
+  // ⚠回収は**候補が無くても物件自身の地番で実行できる**(@codex #394 R6 P1)。
+  //   取込が途中まで進むと物件に不動産番号が入り、所在検索が「対象外」になるため、
+  //   検索の中にある入口だけだと**買った書類に二度と手が届かない**。
+  //   ⚠課金しない経路なので候補キャッシュ(誤課金防止の仕組み)に依存しなくてよい。
+  //   取り違え防止は同定側(区域+地番+種別+謄本の種類+請求済+期限内)が担う。
+  const recoverLocation = isRecover
+    ? (args.locationCandidate ??
+      // ⚠両方持つ物件は**指定された方だけ**を対象にする(@codex #394 R13 P1)。
+      //   指定が無ければ従来どおり(家屋番号があれば建物)。
+      (args.recoverKind === "land"
+        ? { lotNumber: property.lotNumber, buildingNumber: null }
+        : args.recoverKind === "building"
+          ? { lotNumber: null, buildingNumber: property.buildingNumber }
+          : {
+              lotNumber: property.lotNumber,
+              buildingNumber: property.buildingNumber,
+            }))
+    : args.locationCandidate;
+  if (isRecover) {
+    // ⚠**provider が実際に使う識別子**を検査する(建物優先。@codex #394 R8 P2)。
+    const lotOrBuilding = effectiveLocationIdentifier(
+      recoverLocation ?? {},
+    ).value;
+    // ⚠**候補なしの回収は、画面が見せていた内容と一致するときだけ実行する**
+    //   (@codex #394 R20 P1)。確認の後に誰かが地番を編集していると、利用者が
+    //   見たものと違う筆のPDFを取り込み、所有者の紐付けまで書き換わる。
+    //   候補経由には指紋(expectedFingerprint)があるので、そちらは従来どおり。
+    //   ⚠送られた値は**一致判定にのみ使う**(取得キーは常にDBの値)。
+    if (!args.locationCandidate) {
+      // ⚠**両方持つ物件で種別の指定が無ければ実行しない**(@codex #394 R21 P1)。
+      //   既定の選び方(家屋番号優先)に黙って倒すと、土地のつもりで建物のPDFと
+      //   所有者情報を取り込みかねない。選ばせてから実行する。
+      if (
+        args.recoverKind === undefined &&
+        (property.lotNumber ?? "").trim() &&
+        (property.buildingNumber ?? "").trim()
+      ) {
+        throw new ApiError(
+          409,
+          "土地と建物のどちらを取り込むかを選んでください",
+          "REGISTRY_RECOVER_KIND_REQUIRED",
+        );
+      }
+      if (
+        args.recoverExpectedVersion !== undefined &&
+        property.version !== args.recoverExpectedVersion
+      ) {
+        throw new ApiError(
+          409,
+          "物件情報が変わりました。画面を開き直してからもう一度お試しください",
+          "REGISTRY_RECOVER_PROPERTY_CHANGED",
+        );
+      }
+      const expectedAddress = (args.recoverExpectedAddress ?? "").trim();
+      if (
+        expectedAddress &&
+        normalizeKuikiForCompare(expectedAddress) !==
+          normalizeKuikiForCompare(property.address ?? "")
+      ) {
+        throw new ApiError(
+          409,
+          "物件情報が変わりました。画面を開き直してからもう一度お試しください",
+          "REGISTRY_RECOVER_PROPERTY_CHANGED",
+        );
+      }
+      const expectedId = (args.recoverExpectedIdentifier ?? "").trim();
+      if (
+        expectedId &&
+        normalizeChibanForDialog(expectedId) !==
+          normalizeChibanForDialog(lotOrBuilding)
+      ) {
+        throw new ApiError(
+          409,
+          "物件情報が変わりました。画面を開き直してからもう一度お試しください",
+          "REGISTRY_RECOVER_PROPERTY_CHANGED",
+        );
+      }
+    }
+    if (!lotOrBuilding || !(property.address ?? "").trim()) {
+      throw new ApiError(
+        409,
+        "取り込む対象が特定できません。物件の所在・地番をご確認ください",
+        "REGISTRY_RECOVER_TARGET_NOT_FOUND",
+      );
+    }
+    if (!isReadableChiban(lotOrBuilding)) {
+      throw new ApiError(
+        422,
+        "地番の書き方が読み取れません。地図に表示されたとおりに入力してください",
+        "REGISTRY_OBTAIN_IDENTIFIER_INVALID",
+      );
+    }
+  }
   if (willPurchaseByLocation && args.locationCandidate) {
     // ⚠有料取得の専用オプトイン(@codex #345 P1)。所在検索(無料)の校正フラグだけで
     // 課金操作まで露出させない。実課金1回の通しテストを発注者承認のもとで終えるまで、
@@ -3495,11 +4075,10 @@ export async function runRegistryAutoFetch(
         "REGISTRY_PURCHASE_NOT_ENABLED",
       );
     }
-    const lotOrBuilding = (
-      args.locationCandidate.lotNumber ??
-      args.locationCandidate.buildingNumber ??
-      ""
-    ).trim();
+    // ⚠検査する値と provider が探す値を必ず一致させる(建物優先。@codex #394 R8 P2)。
+    const lotOrBuilding = effectiveLocationIdentifier(
+      args.locationCandidate,
+    ).value;
     if (!lotOrBuilding || !(property.address ?? "").trim()) {
       // 買う対象(地番/家屋番号)か所在が無い候補は購入できない(課金前・fail-closed)。
       throw new ApiError(
@@ -3561,7 +4140,11 @@ export async function runRegistryAutoFetch(
       // @codex P2: 所在検索取得は「検索キー項目（指紋）」も一致条件に含め、read〜lock の間に
       //   version を上げない経路（取込・PDF処理等）で編集されていても lock を失敗させる。
       //   これで override（resolve 時の番号）は「lock した行の指紋 = resolve 時の指紋」の時だけ使う。
-      ...(args.expectedFingerprint !== undefined
+      // ⚠**回収(候補なし)も同じ扱いにする**(@codex #394 R24 P1)。確認時点の検査を
+      //   通っても、その後に version を上げない経路(CSV取込の重複更新など)で所在や
+      //   地番が変わると、**別の対象になった物件**にPDFと所有者情報を貼ってしまう。
+      //   取得キーに使う項目をロック条件に入れ、変わっていたら lock を失敗させる。
+      ...(args.expectedFingerprint !== undefined || (isRecover && !args.locationCandidate)
         ? {
             address: property.address,
             lotNumber: property.lotNumber,
@@ -3606,16 +4189,46 @@ export async function runRegistryAutoFetch(
     // cond③: 所在検索の候補取得では server 再解決した override を優先（物件は番号未保持）。
     // 段階②: 地番候補の有料取得は location を渡す（番号があれば番号を優先）。
     const effectiveNumber = args.realEstateNumber ?? property.realEstateNumber;
-    const fetchResult = await provider.fetchRegistryPdf({
-      realEstateNumber: effectiveNumber,
+    if (isRecover) {
+      // 回収は provider 側の専用メソッド(課金操作を含まない実装)でのみ行う。
+      if (!provider.recoverRegistryPdf) {
+        throw new ApiError(
+          501,
+          "この環境では取得済みの書類の取り込みに対応していません",
+          "REGISTRY_RECOVER_NOT_SUPPORTED",
+        );
+      }
+    }
+    const fetchOne = isRecover
+      ? provider.recoverRegistryPdf!.bind(provider)
+      : provider.fetchRegistryPdf.bind(provider);
+    const fetchResult = await fetchOne({
+      // ⚠回収は**番号を渡さない**(提出前レビュー指摘)。番号が入っていると、
+      //   provider 実装の「番号があれば番号を優先」に乗って**課金フロー**
+      //   (確定→請求)へ落ちる余地が残る。回収は所在だけで引く。
+      realEstateNumber: isRecover ? null : effectiveNumber,
       location:
-        args.locationCandidate && !effectiveNumber?.trim()
+        (isRecover ? recoverLocation : args.locationCandidate) &&
+        (isRecover || !effectiveNumber?.trim())
           ? {
               address: property.address ?? "",
-              lotNumber: args.locationCandidate.lotNumber,
-              buildingNumber: args.locationCandidate.buildingNumber,
+              lotNumber: (isRecover ? recoverLocation : args.locationCandidate)!
+                .lotNumber,
+              buildingNumber: (isRecover
+                ? recoverLocation
+                : args.locationCandidate)!.buildingNumber,
               // ⚠鍵(purchaseKeyHash)と同じ選択値を使う(上で確定した certificateType)。
               certificateType,
+              // 【回収】区域キーを作るときに末尾から外してよい候補(物件行の実値)。
+              // 候補経由の建物取得は地番を持たないため、ここで補う(@codex R12 P2)。
+              ...(isRecover
+                ? {
+                    addressIdentifiers: [
+                      property.lotNumber,
+                      property.buildingNumber,
+                    ],
+                  }
+                : {}),
             }
           : null,
       ref: property.id,
@@ -3656,6 +4269,36 @@ export async function runRegistryAutoFetch(
             "[registry-fetch] CRITICAL: charged but ledger persist failed; aborting before attach",
           );
           throw new RegistryFetchError("charged_but_failed");
+        }
+      }
+
+      // ⚠**貼る直前にもう一度、対象が同じ物件のままかを確かめる**(@codex #394 R26 P1)。
+      //   ロックの一致条件は updateMany の**その瞬間**しか効かない。数分かかる取得の
+      //   最中に、scheduled を見ない・version を上げない経路(CSV取込の重複更新)で
+      //   所在や地番が変わると、**別の対象になった物件**にPDFと所有者情報を貼る。
+      //   ⚠回収は課金していないので、ここで中止しても失うものは無い(やり直せる)。
+      if (isRecover) {
+        const fresh = await prisma.property.findUnique({
+          where: { id: propertyId },
+          select: {
+            address: true,
+            lotNumber: true,
+            buildingNumber: true,
+            realEstateNumber: true,
+          },
+        });
+        if (
+          !fresh ||
+          fresh.address !== property.address ||
+          fresh.lotNumber !== property.lotNumber ||
+          fresh.buildingNumber !== property.buildingNumber ||
+          fresh.realEstateNumber !== property.realEstateNumber
+        ) {
+          throw new ApiError(
+            409,
+            "取り込みの途中で物件情報が変わりました。画面を開き直してからもう一度お試しください",
+            "REGISTRY_RECOVER_PROPERTY_CHANGED",
+          );
         }
       }
 
@@ -3705,6 +4348,19 @@ export async function runRegistryAutoFetch(
       if (purchaseKeyHash && !result.attachmentId) {
         throw new RegistryFetchError("charged_but_failed");
       }
+      // 回収も成果物はPDFの添付。保存できていなければ成功にしない。
+      // ⚠ただし**課金していない**ので charged_but_failed には**しない**
+      // (利用者に「お金が動いたかも」と誤警告しないため)。
+      if (isRecover && !result.attachmentId) {
+        throw new ApiError(
+          422,
+          // ⚠やり直せることは伝えるが、**取込の記録が重複し得る**ことも隠さない
+        //   (@codex #394 R6 P2: 保存の前段(取込記録・物件の項目・所有者)は既に
+        //   確定しているため、再実行は同じPDFをもう一度取り込む)。
+        "取得済みの謄本を保存できませんでした。物件の添付をご確認ください(やり直せますが、取込の記録が重複することがあります)",
+          "REGISTRY_RECOVER_ATTACH_FAILED",
+        );
+      }
 
       // 成功 → scheduled から obtained へ確定。
       await prisma.property.update({
@@ -3740,6 +4396,8 @@ export async function runRegistryAutoFetch(
         providerRequestId: fetchResult.providerRequestId,
         fetchedAt: fetchResult.fetchedAt.toISOString(),
         status: "success",
+        // お金の記録の読み分け: purchase=今回買った / recover=買ってあった物の取り込み。
+        mode: isRecover ? "recover" : "purchase",
         action: result.action,
         ownersMatched: result.ownersMatched ?? 0,
         ownersCreated: result.ownersCreated ?? 0,
@@ -3822,6 +4480,7 @@ export async function runRegistryAutoFetch(
           propertyId,
           source: provider.name,
           status: "failed",
+          mode: isRecover ? "recover" : "purchase",
           providerErrorCode: err.code,
           confirmed: true,
         },

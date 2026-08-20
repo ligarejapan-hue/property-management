@@ -1932,6 +1932,67 @@ export async function obtainRegistryByCandidate(
   });
 }
 
+/**
+ * 【回収】既に購入済みの謄本を、再課金なしで取り込む(2026-08-19)。
+ * 課金経路(obtainRegistryByCandidate)とは server 側で別扱いになり、
+ * 有料取得のスイッチが入っていなくても使える(課金操作を一切しないため)。
+ */
+export async function recoverRegistryByCandidate(
+  propertyId: string,
+  candidateRef: string,
+  certificateType: "owner" | "all" = "owner",
+  liveRef?: string,
+): Promise<unknown> {
+  return apiFetch(`/api/properties/${propertyId}/registry/auto-fetch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      confirmed: true,
+      candidateRef,
+      certificateType,
+      mode: "recover",
+      ...(liveRef ? { liveRef } : {}),
+    }),
+  });
+}
+
+/**
+ * 【回収・候補なし】物件自身の地番で、購入済みの謄本を取り込む(2026-08-19)。
+ * 取込が途中まで進んだ物件は不動産番号が入って所在検索の対象外になるため、
+ * 候補が取れない状態でも救えるようにする(課金しない経路)。
+ */
+export async function recoverRegistryFromProperty(
+  propertyId: string,
+  certificateType: "owner" | "all" = "owner",
+  liveRef?: string,
+  /** 物件が地番と家屋番号の両方を持つときに、どちらを取り込むか。 */
+  recoverKind?: "land" | "building",
+  /**
+   * 画面が見せていた版番号と識別子(@codex #394 R20 P1)。
+   * ⚠server は**一致判定にのみ使う**(取得キーは常にDBの値)。ずれていれば 409。
+   */
+  expected?: {
+    version: number;
+    identifier?: string | null;
+    address?: string | null;
+  },
+): Promise<unknown> {
+  return apiFetch(`/api/properties/${propertyId}/registry/auto-fetch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      confirmed: true,
+      certificateType,
+      mode: "recover",
+      ...(recoverKind ? { recoverKind } : {}),
+      ...(expected ? { expectedVersion: expected.version } : {}),
+      ...(expected?.identifier ? { expectedIdentifier: expected.identifier } : {}),
+      ...(expected?.address ? { expectedAddress: expected.address } : {}),
+      ...(liveRef ? { liveRef } : {}),
+    }),
+  });
+}
+
 // ---- 謄本 一括取得(PR-B・薄い版) ----
 
 export interface RegistryFetchJobCreateResult {

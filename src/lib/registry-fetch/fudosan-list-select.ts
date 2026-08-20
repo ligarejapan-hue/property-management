@@ -160,12 +160,84 @@ export interface MyPageScanRow {
   receiptNo: string;
   /** 所在セル(列4)=地番区域+地番。⚠PII: Node のメモリ内のみで扱い、ログに出さない。 */
   shozai: string;
+  /**
+   * 請求種別セル(列2)の文字。例「不動産登記 （所有者事項）」(probe16 実測)。
+   * ⚠所有者事項と全部事項は**別の商品**。同じ筆で両方買っていると、ここを見ないと
+   *   取り違える(@codex #394 P1)。
+   */
+  seikyuType: string;
   /** 状態(列5)。「請求済」のみDL可。 */
   status: string;
   /** 請求日時(td[6] の1段目)。文字列比較で新しさを判定(表示順に依存しない)。 */
   when: string;
   /** PDF有効期限(列9)。空=準備前・「期間超過」=DL不可。 */
   expiry: string;
+}
+
+/**
+ * 物件の所在(address)の**末尾に入っている対象地番**を外し、照合用の区域だけにする。
+ *
+ * ⚠なぜ要るか(2026-08-19 本番データ実測): properties.address は
+ * 「神奈川県横浜市南区井土ケ谷中町69-2」のように**地番まで入っている**ことがある。
+ * これをそのまま区域キーにすると、マイページの所在「土地・…中町６９－２」から
+ * 前半を除いた残りが**空**になり、`pickChargedMyPageRow` の②(残りが地番として
+ * 説明でき、対象地番と完全一致)を満たせず、**正しい行まで弾いてしまう**。
+ *
+ * ⚠外すのは**末尾が対象地番と一致するときだけ**。それ以外は1文字も削らない
+ * (削ると区域が短くなり「中町」が「中町東」の行を通す=別の筆に化ける)。
+ * 判定は正規化後(NFKC・空白除去)の文字列で行い、戻り値も正規化後の区域キー。
+ */
+export function stripTrailingChibanFromKuiki(
+  address: string,
+  targetKey: string,
+): string {
+  const full = normalizeKuikiForCompare(address);
+  const target = targetKey.trim();
+  if (!full || !target) return full;
+  // 末尾から順に切り出し、対象地番そのものになる切れ目を探す(通常は1つだけ)。
+  for (let cut = full.length - 1; cut >= 1; cut--) {
+    // ⚠**数字/ハイフンの途中では切らない**(提出前レビュー指摘)。
+    //   「…中町169-2」から「69-2」を切り出すと区域が「…中町1」になり、
+    //   マイページの「…中町１６９－２」の行が残り「69-2」で一致してしまう
+    //   =**別の筆(169-2)のPDFを69-2の物件に貼る**。境界でなければ諦める
+    //   (=見つからない扱い)方が安全。registryRowMatchesChiban と同じ規則。
+    const prev = full[cut - 1];
+    if (prev !== undefined && /[0-9-]/.test(prev)) continue;
+    const tail = full.slice(cut);
+    if (!isReadableChiban(tail)) continue;
+    if (normalizeChibanForDialog(tail) !== target) continue;
+    return full.slice(0, cut);
+  }
+  return full;
+}
+
+/**
+ * 所在の末尾に付いている識別子を外して区域だけにする(@codex #394 R9 P2)。
+ *
+ * ⚠建物(家屋番号)で探すとき、物件の所在の末尾には**地番**が入っていることが
+ * ある(実データ: 「…中町69-2」)。対象キー(家屋番号)しか見ないと外せず、
+ * 区域が合わずに『見つかりません』になる。**対象 → もう一方**の順に試す。
+ */
+export function stripTrailingIdentifierFromKuiki(
+  address: string,
+  keys: Array<string | null | undefined>,
+): string {
+  const out = normalizeKuikiForCompare(address);
+  for (const key of keys) {
+    const k = (key ?? "").trim();
+    if (!k) continue;
+    const stripped = stripTrailingChibanFromKuiki(out, normalizeChibanForDialog(k));
+    if (stripped !== out) return stripped;
+  }
+  return out;
+}
+
+
+/** 取り込める行か(請求済 × 期限が入っていて期間超過でない)。 */
+function isDownloadableRow(r: { status: string; expiry: string }): boolean {
+  const status = r.status.trim();
+  const expiry = r.expiry.trim();
+  return status === "請求済" && expiry !== "" && expiry !== "期間超過";
 }
 
 /**
@@ -189,6 +261,11 @@ export function pickChargedMyPageRow(
     targetKey: string;
     kuiki: string;
     /**
+     * 期待する不動産種別(「土地」/「建物」)。マイページの所在セルは先頭に
+     * 種別が付く(2026-08-19 probe16 実測)。地番での請求=土地 / 家屋番号=建物。
+     */
+    kindLabel: string;
+    /**
      * 課金**前**に控えた既存行の**受付番号**(@codex #390 R2 P1)。ここに載っている
      * 行は「今回の課金で作られた行」ではあり得ないため同定から除外する。
      * 新行が非同期でまだ表に出ていない間に、同じ筆の**古い**請求済行だけが
@@ -197,6 +274,29 @@ export function pickChargedMyPageRow(
      * (2026-08-19 第8回テストの実害: 買った行が基準に含まれ永久に見つからなかった)。
      */
     baselineReceiptNos: ReadonlySet<string>;
+    /**
+     * 期待する謄本の種類(owner=所有者事項 / all=全部事項)。同じ筆で両方買って
+     * いると種別を見ないと取り違える(@codex #394 P1)。
+     * ⚠**読めた上での不一致だけ弾く**。表記が読めない行は落とさない: 課金後の
+     *   同定でここを fail-closed にすると、表記違いだけで**払ったのにPDFを失う**。
+     */
+    certificateType: "owner" | "all";
+    /**
+     * 【回収】**取り込める行**(請求済 × 期限内)だけを候補にする(@codex #394 R9 P2)。
+     * ⚠有料取得では **false のまま**にする: あちらは『いま買った行』の同定なので、
+     *   まだ準備中(請求中)でも**その行**でなければならない。古い ready 行へ
+     *   乗り換えると、払った分と違うPDFを『今回の結果』として添付してしまう。
+     * 回収は逆に『買ってあるもののうち、いま取り込めるもの』が目的なので true。
+     */
+    requireReady?: boolean;
+    /**
+     * 【回収】謄本の種類が**読み取れた行だけ**を候補にする(@codex #394 R11 P2)。
+     * 回収には『どの種類を買ったか』の裏付け(課金前の基準)が無いので、表記が
+     * 読めない行を通すと、所有者事項と全部事項を取り違えたまま添付し得る。
+     * ⚠有料取得では **false のまま**: あちらは『いま買った行』が分かっている。
+     *   表記が想定と違うだけで弾くと、**払ったのにPDFを失う**(損害が逆転)。
+     */
+    strictCertificateType?: boolean;
   },
 ): { receiptNo: string; readyNow: boolean; status: string } | null {
   const kuikiKey = normalizeKuikiForCompare(expected.kuiki);
@@ -206,7 +306,18 @@ export function pickChargedMyPageRow(
       // 受付番号を持たない行=未請求(まだ買っていない)。買った行は必ず持つ。
       if (r.receiptNo.trim() === "") return false;
       if (expected.baselineReceiptNos.has(r.receiptNo.trim())) return false;
-      const cellKey = normalizeKuikiForCompare(r.shozai);
+      // ⚠所在セルの先頭の「土地・」「建物・」を外してから比べる(実測)。
+      const split = splitMyPageShozai(r.shozai);
+      if (split.kindLabel !== expected.kindLabel) return false;
+      // 請求種別(所有者事項/全部事項)。読めた場合だけ突き合わせる。
+      const rowCert = mypageCertificateTypeOf(r.seikyuType);
+      if (rowCert === null) {
+        // 読めない表記: 回収は採らない/有料取得は採る(上のコメントの理由)。
+        if (expected.strictCertificateType === true) return false;
+      } else if (rowCert !== expected.certificateType) {
+        return false;
+      }
+      const cellKey = normalizeKuikiForCompare(split.rest);
       if (!cellKey.startsWith(kuikiKey)) return false;
       const remainder = cellKey.slice(kuikiKey.length);
       return (
@@ -215,12 +326,14 @@ export function pickChargedMyPageRow(
         normalizeChibanForDialog(remainder) === expected.targetKey
       );
     })
+    .filter((r) =>
+      expected.requireReady === true ? isDownloadableRow(r) : true,
+    )
     .sort((a, b) => (a.when < b.when ? 1 : a.when > b.when ? -1 : 0));
   if (matches.length === 0) return null;
   const best = matches[0];
   const status = best.status.trim();
-  const expiry = best.expiry.trim();
-  const readyNow = status === "請求済" && expiry !== "" && expiry !== "期間超過";
+  const readyNow = isDownloadableRow(best);
   return { receiptNo: best.receiptNo.trim(), readyNow, status };
 }
 
@@ -280,9 +393,50 @@ export function parseMyPageRowCells(cellHtmls: string[]): MyPageScanRow | null {
     // ⚠受付番号は td[6] の2段目。td[1](No.)は並び順で変わるので使わない。
     receiptNo: dateAndReceipt[1] ?? "",
     when: dateAndReceipt[0] ?? "",
+    seikyuType: plain(cellHtmls[2] ?? ""),
     shozai: plain(cellHtmls[4] ?? ""),
     status: plain(cellHtmls[5] ?? ""),
     // 期限も `2026/<br>08/24` のように改行を含むため、行を連結して1つの文字列にする。
     expiry: lines(cellHtmls[9] ?? "").join(""),
   };
+}
+
+/**
+ * マイページの請求種別セルから**謄本の種類**を読む(読めなければ null)。
+ *
+ * 実測(probe16): 「不動産登記（所有者事項）」。全部事項の表記は未実測のため、
+ * **読めた場合だけ**判断材料にする(下の照合は『読めた上での不一致』だけ弾く)。
+ */
+export function mypageCertificateTypeOf(
+  raw: string,
+): "owner" | "all" | null {
+  const text = (raw ?? "").normalize("NFKC").replace(/\s+/g, "");
+  if (text.includes("所有者事項")) return "owner";
+  if (text.includes("全部事項")) return "all";
+  return null;
+}
+
+/** マイページの所在セルの先頭に付く不動産種別(2026-08-19 probe16 実測)。 */
+export const MYPAGE_KIND_PREFIXES = ["土地・", "建物・"] as const;
+
+/**
+ * マイページ一覧の所在セルから**種別の接頭辞**を分離する。
+ *
+ * ⚠実測(probe16): マイページの所在は `土地・神奈川県横浜市南区井土ケ谷中町６９－２`
+ * のように**先頭に「土地・」「建物・」が付く**(請求リスト側の hidden とは形が違う)。
+ * これを外さずに「所在の前半が期待の地番区域で始まる」を判定すると**常に不一致**に
+ * なり、課金後に自分が買った行を永久に見つけられない。
+ * 接頭辞は種別の裏取りにも使える(地番での請求=土地 / 家屋番号での請求=建物)。
+ */
+export function splitMyPageShozai(raw: string): {
+  kindLabel: string;
+  rest: string;
+} {
+  const text = raw.trim();
+  for (const prefix of MYPAGE_KIND_PREFIXES) {
+    if (text.startsWith(prefix)) {
+      return { kindLabel: prefix.slice(0, -1), rest: text.slice(prefix.length) };
+    }
+  }
+  return { kindLabel: "", rest: text };
 }

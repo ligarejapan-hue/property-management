@@ -44,6 +44,14 @@ export interface RegistryFetchRequest {
     buildingNumber?: string | null;
     /** 謄本種別（所有者事項=owner / 全部事項=all）。 */
     certificateType: RegistryCertificateType;
+    /**
+     * 【回収のみ】物件行が持っている識別子(地番・家屋番号)。
+     * 物件の所在は末尾に地番/家屋番号が入っていることがあり、区域キーを作るときに
+     * **末尾から外してよい候補**として使う(@codex #394 R12 P2)。
+     * ⚠探す対象は変えない(選ぶのは effectiveLocationIdentifier)。候補経由の建物取得は
+     *   lotNumber を持たないため、これが無いと区域が合わず『見つかりません』になる。
+     */
+    addressIdentifiers?: Array<string | null | undefined>;
   } | null;
   /**
    * トレース用の非PII参照ラベル（例: ImportJobId / 物件UUID）。
@@ -206,6 +214,13 @@ export interface RegistryFetchProvider {
    * 返す候補（秘匿情報）は呼び出し側が log / AuditLog / error response に出さない契約。
    */
   searchCandidates?(request: RegistrySearchRequest): Promise<RegistryCandidate[]>;
+  /**
+   * 【回収】既に**課金済み**の謄本PDFを、再課金なしで取り込む(2026-08-19・任意実装)。
+   * ⚠課金操作(請求・確定・確認ダイアログのＯＫ)を**一切行わない**こと。
+   * 対象が見つからない/期限切れは RegistryFetchError("not_found")。
+   */
+  recoverRegistryPdf?(request: RegistryFetchRequest): Promise<RegistryFetchResult>;
+
   /**
    * 所在検索（searchCandidates）が実際に利用可能かの宣言（PR-2b-2）。
    * searchCandidates メソッドが存在しても、実 adapter の searchByLocation が未実装の provider

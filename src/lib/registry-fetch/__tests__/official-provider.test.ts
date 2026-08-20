@@ -29,6 +29,13 @@ function makeFakePage(
       buildingNumber?: string | null;
       certificateType: "owner";
     }) => Promise<Buffer>;
+    /** 【回収】課金なしの取り込み。指定時のみ adapter が対応している状態を模す。 */
+    recoverRegistryPdfByLocation: (input: {
+      address: string;
+      lotNumber?: string | null;
+      buildingNumber?: string | null;
+      certificateType: "owner";
+    }) => Promise<Buffer>;
   }> = {},
 ): RegistryBrowserPage & { calls: string[]; closed: boolean } {
   const state = { calls: [] as string[], closed: false };
@@ -48,6 +55,19 @@ function makeFakePage(
           }) {
             state.calls.push("fetchByLocation");
             return over.fetchByLocationCandidate!(input);
+          },
+        }
+      : {}),
+    ...(over.recoverRegistryPdfByLocation
+      ? {
+          async recoverRegistryPdfByLocation(input: {
+            address: string;
+            lotNumber?: string | null;
+            buildingNumber?: string | null;
+            certificateType: "owner";
+          }) {
+            state.calls.push("recover");
+            return over.recoverRegistryPdfByLocation!(input);
           },
         }
       : {}),
@@ -690,5 +710,106 @@ describe("段階②: 課金前タイムアウトの競合（@codex #345 R10 P1�
     expect(seen).not.toBeNull();
     expect(seen!.aborted).toBe(true);
     expect(seen!.charged).toBe(false);
+  });
+});
+
+describe("【回収】既に購入済みの謄本を課金なしで取り込む(provider の配線)", () => {
+  // ⚠2026-08-19 提出前レビューで発覚: interface と呼び出し側はあるのに**実装が無く**、
+  //   本番では必ず 501 になっていた。存在そのものをここで固定する。
+  const LOC = {
+    address: "東京都テスト市テスト町一丁目",
+    lotNumber: "1-1",
+    buildingNumber: null,
+    certificateType: "owner" as const,
+  };
+
+  it("R1: provider は recoverRegistryPdf を持つ(無いと画面から永久に使えない)", () => {
+    const provider: RegistryFetchProvider = new OfficialRegistryProvider({
+      loginId: "id",
+      password: "pw",
+    });
+    expect(typeof provider.recoverRegistryPdf).toBe("function");
+  });
+
+  it("R2: login → recoverRegistryPdfByLocation の順で実行し PDF を返す(必ず close)", async () => {
+    let received: unknown;
+    const page = makeFakePage({
+      recoverRegistryPdfByLocation: async (input) => {
+        received = input;
+        return VALID_PDF;
+      },
+    });
+    const { provider } = makeProvider({ page });
+    const result = await provider.recoverRegistryPdf!({
+      location: LOC,
+      ref: "p1",
+    });
+    expect(result.pdfBuffer).toEqual(VALID_PDF);
+    expect(page.calls).toEqual(["login", "recover", "close"]);
+    expect(page.closed).toBe(true);
+    // ⚠課金境界フラグ(chargeState)は**渡さない**=課金の仕掛けを持ち込まない。
+    expect(received).not.toHaveProperty("chargeState");
+    expect(received).toMatchObject({ lotNumber: "1-1" });
+  });
+
+  it("R3: adapter が未対応なら login の前に provider_error(無駄な実ログインをしない)", async () => {
+    const page = makeFakePage(); // recoverRegistryPdfByLocation 無し
+    const { provider } = makeProvider({ page });
+    await expect(
+      provider.recoverRegistryPdf!({ location: LOC, ref: "p1" }),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    expect(page.calls).not.toContain("login");
+    expect(page.closed).toBe(true);
+  });
+
+  it("R4: 所在が無ければブラウザも起動しない(回収は所在でしか引けない)", async () => {
+    const page = makeFakePage({
+      recoverRegistryPdfByLocation: async () => VALID_PDF,
+    });
+    const { provider, factoryCalls } = makeProvider({ page });
+    await expect(
+      provider.recoverRegistryPdf!({ realEstateNumber: "0123456789012", ref: "p1" }),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    expect(factoryCalls()).toBe(0);
+    expect(page.calls).toHaveLength(0);
+  });
+
+  it("R5: ⚠回収も購入と同じ直列化に乗る(同時1セッション制約=割り込むと他の課金が飛ぶ)", async () => {
+    // 登記サービスは1IDにつき同時1セッション。回収のログインが進行中の購入を
+    // 強制ログアウトさせると、**この機能が直そうとしている事故そのもの**を起こす。
+    const order: string[] = [];
+    let releasePurchase: (() => void) | null = null;
+    const purchasePage = makeFakePage({
+      fetchByLocationCandidate: async () => {
+        order.push("purchase:start");
+        await new Promise<void>((r) => {
+          releasePurchase = r;
+        });
+        order.push("purchase:end");
+        return VALID_PDF;
+      },
+    });
+    const recoverPage = makeFakePage({
+      recoverRegistryPdfByLocation: async () => {
+        order.push("recover:start");
+        return VALID_PDF;
+      },
+    });
+    const { provider: p1 } = makeProvider({ page: purchasePage });
+    const { provider: p2 } = makeProvider({ page: recoverPage });
+    const purchase = p1.fetchRegistryPdf({ location: LOC, ref: "p1" });
+    // 購入が走り出すのを待ってから回収を始める。
+    await vi.waitFor(() => expect(order).toContain("purchase:start"));
+    const recover = p2.recoverRegistryPdf!({ location: LOC, ref: "p2" });
+    // 直列化されていれば、購入が終わるまで回収は**始まらない**。
+    await new Promise((r) => setTimeout(r, 30));
+    expect(order).not.toContain("recover:start");
+    releasePurchase!();
+    await Promise.all([purchase, recover]);
+    expect(order).toEqual([
+      "purchase:start",
+      "purchase:end",
+      "recover:start",
+    ]);
   });
 });

@@ -8,6 +8,7 @@ import {
   parseJsonBody,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { isPropertyScopedRole } from "@/lib/property-access";
 import {
   runRegistryAutoFetch,
   getRegistryFetchProvider,
@@ -87,50 +88,223 @@ export async function POST(
     const certRaw = (body as { certificateType?: unknown } | null)?.certificateType;
     const certificateType: "owner" | "all" = certRaw === "all" ? "all" : "owner";
 
+    // 【回収】既に購入済みの謄本を、再課金なしで取り込むモード(2026-08-19)。
+    // ⚠"recover" 以外の値は既定(有料取得)に倒さず**そのまま既定**=購入扱いにする
+    //   のではなく、明示的に "recover" のときだけ回収にする(fail-safe: 不明値で
+    //   勝手に課金経路へ落ちるのは避けたいが、既定は従来どおりの有料取得)。
+    const modeRaw = (body as { mode?: unknown } | null)?.mode;
+    // ⚠**知らない値は課金扱いにしない**(@codex #394 R2 P2)。打ち間違い("RECOVER"、
+    //   末尾の空白など)が既定の有料取得へ落ちると、確認フラグは両方の導線が立てて
+    //   いるため**意図しない課金**になり得る。未指定だけを従来どおり(有料取得)とし、
+    //   値が入っているのに知らない値なら 400 で止める。
+    // ⚠null も『指定した』扱い(@codex #394 R24 P2)。回収のつもりの呼び出しが
+    //   null に化けて既定(有料取得)へ落ちると、確認フラグは共通なので**課金し得る**。
+    if (modeRaw !== undefined) {
+      if (modeRaw !== "purchase" && modeRaw !== "recover") {
+        throw new ApiError(
+          400,
+          "取得方法の指定が正しくありません",
+          "REGISTRY_MODE_INVALID",
+        );
+      }
+    }
+    const isRecover = modeRaw === "recover";
+
+    // ⚠**回収では打ち間違いを黙って owner に倒さない**(@codex #394 R14 P2)。
+    //   回収は種類まで厳密に一致させるので、"ALL" のような値が owner に化けると
+    //   全部事項を頼んだ人に所有者事項を取り込み、しかも**所有者の自動反映**まで
+    //   走る(all では抑止される処理)。従来の有料取得は既定 owner のまま(安い方に
+    //   倒す fail-safe)で挙動を変えない。
+    // ⚠**回収では明示的な null も『指定した』扱い**(@codex #394 R25 P2)。
+    //   null を素通りさせると既定(所有者事項)に化け、全部事項を頼んだ人に
+    //   別の種類を取り込み、所有者の自動反映まで走る。省略だけを既定とする。
+    if (
+      isRecover &&
+      certRaw !== undefined &&
+      certRaw !== "owner" &&
+      certRaw !== "all"
+    ) {
+      throw new ApiError(
+        400,
+        "取り込む謄本の種類が正しくありません",
+        "REGISTRY_RECOVER_CERTIFICATE_TYPE_INVALID",
+      );
+    }
+
+    // 【回収・候補なし】土地/建物の明示指定(@codex #394 R13 P1)。知らない値は 400。
+    const kindRaw = (body as { recoverKind?: unknown } | null)?.recoverKind;
+    if (isRecover && kindRaw !== undefined) {
+      if (kindRaw !== "land" && kindRaw !== "building") {
+        throw new ApiError(
+          400,
+          "取り込む対象の種別が正しくありません",
+          "REGISTRY_RECOVER_KIND_INVALID",
+        );
+      }
+    }
+    const recoverKind =
+      kindRaw === "land" || kindRaw === "building" ? kindRaw : undefined;
+
+    // 【回収・候補なし】画面が見せていた内容(版番号・識別子)。一致判定にのみ使う
+    // (@codex #394 R20 P1)。⚠数値でない版番号は黙って無視しない(検査が効かなくなる)。
+    const versionRaw = (body as { expectedVersion?: unknown } | null)
+      ?.expectedVersion;
+    if (isRecover && versionRaw !== undefined) {
+      if (typeof versionRaw !== "number" || !Number.isFinite(versionRaw)) {
+        throw new ApiError(
+          400,
+          "物件の版番号が正しくありません",
+          "REGISTRY_RECOVER_EXPECTED_VERSION_INVALID",
+        );
+      }
+    }
+    const recoverExpectedVersion =
+      typeof versionRaw === "number" && Number.isFinite(versionRaw)
+        ? versionRaw
+        : undefined;
+    const identifierRaw = (body as { expectedIdentifier?: unknown } | null)
+      ?.expectedIdentifier;
+    const recoverExpectedIdentifier =
+      typeof identifierRaw === "string" ? identifierRaw : undefined;
+    // ⚠所在も確認情報に含める(@codex #394 R23 P1)。CSV取込の重複更新は version を
+    //   上げずに所在を書き換えるため、版番号だけでは変化を捕まえられない。
+    const addressRaw = (body as { expectedAddress?: unknown } | null)
+      ?.expectedAddress;
+    const recoverExpectedAddress =
+      typeof addressRaw === "string" ? addressRaw : undefined;
+
     // 所在検索の候補を選んで取得する場合（candidateRef 指定）。cond③: client の候補参照は信頼せず、
     // server 側で当該物件向けに再検索して不動産番号を解決してから取得する。
     const candidateRefRaw = (body as { candidateRef?: unknown } | null)?.candidateRef;
     const candidateRef =
       typeof candidateRefRaw === "string" ? candidateRefRaw.trim() : "";
 
-    if (candidateRef) {
-      const { candidate, fingerprint } = await resolveRegistryCandidate({
-        session: { id: session.id, role: session.role },
-        propertyId: id,
-        confirmed,
-        candidateRef,
-      });
-      // 実況パネル(2026-08-15・任意)。検索 route と同じ橋渡しだが、**有料取得は中止を
-      // 受け付けない**(課金だけ残る状態を作らない既存方針)ので、begin 直後に cancel 窓を
-      // 閉じ、reporter にも isCancelRequested を配線しない。液晶に映る「中止」ボタンが
-      // 効かないのに出ている、という食い違いを作らないため。
-      const liveRefRaw = (body as { liveRef?: unknown } | null)?.liveRef;
-      const liveRef =
-        typeof liveRefRaw === "string" && isValidLiveRef(liveRefRaw)
-          ? liveRefRaw
-          : null;
-      if (liveRef) {
-        beginLiveView(session.id, id, liveRef);
-        closeLiveViewCancelWindow(session.id, id, liveRef);
+    // ⚠**「指定しなかった」と「指定したが壊れている」を区別する**(@codex #394 R18 P2)。
+    //   回収は候補なしでも動く(物件自身の地番)ため、壊れた候補が黙って
+    //   物件経由へ落ちる。地番と家屋番号の両方を持つ物件では、候補経由なら
+    //   土地を指していたはずが**建物優先の規則で建物のPDFを取り込み**かねない。
+    //   ⚠従来の有料取得の挙動は変えない(回収のときだけ厳しくする)。
+    //   ⚠null も『指定した』扱いにする(@codex #394 R19 P2)。未指定(フィールドを
+    //     送らない)だけが物件経由の合図。自前の画面は null を送らない。
+    if (isRecover && candidateRefRaw !== undefined) {
+      if (typeof candidateRefRaw !== "string" || candidateRef === "") {
+        throw new ApiError(
+          400,
+          "取り込む候補の指定が正しくありません",
+          "REGISTRY_RECOVER_CANDIDATE_REF_INVALID",
+        );
+      }
+    }
+
+    // ⚠**入力の検査は実況を始める前に済ませる**(@codex #394 R22 P2)。実況を任意にしておくと、古い/別の
+    //   クライアントが省略するだけで取り違え防止の検査が丸ごと外れる。
+    if (isRecover && !candidateRef) {
+      if (
+        recoverExpectedVersion === undefined ||
+        !(recoverExpectedIdentifier ?? "").trim() ||
+        !(recoverExpectedAddress ?? "").trim()
+      ) {
+        throw new ApiError(
+          400,
+          "取り込む対象の確認情報が足りません。画面を開き直してからお試しください",
+          "REGISTRY_RECOVER_SNAPSHOT_REQUIRED",
+        );
+      }
+    }
+
+    // 実況パネル(2026-08-15・任意)。取得も回収も同じ橋渡しを使う。
+    // ⚠**有料取得は中止を受け付けない**(課金だけ残る状態を作らない既存方針)ので、
+    //   begin 直後に cancel 窓を閉じ、reporter にも isCancelRequested を配線しない。
+    //   効かない「中止」ボタンが画面に出る食い違いを作らないため。
+    const liveRefRaw = (body as { liveRef?: unknown } | null)?.liveRef;
+    const liveRef =
+      typeof liveRefRaw === "string" && isValidLiveRef(liveRefRaw)
+        ? liveRefRaw
+        : null;
+    // ⚠**画面の写真は『全物件を見られる役割』にだけ渡す**(@codex #394 R2 P1)。
+    //   自動操作は登記情報提供サービスの**マイページ(口座全体の履歴)**を開くため、
+    //   全画面の写真には**他の物件の所在・受付番号**まで写る。担当分しか見られない
+    //   役割(field_staff)に見せると、物件単位の認可を写真が素通りさせてしまう。
+    //   文字の進行(固定文言)は誰でも見られるので、進み具合は分かる。
+    const canSeeShots = !isPropertyScopedRole(session.role);
+    if (liveRef) {
+      beginLiveView(session.id, id, liveRef);
+      closeLiveViewCancelWindow(session.id, id, liveRef);
+      reportLiveStep(
+        session.id,
+        id,
+        liveRef,
+        isRecover
+          ? "取得済みの書類の取り込みを受け付けました(課金はしません)"
+          : "自動取得を受け付けました(この処理は中止できません)",
+        null,
+      );
+      if (!canSeeShots) {
         reportLiveStep(
           session.id,
           id,
           liveRef,
-          "自動取得を受け付けました(この処理は中止できません)",
+          "この権限では画面の写真は記録しません(進行状況は文字でお伝えします)",
           null,
         );
       }
-      const live = liveRef
-        ? {
-            step(label: string): number {
-              return reportLiveStep(session.id, id, liveRef, label, null);
-            },
-            attachShot(seq: number, shot: Uint8Array): void {
-              attachLiveShot(session.id, id, liveRef, seq, shot);
-            },
-          }
-        : undefined;
+    }
+    const live = liveRef
+      ? {
+          step(label: string): number {
+            return reportLiveStep(session.id, id, liveRef, label, null);
+          },
+          attachShot(seq: number, shot: Uint8Array): void {
+            if (!canSeeShots) return;
+            attachLiveShot(session.id, id, liveRef, seq, shot);
+          },
+        }
+      : undefined;
+
+    // 【回収】候補が無くても物件自身の地番で取り込む(@codex #394 R6 P1)。
+    // ⚠取込が途中まで進むと物件に不動産番号が入り、所在検索が「対象外」になる。
+    //   検索の中にある入口しか無いと、**買った書類に二度と手が届かない**。
+    //   ⚠ここは**課金しない経路だけ**が通る。従来の(課金し得る)経路へは落とさない。
+    if (isRecover && !candidateRef) {
       try {
+        const recovered = await runRegistryAutoFetch(
+          {
+            session: { id: session.id, role: session.role },
+            propertyId: id,
+            confirmed,
+            mode: "recover",
+            certificateType,
+            ...(recoverKind ? { recoverKind } : {}),
+            ...(recoverExpectedVersion !== undefined
+              ? { recoverExpectedVersion }
+              : {}),
+            ...(recoverExpectedIdentifier !== undefined
+              ? { recoverExpectedIdentifier }
+              : {}),
+            ...(recoverExpectedAddress !== undefined
+              ? { recoverExpectedAddress }
+              : {}),
+            live,
+          },
+          provider,
+        );
+        return apiResponse(recovered, 200);
+      } finally {
+        if (liveRef) completeLiveView(session.id, id, liveRef);
+      }
+    }
+
+    if (candidateRef) {
+      // ⚠**候補の解決も try の中で行う**(@codex #394 R7 P2)。実況は既に始まって
+      //   いるので、ここで throw すると finally を通らず、パネルが閉じられないまま
+      //   期限切れまでポーリングし続ける(利用者には『固まった』ように見える)。
+      try {
+        const { candidate, fingerprint } = await resolveRegistryCandidate({
+          session: { id: session.id, role: session.role },
+          propertyId: id,
+          confirmed,
+          candidateRef,
+        });
         const obtained = await runRegistryAutoFetch(
           {
             session: { id: session.id, role: session.role },
@@ -150,6 +324,9 @@ export async function POST(
                 }),
             // @codex P2: lock する行の指紋が resolve 時と一致する時だけ override を使う。
             expectedFingerprint: fingerprint,
+            // 回収は課金しない経路(スイッチ・二重課金ガードを通らない代わりに、
+            // 請求済み・期限内の行しか取り込まない)。
+            ...(isRecover ? ({ mode: "recover" } as const) : {}),
             live,
           },
           provider,
@@ -161,16 +338,22 @@ export async function POST(
       }
     }
 
-    const result = await runRegistryAutoFetch(
-      {
-        session: { id: session.id, role: session.role },
-        propertyId: id,
-        confirmed,
-      },
-      provider,
-    );
+    // ⚠従来経路(番号取得)も**必ず実況を閉じる**(@codex #394 R13 P2)。実況は上で
+    //   始まっているので、ここで閉じないとパネルが期限切れまで回り続ける。
+    try {
+      const result = await runRegistryAutoFetch(
+        {
+          session: { id: session.id, role: session.role },
+          propertyId: id,
+          confirmed,
+        },
+        provider,
+      );
 
-    return apiResponse(result, 200);
+      return apiResponse(result, 200);
+    } finally {
+      if (liveRef) completeLiveView(session.id, id, liveRef);
+    }
   } catch (error) {
     return handleApiError(error);
   }

@@ -377,6 +377,7 @@ export default function PropertyDetailPage({
     corporateLookupConfigured,
     canAutoFetchRegistry,
     registryLocationSearchConfigured,
+    registryRecoverConfigured,
     registryPurchaseConfigured,
     ownerEditableFields,
   } = useMemo(() => {
@@ -393,6 +394,12 @@ export default function PropertyDetailPage({
     const registryLocationSearchConfigured = collapseCapabilities
       ? false
       : meCapabilities?.registryLocationSearch === true;
+    // 【回収】購入済みの取り込みは**所在検索に依存しない**(@codex #394 R16 P2)。
+    //   provider は資格情報だけで解決し、回収の口も持つ。所在検索の校正が外れて
+    //   いても、買った書類は取り込めなければならない(期限があるため)。
+    const registryRecoverConfigured = collapseCapabilities
+      ? false
+      : meCapabilities?.registryAutoFetch === true;
     // 段階②(2026-08-01): 有料取得はさらに厳しく、専用オプトイン
     // (REGISTRY_FETCH_PURCHASE_ENABLED)込みの capability(@codex #345 P1)。
     const registryPurchaseConfigured = collapseCapabilities
@@ -446,6 +453,7 @@ export default function PropertyDetailPage({
       corporateLookupConfigured,
       canAutoFetchRegistry,
       registryLocationSearchConfigured,
+      registryRecoverConfigured,
       registryPurchaseConfigured,
       ownerEditableFields,
     };
@@ -568,7 +576,12 @@ export default function PropertyDetailPage({
         canAutoFetch={canAutoFetchRegistry}
         providerConfigured={registryLocationSearchConfigured}
         purchaseEnabled={registryPurchaseConfigured}
+        recoverConfigured={registryRecoverConfigured}
         propertyAddress={property.address}
+        // 候補なしの回収で「土地/建物」どちらを取り込むか選ばせるために渡す
+        // (両方登録されている物件は放っておくと家屋番号が優先される)。
+        propertyLotNumber={property.lotNumber}
+        propertyBuildingNumber={property.buildingNumber}
         // ⚠地番の保存に要る。保存後は fetchProperty で取り直す
         //   （同じ画面で2回保存すると2回目が必ず 409 になるため）。
         propertyVersion={property.version}

@@ -6,7 +6,8 @@
  *   （今まで取れていたものが取れなくなる）。
  */
 import { describe, it, expect } from "vitest";
-import { isReadableChiban } from "@/lib/registry-fetch/chiban-input";
+import { effectiveLocationIdentifier,
+  isReadableChiban } from "@/lib/registry-fetch/chiban-input";
 
 describe("受理する（既存データを落とさない）", () => {
   it.each([
@@ -71,5 +72,36 @@ describe("⚠漢数字は受理しない（意図した判断・実測つき）"
     // 実測（2026-08-12 本番）: lot_number / building_number に漢数字を含む物件は
     // **668件中0件**。既存データを落とす変更ではない。
     expect(isReadableChiban(raw)).toBe(false);
+  });
+});
+
+describe("実際に登記を引く識別子の選び方(検査と探索で必ず同じ値を使う)", () => {
+  it("家屋番号が入っていれば建物として扱う(建物優先)", () => {
+    expect(
+      effectiveLocationIdentifier({ lotNumber: "1-1", buildingNumber: "5番2" }),
+    ).toEqual({ isBuilding: true, value: "5番2" });
+  });
+
+  it("家屋番号が空なら地番", () => {
+    expect(
+      effectiveLocationIdentifier({ lotNumber: "1-1", buildingNumber: "  " }),
+    ).toEqual({ isBuilding: false, value: "1-1" });
+  });
+
+  it("⚠壊れた家屋番号でも『建物として選ばれる』=検査対象になる", () => {
+    // 地番が正しいからと素通しすると、壊れた家屋番号を正規化した別の値で
+    // 探し、別の登記を掴む(@codex #394 R8 P2)。
+    const picked = effectiveLocationIdentifier({
+      lotNumber: "1-1",
+      buildingNumber: "abc1x2",
+    });
+    expect(picked).toEqual({ isBuilding: true, value: "abc1x2" });
+    expect(isReadableChiban(picked.value)).toBe(false);
+  });
+
+  it("どちらも空なら空文字(呼び出し側が中止できる)", () => {
+    expect(
+      effectiveLocationIdentifier({ lotNumber: null, buildingNumber: null }),
+    ).toEqual({ isBuilding: false, value: "" });
   });
 });

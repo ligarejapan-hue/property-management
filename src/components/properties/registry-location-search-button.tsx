@@ -8,10 +8,13 @@ import {
 } from "@/components/properties/registry-preflight-warnings";
 import RegistryChibanPopup from "@/components/properties/registry-chiban-popup";
 import { isSearchableTarget } from "@/lib/registry-fetch/registry-target";
+import { resolveRecoverEntry } from "@/lib/registry-fetch/recover-entry";
 import { MapPinned, Loader2 } from "lucide-react";
 import {
   searchRegistryCandidates,
   obtainRegistryByCandidate,
+  recoverRegistryByCandidate,
+  recoverRegistryFromProperty,
   apiErrorCode,
   type RegistrySearchCandidate,
 } from "@/lib/api-client";
@@ -31,8 +34,18 @@ interface RegistryLocationSearchButtonProps {
    * server 側も 501 で enforce)。
    */
   purchaseEnabled: boolean;
+  /**
+   * 【回収】購入済みの取り込みが使えるか(capabilities.registryAutoFetch)。
+   * ⚠**所在検索とは別条件**(@codex #394 R16 P2)。所在検索の校正が外れていても
+   * 買った書類は取り込めなければならない(取得期限があるため)。
+   */
+  recoverConfigured?: boolean;
   /** 物件の所在（ポップアップで画面にコピーしてもらう。⚠外部へは渡さない）。 */
   propertyAddress: string;
+  /** 物件に登録されている地番(候補なしの回収でどちらを探すか選ばせるため)。 */
+  propertyLotNumber?: string | null;
+  /** 物件に登録されている家屋番号(同上)。 */
+  propertyBuildingNumber?: string | null;
   /**
    * 地番の保存に必要な現在の版番号。
    * ⚠保存後は**この画面が持ち帰った版番号**を使う（親の取り直しを待たない）。
@@ -53,6 +66,8 @@ type State =
   | "results"
   | "confirmObtain"
   | "obtaining"
+  // 【回収】購入済みの書類を取り込んでいる最中(課金なし)。
+  | "recovering"
   | "done"
   // 利用者が自分で中止した (@codex #357 P2)。失敗ではないので "error" と分ける。
   | "cancelled"
@@ -70,7 +85,10 @@ export default function RegistryLocationSearchButton({
   canAutoFetch,
   providerConfigured,
   purchaseEnabled,
+  recoverConfigured = false,
   propertyAddress,
+  propertyLotNumber,
+  propertyBuildingNumber,
   propertyVersion,
   canWriteProperty,
   offerBuildingPath,
@@ -83,6 +101,11 @@ export default function RegistryLocationSearchButton({
   // 請求種別（所有者事項=既定・安い方 / 全部事項=高い方）。取得の確認画面で選ぶ。
   const [certificateType, setCertificateType] = useState<"owner" | "all">("owner");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // 完了表示の文言を分けるため、直前に実行したのが取得(有料)か回収(課金なし)かを覚える。
+  const [lastAction, setLastAction] = useState<"obtain" | "recover">("obtain");
+  // 候補なしの回収で、物件が両方持つときにどちらを取り込むか(@codex #394 R13 P1)。
+  // ⚠既定は土地(地番)。この運用では地番で買うのが基本のため。画面で変更できる。
+  const [recoverKind, setRecoverKind] = useState<"land" | "building">("land");
   // 実況パネル用の参照 (client 発行・非PII)。検索のたびに発行し直す。
   // HTTP 本番でも動く safeRandomId を使う (crypto.randomUUID 禁止)。
   const [liveRef, setLiveRef] = useState<string | null>(null);
@@ -111,6 +134,10 @@ export default function RegistryLocationSearchButton({
   if (!canAutoFetch) return null;
 
   const providerDisabled = !providerConfigured;
+  // ⚠両方登録されている物件は、放っておくと家屋番号が優先される(=土地の購入を
+  //   取り込めない/建物のPDFを取り込んでしまう)。選ばせる(@codex #394 R13 P1)。
+  const hasBothIdentifiers =
+    !!(propertyLotNumber ?? "").trim() && !!(propertyBuildingNumber ?? "").trim();
 
   const reset = () => {
     setState("idle");
@@ -175,6 +202,10 @@ export default function RegistryLocationSearchButton({
   // 二重課金台帳→直列化→請求→PDF→物件添付まで行う。confirmed:true は api-client が付ける。
   const runObtain = async () => {
     if (!selected) return;
+    // ボタンの disabled だけに頼らない(迂回への二重防御)。
+    // 回収(runRecover)にはこのガードを入れない=課金しないのでスイッチと無関係。
+    if (!purchaseEnabled) return;
+    setLastAction("obtain");
     setState("obtaining");
     setErrorMsg(null);
     // 実況(2026-08-15)。取得のたびに新しい参照を発行し、検索と同じパネルで
@@ -201,6 +232,74 @@ export default function RegistryLocationSearchButton({
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "謄本の取得に失敗しました");
       setState("error");
+    }
+  };
+
+  // 【回収】既に購入済みの謄本を、再課金なしで取り込む(2026-08-19)。
+  // 背景: 請求は成立したのにPDFの取り込みに失敗すると、二重課金ガードが効いて
+  // 取り直せない=**払ったのに手元に残らない**。期限内なら課金せず回収できる。
+  // ⚠この経路は有料取得のスイッチが入っていなくても使える(課金操作をしないため)。
+  /**
+   * @param fromProperty 候補を使わず**物件自身の地番**で取り込む
+   *   (所在検索が対象外になった物件でも救えるようにするため)。
+   */
+  const runRecover = async (fromProperty = false) => {
+    // ⚠**候補が無い=押しても無反応、にしない**(@codex #394 R10 P1)。
+    //   検索できない物件からの入口は候補を持たないので、以前の早期 return では
+    //   確認パネルのボタンが**何もしない**状態だった。判断は純関数に出す。
+    const entry = resolveRecoverEntry({
+      fromProperty,
+      hasSelection: !!selected,
+    });
+    setLastAction("recover");
+    setState("recovering");
+    setErrorMsg(null);
+    const recoverLiveRef = safeRandomId();
+    setLiveRef(recoverLiveRef);
+    try {
+      if (entry === "property") {
+        await recoverRegistryFromProperty(
+          propertyId,
+          certificateType,
+          recoverLiveRef,
+          // 両方持つ物件のときだけ意味を持つ(片方しか無ければサーバーが解決)。
+          hasBothIdentifiers ? recoverKind : undefined,
+          // ⚠**画面が見せていた内容**を一緒に送る(@codex #394 R20 P1)。確認の後に
+          //   誰かが地番を編集していたら、server 側で 409 にして取り違えを防ぐ。
+          {
+            version: savedVersion ?? propertyVersion,
+            address: propertyAddress,
+            identifier: hasBothIdentifiers
+              ? recoverKind === "land"
+                ? propertyLotNumber
+                : propertyBuildingNumber
+              : ((propertyBuildingNumber ?? "").trim()
+                  ? propertyBuildingNumber
+                  : propertyLotNumber),
+          },
+        );
+      } else {
+        await recoverRegistryByCandidate(
+          propertyId,
+          selected!.candidateRef,
+          certificateType,
+          recoverLiveRef,
+        );
+      }
+      setState("done");
+      propertyRefreshPendingRef.current = true;
+    } catch (e) {
+      setErrorMsg(
+        e instanceof Error
+          ? e.message
+          : "取得済みの謄本を取り込めませんでした（課金は発生していません）",
+      );
+      setState("error");
+      // ⚠**失敗後は物件を取り直す**(@codex #394 R27 P2)。取得の予約(ロック)が
+      //   版番号を上げるため、古い版のままもう一度押すと、サーバーが
+      //   「物件情報が変わりました」で**永久に**弾いてしまう。閉じたときに
+      //   まとめて取り直す(成功時と同じ流儀)。
+      propertyRefreshPendingRef.current = true;
     }
   };
 
@@ -233,16 +332,39 @@ export default function RegistryLocationSearchButton({
         </button>
       )}
 
+      {/* 【回収】購入済みの取り込みは**所在検索と別の入口**(@codex #394 R16 P2)。
+          所在検索が使えない環境・使えない物件でも、買った書類には手が届く。 */}
+      {showButton && recoverConfigured && (
+        <button
+          type="button"
+          onClick={() => {
+            reset();
+            setSelected(null);
+            setState("confirmObtain");
+          }}
+          className="w-fit text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline"
+        >
+          取得済みの謄本を取り込む（課金なし）
+        </button>
+      )}
+
+      {/* ⚠**使える機能まで『利用できません』と言わない**(@codex #394 R17 P2)。
+          所在検索が使えなくても、取り込み(回収)は別条件で使える。期限のある
+          書類なので、ここで諦めさせると実害になる。 */}
       {providerDisabled && (
         <p className="text-[11px] text-amber-700 dark:text-amber-400">
-          謄本取得プロバイダが未設定のため現在利用できません。
+          {recoverConfigured
+            ? "所在での検索は現在利用できません（取得済みの謄本の取り込みはご利用いただけます）。"
+            : "謄本取得プロバイダが未設定のため現在利用できません。"}
         </p>
       )}
 
       {state === "done" && (
         <div className="flex flex-wrap items-center gap-2 text-[11px]">
           <p className="text-green-600 dark:text-green-400" role="status">
-            謄本を取得しました。下の実況で仕上がりを確認できます。
+            {lastAction === "recover"
+              ? "取得済みの謄本を取り込みました（今回の料金は発生していません）。"
+              : "謄本を取得しました。下の実況で仕上がりを確認できます。"}
           </p>
           {/* ⚠閉じたときに初めて物件を取り直す(@codex #380 R3 P2)。その場で取り直すと
               詳細ページが読み込み中の画面に差し替わり、実況の見返しが即座に消える。 */}
@@ -321,6 +443,25 @@ export default function RegistryLocationSearchButton({
                 {preflight.pending ? "確認中..." : "検索する"}
               </button>
             )}
+            {/* ⚠検索できない物件にも**回収**の入口を出す(@codex #394 R6 P1)。
+                取込が途中まで進むと不動産番号が入って所在検索の対象外になり、
+                候補経由の入口だけだと**買った書類に二度と手が届かない**。
+                この経路は物件自身の地番で探すので候補が要らず、課金もしない。 */}
+            {target && !isSearchableTarget(target.kind) && (
+              <button
+                type="button"
+                onClick={() => {
+                  // ⚠**種類(所有者事項/全部事項)を選ばせてから**走らせる
+                  //   (@codex #394 R9 P1)。既定のまま固定すると、全部事項で
+                  //   買ったものが永久に取り込めない(同定が種類まで見るため)。
+                  setSelected(null);
+                  setState("confirmObtain");
+                }}
+                className="rounded border border-indigo-300 dark:border-indigo-500/40 bg-white dark:bg-gray-900 px-2 py-1 font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/10"
+              >
+                取得済みを取り込む（課金なし）
+              </button>
+            )}
             <button type="button" onClick={reset} className="rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
               {target && !isSearchableTarget(target.kind) ? "閉じる" : "キャンセル"}
             </button>
@@ -328,10 +469,14 @@ export default function RegistryLocationSearchButton({
         </div>
       )}
 
-      {(state === "searching" || state === "obtaining") && (
+      {(state === "searching" || state === "obtaining" || state === "recovering") && (
         <span className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
           <Loader2 className="h-3 w-3 animate-spin" />
-          {state === "searching" ? "検索中..." : "取得中..."}
+          {state === "searching"
+            ? "検索中..."
+            : state === "recovering"
+              ? "取り込み中...（課金はしません）"
+              : "取得中..."}
         </span>
       )}
 
@@ -347,6 +492,8 @@ export default function RegistryLocationSearchButton({
           // 失敗時に「どの画面のどの段で止まったか」を本人が見返せることが
           // この実況の主目的(実課金テスト2回が手がかり1行で終わった反省)。
           state === "obtaining" ||
+          // 回収(課金なし)の間も同じパネルで進行を見せる。
+          state === "recovering" ||
           state === "done" ||
           // 中止のときも残す (@codex #357 P2)。どこまで進んで止まったかを
           // 本人が確かめられないと「本当に止まったのか」が分からない。
@@ -360,7 +507,11 @@ export default function RegistryLocationSearchButton({
             key={liveRef}
             propertyId={propertyId}
             liveRef={liveRef}
-            searchSettled={state !== "searching" && state !== "obtaining"}
+            searchSettled={
+              state !== "searching" &&
+              state !== "obtaining" &&
+              state !== "recovering"
+            }
             // ⚠「中止」は無料の検索中だけ。有料取得(obtaining)で出すと、課金中に
             //   「課金は発生しません」という嘘の説明つきボタンが出る(server は
             //   受け付けないが表示が矛盾する)。
@@ -402,24 +553,18 @@ export default function RegistryLocationSearchButton({
                           .join(" / ") || "（地番・家屋番号なし）"}
                       </span>
                     </span>
+                    {/* ⚠有料スイッチが入っていなくても押せる。次の画面で
+                        「取得(有料)」と「取得済みを取り込む(課金なし)」を選ぶため。
+                        取得の方は次の画面で押せなくなる(準備中)。 */}
                     <button
                       type="button"
-                      disabled={!purchaseEnabled}
-                      title={
-                        purchaseEnabled ? undefined : "有料取得は準備中です"
-                      }
                       onClick={() => {
-                        if (!purchaseEnabled) return;
                         setSelected(c);
                         setState("confirmObtain");
                       }}
-                      className={
-                        purchaseEnabled
-                          ? "shrink-0 rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700"
-                          : "shrink-0 rounded bg-gray-300 dark:bg-gray-700 px-2 py-1 font-medium text-gray-500 dark:text-gray-400 cursor-not-allowed"
-                      }
+                      className="shrink-0 rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700"
                     >
-                      取得
+                      選ぶ
                     </button>
                   </li>
                 ))}
@@ -432,19 +577,58 @@ export default function RegistryLocationSearchButton({
         </div>
       )}
 
-      {state === "confirmObtain" && selected && (
+      {state === "confirmObtain" && (
         <div className="flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/15 p-2 text-xs">
-          <p className="font-medium text-indigo-800 dark:text-indigo-300">この候補で謄本を取得しますか？</p>
-          <RegistryPreflightWarningLines state={preflight} propertyId={propertyId} />
-          <p className="truncate text-indigo-700 dark:text-indigo-300">{selected.address ?? "（所在不明）"}</p>
-          <p className="truncate text-indigo-700 dark:text-indigo-300">
-            {[
-              selected.lotNumber && `地番 ${selected.lotNumber}`,
-              selected.buildingNumber && `家屋番号 ${selected.buildingNumber}`,
-            ]
-              .filter(Boolean)
-              .join(" / ")}
+          <p className="font-medium text-indigo-800 dark:text-indigo-300">
+            {selected
+              ? "この候補で何をしますか？"
+              : "取得済みの謄本を取り込みますか？（課金なし）"}
           </p>
+          <RegistryPreflightWarningLines state={preflight} propertyId={propertyId} />
+          {selected ? (
+            <>
+              <p className="truncate text-indigo-700 dark:text-indigo-300">{selected.address ?? "（所在不明）"}</p>
+              <p className="truncate text-indigo-700 dark:text-indigo-300">
+                {[
+                  selected.lotNumber && `地番 ${selected.lotNumber}`,
+                  selected.buildingNumber && `家屋番号 ${selected.buildingNumber}`,
+                ]
+                  .filter(Boolean)
+                  .join(" / ")}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-indigo-700 dark:text-indigo-300">
+                この物件に登録されている所在・地番で、購入済みの謄本を探します。
+              </p>
+              {hasBothIdentifiers && (
+                <fieldset className="mt-1 flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 p-1.5">
+                  <legend className="px-1 text-indigo-800 dark:text-indigo-300">
+                    どちらを取り込みますか？
+                  </legend>
+                  <label className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
+                    <input
+                      type="radio"
+                      name="recoverKind"
+                      checked={recoverKind === "land"}
+                      onChange={() => setRecoverKind("land")}
+                    />
+                    土地（地番 {propertyLotNumber}）
+                  </label>
+                  <label className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
+                    <input
+                      type="radio"
+                      name="recoverKind"
+                      checked={recoverKind === "building"}
+                      onChange={() => setRecoverKind("building")}
+                    />
+                    建物（家屋番号 {propertyBuildingNumber}）
+                  </label>
+                </fieldset>
+              )}
+            </>
+          )}
           <fieldset className="mt-1 flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 p-1.5">
             <legend className="px-1 text-indigo-800 dark:text-indigo-300">取得する種類</legend>
             <label className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
@@ -466,6 +650,7 @@ export default function RegistryLocationSearchButton({
               全部事項（権利関係まで・料金が高い）
             </label>
           </fieldset>
+          {selected && (
           <p className="text-indigo-700 dark:text-indigo-300">
             取得すると謄本1通分の利用料が発生します（
             {certificateType === "all" ? "全部事項・料金が高い方" : "所有者事項"}
@@ -476,19 +661,48 @@ export default function RegistryLocationSearchButton({
               </span>
             )}
           </p>
-          <div className="mt-1 flex gap-1">
+          )}
+          <div className="mt-1 flex flex-wrap gap-1">
+            {/* 有料取得は候補を選んだときだけ(候補なしの入口は回収専用)。 */}
+            {selected && (
             <button
               type="button"
               onClick={runObtain}
-              disabled={preflight.pending || preflight.targetsUnavailable}
-              title={preflight.pending ? "事前確認中です" : undefined}
+              disabled={
+                !purchaseEnabled ||
+                preflight.pending ||
+                preflight.targetsUnavailable
+              }
+              title={
+                !purchaseEnabled
+                  ? "有料取得は準備中です"
+                  : preflight.pending
+                    ? "事前確認中です"
+                    : undefined
+              }
               className="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {preflight.pending ? "確認中..." : "取得する"}
+              {preflight.pending ? "確認中..." : "取得する（有料）"}
+            </button>
+            )}
+            {/* 【回収】既に買った書類の取り込み。⚠有料スイッチと無関係に使える
+                (課金操作をしないため)。押しても新たな料金は発生しない。 */}
+            <button
+              type="button"
+              onClick={() => runRecover(!selected)}
+              disabled={preflight.pending || preflight.targetsUnavailable}
+              title={preflight.pending ? "事前確認中です" : undefined}
+              className="rounded border border-indigo-300 dark:border-indigo-500/40 bg-white dark:bg-gray-900 px-2 py-1 font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              取得済みを取り込む（課金なし）
             </button>
             <button
               type="button"
               onClick={() => {
+                if (!selected) {
+                  reset();
+                  return;
+                }
                 setSelected(null);
                 setState("results");
               }}
@@ -497,6 +711,11 @@ export default function RegistryLocationSearchButton({
               戻る
             </button>
           </div>
+          <p className="mt-0.5 text-[11px] text-gray-600 dark:text-gray-400">
+            ※「取得済みを取り込む」は、以前この地番で購入した謄本が登記情報提供サービスに
+            残っている場合だけ使えます（購入から一定期間内）。新たな料金はかかりません。
+            見つからないときは何も起きません。
+          </p>
         </div>
       )}
     </div>
