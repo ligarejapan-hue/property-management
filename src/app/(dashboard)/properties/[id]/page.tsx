@@ -317,7 +317,11 @@ export default function PropertyDetailPage({
       propertyAppliedSeq.current = seq;
       setProperty(data as unknown as ApiProperty);
     } catch (err) {
-      if (seq < propertyAppliedSeq.current) return;
+      // ⚠**追い越された失敗は捨てる**（@codex R4 P2）。後から新しい取り直しが
+      //   始まっているなら、その結果を待つべき。古い失敗をここで反映すると
+      //   `error || !property` の分岐でページ全体がエラー画面に差し替わり、
+      //   **実況パネルごと消える**うえ、後から成功しても error は消えない。
+      if (seq !== propertyReqSeq.current) return;
       propertyAppliedSeq.current = seq;
       setError(
         err instanceof Error ? err.message : "データ取得に失敗しました",
@@ -347,6 +351,9 @@ export default function PropertyDetailPage({
       if (seq < propertyAppliedSeq.current) return; // より新しい結果が反映済み
       propertyAppliedSeq.current = seq;
       setProperty(data as unknown as ApiProperty);
+      // ⚠取れたのだから、居座っているエラー画面は畳む（@codex R4 P2）。
+      //   放置すると、古い失敗で出たエラー表示からページが戻れない。
+      setError(null);
       void loadQualityIssues();
     } catch {
       // 何もしない（意図的）。静かな更新なので画面は壊さず、利用者は

@@ -103,6 +103,22 @@ describe("謄本の結果が画面に出る(2026-08-20 の誤解の再発防止)
     expect(fin).not.toContain("if (seq === propertyReqSeq.current) setLoading(false)");
   });
 
+  it("追い越された失敗はページ全体をエラー画面に差し替えない", () => {
+    // @codex #395 R4 P2: 通常の取り直しが失敗したとき、後から新しい取り直しが
+    //   始まっていてもエラーを反映してしまうと、`error || !property` の分岐で
+    //   **ページ全体がエラー画面に差し替わり実況パネルごと消える**。
+    //   しかも後から成功しても error は消えないので、戻れない。
+    const begin = PAGE.indexOf("const fetchProperty = useCallback");
+    expect(begin).toBeGreaterThan(-1);
+    const body = PAGE.slice(begin, PAGE.indexOf("}, [id, loadQualityIssues]);", begin));
+    const cat = body.slice(body.indexOf("} catch (err) {"));
+    expect(cat).toContain("if (seq !== propertyReqSeq.current) return;");
+    // 取れたらエラー画面は畳む(居座らせない)。
+    const qBegin = PAGE.indexOf("const refreshPropertyQuietly");
+    const qBody = PAGE.slice(qBegin, PAGE.indexOf("}, [id, loadQualityIssues]);", qBegin));
+    expect(qBody).toContain("setError(null);");
+  });
+
   it("失敗した静かな取り直しは世代を進めない(成功した取り直しを無効にしない)", () => {
     // @codex #395 R3 P2: 通常の取り直しが走っている最中に取り込みが成功すると、
     //   静かな取り直しが世代を進める。そこで静かな取り直しが**失敗**すると
