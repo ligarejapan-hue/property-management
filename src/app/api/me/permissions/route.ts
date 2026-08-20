@@ -14,7 +14,7 @@ import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
 import { isReverseGeocodeConfigured } from "@/lib/reverse-geocode";
 import { isSaleDmConfigured } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
-import { isSenderConfigured } from "@/lib/sale-dm-letter/sender";
+import { isSaleDmPrintReady } from "@/lib/sale-dm-letter/print-ready";
 import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
 import { loadRegistryFetchCredentials } from "@/lib/registry-fetch/config-store";
 
@@ -53,7 +53,14 @@ export async function GET() {
       // provider/APIキーは見ない（設計 §2.5）。郵送QRに必須の絶対URL（SALE_DM_TRACKING_BASE_URL /
       // SALE_DM_LP_URL）と差出人（SALE_DM_SENDER_NAME / CONTACT）だけを要求する。いずれか未設定だと
       // campaign 作成が 503 になるため「売却DMを作成」導線自体を出さない（押して 503 を防ぐ）。
-      saleDmPrintReady: !!resolveTrackingBaseUrl(saleDmCfg) && !!resolveLpUrl(saleDmCfg) && isSenderConfigured(saleDmCfg),
+      // ⚠判定規則は print-ready.ts の1本だけ（設定画面も同じものを使う）。以前は画面側に
+      //   同じ規則を書き写していたため、AI直結の廃止後も画面だけが APIキーを要求し続けた。
+      saleDmPrintReady: isSaleDmPrintReady({
+        trackingBaseUrl: resolveTrackingBaseUrl(saleDmCfg),
+        lpUrl: resolveLpUrl(saleDmCfg),
+        senderName: saleDmCfg.senderName,
+        senderContact: saleDmCfg.senderContact,
+      }),
     };
     return apiResponse({ permissions, capabilities });
   } catch (error) {

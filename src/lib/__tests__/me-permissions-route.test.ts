@@ -92,8 +92,14 @@ vi.mock("@/lib/sale-dm-letter/tracking", () => ({
   resolveTrackingBaseUrl: vi.fn(() => "https://app.example.com"),
   resolveLpUrl: vi.fn(() => "https://lp.example.com"),
 }));
-vi.mock("@/lib/sale-dm-letter/sender", () => ({
-  isSenderConfigured: vi.fn(() => true),
+// ⚠差出人の判定はヘルパーのモックではなく**設定値**を継ぎ目にする。
+//   判定規則を print-ready.ts の1本にまとめたため、route は設定の値をそのまま渡す
+//   （規則を画面とサーバーに書き分けたことが「使えるのに使えないと出る」の原因だった）。
+vi.mock("@/lib/sale-dm-letter/config-store", () => ({
+  loadSaleDmConfig: vi.fn(async () => ({
+    senderName: "リガーレ",
+    senderContact: "03-0000-0000",
+  })),
 }));
 
 import {
@@ -112,7 +118,7 @@ import { isRegistryOcrConfigured } from "@/lib/registry-ocr/client";
 import { isReverseGeocodeConfigured } from "@/lib/reverse-geocode";
 import { isSaleDmConfigured } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
-import { isSenderConfigured } from "@/lib/sale-dm-letter/sender";
+import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
 import { loadRegistryFetchCredentials } from "@/lib/registry-fetch/config-store";
 import { GET } from "@/app/api/me/permissions/route";
 
@@ -150,9 +156,10 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
     expect(body.permissions).toEqual(PERMS);
   });
 
-  it("saleDmPrintReady は AI provider + 印刷必須URL(tracking/LP) + 差出人(sender) が揃って初めて true", async () => {
+  it("saleDmPrintReady は 印刷必須URL(tracking/LP) + 差出人(sender) が揃って初めて true", async () => {
+    // ⚠AI設定(種別・APIキー)は条件に入らない（外部AI方式へ変更済み）。
     (isSaleDmConfigured as Mock).mockReturnValue(true);
-    // provider + 両URL + 差出人 → true
+    // 両URL + 差出人 → true
     let body = await (await GET()).json();
     expect(body.capabilities.saleDmPrintReady).toBe(true);
     // tracking URL 欠落 → false(campaign 作成が 503 になるため一覧の作成導線を出さない)
@@ -163,8 +170,11 @@ describe("GET /api/me/permissions — レスポンス契約（E-T3）", () => {
     (resolveLpUrl as Mock).mockReturnValueOnce(undefined);
     body = await (await GET()).json();
     expect(body.capabilities.saleDmPrintReady).toBe(false);
-    // 差出人 env 欠落でも false(生成/印刷の fail-closed と UI を揃える・Codex)
-    (isSenderConfigured as Mock).mockReturnValueOnce(false);
+    // 差出人 欠落でも false(生成/印刷の fail-closed と UI を揃える・Codex)
+    (loadSaleDmConfig as Mock).mockResolvedValueOnce({
+      senderName: "",
+      senderContact: "",
+    });
     body = await (await GET()).json();
     expect(body.capabilities.saleDmPrintReady).toBe(false);
   });

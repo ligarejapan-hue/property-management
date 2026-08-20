@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import { Loader2, Save, ShieldCheck, ShieldAlert } from "lucide-react";
 import {
+  isSaleDmPrintReady,
+  missingSaleDmPrintRequirements,
+} from "@/lib/sale-dm-letter/print-ready";
+import {
   fetchSaleDmSettings,
   updateSaleDmSettings,
   type SaleDmSettings,
@@ -95,19 +99,20 @@ export default function SaleDmSettingsPage() {
   const keyStatus = (has: boolean, cleared: boolean, typed: string) =>
     cleared ? "クリアして保存" : typed.trim() !== "" ? "新しいキーを保存" : has ? "設定済み" : "未設定";
 
-  // この設定で売却DMが「有効」になるか(画面のガイド用・サーバーの capability と同条件の目安)。
-  const providerKeyOk =
-    provider === "mock" ||
-    (provider === "claude" && (s?.hasAnthropicKey || anthropicKey.trim() !== "")) ||
-    (provider === "openai" && (s?.hasOpenaiKey || openaiKey.trim() !== ""));
-  const enabledHint = providerKeyOk && trackingBaseUrl.trim() !== "" && lpUrl.trim() !== "" && senderName.trim() !== "" && senderContact.trim() !== "";
+  // この設定で売却DMが「使える」状態かどうか。
+  // ⚠判定は**サーバーと同じ純関数**を使う（print-ready.ts）。以前はここに条件を書き写して
+  //   いたため、AI直結の生成を廃止したあとも画面だけが「AI種別＋APIキー」を要求し続け、
+  //   **使えるのに「使えません」**と表示していた（不要な有料API契約に進みかねない）。
+  const printReadyInput = { trackingBaseUrl, lpUrl, senderName, senderContact };
+  const enabledHint = isSaleDmPrintReady(printReadyInput);
+  const missingRequirements = missingSaleDmPrintRequirements(printReadyInput);
 
   return (
     <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
       <div>
         <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">売却促進DM 設定</h1>
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          AIの種類・APIキー・URL・差出人を設定します。APIキーは暗号化して保存され、画面には表示されません(設定済/未設定のみ)。
+          売却DMの追跡URL・既定LP URL・差出人を設定します。⚠**AIの種類とAPIキーは現在の運用では使いません**(文面はお手元のAIで作る方式に変わりました)。
         </p>
       </div>
 
@@ -120,7 +125,9 @@ export default function SaleDmSettingsPage() {
 
       <div className={`flex items-center gap-2 rounded-md border p-3 text-xs ${enabledHint ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" : "border-gray-300 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400"}`}>
         {enabledHint ? <ShieldCheck className="h-4 w-4" /> : <ShieldAlert className="h-4 w-4" />}
-        {enabledHint ? "売却DMを使う設定が揃っています(利用者へ「売却促進DMのAI生成」権限の付与もお忘れなく)。" : "売却DMを有効にするには: AI種別+APIキー / 追跡URL / 既定LP URL / 差出人名・連絡先 をすべて設定してください。"}
+        {enabledHint
+          ? "売却DMを使う設定が揃っています(利用者には「物件情報の編集」権限が必要です)。"
+          : `売却DMを使うには次の設定が必要です: ${missingRequirements.join(" / ")}。⚠URLは http(s) から始まる絶対URLで入力してください。`}
       </div>
 
       {message && (
@@ -130,6 +137,12 @@ export default function SaleDmSettingsPage() {
       )}
 
       <div className="space-y-4">
+        {/* ⚠欄自体を消すかは別判断。残す以上「埋めなくてよい」と分かる必要がある
+            （分からないと不要な有料API契約に進みかねない＝この画面の誤表示の実害）。 */}
+        <p className="rounded-md border border-gray-300 bg-gray-50 p-2 text-[11px] text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+          ⚠下の「AIの種類」と「APIキー」は<strong>現在の運用では使いません</strong>（空のままで構いません）。
+          手紙の文面はお手元のブラウザのAIで作り、貼り付ける方式です。
+        </p>
         <Field label="AIの種類(プロバイダ)">
           <select value={provider} onChange={(e) => setProvider(e.target.value)} aria-label="AIの種類" className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100">
             <option value="">未設定(サーバー既定に従う)</option>
