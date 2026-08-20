@@ -218,6 +218,15 @@ describe("回収の入口(画面)", () => {
       "utf8",
     ).split(CR).join("");
     expect(patch).toContain('current.registryStatus === "scheduled"');
+    // ⚠**書き込み自体にも条件を付ける**(@codex #394 R29 P1)。読んだ時点の判定
+    //   だけだと、読んだ後にロックを取られて書き換えられる。
+    const writeAt = patch.indexOf("const guardedUpdate = await prisma.property.updateMany");
+    expect(writeAt).toBeGreaterThan(-1);
+    const writeSeg = patch.slice(writeAt, patch.indexOf("});", writeAt));
+    expect(writeSeg).toContain("version,");
+    expect(writeSeg).toContain('registryStatus: { not: "scheduled" }');
+    // 条件付き更新が0件のときは必ず 409 で返す(黙って成功にしない)。
+    expect(patch).toContain("if (guardedUpdate.count === 0) {");
     expect(patch).toContain("REGISTRY_FETCH_IN_PROGRESS");
     expect(patch).toContain('"realEstateNumber",');
   });

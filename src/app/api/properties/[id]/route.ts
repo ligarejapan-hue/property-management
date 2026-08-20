@@ -223,32 +223,29 @@ export async function PATCH(
     }
 
     // ⚠**謄本の自動取得(scheduled)中は、取得の鍵になる項目を変えさせない**
-    //   (@codex #394 R28 P1)。取得は所在・地番を鍵にサイトから書類を選ぶ。
+    //   (@codex #394 R28/R29 P1)。取得は所在・地番を鍵にサイトから書類を選ぶ。
     //   取得中にここが変わると、選んだ書類が**別の対象になった物件**へ添付され、
-    //   所有者の紐付けまで変わる。CSV取込は既に同じガードを持つ(R27)。
+    //   所有者の紐付けまで変わる。⚠**判定だけでは足りない**(読んだ後にロックを
+    //   取られる)ので、下の**書き込み条件**に入れて弾く。
     //   ⚠メモ等、鍵に関係ない項目の編集は止めない(取得は数分かかるため)。
-    if (current.registryStatus === "scheduled") {
-      const keyFields = [
-        "address",
-        "lotNumber",
-        "buildingNumber",
-        "realEstateNumber",
-      ] as const;
-      const touchesKey = keyFields.some((f) => {
-        if (!(f in updateFields)) return false;
-        const next = (updateFields as Record<string, unknown>)[f];
-        const prev = current[f];
-        return String(next ?? "").trim() !== String(prev ?? "").trim();
-      });
-      if (touchesKey) {
-        throw new ApiError(
-          409,
-          "謄本の自動取得の処理中です。所在・地番・家屋番号・不動産番号の変更は完了後にお試しください",
-          "REGISTRY_FETCH_IN_PROGRESS",
-        );
-      }
+    const REGISTRY_KEY_FIELDS = [
+      "address",
+      "lotNumber",
+      "buildingNumber",
+      "realEstateNumber",
+    ] as const;
+    const touchesRegistryKey = REGISTRY_KEY_FIELDS.some((f) => {
+      if (!(f in updateFields)) return false;
+      const next = (updateFields as Record<string, unknown>)[f];
+      return String(next ?? "").trim() !== String(current[f] ?? "").trim();
+    });
+    if (touchesRegistryKey && current.registryStatus === "scheduled") {
+      throw new ApiError(
+        409,
+        "謄本の自動取得の処理中です。所在・地番・家屋番号・不動産番号の変更は完了後にお試しください",
+        "REGISTRY_FETCH_IN_PROGRESS",
+      );
     }
-
     // field_staff scope check
     if (
       session.role === "field_staff" &&
@@ -314,12 +311,43 @@ export async function PATCH(
 
     // Update property with version increment
     // ⚠保存する値は履歴と同じ persistedFields を使う (二重に組み立てない)。
-    const updated = await prisma.property.update({
-      where: { id },
+    // ⚠**条件は書き込み自体に付ける**(@codex #394 R29 P1)。読んだ時点の判定だけだと、
+    //   読んだ後に謄本取得がロックを取った場合に鍵の項目を書き換えてしまう。
+    //   版番号もここで見る(読み取り後に別の更新が入った場合も弾く)。
+    const guardedUpdate = await prisma.property.updateMany({
+      where: {
+        id,
+        version,
+        ...(touchesRegistryKey
+          ? { registryStatus: { not: "scheduled" } }
+          : {}),
+      },
       data: {
         ...persistedFields,
         version: { increment: 1 },
       },
+    });
+    if (guardedUpdate.count === 0) {
+      // 0件の理由を弁別する(取得中 / 先に更新された)。
+      const fresh = await prisma.property.findUnique({
+        where: { id },
+        select: { registryStatus: true },
+      });
+      if (touchesRegistryKey && fresh?.registryStatus === "scheduled") {
+        throw new ApiError(
+          409,
+          "謄本の自動取得の処理中です。所在・地番・家屋番号・不動産番号の変更は完了後にお試しください",
+          "REGISTRY_FETCH_IN_PROGRESS",
+        );
+      }
+      throw new ApiError(
+        409,
+        "他のユーザーが先に更新しています。画面を再読み込みしてください。",
+        "VERSION_CONFLICT",
+      );
+    }
+    const updated = await prisma.property.findUniqueOrThrow({
+      where: { id },
       include: {
         assignee: { select: { id: true, name: true } },
         creator: { select: { id: true, name: true } },
