@@ -184,6 +184,19 @@ describe("回収の入口(画面)", () => {
     expect(fn).toContain('mode: "recover"');
   });
 
+  it("⚠画面は『見せていた内容』を一緒に送る(取り違えをserverで止められる)", () => {
+    // 確認の後に誰かが地番を編集すると、見たものと違う筆を取り込む
+    // (@codex #394 R20 P1)。画面側が版番号と識別子を送らないと検査できない。
+    expect(SEARCH_BUTTON_UI).toContain("version: savedVersion ?? propertyVersion");
+    expect(SEARCH_BUTTON_UI).toContain("identifier: hasBothIdentifiers");
+    const fn = API_CLIENT.slice(
+      API_CLIENT.indexOf("export async function recoverRegistryFromProperty"),
+      API_CLIENT.indexOf("// ---- 謄本 一括取得"),
+    );
+    expect(fn).toContain("expectedVersion: expected.version");
+    expect(fn).toContain("expectedIdentifier: expected.identifier");
+  });
+
   it("⚠使える機能まで『利用できません』と言わない", () => {
     // 所在検索が使えないだけなのに『謄本取得は利用できません』と出すと、
     // 期限のある取り込みまで諦めさせてしまう(@codex #394 R17 P2)。

@@ -264,6 +264,18 @@ export default function RegistryLocationSearchButton({
           recoverLiveRef,
           // 両方持つ物件のときだけ意味を持つ(片方しか無ければサーバーが解決)。
           hasBothIdentifiers ? recoverKind : undefined,
+          // ⚠**画面が見せていた内容**を一緒に送る(@codex #394 R20 P1)。確認の後に
+          //   誰かが地番を編集していたら、server 側で 409 にして取り違えを防ぐ。
+          {
+            version: savedVersion ?? propertyVersion,
+            identifier: hasBothIdentifiers
+              ? recoverKind === "land"
+                ? propertyLotNumber
+                : propertyBuildingNumber
+              : ((propertyBuildingNumber ?? "").trim()
+                  ? propertyBuildingNumber
+                  : propertyLotNumber),
+          },
         );
       } else {
         await recoverRegistryByCandidate(

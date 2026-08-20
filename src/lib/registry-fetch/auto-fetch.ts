@@ -122,6 +122,18 @@ export interface RunRegistryAutoFetchArgs {
    */
   recoverKind?: "land" | "building";
   /**
+   * 【回収・候補なし】画面が見せていた版番号(@codex #394 R20 P1)。
+   * ⚠候補経由には指紋(expectedFingerprint)があるが、物件経由には無かった。
+   *   確認の後に地番が編集されると**見たものと違う筆**を取り込み、所有者事項なら
+   *   所有者の紐付けまで書き換わる。一致しなければ 409。
+   */
+  recoverExpectedVersion?: number;
+  /**
+   * 【回収・候補なし】画面が見せていた識別子(地番 or 家屋番号)。
+   * ⚠**一致判定にのみ使う**(取得キーは常にDBの値)。表記ゆれは正規化して比べる。
+   */
+  recoverExpectedIdentifier?: string | null;
+  /**
    * 取得キーの上書き（所在検索で server 側再解決した候補の不動産番号／cond③）。
    * 指定時はこれを fetchRegistryPdf に使う（物件は番号未保持のため）。未指定は物件の realEstateNumber。
    */
@@ -3974,6 +3986,35 @@ export async function runRegistryAutoFetch(
     const lotOrBuilding = effectiveLocationIdentifier(
       recoverLocation ?? {},
     ).value;
+    // ⚠**候補なしの回収は、画面が見せていた内容と一致するときだけ実行する**
+    //   (@codex #394 R20 P1)。確認の後に誰かが地番を編集していると、利用者が
+    //   見たものと違う筆のPDFを取り込み、所有者の紐付けまで書き換わる。
+    //   候補経由には指紋(expectedFingerprint)があるので、そちらは従来どおり。
+    //   ⚠送られた値は**一致判定にのみ使う**(取得キーは常にDBの値)。
+    if (!args.locationCandidate) {
+      if (
+        args.recoverExpectedVersion !== undefined &&
+        property.version !== args.recoverExpectedVersion
+      ) {
+        throw new ApiError(
+          409,
+          "物件情報が変わりました。画面を開き直してからもう一度お試しください",
+          "REGISTRY_RECOVER_PROPERTY_CHANGED",
+        );
+      }
+      const expectedId = (args.recoverExpectedIdentifier ?? "").trim();
+      if (
+        expectedId &&
+        normalizeChibanForDialog(expectedId) !==
+          normalizeChibanForDialog(lotOrBuilding)
+      ) {
+        throw new ApiError(
+          409,
+          "物件情報が変わりました。画面を開き直してからもう一度お試しください",
+          "REGISTRY_RECOVER_PROPERTY_CHANGED",
+        );
+      }
+    }
     if (!lotOrBuilding || !(property.address ?? "").trim()) {
       throw new ApiError(
         409,

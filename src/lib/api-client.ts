@@ -1967,6 +1967,11 @@ export async function recoverRegistryFromProperty(
   liveRef?: string,
   /** 物件が地番と家屋番号の両方を持つときに、どちらを取り込むか。 */
   recoverKind?: "land" | "building",
+  /**
+   * 画面が見せていた版番号と識別子(@codex #394 R20 P1)。
+   * ⚠server は**一致判定にのみ使う**(取得キーは常にDBの値)。ずれていれば 409。
+   */
+  expected?: { version: number; identifier?: string | null },
 ): Promise<unknown> {
   return apiFetch(`/api/properties/${propertyId}/registry/auto-fetch`, {
     method: "POST",
@@ -1976,6 +1981,8 @@ export async function recoverRegistryFromProperty(
       certificateType,
       mode: "recover",
       ...(recoverKind ? { recoverKind } : {}),
+      ...(expected ? { expectedVersion: expected.version } : {}),
+      ...(expected?.identifier ? { expectedIdentifier: expected.identifier } : {}),
       ...(liveRef ? { liveRef } : {}),
     }),
   });

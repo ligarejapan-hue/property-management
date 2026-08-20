@@ -1187,6 +1187,8 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
       } | null;
       provider?: RegistryFetchProvider;
       recoverKind?: "land" | "building";
+      recoverExpectedVersion?: number;
+      recoverExpectedIdentifier?: string | null;
     } = {},
   ) {
     const provider = (over.provider ?? recoverProvider()) as RecoverProvider;
@@ -1197,6 +1199,12 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
         confirmed: true,
         mode: "recover",
         ...(over.recoverKind ? { recoverKind: over.recoverKind } : {}),
+        ...(over.recoverExpectedVersion !== undefined
+          ? { recoverExpectedVersion: over.recoverExpectedVersion }
+          : {}),
+        ...(over.recoverExpectedIdentifier !== undefined
+          ? { recoverExpectedIdentifier: over.recoverExpectedIdentifier }
+          : {}),
         locationCandidate:
           over.locationCandidate === undefined ? LC : over.locationCandidate,
       },
@@ -1362,6 +1370,67 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
     const req = provider.recoverRegistryPdf.mock.calls[0][0];
     expect(req.location).toMatchObject({ lotNumber: "5-6" });
     expect(req.realEstateNumber).toBeFalsy();
+  });
+
+  it("⚠確認の後に物件が編集されていたら取り込まない(版番号が違う)", async () => {
+    // 画面が見せていた地番と、いまDBにある地番が違う=利用者が見たものと別の筆。
+    // 所有者事項なら所有者の紐付けまで書き換わる(@codex #394 R20 P1)。
+    setProperty({
+      address: "テスト市テスト町一丁目",
+      lotNumber: "69-2",
+      version: 5,
+    });
+    const { provider, promise } = runRecover({
+      locationCandidate: null,
+      recoverExpectedVersion: 4, // 画面は古い版を見ていた
+    });
+    await expect(promise).rejects.toMatchObject({
+      status: 409,
+      code: "REGISTRY_RECOVER_PROPERTY_CHANGED",
+    });
+    expect(provider.recoverRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("⚠画面が見せていた地番と現在値が違えば取り込まない", async () => {
+    setProperty({
+      address: "テスト市テスト町一丁目",
+      lotNumber: "70-1", // 誰かが直した後
+      version: 5,
+    });
+    const { provider, promise } = runRecover({
+      locationCandidate: null,
+      recoverExpectedVersion: 5,
+      recoverExpectedIdentifier: "69-2", // 画面はこれを見せていた
+    });
+    await expect(promise).rejects.toMatchObject({
+      status: 409,
+      code: "REGISTRY_RECOVER_PROPERTY_CHANGED",
+    });
+    expect(provider.recoverRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("表記ゆれ(全角・番)は同じものとして通す", async () => {
+    setProperty({
+      address: "テスト市テスト町一丁目",
+      lotNumber: "69-2",
+      version: 5,
+    });
+    const { provider, promise } = runRecover({
+      locationCandidate: null,
+      recoverExpectedVersion: 5,
+      recoverExpectedIdentifier: "６９番２",
+    });
+    await promise;
+    expect(provider.recoverRegistryPdf).toHaveBeenCalledTimes(1);
+  });
+
+  it("⚠候補経由の回収は従来どおり指紋で守る(この検査は掛けない)", async () => {
+    setProperty({ address: "テスト市テスト町一丁目", version: 5 });
+    const { provider, promise } = runRecover({
+      recoverExpectedVersion: 4, // 候補ありなら無視される
+    });
+    await promise;
+    expect(provider.recoverRegistryPdf).toHaveBeenCalledTimes(1);
   });
 
   it("⚠両方登録された物件で『土地』を選べば地番で探す(建物に化けない)", async () => {

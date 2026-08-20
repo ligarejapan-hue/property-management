@@ -273,6 +273,35 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
     expect(arg.certificateType).toBe("owner");
   });
 
+  it("候補なしの回収は画面が見せていた版番号・識別子を渡す", async () => {
+    const res = await callRoute({
+      confirmed: true,
+      mode: "recover",
+      expectedVersion: 7,
+      expectedIdentifier: "69-2",
+    });
+    expect(res.status).toBe(200);
+    const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
+    expect(arg.recoverExpectedVersion).toBe(7);
+    expect(arg.recoverExpectedIdentifier).toBe("69-2");
+  });
+
+  it.each(["7", true, {}])(
+    "⚠版番号が数値でない(%s)なら 400(検査を黙って無効化しない)",
+    async (expectedVersion) => {
+      const res = await callRoute({
+        confirmed: true,
+        mode: "recover",
+        expectedVersion,
+      });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        error: { code: "REGISTRY_RECOVER_EXPECTED_VERSION_INVALID" },
+      });
+      expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(["land", "building"])(
     "候補なしの回収は recoverKind(%s)をそのまま渡す",
     async (kind) => {

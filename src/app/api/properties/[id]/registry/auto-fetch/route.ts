@@ -141,6 +141,28 @@ export async function POST(
     const recoverKind =
       kindRaw === "land" || kindRaw === "building" ? kindRaw : undefined;
 
+    // 【回収・候補なし】画面が見せていた内容(版番号・識別子)。一致判定にのみ使う
+    // (@codex #394 R20 P1)。⚠数値でない版番号は黙って無視しない(検査が効かなくなる)。
+    const versionRaw = (body as { expectedVersion?: unknown } | null)
+      ?.expectedVersion;
+    if (isRecover && versionRaw !== undefined && versionRaw !== null) {
+      if (typeof versionRaw !== "number" || !Number.isFinite(versionRaw)) {
+        throw new ApiError(
+          400,
+          "物件の版番号が正しくありません",
+          "REGISTRY_RECOVER_EXPECTED_VERSION_INVALID",
+        );
+      }
+    }
+    const recoverExpectedVersion =
+      typeof versionRaw === "number" && Number.isFinite(versionRaw)
+        ? versionRaw
+        : undefined;
+    const identifierRaw = (body as { expectedIdentifier?: unknown } | null)
+      ?.expectedIdentifier;
+    const recoverExpectedIdentifier =
+      typeof identifierRaw === "string" ? identifierRaw : undefined;
+
     // 所在検索の候補を選んで取得する場合（candidateRef 指定）。cond③: client の候補参照は信頼せず、
     // server 側で当該物件向けに再検索して不動産番号を解決してから取得する。
     const candidateRefRaw = (body as { candidateRef?: unknown } | null)?.candidateRef;
@@ -227,6 +249,12 @@ export async function POST(
             mode: "recover",
             certificateType,
             ...(recoverKind ? { recoverKind } : {}),
+            ...(recoverExpectedVersion !== undefined
+              ? { recoverExpectedVersion }
+              : {}),
+            ...(recoverExpectedIdentifier !== undefined
+              ? { recoverExpectedIdentifier }
+              : {}),
             live,
           },
           provider,
