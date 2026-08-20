@@ -22,6 +22,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
+import { pickReusableAddresslessOwner } from "@/lib/registry-pdf/owner-reuse";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { buildErrorRawDataExtras } from "@/lib/import-error-display";
 import {
@@ -175,6 +176,104 @@ async function reflectParsedOwners(args: {
 
   for (const ownerInfo of owners) {
     if (!ownerInfo.name) continue;
+
+    // ── 住所が無い所有者：**この物件に既に紐づいている**同名の所有者を再利用する ──
+    // なぜ要るか（@codex #394 R6 P2）: 謄本PDFの保存は取込処理の最後にあり、失敗しても
+    // 取込は成功扱い（警告のみ）。「PDFだけ入らなかったのでやり直す」が現実に起き、
+    // 再利用しないとそのたびに同じ人が物件に並ぶ。
+    // ⚠**グローバルな名前だけの統合は従来どおり禁止**（別の物件の同姓同名は別人であり得る）。
+    // ⚠**照会・作成・リンクを1つのトランザクションに閉じ、先に物件行をロックする**
+    //   （@codex #396）。ロックの外で照会すると、同じ物件への取込が同時に走ったときに
+    //   両方が「既存なし」と判定し、それぞれ別の Owner を作ってしまう。PropertyOwner の
+    //   一意制約は (propertyId, ownerId) なので、**別 id の2本は制約でも止められない**。
+    // ⚠**ループの外に出さない**: 1件の謄本に同名・住所なしが2回出てきたとき、
+    //   直前に作った所有者を2件目が再利用できる必要がある。
+    if (!ownerInfo.address) {
+      const outcome = await prisma.$transaction(async (tx) => {
+        await lockPropertyRow(tx, propertyId);
+        const linked = await tx.propertyOwner.findMany({
+          where: { propertyId },
+          select: {
+            owner: {
+              select: {
+                id: true,
+                name: true,
+                address: true,
+                isArchived: true,
+                corporateNumber: true,
+              },
+            },
+          },
+        });
+        const reusable = pickReusableAddresslessOwner(
+          linked
+            .map((l) => l.owner)
+            .filter((o): o is NonNullable<typeof o> => !!o),
+          ownerInfo.name,
+        );
+        if (reusable) {
+          // 既にこの物件に紐づいている＝リンクは作らない。
+          // ⚠**この tx で既存の Owner 行に触らない**（@codex #396 R2）。住所ありの経路は
+          //   「Owner → 物件」の順でロックするため、ここで物件を握ったまま Owner を
+          //   掴むと**ロック順序が逆**になり、同時実行で互いに待ち合って
+          //   PostgreSQL がどちらかを中断する（正常な取込が失敗する）。
+          //   法人番号の穴埋めは tx の外で行う（空のときだけ埋める条件付き更新なので
+          //   直列化は要らない）。
+          return {
+            reused: true as const,
+            ownerId: reusable.id,
+            existingCorporateNumber: reusable.corporateNumber,
+          };
+        }
+        const decision = decideCorporateImport(
+          { name: ownerInfo.name, address: null },
+          null,
+        );
+        const created = await tx.owner.create({
+          data: {
+            name: ownerInfo.name,
+            ...(decision.action === "save" && decision.corporateNumber
+              ? { corporateNumber: decision.corporateNumber }
+              : {}),
+          },
+          select: { id: true },
+        });
+        await tx.propertyOwner.create({
+          data: {
+            propertyId,
+            ownerId: created.id,
+            relationship: ownerInfo.share ? "共有者" : "所有者",
+          },
+        });
+        return { reused: false as const, decision };
+      });
+      if (outcome.reused) {
+        matchedCount++;
+        // tx の外で法人番号を穴埋めする（空のときだけ・既存値は自動で上書きしない）。
+        const decision = decideCorporateImport(
+          { name: ownerInfo.name, address: null },
+          outcome.existingCorporateNumber,
+        );
+        if (decision.action === "save" && decision.corporateNumber) {
+          const filled = await prisma.owner.updateMany({
+            where: { id: outcome.ownerId, corporateNumber: null },
+            data: { corporateNumber: decision.corporateNumber },
+          });
+          recordCorporateDecision(
+            filled.count === 0
+              ? { action: "noop", corporateNumber: null }
+              : decision,
+          );
+        } else {
+          recordCorporateDecision(decision);
+        }
+      } else {
+        createdCount++;
+        linkedCount++;
+        recordCorporateDecision(outcome.decision);
+      }
+      continue;
+    }
 
     // address あり → normalizeName + normalizeAddress で既存 Owner 検索
     // address なし → name のみでの自動統合はしない（同姓同名の別人を誤統合しないため）

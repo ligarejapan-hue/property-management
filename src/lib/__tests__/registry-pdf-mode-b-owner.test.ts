@@ -98,6 +98,9 @@ vi.mock("@/lib/prisma", () => {
     },
     propertyOwner: {
       findFirst: vi.fn(),
+      // 住所なしの所有者は「この物件に既に紐づいている同名」を再利用するため、
+      // 取込処理が物件の紐づきを引く（既定は空＝紐づきなし＝従来どおり新規作成）。
+      findMany: vi.fn(async () => []),
       create: vi.fn(),
     },
     importJob: { create: vi.fn(), update: vi.fn() },
@@ -134,7 +137,7 @@ const pm = prisma as unknown as {
     updateMany: Mock;
   };
   owner: { findMany: Mock; create: Mock; updateMany: Mock };
-  propertyOwner: { findFirst: Mock; create: Mock };
+  propertyOwner: { findFirst: Mock; findMany: Mock; create: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
   attachment: { create: Mock };
