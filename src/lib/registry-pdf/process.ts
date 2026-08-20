@@ -22,6 +22,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
+import { pickReusableAddresslessOwner } from "@/lib/registry-pdf/owner-reuse";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { buildErrorRawDataExtras } from "@/lib/import-error-display";
 import {
@@ -197,6 +198,36 @@ async function reflectParsedOwners(args: {
       );
       candidateOwnerId = hit?.id ?? null;
       candidateCorporateNumber = hit?.corporateNumber ?? null;
+    } else {
+      // 住所が無い所有者は**この物件に既に紐づいている**同名の所有者だけ再利用する
+      // （@codex #394 R6 P2）。謄本PDFの保存は最後にあり、失敗しても取込は成功扱いなので
+      // 「PDFだけ入らなかったのでやり直す」が起きる。再利用しないと、そのたびに
+      // 同じ人が物件に並ぶ。
+      // ⚠**グローバルな名前だけの統合は従来どおり禁止**（別の物件の同姓同名は別人であり得る）。
+      // ⚠**ループの外に出さない**: 1件の謄本に同名・住所なしが2回出てきたとき、
+      //   このループで作ったばかりの所有者を2件目が再利用できる必要がある
+      //   （外で1回引くと、同じPDFの中で2件作ってしまう）。
+      //   引く回数は1物件の所有者数どまりで、住所ありの所有者は従来どおり別経路。
+      const linked = await prisma.propertyOwner.findMany({
+        where: { propertyId },
+        select: {
+          owner: {
+            select: {
+              id: true,
+              name: true,
+              address: true,
+              isArchived: true,
+              corporateNumber: true,
+            },
+          },
+        },
+      });
+      const reusable = pickReusableAddresslessOwner(
+        linked.map((l) => l.owner).filter((o): o is NonNullable<typeof o> => !!o),
+        ownerInfo.name,
+      );
+      candidateOwnerId = reusable?.id ?? null;
+      candidateCorporateNumber = reusable?.corporateNumber ?? null;
     }
 
     // 既存 owner を使うパス: lookup と PropertyOwner.create の間に concurrent
