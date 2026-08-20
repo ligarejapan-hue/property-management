@@ -54,6 +54,7 @@ import {
   resolveFailure,
   resolveSuccess,
   shouldClearLoading,
+  type RefreshOutcome,
 } from "@/lib/property-refresh/refresh-coordinator";
 
 // ---------- Label maps ----------
@@ -225,6 +226,24 @@ interface ApiProperty {
 
 // ---------- Component ----------
 
+/**
+ * 取り直しの判定結果（refresh-coordinator が返す）を画面へ反映する**唯一の場所**。
+ * ⚠反映を書く場所を増やすと、「どこかだけ showError を見ていない」というずれが必ず起きる。
+ * ⚠コンポーネントの外に置く: 中に置くと useCallback の依存配列が増え、
+ *   取り直しの再生成条件（[id, loadQualityIssues]）まで変わってしまう。
+ */
+function applyRefreshOutcome(
+  outcome: RefreshOutcome,
+  data: ApiProperty | null,
+  setProperty: (property: ApiProperty) => void,
+  setError: (message: string | null) => void,
+): boolean {
+  if (outcome.applyData && data !== null) setProperty(data);
+  if (outcome.showError !== null) setError(outcome.showError);
+  else if (outcome.clearError) setError(null);
+  return outcome.applyData;
+}
+
 export default function PropertyDetailPage({
   params,
 }: {
@@ -316,16 +335,23 @@ export default function PropertyDetailPage({
     setError(null);
     try {
       const data = await fetchPropertyDetail(id);
-      const outcome = resolveSuccess(refreshStateRef.current, ticket);
-      if (outcome.applyData) setProperty(data as unknown as ApiProperty);
-      if (outcome.clearError) setError(null);
-    } catch (err) {
-      const outcome = resolveFailure(
-        refreshStateRef.current,
-        ticket,
-        err instanceof Error ? err.message : "データ取得に失敗しました",
+      applyRefreshOutcome(
+        resolveSuccess(refreshStateRef.current, ticket),
+        data as unknown as ApiProperty,
+        setProperty,
+        setError,
       );
-      if (outcome.showError !== null) setError(outcome.showError);
+    } catch (err) {
+      applyRefreshOutcome(
+        resolveFailure(
+          refreshStateRef.current,
+          ticket,
+          err instanceof Error ? err.message : "データ取得に失敗しました",
+        ),
+        null,
+        setProperty,
+        setError,
+      );
     } finally {
       if (shouldClearLoading(refreshStateRef.current, ticket)) setLoading(false);
     }
@@ -342,21 +368,26 @@ export default function PropertyDetailPage({
     const ticket = beginRefresh(refreshStateRef.current, "quiet");
     try {
       const data = await fetchPropertyDetail(id);
-      const outcome = resolveSuccess(refreshStateRef.current, ticket);
-      if (!outcome.applyData) return;
-      setProperty(data as unknown as ApiProperty);
-      // 取れたのだから、居座っているエラー画面は畳む。
-      if (outcome.clearError) setError(null);
-      void loadQualityIssues();
-    } catch (err) {
-      const outcome = resolveFailure(
-        refreshStateRef.current,
-        ticket,
-        err instanceof Error ? err.message : "データ取得に失敗しました",
+      const applied = applyRefreshOutcome(
+        resolveSuccess(refreshStateRef.current, ticket),
+        data as unknown as ApiProperty,
+        setProperty,
+        setError,
       );
-      // 静かな更新**自身**の失敗は表に出さない（best-effort）。
-      // 出るのは「預かっている失敗があり、これが決着になった」ときだけ。
-      if (outcome.showError !== null) setError(outcome.showError);
+      if (applied) void loadQualityIssues();
+    } catch (err) {
+      // 静かな更新**自身**の失敗は表に出さない（best-effort）。出るのは
+      // 「預かっている失敗があり、これが決着になった」ときだけ（純関数が決める）。
+      applyRefreshOutcome(
+        resolveFailure(
+          refreshStateRef.current,
+          ticket,
+          err instanceof Error ? err.message : "データ取得に失敗しました",
+        ),
+        null,
+        setProperty,
+        setError,
+      );
     }
   }, [id, loadQualityIssues]);
 

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  type RefreshKind,
   beginRefresh,
   createRefreshState,
   resolveFailure,
@@ -15,7 +16,11 @@ describe("refresh-coordinator: 単独で走る場合", () => {
   it("通常の取り直しは反映して「読み込み中」も解除する", () => {
     const s = createRefreshState();
     const t = beginRefresh(s, "full");
-    expect(resolveSuccess(s, t)).toEqual({ applyData: true, clearError: true });
+    expect(resolveSuccess(s, t)).toEqual({
+      applyData: true,
+      clearError: true,
+      showError: null,
+    });
     expect(shouldClearLoading(s, t)).toBe(true);
   });
 
@@ -129,6 +134,29 @@ describe("refresh-coordinator: 通常と静かが交差する場合", () => {
     expect(resolveFailure(s, second, "2回目の失敗").showError).toBe("2回目の失敗");
   });
 
+  it("古い成功は、より新しい失敗の預かりを消さない(full1/full2/quiet3)", () => {
+    // @codex R6 P2: full2 が失敗して預かりになった後に**より古い** full1 が成功しても、
+    //   full2 の失敗は未解決のまま。ここで預かりを消すと、quiet3 も失敗したときに
+    //   何も知らせず、full1 の古い内容だけが残る。
+    const s = createRefreshState();
+    const full1 = beginRefresh(s, "full");
+    const full2 = beginRefresh(s, "full");
+    const quiet3 = beginRefresh(s, "quiet");
+    expect(resolveFailure(s, full2, "2回目が失敗").showError).toBeNull();
+    expect(resolveSuccess(s, full1).applyData).toBe(true);
+    expect(resolveFailure(s, quiet3, "静かな方も失敗").showError).toBe("2回目が失敗");
+  });
+
+  it("預かりより新しい中身が届いたら、預かりは消える", () => {
+    const s = createRefreshState();
+    const full1 = beginRefresh(s, "full");
+    const quiet2 = beginRefresh(s, "quiet");
+    resolveFailure(s, full1, "1回目が失敗");
+    expect(resolveSuccess(s, quiet2).applyData).toBe(true);
+    const later = beginRefresh(s, "quiet");
+    expect(resolveFailure(s, later, "また失敗").showError).toBeNull();
+  });
+
   it("最新が失敗した後は、古い成功で画面を書き戻さない", () => {
     const s = createRefreshState();
     const older = beginRefresh(s, "quiet");
@@ -136,4 +164,93 @@ describe("refresh-coordinator: 通常と静かが交差する場合", () => {
     expect(resolveFailure(s, newer, "落ちました").showError).toBe("落ちました");
     expect(resolveSuccess(s, older).applyData).toBe(false);
   });
+});
+
+/**
+ * 総当たり: 発行する取り直しの種類・成否・**返ってくる順番**の全組み合わせで、
+ * 守るべき約束が破れないことを確かめる。
+ *
+ * ⚠これを書いた動機: 個別の場面を1つずつ塞ぐやり方では、@codex に 6 巡連続で
+ *   「その隣」を指摘された。**順番の交差は人が数え上げるには多すぎる**ので機械に任せる。
+ *   実際このテストを書いた時点で、まだ塞げていない穴が1つ見つかった
+ *   （静かな更新が先に失敗し、後から通常の更新が失敗すると、預かりを渡す相手がいない）。
+ */
+describe("refresh-coordinator: 総当たり(守るべき約束が破れない)", () => {
+  interface Step {
+    kind: RefreshKind;
+    ok: boolean;
+  }
+
+  /** 発行を全部済ませてから、指定の順番で決着させる（＝重なって走っている状態）。 */
+  const simulate = (steps: Step[], settleOrder: number[]) => {
+    const state = createRefreshState();
+    const tickets = steps.map((s) => beginRefresh(state, s.kind));
+    let shownError: string | null = null;
+    let loadingCleared = false;
+    let lastApplied = 0;
+    for (const i of settleOrder) {
+      const ticket = tickets[i];
+      const outcome = steps[i].ok
+        ? resolveSuccess(state, ticket)
+        : resolveFailure(state, ticket, `失敗${i + 1}`);
+      if (outcome.applyData) {
+        // 約束1: 反映する内容が古い方へ戻らないこと。
+        expect(ticket.seq).toBeGreaterThanOrEqual(lastApplied);
+        lastApplied = ticket.seq;
+      }
+      if (outcome.showError !== null) shownError = outcome.showError;
+      else if (outcome.clearError) shownError = null;
+      if (shouldClearLoading(state, ticket)) loadingCleared = true;
+    }
+    return { state, shownError, loadingCleared, lastApplied };
+  };
+
+  const permutations = <T,>(items: T[]): T[][] => {
+    if (items.length <= 1) return [items];
+    return items.flatMap((item, i) =>
+      permutations([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [
+        item,
+        ...rest,
+      ]),
+    );
+  };
+
+  const KINDS: RefreshKind[] = ["full", "quiet"];
+  const allStepSets = (n: number): Step[][] => {
+    if (n === 0) return [[]];
+    return allStepSets(n - 1).flatMap((rest) =>
+      KINDS.flatMap((kind) =>
+        [true, false].map((ok) => [...rest, { kind, ok }] as Step[]),
+      ),
+    );
+  };
+
+  for (const n of [1, 2, 3]) {
+    it(`${n}件が重なって走っても、約束が破れない`, () => {
+      let cases = 0;
+      for (const steps of allStepSets(n)) {
+        for (const order of permutations([...Array(n).keys()])) {
+          cases += 1;
+          const { state, shownError, loadingCleared, lastApplied } = simulate(
+            steps,
+            order,
+          );
+          // 約束2: 「読み込み中」は必ず解除される（full を出したなら）。
+          if (steps.some((s) => s.kind === "full")) {
+            expect(loadingCleared).toBe(true);
+          }
+          // 約束3: 利用者の操作(full)が失敗し、**それより新しい内容も届いていない**なら、
+          //        黙らずにエラーを見せる。
+          const unresolved = steps.some(
+            (s, i) => s.kind === "full" && !s.ok && lastApplied <= i + 1,
+          );
+          if (unresolved) expect(shownError).not.toBeNull();
+          // 約束4: 決着したら預かりを残さない（次の取り直しに古い失敗が混ざらない）。
+          expect(state.pending).toBe(0);
+          expect(state.deferredError).toBeNull();
+        }
+      }
+      expect(cases).toBeGreaterThan(0);
+    });
+  }
 });
