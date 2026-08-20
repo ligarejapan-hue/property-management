@@ -48,6 +48,14 @@ import { useScreenProtection } from "@/components/screen-protection/screen-prote
 import { SalesSheetCreateButton } from "@/components/sales-sheet/SalesSheetCreateButton";
 import { SalesSheetList } from "@/components/sales-sheet/SalesSheetList";
 import { salesSheetTemplateKindFor } from "@/lib/sales-sheet/template-kind";
+import {
+  beginRefresh,
+  createRefreshState,
+  resolveFailure,
+  resolveSuccess,
+  shouldClearLoading,
+  type RefreshOutcome,
+} from "@/lib/property-refresh/refresh-coordinator";
 
 // ---------- Label maps ----------
 
@@ -218,6 +226,24 @@ interface ApiProperty {
 
 // ---------- Component ----------
 
+/**
+ * 取り直しの判定結果（refresh-coordinator が返す）を画面へ反映する**唯一の場所**。
+ * ⚠反映を書く場所を増やすと、「どこかだけ showError を見ていない」というずれが必ず起きる。
+ * ⚠コンポーネントの外に置く: 中に置くと useCallback の依存配列が増え、
+ *   取り直しの再生成条件（[id, loadQualityIssues]）まで変わってしまう。
+ */
+function applyRefreshOutcome(
+  outcome: RefreshOutcome,
+  data: ApiProperty | null,
+  setProperty: (property: ApiProperty) => void,
+  setError: (message: string | null) => void,
+): boolean {
+  if (outcome.applyData && data !== null) setProperty(data);
+  if (outcome.showError !== null) setError(outcome.showError);
+  else if (outcome.clearError) setError(null);
+  return outcome.applyData;
+}
+
 export default function PropertyDetailPage({
   params,
 }: {
@@ -231,6 +257,10 @@ export default function PropertyDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // 添付ファイルタブへ「一覧を読み直して」と伝える合図（値が変わったときだけ効く）。
+  // ⚠あのタブは開いた瞬間に一度だけ読み込むため、開いたまま謄本を取り込んでも
+  //   一覧が増えなかった（2026-08-20 に『取り込めていない』と誤解された原因）。
+  const [attachmentsRefreshToken, setAttachmentsRefreshToken] = useState(0);
 
   // 品質警告 (§8-6): 一覧と同じ fetchQualityCheck の scoped モードで当該物件分のみ取得。
   // severity=info は対象外。取得失敗時はセクション非表示（fail-safe: 詳細全体を壊さない）。
@@ -261,6 +291,15 @@ export default function PropertyDetailPage({
   // seq guard: fire-and-forget でも後着リクエストが先着の stale 結果で state を上書きしない。
   // void 呼び出しでも cancelled フラグを誰も true にしない問題を解消（ref シーケンス方式）。
   const qualityReqSeq = useRef(0);
+  // 物件本体の取り直しの世代（通常の取り直しと静かな取り直しで共有する）。
+  // ⚠**発行**(Req)と**反映できた**(Applied)を分ける（@codex R3 P2）。まとめてしまうと、
+  //   best-effort の静かな取り直しが**失敗しただけ**で、ちゃんと返ってきた通常の
+  //   取り直しの結果まで「古い」と判定されて捨てられ、画面が古いまま残る。
+  //   ⇒ 世代を進めるのは**中身を反映できたときだけ**にする。
+  // 取り直しの交通整理は純関数へ（refresh-coordinator）。判定を画面に直書きしていたら
+  // @codex に 5 巡連続で別々の穴を指摘されたため、**順番を並べた本物のテスト**で
+  // 固定できる形に出した。ここが持つのはその状態だけ。
+  const refreshStateRef = useRef(createRefreshState());
   const loadQualityIssues = useCallback(async () => {
     const seq = ++qualityReqSeq.current;
     try {
@@ -290,21 +329,77 @@ export default function PropertyDetailPage({
   }, [id]);
 
   const fetchProperty = useCallback(async () => {
+    // 利用者の操作による取り直し（画面を「読み込み中」にする）。
+    const ticket = beginRefresh(refreshStateRef.current, "full");
     setLoading(true);
     setError(null);
     try {
       const data = await fetchPropertyDetail(id);
-      setProperty(data as unknown as ApiProperty);
+      applyRefreshOutcome(
+        resolveSuccess(refreshStateRef.current, ticket),
+        data as unknown as ApiProperty,
+        setProperty,
+        setError,
+      );
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "データ取得に失敗しました",
+      applyRefreshOutcome(
+        resolveFailure(
+          refreshStateRef.current,
+          ticket,
+          err instanceof Error ? err.message : "データ取得に失敗しました",
+        ),
+        null,
+        setProperty,
+        setError,
       );
     } finally {
-      setLoading(false);
+      if (shouldClearLoading(refreshStateRef.current, ticket)) setLoading(false);
     }
     // 物件再取得に連動して品質警告も更新する（@codex P2: 更新後も最新の警告を表示）。
     void loadQualityIssues();
   }, [id, loadQualityIssues]);
+
+  // 画面を「読み込み中」に差し替えない取り直し。謄本の取得・取り込みが成功したときに使う。
+  // ⚠loading を立てない＝このページの子（謄本の実況パネル）が作り直されない。立てると
+  //   成功直後に実況の見返しが消える（@codex #380 R3 P2 で踏んだ回帰）。
+  // ⚠静かな更新なので、失敗しても画面は壊さない（利用者は従来どおり
+  //   「閉じる（物件情報を更新）」でいつでも本筋の取り直しができる）。
+  const refreshPropertyQuietly = useCallback(async () => {
+    const ticket = beginRefresh(refreshStateRef.current, "quiet");
+    try {
+      const data = await fetchPropertyDetail(id);
+      const applied = applyRefreshOutcome(
+        resolveSuccess(refreshStateRef.current, ticket),
+        data as unknown as ApiProperty,
+        setProperty,
+        setError,
+      );
+      if (applied) void loadQualityIssues();
+    } catch (err) {
+      // 静かな更新**自身**の失敗は表に出さない（best-effort）。出るのは
+      // 「預かっている失敗があり、これが決着になった」ときだけ（純関数が決める）。
+      applyRefreshOutcome(
+        resolveFailure(
+          refreshStateRef.current,
+          ticket,
+          err instanceof Error ? err.message : "データ取得に失敗しました",
+        ),
+        null,
+        setProperty,
+        setError,
+      );
+    }
+  }, [id, loadQualityIssues]);
+
+  // 謄本の取得・取り込みが成功したときの反映。
+  // ⚠発注者指示（2026-08-20）＝**知らせるのは失敗のときだけ**。成功時に**新しい通知は
+  //   足さない**（トーストも、タブの自動切替もしない）＝結果が画面に出れば足りる：
+  //   ①添付ファイル一覧に取り込んだPDFが出る ②謄本の状態バッジが最新になる。
+  //   ⚠従来からの一行の完了表示は残す（設計提示時に明示して承認済み）。
+  const handleRegistryResultApplied = useCallback(() => {
+    setAttachmentsRefreshToken((n) => n + 1);
+    void refreshPropertyQuietly();
+  }, [refreshPropertyQuietly]);
 
   useEffect(() => {
     fetchProperty();
@@ -590,6 +685,7 @@ export default function PropertyDetailPage({
         //   駐車場・その他・不明は土地とも建物とも決まっていない。
         offerBuildingPath={!isLandPropertyType(property.propertyType)}
         onPropertyRefresh={fetchProperty}
+        onRegistryResultApplied={handleRegistryResultApplied}
       />
 
       {/* Warning badge */}
@@ -677,7 +773,10 @@ export default function PropertyDetailPage({
           <CommentTab propertyId={property.id} />
         )}
         {activeTab === "attachments" && (
-          <AttachmentTab propertyId={property.id} />
+          <AttachmentTab
+            propertyId={property.id}
+            refreshToken={attachmentsRefreshToken}
+          />
         )}
         {activeTab === "history" && (
           <HistoryTab propertyId={property.id} />

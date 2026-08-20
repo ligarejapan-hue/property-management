@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   useRegistryPreflight,
   RegistryPreflightWarningLines,
@@ -9,7 +9,7 @@ import {
 import RegistryChibanPopup from "@/components/properties/registry-chiban-popup";
 import { isSearchableTarget } from "@/lib/registry-fetch/registry-target";
 import { resolveRecoverEntry } from "@/lib/registry-fetch/recover-entry";
-import { MapPinned, Loader2 } from "lucide-react";
+import { MapPinned, Loader2, AlertTriangle } from "lucide-react";
 import {
   searchRegistryCandidates,
   obtainRegistryByCandidate,
@@ -57,6 +57,15 @@ interface RegistryLocationSearchButtonProps {
   offerBuildingPath: boolean;
   /** 地番を保存したので物件を取り直す（version と分類を新しくする）。 */
   onPropertyRefresh: () => void;
+  /**
+   * 取得・取り込みが**成功した**合図。画面を作り直さずに、添付ファイル一覧と
+   * 謄本の状態だけを静かに最新化してもらう。
+   * ⚠onPropertyRefresh では代用できない（あちらはページを「読み込み中」に差し替え、
+   *   このボタンごと作り直す＝実況の見返しが即座に消える。@codex #380 R3 P2）。
+   * ⚠任意（?）にしない：配線を忘れても型・テスト・build が通ってしまい、
+   *   本番でだけ「成功したのに画面が古いまま」が復活する（2026-08-20 の再演）。
+   */
+  onRegistryResultApplied: () => void;
 }
 
 type State =
@@ -93,6 +102,7 @@ export default function RegistryLocationSearchButton({
   canWriteProperty,
   offerBuildingPath,
   onPropertyRefresh,
+  onRegistryResultApplied,
 }: RegistryLocationSearchButtonProps) {
   const [state, setState] = useState<State>("idle");
   const [candidates, setCandidates] = useState<RegistrySearchCandidate[]>([]);
@@ -120,6 +130,13 @@ export default function RegistryLocationSearchButton({
   const propertyRefreshPendingRef = useRef(false);
   // 保存後の版番号（親から届く propertyVersion より新しい）。
   const [savedVersion, setSavedVersion] = useState<number | null>(null);
+  // 失敗の帯が現れた瞬間に、そこまで画面を送って見落としを防ぐ。
+  // ⚠**知らせるのは失敗のときだけ**(発注者指示 2026-08-20)。成功は画面の更新で足りる。
+  // ⚠useEffect ではなく callback ref: 実物の要素を掴んだ瞬間に 1 回だけ動かす
+  //   (effect 内の同期処理は eslint react-hooks 系の規約でも避ける形)。
+  const errorBannerRef = useCallback((node: HTMLDivElement | null) => {
+    node?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+  }, []);
   // ⚠confirmSearch でも動かす。「何を取りに行くか」が分からないうちは
   //   検索も取得も始めさせない（設計 §3.1.1・fail closed）。
   //   ⚠番号が無い物件ではここでポップアップを出す（確認パネルの**前**）。
@@ -224,6 +241,13 @@ export default function RegistryLocationSearchButton({
         obtainLiveRef,
       );
       setState("done");
+      // 画面を作り直さずに、添付ファイル一覧と謄本の状態だけを静かに最新化する
+      // (2026-08-20: 成功したのに一覧が増えず『取り込めていない』と誤解された)。
+      // ⚠発注者指示(2026-08-20)=**知らせるのは失敗のときだけ**。成功時に
+      //   **新しい通知は足さない**(トースト・自動タブ切替・自動スクロールを付けない)
+      //   =結果が画面に出れば足りる。⚠**従来からの一行の完了表示(role="status")は残す**
+      //   (「閉じる（物件情報を更新）」の導線と一体のため。設計提示時に明示して承認済み)。
+      onRegistryResultApplied();
       // ⚠その場で親の再取得を呼ばない(@codex #380 R3 P2)。再取得は詳細ページを
       //   読み込み中の画面へ差し替え、このボタンごと作り直される=**取得成功の実況
       //   (最後のスクショと3分の見返し)が即座に消える**。地番保存(#373 R10 P2)と
@@ -287,6 +311,8 @@ export default function RegistryLocationSearchButton({
         );
       }
       setState("done");
+      // 取得と同じく、画面を作り直さずに結果だけを反映する(新しい通知は足さない)。
+      onRegistryResultApplied();
       propertyRefreshPendingRef.current = true;
     } catch (e) {
       setErrorMsg(
@@ -366,8 +392,9 @@ export default function RegistryLocationSearchButton({
               ? "取得済みの謄本を取り込みました（今回の料金は発生していません）。"
               : "謄本を取得しました。下の実況で仕上がりを確認できます。"}
           </p>
-          {/* ⚠閉じたときに初めて物件を取り直す(@codex #380 R3 P2)。その場で取り直すと
-              詳細ページが読み込み中の画面に差し替わり、実況の見返しが即座に消える。 */}
+          {/* ⚠**ページを作り直す**取り直しは閉じたときだけ(@codex #380 R3 P2)。その場で
+              呼ぶと詳細ページが読み込み中の画面に差し替わり、実況の見返しが即座に消える。
+              成功直後の反映は onRegistryResultApplied（画面を作り直さない静かな更新）が担う。 */}
           <button
             type="button"
             onClick={reset}
@@ -390,9 +417,22 @@ export default function RegistryLocationSearchButton({
       )}
 
       {state === "error" && errorMsg && (
-        <div className="flex flex-col gap-1 text-[11px]">
-          <p className="text-red-600 dark:text-red-400" role="alert">{errorMsg}</p>
-          <button type="button" onClick={reset} className="w-fit text-indigo-600 dark:text-indigo-400 hover:underline">
+        <div
+          ref={errorBannerRef}
+          className="flex flex-col gap-1 rounded-md border border-red-300 bg-red-50 px-3 py-2 dark:border-red-800 dark:bg-red-950/40"
+        >
+          <p
+            className="flex items-start gap-1.5 text-xs font-medium text-red-700 dark:text-red-300"
+            role="alert"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{errorMsg}</span>
+          </p>
+          <button
+            type="button"
+            onClick={reset}
+            className="w-fit text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline"
+          >
             閉じる
           </button>
         </div>
