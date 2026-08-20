@@ -330,9 +330,14 @@ export default function RegistryLocationSearchButton({
         </button>
       )}
 
+      {/* ⚠**使える機能まで『利用できません』と言わない**(@codex #394 R17 P2)。
+          所在検索が使えなくても、取り込み(回収)は別条件で使える。期限のある
+          書類なので、ここで諦めさせると実害になる。 */}
       {providerDisabled && (
         <p className="text-[11px] text-amber-700 dark:text-amber-400">
-          謄本取得プロバイダが未設定のため現在利用できません。
+          {recoverConfigured
+            ? "所在での検索は現在利用できません（取得済みの謄本の取り込みはご利用いただけます）。"
+            : "謄本取得プロバイダが未設定のため現在利用できません。"}
         </p>
       )}
 

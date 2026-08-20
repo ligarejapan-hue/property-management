@@ -184,6 +184,16 @@ describe("回収の入口(画面)", () => {
     expect(fn).toContain('mode: "recover"');
   });
 
+  it("⚠使える機能まで『利用できません』と言わない", () => {
+    // 所在検索が使えないだけなのに『謄本取得は利用できません』と出すと、
+    // 期限のある取り込みまで諦めさせてしまう(@codex #394 R17 P2)。
+    const at = SEARCH_BUTTON_UI.indexOf("{providerDisabled && (");
+    expect(at).toBeGreaterThan(-1);
+    const seg = SEARCH_BUTTON_UI.slice(at, SEARCH_BUTTON_UI.indexOf("</p>", at));
+    expect(seg).toContain("recoverConfigured");
+    expect(seg).toContain("取得済みの謄本の取り込みはご利用いただけます");
+  });
+
   it("物件ページは回収の可否を**取得の可否**から渡す(所在検索の校正に依らない)", () => {
     expect(PROPERTY_PAGE).toContain("registryRecoverConfigured");
     expect(PROPERTY_PAGE).toContain(
