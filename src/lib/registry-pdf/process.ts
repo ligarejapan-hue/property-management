@@ -177,6 +177,94 @@ async function reflectParsedOwners(args: {
   for (const ownerInfo of owners) {
     if (!ownerInfo.name) continue;
 
+    // ── 住所が無い所有者：**この物件に既に紐づいている**同名の所有者を再利用する ──
+    // なぜ要るか（@codex #394 R6 P2）: 謄本PDFの保存は取込処理の最後にあり、失敗しても
+    // 取込は成功扱い（警告のみ）。「PDFだけ入らなかったのでやり直す」が現実に起き、
+    // 再利用しないとそのたびに同じ人が物件に並ぶ。
+    // ⚠**グローバルな名前だけの統合は従来どおり禁止**（別の物件の同姓同名は別人であり得る）。
+    // ⚠**照会・作成・リンクを1つのトランザクションに閉じ、先に物件行をロックする**
+    //   （@codex #396）。ロックの外で照会すると、同じ物件への取込が同時に走ったときに
+    //   両方が「既存なし」と判定し、それぞれ別の Owner を作ってしまう。PropertyOwner の
+    //   一意制約は (propertyId, ownerId) なので、**別 id の2本は制約でも止められない**。
+    // ⚠**ループの外に出さない**: 1件の謄本に同名・住所なしが2回出てきたとき、
+    //   直前に作った所有者を2件目が再利用できる必要がある。
+    if (!ownerInfo.address) {
+      const outcome = await prisma.$transaction(async (tx) => {
+        await lockPropertyRow(tx, propertyId);
+        const linked = await tx.propertyOwner.findMany({
+          where: { propertyId },
+          select: {
+            owner: {
+              select: {
+                id: true,
+                name: true,
+                address: true,
+                isArchived: true,
+                corporateNumber: true,
+              },
+            },
+          },
+        });
+        const reusable = pickReusableAddresslessOwner(
+          linked
+            .map((l) => l.owner)
+            .filter((o): o is NonNullable<typeof o> => !!o),
+          ownerInfo.name,
+        );
+        if (reusable) {
+          // 既にこの物件に紐づいている＝リンクは作らない。
+          const decision = decideCorporateImport(
+            { name: ownerInfo.name, address: null },
+            reusable.corporateNumber,
+          );
+          if (decision.action === "save" && decision.corporateNumber) {
+            // 空のときだけ埋める（既存値は自動で上書きしない）。
+            const filled = await tx.owner.updateMany({
+              where: { id: reusable.id, corporateNumber: null },
+              data: { corporateNumber: decision.corporateNumber },
+            });
+            return {
+              reused: true as const,
+              decision:
+                filled.count === 0
+                  ? ({ action: "noop", corporateNumber: null } as const)
+                  : decision,
+            };
+          }
+          return { reused: true as const, decision };
+        }
+        const decision = decideCorporateImport(
+          { name: ownerInfo.name, address: null },
+          null,
+        );
+        const created = await tx.owner.create({
+          data: {
+            name: ownerInfo.name,
+            ...(decision.action === "save" && decision.corporateNumber
+              ? { corporateNumber: decision.corporateNumber }
+              : {}),
+          },
+          select: { id: true },
+        });
+        await tx.propertyOwner.create({
+          data: {
+            propertyId,
+            ownerId: created.id,
+            relationship: ownerInfo.share ? "共有者" : "所有者",
+          },
+        });
+        return { reused: false as const, decision };
+      });
+      if (outcome.reused) {
+        matchedCount++;
+      } else {
+        createdCount++;
+        linkedCount++;
+      }
+      recordCorporateDecision(outcome.decision);
+      continue;
+    }
+
     // address あり → normalizeName + normalizeAddress で既存 Owner 検索
     // address なし → name のみでの自動統合はしない（同姓同名の別人を誤統合しないため）
     // archived owner は通常の取込候補から除外（Phase 2-A）。
@@ -198,36 +286,6 @@ async function reflectParsedOwners(args: {
       );
       candidateOwnerId = hit?.id ?? null;
       candidateCorporateNumber = hit?.corporateNumber ?? null;
-    } else {
-      // 住所が無い所有者は**この物件に既に紐づいている**同名の所有者だけ再利用する
-      // （@codex #394 R6 P2）。謄本PDFの保存は最後にあり、失敗しても取込は成功扱いなので
-      // 「PDFだけ入らなかったのでやり直す」が起きる。再利用しないと、そのたびに
-      // 同じ人が物件に並ぶ。
-      // ⚠**グローバルな名前だけの統合は従来どおり禁止**（別の物件の同姓同名は別人であり得る）。
-      // ⚠**ループの外に出さない**: 1件の謄本に同名・住所なしが2回出てきたとき、
-      //   このループで作ったばかりの所有者を2件目が再利用できる必要がある
-      //   （外で1回引くと、同じPDFの中で2件作ってしまう）。
-      //   引く回数は1物件の所有者数どまりで、住所ありの所有者は従来どおり別経路。
-      const linked = await prisma.propertyOwner.findMany({
-        where: { propertyId },
-        select: {
-          owner: {
-            select: {
-              id: true,
-              name: true,
-              address: true,
-              isArchived: true,
-              corporateNumber: true,
-            },
-          },
-        },
-      });
-      const reusable = pickReusableAddresslessOwner(
-        linked.map((l) => l.owner).filter((o): o is NonNullable<typeof o> => !!o),
-        ownerInfo.name,
-      );
-      candidateOwnerId = reusable?.id ?? null;
-      candidateCorporateNumber = reusable?.corporateNumber ?? null;
     }
 
     // 既存 owner を使うパス: lookup と PropertyOwner.create の間に concurrent

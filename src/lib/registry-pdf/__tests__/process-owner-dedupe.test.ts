@@ -64,6 +64,7 @@ const PROP_ID = "11111111-1111-4111-8111-111111111111";
 const PDF = Buffer.from([1, 2, 3, 4, 5]);
 
 const pm = prisma as unknown as {
+  $queryRaw: Mock;
   property: { findUnique: Mock; update: Mock };
   owner: { findMany: Mock; create: Mock; updateMany: Mock };
   propertyOwner: { findFirst: Mock; findMany: Mock; create: Mock };
@@ -175,6 +176,39 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
     linkedOwners([{ id: "owner-arch", name: "山田太郎", isArchived: true }]);
     await run();
     expect(pm.owner.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("照会は『物件行をロックしたトランザクションの中』で行う（同時取込の直列化）", async () => {
+    // @codex #396: ロックの**外**で照会すると、同じ物件への取込が同時に走ったとき
+    //   両方が「既存なし」と判定し、それぞれ別の所有者を作ってしまう。
+    //   PropertyOwner の一意制約は (propertyId, ownerId) なので、**別idの2本は
+    //   制約でも止められない**＝このPRが消そうとしている重複がそのまま残る。
+    // ⇒ 物件行をロック → 照会 → 作成/リンク までを1つのトランザクションに閉じる。
+    const order: string[] = [];
+    let inTx = false;
+    pm.$transaction.mockImplementation(async (cb: (tx: typeof prisma) => unknown) => {
+      inTx = true;
+      try {
+        return await cb(prisma);
+      } finally {
+        inTx = false;
+      }
+    });
+    pm.$queryRaw.mockImplementation(async () => {
+      order.push(`lock:${inTx}`);
+      return [{ id: PROP_ID }];
+    });
+    pm.propertyOwner.findMany.mockImplementation(async () => {
+      order.push(`lookup:${inTx}`);
+      return [];
+    });
+    pm.owner.create.mockImplementation(async () => {
+      order.push(`create:${inTx}`);
+      return { id: "owner-new" };
+    });
+    await run();
+    // ロックが先・照会と作成はトランザクションの中。
+    expect(order).toEqual(["lock:true", "lookup:true", "create:true"]);
   });
 
   it("⚠住所ありの所有者は従来どおり**全体**から照合する（この変更で経路を変えない）", async () => {
