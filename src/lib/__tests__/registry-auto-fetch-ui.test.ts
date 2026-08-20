@@ -122,12 +122,13 @@ describe("PropertyDetailPage — 自動取得導線の配線 (source assertion)"
     );
   });
 
-  it("使わなくなった registryAutoFetch capability の導出をページに残さない", () => {
-    // ⚠所在検索は registryLocationSearch / registryPurchase を使う。自動取得ボタンを
-    //   撤去した以上、registryAutoFetch をページで導出しても誰も読まない（読まれない
-    //   派生値が残ると「まだ使っている」と誤読される）。
+  it("registryAutoFetch を読むのは**回収**のためだけ(自動取得ボタンは復活させない)", () => {
+    // ⚠2026-08-20: 購入済みの取り込み(回収)は**所在検索の校正に依存しない**ため、
+    //   provider が使えるか(registryAutoFetch)で可否を決める(@codex #394 R16 P2)。
+    //   ⚠撤去した「謄本を自動取得」ボタン自体は復活させない(下の各テストで担保)。
     expect(pageSrc).not.toMatch(/registryAutoFetchConfigured/);
-    expect(pageSrc).not.toMatch(/meCapabilities\?\.registryAutoFetch/);
+    expect(pageSrc).toMatch(/meCapabilities\?\.registryAutoFetch === true/);
+    expect(pageSrc).toMatch(/recoverConfigured=\{registryRecoverConfigured\}/);
   });
 
   it("ActionBar の直後に描くのは所在検索ボタンだけ（自動取得は無い）", () => {

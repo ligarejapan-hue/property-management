@@ -102,8 +102,10 @@ describe("F12 展開(19-A 第3実装) — properties 詳細は provider 経由�
         ),
       );
     }
-    // 撤去した自動取得ボタンの capability は、このページではもう読まない。
-    expect(used).not.toContain("registryAutoFetch");
+    // ⚠2026-08-20: registryAutoFetch は**回収(購入済みの取り込み)の可否**として
+    //   再び読むようになった(所在検索の校正に依存させないため)。読むこと自体は
+    //   正しいので、上の走査で collapse が要求されていれば十分。
+    expect(used).toContain("registryAutoFetch");
   });
 
   it("導出は単一 useMemo の純関数(setter / state 持ち越しなし)で 8 状態を返す", () => {

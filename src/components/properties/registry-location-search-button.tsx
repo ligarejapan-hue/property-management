@@ -34,6 +34,12 @@ interface RegistryLocationSearchButtonProps {
    * server 側も 501 で enforce)。
    */
   purchaseEnabled: boolean;
+  /**
+   * 【回収】購入済みの取り込みが使えるか(capabilities.registryAutoFetch)。
+   * ⚠**所在検索とは別条件**(@codex #394 R16 P2)。所在検索の校正が外れていても
+   * 買った書類は取り込めなければならない(取得期限があるため)。
+   */
+  recoverConfigured?: boolean;
   /** 物件の所在（ポップアップで画面にコピーしてもらう。⚠外部へは渡さない）。 */
   propertyAddress: string;
   /** 物件に登録されている地番(候補なしの回収でどちらを探すか選ばせるため)。 */
@@ -79,6 +85,7 @@ export default function RegistryLocationSearchButton({
   canAutoFetch,
   providerConfigured,
   purchaseEnabled,
+  recoverConfigured = false,
   propertyAddress,
   propertyLotNumber,
   propertyBuildingNumber,
@@ -304,6 +311,22 @@ export default function RegistryLocationSearchButton({
         >
           <MapPinned className="h-3.5 w-3.5" />
           所在で謄本を検索
+        </button>
+      )}
+
+      {/* 【回収】購入済みの取り込みは**所在検索と別の入口**(@codex #394 R16 P2)。
+          所在検索が使えない環境・使えない物件でも、買った書類には手が届く。 */}
+      {showButton && recoverConfigured && (
+        <button
+          type="button"
+          onClick={() => {
+            reset();
+            setSelected(null);
+            setState("confirmObtain");
+          }}
+          className="w-fit text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline"
+        >
+          取得済みの謄本を取り込む（課金なし）
         </button>
       )}
 

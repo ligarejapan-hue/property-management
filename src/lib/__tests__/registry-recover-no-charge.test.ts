@@ -108,6 +108,11 @@ const SEARCH_BUTTON_UI = readFileSync(
   "utf8",
 ).split(CR).join("");
 
+const PROPERTY_PAGE = readFileSync(
+  join(process.cwd(), "src/app/(dashboard)/properties/[id]/page.tsx"),
+  "utf8",
+).split(CR).join("");
+
 const API_CLIENT = readFileSync(
   join(process.cwd(), "src/lib/api-client.ts"),
   "utf8",
@@ -177,6 +182,32 @@ describe("回収の入口(画面)", () => {
       API_CLIENT.indexOf("// ---- 謄本 一括取得"),
     );
     expect(fn).toContain('mode: "recover"');
+  });
+
+  it("物件ページは回収の可否を**取得の可否**から渡す(所在検索の校正に依らない)", () => {
+    expect(PROPERTY_PAGE).toContain("registryRecoverConfigured");
+    expect(PROPERTY_PAGE).toContain(
+      "meCapabilities?.registryAutoFetch === true",
+    );
+    expect(PROPERTY_PAGE).toContain(
+      "recoverConfigured={registryRecoverConfigured}",
+    );
+  });
+
+  it("⚠回収の入口は所在検索とは別条件(検索が使えなくても取り込める)", () => {
+    // 所在検索の校正が外れると検索ボタンごと無効になる。回収まで道連れにすると、
+    // 買った書類に手が届かない(@codex #394 R16 P2)。
+    expect(SEARCH_BUTTON_UI).toContain("recoverConfigured");
+    // idle でも回収の入口を出す(検索ボタンの有効/無効とは無関係)。
+    expect(SEARCH_BUTTON_UI).toContain("{showButton && recoverConfigured && (");
+    // ⚠回収の入口は providerDisabled(=所在検索の可否)で塞がない。
+    const at = SEARCH_BUTTON_UI.indexOf("{showButton && recoverConfigured && (");
+    const seg = SEARCH_BUTTON_UI.slice(
+      at,
+      SEARCH_BUTTON_UI.indexOf("</button>", at),
+    );
+    expect(seg).not.toContain("providerDisabled");
+    expect(seg).not.toContain("purchaseEnabled");
   });
 
   it("⚠地番と家屋番号の両方がある物件は、どちらを取り込むか選ばせる", () => {
