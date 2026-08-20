@@ -64,19 +64,44 @@ describe("謄本の結果が画面に出る(2026-08-20 の誤解の再発防止)
     expect(PAGE).toContain("refreshToken={attachmentsRefreshToken}");
   });
 
-  it("通常の取り直しは、どんな場合でも『読み込み中』を解除する", () => {
-    // ⚠実装中に一度踏んだ罠: 世代ガード(後着勝ち)を finally にも掛けると、
-    //   通常の取り直しの最中に静かな取り直しが割り込んだとき、
-    //   **誰も loading を false に戻せず**画面が「読み込み中」から抜けられなくなる
-    //   (静かな取り直しは loading を触らない設計のため)。
-    //   世代ガードは「中身の上書き」(setProperty / setError)にだけ効かせる。
+  it("『読み込み中』の解除は最新の通常の取り直しだけが行う", () => {
+    // ⚠罠その1(実装中に踏んだ): 中身の世代(propertyReqSeq)を finally に掛けると、
+    //   静かな取り直しが割り込んだとき**誰も loading を戻せず**画面が
+    //   「読み込み中」から抜けられなくなる(静かな取り直しは loading を触らない)。
+    // ⚠罠その2(@codex #395 R1 P2): かといって無条件に戻すと、**古い**取り直しが
+    //   先に返っただけで解除され、最新の取得を待たずに古い内容や
+    //   「物件が見つかりません」を見せてしまう(その状態で操作もできてしまう)。
+    // ⇒ loading の持ち主は「通常の取り直し」専用の世代で決める。
     const begin = PAGE.indexOf("const fetchProperty = useCallback");
     expect(begin).toBeGreaterThan(-1);
-    const end = PAGE.indexOf("}, [id, loadQualityIssues]);", begin);
-    const body = PAGE.slice(begin, end);
+    const body = PAGE.slice(begin, PAGE.indexOf("}, [id, loadQualityIssues]);", begin));
     const fin = body.slice(body.indexOf("} finally {"));
-    expect(fin).toContain("setLoading(false);");
-    expect(fin).not.toMatch(/if \([^)]*\)\s*setLoading\(false\)/);
+    expect(fin).toContain("if (fullSeq === fullRefreshSeq.current) setLoading(false);");
+    expect(fin).not.toContain("if (seq === propertyReqSeq.current) setLoading(false)");
+  });
+
+  it("静かな取り直しは『読み込み中』の世代を触らない(取り残しの再発防止)", () => {
+    const qBegin = PAGE.indexOf("const refreshPropertyQuietly");
+    expect(qBegin).toBeGreaterThan(-1);
+    const qBody = PAGE.slice(qBegin, PAGE.indexOf("}, [id, loadQualityIssues]);", qBegin));
+    expect(qBody).not.toContain("fullRefreshSeq");
+  });
+
+  it("添付一覧は後着勝ち(古い読み取りが新しい一覧を上書きしない)", () => {
+    // @codex #395 R1 P2: 取り込み直後の読み直しが、先に始まっていた読み取り
+    //   (初回表示・アップロード後の再取得)に上書きされると、
+    //   **まさに直したはずの「成功が見えない」が復活する**。
+    const begin = ATTACH.indexOf("const fetchAttachmentsData = useCallback");
+    expect(begin).toBeGreaterThan(-1);
+    const body = ATTACH.slice(begin, ATTACH.indexOf("}, [propertyId]);", begin));
+    expect(body).toContain("const seq = ++attachmentsReqSeq.current;");
+    // ⚠**成功したときと失敗したときの両方**で古い結果を捨てる(片方だけだと、
+    //   もう一方の経路で古い一覧・古いエラーが最新を上書きする)。
+    const guards =
+      body.split("if (seq !== attachmentsReqSeq.current) return;").length - 1;
+    expect(guards).toBe(2);
+    // ⚠loading は世代で縛らない(縛ると静かな読み直しの割り込みで取り残す)。
+    expect(body).not.toContain("attachmentsReqSeq.current) setLoading(false)");
   });
 
   it("静かな取り直しはページ全体を『読み込み中』にしない", () => {

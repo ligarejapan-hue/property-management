@@ -120,19 +120,30 @@ export default function AttachmentTab({
   const [previewTarget, setPreviewTarget] = useState<AttachmentData | null>(null);
   const fileInputRefGeneral = useRef<HTMLInputElement>(null);
   const fileInputRefRegistry = useRef<HTMLInputElement>(null);
+  // 一覧の読み取りの世代（初回・アップロード後・合図での読み直しで共有）。
+  const attachmentsReqSeq = useRef(0);
 
   const fetchAttachmentsData = useCallback(async (options?: { silent?: boolean }) => {
+    // ⚠**後着勝ち**(@codex #395 R1 P2)。合図での読み直しは、初回表示や
+    //   アップロード/削除後の読み直しと重なり得る。先に始まった（取り込み前の）
+    //   読み取りが後から返って上書きすると、**まさに直したはずの
+    //   「取り込んだのに一覧に出ない」が復活する**。
+    const seq = ++attachmentsReqSeq.current;
     // ⚠合図での取り直しは「読み込み中」に差し替えない（見ている表が一瞬消えるため）。
     if (!options?.silent) setLoading(true);
     setError(null);
     try {
       const json = await apiFetchAttachments(propertyId);
+      if (seq !== attachmentsReqSeq.current) return; // 後発が来ていたら破棄
       setAttachments(json.data as AttachmentData[]);
     } catch (err) {
+      if (seq !== attachmentsReqSeq.current) return;
       setError(
         err instanceof Error ? err.message : "取得に失敗しました",
       );
     } finally {
+      // ⚠loading は世代で縛らない。縛ると、静かな読み直しが割り込んだときに
+      //   誰も「読み込み中」を解除できなくなる（silent は loading を立てないため）。
       setLoading(false);
     }
   }, [propertyId]);

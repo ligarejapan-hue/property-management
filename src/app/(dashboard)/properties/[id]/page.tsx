@@ -267,6 +267,9 @@ export default function PropertyDetailPage({
   const qualityReqSeq = useRef(0);
   // 物件本体の取り直しの世代（通常の取り直しと静かな取り直しで共有する）。
   const propertyReqSeq = useRef(0);
+  // 「読み込み中」の持ち主を決める世代。⚠**通常の取り直しだけ**が進める
+  //   （静かな取り直しが触ると、割り込んだときに誰も解除できなくなる）。
+  const fullRefreshSeq = useRef(0);
   const loadQualityIssues = useCallback(async () => {
     const seq = ++qualityReqSeq.current;
     try {
@@ -300,6 +303,7 @@ export default function PropertyDetailPage({
     //   でないと先に始まった方が後から返って、新しい内容を古い内容で上書きし得る
     //   （＝直したはずの「画面が古いまま」が別の形で復活する）。品質警告と同じ流儀。
     const seq = ++propertyReqSeq.current;
+    const fullSeq = ++fullRefreshSeq.current;
     setLoading(true);
     setError(null);
     try {
@@ -312,10 +316,13 @@ export default function PropertyDetailPage({
         err instanceof Error ? err.message : "データ取得に失敗しました",
       );
     } finally {
-      // ⚠ここに世代ガードを掛けてはいけない。静かな取り直しが割り込むと
-      //   誰も loading を false に戻せず「読み込み中」から抜けられなくなる
-      //   （静かな取り直しは loading を触らないため）。従来どおり無条件に戻す。
-      setLoading(false);
+      // ⚠「読み込み中」を解除してよいのは**最新の通常の取り直しだけ**（@codex R1 P2）。
+      //   無条件に戻すと、古い取り直しが先に返っただけで解除され、最新の取得を待たずに
+      //   古い内容や「物件が見つかりません」を見せてしまう（操作もできてしまう）。
+      // ⚠かといって propertyReqSeq（中身の世代）で縛ってもいけない。静かな取り直しが
+      //   割り込むと**誰も戻せず**「読み込み中」から抜けられない（実装中に踏んだ）。
+      //   ⇒ 持ち主は「通常の取り直し」専用の世代で決める。
+      if (fullSeq === fullRefreshSeq.current) setLoading(false);
     }
     // 物件再取得に連動して品質警告も更新する（@codex P2: 更新後も最新の警告を表示）。
     void loadQualityIssues();
