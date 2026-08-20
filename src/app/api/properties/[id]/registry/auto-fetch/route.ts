@@ -152,7 +152,9 @@ export async function POST(
     //   物件経由へ落ちる。地番と家屋番号の両方を持つ物件では、候補経由なら
     //   土地を指していたはずが**建物優先の規則で建物のPDFを取り込み**かねない。
     //   ⚠従来の有料取得の挙動は変えない(回収のときだけ厳しくする)。
-    if (isRecover && candidateRefRaw !== undefined && candidateRefRaw !== null) {
+    //   ⚠null も『指定した』扱いにする(@codex #394 R19 P2)。未指定(フィールドを
+    //     送らない)だけが物件経由の合図。自前の画面は null を送らない。
+    if (isRecover && candidateRefRaw !== undefined) {
       if (typeof candidateRefRaw !== "string" || candidateRef === "") {
         throw new ApiError(
           400,
