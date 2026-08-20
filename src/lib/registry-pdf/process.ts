@@ -213,25 +213,17 @@ async function reflectParsedOwners(args: {
         );
         if (reusable) {
           // 既にこの物件に紐づいている＝リンクは作らない。
-          const decision = decideCorporateImport(
-            { name: ownerInfo.name, address: null },
-            reusable.corporateNumber,
-          );
-          if (decision.action === "save" && decision.corporateNumber) {
-            // 空のときだけ埋める（既存値は自動で上書きしない）。
-            const filled = await tx.owner.updateMany({
-              where: { id: reusable.id, corporateNumber: null },
-              data: { corporateNumber: decision.corporateNumber },
-            });
-            return {
-              reused: true as const,
-              decision:
-                filled.count === 0
-                  ? ({ action: "noop", corporateNumber: null } as const)
-                  : decision,
-            };
-          }
-          return { reused: true as const, decision };
+          // ⚠**この tx で既存の Owner 行に触らない**（@codex #396 R2）。住所ありの経路は
+          //   「Owner → 物件」の順でロックするため、ここで物件を握ったまま Owner を
+          //   掴むと**ロック順序が逆**になり、同時実行で互いに待ち合って
+          //   PostgreSQL がどちらかを中断する（正常な取込が失敗する）。
+          //   法人番号の穴埋めは tx の外で行う（空のときだけ埋める条件付き更新なので
+          //   直列化は要らない）。
+          return {
+            reused: true as const,
+            ownerId: reusable.id,
+            existingCorporateNumber: reusable.corporateNumber,
+          };
         }
         const decision = decideCorporateImport(
           { name: ownerInfo.name, address: null },
@@ -257,11 +249,29 @@ async function reflectParsedOwners(args: {
       });
       if (outcome.reused) {
         matchedCount++;
+        // tx の外で法人番号を穴埋めする（空のときだけ・既存値は自動で上書きしない）。
+        const decision = decideCorporateImport(
+          { name: ownerInfo.name, address: null },
+          outcome.existingCorporateNumber,
+        );
+        if (decision.action === "save" && decision.corporateNumber) {
+          const filled = await prisma.owner.updateMany({
+            where: { id: outcome.ownerId, corporateNumber: null },
+            data: { corporateNumber: decision.corporateNumber },
+          });
+          recordCorporateDecision(
+            filled.count === 0
+              ? { action: "noop", corporateNumber: null }
+              : decision,
+          );
+        } else {
+          recordCorporateDecision(decision);
+        }
       } else {
         createdCount++;
         linkedCount++;
+        recordCorporateDecision(outcome.decision);
       }
-      recordCorporateDecision(outcome.decision);
       continue;
     }
 

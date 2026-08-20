@@ -44,6 +44,15 @@ vi.mock("@/lib/api-helpers", () => {
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/change-log", () => ({ recordChangeLog: vi.fn() }));
 vi.mock("@/lib/pdf-registry-parser", () => ({ parseRegistryText: vi.fn() }));
+// 法人番号の検出は差し替える（既定は候補なし）。ロック順序のテストだけ候補を1件返し、
+// 「既存所有者の法人番号を埋める」更新を実際に走らせる＝空振りのピンにしない。
+vi.mock("@/lib/corporate-number", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    detectCorporateNumberInOwnerLike: vi.fn(() => ({ candidates: [] })),
+  };
+});
 vi.mock("@/lib/storage", () => {
   const upload = vi.fn();
   const del = vi.fn();
@@ -56,6 +65,7 @@ vi.mock("@/lib/storage", () => {
 
 import prisma from "@/lib/prisma";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
+import { detectCorporateNumberInOwnerLike } from "@/lib/corporate-number";
 import { getStorage } from "@/lib/storage";
 import { processRegistryPdf } from "@/lib/registry-pdf/process";
 
@@ -209,6 +219,40 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
     await run();
     // ロックが先・照会と作成はトランザクションの中。
     expect(order).toEqual(["lock:true", "lookup:true", "create:true"]);
+  });
+
+  it("物件行を握ったまま既存の所有者行を掴まない（ロック順序の食い違い＝デッドロック回避）", async () => {
+    // @codex #396 R2: 住所ありの経路は「所有者 → 物件」の順でロックする。こちらが
+    //   物件を握ったまま既存の所有者を掴むと**逆順**になり、同時実行で互いに待ち合って
+    //   PostgreSQL がどちらかを中断する（正常な取込が失敗する）。
+    // ⇒ 既存の所有者行に触る更新（法人番号の穴埋め）はトランザクションの**外**で行う。
+    //   空のときだけ埋める条件付き更新なので直列化は要らない。
+    linkedOwners([{ id: "owner-existing", name: "山田太郎" }]);
+    pm.propertyOwner.findFirst.mockResolvedValue({ propertyId: PROP_ID });
+    // ⚠法人番号の候補を1件返させて、既存所有者への更新を**実際に走らせる**。
+    //   （走らない条件で「呼ばれない」を確かめても、何も守れない空振りのピンになる）
+    (detectCorporateNumberInOwnerLike as unknown as Mock).mockReturnValue({
+      candidates: ["4011001059442"],
+    });
+    let inTx = false;
+    const updateManyInTx: boolean[] = [];
+    pm.$transaction.mockImplementation(async (cb: (tx: typeof prisma) => unknown) => {
+      inTx = true;
+      try {
+        return await cb(prisma);
+      } finally {
+        inTx = false;
+      }
+    });
+    pm.owner.updateMany.mockImplementation(async () => {
+      updateManyInTx.push(inTx);
+      return { count: 1 };
+    });
+    await run();
+    // 実際に呼ばれていること（空振りのピンにしない）。
+    expect(updateManyInTx.length).toBeGreaterThan(0);
+    // そのうえで、トランザクションの中では呼ばない。
+    expect(updateManyInTx.every((v) => v === false)).toBe(true);
   });
 
   it("⚠住所ありの所有者は従来どおり**全体**から照合する（この変更で経路を変えない）", async () => {
