@@ -705,11 +705,35 @@ export async function POST(request: NextRequest) {
             continue;
           }
 
-          const updated = await prisma.property.update({
-            where: { id: dupHit.matchedId },
+          // ⚠**謄本の自動取得(scheduled)中の物件は書き換えない**(@codex #394 R27 P1)。
+          //   取得は所在・地番を鍵にサイトから書類を選ぶ。取得中にここが書き換わると、
+          //   選んだ書類が**別の対象になった物件**へ添付され、所有者の紐付けまで変わる。
+          //   この経路は version を上げない(=楽観ロックに掛からない)ため、
+          //   updateMany の条件で弾き、行エラーとして報告する(取得後に再実行できる)。
+          const guarded = await prisma.property.updateMany({
+            where: {
+              id: dupHit.matchedId,
+              registryStatus: { not: "scheduled" },
+            },
             data: finalUpdateData as Parameters<
               typeof prisma.property.update
             >[0]["data"],
+          });
+          if (guarded.count === 0) {
+            await commitBuildingPostalCode();
+            jobRows.push({
+              jobId: job.id,
+              rowNumber,
+              status: "error",
+              rawData: rawRow,
+              errorMessage: `更新スキップ[${dupHit.reason}]: 既存物件ID=${dupHit.matchedId} は謄本の自動取得の処理中です。完了後にこの行だけ再取込してください`,
+              createdId: dupHit.matchedId,
+            });
+            errorCount++;
+            continue;
+          }
+          const updated = await prisma.property.findUniqueOrThrow({
+            where: { id: dupHit.matchedId },
           });
 
           await recordChanges({

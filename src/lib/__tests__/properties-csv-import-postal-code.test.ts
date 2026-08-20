@@ -71,7 +71,15 @@ vi.mock("@/lib/prisma", () => ({
   default: {
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
-    property: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+    property: {
+      findMany: vi.fn(),
+      findUnique: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      // 重複更新は scheduled ガード付きの updateMany 経由(@codex #394 R27)。
+      updateMany: vi.fn(),
+    },
     building: { findMany: vi.fn(), create: vi.fn() },
   },
 }));
@@ -85,7 +93,14 @@ import { POST } from "../../app/api/import/csv/route";
 const pm = prisma as unknown as {
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
-  property: { findMany: Mock; findUnique: Mock; create: Mock; update: Mock };
+  property: {
+    findMany: Mock;
+    findUnique: Mock;
+    findUniqueOrThrow: Mock;
+    create: Mock;
+    update: Mock;
+    updateMany: Mock;
+  };
   building: { findMany: Mock; create: Mock };
 };
 
@@ -104,9 +119,9 @@ function lastCreateData(): Record<string, unknown> {
   return pm.property.create.mock.calls.at(-1)?.[0]?.data ?? {};
 }
 
-/** property.update に渡された data を取得（最後の呼び出し）。 */
+/** 重複更新(updateMany)に渡された data を取得（最後の呼び出し）。 */
 function lastUpdateData(): Record<string, unknown> {
-  return pm.property.update.mock.calls.at(-1)?.[0]?.data ?? {};
+  return pm.property.updateMany.mock.calls.at(-1)?.[0]?.data ?? {};
 }
 
 beforeEach(() => {
@@ -236,18 +251,15 @@ describe("POST /api/import/csv — 郵便番号取込（update）", () => {
 
   beforeEach(() => {
     pm.property.findMany.mockResolvedValue([existingForDedupe]);
-    pm.property.update.mockImplementation(
-      ({ data }: { data: Record<string, unknown> }) =>
-        Promise.resolve({
-          id: "p-existing",
-          address: "東京都千代田区1-1",
-          roomNo: null,
-          buildingId: null,
-          realEstateNumber: "RE-1",
-          externalLinkKey: null,
-          ...data,
-        }),
-    );
+    pm.property.updateMany.mockResolvedValue({ count: 1 });
+    pm.property.findUniqueOrThrow.mockResolvedValue({
+      id: "p-existing",
+      address: "東京都千代田区1-1",
+      roomNo: null,
+      buildingId: null,
+      realEstateNumber: "RE-1",
+      externalLinkKey: null,
+    });
   });
 
   it("12. update時に postalCode が変更され change-log に渡される", async () => {
@@ -260,7 +272,7 @@ describe("POST /api/import/csv — 郵便番号取込（update）", () => {
     const csv = "住所,不動産番号,郵便番号\n東京都千代田区1-1,RE-1,100-0005\n";
     const res = await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
     expect(res.status).toBe(201);
-    expect(pm.property.update).toHaveBeenCalledTimes(1);
+    expect(pm.property.updateMany).toHaveBeenCalledTimes(1);
     expect(lastUpdateData().postalCode).toBe("1000005");
 
     expect(recordChanges).toHaveBeenCalledTimes(1);
@@ -281,7 +293,7 @@ describe("POST /api/import/csv — 郵便番号取込（update）", () => {
     // note を変更して update 自体は発火させつつ、郵便番号は空欄
     const csv = "住所,不動産番号,郵便番号,備考\n東京都千代田区1-1,RE-1,,新メモ\n";
     await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
-    expect(pm.property.update).toHaveBeenCalledTimes(1);
+    expect(pm.property.updateMany).toHaveBeenCalledTimes(1);
     expect("postalCode" in lastUpdateData()).toBe(false);
     expect(lastUpdateData().note).toBe("新メモ");
   });

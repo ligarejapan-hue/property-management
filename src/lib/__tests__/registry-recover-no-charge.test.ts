@@ -184,6 +184,28 @@ describe("回収の入口(画面)", () => {
     expect(fn).toContain('mode: "recover"');
   });
 
+  it("⚠失敗した回収の後は物件を取り直す(古い版番号で永久に409にならない)", () => {
+    // 取得の予約(ロック)が版番号を上げるため、古い版のまま再実行すると
+    // サーバーが毎回409で弾く(@codex #394 R27 P2)。
+    const at = SEARCH_BUTTON_UI.indexOf("const runRecover = async");
+    const seg = SEARCH_BUTTON_UI.slice(at, SEARCH_BUTTON_UI.indexOf("const showButton", at));
+    // catch 側にも refresh の予約がある(成功側だけではない)。
+    const catchAt = seg.indexOf("} catch (e) {");
+    expect(catchAt).toBeGreaterThan(-1);
+    expect(seg.slice(catchAt)).toContain("propertyRefreshPendingRef.current = true;");
+  });
+
+  it("⚠CSV取込の重複更新は謄本取得中(scheduled)の物件を書き換えない", () => {
+    // 取得は所在・地番を鍵に書類を選ぶ。取得中に書き換わると別の対象になった
+    // 物件へ添付される(@codex #394 R26/R27 P1)。CSV側で弾いて行エラーにする。
+    const csv = readFileSync(
+      join(process.cwd(), "src/app/api/import/csv/route.ts"),
+      "utf8",
+    ).split(CR).join("");
+    expect(csv).toContain('registryStatus: { not: "scheduled" }');
+    expect(csv).toContain("謄本の自動取得の処理中です");
+  });
+
   it("⚠画面は『見せていた内容』を一緒に送る(取り違えをserverで止められる)", () => {
     // 確認の後に誰かが地番を編集すると、見たものと違う筆を取り込む
     // (@codex #394 R20 P1)。画面側が版番号と識別子を送らないと検査できない。

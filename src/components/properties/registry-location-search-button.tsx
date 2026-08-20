@@ -295,6 +295,11 @@ export default function RegistryLocationSearchButton({
           : "取得済みの謄本を取り込めませんでした（課金は発生していません）",
       );
       setState("error");
+      // ⚠**失敗後は物件を取り直す**(@codex #394 R27 P2)。取得の予約(ロック)が
+      //   版番号を上げるため、古い版のままもう一度押すと、サーバーが
+      //   「物件情報が変わりました」で**永久に**弾いてしまう。閉じたときに
+      //   まとめて取り直す(成功時と同じ流儀)。
+      propertyRefreshPendingRef.current = true;
     }
   };
 
