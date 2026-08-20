@@ -347,8 +347,10 @@ export default function PropertyDetailPage({
   }, [id, loadQualityIssues]);
 
   // 謄本の取得・取り込みが成功したときの反映。
-  // ⚠**成功の通知は出さない**（発注者指示 2026-08-20）。結果が画面に出れば足りる＝
+  // ⚠発注者指示（2026-08-20）＝**知らせるのは失敗のときだけ**。成功時に**新しい通知は
+  //   足さない**（トーストも、タブの自動切替もしない）＝結果が画面に出れば足りる：
   //   ①添付ファイル一覧に取り込んだPDFが出る ②謄本の状態バッジが最新になる。
+  //   ⚠従来からの一行の完了表示は残す（設計提示時に明示して承認済み）。
   const handleRegistryResultApplied = useCallback(() => {
     setAttachmentsRefreshToken((n) => n + 1);
     void refreshPropertyQuietly();

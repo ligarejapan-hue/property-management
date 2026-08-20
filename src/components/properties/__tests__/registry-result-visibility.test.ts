@@ -14,8 +14,12 @@ import { dirname, join } from "node:path";
  *     呼ぶと **実況パネルごと消える**(@codex #380 R3 P2)ため呼べなかった。
  * ⇒ 「全体を作り直さずに、必要な2か所だけ静かに更新する」を配線として固定する。
  *
- * 発注者指示(2026-08-20): **成功時に通知は出さない**(画面が最新化されれば足りる)。
- *                          **失敗したときだけ**見落とせない形で知らせる。
+ * 発注者指示(2026-08-20): **知らせるのは失敗のときだけ**。成功時は**新しい通知を足さない**
+ *   (トースト・自動タブ切替・自動スクロールを付けない)＝画面が最新化されれば足りる。
+ * ⚠**従来からの一行の完了表示(role="status")は残す**。設計提示時に「今ある緑の一行は
+ *   現状のまま残す」と明示して承認を得ている（減らす指示は受けていない）。
+ *   @codex R2 P2 は「通知を出さないと書いてあるのに完了表示がある」という**文言と実装の
+ *   食い違い**を指したもので、正しい指摘。直したのは**文言の側**（下の検査で固定）。
  *
  * ⚠このリポは jsdom/RTL 未導入のため source-assertion で配線を固定する。
  * ⚠改行は LF に正規化する(手元 CRLF と CI で判定が変わるため)。
@@ -47,6 +51,25 @@ describe("謄本の結果が画面に出る(2026-08-20 の誤解の再発防止)
   it("失敗は見落とせない帯にして、その場まで自動でスクロールする", () => {
     expect(BUTTON).toContain('role="alert"');
     expect(BUTTON).toContain("scrollIntoView");
+  });
+
+  it("成功時に新しい通知は足さない(トースト・自動タブ切替・自動スクロールを増やさない)", () => {
+    // ⚠自動スクロールは**失敗の帯だけ**。成功経路にも付けると「知らせるのは失敗だけ」
+    //   という指示を破る（数で固定＝1か所だけ外す変異でも落ちる）。
+    const scrolls = BUTTON.split("scrollIntoView").length - 1;
+    expect(scrolls).toBe(1);
+    // 成功の合図でタブを勝手に切り替えない（見ていたタブが変わるのは驚きになる）。
+    const hBegin = PAGE.indexOf("const handleRegistryResultApplied");
+    expect(hBegin).toBeGreaterThan(-1);
+    const hBody = PAGE.slice(
+      hBegin,
+      PAGE.indexOf("}, [refreshPropertyQuietly]);", hBegin),
+    );
+    expect(hBody).not.toContain("setActiveTab");
+    // ⚠**従来からの完了表示は残す**（承認済み。消すと「閉じる（物件情報を更新）」の
+    //   導線が宙に浮き、いつ閉じてよいのか分からなくなる）。
+    expect(BUTTON).toContain('role="status"');
+    expect(BUTTON).toContain("取得済みの謄本を取り込みました");
   });
 
   it("添付ファイルタブは合図で一覧だけを読み直す(タブを開いたままでも増える)", () => {
