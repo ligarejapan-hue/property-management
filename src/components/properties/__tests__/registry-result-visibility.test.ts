@@ -78,7 +78,19 @@ describe("謄本の結果が画面に出る(2026-08-20 の誤解の再発防止)
   });
 
   it("合図での取り直しは一覧を『読み込み中』に差し替えない(表が消えてちらつく)", () => {
-    expect(ATTACH).toContain("if (!options?.silent) setLoading(true);");
+    // 静かな読み直しは「読み込み中」にもエラー表示にも触らない
+    //   （見えている表を乱さない）。触ってよいのは見える取り直しだけ。
+    const begin = ATTACH.indexOf("const fetchAttachmentsData = useCallback");
+    expect(begin).toBeGreaterThan(-1);
+    const body = ATTACH.slice(begin, ATTACH.indexOf("}, [propertyId]);", begin));
+    const guarded = body.slice(
+      body.indexOf("if (!options?.silent) {"),
+      body.indexOf("try {"),
+    );
+    expect(guarded).toContain("setLoading(true);");
+    expect(guarded).toContain("setError(null);");
+    // ガードの外で「読み込み中」にしていないこと（数で固定）。
+    expect(body.split("setLoading(true);").length - 1).toBe(1);
   });
 
   it("物件ページは合図を添付タブと謄本ブロックの両方へ配る", () => {
@@ -109,17 +121,14 @@ describe("謄本の結果が画面に出る(2026-08-20 の誤解の再発防止)
     // @codex #395 R1 P2: 取り込み直後の読み直しが、先に始まっていた読み取り
     //   (初回表示・アップロード後の再取得)に上書きされると、
     //   **まさに直したはずの「成功が見えない」が復活する**。
-    const begin = ATTACH.indexOf("const fetchAttachmentsData = useCallback");
-    expect(begin).toBeGreaterThan(-1);
-    const body = ATTACH.slice(begin, ATTACH.indexOf("}, [propertyId]);", begin));
-    expect(body).toContain("const seq = ++attachmentsReqSeq.current;");
-    // ⚠**成功したときと失敗したときの両方**で古い結果を捨てる(片方だけだと、
-    //   もう一方の経路で古い一覧・古いエラーが最新を上書きする)。
-    const guards =
-      body.split("if (seq !== attachmentsReqSeq.current) return;").length - 1;
-    expect(guards).toBe(2);
-    // ⚠loading は世代で縛らない(縛ると静かな読み直しの割り込みで取り残す)。
-    expect(body).not.toContain("attachmentsReqSeq.current) setLoading(false)");
+    // @codex #395 R7 P2: 独自の世代ガードだと、**新しい取り直しが失敗しただけ**で
+    //   先に届いていた使える一覧を捨て、タブが空/古いままエラーになる。
+    //   ⇒ 物件ページと**同じ純関数**（総当たり検証つき）に委ねる。
+    expect(ATTACH).toContain('from "@/lib/property-refresh/refresh-coordinator"');
+    expect(ATTACH).toContain('options?.silent ? "quiet" : "full"');
+    expect(ATTACH).toContain("shouldClearLoading(refreshStateRef.current, ticket)");
+    // 画面側で世代を数え直さない（二重管理は必ずずれる）。
+    expect(ATTACH).not.toContain("attachmentsReqSeq");
   });
 
   it("静かな取り直しはページ全体を『読み込み中』にしない", () => {
