@@ -48,6 +48,13 @@ import { useScreenProtection } from "@/components/screen-protection/screen-prote
 import { SalesSheetCreateButton } from "@/components/sales-sheet/SalesSheetCreateButton";
 import { SalesSheetList } from "@/components/sales-sheet/SalesSheetList";
 import { salesSheetTemplateKindFor } from "@/lib/sales-sheet/template-kind";
+import {
+  beginRefresh,
+  createRefreshState,
+  resolveFailure,
+  resolveSuccess,
+  shouldClearLoading,
+} from "@/lib/property-refresh/refresh-coordinator";
 
 // ---------- Label maps ----------
 
@@ -270,15 +277,10 @@ export default function PropertyDetailPage({
   //   best-effort の静かな取り直しが**失敗しただけ**で、ちゃんと返ってきた通常の
   //   取り直しの結果まで「古い」と判定されて捨てられ、画面が古いまま残る。
   //   ⇒ 世代を進めるのは**中身を反映できたときだけ**にする。
-  const propertyReqSeq = useRef(0);
-  const propertyAppliedSeq = useRef(0);
-  // 追い越された失敗の**預かり**（@codex R5 P2）。追い越されたからといって捨てると、
-  // 新しい取り直しも失敗したときに**何も知らせずに古い内容を見せ続ける**ことになる。
-  // 中身が届いたら破棄し、新しい取り直しも実を結ばなかったらここから出す。
-  const deferredErrorRef = useRef<string | null>(null);
-  // 「読み込み中」の持ち主を決める世代。⚠**通常の取り直しだけ**が進める
-  //   （静かな取り直しが触ると、割り込んだときに誰も解除できなくなる）。
-  const fullRefreshSeq = useRef(0);
+  // 取り直しの交通整理は純関数へ（refresh-coordinator）。判定を画面に直書きしていたら
+  // @codex に 5 巡連続で別々の穴を指摘されたため、**順番を並べた本物のテスト**で
+  // 固定できる形に出した。ここが持つのはその状態だけ。
+  const refreshStateRef = useRef(createRefreshState());
   const loadQualityIssues = useCallback(async () => {
     const seq = ++qualityReqSeq.current;
     try {
@@ -308,42 +310,24 @@ export default function PropertyDetailPage({
   }, [id]);
 
   const fetchProperty = useCallback(async () => {
-    // ⚠静かな取り直し（refreshPropertyQuietly）と同時に走り得るため、**後着勝ち**にする。
-    //   でないと先に始まった方が後から返って、新しい内容を古い内容で上書きし得る
-    //   （＝直したはずの「画面が古いまま」が別の形で復活する）。品質警告と同じ流儀。
-    const seq = ++propertyReqSeq.current;
-    const fullSeq = ++fullRefreshSeq.current;
+    // 利用者の操作による取り直し（画面を「読み込み中」にする）。
+    const ticket = beginRefresh(refreshStateRef.current, "full");
     setLoading(true);
     setError(null);
     try {
       const data = await fetchPropertyDetail(id);
-      if (seq < propertyAppliedSeq.current) return; // より新しい結果が反映済み
-      propertyAppliedSeq.current = seq;
-      deferredErrorRef.current = null; // 中身が届いたので預かりは破棄
-      setProperty(data as unknown as ApiProperty);
+      const outcome = resolveSuccess(refreshStateRef.current, ticket);
+      if (outcome.applyData) setProperty(data as unknown as ApiProperty);
+      if (outcome.clearError) setError(null);
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "データ取得に失敗しました";
-      // ⚠**追い越された失敗はすぐには出さない**（@codex R4 P2）。古い失敗をここで
-      //   反映すると `error || !property` の分岐でページ全体がエラー画面に差し替わり、
-      //   **実況パネルごと消える**。
-      // ⚠かといって**捨ててもいけない**（@codex R5 P2）。新しい取り直しも失敗したら、
-      //   黙って古い内容を見せ続けることになる。⇒ 預かって、決着したときに出す。
-      if (seq !== propertyReqSeq.current) {
-        deferredErrorRef.current = message;
-        return;
-      }
-      propertyAppliedSeq.current = seq;
-      deferredErrorRef.current = null;
-      setError(message);
+      const outcome = resolveFailure(
+        refreshStateRef.current,
+        ticket,
+        err instanceof Error ? err.message : "データ取得に失敗しました",
+      );
+      if (outcome.showError !== null) setError(outcome.showError);
     } finally {
-      // ⚠「読み込み中」を解除してよいのは**最新の通常の取り直しだけ**（@codex R1 P2）。
-      //   無条件に戻すと、古い取り直しが先に返っただけで解除され、最新の取得を待たずに
-      //   古い内容や「物件が見つかりません」を見せてしまう（操作もできてしまう）。
-      // ⚠かといって propertyReqSeq（中身の世代）で縛ってもいけない。静かな取り直しが
-      //   割り込むと**誰も戻せず**「読み込み中」から抜けられない（実装中に踏んだ）。
-      //   ⇒ 持ち主は「通常の取り直し」専用の世代で決める。
-      if (fullSeq === fullRefreshSeq.current) setLoading(false);
+      if (shouldClearLoading(refreshStateRef.current, ticket)) setLoading(false);
     }
     // 物件再取得に連動して品質警告も更新する（@codex P2: 更新後も最新の警告を表示）。
     void loadQualityIssues();
@@ -355,31 +339,24 @@ export default function PropertyDetailPage({
   // ⚠静かな更新なので、失敗しても画面は壊さない（利用者は従来どおり
   //   「閉じる（物件情報を更新）」でいつでも本筋の取り直しができる）。
   const refreshPropertyQuietly = useCallback(async () => {
-    const seq = ++propertyReqSeq.current;
+    const ticket = beginRefresh(refreshStateRef.current, "quiet");
     try {
       const data = await fetchPropertyDetail(id);
-      if (seq < propertyAppliedSeq.current) return; // より新しい結果が反映済み
-      propertyAppliedSeq.current = seq;
-      deferredErrorRef.current = null; // 中身が届いたので預かりは破棄
+      const outcome = resolveSuccess(refreshStateRef.current, ticket);
+      if (!outcome.applyData) return;
       setProperty(data as unknown as ApiProperty);
-      // ⚠取れたのだから、居座っているエラー画面は畳む（@codex R4 P2）。
-      //   放置すると、古い失敗で出たエラー表示からページが戻れない。
-      setError(null);
+      // 取れたのだから、居座っているエラー画面は畳む。
+      if (outcome.clearError) setError(null);
       void loadQualityIssues();
-    } catch {
-      // 静かな更新**自身**の失敗は表に出さない（best-effort。ここでエラー画面にすると
-      // 取得に成功した直後なのに実況パネルごと消える）。利用者は従来どおり
-      // 「閉じる（物件情報を更新）」で取り直せる。
-      // ⚠ここで**世代を進めてはいけない**（@codex R3 P2）。進めると、ちゃんと返ってきた
-      //   通常の取り直しの結果まで捨てられ、画面が古いまま残る。
-      // ⚠ただし**預かっている失敗がある＆これが最新の発行**なら出す（@codex R5 P2）。
-      //   両方失敗したのに何も知らせず古い内容を見せ続ける、を防ぐ。
-      if (seq !== propertyReqSeq.current) return;
-      if (deferredErrorRef.current) {
-        const deferred = deferredErrorRef.current;
-        deferredErrorRef.current = null;
-        setError(deferred);
-      }
+    } catch (err) {
+      const outcome = resolveFailure(
+        refreshStateRef.current,
+        ticket,
+        err instanceof Error ? err.message : "データ取得に失敗しました",
+      );
+      // 静かな更新**自身**の失敗は表に出さない（best-effort）。
+      // 出るのは「預かっている失敗があり、これが決着になった」ときだけ。
+      if (outcome.showError !== null) setError(outcome.showError);
     }
   }, [id, loadQualityIssues]);
 

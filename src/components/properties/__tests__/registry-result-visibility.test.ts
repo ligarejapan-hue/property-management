@@ -87,78 +87,22 @@ describe("謄本の結果が画面に出る(2026-08-20 の誤解の再発防止)
     expect(PAGE).toContain("refreshToken={attachmentsRefreshToken}");
   });
 
-  it("『読み込み中』の解除は最新の通常の取り直しだけが行う", () => {
-    // ⚠罠その1(実装中に踏んだ): 中身の世代(propertyReqSeq)を finally に掛けると、
-    //   静かな取り直しが割り込んだとき**誰も loading を戻せず**画面が
-    //   「読み込み中」から抜けられなくなる(静かな取り直しは loading を触らない)。
-    // ⚠罠その2(@codex #395 R1 P2): かといって無条件に戻すと、**古い**取り直しが
-    //   先に返っただけで解除され、最新の取得を待たずに古い内容や
-    //   「物件が見つかりません」を見せてしまう(その状態で操作もできてしまう)。
-    // ⇒ loading の持ち主は「通常の取り直し」専用の世代で決める。
-    const begin = PAGE.indexOf("const fetchProperty = useCallback");
-    expect(begin).toBeGreaterThan(-1);
-    const body = PAGE.slice(begin, PAGE.indexOf("}, [id, loadQualityIssues]);", begin));
-    const fin = body.slice(body.indexOf("} finally {"));
-    expect(fin).toContain("if (fullSeq === fullRefreshSeq.current) setLoading(false);");
-    expect(fin).not.toContain("if (seq === propertyReqSeq.current) setLoading(false)");
-  });
-
-  it("追い越された失敗はページ全体をエラー画面に差し替えない", () => {
-    // @codex #395 R4 P2: 通常の取り直しが失敗したとき、後から新しい取り直しが
-    //   始まっていてもエラーを反映してしまうと、`error || !property` の分岐で
-    //   **ページ全体がエラー画面に差し替わり実況パネルごと消える**。
-    //   しかも後から成功しても error は消えないので、戻れない。
-    const begin = PAGE.indexOf("const fetchProperty = useCallback");
-    expect(begin).toBeGreaterThan(-1);
-    const body = PAGE.slice(begin, PAGE.indexOf("}, [id, loadQualityIssues]);", begin));
-    const cat = body.slice(body.indexOf("} catch (err) {"));
-    expect(cat).toContain("if (seq !== propertyReqSeq.current) {");
-    // 取れたらエラー画面は畳む(居座らせない)。
-    const qBegin = PAGE.indexOf("const refreshPropertyQuietly");
-    const qBody = PAGE.slice(qBegin, PAGE.indexOf("}, [id, loadQualityIssues]);", qBegin));
-    expect(qBody).toContain("setError(null);");
-  });
-
-  it("両方の取り直しが失敗したら黙らない(追い越された失敗は捨てずに預かる)", () => {
-    // @codex #395 R5 P2: 追い越された失敗を**捨てる**と、新しい取り直しも失敗したとき
-    //   (通信障害など)に**何も知らせず古い内容を見せ続ける**。⇒ 預かって、決着時に出す。
-    const begin = PAGE.indexOf("const fetchProperty = useCallback");
-    const body = PAGE.slice(begin, PAGE.indexOf("}, [id, loadQualityIssues]);", begin));
-    const cat = body.slice(body.indexOf("} catch (err) {"));
-    // 追い越された失敗は「預ける」(捨てない)。
-    expect(cat).toContain("deferredErrorRef.current = message;");
-    // 静かな取り直しが最新で、かつ失敗したときに預かりを出す。
-    const qBegin = PAGE.indexOf("const refreshPropertyQuietly");
-    const qBody = PAGE.slice(qBegin, PAGE.indexOf("}, [id, loadQualityIssues]);", qBegin));
-    const qCatch = qBody.slice(qBody.indexOf("} catch {"));
-    expect(qCatch).toContain("if (deferredErrorRef.current) {");
-    expect(qCatch).toContain("setError(deferred);");
-    // 中身が届いたら預かりは破棄する(古い失敗が後から出てこない)。
-    const clears = PAGE.split("deferredErrorRef.current = null;").length - 1;
-    expect(clears).toBe(4);
-  });
-
-  it("失敗した静かな取り直しは世代を進めない(成功した取り直しを無効にしない)", () => {
-    // @codex #395 R3 P2: 通常の取り直しが走っている最中に取り込みが成功すると、
-    //   静かな取り直しが世代を進める。そこで静かな取り直しが**失敗**すると
-    //   (エラーは握りつぶす設計)、ちゃんと返ってきた通常の取り直しの結果まで
-    //   「古い」と判定されて捨てられ、**画面が古いまま残る**。
-    // ⇒ 世代を進めるのは「中身を反映できたとき」だけ。
-    const qBegin = PAGE.indexOf("const refreshPropertyQuietly");
-    expect(qBegin).toBeGreaterThan(-1);
-    const qBody = PAGE.slice(qBegin, PAGE.indexOf("}, [id, loadQualityIssues]);", qBegin));
-    // 成功したときは進める。
-    expect(qBody).toContain("propertyAppliedSeq.current = seq;");
-    // 失敗したとき(catch)は触らない。
-    const qCatch = qBody.slice(qBody.indexOf("} catch {"));
-    expect(qCatch).not.toContain("propertyAppliedSeq.current =");
-  });
-
-  it("静かな取り直しは『読み込み中』の世代を触らない(取り残しの再発防止)", () => {
-    const qBegin = PAGE.indexOf("const refreshPropertyQuietly");
-    expect(qBegin).toBeGreaterThan(-1);
-    const qBody = PAGE.slice(qBegin, PAGE.indexOf("}, [id, loadQualityIssues]);", qBegin));
-    expect(qBody).not.toContain("fullRefreshSeq");
+  it("取り直しの交通整理は純関数に委ねる(画面で世代を数え直さない)", () => {
+    // ⚠ここは @codex に**5巡連続で別々の穴**を指摘された場所
+    //   (後着勝ち / 「読み込み中」の取り残し / 失敗が成功を無効化 /
+    //    追い越された失敗でページ全体がエラー画面 / 両方失敗したときに黙る)。
+    //   原因は、判定を画面に直書きしたせいで**文字列の照合でしか確かめられなかった**こと。
+    //   判定は refresh-coordinator(純関数)へ出し、**順番を並べた本物のテスト**で固定する
+    //   (src/lib/property-refresh/__tests__/refresh-coordinator.test.ts)。
+    //   ここで固定するのは「画面がそれに委ねている」ことだけ。
+    expect(PAGE).toContain('from "@/lib/property-refresh/refresh-coordinator"');
+    expect(PAGE).toContain('beginRefresh(refreshStateRef.current, "full")');
+    expect(PAGE).toContain('beginRefresh(refreshStateRef.current, "quiet")');
+    expect(PAGE).toContain("shouldClearLoading(refreshStateRef.current, ticket)");
+    // ⚠画面側で世代を数え直さない(二重管理は必ずずれる)。
+    expect(PAGE).not.toContain("propertyReqSeq");
+    expect(PAGE).not.toContain("fullRefreshSeq");
+    expect(PAGE).not.toContain("deferredErrorRef");
   });
 
   it("添付一覧は後着勝ち(古い読み取りが新しい一覧を上書きしない)", () => {
