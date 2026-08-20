@@ -231,6 +231,10 @@ export default function PropertyDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // 添付ファイルタブへ「一覧を読み直して」と伝える合図（値が変わったときだけ効く）。
+  // ⚠あのタブは開いた瞬間に一度だけ読み込むため、開いたまま謄本を取り込んでも
+  //   一覧が増えなかった（2026-08-20 に『取り込めていない』と誤解された原因）。
+  const [attachmentsRefreshToken, setAttachmentsRefreshToken] = useState(0);
 
   // 品質警告 (§8-6): 一覧と同じ fetchQualityCheck の scoped モードで当該物件分のみ取得。
   // severity=info は対象外。取得失敗時はセクション非表示（fail-safe: 詳細全体を壊さない）。
@@ -261,6 +265,8 @@ export default function PropertyDetailPage({
   // seq guard: fire-and-forget でも後着リクエストが先着の stale 結果で state を上書きしない。
   // void 呼び出しでも cancelled フラグを誰も true にしない問題を解消（ref シーケンス方式）。
   const qualityReqSeq = useRef(0);
+  // 物件本体の取り直しの世代（通常の取り直しと静かな取り直しで共有する）。
+  const propertyReqSeq = useRef(0);
   const loadQualityIssues = useCallback(async () => {
     const seq = ++qualityReqSeq.current;
     try {
@@ -290,21 +296,56 @@ export default function PropertyDetailPage({
   }, [id]);
 
   const fetchProperty = useCallback(async () => {
+    // ⚠静かな取り直し（refreshPropertyQuietly）と同時に走り得るため、**後着勝ち**にする。
+    //   でないと先に始まった方が後から返って、新しい内容を古い内容で上書きし得る
+    //   （＝直したはずの「画面が古いまま」が別の形で復活する）。品質警告と同じ流儀。
+    const seq = ++propertyReqSeq.current;
     setLoading(true);
     setError(null);
     try {
       const data = await fetchPropertyDetail(id);
+      if (seq !== propertyReqSeq.current) return; // 後発が来ていたら破棄
       setProperty(data as unknown as ApiProperty);
     } catch (err) {
+      if (seq !== propertyReqSeq.current) return;
       setError(
         err instanceof Error ? err.message : "データ取得に失敗しました",
       );
     } finally {
+      // ⚠ここに世代ガードを掛けてはいけない。静かな取り直しが割り込むと
+      //   誰も loading を false に戻せず「読み込み中」から抜けられなくなる
+      //   （静かな取り直しは loading を触らないため）。従来どおり無条件に戻す。
       setLoading(false);
     }
     // 物件再取得に連動して品質警告も更新する（@codex P2: 更新後も最新の警告を表示）。
     void loadQualityIssues();
   }, [id, loadQualityIssues]);
+
+  // 画面を「読み込み中」に差し替えない取り直し。謄本の取得・取り込みが成功したときに使う。
+  // ⚠loading を立てない＝このページの子（謄本の実況パネル）が作り直されない。立てると
+  //   成功直後に実況の見返しが消える（@codex #380 R3 P2 で踏んだ回帰）。
+  // ⚠静かな更新なので、失敗しても画面は壊さない（利用者は従来どおり
+  //   「閉じる（物件情報を更新）」でいつでも本筋の取り直しができる）。
+  const refreshPropertyQuietly = useCallback(async () => {
+    const seq = ++propertyReqSeq.current;
+    try {
+      const data = await fetchPropertyDetail(id);
+      if (seq !== propertyReqSeq.current) return; // 後発が来ていたら破棄（後着勝ち）
+      setProperty(data as unknown as ApiProperty);
+      void loadQualityIssues();
+    } catch {
+      // 何もしない（意図的）。静かな更新なので画面は壊さず、利用者は
+      // 「閉じる（物件情報を更新）」で従来どおり取り直せる。
+    }
+  }, [id, loadQualityIssues]);
+
+  // 謄本の取得・取り込みが成功したときの反映。
+  // ⚠**成功の通知は出さない**（発注者指示 2026-08-20）。結果が画面に出れば足りる＝
+  //   ①添付ファイル一覧に取り込んだPDFが出る ②謄本の状態バッジが最新になる。
+  const handleRegistryResultApplied = useCallback(() => {
+    setAttachmentsRefreshToken((n) => n + 1);
+    void refreshPropertyQuietly();
+  }, [refreshPropertyQuietly]);
 
   useEffect(() => {
     fetchProperty();
@@ -590,6 +631,7 @@ export default function PropertyDetailPage({
         //   駐車場・その他・不明は土地とも建物とも決まっていない。
         offerBuildingPath={!isLandPropertyType(property.propertyType)}
         onPropertyRefresh={fetchProperty}
+        onRegistryResultApplied={handleRegistryResultApplied}
       />
 
       {/* Warning badge */}
@@ -677,7 +719,10 @@ export default function PropertyDetailPage({
           <CommentTab propertyId={property.id} />
         )}
         {activeTab === "attachments" && (
-          <AttachmentTab propertyId={property.id} />
+          <AttachmentTab
+            propertyId={property.id}
+            refreshToken={attachmentsRefreshToken}
+          />
         )}
         {activeTab === "history" && (
           <HistoryTab propertyId={property.id} />

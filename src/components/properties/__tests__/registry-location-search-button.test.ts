@@ -75,7 +75,11 @@ describe("registry-location-search-button.tsx: dark 配色（暗面可読化）"
   const darkClasses = [
     "dark:text-amber-400",
     "dark:text-green-400",
-    "dark:text-red-400",
+    // 2026-08-20: 失敗の表示を**帯**にした（見落とし防止）。赤の対は
+    //   text-red-700 ↔ dark:text-red-300 + 地と枠。他画面の警告帯と同じ流儀。
+    "dark:text-red-300",
+    "dark:border-red-800",
+    "dark:bg-red-950/40",
     "dark:text-gray-400",
     "dark:text-gray-300",
     "dark:text-gray-200",
@@ -105,7 +109,9 @@ describe("registry-location-search-button.tsx: dark 配色（暗面可読化）"
     "text-indigo-700",
     "text-amber-700",
     "text-green-600",
-    "text-red-600",
+    "text-red-700",
+    "border-red-300",
+    "bg-red-50",
     "bg-white",
     "border-gray-300",
     "hover:bg-gray-50",

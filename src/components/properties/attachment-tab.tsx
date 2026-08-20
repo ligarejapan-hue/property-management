@@ -95,8 +95,16 @@ export function registryDisplayName(certType?: string | null): string {
 
 export default function AttachmentTab({
   propertyId,
+  refreshToken = 0,
 }: {
   propertyId: string;
+  /**
+   * 外から「一覧を読み直して」と伝える合図。値が変わったときだけ読み直す。
+   * ⚠このタブは**開いた瞬間に一度だけ**読み込む作りなので、タブを開いたまま
+   *   謄本を取り込んでも一覧は増えない。2026-08-20 に本番で回収に成功したのに
+   *   『取り込めていない』と誤解された原因がこれ（実際は成功していた）。
+   */
+  refreshToken?: number;
 }) {
   const [attachments, setAttachments] = useState<AttachmentData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,8 +121,9 @@ export default function AttachmentTab({
   const fileInputRefGeneral = useRef<HTMLInputElement>(null);
   const fileInputRefRegistry = useRef<HTMLInputElement>(null);
 
-  const fetchAttachmentsData = useCallback(async () => {
-    setLoading(true);
+  const fetchAttachmentsData = useCallback(async (options?: { silent?: boolean }) => {
+    // ⚠合図での取り直しは「読み込み中」に差し替えない（見ている表が一瞬消えるため）。
+    if (!options?.silent) setLoading(true);
     setError(null);
     try {
       const json = await apiFetchAttachments(propertyId);
@@ -131,6 +140,15 @@ export default function AttachmentTab({
   useEffect(() => {
     fetchAttachmentsData();
   }, [fetchAttachmentsData]);
+
+  // 合図（refreshToken）が変わったときだけ、一覧を**静かに**読み直す。
+  // ⚠初回は上の useEffect が読み込むので走らせない（二重取得を避ける）。
+  const seenRefreshTokenRef = useRef(refreshToken);
+  useEffect(() => {
+    if (seenRefreshTokenRef.current === refreshToken) return;
+    seenRefreshTokenRef.current = refreshToken;
+    void fetchAttachmentsData({ silent: true });
+  }, [refreshToken, fetchAttachmentsData]);
 
   const handleUpload = async (file: File, type: AttachmentType) => {
     const setUploading = type === "registry" ? setUploadingRegistry : setUploadingGeneral;
