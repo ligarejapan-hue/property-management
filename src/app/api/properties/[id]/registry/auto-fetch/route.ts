@@ -108,6 +108,20 @@ export async function POST(
     }
     const isRecover = modeRaw === "recover";
 
+    // 【回収・候補なし】土地/建物の明示指定(@codex #394 R13 P1)。知らない値は 400。
+    const kindRaw = (body as { recoverKind?: unknown } | null)?.recoverKind;
+    if (kindRaw !== undefined && kindRaw !== null) {
+      if (kindRaw !== "land" && kindRaw !== "building") {
+        throw new ApiError(
+          400,
+          "取り込む対象の種別が正しくありません",
+          "REGISTRY_RECOVER_KIND_INVALID",
+        );
+      }
+    }
+    const recoverKind =
+      kindRaw === "land" || kindRaw === "building" ? kindRaw : undefined;
+
     // 所在検索の候補を選んで取得する場合（candidateRef 指定）。cond③: client の候補参照は信頼せず、
     // server 側で当該物件向けに再検索して不動産番号を解決してから取得する。
     const candidateRefRaw = (body as { candidateRef?: unknown } | null)?.candidateRef;
@@ -176,6 +190,7 @@ export async function POST(
             confirmed,
             mode: "recover",
             certificateType,
+            ...(recoverKind ? { recoverKind } : {}),
             live,
           },
           provider,
@@ -230,16 +245,22 @@ export async function POST(
       }
     }
 
-    const result = await runRegistryAutoFetch(
-      {
-        session: { id: session.id, role: session.role },
-        propertyId: id,
-        confirmed,
-      },
-      provider,
-    );
+    // ⚠従来経路(番号取得)も**必ず実況を閉じる**(@codex #394 R13 P2)。実況は上で
+    //   始まっているので、ここで閉じないとパネルが期限切れまで回り続ける。
+    try {
+      const result = await runRegistryAutoFetch(
+        {
+          session: { id: session.id, role: session.role },
+          propertyId: id,
+          confirmed,
+        },
+        provider,
+      );
 
-    return apiResponse(result, 200);
+      return apiResponse(result, 200);
+    } finally {
+      if (liveRef) completeLiveView(session.id, id, liveRef);
+    }
   } catch (error) {
     return handleApiError(error);
   }

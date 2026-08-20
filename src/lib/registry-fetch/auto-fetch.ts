@@ -115,6 +115,13 @@ export interface RunRegistryAutoFetchArgs {
    */
   mode?: "purchase" | "recover";
   /**
+   * 【回収・候補なし】どちらの登記を取り込むか(@codex #394 R13 P1)。
+   * 物件が地番と家屋番号の**両方**を持つ場合、既定の選び方(家屋番号優先)だと
+   * 土地の購入を永久に取り込めず、条件次第では**建物のPDFを土地の物件へ**
+   * 取り込みかねない。利用者に選ばせた結果をここで受ける。
+   */
+  recoverKind?: "land" | "building";
+  /**
    * 取得キーの上書き（所在検索で server 側再解決した候補の不動産番号／cond③）。
    * 指定時はこれを fetchRegistryPdf に使う（物件は番号未保持のため）。未指定は物件の realEstateNumber。
    */
@@ -3204,6 +3211,49 @@ function createPlaywrightRegistryPage(
           return !/disabled/.test(String(b.className ?? ""));
         }, sel)) === true;
       const hasNext = () => pagerEnabled(REGISTRY_SELECTORS.myPageNextButton);
+      /** いま表示中のページを読む(表が『データ取得中』なら loading)。 */
+      const readCurrentPage = async (): Promise<{
+        loading: boolean;
+        rows: string[][];
+      }> => {
+        const raw = (await page.evaluate(
+          (json) => {
+            const { tableSel } = JSON.parse(json) as { tableSel: string };
+            const t = document.querySelector(tableSel);
+            if (!t || /データ取得中/.test(t.textContent ?? "")) {
+              return JSON.stringify({ loading: true, rows: [] });
+            }
+            const rows: string[][] = [];
+            for (const tr of Array.from(t.querySelectorAll("tbody tr"))) {
+              const tds = tr.querySelectorAll("td");
+              if (tds.length < 7) continue;
+              rows.push(
+                Array.from(tds)
+                  .slice(0, 12)
+                  .map((td) => (td as HTMLElement).innerHTML ?? ""),
+              );
+            }
+            return JSON.stringify({ loading: false, rows });
+          },
+          JSON.stringify({
+            probe: "mypage-scan",
+            tableSel: REGISTRY_SELECTORS.myPageTable,
+          }),
+        )) as string;
+        return JSON.parse(raw) as { loading: boolean; rows: string[][] };
+      };
+      /**
+       * 表の読み込みが終わるまで待つ(@codex #394 R11 P2)。
+       * ⚠固定待ちのままページ送りの判定や行の選択へ進むと、途中で止まったり
+       *   読み込み中の表を見て『無い』と言ったりする。
+       */
+      const waitPageLoaded = async (): Promise<boolean> => {
+        for (let i = 0; i < 4; i++) {
+          if (!(await readCurrentPage()).loading) return true;
+          await sleep(1500);
+        }
+        return !(await readCurrentPage()).loading;
+      };
       /**
        * 1ページ目まで戻る。**戻り切れたかを返す**(@codex #394 R5 P2)。
        * ⚠戻り切れないまま選択に進むと、位置(ページ番号)の意味がずれ、
@@ -3212,12 +3262,18 @@ function createPlaywrightRegistryPage(
        */
       const resetToFirst = async (): Promise<boolean> => {
         for (let i = 0; i < RECOVER_MAX_PAGES + 2; i++) {
+          // ⚠**読み込み完了を待ってから** prev の状態を見る(@codex #394 R13 P2)。
+          //   『データ取得中』の間は prev が一時的に押せなくなることがあり、それを
+          //   「1ページ目に着いた」と読むと、以降のページ番号の意味がずれて
+          //   受付番号の読み戻しで必ず外す=取り込めるPDFを取り逃す。
+          if (!(await waitPageLoaded())) return false;
           if (!(await pagerEnabled(REGISTRY_SELECTORS.myPagePrevButton))) {
             return true;
           }
           await page.click(REGISTRY_SELECTORS.myPagePrevButton);
           await sleep(800);
         }
+        if (!(await waitPageLoaded())) return false;
         return !(await pagerEnabled(REGISTRY_SELECTORS.myPagePrevButton));
       };
       /** 戻り切れないときの共通の切り上げ(『無い』とは言わない)。 */
@@ -3304,49 +3360,6 @@ function createPlaywrightRegistryPage(
         // ⚠**途中で諦めたことを覚えておく**(@codex #394 R4 P2)。上限で抜けたのに
         //   『見つかりません』と言うと、まだ期限内の購入を『無い』ことにしてしまう。
         let truncated = false;
-        /** いま表示中のページを読む(表が『データ取得中』なら loading)。 */
-        const readCurrentPage = async (): Promise<{
-          loading: boolean;
-          rows: string[][];
-        }> => {
-          const raw = (await page.evaluate(
-            (json) => {
-              const { tableSel } = JSON.parse(json) as { tableSel: string };
-              const t = document.querySelector(tableSel);
-              if (!t || /データ取得中/.test(t.textContent ?? "")) {
-                return JSON.stringify({ loading: true, rows: [] });
-              }
-              const rows: string[][] = [];
-              for (const tr of Array.from(t.querySelectorAll("tbody tr"))) {
-                const tds = tr.querySelectorAll("td");
-                if (tds.length < 7) continue;
-                rows.push(
-                  Array.from(tds)
-                    .slice(0, 12)
-                    .map((td) => (td as HTMLElement).innerHTML ?? ""),
-                );
-              }
-              return JSON.stringify({ loading: false, rows });
-            },
-            JSON.stringify({
-              probe: "mypage-scan",
-              tableSel: REGISTRY_SELECTORS.myPageTable,
-            }),
-          )) as string;
-          return JSON.parse(raw) as { loading: boolean; rows: string[][] };
-        };
-        /**
-         * 表の読み込みが終わるまで待つ(@codex #394 R11 P2)。
-         * ⚠固定待ちのままページ送りの判定や行の選択へ進むと、途中で止まったり
-         *   読み込み中の表を見て『無い』と言ったりする。
-         */
-        const waitPageLoaded = async (): Promise<boolean> => {
-          for (let i = 0; i < 4; i++) {
-            if (!(await readCurrentPage()).loading) return true;
-            await sleep(1500);
-          }
-          return !(await readCurrentPage()).loading;
-        };
         for (let pageNo = 0; pageNo < RECOVER_MAX_PAGES; pageNo++) {
           // ⚠『データ取得中』はまだ結論が出ていない。待ってから読む。それでも
           //   読めなければ**『無い』とは言わず**見切れた扱いにする(@codex R5 P2)。
@@ -3899,10 +3912,17 @@ export async function runRegistryAutoFetch(
   //   ⚠課金しない経路なので候補キャッシュ(誤課金防止の仕組み)に依存しなくてよい。
   //   取り違え防止は同定側(区域+地番+種別+謄本の種類+請求済+期限内)が担う。
   const recoverLocation = isRecover
-    ? (args.locationCandidate ?? {
-        lotNumber: property.lotNumber,
-        buildingNumber: property.buildingNumber,
-      })
+    ? (args.locationCandidate ??
+      // ⚠両方持つ物件は**指定された方だけ**を対象にする(@codex #394 R13 P1)。
+      //   指定が無ければ従来どおり(家屋番号があれば建物)。
+      (args.recoverKind === "land"
+        ? { lotNumber: property.lotNumber, buildingNumber: null }
+        : args.recoverKind === "building"
+          ? { lotNumber: null, buildingNumber: property.buildingNumber }
+          : {
+              lotNumber: property.lotNumber,
+              buildingNumber: property.buildingNumber,
+            }))
     : args.locationCandidate;
   if (isRecover) {
     // ⚠**provider が実際に使う識別子**を検査する(建物優先。@codex #394 R8 P2)。

@@ -569,6 +569,10 @@ export default function PropertyDetailPage({
         providerConfigured={registryLocationSearchConfigured}
         purchaseEnabled={registryPurchaseConfigured}
         propertyAddress={property.address}
+        // 候補なしの回収で「土地/建物」どちらを取り込むか選ばせるために渡す
+        // (両方登録されている物件は放っておくと家屋番号が優先される)。
+        propertyLotNumber={property.lotNumber}
+        propertyBuildingNumber={property.buildingNumber}
         // ⚠地番の保存に要る。保存後は fetchProperty で取り直す
         //   （同じ画面で2回保存すると2回目が必ず 409 になるため）。
         propertyVersion={property.version}

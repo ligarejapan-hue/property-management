@@ -179,6 +179,19 @@ describe("回収の入口(画面)", () => {
     expect(fn).toContain('mode: "recover"');
   });
 
+  it("⚠地番と家屋番号の両方がある物件は、どちらを取り込むか選ばせる", () => {
+    // 放っておくと家屋番号が優先され、土地の購入を取り込めない/建物のPDFを
+    // 土地の物件へ入れてしまう(@codex #394 R13 P1)。
+    expect(SEARCH_BUTTON_UI).toContain("hasBothIdentifiers");
+    expect(SEARCH_BUTTON_UI).toContain('name="recoverKind"');
+    expect(SEARCH_BUTTON_UI).toContain("土地（地番");
+    expect(SEARCH_BUTTON_UI).toContain("建物（家屋番号");
+    // 選んだ結果を通信に載せる(両方あるときだけ意味を持つ)。
+    expect(SEARCH_BUTTON_UI).toContain(
+      "hasBothIdentifiers ? recoverKind : undefined",
+    );
+  });
+
   it("⚠有料取得の通信関数には mode を混ぜない(取り違えで課金経路が回収に化けない)", () => {
     const fn = API_CLIENT.slice(
       API_CLIENT.indexOf("export async function obtainRegistryByCandidate"),

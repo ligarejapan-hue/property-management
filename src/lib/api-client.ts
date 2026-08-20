@@ -1965,6 +1965,8 @@ export async function recoverRegistryFromProperty(
   propertyId: string,
   certificateType: "owner" | "all" = "owner",
   liveRef?: string,
+  /** 物件が地番と家屋番号の両方を持つときに、どちらを取り込むか。 */
+  recoverKind?: "land" | "building",
 ): Promise<unknown> {
   return apiFetch(`/api/properties/${propertyId}/registry/auto-fetch`, {
     method: "POST",
@@ -1973,6 +1975,7 @@ export async function recoverRegistryFromProperty(
       confirmed: true,
       certificateType,
       mode: "recover",
+      ...(recoverKind ? { recoverKind } : {}),
       ...(liveRef ? { liveRef } : {}),
     }),
   });

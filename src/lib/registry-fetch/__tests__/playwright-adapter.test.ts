@@ -1998,6 +1998,15 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
         // 【請求】は**ダイアログを出すだけ**(実サイト実測・課金しない)。
         // ページ送りボタンの有効判定(pagerEnabled は evaluate に**セレクタ文字列**を渡す)。
         if (arg === "#myPageTable_next" || arg === "#myPageTable_previous") {
+          // ⚠読み込み中(『データ取得中』)はページ送りも押せない。これを
+          //   『端に着いた』と読む実装は位置を誤る(@codex #394 R13 P2)。
+          if (
+            opts.slowPage !== undefined &&
+            mypageCurrentPage === opts.slowPage &&
+            pageAtLastRead !== mypageCurrentPage
+          ) {
+            return false;
+          }
           const visibleAll = seikyuClicked
             ? [...(opts.mypageBaselineRows ?? []), ...mypageRows]
             : opts.mypageBaselineRows ?? [];
@@ -3264,6 +3273,29 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
       }),
     ).rejects.toMatchObject({ code: "not_found" });
     expect(clicked).not.toContain(DOWNLOAD);
+  });
+
+  it("SV24: 戻る途中の読み込み中を『先頭に着いた』と誤解しない", async () => {
+    // 戻り中に『データ取得中』で prev が一時的に押せなくなると、そこを1ページ目と
+    // 誤解して以降の位置がずれ、取り込めるPDFを取り逃す(@codex #394 R13 P2)。
+    const f = makeFakeChromium();
+    const seen: string[] = [];
+    const filler = Array.from({ length: 6 }, (_, i) =>
+      boughtRow({
+        receiptNo: `20260819000030${String(i).padStart(2, "0")}`,
+        shozai: `${INPUT.address}９９－${i + 1}`,
+      }),
+    );
+    wireStage2(f, {
+      rowsPerPage: 1,
+      slowPage: 3, // 4ページ目は移動直後だけ読み込み中(prevも押せない)
+      mypageBaselineRows: [...filler, boughtRow()],
+      onMypageSelect: (r) => seen.push(r),
+    });
+    const page = await makeRecoverPage(f);
+    const buf = await page.recoverRegistryPdfByLocation(RECOVER_INPUT);
+    expect(Buffer.isBuffer(buf)).toBe(true);
+    expect(seen).toEqual(["2026081900727233"]);
   });
 
   it("SV9: 買う対象(地番/家屋番号)が空なら何もしない(ページに触れない)", async () => {

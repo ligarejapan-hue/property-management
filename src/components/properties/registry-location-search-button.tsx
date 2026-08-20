@@ -36,6 +36,10 @@ interface RegistryLocationSearchButtonProps {
   purchaseEnabled: boolean;
   /** 物件の所在（ポップアップで画面にコピーしてもらう。⚠外部へは渡さない）。 */
   propertyAddress: string;
+  /** 物件に登録されている地番(候補なしの回収でどちらを探すか選ばせるため)。 */
+  propertyLotNumber?: string | null;
+  /** 物件に登録されている家屋番号(同上)。 */
+  propertyBuildingNumber?: string | null;
   /**
    * 地番の保存に必要な現在の版番号。
    * ⚠保存後は**この画面が持ち帰った版番号**を使う（親の取り直しを待たない）。
@@ -76,6 +80,8 @@ export default function RegistryLocationSearchButton({
   providerConfigured,
   purchaseEnabled,
   propertyAddress,
+  propertyLotNumber,
+  propertyBuildingNumber,
   propertyVersion,
   canWriteProperty,
   offerBuildingPath,
@@ -90,6 +96,9 @@ export default function RegistryLocationSearchButton({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   // 完了表示の文言を分けるため、直前に実行したのが取得(有料)か回収(課金なし)かを覚える。
   const [lastAction, setLastAction] = useState<"obtain" | "recover">("obtain");
+  // 候補なしの回収で、物件が両方持つときにどちらを取り込むか(@codex #394 R13 P1)。
+  // ⚠既定は土地(地番)。この運用では地番で買うのが基本のため。画面で変更できる。
+  const [recoverKind, setRecoverKind] = useState<"land" | "building">("land");
   // 実況パネル用の参照 (client 発行・非PII)。検索のたびに発行し直す。
   // HTTP 本番でも動く safeRandomId を使う (crypto.randomUUID 禁止)。
   const [liveRef, setLiveRef] = useState<string | null>(null);
@@ -118,6 +127,10 @@ export default function RegistryLocationSearchButton({
   if (!canAutoFetch) return null;
 
   const providerDisabled = !providerConfigured;
+  // ⚠両方登録されている物件は、放っておくと家屋番号が優先される(=土地の購入を
+  //   取り込めない/建物のPDFを取り込んでしまう)。選ばせる(@codex #394 R13 P1)。
+  const hasBothIdentifiers =
+    !!(propertyLotNumber ?? "").trim() && !!(propertyBuildingNumber ?? "").trim();
 
   const reset = () => {
     setState("idle");
@@ -242,6 +255,8 @@ export default function RegistryLocationSearchButton({
           propertyId,
           certificateType,
           recoverLiveRef,
+          // 両方持つ物件のときだけ意味を持つ(片方しか無ければサーバーが解決)。
+          hasBothIdentifiers ? recoverKind : undefined,
         );
       } else {
         await recoverRegistryByCandidate(
@@ -537,9 +552,36 @@ export default function RegistryLocationSearchButton({
               </p>
             </>
           ) : (
-            <p className="text-indigo-700 dark:text-indigo-300">
-              この物件に登録されている所在・地番で、購入済みの謄本を探します。
-            </p>
+            <>
+              <p className="text-indigo-700 dark:text-indigo-300">
+                この物件に登録されている所在・地番で、購入済みの謄本を探します。
+              </p>
+              {hasBothIdentifiers && (
+                <fieldset className="mt-1 flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 p-1.5">
+                  <legend className="px-1 text-indigo-800 dark:text-indigo-300">
+                    どちらを取り込みますか？
+                  </legend>
+                  <label className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
+                    <input
+                      type="radio"
+                      name="recoverKind"
+                      checked={recoverKind === "land"}
+                      onChange={() => setRecoverKind("land")}
+                    />
+                    土地（地番 {propertyLotNumber}）
+                  </label>
+                  <label className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
+                    <input
+                      type="radio"
+                      name="recoverKind"
+                      checked={recoverKind === "building"}
+                      onChange={() => setRecoverKind("building")}
+                    />
+                    建物（家屋番号 {propertyBuildingNumber}）
+                  </label>
+                </fieldset>
+              )}
+            </>
           )}
           <fieldset className="mt-1 flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 p-1.5">
             <legend className="px-1 text-indigo-800 dark:text-indigo-300">取得する種類</legend>

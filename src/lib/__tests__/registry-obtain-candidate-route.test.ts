@@ -230,6 +230,36 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
     },
   );
 
+  it.each(["land", "building"])(
+    "候補なしの回収は recoverKind(%s)をそのまま渡す",
+    async (kind) => {
+      const res = await callRoute({
+        confirmed: true,
+        mode: "recover",
+        recoverKind: kind,
+      });
+      expect(res.status).toBe(200);
+      const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
+      expect(arg.recoverKind).toBe(kind);
+    },
+  );
+
+  it.each(["LAND", "土地", "", 1, true])(
+    "⚠知らない種別(%s)は 400 で止める(黙って別の登記を探さない)",
+    async (kind) => {
+      const res = await callRoute({
+        confirmed: true,
+        mode: "recover",
+        recoverKind: kind,
+      });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        error: { code: "REGISTRY_RECOVER_KIND_INVALID" },
+      });
+      expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+    },
+  );
+
   it("⚠候補が無いのは回収のときだけ通す(従来の取得は今までどおり)", async () => {
     // mode 未指定で候補も無ければ、従来経路(番号での取得)がそのまま走る。
     await callRoute({ confirmed: true });

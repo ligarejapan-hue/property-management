@@ -1186,6 +1186,7 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
         buildingNumber: string | null;
       } | null;
       provider?: RegistryFetchProvider;
+      recoverKind?: "land" | "building";
     } = {},
   ) {
     const provider = (over.provider ?? recoverProvider()) as RecoverProvider;
@@ -1195,6 +1196,7 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
         propertyId: PROP_ID,
         confirmed: true,
         mode: "recover",
+        ...(over.recoverKind ? { recoverKind: over.recoverKind } : {}),
         locationCandidate:
           over.locationCandidate === undefined ? LC : over.locationCandidate,
       },
@@ -1360,6 +1362,44 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
     const req = provider.recoverRegistryPdf.mock.calls[0][0];
     expect(req.location).toMatchObject({ lotNumber: "5-6" });
     expect(req.realEstateNumber).toBeFalsy();
+  });
+
+  it("⚠両方登録された物件で『土地』を選べば地番で探す(建物に化けない)", async () => {
+    // 既定の選び方は家屋番号優先。土地の購入を取り込めない/建物のPDFを
+    // 土地の物件へ入れてしまう、を防ぐ(@codex #394 R13 P1)。
+    setProperty({
+      address: "テスト市テスト町一丁目",
+      lotNumber: "69-2",
+      buildingNumber: "5-2",
+    });
+    const { provider, promise } = runRecover({
+      locationCandidate: null,
+      recoverKind: "land",
+    });
+    await promise;
+    const req = provider.recoverRegistryPdf.mock.calls[0][0];
+    expect(req.location).toMatchObject({
+      lotNumber: "69-2",
+      buildingNumber: null,
+    });
+  });
+
+  it("『建物』を選べば家屋番号で探す", async () => {
+    setProperty({
+      address: "テスト市テスト町一丁目",
+      lotNumber: "69-2",
+      buildingNumber: "5-2",
+    });
+    const { provider, promise } = runRecover({
+      locationCandidate: null,
+      recoverKind: "building",
+    });
+    await promise;
+    const req = provider.recoverRegistryPdf.mock.calls[0][0];
+    expect(req.location).toMatchObject({
+      lotNumber: null,
+      buildingNumber: "5-2",
+    });
   });
 
   it("⚠物件にも地番が無ければ取り込まない(別の筆を掴まない)", async () => {
