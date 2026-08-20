@@ -64,6 +64,7 @@ import {
   attachLiveShot,
   reportLiveStep,
   completeLiveView,
+  beginLiveView,
 } from "@/lib/registry-fetch/live-view-store";
 import * as routeModule from "@/app/api/properties/[id]/registry/auto-fetch/route";
 
@@ -399,6 +400,18 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
 });
 
 describe("実況は必ず閉じる(パネルが固まったように見えない)", () => {
+
+  it("⚠確認情報が足りない回収でも実況は開かれない/残らない", async () => {
+    const res = await callRoute({
+      confirmed: true,
+      mode: "recover",
+      liveRef: "live-1",
+    });
+    expect(res.status).toBe(400);
+    // 始めていないので閉じる必要も無い(始めたのに閉じない、が最悪)。
+    expect(beginLiveView).not.toHaveBeenCalled();
+  });
+
   it("⚠候補の解決が失敗しても実況を完了させる(期限切れまで回り続けない)", async () => {
     (resolveRegistryCandidate as Mock).mockRejectedValue(
       Object.assign(new Error("stale"), {

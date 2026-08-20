@@ -186,6 +186,21 @@ export async function POST(
       }
     }
 
+    // ⚠**入力の検査は実況を始める前に済ませる**(@codex #394 R22 P2)。実況を任意にしておくと、古い/別の
+    //   クライアントが省略するだけで取り違え防止の検査が丸ごと外れる。
+    if (isRecover && !candidateRef) {
+      if (
+        recoverExpectedVersion === undefined ||
+        !(recoverExpectedIdentifier ?? "").trim()
+      ) {
+        throw new ApiError(
+          400,
+          "取り込む対象の確認情報が足りません。画面を開き直してからお試しください",
+          "REGISTRY_RECOVER_SNAPSHOT_REQUIRED",
+        );
+      }
+    }
+
     // 実況パネル(2026-08-15・任意)。取得も回収も同じ橋渡しを使う。
     // ⚠**有料取得は中止を受け付けない**(課金だけ残る状態を作らない既存方針)ので、
     //   begin 直後に cancel 窓を閉じ、reporter にも isCancelRequested を配線しない。
@@ -234,21 +249,6 @@ export async function POST(
           },
         }
       : undefined;
-
-    // ⚠**確認時点の情報は必須**(@codex #394 R21 P1)。任意にしておくと、古い/別の
-    //   クライアントが省略するだけで取り違え防止の検査が丸ごと外れる。
-    if (isRecover && !candidateRef) {
-      if (
-        recoverExpectedVersion === undefined ||
-        !(recoverExpectedIdentifier ?? "").trim()
-      ) {
-        throw new ApiError(
-          400,
-          "取り込む対象の確認情報が足りません。画面を開き直してからお試しください",
-          "REGISTRY_RECOVER_SNAPSHOT_REQUIRED",
-        );
-      }
-    }
 
     // 【回収】候補が無くても物件自身の地番で取り込む(@codex #394 R6 P1)。
     // ⚠取込が途中まで進むと物件に不動産番号が入り、所在検索が「対象外」になる。
