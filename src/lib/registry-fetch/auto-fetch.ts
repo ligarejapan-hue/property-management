@@ -4140,7 +4140,11 @@ export async function runRegistryAutoFetch(
       // @codex P2: 所在検索取得は「検索キー項目（指紋）」も一致条件に含め、read〜lock の間に
       //   version を上げない経路（取込・PDF処理等）で編集されていても lock を失敗させる。
       //   これで override（resolve 時の番号）は「lock した行の指紋 = resolve 時の指紋」の時だけ使う。
-      ...(args.expectedFingerprint !== undefined
+      // ⚠**回収(候補なし)も同じ扱いにする**(@codex #394 R24 P1)。確認時点の検査を
+      //   通っても、その後に version を上げない経路(CSV取込の重複更新など)で所在や
+      //   地番が変わると、**別の対象になった物件**にPDFと所有者情報を貼ってしまう。
+      //   取得キーに使う項目をロック条件に入れ、変わっていたら lock を失敗させる。
+      ...(args.expectedFingerprint !== undefined || (isRecover && !args.locationCandidate)
         ? {
             address: property.address,
             lotNumber: property.lotNumber,

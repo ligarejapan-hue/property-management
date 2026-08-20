@@ -97,7 +97,9 @@ export async function POST(
     //   末尾の空白など)が既定の有料取得へ落ちると、確認フラグは両方の導線が立てて
     //   いるため**意図しない課金**になり得る。未指定だけを従来どおり(有料取得)とし、
     //   値が入っているのに知らない値なら 400 で止める。
-    if (modeRaw !== undefined && modeRaw !== null) {
+    // ⚠null も『指定した』扱い(@codex #394 R24 P2)。回収のつもりの呼び出しが
+    //   null に化けて既定(有料取得)へ落ちると、確認フラグは共通なので**課金し得る**。
+    if (modeRaw !== undefined) {
       if (modeRaw !== "purchase" && modeRaw !== "recover") {
         throw new ApiError(
           400,

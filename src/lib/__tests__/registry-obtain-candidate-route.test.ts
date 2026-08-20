@@ -184,7 +184,7 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
     expect(arg.mode).toBeUndefined();
   });
 
-  it.each(["purchase", null])(
+  it.each(["purchase"])(
     "%s は従来どおりの有料取得(回収にしない)",
     async (mode) => {
       (resolveRegistryCandidate as Mock).mockResolvedValue(LOCATION_CANDIDATE);
@@ -195,7 +195,7 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
     },
   );
 
-  it.each(["RECOVER", "recover ", "", "obtain", 1, true])(
+  it.each(["RECOVER", "recover ", "", "obtain", 1, true, null])(
     "⚠知らない値(%s)は課金扱いにせず 400 で止める(打ち間違いで課金しない)",
     async (mode) => {
       (resolveRegistryCandidate as Mock).mockResolvedValue(LOCATION_CANDIDATE);

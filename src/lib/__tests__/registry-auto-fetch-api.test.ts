@@ -1395,6 +1395,34 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
     expect(provider.recoverRegistryPdf).not.toHaveBeenCalled();
   });
 
+  it("⚠回収のロックは取得キー項目も条件に含める(検査の後に変わっても掴まない)", async () => {
+    // 確認時点の検査を通っても、その後に version を上げない経路で所在や地番が
+    // 変わると、別の対象になった物件にPDFを貼ってしまう(@codex #394 R24 P1)。
+    setProperty({
+      address: "テスト市テスト町一丁目",
+      lotNumber: "69-2",
+      version: 5,
+    });
+    const { promise } = runRecover({
+      locationCandidate: null,
+      recoverExpectedVersion: 5,
+      recoverExpectedIdentifier: "69-2",
+      recoverExpectedAddress: "テスト市テスト町一丁目",
+    });
+    await promise;
+    const lockCall = pm.property.updateMany.mock.calls.find(
+      (c) =>
+        (c[0] as { data?: { registryStatus?: unknown } })?.data
+          ?.registryStatus === "scheduled",
+    );
+    expect(lockCall).toBeDefined();
+    expect((lockCall![0] as { where: Record<string, unknown> }).where).
+      toMatchObject({
+        address: "テスト市テスト町一丁目",
+        lotNumber: "69-2",
+      });
+  });
+
   it("⚠所在だけが書き換わっていても取り込まない(版番号が上がらない経路がある)", async () => {
     // CSV取込の重複更新は version を上げずに所在を書き換える。所在が変わると
     // 探す区域が変わり、**別の物件の書類**を取り込みかねない(@codex #394 R23 P1)。
