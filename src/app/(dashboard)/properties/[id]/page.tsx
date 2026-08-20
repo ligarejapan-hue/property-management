@@ -272,6 +272,10 @@ export default function PropertyDetailPage({
   //   ⇒ 世代を進めるのは**中身を反映できたときだけ**にする。
   const propertyReqSeq = useRef(0);
   const propertyAppliedSeq = useRef(0);
+  // 追い越された失敗の**預かり**（@codex R5 P2）。追い越されたからといって捨てると、
+  // 新しい取り直しも失敗したときに**何も知らせずに古い内容を見せ続ける**ことになる。
+  // 中身が届いたら破棄し、新しい取り直しも実を結ばなかったらここから出す。
+  const deferredErrorRef = useRef<string | null>(null);
   // 「読み込み中」の持ち主を決める世代。⚠**通常の取り直しだけ**が進める
   //   （静かな取り直しが触ると、割り込んだときに誰も解除できなくなる）。
   const fullRefreshSeq = useRef(0);
@@ -315,17 +319,23 @@ export default function PropertyDetailPage({
       const data = await fetchPropertyDetail(id);
       if (seq < propertyAppliedSeq.current) return; // より新しい結果が反映済み
       propertyAppliedSeq.current = seq;
+      deferredErrorRef.current = null; // 中身が届いたので預かりは破棄
       setProperty(data as unknown as ApiProperty);
     } catch (err) {
-      // ⚠**追い越された失敗は捨てる**（@codex R4 P2）。後から新しい取り直しが
-      //   始まっているなら、その結果を待つべき。古い失敗をここで反映すると
-      //   `error || !property` の分岐でページ全体がエラー画面に差し替わり、
-      //   **実況パネルごと消える**うえ、後から成功しても error は消えない。
-      if (seq !== propertyReqSeq.current) return;
+      const message =
+        err instanceof Error ? err.message : "データ取得に失敗しました";
+      // ⚠**追い越された失敗はすぐには出さない**（@codex R4 P2）。古い失敗をここで
+      //   反映すると `error || !property` の分岐でページ全体がエラー画面に差し替わり、
+      //   **実況パネルごと消える**。
+      // ⚠かといって**捨ててもいけない**（@codex R5 P2）。新しい取り直しも失敗したら、
+      //   黙って古い内容を見せ続けることになる。⇒ 預かって、決着したときに出す。
+      if (seq !== propertyReqSeq.current) {
+        deferredErrorRef.current = message;
+        return;
+      }
       propertyAppliedSeq.current = seq;
-      setError(
-        err instanceof Error ? err.message : "データ取得に失敗しました",
-      );
+      deferredErrorRef.current = null;
+      setError(message);
     } finally {
       // ⚠「読み込み中」を解除してよいのは**最新の通常の取り直しだけ**（@codex R1 P2）。
       //   無条件に戻すと、古い取り直しが先に返っただけで解除され、最新の取得を待たずに
@@ -350,16 +360,26 @@ export default function PropertyDetailPage({
       const data = await fetchPropertyDetail(id);
       if (seq < propertyAppliedSeq.current) return; // より新しい結果が反映済み
       propertyAppliedSeq.current = seq;
+      deferredErrorRef.current = null; // 中身が届いたので預かりは破棄
       setProperty(data as unknown as ApiProperty);
       // ⚠取れたのだから、居座っているエラー画面は畳む（@codex R4 P2）。
       //   放置すると、古い失敗で出たエラー表示からページが戻れない。
       setError(null);
       void loadQualityIssues();
     } catch {
-      // 何もしない（意図的）。静かな更新なので画面は壊さず、利用者は
-      // 「閉じる（物件情報を更新）」で従来どおり取り直せる。
+      // 静かな更新**自身**の失敗は表に出さない（best-effort。ここでエラー画面にすると
+      // 取得に成功した直後なのに実況パネルごと消える）。利用者は従来どおり
+      // 「閉じる（物件情報を更新）」で取り直せる。
       // ⚠ここで**世代を進めてはいけない**（@codex R3 P2）。進めると、ちゃんと返ってきた
       //   通常の取り直しの結果まで捨てられ、画面が古いまま残る。
+      // ⚠ただし**預かっている失敗がある＆これが最新の発行**なら出す（@codex R5 P2）。
+      //   両方失敗したのに何も知らせず古い内容を見せ続ける、を防ぐ。
+      if (seq !== propertyReqSeq.current) return;
+      if (deferredErrorRef.current) {
+        const deferred = deferredErrorRef.current;
+        deferredErrorRef.current = null;
+        setError(deferred);
+      }
     }
   }, [id, loadQualityIssues]);
 

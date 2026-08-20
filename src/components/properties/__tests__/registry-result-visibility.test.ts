@@ -112,11 +112,30 @@ describe("謄本の結果が画面に出る(2026-08-20 の誤解の再発防止)
     expect(begin).toBeGreaterThan(-1);
     const body = PAGE.slice(begin, PAGE.indexOf("}, [id, loadQualityIssues]);", begin));
     const cat = body.slice(body.indexOf("} catch (err) {"));
-    expect(cat).toContain("if (seq !== propertyReqSeq.current) return;");
+    expect(cat).toContain("if (seq !== propertyReqSeq.current) {");
     // 取れたらエラー画面は畳む(居座らせない)。
     const qBegin = PAGE.indexOf("const refreshPropertyQuietly");
     const qBody = PAGE.slice(qBegin, PAGE.indexOf("}, [id, loadQualityIssues]);", qBegin));
     expect(qBody).toContain("setError(null);");
+  });
+
+  it("両方の取り直しが失敗したら黙らない(追い越された失敗は捨てずに預かる)", () => {
+    // @codex #395 R5 P2: 追い越された失敗を**捨てる**と、新しい取り直しも失敗したとき
+    //   (通信障害など)に**何も知らせず古い内容を見せ続ける**。⇒ 預かって、決着時に出す。
+    const begin = PAGE.indexOf("const fetchProperty = useCallback");
+    const body = PAGE.slice(begin, PAGE.indexOf("}, [id, loadQualityIssues]);", begin));
+    const cat = body.slice(body.indexOf("} catch (err) {"));
+    // 追い越された失敗は「預ける」(捨てない)。
+    expect(cat).toContain("deferredErrorRef.current = message;");
+    // 静かな取り直しが最新で、かつ失敗したときに預かりを出す。
+    const qBegin = PAGE.indexOf("const refreshPropertyQuietly");
+    const qBody = PAGE.slice(qBegin, PAGE.indexOf("}, [id, loadQualityIssues]);", qBegin));
+    const qCatch = qBody.slice(qBody.indexOf("} catch {"));
+    expect(qCatch).toContain("if (deferredErrorRef.current) {");
+    expect(qCatch).toContain("setError(deferred);");
+    // 中身が届いたら預かりは破棄する(古い失敗が後から出てこない)。
+    const clears = PAGE.split("deferredErrorRef.current = null;").length - 1;
+    expect(clears).toBe(4);
   });
 
   it("失敗した静かな取り直しは世代を進めない(成功した取り直しを無効にしない)", () => {
