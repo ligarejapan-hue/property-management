@@ -34,10 +34,16 @@ export interface RefreshState {
   applied: number;
   /** 「読み込み中」の持ち主。⚠full だけが進める。 */
   loadingOwner: number;
-  /** まだ決着していない取り直しの数。0 になったら預かりを出す（誰も決着させないため）。 */
-  pending: number;
+  /** まだ決着していない取り直しの世代。⚠数ではなく**どの世代か**を持つ。 */
+  pending: number[];
   /** 追い越された失敗の預かり。 */
   deferredError: DeferredFailure | null;
+  /**
+   * いま画面に出ている失敗の世代（0 は「出ていない」）。
+   * ⚠**古い**中身が後から届いただけでエラーを畳んではいけない。畳むと、失敗したこと自体が
+   *   なかったことになり、古い内容だけが黙って残る（総当たりで自力検出）。
+   */
+  errorSeq: number;
 }
 
 export interface RefreshTicket {
@@ -60,35 +66,41 @@ export const createRefreshState = (): RefreshState => ({
   issued: 0,
   applied: 0,
   loadingOwner: 0,
-  pending: 0,
+  pending: [],
   deferredError: null,
+  errorSeq: 0,
 });
 
 /** 取り直しを発行する。戻り値のチケットを結果の判定に使う。 */
 export function beginRefresh(state: RefreshState, kind: RefreshKind): RefreshTicket {
   state.issued += 1;
-  state.pending += 1;
+  state.pending.push(state.issued);
   if (kind === "full") state.loadingOwner += 1;
   return { kind, seq: state.issued, loadingSeq: state.loadingOwner };
 }
 
 /**
- * 走っているものが無くなった時点で、預かっている失敗を出す。
+ * 預かっている失敗を、決着した時点で出す。
  * ⚠出さないと「誰も決着させないまま黙る」（＝古い内容を見せ続ける）。
+ * ⚠待つのは**その失敗より新しい取り直し**だけ（@codex R8 P2）。より古い取り直しは
+ *   定義上その失敗を埋める中身を持ってこられないので、待っても意味がない。
+ *   一律に「走っているものがあるか」で待つと、**固まった古い1件**のせいで
+ *   永久に黙り続ける（画面は古いまま・エラーも出ない）。
  * ⚠預かりより新しい中身が反映済みなら、もう出す必要はない。
  */
 function settleDeferred(state: RefreshState, outcome: RefreshOutcome): RefreshOutcome {
-  if (state.pending > 0) return outcome;
   const deferred = state.deferredError;
   if (deferred === null) return outcome;
+  if (state.pending.some((seq) => seq > deferred.seq)) return outcome;
   state.deferredError = null;
   if (state.applied > deferred.seq) return outcome;
+  state.errorSeq = deferred.seq;
   return { ...outcome, clearError: false, showError: deferred.message };
 }
 
 /** 取得に成功したとき、画面に何をしてよいか。 */
 export function resolveSuccess(state: RefreshState, ticket: RefreshTicket): RefreshOutcome {
-  state.pending = Math.max(0, state.pending - 1);
+  state.pending = state.pending.filter((seq) => seq !== ticket.seq);
   // より新しい結果が既に反映済みなら、古い内容で上書きしない。
   if (ticket.seq < state.applied) {
     return settleDeferred(state, { applyData: false, clearError: false, showError: null });
@@ -99,7 +111,10 @@ export function resolveSuccess(state: RefreshState, ticket: RefreshTicket): Refr
   if (state.deferredError !== null && ticket.seq > state.deferredError.seq) {
     state.deferredError = null;
   }
-  return settleDeferred(state, { applyData: true, clearError: true, showError: null });
+  // ⚠画面に出ているエラーも同じ理屈で、**それより新しい中身**が届いたときだけ畳む。
+  const clearError = ticket.seq > state.errorSeq;
+  if (clearError) state.errorSeq = 0;
+  return settleDeferred(state, { applyData: true, clearError, showError: null });
 }
 
 /** 取得に失敗したとき、画面に何をしてよいか。 */
@@ -108,11 +123,12 @@ export function resolveFailure(
   ticket: RefreshTicket,
   message: string,
 ): RefreshOutcome {
-  state.pending = Math.max(0, state.pending - 1);
+  state.pending = state.pending.filter((seq) => seq !== ticket.seq);
   // 最新の full の失敗は、そのまま画面に出す（利用者が待っている操作の結果）。
   if (ticket.kind === "full" && ticket.seq === state.issued) {
     state.applied = ticket.seq;
     state.deferredError = null;
+    state.errorSeq = ticket.seq;
     return { applyData: false, clearError: false, showError: message };
   }
   if (ticket.kind === "full") {

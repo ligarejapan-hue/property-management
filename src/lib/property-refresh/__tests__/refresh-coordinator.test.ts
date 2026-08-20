@@ -181,7 +181,11 @@ describe("refresh-coordinator: 総当たり(守るべき約束が破れない)",
     ok: boolean;
   }
 
-  /** 発行を全部済ませてから、指定の順番で決着させる（＝重なって走っている状態）。 */
+  /**
+   * 発行を全部済ませてから、指定の順番で決着させる（＝重なって走っている状態）。
+   * ⚠settleOrder は**部分列でよい**＝載っていないチケットは「まだ返ってこない」
+   *   （遅い・固まっている）。@codex R8 P2: この場合を試していなかった。
+   */
   const simulate = (steps: Step[], settleOrder: number[]) => {
     const state = createRefreshState();
     const tickets = steps.map((s) => beginRefresh(state, s.kind));
@@ -205,14 +209,20 @@ describe("refresh-coordinator: 総当たり(守るべき約束が破れない)",
     return { state, shownError, loadingCleared, lastApplied };
   };
 
-  const permutations = <T,>(items: T[]): T[][] => {
-    if (items.length <= 1) return [items];
-    return items.flatMap((item, i) =>
-      permutations([...items.slice(0, i), ...items.slice(i + 1)]).map((rest) => [
-        item,
-        ...rest,
-      ]),
-    );
+  /** 決着させるチケットの「部分集合 × 順番」を全部（載っていない分は返ってこない）。 */
+  const settleSequences = (n: number): number[][] => {
+    const result: number[][] = [];
+    const walk = (used: number[], remaining: number[]) => {
+      result.push([...used]);
+      for (let i = 0; i < remaining.length; i += 1) {
+        walk(
+          [...used, remaining[i]],
+          [...remaining.slice(0, i), ...remaining.slice(i + 1)],
+        );
+      }
+    };
+    walk([], [...Array(n).keys()]);
+    return result;
   };
 
   const KINDS: RefreshKind[] = ["full", "quiet"];
@@ -225,29 +235,44 @@ describe("refresh-coordinator: 総当たり(守るべき約束が破れない)",
     );
   };
 
-  for (const n of [1, 2, 3]) {
+  for (const n of [1, 2, 3, 4]) {
     it(`${n}件が重なって走っても、約束が破れない`, () => {
       let cases = 0;
       for (const steps of allStepSets(n)) {
-        for (const order of permutations([...Array(n).keys()])) {
+        for (const order of settleSequences(n)) {
           cases += 1;
           const { state, shownError, loadingCleared, lastApplied } = simulate(
             steps,
             order,
           );
-          // 約束2: 「読み込み中」は必ず解除される（full を出したなら）。
-          if (steps.some((s) => s.kind === "full")) {
+          const settled = new Set(order);
+          const lastFullIndex = steps.reduce(
+            (acc, s, i) => (s.kind === "full" ? i : acc),
+            -1,
+          );
+          // 約束2: 最新の full が返ってきたなら、「読み込み中」は解除されている。
+          if (lastFullIndex >= 0 && settled.has(lastFullIndex)) {
             expect(loadingCleared).toBe(true);
           }
-          // 約束3: 利用者の操作(full)が失敗し、**それより新しい内容も届いていない**なら、
-          //        黙らずにエラーを見せる。
-          const unresolved = steps.some(
-            (s, i) => s.kind === "full" && !s.ok && lastApplied <= i + 1,
-          );
+          // 約束3: 利用者の操作(full)が失敗し、**それより新しい内容も届かず**、
+          //        **それより新しい取り直しも走っていない**なら、黙らずにエラーを見せる。
+          //        ⚠より**古い**取り直しが走っていても、それは中身を持ってこられない
+          //        （@codex R8 P2: 一律に数えると、固まった古い1件で永久に黙る）。
+          const unresolved = steps.some((s, i) => {
+            if (s.kind !== "full" || s.ok || !settled.has(i)) return false;
+            const seq = i + 1;
+            if (lastApplied > seq) return false;
+            const newerOutstanding = steps.some(
+              (_x, j) => j + 1 > seq && !settled.has(j),
+            );
+            return !newerOutstanding;
+          });
           if (unresolved) expect(shownError).not.toBeNull();
-          // 約束4: 決着したら預かりを残さない（次の取り直しに古い失敗が混ざらない）。
-          expect(state.pending).toBe(0);
-          expect(state.deferredError).toBeNull();
+          // 約束4: 全部決着したら預かりを残さない。
+          if (order.length === n) {
+            expect(state.pending).toHaveLength(0);
+            expect(state.deferredError).toBeNull();
+          }
         }
       }
       expect(cases).toBeGreaterThan(0);
