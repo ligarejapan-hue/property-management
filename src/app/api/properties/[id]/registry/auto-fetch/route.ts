@@ -108,6 +108,25 @@ export async function POST(
     }
     const isRecover = modeRaw === "recover";
 
+    // ⚠**回収では打ち間違いを黙って owner に倒さない**(@codex #394 R14 P2)。
+    //   回収は種類まで厳密に一致させるので、"ALL" のような値が owner に化けると
+    //   全部事項を頼んだ人に所有者事項を取り込み、しかも**所有者の自動反映**まで
+    //   走る(all では抑止される処理)。従来の有料取得は既定 owner のまま(安い方に
+    //   倒す fail-safe)で挙動を変えない。
+    if (
+      isRecover &&
+      certRaw !== undefined &&
+      certRaw !== null &&
+      certRaw !== "owner" &&
+      certRaw !== "all"
+    ) {
+      throw new ApiError(
+        400,
+        "取り込む謄本の種類が正しくありません",
+        "REGISTRY_RECOVER_CERTIFICATE_TYPE_INVALID",
+      );
+    }
+
     // 【回収・候補なし】土地/建物の明示指定(@codex #394 R13 P1)。知らない値は 400。
     const kindRaw = (body as { recoverKind?: unknown } | null)?.recoverKind;
     if (kindRaw !== undefined && kindRaw !== null) {

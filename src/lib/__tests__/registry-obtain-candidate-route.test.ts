@@ -230,6 +230,49 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
     },
   );
 
+  it.each(["ALL", "owner ", "全部事項", 1, true])(
+    "⚠回収で謄本の種類(%s)が読めない値なら 400(黙って所有者事項にしない)",
+    async (certificateType) => {
+      const res = await callRoute({
+        confirmed: true,
+        mode: "recover",
+        certificateType,
+      });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        error: { code: "REGISTRY_RECOVER_CERTIFICATE_TYPE_INVALID" },
+      });
+      expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["owner", "all"])("回収で %s は通る", async (certificateType) => {
+    const res = await callRoute({
+      confirmed: true,
+      mode: "recover",
+      certificateType,
+    });
+    expect(res.status).toBe(200);
+    const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
+    expect(arg.certificateType).toBe(certificateType);
+  });
+
+  it("⚠従来の有料取得は今までどおり(読めない値は既定=所有者事項に倒す)", async () => {
+    // 安い方に倒す fail-safe。回収と違って挙動を変えない。
+    (resolveRegistryCandidate as Mock).mockResolvedValue({
+      candidate: { kind: "location", lotNumber: "1-1", buildingNumber: null },
+      fingerprint: "FP-RESOLVE",
+    });
+    const res = await callRoute({
+      confirmed: true,
+      candidateRef: "cand-1",
+      certificateType: "ALL",
+    });
+    expect(res.status).toBe(200);
+    const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
+    expect(arg.certificateType).toBe("owner");
+  });
+
   it.each(["land", "building"])(
     "候補なしの回収は recoverKind(%s)をそのまま渡す",
     async (kind) => {

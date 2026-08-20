@@ -1855,6 +1855,11 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
        */
       loadingPage?: number;
       /**
+       * 「次へ」を押せる回数の上限(SV25)。走査は通るが**選択のための移動**で
+       * 進めなくなる画面を模す(実サイトの一時的な不調)。
+       */
+      maxNextClicks?: number;
+      /**
        * そのページに**移動するたび**、最初の読みを「データ取得中」にする(SV20)。
        * 走査中だけでなく**ページ送りの最中**にも起きる状況を模す。
        */
@@ -1948,6 +1953,7 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     let mypageCurrentPage = 0; // マイページのページ送り位置(rowsPerPage 指定時)
     let dialogOpen = false; // 【請求】クリックで開く確認ダイアログ
     let scanCallCount = 0;
+    let nextClicks = 0;
     let pageAtLastRead = -1;
     let readsOnCurrentPage = 0;
     const mypageRows =
@@ -1979,7 +1985,10 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     // ページ送りは page.click 経由(evaluate ではない)。fake の表示ページを進める。
     const originalClick = f.page.click;
     f.page.click = vi.fn(async (sel: string) => {
-      if (sel === "#myPageTable_next") mypageCurrentPage += 1;
+      if (sel === "#myPageTable_next") {
+        mypageCurrentPage += 1;
+        nextClicks += 1;
+      }
       if (sel === "#myPageTable_previous" && mypageCurrentPage > 0) {
         mypageCurrentPage -= 1;
       }
@@ -2012,6 +2021,13 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
             : opts.mypageBaselineRows ?? [];
           const per = opts.rowsPerPage ?? visibleAll.length ?? 1;
           const lastPage = Math.max(0, Math.ceil(visibleAll.length / per) - 1);
+          if (
+            arg === "#myPageTable_next" &&
+            opts.maxNextClicks !== undefined &&
+            nextClicks >= opts.maxNextClicks
+          ) {
+            return false; // これ以上は進めない画面
+          }
           return arg === "#myPageTable_next"
             ? mypageCurrentPage < lastPage
             : mypageCurrentPage > 0;
@@ -3298,6 +3314,28 @@ describe("段階②: 有料の請求→PDF取得フロー（fetchByLocationCandi
     expect(seen).toEqual(["2026081900727233"]);
   });
 
+  it("SV25: ⚠目的のページへ進めなかったときは『無い』と言わない", async () => {
+    // 受付番号は走査で見つけている。移動できなかっただけなので not_found に
+    // すると、期限内の書類を諦めさせてしまう(@codex #394 R14 P2)。
+    const f = makeFakeChromium();
+    const { clicked } = wireStage2(f, {
+      rowsPerPage: 1,
+      // 走査(1回の「次へ」)は通るが、選択のための移動ではもう進めない。
+      maxNextClicks: 1,
+      mypageBaselineRows: [
+        boughtRow({
+          receiptNo: "2026081900004000",
+          shozai: `${INPUT.address}９９－１`,
+        }),
+        boughtRow(), // 対象は2ページ目
+      ],
+    });
+    const page = await makeRecoverPage(f);
+    await expect(
+      page.recoverRegistryPdfByLocation(RECOVER_INPUT),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    expect(clicked).not.toContain(DOWNLOAD);
+  });
   it("SV9: 買う対象(地番/家屋番号)が空なら何もしない(ページに触れない)", async () => {
     const f = makeFakeChromium();
     const { clicked } = wireStage2(f, { mypageBaselineRows: [boughtRow()] });

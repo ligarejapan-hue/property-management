@@ -3447,7 +3447,19 @@ function createPlaywrightRegistryPage(
           await page.click(REGISTRY_SELECTORS.myPageNextButton);
           await sleep(1200);
         }
-        if (hopped !== target.pageNo) throw new RegistryFetchError("not_found");
+        if (hopped !== target.pageNo) {
+          // ⚠**『無い』ではない**(@codex #394 R14 P2)。受付番号は走査で見つけて
+          //   いる。移動できなかっただけなので、そう伝える(『無い』と言うと
+          //   期限内の書類を諦めさせてしまう)。
+          console.warn(
+            "[registry-fetch] recover: could not reach the target page (not charged)",
+            { wanted: target.pageNo, reached: hopped },
+          );
+          reportLive(
+            "一覧の目的のページまで進めませんでした(課金はしていません)。時間をおいて再度お試しください",
+          );
+          throw new RegistryFetchError("provider_error");
+        }
         // 目的のページでも、選ぶ前に読み込み完了を確かめる。
         if (!(await waitPageLoaded())) {
           reportLive(
