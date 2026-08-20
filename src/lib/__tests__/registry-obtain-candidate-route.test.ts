@@ -217,6 +217,8 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
       const res = await callRoute({
         confirmed: true,
         mode: "recover",
+        expectedVersion: 3,
+        expectedIdentifier: "69-2",
         ...(candidateRef === undefined ? {} : { candidateRef }),
       });
       expect(res.status).toBe(200);
@@ -251,6 +253,8 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
       confirmed: true,
       mode: "recover",
       certificateType,
+      expectedVersion: 3,
+      expectedIdentifier: "69-2",
     });
     expect(res.status).toBe(200);
     const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
@@ -309,6 +313,8 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
         confirmed: true,
         mode: "recover",
         recoverKind: kind,
+        expectedVersion: 3,
+        expectedIdentifier: "69-2",
       });
       expect(res.status).toBe(200);
       const arg = (runRegistryAutoFetch as Mock).mock.calls[0][0];
@@ -358,6 +364,26 @@ describe("【回収】mode:recover の受け渡し(課金経路と取り違え�
     expect(resolveRegistryCandidate).not.toHaveBeenCalled();
     expect(runRegistryAutoFetch).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ["版番号なし", { expectedIdentifier: "69-2" }],
+    ["識別子なし", { expectedVersion: 3 }],
+    ["どちらも無し", {}],
+  ])(
+    "⚠候補なしの回収で確認情報(%s)が欠けていたら 400(検査を省略させない)",
+    async (_label, extra) => {
+      const res = await callRoute({
+        confirmed: true,
+        mode: "recover",
+        ...extra,
+      });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        error: { code: "REGISTRY_RECOVER_SNAPSHOT_REQUIRED" },
+      });
+      expect(runRegistryAutoFetch).not.toHaveBeenCalled();
+    },
+  );
 
   it("⚠候補が無いのは回収のときだけ通す(従来の取得は今までどおり)", async () => {
     // mode 未指定で候補も無ければ、従来経路(番号での取得)がそのまま走る。

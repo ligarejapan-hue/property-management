@@ -1433,6 +1433,29 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
     expect(provider.recoverRegistryPdf).toHaveBeenCalledTimes(1);
   });
 
+  it("⚠両方登録された物件で種別の指定が無ければ実行しない(黙って建物にしない)", async () => {
+    // 既定の選び方(家屋番号優先)に倒すと、土地のつもりで建物のPDFと所有者情報を
+    // 取り込みかねない(@codex #394 R21 P1)。
+    setProperty({
+      address: "テスト市テスト町一丁目",
+      lotNumber: "69-2",
+      buildingNumber: "5-2",
+    });
+    const { provider, promise } = runRecover({ locationCandidate: null });
+    await expect(promise).rejects.toMatchObject({
+      status: 409,
+      code: "REGISTRY_RECOVER_KIND_REQUIRED",
+    });
+    expect(provider.recoverRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("片方しか無い物件は種別の指定が無くても実行できる", async () => {
+    setProperty({ address: "テスト市テスト町一丁目", lotNumber: "69-2" });
+    const { provider, promise } = runRecover({ locationCandidate: null });
+    await promise;
+    expect(provider.recoverRegistryPdf).toHaveBeenCalledTimes(1);
+  });
+
   it("⚠両方登録された物件で『土地』を選べば地番で探す(建物に化けない)", async () => {
     // 既定の選び方は家屋番号優先。土地の購入を取り込めない/建物のPDFを
     // 土地の物件へ入れてしまう、を防ぐ(@codex #394 R13 P1)。

@@ -3992,6 +3992,20 @@ export async function runRegistryAutoFetch(
     //   候補経由には指紋(expectedFingerprint)があるので、そちらは従来どおり。
     //   ⚠送られた値は**一致判定にのみ使う**(取得キーは常にDBの値)。
     if (!args.locationCandidate) {
+      // ⚠**両方持つ物件で種別の指定が無ければ実行しない**(@codex #394 R21 P1)。
+      //   既定の選び方(家屋番号優先)に黙って倒すと、土地のつもりで建物のPDFと
+      //   所有者情報を取り込みかねない。選ばせてから実行する。
+      if (
+        args.recoverKind === undefined &&
+        (property.lotNumber ?? "").trim() &&
+        (property.buildingNumber ?? "").trim()
+      ) {
+        throw new ApiError(
+          409,
+          "土地と建物のどちらを取り込むかを選んでください",
+          "REGISTRY_RECOVER_KIND_REQUIRED",
+        );
+      }
       if (
         args.recoverExpectedVersion !== undefined &&
         property.version !== args.recoverExpectedVersion

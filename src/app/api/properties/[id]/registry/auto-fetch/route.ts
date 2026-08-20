@@ -235,6 +235,21 @@ export async function POST(
         }
       : undefined;
 
+    // ⚠**確認時点の情報は必須**(@codex #394 R21 P1)。任意にしておくと、古い/別の
+    //   クライアントが省略するだけで取り違え防止の検査が丸ごと外れる。
+    if (isRecover && !candidateRef) {
+      if (
+        recoverExpectedVersion === undefined ||
+        !(recoverExpectedIdentifier ?? "").trim()
+      ) {
+        throw new ApiError(
+          400,
+          "取り込む対象の確認情報が足りません。画面を開き直してからお試しください",
+          "REGISTRY_RECOVER_SNAPSHOT_REQUIRED",
+        );
+      }
+    }
+
     // 【回収】候補が無くても物件自身の地番で取り込む(@codex #394 R6 P1)。
     // ⚠取込が途中まで進むと物件に不動産番号が入り、所在検索が「対象外」になる。
     //   検索の中にある入口しか無いと、**買った書類に二度と手が届かない**。
