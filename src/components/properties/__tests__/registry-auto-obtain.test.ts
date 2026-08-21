@@ -87,3 +87,35 @@ describe("自動で課金する前に、止める手段と警告を確実に出�
     expect(block).toContain("RegistryPreflightWarningLines");
   });
 });
+
+describe("検索の間に状況が変わっていたら自動で買わない(@codex #399 R2 P1)", () => {
+  it("課金の直前に警告を取り直し、増えていたら人に確認させる", () => {
+    const at = src.indexOf('if (decision.action === "obtain")');
+    expect(at).toBeGreaterThan(-1);
+    // ⚠内側の閉じ括弧で切れないよう、分岐の**次の行**を終端にする。
+    const block = src.slice(
+      at,
+      src.indexOf("setNotSearchableReason(res.candidates.length", at),
+    );
+    // 検索前の値と、取り直した今の値を比べる。
+    expect(block).toContain("preflight.flagsById.get(propertyId)");
+    expect(block).toContain("await fetchRegistryPreflight([propertyId])");
+    expect(block).toContain("preflightWarningsIncreased(beforeFlags, afterFlags)");
+    // 増えていたら取得へ進まず確認画面へ。
+    const iGuard = block.indexOf("preflightWarningsIncreased(");
+    const iObtain = block.indexOf("await runObtain(");
+    expect(iGuard).toBeGreaterThan(-1);
+    expect(iObtain).toBeGreaterThan(iGuard);
+    expect(block).toContain('setState("confirmObtain")');
+  });
+
+  it("確認へ回すときは最新の警告を出し直す", () => {
+    const at = src.indexOf('if (decision.action === "obtain")');
+    // ⚠内側の閉じ括弧で切れないよう、分岐の**次の行**を終端にする。
+    const block = src.slice(
+      at,
+      src.indexOf("setNotSearchableReason(res.candidates.length", at),
+    );
+    expect(block).toContain("setPreflightReload((n) => n + 1)");
+  });
+});

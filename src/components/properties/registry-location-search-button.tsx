@@ -10,9 +10,11 @@ import RegistryChibanPopup from "@/components/properties/registry-chiban-popup";
 import { isSearchableTarget } from "@/lib/registry-fetch/registry-target";
 import { resolveRecoverEntry } from "@/lib/registry-fetch/recover-entry";
 import { decideAfterSearch } from "@/lib/registry-fetch/after-search";
+import { preflightWarningsIncreased } from "@/lib/registry-fetch/preflight-change";
 import { MapPinned, Loader2, AlertTriangle } from "lucide-react";
 import {
   searchRegistryCandidates,
+  fetchRegistryPreflight,
   obtainRegistryByCandidate,
   recoverRegistryByCandidate,
   recoverRegistryFromProperty,
@@ -300,8 +302,22 @@ export default function RegistryLocationSearchButton({
         return;
       }
       if (decision.action === "obtain") {
-        // 候補1件＝「選ぶ」「確認」を挟まずそのまま有料取得へ（発注者指示 2026-08-21）。
+        // ⚠**検索の間に状況が変わっていないか確かめてから**課金する（@codex #399 R2 P1）。
+        //   所在検索は数十秒〜数分かかる。その間に別の担当者が謄本PDFを添付したり
+        //   所有者を入れたりすると、検索前に見た警告のまま**重複して買ってしまう**。
+        //   取り直せなかったときも止める側に倒す（お金は取り戻せない）。
+        const beforeFlags = preflight.flagsById.get(propertyId) ?? null;
+        const afterFlags = await fetchRegistryPreflight([propertyId])
+          .then((r) => r.data[0] ?? null)
+          .catch(() => null);
         setSelected(decision.candidate);
+        if (preflightWarningsIncreased(beforeFlags, afterFlags)) {
+          // 自動では進まず、最新の警告つきで人に確認させる。
+          setPreflightReload((n) => n + 1);
+          setState("confirmObtain");
+          return;
+        }
+        // 候補1件＝「選ぶ」「確認」を挟まずそのまま有料取得へ（発注者指示 2026-08-21）。
         await runObtain(decision.candidate);
         return;
       }
