@@ -575,6 +575,10 @@ export default function RegistryLocationSearchButton({
             登記情報の検索は有料処理になり得ます。実行には明示的な確認が必要です。
           </p>
           <RegistryTargetNote state={preflight} propertyId={propertyId} />
+          {/* ⚠**取得の前に警告を出す**（@codex #399 R1 P1）。候補1件はそのまま課金まで
+              進むため、確認画面だけに警告があると「既に取得済み・PDF添付済み・所有者あり」に
+              気づけず**重複して買ってしまう**。 */}
+          <RegistryPreflightWarningLines state={preflight} propertyId={propertyId} />
           {/* ⚠**種類は検索の前に選ぶ**（発注者指示 2026-08-21）。候補が1件なら
               そのまま取得まで進むため、あとから選ぶ画面が無い。既定は安い方
               （所有者事項）。全部事項が必要なときの道を塞がないため、ここに置く。 */}
@@ -697,9 +701,10 @@ export default function RegistryLocationSearchButton({
             //   「課金は発生しません」という嘘の説明つきボタンが出る(server は
             //   受け付けないが表示が矛盾する)。
             cancelable={state === "searching"}
-            // ⚠中止が受け付けられたら覚えておく。直後に検索結果が返っても
-            //   有料取得へ進ませない（課金の後は取り消せない）。
-            onCancelAccepted={() => {
+            // ⚠中止が**押された瞬間**に覚える。サーバーの応答を待つと、その間に
+            //   検索が終わって自動で課金され得る（@codex #399 R1 P1）。
+            //   受け付けの成否に関わらず、止める意思が示された時点で進ませない。
+            onCancelRequested={() => {
               searchCancelledRef.current = true;
             }}
           />

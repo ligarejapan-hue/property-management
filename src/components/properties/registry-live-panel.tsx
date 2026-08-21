@@ -52,7 +52,7 @@ export default function RegistryLivePanel({
   liveRef,
   searchSettled,
   cancelable = true,
-  onCancelAccepted,
+  onCancelRequested,
 }: {
   propertyId: string;
   liveRef: string;
@@ -72,11 +72,12 @@ export default function RegistryLivePanel({
    */
   cancelable?: boolean;
   /**
-   * 中止が**受け付けられた**ときに呼ぶ。⚠親はこれを覚えておき、直後に検索結果が
-   * 返ってきても**有料取得へ進ませない**（押した瞬間と検索完了が重なる隙間を塞ぐ）。
-   * 課金の後は取り消せないので、止まれるのは課金の前だけ。
+   * 中止が**押された瞬間**に呼ぶ。⚠サーバーの応答を待ってから呼ぶと、
+   * 待っている間に検索が終わり**自動で課金される**（@codex #399 R1 P1）。
+   * 受け付けられたかに関わらず「利用者が止める意思を示した」時点で親に伝え、
+   * 親はそれ以降**有料取得へ進ませない**。課金の後は取り消せない。
    */
-  onCancelAccepted?: () => void;
+  onCancelRequested?: () => void;
 }) {
   const [steps, setSteps] = useState<RegistryLiveViewStep[]>([]);
   const [done, setDone] = useState(false);
@@ -115,6 +116,9 @@ export default function RegistryLivePanel({
    */
   const handleCancel = async (): Promise<void> => {
     if (cancelling) return;
+    // ⚠**通信より先に**伝える（@codex #399 R1 P1）。応答を待つ間に検索が終わると、
+    //   止めるつもりだったのに自動で課金されてしまう。
+    onCancelRequested?.();
     setCancelling(true);
     try {
       const res = await cancelRegistryLiveView(propertyId, liveRef);
@@ -122,13 +126,10 @@ export default function RegistryLivePanel({
       // 検索 POST が実況を登録する前 (権限・資格情報・provider の解決中) に押すと
       // まだ実況が無く accepted:false が返る。これを無視すると、実行は普通に続いて
       // いるのにボタンだけ押せないまま固まり、**もう中止できなくなる**。
-      if (!res.data.accepted) {
-        setCancelling(false);
-      } else {
-        // ⚠受け付けられた＝この先へ進ませてはいけない。親に伝えて、直後に
-        //   検索結果が返っても**有料取得へ進ませない**（課金前の唯一の砦）。
-        onCancelAccepted?.();
-      }
+      // ⚠**受け付けられた時だけ「中止しています…」で固定する**。受け付けられなかった
+      //   ときは押せる状態に戻す（実行が続いているのにボタンだけ死ぬのを防ぐ）。
+      //   ⚠親への通知は押下時に済ませてある（ここでは行わない）。
+      if (!res.data.accepted) setCancelling(false);
     } catch {
       // 通信失敗。押し直せるよう戻すだけ (理由は画面に出さない=秘匿情報の混入を避ける)。
       setCancelling(false);

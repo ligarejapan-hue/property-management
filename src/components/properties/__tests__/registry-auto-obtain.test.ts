@@ -38,10 +38,10 @@ describe("検索のあとの分岐は純関数に委ねる", () => {
 });
 
 describe("中止は課金の前で必ず効く", () => {
-  it("中止が受け付けられたことを画面が覚える", () => {
+  it("中止が押されたことを画面が覚える", () => {
     expect(src).toContain("searchCancelledRef");
-    // 実況パネルから中止の受付を受け取る。
-    expect(src).toContain("onCancelAccepted");
+    // ⚠実況パネルから**押下の時点**で受け取る(受付の応答を待たない。@codex #399 R1 P1)。
+    expect(src).toContain("onCancelRequested");
   });
 
   it("検索を始めるたびに、前回の中止は持ち越さない", () => {
@@ -54,5 +54,36 @@ describe("中止は課金の前で必ず効く", () => {
     const iCall = body.indexOf("await searchRegistryCandidates(");
     expect(iReset).toBeGreaterThan(-1);
     expect(iCall).toBeGreaterThan(iReset);
+  });
+});
+
+describe("自動で課金する前に、止める手段と警告を確実に出す(@codex #399 R1 P1 ×2)", () => {
+  it("⚠中止は**押した瞬間**に記録する(サーバー応答を待たない)", () => {
+    // 押した直後に検索が終わると、応答待ちの間に自動購入が走ってしまう。
+    // 課金は取り消せないので、**利用者が止める意思を示した時点**で止める。
+    const panel = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "..", "registry-live-panel.tsx"),
+      "utf8",
+    );
+    // ⚠改行の正規化はしない(1行の部分一致と位置比較だけで確かめるため)。
+    expect(panel).toContain("onCancelRequested");
+    // 通信より前に呼ぶ(順序)。
+    const at = panel.indexOf("const handleCancel = async ()");
+    const body = panel.slice(at, panel.indexOf("  };", at));
+    const iNotify = body.indexOf("onCancelRequested?.()");
+    const iSend = body.indexOf("await cancelRegistryLiveView(");
+    expect(iNotify).toBeGreaterThan(-1);
+    expect(iSend).toBeGreaterThan(iNotify);
+    // 画面側も押下時点で受け取る。
+    expect(src).toContain("onCancelRequested={");
+  });
+
+  it("⚠取得の前に『既に取得済み』等の警告を出す(重複購入を防ぐ)", () => {
+    // 自動で進む経路は確認画面を通らないため、警告が確認画面だけにあると
+    // **重複して買ってしまう**。検索の確認にも出す。
+    const at = src.indexOf('state === "confirmSearch" && target?.kind !== "none"');
+    expect(at).toBeGreaterThan(-1);
+    const block = src.slice(at, src.indexOf('{state === "searching"', at));
+    expect(block).toContain("RegistryPreflightWarningLines");
   });
 });
