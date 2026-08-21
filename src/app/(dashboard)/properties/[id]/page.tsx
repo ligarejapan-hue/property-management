@@ -364,7 +364,10 @@ export default function PropertyDetailPage({
   //   成功直後に実況の見返しが消える（@codex #380 R3 P2 で踏んだ回帰）。
   // ⚠静かな更新なので、失敗しても画面は壊さない（利用者は従来どおり
   //   「閉じる（物件情報を更新）」でいつでも本筋の取り直しができる）。
-  const refreshPropertyQuietly = useCallback(async () => {
+  // ⚠**取り直せたかを返す**(@codex #398 R5 P2)。この関数は画面を壊さないために
+  //   失敗を握りつぶすので、呼び出し側が「待った＝新しくなった」と思い込むと、
+  //   古い版番号のまま再挑戦して弾かれる。false=取り直せていない、を返す。
+  const refreshPropertyQuietly = useCallback(async (): Promise<boolean> => {
     const ticket = beginRefresh(refreshStateRef.current, "quiet");
     try {
       const data = await fetchPropertyDetail(id);
@@ -375,6 +378,7 @@ export default function PropertyDetailPage({
         setError,
       );
       if (applied) void loadQualityIssues();
+      return applied;
     } catch (err) {
       // 静かな更新**自身**の失敗は表に出さない（best-effort）。出るのは
       // 「預かっている失敗があり、これが決着になった」ときだけ（純関数が決める）。
@@ -388,6 +392,7 @@ export default function PropertyDetailPage({
         setProperty,
         setError,
       );
+      return false;
     }
   }, [id, loadQualityIssues]);
 

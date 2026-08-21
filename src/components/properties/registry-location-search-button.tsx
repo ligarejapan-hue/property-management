@@ -65,7 +65,7 @@ interface RegistryLocationSearchButtonProps {
    * ⚠任意（?）にしない：配線を忘れても型・テスト・build が通ってしまい、
    *   本番でだけ「成功したのに画面が古いまま」が復活する（2026-08-20 の再演）。
    */
-  onRegistryResultApplied: () => void | Promise<void>;
+  onRegistryResultApplied: () => void | Promise<boolean | void>;
 }
 
 type State =
@@ -204,10 +204,21 @@ export default function RegistryLocationSearchButton({
         //   利用者が先にボタンを押せてしまい**古い版のまま送って再び弾かれる**。
         setSavedVersion(null);
         setPreparingRecover(true);
+        let refreshed: boolean | void;
         try {
-          await onRegistryResultApplied();
+          refreshed = await onRegistryResultApplied();
         } finally {
           setPreparingRecover(false);
+        }
+        // ⚠取り直しは失敗を握りつぶす(画面を壊さないため)。**取り直せていない**まま
+        //   確認画面を開くと、古い版番号で再挑戦して弾かれる(@codex #398 R5 P2)。
+        //   返さない実装(void)は従来どおり通す。false のときだけ止める。
+        if (refreshed === false) {
+          setErrorMsg(
+            "最新の物件情報を取得できませんでした。通信を確認して、もう一度お試しください。",
+          );
+          setState("error");
+          return;
         }
         clearFlow();
         setSelected(null);

@@ -118,7 +118,8 @@ describe("取り直しの完了を待ってから確認画面を開く(@codex #3
   //   ボタンを押せてしまい、**古い版番号のまま送って再び弾かれる**
   //   (REGISTRY_RECOVER_PROPERTY_CHANGED)。失敗直後の再挑戦で必ず1回無駄に失敗する。
   it("合図は待てる形(Promise)で受け取る", () => {
-    expect(src).toContain("onRegistryResultApplied: () => void | Promise<void>;");
+    // ⚠**待てること**と、**取り直せたかを受け取れること**を見る。
+    expect(src).toContain("onRegistryResultApplied: () => void | Promise<boolean | void>;");
   });
 
   it("入口は取り直しを待ってから確認画面へ進む", () => {
@@ -145,5 +146,36 @@ describe("取り直しの完了を待ってから確認画面を開く(@codex #3
     );
     // ⚠改行の正規化は不要(1行の部分一致で確かめるため)。
     expect(page).toContain("return refreshPropertyQuietly();");
+  });
+});
+
+describe("取り直せなかったときは進ませない(@codex #398 R5 P2)", () => {
+  // ⚠静かな取り直しは**失敗を握りつぶす**設計(画面を壊さないため)。待つだけでは
+  //   「取り直せた」保証にならず、通信が落ちていると**古い版のまま**確認画面が開き、
+  //   再挑戦がまた「物件情報が変わりました」で弾かれる。
+  it("静かな取り直しは『取り直せたか』を返す", () => {
+    const page = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        "..", "..", "..",
+        "app", "(dashboard)", "properties", "[id]", "page.tsx",
+      ),
+      "utf8",
+    );
+    expect(page).toContain("const refreshPropertyQuietly = useCallback(async (): Promise<boolean> => {");
+    // 失敗したときは false。
+    expect(page).toContain("return false;");
+  });
+
+  it("取り直せなかったら確認画面を開かない", () => {
+    const at = src.indexOf("const recoverEntryLink = recoverConfigured ? (");
+    const block = src.slice(at, src.indexOf("  ) : null;", at));
+    expect(block).toContain("=== false");
+    // 進まずに知らせて終わる。
+    const iGuard = block.indexOf("=== false");
+    const iOpen = block.indexOf('setState("confirmObtain")');
+    expect(iGuard).toBeGreaterThan(-1);
+    expect(iOpen).toBeGreaterThan(iGuard);
+    expect(block).toContain("return;");
   });
 });
