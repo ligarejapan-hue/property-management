@@ -61,7 +61,7 @@ describe("registry-location-search-button.tsx: 配線（所在検索→候補→
     //   (同じ画面に課金しない「取り込む」を並べるため)。塞ぐ強さは変えない。
     expect(src).toContain("取得する（有料）");
     expect(src).toMatch(
-      /onClick=\{\(\) => runObtain\(\)\}[\s\S]{0,200}?disabled=\{[\s\S]{0,80}?!purchaseEnabled/,
+      /onClick=\{\(\) => runObtain\([\s\S]{0,80}?\)\}[\s\S]{0,200}?disabled=\{[\s\S]{0,80}?!purchaseEnabled/,
     );
     expect(src).toContain("有料取得は準備中です");
     // ⚠**2026-08-21 発注者指示で運用が変わった**: 候補が**1件**のときは「選ぶ」も確認画面も

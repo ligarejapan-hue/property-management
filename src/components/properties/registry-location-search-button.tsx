@@ -170,6 +170,23 @@ export default function RegistryLocationSearchButton({
   const providerDisabled = !providerConfigured;
   // ⚠両方登録されている物件は、放っておくと家屋番号が優先される(=土地の購入を
   //   取り込めない/建物のPDFを取り込んでしまう)。選ばせる(@codex #394 R13 P1)。
+  /**
+   * いま画面に出ている事前警告を、そのまま「承認した内容」として渡す
+   * （@codex #399 R6 P2）。⚠**最新を取り直して渡してはいけない**。承認したのは
+   * 「画面に出ていた状態」であって、その後に増えた警告は**弾く側**に回す必要がある。
+   * 読めていないときは undefined（＝検査を足さない・ボタンは preflight 待ちで押せない）。
+   */
+  const approvedFromDisplay = () => {
+    const f = preflight.flagsById.get(propertyId);
+    return f
+      ? {
+          registryObtained: f.registryObtained,
+          hasRegistryAttachment: f.hasRegistryAttachment,
+          hasOwners: f.hasOwners,
+        }
+      : undefined;
+  };
+
   const hasBothIdentifiers =
     !!(propertyLotNumber ?? "").trim() && !!(propertyBuildingNumber ?? "").trim();
 
@@ -910,7 +927,10 @@ export default function RegistryLocationSearchButton({
               type="button"
               // ⚠**関数を直接渡さない**。引数を取るようになったため、クリックイベントが
               //   候補として渡ってしまう（tsc が検出）。
-              onClick={() => runObtain()}
+              // ⚠**画面に出ている警告を承認内容として送る**（@codex #399 R6 P2）。
+              //   送らないと、確認を出してから課金までの間に謄本が登録されても
+              //   検査が効かず、重複して買ってしまう。
+              onClick={() => runObtain(undefined, approvedFromDisplay())}
               disabled={
                 !purchaseEnabled ||
                 preflight.pending ||

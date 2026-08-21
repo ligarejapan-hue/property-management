@@ -180,3 +180,23 @@ describe("重複の検査は課金のロックと同じ一文で行う(@codex #3
     expect(src).toContain("registryObtained: afterFlags?.registryObtained ?? false");
   });
 });
+
+describe("手動の取得ボタンも承認内容を送る(@codex #399 R6 P2)", () => {
+  it("画面に出ている警告をそのまま渡す(最新を取り直さない)", () => {
+    // ⚠承認したのは「画面に出ていた状態」。その後に増えた警告は弾く側に回す必要がある。
+    expect(src).toContain("const approvedFromDisplay = ()");
+    expect(src).toContain("preflight.flagsById.get(propertyId)");
+    expect(src).toContain("runObtain(undefined, approvedFromDisplay())");
+  });
+
+  it("有料取得のボタンは、承認内容を渡さずには押せない形になっている", () => {
+    // ボタン本体(onClick)を起点にする。文言は他の説明文にも出るため。
+    const at = src.indexOf("runObtain(undefined, approvedFromDisplay())");
+    expect(at).toBeGreaterThan(-1);
+    const after = src.slice(at, at + 900);
+    // 従来どおりスイッチと事前確認で塞ぐ。
+    expect(after).toContain("!purchaseEnabled");
+    expect(after).toContain("preflight.pending");
+    expect(after).toContain("取得する（有料）");
+  });
+});
