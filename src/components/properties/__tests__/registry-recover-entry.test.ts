@@ -179,3 +179,24 @@ describe("取り直せなかったときは進ませない(@codex #398 R5 P2)", 
     expect(block).toContain("return;");
   });
 });
+
+describe("待っている間に閉じたら、後から勝手に開かない(@codex #398 R6 P2)", () => {
+  // ⚠取り直しを待っている間も「閉じる」は押せる。閉じたのに続きが動いて
+  //   確認画面が開くと、利用者には**勝手に開いた**ようにしか見えない。
+  it("流れを畳むと、待っていた続きは無効になる", () => {
+    // 畳む側が世代を進める。
+    const clearAt = src.indexOf("const clearFlow = () => {");
+    const clearBlock = src.slice(clearAt, src.indexOf("  };", clearAt));
+    expect(clearBlock).toContain("recoverPrepRef.current += 1;");
+    // 待った側は世代を照合してから進む。
+    const at = src.indexOf("const recoverEntryLink = recoverConfigured ? (");
+    const block = src.slice(at, src.indexOf("  ) : null;", at));
+    expect(block).toContain("const prepGen = ++recoverPrepRef.current;");
+    expect(block).toContain("if (prepGen !== recoverPrepRef.current) return;");
+    // 照合は「開く」より前。
+    const iGuard = block.indexOf("if (prepGen !== recoverPrepRef.current) return;");
+    const iOpen = block.indexOf('setState("confirmObtain")');
+    expect(iGuard).toBeGreaterThan(-1);
+    expect(iOpen).toBeGreaterThan(iGuard);
+  });
+});

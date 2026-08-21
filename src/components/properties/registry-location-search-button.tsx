@@ -132,6 +132,12 @@ export default function RegistryLocationSearchButton({
   const [savedVersion, setSavedVersion] = useState<number | null>(null);
   // 回収の入口を押してから、物件の取り直しが返るまで(押せない・押したことが分かる)。
   const [preparingRecover, setPreparingRecover] = useState(false);
+  /**
+   * 回収の準備(取り直し待ち)の世代。⚠待っている間に「閉じる」等で流れが畳まれたら、
+   * 続きを実行しない(畳んだのに確認画面が開くと**勝手に開いた**ようにしか見えない。
+   * @codex #398 R6 P2)。畳む側(clearFlow)が進め、待った側が照合する。
+   */
+  const recoverPrepRef = useRef(0);
   // 失敗の帯が現れた瞬間に、そこまで画面を送って見落としを防ぐ。
   // ⚠**知らせるのは失敗のときだけ**(発注者指示 2026-08-20)。成功は画面の更新で足りる。
   // ⚠useEffect ではなく callback ref: 実物の要素を掴んだ瞬間に 1 回だけ動かす
@@ -164,6 +170,8 @@ export default function RegistryLocationSearchButton({
    * 直後の setState が捨てられる(@codex #398 R3 P2)。
    */
   const clearFlow = () => {
+    // 待っている回収の準備を無効にする(畳んだ後に続きが動かないように)。
+    recoverPrepRef.current += 1;
     setState("idle");
     setCandidates([]);
     setNotSearchableReason(null);
@@ -202,6 +210,7 @@ export default function RegistryLocationSearchButton({
         //   画面を作り直さない**静かな取り直し**を使い、古い版を捨てる。
         // ⚠**取り直しの完了を待ってから**開く(@codex #398 R4 P2)。待たないと、
         //   利用者が先にボタンを押せてしまい**古い版のまま送って再び弾かれる**。
+        const prepGen = ++recoverPrepRef.current;
         setSavedVersion(null);
         setPreparingRecover(true);
         let refreshed: boolean | void;
@@ -213,6 +222,8 @@ export default function RegistryLocationSearchButton({
         // ⚠取り直しは失敗を握りつぶす(画面を壊さないため)。**取り直せていない**まま
         //   確認画面を開くと、古い版番号で再挑戦して弾かれる(@codex #398 R5 P2)。
         //   返さない実装(void)は従来どおり通す。false のときだけ止める。
+        // ⚠待っている間に閉じられていたら、ここで終わる(勝手に開かない)。
+        if (prepGen !== recoverPrepRef.current) return;
         if (refreshed === false) {
           setErrorMsg(
             "最新の物件情報を取得できませんでした。通信を確認して、もう一度お試しください。",
