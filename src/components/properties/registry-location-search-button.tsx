@@ -317,6 +317,15 @@ export default function RegistryLocationSearchButton({
           setState("confirmObtain");
           return;
         }
+        // ⚠**課金の直前に、もう一度だけ中止を読み直す**（@codex #399 R3 P1）。
+        //   上の警告の取り直し（await）の間にも「中止」は押せる。判断はその待ちの前に
+        //   済ませているので、読み直さないと**押したのに課金される**。
+        //   ⚠一般則: **課金の前に await を足したら、その後で必ずここを読み直す**。
+        if (searchCancelledRef.current) {
+          setErrorMsg("検索を中止しました。課金は発生していません。");
+          setState("cancelled");
+          return;
+        }
         // 候補1件＝「選ぶ」「確認」を挟まずそのまま有料取得へ（発注者指示 2026-08-21）。
         await runObtain(decision.candidate);
         return;

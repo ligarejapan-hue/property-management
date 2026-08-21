@@ -119,3 +119,22 @@ describe("検索の間に状況が変わっていたら自動で買わない(@co
     expect(block).toContain("setPreflightReload((n) => n + 1)");
   });
 });
+
+describe("課金の直前に、もう一度だけ中止を読み直す(@codex #399 R3 P1)", () => {
+  // ⚠警告を取り直す待ち時間の間にも「中止」は押せる。判断はその待ちの**前**に
+  //   済ませているので、読み直さないと**押したのに課金される**。
+  //   ⚠一般則: **課金の前に await を足したら、その後で必ず中止を読み直す**。
+  it("警告の取り直しのあと、取得を始める前に中止を確認する", () => {
+    const at = src.indexOf('if (decision.action === "obtain")');
+    const block = src.slice(
+      at,
+      src.indexOf("setNotSearchableReason(res.candidates.length", at),
+    );
+    const iAwaitPreflight = block.indexOf("await fetchRegistryPreflight(");
+    const iRecheck = block.indexOf("if (searchCancelledRef.current)");
+    const iObtain = block.indexOf("await runObtain(");
+    expect(iAwaitPreflight).toBeGreaterThan(-1);
+    expect(iRecheck).toBeGreaterThan(iAwaitPreflight);
+    expect(iObtain).toBeGreaterThan(iRecheck);
+  });
+});
