@@ -56,7 +56,10 @@ describe("謄本の結果が画面に出る(2026-08-20 の誤解の再発防止)
   });
 
   it("合図の口は任意ではなく必須(配線を忘れても型で気づけない事故を防ぐ)", () => {
-    expect(BUTTON).toContain("onRegistryResultApplied: () => void;");
+    // ⚠見るのは「**必須**である(? を付けない)」こと。返り値の形は用途で変わる
+    //   (取り直しの完了を待つため Promise も返せるようにした=@codex #398 R4 P2)。
+    expect(BUTTON).toContain("onRegistryResultApplied: () =>");
+    expect(BUTTON).not.toContain("onRegistryResultApplied?:");
   });
 
   it("失敗は見落とせない帯にして、その場まで自動でスクロールする", () => {

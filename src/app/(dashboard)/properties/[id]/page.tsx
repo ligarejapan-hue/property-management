@@ -396,9 +396,12 @@ export default function PropertyDetailPage({
   //   足さない**（トーストも、タブの自動切替もしない）＝結果が画面に出れば足りる：
   //   ①添付ファイル一覧に取り込んだPDFが出る ②謄本の状態バッジが最新になる。
   //   ⚠従来からの一行の完了表示は残す（設計提示時に明示して承認済み）。
+  // ⚠**取り直しの約束(Promise)を返す**(@codex #398 R4 P2)。投げっぱなしにすると、
+  //   回収の入口を押した直後に**古い版番号のまま**再挑戦できてしまい、また弾かれる。
+  //   成功時の反映は従来どおり待たずに使ってよい(返り値を無視するだけ)。
   const handleRegistryResultApplied = useCallback(() => {
     setAttachmentsRefreshToken((n) => n + 1);
-    void refreshPropertyQuietly();
+    return refreshPropertyQuietly();
   }, [refreshPropertyQuietly]);
 
   useEffect(() => {

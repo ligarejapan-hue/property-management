@@ -65,7 +65,7 @@ interface RegistryLocationSearchButtonProps {
    * ⚠任意（?）にしない：配線を忘れても型・テスト・build が通ってしまい、
    *   本番でだけ「成功したのに画面が古いまま」が復活する（2026-08-20 の再演）。
    */
-  onRegistryResultApplied: () => void;
+  onRegistryResultApplied: () => void | Promise<void>;
 }
 
 type State =
@@ -130,6 +130,8 @@ export default function RegistryLocationSearchButton({
   const propertyRefreshPendingRef = useRef(false);
   // 保存後の版番号（親から届く propertyVersion より新しい）。
   const [savedVersion, setSavedVersion] = useState<number | null>(null);
+  // 回収の入口を押してから、物件の取り直しが返るまで(押せない・押したことが分かる)。
+  const [preparingRecover, setPreparingRecover] = useState(false);
   // 失敗の帯が現れた瞬間に、そこまで画面を送って見落としを防ぐ。
   // ⚠**知らせるのは失敗のときだけ**(発注者指示 2026-08-20)。成功は画面の更新で足りる。
   // ⚠useEffect ではなく callback ref: 実物の要素を掴んだ瞬間に 1 回だけ動かす
@@ -190,22 +192,32 @@ export default function RegistryLocationSearchButton({
   const recoverEntryLink = recoverConfigured ? (
     <button
       type="button"
-      onClick={() => {
+      disabled={preparingRecover}
+      onClick={async () => {
         // ⚠reset() は使わない。溜まっている親の取り直しを流すと詳細ページが
         //   読み込み中に差し替わり、**この部品ごと消えて**直後の setState が
         //   捨てられる(=押しても確認画面が開かない。@codex #398 R3 P2)。
-        clearFlow();
         // ⚠失敗直後は取得の予約で**版番号が上がっている**ため、取り直さないと
         //   再挑戦が「物件情報が変わりました」で弾かれる(@codex #394 R27 P2)。
         //   画面を作り直さない**静かな取り直し**を使い、古い版を捨てる。
+        // ⚠**取り直しの完了を待ってから**開く(@codex #398 R4 P2)。待たないと、
+        //   利用者が先にボタンを押せてしまい**古い版のまま送って再び弾かれる**。
         setSavedVersion(null);
-        onRegistryResultApplied();
+        setPreparingRecover(true);
+        try {
+          await onRegistryResultApplied();
+        } finally {
+          setPreparingRecover(false);
+        }
+        clearFlow();
         setSelected(null);
         setState("confirmObtain");
       }}
-      className="w-fit text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline"
+      className="w-fit text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline disabled:opacity-60"
     >
-      取得済みの謄本を取り込む（課金なし）
+      {preparingRecover
+        ? "最新の情報を取り直しています…"
+        : "取得済みの謄本を取り込む（課金なし）"}
     </button>
   ) : null;
 

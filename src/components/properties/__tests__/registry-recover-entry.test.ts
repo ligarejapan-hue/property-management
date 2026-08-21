@@ -112,3 +112,38 @@ describe("入口を押した直後に画面が消えない(@codex #398 R3 P2)", 
     expect(calls).toBe(1);
   });
 });
+
+describe("取り直しの完了を待ってから確認画面を開く(@codex #398 R4 P2)", () => {
+  // ⚠静かな取り直しは**非同期**。投げっぱなしのまま確認画面を開くと、利用者が先に
+  //   ボタンを押せてしまい、**古い版番号のまま送って再び弾かれる**
+  //   (REGISTRY_RECOVER_PROPERTY_CHANGED)。失敗直後の再挑戦で必ず1回無駄に失敗する。
+  it("合図は待てる形(Promise)で受け取る", () => {
+    expect(src).toContain("onRegistryResultApplied: () => void | Promise<void>;");
+  });
+
+  it("入口は取り直しを待ってから確認画面へ進む", () => {
+    const at = src.indexOf("const recoverEntryLink = recoverConfigured ? (");
+    const block = src.slice(at, src.indexOf("  ) : null;", at));
+    expect(block).toContain("await onRegistryResultApplied();");
+    // 待ってから開く(順序)。
+    const iAwait = block.indexOf("await onRegistryResultApplied();");
+    const iOpen = block.indexOf('setState("confirmObtain")');
+    expect(iAwait).toBeGreaterThan(-1);
+    expect(iOpen).toBeGreaterThan(iAwait);
+    // 待っている間は押せない/押したことが分かる。
+    expect(block).toContain("preparingRecover");
+  });
+
+  it("物件ページは取り直しの約束を返す(投げっぱなしにしない)", () => {
+    const page = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        "..", "..", "..",
+        "app", "(dashboard)", "properties", "[id]", "page.tsx",
+      ),
+      "utf8",
+    );
+    // ⚠改行の正規化は不要(1行の部分一致で確かめるため)。
+    expect(page).toContain("return refreshPropertyQuietly();");
+  });
+});
