@@ -329,7 +329,13 @@ export default function RegistryLocationSearchButton({
           return;
         }
         // 候補1件＝「選ぶ」「確認」を挟まずそのまま有料取得へ（発注者指示 2026-08-21）。
-        await runObtain(decision.candidate);
+        // ⚠**承認した警告の状態を一緒に送る**。server は課金のロックと同じ一文で
+        //   検査し、確認のあとに謄本が登録されていたら課金せず弾く（@codex #399 R5 P2）。
+        await runObtain(decision.candidate, {
+          registryObtained: afterFlags?.registryObtained ?? false,
+          hasRegistryAttachment: afterFlags?.hasRegistryAttachment ?? false,
+          hasOwners: afterFlags?.hasOwners ?? false,
+        });
         return;
       }
       setNotSearchableReason(res.candidates.length === 0 ? "no_candidates" : null);
@@ -355,7 +361,18 @@ export default function RegistryLocationSearchButton({
    * @param candidate 候補を**引数で**受け取る。⚠候補1件の自動進行では setSelected の
    *   反映を待てないため、state を読むと空のまま何も起きない。
    */
-  const runObtain = async (candidate?: RegistrySearchCandidate) => {
+  /**
+   * @param approvedPreflight 課金を承認した時点の事前警告。⚠**ロックと同じ一文**で
+   *   server に検査させる（別の問い合わせでは相手の未確定処理を読み落とす）。
+   */
+  const runObtain = async (
+    candidate?: RegistrySearchCandidate,
+    approvedPreflight?: {
+      registryObtained: boolean;
+      hasRegistryAttachment: boolean;
+      hasOwners: boolean;
+    },
+  ) => {
     const target = candidate ?? selected;
     if (!target) return;
     // ボタンの disabled だけに頼らない(迂回への二重防御)。
@@ -378,6 +395,7 @@ export default function RegistryLocationSearchButton({
         target.candidateRef,
         certificateType,
         obtainLiveRef,
+        approvedPreflight,
       );
       setState("done");
       // 画面を作り直さずに、添付ファイル一覧と謄本の状態だけを静かに最新化する

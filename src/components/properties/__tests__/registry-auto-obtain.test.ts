@@ -27,7 +27,8 @@ describe("検索のあとの分岐は純関数に委ねる", () => {
     // ⚠state の反映を待たずに走らせるため、**候補を引数で直接渡す**。
     //   setSelected 後の state に頼ると、まだ空のまま取得が始まって何も起きない。
     expect(src).toContain('if (decision.action === "obtain")');
-    expect(src).toContain("await runObtain(decision.candidate)");
+    // ⚠承認した警告の状態も一緒に渡すため、引数は2つになった(@codex #399 R5 P2)。
+    expect(src).toContain("await runObtain(decision.candidate,");
     expect(src).toContain("const runObtain = async (");
   });
 
@@ -140,5 +141,42 @@ describe("課金の直前に、もう一度だけ中止を読み直す(@codex #3
     expect(iRecheck).toBeGreaterThan(iAwaitPreflight);
     expect(iWarnBranch).toBeGreaterThan(iRecheck);
     expect(iObtain).toBeGreaterThan(iRecheck);
+  });
+});
+
+describe("重複の検査は課金のロックと同じ一文で行う(@codex #399 R5 P2)", () => {
+  const AUTO_FETCH = readFileSync(
+    join(
+      dirname(fileURLToPath(import.meta.url)),
+      "..", "..", "..",
+      "lib", "registry-fetch", "auto-fetch.ts",
+    ),
+    "utf8",
+  );
+
+  it("楽観ロックの where に承認内容の検査が入っている", () => {
+    // 別の問い合わせで確かめると、相手の未確定な処理を読み落として重複購入し得る。
+    const at = AUTO_FETCH.indexOf("const lock = await prisma.property.updateMany({");
+    expect(at).toBeGreaterThan(-1);
+    const block = AUTO_FETCH.slice(
+      at,
+      AUTO_FETCH.indexOf("if (lock.count === 0)", at),
+    );
+    expect(block).toContain("buildApprovedDuplicateGuard(args.approvedPreflight)");
+    // ⚠課金する経路だけ。回収(課金なし)には掛けない。
+    expect(block).toContain("willPurchaseByLocation");
+  });
+
+  it("重複で弾いたときは『実行中』ではなく専用の理由を返す", () => {
+    // 「実行中です」と言われると待って押し直すが、実際はもう持っているので解決しない。
+    expect(AUTO_FETCH).toContain("REGISTRY_PURCHASE_DUPLICATE_APPEARED");
+    const at = AUTO_FETCH.indexOf("REGISTRY_PURCHASE_DUPLICATE_APPEARED");
+    const before = AUTO_FETCH.slice(Math.max(0, at - 900), at);
+    expect(before).toContain("課金していません");
+  });
+
+  it("画面は承認した警告の状態を一緒に送る", () => {
+    expect(src).toContain("await runObtain(decision.candidate, {");
+    expect(src).toContain("registryObtained: afterFlags?.registryObtained ?? false");
   });
 });
