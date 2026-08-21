@@ -2946,6 +2946,26 @@ export async function updatePropertyOwner(
   });
 }
 
+/**
+ * 所有者を**この物件から外す**(紐付けだけを消す)。
+ *
+ * ⚠**所有者そのものは消えない**。消えるのは PropertyOwner 行=
+ *   この物件での関係・主所有者フラグ・**物件×所有者のメモ(PropertyOwner.note)**。
+ *   所有者に付けた OwnerMemo は物件を参照しているだけなので残る。
+ * ⚠server 側は **管理者(user_management:read)+ owner:write** を要求する
+ *   (発注者判断 2026-08-21:「事務担当は付け替えだけに」)。
+ */
+export async function unlinkPropertyOwner(propertyId: string, ownerId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { message: "紐付けを解除しました" };
+  }
+  return apiFetch<{ message: string }>(
+    `/api/properties/${propertyId}/owners/${ownerId}`,
+    { method: "DELETE" },
+  );
+}
+
 export async function searchOwners(query: string) {
   if (USE_MOCK) {
     await mockDelay();

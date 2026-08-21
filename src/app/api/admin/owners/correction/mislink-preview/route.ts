@@ -78,9 +78,9 @@ export async function POST(request: NextRequest) {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
 
-    if (!hasPermission(perms, "user_management", "read")) {
-      throw new ApiError(403, "権限がありません", "FORBIDDEN");
-    }
+    // ⚠**操作ごとに要求が違う**(発注者判断 2026-08-21)。詳細は execute 側
+    // (mislink/route.ts) の同じ位置のコメント。**下見と実行で規則を揃える**
+    // ——片方だけ緩いと「画面は出るのに実行で 403」(逆も然り)になる。
     if (!hasPermission(perms, "owner", "read")) {
       throw new ApiError(403, "所有者閲覧の権限がありません", "FORBIDDEN");
     }
@@ -100,6 +100,18 @@ export async function POST(request: NextRequest) {
         400,
         "operation は 'remove' または 'relink' を指定してください",
         "INVALID_INPUT",
+      );
+    }
+    // **外す(remove)は管理者だけ**。⚠**DB に触る前**に弾く
+    // (権限の無い人にリンクの存在を漏らさない)。
+    if (
+      operation === "remove" &&
+      !hasPermission(perms, "user_management", "read")
+    ) {
+      throw new ApiError(
+        403,
+        "所有者を物件から外すには管理者権限が必要です",
+        "FORBIDDEN",
       );
     }
     if (

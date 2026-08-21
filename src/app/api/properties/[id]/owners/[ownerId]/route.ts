@@ -111,6 +111,19 @@ export async function DELETE(
     if (!hasPermission(perms, "owner", "write")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
+    // 発注者判断 2026-08-21:「削除と付け替えは別のボタンにしてほしい。
+    // **事務担当は付け替えだけに**」⇒ **外す(リンク削除)は管理者だけ**。
+    // ⚠このリポには role を直接見る仕組みが無い。既存の管理者向け route
+    // (誤紐づき修正 = /api/admin/owners/correction/mislink) が
+    // `user_management:read` を管理者の代理鍵として使っているので **同じ鍵に揃える**
+    // (判定基準を2種類作らない)。本番実測: 事務担当用テンプレはこの鍵を持たない。
+    if (!hasPermission(perms, "user_management", "read")) {
+      throw new ApiError(
+        403,
+        "所有者を物件から外すには管理者権限が必要です",
+        "FORBIDDEN",
+      );
+    }
 
     // Find the PropertyOwner record
     const propertyOwner = await prisma.propertyOwner.findUnique({

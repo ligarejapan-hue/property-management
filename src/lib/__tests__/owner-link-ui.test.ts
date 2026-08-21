@@ -214,7 +214,12 @@ describe("page.tsx: ボタン識別性（ラベル / aria-label / title）", () 
     expect(pageSrc).toMatch(/の所有者情報を編集/); // aria-label テンプレ末尾（所有者名 + 文脈）
   });
 
-  it("誤紐づき修正に補足 title がある", () => {
-    expect(pageSrc).toMatch(/title="この物件と所有者の紐づきを修正"/);
+  it("付け替えボタンに補足 title がある (旧「誤紐づき修正」・2026-08-21 改名)", () => {
+    expect(pageSrc).toMatch(/title="この所有者を、別の所有者に付け替える"/);
+  });
+
+  it("外すボタンは、何が残るかを title でも伝える (2026-08-21 追加)", () => {
+    // ⚠「外す」だけだと所有者ごと消えると誤解される。
+    expect(pageSrc).toMatch(/title="この所有者を、この物件から外す（所有者の情報そのものは残ります）"/);
   });
 });

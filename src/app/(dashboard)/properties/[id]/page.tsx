@@ -29,7 +29,7 @@ import RegistryLocationSearchButton from "@/components/properties/registry-locat
 import { isLandPropertyType } from "@/lib/registry-fetch/registry-target";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
-import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, updateOwner, fetchQualityCheck } from "@/lib/api-client";
+import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, unlinkPropertyOwner, updateOwner, fetchQualityCheck } from "@/lib/api-client";
 import { OwnerEditableFields, buildOwnerUpdatePayload, canEditOwner } from "@/lib/owner-edit-utils";
 import { canShowAddOwner } from "@/lib/owner-link-utils";
 import {
@@ -476,6 +476,7 @@ export default function PropertyDetailPage({
     canDeleteProperty,
     canWriteOwner,
     canReadOwner,
+    canRemoveOwnerLink,
     canCreateOwnerMemo,
     corporateLookupConfigured,
     canAutoFetchRegistry,
@@ -547,11 +548,24 @@ export default function PropertyDetailPage({
     // canCreateOwnerMemo と整合）。複合述語ゆえ verbatim 維持（緩めない）。
     const canCreateOwnerMemo =
       canWriteOwner && (hasFullPerm("owner_note") || hasEditPerm("owner_note"));
+    // 「この物件から外す」= **管理者だけ**(発注者判断 2026-08-21:
+    // 「削除と付け替えは別のボタンにしてほしい。事務担当は付け替えだけに」)。
+    // ⚠このリポに role 判定は無く、既存の管理者向け route が
+    // `user_management:read` を代理鍵にしている。server 側
+    // (DELETE /api/properties/[id]/owners/[ownerId]) と**同じ条件**にする
+    // ——ここだけ緩いと「ボタンは出るのに 403」になる。
+    const canRemoveOwnerLink =
+      canWriteOwner &&
+      effectivePermissions.some(
+        (p) =>
+          p.resource === "user_management" && p.action === "read" && p.granted,
+      );
     return {
       canWriteProperty,
       canDeleteProperty,
       canWriteOwner,
       canReadOwner,
+      canRemoveOwnerLink,
       canCreateOwnerMemo,
       corporateLookupConfigured,
       canAutoFetchRegistry,
@@ -764,6 +778,7 @@ export default function PropertyDetailPage({
             propertyId={property.id}
             canRead={canReadOwner}
             canWrite={canWriteOwner}
+            canRemoveOwnerLink={canRemoveOwnerLink}
             editableFields={ownerEditableFields}
             canCreateMemo={canCreateOwnerMemo}
             corporateLookupConfigured={corporateLookupConfigured}
@@ -947,6 +962,7 @@ function OwnerTab({
   propertyId,
   canRead,
   canWrite,
+  canRemoveOwnerLink,
   editableFields,
   canCreateMemo,
   corporateLookupConfigured,
@@ -956,6 +972,8 @@ function OwnerTab({
   propertyId: string;
   canRead: boolean;
   canWrite: boolean;
+  /** 「この物件から外す」を出してよいか(= 管理者)。server 側と同じ条件。 */
+  canRemoveOwnerLink: boolean;
   editableFields: OwnerEditableFields;
   canCreateMemo: boolean;
   corporateLookupConfigured: boolean;
@@ -1031,6 +1049,7 @@ function OwnerTab({
               total={owners.length}
               canRead={canRead}
               canWrite={canWrite}
+              canRemoveOwnerLink={canRemoveOwnerLink}
               editableFields={editableFields}
               canCreateMemo={canCreateMemo}
               corporateLookupConfigured={corporateLookupConfigured}
@@ -1062,6 +1081,7 @@ function OwnerCard({
   total,
   canRead,
   canWrite,
+  canRemoveOwnerLink,
   editableFields,
   canCreateMemo,
   corporateLookupConfigured,
@@ -1073,6 +1093,8 @@ function OwnerCard({
   total: number;
   canRead: boolean;
   canWrite: boolean;
+  /** 「この物件から外す」を出してよいか(= 管理者)。 */
+  canRemoveOwnerLink: boolean;
   editableFields: OwnerEditableFields;
   canCreateMemo: boolean;
   corporateLookupConfigured: boolean;
@@ -1087,6 +1109,9 @@ function OwnerCard({
   const [addressEdited, setAddressEdited] = useState(false);
   // 誤紐づき修正モーダル（Phase 2-C）。owner:write 権限がない場合は出さない。
   const [mislinkOpen, setMislinkOpen] = useState(false);
+  // 「この物件から外す」。⚠押し間違いが起きる場所なので、確認してから実行する。
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   // email が API レスポンスに含まれているか（hidden の場合キーが存在しない）
   const emailReturned = "email" in po.owner;
@@ -1171,6 +1196,41 @@ function OwnerCard({
     setSaveError(null);
   };
 
+  /**
+   * 「この物件から外す」。⚠**所有者そのものは消えない**——消えるのはこの物件との
+   * 紐付け(関係・主所有者・**物件×所有者のメモ**)だけ。文面でそこを明示する
+   * (「本当に削除しますか」だけだと、所有者ごと消えると誤解される)。
+   * ⚠戻せない操作なので、押し間違い防止に確認を挟む。
+   */
+  const handleRemoveLink = async () => {
+    const name = po.owner.name ?? "（氏名未登録）";
+    const ok = window.confirm(
+      [
+        `${name} をこの物件から外します。`,
+        "",
+        "・所有者の情報そのものは残ります（他の物件との紐付けや履歴も残ります）",
+        "・この物件でのメモ（物件ごとに持つメモ）と、主所有者などの設定は消えます",
+        "",
+        "外しますか？",
+      ].join("\n"),
+    );
+    if (!ok) return;
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      await unlinkPropertyOwner(propertyId, po.ownerId);
+      await onRefresh();
+    } catch (err) {
+      setRemoveError(
+        err instanceof Error ? err.message : "外す操作に失敗しました",
+      );
+    } finally {
+      // ⚠onRefresh が親を差し替えてもこのカードは残り得る(共有名義)。
+      // 失敗時に押せないまま固まらないよう、必ず戻す。
+      setRemoving(false);
+    }
+  };
+
   const handleSave = async () => {
     // 編集ボタン非表示時の異常呼び出しガード:
     // owner:read がない・version 未返却の場合は保存不可。
@@ -1229,21 +1289,45 @@ function OwnerCard({
             所有者情報を編集
           </button>
         )}
-        {/* 誤紐づき修正ボタン (Phase 2-C): owner:write がある場合のみ表示。
-            execute 側で property:write も再検証するため UI 表示条件はゆるく
-            owner:write のみ。 */}
+        {/* 付け替え: owner:write があれば事務担当でも使える。
+            ⚠旧名は「誤紐づき修正」。**その名前では「外す」機能を誰も見つけられず**
+            (本番の監査ログで利用 0 件)、発注者から「削除ができない」と報告された。
+            名前は**やることそのもの**にする。 */}
         {canWrite && !editing && (
           <button
             type="button"
             onClick={() => setMislinkOpen(true)}
-            title="この物件と所有者の紐づきを修正"
-            aria-label={`所有者${idx + 1}/${total} ${po.owner.name ?? "（氏名未登録）"}の紐づきを修正`}
+            title="この所有者を、別の所有者に付け替える"
+            aria-label={`所有者${idx + 1}/${total} ${po.owner.name ?? "（氏名未登録）"}を別の所有者に付け替える`}
             className={`${editAllowed ? "" : "ml-auto"} flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/40`}
           >
-            誤紐づき修正
+            別の所有者に付け替える
+          </button>
+        )}
+        {/* 外す: **管理者だけ**(発注者判断 2026-08-21「事務担当は付け替えだけに」)。
+            条件は server (DELETE /api/properties/[id]/owners/[ownerId]) と同一。 */}
+        {canRemoveOwnerLink && !editing && (
+          <button
+            type="button"
+            disabled={removing}
+            onClick={handleRemoveLink}
+            title="この所有者を、この物件から外す（所有者の情報そのものは残ります）"
+            aria-label={`所有者${idx + 1}/${total} ${po.owner.name ?? "（氏名未登録）"}をこの物件から外す`}
+            className="flex items-center gap-1 rounded-md border border-red-300 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-100 disabled:opacity-60 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/40"
+          >
+            {removing ? "外しています..." : "この物件から外す"}
           </button>
         )}
       </div>
+
+      {removeError && (
+        <p
+          role="alert"
+          className="mb-3 rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"
+        >
+          {removeError}
+        </p>
+      )}
 
       {mislinkOpen && (
         <OwnerMislinkModal
