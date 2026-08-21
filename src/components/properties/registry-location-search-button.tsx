@@ -310,20 +310,22 @@ export default function RegistryLocationSearchButton({
         const afterFlags = await fetchRegistryPreflight([propertyId])
           .then((r) => r.data[0] ?? null)
           .catch(() => null);
+        // ⚠**待ちの直後に、真っ先に中止を読み直す**（@codex #399 R3/R4 P1・P2）。
+        //   上の警告の取り直し（await）の間にも「中止」は押せる。判断はその待ちの前に
+        //   済ませているので、読み直さないと**押したのに課金される**。
+        //   ⚠**他のどの分岐よりも前**に置く。後ろに置くと、警告が増えた場合や
+        //   取り直しに失敗した場合に中止が無視され、有料ボタンのある画面へ進んでしまう。
+        //   ⚠一般則: **課金の前に await を足したら、その直後にここを読み直す**。
+        if (searchCancelledRef.current) {
+          setErrorMsg("検索を中止しました。課金は発生していません。");
+          setState("cancelled");
+          return;
+        }
         setSelected(decision.candidate);
         if (preflightWarningsIncreased(beforeFlags, afterFlags)) {
           // 自動では進まず、最新の警告つきで人に確認させる。
           setPreflightReload((n) => n + 1);
           setState("confirmObtain");
-          return;
-        }
-        // ⚠**課金の直前に、もう一度だけ中止を読み直す**（@codex #399 R3 P1）。
-        //   上の警告の取り直し（await）の間にも「中止」は押せる。判断はその待ちの前に
-        //   済ませているので、読み直さないと**押したのに課金される**。
-        //   ⚠一般則: **課金の前に await を足したら、その後で必ずここを読み直す**。
-        if (searchCancelledRef.current) {
-          setErrorMsg("検索を中止しました。課金は発生していません。");
-          setState("cancelled");
           return;
         }
         // 候補1件＝「選ぶ」「確認」を挟まずそのまま有料取得へ（発注者指示 2026-08-21）。

@@ -132,9 +132,13 @@ describe("課金の直前に、もう一度だけ中止を読み直す(@codex #3
     );
     const iAwaitPreflight = block.indexOf("await fetchRegistryPreflight(");
     const iRecheck = block.indexOf("if (searchCancelledRef.current)");
+    const iWarnBranch = block.indexOf("preflightWarningsIncreased(");
     const iObtain = block.indexOf("await runObtain(");
     expect(iAwaitPreflight).toBeGreaterThan(-1);
+    // 待ちの直後＝**どの分岐よりも先**に読み直す（@codex #399 R4 P2）。
+    //   後ろに置くと、警告が増えた場合に中止が無視されて有料ボタンのある画面へ進む。
     expect(iRecheck).toBeGreaterThan(iAwaitPreflight);
+    expect(iWarnBranch).toBeGreaterThan(iRecheck);
     expect(iObtain).toBeGreaterThan(iRecheck);
   });
 });
