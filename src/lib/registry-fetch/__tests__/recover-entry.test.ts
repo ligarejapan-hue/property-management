@@ -34,3 +34,28 @@ describe("回収の探し方の決定", () => {
     ).toBe("property");
   });
 });
+
+describe("土地と建物の両方がある物件(@codex #398 R1 P1)", () => {
+  it("⚠両方あるときは候補があっても物件の地番で取り込む", () => {
+    // 所在検索は**家屋番号(建物)を優先**して候補を返すため、候補由来の回収では
+    // **買った土地の謄本に永久に手が届かない**(謄本には取得期限がある)。
+    // 入口を「所在で謄本を検索」の流れに一本化した以上、この判断は流れの中で効く必要がある。
+    expect(
+      resolveRecoverEntry({
+        fromProperty: false,
+        hasSelection: true,
+        hasBothIdentifiers: true,
+      }),
+    ).toBe("property");
+  });
+
+  it("片方しか無ければ従来どおり候補で取り込む(サーバーが解決できる)", () => {
+    expect(
+      resolveRecoverEntry({
+        fromProperty: false,
+        hasSelection: true,
+        hasBothIdentifiers: false,
+      }),
+    ).toBe("candidate");
+  });
+});

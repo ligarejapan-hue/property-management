@@ -34,8 +34,19 @@ const PAGE = read(
 
 describe("謄本の結果が画面に出る(2026-08-20 の誤解の再発防止)", () => {
   it("成功したら『静かな更新』の合図を出す(有料取得・課金なしの回収の両方)", () => {
-    const calls = BUTTON.match(/onRegistryResultApplied\(\)/g) ?? [];
-    expect(calls.length).toBe(2);
+    // ⚠**回数では固定しない**。合図は他の場面(回収の入口を押したとき=版番号を
+    //   新しくするため)でも使うので、回数を増やすたびにピンが壊れる。
+    //   守るべきは「**両方の成功経路が合図を出す**」こと。
+    const LF = String.fromCharCode(10);
+    const bodyOf = (name: string) => {
+      const at = BUTTON.indexOf("const " + name + " = async (");
+      expect(at).toBeGreaterThan(-1);
+      const end = BUTTON.indexOf(LF + "  };", at);
+      expect(end).toBeGreaterThan(at);
+      return BUTTON.slice(at, end);
+    };
+    expect(bodyOf("runObtain")).toContain("onRegistryResultApplied();");
+    expect(bodyOf("runRecover")).toContain("onRegistryResultApplied();");
   });
 
   it("成功しても画面を作り直す取り直しは呼ばない(実況の見返しが消える回帰)", () => {
@@ -45,7 +56,10 @@ describe("謄本の結果が画面に出る(2026-08-20 の誤解の再発防止)
   });
 
   it("合図の口は任意ではなく必須(配線を忘れても型で気づけない事故を防ぐ)", () => {
-    expect(BUTTON).toContain("onRegistryResultApplied: () => void;");
+    // ⚠見るのは「**必須**である(? を付けない)」こと。返り値の形は用途で変わる
+    //   (取り直しの完了を待つため Promise も返せるようにした=@codex #398 R4 P2)。
+    expect(BUTTON).toContain("onRegistryResultApplied: () =>");
+    expect(BUTTON).not.toContain("onRegistryResultApplied?:");
   });
 
   it("失敗は見落とせない帯にして、その場まで自動でスクロールする", () => {
