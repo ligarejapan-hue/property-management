@@ -94,7 +94,11 @@ describe("配線", () => {
     // 検索 POST が実況を登録する前に押すと accepted:false が返る。無視すると
     // 実行は続いているのにボタンだけ死に、二度と中止できなくなる。
     const src = read("src/components/properties/registry-live-panel.tsx");
-    expect(src).toMatch(/if \(!res\.data\.accepted\) setCancelling\(false\)/);
+    // ⚠2026-08-21: 受け付けられた側で親へ通知するようになり、if がブロック形になった。
+    //   守る中身は不変=**受け付けられなかったら押せる状態に戻す**。
+    const at = src.indexOf("if (!res.data.accepted)");
+    expect(at).toBeGreaterThan(-1);
+    expect(src.slice(at, at + 140)).toContain("setCancelling(false)");
   });
 
   it("⚠実況が期限切れでも中止の印が残る (@codex #357 P2)", () => {

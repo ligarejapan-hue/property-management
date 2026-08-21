@@ -1919,6 +1919,16 @@ export async function obtainRegistryByCandidate(
   candidateRef: string,
   certificateType: "owner" | "all" = "owner",
   liveRef?: string,
+  /**
+   * ⚠**課金を承認した時点**の事前警告の状態。server はここで「無かった」項目だけを
+   * 課金のロックと同じ一文で検査し、確認のあとに謄本が登録されていたら課金せず弾く
+   * (@codex #399 R5 P2)。省略時は従来どおり検査しない。
+   */
+  approvedPreflight?: {
+    registryObtained: boolean;
+    hasRegistryAttachment: boolean;
+    hasOwners: boolean;
+  },
 ): Promise<unknown> {
   return apiFetch(`/api/properties/${propertyId}/registry/auto-fetch`, {
     method: "POST",
@@ -1928,6 +1938,7 @@ export async function obtainRegistryByCandidate(
       candidateRef,
       certificateType,
       ...(liveRef ? { liveRef } : {}),
+      ...(approvedPreflight ? { approvedPreflight } : {}),
     }),
   });
 }

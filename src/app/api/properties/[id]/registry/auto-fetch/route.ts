@@ -87,6 +87,22 @@ export async function POST(
     // （fail-safe: 未知の値で高い方を勝手に買わない）。
     const certRaw = (body as { certificateType?: unknown } | null)?.certificateType;
     const certificateType: "owner" | "all" = certRaw === "all" ? "all" : "owner";
+    // ⚠課金を承認した時点の事前警告(@codex #399 R5 P2)。**3つとも boolean のときだけ**
+    //   採用する(欠けた形を受け取って「無かったこと」にしない=fail closed)。
+    const apRaw = (body as { approvedPreflight?: unknown } | null)?.approvedPreflight as
+      | { registryObtained?: unknown; hasRegistryAttachment?: unknown; hasOwners?: unknown }
+      | undefined;
+    const approvedPreflight =
+      apRaw &&
+      typeof apRaw.registryObtained === "boolean" &&
+      typeof apRaw.hasRegistryAttachment === "boolean" &&
+      typeof apRaw.hasOwners === "boolean"
+        ? {
+            registryObtained: apRaw.registryObtained,
+            hasRegistryAttachment: apRaw.hasRegistryAttachment,
+            hasOwners: apRaw.hasOwners,
+          }
+        : undefined;
 
     // 【回収】既に購入済みの謄本を、再課金なしで取り込むモード(2026-08-19)。
     // ⚠"recover" 以外の値は既定(有料取得)に倒さず**そのまま既定**=購入扱いにする
@@ -321,6 +337,7 @@ export async function POST(
                   },
                   // 有料の所在取得のときだけ種別を渡す（番号取得は従来どおり無関係）。
                   certificateType,
+                  approvedPreflight,
                 }),
             // @codex P2: lock する行の指紋が resolve 時と一致する時だけ override を使う。
             expectedFingerprint: fingerprint,

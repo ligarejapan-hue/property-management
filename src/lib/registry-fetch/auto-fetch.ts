@@ -79,6 +79,10 @@ import {
 } from "@/lib/registry-fetch/shozai-dialog";
 import { processRegistryPdf, type RegistryPdfSession } from "@/lib/registry-pdf/process";
 import {
+  buildApprovedDuplicateGuard,
+  type ApprovedPreflightFlags,
+} from "@/lib/registry-fetch/duplicate-guard";
+import {
   RegistryFetchError,
   DEFAULT_CERTIFICATE_TYPE,
   type RegistryFetchProvider,
@@ -151,6 +155,13 @@ export interface RunRegistryAutoFetchArgs {
    * ここで version-lock する行の指紋がこれと一致しなければ 409（resolve〜取得の間の編集を弾く）。
    */
   expectedFingerprint?: string;
+  /**
+   * @codex #399 R5 P2: 画面が**課金を承認した時点**の事前警告の状態。
+   * ⚠承認時に「無かった」項目だけを、**ロックと同じ一文**で検査する
+   * （別の問い合わせでは、相手の未確定な処理を読み落として重複購入し得る）。
+   * ⚠警告を見たうえで意図して買い直す運用は従来どおり許す（承認済み=true は条件にしない）。
+   */
+  approvedPreflight?: ApprovedPreflightFlags;
   /**
    * 段階②(2026-07-31): 所在検索で選ばれた候補(地番/家屋番号)での**有料取得**。
    * realEstateNumber と排他（両方指定は番号を優先）。値は秘匿情報＝log/監査/応答に出さない。
@@ -4152,10 +4163,52 @@ export async function runRegistryAutoFetch(
             realEstateNumber: property.realEstateNumber,
           }
         : {}),
+      // @codex #399 R5 P2: **課金するときだけ**、承認時に警告が無かった項目を
+      //   このロックと同じ一文で検査する。別の問い合わせで確かめると、相手の
+      //   未確定な処理（謄本PDFの添付・所有者の紐付け）を読み落とし、
+      //   **既にある謄本をもう一度買う**。物件配下の書き込みは親行を先にロックする
+      //   規約なので、相手が押さえている間はここで待たされ、確定後に評価し直される。
+      // ⚠回収(課金なし)には掛けない。買った書類の取り込みは重複と無関係。
+      ...(willPurchaseByLocation
+        ? buildApprovedDuplicateGuard(args.approvedPreflight)
+        : {}),
     },
     data: { registryStatus: "scheduled", version: { increment: 1 } },
   });
   if (lock.count === 0) {
+    // ⚠**重複で弾いたのかを先に見分ける**(@codex #399 R5 P2)。「実行中です」と言われると
+    //   利用者は待って押し直すが、実際は**もう持っている**のだから、待っても解決しない。
+    if (willPurchaseByLocation && args.approvedPreflight) {
+      const now = await prisma.property.findUnique({
+        where: { id: propertyId },
+        select: {
+          registryStatus: true,
+          _count: { select: { propertyOwners: true } },
+        },
+      });
+      const attachedNow = await prisma.attachment.count({
+        where: {
+          targetType: "property",
+          targetId: propertyId,
+          type: "registry",
+          isDeleted: false,
+        },
+      });
+      const appearedObtained =
+        !args.approvedPreflight.registryObtained &&
+        now?.registryStatus === "obtained";
+      const appearedAttachment =
+        !args.approvedPreflight.hasRegistryAttachment && attachedNow > 0;
+      const appearedOwners =
+        !args.approvedPreflight.hasOwners && (now?._count.propertyOwners ?? 0) > 0;
+      if (appearedObtained || appearedAttachment || appearedOwners) {
+        throw new ApiError(
+          409,
+          "確認のあとに、この物件の謄本が登録されました。課金していません。画面を開き直して内容を確かめてください",
+          "REGISTRY_PURCHASE_DUPLICATE_APPEARED",
+        );
+      }
+    }
     // 候補取得で lock 失敗 = 並行取得 or 検索キー項目の変化。指紋が今も一致するか再確認して弁別する。
     if (args.expectedFingerprint !== undefined) {
       const fresh = await prisma.property.findUnique({

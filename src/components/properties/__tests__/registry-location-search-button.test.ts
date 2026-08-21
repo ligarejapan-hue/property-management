@@ -21,7 +21,9 @@ describe("registry-location-search-button.tsx: 配線（所在検索→候補→
   });
   it("取得は candidateRef と種別を渡して obtainRegistryByCandidate を使う（cond③ server 再解決）", () => {
     expect(src).toContain("obtainRegistryByCandidate(");
-    expect(src).toContain("selected.candidateRef");
+    // ⚠候補は**引数で**受け取る(候補1件の自動進行では state の反映を待てないため)。
+    expect(src).toContain("const runObtain = async (");
+    expect(src).toContain("target.candidateRef");
     // 請求種別(所有者事項/全部事項)を選んで渡す。
     expect(src).toContain("certificateType");
   });
@@ -59,10 +61,14 @@ describe("registry-location-search-button.tsx: 配線（所在検索→候補→
     //   (同じ画面に課金しない「取り込む」を並べるため)。塞ぐ強さは変えない。
     expect(src).toContain("取得する（有料）");
     expect(src).toMatch(
-      /onClick=\{runObtain\}[\s\S]{0,200}?disabled=\{[\s\S]{0,80}?!purchaseEnabled/,
+      /onClick=\{\(\) => runObtain\([\s\S]{0,80}?\)\}[\s\S]{0,200}?disabled=\{[\s\S]{0,80}?!purchaseEnabled/,
     );
     expect(src).toContain("有料取得は準備中です");
-    // 有効時も**ワンクリック課金にはしない**: 「選ぶ」→確認画面→「取得する（有料）」の2段。
+    // ⚠**2026-08-21 発注者指示で運用が変わった**: 候補が**1件**のときは「選ぶ」も確認画面も
+    //   挟まず、そのまま取得(課金)まで進む。手動の2段(選ぶ→確認→取得)は
+    //   **有料スイッチが切れている環境**と**回収**で今も使うため残る(下の pin はその経路)。
+    //   ⚠代わりの砦=**検索中の「中止」**。押して受け付けられたら取得へ進まない
+    //   (純関数 decideAfterSearch で全条件を実測)。課金の後は取り消せない。
     expect(src).toContain('setState("confirmObtain")');
     expect(src).toContain("利用料が発生します");
     expect(src).toContain("この候補で何をしますか？");
