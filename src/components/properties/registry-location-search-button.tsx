@@ -9,6 +9,7 @@ import {
 import RegistryChibanPopup from "@/components/properties/registry-chiban-popup";
 import { isSearchableTarget } from "@/lib/registry-fetch/registry-target";
 import { resolveRecoverEntry } from "@/lib/registry-fetch/recover-entry";
+import { decideAfterSearch } from "@/lib/registry-fetch/after-search";
 import { MapPinned, Loader2, AlertTriangle } from "lucide-react";
 import {
   searchRegistryCandidates,
@@ -138,6 +139,12 @@ export default function RegistryLocationSearchButton({
    * @codex #398 R6 P2)。畳む側(clearFlow)が進め、待った側が照合する。
    */
   const recoverPrepRef = useRef(0);
+  /**
+   * 検索中に中止が**受け付けられた**か。⚠候補1件で自動的に有料取得へ進む運用にしたため、
+   * 「中止を押した直後に検索結果が返る」隙間で課金され得る。サーバーの中止判定に加えて
+   * 画面側でも覚えておき、二重に止める（課金の後は取り消せない）。
+   */
+  const searchCancelledRef = useRef(false);
   // 失敗の帯が現れた瞬間に、そこまで画面を送って見落としを防ぐ。
   // ⚠**知らせるのは失敗のときだけ**(発注者指示 2026-08-20)。成功は画面の更新で足りる。
   // ⚠useEffect ではなく callback ref: 実物の要素を掴んだ瞬間に 1 回だけ動かす
@@ -257,25 +264,55 @@ export default function RegistryLocationSearchButton({
   const runSearch = async () => {
     setState("searching");
     setErrorMsg(null);
+    // ⚠検索のたびに中止の記憶を落とす（前回の中止を持ち越さない）。
+    searchCancelledRef.current = false;
     // 実況パネルの参照を発行して検索 POST に同封する。実行中の自動操作を
     // 本人がスクショ紙芝居で追える (サーバー側はメモリ内 TTL・完了後破棄)。
     const ref = safeRandomId();
     setLiveRef(ref);
     try {
       const res = await searchRegistryCandidates(propertyId, ref);
-      if (res.searchable) {
-        setCandidates(res.candidates);
-        setNotSearchableReason(res.candidates.length === 0 ? "no_candidates" : null);
-      } else {
+      if (!res.searchable) {
         setCandidates([]);
         setNotSearchableReason(res.reason);
+        setState("results");
+        return;
       }
+      setCandidates(res.candidates);
+      // 検索のあと何をするかは純関数で決める（お金が動く分岐を画面に書き写さない）。
+      const decision = decideAfterSearch({
+        candidates: res.candidates,
+        cancelRequested: searchCancelledRef.current,
+        purchaseEnabled,
+      });
+      if (decision.action === "cancelled") {
+        // ⚠中止が受け付けられていた。候補があっても**課金へ進まない**。
+        setErrorMsg("検索を中止しました。課金は発生していません。");
+        setState("cancelled");
+        return;
+      }
+      if (decision.action === "too_many") {
+        // ⚠取り違えて別の筆を買わないため、複数件は取得しない（発注者指示 2026-08-21）。
+        setErrorMsg(
+          `候補が複数見つかりました（${decision.count}件）。取り違えを防ぐため取得しません。物件の地番を絞り込んでからやり直してください。`,
+        );
+        setState("error");
+        return;
+      }
+      if (decision.action === "obtain") {
+        // 候補1件＝「選ぶ」「確認」を挟まずそのまま有料取得へ（発注者指示 2026-08-21）。
+        setSelected(decision.candidate);
+        await runObtain(decision.candidate);
+        return;
+      }
+      setNotSearchableReason(res.candidates.length === 0 ? "no_candidates" : null);
       setState("results");
     } catch (e) {
       // ⚠**自分で押した中止を「失敗」として出さない**(@codex #357 P2)。
       // 中止は 409 で返るが、通信の失敗と同じ経路を通ると赤いエラー表示になり、
       // 「止めたのに何か問題が起きた」と誤解させる。課金が無いことも伝わらない。
       if (apiErrorCode(e) === "REGISTRY_SEARCH_CANCELLED") {
+        searchCancelledRef.current = true;
         setErrorMsg(e instanceof Error ? e.message : null);
         setState("cancelled");
         return;
@@ -287,8 +324,13 @@ export default function RegistryLocationSearchButton({
 
   // 段階②(2026-07-31): 候補(地番)の有料取得。server 側が候補をキャッシュから再解決し、
   // 二重課金台帳→直列化→請求→PDF→物件添付まで行う。confirmed:true は api-client が付ける。
-  const runObtain = async () => {
-    if (!selected) return;
+  /**
+   * @param candidate 候補を**引数で**受け取る。⚠候補1件の自動進行では setSelected の
+   *   反映を待てないため、state を読むと空のまま何も起きない。
+   */
+  const runObtain = async (candidate?: RegistrySearchCandidate) => {
+    const target = candidate ?? selected;
+    if (!target) return;
     // ボタンの disabled だけに頼らない(迂回への二重防御)。
     // 回収(runRecover)にはこのガードを入れない=課金しないのでスイッチと無関係。
     if (!purchaseEnabled) return;
@@ -306,7 +348,7 @@ export default function RegistryLocationSearchButton({
       // 「閉じる」時の物件再取得(onPropertyRefresh)で既存の権限ガード付きタブに反映する。
       await obtainRegistryByCandidate(
         propertyId,
-        selected.candidateRef,
+        target.candidateRef,
         certificateType,
         obtainLiveRef,
       );
@@ -533,6 +575,40 @@ export default function RegistryLocationSearchButton({
             登記情報の検索は有料処理になり得ます。実行には明示的な確認が必要です。
           </p>
           <RegistryTargetNote state={preflight} propertyId={propertyId} />
+          {/* ⚠**種類は検索の前に選ぶ**（発注者指示 2026-08-21）。候補が1件なら
+              そのまま取得まで進むため、あとから選ぶ画面が無い。既定は安い方
+              （所有者事項）。全部事項が必要なときの道を塞がないため、ここに置く。 */}
+          {(!target || isSearchableTarget(target.kind)) && (
+            <fieldset className="mt-1 flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 p-1.5">
+              <legend className="px-1 text-indigo-800 dark:text-indigo-300">取得する種類</legend>
+              <label className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
+                <input
+                  type="radio"
+                  name="certificateTypeBeforeSearch"
+                  checked={certificateType === "owner"}
+                  onChange={() => setCertificateType("owner")}
+                />
+                所有者事項（所有者の確認向け・料金が安い）
+              </label>
+              <label className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
+                <input
+                  type="radio"
+                  name="certificateTypeBeforeSearch"
+                  checked={certificateType === "all"}
+                  onChange={() => setCertificateType("all")}
+                />
+                全部事項（権利関係まで・料金が高い）
+              </label>
+            </fieldset>
+          )}
+          {/* ⚠**候補が1件なら、そのまま取得（課金）まで進む**。止められるのは検索中だけ。 */}
+          {(!target || isSearchableTarget(target.kind)) && purchaseEnabled && (
+            <p className="text-amber-700 dark:text-amber-400">
+              ⚠候補が1件だけ見つかった場合は、そのまま取得（有料）まで進みます。
+              やめるときは検索中に「中止」を押してください（課金の後は取り消せません）。
+              候補が複数のときは取得せずに止まります。
+            </p>
+          )}
           <div className="mt-1 flex gap-1">
             {/* ⚠サーバーが必ず弾く分類（住所が無い・番号が読めない・不動産番号がある）
                 では、実行の導線自体を出さない。出すと「押したのに毎回断られる」だけ。
@@ -621,6 +697,11 @@ export default function RegistryLocationSearchButton({
             //   「課金は発生しません」という嘘の説明つきボタンが出る(server は
             //   受け付けないが表示が矛盾する)。
             cancelable={state === "searching"}
+            // ⚠中止が受け付けられたら覚えておく。直後に検索結果が返っても
+            //   有料取得へ進ませない（課金の後は取り消せない）。
+            onCancelAccepted={() => {
+              searchCancelledRef.current = true;
+            }}
           />
         )}
 
@@ -777,7 +858,9 @@ export default function RegistryLocationSearchButton({
             {selected && (
             <button
               type="button"
-              onClick={runObtain}
+              // ⚠**関数を直接渡さない**。引数を取るようになったため、クリックイベントが
+              //   候補として渡ってしまう（tsc が検出）。
+              onClick={() => runObtain()}
               disabled={
                 !purchaseEnabled ||
                 preflight.pending ||

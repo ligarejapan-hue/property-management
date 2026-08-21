@@ -139,7 +139,7 @@ describe("回収の入口(画面)", () => {
   });
 
   it("⚠有料取得ボタンの方は今までどおりスイッチで塞ぐ(準備中に課金させない)", () => {
-    expect(buttonTag("runObtain}")).toContain("purchaseEnabled");
+    expect(buttonTag("runObtain()}")).toContain("purchaseEnabled");
   });
 
   it("⚠検索できない物件にも回収の入口がある(買った書類に手が届かなくならない)", () => {
@@ -169,7 +169,7 @@ describe("回収の入口(画面)", () => {
   });
 
   it("⚠候補が無いときは有料取得のボタンを出さない(回収専用の入口)", () => {
-    const at = SEARCH_BUTTON_UI.indexOf("onClick={runObtain}");
+    const at = SEARCH_BUTTON_UI.indexOf("onClick={() => runObtain()}");
     expect(at).toBeGreaterThan(-1);
     const before = SEARCH_BUTTON_UI.slice(Math.max(0, at - 300), at);
     expect(before).toContain("{selected && (");

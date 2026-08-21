@@ -57,10 +57,11 @@ describe("土地/建物の選択は流れの中に残す(@codex #398 R1 P1)", ()
     const LF = String.fromCharCode(10);
     const ternaryEnd = src.indexOf("</>" + LF + "          )}", elseAt);
     const both = src.indexOf("{hasBothIdentifiers && (");
-    const kindFieldset = src.indexOf("取得する種類");
     expect(ternaryEnd).toBeGreaterThan(elseAt);
     expect(both).toBeGreaterThan(ternaryEnd);
-    expect(both).toBeLessThan(kindFieldset);
+    // ⚠「取得する種類」は**検索前の確認**にも置いたため、ファイル内に複数ある
+    //   (2026-08-21)。絶対位置で比べず、**この選択より後ろに在ること**だけを見る。
+    expect(src.indexOf("取得する種類", both)).toBeGreaterThan(both);
   });
 });
 
