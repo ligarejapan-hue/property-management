@@ -274,6 +274,8 @@ export default function RegistryLocationSearchButton({
     const entry = resolveRecoverEntry({
       fromProperty,
       hasSelection: !!selected,
+      // 土地と建物の両方があるときは、候補(建物優先)ではなく人が選んだ種類で探す。
+      hasBothIdentifiers,
     });
     setLastAction("recover");
     setState("recovering");
@@ -644,32 +646,35 @@ export default function RegistryLocationSearchButton({
               <p className="text-indigo-700 dark:text-indigo-300">
                 この物件に登録されている所在・地番で、購入済みの謄本を探します。
               </p>
-              {hasBothIdentifiers && (
-                <fieldset className="mt-1 flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 p-1.5">
-                  <legend className="px-1 text-indigo-800 dark:text-indigo-300">
-                    どちらを取り込みますか？
-                  </legend>
-                  <label className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
-                    <input
-                      type="radio"
-                      name="recoverKind"
-                      checked={recoverKind === "land"}
-                      onChange={() => setRecoverKind("land")}
-                    />
-                    土地（地番 {propertyLotNumber}）
-                  </label>
-                  <label className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
-                    <input
-                      type="radio"
-                      name="recoverKind"
-                      checked={recoverKind === "building"}
-                      onChange={() => setRecoverKind("building")}
-                    />
-                    建物（家屋番号 {propertyBuildingNumber}）
-                  </label>
-                </fieldset>
-              )}
             </>
+          )}
+          {/* ⚠土地/建物の選択は**候補の有無にかかわらず**出す(@codex #398 R1 P1)。
+              所在検索は家屋番号(建物)を優先して候補を返すため、ここが無いと
+              **買った土地の謄本に永久に手が届かない**(謄本には取得期限がある)。 */}
+          {hasBothIdentifiers && (
+            <fieldset className="mt-1 flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 p-1.5">
+              <legend className="px-1 text-indigo-800 dark:text-indigo-300">
+                どちらを取り込みますか？（取り込みのみ）
+              </legend>
+              <label className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
+                <input
+                  type="radio"
+                  name="recoverKind"
+                  checked={recoverKind === "land"}
+                  onChange={() => setRecoverKind("land")}
+                />
+                土地（地番 {propertyLotNumber}）
+              </label>
+              <label className="flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
+                <input
+                  type="radio"
+                  name="recoverKind"
+                  checked={recoverKind === "building"}
+                  onChange={() => setRecoverKind("building")}
+                />
+                建物（家屋番号 {propertyBuildingNumber}）
+              </label>
+            </fieldset>
           )}
           <fieldset className="mt-1 flex flex-col gap-1 rounded border border-indigo-200 dark:border-indigo-500/30 p-1.5">
             <legend className="px-1 text-indigo-800 dark:text-indigo-300">取得する種類</legend>

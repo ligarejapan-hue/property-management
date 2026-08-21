@@ -13,8 +13,17 @@ export function resolveRecoverEntry(input: {
   fromProperty: boolean;
   /** 候補(所在検索で選んだ地番)を持っているか。 */
   hasSelection: boolean;
+  /**
+   * 土地と建物の**両方**が登録されているか。
+   * ⚠所在検索は家屋番号(建物)を優先して候補を返すため、候補由来の回収では
+   *   **買った土地の謄本に永久に手が届かない**(謄本には取得期限がある)。
+   *   両方あるときは人が選んだ種類で、物件自身の地番/家屋番号から探す
+   *   (@codex #398 R1 P1)。
+   */
+  hasBothIdentifiers?: boolean;
 }): RecoverEntry {
   // ⚠候補が無いときは**必ず**物件自身の地番で探す(何も起きない、を作らない)。
   if (input.fromProperty || !input.hasSelection) return "property";
+  if (input.hasBothIdentifiers) return "property";
   return "candidate";
 }

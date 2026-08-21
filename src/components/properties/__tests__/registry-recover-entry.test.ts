@@ -34,3 +34,30 @@ describe("取り込みの入口は検索の流れに一本化する", () => {
     expect(src).toContain("取得済みを取り込む（課金なし）");
   });
 });
+
+describe("土地/建物の選択は流れの中に残す(@codex #398 R1 P1)", () => {
+  it("判断は純関数に渡す(画面に条件を書き写さない)", () => {
+    expect(src).toContain("hasBothIdentifiers,");
+    expect(src).toContain("resolveRecoverEntry({");
+  });
+
+  it("⚠『どちらを取り込みますか』は候補を選んだ後でも出る", () => {
+    // 候補あり分岐(selected ? ( ... )) の中だけに置くと、検索から入った人は選べない。
+    const start = src.indexOf("{selected ? (");
+    const elseAt = src.indexOf(") : (", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(elseAt).toBeGreaterThan(start);
+    const candidateBranch = src.slice(start, elseAt);
+    expect(candidateBranch).not.toContain("どちらを取り込みますか");
+    // ⚠**三項(候補あり/なし)の外**にあること。片方の分岐に置くと、もう片方から
+    //   入った人は選べない(=買った方の謄本に手が届かない)。
+    // ⚠エスケープを使わずに改行を作る(この環境ではバックスラッシュが失われることがある)。
+    const LF = String.fromCharCode(10);
+    const ternaryEnd = src.indexOf("</>" + LF + "          )}", elseAt);
+    const both = src.indexOf("{hasBothIdentifiers && (");
+    const kindFieldset = src.indexOf("取得する種類");
+    expect(ternaryEnd).toBeGreaterThan(elseAt);
+    expect(both).toBeGreaterThan(ternaryEnd);
+    expect(both).toBeLessThan(kindFieldset);
+  });
+});
