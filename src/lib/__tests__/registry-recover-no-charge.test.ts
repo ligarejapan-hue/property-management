@@ -270,10 +270,12 @@ describe("回収の入口(画面)", () => {
     // ⚠2026-08-21 発注者指示で**入口を検索の流れに一本化**した(重複した導線を置かない)。
     //   守る中身は変わらない: 検索が使える → 流れの中の2択で到達できる /
     //   検索が使えない → ここに独立した入口を出す。
-    expect(SEARCH_BUTTON_UI).toContain("recoverConfigured");
-    expect(SEARCH_BUTTON_UI).toContain("{showButton && providerDisabled && recoverConfigured && (");
+    // ⚠2026-08-21: 入口の定義を1か所(recoverEntryLink)にまとめ、行き止まりの各所へ
+    //   差し込む形にした(@codex #398 R2 P1)。条件の書き写しを作らないため。
+    expect(SEARCH_BUTTON_UI).toContain("const recoverEntryLink = recoverConfigured ? (");
+    expect(SEARCH_BUTTON_UI).toContain("{showButton && providerDisabled && recoverEntryLink}");
     // ⚠回収は有料スイッチでは塞がない(切れている本番でも取り込める)。
-    const at = SEARCH_BUTTON_UI.indexOf("{showButton && providerDisabled && recoverConfigured && (");
+    const at = SEARCH_BUTTON_UI.indexOf("const recoverEntryLink = recoverConfigured ? (");
     const seg = SEARCH_BUTTON_UI.slice(
       at,
       SEARCH_BUTTON_UI.indexOf("</button>", at),

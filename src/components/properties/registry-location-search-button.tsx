@@ -173,6 +173,25 @@ export default function RegistryLocationSearchButton({
     }
   };
 
+  /**
+   * 【回収】購入済みの謄本を取り込む入口。⚠**定義は1か所**にして、行き止まりの各所へ
+   * 同じものを差し込む(場所ごとに書き写すと、片方だけ直してずれる)。
+   * 候補を持たない経路なので、物件自身の地番/家屋番号から探す確認画面へ進む。
+   */
+  const recoverEntryLink = recoverConfigured ? (
+    <button
+      type="button"
+      onClick={() => {
+        reset();
+        setSelected(null);
+        setState("confirmObtain");
+      }}
+      className="w-fit text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline"
+    >
+      取得済みの謄本を取り込む（課金なし）
+    </button>
+  ) : null;
+
   // ⚠**共通部品(registry-preflight-warnings)の同じ判定と、文言をそろえる**。
   //   以前ここだけ「通常の『謄本を自動取得』をご利用ください」と案内していたが、
   //   その導線は 2026-08-15 に撤去した（番号取得は実サイトへ未配線＝必ず失敗する）。
@@ -362,21 +381,10 @@ export default function RegistryLocationSearchButton({
 
       {/* 【回収】購入済みの取り込みは**「所在で謄本を検索」の流れの中**で行う(発注者指示 2026-08-21)。
           候補を選ぶと確認画面に「取得する（有料）／取得済みを取り込む（課金なし）」の2択が出る。
-          ⚠**検索そのものが使えないときだけ**、ここに入口を残す(@codex #394 R16 P2 の趣旨)。
-            消してしまうと、謄本に取得期限があるのに**買った書類へ手が届かなくなる**。 */}
-      {showButton && providerDisabled && recoverConfigured && (
-        <button
-          type="button"
-          onClick={() => {
-            reset();
-            setSelected(null);
-            setState("confirmObtain");
-          }}
-          className="w-fit text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline"
-        >
-          取得済みの謄本を取り込む（課金なし）
-        </button>
-      )}
+          ⚠**検索が使えないとき**と**流れが行き止まりになったとき**は、ここへ戻れないと
+            買った書類に手が届かない(謄本には取得期限がある)。同じ入口を差し込む
+            (@codex #394 R16 P2 / #398 R2 P1)。 */}
+      {showButton && providerDisabled && recoverEntryLink}
 
       {/* ⚠**使える機能まで『利用できません』と言わない**(@codex #394 R17 P2)。
           所在検索が使えなくても、取り込み(回収)は別条件で使える。期限のある
@@ -414,6 +422,7 @@ export default function RegistryLocationSearchButton({
           <p className="text-gray-600 dark:text-gray-300" role="status">
             {errorMsg ?? "取得を中止しました。課金は発生していません。"}
           </p>
+          {recoverEntryLink}
           <button type="button" onClick={reset} className="w-fit text-indigo-600 dark:text-indigo-400 hover:underline">
             閉じる
           </button>
@@ -432,6 +441,7 @@ export default function RegistryLocationSearchButton({
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{errorMsg}</span>
           </p>
+          {recoverEntryLink}
           <button
             type="button"
             onClick={reset}
@@ -615,6 +625,8 @@ export default function RegistryLocationSearchButton({
               </ul>
             </>
           )}
+          {/* ⚠候補が0件でも行き止まりにしない。買った書類が残っているかもしれない。 */}
+          {candidates.length === 0 && recoverEntryLink}
           <button type="button" onClick={reset} className="w-fit text-gray-500 dark:text-gray-400 hover:underline">
             閉じる
           </button>

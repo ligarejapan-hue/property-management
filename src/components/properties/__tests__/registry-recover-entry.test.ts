@@ -25,8 +25,10 @@ describe("取り込みの入口は検索の流れに一本化する", () => {
     expect(src).not.toContain("{showButton && recoverConfigured && (");
   });
 
-  it("検索が使えないときだけ入口を残す(買った書類に手が届かなくならない)", () => {
-    expect(src).toContain("providerDisabled && recoverConfigured");
+  it("検索が使えないときは、待たずに入口が出る(買った書類に手が届かなくならない)", () => {
+    expect(src).toContain("{showButton && providerDisabled && recoverEntryLink}");
+    // 入口そのものは「取り込みが使える設定」のときだけ存在する(定義側で担保)。
+    expect(src).toContain("const recoverEntryLink = recoverConfigured ? (");
   });
 
   it("検索の流れの中の2択は残っている(ここが本来の導線)", () => {
@@ -59,5 +61,29 @@ describe("土地/建物の選択は流れの中に残す(@codex #398 R1 P1)", ()
     expect(ternaryEnd).toBeGreaterThan(elseAt);
     expect(both).toBeGreaterThan(ternaryEnd);
     expect(both).toBeLessThan(kindFieldset);
+  });
+});
+
+describe("行き止まりでも買った書類に手が届く(@codex #398 R2 P1)", () => {
+  // 入口を検索の流れへ一本化した結果、**流れが行き止まりになる場面**で回収へ進めなくなった。
+  // 該当: 候補0件 / 検索エラー / 中止。いずれも「閉じる」しか無かった。
+  // 謄本には取得期限があるので、行き止まり＝**払った代金が失われる**。
+  it("回収の入口は1か所で定義する(場所ごとに書き写さない)", () => {
+    const defs = src.split("取得済みの謄本を取り込む（課金なし）").length - 1;
+    expect(defs).toBe(1);
+    expect(src).toContain("recoverEntryLink");
+  });
+
+  it("候補0件・エラー・中止のどれからでも回収へ進める", () => {
+    // それぞれの分岐に入口を差し込んでいること。
+    expect(src).toContain("{candidates.length === 0 && recoverEntryLink}");
+    const err = src.indexOf('{state === "error" && errorMsg && (');
+    const cancelled = src.indexOf('{state === "cancelled" && (');
+    expect(err).toBeGreaterThan(-1);
+    expect(cancelled).toBeGreaterThan(-1);
+    const errBlock = src.slice(err, src.indexOf("      )}", err));
+    const cancelledBlock = src.slice(cancelled, src.indexOf("      )}", cancelled));
+    expect(errBlock).toContain("recoverEntryLink");
+    expect(cancelledBlock).toContain("recoverEntryLink");
   });
 });
