@@ -176,9 +176,15 @@ describe("registry-location-search-button — 実況パネル統合 (ソース�
     expect(BUTTON_SRC).toMatch(
       /liveRef &&\s*\(state === "searching" \|\|\s*state === "results" \|\|[\s\S]*?state === "cancelled" \|\|\s*state === "error"\) && \(\s*<RegistryLivePanel/,
     );
+    // ⚠2026-08-21: 「畳むだけ(clearFlow)」と「畳んで親も取り直す(reset)」に分けた
+    //   (@codex #398 R3 P2)。閉じたときにパネルが消えることは変わらない=
+    //   reset は clearFlow を通り、clearFlow が liveRef を落とす。
+    const clearBlock =
+      BUTTON_SRC.match(/const clearFlow = \(\) => \{[\s\S]*?\};/)?.[0] ?? "";
+    expect(clearBlock).toMatch(/setLiveRef\(null\)/);
     const resetBlock =
       BUTTON_SRC.match(/const reset = \(\) => \{[\s\S]*?\};/)?.[0] ?? "";
-    expect(resetBlock).toMatch(/setLiveRef\(null\)/);
+    expect(resetBlock).toMatch(/clearFlow\(\)/);
   });
 });
 

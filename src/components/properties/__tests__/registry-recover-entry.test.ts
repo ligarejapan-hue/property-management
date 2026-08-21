@@ -87,3 +87,28 @@ describe("行き止まりでも買った書類に手が届く(@codex #398 R2 P1)
     expect(cancelledBlock).toContain("recoverEntryLink");
   });
 });
+
+describe("入口を押した直後に画面が消えない(@codex #398 R3 P2)", () => {
+  // ⚠回収に**失敗した直後**は親の取り直しが溜まっている(版番号が上がるため)。
+  //   そこで reset() を呼ぶと onPropertyRefresh() が走り、詳細ページが読み込み中に
+  //   差し替わって**この部品ごと消える**→直後の setState("confirmObtain") が捨てられ、
+  //   入口を押しても確認画面が開かない(=期限のある書類に手が届かないまま)。
+  it("入口は reset() ではなく、画面を作り直さない道を通る", () => {
+    const at = src.indexOf("const recoverEntryLink = recoverConfigured ? (");
+    expect(at).toBeGreaterThan(-1);
+    const block = src.slice(at, src.indexOf("  ) : null;", at));
+    // 溜まった取り直しを流す reset() は使わない。
+    expect(block).not.toContain("reset();");
+    // 検索の途中状態だけ畳む。
+    expect(block).toContain("clearFlow();");
+    // ⚠版番号は新しくする(失敗後の再挑戦が409で弾かれないように)。
+    //   使うのは**静かな取り直し**(画面を作り直さない)。
+    expect(block).toContain("onRegistryResultApplied();");
+    expect(block).toContain("setSavedVersion(null);");
+  });
+
+  it("画面を作り直す取り直しは今も『閉じる』のときだけ", () => {
+    const calls = src.split("onPropertyRefresh()").length - 1;
+    expect(calls).toBe(1);
+  });
+});

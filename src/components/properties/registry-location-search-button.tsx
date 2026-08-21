@@ -156,7 +156,12 @@ export default function RegistryLocationSearchButton({
   const hasBothIdentifiers =
     !!(propertyLotNumber ?? "").trim() && !!(propertyBuildingNumber ?? "").trim();
 
-  const reset = () => {
+  /**
+   * 検索の途中状態を畳むだけ。⚠**親の取り直しは流さない**。
+   * 流すと詳細ページが読み込み中に差し替わり、この部品ごと作り直されるため、
+   * 直後の setState が捨てられる(@codex #398 R3 P2)。
+   */
+  const clearFlow = () => {
     setState("idle");
     setCandidates([]);
     setNotSearchableReason(null);
@@ -164,6 +169,10 @@ export default function RegistryLocationSearchButton({
     setErrorMsg(null);
     // 実況パネルも閉じる (server 側のスクショは TTL で自動消滅)。
     setLiveRef(null);
+  };
+
+  const reset = () => {
+    clearFlow();
     // ⚠溜めておいた物件の取り直しをここで流す。流れは閉じたので、
     //   親が読み込み中の画面へ切り替わっても失うものが無い。
     if (propertyRefreshPendingRef.current) {
@@ -182,7 +191,15 @@ export default function RegistryLocationSearchButton({
     <button
       type="button"
       onClick={() => {
-        reset();
+        // ⚠reset() は使わない。溜まっている親の取り直しを流すと詳細ページが
+        //   読み込み中に差し替わり、**この部品ごと消えて**直後の setState が
+        //   捨てられる(=押しても確認画面が開かない。@codex #398 R3 P2)。
+        clearFlow();
+        // ⚠失敗直後は取得の予約で**版番号が上がっている**ため、取り直さないと
+        //   再挑戦が「物件情報が変わりました」で弾かれる(@codex #394 R27 P2)。
+        //   画面を作り直さない**静かな取り直し**を使い、古い版を捨てる。
+        setSavedVersion(null);
+        onRegistryResultApplied();
         setSelected(null);
         setState("confirmObtain");
       }}
