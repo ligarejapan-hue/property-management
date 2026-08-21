@@ -358,9 +358,11 @@ export default function RegistryLocationSearchButton({
         </button>
       )}
 
-      {/* 【回収】購入済みの取り込みは**所在検索と別の入口**(@codex #394 R16 P2)。
-          所在検索が使えない環境・使えない物件でも、買った書類には手が届く。 */}
-      {showButton && recoverConfigured && (
+      {/* 【回収】購入済みの取り込みは**「所在で謄本を検索」の流れの中**で行う(発注者指示 2026-08-21)。
+          候補を選ぶと確認画面に「取得する（有料）／取得済みを取り込む（課金なし）」の2択が出る。
+          ⚠**検索そのものが使えないときだけ**、ここに入口を残す(@codex #394 R16 P2 の趣旨)。
+            消してしまうと、謄本に取得期限があるのに**買った書類へ手が届かなくなる**。 */}
+      {showButton && providerDisabled && recoverConfigured && (
         <button
           type="button"
           onClick={() => {
