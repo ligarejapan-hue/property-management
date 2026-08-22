@@ -124,9 +124,17 @@ export async function DELETE(
         "FORBIDDEN",
       );
     }
+    // ⚠**物件の編集権限も要る**(@codex #400 R1 P1)。付け替え(mislink)は
+    // property:write を要求している。紐付けを**壊す側だけ緩い**のは筋が通らず、
+    // 権限は個別に上書きできるため「user_management:read + owner:write はあるが
+    // property:write は無い」組み合わせが実際に作れてしまう。
+    if (!hasPermission(perms, "property", "write")) {
+      throw new ApiError(403, "物件更新の権限がありません", "FORBIDDEN");
+    }
 
-    // Find the PropertyOwner record
-    const propertyOwner = await prisma.propertyOwner.findUnique({
+    // 早期の存在確認 (404 を返すための下見)。⚠**これは判断の根拠にしない**——
+    // ロックを取る前の値なので、下の tx 内で必ず読み直す。
+    const preview = await prisma.propertyOwner.findUnique({
       where: {
         propertyId_ownerId: {
           propertyId,
@@ -135,7 +143,7 @@ export async function DELETE(
       },
     });
 
-    if (!propertyOwner) {
+    if (!preview) {
       throw new ApiError(
         404,
         "物件と所有者の紐付けが見つかりません",
@@ -146,14 +154,37 @@ export async function DELETE(
     // Delete the link。⚠親の物件行を先にロックする(書き込み規約+#364 R6):
     // 素の delete は DM 控えの凍結 tx(親行 FOR SHARE 保持で宛先資格を検証)と直列化されず、
     // 解除直前のリンクを読んだ古いCSVがそのまま凍結・配布される。
-    await prisma.$transaction(async (tx) => {
+    //
+    // ⚠**ロックを取ってから読み直す**(@codex #400 R1 P1)。付け替え(relink)は
+    // **同じ行の ownerId を書き換える**ため、下見で得た行 id をそのまま消すと、
+    // その隙間に付け替えが入ったとき**確認画面で名前を見せた人とは別の人**の
+    // 紐付けを消してしまう。読み直して「まだこの所有者の行か」を確かめる。
+    const propertyOwner = await prisma.$transaction(async (tx) => {
       await lockPropertyRow(tx, propertyId);
-      await tx.propertyOwner.delete({
-        where: { id: propertyOwner.id },
+      const current = await tx.propertyOwner.findUnique({
+        where: {
+          propertyId_ownerId: {
+            propertyId,
+            ownerId,
+          },
+        },
       });
+      if (!current) {
+        throw new ApiError(
+          409,
+          "他のユーザーが先にこの紐付けを変更しました。画面を再読み込みしてください。",
+          "CONFLICT",
+        );
+      }
+      await tx.propertyOwner.delete({
+        where: { id: current.id },
+      });
+      return current;
     });
 
     // Record change log for the unlink
+    // ⚠記録する before は**読み直した値**。下見の値だと、直前に変わった
+    // relationship / isPrimary を取り違えて残す。
     await recordChanges({
       targetTable: "property_owners",
       targetId: propertyOwner.id,

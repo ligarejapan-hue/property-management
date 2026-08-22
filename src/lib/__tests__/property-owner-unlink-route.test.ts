@@ -61,7 +61,9 @@ vi.mock("@/lib/change-log", () => ({ recordChanges: vi.fn() }));
 vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRow: vi.fn() }));
 
 vi.mock("@/lib/prisma", () => {
-  const tx = { propertyOwner: { delete: vi.fn() } };
+  const tx = {
+    propertyOwner: { delete: vi.fn(), findUnique: vi.fn() },
+  };
   return {
     default: {
       propertyOwner: { findUnique: vi.fn() },
@@ -102,7 +104,7 @@ const OFFICE_STAFF_PERMS = [
 const pm = prisma as unknown as {
   propertyOwner: { findUnique: Mock };
   $transaction: Mock;
-  _tx: { propertyOwner: { delete: Mock } };
+  _tx: { propertyOwner: { delete: Mock; findUnique: Mock } };
 };
 
 function callDelete() {
@@ -119,6 +121,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   (getApiSession as Mock).mockResolvedValue({ id: "user-1" });
   pm.propertyOwner.findUnique.mockResolvedValue({
+    id: LINK_ID,
+    propertyId: PROPERTY_ID,
+    ownerId: OWNER_ID,
+    relationship: null,
+    isPrimary: false,
+  });
+  pm._tx.propertyOwner.findUnique.mockResolvedValue({
     id: LINK_ID,
     propertyId: PROPERTY_ID,
     ownerId: OWNER_ID,
@@ -165,5 +174,79 @@ describe("DELETE /api/properties/[id]/owners/[ownerId] の権限", () => {
     await callDelete();
     expect(lockPropertyRow as Mock).toHaveBeenCalledTimes(1);
     expect((lockPropertyRow as Mock).mock.calls[0][1]).toBe(PROPERTY_ID);
+  });
+});
+
+// ── @codex #400 R1 P1 ────────────────────────────────────────────────
+describe("DELETE: 物件の編集権限も要る (@codex #400 R1 P1)", () => {
+  it("property:write が無ければ外せない", () => {
+    // 付け替え(mislink)は property:write を要求している。**壊す側だけ緩い**のは筋が通らない。
+    return (async () => {
+      (getUserPermissions as Mock).mockResolvedValue([
+        { resource: "user_management", action: "read", granted: true },
+        { resource: "owner", action: "read", granted: true },
+        { resource: "owner", action: "write", granted: true },
+        { resource: "property", action: "read", granted: true },
+        // property:write なし
+      ]);
+      const res = await callDelete();
+      expect(res.status).toBe(403);
+      expect(pm._tx.propertyOwner.delete).not.toHaveBeenCalled();
+    })();
+  });
+});
+
+describe("DELETE: ロック後に読み直す (@codex #400 R1 P1)", () => {
+  it("先に読んだ行の所有者が、ロック後に別人へ差し替わっていたら消さない", async () => {
+    // ⚠付け替え(relink)は**同じ行の ownerId を書き換える**。最初に読んだ行 id を
+    //   そのまま消すと、**確認画面で名前を見せた人とは別の人**の紐付けを消す。
+    (getUserPermissions as Mock).mockResolvedValue(ADMIN_PERMS);
+    // トランザクション内で読み直すと、もうこの所有者では見つからない
+    pm._tx.propertyOwner.findUnique.mockResolvedValue(null);
+    const res = await callDelete();
+    expect(res.status).toBe(409);
+    expect(pm._tx.propertyOwner.delete).not.toHaveBeenCalled();
+  });
+
+  it("読み直しは**ロックを取ってから**行う(取る前に読んでも意味がない)", async () => {
+    (getUserPermissions as Mock).mockResolvedValue(ADMIN_PERMS);
+    const order: string[] = [];
+    (lockPropertyRow as Mock).mockImplementation(async () => {
+      order.push("lock");
+    });
+    pm._tx.propertyOwner.findUnique.mockImplementation(async () => {
+      order.push("reread");
+      return {
+        id: LINK_ID,
+        propertyId: PROPERTY_ID,
+        ownerId: OWNER_ID,
+        relationship: null,
+        isPrimary: false,
+      };
+    });
+    pm._tx.propertyOwner.delete.mockImplementation(async () => {
+      order.push("delete");
+      return {};
+    });
+    const res = await callDelete();
+    expect(res.status).toBe(200);
+    expect(order).toEqual(["lock", "reread", "delete"]);
+  });
+
+  it("消すのは**読み直した行**(古い id を握り続けない)", async () => {
+    (getUserPermissions as Mock).mockResolvedValue(ADMIN_PERMS);
+    const FRESH_LINK_ID = "55555555-5555-4555-8555-555555555555";
+    pm._tx.propertyOwner.findUnique.mockResolvedValue({
+      id: FRESH_LINK_ID,
+      propertyId: PROPERTY_ID,
+      ownerId: OWNER_ID,
+      relationship: "共有",
+      isPrimary: true,
+    });
+    const res = await callDelete();
+    expect(res.status).toBe(200);
+    expect(pm._tx.propertyOwner.delete).toHaveBeenCalledWith({
+      where: { id: FRESH_LINK_ID },
+    });
   });
 });

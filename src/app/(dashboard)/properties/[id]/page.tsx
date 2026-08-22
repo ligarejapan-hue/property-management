@@ -554,8 +554,13 @@ export default function PropertyDetailPage({
     // `user_management:read` を代理鍵にしている。server 側
     // (DELETE /api/properties/[id]/owners/[ownerId]) と**同じ条件**にする
     // ——ここだけ緩いと「ボタンは出るのに 403」になる。
+    // ⚠**server (DELETE .../owners/[ownerId]) と同じ3条件**にする
+    // (@codex #400 R1 P1)。片方だけ緩いと「ボタンは出るのに 403」になる。
+    // 物件の編集権限も要るのは、付け替え(mislink)が要求しているため——
+    // 紐付けを**壊す側だけ緩い**のは筋が通らない。
     const canRemoveOwnerLink =
       canWriteOwner &&
+      canWriteProperty &&
       effectivePermissions.some(
         (p) =>
           p.resource === "user_management" && p.action === "read" && p.granted,

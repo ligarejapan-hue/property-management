@@ -112,3 +112,26 @@ describe("付け替えの導線(名前と役割を1つに)", () => {
     expect(modalSrc).toContain('"relink"');
   });
 });
+
+describe("画面の表示条件は server と一致させる (@codex #400 R1 P1)", () => {
+  /** canRemoveOwnerLink の定義本体だけを切り出す。 */
+  function removeGuardDefinition(): string {
+    const at = pageSrc.indexOf("const canRemoveOwnerLink =");
+    expect(at, "canRemoveOwnerLink の定義が無い").toBeGreaterThan(-1);
+    const end = pageSrc.indexOf(";", at);
+    expect(end).toBeGreaterThan(at);
+    return pageSrc.slice(at, end);
+  }
+
+  it("外すボタンの表示条件に、物件の編集権限が入っている", () => {
+    // ⚠server は owner:write + user_management:read + property:write を要求する。
+    //   画面だけ緩いと「ボタンは出るのに 403」になる。
+    expect(removeGuardDefinition()).toContain("canWriteProperty");
+  });
+
+  it("外すボタンの表示条件に、所有者の編集権限と管理者の鍵も入っている", () => {
+    const def = removeGuardDefinition();
+    expect(def).toContain("canWriteOwner");
+    expect(def).toContain("user_management");
+  });
+});
