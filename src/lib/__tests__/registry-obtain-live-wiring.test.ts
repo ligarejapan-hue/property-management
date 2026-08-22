@@ -6,8 +6,13 @@
  * 有料取得には無かったため。ここでは route→runRegistryAutoFetch→provider→adapter の
  * 受け渡しと、UI が liveRef を発行することをソース表明で固定する。
  *
- * ⚠有料取得は**中止を受け付けない**(課金だけ残る状態を作らない既存方針)。
- *   そのため cancel 窓は begin 直後に閉じ、reporter に isCancelRequested を配線しない。
+ * ⚠**2026-08-23 方針変更(発注者指示)**:「確定ボタンを押すまでは中止ボタンを
+ *   出してください。」従来は begin 直後に cancel 窓を閉じ、有料取得は一切中止
+ *   できなかった。候補1件で自動的に取得へ進む今の流れでは、押せる時間が数秒しか
+ *   無く実質止められなかった。
+ *   ⇒ **窓は開けたまま渡し、adapter が課金の直前(endCancelable)で閉じる**。
+ *   課金までの各段は全て無料で、途中で止めてもカートに未請求の行が残るだけ
+ *   (コード上も無害として扱っている)。課金後は cancel-safety.ts が中止を無視する。
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -30,15 +35,28 @@ describe("route: liveRef の受け付けと橋渡し", () => {
     expect(ROUTE).toMatch(/beginLiveView\(session\.id, id, liveRef\)/);
   });
 
-  it("⚠begin 直後に cancel 窓を閉じる(有料取得は中止不可=効かない「中止」ボタンを出さない)", () => {
+  it("⚠begin 直後に cancel 窓を閉じない(課金の直前まで中止できる)", () => {
     const begin = ROUTE.indexOf("beginLiveView(session.id, id, liveRef)");
-    const close = ROUTE.indexOf(
-      "closeLiveViewCancelWindow(session.id, id, liveRef)",
-    );
     expect(begin).toBeGreaterThan(-1);
-    expect(close).toBeGreaterThan(begin);
-    // reporter に中止確認を配線しない(見る場所が無い中止を受け付けない)。
-    expect(ROUTE).not.toMatch(/isLiveViewCancelRequested/);
+    // begin の直後の数行に「閉じる」が現れないこと。
+    expect(ROUTE.slice(begin, begin + 200)).not.toContain(
+      "closeLiveViewCancelWindow",
+    );
+  });
+
+  it("reporter に中止の確認と受付終了を配線する", () => {
+    // ⚠この2つが無いと、画面が中止を送っても**見る場所が無い**。
+    expect(ROUTE).toMatch(/isCancelRequested\(\): boolean \{/);
+    expect(ROUTE).toMatch(/isLiveViewCancelRequested\(session\.id, id, liveRef\)/);
+    expect(ROUTE).toMatch(/endCancelable\(\): void \{/);
+    expect(ROUTE).toMatch(
+      /closeLiveViewCancelWindow\(session\.id, id, liveRef\)/,
+    );
+  });
+
+  it("受け付けの文言が実態と合っている(中止できないと嘘を書かない)", () => {
+    expect(ROUTE).not.toContain("自動取得を受け付けました(この処理は中止できません)");
+    expect(ROUTE).toContain("請求(課金)の直前まで中止できます");
   });
 
   it("成否によらず finally で completeLiveView する(失敗時こそ見返しが要る)", () => {
@@ -73,6 +91,26 @@ describe("orchestration→provider→adapter の受け渡し", () => {
     expect(AUTO).not.toContain("請求しました(課金済み)");
     // 選択検証(発注者指示)の文言。
     expect(AUTO).toContain("対象の地番を選択しました。確定します(まだ課金されていません)");
+  });
+
+  it("⚠adapter は課金の直前で中止の受付を閉じる(2026-08-23)", () => {
+    // 閉じるのは「⚠ここから請求(課金)を実行します」より**前**でなければならない。
+    // 閉じ忘れると「中止しています…」と出したまま請求が進む=**止めたつもりで請求**。
+    const endCancelable = AUTO.indexOf("live?.endCancelable?.()");
+    const chargeLine = AUTO.indexOf("⚠ここから請求(課金)を実行します");
+    expect(endCancelable).toBeGreaterThan(-1);
+    expect(chargeLine).toBeGreaterThan(-1);
+    expect(endCancelable).toBeLessThan(chargeLine);
+  });
+
+  it("⚠adapter は課金前の節目ごとに中止を見る(押しても進み続ける、を作らない)", () => {
+    // 節目が1か所しか無いと「押したのに最後まで走る」時間帯が生まれる。
+    const checks = AUTO.match(/abortIfCancelledPaid\(\)/g) ?? [];
+    expect(checks.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("⚠中止で止めたことが実況に残る(黙って終わらない)", () => {
+    expect(AUTO).toContain("CANCEL_ACCEPTED_MESSAGE");
   });
 
   it("⚠順番待ち(購入ミューテックス)の間も心拍を刻む(@codex #380 R2 P2)", () => {

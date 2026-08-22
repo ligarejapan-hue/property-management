@@ -21,6 +21,10 @@ import {
   registryLiveShotUrl,
   type RegistryLiveViewStep,
 } from "@/lib/api-client";
+import {
+  shouldShowCancelButton,
+  cancelClosedNotice,
+} from "@/lib/registry-fetch/cancel-visibility";
 
 const POLL_INTERVAL_MS = 1000;
 
@@ -81,6 +85,10 @@ export default function RegistryLivePanel({
 }) {
   const [steps, setSteps] = useState<RegistryLiveViewStep[]>([]);
   const [done, setDone] = useState(false);
+  // サーバーが中止を受け付けられるか (null = まだ分からない)。
+  // ⚠**実況の文言から推測しない**。文言を1つ変えただけで課金中に中止ボタンが
+  //   出る(押しても効かないのに押せる = 嘘の表示)。サーバーの答えだけを使う。
+  const [serverCancelable, setServerCancelable] = useState<boolean | null>(null);
   // 中止の送信中。⚠押した瞬間に止まるわけではないので「中止しています…」と出す。
   // 実際に止まるのは、自動操作が安全な節目まで進んでから。
   const [cancelling, setCancelling] = useState(false);
@@ -148,6 +156,10 @@ export default function RegistryLivePanel({
         failStreakRef.current = 0;
         setSteps(res.data.steps);
         setDone(res.data.done);
+        // ⚠応答に無い(古いサーバー)ときは **null のまま** = 出さない側に倒す。
+        setServerCancelable(
+          typeof res.data.cancelable === "boolean" ? res.data.cancelable : null,
+        );
         if (res.data.done) {
           // done 直後に停止すると fire-and-forget 撮影の遅着スクショ (最終
           // ステップ分) を取り逃す (@codex P2)。猶予分だけ追加で拾ってから
@@ -252,6 +264,17 @@ export default function RegistryLivePanel({
     );
   }
 
+  // ⚠ボタンが消えた理由を出すための文言 (不要なら null)。
+  //   `cancelable` が false の経路(呼び出し側が明示的に出さないと決めた経路)では
+  //   そもそも中止の話をしないので、知らせも出さない。
+  const closedNotice = cancelable
+    ? cancelClosedNotice({
+        cancelWindowOpen: serverCancelable,
+        done,
+        started: steps.length > 0,
+      })
+    : null;
+
   return (
     <div
       data-testid="registry-live-panel"
@@ -270,13 +293,21 @@ export default function RegistryLivePanel({
             (完了)
           </span>
         )}
-        {/* 中止 (発注者要望 2026-08-03)。実行中だけ出す。
+        {/* 中止 (発注者要望 2026-08-03 / 2026-08-21 に有料取得へも拡大)。
             ⚠押しても即座には止まらない。自動操作が**安全な節目**まで進んでから
             自分で抜ける (途中で殺すと外部サイトを中途半端な状態で放り出す)。
-            この候補検索の経路では**お金は動かない**ので、いつ止めても課金は無い。
-            ⚠cancelable=false(有料取得)では出さない(課金中に「課金は発生しません」の
-            嘘が出るため・2026-08-15)。 */}
-        {cancelable && !done && !searchSettled && (
+            ⚠**出すかどうかはサーバーの答え(serverCancelable)で決める**。
+            有料取得でも**請求(課金)の直前まで**は 1 円も動かないので中止できる。
+            課金の直前に adapter が受付を閉じ、ここが false になってボタンが消える。
+            ⚠呼び出し側の cancelable=false は「この経路では出さない」の明示指定
+            として引き続き尊重する(AND 条件)。 */}
+        {cancelable &&
+          !searchSettled &&
+          shouldShowCancelButton({
+            cancelWindowOpen: serverCancelable,
+            done,
+            cancelRequested: cancelling,
+          }) && (
           <button
             type="button"
             onClick={() => void handleCancel()}
@@ -287,6 +318,13 @@ export default function RegistryLivePanel({
           >
             {cancelling ? "中止しています…" : "中止"}
           </button>
+        )}
+        {/* ⚠**黙って消さない**。ボタンが消えた理由を出す
+            (消えるだけだと「壊れた」と思われる)。 */}
+        {closedNotice && (
+          <span className="ml-auto text-[11px] font-medium text-amber-700 dark:text-amber-300">
+            {closedNotice}
+          </span>
         )}
       </div>
 

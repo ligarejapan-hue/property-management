@@ -1866,10 +1866,22 @@ export interface RegistryLiveViewStep {
 export async function fetchRegistryLiveView(
   propertyId: string,
   liveRef: string,
-): Promise<{ data: { steps: RegistryLiveViewStep[]; done: boolean } }> {
+): Promise<{
+  data: {
+    steps: RegistryLiveViewStep[];
+    done: boolean;
+    /**
+     * サーバーが「中止」を受け付けられる状態か(2026-08-23)。
+     * ⚠画面は**実況の文言から推測しない**。文言を1つ変えただけで
+     *   課金中に中止ボタンが出る(押しても効かないのに押せる)ため。
+     * ⚠古いサーバー応答には無いので任意。無い場合は「不明」= **出さない**。
+     */
+    cancelable?: boolean;
+  };
+}> {
   if (USE_MOCK) {
     await mockDelay();
-    return { data: { steps: [], done: false } };
+    return { data: { steps: [], done: false, cancelable: false } };
   }
   return apiFetch(
     `/api/properties/${propertyId}/registry/search/live/${encodeURIComponent(liveRef)}`,

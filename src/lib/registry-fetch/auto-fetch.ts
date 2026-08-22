@@ -1937,8 +1937,10 @@ function createPlaywrightRegistryPage(
       const sleep = (ms: number) =>
         page.waitForFunction(() => false, undefined, { timeout: ms }).catch(() => {});
 
-      // 実況(2026-08-15)。検索側 reportLive と同じ contract だが、**中止は見ない**
-      // (有料取得は中止を受け付けない既存方針=課金だけ残る状態を作らない)。
+      // 実況(2026-08-15)。検索側 reportLive と同じ contract。
+      // ⚠**2026-08-23 から中止も見る**(発注者指示「確定ボタンを押すまでは中止
+      // ボタンを出してください」)。課金の直前までは 1 円も動かないので、
+      // 節目ごとに中止を確認して**自分で**止まる(外から処理を殺さない)。
       // 撮影は本体の await チェーンに乗せない・累計予算制も検索側と同じ。
       // ⚠label は固定文言のみ。所在・地番・資格情報を**絶対に**埋め込まない
       // (スクショには写るが、閲覧はストア側で実行者本人に限定される)。
@@ -1976,11 +1978,30 @@ function createPlaywrightRegistryPage(
         })();
       };
 
+      /**
+       * 課金前の節目で中止を確認し、押されていれば**課金せず**止まる。
+       *
+       * ⚠**課金の直前(`endCancelable`)より前でしか呼ばない**。課金後に止めると
+       *   「払ったのに書類が無い」を作る(その判断は cancel-safety.ts が持つ)。
+       * ⚠止めたことを実況に残す(黙って終わると「壊れた」と見える)。
+       * ⚠節目は**複数**要る。1か所だけだと「押したのに最後まで走る」時間帯が残る。
+       */
+      const abortIfCancelledPaid = (): void => {
+        if (input.live?.isCancelRequested?.() !== true) return;
+        try {
+          input.live?.step(CANCEL_ACCEPTED_MESSAGE);
+        } catch {
+          /* 実況は best-effort */
+        }
+        throw new RegistryFetchError("cancelled");
+      };
+
       // ---- 課金前ゾーン(①〜③: ナビゲーション+条件入力+ダイアログ検索) ----
       try {
         await page.waitForSelector(REGISTRY_SELECTORS.fudosanRequestLink, {
           state: "attached",
         });
+        abortIfCancelledPaid();
         reportLive("ログインしました。不動産請求メニューへ移動します(まだ課金されていません)");
         await domClick(REGISTRY_SELECTORS.fudosanRequestLink);
         await page.waitForSelector(REGISTRY_SELECTORS.searchMethodLocationRadio);
@@ -2019,6 +2040,7 @@ function createPlaywrightRegistryPage(
         //   無料検索と有料取得で結果集合がずれる([同種の穴は全箇所を洗ってから直す])。
         await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, targetKey);
         await page.fill(REGISTRY_SELECTORS.dialogChibanRangeEnd, targetKey);
+        abortIfCancelledPaid();
         reportLive("所在と地番を入力し、地番検索を実行しています(まだ課金されていません)");
         await page.click(REGISTRY_SELECTORS.dialogSearch);
       } catch (err) {
@@ -2367,6 +2389,7 @@ function createPlaywrightRegistryPage(
           await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
           throw new RegistryFetchError("provider_error");
         }
+        abortIfCancelledPaid();
         reportLive("対象の地番を選択しました。確定します(まだ課金されていません)");
         await domClick(REGISTRY_SELECTORS.dialogOk);
         // ⚠**閉じたことを実測する**。従来の sleep だけだと、確定が効いていなくても
@@ -2396,6 +2419,7 @@ function createPlaywrightRegistryPage(
         reportLive("地番を確定しました(まだ課金されていません)");
         await sleep(1000); // 確定値のフォーム反映を待つ
 
+        abortIfCancelledPaid();
         reportLive("請求する書類の種類を選択しています(まだ課金されていません)");
         // ---- ⑤ 請求事項=**選んだ種別のみ**(検証つき・課金前) ----
         // 所有者事項(既定)/全部事項 のどちらか一方だけをONにし、残りは全部OFF。
@@ -2443,6 +2467,7 @@ function createPlaywrightRegistryPage(
         // 「請求済フィルタ×地番一致×最新日時×期限実測」(下のループの従来
         // フォールバック)が担う。
 
+        abortIfCancelledPaid();
         reportLive("請求条件を確定しています(まだ課金されていません)");
         // ⚠**確定のクリックそのものから診断の内側にする**(@codex #383 P2×3)。
         // 守る範囲を3回にわたって1段ずつ手前へ動かした
@@ -2586,6 +2611,7 @@ function createPlaywrightRegistryPage(
             state: "attached",
             timeout: DIALOG_RESULT_TIMEOUT_MS,
           });
+          abortIfCancelledPaid();
           reportLive("請求リストで対象の行を選んでいます(まだ課金されていません)");
           // 行の照合材料は各行の hidden(#chiban_N/#chibanKuiki_N/#seikyuType_N/
           // #seikyuzumi_N)。⚠**check した行がそのまま請求対象**=お金の一歩手前
@@ -2755,6 +2781,13 @@ function createPlaywrightRegistryPage(
 
       // ⚠実況はこの位置(=aborted確認より前)で刻む。下の確認〜charged代入の
       // 「同一同期区間」に await を挟まないため(reportLive は同期・撮影は void)。
+      // ⚠**ここが最後の分かれ目**。以降は中止を見る場所が無いので、受付を閉じてから
+      //   課金に入る(閉じ忘れると「中止しています…」と出したまま請求が進み、
+      //   **止めたつもりなのに請求される**)。
+      //   ⚠閉じる**前**に最後の確認をする(閉じた後に押された中止はもう効かない)。
+      abortIfCancelledPaid();
+      input.live?.endCancelable?.();
+      reportLive("これ以降は中止できません(請求の手続きに入ります)");
       reportLive("⚠ここから請求(課金)を実行します");
       // ⚠中止の印を**請求ボタンの直前**で確認(@codex R10 P1)。provider が課金前
       // タイムアウトで reject した後も、この関数は裏で走り続けている可能性がある。
