@@ -63,6 +63,7 @@ vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRow: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const tx = {
     propertyOwner: { delete: vi.fn(), findUnique: vi.fn() },
+    changeLog: { createMany: vi.fn() },
   };
   return {
     default: {
@@ -104,7 +105,10 @@ const OFFICE_STAFF_PERMS = [
 const pm = prisma as unknown as {
   propertyOwner: { findUnique: Mock };
   $transaction: Mock;
-  _tx: { propertyOwner: { delete: Mock; findUnique: Mock } };
+  _tx: {
+    propertyOwner: { delete: Mock; findUnique: Mock };
+    changeLog: { createMany: Mock };
+  };
 };
 
 function callDelete() {
@@ -135,6 +139,7 @@ beforeEach(() => {
     isPrimary: false,
   });
   pm._tx.propertyOwner.delete.mockResolvedValue({});
+  pm._tx.changeLog.createMany.mockResolvedValue({ count: 1 });
 });
 
 describe("DELETE /api/properties/[id]/owners/[ownerId] の権限", () => {
@@ -248,5 +253,64 @@ describe("DELETE: ロック後に読み直す (@codex #400 R1 P1)", () => {
     expect(pm._tx.propertyOwner.delete).toHaveBeenCalledWith({
       where: { id: FRESH_LINK_ID },
     });
+  });
+});
+
+// ── @codex #400 R2 P2 ────────────────────────────────────────────────
+describe("DELETE: 変更履歴に削除の印を残す (@codex #400 R2 P2)", () => {
+  it("外したら ChangeLog 行が作られる", async () => {
+    // ⚠従来の recordChanges({ newValues: {} }) は**1行も作らない**
+    //   (change-log.ts は newValues に無い項目を飛ばす)。
+    //   壊す操作が履歴に残らないのは困る。
+    (getUserPermissions as Mock).mockResolvedValue(ADMIN_PERMS);
+    const res = await callDelete();
+    expect(res.status).toBe(200);
+    expect(pm._tx.changeLog.createMany).toHaveBeenCalledTimes(1);
+    const arg = pm._tx.changeLog.createMany.mock.calls[0][0];
+    expect(Array.isArray(arg.data)).toBe(true);
+    expect(arg.data.length).toBeGreaterThan(0);
+  });
+
+  it("履歴は削除トランザクションの中で書く(消えたのに履歴が無い、を作らない)", async () => {
+    (getUserPermissions as Mock).mockResolvedValue(ADMIN_PERMS);
+    const order: string[] = [];
+    pm._tx.propertyOwner.delete.mockImplementation(async () => {
+      order.push("delete");
+      return {};
+    });
+    pm._tx.changeLog.createMany.mockImplementation(async () => {
+      order.push("changelog");
+      return { count: 1 };
+    });
+    await callDelete();
+    // どちらも tx の中で呼ばれている(= $transaction のコールバック内)
+    expect(order).toContain("delete");
+    expect(order).toContain("changelog");
+    expect(pm.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("履歴に氏名・メモなどの個人情報を入れない", async () => {
+    (getUserPermissions as Mock).mockResolvedValue(ADMIN_PERMS);
+    pm._tx.propertyOwner.findUnique.mockResolvedValue({
+      id: LINK_ID,
+      propertyId: PROPERTY_ID,
+      ownerId: OWNER_ID,
+      relationship: "共有",
+      isPrimary: true,
+      note: "ここは絶対に履歴へ出してはいけないメモ",
+    });
+    await callDelete();
+    const serialized = JSON.stringify(
+      pm._tx.changeLog.createMany.mock.calls[0][0],
+    );
+    expect(serialized).not.toContain("ここは絶対に履歴へ出してはいけないメモ");
+  });
+
+  it("消えなかったとき(409)は履歴も書かない", async () => {
+    (getUserPermissions as Mock).mockResolvedValue(ADMIN_PERMS);
+    pm._tx.propertyOwner.findUnique.mockResolvedValue(null);
+    const res = await callDelete();
+    expect(res.status).toBe(409);
+    expect(pm._tx.changeLog.createMany).not.toHaveBeenCalled();
   });
 });

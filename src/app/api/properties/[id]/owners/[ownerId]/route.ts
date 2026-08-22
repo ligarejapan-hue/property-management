@@ -179,24 +179,36 @@ export async function DELETE(
       await tx.propertyOwner.delete({
         where: { id: current.id },
       });
+      // ⚠**削除の印を同じ tx の中で書く**(@codex #400 R2 P2)。
+      //   以前は tx の外で `recordChanges({ newValues: {} })` を呼んでいたが、
+      //   change-log.ts は **newValues に無い項目を飛ばす**ため
+      //   **1行も作られていなかった**（壊す操作が履歴に残らない）。
+      //   形は付け替え(mislink)の削除と揃える＝印の項目名 + 旧 ownerId。
+      //   ⚠氏名・メモ等の PII は入れない（ownerId は UUID）。
+      //   tx の中で書くので「消えたのに履歴が無い」も起きない。
+      await tx.changeLog.createMany({
+        data: [
+          {
+            targetTable: "property_owners",
+            targetId: current.id,
+            fieldName: "_unlinked_from_property",
+            oldValue: current.ownerId,
+            newValue: null,
+            source: "manual",
+            changedBy: session.id,
+          },
+          {
+            targetTable: "property_owners",
+            targetId: current.id,
+            fieldName: "isPrimary",
+            oldValue: String(current.isPrimary),
+            newValue: null,
+            source: "manual",
+            changedBy: session.id,
+          },
+        ],
+      });
       return current;
-    });
-
-    // Record change log for the unlink
-    // ⚠記録する before は**読み直した値**。下見の値だと、直前に変わった
-    // relationship / isPrimary を取り違えて残す。
-    await recordChanges({
-      targetTable: "property_owners",
-      targetId: propertyOwner.id,
-      changedBy: session.id,
-      oldValues: {
-        propertyId: propertyOwner.propertyId,
-        ownerId: propertyOwner.ownerId,
-        relationship: propertyOwner.relationship,
-        isPrimary: propertyOwner.isPrimary,
-      },
-      newValues: {},
-      trackedFields: ["propertyId", "ownerId", "relationship", "isPrimary"],
     });
 
     await writeAuditLog({
