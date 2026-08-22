@@ -51,6 +51,11 @@ vi.mock("@/lib/registry-fetch/live-view-store", () => ({
   attachLiveShot: vi.fn(),
   completeLiveView: vi.fn(),
   closeLiveViewCancelWindow: vi.fn(),
+  // ⚠2026-08-23: route が中止を見るようになったので、mock にも足す
+  //   (足し忘れると **undefined を呼んで 500** になり、この差分と無関係な
+  //   テストがまとめて落ちる。フル vitest でのみ現れる)。
+  isLiveViewCancelRequested: vi.fn(() => false),
+  clearLiveViewCancel: vi.fn(),
   isValidLiveRef: vi.fn(() => true),
 }));
 vi.mock("@/lib/registry-fetch/search", () => ({

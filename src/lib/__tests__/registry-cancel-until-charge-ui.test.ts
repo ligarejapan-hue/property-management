@@ -59,14 +59,16 @@ describe("パネルはサーバーの答えだけで判断する", () => {
 });
 
 describe("有料取得でも中止の話をしてよい経路になっている", () => {
-  it("取得中・回収中もパネルに cancelable を渡す", () => {
-    // ⚠ここが searching だけに戻ると、サーバーが受け付けていても画面に出ない。
+  it("取得中もパネルに cancelable を渡す。⚠回収中は渡さない", () => {
+    // ⚠searching だけに戻ると、サーバーが受け付けていても画面に出ない。
+    // ⚠**回収(recovering)は対象外**(@codex #401 R2 P1)。回収の経路には中止を
+    //   見る場所が無いので、出すと「止めたつもりで最後まで走り PDF が添付される」。
     const at = BUTTON.indexOf("cancelable={");
     expect(at).toBeGreaterThan(-1);
-    const block = BUTTON.slice(at, at + 220);
+    const block = BUTTON.slice(at, at + 200);
     expect(block).toContain('state === "searching"');
     expect(block).toContain('state === "obtaining"');
-    expect(block).toContain('state === "recovering"');
+    expect(block).not.toContain('state === "recovering"');
   });
 
   it("中止を押した瞬間に画面側でも覚える(応答待ちの間に自動で進まない)", () => {

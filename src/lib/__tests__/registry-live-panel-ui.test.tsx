@@ -68,14 +68,16 @@ describe("RegistryLivePanel — SSR (初期状態)", () => {
     expect(initial).not.toContain("ここから先は中止できません");
   });
 
-  it("親は検索中だけでなく取得中・回収中も cancelable を立てる(2026-08-23)", () => {
+  it("親は検索中に加えて取得中も cancelable を立てる。⚠回収中は立てない", () => {
     // ⚠searching だけに戻ると、サーバーが受け付けていても画面に出ない。
+    // ⚠**回収(recovering)は対象外**(@codex #401 R2 P1)。回収の経路には中止を
+    //   見る場所が無いため、出すと「止めたつもりで完了する」ことになる。
     const at = BUTTON_SRC.indexOf("cancelable={");
     expect(at).toBeGreaterThan(-1);
-    const block = BUTTON_SRC.slice(at, at + 220);
+    const block = BUTTON_SRC.slice(at, at + 200);
     expect(block).toContain('state === "searching"');
     expect(block).toContain('state === "obtaining"');
-    expect(block).toContain('state === "recovering"');
+    expect(block).not.toContain('state === "recovering"');
   });
 
   it("⚠パネルは liveRef ごとに作り直す(@codex #380 P2)", () => {

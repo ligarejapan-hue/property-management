@@ -2781,13 +2781,11 @@ function createPlaywrightRegistryPage(
 
       // ⚠実況はこの位置(=aborted確認より前)で刻む。下の確認〜charged代入の
       // 「同一同期区間」に await を挟まないため(reportLive は同期・撮影は void)。
-      // ⚠**ここが最後の分かれ目**。以降は中止を見る場所が無いので、受付を閉じてから
-      //   課金に入る(閉じ忘れると「中止しています…」と出したまま請求が進み、
-      //   **止めたつもりなのに請求される**)。
-      //   ⚠閉じる**前**に最後の確認をする(閉じた後に押された中止はもう効かない)。
+      // ⚠ここから先も**まだ課金していない**(金額の裏取り・請求ボタン・確認
+      //   ダイアログ待ちはすべて無料)。**受付はまだ閉じない**
+      //   (@codex #401 R1 P1: ここで閉じると「課金の直前まで中止できる」と
+      //   案内しながら、実際には約130行ぶん早く締め切っていた)。
       abortIfCancelledPaid();
-      input.live?.endCancelable?.();
-      reportLive("これ以降は中止できません(請求の手続きに入ります)");
       reportLive("⚠ここから請求(課金)を実行します");
       // ⚠中止の印を**請求ボタンの直前**で確認(@codex R10 P1)。provider が課金前
       // タイムアウトで reject した後も、この関数は裏で走り続けている可能性がある。
@@ -2914,6 +2912,17 @@ function createPlaywrightRegistryPage(
       if (input.chargeState?.aborted) {
         throw new RegistryFetchError("provider_error");
       }
+      // ⚠**ここが最後の分かれ目**(@codex #401 R1 P1)。ＯＫを押すと課金が成立する。
+      //   利用者の中止を**最後に一度だけ**見てから、受付を閉じて課金へ入る。
+      //   ⚠順序が重要: 「確認 → 閉じる → charged=true → ＯＫ」。
+      //     先に閉じると、閉じてから押された中止が黙って捨てられる。
+      //     閉じ忘れると「中止しています…」と出したまま請求が進み、
+      //     **止めたつもりなのに請求される**。
+      //   ⚠この確認〜charged 代入は**同一同期区間**(間に await を挟まない)。
+      //     abortIfCancelledPaid / endCancelable はいずれも同期処理。
+      abortIfCancelledPaid();
+      input.live?.endCancelable?.();
+      reportLive("これ以降は中止できません(請求の手続きに入ります)");
       try {
         // ⚠課金境界フラグ(@codex #345 P1)。**ＯＫを押す直前**に立てる(第7回の
         // 誤判定=請求クリック時点で立てていたため、未課金なのに課金済み扱いになった)。

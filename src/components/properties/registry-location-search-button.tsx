@@ -765,12 +765,11 @@ export default function RegistryLocationSearchButton({
             //   ⚠**実際に出すかはパネルがサーバーの答えで決める**。ここは
             //   「この経路では中止の話をしてよいか」の指定に留める
             //   (画面が文言から課金前かを推測すると、文言変更で嘘の表示になる)。
-            //   回収(recovering)も課金しないので中止してよい。
-            cancelable={
-              state === "searching" ||
-              state === "obtaining" ||
-              state === "recovering"
-            }
+            //   ⚠**回収(recovering)は対象外**(@codex #401 R2 P1)。回収の経路は
+            //   中止を見る場所が無い(`recoverRegistryPdf` は実況を刻むだけ)ため、
+            //   出すと「受け付けたのに最後まで走り、PDFが添付される」= 利用者が
+            //   止めたつもりで完了する。配線するまでは出さない。
+            cancelable={state === "searching" || state === "obtaining"}
             // ⚠中止が**押された瞬間**に覚える。サーバーの応答を待つと、その間に
             //   検索が終わって自動で課金され得る（@codex #399 R1 P1）。
             //   受け付けの成否に関わらず、止める意思が示された時点で進ませない。

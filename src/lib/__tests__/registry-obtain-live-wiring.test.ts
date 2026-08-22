@@ -93,15 +93,10 @@ describe("orchestration→provider→adapter の受け渡し", () => {
     expect(AUTO).toContain("対象の地番を選択しました。確定します(まだ課金されていません)");
   });
 
-  it("⚠adapter は課金の直前で中止の受付を閉じる(2026-08-23)", () => {
-    // 閉じるのは「⚠ここから請求(課金)を実行します」より**前**でなければならない。
-    // 閉じ忘れると「中止しています…」と出したまま請求が進む=**止めたつもりで請求**。
-    const endCancelable = AUTO.indexOf("live?.endCancelable?.()");
-    const chargeLine = AUTO.indexOf("⚠ここから請求(課金)を実行します");
-    expect(endCancelable).toBeGreaterThan(-1);
-    expect(chargeLine).toBeGreaterThan(-1);
-    expect(endCancelable).toBeLessThan(chargeLine);
-  });
+  // ⚠**このテストの旧版は誤りだった**(@codex #401 R1 P1 で指摘)。
+  //   「実況文言より前で閉じる」を正しいと固定していたが、その文言から実際の
+  //   課金(確認ダイアログのＯＫ)までは**約130行あり全部無料**。正しい基準は
+  //   「charged=true の直前で閉じる」。下の describe に置き換えた。
 
   it("⚠adapter は課金前の節目ごとに中止を見る(押しても進み続ける、を作らない)", () => {
     // 節目が1か所しか無いと「押したのに最後まで走る」時間帯が生まれる。
@@ -174,5 +169,67 @@ describe("client 側", () => {
     expect(BUTTON).toMatch(
       /searchSettled=\{[\s\S]*?state !== "searching" &&[\s\S]*?state !== "obtaining" &&[\s\S]*?state !== "recovering"[\s\S]*?\}/,
     );
+  });
+});
+
+// ── @codex #401 R1 ────────────────────────────────────────────────────
+describe("受付を閉じるのは『本当の課金の直前』(@codex #401 R1 P1)", () => {
+  it("endCancelable は charged=true より前、かつ請求の実況文言より後", () => {
+    // ⚠初版は「⚠ここから請求(課金)を実行します」の手前で閉じていた。
+    //   そこから実際の課金(確認ダイアログのＯＫ)までは**約130行あり全部無料**。
+    //   「課金の直前まで中止できる」と案内しながら早く締め切っていた。
+    const chargeMsg = AUTO.indexOf("⚠ここから請求(課金)を実行します");
+    const endCancelable = AUTO.indexOf("live?.endCancelable?.()");
+    const chargedFlag = AUTO.indexOf("input.chargeState) input.chargeState.charged = true");
+    expect(chargeMsg).toBeGreaterThan(-1);
+    expect(endCancelable).toBeGreaterThan(-1);
+    expect(chargedFlag).toBeGreaterThan(-1);
+    expect(endCancelable).toBeGreaterThan(chargeMsg);
+    expect(endCancelable).toBeLessThan(chargedFlag);
+  });
+
+  it("閉じる直前に中止を最終確認する(閉じてから押された中止を捨てない)", () => {
+    const endCancelable = AUTO.indexOf("live?.endCancelable?.()");
+    const before = AUTO.slice(Math.max(0, endCancelable - 400), endCancelable);
+    expect(before).toContain("abortIfCancelledPaid();");
+  });
+
+  it("⚠確認〜課金の間に await を挟まない(同一同期区間)", () => {
+    const endCancelable = AUTO.indexOf("live?.endCancelable?.()");
+    const chargedFlag = AUTO.indexOf("input.chargeState) input.chargeState.charged = true");
+    const between = AUTO.slice(endCancelable, chargedFlag);
+    expect(between).not.toContain("await ");
+  });
+});
+
+// ── @codex #401 R2 ────────────────────────────────────────────────────
+describe("回収(課金なし)は中止を受け付けない(@codex #401 R2 P1)", () => {
+  it("route は回収のときだけ受付を即閉じる", () => {
+    // ⚠回収の経路には中止を見る場所が無い(実況を刻むだけ)。受け付けると
+    //   「止めたつもりで最後まで走り、PDFが添付される」ことになる。
+    expect(ROUTE).toMatch(
+      /if \(isRecover\) \{\s*\n\s*closeLiveViewCancelWindow\(session\.id, id, liveRef\);/,
+    );
+  });
+
+  it("画面も回収中は中止ボタンを出さない", () => {
+    const at = BUTTON.indexOf("cancelable={");
+    const block = BUTTON.slice(at, at + 200);
+    expect(block).toContain('state === "searching"');
+    expect(block).toContain('state === "obtaining"');
+    expect(block).not.toContain('state === "recovering"');
+  });
+});
+
+// ── @codex #401 R3 ────────────────────────────────────────────────────
+describe("終わったら中止の印を必ず片付ける(@codex #401 R3 P2)", () => {
+  it("実況を閉じる全ての出口で clearLiveViewCancel も呼ぶ", () => {
+    // ⚠実況の TTL が消すのは store のエントリだけ。activeOps / cancelMarks は残る。
+    //   消さないと鍵が溜まり続け、TTL 後に「もう存在しない実行」へ中止が
+    //   accepted:true を返す。
+    const completes = ROUTE.match(/completeLiveView\(session\.id, id, liveRef\)/g) ?? [];
+    const clears = ROUTE.match(/clearLiveViewCancel\(session\.id, id, liveRef\)/g) ?? [];
+    expect(completes.length).toBeGreaterThanOrEqual(3);
+    expect(clears.length).toBe(completes.length);
   });
 });
