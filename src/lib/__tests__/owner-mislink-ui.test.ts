@@ -2,8 +2,8 @@
  * OwnerMislinkModal / property 詳細 OwnerCard 統合の source assertion。
  *
  * 要件:
- *   - OwnerCard に「誤紐づき修正」ボタンが配置
- *   - モーダルに remove/relink ラジオ
+ *   - OwnerCard に「別の所有者に付け替える」ボタンが配置 (旧「誤紐づき修正」)
+ *   - モーダルは**付け替え専用** (外すは所有者カードの別ボタン=管理者のみ)
  *   - relink 時に /api/owners/search を fetch
  *   - preview → execute の 2 段階確認
  *   - 「元に戻せません」文言
@@ -32,9 +32,13 @@ const pageSrc = fs.readFileSync(
 );
 
 describe("OwnerMislinkModal: 操作・検索・preview/execute UI", () => {
-  it("remove / relink のラジオを持つ", () => {
-    expect(modalSrc).toMatch(/value="remove"/);
-    expect(modalSrc).toMatch(/value="relink"/);
+  it("付け替え専用で、操作の選択肢を持たない (発注者判断 2026-08-21)", () => {
+    // 「削除と付け替えは別のボタンにしてほしい。事務担当は付け替えだけに」
+    // ⇒ 外すのは所有者カードの「この物件から外す」(管理者のみ)。
+    //   ここに選択肢を戻すと、入口が2か所に増えて元の混乱に戻る。
+    expect(modalSrc).not.toContain('value="remove"');
+    expect(modalSrc).not.toContain("setOperation");
+    expect(modalSrc).toContain('const operation: Operation = "relink"');
   });
 
   it("relink 時に /api/owners/search を fetch する", () => {
@@ -82,10 +86,11 @@ describe("OwnerMislinkModal: 操作・検索・preview/execute UI", () => {
     expect(modalSrc).toMatch(/onExecuted\?\.\(\)/);
   });
 
-  it("operation / target 変更時に preview / execute state を reset する useEffect", () => {
+  it("付け替え先が変わったら preview / execute state を reset する useEffect", () => {
+    // ⚠2026-08-21 に付け替え専用化したため、operation は定数になった
+    // (依存に入れても永久に変化しない)。**付け替え先だけ**が変化する軸。
     expect(modalSrc).toMatch(/useEffect/);
-    // [operation, selectedTarget?.id] 依存
-    expect(modalSrc).toMatch(/\[operation,\s*selectedTarget\?\.id\]/);
+    expect(modalSrc).toContain("}, [selectedTarget?.id]);");
   });
 
   it("target archived 救済: api/owners/search の archived フィルタは API 側で済みだが UI は currentOwner を結果から除外", () => {

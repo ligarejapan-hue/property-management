@@ -97,7 +97,11 @@ export function OwnerMislinkModal({
   onClose,
   onExecuted,
 }: OwnerMislinkModalProps) {
-  const [operation, setOperation] = useState<Operation>("remove");
+  // ⚠**このモーダルは付け替え専用**(発注者判断 2026-08-21:
+  //   「削除と付け替えは別のボタンにしてほしい。事務担当は付け替えだけに」)。
+  //   外すのは所有者カードの「この物件から外す」(管理者のみ)。
+  //   ここで operation を切り替えられると、入口が2か所になって元の混乱に戻る。
+  const operation: Operation = "relink";
 
   // target owner 検索
   const [searchQ, setSearchQ] = useState("");
@@ -131,11 +135,10 @@ export function OwnerMislinkModal({
     setExecuteErrorMsg(null);
     setExecuteBlockReasons([]);
     setExecuteResult(null);
-  }, [operation, selectedTarget?.id]);
+  }, [selectedTarget?.id]);
 
   // 検索: debounce
   useEffect(() => {
-    if (operation !== "relink") return;
     const q = searchQ.trim();
     if (q.length < 1) {
       setSearchHits([]);
@@ -167,11 +170,10 @@ export function OwnerMislinkModal({
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [searchQ, operation, currentOwnerId]);
+  }, [searchQ, currentOwnerId]);
 
-  const canPreview =
-    operation === "remove" ||
-    (operation === "relink" && selectedTarget !== null);
+  // 付け替え専用なので、付け替え先が選ばれるまでは下見できない。
+  const canPreview = selectedTarget !== null;
 
   const handlePreview = async () => {
     if (!canPreview) return;
@@ -190,7 +192,7 @@ export function OwnerMislinkModal({
             propertyOwnerId,
             currentOwnerId,
             targetOwnerId:
-              operation === "relink" ? selectedTarget?.id : undefined,
+              selectedTarget?.id,
           }),
         },
       );
@@ -242,7 +244,7 @@ export function OwnerMislinkModal({
 
   const handleExecute = async () => {
     if (!previewResult || !previewResult.eligible) return;
-    if (operation === "relink" && !selectedTarget) return;
+    if (!selectedTarget) return;
     setExecuteState("executing");
     setExecuteErrorMsg(null);
     setExecuteBlockReasons([]);
@@ -255,7 +257,7 @@ export function OwnerMislinkModal({
           propertyId,
           propertyOwnerId,
           currentOwnerId,
-          targetOwnerId: operation === "relink" ? selectedTarget?.id : null,
+          targetOwnerId: selectedTarget?.id ?? null,
           currentOwnerVersion: previewResult.summary.currentOwnerVersion,
           targetOwnerVersion: previewResult.summary.targetOwnerVersion,
           propertyVersion: previewResult.summary.propertyVersion,
@@ -268,7 +270,7 @@ export function OwnerMislinkModal({
           ? (j.error.blockReasons as string[])
           : [];
         setExecuteBlockReasons(reasons);
-        setExecuteErrorMsg(j?.error?.message ?? "誤紐づき修正に失敗しました");
+        setExecuteErrorMsg(j?.error?.message ?? "付け替えに失敗しました");
         setExecuteResult(null);
         setExecuteState("execute_error");
         return;
@@ -279,7 +281,7 @@ export function OwnerMislinkModal({
     } catch (e) {
       setExecuteResult(null);
       setExecuteErrorMsg(
-        e instanceof Error ? e.message : "誤紐づき修正に失敗しました",
+        e instanceof Error ? e.message : "付け替えに失敗しました",
       );
       setExecuteState("execute_error");
     }
@@ -290,7 +292,7 @@ export function OwnerMislinkModal({
       <div className="max-h-[90vh] w-full max-w-[90vw] sm:max-w-xl overflow-y-auto rounded-lg bg-white dark:bg-gray-900 p-4 shadow-xl">
         <div className="mb-3 flex items-baseline justify-between">
           <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-            誤紐づき修正
+            別の所有者に付け替える
           </h3>
           <button
             type="button"
@@ -306,38 +308,10 @@ export function OwnerMislinkModal({
           <span className="font-mono">{currentOwnerLabel}</span>
         </div>
 
-        {/* 操作選択 */}
-        <fieldset className="mb-3 rounded border border-gray-200 dark:border-gray-800 p-2 text-xs">
-          <legend className="px-1 text-gray-500 dark:text-gray-400">操作</legend>
-          <label className="mr-3">
-            <input
-              type="radio"
-              name="mislink-op"
-              value="remove"
-              checked={operation === "remove"}
-              onChange={() => {
-                setOperation("remove");
-                setSelectedTarget(null);
-              }}
-              className="mr-1"
-            />
-            物件から外す
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="mislink-op"
-              value="relink"
-              checked={operation === "relink"}
-              onChange={() => setOperation("relink")}
-              className="mr-1"
-            />
-            別の所有者に付け替える
-          </label>
-        </fieldset>
-
-        {/* target 検索 */}
-        {operation === "relink" && (
+        {/* ⚠操作の選択肢は置かない(付け替え専用)。外すのは所有者カードの
+            「この物件から外す」= 管理者のみ。 */}
+        {/* 付け替え先の検索(このモーダルは付け替え専用) */}
+        {(
           <div className="mb-3 rounded border border-gray-200 dark:border-gray-800 p-2">
             <label className="mb-1 block text-xs text-gray-600 dark:text-gray-300">
               付け替え先の所有者を検索
@@ -510,7 +484,7 @@ export function OwnerMislinkModal({
                   onClick={() => setExecuteState("confirm1")}
                   className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
                 >
-                  誤紐づき修正を実行
+                  付け替えを実行
                 </button>
               )}
 
@@ -522,7 +496,7 @@ export function OwnerMislinkModal({
                       {previewResult.operation}
                     </span>
                   </p>
-                  {operation === "relink" && selectedTarget && (
+                  {selectedTarget && (
                     <p>
                       付け替え先:{" "}
                       <span className="font-mono">

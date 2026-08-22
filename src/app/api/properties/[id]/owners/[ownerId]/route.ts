@@ -111,9 +111,30 @@ export async function DELETE(
     if (!hasPermission(perms, "owner", "write")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
+    // 発注者判断 2026-08-21:「削除と付け替えは別のボタンにしてほしい。
+    // **事務担当は付け替えだけに**」⇒ **外す(リンク削除)は管理者だけ**。
+    // ⚠このリポには role を直接見る仕組みが無い。既存の管理者向け route
+    // (誤紐づき修正 = /api/admin/owners/correction/mislink) が
+    // `user_management:read` を管理者の代理鍵として使っているので **同じ鍵に揃える**
+    // (判定基準を2種類作らない)。本番実測: 事務担当用テンプレはこの鍵を持たない。
+    if (!hasPermission(perms, "user_management", "read")) {
+      throw new ApiError(
+        403,
+        "所有者を物件から外すには管理者権限が必要です",
+        "FORBIDDEN",
+      );
+    }
+    // ⚠**物件の編集権限も要る**(@codex #400 R1 P1)。付け替え(mislink)は
+    // property:write を要求している。紐付けを**壊す側だけ緩い**のは筋が通らず、
+    // 権限は個別に上書きできるため「user_management:read + owner:write はあるが
+    // property:write は無い」組み合わせが実際に作れてしまう。
+    if (!hasPermission(perms, "property", "write")) {
+      throw new ApiError(403, "物件更新の権限がありません", "FORBIDDEN");
+    }
 
-    // Find the PropertyOwner record
-    const propertyOwner = await prisma.propertyOwner.findUnique({
+    // 早期の存在確認 (404 を返すための下見)。⚠**これは判断の根拠にしない**——
+    // ロックを取る前の値なので、下の tx 内で必ず読み直す。
+    const preview = await prisma.propertyOwner.findUnique({
       where: {
         propertyId_ownerId: {
           propertyId,
@@ -122,7 +143,7 @@ export async function DELETE(
       },
     });
 
-    if (!propertyOwner) {
+    if (!preview) {
       throw new ApiError(
         404,
         "物件と所有者の紐付けが見つかりません",
@@ -133,26 +154,61 @@ export async function DELETE(
     // Delete the link。⚠親の物件行を先にロックする(書き込み規約+#364 R6):
     // 素の delete は DM 控えの凍結 tx(親行 FOR SHARE 保持で宛先資格を検証)と直列化されず、
     // 解除直前のリンクを読んだ古いCSVがそのまま凍結・配布される。
-    await prisma.$transaction(async (tx) => {
+    //
+    // ⚠**ロックを取ってから読み直す**(@codex #400 R1 P1)。付け替え(relink)は
+    // **同じ行の ownerId を書き換える**ため、下見で得た行 id をそのまま消すと、
+    // その隙間に付け替えが入ったとき**確認画面で名前を見せた人とは別の人**の
+    // 紐付けを消してしまう。読み直して「まだこの所有者の行か」を確かめる。
+    const propertyOwner = await prisma.$transaction(async (tx) => {
       await lockPropertyRow(tx, propertyId);
-      await tx.propertyOwner.delete({
-        where: { id: propertyOwner.id },
+      const current = await tx.propertyOwner.findUnique({
+        where: {
+          propertyId_ownerId: {
+            propertyId,
+            ownerId,
+          },
+        },
       });
-    });
-
-    // Record change log for the unlink
-    await recordChanges({
-      targetTable: "property_owners",
-      targetId: propertyOwner.id,
-      changedBy: session.id,
-      oldValues: {
-        propertyId: propertyOwner.propertyId,
-        ownerId: propertyOwner.ownerId,
-        relationship: propertyOwner.relationship,
-        isPrimary: propertyOwner.isPrimary,
-      },
-      newValues: {},
-      trackedFields: ["propertyId", "ownerId", "relationship", "isPrimary"],
+      if (!current) {
+        throw new ApiError(
+          409,
+          "他のユーザーが先にこの紐付けを変更しました。画面を再読み込みしてください。",
+          "CONFLICT",
+        );
+      }
+      await tx.propertyOwner.delete({
+        where: { id: current.id },
+      });
+      // ⚠**削除の印を同じ tx の中で書く**(@codex #400 R2 P2)。
+      //   以前は tx の外で `recordChanges({ newValues: {} })` を呼んでいたが、
+      //   change-log.ts は **newValues に無い項目を飛ばす**ため
+      //   **1行も作られていなかった**（壊す操作が履歴に残らない）。
+      //   形は付け替え(mislink)の削除と揃える＝印の項目名 + 旧 ownerId。
+      //   ⚠氏名・メモ等の PII は入れない（ownerId は UUID）。
+      //   tx の中で書くので「消えたのに履歴が無い」も起きない。
+      await tx.changeLog.createMany({
+        data: [
+          {
+            targetTable: "property_owners",
+            targetId: current.id,
+            fieldName: "_unlinked_from_property",
+            oldValue: current.ownerId,
+            newValue: null,
+            source: "manual",
+            changedBy: session.id,
+          },
+          {
+            targetTable: "property_owners",
+            targetId: current.id,
+            fieldName: "isPrimary",
+            oldValue: String(current.isPrimary),
+            newValue: null,
+            source: "manual",
+            changedBy: session.id,
+          },
+        ],
+      });
+      return current;
     });
 
     await writeAuditLog({

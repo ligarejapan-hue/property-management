@@ -456,3 +456,60 @@ describe("POST mislink-preview: PII 非露出", () => {
     });
   });
 });
+
+// ── 操作ごとの権限 (発注者判断 2026-08-21) ────────────────────────────
+//   付け替え(relink) = 事務担当も可 / 外す(remove) = 管理者だけ。
+//   ⚠下見だけ緩い/厳しいがあると、画面は出るのに実行で 403 になる(逆も然り)。
+//   **下見と実行で同じ規則**にする。
+describe("POST mislink-preview: 操作ごとの権限", () => {
+  const OFFICE_STAFF_PERMS = [
+    { resource: "owner", action: "read", granted: true },
+    { resource: "property", action: "read", granted: true },
+  ];
+
+  it("事務担当(user_management:read なし)でも 付け替え の下見はできる", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(OFFICE_STAFF_PERMS);
+    setupValidState();
+    const res = await POST(
+      makeRequest({
+        operation: "relink",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        targetOwnerId: TARGET_OWNER_ID,
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("事務担当は 外す の下見ができない(403)", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue(OFFICE_STAFF_PERMS);
+    setupValidState();
+    const res = await POST(
+      makeRequest({
+        operation: "remove",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("owner:read が無ければ 付け替え の下見もできない(緩めすぎていない)", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValue([
+      { resource: "property", action: "read", granted: true },
+    ]);
+    setupValidState();
+    const res = await POST(
+      makeRequest({
+        operation: "relink",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        targetOwnerId: TARGET_OWNER_ID,
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+});

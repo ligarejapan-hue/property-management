@@ -914,3 +914,99 @@ describe("POST mislink: PII 非露出", () => {
     expect(serialized).not.toContain(PROPERTY_ADDRESS);
   });
 });
+
+// ── 操作ごとの権限 (発注者判断 2026-08-21) ────────────────────────────
+//   「削除と付け替えは別のボタンにしてほしい。**事務担当は付け替えだけに**」
+//   ⇒ 付け替え(relink) = 事務担当も可 / 外す(remove) = 管理者だけ。
+//   ⚠ここは route 全体で `user_management:read` を要求していたため、事務担当は
+//     付け替えすらできなかった。**操作ごとに分ける**。
+//   本番実測(2026-08-21): 事務担当用テンプレは owner:read/write + property:read/write
+//   を持ち、user_management:read を持たない。
+const OFFICE_STAFF_PERMS = [
+  { resource: "owner", action: "read", granted: true },
+  { resource: "owner", action: "write", granted: true },
+  { resource: "property", action: "read", granted: true },
+  { resource: "property", action: "write", granted: true },
+];
+
+describe("POST mislink: 操作ごとの権限", () => {
+  it("事務担当(user_management:read なし)でも 付け替え はできる", async () => {
+    (getUserPermissions as Mock).mockResolvedValue(OFFICE_STAFF_PERMS);
+    setupHappyPath();
+    const res = await POST(
+      makeRequest({
+        operation: "relink",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        targetOwnerId: TARGET_OWNER_ID,
+        currentOwnerVersion: 1,
+        targetOwnerVersion: 2,
+        propertyVersion: 1,
+        dryRun: false,
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(pm._tx.propertyOwner.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("事務担当は 外す を実行できない(403・リンクも消えない)", async () => {
+    (getUserPermissions as Mock).mockResolvedValue(OFFICE_STAFF_PERMS);
+    setupHappyPath();
+    const res = await POST(
+      makeRequest({
+        operation: "remove",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        currentOwnerVersion: 1,
+        propertyVersion: 1,
+        dryRun: false,
+      }),
+    );
+    expect(res.status).toBe(403);
+    // ⚠403 を返しつつ消えていたら意味がない。
+    expect(pm._tx.propertyOwner.delete).not.toHaveBeenCalled();
+  });
+
+  it("事務担当の 外す は、下見(dryRun)でも 403 で止まる", async () => {
+    (getUserPermissions as Mock).mockResolvedValue(OFFICE_STAFF_PERMS);
+    setupHappyPath();
+    const res = await POST(
+      makeRequest({
+        operation: "remove",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        currentOwnerVersion: 1,
+        propertyVersion: 1,
+        dryRun: true,
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("owner:write が無ければ 付け替え もできない(緩めすぎていない)", async () => {
+    (getUserPermissions as Mock).mockResolvedValue([
+      { resource: "owner", action: "read", granted: true },
+      { resource: "property", action: "read", granted: true },
+      { resource: "property", action: "write", granted: true },
+    ]);
+    setupHappyPath();
+    const res = await POST(
+      makeRequest({
+        operation: "relink",
+        propertyId: PROPERTY_ID,
+        propertyOwnerId: PROPERTY_OWNER_ID,
+        currentOwnerId: CURRENT_OWNER_ID,
+        targetOwnerId: TARGET_OWNER_ID,
+        currentOwnerVersion: 1,
+        targetOwnerVersion: 2,
+        propertyVersion: 1,
+        dryRun: false,
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(pm._tx.propertyOwner.update).not.toHaveBeenCalled();
+  });
+});

@@ -111,9 +111,13 @@ export async function POST(request: NextRequest) {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
 
-    if (!hasPermission(perms, "user_management", "read")) {
-      throw new ApiError(403, "権限がありません", "FORBIDDEN");
-    }
+    // ⚠**操作ごとに要求が違う**(発注者判断 2026-08-21:
+    //   「削除と付け替えは別のボタンにしてほしい。**事務担当は付け替えだけに**」)。
+    //   ここに共通で必要な鍵だけを置き、`remove` 固有の管理者要求は
+    //   operation を読んだ直後(DBに触る前)で判定する。
+    //   ⚠以前は route 全体で `user_management:read` を要求していたため、
+    //   **事務担当は付け替えすらできなかった**(本番実測: 事務担当用テンプレは
+    //   owner:read/write + property:read/write のみ)。
     if (!hasPermission(perms, "owner", "read")) {
       throw new ApiError(403, "所有者閲覧の権限がありません", "FORBIDDEN");
     }
@@ -143,6 +147,20 @@ export async function POST(request: NextRequest) {
         400,
         "operation は 'remove' または 'relink' を指定してください",
         "INVALID_INPUT",
+      );
+    }
+    // **外す(remove)は管理者だけ**。⚠ここは **DB に触る前**でなければならない
+    // (下見/実行のどちらでも、権限の無い人にリンクの存在を漏らさない)。
+    // 管理者の代理鍵は `user_management:read`(このリポに role 判定は無く、
+    // 既存の管理者向け route が同じ鍵を使っている)。
+    if (
+      operation === "remove" &&
+      !hasPermission(perms, "user_management", "read")
+    ) {
+      throw new ApiError(
+        403,
+        "所有者を物件から外すには管理者権限が必要です",
+        "FORBIDDEN",
       );
     }
     if (
