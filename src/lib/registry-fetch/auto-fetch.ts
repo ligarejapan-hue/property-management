@@ -4574,7 +4574,12 @@ export async function runRegistryAutoFetch(
         detail: {
           propertyId,
           source: provider.name,
-          status: "failed",
+          // ⚠**中止を「失敗」として残さない**(@codex #401 R2 P2)。
+          //   利用者が自分で止めたのは failed ではない。検索側(search.ts)は
+          //   既に `err.code === "cancelled" ? "cancelled" : "failed"` で分けている。
+          //   有料取得にも中止ボタンが付いた以上、**通常操作のたびに偽の失敗が
+          //   監査へ積まれる**のは困る(障害調査の邪魔になる)。
+          status: err.code === "cancelled" ? "cancelled" : "failed",
           mode: isRecover ? "recover" : "purchase",
           providerErrorCode: err.code,
           confirmed: true,
@@ -4583,7 +4588,14 @@ export async function runRegistryAutoFetch(
       throw new ApiError(
         PROVIDER_ERROR_STATUS[err.code],
         err.message,
-        "REGISTRY_AUTO_FETCH_PROVIDER_ERROR",
+        // ⚠**中止は画面に「失敗」と見せない**(@codex #401 R2 P2)。
+        //   汎用の PROVIDER_ERROR のままだと、利用者が自分で押した中止が
+        //   赤いエラー帯で出る(検索側には中立の「中止しました」表示がある)。
+        //   ⚠一括取得の分類は `providerCode`(下の第4引数)を見るので、
+        //   ここで code を変えても影響しない(実測: この文字列を判定に使う箇所は無い)。
+        err.code === "cancelled"
+          ? "REGISTRY_AUTO_FETCH_CANCELLED"
+          : "REGISTRY_AUTO_FETCH_PROVIDER_ERROR",
         // ⚠元の分類コード(charged_but_failed / rate_limited 等)を消さずに渡す。
         // 一括取得の分類が code 文字列を変えずに安全に判定できるようにする(@codex #361 P1)。
         err.code,

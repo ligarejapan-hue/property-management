@@ -507,6 +507,32 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     //   課金ゼロ)。gaveUp の判定と acquired の代入はどちらも同期区間なので競合しない。
     let acquired = false;
     let gaveUp = false;
+    // ⚠**順番待ちの間に押された中止を拾う**(@codex #401 R2 P2)。購入ミューテックスは
+    //   一括取得と共有で、待ちには最大30分の寿命がある。待っている間の中止に
+    //   気づかないと、順番が回った時点で**ブラウザを起動してログインしてしまう**
+    //   (画面は「中止しています…」のまま・物件のロックも続く)。
+    //   ⚠**この実行専用の印も併せて見る**(検索側 searchCandidates と同型)。
+    //   route は決着時に共有の印を消すので、共有だけを見ていると
+    //   「中止したはずの取得が動き出す」。ここは課金前なので止めて安全。
+    let cancelObserved = false;
+    const isCancelledPaid = (): boolean =>
+      cancelObserved || live?.isCancelRequested?.() === true;
+    const abortIfCancelledQueued = (): void => {
+      if (!isCancelledPaid()) return;
+      cancelObserved = true;
+      try {
+        live?.step(CANCEL_ACCEPTED_MESSAGE);
+      } catch {
+        /* 実況は best-effort */
+      }
+      throw new RegistryFetchError("cancelled");
+    };
+    // 待っている最中にも定期的に見る(順番が回るまで気づかない、を作らない)。
+    const queueCancelWatch = live
+      ? setInterval(() => {
+          if (live.isCancelRequested?.() === true) cancelObserved = true;
+        }, 5_000)
+      : null;
 
     const run = runExclusivePurchase(async () => {
       if (gaveUp) {
@@ -516,6 +542,10 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       }
       acquired = true;
       if (queueHeartbeat) clearInterval(queueHeartbeat);
+      if (queueCancelWatch) clearInterval(queueCancelWatch);
+      // ⚠**ブラウザを起動する前が最初の安全な節目**。ここで止めれば外部に一切
+      //   触れない(課金ゼロ・ログインもしない)。
+      abortIfCancelledQueued();
       let page: RegistryBrowserPage;
       try {
         page = await this.withStartupTimeout(() => this.browserFactory!());
@@ -620,6 +650,7 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       // ⚠取得開始時にも clear しているが、**待ちのまま満了した経路**では
       // コールバックが走らない。二重 clear は無害。
       if (queueHeartbeat) clearInterval(queueHeartbeat);
+      if (queueCancelWatch) clearInterval(queueCancelWatch);
     });
   }
 

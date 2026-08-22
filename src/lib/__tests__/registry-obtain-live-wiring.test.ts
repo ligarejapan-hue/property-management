@@ -233,3 +233,40 @@ describe("終わったら中止の印を必ず片付ける(@codex #401 R3 P2)", 
     expect(clears.length).toBe(completes.length);
   });
 });
+
+// ── @codex #401 R2(2巡目) ─────────────────────────────────────────────
+describe("中止という結果を、受け止める側も『中止』として扱う(@codex #401 R2)", () => {
+  it("⚠順番待ちの間も中止を見る(順番が回るまで気づかない、を作らない)", () => {
+    // 購入ミューテックスは一括取得と共有で、待ちには最大30分の寿命がある。
+    // 見ていないと、順番が回った時点でブラウザを起動しログインしてしまう
+    // (画面は「中止しています…」のまま・物件のロックも続く)。
+    expect(PROVIDER).toContain("queueCancelWatch");
+    expect(PROVIDER).toContain("abortIfCancelledQueued");
+    // ⚠**この実行専用の印**も併せて見る(route が共有の印を消しても復活させない)。
+    expect(PROVIDER).toMatch(/cancelObserved \|\| live\?\.isCancelRequested\?\.\(\) === true/);
+    // 待ちの見張りは、取得開始時と finally の**両方**で止める(漏れ防止)。
+    const clears = PROVIDER.match(/clearInterval\(queueCancelWatch\)/g) ?? [];
+    expect(clears.length).toBe(2);
+  });
+
+  it("⚠ブラウザを起動する前に止める(外部に一切触れない)", () => {
+    const abortAt = PROVIDER.indexOf("abortIfCancelledQueued();");
+    const launchAt = PROVIDER.indexOf("page = await this.withStartupTimeout", abortAt);
+    expect(abortAt).toBeGreaterThan(-1);
+    expect(launchAt).toBeGreaterThan(abortAt);
+  });
+
+  it("⚠監査に『失敗』として残さない(通常操作のたびに偽の失敗が積まれる)", () => {
+    expect(AUTO).toContain('status: err.code === "cancelled" ? "cancelled" : "failed"');
+  });
+
+  it("⚠画面に赤いエラーとして出さない(中止専用のコードを渡す)", () => {
+    expect(AUTO).toContain('"REGISTRY_AUTO_FETCH_CANCELLED"');
+    expect(BUTTON).toContain(
+      'apiErrorCode(e) === "REGISTRY_AUTO_FETCH_CANCELLED"',
+    );
+    // 中止のときは中立の表示へ(検索側と同じ)。
+    const at = BUTTON.indexOf('apiErrorCode(e) === "REGISTRY_AUTO_FETCH_CANCELLED"');
+    expect(BUTTON.slice(at, at + 160)).toContain('setState("cancelled")');
+  });
+});

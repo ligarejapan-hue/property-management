@@ -428,6 +428,13 @@ export default function RegistryLocationSearchButton({
       //   同じく、流れを閉じるとき(reset)にまとめて流す。
       propertyRefreshPendingRef.current = true;
     } catch (e) {
+      // ⚠**中止は失敗ではない**(@codex #401 R2 P2)。利用者が自分で押した中止を
+      //   赤いエラー帯で出すと「壊れた」と見える。課金も発生していない。
+      //   検索側と同じ中立の表示に合わせる。
+      if (apiErrorCode(e) === "REGISTRY_AUTO_FETCH_CANCELLED") {
+        setState("cancelled");
+        return;
+      }
       setErrorMsg(e instanceof Error ? e.message : "謄本の取得に失敗しました");
       setState("error");
     }
