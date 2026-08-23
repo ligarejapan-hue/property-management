@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
+import { Search, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
+import { Pagination } from "@/components/ui/pagination";
 import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions, createSaleDmCampaign, clearSaleDmUndeliverable, createDmBatch } from "@/lib/api-client";
 import { classifyPropertySearch, toMgmtIdQuery } from "@/lib/property-search-classify";
 import { canCreateSaleDm, buildSaleDmPartialNotice } from "@/lib/sale-dm-letter/list-ui";
@@ -1933,50 +1934,17 @@ function PropertiesPageInner() {
         )}
       </div>
 
-      {/* Pagination */}
-      <div className="mt-4 w-full flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pb-8">
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {pagination.total} 件中{" "}
-          {pagination.total > 0
-            ? `${(pagination.page - 1) * pagination.limit + 1}〜${Math.min(pagination.page * pagination.limit, pagination.total)}`
-            : "0"}{" "}
-          件表示
-        </p>
-        <div className="flex items-center gap-2">
-          <button
-            disabled={page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            className={`flex min-h-[44px] items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 ${
-              page <= 1
-                ? "text-gray-400 cursor-not-allowed dark:text-gray-500"
-                : "text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
-            }`}
-          >
-            <ChevronLeft className="h-4 w-4" />
-            前へ
-          </button>
-          <span className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white">
-            {page}
-          </span>
-          {pagination.totalPages > 1 && (
-            <span className="text-sm text-gray-500 dark:text-gray-400">
-              / {pagination.totalPages}
-            </span>
-          )}
-          <button
-            disabled={page >= pagination.totalPages}
-            onClick={() => setPage((p) => p + 1)}
-            className={`flex min-h-[44px] items-center gap-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 ${
-              page >= pagination.totalPages
-                ? "text-gray-400 cursor-not-allowed dark:text-gray-500"
-                : "text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
-            }`}
-          >
-            次へ
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
+      {/* Pagination(共通部品・第2弾⑨)。busy=loading で読み込み中の連打を防ぐ。 */}
+      <Pagination
+        className="mt-4 pb-8"
+        page={page}
+        totalPages={pagination.totalPages}
+        total={pagination.total}
+        pageSize={pagination.limit}
+        busy={loading}
+        onPrev={() => setPage((p) => Math.max(1, p - 1))}
+        onNext={() => setPage((p) => p + 1)}
+      />
     </div>
   );
 }

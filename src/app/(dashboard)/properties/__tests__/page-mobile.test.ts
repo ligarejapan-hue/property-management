@@ -25,8 +25,11 @@ describe("properties/page.tsx モバイル UI (M1)", () => {
   it("§8-3: ページネーションに flex-col がある", () => {
     expect(src).toContain("flex-col");
   });
-  it("§8-3: ページネーションに sm:flex-row がある", () => {
-    expect(src).toContain("sm:flex-row");
+  it("§8-3: ページネーションは共通 Pagination(タップ寸法44pxは部品側で担保)", () => {
+    // 第2弾⑨で共通部品化。flex-wrap での折返し・min-h-[44px] は
+    // src/components/ui/__tests__/pagination.test.tsx が固定している。
+    expect(src).toContain("<Pagination");
+    expect(src).toContain('from "@/components/ui/pagination"');
   });
 
   // §8-4 行クリック遷移 + 誤遷移防止

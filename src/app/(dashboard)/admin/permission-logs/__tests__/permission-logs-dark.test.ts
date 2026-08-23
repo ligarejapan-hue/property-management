@@ -72,8 +72,8 @@ describe("admin/permission-logs/page.tsx dark: 配色 (admin残)", () => {
   it("ページネーションボタンに dark:bg-gray-900 がある", () => {
     expect(src).toContain("dark:bg-gray-900");
   });
-  it("ページネーションボタン枠線に dark:border-gray-700 がある", () => {
-    expect(src).toContain("dark:border-gray-700");
+  it("ページネーションは共通 Pagination(枠線の dark は部品側で担保)", () => {
+    expect(src).toContain("<Pagination");
   });
   it("ページネーションボタンホバーに dark:hover:bg-gray-800 がある", () => {
     expect(src).toContain("dark:hover:bg-gray-800");
@@ -89,8 +89,9 @@ describe("admin/permission-logs/page.tsx dark: 配色 (admin残)", () => {
   it("ライトモード border-gray-200 は残っている", () => {
     expect(src).toContain("border-gray-200");
   });
-  it("ライトモード border-gray-300 は残っている", () => {
-    expect(src).toContain("border-gray-300");
+  it("ライトモード border-gray-300 はページ送り部品側に移った(部品テストで担保)", () => {
+    // 旧: ページ内の手書き前へ/次へボタンに付いていた。第2弾⑨で部品へ。
+    expect(src).toContain("<Pagination");
   });
   it("ライトモード hover:bg-gray-50 は残っている", () => {
     expect(src).toContain("hover:bg-gray-50");

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import Link from "next/link";
 import { Loader2, Search, RotateCcw } from "lucide-react";
+import { Pagination } from "@/components/ui/pagination";
 import { debounce } from "@/lib/debounce";
 import { formatJaDateTime } from "@/lib/format-datetime";
 
@@ -502,33 +503,17 @@ export default function AuditLogsPage() {
         )}
       </div>
 
-      {/* Pagination */}
-      <div className="mt-4 flex items-center justify-between">
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          全 {total} 件{total > 0 && `中 ${(page - 1) * limit + 1}〜${Math.min(page * limit, total)} 件`}
-        </p>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-            className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:text-gray-400 disabled:cursor-not-allowed"
-          >
-            前へ
-          </button>
-          <span className="flex items-center px-2 text-sm text-gray-500 dark:text-gray-400">
-            {page} / {totalPages || 1}
-          </span>
-          <button
-            type="button"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-            className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:text-gray-400 disabled:cursor-not-allowed"
-          >
-            次へ
-          </button>
-        </div>
-      </div>
+      {/* Pagination(共通部品・第2弾⑨) */}
+      <Pagination
+        className="mt-4"
+        page={page}
+        totalPages={totalPages}
+        total={total}
+        pageSize={limit}
+        busy={loading}
+        onPrev={() => setPage((p) => p - 1)}
+        onNext={() => setPage((p) => p + 1)}
+      />
     </div>
   );
 }

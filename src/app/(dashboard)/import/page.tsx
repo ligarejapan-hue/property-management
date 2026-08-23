@@ -22,6 +22,7 @@ import {
   ClipboardCheck,
   DownloadCloud,
 } from "lucide-react";
+import { Pagination } from "@/components/ui/pagination";
 import Link from "next/link";
 import {
   importCsv,
@@ -2427,25 +2428,21 @@ export default function ImportPage() {
           const totalPages = jobPagination?.totalPages ?? 1;
           const currentPage = jobPagination?.page ?? jobPage;
           const currentLimit = jobPagination?.limit ?? jobLimit;
-          // 「全N件中 X〜Y件を表示」の数値計算
-          // 0 件時は X / Y を出さず「全 0 件」のみ表示する
-          const rangeStart = total === 0 ? 0 : (currentPage - 1) * currentLimit + 1;
-          const rangeEnd = total === 0 ? 0 : Math.min(currentPage * currentLimit, total);
-          const canPrev = currentPage > 1 && !jobsLoading;
-          const canNext = currentPage < totalPages && !jobsLoading;
           return (
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600 dark:text-gray-300">
-              <div>
-                {total === 0 ? (
-                  <span>全 0 件</span>
-                ) : (
-                  <span>
-                    全 <strong>{total}</strong> 件中{" "}
-                    <strong>{rangeStart}</strong>〜<strong>{rangeEnd}</strong> 件を表示
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
+            <Pagination
+              className="mb-3"
+              page={currentPage}
+              totalPages={totalPages}
+              total={total}
+              pageSize={currentLimit}
+              busy={jobsLoading}
+              onPrev={() => setJobPage((p) => Math.max(1, p - 1))}
+              onNext={() =>
+                setJobPage((p) =>
+                  jobPagination ? Math.min(jobPagination.totalPages, p + 1) : p + 1,
+                )
+              }
+            >
                 <label className="flex items-center gap-1">
                   <span className="text-gray-500 dark:text-gray-400">1ページあたり</span>
                   <select
@@ -2460,33 +2457,7 @@ export default function ImportPage() {
                     <option value={100}>100件</option>
                   </select>
                 </label>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setJobPage((p) => Math.max(1, p - 1))}
-                    disabled={!canPrev}
-                    className="flex items-center gap-0.5 rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                    前へ
-                  </button>
-                  <span className="px-2 tabular-nums">
-                    <strong>{currentPage}</strong> / {totalPages}
-                  </span>
-                  <button
-                    onClick={() =>
-                      setJobPage((p) =>
-                        jobPagination ? Math.min(jobPagination.totalPages, p + 1) : p + 1,
-                      )
-                    }
-                    disabled={!canNext}
-                    className="flex items-center gap-0.5 rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    次へ
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
+            </Pagination>
           );
         })()}
 

@@ -30,9 +30,10 @@ describe("取込ジョブ詳細: 再取得でちらつかせない", () => {
 
   it("再取得中も操作は抑止されたまま(二重送信の防止は維持)", () => {
     // ページ送り等の disabled={loading} は残す(早期 return が無くなった分、
-    // ここが操作抑止の唯一の担保になる)。
+    // ここが操作抑止の唯一の担保になる)。前へ/次へは共通 Pagination(第2弾⑨)に
+    // 置き換わったため、抑止は busy={loading} が担う(部品側で両方向 disabled)。
     expect(PAGE).toMatch(/disabled=\{loading\}/);
-    expect(PAGE).toMatch(/disabled=\{!job\.pagination\.hasNextPage \|\| loading\}/);
+    expect(PAGE).toMatch(/busy=\{loading\}/);
   });
 
   it("ステータスタブも再取得中は押せない(古い応答での上書きを防ぐ)", () => {

@@ -69,12 +69,14 @@ describe("import job detail page — B2 pagination 配線 (source-assertion)", (
     expect(pageSrc).not.toMatch(/onClick=\{\(\) => setFilter\(tab\.key\)\}/);
   });
 
-  it("job.pagination を使った前へ/次へ UI", () => {
-    expect(pageSrc).toMatch(/job\.pagination\.hasPrevPage/);
-    expect(pageSrc).toMatch(/job\.pagination\.hasNextPage/);
-    expect(pageSrc).toMatch(/job\.pagination\.totalPages/);
-    expect(pageSrc).toMatch(/前へ/);
-    expect(pageSrc).toMatch(/次へ/);
+  it("job.pagination を使った前へ/次へ UI(第2弾⑨で共通 Pagination へ)", () => {
+    // 前へ/次への描画・端での disabled は部品側テストで担保。ここでは
+    // server pagination メタが部品へ正しく配線されていることを固定する。
+    expect(pageSrc).toContain('from "@/components/ui/pagination"');
+    expect(pageSrc).toMatch(/totalPages=\{job\.pagination\.totalPages\}/);
+    expect(pageSrc).toMatch(/total=\{job\.pagination\.totalRows\}/);
+    expect(pageSrc).toMatch(/pageSize=\{job\.pagination\.limit\}/);
+    expect(pageSrc).toMatch(/busy=\{loading\}/);
   });
 
   it("全体判定は server 値を使う（isReceptionOwnerJob / duplicateCount）", () => {
@@ -229,11 +231,8 @@ describe("import job detail page — 候補5 ページング UX (source-assertio
     );
   });
 
-  it("既存の前へ/次へ・bulk UI を壊さない", () => {
-    expect(pageSrc).toMatch(/前へ/);
-    expect(pageSrc).toMatch(/次へ/);
-    expect(pageSrc).toMatch(/job\.pagination\.hasPrevPage/);
-    expect(pageSrc).toMatch(/job\.pagination\.hasNextPage/);
+  it("既存のページ送り・bulk UI を壊さない(ページ送りは共通 Pagination)", () => {
+    expect(pageSrc).toContain("<Pagination");
     expect(pageSrc).toMatch(/全件スキップ/);
     expect(pageSrc).toMatch(/重複候補のみスキップ/);
   });
