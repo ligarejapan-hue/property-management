@@ -1981,3 +1981,153 @@ export function findTextTableOverlaps(
   }
   return pairs;
 }
+
+// ---------------------------------------------------------------------------
+// B-8 案A (2026-08-23 発注者判断で採用): 重なりの自動解消 (ボタンで実行)
+// ---------------------------------------------------------------------------
+
+/** resolveTextTableOverlapsInDocument の結果。 */
+export interface ResolveOverlapsResult {
+  /** 調整後の document (何も変えなければ入力と同一参照)。 */
+  document: SalesSheetDocument;
+  /** 文字サイズの縮小で解消した要素 id (document 順)。 */
+  shrunk: string[];
+  /** 位置の移動で解消した要素 id (document 順)。 */
+  moved: string[];
+  /** 自動では解消できず残った重なりの組数 (表×表を含む)。 */
+  unresolved: number;
+}
+
+/** 縮小の刻み (pt)。 */
+const SHRINK_STEP_PT = 0.5;
+/** 縮小の下限 = 元サイズ×この比率 (それ未満には読めないので下げない)。 */
+const SHRINK_FLOOR_RATIO = 0.6;
+/** 縮小の絶対下限 (pt)。 */
+const SHRINK_FLOOR_PT = 7;
+/** 移動の探索刻み (mm)。 */
+const MOVE_STEP_MM = 1;
+/** 移動の探索上限 (mm)。これ以上遠くへは動かさない (置き場所の意図を壊さない)。 */
+const MOVE_MAX_MM = 60;
+
+/** id の要素が関与する重なりが有るか。 */
+function hasOverlapInvolving(doc: SalesSheetDocument, id: string): boolean {
+  return findTextTableOverlaps(doc).some((p) => p.aId === id || p.bId === id);
+}
+
+/**
+ * この text 要素を**この要素側で**直すべきか。
+ * - 表との重なり: 常にこちら(text)が動く (表は動かさない)。
+ * - 文字×文字: **後から置いた方**(document 順で後)が動く。先にあった要素は
+ *   置き場所の基準として尊重する (両方を動かすと、どちらも半端に動く)。
+ */
+function needsFixHere(doc: SalesSheetDocument, idx: number): boolean {
+  const id = doc.elements[idx].id;
+  const indexOf = new Map(doc.elements.map((e, i) => [e.id, i] as const));
+  const typeOf = new Map(doc.elements.map((e) => [e.id, e.type] as const));
+  return findTextTableOverlaps(doc).some((p) => {
+    const partner = p.aId === id ? p.bId : p.bId === id ? p.aId : null;
+    if (partner === null) return false;
+    if (typeOf.get(partner) === "table") return true;
+    return (indexOf.get(partner) ?? -1) < idx;
+  });
+}
+
+/** elements[idx] を差し替えた新 document。 */
+function withElementAt(
+  doc: SalesSheetDocument,
+  idx: number,
+  el: SalesSheetElement,
+): SalesSheetDocument {
+  const elements = doc.elements.slice();
+  elements[idx] = el;
+  return { ...doc, elements };
+}
+
+/**
+ * 文字・表の重なりを「縮小 → 駄目なら移動」で自動解消する (純関数)。
+ *
+ * ⚠**勝手には動かさない**。この関数は利用者が「重なりを自動で直す」ボタンを
+ *   押したときにだけ呼ばれる (案Aが見送られていた理由=「手動配置の尊重」との
+ *   相反を、明示操作に限ることで両立させた・2026-08-23 発注者判断)。
+ *
+ * 規則:
+ * - 調整するのは **text だけ**。表は動かさない (表×表の重なりは unresolved)。
+ * - 各 text につき ①縮小 (SHRINK_STEP_PT 刻み・下限=元の6割か7ptの大きい方)
+ *   ②縦の最小距離移動 (±MOVE_STEP_MM 刻み・ページ内・**新たな重なりを作らない**
+ *   =候補ごとに検知器そのもので再判定) の順に試す。
+ * - x は変えない (縦の最小移動だけなら「どこへ行ったか」を利用者が追える)。
+ * - 解消できない要素は**触らない** (中途半端な縮小だけ残さない)。
+ * - document 順に処理し、後続の判定は調整後の document で行う (決定的)。
+ * - 何も変えなければ入力と**同一参照**を返す (no-op 規約)。
+ */
+export function resolveTextTableOverlapsInDocument(
+  doc: SalesSheetDocument,
+): ResolveOverlapsResult {
+  const shrunk: string[] = [];
+  const moved: string[] = [];
+  let current = doc;
+
+  for (let idx = 0; idx < current.elements.length; idx++) {
+    const el = current.elements[idx];
+    if (el.type !== "text") continue;
+    if (!needsFixHere(current, idx)) continue;
+
+    // ① 縮小 (位置は不変)。効果は検知器そのもので測る (字送り・折返し・
+    //    可視行の打ち切りまで含めた本物のモデルで再判定する)。
+    const originalPt = el.style.fontSizePt ?? 12;
+    const floorPt = Math.max(SHRINK_FLOOR_PT, originalPt * SHRINK_FLOOR_RATIO);
+    let fixed = false;
+    for (
+      let pt = originalPt - SHRINK_STEP_PT;
+      pt >= floorPt - 1e-9;
+      pt -= SHRINK_STEP_PT
+    ) {
+      const candidate = withElementAt(current, idx, {
+        ...el,
+        style: { ...el.style, fontSizePt: Math.round(pt * 2) / 2 },
+      });
+      if (!hasOverlapInvolving(candidate, el.id)) {
+        current = candidate;
+        shrunk.push(el.id);
+        fixed = true;
+        break;
+      }
+    }
+    if (fixed) continue;
+
+    // ② 縦の最小距離移動。近い順 (+1, -1, +2, -2, …) に試し、ページ内かつ
+    //    自分の重なりが消える最初の位置を採る。
+    for (let step = MOVE_STEP_MM; step <= MOVE_MAX_MM; step += MOVE_STEP_MM) {
+      let done = false;
+      for (const dy of [step, -step]) {
+        const y = el.y + dy;
+        if (y < 0 || y + el.h > current.page.height) continue;
+        const candidate = withElementAt(current, idx, { ...el, y });
+        if (!hasOverlapInvolving(candidate, el.id)) {
+          current = candidate;
+          moved.push(el.id);
+          done = true;
+          break;
+        }
+      }
+      if (done) break;
+    }
+  }
+
+  return {
+    document: current,
+    shrunk,
+    moved,
+    unresolved: findTextTableOverlaps(current).length,
+  };
+}
+
+/**
+ * EditorState 版 (履歴に乗せるための入口)。何も変わらなければ同一参照。
+ * dirty は document が変わったときだけ立てる (既存の編集系と同じ規約)。
+ */
+export function resolveOverlapsInState(state: EditorState): EditorState {
+  const r = resolveTextTableOverlapsInDocument(state.document);
+  if (r.document === state.document) return state;
+  return { ...state, document: r.document, dirty: true };
+}

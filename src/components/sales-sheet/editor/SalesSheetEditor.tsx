@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import type { ImageElement, SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
 import type { EditorState, EditThemePatch } from "@/lib/sales-sheet/editor-document";
@@ -38,6 +38,8 @@ import {
   markSavedIfCurrent,
   exportWithSaveGuard,
   findTextTableOverlaps,
+  resolveTextTableOverlapsInDocument,
+  resolveOverlapsInState,
 } from "@/lib/sales-sheet/editor-document";
 import { EditorCanvas } from "./EditorCanvas";
 import { ElementPanel } from "./ElementPanel";
@@ -590,6 +592,32 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     textTableOverlapCount > 0
       ? `文字・表が重なっています(${textTableOverlapCount}箇所)。出力にもそのまま写るため、ドラッグで位置を調整してください`
       : null;
+  // B-8 案A (2026-08-23 発注者判断): ボタンを押したときだけ自動で直す。
+  // 勝手には一切動かさない(「手動配置の尊重」との両立)。結果は履歴に乗る=
+  // 「元に戻す」で丸ごと戻せる。
+  const [autoFixNotice, setAutoFixNotice] = useState<string | null>(null);
+  const handleAutoFixOverlaps = useCallback(() => {
+    // 概要(何件直せたか)は純関数を**表示用に**先に走らせて作る。決定的なので
+    // 履歴へ積む本番適用(resolveOverlapsInState)と必ず同じ結果になる。
+    const r = resolveTextTableOverlapsInDocument(editorState.document);
+    if (r.document === editorState.document) {
+      setAutoFixNotice(
+        r.unresolved > 0
+          ? "自動では直せない重なりです(表どうし等)。ドラッグで調整してください"
+          : null,
+      );
+      return;
+    }
+    setEditorState(resolveOverlapsInState);
+    const parts: string[] = [];
+    if (r.shrunk.length > 0) parts.push(`縮小${r.shrunk.length}`);
+    if (r.moved.length > 0) parts.push(`移動${r.moved.length}`);
+    setAutoFixNotice(
+      r.unresolved > 0
+        ? `${parts.join("・")}で直しました。残り${r.unresolved}箇所は自動では直せません(ドラッグで調整してください)`
+        : `${parts.join("・")}で直しました(「元に戻す」で戻せます)`,
+    );
+  }, [editorState.document]);
 
   return (
     <div className="flex flex-col h-full bg-neutral-200 dark:bg-zinc-900">
@@ -615,6 +643,8 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         onOpenTransactionInfo={() => setTxInfoOpen(true)}
         canEditTransactionInfo={editorState.document.elements.some((e) => e.id === "footer-band")}
         layoutWarning={layoutWarning}
+        onAutoFixOverlaps={handleAutoFixOverlaps}
+        autoFixNotice={autoFixNotice}
       />
 
       {/* ── 写真ギャラリー（写真管理・計画④） ─────────────────────────── */}
