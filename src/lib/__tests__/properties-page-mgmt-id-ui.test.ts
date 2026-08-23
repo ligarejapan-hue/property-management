@@ -32,9 +32,10 @@ describe("properties page: 管理ID 検索欄", () => {
   });
 
   it("見分けは共通の純関数 classifyPropertySearch を使う", () => {
-    expect(pageSrc).toMatch(
-      /import \{ classifyPropertySearch \} from "@\/lib\/property-search-classify"/,
-    );
+    // R6 で toMgmtIdQuery も import するようになったため、名前の存在で見る。
+    expect(pageSrc).toContain('from "@/lib/property-search-classify"');
+    expect(pageSrc).toContain("classifyPropertySearch");
+    expect(pageSrc).toContain("toMgmtIdQuery");
   });
 
   it("fetchProperties で mgmtId クエリを送る", () => {

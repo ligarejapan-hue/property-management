@@ -87,7 +87,7 @@ describe("所有者検索の構造分離(@codex #404 R1〜R4 P1 の最終形)", 
   //   所有者検索 = 専用の小窓(POST の suggest のみ・keyword へ構造的に流れない)
 
   it("絞り込み窓の placeholder は所有者・電話を案内しない", () => {
-    expect(pageSrc).toMatch(/placeholder="住所・地番・管理ID\(例: 120行\)で一覧を絞り込み"/);
+    expect(pageSrc).toMatch(/placeholder="住所・地番・管理ID\(例: 120行, id:◯◯\)で一覧を絞り込み"/);
     expect(pageSrc).not.toMatch(/placeholder="[^"]*所有者[^"]*絞り込み/);
   });
 
