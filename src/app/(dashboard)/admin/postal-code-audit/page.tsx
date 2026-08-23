@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { Tabs, tabPanelProps } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui/page-header";
 import { Loader2, MapPinned, Download, AlertTriangle } from "lucide-react";
 import {
@@ -173,23 +174,13 @@ export default function PostalCodeAuditPage() {
             )}
           </div>
 
-          <div className="mb-3 flex gap-1 border-b border-gray-200 dark:border-gray-800">
-            {FILTER_TABS.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setFilter(tab.key)}
-                className={`px-3 py-2 text-sm font-medium ${
-                  filter === tab.key
-                    ? "border-b-2 border-indigo-600 text-indigo-700 dark:border-indigo-400 dark:text-indigo-400"
-                    : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+          {/* 第3弾⑪: 共通 Tabs */}
+          <Tabs idBase="postal-audit" className="mb-3" tabs={FILTER_TABS} active={filter} onChange={setFilter} />
 
-          <div className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-800">
+          <div
+            {...tabPanelProps("postal-audit", filter)}
+            className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-800"
+          >
             <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
               <thead className="bg-gray-50 dark:bg-gray-800/50">
                 <tr>

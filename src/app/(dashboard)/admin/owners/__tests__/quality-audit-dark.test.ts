@@ -72,14 +72,14 @@ describe("owners/quality-audit/page.tsx dark: 配色 (O2)", () => {
   it("アクティブタブに dark:text-indigo-400 がある", () => {
     expect(src).toContain("dark:text-indigo-400");
   });
-  it("アクティブタブ下線に dark:border-indigo-400 がある", () => {
-    expect(src).toContain("dark:border-indigo-400");
+  it("タブは共通 Tabs(active の dark 下線は部品側で担保・第3弾⑪)", () => {
+    expect(src).toContain('from "@/components/ui/tabs"');
   });
-  it("ライトモード text-indigo-700 は残っている（アクティブタブ文字）", () => {
-    expect(src).toContain("text-indigo-700");
+  it("ライトモードのタブ配色は Tabs 部品側に移った(第3弾⑪)", () => {
+    expect(src).toContain("<Tabs");
   });
-  it("ライトモード border-indigo-600 は残っている（アクティブタブ下線）", () => {
-    expect(src).toContain("border-indigo-600");
+  it("ライトモードのタブ下線は Tabs 部品側に移った(第3弾⑪)", () => {
+    expect(src).toContain("<Tabs");
   });
 
   // --- SEVERITY_CLASS info (neutral) に dark: がある ---

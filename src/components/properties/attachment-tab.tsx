@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   Loader2,
   Paperclip,
@@ -395,32 +396,13 @@ export default function AttachmentTab({
         <PreviewModal att={previewTarget} onClose={() => setPreviewTarget(null)} />
       )}
 
-      {/* Delete confirmation dialog */}
+      {/* Delete confirmation dialog(第3弾⑪: 共通 ConfirmDialog) */}
       {deleteTargetId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="mx-4 w-full max-w-sm rounded-lg bg-white dark:bg-gray-900 p-6 shadow-xl">
-            <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-              ファイルを削除しますか？
-            </h4>
-            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-              この操作は取り消せません。
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={() => setDeleteTargetId(null)}
-                className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
-              >
-                キャンセル
-              </button>
-              <button
-                onClick={() => handleDelete(deleteTargetId)}
-                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
-              >
-                削除
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="ファイルを削除しますか？"
+          onCancel={() => setDeleteTargetId(null)}
+          onConfirm={() => handleDelete(deleteTargetId)}
+        />
       )}
     </div>
   );

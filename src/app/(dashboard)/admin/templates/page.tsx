@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { ModalShell } from "@/components/ui/modal-shell";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { Loader2, Plus, Trash2 } from "lucide-react";
@@ -116,88 +119,58 @@ export default function TemplatesPage() {
 
       {/* Create modal */}
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md rounded-lg bg-white dark:bg-gray-900 p-6 shadow-xl">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
-              新規テンプレート作成
-            </h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
-                  テンプレート名 *
-                </label>
-                <input
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 dark:bg-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:ring-indigo-500"
-                  placeholder="例: 現地担当用"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
-                  説明
-                </label>
-                <textarea
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                  rows={2}
-                  className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 dark:bg-gray-900 focus:border-indigo-500 focus:ring-indigo-500"
-                />
-              </div>
-            </div>
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setShowCreate(false)}
-                className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
-              >
+        <ModalShell
+          title="新規テンプレート作成"
+          onClose={() => setShowCreate(false)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setShowCreate(false)}>
                 キャンセル
-              </button>
-              <button
-                type="button"
-                onClick={handleCreate}
-                disabled={creating || !newName.trim()}
-                className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50"
-              >
+              </Button>
+              <Button onClick={handleCreate} disabled={creating || !newName.trim()}>
                 {creating && <Loader2 className="h-4 w-4 animate-spin" />}
                 作成
-              </button>
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+                テンプレート名 *
+              </label>
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 dark:bg-gray-900 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:ring-indigo-500"
+                placeholder="例: 現地担当用"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+                説明
+              </label>
+              <textarea
+                value={newDesc}
+                onChange={(e) => setNewDesc(e.target.value)}
+                rows={2}
+                className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 dark:bg-gray-900 focus:border-indigo-500 focus:ring-indigo-500"
+              />
             </div>
           </div>
-        </div>
+        </ModalShell>
       )}
 
-      {/* Delete confirmation */}
+      {/* Delete confirmation(第3弾⑪: 共通 ConfirmDialog) */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-sm rounded-lg bg-white dark:bg-gray-900 p-6 shadow-xl">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-              テンプレート削除
-            </h2>
-            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4">
-              「{deleteTarget.name}」を削除しますか？この操作は取り消せません。
-            </p>
-            <div className="flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setDeleteTarget(null)}
-                className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
-              >
-                キャンセル
-              </button>
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={deleting}
-                className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-50"
-              >
-                {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
-                削除
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="テンプレート削除"
+          message={`「${deleteTarget.name}」を削除しますか？この操作は取り消せません。`}
+          busy={deleting}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
+        />
       )}
 
       {/* Table */}

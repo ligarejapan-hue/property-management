@@ -118,8 +118,8 @@ describe("correction page dark mode", () => {
     expect(src).toContain("dark:text-indigo-400");
   });
 
-  it("active tab border has dark:border-indigo-400 for readability on dark bg", () => {
-    expect(src).toContain("dark:border-indigo-400");
+  it("active tab styling is delegated to the shared Tabs component (第3弾⑪)", () => {
+    expect(src).toContain('from "@/components/ui/tabs"');
   });
 
   it("select-all button has dark:text-emerald-400 for readability on dark bg", () => {

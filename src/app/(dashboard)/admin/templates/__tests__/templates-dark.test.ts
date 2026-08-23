@@ -72,13 +72,9 @@ describe("admin/templates/page.tsx dark: 配色 (A2)", () => {
   it("アクセントリンクに dark:text-indigo-400 がある", () => {
     expect(listPage).toContain("dark:text-indigo-400");
   });
-  it("削除ボタンに dark:text-red-400 がある", () => {
-    expect(listPage).toContain("dark:text-red-400");
-  });
-
-  // --- モーダルパネル ---
-  it("モーダルパネルに暗背景クラスがある", () => {
-    expect(listPage).toContain("dark:bg-gray-900");
+  it("モーダルは共通 ModalShell/ConfirmDialog(暗色は部品側で担保・第3弾⑪)", () => {
+    expect(listPage).toContain('from "@/components/ui/modal-shell"');
+    expect(listPage).toContain('from "@/components/ui/confirm-dialog"');
   });
   it("モーダルキャンセルボタン枠線に dark:border-gray-700 がある", () => {
     expect(listPage).toContain("dark:border-gray-700");
