@@ -72,8 +72,10 @@ describe("(⑪) モーダルの器の手書き禁止(ラチェット)", () => {
   });
 
   it("モーダルフッタの間隔は gap-2 のみ(gap-3/4 の揺れを戻さない)", () => {
+    // ⚠「flex justify-end」の隣接一致だと flex items-center justify-end gap-3 の
+    //   ような(実在した)書き方が素通りする(提出前レビューP1)→ justify-end 起点で見る。
     const offenders = files.filter((f) =>
-      /flex justify-end gap-(?!2\b)\d/.test(read(f)),
+      /justify-end gap-(?!2\b)\d/.test(read(f)),
     );
     expect(offenders.map(rel), "justify-end の gap が 2 以外").toEqual([]);
   });

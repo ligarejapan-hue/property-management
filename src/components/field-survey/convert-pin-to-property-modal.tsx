@@ -408,7 +408,7 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
             </p>
           </div>
 
-          <div className="flex items-center justify-end gap-3 border-t border-gray-100 dark:border-gray-800 pt-4">
+          <div className="flex items-center justify-end gap-2 border-t border-gray-100 dark:border-gray-800 pt-4">
             <button
               type="button"
               onClick={onClose}

@@ -51,13 +51,8 @@ describe("postal-code-audit/page.tsx dark: 配色", () => {
   it("テーブル行区切りに dark:divide-gray-800 がある", () => {
     expect(src).toContain("dark:divide-gray-800");
   });
-  it("CSV ボタン枠線に dark:border-gray-700 がある", () => {
-    expect(src).toContain("dark:border-gray-700");
-  });
-
-  // --- タブ（フィルタタブ）---
-  it("アクティブタブ文字に dark:text-indigo-400 がある", () => {
-    expect(src).toContain("dark:text-indigo-400");
+  it("タブは共通 Tabs(暗色は部品側で担保・第3弾⑪)", () => {
+    expect(src).toContain('from "@/components/ui/tabs"');
   });
   it("非アクティブタブに dark:text-gray-400 がある", () => {
     expect(src).toContain("dark:text-gray-400");

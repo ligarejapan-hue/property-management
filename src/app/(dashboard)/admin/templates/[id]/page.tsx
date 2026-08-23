@@ -333,7 +333,7 @@ export default function TemplateEditPage({
       </section>
 
       {/* Save button */}
-      <div className="flex items-center justify-end gap-4">
+      <div className="flex items-center justify-end gap-2">
         {message && (
           <span
             className={`text-sm ${message.includes("失敗") || message.includes("必須") ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}
