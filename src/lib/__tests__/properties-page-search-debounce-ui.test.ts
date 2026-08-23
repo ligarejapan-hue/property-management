@@ -72,6 +72,13 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     expect(branch).toContain('setSearchText("")');
     expect(branch).toContain('setMgmtIdText("")');
     expect(branch).toContain("setPage(1)");
+    // ⚠保留中は絞り込みが空=全件になるため、CSV/DM出力を止める(@codex #404 R11 P1)。
+    expect(branch).toContain("setSearchPending(true)");
+    expect(pageSrc).toContain("selectedExportColumns.size === 0 || searchPending");
+    expect(pageSrc).toContain("exportingDm || searchPending");
+    // 完成・text・空・リセットで必ず解除される(立ちっぱなし防止)。
+    const clears = pageSrc.match(/setSearchPending\(false\)/g) ?? [];
+    expect(clears.length).toBeGreaterThanOrEqual(3);
   });
 
   it("⚠旧ブックマーク(keyword+mgmtId両方)は見える方(keyword)だけ復元する(@codex #404 R1 P2)", () => {

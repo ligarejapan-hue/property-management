@@ -310,6 +310,10 @@ function PropertiesPageInner() {
   // Enter」を絞り込みから守れない(R1→R2→R3→R4 と塞いでも別の穴が開いた)ため、
   // 経路そのものを分けた。
   const [ownerSearchOpen, setOwnerSearchOpen] = useState(false);
+  // 検索語が管理IDに**なりかけ**のまま止まっているか(@codex #404 R11 P1)。
+  // 保留中は絞り込みを空にするため、そのままCSV/DM出力を許すと**全件**が対象に
+  // なってしまう。完成するか消すまで、絞り込み依存の出力を止める。
+  const [searchPending, setSearchPending] = useState(false);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const suggestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 最後に発行した suggest query を記録する。in-flight の古いレスポンスを弾くために使う。
@@ -720,6 +724,7 @@ function PropertiesPageInner() {
     setSearchAllDraft(value);
     const kind = classifyPropertySearch(value);
     if (kind === "mgmtId") {
+      setSearchPending(false);
       commitSearch("", toMgmtIdQuery(value));
       return;
     }
@@ -727,6 +732,7 @@ function PropertiesPageInner() {
     //   300ms 止まると部分文字列が keyword=URL/監査に確定してしまうため、
     //   予約済みの確定も取り下げて完成を待つ(空に戻せば empty で消える)。
     if (kind === "mgmtIdPartial") {
+      setSearchPending(true);
       commitSearch.cancel();
       // ⚠確定済みの古い絞り込みも**即座に**消す(@codex #404 R10 P2)。残すと
       //   窓には新しい値・一覧/CSV/DMは**見えない古い条件**という食い違いのまま
@@ -743,6 +749,7 @@ function PropertiesPageInner() {
     //   URL/property_list 監査へは構造的に流れない。placeholder もその2用途
     //   (住所・地番/管理ID)だけを案内する。ゆえにここの text は非PII前提で
     //   従来どおり入力しながら即時絞り込みに流せる。
+    setSearchPending(false);
     commitSearch(kind === "text" ? value : "", "");
   };
 
@@ -778,6 +785,7 @@ function PropertiesPageInner() {
     // 保留中の検索 debounce を破棄してからリセットする
     // （後から確定コミットが走って検索語が復活しないように）。
     commitSearch.cancel();
+    setSearchPending(false);
     setSuggestOpen(false);
     setSuggestResults([]);
     setOwnerSearchOpen(false);
@@ -1011,12 +1019,14 @@ function PropertiesPageInner() {
                 <button
                   type="button"
                   onClick={handleExportCsv}
-                  disabled={selectedExportColumns.size === 0}
+                  disabled={selectedExportColumns.size === 0 || searchPending}
                   className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                   title={
-                    selectedExportColumns.size === 0
-                      ? "1列以上選択してください"
-                      : "現在の検索条件で選択列をCSV出力"
+                    searchPending
+                      ? "検索語が入力途中です(管理IDを最後まで入力するか、消してください)"
+                      : selectedExportColumns.size === 0
+                        ? "1列以上選択してください"
+                        : "現在の検索条件で選択列をCSV出力"
                   }
                 >
                   <Download className="h-4 w-4" />
@@ -1030,9 +1040,13 @@ function PropertiesPageInner() {
           <button
             type="button"
             onClick={handleExportDm}
-            disabled={exportingDm}
+            disabled={exportingDm || searchPending}
             className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-            title="現在の検索条件で送付可の物件をDM差込CSV出力(控えが作られ、投函後に送付を確定できます)"
+            title={
+              searchPending
+                ? "検索語が入力途中です(管理IDを最後まで入力するか、消してください)"
+                : "現在の検索条件で送付可の物件をDM差込CSV出力(控えが作られ、投函後に送付を確定できます)"
+            }
           >
             {exportingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             DM差込CSV出力
