@@ -393,20 +393,16 @@ describe("field-survey-map.tsx — PII / API 境界", () => {
     expect(filterRegion?.[0]).not.toMatch(/typeof\s+\w+\.lat\s*===\s*"number"/);
   });
 
-  it("共有フック useMapGestureHandling がタッチ端末検出で cooperative / greedy を返す", () => {
-    // 地図が画面を占有して周囲 UI に触れなくなる問題の対策。タッチ入力検出は
-    // useSyncExternalStore + matchMedia("(any-pointer: coarse)")。
-    // ハイブリッド機(タッチPC+マウス)でも再発しないよう any-pointer を使う。
-    expect(GESTURE_HOOK_SRC).toMatch(/useSyncExternalStore/);
-    expect(GESTURE_HOOK_SRC).toMatch(/\(any-pointer:\s*coarse\)/);
-    expect(GESTURE_HOOK_SRC).not.toMatch(/matchMedia\(["']\(pointer:\s*coarse\)["']\)/);
-    expect(GESTURE_HOOK_SRC).toMatch(
-      /isCoarsePointer\s*\?\s*["']cooperative["']\s*:\s*["']greedy["']/,
-    );
+  it("共有フック useMapGestureHandling は greedy 固定(発注者決定 2026-08-24・第1弾 B1)", () => {
+    // 旧: タッチ端末は cooperative(1本指=ページ送り)。この地図は画面いっぱいの
+    // 固定レイアウトで送る先のページが無く、片手操作で毎回2本指を要求するだけ
+    // だった。cooperative へ戻す変異はここで落ちる。
+    expect(GESTURE_HOOK_SRC).toMatch(/return "greedy";/);
+    expect(GESTURE_HOOK_SRC).not.toMatch(/\?\s*["']cooperative["']/);
     expect(GESTURE_HOOK_SRC).toMatch(/export function useMapGestureHandling/);
   });
 
-  it("現地調査マップ本体と履歴マップの両方が共有フックで gestureHandling を切替える(greedy 固定にしない)", () => {
+  it("本体と履歴マップの両方が共有フック経由(判断を1箇所に保つ)", () => {
     for (const src of [MAP_SRC, HISTORY_MAP_SRC]) {
       expect(src).toMatch(/useMapGestureHandling\(\)/);
       expect(src).toMatch(/gestureHandling=\{mapGestureHandling\}/);

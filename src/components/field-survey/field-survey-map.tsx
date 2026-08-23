@@ -61,6 +61,11 @@ import {
   type CameraFirstPhase,
 } from "@/lib/field-survey-camera-first";
 import { recenterZoom } from "@/lib/field-survey-map-recenter";
+import {
+  coverageOnMapNotice,
+  truncationNotice,
+} from "@/lib/field-survey-map-notices";
+import { useGrantedGeolocationWatch } from "./use-display-position";
 import PinDetailPanel from "@/components/field-survey/pin-detail-panel";
 import { useFieldSurveyPinMutations } from "@/components/field-survey/use-field-survey-pin-mutations";
 import {
@@ -101,6 +106,8 @@ const CONTEXT_FIRE_DEDUPE_MS = 800;
 // 巡回開始時に寄せる倍率。既定 (14) は市区町村が入る広さで、街を歩きながら
 // 使うには広すぎる。17 なら建物の並びが判別できる。
 const TRIP_START_ZOOM = 17;
+/** 巡回開始の自動寄せ予約の寿命 (第1弾 B2)。 */
+const AUTO_CENTER_ON_START_TTL_MS = 15_000;
 const FETCH_DEBOUNCE_MS = 500;
 const PROPERTY_LIMIT = 200;
 const PIN_LIMIT = 100;
@@ -259,6 +266,10 @@ export default function FieldSurveyMap({
   // <Map> の外にあるため、Map 内で useMap() で捕捉した値を state に上げる
   // (<MapInstanceCapture>)。押された時だけ panTo を呼ぶ (自動 pan しない)。
   const [mapInstance, setMapInstance] = useState<unknown>(null);
+  // 第1弾 A3/A4: 地図データ層から吊り上げる表示状態(上部中央スタックで出す)。
+  const [mapLoading, setMapLoading] = useState(false);
+  const [pinsTruncated, setPinsTruncated] = useState(false);
+  const [propertiesTruncated, setPropertiesTruncated] = useState(false);
 
   // 地図左下の「現在地へ移動」FAB から呼ぶ pan (2026-08-03)。
   // ⚠**パネル内にあった同名ボタンは廃止した** (2026-08-03 発注者指示)。
@@ -322,11 +333,51 @@ export default function FieldSurveyMap({
     [recorder.status, recenterLivePos],
   );
 
-  // 位置記録中かつ最新位置が取得済の時のみ現在地マーカーを描画する。
-  const showCurrentLocationMarker =
-    !!activeSession &&
-    recorder.status === "recording" &&
-    !!recorder.latestPositionForDisplay;
+  const handleTruncationChange = useCallback(
+    (t: { pins: boolean; properties: boolean }) => {
+      setPinsTruncated(t.pins);
+      setPropertiesTruncated(t.properties);
+    },
+    [],
+  );
+  const autoCenterOnStartRef = useRef(false);
+  // 第1弾 B2: 自動で寄せる予約の寿命。測位に時間がかかったとき、忘れた頃に
+  // 突然引き戻さない(タイムアウトで諦める+ユーザーが地図を動かしたら破棄)。
+  const autoCenterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ⚠ref/timer の書き換えは useCallback 包みに寄せる(react-hooks/immutability が
+  //   render 経路とみなす場所での .current 書き換えを弾くため。同ファイルの
+  //   他 helper と同じ作法)。
+  const armAutoCenterOnStart = useCallback(() => {
+    autoCenterOnStartRef.current = true;
+    if (autoCenterTimerRef.current) clearTimeout(autoCenterTimerRef.current);
+    autoCenterTimerRef.current = setTimeout(() => {
+      autoCenterOnStartRef.current = false;
+    }, AUTO_CENTER_ON_START_TTL_MS);
+  }, []);
+  const cancelAutoCenterOnStart = useCallback(() => {
+    autoCenterOnStartRef.current = false;
+    if (autoCenterTimerRef.current) clearTimeout(autoCenterTimerRef.current);
+  }, []);
+
+  // 第1弾 A3/A4: 上部中央スタックに出す文言(純関数で決定)。
+  const truncationNoticeText = truncationNotice({
+    pinsTruncated,
+    propertiesTruncated,
+  });
+  const coverageNoticeText = coverageOnMapNotice({
+    coverage: coverageState.status,
+    tracks: tracksState.status,
+  });
+
+  // 第1弾 A6: 現在地マーカーは「巡回中かつ記録中」限定をやめる。
+  // 記録中は recorder の位置、それ以外は**許可済みのときだけ**表示専用 watch
+  // (勝手に権限プロンプトは出さない)。タップで家を指す操作の前提として、
+  // 自分の立ち位置は常に地図に出す。
+  const grantedDisplayPos = useGrantedGeolocationWatch(
+    recorder.status !== "recording",
+  );
+  const displayPosition = recenterLivePosition ?? grantedDisplayPos;
+  const showCurrentLocationMarker = !!displayPosition;
 
   // Phase 1-G / 1-I: pin 追加モード / 詳細パネル用の write/manage 権限。
   //
@@ -618,7 +669,6 @@ export default function FieldSurveyMap({
   // 巡回開始時に一度だけ走らせる自動処理の予約。開始の瞬間には session id も
   // 現在地もまだ無いため、その場では実行できない (下の effect で消化する)。
   const autoStartRecordingRef = useRef(false);
-  const autoCenterOnStartRef = useRef(false);
   const handleActiveSessionChange = useCallback(
     (s: ActiveSessionLike | null, opts?: { justStarted?: boolean }) => {
       const nextId = s?.id ?? null;
@@ -655,13 +705,15 @@ export default function FieldSurveyMap({
         // 覆して休憩場所を記録してしまう。
         if (prevId === null && nextId !== null && opts?.justStarted) {
           autoStartRecordingRef.current = true;
-          autoCenterOnStartRef.current = true;
+          // 第1弾 B2: 予約は15秒で失効(armAutoCenterOnStart)。屋内で測位に
+          // 1分かかるような場合、忘れた頃に突然引き戻さない。
+          armAutoCenterOnStart();
         }
         // 終了したら予約を取り消す。位置が最後まで取れないまま終わった場合に
         // 予約が残ると、次に地図が用意できた時点で意図せず寄ってしまう。
         if (nextId === null) {
           autoStartRecordingRef.current = false;
-          autoCenterOnStartRef.current = false;
+          cancelAutoCenterOnStart();
         }
         // 種類の引き継ぎも巡回単位でリセットする (別の巡回に前回の種類を
         // 持ち越さない。既定 = candidate)。
@@ -678,7 +730,7 @@ export default function FieldSurveyMap({
       }
       setActiveSession(s);
     },
-    [resetCameraFirst, bumpRefetch],
+    [resetCameraFirst, bumpRefetch, armAutoCenterOnStart, cancelAutoCenterOnStart],
   );
 
   // 巡回が始まったら位置記録も始める。
@@ -706,14 +758,22 @@ export default function FieldSurveyMap({
     const m = mapInstance as {
       panTo?: (p: { lat: number; lng: number }) => void;
       setZoom?: (z: number) => void;
+      getZoom?: () => number | undefined;
     } | null;
     // 地図がまだ用意できていない間も予約を残す (用意でき次第この effect が
     // 再実行される)。ここで落とすと「位置は取れたが地図が間に合わなかった」
     // 時に永久に寄らない。
     if (!m || typeof m.panTo !== "function") return;
     autoCenterOnStartRef.current = false;
+    if (autoCenterTimerRef.current) clearTimeout(autoCenterTimerRef.current);
     m.panTo({ lat: pos.lat, lng: pos.lng });
-    if (typeof m.setZoom === "function") m.setZoom(TRIP_START_ZOOM);
+    // 第1弾 B2: ズームは現在地ボタンと同じ規則(引きすぎのときだけ寄せる)に統一。
+    // 番地単位で見ていた人を無条件に z17 へ引かない。
+    const z = recenterZoom({
+      currentZoom: typeof m.getZoom === "function" ? m.getZoom() : null,
+      tripZoom: TRIP_START_ZOOM,
+    });
+    if (z !== null && typeof m.setZoom === "function") m.setZoom(z);
     // activeSession?.id も依存に入れる。2回目の巡回で現在地の値がたまたま
     // 前回と同一参照のままだと、予約を立てても再実行されず寄らない。
   }, [activeSession?.id, mapInstance, recorder.latestPositionForDisplay]);
@@ -1048,13 +1108,16 @@ export default function FieldSurveyMap({
             onMapClick={handleMapClick}
             onMapContextMenu={handleMapContextCreate}
             onOpenPinDetail={setDetailPinId}
+            onLoadingChange={setMapLoading}
+            onTruncationChange={handleTruncationChange}
+            onUserDrag={cancelAutoCenterOnStart}
           />
           <MapInstanceCapture onMap={setMapInstance} />
           {activeSession && <RoutePolyline points={polylinePoints} />}
-          {showCurrentLocationMarker && recorder.latestPositionForDisplay && (
+          {showCurrentLocationMarker && displayPosition && (
             <CurrentLocationMarker
-              lat={recorder.latestPositionForDisplay.lat}
-              lng={recorder.latestPositionForDisplay.lng}
+              lat={displayPosition.lat}
+              lng={displayPosition.lng}
             />
           )}
           {/* 「この場所を地図で見る」で指定されたピンの強調マーカー。PIN_LIMIT で
@@ -1155,12 +1218,40 @@ export default function FieldSurveyMap({
             />
           </div>
         )}
-        {cameraFirstPhase === "awaiting-map-tap" && !panelOpen && (
-          <CameraFirstBanner
-            hasPhoto={cameraFirstHasPhoto}
-            onCancel={resetCameraFirst}
-          />
-        )}
+        {/* 画面上部中央の通知スタック(第1弾 A3/A4/A5)。タップ待ちバナーは以前
+            下端(bottom-14)にあり、現在地ボタンを完全に覆っていた(A5)。下端の帯
+            (現在地/撮影/巡回開始)と住み分けるため、通知類はここへ集約する。 */}
+        <div className="pointer-events-none absolute left-1/2 top-3 z-10 flex w-[calc(100%-1.5rem)] max-w-sm -translate-x-1/2 flex-col items-stretch gap-1.5">
+          {cameraFirstPhase === "awaiting-map-tap" && !panelOpen && (
+            <CameraFirstBanner
+              hasPhoto={cameraFirstHasPhoto}
+              onCancel={resetCameraFirst}
+            />
+          )}
+          {mapLoading && (
+            <div className="rounded-md bg-white/90 px-3 py-1 text-center text-xs text-gray-700 shadow dark:bg-gray-900/90 dark:text-gray-300">
+              読み込み中…
+            </div>
+          )}
+          {truncationNoticeText && (
+            <div
+              role="status"
+              data-testid="map-truncation-notice"
+              className="rounded-md border border-amber-300 bg-amber-50 px-3 py-1 text-center text-xs text-amber-900 shadow dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200"
+            >
+              {truncationNoticeText}
+            </div>
+          )}
+          {coverageNoticeText && (
+            <div
+              role="status"
+              data-testid="map-coverage-notice"
+              className="rounded-md border border-amber-300 bg-amber-50 px-3 py-1 text-center text-xs text-amber-900 shadow dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200"
+            >
+              {coverageNoticeText}
+            </div>
+          )}
+        </div>
 
         {/* 巡回していない時の地図下部。「巡回なしで撮影」権限があれば
             「📷撮って登録」を主ボタンとして左に、「🚶巡回を開始」を副ボタンとして
@@ -1724,6 +1815,9 @@ function MapDataLayer({
   coverageDays,
   onCoverageState,
   onTracksState,
+  onLoadingChange,
+  onTruncationChange,
+  onUserDrag,
 }: {
   layers: Record<Layer, boolean>;
   /**
@@ -1745,6 +1839,12 @@ function MapDataLayer({
     status: CoverageStatus;
   }) => void;
   onError: (msg: string | null) => void;
+  /** 読み込み中チップは上部中央スタック(親)で出す(第1弾 A3)。 */
+  onLoadingChange: (loading: boolean) => void;
+  /** ピン/物件の打ち切り(API の hasNext)を親へ(第1弾 A3)。 */
+  onTruncationChange: (t: { pins: boolean; properties: boolean }) => void;
+  /** ユーザーが地図をドラッグした(第1弾 B2: 自動寄せ予約の破棄に使う)。 */
+  onUserDrag: () => void;
   refetchNonce: number;
   /** ピンの「自分/他人」縁色の判定用 (server-side で確定済みのログイン userId)。 */
   currentUserId: string;
@@ -1768,7 +1868,7 @@ function MapDataLayer({
     latStep: number;
     lngStep: number;
   } | null>(null);
-  const [loading, setLoading] = useState(false);
+
   const [selected, setSelected] = useState<
     | { kind: "property"; row: PropertyRow }
     | { kind: "pin"; row: PinRow }
@@ -1781,6 +1881,8 @@ function MapDataLayer({
     async (b: Bbox) => {
       const v = validateBbox(b);
       if (!v.ok) {
+        // 第1弾 A3: 取得しない範囲では打ち切りの断りも消す(古い断りを残さない)。
+        onTruncationChange({ pins: false, properties: false });
         // 面積過大はユーザーにズームアップを促す (詳細座標は出さない)
         if (v.reason === "too_large_lat" || v.reason === "too_large_lng") {
           onError(
@@ -1812,7 +1914,7 @@ function MapDataLayer({
       const ac = new AbortController();
       abortRef.current = ac;
 
-      setLoading(true);
+      onLoadingChange(true);
       try {
         const tasks: Promise<Response>[] = [];
         if (layers.properties) {
@@ -1995,12 +2097,22 @@ function MapDataLayer({
         }
 
         const results = await Promise.all(tasks);
+        // 第1弾 A3: 打ち切り(nextCursor 非 null)。取得しなかった/失敗した層は false
+        // (分からないものを「まだある」とは言わない)。
+        let propertiesTruncatedNext = false;
+        let pinsTruncatedNext = false;
         let idx = 0;
         if (layers.properties) {
           const r = results[idx++];
           if (r.ok) {
-            const j = (await r.json()) as { data?: PropertyRow[] };
+            const j = (await r.json()) as {
+              data?: PropertyRow[];
+              nextCursor?: string | null;
+            };
             setProperties(filterValidGps(j.data ?? []));
+            // ⚠実契約は nextCursor(hasNext というフィールドは API に無い。
+            //   @codex #407 R2 P1: 存在しない鍵を読んで断りが一度も出なかった)。
+            propertiesTruncatedNext = typeof j.nextCursor === "string";
           } else {
             handleHttpError(r.status, onError);
           }
@@ -2014,16 +2126,28 @@ function MapDataLayer({
             // のみを返すため、クライアント側 strip は不要。防御として
             // 万一 memo key が残っていた場合に備えた追加 strip は行わない
             // (生 memo を一度でも client メモリに乗せないため)。
-            const j = (await r.json()) as { data?: PinRow[] };
+            const j = (await r.json()) as {
+              data?: PinRow[];
+              nextCursor?: string | null;
+            };
             setPins(filterValidPinGps(j.data ?? []));
+            pinsTruncatedNext = typeof j.nextCursor === "string";
           } else {
             handleHttpError(r.status, onError);
           }
         } else {
           setPins([]);
         }
+        onTruncationChange({
+          pins: pinsTruncatedNext,
+          properties: propertiesTruncatedNext,
+        });
       } catch (err) {
         if ((err as { name?: string }).name === "AbortError") return;
+        // ⚠打ち切りの断りもここで消す(@codex #407 R1 P2)。成功経路でしか
+        //   更新しないと、前の画面の「表示しきれていない…」が通信断の後も
+        //   残り続ける(直前に OFF にした層の断りすら残り得る)。
+        onTruncationChange({ pins: false, properties: false });
         // ⚠通信失敗でも**古い色を必ず消す** (@codex #332 P2)。残すと、期間を
         // 「直近1年」から「全期間」へ切り替えた直後に失敗した場合、画面は新しい
         // 期間を選んだ状態のまま**古い期間の色**を描き続ける。
@@ -2041,10 +2165,14 @@ function MapDataLayer({
         // 詳細は console / UI に出さない
         onError("地図データの取得に失敗しました。");
       } finally {
-        setLoading(false);
+        // ⚠解除は**最新の fetch だけ**が行う(#404 R8 と同型の早消し防止。
+        //   abort された古い fetch の finally が、進行中の「読み込み中」を消さない)。
+        if (abortRef.current === ac) onLoadingChange(false);
       }
     },
     [
+      onLoadingChange,
+      onTruncationChange,
       layers.properties,
       layers.pins,
       layers.coverage,
@@ -2063,6 +2191,11 @@ function MapDataLayer({
       void fetchForBbox(b);
     }, FETCH_DEBOUNCE_MS);
 
+    // 第1弾 B2: ユーザーが自分で地図を動かしたら、巡回開始の自動寄せ予約を
+    // 破棄する(見始めた場所から引き戻さない)。
+    const dragListener = map.addListener("dragstart", () => {
+      onUserDrag();
+    });
     const listener = map.addListener("idle", () => {
       const bounds = map.getBounds();
       if (!bounds) return;
@@ -2078,10 +2211,11 @@ function MapDataLayer({
 
     return () => {
       debounced.cancel();
+      dragListener.remove();
       listener.remove();
       if (abortRef.current) abortRef.current.abort();
     };
-  }, [map, fetchForBbox]);
+  }, [map, fetchForBbox, onUserDrag]);
 
   // layer toggle / pin 作成 / 編集成功時に現在 bbox で再 fetch する。
   useEffect(() => {
@@ -2351,11 +2485,6 @@ function MapDataLayer({
         </InfoWindow>
       )}
 
-      {loading && (
-        <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-md bg-white/90 px-3 py-1 text-xs text-gray-700 shadow dark:bg-gray-900/90 dark:text-gray-300">
-          読み込み中…
-        </div>
-      )}
     </>
   );
 }
@@ -2379,6 +2508,8 @@ function PropertyInfo({ row }: { row: PropertyRow }) {
       <div className="mt-2">
         <a
           href={`/properties/${row.id}`}
+          target="_blank"
+          rel="noopener noreferrer"
           className="text-indigo-600 hover:underline"
         >
           詳細を開く →
@@ -2405,6 +2536,8 @@ function PinInfo({ row, onOpenDetail }: { row: PinRow; onOpenDetail: () => void 
           {row.propertyId ? (
             <a
               href={`/properties/${row.propertyId}`}
+              target="_blank"
+              rel="noopener noreferrer"
               className="text-indigo-600 hover:underline"
             >
               紐付け済 →
