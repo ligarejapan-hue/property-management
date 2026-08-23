@@ -54,8 +54,9 @@ describe("owners/[id]/page.tsx dark: 配色 (O1)", () => {
   });
 
   // --- hover 可読化（backlink） ---
-  it("back リンクに dark:hover:text-gray-200 がある", () => {
-    expect(detailSrc).toContain("dark:hover:text-gray-200");
+  it("back リンクは共通 BackLink(dark:hover は部品側で担保・第2弾⑩)", () => {
+    // dark:hover:text-gray-200 は src/components/ui/back-link.tsx が持つ。
+    expect(detailSrc).toContain('to: "補正候補一覧"');
   });
 
   // --- ライト側不変担保 ---

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, use } from "react";
+import { BackLink } from "@/components/ui/back-link";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -244,9 +245,7 @@ export default function BuildingDetailPage({
     return (
       <div className="py-10 text-center">
         <p className="mb-4 text-red-600 dark:text-red-400">{error ?? "棟が見つかりません"}</p>
-        <Link href="/buildings" className="text-sm text-indigo-600 hover:underline dark:text-indigo-400">
-          棟一覧に戻る
-        </Link>
+        <BackLink href="/buildings" to="棟一覧" />
       </div>
     );
   }

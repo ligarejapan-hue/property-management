@@ -87,8 +87,9 @@ describe("admin/audit-logs/page.tsx dark: 配色 (admin残)", () => {
   it("入力欄に dark:border-gray-700 がある", () => {
     expect(src).toContain("dark:border-gray-700");
   });
-  it("placeholder に dark:placeholder:text-gray-500 がある", () => {
-    expect(src).toContain("dark:placeholder:text-gray-500");
+  it("検索窓は共通 SearchField(placeholder の dark は部品側で担保・第2弾②)", () => {
+    // dark:placeholder:text-gray-500 は src/components/ui/search-field.tsx が持つ。
+    expect(src).toContain("<SearchField");
   });
 
   // --- ページネーション ---

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef, use } from "react";
+import { BackLink } from "@/components/ui/back-link";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -596,12 +597,7 @@ export default function PropertyDetailPage({
         <p className="text-sm text-red-700 dark:text-red-300">
           {error ?? "物件が見つかりません"}
         </p>
-        <Link
-          href="/properties"
-          className="mt-3 inline-block text-sm text-indigo-600 hover:underline"
-        >
-          物件一覧に戻る
-        </Link>
+        <BackLink href="/properties" to="物件一覧" className="mt-3" />
       </div>
     );
   }

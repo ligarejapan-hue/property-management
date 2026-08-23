@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { FilterPanel } from "@/components/ui/filter-panel";
+import { Button } from "@/components/ui/button";
 import { formatJaDateTime } from "@/lib/format-datetime";
 import {
   Upload,
@@ -10,7 +12,6 @@ import {
   XCircle,
   AlertTriangle,
   RefreshCw,
-  ChevronLeft,
   ChevronRight,
   GripVertical,
   Eye,
@@ -22,6 +23,7 @@ import {
   ClipboardCheck,
   DownloadCloud,
 } from "lucide-react";
+import { Pagination } from "@/components/ui/pagination";
 import Link from "next/link";
 import {
   importCsv,
@@ -2351,72 +2353,82 @@ export default function ImportPage() {
           </button>
         </div>
 
-        {/* ---- フィルタ UI（段階A: 取込種別 / 実行者 / 日付範囲） ---- */}
-        <div className="mb-4 grid grid-cols-1 gap-3 rounded-md border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 p-3 sm:grid-cols-2 lg:grid-cols-5">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-              種別
-            </label>
-            <select
-              value={jobFilters.jobType}
-              onChange={(e) => updateJobFilter("jobType", e.target.value)}
-              className="w-full rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            >
-              {JOB_TYPE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-              実行者
-            </label>
-            <select
-              value={jobFilters.executedBy}
-              onChange={(e) => updateJobFilter("executedBy", e.target.value)}
-              className="w-full rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            >
-              <option value="">すべての実行者</option>
-              {executorOptions.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-              日付（開始）
-            </label>
-            <input
-              type="date"
-              value={jobFilters.from}
-              onChange={(e) => updateJobFilter("from", e.target.value)}
-              className="w-full rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
-              日付（終了）
-            </label>
-            <input
-              type="date"
-              value={jobFilters.to}
-              onChange={(e) => updateJobFilter("to", e.target.value)}
-              className="w-full rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            />
-          </div>
-          <div className="flex items-end">
-            <button
-              onClick={handleResetJobFilters}
-              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
-              フィルタをクリア
-            </button>
-          </div>
-        </div>
+        {/* ---- フィルタ UI(第2弾⑥⑦: FilterPanel=よく使う+詳細条件▾) ---- */}
+        <FilterPanel
+          className="mb-4"
+          primary={
+            <>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  種別
+                </label>
+                <select
+                  value={jobFilters.jobType}
+                  onChange={(e) => updateJobFilter("jobType", e.target.value)}
+                  className="w-44 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  {JOB_TYPE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  実行者
+                </label>
+                <select
+                  value={jobFilters.executedBy}
+                  onChange={(e) => updateJobFilter("executedBy", e.target.value)}
+                  className="w-44 rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                >
+                  <option value="">すべての実行者</option>
+                  {executorOptions.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="self-end"
+                onClick={handleResetJobFilters}
+              >
+                フィルタをクリア
+              </Button>
+            </>
+          }
+          advancedCount={[jobFilters.from, jobFilters.to].filter(Boolean).length}
+          advanced={
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  日付（開始）
+                </label>
+                <input
+                  type="date"
+                  value={jobFilters.from}
+                  onChange={(e) => updateJobFilter("from", e.target.value)}
+                  className="w-full rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">
+                  日付（終了）
+                </label>
+                <input
+                  type="date"
+                  value={jobFilters.to}
+                  onChange={(e) => updateJobFilter("to", e.target.value)}
+                  className="w-full rounded border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 py-1 px-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+          }
+        />
 
         {/* ---- ページネーション バー（テーブル上部）----
             APIから返る pagination をそのまま信頼し、件数表示・limit 切替・
@@ -2427,25 +2439,21 @@ export default function ImportPage() {
           const totalPages = jobPagination?.totalPages ?? 1;
           const currentPage = jobPagination?.page ?? jobPage;
           const currentLimit = jobPagination?.limit ?? jobLimit;
-          // 「全N件中 X〜Y件を表示」の数値計算
-          // 0 件時は X / Y を出さず「全 0 件」のみ表示する
-          const rangeStart = total === 0 ? 0 : (currentPage - 1) * currentLimit + 1;
-          const rangeEnd = total === 0 ? 0 : Math.min(currentPage * currentLimit, total);
-          const canPrev = currentPage > 1 && !jobsLoading;
-          const canNext = currentPage < totalPages && !jobsLoading;
           return (
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600 dark:text-gray-300">
-              <div>
-                {total === 0 ? (
-                  <span>全 0 件</span>
-                ) : (
-                  <span>
-                    全 <strong>{total}</strong> 件中{" "}
-                    <strong>{rangeStart}</strong>〜<strong>{rangeEnd}</strong> 件を表示
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
+            <Pagination
+              className="mb-3"
+              page={currentPage}
+              totalPages={totalPages}
+              total={total}
+              pageSize={currentLimit}
+              busy={jobsLoading}
+              onPrev={() => setJobPage((p) => Math.max(1, p - 1))}
+              onNext={() =>
+                setJobPage((p) =>
+                  jobPagination ? Math.min(jobPagination.totalPages, p + 1) : p + 1,
+                )
+              }
+            >
                 <label className="flex items-center gap-1">
                   <span className="text-gray-500 dark:text-gray-400">1ページあたり</span>
                   <select
@@ -2460,33 +2468,7 @@ export default function ImportPage() {
                     <option value={100}>100件</option>
                   </select>
                 </label>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setJobPage((p) => Math.max(1, p - 1))}
-                    disabled={!canPrev}
-                    className="flex items-center gap-0.5 rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                    前へ
-                  </button>
-                  <span className="px-2 tabular-nums">
-                    <strong>{currentPage}</strong> / {totalPages}
-                  </span>
-                  <button
-                    onClick={() =>
-                      setJobPage((p) =>
-                        jobPagination ? Math.min(jobPagination.totalPages, p + 1) : p + 1,
-                      )
-                    }
-                    disabled={!canNext}
-                    className="flex items-center gap-0.5 rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    次へ
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
+            </Pagination>
           );
         })()}
 

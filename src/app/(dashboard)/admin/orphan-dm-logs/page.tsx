@@ -1,10 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { SearchField } from "@/components/ui/search-field";
+import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/page-header";
 import { USE_MOCK } from "@/lib/api-client";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
+import { Pagination } from "@/components/ui/pagination";
 import {
   REACTION_STATUSES,
   REACTION_LABELS,
@@ -127,12 +131,10 @@ export default function OrphanDmLogsPage() {
         <span className="text-gray-900 dark:text-gray-100">孤児DM記録の訂正</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">孤児DM記録の訂正</h1>
-      <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-        物件を削除しても、DMの送付記録は所有者に引き継がれます(拒否・宛先不明の履歴を守るため)。
-        ここでは物件ページから辿れなくなった記録の反響の訂正・記録の取消ができます。
-        誤った「拒否・宛先不明」が残っていると、その所有者へのDMがずっと止まったままになります。
-      </p>
+      <PageHeader
+        title="孤児DM記録の訂正"
+        description="物件を削除しても、DMの送付記録は所有者に引き継がれます(拒否・宛先不明の履歴を守るため)。ここでは物件ページから辿れなくなった記録の反響の訂正・記録の取消ができます。誤った「拒否・宛先不明」が残っていると、その所有者へのDMがずっと止まったままになります。"
+      />
 
       {message && (
         <div className="mb-4 rounded-md border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-500/10 px-4 py-2 text-sm text-blue-800 dark:text-blue-200">
@@ -148,19 +150,13 @@ export default function OrphanDmLogsPage() {
           setQuery(searchInput);
         }}
       >
-        <input
-          type="text"
+        {/* 第2弾②: 検索窓は SearchField(左端・幅統一) */}
+        <SearchField
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           placeholder="所有者名で検索"
-          className="w-64 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100"
         />
-        <button
-          type="submit"
-          className="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
-        >
-          検索
-        </button>
+        <Button type="submit">検索</Button>
       </form>
 
       <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
@@ -205,30 +201,16 @@ export default function OrphanDmLogsPage() {
         )}
       </div>
 
-      <div className="mt-4 flex items-center justify-between">
-        <p className="text-sm text-gray-500 dark:text-gray-400">全 {total} 件</p>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => p - 1)}
-            className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:text-gray-400 disabled:cursor-not-allowed"
-          >
-            前へ
-          </button>
-          <span className="flex items-center px-2 text-sm text-gray-500 dark:text-gray-400">
-            {page} / {totalPages || 1}
-          </span>
-          <button
-            type="button"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => p + 1)}
-            className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:text-gray-400 disabled:cursor-not-allowed"
-          >
-            次へ
-          </button>
-        </div>
-      </div>
+      <Pagination
+        className="mt-4"
+        page={page}
+        totalPages={totalPages}
+        total={total}
+        pageSize={limit}
+        busy={loading}
+        onPrev={() => setPage((p) => p - 1)}
+        onNext={() => setPage((p) => p + 1)}
+      />
     </div>
   );
 }

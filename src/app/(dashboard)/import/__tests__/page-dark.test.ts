@@ -82,8 +82,9 @@ describe("import/page.tsx dark: RoStat 集計カード tone カバレッジ固�
 // @codex #231 round2: 取込履歴カード(dark:bg-gray-900)内のページネーション一式と、
 // 取込完了バナー(dark:bg-green-500/10)内の色付き集計文字が暗面で未dark→低コントラストだった。
 describe("import/page.tsx dark: ページネーション/取込完了集計の暗面可読性（@codex round2）", () => {
-  it("ページネーション件数文(text-gray-600)に dark:text-gray-300", () => {
-    expect(src).toContain("justify-between gap-2 text-xs text-gray-600 dark:text-gray-300");
+  it("ページネーションは共通 Pagination(件数文の dark は部品側で担保)", () => {
+    // 第2弾⑨で共通部品化。dark:text-gray-300 等は部品テストが固定。
+    expect(src).toContain("<Pagination");
   });
   it("「1ページあたり」ラベル(text-gray-500)に dark:text-gray-400", () => {
     expect(src).toContain('text-gray-500 dark:text-gray-400">1ページあたり');
@@ -91,8 +92,8 @@ describe("import/page.tsx dark: ページネーション/取込完了集計の�
   it("limit select に dark の border/bg/text", () => {
     expect(src).toContain("px-1.5 text-xs dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100");
   });
-  it("前へ/次へボタンに dark の border/bg/text/hover", () => {
-    expect(src).toContain("text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800");
+  it("前へ/次へは共通 Pagination の Button(dark は部品テストで担保)", () => {
+    expect(src).toContain('busy={jobsLoading}');
   });
   it("取込完了バナーの集計ラベルに dark:text-*-300（成功/うち更新/要レビュー/エラー）", () => {
     expect(src).toContain('text-green-600 dark:text-green-300">成功:');

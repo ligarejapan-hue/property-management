@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { Loader2, Save, ShieldCheck, ShieldAlert } from "lucide-react";
 import {
   isSaleDmPrintReady,
@@ -110,10 +111,10 @@ export default function SaleDmSettingsPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
       <div>
-        <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">売却促進DM 設定</h1>
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          売却DMの追跡URL・既定LP URL・差出人を設定します。⚠**AIの種類とAPIキーは現在の運用では使いません**(文面はお手元のAIで作る方式に変わりました)。
-        </p>
+        <PageHeader
+          title="売却促進DM 設定"
+          description="売却DMの追跡URL・既定LP URL・差出人を設定します。⚠**AIの種類とAPIキーは現在の運用では使いません**(文面はお手元のAIで作る方式に変わりました)。"
+        />
       </div>
 
       {!s?.encryptionConfigured && (

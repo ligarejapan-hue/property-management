@@ -54,8 +54,8 @@ describe("B-5: 所有者補正候補の開発用語を平易化・事実に合�
     expect(withoutComments).not.toMatch(/soft-?delete/i);
   });
 
-  it("タイトルは補足なしの「所有者補正候補」", () => {
-    expect(src).toMatch(/所有者補正候補\s*<\/h1>/);
+  it("タイトルは補足なしの「所有者補正候補」(第2弾⑧でPageHeader化)", () => {
+    expect(src).toMatch(/title="所有者補正候補"/);
     expect(src).not.toContain("所有者補正候補 (");
   });
 

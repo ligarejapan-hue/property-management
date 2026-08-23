@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } from "react";
+import { BackLink } from "@/components/ui/back-link";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { canDownloadImportErrorCsv } from "@/lib/import-error-csv-access";
 import { formatJaDateTime } from "@/lib/format-datetime";
@@ -29,6 +30,7 @@ import {
   RotateCcw,
   Clock,
 } from "lucide-react";
+import { Pagination } from "@/components/ui/pagination";
 import {
   fetchImportJobDetail,
   fetchAffectedProperties,
@@ -677,12 +679,7 @@ export default function ImportJobDetailPage() {
     return (
       <div className="py-10 text-center">
         <p className="mb-4 text-red-600 dark:text-red-400">{error ?? "ジョブが見つかりません"}</p>
-        <button
-          onClick={() => router.back()}
-          className="text-sm text-indigo-600 hover:underline dark:text-indigo-400"
-        >
-          戻る
-        </button>
+        <BackLink href="/import" to="取込画面" />
       </div>
     );
   }
@@ -1155,16 +1152,19 @@ export default function ImportJobDetailPage() {
         ) : null}
       </div>
 
-      {/* B2 + 候補5: ページネーション（server pagination メタ）＋ 表示件数切替 / ページジャンプ */}
+      {/* B2 + 候補5: ページネーション(共通部品・第2弾⑨・server pagination メタ)。
+          表示件数切替とページジャンプは children で同居。 */}
       {job?.pagination && job.pagination.totalRows > 0 && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600 dark:text-gray-300">
-          <span>
-            {job.pagination.totalRows} 件中{" "}
-            {(page - 1) * job.pagination.limit + 1}–
-            {Math.min(page * job.pagination.limit, job.pagination.totalRows)} 件
-            （{page} / {job.pagination.totalPages} ページ）
-          </span>
-          <div className="flex flex-wrap items-center gap-2">
+        <Pagination
+          className="mb-4"
+          page={page}
+          totalPages={job.pagination.totalPages}
+          total={job.pagination.totalRows}
+          pageSize={job.pagination.limit}
+          busy={loading}
+          onPrev={() => setPage((p) => Math.max(1, p - 1))}
+          onNext={() => setPage((p) => p + 1)}
+        >
             {/* 候補5: 表示件数（limit）切替。変更時は changeLimit で page=1 に戻る。 */}
             <label className="flex items-center gap-1">
               <span className="text-xs text-gray-500 dark:text-gray-400">表示件数</span>
@@ -1195,9 +1195,6 @@ export default function ImportJobDetailPage() {
                   aria-label="移動先ページ番号"
                   className="w-16 rounded-md border border-gray-300 px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 />
-                <span className="text-xs text-gray-400 dark:text-gray-500">
-                  / {job.pagination.totalPages}
-                </span>
                 <button
                   type="submit"
                   disabled={loading || gotoPage === ""}
@@ -1207,22 +1204,7 @@ export default function ImportJobDetailPage() {
                 </button>
               </form>
             )}
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={!job.pagination.hasPrevPage || loading}
-              className="rounded-md border border-gray-300 px-3 py-1 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300"
-            >
-              前へ
-            </button>
-            <button
-              onClick={() => setPage((p) => p + 1)}
-              disabled={!job.pagination.hasNextPage || loading}
-              className="rounded-md border border-gray-300 px-3 py-1 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300"
-            >
-              次へ
-            </button>
-          </div>
-        </div>
+        </Pagination>
       )}
 
       {/* Rows list */}

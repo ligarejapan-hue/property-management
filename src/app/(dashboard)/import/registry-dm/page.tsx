@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import ImportSwitcher from "@/components/import/import-switcher";
 import BulkFolderUpload, {
@@ -86,9 +87,9 @@ export default function RegistryDmImportPage() {
   return (
     <div data-pii-protected data-pii-surface="import" className="space-y-6">
       <ImportSwitcher />
-      <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-        登記DM取込
-      </h1>
+      <PageHeader
+        title="登記DM取込"
+      />
       <p className="text-sm text-gray-600 dark:text-gray-400">
         登記情報自動化ツールの成果物(受付帳Excel・所有者Excel・取得済みPDF)を順に取り込みます。各ステップは独立しているので、必要なものだけ実行しても構いません。
       </p>

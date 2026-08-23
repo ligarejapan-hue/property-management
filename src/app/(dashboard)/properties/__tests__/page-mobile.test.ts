@@ -22,11 +22,17 @@ describe("properties/page.tsx モバイル UI (M1)", () => {
   });
 
   // §8-3 ページネーション縦積み → 横
-  it("§8-3: ページネーションに flex-col がある", () => {
-    expect(src).toContain("flex-col");
+  it("§8-3: ページネーションの折返しは部品側で担保(flex-wrap)", () => {
+    // ⚠旧ピン(toContain("flex-col"))はページ内の無関係な flex-col に空当たり
+    //   していた(提出前レビューP2)。縦積み相当の折返しは
+    //   src/components/ui/__tests__/pagination.test.tsx が固定している。
+    expect(src).toContain("<Pagination");
   });
-  it("§8-3: ページネーションに sm:flex-row がある", () => {
-    expect(src).toContain("sm:flex-row");
+  it("§8-3: ページネーションは共通 Pagination(タップ寸法44pxは部品側で担保)", () => {
+    // 第2弾⑨で共通部品化。flex-wrap での折返し・min-h-[44px] は
+    // src/components/ui/__tests__/pagination.test.tsx が固定している。
+    expect(src).toContain("<Pagination");
+    expect(src).toContain('from "@/components/ui/pagination"');
   });
 
   // §8-4 行クリック遷移 + 誤遷移防止

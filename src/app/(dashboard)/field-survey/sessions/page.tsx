@@ -1,4 +1,5 @@
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
+import { PageHeader } from "@/components/ui/page-header";
 import { hasPermission } from "@/lib/permissions";
 import SessionHistoryClient from "@/components/field-survey/session-history-client";
 
@@ -34,10 +35,10 @@ export default async function FieldSurveySessionsPage() {
   return (
     <div className="flex flex-col">
       <header className="border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
-        <h1 className="text-lg font-semibold text-gray-800 dark:text-gray-100">巡回履歴</h1>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          過去の巡回セッションを一覧で確認し、地図で過去ルートを閲覧します。
-        </p>
+        <PageHeader
+          title="巡回履歴"
+          description="過去の巡回セッションを一覧で確認し、地図で過去ルートを閲覧します。"
+        />
       </header>
       <SessionHistoryClient canSeeAll={canSeeAll} />
     </div>

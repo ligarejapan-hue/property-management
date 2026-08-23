@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { Loader2, Save } from "lucide-react";
 import {
   fetchCompanySettings,
@@ -100,10 +101,10 @@ export default function CompanySettingsPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
       <div>
-        <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">会社情報</h1>
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          販売図面(マイソク)の下部に表示される自社情報です。空欄の項目は初期値が使われます。
-        </p>
+        <PageHeader
+          title="会社情報"
+          description="販売図面(マイソク)の下部に表示される自社情報です。空欄の項目は初期値が使われます。"
+        />
       </div>
 
       {message && (

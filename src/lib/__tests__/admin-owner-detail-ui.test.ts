@@ -26,11 +26,10 @@ const pageSrc = fs.readFileSync(
 );
 
 describe("/admin/owners/[id] page (Phase F)", () => {
-  it("「補正候補に戻る」リンクが /admin/owners/correction?tab=corporate_number へ向く", () => {
-    expect(pageSrc).toMatch(
-      /href="\/admin\/owners\/correction\?tab=corporate_number"/,
-    );
-    expect(pageSrc).toMatch(/補正候補に戻る/);
+  it("「補正候補一覧へ戻る」導線が correction?tab=corporate_number へ向く(第2弾⑩でBackLink化)", () => {
+    expect(pageSrc).toContain('from "@/components/ui/page-header"');
+    expect(pageSrc).toContain('to: "補正候補一覧"');
+    expect(pageSrc).toContain("/admin/owners/correction?tab=corporate_number");
   });
 
   it("fetchAdminOwnerCorporateCandidate を import + 呼び出している", () => {

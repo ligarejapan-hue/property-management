@@ -9,6 +9,7 @@
  * ⚠中止は「節目で止まる」= 実行中の1件は最後まで進み、以降は掴まれない。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -187,21 +188,17 @@ export default function RegistryBulkFetchProgressPage() {
 
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <button
-        type="button"
-        onClick={() => router.push("/properties")}
-        className="mb-4 text-sm text-indigo-600 hover:underline dark:text-indigo-400"
-      >
-        ← 物件一覧へ戻る
-      </button>
-
-      <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-        謄本の一括取得（{certLabel}）
-      </h1>
-      <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-        状態: {statusText[progress.status] ?? progress.status}
-        {running && <span className="ml-2 animate-pulse">●</span>}
-      </p>
+      {/* 第2弾⑧⑩: PageHeader+BackLink(「← 物件一覧へ戻る」)に統一 */}
+      <PageHeader
+        back={{ href: "/properties", to: "物件一覧" }}
+        title={<>謄本の一括取得（{certLabel}）</>}
+        description={
+          <>
+            状態: {statusText[progress.status] ?? progress.status}
+            {running && <span className="ml-2 animate-pulse">●</span>}
+          </>
+        }
+      />
 
       {/* 進捗バー */}
       <div className="mt-4">

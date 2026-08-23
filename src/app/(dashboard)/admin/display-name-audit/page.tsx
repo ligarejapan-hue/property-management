@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { Loader2, Download, AlertTriangle } from "lucide-react";
 
@@ -89,11 +90,10 @@ export default function DisplayNameAuditPage() {
         <span className="text-gray-900 dark:text-gray-100">表示名監査</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-2 dark:text-gray-100">表示名監査</h1>
-      <p className="text-sm text-gray-500 mb-6 dark:text-gray-400">
-        同じ正規化名でも、保存されている表示名が全半角・空白違いなどで割れている群を一覧します。
-        これは確認用のレポートです（自動統一・更新は行いません）。
-      </p>
+      <PageHeader
+        title="表示名監査"
+        description="同じ正規化名でも、保存されている表示名が全半角・空白違いなどで割れている群を一覧します。これは確認用のレポートです（自動統一・更新は行いません）。"
+      />
 
       {error && (
         <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">

@@ -13,11 +13,9 @@ describe("field-survey/sessions/page.tsx dark: 配色 (Task D)", () => {
   });
 
   // --- 文字 ---
-  it("見出し h1 に dark:text-gray-100 がある", () => {
-    expect(src).toContain("dark:text-gray-100");
-  });
-  it("説明文に dark:text-gray-400 がある", () => {
-    expect(src).toContain("dark:text-gray-400");
+  it("見出し・説明文は共通 PageHeader(dark:text-gray-100/400 は部品側で担保・第2弾⑧)", () => {
+    expect(src).toContain('from "@/components/ui/page-header"');
+    expect(src).toContain("<PageHeader");
   });
 
   // --- 枠線 ---
@@ -43,11 +41,9 @@ describe("field-survey/sessions/page.tsx dark: 配色 (Task D)", () => {
   it("ライトモード border-gray-200 は残っている", () => {
     expect(src).toContain("border-gray-200");
   });
-  it("ライトモード text-gray-800 は残っている", () => {
-    expect(src).toContain("text-gray-800");
-  });
-  it("ライトモード text-gray-500 は残っている", () => {
-    expect(src).toContain("text-gray-500");
+  it("ライトモードの文字色は PageHeader 部品側に移った(第2弾⑧)", () => {
+    // 旧 h1(text-gray-800)/説明(text-gray-500)は部品の text-gray-900/500 に統一。
+    expect(src).toContain("<PageHeader");
   });
   it("ライトモード bg-amber-50 は残っている", () => {
     expect(src).toContain("bg-amber-50");

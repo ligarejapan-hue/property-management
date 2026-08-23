@@ -14,6 +14,7 @@
 //   フローに誘導する。Panel 自体は変更しない。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, AlertTriangle, Loader2 } from "lucide-react";
@@ -206,23 +207,23 @@ export default function AdminOwnerDetailPage() {
 
   return (
     <div className="p-6">
-      {/* Header */}
-      <div className="mb-4 flex items-center gap-3">
-        <Link
-          href="/admin/owners/correction?tab=corporate_number"
-          className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          補正候補に戻る
-        </Link>
-        <span className="text-gray-300 dark:text-gray-700">/</span>
-        <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">所有者詳細</h1>
-        {owner && (
-          <span className="font-mono text-[11px] text-gray-400 dark:text-gray-500">
-            {owner.ownerId.slice(0, 8)}…
-          </span>
-        )}
-      </div>
+      {/* Header(第2弾⑧⑩: PageHeader+「← ◯◯一覧へ戻る」に統一) */}
+      <PageHeader
+        back={{
+          href: "/admin/owners/correction?tab=corporate_number",
+          to: "補正候補一覧",
+        }}
+        title={
+          <>
+            所有者詳細
+            {owner && (
+              <span className="ml-2 align-middle font-mono text-[11px] font-normal text-gray-400 dark:text-gray-500">
+                {owner.ownerId.slice(0, 8)}…
+              </span>
+            )}
+          </>
+        }
+      />
 
       {loading && (
         <p className="flex items-center gap-2 py-8 text-sm text-gray-500 dark:text-gray-400">
