@@ -37,18 +37,22 @@ describe("Tabs", () => {
     expect(html).toContain('aria-selected="false"');
   });
 
-  it("タブとパネルが id で紐付く: id / aria-controls / tabPanelProps(@codex #406 R3 P2)", () => {
+  it("タブとパネルが id で紐付く: 全タブが**同じ固定パネル**を指す(@codex #406 R3→R4 P2)", () => {
     const html = render(<Tabs idBase="t" tabs={TABS} active="a" onChange={() => {}} />);
     expect(html).toContain('id="t-tab-a"');
-    expect(html).toContain('aria-controls="t-panel-a"');
-    expect(html).toContain('aria-controls="t-panel-b"');
-    // パネル側に貼る属性が対応する id を指す
+    // ⚠aria-controls はタブごとの id ではなく共有の固定 id。active しか描画しない
+    //   呼び出し側でタブごと id にすると、非 active 側が存在しない id を指す。
+    expect((html.match(/aria-controls="t-panel"/g) ?? []).length).toBe(2);
+    expect(html).not.toContain("t-panel-a");
+    // パネル側の属性は固定 id + active タブへの aria-labelledby
     const panel = tabPanelProps("t", "a");
     expect(panel).toEqual({
       role: "tabpanel",
-      id: "t-panel-a",
+      id: "t-panel",
       "aria-labelledby": "t-tab-a",
     });
+    // = すべての aria-controls の参照先(tabPanelProps の id)が実在する
+    expect(html).toContain(`aria-controls="${panel.id}"`);
   });
 
   it("roving tabIndex: active だけ 0・他は -1(@codex #406 R1 P2)", () => {

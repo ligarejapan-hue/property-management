@@ -55,8 +55,17 @@ export function ModalShell({
   const titleId = useId();
   useEffect(() => {
     const dialog = ref.current;
-    // マウント=開く。showModal がフォーカスを中へ移し、閉じたら呼び出し元へ戻す。
+    // ⚠開閉が「親の条件描画」なので、キャンセル→即アンマウントの経路では
+    //   ネイティブの close 手続き(=呼び出し元へのフォーカス復帰)が走らない
+    //   (@codex #406 R4 P2)。開く前のフォーカス元を控え、後始末で手動復帰する。
+    const opener =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // マウント=開く。showModal がフォーカスを中へ移す。
     if (dialog && !dialog.open) dialog.showModal();
+    return () => {
+      if (dialog?.open) dialog.close();
+      if (opener?.isConnected) opener.focus();
+    };
   }, []);
   return (
     <dialog

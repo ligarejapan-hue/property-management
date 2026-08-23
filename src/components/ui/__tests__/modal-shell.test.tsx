@@ -37,6 +37,10 @@ describe("ModalShell", () => {
     expect(src).toContain("dialog.showModal()");
     expect(src).toContain("onCancel={(e) => {");
     expect(src).toContain("else e.preventDefault();");
+    // ⚠キャンセル→親の条件描画で即アンマウントの経路では native の復帰が
+    //   走らないため、開く前のフォーカス元へ手動で戻す(@codex #406 R4 P2)。
+    expect(src).toContain("document.activeElement instanceof HTMLElement");
+    expect(src).toContain("if (opener?.isConnected) opener.focus();");
   });
 
   it("dialog は見出しと aria-labelledby で紐付く=名前を持つ(@codex #406 R1 P2)", () => {
