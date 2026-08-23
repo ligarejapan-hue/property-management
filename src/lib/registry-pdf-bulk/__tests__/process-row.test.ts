@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
+// #402: 実装が lockPropertyRow を import するようになった。実体は
+// property-record-guard → api-helpers → next-auth と辿って **env=node の vitest では
+// 解決できない**([[custom-skills]] ship の既知の罠)。丸ごと差し替える。
+vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRow: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   default: {
     importJobRow: {
@@ -14,6 +18,9 @@ vi.mock("@/lib/prisma", () => ({
     property: {
       findUnique: vi.fn(),
     },
+    // #402: 添付作成は「親行ロック → tx.attachment.create」の tx 内になった。
+    $queryRaw: vi.fn(async () => [{ id: "p" }]),
+    $transaction: vi.fn(),
   },
 }));
 vi.mock("@/lib/storage", async (importOriginal) => {
@@ -80,6 +87,13 @@ const storageMock = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // #402: $transaction は同一 mock を tx として渡す(既存アサーションを tx 経由でも通す)。
+  (prisma as unknown as { $transaction: Mock }).$transaction.mockImplementation(
+    async (fn: (tx: unknown) => unknown) => fn(prisma),
+  );
+  (prisma as unknown as { $queryRaw: Mock }).$queryRaw.mockResolvedValue([
+    { id: "p" },
+  ]);
   (getStorage as Mock).mockReturnValue(storageMock);
   (canAccessPropertyRecord as Mock).mockReturnValue(true);
   pm.importJobRow.updateMany.mockResolvedValue({ count: 1 });

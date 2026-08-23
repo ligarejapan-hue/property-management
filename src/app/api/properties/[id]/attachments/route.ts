@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import {
   getApiSession,
   getUserPermissions,
@@ -193,21 +194,30 @@ export async function POST(
       }
     }
 
-    const attachment = await prisma.attachment.create({
-      data: {
-        targetType: "property",
-        targetId: propertyId,
-        propertyId,
-        type: attachmentType,
-        fileName,
-        fileUrl,
-        fileSize,
-        mimeType,
-        uploadedBy: session.id,
-      },
-      include: {
-        uploader: { select: { id: true, name: true } },
-      },
+    // ⚠**親の物件行をロックしてから作る**(@codex #399 R7 P2 → #402)。
+    //   有料取得の二重課金ガードは購入ロックの where で「謄本PDFが無いこと」を
+    //   検査する。この route はロック無しの単独 create だったため、**作成が確定する
+    //   直前のミリ秒**に検査が通り二重課金の余地が残っていた(型が registry の場合)。
+    //   ⚠registry 以外の添付も同じ扱いにする=「物件配下を書き換える tx は親を先に
+    //   ロック」の書き込み規約(#364)に全 type で揃える。ロックは作成の一瞬だけ。
+    const attachment = await prisma.$transaction(async (tx) => {
+      await lockPropertyRow(tx, propertyId);
+      return tx.attachment.create({
+        data: {
+          targetType: "property",
+          targetId: propertyId,
+          propertyId,
+          type: attachmentType,
+          fileName,
+          fileUrl,
+          fileSize,
+          mimeType,
+          uploadedBy: session.id,
+        },
+        include: {
+          uploader: { select: { id: true, name: true } },
+        },
+      });
     });
 
     await writeAuditLog({

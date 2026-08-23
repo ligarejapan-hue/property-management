@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import {
   getApiSession,
   getUserPermissions,
@@ -152,19 +153,25 @@ export async function POST(
         fileName,
       });
       uploadedKey = uploaded.key;
-      const attachment = await prisma.attachment.create({
-        data: {
-          targetType: "property",
-          targetId: propertyId,
-          propertyId,
-          type: "registry",
-          fileName,
-          fileUrl: uploaded.url,
-          fileSize: buf.length,
-          mimeType: "application/pdf",
-          uploadedBy: session.id,
-        },
-        select: { id: true },
+      // ⚠**親の物件行をロックしてから作る**(@codex #399 R7 P2 → #402)。
+      //   二重課金ガードの検査(親行の更新)とこの作成を直列化する。
+      //   保存は上(ロック外)で完了済み=ロックは作成の一瞬だけ。親→子の順。
+      const attachment = await prisma.$transaction(async (tx) => {
+        await lockPropertyRow(tx, propertyId);
+        return tx.attachment.create({
+          data: {
+            targetType: "property",
+            targetId: propertyId,
+            propertyId,
+            type: "registry",
+            fileName,
+            fileUrl: uploaded.url,
+            fileSize: buf.length,
+            mimeType: "application/pdf",
+            uploadedBy: session.id,
+          },
+          select: { id: true },
+        });
       });
       attachmentId = attachment.id;
     } catch (err) {

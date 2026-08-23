@@ -218,7 +218,9 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
     });
     await run();
     // ロックが先・照会と作成はトランザクションの中。
-    expect(order).toEqual(["lock:true", "lookup:true", "create:true"]);
+    // ⚠末尾の lock:true は #402 で増えた**添付作成の親行ロック**(所有者処理の後に
+    //   添付を作る tx が走る)。所有者側の約束(ロック→照会→作成が同一tx)は不変。
+    expect(order).toEqual(["lock:true", "lookup:true", "create:true", "lock:true"]);
   });
 
   it("物件行を握ったまま既存の所有者行を掴まない（ロック順序の食い違い＝デッドロック回避）", async () => {

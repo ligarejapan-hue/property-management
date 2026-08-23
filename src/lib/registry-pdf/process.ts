@@ -858,21 +858,30 @@ export async function processRegistryPdf(
           fileName,
         });
         uploadedKey = uploaded.key;
-        const attachment = await prisma.attachment.create({
-          data: {
-            targetType: "property",
-            targetId: targetPropertyId,
-            propertyId: targetPropertyId,
-            type: "registry",
-            // 有料取得の種別（owner|all）。手動取込(undefined)は null=種別不明のまま。
-            registryCertificateType: args.certificateType ?? null,
-            fileName,
-            fileUrl: uploaded.url,
-            fileSize: pdfBuffer.length,
-            mimeType: "application/pdf",
-            uploadedBy: session.id,
-          },
-          select: { id: true },
+        // ⚠**親の物件行をロックしてから作る**(@codex #399 R7 P2 → #402)。
+        //   有料取得の二重課金ガード(duplicate-guard)は購入ロックの where で
+        //   「謄本PDFが無いこと」を検査する。ロック無しの単独 create だと、
+        //   **作成が確定する直前のミリ秒**に検査が通り二重課金の余地が残る。
+        //   ストレージへの保存は上(ロック外)で完了済み=ロックは作成の一瞬だけ。
+        //   順序は常に**親→子**(デッドロック回避・書き込み規約 #364)。
+        const attachment = await prisma.$transaction(async (tx) => {
+          await lockPropertyRow(tx, targetPropertyId);
+          return tx.attachment.create({
+            data: {
+              targetType: "property",
+              targetId: targetPropertyId,
+              propertyId: targetPropertyId,
+              type: "registry",
+              // 有料取得の種別（owner|all）。手動取込(undefined)は null=種別不明のまま。
+              registryCertificateType: args.certificateType ?? null,
+              fileName,
+              fileUrl: uploaded.url,
+              fileSize: pdfBuffer.length,
+              mimeType: "application/pdf",
+              uploadedBy: session.id,
+            },
+            select: { id: true },
+          });
         });
         attachmentId = attachment.id;
       } catch (err) {
