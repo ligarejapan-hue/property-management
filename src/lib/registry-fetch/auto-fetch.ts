@@ -4027,6 +4027,38 @@ export async function runRegistryAutoFetch(
   //   live の中止を見ない。ここで受付を閉じないと、中止が accepted:true になるのに
   //   実行は最後まで走る(=止めたつもりで完了/課金)。回収は route 側で閉じ済み。
   if (!isRecover && !willPurchaseByLocation) {
+    // ⚠閉じる前に、**既に受け付けた中止**を敬う(@codex #401 R5 P2)。route が
+    //   受付を開けたまま候補解決〜ここまで進む間に押された中止は accepted:true で
+    //   返っている。黙って閉じて番号購入へ進むと「止めたつもりなのに実行が走り、
+    //   最後は provider の失敗として残る」。外部にはまだ一切触れていないので、
+    //   ここで止めるのが安全かつ約束どおり(監査にも cancelled で残す)。
+    if (args.live?.isCancelRequested?.() === true) {
+      try {
+        args.live?.step(CANCEL_ACCEPTED_MESSAGE);
+      } catch {
+        /* 実況は best-effort */
+      }
+      await writeAuditLog({
+        userId: session.id,
+        action: "registry_auto_fetch",
+        targetTable: "properties",
+        targetId: propertyId,
+        detail: {
+          propertyId,
+          source: provider.name,
+          status: "cancelled",
+          mode: "purchase",
+          providerErrorCode: "cancelled",
+          confirmed: true,
+        },
+      });
+      throw new ApiError(
+        PROVIDER_ERROR_STATUS.cancelled,
+        "中止しました（課金は発生していません）",
+        "REGISTRY_AUTO_FETCH_CANCELLED",
+        "cancelled",
+      );
+    }
     args.live?.endCancelable?.();
   }
   // ⚠回収でも「対象と所在があること・地番の書き方が読めること」は同じ規則で検査する

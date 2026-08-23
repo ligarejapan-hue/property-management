@@ -131,9 +131,11 @@ describe("中止の節目を実装している経路だけ受付を開ける(@co
   it("orchestration: 候補があっても所在購入でなければ受付を閉じる", () => {
     // 候補が番号で買われる(willPurchaseByLocation=false)場合、所在購入の
     // adapter の節目(abortIfCancelledPaid)を通らない=誰も中止を見ない。
-    expect(AUTO).toMatch(
-      /if \(!isRecover && !willPurchaseByLocation\) \{\s*\n\s*args\.live\?\.endCancelable\?\.\(\);/,
-    );
+    // ⚠R5 で「閉じる前に既に受け付けた中止を確認する」が間に入った。
+    //   閉じること自体はこの分岐の中に残る(順序は R5 の固定が見る)。
+    const at = AUTO.indexOf("if (!isRecover && !willPurchaseByLocation) {");
+    expect(at).toBeGreaterThan(-1);
+    expect(AUTO.slice(at, at + 1600)).toContain("args.live?.endCancelable?.();");
   });
 });
 
@@ -153,5 +155,23 @@ describe("文言は流れに合わせる(@codex #401 R4 P2)", () => {
 
   it("閉じた知らせも流れごとの文言(無料検索に「請求手続き中」を出さない)", () => {
     expect(PANEL).toContain("chargeInvolved: chargeable");
+  });
+});
+
+// ── @codex #401 R5 ────────────────────────────────────────────────────
+describe("受付を閉じる前に、既に受け付けた中止を敬う(@codex #401 R5 P2)", () => {
+  it("番号購入へ落ちる分岐は、閉じる前に isCancelRequested を確認する", () => {
+    // route が受付を開けたまま候補解決〜判定まで進む間に押された中止は
+    // accepted:true で返っている。黙って閉じると「止めたつもりなのに実行が走る」。
+    const at = AUTO.indexOf("if (!isRecover && !willPurchaseByLocation) {");
+    expect(at).toBeGreaterThan(-1);
+    const block = AUTO.slice(at, at + 1600);
+    const check = block.indexOf("isCancelRequested?.() === true");
+    const close = block.indexOf("args.live?.endCancelable?.()");
+    expect(check).toBeGreaterThan(-1);
+    expect(close).toBeGreaterThan(check); // 確認が先・閉じるのが後
+    // 止めたことは監査に cancelled で残し、画面には中止専用コードで返す。
+    expect(block).toContain('status: "cancelled"');
+    expect(block).toContain('"REGISTRY_AUTO_FETCH_CANCELLED"');
   });
 });
