@@ -31,18 +31,21 @@ const read = (p: string) => readFileSync(p, "utf8").replace(/\r\n/g, "\n");
 const rel = (p: string) => relative(process.cwd(), p).replace(/\\/g, "/");
 
 /**
- * ファイル中の各 className をトークン集合にして返す(@codex #406 R2/R5 P2)。
- * Tailwind のクラスは**順序が意味を持たない**ため、`"fixed inset-0"` のような
- * 隣接部分文字列の一致では並べ替え・介在トークンで素通りする。
- * テンプレートリテラル内の ${...} は除いて残りの静的トークンだけを見る。
+ * ファイル中の**全ての文字列リテラル**をトークン集合にして返す
+ * (@codex #406 R2/R5/R6 P2)。
+ * - Tailwind のクラスは順序が意味を持たない→隣接部分文字列の一致は並べ替えで素通り
+ * - className="…" 限定だと {"…"}(brace包み)・三項・clsx() 等の書き方で素通り
+ * → どんな書き方でもクラス列は最終的に文字列リテラルに現れるので、
+ *   "…" / '…' / `…` を全部走査する(禁止対象のトークン組が同居する
+ *   非クラス文字列は実在しない)。${...} は除いて静的トークンだけを見る。
  */
 function classTokenSets(src: string): string[][] {
   const out: string[][] = [];
-  const classRe = /className=(?:"([^"]*)"|\{`([^`]*)`\})/g;
+  const litRe = /"([^"\n]*)"|'([^'\n]*)'|`([^`]*)`/g;
   let m: RegExpExecArray | null;
-  while ((m = classRe.exec(src)) !== null) {
+  while ((m = litRe.exec(src)) !== null) {
     out.push(
-      (m[1] ?? m[2] ?? "")
+      (m[1] ?? m[2] ?? m[3] ?? "")
         .replace(/\$\{[^}]*\}/g, " ")
         .split(/\s+/)
         .filter(Boolean),
