@@ -70,7 +70,9 @@ describe("A3: 打ち切り(hasNext)を読む・断りを出す", () => {
   });
 
   it("通信断(catch)でも断りをリセットする(@codex #407 R1 P2)", () => {
-    const at = MAP.indexOf('=== "AbortError") return;');
+    // ⚠AbortError 判定は tracks/coverage の .then にもあるため、tasks の catch に
+    //   足した一意コメントを anchor にする(先出現への誤当たり=実測)。
+    const at = MAP.indexOf('打ち切りの断りもここで消す');
     expect(at).toBeGreaterThan(-1);
     expect(MAP.slice(at, at + 500)).toContain(
       "onTruncationChange({ pins: false, properties: false })",
