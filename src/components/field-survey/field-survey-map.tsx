@@ -2159,7 +2159,9 @@ function MapDataLayer({
         // 詳細は console / UI に出さない
         onError("地図データの取得に失敗しました。");
       } finally {
-        onLoadingChange(false);
+        // ⚠解除は**最新の fetch だけ**が行う(#404 R8 と同型の早消し防止。
+        //   abort された古い fetch の finally が、進行中の「読み込み中」を消さない)。
+        if (abortRef.current === ac) onLoadingChange(false);
       }
     },
     [

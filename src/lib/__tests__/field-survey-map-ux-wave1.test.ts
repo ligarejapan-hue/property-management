@@ -147,11 +147,18 @@ describe("A6: 現在地は許可済みなら常時表示", () => {
 });
 
 describe("B2: 自動寄せの予約に寿命とユーザー優先", () => {
-  it("予約は15秒で失効し、地図をドラッグしたら破棄される", () => {
+  it("予約は15秒で失効し、地図をドラッグしたら破棄される(配線まで固定)", () => {
     expect(MAP).toContain("AUTO_CENTER_ON_START_TTL_MS = 15_000");
-    expect(MAP).toContain('map.addListener("dragstart"');
-    expect(MAP).toContain("onUserDrag");
-    expect(MAP).toContain("cancelAutoCenterOnStart");
+    // dragstart リスナーの中身が onUserDrag() を呼ぶ(存在だけの空当たり防止)。
+    const at = MAP.indexOf('map.addListener("dragstart"');
+    expect(at).toBeGreaterThan(-1);
+    expect(MAP.slice(at, at + 200)).toContain("onUserDrag()");
+    // prop が実際に cancelAutoCenterOnStart へ結線されている。
+    expect(MAP).toContain("onUserDrag={cancelAutoCenterOnStart}");
+  });
+
+  it("読み込み中の解除は最新の fetch だけが行う(古い finally の早消し防止)", () => {
+    expect(MAP).toContain("if (abortRef.current === ac) onLoadingChange(false);");
   });
 });
 
