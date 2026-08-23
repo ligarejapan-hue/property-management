@@ -204,11 +204,13 @@ describe("受付を閉じるのは『本当の課金の直前』(@codex #401 R1 
 
 // ── @codex #401 R2 ────────────────────────────────────────────────────
 describe("回収(課金なし)は中止を受け付けない(@codex #401 R2 P1)", () => {
-  it("route は回収のときだけ受付を即閉じる", () => {
+  it("route は回収と旧経路(candidateRef なし)で受付を即閉じる", () => {
     // ⚠回収の経路には中止を見る場所が無い(実況を刻むだけ)。受け付けると
     //   「止めたつもりで最後まで走り、PDFが添付される」ことになる。
+    // ⚠R4 で旧経路(不動産番号での購入)も対象に広げた(live を渡しておらず
+    //   誰も中止を見ないため)。
     expect(ROUTE).toMatch(
-      /if \(isRecover\) \{\s*\n\s*closeLiveViewCancelWindow\(session\.id, id, liveRef\);/,
+      /if \(isRecover \|\| !candidateRef\) \{\s*\n\s*closeLiveViewCancelWindow\(session\.id, id, liveRef\);/,
     );
   });
 

@@ -56,6 +56,7 @@ export default function RegistryLivePanel({
   liveRef,
   searchSettled,
   cancelable = true,
+  chargeable = false,
   onCancelRequested,
 }: {
   propertyId: string;
@@ -75,6 +76,13 @@ export default function RegistryLivePanel({
    * (押しても server は accepted:false で無視するが、表示が矛盾する)。
    */
   cancelable?: boolean;
+  /**
+   * この流れはお金が動き得るか(有料取得=true)。⚠文言の選択にだけ使う
+   * (@codex #401 R4 P2: 有料取得の中止ボタンに「この検索では課金は発生しません」
+   * と出ていた=課金境界まで進めば請求される流れなのに無料と誤解させる)。
+   * 可否の判定には使わない(それはサーバーの答え=serverCancelable)。
+   */
+  chargeable?: boolean;
   /**
    * 中止が**押された瞬間**に呼ぶ。⚠サーバーの応答を待ってから呼ぶと、
    * 待っている間に検索が終わり**自動で課金される**（@codex #399 R1 P1）。
@@ -281,6 +289,7 @@ export default function RegistryLivePanel({
         cancelWindowOpen: serverCancelable,
         done,
         started: steps.length > 0,
+        chargeInvolved: chargeable,
       })
     : null;
 
@@ -316,7 +325,11 @@ export default function RegistryLivePanel({
             onClick={() => void handleCancel()}
             disabled={cancelView === "pending"}
             data-testid="registry-live-cancel"
-            title="自動操作を中止します（この検索では課金は発生しません）"
+            title={
+              chargeable
+                ? "自動操作を中止します（課金の前に受け付けられた中止では、課金は発生しません）"
+                : "自動操作を中止します（この検索では課金は発生しません）"
+            }
             className="ml-auto rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
           >
             {cancelling ? "中止しています…" : "中止"}

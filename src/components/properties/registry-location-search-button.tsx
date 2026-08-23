@@ -777,6 +777,9 @@ export default function RegistryLocationSearchButton({
             //   出すと「受け付けたのに最後まで走り、PDFが添付される」= 利用者が
             //   止めたつもりで完了する。配線するまでは出さない。
             cancelable={state === "searching" || state === "obtaining"}
+            // ⚠文言の選択にだけ効く(可否はサーバーの答え)。有料取得では
+            //   「この検索では課金は発生しません」と出さない(@codex #401 R4 P2)。
+            chargeable={state === "obtaining"}
             // ⚠中止が**押された瞬間**に覚える。サーバーの応答を待つと、その間に
             //   検索が終わって自動で課金され得る（@codex #399 R1 P1）。
             //   受け付けの成否に関わらず、止める意思が示された時点で進ませない。

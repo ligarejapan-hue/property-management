@@ -96,6 +96,7 @@ describe("cancelClosedNotice", () => {
         cancelWindowOpen: false,
         done: false,
         started: true,
+        chargeInvolved: true,
       }),
     ).not.toBeNull();
   });
@@ -105,13 +106,19 @@ describe("cancelClosedNotice", () => {
       cancelWindowOpen: false,
       done: false,
       started: true,
+      chargeInvolved: true,
     });
     expect(notice).toContain("中止できません");
   });
 
   it("終わっていたら知らせない(結果を見る場面で警告を残さない)", () => {
     expect(
-      cancelClosedNotice({ cancelWindowOpen: false, done: true, started: true }),
+      cancelClosedNotice({
+        cancelWindowOpen: false,
+        done: true,
+        started: true,
+        chargeInvolved: true,
+      }),
     ).toBeNull();
   });
 
@@ -121,6 +128,7 @@ describe("cancelClosedNotice", () => {
         cancelWindowOpen: true,
         done: false,
         started: true,
+        chargeInvolved: true,
       }),
     ).toBeNull();
     expect(
@@ -128,13 +136,19 @@ describe("cancelClosedNotice", () => {
         cancelWindowOpen: false,
         done: false,
         started: false,
+        chargeInvolved: true,
       }),
     ).toBeNull();
   });
 
   it("まだ分からないとき(null)は知らせない(閉じたと決めつけない)", () => {
     expect(
-      cancelClosedNotice({ cancelWindowOpen: null, done: false, started: true }),
+      cancelClosedNotice({
+        cancelWindowOpen: null,
+        done: false,
+        started: true,
+        chargeInvolved: true,
+      }),
     ).toBeNull();
   });
 });
@@ -197,5 +211,31 @@ describe("cancelControlView (@codex #401 R3 P2)", () => {
     expect(seen.action).toEqual(["true/false/false"]);
     expect(seen.pending).toEqual(["true/false/true"]);
     expect(seen.hidden.length).toBe(10);
+  });
+});
+
+describe("cancelClosedNotice: 流れごとの文言 (@codex #401 R4 P2)", () => {
+  it("課金が絡む流れ(有料取得)では「請求手続き中」", () => {
+    const notice = cancelClosedNotice({
+      cancelWindowOpen: false,
+      done: false,
+      started: true,
+      chargeInvolved: true,
+    });
+    expect(notice).toContain("請求手続き中");
+  });
+
+  it("⚠課金が絡まない流れ(無料検索)では請求の文言を出さない", () => {
+    // 無料検索でも provider が返ってから完了までの短い間は受付が閉じる。
+    // そこで「請求手続き中」と出すと**課金しない検索で請求中と誤解させる**。
+    const notice = cancelClosedNotice({
+      cancelWindowOpen: false,
+      done: false,
+      started: true,
+      chargeInvolved: false,
+    });
+    expect(notice).not.toBeNull();
+    expect(notice).not.toContain("請求");
+    expect(notice).toContain("中止できません");
   });
 });

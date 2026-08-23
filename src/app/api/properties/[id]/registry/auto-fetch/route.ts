@@ -252,11 +252,14 @@ export async function POST(
     const canSeeShots = !isPropertyScopedRole(session.role);
     if (liveRef) {
       beginLiveView(session.id, id, liveRef);
-      // ⚠**回収(課金なし)は従来どおり中止を受け付けない**(@codex #401 R2 P1)。
-      //   回収の経路には中止を見る場所が無い(実況を刻むだけ)ので、受け付けると
-      //   「止めたつもりで最後まで走り、PDFが添付される」ことになる。
-      //   有料取得だけ、課金の直前まで窓を開けておく。
-      if (isRecover) {
+      // ⚠**中止の節目を実装している経路だけ、受付を開けておく**(@codex #401 R4 P2)。
+      //   開けてよいのは「候補からの所在購入」(candidateRef あり)だけ。
+      //   - 回収: 中止を見る場所が無い(実況を刻むだけ)。受け付けると
+      //     「止めたつもりで最後まで走り、PDFが添付される」(@codex #401 R2 P1)。
+      //   - 旧経路(candidateRef なし=不動産番号での購入): この分岐は live を
+      //     orchestration に渡しておらず、誰も中止を見ない。開けたままだと
+      //     中止が accepted:true になるのに実行は最後まで走る。
+      if (isRecover || !candidateRef) {
         closeLiveViewCancelWindow(session.id, id, liveRef);
       }
       reportLiveStep(

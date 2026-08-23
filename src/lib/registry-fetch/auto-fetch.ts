@@ -4022,6 +4022,13 @@ export async function runRegistryAutoFetch(
     !isRecover &&
     !!args.locationCandidate &&
     !(args.realEstateNumber ?? property.realEstateNumber)?.trim();
+  // ⚠中止の節目(abortIfCancelledPaid)を実装しているのは**所在購入の adapter だけ**
+  //   (@codex #401 R4 P2)。番号での購入(provider.fetchRegistryPdf の番号分岐)は
+  //   live の中止を見ない。ここで受付を閉じないと、中止が accepted:true になるのに
+  //   実行は最後まで走る(=止めたつもりで完了/課金)。回収は route 側で閉じ済み。
+  if (!isRecover && !willPurchaseByLocation) {
+    args.live?.endCancelable?.();
+  }
   // ⚠回収でも「対象と所在があること・地番の書き方が読めること」は同じ規則で検査する
   // (別の筆を取り込まないため)。違うのは課金スイッチと台帳ガードを通らない点だけ。
   // ⚠回収は**候補が無くても物件自身の地番で実行できる**(@codex #394 R6 P1)。

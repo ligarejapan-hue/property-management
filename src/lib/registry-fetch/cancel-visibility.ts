@@ -66,25 +66,40 @@ export function shouldShowCancelButton(input: {
   return cancelControlView(input) === "action";
 }
 
-/** 受付口が閉じたときの説明。⚠**黙って消さない**。 */
+/** 受付口が閉じたときの説明(課金が絡む流れ)。⚠**黙って消さない**。 */
 export const CANCEL_WINDOW_CLOSED_MESSAGE =
   "ここから先は中止できません（請求手続き中）";
+
+/**
+ * 受付口が閉じたときの説明(課金が絡まない流れ=無料の所在検索)。
+ * ⚠**「請求手続き中」と書かない**(@codex #401 R4 P2)。無料検索でも
+ *   provider が返ってから完了までの短い間は受付が閉じており、そこで
+ *   請求の文言を出すと**課金しない検索で「請求中」と誤解させる**。
+ */
+export const CANCEL_WINDOW_CLOSED_FREE_MESSAGE =
+  "ここからは中止できません（検索を仕上げています）";
 
 /**
  * 受付口が閉じたことを知らせる文言 (不要なら null)。
  *
  * ⚠ボタンが黙って消えると「壊れた」と思われる。**なぜ消えたか**を出す。
  * ⚠終わったあとは出さない (結果を見る場面に警告を残さない)。
+ * ⚠文言は**流れごと**に選ぶ。同じ「閉じた」でも、課金が絡む流れ(有料取得)と
+ *   絡まない流れ(無料検索)では理由が違う。
  */
 export function cancelClosedNotice(input: {
   cancelWindowOpen: CancelWindowState;
   done: boolean;
   /** 実行が始まっているか (始まる前は受付口も無いので知らせない)。 */
   started: boolean;
+  /** この流れはお金が動き得るか (有料取得=true / 無料検索=false)。 */
+  chargeInvolved: boolean;
 }): string | null {
   if (!input.started) return null;
   if (input.done) return null;
   // ⚠`null`(不明) を「閉じた」と決めつけない。
   if (input.cancelWindowOpen !== false) return null;
-  return CANCEL_WINDOW_CLOSED_MESSAGE;
+  return input.chargeInvolved
+    ? CANCEL_WINDOW_CLOSED_MESSAGE
+    : CANCEL_WINDOW_CLOSED_FREE_MESSAGE;
 }

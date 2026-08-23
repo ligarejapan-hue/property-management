@@ -21,6 +21,8 @@ const BUTTON = read(
 const CLIENT = read("src/lib/api-client.ts");
 const STORE = read("src/lib/registry-fetch/live-view-store.ts");
 const PROVIDER = read("src/lib/registry-fetch/official-provider.ts");
+const ROUTE = read("src/app/api/properties/[id]/registry/auto-fetch/route.ts");
+const AUTO = read("src/lib/registry-fetch/auto-fetch.ts");
 
 describe("サーバーが中止の可否を答える", () => {
   it("実況の取得結果に cancelable が含まれる", () => {
@@ -113,5 +115,43 @@ describe("順番待ちの中止は待たずに決着させる(@codex #401 R3 P2)
     // gaveUp も立てるので、遅れて回ってきたコールバックは冒頭で rate_limited。
     const at = PROVIDER.indexOf("abandonForCancel = () => {");
     expect(PROVIDER.slice(at, at + 260)).toContain("gaveUp = true;");
+  });
+});
+
+// ── @codex #401 R4 ────────────────────────────────────────────────────
+describe("中止の節目を実装している経路だけ受付を開ける(@codex #401 R4 P2)", () => {
+  it("route: 回収と旧経路(candidateRef なし)は受付を即閉じる", () => {
+    // ⚠旧経路(不動産番号での購入)は live を orchestration に渡しておらず、
+    //   誰も中止を見ない。開けたままだと accepted:true なのに最後まで走る。
+    expect(ROUTE).toMatch(
+      /if \(isRecover \|\| !candidateRef\) \{\s*\n\s*closeLiveViewCancelWindow\(session\.id, id, liveRef\);/,
+    );
+  });
+
+  it("orchestration: 候補があっても所在購入でなければ受付を閉じる", () => {
+    // 候補が番号で買われる(willPurchaseByLocation=false)場合、所在購入の
+    // adapter の節目(abortIfCancelledPaid)を通らない=誰も中止を見ない。
+    expect(AUTO).toMatch(
+      /if \(!isRecover && !willPurchaseByLocation\) \{\s*\n\s*args\.live\?\.endCancelable\?\.\(\);/,
+    );
+  });
+});
+
+describe("文言は流れに合わせる(@codex #401 R4 P2)", () => {
+  it("有料取得の中止ボタンに「この検索では課金は発生しません」と出さない", () => {
+    // title は chargeable で切り替える(有料の説明は「課金の前に受け付けられた
+    // 中止では、課金は発生しません」)。
+    expect(PANEL).toContain("chargeable");
+    expect(PANEL).toContain(
+      "課金の前に受け付けられた中止では、課金は発生しません",
+    );
+  });
+
+  it("呼び出し側は有料取得のときだけ chargeable を立てる", () => {
+    expect(BUTTON).toMatch(/chargeable=\{state === "obtaining"\}/);
+  });
+
+  it("閉じた知らせも流れごとの文言(無料検索に「請求手続き中」を出さない)", () => {
+    expect(PANEL).toContain("chargeInvolved: chargeable");
   });
 });
