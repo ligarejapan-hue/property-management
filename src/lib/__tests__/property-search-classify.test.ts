@@ -42,9 +42,18 @@ describe("classifyPropertySearch", () => {
     expect(classifyPropertySearch("180-1")).toBe("text");
   });
 
-  it("⚠ファイル名だけ・拡張子だけは keyword(住所の一部であり得る)", () => {
+  it("拡張子で終わるファイル名 → mgmtId(取込ファイル単位の絞り込み・@codex #404 R5)", () => {
+    // 「受付帳.xlsx」だけで、そのファイルから取り込んだ物件全部に絞る旧機能を守る。
+    // 拡張子で終わる文字列は住所・地番ではあり得ないので曖昧さは無い。
+    expect(classifyPropertySearch("受付帳.xlsx")).toBe("mgmtId");
+    expect(classifyPropertySearch("data.csv")).toBe("mgmtId");
+    expect(classifyPropertySearch("台帳.XLS")).toBe("mgmtId");
+  });
+
+  it("⚠拡張子の無いファイル名だけは keyword(住所の一部であり得る)", () => {
     expect(classifyPropertySearch("受付帳")).toBe("text");
-    expect(classifyPropertySearch("受付帳.xlsx")).toBe("text");
+    // 拡張子が途中にある(後ろに住所などが続く)場合も keyword。
+    expect(classifyPropertySearch("受付帳.xlsxの物件")).toBe("text");
   });
 
   it("住所・氏名・電話は keyword(text)", () => {

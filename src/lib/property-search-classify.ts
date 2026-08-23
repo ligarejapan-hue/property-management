@@ -20,6 +20,14 @@ export type PropertySearchKind = "empty" | "mgmtId" | "text";
 const ROW_SUFFIX_RE = /\d+\s*行\s*$/;
 /** 拡張子+コロン(全角可)+数字。ファイル名の一部だけでは一致しない。 */
 const FILE_COLON_ROW_RE = /\.(xlsx|xls|csv)\s*[:：]\s*\d+/i;
+/**
+ * 拡張子で**終わる**ファイル名(@codex #404 R5 P2)。
+ * 「受付帳.xlsx」だけで「そのファイルから取り込んだ物件全部」に絞る旧機能を
+ * 統合窓でも使えるようにする。拡張子で終わる文字列は住所・地番ではあり得ない
+ * ので曖昧さは無い(⚠拡張子の無い「受付帳」は住所かもしれないので従来どおり
+ * keyword 側)。
+ */
+const FILE_ONLY_RE = /\.(xlsx|xls|csv)\s*$/i;
 
 export function classifyPropertySearch(raw: string): PropertySearchKind {
   const q = raw.trim();
@@ -27,5 +35,6 @@ export function classifyPropertySearch(raw: string): PropertySearchKind {
   if (q.startsWith("__sourceRef")) return "mgmtId";
   if (ROW_SUFFIX_RE.test(q)) return "mgmtId";
   if (FILE_COLON_ROW_RE.test(q)) return "mgmtId";
+  if (FILE_ONLY_RE.test(q)) return "mgmtId";
   return "text";
 }
