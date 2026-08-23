@@ -67,8 +67,11 @@ export function Tabs<K extends string = string>({
     else if (e.key === "ArrowLeft") next = (idx - 1 + tabs.length) % tabs.length;
     else if (e.key === "Home") next = 0;
     else if (e.key === "End") next = tabs.length - 1;
-    if (next < 0 || next === idx) return;
+    if (next < 0) return; // 認識しないキーはブラウザへ
+    // ⚠認識したキーは**端でも** preventDefault(@codex #406 R8 P2)。先頭で Home /
+    //   末尾で End を素通しすると、フォーカスはタブ列のままページがスクロールする。
     e.preventDefault();
+    if (next === idx) return;
     onChange(tabs[next].key);
     const btns = listRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
     btns?.[next]?.focus();

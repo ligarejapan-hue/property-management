@@ -73,6 +73,13 @@ describe("Tabs", () => {
     expect(src).toContain("e.preventDefault()");
     expect(src).toContain(".focus()");
     expect(src).toContain("onKeyDown={handleKeyDown}");
+    // ⚠端での Home/End もスクロールさせない: preventDefault は
+    //   「next === idx で打ち切る**前**」にある(@codex #406 R8 P2)。
+    const pd = src.indexOf("e.preventDefault()");
+    const stay = src.indexOf("if (next === idx) return;");
+    expect(pd).toBeGreaterThan(-1);
+    expect(stay).toBeGreaterThan(-1);
+    expect(pd).toBeLessThan(stay);
   });
 
   it("type=button(form 内で誤 submit しない)・下線の枠(border-b)を持つ", () => {

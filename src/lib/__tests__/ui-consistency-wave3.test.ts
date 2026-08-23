@@ -51,8 +51,15 @@ function classTokenSets(src: string): string[][] {
       .filter(Boolean);
     if (tokens.length > 0) out.push(tokens);
   };
-  // 複数行に渡り得る `…` は先に1式ずつ回収し、残りから消す
-  const rest = src.replace(/`([^`]*)`/g, (_all, body: string) => {
+  // 1行に収まる `…` は "…" に正規化して**行グループに合流**させる
+  // (@codex #406 R8 P2: clsx(`fixed`, x && `inset-0`) の backtick 分割合成も
+  //  同一行なら1集合として見えるように)。中の " はトークン区切りへ落とす。
+  let rest = src.replace(
+    /`([^`\n]*)`/g,
+    (_all, body: string) => '"' + body.replace(/"/g, " ") + '"',
+  );
+  // 複数行に渡る `…` は1式=1集合として回収し、残りから消す
+  rest = rest.replace(/`([^`]*)`/g, (_all, body: string) => {
     push(body);
     return '""';
   });
