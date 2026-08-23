@@ -30,6 +30,27 @@ const files = ROOTS.flatMap((r) => walk(r));
 const read = (p: string) => readFileSync(p, "utf8").replace(/\r\n/g, "\n");
 const rel = (p: string) => relative(process.cwd(), p).replace(/\\/g, "/");
 
+/**
+ * ファイル中の各 className をトークン集合にして返す(@codex #406 R2/R5 P2)。
+ * Tailwind のクラスは**順序が意味を持たない**ため、`"fixed inset-0"` のような
+ * 隣接部分文字列の一致では並べ替え・介在トークンで素通りする。
+ * テンプレートリテラル内の ${...} は除いて残りの静的トークンだけを見る。
+ */
+function classTokenSets(src: string): string[][] {
+  const out: string[][] = [];
+  const classRe = /className=(?:"([^"]*)"|\{`([^`]*)`\})/g;
+  let m: RegExpExecArray | null;
+  while ((m = classRe.exec(src)) !== null) {
+    out.push(
+      (m[1] ?? m[2] ?? "")
+        .replace(/\$\{[^}]*\}/g, " ")
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+  }
+  return out;
+}
+
 describe("(⑪) モーダルの器の手書き禁止(ラチェット)", () => {
   it("fixed inset-0 の overlay は ModalShell 経由か、理由付き allow-list のみ", () => {
     const ALLOW = new Set([
@@ -62,8 +83,13 @@ describe("(⑪) モーダルの器の手書き禁止(ラチェット)", () => {
       "src/components/sales-sheet/editor/TransactionInfoDialog.tsx",
       "src/components/sales-sheet/SalesSheetCreateButton.tsx",
     ]);
+    // ⚠隣接一致(includes("fixed inset-0"))は「fixed z-50 inset-0」等の並べ替えで
+    //   素通りする(@codex #406 R5 P2)→ トークン集合で fixed と inset-0 の同居を見る。
     const offenders = files.filter(
-      (f) => read(f).includes("fixed inset-0") && !ALLOW.has(rel(f)),
+      (f) =>
+        classTokenSets(read(f)).some(
+          (tokens) => tokens.includes("fixed") && tokens.includes("inset-0"),
+        ) && !ALLOW.has(rel(f)),
     );
     expect(
       offenders.map(rel),
@@ -78,18 +104,12 @@ describe("(⑪) モーダルの器の手書き禁止(ラチェット)", () => {
     //   「justify-end と gap-N(N≠2) が同居」を順序に関係なく検出する。
     const offenders: string[] = [];
     for (const f of files) {
-      const src = read(f);
-      const classRe = /className=(?:"([^"]*)"|\{`([^`]*)`\})/g;
-      let m: RegExpExecArray | null;
-      while ((m = classRe.exec(src)) !== null) {
-        const tokens = (m[1] ?? m[2] ?? "")
-          .replace(/\$\{[^}]*\}/g, " ")
-          .split(/\s+/);
+      for (const tokens of classTokenSets(read(f))) {
         if (
           tokens.includes("justify-end") &&
           tokens.some((t) => /^gap-(?!2$)\d/.test(t))
         ) {
-          offenders.push(`${rel(f)}: ${tokens.join(" ").trim().slice(0, 60)}`);
+          offenders.push(`${rel(f)}: ${tokens.join(" ").slice(0, 60)}`);
         }
       }
     }
