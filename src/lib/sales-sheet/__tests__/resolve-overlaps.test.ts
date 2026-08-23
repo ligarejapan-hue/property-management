@@ -170,3 +170,20 @@ describe("resolveTextTableOverlapsInDocument", () => {
     }
   });
 });
+
+// ── @codex #403 R1 ────────────────────────────────────────────────────
+describe("巨大な fontSizePt でも固まらない(@codex #403 R1 P1)", () => {
+  it("fontSizePt=1e20 でも有限時間で返り、無限ループしない", () => {
+    // schema は fontSizePt に上限を持たない。浮動小数では 1e20 - 0.5 が
+    // **変化しない**ため、pt を添字にしたループは永遠に回る(タブが固まる)。
+    const doc = makeDoc([
+      text("huge", 120, 60, 40, 10, { fontSizePt: 1e20 }),
+      table("tb", 100, 30, 80, 60),
+    ]);
+    const started = Date.now();
+    const r = resolveTextTableOverlapsInDocument(doc);
+    expect(Date.now() - started).toBeLessThan(5000);
+    // 縮小では直らず、移動か unresolved のどちらかに決着している。
+    expect(r.shrunk).toEqual([]);
+  });
+});

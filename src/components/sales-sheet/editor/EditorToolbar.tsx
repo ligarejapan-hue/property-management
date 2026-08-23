@@ -252,8 +252,9 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
           <button
             type="button"
             onClick={onAutoFixOverlaps}
+            disabled={busy}
             data-toolbar-auto-fix-overlaps
-            className="ml-2 rounded border border-amber-400 bg-white px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-50 dark:border-amber-600 dark:bg-gray-800 dark:text-amber-300 dark:hover:bg-amber-900/40"
+            className="ml-2 rounded border border-amber-400 bg-white px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-600 dark:bg-gray-800 dark:text-amber-300 dark:hover:bg-amber-900/40"
           >
             重なりを自動で直す
           </button>

@@ -2008,6 +2008,14 @@ const SHRINK_FLOOR_PT = 7;
 const MOVE_STEP_MM = 1;
 /** 移動の探索上限 (mm)。これ以上遠くへは動かさない (置き場所の意図を壊さない)。 */
 const MOVE_MAX_MM = 60;
+/**
+ * 縮小の試行回数の上限 (@codex #403 R1 P1)。schema は fontSizePt に上限を
+ * 持たないため、巨大な値 (例 1e20) では `pt -= 0.5` が IEEE-754 で**変化せず**、
+ * 添字を pt にした while/for は**無限ループ=ブラウザのタブが固まる**。
+ * 整数カウンタで回し、かつ回数そのものにも蓋をする (200回=100pt ぶん。
+ * 実用のフォントサイズなら十分・巨大値でも一瞬で諦めて移動へ進む)。
+ */
+const SHRINK_MAX_STEPS = 200;
 
 /** id の要素が関与する重なりが有るか。 */
 function hasOverlapInvolving(doc: SalesSheetDocument, id: string): boolean {
@@ -2077,14 +2085,16 @@ export function resolveTextTableOverlapsInDocument(
     const originalPt = el.style.fontSizePt ?? 12;
     const floorPt = Math.max(SHRINK_FLOOR_PT, originalPt * SHRINK_FLOOR_RATIO);
     let fixed = false;
-    for (
-      let pt = originalPt - SHRINK_STEP_PT;
-      pt >= floorPt - 1e-9;
-      pt -= SHRINK_STEP_PT
-    ) {
+    // ⚠添字は**整数カウンタ** (@codex #403 R1 P1: pt 自体を減算すると巨大値で
+    //   浮動小数が変化せず無限ループになる)。回数にも SHRINK_MAX_STEPS の蓋。
+    for (let step = 1; step <= SHRINK_MAX_STEPS; step++) {
+      const pt = originalPt - step * SHRINK_STEP_PT;
+      if (pt < floorPt - 1e-9) break;
+      const rounded = Math.round(pt * 2) / 2;
+      if (rounded >= originalPt) break; // 巨大値で丸めが効かない場合も前へ進める
       const candidate = withElementAt(current, idx, {
         ...el,
-        style: { ...el.style, fontSizePt: Math.round(pt * 2) / 2 },
+        style: { ...el.style, fontSizePt: rounded },
       });
       if (!hasOverlapInvolving(candidate, el.id)) {
         current = candidate;
