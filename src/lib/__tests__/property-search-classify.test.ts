@@ -120,7 +120,11 @@ describe("なりかけの形は保留(@codex #404 R9 P2)", () => {
     expect(classifyPropertySearch("受付帳.x")).toBe("mgmtIdPartial");
     expect(classifyPropertySearch("受付帳.xl")).toBe("mgmtIdPartial");
     expect(classifyPropertySearch("受付帳.xlsx:")).toBe("mgmtIdPartial");
+    expect(classifyPropertySearch("i")).toBe("mgmtIdPartial");
     expect(classifyPropertySearch("id")).toBe("mgmtIdPartial");
+    expect(classifyPropertySearch("管")).toBe("mgmtIdPartial");
+    expect(classifyPropertySearch("管理")).toBe("mgmtIdPartial");
+    expect(classifyPropertySearch("管理I")).toBe("mgmtIdPartial");
     expect(classifyPropertySearch("id:")).toBe("mgmtIdPartial");
     expect(classifyPropertySearch("管理ID：")).toBe("mgmtIdPartial");
   });
@@ -140,5 +144,28 @@ describe("なりかけの形は保留(@codex #404 R9 P2)", () => {
     expect(classifyPropertySearch("ABC.jp")).toBe("text");
     expect(classifyPropertySearch("BLD.abc")).toBe("text");
     expect(classifyPropertySearch("何か.xz")).toBe("text");
+  });
+});
+
+describe("案内している構文は打っている途中が一度も text にならない(@codex #404 R14 P2)", () => {
+  // 旧案内「120行」は数字の途中(「120」)が text=keyword 確定を通り、300ms 止まる
+  // だけで生の値が URL/property_list 監査に載った。案内を「id:120行」に変え、
+  // その**全打鍵**が保留(partial)か mgmtId であることを総当たりで固定する。
+  it("「id:120行」「id:MGMT-001」「管理ID:120行」の全接頭辞が非text", () => {
+    for (const full of ["id:120行", "id:MGMT-001", "管理ID:120行", "管理ID：45"]) {
+      for (let i = 1; i <= full.length; i++) {
+        const prefix = full.slice(0, i);
+        const kind = classifyPropertySearch(prefix);
+        expect(kind, `prefix="${prefix}"`).not.toBe("text");
+        expect(kind, `prefix="${prefix}"`).not.toBe("empty");
+      }
+    }
+  });
+
+  it("⚠素の「120行」は機能として残る(打ち切れば従来どおり)が、途中の数字は text", () => {
+    // 素の数字を保留にすると地番検索(「292」等)が永久に確定しなくなるため、
+    // text のまま=**この形は案内しない**(placeholder/title は id: 形式のみ)。
+    expect(classifyPropertySearch("120")).toBe("text");
+    expect(classifyPropertySearch("120行")).toBe("mgmtId");
   });
 });

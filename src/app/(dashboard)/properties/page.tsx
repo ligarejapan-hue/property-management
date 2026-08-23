@@ -1123,8 +1123,8 @@ function PropertiesPageInner() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
           <input
             type="text"
-            placeholder="住所・地番・管理ID(例: 120行, id:◯◯)で一覧を絞り込み"
-            title="管理IDの書き方: 「120行」「受付帳.xlsx:120」「受付帳.xlsx」/ コピーした管理IDは「id:」に続けて貼り付け"
+            placeholder="住所・地番・管理ID(例: id:120行)で一覧を絞り込み"
+            title="管理IDの書き方: 「id:120行」(取込行)・「id:」+コピーした管理ID / ファイル単位は「受付帳.xlsx」「受付帳.xlsx:120」"
             value={searchAllDraft}
             onChange={(e) => handleUnifiedSearchChange(e.target.value)}
             className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"

@@ -58,8 +58,15 @@ const EXPLICIT_PREFIX_RE = /^(id|管理ID)\s*[:：]\s*(\S.*)$/i;
 const PARTIAL_EXT_RE = /\.(x|xl|xls|xlsx|c|cs|csv)?$/i;
 /** なりかけ: 拡張子+コロンまで(行番号がまだ)。 */
 const PARTIAL_COLON_RE = /\.(xlsx|xls|csv)\s*[:：]\s*$/i;
-/** なりかけ: 明示接頭辞の途中(「id」「id:」「管理ID：」)。 */
-const PARTIAL_PREFIX_RE = /^(id|管理ID)\s*[:：]?\s*$/i;
+/**
+ * なりかけ: 明示接頭辞の途中(「i」「id」「id:」「管」「管理」「管理ID：」)。
+ * ⚠1文字目からの**全打鍵**を保留で覆う(@codex #404 R14 P2)。案内している
+ * 「id:120行」を打つ途中が一瞬でも text になると、そこで300ms止まった値が
+ * keyword=URL/property_list 監査へ生で確定してしまう。単独の「i」「管」「管理」
+ * が正当な keyword である場面は実運用上無く(住所・地番検索)、次の1字で
+ * text に抜けるので握りつぶしにもならない。
+ */
+const PARTIAL_PREFIX_RE = /^(i|id|管|管理|管理i|管理id)\s*[:：]?\s*$/i;
 
 export function classifyPropertySearch(raw: string): PropertySearchKind {
   const q = raw.trim();
