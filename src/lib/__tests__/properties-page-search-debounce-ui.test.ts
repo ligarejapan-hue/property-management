@@ -78,19 +78,23 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     expect(branch).toContain("commitSearch.cancel()");
     expect(branch).toContain('setSearchText("")');
     expect(branch).toContain('setMgmtIdText("")');
-    expect(branch).toContain("setPage(1)");
-    // ⚠選択解除(setPage(1))は**条件の外**=無条件(@codex #404 R13 P1)。絞り込みが
-    //   元々空でも、選択(チェック)は必ず解除する(生き残ると入力途中のIDと違う
-    //   集合へ一括・有料操作が撃てる)。
+    // ⚠保留(searchPending)と選択解除(setPage(1))は**分岐の前**=全経路共通
+    //   (@codex #404 R13→R15 P1)。貼り付けで完全形が一度に入ると partial を
+    //   経由しないため、分岐内に置くと 300ms の確定待ちの間、古い絞り込み+
+    //   古い選択のまま出力・一括・有料操作ができてしまう。
     // ⚠一致は**行頭アンカーの実呼び出し**で取る(indexOf だと説明コメント内の
-    //   同じ文字列に一致し、呼び出しを条件内へ戻す変異を見逃す=実測済み)。
-    const callIdx = branch.search(/^\s*setPage\(1\);/m);
-    expect(callIdx).toBeGreaterThan(-1);
-    const condIdx = branch.indexOf('if (searchText !== ""');
-    expect(condIdx).toBeGreaterThan(-1);
-    expect(callIdx).toBeLessThan(condIdx);
-    // ⚠保留中は絞り込みが空=全件になるため、CSV/DM出力を止める(@codex #404 R11 P1)。
-    expect(branch).toContain("setSearchPending(true)");
+    //   同じ文字列に一致し、分岐内へ戻す変異を見逃す=実測済み)。
+    const hAt0 = pageSrc.indexOf("const handleUnifiedSearchChange");
+    const hEnd0 = pageSrc.indexOf("};", hAt0);
+    const handler0 = pageSrc.slice(hAt0, hEnd0);
+    const firstBranch = handler0.indexOf('if (kind === "mgmtId")');
+    expect(firstBranch).toBeGreaterThan(-1);
+    const pendIdx = handler0.search(/^\s*setSearchPending\(true\);/m);
+    const pageIdx = handler0.search(/^\s*setPage\(1\);/m);
+    expect(pendIdx).toBeGreaterThan(-1);
+    expect(pageIdx).toBeGreaterThan(-1);
+    expect(pendIdx).toBeLessThan(firstBranch);
+    expect(pageIdx).toBeLessThan(firstBranch);
     expect(pageSrc).toContain("selectedExportColumns.size === 0 || searchPending");
     expect(pageSrc).toContain("exportingDm || searchPending");
     // ⚠解除は**確定が実際に入る debounce callback の中**とリセットの2箇所だけ

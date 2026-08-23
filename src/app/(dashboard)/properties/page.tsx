@@ -728,6 +728,14 @@ function PropertiesPageInner() {
   const handleUnifiedSearchChange = (value: string) => {
     setSearchAllDraft(value);
     const kind = classifyPropertySearch(value);
+    // ⚠保留(searchPending)と選択解除は**分岐の前**=全経路共通(@codex #404
+    //   R13→R15 P1)。完全形の貼り付け(「id:MGMT-001」が1イベントで入る)は
+    //   partial を経由せず 300ms の確定待ちに入るため、その間も「窓の見た目と
+    //   違う集合」への出力・一括・有料操作を封じる。解除は確定が実際に入る
+    //   commitSearch callback とリセットだけ。選択解除は表示条件変更の一元窓口
+    //   setPage(1) を通す(空→空は同一参照で bail out=打鍵ごとの再描画なし)。
+    setSearchPending(true);
+    setPage(1);
     if (kind === "mgmtId") {
       commitSearch("", toMgmtIdQuery(value));
       return;
@@ -736,13 +744,7 @@ function PropertiesPageInner() {
     //   300ms 止まると部分文字列が keyword=URL/監査に確定してしまうため、
     //   予約済みの確定も取り下げて完成を待つ(空に戻せば empty で消える)。
     if (kind === "mgmtIdPartial") {
-      setSearchPending(true);
       commitSearch.cancel();
-      // ⚠選択(チェック)の解除は**無条件**(@codex #404 R13 P1)。絞り込みが元々
-      //   空だと下の if を踏まず選択が生き残り、窓の見た目(入力途中のID)と違う
-      //   集合へ一括変更・削除・売却DM・謄本取得が撃てた。表示条件変更の一元
-      //   窓口 setPage(1) を必ず通す(選択解除を兼ねる)。
-      setPage(1);
       // ⚠確定済みの古い絞り込みも**即座に**消す(@codex #404 R10 P2)。残すと
       //   窓には新しい値・一覧/CSV/DMは**見えない古い条件**という食い違いのまま
       //   固定され、意図しない集合へ一括操作しかねない。
