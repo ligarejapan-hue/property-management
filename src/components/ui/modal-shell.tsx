@@ -13,7 +13,7 @@
  *   ないため対象外(走査テストの allow-list 参照)。
  * ⚠開閉の状態・Escape 等の振る舞いは呼び出し側の責務(器は見た目だけ)。
  */
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 export interface ModalShellProps {
   title: ReactNode;
@@ -38,14 +38,21 @@ export function ModalShell({
   size = "md",
   className,
 }: ModalShellProps) {
+  // ⚠role="dialog" は見出しと紐付けて**名前**を持たせる(@codex #406 R1 P2)。
+  //   無名の dialog は支援技術が「ダイアログ」としか読み上げられない。
+  const titleId = useId();
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
         className={`w-full ${SIZE_CLASSES[size]} rounded-lg bg-white p-6 shadow-xl dark:bg-gray-900${className ? ` ${className}` : ""}`}
       >
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+        <h2
+          id={titleId}
+          className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+        >
           {title}
         </h2>
         {children !== undefined && <div className="mt-3">{children}</div>}

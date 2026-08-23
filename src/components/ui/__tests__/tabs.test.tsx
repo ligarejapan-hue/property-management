@@ -7,6 +7,8 @@
  */
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Tabs } from "../tabs";
 
 const render = (el: React.ReactElement) => renderToStaticMarkup(el);
@@ -33,6 +35,26 @@ describe("Tabs", () => {
     expect((html.match(/role="tab"/g) ?? []).length).toBe(2);
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('aria-selected="false"');
+  });
+
+  it("roving tabIndex: active だけ 0・他は -1(@codex #406 R1 P2)", () => {
+    const html = render(<Tabs tabs={TABS} active="a" onChange={() => {}} />);
+    const btns = html.match(/<button[^>]*>/g) ?? [];
+    expect(btns[0]).toContain('tabindex="0"');
+    expect(btns[1]).toContain('tabindex="-1"');
+  });
+
+  it("矢印キーの移動と選択を実装している(env=node のため存在をソースで固定)", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src", "components", "ui", "tabs.tsx"),
+      "utf8",
+    );
+    for (const key of ['"ArrowRight"', '"ArrowLeft"', '"Home"', '"End"']) {
+      expect(src).toContain(`e.key === ${key}`);
+    }
+    expect(src).toContain("e.preventDefault()");
+    expect(src).toContain(".focus()");
+    expect(src).toContain("onKeyDown={handleKeyDown}");
   });
 
   it("type=button(form 内で誤 submit しない)・下線の枠(border-b)を持つ", () => {

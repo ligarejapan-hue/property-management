@@ -31,6 +31,13 @@ describe("ModalShell", () => {
     expect(html).toContain('aria-modal="true"');
   });
 
+  it("dialog は見出しと aria-labelledby で紐付く=名前を持つ(@codex #406 R1 P2)", () => {
+    const html = render(<ModalShell title="題" footer={<span>F</span>} />);
+    const m = html.match(/aria-labelledby="([^"]+)"/);
+    expect(m).not.toBeNull();
+    expect(html).toContain(`<h2 id="${m![1]}"`);
+  });
+
   it("フッタは justify-end gap-2 に固定(gap-3 揺れの再発防止)", () => {
     const html = render(<ModalShell title="題" footer={<span>F</span>} />);
     expect(html).toContain("flex justify-end gap-2");
