@@ -75,6 +75,23 @@ describe("classifyPropertySearch", () => {
   });
 });
 
+describe("不完全な構文は keyword(@codex #404 R8 P2)", () => {
+  it("「120行目」「◯.xlsx:120行目」「◯.xlsx:120abc」は mgmtId にしない", () => {
+    // server の parseMgmtIdQuery はこれらを行番号と解釈できず、ファイル名ヒント
+    // 扱い=**そのファイル全部**という別の絞り込みに化ける。CSV/DM もこの
+    // 絞り込みを使うため、分類は server が解釈できる完全形だけに絞る。
+    expect(classifyPropertySearch("120行目")).toBe("text");
+    expect(classifyPropertySearch("受付帳.xlsx:120行目")).toBe("text");
+    expect(classifyPropertySearch("受付帳.xlsx:120abc")).toBe("text");
+    expect(classifyPropertySearch("abc 120行")).toBe("text");
+  });
+
+  it("完全形は従来どおり mgmtId", () => {
+    expect(classifyPropertySearch("受付帳.xlsx:120行")).toBe("mgmtId");
+    expect(classifyPropertySearch("120 行")).toBe("mgmtId");
+  });
+});
+
 describe("明示の接頭辞(@codex #404 R6 P2)", () => {
   it("「id:◯◯」「管理ID:◯◯」は任意の値を mgmtId へ通す", () => {
     // CSV出力の「管理ID」列の生値(例: MGMT-001)は構文を持たないため、
@@ -84,9 +101,9 @@ describe("明示の接頭辞(@codex #404 R6 P2)", () => {
     expect(classifyPropertySearch("ID: 受付帳分の何か")).toBe("mgmtId");
   });
 
-  it("接頭辞だけ(中身なし)は keyword のまま", () => {
-    expect(classifyPropertySearch("id:")).toBe("text");
-    expect(classifyPropertySearch("管理ID：  ")).toBe("text");
+  it("接頭辞だけ(中身なし)は、なりかけ=保留(R9で text から変更)", () => {
+    expect(classifyPropertySearch("id:")).toBe("mgmtIdPartial");
+    expect(classifyPropertySearch("管理ID：  ")).toBe("mgmtIdPartial");
   });
 
   it("toMgmtIdQuery は接頭辞を剥がし、他の構文はそのまま返す", () => {
@@ -94,5 +111,27 @@ describe("明示の接頭辞(@codex #404 R6 P2)", () => {
     expect(toMgmtIdQuery("管理ID： MGMT-001")).toBe("MGMT-001");
     expect(toMgmtIdQuery("120行")).toBe("120行");
     expect(toMgmtIdQuery("受付帳.xlsx:120")).toBe("受付帳.xlsx:120");
+  });
+});
+
+describe("なりかけの形は保留(@codex #404 R9 P2)", () => {
+  it("拡張子の断片・コロン待ち・接頭辞の途中は mgmtIdPartial", () => {
+    expect(classifyPropertySearch("受付帳.")).toBe("mgmtIdPartial");
+    expect(classifyPropertySearch("受付帳.x")).toBe("mgmtIdPartial");
+    expect(classifyPropertySearch("受付帳.xl")).toBe("mgmtIdPartial");
+    expect(classifyPropertySearch("受付帳.xlsx:")).toBe("mgmtIdPartial");
+    expect(classifyPropertySearch("id")).toBe("mgmtIdPartial");
+    expect(classifyPropertySearch("id:")).toBe("mgmtIdPartial");
+    expect(classifyPropertySearch("管理ID：")).toBe("mgmtIdPartial");
+  });
+
+  it("完全形はなりかけにならない(先に mgmtId 判定)", () => {
+    expect(classifyPropertySearch("受付帳.xls")).toBe("mgmtId");
+    expect(classifyPropertySearch("受付帳.csv")).toBe("mgmtId");
+  });
+
+  it("普通の住所・名前はなりかけ扱いにならない", () => {
+    expect(classifyPropertySearch("世田谷区三宿")).toBe("text");
+    expect(classifyPropertySearch("山田太郎")).toBe("text");
   });
 });

@@ -456,7 +456,11 @@ function PropertiesPageInner() {
     }
   };
 
+  // ⚠取得の世代ガード(@codex #404 R8 P1)。応答の追い越しで**古い結果が新しい
+  //   絞り込みを上書き**しないよう、最新の呼び出しだけが state を書く。
+  const fetchSeqRef = useRef(0);
   const fetchProperties = useCallback(async () => {
+    const seq = ++fetchSeqRef.current;
     setLoading(true);
     setError(null);
 
@@ -468,6 +472,7 @@ function PropertiesPageInner() {
 
     try {
       const json = await apiFetchProperties(params);
+      if (seq !== fetchSeqRef.current) return; // 追い越された古い応答は捨てる
       setProperties(json.data);
       // 選択(チェック)は「今表示している物件」だけに保つ。フィルタ/ページ/検索の変更で見えなくなった物件が
       // selectedIds に残ると、売却DM作成時に意図しない物件へ有料AI生成+オーナーPII送信になり得る(Codex R7)。
@@ -478,10 +483,14 @@ function PropertiesPageInner() {
       });
       setPagination(json.pagination as Pagination);
     } catch (err) {
+      if (seq !== fetchSeqRef.current) return; // 古い失敗で新しい結果を消さない
       setError(err instanceof Error ? err.message : "データ取得に失敗しました");
       setProperties([]);
     } finally {
-      setLoading(false);
+      // ⚠loading の解除は**最新の呼び出しだけ**が行う(古い決着が新しい取得中の
+      //   「読み込み中」を早消ししない)。最新はこの後必ず finally に到達するので
+      //   立ちっぱなしにはならない([[refresh-coordinator]] と同じ考え方)。
+      if (seq === fetchSeqRef.current) setLoading(false);
     }
   }, [page, buildFilterParams]);
 
@@ -678,18 +687,15 @@ function PropertiesPageInner() {
   // 入力ドラフト (searchAllDraft) は即時更新し、確定値への反映と
   // page リセットだけを遅延させる。suggest (searchInput) の debounce とは別インスタンス
   // なので互いに干渉しない。setState の identity は安定なので deps は空でよい。
-  const commitKeyword = useMemo(
+  // ⚠keyword と mgmtId の確定は**1本の debounce で同時に**行う(@codex #404 R8 P1)。
+  //   2本の独立タイマーだと、種別をまたぐ打ち替え(住所→管理ID等)で
+  //   「片方消えただけ」と「両方確定」の2回の取得が走り、**広い方の古い結果が
+  //   後から着いて新しい絞り込みを上書き**し得る(その行を選んで一括操作すると実害)。
+  const commitSearch = useMemo(
     () =>
-      debounce((value: string) => {
-        setSearchText(value);
-        setPage(1);
-      }, 300),
-    [setPage],
-  );
-  const commitMgmtId = useMemo(
-    () =>
-      debounce((value: string) => {
-        setMgmtIdText(value);
+      debounce((keyword: string, mgmtId: string) => {
+        setSearchText(keyword);
+        setMgmtIdText(mgmtId);
         setPage(1);
       }, 300),
     [setPage],
@@ -697,10 +703,9 @@ function PropertiesPageInner() {
   // アンマウント時に保留中の確定コミットを破棄する。
   useEffect(() => {
     return () => {
-      commitKeyword.cancel();
-      commitMgmtId.cancel();
+      commitSearch.cancel();
     };
-  }, [commitKeyword, commitMgmtId]);
+  }, [commitSearch]);
 
   /**
    * 統合検索窓の入力(UI一貫性 第1弾(1))。
@@ -715,17 +720,22 @@ function PropertiesPageInner() {
     setSearchAllDraft(value);
     const kind = classifyPropertySearch(value);
     if (kind === "mgmtId") {
-      commitKeyword("");
-      commitMgmtId(toMgmtIdQuery(value));
+      commitSearch("", toMgmtIdQuery(value));
       return;
     }
-    commitMgmtId("");
+    // ⚠管理IDに**なりかけ**の形は確定を保留(@codex #404 R9 P2)。「受付帳.xl」で
+    //   300ms 止まると部分文字列が keyword=URL/監査に確定してしまうため、
+    //   予約済みの確定も取り下げて完成を待つ(空に戻せば empty で消える)。
+    if (kind === "mgmtIdPartial") {
+      commitSearch.cancel();
+      return;
+    }
     // ⚠この窓は**所有者検索を受けない**(@codex #404 R4 P1)。所有者名・電話は
     //   専用の「所有者で探す」小窓(POST の suggest のみ)が受け、keyword=
     //   URL/property_list 監査へは構造的に流れない。placeholder もその2用途
     //   (住所・地番/管理ID)だけを案内する。ゆえにここの text は非PII前提で
     //   従来どおり入力しながら即時絞り込みに流せる。
-    commitKeyword(kind === "text" ? value : "");
+    commitSearch(kind === "text" ? value : "", "");
   };
 
   // Debounce search: reset page on filter change
@@ -759,8 +769,7 @@ function PropertiesPageInner() {
   const handleResetFilters = () => {
     // 保留中の検索 debounce を破棄してからリセットする
     // （後から確定コミットが走って検索語が復活しないように）。
-    commitKeyword.cancel();
-    commitMgmtId.cancel();
+    commitSearch.cancel();
     setSuggestOpen(false);
     setSuggestResults([]);
     setOwnerSearchOpen(false);

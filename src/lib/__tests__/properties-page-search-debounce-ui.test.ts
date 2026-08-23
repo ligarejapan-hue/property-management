@@ -32,24 +32,35 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     expect(pageSrc).toContain('classifyPropertySearch(mid) === "mgmtId" ? mid : `id:${mid}`');
   });
 
-  it("keyword / 管理ID の確定コミットを 300ms debounce する committer を持つ", () => {
-    expect(pageSrc).toMatch(/const commitKeyword = useMemo\(/);
-    expect(pageSrc).toMatch(/const commitMgmtId = useMemo\(/);
-    // 確定値 (searchText/mgmtIdText) へは debounce(…, 300) 経由でのみ反映する
+  it("keyword / 管理ID の確定は**1本の** 300ms debounce で同時に行う", () => {
+    // ⚠2本の独立タイマーだと種別またぎの打ち替えで取得が2回走り、広い方の
+    //   古い結果が後着で新しい絞り込みを上書きし得る(@codex #404 R8 P1)。
+    expect(pageSrc).toMatch(/const commitSearch = useMemo\(/);
     expect(pageSrc).toMatch(
-      /debounce\(\(value: string\) => \{\s*setSearchText\(value\);\s*setPage\(1\);\s*\}, 300\)/,
+      /debounce\(\(keyword: string, mgmtId: string\) => \{\s*setSearchText\(keyword\);\s*setMgmtIdText\(mgmtId\);\s*setPage\(1\);\s*\}, 300\)/,
     );
-    expect(pageSrc).toMatch(
-      /debounce\(\(value: string\) => \{\s*setMgmtIdText\(value\);\s*setPage\(1\);\s*\}, 300\)/,
-    );
+    // 旧・2本組は残っていない。
+    expect(pageSrc).not.toContain("commitKeyword");
+    expect(pageSrc).not.toContain("commitMgmtId");
+  });
+
+  it("取得は世代ガードで追い越しを捨てる(@codex #404 R8 P1)", () => {
+    expect(pageSrc).toContain("fetchSeqRef");
+    // ⚠ガードは**成功側と失敗側の2箇所**(片方だけ消す変異が toContain を
+    //   すり抜けた実測があるため、出現数で固定する)。
+    const guards = pageSrc.match(/seq !== fetchSeqRef\.current/g) ?? [];
+    expect(guards).toHaveLength(2);
+    // loading の解除も最新だけが行う(古い決着の早消し防止)。
+    expect(pageSrc).toContain("if (seq === fetchSeqRef.current) setLoading(false)");
   });
 
   it("統合検索欄はドラフト値を表示し、onChange は見分け(classify)経由で処理する", () => {
     expect(pageSrc).toMatch(/value=\{searchAllDraft\}/);
     expect(pageSrc).toMatch(/handleUnifiedSearchChange\(e\.target\.value\)/);
     expect(pageSrc).toMatch(/classifyPropertySearch\(value\)/);
-    expect(pageSrc).toMatch(/commitKeyword\(""\)/);
-    expect(pageSrc).toMatch(/commitMgmtId\(""\)/);
+    // 1本コミット: mgmtId のとき keyword は同時に空へ(逆も同様)。
+    expect(pageSrc).toContain('commitSearch("", toMgmtIdQuery(value))');
+    expect(pageSrc).toContain('commitSearch(kind === "text" ? value : "", "")');
   });
 
   it("⚠旧ブックマーク(keyword+mgmtId両方)は見える方(keyword)だけ復元する(@codex #404 R1 P2)", () => {
@@ -74,12 +85,12 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
 
   it("リセットでドラフトを空にし、保留中の debounce を cancel する", () => {
     expect(pageSrc).toMatch(/setSearchAllDraft\(""\)/);
-    expect(pageSrc).toMatch(/commitKeyword\.cancel\(\)/);
-    expect(pageSrc).toMatch(/commitMgmtId\.cancel\(\)/);
+    expect(pageSrc).toMatch(/commitSearch\.cancel\(\)/);
   });
 
   it("アンマウント時に debounce を cancel する cleanup を持つ", () => {
-    expect(pageSrc).toMatch(/commitKeyword\.cancel\(\);\s*commitMgmtId\.cancel\(\)/);
+    const at = pageSrc.indexOf("return () => {\n      commitSearch.cancel();");
+    expect(at).toBeGreaterThan(-1);
   });
 });
 
@@ -127,6 +138,6 @@ describe("所有者検索の構造分離(@codex #404 R1〜R4 P1 の最終形)", 
     const hAt = pageSrc.indexOf("const handleUnifiedSearchChange");
     const hEnd = pageSrc.indexOf("};", hAt);
     const handler = pageSrc.slice(hAt, hEnd);
-    expect(handler).toContain('commitKeyword(kind === "text" ? value : "")');
+    expect(handler).toContain('commitSearch(kind === "text" ? value : "", "")');
   });
 });
