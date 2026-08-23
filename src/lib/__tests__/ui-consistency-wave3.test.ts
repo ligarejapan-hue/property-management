@@ -33,8 +33,8 @@ const rel = (p: string) => relative(process.cwd(), p).replace(/\\/g, "/");
 describe("(⑪) モーダルの器の手書き禁止(ラチェット)", () => {
   it("fixed inset-0 の overlay は ModalShell 経由か、理由付き allow-list のみ", () => {
     const ALLOW = new Set([
-      // 器そのもの
-      "src/components/ui/modal-shell.tsx",
+      // ⚠器(modal-shell)はネイティブ <dialog> 化で fixed inset-0 を持たなくなった
+      //   ため allow 不要(@codex #406 R2)。
       // モーダルではないもの
       "src/components/screen-protection/watermark-overlay.tsx", // 透かし(全画面装飾)
       "src/components/layout/sidebar.tsx", // モバイルドロワー
@@ -72,12 +72,28 @@ describe("(⑪) モーダルの器の手書き禁止(ラチェット)", () => {
   });
 
   it("モーダルフッタの間隔は gap-2 のみ(gap-3/4 の揺れを戻さない)", () => {
-    // ⚠「flex justify-end」の隣接一致だと flex items-center justify-end gap-3 の
-    //   ような(実在した)書き方が素通りする(提出前レビューP1)→ justify-end 起点で見る。
-    const offenders = files.filter((f) =>
-      /justify-end gap-(?!2\b)\d/.test(read(f)),
-    );
-    expect(offenders.map(rel), "justify-end の gap が 2 以外").toEqual([]);
+    // ⚠隣接一致は Tailwind のクラス**順序**に依存し「justify-end items-center gap-3」
+    //   「gap-3 justify-end」が素通りする(@codex #406 R2 P2。提出前レビューP1で
+    //   一度緩めたが、まだ順序依存だった)→ className 文字列をトークン分解して
+    //   「justify-end と gap-N(N≠2) が同居」を順序に関係なく検出する。
+    const offenders: string[] = [];
+    for (const f of files) {
+      const src = read(f);
+      const classRe = /className=(?:"([^"]*)"|\{`([^`]*)`\})/g;
+      let m: RegExpExecArray | null;
+      while ((m = classRe.exec(src)) !== null) {
+        const tokens = (m[1] ?? m[2] ?? "")
+          .replace(/\$\{[^}]*\}/g, " ")
+          .split(/\s+/);
+        if (
+          tokens.includes("justify-end") &&
+          tokens.some((t) => /^gap-(?!2$)\d/.test(t))
+        ) {
+          offenders.push(`${rel(f)}: ${tokens.join(" ").trim().slice(0, 60)}`);
+        }
+      }
+    }
+    expect(offenders, "justify-end の gap が 2 以外").toEqual([]);
   });
 
   it("削除確認4箇所は ConfirmDialog を使っている(逆行防止)", () => {

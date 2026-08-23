@@ -8,27 +8,35 @@
  */
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { ModalShell } from "../modal-shell";
 import { ConfirmDialog } from "../confirm-dialog";
 
 const render = (el: React.ReactElement) => renderToStaticMarkup(el);
 
 describe("ModalShell", () => {
-  it("器の規約: overlay=bg-black/50 p-4・カード=rounded-lg p-6 shadow-xl・dark対応", () => {
+  it("器はネイティブ <dialog>(showModal=閉じ込め/初期フォーカス/復帰が標準・@codex #406 R2 P2)", () => {
     const html = render(
       <ModalShell title="題" footer={<button type="button">閉</button>} />,
     );
-    expect(html).toContain("fixed inset-0 z-50");
-    expect(html).toContain("bg-black/50");
+    expect(html).toMatch(/^<dialog /);
+    expect(html).toContain("backdrop:bg-black/50");
     expect(html).toContain("rounded-lg");
     expect(html).toContain("shadow-xl");
     expect(html).toContain("dark:bg-gray-900");
+    // 旧・div 方式の overlay は残っていない
+    expect(html).not.toContain("fixed inset-0");
   });
 
-  it("role=dialog + aria-modal を持つ(手書き26箇所には無かった)", () => {
-    const html = render(<ModalShell title="題" footer={<span>F</span>} />);
-    expect(html).toContain('role="dialog"');
-    expect(html).toContain('aria-modal="true"');
+  it("showModal で開く+Escape は onClose 無指定なら無効化(状態の食い違い防止)をソースで固定", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src", "components", "ui", "modal-shell.tsx"),
+      "utf8",
+    );
+    expect(src).toContain("dialog.showModal()");
+    expect(src).toContain("onCancel={(e) => {");
+    expect(src).toContain("else e.preventDefault();");
   });
 
   it("dialog は見出しと aria-labelledby で紐付く=名前を持つ(@codex #406 R1 P2)", () => {
@@ -36,6 +44,14 @@ describe("ModalShell", () => {
     const m = html.match(/aria-labelledby="([^"]+)"/);
     expect(m).not.toBeNull();
     expect(html).toContain(`<h2 id="${m![1]}"`);
+  });
+
+  it("ConfirmDialog は busy 中 Escape も無効(onClose=undefined)をソースで固定", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src", "components", "ui", "confirm-dialog.tsx"),
+      "utf8",
+    );
+    expect(src).toContain("onClose={busy ? undefined : onCancel}");
   });
 
   it("フッタは justify-end gap-2 に固定(gap-3 揺れの再発防止)", () => {

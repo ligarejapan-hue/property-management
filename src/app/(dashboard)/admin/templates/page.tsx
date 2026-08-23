@@ -121,6 +121,7 @@ export default function TemplatesPage() {
       {showCreate && (
         <ModalShell
           title="新規テンプレート作成"
+          onClose={() => setShowCreate(false)}
           footer={
             <>
               <Button variant="secondary" onClick={() => setShowCreate(false)}>

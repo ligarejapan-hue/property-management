@@ -32,6 +32,7 @@ export function ConfirmDialog({
     <ModalShell
       size="sm"
       title={title}
+      onClose={busy ? undefined : onCancel}
       footer={
         <>
           <Button variant="secondary" onClick={onCancel} disabled={busy}>
