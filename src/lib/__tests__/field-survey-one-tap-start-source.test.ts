@@ -95,16 +95,20 @@ describe("1-b. 復元では自動開始しない (本人の停止を覆さない
 });
 
 describe("2. 開始と同時に現在地へ寄せて倍率を上げる", () => {
-  it("最初の現在地が取れた時点で panTo と setZoom を呼ぶ", () => {
+  it("最初の現在地が取れた時点で panTo し、倍率は「引きすぎのときだけ」寄せる", () => {
+    // 第1弾 B2: 無条件 setZoom(TRIP_START_ZOOM) は、番地単位で見ていた人まで
+    // 引き戻していた → 現在地ボタンと同じ recenterZoom 規則に統一。
     const eff = MAP_SRC.match(
-      /if \(!autoCenterOnStartRef\.current\) return;[\s\S]{0,800}?\}, \[[^\]]*\]\);/,
+      /if \(!autoCenterOnStartRef\.current\) return;[\s\S]{0,1600}?\}, \[[^\]]*\]\);/,
     );
     expect(eff).not.toBeNull();
     const m = eff?.[0] ?? "";
     expect(m).toContain("recorder.latestPositionForDisplay");
     expect(m).toContain("autoCenterOnStartRef.current = false");
     expect(m).toContain("panTo");
-    expect(m).toContain("setZoom(TRIP_START_ZOOM)");
+    expect(m).toContain("recenterZoom({");
+    expect(m).toContain("tripZoom: TRIP_START_ZOOM");
+    expect(m).not.toContain("setZoom(TRIP_START_ZOOM)");
   });
 
   it("開始時の倍率は既定より大きい (街歩きで建物が見える)", () => {
@@ -119,7 +123,7 @@ describe("2. 開始と同時に現在地へ寄せて倍率を上げる", () => {
   it("位置が取れなければ何もしない (巡回自体は止めない)", () => {
     const eff =
       MAP_SRC.match(
-        /if \(!autoCenterOnStartRef\.current\) return;[\s\S]{0,800}?\}, \[[^\]]*\]\);/,
+        /if \(!autoCenterOnStartRef\.current\) return;[\s\S]{0,1600}?\}, \[[^\]]*\]\);/,
       )?.[0] ?? "";
     // 位置が無い間は ref を落とさずに return し、後から届いた時に効かせる。
     const posGuard = eff.indexOf("if (!pos) return;");

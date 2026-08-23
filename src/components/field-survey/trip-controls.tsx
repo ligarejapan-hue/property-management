@@ -28,6 +28,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { LocationConsentNotice } from "@/components/field-survey/location-consent-notice";
 import {
   hasLocationConsent,
@@ -1142,7 +1143,11 @@ function ModalShell({
   testId: string;
   children: React.ReactNode;
 }) {
-  return (
+  // ⚠portal で body 直下に出す(地図操作性 第1弾 A2)。この部品はスマホでは
+  //   閉じている(display:none)表示切替パネルの**子孫**として描画されるため、
+  //   「前回の巡回が終了されていません」等の確認が画面に出ない事故があった。
+  //   モーダルは親の開閉と無関係に必ず見えなければならない。
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -1153,7 +1158,8 @@ function ModalShell({
         <h3 className="mb-2 text-base font-semibold text-gray-800 dark:text-gray-100">{title}</h3>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

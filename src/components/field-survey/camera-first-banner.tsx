@@ -13,6 +13,10 @@
  * 立っているうちに家の上を指してもらう。
  *
  * 座標・技術用語は文言に含めない。
+ *
+ * 配置は呼び出し側の**画面上部中央スタック**が持つ(第1弾 A5)。以前ここに
+ * あった absolute bottom-14 は、左下の現在地ボタンと同じ帯に覆いかぶさり、
+ * 家を探すために現在地へ寄りたい瞬間にボタンを押せなくしていた。
  */
 
 interface CameraFirstBannerProps {
@@ -34,7 +38,7 @@ export default function CameraFirstBanner({
     <div
       role="status"
       data-testid="camera-first-banner"
-      className="pointer-events-auto absolute bottom-14 left-1/2 z-10 w-[calc(100%-1.5rem)] max-w-sm -translate-x-1/2 rounded-md border border-indigo-300 bg-indigo-50 p-3 text-xs text-indigo-900 shadow dark:border-indigo-500/40 dark:bg-indigo-500/15 dark:text-indigo-200"
+      className="pointer-events-auto w-full rounded-md border border-indigo-300 bg-indigo-50 p-3 text-xs text-indigo-900 shadow dark:border-indigo-500/40 dark:bg-indigo-500/15 dark:text-indigo-200"
     >
       <p className="font-semibold">
         {hasPhoto ? "写真を撮りました" : "写真なしでピンを立てます"}

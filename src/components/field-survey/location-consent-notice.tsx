@@ -1,5 +1,7 @@
 "use client";
 
+import { createPortal } from "react-dom";
+
 /**
  * 位置記録の説明文 (単一の正本)。
  *
@@ -46,7 +48,9 @@ export function LocationConsentModal({
   onCancel: () => void;
   onAgree: () => void;
 }) {
-  return (
+  // ⚠portal で body 直下へ(地図操作性 第1弾 A2)。スマホでは閉じている
+  //   (display:none)パネルの子孫として描画されると不可視になるため。
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -77,6 +81,7 @@ export function LocationConsentModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

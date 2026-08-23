@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
   FIELD_SURVEY_PIN_STATUSES,
   FIELD_SURVEY_PIN_TYPES,
@@ -539,6 +540,10 @@ function PinPhotoSection({
     if (r.ok) await reload();
   };
 
+  // 第1弾 A1: 削除は必ず確認をはさむ(現地写真は撮り直しが効かない)。
+  const [confirmDeletePhotoId, setConfirmDeletePhotoId] = useState<string | null>(
+    null,
+  );
   const handleDelete = async (photoId: string) => {
     const r = await photoMutations.deletePhoto(pinId, photoId);
     if (r.ok) {
@@ -602,25 +607,38 @@ function PinPhotoSection({
                   />
                 )}
               </button>
+              {/* 第1弾 A1: 削除ボタンをサムネイルの外へ(拡大タップとの押し
+                  間違いで、確認なしに現地写真が消えていた)。押すと確認を出す。 */}
               {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleDelete(p.id);
-                  }}
-                  disabled={
-                    photoMutations.deleteLoading || pendingDeleteIds.includes(p.id)
-                  }
-                  data-testid="pin-photo-delete"
-                  className="absolute right-0 top-0 rounded-bl bg-black/60 px-1 text-[10px] text-white disabled:opacity-60"
-                  aria-label="写真を削除"
-                >
-                  {pendingDeleteIds.includes(p.id) ? "削除中…" : "写真を削除"}
-                </button>
+                <div className="mt-0.5 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeletePhotoId(p.id)}
+                    disabled={
+                      photoMutations.deleteLoading || pendingDeleteIds.includes(p.id)
+                    }
+                    data-testid="pin-photo-delete"
+                    className="rounded px-1.5 py-0.5 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-60 dark:text-red-400 dark:hover:bg-red-500/10"
+                  >
+                    {pendingDeleteIds.includes(p.id) ? "削除中…" : "削除"}
+                  </button>
+                </div>
               )}
             </li>
           ))}
         </ul>
+      )}
+
+      {confirmDeletePhotoId && (
+        <ConfirmDialog
+          title="写真を削除しますか？"
+          onCancel={() => setConfirmDeletePhotoId(null)}
+          onConfirm={() => {
+            const id = confirmDeletePhotoId;
+            setConfirmDeletePhotoId(null);
+            void handleDelete(id);
+          }}
+        />
       )}
 
       {preview && !brokenIds.has(preview.id) && (
