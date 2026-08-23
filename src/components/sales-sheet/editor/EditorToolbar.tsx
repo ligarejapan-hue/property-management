@@ -35,9 +35,13 @@ export interface EditorToolbarProps {
   /** B-8: 文字・表どうしの重なり検知の注意文言(重なりなし/未指定は非表示)。
    *  自動整列・自動調整は文字を動かさない仕様のため、出力前に気付けるように出す。 */
   layoutWarning?: string | null;
+  /** B-8 案A: 「重なりを自動で直す」(押したときだけ動かす)。 */
+  onAutoFixOverlaps?: () => void;
+  /** B-8 案A: 自動修正の結果メッセージ(なければ非表示)。 */
+  autoFixNotice?: string | null;
 }
 
-export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr, onAddMapQr, canAddMapQr = false, onOpenTransactionInfo, canEditTransactionInfo = true, onUndo, canUndo = false, onRedo, canRedo = false, layoutWarning = null }: EditorToolbarProps) {
+export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr, onAddMapQr, canAddMapQr = false, onOpenTransactionInfo, canEditTransactionInfo = true, onUndo, canUndo = false, onRedo, canRedo = false, layoutWarning = null, onAutoFixOverlaps, autoFixNotice = null }: EditorToolbarProps) {
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -243,6 +247,28 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         className="px-4 pb-1.5 text-sm text-amber-700 dark:text-amber-400"
       >
         {layoutWarning}
+        {/* B-8 案A: 押したときだけ自動で直す(勝手には動かさない)。 */}
+        {onAutoFixOverlaps && (
+          <button
+            type="button"
+            onClick={onAutoFixOverlaps}
+            disabled={busy}
+            data-toolbar-auto-fix-overlaps
+            className="ml-2 rounded border border-amber-400 bg-white px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-600 dark:bg-gray-800 dark:text-amber-300 dark:hover:bg-amber-900/40"
+          >
+            重なりを自動で直す
+          </button>
+        )}
+      </p>
+    )}
+    {/* 自動修正の結果。⚠重なりが全部消えると layoutWarning ごと消えるため、
+        「直りました」はこの独立行が伝える(黙って消えると押した人が結果を知れない)。 */}
+    {autoFixNotice && (
+      <p
+        data-toolbar-auto-fix-notice
+        className="px-4 pb-1.5 text-sm text-emerald-700 dark:text-emerald-400"
+      >
+        {autoFixNotice}
       </p>
     )}
     </div>
