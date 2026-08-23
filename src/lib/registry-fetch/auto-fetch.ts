@@ -1937,8 +1937,10 @@ function createPlaywrightRegistryPage(
       const sleep = (ms: number) =>
         page.waitForFunction(() => false, undefined, { timeout: ms }).catch(() => {});
 
-      // 実況(2026-08-15)。検索側 reportLive と同じ contract だが、**中止は見ない**
-      // (有料取得は中止を受け付けない既存方針=課金だけ残る状態を作らない)。
+      // 実況(2026-08-15)。検索側 reportLive と同じ contract。
+      // ⚠**2026-08-23 から中止も見る**(発注者指示「確定ボタンを押すまでは中止
+      // ボタンを出してください」)。課金の直前までは 1 円も動かないので、
+      // 節目ごとに中止を確認して**自分で**止まる(外から処理を殺さない)。
       // 撮影は本体の await チェーンに乗せない・累計予算制も検索側と同じ。
       // ⚠label は固定文言のみ。所在・地番・資格情報を**絶対に**埋め込まない
       // (スクショには写るが、閲覧はストア側で実行者本人に限定される)。
@@ -1976,11 +1978,30 @@ function createPlaywrightRegistryPage(
         })();
       };
 
+      /**
+       * 課金前の節目で中止を確認し、押されていれば**課金せず**止まる。
+       *
+       * ⚠**課金の直前(`endCancelable`)より前でしか呼ばない**。課金後に止めると
+       *   「払ったのに書類が無い」を作る(その判断は cancel-safety.ts が持つ)。
+       * ⚠止めたことを実況に残す(黙って終わると「壊れた」と見える)。
+       * ⚠節目は**複数**要る。1か所だけだと「押したのに最後まで走る」時間帯が残る。
+       */
+      const abortIfCancelledPaid = (): void => {
+        if (input.live?.isCancelRequested?.() !== true) return;
+        try {
+          input.live?.step(CANCEL_ACCEPTED_MESSAGE);
+        } catch {
+          /* 実況は best-effort */
+        }
+        throw new RegistryFetchError("cancelled");
+      };
+
       // ---- 課金前ゾーン(①〜③: ナビゲーション+条件入力+ダイアログ検索) ----
       try {
         await page.waitForSelector(REGISTRY_SELECTORS.fudosanRequestLink, {
           state: "attached",
         });
+        abortIfCancelledPaid();
         reportLive("ログインしました。不動産請求メニューへ移動します(まだ課金されていません)");
         await domClick(REGISTRY_SELECTORS.fudosanRequestLink);
         await page.waitForSelector(REGISTRY_SELECTORS.searchMethodLocationRadio);
@@ -2019,6 +2040,7 @@ function createPlaywrightRegistryPage(
         //   無料検索と有料取得で結果集合がずれる([同種の穴は全箇所を洗ってから直す])。
         await page.fill(REGISTRY_SELECTORS.dialogChibanRangeStart, targetKey);
         await page.fill(REGISTRY_SELECTORS.dialogChibanRangeEnd, targetKey);
+        abortIfCancelledPaid();
         reportLive("所在と地番を入力し、地番検索を実行しています(まだ課金されていません)");
         await page.click(REGISTRY_SELECTORS.dialogSearch);
       } catch (err) {
@@ -2367,6 +2389,7 @@ function createPlaywrightRegistryPage(
           await domClick(REGISTRY_SELECTORS.dialogCancel).catch(() => {});
           throw new RegistryFetchError("provider_error");
         }
+        abortIfCancelledPaid();
         reportLive("対象の地番を選択しました。確定します(まだ課金されていません)");
         await domClick(REGISTRY_SELECTORS.dialogOk);
         // ⚠**閉じたことを実測する**。従来の sleep だけだと、確定が効いていなくても
@@ -2396,6 +2419,7 @@ function createPlaywrightRegistryPage(
         reportLive("地番を確定しました(まだ課金されていません)");
         await sleep(1000); // 確定値のフォーム反映を待つ
 
+        abortIfCancelledPaid();
         reportLive("請求する書類の種類を選択しています(まだ課金されていません)");
         // ---- ⑤ 請求事項=**選んだ種別のみ**(検証つき・課金前) ----
         // 所有者事項(既定)/全部事項 のどちらか一方だけをONにし、残りは全部OFF。
@@ -2443,6 +2467,7 @@ function createPlaywrightRegistryPage(
         // 「請求済フィルタ×地番一致×最新日時×期限実測」(下のループの従来
         // フォールバック)が担う。
 
+        abortIfCancelledPaid();
         reportLive("請求条件を確定しています(まだ課金されていません)");
         // ⚠**確定のクリックそのものから診断の内側にする**(@codex #383 P2×3)。
         // 守る範囲を3回にわたって1段ずつ手前へ動かした
@@ -2586,6 +2611,7 @@ function createPlaywrightRegistryPage(
             state: "attached",
             timeout: DIALOG_RESULT_TIMEOUT_MS,
           });
+          abortIfCancelledPaid();
           reportLive("請求リストで対象の行を選んでいます(まだ課金されていません)");
           // 行の照合材料は各行の hidden(#chiban_N/#chibanKuiki_N/#seikyuType_N/
           // #seikyuzumi_N)。⚠**check した行がそのまま請求対象**=お金の一歩手前
@@ -2755,6 +2781,11 @@ function createPlaywrightRegistryPage(
 
       // ⚠実況はこの位置(=aborted確認より前)で刻む。下の確認〜charged代入の
       // 「同一同期区間」に await を挟まないため(reportLive は同期・撮影は void)。
+      // ⚠ここから先も**まだ課金していない**(金額の裏取り・請求ボタン・確認
+      //   ダイアログ待ちはすべて無料)。**受付はまだ閉じない**
+      //   (@codex #401 R1 P1: ここで閉じると「課金の直前まで中止できる」と
+      //   案内しながら、実際には約130行ぶん早く締め切っていた)。
+      abortIfCancelledPaid();
       reportLive("⚠ここから請求(課金)を実行します");
       // ⚠中止の印を**請求ボタンの直前**で確認(@codex R10 P1)。provider が課金前
       // タイムアウトで reject した後も、この関数は裏で走り続けている可能性がある。
@@ -2881,6 +2912,17 @@ function createPlaywrightRegistryPage(
       if (input.chargeState?.aborted) {
         throw new RegistryFetchError("provider_error");
       }
+      // ⚠**ここが最後の分かれ目**(@codex #401 R1 P1)。ＯＫを押すと課金が成立する。
+      //   利用者の中止を**最後に一度だけ**見てから、受付を閉じて課金へ入る。
+      //   ⚠順序が重要: 「確認 → 閉じる → charged=true → ＯＫ」。
+      //     先に閉じると、閉じてから押された中止が黙って捨てられる。
+      //     閉じ忘れると「中止しています…」と出したまま請求が進み、
+      //     **止めたつもりなのに請求される**。
+      //   ⚠この確認〜charged 代入は**同一同期区間**(間に await を挟まない)。
+      //     abortIfCancelledPaid / endCancelable はいずれも同期処理。
+      abortIfCancelledPaid();
+      input.live?.endCancelable?.();
+      reportLive("これ以降は中止できません(請求の手続きに入ります)");
       try {
         // ⚠課金境界フラグ(@codex #345 P1)。**ＯＫを押す直前**に立てる(第7回の
         // 誤判定=請求クリック時点で立てていたため、未課金なのに課金済み扱いになった)。
@@ -3980,6 +4022,45 @@ export async function runRegistryAutoFetch(
     !isRecover &&
     !!args.locationCandidate &&
     !(args.realEstateNumber ?? property.realEstateNumber)?.trim();
+  // ⚠中止の節目(abortIfCancelledPaid)を実装しているのは**所在購入の adapter だけ**
+  //   (@codex #401 R4 P2)。番号での購入(provider.fetchRegistryPdf の番号分岐)は
+  //   live の中止を見ない。ここで受付を閉じないと、中止が accepted:true になるのに
+  //   実行は最後まで走る(=止めたつもりで完了/課金)。回収は route 側で閉じ済み。
+  if (!isRecover && !willPurchaseByLocation) {
+    // ⚠閉じる前に、**既に受け付けた中止**を敬う(@codex #401 R5 P2)。route が
+    //   受付を開けたまま候補解決〜ここまで進む間に押された中止は accepted:true で
+    //   返っている。黙って閉じて番号購入へ進むと「止めたつもりなのに実行が走り、
+    //   最後は provider の失敗として残る」。外部にはまだ一切触れていないので、
+    //   ここで止めるのが安全かつ約束どおり(監査にも cancelled で残す)。
+    if (args.live?.isCancelRequested?.() === true) {
+      try {
+        args.live?.step(CANCEL_ACCEPTED_MESSAGE);
+      } catch {
+        /* 実況は best-effort */
+      }
+      await writeAuditLog({
+        userId: session.id,
+        action: "registry_auto_fetch",
+        targetTable: "properties",
+        targetId: propertyId,
+        detail: {
+          propertyId,
+          source: provider.name,
+          status: "cancelled",
+          mode: "purchase",
+          providerErrorCode: "cancelled",
+          confirmed: true,
+        },
+      });
+      throw new ApiError(
+        PROVIDER_ERROR_STATUS.cancelled,
+        "中止しました（課金は発生していません）",
+        "REGISTRY_AUTO_FETCH_CANCELLED",
+        "cancelled",
+      );
+    }
+    args.live?.endCancelable?.();
+  }
   // ⚠回収でも「対象と所在があること・地番の書き方が読めること」は同じ規則で検査する
   // (別の筆を取り込まないため)。違うのは課金スイッチと台帳ガードを通らない点だけ。
   // ⚠回収は**候補が無くても物件自身の地番で実行できる**(@codex #394 R6 P1)。
@@ -4532,7 +4613,12 @@ export async function runRegistryAutoFetch(
         detail: {
           propertyId,
           source: provider.name,
-          status: "failed",
+          // ⚠**中止を「失敗」として残さない**(@codex #401 R2 P2)。
+          //   利用者が自分で止めたのは failed ではない。検索側(search.ts)は
+          //   既に `err.code === "cancelled" ? "cancelled" : "failed"` で分けている。
+          //   有料取得にも中止ボタンが付いた以上、**通常操作のたびに偽の失敗が
+          //   監査へ積まれる**のは困る(障害調査の邪魔になる)。
+          status: err.code === "cancelled" ? "cancelled" : "failed",
           mode: isRecover ? "recover" : "purchase",
           providerErrorCode: err.code,
           confirmed: true,
@@ -4541,7 +4627,14 @@ export async function runRegistryAutoFetch(
       throw new ApiError(
         PROVIDER_ERROR_STATUS[err.code],
         err.message,
-        "REGISTRY_AUTO_FETCH_PROVIDER_ERROR",
+        // ⚠**中止は画面に「失敗」と見せない**(@codex #401 R2 P2)。
+        //   汎用の PROVIDER_ERROR のままだと、利用者が自分で押した中止が
+        //   赤いエラー帯で出る(検索側には中立の「中止しました」表示がある)。
+        //   ⚠一括取得の分類は `providerCode`(下の第4引数)を見るので、
+        //   ここで code を変えても影響しない(実測: この文字列を判定に使う箇所は無い)。
+        err.code === "cancelled"
+          ? "REGISTRY_AUTO_FETCH_CANCELLED"
+          : "REGISTRY_AUTO_FETCH_PROVIDER_ERROR",
         // ⚠元の分類コード(charged_but_failed / rate_limited 等)を消さずに渡す。
         // 一括取得の分類が code 文字列を変えずに安全に判定できるようにする(@codex #361 P1)。
         err.code,

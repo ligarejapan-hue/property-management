@@ -6,8 +6,13 @@
  * 有料取得には無かったため。ここでは route→runRegistryAutoFetch→provider→adapter の
  * 受け渡しと、UI が liveRef を発行することをソース表明で固定する。
  *
- * ⚠有料取得は**中止を受け付けない**(課金だけ残る状態を作らない既存方針)。
- *   そのため cancel 窓は begin 直後に閉じ、reporter に isCancelRequested を配線しない。
+ * ⚠**2026-08-23 方針変更(発注者指示)**:「確定ボタンを押すまでは中止ボタンを
+ *   出してください。」従来は begin 直後に cancel 窓を閉じ、有料取得は一切中止
+ *   できなかった。候補1件で自動的に取得へ進む今の流れでは、押せる時間が数秒しか
+ *   無く実質止められなかった。
+ *   ⇒ **窓は開けたまま渡し、adapter が課金の直前(endCancelable)で閉じる**。
+ *   課金までの各段は全て無料で、途中で止めてもカートに未請求の行が残るだけ
+ *   (コード上も無害として扱っている)。課金後は cancel-safety.ts が中止を無視する。
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -30,15 +35,28 @@ describe("route: liveRef の受け付けと橋渡し", () => {
     expect(ROUTE).toMatch(/beginLiveView\(session\.id, id, liveRef\)/);
   });
 
-  it("⚠begin 直後に cancel 窓を閉じる(有料取得は中止不可=効かない「中止」ボタンを出さない)", () => {
+  it("⚠begin 直後に cancel 窓を閉じない(課金の直前まで中止できる)", () => {
     const begin = ROUTE.indexOf("beginLiveView(session.id, id, liveRef)");
-    const close = ROUTE.indexOf(
-      "closeLiveViewCancelWindow(session.id, id, liveRef)",
-    );
     expect(begin).toBeGreaterThan(-1);
-    expect(close).toBeGreaterThan(begin);
-    // reporter に中止確認を配線しない(見る場所が無い中止を受け付けない)。
-    expect(ROUTE).not.toMatch(/isLiveViewCancelRequested/);
+    // begin の直後の数行に「閉じる」が現れないこと。
+    expect(ROUTE.slice(begin, begin + 200)).not.toContain(
+      "closeLiveViewCancelWindow",
+    );
+  });
+
+  it("reporter に中止の確認と受付終了を配線する", () => {
+    // ⚠この2つが無いと、画面が中止を送っても**見る場所が無い**。
+    expect(ROUTE).toMatch(/isCancelRequested\(\): boolean \{/);
+    expect(ROUTE).toMatch(/isLiveViewCancelRequested\(session\.id, id, liveRef\)/);
+    expect(ROUTE).toMatch(/endCancelable\(\): void \{/);
+    expect(ROUTE).toMatch(
+      /closeLiveViewCancelWindow\(session\.id, id, liveRef\)/,
+    );
+  });
+
+  it("受け付けの文言が実態と合っている(中止できないと嘘を書かない)", () => {
+    expect(ROUTE).not.toContain("自動取得を受け付けました(この処理は中止できません)");
+    expect(ROUTE).toContain("請求(課金)の直前まで中止できます");
   });
 
   it("成否によらず finally で completeLiveView する(失敗時こそ見返しが要る)", () => {
@@ -73,6 +91,21 @@ describe("orchestration→provider→adapter の受け渡し", () => {
     expect(AUTO).not.toContain("請求しました(課金済み)");
     // 選択検証(発注者指示)の文言。
     expect(AUTO).toContain("対象の地番を選択しました。確定します(まだ課金されていません)");
+  });
+
+  // ⚠**このテストの旧版は誤りだった**(@codex #401 R1 P1 で指摘)。
+  //   「実況文言より前で閉じる」を正しいと固定していたが、その文言から実際の
+  //   課金(確認ダイアログのＯＫ)までは**約130行あり全部無料**。正しい基準は
+  //   「charged=true の直前で閉じる」。下の describe に置き換えた。
+
+  it("⚠adapter は課金前の節目ごとに中止を見る(押しても進み続ける、を作らない)", () => {
+    // 節目が1か所しか無いと「押したのに最後まで走る」時間帯が生まれる。
+    const checks = AUTO.match(/abortIfCancelledPaid\(\)/g) ?? [];
+    expect(checks.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("⚠中止で止めたことが実況に残る(黙って終わらない)", () => {
+    expect(AUTO).toContain("CANCEL_ACCEPTED_MESSAGE");
   });
 
   it("⚠順番待ち(購入ミューテックス)の間も心拍を刻む(@codex #380 R2 P2)", () => {
@@ -136,5 +169,106 @@ describe("client 側", () => {
     expect(BUTTON).toMatch(
       /searchSettled=\{[\s\S]*?state !== "searching" &&[\s\S]*?state !== "obtaining" &&[\s\S]*?state !== "recovering"[\s\S]*?\}/,
     );
+  });
+});
+
+// ── @codex #401 R1 ────────────────────────────────────────────────────
+describe("受付を閉じるのは『本当の課金の直前』(@codex #401 R1 P1)", () => {
+  it("endCancelable は charged=true より前、かつ請求の実況文言より後", () => {
+    // ⚠初版は「⚠ここから請求(課金)を実行します」の手前で閉じていた。
+    //   そこから実際の課金(確認ダイアログのＯＫ)までは**約130行あり全部無料**。
+    //   「課金の直前まで中止できる」と案内しながら早く締め切っていた。
+    const chargeMsg = AUTO.indexOf("⚠ここから請求(課金)を実行します");
+    const endCancelable = AUTO.indexOf("live?.endCancelable?.()");
+    const chargedFlag = AUTO.indexOf("input.chargeState) input.chargeState.charged = true");
+    expect(chargeMsg).toBeGreaterThan(-1);
+    expect(endCancelable).toBeGreaterThan(-1);
+    expect(chargedFlag).toBeGreaterThan(-1);
+    expect(endCancelable).toBeGreaterThan(chargeMsg);
+    expect(endCancelable).toBeLessThan(chargedFlag);
+  });
+
+  it("閉じる直前に中止を最終確認する(閉じてから押された中止を捨てない)", () => {
+    const endCancelable = AUTO.indexOf("live?.endCancelable?.()");
+    const before = AUTO.slice(Math.max(0, endCancelable - 400), endCancelable);
+    expect(before).toContain("abortIfCancelledPaid();");
+  });
+
+  it("⚠確認〜課金の間に await を挟まない(同一同期区間)", () => {
+    const endCancelable = AUTO.indexOf("live?.endCancelable?.()");
+    const chargedFlag = AUTO.indexOf("input.chargeState) input.chargeState.charged = true");
+    const between = AUTO.slice(endCancelable, chargedFlag);
+    expect(between).not.toContain("await ");
+  });
+});
+
+// ── @codex #401 R2 ────────────────────────────────────────────────────
+describe("回収(課金なし)は中止を受け付けない(@codex #401 R2 P1)", () => {
+  it("route は回収と旧経路(candidateRef なし)で受付を即閉じる", () => {
+    // ⚠回収の経路には中止を見る場所が無い(実況を刻むだけ)。受け付けると
+    //   「止めたつもりで最後まで走り、PDFが添付される」ことになる。
+    // ⚠R4 で旧経路(不動産番号での購入)も対象に広げた(live を渡しておらず
+    //   誰も中止を見ないため)。
+    expect(ROUTE).toMatch(
+      /if \(isRecover \|\| !candidateRef\) \{\s*\n\s*closeLiveViewCancelWindow\(session\.id, id, liveRef\);/,
+    );
+  });
+
+  it("画面も回収中は中止ボタンを出さない", () => {
+    const at = BUTTON.indexOf("cancelable={");
+    const block = BUTTON.slice(at, at + 200);
+    expect(block).toContain('state === "searching"');
+    expect(block).toContain('state === "obtaining"');
+    expect(block).not.toContain('state === "recovering"');
+  });
+});
+
+// ── @codex #401 R3 ────────────────────────────────────────────────────
+describe("終わったら中止の印を必ず片付ける(@codex #401 R3 P2)", () => {
+  it("実況を閉じる全ての出口で clearLiveViewCancel も呼ぶ", () => {
+    // ⚠実況の TTL が消すのは store のエントリだけ。activeOps / cancelMarks は残る。
+    //   消さないと鍵が溜まり続け、TTL 後に「もう存在しない実行」へ中止が
+    //   accepted:true を返す。
+    const completes = ROUTE.match(/completeLiveView\(session\.id, id, liveRef\)/g) ?? [];
+    const clears = ROUTE.match(/clearLiveViewCancel\(session\.id, id, liveRef\)/g) ?? [];
+    expect(completes.length).toBeGreaterThanOrEqual(3);
+    expect(clears.length).toBe(completes.length);
+  });
+});
+
+// ── @codex #401 R2(2巡目) ─────────────────────────────────────────────
+describe("中止という結果を、受け止める側も『中止』として扱う(@codex #401 R2)", () => {
+  it("⚠順番待ちの間も中止を見る(順番が回るまで気づかない、を作らない)", () => {
+    // 購入ミューテックスは一括取得と共有で、待ちには最大30分の寿命がある。
+    // 見ていないと、順番が回った時点でブラウザを起動しログインしてしまう
+    // (画面は「中止しています…」のまま・物件のロックも続く)。
+    expect(PROVIDER).toContain("queueCancelWatch");
+    expect(PROVIDER).toContain("abortIfCancelledQueued");
+    // ⚠**この実行専用の印**も併せて見る(route が共有の印を消しても復活させない)。
+    expect(PROVIDER).toMatch(/cancelObserved \|\| live\?\.isCancelRequested\?\.\(\) === true/);
+    // 待ちの見張りは、取得開始時と finally の**両方**で止める(漏れ防止)。
+    const clears = PROVIDER.match(/clearInterval\(queueCancelWatch\)/g) ?? [];
+    expect(clears.length).toBe(2);
+  });
+
+  it("⚠ブラウザを起動する前に止める(外部に一切触れない)", () => {
+    const abortAt = PROVIDER.indexOf("abortIfCancelledQueued();");
+    const launchAt = PROVIDER.indexOf("page = await this.withStartupTimeout", abortAt);
+    expect(abortAt).toBeGreaterThan(-1);
+    expect(launchAt).toBeGreaterThan(abortAt);
+  });
+
+  it("⚠監査に『失敗』として残さない(通常操作のたびに偽の失敗が積まれる)", () => {
+    expect(AUTO).toContain('status: err.code === "cancelled" ? "cancelled" : "failed"');
+  });
+
+  it("⚠画面に赤いエラーとして出さない(中止専用のコードを渡す)", () => {
+    expect(AUTO).toContain('"REGISTRY_AUTO_FETCH_CANCELLED"');
+    expect(BUTTON).toContain(
+      'apiErrorCode(e) === "REGISTRY_AUTO_FETCH_CANCELLED"',
+    );
+    // 中止のときは中立の表示へ(検索側と同じ)。
+    const at = BUTTON.indexOf('apiErrorCode(e) === "REGISTRY_AUTO_FETCH_CANCELLED"');
+    expect(BUTTON.slice(at, at + 160)).toContain('setState("cancelled")');
   });
 });

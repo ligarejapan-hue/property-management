@@ -35,11 +35,10 @@ describe("RegistryLivePanel — SSR (初期状態)", () => {
     expect(html).toContain("実況に接続しています…");
   });
 
-  it("⚠cancelable=false(有料取得)では「中止」を出さない(2026-08-15 提出前レビュー指摘)", () => {
-    // server が cancel 窓を閉じていても、ボタンの表示は client 状態だけで決まる。
-    // これが無いと**課金中**に「中止(この検索では課金は発生しません)」という
-    // 嘘の説明つきボタンが出る(押しても無視されるが、表示が矛盾する)。
-    const paid = renderToStaticMarkup(
+  it("⚠cancelable=false の経路では「中止」を出さない", () => {
+    // 呼び出し側が「この経路では中止の話をしない」と決めた場合は、
+    // サーバーが何を答えても出さない(AND 条件)。
+    const off = renderToStaticMarkup(
       createElement(RegistryLivePanel, {
         propertyId: "p1",
         liveRef: "ref-12345678",
@@ -47,18 +46,38 @@ describe("RegistryLivePanel — SSR (初期状態)", () => {
         cancelable: false,
       }),
     );
-    expect(paid).not.toContain('data-testid="registry-live-cancel"');
-    // 既定(検索)では従来どおり出る。
-    const search = renderToStaticMarkup(
+    expect(off).not.toContain('data-testid="registry-live-cancel"');
+  });
+
+  it("⚠サーバーの答えが来るまでは「中止」を出さない(2026-08-23・安全側)", () => {
+    // **方針変更**: 以前は client 状態だけで即座に出していた。今は可否を
+    // **サーバーが持つ受付口の状態**で決める(有料取得でも課金の直前までは
+    // 中止できるようになったため、文言や画面状態からの推測をやめた)。
+    // ⚠初回描画は答えがまだ無い(null)。ここで出すと、効かない中止ボタンを
+    //   見せることになる。**分からないなら出さない**(出し損ねは機会損失で済む)。
+    //   最初のポーリングが返った時点で出る。
+    const initial = renderToStaticMarkup(
       createElement(RegistryLivePanel, {
         propertyId: "p1",
         liveRef: "ref-12345678",
         searchSettled: false,
       }),
     );
-    expect(search).toContain('data-testid="registry-live-cancel"');
-    // 親は「無料の検索中」だけ cancelable を立てる。
-    expect(BUTTON_SRC).toMatch(/cancelable=\{state === "searching"\}/);
+    expect(initial).not.toContain('data-testid="registry-live-cancel"');
+    // 受付口が閉じたという知らせも、まだ出さない(閉じたと決めつけない)。
+    expect(initial).not.toContain("ここから先は中止できません");
+  });
+
+  it("親は検索中に加えて取得中も cancelable を立てる。⚠回収中は立てない", () => {
+    // ⚠searching だけに戻ると、サーバーが受け付けていても画面に出ない。
+    // ⚠**回収(recovering)は対象外**(@codex #401 R2 P1)。回収の経路には中止を
+    //   見る場所が無いため、出すと「止めたつもりで完了する」ことになる。
+    const at = BUTTON_SRC.indexOf("cancelable={");
+    expect(at).toBeGreaterThan(-1);
+    const block = BUTTON_SRC.slice(at, at + 200);
+    expect(block).toContain('state === "searching"');
+    expect(block).toContain('state === "obtaining"');
+    expect(block).not.toContain('state === "recovering"');
   });
 
   it("⚠パネルは liveRef ごとに作り直す(@codex #380 P2)", () => {

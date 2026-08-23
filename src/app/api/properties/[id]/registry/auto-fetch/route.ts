@@ -22,6 +22,8 @@ import {
   completeLiveView,
   isValidLiveRef,
   closeLiveViewCancelWindow,
+  isLiveViewCancelRequested,
+  clearLiveViewCancel,
 } from "@/lib/registry-fetch/live-view-store";
 
 // ---------- POST /api/properties/[id]/registry/auto-fetch ----------
@@ -229,9 +231,14 @@ export async function POST(
     }
 
     // 実況パネル(2026-08-15・任意)。取得も回収も同じ橋渡しを使う。
-    // ⚠**有料取得は中止を受け付けない**(課金だけ残る状態を作らない既存方針)ので、
-    //   begin 直後に cancel 窓を閉じ、reporter にも isCancelRequested を配線しない。
-    //   効かない「中止」ボタンが画面に出る食い違いを作らないため。
+    // ⚠**2026-08-23 変更(発注者指示)**:「確定ボタンを押すまでは中止ボタンを
+    //   出してください。」従来はここで begin 直後に cancel 窓を閉じていた
+    //   (=有料取得は一切中止できない)。候補が1件なら自動で取得へ進む今の流れでは、
+    //   押せる時間が数秒しか無く、実質**止められなかった**。
+    //   ⇒ **窓は開けたまま渡し、adapter が課金の直前(`endCancelable`)で閉じる**。
+    //   実測: 課金までの各段は全て「まだ課金されていません」で、途中で止めても
+    //   カートに未請求の行が残るだけ(コード上も無害として扱っている)。
+    //   ⚠**課金後は中止を無視する**判断は従来どおり cancel-safety.ts が持つ。
     const liveRefRaw = (body as { liveRef?: unknown } | null)?.liveRef;
     const liveRef =
       typeof liveRefRaw === "string" && isValidLiveRef(liveRefRaw)
@@ -245,14 +252,23 @@ export async function POST(
     const canSeeShots = !isPropertyScopedRole(session.role);
     if (liveRef) {
       beginLiveView(session.id, id, liveRef);
-      closeLiveViewCancelWindow(session.id, id, liveRef);
+      // ⚠**中止の節目を実装している経路だけ、受付を開けておく**(@codex #401 R4 P2)。
+      //   開けてよいのは「候補からの所在購入」(candidateRef あり)だけ。
+      //   - 回収: 中止を見る場所が無い(実況を刻むだけ)。受け付けると
+      //     「止めたつもりで最後まで走り、PDFが添付される」(@codex #401 R2 P1)。
+      //   - 旧経路(candidateRef なし=不動産番号での購入): この分岐は live を
+      //     orchestration に渡しておらず、誰も中止を見ない。開けたままだと
+      //     中止が accepted:true になるのに実行は最後まで走る。
+      if (isRecover || !candidateRef) {
+        closeLiveViewCancelWindow(session.id, id, liveRef);
+      }
       reportLiveStep(
         session.id,
         id,
         liveRef,
         isRecover
           ? "取得済みの書類の取り込みを受け付けました(課金はしません)"
-          : "自動取得を受け付けました(この処理は中止できません)",
+          : "自動取得を受け付けました(請求(課金)の直前まで中止できます)",
         null,
       );
       if (!canSeeShots) {
@@ -273,6 +289,19 @@ export async function POST(
           attachShot(seq: number, shot: Uint8Array): void {
             if (!canSeeShots) return;
             attachLiveShot(session.id, id, liveRef, seq, shot);
+          },
+          // ⚠adapter は**節目ごとに**これを見て自分で止まる(外から処理を殺さない
+          //   = 外部サイトを中途半端な状態で放り出さない)。
+          //   ⚠課金後は無視される(判断は cancel-safety.ts)。
+          isCancelRequested(): boolean {
+            return isLiveViewCancelRequested(session.id, id, liveRef);
+          },
+          // ⚠**課金の直前**に adapter がこれを呼ぶ。以降は中止を見る場所が無いので、
+          //   受け付けたままにすると「中止しています…」と出したまま課金が進み、
+          //   **止めたつもりなのに請求される**という食い違いが起きる。
+          //   画面はこれを見てボタンを引っ込め、理由を出す。
+          endCancelable(): void {
+            closeLiveViewCancelWindow(session.id, id, liveRef);
           },
         }
       : undefined;
@@ -306,7 +335,14 @@ export async function POST(
         );
         return apiResponse(recovered, 200);
       } finally {
-        if (liveRef) completeLiveView(session.id, id, liveRef);
+        if (liveRef) {
+          completeLiveView(session.id, id, liveRef);
+          // ⚠**中止の印と実行中の印をここで消す**(@codex #401 R3 P2)。
+          //   実況の TTL が消すのは store のエントリだけで、`activeOps` /
+          //   `cancelMarks` は残る。消さないと (1) 鍵が溜まり続ける
+          //   (2) TTL 後に「もう存在しない実行」へ中止が accepted:true を返す。
+          clearLiveViewCancel(session.id, id, liveRef);
+        }
       }
     }
 
@@ -351,7 +387,14 @@ export async function POST(
         return apiResponse(obtained, 200);
       } finally {
         // 成否によらず「完了」を刻む(パネルは3分間の見返しつきで自動消滅)。
-        if (liveRef) completeLiveView(session.id, id, liveRef);
+        if (liveRef) {
+          completeLiveView(session.id, id, liveRef);
+          // ⚠**中止の印と実行中の印をここで消す**(@codex #401 R3 P2)。
+          //   実況の TTL が消すのは store のエントリだけで、`activeOps` /
+          //   `cancelMarks` は残る。消さないと (1) 鍵が溜まり続ける
+          //   (2) TTL 後に「もう存在しない実行」へ中止が accepted:true を返す。
+          clearLiveViewCancel(session.id, id, liveRef);
+        }
       }
     }
 
@@ -369,7 +412,11 @@ export async function POST(
 
       return apiResponse(result, 200);
     } finally {
-      if (liveRef) completeLiveView(session.id, id, liveRef);
+      if (liveRef) {
+        completeLiveView(session.id, id, liveRef);
+        // ⚠中止の印と実行中の印も消す(@codex #401 R3 P2・上と同じ理由)。
+        clearLiveViewCancel(session.id, id, liveRef);
+      }
     }
   } catch (error) {
     return handleApiError(error);

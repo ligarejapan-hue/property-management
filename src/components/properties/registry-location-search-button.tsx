@@ -428,6 +428,13 @@ export default function RegistryLocationSearchButton({
       //   同じく、流れを閉じるとき(reset)にまとめて流す。
       propertyRefreshPendingRef.current = true;
     } catch (e) {
+      // ⚠**中止は失敗ではない**(@codex #401 R2 P2)。利用者が自分で押した中止を
+      //   赤いエラー帯で出すと「壊れた」と見える。課金も発生していない。
+      //   検索側と同じ中立の表示に合わせる。
+      if (apiErrorCode(e) === "REGISTRY_AUTO_FETCH_CANCELLED") {
+        setState("cancelled");
+        return;
+      }
       setErrorMsg(e instanceof Error ? e.message : "謄本の取得に失敗しました");
       setState("error");
     }
@@ -759,10 +766,20 @@ export default function RegistryLocationSearchButton({
               state !== "obtaining" &&
               state !== "recovering"
             }
-            // ⚠「中止」は無料の検索中だけ。有料取得(obtaining)で出すと、課金中に
-            //   「課金は発生しません」という嘘の説明つきボタンが出る(server は
-            //   受け付けないが表示が矛盾する)。
-            cancelable={state === "searching"}
+            // ⚠**2026-08-23 から有料取得(obtaining)でも出す**(発注者指示
+            //   「確定ボタンを押すまでは中止ボタンを出してください」)。
+            //   請求(課金)の直前までは 1 円も動かないので中止して構わない。
+            //   ⚠**実際に出すかはパネルがサーバーの答えで決める**。ここは
+            //   「この経路では中止の話をしてよいか」の指定に留める
+            //   (画面が文言から課金前かを推測すると、文言変更で嘘の表示になる)。
+            //   ⚠**回収(recovering)は対象外**(@codex #401 R2 P1)。回収の経路は
+            //   中止を見る場所が無い(`recoverRegistryPdf` は実況を刻むだけ)ため、
+            //   出すと「受け付けたのに最後まで走り、PDFが添付される」= 利用者が
+            //   止めたつもりで完了する。配線するまでは出さない。
+            cancelable={state === "searching" || state === "obtaining"}
+            // ⚠文言の選択にだけ効く(可否はサーバーの答え)。有料取得では
+            //   「この検索では課金は発生しません」と出さない(@codex #401 R4 P2)。
+            chargeable={state === "obtaining"}
             // ⚠中止が**押された瞬間**に覚える。サーバーの応答を待つと、その間に
             //   検索が終わって自動で課金され得る（@codex #399 R1 P1）。
             //   受け付けの成否に関わらず、止める意思が示された時点で進ませない。

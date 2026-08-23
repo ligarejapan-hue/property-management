@@ -21,6 +21,7 @@ import {
   LIVE_VIEW_MAX_TOTAL_SHOT_BYTES,
   LIVE_VIEW_MAX_PER_PROPERTY,
   __clearLiveViewStoreForTests,
+  closeLiveViewCancelWindow,
   __liveViewStoreSizeForTests,
 } from "@/lib/registry-fetch/live-view-store";
 
@@ -177,5 +178,41 @@ describe("live-view-store", () => {
 
   it("begin していない ref への reportLiveStep は -1 を返す", () => {
     expect(reportLiveStep(U, P, "ref-none0001", "x", null)).toBe(-1);
+  });
+});
+
+// ── 中止の受付口の状態を外へ答える (発注者指示 2026-08-21) ──────────────
+describe("getLiveView: 中止の受付口(cancelable)", () => {
+  const U = "user-cancelable";
+  const P = "prop-cancelable";
+  const R = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6";
+
+  beforeEach(() => {
+    __clearLiveViewStoreForTests();
+  });
+
+  it("始めた直後は開いている", () => {
+    beginLiveView(U, P, R);
+    expect(getLiveView(U, P, R)?.cancelable).toBe(true);
+  });
+
+  it("閉じたら false になる(課金の直前で閉じる)", () => {
+    beginLiveView(U, P, R);
+    closeLiveViewCancelWindow(U, P, R);
+    expect(getLiveView(U, P, R)?.cancelable).toBe(false);
+  });
+
+  it("完了したら開いたままにしない", () => {
+    // ⚠終わったのに「中止できます」と答えると、押しても効かないボタンが出る。
+    beginLiveView(U, P, R);
+    completeLiveView(U, P, R);
+    expect(getLiveView(U, P, R)?.cancelable).toBe(false);
+  });
+
+  it("段を刻んでも開いたまま(進んだだけで閉じない)", () => {
+    beginLiveView(U, P, R);
+    reportLiveStep(U, P, R, "ログインしました", null);
+    reportLiveStep(U, P, R, "地番検索を実行しています", null);
+    expect(getLiveView(U, P, R)?.cancelable).toBe(true);
   });
 });

@@ -357,11 +357,21 @@ export function getLiveView(
   userId: string,
   propertyId: string,
   liveRef: string,
-): { steps: LiveViewStep[]; done: boolean } | null {
+): { steps: LiveViewStep[]; done: boolean; cancelable: boolean } | null {
   pruneExpired(Date.now());
-  const entry = store.get(key(userId, propertyId, liveRef));
+  const k = key(userId, propertyId, liveRef);
+  const entry = store.get(k);
   if (!entry) return null;
-  return { steps: entry.steps.slice(), done: entry.done };
+  // ⚠**中止できるかは画面に推測させない**(発注者指示 2026-08-21)。
+  //   実況の文言から「まだ課金前らしい」と判断させると、文言を1つ変えただけで
+  //   **課金中に中止ボタンが出る**(押しても効かないのに押せる = 嘘の表示)。
+  //   受付口(activeOps)の実際の状態だけを答える。
+  //   ⚠完了後は必ず false(終わったのに「中止できます」と答えない)。
+  return {
+    steps: entry.steps.slice(),
+    done: entry.done,
+    cancelable: !entry.done && activeOps.has(k),
+  };
 }
 
 /** ステップのスクショ取得 (無ければ null)。 */
