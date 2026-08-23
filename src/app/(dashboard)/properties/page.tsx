@@ -339,7 +339,8 @@ function PropertiesPageInner() {
   // 前ページ/前フィルタの(今は見えていない)選択のまま有料DM作成が走る競合を、再フェッチ完了を待たず
   // その場で防ぐ(Codex R7/R11/R12)。バルク操作系(fetchProperties 直呼び)は setPage を通らず影響を受けない。
   const setPage = useCallback((updater: number | ((p: number) => number)) => {
-    setSelectedIds(new Set());
+    // 空→空は同一参照で bail out(なりかけ入力の毎打鍵からも呼ばれるため)。
+    setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()));
     setPageState(updater);
   }, []);
   const [bulkUpdating, setBulkUpdating] = useState(false);
@@ -385,7 +386,7 @@ function PropertiesPageInner() {
   // 再送=サーバーが二重生成しない)、成功で破棄して次の作成は新しいキーにする。
   const saleDmIdemKeyRef = useRef<string | null>(null);
   const handleCreateSaleDm = async () => {
-    if (creatingDm) return;
+    if (creatingDm || searchPending) return;
     // 送信対象は「今読み込んでいる物件」に選択(チェック)を intersect して確定する。フィルタ/ページ変更の
     // 読み込み中に古いページのIDが混ざって送られる競合(Codex R7/R11)を、送信の瞬間にも断つ。
     const ids = properties.filter((p) => selectedIds.has(p.id)).map((p) => p.id);
@@ -737,13 +738,17 @@ function PropertiesPageInner() {
     if (kind === "mgmtIdPartial") {
       setSearchPending(true);
       commitSearch.cancel();
+      // ⚠選択(チェック)の解除は**無条件**(@codex #404 R13 P1)。絞り込みが元々
+      //   空だと下の if を踏まず選択が生き残り、窓の見た目(入力途中のID)と違う
+      //   集合へ一括変更・削除・売却DM・謄本取得が撃てた。表示条件変更の一元
+      //   窓口 setPage(1) を必ず通す(選択解除を兼ねる)。
+      setPage(1);
       // ⚠確定済みの古い絞り込みも**即座に**消す(@codex #404 R10 P2)。残すと
       //   窓には新しい値・一覧/CSV/DMは**見えない古い条件**という食い違いのまま
       //   固定され、意図しない集合へ一括操作しかねない。
       if (searchText !== "" || mgmtIdText !== "") {
         setSearchText("");
         setMgmtIdText("");
-        setPage(1);
       }
       return;
     }
@@ -895,7 +900,7 @@ function PropertiesPageInner() {
   // - 失敗は ID と住所と日本語メッセージで集計表示
   // - 成功・失敗どちらでも最後に一覧再取得
   const handleBulkDelete = async () => {
-    if (bulkDeleting || selectedIds.size === 0) return;
+    if (bulkDeleting || selectedIds.size === 0 || searchPending) return;
     const targets = properties.filter((p) => selectedIds.has(p.id));
     if (targets.length === 0) return;
     if (
@@ -939,7 +944,7 @@ function PropertiesPageInner() {
   };
 
   const handleBulkUpdate = async (updates: Record<string, unknown>) => {
-    if (selectedIds.size === 0) return;
+    if (selectedIds.size === 0 || searchPending) return;
     setBulkUpdating(true);
     try {
       await bulkUpdateProperties(Array.from(selectedIds), updates);
@@ -1072,9 +1077,13 @@ function PropertiesPageInner() {
           <button
             type="button"
             onClick={handleCreateSaleDm}
-            disabled={creatingDm || loading || selectedIds.size === 0}
+            disabled={creatingDm || loading || selectedIds.size === 0 || searchPending}
             className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-400 dark:bg-gray-900 dark:text-indigo-400 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-            title="チェックした物件から売却DM下書きを作成(住所が無い物件は自動で除外)"
+            title={
+              searchPending
+                ? "検索語が入力途中です(管理IDを最後まで入力するか、消してください)"
+                : "チェックした物件から売却DM下書きを作成(住所が無い物件は自動で除外)"
+            }
           >
             {creatingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             売却DMを作成{selectedIds.size > 0 ? `（${selectedIds.size}件）` : ""}
@@ -1087,7 +1096,7 @@ function PropertiesPageInner() {
             propertyIds={properties
               .filter((p) => selectedIds.has(p.id))
               .map((p) => p.id)}
-            disabled={loading || selectedIds.size === 0}
+            disabled={loading || selectedIds.size === 0 || searchPending}
           />
         )}
         <button
@@ -1482,7 +1491,7 @@ function PropertiesPageInner() {
             {selectedIds.size} 件選択中
           </span>
           <select
-            disabled={bulkUpdating}
+            disabled={bulkUpdating || searchPending}
             onChange={(e) => {
               if (e.target.value) {
                 handleBulkUpdate({ caseStatus: e.target.value });
@@ -1497,7 +1506,7 @@ function PropertiesPageInner() {
             ))}
           </select>
           <select
-            disabled={bulkUpdating}
+            disabled={bulkUpdating || searchPending}
             onChange={(e) => {
               if (e.target.value) {
                 handleBulkUpdate({ dmStatus: e.target.value });
@@ -1514,7 +1523,7 @@ function PropertiesPageInner() {
           {canDeleteProperty && (
           <button
             type="button"
-            disabled={bulkDeleting || bulkUpdating}
+            disabled={bulkDeleting || bulkUpdating || searchPending}
             onClick={handleBulkDelete}
             className="inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
           >

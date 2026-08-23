@@ -74,11 +74,21 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     // @codex #404 R9(保留) + R10(見えない古い条件を残さない)。
     const at = pageSrc.indexOf('if (kind === "mgmtIdPartial")');
     expect(at).toBeGreaterThan(-1);
-    const branch = pageSrc.slice(at, at + 700);
+    const branch = pageSrc.slice(at, at + 1200);
     expect(branch).toContain("commitSearch.cancel()");
     expect(branch).toContain('setSearchText("")');
     expect(branch).toContain('setMgmtIdText("")');
     expect(branch).toContain("setPage(1)");
+    // ⚠選択解除(setPage(1))は**条件の外**=無条件(@codex #404 R13 P1)。絞り込みが
+    //   元々空でも、選択(チェック)は必ず解除する(生き残ると入力途中のIDと違う
+    //   集合へ一括・有料操作が撃てる)。
+    // ⚠一致は**行頭アンカーの実呼び出し**で取る(indexOf だと説明コメント内の
+    //   同じ文字列に一致し、呼び出しを条件内へ戻す変異を見逃す=実測済み)。
+    const callIdx = branch.search(/^\s*setPage\(1\);/m);
+    expect(callIdx).toBeGreaterThan(-1);
+    const condIdx = branch.indexOf('if (searchText !== ""');
+    expect(condIdx).toBeGreaterThan(-1);
+    expect(callIdx).toBeLessThan(condIdx);
     // ⚠保留中は絞り込みが空=全件になるため、CSV/DM出力を止める(@codex #404 R11 P1)。
     expect(branch).toContain("setSearchPending(true)");
     expect(pageSrc).toContain("selectedExportColumns.size === 0 || searchPending");
@@ -97,6 +107,27 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     const rAt = pageSrc.indexOf("const handleResetFilters");
     const rEnd = pageSrc.indexOf("};", rAt);
     expect(pageSrc.slice(rAt, rEnd)).toContain("setSearchPending(false)");
+  });
+
+  it("保留中(searchPending)は一括・有料操作も全て止まる(@codex #404 R13 P1)", () => {
+    // 出力2つ(R11)に加え、保留中に再チェックして撃てる残りの経路も塞ぐ:
+    // 売却DM作成・謄本一括取得・一括変更(2つのselect)・一括削除。
+    expect(pageSrc).toContain(
+      "creatingDm || loading || selectedIds.size === 0 || searchPending",
+    );
+    expect(pageSrc).toContain(
+      "disabled={loading || selectedIds.size === 0 || searchPending}",
+    );
+    const bulkSelects =
+      pageSrc.match(/disabled=\{bulkUpdating \|\| searchPending\}/g) ?? [];
+    expect(bulkSelects).toHaveLength(2);
+    expect(pageSrc).toContain("bulkDeleting || bulkUpdating || searchPending");
+    // ハンドラ側でも防ぐ(disabled はUIの門・ハンドラは最終ガード)。
+    expect(pageSrc).toContain("if (creatingDm || searchPending) return;");
+    expect(pageSrc).toContain(
+      "if (bulkDeleting || selectedIds.size === 0 || searchPending) return;",
+    );
+    expect(pageSrc).toContain("if (selectedIds.size === 0 || searchPending) return;");
   });
 
   it("⚠旧ブックマーク(keyword+mgmtId両方)は見える方(keyword)だけ復元する(@codex #404 R1 P2)", () => {
