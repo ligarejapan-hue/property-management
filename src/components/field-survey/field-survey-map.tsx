@@ -2097,7 +2097,7 @@ function MapDataLayer({
         }
 
         const results = await Promise.all(tasks);
-        // 第1弾 A3: 打ち切り(hasNext)。取得しなかった/失敗した層は false
+        // 第1弾 A3: 打ち切り(nextCursor 非 null)。取得しなかった/失敗した層は false
         // (分からないものを「まだある」とは言わない)。
         let propertiesTruncatedNext = false;
         let pinsTruncatedNext = false;
@@ -2107,10 +2107,12 @@ function MapDataLayer({
           if (r.ok) {
             const j = (await r.json()) as {
               data?: PropertyRow[];
-              hasNext?: boolean;
+              nextCursor?: string | null;
             };
             setProperties(filterValidGps(j.data ?? []));
-            propertiesTruncatedNext = j.hasNext === true;
+            // ⚠実契約は nextCursor(hasNext というフィールドは API に無い。
+            //   @codex #407 R2 P1: 存在しない鍵を読んで断りが一度も出なかった)。
+            propertiesTruncatedNext = typeof j.nextCursor === "string";
           } else {
             handleHttpError(r.status, onError);
           }
@@ -2126,10 +2128,10 @@ function MapDataLayer({
             // (生 memo を一度でも client メモリに乗せないため)。
             const j = (await r.json()) as {
               data?: PinRow[];
-              hasNext?: boolean;
+              nextCursor?: string | null;
             };
             setPins(filterValidPinGps(j.data ?? []));
-            pinsTruncatedNext = j.hasNext === true;
+            pinsTruncatedNext = typeof j.nextCursor === "string";
           } else {
             handleHttpError(r.status, onError);
           }

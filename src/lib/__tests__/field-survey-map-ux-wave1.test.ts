@@ -54,13 +54,26 @@ describe("A2: 巡回モーダルは portal で必ず見える", () => {
   });
 });
 
-describe("A3: 打ち切り(hasNext)を読む・断りを出す", () => {
-  it("物件・ピンの応答から hasNext を読む(捨てない)", () => {
-    const m = MAP.match(/hasNext\?: boolean;/g) ?? [];
+describe("A3: 打ち切り(nextCursor)を読む・断りを出す", () => {
+  it("応答の nextCursor を読む=API の実契約(hasNext は存在しない・@codex #407 R2 P1)", () => {
+    const m = MAP.match(/nextCursor\?: string \| null;/g) ?? [];
     expect(m.length).toBe(2);
-    expect(MAP).toContain("propertiesTruncatedNext = j.hasNext === true;");
-    expect(MAP).toContain("pinsTruncatedNext = j.hasNext === true;");
+    expect(MAP).toContain(
+      'propertiesTruncatedNext = typeof j.nextCursor === "string";',
+    );
+    expect(MAP).toContain('pinsTruncatedNext = typeof j.nextCursor === "string";');
     expect(MAP).toContain("onTruncationChange({");
+    // ⚠存在しないフィールドを読む事故の再発防止: **契約の両側**を同じテストで
+    //   固定する。route が nextCursor を返す形を変えたら、ここが名指しで落ちる。
+    for (const rf of [
+      "src/app/api/field-survey/map/properties/route.ts",
+      "src/app/api/field-survey/pins/route.ts",
+    ]) {
+      expect(read(rf), rf).toContain("apiResponse({ data, nextCursor })");
+    }
+    // クライアント側に hasNext を読む残骸が無い(説明コメントの語は除外=コード形で見る)。
+    expect(MAP).not.toContain("j.hasNext");
+    expect(MAP).not.toContain("hasNext?:");
   });
 
   it("断りの文言は純関数 truncationNotice(専用テストあり)から取る", () => {
