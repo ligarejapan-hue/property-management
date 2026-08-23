@@ -63,6 +63,17 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     expect(pageSrc).toContain('commitSearch(kind === "text" ? value : "", "")');
   });
 
+  it("なりかけ(mgmtIdPartial)は確定を保留し、古い確定済み絞り込みも即座に消す", () => {
+    // @codex #404 R9(保留) + R10(見えない古い条件を残さない)。
+    const at = pageSrc.indexOf('if (kind === "mgmtIdPartial")');
+    expect(at).toBeGreaterThan(-1);
+    const branch = pageSrc.slice(at, at + 700);
+    expect(branch).toContain("commitSearch.cancel()");
+    expect(branch).toContain('setSearchText("")');
+    expect(branch).toContain('setMgmtIdText("")');
+    expect(branch).toContain("setPage(1)");
+  });
+
   it("⚠旧ブックマーク(keyword+mgmtId両方)は見える方(keyword)だけ復元する(@codex #404 R1 P2)", () => {
     expect(pageSrc).toMatch(
       /sp\.get\("keyword"\) \? "" : \(sp\.get\("mgmtId"\) \?\? ""\)/,

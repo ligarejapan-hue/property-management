@@ -49,8 +49,13 @@ const FILE_ONLY_RE = /\.(xlsx|xls|csv)\s*$/i;
  * 「id:◯◯」「管理ID:◯◯」(全角コロン可)で**任意の値**を管理ID検索へ通す。
  */
 const EXPLICIT_PREFIX_RE = /^(id|管理ID)\s*[:：]\s*(\S.*)$/i;
-/** なりかけ: 末尾がドット+拡張子の断片(「受付帳.」「◯.x」「◯.xl」等)。 */
-const PARTIAL_EXT_RE = /\.[a-z]{0,3}$/i;
+/**
+ * なりかけ: 末尾がドット+**対象拡張子の前方一致だけ**(「受付帳.」「◯.x」「◯.xl」
+ * 「◯.c」「◯.cs」)。⚠任意の英字にすると「ABC.jp」「BLD.abc」のような正当な
+ * 住所・建物名の検索まで保留に吸い込まれ、keyword に一生到達しない
+ * (@codex #404 R10 P2)。
+ */
+const PARTIAL_EXT_RE = /\.(x|xl|xls|xlsx|c|cs|csv)?$/i;
 /** なりかけ: 拡張子+コロンまで(行番号がまだ)。 */
 const PARTIAL_COLON_RE = /\.(xlsx|xls|csv)\s*[:：]\s*$/i;
 /** なりかけ: 明示接頭辞の途中(「id」「id:」「管理ID：」)。 */

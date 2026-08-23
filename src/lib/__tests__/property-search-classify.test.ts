@@ -134,4 +134,11 @@ describe("なりかけの形は保留(@codex #404 R9 P2)", () => {
     expect(classifyPropertySearch("世田谷区三宿")).toBe("text");
     expect(classifyPropertySearch("山田太郎")).toBe("text");
   });
+
+  it("⚠対象拡張子の前方一致以外は text(検索を握りつぶさない・@codex #404 R10)", () => {
+    // 「.jp」「.abc」等は xlsx/xls/csv の前方一致ではない=正当な検索語。
+    expect(classifyPropertySearch("ABC.jp")).toBe("text");
+    expect(classifyPropertySearch("BLD.abc")).toBe("text");
+    expect(classifyPropertySearch("何か.xz")).toBe("text");
+  });
 });

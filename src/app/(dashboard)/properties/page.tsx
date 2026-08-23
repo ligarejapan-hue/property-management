@@ -728,6 +728,14 @@ function PropertiesPageInner() {
     //   予約済みの確定も取り下げて完成を待つ(空に戻せば empty で消える)。
     if (kind === "mgmtIdPartial") {
       commitSearch.cancel();
+      // ⚠確定済みの古い絞り込みも**即座に**消す(@codex #404 R10 P2)。残すと
+      //   窓には新しい値・一覧/CSV/DMは**見えない古い条件**という食い違いのまま
+      //   固定され、意図しない集合へ一括操作しかねない。
+      if (searchText !== "" || mgmtIdText !== "") {
+        setSearchText("");
+        setMgmtIdText("");
+        setPage(1);
+      }
       return;
     }
     // ⚠この窓は**所有者検索を受けない**(@codex #404 R4 P1)。所有者名・電話は
