@@ -127,13 +127,15 @@ describe("3. タップし直せる（間違えても写真を捨てない）", (
   });
 
   it("置き直しても写真を保持したままタップ待ちへ戻る", () => {
+    // 終端は deps 込みの実形(緩い「)」終端は後続 JSX まで飲み込み、
+    // 無関係な resetCameraFirst に誤当たりした=実測)。
     const handler =
       MAP_SRC.match(
-        /const handleReplaceLocation = useCallback\([\s\S]*?\n  \);/,
+        /const handleReplaceLocation = useCallback\([\s\S]*?\}, \[\]\);/,
       )?.[0] ?? "";
     expect(handler).not.toBe("");
     expect(handler).toContain('setCameraFirstPhase("awaiting-map-tap")');
-    // 写真を捨てる後始末を呼ばない（写真を持ち帰ってタップ待ちへ戻る）
+    expect(handler).toContain("cameraPhotoFileRef.current = currentPhoto");
     expect(handler).not.toContain("resetCameraFirst()");
   });
 
@@ -142,7 +144,7 @@ describe("3. タップし直せる（間違えても写真を捨てない）", (
     // 撮り直した写真が黙って元に戻り、次のタップで**別の家の写真**が付く。
     const handler =
       MAP_SRC.match(
-        /const handleReplaceLocation = useCallback\([\s\S]*?\n  \);/,
+        /const handleReplaceLocation = useCallback\([\s\S]*?\}, \[\]\);/,
       )?.[0] ?? "";
     expect(handler).toContain("(currentPhoto: File | null)");
     expect(handler).toContain("cameraPhotoFileRef.current = currentPhoto");
@@ -207,15 +209,12 @@ describe("3-d. タップ待ち中は既存マーカーがタップを奪わな�
   });
 
   it("タップ待ち中は吹き出しを描かない（撮影した家を覆わない）", () => {
-    // 総点検P3でレイヤー OFF 条件 (layers.properties / layers.pins) も加わった。
-    // ここでは「!captureMapClick が条件に入っている」ことだけを表明する
-    // (レイヤー条件の表明は field-survey-map-ui-source.test.ts 側)。
+    // 物件の吹き出しは従来どおり !captureMapClick 条件。ピンの吹き出しは
+    // 第2弾C2で廃止(タップで直接詳細=マーカー側のゲートがタップ待ちを守る)。
     expect(MAP_SRC).toMatch(
       /selected &&\s*\n\s*!captureMapClick &&\s*\n\s*layers\.properties &&\s*\n\s*selected\.kind === "property"/,
     );
-    expect(MAP_SRC).toMatch(
-      /selected &&\s*\n\s*!captureMapClick &&\s*\n\s*layers\.pins &&\s*\n\s*selected\.kind === "pin"/,
-    );
+    expect(MAP_SRC).not.toContain('selected.kind === "pin"');
   });
 
   it("タップで開いていた吹き出しを閉じてから作成へ進む（モーダル背後に残さない）", () => {

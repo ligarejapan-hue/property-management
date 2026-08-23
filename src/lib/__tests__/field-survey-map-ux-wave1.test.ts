@@ -131,12 +131,21 @@ describe("A5: バナーは上部スタック(現在地ボタンを覆わない)"
     expect(stack).toContain("top-3");
   });
 
-  it("バナーはスタック容器(flex-col)の直下にある(下端の帯へ戻す変異はここで落ちる)", () => {
-    const at = MAP.indexOf("<CameraFirstBanner");
-    expect(at).toBeGreaterThan(-1);
-    const before = MAP.slice(Math.max(0, at - 300), at);
-    expect(before).toContain("flex-col");
-    expect(before).not.toContain("bottom-14");
+  it("バナーはスタック容器(flex-col)の中にある(下端の帯へ戻す変異はここで落ちる)", () => {
+    // ⚠経緯コメントに旧クラス名(bottom-14)が載るため、判定は className で行う。
+    const container = MAP.match(
+      /className="pointer-events-none absolute left-1\/2 top-3[^"]*flex-col[^"]*"/,
+    );
+    expect(container).not.toBeNull();
+    const at = MAP.indexOf(container![0]);
+    const bannerAt = MAP.indexOf("<CameraFirstBanner");
+    expect(bannerAt).toBeGreaterThan(at);
+    // バナーが容器の中(直後2,000文字以内)にあり、その区間の className に
+    // bottom-14 が無い。
+    const between = MAP.slice(at, bannerAt);
+    expect(bannerAt - at).toBeLessThan(2000);
+    const classesBetween = between.match(/className="[^"]*"/g) ?? [];
+    for (const c of classesBetween) expect(c).not.toContain("bottom-14");
   });
 });
 
@@ -194,11 +203,13 @@ describe("B2: 自動寄せの予約に寿命とユーザー優先", () => {
 });
 
 describe("B3: 物件リンクは別タブ(地図の状態を失わない)", () => {
-  it("吹き出しの物件リンク2箇所に target=_blank + rel", () => {
+  it("吹き出しの物件リンクに target=_blank + rel(第2弾C2でピン吹き出し廃止=残り1箇所)", () => {
     const links = MAP.match(
-      /href=\{`\/properties\/\$\{row\.(?:id|propertyId)\}`\}\s*\n\s*target="_blank"\s*\n\s*rel="noopener noreferrer"/g,
+      /href=\{`\/properties\/\$\{row\.id\}`\}\s*\n\s*target="_blank"\s*\n\s*rel="noopener noreferrer"/g,
     ) ?? [];
-    expect(links.length).toBe(2);
+    expect(links.length).toBe(1);
+    // ピン側のリンク(propertyId)は吹き出しごと廃止(詳細パネルの物件行が担う)。
+    expect(MAP).not.toContain("row.propertyId");
   });
 });
 

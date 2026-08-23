@@ -245,8 +245,15 @@ describe("クライアント配線 (field-survey-map)", () => {
     expect(MAP_SRC).toMatch(/<CameraFirstButton\s*\n?\s*inline/);
   });
 
-  it("地図の吹き出しは巡回なしを「巡回外の撮影」と表示する", () => {
-    expect(MAP_SRC).toMatch(/row\.sessionId \? "あり" : "巡回外の撮影"/);
+  it("巡回なしは「巡回外の撮影」と表示する(第2弾C2で吹き出し→詳細パネルへ移設)", () => {
+    const detailSrc = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        "src/components/field-survey/pin-detail-panel.tsx",
+      ),
+      "utf8",
+    );
+    expect(detailSrc).toMatch(/detail\.sessionId \? "あり" : "巡回外の撮影"/);
   });
 
   it("撮影は巡回の有無を見ない（巡回外の撮影を破棄しない）", () => {

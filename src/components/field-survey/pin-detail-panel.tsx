@@ -200,6 +200,33 @@ export default function PinDetailPanel({
     onDeleted?.(targetPinId);
   };
 
+  // 第2弾 C1: 「この家は済んだ」を1タップで(従来=編集→選択→保存の6タップ)。
+  // 保存フローと同じ patch/3段ガードを使う(optimistic しない方針も同じ)。
+  const [quickStatusSaving, setQuickStatusSaving] = useState(false);
+  const handleQuickStatus = async (nextStatus: "open" | "closed") => {
+    if (!detail || quickStatusSaving) return;
+    const saveTargetPinId = pinId;
+    if (detail.id !== saveTargetPinId) return;
+    if (detail.staffUserId !== currentUserId) return;
+    const patch = buildPinPatch(
+      { pinType: detail.pinType, status: detail.status, memo: detail.memo },
+      { pinType: detail.pinType, status: nextStatus, memo: detail.memo },
+    );
+    if (!patch) return;
+    setQuickStatusSaving(true);
+    try {
+      const r = await mutations.updatePin(saveTargetPinId, patch);
+      if (!r.ok || !r.data) return;
+      if (latestPinIdRef.current !== saveTargetPinId) return;
+      if (r.data.id !== latestPinIdRef.current) return;
+      if (r.data.id !== saveTargetPinId) return;
+      setDetail(r.data);
+      onUpdated?.(r.data);
+    } finally {
+      setQuickStatusSaving(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!detail) return;
     // Codex P2: PATCH 直前に stale / 他人 pin への送信を再確認する。
@@ -239,6 +266,15 @@ export default function PinDetailPanel({
     onUpdated?.(r.data);
   };
 
+  // 第2弾: Escape でも閉じられる(従来は右上の小さな×だけだった)。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   return (
     <aside
       role="complementary"
@@ -247,7 +283,7 @@ export default function PinDetailPanel({
       className={
         "fixed z-40 bg-white dark:bg-gray-900 shadow-xl border border-gray-200 dark:border-gray-700 " +
         // mobile: bottom sheet
-        "inset-x-0 bottom-0 max-h-[70vh] overflow-y-auto rounded-t-lg " +
+        "inset-x-0 bottom-0 max-h-[55vh] overflow-y-auto overscroll-contain rounded-t-lg " +
         // desktop: 右側固定パネル
         "md:inset-y-0 md:right-0 md:bottom-auto md:left-auto md:w-96 md:max-h-none md:rounded-none md:rounded-l-lg"
       }
@@ -258,7 +294,7 @@ export default function PinDetailPanel({
           type="button"
           onClick={onClose}
           aria-label="閉じる"
-          className="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100"
+          className="-m-2 p-2 text-lg leading-none text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
         >
           ×
         </button>
@@ -285,6 +321,10 @@ export default function PinDetailPanel({
             onEdit={() => setEditing(true)}
             canConvert={canConvert}
             onConvert={() => setShowConvert(true)}
+            quickStatusSaving={quickStatusSaving}
+            onQuickStatus={(next) => {
+              void handleQuickStatus(next);
+            }}
           />
         )}
 
@@ -765,6 +805,8 @@ function ReadOnlyView({
   onEdit,
   canConvert,
   onConvert,
+  quickStatusSaving,
+  onQuickStatus,
 }: {
   detail: PinDetail;
   isOwn: boolean;
@@ -772,6 +814,8 @@ function ReadOnlyView({
   onEdit: () => void;
   canConvert?: boolean;
   onConvert?: () => void;
+  quickStatusSaving: boolean;
+  onQuickStatus: (next: "open" | "closed") => void;
 }) {
   return (
     <>
@@ -784,6 +828,9 @@ function ReadOnlyView({
         <dd>{isOwn ? "あなた" : "他スタッフ"}</dd>
         <dt className="text-gray-500 dark:text-gray-400">作成日時</dt>
         <dd>{formatPinCreatedAt(detail.createdAt)}</dd>
+        <dt className="text-gray-500 dark:text-gray-400">巡回</dt>
+        {/* 第2弾 C2: ピンの吹き出し廃止で消えた情報の移設(文言は旧吹き出しと同一)。 */}
+        <dd>{detail.sessionId ? "あり" : "巡回外の撮影"}</dd>
         <dt className="text-gray-500 dark:text-gray-400">物件</dt>
         <dd>
           {detail.propertyId ? (
@@ -807,6 +854,32 @@ function ReadOnlyView({
           )}
         </dd>
       </dl>
+      {/* 第2弾 C1: 巡回中いちばん多い操作を1発に(6タップ→3タップ)。 */}
+      {canEdit && (
+        <div className="mt-3">
+          {detail.status === "open" ? (
+            <button
+              type="button"
+              data-testid="pin-quick-close"
+              onClick={() => onQuickStatus("closed")}
+              disabled={quickStatusSaving}
+              className="w-full rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {quickStatusSaving ? "保存中…" : "✔ この場所を対応済みにする"}
+            </button>
+          ) : detail.status === "closed" ? (
+            <button
+              type="button"
+              data-testid="pin-quick-reopen"
+              onClick={() => onQuickStatus("open")}
+              disabled={quickStatusSaving}
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              {quickStatusSaving ? "保存中…" : "未対応に戻す"}
+            </button>
+          ) : null}
+        </div>
+      )}
       <div className="mt-3">
         <div className="mb-1 text-[11px] text-gray-500 dark:text-gray-400">メモ</div>
         {/* React text node のみで描画する (raw HTML 描画は使わない)。 */}

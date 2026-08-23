@@ -31,8 +31,9 @@ const CANDIDATES_PAGE_SRC = readSrc(
 );
 
 describe("1. 既存物件 InfoWindow の日本語ラベル表示", () => {
+  // 第2弾 C2 で PinInfo は廃止(ピンはタップで直接詳細)。終端は次の関数に変更。
   const propertyInfo =
-    MAP_SRC.match(/function PropertyInfo[\s\S]*?function PinInfo/)?.[0] ?? "";
+    MAP_SRC.match(/function PropertyInfo[\s\S]*?function handleHttpError/)?.[0] ?? "";
 
   it("PropertyInfo が存在する", () => {
     expect(propertyInfo).not.toBe("");
@@ -170,10 +171,11 @@ describe("4. 対応済みのピンを隠すトグル", () => {
     );
   });
 
-  it("開いている吹き出しも隠す対象なら描画しない (marker と表示が食い違わない)", () => {
-    expect(MAP_SRC).toMatch(
-      /selected\.kind === "pin"[\s\S]{0,200}hideClosedPins[\s\S]{0,120}selected\.row\.status === "closed"/,
-    );
+  it("ピンの吹き出しは廃止済み(第2弾C2)で、marker 側の隠すフィルタが唯一の描画判定", () => {
+    // 旧: 吹き出しにも hideClosedPins 条件が要った(marker と食い違うため)。
+    // 今: ピンはタップで直接詳細=吹き出しが存在せず、食い違いも起きない。
+    expect(MAP_SRC).not.toContain('selected.kind === "pin"');
+    expect(MAP_SRC).toMatch(/hideClosedPins\s*\?\s*pins\.filter\(\(p\) => p\.status !== "closed"/);
   });
 
   it("表示切替パネルに「対応済みのピンを隠す」チェックがある (調査ピン表示中のみ)", () => {

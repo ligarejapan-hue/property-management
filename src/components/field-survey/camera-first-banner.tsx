@@ -21,6 +21,8 @@
 
 interface CameraFirstBannerProps {
   onCancel: () => void;
+  /** 「撮り直す」=写真を捨てて**カメラを直接開く**(第2弾。従来はFAB押し直し)。 */
+  onRetake?: () => void;
   /**
    * タップ待ちが写真を持っているか (発注者要望 2026-08-17「写真なしでピン」)。
    * false のときは「写真を撮りました」が嘘になるので、見出しと取消ボタンの
@@ -32,6 +34,7 @@ interface CameraFirstBannerProps {
 
 export default function CameraFirstBanner({
   onCancel,
+  onRetake,
   hasPhoto = true,
 }: CameraFirstBannerProps) {
   return (
@@ -46,15 +49,25 @@ export default function CameraFirstBanner({
       <p className="mt-1">
         地図で<b>家の上をタップ</b>してください。そこにピンを立てます。
       </p>
-      <div className="mt-2 flex justify-end">
+      <div className="mt-2 flex justify-end gap-2">
         <button
           type="button"
           onClick={onCancel}
           data-testid="camera-first-cancel"
           className="rounded border border-indigo-300 bg-white px-3 py-1 text-[11px] text-indigo-900 hover:bg-indigo-100 dark:border-indigo-500/40 dark:bg-gray-900 dark:text-indigo-200 dark:hover:bg-gray-800"
         >
-          {hasPhoto ? "撮り直す" : "やめる"}
+          やめる
         </button>
+        {hasPhoto && onRetake && (
+          <button
+            type="button"
+            onClick={onRetake}
+            data-testid="camera-first-retake"
+            className="rounded border border-indigo-600 bg-indigo-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700 dark:border-indigo-500"
+          >
+            撮り直す(カメラを開く)
+          </button>
+        )}
       </div>
     </div>
   );

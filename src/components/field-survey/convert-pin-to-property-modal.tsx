@@ -243,8 +243,8 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-[90vw] sm:max-w-md max-h-[90vh] overflow-y-auto rounded-xl bg-white dark:bg-gray-900 shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-4 sm:items-center sm:pt-0 bg-black/40 p-4">
+      <div className="w-full max-w-[90vw] sm:max-w-md max-h-[85dvh] overflow-y-auto overscroll-contain rounded-xl bg-white dark:bg-gray-900 shadow-xl">
         <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 px-6 py-4">
           <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">この場所を物件にする</h2>
           <button

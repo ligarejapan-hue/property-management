@@ -412,16 +412,14 @@ describe("field-survey-map.tsx — Phase 1-G 統合", () => {
   // 「現在地を使う」廃止。位置取得が無いことは別 describe で見張る。
 
 
-  it("InfoWindow の PinInfo に「詳細を見る」リンク + onOpenPinDetail", () => {
-    expect(MAP_SRC).toMatch(/data-testid="pin-info-open-detail"/);
-    expect(MAP_SRC).toMatch(/詳細を見る/);
-    expect(MAP_SRC).toMatch(/onOpenPinDetail\(id\)/);
+  it("ピンはタップで直接詳細を開く(第2弾C2: 吹き出しの中継を廃止)", () => {
+    expect(MAP_SRC).toMatch(/onOpenPinDetail\(pin\.id\)/);
+    expect(MAP_SRC).not.toMatch(/data-testid="pin-info-open-detail"/);
   });
 
-  it("pinType / status を生 enum でなくラベル化して表示", () => {
-    // PinInfo で formatPinType / formatPinStatus を使う
-    expect(MAP_SRC).toMatch(/formatPinType\(row\.pinType\)/);
-    expect(MAP_SRC).toMatch(/formatPinStatus\(row\.status\)/);
+  it("pinType を生 enum でなくラベル化して表示(marker title。吹き出しはC2で廃止)", () => {
+    expect(MAP_SRC).toMatch(/formatPinType\(pin\.pinType\)/);
+    // status のラベル表示は詳細パネル(pin-detail-panel)側が担う。
   });
 
   it("Phase 1-G で localStorage / sessionStorage / IndexedDB / wakeLock を新規に使わない", () => {

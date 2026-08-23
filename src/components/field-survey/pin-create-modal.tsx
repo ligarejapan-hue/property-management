@@ -207,9 +207,9 @@ export default function PinCreateModal({
       role="dialog"
       aria-modal="true"
       data-testid="pin-create-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-4 sm:items-center sm:pt-0 bg-black/40 p-4"
     >
-      <div className="w-full max-w-[90vw] sm:max-w-md max-h-[90vh] overflow-y-auto rounded-md bg-white dark:bg-gray-900 p-4 text-sm shadow-lg">
+      <div className="w-full max-w-[90vw] sm:max-w-md max-h-[85dvh] overflow-y-auto overscroll-contain rounded-md bg-white dark:bg-gray-900 p-4 text-sm shadow-lg">
         <h3 className="mb-3 text-base font-semibold text-gray-800 dark:text-gray-100">
           調査ピンを追加
         </h3>

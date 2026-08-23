@@ -73,7 +73,6 @@ import {
   useFieldSurveyPinPhotoMutations,
 } from "@/components/field-survey/use-field-survey-pin-photo-mutations";
 import {
-  formatPinStatus,
   formatPinType,
   isFieldSurveyPinType,
   type FieldSurveyPinType,
@@ -527,6 +526,11 @@ export default function FieldSurveyMap({
     | null
   >(null);
   const [detailPinId, setDetailPinId] = useState<string | null>(null);
+  // 第2弾 C2: 地図の何もない場所のタップで詳細シートを閉じる(宣言順は
+  //   React Compiler の「宣言前アクセス」検出に合わせ state の直後に置く)。
+  const closeDetailOnBackground = useCallback(() => {
+    setDetailPinId(null);
+  }, []);
   // 「この場所を地図で見る」(?focusPin): 指定ピンの場所へ地図を寄せ、そのピンを
   // 強調マーカーで必ず表示する。map instance が揃った後に一度だけ、pin 詳細 API
   // から座標を取得して panTo + 強調マーカーを立てる。
@@ -625,6 +629,14 @@ export default function FieldSurveyMap({
   // ハンドラ (TripControls が effect で登録する)。パネルを開かずに開始できる
   // 導線 (毎朝の 6 タップ → 2 タップ)。
   const startTripRef = useRef<(() => void) | null>(null);
+  const endTripRef = useRef<(() => void) | null>(null);
+  const cameraTriggerRef = useRef<(() => void) | null>(null);
+  const registerCameraTrigger = useCallback((fn: (() => void) | null) => {
+    cameraTriggerRef.current = fn;
+  }, []);
+  const registerEndRequest = useCallback((fn: (() => void) | null) => {
+    endTripRef.current = fn;
+  }, []);
   const registerStartRequest = useCallback((fn: (() => void) | null) => {
     startTripRef.current = fn;
   }, []);
@@ -704,6 +716,9 @@ export default function FieldSurveyMap({
         // たびに始めると、休憩中に自分で「位置記録停止」を押した人の意思を
         // 覆して休憩場所を記録してしまう。
         if (prevId === null && nextId !== null && opts?.justStarted) {
+          // 第2弾: 「巡回が終了しています。開始してから…」等の古い案内を、
+          // 指示どおり開始した瞬間に消す(従来は地図を動かすまで残った)。
+          setError(null);
           autoStartRecordingRef.current = true;
           // 第1弾 B2: 予約は15秒で失効(armAutoCenterOnStart)。屋内で測位に
           // 1分かかるような場合、忘れた頃に突然引き戻さない。
@@ -1111,6 +1126,7 @@ export default function FieldSurveyMap({
             onLoadingChange={setMapLoading}
             onTruncationChange={handleTruncationChange}
             onUserDrag={cancelAutoCenterOnStart}
+            onBackgroundClick={closeDetailOnBackground}
           />
           <MapInstanceCapture onMap={setMapInstance} />
           {activeSession && <RoutePolyline points={polylinePoints} />}
@@ -1173,6 +1189,7 @@ export default function FieldSurveyMap({
           }}
           currentUserId={currentUserId}
           registerStartRequest={registerStartRequest}
+        registerEndRequest={registerEndRequest}
           registerSessionRefresh={registerSessionRefresh}
           onDiscardUnsentLocations={() => recorder.discardBufferAndStop()}
           onAbortPendingFlush={() => recorder.abortInFlightFlush()}
@@ -1203,6 +1220,19 @@ export default function FieldSurveyMap({
             遮るため FAB / banner を描画しない (md+ はトグル自体が無い)。 */}
         {/* 巡回中は「撮って登録」を主に、「写真なしでピン」を隣に置く
             (発注者要望 2026-08-17。行レイアウトで中央寄せ=巡回外と同じ作り)。 */}
+        {/* 第2弾 C3: 終了は開始と同じく地図上から(パネルの奥に沈めない)。
+            現在地FAB(左下)の真上=左列に置き、中央の撮影FAB群・右下の
+            Google純正ズームと取り合わない。 */}
+        {activeSession && !panelOpen && (
+          <button
+            type="button"
+            data-testid="trip-quick-end"
+            onClick={() => endTripRef.current?.()}
+            className="absolute bottom-[7.25rem] left-3 z-10 flex items-center gap-1 rounded-full border border-gray-300 bg-white/95 px-3 py-2 text-xs font-semibold text-gray-800 shadow-lg hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900/95 dark:text-gray-100 dark:hover:bg-gray-800"
+          >
+            🏁 巡回終了
+          </button>
+        )}
         {activeSession && cameraButton.visible && !panelOpen && (
           <div className="pointer-events-none absolute bottom-14 left-1/2 z-10 flex -translate-x-1/2 items-start gap-2">
             <CameraFirstButton
@@ -1210,6 +1240,7 @@ export default function FieldSurveyMap({
               disabled={cameraButton.disabled}
               permissionDenied={canWritePin === false}
               onPhotoCaptured={handleCameraPhotoCaptured}
+              registerTrigger={registerCameraTrigger}
             />
             <PinWithoutPhotoButton
               disabled={cameraButton.disabled}
@@ -1222,10 +1253,24 @@ export default function FieldSurveyMap({
             下端(bottom-14)にあり、現在地ボタンを完全に覆っていた(A5)。下端の帯
             (現在地/撮影/巡回開始)と住み分けるため、通知類はここへ集約する。 */}
         <div className="pointer-events-none absolute left-1/2 top-3 z-10 flex w-[calc(100%-1.5rem)] max-w-sm -translate-x-1/2 flex-col items-stretch gap-1.5">
+          {/* 第2弾 C4: 一覧から来たときだけ戻り道を出す(従来は片道だった)。 */}
+          {focusPinId && (
+            <a
+              href="/field-survey/candidates"
+              data-testid="map-back-to-candidates"
+              className="pointer-events-auto self-start rounded-full border border-gray-300 bg-white/95 px-3 py-1.5 text-xs font-semibold text-gray-800 shadow hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900/95 dark:text-gray-100 dark:hover:bg-gray-800"
+            >
+              ← 完成待ち一覧へ戻る
+            </a>
+          )}
           {cameraFirstPhase === "awaiting-map-tap" && !panelOpen && (
             <CameraFirstBanner
               hasPhoto={cameraFirstHasPhoto}
               onCancel={resetCameraFirst}
+              onRetake={() => {
+                resetCameraFirst();
+                cameraTriggerRef.current?.();
+              }}
             />
           )}
           {mapLoading && (
@@ -1267,6 +1312,7 @@ export default function FieldSurveyMap({
                 disabled={cameraButton.disabled}
                 permissionDenied={canWritePin === false}
                 onPhotoCaptured={handleCameraPhotoCaptured}
+                registerTrigger={registerCameraTrigger}
               />
             )}
             {cameraButton.visible && (
@@ -1433,9 +1479,18 @@ export default function FieldSurveyMap({
         {error && (
           <div
             role="alert"
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800 shadow dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
+            className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-start gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800 shadow dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
           >
-            {error}
+            <span>{error}</span>
+            {/* 第2弾: 読んだら消せる(従来は地図を動かすまで消えなかった)。 */}
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              aria-label="閉じる"
+              className="-m-1 p-1 leading-none text-red-700 hover:text-red-900 dark:text-red-300 dark:hover:text-red-100"
+            >
+              ×
+            </button>
           </div>
         )}
       </div>
@@ -1460,6 +1515,7 @@ function ControlPanel({
   onTogglePanelOpen,
   currentUserId,
   registerStartRequest,
+  registerEndRequest,
   registerSessionRefresh,
   onDiscardUnsentLocations,
   onAbortPendingFlush,
@@ -1504,6 +1560,7 @@ function ControlPanel({
   currentUserId: string;
   /** 地図上「巡回を開始」→ TripControls の開始確認 modal を開くハンドラ登録。 */
   registerStartRequest: (fn: (() => void) | null) => void;
+  registerEndRequest: (fn: (() => void) | null) => void;
   /** #317: 開始フェンスの終了検知 → 巡回状態の再取得ハンドラ登録 (TripControls)。 */
   registerSessionRefresh: (fn: (() => void) | null) => void;
   /** 圏外時の「未送信の位置記録を破棄して終了」の破棄側 (recorder)。 */
@@ -1542,6 +1599,51 @@ function ControlPanel({
       <div
         className={`${panelOpen ? "mt-2 block" : "hidden"} pointer-events-auto min-h-0 w-56 overflow-y-auto overscroll-contain rounded-md border border-gray-200 bg-white p-3 text-sm shadow dark:border-gray-800 dark:bg-gray-900 md:mt-0 md:block`}
       >
+      {/* 第2弾 C3: 巡回操作(開始/終了/位置記録/現在地)を最上部へ。終了が
+          凡例やチェックの下に沈み、終業時に毎回スクロールしていた。 */}
+      <TripControls
+        currentUserId={currentUserId}
+        onActiveSessionChange={onActiveSessionChange}
+        onBeforeSessionEnd={onBeforeSessionEnd}
+        registerStartRequest={registerStartRequest}
+        registerEndRequest={registerEndRequest}
+        registerSessionRefresh={registerSessionRefresh}
+        onDiscardUnsentLocations={onDiscardUnsentLocations}
+        onAbortPendingFlush={onAbortPendingFlush}
+        onEndFailedRestoreRecorder={onEndFailedRestoreRecorder}
+        onBlockRecorderForEnd={onBlockRecorderForEnd}
+        unsentLocationCount={recorder.bufferedCount}
+      />
+
+      {/* Phase 1-F-2: 位置記録 UI。active session がある時のみ表示。
+          active 復元時に自動 start しない (ユーザー操作で start)。 */}
+      {hasActiveSession && (
+        <LocationRecorderControls
+          status={recorder.status}
+          savedCount={recorder.savedPoints.length}
+          bufferedCount={recorder.bufferedCount}
+          lastFlushAt={recorder.lastFlushAt}
+          isFlushing={recorder.isFlushing}
+          isLowAccuracyNow={recorder.isLowAccuracyNow}
+          error={recorder.error}
+          onStart={recorder.start}
+          onStop={() => {
+            void recorder.stop();
+          }}
+        />
+      )}
+
+      {/* Phase 1-F-3: 現在地ステータス + 現在地へ移動。active session 中のみ表示。
+          地図クリック (pin 追加モード) と干渉しないよう、marker は clickable:false。 */}
+      {hasActiveSession && (
+        <CurrentLocationStatus
+          latestPositionForDisplay={recorder.latestPositionForDisplay}
+          isWaitingForFirstLocation={recorder.isWaitingForFirstLocation}
+          lastLocationErrorForDisplay={recorder.lastLocationErrorForDisplay}
+          recording={recorder.status === "recording"}
+        />
+      )}
+
       <div className="mb-2 text-xs font-semibold text-gray-600 dark:text-gray-300">表示切替</div>
       <label className="mb-1 flex cursor-pointer items-center gap-2">
         <input
@@ -1734,51 +1836,6 @@ function ControlPanel({
         </div>
       )}
 
-      {/* Phase 1-F-1: 巡回開始/終了 + active session 復元。
-          Phase 1-F-2: 終了前に位置記録 (watchPosition / flush timer / buffer)
-          を確実に停止するため onBeforeSessionEnd を渡す。 */}
-      <TripControls
-        currentUserId={currentUserId}
-        onActiveSessionChange={onActiveSessionChange}
-        onBeforeSessionEnd={onBeforeSessionEnd}
-        registerStartRequest={registerStartRequest}
-        registerSessionRefresh={registerSessionRefresh}
-        onDiscardUnsentLocations={onDiscardUnsentLocations}
-        onAbortPendingFlush={onAbortPendingFlush}
-        onEndFailedRestoreRecorder={onEndFailedRestoreRecorder}
-        onBlockRecorderForEnd={onBlockRecorderForEnd}
-        unsentLocationCount={recorder.bufferedCount}
-      />
-
-      {/* Phase 1-F-2: 位置記録 UI。active session がある時のみ表示。
-          active 復元時に自動 start しない (ユーザー操作で start)。 */}
-      {hasActiveSession && (
-        <LocationRecorderControls
-          status={recorder.status}
-          savedCount={recorder.savedPoints.length}
-          bufferedCount={recorder.bufferedCount}
-          lastFlushAt={recorder.lastFlushAt}
-          isFlushing={recorder.isFlushing}
-          isLowAccuracyNow={recorder.isLowAccuracyNow}
-          error={recorder.error}
-          onStart={recorder.start}
-          onStop={() => {
-            void recorder.stop();
-          }}
-        />
-      )}
-
-      {/* Phase 1-F-3: 現在地ステータス + 現在地へ移動。active session 中のみ表示。
-          地図クリック (pin 追加モード) と干渉しないよう、marker は clickable:false。 */}
-      {hasActiveSession && (
-        <CurrentLocationStatus
-          latestPositionForDisplay={recorder.latestPositionForDisplay}
-          isWaitingForFirstLocation={recorder.isWaitingForFirstLocation}
-          lastLocationErrorForDisplay={recorder.lastLocationErrorForDisplay}
-          recording={recorder.status === "recording"}
-        />
-      )}
-
       </div>
     </div>
   );
@@ -1818,6 +1875,7 @@ function MapDataLayer({
   onLoadingChange,
   onTruncationChange,
   onUserDrag,
+  onBackgroundClick,
 }: {
   layers: Record<Layer, boolean>;
   /**
@@ -1845,6 +1903,8 @@ function MapDataLayer({
   onTruncationChange: (t: { pins: boolean; properties: boolean }) => void;
   /** ユーザーが地図をドラッグした(第1弾 B2: 自動寄せ予約の破棄に使う)。 */
   onUserDrag: () => void;
+  /** 地図の何もない場所をタップした(第2弾: 吹き出し/詳細シートを閉じる)。 */
+  onBackgroundClick: () => void;
   refetchNonce: number;
   /** ピンの「自分/他人」縁色の判定用 (server-side で確定済みのログイン userId)。 */
   currentUserId: string;
@@ -1869,12 +1929,17 @@ function MapDataLayer({
     lngStep: number;
   } | null>(null);
 
-  const [selected, setSelected] = useState<
-    | { kind: "property"; row: PropertyRow }
-    | { kind: "pin"; row: PinRow }
-    | null
-  >(null);
+  // 第2弾 C2: 吹き出しは物件のみ(ピンはタップで直接詳細)。
+  const [selected, setSelected] = useState<{
+    kind: "property";
+    row: PropertyRow;
+  } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // 背景タップ判定用: captureMapClick の最新値(リスナーは長寿命のため ref 経由)。
+  const captureRef = useRef(captureMapClick);
+  useEffect(() => {
+    captureRef.current = captureMapClick;
+  }, [captureMapClick]);
 
   // bbox を取って fetch する関数 (debounce 後に呼ばれる)
   const fetchForBbox = useCallback(
@@ -2196,6 +2261,14 @@ function MapDataLayer({
     const dragListener = map.addListener("dragstart", () => {
       onUserDrag();
     });
+    // 第2弾: 何もない場所のタップで吹き出し/詳細を閉じる(マーカーの click は
+    // map の click と別イベントなので、開く操作を即閉じすることはない)。
+    // タップ待ち(captureMapClick)中は作成用の click 処理に譲る。
+    const clickListener = map.addListener("click", () => {
+      if (captureRef.current) return;
+      setSelected(null);
+      onBackgroundClick();
+    });
     const listener = map.addListener("idle", () => {
       const bounds = map.getBounds();
       if (!bounds) return;
@@ -2212,6 +2285,7 @@ function MapDataLayer({
     return () => {
       debounced.cancel();
       dragListener.remove();
+      clickListener.remove();
       listener.remove();
       if (abortRef.current) abortRef.current.abort();
     };
@@ -2428,7 +2502,9 @@ function MapDataLayer({
             onClick={
               captureMapClick
                 ? undefined
-                : () => setSelected({ kind: "pin", row: pin })
+                : // 第2弾 C2: 中身の無い吹き出し(メモは「あり」しか出せない)を
+                  // 経由せず、タップで直接詳細を開く(★focusPin と挙動統一)。
+                  () => onOpenPinDetail(pin.id)
             }
             title={formatPinType(pin.pinType)}
           >
@@ -2459,29 +2535,6 @@ function MapDataLayer({
           onCloseClick={() => setSelected(null)}
         >
           <PropertyInfo row={selected.row} />
-        </InfoWindow>
-      )}
-      {/* 開いたまま「対応済みを隠す」を ON にした closed ピンの吹き出しは
-          marker と一緒に非表示にする (marker が消えたのに吹き出しだけ残ると
-          位置の手がかりが無い浮遊 UI になる)。OFF に戻せば再表示される。
-          レイヤー OFF (layers.pins) も同じ理屈で吹き出しごと消す（総点検P3）。 */}
-      {selected &&
-        !captureMapClick &&
-        layers.pins &&
-        selected.kind === "pin" &&
-        !(hideClosedPins && selected.row.status === "closed") && (
-        <InfoWindow
-          position={{ lat: selected.row.lat, lng: selected.row.lng }}
-          onCloseClick={() => setSelected(null)}
-        >
-          <PinInfo
-            row={selected.row}
-            onOpenDetail={() => {
-              const id = selected.row.id;
-              setSelected(null);
-              onOpenPinDetail(id);
-            }}
-          />
         </InfoWindow>
       )}
 
@@ -2515,48 +2568,6 @@ function PropertyInfo({ row }: { row: PropertyRow }) {
           詳細を開く →
         </a>
       </div>
-    </div>
-  );
-}
-
-function PinInfo({ row, onOpenDetail }: { row: PinRow; onOpenDetail: () => void }) {
-  return (
-    <div className="min-w-[200px] max-w-[280px] text-xs">
-      <div className="mb-1 font-semibold text-gray-800">調査ピン</div>
-      <dl className="grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-gray-700">
-        <dt>種類</dt>
-        <dd>{formatPinType(row.pinType)}</dd>
-        <dt>状態</dt>
-        <dd>{formatPinStatus(row.status)}</dd>
-        <dt>巡回</dt>
-        {/* 巡回なし撮影が入ったため「—」が常態になる。何が起きたか分かる語にする。 */}
-        <dd>{row.sessionId ? "あり" : "巡回外の撮影"}</dd>
-        <dt>物件</dt>
-        <dd>
-          {row.propertyId ? (
-            <a
-              href={`/properties/${row.propertyId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-indigo-600 hover:underline"
-            >
-              紐付け済 →
-            </a>
-          ) : (
-            "—"
-          )}
-        </dd>
-        <dt>メモ</dt>
-        <dd>{row.hasMemo ? "あり (詳細パネルで確認)" : "—"}</dd>
-      </dl>
-      <button
-        type="button"
-        onClick={onOpenDetail}
-        data-testid="pin-info-open-detail"
-        className="mt-2 text-indigo-600 hover:underline"
-      >
-        詳細を見る →
-      </button>
     </div>
   );
 }

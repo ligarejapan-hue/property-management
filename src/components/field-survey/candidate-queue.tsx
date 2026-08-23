@@ -243,6 +243,23 @@ export default function CandidateQueue({
   // 現在の並び順のリクエストでなければ破棄する (Codex P2: 切替直後に
   // 古い応答が rows/truncated を上書きし、表示と選択が食い違う)。
   const loadGenerationRef = useRef(0);
+  // 第2弾 C4: 地図から戻ったら、出発した行まで自動スクロール(1回だけ)。
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || rows === null) return;
+    let target: string | null = null;
+    try {
+      target = sessionStorage.getItem("fsCandidatesReturnPin");
+      if (target) sessionStorage.removeItem("fsCandidatesReturnPin");
+    } catch {
+      return;
+    }
+    if (!target) return;
+    restoredRef.current = true;
+    const el = document.querySelector(`[data-candidate-row="${target}"]`);
+    if (el) el.scrollIntoView({ block: "center" });
+  }, [rows]);
+
   const load = useCallback(async () => {
     const generation = ++loadGenerationRef.current;
     // 取得前に一覧をクリアして「読み込み中」へ切り替える (Codex P2: 並び順
@@ -458,7 +475,7 @@ export default function CandidateQueue({
                 currentUserId !== null &&
                 r.staffUserId === currentUserId);
             return (
-              <li key={r.id} className="px-4 py-3">
+              <li key={r.id} className="px-4 py-3" data-candidate-row={r.id}>
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2 text-sm text-gray-800 dark:text-gray-200">
@@ -501,6 +518,15 @@ export default function CandidateQueue({
                         data-testid="candidate-map-link"
                         href={`/field-survey/map?focusPin=${r.id}`}
                         className={ROW_CHIP_CLASS}
+                        onClick={() => {
+                          // 第2弾 C4: 地図から戻ったとき、この行まで自動で
+                          // スクロールして「どこまで処理したか」を見失わない。
+                          try {
+                            sessionStorage.setItem("fsCandidatesReturnPin", r.id);
+                          } catch {
+                            // storage不可(プライベートモード等)は黙って諦める
+                          }
+                        }}
                       >
                         <span aria-hidden="true">🗺</span>
                         地図で見る
