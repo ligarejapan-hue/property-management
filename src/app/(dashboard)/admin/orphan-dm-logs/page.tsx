@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { SearchField } from "@/components/ui/search-field";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { USE_MOCK } from "@/lib/api-client";
 import { useSession } from "next-auth/react";
@@ -148,19 +150,13 @@ export default function OrphanDmLogsPage() {
           setQuery(searchInput);
         }}
       >
-        <input
-          type="text"
+        {/* 第2弾②: 検索窓は SearchField(左端・幅統一) */}
+        <SearchField
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           placeholder="所有者名で検索"
-          className="w-64 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-sm text-gray-900 dark:text-gray-100"
         />
-        <button
-          type="submit"
-          className="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
-        >
-          検索
-        </button>
+        <Button type="submit">検索</Button>
       </form>
 
       <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">

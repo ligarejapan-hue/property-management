@@ -1,6 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { FilterPanel } from "@/components/ui/filter-panel";
+import { SearchField } from "@/components/ui/search-field";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { Loader2, Search, RotateCcw } from "lucide-react";
@@ -322,101 +325,87 @@ export default function AuditLogsPage() {
         </div>
       )}
 
-      {/* Filter bar */}
-      <div className="mb-6 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 shadow-sm">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <div>
-            <label htmlFor="date-from" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
-              日付範囲（開始）
-            </label>
-            <input
-              id="date-from"
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
-            />
-          </div>
-          <div>
-            <label htmlFor="date-to" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
-              日付範囲（終了）
-            </label>
-            <input
-              id="date-to"
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
-            />
-          </div>
-          <div>
-            <label htmlFor="user-name-filter" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
-              ユーザー名
-            </label>
-            <input
-              id="user-name-filter"
-              type="text"
+      {/* Filter bar(第2弾⑦: 共通 FilterPanel=よく使う+詳細条件▾。適用の仕組みは従来どおり) */}
+      <FilterPanel
+        primary={
+          <>
+            <SearchField
+              aria-label="ユーザー名で検索"
               placeholder="ユーザー名で検索..."
               value={userNameInput}
               onChange={(e) => {
                 setUserNameInput(e.target.value);
                 commitUserName(e.target.value);
               }}
-              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
             />
-          </div>
-          <div>
-            <label htmlFor="action-filter" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
-              操作種別
-            </label>
             <select
               id="action-filter"
+              aria-label="操作種別"
               value={actionFilter}
               onChange={(e) => setActionFilter(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
+              className="rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             >
-              <option value="">すべて</option>
+              <option value="">操作種別: すべて</option>
               {actions.map((a) => (
                 <option key={a} value={a}>{ACTION_LABELS[a] ?? a}</option>
               ))}
             </select>
-          </div>
-          <div>
-            <label htmlFor="target-table-filter" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
-              対象テーブル
-            </label>
-            <select
-              id="target-table-filter"
-              value={targetTableFilter}
-              onChange={(e) => setTargetTableFilter(e.target.value)}
-              className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
-            >
-              <option value="">すべて</option>
-              {targetTables.map((t) => (
-                <option key={t} value={t}>{TARGET_TABLE_LABELS[t] ?? t}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-end gap-2">
-            <button
-              type="button"
-              onClick={handleSearch}
-              className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
-            >
+            <Button onClick={handleSearch}>
               <Search className="h-4 w-4" />
               検索
-            </button>
-            <button
-              type="button"
-              onClick={handleReset}
-              className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
+            </Button>
+            <Button variant="secondary" onClick={handleReset}>
               <RotateCcw className="h-4 w-4" />
               リセット
-            </button>
+            </Button>
+          </>
+        }
+        advancedCount={[dateFrom, dateTo, targetTableFilter].filter(Boolean).length}
+        advanced={
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div>
+              <label htmlFor="date-from" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
+                日付範囲（開始）
+              </label>
+              <input
+                id="date-from"
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
+              />
+            </div>
+            <div>
+              <label htmlFor="date-to" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
+                日付範囲（終了）
+              </label>
+              <input
+                id="date-to"
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
+              />
+            </div>
+            <div>
+              <label htmlFor="target-table-filter" className="block text-xs font-medium text-gray-700 dark:text-gray-200 mb-1">
+                対象テーブル
+              </label>
+              <select
+                id="target-table-filter"
+                value={targetTableFilter}
+                onChange={(e) => setTargetTableFilter(e.target.value)}
+                className="block w-full rounded-md border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 dark:bg-gray-900 dark:text-gray-100"
+              >
+                <option value="">すべて</option>
+                {targetTables.map((t) => (
+                  <option key={t} value={t}>{TARGET_TABLE_LABELS[t] ?? t}</option>
+                ))}
+              </select>
+            </div>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       {/* Table */}
       <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
