@@ -40,13 +40,44 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     );
   });
 
-  it("統合検索欄はドラフト値を表示し、onChange は見分け(classify)経由でコミットする", () => {
+  it("統合検索欄はドラフト値を表示し、onChange は見分け(classify)経由で処理する", () => {
     expect(pageSrc).toMatch(/value=\{searchAllDraft\}/);
     expect(pageSrc).toMatch(/handleUnifiedSearchChange\(e\.target\.value\)/);
-    // 見分けの結果で片方へ流し、もう片方は必ず空にする(古い絞り込みを残さない)。
     expect(pageSrc).toMatch(/classifyPropertySearch\(value\)/);
     expect(pageSrc).toMatch(/commitKeyword\(""\)/);
     expect(pageSrc).toMatch(/commitMgmtId\(""\)/);
+  });
+
+  it("⚠text 入力を keyword に自動コミットしない(所有者PIIをURL/監査に載せない・@codex #404 R1 P1)", () => {
+    // 入力中に流してよいのは suggest(POST) と mgmtId(非PII構文)だけ。
+    // keyword の確定は Enter(handleUnifiedSearchSubmit)の明示操作のみ。
+    // ⚠onChange ハンドラ内の commitKeyword は**全て空文字**であること。
+    //   /commitKeyword\(value\)/ の不在だけでは、三項演算子
+    //   (commitKeyword(kind === "text" ? value : "")) の形で漏れが再発しても
+    //   捕まえられない(変異実測ですり抜けた)。
+    const hAt = pageSrc.indexOf("const handleUnifiedSearchChange");
+    const hEnd = pageSrc.indexOf("const handleUnifiedSearchSubmit");
+    expect(hAt).toBeGreaterThan(-1);
+    expect(hEnd).toBeGreaterThan(hAt);
+    const handler = pageSrc.slice(hAt, hEnd);
+    const commits = handler.match(/commitKeyword\([^)]*\)/g) ?? [];
+    expect(commits.length).toBeGreaterThan(0);
+    for (const c of commits) {
+      expect(c).toBe('commitKeyword("")');
+    }
+    expect(pageSrc).toMatch(/handleUnifiedSearchSubmit/);
+    // Enter 側でだけ確定する(直接 setSearchText)。
+    const at = pageSrc.indexOf("const handleUnifiedSearchSubmit");
+    expect(at).toBeGreaterThan(-1);
+    const body = pageSrc.slice(at, at + 700);
+    expect(body).toContain("setSearchText(value)");
+    expect(body).toContain('classifyPropertySearch(value) !== "text"');
+  });
+
+  it("⚠旧ブックマーク(keyword+mgmtId両方)は見える方(keyword)だけ復元する(@codex #404 R1 P2)", () => {
+    expect(pageSrc).toMatch(
+      /sp\.get\("keyword"\) \? "" : \(sp\.get\("mgmtId"\) \?\? ""\)/,
+    );
   });
 
   it("入力 onChange からの確定値への即時反映 (handleFilterChange(setSearchText/setMgmtIdText)) を排除している", () => {

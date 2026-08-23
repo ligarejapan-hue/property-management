@@ -120,7 +120,12 @@ function PropertiesPageInner() {
   //   URL keyword は /api/properties 用の確定語なので searchInput には入れない。
   //   入力中の所有者名・電話番号が property_list audit の raw keyword に残らないよう分離する。
   const [searchText, setSearchText] = useState(() => sp.get("keyword") ?? "");
-  const [mgmtIdText, setMgmtIdText] = useState(() => sp.get("mgmtId") ?? "");
+  // ⚠旧UI(検索窓2本)のブックマークは keyword と mgmtId を両方持ち得る。
+  //   統合窓は1本しか表示できないため、**見える方(keyword)だけ**を復元する
+  //   (@codex #404 R1 P2: 見えない管理ID絞り込みが裏で効くと、外し方が無い)。
+  const [mgmtIdText, setMgmtIdText] = useState(() =>
+    sp.get("keyword") ? "" : (sp.get("mgmtId") ?? ""),
+  );
   // 一覧検索の入力中文字列（即時反映で入力レスポンスを維持）。300ms debounce 後に
   // 確定値 searchText / mgmtIdText へコミットし、/api/properties 再取得・URL同期は
   // その確定値だけで動く（毎キーストロークの再取得＝property_list audit 量産を防ぐ）。
@@ -699,10 +704,31 @@ function PropertiesPageInner() {
       commitMgmtId(value);
       return;
     }
+    commitMgmtId("");
+    // ⚠text を keyword に**自動では**流さない(@codex #404 R1 P1)。
+    //   keyword は URL と property_list 監査に残るため、所有者名・電話を
+    //   打った途端に PII が URL/監査へ載ってしまう。旧・所有者窓が
+    //   POST の suggest だけに送っていた保護を統合後も守る:
+    //   - 入力中は suggest(POST・PII を URL に載せない)だけを更新
+    //   - 一覧の絞り込みは **Enter の明示操作**で確定(handleUnifiedSearchSubmit)
+    //   - 打ち直し始めたら古い keyword は消す(見えない絞り込みを残さない)
     setSearchInput(kind === "text" ? value : "");
     if (kind === "empty") setSuggestOpen(false);
-    commitMgmtId("");
-    commitKeyword(kind === "text" ? value : "");
+    commitKeyword("");
+  };
+
+  /**
+   * Enter での明示確定(一覧の絞り込み)。候補を選ばず Enter した文字列だけが
+   * keyword(=URL/監査に残る)になる。⚠候補から物件へ飛ぶ操作はクリックで行う
+   * (Enter を「先頭候補へ移動」にすると、絞り込みたい人が誤って別画面へ飛ぶ)。
+   */
+  const handleUnifiedSearchSubmit = () => {
+    const value = searchAllDraft.trim();
+    setSuggestOpen(false);
+    if (classifyPropertySearch(value) !== "text") return;
+    commitKeyword.cancel();
+    setSearchText(value);
+    setPage(1);
   };
 
   // Debounce search: reset page on filter change
@@ -1057,18 +1083,13 @@ function PropertiesPageInner() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
           <input
             type="text"
-            placeholder="住所・地番・所有者名・電話・管理ID(例: 120行)で検索"
+            placeholder="住所・地番・所有者名・電話・管理ID(例: 120行)で検索 — Enterで一覧を絞り込み"
             value={searchAllDraft}
             onChange={(e) => handleUnifiedSearchChange(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                if (suggestOpen && suggestResults.length > 0) {
-                  setSuggestOpen(false);
-                  router.push(`/properties/${suggestResults[0].id}`);
-                } else {
-                  setSuggestOpen(false);
-                }
+                handleUnifiedSearchSubmit();
               }
             }}
             onBlur={() => setSuggestOpen(false)}
