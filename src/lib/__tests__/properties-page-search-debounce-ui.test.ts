@@ -106,11 +106,30 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
 });
 
 describe("候補優先のEnter(@codex #404 R2 P1/P2)", () => {
+  it("Enter の優先規則: 明示選択 or 所有者だけの一致→候補を開く / 物件側に一致し得る入力→一覧絞り込み", () => {
+    // @codex #404 R3 P1: suggest は住所・地番でも一致するため、「候補があれば
+    // Enter=移動」は本来の絞り込み操作を乗っ取っていた。所有者側だけの一致
+    // (propertyFieldMatch が全て false)のときに限り候補を優先する。
+    expect(pageSrc).toContain("ownerOnlyMatches");
+    expect(pageSrc).toContain("!r.propertyFieldMatch");
+    expect(pageSrc).toContain("activeSuggest >= 0 || ownerOnlyMatches");
+    // server 側が一致種別を返す(生値は返さない)。
+    const route = fs.readFileSync(
+      path.resolve(process.cwd(), "src/app/api/properties/suggest/route.ts"),
+      "utf8",
+    );
+    expect(route).toContain("propertyFieldMatch:");
+    expect(route).toContain("hitsProperty(p.lotNumber)");
+  });
+
   it("候補が出ている間の Enter は候補を開き、keyword を確定しない", () => {
     // 所有者検索は suggest(POST) 経由で完結=PII が URL/監査へ落ちない。
     const at = pageSrc.indexOf('if (e.key === "Enter")');
     expect(at).toBeGreaterThan(-1);
-    const branch = pageSrc.slice(at, at + 700);
+    // ⚠幅は固定長でなく submit 呼び出しまで(コメント追記で伸びても切れない)。
+    const end = pageSrc.indexOf("handleUnifiedSearchSubmit()", at);
+    expect(end).toBeGreaterThan(at);
+    const branch = pageSrc.slice(at, end + 40);
     expect(branch).toContain("suggestOpen && suggestResults.length > 0");
     expect(branch).toMatch(/router\.push\(`\/properties\/\$\{pick\.id\}`\)/);
     // 候補ありの分岐は submit(=setSearchText)へ落ちずに return する。

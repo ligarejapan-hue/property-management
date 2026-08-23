@@ -69,6 +69,9 @@ interface SuggestResult {
   address: string;
   dmStatus: string;
   importSource: string | null;
+  /** この候補が物件側の項目(住所・地番・家屋番号・不動産番号)に一致したか。
+   *  false=所有者側だけの一致(@codex #404 R3: Enter の優先規則に使う)。 */
+  propertyFieldMatch?: boolean;
   owners: Array<{
     name: string | null;
     address: string | null;
@@ -1115,12 +1118,23 @@ function PropertiesPageInner() {
               if (e.key === "Enter") {
                 e.preventDefault();
                 if (suggestOpen && suggestResults.length > 0) {
-                  const pick =
-                    suggestResults[activeSuggest >= 0 ? activeSuggest : 0];
-                  setSuggestOpen(false);
-                  setActiveSuggest(-1);
-                  router.push(`/properties/${pick.id}`);
-                  return;
+                  // ⚠優先規則(@codex #404 R3 P1):
+                  //   1. 矢印で**明示選択**していれば、その候補を開く
+                  //   2. 候補が**所有者側だけ**に一致(=住所・地番等に一致し得ない
+                  //      入力)なら先頭候補を開く(PIIをkeywordへ落とさない)
+                  //   3. それ以外(物件側に一致する入力)は**一覧の絞り込み**
+                  //      =本来のEnter。住所・地番のEnterを候補が乗っ取らない。
+                  const ownerOnlyMatches = suggestResults.every(
+                    (r) => !r.propertyFieldMatch,
+                  );
+                  if (activeSuggest >= 0 || ownerOnlyMatches) {
+                    const pick =
+                      suggestResults[activeSuggest >= 0 ? activeSuggest : 0];
+                    setSuggestOpen(false);
+                    setActiveSuggest(-1);
+                    router.push(`/properties/${pick.id}`);
+                    return;
+                  }
                 }
                 handleUnifiedSearchSubmit();
               }
