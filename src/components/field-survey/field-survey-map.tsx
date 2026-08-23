@@ -529,6 +529,10 @@ export default function FieldSurveyMap({
   // 第2弾 C2: 地図の何もない場所のタップで詳細シートを閉じる(宣言順は
   //   React Compiler の「宣言前アクセス」検出に合わせ state の直後に置く)。
   const closeDetailOnBackground = useCallback(() => {
+    // ⚠既存の busy ゲート原則を踏襲(提出前レビューP1)。編集下書き・削除確認・
+    //   物件化フォーム・写真送信中は、背景タップで黙って閉じない
+    //   (handleMapClick / handleMapContextCreate と同じ判定)。
+    if (detailPanelBusyRef.current) return;
     setDetailPinId(null);
   }, []);
   // 「この場所を地図で見る」(?focusPin): 指定ピンの場所へ地図を寄せ、そのピンを
@@ -630,10 +634,11 @@ export default function FieldSurveyMap({
   // 導線 (毎朝の 6 タップ → 2 タップ)。
   const startTripRef = useRef<(() => void) | null>(null);
   const endTripRef = useRef<(() => void) | null>(null);
-  const cameraTriggerRef = useRef<(() => void) | null>(null);
-  const registerCameraTrigger = useCallback((fn: (() => void) | null) => {
-    cameraTriggerRef.current = fn;
-  }, []);
+  // ⚠撮り直しの起動口は**常時マウントの隠し input**(提出前レビューP1)。
+  //   撮影FAB(CameraFirstButton)は awaiting-map-tap 中アンマウントされるため、
+  //   そこへ登録する方式だと「撮り直す」を押した瞬間は必ず ref=null で
+  //   カメラが開かなかった(文言だけの機能になっていた)。
+  const retakeInputRef = useRef<HTMLInputElement | null>(null);
   const registerEndRequest = useCallback((fn: (() => void) | null) => {
     endTripRef.current = fn;
   }, []);
@@ -1240,7 +1245,6 @@ export default function FieldSurveyMap({
               disabled={cameraButton.disabled}
               permissionDenied={canWritePin === false}
               onPhotoCaptured={handleCameraPhotoCaptured}
-              registerTrigger={registerCameraTrigger}
             />
             <PinWithoutPhotoButton
               disabled={cameraButton.disabled}
@@ -1249,6 +1253,21 @@ export default function FieldSurveyMap({
             />
           </div>
         )}
+        {/* 撮り直し用の常時マウント隠し input(提出前レビューP1)。撮影FABは
+            タップ待ち中アンマウントされるため、こちらが唯一の確実な起動口。 */}
+        <input
+          ref={retakeInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          data-testid="camera-retake-input"
+          onChange={(e) => {
+            const file = e.target.files?.[0] ?? null;
+            e.target.value = "";
+            if (file) handleCameraPhotoCaptured(file);
+          }}
+        />
         {/* 画面上部中央の通知スタック(第1弾 A3/A4/A5)。タップ待ちバナーは以前
             下端(bottom-14)にあり、現在地ボタンを完全に覆っていた(A5)。下端の帯
             (現在地/撮影/巡回開始)と住み分けるため、通知類はここへ集約する。 */}
@@ -1269,7 +1288,8 @@ export default function FieldSurveyMap({
               onCancel={resetCameraFirst}
               onRetake={() => {
                 resetCameraFirst();
-                cameraTriggerRef.current?.();
+                // 同一ジェスチャ内で常時マウントの input を直接開く。
+                retakeInputRef.current?.click();
               }}
             />
           )}
@@ -1312,7 +1332,6 @@ export default function FieldSurveyMap({
                 disabled={cameraButton.disabled}
                 permissionDenied={canWritePin === false}
                 onPhotoCaptured={handleCameraPhotoCaptured}
-                registerTrigger={registerCameraTrigger}
               />
             )}
             {cameraButton.visible && (

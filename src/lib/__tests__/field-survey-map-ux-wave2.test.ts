@@ -56,7 +56,12 @@ describe("C2: タップで直接詳細+背景タップで閉じる", () => {
     expect(listener).toContain("onBackgroundClick()");
     expect(MAP).toContain("onBackgroundClick={closeDetailOnBackground}");
     const cb = MAP.indexOf("const closeDetailOnBackground");
-    expect(MAP.slice(cb, cb + 200)).toContain("setDetailPinId(null)");
+    const cbBody = MAP.slice(cb, cb + 500);
+    expect(cbBody).toContain("setDetailPinId(null)");
+    // 提出前レビューP1: 既存の busy ゲート原則を踏襲(編集下書き等を黙って壊さない)。
+    const guard = cbBody.indexOf("if (detailPanelBusyRef.current) return;");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(cbBody.indexOf("setDetailPinId(null)"));
   });
 
   it("タップ待ち中は背景クリックが作成処理に譲る(captureRef で最新値を見る)", () => {
@@ -114,9 +119,18 @@ describe("シート・モーダルの操作性", () => {
     expect(DETAIL).not.toContain("max-h-[70vh]");
     const close = DETAIL.indexOf('aria-label="閉じる"');
     expect(DETAIL.slice(close, close + 200)).toContain("-m-2 p-2 text-lg");
-    const esc = DETAIL.indexOf('e.key === "Escape"');
+    const esc = DETAIL.indexOf('e.key !== "Escape"');
     expect(esc).toBeGreaterThan(-1);
-    expect(DETAIL.slice(esc - 300, esc + 200)).toContain("onClose()");
+    const escBody = DETAIL.slice(esc, esc + 900);
+    // 提出前レビューP1: スタック的に閉じる+作業中はパネルを閉じない。
+    expect(escBody).toContain("setShowConvert(false)");
+    expect(escBody).toContain("setConfirmingDelete(false)");
+    const guard = escBody.indexOf("if (hasUnfinishedWork) return;");
+    const closeAt = escBody.indexOf("onClose()");
+    expect(guard).toBeGreaterThan(-1);
+    expect(closeAt).toBeGreaterThan(guard);
+    // 写真削除の確認オープンも作業中に含まれる(dialog との二重処理防止)。
+    expect(DETAIL).toContain("confirmDeletePhotoId !== null;");
   });
 
   it("ピン作成/物件化モーダル: 85dvh+overscroll+上寄せ(キーボードで保存が隠れる対策)", () => {
@@ -133,18 +147,25 @@ describe("シート・モーダルの操作性", () => {
 });
 
 describe("撮り直す=カメラを実際に開く", () => {
-  it("バナーの撮り直すが reset→カメラ起動の順で結線されている", () => {
-    const at = MAP.indexOf("onRetake={() => {");
+  it("起動口は常時マウントの隠し input(FABはタップ待ち中アンマウントされるため)", () => {
+    // 提出前レビューP1: FABの input へ登録する方式は、バナー表示中は必ず
+    // ref=null でカメラが開かなかった。常時マウント input が唯一の確実な口。
+    const at = MAP.indexOf('data-testid="camera-retake-input"');
     expect(at).toBeGreaterThan(-1);
-    const w = MAP.slice(at, at + 220);
-    const reset = w.indexOf("resetCameraFirst()");
-    const trigger = w.indexOf("cameraTriggerRef.current?.()");
-    expect(reset).toBeGreaterThan(-1);
-    expect(trigger).toBeGreaterThan(reset);
-    // 起動口は撮影ボタンの input を registerTrigger で共有(2箇所=巡回中/外)。
-    const wires = MAP.match(/registerTrigger=\{registerCameraTrigger\}/g) ?? [];
-    expect(wires.length).toBe(2);
-    expect(CAMERA_BTN).toContain("registerTrigger?.(() => inputRef.current?.click())");
+    const input = MAP.slice(at - 400, at + 500);
+    expect(input).toContain('type="file"');
+    expect(input).toContain('capture="environment"');
+    expect(input).toContain("handleCameraPhotoCaptured(file)");
+    // バナーの撮り直すが reset→この input を click する順で結線。
+    const r = MAP.indexOf("onRetake={() => {");
+    const w = MAP.slice(r, r + 260);
+    expect(w.indexOf("resetCameraFirst()")).toBeGreaterThan(-1);
+    expect(w.indexOf("retakeInputRef.current?.click()")).toBeGreaterThan(
+      w.indexOf("resetCameraFirst()"),
+    );
+    // 旧・登録機構の残骸なし。
+    expect(MAP).not.toContain("registerCameraTrigger");
+    expect(CAMERA_BTN).not.toContain("registerTrigger");
     expect(BANNER).toContain('data-testid="camera-first-retake"');
   });
 });

@@ -17,12 +17,6 @@ import { useEffect, useRef } from "react";
 import { Camera } from "lucide-react";
 
 interface CameraFirstButtonProps {
-  /**
-   * バナーの「撮り直す」からカメラを直接開くための登録口 (第2弾)。
-   * registerStartRequest と同型の event 駆動。従来の「撮り直す」は写真を
-   * 捨てて idle に戻るだけで、もう一度FABを押す必要があった。
-   */
-  registerTrigger?: (fn: (() => void) | null) => void;
   disabled: boolean;
   /** field_survey:write 未付与が確定している (title で理由を示す)。 */
   permissionDenied: boolean;
@@ -36,20 +30,12 @@ interface CameraFirstButtonProps {
 }
 
 export default function CameraFirstButton({
-  registerTrigger,
   disabled,
   permissionDenied,
   inline = false,
   onPhotoCaptured,
 }: CameraFirstButtonProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    registerTrigger?.(() => inputRef.current?.click());
-    return () => {
-      registerTrigger?.(null);
-    };
-  }, [registerTrigger]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;

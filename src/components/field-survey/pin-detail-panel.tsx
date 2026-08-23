@@ -221,6 +221,22 @@ export default function PinDetailPanel({
       if (r.data.id !== latestPinIdRef.current) return;
       if (r.data.id !== saveTargetPinId) return;
       setDetail(r.data);
+      // ⚠下書きも再同期(提出前レビューP2)。しないと直後の「編集」が古い
+      //   status を選択済み表示し、保存でこの1発変更が無言で巻き戻る。
+      //   変換は loadDetail と同一(サーバー値の検証込み)。
+      const t = r.data.pinType;
+      const s = r.data.status;
+      setDraftPinType(
+        (FIELD_SURVEY_PIN_TYPES as readonly string[]).includes(t)
+          ? (t as FieldSurveyPinType)
+          : "candidate",
+      );
+      setDraftStatus(
+        (FIELD_SURVEY_PIN_STATUSES as readonly string[]).includes(s)
+          ? (s as FieldSurveyPinStatus)
+          : "open",
+      );
+      setDraftMemo(r.data.memo ?? "");
       onUpdated?.(r.data);
     } finally {
       setQuickStatusSaving(false);
@@ -267,13 +283,28 @@ export default function PinDetailPanel({
   };
 
   // 第2弾: Escape でも閉じられる(従来は右上の小さな×だけだった)。
+  // ⚠スタック的に閉じる(提出前レビューP1): 手前の物(物件化モーダル→削除確認)を
+  //   先に閉じ、編集中などの作業中はパネルを閉じない(下書きを無確認で失わない)。
+  //   写真削除の確認(ネイティブ<dialog>)は自前の Escape 処理を持つため触らない。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // 写真削除の確認(ネイティブ<dialog>)が開いている間は photoBusy 経由で
+      // hasUnfinishedWork が立つ(下の guard が握る)ため、二重処理にならない。
+      if (showConvert) {
+        setShowConvert(false);
+        return;
+      }
+      if (confirmingDelete) {
+        setConfirmingDelete(false);
+        return;
+      }
+      if (hasUnfinishedWork) return; // 編集中・通信中は閉じない
+      onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, showConvert, confirmingDelete, hasUnfinishedWork]);
 
   return (
     <aside
@@ -475,8 +506,16 @@ function PinPhotoSection({
   const ownInstanceId = photoMutations.instanceId;
   const [photos, setPhotos] = useState<PinPhoto[]>([]);
   // 送信・削除の進行中を親へ通知する (unmount 時は必ず false へ戻す)。
+  // 第1弾 A1: 削除は必ず確認をはさむ(現地写真は撮り直しが効かない)。
+  const [confirmDeletePhotoId, setConfirmDeletePhotoId] = useState<string | null>(
+    null,
+  );
   const photoBusy =
-    photoMutations.uploadLoading || photoMutations.deleteLoading;
+    photoMutations.uploadLoading ||
+    photoMutations.deleteLoading ||
+    // 削除確認(ネイティブ<dialog>)が開いている間も「作業中」。親の Escape が
+    // これを見てパネルを閉じない=dialog 側の Escape と二重処理にならない。
+    confirmDeletePhotoId !== null;
   useEffect(() => {
     onBusyChange?.(photoBusy);
   }, [photoBusy, onBusyChange]);
@@ -580,10 +619,6 @@ function PinPhotoSection({
     if (r.ok) await reload();
   };
 
-  // 第1弾 A1: 削除は必ず確認をはさむ(現地写真は撮り直しが効かない)。
-  const [confirmDeletePhotoId, setConfirmDeletePhotoId] = useState<string | null>(
-    null,
-  );
   const handleDelete = async (photoId: string) => {
     const r = await photoMutations.deletePhoto(pinId, photoId);
     if (r.ok) {
