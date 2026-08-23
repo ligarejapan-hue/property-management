@@ -700,6 +700,10 @@ function PropertiesPageInner() {
       debounce((keyword: string, mgmtId: string) => {
         setSearchText(keyword);
         setMgmtIdText(mgmtId);
+        // ⚠保留の解除は**確定が実際に入るここ**で行う(@codex #404 R12 P1)。
+        //   完成した瞬間(ハンドラ側)で解除すると、この300msの待ちの間は
+        //   「絞り込み空+出力ボタン有効」=全件出力の窓が開く。
+        setSearchPending(false);
         setPage(1);
       }, 300),
     [setPage],
@@ -724,7 +728,6 @@ function PropertiesPageInner() {
     setSearchAllDraft(value);
     const kind = classifyPropertySearch(value);
     if (kind === "mgmtId") {
-      setSearchPending(false);
       commitSearch("", toMgmtIdQuery(value));
       return;
     }
@@ -749,7 +752,6 @@ function PropertiesPageInner() {
     //   URL/property_list 監査へは構造的に流れない。placeholder もその2用途
     //   (住所・地番/管理ID)だけを案内する。ゆえにここの text は非PII前提で
     //   従来どおり入力しながら即時絞り込みに流せる。
-    setSearchPending(false);
     commitSearch(kind === "text" ? value : "", "");
   };
 

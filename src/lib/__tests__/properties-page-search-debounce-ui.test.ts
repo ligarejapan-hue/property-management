@@ -36,9 +36,16 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     // ⚠2本の独立タイマーだと種別またぎの打ち替えで取得が2回走り、広い方の
     //   古い結果が後着で新しい絞り込みを上書きし得る(@codex #404 R8 P1)。
     expect(pageSrc).toMatch(/const commitSearch = useMemo\(/);
-    expect(pageSrc).toMatch(
-      /debounce\(\(keyword: string, mgmtId: string\) => \{\s*setSearchText\(keyword\);\s*setMgmtIdText\(mgmtId\);\s*setPage\(1\);\s*\}, 300\)/,
-    );
+    // ⚠callback には R12 で保留解除(+説明コメント)が入ったため、厳密一致でなく
+    //   「同じ callback 内に両set と 300ms」があることを範囲で見る。
+    const cAt = pageSrc.indexOf("debounce((keyword: string, mgmtId: string) => {");
+    expect(cAt).toBeGreaterThan(-1);
+    const cEnd = pageSrc.indexOf("}, 300)", cAt);
+    expect(cEnd).toBeGreaterThan(cAt);
+    const cb = pageSrc.slice(cAt, cEnd);
+    expect(cb).toContain("setSearchText(keyword)");
+    expect(cb).toContain("setMgmtIdText(mgmtId)");
+    expect(cb).toContain("setPage(1)");
     // 旧・2本組は残っていない。
     expect(pageSrc).not.toContain("commitKeyword");
     expect(pageSrc).not.toContain("commitMgmtId");
@@ -76,9 +83,20 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     expect(branch).toContain("setSearchPending(true)");
     expect(pageSrc).toContain("selectedExportColumns.size === 0 || searchPending");
     expect(pageSrc).toContain("exportingDm || searchPending");
-    // 完成・text・空・リセットで必ず解除される(立ちっぱなし防止)。
-    const clears = pageSrc.match(/setSearchPending\(false\)/g) ?? [];
-    expect(clears.length).toBeGreaterThanOrEqual(3);
+    // ⚠解除は**確定が実際に入る debounce callback の中**とリセットの2箇所だけ
+    //   (@codex #404 R12 P1: ハンドラ側の即時解除は、確定までの300msに
+    //   「絞り込み空+出力有効」の窓を開ける)。
+    const commitAt = pageSrc.indexOf("const commitSearch = useMemo(");
+    const commitEnd = pageSrc.indexOf("}, 300),", commitAt);
+    expect(pageSrc.slice(commitAt, commitEnd)).toContain("setSearchPending(false)");
+    // ハンドラの中に即時解除が無い。
+    const hAt = pageSrc.indexOf("const handleUnifiedSearchChange");
+    const hEnd = pageSrc.indexOf("};", hAt);
+    expect(pageSrc.slice(hAt, hEnd)).not.toContain("setSearchPending(false)");
+    // リセット側の解除は残す(コミットを cancel するため callback が走らない)。
+    const rAt = pageSrc.indexOf("const handleResetFilters");
+    const rEnd = pageSrc.indexOf("};", rAt);
+    expect(pageSrc.slice(rAt, rEnd)).toContain("setSearchPending(false)");
   });
 
   it("⚠旧ブックマーク(keyword+mgmtId両方)は見える方(keyword)だけ復元する(@codex #404 R1 P2)", () => {
