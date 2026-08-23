@@ -25,7 +25,11 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     expect(pageSrc).toMatch(
       /const \[searchAllDraft, setSearchAllDraft\] = useState\(/,
     );
-    expect(pageSrc).toMatch(/sp\.get\("keyword"\) \|\| sp\.get\("mgmtId"\)/);
+    expect(pageSrc).toMatch(/sp\.get\("keyword"\)/);
+    expect(pageSrc).toMatch(/sp\.get\("mgmtId"\)/);
+    // ⚠構文で見分けられない管理IDは接頭辞を付けて復元する(@codex #404 R7 P2:
+    //   素の値のまま戻すと、次の編集で text 扱いに落ちて keyword=監査へ流れる)。
+    expect(pageSrc).toContain('classifyPropertySearch(mid) === "mgmtId" ? mid : `id:${mid}`');
   });
 
   it("keyword / 管理ID の確定コミットを 300ms debounce する committer を持つ", () => {

@@ -133,9 +133,17 @@ function PropertiesPageInner() {
   // UI一貫性 第1弾(1): 検索窓を1本に統合。入力は classifyPropertySearch で見分け、
   // 管理IDの構文(「120行」等)だけ mgmtId へ、それ以外は keyword+所有者サジェストへ流す。
   // URL からの復元は keyword 優先(両方あることは通常ない)。
-  const [searchAllDraft, setSearchAllDraft] = useState(
-    () => sp.get("keyword") || sp.get("mgmtId") || "",
-  );
+  const [searchAllDraft, setSearchAllDraft] = useState(() => {
+    const kw = sp.get("keyword");
+    if (kw) return kw;
+    const mid = sp.get("mgmtId") ?? "";
+    if (!mid) return "";
+    // ⚠管理IDの復元は**見分けが付く形**で(@codex #404 R7 P2)。「id:MGMT-001」で
+    //   検索すると server へは剥がした「MGMT-001」が渡り URL にもそれが残る。
+    //   素の値のまま窓に戻すと、次の編集で text 扱いに落ちて keyword(=監査に
+    //   生値)へ流れてしまう。構文で見分けられない値には接頭辞を付け直す。
+    return classifyPropertySearch(mid) === "mgmtId" ? mid : `id:${mid}`;
+  });
   const [searchInput, setSearchInput] = useState("");
   const [typeFilter, setTypeFilter] = useState(() => sp.get("propertyType") ?? "");
   const [registryFilter, setRegistryFilter] = useState(() => sp.get("registryStatus") ?? "");
