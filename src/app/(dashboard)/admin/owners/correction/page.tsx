@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, Suspense } from "react";
-import { Tabs } from "@/components/ui/tabs";
+import { Tabs, tabPanelProps } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -346,6 +346,7 @@ function OwnerCorrectionPageInner() {
 
       {/* Filter tabs(第3弾⑪: 共通 Tabs) */}
       <Tabs
+        idBase="owner-correction"
         className="mb-4"
         tabs={tabs.map((tab) => ({
           key: tab.key,
@@ -364,6 +365,8 @@ function OwnerCorrectionPageInner() {
         onChange={setFilterType}
       />
 
+      {/* タブが切り替える中身の全域(@codex #406 R3 P2: tabpanel の紐付け) */}
+      <div {...tabPanelProps("owner-correction", filterType)}>
       {loading && !SELF_FETCH_TABS.includes(filterType) && (
         <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">読み込み中...</p>
       )}
@@ -601,6 +604,7 @@ function OwnerCorrectionPageInner() {
           </p>
         </>
       )}
+      </div>
     </div>
   );
 }

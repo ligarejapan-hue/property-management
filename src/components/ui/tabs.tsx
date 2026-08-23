@@ -22,13 +22,33 @@ export interface TabsProps<K extends string = string> {
   tabs: readonly TabItem<K>[];
   active: K;
   onChange: (key: K) => void;
+  /**
+   * タブとパネルを紐付ける id の元(@codex #406 R3 P2)。ボタンは
+   * {idBase}-tab-{key} / aria-controls={idBase}-panel-{key} を名乗るので、
+   * 切り替わる中身のコンテナに tabPanelProps(idBase, activeKey) を貼ること。
+   */
+  idBase: string;
   className?: string;
+}
+
+/**
+ * タブが制御する**パネル側**に貼る属性(role/id/aria-labelledby)。
+ * 貼らないと支援技術は「どのタブがどの領域を切り替えるのか」を辿れない。
+ * 使い方: <div {...tabPanelProps("owner-quality", tab)} className="...">
+ */
+export function tabPanelProps<K extends string>(idBase: string, key: K) {
+  return {
+    role: "tabpanel" as const,
+    id: `${idBase}-panel-${key}`,
+    "aria-labelledby": `${idBase}-tab-${key}`,
+  };
 }
 
 export function Tabs<K extends string = string>({
   tabs,
   active,
   onChange,
+  idBase,
   className,
 }: TabsProps<K>) {
   const listRef = useRef<HTMLDivElement>(null);
@@ -58,9 +78,11 @@ export function Tabs<K extends string = string>({
       {tabs.map((t) => (
         <button
           key={t.key}
+          id={`${idBase}-tab-${t.key}`}
           type="button"
           role="tab"
           aria-selected={active === t.key}
+          aria-controls={`${idBase}-panel-${t.key}`}
           tabIndex={active === t.key ? 0 : -1}
           onClick={() => onChange(t.key)}
           className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${

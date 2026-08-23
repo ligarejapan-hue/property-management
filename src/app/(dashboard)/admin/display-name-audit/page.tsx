@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Tabs } from "@/components/ui/tabs";
+import { Tabs, tabPanelProps } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { Loader2, Download, AlertTriangle } from "lucide-react";
@@ -105,6 +105,7 @@ export default function DisplayNameAuditPage() {
       {/* タブ + CSV ダウンロード(第3弾⑪: 共通 Tabs。下線はタブ側の幅にのみ引かれる) */}
       <div className="mb-4 flex items-end justify-between gap-2">
         <Tabs
+          idBase="display-name-audit"
           className="flex-1"
           tabs={(["owner", "building"] as Tab[]).map((t) => ({
             key: t,
@@ -137,6 +138,7 @@ export default function DisplayNameAuditPage() {
       )}
 
       <div
+        {...tabPanelProps("display-name-audit", tab)}
         className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900"
         {...piiSurfaceProps}
       >

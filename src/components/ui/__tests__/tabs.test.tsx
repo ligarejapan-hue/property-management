@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Tabs } from "../tabs";
+import { Tabs, tabPanelProps } from "../tabs";
 
 const render = (el: React.ReactElement) => renderToStaticMarkup(el);
 const TABS = [
@@ -19,7 +19,7 @@ const TABS = [
 
 describe("Tabs", () => {
   it("active タブだけ indigo の下線+文字色(dark対応)", () => {
-    const html = render(<Tabs tabs={TABS} active="a" onChange={() => {}} />);
+    const html = render(<Tabs idBase="t" tabs={TABS} active="a" onChange={() => {}} />);
     const btns = html.match(/<button[^>]*>/g) ?? [];
     expect(btns).toHaveLength(2);
     expect(btns[0]).toContain("border-indigo-600");
@@ -30,15 +30,29 @@ describe("Tabs", () => {
   });
 
   it("role=tablist / role=tab / aria-selected を持つ(手書き実装には無かった)", () => {
-    const html = render(<Tabs tabs={TABS} active="b" onChange={() => {}} />);
+    const html = render(<Tabs idBase="t" tabs={TABS} active="b" onChange={() => {}} />);
     expect(html).toContain('role="tablist"');
     expect((html.match(/role="tab"/g) ?? []).length).toBe(2);
     expect(html).toContain('aria-selected="true"');
     expect(html).toContain('aria-selected="false"');
   });
 
+  it("タブとパネルが id で紐付く: id / aria-controls / tabPanelProps(@codex #406 R3 P2)", () => {
+    const html = render(<Tabs idBase="t" tabs={TABS} active="a" onChange={() => {}} />);
+    expect(html).toContain('id="t-tab-a"');
+    expect(html).toContain('aria-controls="t-panel-a"');
+    expect(html).toContain('aria-controls="t-panel-b"');
+    // パネル側に貼る属性が対応する id を指す
+    const panel = tabPanelProps("t", "a");
+    expect(panel).toEqual({
+      role: "tabpanel",
+      id: "t-panel-a",
+      "aria-labelledby": "t-tab-a",
+    });
+  });
+
   it("roving tabIndex: active だけ 0・他は -1(@codex #406 R1 P2)", () => {
-    const html = render(<Tabs tabs={TABS} active="a" onChange={() => {}} />);
+    const html = render(<Tabs idBase="t" tabs={TABS} active="a" onChange={() => {}} />);
     const btns = html.match(/<button[^>]*>/g) ?? [];
     expect(btns[0]).toContain('tabindex="0"');
     expect(btns[1]).toContain('tabindex="-1"');
@@ -58,7 +72,7 @@ describe("Tabs", () => {
   });
 
   it("type=button(form 内で誤 submit しない)・下線の枠(border-b)を持つ", () => {
-    const html = render(<Tabs tabs={TABS} active="a" onChange={() => {}} />);
+    const html = render(<Tabs idBase="t" tabs={TABS} active="a" onChange={() => {}} />);
     expect((html.match(/type="button"/g) ?? []).length).toBe(2);
     expect(html).toContain("border-b border-gray-200");
   });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Tabs } from "@/components/ui/tabs";
+import { Tabs, tabPanelProps } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui/page-header";
 import { Loader2, MapPinned, Download, AlertTriangle } from "lucide-react";
 import {
@@ -175,9 +175,12 @@ export default function PostalCodeAuditPage() {
           </div>
 
           {/* 第3弾⑪: 共通 Tabs */}
-          <Tabs className="mb-3" tabs={FILTER_TABS} active={filter} onChange={setFilter} />
+          <Tabs idBase="postal-audit" className="mb-3" tabs={FILTER_TABS} active={filter} onChange={setFilter} />
 
-          <div className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-800">
+          <div
+            {...tabPanelProps("postal-audit", filter)}
+            className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-800"
+          >
             <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
               <thead className="bg-gray-50 dark:bg-gray-800/50">
                 <tr>

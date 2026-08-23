@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
-import { Tabs } from "@/components/ui/tabs";
+import { Tabs, tabPanelProps } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { Loader2, AlertTriangle, ExternalLink, Wand2 } from "lucide-react";
@@ -431,6 +431,7 @@ export default function QualityAuditPage() {
 
       {/* タブ(第3弾⑪: 共通 Tabs) */}
       <Tabs
+        idBase="owner-quality"
         className="mb-4"
         tabs={(["name", "contact"] as Tab[]).map((t) => ({
           key: t,
@@ -484,6 +485,7 @@ export default function QualityAuditPage() {
       )}
 
       <div
+        {...tabPanelProps("owner-quality", tab)}
         className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900"
         data-pii-protected
         data-pii-surface="owner"

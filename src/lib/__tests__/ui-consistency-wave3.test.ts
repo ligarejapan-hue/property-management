@@ -139,4 +139,18 @@ describe("(⑪) タブ行の手書き禁止(ラチェット)", () => {
       ).toContain('from "@/components/ui/tabs"');
     }
   });
+
+  it("移行済み4画面はパネル側も tabPanelProps で紐付けている(@codex #406 R3 P2)", () => {
+    for (const f of [
+      "src/app/(dashboard)/admin/owners/quality-audit/page.tsx",
+      "src/app/(dashboard)/admin/owners/correction/page.tsx",
+      "src/app/(dashboard)/admin/postal-code-audit/page.tsx",
+      "src/app/(dashboard)/admin/display-name-audit/page.tsx",
+    ]) {
+      expect(
+        readFileSync(join(process.cwd(), f), "utf8"),
+        `${f} が tabPanelProps を使っていない`,
+      ).toContain("{...tabPanelProps(");
+    }
+  });
 });
