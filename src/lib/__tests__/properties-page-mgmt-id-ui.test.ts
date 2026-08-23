@@ -22,13 +22,20 @@ describe("properties page: 管理ID 検索欄", () => {
     expect(pageSrc).toMatch(/sp\.get\("mgmtId"\)/);
   });
 
-  it("placeholder「管理IDで検索」を含む input がある", () => {
-    expect(pageSrc).toMatch(/placeholder="管理IDで検索/);
+  it("統合検索窓の placeholder が管理IDにも触れ、行サフィックスの例を示す", () => {
+    // UI一貫性 第1弾(1): 専用窓は廃止し統合窓に。素の数字は地番と曖昧なため
+    // 管理ID扱いは「120行」等の明確な構文のみ(placeholder で例示して教える)。
+    // R4 で所有者検索を専用の小窓に分離したため、絞り込み窓の placeholder は
+    // 住所・地番・管理ID の3用途になった。
+    expect(pageSrc).toMatch(/placeholder="住所・地番・管理ID/);
+    expect(pageSrc).toMatch(/例: id:120行/);
   });
 
-  it("placeholder に例（受付帳 / 行）が含まれる", () => {
-    expect(pageSrc).toMatch(/受付帳.*xlsx/);
-    expect(pageSrc).toMatch(/120行/);
+  it("見分けは共通の純関数 classifyPropertySearch を使う", () => {
+    // R6 で toMgmtIdQuery も import するようになったため、名前の存在で見る。
+    expect(pageSrc).toContain('from "@/lib/property-search-classify"');
+    expect(pageSrc).toContain("classifyPropertySearch");
+    expect(pageSrc).toContain("toMgmtIdQuery");
   });
 
   it("fetchProperties で mgmtId クエリを送る", () => {

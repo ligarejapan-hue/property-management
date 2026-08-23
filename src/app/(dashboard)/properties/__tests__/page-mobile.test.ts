@@ -8,14 +8,17 @@ const src = readFileSync(join(dir, "..", "page.tsx"), "utf8");
 
 describe("properties/page.tsx モバイル UI (M1)", () => {
   // §8-2 フィルタ折りたたみ
-  it("§8-2: showFilters の state が存在する", () => {
-    expect(src).toContain("showFilters");
+  // UI一貫性 第1弾(5)で「モバイルだけ全体を畳む」から「全サイズで詳細条件を畳む」へ
+  // 置き換えた(常時表示は検索・DM判断・担当者・リセットの短い1行だけ=モバイルでも短い)。
+  it("§8-2: 詳細条件の折りたたみ state(advancedOpen)が存在する", () => {
+    expect(src).toContain("advancedOpen");
   });
-  it("§8-2: モバイル専用トグルに md:hidden がある", () => {
-    expect(src).toContain("md:hidden");
+  it("§8-2: 詳細条件トグルがあり適用件数を出す", () => {
+    expect(src).toContain("詳細条件");
+    expect(src).toContain("件適用中");
   });
-  it("§8-2: フィルタ panel の条件表示に md:flex がある", () => {
-    expect(src).toContain("md:flex");
+  it("§8-2: 詳細ブロックは advancedOpen のときだけ描画される", () => {
+    expect(src).toContain("{advancedOpen && (");
   });
 
   // §8-3 ページネーション縦積み → 横

@@ -5,6 +5,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
 import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions, createSaleDmCampaign, clearSaleDmUndeliverable, createDmBatch } from "@/lib/api-client";
+import { classifyPropertySearch, toMgmtIdQuery } from "@/lib/property-search-classify";
 import { canCreateSaleDm, buildSaleDmPartialNotice } from "@/lib/sale-dm-letter/list-ui";
 import { debounce } from "@/lib/debounce";
 import { EXPORT_COLUMNS } from "@/lib/property-export-columns";
@@ -119,13 +120,30 @@ function PropertiesPageInner() {
   //   URL keyword は /api/properties 用の確定語なので searchInput には入れない。
   //   入力中の所有者名・電話番号が property_list audit の raw keyword に残らないよう分離する。
   const [searchText, setSearchText] = useState(() => sp.get("keyword") ?? "");
-  const [mgmtIdText, setMgmtIdText] = useState(() => sp.get("mgmtId") ?? "");
+  // ⚠旧UI(検索窓2本)のブックマークは keyword と mgmtId を両方持ち得る。
+  //   統合窓は1本しか表示できないため、**見える方(keyword)だけ**を復元する
+  //   (@codex #404 R1 P2: 見えない管理ID絞り込みが裏で効くと、外し方が無い)。
+  const [mgmtIdText, setMgmtIdText] = useState(() =>
+    sp.get("keyword") ? "" : (sp.get("mgmtId") ?? ""),
+  );
   // 一覧検索の入力中文字列（即時反映で入力レスポンスを維持）。300ms debounce 後に
   // 確定値 searchText / mgmtIdText へコミットし、/api/properties 再取得・URL同期は
   // その確定値だけで動く（毎キーストロークの再取得＝property_list audit 量産を防ぐ）。
   // URL からの復元値で初期化する。
-  const [searchDraft, setSearchDraft] = useState(() => sp.get("keyword") ?? "");
-  const [mgmtIdDraft, setMgmtIdDraft] = useState(() => sp.get("mgmtId") ?? "");
+  // UI一貫性 第1弾(1): 検索窓を1本に統合。入力は classifyPropertySearch で見分け、
+  // 管理IDの構文(「120行」等)だけ mgmtId へ、それ以外は keyword+所有者サジェストへ流す。
+  // URL からの復元は keyword 優先(両方あることは通常ない)。
+  const [searchAllDraft, setSearchAllDraft] = useState(() => {
+    const kw = sp.get("keyword");
+    if (kw) return kw;
+    const mid = sp.get("mgmtId") ?? "";
+    if (!mid) return "";
+    // ⚠管理IDの復元は**見分けが付く形**で(@codex #404 R7 P2)。「id:MGMT-001」で
+    //   検索すると server へは剥がした「MGMT-001」が渡り URL にもそれが残る。
+    //   素の値のまま窓に戻すと、次の編集で text 扱いに落ちて keyword(=監査に
+    //   生値)へ流れてしまう。構文で見分けられない値には接頭辞を付け直す。
+    return classifyPropertySearch(mid) === "mgmtId" ? mid : `id:${mid}`;
+  });
   const [searchInput, setSearchInput] = useState("");
   const [typeFilter, setTypeFilter] = useState(() => sp.get("propertyType") ?? "");
   const [registryFilter, setRegistryFilter] = useState(() => sp.get("registryStatus") ?? "");
@@ -145,8 +163,24 @@ function PropertiesPageInner() {
   const [sort, setSort] = useState<string>(() => sp.get("sort") ?? "updatedAt:desc");
   const [page, setPageState] = useState(() => Math.max(1, parseInt(sp.get("page") ?? "1") || 1));
 
-  // モバイル用フィルタ折りたたみ
-  const [showFilters, setShowFilters] = useState(false);
+  // UI一貫性 第1弾(5): 詳細条件の折りたたみ(PC/モバイル共通)。
+  // 開いた状態で読み込むのは「詳細条件が適用されている」とき——
+  // 畳んだまま適用されていると、なぜ絞れているのか分からなくなるため。
+  const [advancedOpen, setAdvancedOpen] = useState(() =>
+    Boolean(
+      sp.get("propertyType") ||
+        sp.get("registryStatus") ||
+        sp.get("dmSentMax") ||
+        sp.get("caseStatus") ||
+        sp.get("introductionRoute") ||
+        sp.get("updatedFrom") ||
+        sp.get("updatedTo") ||
+        sp.get("hasWarning") === "true" ||
+        sp.get("undeliverable") === "1" ||
+        sp.get("resendOnly") === "1" ||
+        (sp.get("sort") && sp.get("sort") !== "updatedAt:desc"),
+    ),
+  );
 
   // CSVエクスポートの列ピッカー。既定=全列選択。ゼロ列選択時は出力ボタンを無効化する。
   const [showColumnPicker, setShowColumnPicker] = useState(false);
@@ -268,6 +302,18 @@ function PropertiesPageInner() {
 
   // 入力中候補表示
   const [suggestResults, setSuggestResults] = useState<SuggestResult[]>([]);
+  // 候補のキーボード選択(@codex #404 R2 P2)。-1 = 未選択(Enter は先頭を選ぶ)。
+  const [activeSuggest, setActiveSuggest] = useState(-1);
+  // 所有者検索の小窓(@codex #404 R4 P1)。所有者名・電話は**この専用入力だけ**が
+  // 受け、POST の suggest のみに流れる=絞り込み(keyword=URL/監査)へは
+  // **構造的に**流れない。自由入力の1本化では「打ち間違えた名前(候補0件)の
+  // Enter」を絞り込みから守れない(R1→R2→R3→R4 と塞いでも別の穴が開いた)ため、
+  // 経路そのものを分けた。
+  const [ownerSearchOpen, setOwnerSearchOpen] = useState(false);
+  // 検索語が管理IDに**なりかけ**のまま止まっているか(@codex #404 R11 P1)。
+  // 保留中は絞り込みを空にするため、そのままCSV/DM出力を許すと**全件**が対象に
+  // なってしまう。完成するか消すまで、絞り込み依存の出力を止める。
+  const [searchPending, setSearchPending] = useState(false);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const suggestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 最後に発行した suggest query を記録する。in-flight の古いレスポンスを弾くために使う。
@@ -293,7 +339,8 @@ function PropertiesPageInner() {
   // 前ページ/前フィルタの(今は見えていない)選択のまま有料DM作成が走る競合を、再フェッチ完了を待たず
   // その場で防ぐ(Codex R7/R11/R12)。バルク操作系(fetchProperties 直呼び)は setPage を通らず影響を受けない。
   const setPage = useCallback((updater: number | ((p: number) => number)) => {
-    setSelectedIds(new Set());
+    // 空→空は同一参照で bail out(なりかけ入力の毎打鍵からも呼ばれるため)。
+    setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()));
     setPageState(updater);
   }, []);
   const [bulkUpdating, setBulkUpdating] = useState(false);
@@ -339,7 +386,7 @@ function PropertiesPageInner() {
   // 再送=サーバーが二重生成しない)、成功で破棄して次の作成は新しいキーにする。
   const saleDmIdemKeyRef = useRef<string | null>(null);
   const handleCreateSaleDm = async () => {
-    if (creatingDm) return;
+    if (creatingDm || searchPending) return;
     // 送信対象は「今読み込んでいる物件」に選択(チェック)を intersect して確定する。フィルタ/ページ変更の
     // 読み込み中に古いページのIDが混ざって送られる競合(Codex R7/R11)を、送信の瞬間にも断つ。
     const ids = properties.filter((p) => selectedIds.has(p.id)).map((p) => p.id);
@@ -414,7 +461,11 @@ function PropertiesPageInner() {
     }
   };
 
+  // ⚠取得の世代ガード(@codex #404 R8 P1)。応答の追い越しで**古い結果が新しい
+  //   絞り込みを上書き**しないよう、最新の呼び出しだけが state を書く。
+  const fetchSeqRef = useRef(0);
   const fetchProperties = useCallback(async () => {
+    const seq = ++fetchSeqRef.current;
     setLoading(true);
     setError(null);
 
@@ -426,6 +477,7 @@ function PropertiesPageInner() {
 
     try {
       const json = await apiFetchProperties(params);
+      if (seq !== fetchSeqRef.current) return; // 追い越された古い応答は捨てる
       setProperties(json.data);
       // 選択(チェック)は「今表示している物件」だけに保つ。フィルタ/ページ/検索の変更で見えなくなった物件が
       // selectedIds に残ると、売却DM作成時に意図しない物件へ有料AI生成+オーナーPII送信になり得る(Codex R7)。
@@ -436,10 +488,14 @@ function PropertiesPageInner() {
       });
       setPagination(json.pagination as Pagination);
     } catch (err) {
+      if (seq !== fetchSeqRef.current) return; // 古い失敗で新しい結果を消さない
       setError(err instanceof Error ? err.message : "データ取得に失敗しました");
       setProperties([]);
     } finally {
-      setLoading(false);
+      // ⚠loading の解除は**最新の呼び出しだけ**が行う(古い決着が新しい取得中の
+      //   「読み込み中」を早消ししない)。最新はこの後必ず finally に到達するので
+      //   立ちっぱなしにはならない([[refresh-coordinator]] と同じ考え方)。
+      if (seq === fetchSeqRef.current) setLoading(false);
     }
   }, [page, buildFilterParams]);
 
@@ -619,6 +675,7 @@ function PropertiesPageInner() {
         const res = await fetchPropertySuggestions(query);
         if (query !== suggestQueryRef.current) return;
         setSuggestResults(res.data);
+        setActiveSuggest(-1);
         setSuggestOpen(res.data.length > 0);
       } catch {
         if (query !== suggestQueryRef.current) return;
@@ -632,21 +689,22 @@ function PropertiesPageInner() {
   }, [searchInput]);
 
   // 一覧検索 (keyword / 管理ID) の確定コミットを 300ms debounce する。
-  // 入力ドラフト (searchDraft / mgmtIdDraft) は即時更新し、確定値への反映と
+  // 入力ドラフト (searchAllDraft) は即時更新し、確定値への反映と
   // page リセットだけを遅延させる。suggest (searchInput) の debounce とは別インスタンス
   // なので互いに干渉しない。setState の identity は安定なので deps は空でよい。
-  const commitKeyword = useMemo(
+  // ⚠keyword と mgmtId の確定は**1本の debounce で同時に**行う(@codex #404 R8 P1)。
+  //   2本の独立タイマーだと、種別をまたぐ打ち替え(住所→管理ID等)で
+  //   「片方消えただけ」と「両方確定」の2回の取得が走り、**広い方の古い結果が
+  //   後から着いて新しい絞り込みを上書き**し得る(その行を選んで一括操作すると実害)。
+  const commitSearch = useMemo(
     () =>
-      debounce((value: string) => {
-        setSearchText(value);
-        setPage(1);
-      }, 300),
-    [setPage],
-  );
-  const commitMgmtId = useMemo(
-    () =>
-      debounce((value: string) => {
-        setMgmtIdText(value);
+      debounce((keyword: string, mgmtId: string) => {
+        setSearchText(keyword);
+        setMgmtIdText(mgmtId);
+        // ⚠保留の解除は**確定が実際に入るここ**で行う(@codex #404 R12 P1)。
+        //   完成した瞬間(ハンドラ側)で解除すると、この300msの待ちの間は
+        //   「絞り込み空+出力ボタン有効」=全件出力の窓が開く。
+        setSearchPending(false);
         setPage(1);
       }, 300),
     [setPage],
@@ -654,10 +712,55 @@ function PropertiesPageInner() {
   // アンマウント時に保留中の確定コミットを破棄する。
   useEffect(() => {
     return () => {
-      commitKeyword.cancel();
-      commitMgmtId.cancel();
+      commitSearch.cancel();
     };
-  }, [commitKeyword, commitMgmtId]);
+  }, [commitSearch]);
+
+  /**
+   * 統合検索窓の入力(UI一貫性 第1弾(1))。
+   * - 管理IDの構文(「120行」「◯.xlsx:120」)のときだけ mgmtId 検索へ。
+   *   曖昧な入力(素の数字・ファイル名だけ)は keyword 側=安全側
+   *   (素の「120」は地番の一部であり得る)。
+   * - text は keyword(住所・地番の一覧絞り込み)と所有者サジェストの両方に流す。
+   *   所有者名だと一覧は0件になり得るが、下の候補から物件へ飛べる。
+   * - 片方に流すとき、もう片方の確定値は必ず空にする(古い絞り込みが残らない)。
+   */
+  const handleUnifiedSearchChange = (value: string) => {
+    setSearchAllDraft(value);
+    const kind = classifyPropertySearch(value);
+    // ⚠保留(searchPending)と選択解除は**分岐の前**=全経路共通(@codex #404
+    //   R13→R15 P1)。完全形の貼り付け(「id:MGMT-001」が1イベントで入る)は
+    //   partial を経由せず 300ms の確定待ちに入るため、その間も「窓の見た目と
+    //   違う集合」への出力・一括・有料操作を封じる。解除は確定が実際に入る
+    //   commitSearch callback とリセットだけ。選択解除は表示条件変更の一元窓口
+    //   setPage(1) を通す(空→空は同一参照で bail out=打鍵ごとの再描画なし)。
+    setSearchPending(true);
+    setPage(1);
+    if (kind === "mgmtId") {
+      commitSearch("", toMgmtIdQuery(value));
+      return;
+    }
+    // ⚠管理IDに**なりかけ**の形は確定を保留(@codex #404 R9 P2)。「受付帳.xl」で
+    //   300ms 止まると部分文字列が keyword=URL/監査に確定してしまうため、
+    //   予約済みの確定も取り下げて完成を待つ(空に戻せば empty で消える)。
+    if (kind === "mgmtIdPartial") {
+      commitSearch.cancel();
+      // ⚠確定済みの古い絞り込みも**即座に**消す(@codex #404 R10 P2)。残すと
+      //   窓には新しい値・一覧/CSV/DMは**見えない古い条件**という食い違いのまま
+      //   固定され、意図しない集合へ一括操作しかねない。
+      if (searchText !== "" || mgmtIdText !== "") {
+        setSearchText("");
+        setMgmtIdText("");
+      }
+      return;
+    }
+    // ⚠この窓は**所有者検索を受けない**(@codex #404 R4 P1)。所有者名・電話は
+    //   専用の「所有者で探す」小窓(POST の suggest のみ)が受け、keyword=
+    //   URL/property_list 監査へは構造的に流れない。placeholder もその2用途
+    //   (住所・地番/管理ID)だけを案内する。ゆえにここの text は非PII前提で
+    //   従来どおり入力しながら即時絞り込みに流せる。
+    commitSearch(kind === "text" ? value : "", "");
+  };
 
   // Debounce search: reset page on filter change
   const handleFilterChange = (setter: (v: string) => void) => (
@@ -690,13 +793,13 @@ function PropertiesPageInner() {
   const handleResetFilters = () => {
     // 保留中の検索 debounce を破棄してからリセットする
     // （後から確定コミットが走って検索語が復活しないように）。
-    commitKeyword.cancel();
-    commitMgmtId.cancel();
+    commitSearch.cancel();
+    setSearchPending(false);
     setSuggestOpen(false);
     setSuggestResults([]);
+    setOwnerSearchOpen(false);
     setSearchInput("");
-    setSearchDraft("");
-    setMgmtIdDraft("");
+    setSearchAllDraft("");
     setSearchText("");
     setMgmtIdText("");
     setTypeFilter("");
@@ -717,7 +820,7 @@ function PropertiesPageInner() {
 
   // 何らかのフィルタが効いているか（リセットボタン活性化用）
   const hasActiveFilter =
-    !!searchInput || !!searchText || !!searchDraft || !!mgmtIdText || !!mgmtIdDraft || !!typeFilter || !!registryFilter || !!dmFilter ||
+    !!searchInput || !!searchText || !!searchAllDraft || !!mgmtIdText || !!typeFilter || !!registryFilter || !!dmFilter ||
     !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
     warningOnly || undeliverableOnly || resendOnly || !!sendCountMaxFilter || sort !== "updatedAt:desc";
 
@@ -729,6 +832,18 @@ function PropertiesPageInner() {
     searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter,
     introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, sendCountMaxFilter,
   ].filter(Boolean).length + (warningOnly ? 1 : 0) + (sort !== "updatedAt:desc" ? 1 : 0);
+
+  // 折りたたみ内(詳細条件)に適用されている件数。畳んでいても見落とさないよう
+  // トグルに「(N件適用中)」と出す(UI一貫性 第1弾(5))。
+  const advancedFilterCount =
+    [
+      typeFilter, registryFilter, sendCountMaxFilter, caseFilter,
+      introductionRouteFilter, updatedFromFilter, updatedToFilter,
+    ].filter(Boolean).length +
+    (warningOnly ? 1 : 0) +
+    (undeliverableOnly ? 1 : 0) +
+    (resendOnly ? 1 : 0) +
+    (sort !== "updatedAt:desc" ? 1 : 0);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -787,7 +902,7 @@ function PropertiesPageInner() {
   // - 失敗は ID と住所と日本語メッセージで集計表示
   // - 成功・失敗どちらでも最後に一覧再取得
   const handleBulkDelete = async () => {
-    if (bulkDeleting || selectedIds.size === 0) return;
+    if (bulkDeleting || selectedIds.size === 0 || searchPending) return;
     const targets = properties.filter((p) => selectedIds.has(p.id));
     if (targets.length === 0) return;
     if (
@@ -831,7 +946,7 @@ function PropertiesPageInner() {
   };
 
   const handleBulkUpdate = async (updates: Record<string, unknown>) => {
-    if (selectedIds.size === 0) return;
+    if (selectedIds.size === 0 || searchPending) return;
     setBulkUpdating(true);
     try {
       await bulkUpdateProperties(Array.from(selectedIds), updates);
@@ -913,12 +1028,14 @@ function PropertiesPageInner() {
                 <button
                   type="button"
                   onClick={handleExportCsv}
-                  disabled={selectedExportColumns.size === 0}
+                  disabled={selectedExportColumns.size === 0 || searchPending}
                   className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                   title={
-                    selectedExportColumns.size === 0
-                      ? "1列以上選択してください"
-                      : "現在の検索条件で選択列をCSV出力"
+                    searchPending
+                      ? "検索語が入力途中です(管理IDを最後まで入力するか、消してください)"
+                      : selectedExportColumns.size === 0
+                        ? "1列以上選択してください"
+                        : "現在の検索条件で選択列をCSV出力"
                   }
                 >
                   <Download className="h-4 w-4" />
@@ -932,9 +1049,13 @@ function PropertiesPageInner() {
           <button
             type="button"
             onClick={handleExportDm}
-            disabled={exportingDm}
+            disabled={exportingDm || searchPending}
             className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-            title="現在の検索条件で送付可の物件をDM差込CSV出力(控えが作られ、投函後に送付を確定できます)"
+            title={
+              searchPending
+                ? "検索語が入力途中です(管理IDを最後まで入力するか、消してください)"
+                : "現在の検索条件で送付可の物件をDM差込CSV出力(控えが作られ、投函後に送付を確定できます)"
+            }
           >
             {exportingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             DM差込CSV出力
@@ -958,9 +1079,13 @@ function PropertiesPageInner() {
           <button
             type="button"
             onClick={handleCreateSaleDm}
-            disabled={creatingDm || loading || selectedIds.size === 0}
+            disabled={creatingDm || loading || selectedIds.size === 0 || searchPending}
             className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-400 dark:bg-gray-900 dark:text-indigo-400 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-            title="チェックした物件から売却DM下書きを作成(住所が無い物件は自動で除外)"
+            title={
+              searchPending
+                ? "検索語が入力途中です(管理IDを最後まで入力するか、消してください)"
+                : "チェックした物件から売却DM下書きを作成(住所が無い物件は自動で除外)"
+            }
           >
             {creatingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             売却DMを作成{selectedIds.size > 0 ? `（${selectedIds.size}件）` : ""}
@@ -973,7 +1098,7 @@ function PropertiesPageInner() {
             propertyIds={properties
               .filter((p) => selectedIds.has(p.id))
               .map((p) => p.id)}
-            disabled={loading || selectedIds.size === 0}
+            disabled={loading || selectedIds.size === 0 || searchPending}
           />
         )}
         <button
@@ -992,118 +1117,94 @@ function PropertiesPageInner() {
 
       <DmBatchConfirmModal open={dmConfirmOpen} onClose={() => setDmConfirmOpen(false)} />
 
-      {/* Filter toggle (mobile only) */}
-      <div className="mb-2 md:hidden">
-        <button
-          type="button"
-          onClick={() => setShowFilters((v) => !v)}
-          className="inline-flex min-h-[44px] items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-        >
-          絞り込み{activeFilterCount > 0 ? `（${activeFilterCount}）` : ""}
-          {showFilters ? " ▴" : " ▾"}
-        </button>
-      </div>
-
-      {/* Filter bar */}
-      <div className={`mb-4 flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 ${showFilters ? "flex" : "hidden"} md:flex`}>
-        <select
-          value={typeFilter}
-          onChange={handleFilterChange(setTypeFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-        >
-          <option value="">種別: すべて</option>
-          {PROPERTY_TYPE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={registryFilter}
-          onChange={handleFilterChange(setRegistryFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-        >
-          <option value="">登記状況: すべて</option>
-          <option value="obtained">取得済</option>
-          <option value="unconfirmed">未取得</option>
-          <option value="scheduled">取得中</option>
-        </select>
-
-        <select
-          value={dmFilter}
-          onChange={handleDmFilterChange}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-        >
-          <option value="">DM判断: すべて</option>
-          <option value="send">送付可</option>
-          <option value="no_send">送付不可</option>
-          <option value="hold">未判断</option>
-        </select>
-
-        <select
-          value={sendCountMaxFilter}
-          onChange={handleSendCountMaxChange}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-          title="DM送信回数で絞り込む"
-        >
-          <option value="">送信回数: すべて</option>
-          <option value="0">未送信（0回）</option>
-        </select>
-
-        <div className="relative min-w-[220px]">
+      {/* Filter bar (UI一貫性 第1弾: 検索窓を1本に統合・詳細条件は折りたたみ) */}
+      <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+        {/* よく使う条件(常時表示): 検索・DM判断・担当者・リセット */}
+        <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[240px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
           <input
             type="text"
-            placeholder="物件住所・地番・家屋番号で一覧検索"
-            value={searchDraft}
-            onChange={(e) => {
-              const value = e.target.value;
-              setSearchDraft(value);
-              commitKeyword(value);
-            }}
+            placeholder="住所・地番・管理ID(例: id:120行)で一覧を絞り込み"
+            title="管理IDの書き方: 「id:120行」(取込行)・「id:」+コピーした管理ID / ファイル単位は「受付帳.xlsx」「受付帳.xlsx:120」"
+            value={searchAllDraft}
+            onChange={(e) => handleUnifiedSearchChange(e.target.value)}
             className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
           />
         </div>
 
-        <div className="relative min-w-[240px]">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-          <input
-            type="text"
-            placeholder="管理IDで検索（例: 受付帳.xlsx:120行 / 120行）"
-            value={mgmtIdDraft}
-            onChange={(e) => {
-              const value = e.target.value;
-              setMgmtIdDraft(value);
-              commitMgmtId(value);
-            }}
-            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
-          />
-        </div>
-
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-          <input
-            type="text"
-            placeholder="所有者名・電話番号で候補を選択して物件を開く"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                if (suggestOpen && suggestResults.length > 0) {
+        {/* 所有者で探す(@codex #404 R4 P1): 所有者名・電話は**この小窓だけ**が受け、
+            POST の suggest のみに流れる=URL・property_list 監査に載らない。
+            絞り込み窓と経路を分けることで、打ち間違い(候補0件)でも漏れない。 */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => {
+              setOwnerSearchOpen((v) => {
+                const next = !v;
+                if (!next) {
                   setSuggestOpen(false);
-                  router.push(`/properties/${suggestResults[0].id}`);
-                } else {
-                  setSuggestOpen(false);
+                  setActiveSuggest(-1);
                 }
-              }
+                return next;
+              });
             }}
-            onBlur={() => setSuggestOpen(false)}
-            onFocus={() => { if (suggestResults.length > 0) setSuggestOpen(true); }}
-            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
-          />
-          {suggestOpen && suggestResults.length > 0 && (
+            aria-expanded={ownerSearchOpen}
+            className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            title="所有者名・電話番号から物件を開く(一覧の絞り込みには使いません)"
+          >
+            所有者で探す{ownerSearchOpen ? " ▴" : " ▾"}
+          </button>
+          {ownerSearchOpen && (
+            <div className="absolute left-0 top-full z-50 mt-1 w-[360px] max-w-[90vw] rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-800 dark:bg-gray-900">
+              <p className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
+                所有者名・電話番号で候補を出し、選ぶと物件を開きます(一覧は絞りません)
+              </p>
+              <div className="relative">
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="所有者名・電話番号で検索"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowDown" && suggestResults.length > 0) {
+                      e.preventDefault();
+                      setSuggestOpen(true);
+                      setActiveSuggest((i) => Math.min(i + 1, suggestResults.length - 1));
+                      return;
+                    }
+                    if (e.key === "ArrowUp" && suggestOpen) {
+                      e.preventDefault();
+                      setActiveSuggest((i) => Math.max(i - 1, -1));
+                      return;
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setOwnerSearchOpen(false);
+                      setSuggestOpen(false);
+                      setActiveSuggest(-1);
+                      return;
+                    }
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      // ⚠候補が無い Enter は**何もしない**(この入力は絞り込みへ
+                      //   一切流れない=打ち間違いの名前が URL/監査に残らない)。
+                      if (suggestOpen && suggestResults.length > 0) {
+                        const pick =
+                          suggestResults[activeSuggest >= 0 ? activeSuggest : 0];
+                        setOwnerSearchOpen(false);
+                        setSuggestOpen(false);
+                        setActiveSuggest(-1);
+                        router.push(`/properties/${pick.id}`);
+                      }
+                    }
+                  }}
+                  onBlur={() => setSuggestOpen(false)}
+                  onFocus={() => { if (suggestResults.length > 0) setSuggestOpen(true); }}
+                  className="w-full rounded-md border border-gray-300 py-2 px-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
+                />
+                {suggestOpen && suggestResults.length > 0 && (
             <ul className="absolute left-0 top-full z-50 mt-1 w-full min-w-[320px] rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-800 dark:bg-gray-900">
               {suggestResults.map((item) => (
                 <li key={item.id}>
@@ -1114,7 +1215,7 @@ function PropertiesPageInner() {
                       setSuggestOpen(false);
                       router.push(`/properties/${item.id}`);
                     }}
-                    className="flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-indigo-50 dark:hover:bg-gray-800"
+                    className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-indigo-50 dark:hover:bg-gray-800 ${suggestResults[activeSuggest]?.id === item.id ? "bg-indigo-50 dark:bg-gray-800" : ""}`}
                   >
                     <div className="flex items-center gap-2">
                       <span className="flex-1 font-medium text-gray-800 truncate dark:text-gray-100">{item.address}</span>
@@ -1157,7 +1258,96 @@ function PropertiesPageInner() {
               ))}
             </ul>
           )}
+              </div>
+            </div>
+          )}
         </div>
+
+        <select
+          value={dmFilter}
+          onChange={handleDmFilterChange}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+        >
+          <option value="">DM判断: すべて</option>
+          <option value="send">送付可</option>
+          <option value="no_send">送付不可</option>
+          <option value="hold">未判断</option>
+        </select>
+
+        <select
+          value={assigneeFilter}
+          onChange={handleFilterChange(setAssigneeFilter)}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          title="担当者"
+        >
+          <option value="">担当者: すべて</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </select>
+
+        <button
+          type="button"
+          onClick={handleResetFilters}
+          disabled={!hasActiveFilter}
+          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+          title="全フィルタをリセット"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          リセット
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen((v) => !v)}
+          aria-expanded={advancedOpen}
+          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+          title="種別・登記状況・日付などの詳細条件を開閉"
+        >
+          詳細条件{advancedFilterCount > 0 ? `（${advancedFilterCount}件適用中）` : ""}
+          {advancedOpen ? " ▴" : " ▾"}
+        </button>
+        </div>
+
+        {/* 詳細条件(折りたたみ)。適用中はトグルに件数が出るので、畳んでいても
+            「なぜ絞れているのか分からない」にはならない。 */}
+        {advancedOpen && (
+          <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-gray-100 pt-3 dark:border-gray-800">
+        <select
+          value={typeFilter}
+          onChange={handleFilterChange(setTypeFilter)}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+        >
+          <option value="">種別: すべて</option>
+          {PROPERTY_TYPE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={registryFilter}
+          onChange={handleFilterChange(setRegistryFilter)}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+        >
+          <option value="">登記状況: すべて</option>
+          <option value="obtained">取得済</option>
+          <option value="unconfirmed">未取得</option>
+          <option value="scheduled">取得中</option>
+        </select>
+
+        <select
+          value={sendCountMaxFilter}
+          onChange={handleSendCountMaxChange}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          title="DM送信回数で絞り込む"
+        >
+          <option value="">送信回数: すべて</option>
+          <option value="0">未送信（0回）</option>
+        </select>
 
         <label className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
           <input
@@ -1258,20 +1448,6 @@ function PropertiesPageInner() {
           <option value="dmSendCount:desc">DM送信回数 多い順</option>
         </select>
 
-        <select
-          value={assigneeFilter}
-          onChange={handleFilterChange(setAssigneeFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-          title="担当者"
-        >
-          <option value="">担当者: すべて</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name}
-            </option>
-          ))}
-        </select>
-
         <label className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-300">
           更新日:
           <input
@@ -1293,17 +1469,8 @@ function PropertiesPageInner() {
             <span className="ml-1 text-xs text-amber-600 dark:text-amber-400">開始日が終了日より後です</span>
           )}
         </label>
-
-        <button
-          type="button"
-          onClick={handleResetFilters}
-          disabled={!hasActiveFilter}
-          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-          title="全フィルタをリセット"
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-          リセット
-        </button>
+          </div>
+        )}
       </div>
 
       {/* Error */}
@@ -1326,7 +1493,7 @@ function PropertiesPageInner() {
             {selectedIds.size} 件選択中
           </span>
           <select
-            disabled={bulkUpdating}
+            disabled={bulkUpdating || searchPending}
             onChange={(e) => {
               if (e.target.value) {
                 handleBulkUpdate({ caseStatus: e.target.value });
@@ -1341,7 +1508,7 @@ function PropertiesPageInner() {
             ))}
           </select>
           <select
-            disabled={bulkUpdating}
+            disabled={bulkUpdating || searchPending}
             onChange={(e) => {
               if (e.target.value) {
                 handleBulkUpdate({ dmStatus: e.target.value });
@@ -1358,7 +1525,7 @@ function PropertiesPageInner() {
           {canDeleteProperty && (
           <button
             type="button"
-            disabled={bulkDeleting || bulkUpdating}
+            disabled={bulkDeleting || bulkUpdating || searchPending}
             onClick={handleBulkDelete}
             className="inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
           >

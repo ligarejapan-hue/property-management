@@ -102,8 +102,10 @@ describe("CorporateCleanupPanel dark: 配色 (P2-1)", () => {
   it("ライトモード text-slate-600 は残っている", () => {
     expect(cleanupSrc).toContain("text-slate-600");
   });
-  it("純 accent ボタン（bg-blue-600）は dark: 据え置き", () => {
-    expect(cleanupSrc).toContain("bg-blue-600");
+  it("純 accent ボタンは藍(bg-indigo-600)・dark: 据え置き", () => {
+    // UI一貫性 第1弾(4)で青(blue)→藍(indigo)へ統一した。
+    expect(cleanupSrc).toContain("bg-indigo-600");
+    expect(cleanupSrc).not.toContain("bg-blue-600");
   });
   // --- P2 追加: 清掃チェックボタンの dark 可読化 ---
   it("清掃チェックボタンに dark:bg-gray-800 がある（暗背景地）", () => {

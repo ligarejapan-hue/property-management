@@ -15,7 +15,7 @@ describe("properties page: 売却DM対象選択の配線", () => {
   });
 
   it("作成ボタンは選択0件/読み込み中は無効(競合クリック防止・Codex R11)", () => {
-    expect(src).toContain("disabled={creatingDm || loading || selectedIds.size === 0}");
+    expect(src).toContain("disabled={creatingDm || loading || selectedIds.size === 0 || searchPending}");
   });
 
   it("表示条件変更(setPage)で選択を同期的にクリアする(競合の芽を断つ・Codex R12)", () => {
