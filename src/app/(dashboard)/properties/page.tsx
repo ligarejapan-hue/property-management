@@ -5,6 +5,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
 import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions, createSaleDmCampaign, clearSaleDmUndeliverable, createDmBatch } from "@/lib/api-client";
+import { classifyPropertySearch } from "@/lib/property-search-classify";
 import { canCreateSaleDm, buildSaleDmPartialNotice } from "@/lib/sale-dm-letter/list-ui";
 import { debounce } from "@/lib/debounce";
 import { EXPORT_COLUMNS } from "@/lib/property-export-columns";
@@ -124,8 +125,12 @@ function PropertiesPageInner() {
   // 確定値 searchText / mgmtIdText へコミットし、/api/properties 再取得・URL同期は
   // その確定値だけで動く（毎キーストロークの再取得＝property_list audit 量産を防ぐ）。
   // URL からの復元値で初期化する。
-  const [searchDraft, setSearchDraft] = useState(() => sp.get("keyword") ?? "");
-  const [mgmtIdDraft, setMgmtIdDraft] = useState(() => sp.get("mgmtId") ?? "");
+  // UI一貫性 第1弾(1): 検索窓を1本に統合。入力は classifyPropertySearch で見分け、
+  // 管理IDの構文(「120行」等)だけ mgmtId へ、それ以外は keyword+所有者サジェストへ流す。
+  // URL からの復元は keyword 優先(両方あることは通常ない)。
+  const [searchAllDraft, setSearchAllDraft] = useState(
+    () => sp.get("keyword") || sp.get("mgmtId") || "",
+  );
   const [searchInput, setSearchInput] = useState("");
   const [typeFilter, setTypeFilter] = useState(() => sp.get("propertyType") ?? "");
   const [registryFilter, setRegistryFilter] = useState(() => sp.get("registryStatus") ?? "");
@@ -145,8 +150,24 @@ function PropertiesPageInner() {
   const [sort, setSort] = useState<string>(() => sp.get("sort") ?? "updatedAt:desc");
   const [page, setPageState] = useState(() => Math.max(1, parseInt(sp.get("page") ?? "1") || 1));
 
-  // モバイル用フィルタ折りたたみ
-  const [showFilters, setShowFilters] = useState(false);
+  // UI一貫性 第1弾(5): 詳細条件の折りたたみ(PC/モバイル共通)。
+  // 開いた状態で読み込むのは「詳細条件が適用されている」とき——
+  // 畳んだまま適用されていると、なぜ絞れているのか分からなくなるため。
+  const [advancedOpen, setAdvancedOpen] = useState(() =>
+    Boolean(
+      sp.get("propertyType") ||
+        sp.get("registryStatus") ||
+        sp.get("dmSentMax") ||
+        sp.get("caseStatus") ||
+        sp.get("introductionRoute") ||
+        sp.get("updatedFrom") ||
+        sp.get("updatedTo") ||
+        sp.get("hasWarning") === "true" ||
+        sp.get("undeliverable") === "1" ||
+        sp.get("resendOnly") === "1" ||
+        (sp.get("sort") && sp.get("sort") !== "updatedAt:desc"),
+    ),
+  );
 
   // CSVエクスポートの列ピッカー。既定=全列選択。ゼロ列選択時は出力ボタンを無効化する。
   const [showColumnPicker, setShowColumnPicker] = useState(false);
@@ -632,7 +653,7 @@ function PropertiesPageInner() {
   }, [searchInput]);
 
   // 一覧検索 (keyword / 管理ID) の確定コミットを 300ms debounce する。
-  // 入力ドラフト (searchDraft / mgmtIdDraft) は即時更新し、確定値への反映と
+  // 入力ドラフト (searchAllDraft) は即時更新し、確定値への反映と
   // page リセットだけを遅延させる。suggest (searchInput) の debounce とは別インスタンス
   // なので互いに干渉しない。setState の identity は安定なので deps は空でよい。
   const commitKeyword = useMemo(
@@ -658,6 +679,31 @@ function PropertiesPageInner() {
       commitMgmtId.cancel();
     };
   }, [commitKeyword, commitMgmtId]);
+
+  /**
+   * 統合検索窓の入力(UI一貫性 第1弾(1))。
+   * - 管理IDの構文(「120行」「◯.xlsx:120」)のときだけ mgmtId 検索へ。
+   *   曖昧な入力(素の数字・ファイル名だけ)は keyword 側=安全側
+   *   (素の「120」は地番の一部であり得る)。
+   * - text は keyword(住所・地番の一覧絞り込み)と所有者サジェストの両方に流す。
+   *   所有者名だと一覧は0件になり得るが、下の候補から物件へ飛べる。
+   * - 片方に流すとき、もう片方の確定値は必ず空にする(古い絞り込みが残らない)。
+   */
+  const handleUnifiedSearchChange = (value: string) => {
+    setSearchAllDraft(value);
+    const kind = classifyPropertySearch(value);
+    if (kind === "mgmtId") {
+      setSearchInput("");
+      setSuggestOpen(false);
+      commitKeyword("");
+      commitMgmtId(value);
+      return;
+    }
+    setSearchInput(kind === "text" ? value : "");
+    if (kind === "empty") setSuggestOpen(false);
+    commitMgmtId("");
+    commitKeyword(kind === "text" ? value : "");
+  };
 
   // Debounce search: reset page on filter change
   const handleFilterChange = (setter: (v: string) => void) => (
@@ -695,8 +741,7 @@ function PropertiesPageInner() {
     setSuggestOpen(false);
     setSuggestResults([]);
     setSearchInput("");
-    setSearchDraft("");
-    setMgmtIdDraft("");
+    setSearchAllDraft("");
     setSearchText("");
     setMgmtIdText("");
     setTypeFilter("");
@@ -717,7 +762,7 @@ function PropertiesPageInner() {
 
   // 何らかのフィルタが効いているか（リセットボタン活性化用）
   const hasActiveFilter =
-    !!searchInput || !!searchText || !!searchDraft || !!mgmtIdText || !!mgmtIdDraft || !!typeFilter || !!registryFilter || !!dmFilter ||
+    !!searchInput || !!searchText || !!searchAllDraft || !!mgmtIdText || !!typeFilter || !!registryFilter || !!dmFilter ||
     !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
     warningOnly || undeliverableOnly || resendOnly || !!sendCountMaxFilter || sort !== "updatedAt:desc";
 
@@ -729,6 +774,18 @@ function PropertiesPageInner() {
     searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter,
     introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, sendCountMaxFilter,
   ].filter(Boolean).length + (warningOnly ? 1 : 0) + (sort !== "updatedAt:desc" ? 1 : 0);
+
+  // 折りたたみ内(詳細条件)に適用されている件数。畳んでいても見落とさないよう
+  // トグルに「(N件適用中)」と出す(UI一貫性 第1弾(5))。
+  const advancedFilterCount =
+    [
+      typeFilter, registryFilter, sendCountMaxFilter, caseFilter,
+      introductionRouteFilter, updatedFromFilter, updatedToFilter,
+    ].filter(Boolean).length +
+    (warningOnly ? 1 : 0) +
+    (undeliverableOnly ? 1 : 0) +
+    (resendOnly ? 1 : 0) +
+    (sort !== "updatedAt:desc" ? 1 : 0);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -992,102 +1049,17 @@ function PropertiesPageInner() {
 
       <DmBatchConfirmModal open={dmConfirmOpen} onClose={() => setDmConfirmOpen(false)} />
 
-      {/* Filter toggle (mobile only) */}
-      <div className="mb-2 md:hidden">
-        <button
-          type="button"
-          onClick={() => setShowFilters((v) => !v)}
-          className="inline-flex min-h-[44px] items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-        >
-          絞り込み{activeFilterCount > 0 ? `（${activeFilterCount}）` : ""}
-          {showFilters ? " ▴" : " ▾"}
-        </button>
-      </div>
-
-      {/* Filter bar */}
-      <div className={`mb-4 flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 ${showFilters ? "flex" : "hidden"} md:flex`}>
-        <select
-          value={typeFilter}
-          onChange={handleFilterChange(setTypeFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-        >
-          <option value="">種別: すべて</option>
-          {PROPERTY_TYPE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={registryFilter}
-          onChange={handleFilterChange(setRegistryFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-        >
-          <option value="">登記状況: すべて</option>
-          <option value="obtained">取得済</option>
-          <option value="unconfirmed">未取得</option>
-          <option value="scheduled">取得中</option>
-        </select>
-
-        <select
-          value={dmFilter}
-          onChange={handleDmFilterChange}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-        >
-          <option value="">DM判断: すべて</option>
-          <option value="send">送付可</option>
-          <option value="no_send">送付不可</option>
-          <option value="hold">未判断</option>
-        </select>
-
-        <select
-          value={sendCountMaxFilter}
-          onChange={handleSendCountMaxChange}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-          title="DM送信回数で絞り込む"
-        >
-          <option value="">送信回数: すべて</option>
-          <option value="0">未送信（0回）</option>
-        </select>
-
-        <div className="relative min-w-[220px]">
+      {/* Filter bar (UI一貫性 第1弾: 検索窓を1本に統合・詳細条件は折りたたみ) */}
+      <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+        {/* よく使う条件(常時表示): 検索・DM判断・担当者・リセット */}
+        <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[280px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
           <input
             type="text"
-            placeholder="物件住所・地番・家屋番号で一覧検索"
-            value={searchDraft}
-            onChange={(e) => {
-              const value = e.target.value;
-              setSearchDraft(value);
-              commitKeyword(value);
-            }}
-            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
-          />
-        </div>
-
-        <div className="relative min-w-[240px]">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-          <input
-            type="text"
-            placeholder="管理IDで検索（例: 受付帳.xlsx:120行 / 120行）"
-            value={mgmtIdDraft}
-            onChange={(e) => {
-              const value = e.target.value;
-              setMgmtIdDraft(value);
-              commitMgmtId(value);
-            }}
-            className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
-          />
-        </div>
-
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-          <input
-            type="text"
-            placeholder="所有者名・電話番号で候補を選択して物件を開く"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="住所・地番・所有者名・電話・管理ID(例: 120行)で検索"
+            value={searchAllDraft}
+            onChange={(e) => handleUnifiedSearchChange(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -1158,6 +1130,92 @@ function PropertiesPageInner() {
             </ul>
           )}
         </div>
+
+        <select
+          value={dmFilter}
+          onChange={handleDmFilterChange}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+        >
+          <option value="">DM判断: すべて</option>
+          <option value="send">送付可</option>
+          <option value="no_send">送付不可</option>
+          <option value="hold">未判断</option>
+        </select>
+
+        <select
+          value={assigneeFilter}
+          onChange={handleFilterChange(setAssigneeFilter)}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          title="担当者"
+        >
+          <option value="">担当者: すべて</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </select>
+
+        <button
+          type="button"
+          onClick={handleResetFilters}
+          disabled={!hasActiveFilter}
+          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+          title="全フィルタをリセット"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          リセット
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen((v) => !v)}
+          aria-expanded={advancedOpen}
+          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+          title="種別・登記状況・日付などの詳細条件を開閉"
+        >
+          詳細条件{advancedFilterCount > 0 ? `（${advancedFilterCount}件適用中）` : ""}
+          {advancedOpen ? " ▴" : " ▾"}
+        </button>
+        </div>
+
+        {/* 詳細条件(折りたたみ)。適用中はトグルに件数が出るので、畳んでいても
+            「なぜ絞れているのか分からない」にはならない。 */}
+        {advancedOpen && (
+          <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-gray-100 pt-3 dark:border-gray-800">
+        <select
+          value={typeFilter}
+          onChange={handleFilterChange(setTypeFilter)}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+        >
+          <option value="">種別: すべて</option>
+          {PROPERTY_TYPE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={registryFilter}
+          onChange={handleFilterChange(setRegistryFilter)}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+        >
+          <option value="">登記状況: すべて</option>
+          <option value="obtained">取得済</option>
+          <option value="unconfirmed">未取得</option>
+          <option value="scheduled">取得中</option>
+        </select>
+
+        <select
+          value={sendCountMaxFilter}
+          onChange={handleSendCountMaxChange}
+          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          title="DM送信回数で絞り込む"
+        >
+          <option value="">送信回数: すべて</option>
+          <option value="0">未送信（0回）</option>
+        </select>
 
         <label className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
           <input
@@ -1258,20 +1316,6 @@ function PropertiesPageInner() {
           <option value="dmSendCount:desc">DM送信回数 多い順</option>
         </select>
 
-        <select
-          value={assigneeFilter}
-          onChange={handleFilterChange(setAssigneeFilter)}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-          title="担当者"
-        >
-          <option value="">担当者: すべて</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name}
-            </option>
-          ))}
-        </select>
-
         <label className="flex items-center gap-1 text-sm text-gray-600 dark:text-gray-300">
           更新日:
           <input
@@ -1293,17 +1337,8 @@ function PropertiesPageInner() {
             <span className="ml-1 text-xs text-amber-600 dark:text-amber-400">開始日が終了日より後です</span>
           )}
         </label>
-
-        <button
-          type="button"
-          onClick={handleResetFilters}
-          disabled={!hasActiveFilter}
-          className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
-          title="全フィルタをリセット"
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-          リセット
-        </button>
+          </div>
+        )}
       </div>
 
       {/* Error */}

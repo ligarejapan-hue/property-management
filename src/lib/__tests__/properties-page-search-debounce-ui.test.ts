@@ -20,13 +20,12 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     expect(pageSrc).toMatch(/import\s*\{\s*debounce\s*\}\s*from\s*"@\/lib\/debounce"/);
   });
 
-  it("入力ドラフト state (searchDraft / mgmtIdDraft) を URL 復元値で初期化する", () => {
+  it("統合ドラフト state (searchAllDraft) を URL 復元値(keyword優先)で初期化する", () => {
+    // UI一貫性 第1弾(1): 検索窓を1本に統合した(旧: searchDraft / mgmtIdDraft の2本)。
     expect(pageSrc).toMatch(
-      /const \[searchDraft, setSearchDraft\] = useState\(\(\) => sp\.get\("keyword"\)/,
+      /const \[searchAllDraft, setSearchAllDraft\] = useState\(/,
     );
-    expect(pageSrc).toMatch(
-      /const \[mgmtIdDraft, setMgmtIdDraft\] = useState\(\(\) => sp\.get\("mgmtId"\)/,
-    );
+    expect(pageSrc).toMatch(/sp\.get\("keyword"\) \|\| sp\.get\("mgmtId"\)/);
   });
 
   it("keyword / 管理ID の確定コミットを 300ms debounce する committer を持つ", () => {
@@ -41,11 +40,13 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     );
   });
 
-  it("検索入力欄はドラフト値を表示し、onChange はドラフト更新＋debounce コミットのみ", () => {
-    expect(pageSrc).toMatch(/value=\{searchDraft\}/);
-    expect(pageSrc).toMatch(/value=\{mgmtIdDraft\}/);
-    expect(pageSrc).toMatch(/setSearchDraft\(value\);\s*commitKeyword\(value\)/);
-    expect(pageSrc).toMatch(/setMgmtIdDraft\(value\);\s*commitMgmtId\(value\)/);
+  it("統合検索欄はドラフト値を表示し、onChange は見分け(classify)経由でコミットする", () => {
+    expect(pageSrc).toMatch(/value=\{searchAllDraft\}/);
+    expect(pageSrc).toMatch(/handleUnifiedSearchChange\(e\.target\.value\)/);
+    // 見分けの結果で片方へ流し、もう片方は必ず空にする(古い絞り込みを残さない)。
+    expect(pageSrc).toMatch(/classifyPropertySearch\(value\)/);
+    expect(pageSrc).toMatch(/commitKeyword\(""\)/);
+    expect(pageSrc).toMatch(/commitMgmtId\(""\)/);
   });
 
   it("入力 onChange からの確定値への即時反映 (handleFilterChange(setSearchText/setMgmtIdText)) を排除している", () => {
@@ -63,8 +64,7 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
   });
 
   it("リセットでドラフトを空にし、保留中の debounce を cancel する", () => {
-    expect(pageSrc).toMatch(/setSearchDraft\(""\)/);
-    expect(pageSrc).toMatch(/setMgmtIdDraft\(""\)/);
+    expect(pageSrc).toMatch(/setSearchAllDraft\(""\)/);
     expect(pageSrc).toMatch(/commitKeyword\.cancel\(\)/);
     expect(pageSrc).toMatch(/commitMgmtId\.cancel\(\)/);
   });

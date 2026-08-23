@@ -149,7 +149,7 @@ export default function CorporateCleanupPanel({ ownerId, onApplied }: Props) {
             type="button"
             onClick={onApply}
             disabled={applying || !anyChecked}
-            className="rounded bg-blue-600 px-3 py-1 text-white"
+            className="rounded bg-indigo-600 px-3 py-1 text-white"
           >
             {applying ? "反映中…" : "選択した項目を反映"}
           </button>

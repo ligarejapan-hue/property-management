@@ -22,13 +22,17 @@ describe("properties page: 管理ID 検索欄", () => {
     expect(pageSrc).toMatch(/sp\.get\("mgmtId"\)/);
   });
 
-  it("placeholder「管理IDで検索」を含む input がある", () => {
-    expect(pageSrc).toMatch(/placeholder="管理IDで検索/);
+  it("統合検索窓の placeholder が管理IDにも触れ、行サフィックスの例を示す", () => {
+    // UI一貫性 第1弾(1): 専用窓は廃止し統合窓に。素の数字は地番と曖昧なため
+    // 管理ID扱いは「120行」等の明確な構文のみ(placeholder で例示して教える)。
+    expect(pageSrc).toMatch(/placeholder="住所・地番・所有者名・電話・管理ID/);
+    expect(pageSrc).toMatch(/例: 120行/);
   });
 
-  it("placeholder に例（受付帳 / 行）が含まれる", () => {
-    expect(pageSrc).toMatch(/受付帳.*xlsx/);
-    expect(pageSrc).toMatch(/120行/);
+  it("見分けは共通の純関数 classifyPropertySearch を使う", () => {
+    expect(pageSrc).toMatch(
+      /import \{ classifyPropertySearch \} from "@\/lib\/property-search-classify"/,
+    );
   });
 
   it("fetchProperties で mgmtId クエリを送る", () => {

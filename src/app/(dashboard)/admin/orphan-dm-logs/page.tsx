@@ -157,7 +157,7 @@ export default function OrphanDmLogsPage() {
         />
         <button
           type="submit"
-          className="rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+          className="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
         >
           検索
         </button>
@@ -336,7 +336,7 @@ function OrphanReactionEditor({
           }
           onSave(status, reactedAt, note, clearNote);
         }}
-        className="rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
+        className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700"
       >
         {refusalArmed ? "拒否として保存（確定）" : "保存"}
       </button>
