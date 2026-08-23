@@ -11,7 +11,10 @@
  *     行サフィックスを付けてもらう(placeholder で例示)。
  */
 import { describe, it, expect } from "vitest";
-import { classifyPropertySearch } from "../property-search-classify";
+import {
+  classifyPropertySearch,
+  toMgmtIdQuery,
+} from "../property-search-classify";
 
 describe("classifyPropertySearch", () => {
   it("空・空白のみ → empty", () => {
@@ -69,5 +72,27 @@ describe("classifyPropertySearch", () => {
 
   it("前後の空白は無視して判定する", () => {
     expect(classifyPropertySearch("  120行  ")).toBe("mgmtId");
+  });
+});
+
+describe("明示の接頭辞(@codex #404 R6 P2)", () => {
+  it("「id:◯◯」「管理ID:◯◯」は任意の値を mgmtId へ通す", () => {
+    // CSV出力の「管理ID」列の生値(例: MGMT-001)は構文を持たないため、
+    // 接頭辞で明示して通す(コピー&ペースト運用)。
+    expect(classifyPropertySearch("id:MGMT-001")).toBe("mgmtId");
+    expect(classifyPropertySearch("管理ID：MGMT-001")).toBe("mgmtId");
+    expect(classifyPropertySearch("ID: 受付帳分の何か")).toBe("mgmtId");
+  });
+
+  it("接頭辞だけ(中身なし)は keyword のまま", () => {
+    expect(classifyPropertySearch("id:")).toBe("text");
+    expect(classifyPropertySearch("管理ID：  ")).toBe("text");
+  });
+
+  it("toMgmtIdQuery は接頭辞を剥がし、他の構文はそのまま返す", () => {
+    expect(toMgmtIdQuery("id:MGMT-001")).toBe("MGMT-001");
+    expect(toMgmtIdQuery("管理ID： MGMT-001")).toBe("MGMT-001");
+    expect(toMgmtIdQuery("120行")).toBe("120行");
+    expect(toMgmtIdQuery("受付帳.xlsx:120")).toBe("受付帳.xlsx:120");
   });
 });

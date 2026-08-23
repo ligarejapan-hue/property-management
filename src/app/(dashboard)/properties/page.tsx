@@ -5,7 +5,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Search, ChevronLeft, ChevronRight, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
 import { fetchProperties as apiFetchProperties, bulkUpdateProperties, deleteProperty, fetchQualityCheck, fetchUsers, fetchPropertySuggestions, createSaleDmCampaign, clearSaleDmUndeliverable, createDmBatch } from "@/lib/api-client";
-import { classifyPropertySearch } from "@/lib/property-search-classify";
+import { classifyPropertySearch, toMgmtIdQuery } from "@/lib/property-search-classify";
 import { canCreateSaleDm, buildSaleDmPartialNotice } from "@/lib/sale-dm-letter/list-ui";
 import { debounce } from "@/lib/debounce";
 import { EXPORT_COLUMNS } from "@/lib/property-export-columns";
@@ -708,7 +708,7 @@ function PropertiesPageInner() {
     const kind = classifyPropertySearch(value);
     if (kind === "mgmtId") {
       commitKeyword("");
-      commitMgmtId(value);
+      commitMgmtId(toMgmtIdQuery(value));
       return;
     }
     commitMgmtId("");
@@ -1073,7 +1073,8 @@ function PropertiesPageInner() {
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
           <input
             type="text"
-            placeholder="住所・地番・管理ID(例: 120行)で一覧を絞り込み"
+            placeholder="住所・地番・管理ID(例: 120行, id:◯◯)で一覧を絞り込み"
+            title="管理IDの書き方: 「120行」「受付帳.xlsx:120」「受付帳.xlsx」/ コピーした管理IDは「id:」に続けて貼り付け"
             value={searchAllDraft}
             onChange={(e) => handleUnifiedSearchChange(e.target.value)}
             className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"

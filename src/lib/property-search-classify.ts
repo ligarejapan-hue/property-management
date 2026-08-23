@@ -28,6 +28,12 @@ const FILE_COLON_ROW_RE = /\.(xlsx|xls|csv)\s*[:：]\s*\d+/i;
  * keyword 側)。
  */
 const FILE_ONLY_RE = /\.(xlsx|xls|csv)\s*$/i;
+/**
+ * 明示の接頭辞(@codex #404 R6 P2)。CSV出力の「管理ID」列の生値(__sourceRef
+ * そのもの・例: MGMT-001)は構文を持たないため自動では見分けられない。
+ * 「id:◯◯」「管理ID:◯◯」(全角コロン可)で**任意の値**を管理ID検索へ通す。
+ */
+const EXPLICIT_PREFIX_RE = /^(id|管理ID)\s*[:：]\s*(\S.*)$/i;
 
 export function classifyPropertySearch(raw: string): PropertySearchKind {
   const q = raw.trim();
@@ -36,5 +42,17 @@ export function classifyPropertySearch(raw: string): PropertySearchKind {
   if (ROW_SUFFIX_RE.test(q)) return "mgmtId";
   if (FILE_COLON_ROW_RE.test(q)) return "mgmtId";
   if (FILE_ONLY_RE.test(q)) return "mgmtId";
+  if (EXPLICIT_PREFIX_RE.test(q)) return "mgmtId";
   return "text";
+}
+
+/**
+ * mgmtId 検索へ送る実クエリ。明示の接頭辞(「id:」「管理ID:」)は剥がして
+ * 中身だけを送る(server の parseMgmtIdQuery は生値で照合するため)。
+ * それ以外の管理ID構文(「120行」等)は server 側が解釈するのでそのまま返す。
+ */
+export function toMgmtIdQuery(raw: string): string {
+  const q = raw.trim();
+  const m = q.match(EXPLICIT_PREFIX_RE);
+  return m ? m[2] : q;
 }
