@@ -31,25 +31,42 @@ const read = (p: string) => readFileSync(p, "utf8").replace(/\r\n/g, "\n");
 const rel = (p: string) => relative(process.cwd(), p).replace(/\\/g, "/");
 
 /**
- * ファイル中の**全ての文字列リテラル**をトークン集合にして返す
- * (@codex #406 R2/R5/R6 P2)。
+ * ファイル中の文字列リテラルをトークン集合の列にして返す
+ * (@codex #406 R2/R5/R6/R7 P2)。
  * - Tailwind のクラスは順序が意味を持たない→隣接部分文字列の一致は並べ替えで素通り
- * - className="…" 限定だと {"…"}(brace包み)・三項・clsx() 等の書き方で素通り
- * → どんな書き方でもクラス列は最終的に文字列リテラルに現れるので、
- *   "…" / '…' / `…` を全部走査する(禁止対象のトークン組が同居する
- *   非クラス文字列は実在しない)。${...} は除いて静的トークンだけを見る。
+ * - className="…" 限定だと {"…"}(brace包み)等の書き方で素通り
+ * - リテラル単位だと clsx("fixed", x && "inset-0") のような**分割合成**で素通り
+ * → `…`(複数行可)は1式=1集合、それ以外は**同一行内の "…"/'…' を合算して1集合**
+ *   にする(1行に収まる合成はどんな書き方でも捕まる)。
+ * ⚠検出境界: **複数行に分けた合成**(clsx の引数を改行で分ける等)はこの走査の
+ *   保証外=コードレビューで見る。ここは「うっかりの逆行」を止めるラチェットで
+ *   あり、静的解析の完全性は主張しない。${...} は除いて静的トークンだけを見る。
  */
 function classTokenSets(src: string): string[][] {
   const out: string[][] = [];
-  const litRe = /"([^"\n]*)"|'([^'\n]*)'|`([^`]*)`/g;
-  let m: RegExpExecArray | null;
-  while ((m = litRe.exec(src)) !== null) {
-    out.push(
-      (m[1] ?? m[2] ?? m[3] ?? "")
-        .replace(/\$\{[^}]*\}/g, " ")
-        .split(/\s+/)
-        .filter(Boolean),
-    );
+  const push = (text: string) => {
+    const tokens = text
+      .replace(/\$\{[^}]*\}/g, " ")
+      .split(/\s+/)
+      .filter(Boolean);
+    if (tokens.length > 0) out.push(tokens);
+  };
+  // 複数行に渡り得る `…` は先に1式ずつ回収し、残りから消す
+  const rest = src.replace(/`([^`]*)`/g, (_all, body: string) => {
+    push(body);
+    return '""';
+  });
+  // 残りは行ごとに "…"/'…' の中身を合算(同一行の合成を1集合として見る)
+  for (const line of rest.split("\n")) {
+    const tokens: string[] = [];
+    const re = /"([^"]*)"|'([^']*)'/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) {
+      tokens.push(
+        ...(m[1] ?? m[2] ?? "").split(/\s+/).filter(Boolean),
+      );
+    }
+    if (tokens.length > 0) out.push(tokens);
   }
   return out;
 }
