@@ -20,6 +20,7 @@ const BUTTON = read(
 );
 const CLIENT = read("src/lib/api-client.ts");
 const STORE = read("src/lib/registry-fetch/live-view-store.ts");
+const PROVIDER = read("src/lib/registry-fetch/official-provider.ts");
 
 describe("サーバーが中止の可否を答える", () => {
   it("実況の取得結果に cancelable が含まれる", () => {
@@ -34,8 +35,10 @@ describe("サーバーが中止の可否を答える", () => {
 });
 
 describe("パネルはサーバーの答えだけで判断する", () => {
-  it("判定を純関数 shouldShowCancelButton に委ねている", () => {
-    expect(PANEL).toContain("shouldShowCancelButton({");
+  it("判定を純関数 cancelControlView に委ねている", () => {
+    // ⚠2026-08-23(@codex #401 R3): 2値(出す/出さない)では「中止しています…」を
+    //   出せなかったため、3状態(action/pending/hidden)を返す関数に置き換えた。
+    expect(PANEL).toContain("cancelControlView({");
     expect(PANEL).toContain("cancelWindowOpen: serverCancelable");
   });
 
@@ -74,5 +77,41 @@ describe("有料取得でも中止の話をしてよい経路になっている"
   it("中止を押した瞬間に画面側でも覚える(応答待ちの間に自動で進まない)", () => {
     expect(BUTTON).toContain("onCancelRequested");
     expect(BUTTON).toContain("searchCancelledRef.current = true;");
+  });
+});
+
+// ── @codex #401 R3 ────────────────────────────────────────────────────
+describe("中止を押した後も状態が見える(@codex #401 R3 P2)", () => {
+  it("パネルは3状態(押せる/中止しています…/出さない)を純関数で決める", () => {
+    // ⚠初版は「押したら隠す」だったため、`中止しています…` が**一度も出せなかった**。
+    expect(PANEL).toContain("cancelControlView({");
+    expect(PANEL).toContain('cancelView !== "hidden"');
+    expect(PANEL).toContain('disabled={cancelView === "pending"}');
+  });
+
+  it("押した後の文言がボタンに残っている", () => {
+    expect(PANEL).toContain('cancelling ? "中止しています…" : "中止"');
+  });
+});
+
+describe("順番待ちの中止は待たずに決着させる(@codex #401 R3 P2)", () => {
+  it("見張りは印を立てるだけでなく待ちを打ち切る", () => {
+    // ⚠印だけだと、待ち(最大30分)が終わるまで画面は「中止しています…」のまま・
+    //   物件も scheduled のまま。**待ちそのものを cancelled で決着**させる。
+    expect(PROVIDER).toContain("abandonForCancel");
+    expect(PROVIDER).toMatch(/abandonForCancel\?\.\(\)/);
+    expect(PROVIDER).toMatch(/reject\(new RegistryFetchError\("cancelled"\)\)/);
+  });
+
+  it("⚠取得が始まっていたら打ち切らない(課金境界は adapter が見る)", () => {
+    const at = PROVIDER.indexOf("abandonForCancel = () => {");
+    expect(at).toBeGreaterThan(-1);
+    expect(PROVIDER.slice(at, at + 260)).toContain("if (acquired || gaveUp) return;");
+  });
+
+  it("⚠印は残す(あとから順番が回っても外部に触れずに抜ける)", () => {
+    // gaveUp も立てるので、遅れて回ってきたコールバックは冒頭で rate_limited。
+    const at = PROVIDER.indexOf("abandonForCancel = () => {");
+    expect(PROVIDER.slice(at, at + 260)).toContain("gaveUp = true;");
   });
 });

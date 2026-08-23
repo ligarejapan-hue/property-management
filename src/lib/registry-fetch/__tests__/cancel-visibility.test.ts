@@ -14,6 +14,7 @@
 import { describe, it, expect } from "vitest";
 import {
   shouldShowCancelButton,
+  cancelControlView,
   cancelClosedNotice,
 } from "../cancel-visibility";
 
@@ -135,5 +136,66 @@ describe("cancelClosedNotice", () => {
     expect(
       cancelClosedNotice({ cancelWindowOpen: null, done: false, started: true }),
     ).toBeNull();
+  });
+});
+
+describe("cancelControlView (@codex #401 R3 P2)", () => {
+  it("押す前は押せるボタン", () => {
+    expect(
+      cancelControlView({
+        cancelWindowOpen: true,
+        done: false,
+        cancelRequested: false,
+      }),
+    ).toBe("action");
+  });
+
+  it("⚠押した後は『中止しています…』を出す(隠さない)", () => {
+    // 初版は隠していたため、この表示が**一度も出せなかった**。
+    // 押しても即座には止まらないので、受け付けたことが分からないと
+    // 利用者は「押せていない」と思って何度も押す。
+    expect(
+      cancelControlView({
+        cancelWindowOpen: true,
+        done: false,
+        cancelRequested: true,
+      }),
+    ).toBe("pending");
+  });
+
+  it("⚠受付が閉じたら pending も出さない(止めたつもりで請求されるのを防ぐ)", () => {
+    expect(
+      cancelControlView({
+        cancelWindowOpen: false,
+        done: false,
+        cancelRequested: true,
+      }),
+    ).toBe("hidden");
+  });
+
+  it("終わったら何も出さない", () => {
+    expect(
+      cancelControlView({
+        cancelWindowOpen: true,
+        done: true,
+        cancelRequested: true,
+      }),
+    ).toBe("hidden");
+  });
+
+  it("総当たり: action は1通り・pending も1通り・残りは hidden", () => {
+    const values: Array<boolean | null> = [true, false, null];
+    const seen: Record<string, string[]> = { action: [], pending: [], hidden: [] };
+    for (const cancelWindowOpen of values) {
+      for (const done of [true, false]) {
+        for (const cancelRequested of [true, false]) {
+          const v = cancelControlView({ cancelWindowOpen, done, cancelRequested });
+          seen[v].push(`${String(cancelWindowOpen)}/${done}/${cancelRequested}`);
+        }
+      }
+    }
+    expect(seen.action).toEqual(["true/false/false"]);
+    expect(seen.pending).toEqual(["true/false/true"]);
+    expect(seen.hidden.length).toBe(10);
   });
 });

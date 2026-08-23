@@ -528,9 +528,18 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
       throw new RegistryFetchError("cancelled");
     };
     // 待っている最中にも定期的に見る(順番が回るまで気づかない、を作らない)。
+    // ⚠**印を立てるだけでは足りない**(@codex #401 R3 P2)。待ちは最大30分あり、
+    //   印だけだと guarded は順番が回るか満了するまで決着せず、**画面は「中止して
+    //   います…」のまま・物件も scheduled のまま最大30分**という状態になる。
+    //   ⇒ 見つけた時点で**待ちを打ち切って cancelled で決着**させる。
+    //   ⚠印は残す。あとから順番が回ってきたコールバックは、印を見て
+    //   **ブラウザを起動する前に**抜ける(外部無接触・課金ゼロ)。
+    let abandonForCancel: (() => void) | null = null;
     const queueCancelWatch = live
       ? setInterval(() => {
-          if (live.isCancelRequested?.() === true) cancelObserved = true;
+          if (live.isCancelRequested?.() !== true) return;
+          cancelObserved = true;
+          abandonForCancel?.();
         }, 5_000)
       : null;
 
@@ -622,6 +631,20 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
     // run 側の遅延 throw(rate_limited) は既に決着済みの guarded に届かないため
     // catch で握る(未処理拒否の警告を出さない)。
     const guarded = new Promise<RegistryFetchResult>((resolve, reject) => {
+      // ⚠**順番待ちの間に中止されたら、待たずに決着させる**(@codex #401 R3 P2)。
+      //   取得がまだ始まっていない(acquired=false)ときだけ効く。始まった後は
+      //   adapter 側の節目が中止を見る(そちらは課金境界まで面倒を見る)。
+      //   ⚠gaveUp も立てる: あとから順番が回ってきたコールバックは冒頭で抜ける。
+      abandonForCancel = () => {
+        if (acquired || gaveUp) return;
+        gaveUp = true;
+        try {
+          live?.step(CANCEL_ACCEPTED_MESSAGE);
+        } catch {
+          /* 実況は best-effort */
+        }
+        reject(new RegistryFetchError("cancelled"));
+      };
       const timer = setTimeout(() => {
         if (!acquired) {
           gaveUp = true;

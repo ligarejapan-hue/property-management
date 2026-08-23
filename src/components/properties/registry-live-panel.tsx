@@ -22,7 +22,7 @@ import {
   type RegistryLiveViewStep,
 } from "@/lib/api-client";
 import {
-  shouldShowCancelButton,
+  cancelControlView,
   cancelClosedNotice,
 } from "@/lib/registry-fetch/cancel-visibility";
 
@@ -264,6 +264,15 @@ export default function RegistryLivePanel({
     );
   }
 
+  // ⚠**押した後も表示を残す**(@codex #401 R3 P2)。押しても即座には止まらない
+  //   (自動操作が安全な節目まで進んでから抜ける)ので、受け付けたことが
+  //   分からないと利用者は「押せていない」と思って何度も押す。
+  const cancelView = cancelControlView({
+    cancelWindowOpen: serverCancelable,
+    done,
+    cancelRequested: cancelling,
+  });
+
   // ⚠ボタンが消えた理由を出すための文言 (不要なら null)。
   //   `cancelable` が false の経路(呼び出し側が明示的に出さないと決めた経路)では
   //   そもそも中止の話をしないので、知らせも出さない。
@@ -301,17 +310,11 @@ export default function RegistryLivePanel({
             課金の直前に adapter が受付を閉じ、ここが false になってボタンが消える。
             ⚠呼び出し側の cancelable=false は「この経路では出さない」の明示指定
             として引き続き尊重する(AND 条件)。 */}
-        {cancelable &&
-          !searchSettled &&
-          shouldShowCancelButton({
-            cancelWindowOpen: serverCancelable,
-            done,
-            cancelRequested: cancelling,
-          }) && (
+        {cancelable && !searchSettled && cancelView !== "hidden" && (
           <button
             type="button"
             onClick={() => void handleCancel()}
-            disabled={cancelling}
+            disabled={cancelView === "pending"}
             data-testid="registry-live-cancel"
             title="自動操作を中止します（この検索では課金は発生しません）"
             className="ml-auto rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"

@@ -18,24 +18,52 @@
 /** 受付口の状態。`null` = まだ分からない (実況をまだ取得できていない)。 */
 export type CancelWindowState = boolean | null;
 
+/** 中止まわりに何を出すか。 */
+export type CancelControlView =
+  /** 押せる「中止」ボタン。 */
+  | "action"
+  /** 押した後の「中止しています…」(押せない表示)。 */
+  | "pending"
+  /** 何も出さない。 */
+  | "hidden";
+
 /**
- * 「中止」ボタンを出してよいか。
+ * 中止まわりの表示を1つに決める。
  *
- * ⚠`null`(不明) は **出さない**。効かないボタンを出すと
- * 「押したのに止まらない」を生む。出し損ねるのは機会損失で済む。
+ * ⚠**押した後を「隠す」にしてはいけない**(@codex #401 R3 P2)。初版は
+ *   `cancelRequested` で丸ごと隠していたため、「中止しています…」が
+ *   **一度も出せなかった**。押しても即座には止まらない(自動操作が安全な節目まで
+ *   進んでから抜ける)ので、受け付けたことが分からないと利用者は
+ *   「押せていない」と思って**何度も押す**。
+ * ⚠`null`(不明) では押せるボタンを出さない。効かないボタンは
+ *   「押したのに止まらない」を生む。出し損ねるのは機会損失で済む。
+ * ⚠受付が閉じた後(=課金に入った後)は pending も出さない。「中止しています…」の
+ *   まま課金が進むと**止めたつもりなのに請求される**。閉じた理由は
+ *   `cancelClosedNotice` が出す。
  */
-export function shouldShowCancelButton(input: {
+export function cancelControlView(input: {
   /** サーバーが中止を受け付けられる状態か。 */
   cancelWindowOpen: CancelWindowState;
   /** 実行が終わったか。 */
   done: boolean;
-  /** すでに中止を押したか (二重に押させない)。 */
+  /** すでに中止を押したか。 */
+  cancelRequested: boolean;
+}): CancelControlView {
+  if (input.done) return "hidden";
+  if (input.cancelWindowOpen !== true) return "hidden";
+  return input.cancelRequested ? "pending" : "action";
+}
+
+/**
+ * 押せる「中止」ボタンを出してよいか。
+ * `cancelControlView` の "action" と同義 (呼び出し側の可読性のために残す)。
+ */
+export function shouldShowCancelButton(input: {
+  cancelWindowOpen: CancelWindowState;
+  done: boolean;
   cancelRequested: boolean;
 }): boolean {
-  if (input.cancelWindowOpen !== true) return false;
-  if (input.done) return false;
-  if (input.cancelRequested) return false;
-  return true;
+  return cancelControlView(input) === "action";
 }
 
 /** 受付口が閉じたときの説明。⚠**黙って消さない**。 */
