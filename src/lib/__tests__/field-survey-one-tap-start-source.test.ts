@@ -34,8 +34,9 @@ describe("1. 巡回開始で位置記録も始まる", () => {
   it("巡回が始まった遷移で自動開始を予約する", () => {
     // 開始 (prevId === null && nextId !== null) の時だけ予約する。
     // 別巡回への切替や終了で走らせない。
+    // 第1弾 B2: 寄せ予約は寿命つき helper(armAutoCenterOnStart)経由に変わった。
     expect(MAP_SRC).toMatch(
-      /autoStartRecordingRef\.current = true[\s\S]{0,200}autoCenterOnStartRef\.current = true/,
+      /autoStartRecordingRef\.current = true[\s\S]{0,300}armAutoCenterOnStart\(\)/,
     );
   });
 
@@ -55,7 +56,7 @@ describe("1. 巡回開始で位置記録も始まる", () => {
 
   it("巡回が終わったら予約を取り消す (次の巡回へ持ち越さない)", () => {
     const off = MAP_SRC.match(
-      /autoStartRecordingRef\.current = false;\s*\n\s*autoCenterOnStartRef\.current = false;/,
+      /autoStartRecordingRef\.current = false;\s*\n\s*cancelAutoCenterOnStart\(\);/,
     );
     expect(off).not.toBeNull();
   });
