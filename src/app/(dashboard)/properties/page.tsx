@@ -69,9 +69,6 @@ interface SuggestResult {
   address: string;
   dmStatus: string;
   importSource: string | null;
-  /** この候補が物件側の項目(住所・地番・家屋番号・不動産番号)に一致したか。
-   *  false=所有者側だけの一致(@codex #404 R3: Enter の優先規則に使う)。 */
-  propertyFieldMatch?: boolean;
   owners: Array<{
     name: string | null;
     address: string | null;
@@ -299,6 +296,12 @@ function PropertiesPageInner() {
   const [suggestResults, setSuggestResults] = useState<SuggestResult[]>([]);
   // 候補のキーボード選択(@codex #404 R2 P2)。-1 = 未選択(Enter は先頭を選ぶ)。
   const [activeSuggest, setActiveSuggest] = useState(-1);
+  // 所有者検索の小窓(@codex #404 R4 P1)。所有者名・電話は**この専用入力だけ**が
+  // 受け、POST の suggest のみに流れる=絞り込み(keyword=URL/監査)へは
+  // **構造的に**流れない。自由入力の1本化では「打ち間違えた名前(候補0件)の
+  // Enter」を絞り込みから守れない(R1→R2→R3→R4 と塞いでも別の穴が開いた)ため、
+  // 経路そのものを分けた。
+  const [ownerSearchOpen, setOwnerSearchOpen] = useState(false);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const suggestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 最後に発行した suggest query を記録する。in-flight の古いレスポンスを弾くために使う。
@@ -704,39 +707,17 @@ function PropertiesPageInner() {
     setSearchAllDraft(value);
     const kind = classifyPropertySearch(value);
     if (kind === "mgmtId") {
-      setSearchInput("");
-      setSuggestOpen(false);
       commitKeyword("");
       commitMgmtId(value);
       return;
     }
     commitMgmtId("");
-    // ⚠text を keyword に**自動では**流さない(@codex #404 R1 P1)。
-    //   keyword は URL と property_list 監査に残るため、所有者名・電話を
-    //   打った途端に PII が URL/監査へ載ってしまう。旧・所有者窓が
-    //   POST の suggest だけに送っていた保護を統合後も守る:
-    //   - 入力中は suggest(POST・PII を URL に載せない)だけを更新
-    //   - 一覧の絞り込みは **Enter の明示操作**で確定(handleUnifiedSearchSubmit)
-    //   - 打ち直し始めたら古い keyword は消す(見えない絞り込みを残さない)
-    setSearchInput(kind === "text" ? value : "");
-    if (kind === "empty") setSuggestOpen(false);
-    commitKeyword("");
-  };
-
-  /**
-   * Enter での明示確定(一覧の絞り込み)。
-   * ⚠**候補が出ている間の Enter はここへ来ない**(@codex #404 R2 P1):
-   *   候補があるときの Enter は候補の選択(=POSTのsuggestのみ・PIIがURL/監査に
-   *   載らない経路)。所有者検索は候補経由で完結する。
-   *   ここへ来るのは候補ゼロの明示絞り込みだけ=旧・住所窓と同じ意味の操作。
-   */
-  const handleUnifiedSearchSubmit = () => {
-    const value = searchAllDraft.trim();
-    setSuggestOpen(false);
-    if (classifyPropertySearch(value) !== "text") return;
-    commitKeyword.cancel();
-    setSearchText(value);
-    setPage(1);
+    // ⚠この窓は**所有者検索を受けない**(@codex #404 R4 P1)。所有者名・電話は
+    //   専用の「所有者で探す」小窓(POST の suggest のみ)が受け、keyword=
+    //   URL/property_list 監査へは構造的に流れない。placeholder もその2用途
+    //   (住所・地番/管理ID)だけを案内する。ゆえにここの text は非PII前提で
+    //   従来どおり入力しながら即時絞り込みに流せる。
+    commitKeyword(kind === "text" ? value : "");
   };
 
   // Debounce search: reset page on filter change
@@ -774,6 +755,7 @@ function PropertiesPageInner() {
     commitMgmtId.cancel();
     setSuggestOpen(false);
     setSuggestResults([]);
+    setOwnerSearchOpen(false);
     setSearchInput("");
     setSearchAllDraft("");
     setSearchText("");
@@ -1087,63 +1069,89 @@ function PropertiesPageInner() {
       <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
         {/* よく使う条件(常時表示): 検索・DM判断・担当者・リセット */}
         <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[280px]">
+        <div className="relative flex-1 min-w-[240px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
           <input
             type="text"
-            placeholder="住所・地番・所有者名・電話・管理ID(例: 120行)で検索 — Enterで一覧を絞り込み"
+            placeholder="住所・地番・管理ID(例: 120行)で一覧を絞り込み"
             value={searchAllDraft}
             onChange={(e) => handleUnifiedSearchChange(e.target.value)}
-            onKeyDown={(e) => {
-              // ⚠候補が出ている間の Enter は**候補の選択**(@codex #404 R2 P1/P2)。
-              //   所有者名・電話は suggest(POST) 経由で完結し、keyword(URL/監査)へ
-              //   落ちない。矢印で選び、未選択の Enter は先頭候補を開く(旧仕様)。
-              if (e.key === "ArrowDown" && suggestResults.length > 0) {
-                e.preventDefault();
-                setSuggestOpen(true);
-                setActiveSuggest((i) => Math.min(i + 1, suggestResults.length - 1));
-                return;
-              }
-              if (e.key === "ArrowUp" && suggestOpen) {
-                e.preventDefault();
-                setActiveSuggest((i) => Math.max(i - 1, -1));
-                return;
-              }
-              if (e.key === "Escape" && suggestOpen) {
-                e.preventDefault();
-                setSuggestOpen(false);
-                setActiveSuggest(-1);
-                return;
-              }
-              if (e.key === "Enter") {
-                e.preventDefault();
-                if (suggestOpen && suggestResults.length > 0) {
-                  // ⚠優先規則(@codex #404 R3 P1):
-                  //   1. 矢印で**明示選択**していれば、その候補を開く
-                  //   2. 候補が**所有者側だけ**に一致(=住所・地番等に一致し得ない
-                  //      入力)なら先頭候補を開く(PIIをkeywordへ落とさない)
-                  //   3. それ以外(物件側に一致する入力)は**一覧の絞り込み**
-                  //      =本来のEnter。住所・地番のEnterを候補が乗っ取らない。
-                  const ownerOnlyMatches = suggestResults.every(
-                    (r) => !r.propertyFieldMatch,
-                  );
-                  if (activeSuggest >= 0 || ownerOnlyMatches) {
-                    const pick =
-                      suggestResults[activeSuggest >= 0 ? activeSuggest : 0];
-                    setSuggestOpen(false);
-                    setActiveSuggest(-1);
-                    router.push(`/properties/${pick.id}`);
-                    return;
-                  }
-                }
-                handleUnifiedSearchSubmit();
-              }
-            }}
-            onBlur={() => setSuggestOpen(false)}
-            onFocus={() => { if (suggestResults.length > 0) setSuggestOpen(true); }}
             className="w-full rounded-md border border-gray-300 py-2 pl-9 pr-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
           />
-          {suggestOpen && suggestResults.length > 0 && (
+        </div>
+
+        {/* 所有者で探す(@codex #404 R4 P1): 所有者名・電話は**この小窓だけ**が受け、
+            POST の suggest のみに流れる=URL・property_list 監査に載らない。
+            絞り込み窓と経路を分けることで、打ち間違い(候補0件)でも漏れない。 */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => {
+              setOwnerSearchOpen((v) => {
+                const next = !v;
+                if (!next) {
+                  setSuggestOpen(false);
+                  setActiveSuggest(-1);
+                }
+                return next;
+              });
+            }}
+            aria-expanded={ownerSearchOpen}
+            className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            title="所有者名・電話番号から物件を開く(一覧の絞り込みには使いません)"
+          >
+            所有者で探す{ownerSearchOpen ? " ▴" : " ▾"}
+          </button>
+          {ownerSearchOpen && (
+            <div className="absolute left-0 top-full z-50 mt-1 w-[360px] max-w-[90vw] rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-800 dark:bg-gray-900">
+              <p className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
+                所有者名・電話番号で候補を出し、選ぶと物件を開きます(一覧は絞りません)
+              </p>
+              <div className="relative">
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="所有者名・電話番号で検索"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowDown" && suggestResults.length > 0) {
+                      e.preventDefault();
+                      setSuggestOpen(true);
+                      setActiveSuggest((i) => Math.min(i + 1, suggestResults.length - 1));
+                      return;
+                    }
+                    if (e.key === "ArrowUp" && suggestOpen) {
+                      e.preventDefault();
+                      setActiveSuggest((i) => Math.max(i - 1, -1));
+                      return;
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setOwnerSearchOpen(false);
+                      setSuggestOpen(false);
+                      setActiveSuggest(-1);
+                      return;
+                    }
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      // ⚠候補が無い Enter は**何もしない**(この入力は絞り込みへ
+                      //   一切流れない=打ち間違いの名前が URL/監査に残らない)。
+                      if (suggestOpen && suggestResults.length > 0) {
+                        const pick =
+                          suggestResults[activeSuggest >= 0 ? activeSuggest : 0];
+                        setOwnerSearchOpen(false);
+                        setSuggestOpen(false);
+                        setActiveSuggest(-1);
+                        router.push(`/properties/${pick.id}`);
+                      }
+                    }
+                  }}
+                  onBlur={() => setSuggestOpen(false)}
+                  onFocus={() => { if (suggestResults.length > 0) setSuggestOpen(true); }}
+                  className="w-full rounded-md border border-gray-300 py-2 px-3 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
+                />
+                {suggestOpen && suggestResults.length > 0 && (
             <ul className="absolute left-0 top-full z-50 mt-1 w-full min-w-[320px] rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-800 dark:bg-gray-900">
               {suggestResults.map((item) => (
                 <li key={item.id}>
@@ -1196,6 +1204,9 @@ function PropertiesPageInner() {
                 </li>
               ))}
             </ul>
+          )}
+              </div>
+            </div>
           )}
         </div>
 

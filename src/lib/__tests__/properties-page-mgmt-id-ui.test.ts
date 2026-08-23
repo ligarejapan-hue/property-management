@@ -25,7 +25,9 @@ describe("properties page: 管理ID 検索欄", () => {
   it("統合検索窓の placeholder が管理IDにも触れ、行サフィックスの例を示す", () => {
     // UI一貫性 第1弾(1): 専用窓は廃止し統合窓に。素の数字は地番と曖昧なため
     // 管理ID扱いは「120行」等の明確な構文のみ(placeholder で例示して教える)。
-    expect(pageSrc).toMatch(/placeholder="住所・地番・所有者名・電話・管理ID/);
+    // R4 で所有者検索を専用の小窓に分離したため、絞り込み窓の placeholder は
+    // 住所・地番・管理ID の3用途になった。
+    expect(pageSrc).toMatch(/placeholder="住所・地番・管理ID/);
     expect(pageSrc).toMatch(/例: 120行/);
   });
 

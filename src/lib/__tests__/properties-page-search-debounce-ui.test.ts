@@ -48,32 +48,6 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     expect(pageSrc).toMatch(/commitMgmtId\(""\)/);
   });
 
-  it("⚠text 入力を keyword に自動コミットしない(所有者PIIをURL/監査に載せない・@codex #404 R1 P1)", () => {
-    // 入力中に流してよいのは suggest(POST) と mgmtId(非PII構文)だけ。
-    // keyword の確定は Enter(handleUnifiedSearchSubmit)の明示操作のみ。
-    // ⚠onChange ハンドラ内の commitKeyword は**全て空文字**であること。
-    //   /commitKeyword\(value\)/ の不在だけでは、三項演算子
-    //   (commitKeyword(kind === "text" ? value : "")) の形で漏れが再発しても
-    //   捕まえられない(変異実測ですり抜けた)。
-    const hAt = pageSrc.indexOf("const handleUnifiedSearchChange");
-    const hEnd = pageSrc.indexOf("const handleUnifiedSearchSubmit");
-    expect(hAt).toBeGreaterThan(-1);
-    expect(hEnd).toBeGreaterThan(hAt);
-    const handler = pageSrc.slice(hAt, hEnd);
-    const commits = handler.match(/commitKeyword\([^)]*\)/g) ?? [];
-    expect(commits.length).toBeGreaterThan(0);
-    for (const c of commits) {
-      expect(c).toBe('commitKeyword("")');
-    }
-    expect(pageSrc).toMatch(/handleUnifiedSearchSubmit/);
-    // Enter 側でだけ確定する(直接 setSearchText)。
-    const at = pageSrc.indexOf("const handleUnifiedSearchSubmit");
-    expect(at).toBeGreaterThan(-1);
-    const body = pageSrc.slice(at, at + 700);
-    expect(body).toContain("setSearchText(value)");
-    expect(body).toContain('classifyPropertySearch(value) !== "text"');
-  });
-
   it("⚠旧ブックマーク(keyword+mgmtId両方)は見える方(keyword)だけ復元する(@codex #404 R1 P2)", () => {
     expect(pageSrc).toMatch(
       /sp\.get\("keyword"\) \? "" : \(sp\.get\("mgmtId"\) \?\? ""\)/,
@@ -105,46 +79,50 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
   });
 });
 
-describe("候補優先のEnter(@codex #404 R2 P1/P2)", () => {
-  it("Enter の優先規則: 明示選択 or 所有者だけの一致→候補を開く / 物件側に一致し得る入力→一覧絞り込み", () => {
-    // @codex #404 R3 P1: suggest は住所・地番でも一致するため、「候補があれば
-    // Enter=移動」は本来の絞り込み操作を乗っ取っていた。所有者側だけの一致
-    // (propertyFieldMatch が全て false)のときに限り候補を優先する。
-    expect(pageSrc).toContain("ownerOnlyMatches");
-    expect(pageSrc).toContain("!r.propertyFieldMatch");
-    expect(pageSrc).toContain("activeSuggest >= 0 || ownerOnlyMatches");
-    // server 側が一致種別を返す(生値は返さない)。
-    const route = fs.readFileSync(
-      path.resolve(process.cwd(), "src/app/api/properties/suggest/route.ts"),
-      "utf8",
-    );
-    expect(route).toContain("propertyFieldMatch:");
-    expect(route).toContain("hitsProperty(p.lotNumber)");
+describe("所有者検索の構造分離(@codex #404 R1〜R4 P1 の最終形)", () => {
+  // 経緯: 自由入力の1本化では「打ち間違えた所有者名(候補0件)の Enter」を
+  // 絞り込み(keyword=URL/property_list 監査)から守れなかった(R1→R2→R3→R4 と
+  // 塞いでも別の穴が開いた)。→ 経路そのものを分ける:
+  //   絞り込み窓 = 住所・地番・管理ID だけ(非PII前提・即時絞り込み)
+  //   所有者検索 = 専用の小窓(POST の suggest のみ・keyword へ構造的に流れない)
+
+  it("絞り込み窓の placeholder は所有者・電話を案内しない", () => {
+    expect(pageSrc).toMatch(/placeholder="住所・地番・管理ID\(例: 120行\)で一覧を絞り込み"/);
+    expect(pageSrc).not.toMatch(/placeholder="[^"]*所有者[^"]*絞り込み/);
   });
 
-  it("候補が出ている間の Enter は候補を開き、keyword を確定しない", () => {
-    // 所有者検索は suggest(POST) 経由で完結=PII が URL/監査へ落ちない。
-    const at = pageSrc.indexOf('if (e.key === "Enter")');
+  it("⚠所有者検索の入力(searchInput)は keyword へ一切流れない(構造の固定)", () => {
+    // searchInput を setSearchText / commitKeyword に渡す行が存在しないこと。
+    expect(pageSrc).not.toMatch(/setSearchText\(\s*searchInput/);
+    expect(pageSrc).not.toMatch(/commitKeyword\(\s*searchInput/);
+    // 統合ハンドラは suggest(searchInput)に触らない(所有者検索は別経路)。
+    const hAt = pageSrc.indexOf("const handleUnifiedSearchChange");
+    const hEnd = pageSrc.indexOf("};", hAt);
+    const handler = pageSrc.slice(hAt, hEnd);
+    expect(handler).not.toContain("setSearchInput");
+  });
+
+  it("所有者検索の小窓: 候補が無い Enter は何もしない(打ち間違いを漏らさない)", () => {
+    const at = pageSrc.indexOf("所有者名・電話番号で検索");
     expect(at).toBeGreaterThan(-1);
-    // ⚠幅は固定長でなく submit 呼び出しまで(コメント追記で伸びても切れない)。
-    const end = pageSrc.indexOf("handleUnifiedSearchSubmit()", at);
-    expect(end).toBeGreaterThan(at);
-    const branch = pageSrc.slice(at, end + 40);
-    expect(branch).toContain("suggestOpen && suggestResults.length > 0");
-    expect(branch).toMatch(/router\.push\(`\/properties\/\$\{pick\.id\}`\)/);
-    // 候補ありの分岐は submit(=setSearchText)へ落ちずに return する。
-    const candidateBlock = branch.slice(
-      branch.indexOf("suggestOpen && suggestResults.length > 0"),
-      branch.indexOf("handleUnifiedSearchSubmit()"),
-    );
-    expect(candidateBlock).toContain("return;");
-    expect(candidateBlock).not.toContain("setSearchText");
+    const block = pageSrc.slice(at, at + 2600);
+    expect(block).toContain('if (suggestOpen && suggestResults.length > 0)');
+    // Enter 分岐に setSearchText / commitKeyword が無い。
+    expect(block).not.toContain("setSearchText");
+    expect(block).not.toContain("commitKeyword");
   });
 
-  it("矢印キーで候補を選べる(キーボード操作の回復)", () => {
+  it("所有者検索は矢印で候補を選べる(キーボード操作)", () => {
     expect(pageSrc).toContain('e.key === "ArrowDown"');
     expect(pageSrc).toContain('e.key === "ArrowUp"');
     expect(pageSrc).toContain('e.key === "Escape"');
     expect(pageSrc).toContain("activeSuggest");
+  });
+
+  it("絞り込み窓の text は従来どおり入力しながら即時絞り込み(300ms debounce)", () => {
+    const hAt = pageSrc.indexOf("const handleUnifiedSearchChange");
+    const hEnd = pageSrc.indexOf("};", hAt);
+    const handler = pageSrc.slice(hAt, hEnd);
+    expect(handler).toContain('commitKeyword(kind === "text" ? value : "")');
   });
 });

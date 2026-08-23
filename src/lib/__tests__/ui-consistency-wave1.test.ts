@@ -15,10 +15,20 @@ const read = (p: string) =>
 const PAGE = read("src/app/(dashboard)/properties/page.tsx");
 
 describe("(1) 検索窓の統合", () => {
-  it("物件一覧の検索 input は1本だけ(3連に戻さない)", () => {
-    // placeholder に「検索」を含む input の数で数える。
-    const boxes = PAGE.match(/placeholder="[^"]*検索[^"]*"/g) ?? [];
+  it("常時表示の検索系 input は絞り込み窓の1本だけ(3連に戻さない)", () => {
+    // 所有者検索は「所有者で探す」小窓の中(ownerSearchOpen のときだけ描画)。
+    // 常時並ぶ入力が1本であることを、小窓ブロックを除いた本文で数える。
+    // ⚠語はハンドラのコメントにも出るため、JSX ブロックのマーカーで切る。
+    const popAt = PAGE.indexOf("{/* 所有者で探す");
+    expect(popAt).toBeGreaterThan(-1);
+    const popEnd = PAGE.indexOf("</div>\n\n        <select", popAt);
+    const withoutPopover =
+      PAGE.slice(0, popAt) + (popEnd > 0 ? PAGE.slice(popEnd) : "");
+    const boxes = withoutPopover.match(/placeholder="[^"]*(検索|絞り込み)[^"]*"/g) ?? [];
     expect(boxes).toHaveLength(1);
+    // 小窓側の専用入力は存在する(用途がラベルで分かる)。
+    expect(PAGE).toContain('placeholder="所有者名・電話番号で検索"');
+    expect(PAGE).toContain("ownerSearchOpen");
   });
 
   it("旧・専用窓の状態(searchDraft/mgmtIdDraft)が残っていない", () => {

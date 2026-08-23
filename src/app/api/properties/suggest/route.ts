@@ -125,13 +125,6 @@ export async function POST(request: NextRequest) {
       select: {
         id: true,
         address: true,
-        // ⚠一致判定用(応答には生値を出さない)。候補が「物件側の項目
-        //   (住所・地番・家屋番号・不動産番号)に一致したのか、所有者側だけか」を
-        //   client が見分けるため(@codex #404 R3 P1: 所有者だけに一致したときの
-        //   Enter は候補を開き、物件側に一致し得る入力の Enter は一覧絞り込み)。
-        lotNumber: true,
-        realEstateNumber: true,
-        buildingNumber: true,
         dmStatus: true,
         propertyOwners: {
           select: {
@@ -181,19 +174,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const qLower = q.toLowerCase();
-    const hitsProperty = (v: string | null): boolean =>
-      typeof v === "string" && v.toLowerCase().includes(qLower);
     const data = properties.map((p) => ({
       id: p.id,
       address: p.address,
       dmStatus: p.dmStatus,
-      // 物件側フィールドへの一致(生値は返さない・boolean のみ)。
-      propertyFieldMatch:
-        hitsProperty(p.address) ||
-        hitsProperty(p.lotNumber) ||
-        hitsProperty(p.realEstateNumber) ||
-        hitsProperty(p.buildingNumber),
       importSource: importSourceMap.get(p.id) ?? null,
       owners: p.propertyOwners.map(({ owner: o }) =>
         hasOwnerRead && displayConfig
