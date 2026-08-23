@@ -113,7 +113,7 @@ vi.mock("@/lib/prisma", () => {
     propertyOwner: { findFirst: vi.fn(), create: vi.fn() },
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
-    attachment: { create: vi.fn(), findFirst: vi.fn() },
+    attachment: { create: vi.fn(), findFirst: vi.fn(), count: vi.fn() },
     auditLog: { findFirst: vi.fn(), create: vi.fn() },
   };
   // link の親行ロック(#364 R10)で $transaction/$queryRaw を実行するため、
@@ -166,9 +166,10 @@ const pm = prisma as unknown as {
   propertyOwner: { findFirst: Mock; create: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
-  attachment: { create: Mock };
+  attachment: { create: Mock; findFirst: Mock; count: Mock };
   auditLog: { findFirst: Mock; create: Mock };
   $transaction: Mock;
+  $queryRaw: Mock;
 };
 
 function uploadMock(): Mock {
@@ -254,6 +255,7 @@ beforeEach(() => {
   pm.importJob.update.mockResolvedValue({});
   pm.importJobRow.create.mockResolvedValue({});
   pm.attachment.create.mockResolvedValue({ id: "att-1" });
+  pm.attachment.count.mockResolvedValue(0);
   pm.owner.findMany.mockResolvedValue([]);
   pm.owner.create.mockResolvedValue({ id: "owner-x" });
   pm.owner.updateMany.mockResolvedValue({ count: 1 });
@@ -329,16 +331,44 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
     expect(provider.fetchRegistryPdf).not.toHaveBeenCalled();
   });
 
-  it("expectedFingerprint 指定時は lock の where に指紋フィールドを含める（@codex P2 atomic）", async () => {
+  it("購入ロックは『FOR UPDATE → 新しい文で読む → 判定 → update』の順（@codex #402 Blocker）", async () => {
+    // ⚠旧方式(条件を updateMany の一文に埋め込む)は READ COMMITTED で
+    //   待っている間にコミットされた添付が見えなかった(PostgreSQL 18 で実再現)。
+    //   ロック後の**新しい文**で読み、同一 tx 内で判定と更新を行う。
     const provider = successProvider();
     setProperty({ realEstateNumber: null, address: "所在X", lotNumber: "1", buildingNumber: "2" });
     const fp = fingerprintProperty({ address: "所在X", lotNumber: "1", buildingNumber: "2", realEstateNumber: null });
+    const order: string[] = [];
+    pm.$queryRaw.mockImplementation(async () => {
+      order.push("lock");
+      return [{ id: PROP_ID }];
+    });
+    const origFind = pm.property.findUnique.getMockImplementation();
+    pm.property.findUnique.mockImplementation(async (...a: unknown[]) => {
+      order.push("read");
+      return origFind ? origFind(...a) : null;
+    });
+    pm.attachment.count.mockImplementation(async () => {
+      order.push("count");
+      return 0;
+    });
+    pm.property.update.mockImplementation(async () => {
+      order.push("update");
+      return {};
+    });
     await runRegistryAutoFetch(
       { session: SESSION, propertyId: PROP_ID, confirmed: true, realEstateNumber: "CAND-REN", expectedFingerprint: fp },
       provider,
     );
-    const lockWhere = (pm.property.updateMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
-    expect(lockWhere).toMatchObject({ address: "所在X", lotNumber: "1", buildingNumber: "2", realEstateNumber: null });
+    // ⚠先頭の read は tx **前**の事前読み(対象特定)。プロトコルの約束は
+    //   「lock の後に読み直し(read/count)があり、その後に scheduled 更新」。
+    const lockAt = order.indexOf("lock");
+    expect(lockAt).toBeGreaterThan(-1);
+    const after = order.slice(lockAt);
+    const updateAt = after.indexOf("update");
+    expect(updateAt).toBeGreaterThan(-1);
+    expect(after.slice(0, updateAt)).toContain("read");
+    expect(after.slice(0, updateAt)).toContain("count");
   });
 
   it("lock 失敗(count=0)で再読込の指紋が不一致なら 409 CANDIDATE_NOT_FOUND（@codex P2）", async () => {
@@ -398,12 +428,14 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
   it("6. 成功時に registryStatus が scheduled→obtained に更新される（version 楽観ロック）", async () => {
     const provider = successProvider();
     const body = await runLib({ provider });
-    const lockCall = pm.property.updateMany.mock.calls.find(
+    // #402: 予約(scheduled)は FOR UPDATE 保持中の update で立つ(where 条件は
+    //   ロック後の読み直し + decidePurchaseLock が代替)。
+    const lockCall = pm.property.update.mock.calls.find(
       (c) => c[0]?.data?.registryStatus === "scheduled",
     );
     expect(lockCall).toBeTruthy();
-    expect(lockCall![0].where.version).toBe(3);
-    expect(lockCall![0].where.registryStatus).toEqual({ not: "scheduled" });
+    expect(lockCall![0].where).toEqual({ id: PROP_ID });
+    expect(lockCall![0].data.version).toEqual({ increment: 1 });
     expect(pm.property.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: PROP_ID },
@@ -443,9 +475,12 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
     expect(pm.importJob.create).not.toHaveBeenCalled();
   });
 
-  it("7b. 楽観ロック競合（updateMany count=0）でも 409・provider 未到達", async () => {
+  it("7b. 楽観ロック競合（ロック後の読み直しで version 不一致）でも 409・provider 未到達", async () => {
     const provider = successProvider();
-    pm.property.updateMany.mockResolvedValue({ count: 0 });
+    // #402: 競合は「FOR UPDATE を取って読み直したら version が進んでいた」形で現れる。
+    pm.property.findUnique
+      .mockResolvedValueOnce({ id: PROP_ID, createdBy: "user-1", assignedTo: null, registryStatus: "unconfirmed", version: 3, realEstateNumber: "1234567890123", address: null, lotNumber: null, buildingNumber: null })
+      .mockResolvedValueOnce({ registryStatus: "unconfirmed", version: 4, realEstateNumber: "1234567890123", address: null, lotNumber: null, buildingNumber: null, _count: { propertyOwners: 0 } });
     await expect(runLib({ provider })).rejects.toMatchObject({
       status: 409,
       code: "REGISTRY_AUTO_FETCH_ALREADY_RUNNING",
@@ -462,9 +497,11 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
       code: "REGISTRY_AUTO_FETCH_PROVIDER_ERROR",
     });
     expect(spy).toHaveBeenCalledTimes(1);
-    const calls = pm.property.updateMany.mock.calls;
-    const lock = calls.find((c) => c[0]?.data?.registryStatus === "scheduled");
-    const release = calls.find(
+    // #402: 予約は update(scheduled)・解除は従来どおり updateMany(previous へ)。
+    const lock = pm.property.update.mock.calls.find(
+      (c) => c[0]?.data?.registryStatus === "scheduled",
+    );
+    const release = pm.property.updateMany.mock.calls.find(
       (c) => c[0]?.data?.registryStatus === "unconfirmed",
     );
     expect(lock).toBeTruthy();
@@ -472,7 +509,11 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
     expect(release![0].where.registryStatus).toBe("scheduled");
     // processRegistryPdf には進まない / obtained にもしない
     expect(pm.importJob.create).not.toHaveBeenCalled();
-    expect(pm.property.update).not.toHaveBeenCalled();
+    expect(
+      pm.property.update.mock.calls.find(
+        (c) => c[0]?.data?.registryStatus === "obtained",
+      ),
+    ).toBeUndefined();
   });
 
   it("I-1. not_found は業務的 not found ゆえ 404（upstream 障害扱いの 502 にしない・リトライ誤認回避）", async () => {
@@ -487,7 +528,13 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
     );
     expect(release).toBeTruthy();
     expect(pm.importJob.create).not.toHaveBeenCalled();
-    expect(pm.property.update).not.toHaveBeenCalled();
+    // #402: 予約が update(scheduled) になったため「update 不使用」ではなく
+    //   「obtained にしない」を見る。
+    expect(
+      pm.property.update.mock.calls.find(
+        (c) => c[0]?.data?.registryStatus === "obtained",
+      ),
+    ).toBeUndefined();
   });
 
   it("I-1. 他の provider 失敗コードの HTTP ステータスは不変（timeout=504/rate_limited=429/auth_failed=502/provider_error=502）", async () => {
@@ -1417,6 +1464,17 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
         lotNumber: "69-2",
         buildingNumber: null,
       })
+      // #402: ロック時の読み直し(新設)では**まだ変わっていない**。
+      //   この場面は「provider 取得の最中に書き換わった」を検証する。
+      .mockResolvedValueOnce({
+        registryStatus: "unconfirmed",
+        version: 5,
+        address: "テスト市テスト町一丁目",
+        lotNumber: "69-2",
+        buildingNumber: null,
+        realEstateNumber: null,
+        _count: { propertyOwners: 0 },
+      })
       .mockResolvedValueOnce({
         address: "テスト市テスト町二丁目", // 取込で書き換わった
         lotNumber: "69-2",
@@ -1438,32 +1496,47 @@ describe("【回収】購入済みの謄本を再課金なしで取り込む(mod
     expect(pm.attachment.create).not.toHaveBeenCalled();
   });
 
-  it("⚠回収のロックは取得キー項目も条件に含める(検査の後に変わっても掴まない)", async () => {
+  it("⚠回収でも、ロック後の読み直しで取得キー項目が変わっていたら掴まない", async () => {
     // 確認時点の検査を通っても、その後に version を上げない経路で所在や地番が
     // 変わると、別の対象になった物件にPDFを貼ってしまう(@codex #394 R24 P1)。
-    setProperty({
-      address: "テスト市テスト町一丁目",
-      lotNumber: "69-2",
-      version: 5,
-    });
+    // #402: かつては updateMany の where に埋めていたが、READ COMMITTED の
+    //   スナップショット問題(Blocker)により「FOR UPDATE → 新しい文で読み直し →
+    //   判定」に置き換えた。読み直しが変化を見たら 409・provider 未到達。
+    pm.property.findUnique
+      .mockResolvedValueOnce({
+        id: PROP_ID,
+        createdBy: "user-1",
+        assignedTo: null,
+        registryStatus: "unconfirmed",
+        version: 5,
+        realEstateNumber: null,
+        address: "テスト市テスト町一丁目",
+        lotNumber: "69-2",
+        buildingNumber: null,
+      })
+      .mockResolvedValueOnce({
+        registryStatus: "unconfirmed",
+        version: 5,
+        address: "テスト市テスト町三丁目", // ロック直前に書き換わった
+        lotNumber: "69-2",
+        buildingNumber: null,
+        realEstateNumber: null,
+        _count: { propertyOwners: 0 },
+      });
+    const provider = recoverProvider();
     const { promise } = runRecover({
       locationCandidate: null,
       recoverExpectedVersion: 5,
       recoverExpectedIdentifier: "69-2",
       recoverExpectedAddress: "テスト市テスト町一丁目",
+      provider,
     });
-    await promise;
-    const lockCall = pm.property.updateMany.mock.calls.find(
-      (c) =>
-        (c[0] as { data?: { registryStatus?: unknown } })?.data
-          ?.registryStatus === "scheduled",
-    );
-    expect(lockCall).toBeDefined();
-    expect((lockCall![0] as { where: Record<string, unknown> }).where).
-      toMatchObject({
-        address: "テスト市テスト町一丁目",
-        lotNumber: "69-2",
-      });
+    await expect(promise).rejects.toMatchObject({
+      status: 409,
+      code: "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND",
+    });
+    expect(provider.recoverRegistryPdf).not.toHaveBeenCalled();
+    expect(pm.attachment.create).not.toHaveBeenCalled();
   });
 
   it("⚠所在だけが書き換わっていても取り込まない(版番号が上がらない経路がある)", async () => {

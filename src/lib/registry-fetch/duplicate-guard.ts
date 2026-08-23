@@ -1,22 +1,20 @@
 /**
- * 「承認したときに警告が無かったもの」を、課金を直列化するロックと**同じ一文**で検査する条件。
+ * 有料取得の**二重課金ガード**。
  *
- * ⚠なぜ要るか（@codex #399 R5 P2）: 画面が課金の直前に取り直す警告は**別の問い合わせ**なので、
- *   相手の処理（謄本PDFの添付・所有者の紐付け）がまだ確定していない一瞬に読むと
- *   「警告なし」と返る。その直後に相手が確定すると、**既にある謄本をもう一度買ってしまう**。
- *   条件をロックの一文に混ぜれば、相手が物件行を押さえている間はこちらが待たされ、
- *   相手の確定後に条件が評価し直されて弾ける（物件配下の書き込みは親行を先にロックする規約）。
- * ⚠**承認した項目だけ**を条件にする。警告を見たうえで意図して買い直す運用は従来どおり許す
- *   （事前警告は「警告のみ・実行はブロックしない」設計）。
+ * 方式 (@codex #402 Blocker で確立):
+ *   親の物件行を FOR UPDATE でロック → **新しい文**で現況を読む →
+ *   `decidePurchaseLock`(純関数)で判定 → 同一 tx 内で予約(scheduled)を立てる。
  *
- * ⚠**この検査の限界（@codex #399 R7 P2・2026-08-21 発注者判断で別件に切り出し）**:
- *   完全な直列化には「謄本PDFを登録する側も親の物件行を先にロックする」ことが要る。
- *   **実測: `src/app/api/properties/[id]/attachments/route.ts` は親行をロックしない**
- *   （`prisma.attachment.create` を単独実行）。そのため、添付の作成が**確定する直前**に
- *   このロックが通ると、ミリ秒単位ですり抜ける余地が残る。
- *   ⇒ 窓は「承認から課金までの数秒」から「確定直前のミリ秒」まで縮んだが、ゼロではない。
- *   ⇒ 消すには**添付を登録する全経路に親行ロックを入れる**（汎用の添付処理＝写真等も通る道に
- *      触るため、デッドロックの検討を含めて別PRで丁寧に行う）。
+ * ⚠かつては条件を updateMany の一文(where 断片)に埋め込んでいたが、
+ *   PostgreSQL の READ COMMITTED では「待ちの後の再評価は相手が行を書き換えた
+ *   場合にしか起きない」「副問い合わせは文の開始時点のスナップショットで評価される」
+ *   ため、待っている間にコミットされた添付が**原理的に見えなかった**
+ *   (レビューが PostgreSQL 18 で実再現)。その方式(buildApprovedDuplicateGuard)は
+ *   誤って再利用されないよう**削除済み**。
+ * ⚠この方式が成立する前提=**添付を登録する全経路が親の物件行を先にロックする**
+ *   (#402・走査テスト attachment-create-parent-lock.test.ts が全出現を守る)。
+ * ⚠**承認した項目だけ**を検査する。警告を見たうえで意図して買い直す運用は許す
+ *   (事前警告は「警告のみ・実行はブロックしない」設計)。
  */
 export interface ApprovedPreflightFlags {
   /** 承認時、登記状況が「取得済」だったか。 */
@@ -27,32 +25,73 @@ export interface ApprovedPreflightFlags {
   hasOwners: boolean;
 }
 
-/** ⚠Prisma の列挙型に合わせる（string[] だと where に渡せない）。 */
-export type BlockedRegistryStatus = "scheduled" | "obtained";
+/** 購入ロックの判定結果。 */
+export type PurchaseLockDecision =
+  /** 進んでよい(予約を立てる)。 */
+  | { kind: "proceed" }
+  /** 承認時に無かったもの(取得済/謄本PDF/所有者)が現れた=もう持っている。 */
+  | { kind: "duplicate_appeared" }
+  /** 検索キー項目(指紋)が変わった=別の対象になった。 */
+  | { kind: "fingerprint_changed" }
+  /** 予約中 or 並行更新(version 不一致) or 行が無い。 */
+  | { kind: "already_running" };
 
-export interface ApprovedDuplicateGuard {
-  registryStatus?: { notIn: BlockedRegistryStatus[] };
-  attachments?: { none: { targetType: string; type: string; isDeleted: boolean } };
-  propertyOwners?: { none: Record<string, never> };
-}
-
-export function buildApprovedDuplicateGuard(
-  approved: ApprovedPreflightFlags | null | undefined,
-): ApprovedDuplicateGuard {
-  if (!approved) return {};
-  const guard: ApprovedDuplicateGuard = {};
-  if (!approved.registryObtained) {
-    // ⚠既存の二重実行ガード(scheduled を除く)を**弱めない**よう、両方を外す。
-    guard.registryStatus = { notIn: ["scheduled", "obtained"] as BlockedRegistryStatus[] };
+/**
+ * 購入の予約を立ててよいかの判定 (@codex #402 Blocker)。
+ *
+ * ⚠**入力は「親の物件行を FOR UPDATE でロックした後に、新しい文で読んだ値」**で
+ *   なければならない。かつての実装は条件を UPDATE の一文に埋め込んでいたが、
+ *   PostgreSQL の READ COMMITTED では:
+ *   (1) 待ちの後の再評価(EvalPlanQual)は**相手が行を書き換えた場合**にしか起きない
+ *       (添付側はロックするだけ=書き換えない)
+ *   (2) 起きたとしても、別テーブルへの副問い合わせ(添付の有無)は
+ *       **文の開始時点のスナップショット**で評価される
+ *   ため、待っている間にコミットされた添付が**原理的に見えなかった**
+ *   (レビューが PostgreSQL 18 で再現)。ロック→**新しい文**で読む→この関数で判定→
+ *   同一 tx 内で更新、の順なら必ず見える。
+ *
+ * ⚠**判定の優先順位**: 重複 > 指紋 > 実行中。
+ *   「実行中です」と言われた利用者は待って押し直すが、重複なら**もう持っている**
+ *   のだから待っても解決しない(@codex #399 R5 P2 の弁別を引き継ぐ)。
+ * ⚠approved が null(番号購入・回収)なら重複検査はしない(従来どおり)。
+ *   approved=true の項目も検査しない(警告を見て意図して買い直す運用を許す)。
+ */
+export function decidePurchaseLock(input: {
+  /** ロック後の読み直しで行が見つかったか。 */
+  found: boolean;
+  /** ロック後の registryStatus。 */
+  registryStatus: string | null;
+  /** ロック後の version が、事前読みの version と一致するか。 */
+  versionMatches: boolean;
+  /** 検索キー項目(指紋)の一致が要求されているか。 */
+  fingerprintRequired: boolean;
+  /** ロック後の指紋が期待値と一致するか(要求されていない場合は無視)。 */
+  fingerprintMatches: boolean;
+  /** 承認時の警告状態(null = 重複検査をしない経路)。 */
+  approved: ApprovedPreflightFlags | null;
+  /** ロック後: 登記状況が「取得済」か。 */
+  obtainedNow: boolean;
+  /** ロック後: 謄本PDF(未削除)が添付されているか。 */
+  hasRegistryAttachmentNow: boolean;
+  /** ロック後: 所有者が1名以上いるか。 */
+  hasOwnersNow: boolean;
+}): PurchaseLockDecision {
+  if (input.approved) {
+    const appeared =
+      (!input.approved.registryObtained && input.obtainedNow) ||
+      (!input.approved.hasRegistryAttachment && input.hasRegistryAttachmentNow) ||
+      (!input.approved.hasOwners && input.hasOwnersNow);
+    if (appeared) return { kind: "duplicate_appeared" };
   }
-  if (!approved.hasRegistryAttachment) {
-    // ⚠事前確認(preflight)と**同じ述語**にする。片方だけ変えるとずれる。
-    guard.attachments = {
-      none: { targetType: "property", type: "registry", isDeleted: false },
-    };
+  if (input.fingerprintRequired && (!input.found || !input.fingerprintMatches)) {
+    return { kind: "fingerprint_changed" };
   }
-  if (!approved.hasOwners) {
-    guard.propertyOwners = { none: {} };
+  if (
+    !input.found ||
+    input.registryStatus === "scheduled" ||
+    !input.versionMatches
+  ) {
+    return { kind: "already_running" };
   }
-  return guard;
+  return { kind: "proceed" };
 }

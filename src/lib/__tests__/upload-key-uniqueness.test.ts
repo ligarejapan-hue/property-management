@@ -83,15 +83,20 @@ vi.mock("@/lib/storage", () => {
   };
 });
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
+vi.mock("@/lib/prisma", () => {
+  const db: Record<string, unknown> = {
     property: { findUnique: vi.fn() },
     propertyPhoto: { aggregate: vi.fn(), create: vi.fn() },
     building: { findUnique: vi.fn() },
     buildingPhoto: { aggregate: vi.fn(), create: vi.fn() },
     attachment: { create: vi.fn() },
-  },
-}));
+  };
+  // #402: 添付の作成は「親行ロック → tx.attachment.create」の tx 内になった。
+  // callback へ同じ db を渡す(registry-pdf-attachment.test と同型)。
+  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  db.$queryRaw = vi.fn(async () => [{ id: "p1" }]); // lockPropertyRow の実体
+  return { default: db };
+});
 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";

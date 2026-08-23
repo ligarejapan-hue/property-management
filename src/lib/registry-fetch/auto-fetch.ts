@@ -26,6 +26,7 @@ import type { ResolvedRegistryCredentials } from "@/lib/registry-fetch/config-st
 import { ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import {
   ZERO_RETRY_SLEEP_MS,
@@ -79,7 +80,7 @@ import {
 } from "@/lib/registry-fetch/shozai-dialog";
 import { processRegistryPdf, type RegistryPdfSession } from "@/lib/registry-pdf/process";
 import {
-  buildApprovedDuplicateGuard,
+  decidePurchaseLock,
   type ApprovedPreflightFlags,
 } from "@/lib/registry-fetch/duplicate-guard";
 import {
@@ -4223,98 +4224,93 @@ export async function runRegistryAutoFetch(
 
   // 5. 楽観ロック取得: version 一致 かつ まだ scheduled でない物件だけを scheduled にする。
   //    count===0 は並行取得 or バージョン変化 → 409（二重実行させない）。
-  const previousStatus = property.registryStatus;
-  const lock = await prisma.property.updateMany({
-    where: {
-      id: propertyId,
-      version: property.version,
-      registryStatus: { not: "scheduled" },
-      // @codex P2: 所在検索取得は「検索キー項目（指紋）」も一致条件に含め、read〜lock の間に
-      //   version を上げない経路（取込・PDF処理等）で編集されていても lock を失敗させる。
-      //   これで override（resolve 時の番号）は「lock した行の指紋 = resolve 時の指紋」の時だけ使う。
-      // ⚠**回収(候補なし)も同じ扱いにする**(@codex #394 R24 P1)。確認時点の検査を
-      //   通っても、その後に version を上げない経路(CSV取込の重複更新など)で所在や
-      //   地番が変わると、**別の対象になった物件**にPDFと所有者情報を貼ってしまう。
-      //   取得キーに使う項目をロック条件に入れ、変わっていたら lock を失敗させる。
-      ...(args.expectedFingerprint !== undefined || (isRecover && !args.locationCandidate)
-        ? {
-            address: property.address,
-            lotNumber: property.lotNumber,
-            buildingNumber: property.buildingNumber,
-            realEstateNumber: property.realEstateNumber,
-          }
-        : {}),
-      // @codex #399 R5 P2: **課金するときだけ**、承認時に警告が無かった項目を
-      //   このロックと同じ一文で検査する。別の問い合わせで確かめると、相手の
-      //   未確定な処理（謄本PDFの添付・所有者の紐付け）を読み落とし、
-      //   **既にある謄本をもう一度買う**。物件配下の書き込みは親行を先にロックする
-      //   規約なので、相手が押さえている間はここで待たされ、確定後に評価し直される。
-      // ⚠回収(課金なし)には掛けない。買った書類の取り込みは重複と無関係。
-      ...(willPurchaseByLocation
-        ? buildApprovedDuplicateGuard(args.approvedPreflight)
-        : {}),
-    },
-    data: { registryStatus: "scheduled", version: { increment: 1 } },
+  // ⚠**「ロック → 新しい文で読む → 判定 → 更新」を1つのトランザクションで行う**
+  //   (@codex #402 Blocker・PostgreSQL 18 で旧実装のすり抜けを実再現)。
+  //   旧実装は条件を updateMany の一文に埋め込んでいたが、READ COMMITTED では
+  //   (1) 待ちの後の再評価は相手が行を**書き換えた**場合にしか起きない
+  //       (添付側は FOR UPDATE で押さえるだけ=書き換えない)
+  //   (2) 再評価が起きても、別テーブルの副問い合わせ(添付の有無)は
+  //       **文の開始時点のスナップショット**で評価される
+  //   ため、待っている間にコミットされた添付が原理的に見えなかった。
+  //   FOR UPDATE を取った**後の新しい文**は必ず最新のコミット済みを見る
+  //   (これが添付側 #402 の親行ロックと対になる)。判定は純関数
+  //   decidePurchaseLock に集約(優先順位=重複>指紋>実行中を総当たりで固定)。
+  const fingerprintRequired =
+    args.expectedFingerprint !== undefined || (isRecover && !args.locationCandidate);
+  const lockOutcome = await prisma.$transaction(async (tx) => {
+    await lockPropertyRow(tx, propertyId);
+    // ⚠ここからの読みは**ロック後の新しい文**=待っている間の確定が必ず見える。
+    const fresh = await tx.property.findUnique({
+      where: { id: propertyId },
+      select: {
+        registryStatus: true,
+        version: true,
+        address: true,
+        lotNumber: true,
+        buildingNumber: true,
+        realEstateNumber: true,
+        _count: { select: { propertyOwners: true } },
+      },
+    });
+    const attachedNow = await tx.attachment.count({
+      where: {
+        targetType: "property",
+        targetId: propertyId,
+        type: "registry",
+        isDeleted: false,
+      },
+    });
+    const decision = decidePurchaseLock({
+      found: fresh !== null,
+      registryStatus: fresh?.registryStatus ?? null,
+      versionMatches: fresh?.version === property.version,
+      fingerprintRequired,
+      fingerprintMatches:
+        fresh !== null &&
+        (args.expectedFingerprint !== undefined
+          ? fingerprintProperty(fresh) === args.expectedFingerprint
+          : fingerprintProperty(fresh) === fingerprintProperty(property)),
+      approved:
+        willPurchaseByLocation && args.approvedPreflight
+          ? args.approvedPreflight
+          : null,
+      obtainedNow: fresh?.registryStatus === "obtained",
+      hasRegistryAttachmentNow: attachedNow > 0,
+      hasOwnersNow: (fresh?._count?.propertyOwners ?? 0) > 0,
+    });
+    if (decision.kind !== "proceed") {
+      return { decision, previousStatus: fresh?.registryStatus ?? null };
+    }
+    // FOR UPDATE を保持したままの更新=この間に誰も行を変えられない。
+    await tx.property.update({
+      where: { id: propertyId },
+      data: { registryStatus: "scheduled", version: { increment: 1 } },
+    });
+    return { decision, previousStatus: fresh!.registryStatus };
   });
-  if (lock.count === 0) {
-    // ⚠**重複で弾いたのかを先に見分ける**(@codex #399 R5 P2)。「実行中です」と言われると
-    //   利用者は待って押し直すが、実際は**もう持っている**のだから、待っても解決しない。
-    if (willPurchaseByLocation && args.approvedPreflight) {
-      const now = await prisma.property.findUnique({
-        where: { id: propertyId },
-        select: {
-          registryStatus: true,
-          _count: { select: { propertyOwners: true } },
-        },
-      });
-      const attachedNow = await prisma.attachment.count({
-        where: {
-          targetType: "property",
-          targetId: propertyId,
-          type: "registry",
-          isDeleted: false,
-        },
-      });
-      const appearedObtained =
-        !args.approvedPreflight.registryObtained &&
-        now?.registryStatus === "obtained";
-      const appearedAttachment =
-        !args.approvedPreflight.hasRegistryAttachment && attachedNow > 0;
-      const appearedOwners =
-        !args.approvedPreflight.hasOwners && (now?._count.propertyOwners ?? 0) > 0;
-      if (appearedObtained || appearedAttachment || appearedOwners) {
-        throw new ApiError(
-          409,
-          "確認のあとに、この物件の謄本が登録されました。課金していません。画面を開き直して内容を確かめてください",
-          "REGISTRY_PURCHASE_DUPLICATE_APPEARED",
-        );
-      }
-    }
-    // 候補取得で lock 失敗 = 並行取得 or 検索キー項目の変化。指紋が今も一致するか再確認して弁別する。
-    if (args.expectedFingerprint !== undefined) {
-      const fresh = await prisma.property.findUnique({
-        where: { id: propertyId },
-        select: {
-          address: true,
-          lotNumber: true,
-          buildingNumber: true,
-          realEstateNumber: true,
-        },
-      });
-      if (!fresh || fingerprintProperty(fresh) !== args.expectedFingerprint) {
-        throw new ApiError(
-          409,
-          "物件情報が変わりました。もう一度検索してから取得してください",
-          "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND",
-        );
-      }
-    }
+  if (lockOutcome.decision.kind === "duplicate_appeared") {
+    // ⚠「実行中です」と誤案内しない(@codex #399 R5 P2)。待っても解決しない。
+    throw new ApiError(
+      409,
+      "確認のあとに、この物件の謄本が登録されました。課金していません。画面を開き直して内容を確かめてください",
+      "REGISTRY_PURCHASE_DUPLICATE_APPEARED",
+    );
+  }
+  if (lockOutcome.decision.kind === "fingerprint_changed") {
+    throw new ApiError(
+      409,
+      "物件情報が変わりました。もう一度検索してから取得してください",
+      "REGISTRY_OBTAIN_CANDIDATE_NOT_FOUND",
+    );
+  }
+  if (lockOutcome.decision.kind === "already_running") {
     throw new ApiError(
       409,
       "この物件は既に謄本自動取得を実行中です",
       "REGISTRY_AUTO_FETCH_ALREADY_RUNNING",
     );
   }
+  const previousStatus = lockOutcome.previousStatus ?? property.registryStatus;
 
   // 6. provider 取得 → PDF 検証 → text 抽出 → processRegistryPdf 接続 → 成功 status。
   //    いずれの失敗でも scheduled で固着させないよう、catch で必ずロック解除する。

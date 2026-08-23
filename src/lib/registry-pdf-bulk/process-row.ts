@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@/generated/prisma";
 import prisma from "@/lib/prisma";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES } from "@/lib/storage";
 import { extractTextFromPdf } from "@/lib/pdf-extract";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
@@ -310,19 +311,25 @@ export async function processRegistryPdfBulkRow(args: {
         fileName: fileName || "registry.pdf",
       });
       uploadedKey = uploaded.key;
-      const attachment = await prisma.attachment.create({
-        data: {
-          targetType: "property",
-          targetId: match.propertyId,
-          propertyId: match.propertyId,
-          type: "registry",
-          fileName: fileName || "registry.pdf",
-          fileUrl: uploaded.url,
-          fileSize: buf.length,
-          mimeType: "application/pdf",
-          uploadedBy: executor.id,
-        },
-        select: { id: true },
+      // ⚠**親の物件行をロックしてから作る**(@codex #399 R7 P2 → #402)。
+      //   二重課金ガードの検査(親行の更新)とこの作成を直列化する。
+      //   保存は上(ロック外)で完了済み=ロックは作成の一瞬だけ。親→子の順。
+      const attachment = await prisma.$transaction(async (tx) => {
+        await lockPropertyRow(tx, match.propertyId);
+        return tx.attachment.create({
+          data: {
+            targetType: "property",
+            targetId: match.propertyId,
+            propertyId: match.propertyId,
+            type: "registry",
+            fileName: fileName || "registry.pdf",
+            fileUrl: uploaded.url,
+            fileSize: buf.length,
+            mimeType: "application/pdf",
+            uploadedBy: executor.id,
+          },
+          select: { id: true },
+        });
       });
       attachmentId = attachment.id;
     } catch (err) {

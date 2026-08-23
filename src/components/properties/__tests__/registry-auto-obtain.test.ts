@@ -144,7 +144,7 @@ describe("課金の直前に、もう一度だけ中止を読み直す(@codex #3
   });
 });
 
-describe("重複の検査は課金のロックと同じ一文で行う(@codex #399 R5 P2)", () => {
+describe("重複の検査は『ロック後の新しい文』で行う(@codex #402 Blocker で方式変更)", () => {
   const AUTO_FETCH = readFileSync(
     join(
       dirname(fileURLToPath(import.meta.url)),
@@ -154,17 +154,23 @@ describe("重複の検査は課金のロックと同じ一文で行う(@codex #3
     "utf8",
   );
 
-  it("楽観ロックの where に承認内容の検査が入っている", () => {
-    // 別の問い合わせで確かめると、相手の未確定な処理を読み落として重複購入し得る。
-    const at = AUTO_FETCH.indexOf("const lock = await prisma.property.updateMany({");
+  it("購入は『FOR UPDATE → 新しい文で読み直し → 判定 → 更新』の1トランザクション", () => {
+    // ⚠旧方式(where 一文への埋め込み・#399 R5)は READ COMMITTED で
+    //   待っている間にコミットされた添付が**原理的に見えない**(@codex #402 Blocker・
+    //   PostgreSQL 18 で実再現)。ロック後の新しい文で読み直す方式に置き換えた。
+    const at = AUTO_FETCH.indexOf("const lockOutcome = await prisma.$transaction(");
     expect(at).toBeGreaterThan(-1);
-    const block = AUTO_FETCH.slice(
-      at,
-      AUTO_FETCH.indexOf("if (lock.count === 0)", at),
-    );
-    expect(block).toContain("buildApprovedDuplicateGuard(args.approvedPreflight)");
-    // ⚠課金する経路だけ。回収(課金なし)には掛けない。
-    expect(block).toContain("willPurchaseByLocation");
+    const block = AUTO_FETCH.slice(at, at + 3200);
+    const lock = block.indexOf("lockPropertyRow(tx, propertyId)");
+    const readBack = block.indexOf("tx.attachment.count(");
+    const decide = block.indexOf("decidePurchaseLock({");
+    const update = block.indexOf('registryStatus: "scheduled"');
+    expect(lock).toBeGreaterThan(-1);
+    expect(readBack).toBeGreaterThan(lock);
+    expect(decide).toBeGreaterThan(readBack);
+    expect(update).toBeGreaterThan(decide);
+    // ⚠課金する経路だけ重複検査(回収・番号購入は approved: null)。
+    expect(block).toContain("willPurchaseByLocation && args.approvedPreflight");
   });
 
   it("重複で弾いたときは『実行中』ではなく専用の理由を返す", () => {

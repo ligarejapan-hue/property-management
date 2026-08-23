@@ -40,6 +40,8 @@ vi.mock("@/lib/prisma", () => ({
     property: { findUnique: vi.fn() },
     attachment: { create: vi.fn(), delete: vi.fn() },
     $transaction: vi.fn(),
+    // #402: 添付作成 tx の親行ロック(lockPropertyRow)の実体。
+    $queryRaw: vi.fn(async () => [{ id: "p" }]),
   },
 }));
 vi.mock("@/lib/storage", async (importOriginal) => {
