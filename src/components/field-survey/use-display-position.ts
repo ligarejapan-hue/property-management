@@ -44,7 +44,11 @@ export function useGrantedGeolocationWatch(
       watchId = navigator.geolocation.watchPosition(
         (p) => setPos({ lat: p.coords.latitude, lng: p.coords.longitude }),
         () => {
-          // 表示専用: 取得失敗は静かに(印が出ないだけ)。
+          // ⚠一度出た後の失敗(位置情報オフ・提供不能)で**古い現在地を出し
+          //   続けない**(@codex #407 R1 P2)。現場が古い印を信じて隣の家を
+          //   選ぶ事故につながる。エラー表示は出さない(役割は記録側)が、
+          //   印は消す。次に取れたら再表示される。
+          setPos(null);
         },
         { enableHighAccuracy: false, maximumAge: 30_000, timeout: 20_000 },
       );

@@ -2142,6 +2142,10 @@ function MapDataLayer({
         });
       } catch (err) {
         if ((err as { name?: string }).name === "AbortError") return;
+        // ⚠打ち切りの断りもここで消す(@codex #407 R1 P2)。成功経路でしか
+        //   更新しないと、前の画面の「表示しきれていない…」が通信断の後も
+        //   残り続ける(直前に OFF にした層の断りすら残り得る)。
+        onTruncationChange({ pins: false, properties: false });
         // ⚠通信失敗でも**古い色を必ず消す** (@codex #332 P2)。残すと、期間を
         // 「直近1年」から「全期間」へ切り替えた直後に失敗した場合、画面は新しい
         // 期間を選んだ状態のまま**古い期間の色**を描き続ける。

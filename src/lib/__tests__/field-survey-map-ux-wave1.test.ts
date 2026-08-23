@@ -69,6 +69,14 @@ describe("A3: 打ち切り(hasNext)を読む・断りを出す", () => {
     expect(MAP).toContain('data-testid="map-truncation-notice"');
   });
 
+  it("通信断(catch)でも断りをリセットする(@codex #407 R1 P2)", () => {
+    const at = MAP.indexOf('=== "AbortError") return;');
+    expect(at).toBeGreaterThan(-1);
+    expect(MAP.slice(at, at + 500)).toContain(
+      "onTruncationChange({ pins: false, properties: false })",
+    );
+  });
+
   it("範囲過大の早期 return でも断りをリセットする(古い断りを残さない)", () => {
     const at = MAP.indexOf("const v = validateBbox(b);");
     expect(at).toBeGreaterThan(-1);
@@ -127,6 +135,14 @@ describe("A6: 現在地は許可済みなら常時表示", () => {
     expect(grantedGate).toBeGreaterThan(-1);
     // permissions.query が無い環境では watch しない(従来どおり=安全側)。
     expect(DISPLAY_POS).toContain("if (!permissions?.query) return;");
+  });
+
+  it("watch がエラーを報告したら古い現在地を消す(@codex #407 R1 P2)", () => {
+    // watchPosition の第2引数(エラーコールバック)の中に setPos(null) がある。
+    const at = DISPLAY_POS.indexOf("watchPosition(");
+    expect(at).toBeGreaterThan(-1);
+    const call = DISPLAY_POS.slice(at, at + 700);
+    expect(call).toContain("setPos(null);");
   });
 
   it("マーカーは displayPosition(記録中=recorder / それ以外=granted watch)", () => {
