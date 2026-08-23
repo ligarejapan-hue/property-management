@@ -104,3 +104,28 @@ describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", ()
     expect(pageSrc).toMatch(/commitKeyword\.cancel\(\);\s*commitMgmtId\.cancel\(\)/);
   });
 });
+
+describe("候補優先のEnter(@codex #404 R2 P1/P2)", () => {
+  it("候補が出ている間の Enter は候補を開き、keyword を確定しない", () => {
+    // 所有者検索は suggest(POST) 経由で完結=PII が URL/監査へ落ちない。
+    const at = pageSrc.indexOf('if (e.key === "Enter")');
+    expect(at).toBeGreaterThan(-1);
+    const branch = pageSrc.slice(at, at + 700);
+    expect(branch).toContain("suggestOpen && suggestResults.length > 0");
+    expect(branch).toMatch(/router\.push\(`\/properties\/\$\{pick\.id\}`\)/);
+    // 候補ありの分岐は submit(=setSearchText)へ落ちずに return する。
+    const candidateBlock = branch.slice(
+      branch.indexOf("suggestOpen && suggestResults.length > 0"),
+      branch.indexOf("handleUnifiedSearchSubmit()"),
+    );
+    expect(candidateBlock).toContain("return;");
+    expect(candidateBlock).not.toContain("setSearchText");
+  });
+
+  it("矢印キーで候補を選べる(キーボード操作の回復)", () => {
+    expect(pageSrc).toContain('e.key === "ArrowDown"');
+    expect(pageSrc).toContain('e.key === "ArrowUp"');
+    expect(pageSrc).toContain('e.key === "Escape"');
+    expect(pageSrc).toContain("activeSuggest");
+  });
+});

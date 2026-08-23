@@ -294,6 +294,8 @@ function PropertiesPageInner() {
 
   // 入力中候補表示
   const [suggestResults, setSuggestResults] = useState<SuggestResult[]>([]);
+  // 候補のキーボード選択(@codex #404 R2 P2)。-1 = 未選択(Enter は先頭を選ぶ)。
+  const [activeSuggest, setActiveSuggest] = useState(-1);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const suggestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 最後に発行した suggest query を記録する。in-flight の古いレスポンスを弾くために使う。
@@ -645,6 +647,7 @@ function PropertiesPageInner() {
         const res = await fetchPropertySuggestions(query);
         if (query !== suggestQueryRef.current) return;
         setSuggestResults(res.data);
+        setActiveSuggest(-1);
         setSuggestOpen(res.data.length > 0);
       } catch {
         if (query !== suggestQueryRef.current) return;
@@ -718,9 +721,11 @@ function PropertiesPageInner() {
   };
 
   /**
-   * Enter での明示確定(一覧の絞り込み)。候補を選ばず Enter した文字列だけが
-   * keyword(=URL/監査に残る)になる。⚠候補から物件へ飛ぶ操作はクリックで行う
-   * (Enter を「先頭候補へ移動」にすると、絞り込みたい人が誤って別画面へ飛ぶ)。
+   * Enter での明示確定(一覧の絞り込み)。
+   * ⚠**候補が出ている間の Enter はここへ来ない**(@codex #404 R2 P1):
+   *   候補があるときの Enter は候補の選択(=POSTのsuggestのみ・PIIがURL/監査に
+   *   載らない経路)。所有者検索は候補経由で完結する。
+   *   ここへ来るのは候補ゼロの明示絞り込みだけ=旧・住所窓と同じ意味の操作。
    */
   const handleUnifiedSearchSubmit = () => {
     const value = searchAllDraft.trim();
@@ -1087,8 +1092,36 @@ function PropertiesPageInner() {
             value={searchAllDraft}
             onChange={(e) => handleUnifiedSearchChange(e.target.value)}
             onKeyDown={(e) => {
+              // ⚠候補が出ている間の Enter は**候補の選択**(@codex #404 R2 P1/P2)。
+              //   所有者名・電話は suggest(POST) 経由で完結し、keyword(URL/監査)へ
+              //   落ちない。矢印で選び、未選択の Enter は先頭候補を開く(旧仕様)。
+              if (e.key === "ArrowDown" && suggestResults.length > 0) {
+                e.preventDefault();
+                setSuggestOpen(true);
+                setActiveSuggest((i) => Math.min(i + 1, suggestResults.length - 1));
+                return;
+              }
+              if (e.key === "ArrowUp" && suggestOpen) {
+                e.preventDefault();
+                setActiveSuggest((i) => Math.max(i - 1, -1));
+                return;
+              }
+              if (e.key === "Escape" && suggestOpen) {
+                e.preventDefault();
+                setSuggestOpen(false);
+                setActiveSuggest(-1);
+                return;
+              }
               if (e.key === "Enter") {
                 e.preventDefault();
+                if (suggestOpen && suggestResults.length > 0) {
+                  const pick =
+                    suggestResults[activeSuggest >= 0 ? activeSuggest : 0];
+                  setSuggestOpen(false);
+                  setActiveSuggest(-1);
+                  router.push(`/properties/${pick.id}`);
+                  return;
+                }
                 handleUnifiedSearchSubmit();
               }
             }}
@@ -1107,7 +1140,7 @@ function PropertiesPageInner() {
                       setSuggestOpen(false);
                       router.push(`/properties/${item.id}`);
                     }}
-                    className="flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-indigo-50 dark:hover:bg-gray-800"
+                    className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left text-sm hover:bg-indigo-50 dark:hover:bg-gray-800 ${suggestResults[activeSuggest]?.id === item.id ? "bg-indigo-50 dark:bg-gray-800" : ""}`}
                   >
                     <div className="flex items-center gap-2">
                       <span className="flex-1 font-medium text-gray-800 truncate dark:text-gray-100">{item.address}</span>
