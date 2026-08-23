@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { USE_MOCK } from "@/lib/api-client";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -128,12 +129,10 @@ export default function OrphanDmLogsPage() {
         <span className="text-gray-900 dark:text-gray-100">孤児DM記録の訂正</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">孤児DM記録の訂正</h1>
-      <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-        物件を削除しても、DMの送付記録は所有者に引き継がれます(拒否・宛先不明の履歴を守るため)。
-        ここでは物件ページから辿れなくなった記録の反響の訂正・記録の取消ができます。
-        誤った「拒否・宛先不明」が残っていると、その所有者へのDMがずっと止まったままになります。
-      </p>
+      <PageHeader
+        title="孤児DM記録の訂正"
+        description="物件を削除しても、DMの送付記録は所有者に引き継がれます(拒否・宛先不明の履歴を守るため)。ここでは物件ページから辿れなくなった記録の反響の訂正・記録の取消ができます。誤った「拒否・宛先不明」が残っていると、その所有者へのDMがずっと止まったままになります。"
+      />
 
       {message && (
         <div className="mb-4 rounded-md border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-500/10 px-4 py-2 text-sm text-blue-800 dark:text-blue-200">

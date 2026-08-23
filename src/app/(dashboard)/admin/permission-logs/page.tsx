@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { Pagination } from "@/components/ui/pagination";
@@ -70,7 +71,9 @@ export default function PermissionLogsPage() {
         <span className="text-gray-900 dark:text-gray-100">権限変更履歴</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">権限変更履歴</h1>
+      <PageHeader
+        title="権限変更履歴"
+      />
 
       <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm">
         {loading ? (

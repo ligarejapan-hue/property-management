@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { Loader2, Search, RotateCcw } from "lucide-react";
 import { formatJaDateTime } from "@/lib/format-datetime";
@@ -137,11 +138,10 @@ export default function AttachmentSearchPage() {
         <span className="text-gray-900 dark:text-gray-100">添付横断検索</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">添付横断検索</h1>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-        添付のメタデータ（ファイル名・種別・対象・登録日時）のみを横断検索します。
-        ファイル本体のダウンロードはこの画面では提供しません。
-      </p>
+      <PageHeader
+        title="添付横断検索"
+        description="添付のメタデータ（ファイル名・種別・対象・登録日時）のみを横断検索します。ファイル本体のダウンロードはこの画面では提供しません。"
+      />
 
       {error && (
         <div className="mb-4 rounded-md border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">

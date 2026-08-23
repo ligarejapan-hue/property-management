@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { Loader2, MapPinned, Download, AlertTriangle } from "lucide-react";
 import {
   fetchPostalCodeAudit,
@@ -84,7 +85,9 @@ export default function PostalCodeAuditPage() {
     <div className="p-6">
       <div className="mb-4 flex items-center gap-2">
         <MapPinned className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
-        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">郵便番号×住所 整合チェック</h1>
+        <PageHeader
+          title="郵便番号×住所 整合チェック"
+        />
       </div>
       <p className="mb-4 max-w-3xl text-sm text-gray-600 dark:text-gray-300">
         所有者の保存済み郵便番号を住所APIと突き合わせ、保存住所と整合しているかを点検します。

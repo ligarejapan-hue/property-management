@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 
@@ -100,7 +101,9 @@ export default function TemplatesPage() {
       </nav>
 
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">権限テンプレート一覧</h1>
+        <PageHeader
+          title="権限テンプレート一覧"
+        />
         <button
           type="button"
           onClick={() => setShowCreate(true)}

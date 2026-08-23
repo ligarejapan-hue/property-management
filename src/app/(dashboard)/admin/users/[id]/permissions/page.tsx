@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useState, useEffect, useCallback } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { Loader2, Save } from "lucide-react";
 import { ROLE_LABELS } from "@/lib/role-labels";
@@ -264,7 +265,9 @@ export default function UserPermissionsPage({
         <span className="text-gray-900 dark:text-gray-100">権限編集</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-2 dark:text-gray-100">ユーザー権限編集</h1>
+      <PageHeader
+        title="ユーザー権限編集"
+      />
 
       {/* User info */}
       <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { Loader2, Search, RotateCcw } from "lucide-react";
 import { Pagination } from "@/components/ui/pagination";
@@ -310,10 +311,10 @@ export default function AuditLogsPage() {
         <span className="text-gray-900 dark:text-gray-100">監査ログ</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">監査ログ</h1>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-        監査ログは閲覧のみです。編集・削除はできません。
-      </p>
+      <PageHeader
+        title="監査ログ"
+        description="監査ログは閲覧のみです。編集・削除はできません。"
+      />
 
       {error && (
         <div className="mb-4 rounded-md border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">

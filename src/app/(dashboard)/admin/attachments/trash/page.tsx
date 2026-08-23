@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 
@@ -112,10 +113,10 @@ export default function AttachmentTrashPage() {
         <span className="text-gray-900 dark:text-gray-100">ゴミ箱</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">ゴミ箱（削除した添付）</h1>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-        一般の書類は削除から{RETENTION_DAYS}日でお掃除されます。謄本は残ります。期間内は「元に戻す」で復元できます。
-      </p>
+      <PageHeader
+        title="ゴミ箱（削除した添付）"
+        description={<>一般の書類は削除から{RETENTION_DAYS}日でお掃除されます。謄本は残ります。期間内は「元に戻す」で復元できます。</>}
+      />
 
       {error && (
         <div className="mb-4 rounded-md border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">

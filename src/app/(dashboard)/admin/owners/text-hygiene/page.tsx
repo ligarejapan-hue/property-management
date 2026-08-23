@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { Loader2, AlertTriangle, Wand2, ExternalLink } from "lucide-react";
 import { visualizeTextHygiene } from "@/lib/text-hygiene-display";
@@ -214,17 +215,10 @@ export default function TextHygieneAuditPage() {
         <span className="text-gray-900 dark:text-gray-100">テキスト衛生監査</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-2 dark:text-gray-100">
-        テキスト衛生監査（制御文字・文字化け）
-      </h1>
-      <p className="text-sm text-gray-500 mb-6 dark:text-gray-400">
-        所有者の氏名・氏名カナ・住所・備考に紛れた制御文字・ゼロ幅・双方向制御・文字化け（U+FFFD /
-        mojibake）を検出します。
-        <span className="font-medium">不可視の制御文字のみ</span>
-        が自動除去可（情報を失いません）。
-        <span className="font-medium">文字化け（U+FFFD / mojibake）</span>
-        は原本の取り直しが必要なため自動除去せず、確認のみです。備考は絵文字保護のため確認のみ（自動除去しません）。
-      </p>
+      <PageHeader
+        title="テキスト衛生監査（制御文字・文字化け）"
+        description={<>所有者の氏名・氏名カナ・住所・備考に紛れた制御文字・ゼロ幅・双方向制御・文字化け（U+FFFD /mojibake）を検出します。<span className="font-medium">不可視の制御文字のみ</span>が自動除去可（情報を失いません）。<span className="font-medium">文字化け（U+FFFD / mojibake）</span>は原本の取り直しが必要なため自動除去せず、確認のみです。備考は絵文字保護のため確認のみ（自動除去しません）。</>}
+      />
 
       {error && (
         <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">

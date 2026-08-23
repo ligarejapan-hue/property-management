@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { Loader2, Save, ShieldAlert } from "lucide-react";
 import {
   fetchRegistrySettings,
@@ -79,10 +80,10 @@ export default function RegistrySettingsPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
       <div>
-        <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">謄本取得の資格情報</h1>
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          登記情報提供サービスのログイン情報(利用者識別番号・パスワード)を設定します。値は暗号化して保存され、画面には表示されません(設定済/未設定のみ)。実際の自動取得には、登記情報提供サービスの利用契約(有料)とサーバー側の設定が必要です。
-        </p>
+        <PageHeader
+          title="謄本取得の資格情報"
+          description="登記情報提供サービスのログイン情報(利用者識別番号・パスワード)を設定します。値は暗号化して保存され、画面には表示されません(設定済/未設定のみ)。実際の自動取得には、登記情報提供サービスの利用契約(有料)とサーバー側の設定が必要です。"
+        />
       </div>
 
       {!s?.encryptionConfigured && (

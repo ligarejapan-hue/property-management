@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } from "react";
+import { BackLink } from "@/components/ui/back-link";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { canDownloadImportErrorCsv } from "@/lib/import-error-csv-access";
 import { formatJaDateTime } from "@/lib/format-datetime";
@@ -678,12 +679,7 @@ export default function ImportJobDetailPage() {
     return (
       <div className="py-10 text-center">
         <p className="mb-4 text-red-600 dark:text-red-400">{error ?? "ジョブが見つかりません"}</p>
-        <button
-          onClick={() => router.back()}
-          className="text-sm text-indigo-600 hover:underline dark:text-indigo-400"
-        >
-          戻る
-        </button>
+        <BackLink href="/import" to="取込画面" />
       </div>
     );
   }

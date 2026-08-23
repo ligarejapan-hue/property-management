@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useState, useEffect, useCallback } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, Save } from "lucide-react";
@@ -205,7 +206,9 @@ export default function TemplateEditPage({
         <span className="text-gray-900 dark:text-gray-100">テンプレート編集</span>
       </nav>
 
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">権限テンプレート編集</h1>
+      <PageHeader
+        title="権限テンプレート編集"
+      />
 
       {/* Template info */}
       <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm">
