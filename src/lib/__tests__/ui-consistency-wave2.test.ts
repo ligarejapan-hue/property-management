@@ -77,7 +77,9 @@ describe("(⑨) ページ送りの手書き禁止", () => {
 describe("(⑧) ページ見出しの手書き禁止", () => {
   it("dashboard の page.tsx に生の <h1 を増やさない(PageHeader を使う)", () => {
     const ALLOW = new Set([
-      "src/app/(dashboard)/field-survey/map/page.tsx", // 地図オーバーレイの小見出し(ページ見出しではない)
+      // コンパクトな地図ツールバーの見出し。PageHeader の既定寸(text-2xl+mb-6)は
+      // h-[calc(100dvh-3.5rem)] で高さを切り詰めた地図表示領域を圧迫するため対象外。
+      "src/app/(dashboard)/field-survey/map/page.tsx",
     ]);
     const offenders = files.filter(
       (f) =>

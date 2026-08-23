@@ -100,6 +100,15 @@ describe("Pagination", () => {
     expect(html).toContain("次へ");
   });
 
+  it("幅が足りないときは折り返す(flex-wrap=モバイル縦積みの担保)", () => {
+    // 旧・物件一覧の手書き実装は flex-col sm:flex-row だった。部品は
+    // flex-wrap で同等(狭幅では件数文とボタン群が別の行に折り返る)。
+    const html = render(
+      <Pagination page={1} totalPages={2} total={30} pageSize={20} onPrev={() => {}} onNext={() => {}} />,
+    );
+    expect(html).toMatch(/class="flex flex-wrap items-center justify-between/);
+  });
+
   it("スマホのタップ寸法44pxを確保(デスクトップは通常寸)", () => {
     const html = render(
       <Pagination page={2} totalPages={3} onPrev={() => {}} onNext={() => {}} />,
