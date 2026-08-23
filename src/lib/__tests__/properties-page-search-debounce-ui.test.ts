@@ -10,10 +10,13 @@ import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 
-const pageSrc = fs.readFileSync(
-  path.resolve(process.cwd(), "src/app/(dashboard)/properties/page.tsx"),
-  "utf8",
-);
+// ⚠走査型テストは改行を LF に正規化する(手元=CRLF checkout と CI で判定が変わる)。
+const pageSrc = fs
+  .readFileSync(
+    path.resolve(process.cwd(), "src/app/(dashboard)/properties/page.tsx"),
+    "utf8",
+  )
+  .replace(/\r\n/g, "\n");
 
 describe("properties page: 一覧検索 (keyword/管理ID) の debounce 化", () => {
   it("debounce ユーティリティを import している", () => {

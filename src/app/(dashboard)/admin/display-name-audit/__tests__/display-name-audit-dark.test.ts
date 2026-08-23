@@ -54,8 +54,8 @@ describe("display-name-audit/page.tsx dark: 配色", () => {
   });
 
   // --- タブ ---
-  it("アクティブタブ文字に dark:text-indigo-400 がある", () => {
-    expect(src).toContain("dark:text-indigo-400");
+  it("タブは共通 Tabs(active の dark 色は部品側で担保・第3弾⑪)", () => {
+    expect(src).toContain('from "@/components/ui/tabs"');
   });
   it("非アクティブタブに dark:text-gray-400 がある", () => {
     expect(src).toContain("dark:text-gray-400");
