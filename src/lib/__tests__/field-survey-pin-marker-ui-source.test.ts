@@ -34,14 +34,18 @@ const LEGEND_SRC = readSrc(
 describe("field-survey-map — ピン配色の配線", () => {
   it("ピン marker は Pin (色+グリフ) を子に持ち、スタイルは純関数経由", () => {
     expect(MAP_SRC).toMatch(/\bPin,\n/);
-    // pins 起点にアンカーして marker ブロックのみを掴む
+    // 第3弾: まとまっていない単独ピンの描画ブロックを掴む
     // (ControlPanel の {layers.pins && <PinMarkerLegend .../>} に誤マッチさせない)。
-    // 「対応済みのピンを隠す」フィルタ (hideClosedPins) を挟んだ形。
+    // 「対応済みのピンを隠す」フィルタは pinClusters の材料側で効く。
     const pinBlock = MAP_SRC.match(
-      /\{layers\.pins &&\s*\(hideClosedPins\s*\?\s*pins\.filter\(\(p\) => p\.status !== "closed"\)\s*:\s*pins\s*\)\.map\(\(pin\) => \([\s\S]*?<\/AdvancedMarker>\s*\)\)\}/,
+      /\{layers\.pins &&\s*pinClusters\.singles\.map\(\(sp\) => \{[\s\S]*?<\/AdvancedMarker>/,
     );
     expect(pinBlock).not.toBeNull();
     const m = pinBlock?.[0] ?? "";
+    // フィルタは残っている(取得条件ではなく描画時のまま)。
+    expect(MAP_SRC).toMatch(
+      /hideClosedPins \? pins\.filter\(\(p\) => p\.status !== "closed"\) : pins/,
+    );
     // <PinMarkerLegend 等への前方一致を防ぐため空白まで含めて照合
     expect(m).toMatch(/<Pin\s/);
     expect(m).toMatch(/pinMarkerStyle\(\{/);
@@ -59,17 +63,26 @@ describe("field-survey-map — ピン配色の配線", () => {
     expect(mdTag?.[0] ?? "").toMatch(/currentUserId=\{currentUserId\}/);
   });
 
-  it("既存物件 marker は既定のまま (着色ピンとの対比で区別が付く)", () => {
-    const propBlock = MAP_SRC.match(
-      /\{layers\.properties &&[\s\S]*?\)\)\}/,
-    );
-    expect(propBlock?.[0] ?? "").not.toMatch(/<Pin/);
+  it("物件 marker は赤系のまま(第3弾で種別の文字を足したが、ピンとの区別は保つ)", () => {
+    // ⚠旧: 物件は Google 既定の赤バルーンで「<Pin を持たない」ことを固定して
+    //   いた。第3弾で種別を1文字で示すため <Pin を持つようになったが、守るべき
+    //   不変条件は**物件とピンが一目で区別できること**であって、実装形ではない。
+    //   → 見分けの根拠(色が被らないこと)は純関数のテストで固定する
+    //     (field-survey-property-marker.test.ts)。ここでは配線だけを見る。
+    expect(MAP_SRC).toMatch(/propertyMarkerStyle\(\{/);
+    expect(MAP_SRC).toMatch(/propertyType: p\.propertyType/);
+    expect(MAP_SRC).toMatch(/caseStatus: p\.caseStatus/);
   });
 
-  it("凡例は調査ピン layer ON のときパネルに表示される", () => {
-    expect(MAP_SRC).toMatch(
-      /\{layers\.pins && <PinMarkerLegend showOthersHint=\{showOthersLegendHint\} \/>\}/,
-    );
+  it("凡例は出している層に合わせて表示される(第3弾で物件の行が加わった)", () => {
+    // ⚠旧: ピンの層 ON のときだけ出していた。第3弾で物件マーカーの説明が
+    //   凡例に入ったため、ピンを消して物件だけ出しているときにも必要になった
+    //   (@codex #409 R2 P2)。中の行は showPins / showProperties で出し分ける。
+    expect(MAP_SRC).toMatch(/\{\(layers\.pins \|\| layers\.properties\) && \(/);
+    expect(MAP_SRC).toMatch(/<PinMarkerLegend/);
+    expect(MAP_SRC).toMatch(/showOthersHint=\{showOthersLegendHint\}/);
+    expect(MAP_SRC).toMatch(/showPins=\{layers\.pins\}/);
+    expect(MAP_SRC).toMatch(/showProperties=\{layers\.properties\}/);
   });
 
   it("「他の担当者」ヒントは read_all/manage 保持者にのみ渡す", () => {

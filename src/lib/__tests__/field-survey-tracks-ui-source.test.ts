@@ -100,7 +100,9 @@ describe("3. 地図側の配線", () => {
 
   it("線の取得は面・物件・ピンと待ち行列を分ける（重い方が軽い方を止めない）", () => {
     // Promise.all に混ぜない。
-    expect(MAP_SRC).toMatch(/const tracksPromise = layers\.tracks/);
+    // 第3弾: 取得の有無は「レイヤーが ON か」から「今回この層を取る計画か」へ
+    // (plan.fetch.tracks)。待ち行列を分ける不変条件はそのまま。
+    expect(MAP_SRC).toMatch(/const tracksPromise = plan\.fetch\.tracks/);
     const all = MAP_SRC.match(/await Promise\.all\(tasks\)/);
     expect(all).not.toBeNull();
     expect(MAP_SRC).not.toMatch(/tasks\.push\([\s\S]{0,80}coverage\/tracks/);
@@ -118,7 +120,8 @@ describe("3. 地図側の配線", () => {
     // 発注者判断: 歩いたルートは制限する必要のない情報。二度歩きを避けるのが
     // 目的なので、街を歩く当人が見られないと意味がない。
     expect(MAP_SRC).not.toMatch(/canSeeOtherTracks/);
-    expect(MAP_SRC).toMatch(/const tracksPromise = layers.tracks$/m);
+    // 取得の条件は表示レイヤーの計画だけ(権限による分岐を挟まない)。
+    expect(MAP_SRC).toMatch(/const tracksPromise = plan\.fetch\.tracks$/m);
   });
 });
 

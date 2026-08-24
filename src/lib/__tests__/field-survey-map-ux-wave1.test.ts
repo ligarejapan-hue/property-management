@@ -85,11 +85,17 @@ describe("A3: 打ち切り(nextCursor)を読む・断りを出す", () => {
   it("通信断(catch)でも断りをリセットする(@codex #407 R1 P2)", () => {
     // ⚠AbortError 判定は tracks/coverage の .then にもあるため、tasks の catch に
     //   足した一意コメントを anchor にする(先出現への誤当たり=実測)。
-    const at = MAP.indexOf('打ち切りの断りもここで消す');
+    // 第3弾: 層ごとに取るようになったので、**今回取りに行った層の断りだけ**を
+    // 消す(@codex #409 R1 P2)。「通信断で古い断りが残らない」不変条件は
+    // 対象の層について従来どおり保たれる。
+    const at = MAP.indexOf("**今回の計画に入っていた層だけ**を片付ける");
     expect(at).toBeGreaterThan(-1);
-    expect(MAP.slice(at, at + 500)).toContain(
-      "onTruncationChange({ pins: false, properties: false })",
-    );
+    const body = MAP.slice(at, at + 700);
+    expect(body).toContain("if (plan.fetch.properties || plan.clear.properties) {");
+    expect(body).toContain("properties: false");
+    expect(body).toContain("if (plan.fetch.pins || plan.clear.pins) {");
+    expect(body).toContain("pins: false");
+    expect(body).toContain("onTruncationChange({ ...truncationRef.current })");
   });
 
   it("範囲過大の早期 return でも断りをリセットする(古い断りを残さない)", () => {

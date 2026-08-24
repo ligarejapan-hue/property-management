@@ -40,8 +40,10 @@ import { pinMarkerStyle } from "@/lib/field-survey-pin-marker";
 const DEFAULT_CENTER = { lat: 35.6812, lng: 139.7671 };
 const DEFAULT_ZOOM = 15;
 const SINGLE_POINT_ZOOM = 17;
-const TRACK_PAGE_LIMIT = 500;
-const TRACK_PAGE_MAX = 50; // 最大 25,000 点まで取得 (decimation は今回しない)
+// 1回あたりの取得数は API の上限(1000)まで使う。取れる総数(25,000点)は
+// 据え置きのまま、往復の回数を半分にする(第3弾: 履歴が出るまでが遅い)。
+const TRACK_PAGE_LIMIT = 1000;
+const TRACK_PAGE_MAX = 25; // 1000 × 25 = 25,000 点(従来 500 × 50 と同じ上限)
 const PIN_LIMIT = 100;
 const PIN_PAGE_MAX = 20; // 最大 2,000 件まで取得。超過時は truncated 警告。
 
@@ -115,6 +117,9 @@ export default function FieldSurveyHistoryMap({
   // 読み込み世代。新しい load が始まったら古い load の遅延継続を無効化し、
   // 古い fetch 結果が新 session の state を上書きしないようにする。
   const loadGenerationRef = useRef(0);
+  // 「再試行」「更新」で読み直すための合図。同じ巡回のまま取り直せる導線が
+  // 無く、失敗したら開き直すしかなかった(第3弾)。
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -182,7 +187,11 @@ export default function FieldSurveyHistoryMap({
       const m = metaBody.data;
       setMeta(m);
 
-      // 2) track points を cursor pagination で全件取得 → polyline
+      // 2) track points と 3) pin を**同時に**取りに行く(第3弾)。従来は線を
+      //    全ページ読み終えてからピンを読み始めており、待ち時間が素直に足し算に
+      //    なっていた。どちらも同じ中断(ac)と世代(stale)に従うので、失敗の扱いは
+      //    従来どおり「途中まで見せない」fail closed のまま。
+      const loadTrackPoints = async () => {
       const points: RoutePolylinePoint[] = [];
       let cursor: number | null = null;
       let routeOverCap = false;
@@ -193,13 +202,13 @@ export default function FieldSurveyHistoryMap({
           `/api/field-survey/sessions/${encodeURIComponent(sessionId)}/track-points?${qs.toString()}`,
           { credentials: "same-origin", signal: ac.signal },
         );
-        if (stale()) return;
+        if (stale()) return null;
         // non-2xx は「途中まで表示」にせず読み込み失敗として扱う (fail closed)。
         if (!tpRes.ok) throw new Error("history_load_failed");
         const tpBody = (await tpRes.json().catch(() => null)) as
           | { data?: TrackPointApiRow[]; nextCursor?: number | null }
           | null;
-        if (stale()) return;
+        if (stale()) return null;
         const rows = Array.isArray(tpBody?.data) ? tpBody!.data! : [];
         for (const r of rows) {
           const lat = coerceLat(r.lat);
@@ -213,15 +222,17 @@ export default function FieldSurveyHistoryMap({
         // 履歴として見せると巡回済/未巡回の判断を誤るため fail closed にする。
         if (i === TRACK_PAGE_MAX - 1) routeOverCap = true;
       }
-      if (stale()) return;
+      if (stale()) return null;
       // 上限超過時は incomplete route を表示せず読み込み失敗として扱う (pin の
       // truncated 警告とは区別し、route は警告表示にしない)。
       if (routeOverCap) throw new Error("history_route_over_cap");
-      setRoutePoints(points);
+      return points;
+      };
 
       // 3) session に紐づく pin (archived 除外) を nextCursor で全件ページング取得。
       //    他人 session は staffUserId を付与して既存 pin_list_others 監査を発火させる。
       //    view=map で memo を載せない。上限ページ到達時は truncated 警告を出す。
+      const loadPins = async () => {
       const normalized: HistoryPinRow[] = [];
       let pinCursor: string | null = null;
       let truncated = false;
@@ -237,14 +248,14 @@ export default function FieldSurveyHistoryMap({
           `/api/field-survey/pins?${pinQs.toString()}`,
           { credentials: "same-origin", signal: ac.signal },
         );
-        if (stale()) return;
+        if (stale()) return null;
         // non-2xx は「一部 pin のみ表示」にせず読み込み失敗として扱う (fail closed)。
         // truncated 警告は page 上限到達専用であり、HTTP failure を隠さない。
         if (!pinRes.ok) throw new Error("history_load_failed");
         const pinBody = (await pinRes.json().catch(() => null)) as
           | { data?: Array<Record<string, unknown>>; nextCursor?: string | null }
           | null;
-        if (stale()) return;
+        if (stale()) return null;
         const list = Array.isArray(pinBody?.data) ? pinBody!.data! : [];
         for (const raw of list) {
           const lat = coerceLat(raw.lat);
@@ -266,9 +277,28 @@ export default function FieldSurveyHistoryMap({
         // 次ループが無い (最終反復) のに nextCursor が残っていれば truncated。
         if (i === PIN_PAGE_MAX - 1) truncated = true;
       }
+      if (stale()) return null;
+      return { rows: normalized, truncated };
+      };
+
+      // 片方が失敗したらもう片方の結果も使わない(従来と同じ fail closed)。
+      // ⚠さらに**もう片方の取得も止める**(@codex #409 R4 P2)。止めないと、
+      //   1ページ目で失敗して画面に「読み込み失敗」を出した後も、残りの
+      //   ページ(最大25回/20回)を取り続け、位置情報の通信を無駄に流す。
+      const stopSibling = (e: unknown) => {
+        ac.abort();
+        throw e;
+      };
+      const [pointsResult, pinsResult] = await Promise.all([
+        loadTrackPoints().catch(stopSibling),
+        loadPins().catch(stopSibling),
+      ]);
       if (stale()) return;
-      setPins(normalized);
-      setPinsTruncated(truncated);
+      // null = 途中で stale 判定(新しい読み込みが始まった)。何も反映しない。
+      if (pointsResult === null || pinsResult === null) return;
+      setRoutePoints(pointsResult);
+      setPins(pinsResult.rows);
+      setPinsTruncated(pinsResult.truncated);
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;
       if (stale()) return;
@@ -287,7 +317,9 @@ export default function FieldSurveyHistoryMap({
       // の spinner を消さないように世代で判定)。
       if (!stale()) setLoading(false);
     }
-  }, [sessionId, clearHistorySessionState]);
+    // reloadNonce は「同じ巡回をもう一度読む」ための依存。値は使わない。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, clearHistorySessionState, reloadNonce]);
 
   useEffect(() => {
     void loadAll();
@@ -334,6 +366,15 @@ export default function FieldSurveyHistoryMap({
           履歴閲覧中（read-only）
           {meta?.staffName ? ` / ${meta.staffName}` : ""}
         </span>
+        <button
+          type="button"
+          data-testid="history-reload"
+          onClick={() => setReloadNonce((n) => n + 1)}
+          disabled={loading}
+          className="ml-auto rounded border border-blue-300 bg-white px-2 py-1 text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-500/40 dark:bg-gray-900 dark:text-blue-400 dark:hover:bg-gray-800"
+        >
+          {loading ? "更新中…" : "更新"}
+        </button>
         <Link
           href="/field-survey/map"
           data-testid="history-back-to-map"
@@ -348,7 +389,19 @@ export default function FieldSurveyHistoryMap({
           role="alert"
           className="absolute left-1/2 top-14 z-10 -translate-x-1/2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300"
         >
-          {error}
+          <span>{error}</span>
+          {/* 第3弾: 同じ巡回のまま読み直せる導線。従来は失敗すると開き直す
+              しかなく、「時間をおいて再度お試しください」と言いながら
+              試す手段が画面に無かった。 */}
+          <button
+            type="button"
+            data-testid="history-retry"
+            onClick={() => setReloadNonce((n) => n + 1)}
+            disabled={loading}
+            className="ml-2 rounded border border-amber-400 bg-white px-2 py-0.5 font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-500/40 dark:bg-gray-900 dark:text-amber-300 dark:hover:bg-gray-800"
+          >
+            {loading ? "読み込み中…" : "再試行"}
+          </button>
         </div>
       )}
       {loading && !error && (

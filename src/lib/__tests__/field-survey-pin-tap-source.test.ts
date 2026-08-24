@@ -195,7 +195,13 @@ describe("3-d. タップ待ち中は既存マーカーがタップを奪わな�
     const matches = MAP_SRC.match(
       /onClick=\{\s*captureMapClick\s*\?\s*undefined\s*:/g,
     );
-    expect(matches?.length).toBe(2); // 物件 marker + ピン marker
+    // 第3弾: まとめ表示の marker が増えた。**タップを奪い得る marker は全部**
+    // この形であること(1つでも素通しでないものが混じると作成経路が塞がる)。
+    expect(matches?.length).toBe(4); // 物件 + ピン + それぞれのまとめ印
+    // まとめ印も同じ判定を通る。
+    expect(MAP_SRC).toMatch(
+      /onClick=\{captureMapClick \? undefined : \(\) => zoomIntoCluster\(c\)\}/,
+    );
   });
 
   it("focusPin の強調マーカー (zIndex 1000) も同様に素通しにする", () => {
