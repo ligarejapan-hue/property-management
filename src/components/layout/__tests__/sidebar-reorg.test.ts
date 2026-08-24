@@ -142,14 +142,23 @@ describe("⚠URL 直打ちでしか行けなかった画面を載せる", () => 
     expect(OWNERS_PAGE).toContain('redirect("/import#owner-match")');
   });
 
-  it("同じページの別セクションを指す項目は現在地を点灯させない(既存の前例と同じ)", () => {
-    // 前例: 「法人番号紐づけ」= /admin/owners/correction?tab=corporate_restore。
-    // 同じページを指す変種は点灯せず、基本の項目だけが点灯する(2つ光らせない)。
-    expect(isNavItemActive("/import#owner-match", "/import")).toBe(false);
+  it("⚠押した項目が光る(いま見ている位置まで見る・@codex #411 R2 P2)", () => {
+    // 押した項目とは**別の項目**が光ると、どこに居るのか分からなくなる。
+    // 位置(#)まで一致したときだけ点灯し、そのとき全体を指す項目は消す
+    // =2つ同時に光らせない。
+    expect(isNavItemActive("/import#owner-match", "/import", "#owner-match")).toBe(true);
+    expect(isNavItemActive("/import", "/import", "#owner-match")).toBe(false);
+    // 位置を指定していないときは、これまでどおり全体の項目が光る。
+    expect(isNavItemActive("/import", "/import", "")).toBe(true);
+    expect(isNavItemActive("/import#owner-match", "/import", "")).toBe(false);
+    // 別の場所の位置指定に巻き込まれない(無関係なページを消さない)。
+    expect(isNavItemActive("/properties", "/properties", "#somewhere")).toBe(true);
+    // 位置が違えば点かない。
+    expect(isNavItemActive("/import#owner-match", "/import", "#other")).toBe(false);
+    // 別ページでは点かない。
+    expect(isNavItemActive("/import#owner-match", "/properties", "#owner-match")).toBe(false);
+    // 第3引数を省いた既存の呼び出しは従来どおり動く(後方互換)。
     expect(isNavItemActive("/import", "/import")).toBe(true);
-    expect(
-      isNavItemActive("/admin/owners/correction?tab=corporate_restore", "/admin/owners/correction"),
-    ).toBe(false);
   });
 
   it("取り込み系は「物件データ取り込み」に、エラー確認は「物件」に置く", () => {

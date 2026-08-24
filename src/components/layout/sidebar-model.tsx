@@ -173,14 +173,34 @@ export function visibleSidebar(userRole: string): NavGroup[] {
  */
 const PROPERTIES_NON_LIST = ["/properties/quality-check", "/properties/sale-dm"];
 
+/** 同じページの中の場所を指す項目(`/import#owner-match` など)の一覧。 */
+const ANCHOR_HREFS = SIDEBAR_GROUPS.flatMap((g) => g.items)
+  .map((i) => i.href)
+  .filter((h) => h.includes("#"));
+
 /**
  * サイドバー項目の現在地ハイライト判定(純関数=テスト可能)。
  * - `/properties` は一覧および物件詳細(`/properties/<id>`)で点灯するが、上記の別機能ページ
  *   (品質チェック・売却DM)では点灯させない。
  * - `/import` は完全一致のみ(`/import/registry-pdf` 等では点灯しない)。
  * - それ以外は完全一致、またはその配下(`href + "/"`)で点灯。
+ * - ⚠**同じページの中の場所を指す項目**(`/import#owner-match`)は、いま見ている
+ *   位置(hash)まで一致したときだけ点灯する(@codex #411 R2 P2)。押した項目とは
+ *   別の項目が光る、という食い違いを防ぐ。裏返して、その位置を見ている間は
+ *   ページ全体を指す項目(`/import`)を消す=2つ同時に光らせない。
  */
-export function isNavItemActive(href: string, currentPath: string): boolean {
+export function isNavItemActive(
+  href: string,
+  currentPath: string,
+  currentHash = "",
+): boolean {
+  const hashAt = href.indexOf("#");
+  if (hashAt !== -1) {
+    const base = href.slice(0, hashAt);
+    return currentPath === base && currentHash === href.slice(hashAt);
+  }
+  // いま見ている位置を担当する項目が別にあるなら、こちらは譲る。
+  if (currentHash && ANCHOR_HREFS.includes(currentPath + currentHash)) return false;
   if (href === "/properties") {
     if (PROPERTIES_NON_LIST.some((p) => currentPath === p || currentPath.startsWith(p + "/"))) {
       return false;

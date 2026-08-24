@@ -557,45 +557,11 @@ export async function updateCompanySettings(body: {
   });
 }
 
-// ---------- 謄本取得の資格情報(登記情報提供サービス・管理者設定) ----------
-
-export interface RegistrySettings {
-  hasLoginId: boolean;
-  hasPassword: boolean;
-  encryptionConfigured: boolean;
-  updatedAt: string | null;
-}
-
-const EMPTY_REGISTRY_SETTINGS: RegistrySettings = {
-  hasLoginId: false,
-  hasPassword: false,
-  encryptionConfigured: false,
-  updatedAt: null,
-};
-
-export async function fetchRegistrySettings(): Promise<RegistrySettings> {
-  if (USE_MOCK) {
-    await mockDelay();
-    return { ...EMPTY_REGISTRY_SETTINGS };
-  }
-  return apiFetch<RegistrySettings>("/api/admin/registry-settings");
-}
-
-// 部分更新。資格情報(loginId/password)は指定時のみ送る(空文字=クリア・未指定=現状維持)。
-export async function updateRegistrySettings(body: {
-  loginId?: string;
-  password?: string;
-}): Promise<{ ok: boolean }> {
-  if (USE_MOCK) {
-    await mockDelay();
-    return { ok: true };
-  }
-  return apiFetch<{ ok: boolean }>("/api/admin/registry-settings", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
+// ⚠謄本取得の資格情報(DB保存)の API は撤去した(@codex #411 R2 P1・2026-08-24)。
+//   設定画面を廃止したのに書き込み口だけ残ると、DB に資格情報を作れるのに
+//   **消す手段が無い**状態を招き、環境変数を入れ替えても古い DB の値が優先されて
+//   謄本取得が止まり得る。実測: 本番は暗号化キー未設定・registry_fetch_config は
+//   0行=作られたことがない。資格情報は環境変数の共通アカウントだけを使う。
 
 // ---------- Next Actions ----------
 

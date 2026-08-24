@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Menu, X, FileText } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { visibleSidebar, isNavItemActive, type NavGroup, type NavLeaf } from "./sidebar-model";
@@ -15,7 +15,18 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const groups = visibleSidebar(userRole);
 
-  const isActive = (href: string) => isNavItemActive(href, currentPath);
+  // ⚠いま見ている位置(#)。usePathname/props の currentPath は hash を含まないので
+  //   自分で追う(@codex #411 R2 P2)。初期値は空=サーバー描画と一致し、読み込み後に
+  //   実際の位置へ合わせる(描画のずれによる警告を出さない)。
+  const [hash, setHash] = useState("");
+  useEffect(() => {
+    const sync = () => setHash(window.location.hash);
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, [currentPath]);
+
+  const isActive = (href: string) => isNavItemActive(href, currentPath, hash);
 
   // 折りたたみグループの開閉: 手動トグル(未操作=未設定)が無ければ、現在地がグループ内なら
   // 自動で開く。dashboard layout は永続で Sidebar が再マウントされないため、遷移のたび
