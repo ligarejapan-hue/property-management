@@ -194,7 +194,17 @@ export default function CandidateQueue({
   const [ageBase, setAgeBase] = useState<Date | null>(null);
   // 並び順。上限超過時に古い候補へ到達できるよう「古い順」を選べる
   // (Codex P2: 「古いものから処理して」と案内しつつ古い分が開けない矛盾の解消)。
-  const [order, setOrder] = useState<"newest" | "oldest">("newest");
+  // ⚠戻り先の復元は**出発時の並び順ごと**行う(@codex #408 R1 P2)。古い順で
+  //   開いた行は新しい順では一覧に居らず(200件上限)、以前は初回応答で戻り先を
+  //   空振り消費していた。並び順を先に復元すれば行は同じページに現れる。
+  const [order, setOrder] = useState<"newest" | "oldest">(() => {
+    try {
+      const o = sessionStorage.getItem("fsCandidatesReturnOrder");
+      return o === "oldest" || o === "newest" ? o : "newest";
+    } catch {
+      return "newest";
+    }
+  });
   // 現地写真は「タップした時だけ」読み込む (モバイルの通信量に配慮)。本番は
   // サムネイル生成が無く cover が原寸 (最大 8MB) のため、一覧の全行に常時
   // <img> を置くとスクロールで原寸を大量に落としてしまう。表示中の行だけ
@@ -250,12 +260,19 @@ export default function CandidateQueue({
     let target: string | null = null;
     try {
       target = sessionStorage.getItem("fsCandidatesReturnPin");
-      if (target) sessionStorage.removeItem("fsCandidatesReturnPin");
     } catch {
       return;
     }
     if (!target) return;
+    // 並び順は state 初期値で復元済み=最初の応答に行が居るはず。居なければ
+    // その行は本当に消えた(却下/物件化)ので、鍵ごと片付けて終わり。
     restoredRef.current = true;
+    try {
+      sessionStorage.removeItem("fsCandidatesReturnPin");
+      sessionStorage.removeItem("fsCandidatesReturnOrder");
+    } catch {
+      // 消せなくても実害なし(次回は行が見つからず同様に片付く)
+    }
     const el = document.querySelector(`[data-candidate-row="${target}"]`);
     if (el) el.scrollIntoView({ block: "center" });
   }, [rows]);
@@ -523,6 +540,10 @@ export default function CandidateQueue({
                           // スクロールして「どこまで処理したか」を見失わない。
                           try {
                             sessionStorage.setItem("fsCandidatesReturnPin", r.id);
+                            sessionStorage.setItem(
+                              "fsCandidatesReturnOrder",
+                              order,
+                            );
                           } catch {
                             // storage不可(プライベートモード等)は黙って諦める
                           }

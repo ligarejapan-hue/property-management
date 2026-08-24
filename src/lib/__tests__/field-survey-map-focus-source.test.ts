@@ -85,7 +85,7 @@ describe("field-survey: この場所を地図で見る (?focusPin)", () => {
     // (@codex #336 P2: 前面マーカーが撮影した家を覆うと、唯一の作成経路で
     // ある地図タップが奪われるため素通しにする)。
     expect(m).toMatch(
-      /onClick=\{\s*cameraFirstPhase === "awaiting-map-tap"\s*\?\s*undefined\s*:\s*\(\) => setDetailPinId\(focusPinId\)/,
+      /onClick=\{\s*cameraFirstPhase === "awaiting-map-tap"\s*\?\s*undefined\s*:\s*\(\) => openPinDetailSafe\(focusPinId\)/,
     );
   });
 });

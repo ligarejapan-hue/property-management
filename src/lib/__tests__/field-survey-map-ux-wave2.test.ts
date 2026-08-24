@@ -55,6 +55,16 @@ describe("C2: タップで直接詳細+背景タップで閉じる", () => {
     expect(listener).toContain("setSelected(null)");
     expect(listener).toContain("onBackgroundClick()");
     expect(MAP).toContain("onBackgroundClick={closeDetailOnBackground}");
+    // @codex #408 R1 P1: 開く側(marker 直行・focusPin)も busy ゲートを通す。
+    expect(MAP).toContain("onOpenPinDetail={openPinDetailSafe}");
+    expect(MAP).toContain("openPinDetailSafe(focusPinId)");
+    const so = MAP.indexOf("const openPinDetailSafe");
+    const soBody = MAP.slice(so, so + 300);
+    expect(soBody.indexOf("if (detailPanelBusyRef.current) return;")).toBeGreaterThan(-1);
+    expect(soBody.indexOf("if (detailPanelBusyRef.current) return;")).toBeLessThan(
+      soBody.indexOf("setDetailPinId(id)"),
+    );
+    expect(MAP).not.toContain("onOpenPinDetail={setDetailPinId}");
     const cb = MAP.indexOf("const closeDetailOnBackground");
     const cbBody = MAP.slice(cb, cb + 500);
     expect(cbBody).toContain("setDetailPinId(null)");
@@ -104,6 +114,14 @@ describe("C4: 一覧⇔地図の往復", () => {
 
   it("一覧: 出発した行を覚え、戻ったらその行へスクロール(1回だけ)", () => {
     expect(QUEUE).toContain('sessionStorage.setItem("fsCandidatesReturnPin", r.id)');
+    // @codex #408 R1 P2: 並び順も一緒に保存し、初期 state で復元する
+    // (古い順で開いた行が新しい順の初回応答で空振り消費されない)。
+    expect(QUEUE).toContain('"fsCandidatesReturnOrder"');
+    const init = QUEUE.indexOf('useState<"newest" | "oldest">(() => {');
+    expect(init).toBeGreaterThan(-1);
+    expect(QUEUE.slice(init, init + 400)).toContain(
+      'sessionStorage.getItem("fsCandidatesReturnOrder")',
+    );
     expect(QUEUE).toContain("data-candidate-row={r.id}");
     const eff = QUEUE.indexOf('sessionStorage.getItem("fsCandidatesReturnPin")');
     expect(eff).toBeGreaterThan(-1);

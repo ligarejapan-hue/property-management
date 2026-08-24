@@ -532,6 +532,13 @@ export default function FieldSurveyMap({
   // closure から読むための ref。true の間は地図タップでパネルを閉じない
   // (下書き・送信中の写真を黙って破棄しない。Codex P2)。
   const detailPanelBusyRef = useRef(false);
+  // ⚠開く側も busy ゲートを通す(@codex #408 R1 P1)。作業中に**別のピン**を
+  //   タップすると pinId 切替のリセットで下書きが消えるため、直行 marker 経路
+  //   も背景タップ・作成タップと同じ判定に揃える。
+  const openPinDetailSafe = useCallback((id: string) => {
+    if (detailPanelBusyRef.current) return;
+    setDetailPinId(id);
+  }, []);
   const closeDetailOnBackground = useCallback(() => {
     // ⚠既存の busy ゲート原則を踏襲(提出前レビューP1)。編集下書き・削除確認・
     //   物件化フォーム・写真送信中は、背景タップで黙って閉じない
@@ -1127,7 +1134,7 @@ export default function FieldSurveyMap({
             captureMapClick={cameraFirstPhase === "awaiting-map-tap"}
             onMapClick={handleMapClick}
             onMapContextMenu={handleMapContextCreate}
-            onOpenPinDetail={setDetailPinId}
+            onOpenPinDetail={openPinDetailSafe}
             onLoadingChange={setMapLoading}
             onTruncationChange={handleTruncationChange}
             onUserDrag={cancelAutoCenterOnStart}
@@ -1158,7 +1165,7 @@ export default function FieldSurveyMap({
               onClick={
                 cameraFirstPhase === "awaiting-map-tap"
                   ? undefined
-                  : () => setDetailPinId(focusPinId)
+                  : () => openPinDetailSafe(focusPinId)
               }
             >
               <Pin
