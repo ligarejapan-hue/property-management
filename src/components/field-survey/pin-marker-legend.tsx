@@ -133,7 +133,10 @@ export default function PinMarkerLegend({
         {(showPins || showProperties) && (
           <li className="flex items-center gap-1.5">
             <LegendChip background="#6B7280" glyph="12" />
-            <span>数字 = この辺りにまとまっている件数(押すと寄って開きます)</span>
+            <span>
+              数字 = この辺りにまとまっている件数(押すと寄って開きます)。
+              灰色は中身がすべて済みのまとまりです。
+            </span>
           </li>
         )}
       </ul>

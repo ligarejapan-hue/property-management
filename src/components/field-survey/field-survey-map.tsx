@@ -29,7 +29,10 @@ import {
   clusterByGrid,
   CLUSTER_MIN_ZOOM,
 } from "@/lib/field-survey-map-cluster";
-import { propertyMarkerStyle } from "@/lib/field-survey-property-marker";
+import {
+  propertyMarkerStyle,
+  isPropertyCaseDone,
+} from "@/lib/field-survey-property-marker";
 import {
   planMapFetch,
   keepCoverageWhileLoading,
@@ -2031,8 +2034,25 @@ function MapInstanceCapture({
  * 調査ピンのまとまりは緑系にし、件数を数字で出す。3桁以上は「99+」に丸める
  * (印からはみ出して読めなくなるため)。
  */
-function clusterPinStyle(count: number, kind: "property" | "pin") {
+function clusterPinStyle(
+  count: number,
+  kind: "property" | "pin",
+  allDone: boolean,
+) {
   const label = count > 99 ? "99+" : String(count);
+  // ⚠中身が全部済みなら**灰色**にする(@codex #409 R5 P2)。現役の色のままだと、
+  //   終わった家ばかりのまとまりへ人を送ってしまう(単独の印は灰+✓で出るのに、
+  //   まとまると現役に見える、という食い違いも起きる)。灰は単独の「済み」と
+  //   同じ色を使う(凡例の語彙をそろえる)。
+  if (allDone) {
+    return {
+      background: "#6B7280",
+      borderColor: "#374151",
+      glyphColor: "#FFFFFF",
+      glyph: label,
+      scale: 1.2,
+    };
+  }
   return kind === "property"
     ? {
         background: "#C5221F",
@@ -2177,10 +2197,22 @@ function MapDataLayer({
     const r = clusterByGrid(
       visiblePins
         .filter((p) => p.id !== focusPinId)
-        .map((p) => ({ id: p.id, lat: p.lat, lng: p.lng })),
+        .map((p) => ({
+          id: p.id,
+          lat: p.lat,
+          lng: p.lng,
+          // 対応済みのピンだけのまとまりは「済み」の見た目にする(R5 P2)。
+          done: p.status === "closed",
+        })),
       zoom,
     );
-    if (focusRow) r.singles.push({ id: focusRow.id, lat: focusRow.lat, lng: focusRow.lng });
+    if (focusRow)
+      r.singles.push({
+        id: focusRow.id,
+        lat: focusRow.lat,
+        lng: focusRow.lng,
+        done: focusRow.status === "closed",
+      });
     // ⚠`Map` はこのファイルでは地図コンポーネントの名前。標準の Map は
     //   globalThis 経由で明示する(取り違えると型が通らない)。
     const byId = new globalThis.Map<string, PinRow>(
@@ -2195,7 +2227,13 @@ function MapDataLayer({
   }, [visiblePins, zoom, focusPinId]);
   const propertyClusters = useMemo(() => {
     const r = clusterByGrid(
-      properties.map((p) => ({ id: p.id, lat: p.gpsLat, lng: p.gpsLng })),
+      properties.map((p) => ({
+        id: p.id,
+        lat: p.gpsLat,
+        lng: p.gpsLng,
+        // 売却済み・終了(旧 done 含む)だけのまとまりは「済み」の見た目に。
+        done: isPropertyCaseDone(p.caseStatus),
+      })),
       zoom,
     );
     const byId = new globalThis.Map<string, PropertyRow>(
@@ -2930,9 +2968,13 @@ function MapDataLayer({
             key={c.key}
             position={{ lat: c.lat, lng: c.lng }}
             onClick={captureMapClick ? undefined : () => zoomIntoCluster(c)}
-            title={`この辺りに物件 ${c.count} 件`}
+            title={
+              c.allDone
+                ? `この辺りに物件 ${c.count} 件(すべて売却済み・終了)`
+                : `この辺りに物件 ${c.count} 件`
+            }
           >
-            <Pin {...clusterPinStyle(c.count, "property")} />
+            <Pin {...clusterPinStyle(c.count, "property", c.allDone)} />
           </AdvancedMarker>
         ))}
       {layers.properties &&
@@ -2967,9 +3009,13 @@ function MapDataLayer({
             key={c.key}
             position={{ lat: c.lat, lng: c.lng }}
             onClick={captureMapClick ? undefined : () => zoomIntoCluster(c)}
-            title={`この辺りに調査ピン ${c.count} 件`}
+            title={
+              c.allDone
+                ? `この辺りに調査ピン ${c.count} 件(すべて対応済み)`
+                : `この辺りに調査ピン ${c.count} 件`
+            }
           >
-            <Pin {...clusterPinStyle(c.count, "pin")} />
+            <Pin {...clusterPinStyle(c.count, "pin", c.allDone)} />
           </AdvancedMarker>
         ))}
       {layers.pins &&

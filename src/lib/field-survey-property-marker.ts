@@ -40,6 +40,14 @@ export const PROPERTY_DONE_GLYPH = "✓";
  */
 const DONE_CASE_STATUSES = new Set(["sold", "closed", "done"]);
 
+/**
+ * 案件が終わっているか。まとめ表示(クラスタ)も**この同じ規則**を使う
+ * (@codex #409 R5 P2)。規則が二重化すると、印と中身の判断がずれる。
+ */
+export function isPropertyCaseDone(caseStatus?: string | null): boolean {
+  return typeof caseStatus === "string" && DONE_CASE_STATUSES.has(caseStatus);
+}
+
 /** 未知の種別のフォールバック(種別が増えても地図を壊さない)。 */
 const UNKNOWN_GLYPH = "・";
 
@@ -60,8 +68,7 @@ export function propertyMarkerStyle(input: {
   propertyType?: string | null;
   caseStatus?: string | null;
 }): PropertyMarkerStyle {
-  const done =
-    typeof input.caseStatus === "string" && DONE_CASE_STATUSES.has(input.caseStatus);
+  const done = isPropertyCaseDone(input.caseStatus);
   const colors = done ? DONE_COLORS : ACTIVE_COLORS;
 
   const type = typeof input.propertyType === "string" ? input.propertyType.trim() : "";

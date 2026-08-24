@@ -12,6 +12,7 @@ import {
   propertyMarkerStyle,
   PROPERTY_TYPE_GLYPHS,
   PROPERTY_DONE_GLYPH,
+  isPropertyCaseDone,
 } from "@/lib/field-survey-property-marker";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import { pinMarkerStyle } from "@/lib/field-survey-pin-marker";
@@ -103,6 +104,22 @@ describe("propertyMarkerStyle", () => {
     for (const bg of propertyBackgrounds) {
       if (bg === GREY) continue;
       expect(pinBackgrounds.has(bg), `物件色 ${bg} がピン色と衝突`).toBe(false);
+    }
+  });
+
+  it("済み判定は関数として公開する(まとめ表示と同じ規則を使うため)", () => {
+    expect(isPropertyCaseDone("sold")).toBe(true);
+    expect(isPropertyCaseDone("closed")).toBe(true);
+    expect(isPropertyCaseDone("done")).toBe(true); // 旧値
+    expect(isPropertyCaseDone("negotiating")).toBe(false);
+    expect(isPropertyCaseDone(null)).toBe(false);
+    expect(isPropertyCaseDone(undefined)).toBe(false);
+    // 見た目と同じ判断であること(規則が二重化していない)。
+    for (const cs of ["sold", "closed", "done", "negotiating", null]) {
+      const style = propertyMarkerStyle({ propertyType: "house", caseStatus: cs });
+      expect(style.glyph === PROPERTY_DONE_GLYPH, String(cs)).toBe(
+        isPropertyCaseDone(cs),
+      );
     }
   });
 

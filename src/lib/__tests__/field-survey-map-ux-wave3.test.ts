@@ -291,6 +291,26 @@ describe("まとめ表示(クラスタリング)", () => {
     expect(body).toContain("visiblePins, zoom, focusPinId]");
   });
 
+  it("中身が全部済みのまとまりは灰色で出す(@codex #409 R5 P2)", () => {
+    // 単独の印は灰+✓なのに、まとまると現役の色に見える食い違いを防ぐ。
+    // 判定(allDone)は純関数側で検証済み。ここは配線を固定する。
+    const at = MAP.indexOf("function clusterPinStyle(");
+    expect(at).toBeGreaterThan(-1);
+    const fn = MAP.slice(at, at + 900);
+    expect(fn).toContain("allDone: boolean,");
+    const branch = fn.indexOf("if (allDone) {");
+    expect(branch).toBeGreaterThan(-1);
+    // 灰は単独の「済み」と同じ色(凡例の語彙をそろえる)。
+    expect(fn.slice(branch, branch + 220)).toContain('"#6B7280"');
+    expect(MAP).toContain('clusterPinStyle(c.count, "property", c.allDone)');
+    expect(MAP).toContain('clusterPinStyle(c.count, "pin", c.allDone)');
+    // 「済み」の判断は物件・ピンとも1か所の規則から取る。
+    expect(MAP).toContain("done: isPropertyCaseDone(p.caseStatus)");
+    expect(MAP).toContain('done: p.status === "closed"');
+    // 凡例にも灰色のまとまりの意味を書く。
+    expect(LEGEND).toContain("灰色は中身がすべて済みのまとまりです");
+  });
+
   it("押すと必ずほどける倍率まで寄る(@codex #409 R4 P2)", () => {
     // 2段ずつ上げる方式だと、広く引いた状態(13以下)から押しても閾値に
     // 届かず、また別のまとまりになって「押したのに開かない」。

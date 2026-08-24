@@ -76,6 +76,38 @@ describe("clusterByGrid: まとめ方", () => {
     expect(r.clusters[0].count).toBe(r.clusters[0].ids.length);
   });
 
+  it("中身が全部『済み』ならまとまりも済み扱い(@codex #409 R5 P2)", () => {
+    // 済んだ場所だけのまとまりが現役の色で出ると、終わった家へ人を送る。
+    const r = clusterByGrid(
+      [
+        { id: "a", lat: 35.0, lng: 139.0, done: true },
+        { id: "b", lat: 35.0002, lng: 139.0002, done: true },
+      ],
+      12,
+    );
+    expect(r.clusters).toHaveLength(1);
+    expect(r.clusters[0].allDone).toBe(true);
+  });
+
+  it("1件でも未対応が混ざれば済み扱いにしない(見落とさない側へ倒す)", () => {
+    const r = clusterByGrid(
+      [
+        { id: "a", lat: 35.0, lng: 139.0, done: true },
+        { id: "b", lat: 35.0002, lng: 139.0002, done: false },
+      ],
+      12,
+    );
+    expect(r.clusters[0].allDone).toBe(false);
+  });
+
+  it("済みの指定が無い点は未対応として扱う(既定で見落とさない)", () => {
+    const r = clusterByGrid(
+      [pt("a", 35.0, 139.0), pt("b", 35.0002, 139.0002)],
+      12,
+    );
+    expect(r.clusters[0].allDone).toBe(false);
+  });
+
   it("入力ゼロ件は空(例外にしない)", () => {
     const r = clusterByGrid([], 12);
     expect(r.clusters).toEqual([]);

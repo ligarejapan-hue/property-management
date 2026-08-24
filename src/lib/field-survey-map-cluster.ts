@@ -19,6 +19,11 @@ export interface ClusterPoint {
   id: string;
   lat: number;
   lng: number;
+  /**
+   * この点が「済み」か(対応済みのピン / 売却済み・終了の物件)。
+   * 省略は**未対応**として扱う=見落とさない側へ倒す。
+   */
+  done?: boolean;
 }
 
 export interface MarkerCluster {
@@ -28,6 +33,12 @@ export interface MarkerCluster {
   lng: number;
   count: number;
   ids: string[];
+  /**
+   * 中身が**全部済み**か(@codex #409 R5 P2)。1件でも未対応が混ざれば false。
+   * まとまりを現役の色で出すと、終わった場所へ人を送ることになるため、
+   * 見た目をここから決める。
+   */
+  allDone: boolean;
 }
 
 export interface ClusterResult {
@@ -94,6 +105,8 @@ export function clusterByGrid(
       lng: lngSum / members.length,
       count: members.length,
       ids,
+      // 未指定(done 省略)は未対応扱い=1件でもあれば現役の色で出す。
+      allDone: members.every((m) => m.done === true),
     });
   }
 
