@@ -77,6 +77,59 @@ export interface PinPatchBody {
   pinType?: string;
   status?: string;
   memo?: string | null;
+  lat?: number;
+  lng?: number;
+  fromLat?: number;
+  fromLng?: number;
+}
+
+/**
+ * 位置直し(決定8)で送る中身。**座標だけ**を送り、他の項目は巻き込まない。
+ * 壊れた値・地球の範囲外は null を返して送らない(サーバーに 422 を打たせない)。
+ * 判定はサーバーの検証と同じ規則にそろえる。
+ *
+ * ⚠`from*` = **画面が実際に見ていた、動かし始めた位置**(@codex #410 R3 P2)。
+ * サーバーはこれを条件に更新するので、先に他の人が動かしていれば 409 になる。
+ * 添えないと競合の検出をすり抜けるため、必ず組で渡す。
+ */
+export function buildPinMovePatch(
+  lat: number,
+  lng: number,
+  fromLat: number,
+  fromLng: number,
+): PinPatchBody | null {
+  const inRange = (la: number, ln: number) =>
+    Number.isFinite(la) &&
+    Number.isFinite(ln) &&
+    la >= -90 &&
+    la <= 90 &&
+    ln >= -180 &&
+    ln <= 180;
+  if (!inRange(lat, lng) || !inRange(fromLat, fromLng)) return null;
+  // ⚠**保存される精度に丸めてから送る**(@codex #410 R4 P2)。地図が返す生の値を
+  //   そのまま使うと、保存側(小数7桁)で丸められた値と食い違い、続けて同じピンを
+  //   動かしたときの照合が必ず外れて 409 になる(微調整が1回しかできない)。
+  return {
+    lat: roundPinCoord(lat),
+    lng: roundPinCoord(lng),
+    fromLat: roundPinCoord(fromLat),
+    fromLng: roundPinCoord(fromLng),
+  };
+}
+
+/** 座標が保存される精度(小数7桁)。DB 側は Decimal(10,7)。 */
+export const PIN_COORD_DECIMALS = 7;
+
+/**
+ * 座標を保存される精度へそろえる(@codex #410 R4 P2)。
+ * 画面が持つ値と保存された値を突き合わせる場面(位置直しの照合)で使う。
+ * 壊れた値はそのまま返し、範囲の判定は呼び出し側に委ねる。
+ */
+export function roundPinCoord(v: number): number {
+  if (!Number.isFinite(v)) return v;
+  const f = 10 ** PIN_COORD_DECIMALS;
+  // +0 に正規化する(-0 が混じると文字列化で食い違う)。
+  return Math.round(v * f) / f + 0;
 }
 
 export function buildPinPatch(

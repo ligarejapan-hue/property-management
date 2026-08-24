@@ -7,8 +7,10 @@
  *  - GET list: own / read_all / archived デフォルト除外 / pagination / 他人 staffUserId
  *    フィルタ時のみ AuditLog
  *  - GET detail: own / 他人 read_all / 他人時のみ AuditLog
- *  - PATCH: own / 他人 manage / read_all のみは更新不可 / lat 拒否 / propertyId 解除
+ *  - PATCH: own / 他人 manage / read_all のみは更新不可 / propertyId 解除
  *    / AuditLog 座標非含有
+ *  - PATCH の位置直し(決定8): lat/lng は**組で**受け付ける・片方だけは 422 /
+ *    範囲外は 422 / **位置だけの変更は監査を残さない**(決定9)
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
@@ -1315,18 +1317,314 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("lat / lng を送ると strict() で 422", async () => {
+  it("lat だけ / lng だけは 422 (位置は必ず組で送る)", async () => {
+    // ⚠片方だけ通すと、もう片方が前の位置のまま残り実在しない場所にピンが立つ。
+    for (const body of [
+      { status: "closed", lat: 0 },
+      { status: "closed", lng: 0 },
+    ]) {
+      (getApiSession as Mock).mockResolvedValue(fieldUser);
+      (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+      (prisma.fieldSurveyPin.updateMany as Mock).mockClear();
+      const res = await PATCH(
+        makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        }),
+        { params },
+      );
+      expect(res.status, JSON.stringify(body)).toBe(422);
+      expect(prisma.fieldSurveyPin.updateMany).not.toHaveBeenCalled();
+    }
+  });
+
+  it("範囲外の座標は 422", async () => {
+    for (const body of [
+      { lat: 91, lng: 0 },
+      { lat: 0, lng: 181 },
+    ]) {
+      (getApiSession as Mock).mockResolvedValue(fieldUser);
+      (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+      (prisma.fieldSurveyPin.updateMany as Mock).mockClear();
+      const res = await PATCH(
+        makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        }),
+        { params },
+      );
+      expect(res.status, JSON.stringify(body)).toBe(422);
+      expect(prisma.fieldSurveyPin.updateMany).not.toHaveBeenCalled();
+    }
+  });
+
+  it("⚠競合の判定は**クライアントが動かし始めた位置**で行う(@codex #410 R3 P2)", async () => {
+    // ⚠サーバーで読み直した値を条件にすると、先に他の人が動かし終えていた場合
+    //   その新しい位置と一致してしまい、**古い画面を見ている人が黙って上書き**
+    //   できる(検出できるのは、この要求自身の読みと書きの間に挟まった更新だけ)。
+    //   画面が実際に見ていた位置を条件にすれば、先を越されていれば 409 になる。
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
-    const res = await PATCH(
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: null,
+      propertyId: null,
+      pinType: "candidate",
+      status: "open",
+      lat: 35.0,
+      lng: 139.0,
+    });
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: null,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: 35.6812,
+      lng: 139.7671,
+      accuracy: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await PATCH(
       makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
         method: "PATCH",
-        body: JSON.stringify({ status: "closed", lat: 0 }),
+        body: JSON.stringify({
+          lat: 35.6812,
+          lng: 139.7671,
+          fromLat: 35.0,
+          fromLng: 139.0,
+        }),
       }),
       { params },
     );
-    expect(res.status).toBe(422);
-    expect(prisma.fieldSurveyPin.updateMany).not.toHaveBeenCalled();
+    const where = (prisma.fieldSurveyPin.updateMany as Mock).mock.calls.at(-1)?.[0]
+      .where;
+    // 送った from* がそのまま条件になる(サーバーが読み直した値ではない)。
+    expect(where.lat).toBe(35.0);
+    expect(where.lng).toBe(139.0);
+  });
+
+  it("⚠先を越されていたら 409(サーバーの読み直し値では検出できない競合)", async () => {
+    // 他の人が先に動かし終えた後、古い画面から動かした要求。
+    // サーバーが読み直す値は「新しい位置」なので、それを条件にすると通ってしまう。
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: null,
+      propertyId: null,
+      pinType: "candidate",
+      status: "open",
+      // 既に他の人が動かし終えた後の位置。
+      lat: 36.0,
+      lng: 140.0,
+    });
+    // CAS が 0 件 = 先を越されていた。
+    (prisma.fieldSurveyPin.updateMany as Mock).mockResolvedValueOnce({ count: 0 });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          lat: 35.6812,
+          lng: 139.7671,
+          // 古い画面が見ていた位置。
+          fromLat: 35.0,
+          fromLng: 139.0,
+        }),
+      }),
+      { params },
+    );
+    expect(res.status).toBe(409);
+    const where = (prisma.fieldSurveyPin.updateMany as Mock).mock.calls.at(-1)?.[0]
+      .where;
+    expect(where.lat).toBe(35.0);
+    expect(where.lng).toBe(139.0);
+  });
+
+  it("位置を動かさない更新では、座標を条件に入れない(無関係な 409 を作らない)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: null,
+      propertyId: null,
+      pinType: "candidate",
+      status: "open",
+      lat: 35.0,
+      lng: 139.0,
+    });
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: null,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: 35.0,
+      lng: 139.0,
+      accuracy: null,
+      pinType: "candidate",
+      status: "closed",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "closed" }),
+      }),
+      { params },
+    );
+    const where = (prisma.fieldSurveyPin.updateMany as Mock).mock.calls.at(-1)?.[0]
+      .where;
+    expect(where.lat).toBeUndefined();
+    expect(where.lng).toBeUndefined();
+  });
+
+  it("位置直し(決定8): 組で送ると保存される", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (writeAuditLog as Mock).mockClear();
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: null,
+      propertyId: null,
+      pinType: "candidate",
+      status: "open",
+      lat: 35.0,
+      lng: 139.0,
+    });
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: null,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: 35.6812,
+      lng: 139.7671,
+      accuracy: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          lat: 35.6812,
+          lng: 139.7671,
+          fromLat: 35.0,
+          fromLng: 139.0,
+        }),
+      }),
+      { params },
+    );
+    expect(res.status).toBe(200);
+    const call = (prisma.fieldSurveyPin.updateMany as Mock).mock.calls.at(-1)?.[0];
+    expect(call.data.lat).toBe(35.6812);
+    expect(call.data.lng).toBe(139.7671);
+  });
+
+  it("⚠位置だけの変更は記録を残さない(発注者決定 2026-07-28 決定9)", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (writeAuditLog as Mock).mockClear();
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: null,
+      propertyId: null,
+      pinType: "candidate",
+      status: "open",
+      lat: 35.0,
+      lng: 139.0,
+    });
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: null,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: 35.6812,
+      lng: 139.7671,
+      accuracy: null,
+      pinType: "candidate",
+      status: "open",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          lat: 35.6812,
+          lng: 139.7671,
+          fromLat: 35.0,
+          fromLng: 139.0,
+        }),
+      }),
+      { params },
+    );
+    expect(res.status).toBe(200);
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("位置と一緒に状況を変えたときは、状況の変更だけが記録される", async () => {
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (writeAuditLog as Mock).mockClear();
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: null,
+      propertyId: null,
+      pinType: "candidate",
+      status: "open",
+      lat: 35.0,
+      lng: 139.0,
+    });
+    (prisma.fieldSurveyPin.findUniqueOrThrow as Mock).mockResolvedValue({
+      id: PIN_ID,
+      sessionId: null,
+      staffUserId: fieldUser.id,
+      propertyId: null,
+      lat: 35.6812,
+      lng: 139.7671,
+      accuracy: null,
+      pinType: "candidate",
+      status: "closed",
+      memo: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          lat: 35.6812,
+          lng: 139.7671,
+          fromLat: 35.0,
+          fromLng: 139.0,
+          status: "closed",
+        }),
+      }),
+      { params },
+    );
+    expect(res.status).toBe(200);
+    expect(writeAuditLog).toHaveBeenCalledTimes(1);
+    const detail = (writeAuditLog as Mock).mock.calls[0][0].detail;
+    expect(detail.changedFields).toContain("status");
+    expect(detail.changedFields).not.toContain("lat");
+    expect(detail.changedFields).not.toContain("lng");
+    // 座標そのものも記録に載せない (既存の原則)。
+    expect(JSON.stringify(detail)).not.toMatch(/35\.6812|139\.7671/);
   });
 
   it("空 body は 422", async () => {
