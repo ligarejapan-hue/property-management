@@ -34,11 +34,29 @@ describe("C1: 対応済みを1タップで", () => {
   it("保存フローと同じ patch/3段ガードを通る(optimistic しない)", () => {
     const at = DETAIL.indexOf("const handleQuickStatus");
     expect(at).toBeGreaterThan(-1);
-    const fn = DETAIL.slice(at, at + 1400);
+    const fn = DETAIL.slice(at, at + 2200);
     expect(fn).toContain("buildPinPatch(");
     expect(fn).toContain("mutations.updatePin(saveTargetPinId, patch)");
     expect(fn).toContain("latestPinIdRef.current !== saveTargetPinId");
     expect(fn).toContain("onUpdated?.(r.data)");
+  });
+
+  it("失敗は読取ビューに印を出す(@codex #408 R4 P2: 黙って元に戻さない)", () => {
+    const at = DETAIL.indexOf("const handleQuickStatus");
+    const fn = DETAIL.slice(at, at + 2200);
+    // 遅延応答の失敗印が別ピンへ化けないよう stale 判定が成否判定より先。
+    expect(fn.indexOf("latestPinIdRef.current !== saveTargetPinId")).toBeLessThan(
+      fn.indexOf("if (!r.ok || !r.data)"),
+    );
+    // error 無しの失敗(中断/画面破棄)は印を出さない。
+    expect(fn).toContain("if (r.error) setQuickStatusError(r.error);");
+    // 表示の結線: 親→ReadOnlyView→帯。ピン切替と編集開始で必ず消える。
+    expect(DETAIL).toContain("quickStatusError={quickStatusError}");
+    expect(DETAIL).toContain('data-testid="pin-quick-status-error"');
+    const reset = DETAIL.indexOf("setDetail(null);");
+    expect(DETAIL.slice(reset, reset + 300)).toContain("setQuickStatusError(null);");
+    const edit = DETAIL.indexOf("onEdit={() => {");
+    expect(DETAIL.slice(edit, edit + 400)).toContain("setQuickStatusError(null);");
   });
 
   it("ボタンは onQuickStatus に結線され、直接 mutations を呼ばない", () => {

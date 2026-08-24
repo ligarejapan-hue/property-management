@@ -145,6 +145,7 @@ export default function PinDetailPanel({
     setDetail(null);
     setEditing(false);
     setConfirmingDelete(false);
+    setQuickStatusError(null);
     setDraftPinType("candidate");
     setDraftStatus("open");
     setDraftMemo("");
@@ -205,6 +206,9 @@ export default function PinDetailPanel({
   // 第2弾 C1: 「この家は済んだ」を1タップで(従来=編集→選択→保存の6タップ)。
   // 保存フローと同じ patch/3段ガードを使う(optimistic しない方針も同じ)。
   const [quickStatusSaving, setQuickStatusSaving] = useState(false);
+  // 1発変更の失敗を読取ビューへ出すための印(@codex #408 R4 P2)。従来は黙って
+  // 元の表示に戻り、電波切れ・権限剥奪・サーバー拒否が現場に伝わらなかった。
+  const [quickStatusError, setQuickStatusError] = useState<string | null>(null);
   const handleQuickStatus = async (nextStatus: "open" | "closed") => {
     if (!detail || quickStatusSaving) return;
     const saveTargetPinId = pinId;
@@ -216,10 +220,16 @@ export default function PinDetailPanel({
     );
     if (!patch) return;
     setQuickStatusSaving(true);
+    setQuickStatusError(null);
     try {
       const r = await mutations.updatePin(saveTargetPinId, patch);
-      if (!r.ok || !r.data) return;
+      // 遅延応答の失敗印が別ピンへ化けないよう、成否より先に stale を捨てる。
       if (latestPinIdRef.current !== saveTargetPinId) return;
+      if (!r.ok || !r.data) {
+        // error 無しの失敗=中断(abort)や画面破棄。印は出さない。
+        if (r.error) setQuickStatusError(r.error);
+        return;
+      }
       if (r.data.id !== latestPinIdRef.current) return;
       if (r.data.id !== saveTargetPinId) return;
       setDetail(r.data);
@@ -354,10 +364,16 @@ export default function PinDetailPanel({
             detail={detail!}
             isOwn={isOwn}
             canEdit={canEditOwn}
-            onEdit={() => setEditing(true)}
+            onEdit={() => {
+              // 編集画面は同じ mutations.updateError を自前表示する=二重表示と
+              // 「編集で保存成功→戻ったら古い失敗印」を避けるためここで消す。
+              setQuickStatusError(null);
+              setEditing(true);
+            }}
             canConvert={canConvert}
             onConvert={() => setShowConvert(true)}
             quickStatusSaving={quickStatusSaving}
+            quickStatusError={quickStatusError}
             onQuickStatus={(next) => {
               void handleQuickStatus(next);
             }}
@@ -847,6 +863,7 @@ function ReadOnlyView({
   canConvert,
   onConvert,
   quickStatusSaving,
+  quickStatusError,
   onQuickStatus,
 }: {
   detail: PinDetail;
@@ -856,6 +873,7 @@ function ReadOnlyView({
   canConvert?: boolean;
   onConvert?: () => void;
   quickStatusSaving: boolean;
+  quickStatusError: string | null;
   onQuickStatus: (next: "open" | "closed") => void;
 }) {
   return (
@@ -919,6 +937,15 @@ function ReadOnlyView({
               {quickStatusSaving ? "保存中…" : "未対応に戻す"}
             </button>
           ) : null}
+          {quickStatusError && (
+            <p
+              role="status"
+              data-testid="pin-quick-status-error"
+              className="mt-2 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
+            >
+              {quickStatusError}
+            </p>
+          )}
         </div>
       )}
       <div className="mt-3">
