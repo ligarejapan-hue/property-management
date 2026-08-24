@@ -62,6 +62,41 @@ describe("B4: 取り直しの計画を1か所で作る", () => {
     expect(MAP).toContain("if (plan.clear.pins) pinsTruncatedNext = false;");
   });
 
+  it("失敗しても、今回の計画に無い層は消さない(@codex #409 R1 P2)", () => {
+    // ピンだけ取り直して失敗したときに、無関係な踏破の色や線まで消えると
+    // 層別取得の意味が失われる。片付けるのは今回取りに行った層だけ。
+    // ⚠内側(面・線それぞれの .catch)にも同じ AbortError 判定があるため、
+    //   外側の catch 固有の目印でアンカーする。
+    const at = MAP.indexOf("**今回の計画に入っていた層だけ**を片付ける");
+    expect(at).toBeGreaterThan(-1);
+    const body = MAP.slice(at, at + 2000);
+    expect(body).toContain("if (plan.fetch.coverage) {");
+    expect(body).toContain("if (plan.fetch.tracks) {");
+    expect(body).toContain("if (plan.fetch.properties || plan.clear.properties) {");
+    expect(body).toContain("if (plan.fetch.pins || plan.clear.pins) {");
+    // 断りも層ごと(両方まとめて false にしない)。
+    expect(body).not.toContain("truncationRef.current = { pins: false, properties: false };");
+  });
+
+  it("面・線が飛んでいる間は「読み込み中」を解除しない(@codex #409 R1 P2)", () => {
+    // 期間変更やレイヤーONで面・線だけを取る計画になると tasks が空になり、
+    // Promise.all([]) が即解決して「更新」が押せる状態に戻っていた
+    // (次の操作が進行中の取得を中断する)。
+    expect(MAP).toContain("let coverageChain: Promise<void> | null = null;");
+    expect(MAP).toContain("let tracksChain: Promise<void> | null = null;");
+    expect(MAP).toContain("coverageChain = coveragePromise");
+    expect(MAP).toContain("tracksChain = tracksPromise");
+    const fin = MAP.indexOf("      } finally {");
+    expect(fin).toBeGreaterThan(-1);
+    const body = MAP.slice(fin, fin + 900);
+    expect(body).toContain("const detached = [coverageChain, tracksChain].filter(");
+    // 失敗しても必ず解除される(解除漏れで固まらない)。
+    expect(body).toContain("Promise.allSettled(detached)");
+    // 解除はいずれの経路でも「最新の取得だけ」。
+    const guards = body.match(/abortRef\.current === ac/g) ?? [];
+    expect(guards.length).toBe(2);
+  });
+
   it("何も変わらない再評価では1本も通信しない", () => {
     const at = MAP.indexOf("何もすることが無い");
     expect(at).toBeGreaterThan(-1);

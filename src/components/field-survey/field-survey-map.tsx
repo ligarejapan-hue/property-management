@@ -2238,6 +2238,13 @@ function MapDataLayer({
       abortRef.current = ac;
 
       onLoadingChange(true);
+      // ⚠面・線は待ち行列を分けている(重い方が軽い方を止めない)。ただし
+      //   **「読み込み中」の解除はこの2本も片付いてから**にする(@codex #409 R1 P2)。
+      //   期間変更やレイヤーONで面・線だけを取る計画になると tasks が空になり、
+      //   Promise.all([]) が即座に解決して「更新」ボタンが押せる状態に戻り、
+      //   進行中の取得が次の操作で中断されていた。
+      let coverageChain: Promise<void> | null = null;
+      let tracksChain: Promise<void> | null = null;
       try {
         const tasks: Promise<Response>[] = [];
         if (plan.fetch.properties) {
@@ -2317,7 +2324,7 @@ function MapDataLayer({
             droppedTripsExact: true,
             unrenderableTrips: 0,
           });
-          void tracksPromise
+          tracksChain = tracksPromise
             .then(async (r) => {
               if (ac.signal.aborted) return;
               if (!r.ok) {
@@ -2387,7 +2394,7 @@ function MapDataLayer({
             setCoverageStep(null);
           }
           onCoverageState({ cellSize: null, status: "loading" });
-          void coveragePromise
+          coverageChain = coveragePromise
             .then(async (r) => {
               if (ac.signal.aborted) return;
               if (!r.ok) {
@@ -2500,33 +2507,59 @@ function MapDataLayer({
         });
       } catch (err) {
         if ((err as { name?: string }).name === "AbortError") return;
-        // ⚠打ち切りの断りもここで消す(@codex #407 R1 P2)。成功経路でしか
-        //   更新しないと、前の画面の「表示しきれていない…」が通信断の後も
-        //   残り続ける(直前に OFF にした層の断りすら残り得る)。
-        truncationRef.current = { pins: false, properties: false };
-        onTruncationChange({ pins: false, properties: false });
+        // ⚠**今回の計画に入っていた層だけ**を片付ける(@codex #409 R1 P2)。
+        //   ここへ来るのは物件/ピンの取得が失敗したとき。層ごとに取るように
+        //   なった今、無関係な面・線まで消すと「ピンだけ点け直したら踏破の色が
+        //   消えた」ことになり、層別取得の意味が失われる。
+        //   ⚠ただし**今回取りに行った層は必ず片付ける**(@codex #332 P2 の意図)。
+        //   通信断のときは面・線それぞれの .catch も同じ後始末をするが、
+        //   同期例外など .catch が走らない経路のための備えとして残す。
+        if (plan.fetch.properties || plan.clear.properties) {
+          truncationRef.current = { ...truncationRef.current, properties: false };
+        }
+        if (plan.fetch.pins || plan.clear.pins) {
+          truncationRef.current = { ...truncationRef.current, pins: false };
+        }
+        onTruncationChange({ ...truncationRef.current });
         // ⚠通信失敗でも**古い色を必ず消す** (@codex #332 P2)。残すと、期間を
         // 「直近1年」から「全期間」へ切り替えた直後に失敗した場合、画面は新しい
         // 期間を選んだ状態のまま**古い期間の色**を描き続ける。
         // 「色が無い＝誰も通っていない」と読ませる画面なので、古い色が残ることは
         // 誤った指示に直結する。
-        setCoverageCells([]);
-        coverageRenderedRef.current = null;
-        onCoverageState({ cellSize: null, status: "unavailable" });
-        setTrackLines([]);
-        tracksRenderedDaysRef.current = null;
-        onTracksState({
-          status: "unavailable",
-          droppedTrips: 0,
-          droppedTripsExact: true,
-          unrenderableTrips: 0,
-        });
+        if (plan.fetch.coverage) {
+          setCoverageCells([]);
+          coverageRenderedRef.current = null;
+          onCoverageState({ cellSize: null, status: "unavailable" });
+        }
+        if (plan.fetch.tracks) {
+          setTrackLines([]);
+          tracksRenderedDaysRef.current = null;
+          onTracksState({
+            status: "unavailable",
+            droppedTrips: 0,
+            droppedTripsExact: true,
+            unrenderableTrips: 0,
+          });
+        }
         // 詳細は console / UI に出さない
         onError("地図データの取得に失敗しました。");
       } finally {
         // ⚠解除は**最新の fetch だけ**が行う(#404 R8 と同型の早消し防止。
         //   abort された古い fetch の finally が、進行中の「読み込み中」を消さない)。
-        if (abortRef.current === ac) onLoadingChange(false);
+        //   さらに面・線が飛んでいる間は解除しない(@codex #409 R1 P2)。
+        //   allSettled なので失敗しても必ず解除される(解除漏れで固まらない)。
+        if (abortRef.current === ac) {
+          const detached = [coverageChain, tracksChain].filter(
+            (c): c is Promise<void> => c !== null,
+          );
+          if (detached.length === 0) {
+            onLoadingChange(false);
+          } else {
+            void Promise.allSettled(detached).then(() => {
+              if (abortRef.current === ac) onLoadingChange(false);
+            });
+          }
+        }
       }
     },
     [
