@@ -2214,7 +2214,10 @@ function MapDataLayer({
       if (!map) return;
       const z = map.getZoom() ?? CLUSTER_MIN_ZOOM;
       map.panTo({ lat: c.lat, lng: c.lng });
-      map.setZoom(Math.min(CLUSTER_MIN_ZOOM + 2, Math.max(z + 2, z)));
+      // ⚠**必ずほどける倍率まで寄る**(@codex #409 R4 P2)。2段ずつ上げる方式だと、
+      //   広く引いた状態(13以下)から押しても閾値に届かず、また別のまとまりに
+      //   なって「押したのに開かない」。押した1回で中身が見える約束を守る。
+      map.setZoom(Math.max(z, CLUSTER_MIN_ZOOM));
     },
     [map],
   );
@@ -2563,12 +2566,17 @@ function MapDataLayer({
         // 期間を選んだ状態のまま**古い期間の色**を描き続ける。
         // 「色が無い＝誰も通っていない」と読ませる画面なので、古い色が残ることは
         // 誤った指示に直結する。
-        if (plan.fetch.coverage) {
+        // ⚠**自分の取得が成功した層は消さない**(@codex #409 R4 P2)。面・線は
+        //   別の待ち行列で走るので、物件/ピンが失敗する前に描き終わっている
+        //   ことがある。計画に入っていたかだけで判断すると、API が成功して
+        //   出した色を、無関係な失敗で消してしまう。未達に残っているか
+        //   (=まだ描けていないか)で判断する。
+        if (plan.fetch.coverage && pendingLayersRef.current.has("coverage")) {
           setCoverageCells([]);
           coverageRenderedRef.current = null;
           onCoverageState({ cellSize: null, status: "unavailable" });
         }
-        if (plan.fetch.tracks) {
+        if (plan.fetch.tracks && pendingLayersRef.current.has("tracks")) {
           setTrackLines([]);
           tracksRenderedDaysRef.current = null;
           onTracksState({

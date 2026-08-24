@@ -282,9 +282,16 @@ export default function FieldSurveyHistoryMap({
       };
 
       // 片方が失敗したらもう片方の結果も使わない(従来と同じ fail closed)。
+      // ⚠さらに**もう片方の取得も止める**(@codex #409 R4 P2)。止めないと、
+      //   1ページ目で失敗して画面に「読み込み失敗」を出した後も、残りの
+      //   ページ(最大25回/20回)を取り続け、位置情報の通信を無駄に流す。
+      const stopSibling = (e: unknown) => {
+        ac.abort();
+        throw e;
+      };
       const [pointsResult, pinsResult] = await Promise.all([
-        loadTrackPoints(),
-        loadPins(),
+        loadTrackPoints().catch(stopSibling),
+        loadPins().catch(stopSibling),
       ]);
       if (stale()) return;
       // null = 途中で stale 判定(新しい読み込みが始まった)。何も反映しない。

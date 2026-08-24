@@ -93,8 +93,14 @@ describe("B4: 取り直しの計画を1か所で作る", () => {
     const at = MAP.indexOf("**今回の計画に入っていた層だけ**を片付ける");
     expect(at).toBeGreaterThan(-1);
     const body = MAP.slice(at, at + 2000);
-    expect(body).toContain("if (plan.fetch.coverage) {");
-    expect(body).toContain("if (plan.fetch.tracks) {");
+    // ⚠成功して描けた層は消さない(@codex #409 R4 P2)。面・線は別の待ち行列で
+    //   走るので、物件/ピンが失敗する前に描き終わっていることがある。
+    expect(body).toContain(
+      'if (plan.fetch.coverage && pendingLayersRef.current.has("coverage")) {',
+    );
+    expect(body).toContain(
+      'if (plan.fetch.tracks && pendingLayersRef.current.has("tracks")) {',
+    );
     expect(body).toContain("if (plan.fetch.properties || plan.clear.properties) {");
     expect(body).toContain("if (plan.fetch.pins || plan.clear.pins) {");
     // 断りも層ごと(両方まとめて false にしない)。
@@ -236,6 +242,16 @@ describe("履歴地図: 往復を半分に+線とピンを同時に", () => {
     expect(HISTORY).toContain(
       "if (pointsResult === null || pinsResult === null) return;",
     );
+    // ⚠片方が失敗したら、もう片方の取得も止める(@codex #409 R4 P2)。
+    //   止めないと失敗表示の後も残りのページを取り続け、位置情報の通信を
+    //   無駄に流す(最大25回/20回)。
+    const stop = HISTORY.indexOf("const stopSibling = (e: unknown) => {");
+    expect(stop).toBeGreaterThan(-1);
+    const stopBody = HISTORY.slice(stop, stop + 160);
+    expect(stopBody).toContain("ac.abort();");
+    expect(stopBody).toContain("throw e;");
+    expect(HISTORY).toContain("loadTrackPoints().catch(stopSibling)");
+    expect(HISTORY).toContain("loadPins().catch(stopSibling)");
   });
 });
 
@@ -275,12 +291,16 @@ describe("まとめ表示(クラスタリング)", () => {
     expect(body).toContain("visiblePins, zoom, focusPinId]");
   });
 
-  it("押すと寄って中身がほどける", () => {
+  it("押すと必ずほどける倍率まで寄る(@codex #409 R4 P2)", () => {
+    // 2段ずつ上げる方式だと、広く引いた状態(13以下)から押しても閾値に
+    // 届かず、また別のまとまりになって「押したのに開かない」。
     const at = MAP.indexOf("const zoomIntoCluster");
     expect(at).toBeGreaterThan(-1);
-    const fn = MAP.slice(at, at + 400);
+    const fn = MAP.slice(at, at + 600);
     expect(fn).toContain("map.panTo(");
-    expect(fn).toContain("map.setZoom(");
+    expect(fn).toContain("map.setZoom(Math.max(z, CLUSTER_MIN_ZOOM))");
+    // 「今より2段」式の残骸が無い(閾値に届かない可能性を残さない)。
+    expect(fn).not.toContain("z + 2");
   });
 });
 
