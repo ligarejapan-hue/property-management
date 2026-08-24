@@ -1021,8 +1021,15 @@ export default function FieldSurveyMap({
   // ドラッグで離した瞬間に保存する(「完了」を押させない=手数ゼロの原則)。
   // ⚠位置の変更は記録に残らない(決定9)。監査の扱いはサーバー側で担保。
   const handlePinMoved = useCallback(
-    async (pinId: string, lat: number, lng: number): Promise<boolean> => {
-      const patch = buildPinMovePatch(lat, lng);
+    async (
+      pinId: string,
+      lat: number,
+      lng: number,
+      fromLat: number,
+      fromLng: number,
+    ): Promise<boolean> => {
+      // 動かし始めた位置を添える=先に他の人が動かしていれば 409 になる。
+      const patch = buildPinMovePatch(lat, lng, fromLat, fromLng);
       if (!patch) {
         setError("その位置には動かせません。もう一度お試しください。");
         return false;
@@ -1035,6 +1042,9 @@ export default function FieldSurveyMap({
           setError(
             r.error ?? "ピンの位置を保存できませんでした。もう一度お試しください。",
           );
+          // 競合などで保存できなかったときは、本当の位置を取り直して見せる
+          // (手元の位置に戻すだけだと、他の人が動かした結果が見えない)。
+          bumpRefetch();
           return false;
         }
         return true;
@@ -1042,7 +1052,7 @@ export default function FieldSurveyMap({
         if (fsMapMountedRef.current) setMovingPin(false);
       }
     },
-    [pinMutations],
+    [pinMutations, bumpRefetch],
   );
 
   // トーストの「取り消す」: 直前に作成した pin を論理削除 (アーカイブ) する。
@@ -2258,8 +2268,15 @@ function MapDataLayer({
   movablePinId: string | null;
   /** 位置を保存している最中か。この間は掴ませない(内部レビューP2)。 */
   movingPin: boolean;
-  /** ドラッグで離した位置を保存する。false=保存できなかった(元に戻す)。 */
-  onPinMoved: (pinId: string, lat: number, lng: number) => Promise<boolean>;
+  /** ドラッグで離した位置を保存する。false=保存できなかった(元に戻す)。
+   *  from* = 動かし始めた位置(競合の判定に使う。@codex #410 R3 P2)。 */
+  onPinMoved: (
+    pinId: string,
+    lat: number,
+    lng: number,
+    fromLat: number,
+    fromLng: number,
+  ) => Promise<boolean>;
   refetchNonce: number;
   /** ピンの「自分/他人」縁色の判定用 (server-side で確定済みのログイン userId)。 */
   currentUserId: string;
@@ -2406,11 +2423,17 @@ function MapDataLayer({
   //   遅れ、その隙に届いた取得結果が手元の位置を消す。
   //   ⚠fetchForBbox の依存には入れない=入れるとリスナー再登録と進行中取得の
   //   中断が起き、層別取得で減らした通信が戻ってしまう。
+  //   ⚠さらに、**動かす前に始まった取得**がこの守りを外したあとに届くことが
+  //   ある(取得は Promise.all で待っている間に保存が終わり得る)。そのまま当てると
+  //   保存に成功しているのにマーカーが元へ戻る。世代(epoch)で「その取得は
+  //   いつ始まったか」を持ち、動かした後に届いた古い応答には手元の位置を当てる。
   const pendingMoveRef = useRef<{
     id: string;
     lat: number;
     lng: number;
+    epoch: number;
   } | null>(null);
+  const moveEpochRef = useRef(0);
   // 背景タップ判定用: captureMapClick の最新値(リスナーは長寿命のため ref 経由)。
   const captureRef = useRef(captureMapClick);
   useEffect(() => {
@@ -2420,6 +2443,9 @@ function MapDataLayer({
   // bbox を取って fetch する関数 (debounce 後に呼ばれる)
   const fetchForBbox = useCallback(
     async (b: Bbox, plan: MapFetchPlan) => {
+      // この取得が始まった時点の世代。応答を当てるときに「これより後に
+      // 動かされたか」を判定する(@codex #410 R3 P2)。
+      const moveEpochAtStart = moveEpochRef.current;
       const v = validateBbox(b);
       if (!v.ok) {
         // 第1弾 A3: 取得しない範囲では打ち切りの断りも消す(古い断りを残さない)。
@@ -2723,12 +2749,12 @@ function MapDataLayer({
             //   実際には保存されているのに無駄な直しを誘う。
             setPins(() => {
               const next = filterValidPinGps(j.data ?? []);
-              const pending = pendingMoveRef.current;
-              if (!pending) return next;
+              const moved = pendingMoveRef.current;
+              // この取得が始まったより後に動かしたピンだけ、手元の位置を当てる。
+              // (この取得より前の移動なら、サーバーの位置がその結果を含む)
+              if (!moved || moved.epoch <= moveEpochAtStart) return next;
               return next.map((x) =>
-                x.id === pending.id
-                  ? { ...x, lat: pending.lat, lng: pending.lng }
-                  : x,
+                x.id === moved.id ? { ...x, lat: moved.lat, lng: moved.lng } : x,
               );
             });
             pendingLayersRef.current.delete("pins");
@@ -3215,16 +3241,34 @@ function MapDataLayer({
                     const lng = e.latLng?.lng();
                     if (typeof lat !== "number" || typeof lng !== "number") return;
                     const before = { lat: pin.lat, lng: pin.lng };
-                    // 保存が飛んでいる間だけ、取得結果から手元の位置を守る。
-                    pendingMoveRef.current = { id: pin.id, lat, lng };
+                    // 保存が飛んでいる間+この時点より前に始まった取得から、
+                    // 手元の位置を守る(世代を1つ進める)。
+                    moveEpochRef.current += 1;
+                    pendingMoveRef.current = {
+                      id: pin.id,
+                      lat,
+                      lng,
+                      epoch: moveEpochRef.current,
+                    };
                     // 先に画面へ反映してから保存する(指を離した位置に留まる)。
                     setPins((cur) =>
                       cur.map((x) => (x.id === pin.id ? { ...x, lat, lng } : x)),
                     );
-                    void onPinMoved(pin.id, lat, lng).then((ok) => {
+                    void onPinMoved(
+                      pin.id,
+                      lat,
+                      lng,
+                      before.lat,
+                      before.lng,
+                    ).then((ok) => {
                       // 守りは成否どちらでも解く。以後はサーバーの位置に従う
                       // (他の人が動かしていれば、その位置が正しい)。
+                      // 保存できたときは守りを**残す**(この保存より前に始まった
+                      // 取得が後から届いても、元へ戻さないため)。以後に始まった
+                      // 取得は世代が新しいので、サーバーの位置がそのまま通る。
+                      // 失敗したときは守りを解いて、本当の位置を見せる。
                       if (
+                        !ok &&
                         pendingMoveRef.current?.id === pin.id &&
                         pendingMoveRef.current.lat === lat &&
                         pendingMoveRef.current.lng === lng

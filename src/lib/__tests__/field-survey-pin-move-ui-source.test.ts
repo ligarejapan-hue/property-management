@@ -73,23 +73,29 @@ describe("動かせるのは保存直後の1本だけ", () => {
     expect(MAP.slice(at, at + 200)).toContain("setMovablePinId(null);");
   });
 
-  it("⚠手元の位置を守るのは**保存中だけ**(@codex #410 R2 P2)", () => {
+  it("⚠古い取得の結果で、動かしたピンを戻さない(@codex #410 R3 P2)", () => {
     // 保存の応答前に復帰などで再取得が走ると、サーバーはまだ古い位置を返す。
     // そのまま流し込むと「直したのに戻った」に見える(実際は保存済み)。
     // ⚠ただし守り続けると、保存が終わったあとに**他の人が動かした結果**まで
     //   打ち消してしまう。守るのは飛んでいる1件だけにする。
-    const at = MAP.indexOf("const pending = pendingMoveRef.current;");
+    const at = MAP.indexOf("const moved = pendingMoveRef.current;");
     expect(at).toBeGreaterThan(-1);
-    const body = MAP.slice(at - 300, at + 400);
-    expect(body).toContain("if (!pending) return next;");
-    expect(body).toContain("lat: pending.lat, lng: pending.lng");
-    // 保存の開始で同期に立て(state だと反映が1描画遅れて隙ができる)、
-    const drag = MAP.indexOf("pendingMoveRef.current = { id: pin.id, lat, lng };");
+    const body = MAP.slice(at - 300, at + 500);
+    expect(body).toContain("lat: moved.lat, lng: moved.lng");
+    // ⚠**世代**で「その取得はいつ始まったか」を見る。保存中かどうかだけでは、
+    //   動かす前に始まった取得が保存の完了後に届いたときに戻ってしまう。
+    expect(body).toContain("moved.epoch <= moveEpochAtStart");
+    expect(MAP).toContain("const moveEpochAtStart = moveEpochRef.current;");
+    // 保存の開始で同期に立てる(state だと反映が1描画遅れて隙ができる)。
+    const drag = MAP.indexOf("moveEpochRef.current += 1;");
     expect(drag).toBeGreaterThan(-1);
-    const dragBody = MAP.slice(drag, drag + 1200);
+    const dragBody = MAP.slice(drag, drag + 1600);
+    expect(dragBody).toContain("epoch: moveEpochRef.current,");
     // 先に画面へ反映するより前に守りを立てる。
     expect(dragBody.indexOf("setPins((cur) =>")).toBeGreaterThan(-1);
-    // 成否どちらでも解く(自分が立てた1件だけを消す)。
+    // 成功したときは守りを**残す**(古い取得が後から届いても戻さない)。
+    // 失敗したときだけ解く(自分が立てた1件だけを消す)。
+    expect(dragBody).toContain("!ok &&");
     expect(dragBody).toContain("pendingMoveRef.current?.id === pin.id");
     expect(dragBody).toContain("pendingMoveRef.current = null;");
     // 守りは ref(再取得の関数の依存に入れない=リスナー再登録と中断を招かない)。
@@ -102,10 +108,10 @@ describe("離した瞬間に保存し、失敗したら元へ戻す", () => {
   it("画面へ先に反映してから保存する(指を離した位置に留まる)", () => {
     const at = MAP.indexOf("const before = { lat: pin.lat, lng: pin.lng };");
     expect(at).toBeGreaterThan(-1);
-    // 窓は 1600: 保存中の守り(@codex R2)が入り、ハンドラが伸びたため。
-    const body = MAP.slice(at, at + 1600);
+    // 窓は 2600: 保存中の守り(R2)と世代による判定(R3)が入り、ハンドラが伸びた。
+    const body = MAP.slice(at, at + 2600);
     const optimistic = body.indexOf("setPins((cur) =>");
-    const save = body.indexOf("onPinMoved(pin.id, lat, lng)");
+    const save = body.indexOf("onPinMoved(");
     expect(optimistic).toBeGreaterThan(-1);
     expect(save).toBeGreaterThan(optimistic);
     // 保存できなければ元の位置へ戻す(保存された、と誤解させない)。
@@ -118,7 +124,10 @@ describe("離した瞬間に保存し、失敗したら元へ戻す", () => {
     const at = MAP.indexOf("const handlePinMoved");
     expect(at).toBeGreaterThan(-1);
     const fn = MAP.slice(at, at + 900);
-    expect(fn).toContain("buildPinMovePatch(lat, lng)");
+    // 動かし始めた位置も添える(競合の判定に使う。@codex #410 R3 P2)。
+    expect(fn).toContain("buildPinMovePatch(lat, lng, fromLat, fromLng)");
+    expect(MAP).toContain("before.lat,");
+    expect(MAP).toContain("before.lng,");
     expect(fn).toContain("if (!patch)");
     expect(fn).toContain("pinMutations.updatePin(pinId, patch)");
     // 失敗は黙らせない。

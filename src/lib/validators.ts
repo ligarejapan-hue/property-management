@@ -402,6 +402,12 @@ export const patchFieldSurveyPinSchema = z
     //   座標を含めないこと(含めると監査へ自動的に載る)。
     lat: z.number().min(-90).max(90).optional(),
     lng: z.number().min(-180).max(180).optional(),
+    // ⚠**動かし始めた位置**(@codex #410 R3 P2)。サーバーが読み直した値を条件に
+    //   しても、先に他の人が動かし終えていた場合は「読み直した値」がその新しい
+    //   位置になるため一致してしまい、**古い画面を見ている人が黙って上書き**
+    //   できてしまう。画面が実際に見ていた位置を送らせ、それを条件にする。
+    fromLat: z.number().min(-90).max(90).optional(),
+    fromLng: z.number().min(-180).max(180).optional(),
   })
   .strict()
   .refine(
@@ -419,6 +425,17 @@ export const patchFieldSurveyPinSchema = z
   //   実在しない場所にピンが立つ。
   .refine((v) => (v.lat === undefined) === (v.lng === undefined), {
     message: "緯度と経度は両方を指定してください",
+  })
+  .refine((v) => (v.fromLat === undefined) === (v.fromLng === undefined), {
+    message: "動かし始めた緯度と経度は両方を指定してください",
+  })
+  // ⚠位置を動かすときは**必ず**動かし始めた位置を添える。省略を許すと、
+  //   添えない呼び出しが競合の検出をすり抜けてしまう。
+  .refine((v) => v.lat === undefined || v.fromLat !== undefined, {
+    message: "位置を動かすときは動かし始めた位置も指定してください",
+  })
+  .refine((v) => v.fromLat === undefined || v.lat !== undefined, {
+    message: "動かし始めた位置だけでは更新できません",
   });
 
 // 地図 pan/zoom で頻繁に叩かれるため、bbox は必須で面積上限を設ける。

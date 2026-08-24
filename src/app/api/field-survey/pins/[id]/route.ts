@@ -126,7 +126,9 @@ export async function PATCH(
         pinType: true,
         status: true,
         memo: true,
-        // 位置直しの重複防止に使う (@codex #410 R1 P2)。監査には載せない。
+        // 位置直しの重複防止に使う。監査には載せない。
+        // ⚠条件そのものは**クライアントが送る fromLat/fromLng** を使う
+        //   (@codex #410 R3 P2)。ここで読む値は 409 の判定には用いない。
         lat: true,
         lng: true,
       },
@@ -272,14 +274,15 @@ export async function PATCH(
           id,
           sessionId: existing.sessionId,
           pinType: existing.pinType,
-          // ⚠位置を動かすときは**動かす前の座標**も条件に入れる
-          //   (@codex #410 R1 P2)。入れないと、2台から同時に動かしたときや
-          //   本人と管理者が同時に動かしたときに**両方成功**し、後に届いた方が
-          //   黙って上書きする(先に動かした人の画面は、保存されていない位置を
-          //   出し続ける)。条件に入れれば後着は 0 件になり 409 を返せる。
-          ...(patch.lat !== undefined && {
-            lat: existing.lat,
-            lng: existing.lng,
+          // ⚠位置を動かすときは**クライアントが動かし始めた位置**を条件に入れる
+          //   (@codex #410 R3 P2)。サーバーで読み直した値を使うと、先に他の人が
+          //   動かし終えていた場合その新しい位置と一致してしまい、**古い画面を
+          //   見ている人が黙って上書き**できてしまう(検出できるのは、この要求
+          //   自身の読みと書きの間に挟まった更新だけになる)。画面が実際に
+          //   見ていた位置を条件にすれば、先を越されていれば 0 件=409 になる。
+          ...(patch.fromLat !== undefined && {
+            lat: patch.fromLat,
+            lng: patch.fromLng,
           }),
         },
         data: {

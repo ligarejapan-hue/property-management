@@ -1358,9 +1358,11 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
     }
   });
 
-  it("⚠位置の重複防止: 動かす前の座標も条件に入れる(@codex #410 R1 P2)", async () => {
-    // 入れないと、2台から同時に動かしたときに**両方成功**し、後に届いた方が
-    // 黙って上書きする(先に動かした人の画面は保存されていない位置を出し続ける)。
+  it("⚠競合の判定は**クライアントが動かし始めた位置**で行う(@codex #410 R3 P2)", async () => {
+    // ⚠サーバーで読み直した値を条件にすると、先に他の人が動かし終えていた場合
+    //   その新しい位置と一致してしまい、**古い画面を見ている人が黙って上書き**
+    //   できる(検出できるのは、この要求自身の読みと書きの間に挟まった更新だけ)。
+    //   画面が実際に見ていた位置を条件にすれば、先を越されていれば 409 になる。
     (getApiSession as Mock).mockResolvedValue(fieldUser);
     (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
     (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
@@ -1390,10 +1392,54 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
     await PATCH(
       makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
         method: "PATCH",
-        body: JSON.stringify({ lat: 35.6812, lng: 139.7671 }),
+        body: JSON.stringify({
+          lat: 35.6812,
+          lng: 139.7671,
+          fromLat: 35.0,
+          fromLng: 139.0,
+        }),
       }),
       { params },
     );
+    const where = (prisma.fieldSurveyPin.updateMany as Mock).mock.calls.at(-1)?.[0]
+      .where;
+    // 送った from* がそのまま条件になる(サーバーが読み直した値ではない)。
+    expect(where.lat).toBe(35.0);
+    expect(where.lng).toBe(139.0);
+  });
+
+  it("⚠先を越されていたら 409(サーバーの読み直し値では検出できない競合)", async () => {
+    // 他の人が先に動かし終えた後、古い画面から動かした要求。
+    // サーバーが読み直す値は「新しい位置」なので、それを条件にすると通ってしまう。
+    (getApiSession as Mock).mockResolvedValue(fieldUser);
+    (getUserPermissions as Mock).mockResolvedValue(fieldPerms);
+    (prisma.fieldSurveyPin.findUnique as Mock).mockResolvedValue({
+      id: PIN_ID,
+      staffUserId: fieldUser.id,
+      sessionId: null,
+      propertyId: null,
+      pinType: "candidate",
+      status: "open",
+      // 既に他の人が動かし終えた後の位置。
+      lat: 36.0,
+      lng: 140.0,
+    });
+    // CAS が 0 件 = 先を越されていた。
+    (prisma.fieldSurveyPin.updateMany as Mock).mockResolvedValueOnce({ count: 0 });
+    const res = await PATCH(
+      makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          lat: 35.6812,
+          lng: 139.7671,
+          // 古い画面が見ていた位置。
+          fromLat: 35.0,
+          fromLng: 139.0,
+        }),
+      }),
+      { params },
+    );
+    expect(res.status).toBe(409);
     const where = (prisma.fieldSurveyPin.updateMany as Mock).mock.calls.at(-1)?.[0]
       .where;
     expect(where.lat).toBe(35.0);
@@ -1471,7 +1517,12 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
     const res = await PATCH(
       makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
         method: "PATCH",
-        body: JSON.stringify({ lat: 35.6812, lng: 139.7671 }),
+        body: JSON.stringify({
+          lat: 35.6812,
+          lng: 139.7671,
+          fromLat: 35.0,
+          fromLng: 139.0,
+        }),
       }),
       { params },
     );
@@ -1512,7 +1563,12 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
     const res = await PATCH(
       makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
         method: "PATCH",
-        body: JSON.stringify({ lat: 35.6812, lng: 139.7671 }),
+        body: JSON.stringify({
+          lat: 35.6812,
+          lng: 139.7671,
+          fromLat: 35.0,
+          fromLng: 139.0,
+        }),
       }),
       { params },
     );
@@ -1551,7 +1607,13 @@ describe("PATCH /api/field-survey/pins/[id]", () => {
     const res = await PATCH(
       makeReq(`http://x/api/field-survey/pins/${PIN_ID}`, {
         method: "PATCH",
-        body: JSON.stringify({ lat: 35.6812, lng: 139.7671, status: "closed" }),
+        body: JSON.stringify({
+          lat: 35.6812,
+          lng: 139.7671,
+          fromLat: 35.0,
+          fromLng: 139.0,
+          status: "closed",
+        }),
       }),
       { params },
     );

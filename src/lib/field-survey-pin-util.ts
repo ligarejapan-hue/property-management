@@ -79,21 +79,34 @@ export interface PinPatchBody {
   memo?: string | null;
   lat?: number;
   lng?: number;
+  fromLat?: number;
+  fromLng?: number;
 }
 
 /**
  * 位置直し(決定8)で送る中身。**座標だけ**を送り、他の項目は巻き込まない。
  * 壊れた値・地球の範囲外は null を返して送らない(サーバーに 422 を打たせない)。
  * 判定はサーバーの検証と同じ規則にそろえる。
+ *
+ * ⚠`from*` = **画面が実際に見ていた、動かし始めた位置**(@codex #410 R3 P2)。
+ * サーバーはこれを条件に更新するので、先に他の人が動かしていれば 409 になる。
+ * 添えないと競合の検出をすり抜けるため、必ず組で渡す。
  */
 export function buildPinMovePatch(
   lat: number,
   lng: number,
+  fromLat: number,
+  fromLng: number,
 ): PinPatchBody | null {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  if (lat < -90 || lat > 90) return null;
-  if (lng < -180 || lng > 180) return null;
-  return { lat, lng };
+  const inRange = (la: number, ln: number) =>
+    Number.isFinite(la) &&
+    Number.isFinite(ln) &&
+    la >= -90 &&
+    la <= 90 &&
+    ln >= -180 &&
+    ln <= 180;
+  if (!inRange(lat, lng) || !inRange(fromLat, fromLng)) return null;
+  return { lat, lng, fromLat, fromLng };
 }
 
 export function buildPinPatch(
