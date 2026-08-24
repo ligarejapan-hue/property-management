@@ -260,7 +260,11 @@ export default function CandidateQueue({
   useEffect(() => {
     if (restoredRef.current || rows === null || !backPinId) return;
     restoredRef.current = true;
-    const el = document.querySelector(`[data-candidate-row="${backPinId}"]`);
+    // props は server page で UUID 検証済みだが、部品単体でも安全なように
+    // セレクタへは必ず escape してから埋め込む(@codex #408 R3 P2)。
+    const el = document.querySelector(
+      `[data-candidate-row="${CSS.escape(backPinId)}"]`,
+    );
     if (el) el.scrollIntoView({ block: "center" });
   }, [rows, backPinId]);
 

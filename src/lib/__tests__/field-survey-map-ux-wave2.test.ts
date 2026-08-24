@@ -107,16 +107,32 @@ describe("C3: 巡回終了を地図上に+パネル最上部", () => {
 });
 
 describe("C4: 一覧⇔地図の往復", () => {
-  it("focusPin で来たときだけ「一覧へ戻る」を出す(並び順も URL で載せ返す)", () => {
-    const at = MAP.indexOf('data-testid="map-back-to-candidates"');
-    expect(at).toBeGreaterThan(-1);
-    const before = MAP.slice(at - 450, at);
-    expect(before).toContain("focusPinId &&");
+  it("focusPin で来たときだけ「一覧へ戻る」を出す(並び順もURLで載せ返す・作業中は無効)", () => {
+    const chipAt = MAP.indexOf("一覧から来たときだけ戻り道を出す");
+    expect(chipAt).toBeGreaterThan(-1);
+    const chip = MAP.slice(chipAt, chipAt + 2600);
+    expect(chip).toContain("focusPinId &&");
     // @codex #408 R2 P2: 戻り先(?back=)と並び順(?order=)は URL で運ぶ。
-    expect(before).toContain(
+    expect(chip).toContain(
       "href={`/field-survey/candidates?back=${encodeURIComponent(focusPinId)}${",
     );
-    expect(before).toContain('returnOrder === "oldest" ? "&order=oldest" : ""');
+    expect(chip).toContain('returnOrder === "oldest" ? "&order=oldest" : ""');
+    // @codex #408 R3 P1: 作業中(詳細パネル busy/撮影後のタップ待ち)は無効表示の
+    // span に切替+<a> クリック時も ref 実値で最終ガード(素の <a> のままだと
+    // 他経路に貫徹した busy ゲートを素通りして下書き・写真を捨てる)。
+    expect(chip).toContain(
+      'detailPanelBusy || cameraFirstPhase === "awaiting-map-tap"',
+    );
+    expect(chip).toContain('data-testid="map-back-to-candidates-blocked"');
+    const guard = chip.indexOf("detailPanelBusyRef.current ||");
+    expect(guard).toBeGreaterThan(-1);
+    expect(chip.slice(guard, guard + 220)).toContain("e.preventDefault()");
+    // busy は ref と state の鏡写し=更新は handleDetailPanelBusyChange の1か所。
+    const bc = MAP.indexOf("const handleDetailPanelBusyChange");
+    expect(bc).toBeGreaterThan(-1);
+    const bcBody = MAP.slice(bc, bc + 300);
+    expect(bcBody).toContain("detailPanelBusyRef.current = busy;");
+    expect(bcBody).toContain("setDetailPanelBusy(busy);");
     // map-client が ?retOrder= を読んで returnOrder prop として渡す結線。
     expect(CLIENT).toContain('searchParams?.get("retOrder")');
     expect(CLIENT).toContain("returnOrder={returnOrder}");
@@ -131,6 +147,10 @@ describe("C4: 一覧⇔地図の往復", () => {
       "href={`/field-survey/map?focusPin=${r.id}&retOrder=${order}`}",
     );
     expect(QUEUE).toContain('useState<"newest" | "oldest">(initialOrder)');
+    // @codex #408 R3 P2: ?back= は server page で UUID 検証し、queue 側も
+    // セレクタへ埋める前に必ず escape(不正値で querySelector が落ちない)。
+    expect(PAGE).toContain("isValidUuid(rawBack)");
+    expect(QUEUE).toContain("CSS.escape(backPinId)");
     expect(PAGE).toContain("searchParams: Promise<{ order?: string; back?: string }>");
     expect(PAGE).toContain("initialOrder={initialOrder}");
     expect(PAGE).toContain("backPinId={backPinId}");

@@ -535,6 +535,10 @@ export default function FieldSurveyMap({
   // closure から読むための ref。true の間は地図タップでパネルを閉じない
   // (下書き・送信中の写真を黙って破棄しない。Codex P2)。
   const detailPanelBusyRef = useRef(false);
+  // 同じ値の state 鏡写し(@codex #408 R3 P1)。「一覧へ戻る」チップの表示切替
+  // (busy 中は無効表示)に使う。ref は再描画を起こさないため両方持つ。
+  // 更新は handleDetailPanelBusyChange の1か所だけ=食い違わない。
+  const [detailPanelBusy, setDetailPanelBusy] = useState(false);
   // ⚠開く側も busy ゲートを通す(@codex #408 R1 P1)。作業中に**別のピン**を
   //   タップすると pinId 切替のリセットで下書きが消えるため、直行 marker 経路
   //   も背景タップ・作成タップと同じ判定に揃える。
@@ -1001,6 +1005,7 @@ export default function FieldSurveyMap({
 
   const handleDetailPanelBusyChange = useCallback((busy: boolean) => {
     detailPanelBusyRef.current = busy;
+    setDetailPanelBusy(busy);
   }, []);
 
   // 地図タップで**ピンの位置を決める**。これが唯一のピン作成経路
@@ -1282,18 +1287,41 @@ export default function FieldSurveyMap({
             下端(bottom-14)にあり、現在地ボタンを完全に覆っていた(A5)。下端の帯
             (現在地/撮影/巡回開始)と住み分けるため、通知類はここへ集約する。 */}
         <div className="pointer-events-none absolute left-1/2 top-3 z-10 flex w-[calc(100%-1.5rem)] max-w-sm -translate-x-1/2 flex-col items-stretch gap-1.5">
-          {/* 第2弾 C4: 一覧から来たときだけ戻り道を出す(従来は片道だった)。 */}
-          {focusPinId && (
-            <a
-              href={`/field-survey/candidates?back=${encodeURIComponent(focusPinId)}${
-                returnOrder === "oldest" ? "&order=oldest" : ""
-              }`}
-              data-testid="map-back-to-candidates"
-              className="pointer-events-auto self-start rounded-full border border-gray-300 bg-white/95 px-3 py-1.5 text-xs font-semibold text-gray-800 shadow hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900/95 dark:text-gray-100 dark:hover:bg-gray-800"
-            >
-              ← 完成待ち一覧へ戻る
-            </a>
-          )}
+          {/* 第2弾 C4: 一覧から来たときだけ戻り道を出す(従来は片道だった)。
+              ⚠作業中(詳細パネル busy / 撮影後のタップ待ち)は無効表示に切替
+              (@codex #408 R3 P1)。素の <a> のままだと踏んだ瞬間に地図ごと
+              アンマウントされ、他の閉じ経路に貫徹した busy ゲートを素通りして
+              下書き・撮影済み写真を黙って捨てる。span は pointer-events-auto の
+              まま=タップ待ち中にチップ位置のタップが地図へ抜けてピンが
+              置かれる事故も防ぐ。 */}
+          {focusPinId &&
+            (detailPanelBusy || cameraFirstPhase === "awaiting-map-tap" ? (
+              <span
+                data-testid="map-back-to-candidates-blocked"
+                className="pointer-events-auto self-start rounded-full border border-gray-200 bg-white/80 px-3 py-1.5 text-xs font-semibold text-gray-400 shadow-sm dark:border-gray-700 dark:bg-gray-900/80 dark:text-gray-500"
+              >
+                ← 完成待ち一覧へ戻る
+              </span>
+            ) : (
+              <a
+                href={`/field-survey/candidates?back=${encodeURIComponent(focusPinId)}${
+                  returnOrder === "oldest" ? "&order=oldest" : ""
+                }`}
+                data-testid="map-back-to-candidates"
+                onClick={(e) => {
+                  // 描画反映前の一瞬に踏まれても ref の実値で最終ガード。
+                  if (
+                    detailPanelBusyRef.current ||
+                    cameraFirstPhaseRef.current === "awaiting-map-tap"
+                  ) {
+                    e.preventDefault();
+                  }
+                }}
+                className="pointer-events-auto self-start rounded-full border border-gray-300 bg-white/95 px-3 py-1.5 text-xs font-semibold text-gray-800 shadow hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900/95 dark:text-gray-100 dark:hover:bg-gray-800"
+              >
+                ← 完成待ち一覧へ戻る
+              </a>
+            ))}
           {cameraFirstPhase === "awaiting-map-tap" && !panelOpen && (
             <CameraFirstBanner
               hasPhoto={cameraFirstHasPhoto}

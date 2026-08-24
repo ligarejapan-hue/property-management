@@ -123,7 +123,9 @@ describe("A5: バナーは上部スタック(現在地ボタンを覆わない)"
   it("地図側の上部スタックにバナー・読み込み中・断り・踏破状態が同居する", () => {
     const at = MAP.indexOf("画面上部中央の通知スタック");
     expect(at).toBeGreaterThan(-1);
-    const stack = MAP.slice(at, at + 2600);
+    // 窓は 4400: 戻りチップが busy 切替の二枝(@codex #408 R3 P1)に育ち
+    // スタック内の後続要素が押し出されたため広げた(同居の検証は変わらず)。
+    const stack = MAP.slice(at, at + 4400);
     expect(stack).toContain("<CameraFirstBanner");
     expect(stack).toContain("読み込み中…");
     expect(stack).toContain("map-truncation-notice");
