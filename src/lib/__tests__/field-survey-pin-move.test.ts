@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { patchFieldSurveyPinSchema } from "@/lib/validators";
-import { buildPinMovePatch } from "@/lib/field-survey-pin-util";
+import { buildPinMovePatch, roundPinCoord } from "@/lib/field-survey-pin-util";
 
 describe("patchFieldSurveyPinSchema: 座標の受け付け", () => {
   it("動かし先と動かし始めた位置の組を受け付ける", () => {
@@ -116,7 +116,54 @@ describe("patchFieldSurveyPinSchema: 座標の受け付け", () => {
   });
 });
 
+describe("roundPinCoord: 保存される精度にそろえる(@codex #410 R4 P2)", () => {
+  it("小数7桁に丸める(保存の精度と同じ)", () => {
+    // ⚠座標は Decimal(10,7) で保存される。地図が返す生の値をそのまま次の
+    //   「動かし始めた位置」に使うと、保存済みの値と一致せず**2回目の
+    //   ドラッグが必ず 409** になる(続けて微調整できない)。
+    expect(roundPinCoord(35.68123456789)).toBe(35.6812346);
+    expect(roundPinCoord(139.76712344999)).toBe(139.7671234);
+  });
+
+  it("すでに7桁以内の値は変えない", () => {
+    expect(roundPinCoord(35.6812346)).toBe(35.6812346);
+    expect(roundPinCoord(35)).toBe(35);
+    expect(roundPinCoord(-0)).toBe(0);
+  });
+
+  it("負の値も同じ規則で丸める", () => {
+    expect(roundPinCoord(-35.68123456789)).toBe(-35.6812346);
+  });
+
+  it("壊れた値はそのまま返す(呼び出し側の範囲判定に委ねる)", () => {
+    expect(Number.isNaN(roundPinCoord(Number.NaN))).toBe(true);
+    expect(roundPinCoord(Number.POSITIVE_INFINITY)).toBe(
+      Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("丸めた値をもう一度丸めても変わらない(次の照合にそのまま使える)", () => {
+    const once = roundPinCoord(35.68123456789);
+    expect(roundPinCoord(once)).toBe(once);
+  });
+});
+
 describe("buildPinMovePatch: 送る中身を決める", () => {
+  it("⚠送る座標は保存の精度に丸める(2回目のドラッグが 409 にならない)", () => {
+    const patch = buildPinMovePatch(
+      35.68123456789,
+      139.76712344999,
+      35.60000009999,
+      139.70000004999,
+    );
+    expect(patch).toEqual({
+      lat: 35.6812346,
+      lng: 139.7671234,
+      fromLat: 35.6000001,
+      fromLng: 139.7,
+    });
+  });
+
   it("動かした先と、動かし始めた位置を送る(他の項目を巻き込まない)", () => {
     // ⚠from* = 画面が実際に見ていた位置。サーバーはこれを条件に更新するので、
     //   先に他の人が動かしていれば 409 になる(@codex #410 R3 P2)。

@@ -25,7 +25,10 @@ import {
 } from "@vis.gl/react-google-maps";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMapGestureHandling } from "@/components/field-survey/use-map-gesture-handling";
-import { buildPinMovePatch } from "@/lib/field-survey-pin-util";
+import {
+  buildPinMovePatch,
+  roundPinCoord,
+} from "@/lib/field-survey-pin-util";
 import {
   clusterByGrid,
   CLUSTER_MIN_ZOOM,
@@ -3237,9 +3240,16 @@ function MapDataLayer({
             onDragEnd={
               !captureMapClick && !movingPin && pin.id === movablePinId
                 ? (e) => {
-                    const lat = e.latLng?.lat();
-                    const lng = e.latLng?.lng();
-                    if (typeof lat !== "number" || typeof lng !== "number") return;
+                    const rawLat = e.latLng?.lat();
+                    const rawLng = e.latLng?.lng();
+                    if (typeof rawLat !== "number" || typeof rawLng !== "number")
+                      return;
+                    // ⚠**保存される精度に丸めてから画面へ入れる**
+                    //   (@codex #410 R4 P2)。生の値を持つと、続けて同じピンを
+                    //   動かしたときの「動かし始めた位置」が保存済みの値と
+                    //   食い違い、照合が必ず外れて 409 になる。
+                    const lat = roundPinCoord(rawLat);
+                    const lng = roundPinCoord(rawLng);
                     const before = { lat: pin.lat, lng: pin.lng };
                     // 保存が飛んでいる間+この時点より前に始まった取得から、
                     // 手元の位置を守る(世代を1つ進める)。

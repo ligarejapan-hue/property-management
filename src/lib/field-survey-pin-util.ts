@@ -106,7 +106,30 @@ export function buildPinMovePatch(
     ln >= -180 &&
     ln <= 180;
   if (!inRange(lat, lng) || !inRange(fromLat, fromLng)) return null;
-  return { lat, lng, fromLat, fromLng };
+  // ⚠**保存される精度に丸めてから送る**(@codex #410 R4 P2)。地図が返す生の値を
+  //   そのまま使うと、保存側(小数7桁)で丸められた値と食い違い、続けて同じピンを
+  //   動かしたときの照合が必ず外れて 409 になる(微調整が1回しかできない)。
+  return {
+    lat: roundPinCoord(lat),
+    lng: roundPinCoord(lng),
+    fromLat: roundPinCoord(fromLat),
+    fromLng: roundPinCoord(fromLng),
+  };
+}
+
+/** 座標が保存される精度(小数7桁)。DB 側は Decimal(10,7)。 */
+export const PIN_COORD_DECIMALS = 7;
+
+/**
+ * 座標を保存される精度へそろえる(@codex #410 R4 P2)。
+ * 画面が持つ値と保存された値を突き合わせる場面(位置直しの照合)で使う。
+ * 壊れた値はそのまま返し、範囲の判定は呼び出し側に委ねる。
+ */
+export function roundPinCoord(v: number): number {
+  if (!Number.isFinite(v)) return v;
+  const f = 10 ** PIN_COORD_DECIMALS;
+  // +0 に正規化する(-0 が混じると文字列化で食い違う)。
+  return Math.round(v * f) / f + 0;
 }
 
 export function buildPinPatch(

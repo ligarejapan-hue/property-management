@@ -119,6 +119,21 @@ describe("離した瞬間に保存し、失敗したら元へ戻す", () => {
     expect(body).toContain("...before");
   });
 
+  it("⚠画面に入れる座標も保存の精度へ丸める(@codex #410 R4 P2)", () => {
+    // 生の値を持つと、続けて同じピンを動かしたときの「動かし始めた位置」が
+    // 保存済みの値(小数7桁)と食い違い、照合が外れて必ず 409 になる。
+    const at = MAP.indexOf("const rawLat = e.latLng?.lat();");
+    expect(at).toBeGreaterThan(-1);
+    const body = MAP.slice(at, at + 700);
+    expect(body).toContain("const lat = roundPinCoord(rawLat);");
+    expect(body).toContain("const lng = roundPinCoord(rawLng);");
+    // 丸める前の値で早期に弾く(NaN を丸めても NaN のままなので順序は自由だが、
+    // 生の値の型判定を先に済ませる)。
+    expect(body.indexOf("typeof rawLat")).toBeLessThan(
+      body.indexOf("roundPinCoord(rawLat)"),
+    );
+  });
+
   it("壊れた座標は送らない(純関数と同じ規則をクライアントでも通す)", () => {
     expect(MAP).toContain('from "@/lib/field-survey-pin-util"');
     const at = MAP.indexOf("const handlePinMoved");
