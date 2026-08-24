@@ -177,18 +177,44 @@ describe("更新と再試行(やり直す手が画面にある)", () => {
 
 describe("同僚のピンが自動で出る(戻ってきたとき)", () => {
   it("画面へ戻った合図で取り直す。定期問い合わせ(ポーリング)は置かない", () => {
-    const at = MAP.indexOf('document.addEventListener("visibilitychange", onVisible)');
-    expect(at).toBeGreaterThan(-1);
-    expect(MAP).toContain('window.addEventListener("focus", onVisible)');
-    const fn = MAP.indexOf("const onVisible = () => {");
-    const body = MAP.slice(fn, fn + 240);
-    expect(body).toContain('document.visibilityState !== "visible"');
-    expect(body).toContain("bumpRefetchRef.current?.()");
+    expect(MAP).toContain('document.addEventListener("visibilitychange", onVisibility)');
+    expect(MAP).toContain('window.addEventListener("focus", markBack)');
+    expect(MAP).toContain('window.addEventListener("blur", markAway)');
     // 後片付け(離れたときに聞き続けない)。
-    expect(MAP).toContain('document.removeEventListener("visibilitychange", onVisible)');
-    expect(MAP).toContain('window.removeEventListener("focus", onVisible)');
+    expect(MAP).toContain('document.removeEventListener("visibilitychange", onVisibility)');
+    expect(MAP).toContain('window.removeEventListener("focus", markBack)');
+    expect(MAP).toContain('window.removeEventListener("blur", markAway)');
     // 電池と通信を食うので置かない。
     expect(MAP).not.toContain("setInterval");
+  });
+
+  it("1回の復帰で2回取りに行かない(@codex #409 R3 P2)", () => {
+    // visibilitychange と focus の両方が飛ぶ端末がある。素直に数えると
+    // 後の取得が前の取得を中断する。「離れた→戻った」の変化だけ1回数える。
+    const at = MAP.indexOf("const markBack = () => {");
+    expect(at).toBeGreaterThan(-1);
+    const body = MAP.slice(at, at + 300);
+    expect(body).toContain('document.visibilityState !== "visible"');
+    const guard = body.indexOf("if (!awayRef.current) return;");
+    const reset = body.indexOf("awayRef.current = false;");
+    const bump = body.indexOf("setResumeNonce((n) => n + 1)");
+    expect(guard).toBeGreaterThan(-1);
+    expect(reset).toBeGreaterThan(guard);
+    expect(bump).toBeGreaterThan(reset);
+  });
+
+  it("復帰では重い層(踏破・軌跡)を取り直さない(@codex #409 R3 P2)", () => {
+    // 全部取り直す refetchNonce とは別の合図にする。判定は純関数側
+    // (field-survey-map-fetch-plan.test.ts の RESUME_DEPENDENT)。
+    expect(MAP).toContain("setResumeNonce((n) => n + 1)");
+    expect(MAP).not.toContain("bumpRefetchRef");
+    expect(MAP).toContain("resumeNonce={resumeNonce}");
+    // 計画の入力に復帰の合図が載っている(両方の nonce が別物として渡る)。
+    const inputsAt = MAP.indexOf("bboxKey: `${b.north}");
+    expect(inputsAt).toBeGreaterThan(-1);
+    const inputs = MAP.slice(inputsAt, inputsAt + 200);
+    expect(inputs).toContain("refetchNonce,");
+    expect(inputs).toContain("resumeNonce,");
   });
 });
 

@@ -22,6 +22,7 @@ const base: MapFetchInputs = {
   coverageDays: 365,
   bboxKey: "a",
   refetchNonce: 0,
+  resumeNonce: 0,
 };
 
 describe("planMapFetch: 何を取り、何を消すか", () => {
@@ -111,6 +112,29 @@ describe("planMapFetch: 何を取り、何を消すか", () => {
     });
   });
 
+  it("復帰(resumeNonce)ではピンと物件だけ取り直す(@codex #409 R3 P2)", () => {
+    // 他の担当者が増やせるのはピンと物件だけ。踏破の面と軌跡の線は巡回終了
+    // (=自分の操作)でしか増えないので、復帰のたびに重い集計を投げ直さない。
+    const p = planMapFetch(base, { ...base, resumeNonce: 1 });
+    expect(p.fetch).toEqual({
+      properties: true,
+      pins: true,
+      coverage: false,
+      tracks: false,
+    });
+  });
+
+  it("復帰でも OFF の層は取りに行かない", () => {
+    const next: MapFetchInputs = {
+      ...base,
+      resumeNonce: 1,
+      layers: { properties: false, pins: true, coverage: true, tracks: true },
+    };
+    const p = planMapFetch(base, next);
+    expect(p.fetch.properties).toBe(false);
+    expect(p.fetch.pins).toBe(true);
+  });
+
   it("何も変わっていなければ1本も取らない(同じ値での再評価で無駄打ちしない)", () => {
     const p = planMapFetch(base, { ...base });
     expect(p.fetch).toEqual({
@@ -189,6 +213,7 @@ describe("planMapFetch: 何を取り、何を消すか", () => {
                 coverageDays: 365,
                 bboxKey: "a",
                 refetchNonce: 0,
+                resumeNonce: 0,
               };
               const next: MapFetchInputs = {
                 layers: {
@@ -200,6 +225,7 @@ describe("planMapFetch: 何を取り、何を消すか", () => {
                 coverageDays: daysSame ? 365 : 0,
                 bboxKey: bboxSame ? "a" : "b",
                 refetchNonce: nonceSame ? 0 : 1,
+                resumeNonce: 0,
               };
               for (const pend of [new Set<"properties" | "pins" | "coverage" | "tracks">(), new Set(keys)]) {
                 const p = planMapFetch(prev, next, pend);

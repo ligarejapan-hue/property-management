@@ -707,34 +707,46 @@ export default function FieldSurveyMap({
   const pendingPhotoFileRef = useRef<File | null>(null);
   // marker 再 fetch をトリガするためのバンプ値。pin 作成 / 編集成功で increment。
   const [refetchNonce, setRefetchNonce] = useState(0);
-  // 復帰時リスナー(長寿命)から最新の取り直し関数を呼ぶための控え。
-  const bumpRefetchRef = useRef<(() => void) | null>(null);
+  // 「今この画面から離れているか」。復帰の合図を1回に束ねるために使う。
+  const awayRef = useRef(false);
+  // 画面へ戻ってきた合図(@codex #409 R3 P2)。全部を取り直す refetchNonce とは
+  // 別にして、**ピンと物件だけ**取り直す(踏破の面と軌跡の線は重いうえ、
+  // 巡回終了=自分の操作でしか増えないので復帰では取り直さない)。
+  const [resumeNonce, setResumeNonce] = useState(0);
   // ⚠他の担当者が立てたピンは、これまで**地図を動かすまで出なかった**
   //   (取り直しの合図は全部「自分の操作の後始末」だった)。同じ街を2人で歩くと
   //   相手のピンが見えず二度手間になる。定期的な問い合わせ(ポーリング)は電池と
   //   通信を食うので置かず、**画面に戻ってきたときだけ**取り直す
   //   (別アプリ・カメラから戻る = 現場でいちばん多い復帰の仕方)。
+  // ⚠1回の復帰で visibilitychange と focus の**両方**が飛ぶ端末がある
+  //   (@codex #409 R3 P2)。素直に数えると2回取りに行き、後の取得が前の取得を
+  //   中断する。「離れた→戻った」の変化のときだけ1回数える。
   useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState !== "visible") return;
-      bumpRefetchRef.current?.();
+    const markAway = () => {
+      awayRef.current = true;
     };
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onVisible);
+    const markBack = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!awayRef.current) return;
+      awayRef.current = false;
+      setResumeNonce((n) => n + 1);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") markBack();
+      else markAway();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", markBack);
+    window.addEventListener("blur", markAway);
     return () => {
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", markBack);
+      window.removeEventListener("blur", markAway);
     };
   }, []);
   const bumpRefetch = useCallback(() => {
     setRefetchNonce((n) => n + 1);
   }, []);
-  useEffect(() => {
-    bumpRefetchRef.current = bumpRefetch;
-    return () => {
-      bumpRefetchRef.current = null;
-    };
-  }, [bumpRefetch]);
   // unmount 後の state 更新を止めるための印（遅延 callback の防御）。
   const fsMapMountedRef = useRef(true);
   useEffect(() => {
@@ -1202,6 +1214,7 @@ export default function FieldSurveyMap({
             onBackgroundClick={closeDetailOnBackground}
             registerPropertyPopupClose={registerPropertyPopupClose}
             focusPinId={focusPinId}
+            resumeNonce={resumeNonce}
           />
           <MapInstanceCapture onMap={setMapInstance} />
           {activeSession && <RoutePolyline points={polylinePoints} />}
@@ -2056,6 +2069,7 @@ function MapDataLayer({
   onBackgroundClick,
   registerPropertyPopupClose,
   focusPinId,
+  resumeNonce,
 }: {
   layers: Record<Layer, boolean>;
   /**
@@ -2089,6 +2103,8 @@ function MapDataLayer({
   registerPropertyPopupClose: (fn: (() => void) | null) => void;
   /** 一覧から「地図で見る」で指定されたピン(まとめ表示に飲ませない)。 */
   focusPinId: string | null;
+  /** 画面へ戻ってきた合図。増えるとピンと物件だけ取り直す(R3 P2)。 */
+  resumeNonce: number;
   refetchNonce: number;
   /** ピンの「自分/他人」縁色の判定用 (server-side で確定済みのログイン userId)。 */
   currentUserId: string;
@@ -2613,6 +2629,7 @@ function MapDataLayer({
         // 表示範囲の同一性。丸めずそのまま使う(同じ範囲なら同じ文字列)。
         bboxKey: `${b.north},${b.south},${b.east},${b.west}`,
         refetchNonce,
+        resumeNonce,
       };
       const plan = planMapFetch(
         prevFetchInputsRef.current,
@@ -2661,6 +2678,7 @@ function MapDataLayer({
       layers.tracks,
       coverageDays,
       refetchNonce,
+      resumeNonce,
     ],
   );
 
@@ -2729,6 +2747,7 @@ function MapDataLayer({
     layers.tracks,
     coverageDays,
     refetchNonce,
+    resumeNonce,
   ]);
 
   // Phase 1-G: pin 追加モード中 (またはカメラファーストの地図タップ待ち中) のみ

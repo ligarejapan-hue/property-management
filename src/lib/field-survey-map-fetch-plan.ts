@@ -29,6 +29,13 @@ export interface MapFetchInputs {
   bboxKey: string;
   /** 「更新」や自分の操作後の取り直し要求。増えたら全レイヤー取り直し。 */
   refetchNonce: number;
+  /**
+   * 画面へ戻ってきた合図。増えたら**人が増やせるものだけ**取り直す
+   * (@codex #409 R3 P2)。踏破の面と軌跡の線は「巡回が終わったとき」にしか
+   * 増えず、それは自分の操作なので refetchNonce 側で取り直される。復帰のたびに
+   * 重い集計を投げ直すのは、通信を減らすという今回の狙いと逆行する。
+   */
+  resumeNonce: number;
 }
 
 export interface MapFetchPlan {
@@ -47,6 +54,9 @@ const ALL_KEYS: readonly MapLayerKey[] = [
 
 /** 期間(coverageDays)に依存するのは面と線だけ。 */
 const PERIOD_DEPENDENT: readonly MapLayerKey[] = ["coverage", "tracks"];
+
+/** 復帰時に取り直す層。他の担当者が増やせるのはピンと物件だけ。 */
+const RESUME_DEPENDENT: readonly MapLayerKey[] = ["properties", "pins"];
 
 export function planMapFetch(
   prev: MapFetchInputs | null,
@@ -79,6 +89,7 @@ export function planMapFetch(
     prev.bboxKey !== next.bboxKey ||
     prev.refetchNonce !== next.refetchNonce;
   const periodChanged = prev !== null && prev.coverageDays !== next.coverageDays;
+  const resumed = prev !== null && prev.resumeNonce !== next.resumeNonce;
 
   for (const key of ALL_KEYS) {
     const on = next.layers[key];
@@ -90,8 +101,10 @@ export function planMapFetch(
     }
     const turnedOn = prev !== null && !prev.layers[key];
     const periodHit = periodChanged && PERIOD_DEPENDENT.includes(key);
+    const resumeHit = resumed && RESUME_DEPENDENT.includes(key);
     // 未達の層は、他に理由が無くても取り直す(取りこぼしの自己修復)。
-    fetch[key] = refetchAll || turnedOn || periodHit || pending.has(key);
+    fetch[key] =
+      refetchAll || turnedOn || periodHit || resumeHit || pending.has(key);
   }
 
   return { fetch, clear };
