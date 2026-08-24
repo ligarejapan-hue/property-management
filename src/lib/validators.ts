@@ -396,6 +396,12 @@ export const patchFieldSurveyPinSchema = z
     memo: z.string().max(FIELD_SURVEY_MEMO_MAX_LEN).optional().nullable(),
     propertyId: z.string().uuid().nullable().optional(),
     sessionId: z.string().uuid().nullable().optional(),
+    // 位置直し(発注者決定 2026-07-28 決定8)。現場で「家の上へドラッグ」して
+    // 直すための受け口。範囲は作成時と同じ。
+    // ⚠**決定9=位置の変更は記録に残さない**。route 側で changedFields に
+    //   座標を含めないこと(含めると監査へ自動的に載る)。
+    lat: z.number().min(-90).max(90).optional(),
+    lng: z.number().min(-180).max(180).optional(),
   })
   .strict()
   .refine(
@@ -404,9 +410,16 @@ export const patchFieldSurveyPinSchema = z
       v.status !== undefined ||
       v.memo !== undefined ||
       v.propertyId !== undefined ||
-      v.sessionId !== undefined,
+      v.sessionId !== undefined ||
+      v.lat !== undefined ||
+      v.lng !== undefined,
     { message: "更新フィールドを指定してください" },
-  );
+  )
+  // ⚠緯度・経度は**必ず組で**。片方だけ通すと、もう片方が前の位置のまま残り
+  //   実在しない場所にピンが立つ。
+  .refine((v) => (v.lat === undefined) === (v.lng === undefined), {
+    message: "緯度と経度は両方を指定してください",
+  });
 
 // 地図 pan/zoom で頻繁に叩かれるため、bbox は必須で面積上限を設ける。
 // 0.5 度 ≒ 55km。緯度差・経度差ともに 0.5 度を上限とする (国内利用想定の市レベル+α)。

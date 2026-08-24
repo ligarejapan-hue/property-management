@@ -115,7 +115,9 @@ describe("B4: 取り直しの計画を1か所で作る", () => {
     expect(MAP).toContain("let tracksChain: Promise<void> | null = null;");
     expect(MAP).toContain("coverageChain = coveragePromise");
     expect(MAP).toContain("tracksChain = tracksPromise");
-    const fin = MAP.indexOf("      } finally {");
+    // ⚠位置直し(決定8)にも finally があり、そちらが先に出現する。
+    //   取得の finally 固有のコメントでアンカーする。
+    const fin = MAP.indexOf("さらに面・線が飛んでいる間は解除しない");
     expect(fin).toBeGreaterThan(-1);
     const body = MAP.slice(fin, fin + 900);
     expect(body).toContain("const detached = [coverageChain, tracksChain].filter(");
@@ -299,10 +301,13 @@ describe("まとめ表示(クラスタリング)", () => {
     const at = MAP.indexOf("const pinClusters = useMemo");
     expect(at).toBeGreaterThan(-1);
     const body = MAP.slice(at, at + 1400);
-    expect(body).toContain(".filter((p) => p.id !== focusPinId)");
+    // 位置直し中のピン(決定8)も同じ理由でまとめない=「必ず単独」の集合で扱う。
+    expect(body).toContain("const alwaysSingle = new Set<string>();");
+    expect(body).toContain("if (focusPinId) alwaysSingle.add(focusPinId);");
+    expect(body).toContain(".filter((p) => !alwaysSingle.has(p.id))");
     // 除いたぶんは単独として必ず描く(消してしまわない)。
     expect(body).toContain("r.singles.push({");
-    expect(body).toContain("visiblePins, zoom, focusPinId]");
+    expect(body).toContain("visiblePins, zoom, focusPinId, movablePinId]");
   });
 
   it("中身が全部済みのまとまりは灰色で出す(@codex #409 R5 P2)", () => {

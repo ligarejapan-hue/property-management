@@ -25,6 +25,7 @@ import {
 } from "@vis.gl/react-google-maps";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMapGestureHandling } from "@/components/field-survey/use-map-gesture-handling";
+import { buildPinMovePatch } from "@/lib/field-survey-pin-util";
 import {
   clusterByGrid,
   CLUSTER_MIN_ZOOM,
@@ -564,8 +565,16 @@ export default function FieldSurveyMap({
   // ⚠開く側も busy ゲートを通す(@codex #408 R1 P1)。作業中に**別のピン**を
   //   タップすると pinId 切替のリセットで下書きが消えるため、直行 marker 経路
   //   も背景タップ・作成タップと同じ判定に揃える。
+  // ⚠**保存直後のピンだけ**をドラッグで動かせるようにする(発注者決定 2026-07-28
+  //   決定8)。常時ドラッグ可にはしない=歩きながら地図を動かすつもりでピンを
+  //   掴んでしまうため(1本指パンにした今はなおさら)。
+  //   「直さないなら手数ゼロ」=次の操作を始めれば黙って解除する。
+  const [movablePinId, setMovablePinId] = useState<string | null>(null);
+  const [movingPin, setMovingPin] = useState(false);
   const openPinDetailSafe = useCallback((id: string) => {
     if (detailPanelBusyRef.current) return;
+    // 次の操作を始めたので位置直しは終わり(決定8「次の操作を始めれば解除」)。
+    setMovablePinId(null);
     // 物件の吹き出しが開いたまま別ピンの詳細シートと同居しないよう、開く前に
     // 閉じる(@codex #408 R6 P2)。busy で開かない場合は吹き出しも触らない=
     // タップは完全に無効(通常 marker・focusPin 強調 marker の両経路が通る)。
@@ -799,12 +808,16 @@ export default function FieldSurveyMap({
   // 巡回開始時に一度だけ走らせる自動処理の予約。開始の瞬間には session id も
   // 現在地もまだ無いため、その場では実行できない (下の effect で消化する)。
   const autoStartRecordingRef = useRef(false);
+  // ⚠巡回の開始/終了も「次の操作」(決定8)。ここで解除しないと、巡回を終えた
+  //   あともバナーが出続け、前のピンが掴めるまま残る(内部レビューP2)。
   const handleActiveSessionChange = useCallback(
     (s: ActiveSessionLike | null, opts?: { justStarted?: boolean }) => {
       const nextId = s?.id ?? null;
       const prevId = prevActiveSessionIdRef.current;
       if (prevId !== nextId) {
         prevActiveSessionIdRef.current = nextId;
+        // 巡回が変わった=次の操作を始めた。位置直しは終わり(決定8)。
+        setMovablePinId(null);
         // 「巡回を開始」ボタン経由の開始成功時はパネルを畳み、撮影 FAB へ直行
         if (prevId === null && nextId !== null && quickStartRef.current) {
           quickStartRef.current = false;
@@ -933,6 +946,7 @@ export default function FieldSurveyMap({
     cameraPhotoFileRef.current = file;
     setCameraFirstHasPhoto(true);
     setCameraFirstPhase("awaiting-map-tap");
+    setMovablePinId(null); // 次の操作を始めた=位置直しは終わり(決定8)
   }, []);
 
   // 「写真なしでピン」(発注者要望 2026-08-17)。撮影と同じ地図タップ待ちに入るが
@@ -944,6 +958,7 @@ export default function FieldSurveyMap({
     cameraPhotoFileRef.current = null;
     setCameraFirstHasPhoto(false);
     setCameraFirstPhase("awaiting-map-tap");
+    setMovablePinId(null); // 次の操作を始めた=位置直しは終わり(決定8)
   }, []);
 
   const pinMutations = useFieldSurveyPinMutations();
@@ -969,6 +984,9 @@ export default function FieldSurveyMap({
       pendingPhotoFileRef.current = null;
       const fromCamera = createdFromCameraRef.current;
       createdFromCameraRef.current = false;
+      // 決定8: 保存直後のこのピンだけを動かせる状態にする。写真の有無や
+      // 作成経路によらず、立てた直後なら現地で家の上へ寄せられる。
+      setMovablePinId(pinId);
       if (fromCamera || hadPhoto) {
         setSavedToastPinId(pinId);
         if (cameraToastTimerRef.current) {
@@ -986,6 +1004,39 @@ export default function FieldSurveyMap({
     [],
   );
 
+  // 位置直しを終える。次の操作(撮影・作成・詳細を開く・巡回の開始終了)の
+  // 入口で必ず呼び、押し忘れても勝手に外れるようにする。
+  const clearPinMove = useCallback(() => {
+    setMovablePinId(null);
+  }, []);
+
+  // ドラッグで離した瞬間に保存する(「完了」を押させない=手数ゼロの原則)。
+  // ⚠位置の変更は記録に残らない(決定9)。監査の扱いはサーバー側で担保。
+  const handlePinMoved = useCallback(
+    async (pinId: string, lat: number, lng: number): Promise<boolean> => {
+      const patch = buildPinMovePatch(lat, lng);
+      if (!patch) {
+        setError("その位置には動かせません。もう一度お試しください。");
+        return false;
+      }
+      setMovingPin(true);
+      try {
+        const r = await pinMutations.updatePin(pinId, patch);
+        if (!fsMapMountedRef.current) return false;
+        if (!r.ok) {
+          setError(
+            r.error ?? "ピンの位置を保存できませんでした。もう一度お試しください。",
+          );
+          return false;
+        }
+        return true;
+      } finally {
+        if (fsMapMountedRef.current) setMovingPin(false);
+      }
+    },
+    [pinMutations],
+  );
+
   // トーストの「取り消す」: 直前に作成した pin を論理削除 (アーカイブ) する。
   // 誤作成をマーカー探し + 4 タップの削除導線なしで即時に戻せるようにする。
   const handleUndoCreatedPin = useCallback(async () => {
@@ -997,6 +1048,7 @@ export default function FieldSurveyMap({
       // 削除中に別ピンの保存でトーストが切替済みなら、そちらは消さない
       // (timer は共有 ref のため触らない。発火時の null 化は no-op で安全)。
       setSavedToastPinId((cur) => (cur === pinId ? null : cur));
+      setMovablePinId((cur) => (cur === pinId ? null : cur));
       bumpRefetch();
     } else {
       setError("ピンの取り消しに失敗しました。ピンをタップして削除してください。");
@@ -1107,6 +1159,8 @@ export default function FieldSurveyMap({
   // (2026-07-29 業務判断: 現在地への自動配置はしない。写真なしのピンは
   //  2026-08-17 発注者要望で「写真なしでピン」導線から**作れるようになった**が、
   //  位置決めは引き続きこのタップ経路だけ)。
+  // ⚠地図タップでの作成も「次の操作」。ここで解除しないと、新しいピンを
+  //   置いた後も前のピンが掴める状態が残る。
   const handleMapClick = useCallback(
     (latLng: { lat: number; lng: number }) => {
       // 既に modal 表示中はスルー (誤操作防止)。
@@ -1137,6 +1191,7 @@ export default function FieldSurveyMap({
       // 開いたままの詳細パネルは閉じる (旧ピンのパネル残留と、スマホで
       // bottom sheet が保存トーストを覆い隠すのを防ぐ)。
       setDetailPinId(null);
+      setMovablePinId(null); // 次の操作を始めた=位置直しは終わり(決定8)
       setCreateCandidate({
         lat: latLng.lat,
         lng: latLng.lng,
@@ -1174,6 +1229,7 @@ export default function FieldSurveyMap({
       setClientCreateError(null);
       // 開いたままの詳細パネルは閉じる (click 側と同じ理由)。
       setDetailPinId(null);
+      setMovablePinId(null); // 次の操作を始めた=位置直しは終わり(決定8)
       setCreateCandidate({ lat: latLng.lat, lng: latLng.lng });
     },
     [
@@ -1204,6 +1260,7 @@ export default function FieldSurveyMap({
     });
     setClientCreateError(null);
     setCameraFirstPhase("awaiting-map-tap");
+    setMovablePinId(null); // 次の操作を始めた=位置直しは終わり(決定8)
   }, []);
 
   const cameraButton = cameraFirstButtonState({
@@ -1246,6 +1303,9 @@ export default function FieldSurveyMap({
             focusPinId={focusPinId}
             resumeNonce={resumeNonce}
             onHeavyFetch={markHeavyFetched}
+            movablePinId={movablePinId}
+            movingPin={movingPin}
+            onPinMoved={handlePinMoved}
           />
           <MapInstanceCapture onMap={setMapInstance} />
           {activeSession && <RoutePolyline points={polylinePoints} />}
@@ -1423,6 +1483,31 @@ export default function FieldSurveyMap({
                 ← 完成待ち一覧へ戻る
               </a>
             ))}
+          {/* 決定8: 保存直後だけ出る位置直しの案内。押さなくても次の操作で
+              消えるので「直さないなら手数ゼロ」。詳細パネルが開いている間は
+              重ねない(シートの裏に隠れるため)。 */}
+          {movablePinId && !panelOpen && cameraFirstPhase !== "awaiting-map-tap" && (
+            <div
+              role="status"
+              data-testid="pin-move-banner"
+              className="pointer-events-auto flex items-center justify-between gap-2 rounded-md border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-900 shadow dark:border-indigo-500/40 dark:bg-indigo-500/15 dark:text-indigo-200"
+            >
+              <span>
+                {movingPin
+                  ? "位置を保存しています…"
+                  : "ピンを家の上へドラッグして直せます"}
+              </span>
+              <button
+                type="button"
+                data-testid="pin-move-done"
+                onClick={clearPinMove}
+                disabled={movingPin}
+                className="shrink-0 rounded border border-indigo-400 bg-white px-2 py-0.5 font-semibold text-indigo-800 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-indigo-500/50 dark:bg-gray-900 dark:text-indigo-200 dark:hover:bg-gray-800"
+              >
+                完了
+              </button>
+            </div>
+          )}
           {cameraFirstPhase === "awaiting-map-tap" && !panelOpen && (
             <CameraFirstBanner
               hasPhoto={cameraFirstHasPhoto}
@@ -2119,6 +2204,9 @@ function MapDataLayer({
   focusPinId,
   resumeNonce,
   onHeavyFetch,
+  movablePinId,
+  movingPin,
+  onPinMoved,
 }: {
   layers: Record<Layer, boolean>;
   /**
@@ -2156,6 +2244,12 @@ function MapDataLayer({
   resumeNonce: number;
   /** 重い層(面・線)を取りに行ったことを親へ伝える(復帰時の判断材料。R6 P2)。 */
   onHeavyFetch: () => void;
+  /** 保存直後で「家の上へドラッグして直せる」ピン(決定8)。他は動かせない。 */
+  movablePinId: string | null;
+  /** 位置を保存している最中か。この間は掴ませない(内部レビューP2)。 */
+  movingPin: boolean;
+  /** ドラッグで離した位置を保存する。false=保存できなかった(元に戻す)。 */
+  onPinMoved: (pinId: string, lat: number, lng: number) => Promise<boolean>;
   refetchNonce: number;
   /** ピンの「自分/他人」縁色の判定用 (server-side で確定済みのログイン userId)。 */
   currentUserId: string;
@@ -2219,15 +2313,18 @@ function MapDataLayer({
     [pins, hideClosedPins],
   );
   const pinClusters = useMemo(() => {
-    // ⚠一覧から「地図で見る」で来たピンは**まとめに入れない**(提出前レビュー)。
-    //   引いた倍率だとまとまりに飲まれ、見に来たピンの種別の色が見えなくなる
-    //   (場所は★マーカーが示すが、何のピンかが分からないと用が足りない)。
-    const focusRow = focusPinId
-      ? (visiblePins.find((p) => p.id === focusPinId) ?? null)
-      : null;
+    // ⚠**まとめに入れないピン**(必ず単独で描く):
+    //   ・一覧から「地図で見る」で来たピン(提出前レビュー)。引いた倍率だと
+    //     まとまりに飲まれ、見に来たピンの種別の色が見えなくなる。
+    //   ・位置直し中のピン(決定8)。飲まれると**掴めなくなり**、「ドラッグして
+    //     直せます」と案内しながら操作できない状態になる。
+    const alwaysSingle = new Set<string>();
+    if (focusPinId) alwaysSingle.add(focusPinId);
+    if (movablePinId) alwaysSingle.add(movablePinId);
+    const singleRows = visiblePins.filter((p) => alwaysSingle.has(p.id));
     const r = clusterByGrid(
       visiblePins
-        .filter((p) => p.id !== focusPinId)
+        .filter((p) => !alwaysSingle.has(p.id))
         .map((p) => ({
           id: p.id,
           lat: p.lat,
@@ -2237,13 +2334,14 @@ function MapDataLayer({
         })),
       zoom,
     );
-    if (focusRow)
+    for (const row of singleRows) {
       r.singles.push({
-        id: focusRow.id,
-        lat: focusRow.lat,
-        lng: focusRow.lng,
-        done: focusRow.status === "closed",
+        id: row.id,
+        lat: row.lat,
+        lng: row.lng,
+        done: row.status === "closed",
       });
+    }
     // ⚠`Map` はこのファイルでは地図コンポーネントの名前。標準の Map は
     //   globalThis 経由で明示する(取り違えると型が通らない)。
     const byId = new globalThis.Map<string, PinRow>(
@@ -2255,7 +2353,7 @@ function MapDataLayer({
         .map((s) => ({ id: s.id, row: byId.get(s.id) }))
         .filter((x): x is { id: string; row: PinRow } => x.row !== undefined),
     };
-  }, [visiblePins, zoom, focusPinId]);
+  }, [visiblePins, zoom, focusPinId, movablePinId]);
   const propertyClusters = useMemo(() => {
     const r = clusterByGrid(
       properties.map((p) => ({
@@ -2290,6 +2388,13 @@ function MapDataLayer({
     },
     [map],
   );
+  // 位置直し中のピン(取得結果で位置を巻き戻さないための判定に使う)。
+  // ⚠fetchForBbox の依存には入れない=入れるとリスナー再登録と進行中取得の
+  //   中断が起き、層別取得で減らした通信が戻ってしまう。
+  const movablePinIdRef = useRef(movablePinId);
+  useEffect(() => {
+    movablePinIdRef.current = movablePinId;
+  }, [movablePinId]);
   // 背景タップ判定用: captureMapClick の最新値(リスナーは長寿命のため ref 経由)。
   const captureRef = useRef(captureMapClick);
   useEffect(() => {
@@ -2596,7 +2701,20 @@ function MapDataLayer({
               data?: PinRow[];
               nextCursor?: string | null;
             };
-            setPins(filterValidPinGps(j.data ?? []));
+            // ⚠**今まさに動かしているピンの位置は上書きしない**(内部レビューP2)。
+            //   保存の応答が返る前に復帰などで再取得が走ると、サーバーはまだ
+            //   古い位置を返す。そのまま流し込むと「直したのに戻った」に見え、
+            //   実際には保存されているのに無駄な直しを誘う。
+            setPins((cur) => {
+              const next = filterValidPinGps(j.data ?? []);
+              const movingId = movablePinIdRef.current;
+              if (!movingId) return next;
+              const local = cur.find((x) => x.id === movingId);
+              if (!local) return next;
+              return next.map((x) =>
+                x.id === movingId ? { ...x, lat: local.lat, lng: local.lng } : x,
+              );
+            });
             pendingLayersRef.current.delete("pins");
             pinsTruncatedNext = typeof j.nextCursor === "string";
           } else {
@@ -3066,7 +3184,43 @@ function MapDataLayer({
                   // 経由せず、タップで直接詳細を開く(★focusPin と挙動統一)。
                   () => onOpenPinDetail(pin.id)
             }
-            title={formatPinType(pin.pinType)}
+            /* 決定8: 動かせるのは**保存直後のこの1本だけ**。タップ待ちの間は
+               掴ませない(唯一の作成経路である地図タップを奪わないため)。
+               ⚠**保存中も掴ませない**(内部レビューP2)。サーバーの楽観ロックは
+               種類と紐付けしか見ないため、位置の更新を2本同時に飛ばすと
+               どちらも成功し、**到達順**が最終値を決めてしまう(画面は新しい
+               位置なのに DB は古い位置、が起こり得る)。飛ばすのを常に1本に
+               限れば、その競合自体が起きない。 */
+            draggable={!captureMapClick && !movingPin && pin.id === movablePinId}
+            onDragEnd={
+              !captureMapClick && !movingPin && pin.id === movablePinId
+                ? (e) => {
+                    const lat = e.latLng?.lat();
+                    const lng = e.latLng?.lng();
+                    if (typeof lat !== "number" || typeof lng !== "number") return;
+                    const before = { lat: pin.lat, lng: pin.lng };
+                    // 先に画面へ反映してから保存する(指を離した位置に留まる)。
+                    setPins((cur) =>
+                      cur.map((x) => (x.id === pin.id ? { ...x, lat, lng } : x)),
+                    );
+                    void onPinMoved(pin.id, lat, lng).then((ok) => {
+                      // 保存できなければ元の位置へ戻す(保存された、と誤解させない)。
+                      if (!ok) {
+                        setPins((cur) =>
+                          cur.map((x) =>
+                            x.id === pin.id ? { ...x, ...before } : x,
+                          ),
+                        );
+                      }
+                    });
+                  }
+                : undefined
+            }
+            title={
+              pin.id === movablePinId
+                ? "ドラッグで家の上へ動かせます"
+                : formatPinType(pin.pinType)
+            }
           >
             {/* 種別=色+グリフ / 対応済み=灰✓ / 他人=白縁 (凡例と純関数を共有) */}
             <Pin

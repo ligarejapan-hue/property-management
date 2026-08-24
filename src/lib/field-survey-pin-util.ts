@@ -77,6 +77,23 @@ export interface PinPatchBody {
   pinType?: string;
   status?: string;
   memo?: string | null;
+  lat?: number;
+  lng?: number;
+}
+
+/**
+ * 位置直し(決定8)で送る中身。**座標だけ**を送り、他の項目は巻き込まない。
+ * 壊れた値・地球の範囲外は null を返して送らない(サーバーに 422 を打たせない)。
+ * 判定はサーバーの検証と同じ規則にそろえる。
+ */
+export function buildPinMovePatch(
+  lat: number,
+  lng: number,
+): PinPatchBody | null {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90) return null;
+  if (lng < -180 || lng > 180) return null;
+  return { lat, lng };
 }
 
 export function buildPinPatch(

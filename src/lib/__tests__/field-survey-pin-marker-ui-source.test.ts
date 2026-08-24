@@ -51,8 +51,10 @@ describe("field-survey-map — ピン配色の配線", () => {
     expect(m).toMatch(/pinMarkerStyle\(\{/);
     // 自分/他人は staffUserId と server 確定の currentUserId の一致で判定
     expect(m).toMatch(/isOwn:\s*pin\.staffUserId === currentUserId/);
-    // title は生 enum でなく日本語ラベル (タッチ端末以外の hover 用)
-    expect(m).toMatch(/title=\{formatPinType\(pin\.pinType\)\}/);
+    // title は生 enum でなく日本語ラベル (タッチ端末以外の hover 用)。
+    // 位置直し中(決定8)のときだけ操作の案内に差し替わる。
+    expect(m).toMatch(/formatPinType\(pin\.pinType\)/);
+    expect(m).toMatch(/ドラッグで家の上へ動かせます/);
     expect(m).not.toMatch(/title=\{pin\.pinType\}/);
   });
 

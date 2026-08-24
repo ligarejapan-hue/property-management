@@ -129,9 +129,9 @@ describe("A5: バナーは上部スタック(現在地ボタンを覆わない)"
   it("地図側の上部スタックにバナー・読み込み中・断り・踏破状態が同居する", () => {
     const at = MAP.indexOf("画面上部中央の通知スタック");
     expect(at).toBeGreaterThan(-1);
-    // 窓は 4400: 戻りチップが busy 切替の二枝(@codex #408 R3 P1)に育ち
-    // スタック内の後続要素が押し出されたため広げた(同居の検証は変わらず)。
-    const stack = MAP.slice(at, at + 4400);
+    // 窓は 6200: 戻りチップの二枝(#408 R3)に加え、位置直しの案内(決定8)が
+    // スタックへ入り後続要素が押し出されたため広げた(同居の検証は変わらず)。
+    const stack = MAP.slice(at, at + 6200);
     expect(stack).toContain("<CameraFirstBanner");
     expect(stack).toContain("読み込み中…");
     expect(stack).toContain("map-truncation-notice");
@@ -151,7 +151,9 @@ describe("A5: バナーは上部スタック(現在地ボタンを覆わない)"
     // バナーが容器の中(直後2,000文字以内)にあり、その区間の className に
     // bottom-14 が無い。
     const between = MAP.slice(at, bannerAt);
-    expect(bannerAt - at).toBeLessThan(2000);
+    // 位置直しの案内(決定8)がスタックの手前に入ったぶん距離が伸びた。
+    // 見ているのは「バナーがスタック容器の中にある」ことで、距離は近さの目安。
+    expect(bannerAt - at).toBeLessThan(4000);
     const classesBetween = between.match(/className="[^"]*"/g) ?? [];
     for (const c of classesBetween) expect(c).not.toContain("bottom-14");
   });

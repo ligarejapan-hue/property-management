@@ -92,7 +92,11 @@ export async function GET(
 // ============================================================
 // - field_survey:write 必須。own は更新可、他人 pin 更新は manage 必須。
 // - office_staff (read_all のみ) では更新不可。
-// - lat/lng は受け付けない (schema.strict() で 422)。
+// - lat/lng は**位置直し専用の受け口**として受け付ける (発注者決定 2026-07-28 決定8)。
+//   必ず組で送ること (validator の refine)。認可は他の更新と同じ = own は可・
+//   他人 pin は manage 必須 (= 管理者は他人のピンも動かせる。決定8で明示)。
+//   ⚠**決定9: 位置の変更は記録に残さない**。下の changedFields に **lat/lng を
+//   足さないこと**。足すと監査へ自動的に載り、発注者判断と食い違う。
 // - propertyId / sessionId の紐付け先には認可を再評価。
 // - AuditLog: action=field_survey_pin_update / detail に座標・memo 本文を含めない。
 
@@ -274,6 +278,9 @@ export async function PATCH(
             propertyId: patch.propertyId,
           }),
           ...(patch.sessionId !== undefined && { sessionId: patch.sessionId }),
+          // 位置直し (決定8)。validator が組で来ることを保証している。
+          ...(patch.lat !== undefined && { lat: patch.lat }),
+          ...(patch.lng !== undefined && { lng: patch.lng }),
         },
       });
       if (casResult.count === 0) return null;
@@ -315,6 +322,11 @@ export async function PATCH(
       changedFields.push("sessionId");
     }
 
+    // ⚠**lat/lng は changedFields に入れない** (発注者決定 2026-07-28 決定9:
+    //   位置の変更は記録に残さない)。位置だけを直した PATCH は changedFields が
+    //   空になり、下の if を通らないので監査行そのものが作られない = 意図どおり。
+    //   「他人のピンも動かせる」かつ「痕跡が残らない」の組み合わせであることは
+    //   発注者へ提示済み・判断済み。ここを変えるときは決定9の見直しから。
     if (changedFields.length > 0) {
       await writeAuditLog({
         userId: session.id,
