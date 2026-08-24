@@ -22,9 +22,21 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
   useEffect(() => {
     const sync = () => setHash(window.location.hash);
     sync();
+    // ⚠`hashchange` だけでは足りない(@codex #411 R4 P2)。アプリ内のリンクは
+    //   history.pushState で遷移するため、同じページ内で位置だけ変えても
+    //   このイベントは飛ばない。押した時点の位置は下の handleNavClick が入れる。
+    //   ここは「URL を直接開く/戻る・進む」など、押下を経由しない移動の受け口。
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, [currentPath]);
+
+  // 押した項目そのものから位置を確定する。サイドバーはリンクを自分で描いて
+  // いるので、遷移の仕組みに関係なく確実に追随できる。
+  const handleNavClick = (href: string) => {
+    setMobileOpen(false);
+    const at = href.indexOf("#");
+    setHash(at === -1 ? "" : href.slice(at));
+  };
 
   const isActive = (href: string) => isNavItemActive(href, currentPath, hash);
 
@@ -59,7 +71,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
         key={item.href}
         href={item.href}
         className={linkClasses(item.href)}
-        onClick={() => setMobileOpen(false)}
+        onClick={() => handleNavClick(item.href)}
       >
         {item.icon}
         {item.label}

@@ -186,6 +186,43 @@ describe("DM グループ(新設)", () => {
   });
 });
 
+describe("押した位置の追随(@codex #411 R4 P2)", () => {
+  const SIDEBAR = readFileSync(
+    join(process.cwd(), "src/components/layout/sidebar.tsx"),
+    "utf8",
+  );
+
+  it("⚠押した項目そのものから位置を取る(hashchange だけに頼らない)", () => {
+    // アプリ内のリンクは history.pushState で遷移するため、同じページ内で
+    // 位置だけ変えても hashchange は飛ばない=それだけでは追随できない。
+    expect(SIDEBAR).toContain("const handleNavClick = (href: string) => {");
+    expect(SIDEBAR).toContain('onClick={() => handleNavClick(item.href)}');
+    const fn = SIDEBAR.slice(SIDEBAR.indexOf("const handleNavClick"), SIDEBAR.indexOf("const handleNavClick") + 400);
+    expect(fn).toContain('href.indexOf("#")');
+    expect(fn).toContain('setHash(at === -1 ? "" : href.slice(at))');
+    // 直接 URL を開く/戻る・進む の受け口も残す。
+    expect(SIDEBAR).toContain('window.addEventListener("hashchange", sync)');
+  });
+});
+
+describe("撤去した画面の案内が残っていない(@codex #411 R4 P2)", () => {
+  it("設定例・手順書が消えた画面へ誘導しない", () => {
+    // 手順どおりに進むと 404 に当たる、を防ぐ。
+    for (const f of [
+      ".env.example",
+      "deploy/env/app.env.example",
+      "docs/registry-location-search-calibration-runbook.md",
+    ]) {
+      const src = readFileSync(join(process.cwd(), f), "utf8");
+      const lines = src.split("\n").filter((l) => l.includes("/admin/registry-settings"));
+      // 触れる場合は「廃止した」と書いてある行だけ許す(案内として残さない)。
+      for (const l of lines) {
+        expect(l, `${f}: ${l}`).toMatch(/廃止|撤去/);
+      }
+    }
+  });
+});
+
 describe("DMメニューの手順(@codex #411 R3 P2)", () => {
   const DM_PAGE = readFileSync(
     join(process.cwd(), "src/app/(dashboard)/dm/page.tsx"),
