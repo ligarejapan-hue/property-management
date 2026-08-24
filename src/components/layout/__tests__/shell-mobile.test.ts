@@ -59,8 +59,10 @@ describe("sidebar(ドロワー) — ×ボタン被り解消 + モバイル用テ
 });
 
 describe("sidebar — 管理系は折りたたみグループ(既定閉)", () => {
-  it("データ品質・システム管理は collapsible グループ(nav-model)", () => {
-    expect(sidebarModel).toContain('label: "データ品質"');
+  it("物件データ編集・システム管理は collapsible グループ(nav-model)", () => {
+    // メニュー再編(2026-08-24): 「データ品質」→「物件データ編集」に改名。
+    // 「システム管理」は名前そのまま(発注者決定)。折りたたみの扱いは不変。
+    expect(sidebarModel).toContain('label: "物件データ編集"');
     expect(sidebarModel).toContain('label: "システム管理"');
     expect(sidebarModel).toContain("collapsible: true");
   });

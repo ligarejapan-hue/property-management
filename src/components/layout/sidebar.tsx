@@ -70,6 +70,14 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
               {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
               {g.label}
             </button>
+            {/* メニュー再編(2026-08-24): 名前だけでは中身が分かりにくい
+                グループにだけ一言説明を出す。開閉ボタンの外に置く
+                (押す的を小さくしない・読み上げでボタン名が長くならない)。 */}
+            {g.description && (
+              <p className="px-3 pl-8 text-[11px] leading-snug text-gray-400 dark:text-gray-500">
+                {g.description}
+              </p>
+            )}
           </div>
           {open && g.items.map(renderLeaf)}
         </div>
@@ -81,6 +89,11 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
           <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
             {g.label}
           </p>
+          {g.description && (
+            <p className="px-3 text-[11px] leading-snug text-gray-400 dark:text-gray-500">
+              {g.description}
+            </p>
+          )}
         </div>
         {g.items.map(renderLeaf)}
       </div>

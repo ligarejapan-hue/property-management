@@ -433,9 +433,12 @@ describe("UI配線(source)", () => {
   const read = (p: string) =>
     readFileSync(path.join(process.cwd(), p), "utf8").replace(/\r\n/g, "\n");
 
-  it("サイドバー(データ品質)に孤児DM記録の導線がある", () => {
+  it("サイドバー(DM)に送付記録の訂正の導線がある", () => {
+    // メニュー再編(2026-08-24): 「データ品質」から新設「DM」グループへ移動し、
+    // 名前も「孤児DM記録の訂正」→「送付記録の訂正」へ。
     const src = read("src/components/layout/sidebar-model.tsx");
     expect(src).toContain("/admin/orphan-dm-logs");
+    expect(src).toContain("送付記録の訂正");
   });
 
   it("管理ページが存在し API・反響ラベル・削除確認を配線している", () => {

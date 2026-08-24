@@ -27,18 +27,27 @@ describe("visibleSidebar", () => {
     expect(labels).toContain("物件一覧");
     expect(labels).toContain("受付帳CSV取込");
     expect(labels).toContain("販売図面を作成");
-    expect(labels).not.toContain("会社情報");
+    expect(labels).not.toContain("会社情報（図面・DMの差出人）");
     expect(labels).not.toContain("売却DM設定");
     expect(labels).not.toContain("ユーザー管理");
     expect(labels).not.toContain("所有者補正候補");
+    // メニュー再編(2026-08-24): 事務担当も DMメニューと取り込み4種は使う。
+    expect(labels).toContain("DMメニュー");
+    expect(labels).toContain("所有者CSV取込");
+    expect(labels).toContain("物件データエラー確認");
+    // ⚠添付ファイル検索は「物件」へ移したが**権限は据え置き**=事務には出ない。
+    expect(labels).not.toContain("添付ファイル検索");
   });
 
-  it("管理者: 全部見える(設定・データ品質・システム管理)", () => {
+  it("管理者: 全部見える(設定・物件データ編集・システム管理)", () => {
     const labels = sidebarLabels("admin");
-    expect(labels).toContain("会社情報");
+    expect(labels).toContain("会社情報（図面・DMの差出人）");
     expect(labels).toContain("売却DM設定");
     expect(labels).toContain("所有者補正候補");
     expect(labels).toContain("ユーザー管理");
-    expect(labels).toContain("謄本取得の資格情報");
+    expect(labels).toContain("添付ファイル検索");
+    expect(labels).toContain("送付記録の訂正");
+    // ⚠謄本取得の資格情報は画面ごと廃止(発注者決定 2026-08-24)。
+    expect(labels).not.toContain("謄本取得の資格情報");
   });
 });

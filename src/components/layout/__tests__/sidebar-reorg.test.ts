@@ -1,0 +1,222 @@
+/**
+ * メニュー再編(発注者決定 2026-08-24・案B)。
+ *
+ * 決めごと:
+ *  - 仕事の流れ順に並べ、名前だけでは中身が分からないグループにだけ一言説明を付ける
+ *    (「物件」「現地調査」は不要=発注者指示)。
+ *  - **URL を直打ちしないと行けなかった3画面**をメニューに載せる
+ *    (所有者CSV取込=アプリ内リンクゼロ / 登記DM取込 / 物件データエラー確認)。
+ *  - 「DM」グループを新設し、入口ページ「DMメニュー」を置く。
+ *  - 「謄本取得の資格情報」は画面ごと廃止(共通アカウント運用のため)。
+ *  - 画面の中身・権限・スマホ現場メニューは変えない。
+ */
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { SIDEBAR_GROUPS, visibleSidebar } from "@/components/layout/sidebar-model";
+
+const allItems = SIDEBAR_GROUPS.flatMap((g) => g.items);
+const byHref = (href: string) => allItems.find((i) => i.href === href);
+const group = (key: string) => SIDEBAR_GROUPS.find((g) => g.key === key);
+
+describe("確定した並び(仕事の流れ順)", () => {
+  it("グループの順序と数", () => {
+    expect(SIDEBAR_GROUPS.map((g) => g.key)).toEqual([
+      "home",
+      "prop",
+      "field",
+      "imp",
+      "dm",
+      "sheet",
+      "dq",
+      "admin",
+      "doc",
+    ]);
+  });
+});
+
+describe("確定した名前", () => {
+  it("グループ名(R1・R2・R3)", () => {
+    expect(group("imp")?.label).toBe("物件データ取り込み");
+    expect(group("dq")?.label).toBe("物件データ編集");
+    // R3 = そのまま(発注者指示)。
+    expect(group("admin")?.label).toBe("システム管理");
+    expect(group("dm")?.label).toBe("DM");
+  });
+
+  it("項目名(R4・R5・2画面の呼び名)", () => {
+    expect(byHref("/admin/company-settings")?.label).toBe(
+      "会社情報（図面・DMの差出人）",
+    );
+    expect(byHref("/admin/orphan-dm-logs")?.label).toBe("送付記録の訂正");
+    expect(byHref("/properties/quality-check")?.label).toBe("物件データエラー確認");
+    expect(byHref("/admin/attachments")?.label).toBe("添付ファイル検索");
+    expect(byHref("/dm")?.label).toBe("DMメニュー");
+  });
+
+  it("旧い名前が残っていない", () => {
+    const labels = [
+      ...SIDEBAR_GROUPS.map((g) => g.label),
+      ...allItems.map((i) => i.label),
+    ];
+    for (const gone of [
+      "取込・登記",
+      "データ品質",
+      "売却DM",
+      "孤児DM記録の訂正",
+      "添付検索",
+      "品質チェック",
+      "会社情報",
+    ]) {
+      expect(labels, gone).not.toContain(gone);
+    }
+  });
+});
+
+describe("グループの一言説明", () => {
+  it("名前だけでは中身が分からないグループにだけ付ける", () => {
+    // 発注者指示: 「物件」「現地調査」は不要。
+    expect(group("prop")?.description).toBeUndefined();
+    expect(group("field")?.description).toBeUndefined();
+    expect(group("home")?.description).toBeUndefined();
+    expect(group("doc")?.description).toBeUndefined();
+    // 残りは付ける(とくに「システム管理」は名前が分かりにくいという指摘の当事者)。
+    for (const key of ["imp", "dm", "sheet", "dq", "admin"]) {
+      expect(group(key)?.description, key).toBeTruthy();
+    }
+  });
+});
+
+describe("説明文が実際に画面へ出る(定義しただけで終わらせない)", () => {
+  const SIDEBAR = readFileSync(
+    join(process.cwd(), "src/components/layout/sidebar.tsx"),
+    "utf8",
+  ).replace(new RegExp("\\r\\n", "g"), "\n");
+
+  it("折りたたみ・通常の両方のグループで描画される", () => {
+    const hits = SIDEBAR.match(/\{g\.description && \(/g) ?? [];
+    expect(hits.length).toBe(2);
+  });
+
+  it("開閉ボタンの中には入れない(押す的を小さくしない)", () => {
+    // ボタンの内側に説明を入れると、読み上げでボタン名が長くなり、
+    // タップ領域の意味も変わる。ボタンを閉じた**後**に置く。
+    const btnEnd = SIDEBAR.indexOf("</button>");
+    const firstDesc = SIDEBAR.indexOf("{g.description && (");
+    expect(btnEnd).toBeGreaterThan(-1);
+    expect(firstDesc).toBeGreaterThan(btnEnd);
+  });
+});
+
+describe("⚠URL 直打ちでしか行けなかった画面を載せる", () => {
+  it("所有者CSV取込・登記DM取込・物件データエラー確認", () => {
+    // 所有者CSV取込はアプリ内のリンクがゼロだった(実測 2026-08-16 / 08-24)。
+    expect(byHref("/import/owners")).toBeTruthy();
+    expect(byHref("/import/registry-dm")).toBeTruthy();
+    expect(byHref("/properties/quality-check")).toBeTruthy();
+  });
+
+  it("取り込み系は「物件データ取り込み」に、エラー確認は「物件」に置く", () => {
+    const imp = group("imp")?.items.map((i) => i.href) ?? [];
+    expect(imp).toContain("/import");
+    expect(imp).toContain("/import/registry-pdf");
+    expect(imp).toContain("/import/registry-dm");
+    expect(imp).toContain("/import/owners");
+    const prop = group("prop")?.items.map((i) => i.href) ?? [];
+    expect(prop).toContain("/properties/quality-check");
+  });
+});
+
+describe("DM グループ(新設)", () => {
+  it("入口ページを先頭に、送る流れの順で並ぶ", () => {
+    expect(group("dm")?.items.map((i) => i.href)).toEqual([
+      "/dm",
+      "/admin/sale-dm-settings",
+      "/admin/orphan-dm-logs",
+    ]);
+  });
+});
+
+describe("添付ファイル検索の移動", () => {
+  it("「物件」グループへ移り、システム管理からは消える", () => {
+    expect(group("prop")?.items.map((i) => i.href)).toContain("/admin/attachments");
+    expect(group("admin")?.items.map((i) => i.href)).not.toContain(
+      "/admin/attachments",
+    );
+  });
+
+  it("⚠権限は変えない(移動後も管理者だけ)", () => {
+    expect(byHref("/admin/attachments")?.minRole).toBe("admin");
+  });
+});
+
+describe("謄本取得の資格情報は廃止", () => {
+  it("メニューから消える", () => {
+    expect(byHref("/admin/registry-settings")).toBeUndefined();
+  });
+});
+
+describe("⚠変えないもの", () => {
+  it("スマホの現場スタッフに出るメニューは従来どおり", () => {
+    // 現地調査3項目 + 資料3項目 + ホーム。増やさない/減らさない。
+    const staff = visibleSidebar("field_staff");
+    expect(staff.map((g) => g.key)).toEqual(["home", "field", "doc"]);
+    expect(staff.flatMap((g) => g.items).map((i) => i.href)).toEqual([
+      "/home",
+      "/field-survey/map",
+      "/field-survey/sessions",
+      "/field-survey/candidates",
+      "/docs/guide.html",
+      "/docs/manual.html",
+      "/help",
+    ]);
+  });
+
+  it("項目ごとの権限は据え置き(取り込み系は事務担当・管理系は管理者)", () => {
+    expect(byHref("/import")?.minRole).toBe("office_staff");
+    expect(byHref("/import/registry-pdf")?.minRole).toBe("office_staff");
+    expect(byHref("/import/registry-dm")?.minRole).toBe("office_staff");
+    expect(byHref("/import/owners")?.minRole).toBe("office_staff");
+    expect(byHref("/properties/quality-check")?.minRole).toBe("office_staff");
+    expect(byHref("/dm")?.minRole).toBe("office_staff");
+    expect(byHref("/admin/sale-dm-settings")?.minRole).toBe("admin");
+    expect(byHref("/admin/orphan-dm-logs")?.minRole).toBe("admin");
+  });
+
+  it("リンク先(href)は1つも変えていない=画面はそのまま", () => {
+    // 名前と置き場所だけを変える提案。新設は /dm のみ。
+    const hrefs = new Set(allItems.map((i) => i.href));
+    for (const kept of [
+      "/properties",
+      "/buildings",
+      "/field-survey/map",
+      "/field-survey/sessions",
+      "/field-survey/candidates",
+      "/import",
+      "/import/registry-pdf",
+      "/sales-sheets/new",
+      "/admin/company-settings",
+      "/admin/sale-dm-settings",
+      "/admin/owners/correction",
+      "/admin/display-name-audit",
+      "/admin/postal-code-audit",
+      "/admin/owners/text-hygiene",
+      "/admin/owners/quality-audit",
+      "/admin/orphan-dm-logs",
+      "/admin/users",
+      "/admin/templates",
+      "/admin/change-password",
+      "/admin/permission-logs",
+      "/admin/audit-logs",
+      "/admin/attachments",
+      "/help",
+    ]) {
+      expect(hrefs, kept).toContain(kept);
+    }
+  });
+
+  it("重複した項目が無い(同じ画面を2か所に置かない)", () => {
+    const hrefs = allItems.map((i) => i.href);
+    expect(new Set(hrefs).size).toBe(hrefs.length);
+  });
+});
