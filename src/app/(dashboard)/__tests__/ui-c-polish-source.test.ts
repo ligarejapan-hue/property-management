@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 
 // env=node(jsdom 無し)のため、UI 配線の回帰はソース文字列で守る。
@@ -24,20 +24,20 @@ describe("C-2: 取込ボタンは0件のとき非活性を明示(UI総点検)", 
   });
 });
 
-describe("C-3: 謄本設定は暗号化キー未設定なら保存ボタンも無効(UI総点検)", () => {
-  const src = read("src/app/(dashboard)/admin/registry-settings/page.tsx");
-
-  it("暗号化未設定かつクリア指定も無いときだけ保存を無効化(クリアは暗号化不要で許可)", () => {
-    expect(src).toContain(
-      "disabled={saving || (!s?.encryptionConfigured && !clearLoginId && !clearPassword)}",
-    );
-  });
-
-  it("実態と合わない「ベースURLは保存できます」注記を残していない", () => {
-    // この画面にはベースURL欄が無い(資格情報のみ)。
-    expect(src).not.toContain("ベースURLは保存できます");
+describe("C-3: 謄本取得の資格情報画面は廃止(メニュー再編・2026-08-24)", () => {
+  // ⚠この画面は**発注者決定で撤去**した(謄本は共通アカウントから取る運用のため)。
+  //   保存ボタンの無効化条件を守っていた C-3 は、対象ごと無くなったので
+  //   「画面が存在しないこと」を守る形に置き換える。
+  //   取得機能の本体(env 経由の資格情報の解決)は残っている=挙動は不変。
+  it("画面のソースが存在しない", () => {
+    expect(
+      existsSync(
+        path.resolve(process.cwd(), "src/app/(dashboard)/admin/registry-settings/page.tsx"),
+      ),
+    ).toBe(false);
   });
 });
+
 
 describe("C-6: 淡色の警告/エラーカードがダークモード対応(UI総点検)", () => {
   it("ログインのエラーカードが dark:bg を持つ", () => {

@@ -20,9 +20,17 @@ describe("HomeContent", () => {
     expect(html).not.toContain("物件一覧・マンション棟"); // 物件カード(office+)の説明
     expect(html).not.toContain("マイソクを作る"); // 販売図面カード(office+)の説明
   });
-  it("管理者: システム管理・売却DMカードが出る", () => {
+  it("管理者: システム管理・DMメニューカードが出る", () => {
+    // メニュー再編(2026-08-24): 「売却DM(設定へ直行)」を「DMメニュー(入口)」へ。
     const html = renderToStaticMarkup(<HomeContent userRole="admin" />);
     expect(html).toContain("システム管理");
-    expect(html).toContain("売却DMの設定"); // 売却DMカードの説明
+    expect(html).toContain("DMメニュー");
+    expect(html).toContain("宛名・お手紙・記録"); // DMメニューカードの説明
+  });
+
+  it("事務にも DMメニューが出る(設定は管理者のまま)", () => {
+    const html = renderToStaticMarkup(<HomeContent userRole="office_staff" />);
+    expect(html).toContain("DMメニュー");
+    expect(html).not.toContain("利用者・権限・ログ"); // システム管理カードの説明
   });
 });

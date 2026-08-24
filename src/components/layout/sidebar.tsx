@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Menu, X, FileText } from "lucide-react";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { visibleSidebar, isNavItemActive, type NavGroup, type NavLeaf } from "./sidebar-model";
@@ -15,7 +15,30 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const groups = visibleSidebar(userRole);
 
-  const isActive = (href: string) => isNavItemActive(href, currentPath);
+  // ⚠いま見ている位置(#)。usePathname/props の currentPath は hash を含まないので
+  //   自分で追う(@codex #411 R2 P2)。初期値は空=サーバー描画と一致し、読み込み後に
+  //   実際の位置へ合わせる(描画のずれによる警告を出さない)。
+  const [hash, setHash] = useState("");
+  useEffect(() => {
+    const sync = () => setHash(window.location.hash);
+    sync();
+    // ⚠`hashchange` だけでは足りない(@codex #411 R4 P2)。アプリ内のリンクは
+    //   history.pushState で遷移するため、同じページ内で位置だけ変えても
+    //   このイベントは飛ばない。押した時点の位置は下の handleNavClick が入れる。
+    //   ここは「URL を直接開く/戻る・進む」など、押下を経由しない移動の受け口。
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, [currentPath]);
+
+  // 押した項目そのものから位置を確定する。サイドバーはリンクを自分で描いて
+  // いるので、遷移の仕組みに関係なく確実に追随できる。
+  const handleNavClick = (href: string) => {
+    setMobileOpen(false);
+    const at = href.indexOf("#");
+    setHash(at === -1 ? "" : href.slice(at));
+  };
+
+  const isActive = (href: string) => isNavItemActive(href, currentPath, hash);
 
   // 折りたたみグループの開閉: 手動トグル(未操作=未設定)が無ければ、現在地がグループ内なら
   // 自動で開く。dashboard layout は永続で Sidebar が再マウントされないため、遷移のたび
@@ -48,7 +71,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
         key={item.href}
         href={item.href}
         className={linkClasses(item.href)}
-        onClick={() => setMobileOpen(false)}
+        onClick={() => handleNavClick(item.href)}
       >
         {item.icon}
         {item.label}
@@ -70,6 +93,14 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
               {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
               {g.label}
             </button>
+            {/* メニュー再編(2026-08-24): 名前だけでは中身が分かりにくい
+                グループにだけ一言説明を出す。開閉ボタンの外に置く
+                (押す的を小さくしない・読み上げでボタン名が長くならない)。 */}
+            {g.description && (
+              <p className="px-3 pl-8 text-[11px] leading-snug text-gray-400 dark:text-gray-500">
+                {g.description}
+              </p>
+            )}
           </div>
           {open && g.items.map(renderLeaf)}
         </div>
@@ -81,6 +112,11 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
           <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
             {g.label}
           </p>
+          {g.description && (
+            <p className="px-3 text-[11px] leading-snug text-gray-400 dark:text-gray-500">
+              {g.description}
+            </p>
+          )}
         </div>
         {g.items.map(renderLeaf)}
       </div>

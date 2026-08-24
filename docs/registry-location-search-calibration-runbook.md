@@ -76,7 +76,7 @@
 すべて設定して初めて所在検索が動く(**二重ゲート**):
 
 ```
-# 資格情報(env で直接、または管理画面 /admin/registry-settings で暗号化保存)
+# 資格情報(env のみ。⚠管理画面での保存は 2026-08-24 に画面ごと廃止)
 REGISTRY_FETCH_LOGIN_ID=<利用者識別番号>
 REGISTRY_FETCH_PASSWORD=<パスワード>
 # 自動取得系セレクタの校正済み宣言

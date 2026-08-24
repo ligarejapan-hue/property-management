@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { ROLE_LABELS } from "@/lib/role-labels";
 
@@ -72,23 +72,18 @@ describe("B-5: 所有者補正候補の開発用語を平易化・事実に合�
   });
 });
 
-describe("B-5: 謄本設定画面から内部設定名・フェーズ表記を排除", () => {
-  const src = read("src/app/(dashboard)/admin/registry-settings/page.tsx");
-
-  it("環境変数名 REGISTRY_SETTINGS_ENC_KEY を画面に出さない", () => {
-    expect(src).not.toContain("REGISTRY_SETTINGS_ENC_KEY");
-  });
-
-  it("フェーズ3 という開発区分を出さない", () => {
-    expect(src).not.toContain("フェーズ3");
-  });
-
-  it("暗号化未設定時はシステム管理者への依頼として平易に案内する", () => {
-    expect(src).toContain(
-      "サーバー側の暗号化設定が完了していないため、資格情報は保存できません",
-    );
+describe("B-5: 謄本設定画面は廃止(メニュー再編・2026-08-24)", () => {
+  // ⚠内部設定名やフェーズ表記を画面に出さない、という B-5 の担保対象は
+  //   **画面ごと撤去**された(発注者決定)。存在しないことを固定する。
+  it("画面のソースが存在しない", () => {
+    expect(
+      existsSync(
+        path.resolve(process.cwd(), "src/app/(dashboard)/admin/registry-settings/page.tsx"),
+      ),
+    ).toBe(false);
   });
 });
+
 
 describe("B-5: ロール表示名の共有マップ", () => {
   it("3ロールを日本語で持つ", () => {
