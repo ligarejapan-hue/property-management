@@ -73,17 +73,28 @@ describe("動かせるのは保存直後の1本だけ", () => {
     expect(MAP.slice(at, at + 200)).toContain("setMovablePinId(null);");
   });
 
-  it("保存中の再取得で位置を巻き戻さない(内部レビューP2)", () => {
+  it("⚠手元の位置を守るのは**保存中だけ**(@codex #410 R2 P2)", () => {
     // 保存の応答前に復帰などで再取得が走ると、サーバーはまだ古い位置を返す。
     // そのまま流し込むと「直したのに戻った」に見える(実際は保存済み)。
-    expect(MAP).toContain("const movingId = movablePinIdRef.current;");
-    const at = MAP.indexOf("const movingId = movablePinIdRef.current;");
-    const body = MAP.slice(at - 400, at + 500);
-    expect(body).toContain("setPins((cur) => {");
-    expect(body).toContain("lat: local.lat, lng: local.lng");
-    // ⚠再取得の関数の依存には入れない(入れるとリスナー再登録と中断が起きる)。
-    const deps = MAP.indexOf("movablePinIdRef.current = movablePinId;");
-    expect(deps).toBeGreaterThan(-1);
+    // ⚠ただし守り続けると、保存が終わったあとに**他の人が動かした結果**まで
+    //   打ち消してしまう。守るのは飛んでいる1件だけにする。
+    const at = MAP.indexOf("const pending = pendingMoveRef.current;");
+    expect(at).toBeGreaterThan(-1);
+    const body = MAP.slice(at - 300, at + 400);
+    expect(body).toContain("if (!pending) return next;");
+    expect(body).toContain("lat: pending.lat, lng: pending.lng");
+    // 保存の開始で同期に立て(state だと反映が1描画遅れて隙ができる)、
+    const drag = MAP.indexOf("pendingMoveRef.current = { id: pin.id, lat, lng };");
+    expect(drag).toBeGreaterThan(-1);
+    const dragBody = MAP.slice(drag, drag + 1200);
+    // 先に画面へ反映するより前に守りを立てる。
+    expect(dragBody.indexOf("setPins((cur) =>")).toBeGreaterThan(-1);
+    // 成否どちらでも解く(自分が立てた1件だけを消す)。
+    expect(dragBody).toContain("pendingMoveRef.current?.id === pin.id");
+    expect(dragBody).toContain("pendingMoveRef.current = null;");
+    // 守りは ref(再取得の関数の依存に入れない=リスナー再登録と中断を招かない)。
+    expect(MAP).toContain("const pendingMoveRef = useRef<{");
+    expect(MAP).not.toContain("movablePinIdRef");
   });
 });
 
@@ -91,7 +102,8 @@ describe("離した瞬間に保存し、失敗したら元へ戻す", () => {
   it("画面へ先に反映してから保存する(指を離した位置に留まる)", () => {
     const at = MAP.indexOf("const before = { lat: pin.lat, lng: pin.lng };");
     expect(at).toBeGreaterThan(-1);
-    const body = MAP.slice(at, at + 900);
+    // 窓は 1600: 保存中の守り(@codex R2)が入り、ハンドラが伸びたため。
+    const body = MAP.slice(at, at + 1600);
     const optimistic = body.indexOf("setPins((cur) =>");
     const save = body.indexOf("onPinMoved(pin.id, lat, lng)");
     expect(optimistic).toBeGreaterThan(-1);

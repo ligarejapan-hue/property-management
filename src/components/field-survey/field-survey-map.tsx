@@ -2398,13 +2398,19 @@ function MapDataLayer({
     },
     [map],
   );
-  // 位置直し中のピン(取得結果で位置を巻き戻さないための判定に使う)。
-  // ⚠fetchForBbox の依存には入れない=入れるとリスナー再登録と進行中取得の
+  // ⚠**保存が飛んでいる間だけ**、手元の位置を守るための控え(@codex #410 R2 P2)。
+  //   位置直しの状態が続いている限り守り続けると、保存が終わったあとに
+  //   他の人が動かした結果まで打ち消してしまう(古い位置を出し続け、次の
+  //   操作でそれを上書きしかねない)。保存の開始で入れ、成否どちらでも消す。
+  //   ⚠React の state ではなく ref に**同期で**書く。state だと反映が1描画
+  //   遅れ、その隙に届いた取得結果が手元の位置を消す。
+  //   ⚠fetchForBbox の依存には入れない=入れるとリスナー再登録と進行中取得の
   //   中断が起き、層別取得で減らした通信が戻ってしまう。
-  const movablePinIdRef = useRef(movablePinId);
-  useEffect(() => {
-    movablePinIdRef.current = movablePinId;
-  }, [movablePinId]);
+  const pendingMoveRef = useRef<{
+    id: string;
+    lat: number;
+    lng: number;
+  } | null>(null);
   // 背景タップ判定用: captureMapClick の最新値(リスナーは長寿命のため ref 経由)。
   const captureRef = useRef(captureMapClick);
   useEffect(() => {
@@ -2715,14 +2721,14 @@ function MapDataLayer({
             //   保存の応答が返る前に復帰などで再取得が走ると、サーバーはまだ
             //   古い位置を返す。そのまま流し込むと「直したのに戻った」に見え、
             //   実際には保存されているのに無駄な直しを誘う。
-            setPins((cur) => {
+            setPins(() => {
               const next = filterValidPinGps(j.data ?? []);
-              const movingId = movablePinIdRef.current;
-              if (!movingId) return next;
-              const local = cur.find((x) => x.id === movingId);
-              if (!local) return next;
+              const pending = pendingMoveRef.current;
+              if (!pending) return next;
               return next.map((x) =>
-                x.id === movingId ? { ...x, lat: local.lat, lng: local.lng } : x,
+                x.id === pending.id
+                  ? { ...x, lat: pending.lat, lng: pending.lng }
+                  : x,
               );
             });
             pendingLayersRef.current.delete("pins");
@@ -3209,11 +3215,22 @@ function MapDataLayer({
                     const lng = e.latLng?.lng();
                     if (typeof lat !== "number" || typeof lng !== "number") return;
                     const before = { lat: pin.lat, lng: pin.lng };
+                    // 保存が飛んでいる間だけ、取得結果から手元の位置を守る。
+                    pendingMoveRef.current = { id: pin.id, lat, lng };
                     // 先に画面へ反映してから保存する(指を離した位置に留まる)。
                     setPins((cur) =>
                       cur.map((x) => (x.id === pin.id ? { ...x, lat, lng } : x)),
                     );
                     void onPinMoved(pin.id, lat, lng).then((ok) => {
+                      // 守りは成否どちらでも解く。以後はサーバーの位置に従う
+                      // (他の人が動かしていれば、その位置が正しい)。
+                      if (
+                        pendingMoveRef.current?.id === pin.id &&
+                        pendingMoveRef.current.lat === lat &&
+                        pendingMoveRef.current.lng === lng
+                      ) {
+                        pendingMoveRef.current = null;
+                      }
                       // 保存できなければ元の位置へ戻す(保存された、と誤解させない)。
                       if (!ok) {
                         setPins((cur) =>
