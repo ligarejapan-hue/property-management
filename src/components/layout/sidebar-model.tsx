@@ -90,7 +90,10 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       { label: "登記DM取込", href: "/import/registry-dm", icon: ic(Mail), minRole: "office_staff" },
       // ⚠**アプリ内のリンクがゼロ**で、URL を直に打つしか到達手段が無かった
       //   (2026-08-16 に発見・08-24 の再実測でも同じ)。
-      { label: "所有者CSV取込", href: "/import/owners", icon: ic(Users), minRole: "office_staff" },
+      // ⚠行き先は取込画面の**該当セクション**(@codex #411 R1 P2)。/import/owners は
+      //   そこへ送るだけの転送ページで、素の /import へ送ると受付帳の取込と
+      //   見分けがつかない場所に着いてしまう。
+      { label: "所有者CSV取込", href: "/import#owner-match", icon: ic(Users), minRole: "office_staff" },
     ],
   },
   {

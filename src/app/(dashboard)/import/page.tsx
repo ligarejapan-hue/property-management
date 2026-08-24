@@ -1935,7 +1935,13 @@ export default function ImportPage() {
       </div>
 
       {/* ============ ② 受付帳 × 所有者 2ファイル突合 ============ */}
-      <div className="mb-8 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6">
+      {/* ⚠id はメニューの「所有者CSV取込」の着地点(@codex #411 R1 P2)。
+          この作業は同じページの下の方にあり、上から入ると見つからない。
+          scroll-mt-4 = 固定ヘッダに隠れない余白。 */}
+      <div
+        id="owner-match"
+        className="mb-8 scroll-mt-4 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6"
+      >
         <div className="mb-4 flex items-center gap-2">
           <FileUp className="h-5 w-5 text-blue-600 dark:text-blue-400" />
           <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">

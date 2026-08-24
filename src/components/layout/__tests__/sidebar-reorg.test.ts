@@ -13,7 +13,11 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { SIDEBAR_GROUPS, visibleSidebar } from "@/components/layout/sidebar-model";
+import {
+  SIDEBAR_GROUPS,
+  visibleSidebar,
+  isNavItemActive,
+} from "@/components/layout/sidebar-model";
 
 const allItems = SIDEBAR_GROUPS.flatMap((g) => g.items);
 const byHref = (href: string) => allItems.find((i) => i.href === href);
@@ -111,9 +115,41 @@ describe("説明文が実際に画面へ出る(定義しただけで終わらせ
 describe("⚠URL 直打ちでしか行けなかった画面を載せる", () => {
   it("所有者CSV取込・登記DM取込・物件データエラー確認", () => {
     // 所有者CSV取込はアプリ内のリンクがゼロだった(実測 2026-08-16 / 08-24)。
-    expect(byHref("/import/owners")).toBeTruthy();
+    expect(byHref("/import#owner-match")).toBeTruthy();
     expect(byHref("/import/registry-dm")).toBeTruthy();
     expect(byHref("/properties/quality-check")).toBeTruthy();
+  });
+
+  it("⚠所有者CSV取込は、その作業がある場所まで送る(@codex #411 R1 P2)", () => {
+    // ⚠素の /import へ送ると**画面の上から**入ってしまい、所有者の作業が
+    //   どこにあるか分からない(受付帳CSV取込と着地点が同じになる)。
+    //   所有者の作業は同じページの下の「② 受付帳 × 所有者 2ファイル突合」。
+    expect(byHref("/import#owner-match")).toBeTruthy();
+    expect(byHref("/import/owners")).toBeUndefined();
+    // 着地点の id が実在すること(リンク切れの見張り)。
+    const IMPORT_PAGE = readFileSync(
+      join(process.cwd(), "src/app/(dashboard)/import/page.tsx"),
+      "utf8",
+    );
+    expect(IMPORT_PAGE).toContain('id="owner-match"');
+    // 固定ヘッダに隠れないよう余白を取る。
+    expect(IMPORT_PAGE).toContain("scroll-mt-4");
+    // 旧 URL(配布済み・ブックマーク)も同じ場所へ送る=切らない。
+    const OWNERS_PAGE = readFileSync(
+      join(process.cwd(), "src/app/(dashboard)/import/owners/page.tsx"),
+      "utf8",
+    );
+    expect(OWNERS_PAGE).toContain('redirect("/import#owner-match")');
+  });
+
+  it("同じページの別セクションを指す項目は現在地を点灯させない(既存の前例と同じ)", () => {
+    // 前例: 「法人番号紐づけ」= /admin/owners/correction?tab=corporate_restore。
+    // 同じページを指す変種は点灯せず、基本の項目だけが点灯する(2つ光らせない)。
+    expect(isNavItemActive("/import#owner-match", "/import")).toBe(false);
+    expect(isNavItemActive("/import", "/import")).toBe(true);
+    expect(
+      isNavItemActive("/admin/owners/correction?tab=corporate_restore", "/admin/owners/correction"),
+    ).toBe(false);
   });
 
   it("取り込み系は「物件データ取り込み」に、エラー確認は「物件」に置く", () => {
@@ -121,7 +157,7 @@ describe("⚠URL 直打ちでしか行けなかった画面を載せる", () => 
     expect(imp).toContain("/import");
     expect(imp).toContain("/import/registry-pdf");
     expect(imp).toContain("/import/registry-dm");
-    expect(imp).toContain("/import/owners");
+    expect(imp).toContain("/import#owner-match");
     const prop = group("prop")?.items.map((i) => i.href) ?? [];
     expect(prop).toContain("/properties/quality-check");
   });
@@ -176,7 +212,7 @@ describe("⚠変えないもの", () => {
     expect(byHref("/import")?.minRole).toBe("office_staff");
     expect(byHref("/import/registry-pdf")?.minRole).toBe("office_staff");
     expect(byHref("/import/registry-dm")?.minRole).toBe("office_staff");
-    expect(byHref("/import/owners")?.minRole).toBe("office_staff");
+    expect(byHref("/import#owner-match")?.minRole).toBe("office_staff");
     expect(byHref("/properties/quality-check")?.minRole).toBe("office_staff");
     expect(byHref("/dm")?.minRole).toBe("office_staff");
     expect(byHref("/admin/sale-dm-settings")?.minRole).toBe("admin");
