@@ -30,10 +30,13 @@ export interface MapFetchInputs {
   /** 「更新」や自分の操作後の取り直し要求。増えたら全レイヤー取り直し。 */
   refetchNonce: number;
   /**
-   * 画面へ戻ってきた合図。増えたら**人が増やせるものだけ**取り直す
-   * (@codex #409 R3 P2)。踏破の面と軌跡の線は「巡回が終わったとき」にしか
-   * 増えず、それは自分の操作なので refetchNonce 側で取り直される。復帰のたびに
-   * 重い集計を投げ直すのは、通信を減らすという今回の狙いと逆行する。
+   * 画面へ戻ってきた合図。増えたら軽い層(ピン・物件)を取り直す。
+   * ⚠踏破の面と軌跡の線は**全社合計**で、同僚が巡回を終えれば内容が変わる
+   * (発注者決定 2026-07-28「誰の分かを区別しない」)。放っておくと二度歩きを
+   * 防ぐという機能の目的が崩れるため、復帰でも取り直す。ただし写真のたびに
+   * 戻ってくる使い方で重い集計を繰り返さないよう、頻度に下限を置く
+   * (shouldRefreshHeavyOnResume)。下限を越えた復帰は refetchNonce 側で
+   * 全層を取り直す。
    */
   resumeNonce: number;
 }
@@ -108,6 +111,30 @@ export function planMapFetch(
   }
 
   return { fetch, clear };
+}
+
+/**
+ * 復帰時に重い層(踏破の面・軌跡の線)まで取り直す最短間隔。
+ * 撮影のたびにカメラから戻る使い方で、索引の無い集計を繰り返さないための下限。
+ */
+export const RESUME_HEAVY_MIN_INTERVAL_MS = 3 * 60 * 1000;
+
+/**
+ * 画面へ戻ったとき、重い層まで取り直すか(@codex #409 R6 P2)。
+ * 判断できないとき(時刻が読めない・時計が巻き戻った)は**取る側**へ倒す
+ * =古い踏破色を出し続けない。
+ */
+export function shouldRefreshHeavyOnResume(
+  nowMs: number,
+  lastHeavyFetchAtMs: number,
+  minIntervalMs: number = RESUME_HEAVY_MIN_INTERVAL_MS,
+): boolean {
+  if (!Number.isFinite(nowMs) || !Number.isFinite(lastHeavyFetchAtMs)) return true;
+  // 0 = まだ一度も取っていない(初期値)。無条件で取る。
+  if (lastHeavyFetchAtMs <= 0) return true;
+  const elapsed = nowMs - lastHeavyFetchAtMs;
+  if (elapsed < 0) return true; // 時計が巻き戻った
+  return elapsed >= minIntervalMs;
 }
 
 export interface CoverageCellStep {

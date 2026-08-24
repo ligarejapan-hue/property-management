@@ -14,6 +14,7 @@ import { describe, it, expect } from "vitest";
 import {
   planMapFetch,
   keepCoverageWhileLoading,
+  shouldRefreshHeavyOnResume,
   type MapFetchInputs,
 } from "@/lib/field-survey-map-fetch-plan";
 
@@ -238,6 +239,31 @@ describe("planMapFetch: 何を取り、何を消すか", () => {
                 }
               }
             }
+  });
+});
+
+describe("shouldRefreshHeavyOnResume: 復帰時に重い層まで取り直すか", () => {
+  const MIN = 3 * 60 * 1000;
+
+  it("一度も取っていなければ取る", () => {
+    expect(shouldRefreshHeavyOnResume(1000, 0, MIN)).toBe(true);
+  });
+
+  it("直前に取ったばかりなら取らない(写真ごとの復帰で重い集計を繰り返さない)", () => {
+    expect(shouldRefreshHeavyOnResume(60_000, 30_000, MIN)).toBe(false);
+  });
+
+  it("下限の時間が過ぎていれば取る(同僚が巡回を終えた分を取り込む)", () => {
+    expect(shouldRefreshHeavyOnResume(0 + MIN, 0, MIN)).toBe(true);
+    expect(shouldRefreshHeavyOnResume(MIN + 1, 0, MIN)).toBe(true);
+  });
+
+  it("時計が巻き戻っても取る側へ倒す(古い踏破色を出し続けない)", () => {
+    expect(shouldRefreshHeavyOnResume(1000, 999_999, MIN)).toBe(true);
+  });
+
+  it("時刻が読めないときは取る側へ倒す", () => {
+    expect(shouldRefreshHeavyOnResume(Number.NaN, 0, MIN)).toBe(true);
   });
 });
 

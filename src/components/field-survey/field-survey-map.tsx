@@ -36,6 +36,7 @@ import {
 import {
   planMapFetch,
   keepCoverageWhileLoading,
+  shouldRefreshHeavyOnResume,
   type MapFetchInputs,
   type MapFetchPlan,
   type MapLayerKey,
@@ -712,6 +713,14 @@ export default function FieldSurveyMap({
   const [refetchNonce, setRefetchNonce] = useState(0);
   // 「今この画面から離れているか」。復帰の合図を1回に束ねるために使う。
   const awayRef = useRef(false);
+  // 重い層(踏破の面・軌跡の線)を最後に取りに行った時刻。0=まだ一度も取っていない。
+  // 復帰のたびに索引の無い集計を繰り返さないための下限判定に使う。
+  const lastHeavyFetchAtRef = useRef(0);
+  const markHeavyFetched = useCallback(() => {
+    lastHeavyFetchAtRef.current = Date.now();
+  }, []);
+  // 復帰リスナーから最新の bumpRefetch を呼ぶための控え。
+  const bumpRefetchRef = useRef<(() => void) | null>(null);
   // 画面へ戻ってきた合図(@codex #409 R3 P2)。全部を取り直す refetchNonce とは
   // 別にして、**ピンと物件だけ**取り直す(踏破の面と軌跡の線は重いうえ、
   // 巡回終了=自分の操作でしか増えないので復帰では取り直さない)。
@@ -732,6 +741,17 @@ export default function FieldSurveyMap({
       if (document.visibilityState !== "visible") return;
       if (!awayRef.current) return;
       awayRef.current = false;
+      // ⚠踏破の面と軌跡の線は**全社合計**で、同僚が巡回を終えれば内容が変わる
+      //   (発注者決定 2026-07-28「誰の分かを区別しない」)。古いままだと同じ道を
+      //   二度歩くことになり、この機能の目的そのものが崩れる(@codex #409 R6 P2)。
+      //   ただし撮影のたびに戻ってくる使い方で重い集計を繰り返さないよう、
+      //   前回から一定時間あいた復帰のときだけ全層を取り直す。
+      if (
+        shouldRefreshHeavyOnResume(Date.now(), lastHeavyFetchAtRef.current)
+      ) {
+        bumpRefetchRef.current?.();
+        return;
+      }
       setResumeNonce((n) => n + 1);
     };
     const onVisibility = () => {
@@ -750,6 +770,13 @@ export default function FieldSurveyMap({
   const bumpRefetch = useCallback(() => {
     setRefetchNonce((n) => n + 1);
   }, []);
+  // 復帰リスナー(長寿命)から最新の取り直し関数を呼ぶための控え。
+  useEffect(() => {
+    bumpRefetchRef.current = bumpRefetch;
+    return () => {
+      bumpRefetchRef.current = null;
+    };
+  }, [bumpRefetch]);
   // unmount 後の state 更新を止めるための印（遅延 callback の防御）。
   const fsMapMountedRef = useRef(true);
   useEffect(() => {
@@ -1218,6 +1245,7 @@ export default function FieldSurveyMap({
             registerPropertyPopupClose={registerPropertyPopupClose}
             focusPinId={focusPinId}
             resumeNonce={resumeNonce}
+            onHeavyFetch={markHeavyFetched}
           />
           <MapInstanceCapture onMap={setMapInstance} />
           {activeSession && <RoutePolyline points={polylinePoints} />}
@@ -2090,6 +2118,7 @@ function MapDataLayer({
   registerPropertyPopupClose,
   focusPinId,
   resumeNonce,
+  onHeavyFetch,
 }: {
   layers: Record<Layer, boolean>;
   /**
@@ -2125,6 +2154,8 @@ function MapDataLayer({
   focusPinId: string | null;
   /** 画面へ戻ってきた合図。増えるとピンと物件だけ取り直す(R3 P2)。 */
   resumeNonce: number;
+  /** 重い層(面・線)を取りに行ったことを親へ伝える(復帰時の判断材料。R6 P2)。 */
+  onHeavyFetch: () => void;
   refetchNonce: number;
   /** ピンの「自分/他人」縁色の判定用 (server-side で確定済みのログイン userId)。 */
   currentUserId: string;
@@ -2683,6 +2714,8 @@ function MapDataLayer({
         pendingLayersRef.current,
       );
       prevFetchInputsRef.current = next;
+      // 重い層を取りに行ったことを親へ伝える(復帰時に取り直すかの判断材料)。
+      if (plan.fetch.coverage || plan.fetch.tracks) onHeavyFetch();
       // 取りに行く層を未達に積む。消す層は「持っていなくて当然」なので外す。
       for (const key of ["properties", "pins", "coverage", "tracks"] as const) {
         if (plan.fetch[key]) pendingLayersRef.current.add(key);
@@ -2725,6 +2758,7 @@ function MapDataLayer({
       coverageDays,
       refetchNonce,
       resumeNonce,
+      onHeavyFetch,
     ],
   );
 

@@ -199,7 +199,8 @@ describe("同僚のピンが自動で出る(戻ってきたとき)", () => {
     // 後の取得が前の取得を中断する。「離れた→戻った」の変化だけ1回数える。
     const at = MAP.indexOf("const markBack = () => {");
     expect(at).toBeGreaterThan(-1);
-    const body = MAP.slice(at, at + 300);
+    // 窓は 900: R6 で「重い層まで取り直すか」の分岐が入り関数が伸びた。
+    const body = MAP.slice(at, at + 900);
     expect(body).toContain('document.visibilityState !== "visible"');
     const guard = body.indexOf("if (!awayRef.current) return;");
     const reset = body.indexOf("awayRef.current = false;");
@@ -209,11 +210,24 @@ describe("同僚のピンが自動で出る(戻ってきたとき)", () => {
     expect(bump).toBeGreaterThan(reset);
   });
 
-  it("復帰では重い層(踏破・軌跡)を取り直さない(@codex #409 R3 P2)", () => {
-    // 全部取り直す refetchNonce とは別の合図にする。判定は純関数側
-    // (field-survey-map-fetch-plan.test.ts の RESUME_DEPENDENT)。
-    expect(MAP).toContain("setResumeNonce((n) => n + 1)");
-    expect(MAP).not.toContain("bumpRefetchRef");
+  it("復帰時: 短い間隔なら軽い層だけ・間隔が空いたら重い層も取り直す(@codex #409 R3/R6 P2)", () => {
+    // ⚠踏破の面と軌跡の線は**全社合計**で、同僚が巡回を終えれば内容が変わる
+    //   (発注者決定 2026-07-28)。古いままだと二度歩きを防ぐ目的が崩れるので、
+    //   復帰でも取り直す。ただし撮影のたびの復帰で重い集計を繰り返さないよう、
+    //   前回から一定時間あいたときだけ全層(refetchNonce)にする。
+    const at = MAP.indexOf("const markBack = () => {");
+    expect(at).toBeGreaterThan(-1);
+    const body = MAP.slice(at, at + 900);
+    const decide = body.indexOf("shouldRefreshHeavyOnResume(Date.now(), lastHeavyFetchAtRef.current)");
+    const heavy = body.indexOf("bumpRefetchRef.current?.()");
+    const light = body.indexOf("setResumeNonce((n) => n + 1)");
+    expect(decide).toBeGreaterThan(-1);
+    expect(heavy).toBeGreaterThan(decide);
+    expect(light).toBeGreaterThan(heavy); // 重い側は早期 return、軽い側は既定
+    // 重い層を取りに行ったことを親が控える(次の復帰の判断材料)。
+    expect(MAP).toContain("if (plan.fetch.coverage || plan.fetch.tracks) onHeavyFetch();");
+    expect(MAP).toContain("onHeavyFetch={markHeavyFetched}");
+    expect(MAP).toContain("lastHeavyFetchAtRef.current = Date.now();");
     expect(MAP).toContain("resumeNonce={resumeNonce}");
     // 計画の入力に復帰の合図が載っている(両方の nonce が別物として渡る)。
     const inputsAt = MAP.indexOf("bboxKey: `${b.north}");
