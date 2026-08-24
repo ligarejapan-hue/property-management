@@ -27,7 +27,7 @@ describe("visibleSidebar", () => {
     expect(labels).toContain("物件一覧");
     expect(labels).toContain("受付帳CSV取込");
     expect(labels).toContain("販売図面を作成");
-    expect(labels).not.toContain("会社情報（図面・DMの差出人）");
+    expect(labels).not.toContain("会社情報（販売図面の差出人）");
     expect(labels).not.toContain("売却DM設定");
     expect(labels).not.toContain("ユーザー管理");
     expect(labels).not.toContain("所有者補正候補");
@@ -41,7 +41,7 @@ describe("visibleSidebar", () => {
 
   it("管理者: 全部見える(設定・物件データ編集・システム管理)", () => {
     const labels = sidebarLabels("admin");
-    expect(labels).toContain("会社情報（図面・DMの差出人）");
+    expect(labels).toContain("会社情報（販売図面の差出人）");
     expect(labels).toContain("売却DM設定");
     expect(labels).toContain("所有者補正候補");
     expect(labels).toContain("ユーザー管理");

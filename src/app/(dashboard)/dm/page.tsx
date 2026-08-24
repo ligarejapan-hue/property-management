@@ -34,7 +34,21 @@ const STEPS: Step[] = [
     icon: <FileSpreadsheet className="h-5 w-5" />,
   },
   {
+    // ⚠**作成より前に置く**(@codex #411 R3 P2)。差出人・案内先が未設定だと
+    //   物件一覧に「売却DMを作成」ボタンがそもそも出ない(saleDmPrintReady)。
+    //   作成を先に案内すると、はじめて使う人が STEP 2 で行き止まりになる。
     no: "STEP 2",
+    title: "差出人や案内先を設定する",
+    body:
+      "お手紙に載る差出人、案内ページ(LP)、追跡用のURLの設定です。" +
+      "ここが未設定だと、物件一覧に「売却DMを作成」のボタンが出ません。" +
+      "はじめて送る前に必ず確認してください（宛名CSVの出力だけなら設定は不要です）。",
+    href: "/admin/sale-dm-settings",
+    linkLabel: "売却DM設定を開く",
+    icon: <Settings2 className="h-5 w-5" />,
+  },
+  {
+    no: "STEP 3",
     title: "宛名やお手紙を作る",
     body:
       "絞り込んだ状態のまま、物件一覧のボタンから宛名CSVを出力するか、" +
@@ -42,16 +56,6 @@ const STEPS: Step[] = [
     href: "/properties",
     linkLabel: "物件一覧のボタンへ",
     icon: <Mail className="h-5 w-5" />,
-  },
-  {
-    no: "STEP 3",
-    title: "差出人や案内先を確かめる",
-    body:
-      "お手紙に載る差出人、案内ページ(LP)、追跡用のURLの設定です。" +
-      "はじめて送る前と、内容を変えたときに確認してください。",
-    href: "/admin/sale-dm-settings",
-    linkLabel: "売却DM設定を開く",
-    icon: <Settings2 className="h-5 w-5" />,
   },
   {
     no: "STEP 4",

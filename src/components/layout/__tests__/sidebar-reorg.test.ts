@@ -49,9 +49,13 @@ describe("確定した名前", () => {
   });
 
   it("項目名(R4・R5・2画面の呼び名)", () => {
+    // ⚠この画面が効くのは**販売図面だけ**(@codex #411 R3 P2・実測)。
+    //   DM の差出人は売却DM設定で変わる。「DMの差出人」と名乗ると、
+    //   直しに来た人が変わらない設定をいじって古い差出人のまま郵送してしまう。
     expect(byHref("/admin/company-settings")?.label).toBe(
-      "会社情報（図面・DMの差出人）",
+      "会社情報（販売図面の差出人）",
     );
+    expect(byHref("/admin/company-settings")?.label).not.toContain("DM");
     expect(byHref("/admin/orphan-dm-logs")?.label).toBe("送付記録の訂正");
     expect(byHref("/properties/quality-check")?.label).toBe("物件データエラー確認");
     expect(byHref("/admin/attachments")?.label).toBe("添付ファイル検索");
@@ -179,6 +183,28 @@ describe("DM グループ(新設)", () => {
       "/admin/sale-dm-settings",
       "/admin/orphan-dm-logs",
     ]);
+  });
+});
+
+describe("DMメニューの手順(@codex #411 R3 P2)", () => {
+  const DM_PAGE = readFileSync(
+    join(process.cwd(), "src/app/(dashboard)/dm/page.tsx"),
+    "utf8",
+  );
+
+  it("⚠設定を作成より前に案内する(はじめて使う人が行き止まりにならない)", () => {
+    // 差出人・案内先が未設定だと物件一覧に「売却DMを作成」が出ない
+    // (saleDmPrintReady)。作成を先に案内すると STEP で詰む。
+    const setup = DM_PAGE.indexOf("差出人や案内先を設定する");
+    const create = DM_PAGE.indexOf("宛名やお手紙を作る");
+    expect(setup).toBeGreaterThan(-1);
+    expect(create).toBeGreaterThan(-1);
+    expect(setup).toBeLessThan(create);
+  });
+
+  it("設定が要らない作業(宛名CSV)との違いを書いてある", () => {
+    expect(DM_PAGE).toContain("宛名CSVの出力だけなら設定は不要");
+    expect(DM_PAGE).toContain("「売却DMを作成」のボタンが出ません");
   });
 });
 

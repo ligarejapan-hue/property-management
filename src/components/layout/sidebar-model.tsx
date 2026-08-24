@@ -115,7 +115,12 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
     description: "売り出しの1枚チラシ",
     items: [
       { label: "販売図面を作成", href: "/sales-sheets/new", icon: ic(Newspaper), minRole: "office_staff" },
-      { label: "会社情報（図面・DMの差出人）", href: "/admin/company-settings", icon: ic(Building2), minRole: "admin" },
+      // ⚠**DM の差出人はここではない**(@codex #411 R3 P2・実測)。この画面が書くのは
+      //   CompanyProfile で、読むのは販売図面(sales-sheet)だけ。DM の差出人は
+      //   SaleDmConfig / SALE_DM_* から解決され、売却DM設定の画面で変える。
+      //   「図面・DMの差出人」と名乗ると、DMの差出人を直しに来た人が**変わらない
+      //   設定をいじって古い差出人のまま郵送してしまう**。
+      { label: "会社情報（販売図面の差出人）", href: "/admin/company-settings", icon: ic(Building2), minRole: "admin" },
     ],
   },
   {
