@@ -220,6 +220,25 @@ describe("シート・モーダルの操作性", () => {
     expect(DETAIL).toContain("confirmDeletePhotoId !== null;");
   });
 
+  it("×は通信中に無効(@codex #408 R7 P2: 送信中の unmount で地図が古いまま残らない)", () => {
+    // 1発ステータス変更も「作業中」に含める(送信開始〜updateLoading 点灯の
+    // 隙間も Escape/背景タップ/戻りチップのガードが覆う)。
+    const hw = DETAIL.indexOf("const hasUnfinishedWork");
+    expect(hw).toBeGreaterThan(-1);
+    expect(DETAIL.slice(hw, hw + 400)).toContain("quickStatusSaving ||");
+    // ×の disabled は「通信中」の4信号だけ(フォームが開いているだけなら有効)。
+    const cb = DETAIL.indexOf("const closeBlocked");
+    expect(cb).toBeGreaterThan(-1);
+    const cbBody = DETAIL.slice(cb, cb + 300);
+    expect(cbBody).toContain("quickStatusSaving");
+    expect(cbBody).toContain("photoSectionBusy");
+    expect(cbBody).toContain("mutations.updateLoading");
+    expect(cbBody).toContain("mutations.deleteLoading");
+    expect(cbBody).not.toContain("editing");
+    const closeBtn = DETAIL.indexOf('aria-label="閉じる"');
+    expect(DETAIL.slice(closeBtn - 200, closeBtn)).toContain("disabled={closeBlocked}");
+  });
+
   it("ピン作成/物件化モーダル: 85dvh+overscroll+上寄せ(キーボードで保存が隠れる対策)", () => {
     for (const f of [
       "src/components/field-survey/pin-create-modal.tsx",

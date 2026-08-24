@@ -88,13 +88,28 @@ export default function PinDetailPanel({
   const [convertSubmitting, setConvertSubmitting] = useState(false);
   // 写真セクション (子) の送信・削除中フラグ。作業中判定に合流させる。
   const [photoSectionBusy, setPhotoSectionBusy] = useState(false);
+  // 1発ステータス変更(第2弾 C1)の送信中と失敗印。handleQuickStatus は下だが、
+  // state は hasUnfinishedWork が参照するためここで宣言する。
+  const [quickStatusSaving, setQuickStatusSaving] = useState(false);
+  // 失敗印(@codex #408 R4 P2)。黙って元の表示に戻さない。
+  const [quickStatusError, setQuickStatusError] = useState<string | null>(null);
 
   // 作業中 = 下書きが失われ得る状態 (編集フォーム / 削除確認 / 物件化 modal)
-  // または進行中の通信 (保存 / 削除 / 写真送信・削除)。
+  // または進行中の通信 (保存 / 削除 / 写真送信・削除 / 1発ステータス変更)。
   const hasUnfinishedWork =
     editing ||
     confirmingDelete ||
     showConvert ||
+    photoSectionBusy ||
+    quickStatusSaving ||
+    mutations.updateLoading ||
+    mutations.deleteLoading;
+  // 通信が飛んでいる間は×でも閉じない(@codex #408 R7 P2)。unmount すると
+  // cleanup が PATCH/送信を中断し、サーバー側だけ確定して onUpdated が届かず
+  // 地図が古いまま残り得る。フォームが開いているだけ(editing 等)の×は
+  // 従来どおり有効(それぞれに閉じる導線がある)。
+  const closeBlocked =
+    quickStatusSaving ||
     photoSectionBusy ||
     mutations.updateLoading ||
     mutations.deleteLoading;
@@ -205,10 +220,7 @@ export default function PinDetailPanel({
 
   // 第2弾 C1: 「この家は済んだ」を1タップで(従来=編集→選択→保存の6タップ)。
   // 保存フローと同じ patch/3段ガードを使う(optimistic しない方針も同じ)。
-  const [quickStatusSaving, setQuickStatusSaving] = useState(false);
-  // 1発変更の失敗を読取ビューへ出すための印(@codex #408 R4 P2)。従来は黙って
-  // 元の表示に戻り、電波切れ・権限剥奪・サーバー拒否が現場に伝わらなかった。
-  const [quickStatusError, setQuickStatusError] = useState<string | null>(null);
+  // (quickStatusSaving/Error の宣言は hasUnfinishedWork が参照するため上にある)
   const handleQuickStatus = async (nextStatus: "open" | "closed") => {
     if (!detail || quickStatusSaving) return;
     const saveTargetPinId = pinId;
@@ -339,8 +351,9 @@ export default function PinDetailPanel({
         <button
           type="button"
           onClick={onClose}
+          disabled={closeBlocked}
           aria-label="閉じる"
-          className="-m-2 p-2 text-lg leading-none text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+          className="-m-2 p-2 text-lg leading-none text-gray-500 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-400 dark:hover:text-gray-100"
         >
           ×
         </button>
