@@ -13,7 +13,7 @@
  * - 座標 / File 内容を console に出さない。storage を使わない。
  */
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { Camera } from "lucide-react";
 
 interface CameraFirstButtonProps {

@@ -528,6 +528,10 @@ export default function FieldSurveyMap({
   const [detailPinId, setDetailPinId] = useState<string | null>(null);
   // 第2弾 C2: 地図の何もない場所のタップで詳細シートを閉じる(宣言順は
   //   React Compiler の「宣言前アクセス」検出に合わせ state の直後に置く)。
+  // 詳細パネルの「作業中」(編集下書き / 削除確認 / 物件化 / 写真送信中) を
+  // closure から読むための ref。true の間は地図タップでパネルを閉じない
+  // (下書き・送信中の写真を黙って破棄しない。Codex P2)。
+  const detailPanelBusyRef = useRef(false);
   const closeDetailOnBackground = useCallback(() => {
     // ⚠既存の busy ゲート原則を踏襲(提出前レビューP1)。編集下書き・削除確認・
     //   物件化フォーム・写真送信中は、背景タップで黙って閉じない
@@ -985,10 +989,6 @@ export default function FieldSurveyMap({
     finalizePinCreate(pinId, false);
   }, [finalizePinCreate]);
 
-  // 詳細パネルの「作業中」(編集下書き / 削除確認 / 物件化 / 写真送信中) を
-  // closure から読むための ref。true の間は地図タップでパネルを閉じない
-  // (下書き・送信中の写真を黙って破棄しない。Codex P2)。
-  const detailPanelBusyRef = useRef(false);
   const handleDetailPanelBusyChange = useCallback((busy: boolean) => {
     detailPanelBusyRef.current = busy;
   }, []);
@@ -2308,7 +2308,7 @@ function MapDataLayer({
       listener.remove();
       if (abortRef.current) abortRef.current.abort();
     };
-  }, [map, fetchForBbox, onUserDrag]);
+  }, [map, fetchForBbox, onUserDrag, onBackgroundClick]);
 
   // layer toggle / pin 作成 / 編集成功時に現在 bbox で再 fetch する。
   useEffect(() => {
