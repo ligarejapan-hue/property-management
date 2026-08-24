@@ -239,6 +239,21 @@ describe("DMメニューの手順(@codex #411 R3 P2)", () => {
     expect(setup).toBeLessThan(create);
   });
 
+  it("⚠開けない道具は押せるように見せない(@codex #411 R5 P2)", () => {
+    // /dm は事務担当にも見せる。STEP2(売却DM設定)と STEP4(送付記録の訂正)は
+    // 管理者専用なので、足りない人にはリンクではなく案内を出す。
+    expect(DM_PAGE).toContain("minRole: AppRole;");
+    expect(DM_PAGE).toContain("const usable = canSee(userRole, s.minRole);");
+    expect(DM_PAGE).toContain('data-testid="dm-menu-step-unavailable"');
+    expect(DM_PAGE).toContain("管理者にご依頼ください");
+    // 管理者専用の2つに minRole: "admin" が付いている。
+    const admins = DM_PAGE.match(/minRole: "admin"/g) ?? [];
+    expect(admins.length).toBe(2);
+    // 事務担当でも使える2つはそのまま。
+    const office = DM_PAGE.match(/minRole: "office_staff"/g) ?? [];
+    expect(office.length).toBe(2);
+  });
+
   it("設定が要らない作業(宛名CSV)との違いを書いてある", () => {
     expect(DM_PAGE).toContain("宛名CSVの出力だけなら設定は不要");
     expect(DM_PAGE).toContain("「売却DMを作成」のボタンが出ません");
