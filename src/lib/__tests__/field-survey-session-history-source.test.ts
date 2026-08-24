@@ -374,15 +374,19 @@ describe("history map — fail closed on over-cap track routes (Codex P2)", () =
     );
   });
 
-  it("over-cap 時は setRoutePoints せず throw する (incomplete route を表示しない)", () => {
-    // routeOverCap が true なら setRoutePoints の前に throw する
+  it("over-cap 時は描画せず throw する (incomplete route を表示しない)", () => {
+    // routeOverCap が true なら点を返す前に throw する
     expect(HISTORY_SRC).toMatch(
       /if\s*\(routeOverCap\)\s*throw\s+new\s+Error\("history_route_over_cap"\)/,
     );
-    // throw は setRoutePoints(points) より前
-    expect(HISTORY_SRC).toMatch(
-      /if\s*\(routeOverCap\)\s*throw[\s\S]*?setRoutePoints\(points\)/,
-    );
+    // 第3弾: 線とピンを同時に取りに行くため、描画は両方そろってから1か所で行う。
+    // throw は「点を返す」より前=描画へは絶対に届かない。
+    const at = HISTORY_SRC.indexOf('throw new Error("history_route_over_cap")');
+    expect(at).toBeGreaterThan(-1);
+    expect(HISTORY_SRC.indexOf("return points;")).toBeGreaterThan(at);
+    // 描画は Promise.all の結果からのみ(途中の points を直接描かない)。
+    expect(HISTORY_SRC).toContain("setRoutePoints(pointsResult)");
+    expect(HISTORY_SRC).not.toContain("setRoutePoints(points)");
   });
 
   it("over-cap は pins の truncated warning と区別される (route は専用エラー文言)", () => {

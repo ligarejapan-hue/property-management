@@ -365,7 +365,11 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onSubmitting
                 onAddressChange={setAddress}
                 addressEdited={addressEdited}
                 disabled={submitting}
-                mode="both"
+                // ⚠"both" は郵便番号→住所のボタンも出すが、この画面には郵便番号の
+                //   入力欄が無い(住所と地番だけ)。そのためボタンは常に空の郵便番号を
+                //   見て**永久に押せない灰色**で並んでいた(第3弾で発見)。ここで要る
+                //   のは住所→郵便番号の自動補完だけなので "search" にする。
+                mode="search"
               />
             </div>
           </div>

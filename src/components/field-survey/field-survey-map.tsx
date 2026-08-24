@@ -26,6 +26,18 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMapGestureHandling } from "@/components/field-survey/use-map-gesture-handling";
 import {
+  clusterByGrid,
+  CLUSTER_MIN_ZOOM,
+} from "@/lib/field-survey-map-cluster";
+import { propertyMarkerStyle } from "@/lib/field-survey-property-marker";
+import {
+  planMapFetch,
+  keepCoverageWhileLoading,
+  type MapFetchInputs,
+  type MapFetchPlan,
+  type CoverageRenderState,
+} from "@/lib/field-survey-map-fetch-plan";
+import {
   Bbox,
   buildMapPropertiesQuery,
   coerceLat,
@@ -42,9 +54,11 @@ import CoverageHeatLayer from "@/components/field-survey/coverage-heat-layer";
 import CoverageTracksLayer from "@/components/field-survey/coverage-tracks-layer";
 import CoverageLegend from "@/components/field-survey/coverage-legend";
 import {
+  COVERAGE_CELL_STEPS,
   COVERAGE_DEFAULT_DAYS,
   COVERAGE_PERIOD_DAYS,
   coveragePeriodLabel,
+  resolveCoverageCellSize,
   type CoverageCell,
   canTrustCoverageLegend,
   type CoverageCellSize,
@@ -692,9 +706,34 @@ export default function FieldSurveyMap({
   const pendingPhotoFileRef = useRef<File | null>(null);
   // marker 再 fetch をトリガするためのバンプ値。pin 作成 / 編集成功で increment。
   const [refetchNonce, setRefetchNonce] = useState(0);
+  // 復帰時リスナー(長寿命)から最新の取り直し関数を呼ぶための控え。
+  const bumpRefetchRef = useRef<(() => void) | null>(null);
+  // ⚠他の担当者が立てたピンは、これまで**地図を動かすまで出なかった**
+  //   (取り直しの合図は全部「自分の操作の後始末」だった)。同じ街を2人で歩くと
+  //   相手のピンが見えず二度手間になる。定期的な問い合わせ(ポーリング)は電池と
+  //   通信を食うので置かず、**画面に戻ってきたときだけ**取り直す
+  //   (別アプリ・カメラから戻る = 現場でいちばん多い復帰の仕方)。
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      bumpRefetchRef.current?.();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, []);
   const bumpRefetch = useCallback(() => {
     setRefetchNonce((n) => n + 1);
   }, []);
+  useEffect(() => {
+    bumpRefetchRef.current = bumpRefetch;
+    return () => {
+      bumpRefetchRef.current = null;
+    };
+  }, [bumpRefetch]);
   // unmount 後の state 更新を止めるための印（遅延 callback の防御）。
   const fsMapMountedRef = useRef(true);
   useEffect(() => {
@@ -1161,6 +1200,7 @@ export default function FieldSurveyMap({
             onUserDrag={cancelAutoCenterOnStart}
             onBackgroundClick={closeDetailOnBackground}
             registerPropertyPopupClose={registerPropertyPopupClose}
+            focusPinId={focusPinId}
           />
           <MapInstanceCapture onMap={setMapInstance} />
           {activeSession && <RoutePolyline points={polylinePoints} />}
@@ -1212,6 +1252,8 @@ export default function FieldSurveyMap({
           onChangeCoverageDays={setCoverageDays}
           coverageCellSize={coverageState.cellSize}
           coverageStatus={coverageState.status}
+          onRefresh={bumpRefetch}
+          mapLoading={mapLoading}
           tracksStatus={tracksState.status}
           tracksDroppedTrips={tracksState.droppedTrips}
           tracksDroppedTripsExact={tracksState.droppedTripsExact}
@@ -1557,6 +1599,19 @@ export default function FieldSurveyMap({
             className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-start gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800 shadow dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
           >
             <span>{error}</span>
+            {/* 第3弾: 失敗しても「地図を動かす」以外にやり直す手が無かった。
+                押した瞬間に取り直す(消えていた色や線もここから戻せる)。 */}
+            <button
+              type="button"
+              data-testid="map-error-retry"
+              onClick={() => {
+                setError(null);
+                bumpRefetch();
+              }}
+              className="shrink-0 rounded border border-red-400 bg-white px-2 py-0.5 font-semibold text-red-800 hover:bg-red-100 dark:border-red-500/40 dark:bg-gray-900 dark:text-red-300 dark:hover:bg-gray-800"
+            >
+              再試行
+            </button>
             {/* 第2弾: 読んだら消せる(従来は地図を動かすまで消えなかった)。 */}
             <button
               type="button"
@@ -1582,6 +1637,8 @@ function ControlPanel({
   onChangeCoverageDays,
   coverageCellSize,
   coverageStatus,
+  onRefresh,
+  mapLoading,
   tracksStatus,
   tracksDroppedTrips,
   tracksDroppedTripsExact,
@@ -1617,6 +1674,9 @@ function ControlPanel({
    * 「色が無い」の意味が状態で変わるため（誰も通っていない / まだ分からない）。
    */
   coverageStatus: CoverageStatus;
+  /** 「最新に更新」(第3弾)。同僚のピンや失敗で消えた色をここから取り直す。 */
+  onRefresh: () => void;
+  mapLoading: boolean;
   /** 線（過去に歩いた道筋）の状態。落とした本数があれば必ず断りを出す。 */
   tracksStatus: CoverageStatus;
   tracksDroppedTrips: number;
@@ -1718,6 +1778,18 @@ function ControlPanel({
           recording={recorder.status === "recording"}
         />
       )}
+
+      {/* 第3弾: 手で最新にできる口。同僚のピンや、失敗して消えた色をここから
+          取り直せる(従来は地図を動かすしか手が無かった)。 */}
+      <button
+        type="button"
+        data-testid="map-refresh"
+        onClick={onRefresh}
+        disabled={mapLoading}
+        className="mb-3 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+      >
+        {mapLoading ? "更新中…" : "最新に更新"}
+      </button>
 
       <div className="mb-2 text-xs font-semibold text-gray-600 dark:text-gray-300">表示切替</div>
       <label className="mb-1 flex cursor-pointer items-center gap-2">
@@ -1934,6 +2006,30 @@ function MapInstanceCapture({
   return null;
 }
 
+/**
+ * まとめた印の見た目(第3弾)。中身の種類が分かるよう、物件のまとまりは赤系・
+ * 調査ピンのまとまりは緑系にし、件数を数字で出す。3桁以上は「99+」に丸める
+ * (印からはみ出して読めなくなるため)。
+ */
+function clusterPinStyle(count: number, kind: "property" | "pin") {
+  const label = count > 99 ? "99+" : String(count);
+  return kind === "property"
+    ? {
+        background: "#C5221F",
+        borderColor: "#8C1512",
+        glyphColor: "#FFFFFF",
+        glyph: label,
+        scale: 1.2,
+      }
+    : {
+        background: "#047857",
+        borderColor: "#065F46",
+        glyphColor: "#FFFFFF",
+        glyph: label,
+        scale: 1.2,
+      };
+}
+
 function MapDataLayer({
   layers,
   hideClosedPins,
@@ -1952,6 +2048,7 @@ function MapDataLayer({
   onUserDrag,
   onBackgroundClick,
   registerPropertyPopupClose,
+  focusPinId,
 }: {
   layers: Record<Layer, boolean>;
   /**
@@ -1983,6 +2080,8 @@ function MapDataLayer({
   onBackgroundClick: () => void;
   /** 物件吹き出しの閉じ関数を親へ登録(詳細を開く単一の開き口が使う。R6)。 */
   registerPropertyPopupClose: (fn: (() => void) | null) => void;
+  /** 一覧から「地図で見る」で指定されたピン(まとめ表示に飲ませない)。 */
+  focusPinId: string | null;
   refetchNonce: number;
   /** ピンの「自分/他人」縁色の判定用 (server-side で確定済みのログイン userId)。 */
   currentUserId: string;
@@ -2020,6 +2119,77 @@ function MapDataLayer({
     return () => registerPropertyPopupClose(null);
   }, [registerPropertyPopupClose]);
   const abortRef = useRef<AbortController | null>(null);
+  // 第3弾: 取らなかった層の「表示しきれていない」を毎回消さないための控え。
+  const truncationRef = useRef({ pins: false, properties: false });
+  // 第3弾: 取得開始時に前の色/線を残してよいか(純関数 keepCoverageWhileLoading の
+  // 結果)。取得を組み立てる直前に決まるので closure ではなく ref で渡す。
+  const keepCoverageRef = useRef(false);
+  const keepTracksRef = useRef(false);
+  // 今描いている色がどの粗さ・どの期間のものか(残す判定の材料)。
+  const coverageRenderedRef = useRef<CoverageRenderState | null>(null);
+  // 今描いている線がどの期間のものか(線は格子を持たないので期間だけ)。
+  const tracksRenderedDaysRef = useRef<number | null>(null);
+  // 前回の取得入力(計画の差分計算に使う)。
+  const prevFetchInputsRef = useRef<MapFetchInputs | null>(null);
+  // まとめ表示(第3弾)の粗さを決めるための現在のズーム。
+  const [zoom, setZoom] = useState<number>(CLUSTER_MIN_ZOOM);
+  // まとめ表示。純関数へ渡すのは id と座標だけで、元の行は手元で引き当てる
+  // (住所や種別を計算側へ持ち込まない)。
+  const visiblePins = useMemo(
+    () => (hideClosedPins ? pins.filter((p) => p.status !== "closed") : pins),
+    [pins, hideClosedPins],
+  );
+  const pinClusters = useMemo(() => {
+    // ⚠一覧から「地図で見る」で来たピンは**まとめに入れない**(提出前レビュー)。
+    //   引いた倍率だとまとまりに飲まれ、見に来たピンの種別の色が見えなくなる
+    //   (場所は★マーカーが示すが、何のピンかが分からないと用が足りない)。
+    const focusRow = focusPinId
+      ? (visiblePins.find((p) => p.id === focusPinId) ?? null)
+      : null;
+    const r = clusterByGrid(
+      visiblePins
+        .filter((p) => p.id !== focusPinId)
+        .map((p) => ({ id: p.id, lat: p.lat, lng: p.lng })),
+      zoom,
+    );
+    if (focusRow) r.singles.push({ id: focusRow.id, lat: focusRow.lat, lng: focusRow.lng });
+    // ⚠`Map` はこのファイルでは地図コンポーネントの名前。標準の Map は
+    //   globalThis 経由で明示する(取り違えると型が通らない)。
+    const byId = new globalThis.Map<string, PinRow>(
+      visiblePins.map((p) => [p.id, p] as const),
+    );
+    return {
+      clusters: r.clusters,
+      singles: r.singles
+        .map((s) => ({ id: s.id, row: byId.get(s.id) }))
+        .filter((x): x is { id: string; row: PinRow } => x.row !== undefined),
+    };
+  }, [visiblePins, zoom, focusPinId]);
+  const propertyClusters = useMemo(() => {
+    const r = clusterByGrid(
+      properties.map((p) => ({ id: p.id, lat: p.gpsLat, lng: p.gpsLng })),
+      zoom,
+    );
+    const byId = new globalThis.Map<string, PropertyRow>(
+      properties.map((p) => [p.id, p] as const),
+    );
+    return {
+      clusters: r.clusters,
+      singles: r.singles
+        .map((s) => ({ id: s.id, row: byId.get(s.id) }))
+        .filter((x): x is { id: string; row: PropertyRow } => x.row !== undefined),
+    };
+  }, [properties, zoom]);
+  // まとめた印を押したら、その場所へ寄って中身をほどく。
+  const zoomIntoCluster = useCallback(
+    (c: { lat: number; lng: number }) => {
+      if (!map) return;
+      const z = map.getZoom() ?? CLUSTER_MIN_ZOOM;
+      map.panTo({ lat: c.lat, lng: c.lng });
+      map.setZoom(Math.min(CLUSTER_MIN_ZOOM + 2, Math.max(z + 2, z)));
+    },
+    [map],
+  );
   // 背景タップ判定用: captureMapClick の最新値(リスナーは長寿命のため ref 経由)。
   const captureRef = useRef(captureMapClick);
   useEffect(() => {
@@ -2028,10 +2198,11 @@ function MapDataLayer({
 
   // bbox を取って fetch する関数 (debounce 後に呼ばれる)
   const fetchForBbox = useCallback(
-    async (b: Bbox) => {
+    async (b: Bbox, plan: MapFetchPlan) => {
       const v = validateBbox(b);
       if (!v.ok) {
         // 第1弾 A3: 取得しない範囲では打ち切りの断りも消す(古い断りを残さない)。
+        truncationRef.current = { pins: false, properties: false };
         onTruncationChange({ pins: false, properties: false });
         // 面積過大はユーザーにズームアップを促す (詳細座標は出さない)
         if (v.reason === "too_large_lat" || v.reason === "too_large_lng") {
@@ -2045,10 +2216,12 @@ function MapDataLayer({
         if (abortRef.current) abortRef.current.abort();
         setCoverageCells([]);
         setCoverageStep(null);
+        coverageRenderedRef.current = null;
         onCoverageState({ cellSize: null, status: "too-wide" });
         // 線も同じ理由で消す。古い線が残ると、そこを歩いたのが今の範囲の
         // 話だと誤読される。
         setTrackLines([]);
+        tracksRenderedDaysRef.current = null;
         onTracksState({
           status: "too-wide",
           droppedTrips: 0,
@@ -2067,7 +2240,7 @@ function MapDataLayer({
       onLoadingChange(true);
       try {
         const tasks: Promise<Response>[] = [];
-        if (layers.properties) {
+        if (plan.fetch.properties) {
           tasks.push(
             fetch(
               `/api/field-survey/map/properties?${buildMapPropertiesQuery(b, {
@@ -2077,7 +2250,7 @@ function MapDataLayer({
             ),
           );
         }
-        if (layers.pins) {
+        if (plan.fetch.pins) {
           // Codex P2: pin fetch も bbox スコープに絞り、viewport 外の他人 pin
           // を取らない。bbox は Property と同じ map bounds を使う。
           // view=map は memo 本文を Network レスポンスに載せない map-safe
@@ -2102,7 +2275,7 @@ function MapDataLayer({
         // (@codex #332 P2)。集計は座標の索引が無いぶん重くなり得るので、
         // 同じ待ち行列に入れると**物件とピンの更新まで一緒に止まる**。
         // 中断(AbortController)と debounce は共有したまま、待ち合わせだけ分ける。
-        const coveragePromise = layers.coverage
+        const coveragePromise = plan.fetch.coverage
           ? fetch(
               "/api/field-survey/coverage/cells?" +
                 new URLSearchParams({
@@ -2118,7 +2291,7 @@ function MapDataLayer({
 
         // ⚠線も**別の待ち行列**にする（面と同じ理由）。生点を読むので面より
         // 重くなり得る。面・物件・ピンの更新を線が止めないようにする。
-        const tracksPromise = layers.tracks
+        const tracksPromise = plan.fetch.tracks
           ? fetch(
               "/api/field-survey/coverage/tracks?" +
                 new URLSearchParams({
@@ -2133,7 +2306,11 @@ function MapDataLayer({
           : null;
 
         if (tracksPromise) {
-          setTrackLines([]);
+          // ⚠第3弾: 取得開始時に**線を消さない**。従来は動かすたびに線が消え、
+          //   「歩いていない」ように見える時間が生まれていた。線は緯度経度の
+          //   絶対位置なので、届くまで前の線を出していても嘘にならない
+          //   (期間を変えたときは下の keep 判定と同じ理由で消す)。
+          if (!keepTracksRef.current) setTrackLines([]);
           onTracksState({
             status: "loading",
             droppedTrips: 0,
@@ -2146,6 +2323,7 @@ function MapDataLayer({
               if (!r.ok) {
                 handleHttpError(r.status, onError);
                 setTrackLines([]);
+                tracksRenderedDaysRef.current = null;
                 onTracksState({
                   status: "unavailable",
                   droppedTrips: 0,
@@ -2167,6 +2345,7 @@ function MapDataLayer({
               // 線が「歩いていない」を意味しない）。消さずに出し、落とした本数を
               // 断りとして必ず添える。
               setTrackLines(j.data?.lines ?? []);
+              tracksRenderedDaysRef.current = coverageDays;
               onTracksState({
                 status: "ready",
                 droppedTrips: j.data?.droppedTrips ?? 0,
@@ -2177,6 +2356,7 @@ function MapDataLayer({
             .catch((err: unknown) => {
               if ((err as { name?: string }).name === "AbortError") return;
               setTrackLines([]);
+              tracksRenderedDaysRef.current = null;
               onTracksState({
                 status: "unavailable",
                 droppedTrips: 0,
@@ -2184,8 +2364,9 @@ function MapDataLayer({
                 unrenderableTrips: 0,
               });
             });
-        } else {
+        } else if (plan.clear.tracks) {
           setTrackLines([]);
+          tracksRenderedDaysRef.current = null;
           onTracksState({
             status: "off",
             droppedTrips: 0,
@@ -2195,10 +2376,16 @@ function MapDataLayer({
         }
 
         if (coveragePromise) {
-          // ⚠問い合わせ開始時に**前の色を消して「確認中」にする** (@codex #332)。
-          // 期間を「全期間」から「直近1年」へ変えた直後などに古い色が残ると、
-          // 選択と表示が食い違ったまま（集計は索引が無いぶん時間がかかる）。
-          setCoverageCells([]);
+          // ⚠問い合わせ開始時に前の色を消すのは、**残すと嘘になるときだけ**
+          //   (@codex #332 の意図は保つ・第3弾で条件を精密化)。期間が変わった/
+          //   格子の粗さが変わる場合は、古い色が今の選択と食い違うので消す。
+          //   同じ粗さ・同じ期間なら色は緯度経度に貼り付いた事実のままなので、
+          //   届くまで出しておく(動かすたびに色が点滅しない)。判定は純関数
+          //   keepCoverageWhileLoading。
+          if (!keepCoverageRef.current) {
+            setCoverageCells([]);
+            setCoverageStep(null);
+          }
           onCoverageState({ cellSize: null, status: "loading" });
           void coveragePromise
             .then(async (r) => {
@@ -2206,6 +2393,7 @@ function MapDataLayer({
               if (!r.ok) {
                 handleHttpError(r.status, onError);
                 setCoverageCells([]);
+                coverageRenderedRef.current = null;
                 onCoverageState({ cellSize: null, status: "unavailable" });
                 return;
               }
@@ -2225,11 +2413,16 @@ function MapDataLayer({
               // 一部だけ描くと踏破済みエリアへ人を送り出すことになる。
               const truncated = d?.truncated === true;
               setCoverageCells(truncated ? [] : (d?.cells ?? []));
-              setCoverageStep(
+              const nextStep =
                 d?.latStep != null && d?.lngStep != null
                   ? { latStep: d.latStep, lngStep: d.lngStep }
-                  : null,
-              );
+                  : null;
+              setCoverageStep(nextStep);
+              // 何も描かなかった(打ち切り)ときは素性を残さない=次回は残さず消す。
+              coverageRenderedRef.current =
+                truncated || nextStep === null
+                  ? null
+                  : { step: nextStep, days: coverageDays };
               onCoverageState({
                 cellSize: d?.cell ?? null,
                 status: truncated ? "too-wide" : "ready",
@@ -2239,20 +2432,27 @@ function MapDataLayer({
               if ((err as { name?: string }).name === "AbortError") return;
               // 通信失敗でも古い色を残さない(古い期間の色を描き続けない)。
               setCoverageCells([]);
+              coverageRenderedRef.current = null;
               onCoverageState({ cellSize: null, status: "unavailable" });
             });
-        } else {
+        } else if (plan.clear.coverage) {
           setCoverageCells([]);
+          setCoverageStep(null);
+          coverageRenderedRef.current = null;
           onCoverageState({ cellSize: null, status: "off" });
         }
 
         const results = await Promise.all(tasks);
         // 第1弾 A3: 打ち切り(nextCursor 非 null)。取得しなかった/失敗した層は false
         // (分からないものを「まだある」とは言わない)。
-        let propertiesTruncatedNext = false;
-        let pinsTruncatedNext = false;
+        // ⚠取らなかった層の断りは**前回の判断を持ち越す**(第3弾)。毎回 false に
+        //   すると、ピンだけ取り直したときに物件の「表示しきれていない」が消える。
+        let propertiesTruncatedNext = truncationRef.current.properties;
+        let pinsTruncatedNext = truncationRef.current.pins;
         let idx = 0;
-        if (layers.properties) {
+        if (plan.clear.properties) propertiesTruncatedNext = false;
+        if (plan.clear.pins) pinsTruncatedNext = false;
+        if (plan.fetch.properties) {
           const r = results[idx++];
           if (r.ok) {
             const j = (await r.json()) as {
@@ -2265,11 +2465,12 @@ function MapDataLayer({
             propertiesTruncatedNext = typeof j.nextCursor === "string";
           } else {
             handleHttpError(r.status, onError);
+            propertiesTruncatedNext = false;
           }
-        } else {
+        } else if (plan.clear.properties) {
           setProperties([]);
         }
-        if (layers.pins) {
+        if (plan.fetch.pins) {
           const r = results[idx++];
           if (r.ok) {
             // view=map projection で API 側が memo を返さず hasMemo: boolean
@@ -2284,10 +2485,15 @@ function MapDataLayer({
             pinsTruncatedNext = typeof j.nextCursor === "string";
           } else {
             handleHttpError(r.status, onError);
+            pinsTruncatedNext = false;
           }
-        } else {
+        } else if (plan.clear.pins) {
           setPins([]);
         }
+        truncationRef.current = {
+          pins: pinsTruncatedNext,
+          properties: propertiesTruncatedNext,
+        };
         onTruncationChange({
           pins: pinsTruncatedNext,
           properties: propertiesTruncatedNext,
@@ -2297,6 +2503,7 @@ function MapDataLayer({
         // ⚠打ち切りの断りもここで消す(@codex #407 R1 P2)。成功経路でしか
         //   更新しないと、前の画面の「表示しきれていない…」が通信断の後も
         //   残り続ける(直前に OFF にした層の断りすら残り得る)。
+        truncationRef.current = { pins: false, properties: false };
         onTruncationChange({ pins: false, properties: false });
         // ⚠通信失敗でも**古い色を必ず消す** (@codex #332 P2)。残すと、期間を
         // 「直近1年」から「全期間」へ切り替えた直後に失敗した場合、画面は新しい
@@ -2304,8 +2511,10 @@ function MapDataLayer({
         // 「色が無い＝誰も通っていない」と読ませる画面なので、古い色が残ることは
         // 誤った指示に直結する。
         setCoverageCells([]);
+        coverageRenderedRef.current = null;
         onCoverageState({ cellSize: null, status: "unavailable" });
         setTrackLines([]);
+        tracksRenderedDaysRef.current = null;
         onTracksState({
           status: "unavailable",
           droppedTrips: 0,
@@ -2323,14 +2532,72 @@ function MapDataLayer({
     [
       onLoadingChange,
       onTruncationChange,
+      // ⚠layers.* は依存から外した(第3弾)。取得の可否は引数の plan が持ち、
+      //   本体はレイヤーの生の値を読まない。残しておくとトグルのたびに
+      //   fetchForBbox の同一性が変わり、地図のリスナー再登録と進行中の
+      //   取得の中断が起きる(計画で通信を減らした意味が薄れる)。
+      coverageDays,
+      onError,
+      onCoverageState,
+      onTracksState,
+    ],
+  );
+
+  // ⚠取得計画は**この1か所**で作る(第3弾)。地図の idle 経路とレイヤー変更経路が
+  //   別々に判断すると、同じ操作でも取り方が食い違う。前回の入力は ref に控え、
+  //   純関数 planMapFetch が「何を取り・何を消すか」を決める。
+  const runFetch = useCallback(
+    (b: Bbox) => {
+      const next: MapFetchInputs = {
+        layers: {
+          properties: layers.properties,
+          pins: layers.pins,
+          coverage: layers.coverage,
+          tracks: layers.tracks,
+        },
+        coverageDays,
+        // 表示範囲の同一性。丸めずそのまま使う(同じ範囲なら同じ文字列)。
+        bboxKey: `${b.north},${b.south},${b.east},${b.west}`,
+        refetchNonce,
+      };
+      const plan = planMapFetch(prevFetchInputsRef.current, next);
+      prevFetchInputsRef.current = next;
+      // 取得開始時に前の色/線を残してよいか。サーバーと同じ純関数で次の格子の
+      // 粗さを先に求め、今描いている色の素性と突き合わせる。
+      const nextSize = resolveCoverageCellSize(b);
+      const nextStep = COVERAGE_CELL_STEPS[nextSize];
+      const keep = keepCoverageWhileLoading(coverageRenderedRef.current, {
+        step: nextStep,
+        days: coverageDays,
+      });
+      keepCoverageRef.current = keep;
+      // 線は格子を持たないので、期間が同じなら残す(位置は緯度経度そのもの)。
+      keepTracksRef.current =
+        tracksRenderedDaysRef.current !== null &&
+        tracksRenderedDaysRef.current === coverageDays;
+      if (
+        !plan.fetch.properties &&
+        !plan.fetch.pins &&
+        !plan.fetch.coverage &&
+        !plan.fetch.tracks &&
+        !plan.clear.properties &&
+        !plan.clear.pins &&
+        !plan.clear.coverage &&
+        !plan.clear.tracks
+      ) {
+        // 何もすることが無い(同じ範囲・同じ設定での再評価)。通信しない。
+        return;
+      }
+      void fetchForBbox(b, plan);
+    },
+    [
+      fetchForBbox,
       layers.properties,
       layers.pins,
       layers.coverage,
       layers.tracks,
-          coverageDays,
-      onError,
-      onCoverageState,
-      onTracksState,
+      coverageDays,
+      refetchNonce,
     ],
   );
 
@@ -2338,7 +2605,7 @@ function MapDataLayer({
   useEffect(() => {
     if (!map) return;
     const debounced = debounce((b: Bbox) => {
-      void fetchForBbox(b);
+      runFetch(b);
     }, FETCH_DEBOUNCE_MS);
 
     // 第1弾 B2: ユーザーが自分で地図を動かしたら、巡回開始の自動寄せ予約を
@@ -2355,6 +2622,8 @@ function MapDataLayer({
       onBackgroundClick();
     });
     const listener = map.addListener("idle", () => {
+      const z = map.getZoom();
+      if (typeof z === "number") setZoom(z);
       const bounds = map.getBounds();
       if (!bounds) return;
       const ne = bounds.getNorthEast();
@@ -2374,7 +2643,7 @@ function MapDataLayer({
       listener.remove();
       if (abortRef.current) abortRef.current.abort();
     };
-  }, [map, fetchForBbox, onUserDrag, onBackgroundClick]);
+  }, [map, runFetch, onUserDrag, onBackgroundClick]);
 
   // layer toggle / pin 作成 / 編集成功時に現在 bbox で再 fetch する。
   useEffect(() => {
@@ -2383,7 +2652,7 @@ function MapDataLayer({
     if (!bounds) return;
     const ne = bounds.getNorthEast();
     const sw = bounds.getSouthWest();
-    void fetchForBbox({
+    runFetch({
       north: ne.lat(),
       south: sw.lat(),
       east: ne.lng(),
@@ -2395,7 +2664,7 @@ function MapDataLayer({
     layers.pins,
     layers.coverage,
     layers.tracks,
-      coverageDays,
+    coverageDays,
     refetchNonce,
   ]);
 
@@ -2563,24 +2832,60 @@ function MapDataLayer({
           タップが marker に奪われて吹き出しが開き、作成モーダルが永久に
           開かない**。地図タップが唯一の作成経路なので、タップ待ち中は
           marker を素通しにして map click へ落とす (タップした実座標が使える)。 */}
+      {/* 第3弾: 引くとマーカーが重なって何件あるか分からなかったので、
+          近いものを1つにまとめて件数を出す。押すと寄って中身がほどける。 */}
       {layers.properties &&
-        properties.map((p) => (
+        propertyClusters.clusters.map((c) => (
           <AdvancedMarker
-            key={p.id}
-            position={{ lat: p.gpsLat, lng: p.gpsLng }}
-            onClick={
-              captureMapClick
-                ? undefined
-                : () => setSelected({ kind: "property", row: p })
-            }
-            title={p.address}
-          />
+            key={c.key}
+            position={{ lat: c.lat, lng: c.lng }}
+            onClick={captureMapClick ? undefined : () => zoomIntoCluster(c)}
+            title={`この辺りに物件 ${c.count} 件`}
+          >
+            <Pin {...clusterPinStyle(c.count, "property")} />
+          </AdvancedMarker>
+        ))}
+      {layers.properties &&
+        propertyClusters.singles.map((sp) => {
+          const p = sp.row;
+          return (
+            <AdvancedMarker
+              key={p.id}
+              position={{ lat: p.gpsLat, lng: p.gpsLng }}
+              onClick={
+                captureMapClick
+                  ? undefined
+                  : () => setSelected({ kind: "property", row: p })
+              }
+              title={p.address}
+            >
+              {/* 第3弾: 全部同じ赤で種別が分からなかった。⚠赤は「物件」の合図
+                  なので色は変えず(ピン側は物件と混同しないよう赤を避けている)、
+                  種別は1文字の印で示す。終わった案件だけ灰色+✓。 */}
+              <Pin
+                {...propertyMarkerStyle({
+                  propertyType: p.propertyType,
+                  caseStatus: p.caseStatus,
+                })}
+              />
+            </AdvancedMarker>
+          );
+        })}
+      {layers.pins &&
+        pinClusters.clusters.map((c) => (
+          <AdvancedMarker
+            key={c.key}
+            position={{ lat: c.lat, lng: c.lng }}
+            onClick={captureMapClick ? undefined : () => zoomIntoCluster(c)}
+            title={`この辺りに調査ピン ${c.count} 件`}
+          >
+            <Pin {...clusterPinStyle(c.count, "pin")} />
+          </AdvancedMarker>
         ))}
       {layers.pins &&
-        (hideClosedPins
-          ? pins.filter((p) => p.status !== "closed")
-          : pins
-        ).map((pin) => (
+        pinClusters.singles.map((sp) => {
+          const pin = sp.row;
+          return (
           <AdvancedMarker
             key={pin.id}
             position={{ lat: pin.lat, lng: pin.lng }}
@@ -2602,7 +2907,8 @@ function MapDataLayer({
               })}
             />
           </AdvancedMarker>
-        ))}
+          );
+        })}
 
       {/* ⚠タップ待ち中 (captureMapClick) は吹き出しを描かない (@codex #336 P2
           と同根)。開いたままの吹き出しが撮影した家を覆うと、タップ先そのものが

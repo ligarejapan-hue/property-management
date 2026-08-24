@@ -9,6 +9,7 @@
 import { FIELD_SURVEY_PIN_TYPES } from "@/lib/field-survey-constants";
 import { formatPinType } from "@/lib/field-survey-pin-util";
 import { pinMarkerStyle } from "@/lib/field-survey-pin-marker";
+import { propertyMarkerStyle } from "@/lib/field-survey-property-marker";
 
 function LegendChip({
   background,
@@ -48,6 +49,14 @@ export default function PinMarkerLegend({
     status: "open",
     isOwn: false,
   });
+  const propertySample = propertyMarkerStyle({
+    propertyType: "house",
+    caseStatus: "new_case",
+  });
+  const propertyDone = propertyMarkerStyle({
+    propertyType: "house",
+    caseStatus: "sold",
+  });
   return (
     <div
       data-testid="pin-marker-legend"
@@ -86,6 +95,29 @@ export default function PinMarkerLegend({
             <span>白いふちどり = 他の担当者のピン</span>
           </li>
         )}
+        {/* 第3弾: 物件マーカーは全部同じ赤で種別が分からなかった。赤=物件の
+            合図は変えず、中の1文字で種別を示す。 */}
+        <li
+          className="flex items-center gap-1.5"
+          data-testid="pin-legend-property"
+        >
+          <LegendChip
+            background={propertySample.background}
+            glyph={propertySample.glyph}
+          />
+          <span>赤 = 登録済みの物件(中の文字は種別。土=土地 / 戸=戸建 など)</span>
+        </li>
+        <li className="flex items-center gap-1.5">
+          <LegendChip
+            background={propertyDone.background}
+            glyph={propertyDone.glyph}
+          />
+          <span>灰 = 売却済み・終了した物件</span>
+        </li>
+        <li className="flex items-center gap-1.5">
+          <LegendChip background="#6B7280" glyph="12" />
+          <span>数字 = この辺りにまとまっている件数(押すと寄って開きます)</span>
+        </li>
       </ul>
     </div>
   );
