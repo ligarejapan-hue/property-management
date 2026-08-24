@@ -126,6 +126,9 @@ export async function PATCH(
         pinType: true,
         status: true,
         memo: true,
+        // 位置直しの重複防止に使う (@codex #410 R1 P2)。監査には載せない。
+        lat: true,
+        lng: true,
       },
     });
     if (!existing) {
@@ -269,6 +272,15 @@ export async function PATCH(
           id,
           sessionId: existing.sessionId,
           pinType: existing.pinType,
+          // ⚠位置を動かすときは**動かす前の座標**も条件に入れる
+          //   (@codex #410 R1 P2)。入れないと、2台から同時に動かしたときや
+          //   本人と管理者が同時に動かしたときに**両方成功**し、後に届いた方が
+          //   黙って上書きする(先に動かした人の画面は、保存されていない位置を
+          //   出し続ける)。条件に入れれば後着は 0 件になり 409 を返せる。
+          ...(patch.lat !== undefined && {
+            lat: existing.lat,
+            lng: existing.lng,
+          }),
         },
         data: {
           ...(patch.pinType !== undefined && { pinType: patch.pinType }),

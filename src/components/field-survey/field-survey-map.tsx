@@ -571,6 +571,14 @@ export default function FieldSurveyMap({
   //   「直さないなら手数ゼロ」=次の操作を始めれば黙って解除する。
   const [movablePinId, setMovablePinId] = useState<string | null>(null);
   const [movingPin, setMovingPin] = useState(false);
+  // ⚠位置直しが**実際に使える**条件(@codex #410 R1 P2)。状態は保ったまま、
+  //   使えない状況では出さない(閉じれば戻る)。
+  //   ・詳細シートを開いている間: 操作の主役はそちら。裏でバナーを出さない
+  //     (写真なしの保存は、保存直後にそのまま詳細を開くため必ず通る経路)。
+  //   ・ピンのレイヤーが OFF: マーカーそのものを描いていないので、
+  //     「ドラッグして直せます」は**嘘の案内**になる。
+  const activeMovablePinId =
+    detailPinId !== null || !layers.pins ? null : movablePinId;
   const openPinDetailSafe = useCallback((id: string) => {
     if (detailPanelBusyRef.current) return;
     // 次の操作を始めたので位置直しは終わり(決定8「次の操作を始めれば解除」)。
@@ -1303,7 +1311,7 @@ export default function FieldSurveyMap({
             focusPinId={focusPinId}
             resumeNonce={resumeNonce}
             onHeavyFetch={markHeavyFetched}
-            movablePinId={movablePinId}
+            movablePinId={activeMovablePinId}
             movingPin={movingPin}
             onPinMoved={handlePinMoved}
           />
@@ -1486,7 +1494,9 @@ export default function FieldSurveyMap({
           {/* 決定8: 保存直後だけ出る位置直しの案内。押さなくても次の操作で
               消えるので「直さないなら手数ゼロ」。詳細パネルが開いている間は
               重ねない(シートの裏に隠れるため)。 */}
-          {movablePinId && !panelOpen && cameraFirstPhase !== "awaiting-map-tap" && (
+          {activeMovablePinId &&
+            !panelOpen &&
+            cameraFirstPhase !== "awaiting-map-tap" && (
             <div
               role="status"
               data-testid="pin-move-banner"

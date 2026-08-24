@@ -143,13 +143,31 @@ describe("直さないなら手数ゼロ(次の操作で解除)", () => {
   });
 });
 
+describe("使えない状況では位置直しを出さない(@codex #410 R1 P2)", () => {
+  it("詳細シートを開いている間と、ピンのレイヤーが OFF のときは出さない", () => {
+    // ⚠panelOpen は「表示切替パネル」であって詳細シートではない(取り違えていた)。
+    //   写真なしの保存は保存直後にそのまま詳細を開くので、必ずこの経路を通る。
+    //   レイヤー OFF ではマーカー自体を描いていないため、案内だけ出ると嘘になる。
+    expect(MAP).toContain(
+      "detailPinId !== null || !layers.pins ? null : movablePinId",
+    );
+    // 判定は1か所で作り、案内も描画も**同じ値**を使う(食い違わない)。
+    expect(MAP).toContain("movablePinId={activeMovablePinId}");
+    const at = MAP.indexOf('data-testid="pin-move-banner"');
+    expect(MAP.slice(at - 400, at)).toContain("activeMovablePinId &&");
+    // 状態そのものは保つ(閉じれば戻る・レイヤーを戻せば使える)。
+    expect(MAP).toContain("const [movablePinId, setMovablePinId]");
+  });
+});
+
 describe("案内は保存直後だけ出る", () => {
   it("「家の上へドラッグ」と「完了」が出て、完了で解除する", () => {
     const at = MAP.indexOf('data-testid="pin-move-banner"');
     expect(at).toBeGreaterThan(-1);
     const before = MAP.slice(at - 400, at);
     // 保存直後のときだけ。詳細シートやタップ待ちの案内とは重ねない。
-    expect(before).toContain("movablePinId && !panelOpen");
+    expect(before).toContain("activeMovablePinId &&");
+    expect(before).toContain("!panelOpen");
     expect(before).toContain('cameraFirstPhase !== "awaiting-map-tap"');
     const block = MAP.slice(at, at + 1200);
     expect(block).toContain("ピンを家の上へドラッグして直せます");
