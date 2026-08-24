@@ -74,10 +74,15 @@ describe("field-survey-map — ピン配色の配線", () => {
     expect(MAP_SRC).toMatch(/caseStatus: p\.caseStatus/);
   });
 
-  it("凡例は調査ピン layer ON のときパネルに表示される", () => {
-    expect(MAP_SRC).toMatch(
-      /\{layers\.pins && <PinMarkerLegend showOthersHint=\{showOthersLegendHint\} \/>\}/,
-    );
+  it("凡例は出している層に合わせて表示される(第3弾で物件の行が加わった)", () => {
+    // ⚠旧: ピンの層 ON のときだけ出していた。第3弾で物件マーカーの説明が
+    //   凡例に入ったため、ピンを消して物件だけ出しているときにも必要になった
+    //   (@codex #409 R2 P2)。中の行は showPins / showProperties で出し分ける。
+    expect(MAP_SRC).toMatch(/\{\(layers\.pins \|\| layers\.properties\) && \(/);
+    expect(MAP_SRC).toMatch(/<PinMarkerLegend/);
+    expect(MAP_SRC).toMatch(/showOthersHint=\{showOthersLegendHint\}/);
+    expect(MAP_SRC).toMatch(/showPins=\{layers\.pins\}/);
+    expect(MAP_SRC).toMatch(/showProperties=\{layers\.properties\}/);
   });
 
   it("「他の担当者」ヒントは read_all/manage 保持者にのみ渡す", () => {

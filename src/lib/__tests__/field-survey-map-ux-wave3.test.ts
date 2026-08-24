@@ -20,7 +20,13 @@ const CONVERT = read("src/components/field-survey/convert-pin-to-property-modal.
 
 describe("B4: 取り直しの計画を1か所で作る", () => {
   it("取得の可否は純関数の計画に従う(レイヤーの生の値で分岐しない)", () => {
-    expect(MAP).toContain("planMapFetch(prevFetchInputsRef.current, next)");
+    // 呼び出しは複数行(未達の層も渡すため)。引数の並びで固定する。
+    const pm = MAP.indexOf("const plan = planMapFetch(");
+    expect(pm).toBeGreaterThan(-1);
+    const pmCall = MAP.slice(pm, pm + 200);
+    expect(pmCall).toContain("prevFetchInputsRef.current,");
+    expect(pmCall).toContain("next,");
+    expect(pmCall).toContain("pendingLayersRef.current,");
     for (const key of ["properties", "pins", "coverage", "tracks"]) {
       expect(MAP, key).toContain(`plan.fetch.${key}`);
     }
@@ -43,6 +49,23 @@ describe("B4: 取り直しの計画を1か所で作る", () => {
     // 実際に叩く箇所は runFetch の中だけ(定義は useCallback なので数に入らない)。
     const raw = MAP.match(/(?<!const )fetchForBbox\(/g) ?? [];
     expect(raw.length).toBe(1);
+  });
+
+  it("中断・失敗した層は次の計画で取り直す(@codex #409 R2 P2)", () => {
+    // 取得中にレイヤーや期間を切り替えると前の取得は中断される。計画が
+    // 「取った」と記録しただけでは、その層は空のまま残る(地図を動かすまで直らない)。
+    expect(MAP).toContain("pendingLayersRef.current,");
+    const at = MAP.indexOf("for (const key of [\"properties\", \"pins\", \"coverage\", \"tracks\"] as const) {");
+    expect(at).toBeGreaterThan(-1);
+    const body = MAP.slice(at, at + 300);
+    expect(body).toContain("if (plan.fetch[key]) pendingLayersRef.current.add(key);");
+    expect(body).toContain("else if (plan.clear[key]) pendingLayersRef.current.delete(key);");
+    // 外すのは**実際に描けたとき**だけ(中断・失敗では残す=自己修復する)。
+    for (const layer of ["properties", "pins", "coverage", "tracks"]) {
+      expect(MAP, layer).toContain(`pendingLayersRef.current.delete("${layer}")`);
+    }
+    // 範囲過大は取りに行かないので持ち越さない(無駄な取得を積まない)。
+    expect(MAP).toContain("pendingLayersRef.current.clear();");
   });
 
   it("取らなかった層を消さない(消すのは計画が消せと言ったときだけ)", () => {
@@ -235,12 +258,32 @@ describe("まとめ表示(クラスタリング)", () => {
   });
 });
 
+describe("凡例は出している層だけを説明する(@codex #409 R2 P2)", () => {
+  it("ピン・物件それぞれの層に合わせて行を出し分ける", () => {
+    // ピンを消して物件だけ出しているとき、新しい物件マーカーの説明が
+    // どこにも無くなる/逆に隠れている層の説明が並ぶ、を防ぐ。
+    expect(MAP).toContain("{(layers.pins || layers.properties) && (");
+    expect(MAP).toContain("showPins={layers.pins}");
+    expect(MAP).toContain("showProperties={layers.properties}");
+    expect(LEGEND).toContain("{showPins &&");
+    expect(LEGEND).toContain("{showProperties && (");
+    // まとめ表示の説明はどちらか出ていれば出す。
+    expect(LEGEND).toContain("{(showPins || showProperties) && (");
+  });
+});
+
 describe("物件マーカー: 赤は据え置き・種別は1文字", () => {
   it("色の決定は純関数で、凡例と同じものを使う", () => {
     expect(MAP).toContain('from "@/lib/field-survey-property-marker"');
     expect(MAP).toContain("propertyMarkerStyle({");
     expect(LEGEND).toContain('from "@/lib/field-survey-property-marker"');
     expect(LEGEND).toContain('data-testid="pin-legend-property"');
+  });
+
+  it("旧ステータス done も終わった案件として灰色にする(@codex #409 R2 P2)", () => {
+    // done は廃止値だが既存データに残っており、地図APIは生値を返す。
+    const MARKER = read("src/lib/field-survey-property-marker.ts");
+    expect(MARKER).toContain('new Set(["sold", "closed", "done"])');
   });
 
   it("種別と案件の状態を渡す(見た目の判断を画面側で分岐しない)", () => {

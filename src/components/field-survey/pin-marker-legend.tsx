@@ -31,6 +31,8 @@ function LegendChip({
 
 export default function PinMarkerLegend({
   showOthersHint = false,
+  showPins = true,
+  showProperties = true,
 }: {
   /**
    * 「白いふちどり = 他の担当者」行を出すか。read_all/manage が無いスタッフ
@@ -38,6 +40,10 @@ export default function PinMarkerLegend({
    * 見分け方を案内しない (呼び出し側が権限から判定して渡す)。
    */
   showOthersHint?: boolean;
+  /** 調査ピンの行を出すか(ピンのレイヤーが ON のときだけ)。 */
+  showPins?: boolean;
+  /** 物件の行を出すか(物件のレイヤーが ON のときだけ)。@codex #409 R2 P2 */
+  showProperties?: boolean;
 }) {
   const closed = pinMarkerStyle({
     pinType: "candidate",
@@ -66,20 +72,23 @@ export default function PinMarkerLegend({
         ピンの見かた
       </div>
       <ul className="space-y-1 text-[10px] text-gray-700 dark:text-gray-300">
-        {FIELD_SURVEY_PIN_TYPES.map((t) => {
-          const s = pinMarkerStyle({ pinType: t, status: "open", isOwn: true });
-          return (
-            <li key={t} className="flex items-center gap-1.5">
-              <LegendChip background={s.background} glyph={s.glyph} />
-              <span>{formatPinType(t)}</span>
-            </li>
-          );
-        })}
-        <li className="flex items-center gap-1.5">
-          <LegendChip background={closed.background} glyph={closed.glyph} />
-          <span>対応済み・物件化済み</span>
-        </li>
-        {showOthersHint && (
+        {showPins &&
+          FIELD_SURVEY_PIN_TYPES.map((t) => {
+            const s = pinMarkerStyle({ pinType: t, status: "open", isOwn: true });
+            return (
+              <li key={t} className="flex items-center gap-1.5">
+                <LegendChip background={s.background} glyph={s.glyph} />
+                <span>{formatPinType(t)}</span>
+              </li>
+            );
+          })}
+        {showPins && (
+          <li className="flex items-center gap-1.5">
+            <LegendChip background={closed.background} glyph={closed.glyph} />
+            <span>対応済み・物件化済み</span>
+          </li>
+        )}
+        {showPins && showOthersHint && (
           <li
             className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400"
             data-testid="pin-legend-others-hint"
@@ -96,28 +105,37 @@ export default function PinMarkerLegend({
           </li>
         )}
         {/* 第3弾: 物件マーカーは全部同じ赤で種別が分からなかった。赤=物件の
-            合図は変えず、中の1文字で種別を示す。 */}
-        <li
-          className="flex items-center gap-1.5"
-          data-testid="pin-legend-property"
-        >
-          <LegendChip
-            background={propertySample.background}
-            glyph={propertySample.glyph}
-          />
-          <span>赤 = 登録済みの物件(中の文字は種別。土=土地 / 戸=戸建 など)</span>
-        </li>
-        <li className="flex items-center gap-1.5">
-          <LegendChip
-            background={propertyDone.background}
-            glyph={propertyDone.glyph}
-          />
-          <span>灰 = 売却済み・終了した物件</span>
-        </li>
-        <li className="flex items-center gap-1.5">
-          <LegendChip background="#6B7280" glyph="12" />
-          <span>数字 = この辺りにまとまっている件数(押すと寄って開きます)</span>
-        </li>
+            合図は変えず、中の1文字で種別を示す。
+            ⚠**物件のレイヤーが ON のときだけ**出す(@codex #409 R2 P2)。
+            隠れている層の説明を並べない/出している層の説明を隠さない。 */}
+        {showProperties && (
+          <>
+            <li
+              className="flex items-center gap-1.5"
+              data-testid="pin-legend-property"
+            >
+              <LegendChip
+                background={propertySample.background}
+                glyph={propertySample.glyph}
+              />
+              <span>赤 = 登録済みの物件(中の文字は種別。土=土地 / 戸=戸建 など)</span>
+            </li>
+            <li className="flex items-center gap-1.5">
+              <LegendChip
+                background={propertyDone.background}
+                glyph={propertyDone.glyph}
+              />
+              <span>灰 = 売却済み・終了した物件</span>
+            </li>
+          </>
+        )}
+        {/* まとめ表示はピン・物件のどちらにも出るので、どちらか出ていれば説明する。 */}
+        {(showPins || showProperties) && (
+          <li className="flex items-center gap-1.5">
+            <LegendChip background="#6B7280" glyph="12" />
+            <span>数字 = この辺りにまとまっている件数(押すと寄って開きます)</span>
+          </li>
+        )}
       </ul>
     </div>
   );

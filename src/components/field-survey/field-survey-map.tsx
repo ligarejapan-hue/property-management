@@ -35,6 +35,7 @@ import {
   keepCoverageWhileLoading,
   type MapFetchInputs,
   type MapFetchPlan,
+  type MapLayerKey,
   type CoverageRenderState,
 } from "@/lib/field-survey-map-fetch-plan";
 import {
@@ -1826,7 +1827,13 @@ function ControlPanel({
       )}
 
       {/* ピンの配色凡例 (調査ピン表示中のみ)。 */}
-      {layers.pins && <PinMarkerLegend showOthersHint={showOthersLegendHint} />}
+      {(layers.pins || layers.properties) && (
+        <PinMarkerLegend
+          showOthersHint={showOthersLegendHint}
+          showPins={layers.pins}
+          showProperties={layers.properties}
+        />
+      )}
 
       {/* 踏破ヒート: 全員が歩いた場所の蓄積。この地図を開く主目的が
           「次にどこを回るか決める」なので既定 ON。 */}
@@ -2131,6 +2138,11 @@ function MapDataLayer({
   const tracksRenderedDaysRef = useRef<number | null>(null);
   // 前回の取得入力(計画の差分計算に使う)。
   const prevFetchInputsRef = useRef<MapFetchInputs | null>(null);
+  // ⚠**まだ画面に反映できていない層**(@codex #409 R2 P2)。取りに行った時点で
+  //   入れ、**実際に描けたときだけ**外す。中断(次の操作が古い取得を止める)や
+  //   失敗では残るので、次の計画が取り直して自己修復する。これが無いと
+  //   「取得中にレイヤーを切り替えたら、前の層が空のまま残る」。
+  const pendingLayersRef = useRef<Set<MapLayerKey>>(new Set());
   // まとめ表示(第3弾)の粗さを決めるための現在のズーム。
   const [zoom, setZoom] = useState<number>(CLUSTER_MIN_ZOOM);
   // まとめ表示。純関数へ渡すのは id と座標だけで、元の行は手元で引き当てる
@@ -2214,6 +2226,9 @@ function MapDataLayer({
         // 行っていない広い範囲に前の色が残り、周りの無色を「誰も通っていない」
         // と誤読させる。飛んでいる古い要求が後から色を戻すのも防ぐ。
         if (abortRef.current) abortRef.current.abort();
+        // 範囲が広すぎる間は取りに行かない=未達として持ち越さない
+        // (持ち越すと、範囲を戻すまで毎回の計画に無駄な取得が積まれる)。
+        pendingLayersRef.current.clear();
         setCoverageCells([]);
         setCoverageStep(null);
         coverageRenderedRef.current = null;
@@ -2353,6 +2368,7 @@ function MapDataLayer({
               // 断りとして必ず添える。
               setTrackLines(j.data?.lines ?? []);
               tracksRenderedDaysRef.current = coverageDays;
+              pendingLayersRef.current.delete("tracks");
               onTracksState({
                 status: "ready",
                 droppedTrips: j.data?.droppedTrips ?? 0,
@@ -2430,6 +2446,9 @@ function MapDataLayer({
                 truncated || nextStep === null
                   ? null
                   : { step: nextStep, days: coverageDays };
+              // 打ち切りも「サーバーが答えた」結果なので未達ではない
+              // (取り直しても同じ答えになる。無限の取り直しにしない)。
+              pendingLayersRef.current.delete("coverage");
               onCoverageState({
                 cellSize: d?.cell ?? null,
                 status: truncated ? "too-wide" : "ready",
@@ -2467,6 +2486,7 @@ function MapDataLayer({
               nextCursor?: string | null;
             };
             setProperties(filterValidGps(j.data ?? []));
+            pendingLayersRef.current.delete("properties");
             // ⚠実契約は nextCursor(hasNext というフィールドは API に無い。
             //   @codex #407 R2 P1: 存在しない鍵を読んで断りが一度も出なかった)。
             propertiesTruncatedNext = typeof j.nextCursor === "string";
@@ -2489,6 +2509,7 @@ function MapDataLayer({
               nextCursor?: string | null;
             };
             setPins(filterValidPinGps(j.data ?? []));
+            pendingLayersRef.current.delete("pins");
             pinsTruncatedNext = typeof j.nextCursor === "string";
           } else {
             handleHttpError(r.status, onError);
@@ -2593,8 +2614,17 @@ function MapDataLayer({
         bboxKey: `${b.north},${b.south},${b.east},${b.west}`,
         refetchNonce,
       };
-      const plan = planMapFetch(prevFetchInputsRef.current, next);
+      const plan = planMapFetch(
+        prevFetchInputsRef.current,
+        next,
+        pendingLayersRef.current,
+      );
       prevFetchInputsRef.current = next;
+      // 取りに行く層を未達に積む。消す層は「持っていなくて当然」なので外す。
+      for (const key of ["properties", "pins", "coverage", "tracks"] as const) {
+        if (plan.fetch[key]) pendingLayersRef.current.add(key);
+        else if (plan.clear[key]) pendingLayersRef.current.delete(key);
+      }
       // 取得開始時に前の色/線を残してよいか。サーバーと同じ純関数で次の格子の
       // 粗さを先に求め、今描いている色の素性と突き合わせる。
       const nextSize = resolveCoverageCellSize(b);

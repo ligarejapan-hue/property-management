@@ -32,8 +32,13 @@ export const PROPERTY_TYPE_GLYPHS: Record<string, string> = {
 /** 終わった案件の印(ピンの「対応済み」と同じ✓)。 */
 export const PROPERTY_DONE_GLYPH = "✓";
 
-/** 案件が終わっているとみなす状態。 */
-const DONE_CASE_STATUSES = new Set(["sold", "closed"]);
+/**
+ * 案件が終わっているとみなす状態。
+ * ⚠`done` は廃止された旧値だが**既存データには今も入っている**(新規設定は不可・
+ *   正規化では closed 相当)。地図APIは生の caseStatus を返すため、ここで拾わないと
+ *   終わった物件が現役の赤で出て状態を誤らせる(@codex #409 R2 P2)。
+ */
+const DONE_CASE_STATUSES = new Set(["sold", "closed", "done"]);
 
 /** 未知の種別のフォールバック(種別が増えても地図を壊さない)。 */
 const UNKNOWN_GLYPH = "・";

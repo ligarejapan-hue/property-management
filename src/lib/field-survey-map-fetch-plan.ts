@@ -51,6 +51,14 @@ const PERIOD_DEPENDENT: readonly MapLayerKey[] = ["coverage", "tracks"];
 export function planMapFetch(
   prev: MapFetchInputs | null,
   next: MapFetchInputs,
+  /**
+   * **まだ画面に反映できていない層**(取りに行ったが中断された/失敗した)。
+   * ⚠これが無いと、取得中にレイヤーや期間を切り替えたときに取りこぼす
+   * (@codex #409 R2 P2)。前回の計画が「取った」と記録した直後に中断されると、
+   * 次の差分計画はその層を「もう持っている」と見なして取りに行かず、地図が
+   * 空のまま/古いまま残る(地図を動かすか更新を押すまで直らない)。
+   */
+  pending: ReadonlySet<MapLayerKey> = new Set(),
 ): MapFetchPlan {
   const fetch: Record<MapLayerKey, boolean> = {
     properties: false,
@@ -82,7 +90,8 @@ export function planMapFetch(
     }
     const turnedOn = prev !== null && !prev.layers[key];
     const periodHit = periodChanged && PERIOD_DEPENDENT.includes(key);
-    fetch[key] = refetchAll || turnedOn || periodHit;
+    // 未達の層は、他に理由が無くても取り直す(取りこぼしの自己修復)。
+    fetch[key] = refetchAll || turnedOn || periodHit || pending.has(key);
   }
 
   return { fetch, clear };

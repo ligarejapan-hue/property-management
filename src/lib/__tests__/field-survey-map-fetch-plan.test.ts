@@ -143,6 +143,34 @@ describe("planMapFetch: 何を取り、何を消すか", () => {
     expect(p.clear.coverage).toBe(true);
   });
 
+  it("未達の層(中断・失敗)は、他に理由が無くても取り直す(@codex #409 R2 P2)", () => {
+    // 取得中にレイヤーを切り替えると前の取得は中断される。前回の計画が
+    // 「取った」と記録しているだけでは、次の差分計画がその層を飛ばして
+    // 地図が空のまま残る。未達として持ち越せば自己修復する。
+    const p = planMapFetch(base, { ...base }, new Set(["coverage"]));
+    expect(p.fetch.coverage).toBe(true);
+    // 巻き添えで他の層まで取り直したりしない。
+    expect(p.fetch.pins).toBe(false);
+    expect(p.fetch.properties).toBe(false);
+    expect(p.fetch.tracks).toBe(false);
+  });
+
+  it("未達でも OFF の層は取りに行かない(消すだけ)", () => {
+    const next: MapFetchInputs = {
+      ...base,
+      layers: { properties: true, pins: true, coverage: false, tracks: true },
+    };
+    const p = planMapFetch(base, next, new Set(["coverage"]));
+    expect(p.fetch.coverage).toBe(false);
+    expect(p.clear.coverage).toBe(true);
+  });
+
+  it("未達の指定が無いときは従来どおり(既定引数で壊れない)", () => {
+    const a = planMapFetch(base, { ...base });
+    const b = planMapFetch(base, { ...base }, new Set());
+    expect(a).toEqual(b);
+  });
+
   it("総当たり: fetch と clear が同時に立つ組み合わせは存在しない", () => {
     const bools = [false, true];
     const keys = ["properties", "pins", "coverage", "tracks"] as const;
@@ -173,11 +201,15 @@ describe("planMapFetch: 何を取り、何を消すか", () => {
                 bboxKey: bboxSame ? "a" : "b",
                 refetchNonce: nonceSame ? 0 : 1,
               };
-              const p = planMapFetch(prev, next);
-              for (const k of keys) {
-                expect(p.fetch[k] && p.clear[k]).toBe(false);
-                // OFF のレイヤーを取りに行くことは絶対にない
-                if (!next.layers[k]) expect(p.fetch[k]).toBe(false);
+              for (const pend of [new Set<"properties" | "pins" | "coverage" | "tracks">(), new Set(keys)]) {
+                const p = planMapFetch(prev, next, pend);
+                for (const k of keys) {
+                  expect(p.fetch[k] && p.clear[k]).toBe(false);
+                  // OFF のレイヤーを取りに行くことは絶対にない(未達でも)
+                  if (!next.layers[k]) expect(p.fetch[k]).toBe(false);
+                  // ON かつ未達なら必ず取り直す
+                  if (next.layers[k] && pend.has(k)) expect(p.fetch[k]).toBe(true);
+                }
               }
             }
   });
