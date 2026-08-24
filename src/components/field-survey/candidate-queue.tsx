@@ -112,8 +112,14 @@ export function CandidatePlaceLinks({
 
 export default function CandidateQueue({
   currentUserId,
+  initialOrder = "newest",
+  backPinId = null,
 }: {
   currentUserId: string | null;
+  /** 地図から戻ったときの並び順(?order=)。server page が渡す=SSRと一致。 */
+  initialOrder?: "newest" | "oldest";
+  /** 地図から戻ったときのスクロール先の行(?back=)。 */
+  backPinId?: string | null;
 }) {
   const router = useRouter();
   const {
@@ -194,17 +200,11 @@ export default function CandidateQueue({
   const [ageBase, setAgeBase] = useState<Date | null>(null);
   // 並び順。上限超過時に古い候補へ到達できるよう「古い順」を選べる
   // (Codex P2: 「古いものから処理して」と案内しつつ古い分が開けない矛盾の解消)。
-  // ⚠戻り先の復元は**出発時の並び順ごと**行う(@codex #408 R1 P2)。古い順で
-  //   開いた行は新しい順では一覧に居らず(200件上限)、以前は初回応答で戻り先を
-  //   空振り消費していた。並び順を先に復元すれば行は同じページに現れる。
-  const [order, setOrder] = useState<"newest" | "oldest">(() => {
-    try {
-      const o = sessionStorage.getItem("fsCandidatesReturnOrder");
-      return o === "oldest" || o === "newest" ? o : "newest";
-    } catch {
-      return "newest";
-    }
-  });
+  // ⚠戻り先の復元は**出発時の並び順ごと**行う(@codex #408 R1→R2 P2)。
+  //   並び順は URL(?order=)を server page が読んで props で渡す=サーバー描画と
+  //   クライアントで同じ値になり hydration が食い違わない(storage 初期化は
+  //   SSR=newest/クライアント=oldest の不一致を起こした)。
+  const [order, setOrder] = useState<"newest" | "oldest">(initialOrder);
   // 現地写真は「タップした時だけ」読み込む (モバイルの通信量に配慮)。本番は
   // サムネイル生成が無く cover が原寸 (最大 8MB) のため、一覧の全行に常時
   // <img> を置くとスクロールで原寸を大量に落としてしまう。表示中の行だけ
@@ -253,29 +253,16 @@ export default function CandidateQueue({
   // 現在の並び順のリクエストでなければ破棄する (Codex P2: 切替直後に
   // 古い応答が rows/truncated を上書きし、表示と選択が食い違う)。
   const loadGenerationRef = useRef(0);
-  // 第2弾 C4: 地図から戻ったら、出発した行まで自動スクロール(1回だけ)。
+  // 第2弾 C4: 地図から戻ったら、出発した行(?back=)まで自動スクロール(1回だけ)。
+  // 並び順は props で復元済み=最初の応答に行が居るはず。居なければその行は
+  // 本当に消えた(却下/物件化)ので何もしない。
   const restoredRef = useRef(false);
   useEffect(() => {
-    if (restoredRef.current || rows === null) return;
-    let target: string | null = null;
-    try {
-      target = sessionStorage.getItem("fsCandidatesReturnPin");
-    } catch {
-      return;
-    }
-    if (!target) return;
-    // 並び順は state 初期値で復元済み=最初の応答に行が居るはず。居なければ
-    // その行は本当に消えた(却下/物件化)ので、鍵ごと片付けて終わり。
+    if (restoredRef.current || rows === null || !backPinId) return;
     restoredRef.current = true;
-    try {
-      sessionStorage.removeItem("fsCandidatesReturnPin");
-      sessionStorage.removeItem("fsCandidatesReturnOrder");
-    } catch {
-      // 消せなくても実害なし(次回は行が見つからず同様に片付く)
-    }
-    const el = document.querySelector(`[data-candidate-row="${target}"]`);
+    const el = document.querySelector(`[data-candidate-row="${backPinId}"]`);
     if (el) el.scrollIntoView({ block: "center" });
-  }, [rows]);
+  }, [rows, backPinId]);
 
   const load = useCallback(async () => {
     const generation = ++loadGenerationRef.current;
@@ -533,21 +520,11 @@ export default function CandidateQueue({
                           載せず (id のみ)、地図側が pin 詳細 API から取得する。 */}
                       <Link
                         data-testid="candidate-map-link"
-                        href={`/field-survey/map?focusPin=${r.id}`}
+                        // 第2弾 C4: 現在の並び順を URL で地図へ運ぶ(戻りリンクが
+                        // ?order= に載せ返す)。storage 方式は hydration 不一致の
+                        // 原因になった(@codex #408 R2 P2)。
+                        href={`/field-survey/map?focusPin=${r.id}&retOrder=${order}`}
                         className={ROW_CHIP_CLASS}
-                        onClick={() => {
-                          // 第2弾 C4: 地図から戻ったとき、この行まで自動で
-                          // スクロールして「どこまで処理したか」を見失わない。
-                          try {
-                            sessionStorage.setItem("fsCandidatesReturnPin", r.id);
-                            sessionStorage.setItem(
-                              "fsCandidatesReturnOrder",
-                              order,
-                            );
-                          } catch {
-                            // storage不可(プライベートモード等)は黙って諦める
-                          }
-                        }}
                       >
                         <span aria-hidden="true">🗺</span>
                         地図で見る

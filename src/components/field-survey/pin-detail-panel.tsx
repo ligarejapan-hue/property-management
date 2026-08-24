@@ -84,6 +84,8 @@ export default function PinDetailPanel({
   const [draftMemo, setDraftMemo] = useState<string>("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showConvert, setShowConvert] = useState(false);
+  // 物件化フォームが POST 中か(モーダル側の閉じるボタンと同じく Escape も止める)。
+  const [convertSubmitting, setConvertSubmitting] = useState(false);
   // 写真セクション (子) の送信・削除中フラグ。作業中判定に合流させる。
   const [photoSectionBusy, setPhotoSectionBusy] = useState(false);
 
@@ -292,6 +294,9 @@ export default function PinDetailPanel({
       // 写真削除の確認(ネイティブ<dialog>)が開いている間は photoBusy 経由で
       // hasUnfinishedWork が立つ(下の guard が握る)ため、二重処理にならない。
       if (showConvert) {
+        // ⚠送信中は閉じない(@codex #408 R2 P2)。モーダル自身の閉じるボタンが
+        //   submitting 中 disabled なのと同じ判定を Escape にも適用する。
+        if (convertSubmitting) return;
         setShowConvert(false);
         return;
       }
@@ -304,7 +309,7 @@ export default function PinDetailPanel({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, showConvert, confirmingDelete, hasUnfinishedWork]);
+  }, [onClose, showConvert, convertSubmitting, confirmingDelete, hasUnfinishedWork]);
 
   return (
     <aside
@@ -468,6 +473,7 @@ export default function PinDetailPanel({
             key={pinId}
             pinId={pinId}
             onClose={() => setShowConvert(false)}
+            onSubmittingChange={setConvertSubmitting}
             onConverted={handleConverted}
           />
         )}

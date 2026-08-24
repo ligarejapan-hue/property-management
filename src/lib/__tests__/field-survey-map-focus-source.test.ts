@@ -22,8 +22,9 @@ const QUEUE = readSrc("src/components/field-survey/candidate-queue.tsx");
 describe("field-survey: この場所を地図で見る (?focusPin)", () => {
   it("完成待ち一覧に地図リンク (focusPin=id) を出す", () => {
     expect(QUEUE).toMatch(/data-testid="candidate-map-link"/);
+    // 第2弾 C4 (@codex #408 R2): 現在の並び順 (&retOrder=) も URL で運ぶ。
     expect(QUEUE).toMatch(
-      /href=\{`\/field-survey\/map\?focusPin=\$\{r\.id\}`\}/,
+      /href=\{`\/field-survey\/map\?focusPin=\$\{r\.id\}&retOrder=\$\{order\}`\}/,
     );
   });
 

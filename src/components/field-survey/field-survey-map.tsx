@@ -123,6 +123,8 @@ interface FieldSurveyMapProps {
   // 完成待ち一覧などからの「この場所を地図で見る」導線 (?focusPin=<uuid>)。
   // 指定ピンへ地図を寄せて詳細を開く。座標は URL でなく pin 詳細 API から取得。
   focusPinId?: string | null;
+  /** 「一覧へ戻る」に載せ返す並び順(?retOrder=)。一覧が同じ並びで再開できる。 */
+  returnOrder?: "newest" | "oldest";
 }
 
 interface PropertyRow {
@@ -157,6 +159,7 @@ export default function FieldSurveyMap({
   mapId,
   currentUserId,
   focusPinId = null,
+  returnOrder = "newest",
 }: FieldSurveyMapProps) {
   // タッチ端末では地図ジェスチャを cooperative(1本指=ページスクロール / 2本指=地図移動)に
   // して、地図が画面を占有し周囲の UI に触れなくなる問題を避ける。PC は greedy 継続。共有フック。
@@ -1282,7 +1285,9 @@ export default function FieldSurveyMap({
           {/* 第2弾 C4: 一覧から来たときだけ戻り道を出す(従来は片道だった)。 */}
           {focusPinId && (
             <a
-              href="/field-survey/candidates"
+              href={`/field-survey/candidates?back=${encodeURIComponent(focusPinId)}${
+                returnOrder === "oldest" ? "&order=oldest" : ""
+              }`}
               data-testid="map-back-to-candidates"
               className="pointer-events-auto self-start rounded-full border border-gray-300 bg-white/95 px-3 py-1.5 text-xs font-semibold text-gray-800 shadow hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900/95 dark:text-gray-100 dark:hover:bg-gray-800"
             >
@@ -1294,8 +1299,10 @@ export default function FieldSurveyMap({
               hasPhoto={cameraFirstHasPhoto}
               onCancel={resetCameraFirst}
               onRetake={() => {
-                resetCameraFirst();
-                // 同一ジェスチャ内で常時マウントの input を直接開く。
+                // ⚠reset しない(@codex #408 R2 P2)。OS のカメラ/選択を
+                //   キャンセルすると onChange は発火しないため、先に捨てると
+                //   元の写真が取り戻せない。差し替えは onChange(非null)が
+                //   届いた時だけ=キャンセルなら元の写真とバナーが残る。
                 retakeInputRef.current?.click();
               }}
             />

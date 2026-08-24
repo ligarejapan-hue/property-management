@@ -36,6 +36,9 @@ export default function FieldSurveyMapClient({
   // 詳細を開く (座標は map が pin 詳細 API から取得。URL には id のみ)。
   const rawFocusPin = searchParams?.get("focusPin") ?? null;
   const focusPinId = isValidUuid(rawFocusPin) ? rawFocusPin : null;
+  // 一覧から来たときの並び順(戻りリンクに載せ返す)。不正値は newest に倒す。
+  const returnOrder =
+    searchParams?.get("retOrder") === "oldest" ? ("oldest" as const) : ("newest" as const);
 
   if (!hasKey) return <MissingKeyNotice />;
   // Codex P1: APIキーが入っていても billing 未確認なら Maps JS API loader を
@@ -62,6 +65,7 @@ export default function FieldSurveyMapClient({
       mapId={mapId as string}
       currentUserId={currentUserId}
       focusPinId={focusPinId}
+      returnOrder={returnOrder}
     />
   );
 }

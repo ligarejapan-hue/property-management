@@ -17,6 +17,9 @@ const MAP = read("src/components/field-survey/field-survey-map.tsx");
 const TRIP = read("src/components/field-survey/trip-controls.tsx");
 const DETAIL = read("src/components/field-survey/pin-detail-panel.tsx");
 const QUEUE = read("src/components/field-survey/candidate-queue.tsx");
+const CLIENT = read("src/components/field-survey/field-survey-map-client.tsx");
+const PAGE = read("src/app/(dashboard)/field-survey/candidates/page.tsx");
+const CONVERT = read("src/components/field-survey/convert-pin-to-property-modal.tsx");
 const BANNER = read("src/components/field-survey/camera-first-banner.tsx");
 const CAMERA_BTN = read("src/components/field-survey/camera-first-button.tsx");
 
@@ -104,30 +107,42 @@ describe("C3: 巡回終了を地図上に+パネル最上部", () => {
 });
 
 describe("C4: 一覧⇔地図の往復", () => {
-  it("focusPin で来たときだけ「一覧へ戻る」を出す", () => {
+  it("focusPin で来たときだけ「一覧へ戻る」を出す(並び順も URL で載せ返す)", () => {
     const at = MAP.indexOf('data-testid="map-back-to-candidates"');
     expect(at).toBeGreaterThan(-1);
-    const before = MAP.slice(at - 300, at);
+    const before = MAP.slice(at - 450, at);
     expect(before).toContain("focusPinId &&");
-    expect(MAP.slice(at - 300, at + 100)).toContain('href="/field-survey/candidates"');
+    // @codex #408 R2 P2: 戻り先(?back=)と並び順(?order=)は URL で運ぶ。
+    expect(before).toContain(
+      "href={`/field-survey/candidates?back=${encodeURIComponent(focusPinId)}${",
+    );
+    expect(before).toContain('returnOrder === "oldest" ? "&order=oldest" : ""');
+    // map-client が ?retOrder= を読んで returnOrder prop として渡す結線。
+    expect(CLIENT).toContain('searchParams?.get("retOrder")');
+    expect(CLIENT).toContain("returnOrder={returnOrder}");
   });
 
-  it("一覧: 出発した行を覚え、戻ったらその行へスクロール(1回だけ)", () => {
-    expect(QUEUE).toContain('sessionStorage.setItem("fsCandidatesReturnPin", r.id)');
-    // @codex #408 R1 P2: 並び順も一緒に保存し、初期 state で復元する
-    // (古い順で開いた行が新しい順の初回応答で空振り消費されない)。
-    expect(QUEUE).toContain('"fsCandidatesReturnOrder"');
-    const init = QUEUE.indexOf('useState<"newest" | "oldest">(() => {');
-    expect(init).toBeGreaterThan(-1);
-    expect(QUEUE.slice(init, init + 400)).toContain(
-      'sessionStorage.getItem("fsCandidatesReturnOrder")',
+  it("一覧: 並び順は URL→server page→props で復元し、?back= の行へスクロール(1回だけ)", () => {
+    // @codex #408 R2 P2: storage の lazy 初期化は SSR とクライアントで初期表示が
+    // 食い違い hydration 不一致になった → sessionStorage 全廃。並び順は
+    // server page が URL を読んで props で渡す=サーバー描画と必ず一致する。
+    expect(QUEUE).not.toContain("sessionStorage");
+    expect(QUEUE).toContain(
+      "href={`/field-survey/map?focusPin=${r.id}&retOrder=${order}`}",
     );
+    expect(QUEUE).toContain('useState<"newest" | "oldest">(initialOrder)');
+    expect(PAGE).toContain("searchParams: Promise<{ order?: string; back?: string }>");
+    expect(PAGE).toContain("initialOrder={initialOrder}");
+    expect(PAGE).toContain("backPinId={backPinId}");
     expect(QUEUE).toContain("data-candidate-row={r.id}");
-    const eff = QUEUE.indexOf('sessionStorage.getItem("fsCandidatesReturnPin")');
+    // 復元は1回だけ・行が居なければ何もしない(却下/物件化で消えた行)。
+    const eff = QUEUE.indexOf(
+      "if (restoredRef.current || rows === null || !backPinId) return;",
+    );
     expect(eff).toBeGreaterThan(-1);
-    const effBlock = QUEUE.slice(eff - 600, eff + 600);
-    expect(effBlock).toContain("restoredRef.current");
-    expect(effBlock).toContain('scrollIntoView({ block: "center" })');
+    expect(QUEUE.slice(eff, eff + 400)).toContain(
+      'scrollIntoView({ block: "center" })',
+    );
   });
 });
 
@@ -142,6 +157,14 @@ describe("シート・モーダルの操作性", () => {
     const escBody = DETAIL.slice(esc, esc + 900);
     // 提出前レビューP1: スタック的に閉じる+作業中はパネルを閉じない。
     expect(escBody).toContain("setShowConvert(false)");
+    // @codex #408 R2 P2: 物件化 POST 中は Escape でも閉じない。子モーダルが
+    // submitting を onSubmittingChange で親へ通知し、showConvert 分岐の
+    // 先頭でガード(モーダル自身の閉じるボタン disabled と同じ判定)。
+    const cg = escBody.indexOf("if (convertSubmitting) return;");
+    expect(cg).toBeGreaterThan(-1);
+    expect(cg).toBeLessThan(escBody.indexOf("setShowConvert(false)"));
+    expect(DETAIL).toContain("onSubmittingChange={setConvertSubmitting}");
+    expect(CONVERT).toContain("onSubmittingChange?.(submitting)");
     expect(escBody).toContain("setConfirmingDelete(false)");
     const guard = escBody.indexOf("if (hasUnfinishedWork) return;");
     const closeAt = escBody.indexOf("onClose()");
@@ -174,13 +197,13 @@ describe("撮り直す=カメラを実際に開く", () => {
     expect(input).toContain('type="file"');
     expect(input).toContain('capture="environment"');
     expect(input).toContain("handleCameraPhotoCaptured(file)");
-    // バナーの撮り直すが reset→この input を click する順で結線。
+    // @codex #408 R2 P2: 撮り直しは reset **しない**で input を開くだけ。
+    // OS カメラをキャンセルすると onChange は発火しない=先に捨てると元の
+    // 写真を失う。差し替えは onChange(非null)が届いた時だけ行う。
     const r = MAP.indexOf("onRetake={() => {");
-    const w = MAP.slice(r, r + 260);
-    expect(w.indexOf("resetCameraFirst()")).toBeGreaterThan(-1);
-    expect(w.indexOf("retakeInputRef.current?.click()")).toBeGreaterThan(
-      w.indexOf("resetCameraFirst()"),
-    );
+    const w = MAP.slice(r, r + 420);
+    expect(w).toContain("retakeInputRef.current?.click()");
+    expect(w).not.toContain("resetCameraFirst()");
     // 旧・登録機構の残骸なし。
     expect(MAP).not.toContain("registerCameraTrigger");
     expect(CAMERA_BTN).not.toContain("registerTrigger");
