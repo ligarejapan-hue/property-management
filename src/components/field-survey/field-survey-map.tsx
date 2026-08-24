@@ -539,11 +539,18 @@ export default function FieldSurveyMap({
   // (busy 中は無効表示)に使う。ref は再描画を起こさないため両方持つ。
   // 更新は handleDetailPanelBusyChange の1か所だけ=食い違わない。
   const [detailPanelBusy, setDetailPanelBusy] = useState(false);
+  // 物件の吹き出しを閉じる関数(MapDataLayer が登録)。registerEndRequest と
+  // 同じ ref 登録パターン。selected は MapDataLayer の内部 state のため。
+  const propertyPopupCloseRef = useRef<(() => void) | null>(null);
   // ⚠開く側も busy ゲートを通す(@codex #408 R1 P1)。作業中に**別のピン**を
   //   タップすると pinId 切替のリセットで下書きが消えるため、直行 marker 経路
   //   も背景タップ・作成タップと同じ判定に揃える。
   const openPinDetailSafe = useCallback((id: string) => {
     if (detailPanelBusyRef.current) return;
+    // 物件の吹き出しが開いたまま別ピンの詳細シートと同居しないよう、開く前に
+    // 閉じる(@codex #408 R6 P2)。busy で開かない場合は吹き出しも触らない=
+    // タップは完全に無効(通常 marker・focusPin 強調 marker の両経路が通る)。
+    propertyPopupCloseRef.current?.();
     setDetailPinId(id);
   }, []);
   const closeDetailOnBackground = useCallback(() => {
@@ -553,6 +560,12 @@ export default function FieldSurveyMap({
     if (detailPanelBusyRef.current) return;
     setDetailPinId(null);
   }, []);
+  const registerPropertyPopupClose = useCallback(
+    (fn: (() => void) | null) => {
+      propertyPopupCloseRef.current = fn;
+    },
+    [],
+  );
   // 「この場所を地図で見る」(?focusPin): 指定ピンの場所へ地図を寄せ、そのピンを
   // 強調マーカーで必ず表示する。map instance が揃った後に一度だけ、pin 詳細 API
   // から座標を取得して panTo + 強調マーカーを立てる。
@@ -1147,6 +1160,7 @@ export default function FieldSurveyMap({
             onTruncationChange={handleTruncationChange}
             onUserDrag={cancelAutoCenterOnStart}
             onBackgroundClick={closeDetailOnBackground}
+            registerPropertyPopupClose={registerPropertyPopupClose}
           />
           <MapInstanceCapture onMap={setMapInstance} />
           {activeSession && <RoutePolyline points={polylinePoints} />}
@@ -1937,6 +1951,7 @@ function MapDataLayer({
   onTruncationChange,
   onUserDrag,
   onBackgroundClick,
+  registerPropertyPopupClose,
 }: {
   layers: Record<Layer, boolean>;
   /**
@@ -1966,6 +1981,8 @@ function MapDataLayer({
   onUserDrag: () => void;
   /** 地図の何もない場所をタップした(第2弾: 吹き出し/詳細シートを閉じる)。 */
   onBackgroundClick: () => void;
+  /** 物件吹き出しの閉じ関数を親へ登録(詳細を開く単一の開き口が使う。R6)。 */
+  registerPropertyPopupClose: (fn: (() => void) | null) => void;
   refetchNonce: number;
   /** ピンの「自分/他人」縁色の判定用 (server-side で確定済みのログイン userId)。 */
   currentUserId: string;
@@ -1991,10 +2008,17 @@ function MapDataLayer({
   } | null>(null);
 
   // 第2弾 C2: 吹き出しは物件のみ(ピンはタップで直接詳細)。
+  // 吹き出しの閉じ手を親(openPinDetailSafe)へ登録(@codex #408 R6 P2)。
+  // setSelected は useState の setter=恒久に安定。宣言順の都合で effect は
+  // selected 宣言の後に置く(下の useEffect を参照)。
   const [selected, setSelected] = useState<{
     kind: "property";
     row: PropertyRow;
   } | null>(null);
+  useEffect(() => {
+    registerPropertyPopupClose(() => setSelected(null));
+    return () => registerPropertyPopupClose(null);
+  }, [registerPropertyPopupClose]);
   const abortRef = useRef<AbortController | null>(null);
   // 背景タップ判定用: captureMapClick の最新値(リスナーは長寿命のため ref 経由)。
   const captureRef = useRef(captureMapClick);

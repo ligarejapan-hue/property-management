@@ -80,11 +80,19 @@ describe("C2: タップで直接詳細+背景タップで閉じる", () => {
     expect(MAP).toContain("onOpenPinDetail={openPinDetailSafe}");
     expect(MAP).toContain("openPinDetailSafe(focusPinId)");
     const so = MAP.indexOf("const openPinDetailSafe");
-    const soBody = MAP.slice(so, so + 300);
-    expect(soBody.indexOf("if (detailPanelBusyRef.current) return;")).toBeGreaterThan(-1);
-    expect(soBody.indexOf("if (detailPanelBusyRef.current) return;")).toBeLessThan(
-      soBody.indexOf("setDetailPinId(id)"),
-    );
+    const soBody = MAP.slice(so, so + 700);
+    const soGuard = soBody.indexOf("if (detailPanelBusyRef.current) return;");
+    const soPopup = soBody.indexOf("propertyPopupCloseRef.current?.();");
+    const soOpen = soBody.indexOf("setDetailPinId(id)");
+    // @codex #408 R6 P2: busy ガード→物件吹き出しを閉じる→開く、の順。
+    // busy で開かない場合は吹き出しも触らない=タップ完全無効。単一の開き口に
+    // 集約したので通常 marker・focusPin 強調 marker の両経路が同時に直る。
+    expect(soGuard).toBeGreaterThan(-1);
+    expect(soPopup).toBeGreaterThan(soGuard);
+    expect(soOpen).toBeGreaterThan(soPopup);
+    // 閉じ手の登録(MapDataLayer→親)と JSX 結線。
+    expect(MAP).toContain("registerPropertyPopupClose(() => setSelected(null))");
+    expect(MAP).toContain("registerPropertyPopupClose={registerPropertyPopupClose}");
     expect(MAP).not.toContain("onOpenPinDetail={setDetailPinId}");
     const cb = MAP.indexOf("const closeDetailOnBackground");
     const cbBody = MAP.slice(cb, cb + 500);
