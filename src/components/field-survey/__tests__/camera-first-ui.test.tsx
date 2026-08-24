@@ -137,12 +137,16 @@ describe("CameraFirstBanner", () => {
     expect(html).not.toMatch(/GPS|geolocation/i);
   });
 
-  it("「撮り直す」ボタンを持つ（写真を捨てる操作だと分かる言葉）", () => {
+  it("「やめる」+「撮り直す(カメラを開く)」の2ボタン(第2弾: 撮り直すは実際にカメラを開く)", () => {
     const html = renderToStaticMarkup(
-      createElement(CameraFirstBanner, { onCancel: noop }),
+      <CameraFirstBanner onCancel={() => {}} onRetake={() => {}} />,
     );
-    expect(html).toContain('data-testid="camera-first-cancel"');
-    expect(html).toContain("撮り直す");
+    expect(html).toContain("やめる");
+    expect(html).toContain("撮り直す(カメラを開く)");
+    expect(html).toContain('data-testid="camera-first-retake"');
+    // onRetake を渡さない(旧呼び出し)場合は「やめる」だけ=誤動作しない。
+    const legacy = renderToStaticMarkup(<CameraFirstBanner onCancel={() => {}} />);
+    expect(legacy).not.toContain("撮り直す");
   });
 
   // 写真なし導線 (発注者要望 2026-08-17): 同じ「地図タップ待ち」を写真なしで使う。

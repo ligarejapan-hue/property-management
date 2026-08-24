@@ -100,9 +100,16 @@ describe("2. 技術用語「session」の一掃 (利用者向け文言)", () => 
     }
   });
 
-  it("InfoWindow の項目名も session でなく「巡回」", () => {
-    expect(MAP_SRC).not.toMatch(/<dt>session<\/dt>/);
-    expect(MAP_SRC).toMatch(/<dt>巡回<\/dt>/);
+  it("ピン詳細の項目名も session でなく「巡回」(第2弾C2で吹き出し→詳細パネルへ)", () => {
+    const detailSrc = fs.readFileSync(
+      path.join(
+        process.cwd(),
+        "src/components/field-survey/pin-detail-panel.tsx",
+      ),
+      "utf8",
+    );
+    expect(detailSrc).toContain(">巡回</dt>");
+    expect(detailSrc).toMatch(/"あり" : "巡回外の撮影"/);
   });
 
   it("置換後の平易文言が存在する", () => {

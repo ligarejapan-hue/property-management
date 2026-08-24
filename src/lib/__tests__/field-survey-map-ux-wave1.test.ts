@@ -123,7 +123,9 @@ describe("A5: バナーは上部スタック(現在地ボタンを覆わない)"
   it("地図側の上部スタックにバナー・読み込み中・断り・踏破状態が同居する", () => {
     const at = MAP.indexOf("画面上部中央の通知スタック");
     expect(at).toBeGreaterThan(-1);
-    const stack = MAP.slice(at, at + 2600);
+    // 窓は 4400: 戻りチップが busy 切替の二枝(@codex #408 R3 P1)に育ち
+    // スタック内の後続要素が押し出されたため広げた(同居の検証は変わらず)。
+    const stack = MAP.slice(at, at + 4400);
     expect(stack).toContain("<CameraFirstBanner");
     expect(stack).toContain("読み込み中…");
     expect(stack).toContain("map-truncation-notice");
@@ -131,12 +133,21 @@ describe("A5: バナーは上部スタック(現在地ボタンを覆わない)"
     expect(stack).toContain("top-3");
   });
 
-  it("バナーはスタック容器(flex-col)の直下にある(下端の帯へ戻す変異はここで落ちる)", () => {
-    const at = MAP.indexOf("<CameraFirstBanner");
-    expect(at).toBeGreaterThan(-1);
-    const before = MAP.slice(Math.max(0, at - 300), at);
-    expect(before).toContain("flex-col");
-    expect(before).not.toContain("bottom-14");
+  it("バナーはスタック容器(flex-col)の中にある(下端の帯へ戻す変異はここで落ちる)", () => {
+    // ⚠経緯コメントに旧クラス名(bottom-14)が載るため、判定は className で行う。
+    const container = MAP.match(
+      /className="pointer-events-none absolute left-1\/2 top-3[^"]*flex-col[^"]*"/,
+    );
+    expect(container).not.toBeNull();
+    const at = MAP.indexOf(container![0]);
+    const bannerAt = MAP.indexOf("<CameraFirstBanner");
+    expect(bannerAt).toBeGreaterThan(at);
+    // バナーが容器の中(直後2,000文字以内)にあり、その区間の className に
+    // bottom-14 が無い。
+    const between = MAP.slice(at, bannerAt);
+    expect(bannerAt - at).toBeLessThan(2000);
+    const classesBetween = between.match(/className="[^"]*"/g) ?? [];
+    for (const c of classesBetween) expect(c).not.toContain("bottom-14");
   });
 });
 
@@ -194,11 +205,45 @@ describe("B2: 自動寄せの予約に寿命とユーザー優先", () => {
 });
 
 describe("B3: 物件リンクは別タブ(地図の状態を失わない)", () => {
-  it("吹き出しの物件リンク2箇所に target=_blank + rel", () => {
+  it("吹き出しの物件リンクに target=_blank + rel(第2弾C2でピン吹き出し廃止=残り1箇所)", () => {
     const links = MAP.match(
-      /href=\{`\/properties\/\$\{row\.(?:id|propertyId)\}`\}\s*\n\s*target="_blank"\s*\n\s*rel="noopener noreferrer"/g,
+      /href=\{`\/properties\/\$\{row\.id\}`\}\s*\n\s*target="_blank"\s*\n\s*rel="noopener noreferrer"/g,
     ) ?? [];
-    expect(links.length).toBe(2);
+    expect(links.length).toBe(1);
+    // ピン側のリンク(propertyId)は吹き出しごと廃止(詳細パネルの物件行が担う)。
+    expect(MAP).not.toContain("row.propertyId");
+  });
+
+  it("詳細パネル・履歴地図の物件リンクも別タブ(@codex #408 R5 P2: 全箇所を縛る)", () => {
+    // 地図系の画面から素の <a> で /properties/ へ飛ぶと地図の表示位置と作業
+    // 文脈を失う。対象3ファイルの物件リンク**全部**が別タブであることを、
+    // 「href の総数 = target/rel 付きの数」で固定(素のリンクを足すと落ちる)。
+    // 判定窓は各 <a> の開きタグ内(href から最初の ">" まで)=隣のリンクの
+    // 属性を誤って数えない。
+    const DETAIL = read("src/components/field-survey/pin-detail-panel.tsx");
+    const HISTORY = read("src/components/field-survey/field-survey-history-map.tsx");
+    const HREF = "href={`/properties/";
+    for (const [name, src] of [
+      ["map", MAP],
+      ["detail", DETAIL],
+      ["history", HISTORY],
+    ] as const) {
+      let all = 0;
+      let blank = 0;
+      for (let at = src.indexOf(HREF); at !== -1; at = src.indexOf(HREF, at + 1)) {
+        all += 1;
+        const close = src.indexOf(">", at);
+        const win = src.slice(at, close === -1 ? at + 260 : close);
+        if (
+          win.includes('target="_blank"') &&
+          win.includes('rel="noopener noreferrer"')
+        ) {
+          blank += 1;
+        }
+      }
+      expect(all, name).toBeGreaterThan(0);
+      expect(blank, name).toBe(all);
+    }
   });
 });
 

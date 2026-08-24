@@ -129,6 +129,13 @@ interface TripControlsProps {
    */
   registerStartRequest?: (fn: (() => void) | null) => void;
   /**
+   * 地図上の「巡回終了」ボタン用 (第2弾 C3・registerStartRequest と対称)。
+   * 終了は1日1回必ず行う操作なのに、パネルを開いて最下部まで
+   * スクロールしないと届かなかった。確認モーダルは portal 済みなので
+   * パネルが閉じていても必ず見える。
+   */
+  registerEndRequest?: (fn: (() => void) | null) => void;
+  /**
    * #317: 巡回状態の再取得要求を受けるためのハンドラ登録 (registerStartRequest
    * と同型)。recorder の開始フェンス touch が 409/404 で「巡回は既に終了して
    * いる」と検知した時に親経由で呼ばれ、巡回中表示を真の状態へ整合させる。
@@ -180,6 +187,7 @@ export default function TripControls({
   onActiveSessionChange,
   onBeforeSessionEnd,
   registerStartRequest,
+  registerEndRequest,
   registerSessionRefresh,
   onDiscardUnsentLocations,
   onAbortPendingFlush,
@@ -242,6 +250,16 @@ export default function TripControls({
       registerStartRequest?.(null);
     };
   }, [registerStartRequest, requestStart]);
+  const requestEnd = useCallback(() => {
+    // active のときだけ確認モーダルへ(loading/ending 中の連打は無視)。
+    setPhase((p) => (p === "active" ? "confirmEnd" : p));
+  }, []);
+  useEffect(() => {
+    registerEndRequest?.(requestEnd);
+    return () => {
+      registerEndRequest?.(null);
+    };
+  }, [registerEndRequest, requestEnd]);
 
   const isAbortError = (err: unknown): boolean =>
     typeof err === "object" &&

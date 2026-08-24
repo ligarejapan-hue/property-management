@@ -16,6 +16,7 @@ import { useScreenProtection } from "@/components/screen-protection/screen-prote
 interface Props {
   pinId: string;
   onClose: () => void;
+  onSubmittingChange?: (submitting: boolean) => void;
   onConverted: (propertyId: string) => void;
 }
 
@@ -24,7 +25,7 @@ interface Props {
  * - 位置(GPS)は入力せず、サーバーがピンから継承する。
  * - 種別/住所(+補完)/地番/家屋番号を収集し、所在検索に必要な項目を満たす。
  */
-export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted }: Props) {
+export default function ConvertPinToPropertyModal({ pinId, onClose, onSubmittingChange, onConverted }: Props) {
   const [propertyType, setPropertyType] = useState("");
   const [postalCode, setPostalCode] = useState("");
   const [address, setAddress] = useState("");
@@ -35,6 +36,14 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   // 所在検索より確実に使える。API/validator は元々受け付けており入力欄のみ追加。
   const [realEstateNumber, setRealEstateNumber] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // 親(詳細パネル)の Escape 制御用に送信中を通知する(@codex #408 R2 P2)。
+  // photos セクションの onBusyChange と同じ event 駆動パターン。
+  useEffect(() => {
+    onSubmittingChange?.(submitting);
+    return () => {
+      onSubmittingChange?.(false);
+    };
+  }, [submitting, onSubmittingChange]);
   const [error, setError] = useState<string | null>(null);
   // ピンの座標からの住所自動入力（住居表示・町丁目まで）。
   //  - 座標は client に降ろさない（server がピンから読んで逆ジオコーディングする）
@@ -243,8 +252,8 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onConverted 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-[90vw] sm:max-w-md max-h-[90vh] overflow-y-auto rounded-xl bg-white dark:bg-gray-900 shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-4 sm:items-center sm:pt-0 bg-black/40 p-4">
+      <div className="w-full max-w-[90vw] sm:max-w-md max-h-[85dvh] overflow-y-auto overscroll-contain rounded-xl bg-white dark:bg-gray-900 shadow-xl">
         <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 px-6 py-4">
           <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100">この場所を物件にする</h2>
           <button

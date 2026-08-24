@@ -308,14 +308,12 @@ describe("field-survey-map.tsx — PII / API 境界", () => {
     expect(MAP_SRC).toMatch(/debounce\(/);
   });
 
-  it("Pin InfoWindow に memo 本文を表示しない (Codex P2)", () => {
-    // PinInfo 関数内で row.memo を直接 render しない
-    const pinInfo = MAP_SRC.match(/function PinInfo[\s\S]*?^\}/m);
-    expect(pinInfo).not.toBeNull();
-    expect(pinInfo?.[0]).not.toMatch(/row\.memo/);
-    expect(pinInfo?.[0]).not.toMatch(/\{[^}]*memo[^}]*\}/);
-    // hasMemo の boolean のみで「あり」「—」を切り替える
-    expect(pinInfo?.[0]).toMatch(/hasMemo/);
+  it("ピンの吹き出しは廃止済みで、memo を地図側で render しない (Codex P2→第2弾C2)", () => {
+    // C2: ピンはタップで直接詳細(吹き出し無し)。地図ファイルに memo の
+    // render が存在しないことを直接固定する(PII 方針は据え置き)。
+    expect(MAP_SRC).not.toMatch(/function PinInfo/);
+    expect(MAP_SRC).not.toMatch(/row\.memo/);
+    // hasMemo(boolean)は型・一覧フィルタに正当に残る(本文 memo とは別物)。
   });
 
   it("PinRow 型 / state に memo 本文を持ち回らない", () => {
@@ -449,7 +447,12 @@ describe("レイヤー OFF で吹き出しを浮遊させない（総点検P3）
     );
   });
 
-  it("ピンの吹き出しは layers.pins が ON のときだけ描く", () => {
+  it("ピンの吹き出しは存在しない(第2弾C2: タップで直接詳細)", () => {
+    expect(MAP_SRC).not.toContain('selected.kind === "pin"');
+    expect(MAP_SRC).toContain("onOpenPinDetail(pin.id)");
+  });
+
+  it.skip("(旧仕様)ピンの吹き出しは layers.pins が ON のときだけ描く", () => {
     expect(MAP_SRC).toMatch(
       /selected &&\s*\n\s*!captureMapClick &&\s*\n\s*layers\.pins &&\s*\n\s*selected\.kind === "pin"/,
     );

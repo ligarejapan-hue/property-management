@@ -112,8 +112,14 @@ export function CandidatePlaceLinks({
 
 export default function CandidateQueue({
   currentUserId,
+  initialOrder = "newest",
+  backPinId = null,
 }: {
   currentUserId: string | null;
+  /** 地図から戻ったときの並び順(?order=)。server page が渡す=SSRと一致。 */
+  initialOrder?: "newest" | "oldest";
+  /** 地図から戻ったときのスクロール先の行(?back=)。 */
+  backPinId?: string | null;
 }) {
   const router = useRouter();
   const {
@@ -194,7 +200,11 @@ export default function CandidateQueue({
   const [ageBase, setAgeBase] = useState<Date | null>(null);
   // 並び順。上限超過時に古い候補へ到達できるよう「古い順」を選べる
   // (Codex P2: 「古いものから処理して」と案内しつつ古い分が開けない矛盾の解消)。
-  const [order, setOrder] = useState<"newest" | "oldest">("newest");
+  // ⚠戻り先の復元は**出発時の並び順ごと**行う(@codex #408 R1→R2 P2)。
+  //   並び順は URL(?order=)を server page が読んで props で渡す=サーバー描画と
+  //   クライアントで同じ値になり hydration が食い違わない(storage 初期化は
+  //   SSR=newest/クライアント=oldest の不一致を起こした)。
+  const [order, setOrder] = useState<"newest" | "oldest">(initialOrder);
   // 現地写真は「タップした時だけ」読み込む (モバイルの通信量に配慮)。本番は
   // サムネイル生成が無く cover が原寸 (最大 8MB) のため、一覧の全行に常時
   // <img> を置くとスクロールで原寸を大量に落としてしまう。表示中の行だけ
@@ -243,6 +253,21 @@ export default function CandidateQueue({
   // 現在の並び順のリクエストでなければ破棄する (Codex P2: 切替直後に
   // 古い応答が rows/truncated を上書きし、表示と選択が食い違う)。
   const loadGenerationRef = useRef(0);
+  // 第2弾 C4: 地図から戻ったら、出発した行(?back=)まで自動スクロール(1回だけ)。
+  // 並び順は props で復元済み=最初の応答に行が居るはず。居なければその行は
+  // 本当に消えた(却下/物件化)ので何もしない。
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || rows === null || !backPinId) return;
+    restoredRef.current = true;
+    // props は server page で UUID 検証済みだが、部品単体でも安全なように
+    // セレクタへは必ず escape してから埋め込む(@codex #408 R3 P2)。
+    const el = document.querySelector(
+      `[data-candidate-row="${CSS.escape(backPinId)}"]`,
+    );
+    if (el) el.scrollIntoView({ block: "center" });
+  }, [rows, backPinId]);
+
   const load = useCallback(async () => {
     const generation = ++loadGenerationRef.current;
     // 取得前に一覧をクリアして「読み込み中」へ切り替える (Codex P2: 並び順
@@ -458,7 +483,7 @@ export default function CandidateQueue({
                 currentUserId !== null &&
                 r.staffUserId === currentUserId);
             return (
-              <li key={r.id} className="px-4 py-3">
+              <li key={r.id} className="px-4 py-3" data-candidate-row={r.id}>
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2 text-sm text-gray-800 dark:text-gray-200">
@@ -499,7 +524,10 @@ export default function CandidateQueue({
                           載せず (id のみ)、地図側が pin 詳細 API から取得する。 */}
                       <Link
                         data-testid="candidate-map-link"
-                        href={`/field-survey/map?focusPin=${r.id}`}
+                        // 第2弾 C4: 現在の並び順を URL で地図へ運ぶ(戻りリンクが
+                        // ?order= に載せ返す)。storage 方式は hydration 不一致の
+                        // 原因になった(@codex #408 R2 P2)。
+                        href={`/field-survey/map?focusPin=${r.id}&retOrder=${order}`}
                         className={ROW_CHIP_CLASS}
                       >
                         <span aria-hidden="true">🗺</span>

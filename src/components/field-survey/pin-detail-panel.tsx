@@ -84,15 +84,32 @@ export default function PinDetailPanel({
   const [draftMemo, setDraftMemo] = useState<string>("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showConvert, setShowConvert] = useState(false);
+  // 物件化フォームが POST 中か(モーダル側の閉じるボタンと同じく Escape も止める)。
+  const [convertSubmitting, setConvertSubmitting] = useState(false);
   // 写真セクション (子) の送信・削除中フラグ。作業中判定に合流させる。
   const [photoSectionBusy, setPhotoSectionBusy] = useState(false);
+  // 1発ステータス変更(第2弾 C1)の送信中と失敗印。handleQuickStatus は下だが、
+  // state は hasUnfinishedWork が参照するためここで宣言する。
+  const [quickStatusSaving, setQuickStatusSaving] = useState(false);
+  // 失敗印(@codex #408 R4 P2)。黙って元の表示に戻さない。
+  const [quickStatusError, setQuickStatusError] = useState<string | null>(null);
 
   // 作業中 = 下書きが失われ得る状態 (編集フォーム / 削除確認 / 物件化 modal)
-  // または進行中の通信 (保存 / 削除 / 写真送信・削除)。
+  // または進行中の通信 (保存 / 削除 / 写真送信・削除 / 1発ステータス変更)。
   const hasUnfinishedWork =
     editing ||
     confirmingDelete ||
     showConvert ||
+    photoSectionBusy ||
+    quickStatusSaving ||
+    mutations.updateLoading ||
+    mutations.deleteLoading;
+  // 通信が飛んでいる間は×でも閉じない(@codex #408 R7 P2)。unmount すると
+  // cleanup が PATCH/送信を中断し、サーバー側だけ確定して onUpdated が届かず
+  // 地図が古いまま残り得る。フォームが開いているだけ(editing 等)の×は
+  // 従来どおり有効(それぞれに閉じる導線がある)。
+  const closeBlocked =
+    quickStatusSaving ||
     photoSectionBusy ||
     mutations.updateLoading ||
     mutations.deleteLoading;
@@ -143,6 +160,7 @@ export default function PinDetailPanel({
     setDetail(null);
     setEditing(false);
     setConfirmingDelete(false);
+    setQuickStatusError(null);
     setDraftPinType("candidate");
     setDraftStatus("open");
     setDraftMemo("");
@@ -200,6 +218,55 @@ export default function PinDetailPanel({
     onDeleted?.(targetPinId);
   };
 
+  // 第2弾 C1: 「この家は済んだ」を1タップで(従来=編集→選択→保存の6タップ)。
+  // 保存フローと同じ patch/3段ガードを使う(optimistic しない方針も同じ)。
+  // (quickStatusSaving/Error の宣言は hasUnfinishedWork が参照するため上にある)
+  const handleQuickStatus = async (nextStatus: "open" | "closed") => {
+    if (!detail || quickStatusSaving) return;
+    const saveTargetPinId = pinId;
+    if (detail.id !== saveTargetPinId) return;
+    if (detail.staffUserId !== currentUserId) return;
+    const patch = buildPinPatch(
+      { pinType: detail.pinType, status: detail.status, memo: detail.memo },
+      { pinType: detail.pinType, status: nextStatus, memo: detail.memo },
+    );
+    if (!patch) return;
+    setQuickStatusSaving(true);
+    setQuickStatusError(null);
+    try {
+      const r = await mutations.updatePin(saveTargetPinId, patch);
+      // 遅延応答の失敗印が別ピンへ化けないよう、成否より先に stale を捨てる。
+      if (latestPinIdRef.current !== saveTargetPinId) return;
+      if (!r.ok || !r.data) {
+        // error 無しの失敗=中断(abort)や画面破棄。印は出さない。
+        if (r.error) setQuickStatusError(r.error);
+        return;
+      }
+      if (r.data.id !== latestPinIdRef.current) return;
+      if (r.data.id !== saveTargetPinId) return;
+      setDetail(r.data);
+      // ⚠下書きも再同期(提出前レビューP2)。しないと直後の「編集」が古い
+      //   status を選択済み表示し、保存でこの1発変更が無言で巻き戻る。
+      //   変換は loadDetail と同一(サーバー値の検証込み)。
+      const t = r.data.pinType;
+      const s = r.data.status;
+      setDraftPinType(
+        (FIELD_SURVEY_PIN_TYPES as readonly string[]).includes(t)
+          ? (t as FieldSurveyPinType)
+          : "candidate",
+      );
+      setDraftStatus(
+        (FIELD_SURVEY_PIN_STATUSES as readonly string[]).includes(s)
+          ? (s as FieldSurveyPinStatus)
+          : "open",
+      );
+      setDraftMemo(r.data.memo ?? "");
+      onUpdated?.(r.data);
+    } finally {
+      setQuickStatusSaving(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!detail) return;
     // Codex P2: PATCH 直前に stale / 他人 pin への送信を再確認する。
@@ -239,6 +306,33 @@ export default function PinDetailPanel({
     onUpdated?.(r.data);
   };
 
+  // 第2弾: Escape でも閉じられる(従来は右上の小さな×だけだった)。
+  // ⚠スタック的に閉じる(提出前レビューP1): 手前の物(物件化モーダル→削除確認)を
+  //   先に閉じ、編集中などの作業中はパネルを閉じない(下書きを無確認で失わない)。
+  //   写真削除の確認(ネイティブ<dialog>)は自前の Escape 処理を持つため触らない。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // 写真削除の確認(ネイティブ<dialog>)が開いている間は photoBusy 経由で
+      // hasUnfinishedWork が立つ(下の guard が握る)ため、二重処理にならない。
+      if (showConvert) {
+        // ⚠送信中は閉じない(@codex #408 R2 P2)。モーダル自身の閉じるボタンが
+        //   submitting 中 disabled なのと同じ判定を Escape にも適用する。
+        if (convertSubmitting) return;
+        setShowConvert(false);
+        return;
+      }
+      if (confirmingDelete) {
+        setConfirmingDelete(false);
+        return;
+      }
+      if (hasUnfinishedWork) return; // 編集中・通信中は閉じない
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, showConvert, convertSubmitting, confirmingDelete, hasUnfinishedWork]);
+
   return (
     <aside
       role="complementary"
@@ -247,7 +341,7 @@ export default function PinDetailPanel({
       className={
         "fixed z-40 bg-white dark:bg-gray-900 shadow-xl border border-gray-200 dark:border-gray-700 " +
         // mobile: bottom sheet
-        "inset-x-0 bottom-0 max-h-[70vh] overflow-y-auto rounded-t-lg " +
+        "inset-x-0 bottom-0 max-h-[55vh] overflow-y-auto overscroll-contain rounded-t-lg " +
         // desktop: 右側固定パネル
         "md:inset-y-0 md:right-0 md:bottom-auto md:left-auto md:w-96 md:max-h-none md:rounded-none md:rounded-l-lg"
       }
@@ -257,8 +351,9 @@ export default function PinDetailPanel({
         <button
           type="button"
           onClick={onClose}
+          disabled={closeBlocked}
           aria-label="閉じる"
-          className="text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100"
+          className="-m-2 p-2 text-lg leading-none text-gray-500 hover:text-gray-800 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-400 dark:hover:text-gray-100"
         >
           ×
         </button>
@@ -282,9 +377,19 @@ export default function PinDetailPanel({
             detail={detail!}
             isOwn={isOwn}
             canEdit={canEditOwn}
-            onEdit={() => setEditing(true)}
+            onEdit={() => {
+              // 編集画面は同じ mutations.updateError を自前表示する=二重表示と
+              // 「編集で保存成功→戻ったら古い失敗印」を避けるためここで消す。
+              setQuickStatusError(null);
+              setEditing(true);
+            }}
             canConvert={canConvert}
             onConvert={() => setShowConvert(true)}
+            quickStatusSaving={quickStatusSaving}
+            quickStatusError={quickStatusError}
+            onQuickStatus={(next) => {
+              void handleQuickStatus(next);
+            }}
           />
         )}
 
@@ -397,6 +502,7 @@ export default function PinDetailPanel({
             key={pinId}
             pinId={pinId}
             onClose={() => setShowConvert(false)}
+            onSubmittingChange={setConvertSubmitting}
             onConverted={handleConverted}
           />
         )}
@@ -435,8 +541,16 @@ function PinPhotoSection({
   const ownInstanceId = photoMutations.instanceId;
   const [photos, setPhotos] = useState<PinPhoto[]>([]);
   // 送信・削除の進行中を親へ通知する (unmount 時は必ず false へ戻す)。
+  // 第1弾 A1: 削除は必ず確認をはさむ(現地写真は撮り直しが効かない)。
+  const [confirmDeletePhotoId, setConfirmDeletePhotoId] = useState<string | null>(
+    null,
+  );
   const photoBusy =
-    photoMutations.uploadLoading || photoMutations.deleteLoading;
+    photoMutations.uploadLoading ||
+    photoMutations.deleteLoading ||
+    // 削除確認(ネイティブ<dialog>)が開いている間も「作業中」。親の Escape が
+    // これを見てパネルを閉じない=dialog 側の Escape と二重処理にならない。
+    confirmDeletePhotoId !== null;
   useEffect(() => {
     onBusyChange?.(photoBusy);
   }, [photoBusy, onBusyChange]);
@@ -540,10 +654,6 @@ function PinPhotoSection({
     if (r.ok) await reload();
   };
 
-  // 第1弾 A1: 削除は必ず確認をはさむ(現地写真は撮り直しが効かない)。
-  const [confirmDeletePhotoId, setConfirmDeletePhotoId] = useState<string | null>(
-    null,
-  );
   const handleDelete = async (photoId: string) => {
     const r = await photoMutations.deletePhoto(pinId, photoId);
     if (r.ok) {
@@ -765,6 +875,9 @@ function ReadOnlyView({
   onEdit,
   canConvert,
   onConvert,
+  quickStatusSaving,
+  quickStatusError,
+  onQuickStatus,
 }: {
   detail: PinDetail;
   isOwn: boolean;
@@ -772,6 +885,9 @@ function ReadOnlyView({
   onEdit: () => void;
   canConvert?: boolean;
   onConvert?: () => void;
+  quickStatusSaving: boolean;
+  quickStatusError: string | null;
+  onQuickStatus: (next: "open" | "closed") => void;
 }) {
   return (
     <>
@@ -784,11 +900,16 @@ function ReadOnlyView({
         <dd>{isOwn ? "あなた" : "他スタッフ"}</dd>
         <dt className="text-gray-500 dark:text-gray-400">作成日時</dt>
         <dd>{formatPinCreatedAt(detail.createdAt)}</dd>
+        <dt className="text-gray-500 dark:text-gray-400">巡回</dt>
+        {/* 第2弾 C2: ピンの吹き出し廃止で消えた情報の移設(文言は旧吹き出しと同一)。 */}
+        <dd>{detail.sessionId ? "あり" : "巡回外の撮影"}</dd>
         <dt className="text-gray-500 dark:text-gray-400">物件</dt>
         <dd>
           {detail.propertyId ? (
             <a
               href={`/properties/${detail.propertyId}`}
+              target="_blank"
+              rel="noopener noreferrer"
               className="text-indigo-600 dark:text-indigo-400 hover:underline"
             >
               紐付け済 →
@@ -807,6 +928,41 @@ function ReadOnlyView({
           )}
         </dd>
       </dl>
+      {/* 第2弾 C1: 巡回中いちばん多い操作を1発に(6タップ→3タップ)。 */}
+      {canEdit && (
+        <div className="mt-3">
+          {detail.status === "open" ? (
+            <button
+              type="button"
+              data-testid="pin-quick-close"
+              onClick={() => onQuickStatus("closed")}
+              disabled={quickStatusSaving}
+              className="w-full rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {quickStatusSaving ? "保存中…" : "✔ この場所を対応済みにする"}
+            </button>
+          ) : detail.status === "closed" ? (
+            <button
+              type="button"
+              data-testid="pin-quick-reopen"
+              onClick={() => onQuickStatus("open")}
+              disabled={quickStatusSaving}
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              {quickStatusSaving ? "保存中…" : "未対応に戻す"}
+            </button>
+          ) : null}
+          {quickStatusError && (
+            <p
+              role="status"
+              data-testid="pin-quick-status-error"
+              className="mt-2 rounded border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 text-[11px] text-amber-900 dark:text-amber-300"
+            >
+              {quickStatusError}
+            </p>
+          )}
+        </div>
+      )}
       <div className="mt-3">
         <div className="mb-1 text-[11px] text-gray-500 dark:text-gray-400">メモ</div>
         {/* React text node のみで描画する (raw HTML 描画は使わない)。 */}
