@@ -466,6 +466,8 @@ function HistoryPinInfo({
           {pin.propertyId ? (
             <a
               href={`/properties/${pin.propertyId}`}
+              target="_blank"
+              rel="noopener noreferrer"
               className="text-indigo-600 hover:underline"
             >
               紐付け済 →

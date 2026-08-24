@@ -213,6 +213,38 @@ describe("B3: 物件リンクは別タブ(地図の状態を失わない)", () =
     // ピン側のリンク(propertyId)は吹き出しごと廃止(詳細パネルの物件行が担う)。
     expect(MAP).not.toContain("row.propertyId");
   });
+
+  it("詳細パネル・履歴地図の物件リンクも別タブ(@codex #408 R5 P2: 全箇所を縛る)", () => {
+    // 地図系の画面から素の <a> で /properties/ へ飛ぶと地図の表示位置と作業
+    // 文脈を失う。対象3ファイルの物件リンク**全部**が別タブであることを、
+    // 「href の総数 = target/rel 付きの数」で固定(素のリンクを足すと落ちる)。
+    // 判定窓は各 <a> の開きタグ内(href から最初の ">" まで)=隣のリンクの
+    // 属性を誤って数えない。
+    const DETAIL = read("src/components/field-survey/pin-detail-panel.tsx");
+    const HISTORY = read("src/components/field-survey/field-survey-history-map.tsx");
+    const HREF = "href={`/properties/";
+    for (const [name, src] of [
+      ["map", MAP],
+      ["detail", DETAIL],
+      ["history", HISTORY],
+    ] as const) {
+      let all = 0;
+      let blank = 0;
+      for (let at = src.indexOf(HREF); at !== -1; at = src.indexOf(HREF, at + 1)) {
+        all += 1;
+        const close = src.indexOf(">", at);
+        const win = src.slice(at, close === -1 ? at + 260 : close);
+        if (
+          win.includes('target="_blank"') &&
+          win.includes('rel="noopener noreferrer"')
+        ) {
+          blank += 1;
+        }
+      }
+      expect(all, name).toBeGreaterThan(0);
+      expect(blank, name).toBe(all);
+    }
+  });
 });
 
 describe("読み込み中チップの吊り上げ(A3 付随)", () => {

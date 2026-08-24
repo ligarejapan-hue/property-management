@@ -895,6 +895,8 @@ function ReadOnlyView({
           {detail.propertyId ? (
             <a
               href={`/properties/${detail.propertyId}`}
+              target="_blank"
+              rel="noopener noreferrer"
               className="text-indigo-600 dark:text-indigo-400 hover:underline"
             >
               紐付け済 →
