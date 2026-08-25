@@ -43,7 +43,11 @@ export function buildPasteDraft(text: string): PasteDraft {
     if (!picked.has(key)) picked.set(key, line);
   }
 
-  if (labeled.length === 0) {
+  // 見出しが1つも読み取れなかったときは、その1件だけを警告する。
+  // 「そもそも何も読み取れていない」のに「住所が無い」「地番が無い」まで
+  // 並ぶと利用者が誤解するため（address_missing / lot_number_missing を抑制）。
+  const noLabeledLines = labeled.length === 0;
+  if (noLabeledLines) {
     warnings.push({
       code: "no_labeled_lines",
       message:
@@ -72,13 +76,13 @@ export function buildPasteDraft(text: string): PasteDraft {
     roomNo = room.roomNo;
   }
 
-  if (address === null) {
+  if (address === null && !noLabeledLines) {
     warnings.push({
       code: "address_missing",
       message: "住所を読み取れませんでした。手で入力してください。",
     });
   }
-  if (lotNumber === null) {
+  if (lotNumber === null && !noLabeledLines) {
     warnings.push({
       code: "lot_number_missing",
       message:

@@ -31,7 +31,14 @@ describe("buildPasteDraft — 実サンプルA（HOME4U 空き家相談）", () 
   });
 
   it("値が「-」の項目は拾わない（空欄のまま）", () => {
+    // 「間取り」の行は値が実際に "-" ＝ 空値フィルタを通ってはじめて null になる。
     expect(draft.property.layoutType.value).toBeNull();
+  });
+
+  it("文書に項目そのものが無ければ null（土地面積の行が無い）", () => {
+    // ⚠ home4u-vacant-house.txt に「土地面積」の行は実物どおり存在しない。
+    //   ここは「行が無い→null」を確かめるテストで、
+    //   「値が-→null」を確かめる空値フィルタのテストとは意図が別。
     expect(draft.property.landArea.value).toBeNull();
   });
 
@@ -108,6 +115,13 @@ describe("buildPasteDraft — 読み取れないとき", () => {
     expect(draft.owner).toBeNull();
   });
 
+  it("見出しが1つも無いときは no_labeled_lines のみ（住所/地番の警告は重ねない）", () => {
+    const draft = buildPasteDraft("こんにちは\nよろしくお願いします");
+    expect(draft.warnings.map((w) => w.code)).toEqual(["no_labeled_lines"]);
+    expect(draft.warnings.map((w) => w.code)).not.toContain("address_missing");
+    expect(draft.warnings.map((w) => w.code)).not.toContain("lot_number_missing");
+  });
+
   it("住所が取れなければ警告を出す", () => {
     const draft = buildPasteDraft("■物件種別： 土地");
     expect(draft.warnings.map((w) => w.code)).toContain("address_missing");
@@ -128,5 +142,19 @@ describe("buildPasteDraft — 読み取れないとき", () => {
   it("氏名が無ければ owner は作らない", () => {
     const draft = buildPasteDraft("■物件所在地： 東京都A区B1-2-3\n■電話番号： 09000000000");
     expect(draft.owner).toBeNull();
+  });
+
+  it("同じ見出しが2回出たら先に出た方を採る", () => {
+    const draft = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3\n■お名前： 田中\n■お名前： 佐藤",
+    );
+    expect(draft.owner!.name.value).toBe("田中");
+  });
+
+  it("空値の行はスロットを消費しない（1回目が「-」、2回目が実値なら実値を採る）", () => {
+    const draft = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3\n■間取り： -\n■間取り： 2LDK",
+    );
+    expect(draft.property.layoutType.value).toBe("2LDK");
   });
 });
