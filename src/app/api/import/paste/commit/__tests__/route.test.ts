@@ -97,12 +97,22 @@ vi.mock("@/lib/prisma", () => {
 import { POST } from "../route";
 import { NextRequest } from "next/server";
 
-const req = (body: unknown) =>
-  new NextRequest("http://localhost/api/import/paste/commit", {
+const req = (body: unknown) => {
+  const s = JSON.stringify(body);
+  // ⚠assertImportJsonBodySize(@/lib/import-body-size) は content-length ヘッダを
+  //   要求する(欠落は411)。実ブラウザの fetch は JSON body に自動で付けるが、
+  //   NextRequest を直接組み立てるテストでは自分で付けないと本文の
+  //   パース前ガードを通れない(src/app/api/import/paste/__tests__/route.test.ts
+  //   の jsonReq と同じ理由・Task 8 レビュー Important 対応)。
+  return new NextRequest("http://localhost/api/import/paste/commit", {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    headers: {
+      "content-type": "application/json",
+      "content-length": String(Buffer.byteLength(s)),
+    },
+    body: s,
   });
+};
 
 /** %PDF- マジックバイトを持つ最小限の PDF バイナリ。 */
 function pdfFile(name = "shokai.pdf"): File {
@@ -191,6 +201,24 @@ describe("POST /api/import/paste/commit", () => {
     mockPerms = [{ resource: "property", action: "write", granted: true }];
     const res = await POST(req({ ...baseBody, owner: { name: "山田太郎" } }));
     expect(res.status).toBe(403);
+  });
+
+  it("★linkExistingOwnerIdだけでも owner:write が無ければ403(権限迂回路が無いことの固定)", async () => {
+    mockPerms = [{ resource: "property", action: "write", granted: true }];
+    const res = await POST(req({ ...baseBody, linkExistingOwnerId: "existing-owner-1" }));
+    expect(res.status).toBe(403);
+  });
+
+  it("★linkExistingOwnerId を送ると owner.create は呼ばれず、propertyOwner.create だけが呼ばれる", async () => {
+    const res = await POST(req({ ...baseBody, linkExistingOwnerId: "existing-owner-1" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ownerId).toBe("existing-owner-1");
+    expect(created.owner).toBeUndefined();
+    expect(created.propertyOwner?.[0]).toMatchObject({
+      propertyId: body.propertyId,
+      ownerId: "existing-owner-1",
+    });
   });
 
   it("住所が無ければ400", async () => {

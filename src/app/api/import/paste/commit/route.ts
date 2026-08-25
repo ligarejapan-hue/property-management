@@ -12,7 +12,8 @@ import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { isPdfBuffer } from "@/lib/pdf-extract";
-import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES } from "@/lib/storage";
+import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES, MAX_FILE_SIZE } from "@/lib/storage";
+import { assertImportJsonBodySize } from "@/lib/import-body-size";
 import type { PropertyType, OccupancyStatus } from "@/generated/prisma";
 
 // ---------- POST /api/import/paste/commit ----------
@@ -51,9 +52,6 @@ interface CommitBody {
   linkExistingOwnerId?: string | null;
 }
 
-/** PDF の上限(10MB・貼り付け読み取り /api/import/paste と同じ上限)。 */
-const MAX_PDF_BYTES = 10 * 1024 * 1024;
-
 export async function POST(request: NextRequest) {
   try {
     const session = await getApiSession();
@@ -81,8 +79,15 @@ export async function POST(request: NextRequest) {
 
       const file = form.get("file");
       if (file && typeof file !== "string") {
-        if (file.size > MAX_PDF_BYTES) {
-          throw new ApiError(400, "PDFが大きすぎます(10MBまで)", "BAD_REQUEST");
+        // ⚠案内文言と実際の上限を二重管理しない。実効値は validateFile
+        //   (@/lib/storage) が使う MAX_FILE_SIZE と同じ定数を直接参照する
+        //   (Task 8 レビュー Minor: 10MBと案内しつつ実際は8MBで弾かれていた)。
+        if (file.size > MAX_FILE_SIZE) {
+          throw new ApiError(
+            400,
+            `PDFが大きすぎます(${MAX_FILE_SIZE / 1024 / 1024}MBまで)`,
+            "BAD_REQUEST",
+          );
         }
         const buffer = Buffer.from(await file.arrayBuffer());
         if (!isPdfBuffer(buffer)) {
@@ -92,6 +97,9 @@ export async function POST(request: NextRequest) {
         pdfFileName = file.name || pdfFileName;
       }
     } else {
+      // ⚠request.json() でボディ全体をバッファする前に過大サイズを弾く
+      //   (兄弟ルート /api/import/paste と同じ姿勢。Task 8 レビュー Important)。
+      assertImportJsonBodySize(request);
       body = (await request.json()) as CommitBody;
     }
 
