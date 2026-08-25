@@ -14,12 +14,18 @@ import { judgeDuplicates, type ExistingProperty } from "@/lib/paste-import/find-
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
 import { buildOwnerDedupKey } from "@/lib/owner-dedup";
 
-/** 所有者の重複候補として返す1件。氏名/一致の強さのみ(電話・メール・住所は返さない)。 */
+/** 所有者の重複候補として返す1件。氏名/一致の種類のみ(電話・メール・住所そのものは返さない)。 */
 interface OwnerCandidate {
   id: string;
   name: string;
-  /** strong = 氏名+現住所の鍵が一致(同一人物の可能性が高い)。weak = 氏名だけ一致。 */
-  matchStrength: "strong" | "weak";
+  /**
+   * 一致の種類。address/currentAddress は意味が違う(登記上/連絡先)ので混ぜない。
+   *   current_address = 貼り付けの現住所 == 既存の Owner.currentAddress(連絡先住所が一致)
+   *   registry_address = 貼り付けの現住所 == 既存の Owner.address(登記上の住所と一致)
+   *   name_only        = 氏名だけ一致(同姓同名の別人かもしれない)
+   * 優先順位: current_address > registry_address > name_only(1件が複数に該当するときは強い方)。
+   */
+  matchKind: "current_address" | "registry_address" | "name_only";
 }
 
 // ---------- POST /api/import/paste ----------
@@ -137,17 +143,24 @@ export async function POST(request: NextRequest) {
       .map((c) => ({ id: c.id, address: c.address, lotNumber: c.lotNumber }));
 
     // ---- 所有者の重複候補(設計書 §6: 氏名+住所が一致すれば候補を並べて選ばせる) ----
-    // ⚠draft.owner.currentAddress は「現住所」(Owner.currentAddress と同じ意味)。
-    //   Owner.address は「登記上の住所」で意味が別(設計 2026-08-10-owner-current-address-design.md)。
-    //   貼り付け元は現住所しか持たないので、登記上住所(Owner.address)と比べると
-    //   意味の違う値同士を突き合わせることになり、一致すべきでない/しないケースを
-    //   両方生む。よって照合は Owner.currentAddress を使う。
+    // ⚠draft.owner.currentAddress は「現住所」(貼り付け元はこれしか持たない)。
+    //   既存 Owner 側は currentAddress(連絡先住所)と address(登記上住所)の
+    //   2つの欄を持ち、意味が別(設計 2026-08-10-owner-current-address-design.md)。
+    //   ⚠本番実測(2026-08-26): is_archived=false の所有者1,312件中、
+    //   currentAddress が入っているのは0件・address(登記上住所)は1,309件。
+    //   現住所どうしだけを比べると本番データでは強い一致が事実上発火しない
+    //   (ほぼ全員が登記由来の取込で、現住所欄が空のまま)。よって貼り付けの
+    //   現住所は Owner.currentAddress と Owner.address の**両方**に照合し、
+    //   どちらに当たったかを区別して返す(意味の違う欄を混ぜて「同じ」と
+    //   言わない・「登記上の住所と一致」「連絡先住所が一致」を人が見分けられる
+    //   ようにする)。優先順位は current_address(連絡先) > registry_address(登記) >
+    //   name_only(氏名のみ)。住所そのものはレスポンスに含めない。
     const ownerName = draft.owner?.name.value?.trim() ?? "";
     let ownerCandidates: OwnerCandidate[] = [];
     if (ownerName !== "") {
       const ownerRows = await prisma.owner.findMany({
         where: { name: ownerName, isArchived: false },
-        select: { id: true, name: true, currentAddress: true },
+        select: { id: true, name: true, currentAddress: true, address: true },
         take: 20,
       });
 
@@ -155,18 +168,27 @@ export async function POST(request: NextRequest) {
       const draftKey = draftAddress ? buildOwnerDedupKey(ownerName, draftAddress) : null;
 
       ownerCandidates = ownerRows.map((row) => {
-        const candAddress = row.currentAddress?.trim() ?? "";
-        const strong =
-          draftKey !== null &&
-          candAddress !== "" &&
-          buildOwnerDedupKey(row.name, candAddress) === draftKey;
-        return { id: row.id, name: row.name, matchStrength: strong ? "strong" : "weak" };
+        let matchKind: OwnerCandidate["matchKind"] = "name_only";
+        if (draftKey !== null) {
+          const currentAddr = row.currentAddress?.trim() ?? "";
+          const registryAddr = row.address?.trim() ?? "";
+          const currentHit =
+            currentAddr !== "" && buildOwnerDedupKey(row.name, currentAddr) === draftKey;
+          const registryHit =
+            registryAddr !== "" && buildOwnerDedupKey(row.name, registryAddr) === draftKey;
+          if (currentHit) {
+            matchKind = "current_address";
+          } else if (registryHit) {
+            matchKind = "registry_address";
+          }
+        }
+        return { id: row.id, name: row.name, matchKind };
       });
     }
 
     // ⚠貼った原文は返さない（画面側が手元に持っている。往復させるとログや
-    //   ブラウザ履歴に PII が増えるだけ）。所有者候補も電話・メール・住所は返さず
-    //   id/氏名/一致の強さだけに絞る。デバッグ用フィールドも一切足さない。
+    //   ブラウザ履歴に PII が増えるだけ）。所有者候補も電話・メール・住所そのものは
+    //   返さず、id/氏名/一致の種類だけに絞る。デバッグ用フィールドも一切足さない。
     return apiResponse({
       draft,
       duplicates,

@@ -146,9 +146,9 @@ describe("POST /api/import/paste", () => {
     expect(mockOwnerFindMany).not.toHaveBeenCalled();
   });
 
-  it("★氏名も現住所も一致する既存所有者は「強い一致」で返る", async () => {
+  it("★氏名も現住所(Owner.currentAddress)も一致する既存所有者は current_address で返る", async () => {
     mockOwnerFindMany.mockResolvedValue([
-      { id: "o1", name: "山田太郎", currentAddress: "東京都渋谷区X1-1-1" },
+      { id: "o1", name: "山田太郎", currentAddress: "東京都渋谷区X1-1-1", address: null },
     ]);
     const res = await POST(
       jsonReq({
@@ -158,13 +158,16 @@ describe("POST /api/import/paste", () => {
     const body = await res.json();
     expect(mockOwnerFindMany).toHaveBeenCalledTimes(1);
     expect(body.ownerCandidates).toEqual([
-      { id: "o1", name: "山田太郎", matchStrength: "strong" },
+      { id: "o1", name: "山田太郎", matchKind: "current_address" },
     ]);
   });
 
-  it("★氏名だけ一致する既存所有者は「弱い一致」で返る（住所が違う/無い）", async () => {
+  it("★本番の実態=currentAddressがnullでaddress(登記上住所)に貼り付けの現住所と同じ値が入っている場合、registry_addressで返る", async () => {
+    // 本番実測(2026-08-26): is_archived=false 1,312件中、currentAddress は0件・
+    // address(登記上住所)は1,309件。ほぼ全員がこの形なので、ここが通らないと
+    // この機能は本番でほぼ発火しない。
     mockOwnerFindMany.mockResolvedValue([
-      { id: "o2", name: "山田太郎", currentAddress: "大阪府大阪市Y2-2-2" },
+      { id: "o1b", name: "山田太郎", currentAddress: null, address: "東京都渋谷区X1-1-1" },
     ]);
     const res = await POST(
       jsonReq({
@@ -173,7 +176,42 @@ describe("POST /api/import/paste", () => {
     );
     const body = await res.json();
     expect(body.ownerCandidates).toEqual([
-      { id: "o2", name: "山田太郎", matchStrength: "weak" },
+      { id: "o1b", name: "山田太郎", matchKind: "registry_address" },
+    ]);
+  });
+
+  it("★同じ候補に現住所も登記上住所も一致する場合、current_addressが優先される", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      {
+        id: "o1c",
+        name: "山田太郎",
+        currentAddress: "東京都渋谷区X1-1-1",
+        address: "東京都渋谷区X1-1-1",
+      },
+    ]);
+    const res = await POST(
+      jsonReq({
+        text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 山田太郎\n■現住所： 東京都渋谷区X1-1-1",
+      }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([
+      { id: "o1c", name: "山田太郎", matchKind: "current_address" },
+    ]);
+  });
+
+  it("★氏名だけ一致する既存所有者は name_only で返る（現住所も登記上住所も違う/無い）", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "o2", name: "山田太郎", currentAddress: "大阪府大阪市Y2-2-2", address: null },
+    ]);
+    const res = await POST(
+      jsonReq({
+        text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 山田太郎\n■現住所： 東京都渋谷区X1-1-1",
+      }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([
+      { id: "o2", name: "山田太郎", matchKind: "name_only" },
     ]);
   });
 
@@ -215,7 +253,7 @@ describe("POST /api/import/paste", () => {
     // candidate.currentAddress の値そのもの(現住所)も候補には含めない。
     expect(rawCandidates).not.toContain("渋谷区X1-1-1");
     expect(body.ownerCandidates).toEqual([
-      { id: "o3", name: "山田太郎", matchStrength: "strong" },
+      { id: "o3", name: "山田太郎", matchKind: "current_address" },
     ]);
   });
 
