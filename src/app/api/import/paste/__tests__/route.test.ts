@@ -215,6 +215,97 @@ describe("POST /api/import/paste", () => {
     ]);
   });
 
+  it("★本番の実態=DBの氏名が空白なし「佐藤花子」、貼り付けが全角空白入り「佐藤　花子」でも見つかる", async () => {
+    // 本番実測(2026-08-26): is_archived=false 1,312件中、氏名に空白が入っているのは
+    // 全角1件・半角3件だけでほぼ全員「空白なし」。一方 貼り付け元(HOME4U査定依頼)は
+    // 「佐藤　花子」のように全角空白入りが典型 → where の完全一致だと0件になっていた。
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "s1", name: "佐藤花子", currentAddress: null, address: null },
+    ]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 佐藤　花子" }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([
+      { id: "s1", name: "佐藤花子", matchKind: "name_only" },
+    ]);
+  });
+
+  it("★逆方向=DBの氏名が全角空白入り「佐藤　花子」、貼り付けが空白なし「佐藤花子」でも見つかる", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "s2", name: "佐藤　花子", currentAddress: null, address: null },
+    ]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 佐藤花子" }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([
+      { id: "s2", name: "佐藤　花子", matchKind: "name_only" },
+    ]);
+  });
+
+  it("★全角空白と半角空白の違いだけでも見つかる", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "s3", name: "佐藤 花子", currentAddress: null, address: null }, // 半角
+    ]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 佐藤　花子" }), // 全角
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([
+      { id: "s3", name: "佐藤 花子", matchKind: "name_only" },
+    ]);
+  });
+
+  it("★別人(佐藤太郎)は正規化しすぎて拾わない", async () => {
+    // 前方一致の絞り込みは姓の先頭1文字だけなので「佐藤」姓の別人も DB から
+    // 返ってきうるが、JS 側の normalizeName 完全一致で除外されることを確かめる。
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "s4", name: "佐藤太郎", currentAddress: null, address: null },
+    ]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 佐藤　花子" }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([]);
+  });
+
+  it("★所有者候補のDB取得件数上限(take)を固定する(上限が消えても気づけるように)", async () => {
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 佐藤　花子" }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockOwnerFindMany).toHaveBeenCalledTimes(1);
+    const args = mockOwnerFindMany.mock.calls[0][0] as { take?: number };
+    // ⚠姓の先頭1文字で前方一致するため、多い姓(佐藤等)は何十件も返りうる。
+    //   正規化一致で最終的に絞り込む前提で厚めに取っている値そのものを固定する。
+    expect(args.take).toBe(200);
+  });
+
+  it("★一致の種類が異なる候補が同一レスポンスに混在しても、各候補が自分の種類を保つ", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "t-cur", name: "田中一郎", currentAddress: "東京都新宿区Z9-9-9", address: null },
+      { id: "t-reg", name: "田中一郎", currentAddress: null, address: "東京都新宿区Z9-9-9" },
+      {
+        id: "t-name",
+        name: "田中一郎",
+        currentAddress: "大阪府大阪市Y2-2-2",
+        address: "福岡県福岡市W3-3-3",
+      },
+    ]);
+    const res = await POST(
+      jsonReq({
+        text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 田中一郎\n■現住所： 東京都新宿区Z9-9-9",
+      }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([
+      { id: "t-cur", name: "田中一郎", matchKind: "current_address" },
+      { id: "t-reg", name: "田中一郎", matchKind: "registry_address" },
+      { id: "t-name", name: "田中一郎", matchKind: "name_only" },
+    ]);
+  });
+
   it("★所有者検索は isArchived: false を指定する(除外はサーバー側クエリで行う)", async () => {
     const res = await POST(
       jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 山田太郎" }),

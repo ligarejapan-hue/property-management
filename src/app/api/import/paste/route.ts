@@ -13,6 +13,15 @@ import { buildPasteDraft } from "@/lib/paste-import/build-draft";
 import { judgeDuplicates, type ExistingProperty } from "@/lib/paste-import/find-duplicates";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
 import { buildOwnerDedupKey } from "@/lib/owner-dedup";
+import { normalizeName } from "@/lib/normalize";
+
+/**
+ * 所有者候補の DB 検索で広めに取る件数。
+ * ⚠本番実測(2026-08-26): 姓の先頭1文字で前方一致すると、多い姓(例:佐藤)は
+ *   何十件も返りうる。正規化一致で最終的に絞り込む前提で厚めに取る。
+ *   この値を変えたら test の固定値テストも直すこと。
+ */
+const OWNER_CANDIDATE_FETCH_LIMIT = 200;
 
 /** 所有者の重複候補として返す1件。氏名/一致の種類のみ(電話・メール・住所そのものは返さない)。 */
 interface OwnerCandidate {
@@ -155,19 +164,41 @@ export async function POST(request: NextRequest) {
     //   言わない・「登記上の住所と一致」「連絡先住所が一致」を人が見分けられる
     //   ようにする)。優先順位は current_address(連絡先) > registry_address(登記) >
     //   name_only(氏名のみ)。住所そのものはレスポンスに含めない。
-    const ownerName = draft.owner?.name.value?.trim() ?? "";
+    //
+    // ⚠氏名の突き合わせは完全一致(where: { name: ownerName })では引けない。
+    //   本番実測(2026-08-26): is_archived=false 1,312件中、氏名に空白が入って
+    //   いるのは全角1件・半角3件だけでほぼ全員「空白なし」。一方 貼り付け元
+    //   (HOME4U 査定依頼)の実サンプルは「佐藤　花子」のように全角空白入りが
+    //   典型。where の完全一致だと候補が0件になり、この機能が本番で機能しない。
+    //   → 案B(姓の先頭1文字で前方一致→JS側で normalizeName 一致)を採用。
+    //   案A(表記を有限列挙して in で引く)は、貼り付け側に空白が無く DB 側に
+    //   ある「逆」のケース(例: 貼り付け「佐藤花子」/DB「佐藤　花子」)で、
+    //   どこに空白を挿し込むべきかを機械的に決められず取りこぼす
+    //   (姓と名の境界は文字列からは分からない)。案Bは正規化後の完全一致で
+    //   判定するため、どちらの向きの表記ゆれも取りこぼさない。先頭1文字の
+    //   前方一致は DB 側の値に前置スペースが無い限り(実際の氏名では起きない)
+    //   正規化の影響を受けない安全な絞り込みで、正確な判定は JS 側の
+    //   normalizeName 一致に委ねる。
+    const ownerNameRaw = draft.owner?.name.value?.trim() ?? "";
+    const normalizedOwnerName = normalizeName(ownerNameRaw);
     let ownerCandidates: OwnerCandidate[] = [];
-    if (ownerName !== "") {
+    if (normalizedOwnerName !== "") {
+      const surnamePrefix = normalizedOwnerName.slice(0, 1);
       const ownerRows = await prisma.owner.findMany({
-        where: { name: ownerName, isArchived: false },
+        where: { name: { startsWith: surnamePrefix }, isArchived: false },
         select: { id: true, name: true, currentAddress: true, address: true },
-        take: 20,
+        take: OWNER_CANDIDATE_FETCH_LIMIT,
       });
+      const matchedRows = ownerRows.filter(
+        (row) => normalizeName(row.name) === normalizedOwnerName,
+      );
 
       const draftAddress = draft.owner?.currentAddress.value?.trim() ?? "";
-      const draftKey = draftAddress ? buildOwnerDedupKey(ownerName, draftAddress) : null;
+      const draftKey = draftAddress
+        ? buildOwnerDedupKey(normalizedOwnerName, draftAddress)
+        : null;
 
-      ownerCandidates = ownerRows.map((row) => {
+      ownerCandidates = matchedRows.map((row) => {
         let matchKind: OwnerCandidate["matchKind"] = "name_only";
         if (draftKey !== null) {
           const currentAddr = row.currentAddress?.trim() ?? "";
