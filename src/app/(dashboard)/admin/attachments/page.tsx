@@ -179,8 +179,8 @@ export default function AttachmentSearchPage() {
         primary={
           <>
             <SearchField
-              aria-label="ファイル名（部分一致）"
-              placeholder="ファイル名で検索..."
+              aria-label="ファイル名（部分一致・一覧に出ている名前でも探せます）"
+              placeholder="ファイル名で検索（謄本・所有者事項・2026-08-25 など）..."
               value={fileName}
               onChange={(e) => setFileName(e.target.value)}
               onKeyDown={(e) => {
