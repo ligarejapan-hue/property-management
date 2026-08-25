@@ -46,12 +46,21 @@ vi.mock("@/lib/prisma", () => ({
 import { POST } from "../route";
 import { NextRequest } from "next/server";
 
-const jsonReq = (body: unknown) =>
-  new NextRequest("http://localhost/api/import/paste", {
+const jsonReq = (body: unknown) => {
+  const s = JSON.stringify(body);
+  // ⚠assertImportJsonBodySize(@/lib/import-body-size) は content-length ヘッダを
+  //   要求する(欠落は411)。実ブラウザの fetch は JSON body に自動で付けるが、
+  //   NextRequest を直接組み立てるテストでは自分で付けないと本文の
+  //   ガード(request.json() の前に呼ぶ)を通れない。
+  return new NextRequest("http://localhost/api/import/paste", {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    headers: {
+      "content-type": "application/json",
+      "content-length": String(Buffer.byteLength(s)),
+    },
+    body: s,
   });
+};
 
 beforeEach(() => {
   mockPerms = [{ resource: "property", action: "write", granted: true }];
@@ -98,6 +107,29 @@ describe("POST /api/import/paste", () => {
     const body = await res.json();
     expect(body.duplicates.blocked).toBe(true);
     expect(body.duplicates.blockedByPropertyId).toBe("p1");
+  });
+
+  it("★住所一致の候補が take(50) を埋めていても、外部キー一致は別クエリなので必ず候補に入り blocked になる", async () => {
+    // 外部キー一致クエリと住所前方一致クエリを where の形で区別する。
+    // 同じ建物に多数戸(50件超)が既に登録されている状況を再現し、ブロックすべき
+    // 唯一の外部キー一致行(p-key)が住所一致の50件の中には**含まれない**ようにする。
+    mockFindMany.mockImplementation(async (args: { where?: Record<string, unknown> }) => {
+      if (args?.where?.externalLinkKey) {
+        return [{ id: "p-key", address: "別の建物", lotNumber: null, externalLinkKey: "SA-1" }];
+      }
+      return Array.from({ length: 50 }, (_, i) => ({
+        id: `p-addr-${i}`,
+        address: "東京都A区B1-2-3",
+        lotNumber: null,
+        externalLinkKey: null,
+      }));
+    });
+    const res = await POST(
+      jsonReq({ text: "■査定ナンバー： SA-1\n■物件所在地： 東京都A区B1-2-3" }),
+    );
+    const body = await res.json();
+    expect(body.duplicates.blocked).toBe(true);
+    expect(body.duplicates.blockedByPropertyId).toBe("p-key");
   });
 
   it("★下書きに貼った原文をそのまま含めない（PII を返しっぱなしにしない）", async () => {

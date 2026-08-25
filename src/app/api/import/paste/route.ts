@@ -11,6 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
 import { judgeDuplicates, type ExistingProperty } from "@/lib/paste-import/find-duplicates";
+import { assertImportJsonBodySize } from "@/lib/import-body-size";
 
 // ---------- POST /api/import/paste ----------
 // リクエスト形式:
@@ -59,6 +60,9 @@ export async function POST(request: NextRequest) {
         );
       }
     } else {
+      // request.json() で body 全体をバッファする前に過大サイズを弾く
+      // (registry-pdf/route.ts と同じ姿勢。2026-08-02 是正済みの非対称を再発させない)。
+      assertImportJsonBodySize(request);
       const body = (await request.json()) as { text?: unknown };
       if (typeof body.text !== "string") {
         throw new ApiError(400, "貼り付けた文章がありません", "BAD_REQUEST");
@@ -79,22 +83,36 @@ export async function POST(request: NextRequest) {
 
     const draft = buildPasteDraft(text);
 
-    // 重複の手がかり: 外部キーか、正規化前の住所で粗く引いてから純関数で判定する。
-    const or: Record<string, unknown>[] = [];
-    if (draft.externalLinkKey) or.push({ externalLinkKey: draft.externalLinkKey });
-    if (draft.property.address.value) {
-      or.push({ address: { contains: draft.property.address.value.slice(0, 20) } });
+    // 重複の手がかり: 外部キー一致と住所の前方一致は**別クエリ**で引く。
+    // ⚠1つの OR に混ぜて take で切ると、同じ建物の多数戸が既に登録されている
+    //   ときに住所一致だけで take を埋めてしまい、ブロックすべき唯一の外部キー
+    //   一致行が結果から漏れる(=二重登録を防げない)。外部キー一致は完全一致
+    //   なので件数は少なく、take で切らない。住所の前方一致だけ take:50 を掛け、
+    //   最後に id で重複を除いて合流する。
+    const select = { id: true, address: true, lotNumber: true, externalLinkKey: true } as const;
+    const candidateMap = new Map<string, ExistingProperty>();
+
+    if (draft.externalLinkKey) {
+      const keyRows = await prisma.property.findMany({
+        where: { externalLinkKey: draft.externalLinkKey, isArchived: false },
+        select,
+      });
+      for (const row of keyRows) candidateMap.set(row.id, row);
     }
 
-    let candidates: ExistingProperty[] = [];
-    if (or.length > 0) {
-      const rows = await prisma.property.findMany({
-        where: { OR: or, isArchived: false },
-        select: { id: true, address: true, lotNumber: true, externalLinkKey: true },
+    if (draft.property.address.value) {
+      const addressRows = await prisma.property.findMany({
+        where: {
+          address: { contains: draft.property.address.value.slice(0, 20) },
+          isArchived: false,
+        },
+        select,
         take: 50,
       });
-      candidates = rows;
+      for (const row of addressRows) candidateMap.set(row.id, row);
     }
+
+    const candidates: ExistingProperty[] = Array.from(candidateMap.values());
 
     const duplicates = judgeDuplicates(
       {
