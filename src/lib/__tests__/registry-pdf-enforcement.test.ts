@@ -56,9 +56,12 @@ describe("S1b-4: /uploads route の header / 監査", () => {
     expect(routeSrc).toMatch(/no-store/);
   });
 
-  it("registry の Content-Disposition は download=attachment;filename=registry.pdf / preview=inline", () => {
-    expect(routeSrc).toMatch(/attachment; filename="registry\.pdf"/);
-    expect(routeSrc).toMatch(/"inline"/);
+  it("registry の Content-Disposition は共通関数が組み立てる（route で手書きしない）", () => {
+    // 保存名の中身は registry-display-name.test.ts が総当たりで固定する。
+    // ここでは「route が自前で名前を書いていない」ことだけを見る。
+    expect(routeSrc).toMatch(/registryContentDisposition\(\{/);
+    expect(routeSrc).toMatch(/downloadIntent,/);
+    expect(routeSrc).not.toMatch(/attachment; filename=/);
   });
 
   it("X-Content-Type-Options: nosniff を付与", () => {
@@ -96,7 +99,11 @@ describe("S1b-4: attachment-tab の download intent", () => {
   });
 
   it("registry の保存名は generic（att.fileName を使わない）", () => {
-    expect(attachSrc).toMatch(/REGISTRY_DOWNLOAD_NAME\s*=\s*"registry\.pdf"/);
+    // 名前は共通モジュールが作る。attachment-tab は自前の定数を持たない。
+    expect(attachSrc).toMatch(
+      /import \{[\s\S]*registryDisplayName[\s\S]*\} from "@\/lib\/attachments\/registry-display-name"/,
+    );
+    expect(attachSrc).not.toMatch(/REGISTRY_DOWNLOAD_NAME/);
   });
 
   it("preview iframe は無 param のまま（src は safeUrl）", () => {
@@ -105,16 +112,13 @@ describe("S1b-4: attachment-tab の download intent", () => {
 });
 
 describe("S1b-registry-preview: client 表示名の PII 限定（17-A Phase 1）", () => {
-  it("registry は表示名を種別ラベル(非PII)に、registry以外は att.fileName", () => {
-    // registry の表示名は生ファイル名を使わず、種別から固定ラベルを組み立てる。
+  it("registry は表示名を種別＋登録日(非PII)から作り、registry以外は att.fileName", () => {
+    // registry の表示名は生ファイル名を使わず、非PIIの材料だけから組み立てる。
     expect(attachSrc).toMatch(
-      /const displayName = isRegistry\s*\?\s*registryDisplayName\(att\.registryCertificateType\)\s*:\s*att\.fileName/,
+      /const displayName = isRegistry\s*\?\s*registryDisplayName\(\s*att\.registryCertificateType,\s*att\.createdAt,?\s*\)\s*:\s*att\.fileName/,
     );
-    // ラベルは種別から固定文字列(非PII)。生ファイル名は使わない。
-    expect(attachSrc).toMatch(/謄本\(所有者事項\)\.pdf/);
-    expect(attachSrc).toMatch(/謄本\(全部事項\)\.pdf/);
-    // 種別不明(手動取込)は従来どおり registry.pdf 固定。
-    expect(attachSrc).toMatch(/REGISTRY_DOWNLOAD_NAME\s*=\s*"registry\.pdf"/);
+    // ラベルの文字列そのものは共通モジュールにしか無い（画面側で手書きしない）。
+    expect(attachSrc).not.toMatch(/謄本\(/);
   });
 
   it("preview modal / row の表示テキスト・title・alt・iframe title・download に att.fileName を直接バインドしない", () => {

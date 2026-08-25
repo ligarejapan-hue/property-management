@@ -25,6 +25,9 @@ type Att = {
   // S1b-4: registry gating / serve-meta 検証用（既存ケースは未指定=非registry扱い）
   id?: string;
   type?: string;
+  // 保存名の材料。実テーブルと同じく「無ければ null」を取り得る。
+  registryCertificateType?: string | null;
+  createdAt?: Date | null;
 };
 type Prop = { id: string; createdBy: string; assignedTo: string | null };
 
@@ -943,17 +946,37 @@ describe("authorizeUploadAccess — registry_pdf gating (S1b-4)", () => {
 describe("resolveRegistryServeMeta (S1b-4)", () => {
   const REG_KEY = "properties/p1/registry/100.pdf";
 
-  it("active registry 添付 → { isRegistry, attachmentId, propertyId } を返す", async () => {
+  it("active registry 添付 → 保存名の材料（種別・登録日）込みで返す", async () => {
+    const created = new Date("2026-08-25T03:00:00.000Z");
     const prisma = makeDb({
       attachments: [
-        { id: "att-reg-1", fileUrl: `/uploads/${REG_KEY}`, isDeleted: false, targetType: "property", targetId: "p1", propertyId: "p1", type: "registry" },
+        { id: "att-reg-1", fileUrl: `/uploads/${REG_KEY}`, isDeleted: false, targetType: "property", targetId: "p1", propertyId: "p1", type: "registry", registryCertificateType: "owner", createdAt: created },
       ],
     });
     expect(await resolveRegistryServeMeta(REG_KEY, prisma)).toEqual({
       isRegistry: true,
       attachmentId: "att-reg-1",
       propertyId: "p1",
+      certificateType: "owner",
+      createdAt: created,
     });
+  });
+
+  it("種別・登録日が無い添付でも、材料は null で返す（生の fileName は返さない）", async () => {
+    const prisma = makeDb({
+      attachments: [
+        { id: "att-reg-2", fileUrl: `/uploads/${REG_KEY}`, isDeleted: false, targetType: "property", targetId: "p1", propertyId: "p1", type: "registry" },
+      ],
+    });
+    const meta = await resolveRegistryServeMeta(REG_KEY, prisma);
+    expect(meta).toEqual({
+      isRegistry: true,
+      attachmentId: "att-reg-2",
+      propertyId: "p1",
+      certificateType: null,
+      createdAt: null,
+    });
+    expect(meta).not.toHaveProperty("fileName");
   });
 
   it("非 registry(general) → null（route は従来ヘッダ・監査なし）", async () => {

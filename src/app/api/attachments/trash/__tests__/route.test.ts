@@ -21,6 +21,7 @@ vi.mock("@/lib/prisma", () => ({ default: { attachment: { findMany: vi.fn() } } 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { GET } from "../route";
+import { registryDisplayName } from "@/lib/attachments/registry-display-name";
 
 const pm = prisma as unknown as { attachment: { findMany: Mock } };
 const UUID = "11111111-1111-4111-8111-111111111111";
@@ -68,13 +69,35 @@ describe("GET /api/attachments/trash", () => {
     expect(body.data[0]).not.toHaveProperty("fileUrl");
   });
 
-  it("registry の fileName は generic（PII を出さない）", async () => {
+  it("registry の fileName は共通の決まりごとで組み立てる（PII を出さない）", async () => {
     pm.attachment.findMany.mockResolvedValueOnce([
-      { id: "a1", fileName: "山田太郎_謄本.pdf", type: "registry", createdAt: new Date(), deletedAt: new Date(), targetType: "property", targetId: UUID },
+      { id: "a1", fileName: "山田太郎_謄本.pdf", type: "registry", registryCertificateType: "owner", createdAt: new Date("2026-08-25T03:00:00.000Z"), deletedAt: new Date(), targetType: "property", targetId: UUID },
     ]);
     const res = await GET(req());
     const body = await res.json();
-    expect(body.data[0].fileName).toBe("registry.pdf");
+    expect(body.data[0].fileName).toBe(
+      registryDisplayName("owner", new Date("2026-08-25T03:00:00.000Z")),
+    );
+    expect(body.data[0].fileName).toBe("謄本(所有者事項)_2026-08-25.pdf");
     expect(JSON.stringify(body)).not.toContain("山田太郎");
+  });
+
+  it("種別が記録されていない（手作業で取り込んだ）謄本も生の名前は返さない", async () => {
+    pm.attachment.findMany.mockResolvedValueOnce([
+      { id: "a1", fileName: "世田谷区弦巻１丁目３２－３１不動産登記.pdf", type: "registry", registryCertificateType: null, createdAt: new Date("2026-08-25T03:00:00.000Z"), deletedAt: new Date(), targetType: "property", targetId: UUID },
+    ]);
+    const res = await GET(req());
+    const body = await res.json();
+    expect(body.data[0].fileName).toBe("謄本_2026-08-25.pdf");
+    expect(JSON.stringify(body)).not.toContain("弦巻");
+  });
+
+  it("組み立ての材料（種別）を、そのまま外へ返さない", async () => {
+    pm.attachment.findMany.mockResolvedValueOnce([
+      { id: "a1", fileName: "謄本.pdf", type: "registry", registryCertificateType: "all", createdAt: new Date(), deletedAt: new Date(), targetType: "property", targetId: UUID },
+    ]);
+    const res = await GET(req());
+    const body = await res.json();
+    expect(body.data[0]).not.toHaveProperty("registryCertificateType");
   });
 });

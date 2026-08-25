@@ -7,6 +7,7 @@ import {
 } from "@/lib/uploads-authorization";
 import { buildUploadsEtag, ifNoneMatchMatches } from "@/lib/uploads-etag";
 import { writeAuditLog } from "@/lib/audit";
+import { registryContentDisposition } from "@/lib/attachments/registry-display-name";
 
 /**
  * /uploads/[...path] 配信 proxy。
@@ -145,10 +146,15 @@ export async function GET(
     // 権限剥奪を即時反映するため registry PDF はキャッシュさせない。
     headers["Cache-Control"] = "no-store";
     headers["X-Content-Type-Options"] = "nosniff";
-    // filename は generic 固定。元の添付ファイル名（所有者名等の PII の恐れ）は使わない。
-    headers["Content-Disposition"] = downloadIntent
-      ? 'attachment; filename="registry.pdf"'
-      : "inline";
+    // ⚠**手元に落ちるファイル名を決めるのはここ**（同一オリジンでも Content-Disposition の
+    //   filename が指定されていればブラウザはそちらを採る＝画面側の download 属性は効かない）。
+    // 名前は種別＋登録日から組み立てる共通関数に一本化する。元の添付ファイル名
+    // （所有者名等の PII の恐れ）は依然として一切使わない。
+    headers["Content-Disposition"] = registryContentDisposition({
+      downloadIntent,
+      certType: registryMeta.certificateType,
+      createdAt: registryMeta.createdAt,
+    });
 
     // 非PII の監査のみ（fileName / 所有者情報は記録しない）。
     // preview は iframe 再読込でログが増え得る点に留意（PR 本文に明記）。

@@ -324,6 +324,13 @@ export interface RegistryServeMeta {
   isRegistry: true;
   attachmentId: string;
   propertyId: string | null;
+  /**
+   * 保存名を組み立てる材料（非PII）。生の fileName は**返さない**。
+   * 手元に落ちるファイル名を決めるのは Content-Disposition なので、
+   * ヘッダを組み立てる側にこの2つを渡す必要がある。
+   */
+  certificateType: string | null;
+  createdAt: Date | null;
 }
 
 export async function resolveRegistryServeMeta(
@@ -343,6 +350,9 @@ export async function resolveRegistryServeMeta(
       targetId: true,
       fileUrl: true,
       isDeleted: true,
+      // 保存名の材料（owner|all と登録日）。生の fileName は select しない。
+      registryCertificateType: true,
+      createdAt: true,
     },
   });
   for (const a of attachments) {
@@ -353,6 +363,8 @@ export async function resolveRegistryServeMeta(
         isRegistry: true,
         attachmentId: a.id,
         propertyId: a.propertyId ?? a.targetId ?? null,
+        certificateType: a.registryCertificateType ?? null,
+        createdAt: a.createdAt ?? null,
       };
     }
   }

@@ -10,6 +10,10 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
+import {
+  planRegistryNameSearch,
+  jstDayRangeUtc,
+} from "@/lib/attachments/registry-name-search";
 
 /**
  * GET /api/attachments/search — 添付の横断検索（管理者限定）。
@@ -23,8 +27,11 @@ import { writeAuditLog } from "@/lib/audit";
  *    任意の owner PII を含み得るため owner PII 全フィールド（name/kana/phone/zip/address/note/
  *    email/corporate_number）が edit/full/read（getOwnerDisplayConfig で解決）。
  *  - 既定で isDeleted=false（削除済みは除外）。
- *  - 返却は **メタデータのみ**（id / fileName / type / createdAt / targetType /
- *    targetId）。**ファイル本体 URL(fileUrl)は select せず結果に一切載せない**
+ *  - ファイル名検索は「保存されている生の名前」に加えて「一覧に出ている組み立てた名前」
+ *    でも当たる（自動取得の謄本のみ・読み替えの範囲は registry-name-search.ts に明記）。
+ *  - 返却は **メタデータのみ**（id / fileName / type / registryCertificateType /
+ *    createdAt / targetType / targetId）。**ファイル本体 URL(fileUrl)は select せず
+ *    結果に一切載せない**
  *    （ダウンロードは物件詳細など本来の権限導線でのみ。横断検索は所在把握用）。
  *  - 検索操作は非PII audit に記録する（検索語の生値は載せず、フィルタの有無/種別
  *    と件数のみ）。
@@ -104,7 +111,26 @@ export async function GET(request: Request) {
 
     const where: Record<string, unknown> = { isDeleted: false };
     if (q.type) where.type = q.type;
-    if (q.fileName) where.fileName = { contains: q.fileName, mode: "insensitive" };
+    if (q.fileName) {
+      // 生のファイル名での検索（従来どおり）に加えて、**画面に出ている名前**でも
+      // 当たるようにする。自動取得の謄本は一覧の表示名を種別＋登録日から組み立てて
+      // いるため、生の名前しか探さないと「見えている名前で探すと出てこない」になる。
+      // ⚠OR は**取りこぼしを減らすだけ**。他の絞り込み（種別・対象・期間）は
+      //   従来どおり AND のままなので、条件がゆるくなることはない。
+      const orConditions: Record<string, unknown>[] = [
+        { fileName: { contains: q.fileName, mode: "insensitive" } },
+      ];
+      const plan = planRegistryNameSearch(q.fileName);
+      if (plan) {
+        const range = plan.jstDate ? jstDayRangeUtc(plan.jstDate) : null;
+        orConditions.push({
+          type: "registry",
+          registryCertificateType: { in: plan.certificateTypes },
+          ...(range ? { createdAt: { gte: range.gte, lt: range.lt } } : {}),
+        });
+      }
+      where.OR = orConditions;
+    }
     if (q.targetType) where.targetType = q.targetType;
     if (q.targetId) where.targetId = q.targetId;
     if (q.from || q.to) {
@@ -126,6 +152,9 @@ export async function GET(request: Request) {
         id: true,
         fileName: true,
         type: true,
+        // 謄本の表示名を組み立てる材料（owner|all の2値・非PII）。
+        // これが記録されている＝自動取得で入った分、という印にもなる。
+        registryCertificateType: true,
         createdAt: true,
         targetType: true,
         targetId: true,

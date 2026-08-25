@@ -39,6 +39,7 @@ import { CANCEL_ACCEPTED_MESSAGE } from "./cancel-safety";
 import { RegistryFetchError } from "./errors";
 import { runExclusivePurchase } from "./purchase-safety";
 import type { RegistryFetchThrottle } from "./throttle";
+import { REGISTRY_STORED_FILE_NAME } from "@/lib/attachments/registry-display-name";
 
 /** login に渡す資格情報＋遷移先（page 側に保持させない＝呼び出し都度渡す契約）。 */
 export interface RegistryLoginInput {
@@ -309,7 +310,10 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
         return {
           pdfBuffer,
           // 非PII の generic filename（不動産番号・所有者名を埋め込まない）。
-          fileName: `registry-auto-${requestId}.pdf`,
+          // ⚠**保存名は全経路で共通の "謄本.pdf" に統一**する（受付番号は台帳と
+          //   providerRequestId に残るのでファイル名に持たせない）。画面に出す名前は
+          //   種別＋登録日から `@/lib/attachments/registry-display-name` が組み立てる。
+          fileName: REGISTRY_STORED_FILE_NAME,
           source: this.name,
           fetchedAt: this.now(),
           providerRequestId: requestId,
@@ -409,8 +413,8 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
         });
         return {
           pdfBuffer,
-          // 非PII の generic filename(地番・所有者名を埋め込まない)。
-          fileName: `registry-recovered-${requestId}.pdf`,
+          // 非PII の generic filename(地番・所有者名を埋め込まない)。保存名は全経路共通。
+          fileName: REGISTRY_STORED_FILE_NAME,
           source: this.name,
           fetchedAt: this.now(),
           providerRequestId: requestId,
@@ -600,8 +604,8 @@ export class OfficialRegistryProvider implements RegistryFetchProvider {
         }, chargeState);
         return {
           pdfBuffer,
-          // 非PII の generic filename（地番・所有者名を埋め込まない）。
-          fileName: `registry-auto-${requestId}.pdf`,
+          // 非PII の generic filename（地番・所有者名を埋め込まない）。保存名は全経路共通。
+          fileName: REGISTRY_STORED_FILE_NAME,
           source: this.name,
           fetchedAt: this.now(),
           providerRequestId: requestId,

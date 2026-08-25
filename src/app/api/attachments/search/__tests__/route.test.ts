@@ -226,6 +226,8 @@ describe("GET /api/attachments/search", () => {
       id: true,
       fileName: true,
       type: true,
+      // 謄本の表示名を組み立てる材料（owner|all の2値・非PII）。
+      registryCertificateType: true,
       createdAt: true,
       targetType: true,
       targetId: true,
@@ -251,13 +253,64 @@ describe("GET /api/attachments/search", () => {
 
     const where = lastWhere();
     expect(where.type).toBe("registry");
-    expect(where.fileName).toEqual({ contains: "foo", mode: "insensitive" });
+    // ファイル名は OR の1本目に入る（表示名での検索を上乗せするため）。
+    const or = where.OR as Record<string, unknown>[];
+    expect(or[0]).toEqual({ fileName: { contains: "foo", mode: "insensitive" } });
     expect(where.targetType).toBe("property");
     expect(where.targetId).toBe(UUID);
     const createdAt = where.createdAt as { gte: Date; lte: Date };
     expect(createdAt.gte).toBeInstanceOf(Date);
     expect(createdAt.lte).toBeInstanceOf(Date);
     expect(createdAt.lte.getTime()).toBeGreaterThan(createdAt.gte.getTime());
+  });
+
+  it("表示名と関係ない語のときは、生のファイル名の検索だけ（条件を増やさない）", async () => {
+    await GET(req(`?fileName=世田谷区`));
+    const or = lastWhere().OR as Record<string, unknown>[];
+    expect(or).toHaveLength(1);
+    expect(or[0]).toEqual({
+      fileName: { contains: "世田谷区", mode: "insensitive" },
+    });
+  });
+
+  it("「謄本」で探すと、昔の registry-auto- の行も拾えるよう条件を上乗せする", async () => {
+    await GET(req(`?fileName=${encodeURIComponent("謄本")}`));
+    const or = lastWhere().OR as Record<string, unknown>[];
+    expect(or).toHaveLength(2);
+    expect(or[1]).toEqual({
+      type: "registry",
+      registryCertificateType: { in: ["owner", "all"] },
+    });
+  });
+
+  it("画面の名前をそのまま貼り付けると、種別と登録日で絞る", async () => {
+    await GET(
+      req(`?fileName=${encodeURIComponent("謄本(所有者事項)_2026-08-25.pdf")}`),
+    );
+    const or = lastWhere().OR as Record<string, unknown>[];
+    expect(or).toHaveLength(2);
+    const derived = or[1] as {
+      type: string;
+      registryCertificateType: { in: string[] };
+      createdAt: { gte: Date; lt: Date };
+    };
+    expect(derived.type).toBe("registry");
+    expect(derived.registryCertificateType).toEqual({ in: ["owner"] });
+    // 日本時間の1日 = UTC の前日15時〜当日15時。
+    expect(derived.createdAt.gte).toEqual(new Date("2026-08-24T15:00:00.000Z"));
+    expect(derived.createdAt.lt).toEqual(new Date("2026-08-25T15:00:00.000Z"));
+  });
+
+  it("上乗せしても、他の絞り込み（対象・期間）は AND のまま", async () => {
+    await GET(
+      req(
+        `?fileName=${encodeURIComponent("謄本")}&targetType=property&from=2026-01-01`,
+      ),
+    );
+    const where = lastWhere();
+    expect(where.targetType).toBe("property");
+    expect(where.createdAt).toBeDefined();
+    expect((where.OR as unknown[]).length).toBe(2);
   });
 
   it("非PII audit：action=attachment_search・検索語の生値は記録しない", async () => {
