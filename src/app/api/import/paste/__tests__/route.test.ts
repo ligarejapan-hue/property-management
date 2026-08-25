@@ -257,6 +257,65 @@ describe("POST /api/import/paste", () => {
     ]);
   });
 
+  it("★DBの氏名が全角英字「ＡＢＣ商事」、貼り付けが半角英字「ABC商事」でも見つかる", async () => {
+    // 本番実測(2026-08-26): is_archived=false 1,312件中、氏名の先頭が全角英数
+    // 5件・全角カナ24件(半角は0件)。正規化後の1文字だけで前方一致すると、
+    // NFKCが全角→半角へ寄せるLatin文字では、DB(全角のまま)の生値と食い違って
+    // 取りこぼす(JS側の正規化一致フィルタに到達する前に脱落する)。
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "w1", name: "ＡＢＣ商事", currentAddress: null, address: null },
+    ]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： ABC商事" }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([
+      { id: "w1", name: "ＡＢＣ商事", matchKind: "name_only" },
+    ]);
+  });
+
+  it("★逆方向=DBの氏名が半角英字「ABC商事」、貼り付けが全角英字「ＡＢＣ商事」でも見つかる", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "w2", name: "ABC商事", currentAddress: null, address: null },
+    ]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： ＡＢＣ商事" }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([
+      { id: "w2", name: "ABC商事", matchKind: "name_only" },
+    ]);
+  });
+
+  it("★全角カナで始まる名前(本番に24件)でも見つかる。貼り付けが半角カナでも同様", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "w3", name: "タナカ商店", currentAddress: null, address: null }, // 全角カナ開始
+    ]);
+    const res = await POST(
+      // 半角カナ("ﾀﾅｶ")で貼り付けても NFKC 正規化(全角カナへ寄る)と、
+      // 前方一致の候補集合(全角/半角の両方)を通じて見つかる。
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： ﾀﾅｶ商店" }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([
+      { id: "w3", name: "タナカ商店", matchKind: "name_only" },
+    ]);
+  });
+
+  it("★幅違いの候補を広げても別人(全角/半角違いなだけの他社)は拾わない", async () => {
+    // 過剰一致になっていないことの確認: 先頭の幅は一致するが氏名全体は
+    // 別物("ＡＢＣ商事" と "ＡＢＣ工業")の場合、JS側の normalizeName
+    // 完全一致で正しく除外されること。
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "w4", name: "ＡＢＣ工業", currentAddress: null, address: null },
+    ]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： ABC商事" }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([]);
+  });
+
   it("★別人(佐藤太郎)は正規化しすぎて拾わない", async () => {
     // 前方一致の絞り込みは姓の先頭1文字だけなので「佐藤」姓の別人も DB から
     // 返ってきうるが、JS 側の normalizeName 完全一致で除外されることを確かめる。

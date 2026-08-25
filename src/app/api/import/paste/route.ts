@@ -23,6 +23,76 @@ import { normalizeName } from "@/lib/normalize";
  */
 const OWNER_CANDIDATE_FETCH_LIMIT = 200;
 
+// ---- 所有者検索の前方一致に使う「先頭1文字」の幅(全角/半角)変換 ----
+// ⚠normalizeName の NFKC 正規化は「空白の除去」と「全角/半角の統一」を両方
+//   行うが、DB への startsWith はその**正規化後**の1文字を**正規化前(生)**の
+//   DB値に対してかけるため、正規化で幅が変わる文字(英数字・カナ)は
+//   取りこぼす。例: 貼り付け「ABC商事」(半角)→ normalizeName後も"A"のまま
+//   (NFKC は全角→半角へ寄せる)。DB「ＡＢＣ商事」(全角)の生値は"Ａ"で始まる
+//   ため startsWith("A") は不一致になり、JS側の正規化一致フィルタに
+//   **到達する前に**候補から脱落する。本番実測(2026-08-26): is_archived=false
+//   1,312件中、氏名の先頭が全角英数5件・全角カナ24件(半角は0件)。
+//   → 先頭1文字を1つに決め打ちせず、全角/半角の両方の表記を集めて OR で
+//   startsWith してから、JS側の normalizeName 完全一致で絞り込む。
+
+/** 半角カナの符号位置(全角カナへの正規化対応表を実行時に作る際の範囲)。 */
+const HALF_WIDTH_KATAKANA_START = 0xff61;
+const HALF_WIDTH_KATAKANA_END = 0xff9f;
+
+/**
+ * 全角カナ(1文字)→半角カナ(1文字)の対応表。
+ * ⚠手書きの対応表は書き間違いの元なので、逆方向(半角→全角)は
+ *   String.prototype.normalize("NFKC") が正しく変換できることを使って
+ *   実行時に自動生成する(半角カナの正規分解は全角カナ)。濁点/半濁点を
+ *   別文字として持つ結合(例: "ｶﾞ"=2文字)は1文字変換の対象外
+ *   (氏名の先頭1文字だけを広げる用途では十分)。
+ */
+const FULL_WIDTH_TO_HALF_WIDTH_KATAKANA: ReadonlyMap<string, string> = (() => {
+  const map = new Map<string, string>();
+  for (let code = HALF_WIDTH_KATAKANA_START; code <= HALF_WIDTH_KATAKANA_END; code++) {
+    const half = String.fromCharCode(code);
+    const full = half.normalize("NFKC");
+    if (full.length === 1 && full !== half) {
+      map.set(full, half);
+    }
+  }
+  return map;
+})();
+
+/** 1文字を半角へ(全角英数記号・全角カナが対象。それ以外はそのまま)。 */
+function toHalfWidthChar(c: string): string {
+  const code = c.charCodeAt(0);
+  if (code >= 0xff01 && code <= 0xff5e) return String.fromCharCode(code - 0xfee0);
+  return FULL_WIDTH_TO_HALF_WIDTH_KATAKANA.get(c) ?? c;
+}
+
+/** 1文字を全角へ(半角英数記号・半角カナが対象。それ以外はそのまま)。 */
+function toFullWidthChar(c: string): string {
+  const code = c.charCodeAt(0);
+  if (code >= 0x0021 && code <= 0x007e) return String.fromCharCode(code + 0xfee0);
+  if (code >= HALF_WIDTH_KATAKANA_START && code <= HALF_WIDTH_KATAKANA_END) {
+    return c.normalize("NFKC");
+  }
+  return c;
+}
+
+/**
+ * 所有者検索の DB 前方一致に使う「先頭1文字」の候補集合を作る。
+ * 生の氏名の先頭1文字・正規化後の氏名の先頭1文字、それぞれの全角/半角版を
+ * 集めて重複を除く(漢字など幅変換の対象外の文字は変換前後で同じ値になり
+ * 自然に1つへ畳まれる)。
+ */
+function ownerSearchPrefixCandidates(rawName: string, normalizedName: string): string[] {
+  const seeds = [rawName.slice(0, 1), normalizedName.slice(0, 1)].filter((c) => c !== "");
+  const variants = new Set<string>();
+  for (const c of seeds) {
+    variants.add(c);
+    variants.add(toHalfWidthChar(c));
+    variants.add(toFullWidthChar(c));
+  }
+  return Array.from(variants);
+}
+
 /** 所有者の重複候補として返す1件。氏名/一致の種類のみ(電話・メール・住所そのものは返さない)。 */
 interface OwnerCandidate {
   id: string;
@@ -175,17 +245,23 @@ export async function POST(request: NextRequest) {
     //   ある「逆」のケース(例: 貼り付け「佐藤花子」/DB「佐藤　花子」)で、
     //   どこに空白を挿し込むべきかを機械的に決められず取りこぼす
     //   (姓と名の境界は文字列からは分からない)。案Bは正規化後の完全一致で
-    //   判定するため、どちらの向きの表記ゆれも取りこぼさない。先頭1文字の
-    //   前方一致は DB 側の値に前置スペースが無い限り(実際の氏名では起きない)
-    //   正規化の影響を受けない安全な絞り込みで、正確な判定は JS 側の
-    //   normalizeName 一致に委ねる。
+    //   判定するため、どちらの向きの表記ゆれも取りこぼさない。
+    //   ⚠ただし先頭1文字を正規化後の1文字**だけ**で startsWith すると、
+    //   今度は全角/半角の**幅**の違いで取りこぼす(下の
+    //   ownerSearchPrefixCandidates のコメント参照・本番実測あり)。
+    //   そのため先頭1文字は複数の幅表記を OR で並べて広く取り、
+    //   正確な判定は JS 側の normalizeName 完全一致に委ねる(広く取って
+    //   正確に絞る、の「広く取る」側だけを変える)。
     const ownerNameRaw = draft.owner?.name.value?.trim() ?? "";
     const normalizedOwnerName = normalizeName(ownerNameRaw);
     let ownerCandidates: OwnerCandidate[] = [];
     if (normalizedOwnerName !== "") {
-      const surnamePrefix = normalizedOwnerName.slice(0, 1);
+      const prefixCandidates = ownerSearchPrefixCandidates(ownerNameRaw, normalizedOwnerName);
       const ownerRows = await prisma.owner.findMany({
-        where: { name: { startsWith: surnamePrefix }, isArchived: false },
+        where: {
+          OR: prefixCandidates.map((prefix) => ({ name: { startsWith: prefix } })),
+          isArchived: false,
+        },
         select: { id: true, name: true, currentAddress: true, address: true },
         take: OWNER_CANDIDATE_FETCH_LIMIT,
       });
