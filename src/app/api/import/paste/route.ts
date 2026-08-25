@@ -12,6 +12,15 @@ import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
 import { judgeDuplicates, type ExistingProperty } from "@/lib/paste-import/find-duplicates";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
+import { buildOwnerDedupKey } from "@/lib/owner-dedup";
+
+/** 所有者の重複候補として返す1件。氏名/一致の強さのみ(電話・メール・住所は返さない)。 */
+interface OwnerCandidate {
+  id: string;
+  name: string;
+  /** strong = 氏名+現住所の鍵が一致(同一人物の可能性が高い)。weak = 氏名だけ一致。 */
+  matchStrength: "strong" | "weak";
+}
 
 // ---------- POST /api/import/paste ----------
 // リクエスト形式:
@@ -127,12 +136,42 @@ export async function POST(request: NextRequest) {
       .filter((c) => duplicates.similarPropertyIds.includes(c.id))
       .map((c) => ({ id: c.id, address: c.address, lotNumber: c.lotNumber }));
 
+    // ---- 所有者の重複候補(設計書 §6: 氏名+住所が一致すれば候補を並べて選ばせる) ----
+    // ⚠draft.owner.currentAddress は「現住所」(Owner.currentAddress と同じ意味)。
+    //   Owner.address は「登記上の住所」で意味が別(設計 2026-08-10-owner-current-address-design.md)。
+    //   貼り付け元は現住所しか持たないので、登記上住所(Owner.address)と比べると
+    //   意味の違う値同士を突き合わせることになり、一致すべきでない/しないケースを
+    //   両方生む。よって照合は Owner.currentAddress を使う。
+    const ownerName = draft.owner?.name.value?.trim() ?? "";
+    let ownerCandidates: OwnerCandidate[] = [];
+    if (ownerName !== "") {
+      const ownerRows = await prisma.owner.findMany({
+        where: { name: ownerName, isArchived: false },
+        select: { id: true, name: true, currentAddress: true },
+        take: 20,
+      });
+
+      const draftAddress = draft.owner?.currentAddress.value?.trim() ?? "";
+      const draftKey = draftAddress ? buildOwnerDedupKey(ownerName, draftAddress) : null;
+
+      ownerCandidates = ownerRows.map((row) => {
+        const candAddress = row.currentAddress?.trim() ?? "";
+        const strong =
+          draftKey !== null &&
+          candAddress !== "" &&
+          buildOwnerDedupKey(row.name, candAddress) === draftKey;
+        return { id: row.id, name: row.name, matchStrength: strong ? "strong" : "weak" };
+      });
+    }
+
     // ⚠貼った原文は返さない（画面側が手元に持っている。往復させるとログや
-    //   ブラウザ履歴に PII が増えるだけ）。デバッグ用フィールドも一切足さない。
+    //   ブラウザ履歴に PII が増えるだけ）。所有者候補も電話・メール・住所は返さず
+    //   id/氏名/一致の強さだけに絞る。デバッグ用フィールドも一切足さない。
     return apiResponse({
       draft,
       duplicates,
       similar,
+      ownerCandidates,
     });
   } catch (error) {
     return handleApiError(error);

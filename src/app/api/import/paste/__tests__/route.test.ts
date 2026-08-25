@@ -10,6 +10,7 @@ const mockSession = { id: "user-1" };
 //   常に false を返す(= 常に403)。リポジトリ内の他テストの慣例に合わせる。
 let mockPerms: unknown = [{ resource: "property", action: "write", granted: true }];
 const mockFindMany = vi.fn();
+const mockOwnerFindMany = vi.fn();
 
 // ⚠api-helpers を vi.importActual すると実物の "@/lib/auth" まで読み込まれ、
 //   next-auth 内部の拡張子なし "next/server" import が node の ESM 解決に失敗する
@@ -40,7 +41,10 @@ vi.mock("@/lib/api-helpers", async () => {
   };
 });
 vi.mock("@/lib/prisma", () => ({
-  prisma: { property: { findMany: (...a: unknown[]) => mockFindMany(...a) } },
+  prisma: {
+    property: { findMany: (...a: unknown[]) => mockFindMany(...a) },
+    owner: { findMany: (...a: unknown[]) => mockOwnerFindMany(...a) },
+  },
 }));
 
 import { POST } from "../route";
@@ -66,6 +70,8 @@ beforeEach(() => {
   mockPerms = [{ resource: "property", action: "write", granted: true }];
   mockFindMany.mockReset();
   mockFindMany.mockResolvedValue([]);
+  mockOwnerFindMany.mockReset();
+  mockOwnerFindMany.mockResolvedValue([]);
 });
 
 describe("POST /api/import/paste", () => {
@@ -130,6 +136,87 @@ describe("POST /api/import/paste", () => {
     const body = await res.json();
     expect(body.duplicates.blocked).toBe(true);
     expect(body.duplicates.blockedByPropertyId).toBe("p-key");
+  });
+
+  it("★所有者の氏名が無ければ所有者候補を引きに行かない", async () => {
+    const res = await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([]);
+    expect(mockOwnerFindMany).not.toHaveBeenCalled();
+  });
+
+  it("★氏名も現住所も一致する既存所有者は「強い一致」で返る", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "o1", name: "山田太郎", currentAddress: "東京都渋谷区X1-1-1" },
+    ]);
+    const res = await POST(
+      jsonReq({
+        text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 山田太郎\n■現住所： 東京都渋谷区X1-1-1",
+      }),
+    );
+    const body = await res.json();
+    expect(mockOwnerFindMany).toHaveBeenCalledTimes(1);
+    expect(body.ownerCandidates).toEqual([
+      { id: "o1", name: "山田太郎", matchStrength: "strong" },
+    ]);
+  });
+
+  it("★氏名だけ一致する既存所有者は「弱い一致」で返る（住所が違う/無い）", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "o2", name: "山田太郎", currentAddress: "大阪府大阪市Y2-2-2" },
+    ]);
+    const res = await POST(
+      jsonReq({
+        text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 山田太郎\n■現住所： 東京都渋谷区X1-1-1",
+      }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([
+      { id: "o2", name: "山田太郎", matchStrength: "weak" },
+    ]);
+  });
+
+  it("★所有者検索は isArchived: false を指定する(除外はサーバー側クエリで行う)", async () => {
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 山田太郎" }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockOwnerFindMany).toHaveBeenCalledTimes(1);
+    const args = mockOwnerFindMany.mock.calls[0][0] as { where?: { isArchived?: boolean } };
+    expect(args.where?.isArchived).toBe(false);
+  });
+
+  it("★所有者候補のレスポンスに電話番号・メールアドレス・住所を含めない", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      {
+        id: "o3",
+        name: "山田太郎",
+        currentAddress: "東京都渋谷区X1-1-1",
+        phone: "09099999999",
+        email: "yamada@example.com",
+        address: "登記上の住所テキスト",
+      },
+    ]);
+    const res = await POST(
+      jsonReq({
+        text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 山田太郎\n■現住所： 東京都渋谷区X1-1-1",
+      }),
+    );
+    const body = await res.json();
+    // ⚠body.draft.owner.currentAddress には貼った現住所がそのまま入る(既存の仕様=
+    //   確認画面用の下書きが原文の構造化値を持つのは正しい)。ここで確かめたいのは
+    //   「所有者候補(ownerCandidates)」側にDBの電話・メール・登記住所が絶対に
+    //   漏れていないことなので、対象を ownerCandidates に絞って確認する。
+    const rawCandidates = JSON.stringify(body.ownerCandidates);
+    expect(rawCandidates).not.toContain("09099999999");
+    expect(rawCandidates).not.toContain("yamada@example.com");
+    expect(rawCandidates).not.toContain("登記上の住所テキスト");
+    // candidate.currentAddress の値そのもの(現住所)も候補には含めない。
+    expect(rawCandidates).not.toContain("渋谷区X1-1-1");
+    expect(body.ownerCandidates).toEqual([
+      { id: "o3", name: "山田太郎", matchStrength: "strong" },
+    ]);
   });
 
   it("★下書きに貼った原文をそのまま含めない（PII を返しっぱなしにしない）", async () => {
