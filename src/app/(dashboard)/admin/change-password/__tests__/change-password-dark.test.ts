@@ -69,9 +69,12 @@ describe("admin/change-password/page.tsx dark: 配色 (admin残)", () => {
     expect(src).toContain("dark:border-green-500/20");
   });
 
-  // --- アイコン文字 ---
-  it("アイコンに dark:text-gray-200 がある", () => {
-    expect(src).toContain("dark:text-gray-200");
+  // --- 題名 ---
+  // 見出し横の鍵アイコンは廃止(2026-08-25 の見出し統一)。題名は共通部品
+  // PageHeader が描き、暗面の配色も部品側が持つ。
+  it("題名は PageHeader で描く", () => {
+    expect(src).toContain('from "@/components/ui/page-header"');
+    expect(src).toContain('<PageHeader title="パスワード変更" />');
   });
 
   // --- ライト側不変担保 ---

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { SearchField } from "@/components/ui/search-field";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
@@ -139,16 +140,18 @@ export default function UsersPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">ユーザー管理</h2>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-        >
-          <Plus className="h-4 w-4" />
-          新規ユーザー作成
-        </button>
-      </div>
+      <PageHeader
+        title="ユーザー管理"
+        actions={
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          >
+            <Plus className="h-4 w-4" />
+            新規ユーザー作成
+          </button>
+        }
+      />
 
       {message && (
         <div

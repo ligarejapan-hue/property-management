@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface HelpSection {
@@ -110,12 +111,10 @@ export default function HelpPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">ヘルプ</h2>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          システムの使い方や各機能の説明をご覧いただけます。
-        </p>
-      </div>
+      <PageHeader
+        title="ヘルプ"
+        description="システムの使い方や各機能の説明をご覧いただけます。"
+      />
 
       <div className="rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
         {helpSections.map((section, index) => (

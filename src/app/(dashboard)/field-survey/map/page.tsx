@@ -34,7 +34,7 @@ export default async function FieldSurveyMapPage() {
     <div className="flex h-[calc(100dvh-3.5rem)] flex-col">
       <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
         <div>
-          <h1 className="text-lg font-semibold text-gray-800 dark:text-gray-100">
+          <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">
             現地調査マップ
           </h1>
           <p className="text-xs text-gray-500 dark:text-gray-400">

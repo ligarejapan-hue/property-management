@@ -107,7 +107,7 @@ export default function AttachmentTrashPage() {
         </Link>
         <span className="mx-2">/</span>
         <Link href="/admin/attachments" className="hover:text-gray-700 dark:hover:text-gray-300">
-          添付横断検索
+          添付ファイル検索
         </Link>
         <span className="mx-2">/</span>
         <span className="text-gray-900 dark:text-gray-100">ゴミ箱</span>

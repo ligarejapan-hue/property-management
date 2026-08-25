@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Search, Loader2, Plus, Trash2, AlertTriangle, RotateCcw, Download } from "lucide-react";
@@ -962,9 +963,7 @@ function PropertiesPageInner() {
 
   return (
     <div className="pt-2">
-      <div className="mb-4">
-        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">物件一覧</h2>
-      </div>
+      <PageHeader title="物件一覧" />
 
       {/* Action row */}
       <div className="mb-4 flex flex-wrap justify-end gap-2">

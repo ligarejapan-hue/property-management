@@ -216,7 +216,7 @@ export default function TextHygieneAuditPage() {
       </nav>
 
       <PageHeader
-        title="テキスト衛生監査（制御文字・文字化け）"
+        title="テキスト衛生監査"
         description={<>所有者の氏名・氏名カナ・住所・備考に紛れた制御文字・ゼロ幅・双方向制御・文字化け（U+FFFD /mojibake）を検出します。<span className="font-medium">不可視の制御文字のみ</span>が自動除去可（情報を失いません）。<span className="font-medium">文字化け（U+FFFD / mojibake）</span>は原本の取り直しが必要なため自動除去せず、確認のみです。備考は絵文字保護のため確認のみ（自動除去しません）。</>}
       />
 

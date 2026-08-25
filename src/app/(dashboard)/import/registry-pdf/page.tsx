@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import {
   FileText,
@@ -610,10 +611,10 @@ export default function RegistryPdfPage() {
   return (
     <div className="mx-auto max-w-4xl">
       <ImportSwitcher />
-      <h2 className="mb-2 text-2xl font-bold text-gray-800 dark:text-gray-100">謄本PDF取込</h2>
-      <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-        登記簿謄本のPDFまたはテキストから物件情報を抽出・登録します
-      </p>
+      <PageHeader
+        title="謄本PDF取込"
+        description="登記簿謄本のPDFまたはテキストから物件情報を抽出・登録します。"
+      />
 
       <StepIndicator current={step} />
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
@@ -381,18 +382,20 @@ export default function CandidateQueue({
 
   return (
     <div className="p-4 sm:p-6">
-      <h1 className="mb-1 text-lg font-semibold text-gray-900 dark:text-gray-100">
-        物件化の完成待ち
-        {rows !== null && (
-          <span
-            data-testid="candidate-count"
-            className="ml-2 align-middle rounded-full bg-emerald-50 dark:bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300"
-          >
-            {rows.length}
-            {truncated ? "件以上" : "件"}
-          </span>
-        )}
-      </h1>
+      <PageHeader
+        title="物件化の完成待ち"
+        actions={
+          rows !== null ? (
+            <span
+              data-testid="candidate-count"
+              className="rounded-full bg-emerald-50 dark:bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300"
+            >
+              {rows.length}
+              {truncated ? "件以上" : "件"}
+            </span>
+          ) : undefined
+        }
+      />
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-gray-500 dark:text-gray-400">
           現地で撮影された「物件化候補」で、まだ物件になっていないものです。

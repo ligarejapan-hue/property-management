@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { fetchProperties } from "@/lib/api-client";
 import { debounce } from "@/lib/debounce";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
@@ -144,6 +145,10 @@ export default function SalesSheetNewEntryPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
+      <PageHeader
+        title="販売図面を作成"
+        description="販売図面(マイソク)を作る物件を選んでください。"
+      />
       <SalesSheetPropertyPicker
         rows={rows}
         canWrite={canWriteProperty}

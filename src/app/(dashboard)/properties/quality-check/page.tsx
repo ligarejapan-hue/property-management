@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import {
   Loader2,
@@ -136,17 +137,19 @@ export default function QualityCheckPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">データ品質チェック</h2>
-        <button
-          onClick={runCheck}
-          disabled={loading}
-          className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          再チェック
-        </button>
-      </div>
+      <PageHeader
+        title="物件データエラー確認"
+        actions={
+          <button
+            onClick={runCheck}
+            disabled={loading}
+            className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            再チェック
+          </button>
+        }
+      />
 
       {/* Summary cards */}
       {summary && (
