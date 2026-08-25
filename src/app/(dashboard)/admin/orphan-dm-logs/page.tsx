@@ -128,7 +128,7 @@ export default function OrphanDmLogsPage() {
       <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
         <Link href="/admin" className="hover:text-gray-700 dark:hover:text-gray-300">管理</Link>
         <span className="mx-2">/</span>
-        <span className="text-gray-900 dark:text-gray-100">孤児DM記録の訂正</span>
+        <span className="text-gray-900 dark:text-gray-100">送付記録の訂正</span>
       </nav>
 
       <PageHeader

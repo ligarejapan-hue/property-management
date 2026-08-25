@@ -20,6 +20,9 @@
  *    **飛んだ先のタブの名前**と一致させる(別の describe で見る)。
  *  - 題名は **素の文字列** (`title="…"`) で書く。式で組み立てた題名は機械で
  *    照合できないため null 扱い=失敗させる。
+ *  - パンくず(`<nav>` の末尾の現在地)を**持っている画面だけ**、その文字も同じ
+ *    名前かを見る(@codex #413 R1 P2: 題名だけ直してパンくずに旧名が残った)。
+ *    パンくずを持たない画面は対象外(持てとは言わない)。
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
@@ -131,6 +134,51 @@ describe("左メニューの名前 = 開いた先のページの題名", () => {
         `${href} は PageHeader で題名を描いていない(手書きの見出しは位置・大きさが揃わない)`,
       ).not.toBeNull();
       expect(title, `${href} の題名がメニューの名前と違う`).toBe(label);
+    },
+  );
+});
+
+/**
+ * パンくずの現在地(`<nav>` 内の最後の `text-gray-900` な span)を取り出す(純関数)。
+ * パンくずが無ければ null。
+ */
+export function extractBreadcrumbCurrent(src: string): string | null {
+  const nav = /<nav[^>]*>([\s\S]*?)<\/nav>/.exec(src);
+  if (!nav) return null;
+  const spans = [...nav[1].matchAll(/<span className="text-gray-900[^"]*">([^<]*)<\/span>/g)];
+  if (spans.length === 0) return null;
+  return spans[spans.length - 1][1].trim();
+}
+
+describe("パンくずの現在地(あれば)も同じ名前", () => {
+  it("パンくずが無ければ null(持たない画面を落とさない)", () => {
+    expect(extractBreadcrumbCurrent("<div>題名だけ</div>")).toBeNull();
+  });
+  it("末尾の現在地を取り出す", () => {
+    expect(
+      extractBreadcrumbCurrent(
+        '<nav><a>管理</a><span className="mx-2">/</span>' +
+          '<span className="text-gray-900 dark:text-gray-100">送付記録の訂正</span></nav>',
+      ),
+    ).toBe("送付記録の訂正");
+  });
+
+  it("パンくずを持つ画面が実際にある(全部 null で空振り緑にならない)", () => {
+    const withCrumb = titledLeaves().filter((l) => {
+      const f = sourceOf(l.href);
+      return existsSync(f) && extractBreadcrumbCurrent(read(f)) !== null;
+    });
+    expect(withCrumb.length).toBeGreaterThanOrEqual(6);
+  });
+
+  it.each(titledLeaves().map((l) => [l.href, l.label] as const))(
+    "%s のパンくずは「%s」(パンくずがある場合)",
+    (href, label) => {
+      const file = sourceOf(href);
+      if (!existsSync(file)) return;
+      const crumb = extractBreadcrumbCurrent(read(file));
+      if (crumb === null) return; // パンくずを持たない画面は対象外
+      expect(crumb, `${href} のパンくずの現在地がメニューの名前と違う`).toBe(label);
     },
   );
 });
