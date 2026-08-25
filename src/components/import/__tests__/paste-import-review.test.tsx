@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
-import { PasteImportReview } from "../paste-import-review";
+import { PasteImportReview, foldNoColumnFieldsIntoNote } from "../paste-import-review";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
 
 const draft = buildPasteDraft(
@@ -16,6 +16,18 @@ const draft = buildPasteDraft(
 const html = renderToStaticMarkup(
   createElement(PasteImportReview, { draft, rawText: "■物件所在地： 東京都A区B1-2-3" }),
 );
+
+/**
+ * `data-field="X"` から次の `data-field="` の手前までを取り出す(その欄の描画ブロックだけ
+ * を見るため)。「案内文がどこかに出た」ではなく「その欄の中に出た」ことを確かめたい。
+ */
+function extractFieldBlock(source: string, fieldKey: string): string {
+  const marker = `data-field="${fieldKey}"`;
+  const start = source.indexOf(marker);
+  if (start === -1) return "";
+  const next = source.indexOf('data-field="', start + marker.length);
+  return next === -1 ? source.slice(start) : source.slice(start, next);
+}
 
 describe("PasteImportReview（確認画面）", () => {
   it("拾えた値を表示する", () => {
@@ -150,5 +162,60 @@ describe("PasteImportReview（3状態の描き分け・空洞テスト対策）"
 
   it("所有者なしで登録する選択肢が常に存在する", () => {
     expect(html).toContain("所有者なしで登録する");
+  });
+});
+
+// ============================================================
+// レビュー指摘(Critical/Important)対応: 土地面積・築年は Property に対応する
+// DB 列が無い(commit API の契約にも無い)。値を無言で捨てず備考へ回す。
+// 「builtYear は Property の列として実在する」というレビュー時点の指摘は誤りだった
+// (schema.prisma の builtYear は Building モデルの列。Property モデルには存在しない。
+//  `awk '/^model Property \{/,/^\}/' prisma/schema.prisma | grep -i built` はヒット無し)。
+// このため builtYear も landArea と同じ扱い(備考へ行を足す)にした。
+// ============================================================
+
+describe("foldNoColumnFieldsIntoNote(土地面積・築年を備考へ畳み込む純関数)", () => {
+  it("両方空なら備考をそのまま返す(空行を作らない)", () => {
+    expect(foldNoColumnFieldsIntoNote("既存の備考", { landArea: "", builtYear: "" })).toBe(
+      "既存の備考",
+    );
+  });
+
+  it("土地面積だけあれば行を1つ足す(既存の備考は消えない)", () => {
+    expect(foldNoColumnFieldsIntoNote("既存の備考", { landArea: "120.5", builtYear: "" })).toBe(
+      "既存の備考\n土地面積: 120.5",
+    );
+  });
+
+  it("築年だけあれば行を1つ足す", () => {
+    expect(foldNoColumnFieldsIntoNote("既存の備考", { landArea: "", builtYear: "1998" })).toBe(
+      "既存の備考\n築年: 1998",
+    );
+  });
+
+  it("両方あれば2行とも足す(備考が空でも先頭に空行を作らない)", () => {
+    expect(foldNoColumnFieldsIntoNote("", { landArea: "120.5", builtYear: "1998" })).toBe(
+      "土地面積: 120.5\n築年: 1998",
+    );
+  });
+});
+
+describe("画面: 専用の欄が無い旨の案内(空洞テスト対策=その欄のブロック内に限定して確認)", () => {
+  it("土地面積の欄のブロック内に案内が出る", () => {
+    const block = extractFieldBlock(html, "landArea");
+    expect(block).not.toBe("");
+    expect(block).toContain("専用の欄が無いため、備考に記録されます");
+  });
+
+  it("築年の欄のブロック内に案内が出る", () => {
+    const block = extractFieldBlock(html, "builtYear");
+    expect(block).not.toBe("");
+    expect(block).toContain("専用の欄が無いため、備考に記録されます");
+  });
+
+  it("住所など、対応する列がある欄には案内が出ない(過剰表示になっていない)", () => {
+    const block = extractFieldBlock(html, "address");
+    expect(block).not.toBe("");
+    expect(block).not.toContain("専用の欄が無いため");
   });
 });

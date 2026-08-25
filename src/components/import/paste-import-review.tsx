@@ -91,6 +91,47 @@ const FIELD_WARNING_CODE: Partial<Record<PropertyFieldKey, DraftWarningCode>> = 
   propertyType: "property_type_unknown",
 };
 
+/**
+ * ⚠Property に対応する列が無い欄(レビュー指摘: Critical/Important)。
+ * `landArea`(土地面積)は元々 Property に列が無い。`builtYear`(築年)も、
+ * schema.prisma の `builtYear Int? @map("built_year")` は Building モデルの列であり
+ * Property モデルには同名の列が存在しない(確認: `awk '/^model Property \{/,/^\}/'
+ * prisma/schema.prisma | grep -i built` はヒットなし)。/api/import/paste/commit の
+ * CommitBody.property にもどちらの欄も無い(レビュー済みAPI契約そのまま)。
+ * migration 追加は設計書で禁止されているため、値があれば備考へ行として足す
+ * (`foldNoColumnFieldsIntoNote`)。欄自体は編集可能なまま残し、その旨をここで明記する。
+ */
+const FIELD_NO_COLUMN_HINT: Partial<Record<PropertyFieldKey, string>> = {
+  landArea: "※専用の欄が無いため、備考に記録されます",
+  builtYear: "※専用の欄が無いため、備考に記録されます",
+};
+
+/** 備考の行として使う日本語ラベル(登録時に "ラベル: 値" の形で備考へ足す)。 */
+const NOTE_ONLY_FIELD_LABEL: Record<"landArea" | "builtYear", string> = {
+  landArea: "土地面積",
+  builtYear: "築年",
+};
+
+/**
+ * 専用の DB 列が無い欄(土地面積・築年)の値を、既存の備考を消さずに行として足す。
+ * 値が無い欄は行を足さない。両方無ければ元の備考をそのまま返す(空洞な空行を作らない)。
+ */
+export function foldNoColumnFieldsIntoNote(
+  baseNote: string,
+  values: { landArea: string; builtYear: string },
+): string {
+  const extraLines: string[] = [];
+  if (values.landArea.trim() !== "") {
+    extraLines.push(`${NOTE_ONLY_FIELD_LABEL.landArea}: ${values.landArea.trim()}`);
+  }
+  if (values.builtYear.trim() !== "") {
+    extraLines.push(`${NOTE_ONLY_FIELD_LABEL.builtYear}: ${values.builtYear.trim()}`);
+  }
+  if (extraLines.length === 0) return baseNote;
+  const base = baseNote.trim();
+  return base === "" ? extraLines.join("\n") : `${base}\n${extraLines.join("\n")}`;
+}
+
 export function defaultPropertyValues(draft: PasteDraft): PropertyValues {
   return {
     address: draft.property.address.value ?? "",
@@ -136,6 +177,7 @@ function FieldRow({
   value,
   sourceLabel,
   warningMessage,
+  noColumnHint,
   onChange,
   selectOptions,
 }: {
@@ -144,6 +186,8 @@ function FieldRow({
   value: string;
   sourceLabel: string | null;
   warningMessage?: string;
+  /** 専用のDB列が無い欄への案内(常に表示。値の有無に関係ない固定の注意書き)。 */
+  noColumnHint?: string;
   onChange?: (value: string) => void;
   selectOptions?: { value: string; label: string }[];
 }) {
@@ -199,6 +243,11 @@ function FieldRow({
         {hasValue && warningMessage && (
           <p role="alert" className="mt-0.5 text-[11px] text-amber-700 dark:text-amber-400">
             {warningMessage}
+          </p>
+        )}
+        {noColumnHint && (
+          <p className="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">
+            {noColumnHint}
           </p>
         )}
       </div>
@@ -337,6 +386,7 @@ export function PasteImportReview({
               value={pValues[f.key]}
               sourceLabel={draftField.sourceLabel}
               warningMessage={warning?.message}
+              noColumnHint={FIELD_NO_COLUMN_HINT[f.key]}
               onChange={(v) => onPropertyFieldChange?.(f.key, v)}
               selectOptions={
                 f.key === "propertyType"

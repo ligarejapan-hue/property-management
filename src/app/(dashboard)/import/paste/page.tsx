@@ -20,6 +20,7 @@ import {
   defaultPropertyValues,
   defaultOwnerValues,
   defaultOwnerMode,
+  foldNoColumnFieldsIntoNote,
   type PasteDuplicatesResult,
   type SimilarPropertySummary,
   type OwnerCandidateSummary,
@@ -131,6 +132,14 @@ export default function PasteImportPage() {
     setRegistering(true);
     setRegisterError(null);
     try {
+      // ⚠土地面積・築年は Property に対応する列が無い(commit API の契約にも無い)。
+      //   画面では編集可能な欄として出しているため、値を無言で捨てず備考へ行として
+      //   足す(既存の備考は消さない)。詳細は paste-import-review.tsx の
+      //   FIELD_NO_COLUMN_HINT のコメント参照。
+      const finalNote = foldNoColumnFieldsIntoNote(note, {
+        landArea: propertyValues.landArea,
+        builtYear: propertyValues.builtYear,
+      });
       const body = {
         property: {
           address: propertyValues.address,
@@ -141,7 +150,7 @@ export default function PasteImportPage() {
           exclusiveArea: propertyValues.exclusiveArea || null,
           layoutType: propertyValues.layoutType || null,
           occupancyStatus: propertyValues.occupancyStatus || null,
-          note: note || null,
+          note: finalNote || null,
         },
         owner:
           ownerMode === "new" && ownerValues.name.trim() !== ""
