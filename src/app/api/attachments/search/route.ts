@@ -23,8 +23,9 @@ import { writeAuditLog } from "@/lib/audit";
  *    任意の owner PII を含み得るため owner PII 全フィールド（name/kana/phone/zip/address/note/
  *    email/corporate_number）が edit/full/read（getOwnerDisplayConfig で解決）。
  *  - 既定で isDeleted=false（削除済みは除外）。
- *  - 返却は **メタデータのみ**（id / fileName / type / createdAt / targetType /
- *    targetId）。**ファイル本体 URL(fileUrl)は select せず結果に一切載せない**
+ *  - 返却は **メタデータのみ**（id / fileName / type / registryCertificateType /
+ *    createdAt / targetType / targetId）。**ファイル本体 URL(fileUrl)は select せず
+ *    結果に一切載せない**
  *    （ダウンロードは物件詳細など本来の権限導線でのみ。横断検索は所在把握用）。
  *  - 検索操作は非PII audit に記録する（検索語の生値は載せず、フィルタの有無/種別
  *    と件数のみ）。
@@ -126,6 +127,9 @@ export async function GET(request: Request) {
         id: true,
         fileName: true,
         type: true,
+        // 謄本の表示名を組み立てる材料（owner|all の2値・非PII）。
+        // これが記録されている＝自動取得で入った分、という印にもなる。
+        registryCertificateType: true,
         createdAt: true,
         targetType: true,
         targetId: true,

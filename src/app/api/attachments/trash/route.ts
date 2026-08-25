@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
+import { registryDisplayName } from "@/lib/attachments/registry-display-name";
 
 /**
  * GET /api/attachments/trash — 削除済み（soft-delete）添付の一覧（ゴミ箱・admin オーバーサイト）。
@@ -41,6 +42,8 @@ export async function GET(_request: Request) {
         id: true,
         fileName: true,
         type: true,
+        // 謄本の表示名を組み立てる材料（非PII）。生の fileName は返さない。
+        registryCertificateType: true,
         createdAt: true,
         deletedAt: true,
         targetType: true,
@@ -50,9 +53,15 @@ export async function GET(_request: Request) {
       take: RESULT_LIMIT,
     });
 
-    // registry は fileName に PII を含み得るため generic に伏せる（attachment-tab と同方針）。
-    const data = rows.map((r) =>
-      r.type === "registry" ? { ...r, fileName: "registry.pdf" } : r,
+    // registry は fileName に PII を含み得るため生の名前を返さない（attachment-tab と同方針）。
+    // 名前は種別＋登録日から組み立てる共通関数に一本化する（画面ごとに違う名前を出さない）。
+    const data = rows.map(({ registryCertificateType, ...r }) =>
+      r.type === "registry"
+        ? {
+            ...r,
+            fileName: registryDisplayName(registryCertificateType, r.createdAt),
+          }
+        : r,
     );
 
     await writeAuditLog({

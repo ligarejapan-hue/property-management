@@ -226,6 +226,8 @@ describe("GET /api/attachments/search", () => {
       id: true,
       fileName: true,
       type: true,
+      // 謄本の表示名を組み立てる材料（owner|all の2値・非PII）。
+      registryCertificateType: true,
       createdAt: true,
       targetType: true,
       targetId: true,

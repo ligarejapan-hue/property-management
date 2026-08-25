@@ -8,6 +8,11 @@ import { PageHeader } from "@/components/ui/page-header";
 import Link from "next/link";
 import { Loader2, Search, RotateCcw } from "lucide-react";
 import { formatJaDateTime } from "@/lib/format-datetime";
+import {
+  isAutoFetchedRegistry,
+  registryDisplayName,
+} from "@/lib/attachments/registry-display-name";
+import { attachmentTargetHref } from "@/lib/attachments/target-link";
 
 /**
  * 添付横断検索（管理者限定）。
@@ -21,9 +26,26 @@ interface AttachmentHit {
   id: string;
   fileName: string;
   type: string;
+  /** 謄本の請求種別（owner|all）。記録がある＝自動取得で入った分・非PII。 */
+  registryCertificateType?: string | null;
   createdAt: string;
   targetType: string;
   targetId: string;
+}
+
+/**
+ * 一覧に出す名前。
+ *
+ * **自動取得で入った謄本だけ**、他の画面と同じ決まりごとの名前に揃える
+ * （以前は `registry-auto-<受付番号>.pdf` という機械の名前がそのまま出ていた）。
+ * ⚠**手作業で取り込んだ分は元のファイル名のまま**にする（発注者決定 2026-08-25）。
+ *   この画面はファイル名で探すための画面で、元の名前が手掛かりになるため。
+ */
+function hitDisplayName(hit: AttachmentHit): string {
+  if (hit.type === "registry" && isAutoFetchedRegistry(hit.registryCertificateType)) {
+    return registryDisplayName(hit.registryCertificateType, hit.createdAt);
+  }
+  return hit.fileName;
 }
 
 interface Filters {
@@ -285,7 +307,7 @@ export default function AttachmentSearchPage() {
                     {formatJaDateTime(hit.createdAt)}
                   </td>
                   <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-gray-100 max-w-md truncate">
-                    {hit.fileName}
+                    <AttachmentNameCell hit={hit} />
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-sm">
                     <span className="inline-flex rounded-full bg-gray-100 dark:bg-gray-800 px-2.5 py-0.5 text-xs font-medium text-gray-800 dark:text-gray-200">
@@ -320,5 +342,35 @@ export default function AttachmentSearchPage() {
         )}
       </p>
     </div>
+  );
+}
+
+/**
+ * ファイル名のセル。行き先がある添付は、名前を押すとその先へ**別タブ**で移動する。
+ *
+ * ⚠別タブにするのは、せっかくの検索結果を失わせないため（この画面は条件を組み立てて
+ *   探す画面で、戻ってきたときに結果が消えていると探し直しになる）。
+ * ⚠行き先の無い種別は今までどおり押せない文字のまま（押せそうなのに 404 を作らない）。
+ * ⚠この画面はメタデータしか受け取っていない（物件名・住所は API が返さない）ので、
+ *   リンクの文字はあくまでファイル名。ここに物件名を足すには API の返却を増やす必要があり、
+ *   それは個人情報の出口を増やすことになるので**やらない**。
+ */
+export function AttachmentNameCell({ hit }: { hit: AttachmentHit }) {
+  const name = hitDisplayName(hit);
+  const href = attachmentTargetHref(hit.targetType, hit.targetId);
+  if (!href) {
+    return <span title={name}>{name}</span>;
+  }
+  const targetLabel = TARGET_TYPE_LABELS[hit.targetType] ?? hit.targetType;
+  return (
+    <Link
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-indigo-600 dark:text-indigo-400 hover:underline"
+      title={`${name}（押すと${targetLabel}のページを別タブで開きます）`}
+    >
+      {name}
+    </Link>
   );
 }

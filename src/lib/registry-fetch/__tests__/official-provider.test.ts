@@ -10,6 +10,7 @@ import { createRegistryFetchThrottle } from "../throttle";
 import { RegistryFetchError } from "../errors";
 import { __resetPurchaseChainForTest } from "../purchase-safety";
 import type { RegistryFetchProvider, RegistryFetchErrorCode } from "../types";
+import { REGISTRY_STORED_FILE_NAME } from "@/lib/attachments/registry-display-name";
 
 const VALID_PDF = Buffer.from("%PDF-1.4 mock registry bytes");
 
@@ -192,7 +193,7 @@ describe("OfficialRegistryProvider（PR-2 実フロー・fake page 注入・外�
       ref: "prop-1",
     });
     expect(res.pdfBuffer).toBe(VALID_PDF);
-    expect(res.fileName).toBe("registry-auto-req-fixed.pdf"); // 非PII の generic filename
+    expect(res.fileName).toBe(REGISTRY_STORED_FILE_NAME); // 非PII・全経路共通の保存名
     expect(res.source).toBe("official");
     expect(res.providerRequestId).toBe("req-fixed");
     expect(res.fetchedAt.getTime()).toBe(0);
@@ -493,7 +494,7 @@ describe("段階②: 所在候補の有料取得（fetchByLocation・fake page �
     expect(result.pdfBuffer).toBe(VALID_PDF);
     expect(result.source).toBe("official");
     // 非PII filename（地番・所有者名を含まない）
-    expect(result.fileName).toBe("registry-auto-req-fixed.pdf");
+    expect(result.fileName).toBe(REGISTRY_STORED_FILE_NAME);
     expect(page.calls).toEqual(["login", "fetchByLocation", "close"]);
   });
 

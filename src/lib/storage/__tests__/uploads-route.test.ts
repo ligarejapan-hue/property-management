@@ -28,6 +28,7 @@ import {
 } from "@/lib/uploads-authorization";
 import { buildUploadsEtag } from "@/lib/uploads-etag";
 import { writeAuditLog } from "@/lib/audit";
+import { registryContentDisposition } from "@/lib/attachments/registry-display-name";
 
 vi.mock("@/lib/api-helpers", () => {
   class ApiError extends Error {
@@ -362,6 +363,9 @@ describe("F11: registry 配信ヘッダ/監査 + 配信現状ロック", () => {
     isRegistry: true as const,
     attachmentId: "att-1",
     propertyId: "prop-1",
+    // 保存名の材料（非PII）。JST 2026-08-25 12:00。
+    certificateType: "owner" as string | null,
+    createdAt: new Date("2026-08-25T03:00:00.000Z") as Date | null,
   };
 
   beforeEach(() => {
@@ -407,20 +411,50 @@ describe("F11: registry 配信ヘッダ/監査 + 配信現状ロック", () => {
     expect(JSON.stringify(audit.detail)).not.toContain("fileName");
   });
 
-  it("registry download (?download=1): generic filename の attachment / 監査 registry_pdf_download", async () => {
+  it("registry download (?download=1): 種別＋登録日の保存名 / ASCII フォールバック維持 / 監査 registry_pdf_download", async () => {
     const parts = await writeRegistryPdf();
     vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce(REGISTRY_META);
 
     const res = await callGet(parts, { query: "?download=1" });
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
+    // 手元に落ちる名前を決めるのはこのヘッダ。共通関数と同じ値であることを固定する。
     expect(res.headers.get("Content-Disposition")).toBe(
-      'attachment; filename="registry.pdf"',
+      registryContentDisposition({
+        downloadIntent: true,
+        certType: "owner",
+        createdAt: new Date("2026-08-25T03:00:00.000Z"),
+      }),
     );
+    expect(res.headers.get("Content-Disposition")).toContain(
+      'filename="registry.pdf"',
+    );
+    const ext = (res.headers.get("Content-Disposition") ?? "").split(
+      "filename*=UTF-8''",
+    )[1];
+    expect(decodeURIComponent(ext)).toBe("謄本(所有者事項)_2026-08-25.pdf");
 
     expect(writeAuditLog).toHaveBeenCalledTimes(1);
     const audit = vi.mocked(writeAuditLog).mock.calls[0][0];
     expect(audit.action).toBe("registry_pdf_download");
+  });
+
+  it("registry download: 種別が記録されていない謄本でも、元ファイル名は保存名に出さない", async () => {
+    const parts = await writeRegistryPdf();
+    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce({
+      ...REGISTRY_META,
+      certificateType: null,
+    });
+
+    const res = await callGet(parts, { query: "?download=1" });
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const ext = disposition.split("filename*=UTF-8''")[1];
+    expect(decodeURIComponent(ext)).toBe("謄本_2026-08-25.pdf");
+    // ヘッダは ASCII のみ（生の日本語・改行を混ぜないことを、符号で直接確かめる）。
+    const codes = [...disposition].map((c) => c.charCodeAt(0));
+    expect(codes.includes(13)).toBe(false);
+    expect(codes.includes(10)).toBe(false);
+    expect(codes.every((c) => c >= 0x20 && c <= 0x7e)).toBe(true);
   });
 
   it("registry: propertyId が null の場合 detail は undefined（非 PII 維持）", async () => {
@@ -507,6 +541,9 @@ describe("ETag/304: 非 registry の条件付き GET", () => {
     isRegistry: true as const,
     attachmentId: "att-1",
     propertyId: "prop-1",
+    // 保存名の材料（非PII）。JST 2026-08-25 12:00。
+    certificateType: "owner" as string | null,
+    createdAt: new Date("2026-08-25T03:00:00.000Z") as Date | null,
   };
 
   beforeEach(() => {
@@ -688,7 +725,8 @@ describe("ETag/304: 非 registry の条件付き GET", () => {
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
-    expect(res.headers.get("Content-Disposition")).toBe(
+    // ここが見張るのは「添付として落ちること」。保存名そのものは共通関数側で固定する。
+    expect(res.headers.get("Content-Disposition")).toContain(
       'attachment; filename="registry.pdf"',
     );
     expect(vi.mocked(writeAuditLog).mock.calls[0][0].action).toBe(
@@ -760,6 +798,9 @@ describe("19-A: 無認証 401 ヘッダ衛生 + registry ETag 不発行ロック
     isRegistry: true as const,
     attachmentId: "att-1",
     propertyId: "prop-1",
+    // 保存名の材料（非PII）。JST 2026-08-25 12:00。
+    certificateType: "owner" as string | null,
+    createdAt: new Date("2026-08-25T03:00:00.000Z") as Date | null,
   };
 
   beforeEach(() => {
@@ -872,7 +913,8 @@ describe("19-A: 無認証 401 ヘッダ衛生 + registry ETag 不発行ロック
     expect(res.status).toBe(200);
     expect(res.headers.get("ETag")).toBeNull();
     expect(res.headers.get("Cache-Control")).toBe("no-store");
-    expect(res.headers.get("Content-Disposition")).toBe(
+    // ここが見張るのは「添付として落ちること」。保存名そのものは共通関数側で固定する。
+    expect(res.headers.get("Content-Disposition")).toContain(
       'attachment; filename="registry.pdf"',
     );
   });
