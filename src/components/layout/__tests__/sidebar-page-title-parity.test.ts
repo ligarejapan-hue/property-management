@@ -20,13 +20,16 @@
  *    **飛んだ先のタブの名前**と一致させる(別の describe で見る)。
  *  - 題名は **素の文字列** (`title="…"`) で書く。式で組み立てた題名は機械で
  *    照合できないため null 扱い=失敗させる。
+ *  - 画面の部品(src/components)が**自前の `<h1>` を持たない**ことも見る
+ *    (@codex #413 R2 P2: ページに題名を足したら、子部品が同じ題名の h1 を
+ *    すでに持っていて二重になった)。例外は allow-list に理由を1行で書く。
  *  - パンくず(`<nav>` の末尾の現在地)を**持っている画面だけ**、その文字も同じ
  *    名前かを見る(@codex #413 R1 P2: 題名だけ直してパンくずに旧名が残った)。
  *    パンくずを持たない画面は対象外(持てとは言わない)。
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 import { SIDEBAR_GROUPS } from "../sidebar-model";
 
 const ROOT = process.cwd();
@@ -217,4 +220,37 @@ describe("タブへ飛ぶ項目は、タブの名前と一致させる", () => {
       ).toBe(true);
     },
   );
+});
+
+describe("画面の部品は自前の題名(h1)を持たない", () => {
+  // 題名は PageHeader 1本に集約する。二重の題名は、読み上げでも見た目でも
+  // 「このページの名前はどれか」を壊す(@codex #413 R2 P2 の実例)。
+  const ALLOW = new Set([
+    "src/components/ui/page-header.tsx", // 題名そのものを描く部品
+    "src/components/layout/header.tsx", // 画面上端のアプリ名(ページ題名ではない)
+    "src/components/properties/dm-logs-view.tsx", // 物件配下の別画面。左メニューからは行かない
+  ]);
+
+  function walkComponents(dir: string, out: string[] = []): string[] {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) {
+        if (name === "__tests__") continue;
+        walkComponents(full, out);
+      } else if (name.endsWith(".tsx")) {
+        out.push(full);
+      }
+    }
+    return out;
+  }
+
+  it("allow-list 以外の部品に <h1 が無い", () => {
+    const files = walkComponents(join(ROOT, "src", "components"));
+    expect(files.length).toBeGreaterThan(50); // 空振り防止
+    const offenders = files
+      .map((f) => relative(ROOT, f).split(sep).join("/"))
+      .filter((r) => !ALLOW.has(r))
+      .filter((r) => read(join(ROOT, r)).includes("<h1"));
+    expect(offenders).toEqual([]);
+  });
 });

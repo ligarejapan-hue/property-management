@@ -147,7 +147,7 @@ export default function SalesSheetNewEntryPage() {
     <div className="mx-auto max-w-3xl">
       <PageHeader
         title="販売図面を作成"
-        description="販売図面(マイソク)を作る物件を選んでください。"
+        description="図面を作成する物件を選択してください（対象: 土地・区分マンション・戸建・一棟）"
       />
       <SalesSheetPropertyPicker
         rows={rows}
