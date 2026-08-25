@@ -46,8 +46,10 @@ describe("field-survey/map/page.tsx dark: 配色 (Task D)", () => {
   it("ライトモード border-gray-200 は残っている", () => {
     expect(src).toContain("border-gray-200");
   });
-  it("ライトモード text-gray-800 は残っている", () => {
-    expect(src).toContain("text-gray-800");
+  // 見出しの色は他画面(PageHeader)と揃えて text-gray-900 にした
+  // (2026-08-25 の見出し統一)。大きさだけは地図の面積を守るため据え置き。
+  it("ライトモード text-gray-900 は残っている", () => {
+    expect(src).toContain("text-gray-900");
   });
   it("ライトモード text-gray-500 は残っている", () => {
     expect(src).toContain("text-gray-500");

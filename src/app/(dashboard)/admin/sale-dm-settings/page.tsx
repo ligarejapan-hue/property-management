@@ -110,12 +110,10 @@ export default function SaleDmSettingsPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
-      <div>
-        <PageHeader
-          title="売却促進DM 設定"
-          description="売却DMの追跡URL・既定LP URL・差出人を設定します。⚠**AIの種類とAPIキーは現在の運用では使いません**(文面はお手元のAIで作る方式に変わりました)。"
-        />
-      </div>
+      <PageHeader
+        title="売却DM設定"
+        description="売却DMの追跡URL・既定LP URL・差出人を設定します。⚠**AIの種類とAPIキーは現在の運用では使いません**(文面はお手元のAIで作る方式に変わりました)。"
+      />
 
       {!s?.encryptionConfigured && (
         <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300" role="alert">

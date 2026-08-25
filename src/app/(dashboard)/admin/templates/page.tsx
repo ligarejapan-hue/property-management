@@ -100,22 +100,22 @@ export default function TemplatesPage() {
       <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
         <Link href="/admin" className="hover:text-gray-700 dark:hover:text-gray-200">管理</Link>
         <span className="mx-2">/</span>
-        <span className="text-gray-900 dark:text-gray-100">権限テンプレート一覧</span>
+        <span className="text-gray-900 dark:text-gray-100">権限テンプレート</span>
       </nav>
 
-      <div className="flex items-center justify-between mb-6">
-        <PageHeader
-          title="権限テンプレート一覧"
-        />
-        <button
-          type="button"
-          onClick={() => setShowCreate(true)}
-          className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
-        >
-          <Plus className="h-4 w-4" />
-          新規テンプレート作成
-        </button>
-      </div>
+      <PageHeader
+        title="権限テンプレート"
+        actions={
+          <button
+            type="button"
+            onClick={() => setShowCreate(true)}
+            className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500"
+          >
+            <Plus className="h-4 w-4" />
+            新規テンプレート作成
+          </button>
+        }
+      />
 
       {/* Create modal */}
       {showCreate && (

@@ -1,5 +1,6 @@
 /**
- * 法人番号復元タブ(CorporateRestorePanel)の配線・文言テスト。
+ * 法人番号紐づけタブ(CorporateRestorePanel)の配線・文言テスト。
+ * ⚠タブ名は左メニューの項目名と一致させる(2026-08-25 の見出し統一)。
  * vitest は env=node(jsdom なし)のため、リポ慣行に従いソース文字列で検証する。
  */
 import { readFileSync } from "fs";
@@ -8,9 +9,9 @@ import { describe, it, expect } from "vitest";
 
 const src = readFileSync(resolve(__dirname, "../page.tsx"), "utf-8");
 
-describe("法人番号復元タブの配線", () => {
+describe("法人番号紐づけタブの配線", () => {
   it("タブ定義に corporate_restore がある", () => {
-    expect(src).toContain('{ key: "corporate_restore", label: "法人番号復元" }');
+    expect(src).toContain('{ key: "corporate_restore", label: "法人番号紐づけ" }');
   });
 
   it("SELF_FETCH_TABS に corporate_restore が含まれる(上位fetchの対象外)", () => {

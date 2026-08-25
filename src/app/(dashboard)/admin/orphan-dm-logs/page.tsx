@@ -128,11 +128,11 @@ export default function OrphanDmLogsPage() {
       <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
         <Link href="/admin" className="hover:text-gray-700 dark:hover:text-gray-300">管理</Link>
         <span className="mx-2">/</span>
-        <span className="text-gray-900 dark:text-gray-100">孤児DM記録の訂正</span>
+        <span className="text-gray-900 dark:text-gray-100">送付記録の訂正</span>
       </nav>
 
       <PageHeader
-        title="孤児DM記録の訂正"
+        title="送付記録の訂正"
         description="物件を削除しても、DMの送付記録は所有者に引き継がれます(拒否・宛先不明の履歴を守るため)。ここでは物件ページから辿れなくなった記録の反響の訂正・記録の取消ができます。誤った「拒否・宛先不明」が残っていると、その所有者へのDMがずっと止まったままになります。"
       />
 

@@ -160,11 +160,11 @@ export default function AttachmentSearchPage() {
           管理
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-gray-900 dark:text-gray-100">添付横断検索</span>
+        <span className="text-gray-900 dark:text-gray-100">添付ファイル検索</span>
       </nav>
 
       <PageHeader
-        title="添付横断検索"
+        title="添付ファイル検索"
         description="添付のメタデータ（ファイル名・種別・対象・登録日時）のみを横断検索します。ファイル本体のダウンロードはこの画面では提供しません。"
       />
 

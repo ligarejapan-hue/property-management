@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { FilterPanel } from "@/components/ui/filter-panel";
 import { Button } from "@/components/ui/button";
 import { formatJaDateTime } from "@/lib/format-datetime";
@@ -1072,6 +1073,10 @@ export default function ImportPage() {
   return (
     <div data-pii-protected data-pii-surface="import">
       <ImportSwitcher />
+      <PageHeader
+        title="受付帳CSV取込"
+        description="受付帳のCSV / Excel(.xlsx) から物件を新規作成し、所有者CSVで所有者を紐づけます。"
+      />
 
       {/* 利用者向け操作ガイド: 取込の順番と各CSVの役割を説明 */}
       <div className="mb-6 rounded-lg border border-blue-200 dark:border-blue-400/20 bg-blue-50 dark:bg-blue-500/10 p-4 text-sm">

@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { PageHeader } from "@/components/ui/page-header";
 import { signOut } from "next-auth/react";
-import { Loader2, KeyRound } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 export default function ChangePasswordPage() {
   const [form, setForm] = useState({
@@ -74,10 +75,7 @@ export default function ChangePasswordPage() {
 
   return (
     <div className="mx-auto max-w-md">
-      <div className="mb-6 flex items-center gap-2">
-        <KeyRound className="h-6 w-6 text-gray-700 dark:text-gray-200" />
-        <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">パスワード変更</h2>
-      </div>
+      <PageHeader title="パスワード変更" />
 
       <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
         {error && (

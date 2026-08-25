@@ -201,7 +201,7 @@ export default function TemplateEditPage({
       <nav className="mb-4 text-sm text-gray-500 dark:text-gray-400">
         <Link href="/admin" className="hover:text-gray-700 dark:hover:text-gray-200">管理</Link>
         <span className="mx-2">/</span>
-        <Link href="/admin/templates" className="hover:text-gray-700 dark:hover:text-gray-200">権限テンプレート一覧</Link>
+        <Link href="/admin/templates" className="hover:text-gray-700 dark:hover:text-gray-200">権限テンプレート</Link>
         <span className="mx-2">/</span>
         <span className="text-gray-900 dark:text-gray-100">テンプレート編集</span>
       </nav>

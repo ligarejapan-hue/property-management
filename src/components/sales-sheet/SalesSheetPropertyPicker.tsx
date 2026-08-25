@@ -38,12 +38,8 @@ export function SalesSheetPropertyPicker({
 }: SalesSheetPropertyPickerProps) {
   return (
     <div>
-      <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">販売図面を作成</h1>
-      <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-        図面を作成する物件を選択してください（対象: 土地・区分マンション・戸建・一棟）
-      </p>
-
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      {/* 題名と説明はページ側の PageHeader が持つ(@codex #413 R2 P2: 見出しが二重だった)。 */}
+      <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[220px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
           <input

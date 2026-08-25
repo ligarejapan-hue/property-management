@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { visibleHomeCards } from "./home-model";
+import { PageHeader } from "@/components/ui/page-header";
 
 /** 役割別ホーム(ランチャー)。カードは既存ページへの Link。userRole は親(page)がセッションから渡す。 */
 export function HomeContent({ userRole }: { userRole: string }) {
   const cards = visibleHomeCards(userRole);
   return (
     <div className="mx-auto max-w-3xl">
-      <h1 className="mb-1 text-lg font-bold text-gray-900 dark:text-gray-100">ホーム</h1>
-      <p className="mb-5 text-sm text-gray-500 dark:text-gray-400">やりたいことを選んでください。</p>
+      <PageHeader title="ホーム" description="やりたいことを選んでください。" />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {cards.map((c) => (
           <Link
