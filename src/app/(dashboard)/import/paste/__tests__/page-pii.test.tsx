@@ -140,11 +140,51 @@ describe("査定ナンバーと重複の見直しが画面に配線されてい�
   it("★登録の直前にもう一度見直し、止まっていたら送らない", () => {
     // 欄を直した直後にそのまま登録を押される経路がある。
     expect(source).toContain("const latest = await recheckDuplicates();");
-    expect(source).toContain("if (latest?.duplicates.blocked)");
+    expect(source).toContain("if (latest.duplicates.blocked)");
   });
 
   it("★見直しに失敗したら、その旨を画面に出す（黙って古い判定のままにしない）", () => {
     expect(source).toContain("setRecheckError(");
     expect(source).toContain("recheckError={recheckError}");
+  });
+});
+
+describe("登録直前の再判定は、結果を全部見る（7巡目 ②）", () => {
+  it("★再判定に失敗したら登録に進まない（確認できなかったのに通すのは、確認しないより悪い）", () => {
+    expect(source).toContain("if (latest === null)");
+    // 失敗を握り潰して先へ進む書き方（`latest?.` だけを見る形）に戻っていないこと。
+    expect(source).not.toContain("if (latest?.duplicates.blocked)");
+  });
+
+  it("★似た物件・所有者候補が増減したら、人に見せてから確定させる", () => {
+    expect(source).toContain("const beforeSimilar = similar.map((x) => x.id).sort().join(\",\");");
+    expect(source).toContain("const beforeOwners = ownerCandidates.map((x) => x.id).sort().join(\",\");");
+    expect(source).toContain("const afterSimilar = latest.similar.map((x) => x.id).sort().join(\",\");");
+    expect(source).toContain("const afterOwners = latest.ownerCandidates.map((x) => x.id).sort().join(\",\");");
+    expect(source).toContain("if (afterSimilar !== beforeSimilar || afterOwners !== beforeOwners)");
+    expect(source).toContain("似ている物件／所有者が見つかりました");
+  });
+
+  it("★止めた3つの経路は、それぞれ別の文言で伝える（どれで止まったか分かる）", () => {
+    for (const msg of [
+      "重複の確認ができませんでした。通信の状態を確かめて",
+      "この案件は登録済みです",
+      "入力の変更により、似ている物件／所有者が見つかりました",
+    ]) {
+      expect(source).toContain(msg);
+    }
+  });
+
+  it("★止める判断は、登録APIを呼ぶ前に行う（送ってから気づくのでは遅い）", () => {
+    const stopAt = source.indexOf("if (afterSimilar !== beforeSimilar");
+    const postAt = source.indexOf('fetch("/api/import/paste/commit"');
+    expect(stopAt).toBeGreaterThanOrEqual(0);
+    expect(postAt).toBeGreaterThan(stopAt);
+  });
+
+  it("★変化を見るための値が依存に入っている（古い値と比べ続けない）", () => {
+    const deps = source.slice(source.indexOf("externalLinkKey, recheckDuplicates,"));
+    expect(deps.slice(0, 200)).toContain("similar");
+    expect(deps.slice(0, 200)).toContain("ownerCandidates");
   });
 });

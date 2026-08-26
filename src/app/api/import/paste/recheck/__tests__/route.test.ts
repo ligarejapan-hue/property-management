@@ -10,6 +10,8 @@ let mockSession: { id: string; role?: string } = { id: "user-1" };
 const FULL_PERMS = [
   { resource: "import", action: "write", granted: true },
   { resource: "property", action: "write", granted: true },
+  // ⚠物件を引くには property:read も要る(通常の物件API と同じゲート)。
+  { resource: "property", action: "read", granted: true },
   { resource: "owner", action: "read", granted: true },
   { resource: "owner_name", action: "full", granted: true },
   { resource: "owner_address", action: "full", granted: true },
@@ -193,6 +195,7 @@ describe("POST /api/import/paste/recheck", () => {
     mockPerms = [
       { resource: "import", action: "write", granted: true },
       { resource: "property", action: "write", granted: true },
+      { resource: "property", action: "read", granted: true },
       { resource: "owner", action: "read", granted: true },
       { resource: "owner_name", action: "full", granted: true },
       { resource: "owner_address", action: "partial", granted: true },
@@ -248,5 +251,67 @@ describe("POST /api/import/paste/recheck", () => {
       body: JSON.stringify({ address: "東京都A区B1-2-3" }),
     });
     expect((await POST(big)).status).toBe(413);
+  });
+});
+
+describe("物件を読む権限(property:read)が無ければ、物件情報を返さない（7巡目 ①）", () => {
+  /** property:write は持つが property:read だけ落とされた利用者。 */
+  const WRITE_ONLY = () =>
+    FULL_PERMS.filter((p) => !(p.resource === "property" && p.action === "read"));
+
+  it("★similar も blockedByPropertyId も返さない（住所・地番・id が漏れない）", async () => {
+    mockPerms = WRITE_ONLY();
+    dbProperty({
+      id: "p-secret",
+      address: "東京都Ａ区Ｂ１－２－３",
+      lotNumber: "552-2",
+      externalLinkKey: "SA2608-1234567",
+    });
+    const res = await POST(
+      req({ address: "東京都A区B1-2-3", lotNumber: "552-2", externalLinkKey: "SA2608-1234567" }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.similar).toEqual([]);
+    expect(body.duplicates.similarPropertyIds).toEqual([]);
+    expect(body.duplicates.blockedByPropertyId).toBeNull();
+    const dumped = JSON.stringify(body);
+    expect(dumped).not.toContain("p-secret");
+    expect(dumped).not.toContain("東京都Ａ区Ｂ１－２－３");
+    expect(dumped).not.toContain("552-2");
+  });
+
+  it("★それでも blocked の真偽は残す（伝えないと二重登録が起きる）", async () => {
+    mockPerms = WRITE_ONLY();
+    dbProperty({
+      id: "p-secret",
+      address: "東京都Ａ区Ｂ１－２－３",
+      lotNumber: null,
+      externalLinkKey: "SA2608-1234567",
+    });
+    const res = await POST(req({ externalLinkKey: "SA2608-1234567" }));
+    const body = await res.json();
+    expect(body.duplicates.blocked).toBe(true);
+    expect(body.duplicates.blockedByPropertyId).toBeNull();
+  });
+
+  it("★住所での検索そのものを行わない（住所で既存物件を探れない）", async () => {
+    mockPerms = WRITE_ONLY();
+    mockFindMany.mockResolvedValue([]);
+    await POST(req({ address: "東京都A区B1-2-3" }));
+    // 外部キーが無いので、DB は一度も引かれない。
+    expect(mockFindMany).not.toHaveBeenCalled();
+  });
+
+  it("property:read があれば従来どおり返る（閉じすぎていない）", async () => {
+    dbProperty({
+      id: "p-ok",
+      address: "東京都Ａ区Ｂ１－２－３",
+      lotNumber: null,
+      externalLinkKey: null,
+    });
+    const res = await POST(req({ address: "東京都A区B1-2-3" }));
+    const body = await res.json();
+    expect(body.similar.map((x: { id: string }) => x.id)).toEqual(["p-ok"]);
   });
 });

@@ -195,6 +195,22 @@ export async function lookupPasteDuplicates(
   } as const;
   const candidateMap = new Map<string, CandidateProperty>();
 
+  // ⚠**物件を読む権限**を要求する(@codex PR#414 7巡目 ①)。所有者側で owner:read を
+  //   足したのに、物件側で同じことをしていなかった(同種の穴を全箇所洗う原則の
+  //   取りこぼし)。canAccessPropertyRecord は**行単位のスコープ**であって
+  //   **権限ゲートの代わりにはならない**(別の役割)。これが無いと、管理者が個別に
+  //   property:read を落とした利用者が、通常のAPI(properties / properties/[id])では
+  //   拒否される物件データ(id・住所・地番)をこの口から探れる。
+  const canReadProperty = hasPermission(perms, "property", "read");
+
+  // ⚠**住所での検索は property:read が無ければ一切行わない**。ここが
+  //   「住所を入れて既存の物件を探す」口そのものだから。
+  // ⚠一方、外部キーの**完全一致の存在確認だけ**は権限に関わらず行う。理由:
+  //   同じ指示の後半「blocked の真偽は残す」を満たすには、登録済みかどうかを
+  //   知る必要がある。これは利用者が自分で入力した番号について「もう登録されて
+  //   いるか」の真偽が返るだけで、住所や id は返さない(下で similar=[] /
+  //   blockedByPropertyId=null に落とす)。伝えないと二重登録が起きるため、
+  //   担当外の物件でも blocked を残すのと同じ考え方。
   if (input.externalLinkKey) {
     // ⚠**全角形も見る**(@codex PR#414 2巡目 P2)。CSV取込
     //   (src/app/api/import/csv/route.ts) は externalLinkKey を生値のまま保存する
@@ -219,7 +235,7 @@ export async function lookupPasteDuplicates(
   //   → 氏名で採ったのと同じ形にする: 幅の別が存在しない**先頭のCJK部分**で
   //   広めに前方一致し、正確な判定は judgeDuplicates(normalizeForCompare の
   //   完全一致)に委ねる。
-  if (input.address) {
+  if (canReadProperty && input.address) {
     const addressValue = input.address;
     const prefix = addressSearchPrefix(addressValue);
     const addressRows = await prisma.property.findMany({
@@ -253,16 +269,19 @@ export async function lookupPasteDuplicates(
 
   // ⚠「似た物件」は**この人が開ける物件だけ**に絞る。担当外の住所を
   //   ここから覗けてしまうと、物件一覧・詳細で絞っている意味が無くなる。
-  const similar = candidates
-    .filter((c) => duplicates.similarPropertyIds.includes(c.id))
-    .filter((c) => canAccessPropertyRecord(session, c))
-    .map((c) => ({ id: c.id, address: c.address, lotNumber: c.lotNumber }));
+  const similar = !canReadProperty
+    ? []
+    : candidates
+        .filter((c) => duplicates.similarPropertyIds.includes(c.id))
+        .filter((c) => canAccessPropertyRecord(session, c))
+        .map((c) => ({ id: c.id, address: c.address, lotNumber: c.lotNumber }));
 
   // ⚠止める判断(blocked)は**担当外の物件が相手でも必ず残す**。
   //   「もう登録されている」ことは伝えないと二重登録が起きる。
   //   ただし開けない物件の id は渡さない(押しても403になるリンクを見せない)。
   const blockedBy = duplicates.blockedByPropertyId;
   const blockedByAccessible =
+    canReadProperty &&
     blockedBy !== null &&
     candidates.some((c) => c.id === blockedBy && canAccessPropertyRecord(session, c));
   const scopedDuplicates = {

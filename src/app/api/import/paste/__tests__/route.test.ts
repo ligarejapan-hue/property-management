@@ -17,6 +17,8 @@ let mockSession: { id: string; role?: string } = { id: "user-1" };
 const FULL_PERMS = [
   { resource: "import", action: "write", granted: true },
   { resource: "property", action: "write", granted: true },
+  // ⚠物件を引くには property:read も要る(通常の物件API と同じゲート)。
+  { resource: "property", action: "read", granted: true },
   { resource: "owner", action: "read", granted: true },
   { resource: "owner_name", action: "full", granted: true },
   { resource: "owner_address", action: "full", granted: true },
@@ -513,6 +515,7 @@ describe("所有者候補は owners と同じ規則で守る（検索オラク�
     mockPerms = [
       { resource: "import", action: "write", granted: true },
       { resource: "property", action: "write", granted: true },
+      { resource: "property", action: "read", granted: true },
       { resource: "owner", action: "read", granted: true },
       { resource: "owner_name", action: "full", granted: true },
       { resource: "owner_address", action: "partial", granted: true },
@@ -537,6 +540,7 @@ describe("所有者候補は owners と同じ規則で守る（検索オラク�
     mockPerms = [
       { resource: "import", action: "write", granted: true },
       { resource: "property", action: "write", granted: true },
+      { resource: "property", action: "read", granted: true },
       { resource: "owner", action: "read", granted: true },
       { resource: "owner_name", action: "full", granted: true },
       { resource: "owner_address", action: "partial", granted: true },
@@ -1043,5 +1047,68 @@ describe("JSON body の上限はこの口の実態に合わせる（5巡目 ①�
   it("正規の大きさ（上限の内側）は従来どおり通る", async () => {
     const res = await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
     expect(res.status).toBe(200);
+  });
+});
+
+describe("物件を読む権限(property:read)が無ければ、物件情報を返さない（7巡目 ①・下書きAPI側）", () => {
+  const WRITE_ONLY = () =>
+    FULL_PERMS.filter((p) => !(p.resource === "property" && p.action === "read"));
+
+  /** ⚠where を実際に適用する。 */
+  function dbOne(row: { id: string; address: string; lotNumber: string | null; externalLinkKey: string | null }) {
+    const full = { createdBy: "user-1", assignedTo: null, ...row };
+    mockFindMany.mockImplementation(
+      async (args: { where?: { externalLinkKey?: { in?: string[] }; address?: { contains?: string } } }) => {
+        if (args?.where?.externalLinkKey) {
+          return full.externalLinkKey !== null &&
+            (args.where.externalLinkKey.in ?? []).includes(full.externalLinkKey)
+            ? [full]
+            : [];
+        }
+        const cond = args?.where?.address;
+        if (cond && typeof cond.contains === "string") {
+          return full.address.includes(cond.contains) ? [full] : [];
+        }
+        return [];
+      },
+    );
+  }
+
+  it("★similar も blockedByPropertyId も返さない（住所・地番・id が漏れない）", async () => {
+    mockPerms = WRITE_ONLY();
+    dbOne({ id: "p-secret", address: "東京都Ａ区Ｂ１－２－３", lotNumber: "552-2", externalLinkKey: "SA-1" });
+    const res = await POST(
+      jsonReq({ text: "■査定ナンバー： SA-1" + NL + "■物件所在地： 東京都A区B1-2-3（地番552-2）" }),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.similar).toEqual([]);
+    expect(body.duplicates.blockedByPropertyId).toBeNull();
+    const dumped = JSON.stringify(body.similar) + JSON.stringify(body.duplicates);
+    expect(dumped).not.toContain("p-secret");
+    expect(dumped).not.toContain("東京都Ａ区Ｂ１－２－３");
+  });
+
+  it("★それでも blocked の真偽は残す", async () => {
+    mockPerms = WRITE_ONLY();
+    dbOne({ id: "p-secret", address: "別の住所", lotNumber: null, externalLinkKey: "SA-1" });
+    const res = await POST(jsonReq({ text: "■査定ナンバー： SA-1" }));
+    const body = await res.json();
+    expect(body.duplicates.blocked).toBe(true);
+    expect(body.duplicates.blockedByPropertyId).toBeNull();
+  });
+
+  it("★住所での検索そのものを行わない", async () => {
+    mockPerms = WRITE_ONLY();
+    mockFindMany.mockResolvedValue([]);
+    await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
+    expect(mockFindMany).not.toHaveBeenCalled();
+  });
+
+  it("property:read があれば従来どおり返る（閉じすぎていない）", async () => {
+    dbOne({ id: "p-ok", address: "東京都Ａ区Ｂ１－２－３", lotNumber: null, externalLinkKey: null });
+    const res = await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
+    const body = await res.json();
+    expect(body.similar.map((x: { id: string }) => x.id)).toEqual(["p-ok"]);
   });
 });

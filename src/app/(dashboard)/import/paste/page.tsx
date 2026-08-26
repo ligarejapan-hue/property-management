@@ -203,9 +203,35 @@ export default function PasteImportPage() {
     setRegisterError(null);
     try {
       // ⚠登録の直前にもう一度見直す(欄を直した直後にそのまま押される経路がある)。
+      //   ⚠**結果を全部見る**(@codex PR#414 7巡目 ②)。blocked だけを見ていた頃は、
+      //   直前の編集で似た物件や所有者候補が新しく見つかっても人に見せずに
+      //   登録していた＝見直しを足した目的が半分死んでいた。
+      const beforeSimilar = similar.map((x) => x.id).sort().join(",");
+      const beforeOwners = ownerCandidates.map((x) => x.id).sort().join(",");
       const latest = await recheckDuplicates();
-      if (latest?.duplicates.blocked) {
+
+      // ⚠**確認できなかったときに通してはいけない**(確認しないより悪い＝
+      //   確認したつもりになる)。やり直せるようにして止める。
+      if (latest === null) {
+        setRegisterError(
+          "重複の確認ができませんでした。通信の状態を確かめて、もう一度お試しください。",
+        );
+        return;
+      }
+
+      if (latest.duplicates.blocked) {
         setRegisterError("この案件は登録済みです");
+        return;
+      }
+
+      // 直前の編集で新しい一致が見つかったら、**人に見せてから**確定させる。
+      // 画面は recheckDuplicates が既に更新済み。もう一度押せば登録できる。
+      const afterSimilar = latest.similar.map((x) => x.id).sort().join(",");
+      const afterOwners = latest.ownerCandidates.map((x) => x.id).sort().join(",");
+      if (afterSimilar !== beforeSimilar || afterOwners !== beforeOwners) {
+        setRegisterError(
+          "入力の変更により、似ている物件／所有者が見つかりました。ご確認のうえ、もう一度「この内容で登録」を押してください。",
+        );
         return;
       }
       // ⚠土地面積・築年は Property に対応する列が無い(commit API の契約にも無い)。
@@ -268,7 +294,7 @@ export default function PasteImportPage() {
     }
   }, [
     draft, propertyValues, ownerValues, note, ownerMode, linkedOwnerId, pdfFile, router,
-    externalLinkKey, recheckDuplicates,
+    externalLinkKey, recheckDuplicates, similar, ownerCandidates,
   ]);
 
   return (
