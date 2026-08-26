@@ -28,6 +28,8 @@ const advisoryLockValues: unknown[][] = [];
 const findFirstArgs: unknown[] = [];
 /** 外部キー一致で既に存在する物件の id (null = 未登録)。 */
 let existingByExternalKey: string | null = null;
+/** DB に保存されている外部キーの文字列(null = 渡された値に関わらず一致とみなす)。 */
+let storedExternalKey: string | null = null;
 /** 既存所有者が紐付け可能か(false = アーカイブ済み/削除済み)。 */
 let ownerLinkable = true;
 /** owner.updateMany に渡された引数。 */
@@ -89,10 +91,17 @@ vi.mock("@/lib/prisma", () => {
       findUnique: vi.fn(async () => ({ id: "new-prop" })),
       // 外部キーによる登録済み判定。existingByExternalKey に id を入れると
       // 「既に登録済み」を再現できる。
+      // ⚠**where を実際に適用する**。素通しで「あり」を返すモックだと、
+      //   検索する値がロックの鍵や保存値とずれても緑のまま通ってしまう。
+      //   storedExternalKey が入っているときは、渡された値と一致したときだけ返す。
       findFirst: vi.fn(async (args: { where?: { externalLinkKey?: string } }) => {
         callOrder.push("property.findFirst");
         findFirstArgs.push(args);
-        return existingByExternalKey === null ? null : { id: existingByExternalKey };
+        if (existingByExternalKey === null) return null;
+        if (storedExternalKey !== null && args?.where?.externalLinkKey !== storedExternalKey) {
+          return null;
+        }
+        return { id: existingByExternalKey };
       }),
     },
     owner: {
@@ -213,6 +222,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockPerms = FULL_PERMS;
   existingByExternalKey = null;
+  storedExternalKey = null;
   ownerLinkable = true;
   ownerUpdateManyArgs.length = 0;
   for (const k of Object.keys(created)) delete created[k];
@@ -450,6 +460,7 @@ describe("二重登録は確定側(サーバー)で止める", () => {
 
   it("外部キーがあり、まだ登録されていなければ登録できる", async () => {
     existingByExternalKey = null;
+  storedExternalKey = null;
   ownerLinkable = true;
   ownerUpdateManyArgs.length = 0;
     const res = await POST(req(withKey));
@@ -658,5 +669,48 @@ describe("既存の所有者への紐付けはアーカイブ済みを弾く（P
     const res = await POST(req(linkBody));
     expect(res.status).toBe(200);
     expect(created.propertyOwner?.[0]).toMatchObject({ ownerId: "existing-owner-1" });
+  });
+});
+
+describe("外部キーは入口で1回だけ正規化し、保存・検索・ロックで同じ値を使う", () => {
+  // ⚠いちばん重要なのはロック: 助言ロックの鍵が比較に使う鍵と一致していなければ、
+  //   鍵がずれた瞬間に直列化が外れ、二重登録のガードが静かに無効になる。
+  const FULL = "ＳＡ２６０８－１２３４５６７";
+  const HALF = "SA2608-1234567";
+
+  it("★全角で送られても、半角で保存された既存物件が見つかり409になる", async () => {
+    existingByExternalKey = "prop-existing-1";
+    storedExternalKey = HALF; // DB は半角で保存されている
+    const res = await POST(req({ ...baseBody, externalLinkKey: FULL }));
+    expect(res.status).toBe(409);
+    expect(created.property).toBeUndefined();
+  });
+
+  it("★逆に半角で送られても、正規化後の値で引くので取りこぼさない", async () => {
+    existingByExternalKey = "prop-existing-1";
+    storedExternalKey = HALF;
+    const res = await POST(req({ ...baseBody, externalLinkKey: HALF }));
+    expect(res.status).toBe(409);
+  });
+
+  it("★保存する値そのものが正規化後の形（保存した値 == 検索する値 になる）", async () => {
+    const res = await POST(req({ ...baseBody, externalLinkKey: FULL }));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ externalLinkKey: HALF });
+  });
+
+  it("★助言ロックの鍵は、比較に使った値と同じ（鍵がずれたらロックは何も守らない）", async () => {
+    await POST(req({ ...baseBody, externalLinkKey: FULL }));
+    expect(advisoryLockValues[0]).toEqual([HALF]);
+    // 3か所すべてが同じ文字列であることを一続きで確かめる。
+    expect(findFirstArgs[0]).toMatchObject({ where: { externalLinkKey: HALF, isArchived: false } });
+    expect(created.property?.[0]).toMatchObject({ externalLinkKey: HALF });
+  });
+
+  it("★前後の空白も落とす（空白だけなら「無い」と同じに畳む）", async () => {
+    const res = await POST(req({ ...baseBody, externalLinkKey: "  " }));
+    expect(res.status).toBe(200);
+    expect(callOrder).not.toContain("advisoryLock");
+    expect(created.property?.[0]).toMatchObject({ externalLinkKey: null });
   });
 });

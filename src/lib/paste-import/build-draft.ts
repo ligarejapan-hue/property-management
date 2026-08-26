@@ -3,7 +3,7 @@
  * ⚠ Prisma / next / node:fs を import しないこと。
  */
 import { parseLabeledLines, isBlankValue, type LabeledLine } from "./parse-labeled-lines";
-import { warekiToSeireki, parseAreaSqm, splitLotNumberFromAddress } from "./normalize";
+import { toHalfWidth, warekiToSeireki, parseAreaSqm, splitLotNumberFromAddress } from "./normalize";
 import { fieldKeyForLabel, type DraftFieldKey } from "./label-dictionary";
 import { propertyTypeForRaw } from "./property-type-dictionary";
 import {
@@ -23,6 +23,17 @@ function occupancyFor(raw: string): string | null {
   if (s.includes("居住中") || s.includes("入居中") || s.includes("賃貸中")) return "occupied";
   if (s.includes("空室") || s.includes("空家") || s.includes("空き家")) return "vacant";
   return null;
+}
+
+/**
+ * 外部キーの表記ゆれを畳む。**新しい正規化規則は作らない**:
+ * 既存の toHalfWidth（全角英数→半角・全角ハイフン類→"-"）と前後の空白除去だけ。
+ * 空になったら null（「無い」と同じに畳む）。
+ */
+function normalizeExternalLinkKey(raw: string | null): string | null {
+  if (raw === null) return null;
+  const v = toHalfWidth(raw).trim();
+  return v === "" ? null : v;
 }
 
 export function buildPasteDraft(text: string): PasteDraft {
@@ -139,7 +150,15 @@ export function buildPasteDraft(text: string): PasteDraft {
       builtYear: field(builtYear === null ? null : String(builtYear), label("builtYearRaw")),
     },
     owner,
-    externalLinkKey: raw("externalLinkKey"),
+    // ⚠外部キー(査定ナンバー)は**この入口で1回だけ**正規化し、以降は
+    //   「保存する値 == 検索する値 == 助言ロックの鍵」を常に同じ文字列で通す
+    //   (@codex PR#414 の指摘 → 発注者判断 2026-08-26)。
+    //   ⚠いちばん重要な理由は**ロック**: 助言ロックの鍵が比較に使う鍵と
+    //   一致していなければ、鍵がずれた瞬間に直列化が外れ、二重登録のガードが
+    //   静かに無効になる。ロックと比較は同じ値でなければ意味がない。
+    //   正規化は既存の toHalfWidth + 前後の空白除去だけ(新しい正規化は増やさない)。
+    //   査定ナンバーは元々半角ASCIIなので、実際に保存される文字列は変わらない。
+    externalLinkKey: normalizeExternalLinkKey(raw("externalLinkKey")),
     warnings,
     unmapped,
     // ⚠割れなかった行も捨てずに持つ（設計書 §4.2）。全体レビュー I-5:

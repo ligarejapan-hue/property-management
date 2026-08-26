@@ -15,6 +15,7 @@ import { isPdfBuffer } from "@/lib/pdf-extract";
 import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES, MAX_FILE_SIZE } from "@/lib/storage";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
 import { PROPERTY_TYPE_VALUES, OCCUPANCY_STATUS_LABELS } from "@/lib/property-types";
+import { toHalfWidth } from "@/lib/paste-import/normalize";
 import type { PropertyType, OccupancyStatus } from "@/generated/prisma";
 
 // ---------------------------------------------------------------------------
@@ -205,8 +206,20 @@ export async function POST(request: NextRequest) {
     }
     const occupancyStatus = occupancyInput === "" ? null : (occupancyInput as OccupancyStatus);
 
-    // 外部キー（査定ナンバー等）。空文字は「無い」と同じに畳む。
-    const externalLinkKey = body.externalLinkKey?.trim() || null;
+    // 外部キー（査定ナンバー等）。
+    // ⚠**ここで1回だけ正規化し、この先はすべてこの値を使う**
+    //   （① 助言ロックの鍵 ② 重複ガードの findFirst ③ property.create に保存する値）。
+    //   ⚠ロックの鍵が比較に使う鍵と一致していなければ、鍵がずれた瞬間に直列化が
+    //   外れ、二重登録のガードが静かに無効になる。ロックと比較は同じ値でなければ
+    //   意味がない。保存する値まで揃えることで「保存した値 == 検索する値 ==
+    //   ロックの鍵」が常に成立する。
+    //   正規化は既存の toHalfWidth + 前後の空白除去だけ（新しい正規化は増やさない）。
+    //   査定ナンバーは元々半角ASCIIなので、実際に保存される文字列は変わらない。
+    //   ⚠この route は画面以外からも呼べるので、下書き側(build-draft.ts)で
+    //   正規化済みでも**ここでも必ず通す**。
+    const externalLinkKeyRaw = body.externalLinkKey ?? null;
+    const externalLinkKey =
+      externalLinkKeyRaw === null ? null : toHalfWidth(externalLinkKeyRaw).trim() || null;
     // 既存の所有者へ紐付ける指定。空文字は「無い」と同じに畳む。
     const linkOwnerId = body.linkExistingOwnerId?.trim() || null;
 

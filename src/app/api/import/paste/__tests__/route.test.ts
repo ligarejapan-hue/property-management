@@ -800,3 +800,115 @@ describe("住所の重複候補は全角/半角の違いを越えて見つかる
     expect(addressCall!.take).toBe(300);
   });
 });
+
+// ===========================================================================
+// 外部キー(査定ナンバー)の表記ゆれ（@codex PR#414 の報告 → 発注者判断 2026-08-26）
+//   本番実測: 外部キーを持つ物件は 669件中 0件。今日は踏めないが、この列に
+//   今後書くのはほぼこの機能であり、**助言ロックの鍵が比較に使う鍵と一致して
+//   いなければロックは何も守らない**ため、入口で1回だけ正規化して揃える。
+// ===========================================================================
+
+describe("外部キーは全角/半角の別を越えて突き合わせる", () => {
+  /**
+   * DB に外部キー付きの物件が1件だけある状態。
+   * ⚠**where を実際に適用する**(素通しのモックだと、正規化を戻しても
+   *   「見つかった」ことになり緑のまま通る＝バグを直ったと証明してしまう)。
+   */
+  function dbExternalKey(stored: string) {
+    const row = {
+      id: "p-key",
+      address: "東京都A区B1-2-3",
+      lotNumber: null,
+      externalLinkKey: stored,
+      createdBy: "user-1",
+      assignedTo: null,
+    };
+    mockFindMany.mockImplementation(
+      async (args: { where?: { externalLinkKey?: string; address?: { startsWith?: string; contains?: string } } }) => {
+        if (typeof args?.where?.externalLinkKey === "string") {
+          return args.where.externalLinkKey === stored ? [row] : [];
+        }
+        const cond = args?.where?.address;
+        if (cond && typeof cond.startsWith === "string") {
+          return row.address.startsWith(cond.startsWith) ? [row] : [];
+        }
+        return [];
+      },
+    );
+  }
+
+  it("★貼り付けが全角「ＳＡ２６０８－１２３４５６７」でも、半角で保存された既存物件が見つかりブロックされる", async () => {
+    dbExternalKey("SA2608-1234567");
+    const res = await POST(
+      jsonReq({ text: "■査定ナンバー： ＳＡ２６０８－１２３４５６７" + NL + "■物件所在地： 東京都A区B1-2-3" }),
+    );
+    const body = await res.json();
+    expect(body.duplicates.blocked).toBe(true);
+    expect(body.duplicates.blockedByPropertyId).toBe("p-key");
+  });
+
+  it("★逆方向=貼り付けが半角、既存データの保存が全角でも見つかりブロックされる", async () => {
+    // 今回の方針(保存も正規化後に揃える)ではこの組み合わせは新たに生まれないが、
+    // CSV 取込などで既に全角が入っている行を取りこぼさないことを見る。
+    // ⚠この向きでは外部キーの完全一致クエリは当たらない。住所の候補として
+    //   取れた行を judgeDuplicates が normalizeForCompare で突き合わせて
+    //   ブロックする経路で拾う(=正規化した比較が実際に効いている)。
+    dbExternalKey("ＳＡ２６０８－１２３４５６７");
+    const res = await POST(
+      jsonReq({ text: "■査定ナンバー： SA2608-1234567" + NL + "■物件所在地： 東京都A区B1-2-3" }),
+    );
+    const body = await res.json();
+    expect(body.duplicates.blocked).toBe(true);
+    expect(body.duplicates.blockedByPropertyId).toBe("p-key");
+  });
+
+  it("★逆方向で住所も違う場合は、完全一致クエリでは当たらない（残っている取りこぼしを明示する）", async () => {
+    // 既存データが全角で保存され、かつ住所も違う（＝住所の候補にも入らない）と、
+    // ブロックできない。本番実測では外部キーを持つ物件が0件のため今日は踏めず、
+    // 直すには「正規化した値で引けるようにする」設計判断が要る（別途）。
+    // ⚠この事実をテストで明文化しておく（黙って落ちている状態にしない）。
+    const row = {
+      id: "p-key-fw",
+      address: "大阪府C区D9-9-9",
+      lotNumber: null,
+      externalLinkKey: "ＳＡ２６０８－１２３４５６７",
+      createdBy: "user-1",
+      assignedTo: null,
+    };
+    mockFindMany.mockImplementation(
+      async (args: { where?: { externalLinkKey?: string; address?: { startsWith?: string } } }) => {
+        if (typeof args?.where?.externalLinkKey === "string") {
+          return args.where.externalLinkKey === row.externalLinkKey ? [row] : [];
+        }
+        const cond = args?.where?.address;
+        if (cond && typeof cond.startsWith === "string") {
+          return row.address.startsWith(cond.startsWith) ? [row] : [];
+        }
+        return [];
+      },
+    );
+    const res = await POST(
+      jsonReq({ text: "■査定ナンバー： SA2608-1234567" + NL + "■物件所在地： 東京都A区B1-2-3" }),
+    );
+    const body = await res.json();
+    expect(body.duplicates.blocked).toBe(false);
+  });
+
+  it("★下書きが返す外部キーは正規化済み（画面がそのまま commit へ渡すため）", async () => {
+    const res = await POST(
+      jsonReq({ text: "■査定ナンバー： ＳＡ２６０８－１２３４５６７" + NL + "■物件所在地： 東京都A区B1-2-3" }),
+    );
+    const body = await res.json();
+    expect(body.draft.externalLinkKey).toBe("SA2608-1234567");
+  });
+
+  it("★DBへの問い合わせにも正規化後の値を使う（生値で引かない）", async () => {
+    await POST(
+      jsonReq({ text: "■査定ナンバー： ＳＡ２６０８－１２３４５６７" + NL + "■物件所在地： 東京都A区B1-2-3" }),
+    );
+    const keyCall = mockFindMany.mock.calls
+      .map((c) => c[0] as { where?: { externalLinkKey?: string } })
+      .find((a) => typeof a?.where?.externalLinkKey === "string");
+    expect(keyCall?.where?.externalLinkKey).toBe("SA2608-1234567");
+  });
+});
