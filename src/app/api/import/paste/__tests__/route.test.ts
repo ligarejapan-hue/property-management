@@ -5,10 +5,23 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mockSession = { id: "user-1" };
+let mockSession: { id: string; role?: string } = { id: "user-1" };
 // ⚠ granted: true が無いと hasPermission (src/lib/permissions.ts) は
 //   常に false を返す(= 常に403)。リポジトリ内の他テストの慣例に合わせる。
-let mockPerms: unknown = [{ resource: "property", action: "write", granted: true }];
+//
+// ⚠owner_name / owner_address の**表示レベル**もここに含める。この route は
+//   所有者検索の入口なので、owners と同じく「マスクされている項目では検索しない」
+//   規則に従う(全体レビュー Critical 2)。表示レベルは
+//   getOwnerDisplayConfig(実物を使う・preloadedPermissions 経由でDBを引かない)
+//   がこの配列から解決する。
+const FULL_PERMS = [
+  { resource: "import", action: "write", granted: true },
+  { resource: "property", action: "write", granted: true },
+  { resource: "owner", action: "read", granted: true },
+  { resource: "owner_name", action: "full", granted: true },
+  { resource: "owner_address", action: "full", granted: true },
+];
+let mockPerms: unknown = FULL_PERMS;
 const mockFindMany = vi.fn();
 const mockOwnerFindMany = vi.fn();
 
@@ -40,6 +53,15 @@ vi.mock("@/lib/api-helpers", async () => {
     getUserPermissions: vi.fn(async () => mockPerms),
   };
 });
+// PDF 経路の検証用。isPdfBuffer/isLikelyScannedPdf は実物を使い、
+// 抽出結果(pdfText)だけ差し替える(判定そのものを偽装しないため)。
+// ⚠isLikelyScannedPdf(50文字未満は「読めていない」)を通る長さにしておく。
+let pdfText = "■物件所在地： 東京都A区B1-2-3（地番552-2）\n■物件種別： 一般住宅\n■建物構造： 木造スレート葺\n■間取り： 2LDK";
+vi.mock("@/lib/pdf-extract", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/pdf-extract")>("@/lib/pdf-extract");
+  return { ...actual, extractTextFromPdf: vi.fn(async () => pdfText) };
+});
+
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     property: { findMany: (...a: unknown[]) => mockFindMany(...a) },
@@ -49,6 +71,8 @@ vi.mock("@/lib/prisma", () => ({
 
 import { POST } from "../route";
 import { NextRequest } from "next/server";
+
+const NL = "\n";
 
 const jsonReq = (body: unknown) => {
   const s = JSON.stringify(body);
@@ -67,12 +91,28 @@ const jsonReq = (body: unknown) => {
 };
 
 beforeEach(() => {
-  mockPerms = [{ resource: "property", action: "write", granted: true }];
+  mockSession = { id: "user-1" };
+  mockPerms = FULL_PERMS;
   mockFindMany.mockReset();
   mockFindMany.mockResolvedValue([]);
   mockOwnerFindMany.mockReset();
   mockOwnerFindMany.mockResolvedValue([]);
+  pdfText = "■物件所在地： 東京都A区B1-2-3（地番552-2）\n■物件種別： 一般住宅\n■建物構造： 木造スレート葺\n■間取り： 2LDK";
 });
+
+/** %PDF- マジックバイトを持つ最小限の PDF を multipart で送る。 */
+async function pdfReq(size = 100): Promise<NextRequest> {
+  const head = Buffer.from("%PDF-1.4" + NL);
+  const body = Buffer.concat([head, Buffer.alloc(Math.max(0, size - head.length), 0x20)]);
+  const fd = new FormData();
+  fd.append("file", new File([body], "shokai.pdf", { type: "application/pdf" }));
+  const blob = await new Response(fd).blob();
+  return new NextRequest("http://localhost/api/import/paste", {
+    method: "POST",
+    body: blob,
+    headers: { "content-length": String(blob.size) },
+  });
+}
 
 describe("POST /api/import/paste", () => {
   it("貼り付けたテキストから下書きを返す", async () => {
@@ -85,6 +125,19 @@ describe("POST /api/import/paste", () => {
 
   it("★権限が無ければ403", async () => {
     mockPerms = [];
+    const res = await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
+    expect(res.status).toBe(403);
+  });
+
+  it("★import:write が無ければ403(取込系routeの共通ゲート・全体レビュー I-1)", async () => {
+    mockPerms = FULL_PERMS.filter((p) => p.resource !== "import");
+    const res = await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
+    expect(res.status).toBe(403);
+    expect(mockFindMany).not.toHaveBeenCalled();
+  });
+
+  it("★property:write が無ければ403(import:write だけでは通さない)", async () => {
+    mockPerms = FULL_PERMS.filter((p) => p.resource !== "property");
     const res = await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
     expect(res.status).toBe(403);
   });
@@ -415,5 +468,232 @@ describe("POST /api/import/paste", () => {
     expect(JSON.stringify(body)).not.toContain("rawText");
     // 所有者の欄には入るが、原文そのものは返さない
     expect(body.draft.owner.phone.value).toBe("09012345678");
+  });
+});
+
+// ===========================================================================
+// 全体レビュー Critical 2: この route は所有者検索の入口であり、物件も返す。
+//   owners / owners/search / properties/suggest と同じ規則へ揃える。
+// ===========================================================================
+
+describe("所有者候補は owners と同じ規則で守る（検索オラクル封じ）", () => {
+  const nameAndAddress =
+    "■物件所在地： 東京都A区B1-2-3\n■お名前： 山田太郎\n■現住所： 東京都渋谷区X1-1-1";
+
+  it("★owner:read が無ければ空で返し、所有者を**引きに行かない**", async () => {
+    mockPerms = FULL_PERMS.filter((p) => p.resource !== "owner");
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "o-secret", name: "山田太郎", currentAddress: "東京都渋谷区X1-1-1", address: null },
+    ]);
+    const res = await POST(jsonReq({ text: nameAndAddress }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([]);
+    // 「引かない」ことまで固定する(引いてから捨てるのでは、DB負荷も
+    //  タイミング差による観測も残る)。
+    expect(mockOwnerFindMany).not.toHaveBeenCalled();
+  });
+
+  it("★氏名がマスクされている人には検索させない（DBを引かない）", async () => {
+    mockPerms = [
+      ...FULL_PERMS.filter((p) => p.resource !== "owner_name"),
+      { resource: "owner_name", action: "masked", granted: true },
+    ];
+    const res = await POST(jsonReq({ text: nameAndAddress }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([]);
+    expect(mockOwnerFindMany).not.toHaveBeenCalled();
+  });
+
+  it("★既定の field_staff テンプレート（owner_address: partial）では検索させない", async () => {
+    // prisma/seed.ts の field_staff は owner_phone: masked / owner_address: partial。
+    // この人に「山田太郎 / 登記上の住所と一致」を返すと、市までしか見せていない
+    // 住所の一致を確定させてしまう(= 検索オラクル)。
+    mockPerms = [
+      { resource: "import", action: "write", granted: true },
+      { resource: "property", action: "write", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "partial", granted: true },
+    ];
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "o-secret", name: "山田太郎", currentAddress: null, address: "東京都渋谷区X1-1-1" },
+    ]);
+    const res = await POST(jsonReq({ text: nameAndAddress }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([]);
+    expect(mockOwnerFindMany).not.toHaveBeenCalled();
+  });
+
+  it("氏名も住所も見られる人には従来どおり候補を返す（過剰に閉じていない）", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "o-ok", name: "山田太郎", currentAddress: "東京都渋谷区X1-1-1", address: null },
+    ]);
+    const res = await POST(jsonReq({ text: nameAndAddress }));
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([
+      { id: "o-ok", name: "山田太郎", matchKind: "current_address" },
+    ]);
+  });
+});
+
+describe("物件はレコード単位のスコープで絞る（field_staff は担当分だけ）", () => {
+  /** 担当分(mine)と担当外(theirs)を1件ずつ返す。 */
+  function twoProperties(externalLinkKeyOwner: "mine" | "theirs") {
+    mockFindMany.mockImplementation(async (args: { where?: Record<string, unknown> }) => {
+      const mine = {
+        id: "p-mine",
+        address: "東京都A区B1-2-3",
+        lotNumber: "1-1",
+        externalLinkKey: externalLinkKeyOwner === "mine" ? "SA-1" : null,
+        createdBy: "user-1",
+        assignedTo: null,
+      };
+      const theirs = {
+        id: "p-theirs",
+        address: "東京都A区B1-2-3",
+        lotNumber: "1-1",
+        externalLinkKey: externalLinkKeyOwner === "theirs" ? "SA-1" : null,
+        createdBy: "someone-else",
+        assignedTo: "someone-else",
+      };
+      if (args?.where?.externalLinkKey) {
+        return [mine, theirs].filter((p) => p.externalLinkKey === "SA-1");
+      }
+      return [mine, theirs];
+    });
+  }
+
+  it("★field_staff の similar には担当外の物件（住所・id）が出ない", async () => {
+    mockSession = { id: "user-1", role: "field_staff" };
+    twoProperties("mine");
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3（地番1-1）" }),
+    );
+    const body = await res.json();
+    expect(body.similar.map((x: { id: string }) => x.id)).toEqual(["p-mine"]);
+    expect(body.duplicates.similarPropertyIds).toEqual(["p-mine"]);
+    expect(JSON.stringify(body.similar)).not.toContain("p-theirs");
+  });
+
+  it("担当外でない役割（office_staff 等）には両方出る（絞りすぎていない）", async () => {
+    mockSession = { id: "user-1", role: "office_staff" };
+    twoProperties("mine");
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3（地番1-1）" }),
+    );
+    const body = await res.json();
+    expect(body.similar.map((x: { id: string }) => x.id).sort()).toEqual(["p-mine", "p-theirs"]);
+  });
+
+  it("★担当外の物件が登録済みでも blocked は残るが、id は渡さない", async () => {
+    mockSession = { id: "user-1", role: "field_staff" };
+    twoProperties("theirs");
+    const res = await POST(
+      jsonReq({ text: "■査定ナンバー： SA-1\n■物件所在地： 東京都A区B1-2-3（地番1-1）" }),
+    );
+    const body = await res.json();
+    // 「もう登録されている」ことは必ず伝える(伝えないと二重登録が起きる)。
+    expect(body.duplicates.blocked).toBe(true);
+    // 開けない物件の id は渡さない(押しても403になるリンクを見せない)。
+    expect(body.duplicates.blockedByPropertyId).toBeNull();
+  });
+
+  it("担当分の物件が登録済みなら blocked と id の両方を返す", async () => {
+    mockSession = { id: "user-1", role: "field_staff" };
+    twoProperties("mine");
+    const res = await POST(
+      jsonReq({ text: "■査定ナンバー： SA-1\n■物件所在地： 東京都A区B1-2-3（地番1-1）" }),
+    );
+    const body = await res.json();
+    expect(body.duplicates.blocked).toBe(true);
+    expect(body.duplicates.blockedByPropertyId).toBe("p-mine");
+  });
+
+  it("★レスポンスに createdBy / assignedTo を載せない（判定にだけ使う）", async () => {
+    mockSession = { id: "user-1", role: "office_staff" };
+    twoProperties("mine");
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3（地番1-1）" }),
+    );
+    const dumped = JSON.stringify(await res.json());
+    expect(dumped).not.toContain("createdBy");
+    expect(dumped).not.toContain("assignedTo");
+    expect(dumped).not.toContain("someone-else");
+  });
+});
+
+describe("PDF 経路（全体レビュー I-2 / I-5 / m-2 / m-6）", () => {
+  it("★PDF から取り出した本文を返す（確認画面の左側で突き合わせられるように）", async () => {
+    pdfText = "■物件所在地： 東京都A区B1-2-3（地番552-2）\n■物件種別： 一般住宅\n■建物構造： 木造スレート葺\n■間取り： 2LDK" + NL + "■お名前： 山田太郎";
+    const res = await POST(await pdfReq());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.extractedText).toBe(pdfText);
+    expect(body.draft.property.address.value).toBe("東京都A区B1-2-3");
+  });
+
+  it("★貼り付け経路では本文を返さない（画面が原文を持っているので往復させない）", async () => {
+    const res = await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
+    const body = await res.json();
+    expect(body.extractedText).toBeNull();
+  });
+
+  it("★PDF の上限は確定側(MAX_FILE_SIZE)と同じで、案内文言もその数字を出す", async () => {
+    const { MAX_FILE_SIZE } = await import("@/lib/storage");
+    const res = await POST(await pdfReq(MAX_FILE_SIZE + 1));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    // 「10MBまで」と案内して 8MB で弾く食い違いを作らない。
+    expect(body.error.message).toContain(String(MAX_FILE_SIZE / 1024 / 1024));
+    expect(body.error.message).not.toContain("10MB");
+  });
+
+  it("★文字が数文字しか取れないPDF(スキャン画像)は、空でなくても断る", async () => {
+    // isLikelyScannedPdf は50文字未満を「読めていない」とみなす。
+    // trim()==="" 判定では、雑音を数文字吐くスキャンPDFが素通りしていた。
+    pdfText = "  ・  ";
+    const res = await POST(await pdfReq());
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.message).toContain("文字が入っていません");
+  });
+
+  it("★長すぎるPDFの断り文言は「貼り付けた文章」と言わない", async () => {
+    pdfText = "あ".repeat(200_001);
+    const res = await POST(await pdfReq());
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.message).toContain("PDF");
+    expect(body.error.message).not.toContain("貼り付けた文章");
+  });
+
+  it("貼り付け経路の長すぎる断り文言は従来どおり「貼り付けた文章」", async () => {
+    const res = await POST(jsonReq({ text: "あ".repeat(200_001) }));
+    expect((await res.json()).error.message).toContain("貼り付けた文章");
+  });
+});
+
+describe("氏名の先頭1文字（全体レビュー m-1）", () => {
+  it("★サロゲートペアで始まる姓「𠮷田」でも前方一致の種にできる（半分に割らない）", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "sp1", name: "𠮷田太郎", currentAddress: null, address: null },
+    ]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" + NL + "■お名前： 𠮷田太郎" }),
+    );
+    expect(res.status).toBe(200);
+    const args = mockOwnerFindMany.mock.calls[0][0] as {
+      where?: { OR?: { name?: { startsWith?: string } }[] };
+    };
+    const prefixes = (args.where?.OR ?? []).map((o) => o.name?.startsWith);
+    // slice(0,1) だと壊れた片割れ(長さ1)しか渡らない。
+    expect(prefixes).toContain("𠮷");
+    expect(prefixes.every((x) => x !== undefined && Array.from(x).length === 1)).toBe(true);
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([
+      { id: "sp1", name: "𠮷田太郎", matchKind: "name_only" },
+    ]);
   });
 });

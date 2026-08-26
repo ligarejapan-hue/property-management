@@ -2,16 +2,19 @@ import { NextRequest } from "next/server";
 import {
   getApiSession,
   getUserPermissions,
+  getOwnerDisplayConfig,
   ApiError,
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, maskValue } from "@/lib/permissions";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 import { prisma } from "@/lib/prisma";
-import { extractTextFromPdf, isPdfBuffer } from "@/lib/pdf-extract";
+import { extractTextFromPdf, isPdfBuffer, isLikelyScannedPdf } from "@/lib/pdf-extract";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
 import { judgeDuplicates, type ExistingProperty } from "@/lib/paste-import/find-duplicates";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
+import { MAX_FILE_SIZE } from "@/lib/storage";
 import { buildOwnerDedupKey } from "@/lib/owner-dedup";
 import { normalizeName } from "@/lib/normalize";
 
@@ -59,6 +62,11 @@ const FULL_WIDTH_TO_HALF_WIDTH_KATAKANA: ReadonlyMap<string, string> = (() => {
   return map;
 })();
 
+/** 文字列の先頭1文字（サロゲートペアを割らない）。空文字なら空文字。 */
+function firstCodePoint(s: string): string {
+  return Array.from(s)[0] ?? "";
+}
+
 /** 1文字を半角へ(全角英数記号・全角カナが対象。それ以外はそのまま)。 */
 function toHalfWidthChar(c: string): string {
   const code = c.charCodeAt(0);
@@ -83,7 +91,10 @@ function toFullWidthChar(c: string): string {
  * 自然に1つへ畳まれる)。
  */
 function ownerSearchPrefixCandidates(rawName: string, normalizedName: string): string[] {
-  const seeds = [rawName.slice(0, 1), normalizedName.slice(0, 1)].filter((c) => c !== "");
+  // ⚠先頭1文字は **コードポイント単位**で取る（全体レビュー m-1）。
+  //   slice(0,1) はサロゲートペア（例:「𠮷田」の「𠮷」）を半分に割り、
+  //   壊れた片割れで startsWith するため候補が**無言で0件**になる。
+  const seeds = [firstCodePoint(rawName), firstCodePoint(normalizedName)].filter((c) => c !== "");
   const variants = new Set<string>();
   for (const c of seeds) {
     variants.add(c);
@@ -107,6 +118,23 @@ interface OwnerCandidate {
   matchKind: "current_address" | "registry_address" | "name_only";
 }
 
+/**
+ * 重複候補として DB から引く物件1件。
+ * ⚠createdBy / assignedTo は canAccessPropertyRecord に渡すためだけに持つ。
+ *   **レスポンスには絶対に載せない**。
+ */
+type CandidateProperty = ExistingProperty & {
+  createdBy: string;
+  assignedTo: string | null;
+};
+
+/**
+ * 表示レベルのうち「その項目で**検索してよい**」もの。
+ * ⚠この集合は src/app/api/owners/route.ts の SEARCHABLE_LEVELS と同一。
+ *   独自のしきい値を作らない(3入口で同じ規則であること)。
+ */
+const SEARCHABLE_LEVELS = new Set(["edit", "full", "read"]);
+
 // ---------- POST /api/import/paste ----------
 // リクエスト形式:
 //   multipart/form-data → file: PDF binary
@@ -117,36 +145,55 @@ interface OwnerCandidate {
 
 /** 貼り付けの上限。実サンプルは334文字と約900文字なので3桁の余裕がある。 */
 const MAX_CHARS = 200_000;
-/** PDF の上限（10MB）。 */
-const MAX_PDF_BYTES = 10 * 1024 * 1024;
+/**
+ * PDF の上限。⚠**確定側(/api/import/paste/commit)と同じ定数**を使う
+ * (全体レビュー I-2)。ここだけ 10MB にしていたため、9MB の PDF は読み取りに
+ * 成功して人が10項目直したあと、登録の瞬間に 8MB 超で弾かれていた。
+ * 案内文言も同じ定数から組み立て、数字を二重管理しない。
+ */
+const MAX_PDF_BYTES = MAX_FILE_SIZE;
 
 export async function POST(request: NextRequest) {
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
+    // ⚠取込系 route は例外なく import:write を先に要求する（全体レビュー I-1）。
+    //   src/app/api/import/** の他の全 route と同じ順序・同じ文言に揃える。
+    if (!hasPermission(perms, "import", "write")) {
+      throw new ApiError(403, "権限がありません", "FORBIDDEN");
+    }
     if (!hasPermission(perms, "property", "write")) {
       throw new ApiError(403, "物件を作る権限がありません", "FORBIDDEN");
     }
 
     const contentType = request.headers.get("content-type") ?? "";
     let text = "";
+    // 入口(貼り付け / PDF)で案内文言を変える。人が取った経路の言葉で伝える。
+    const isPdfPath = contentType.includes("multipart/form-data");
 
-    if (contentType.includes("multipart/form-data")) {
+    if (isPdfPath) {
       const form = await request.formData();
       const file = form.get("file");
       if (!(file instanceof File)) {
         throw new ApiError(400, "PDFファイルが見つかりません", "BAD_REQUEST");
       }
       if (file.size > MAX_PDF_BYTES) {
-        throw new ApiError(400, "PDFが大きすぎます（10MBまで）", "BAD_REQUEST");
+        throw new ApiError(
+          400,
+          `PDFが大きすぎます（${MAX_PDF_BYTES / 1024 / 1024}MBまで）`,
+          "BAD_REQUEST",
+        );
       }
       const buffer = Buffer.from(await file.arrayBuffer());
       if (!isPdfBuffer(buffer)) {
         throw new ApiError(400, "PDFファイルではありません", "BAD_REQUEST");
       }
       text = await extractTextFromPdf(buffer);
-      if (text.trim() === "") {
+      if (isLikelyScannedPdf(text)) {
         // ⚠無言で空の下書きを返さない。スキャン画像の PDF はここに来る。
+        // ⚠判定は既存の isLikelyScannedPdf(@/lib/pdf-extract・50文字未満)を使う
+        //   (全体レビュー m-2)。`trim() === ""` だと、雑音を数文字だけ吐く
+        //   スキャンPDFが「読めた」ことになり、空同然の下書きが出ていた。
         throw new ApiError(
           400,
           "このPDFには文字が入っていません（画像として保存されたPDFの可能性があります）。画面をコピーして貼り付けてください。",
@@ -165,9 +212,13 @@ export async function POST(request: NextRequest) {
     }
 
     if (text.length > MAX_CHARS) {
+      // ⚠通った経路の言葉で伝える（全体レビュー m-6）。PDF を投入した人に
+      //   「貼り付けた文章が長すぎます」と言っても心当たりがない。
       throw new ApiError(
         400,
-        `貼り付けた文章が長すぎます（${MAX_CHARS.toLocaleString()}文字まで）`,
+        isPdfPath
+          ? `PDFの文字数が多すぎます（${MAX_CHARS.toLocaleString()}文字まで）`
+          : `貼り付けた文章が長すぎます（${MAX_CHARS.toLocaleString()}文字まで）`,
         "BAD_REQUEST",
       );
     }
@@ -183,8 +234,20 @@ export async function POST(request: NextRequest) {
     //   一致行が結果から漏れる(=二重登録を防げない)。外部キー一致は完全一致
     //   なので件数は少なく、take で切らない。住所の前方一致だけ take:50 を掛け、
     //   最後に id で重複を除いて合流する。
-    const select = { id: true, address: true, lotNumber: true, externalLinkKey: true } as const;
-    const candidateMap = new Map<string, ExistingProperty>();
+    // ⚠createdBy / assignedTo は **レコード単位のスコープ判定にだけ**使う
+    //   (レスポンスには載せない)。物件一覧・詳細と同じ規則
+    //   (src/lib/property-access.ts のヘッダ参照) をこの入口にも適用する
+    //   (全体レビュー Critical 2)。これが無いと field_staff に担当外物件の
+    //   住所(PII)と id がそのまま返っていた。
+    const select = {
+      id: true,
+      address: true,
+      lotNumber: true,
+      externalLinkKey: true,
+      createdBy: true,
+      assignedTo: true,
+    } as const;
+    const candidateMap = new Map<string, CandidateProperty>();
 
     if (draft.externalLinkKey) {
       const keyRows = await prisma.property.findMany({
@@ -206,7 +269,7 @@ export async function POST(request: NextRequest) {
       for (const row of addressRows) candidateMap.set(row.id, row);
     }
 
-    const candidates: ExistingProperty[] = Array.from(candidateMap.values());
+    const candidates: CandidateProperty[] = Array.from(candidateMap.values());
 
     const duplicates = judgeDuplicates(
       {
@@ -217,9 +280,25 @@ export async function POST(request: NextRequest) {
       candidates,
     );
 
+    // ⚠「似た物件」は**この人が開ける物件だけ**に絞る。担当外の住所を
+    //   ここから覗けてしまうと、物件一覧・詳細で絞っている意味が無くなる。
     const similar = candidates
       .filter((c) => duplicates.similarPropertyIds.includes(c.id))
+      .filter((c) => canAccessPropertyRecord(session, c))
       .map((c) => ({ id: c.id, address: c.address, lotNumber: c.lotNumber }));
+
+    // ⚠止める判断(blocked)は**担当外の物件が相手でも必ず残す**。
+    //   「もう登録されている」ことは伝えないと二重登録が起きる。
+    //   ただし開けない物件の id は渡さない(押しても403になるリンクを見せない)。
+    const blockedBy = duplicates.blockedByPropertyId;
+    const blockedByAccessible =
+      blockedBy !== null &&
+      candidates.some((c) => c.id === blockedBy && canAccessPropertyRecord(session, c));
+    const scopedDuplicates = {
+      ...duplicates,
+      blockedByPropertyId: blockedByAccessible ? blockedBy : null,
+      similarPropertyIds: similar.map((sp) => sp.id),
+    };
 
     // ---- 所有者の重複候補(設計書 §6: 氏名+住所が一致すれば候補を並べて選ばせる) ----
     // ⚠draft.owner.currentAddress は「現住所」(貼り付け元はこれしか持たない)。
@@ -252,10 +331,34 @@ export async function POST(request: NextRequest) {
     //   そのため先頭1文字は複数の幅表記を OR で並べて広く取り、
     //   正確な判定は JS 側の normalizeName 完全一致に委ねる(広く取って
     //   正確に絞る、の「広く取る」側だけを変える)。
+    //
+    // ⚠**ここは所有者検索の入口である**(全体レビュー Critical 2)。このリポジトリは
+    //   所有者検索を3入口(owners / owners/search / properties/suggest)に限り、
+    //   3つとも同じ規則に揃えている(src/app/api/owners/route.ts のコメント)。
+    //   この route も同じ規則に従う:
+    //     ① owner:read が無ければ**DBを引かない**(空で返す)
+    //     ② 表示レベルがマスクされている項目では**検索しない**
+    //        (ヒットの有無から見えないはずの値を当てられる=検索オラクル)。
+    //        氏名で前方一致し、住所で一致の種類を出し分ける経路なので、
+    //        **氏名と住所の両方**が検索可能なときだけ引く。
+    //     ③ 返す氏名は maskValue を通す(owners と同じ通し方)。
+    //   ⚠既定の field_staff テンプレート(prisma/seed.ts)は owner_address: partial
+    //     のため②で止まる。以前はこの人に「山田太郎 / 登記上の住所と一致」を
+    //     返しており、**市までしか見せていない住所の一致を確定させていた**。
     const ownerNameRaw = draft.owner?.name.value?.trim() ?? "";
     const normalizedOwnerName = normalizeName(ownerNameRaw);
     let ownerCandidates: OwnerCandidate[] = [];
-    if (normalizedOwnerName !== "") {
+
+    const canReadOwner = hasPermission(perms, "owner", "read");
+    const ownerDisplayConfig = canReadOwner
+      ? await getOwnerDisplayConfig(session.id, perms)
+      : null;
+    const ownerSearchAllowed =
+      ownerDisplayConfig !== null &&
+      SEARCHABLE_LEVELS.has(ownerDisplayConfig.name) &&
+      SEARCHABLE_LEVELS.has(ownerDisplayConfig.address);
+
+    if (ownerSearchAllowed && normalizedOwnerName !== "") {
       const prefixCandidates = ownerSearchPrefixCandidates(ownerNameRaw, normalizedOwnerName);
       const ownerRows = await prisma.owner.findMany({
         where: {
@@ -274,6 +377,7 @@ export async function POST(request: NextRequest) {
         ? buildOwnerDedupKey(normalizedOwnerName, draftAddress)
         : null;
 
+      const nameLevel = ownerDisplayConfig.name;
       ownerCandidates = matchedRows.map((row) => {
         let matchKind: OwnerCandidate["matchKind"] = "name_only";
         if (draftKey !== null) {
@@ -289,8 +393,13 @@ export async function POST(request: NextRequest) {
             matchKind = "registry_address";
           }
         }
-        return { id: row.id, name: row.name, matchKind };
-      });
+        // ⚠氏名は owners と同じく maskValue を通してから返す。
+        //   (上の②で searchable なレベルに限っているため現状は素通しだが、
+        //    レベルの集合が将来広がったときに素の値が漏れる口を残さない。)
+        return { id: row.id, name: maskValue(row.name, nameLevel), matchKind };
+      })
+      // 名前を出せない候補は「どれのことか」を人が選べないので返さない。
+      .filter((c): c is OwnerCandidate => c.name !== null);
     }
 
     // ⚠貼った原文は返さない（画面側が手元に持っている。往復させるとログや
@@ -298,9 +407,15 @@ export async function POST(request: NextRequest) {
     //   返さず、id/氏名/一致の種類だけに絞る。デバッグ用フィールドも一切足さない。
     return apiResponse({
       draft,
-      duplicates,
+      duplicates: scopedDuplicates,
       similar,
       ownerCandidates,
+      // ⚠PDF を投入したときだけ、抽出した本文を返す(全体レビュー I-5)。
+      //   PDF の人は原文を手元に持っていないため、返さないと確認画面の左側に
+      //   突き合わせる材料が何も無い(以前は「（PDF: ファイル名）」だけだった)。
+      //   貼り付け経路では画面が原文を持っているので**返さない**(往復させると
+      //   ログ・履歴に PII を増やすだけ)。
+      extractedText: isPdfPath ? text : null,
     });
   } catch (error) {
     return handleApiError(error);
