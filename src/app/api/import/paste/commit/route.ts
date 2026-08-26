@@ -8,6 +8,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
+import { createOwnerSchema } from "@/lib/validators";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { lockPropertyRow } from "@/lib/property-record-guard";
@@ -187,6 +188,25 @@ export async function POST(request: NextRequest) {
       for (const { value, resource, label } of ownerFieldWriteChecks) {
         if ((value ?? "").trim() !== "" && !hasExplicitWritePerm(perms, resource)) {
           throw new ApiError(403, `${label}を書き込む権限がありません`, "FORBIDDEN");
+        }
+      }
+
+      // ---- メールアドレスの形式（@codex PR#414 3巡目 P2） ----
+      // ⚠通常の所有者作成 (createOwnerSchema) は形式を弾いている。ここが無検証だと
+      //   **通常のAPIでは作れない所有者をこの経路からは作れて**しまい、DMの送信先
+      //   として使えないデータが静かに入る。
+      // ⚠自前の正規表現は書かない。**同じスキーマの同じ欄**をそのまま使い、
+      //   文言も向こう側の定義から取る(片方だけ直る食い違いを作らない)。
+      // ⚠空文字・null は今までどおり「未入力」として通す(必須にはしない)。
+      const emailInput = (body.owner.email ?? "").trim();
+      if (emailInput !== "") {
+        const parsed = createOwnerSchema.shape.email.safeParse(emailInput);
+        if (!parsed.success) {
+          throw new ApiError(
+            400,
+            parsed.error.issues[0]?.message ?? "メールアドレスの形式が正しくありません",
+            "BAD_REQUEST",
+          );
         }
       }
     }

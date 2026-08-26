@@ -200,7 +200,14 @@ export default function PasteImportPage() {
   }, [draft, propertyValues, ownerValues, note, ownerMode, linkedOwnerId, pdfFile, router]);
 
   return (
-    <div className="space-y-6">
+    // ⚠**画面の最上位**に PII 保護の印を付ける(@codex PR#414 3巡目)。
+    //   ScreenProtectionGuard はこの印が付いた要素の**内側でしか**コピー・
+    //   右クリック・印刷を抑止・監査しない。この画面は貼った原文(資料まるごと)と
+    //   所有者の氏名・住所・電話・メールが同じ画面に並ぶ＝この機能でいちばん
+    //   個人情報が濃い画面なので、貼り付け欄・原文の表示・確認画面のフォームが
+    //   **すべて内側に入る**この位置に付ける(一部だけ内側だと外は無防備)。
+    //   兄弟の取込画面3つ(import / import/registry-dm / import/jobs/[jobId])と同じ形。
+    <div data-pii-protected data-pii-surface="import" className="space-y-6">
       <ImportSwitcher />
       <PageHeader
         title="貼り付けて物件化"

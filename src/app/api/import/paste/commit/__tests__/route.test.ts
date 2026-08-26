@@ -858,3 +858,55 @@ describe("物件名は種別に合うときだけ保存する（P2④）", () =>
     expect(created.property?.[0]).toMatchObject({ buildingName: "あ".repeat(100) });
   });
 });
+
+describe("メールアドレスの形式を通常の所有者作成と同じ規則で見る（3巡目 P2）", () => {
+  const ownerEmail = (email: string | null) => ({
+    ...baseBody,
+    owner: { name: "山田太郎", nameKana: null, phone: null, email, currentAddress: null },
+  });
+
+  it("★壊れたメールアドレスは400で、物件も所有者も作られない", async () => {
+    // createOwnerSchema が弾く値は、この経路でも同じように弾く。
+    // ここが無検証だと「通常のAPIでは作れない所有者」がこの画面からだけ作れる。
+    const res = await POST(req(ownerEmail("abc@")));
+    expect(res.status).toBe(400);
+    expect(created.property).toBeUndefined();
+    expect(created.owner).toBeUndefined();
+  });
+
+  it("★文言は通常の所有者作成と同じ（片方だけ直る食い違いを作らない）", async () => {
+    const { createOwnerSchema } = await import("@/lib/validators");
+    const expected = createOwnerSchema.shape.email.safeParse("abc@");
+    expect(expected.success).toBe(false);
+    const res = await POST(req(ownerEmail("abc@")));
+    const body = await res.json();
+    expect(body.error.message).toBe(
+      expected.success ? "" : expected.error.issues[0].message,
+    );
+  });
+
+  it("★@が無い/空白だけ等、いくつかの壊れ方をまとめて弾く", async () => {
+    for (const bad of ["yamada", "yamada@@example.jp", "@example.jp", "a b@example.jp"]) {
+      const res = await POST(req(ownerEmail(bad)));
+      expect(res.status, `${bad} が通ってしまった`).toBe(400);
+    }
+  });
+
+  it("空なら通る（未入力は誤りではない・必須にしない）", async () => {
+    const res = await POST(req(ownerEmail("")));
+    expect(res.status).toBe(200);
+    expect(created.owner?.[0]).toMatchObject({ email: null });
+  });
+
+  it("null でも通る", async () => {
+    const res = await POST(req(ownerEmail(null)));
+    expect(res.status).toBe(200);
+    expect(created.owner?.[0]).toMatchObject({ email: null });
+  });
+
+  it("正しいメールアドレスは従来どおり保存される（弾きすぎていない）", async () => {
+    const res = await POST(req(ownerEmail("yamada@example.jp")));
+    expect(res.status).toBe(200);
+    expect(created.owner?.[0]).toMatchObject({ email: "yamada@example.jp" });
+  });
+});
