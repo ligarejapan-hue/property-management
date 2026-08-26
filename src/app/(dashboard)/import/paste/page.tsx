@@ -22,7 +22,8 @@ import {
   defaultOwnerMode,
   foldNoColumnFieldsIntoNote,
   stripFilledRawLines,
-  hasOwnerMatchWeakened,
+  hasMatchKindWeakened,
+  type OwnerMatchKind,
   type PasteDuplicatesResult,
   type SimilarPropertySummary,
   type OwnerCandidateSummary,
@@ -90,7 +91,20 @@ export default function PasteImportPage() {
   const [externalLinkKey, setExternalLinkKey] = useState("");
   const [recheckError, setRecheckError] = useState<string | null>(null);
   const [ownerMode, setOwnerMode] = useState<OwnerMode>("none");
-  const [linkedOwnerId, setLinkedOwnerId] = useState<string | null>(null);
+  /**
+   * 選んだ所有者と、**選んだ瞬間の一致の種類**。
+   *
+   * ⚠id だけでなく種類も**選択時に固定**する(@codex PR#414 15巡目 ②)。
+   *   住所を編集した blur の再判定が走っている最中に候補をクリックすると、
+   *   あとから届いた応答が候補リストを `name_only` に書き換える。
+   *   比較の基準を候補リストに置いていると、その汚染された値どうしを比べて
+   *   「弱化なし」と判断し、**確認なしで紐付く**。基準を選択時に固定すれば、
+   *   応答がいつ届いても判定は変わらない。
+   */
+  const [linkedOwner, setLinkedOwner] = useState<
+    { id: string; matchKindAtSelection: OwnerMatchKind } | null
+  >(null);
+  const linkedOwnerId = linkedOwner?.id ?? null;
 
   // ---- 登録 ----
   const [registering, setRegistering] = useState(false);
@@ -129,7 +143,7 @@ export default function PasteImportPage() {
       setExternalLinkKey(data.draft.externalLinkKey ?? "");
       setRecheckError(null);
       setOwnerMode(defaultOwnerMode(data.draft));
-      setLinkedOwnerId(null);
+      setLinkedOwner(null);
       setRegisterError(null);
     } catch (e) {
       setReadError(e instanceof Error ? e.message : "読み取りに失敗しました");
@@ -183,14 +197,29 @@ export default function PasteImportPage() {
       // ⚠**見えない紐付けを残さない**。選んでいた相手が候補から消えたら、
       //   選択そのものを外して理由を出す(登録は下のガードで止まる)。
       if (
-        linkedOwnerId !== null &&
-        !data.ownerCandidates.some((c) => c.id === linkedOwnerId)
+        linkedOwner !== null &&
+        !data.ownerCandidates.some((c) => c.id === linkedOwner.id)
       ) {
-        setLinkedOwnerId(null);
+        setLinkedOwner(null);
         setRecheckError(
           "選んでいた所有者が候補から外れました。所有者の扱いを選び直してください。",
         );
         return data;
+      }
+
+      // ⚠**登録時まで黙っていない**(15巡目 ②)。選んだ瞬間の証拠と最新の種類を
+      //   比べ、弱くなっていたらその場で伝える(応答がいつ届いても基準は変わらない)。
+      if (linkedOwner !== null) {
+        const nowCandidate = data.ownerCandidates.find((c) => c.id === linkedOwner.id);
+        if (
+          nowCandidate &&
+          hasMatchKindWeakened(linkedOwner.matchKindAtSelection, nowCandidate.matchKind)
+        ) {
+          setRecheckError(
+            "選択した所有者との住所の一致が、入力の変更により無くなりました。ご確認ください。",
+          );
+          return data;
+        }
       }
 
       setRecheckError(null);
@@ -204,7 +233,7 @@ export default function PasteImportPage() {
       );
       return null;
     }
-  }, [propertyValues, ownerValues, ownerMode, externalLinkKey, linkedOwnerId]);
+  }, [propertyValues, ownerValues, ownerMode, externalLinkKey, linkedOwner]);
 
   const handleRegister = useCallback(async () => {
     if (!draft || !propertyValues || !ownerValues) return;
@@ -243,7 +272,6 @@ export default function PasteImportPage() {
       //   知らせないまま登録が通る。
       const ownerKey = (c: OwnerCandidateSummary) => `${c.id}:${c.matchKind}`;
       const beforeOwners = ownerCandidates.map(ownerKey).sort().join(",");
-      const beforeSelected = ownerCandidates.find((c) => c.id === linkedOwnerId) ?? null;
       const latest = await recheckDuplicates();
 
       // ⚠**確認できなかったときに通してはいけない**(確認しないより悪い＝
@@ -264,10 +292,10 @@ export default function PasteImportPage() {
       //   確認できない相手に紐付けたまま登録させない。
       if (
         ownerMode === "link" &&
-        (linkedOwnerId === null ||
-          !latest.ownerCandidates.some((c) => c.id === linkedOwnerId))
+        (linkedOwner === null ||
+          !latest.ownerCandidates.some((c) => c.id === linkedOwner.id))
       ) {
-        setLinkedOwnerId(null);
+        setLinkedOwner(null);
         setRegisterError(
           "選んでいた所有者が候補から外れました。所有者の扱いを選び直してください。",
         );
@@ -276,8 +304,18 @@ export default function PasteImportPage() {
 
       // ⚠選んでいた相手が候補には残っていても、**一致の根拠が弱くなった**なら止める。
       //   「住所も一致した相手」のつもりで選んだのに、氏名だけの一致に落ちている。
-      const afterSelected = latest.ownerCandidates.find((c) => c.id === linkedOwnerId) ?? null;
-      if (ownerMode === "link" && hasOwnerMatchWeakened(beforeSelected, afterSelected)) {
+      // ⚠比較の基準は**選択した瞬間の証拠**。候補リストは、blur の再判定の応答が
+      //   クリックの後に届くと書き換わっているため、基準に使えない(15巡目 ②)。
+      const afterSelected =
+        linkedOwner === null
+          ? null
+          : (latest.ownerCandidates.find((c) => c.id === linkedOwner.id) ?? null);
+      if (
+        ownerMode === "link" &&
+        linkedOwner !== null &&
+        afterSelected !== null &&
+        hasMatchKindWeakened(linkedOwner.matchKindAtSelection, afterSelected.matchKind)
+      ) {
         setRegisterError(
           "選択した所有者との住所の一致が、入力の変更により無くなりました。ご確認ください。",
         );
@@ -362,7 +400,7 @@ export default function PasteImportPage() {
     }
   }, [
     draft, propertyValues, ownerValues, note, ownerMode, linkedOwnerId, pdfFile, router,
-    externalLinkKey, recheckDuplicates, similar, ownerCandidates,
+    externalLinkKey, recheckDuplicates, similar, ownerCandidates, linkedOwner,
   ]);
 
   return (
@@ -458,6 +496,7 @@ export default function PasteImportPage() {
                 setOwnerCandidates([]);
                 setExtractedText(null);
                 setExternalLinkKey("");
+                setLinkedOwner(null);
                 setRecheckError(null);
                 setPropertyValues(null);
                 setOwnerValues(null);
@@ -487,7 +526,9 @@ export default function PasteImportPage() {
             ownerMode={ownerMode}
             onOwnerModeChange={setOwnerMode}
             linkedOwnerId={linkedOwnerId}
-            onLinkedOwnerChange={setLinkedOwnerId}
+            onLinkedOwnerChange={(id, matchKindAtSelection) =>
+              setLinkedOwner({ id, matchKindAtSelection })
+            }
             onRegister={handleRegister}
             registering={registering}
             registerError={registerError}

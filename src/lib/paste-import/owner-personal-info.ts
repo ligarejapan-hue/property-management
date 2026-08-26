@@ -81,6 +81,35 @@ const PROPERTY_LOCATION_LABELS_EXACT: ReadonlySet<string> = new Set(
 );
 
 /**
+ * **個人情報を持たないと分かっている見出し**（正規化後の**完全一致**）。
+ *
+ * ⚠15巡目で最終フォールバックを **withheld** にしたため、
+ *   「安全と確定できるもの」を明示しないと、ごく普通の取引・建物の項目まで
+ *   備考へ届かなくなる。実サンプル2件の unmapped 項目を実際に通して決めた集合。
+ * ⚠**物件の所在(PROPERTY_LOCATION_LABELS_EXACT)とは扱いが違う**:
+ *   あちらは住所が入るのが正常なので**形の判定より先**に通す。
+ *   こちらは**形の判定を通り抜けたものだけ**を通す。
+ *   つまり `コメント: 東京都A区B1-2-3` は住所の形で先に withheld になる。
+ * ⚠ここへ足してよいのは「その見出しに個人情報が入るのは異常」と言い切れるものだけ。
+ */
+const NON_PERSONAL_LABELS_EXACT: ReadonlySet<string> = new Set(
+  [
+    // 建物・土地の性質
+    "建物構造", "構造", "階数", "総戸数", "管理形態", "駐車場", "設備",
+    "私道負担の有無", "私道負担", "接道状況", "用途地域", "建ぺい率", "容積率",
+    "心理的瑕疵事項", "物件写真",
+    // 取引・依頼の事務項目
+    "ご依頼日", "依頼日", "受付日", "査定方法", "査定区分",
+    "希望する利活用方法", "利活用方法", "売却の希望時期", "希望時期",
+    "対応期限", "希望価格", "他事業者に相談中か否か",
+    // 所有形態・関係性(値が氏名なら③の形の判定で先に伏せられる)
+    "名義", "所有形態", "関係性", "空き家所有者との関係性",
+    // 自由記述(⚠形の判定を通り抜けたものだけ通る)
+    "コメント", "備考", "ご要望", "特記事項",
+  ].map((l) => l.normalize("NFKC").replace(/[\s　]/g, "").toUpperCase()),
+);
+
+/**
  * 「所有者のこと」を明示する語。**物件系の語より優先**する。
  * ここに当たれば、見出しに「物件」が含まれていても所有者側として扱う。
  */
@@ -191,12 +220,21 @@ const DEFINITELY_SAFE_VALUES: ReadonlySet<string> = new Set([
   // 建物の構造・現況(人名にも住所にもなりえない定型語)
   "木造", "鉄骨造", "軽量鉄骨造", "鉄筋コンクリート造", "ブロック造",
   "更地", "空家", "空き家", "居住中", "賃貸中", "空室", "自己居住",
+  // 査定の区分(実サンプルBの「査定方法: 簡易査定」)
+  "簡易査定", "訪問査定", "机上査定", "詳細査定",
   "-", "ー", "−", "―", "‐", "—", "*", "",
 ]);
 
 /**
  * 人名らしい値か。
  * ⚠短い漢字/かなの塊は氏名のことが多い。**定型語(下の安全な値)を先に除く**。
+ */
+/**
+ * ⚠**この判定に語彙を足し続けない**(@codex PR#414 15巡目 ①)。
+ *   `Jonathan Smith` のようなラテン文字の氏名を拾うために正規表現を足すのは、
+ *   13〜14巡目で終わらせたはずの「危険を数え上げる」やり方への逆戻り。
+ *   語彙の外にある個人情報は**最終フォールバック(既定 withheld)**が受け止める。
+ *   ここは「なぜ伏せたか」を具体的に言うための分類にすぎない。
  */
 export function looksLikePersonName(value: string): boolean {
   const v = value.normalize("NFKC").replace(/[\s]/g, "");
@@ -228,7 +266,12 @@ export function isDefinitelyNonPersonalValue(value: string): boolean {
   return false;
 }
 
-export type OwnerPersonalInfoReason = "label" | "value";
+/**
+ * なぜ備考へ入れないと判断したか。
+ * ⚠`unclassified` は「**安全と確定できなかった**」。15巡目で最終フォールバックを
+ *   withheld にしたので、これが既定の理由になる。
+ */
+export type OwnerPersonalInfoReason = "label" | "value" | "unclassified";
 
 export interface OwnerPersonalInfoVerdict {
   /** 所有者の個人情報にあたる＝**備考へ入れない**。 */
@@ -247,14 +290,12 @@ export function judgeOwnerPersonalInfo(
 ): OwnerPersonalInfoVerdict {
   const normalized = normalizeLabel(label);
 
-  // ⚠所有者・人を指す語を先に見る(12巡目 ②)。`物件所有者氏名` のように
-  //   両方の語を含む見出しで物件系が先に効くと、氏名が備考へ素通りする。
+  // ⚠所有者・人を指す語を先に見る(12巡目 ②)。
   const aboutOwner = OWNER_SCOPE_WORDS.some((w) =>
     normalized.includes(normalizeLabel(w)),
   );
 
   // ⚠物件系と「確定」できるのは**完全一致**のときだけ(14巡目 ②)。
-  //   部分一致だと `勤務先所在地` `会社所在地` まで安全側に倒れる。
   const propertyConfirmed = !aboutOwner && PROPERTY_LOCATION_LABELS_EXACT.has(normalized);
 
   // ---- ① 見出しが個人情報の項目だと分かるなら、そこで確定 ----
@@ -265,14 +306,12 @@ export function judgeOwnerPersonalInfo(
     if (hit) return { isOwnerPersonalInfo: true, reason: "label" };
   }
 
-  // ---- ② 見出しで「安全と確定」できるならここで通す ----
+  // ---- ② 物件の所在は住所が入るのが正常なので、形の判定より先に通す ----
   if (propertyConfirmed) return { isOwnerPersonalInfo: false, reason: null };
 
-  // ---- ③ **値の形を、値の許可リストより先に見る**(14巡目 ①) ----
-  // ⚠順序が逆だと、`緊急連絡先: 09012345678` が「数値のみ＝安全」で通ってしまい、
-  //   電話形状の判定に**到達しない**。危険な形を先に落とし、
-  //   そこを通らなかったものだけを許可リストに掛ける。
-  //   (この順序は __tests__ で pin してある。入れ替えると必ず落ちる。)
+  // ---- ③ 値の形は、値の許可リストより先に見る(14巡目 ①) ----
+  // ⚠15巡目以降、この段の役割は「危険を検出する」ことではなく、
+  //   **withheld の理由をより具体的に示す**こと(既定は下の④で withheld)。
   if (
     looksLikePhoneNumber(value) ||
     looksLikeEmailAddress(value) ||
@@ -282,10 +321,21 @@ export function judgeOwnerPersonalInfo(
     return { isOwnerPersonalInfo: true, reason: "value" };
   }
 
-  // ---- ④ 値が明らかに非個人情報（許可リスト・数値のみ）なら通す ----
+  // ---- ④ **安全と確定できたものだけ**を備考へ通す ----
+  // ⚠ここが15巡目の反転の最終形。以前は「危険な形に掛からなければ安全」と
+  //   していたため、形の判定の語彙(日本語の氏名・日本の住所・日本の電話)の
+  //   **外にある個人情報がすべて素通り**していた(例: `担当: Jonathan Smith`)。
+  //   通してよいのは
+  //     (a) 個人情報を持たないと分かっている見出し(完全一致)
+  //     (b) 値の許可リスト(定型語)・電話形状でない純粋な数値
+  //   の2つだけ。
+  if (NON_PERSONAL_LABELS_EXACT.has(normalized)) {
+    return { isOwnerPersonalInfo: false, reason: null };
+  }
   if (isDefinitelyNonPersonalValue(value)) {
     return { isOwnerPersonalInfo: false, reason: null };
   }
 
-  return { isOwnerPersonalInfo: false, reason: null };
+  // ---- ⑤ 安全と確定できないものは伏せる(既定を反転した最終形) ----
+  return { isOwnerPersonalInfo: true, reason: "unclassified" };
 }

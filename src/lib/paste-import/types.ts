@@ -67,7 +67,12 @@ export interface PasteDraft {
    *   (＝同じPRで入れた項目別権限チェックの迂回路)。
    * ⚠**捨てずに持つ**。確認画面に出して、人が適切な欄へ移せるようにする。
    */
-  withheldFromNote: { label: string; value: string; reason: "label" | "value" }[];
+  withheldFromNote: {
+    label: string;
+    value: string;
+    /** label=見出しで判定 / value=値の形で判定 / unclassified=安全と確定できなかった。 */
+    reason: "label" | "value" | "unclassified";
+  }[];
   /**
    * 値を解釈できず、生値を備考へ回した項目。
    * ⚠**どの欄のものか**を持つ。人がその欄に値を入れたら、備考から**その行を

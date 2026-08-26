@@ -17,6 +17,7 @@ import {
   stripFilledRawLines,
   hasOwnerMatchWeakened,
   ownerMatchStrength,
+  hasMatchKindWeakened,
 } from "../paste-import-review";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
 
@@ -895,5 +896,79 @@ describe("選択の根拠が弱くなったことを見分ける（12巡目 ①�
   it("ownerMatchStrength: 住所まで一致 > 氏名だけ一致", () => {
     expect(ownerMatchStrength("current_address")).toBeGreaterThan(ownerMatchStrength("name_only"));
     expect(ownerMatchStrength("registry_address")).toBeGreaterThan(ownerMatchStrength("name_only"));
+  });
+});
+
+describe("blur とクリックの競争でも弱化の検出がすり抜けない（15巡目 ②）", () => {
+  type Kind = "current_address" | "registry_address" | "name_only";
+  const cand = (id: string, matchKind: Kind) => ({
+    id,
+    name: "山田太郎",
+    matchKind,
+    address: "東京都A区1-1-1",
+    addressKind: "registry" as const,
+    propertyCount: 1,
+  });
+
+  /**
+   * 画面の順序を**実際に再現**する。
+   *   1. 住所を編集 → blur が再判定を発火（応答はまだ返らない）
+   *   2. 応答が返る前に、強い一致の候補をクリックして選択
+   *   3. 再判定の応答が届き、候補リストを name_only に書き換える
+   *   4. 登録
+   * ⚠応答を**遅延させて**、3が2より後に起きることを本当に作る。
+   */
+  async function runRace() {
+    let candidates = [cand("o1", "registry_address")];
+    let resolveRecheck: ((v: typeof candidates) => void) | null = null;
+    const pending = new Promise<typeof candidates>((r) => {
+      resolveRecheck = r;
+    });
+
+    // 1. blur の再判定が走り出す（まだ解決しない）
+    const inFlight = pending.then((next) => {
+      // 3. 応答が届いて候補リストを書き換える
+      candidates = next;
+      return next;
+    });
+
+    // 2. 応答より先にクリック → **選択時の証拠**を固定
+    const clicked = candidates.find((c) => c.id === "o1")!;
+    const evidence = { id: clicked.id, matchKindAtSelection: clicked.matchKind };
+
+    // 3. ここで応答が届く（クリックの後）
+    resolveRecheck!([cand("o1", "name_only")]);
+    await inFlight;
+
+    return { evidence, candidatesAfter: candidates };
+  }
+
+  it("★順序が本当に作れている（クリックの後に応答が届き、候補が書き換わる）", async () => {
+    const { evidence, candidatesAfter } = await runRace();
+    expect(evidence.matchKindAtSelection).toBe("registry_address");
+    // 候補リストは応答で name_only に書き換えられている＝汚染された状態。
+    expect(candidatesAfter[0].matchKind).toBe("name_only");
+    expect(candidatesAfter[0].id).toBe(evidence.id);
+  });
+
+  it("★選択時の証拠を基準にすれば、弱化を検出できる（登録に進めない）", async () => {
+    const { evidence, candidatesAfter } = await runRace();
+    const latest = candidatesAfter.find((c) => c.id === evidence.id)!;
+    expect(hasMatchKindWeakened(evidence.matchKindAtSelection, latest.matchKind)).toBe(true);
+  });
+
+  it("★候補リストどうしを比べる旧方式では、この競争をすり抜ける（差の裏取り）", async () => {
+    const { candidatesAfter } = await runRace();
+    // 旧方式は「書き換わったあとの候補リスト」を before としても使うため
+    // name_only 対 name_only になり「弱化なし」と誤判断する。
+    const polluted = candidatesAfter[0];
+    expect(hasMatchKindWeakened(polluted.matchKind, polluted.matchKind)).toBe(false);
+    expect(hasOwnerMatchWeakened(polluted, polluted)).toBe(false);
+  });
+
+  it("★弱化が無い通常の経路は、従来どおり通る", async () => {
+    const evidence = { id: "o1", matchKindAtSelection: "registry_address" as Kind };
+    const latest = cand("o1", "registry_address");
+    expect(hasMatchKindWeakened(evidence.matchKindAtSelection, latest.matchKind)).toBe(false);
   });
 });

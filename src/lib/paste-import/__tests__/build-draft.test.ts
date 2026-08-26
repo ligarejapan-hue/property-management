@@ -339,3 +339,60 @@ describe("読み取れなかった生値は、どの欄のものかを持つ（1
     expect(d.unreadable).toEqual([]);
   });
 });
+
+describe("実サンプル2件の unmapped 項目は、すべて備考に届く（15巡目 ①の裏取り）", () => {
+  /**
+   * ⚠15巡目で**最終フォールバックを withheld** にした。安全と確定できるものを
+   *   明示しないと、ごく普通の取引・建物の項目まで備考へ届かなくなる。
+   *   実物の書式2件で、辞書に無い見出しが**1つも欠けずに**備考へ入ることを固定する。
+   *   (欠けたら、その見出し/値を安全確定へ足すかを判断する材料になる。)
+   */
+  it("★空き家相談(サンプルA): 所有者の個人情報は無く、全項目が備考に入る", () => {
+    const d = buildPasteDraft(fixture("home4u-vacant-house.txt"));
+    expect(d.withheldFromNote, `備考に届かなかった: ${JSON.stringify(d.withheldFromNote)}`).toEqual([]);
+    for (const label of [
+      "空き家所有者との関係性",
+      "建物構造",
+      "希望する利活用方法",
+      "コメント",
+      "他事業者に相談中か否か",
+      "駐車場",
+      "私道負担の有無",
+    ]) {
+      expect(d.noteFromUnmapped, label).toContain(label);
+    }
+  });
+
+  it("★査定依頼(サンプルB): 所有者の個人情報だけが withheld、それ以外は備考に入る", () => {
+    const d = buildPasteDraft(fixture("home4u-assessment.txt"));
+    // 伏せるのは「年齢」だけ(氏名・カナ・電話・メール・住所は辞書で所有者欄へ入る)。
+    expect(d.withheldFromNote.map((w) => w.label)).toEqual(["年齢"]);
+    for (const label of ["ご依頼日", "査定方法", "名義", "売却の希望時期"]) {
+      expect(d.noteFromUnmapped, label).toContain(label);
+    }
+  });
+});
+
+describe("安全と確定できない項目は伏せる（15巡目 ①）", () => {
+  const NL4 = "\n";
+
+  it("★ラテン文字の氏名は伏せる（形の判定の語彙の外＝最終フォールバックが受ける）", () => {
+    // ⚠ここは**最終フォールバックが効いていることの証拠**。
+    //   形の判定(日本語の氏名・住所・電話)には掛からないので、
+    //   最後の return を safe に戻すと必ず落ちる。
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NL4 + "■担当： Jonathan Smith",
+    );
+    expect(d.noteFromUnmapped).not.toContain("Jonathan Smith");
+    expect(d.withheldFromNote.map((w) => w.label)).toEqual(["担当"]);
+    // 形の判定ではなく「安全と確定できなかった」で伏せている。
+    expect(d.withheldFromNote[0].reason).toBe("unclassified");
+  });
+
+  it("★見出しも値も判定できないものは伏せる（既定が withheld）", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NL4 + "■追記事項： 何か分からない自由記述",
+    );
+    expect(d.withheldFromNote.map((w) => w.reason)).toEqual(["unclassified"]);
+  });
+});

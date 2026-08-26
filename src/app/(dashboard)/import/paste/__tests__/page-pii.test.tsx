@@ -199,20 +199,20 @@ describe("link モードの再判定と、見えない紐付けの排除（8巡�
   });
 
   it("★選んでいた相手が候補から消えたら、紐付けも必ず外す", () => {
-    expect(source).toContain("!data.ownerCandidates.some((c) => c.id === linkedOwnerId)");
+    expect(source).toContain("!data.ownerCandidates.some((c) => c.id === linkedOwner.id)");
     expect(source).toContain("選んでいた所有者が候補から外れました");
     // 外すのは「理由を出すだけ」ではなく、選択そのもの。
-    const at = source.indexOf("!data.ownerCandidates.some((c) => c.id === linkedOwnerId)");
-    expect(source.slice(at, at + 300)).toContain("setLinkedOwnerId(null)");
+    const at = source.indexOf("!data.ownerCandidates.some((c) => c.id === linkedOwner.id)");
+    expect(source.slice(at, at + 300)).toContain("setLinkedOwner(null)");
   });
 
   it("★登録の直前にも、選択が候補に残っているか確かめてから送る", () => {
-    expect(source).toContain("!latest.ownerCandidates.some((c) => c.id === linkedOwnerId)");
-    const at = source.indexOf("!latest.ownerCandidates.some((c) => c.id === linkedOwnerId)");
+    expect(source).toContain("!latest.ownerCandidates.some((c) => c.id === linkedOwner.id)");
+    const at = source.indexOf("!latest.ownerCandidates.some((c) => c.id === linkedOwner.id)");
     const postAt = source.indexOf('fetch("/api/import/paste/commit"');
     expect(at).toBeGreaterThanOrEqual(0);
     expect(postAt).toBeGreaterThan(at);
-    expect(source.slice(at, at + 300)).toContain("setLinkedOwnerId(null)");
+    expect(source.slice(at, at + 300)).toContain("setLinkedOwner(null)");
   });
 
   it("★link のまま相手が未選択なら、そもそも登録に進まない", () => {
@@ -221,7 +221,7 @@ describe("link モードの再判定と、見えない紐付けの排除（8巡�
   });
 
   it("★選択の有無を見るための値が依存に入っている", () => {
-    expect(source).toContain('externalLinkKey, linkedOwnerId]');
+    expect(source).toContain('externalLinkKey, linkedOwner]');
   });
 });
 
@@ -248,9 +248,12 @@ describe("備考の生値は、専用欄に値を入れたら取り除いてか�
 
 describe("選択の根拠が弱くなったら登録を止める（12巡目 ①）", () => {
   it("★選択中の候補について、再判定前後の一致の種類を比べている", () => {
-    expect(source).toContain("const beforeSelected = ownerCandidates.find((c) => c.id === linkedOwnerId) ?? null;");
-    expect(source).toContain("const afterSelected = latest.ownerCandidates.find((c) => c.id === linkedOwnerId) ?? null;");
-    expect(source).toContain("hasOwnerMatchWeakened(beforeSelected, afterSelected)");
+    // ⚠比較の基準は**選択した瞬間の証拠**であること(15巡目 ②)。
+    //   候補リストどうしを比べる形に戻すと、blur の応答がクリックの後に届いた
+    //   ときに基準そのものが汚染される。
+    expect(source).toContain("matchKindAtSelection");
+    expect(source).toContain("hasMatchKindWeakened(linkedOwner.matchKindAtSelection, afterSelected.matchKind)");
+    expect(source).not.toContain("const beforeSelected = ownerCandidates.find(");
   });
 
   it("★弱くなったときは専用の文言で止める", () => {
@@ -258,15 +261,15 @@ describe("選択の根拠が弱くなったら登録を止める（12巡目 ①�
   });
 
   it("★止める判断は登録APIを呼ぶ前に行う", () => {
-    const at = source.indexOf("hasOwnerMatchWeakened(beforeSelected, afterSelected)");
+    const at = source.indexOf("hasMatchKindWeakened(linkedOwner.matchKindAtSelection, afterSelected.matchKind)");
     const postAt = source.indexOf('fetch("/api/import/paste/commit"');
     expect(at).toBeGreaterThanOrEqual(0);
     expect(postAt).toBeGreaterThan(at);
   });
 
   it("★比べるのは link のときだけ（新規作成では出さない）", () => {
-    const at = source.indexOf("hasOwnerMatchWeakened(beforeSelected, afterSelected)");
-    const line = source.slice(source.lastIndexOf("if (", at), at + 60);
+    const at = source.indexOf("hasMatchKindWeakened(linkedOwner.matchKindAtSelection, afterSelected.matchKind)");
+    const line = source.slice(source.lastIndexOf("if (", at), at + 120);
     expect(line).toContain('ownerMode === "link"');
   });
 });

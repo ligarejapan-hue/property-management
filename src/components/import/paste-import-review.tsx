@@ -79,16 +79,28 @@ export function ownerMatchStrength(kind: OwnerMatchKind): number {
  *   利用者は根拠が消えたことを知らないまま登録できてしまう。
  *   同姓同名の別人に紐付ける危険そのもの。
  */
+/**
+ * 一致の根拠が弱くなったか（**種類どうし**で比べる版）。
+ *
+ * ⚠**選択した瞬間の証拠**と、最新の候補の種類を比べるために要る
+ *   (@codex PR#414 15巡目 ②)。候補リストどうしを比べる形だと、
+ *   blur の再判定の応答が**クリックの後に**届いて候補を書き換えた場合、
+ *   比較の基準そのものが汚染されて弱化を見逃す。
+ */
+export function hasMatchKindWeakened(
+  before: OwnerMatchKind,
+  after: OwnerMatchKind,
+): boolean {
+  return ownerMatchStrength(before) > 0 && ownerMatchStrength(after) === 0;
+}
+
 export function hasOwnerMatchWeakened(
   before: OwnerCandidateSummary | null | undefined,
   after: OwnerCandidateSummary | null | undefined,
 ): boolean {
   if (!before || !after) return false;
   if (before.id !== after.id) return false;
-  return (
-    ownerMatchStrength(before.matchKind) > 0 &&
-    ownerMatchStrength(after.matchKind) === 0
-  );
+  return hasMatchKindWeakened(before.matchKind, after.matchKind);
 }
 
 /**
@@ -415,7 +427,11 @@ export interface PasteImportReviewProps {
   ownerMode?: OwnerMode;
   onOwnerModeChange?: (mode: OwnerMode) => void;
   linkedOwnerId?: string | null;
-  onLinkedOwnerChange?: (ownerId: string) => void;
+  /**
+   * 候補を選んだとき。⚠**選んだ瞬間の一致の種類も渡す**。呼び出し側はこれを
+   *   「選択時の証拠」として保存し、以後の弱化判定の基準にする(15巡目 ②)。
+   */
+  onLinkedOwnerChange?: (ownerId: string, matchKindAtSelection: OwnerMatchKind) => void;
 
   onRegister?: () => void;
   registering?: boolean;
@@ -704,7 +720,7 @@ export function PasteImportReview({
                 checked={mode === "link" && linkedOwnerId === c.id}
                 onChange={() => {
                   onOwnerModeChange?.("link");
-                  onLinkedOwnerChange?.(c.id);
+                  onLinkedOwnerChange?.(c.id, c.matchKind);
                 }}
               />
               <span>{ownerCandidateLabel(c)}</span>

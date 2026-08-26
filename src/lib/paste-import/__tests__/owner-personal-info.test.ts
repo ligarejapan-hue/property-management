@@ -402,3 +402,62 @@ describe("② 物件系の「確定」は完全一致だけ", () => {
     expect(offenders, `電話番号が素通りする見出し: ${offenders.join(", ")}`).toEqual([]);
   });
 });
+
+// ===========================================================================
+// 15巡目 ①: 最終フォールバックを withheld にした（反転の最終形）
+//
+// ⚠それまでは「危険な形に掛からなければ safe」＝**危険側の既定**が最後に残って
+//   いた。形の判定の語彙（日本語の氏名・日本の住所・日本の電話）の外にある
+//   個人情報は、すべてこの穴を通っていた。ラテン文字の氏名はその一例にすぎない。
+// ⚠形の判定は**残す**が、役割が変わった: 危険を検出するのではなく、
+//   **なぜ伏せたかを具体的に示す**分類（reason）。
+// ===========================================================================
+
+describe("最終フォールバックは withheld", () => {
+  it("★『担当: Jonathan Smith』は withheld（reason=unclassified）", () => {
+    const v = judgeOwnerPersonalInfo("担当", "Jonathan Smith");
+    expect(v.isOwnerPersonalInfo).toBe(true);
+    // 形の判定には掛かっていない＝最終フォールバックが受け止めた証拠。
+    expect(v.reason).toBe("unclassified");
+  });
+
+  it("★『担当: 田中』は withheld（こちらは人名の形で分類できる）", () => {
+    const v = judgeOwnerPersonalInfo("担当", "田中");
+    expect(v.isOwnerPersonalInfo).toBe(true);
+    expect(v.reason).toBe("value");
+  });
+
+  it("★語彙の外にある個人情報は、形に頼らず全部伏せる", () => {
+    // 形の判定を足して追いかけない。既定が withheld なので自動的に守られる。
+    const cases: [string, string][] = [
+      ["担当", "Jonathan Smith"],
+      ["Contact", "J. Smith"],
+      ["連絡", "+44 20 7946 0958"],
+      ["メモ", "Rua das Flores 123, Lisboa"],
+      ["備考2", "何か分からない自由記述"],
+    ];
+    for (const [label, value] of cases) {
+      expect(judgeOwnerPersonalInfo(label, value).isOwnerPersonalInfo, `${label}: ${value}`).toBe(
+        true,
+      );
+    }
+  });
+
+  it("★安全と確定できるものだけが備考に入る（3つの経路）", () => {
+    // (a) 物件見出しの完全一致
+    expect(judgeOwnerPersonalInfo("物件所在地", "東京都A区B1-2-3").isOwnerPersonalInfo).toBe(false);
+    // (b) 個人情報を持たないと分かっている見出しの完全一致
+    expect(judgeOwnerPersonalInfo("建物構造", "木造スレート葺").isOwnerPersonalInfo).toBe(false);
+    // (c) 値の許可リスト・電話形状でない純粋な数値
+    expect(judgeOwnerPersonalInfo("何か", "なし").isOwnerPersonalInfo).toBe(false);
+    expect(judgeOwnerPersonalInfo("何か", "70.55").isOwnerPersonalInfo).toBe(false);
+  });
+
+  it("★自由記述の見出しでも、値が危険な形なら形の判定が先に効く", () => {
+    // コメント/備考は安全確定の見出しに入れているが、③が先に走るので
+    // 住所・電話・メール・日本語の氏名は伏せられる。
+    expect(judgeOwnerPersonalInfo("コメント", "東京都A区B1-2-3").isOwnerPersonalInfo).toBe(true);
+    expect(judgeOwnerPersonalInfo("備考", "09012345678").isOwnerPersonalInfo).toBe(true);
+    expect(judgeOwnerPersonalInfo("コメント", "山田太郎").isOwnerPersonalInfo).toBe(true);
+  });
+});
