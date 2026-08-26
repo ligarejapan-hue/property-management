@@ -47,7 +47,6 @@ import {
 } from "@/lib/import-error-display";
 import { unwrapCsvTextCell } from "@/lib/csv-encode";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
-import { normalizeExternalLinkKey } from "@/lib/paste-import/normalize";
 
 const VALID_PROPERTY_TYPES: readonly string[] = PROPERTY_TYPE_VALUES;
 const VALID_REGISTRY_STATUS = ["unconfirmed", "scheduled", "obtained"];
@@ -424,7 +423,7 @@ export async function POST(request: NextRequest) {
     const buildingPostalApplied = new Set<string>();
 
     // Build normalized dedupe index once (address / unit roomNo / identifier fallback)
-    const existingPropsRaw = await prisma.property.findMany({
+    const existingPropsForDedupe = await prisma.property.findMany({
       select: {
         id: true,
         address: true,
@@ -434,15 +433,16 @@ export async function POST(request: NextRequest) {
         externalLinkKey: true,
       },
     });
-    // ⚠**比較は必ず両側を同じ関数で正規化する**(@codex PR#414 19巡目 ③)。
-    //   入ってくる側だけ正規化しても、照合相手(既存行)が生値のままでは一致しない。
-    //   全角キーで保存された既存行(この変更以前のデータ)に対し、半角の新しい行が
-    //   重複と判定されず2件目ができていた。
-    //   ⚠**DBの保存値は書き換えない**。ここで作るのは読み取り時の比較用の形だけ。
-    const existingPropsForDedupe = existingPropsRaw.map((p) => ({
-      ...p,
-      externalLinkKey: normalizeExternalLinkKey(p.externalLinkKey),
-    }));
+    // ⚠**externalLinkKey は正規化しない**(@codex PR#414 23巡目・17〜22巡目の全撤回)。
+    //   src/lib/import-dedupe.ts の明文の契約:
+    //     「識別子 (realEstateNumber / externalLinkKey) は正規化せず raw 比較
+    //       （DB 側 exact を想定）」
+    //   CSV のリンクキーは**顧客の管理コード**で、幅の違いに意味があり得る。
+    //   さらに `externalLinkKey一致` は**更新対象(update-eligible)の判定理由**なので、
+    //   正規化して「一致」と判定した瞬間、`顧客ー001` と `顧客-001` を意図的に
+    //   別キーとして使う運用では**別の物件のフィールドが上書きされ得る**。
+    //   「幅の違い=同じ」は、自機能が発行して正規形を定義できる査定ナンバー
+    //   (paste-import)にしか成立しない。他機能の鍵の意味論を変えない。
     const dedupeIndex = buildDedupeIndex(existingPropsForDedupe);
 
     for (let i = 0; i < rows.length; i++) {
@@ -470,16 +470,18 @@ export async function POST(request: NextRequest) {
           mapped.buildingNumber = unwrapCsvTextCell(mapped.buildingNumber);
         }
 
-        // 外部キー(リンクキー)は **trim だけ**。**保存時に変換しない**
-        // (@codex PR#414 22巡目・17〜19巡目の保存時正規化を撤回)。
+        // 外部キー(リンクキー)は **trim だけ**。**保存でも比較でも変換しない**
+        // (@codex PR#414 23巡目・17〜22巡目に入れた CSV の正規化を全撤回)。
         // ⚠リンクキーは**利用者が付ける任意の管理コード**であり、
         //   物件CSVと所有者CSVは `externalLinkKey` の**生値の完全一致**で紐付く
         //   (src/lib/owner-property-linker.ts)。所有者CSV側は `.trim()` のみで
         //   保存している(owner-csv/route.ts)ので、物件側だけ正規化すると
         //   `顧客ー001`(長音符)のような鍵が `顧客-001` に変わり、
         //   **紐付けが壊れる**。保存は書式を尊重する。
-        // ⚠**比較(重複ガード)だけ**は両側を normalizeExternalLinkKey に通す。
-        //   混在幅の査定ナンバーの重複検出は、保存を変えずにそちらで効かせる。
+        // ⚠**比較でも正規化しない**(23巡目)。import-dedupe.ts の明文の契約
+        //   「識別子 (realEstateNumber / externalLinkKey) は正規化せず raw 比較」
+        //   に従う。`externalLinkKey一致` は**更新対象**の判定理由なので、
+        //   正規化して一致にすると、別キー運用の物件を上書きへ誘導してしまう。
         if (mapped.externalLinkKey !== undefined) {
           const trimmed = mapped.externalLinkKey.trim();
           if (trimmed === "") {
@@ -644,10 +646,9 @@ export async function POST(request: NextRequest) {
             roomNo: mapped.roomNo,
             buildingId: resolvedBuildingId,
             realEstateNumber: mapped.realEstateNumber,
-            // ⚠**比較のときだけ**正規化する(22巡目)。既存側は読み込み直後に
-            //   同じ関数を通した比較用のコピーになっている(19巡目 ③)。
-            //   **保存する値は変えない**(リンクキーは利用者の管理コード)。
-            externalLinkKey: normalizeExternalLinkKey(mapped.externalLinkKey),
+            // ⚠**生値で比較する**(23巡目)。import-dedupe.ts の契約
+            //   「識別子は正規化せず raw 比較」に従う。
+            externalLinkKey: mapped.externalLinkKey,
           },
           existingPropsForDedupe,
         );
@@ -787,8 +788,7 @@ export async function POST(request: NextRequest) {
             roomNo: updated.roomNo ?? null,
             buildingId: updated.buildingId ?? null,
             realEstateNumber: updated.realEstateNumber ?? null,
-            // ⚠比較用の形に揃える(19巡目 ③)。保存値は書き換えていない。
-            externalLinkKey: normalizeExternalLinkKey(updated.externalLinkKey),
+            externalLinkKey: updated.externalLinkKey ?? null,
           };
           addToDedupeIndex(dedupeIndex, updatedRecord);
           const idxInAll = existingPropsForDedupe.findIndex(
@@ -886,8 +886,7 @@ export async function POST(request: NextRequest) {
           roomNo: property.roomNo ?? null,
           buildingId: property.buildingId ?? null,
           realEstateNumber: property.realEstateNumber ?? null,
-          // ⚠比較用の形に揃える(19巡目 ③)。保存値は書き換えていない。
-          externalLinkKey: normalizeExternalLinkKey(property.externalLinkKey),
+          externalLinkKey: property.externalLinkKey ?? null,
         };
         addToDedupeIndex(dedupeIndex, newRecord);
         existingPropsForDedupe.push(newRecord);

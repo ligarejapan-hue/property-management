@@ -16,22 +16,25 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoSrc = join(here, "../../..");
 
 /**
- * ⚠**外部キーを扱う経路**をここに並べる。
+ * ⚠**paste-import の3経路**をここに並べる。
  *
- * ⚠22巡目で **「保存は書式を尊重、比較だけ正規化」** に分けた:
- *   - paste-import（自機能が発行する鍵）… **保存・検索・ロックすべて正規形**(R16)
- *   - CSV取込（利用者が付ける任意の管理コード）… **保存は生値(trim のみ)**、
- *     **比較(重複ガード)だけ**正規化。物件CSVと所有者CSVは生値の完全一致で
- *     紐付くため(owner-property-linker.ts)、保存を変えると紐付けが壊れる。
+ * ⚠23巡目で線引きを確定した:
+ *   - **paste-import**（自機能が発行する鍵）… 保存・検索・ロックの**すべてが正規形**(R16)。
+ *     査定ナンバーの正規形＝半角ASCII と自分で定義できるから成立する。
+ *   - **CSV取込**（利用者が付ける任意の管理コード）… **保存でも比較でも正規化しない**。
+ *     `src/lib/import-dedupe.ts` の明文の契約
+ *     「識別子 (realEstateNumber / externalLinkKey) は正規化せず raw 比較」に従う。
+ *     `externalLinkKey一致` は**更新対象**の判定理由なので、正規化すると
+ *     別キー運用の物件を**上書き**へ誘導してしまう。
+ *   他機能の鍵の意味論を、自機能の都合で変えない。
  */
 const ROUTES: { label: string; path: string }[] = [
   { label: "下書き(build-draft)", path: "lib/paste-import/build-draft.ts" },
   { label: "再判定(recheck)", path: "app/api/import/paste/recheck/route.ts" },
   { label: "確定(commit)", path: "app/api/import/paste/commit/route.ts" },
-  { label: "CSV取込(比較)", path: "app/api/import/csv/route.ts" },
 ];
 
-/** CSV取込のソース（保存と比較を分けて検査するため個別に読む）。 */
+/** CSV取込のソース（**正規化していない**ことを確かめるために読む）。 */
 const CSV_ROUTE_PATH = "app/api/import/csv/route.ts";
 
 describe("normalizeExternalLinkKey（共通関数そのもの）", () => {
@@ -89,34 +92,30 @@ describe("外部キーを扱う全経路が共通関数を通っている（走�
     });
   }
 
-  it("★CSV取込は**比較**で共有関数を通す（findPropertyDuplicate へ渡す値）", () => {
-    // ⚠22巡目: CSV は保存では正規化しない。比較だけが通ることを確かめる。
-    const src = readFileSync(join(repoSrc, CSV_ROUTE_PATH), "utf8");
-    const callAt = src.indexOf("findPropertyDuplicate(");
-    expect(callAt, "findPropertyDuplicate の呼び出しが無い").toBeGreaterThanOrEqual(0);
-    const callBlock = src.slice(callAt, src.indexOf("existingPropsForDedupe,", callAt));
-    expect(
-      callBlock.includes("normalizeExternalLinkKey(mapped.externalLinkKey)"),
-      "重複ガードの比較が共有の正規化を通っていない",
-    ).toBe(true);
-  });
-
-  it("★CSV取込は**保存**では正規化しない（リンクキーの書式を壊さない）", () => {
-    // ⚠物件CSVと所有者CSVは生値の完全一致で紐付く。保存時に変換すると
-    //   `顧客ー001` が `顧客-001` になり、所有者側の生値と一致しなくなる。
+  it("★CSV取込は externalLinkKey を**保存でも比較でも正規化しない**（契約）", () => {
+    // ⚠import-dedupe.ts:「識別子は正規化せず raw 比較（DB 側 exact を想定）」。
+    //   `externalLinkKey一致` は更新対象の判定理由なので、正規化すると
+    //   `顧客ー001` と `顧客-001` を別キーとして使う運用で**上書き**が起きる。
+    //   ⚠CSV に正規化を再導入する変異は、このテストで名指しで落ちる。
     const src = readFileSync(join(repoSrc, CSV_ROUTE_PATH), "utf8");
     const offenders = src
       .split("\n")
-      .map((line) => line.trim())
-      .filter(
-        (line) =>
-          line.startsWith("createData.externalLinkKey") &&
-          line.includes("normalizeExternalLinkKey("),
-      );
+      .map((line, i) => ({ line: line.trim(), no: i + 1 }))
+      .filter(({ line }) => !line.startsWith("//") && !line.startsWith("*"))
+      .filter(({ line }) => line.includes("normalizeExternalLinkKey"));
     expect(
-      offenders,
-      `保存時に正規化している:\n${offenders.join("\n")}`,
+      offenders.map((o) => `${o.no}: ${o.line}`),
+      "CSV取込が externalLinkKey を正規化している（import-dedupe の raw 比較契約に反する）",
     ).toEqual([]);
+  });
+
+  it("★import-dedupe の契約コメントが実在する（この判断の根拠）", () => {
+    // 根拠そのものが消えたら気づけるようにしておく。
+    const src = readFileSync(join(repoSrc, "lib/import-dedupe.ts"), "utf8");
+    expect(src).toContain("識別子 (realEstateNumber / externalLinkKey) は正規化せず raw 比較");
+    // externalLinkKey一致 が「更新対象」の理由であること＝上書きに繋がること。
+    expect(src).toContain('reason: "externalLinkKey一致"');
+    expect(src).toContain("export function isUpdateEligibleReason");
   });
 
   it("★paste-import(確定)は**保存も**正規形（R16 の一貫性を崩さない）", () => {

@@ -205,8 +205,8 @@ describe("POST /api/import/csv — 外部キーは**書式のまま保存**す�
   });
 });
 
-describe("端から端まで: CSVで入った行を、貼り付け取込がブロックする", () => {
-  it("★CSVが混在幅で取り込んだ番号を貼り付けても blocked になる（比較の正規化）", async () => {
+describe("端から端まで: CSVで入った行を、貼り付け取込側がブロックする", () => {
+  it("★CSVが混在幅で保存した番号でも、**貼り付け取込側の**判定はブロックする", async () => {
     // ① CSV取込（書込側）。**生値のまま**保存される。
     const csv = "住所,リンクキー\n東京都千代田区1-1,SA2608－1234567\n";
     await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
@@ -219,7 +219,10 @@ describe("端から端まで: CSVで入った行を、貼り付け取込がブ�
     );
     expect(draft.externalLinkKey).toBe("SA2608-1234567");
 
-    // ③ **比較は両側を正規化**するので、保存の表記が違っても重複と判定される。
+    // ③ ⚠ここで効いているのは**貼り付け取込側の判定**(judgeDuplicates は
+    //   normalizeForCompare で両側を正規化する)。
+    //   CSV取込側の重複ガードは raw 比較なので当たらない(23巡目の契約)。
+    //   自機能の鍵の意味論は自機能の中でだけ適用する、という線引き。
     const verdict = judgeDuplicates(
       { address: "東京都千代田区1-1", lotNumber: null, externalLinkKey: draft.externalLinkKey },
       [{ id: "p-csv", address: "東京都千代田区1-1", lotNumber: null, externalLinkKey: stored }],
@@ -250,118 +253,19 @@ describe("端から端まで: CSVで入った行を、貼り付け取込がブ�
   });
 });
 
-describe("★正規化は重複チェックより前に効く（18巡目 ①）", () => {
+describe("★重複判定は externalLinkKey を**生値で raw 比較**する（23巡目・契約）", () => {
   /**
-   * ⚠保存時だけ正規化していたときの壊れ方:
-   *   ①全角キーの行は、半角で保存済みの既存行と**照合で一致せず**
-   *   ②そのまま**正規化されたキーで新規作成**される
-   *   → 同じ番号の物件が2件できる。同一CSV内の等価な2行でも同じ。
+   * ⚠src/lib/import-dedupe.ts の明文の契約:
+   *   「識別子 (realEstateNumber / externalLinkKey) は正規化せず raw 比較
+   *     （DB 側 exact を想定）」
+   *
+   * ⚠さらに `externalLinkKey一致` は **update-eligible（更新対象）** の判定理由。
+   *   正規化して「一致」と判定した瞬間、`顧客ー001` と `顧客-001` を**意図的に
+   *   別キー**として使う運用では、**別の物件のフィールドが上書きされ得る**。
+   *   CSV のリンクキーは顧客の管理コードで、幅の違いに意味があり得る。
+   *   「幅の違い＝同じ」は、自機能が発行して正規形を定義できる査定ナンバー
+   *   (paste-import) にしか成立しない。他機能の鍵の意味論を変えない。
    */
-  it("★全角キーの行は、半角で保存済みの既存行と照合で一致する（新規作成しない）", async () => {
-    pm.property.findMany.mockResolvedValue([
-      {
-        id: "existing-1",
-        address: "東京都千代田区9-9",
-        roomNo: null,
-        buildingId: null,
-        realEstateNumber: null,
-        externalLinkKey: "SA2608-1234567",
-      },
-    ]);
-    pm.property.findUnique.mockResolvedValue({
-      id: "existing-1",
-      address: "東京都千代田区9-9",
-      registryStatus: "unconfirmed",
-    });
-    pm.property.updateMany.mockResolvedValue({ count: 1 });
-    pm.property.findUniqueOrThrow.mockResolvedValue({
-      id: "existing-1",
-      address: "東京都千代田区9-9",
-      roomNo: null,
-      buildingId: null,
-      realEstateNumber: null,
-      externalLinkKey: "SA2608-1234567",
-    });
-
-    const csv = "住所,リンクキー\n東京都千代田区1-1,ＳＡ２６０８－１２３４５６７\n";
-    const res = await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
-    expect(res.status).toBe(201);
-    // 既存行と一致したので**新規作成されない**。
-    expect(pm.property.create).not.toHaveBeenCalled();
-  });
-
-  it("★混在幅のキーでも照合で一致する", async () => {
-    pm.property.findMany.mockResolvedValue([
-      {
-        id: "existing-1",
-        address: "東京都千代田区9-9",
-        roomNo: null,
-        buildingId: null,
-        realEstateNumber: null,
-        externalLinkKey: "SA2608-1234567",
-      },
-    ]);
-    pm.property.findUnique.mockResolvedValue({
-      id: "existing-1",
-      address: "東京都千代田区9-9",
-      registryStatus: "unconfirmed",
-    });
-    pm.property.updateMany.mockResolvedValue({ count: 1 });
-    pm.property.findUniqueOrThrow.mockResolvedValue({
-      id: "existing-1",
-      address: "東京都千代田区9-9",
-      roomNo: null,
-      buildingId: null,
-      realEstateNumber: null,
-      externalLinkKey: "SA2608-1234567",
-    });
-
-    const csv = "住所,リンクキー\n東京都千代田区1-1,SA2608－1234567\n";
-    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
-    expect(pm.property.create).not.toHaveBeenCalled();
-  });
-
-  it("★同一CSV内の全角と半角の等価な2行が、2件にならない", async () => {
-    pm.property.findMany.mockResolvedValue([]); // 既存行は無い状態から始める
-    // 1行目で作った行は dedupe index に入る。2行目(全角)は照合で一致するべき。
-    const csv =
-      "住所,リンクキー\n" +
-      "東京都千代田区1-1,SA2608-1234567\n" +
-      "東京都千代田区2-2,ＳＡ２６０８－１２３４５６７\n";
-    pm.property.findUnique.mockResolvedValue({
-      id: "new-1",
-      address: "東京都千代田区1-1",
-      registryStatus: "unconfirmed",
-    });
-    pm.property.updateMany.mockResolvedValue({ count: 1 });
-    pm.property.findUniqueOrThrow.mockResolvedValue({
-      id: "new-1",
-      address: "東京都千代田区1-1",
-      roomNo: null,
-      buildingId: null,
-      realEstateNumber: null,
-      externalLinkKey: "SA2608-1234567",
-    });
-
-    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
-    // 作られるのは1件だけ。
-    expect(pm.property.create).toHaveBeenCalledTimes(1);
-    expect(lastCreateData().externalLinkKey).toBe("SA2608-1234567");
-  });
-
-  it("★別の番号なら従来どおり2件できる（照合が広がりすぎていない）", async () => {
-    pm.property.findMany.mockResolvedValue([]);
-    const csv =
-      "住所,リンクキー\n" +
-      "東京都千代田区1-1,SA2608-1111111\n" +
-      "東京都千代田区2-2,SA2608-2222222\n";
-    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
-    expect(pm.property.create).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe("★照合は両側を同じ関数で正規化する（19巡目 ③）", () => {
-  /** 既存行1件を DB に置く。key の表記はそのまま(＝この変更以前のデータを再現)。 */
   function existingWithKey(storedKey: string) {
     pm.property.findMany.mockResolvedValue([
       {
@@ -389,33 +293,83 @@ describe("★照合は両側を同じ関数で正規化する（19巡目 ③）"
     });
   }
 
-  it("★既存行が**全角**・新しいCSV行が半角 → 重複と判定される", () => {
-    // ⚠入ってくる側だけ正規化していたときは一致せず、2件目ができていた。
+  it("★`顧客-001` の既存行に対し `顧客ー001` の行は**重複と判定されない**（別物件として作成）", async () => {
+    // ⚠今回の指摘の核心。正規化比較だと `ー`→`-` で一致し、
+    //   別キー運用の物件が**上書き**される(externalLinkKey一致 = update-eligible)。
+    existingWithKey("顧客-001");
+    const csv = "住所,リンクキー\n東京都千代田区1-1,顧客ー001\n";
+    const res = await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
+    expect(res.status).toBe(201);
+    expect(pm.property.create).toHaveBeenCalledTimes(1);
+    expect(lastCreateData().externalLinkKey).toBe("顧客ー001");
+    // 既存行は触られていない。
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("★生値が同一なら従来どおり一致する（重複ガード自体は効いている）", async () => {
+    existingWithKey("顧客ー001");
+    const csv = "住所,リンクキー\n東京都千代田区1-1,顧客ー001\n";
+    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
+    expect(pm.property.create).not.toHaveBeenCalled();
+  });
+
+  it("★全角キーの既存行に対し半角の行は**一致しない**（raw 比較なので検出しない・契約どおり）", async () => {
+    // ⚠混在幅/全角の査定ナンバーが CSV 経由で入っていた場合、重複ガードは
+    //   効かない。**本番0件**であり、明文の契約(raw 比較)を優先する。
     existingWithKey("ＳＡ２６０８－１２３４５６７");
-    const csv = "住所,リンクキー\n東京都千代田区1-1,SA2608-1234567\n";
-    return POST(makeRequest({ fileName: "x.csv", csvText: csv })).then(() => {
-      expect(pm.property.create).not.toHaveBeenCalled();
-    });
-  });
-
-  it("★逆方向: 既存行が半角・新しいCSV行が全角 → 重複と判定される", async () => {
-    existingWithKey("SA2608-1234567");
-    const csv = "住所,リンクキー\n東京都千代田区1-1,ＳＡ２６０８－１２３４５６７\n";
-    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
-    expect(pm.property.create).not.toHaveBeenCalled();
-  });
-
-  it("★既存行が**混在幅** → 半角の新しい行と重複と判定される", async () => {
-    existingWithKey("SA2608－1234567");
-    const csv = "住所,リンクキー\n東京都千代田区1-1,SA2608-1234567\n";
-    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
-    expect(pm.property.create).not.toHaveBeenCalled();
-  });
-
-  it("★別の番号なら重複にしない（正規化で潰しすぎていない）", async () => {
-    existingWithKey("ＳＡ２６０８－９９９９９９９");
     const csv = "住所,リンクキー\n東京都千代田区1-1,SA2608-1234567\n";
     await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
     expect(pm.property.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("★混在幅の行も、半角で保存済みの既存行と**一致しない**（同上）", async () => {
+    existingWithKey("SA2608-1234567");
+    const csv = "住所,リンクキー\n東京都千代田区1-1,SA2608－1234567\n";
+    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
+    expect(pm.property.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("★同一CSV内の全角と半角は**別物**として2件できる（raw 比較の帰結）", async () => {
+    pm.property.findMany.mockResolvedValue([]);
+    const csv =
+      "住所,リンクキー\n" +
+      "東京都千代田区1-1,SA2608-1234567\n" +
+      "東京都千代田区2-2,ＳＡ２６０８－１２３４５６７\n";
+    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
+    expect(pm.property.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("★同一CSV内で生値が同じ2行なら、従来どおり2件にならない", async () => {
+    pm.property.findMany.mockResolvedValue([]);
+    pm.property.findUnique.mockResolvedValue({
+      id: "new-1",
+      address: "東京都千代田区1-1",
+      registryStatus: "unconfirmed",
+    });
+    pm.property.updateMany.mockResolvedValue({ count: 1 });
+    pm.property.findUniqueOrThrow.mockResolvedValue({
+      id: "new-1",
+      address: "東京都千代田区1-1",
+      roomNo: null,
+      buildingId: null,
+      realEstateNumber: null,
+      externalLinkKey: "SA2608-1234567",
+    });
+    const csv =
+      "住所,リンクキー\n" +
+      "東京都千代田区1-1,SA2608-1234567\n" +
+      "東京都千代田区2-2,SA2608-1234567\n";
+    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
+    expect(pm.property.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("★別の番号なら従来どおり2件できる", async () => {
+    pm.property.findMany.mockResolvedValue([]);
+    const csv =
+      "住所,リンクキー\n" +
+      "東京都千代田区1-1,SA2608-1111111\n" +
+      "東京都千代田区2-2,SA2608-2222222\n";
+    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
+    expect(pm.property.create).toHaveBeenCalledTimes(2);
   });
 });
