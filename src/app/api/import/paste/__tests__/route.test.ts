@@ -472,6 +472,7 @@ describe("POST /api/import/paste", () => {
         name: "山田太郎",
         matchKind: "current_address",
         address: "東京都渋谷区X1-1-1",
+        addressKind: "current",
         propertyCount: 0,
       },
     ]);
@@ -1166,8 +1167,8 @@ describe("同姓同名の候補を見分けられる（8巡目 ②）", () => {
     );
     const body = await res.json();
     expect(body.ownerCandidates).toEqual([
-      { id: "same-1", name: "山田太郎", matchKind: "name_only", address: "東京都A区1-1-1", propertyCount: 3 },
-      { id: "same-2", name: "山田太郎", matchKind: "name_only", address: "大阪府B市2-2-2", propertyCount: 7 },
+      { id: "same-1", name: "山田太郎", matchKind: "name_only", address: "東京都A区1-1-1", addressKind: "registry", propertyCount: 3 },
+      { id: "same-2", name: "山田太郎", matchKind: "name_only", address: "大阪府B市2-2-2", addressKind: "registry", propertyCount: 7 },
     ]);
   });
 
@@ -1200,5 +1201,85 @@ describe("同姓同名の候補を見分けられる（8巡目 ②）", () => {
     const body = await res.json();
     expect(body.ownerCandidates[0].address).toBe("連絡先の住所");
     expect(JSON.stringify(body.ownerCandidates)).not.toContain("登記上の住所");
+  });
+});
+
+describe("表示する住所は、実際に一致した方（11巡目 ③）", () => {
+  const pasted =
+    "■物件所在地： 東京都A区B1-2-3" + NL + "■お名前： 山田太郎" + NL + "■現住所： 東京都渋谷区X1-1-1";
+
+  it("★両方の住所を持つ所有者で登記上住所が一致したら、**登記上住所**を表示する", () => {
+    // 「登記上の住所と一致」の札の隣に、一致していない連絡先住所が並ぶと、
+    // 利用者は「この住所が一致したのか」と読む＝別人への紐付けを誘導する。
+    mockOwnerFindMany.mockResolvedValue([
+      {
+        id: "both-1",
+        name: "山田太郎",
+        currentAddress: "大阪府B市9-9-9", // 一致していない
+        address: "東京都渋谷区X1-1-1", // こちらが一致
+        _count: { propertyOwners: 1 },
+      },
+    ]);
+    return POST(jsonReq({ text: pasted }))
+      .then((res) => res.json())
+      .then((body) => {
+        expect(body.ownerCandidates[0].matchKind).toBe("registry_address");
+        expect(body.ownerCandidates[0].address).toBe("東京都渋谷区X1-1-1");
+        expect(body.ownerCandidates[0].addressKind).toBe("registry");
+        // 一致していない方の住所は出さない。
+        expect(JSON.stringify(body.ownerCandidates)).not.toContain("大阪府B市9-9-9");
+      });
+  });
+
+  it("★連絡先住所が一致したときは連絡先住所を表示する", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      {
+        id: "both-2",
+        name: "山田太郎",
+        currentAddress: "東京都渋谷区X1-1-1", // こちらが一致
+        address: "大阪府B市9-9-9",
+        _count: { propertyOwners: 1 },
+      },
+    ]);
+    const body = await (await POST(jsonReq({ text: pasted }))).json();
+    expect(body.ownerCandidates[0].matchKind).toBe("current_address");
+    expect(body.ownerCandidates[0].address).toBe("東京都渋谷区X1-1-1");
+    expect(body.ownerCandidates[0].addressKind).toBe("current");
+    expect(JSON.stringify(body.ownerCandidates)).not.toContain("大阪府B市9-9-9");
+  });
+
+  it("★札と表示住所は必ず対応する（どの候補でも）", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "m1", name: "山田太郎", currentAddress: "東京都渋谷区X1-1-1", address: "大阪府B市9-9-9", _count: { propertyOwners: 1 } },
+      { id: "m2", name: "山田太郎", currentAddress: "大阪府B市9-9-9", address: "東京都渋谷区X1-1-1", _count: { propertyOwners: 2 } },
+      { id: "m3", name: "山田太郎", currentAddress: "福岡県C市8-8-8", address: null, _count: { propertyOwners: 3 } },
+    ]);
+    const body = await (await POST(jsonReq({ text: pasted }))).json();
+    const expectedKind: Record<string, string> = {
+      current_address: "current",
+      registry_address: "registry",
+    };
+    for (const c of body.ownerCandidates) {
+      if (expectedKind[c.matchKind]) {
+        expect(c.addressKind, `${c.id}: 札と表示住所が食い違っている`).toBe(
+          expectedKind[c.matchKind],
+        );
+      }
+    }
+    expect(body.ownerCandidates.map((c: { matchKind: string }) => c.matchKind)).toEqual([
+      "current_address",
+      "registry_address",
+      "name_only",
+    ]);
+  });
+
+  it("★どちらも一致していない(name_only)ときは、出した方が分かる", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "n1", name: "山田太郎", currentAddress: null, address: "大阪府B市9-9-9", _count: { propertyOwners: 1 } },
+    ]);
+    const body = await (await POST(jsonReq({ text: pasted }))).json();
+    expect(body.ownerCandidates[0].matchKind).toBe("name_only");
+    expect(body.ownerCandidates[0].address).toBe("大阪府B市9-9-9");
+    expect(body.ownerCandidates[0].addressKind).toBe("registry");
   });
 });

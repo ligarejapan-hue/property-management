@@ -268,3 +268,74 @@ describe("値を解釈できなかった欄は、捨てても黙りもしない�
     expect(d.warnings.some((x) => x.code === "value_unreadable")).toBe(false);
   });
 });
+
+describe("所有者の個人情報は備考へ入れない（11巡目 ①）", () => {
+  const NL2 = "\n";
+
+  it("★『携帯電話』は備考に入らず、withheldFromNote に残る（捨てない）", () => {
+    // Property.note は所有者の項目別マスクを通らずに表示される＝
+    // owner_phone の権限が無い人でも電話番号を保存でき、全員に見えてしまう。
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NL2 + "■携帯電話： 090-1234-5678",
+    );
+    expect(d.noteFromUnmapped).not.toContain("090-1234-5678");
+    expect(d.noteFromUnmapped).not.toContain("携帯電話");
+    expect(d.withheldFromNote).toEqual([
+      { label: "携帯電話", value: "090-1234-5678", reason: "label" },
+    ]);
+  });
+
+  it("★『連絡先住所』も同じ扱い", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NL2 + "■連絡先住所： 東京都渋谷区X1-1-1",
+    );
+    expect(d.noteFromUnmapped).not.toContain("東京都渋谷区X1-1-1");
+    expect(d.withheldFromNote.map((w) => w.label)).toEqual(["連絡先住所"]);
+  });
+
+  it("★見出しが分からなくても、値が電話番号なら備考に入れない", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NL2 + "■ご連絡いただける窓口： 090-1234-5678",
+    );
+    expect(d.noteFromUnmapped).not.toContain("090-1234-5678");
+    expect(d.withheldFromNote[0].reason).toBe("value");
+  });
+
+  it("★『建物構造: 木造』のような所有者と無関係な項目は従来どおり備考に入る", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NL2 + "■建物構造： 木造スレート葺",
+    );
+    expect(d.noteFromUnmapped).toContain("建物構造: 木造スレート葺");
+    expect(d.withheldFromNote).toEqual([]);
+  });
+
+  it("★実サンプル(査定依頼)の『年齢』は備考へ行かない", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NL2 + "■年齢： 71 歳",
+    );
+    expect(d.noteFromUnmapped).not.toContain("71 歳");
+    expect(d.withheldFromNote.map((w) => w.label)).toEqual(["年齢"]);
+  });
+});
+
+describe("読み取れなかった生値は、どの欄のものかを持つ（11巡目 ②の土台）", () => {
+  const NL3 = "\n";
+
+  it("★unreadable に field / label / 生値が入る", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NL3 + "■土地面積： 20坪（66.1㎡）",
+    );
+    expect(d.unreadable).toEqual([
+      { field: "landArea", label: "土地面積", value: "20坪（66.1㎡）" },
+    ]);
+    // 備考にも同じ行が入っている(まだ人が値を入れていないので残す)。
+    expect(d.noteFromUnmapped).toContain("土地面積: 20坪（66.1㎡）");
+  });
+
+  it("読み取れた値では unreadable は空", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NL3 + "■土地面積： 66.1㎡",
+    );
+    expect(d.unreadable).toEqual([]);
+  });
+});

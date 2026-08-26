@@ -344,8 +344,8 @@ describe("同姓同名の候補を見分けられる（8巡目 ②・共有モ�
     const res = await POST(req({ address: "東京都A区B1-2-3", ownerName: "山田太郎" }));
     const body = await res.json();
     expect(body.ownerCandidates).toEqual([
-      { id: "same-1", name: "山田太郎", matchKind: "name_only", address: "東京都A区1-1-1", propertyCount: 3 },
-      { id: "same-2", name: "山田太郎", matchKind: "name_only", address: "大阪府B市2-2-2", propertyCount: 7 },
+      { id: "same-1", name: "山田太郎", matchKind: "name_only", address: "東京都A区1-1-1", addressKind: "registry", propertyCount: 3 },
+      { id: "same-2", name: "山田太郎", matchKind: "name_only", address: "大阪府B市2-2-2", addressKind: "registry", propertyCount: 7 },
     ]);
   });
 

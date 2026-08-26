@@ -17,6 +17,7 @@ import {
   splitBuildingAndRoom,
   SOURCE_PROFILE_LABELS,
 } from "./source-profiles";
+import { judgeOwnerPersonalInfo } from "./owner-personal-info";
 import type { DraftField, DraftWarning, PasteDraft } from "./types";
 
 const EMPTY: DraftField = { value: null, sourceLabel: null };
@@ -53,11 +54,26 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
   // 見出しごとの最初の値だけを採る（同じ見出しが2回出たら先勝ち）。
   const picked = new Map<DraftFieldKey, LabeledLine>();
   const unmapped: { label: string; value: string }[] = [];
+  const withheldFromNote: PasteDraft["withheldFromNote"] = [];
+  const unreadable: PasteDraft["unreadable"] = [];
 
   for (const line of labeled) {
     if (isBlankValue(line.value)) continue; // 値なしは拾わない
     const key = fieldKeyForLabel(line.label);
     if (key === null) {
+      // ⚠所有者の個人情報にあたる見出しは**備考へ入れない**(@codex PR#414 11巡目 ①)。
+      //   Property.note は所有者の項目別マスクを通らずに表示されるため、
+      //   ここへ流すと項目別権限チェックの迂回路になる。捨てはせず、
+      //   確認画面に出して人が適切な欄へ移せるようにする。
+      const verdict = judgeOwnerPersonalInfo(line.label, line.value);
+      if (verdict.isOwnerPersonalInfo && verdict.reason !== null) {
+        withheldFromNote.push({
+          label: line.label,
+          value: line.value,
+          reason: verdict.reason,
+        });
+        continue;
+      }
       unmapped.push({ label: line.label, value: line.value });
       continue;
     }
@@ -159,7 +175,10 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
       message: `${fieldLabel}「${rawValue}」を読み取れませんでした。ご確認のうえ入力してください。`,
     });
     // 備考へ回す(見出しは元の表記のまま＝原文と突き合わせられる)。
-    unmapped.push({ label: label(key) || fieldLabel, value: rawValue });
+    const noteLabel = label(key) || fieldLabel;
+    unmapped.push({ label: noteLabel, value: rawValue });
+    // どの欄の生値かを覚えておく(人がその欄に値を入れたら備考から消すため)。
+    unreadable.push({ field: fieldKey, label: noteLabel, value: rawValue });
     return null;
   }
 
@@ -197,6 +216,8 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
     externalLinkKey: normalizeExternalLinkKey(raw("externalLinkKey")),
     warnings,
     unmapped,
+    withheldFromNote,
+    unreadable,
     // ⚠割れなかった行も捨てずに持つ（設計書 §4.2）。全体レビュー I-5:
     //   parseLabeledLines は unlabeled を返していたのに、ここで labeled しか
     //   受け取っておらず、下書きに乗る前に消えていた。

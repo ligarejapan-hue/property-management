@@ -147,6 +147,14 @@ interface OwnerCandidate {
    */
   address: string | null;
   /**
+   * 上の `address` が**どちらの欄のものか**。
+   * ⚠`matchKind` と**必ず対応させる**(@codex PR#414 11巡目 ③)。
+   *   「登記上の住所と一致」の札の隣に連絡先住所を並べると、利用者は
+   *   「この住所が一致したのか」と読み、**別人に紐付ける誘導**になる。
+   *   name_only のときはどちらを出しているかをこの値で示す。
+   */
+  addressKind: "current" | "registry" | null;
+  /**
    * その所有者に紐づく物件の件数。**個人情報ではない識別の手がかり**。
    * ⚠住所が伏せられる表示レベルの利用者でも選択肢を区別できるように、
    *   住所とは別に必ず添える。
@@ -412,14 +420,37 @@ export async function lookupPasteDuplicates(
       // ⚠氏名は owners と同じく maskValue を通してから返す。
       //   (上の②で searchable なレベルに限っているため現状は素通しだが、
       //    レベルの集合が将来広がったときに素の値が漏れる口を残さない。)
-      // 住所は「連絡先住所があればそれ、無ければ登記上住所」を、必ず表示レベル
-      // 経由で返す(どちらを出しているかは matchKind と併せて人が読める)。
-      const shownAddressRaw = row.currentAddress?.trim() || row.address?.trim() || null;
+      // ⚠**実際に一致した方の住所**を出す(@codex PR#414 11巡目 ③)。
+      //   両方の住所を持つ所有者で登記上住所が一致したのに連絡先住所を並べると、
+      //   「登記上の住所と一致」の札の隣に**一致していない住所**が並び、
+      //   利用者は「この住所が一致したのか」と読む＝別人への紐付けを誘導する。
+      //   name_only(どちらも一致していない)ときだけ、連絡先→登記上の順で参考として
+      //   出し、**どちらを出したか**を addressKind で示す。
+      const currentAddr = row.currentAddress?.trim() || null;
+      const registryAddr = row.address?.trim() || null;
+      let shownAddressRaw: string | null;
+      let addressKind: OwnerCandidate["addressKind"];
+      if (matchKind === "current_address") {
+        shownAddressRaw = currentAddr;
+        addressKind = currentAddr === null ? null : "current";
+      } else if (matchKind === "registry_address") {
+        shownAddressRaw = registryAddr;
+        addressKind = registryAddr === null ? null : "registry";
+      } else if (currentAddr !== null) {
+        shownAddressRaw = currentAddr;
+        addressKind = "current";
+      } else {
+        shownAddressRaw = registryAddr;
+        addressKind = registryAddr === null ? null : "registry";
+      }
+      const shownAddress = maskValue(shownAddressRaw, addressLevel);
       return {
         id: row.id,
         name: maskValue(row.name, nameLevel),
         matchKind,
-        address: maskValue(shownAddressRaw, addressLevel),
+        address: shownAddress,
+        // マスクで消えたときは種別も出さない(空の札を残さない)。
+        addressKind: shownAddress === null ? null : addressKind,
         propertyCount: row._count?.propertyOwners ?? 0,
       };
     })

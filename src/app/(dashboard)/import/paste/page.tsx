@@ -21,6 +21,7 @@ import {
   defaultOwnerValues,
   defaultOwnerMode,
   foldNoColumnFieldsIntoNote,
+  stripFilledRawLines,
   type PasteDuplicatesResult,
   type SimilarPropertySummary,
   type OwnerCandidateSummary,
@@ -280,7 +281,15 @@ export default function PasteImportPage() {
       //   画面では編集可能な欄として出しているため、値を無言で捨てず備考へ行として
       //   足す(既存の備考は消さない)。詳細は paste-import-review.tsx の
       //   FIELD_NO_COLUMN_HINT のコメント参照。
-      const finalNote = foldNoColumnFieldsIntoNote(note, {
+      // ⚠人が専用欄に値を入れた項目は、備考から生値の行を**取り除いてから**
+      //   畳み込む(@codex PR#414 11巡目 ②)。追記だけだと
+      //   `土地面積: 20坪（66.1㎡）` と `土地面積: 66.1` が並ぶ。
+      const noteWithoutFilledRaw = stripFilledRawLines(
+        note,
+        draft.unreadable,
+        propertyValues,
+      );
+      const finalNote = foldNoColumnFieldsIntoNote(noteWithoutFilledRaw, {
         landArea: propertyValues.landArea,
         builtYear: propertyValues.builtYear,
       });

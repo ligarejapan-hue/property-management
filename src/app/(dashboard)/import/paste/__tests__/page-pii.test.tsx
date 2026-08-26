@@ -222,3 +222,24 @@ describe("link モードの再判定と、見えない紐付けの排除（8巡�
     expect(source).toContain('externalLinkKey, linkedOwnerId]');
   });
 });
+
+describe("備考の生値は、専用欄に値を入れたら取り除いてから送る（11巡目 ②）", () => {
+  it("★stripFilledRawLines を通したうえで畳み込んでいる（順序も含めて）", () => {
+    expect(source).toContain("stripFilledRawLines(");
+    const stripAt = source.indexOf("const noteWithoutFilledRaw = stripFilledRawLines(");
+    const foldAt = source.indexOf("foldNoColumnFieldsIntoNote(noteWithoutFilledRaw,");
+    expect(stripAt).toBeGreaterThanOrEqual(0);
+    expect(foldAt).toBeGreaterThan(stripAt);
+  });
+
+  it("★取り除きに使うのは下書きの unreadable と、人が直した値", () => {
+    const at = source.indexOf("const noteWithoutFilledRaw = stripFilledRawLines(");
+    const block = source.slice(at, at + 200);
+    expect(block).toContain("draft.unreadable");
+    expect(block).toContain("propertyValues");
+  });
+
+  it("★取り除いた結果を登録に渡している（畳み込む前の note を送っていない）", () => {
+    expect(source).toContain("note: finalNote || null,");
+  });
+});

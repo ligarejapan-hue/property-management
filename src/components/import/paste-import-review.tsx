@@ -42,8 +42,10 @@ export interface OwnerCandidateSummary {
   id: string;
   name: string;
   matchKind: OwnerMatchKind;
-  /** 表示レベルを通した住所（連絡先住所が無ければ登記上住所）。 */
+  /** 表示レベルを通した住所（**実際に一致した方**。name_only なら参考として1つ）。 */
   address: string | null;
+  /** 上の住所がどちらの欄のものか（札と食い違わせないために必ず添える）。 */
+  addressKind: "current" | "registry" | null;
   /** その所有者に紐づく物件の件数（非個人情報の識別の手がかり）。 */
   propertyCount: number;
 }
@@ -68,7 +70,17 @@ const MATCH_KIND_LABELS: Record<OwnerMatchKind, string> = {
  */
 export function ownerCandidateLabel(c: OwnerCandidateSummary): string {
   const parts = [MATCH_KIND_LABELS[c.matchKind], `所有物件 ${c.propertyCount}件`];
-  if (c.address) parts.push(c.address);
+  if (c.address) {
+    // ⚠どちらの住所かを必ず添える。「登記上の住所と一致」の隣に
+    //   連絡先住所が並ぶと、利用者は「この住所が一致した」と読んでしまう。
+    const kind =
+      c.addressKind === "registry"
+        ? "登記上住所"
+        : c.addressKind === "current"
+          ? "連絡先住所"
+          : null;
+    parts.push(kind === null ? c.address : `${kind}: ${c.address}`);
+  }
   parts.push(`管理番号 ${c.id.slice(0, 8)}`);
   return `${c.name}（${parts.join(" / ")}）`;
 }
@@ -147,6 +159,34 @@ const NOTE_ONLY_FIELD_LABEL: Record<"landArea" | "builtYear", string> = {
  * 専用の DB 列が無い欄(土地面積・築年)の値を、既存の備考を消さずに行として足す。
  * 値が無い欄は行を足さない。両方無ければ元の備考をそのまま返す(空洞な空行を作らない)。
  */
+/**
+ * 人が専用欄に値を入れた項目について、備考に残っている**生値の行を取り除く**。
+ *
+ * ⚠追記だけだと矛盾した2行が並ぶ(@codex PR#414 11巡目 ②):
+ *   `土地面積: 20坪（66.1㎡）`(読み取れなかった生値) と
+ *   `土地面積: 66.1`(人が入れた値) が備考に同居する。
+ * ⚠欄を**空のままにしたら生値の行は残す**(情報を失わない)。
+ * ⚠取り除くのは `見出し: 生値` に**完全一致する行だけ**。人が備考を自分で
+ *   書き換えていたら触らない。
+ */
+export function stripFilledRawLines(
+  note: string,
+  unreadable: PasteDraft["unreadable"],
+  values: Record<string, string>,
+): string {
+  const targets = new Set(
+    unreadable
+      .filter((u) => (values[u.field] ?? "").trim() !== "")
+      .map((u) => `${u.label}: ${u.value}`),
+  );
+  if (targets.size === 0) return note;
+  return note
+    .split("\n")
+    .filter((line) => !targets.has(line.trim()))
+    .join("\n")
+    .trim();
+}
+
 export function foldNoColumnFieldsIntoNote(
   baseNote: string,
   values: { landArea: string; builtYear: string },
@@ -586,6 +626,29 @@ export function PasteImportReview({
             </p>
           </div>
         </div>
+
+        {/*
+          ⚠所有者の個人情報にあたる見出しは備考へ入れない(@codex PR#414 11巡目 ①)。
+            Property.note は所有者の項目別マスクを通らずに表示されるため、
+            そこへ流すと項目別権限チェックの迂回路になる。
+            ただし**捨てない**。ここに出して、人が適切な欄へ移せるようにする。
+        */}
+        {draft.withheldFromNote.length > 0 && (
+          <div
+            data-section="withheld-from-note"
+            role="alert"
+            className="mt-3 rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-300"
+          >
+            次の項目は<b>備考に入れません</b>。必要なら適切な欄へ移してください。
+            <ul className="mt-1 list-disc pl-5">
+              {draft.withheldFromNote.map((w, i) => (
+                <li key={`${i}-${w.label}`}>
+                  {w.label}: {w.value}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* 所有者 */}
         <h3 className="mb-2 mt-4 text-xs font-bold tracking-wider text-gray-500 dark:text-gray-400">

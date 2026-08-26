@@ -14,6 +14,7 @@ import {
   DUPLICATE_INPUT_FIELDS,
   DUPLICATE_OWNER_FIELDS,
   ownerCandidateLabel,
+  stripFilledRawLines,
 } from "../paste-import-review";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
 
@@ -179,9 +180,9 @@ describe("PasteImportReview（3状態の描き分け・空洞テスト対策）"
         draft,
         rawText: "",
         ownerCandidates: [
-          { id: "o1", name: "山田太郎", matchKind: "current_address", address: "東京都A区1-1", propertyCount: 1 },
-          { id: "o2", name: "山田太郎", matchKind: "registry_address", address: "東京都B区2-2", propertyCount: 2 },
-          { id: "o3", name: "山田太郎", matchKind: "name_only", address: null, propertyCount: 0 },
+          { id: "o1", name: "山田太郎", matchKind: "current_address", address: "東京都A区1-1", addressKind: "current" as const, propertyCount: 1 },
+          { id: "o2", name: "山田太郎", matchKind: "registry_address", address: "東京都B区2-2", addressKind: "registry" as const, propertyCount: 2 },
+          { id: "o3", name: "山田太郎", matchKind: "name_only", address: null, addressKind: null, propertyCount: 0 },
         ],
       }),
     );
@@ -252,10 +253,12 @@ describe("画面: 専用の欄が無い旨の案内(空洞テスト対策=その
 
 describe("備考の見え方についての断り書き（全体レビュー I-7）", () => {
   it("★備考欄に「この物件を見られる人全員に表示される」旨が出る", () => {
-    // 備考には辞書に無かった見出し(実サンプルでは「年齢」)がそのまま入る。
-    // 除外はしない発注者判断のため、せめて見え方を伝える。
+    // 備考には辞書に無かった見出し(所有者の個人情報**以外**)がそのまま入る。
+    // ⚠「年齢」は11巡目 ① で備考から外した(所有者の個人情報＝項目別権限の迂回路)。
+    //   ここで見たいのは「備考に入るものについて見え方を伝える」ことなので、
+    //   所有者と無関係な見出し(建物構造)を使う。
     const d = buildPasteDraft(
-      "■物件所在地： 東京都A区B1-2-3\n■年齢： 71 歳\n■お名前： 山田太郎",
+      "■物件所在地： 東京都A区B1-2-3\n■建物構造： 木造スレート葺\n■お名前： 山田太郎",
     );
     const out = renderToStaticMarkup(
       createElement(PasteImportReview, { draft: d, rawText: "" }),
@@ -266,7 +269,7 @@ describe("備考の見え方についての断り書き（全体レビュー I-7
     expect(out).toContain('id="paste-field-note-visibility"');
     expect(out).toContain("この物件を見られる人全員に表示されます");
     // 備考にその値が実際に入っていること(断り書きが空振りでないことの裏取り)。
-    expect(d.noteFromUnmapped).toContain("年齢");
+    expect(d.noteFromUnmapped).toContain("建物構造");
   });
 });
 
@@ -513,6 +516,7 @@ describe("所有者候補の表示は、2件が完全に同じにならない（
     name: "山田太郎",
     matchKind: "name_only" as const,
     address: "東京都A区1-1-1",
+    addressKind: "current" as const,
     propertyCount: 3,
   };
 
@@ -566,6 +570,7 @@ describe("見えない紐付けを残さない（8巡目 ①）", () => {
     name: "山田太郎",
     matchKind: "name_only" as const,
     address: "東京都A区1-1-1",
+    addressKind: "current" as const,
     propertyCount: 2,
   };
 
@@ -707,5 +712,137 @@ describe("読み取れなかった値の見せ方（9巡目 ②・画面）", ()
   it("本当に記載が無い欄には従来どおり「元の資料に記載がありません」が出る", () => {
     const layout = extractFieldBlock(out, "layoutType");
     expect(layout).toContain("元の資料に記載がありません");
+  });
+});
+
+describe("備考へ入れなかった項目を画面に出す（11巡目 ①）", () => {
+  const d = buildPasteDraft(
+    "■物件所在地： 東京都A区B1-2-3" + NL + "■携帯電話： 090-1234-5678" + NL + "■建物構造： 木造スレート葺",
+  );
+  const out = renderToStaticMarkup(createElement(PasteImportReview, { draft: d, rawText: "" }));
+
+  it("★備考に入れない旨と、その項目・値が画面に出る（捨てていない）", () => {
+    expect(out).toContain('data-section="withheld-from-note"');
+    expect(out).toContain("備考に入れません");
+    expect(out).toContain("適切な欄へ移してください");
+    expect(out).toContain("携帯電話");
+    expect(out).toContain("090-1234-5678");
+  });
+
+  it("★その値は備考欄には入っていない", () => {
+    const noteAt = out.indexOf('id="paste-field-note"');
+    expect(noteAt).toBeGreaterThanOrEqual(0);
+    // textarea の中身(次の </textarea> まで)に電話番号が無いこと。
+    const noteBody = out.slice(noteAt, out.indexOf("</textarea>", noteAt));
+    expect(noteBody).not.toContain("090-1234-5678");
+    // 所有者と無関係な項目は備考に入っている。
+    expect(noteBody).toContain("建物構造");
+  });
+
+  it("備考へ入れなかった項目が無ければ、その区画ごと出さない", () => {
+    const clean = buildPasteDraft("■物件所在地： 東京都A区B1-2-3" + NL + "■建物構造： 木造");
+    const outClean = renderToStaticMarkup(
+      createElement(PasteImportReview, { draft: clean, rawText: "" }),
+    );
+    expect(outClean).not.toContain('data-section="withheld-from-note"');
+    expect(outClean).not.toContain("備考に入れません");
+  });
+});
+
+describe("専用欄に値を入れたら、備考の生値の行を取り除く（11巡目 ②）", () => {
+  const d = buildPasteDraft(
+    "■物件所在地： 東京都A区B1-2-3" + NL + "■土地面積： 20坪（66.1㎡）" + NL + "■建物構造： 木造",
+  );
+  const baseNote = d.noteFromUnmapped;
+  const values = (over: Record<string, string>) => ({
+    address: "", lotNumber: "", buildingName: "", roomNo: "", propertyType: "",
+    exclusiveArea: "", landArea: "", layoutType: "", occupancyStatus: "", builtYear: "",
+    ...over,
+  });
+
+  it("★値を入れたら、その項目の生値の行が消える", () => {
+    expect(baseNote).toContain("土地面積: 20坪（66.1㎡）");
+    const after = stripFilledRawLines(baseNote, d.unreadable, values({ landArea: "66.1" }));
+    expect(after).not.toContain("20坪（66.1㎡）");
+  });
+
+  it("★空のままなら生値の行は残る（情報を失わない）", () => {
+    const after = stripFilledRawLines(baseNote, d.unreadable, values({ landArea: "  " }));
+    expect(after).toContain("土地面積: 20坪（66.1㎡）");
+  });
+
+  it("★他の項目の行は影響を受けない", () => {
+    const after = stripFilledRawLines(baseNote, d.unreadable, values({ landArea: "66.1" }));
+    expect(after).toContain("建物構造: 木造");
+  });
+
+  it("★人が備考を書き換えていたら触らない（完全一致の行だけ消す）", () => {
+    const edited = baseNote.replace("20坪（66.1㎡）", "20坪くらい？");
+    const after = stripFilledRawLines(edited, d.unreadable, values({ landArea: "66.1" }));
+    expect(after).toContain("20坪くらい？");
+  });
+
+  it("★取り除いたあとに畳み込むと、矛盾した2行にならない", () => {
+    const after = stripFilledRawLines(baseNote, d.unreadable, values({ landArea: "66.1" }));
+    const folded = foldNoColumnFieldsIntoNote(after, { landArea: "66.1", builtYear: "" });
+    expect(folded).toContain("土地面積: 66.1");
+    expect(folded).not.toContain("20坪（66.1㎡）");
+    // 「土地面積:」で始まる行が1つだけであること。
+    const lines = folded.split("\n").filter((l) => l.startsWith("土地面積:"));
+    expect(lines).toHaveLength(1);
+  });
+});
+
+describe("一致した方の住所を表示する（11巡目 ③）", () => {
+  const base = {
+    id: "aaaaaaaa-1111-2222-3333-444444444444",
+    name: "山田太郎",
+    propertyCount: 1,
+  };
+
+  it("★「登記上の住所と一致」なら、登記上住所であることが分かる表記で出る", () => {
+    const label = ownerCandidateLabel({
+      ...base,
+      matchKind: "registry_address",
+      address: "東京都A区1-1-1",
+      addressKind: "registry",
+    });
+    expect(label).toContain("登記上の住所と一致");
+    expect(label).toContain("登記上住所: 東京都A区1-1-1");
+    expect(label).not.toContain("連絡先住所:");
+  });
+
+  it("★「連絡先の住所も一致」なら連絡先住所として出る", () => {
+    const label = ownerCandidateLabel({
+      ...base,
+      matchKind: "current_address",
+      address: "東京都B区2-2-2",
+      addressKind: "current",
+    });
+    expect(label).toContain("連絡先の住所も一致");
+    expect(label).toContain("連絡先住所: 東京都B区2-2-2");
+    expect(label).not.toContain("登記上住所:");
+  });
+
+  it("★氏名だけ一致のときも、どちらの住所を出しているかが分かる", () => {
+    const label = ownerCandidateLabel({
+      ...base,
+      matchKind: "name_only",
+      address: "東京都C区3-3-3",
+      addressKind: "registry",
+    });
+    expect(label).toContain("氏名だけ一致");
+    expect(label).toContain("登記上住所: 東京都C区3-3-3");
+  });
+
+  it("住所が無ければ住所の札も出さない", () => {
+    const label = ownerCandidateLabel({
+      ...base,
+      matchKind: "name_only",
+      address: null,
+      addressKind: null,
+    });
+    expect(label).not.toContain("登記上住所");
+    expect(label).not.toContain("連絡先住所");
   });
 });
