@@ -981,3 +981,37 @@ describe("監査ログが管理画面で「物件」として拾え、中身も�
     expect(Object.values(shown)).not.toContain(REDACTED);
   });
 });
+
+describe("JSON body の上限はこの口の実態に合わせる（5巡目 ①）", () => {
+  it("★共有の既定(64MB)ではなく、この口専用の小さい上限で弾く", async () => {
+    const big = new NextRequest("http://localhost/api/import/paste/commit", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        // 3MB: 共有の既定(64MB)なら通ってしまうが、この口の上限(2MB)は超える。
+        "content-length": String(3 * 1024 * 1024),
+      },
+      body: JSON.stringify(baseBody),
+    });
+    const res = await POST(big);
+    expect(res.status).toBe(413);
+    expect(created.property).toBeUndefined();
+  });
+
+  it("★下書き側より厳しい（口ごとに分けている）", async () => {
+    // 下書き側の上限(4MB)は超えないが commit 側の上限(2MB)は超える大きさ。
+    const mid = new NextRequest("http://localhost/api/import/paste/commit", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(3 * 1024 * 1024),
+      },
+      body: JSON.stringify(baseBody),
+    });
+    expect((await POST(mid)).status).toBe(413);
+  });
+
+  it("正規の大きさは従来どおり通る", async () => {
+    expect((await POST(req(baseBody))).status).toBe(200);
+  });
+});

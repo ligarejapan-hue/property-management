@@ -98,6 +98,18 @@ interface CommitBody {
   linkExistingOwnerId?: string | null;
 }
 
+/**
+ * JSON body の上限（この口専用）。
+ * ⚠共有の既定値(64MB)は CSV/XLSX 取込の口に合わせた値で、**この口の実態とは
+ *   桁が違う**(@codex PR#414 5巡目)。ここが受け取るのは確認画面で人が直した
+ *   最終値だけ。ほとんどの欄は数十〜数百文字だが、**備考(note)は辞書に無かった
+ *   見出しをまとめたもの**で、最悪 貼り付け全体(20万文字)に迫りうるため
+ *   「数KB」にはできない。
+ *   根拠: 20万文字 × 3バイト(日本語 UTF-8) = 600KB を実質の上限とみなし、
+ *   異常な入力でも正規の登録を弾かない余裕を見て 2MB(下書き側の半分)。
+ */
+const MAX_COMMIT_JSON_BODY_BYTES = 2 * 1024 * 1024;
+
 export async function POST(request: NextRequest) {
   try {
     const session = await getApiSession();
@@ -154,7 +166,7 @@ export async function POST(request: NextRequest) {
     } else {
       // ⚠request.json() でボディ全体をバッファする前に過大サイズを弾く
       //   (兄弟ルート /api/import/paste と同じ姿勢。Task 8 レビュー Important)。
-      assertImportJsonBodySize(request);
+      assertImportJsonBodySize(request, MAX_COMMIT_JSON_BODY_BYTES);
       body = (await request.json()) as CommitBody;
     }
 

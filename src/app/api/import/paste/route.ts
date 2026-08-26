@@ -160,6 +160,17 @@ const SEARCHABLE_LEVELS = new Set(["edit", "full", "read"]);
 
 /** 貼り付けの上限。実サンプルは334文字と約900文字なので3桁の余裕がある。 */
 const MAX_CHARS = 200_000;
+
+/**
+ * JSON body の上限（この口専用）。
+ * ⚠共有の既定値(64MB)は CSV/XLSX 取込の口に合わせた値で、**この口の実態とは
+ *   桁が違う**(@codex PR#414 5巡目)。ここが受け付けるのは `{ text }` だけで、
+ *   text は MAX_CHARS(20万文字)までしか通らない。
+ *   根拠: 20万文字 × 6バイト(最悪。制御文字は `\\uXXXX` の6バイトに膨らむ。
+ *   日本語は UTF-8 で3バイトなのでこちらが上限) = 1.2MB。JSON の構造分と
+ *   余裕を足して 4MB。
+ */
+const MAX_PASTE_JSON_BODY_BYTES = 4 * 1024 * 1024;
 /**
  * PDF の上限。⚠**確定側(/api/import/paste/commit)と同じ定数**を使う
  * (全体レビュー I-2)。ここだけ 10MB にしていたため、9MB の PDF は読み取りに
@@ -222,7 +233,7 @@ export async function POST(request: NextRequest) {
     } else {
       // request.json() で body 全体をバッファする前に過大サイズを弾く
       // (registry-pdf/route.ts と同じ姿勢。2026-08-02 是正済みの非対称を再発させない)。
-      assertImportJsonBodySize(request);
+      assertImportJsonBodySize(request, MAX_PASTE_JSON_BODY_BYTES);
       const body = (await request.json()) as { text?: unknown };
       if (typeof body.text !== "string") {
         throw new ApiError(400, "貼り付けた文章がありません", "BAD_REQUEST");
@@ -297,9 +308,14 @@ export async function POST(request: NextRequest) {
       const prefix = addressSearchPrefix(addressValue);
       const addressRows = await prisma.property.findMany({
         where: {
-          // 先頭がCJKでない書式(実データでは想定外)だけ、従来の contains に戻す。
-          // 取りこぼしを増やさないための保険であって、こちらが本筋ではない。
-          address: prefix === null ? { contains: addressValue.slice(0, 20) } : { startsWith: prefix },
+          // ⚠**貼られた生の値ではなく、幅の別が無いCJK部分**で引く。
+          //   ⚠startsWith ではなく contains にしている(@codex PR#414 5巡目 ②)。
+          //   DB 側の住所が `〒123-4567 東京都…` のように郵便番号で**始まっている**と、
+          //   前方一致では当たらない(郵便番号はこちらの文字列からは落とせても、
+          //   DB の列からは SQL 関数なしに落とせない)。本番は669件と小さく、
+          //   最終判定は judgeDuplicates の正規化一致が行うので contains で広く取る。
+          //   先頭がCJKでない書式(実データでは想定外)だけ、生の先頭20文字へ落とす保険。
+          address: prefix === null ? { contains: addressValue.slice(0, 20) } : { contains: prefix },
           isArchived: false,
         },
         select,

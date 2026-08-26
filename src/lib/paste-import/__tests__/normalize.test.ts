@@ -5,6 +5,7 @@ import {
   parseAreaSqm,
   splitLotNumberFromAddress,
   addressSearchPrefix,
+  stripLeadingPostalCode,
 } from "../normalize";
 
 describe("toHalfWidth（全角英数字を半角へ）", () => {
@@ -137,5 +138,54 @@ describe("parseAreaSqm: 平米だと分かるものだけ採る（4巡目 ③）
     expect(parseAreaSqm("70")).toBe(70);
     expect(parseAreaSqm("1,234.5 ㎡")).toBe(1234.5);
     expect(parseAreaSqm("70平方メートル")).toBe(70);
+  });
+});
+
+describe("warekiToSeireki: 存在しない元号年は採らない（5巡目 ③）", () => {
+  it("★終わった元号の実在する最後の年を超えたら null", () => {
+    // これまで「平成32年」は 2020 に、「昭和65年」は 1990 に化け、確認画面は
+    // 緑(拾えた)で表示してそのまま備考へ書き込んでいた。元資料の誤りを
+    // 別のデータに書き換えている＝空欄より悪い。
+    expect(warekiToSeireki("平成32年")).toBeNull();
+    expect(warekiToSeireki("昭和65年")).toBeNull();
+    expect(warekiToSeireki("大正16年")).toBeNull();
+    expect(warekiToSeireki("明治46年")).toBeNull();
+  });
+
+  it("★境界のちょうど下（実在する最後の年）は通る", () => {
+    expect(warekiToSeireki("平成31年")).toBe(2019);
+    expect(warekiToSeireki("昭和64年")).toBe(1989);
+    expect(warekiToSeireki("大正15年")).toBe(1926);
+    expect(warekiToSeireki("明治45年")).toBe(1912);
+  });
+
+  it("★令和は継続中なので上限を置かない", () => {
+    expect(warekiToSeireki("令和8年")).toBe(2026);
+    expect(warekiToSeireki("令和32年")).toBe(2050);
+  });
+});
+
+describe("stripLeadingPostalCode / addressSearchPrefix: 郵便番号で始まる住所（5巡目 ②）", () => {
+  it("★〒つき・〒なし・全角・ハイフンなし のいずれでも先頭の郵便番号を落とす", () => {
+    expect(stripLeadingPostalCode("〒123-4567 東京都A区B1-2-3")).toBe("東京都A区B1-2-3");
+    expect(stripLeadingPostalCode("123-4567 東京都A区B1-2-3")).toBe("東京都A区B1-2-3");
+    expect(stripLeadingPostalCode("〒１２３－４５６７　東京都A区B1-2-3")).toBe("東京都A区B1-2-3");
+    expect(stripLeadingPostalCode("〒1234567 東京都A区B1-2-3")).toBe("東京都A区B1-2-3");
+  });
+
+  it("★郵便番号が無い住所は何も変えない", () => {
+    expect(stripLeadingPostalCode("東京都A区B1-2-3")).toBe("東京都A区B1-2-3");
+  });
+
+  it("★郵便番号で始まっても CJK の前方一致が取れる（生の contains へ落ちない）", () => {
+    // 落ちていた先は「本番の住所は99.4%が全角なのでほぼ当たらない」経路。
+    expect(addressSearchPrefix("〒123-4567 東京都世田谷区等々力2丁目")).toBe("東京都世田谷区等々力");
+    expect(addressSearchPrefix("〒123-4567 東京都世田谷区等々力2丁目")).toBe(
+      addressSearchPrefix("東京都世田谷区等々力2丁目"),
+    );
+  });
+
+  it("★住所の途中に出てくる数字は郵便番号とみなさない（先頭だけ）", () => {
+    expect(stripLeadingPostalCode("東京都A区123-4567")).toBe("東京都A区123-4567");
   });
 });

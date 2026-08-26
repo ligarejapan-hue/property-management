@@ -4,7 +4,7 @@
  * 方針（設計書 §6）: 外部キーが一致したときだけ登録を止める。それ以外は
  * 警告を出すだけで止めない。住所が似ていても別物件のことがあり、人が判断できるため。
  */
-import { toHalfWidth } from "./normalize";
+import { toHalfWidth, stripLeadingPostalCode } from "./normalize";
 
 export interface ExistingProperty {
   id: string;
@@ -22,6 +22,19 @@ export interface DuplicateVerdict {
 export function normalizeForCompare(s: string | null): string {
   if (s === null) return "";
   return toHalfWidth(s).replace(/[\s　]/g, "").replace(/[-]+/g, "-");
+}
+
+/**
+ * **住所専用**の比較用正規化。先頭の郵便番号を無視してから正規化する。
+ *
+ * ⚠normalizeForCompare 側には入れない。あちらは地番(`552-2`)や外部キーにも
+ *   使われており、`123-4567` のような地番が郵便番号と見なされて**丸ごと消える**。
+ *   郵便番号の除去は「住所として突き合わせるとき」だけの規則。
+ * ⚠保存する住所は貼られたとおりに残す（ここで作るのは比較用の形だけ）。
+ */
+export function normalizeAddressForCompare(s: string | null): string {
+  if (s === null) return "";
+  return normalizeForCompare(stripLeadingPostalCode(s));
 }
 
 export function judgeDuplicates(
@@ -42,14 +55,14 @@ export function judgeDuplicates(
   }
 
   // ② 住所（+地番）一致 → 警告のみ
-  const addr = normalizeForCompare(draft.address);
+  const addr = normalizeAddressForCompare(draft.address);
   if (addr === "") {
     return { blocked: false, blockedByPropertyId: null, similarPropertyIds: [] };
   }
   const lot = normalizeForCompare(draft.lotNumber);
 
   const similar = existing
-    .filter((e) => normalizeForCompare(e.address) === addr)
+    .filter((e) => normalizeAddressForCompare(e.address) === addr)
     .filter((e) => {
       const eLot = normalizeForCompare(e.lotNumber);
       // ⚠片方だけ地番があるときは「似ている」と言わない。同じ住所でも

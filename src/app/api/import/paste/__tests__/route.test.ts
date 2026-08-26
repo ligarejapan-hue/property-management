@@ -793,8 +793,12 @@ describe("住所の重複候補は全角/半角の違いを越えて見つかる
       .map((c) => c[0] as { where?: { address?: Record<string, unknown>; isArchived?: boolean }; take?: number })
       .find((a) => a?.where?.address !== undefined);
     expect(addressCall).toBeDefined();
-    expect(addressCall!.where!.address).toEqual({ startsWith: "東京都世田谷区等々力" });
-    expect(addressCall!.where!.address).not.toHaveProperty("contains");
+    // ⚠**貼られた生の値ではなく、幅の別が無いCJK部分**で引いていること。
+    //   生値(「東京都世田谷区等々力2丁目15番12号」の先頭20文字)では、本番の
+    //   ほぼ全角な住所に1件も当たらない。
+    expect(addressCall!.where!.address).toEqual({ contains: "東京都世田谷区等々力" });
+    const searched = (addressCall!.where!.address as { contains: string }).contains;
+    expect(searched).not.toContain("2丁目");
     // 取得上限とアーカイブ除外は維持する。
     expect(addressCall!.where!.isArchived).toBe(false);
     expect(addressCall!.take).toBe(300);
@@ -951,6 +955,93 @@ describe("下書きAPIの multipart も formData() の前に大きさを見る�
 
   it("通常の大きさのPDFは従来どおり通る", async () => {
     const res = await POST(await pdfReq());
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("郵便番号で始まる住所でも重複警告が出る（5巡目 ②）", () => {
+  /** ⚠where を実際に適用するモック（素通しだと contains へ戻しても緑になる）。 */
+  function dbAddressStrict(stored: string) {
+    const row = {
+      id: "p-postal",
+      address: stored,
+      lotNumber: null,
+      externalLinkKey: null,
+      createdBy: "user-1",
+      assignedTo: null,
+    };
+    mockFindMany.mockImplementation(
+      async (args: { where?: { externalLinkKey?: unknown; address?: { contains?: string; startsWith?: string } } }) => {
+        if (args?.where?.externalLinkKey) return [];
+        const cond = args?.where?.address;
+        if (!cond) return [];
+        if (typeof cond.startsWith === "string") {
+          return stored.startsWith(cond.startsWith) ? [row] : [];
+        }
+        if (typeof cond.contains === "string") {
+          return stored.includes(cond.contains) ? [row] : [];
+        }
+        return [];
+      },
+    );
+  }
+
+  it("★DBが全角＋〒付き、貼り付けが半角〒なしでも見つかる", async () => {
+    dbAddressStrict("〒123-4567 東京都Ａ区Ｂ１－２－３");
+    const res = await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
+    const body = await res.json();
+    expect(body.similar.map((x: { id: string }) => x.id)).toEqual(["p-postal"]);
+  });
+
+  it("★逆方向=貼り付けが〒付き、DBが全角〒なしでも見つかる", async () => {
+    dbAddressStrict("東京都Ａ区Ｂ１－２－３");
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 〒123-4567 東京都A区B1-2-3" }),
+    );
+    const body = await res.json();
+    expect(body.similar.map((x: { id: string }) => x.id)).toEqual(["p-postal"]);
+  });
+
+  it("★〒記号が無い `123-4567 東京都…` でも同じ", async () => {
+    dbAddressStrict("〒123-4567 東京都Ａ区Ｂ１－２－３");
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 123-4567 東京都A区B1-2-3" }),
+    );
+    const body = await res.json();
+    expect(body.similar.map((x: { id: string }) => x.id)).toEqual(["p-postal"]);
+  });
+
+  it("★DBへの問い合わせは郵便番号を外したCJK前方一致（生の contains へ落ちない）", async () => {
+    await POST(
+      jsonReq({ text: "■物件所在地： 〒123-4567 東京都世田谷区等々力2丁目15番12号" }),
+    );
+    const addressCall = mockFindMany.mock.calls
+      .map((c) => c[0] as { where?: { address?: Record<string, unknown> } })
+      .find((a) => a?.where?.address !== undefined);
+    expect(addressCall!.where!.address).toEqual({ contains: "東京都世田谷区等々力" });
+    // 郵便番号を外したCJK部分そのもの（生値の先頭20文字ではない）。
+    expect((addressCall!.where!.address as { contains: string }).contains).not.toContain("〒");
+  });
+});
+
+describe("JSON body の上限はこの口の実態に合わせる（5巡目 ①）", () => {
+  it("★共有の既定(64MB)ではなく、この口専用の小さい上限で弾く", async () => {
+    // 20万文字しか通らない口に 64MB を許すと、無駄な確保を強いられる。
+    const big = new NextRequest("http://localhost/api/import/paste", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        // 5MB: 共有の既定(64MB)なら通ってしまうが、この口の上限(4MB)は超える。
+        "content-length": String(5 * 1024 * 1024),
+      },
+      body: JSON.stringify({ text: "あ" }),
+    });
+    const res = await POST(big);
+    expect(res.status).toBe(413);
+  });
+
+  it("正規の大きさ（上限の内側）は従来どおり通る", async () => {
+    const res = await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
     expect(res.status).toBe(200);
   });
 });

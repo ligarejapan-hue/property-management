@@ -88,3 +88,48 @@ describe("normalizeForCompare", () => {
     expect(normalizeForCompare(null)).toBe("");
   });
 });
+
+describe("住所の突き合わせは先頭の郵便番号を無視する（5巡目 ②）", () => {
+  const existing = (address: string) => [
+    { id: "p1", address, lotNumber: null, externalLinkKey: null },
+  ];
+
+  it("★DB側だけ〒付き・全角でも、半角の貼り付けと同じ住所と判定する", () => {
+    const v = judgeDuplicates(
+      { address: "東京都A区B1-2-3", lotNumber: null, externalLinkKey: null },
+      existing("〒123-4567 東京都Ａ区Ｂ１－２－３"),
+    );
+    expect(v.similarPropertyIds).toEqual(["p1"]);
+  });
+
+  it("★逆に貼り付け側だけ〒付きでも同じ", () => {
+    const v = judgeDuplicates(
+      { address: "〒123-4567 東京都A区B1-2-3", lotNumber: null, externalLinkKey: null },
+      existing("東京都Ａ区Ｂ１－２－３"),
+    );
+    expect(v.similarPropertyIds).toEqual(["p1"]);
+  });
+
+  it("★別の住所は一致にしない（郵便番号を落としたせいで広がっていない）", () => {
+    const v = judgeDuplicates(
+      { address: "〒123-4567 東京都A区B1-2-3", lotNumber: null, externalLinkKey: null },
+      existing("〒123-4567 東京都Ａ区Ｂ９－９－９"),
+    );
+    expect(v.similarPropertyIds).toEqual([]);
+  });
+
+  it("★地番の突き合わせでは郵便番号扱いをしない（`123-4567` の地番が消えない）", () => {
+    // normalizeForCompare(住所以外)にこの規則を入れると、地番 `123-4567` が
+    // 丸ごと消えて、別の地番と一致してしまう。
+    const same = judgeDuplicates(
+      { address: "東京都A区B1-2-3", lotNumber: "123-4567", externalLinkKey: null },
+      [{ id: "p1", address: "東京都A区B1-2-3", lotNumber: "123-4567", externalLinkKey: null }],
+    );
+    expect(same.similarPropertyIds).toEqual(["p1"]);
+    const diff = judgeDuplicates(
+      { address: "東京都A区B1-2-3", lotNumber: "123-4567", externalLinkKey: null },
+      [{ id: "p2", address: "東京都A区B1-2-3", lotNumber: "999-9999", externalLinkKey: null }],
+    );
+    expect(diff.similarPropertyIds).toEqual([]);
+  });
+});

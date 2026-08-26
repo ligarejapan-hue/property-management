@@ -26,13 +26,22 @@ export function toFullWidth(s: string): string {
     .replace(/-/g, "－");
 }
 
-/** 元号の開始年（その元号の1年＝この西暦）。 */
-const ERAS: { name: string; startYear: number }[] = [
-  { name: "令和", startYear: 2019 },
-  { name: "平成", startYear: 1989 },
-  { name: "昭和", startYear: 1926 },
-  { name: "大正", startYear: 1912 },
-  { name: "明治", startYear: 1868 },
+/**
+ * 元号の開始年（その元号の1年＝この西暦）と、**その元号に実在する最後の年**。
+ *
+ * ⚠上限を見ないと、存在しない年が**もっともらしい西暦に化ける**
+ *   (@codex PR#414 5巡目): `平成32年`（平成は31年まで）は 2020 に、
+ *   `昭和65年` は 1990 になり、確認画面は**緑（拾えた）で表示**して
+ *   そのまま備考へ書き込まれていた。これは「推測で埋めない」を超えて、
+ *   **元資料の誤りを別のデータに書き換えている**。空欄より悪い結果になる。
+ */
+const ERAS: { name: string; startYear: number; maxYear: number | null }[] = [
+  // 令和は継続中なので上限を置かない（置くと来年また直すことになる）。
+  { name: "令和", startYear: 2019, maxYear: null },
+  { name: "平成", startYear: 1989, maxYear: 31 },
+  { name: "昭和", startYear: 1926, maxYear: 64 },
+  { name: "大正", startYear: 1912, maxYear: 15 },
+  { name: "明治", startYear: 1868, maxYear: 45 },
 ];
 
 /**
@@ -49,6 +58,9 @@ export function warekiToSeireki(raw: string): number | null {
     if (!m) return null;
     const nth = m[1] === "元" ? 1 : Number(m[1]);
     if (!Number.isFinite(nth) || nth < 1) return null;
+    // ⚠終わった元号の**実在する最後の年**を超えていたら採らない。
+    //   元資料の誤りを別のデータに書き換えてしまう（空欄より悪い）。
+    if (era.maxYear !== null && nth > era.maxYear) return null;
     return era.startYear + nth - 1;
   }
 
@@ -141,8 +153,28 @@ export function splitLotNumberFromAddress(raw: string): {
  */
 const CJK_RUN = /^[々〆〇぀-ヿ㐀-䶿一-鿿豈-﫿々ヶヵ]+/;
 
+/**
+ * 住所の**先頭に付いた郵便番号**（〒の有無・全角半角・ハイフンの有無を問わない）。
+ * 例: `〒123-4567 東京都…` / `123-4567 東京都…` / `〒１２３４５６７　東京都…`
+ */
+const LEADING_POSTAL_CODE =
+  /^〒?[\s　]*[0-9０-９]{3}[\s　]*[-－ー−―‐]?[\s　]*[0-9０-９]{4}[\s　]*/;
+
+/**
+ * 比較・検索のために、住所の**先頭の郵便番号だけ**を取り除く。
+ * ⚠**保存する住所そのものからは消さない**（貼られたとおりに残す）。ここで作るのは
+ *   「突き合わせに使う形」だけ。
+ * ⚠先頭の3桁+4桁にしか当たらないので、地番（例 `552-2`）や外部キーには使わない。
+ */
+export function stripLeadingPostalCode(address: string): string {
+  return address.replace(/^[\s　]+/, "").replace(LEADING_POSTAL_CODE, "");
+}
+
 export function addressSearchPrefix(address: string): string | null {
-  const trimmed = address.replace(/^[\s　]+/, "");
+  // ⚠郵便番号で始まる住所（`〒123-4567 東京都…`）はここで CJK が取れず null に
+  //   落ち、呼び出し側の「生の先頭20文字で contains」という**まさに直したばかりの
+  //   当たらない経路**へ流れていた（本番の住所は99.4%が全角）。先に落とす。
+  const trimmed = stripLeadingPostalCode(address);
   const m = CJK_RUN.exec(trimmed);
   if (!m) return null;
   const prefix = m[0];
