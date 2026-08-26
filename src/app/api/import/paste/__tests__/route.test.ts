@@ -720,3 +720,83 @@ describe("氏名の先頭1文字（全体レビュー m-1）", () => {
     ]);
   });
 });
+
+// ===========================================================================
+// @codex PR#414 P2: 住所の重複候補を「生値の contains」で引いていた
+//   本番実測(2026-08-26・properties の is_archived=false 669件):
+//     全角英数を含む 665件(99.4%) / 全角ハイフン類 659件 / 空白を含む 0件
+//   本番の住所はほぼ全件が全角。貼り付け元(Webフォーム)は半角。生値では
+//   ほぼ1件も候補にならず、住所による重複警告が実質的に機能していなかった。
+// ===========================================================================
+
+describe("住所の重複候補は全角/半角の違いを越えて見つかる", () => {
+  /**
+   * DB に住所1件だけがある状態を再現する。
+   * ⚠**where を実際に適用する**。素通しで返すモックだと、生値の contains に
+   *   戻しても「候補に入った」ことになり(=本番では1件も返らないのに)緑のまま
+   *   通ってしまう。ここは「どう引いたか」で結果が変わることが本題なので、
+   *   contains / startsWith を**生の格納値に対して**評価する。
+   */
+  function dbAddress(address: string) {
+    const row = {
+      id: "p-existing",
+      address,
+      lotNumber: null,
+      externalLinkKey: null,
+      createdBy: "user-1",
+      assignedTo: null,
+    };
+    mockFindMany.mockImplementation(
+      async (args: { where?: { externalLinkKey?: string; address?: { contains?: string; startsWith?: string } } }) => {
+        if (args?.where?.externalLinkKey) return [];
+        const cond = args?.where?.address;
+        if (!cond) return [];
+        if (typeof cond.startsWith === "string") {
+          return address.startsWith(cond.startsWith) ? [row] : [];
+        }
+        if (typeof cond.contains === "string") {
+          return address.includes(cond.contains) ? [row] : [];
+        }
+        return [];
+      },
+    );
+  }
+
+  it("★本番の実態=DBが全角「東京都Ａ区Ｂ１－２－３」、貼り付けが半角「東京都A区B1-2-3」で候補に入る", async () => {
+    dbAddress("東京都Ａ区Ｂ１－２－３");
+    const res = await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
+    const body = await res.json();
+    expect(body.similar.map((x: { id: string }) => x.id)).toEqual(["p-existing"]);
+    expect(body.duplicates.similarPropertyIds).toEqual(["p-existing"]);
+  });
+
+  it("★逆方向=DBが半角、貼り付けが全角でも候補に入る", async () => {
+    dbAddress("東京都A区B1-2-3");
+    const res = await POST(jsonReq({ text: "■物件所在地： 東京都Ａ区Ｂ１－２－３" }));
+    const body = await res.json();
+    expect(body.similar.map((x: { id: string }) => x.id)).toEqual(["p-existing"]);
+  });
+
+  it("★別の住所は候補に入らない（広げすぎていない）", async () => {
+    dbAddress("東京都Ａ区Ｂ９－９－９");
+    const res = await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
+    const body = await res.json();
+    expect(body.similar).toEqual([]);
+    expect(body.duplicates.blocked).toBe(false);
+  });
+
+  it("★DBへの問い合わせは生値の contains ではなく、幅の別が無いCJK前方一致で行う", async () => {
+    // 「どう引いたか」まで固定する。contains に戻すと、本番データ(ほぼ全角)では
+    // 1件も返らなくなるが、モックは何を渡されても返すので結果だけでは気づけない。
+    await POST(jsonReq({ text: "■物件所在地： 東京都世田谷区等々力2丁目15番12号" }));
+    const addressCall = mockFindMany.mock.calls
+      .map((c) => c[0] as { where?: { address?: Record<string, unknown>; isArchived?: boolean }; take?: number })
+      .find((a) => a?.where?.address !== undefined);
+    expect(addressCall).toBeDefined();
+    expect(addressCall!.where!.address).toEqual({ startsWith: "東京都世田谷区等々力" });
+    expect(addressCall!.where!.address).not.toHaveProperty("contains");
+    // 取得上限とアーカイブ除外は維持する。
+    expect(addressCall!.where!.isArchived).toBe(false);
+    expect(addressCall!.take).toBe(300);
+  });
+});

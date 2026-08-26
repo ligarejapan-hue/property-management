@@ -4,6 +4,7 @@ import {
   warekiToSeireki,
   parseAreaSqm,
   splitLotNumberFromAddress,
+  addressSearchPrefix,
 } from "../normalize";
 
 describe("toHalfWidth（全角英数字を半角へ）", () => {
@@ -85,5 +86,28 @@ describe("splitLotNumberFromAddress（括弧の中の地番を分ける）", () 
     const r = splitLotNumberFromAddress("世田谷区池尻4丁目26-8（旧町名あり）");
     expect(r.address).toBe("世田谷区池尻4丁目26-8（旧町名あり）");
     expect(r.lotNumber).toBeNull();
+  });
+});
+
+describe("addressSearchPrefix（DB前方一致の種・@codex PR#414 P2）", () => {
+  it("★数字や英字が現れる手前までのCJKを返す（そこから先は全角/半角がゆれる）", () => {
+    expect(addressSearchPrefix("東京都世田谷区等々力2丁目15番12号")).toBe("東京都世田谷区等々力");
+    expect(addressSearchPrefix("世田谷区池尻4丁目26-8")).toBe("世田谷区池尻");
+  });
+
+  it("★全角で書かれていても、返る種は同じ（幅の別が無いところで切っている）", () => {
+    // 本番の住所はほぼ全件が全角。ここが一致しないと候補が1件も返らない。
+    expect(addressSearchPrefix("東京都Ａ区Ｂ１－２－３")).toBe(
+      addressSearchPrefix("東京都A区B1-2-3"),
+    );
+  });
+
+  it("前後の空白は無視する", () => {
+    expect(addressSearchPrefix("　東京都渋谷区")).toBe("東京都渋谷区");
+  });
+
+  it("CJKで始まらなければ null（呼び出し側が従来の contains へ落とす）", () => {
+    expect(addressSearchPrefix("1-2-3")).toBeNull();
+    expect(addressSearchPrefix("")).toBeNull();
   });
 });

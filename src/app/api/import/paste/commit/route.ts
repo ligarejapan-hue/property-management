@@ -7,7 +7,7 @@ import {
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { lockPropertyRow } from "@/lib/property-record-guard";
@@ -151,6 +151,32 @@ export async function POST(request: NextRequest) {
     if (wantsOwner && !hasPermission(perms, "owner", "write")) {
       throw new ApiError(403, "所有者を作る権限がありません", "FORBIDDEN");
     }
+
+    // ---- 項目ごとの書き込み権限（@codex PR#414 P1-1） ----
+    // ⚠通常の所有者作成 (POST /api/owners) は、**値が入っている項目ごとに**
+    //   owner_phone / owner_address / owner_email … の書き込み権限を
+    //   hasExplicitWritePerm で確かめている。ここが素通しだと、管理者が
+    //   「この担当者には電話を触らせない」と個別に設定していても
+    //   **この画面からなら書けてしまう**（既存の制限の迂回路）。
+    //   判定は自前で書かず、owners/route.ts と同じヘルパーを同じ形で使う。
+    // ⚠owners 側は `value != null` で見るが、この route は値を
+    //   `?.trim() || null` に畳んでから書く＝空文字は**何も書かない**。
+    //   よって「空白を除いて中身がある」ものだけを対象にする（空欄で403にしない）。
+    if (body.owner) {
+      const ownerFieldWriteChecks: { value: string | null | undefined; resource: string; label: string }[] = [
+        { value: body.owner.name, resource: "owner_name", label: "氏名" },
+        { value: body.owner.nameKana, resource: "owner_name_kana", label: "フリガナ" },
+        { value: body.owner.phone, resource: "owner_phone", label: "電話番号" },
+        { value: body.owner.email, resource: "owner_email", label: "メールアドレス" },
+        // ⚠現住所は登記上の住所と同じ機微度＝同じ権限で扱う(owners/route.ts と同じ)。
+        { value: body.owner.currentAddress, resource: "owner_address", label: "現住所" },
+      ];
+      for (const { value, resource, label } of ownerFieldWriteChecks) {
+        if ((value ?? "").trim() !== "" && !hasExplicitWritePerm(perms, resource)) {
+          throw new ApiError(403, `${label}を書き込む権限がありません`, "FORBIDDEN");
+        }
+      }
+    }
     if (pdfBuffer) {
       const validationError = validateFile(
         pdfBuffer.length,
@@ -181,6 +207,8 @@ export async function POST(request: NextRequest) {
 
     // 外部キー（査定ナンバー等）。空文字は「無い」と同じに畳む。
     const externalLinkKey = body.externalLinkKey?.trim() || null;
+    // 既存の所有者へ紐付ける指定。空文字は「無い」と同じに畳む。
+    const linkOwnerId = body.linkExistingOwnerId?.trim() || null;
 
     // PDF があるときだけ、物件 id を先に確定する。ストレージ保存(外部I/O)を
     // トランザクションの外で行うために、保存先キーへ埋め込む id が要る。
@@ -234,6 +262,31 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ---- 既存の所有者に紐付ける場合の確認（@codex PR#414 P1-2） ----
+      // ⚠外部キー制約は「行が存在する」ことしか保証しない。アーカイブ済み
+      //   （＝通常の検索から隠されている）所有者にも紐付けられてしまう。
+      //   下書きを取ってから登録するまでの間にアーカイブされた場合も同じ。
+      // ⚠既存の紐付けルート (POST /api/properties/[id]/owners) と**同じやり方**:
+      //   トランザクション内で owner 行に updateMany を発行し isArchived=false を
+      //   再確認しつつ PostgreSQL の行ロックを取る。archive 側の updateMany と
+      //   競合したら片方が必ずロック待ちになり、後勝ち側が条件不一致で失敗する。
+      // ⚠ロックの順序は **Owner → 物件親行 → 子行**（既存の書き込み規約）。
+      //   この位置なら、後段の lockPropertyRow(添付用) より必ず先になる。
+      //   物件を作る前に確かめるので、断ったときに無駄な行も作らない。
+      if (linkOwnerId !== null) {
+        const lockRes = await tx.owner.updateMany({
+          where: { id: linkOwnerId, isArchived: false },
+          data: { updatedAt: new Date() },
+        });
+        if (lockRes.count === 0) {
+          throw new ApiError(
+            409,
+            "この所有者は使用できません（アーカイブ済み、または削除されています）",
+            "OWNER_UNAVAILABLE",
+          );
+        }
+      }
+
       const property = await tx.property.create({
         data: {
           ...(pregenPropertyId ? { id: pregenPropertyId } : {}),
@@ -256,7 +309,7 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      let ownerId: string | null = body.linkExistingOwnerId ?? null;
+      let ownerId: string | null = linkOwnerId;
       let ownerCreated = false;
       if (ownerId === null && body.owner?.name) {
         const owner = await tx.owner.create({

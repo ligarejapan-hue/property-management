@@ -70,3 +70,30 @@ export function splitLotNumberFromAddress(raw: string): {
   const address = raw.replace(re, "").replace(/[\s　]+$/, "").trim();
   return { address, lotNumber: m[1].trim() };
 }
+
+/**
+ * 住所の先頭にある**CJK(漢字・かな)の連なり**を返す。DB への前方一致に使う。
+ *
+ * ⚠なぜ必要か（本番実測 2026-08-26・properties の is_archived=false 669件）:
+ *     全角英数を含む       665件（99.4%）
+ *     全角ハイフン類を含む 659件
+ *   本番の住所はほぼ全件が全角。一方、貼り付け元(Webフォーム)の住所は半角。
+ *   生の値で `contains` すると**ほぼ1件も候補にならず**、住所による重複警告が
+ *   実質的に機能していなかった（査定ナンバーが無い「空き家相談」の書式では
+ *   住所が唯一の手がかりなので、その経路の二重登録が無警告で通っていた）。
+ *
+ * ⚠氏名で採ったのと同じ形（広く取って、JS側で正規化一致に絞る）。
+ *   住所の先頭は都道府県〜町名まで CJK が続き、**全角/半角の別が存在しない**ため、
+ *   ここまでを前方一致の種にすれば幅のゆれで取りこぼさない。数字・英字が現れた
+ *   ところで打ち切る（そこから先は幅がゆれる）。
+ *   最終的な同一判定は find-duplicates.ts の normalizeForCompare が行う。
+ */
+const CJK_RUN = /^[々〆〇぀-ヿ㐀-䶿一-鿿豈-﫿々ヶヵ]+/;
+
+export function addressSearchPrefix(address: string): string | null {
+  const trimmed = address.replace(/^[\s　]+/, "");
+  const m = CJK_RUN.exec(trimmed);
+  if (!m) return null;
+  const prefix = m[0];
+  return prefix === "" ? null : prefix;
+}

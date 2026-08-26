@@ -3,10 +3,17 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockSession = { id: "user-1" };
 // ⚠granted: true が無いと hasPermission は全件 false を返す(このリポジトリの
 //   テスト作法のハマりどころ)。brief の見本にこのキーが抜けていたので補った。
+// ⚠所有者の**項目ごと**の書き込み権限も要る(owners/route.ts と同じ規則)。
+//   hasExplicitWritePerm は action が "full" か "edit" のときだけ true。
 const FULL_PERMS = [
   { resource: "import", action: "write", granted: true },
   { resource: "property", action: "write", granted: true },
   { resource: "owner", action: "write", granted: true },
+  { resource: "owner_name", action: "full", granted: true },
+  { resource: "owner_name_kana", action: "full", granted: true },
+  { resource: "owner_phone", action: "full", granted: true },
+  { resource: "owner_email", action: "full", granted: true },
+  { resource: "owner_address", action: "full", granted: true },
 ];
 let mockPerms: unknown = FULL_PERMS;
 const created: Record<string, unknown[]> = {};
@@ -21,6 +28,10 @@ const advisoryLockValues: unknown[][] = [];
 const findFirstArgs: unknown[] = [];
 /** 外部キー一致で既に存在する物件の id (null = 未登録)。 */
 let existingByExternalKey: string | null = null;
+/** 既存所有者が紐付け可能か(false = アーカイブ済み/削除済み)。 */
+let ownerLinkable = true;
+/** owner.updateMany に渡された引数。 */
+const ownerUpdateManyArgs: unknown[] = [];
 
 // ⚠api-helpers を vi.importActual すると実物の "@/lib/auth" まで読み込まれ、
 //   next-auth 内部の拡張子なし "next/server" import が node の ESM 解決に失敗する
@@ -90,6 +101,13 @@ vi.mock("@/lib/prisma", () => {
         return { id: "new-owner", ...(data as object) };
       }),
       findFirst: vi.fn(async () => null),
+      // 既存所有者への紐付け前の「アーカイブ済みでないこと」の再確認＋行ロック。
+      // ownerLinkable=false にすると count:0(=アーカイブ済み/削除済み)を再現できる。
+      updateMany: vi.fn(async (args: { where?: { id?: string; isArchived?: boolean } }) => {
+        callOrder.push("owner.updateMany");
+        ownerUpdateManyArgs.push(args);
+        return { count: ownerLinkable ? 1 : 0 };
+      }),
     },
     propertyOwner: {
       create: vi.fn(async ({ data }: { data: unknown }) => {
@@ -195,6 +213,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockPerms = FULL_PERMS;
   existingByExternalKey = null;
+  ownerLinkable = true;
+  ownerUpdateManyArgs.length = 0;
   for (const k of Object.keys(created)) delete created[k];
   auditCalls.length = 0;
   callOrder.length = 0;
@@ -430,6 +450,8 @@ describe("二重登録は確定側(サーバー)で止める", () => {
 
   it("外部キーがあり、まだ登録されていなければ登録できる", async () => {
     existingByExternalKey = null;
+  ownerLinkable = true;
+  ownerUpdateManyArgs.length = 0;
     const res = await POST(req(withKey));
     expect(res.status).toBe(200);
     expect(created.property?.[0]).toMatchObject({ externalLinkKey: "SA2608-1234567" });
@@ -520,5 +542,121 @@ describe("入力の検査: 直せる形の400で断る(500に化けさせない�
     }));
     expect(res.status).toBe(200);
     expect(created.property?.[0]).toMatchObject({ occupancyStatus: "occupied" });
+  });
+});
+
+// ===========================================================================
+// @codex PR#414 の指摘
+// ===========================================================================
+
+describe("所有者の項目ごとの書き込み権限（P1-1）", () => {
+  const ownerWith = (over: Record<string, string | null>) => ({
+    ...baseBody,
+    owner: {
+      name: "山田太郎", nameKana: null, phone: null, email: null, currentAddress: null,
+      ...over,
+    },
+  });
+
+  it("★owner:write はあっても owner_phone が書けなければ、電話入りは403", async () => {
+    // 通常の所有者作成(POST /api/owners)は項目ごとに権限を見ている。ここが
+    // 素通しだと「この担当者には電話を触らせない」設定の迂回路になる。
+    mockPerms = FULL_PERMS.filter((p) => p.resource !== "owner_phone");
+    const res = await POST(req(ownerWith({ phone: "09000000000" })));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.message).toContain("電話番号");
+    // 断るのはトランザクションより前＝物件も所有者も作らない。
+    expect(created.property).toBeUndefined();
+    expect(created.owner).toBeUndefined();
+  });
+
+  it("★同じ利用者でも、電話を空にすれば通る（書かない項目では止めない）", async () => {
+    mockPerms = FULL_PERMS.filter((p) => p.resource !== "owner_phone");
+    const res = await POST(req(ownerWith({ phone: "" })));
+    expect(res.status).toBe(200);
+    expect(created.owner?.[0]).toMatchObject({ name: "山田太郎", phone: null });
+  });
+
+  it("★現住所は owner_address の権限で見る（登記上住所と同じ機微度）", async () => {
+    mockPerms = FULL_PERMS.filter((p) => p.resource !== "owner_address");
+    const res = await POST(req(ownerWith({ currentAddress: "東京都A区B1-2-3" })));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.message).toContain("現住所");
+  });
+
+  it("★メールアドレスも owner_email の権限で見る", async () => {
+    mockPerms = FULL_PERMS.filter((p) => p.resource !== "owner_email");
+    const res = await POST(req(ownerWith({ email: "a@example.jp" })));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.message).toContain("メールアドレス");
+  });
+
+  it("★氏名そのものも owner_name の権限で見る", async () => {
+    mockPerms = FULL_PERMS.filter((p) => p.resource !== "owner_name");
+    const res = await POST(req(ownerWith({})));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.message).toContain("氏名");
+  });
+
+  it("★read レベルでは書けない（hasExplicitWritePerm は full/edit だけを通す）", async () => {
+    mockPerms = [
+      ...FULL_PERMS.filter((p) => p.resource !== "owner_phone"),
+      { resource: "owner_phone", action: "read", granted: true },
+    ];
+    const res = await POST(req(ownerWith({ phone: "09000000000" })));
+    expect(res.status).toBe(403);
+  });
+
+  it("既存所有者への紐付けだけなら、項目ごとの権限は要らない（何も書かないため）", async () => {
+    mockPerms = FULL_PERMS.filter((p) => p.resource !== "owner_phone");
+    const res = await POST(req({ ...baseBody, linkExistingOwnerId: "existing-owner-1" }));
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("既存の所有者への紐付けはアーカイブ済みを弾く（P1-2）", () => {
+  const linkBody = { ...baseBody, linkExistingOwnerId: "existing-owner-1" };
+
+  it("★アーカイブ済みの所有者を指定したら409で、物件も作らない", async () => {
+    ownerLinkable = false;
+    const res = await POST(req(linkBody));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.message).toContain("この所有者は使用できません");
+    // トランザクションごと巻き戻る＝物件も紐付けも残らない。
+    expect(created.property).toBeUndefined();
+    expect(created.propertyOwner).toBeUndefined();
+  });
+
+  it("★確認は isArchived: false つきの updateMany（存在確認だけで済ませない＝行ロックを兼ねる）", async () => {
+    await POST(req(linkBody));
+    expect(ownerUpdateManyArgs[0]).toMatchObject({
+      where: { id: "existing-owner-1", isArchived: false },
+    });
+  });
+
+  it("★ロックの順序は Owner → 物件（親→子の既存規約を崩さない）", async () => {
+    // 添付ありの経路で、owner.updateMany が lockPropertyRow より先であること。
+    await POST(await multipartReq(linkBody, pdfFile("shokai.pdf")));
+    const ownerIdx = callOrder.indexOf("owner.updateMany");
+    const propIdx = callOrder.indexOf("lockPropertyRow");
+    expect(ownerIdx).toBeGreaterThanOrEqual(0);
+    expect(propIdx).toBeGreaterThan(ownerIdx);
+    // 物件の作成よりも前に確かめる（作ってから気づくのでは無駄が出る）。
+    expect(callOrder.indexOf("property.create")).toBeGreaterThan(ownerIdx);
+  });
+
+  it("★新規に所有者を作るときは owner.updateMany を呼ばない（過剰な確認を足していない）", async () => {
+    const res = await POST(req({
+      ...baseBody,
+      owner: { name: "山田太郎", nameKana: null, phone: null, email: null, currentAddress: null },
+    }));
+    expect(res.status).toBe(200);
+    expect(callOrder).not.toContain("owner.updateMany");
+  });
+
+  it("アーカイブされていない所有者には従来どおり紐付けられる", async () => {
+    const res = await POST(req(linkBody));
+    expect(res.status).toBe(200);
+    expect(created.propertyOwner?.[0]).toMatchObject({ ownerId: "existing-owner-1" });
   });
 });

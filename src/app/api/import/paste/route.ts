@@ -16,6 +16,7 @@ import { judgeDuplicates, type ExistingProperty } from "@/lib/paste-import/find-
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
 import { MAX_FILE_SIZE } from "@/lib/storage";
 import { buildOwnerDedupKey } from "@/lib/owner-dedup";
+import { addressSearchPrefix } from "@/lib/paste-import/normalize";
 import { normalizeName } from "@/lib/normalize";
 
 /**
@@ -25,6 +26,17 @@ import { normalizeName } from "@/lib/normalize";
  *   この値を変えたら test の固定値テストも直すこと。
  */
 const OWNER_CANDIDATE_FETCH_LIMIT = 200;
+
+/**
+ * 住所の重複候補を DB から取る件数。
+ * ⚠本番実測(2026-08-26): properties の is_archived=false は669件。町名までの
+ *   前方一致は選択性が高いが、「東京都」までしか CJK が続かない書式では広く当たる。
+ *   最終的な同一判定は judgeDuplicates(normalizeForCompare の完全一致)が行うので、
+ *   ここは広めに取る。⚠ここで切られた行は「似ています」警告に出ない
+ *   (登録は止めない警告なので影響は警告の取りこぼしに限られる。**登録を止める
+ *   外部キー一致は別クエリで take を掛けていない**)。
+ */
+const ADDRESS_CANDIDATE_FETCH_LIMIT = 300;
 
 // ---- 所有者検索の前方一致に使う「先頭1文字」の幅(全角/半角)変換 ----
 // ⚠normalizeName の NFKC 正規化は「空白の除去」と「全角/半角の統一」を両方
@@ -257,14 +269,27 @@ export async function POST(request: NextRequest) {
       for (const row of keyRows) candidateMap.set(row.id, row);
     }
 
+    // ⚠住所は**生の値で contains してはいけない**(@codex PR#414 P2)。
+    //   本番実測(2026-08-26・is_archived=false 669件): 全角英数を含む物件が
+    //   665件(99.4%)・全角ハイフン類が659件。一方 貼り付け元(Webフォーム)の住所は
+    //   半角。生値の contains では**ほぼ1件も候補にならず**、住所による重複警告が
+    //   実質的に機能していなかった(査定ナンバーが無い「空き家相談」の書式では
+    //   住所が唯一の手がかり = その経路の二重登録が無警告で通っていた)。
+    //   → 氏名で採ったのと同じ形にする: 幅の別が存在しない**先頭のCJK部分**で
+    //   広めに前方一致し、正確な判定は judgeDuplicates(normalizeForCompare の
+    //   完全一致)に委ねる。
     if (draft.property.address.value) {
+      const addressValue = draft.property.address.value;
+      const prefix = addressSearchPrefix(addressValue);
       const addressRows = await prisma.property.findMany({
         where: {
-          address: { contains: draft.property.address.value.slice(0, 20) },
+          // 先頭がCJKでない書式(実データでは想定外)だけ、従来の contains に戻す。
+          // 取りこぼしを増やさないための保険であって、こちらが本筋ではない。
+          address: prefix === null ? { contains: addressValue.slice(0, 20) } : { startsWith: prefix },
           isArchived: false,
         },
         select,
-        take: 50,
+        take: ADDRESS_CANDIDATE_FETCH_LIMIT,
       });
       for (const row of addressRows) candidateMap.set(row.id, row);
     }
