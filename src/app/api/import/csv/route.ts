@@ -470,19 +470,22 @@ export async function POST(request: NextRequest) {
           mapped.buildingNumber = unwrapCsvTextCell(mapped.buildingNumber);
         }
 
-        // 外部キー(リンクキー)は**ここで1回だけ**正規化する
-        // (@codex PR#414 18巡目 ①)。
-        // ⚠保存時だけ正規化していたときは、重複チェック(findPropertyDuplicate)に
-        //   生値が渡り、**正規化すれば一致する既存行を照合で見逃したうえで、
-        //   正規化した値で保存**していた＝同じ番号の物件が2件できた。
-        //   同一CSV内の全角/半角の等価な2行でも同じことが起きる。
-        //   照合も保存もこの1つの値を使う(2か所で別々に正規化しない)。
+        // 外部キー(リンクキー)は **trim だけ**。**保存時に変換しない**
+        // (@codex PR#414 22巡目・17〜19巡目の保存時正規化を撤回)。
+        // ⚠リンクキーは**利用者が付ける任意の管理コード**であり、
+        //   物件CSVと所有者CSVは `externalLinkKey` の**生値の完全一致**で紐付く
+        //   (src/lib/owner-property-linker.ts)。所有者CSV側は `.trim()` のみで
+        //   保存している(owner-csv/route.ts)ので、物件側だけ正規化すると
+        //   `顧客ー001`(長音符)のような鍵が `顧客-001` に変わり、
+        //   **紐付けが壊れる**。保存は書式を尊重する。
+        // ⚠**比較(重複ガード)だけ**は両側を normalizeExternalLinkKey に通す。
+        //   混在幅の査定ナンバーの重複検出は、保存を変えずにそちらで効かせる。
         if (mapped.externalLinkKey !== undefined) {
-          const normalizedKey = normalizeExternalLinkKey(mapped.externalLinkKey);
-          if (normalizedKey === null) {
+          const trimmed = mapped.externalLinkKey.trim();
+          if (trimmed === "") {
             delete mapped.externalLinkKey;
           } else {
-            mapped.externalLinkKey = normalizedKey;
+            mapped.externalLinkKey = trimmed;
           }
         }
 
@@ -641,7 +644,10 @@ export async function POST(request: NextRequest) {
             roomNo: mapped.roomNo,
             buildingId: resolvedBuildingId,
             realEstateNumber: mapped.realEstateNumber,
-            externalLinkKey: mapped.externalLinkKey,
+            // ⚠**比較のときだけ**正規化する(22巡目)。既存側は読み込み直後に
+            //   同じ関数を通した比較用のコピーになっている(19巡目 ③)。
+            //   **保存する値は変えない**(リンクキーは利用者の管理コード)。
+            externalLinkKey: normalizeExternalLinkKey(mapped.externalLinkKey),
           },
           existingPropsForDedupe,
         );
@@ -824,8 +830,8 @@ export async function POST(request: NextRequest) {
           createData.buildingNumber = mapped.buildingNumber;
         if (mapped.realEstateNumber)
           createData.realEstateNumber = mapped.realEstateNumber;
-        // ⚠外部キーは**マッピング直後に1回だけ**正規化済み(18巡目 ①)。
-        //   ここで再度正規化しない(2か所で別々に正規化すると、片方だけ直る)。
+        // ⚠外部キーは**生値(trim済み)のまま保存する**(22巡目)。
+        //   所有者CSVとの生値完全一致リンクを壊さないため、ここで正規化しない。
         if (mapped.externalLinkKey)
           createData.externalLinkKey = mapped.externalLinkKey;
         if (mapped.zoningDistrict)

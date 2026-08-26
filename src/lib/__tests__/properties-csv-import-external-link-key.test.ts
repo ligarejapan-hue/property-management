@@ -144,19 +144,38 @@ import { buildPasteDraft } from "@/lib/paste-import/build-draft";
 import { judgeDuplicates } from "@/lib/paste-import/find-duplicates";
 import { normalizeExternalLinkKey, toFullWidth } from "@/lib/paste-import/normalize";
 
-describe("POST /api/import/csv — 外部キーの正規化（create）", () => {
-  it("★混在幅のキーが正規化された形で保存される", async () => {
-    // 「SA2608－1234567」は数字とハイフンだけ全角。2表記の列挙では拾えなかった形。
+describe("POST /api/import/csv — 外部キーは**書式のまま保存**する（22巡目）", () => {
+  it("★混在幅のキーは、そのままの表記で保存される（変換しない）", () => {
+    // ⚠17〜19巡目は保存時にも正規化していたが、22巡目で撤回した。
+    //   リンクキーは利用者が付ける任意の管理コードで、物件CSVと所有者CSVは
+    //   **生値の完全一致**で紐付く(owner-property-linker.ts)。所有者CSV側は
+    //   `.trim()` のみで保存するので、物件側だけ変換すると紐付けが壊れる。
     const csv = "住所,リンクキー\n東京都千代田区1-1,SA2608－1234567\n";
-    const res = await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
-    expect(res.status).toBe(201);
-    expect(lastCreateData().externalLinkKey).toBe("SA2608-1234567");
+    return POST(makeRequest({ fileName: "x.csv", csvText: csv })).then((res) => {
+      expect(res.status).toBe(201);
+      expect(lastCreateData().externalLinkKey).toBe("SA2608－1234567");
+    });
   });
 
-  it("★全角のキーも正規化される", async () => {
+  it("★全角のキーもそのまま保存される", async () => {
     const csv = "住所,リンクキー\n東京都千代田区1-1,ＳＡ２６０８－１２３４５６７\n";
     await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
-    expect(lastCreateData().externalLinkKey).toBe("SA2608-1234567");
+    expect(lastCreateData().externalLinkKey).toBe("ＳＡ２６０８－１２３４５６７");
+  });
+
+  it("★長音符を含む任意の管理コード『顧客ー001』がそのまま保存される", () => {
+    // ⚠これが撤回の理由そのもの。正規化すると `ー`→`-` になり `顧客-001` に変わる。
+    //   所有者CSVは生値で保存するので、変換した瞬間に紐付かなくなる。
+    const csv = "住所,リンクキー\n東京都千代田区1-1,顧客ー001\n";
+    return POST(makeRequest({ fileName: "x.csv", csvText: csv })).then(() => {
+      expect(lastCreateData().externalLinkKey).toBe("顧客ー001");
+    });
+  });
+
+  it("★前後の空白だけは落とす（所有者CSV側と同じ .trim() のみ）", async () => {
+    const csv = "住所,リンクキー\n東京都千代田区1-1,  顧客ー001  \n";
+    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
+    expect(lastCreateData().externalLinkKey).toBe("顧客ー001");
   });
 
   it("半角のキーは従来どおりそのまま（保存される文字列を変えない）", async () => {
@@ -187,19 +206,20 @@ describe("POST /api/import/csv — 外部キーの正規化（create）", () => 
 });
 
 describe("端から端まで: CSVで入った行を、貼り付け取込がブロックする", () => {
-  it("★CSVが混在幅で取り込んだ番号を貼り付けると blocked になる", async () => {
-    // ① CSV取込（書込側）
+  it("★CSVが混在幅で取り込んだ番号を貼り付けても blocked になる（比較の正規化）", async () => {
+    // ① CSV取込（書込側）。**生値のまま**保存される。
     const csv = "住所,リンクキー\n東京都千代田区1-1,SA2608－1234567\n";
     await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
     const stored = lastCreateData().externalLinkKey as string;
+    expect(stored).toBe("SA2608－1234567");
 
-    // ② 貼り付け取込（読み側）。人が混在幅のまま貼っても同じ形に畳まれる。
+    // ② 貼り付け取込（読み側）。こちらは自機能が発行する鍵なので正規形で持つ。
     const draft = buildPasteDraft(
       "■査定ナンバー： SA2608－1234567\n■物件所在地： 東京都千代田区1-1",
     );
-    expect(draft.externalLinkKey).toBe(stored);
+    expect(draft.externalLinkKey).toBe("SA2608-1234567");
 
-    // ③ 重複判定は「保存された値」に当たる。
+    // ③ **比較は両側を正規化**するので、保存の表記が違っても重複と判定される。
     const verdict = judgeDuplicates(
       { address: "東京都千代田区1-1", lotNumber: null, externalLinkKey: draft.externalLinkKey },
       [{ id: "p-csv", address: "東京都千代田区1-1", lotNumber: null, externalLinkKey: stored }],
@@ -208,10 +228,23 @@ describe("端から端まで: CSVで入った行を、貼り付け取込がブ�
     expect(verdict.blockedByPropertyId).toBe("p-csv");
   });
 
-  it("★確定側が引く2表記のどちらかに、保存された値が必ず含まれる", () => {
-    // commit / recheck は `in: [半角形, 全角形]` で引く。書込側が正規化されていれば
-    // 保存値は必ず半角形なので当たる。
+  it("★物件CSVと所有者CSVの『生値の完全一致』リンクの前提が保たれる", () => {
+    // owner-property-linker.ts は Owner.externalLinkKey と Property.externalLinkKey を
+    // **生値の完全一致**(where: { externalLinkKey: owner.externalLinkKey })で突合する。
+    // 所有者CSVは `.trim()` のみで保存するので、物件CSV側も同じでなければ紐付かない。
+    const fromOwnerCsv = "顧客ー001".trim();
+    const csv = "住所,リンクキー\n東京都千代田区1-1,顧客ー001\n";
+    return POST(makeRequest({ fileName: "x.csv", csvText: csv })).then(() => {
+      expect(lastCreateData().externalLinkKey).toBe(fromOwnerCsv);
+    });
+  });
+
+  it("★paste-import が発行する鍵は正規形なので、確定側の2表記に必ず当たる", () => {
+    // ⚠paste-import 側の**保存の正規化は維持**している(R16)。
+    //   あちらは自機能が発行する鍵で、査定ナンバーの正規形=半角ASCIIと定義できる。
+    //   commit / recheck は `in: [半角形, 全角形]` で引くので必ず当たる。
     const stored = normalizeExternalLinkKey("SA2608－1234567") as string;
+    expect(stored).toBe("SA2608-1234567");
     const variants = Array.from(new Set([stored, toFullWidth(stored)]));
     expect(variants).toContain(stored);
   });
