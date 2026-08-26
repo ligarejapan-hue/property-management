@@ -219,3 +219,23 @@ describe("画面: 専用の欄が無い旨の案内(空洞テスト対策=その
     expect(block).not.toContain("専用の欄が無いため");
   });
 });
+
+describe("備考の見え方についての断り書き（全体レビュー I-7）", () => {
+  it("★備考欄に「この物件を見られる人全員に表示される」旨が出る", () => {
+    // 備考には辞書に無かった見出し(実サンプルでは「年齢」)がそのまま入る。
+    // 除外はしない発注者判断のため、せめて見え方を伝える。
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3\n■年齢： 71 歳\n■お名前： 山田太郎",
+    );
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, { draft: d, rawText: "" }),
+    );
+    // 断り書きが、備考の入力欄そのものに結び付いていること(どこか遠くの
+    // 文言では意味がない)。
+    expect(out).toContain('aria-describedby="paste-field-note-visibility"');
+    expect(out).toContain('id="paste-field-note-visibility"');
+    expect(out).toContain("この物件を見られる人全員に表示されます");
+    // 備考にその値が実際に入っていること(断り書きが空振りでないことの裏取り)。
+    expect(d.noteFromUnmapped).toContain("年齢");
+  });
+});

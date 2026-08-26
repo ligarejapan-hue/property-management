@@ -158,3 +158,26 @@ describe("buildPasteDraft — 読み取れないとき", () => {
     expect(draft.property.layoutType.value).toBe("2LDK");
   });
 });
+
+const NL = "\n";
+
+describe("区切りが無い行(unlabeled)を捨てない（設計書 §4.2・全体レビュー I-5）", () => {
+  it("★下書きに unlabeled が残る", () => {
+    const draft = buildPasteDraft(
+      "この物件についてのご相談です" + NL +
+      "■物件所在地： 東京都A区B1-2-3" + NL +
+      "よろしくお願いいたします",
+    );
+    expect(draft.unlabeled).toEqual([
+      "この物件についてのご相談です",
+      "よろしくお願いいたします",
+    ]);
+    // 拾えた項目は従来どおり(unlabeled を持たせたことで壊れていない)。
+    expect(draft.property.address.value).toBe("東京都A区B1-2-3");
+  });
+
+  it("区切りのある行だけなら unlabeled は空", () => {
+    const draft = buildPasteDraft("■物件所在地： 東京都A区B1-2-3");
+    expect(draft.unlabeled).toEqual([]);
+  });
+});

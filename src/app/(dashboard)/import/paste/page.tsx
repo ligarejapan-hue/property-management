@@ -37,6 +37,12 @@ interface PasteApiResponse {
   duplicates: PasteDuplicatesResult;
   similar: SimilarPropertySummary[];
   ownerCandidates: OwnerCandidateSummary[];
+  /**
+   * PDF を投入したときだけ、そこから取り出した本文が入る（貼り付け経路では null）。
+   * ⚠PDF の人は原文を手元に持っていないため、これが無いと確認画面の左側で
+   *   何も突き合わせられない（以前は「（PDF: ファイル名）」しか出ていなかった）。
+   */
+  extractedText: string | null;
 }
 
 interface CommitApiResponse {
@@ -64,6 +70,8 @@ export default function PasteImportPage() {
   const [duplicates, setDuplicates] = useState<PasteDuplicatesResult | null>(null);
   const [similar, setSimilar] = useState<SimilarPropertySummary[]>([]);
   const [ownerCandidates, setOwnerCandidates] = useState<OwnerCandidateSummary[]>([]);
+  /** 確認画面の左側に出す原文。PDF はサーバーが取り出した本文を使う。 */
+  const [extractedText, setExtractedText] = useState<string | null>(null);
 
   // ---- 人が直した最終値 ----
   const [propertyValues, setPropertyValues] = useState<PropertyValues | null>(null);
@@ -102,6 +110,7 @@ export default function PasteImportPage() {
       setDuplicates(data.duplicates);
       setSimilar(data.similar);
       setOwnerCandidates(data.ownerCandidates);
+      setExtractedText(data.extractedText);
       setPropertyValues(defaultPropertyValues(data.draft));
       setOwnerValues(defaultOwnerValues(data.draft));
       setNote(data.draft.noteFromUnmapped);
@@ -272,6 +281,7 @@ export default function PasteImportPage() {
                 setDuplicates(null);
                 setSimilar([]);
                 setOwnerCandidates([]);
+                setExtractedText(null);
                 setPropertyValues(null);
                 setOwnerValues(null);
                 setRegisterError(null);
@@ -283,7 +293,7 @@ export default function PasteImportPage() {
 
           <PasteImportReview
             draft={draft}
-            rawText={pdfFile ? `（PDF: ${pdfFile.name}）` : rawText}
+            rawText={extractedText ?? rawText}
             propertyValues={propertyValues}
             onPropertyFieldChange={handlePropertyFieldChange}
             ownerValues={ownerValues}

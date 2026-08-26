@@ -45,6 +45,12 @@ export interface PasteDraft {
   externalLinkKey: string | null;
   warnings: DraftWarning[];
   unmapped: { label: string; value: string }[];
+  /**
+   * 区切りが無く「見出し: 値」に割れなかった行（設計書 §4.2）。
+   * ⚠**捨てない**。確認画面で原文と突き合わせるとき、および
+   *   「なぜこの項目が拾えなかったのか」を人が調べるときに必要になる。
+   */
+  unlabeled: string[];
   /** 備考へそのまま入れる文字列（辞書に無かった見出しをまとめたもの）。 */
   noteFromUnmapped: string;
 }

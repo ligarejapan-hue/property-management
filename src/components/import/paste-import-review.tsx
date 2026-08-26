@@ -406,13 +406,29 @@ export function PasteImportReview({
           <label htmlFor="paste-field-note" className="pt-2 text-xs font-medium text-gray-500 dark:text-gray-400">
             備考
           </label>
-          <textarea
-            id="paste-field-note"
-            rows={3}
-            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-            value={noteValue}
-            onChange={(e) => onNoteChange?.(e.target.value)}
-          />
+          <div>
+            <textarea
+              id="paste-field-note"
+              rows={3}
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+              value={noteValue}
+              onChange={(e) => onNoteChange?.(e.target.value)}
+              aria-describedby="paste-field-note-visibility"
+            />
+            {/*
+              ⚠備考には、辞書に無かった見出しがそのまま入る(実サンプルの査定依頼には
+                「年齢: 71 歳」が含まれる)。発注者の判断で**情報は落とさない**ため
+                除外はしないが、備考は所有者欄のような項目ごとの表示制限の外にあり、
+                物件を見られる人全員に見える。その事実をここで明示する
+                (全体レビュー I-7)。
+            */}
+            <p
+              id="paste-field-note-visibility"
+              className="mt-1 text-[11px] text-amber-700 dark:text-amber-400"
+            >
+              ⚠ 備考に書いた内容は、この物件を見られる人全員に表示されます。所有者の電話番号などに掛かる項目ごとの表示制限は、備考には掛かりません。見せたくない内容はここから消してください。
+            </p>
+          </div>
         </div>
 
         {/* 所有者 */}

@@ -26,7 +26,7 @@ function occupancyFor(raw: string): string | null {
 }
 
 export function buildPasteDraft(text: string): PasteDraft {
-  const { labeled } = parseLabeledLines(text);
+  const { labeled, unlabeled } = parseLabeledLines(text);
   const warnings: DraftWarning[] = [];
 
   // 見出しごとの最初の値だけを採る（同じ見出しが2回出たら先勝ち）。
@@ -142,6 +142,10 @@ export function buildPasteDraft(text: string): PasteDraft {
     externalLinkKey: raw("externalLinkKey"),
     warnings,
     unmapped,
+    // ⚠割れなかった行も捨てずに持つ（設計書 §4.2）。全体レビュー I-5:
+    //   parseLabeledLines は unlabeled を返していたのに、ここで labeled しか
+    //   受け取っておらず、下書きに乗る前に消えていた。
+    unlabeled,
     noteFromUnmapped: unmapped.map((u) => `${u.label}: ${u.value}`).join("\n"),
   };
 }
