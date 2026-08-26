@@ -139,8 +139,19 @@ describe("buildPasteDraft — 読み取れないとき", () => {
     expect(draft.owner!.phone.value).toBeNull();
   });
 
-  it("氏名が無ければ owner は作らない", () => {
-    const draft = buildPasteDraft("■物件所在地： 東京都A区B1-2-3\n■電話番号： 09000000000");
+  it("★氏名が無くても、連絡先が読めていれば owner を作る（黙って捨てない）", () => {
+    // ⚠21巡目 ①: owner を null にすると、認識済みの行は unmapped からも
+    //   除かれているため確認画面のどこにも出ず、登録時に黙って消えていた。
+    const draft = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3\n■電話番号： 09000000000",
+    );
+    expect(draft.owner).not.toBeNull();
+    expect(draft.owner!.phone.value).toBe("09000000000");
+    expect(draft.owner!.name.value).toBeNull();
+  });
+
+  it("所有者の項目が1つも無ければ owner は作らない", () => {
+    const draft = buildPasteDraft("■物件所在地： 東京都A区B1-2-3");
     expect(draft.owner).toBeNull();
   });
 
@@ -408,5 +419,51 @@ describe("安全と確定できない項目は伏せる（15巡目 ①）", () =
       "■物件所在地： 東京都A区B1-2-3" + NL4 + "■追記事項： 何か分からない自由記述",
     );
     expect(d.withheldFromNote.map((w) => w.reason)).toEqual(["unclassified"]);
+  });
+});
+
+describe("氏名だけ読めなかったときの扱い（21巡目 ①）", () => {
+  const NL5 = "\n";
+
+  it("★電話だけ読み取れた場合: owner が作られ、値が入り、警告が出る", () => {
+    const d = buildPasteDraft("■物件所在地： 東京都A区B1-2-3" + NL5 + "■電話番号： 09012345678");
+    expect(d.owner).not.toBeNull();
+    expect(d.owner!.phone.value).toBe("09012345678");
+    expect(d.owner!.name.value).toBeNull();
+    const w = d.warnings.find((x) => x.code === "owner_name_missing");
+    expect(w).toBeTruthy();
+    expect(w!.message).toContain("氏名");
+    expect(w!.message).toContain("所有者なしで登録する");
+  });
+
+  it("★メール・現住所・カナだけでも同じ（連絡先を落とさない）", () => {
+    for (const line of [
+      "■E-mail： hanako@example.jp",
+      "■ご住所： 東京都渋谷区X1-1-1",
+      "■フリガナ： サトウ　ハナコ",
+    ]) {
+      const d = buildPasteDraft("■物件所在地： 東京都A区B1-2-3" + NL5 + line);
+      expect(d.owner, line).not.toBeNull();
+      expect(d.warnings.some((x) => x.code === "owner_name_missing"), line).toBe(true);
+    }
+  });
+
+  it("★氏名が読めていれば警告は出さない（過剰に出していない）", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NL5 + "■お名前： 山田太郎" + NL5 + "■電話番号： 09012345678",
+    );
+    expect(d.warnings.some((x) => x.code === "owner_name_missing")).toBe(false);
+  });
+
+  it("★所有者の項目が1つも無ければ警告も出さない", () => {
+    const d = buildPasteDraft("■物件所在地： 東京都A区B1-2-3");
+    expect(d.owner).toBeNull();
+    expect(d.warnings.some((x) => x.code === "owner_name_missing")).toBe(false);
+  });
+
+  it("★読み取れた連絡先は unmapped(備考)へは回らない（二重に出さない）", () => {
+    const d = buildPasteDraft("■物件所在地： 東京都A区B1-2-3" + NL5 + "■電話番号： 09012345678");
+    expect(d.noteFromUnmapped).not.toContain("09012345678");
+    expect(d.withheldFromNote).toEqual([]);
   });
 });

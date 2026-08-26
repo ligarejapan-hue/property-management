@@ -972,3 +972,70 @@ describe("blur とクリックの競争でも弱化の検出がすり抜けな�
     expect(hasMatchKindWeakened(evidence.matchKindAtSelection, latest.matchKind)).toBe(false);
   });
 });
+
+describe("氏名だけ読めなかったとき、画面で止まる（21巡目 ①・既存ガードとの接続）", () => {
+  const d = buildPasteDraft(
+    "■物件所在地： 東京都A区B1-2-3" + NL + "■電話番号： 09012345678" + NL + "■ご住所： 東京都渋谷区X1-1-1",
+  );
+  const out = renderToStaticMarkup(createElement(PasteImportReview, { draft: d, rawText: "" }));
+
+  it("★読み取れた連絡先がフォームに事前入力される（捨てていない）", () => {
+    expect(out).toContain("09012345678");
+    expect(out).toContain("東京都渋谷区X1-1-1");
+  });
+
+  it("★氏名が読めなかった旨の警告が出る", () => {
+    const w = d.warnings.find((x) => x.code === "owner_name_missing");
+    expect(w).toBeTruthy();
+    expect(out).toContain(w!.message);
+  });
+
+  it("★既定は「新しい所有者として登録する」で、氏名が空なので登録は止まる", () => {
+    // R9 で入れたガードがそのまま効く（新しい仕掛けを足していない）。
+    expect(registerButtonDisabled(out)).toBe(true);
+    expect(out).toContain(">所有者の氏名を入力してください。");
+  });
+
+  it("★「所有者なしで登録する」を選べば登録できる（人が見たうえで選んだ結果）", () => {
+    const none = renderToStaticMarkup(
+      createElement(PasteImportReview, { draft: d, rawText: "", ownerMode: "none" }),
+    );
+    expect(registerButtonDisabled(none)).toBe(false);
+  });
+});
+
+describe("候補を確認しきれなかったことを画面で伝える（21巡目 ②）", () => {
+  it("★上限到達のときは、確認できなかった旨を出す", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft,
+        rawText: "",
+        ownerCandidates: [],
+        ownerCandidatesTruncated: true,
+      }),
+    );
+    expect(out).toContain('data-section="owner-candidates-truncated"');
+    expect(out).toContain("同名の候補が多すぎて確認できませんでした");
+    expect(out).toContain("所有者一覧から手で確認してください");
+  });
+
+  it("★普通に候補ゼロのときは出さない（「候補なし」と区別する）", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft,
+        rawText: "",
+        ownerCandidates: [],
+        ownerCandidatesTruncated: false,
+      }),
+    );
+    expect(out).not.toContain('data-section="owner-candidates-truncated"');
+    expect(out).not.toContain("同名の候補が多すぎて");
+  });
+
+  it("指定が無ければ出さない", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, { draft, rawText: "" }),
+    );
+    expect(out).not.toContain('data-section="owner-candidates-truncated"');
+  });
+});

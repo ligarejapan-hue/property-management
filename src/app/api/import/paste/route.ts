@@ -129,8 +129,12 @@ export async function POST(request: NextRequest) {
     // ⚠重複の見立て（物件・所有者）は**見直しAPIと同じ関数**で行う。
     //   判定も、権限・表示レベル・レコードスコープの扱いも1か所に閉じ込める
     //   (@codex PR#414 6巡目 ②③)。
-    const { duplicates: scopedDuplicates, similar, ownerCandidates } =
-      await lookupPasteDuplicates(session, perms, {
+    const {
+      duplicates: scopedDuplicates,
+      similar,
+      ownerCandidates,
+      ownerCandidatesTruncated,
+    } = await lookupPasteDuplicates(session, perms, {
         address: draft.property.address.value,
         lotNumber: draft.property.lotNumber.value,
         externalLinkKey: draft.externalLinkKey,
@@ -146,6 +150,9 @@ export async function POST(request: NextRequest) {
       duplicates: scopedDuplicates,
       similar,
       ownerCandidates,
+      // ⚠所有者候補が取得上限に達して確認しきれなかったことを伝える(21巡目 ②)。
+      //   「候補なし」と同じ顔をさせない。
+      ownerCandidatesTruncated,
       // ⚠PDF を投入したときだけ、抽出した本文を返す(全体レビュー I-5)。
       //   PDF の人は原文を手元に持っていないため、返さないと確認画面の左側に
       //   突き合わせる材料が何も無い(以前は「（PDF: ファイル名）」だけだった)。

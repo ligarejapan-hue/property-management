@@ -128,9 +128,26 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
     });
   }
 
-  // ---- 所有者（氏名があるときだけ作る） ----
+  // ---- 所有者 ----
+  // ⚠**氏名が無いだけで丸ごと捨てない**(@codex PR#414 21巡目 ①)。
+  //   連絡先(電話・メール・現住所)やカナが読み取れているのに owner を null に
+  //   すると、それらの行は unmapped からも除かれているため
+  //   **確認画面のどこにも出ないまま、登録時に黙って消える**。
+  //   「黙って捨てるのが一番悪い」。読み取れた値を入れた owner を返し、
+  //   氏名が空であることを警告で伝える。画面側は R9 のガード
+  //   (新規所有者モードで氏名が空なら登録を止める)がそのまま効くので、
+  //   値は事前入力され、氏名の入力を促され、そのまま登録はできない。
+  //   「所有者なしで登録する」を選べば従来どおり(人が見たうえで選んだ結果)。
   const ownerName = raw("ownerName");
-  const owner = ownerName === null
+  const ownerFieldKeys: DraftFieldKey[] = [
+    "ownerName",
+    "ownerNameKana",
+    "ownerPhone",
+    "ownerEmail",
+    "ownerAddress",
+  ];
+  const hasAnyOwnerField = ownerFieldKeys.some((k) => raw(k) !== null);
+  const owner = !hasAnyOwnerField
     ? null
     : {
         name: field(ownerName, label("ownerName")),
@@ -139,6 +156,13 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
         email: field(raw("ownerEmail"), label("ownerEmail")),
         currentAddress: field(raw("ownerAddress"), label("ownerAddress")),
       };
+  if (hasAnyOwnerField && ownerName === null) {
+    warnings.push({
+      code: "owner_name_missing",
+      message:
+        "所有者の連絡先を読み取りましたが、氏名が読み取れませんでした。氏名を入力するか、「所有者なしで登録する」を選んでください。",
+    });
+  }
 
   // ---- 値を解釈できなかった欄の共通処理 ----
   // ⚠**捨てて黙らない**(@codex PR#414 9巡目 ②)。5巡目で「単位が確かでなければ

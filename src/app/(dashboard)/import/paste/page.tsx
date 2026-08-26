@@ -40,6 +40,8 @@ interface PasteApiResponse {
   duplicates: PasteDuplicatesResult;
   similar: SimilarPropertySummary[];
   ownerCandidates: OwnerCandidateSummary[];
+  /** 所有者候補が取得上限に達して確認しきれなかった（21巡目 ②）。 */
+  ownerCandidatesTruncated: boolean;
   /**
    * PDF を投入したときだけ、そこから取り出した本文が入る（貼り付け経路では null）。
    * ⚠PDF の人は原文を手元に持っていないため、これが無いと確認画面の左側で
@@ -53,6 +55,7 @@ interface PasteRecheckResponse {
   duplicates: PasteDuplicatesResult;
   similar: SimilarPropertySummary[];
   ownerCandidates: OwnerCandidateSummary[];
+  ownerCandidatesTruncated: boolean;
 }
 
 interface CommitApiResponse {
@@ -80,6 +83,7 @@ export default function PasteImportPage() {
   const [duplicates, setDuplicates] = useState<PasteDuplicatesResult | null>(null);
   const [similar, setSimilar] = useState<SimilarPropertySummary[]>([]);
   const [ownerCandidates, setOwnerCandidates] = useState<OwnerCandidateSummary[]>([]);
+  const [ownerCandidatesTruncated, setOwnerCandidatesTruncated] = useState(false);
   /** 確認画面の左側に出す原文。PDF はサーバーが取り出した本文を使う。 */
   const [extractedText, setExtractedText] = useState<string | null>(null);
 
@@ -136,6 +140,7 @@ export default function PasteImportPage() {
       setDuplicates(data.duplicates);
       setSimilar(data.similar);
       setOwnerCandidates(data.ownerCandidates);
+      setOwnerCandidatesTruncated(data.ownerCandidatesTruncated);
       setExtractedText(data.extractedText);
       setPropertyValues(defaultPropertyValues(data.draft));
       setOwnerValues(defaultOwnerValues(data.draft));
@@ -193,6 +198,7 @@ export default function PasteImportPage() {
       setDuplicates(data.duplicates);
       setSimilar(data.similar);
       setOwnerCandidates(data.ownerCandidates);
+      setOwnerCandidatesTruncated(data.ownerCandidatesTruncated);
 
       // ⚠**見えない紐付けを残さない**。選んでいた相手が候補から消えたら、
       //   選択そのものを外して理由を出す(登録は下のガードで止まる)。
@@ -494,6 +500,7 @@ export default function PasteImportPage() {
                 setDuplicates(null);
                 setSimilar([]);
                 setOwnerCandidates([]);
+                setOwnerCandidatesTruncated(false);
                 setExtractedText(null);
                 setExternalLinkKey("");
                 setLinkedOwner(null);
@@ -523,6 +530,7 @@ export default function PasteImportPage() {
             duplicates={duplicates ?? undefined}
             similar={similar}
             ownerCandidates={ownerCandidates}
+            ownerCandidatesTruncated={ownerCandidatesTruncated}
             ownerMode={ownerMode}
             onOwnerModeChange={setOwnerMode}
             linkedOwnerId={linkedOwnerId}

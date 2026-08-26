@@ -11,7 +11,14 @@ export type DraftWarningCode =
    *   **利用者への嘘**になる。元資料には書いてあるのだから、
    *   ①警告を出す ②生の値を備考へ残す ③欄は空のまま、の3つを同時に行う。
    */
-  | "value_unreadable";
+  | "value_unreadable"
+  /**
+   * 所有者の連絡先は読み取れたのに、**氏名が読み取れなかった**。
+   * ⚠owner を null にして黙って捨てない(@codex PR#414 21巡目 ①)。
+   *   認識された行は unmapped からも除かれているので、null にすると
+   *   確認画面のどこにも出ないまま登録時に消える。
+   */
+  | "owner_name_missing";
 
 export interface DraftWarning {
   code: DraftWarningCode;

@@ -108,11 +108,57 @@ function toFullWidthChar(c: string): string {
  * 集めて重複を除く(漢字など幅変換の対象外の文字は変換前後で同じ値になり
  * 自然に1つへ畳まれる)。
  */
+/**
+ * 法人名の接頭辞（正規化後の表記）。
+ * ⚠**本番実測(2026-08-26): 「株式会社」で始まる所有者は1,312件中33件**。
+ *   いまは take:200 に余裕があるが、法人が増えれば「株」に集中するのは構造的で、
+ *   上限を超えた瞬間に**実在する完全一致が候補から漏れ、重複作成へ誘導**される。
+ *   → 接頭辞を落とした**実質部分**の先頭文字も種にする
+ *   (「株式会社田中工務店」なら「田」)。
+ * ⚠normalizeName は NFKC + 空白除去なので、㈱ は "(株)" になっている。
+ */
+const CORPORATE_NAME_PREFIXES: readonly string[] = [
+  "株式会社",
+  "有限会社",
+  "合同会社",
+  "合資会社",
+  "合名会社",
+  "一般社団法人",
+  "一般財団法人",
+  "公益社団法人",
+  "公益財団法人",
+  "医療法人",
+  "宗教法人",
+  "(株)",
+  "(有)",
+];
+
+/**
+ * 法人接頭辞を落とした「実質部分」。落とした結果が空なら**元の名前を返す**
+ * （「株式会社」だけ、のような異常値で空の絞り込みを作らない）。
+ */
+export function stripCorporatePrefix(normalizedName: string): string {
+  let rest = normalizedName;
+  // 「株式会社(株)…」のような二重表記も落とす。
+  for (let i = 0; i < 3; i++) {
+    const hit = CORPORATE_NAME_PREFIXES.find((prefix) => rest.startsWith(prefix));
+    if (!hit) break;
+    rest = rest.slice(hit.length);
+  }
+  return rest === "" ? normalizedName : rest;
+}
+
 function ownerSearchPrefixCandidates(rawName: string, normalizedName: string): string[] {
   // ⚠先頭1文字は **コードポイント単位**で取る（全体レビュー m-1）。
   //   slice(0,1) はサロゲートペア（例:「𠮷田」の「𠮷」）を半分に割り、
   //   壊れた片割れで startsWith するため候補が**無言で0件**になる。
-  const seeds = [firstCodePoint(rawName), firstCodePoint(normalizedName)].filter((c) => c !== "");
+  // ⚠法人接頭辞を落とした実質部分の先頭文字も種に加える(@codex PR#414 21巡目 ②)。
+  //   「株」に集中して take 上限を食い潰すのを避ける。
+  const seeds = [
+    firstCodePoint(rawName),
+    firstCodePoint(normalizedName),
+    firstCodePoint(stripCorporatePrefix(normalizedName)),
+  ].filter((c) => c !== "");
   const variants = new Set<string>();
   for (const c of seeds) {
     variants.add(c);
@@ -193,6 +239,12 @@ export interface PasteDuplicateLookupResult {
   duplicates: DuplicateVerdict;
   similar: { id: string; address: string | null; lotNumber: string | null }[];
   ownerCandidates: OwnerCandidate[];
+  /**
+   * 所有者候補が**取得上限に達して確認しきれなかった**。
+   * ⚠true のときは `ownerCandidates` を空で返す。「候補なし」と区別できるよう、
+   *   画面はこのフラグを見て**確認できなかった旨**を出す(21巡目 ②)。
+   */
+  ownerCandidatesTruncated: boolean;
 }
 
 export async function lookupPasteDuplicates(
@@ -378,7 +430,10 @@ export async function lookupPasteDuplicates(
     const prefixCandidates = ownerSearchPrefixCandidates(ownerNameRaw, normalizedOwnerName);
     const ownerRows = await prisma.owner.findMany({
       where: {
-        OR: prefixCandidates.map((prefix) => ({ name: { startsWith: prefix } })),
+        // ⚠**startsWith ではなく contains**(21巡目 ②)。法人接頭辞を落とした
+        //   実質部分は名前の**途中**に来る(「株式会社田中工務店」の「田」)。
+        //   広く取って、正確な判定は下の normalizeName 完全一致に委ねる構造は不変。
+        OR: prefixCandidates.map((seed) => ({ name: { contains: seed } })),
         isArchived: false,
       },
       select: {
@@ -391,6 +446,17 @@ export async function lookupPasteDuplicates(
       },
       take: OWNER_CANDIDATE_FETCH_LIMIT,
     });
+    // ⚠**上限到達を無言にしない**(@codex PR#414 21巡目 ②)。取り切れていないのに
+    //   「候補なし」と同じ顔をするのが一番危険。候補の代わりに警告のフラグを返す。
+    if (ownerRows.length >= OWNER_CANDIDATE_FETCH_LIMIT) {
+      return {
+        duplicates: scopedDuplicates,
+        similar,
+        ownerCandidates: [],
+        ownerCandidatesTruncated: true,
+      };
+    }
+
     const matchedRows = ownerRows.filter(
       (row) => normalizeName(row.name) === normalizedOwnerName,
     );
@@ -458,5 +524,10 @@ export async function lookupPasteDuplicates(
     .filter((c): c is OwnerCandidate => c.name !== null);
   }
 
-  return { duplicates: scopedDuplicates, similar, ownerCandidates };
+  return {
+    duplicates: scopedDuplicates,
+    similar,
+    ownerCandidates,
+    ownerCandidatesTruncated: false,
+  };
 }

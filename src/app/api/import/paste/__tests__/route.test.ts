@@ -737,7 +737,7 @@ describe("PDF 経路（全体レビュー I-2 / I-5 / m-2 / m-6）", () => {
 });
 
 describe("氏名の先頭1文字（全体レビュー m-1）", () => {
-  it("★サロゲートペアで始まる姓「𠮷田」でも前方一致の種にできる（半分に割らない）", async () => {
+  it("★サロゲートペアで始まる姓「𠮷田」でも絞り込みの種にできる（半分に割らない）", async () => {
     mockOwnerFindMany.mockResolvedValue([
       { id: "sp1", name: "𠮷田太郎", currentAddress: null, address: null },
     ]);
@@ -746,12 +746,14 @@ describe("氏名の先頭1文字（全体レビュー m-1）", () => {
     );
     expect(res.status).toBe(200);
     const args = mockOwnerFindMany.mock.calls[0][0] as {
-      where?: { OR?: { name?: { startsWith?: string } }[] };
+      where?: { OR?: { name?: { contains?: string } }[] };
     };
-    const prefixes = (args.where?.OR ?? []).map((o) => o.name?.startsWith);
+    // ⚠21巡目 ② で startsWith → contains になった(法人接頭辞を落とした実質部分は
+    //   名前の途中に来るため)。種の作り方(コードポイント単位)は変わっていない。
+    const seeds = (args.where?.OR ?? []).map((o) => o.name?.contains);
     // slice(0,1) だと壊れた片割れ(長さ1)しか渡らない。
-    expect(prefixes).toContain("𠮷");
-    expect(prefixes.every((x) => x !== undefined && Array.from(x).length === 1)).toBe(true);
+    expect(seeds).toContain("𠮷");
+    expect(seeds.every((x) => x !== undefined && Array.from(x).length === 1)).toBe(true);
     const body = await res.json();
     expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "sp1", name: "𠮷田太郎", matchKind: "name_only" },
@@ -1281,5 +1283,126 @@ describe("表示する住所は、実際に一致した方（11巡目 ③）", (
     expect(body.ownerCandidates[0].matchKind).toBe("name_only");
     expect(body.ownerCandidates[0].address).toBe("大阪府B市9-9-9");
     expect(body.ownerCandidates[0].addressKind).toBe("registry");
+  });
+});
+
+describe("法人名は接頭辞を落とした実質部分でも絞る（21巡目 ②）", () => {
+  const NLX = "\n";
+
+  it("★「株式会社田中工務店」の絞り込みに「田」が含まれる", () => {
+    // ⚠本番実測(2026-08-26): 「株式会社」で始まる所有者は1,312件中33件。
+    //   「株」だけで絞ると、法人が増えたときに take 上限を食い潰し、
+    //   実在する完全一致が候補から漏れて重複作成へ誘導される。
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "corp-1", name: "株式会社田中工務店", currentAddress: null, address: null },
+    ]);
+    return POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" + NLX + "■お名前： 株式会社田中工務店" }),
+    ).then(async (res) => {
+      const args = mockOwnerFindMany.mock.calls[0][0] as {
+        where?: { OR?: { name?: { contains?: string } }[] };
+      };
+      const seeds = (args.where?.OR ?? []).map((o) => o.name?.contains);
+      expect(seeds).toContain("田");
+      // 既存の完全一致は従来どおり見つかる。
+      const body = await res.json();
+      expect(pickKind(body.ownerCandidates)).toEqual([
+        { id: "corp-1", name: "株式会社田中工務店", matchKind: "name_only" },
+      ]);
+    });
+  });
+
+  it("★各種の法人接頭辞を落とす", async () => {
+    for (const [name, expected] of [
+      ["株式会社田中工務店", "田"],
+      ["有限会社佐藤商店", "佐"],
+      ["合同会社鈴木", "鈴"],
+      ["一般社団法人山田会", "山"],
+      ["（株）高橋建設", "高"],
+      ["㈱伊藤不動産", "伊"],
+    ] as [string, string][]) {
+      mockOwnerFindMany.mockClear();
+      mockOwnerFindMany.mockResolvedValue([]);
+      await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" + NLX + "■お名前： " + name }));
+      const args = mockOwnerFindMany.mock.calls[0][0] as {
+        where?: { OR?: { name?: { contains?: string } }[] };
+      };
+      const seeds = (args.where?.OR ?? []).map((o) => o.name?.contains);
+      expect(seeds, name).toContain(expected);
+    }
+  });
+
+  it("★接頭辞だけの異常値でも安全に扱う（空の絞り込みを作らない）", async () => {
+    mockOwnerFindMany.mockResolvedValue([]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" + NLX + "■お名前： 株式会社" }),
+    );
+    expect(res.status).toBe(200);
+    const args = mockOwnerFindMany.mock.calls[0][0] as {
+      where?: { OR?: { name?: { contains?: string } }[] };
+    };
+    const seeds = (args.where?.OR ?? []).map((o) => o.name?.contains);
+    // 空文字で絞ると全件に当たる。必ず1文字以上。
+    expect(seeds.length).toBeGreaterThan(0);
+    for (const seed of seeds) {
+      expect(seed, JSON.stringify(seeds)).toBeTruthy();
+      expect((seed ?? "").length, JSON.stringify(seeds)).toBeGreaterThan(0);
+    }
+    expect(seeds).toContain("株");
+  });
+
+  it("★個人名の挙動は変わらない（実質部分＝そのままの先頭文字）", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "p1", name: "山田太郎", currentAddress: null, address: null },
+    ]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" + NLX + "■お名前： 山田太郎" }),
+    );
+    const body = await res.json();
+    expect(pickKind(body.ownerCandidates)).toEqual([
+      { id: "p1", name: "山田太郎", matchKind: "name_only" },
+    ]);
+  });
+});
+
+describe("所有者候補が取得上限に達したら、黙って「候補なし」にしない（21巡目 ②）", () => {
+  const NLY = "\n";
+
+  it("★上限(200件)に達したら候補を返さず、確認できなかったことを伝える", async () => {
+    // 201件返るモック＝上限に達した状態。
+    mockOwnerFindMany.mockResolvedValue(
+      Array.from({ length: 200 }, (_, i) => ({
+        id: `many-${i}`,
+        name: "山田太郎",
+        currentAddress: null,
+        address: null,
+        _count: { propertyOwners: 1 },
+      })),
+    );
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" + NLY + "■お名前： 山田太郎" }),
+    );
+    const body = await res.json();
+    // ⚠完全一致が200件あっても候補は返さない。確認できていないため。
+    expect(body.ownerCandidates).toEqual([]);
+    expect(body.ownerCandidatesTruncated).toBe(true);
+  });
+
+  it("★上限に達していなければ従来どおり候補を返す", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "o1", name: "山田太郎", currentAddress: null, address: null },
+    ]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" + NLY + "■お名前： 山田太郎" }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidatesTruncated).toBe(false);
+    expect(body.ownerCandidates).toHaveLength(1);
+  });
+
+  it("★所有者を引かなかったときも false（フラグが立ちっぱなしにならない）", async () => {
+    const res = await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
+    const body = await res.json();
+    expect(body.ownerCandidatesTruncated).toBe(false);
   });
 });

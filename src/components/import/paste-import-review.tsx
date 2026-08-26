@@ -424,6 +424,12 @@ export interface PasteImportReviewProps {
   similar?: SimilarPropertySummary[];
 
   ownerCandidates?: OwnerCandidateSummary[];
+  /**
+   * 所有者候補が取得上限に達して確認しきれなかった。
+   * ⚠「候補なし」と同じ顔をさせない(@codex PR#414 21巡目 ②)。
+   *   確認できなかったことを画面で伝える。
+   */
+  ownerCandidatesTruncated?: boolean;
   ownerMode?: OwnerMode;
   onOwnerModeChange?: (mode: OwnerMode) => void;
   linkedOwnerId?: string | null;
@@ -454,6 +460,7 @@ export function PasteImportReview({
   duplicates,
   similar,
   ownerCandidates,
+  ownerCandidatesTruncated,
   ownerMode,
   onOwnerModeChange,
   linkedOwnerId,
@@ -705,6 +712,16 @@ export function PasteImportReview({
         <h3 className="mb-2 mt-4 text-xs font-bold tracking-wider text-gray-500 dark:text-gray-400">
           所有者
         </h3>
+
+        {ownerCandidatesTruncated && (
+          <div
+            role="alert"
+            data-section="owner-candidates-truncated"
+            className="mb-3 rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-300"
+          >
+            同名の候補が多すぎて確認できませんでした。所有者一覧から手で確認してください。
+          </div>
+        )}
 
         <fieldset className="mb-3 space-y-2 rounded-md border border-gray-200 p-3 text-sm dark:border-gray-700">
           <legend className="px-1 text-xs text-gray-500 dark:text-gray-400">
