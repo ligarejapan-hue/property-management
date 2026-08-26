@@ -13,8 +13,10 @@ const created: Record<string, unknown[]> = {};
 const auditCalls: unknown[] = [];
 /** lockPropertyRow / advisory lock (→$queryRaw) と create の呼び出し順を記録する。 */
 const callOrder: string[] = [];
-/** $queryRaw に渡された SQL 断片(結合済み)。 */
+/** $queryRaw / $executeRaw に渡された SQL 断片(結合済み)。 */
 const sqlSeen: string[] = [];
+/** advisory lock に**実際に渡された値**(第2引数以降)。キーの取り違えを検出する。 */
+const advisoryLockValues: unknown[][] = [];
 /** property.findFirst に渡された引数。 */
 const findFirstArgs: unknown[] = [];
 /** 外部キー一致で既に存在する物件の id (null = 未登録)。 */
@@ -102,14 +104,34 @@ vi.mock("@/lib/prisma", () => {
         return { id: "att-1", ...(data as object) };
       }),
     },
-    // ⚠$queryRaw は2つの用途で使われる(親の物件行ロックと advisory lock)。
-    //   SQL の中身で区別しないと、順序の検証がどちらのロックを見ているのか
-    //   分からなくなる(タグ付きテンプレートの第1引数が SQL の断片配列)。
+    // ⚠2種類の生SQLが走る。**呼び分けている API も違う**:
+    //     - 親の物件行ロック(lockPropertyRow) … $queryRaw (行を読む)
+    //     - advisory lock                     … $executeRaw (行を返さない)
+    //   advisory lock を $queryRaw で書くと、driver adapter 構成(PrismaPg)では
+    //   pg_advisory_xact_lock の戻り型 void(OID 2278)を変換できず本番で必ず
+    //   例外になる。ここで**どちらの API に来たか**まで記録し、$queryRaw 側に
+    //   advisory lock が来たら名指しで落とす(下の専用テスト)。
     $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
       const sql = Array.isArray(strings) ? strings.join(" ") : String(strings);
       sqlSeen.push(sql);
-      callOrder.push(sql.includes("pg_advisory_xact_lock") ? "advisoryLock" : "lockPropertyRow");
+      if (sql.includes("pg_advisory_xact_lock")) {
+        // 順序テストが「ロックはあった」と誤って緑にならないよう、別名で積む。
+        callOrder.push("advisoryLockViaQueryRaw");
+      } else {
+        callOrder.push("lockPropertyRow");
+      }
       return [{ id: "new-prop" }];
+    }),
+    $executeRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const sql = Array.isArray(strings) ? strings.join(" ") : String(strings);
+      sqlSeen.push(sql);
+      if (sql.includes("pg_advisory_xact_lock")) {
+        callOrder.push("advisoryLock");
+        advisoryLockValues.push(values);
+      } else {
+        callOrder.push("executeRaw:other");
+      }
+      return 0;
     }),
   };
   return { prisma: { $transaction: vi.fn(async (fn: (t: unknown) => unknown) => fn(tx)), ...tx } };
@@ -177,6 +199,7 @@ beforeEach(() => {
   auditCalls.length = 0;
   callOrder.length = 0;
   sqlSeen.length = 0;
+  advisoryLockValues.length = 0;
   findFirstArgs.length = 0;
 });
 
@@ -356,6 +379,32 @@ describe("二重登録は確定側(サーバー)で止める", () => {
     expect(sqlSeen.some((q) => q.includes("pg_advisory_xact_lock"))).toBe(true);
   });
 
+  it("★advisory lock は $executeRaw で投げる（$queryRaw だと本番で必ず例外になる）", async () => {
+    // driver adapter 構成(src/lib/prisma.ts の PrismaPg)では、$queryRaw は
+    // 返却列の型 OID を必ず変換する。pg_advisory_xact_lock の戻り型は
+    // void(OID 2278)で変換先が無く UnsupportedNativeDataType を投げる。
+    // = 査定ナンバーのある登録(この機能の主経路)が毎回500になり、
+    //   二重登録ガードは一度も働かない。
+    const { prisma } = await import("@/lib/prisma");
+    await POST(req(withKey));
+    expect(callOrder).toContain("advisoryLock");
+    expect(callOrder).not.toContain("advisoryLockViaQueryRaw");
+    const executeSql = (prisma.$executeRaw as unknown as { mock: { calls: unknown[][] } }).mock.calls
+      .map((c) => (Array.isArray(c[0]) ? (c[0] as string[]).join(" ") : ""));
+    expect(executeSql.some((q) => q.includes("pg_advisory_xact_lock"))).toBe(true);
+    // ::bigint も既存の前例(reception-property/route.ts)に合わせる。
+    expect(executeSql.some((q) => q.includes("::bigint"))).toBe(true);
+  });
+
+  it("★ロックのキーは、その案件の外部キーそのもの（全件が1本のロックに直列化されない）", async () => {
+    // SQL 文字列だけを見ていると、hashtext('paste-import') のような固定値へ
+    // 書き換えても緑のまま通ってしまう(＝全ての登録が1本のロックで直列化されても
+    // 気づけない)。埋め込まれた**値**まで見る。
+    await POST(req({ ...withKey, externalLinkKey: "SA2608-7654321" }));
+    expect(advisoryLockValues).toHaveLength(1);
+    expect(advisoryLockValues[0]).toEqual(["SA2608-7654321"]);
+  });
+
   it("★存在確認は物件の作成より**先**(作ってから気づくのでは遅い)", async () => {
     await POST(req(withKey));
     const findIdx = callOrder.indexOf("property.findFirst");
@@ -411,6 +460,26 @@ describe("入力の検査: 直せる形の400で断る(500に化けさせない�
     const res = await POST(req(area("約70")));
     expect(res.status).toBe(400);
     expect((await res.json()).error.message).toContain("専有面積");
+  });
+
+  it("★桁数があふれる値（日付を貼ってしまった等）は400。Decimal(8,2)の汎用500に戻さない", async () => {
+    // 列は Decimal(8,2) = 整数部6桁まで。見出しの取り違えで「20250815」が
+    // 面積欄に入ると、桁数を見ない正規表現は通し、PostgreSQL 側があふれて
+    // I-3 で消したはずの「サーバーエラーが発生しました」に逆戻りする。
+    const res = await POST(req(area("20250815")));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.message).toContain("専有面積");
+    expect(created.property).toBeUndefined();
+  });
+
+  it("★小数は2桁まで(3桁は400)", async () => {
+    expect((await POST(req(area("70.123")))).status).toBe(400);
+  });
+
+  it("整数6桁・小数2桁ちょうどは通る(境界)", async () => {
+    const res = await POST(req(area("999999.99")));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ exclusiveArea: "999999.99" });
   });
 
   it("専有面積が素の数字なら通る(小数も)", async () => {

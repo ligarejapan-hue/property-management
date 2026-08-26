@@ -324,6 +324,28 @@ export function PasteImportReview({
         <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap rounded-md border border-gray-200 bg-gray-50 p-3 text-xs dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
           {rawText}
         </pre>
+
+        {/*
+          「項目名：値」の形になっていなかった行(設計書 §4.2 の unlabeled)。
+          ⚠**下書きに持たせるだけでは意味が無い**ので、ここに出して原文と
+            突き合わせられるようにする。自由記述の連絡事項がここに落ちるため、
+            右側の欄に入っていない情報がないかを人が確かめられる。
+        */}
+        {draft.unlabeled.length > 0 && (
+          <div data-section="unlabeled" className="mt-3">
+            <h3 className="mb-1 text-xs font-bold tracking-wider text-gray-500 dark:text-gray-400">
+              項目として読み取れなかった行（{draft.unlabeled.length}行）
+            </h3>
+            <p className="mb-1 text-[11px] text-gray-500 dark:text-gray-400">
+              「項目名：値」の形になっていないため、どの欄にも入っていません。必要な内容があれば、右の欄か備考へ手で写してください。
+            </p>
+            <ul className="max-h-40 list-disc overflow-auto rounded-md border border-dashed border-gray-300 bg-gray-50 py-2 pl-6 pr-3 text-xs text-gray-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300">
+              {draft.unlabeled.map((line, i) => (
+                <li key={`${i}-${line}`}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
 
       {/* 右: 読み取り結果 */}
@@ -342,15 +364,27 @@ export function PasteImportReview({
           </div>
         ))}
 
-        {dup.blocked && dup.blockedByPropertyId && (
+        {/*
+          ⚠断りの帯は **blocked だけ**を条件にする。id の有無で出し分けない。
+            サーバーは「ブロック相手が担当外の物件なら blocked は残して id だけ
+            null にする」( /api/import/paste )。id を条件に足すと、その組み合わせで
+            帯が消え、利用者に見えるのは**押せない灰色のボタンだけ**になる
+            (理由は title 属性のみ＝スマホでは出ない)。サーバーが blocked を
+            残した意味が画面の手前で消える。
+        */}
+        {dup.blocked && (
           <div
             role="alert"
             className="mb-3 rounded-md border border-red-400 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-500 dark:bg-red-950/40 dark:text-red-300"
           >
             この案件は登録済みです。{" "}
-            <Link href={`/properties/${dup.blockedByPropertyId}`} className="underline">
-              既存の物件を見る
-            </Link>
+            {dup.blockedByPropertyId ? (
+              <Link href={`/properties/${dup.blockedByPropertyId}`} className="underline">
+                既存の物件を見る
+              </Link>
+            ) : (
+              <span>（登録済みの物件は、担当外のため開けません。担当者にご確認ください）</span>
+            )}
           </div>
         )}
 

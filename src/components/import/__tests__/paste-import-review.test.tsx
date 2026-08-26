@@ -239,3 +239,78 @@ describe("備考の見え方についての断り書き（全体レビュー I-7
     expect(d.noteFromUnmapped).toContain("年齢");
   });
 });
+
+const NL = "\n";
+
+describe("登録済みの断り帯は id が無くても出る（再レビュー Important）", () => {
+  it("★担当外の物件でブロックされた場合（id が null）でも、赤帯と文言が出る", () => {
+    // サーバー(/api/import/paste)は「ブロック相手が担当外なら blocked は残して
+    // id だけ null」を返す。id を条件にすると帯が消え、押せない灰色のボタンだけが
+    // 残る(理由は title 属性のみ＝スマホでは出ない)。
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft,
+        rawText: "",
+        duplicates: { blocked: true, blockedByPropertyId: null, similarPropertyIds: [] },
+      }),
+    );
+    expect(out).toContain("この案件は登録済みです");
+    expect(out).toContain("担当外のため開けません");
+    // 開けない物件へのリンクは出さない。
+    expect(out).not.toContain("既存の物件を見る");
+    expect(out).not.toContain("/properties/");
+  });
+
+  it("id があるときは従来どおりリンクを出し、担当外の断りは出さない", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft,
+        rawText: "",
+        duplicates: { blocked: true, blockedByPropertyId: "prop-x", similarPropertyIds: [] },
+      }),
+    );
+    expect(out).toContain("/properties/prop-x");
+    expect(out).toContain("既存の物件を見る");
+    expect(out).not.toContain("担当外のため開けません");
+  });
+
+  it("blocked でなければ帯は出ない（出しっぱなしになっていない）", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft,
+        rawText: "",
+        duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: [] },
+      }),
+    );
+    expect(out).not.toContain("この案件は登録済みです");
+  });
+});
+
+describe("読み取れなかった行(unlabeled)を原文側に出す（再レビュー Minor c）", () => {
+  it("★区切りの無い行が確認画面に出る（下書きに持つだけで終わらせない）", () => {
+    const d = buildPasteDraft(
+      "この物件についてのご相談です" + NL +
+      "■物件所在地： 東京都A区B1-2-3" + NL +
+      "至急ご連絡ください",
+    );
+    expect(d.unlabeled).toEqual(["この物件についてのご相談です", "至急ご連絡ください"]);
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, { draft: d, rawText: "" }),
+    );
+    // rawText は空にしてあるので、この2行が出るのは unlabeled を描いているから。
+    expect(out).toContain('data-section="unlabeled"');
+    expect(out).toContain("この物件についてのご相談です");
+    expect(out).toContain("至急ご連絡ください");
+    expect(out).toContain("項目として読み取れなかった行（2行）");
+  });
+
+  it("読み取れなかった行が無ければ、その区画ごと出さない", () => {
+    const d = buildPasteDraft("■物件所在地： 東京都A区B1-2-3");
+    expect(d.unlabeled).toEqual([]);
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, { draft: d, rawText: "" }),
+    );
+    expect(out).not.toContain('data-section="unlabeled"');
+    expect(out).not.toContain("項目として読み取れなかった行");
+  });
+});

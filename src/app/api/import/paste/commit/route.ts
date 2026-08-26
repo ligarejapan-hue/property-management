@@ -26,8 +26,13 @@ import type { PropertyType, OccupancyStatus } from "@/generated/prisma";
 //   分からない**まま入力内容が失われる。ここで欄の名前つきで 400 を返す。
 // ---------------------------------------------------------------------------
 
-/** 面積として受け付ける形。Decimal(8,2) 列にそのまま渡せる素の数字だけ。 */
-const AREA_PATTERN = /^\d+(\.\d+)?$/;
+/**
+ * 面積として受け付ける形。
+ * ⚠**桁数まで見る**。列は `Decimal(8, 2)`＝整数部6桁・小数部2桁が上限。
+ *   桁数を見ないと、見出しの取り違えで日付「20250815」が面積欄に入ったまま
+ *   ここを通り、PostgreSQL 側があふれて **I-3 で消したはずの汎用500に戻る**。
+ */
+const AREA_PATTERN = /^\d{1,6}(\.\d{1,2})?$/;
 
 const PROPERTY_TYPE_SET = new Set<string>(PROPERTY_TYPE_VALUES);
 /** 現況(OccupancyStatus)の許容値。表示ラベルの定義元と同じ集合を使う。 */
@@ -40,7 +45,7 @@ function parseAreaInput(raw: string | null | undefined, fieldLabel: string): str
   if (!AREA_PATTERN.test(v)) {
     throw new ApiError(
       400,
-      `${fieldLabel}は数字だけで入力してください（例: 70 または 70.5）。単位や「約」は入れないでください`,
+      `${fieldLabel}は数字だけで入力してください（例: 70 または 70.5）。単位や「約」は入れず、整数6桁・小数2桁までにしてください`,
       "BAD_REQUEST",
     );
   }
@@ -211,7 +216,15 @@ export async function POST(request: NextRequest) {
       //   xact lock はトランザクション終了時に自動解放される
       //   (src/app/api/import/reception-property/route.ts と同じ型)。
       if (externalLinkKey) {
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${externalLinkKey}))`;
+        // ⚠**$executeRaw + ::bigint**。$queryRaw にしてはいけない。
+        //   本番は driver adapter 構成(src/lib/prisma.ts の PrismaPg)で、
+        //   $queryRaw は返却列の型 OID を必ず変換する。pg_advisory_xact_lock の
+        //   戻り型は void(OID 2278)で変換先が無く、UnsupportedNativeDataType を
+        //   投げる = 査定ナンバーのある登録が毎回500になり、このガードは一度も
+        //   働かない。$executeRaw は行を返さないので列型の変換を通らない。
+        //   (prisma を丸ごとモックするテストでは原理的に検出できない種類の穴。
+        //    リポジトリ内の唯一の前例 reception-property/route.ts と同じ形に揃える。)
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${externalLinkKey})::bigint)`;
         const already = await tx.property.findFirst({
           where: { externalLinkKey, isArchived: false },
           select: { id: true },

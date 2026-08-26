@@ -494,7 +494,7 @@ describe("所有者候補は owners と同じ規則で守る（検索オラク�
     expect(mockOwnerFindMany).not.toHaveBeenCalled();
   });
 
-  it("★氏名がマスクされている人には検索させない（DBを引かない）", async () => {
+  it("★条件は氏名と住所のAND: 住所は見られても氏名がマスクなら検索させない（項目ごとのORに直すとオラクルが再び開く）", async () => {
     mockPerms = [
       ...FULL_PERMS.filter((p) => p.resource !== "owner_name"),
       { resource: "owner_name", action: "masked", granted: true },
@@ -506,7 +506,7 @@ describe("所有者候補は owners と同じ規則で守る（検索オラク�
     expect(mockOwnerFindMany).not.toHaveBeenCalled();
   });
 
-  it("★既定の field_staff テンプレート（owner_address: partial）では検索させない", async () => {
+  it("★条件は氏名と住所のAND: 氏名は見られても住所がpartialなら検索させない（既定の field_staff がこれ・3入口の項目ごとORへ揃えてはいけない）", async () => {
     // prisma/seed.ts の field_staff は owner_phone: masked / owner_address: partial。
     // この人に「山田太郎 / 登記上の住所と一致」を返すと、市までしか見せていない
     // 住所の一致を確定させてしまう(= 検索オラクル)。
@@ -525,6 +525,29 @@ describe("所有者候補は owners と同じ規則で守る（検索オラク�
     const body = await res.json();
     expect(body.ownerCandidates).toEqual([]);
     expect(mockOwnerFindMany).not.toHaveBeenCalled();
+  });
+
+  it("★AND を OR に緩めると通ってしまう組み合わせが、実際に閉じている（住所partial×氏名full で候補ゼロ）", async () => {
+    // ⚠この route は「氏名で前方一致 → 住所で一致の種類(連絡先/登記上)を出し分ける」
+    //   ため、氏名だけ・住所だけの可否で判断してはいけない。owners は項目ごとに
+    //   OR で検索対象を組むが、**この経路は氏名と住所を組み合わせて答えを返す**ので
+    //   AND にしている。「3入口に揃える」つもりで OR へ直すと、住所が partial の
+    //   人に「登記上の住所と一致」が返り、市までしか見せていない住所の一致を
+    //   確定させられる(＝指摘 Critical 2 の再現)。
+    mockPerms = [
+      { resource: "import", action: "write", granted: true },
+      { resource: "property", action: "write", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "partial", granted: true },
+    ];
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "o-oracle", name: "山田太郎", currentAddress: null, address: "東京都渋谷区X1-1-1" },
+    ]);
+    const res = await POST(jsonReq({ text: nameAndAddress }));
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([]);
+    expect(JSON.stringify(body)).not.toContain("registry_address");
   });
 
   it("氏名も住所も見られる人には従来どおり候補を返す（過剰に閉じていない）", async () => {
