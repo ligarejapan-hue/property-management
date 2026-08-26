@@ -86,6 +86,14 @@ const MATCH_KIND_LABELS: Record<OwnerMatchKind, string> = {
   name_only: "氏名だけ一致（同姓同名の別人かもしれません）",
 };
 
+/**
+ * 直したら**重複の見直し**を起こす欄。
+ * ⚠住所の重複は登録APIが意図的にブロックしない(人が判断すべきなので)＝
+ *   画面の警告が唯一の防御線。直したあとに効かないままでは防御にならない。
+ */
+export const DUPLICATE_INPUT_FIELDS: ReadonlySet<string> = new Set(["address", "lotNumber"]);
+export const DUPLICATE_OWNER_FIELDS: ReadonlySet<string> = new Set(["name", "currentAddress"]);
+
 /** 欄ごとに紐づく警告コード(要確認状態を出す欄のみ)。 */
 const FIELD_WARNING_CODE: Partial<Record<PropertyFieldKey, DraftWarningCode>> = {
   propertyType: "property_type_unknown",
@@ -179,6 +187,7 @@ function FieldRow({
   warningMessage,
   noColumnHint,
   onChange,
+  onBlur,
   selectOptions,
 }: {
   fieldKey: string;
@@ -189,6 +198,8 @@ function FieldRow({
   /** 専用のDB列が無い欄への案内(常に表示。値の有無に関係ない固定の注意書き)。 */
   noColumnHint?: string;
   onChange?: (value: string) => void;
+  /** 入力を終えた（フォーカスが外れた）とき。重複の見直しを起こすために使う。 */
+  onBlur?: () => void;
   selectOptions?: { value: string; label: string }[];
 }) {
   const hasValue = value.trim() !== "";
@@ -213,6 +224,7 @@ function FieldRow({
             className={boxClass}
             value={value}
             onChange={handleChange}
+            onBlur={onBlur}
           >
             <option value="">（未選択）</option>
             {selectOptions.map((opt) => (
@@ -228,6 +240,7 @@ function FieldRow({
             className={boxClass}
             value={value}
             onChange={handleChange}
+            onBlur={onBlur}
           />
         )}
         {hasValue && sourceLabel && (
@@ -272,6 +285,23 @@ export interface PasteImportReviewProps {
   note?: string;
   onNoteChange?: (value: string) => void;
 
+  /**
+   * 査定ナンバー等の外部キー。⚠**人が確認・修正できる欄として出す**
+   * (設計書 §5.4「どの欄も編集できる」/ @codex PR#414 6巡目 ①)。
+   * 誤った番号が保存されると、後日その番号の本物の反響が
+   * 「登録済みです」で弾かれ、誤りが将来に持ち越される。
+   */
+  externalLinkKey?: string;
+  onExternalLinkKeyChange?: (value: string) => void;
+
+  /**
+   * 住所・地番・査定ナンバー・所有者の氏名/現住所を**直し終えた**とき。
+   * 呼び出し側が重複の見直し(/api/import/paste/recheck)を起こす。
+   */
+  onDuplicateInputBlur?: () => void;
+  /** 見直しに失敗したときの断り(黙って古い判定のままにしない)。 */
+  recheckError?: string | null;
+
   duplicates?: PasteDuplicatesResult;
   similar?: SimilarPropertySummary[];
 
@@ -295,6 +325,10 @@ export function PasteImportReview({
   onOwnerFieldChange,
   note,
   onNoteChange,
+  externalLinkKey,
+  onExternalLinkKeyChange,
+  onDuplicateInputBlur,
+  recheckError,
   duplicates,
   similar,
   ownerCandidates,
@@ -309,6 +343,7 @@ export function PasteImportReview({
   const pValues = propertyValues ?? defaultPropertyValues(draft);
   const oValues = ownerValues ?? defaultOwnerValues(draft);
   const noteValue = note ?? draft.noteFromUnmapped;
+  const externalKeyValue = externalLinkKey ?? draft.externalLinkKey ?? "";
   const dup = duplicates ?? { blocked: false, blockedByPropertyId: null, similarPropertyIds: [] };
   const similarList = similar ?? [];
   const candidates = ownerCandidates ?? [];
@@ -421,6 +456,26 @@ export function PasteImportReview({
           </div>
         )}
 
+        {recheckError && (
+          <div
+            role="alert"
+            className="mb-3 rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-300"
+          >
+            {recheckError}
+          </div>
+        )}
+
+        {/* 査定ナンバー(外部キー)。他の欄と同じように確認・修正できる。 */}
+        <FieldRow
+          fieldKey="externalLinkKey"
+          label="査定ナンバー"
+          value={externalKeyValue}
+          sourceLabel={null}
+          noColumnHint="※同じ番号の物件は登録できません。空にすると住所で判断します"
+          onChange={(v) => onExternalLinkKeyChange?.(v)}
+          onBlur={onDuplicateInputBlur}
+        />
+
         {PROPERTY_FIELD_LABELS.map((f) => {
           const draftField = draft.property[f.key];
           const warningCode = FIELD_WARNING_CODE[f.key];
@@ -437,6 +492,7 @@ export function PasteImportReview({
               warningMessage={warning?.message}
               noColumnHint={FIELD_NO_COLUMN_HINT[f.key]}
               onChange={(v) => onPropertyFieldChange?.(f.key, v)}
+              onBlur={DUPLICATE_INPUT_FIELDS.has(f.key) ? onDuplicateInputBlur : undefined}
               selectOptions={
                 f.key === "propertyType"
                   ? PROPERTY_TYPE_OPTIONS.filter((o) =>
@@ -539,6 +595,7 @@ export function PasteImportReview({
                 value={oValues[f.key]}
                 sourceLabel={draftField?.sourceLabel ?? null}
                 onChange={(v) => onOwnerFieldChange?.(f.key, v)}
+                onBlur={DUPLICATE_OWNER_FIELDS.has(f.key) ? onDuplicateInputBlur : undefined}
               />
             );
           })}

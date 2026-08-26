@@ -5,7 +5,15 @@
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
-import { PasteImportReview, foldNoColumnFieldsIntoNote } from "../paste-import-review";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import {
+  PasteImportReview,
+  foldNoColumnFieldsIntoNote,
+  DUPLICATE_INPUT_FIELDS,
+  DUPLICATE_OWNER_FIELDS,
+} from "../paste-import-review";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
 
 const draft = buildPasteDraft(
@@ -390,5 +398,110 @@ describe("「新しい所有者として登録する」のまま氏名が空な�
     expect(out).toContain("この案件は登録済みです");
     expect(out).not.toContain(">所有者の氏名を入力してください。");
     expect(registerButtonDisabled(out)).toBe(true);
+  });
+});
+
+describe("査定ナンバー(外部キー)を確認・修正できる（6巡目 ①）", () => {
+  it("★読み取った査定ナンバーが編集欄として出る（黙って送らない）", () => {
+    // 設計書 §5.4「どの欄も編集できる」。誤った番号が保存されると、後日その番号の
+    // 本物の反響が「登録済みです」で弾かれ、誤りが将来に持ち越される。
+    const d = buildPasteDraft(
+      "■査定ナンバー： SA2608-1234567" + NL + "■物件所在地： 東京都A区B1-2-3",
+    );
+    expect(d.externalLinkKey).toBe("SA2608-1234567");
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, { draft: d, rawText: "" }),
+    );
+    const block = extractFieldBlock(out, "externalLinkKey");
+    expect(block).not.toBe("");
+    expect(block).toContain('value="SA2608-1234567"');
+    expect(block).toContain("査定ナンバー");
+  });
+
+  it("★渡された値（人が直した値）が下書きの値より優先して出る", () => {
+    const d = buildPasteDraft(
+      "■査定ナンバー： SA2608-1234567" + NL + "■物件所在地： 東京都A区B1-2-3",
+    );
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft: d, rawText: "", externalLinkKey: "SA2608-7654321",
+      }),
+    );
+    const block = extractFieldBlock(out, "externalLinkKey");
+    expect(block).toContain('value="SA2608-7654321"');
+    expect(block).not.toContain("SA2608-1234567");
+  });
+
+  it("★空にできる（空なら外部キー無しとして扱う旨の案内が添う）", () => {
+    const d = buildPasteDraft(
+      "■査定ナンバー： SA2608-1234567" + NL + "■物件所在地： 東京都A区B1-2-3",
+    );
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, { draft: d, rawText: "", externalLinkKey: "" }),
+    );
+    const block = extractFieldBlock(out, "externalLinkKey");
+    expect(block).toContain('value=""');
+    expect(block).toContain("空にすると住所で判断します");
+  });
+
+  it("査定ナンバーが元資料に無ければ空欄で出る（推測で埋めない）", () => {
+    const d = buildPasteDraft("■物件所在地： 東京都A区B1-2-3");
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, { draft: d, rawText: "" }),
+    );
+    const block = extractFieldBlock(out, "externalLinkKey");
+    expect(block).not.toBe("");
+    expect(block).toContain("元の資料に記載がありません");
+  });
+});
+
+describe("重複の見直しは、直したあとに起こる（6巡目 ②③）", () => {
+  const out = renderToStaticMarkup(
+    createElement(PasteImportReview, {
+      draft,
+      rawText: "",
+      ownerMode: "new",
+      onDuplicateInputBlur: () => {},
+    }),
+  );
+
+  it("★見直しの断り(recheckError)は画面に出る（黙って古い判定のままにしない）", () => {
+    const withError = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft, rawText: "", recheckError: "重複の確認ができませんでした（通信に失敗しました）。",
+      }),
+    );
+    expect(withError).toContain("重複の確認ができませんでした");
+  });
+
+  it("見直しの断りが無ければ何も出さない", () => {
+    expect(out).not.toContain("重複の確認ができませんでした");
+  });
+
+  it("★どの欄を直したら見直すかが、実際の集合として決まっている", () => {
+    // 住所の重複は登録APIが意図的にブロックしない＝画面の警告が唯一の防御線。
+    expect([...DUPLICATE_INPUT_FIELDS].sort()).toEqual(["address", "lotNumber"]);
+    expect([...DUPLICATE_OWNER_FIELDS].sort()).toEqual(["currentAddress", "name"]);
+  });
+
+  it("★その集合が実際に onBlur へ配線されている(部品のソースを走査して固定する)", () => {
+    // ⚠renderToStaticMarkup は onBlur を属性として出さないため、描画結果からは
+    //   配線を確かめられない。「id があること」だけを見る空振りにしないよう、
+    //   呼び出し側の記述そのものを走査する(配線を外すと名指しで落ちる)。
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../paste-import-review.tsx"),
+      "utf8",
+    );
+    // 物件の欄: 見直し対象の欄だけ onBlur を渡す
+    expect(source).toContain(
+      "onBlur={DUPLICATE_INPUT_FIELDS.has(f.key) ? onDuplicateInputBlur : undefined}",
+    );
+    // 所有者の欄
+    expect(source).toContain(
+      "onBlur={DUPLICATE_OWNER_FIELDS.has(f.key) ? onDuplicateInputBlur : undefined}",
+    );
+    // 査定ナンバーの欄は常に対象
+    const keyBlock = source.slice(source.indexOf('fieldKey="externalLinkKey"'));
+    expect(keyBlock.slice(0, 500)).toContain("onBlur={onDuplicateInputBlur}");
   });
 });

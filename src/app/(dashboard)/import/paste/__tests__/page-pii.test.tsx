@@ -107,3 +107,44 @@ describe("原文の表示と所有者の欄が保護領域の内側にある", (
     expect(out).toContain('id="paste-field-owner-phone"');
   });
 });
+
+// ===========================================================================
+// @codex PR#414 6巡目 ①②③ の画面側の配線。
+// ⚠env=node では state を動かせないため、**呼び出しの記述そのもの**を走査して
+//   固定する（「id があること」だけを見る空振りにしない）。
+// ===========================================================================
+
+describe("査定ナンバーと重複の見直しが画面に配線されている", () => {
+  it("★人が直した査定ナンバーを登録に渡す（下書きの値を黙って送らない）", () => {
+    // 誤った番号が保存されると、後日その番号の本物の反響が「登録済みです」で
+    // 弾かれ、誤りが将来に持ち越される。
+    expect(source).toContain("externalLinkKey: externalLinkKey.trim() || null,");
+    expect(source).not.toContain("externalLinkKey: draft.externalLinkKey,");
+  });
+
+  it("★査定ナンバーの欄を確認画面へ渡している", () => {
+    expect(source).toContain("externalLinkKey={externalLinkKey}");
+    expect(source).toContain("onExternalLinkKeyChange={setExternalLinkKey}");
+  });
+
+  it("★直したあとの見直しを、専用の口へ投げている", () => {
+    expect(source).toContain('fetch("/api/import/paste/recheck"');
+    // 見直しの結果で警告の状態を差し替えていること（受け取って捨てていない）。
+    for (const setter of ["setDuplicates(data.duplicates)", "setSimilar(data.similar)", "setOwnerCandidates(data.ownerCandidates)"]) {
+      expect(source).toContain(setter);
+    }
+    // 欄を直し終えたときに起きること。
+    expect(source).toContain("onDuplicateInputBlur={");
+  });
+
+  it("★登録の直前にもう一度見直し、止まっていたら送らない", () => {
+    // 欄を直した直後にそのまま登録を押される経路がある。
+    expect(source).toContain("const latest = await recheckDuplicates();");
+    expect(source).toContain("if (latest?.duplicates.blocked)");
+  });
+
+  it("★見直しに失敗したら、その旨を画面に出す（黙って古い判定のままにしない）", () => {
+    expect(source).toContain("setRecheckError(");
+    expect(source).toContain("recheckError={recheckError}");
+  });
+});

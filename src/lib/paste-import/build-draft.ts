@@ -3,7 +3,13 @@
  * ⚠ Prisma / next / node:fs を import しないこと。
  */
 import { parseLabeledLines, isBlankValue, type LabeledLine } from "./parse-labeled-lines";
-import { toHalfWidth, warekiToSeireki, parseAreaSqm, splitLotNumberFromAddress } from "./normalize";
+import {
+  toHalfWidth,
+  warekiToSeireki,
+  parseAreaSqm,
+  splitLotNumberFromAddress,
+  type YearBoundOptions,
+} from "./normalize";
 import { fieldKeyForLabel, type DraftFieldKey } from "./label-dictionary";
 import { propertyTypeForRaw } from "./property-type-dictionary";
 import {
@@ -36,7 +42,11 @@ function normalizeExternalLinkKey(raw: string | null): string | null {
   return v === "" ? null : v;
 }
 
-export function buildPasteDraft(text: string): PasteDraft {
+/**
+ * ⚠**時計を読むのは API 層（境界）だけ**。ここは上限を引数で受け取るだけで、
+ *   同じ入力には同じ結果を返す（テストは固定値を渡す）。
+ */
+export function buildPasteDraft(text: string, options?: YearBoundOptions): PasteDraft {
   const { labeled, unlabeled } = parseLabeledLines(text);
   const warnings: DraftWarning[] = [];
 
@@ -124,7 +134,7 @@ export function buildPasteDraft(text: string): PasteDraft {
       };
 
   const builtYearRaw = raw("builtYearRaw");
-  const builtYear = builtYearRaw === null ? null : warekiToSeireki(builtYearRaw);
+  const builtYear = builtYearRaw === null ? null : warekiToSeireki(builtYearRaw, options);
   const areaRaw = raw("exclusiveArea");
   const area = areaRaw === null ? null : parseAreaSqm(areaRaw);
   const landAreaRaw = raw("landArea");

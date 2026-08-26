@@ -45,6 +45,13 @@ interface PasteApiResponse {
   extractedText: string | null;
 }
 
+/** 見直しAPI(/api/import/paste/recheck)の応答。下書きAPIと同じ形の一部。 */
+interface PasteRecheckResponse {
+  duplicates: PasteDuplicatesResult;
+  similar: SimilarPropertySummary[];
+  ownerCandidates: OwnerCandidateSummary[];
+}
+
 interface CommitApiResponse {
   propertyId: string;
   ownerId: string | null;
@@ -77,6 +84,9 @@ export default function PasteImportPage() {
   const [propertyValues, setPropertyValues] = useState<PropertyValues | null>(null);
   const [ownerValues, setOwnerValues] = useState<OwnerValues | null>(null);
   const [note, setNote] = useState("");
+  /** 査定ナンバー等の外部キー。⚠人が確認・修正できる欄として持つ(設計書 §5.4)。 */
+  const [externalLinkKey, setExternalLinkKey] = useState("");
+  const [recheckError, setRecheckError] = useState<string | null>(null);
   const [ownerMode, setOwnerMode] = useState<OwnerMode>("none");
   const [linkedOwnerId, setLinkedOwnerId] = useState<string | null>(null);
 
@@ -114,6 +124,8 @@ export default function PasteImportPage() {
       setPropertyValues(defaultPropertyValues(data.draft));
       setOwnerValues(defaultOwnerValues(data.draft));
       setNote(data.draft.noteFromUnmapped);
+      setExternalLinkKey(data.draft.externalLinkKey ?? "");
+      setRecheckError(null);
       setOwnerMode(defaultOwnerMode(data.draft));
       setLinkedOwnerId(null);
       setRegisterError(null);
@@ -131,6 +143,46 @@ export default function PasteImportPage() {
   const handleOwnerFieldChange = useCallback((key: OwnerFieldKey, value: string) => {
     setOwnerValues((prev) => (prev ? { ...prev, [key]: value } : prev));
   }, []);
+
+  /**
+   * 人が直したあとの値で、重複の見立てをやり直す。
+   *
+   * ⚠**住所の重複は登録APIが意図的にブロックしない**(人が判断すべきなので)＝
+   *   画面の警告が唯一の防御線。読み取り直後の判定のままにすると、直した結果が
+   *   既存と一致しても警告が出ない(@codex PR#414 6巡目 ②③)。
+   * ⚠所有者も同じ。読み取りが崩れた氏名を正しい氏名に直した瞬間こそ候補が要る。
+   */
+  const recheckDuplicates = useCallback(async (): Promise<PasteRecheckResponse | null> => {
+    if (!propertyValues) return null;
+    try {
+      const res = await fetch("/api/import/paste/recheck", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address: propertyValues.address,
+          lotNumber: propertyValues.lotNumber,
+          externalLinkKey,
+          ownerName: ownerMode === "new" ? (ownerValues?.name ?? "") : "",
+          ownerCurrentAddress: ownerMode === "new" ? (ownerValues?.currentAddress ?? "") : "",
+        }),
+      });
+      if (!res.ok) throw new Error(await readApiErrorMessage(res));
+      const data = (await res.json()) as PasteRecheckResponse;
+      setDuplicates(data.duplicates);
+      setSimilar(data.similar);
+      setOwnerCandidates(data.ownerCandidates);
+      setRecheckError(null);
+      return data;
+    } catch (e) {
+      // ⚠黙って古い判定のままにしない。効いていないことを画面で伝える。
+      setRecheckError(
+        `重複の確認ができませんでした（${
+          e instanceof Error ? e.message : "通信に失敗しました"
+        }）。表示中の重複警告は直す前の内容にもとづくものです。`,
+      );
+      return null;
+    }
+  }, [propertyValues, ownerValues, ownerMode, externalLinkKey]);
 
   const handleRegister = useCallback(async () => {
     if (!draft || !propertyValues || !ownerValues) return;
@@ -150,6 +202,12 @@ export default function PasteImportPage() {
     setRegistering(true);
     setRegisterError(null);
     try {
+      // ⚠登録の直前にもう一度見直す(欄を直した直後にそのまま押される経路がある)。
+      const latest = await recheckDuplicates();
+      if (latest?.duplicates.blocked) {
+        setRegisterError("この案件は登録済みです");
+        return;
+      }
       // ⚠土地面積・築年は Property に対応する列が無い(commit API の契約にも無い)。
       //   画面では編集可能な欄として出しているため、値を無言で捨てず備考へ行として
       //   足す(既存の備考は消さない)。詳細は paste-import-review.tsx の
@@ -180,7 +238,9 @@ export default function PasteImportPage() {
                 currentAddress: ownerValues.currentAddress || null,
               }
             : null,
-        externalLinkKey: draft.externalLinkKey,
+        // ⚠人が直した値をそのまま使う。空にしたら外部キー無しとして登録する
+        //   (＝住所での重複判定に委ねられる)。
+        externalLinkKey: externalLinkKey.trim() || null,
         linkExistingOwnerId: ownerMode === "link" ? linkedOwnerId : null,
       };
 
@@ -206,7 +266,10 @@ export default function PasteImportPage() {
     } finally {
       setRegistering(false);
     }
-  }, [draft, propertyValues, ownerValues, note, ownerMode, linkedOwnerId, pdfFile, router]);
+  }, [
+    draft, propertyValues, ownerValues, note, ownerMode, linkedOwnerId, pdfFile, router,
+    externalLinkKey, recheckDuplicates,
+  ]);
 
   return (
     // ⚠**画面の最上位**に PII 保護の印を付ける(@codex PR#414 3巡目)。
@@ -298,6 +361,8 @@ export default function PasteImportPage() {
                 setSimilar([]);
                 setOwnerCandidates([]);
                 setExtractedText(null);
+                setExternalLinkKey("");
+                setRecheckError(null);
                 setPropertyValues(null);
                 setOwnerValues(null);
                 setRegisterError(null);
@@ -316,6 +381,10 @@ export default function PasteImportPage() {
             onOwnerFieldChange={handleOwnerFieldChange}
             note={note}
             onNoteChange={setNote}
+            externalLinkKey={externalLinkKey}
+            onExternalLinkKeyChange={setExternalLinkKey}
+            onDuplicateInputBlur={() => { void recheckDuplicates(); }}
+            recheckError={recheckError}
             duplicates={duplicates ?? undefined}
             similar={similar}
             ownerCandidates={ownerCandidates}

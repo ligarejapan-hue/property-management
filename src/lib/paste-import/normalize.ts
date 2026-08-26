@@ -45,10 +45,30 @@ const ERAS: { name: string; startYear: number; maxYear: number | null }[] = [
 ];
 
 /**
+ * 年の検査に使う上限。
+ * ⚠**この関数は時計を読まない**。上限は呼び出し側（時計を持つAPI層）が渡す。
+ *   純関数の要件は「時計を読まないこと」であって「上限を受け取らないこと」ではない。
+ *   引数で受け取る限り、同じ入力には同じ結果を返す決定的な関数のままで、
+ *   実サンプルをそのままテストに固定できる性質も崩れない
+ *   (@codex PR#414 6巡目・前回の見送り判断を撤回)。
+ */
+export interface YearBoundOptions {
+  /** これより後の西暦は採らない（省略＝上限なし）。 */
+  maxYear?: number;
+}
+
+/**
  * 和暦（平成8年 など）を西暦に。西暦がそのまま書かれていればその数値を返す。
  * 読み取れなければ null（**推測しない**）。
+ *
+ * ⚠上限(`maxYear`)を渡すと、それを超える年は `null` にする。渡さなければ上限なし。
+ *   上限が無いと `令和99年` が 2117 として、`2099年` がそのまま通る。築年としては
+ *   ありえない値が緑（拾えた）で表示され、そのまま備考へ入る。
  */
-export function warekiToSeireki(raw: string): number | null {
+export function warekiToSeireki(
+  raw: string,
+  options?: YearBoundOptions,
+): number | null {
   const s = toHalfWidth(raw).replace(/[\s　]/g, "");
   if (s === "") return null;
 
@@ -61,12 +81,19 @@ export function warekiToSeireki(raw: string): number | null {
     // ⚠終わった元号の**実在する最後の年**を超えていたら採らない。
     //   元資料の誤りを別のデータに書き換えてしまう（空欄より悪い）。
     if (era.maxYear !== null && nth > era.maxYear) return null;
-    return era.startYear + nth - 1;
+    return withinBound(era.startYear + nth - 1, options);
   }
 
   // 西暦（4桁）。年号らしき語が無いときだけ採用する。
   const seireki = /(1[89]\d{2}|20\d{2})\s*年?/.exec(s);
-  return seireki ? Number(seireki[1]) : null;
+  return seireki ? withinBound(Number(seireki[1]), options) : null;
+}
+
+/** 上限を超えていれば null。上限が無ければそのまま。 */
+function withinBound(year: number, options?: YearBoundOptions): number | null {
+  const max = options?.maxYear;
+  if (typeof max === "number" && Number.isFinite(max) && year > max) return null;
+  return year;
 }
 
 /**

@@ -189,3 +189,37 @@ describe("stripLeadingPostalCode / addressSearchPrefix: 郵便番号で始まる
     expect(stripLeadingPostalCode("東京都A区123-4567")).toBe("東京都A区123-4567");
   });
 });
+
+describe("warekiToSeireki: 上限は引数で受け取る（6巡目 ④）", () => {
+  // ⚠テストの中で時計を読まない。上限は固定値で渡す。
+  const BOUND = { maxYear: 2026 };
+
+  it("★上限を渡すと、それを超える年は null（令和にも西暦にも効く）", () => {
+    // 上限が無いと「令和99年」は 2117 として、「2099年」はそのまま通っていた。
+    expect(warekiToSeireki("令和99年", BOUND)).toBeNull();
+    expect(warekiToSeireki("2099年", BOUND)).toBeNull();
+    expect(warekiToSeireki("2027年", BOUND)).toBeNull();
+  });
+
+  it("★上限ちょうどの年は通る（境界の下）", () => {
+    expect(warekiToSeireki("2026年", BOUND)).toBe(2026);
+    expect(warekiToSeireki("令和8年", BOUND)).toBe(2026);
+  });
+
+  it("★上限を渡さなければ従来どおり（省略＝上限なし）", () => {
+    expect(warekiToSeireki("令和99年")).toBe(2117);
+    expect(warekiToSeireki("2099年")).toBe(2099);
+  });
+
+  it("★終わった元号の上限は、年の上限とは別に効き続ける", () => {
+    expect(warekiToSeireki("平成32年", BOUND)).toBeNull();
+    expect(warekiToSeireki("平成31年", BOUND)).toBe(2019);
+  });
+
+  it("★同じ入力に同じ結果を返す（時計に依存していない）", () => {
+    // 決定的であること自体を固定する。実装が Date を読み始めると、
+    // 上限を渡さない呼び出しの結果が環境で変わりうる。
+    expect(warekiToSeireki("2099年")).toBe(warekiToSeireki("2099年"));
+    expect(warekiToSeireki("2099年", { maxYear: 3000 })).toBe(2099);
+  });
+});

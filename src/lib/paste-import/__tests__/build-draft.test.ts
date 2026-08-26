@@ -181,3 +181,28 @@ describe("区切りが無い行(unlabeled)を捨てない（設計書 §4.2・�
     expect(draft.unlabeled).toEqual([]);
   });
 });
+
+describe("buildPasteDraft も年の上限を引数で受け取る（6巡目 ④）", () => {
+  it("★上限を渡すと、それを超える築年は拾わない", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NL + "■築年（西暦）： 2099 年",
+      { maxYear: 2026 },
+    );
+    expect(d.property.builtYear.value).toBeNull();
+  });
+
+  it("★上限の内側なら従来どおり拾う", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NL + "■築年（西暦）： 2013 年",
+      { maxYear: 2026 },
+    );
+    expect(d.property.builtYear.value).toBe("2013");
+  });
+
+  it("上限を渡さなければ従来どおり（既存の呼び出しを壊さない）", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NL + "■築年（西暦）： 2099 年",
+    );
+    expect(d.property.builtYear.value).toBe("2099");
+  });
+});
