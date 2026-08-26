@@ -364,3 +364,50 @@ describe("同姓同名の候補を見分けられる（8巡目 ②・共有モ�
     expect(dumped).not.toContain("yamada@example.com");
   });
 });
+
+describe("同じ所有者が、住所の編集だけで一致の種類を落とす（12巡目 ①の前提）", () => {
+  /**
+   * ⚠画面側の「弱くなったら止める」が守っている状況を、**サーバーが本当に
+   *   作れる**ことを確かめる。id は同じまま matchKind だけが落ちる、という
+   *   組み合わせが実在しなければ、画面側のテストは空振りになる。
+   */
+  const owner = {
+    id: "same-owner",
+    name: "山田太郎",
+    currentAddress: null,
+    address: "東京都渋谷区X1-1-1",
+    _count: { propertyOwners: 1 },
+  };
+
+  it("★住所が一致していれば registry_address、住所を直して一致が消えると同じ id が name_only になる", async () => {
+    mockOwnerFindMany.mockResolvedValue([owner]);
+
+    const matched = await (
+      await POST(
+        req({
+          address: "東京都A区B1-2-3",
+          ownerName: "山田太郎",
+          ownerCurrentAddress: "東京都渋谷区X1-1-1",
+        }),
+      )
+    ).json();
+    expect(matched.ownerCandidates).toHaveLength(1);
+    expect(matched.ownerCandidates[0].id).toBe("same-owner");
+    expect(matched.ownerCandidates[0].matchKind).toBe("registry_address");
+
+    const weakened = await (
+      await POST(
+        req({
+          address: "東京都A区B1-2-3",
+          ownerName: "山田太郎",
+          // 住所だけを直した(一致が消える)。
+          ownerCurrentAddress: "大阪府B市9-9-9",
+        }),
+      )
+    ).json();
+    expect(weakened.ownerCandidates).toHaveLength(1);
+    // ⚠**id は同じ**。だから id の集合比較では「変化なし」に見えていた。
+    expect(weakened.ownerCandidates[0].id).toBe("same-owner");
+    expect(weakened.ownerCandidates[0].matchKind).toBe("name_only");
+  });
+});

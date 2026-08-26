@@ -116,3 +116,87 @@ describe("looksLikePhoneNumber / looksLikeEmailAddress", () => {
     }
   });
 });
+
+// ===========================================================================
+// 所有者語と物件語の優先順位（@codex PR#414 12巡目 ②）
+//
+// ⚠R11 で入れた「物件系の見出しを先に除外」が広すぎ、`物件所有者氏名` の
+//   氏名が備考へ素通りしていた。**例外は、それ自体が新しい穴になる**。
+//   4象限（所有者語あり×物件語あり／所有者語のみ／物件語のみ／どちらも無し）を
+//   総当たりで固定する。
+// ===========================================================================
+
+const OWNER_WORDS = ["所有者", "名義人", "氏名", "名前", "フリガナ"];
+const PROPERTY_WORDS = ["物件", "所在地", "土地", "建物"];
+/** 所有者の個人情報にあたる項目（見出しの語で判定できるもの）。 */
+const PII_SUFFIXES = ["氏名", "住所", "電話", "メールアドレス"];
+
+describe("4象限: 所有者語 × 物件語", () => {
+  it("★① 所有者語あり × 物件語あり → 所有者側を優先して withheld", () => {
+    // ここが今回の穴。`物件所有者氏名: 山田太郎` が備考へ入っていた。
+    const cases = [
+      "物件所有者氏名",
+      "物件所有者住所",
+      "土地所有者の電話番号",
+      "建物名義人氏名",
+      "所在地の所有者メールアドレス",
+    ];
+    for (const label of cases) {
+      const v = judgeOwnerPersonalInfo(label, "山田太郎");
+      expect(v.isOwnerPersonalInfo, label).toBe(true);
+      expect(v.reason, label).toBe("label");
+    }
+  });
+
+  it("★② 所有者語のみ → withheld", () => {
+    for (const owner of OWNER_WORDS) {
+      for (const pii of PII_SUFFIXES) {
+        const label = `${owner}${pii}`;
+        expect(judgeOwnerPersonalInfo(label, "山田太郎").isOwnerPersonalInfo, label).toBe(true);
+      }
+    }
+    expect(judgeOwnerPersonalInfo("所有者住所", "東京都A区B1-2-3").isOwnerPersonalInfo).toBe(true);
+  });
+
+  it("★③ 物件語のみ → 従来どおり備考に入る（過剰に落とさない）", () => {
+    for (const prop of PROPERTY_WORDS) {
+      for (const tail of ["住所", "所在地", "の面積", "構造"]) {
+        const label = `${prop}${tail}`;
+        expect(judgeOwnerPersonalInfo(label, "東京都A区B1-2-3").isOwnerPersonalInfo, label).toBe(
+          false,
+        );
+      }
+    }
+  });
+
+  it("★④ どちらも無し → 見出しの語だけで判断（PII語があれば withheld、無ければ備考）", () => {
+    expect(judgeOwnerPersonalInfo("携帯電話", "090-1234-5678").isOwnerPersonalInfo).toBe(true);
+    expect(judgeOwnerPersonalInfo("建物構造", "木造").isOwnerPersonalInfo).toBe(false);
+    expect(judgeOwnerPersonalInfo("希望する利活用方法", "売却").isOwnerPersonalInfo).toBe(false);
+  });
+
+  it("★物件語 × 所有者語の全組み合わせで、所有者語が勝つ", () => {
+    // 「例外の例外」を機械的に洗う。どの組み合わせでも所有者側が優先されること。
+    const offenders: string[] = [];
+    for (const prop of PROPERTY_WORDS) {
+      for (const owner of OWNER_WORDS) {
+        for (const pii of PII_SUFFIXES) {
+          const label = `${prop}${owner}${pii}`;
+          if (!judgeOwnerPersonalInfo(label, "山田太郎").isOwnerPersonalInfo) {
+            offenders.push(label);
+          }
+        }
+      }
+    }
+    expect(offenders, `備考へ素通りする見出し: ${offenders.join(", ")}`).toEqual([]);
+  });
+
+  it("★実サンプルの『名義: 本人所有』は所有形態であって氏名ではない（備考に入る）", () => {
+    // 所有者語(名義/本人)を含むが、個人情報の項目名ではないので落とさない。
+    expect(judgeOwnerPersonalInfo("名義", "本人所有").isOwnerPersonalInfo).toBe(false);
+  });
+
+  it("★『名義人』は氏名の欄なので落とす", () => {
+    expect(judgeOwnerPersonalInfo("名義人", "山田太郎").isOwnerPersonalInfo).toBe(true);
+  });
+});

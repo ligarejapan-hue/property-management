@@ -15,6 +15,8 @@ import {
   DUPLICATE_OWNER_FIELDS,
   ownerCandidateLabel,
   stripFilledRawLines,
+  hasOwnerMatchWeakened,
+  ownerMatchStrength,
 } from "../paste-import-review";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
 
@@ -844,5 +846,54 @@ describe("一致した方の住所を表示する（11巡目 ③）", () => {
     });
     expect(label).not.toContain("登記上住所");
     expect(label).not.toContain("連絡先住所");
+  });
+});
+
+describe("選択の根拠が弱くなったことを見分ける（12巡目 ①）", () => {
+  const cand = (id: string, matchKind: "current_address" | "registry_address" | "name_only") => ({
+    id,
+    name: "山田太郎",
+    matchKind,
+    address: "東京都A区1-1-1",
+    addressKind: "registry" as const,
+    propertyCount: 1,
+  });
+
+  it("★同じ id のまま 住所一致 → 氏名だけ一致 に落ちたら「弱くなった」", () => {
+    // ⚠ここが id の集合比較では取りこぼす形。id は同じ、matchKind だけ違う。
+    expect(hasOwnerMatchWeakened(cand("o1", "registry_address"), cand("o1", "name_only"))).toBe(true);
+    expect(hasOwnerMatchWeakened(cand("o1", "current_address"), cand("o1", "name_only"))).toBe(true);
+  });
+
+  it("★一致の種類が変わらなければ「弱くなった」ではない", () => {
+    for (const k of ["current_address", "registry_address", "name_only"] as const) {
+      expect(hasOwnerMatchWeakened(cand("o1", k), cand("o1", k)), k).toBe(false);
+    }
+  });
+
+  it("★強くなった場合は止めない（氏名だけ一致 → 住所も一致）", () => {
+    expect(hasOwnerMatchWeakened(cand("o1", "name_only"), cand("o1", "registry_address"))).toBe(false);
+  });
+
+  it("★連絡先住所 ⇄ 登記上住所 の入れ替わりは「弱くなった」ではない（どちらも住所一致）", () => {
+    // 別の案内(候補が変わりました)で拾う。ここで「住所の一致が無くなった」と
+    // 言うと嘘になる。
+    expect(hasOwnerMatchWeakened(cand("o1", "current_address"), cand("o1", "registry_address"))).toBe(false);
+    expect(hasOwnerMatchWeakened(cand("o1", "registry_address"), cand("o1", "current_address"))).toBe(false);
+  });
+
+  it("★別の id なら比べない（候補から消えた側の判定に任せる）", () => {
+    expect(hasOwnerMatchWeakened(cand("o1", "registry_address"), cand("o2", "name_only"))).toBe(false);
+  });
+
+  it("★どちらかが無ければ false", () => {
+    expect(hasOwnerMatchWeakened(null, cand("o1", "name_only"))).toBe(false);
+    expect(hasOwnerMatchWeakened(cand("o1", "registry_address"), null)).toBe(false);
+    expect(hasOwnerMatchWeakened(undefined, undefined)).toBe(false);
+  });
+
+  it("ownerMatchStrength: 住所まで一致 > 氏名だけ一致", () => {
+    expect(ownerMatchStrength("current_address")).toBeGreaterThan(ownerMatchStrength("name_only"));
+    expect(ownerMatchStrength("registry_address")).toBeGreaterThan(ownerMatchStrength("name_only"));
   });
 });

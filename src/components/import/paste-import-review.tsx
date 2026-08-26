@@ -57,6 +57,41 @@ const MATCH_KIND_LABELS: Record<OwnerMatchKind, string> = {
 };
 
 /**
+ * 一致の強さ。**住所まで一致 > 氏名だけ一致**。
+ * ⚠選択の「根拠」が弱くなったことを検出するために要る(@codex PR#414 12巡目 ①)。
+ */
+export function ownerMatchStrength(kind: OwnerMatchKind): number {
+  switch (kind) {
+    case "current_address":
+    case "registry_address":
+      return 1;
+    case "name_only":
+      return 0;
+  }
+}
+
+/**
+ * 選んでいた候補の**一致の根拠が弱くなった**か（住所まで一致 → 氏名だけ一致）。
+ *
+ * ⚠id の集合だけを比べていると、これを取りこぼす(@codex PR#414 12巡目 ①)。
+ *   「登記上の住所も一致」を根拠に選んだあと住所を編集して一致が消えると、
+ *   同じ id が `name_only` で返る＝**id は同じなので「変化なし」**となり、
+ *   利用者は根拠が消えたことを知らないまま登録できてしまう。
+ *   同姓同名の別人に紐付ける危険そのもの。
+ */
+export function hasOwnerMatchWeakened(
+  before: OwnerCandidateSummary | null | undefined,
+  after: OwnerCandidateSummary | null | undefined,
+): boolean {
+  if (!before || !after) return false;
+  if (before.id !== after.id) return false;
+  return (
+    ownerMatchStrength(before.matchKind) > 0 &&
+    ownerMatchStrength(after.matchKind) === 0
+  );
+}
+
+/**
  * 所有者候補1件の表示文。
  *
  * ⚠**2つの候補が完全に同じ表示になってはいけない**(@codex PR#414 8巡目 ②)。

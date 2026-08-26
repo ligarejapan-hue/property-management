@@ -42,6 +42,7 @@ const OWNER_PII_LABEL_WORDS: readonly string[] = [
   "氏名",
   "名前",
   "お名前",
+  "名義人",
   "ご芳名",
   "フリガナ",
   "ふりがな",
@@ -52,10 +53,36 @@ const OWNER_PII_LABEL_WORDS: readonly string[] = [
 ];
 
 /**
- * 「物件のこと」を指す語。⚠これを含む見出しは所有者の個人情報とみなさない。
+ * 「物件のこと」を指す語。これを含む見出しは、原則として所有者の個人情報とみなさない。
  * 例: `物件住所` `物件所在地` は**物件**の住所であって所有者の連絡先ではない。
+ *
+ * ⚠**ただしこの例外は、それ自体が穴になる**(@codex PR#414 12巡目 ②)。
+ *   `物件所有者氏名: 山田太郎` は「物件」を含むため除外が先に効き、
+ *   値も電話/メールの形ではないので、**氏名がそのまま備考へ入って**いた
+ *   (＝所有者の項目別マスクの外に出る)。
+ *   → 下の OWNER_SCOPE_WORDS を**先に**見て、所有者を明示する語があれば
+ *   物件系の語があっても**所有者側を優先**する。
+ *   (社内の恒久ルール「防御を入れるとその防御自体の抜けを突かれる」の実例。)
  */
 const PROPERTY_SCOPE_WORDS: readonly string[] = ["物件", "所在地", "土地", "建物"];
+
+/**
+ * 「所有者のこと」を明示する語。**物件系の語より優先**する。
+ * ここに当たれば、見出しに「物件」が含まれていても所有者側として扱う。
+ */
+const OWNER_SCOPE_WORDS: readonly string[] = [
+  "所有者",
+  "名義人",
+  "名義",
+  "持ち主",
+  "持主",
+  "本人",
+  "氏名",
+  "名前",
+  "フリガナ",
+  "ふりがな",
+  "カナ",
+];
 
 /** 比較用に見出しを整える(全角/半角・空白・大文字小文字を吸収)。 */
 function normalizeLabel(label: string): string {
@@ -98,11 +125,16 @@ export function judgeOwnerPersonalInfo(
 ): OwnerPersonalInfoVerdict {
   const normalized = normalizeLabel(label);
 
-  // ⚠まず「物件のこと」を指す見出しを外す。`物件住所` を所有者の住所と
-  //   取り違えると、落とすべきでないものまで備考から消える。
-  const aboutProperty = PROPERTY_SCOPE_WORDS.some((w) =>
+  // ⚠**所有者を明示する語を先に見る**(@codex PR#414 12巡目 ②)。
+  //   `物件所有者氏名` のように両方の語を含む見出しで、物件系の除外が先に効くと
+  //   氏名が備考へ素通りする。所有者側を優先し、物件系の除外は
+  //   「所有者を示す語が無いとき」だけに効かせる。
+  const aboutOwner = OWNER_SCOPE_WORDS.some((w) =>
     normalized.includes(normalizeLabel(w)),
   );
+  const aboutProperty =
+    !aboutOwner &&
+    PROPERTY_SCOPE_WORDS.some((w) => normalized.includes(normalizeLabel(w)));
 
   if (!aboutProperty) {
     const hit = OWNER_PII_LABEL_WORDS.some((w) =>

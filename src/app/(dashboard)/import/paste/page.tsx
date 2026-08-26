@@ -22,6 +22,7 @@ import {
   defaultOwnerMode,
   foldNoColumnFieldsIntoNote,
   stripFilledRawLines,
+  hasOwnerMatchWeakened,
   type PasteDuplicatesResult,
   type SimilarPropertySummary,
   type OwnerCandidateSummary,
@@ -236,7 +237,13 @@ export default function PasteImportPage() {
       //   直前の編集で似た物件や所有者候補が新しく見つかっても人に見せずに
       //   登録していた＝見直しを足した目的が半分死んでいた。
       const beforeSimilar = similar.map((x) => x.id).sort().join(",");
-      const beforeOwners = ownerCandidates.map((x) => x.id).sort().join(",");
+      // ⚠**id だけでなく一致の種類も比べる**(@codex PR#414 12巡目 ①)。
+      //   id の集合だけだと、「住所も一致」で選んだ相手が住所の編集で
+      //   `name_only` に落ちても「変化なし」になり、根拠が消えたことを
+      //   知らせないまま登録が通る。
+      const ownerKey = (c: OwnerCandidateSummary) => `${c.id}:${c.matchKind}`;
+      const beforeOwners = ownerCandidates.map(ownerKey).sort().join(",");
+      const beforeSelected = ownerCandidates.find((c) => c.id === linkedOwnerId) ?? null;
       const latest = await recheckDuplicates();
 
       // ⚠**確認できなかったときに通してはいけない**(確認しないより悪い＝
@@ -267,13 +274,23 @@ export default function PasteImportPage() {
         return;
       }
 
-      // 直前の編集で新しい一致が見つかったら、**人に見せてから**確定させる。
+      // ⚠選んでいた相手が候補には残っていても、**一致の根拠が弱くなった**なら止める。
+      //   「住所も一致した相手」のつもりで選んだのに、氏名だけの一致に落ちている。
+      const afterSelected = latest.ownerCandidates.find((c) => c.id === linkedOwnerId) ?? null;
+      if (ownerMode === "link" && hasOwnerMatchWeakened(beforeSelected, afterSelected)) {
+        setRegisterError(
+          "選択した所有者との住所の一致が、入力の変更により無くなりました。ご確認ください。",
+        );
+        return;
+      }
+
+      // 直前の編集で候補が変わったら、**人に見せてから**確定させる。
       // 画面は recheckDuplicates が既に更新済み。もう一度押せば登録できる。
       const afterSimilar = latest.similar.map((x) => x.id).sort().join(",");
-      const afterOwners = latest.ownerCandidates.map((x) => x.id).sort().join(",");
+      const afterOwners = latest.ownerCandidates.map(ownerKey).sort().join(",");
       if (afterSimilar !== beforeSimilar || afterOwners !== beforeOwners) {
         setRegisterError(
-          "入力の変更により、似ている物件／所有者が見つかりました。ご確認のうえ、もう一度「この内容で登録」を押してください。",
+          "入力の変更により、似ている物件／所有者の候補が変わりました。ご確認のうえ、もう一度「この内容で登録」を押してください。",
         );
         return;
       }

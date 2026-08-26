@@ -158,18 +158,20 @@ describe("登録直前の再判定は、結果を全部見る（7巡目 ②）",
 
   it("★似た物件・所有者候補が増減したら、人に見せてから確定させる", () => {
     expect(source).toContain("const beforeSimilar = similar.map((x) => x.id).sort().join(\",\");");
-    expect(source).toContain("const beforeOwners = ownerCandidates.map((x) => x.id).sort().join(\",\");");
+    // ⚠**id だけでなく一致の種類も**比べていること(12巡目 ①)。
+    expect(source).toContain('const ownerKey = (c: OwnerCandidateSummary) => `${c.id}:${c.matchKind}`;');
+    expect(source).toContain("const beforeOwners = ownerCandidates.map(ownerKey).sort().join(\",\");");
+    expect(source).toContain("const afterOwners = latest.ownerCandidates.map(ownerKey).sort().join(\",\");");
     expect(source).toContain("const afterSimilar = latest.similar.map((x) => x.id).sort().join(\",\");");
-    expect(source).toContain("const afterOwners = latest.ownerCandidates.map((x) => x.id).sort().join(\",\");");
     expect(source).toContain("if (afterSimilar !== beforeSimilar || afterOwners !== beforeOwners)");
-    expect(source).toContain("似ている物件／所有者が見つかりました");
+    expect(source).toContain("似ている物件／所有者の候補が変わりました");
   });
 
   it("★止めた3つの経路は、それぞれ別の文言で伝える（どれで止まったか分かる）", () => {
     for (const msg of [
       "重複の確認ができませんでした。通信の状態を確かめて",
       "この案件は登録済みです",
-      "入力の変更により、似ている物件／所有者が見つかりました",
+      "入力の変更により、似ている物件／所有者の候補が変わりました",
     ]) {
       expect(source).toContain(msg);
     }
@@ -241,5 +243,30 @@ describe("備考の生値は、専用欄に値を入れたら取り除いてか�
 
   it("★取り除いた結果を登録に渡している（畳み込む前の note を送っていない）", () => {
     expect(source).toContain("note: finalNote || null,");
+  });
+});
+
+describe("選択の根拠が弱くなったら登録を止める（12巡目 ①）", () => {
+  it("★選択中の候補について、再判定前後の一致の種類を比べている", () => {
+    expect(source).toContain("const beforeSelected = ownerCandidates.find((c) => c.id === linkedOwnerId) ?? null;");
+    expect(source).toContain("const afterSelected = latest.ownerCandidates.find((c) => c.id === linkedOwnerId) ?? null;");
+    expect(source).toContain("hasOwnerMatchWeakened(beforeSelected, afterSelected)");
+  });
+
+  it("★弱くなったときは専用の文言で止める", () => {
+    expect(source).toContain("選択した所有者との住所の一致が、入力の変更により無くなりました");
+  });
+
+  it("★止める判断は登録APIを呼ぶ前に行う", () => {
+    const at = source.indexOf("hasOwnerMatchWeakened(beforeSelected, afterSelected)");
+    const postAt = source.indexOf('fetch("/api/import/paste/commit"');
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(postAt).toBeGreaterThan(at);
+  });
+
+  it("★比べるのは link のときだけ（新規作成では出さない）", () => {
+    const at = source.indexOf("hasOwnerMatchWeakened(beforeSelected, afterSelected)");
+    const line = source.slice(source.lastIndexOf("if (", at), at + 60);
+    expect(line).toContain('ownerMode === "link"');
   });
 });
