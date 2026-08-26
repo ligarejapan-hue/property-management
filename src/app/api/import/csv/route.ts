@@ -424,7 +424,7 @@ export async function POST(request: NextRequest) {
     const buildingPostalApplied = new Set<string>();
 
     // Build normalized dedupe index once (address / unit roomNo / identifier fallback)
-    const existingPropsForDedupe = await prisma.property.findMany({
+    const existingPropsRaw = await prisma.property.findMany({
       select: {
         id: true,
         address: true,
@@ -434,6 +434,15 @@ export async function POST(request: NextRequest) {
         externalLinkKey: true,
       },
     });
+    // ⚠**比較は必ず両側を同じ関数で正規化する**(@codex PR#414 19巡目 ③)。
+    //   入ってくる側だけ正規化しても、照合相手(既存行)が生値のままでは一致しない。
+    //   全角キーで保存された既存行(この変更以前のデータ)に対し、半角の新しい行が
+    //   重複と判定されず2件目ができていた。
+    //   ⚠**DBの保存値は書き換えない**。ここで作るのは読み取り時の比較用の形だけ。
+    const existingPropsForDedupe = existingPropsRaw.map((p) => ({
+      ...p,
+      externalLinkKey: normalizeExternalLinkKey(p.externalLinkKey),
+    }));
     const dedupeIndex = buildDedupeIndex(existingPropsForDedupe);
 
     for (let i = 0; i < rows.length; i++) {
@@ -772,7 +781,8 @@ export async function POST(request: NextRequest) {
             roomNo: updated.roomNo ?? null,
             buildingId: updated.buildingId ?? null,
             realEstateNumber: updated.realEstateNumber ?? null,
-            externalLinkKey: updated.externalLinkKey ?? null,
+            // ⚠比較用の形に揃える(19巡目 ③)。保存値は書き換えていない。
+            externalLinkKey: normalizeExternalLinkKey(updated.externalLinkKey),
           };
           addToDedupeIndex(dedupeIndex, updatedRecord);
           const idxInAll = existingPropsForDedupe.findIndex(
@@ -870,7 +880,8 @@ export async function POST(request: NextRequest) {
           roomNo: property.roomNo ?? null,
           buildingId: property.buildingId ?? null,
           realEstateNumber: property.realEstateNumber ?? null,
-          externalLinkKey: property.externalLinkKey ?? null,
+          // ⚠比較用の形に揃える(19巡目 ③)。保存値は書き換えていない。
+          externalLinkKey: normalizeExternalLinkKey(property.externalLinkKey),
         };
         addToDedupeIndex(dedupeIndex, newRecord);
         existingPropsForDedupe.push(newRecord);

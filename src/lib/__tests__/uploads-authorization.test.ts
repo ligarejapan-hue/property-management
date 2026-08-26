@@ -10,6 +10,8 @@ import {
   authorizeUploadAccess,
   resolveRegistryServeMeta,
   escapePrismaLikePattern,
+  isEveryOwnerFieldMaskFree,
+  referralGatedOwnerFields,
 } from "@/lib/uploads-authorization";
 import { __resetStorageForTest } from "@/lib/storage";
 import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
@@ -1169,7 +1171,10 @@ describe("authorizeUploadAccess — referral gating", () => {
     ...propertyReadOnly,
     { resource: "owner", action: "read", granted: true },
   ];
-  /** 反響PDFに載る5項目（氏名・フリガナ・住所・電話・メール）が素通しで見える人。 */
+  /**
+   * 所有者の表示レベル設定の**全項目**が素通しで見える人。
+   * ⚠19巡目でゲートは全フィールドになった（書式に載る項目を数え上げない）。
+   */
   const allPiiVisible: PermissionEntry[] = [
     ...withOwnerRead,
     { resource: "owner_name", action: "full", granted: true },
@@ -1177,6 +1182,9 @@ describe("authorizeUploadAccess — referral gating", () => {
     { resource: "owner_address", action: "full", granted: true },
     { resource: "owner_phone", action: "full", granted: true },
     { resource: "owner_email", action: "full", granted: true },
+    { resource: "owner_zip", action: "full", granted: true },
+    { resource: "owner_note", action: "full", granted: true },
+    { resource: "owner_corporate_number", action: "full", granted: true },
   ];
   /** 既定の field_staff テンプレート相当（電話 masked / 住所 partial）。 */
   const seedFieldStaffLike: PermissionEntry[] = [
@@ -1195,7 +1203,7 @@ describe("authorizeUploadAccess — referral gating", () => {
     ).toBe("forbidden");
   });
 
-  it("★5項目すべてが素通しで見える人 → ok", async () => {
+  it("★全項目が素通しで見える人 → ok", async () => {
     const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
     expect(
       await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: allPiiVisible, prisma }),
@@ -1230,14 +1238,18 @@ describe("authorizeUploadAccess — referral gating", () => {
     ).toBe("forbidden");
   });
 
-  it("★5項目のうち1つでもマスクされていれば forbidden（総当たり）", async () => {
+  it("★どれか1つでもマスクされていれば forbidden（全項目 × 全マスクレベルの総当たり）", async () => {
     // 文書はフィールド単位でマスクできない。1つでも伏せる約束があるなら開けない。
+    // ⚠19巡目: 書式に載る項目だけでなく**全項目**を見る。
     const fields = [
       "owner_name",
       "owner_name_kana",
       "owner_address",
       "owner_phone",
       "owner_email",
+      "owner_zip",
+      "owner_note",
+      "owner_corporate_number",
     ];
     const maskedLevels = ["partial", "masked", "hidden"];
     for (const field of fields) {
@@ -1274,7 +1286,7 @@ describe("authorizeUploadAccess — referral gating", () => {
     ).toBe("forbidden");
   });
 
-  it("★5項目が見える人でも field_staff scope 外 → forbidden（perm と scope の AND）", async () => {
+  it("★全項目が見える人でも field_staff scope 外 → forbidden（perm と scope の AND）", async () => {
     const prisma = makeDb({
       attachments: [refAtt()],
       properties: [{ id: "p1", createdBy: "u-someone", assignedTo: null }],
@@ -1310,6 +1322,78 @@ describe("authorizeUploadAccess — referral gating", () => {
     // registry は owner の項目が全部見えても registry_pdf:preview が無ければ forbidden。
     expect(
       await authorizeUploadAccess({ key: regKey, session: officeStaff, permissions: allPiiVisible, prisma: regDb }),
+    ).toBe("forbidden");
+  });
+});
+
+// ============================================================
+// ゲートは「表示レベル設定の全フィールド」を見る（@codex PR#414 19巡目 ①）
+//
+// ⚠R16→R17→R18 と 1個→4個→5個とフィールドを追いかけたのは列挙の反射だった。
+//   この口が受けるのは**汎用のPDF**なので、書式に載る項目で数えるのが誤り。
+// ============================================================
+describe("isEveryOwnerFieldMaskFree / referralGatedOwnerFields", () => {
+  it("★全部が素通しレベルなら true", () => {
+    expect(
+      isEveryOwnerFieldMaskFree({ a: "full", b: "read", c: "edit" }),
+    ).toBe(true);
+  });
+
+  it("★1つでも伏せるレベルがあれば false", () => {
+    for (const level of ["partial", "masked", "hidden"]) {
+      expect(isEveryOwnerFieldMaskFree({ a: "full", b: level }), level).toBe(false);
+    }
+  });
+
+  it("★**新しいフィールドが増えたら自動でゲート対象になる**", () => {
+    // 架空のフィールドを足しただけで、伏せるレベルなら拒否になる＝
+    // 個別のフィールド名を書いていないことの証拠。
+    const base = { name: "full", address: "full", phone: "full", email: "full" };
+    expect(isEveryOwnerFieldMaskFree(base)).toBe(true);
+    expect(isEveryOwnerFieldMaskFree({ ...base, brandNewField: "masked" })).toBe(false);
+    expect(isEveryOwnerFieldMaskFree({ ...base, brandNewField: "full" })).toBe(true);
+  });
+
+  it("★空の設定は「全部素通し」にしない（fail-closed）", () => {
+    expect(isEveryOwnerFieldMaskFree({})).toBe(false);
+  });
+
+  it("★ゲートの対象は表示レベル設定の全キー（zip / note / corporateNumber も含む）", () => {
+    const fields = referralGatedOwnerFields();
+    for (const f of [
+      "name", "nameKana", "phone", "zip", "address", "note", "email", "corporateNumber",
+    ]) {
+      expect(fields, f).toContain(f);
+    }
+  });
+
+  it("★owner_zip だけ masked でも forbidden（書式に載らない項目でも守る）", async () => {
+    const REF_KEY2 = "properties/p9/paste-import/2-abc.pdf";
+    const att: Att = {
+      id: "att-ref-zip",
+      fileUrl: `/uploads/${REF_KEY2}`,
+      isDeleted: false,
+      targetType: "property",
+      targetId: "p9",
+      propertyId: "p9",
+      type: "referral",
+    };
+    const property: Prop = { id: "p9", createdBy: "u-office", assignedTo: null };
+    const perms: PermissionEntry[] = [
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_corporate_number", action: "full", granted: true },
+      { resource: "owner_zip", action: "masked", granted: true },
+    ];
+    const prisma = makeDb({ attachments: [att], properties: [property] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY2, session: officeStaff, permissions: perms, prisma }),
     ).toBe("forbidden");
   });
 });

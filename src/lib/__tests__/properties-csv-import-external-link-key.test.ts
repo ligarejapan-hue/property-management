@@ -326,3 +326,63 @@ describe("★正規化は重複チェックより前に効く（18巡目 ①）"
     expect(pm.property.create).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("★照合は両側を同じ関数で正規化する（19巡目 ③）", () => {
+  /** 既存行1件を DB に置く。key の表記はそのまま(＝この変更以前のデータを再現)。 */
+  function existingWithKey(storedKey: string) {
+    pm.property.findMany.mockResolvedValue([
+      {
+        id: "existing-1",
+        address: "東京都千代田区9-9",
+        roomNo: null,
+        buildingId: null,
+        realEstateNumber: null,
+        externalLinkKey: storedKey,
+      },
+    ]);
+    pm.property.findUnique.mockResolvedValue({
+      id: "existing-1",
+      address: "東京都千代田区9-9",
+      registryStatus: "unconfirmed",
+    });
+    pm.property.updateMany.mockResolvedValue({ count: 1 });
+    pm.property.findUniqueOrThrow.mockResolvedValue({
+      id: "existing-1",
+      address: "東京都千代田区9-9",
+      roomNo: null,
+      buildingId: null,
+      realEstateNumber: null,
+      externalLinkKey: storedKey,
+    });
+  }
+
+  it("★既存行が**全角**・新しいCSV行が半角 → 重複と判定される", () => {
+    // ⚠入ってくる側だけ正規化していたときは一致せず、2件目ができていた。
+    existingWithKey("ＳＡ２６０８－１２３４５６７");
+    const csv = "住所,リンクキー\n東京都千代田区1-1,SA2608-1234567\n";
+    return POST(makeRequest({ fileName: "x.csv", csvText: csv })).then(() => {
+      expect(pm.property.create).not.toHaveBeenCalled();
+    });
+  });
+
+  it("★逆方向: 既存行が半角・新しいCSV行が全角 → 重複と判定される", async () => {
+    existingWithKey("SA2608-1234567");
+    const csv = "住所,リンクキー\n東京都千代田区1-1,ＳＡ２６０８－１２３４５６７\n";
+    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
+    expect(pm.property.create).not.toHaveBeenCalled();
+  });
+
+  it("★既存行が**混在幅** → 半角の新しい行と重複と判定される", async () => {
+    existingWithKey("SA2608－1234567");
+    const csv = "住所,リンクキー\n東京都千代田区1-1,SA2608-1234567\n";
+    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
+    expect(pm.property.create).not.toHaveBeenCalled();
+  });
+
+  it("★別の番号なら重複にしない（正規化で潰しすぎていない）", async () => {
+    existingWithKey("ＳＡ２６０８－９９９９９９９");
+    const csv = "住所,リンクキー\n東京都千代田区1-1,SA2608-1234567\n";
+    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
+    expect(pm.property.create).toHaveBeenCalledTimes(1);
+  });
+});

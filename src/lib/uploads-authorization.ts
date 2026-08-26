@@ -46,28 +46,39 @@ export type UploadAuthDecision = "ok" | "forbidden" | "not_found";
  *   見られる人はダウンロードもできる、で揃える。
  */
 /**
- * 反響資料に載り得る**所有者の項目**（`resolveOwnerDisplayConfig` のキー）。
+ * 表示レベル設定の**全フィールド**がマスク無しで見えるか。
  *
- * ⚠**実サンプル(fixtures)に実在する所有者の項目と必ず一致させる**
- *   (@codex PR#414 18巡目 ②)。17巡目でここに `nameKana`(フリガナ)を入れ忘れ、
- *   `owner_name_kana` をマスクする利用者が**PDFでは生のカナを読めた**。
- *   見本に新しい所有者の項目が増えたら(将来ほかの書式を足したら)、
- *   この一覧を更新しない限りテストが落ちる
- *   (src/lib/__tests__/referral-gate-fields-cover-fixtures.test.ts)。
+ * ⚠**フィールド名を書き並べない**(@codex PR#414 19巡目 ①)。
+ *   R16→R17→R18 と 1個→4個→5個とフィールドを追いかけたが、それは列挙の反射だった。
+ *   この口が受けるのは**汎用のPDF**(どの業者の書式でも)なので、
+ *   「この書式に入っている項目」で数えるのが誤り。
+ *   `resolveOwnerDisplayConfig` が返す**全キー**を機械的に見る。
+ *   将来 display config にフィールドが増えても自動で追随する。
+ * ⚠この関数に渡すオブジェクトは**値がすべて表示レベル**であること
+ *   (メタ情報を混ぜない)。混ざると isMaskFreeLevel が false を返して
+ *   全員が開けなくなる＝安全側に倒れるが、意図しない締め出しになる。
  */
-export const REFERRAL_GATED_OWNER_FIELDS = [
-  "name",
-  "nameKana",
-  "address",
-  "phone",
-  "email",
-] as const;
+export function isEveryOwnerFieldMaskFree(
+  display: Record<string, string>,
+): boolean {
+  const levels = Object.values(display);
+  // 空のオブジェクトを「全部素通し」にしない(fail-closed)。
+  if (levels.length === 0) return false;
+  return levels.every((level) => isMaskFreeLevel(level));
+}
+
+/**
+ * 反響資料のゲートが見る所有者の項目一覧（**機械的に導出**）。
+ * ⚠固定の配列ではなく、表示レベル設定のキーそのもの。
+ *   R18 の「見本に実在する項目を覆っているか」の突き合わせは、
+ *   これに対する**下限テスト**として残している。
+ */
+export function referralGatedOwnerFields(): string[] {
+  return Object.keys(resolveOwnerDisplayConfig([]));
+}
 export function canOpenReferralDocument(permissions: PermissionEntry[]): boolean {
   if (!hasPermission(permissions, "owner", "read")) return false;
-  const display = resolveOwnerDisplayConfig(permissions);
-  return REFERRAL_GATED_OWNER_FIELDS.every((field) =>
-    isMaskFreeLevel(display[field]),
-  );
+  return isEveryOwnerFieldMaskFree({ ...resolveOwnerDisplayConfig(permissions) });
 }
 
 export interface AuthorizeUploadAccessArgs {

@@ -13,6 +13,7 @@ import {
   looksLikeAddress,
   looksLikePersonName,
   isDefinitelyNonPersonalValue,
+  MAX_SAFE_NUMERIC_DIGITS,
 } from "../owner-personal-info";
 
 describe("judgeOwnerPersonalInfo（見出しの語で見分ける）", () => {
@@ -459,5 +460,76 @@ describe("最終フォールバックは withheld", () => {
     expect(judgeOwnerPersonalInfo("コメント", "東京都A区B1-2-3").isOwnerPersonalInfo).toBe(true);
     expect(judgeOwnerPersonalInfo("備考", "09012345678").isOwnerPersonalInfo).toBe(true);
     expect(judgeOwnerPersonalInfo("コメント", "山田太郎").isOwnerPersonalInfo).toBe(true);
+  });
+});
+
+// ===========================================================================
+// 19巡目 ②: 識別子（法人番号など）が「安全な数値」を通っていた
+//
+// ⚠`法人番号: 1234567890123` は電話形状(10〜11桁)から外れ、PII語にも当たらず、
+//   「数字のみ＝安全」で備考へ入り、owner_corporate_number のマスクを迂回していた。
+//   **二重の網**で塞ぐ: ①数値の桁数上限 ②識別子系のラベル語。
+// ===========================================================================
+
+describe("識別子は備考に入れない（二重の網）", () => {
+  it("★法人番号(13桁)は withheld", () => {
+    expect(judgeOwnerPersonalInfo("法人番号", "1234567890123").isOwnerPersonalInfo).toBe(true);
+  });
+
+  it("★見出しが分からなくても、7桁以上の数字列は withheld（桁数の網）", () => {
+    for (const v of ["1234567", "12345678", "1234567890123", "99999999999999"]) {
+      const verdict = judgeOwnerPersonalInfo("その他", v);
+      expect(verdict.isOwnerPersonalInfo, v).toBe(true);
+    }
+  });
+
+  it("★識別子らしいラベルは、値が短くても withheld（ラベルの網）", () => {
+    for (const label of ["お客様番号", "会員ナンバー", "顧客ID", "管理コード", "受付No"]) {
+      expect(judgeOwnerPersonalInfo(label, "123").isOwnerPersonalInfo, label).toBe(true);
+    }
+  });
+
+  it("★お客様番号(8桁)は、ラベルでも桁でも withheld（網が二重であることの確認）", () => {
+    // ラベルを外しても桁で、桁を外してもラベルで捕まる。
+    expect(judgeOwnerPersonalInfo("お客様番号", "12345678").isOwnerPersonalInfo).toBe(true);
+    expect(judgeOwnerPersonalInfo("その他", "12345678").isOwnerPersonalInfo).toBe(true);
+    expect(judgeOwnerPersonalInfo("お客様番号", "12").isOwnerPersonalInfo).toBe(true);
+  });
+
+  it("★正当な数値は従来どおり備考に入る（過剰に落としていない）", () => {
+    const cases: [string, string][] = [
+      ["築年", "1996"],
+      ["部屋数", "3"],
+      ["専有面積", "70"],
+      ["土地面積", "120.55"],
+      ["総戸数", "48"],
+      ["階数", "12"],
+    ];
+    for (const [label, value] of cases) {
+      expect(judgeOwnerPersonalInfo(label, value).isOwnerPersonalInfo, `${label}: ${value}`).toBe(
+        false,
+      );
+    }
+  });
+
+  it("★桁数の網が効くのは『見出しから安全と確定できない』ときだけ", () => {
+    // 個人情報を持たないと分かっている見出し(NON_PERSONAL_LABELS_EXACT)は、
+    // 桁数に関わらず備考へ通る。金額のような大きい数値を巻き添えにしない。
+    expect(judgeOwnerPersonalInfo("希望価格", "35000000").isOwnerPersonalInfo).toBe(false);
+    // 一方、見出しから何も分からなければ7桁以上は識別子とみなす。
+    expect(judgeOwnerPersonalInfo("その他", "35000000").isOwnerPersonalInfo).toBe(true);
+    // 識別子のラベルなら、安全確定の見出しではないので当然 withheld。
+    expect(judgeOwnerPersonalInfo("法人番号", "1234567890123").isOwnerPersonalInfo).toBe(true);
+  });
+
+  it("★6桁ちょうどは安全・7桁は伏せる（境界の両側）", () => {
+    expect(judgeOwnerPersonalInfo("その他", "999999").isOwnerPersonalInfo).toBe(false);
+    expect(judgeOwnerPersonalInfo("その他", "1000000").isOwnerPersonalInfo).toBe(true);
+    expect(MAX_SAFE_NUMERIC_DIGITS).toBe(6);
+  });
+
+  it("小数部は桁数の対象外（整数部で数える）", () => {
+    expect(isDefinitelyNonPersonalValue("123456.789")).toBe(true);
+    expect(isDefinitelyNonPersonalValue("1234567.8")).toBe(false);
   });
 });

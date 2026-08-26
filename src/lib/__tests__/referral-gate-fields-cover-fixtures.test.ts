@@ -14,7 +14,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
-import { REFERRAL_GATED_OWNER_FIELDS } from "@/lib/uploads-authorization";
+import { referralGatedOwnerFields } from "@/lib/uploads-authorization";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixturesDir = join(here, "../paste-import/__tests__/fixtures");
@@ -55,7 +55,7 @@ describe("ゲートの項目一覧が、実サンプルの所有者の項目を�
     it(`★${name} の所有者の項目は、すべてゲートの対象に入っている`, () => {
       const text = readFileSync(join(fixturesDir, name), "utf8").replace(/\r\n/g, "\n");
       const present = ownerDisplayKeysInFixture(text);
-      const gated = new Set<string>(REFERRAL_GATED_OWNER_FIELDS);
+      const gated = new Set<string>(referralGatedOwnerFields());
       const missing = present.filter((k) => !gated.has(k));
       expect(
         missing,
@@ -75,9 +75,17 @@ describe("ゲートの項目一覧が、実サンプルの所有者の項目を�
     expect(present.sort()).toEqual(["address", "email", "name", "nameKana", "phone"].sort());
   });
 
-  it("★ゲートの一覧に重複や余計な項目が無い", () => {
-    const list = [...REFERRAL_GATED_OWNER_FIELDS];
+  it("★ゲートの一覧は表示レベル設定の全キー（下限として見本の項目を含む）", () => {
+    // ⚠19巡目でゲートは**全フィールド**になった。ここは「最低限これを含む」の
+    //   下限テストとして残す（フィールド名を数え上げる形には戻さない）。
+    const list = referralGatedOwnerFields();
     expect(new Set(list).size).toBe(list.length);
-    expect(list.sort()).toEqual(["address", "email", "name", "nameKana", "phone"].sort());
+    for (const required of ["name", "nameKana", "address", "phone", "email"]) {
+      expect(list, required).toContain(required);
+    }
+    // 見本に無い項目（zip / note / corporateNumber）も対象に入っていること。
+    for (const extra of ["zip", "note", "corporateNumber"]) {
+      expect(list, extra).toContain(extra);
+    }
   });
 });

@@ -50,6 +50,15 @@ const OWNER_PII_LABEL_WORDS: readonly string[] = [
   "年齢",
   "生年月日",
   "性別",
+  // 識別子(@codex PR#414 19巡目 ②)。法人番号・会員番号・お客様IDなど、
+  // 個人・法人を一意に指す番号は所有者の個人情報として扱う。
+  // ⚠"NO" は "NOTE" のような語にも当たるが、伏せる側に倒れるだけなので許容する
+  //   (過剰に伏せる誤りは回復可能・漏らす誤りは回復不能)。
+  "番号",
+  "ナンバー",
+  "NO",
+  "ID",
+  "コード",
 ];
 
 /**
@@ -254,14 +263,26 @@ export function looksLikePersonName(value: string): boolean {
   return v.length <= 5 && KANA_OR_KANJI.test(v);
 }
 
+/**
+ * 「数字だけなら安全」と言ってよい**桁数の上限**。
+ * ⚠これを超える数字列は識別子(法人番号13桁・会員番号など)とみなして伏せる。
+ */
+export const MAX_SAFE_NUMERIC_DIGITS = 6;
+
 /** 値が「明らかに個人情報ではない」と確定できるか。 */
 export function isDefinitelyNonPersonalValue(value: string): boolean {
   const v = value.normalize("NFKC").replace(/[\s]/g, "");
   if (v === "") return true;
   if (DEFINITELY_SAFE_VALUES.has(v)) return true;
   // 数値だけ(単位付きを含む)。面積・金額・年数の類。
+  // ⚠**桁数に上限を置く**(@codex PR#414 19巡目 ②)。上限が無いと
+  //   `法人番号: 1234567890123` が「数字のみ＝安全」で備考へ入り、
+  //   owner_corporate_number のマスクを迂回していた(電話形状は10〜11桁なので外れ、
+  //   PII語にも当たらなかった)。**7桁以上の数字列は識別子とみなして伏せる**。
+  //   部屋数・面積・築年・戸数・金額といった正当な数値は6桁までに収まる。
   if (/^[0-9]+(\.[0-9]+)?[^0-9]{0,4}$/.test(v) && !/[市区町村丁目番地]/.test(v)) {
-    return true;
+    const integerDigits = (/^[0-9]+/.exec(v) ?? [""])[0].length;
+    return integerDigits <= MAX_SAFE_NUMERIC_DIGITS;
   }
   return false;
 }
