@@ -18,7 +18,11 @@
  */
 
 import prismaDefault from "@/lib/prisma";
-import { hasPermission } from "@/lib/permissions";
+import {
+  hasPermission,
+  isMaskFreeLevel,
+  resolveOwnerDisplayConfig,
+} from "@/lib/permissions";
 import { isValidStorageKey } from "@/lib/storage/key-validation";
 import { getStorage } from "@/lib/storage";
 import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
@@ -26,6 +30,32 @@ import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
 type PrismaLike = typeof prismaDefault;
 
 export type UploadAuthDecision = "ok" | "forbidden" | "not_found";
+
+/**
+ * 反響資料(type="referral") の原本を開いてよいか。
+ *
+ * ⚠**`owner:read` の有無だけでは粗すぎる**(@codex PR#414 17巡目 ①)。
+ *   既定の field_staff テンプレート(prisma/seed.ts)は `owner:read` を持ちつつ
+ *   `owner_phone: masked` / `owner_address: partial` なので、画面では電話が
+ *   `***5678` にマスクされるのに、**PDFを開けば生のまま読めて**しまう。
+ *   文書はフィールド単位でマスクできないのだから、
+ *   **文書に含まれ得る全PIIフィールドを素通しで見られる利用者だけ**に開ける。
+ * ⚠「素通しになるレベル」の集合は**発明しない**。`maskValue` を実際に叩いて
+ *   値がそのまま返るレベルだけを採っている(MASK_FREE_DISPLAY_LEVELS)。
+ * ⚠download と preview で段を分けない(registry のような二段権限は作らない)。
+ *   見られる人はダウンロードもできる、で揃える。
+ */
+export function canOpenReferralDocument(permissions: PermissionEntry[]): boolean {
+  if (!hasPermission(permissions, "owner", "read")) return false;
+  const display = resolveOwnerDisplayConfig(permissions);
+  // 反響PDFに載る所有者の項目: 氏名・住所・電話・メール。
+  return (
+    isMaskFreeLevel(display.name) &&
+    isMaskFreeLevel(display.address) &&
+    isMaskFreeLevel(display.phone) &&
+    isMaskFreeLevel(display.email)
+  );
+}
 
 export interface AuthorizeUploadAccessArgs {
   key: string;
@@ -234,7 +264,7 @@ export async function authorizeUploadAccess(
     //    書類を開ける最低権限は owner:read。
     //  上の registry と同じく、下の targetType scope とは独立に AND で課す。
     if (a.type === "referral") {
-      if (!hasPermission(permissions, "owner", "read")) {
+      if (!canOpenReferralDocument(permissions)) {
         decisions.push("forbidden");
         continue;
       }

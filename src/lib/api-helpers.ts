@@ -6,6 +6,7 @@ import {
   isDisplayLevelAction,
   isDisplayLevelResource,
 } from "@/lib/permission-display-levels";
+import { resolveOwnerDisplayConfig } from "@/lib/permissions";
 
 // ---------- Custom error ----------
 
@@ -233,46 +234,10 @@ export async function getOwnerDisplayConfig(
   preloadedPermissions?: PermissionEntry[],
 ): Promise<OwnerDisplayConfig> {
   const permissions = preloadedPermissions ?? (await getUserPermissions(userId));
-
-  const resolveLevel = (field: string): DisplayLevel => {
-    const levels: DisplayLevel[] = ["edit", "full", "read", "partial", "masked", "hidden"];
-    for (const level of levels) {
-      const entry = permissions.find(
-        (p) => p.resource === field && p.action === level,
-      );
-      if (entry?.granted) return level;
-    }
-    return "hidden";
-  };
-
-  // owner_email が権限テンプレートに明示設定されていない場合は owner_phone にフォールバック。
-  // これにより seed 実行前の既存本番テンプレートでも email が意図せず hidden にならない。
-  // 「owner_email エントリが存在する（=明示設定済み）」と「存在しない（=未設定）」を区別する。
-  const hasExplicitEmailEntry = permissions.some((p) => p.resource === "owner_email");
-  const emailLevel = hasExplicitEmailEntry
-    ? resolveLevel("owner_email")
-    : resolveLevel("owner_phone"); // 未設定時は owner_phone の設定を継承
-
-  // owner_corporate_number が seed されていない既存テンプレートでも安全に動くよう、
-  // owner_email と同様に「明示エントリの有無」で挙動を分ける。
-  // 未設定時は owner_name の設定を継承（migration backfill と整合）。
-  const hasExplicitCorporateNumberEntry = permissions.some(
-    (p) => p.resource === "owner_corporate_number",
-  );
-  const corporateNumberLevel = hasExplicitCorporateNumberEntry
-    ? resolveLevel("owner_corporate_number")
-    : resolveLevel("owner_name");
-
-  return {
-    name: resolveLevel("owner_name"),
-    nameKana: resolveLevel("owner_name_kana"),
-    phone: resolveLevel("owner_phone"),
-    zip: resolveLevel("owner_zip"),
-    address: resolveLevel("owner_address"),
-    note: resolveLevel("owner_note"),
-    email: emailLevel,
-    corporateNumber: corporateNumberLevel,
-  };
+  // ⚠導出は @/lib/permissions の純関数1本に集約してある（@codex PR#414 17巡目 ①）。
+  //   next-auth を読み込めない場所（uploads-authorization）からも同じ判定を使うため。
+  //   ここで再実装しない。
+  return resolveOwnerDisplayConfig(permissions) as OwnerDisplayConfig;
 }
 
 // ---------- Request body helpers ----------

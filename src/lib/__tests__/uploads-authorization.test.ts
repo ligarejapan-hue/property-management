@@ -1164,9 +1164,26 @@ describe("authorizeUploadAccess — referral gating", () => {
   const propertyReadOnly: PermissionEntry[] = [
     { resource: "property", action: "read", granted: true },
   ];
+  /** owner:read はあるが、項目ごとの表示レベルが無い（＝全部 hidden）。 */
   const withOwnerRead: PermissionEntry[] = [
     ...propertyReadOnly,
     { resource: "owner", action: "read", granted: true },
+  ];
+  /** 反響PDFに載る4項目（氏名・住所・電話・メール）がすべて素通しで見える人。 */
+  const allPiiVisible: PermissionEntry[] = [
+    ...withOwnerRead,
+    { resource: "owner_name", action: "full", granted: true },
+    { resource: "owner_address", action: "full", granted: true },
+    { resource: "owner_phone", action: "full", granted: true },
+    { resource: "owner_email", action: "full", granted: true },
+  ];
+  /** 既定の field_staff テンプレート相当（電話 masked / 住所 partial）。 */
+  const seedFieldStaffLike: PermissionEntry[] = [
+    ...withOwnerRead,
+    { resource: "owner_name", action: "full", granted: true },
+    { resource: "owner_address", action: "partial", granted: true },
+    { resource: "owner_phone", action: "masked", granted: true },
+    { resource: "owner_email", action: "full", granted: true },
   ];
 
   it("★owner:read 無 → forbidden（property:read だけでは取得不可＝hard boundary）", async () => {
@@ -1176,14 +1193,48 @@ describe("authorizeUploadAccess — referral gating", () => {
     ).toBe("forbidden");
   });
 
-  it("★owner:read 有 → ok", async () => {
+  it("★4項目すべてが素通しで見える人 → ok", async () => {
     const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
     expect(
-      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: withOwnerRead, prisma }),
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: allPiiVisible, prisma }),
     ).toBe("ok");
   });
 
-  it("★download でも同じゲート（owner:read 無なら forbidden）", async () => {
+  it("★owner:read はあっても項目の表示レベルが無ければ forbidden（全部 hidden）", async () => {
+    const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: withOwnerRead, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("★既定の field_staff（電話 masked）は forbidden — 画面で伏せた電話がPDFで生に見えない", async () => {
+    // ⚠これが17巡目の指摘そのもの。owner:read の有無だけでは粗すぎた。
+    const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: seedFieldStaffLike, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("★4項目のうち1つでもマスクされていれば forbidden（総当たり）", async () => {
+    // 文書はフィールド単位でマスクできない。1つでも伏せる約束があるなら開けない。
+    const fields = ["owner_name", "owner_address", "owner_phone", "owner_email"];
+    const maskedLevels = ["partial", "masked", "hidden"];
+    for (const field of fields) {
+      for (const level of maskedLevels) {
+        const perms: PermissionEntry[] = [
+          ...allPiiVisible.filter((p) => p.resource !== field),
+          { resource: field, action: level, granted: true },
+        ];
+        const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+        expect(
+          await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: perms, prisma }),
+          `${field}=${level}`,
+        ).toBe("forbidden");
+      }
+    }
+  });
+
+  it("★download でも同じゲート（preview で見られる人だけが download もできる）", async () => {
     const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
     expect(
       await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: propertyReadOnly, downloadIntent: true, prisma }),
@@ -1202,13 +1253,13 @@ describe("authorizeUploadAccess — referral gating", () => {
     ).toBe("forbidden");
   });
 
-  it("★owner:read 有 でも field_staff scope 外 → forbidden（perm と scope の AND）", async () => {
+  it("★4項目が見える人でも field_staff scope 外 → forbidden（perm と scope の AND）", async () => {
     const prisma = makeDb({
       attachments: [refAtt()],
       properties: [{ id: "p1", createdBy: "u-someone", assignedTo: null }],
     });
     expect(
-      await authorizeUploadAccess({ key: REF_KEY, session: fieldStaff, permissions: withOwnerRead, prisma }),
+      await authorizeUploadAccess({ key: REF_KEY, session: fieldStaff, permissions: allPiiVisible, prisma }),
     ).toBe("forbidden");
   });
 
@@ -1225,7 +1276,7 @@ describe("authorizeUploadAccess — referral gating", () => {
       attachments: [refAtt({ id: "att-gen", fileUrl: `/uploads/${genKey}`, type: "general" })],
       properties: [prop],
     });
-    // general は owner:read が無くても従来どおり ok。
+    // general は owner の項目が見えなくても従来どおり ok。
     expect(
       await authorizeUploadAccess({ key: genKey, session: officeStaff, permissions: propertyReadOnly, prisma: genDb }),
     ).toBe("ok");
@@ -1235,9 +1286,9 @@ describe("authorizeUploadAccess — referral gating", () => {
       attachments: [refAtt({ id: "att-reg", fileUrl: `/uploads/${regKey}`, type: "registry" })],
       properties: [prop],
     });
-    // registry は owner:read があっても registry_pdf:preview が無ければ forbidden。
+    // registry は owner の項目が全部見えても registry_pdf:preview が無ければ forbidden。
     expect(
-      await authorizeUploadAccess({ key: regKey, session: officeStaff, permissions: withOwnerRead, prisma: regDb }),
+      await authorizeUploadAccess({ key: regKey, session: officeStaff, permissions: allPiiVisible, prisma: regDb }),
     ).toBe("forbidden");
   });
 });

@@ -15,15 +15,32 @@ import { normalizeExternalLinkKey } from "../normalize";
 const here = dirname(fileURLToPath(import.meta.url));
 const repoSrc = join(here, "../../..");
 
+/**
+ * ⚠**外部キーを書く／引く全経路**をここに並べる。
+ *   17巡目で CSV取込(書込側)も加えた。これで**混在幅の行は今後生まれ得ない**。
+ */
 const ROUTES: { label: string; path: string }[] = [
   { label: "下書き(build-draft)", path: "lib/paste-import/build-draft.ts" },
   { label: "再判定(recheck)", path: "app/api/import/paste/recheck/route.ts" },
   { label: "確定(commit)", path: "app/api/import/paste/commit/route.ts" },
+  { label: "CSV取込(書込)", path: "app/api/import/csv/route.ts" },
 ];
 
 describe("normalizeExternalLinkKey（共通関数そのもの）", () => {
   it("★全角を半角へ畳む", () => {
     expect(normalizeExternalLinkKey("ＳＡ２６０８－１２３４５６７")).toBe("SA2608-1234567");
+  });
+
+  it("★**混在幅**（一部だけ全角）も同じ形に畳む", () => {
+    // 2表記の列挙では拾えなかった形。書込側を通すことで今後生まれ得なくなる。
+    for (const raw of [
+      "SA2608－1234567",
+      "ＳＡ2608-1234567",
+      "SA２６０８-1234567",
+      "ＳＡ２６０８-１２３４５６７",
+    ]) {
+      expect(normalizeExternalLinkKey(raw), raw).toBe("SA2608-1234567");
+    }
   });
 
   it("★半角はそのまま（保存される文字列を変えない）", () => {
@@ -38,21 +55,29 @@ describe("normalizeExternalLinkKey（共通関数そのもの）", () => {
     expect(normalizeExternalLinkKey(undefined)).toBeNull();
   });
 
-  it("★同じ入力に同じ結果（3ルートで結果が割れない）", () => {
+  it("★同じ入力に同じ結果（経路ごとに結果が割れない）", () => {
     for (const raw of ["ＳＡ２６０８－１２３４５６７", "SA2608-1234567", " sa-1 "]) {
       expect(normalizeExternalLinkKey(raw)).toBe(normalizeExternalLinkKey(raw));
     }
   });
 });
 
-describe("3ルートすべてが共通関数を通っている（走査）", () => {
+describe("外部キーを扱う全経路が共通関数を通っている（走査）", () => {
   for (const route of ROUTES) {
     it(`★${route.label} が normalizeExternalLinkKey を使っている`, () => {
       const src = readFileSync(join(repoSrc, route.path), "utf8");
+      // ⚠**import 行だけでは通っていることにならない**。呼び出しが消えても
+      //   import が残っていれば緑になる空振りを踏んだので、
+      //   import 以外の行に**実際の呼び出し**があることを見る。
+      const callSites = src
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("import"))
+        .filter((line) => !line.trimStart().startsWith("*"))
+        .filter((line) => line.includes("normalizeExternalLinkKey("));
       expect(
-        src.includes("normalizeExternalLinkKey"),
-        `${route.path} が共通の正規化を通っていない`,
-      ).toBe(true);
+        callSites.length,
+        `${route.path} が共通の正規化を呼んでいない（import だけでは不可）`,
+      ).toBeGreaterThan(0);
     });
   }
 

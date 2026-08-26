@@ -47,6 +47,7 @@ import {
 } from "@/lib/import-error-display";
 import { unwrapCsvTextCell } from "@/lib/csv-encode";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
+import { normalizeExternalLinkKey } from "@/lib/paste-import/normalize";
 
 const VALID_PROPERTY_TYPES: readonly string[] = PROPERTY_TYPE_VALUES;
 const VALID_REGISTRY_STATUS = ["unconfirmed", "scheduled", "obtained"];
@@ -797,8 +798,14 @@ export async function POST(request: NextRequest) {
           createData.buildingNumber = mapped.buildingNumber;
         if (mapped.realEstateNumber)
           createData.realEstateNumber = mapped.realEstateNumber;
-        if (mapped.externalLinkKey)
-          createData.externalLinkKey = mapped.externalLinkKey;
+        // ⚠外部キーは**書き込む全経路で同じ正規化を通す**(@codex PR#414 17巡目 ②)。
+        //   ここが生値のままだと、混在幅のキー(`SA2608－1234567` の一部だけ全角)が
+        //   保存され、貼り付け取込の重複判定(半角/全角の2表記で引く)から漏れる。
+        //   ⚠正規化はこの1行だけ。CSV取込の他の挙動は変えない。
+        if (mapped.externalLinkKey) {
+          const normalizedKey = normalizeExternalLinkKey(mapped.externalLinkKey);
+          if (normalizedKey) createData.externalLinkKey = normalizedKey;
+        }
         if (mapped.zoningDistrict)
           createData.zoningDistrict = mapped.zoningDistrict;
         if (mapped.rosenkaValue)
