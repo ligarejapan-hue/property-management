@@ -53,18 +53,32 @@ const OWNER_PII_LABEL_WORDS: readonly string[] = [
 ];
 
 /**
- * 「物件のこと」を指す語。これを含む見出しは、原則として所有者の個人情報とみなさない。
- * 例: `物件住所` `物件所在地` は**物件**の住所であって所有者の連絡先ではない。
+ * **物件の所在を指すと確定できる見出し**（正規化後の**完全一致**のみ）。
  *
- * ⚠**ただしこの例外は、それ自体が穴になる**(@codex PR#414 12巡目 ②)。
- *   `物件所有者氏名: 山田太郎` は「物件」を含むため除外が先に効き、
- *   値も電話/メールの形ではないので、**氏名がそのまま備考へ入って**いた
- *   (＝所有者の項目別マスクの外に出る)。
- *   → 下の OWNER_SCOPE_WORDS を**先に**見て、所有者を明示する語があれば
- *   物件系の語があっても**所有者側を優先**する。
- *   (社内の恒久ルール「防御を入れるとその防御自体の抜けを突かれる」の実例。)
+ * ⚠部分文字列で「物件系」と確定してはいけない(@codex PR#414 14巡目 ②)。
+ *   `勤務先所在地` `会社所在地` は「所在地」を含むだけで物件のことではなく、
+ *   **勤務先の住所が値の形の判定に到達する前に**備考へ素通りしていた。
+ *   13巡目で向きは反転したのに、「確定」の定義が部分文字列のままで、
+ *   **反転が判定の芯まで届いていなかった**。
+ * ⚠ここに載せてよいのは「物件の所在**だけ**を意味する」と言い切れる見出しに限る。
+ *   増やすときは、その語が人の住所を指す複合語になりえないかを必ず考えること。
  */
-const PROPERTY_SCOPE_WORDS: readonly string[] = ["物件", "所在地", "土地", "建物"];
+const PROPERTY_LOCATION_LABELS_EXACT: ReadonlySet<string> = new Set(
+  [
+    "物件所在地",
+    "物件の所在地",
+    "物件所在",
+    "物件の所在",
+    "物件住所",
+    "物件の住所",
+    "所在地",
+    "所在",
+    "土地所在地",
+    "土地の所在地",
+    "建物所在地",
+    "建物の所在地",
+  ].map((l) => l.normalize("NFKC").replace(/[\s　]/g, "").toUpperCase()),
+);
 
 /**
  * 「所有者のこと」を明示する語。**物件系の語より優先**する。
@@ -164,21 +178,6 @@ export function looksLikeAddress(value: string): boolean {
 }
 
 /**
- * 人名らしい値か。
- * ⚠短い漢字/かなの塊は氏名のことが多い。**定型語(下の安全な値)を先に除く**。
- */
-export function looksLikePersonName(value: string): boolean {
-  const v = value.normalize("NFKC").replace(/[\s]/g, "");
-  if (v.length < 2) return false;
-  if (/[0-9A-Za-z]/.test(v)) return false;
-  const KANA_ONLY = /^[ぁ-んァ-ヶー・]+$/;
-  const KANA_OR_KANJI = /^[々〆〇ぁ-んァ-ヶー・㐀-䶿一-鿿豈-﫿]+$/;
-  // かなだけの氏名は長くなりがち(ヤマダタロウ)。漢字を含むものは短い。
-  if (KANA_ONLY.test(v)) return v.length <= 10;
-  return v.length <= 5 && KANA_OR_KANJI.test(v);
-}
-
-/**
  * **明らかに個人情報ではない**と確定できる値(許可リスト)。
  * ⚠ここに載っているものだけが「安全と確定」。増やすのは構わないが、
  *   **人名・住所・連絡先になりうるものは絶対に載せない**。
@@ -189,8 +188,33 @@ const DEFINITELY_SAFE_VALUES: ReadonlySet<string> = new Set([
   "不明", "未定", "未記入", "未入力", "その他",
   "本人", "本人所有", "共有", "単独",
   "売却", "賃貸", "建替", "解体", "相談", "検討中",
+  // 建物の構造・現況(人名にも住所にもなりえない定型語)
+  "木造", "鉄骨造", "軽量鉄骨造", "鉄筋コンクリート造", "ブロック造",
+  "更地", "空家", "空き家", "居住中", "賃貸中", "空室", "自己居住",
   "-", "ー", "−", "―", "‐", "—", "*", "",
 ]);
+
+/**
+ * 人名らしい値か。
+ * ⚠短い漢字/かなの塊は氏名のことが多い。**定型語(下の安全な値)を先に除く**。
+ */
+export function looksLikePersonName(value: string): boolean {
+  const v = value.normalize("NFKC").replace(/[\s]/g, "");
+  if (v.length < 2) return false;
+  // ⚠**許可リストの定型語は人名とみなさない**。
+  //   14巡目で「形の判定を値の許可リストより先に」評価する順序にしたため、
+  //   許可リストを後段の逃げ道にはできない。代わりに、
+  //   **人名らしさの定義そのもの**から定型語を除く(許可リストは
+  //   「人名・住所・連絡先になりえないと人が確認した閉じた集合」なので、
+  //   ここで参照しても危険側へ倒れない。テストで固定してある)。
+  if (DEFINITELY_SAFE_VALUES.has(v)) return false;
+  if (/[0-9A-Za-z]/.test(v)) return false;
+  const KANA_ONLY = /^[ぁ-んァ-ヶー・]+$/;
+  const KANA_OR_KANJI = /^[々〆〇ぁ-んァ-ヶー・㐀-䶿一-鿿豈-﫿]+$/;
+  // かなだけの氏名は長くなりがち(ヤマダタロウ)。漢字を含むものは短い。
+  if (KANA_ONLY.test(v)) return v.length <= 10;
+  return v.length <= 5 && KANA_OR_KANJI.test(v);
+}
 
 /** 値が「明らかに個人情報ではない」と確定できるか。 */
 export function isDefinitelyNonPersonalValue(value: string): boolean {
@@ -223,17 +247,17 @@ export function judgeOwnerPersonalInfo(
 ): OwnerPersonalInfoVerdict {
   const normalized = normalizeLabel(label);
 
-  // ⚠**所有者・人を指す語を先に見る**(12巡目 ②)。`物件所有者氏名` のように
-  //   両方の語を含む見出しで物件系の除外が先に効くと、氏名が備考へ素通りする。
+  // ⚠所有者・人を指す語を先に見る(12巡目 ②)。`物件所有者氏名` のように
+  //   両方の語を含む見出しで物件系が先に効くと、氏名が備考へ素通りする。
   const aboutOwner = OWNER_SCOPE_WORDS.some((w) =>
     normalized.includes(normalizeLabel(w)),
   );
 
-  // ---- ① 見出しが個人情報の項目だと分かるなら、そこで確定 ----
-  const propertyConfirmed =
-    !aboutOwner &&
-    PROPERTY_SCOPE_WORDS.some((w) => normalized.includes(normalizeLabel(w)));
+  // ⚠物件系と「確定」できるのは**完全一致**のときだけ(14巡目 ②)。
+  //   部分一致だと `勤務先所在地` `会社所在地` まで安全側に倒れる。
+  const propertyConfirmed = !aboutOwner && PROPERTY_LOCATION_LABELS_EXACT.has(normalized);
 
+  // ---- ① 見出しが個人情報の項目だと分かるなら、そこで確定 ----
   if (!propertyConfirmed) {
     const hit = OWNER_PII_LABEL_WORDS.some((w) =>
       normalized.includes(normalizeLabel(w)),
@@ -241,27 +265,26 @@ export function judgeOwnerPersonalInfo(
     if (hit) return { isOwnerPersonalInfo: true, reason: "label" };
   }
 
-  // ---- ② 「安全と確定できる」なら備考へ通す ----
-  // ⚠ここから先が**既定の向きの反転**(13巡目 ①)。安全と言い切れるのは
-  //   (a) 見出しが**物件系と確定**できる(物件語を含み、所有者・人物語を含まない)
-  //   (b) 値が**明らかに非個人情報**(許可リスト・数値のみ など)
-  //   の2つだけ。
+  // ---- ② 見出しで「安全と確定」できるならここで通す ----
   if (propertyConfirmed) return { isOwnerPersonalInfo: false, reason: null };
-  if (isDefinitelyNonPersonalValue(value)) {
-    return { isOwnerPersonalInfo: false, reason: null };
-  }
 
-  // ---- ③ 安全と確定できないものは、値の形で見る ----
-  // ⚠住所・電話・メール・人名のいずれかに見えたら withheld。
-  //   粗い判定で過剰に引っかかっても、withheld は画面に出て人が備考へ移せる。
-  //   **過剰に伏せる誤りは回復可能、漏らす誤りは回復不能**。
+  // ---- ③ **値の形を、値の許可リストより先に見る**(14巡目 ①) ----
+  // ⚠順序が逆だと、`緊急連絡先: 09012345678` が「数値のみ＝安全」で通ってしまい、
+  //   電話形状の判定に**到達しない**。危険な形を先に落とし、
+  //   そこを通らなかったものだけを許可リストに掛ける。
+  //   (この順序は __tests__ で pin してある。入れ替えると必ず落ちる。)
   if (
-    looksLikeAddress(value) ||
     looksLikePhoneNumber(value) ||
     looksLikeEmailAddress(value) ||
+    looksLikeAddress(value) ||
     looksLikePersonName(value)
   ) {
     return { isOwnerPersonalInfo: true, reason: "value" };
+  }
+
+  // ---- ④ 値が明らかに非個人情報（許可リスト・数値のみ）なら通す ----
+  if (isDefinitelyNonPersonalValue(value)) {
+    return { isOwnerPersonalInfo: false, reason: null };
   }
 
   return { isOwnerPersonalInfo: false, reason: null };

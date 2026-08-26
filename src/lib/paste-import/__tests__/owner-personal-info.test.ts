@@ -166,15 +166,32 @@ describe("4象限: 所有者語 × 物件語", () => {
     expect(judgeOwnerPersonalInfo("所有者住所", "東京都A区B1-2-3").isOwnerPersonalInfo).toBe(true);
   });
 
-  it("★③ 物件語のみ → 従来どおり備考に入る（過剰に落とさない）", () => {
-    for (const prop of PROPERTY_WORDS) {
-      for (const tail of ["住所", "所在地", "の面積", "構造"]) {
-        const label = `${prop}${tail}`;
-        expect(judgeOwnerPersonalInfo(label, "東京都A区B1-2-3").isOwnerPersonalInfo, label).toBe(
-          false,
-        );
-      }
+  it("★③ 物件系と**完全一致**で確定できる見出しは備考に入る", () => {
+    // ⚠14巡目 ②: 「所在地を含む」では確定しない。完全一致の有限リストだけ。
+    for (const label of [
+      "物件所在地", "物件の所在地", "物件住所", "物件の住所",
+      "所在地", "所在", "土地所在地", "建物所在地",
+    ]) {
+      expect(judgeOwnerPersonalInfo(label, "東京都A区B1-2-3").isOwnerPersonalInfo, label).toBe(
+        false,
+      );
     }
+  });
+
+  it("★③-b 物件語を含むだけの見出しは確定しない → 値の形で判定される", () => {
+    // ⚠これは**意図した過剰**。`勤務先所在地` `会社所在地` を通さないために、
+    //   完全一致以外は「判定不能」に落とす。値が住所らしければ withheld になり、
+    //   画面に出て人が備考へ移せる（回復可能な側の誤り）。
+    for (const label of ["物件の面積", "土地の広さ", "建物の状態"]) {
+      expect(judgeOwnerPersonalInfo(label, "東京都A区B1-2-3").isOwnerPersonalInfo, label).toBe(
+        true,
+      );
+    }
+    // 値が住所らしくなければ、これまでどおり備考に入る。
+    for (const label of ["物件の面積", "建物構造"]) {
+      expect(judgeOwnerPersonalInfo(label, "70.55").isOwnerPersonalInfo, label).toBe(false);
+    }
+    expect(judgeOwnerPersonalInfo("建物構造", "木造").isOwnerPersonalInfo).toBe(false);
   });
 
   it("★④ どちらも無し → 見出しの語だけで判断（PII語があれば withheld、無ければ備考）", () => {
@@ -295,5 +312,93 @@ describe("値の形の判定（粗くてよい／漏らすより過剰に引っ�
     expect(isDefinitelyNonPersonalValue("山田太郎")).toBe(false);
     expect(isDefinitelyNonPersonalValue("東京都A区B1-2-3")).toBe(false);
     expect(isDefinitelyNonPersonalValue("090-1234-5678")).toBe(false);
+  });
+});
+
+// ===========================================================================
+// 14巡目: 前回の反転に残っていた2つの穴
+//   ① 数字だけの電話番号が「安全な数値」として素通り（評価の順序）
+//   ② `勤務先所在地` が「物件系」として素通り（「確定」が部分文字列のままだった）
+// ⚠この関数はもう4巡直している。**総当たりの語彙に今回の2形を必ず含める**。
+// ===========================================================================
+
+describe("① 値の形は、値の許可リストより先に評価する", () => {
+  it("★『緊急連絡先: 09012345678』は withheld（数字だけでも電話形状が勝つ）", () => {
+    // 順序が逆だと「数値のみ＝安全」で確定し、電話形状の判定に到達しない。
+    const v = judgeOwnerPersonalInfo("緊急連絡先", "09012345678");
+    expect(v.isOwnerPersonalInfo).toBe(true);
+    expect(v.reason).toBe("value");
+  });
+
+  it("★固定電話の形（0312345678）も withheld", () => {
+    expect(judgeOwnerPersonalInfo("その他", "0312345678").isOwnerPersonalInfo).toBe(true);
+    expect(judgeOwnerPersonalInfo("ご連絡先", "0312345678").isOwnerPersonalInfo).toBe(true);
+  });
+
+  it("★普通の数値は備考に入る（許可リストは効いている）", () => {
+    for (const v of ["3", "70", "70.55", "1980", "12345"]) {
+      expect(judgeOwnerPersonalInfo("部屋数", v).isOwnerPersonalInfo, v).toBe(false);
+    }
+  });
+
+  it("★順序そのものを pin: 『数字だけ』かつ『電話形状』の値は必ず withheld", () => {
+    // ⚠許可リスト(数値のみ)を先に評価する実装へ戻すと、ここは必ず落ちる。
+    const digitsOnlyPhones = ["09012345678", "0312345678", "0120345678"];
+    for (const v of digitsOnlyPhones) {
+      // 前提: この値は「数字だけ」である＝許可リスト側の条件も満たす。
+      expect(/^[0-9]+$/.test(v), v).toBe(true);
+      expect(looksLikePhoneNumber(v), v).toBe(true);
+      // それでも withheld になること＝形の判定が先に効いている証拠。
+      expect(judgeOwnerPersonalInfo("メモ", v).isOwnerPersonalInfo, v).toBe(true);
+    }
+  });
+});
+
+describe("② 物件系の「確定」は完全一致だけ", () => {
+  it("★『勤務先所在地: 東京都…』は withheld", () => {
+    expect(
+      judgeOwnerPersonalInfo("勤務先所在地", "東京都千代田区1-2-3").isOwnerPersonalInfo,
+    ).toBe(true);
+  });
+
+  it("★『会社所在地』『実家所在地』『連絡先所在地』も withheld", () => {
+    for (const label of ["会社所在地", "実家所在地", "連絡先所在地", "本店所在地"]) {
+      expect(
+        judgeOwnerPersonalInfo(label, "東京都千代田区1-2-3").isOwnerPersonalInfo,
+        label,
+      ).toBe(true);
+    }
+  });
+
+  it("★『物件所在地』『所在地』は備考に入る（完全一致で確定）", () => {
+    expect(judgeOwnerPersonalInfo("物件所在地", "東京都千代田区1-2-3").isOwnerPersonalInfo).toBe(false);
+    expect(judgeOwnerPersonalInfo("所在地", "東京都千代田区1-2-3").isOwnerPersonalInfo).toBe(false);
+  });
+
+  it("★複合語 × 所在地/住所 の総当たり: 完全一致リストに無いものは全部 withheld", () => {
+    // 次に同型が来ても、列挙の外で**形**で捕まることを確かめる。
+    const prefixes = ["勤務先", "会社", "実家", "連絡先", "本店", "支店", "旧", "転居先"];
+    const tails = ["所在地", "住所", "の所在地", "のご住所"];
+    const offenders: string[] = [];
+    for (const p of prefixes) {
+      for (const t of tails) {
+        const label = `${p}${t}`;
+        if (!judgeOwnerPersonalInfo(label, "東京都千代田区1-2-3").isOwnerPersonalInfo) {
+          offenders.push(label);
+        }
+      }
+    }
+    expect(offenders, `備考へ素通りする見出し: ${offenders.join(", ")}`).toEqual([]);
+  });
+
+  it("★裸の数字電話 × 見出しの総当たり: 見出しが何であっても withheld", () => {
+    const labels = ["緊急連絡先", "ご連絡先", "メモ", "特記", "第2連絡先", "窓口", "その他"];
+    const offenders: string[] = [];
+    for (const label of labels) {
+      if (!judgeOwnerPersonalInfo(label, "09012345678").isOwnerPersonalInfo) {
+        offenders.push(label);
+      }
+    }
+    expect(offenders, `電話番号が素通りする見出し: ${offenders.join(", ")}`).toEqual([]);
   });
 });
