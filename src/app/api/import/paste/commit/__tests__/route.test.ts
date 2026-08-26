@@ -1126,3 +1126,43 @@ describe("区分マンション専用の欄は種別に合うときだけ保存�
     expect(dataBlock).toContain("...unitOnly,");
   });
 });
+
+describe("所有者オブジェクトを送るなら氏名は必須（13巡目 ②）", () => {
+  const withOwner = (name: string | null) => ({
+    ...baseBody,
+    owner: { name, nameKana: null, phone: "09000000000", email: null, currentAddress: null },
+  });
+
+  it("★氏名が空文字なら400。物件も所有者も作らない（黙って捨てない）", async () => {
+    // 以前は所有者を黙って捨てて物件だけ作っていた。画面のガード頼みだった。
+    const res = await POST(req(withOwner("")));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.message).toContain("氏名");
+    expect(created.property).toBeUndefined();
+    expect(created.owner).toBeUndefined();
+  });
+
+  it("★氏名が空白だけでも400（空名の所有者を作らない）", async () => {
+    const res = await POST(req(withOwner("   ")));
+    expect(res.status).toBe(400);
+    expect(created.owner).toBeUndefined();
+  });
+
+  it("★全角空白だけでも400", async () => {
+    const res = await POST(req(withOwner("　　")));
+    expect(res.status).toBe(400);
+  });
+
+  it("★owner: null は従来どおり通る（所有者なしで登録）", async () => {
+    const res = await POST(req({ ...baseBody, owner: null }));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ address: "東京都A区B1-2-3" });
+    expect(created.owner).toBeUndefined();
+  });
+
+  it("氏名があれば従来どおり作る（止めすぎていない）", async () => {
+    const res = await POST(req(withOwner("山田太郎")));
+    expect(res.status).toBe(200);
+    expect(created.owner?.[0]).toMatchObject({ name: "山田太郎" });
+  });
+});

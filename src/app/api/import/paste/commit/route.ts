@@ -174,6 +174,18 @@ export async function POST(request: NextRequest) {
     if (!body?.property?.address || body.property.address.trim() === "") {
       throw new ApiError(400, "住所がありません", "BAD_REQUEST");
     }
+    // ⚠**黙って捨てない**(@codex PR#414 13巡目 ②)。`owner` を送ってきているのに
+    //   氏名が空(または空白だけ)なら、これまでは
+    //     ・`""`      → 所有者を作らず**物件だけ**が黙って出来る
+    //     ・`"   "`   → **空名の所有者**が出来る
+    //   という食い違いが起きていた。画面のガード(9巡目)頼みで、直叩きや古い画面から
+    //   不整合データが入る。所有者なしにしたいなら `owner: null` を送る。
+    if (body.owner !== null && body.owner !== undefined) {
+      if ((body.owner.name ?? "").trim() === "") {
+        throw new ApiError(400, "所有者の氏名を入力してください", "BAD_REQUEST");
+      }
+    }
+
     const wantsOwner = Boolean(body.owner?.name || body.linkExistingOwnerId);
     if (wantsOwner && !hasPermission(perms, "owner", "write")) {
       throw new ApiError(403, "所有者を作る権限がありません", "FORBIDDEN");

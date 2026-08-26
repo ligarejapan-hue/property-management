@@ -10,6 +10,9 @@ import {
   judgeOwnerPersonalInfo,
   looksLikePhoneNumber,
   looksLikeEmailAddress,
+  looksLikeAddress,
+  looksLikePersonName,
+  isDefinitelyNonPersonalValue,
 } from "../owner-personal-info";
 
 describe("judgeOwnerPersonalInfo（見出しの語で見分ける）", () => {
@@ -85,8 +88,13 @@ describe("judgeOwnerPersonalInfo（値の形で見分ける）", () => {
     expect(v.reason).toBe("value");
   });
 
-  it("★物件の住所は「値の形」でも拾わない（電話でもメールでもない）", () => {
-    expect(judgeOwnerPersonalInfo("備考", "東京都A区B1-2-3").isOwnerPersonalInfo).toBe(false);
+  it("★判定できない見出し + 住所らしい値 → withheld（既定の向きが反転した証拠）", () => {
+    // ⚠旧実装(危険と確定できたら withheld)ではここは false だった。
+    //   いまは「安全と確定できたら通す」なので、見出しから安全と言い切れない
+    //   ものは、値が住所らしければ伏せる。
+    const v = judgeOwnerPersonalInfo("備考", "東京都A区B1-2-3");
+    expect(v.isOwnerPersonalInfo).toBe(true);
+    expect(v.reason).toBe("value");
   });
 });
 
@@ -198,5 +206,94 @@ describe("4象限: 所有者語 × 物件語", () => {
 
   it("★『名義人』は氏名の欄なので落とす", () => {
     expect(judgeOwnerPersonalInfo("名義人", "山田太郎").isOwnerPersonalInfo).toBe(true);
+  });
+});
+
+// ===========================================================================
+// 既定の向きの反転（@codex PR#414 13巡目 ①）
+//
+// ⚠R11→R12→R13 と3巡続けて「列挙の穴を1語ずつ」突かれた。危険を数え上げる方式
+//   そのものが誤りだった。社内の恒久ルール「伏せ字は許可リスト方式 ―
+//   危険を除くのではなく、安全なものだけで組み立てる」に合わせて向きを反転した。
+// ⚠代償: 非PIIが誤って withheld になることが増える。だが withheld は画面に出て
+//   人が備考へ移せる＝**過剰に伏せる誤りは回復可能、漏らす誤りは回復不能**。
+// ===========================================================================
+
+describe("安全と確定できないものは、値の形で伏せる", () => {
+  it("★『お客様所在地: 東京都…』は withheld（列挙に無い人物語＋物件語の組み合わせ）", () => {
+    // これが13巡目の指摘そのもの。旧実装は「所在地」で物件側に倒れて素通りしていた。
+    const v = judgeOwnerPersonalInfo("お客様所在地", "東京都世田谷区池尻4丁目26-8");
+    expect(v.isOwnerPersonalInfo).toBe(true);
+  });
+
+  it("★『依頼者住所』『売主様ご住所』も withheld", () => {
+    for (const label of ["依頼者住所", "売主様ご住所", "買主様の連絡先", "相続人のお名前"]) {
+      expect(judgeOwnerPersonalInfo(label, "東京都A区B1-2-3").isOwnerPersonalInfo, label).toBe(true);
+    }
+  });
+
+  it("★列挙に無い見出しでも、値が住所らしければ withheld", () => {
+    for (const label of ["ご連絡事項", "特記", "メモ", "第2連絡先"]) {
+      const v = judgeOwnerPersonalInfo(label, "神奈川県横浜市西区1-2-3");
+      expect(v.isOwnerPersonalInfo, label).toBe(true);
+      expect(v.reason, label).toBe("value");
+    }
+  });
+
+  it("★列挙に無い見出しでも、値が人名らしければ withheld", () => {
+    for (const label of ["ご担当", "窓口", "先方"]) {
+      const v = judgeOwnerPersonalInfo(label, "山田太郎");
+      expect(v.isOwnerPersonalInfo, label).toBe(true);
+      expect(v.reason, label).toBe("value");
+    }
+  });
+
+  it("★『物件住所: 東京都…』は備考に入る（物件系と確定できる）", () => {
+    expect(judgeOwnerPersonalInfo("物件住所", "東京都A区B1-2-3").isOwnerPersonalInfo).toBe(false);
+    expect(judgeOwnerPersonalInfo("物件所在地", "東京都世田谷区池尻4丁目26-8").isOwnerPersonalInfo).toBe(false);
+  });
+
+  it("★『建物構造: 木造』は備考に入る（非PIIの値／物件系の見出し）", () => {
+    expect(judgeOwnerPersonalInfo("建物構造", "木造").isOwnerPersonalInfo).toBe(false);
+    expect(judgeOwnerPersonalInfo("希望する利活用方法", "売却").isOwnerPersonalInfo).toBe(false);
+    expect(judgeOwnerPersonalInfo("空き家所有者との関係性", "本人").isOwnerPersonalInfo).toBe(false);
+  });
+
+  it("★数値だけの値・記号だけの値は備考に入る", () => {
+    for (const v of ["70", "70.55", "1980", "-", "なし", "不明"]) {
+      expect(judgeOwnerPersonalInfo("その他", v).isOwnerPersonalInfo, v).toBe(false);
+    }
+  });
+});
+
+describe("値の形の判定（粗くてよい／漏らすより過剰に引っかかる方を採る）", () => {
+  it("★住所らしい値", () => {
+    for (const v of ["東京都A区B1-2-3", "神奈川県横浜市西区1-2-3", "世田谷区池尻4丁目26-8", "A市1番地2"]) {
+      expect(looksLikeAddress(v), v).toBe(true);
+    }
+  });
+
+  it("★住所らしくない値", () => {
+    for (const v of ["木造", "売却", "70.55", "2LDK", "", "本人"]) {
+      expect(looksLikeAddress(v), v).toBe(false);
+    }
+  });
+
+  it("★人名らしい値／らしくない値", () => {
+    for (const v of ["山田太郎", "佐藤", "ヤマダタロウ"]) {
+      expect(looksLikePersonName(v), v).toBe(true);
+    }
+    for (const v of ["木造スレート葺", "1年以内に売りたい", "70", "A", ""]) {
+      expect(looksLikePersonName(v), v).toBe(false);
+    }
+  });
+
+  it("★安全と確定できる値だけが素通りする（許可リスト方式）", () => {
+    expect(isDefinitelyNonPersonalValue("なし")).toBe(true);
+    expect(isDefinitelyNonPersonalValue("70.55")).toBe(true);
+    // ⚠人名・住所は絶対に「安全」にならない。
+    expect(isDefinitelyNonPersonalValue("山田太郎")).toBe(false);
+    expect(isDefinitelyNonPersonalValue("東京都A区B1-2-3")).toBe(false);
+    expect(isDefinitelyNonPersonalValue("090-1234-5678")).toBe(false);
   });
 });
