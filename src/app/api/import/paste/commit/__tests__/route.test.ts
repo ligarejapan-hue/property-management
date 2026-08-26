@@ -508,7 +508,12 @@ describe("取込系routeの共通ゲート(import:write)", () => {
 });
 
 describe("入力の検査: 直せる形の400で断る(500に化けさせない・全体レビュー I-3)", () => {
-  const area = (v: string) => ({ ...baseBody, property: { ...baseBody.property, exclusiveArea: v } });
+  // ⚠専有面積は**区分マンション専用の欄**。種別が合わないと保存側で null に
+  //   落ちる(10巡目 ①)ので、値そのものを見るテストでは種別を区分にする。
+  const area = (v: string) => ({
+    ...baseBody,
+    property: { ...baseBody.property, propertyType: "apartment_unit", exclusiveArea: v },
+  });
 
   it("★専有面積に単位が付いていたら400で、どの欄かを伝える", async () => {
     const res = await POST(req(area("70㎡")));
@@ -578,7 +583,8 @@ describe("入力の検査: 直せる形の400で断る(500に化けさせない�
   it("現況が enum の値なら通る", async () => {
     const res = await POST(req({
       ...baseBody,
-      property: { ...baseBody.property, occupancyStatus: "occupied" },
+      // 現況も区分専用の欄なので、値を見るときは種別を区分にする。
+      property: { ...baseBody.property, propertyType: "apartment_unit", occupancyStatus: "occupied" },
     }));
     expect(res.status).toBe(200);
     expect(created.property?.[0]).toMatchObject({ occupancyStatus: "occupied" });
@@ -1013,5 +1019,110 @@ describe("JSON body の上限はこの口の実態に合わせる（5巡目 ①�
 
   it("正規の大きさは従来どおり通る", async () => {
     expect((await POST(req(baseBody))).status).toBe(200);
+  });
+});
+
+describe("区分マンション専用の欄は種別に合うときだけ保存する（10巡目）", () => {
+  const unitFields = {
+    roomNo: "303",
+    exclusiveArea: "70.55",
+    layoutType: "2LDK",
+    occupancyStatus: "occupied",
+  };
+  const withType = (propertyType: string) => ({
+    ...baseBody,
+    property: { ...baseBody.property, propertyType, ...unitFields },
+  });
+
+  it("★種別が land なら、部屋番号も専有面積も間取りも現況も null で保存される", async () => {
+    // 物件詳細は区分のときしかこれらを描かず、通常の編集画面(updatePropertySchema)にも
+    // 無い＝**見えず直せないデータ**になる。
+    const res = await POST(req(withType("land")));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({
+      roomNo: null,
+      exclusiveArea: null,
+      layoutType: null,
+      occupancyStatus: null,
+    });
+  });
+
+  it("★戸建・一棟マンション・一棟アパートでも同じ", async () => {
+    for (const t of ["house", "apartment_building", "apartment_block"]) {
+      for (const k of Object.keys(created)) delete created[k];
+      const res = await POST(req(withType(t)));
+      expect(res.status, t).toBe(200);
+      expect(created.property?.[0], t).toMatchObject({
+        roomNo: null,
+        exclusiveArea: null,
+        layoutType: null,
+        occupancyStatus: null,
+      });
+    }
+  });
+
+  it("★種別が apartment_unit なら、4つともそのまま保存される（落としすぎていない）", async () => {
+    const res = await POST(req(withType("apartment_unit")));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject(unitFields);
+  });
+
+  it("★旧値 unit でもそのまま保存される（既存データの取り込みで消えない）", async () => {
+    const res = await POST(req(withType("unit")));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject(unitFields);
+  });
+
+  it("★物件名(buildingName)の扱いは変わっていない（既存の正規化と共存する）", async () => {
+    await POST(req({
+      ...baseBody,
+      property: { ...baseBody.property, propertyType: "apartment_unit", buildingName: "グリーンコート", ...unitFields },
+    }));
+    expect(created.property?.[0]).toMatchObject({ buildingName: "グリーンコート", roomNo: "303" });
+  });
+
+  it("★判定は1か所(normalizeUnitOnlyFields)を通る。保存経路が素通しで書いていない", async () => {
+    // ⚠次に区分専用の欄が増えたときも自動的に守られる形であることを固定する。
+    //   UNIT_ONLY_PROPERTY_FIELDS に載っている欄を、保存経路が
+    //   normalizeUnitOnlyFields の外で data に書いていたら名指しで落ちる。
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const { dirname, join } = await import("node:path");
+    const { UNIT_ONLY_PROPERTY_FIELDS } = await import("@/lib/property-building-name");
+
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../route.ts"),
+      "utf8",
+    );
+    const callAt = src.indexOf("normalizeUnitOnlyFields(propertyType, {");
+    expect(callAt, "normalizeUnitOnlyFields の呼び出しが無い").toBeGreaterThanOrEqual(0);
+    const callBlock = src.slice(callAt, src.indexOf("});", callAt));
+
+    // data: { ... } に直接書かれている欄を洗う。
+    const dataAt = src.indexOf("tx.property.create({");
+    const dataBlock = src.slice(dataAt, src.indexOf("        });", dataAt));
+
+    const offenders: string[] = [];
+    for (const f of UNIT_ONLY_PROPERTY_FIELDS) {
+      // ⚠正規表現の**エスケープに頼らない**。テンプレート文字列の中で
+      //   バックスラッシュが1つ落ちると `\s` が `s` になり、
+      //   「何にも当たらないのに緑」の空振りになる(実際に一度踏んだ)。
+      //   行を分けて素直に見る。
+      const writtenDirectly = dataBlock
+        .split("\n")
+        .map((line) => line.trim())
+        .some((line) => line.startsWith(`${f}:`) || line === `${f},`);
+      const throughHelper = callBlock.includes(`${f}:`) || callBlock.includes(`${f},`);
+      if (writtenDirectly && !throughHelper) {
+        offenders.push(`${f} が normalizeUnitOnlyFields を通らずに保存されている`);
+      }
+    }
+    expect(offenders, offenders.join(" / ")).toEqual([]);
+    // 少なくとも今回の4欄はヘルパー経由になっていること（走査が空当たりでない裏取り）。
+    for (const f of ["roomNo", "exclusiveArea", "layoutType", "occupancyStatus"]) {
+      expect(callBlock, f).toContain(f);
+    }
+    // 展開はヘルパーの結果で行っていること。
+    expect(dataBlock).toContain("...unitOnly,");
   });
 });

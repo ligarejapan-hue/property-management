@@ -22,6 +22,7 @@ import { PROPERTY_TYPE_VALUES, OCCUPANCY_STATUS_LABELS } from "@/lib/property-ty
 import { toHalfWidth, toFullWidth } from "@/lib/paste-import/normalize";
 import {
   normalizeBuildingName,
+  normalizeUnitOnlyFields,
   BUILDING_NAME_MAX_LENGTH,
   BUILDING_NAME_TOO_LONG_MESSAGE,
 } from "@/lib/property-building-name";
@@ -263,6 +264,21 @@ export async function POST(request: NextRequest) {
     }
     const buildingName = normalizeBuildingName(propertyType, p.buildingName);
 
+    // ---- 区分マンション専用の欄（@codex PR#414 10巡目） ----
+    // ⚠**種別に合わない欄は null に落とす**。物件詳細はこれらを区分のときしか
+    //   描かず、通常の編集画面(updatePropertySchema)にも無いので、
+    //   種別を土地や戸建に直したのに保存されると**見えず直せないデータ**が残り、
+    //   CSV 出力や DM 差込で初めて表に出る。
+    // ⚠個別に3つ並べず、判定は1か所(normalizeUnitOnlyFields)に置く。
+    //   区分専用の欄が増えたときは UNIT_ONLY_PROPERTY_FIELDS に足すだけで、
+    //   この経路が自動的に守られる(走査テストで固定)。
+    const unitOnly = normalizeUnitOnlyFields(propertyType, {
+      roomNo: p.roomNo?.trim() || null,
+      exclusiveArea,
+      layoutType: p.layoutType?.trim() || null,
+      occupancyStatus,
+    });
+
     // 外部キー（査定ナンバー等）。
     // ⚠**ここで1回だけ正規化し、この先はすべてこの値を使う**
     //   （① 助言ロックの鍵 ② 重複ガードの findFirst ③ property.create に保存する値）。
@@ -389,12 +405,11 @@ export async function POST(request: NextRequest) {
             address: p.address.trim(),
             lotNumber: p.lotNumber?.trim() || null,
             buildingName,
-            roomNo: p.roomNo?.trim() || null,
             propertyType,
-            // Decimal(8,2) 列。素の数字であることは上で検査済み(空欄は null)。
-            exclusiveArea,
-            layoutType: p.layoutType?.trim() || null,
-            occupancyStatus,
+            // 区分専用の欄(部屋番号・専有面積・間取り・現況)。種別に合わなければ
+            // すべて null になっている。⚠**この展開より後に同じ欄を書かない**
+            // (書くと正規化を上書きしてしまう)。
+            ...unitOnly,
             externalLinkKey,
             note: p.note?.trim() || null,
             introductionRoute: "web_inquiry",

@@ -97,3 +97,73 @@ export function isBuildingNameTooLong(
 
 /** 長すぎるときに画面へ出す文言 (入力側・保存側で同じ言い回しにする)。 */
 export const BUILDING_NAME_TOO_LONG_MESSAGE = `物件名は${BUILDING_NAME_MAX_LENGTH}文字以内で入力してください（前後の空白は数えません）`;
+
+// ---------------------------------------------------------------------------
+// 区分マンション専用の欄（@codex PR#414 10巡目）
+//
+// ⚠**物件名(buildingName)だけを種別で正規化して、隣の同種の欄を素通しにしていた**。
+// 物件詳細 (src/app/(dashboard)/properties/[id]/page.tsx の `isUnit` ブロック) は
+// これらの欄を**区分マンションのときしか描かない**。しかも
+// `updatePropertySchema` にも `createPropertySchema` にも無いので、
+// **通常の編集画面からは直せない**。種別に合わないまま保存すると
+// 「見えず、直せないデータ」が残り、CSV 出力や DM 差込で初めて表に出る。
+//
+// ⚠個別に潰さず**1か所で判定する**。次に区分専用の欄が増えたときも、
+// この配列へ足せば保存経路が自動的に守られる
+// (__tests__ の走査テストが、保存経路の欄がこの関数を通っているかを固定する)。
+// ---------------------------------------------------------------------------
+
+/** 区分専用の欄を持てる種別（旧値 `unit` も区分として扱う）。 */
+export const PROPERTY_TYPES_WITH_UNIT_FIELDS: readonly string[] = [
+  "apartment_unit", // 区分マンション
+  "unit", // 区分（旧）
+];
+
+/**
+ * 区分マンションのときだけ意味を持つ欄の名前。
+ * 物件詳細の `isUnit` ブロックが描いている欄と**同じ集合**にすること。
+ */
+export const UNIT_ONLY_PROPERTY_FIELDS = [
+  "roomNo",
+  "floorNo",
+  "exclusiveArea",
+  "balconyArea",
+  "layoutType",
+  "orientation",
+  "managementFee",
+  "repairReserveFee",
+  "occupancyStatus",
+  "ownershipShareNote",
+] as const;
+
+export type UnitOnlyPropertyField = (typeof UNIT_ONLY_PROPERTY_FIELDS)[number];
+
+const UNIT_ONLY_FIELD_SET: ReadonlySet<string> = new Set(UNIT_ONLY_PROPERTY_FIELDS);
+
+/** その種別が区分専用の欄を持てるか。 */
+export function supportsUnitFields(
+  propertyType: string | null | undefined,
+): boolean {
+  if (!propertyType) return false;
+  return PROPERTY_TYPES_WITH_UNIT_FIELDS.includes(propertyType);
+}
+
+/**
+ * 種別に合わない区分専用の欄を **null に落とす**（`normalizeBuildingName` と同じ姿勢）。
+ *
+ * 渡された値のうち `UNIT_ONLY_PROPERTY_FIELDS` に載っている欄だけを対象にする。
+ * それ以外の欄はそのまま通す（呼び出し側が誤って混ぜても壊さない）。
+ */
+export function normalizeUnitOnlyFields<T extends Record<string, unknown>>(
+  propertyType: string | null | undefined,
+  values: T,
+): { [K in keyof T]: T[K] | null } {
+  if (supportsUnitFields(propertyType)) {
+    return { ...values } as { [K in keyof T]: T[K] | null };
+  }
+  const out: Record<string, unknown> = { ...values };
+  for (const key of Object.keys(out)) {
+    if (UNIT_ONLY_FIELD_SET.has(key)) out[key] = null;
+  }
+  return out as { [K in keyof T]: T[K] | null };
+}

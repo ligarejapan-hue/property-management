@@ -14,6 +14,9 @@ import {
   isBuildingNameTooLong,
   normalizeBuildingName,
   supportsBuildingName,
+  normalizeUnitOnlyFields,
+  supportsUnitFields,
+  UNIT_ONLY_PROPERTY_FIELDS,
 } from "@/lib/property-building-name";
 import { PROPERTY_TYPE_LABELS } from "@/lib/property-types";
 import {
@@ -243,5 +246,84 @@ describe("配線 — 同じ判定を UI と API の両方が通る", () => {
         "prisma/migrations/20260803180000_add_property_building_name/migration.sql",
       ),
     ).toMatch(/ADD COLUMN "building_name" TEXT;/);
+  });
+});
+
+// ===========================================================================
+// 区分マンション専用の欄（@codex PR#414 10巡目）
+// ===========================================================================
+
+describe("normalizeUnitOnlyFields（区分専用の欄を種別で落とす）", () => {
+  const filled = {
+    roomNo: "303",
+    exclusiveArea: "70.55",
+    layoutType: "2LDK",
+    occupancyStatus: "occupied",
+  };
+
+  it("★区分マンションならそのまま通す", () => {
+    expect(normalizeUnitOnlyFields("apartment_unit", filled)).toEqual(filled);
+  });
+
+  it("★旧値 unit も区分として扱う（既存データの編集で消えない）", () => {
+    expect(normalizeUnitOnlyFields("unit", filled)).toEqual(filled);
+  });
+
+  it("★土地・戸建・一棟では全部 null（見えず直せないデータを残さない）", () => {
+    for (const t of ["land", "house", "apartment_building", "apartment_block", "store", "unknown"]) {
+      expect(normalizeUnitOnlyFields(t, filled), t).toEqual({
+        roomNo: null,
+        exclusiveArea: null,
+        layoutType: null,
+        occupancyStatus: null,
+      });
+    }
+  });
+
+  it("★種別が空でも落とす（分からないなら持たせない）", () => {
+    expect(normalizeUnitOnlyFields(null, filled).roomNo).toBeNull();
+    expect(normalizeUnitOnlyFields(undefined, filled).exclusiveArea).toBeNull();
+  });
+
+  it("★区分専用ではない欄は素通しする（巻き添えにしない）", () => {
+    const mixed = { roomNo: "303", address: "東京都A区B1-2-3", lotNumber: "552-2" };
+    expect(normalizeUnitOnlyFields("land", mixed)).toEqual({
+      roomNo: null,
+      address: "東京都A区B1-2-3",
+      lotNumber: "552-2",
+    });
+  });
+
+  it("★元のオブジェクトを書き換えない", () => {
+    const src = { ...filled };
+    normalizeUnitOnlyFields("land", src);
+    expect(src).toEqual(filled);
+  });
+
+  it("★対象の欄は、物件詳細が区分のときだけ描いている欄と同じ集合", () => {
+    // 物件詳細 (properties/[id]/page.tsx) の isUnit ブロックが描く欄。
+    // ここがズレると「画面に出ないのに保存される」欄がまた生まれる。
+    expect([...UNIT_ONLY_PROPERTY_FIELDS].sort()).toEqual(
+      [
+        "balconyArea",
+        "exclusiveArea",
+        "floorNo",
+        "layoutType",
+        "managementFee",
+        "occupancyStatus",
+        "orientation",
+        "ownershipShareNote",
+        "repairReserveFee",
+        "roomNo",
+      ].sort(),
+    );
+  });
+
+  it("supportsUnitFields は区分だけ true", () => {
+    expect(supportsUnitFields("apartment_unit")).toBe(true);
+    expect(supportsUnitFields("unit")).toBe(true);
+    expect(supportsUnitFields("apartment_building")).toBe(false);
+    expect(supportsUnitFields("land")).toBe(false);
+    expect(supportsUnitFields(null)).toBe(false);
   });
 });
