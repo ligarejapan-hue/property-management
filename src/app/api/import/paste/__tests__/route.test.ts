@@ -824,9 +824,9 @@ describe("外部キーは全角/半角の別を越えて突き合わせる", () 
       assignedTo: null,
     };
     mockFindMany.mockImplementation(
-      async (args: { where?: { externalLinkKey?: string; address?: { startsWith?: string; contains?: string } } }) => {
-        if (typeof args?.where?.externalLinkKey === "string") {
-          return args.where.externalLinkKey === stored ? [row] : [];
+      async (args: { where?: { externalLinkKey?: { in?: string[] }; address?: { startsWith?: string; contains?: string } } }) => {
+        if (args?.where?.externalLinkKey) {
+          return (args.where.externalLinkKey.in ?? []).includes(stored) ? [row] : [];
         }
         const cond = args?.where?.address;
         if (cond && typeof cond.startsWith === "string") {
@@ -862,11 +862,11 @@ describe("外部キーは全角/半角の別を越えて突き合わせる", () 
     expect(body.duplicates.blockedByPropertyId).toBe("p-key");
   });
 
-  it("★逆方向で住所も違う場合は、完全一致クエリでは当たらない（残っている取りこぼしを明示する）", async () => {
-    // 既存データが全角で保存され、かつ住所も違う（＝住所の候補にも入らない）と、
-    // ブロックできない。本番実測では外部キーを持つ物件が0件のため今日は踏めず、
-    // 直すには「正規化した値で引けるようにする」設計判断が要る（別途）。
-    // ⚠この事実をテストで明文化しておく（黙って落ちている状態にしない）。
+  it("★CSV取込が全角で入れた既存行は、住所が違っていても外部キーだけで見つかりブロックされる", async () => {
+    // @codex PR#414 2巡目 P2: CSV取込(src/app/api/import/csv/route.ts)は
+    // externalLinkKey を**生値のまま**保存する。全角で入った行は、正規化後(半角)の
+    // 完全一致だけでは見つからない。住所も違う＝住所の候補にも入らないので、
+    // 外部キーのクエリが全角形も見ていなければ、この二重登録は素通りする。
     const row = {
       id: "p-key-fw",
       address: "大阪府C区D9-9-9",
@@ -876,9 +876,9 @@ describe("外部キーは全角/半角の別を越えて突き合わせる", () 
       assignedTo: null,
     };
     mockFindMany.mockImplementation(
-      async (args: { where?: { externalLinkKey?: string; address?: { startsWith?: string } } }) => {
-        if (typeof args?.where?.externalLinkKey === "string") {
-          return args.where.externalLinkKey === row.externalLinkKey ? [row] : [];
+      async (args: { where?: { externalLinkKey?: { in?: string[] }; address?: { startsWith?: string } } }) => {
+        if (args?.where?.externalLinkKey) {
+          return (args.where.externalLinkKey.in ?? []).includes(row.externalLinkKey) ? [row] : [];
         }
         const cond = args?.where?.address;
         if (cond && typeof cond.startsWith === "string") {
@@ -891,7 +891,8 @@ describe("外部キーは全角/半角の別を越えて突き合わせる", () 
       jsonReq({ text: "■査定ナンバー： SA2608-1234567" + NL + "■物件所在地： 東京都A区B1-2-3" }),
     );
     const body = await res.json();
-    expect(body.duplicates.blocked).toBe(false);
+    expect(body.duplicates.blocked).toBe(true);
+    expect(body.duplicates.blockedByPropertyId).toBe("p-key-fw");
   });
 
   it("★下書きが返す外部キーは正規化済み（画面がそのまま commit へ渡すため）", async () => {
@@ -907,8 +908,49 @@ describe("外部キーは全角/半角の別を越えて突き合わせる", () 
       jsonReq({ text: "■査定ナンバー： ＳＡ２６０８－１２３４５６７" + NL + "■物件所在地： 東京都A区B1-2-3" }),
     );
     const keyCall = mockFindMany.mock.calls
-      .map((c) => c[0] as { where?: { externalLinkKey?: string } })
-      .find((a) => typeof a?.where?.externalLinkKey === "string");
-    expect(keyCall?.where?.externalLinkKey).toBe("SA2608-1234567");
+      .map((c) => c[0] as { where?: { externalLinkKey?: { in?: string[] } } })
+      .find((a) => a?.where?.externalLinkKey !== undefined);
+    // 正規化後(半角)を必ず含み、CSV取込が生値で入れた全角形も併せて見る。
+    expect(keyCall?.where?.externalLinkKey?.in).toEqual([
+      "SA2608-1234567",
+      "ＳＡ２６０８－１２３４５６７",
+    ]);
+  });
+});
+
+describe("下書きAPIの multipart も formData() の前に大きさを見る（P1②）", () => {
+  it("★Content-Length が上限超過なら413で、PDFの解析にも到達しない", async () => {
+    const { MAX_FILE_SIZE } = await import("@/lib/storage");
+    const fd = new FormData();
+    fd.append("file", new File([Buffer.from("%PDF-1.4")], "x.pdf", { type: "application/pdf" }));
+    const blob = await new Response(fd).blob();
+    const tooBig = new NextRequest("http://localhost/api/import/paste", {
+      method: "POST",
+      body: blob,
+      headers: {
+        "content-type": "multipart/form-data; boundary=x",
+        "content-length": String(MAX_FILE_SIZE + 2 * 1024 * 1024),
+      },
+    });
+    const res = await POST(tooBig);
+    expect(res.status).toBe(413);
+  });
+
+  it("★Content-Length が無い multipart は411", async () => {
+    const fd = new FormData();
+    fd.append("file", new File([Buffer.from("%PDF-1.4")], "x.pdf", { type: "application/pdf" }));
+    const blob = await new Response(fd).blob();
+    const noLen = new NextRequest("http://localhost/api/import/paste", {
+      method: "POST",
+      body: blob,
+      headers: { "content-type": "multipart/form-data; boundary=x" },
+    });
+    const res = await POST(noLen);
+    expect(res.status).toBe(411);
+  });
+
+  it("通常の大きさのPDFは従来どおり通る", async () => {
+    const res = await POST(await pdfReq());
+    expect(res.status).toBe(200);
   });
 });

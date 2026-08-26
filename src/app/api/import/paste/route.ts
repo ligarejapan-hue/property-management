@@ -13,10 +13,13 @@ import { prisma } from "@/lib/prisma";
 import { extractTextFromPdf, isPdfBuffer, isLikelyScannedPdf } from "@/lib/pdf-extract";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
 import { judgeDuplicates, type ExistingProperty } from "@/lib/paste-import/find-duplicates";
-import { assertImportJsonBodySize } from "@/lib/import-body-size";
+import {
+  assertImportJsonBodySize,
+  assertImportMultipartBodySize,
+} from "@/lib/import-body-size";
 import { MAX_FILE_SIZE } from "@/lib/storage";
 import { buildOwnerDedupKey } from "@/lib/owner-dedup";
-import { addressSearchPrefix } from "@/lib/paste-import/normalize";
+import { addressSearchPrefix, toFullWidth } from "@/lib/paste-import/normalize";
 import { normalizeName } from "@/lib/normalize";
 
 /**
@@ -184,6 +187,10 @@ export async function POST(request: NextRequest) {
     const isPdfPath = contentType.includes("multipart/form-data");
 
     if (isPdfPath) {
+      // ⚠formData() は**ボディ全体をメモリに読み込む**。読み込んだ後で file.size を
+      //   見ても、巨大なリクエストでメモリを食い潰せる(@codex PR#414 2巡目 P1)。
+      //   registry-pdf-bulk と同じく Content-Length を**先に**見る。
+      assertImportMultipartBodySize(request, MAX_PDF_BYTES);
       const form = await request.formData();
       const file = form.get("file");
       if (!(file instanceof File)) {
@@ -262,8 +269,15 @@ export async function POST(request: NextRequest) {
     const candidateMap = new Map<string, CandidateProperty>();
 
     if (draft.externalLinkKey) {
+      // ⚠**全角形も見る**(@codex PR#414 2巡目 P2)。CSV取込
+      //   (src/app/api/import/csv/route.ts) は externalLinkKey を生値のまま保存する
+      //   ため、全角で入った既存行は正規化後(半角)の完全一致では見つからない。
+      //   下書きの externalLinkKey は build-draft.ts で正規化済み(半角)。
+      const keyVariants = Array.from(
+        new Set([draft.externalLinkKey, toFullWidth(draft.externalLinkKey)]),
+      );
       const keyRows = await prisma.property.findMany({
-        where: { externalLinkKey: draft.externalLinkKey, isArchived: false },
+        where: { externalLinkKey: { in: keyVariants }, isArchived: false },
         select,
       });
       for (const row of keyRows) candidateMap.set(row.id, row);

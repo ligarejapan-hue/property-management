@@ -12,6 +12,20 @@ export function toHalfWidth(s: string): string {
     .replace(/[－ー−―]/g, "-");
 }
 
+/**
+ * `toHalfWidth` の**逆向き**（半角英数→全角・半角ハイフン→全角ハイフン）。
+ *
+ * ⚠正規化ではない。「同じ値の**別の書き方**」を作るためだけに使う
+ *   (@codex PR#414 2巡目 P2)。CSV取込は外部キーを生値のまま保存するため、
+ *   全角で入った既存行を探すには全角形でも引く必要がある。
+ *   ⚠**保存する値や助言ロックの鍵には使わない**（そちらは常に toHalfWidth 側）。
+ */
+export function toFullWidth(s: string): string {
+  return s
+    .replace(/[A-Za-z0-9]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0))
+    .replace(/-/g, "－");
+}
+
 /** 元号の開始年（その元号の1年＝この西暦）。 */
 const ERAS: { name: string; startYear: number }[] = [
   { name: "令和", startYear: 2019 },

@@ -34,6 +34,9 @@ let storedExternalKey: string | null = null;
 let ownerLinkable = true;
 /** owner.updateMany に渡された引数。 */
 const ownerUpdateManyArgs: unknown[] = [];
+/** storage.upload に渡された key / storage.delete に渡された key。 */
+const uploadedKeys: string[] = [];
+const deletedKeys: string[] = [];
 
 // ⚠api-helpers を vi.importActual すると実物の "@/lib/auth" まで読み込まれ、
 //   next-auth 内部の拡張子なし "next/server" import が node の ESM 解決に失敗する
@@ -69,11 +72,17 @@ vi.mock("@/lib/storage", async (importOriginal) => {
   return {
     ...actual,
     getStorage: vi.fn(() => ({
-      upload: vi.fn(async () => ({
-        url: "https://storage.local/properties/x/paste-import/x.pdf",
-        key: "properties/x/paste-import/x.pdf",
-      })),
-      delete: vi.fn(async () => {}),
+      // ⚠upload に渡された key を控える。孤児 PDF の削除が「アップロードした
+      //   その key」で呼ばれたかを確かめるため(固定文字列の assert では、
+      //   別の key を消していても緑になる)。
+      upload: vi.fn(async (_buf: unknown, opts: { key: string }) => {
+        uploadedKeys.push(opts.key);
+        return {
+          url: "https://storage.local/properties/x/paste-import/x.pdf",
+          key: opts.key,
+        };
+      }),
+      delete: vi.fn(async (key: string) => { deletedKeys.push(key); }),
       getUrl: vi.fn(async () => ""),
       read: vi.fn(async () => null),
       keyFromUrl: vi.fn(() => null),
@@ -94,12 +103,15 @@ vi.mock("@/lib/prisma", () => {
       // ⚠**where を実際に適用する**。素通しで「あり」を返すモックだと、
       //   検索する値がロックの鍵や保存値とずれても緑のまま通ってしまう。
       //   storedExternalKey が入っているときは、渡された値と一致したときだけ返す。
-      findFirst: vi.fn(async (args: { where?: { externalLinkKey?: string } }) => {
+      findFirst: vi.fn(async (args: { where?: { externalLinkKey?: { in?: string[] } } }) => {
         callOrder.push("property.findFirst");
         findFirstArgs.push(args);
         if (existingByExternalKey === null) return null;
-        if (storedExternalKey !== null && args?.where?.externalLinkKey !== storedExternalKey) {
-          return null;
+        if (storedExternalKey !== null) {
+          // ⚠**where を実際に適用する**。検索が探した候補の中に、DB に保存されて
+          //   いる表記が含まれているときだけ返す。
+          const wanted = args?.where?.externalLinkKey?.in ?? [];
+          if (!wanted.includes(storedExternalKey)) return null;
         }
         return { id: existingByExternalKey };
       }),
@@ -225,6 +237,8 @@ beforeEach(() => {
   storedExternalKey = null;
   ownerLinkable = true;
   ownerUpdateManyArgs.length = 0;
+  uploadedKeys.length = 0;
+  deletedKeys.length = 0;
   for (const k of Object.keys(created)) delete created[k];
   auditCalls.length = 0;
   callOrder.length = 0;
@@ -446,7 +460,7 @@ describe("二重登録は確定側(サーバー)で止める", () => {
   it("★存在確認は isArchived: false の同じ外部キーで引く", async () => {
     await POST(req(withKey));
     expect(findFirstArgs[0]).toMatchObject({
-      where: { externalLinkKey: "SA2608-1234567", isArchived: false },
+      where: { externalLinkKey: { in: ["SA2608-1234567", "ＳＡ２６０８－１２３４５６７"] }, isArchived: false },
     });
   });
 
@@ -463,6 +477,8 @@ describe("二重登録は確定側(サーバー)で止める", () => {
   storedExternalKey = null;
   ownerLinkable = true;
   ownerUpdateManyArgs.length = 0;
+  uploadedKeys.length = 0;
+  deletedKeys.length = 0;
     const res = await POST(req(withKey));
     expect(res.status).toBe(200);
     expect(created.property?.[0]).toMatchObject({ externalLinkKey: "SA2608-1234567" });
@@ -703,7 +719,9 @@ describe("外部キーは入口で1回だけ正規化し、保存・検索・ロ
     await POST(req({ ...baseBody, externalLinkKey: FULL }));
     expect(advisoryLockValues[0]).toEqual([HALF]);
     // 3か所すべてが同じ文字列であることを一続きで確かめる。
-    expect(findFirstArgs[0]).toMatchObject({ where: { externalLinkKey: HALF, isArchived: false } });
+    expect(findFirstArgs[0]).toMatchObject({
+      where: { externalLinkKey: { in: [HALF, FULL] }, isArchived: false },
+    });
     expect(created.property?.[0]).toMatchObject({ externalLinkKey: HALF });
   });
 
@@ -712,5 +730,131 @@ describe("外部キーは入口で1回だけ正規化し、保存・検索・ロ
     expect(res.status).toBe(200);
     expect(callOrder).not.toContain("advisoryLock");
     expect(created.property?.[0]).toMatchObject({ externalLinkKey: null });
+  });
+});
+
+// ===========================================================================
+// @codex PR#414 2巡目
+// ===========================================================================
+
+describe("トランザクションが失敗したら、先に保存したPDFを消す（P1①）", () => {
+  it("★409のとき、アップロード済みの key で storage.delete が呼ばれる", async () => {
+    // ⚠孤児 PDF は Attachment 行を持たないため自動お掃除の対象外＝**消えないまま
+    //   溜まり続ける**。中身は所有者の個人情報なので、容量ではなく個人情報の問題。
+    existingByExternalKey = "prop-existing-1";
+    const res = await POST(
+      await multipartReq({ ...baseBody, externalLinkKey: "SA2608-1234567" }, pdfFile("shokai.pdf")),
+    );
+    expect(res.status).toBe(409);
+    expect(uploadedKeys).toHaveLength(1);
+    // 「消した」だけでなく「**アップロードしたその key を**消した」ことを見る。
+    expect(deletedKeys).toEqual([uploadedKeys[0]]);
+  });
+
+  it("★アーカイブ済み所有者による409でも消す（409の経路が1つだけではない）", async () => {
+    ownerLinkable = false;
+    const res = await POST(
+      await multipartReq({ ...baseBody, linkExistingOwnerId: "existing-owner-1" }, pdfFile()),
+    );
+    expect(res.status).toBe(409);
+    expect(deletedKeys).toEqual([uploadedKeys[0]]);
+  });
+
+  it("★成功したときは消さない（消しすぎていない）", async () => {
+    const res = await POST(await multipartReq(baseBody, pdfFile()));
+    expect(res.status).toBe(200);
+    expect(uploadedKeys).toHaveLength(1);
+    expect(deletedKeys).toEqual([]);
+  });
+
+  it("★PDFが無いときは storage.delete を呼ばない", async () => {
+    existingByExternalKey = "prop-existing-1";
+    const res = await POST(req({ ...baseBody, externalLinkKey: "SA2608-1234567" }));
+    expect(res.status).toBe(409);
+    expect(deletedKeys).toEqual([]);
+  });
+});
+
+describe("multipart は formData() の前に大きさを見る（P1②）", () => {
+  it("★Content-Length が上限超過なら413で、formData() に到達しない", async () => {
+    const { MAX_FILE_SIZE } = await import("@/lib/storage");
+    // 本文を実際に作らず、ヘッダだけ巨大にする(=ガードが**先に**効いていなければ
+    // formData() がヘッダどおりの本文を待って別のエラーになる)。
+    const fd = new FormData();
+    fd.append("data", JSON.stringify(baseBody));
+    const blob = await new Response(fd).blob();
+    const reqTooBig = new NextRequest("http://localhost/api/import/paste/commit", {
+      method: "POST",
+      body: blob,
+      headers: {
+        "content-type": "multipart/form-data; boundary=x",
+        "content-length": String(MAX_FILE_SIZE + 2 * 1024 * 1024),
+      },
+    });
+    const res = await POST(reqTooBig);
+    expect(res.status).toBe(413);
+    expect(created.property).toBeUndefined();
+    expect(uploadedKeys).toEqual([]);
+  });
+
+  it("★Content-Length が無い multipart は411", async () => {
+    const fd = new FormData();
+    fd.append("data", JSON.stringify(baseBody));
+    const blob = await new Response(fd).blob();
+    const noLen = new NextRequest("http://localhost/api/import/paste/commit", {
+      method: "POST",
+      body: blob,
+      headers: { "content-type": "multipart/form-data; boundary=x" },
+    });
+    const res = await POST(noLen);
+    expect(res.status).toBe(411);
+  });
+
+  it("通常の大きさの multipart は従来どおり通る", async () => {
+    const res = await POST(await multipartReq(baseBody, pdfFile()));
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("物件名は種別に合うときだけ保存する（P2④）", () => {
+  const withBuilding = (propertyType: string, buildingName: string | null) => ({
+    ...baseBody,
+    property: { ...baseBody.property, propertyType, buildingName },
+  });
+
+  it("★種別を土地に直したのに建物名が残っていたら、保存される値は null", async () => {
+    // 画面はその種別で建物名の欄を出さない＝**見えず直せないデータ**が残り、
+    // CSV出力やDM差込で初めて表に出る。判定は UI・通常の作成/更新と同じ純関数。
+    const res = await POST(req(withBuilding("land", "グリーンコート")));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ buildingName: null });
+  });
+
+  it("★戸建でも null になる", async () => {
+    await POST(req(withBuilding("house", "グリーンコート")));
+    expect(created.property?.[0]).toMatchObject({ buildingName: null });
+  });
+
+  it("区分マンションなら保存される（落としすぎていない）", async () => {
+    await POST(req(withBuilding("apartment_unit", " グリーンコート ")));
+    expect(created.property?.[0]).toMatchObject({ buildingName: "グリーンコート" });
+  });
+
+  it("一棟アパート・一棟マンションでも保存される", async () => {
+    await POST(req(withBuilding("apartment_block", "サンハイツ")));
+    expect(created.property?.[0]).toMatchObject({ buildingName: "サンハイツ" });
+  });
+
+  it("★長すぎる物件名は400で断る（黙って切り詰めない）", async () => {
+    const res = await POST(req(withBuilding("apartment_unit", "あ".repeat(101))));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.message).toContain("物件名");
+    expect(created.property).toBeUndefined();
+  });
+
+  it("100文字ちょうど（前後に空白あり）は通る＝整えてから測っている", async () => {
+    const res = await POST(req(withBuilding("apartment_unit", "  " + "あ".repeat(100) + "  ")));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ buildingName: "あ".repeat(100) });
   });
 });

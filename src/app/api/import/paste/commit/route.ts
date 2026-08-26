@@ -13,9 +13,17 @@ import { writeAuditLog } from "@/lib/audit";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { isPdfBuffer } from "@/lib/pdf-extract";
 import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES, MAX_FILE_SIZE } from "@/lib/storage";
-import { assertImportJsonBodySize } from "@/lib/import-body-size";
+import {
+  assertImportJsonBodySize,
+  assertImportMultipartBodySize,
+} from "@/lib/import-body-size";
 import { PROPERTY_TYPE_VALUES, OCCUPANCY_STATUS_LABELS } from "@/lib/property-types";
-import { toHalfWidth } from "@/lib/paste-import/normalize";
+import { toHalfWidth, toFullWidth } from "@/lib/paste-import/normalize";
+import {
+  normalizeBuildingName,
+  BUILDING_NAME_MAX_LENGTH,
+  BUILDING_NAME_TOO_LONG_MESSAGE,
+} from "@/lib/property-building-name";
 import type { PropertyType, OccupancyStatus } from "@/generated/prisma";
 
 // ---------------------------------------------------------------------------
@@ -108,6 +116,10 @@ export async function POST(request: NextRequest) {
 
     const contentType = request.headers.get("content-type") ?? "";
     if (contentType.includes("multipart/form-data")) {
+      // ⚠formData() は**ボディ全体をメモリに読み込む**。読み込んだ後で file.size を
+      //   見ても、巨大なリクエストでメモリを食い潰せる(@codex PR#414 2巡目 P1)。
+      //   registry-pdf-bulk と同じく Content-Length を**先に**見る。
+      assertImportMultipartBodySize(request, MAX_FILE_SIZE);
       const form = await request.formData();
       const dataRaw = form.get("data");
       if (typeof dataRaw !== "string") {
@@ -206,6 +218,19 @@ export async function POST(request: NextRequest) {
     }
     const occupancyStatus = occupancyInput === "" ? null : (occupancyInput as OccupancyStatus);
 
+    // ---- 物件名（建物名）（@codex PR#414 2巡目 P2） ----
+    // ⚠**種別に合わないときは必ず null に落とす**。読み取った種別を人が土地や
+    //   戸建に直すと画面から建物名の欄が消えるが、値は送られたままになる。
+    //   保存すると**画面に出ないデータが DB に残り**、誰も直せないまま CSV 出力や
+    //   DM 差込で初めて表に出る。判定は UI・通常の作成/更新と同じ純関数を通す
+    //   (src/lib/property-building-name.ts。自前の判定を書かない)。
+    // ⚠長さは「整えてから測って、超えていれば断る」(切り詰めない)。
+    //   createPropertySchema と同じ上限・同じ文言。
+    if ((p.buildingName ?? "").trim().length > BUILDING_NAME_MAX_LENGTH) {
+      throw new ApiError(400, BUILDING_NAME_TOO_LONG_MESSAGE, "BAD_REQUEST");
+    }
+    const buildingName = normalizeBuildingName(propertyType, p.buildingName);
+
     // 外部キー（査定ナンバー等）。
     // ⚠**ここで1回だけ正規化し、この先はすべてこの値を使う**
     //   （① 助言ロックの鍵 ② 重複ガードの findFirst ③ property.create に保存する値）。
@@ -220,6 +245,16 @@ export async function POST(request: NextRequest) {
     const externalLinkKeyRaw = body.externalLinkKey ?? null;
     const externalLinkKey =
       externalLinkKeyRaw === null ? null : toHalfWidth(externalLinkKeyRaw).trim() || null;
+    // ⚠**検索だけは全角形も見る**(@codex PR#414 2巡目 P2)。CSV取込
+    //   (src/app/api/import/csv/route.ts) は externalLinkKey を**生値のまま**保存する
+    //   ため、全角で入った既存行は正規化後の完全一致では見つからない。
+    //   ⚠助言ロックの鍵は**正規化した値のまま**にする。自分たちが書く値は常に
+    //   正規化されるので、直列化はそれで足りる(鍵を増やすと同じ案件が別の鍵で
+    //   走り、直列化が外れる)。
+    const externalLinkKeySearch =
+      externalLinkKey === null
+        ? null
+        : Array.from(new Set([externalLinkKey, toFullWidth(externalLinkKey)]));
     // 既存の所有者へ紐付ける指定。空文字は「無い」と同じに畳む。
     const linkOwnerId = body.linkExistingOwnerId?.trim() || null;
 
@@ -231,6 +266,9 @@ export async function POST(request: NextRequest) {
     // ⚠外部ストレージへの保存はトランザクションの外で行う(ロックを持つのは
     //   作成の一瞬だけ・attachment-create-parent-lock.test.ts のコメントと同じ型)。
     let uploadedUrl: string | null = null;
+    // ⚠保存先の key を控える。トランザクションが失敗したら消すため
+    //   (@codex PR#414 2巡目 P1・発注者判断で見送りを撤回)。
+    let uploadedKey: string | null = null;
     if (pdfBuffer && pregenPropertyId) {
       const key = `properties/${pregenPropertyId}/paste-import/${Date.now()}-${randomUUID()}.pdf`;
       const uploaded = await getStorage().upload(pdfBuffer, {
@@ -239,140 +277,159 @@ export async function POST(request: NextRequest) {
         fileName: pdfFileName,
       });
       uploadedUrl = uploaded.url;
+      uploadedKey = key;
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      // ---- 二重登録を**サーバー側で**止める（全体レビュー Critical 1） ----
-      // ⚠これまで重複判定は下書き route (/api/import/paste) にしか無く、確定側は
-      //   externalLinkKey を無検査で書いていた。Property.externalLinkKey は
-      //   @@index であって @@unique ではないため、二重登録を防いでいたのは
-      //   画面のボタンの disabled だけだった。同じ査定依頼を2人が貼る／確認画面を
-      //   開いたまま同僚が先に登録する、のどちらでも 200 で通り、物件・所有者・
-      //   お手紙・有料の謄本取得がもう一式できてしまう。
-      //
-      // ⚠advisory lock は**省略しない**。素の findFirst だけでは足りない:
-      //   READ COMMITTED では、待っている間に別トランザクションが確定させた行は
-      //   **先に開始した文からは見えない**（#402 で実測済み）。同じキーの確定を
-      //   advisory lock で直列化し、ロックを取った**あとに**存在を確かめる。
-      //   xact lock はトランザクション終了時に自動解放される
-      //   (src/app/api/import/reception-property/route.ts と同じ型)。
-      if (externalLinkKey) {
-        // ⚠**$executeRaw + ::bigint**。$queryRaw にしてはいけない。
-        //   本番は driver adapter 構成(src/lib/prisma.ts の PrismaPg)で、
-        //   $queryRaw は返却列の型 OID を必ず変換する。pg_advisory_xact_lock の
-        //   戻り型は void(OID 2278)で変換先が無く、UnsupportedNativeDataType を
-        //   投げる = 査定ナンバーのある登録が毎回500になり、このガードは一度も
-        //   働かない。$executeRaw は行を返さないので列型の変換を通らない。
-        //   (prisma を丸ごとモックするテストでは原理的に検出できない種類の穴。
-        //    リポジトリ内の唯一の前例 reception-property/route.ts と同じ形に揃える。)
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${externalLinkKey})::bigint)`;
-        const already = await tx.property.findFirst({
-          where: { externalLinkKey, isArchived: false },
-          select: { id: true },
-        });
-        if (already) {
-          throw new ApiError(409, "この案件は登録済みです", "DUPLICATE");
+    // ⚠トランザクションが失敗したら、**先に保存した PDF を best-effort で消す**。
+    //   放置すると Attachment 行を持たない孤児 PDF が storage に残る。孤児は
+    //   自動お掃除(添付を辿る)の対象外なので**消えないまま溜まり続ける**うえ、
+    //   中身は所有者の個人情報。容量の話ではなく個人情報の話なので見送れない。
+    //   二重登録の 409 を新設したことで、この経路は普通に起きるようになった。
+    // ⚠削除の失敗は握り潰す(登録の失敗を上書きして原因を隠さない)。
+    let result;
+    try {
+      result = await prisma.$transaction(async (tx) => {
+        // ---- 二重登録を**サーバー側で**止める（全体レビュー Critical 1） ----
+        // ⚠これまで重複判定は下書き route (/api/import/paste) にしか無く、確定側は
+        //   externalLinkKey を無検査で書いていた。Property.externalLinkKey は
+        //   @@index であって @@unique ではないため、二重登録を防いでいたのは
+        //   画面のボタンの disabled だけだった。同じ査定依頼を2人が貼る／確認画面を
+        //   開いたまま同僚が先に登録する、のどちらでも 200 で通り、物件・所有者・
+        //   お手紙・有料の謄本取得がもう一式できてしまう。
+        //
+        // ⚠advisory lock は**省略しない**。素の findFirst だけでは足りない:
+        //   READ COMMITTED では、待っている間に別トランザクションが確定させた行は
+        //   **先に開始した文からは見えない**（#402 で実測済み）。同じキーの確定を
+        //   advisory lock で直列化し、ロックを取った**あとに**存在を確かめる。
+        //   xact lock はトランザクション終了時に自動解放される
+        //   (src/app/api/import/reception-property/route.ts と同じ型)。
+        if (externalLinkKey) {
+          // ⚠**$executeRaw + ::bigint**。$queryRaw にしてはいけない。
+          //   本番は driver adapter 構成(src/lib/prisma.ts の PrismaPg)で、
+          //   $queryRaw は返却列の型 OID を必ず変換する。pg_advisory_xact_lock の
+          //   戻り型は void(OID 2278)で変換先が無く、UnsupportedNativeDataType を
+          //   投げる = 査定ナンバーのある登録が毎回500になり、このガードは一度も
+          //   働かない。$executeRaw は行を返さないので列型の変換を通らない。
+          //   (prisma を丸ごとモックするテストでは原理的に検出できない種類の穴。
+          //    リポジトリ内の唯一の前例 reception-property/route.ts と同じ形に揃える。)
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${externalLinkKey})::bigint)`;
+          const already = await tx.property.findFirst({
+            where: { externalLinkKey: { in: externalLinkKeySearch }, isArchived: false },
+            select: { id: true },
+          });
+          if (already) {
+            throw new ApiError(409, "この案件は登録済みです", "DUPLICATE");
+          }
         }
-      }
 
-      // ---- 既存の所有者に紐付ける場合の確認（@codex PR#414 P1-2） ----
-      // ⚠外部キー制約は「行が存在する」ことしか保証しない。アーカイブ済み
-      //   （＝通常の検索から隠されている）所有者にも紐付けられてしまう。
-      //   下書きを取ってから登録するまでの間にアーカイブされた場合も同じ。
-      // ⚠既存の紐付けルート (POST /api/properties/[id]/owners) と**同じやり方**:
-      //   トランザクション内で owner 行に updateMany を発行し isArchived=false を
-      //   再確認しつつ PostgreSQL の行ロックを取る。archive 側の updateMany と
-      //   競合したら片方が必ずロック待ちになり、後勝ち側が条件不一致で失敗する。
-      // ⚠ロックの順序は **Owner → 物件親行 → 子行**（既存の書き込み規約）。
-      //   この位置なら、後段の lockPropertyRow(添付用) より必ず先になる。
-      //   物件を作る前に確かめるので、断ったときに無駄な行も作らない。
-      if (linkOwnerId !== null) {
-        const lockRes = await tx.owner.updateMany({
-          where: { id: linkOwnerId, isArchived: false },
-          data: { updatedAt: new Date() },
-        });
-        if (lockRes.count === 0) {
-          throw new ApiError(
-            409,
-            "この所有者は使用できません（アーカイブ済み、または削除されています）",
-            "OWNER_UNAVAILABLE",
-          );
+        // ---- 既存の所有者に紐付ける場合の確認（@codex PR#414 P1-2） ----
+        // ⚠外部キー制約は「行が存在する」ことしか保証しない。アーカイブ済み
+        //   （＝通常の検索から隠されている）所有者にも紐付けられてしまう。
+        //   下書きを取ってから登録するまでの間にアーカイブされた場合も同じ。
+        // ⚠既存の紐付けルート (POST /api/properties/[id]/owners) と**同じやり方**:
+        //   トランザクション内で owner 行に updateMany を発行し isArchived=false を
+        //   再確認しつつ PostgreSQL の行ロックを取る。archive 側の updateMany と
+        //   競合したら片方が必ずロック待ちになり、後勝ち側が条件不一致で失敗する。
+        // ⚠ロックの順序は **Owner → 物件親行 → 子行**（既存の書き込み規約）。
+        //   この位置なら、後段の lockPropertyRow(添付用) より必ず先になる。
+        //   物件を作る前に確かめるので、断ったときに無駄な行も作らない。
+        if (linkOwnerId !== null) {
+          const lockRes = await tx.owner.updateMany({
+            where: { id: linkOwnerId, isArchived: false },
+            data: { updatedAt: new Date() },
+          });
+          if (lockRes.count === 0) {
+            throw new ApiError(
+              409,
+              "この所有者は使用できません（アーカイブ済み、または削除されています）",
+              "OWNER_UNAVAILABLE",
+            );
+          }
         }
-      }
 
-      const property = await tx.property.create({
-        data: {
-          ...(pregenPropertyId ? { id: pregenPropertyId } : {}),
-          address: p.address.trim(),
-          lotNumber: p.lotNumber?.trim() || null,
-          buildingName: p.buildingName?.trim() || null,
-          roomNo: p.roomNo?.trim() || null,
-          propertyType,
-          // Decimal(8,2) 列。素の数字であることは上で検査済み(空欄は null)。
-          exclusiveArea,
-          layoutType: p.layoutType?.trim() || null,
-          occupancyStatus,
-          externalLinkKey,
-          note: p.note?.trim() || null,
-          introductionRoute: "web_inquiry",
-          caseStatus: "new_case",
-          registryStatus: "unconfirmed",
-          dmStatus: "hold",
-          createdBy: session.id,
-        },
+        const property = await tx.property.create({
+          data: {
+            ...(pregenPropertyId ? { id: pregenPropertyId } : {}),
+            address: p.address.trim(),
+            lotNumber: p.lotNumber?.trim() || null,
+            buildingName,
+            roomNo: p.roomNo?.trim() || null,
+            propertyType,
+            // Decimal(8,2) 列。素の数字であることは上で検査済み(空欄は null)。
+            exclusiveArea,
+            layoutType: p.layoutType?.trim() || null,
+            occupancyStatus,
+            externalLinkKey,
+            note: p.note?.trim() || null,
+            introductionRoute: "web_inquiry",
+            caseStatus: "new_case",
+            registryStatus: "unconfirmed",
+            dmStatus: "hold",
+            createdBy: session.id,
+          },
+        });
+
+        let ownerId: string | null = linkOwnerId;
+        let ownerCreated = false;
+        if (ownerId === null && body.owner?.name) {
+          const owner = await tx.owner.create({
+            data: {
+              name: body.owner.name.trim(),
+              nameKana: body.owner.nameKana?.trim() || null,
+              phone: body.owner.phone?.trim() || null,
+              email: body.owner.email?.trim() || null,
+              // ⚠反響フォームの住所は本人の連絡先住所であり、登記上の住所とは
+              //   限らない。address(登記上住所)は空のままにする(設計書 §7・
+              //   発注者承認 2026-08-26)。address キー自体を書かない。
+              currentAddress: body.owner.currentAddress?.trim() || null,
+            },
+          });
+          ownerId = owner.id;
+          ownerCreated = true;
+        }
+
+        if (ownerId !== null) {
+          await tx.propertyOwner.create({
+            data: { propertyId: property.id, ownerId },
+          });
+        }
+
+        let attachmentId: string | null = null;
+        if (pdfBuffer && uploadedUrl) {
+          // ⚠添付は親の物件行を FOR UPDATE した同一tx内で作る(リポジトリ全体の
+          //   規約。src/lib/__tests__/attachment-create-parent-lock.test.ts が
+          //   走査で固定している)。この行は同じ tx で今作ったばかりで他 tx から
+          //   はまだ見えないが、経路の型を全箇所で揃えるためロックは省略しない。
+          await lockPropertyRow(tx, property.id);
+          const attachment = await tx.attachment.create({
+            data: {
+              targetType: "property",
+              targetId: property.id,
+              propertyId: property.id,
+              type: "general",
+              fileName: pdfFileName,
+              fileUrl: uploadedUrl,
+              fileSize: pdfBuffer.length,
+              mimeType: "application/pdf",
+              uploadedBy: session.id,
+            },
+            select: { id: true },
+          });
+          attachmentId = attachment.id;
+        }
+
+        return { propertyId: property.id, ownerId, ownerCreated, attachmentId };
       });
-
-      let ownerId: string | null = linkOwnerId;
-      let ownerCreated = false;
-      if (ownerId === null && body.owner?.name) {
-        const owner = await tx.owner.create({
-          data: {
-            name: body.owner.name.trim(),
-            nameKana: body.owner.nameKana?.trim() || null,
-            phone: body.owner.phone?.trim() || null,
-            email: body.owner.email?.trim() || null,
-            // ⚠反響フォームの住所は本人の連絡先住所であり、登記上の住所とは
-            //   限らない。address(登記上住所)は空のままにする(設計書 §7・
-            //   発注者承認 2026-08-26)。address キー自体を書かない。
-            currentAddress: body.owner.currentAddress?.trim() || null,
-          },
-        });
-        ownerId = owner.id;
-        ownerCreated = true;
+    } catch (txError) {
+      if (uploadedKey !== null) {
+        try {
+          await getStorage().delete(uploadedKey);
+        } catch {
+          // 消せなくても、登録が失敗したことのほうを利用者に返す。
+        }
       }
-
-      if (ownerId !== null) {
-        await tx.propertyOwner.create({
-          data: { propertyId: property.id, ownerId },
-        });
-      }
-
-      let attachmentId: string | null = null;
-      if (pdfBuffer && uploadedUrl) {
-        // ⚠添付は親の物件行を FOR UPDATE した同一tx内で作る(リポジトリ全体の
-        //   規約。src/lib/__tests__/attachment-create-parent-lock.test.ts が
-        //   走査で固定している)。この行は同じ tx で今作ったばかりで他 tx から
-        //   はまだ見えないが、経路の型を全箇所で揃えるためロックは省略しない。
-        await lockPropertyRow(tx, property.id);
-        const attachment = await tx.attachment.create({
-          data: {
-            targetType: "property",
-            targetId: property.id,
-            propertyId: property.id,
-            type: "general",
-            fileName: pdfFileName,
-            fileUrl: uploadedUrl,
-            fileSize: pdfBuffer.length,
-            mimeType: "application/pdf",
-            uploadedBy: session.id,
-          },
-          select: { id: true },
-        });
-        attachmentId = attachment.id;
-      }
-
-      return { propertyId: property.id, ownerId, ownerCreated, attachmentId };
-    });
+      throw txError;
+    }
 
     // ⚠監査ログに原文・氏名・電話・メール・住所を入れない。出してよいのは
     //   固定文字列と id・件数のみ(社内の恒久ルール「ログに外部由来の文字を

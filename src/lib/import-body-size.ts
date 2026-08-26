@@ -63,3 +63,46 @@ export function assertImportJsonBodySize(
     );
   }
 }
+
+/**
+ * multipart/form-data の**パース前**サイズガード（@codex PR#414 2巡目 P1）。
+ *
+ * ⚠`request.formData()` は**ボディ全体をメモリに読み込む**。読み込んだ後で
+ *   ファイルサイズを見ても、権限を持つ利用者が巨大なリクエストでメモリを
+ *   食い潰せる。正しい形はリポジトリに既にある:
+ *   `src/app/api/import/registry-pdf-bulk/route.ts` は Content-Length を
+ *   `formData()` の**前**に見ている（OOM 対策と明記されている）。それと同じ形を
+ *   1か所にまとめ、複数の route から同じ判定を通す。
+ *
+ * ⚠ヘッダ欠落・空・非数値（chunked 等でガードを回避しうる）は 411 で拒否する。
+ *   ブラウザの fetch + FormData は必ず Content-Length を付けるため正規経路に影響なし。
+ */
+
+/** multipart の境界文字列・フィールド名などの上乗せ分（本文以外）。 */
+export const MULTIPART_OVERHEAD_BYTES = 1024 * 1024;
+
+/**
+ * @param maxFileBytes 本文（ファイル）として許す上限。上乗せ分はこの中で加算する。
+ */
+export function assertImportMultipartBodySize(
+  request: { headers: { get(name: string): string | null } },
+  maxFileBytes: number,
+): void {
+  const header = request.headers.get("content-length");
+  const length = header === null ? NaN : Number(header.trim());
+  if (
+    header === null ||
+    header.trim() === "" ||
+    !Number.isFinite(length) ||
+    length < 0
+  ) {
+    throw new ApiError(411, "Content-Length ヘッダが必要です", "LENGTH_REQUIRED");
+  }
+  if (length > maxFileBytes + MULTIPART_OVERHEAD_BYTES) {
+    throw new ApiError(
+      413,
+      `送信データが上限(${maxFileBytes / 1024 / 1024}MB)を超えています`,
+      "PAYLOAD_TOO_LARGE",
+    );
+  }
+}
