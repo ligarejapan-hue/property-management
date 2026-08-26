@@ -45,11 +45,15 @@ describe("judgeOwnerPersonalInfo（見出しの語で見分ける）", () => {
     });
   }
 
+  /**
+   * ⚠**構造的な見出しだけ**を並べる(@codex PR#414 20巡目)。
+   *   自由記述(コメント/備考/ご要望/特記事項)は「本質的に非個人」ではないので
+   *   ここには入れない。値の判定に落ちる。
+   */
   const SAFE_LABELS = [
     "建物構造",
     "私道負担の有無",
     "希望する利活用方法",
-    "コメント",
     "空き家所有者との関係性",
     "売却の希望時期",
     "名義",
@@ -454,12 +458,28 @@ describe("最終フォールバックは withheld", () => {
     expect(judgeOwnerPersonalInfo("何か", "70.55").isOwnerPersonalInfo).toBe(false);
   });
 
-  it("★自由記述の見出しでも、値が危険な形なら形の判定が先に効く", () => {
-    // コメント/備考は安全確定の見出しに入れているが、③が先に走るので
-    // 住所・電話・メール・日本語の氏名は伏せられる。
+  it("★自由記述の見出しは「安全と確定できない」＝値の判定に落ちる", () => {
+    // ⚠R15 では自由記述を安全確定の見出しに入れていたが、20巡目で撤回した。
+    //   自由記述は何でも書けるフィールドで、「本質的に非個人」と分類するのが
+    //   原理的に誤りだった(形で拾えない個人情報はラテン文字の氏名に限らない)。
+    // 値が危険な形なら当然 withheld。
     expect(judgeOwnerPersonalInfo("コメント", "東京都A区B1-2-3").isOwnerPersonalInfo).toBe(true);
     expect(judgeOwnerPersonalInfo("備考", "09012345678").isOwnerPersonalInfo).toBe(true);
     expect(judgeOwnerPersonalInfo("コメント", "山田太郎").isOwnerPersonalInfo).toBe(true);
+    // 形で拾えない個人情報も、最終フォールバックで withheld になる。
+    const latin = judgeOwnerPersonalInfo("コメント", "担当者は Jonathan Smith");
+    expect(latin.isOwnerPersonalInfo).toBe(true);
+    expect(latin.reason).toBe("unclassified");
+    // 値が安全と確定できるものだけが備考へ通る。
+    expect(judgeOwnerPersonalInfo("コメント", "なし").isOwnerPersonalInfo).toBe(false);
+    expect(judgeOwnerPersonalInfo("備考", "70").isOwnerPersonalInfo).toBe(false);
+    // 長文の自由記述は伏せる(人が画面から備考へ移せる)。
+    expect(
+      judgeOwnerPersonalInfo("特記事項", "売却を検討しているのでまずは査定をお願いしたい。")
+        .isOwnerPersonalInfo,
+    ).toBe(true);
+    // 構造的な見出しは従来どおり備考へ。
+    expect(judgeOwnerPersonalInfo("建物構造", "木造").isOwnerPersonalInfo).toBe(false);
   });
 });
 

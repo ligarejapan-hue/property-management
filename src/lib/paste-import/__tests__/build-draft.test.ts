@@ -340,32 +340,46 @@ describe("読み取れなかった生値は、どの欄のものかを持つ（1
   });
 });
 
-describe("実サンプル2件の unmapped 項目は、すべて備考に届く（15巡目 ①の裏取り）", () => {
+describe("実サンプル2件で、備考に入る項目と伏せる項目を固定する", () => {
   /**
-   * ⚠15巡目で**最終フォールバックを withheld** にした。安全と確定できるものを
+   * ⚠15巡目で最終フォールバックを withheld にした。安全と確定できるものを
    *   明示しないと、ごく普通の取引・建物の項目まで備考へ届かなくなる。
-   *   実物の書式2件で、辞書に無い見出しが**1つも欠けずに**備考へ入ることを固定する。
-   *   (欠けたら、その見出し/値を安全確定へ足すかを判断する材料になる。)
+   * ⚠20巡目で**自由記述の見出し(コメント/備考/ご要望/特記事項)を安全確定から外した**。
+   *   自由記述は何でも書けるフィールドで、「本質的に非個人」と分類するのが原理的に
+   *   誤りだった。よってサンプルAの `コメント` は withheld になる
+   *   (画面に案内付きで見え、人が1操作で備考へ移せる＝1手増えるだけ)。
+   * ⚠期待値は**配列まるごと**で固定する。1項目でもずれたら落ちる。
    */
-  it("★空き家相談(サンプルA): 所有者の個人情報は無く、全項目が備考に入る", () => {
+  it("★空き家相談(サンプルA): withheld は自由記述の コメント だけ", () => {
     const d = buildPasteDraft(fixture("home4u-vacant-house.txt"));
-    expect(d.withheldFromNote, `備考に届かなかった: ${JSON.stringify(d.withheldFromNote)}`).toEqual([]);
+    expect(
+      d.withheldFromNote.map((w) => w.label),
+      `withheld: ${JSON.stringify(d.withheldFromNote)}`,
+    ).toEqual(["コメント"]);
+    // 伏せた理由は「安全と確定できなかった」(形の判定には掛かっていない)。
+    expect(d.withheldFromNote[0].reason).toBe("unclassified");
+    // 値そのものは捨てていない(画面に出して人が移せる)。
+    expect(d.withheldFromNote[0].value).toContain("査定をお願いしたい");
+
+    // 構造的な項目は従来どおり備考へ。
     for (const label of [
       "空き家所有者との関係性",
       "建物構造",
       "希望する利活用方法",
-      "コメント",
       "他事業者に相談中か否か",
       "駐車場",
       "私道負担の有無",
     ]) {
       expect(d.noteFromUnmapped, label).toContain(label);
     }
+    // コメントは備考に入らない。
+    expect(d.noteFromUnmapped).not.toContain("コメント");
   });
 
   it("★査定依頼(サンプルB): 所有者の個人情報だけが withheld、それ以外は備考に入る", () => {
     const d = buildPasteDraft(fixture("home4u-assessment.txt"));
     // 伏せるのは「年齢」だけ(氏名・カナ・電話・メール・住所は辞書で所有者欄へ入る)。
+    // ⚠この書式に自由記述の見出しは無いので、20巡目の変更の影響を受けない。
     expect(d.withheldFromNote.map((w) => w.label)).toEqual(["年齢"]);
     for (const label of ["ご依頼日", "査定方法", "名義", "売却の希望時期"]) {
       expect(d.noteFromUnmapped, label).toContain(label);
