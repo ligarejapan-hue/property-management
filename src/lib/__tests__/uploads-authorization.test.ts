@@ -1169,10 +1169,11 @@ describe("authorizeUploadAccess — referral gating", () => {
     ...propertyReadOnly,
     { resource: "owner", action: "read", granted: true },
   ];
-  /** 反響PDFに載る4項目（氏名・住所・電話・メール）がすべて素通しで見える人。 */
+  /** 反響PDFに載る5項目（氏名・フリガナ・住所・電話・メール）が素通しで見える人。 */
   const allPiiVisible: PermissionEntry[] = [
     ...withOwnerRead,
     { resource: "owner_name", action: "full", granted: true },
+    { resource: "owner_name_kana", action: "full", granted: true },
     { resource: "owner_address", action: "full", granted: true },
     { resource: "owner_phone", action: "full", granted: true },
     { resource: "owner_email", action: "full", granted: true },
@@ -1181,6 +1182,7 @@ describe("authorizeUploadAccess — referral gating", () => {
   const seedFieldStaffLike: PermissionEntry[] = [
     ...withOwnerRead,
     { resource: "owner_name", action: "full", granted: true },
+    { resource: "owner_name_kana", action: "full", granted: true },
     { resource: "owner_address", action: "partial", granted: true },
     { resource: "owner_phone", action: "masked", granted: true },
     { resource: "owner_email", action: "full", granted: true },
@@ -1193,7 +1195,7 @@ describe("authorizeUploadAccess — referral gating", () => {
     ).toBe("forbidden");
   });
 
-  it("★4項目すべてが素通しで見える人 → ok", async () => {
+  it("★5項目すべてが素通しで見える人 → ok", async () => {
     const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
     expect(
       await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: allPiiVisible, prisma }),
@@ -1207,6 +1209,19 @@ describe("authorizeUploadAccess — referral gating", () => {
     ).toBe("forbidden");
   });
 
+  it("★フリガナだけ masked でも forbidden（実サンプルBに実在する項目）", async () => {
+    // ⚠17巡目でこの項目を入れ忘れ、owner_name_kana をマスクする利用者が
+    //   PDFでは生のカナを読めていた。
+    const kanaMasked: PermissionEntry[] = [
+      ...allPiiVisible.filter((p) => p.resource !== "owner_name_kana"),
+      { resource: "owner_name_kana", action: "masked", granted: true },
+    ];
+    const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: kanaMasked, prisma }),
+    ).toBe("forbidden");
+  });
+
   it("★既定の field_staff（電話 masked）は forbidden — 画面で伏せた電話がPDFで生に見えない", async () => {
     // ⚠これが17巡目の指摘そのもの。owner:read の有無だけでは粗すぎた。
     const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
@@ -1215,9 +1230,15 @@ describe("authorizeUploadAccess — referral gating", () => {
     ).toBe("forbidden");
   });
 
-  it("★4項目のうち1つでもマスクされていれば forbidden（総当たり）", async () => {
+  it("★5項目のうち1つでもマスクされていれば forbidden（総当たり）", async () => {
     // 文書はフィールド単位でマスクできない。1つでも伏せる約束があるなら開けない。
-    const fields = ["owner_name", "owner_address", "owner_phone", "owner_email"];
+    const fields = [
+      "owner_name",
+      "owner_name_kana",
+      "owner_address",
+      "owner_phone",
+      "owner_email",
+    ];
     const maskedLevels = ["partial", "masked", "hidden"];
     for (const field of fields) {
       for (const level of maskedLevels) {
@@ -1253,7 +1274,7 @@ describe("authorizeUploadAccess — referral gating", () => {
     ).toBe("forbidden");
   });
 
-  it("★4項目が見える人でも field_staff scope 外 → forbidden（perm と scope の AND）", async () => {
+  it("★5項目が見える人でも field_staff scope 外 → forbidden（perm と scope の AND）", async () => {
     const prisma = makeDb({
       attachments: [refAtt()],
       properties: [{ id: "p1", createdBy: "u-someone", assignedTo: null }],

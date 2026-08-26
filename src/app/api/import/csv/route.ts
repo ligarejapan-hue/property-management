@@ -461,6 +461,22 @@ export async function POST(request: NextRequest) {
           mapped.buildingNumber = unwrapCsvTextCell(mapped.buildingNumber);
         }
 
+        // 外部キー(リンクキー)は**ここで1回だけ**正規化する
+        // (@codex PR#414 18巡目 ①)。
+        // ⚠保存時だけ正規化していたときは、重複チェック(findPropertyDuplicate)に
+        //   生値が渡り、**正規化すれば一致する既存行を照合で見逃したうえで、
+        //   正規化した値で保存**していた＝同じ番号の物件が2件できた。
+        //   同一CSV内の全角/半角の等価な2行でも同じことが起きる。
+        //   照合も保存もこの1つの値を使う(2か所で別々に正規化しない)。
+        if (mapped.externalLinkKey !== undefined) {
+          const normalizedKey = normalizeExternalLinkKey(mapped.externalLinkKey);
+          if (normalizedKey === null) {
+            delete mapped.externalLinkKey;
+          } else {
+            mapped.externalLinkKey = normalizedKey;
+          }
+        }
+
         // Validate required field
         if (!mapped.address) {
           jobRows.push({
@@ -798,14 +814,10 @@ export async function POST(request: NextRequest) {
           createData.buildingNumber = mapped.buildingNumber;
         if (mapped.realEstateNumber)
           createData.realEstateNumber = mapped.realEstateNumber;
-        // ⚠外部キーは**書き込む全経路で同じ正規化を通す**(@codex PR#414 17巡目 ②)。
-        //   ここが生値のままだと、混在幅のキー(`SA2608－1234567` の一部だけ全角)が
-        //   保存され、貼り付け取込の重複判定(半角/全角の2表記で引く)から漏れる。
-        //   ⚠正規化はこの1行だけ。CSV取込の他の挙動は変えない。
-        if (mapped.externalLinkKey) {
-          const normalizedKey = normalizeExternalLinkKey(mapped.externalLinkKey);
-          if (normalizedKey) createData.externalLinkKey = normalizedKey;
-        }
+        // ⚠外部キーは**マッピング直後に1回だけ**正規化済み(18巡目 ①)。
+        //   ここで再度正規化しない(2か所で別々に正規化すると、片方だけ直る)。
+        if (mapped.externalLinkKey)
+          createData.externalLinkKey = mapped.externalLinkKey;
         if (mapped.zoningDistrict)
           createData.zoningDistrict = mapped.zoningDistrict;
         if (mapped.rosenkaValue)

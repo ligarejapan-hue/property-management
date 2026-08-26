@@ -45,15 +45,28 @@ export type UploadAuthDecision = "ok" | "forbidden" | "not_found";
  * ⚠download と preview で段を分けない(registry のような二段権限は作らない)。
  *   見られる人はダウンロードもできる、で揃える。
  */
+/**
+ * 反響資料に載り得る**所有者の項目**（`resolveOwnerDisplayConfig` のキー）。
+ *
+ * ⚠**実サンプル(fixtures)に実在する所有者の項目と必ず一致させる**
+ *   (@codex PR#414 18巡目 ②)。17巡目でここに `nameKana`(フリガナ)を入れ忘れ、
+ *   `owner_name_kana` をマスクする利用者が**PDFでは生のカナを読めた**。
+ *   見本に新しい所有者の項目が増えたら(将来ほかの書式を足したら)、
+ *   この一覧を更新しない限りテストが落ちる
+ *   (src/lib/__tests__/referral-gate-fields-cover-fixtures.test.ts)。
+ */
+export const REFERRAL_GATED_OWNER_FIELDS = [
+  "name",
+  "nameKana",
+  "address",
+  "phone",
+  "email",
+] as const;
 export function canOpenReferralDocument(permissions: PermissionEntry[]): boolean {
   if (!hasPermission(permissions, "owner", "read")) return false;
   const display = resolveOwnerDisplayConfig(permissions);
-  // 反響PDFに載る所有者の項目: 氏名・住所・電話・メール。
-  return (
-    isMaskFreeLevel(display.name) &&
-    isMaskFreeLevel(display.address) &&
-    isMaskFreeLevel(display.phone) &&
-    isMaskFreeLevel(display.email)
+  return REFERRAL_GATED_OWNER_FIELDS.every((field) =>
+    isMaskFreeLevel(display[field]),
   );
 }
 
