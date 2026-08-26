@@ -62,6 +62,17 @@ const req = (body: unknown) => {
   });
 };
 
+/**
+ * 候補から「id / 氏名 / 一致の種類」だけを取り出す。
+ * ⚠住所・所有物件数（同姓同名を見分けるための項目）は**別のテストで**固定する。
+ *   ここは一致の種類の判定を見るテスト群なので、そこだけを比べる。
+ */
+function pickKind(
+  candidates: { id: string; name: string; matchKind: string }[],
+): { id: string; name: string; matchKind: string }[] {
+  return candidates.map(({ id, name, matchKind }) => ({ id, name, matchKind }));
+}
+
 beforeEach(() => {
   mockSession = { id: "user-1" };
   mockPerms = FULL_PERMS;
@@ -152,7 +163,7 @@ describe("POST /api/import/paste/recheck", () => {
       }),
     );
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([
+    expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "o-1", name: "山田太郎", matchKind: "current_address" },
     ]);
   });
@@ -187,7 +198,7 @@ describe("POST /api/import/paste/recheck", () => {
       }),
     );
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([]);
+    expect(pickKind(body.ownerCandidates)).toEqual([]);
     expect(mockOwnerFindMany).not.toHaveBeenCalled();
   });
 
@@ -313,5 +324,43 @@ describe("物件を読む権限(property:read)が無ければ、物件情報を�
     const res = await POST(req({ address: "東京都A区B1-2-3" }));
     const body = await res.json();
     expect(body.similar.map((x: { id: string }) => x.id)).toEqual(["p-ok"]);
+  });
+});
+
+describe("同姓同名の候補を見分けられる（8巡目 ②・共有モジュールが両ルートに効く）", () => {
+  it("★再判定でも住所と所有物件数が付いて返る", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      {
+        id: "same-1", name: "山田太郎",
+        currentAddress: null, address: "東京都A区1-1-1",
+        _count: { propertyOwners: 3 },
+      },
+      {
+        id: "same-2", name: "山田太郎",
+        currentAddress: null, address: "大阪府B市2-2-2",
+        _count: { propertyOwners: 7 },
+      },
+    ]);
+    const res = await POST(req({ address: "東京都A区B1-2-3", ownerName: "山田太郎" }));
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([
+      { id: "same-1", name: "山田太郎", matchKind: "name_only", address: "東京都A区1-1-1", propertyCount: 3 },
+      { id: "same-2", name: "山田太郎", matchKind: "name_only", address: "大阪府B市2-2-2", propertyCount: 7 },
+    ]);
+  });
+
+  it("★電話・メールは返さない（住所は表示レベル経由でのみ）", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      {
+        id: "o-1", name: "山田太郎",
+        currentAddress: "東京都渋谷区X1-1-1", address: null,
+        phone: "09099999999", email: "yamada@example.com",
+        _count: { propertyOwners: 1 },
+      },
+    ]);
+    const res = await POST(req({ address: "東京都A区B1-2-3", ownerName: "山田太郎" }));
+    const dumped = JSON.stringify((await res.json()).ownerCandidates);
+    expect(dumped).not.toContain("09099999999");
+    expect(dumped).not.toContain("yamada@example.com");
   });
 });

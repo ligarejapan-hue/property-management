@@ -134,6 +134,24 @@ interface OwnerCandidate {
    * 優先順位: current_address > registry_address > name_only(1件が複数に該当するときは強い方)。
    */
   matchKind: "current_address" | "registry_address" | "name_only";
+  /**
+   * 表示レベルを通した住所（連絡先住所があればそれ、無ければ登記上住所）。
+   *
+   * ⚠**同姓同名を見分けるために要る**(@codex PR#414 8巡目 ②)。氏名と一致種別しか
+   *   返していなかったため、同じ氏名・同じ種別の候補が複数あると選択肢が
+   *   **すべて同じ文字**に見え、どれを選んでいるか分からないまま選ぶことになった。
+   *   別人に紐付ければ**他人にDMが届く**。
+   * ⚠必ず `maskValue` を通す(生の住所を返さない)。これは repo の既存の所有者API
+   *   (/api/owners) が返しているのと**同じ扱い**で、「線に載せない」原則の本体
+   *   =「利用者が見てよい範囲に限る」は保たれる。
+   */
+  address: string | null;
+  /**
+   * その所有者に紐づく物件の件数。**個人情報ではない識別の手がかり**。
+   * ⚠住所が伏せられる表示レベルの利用者でも選択肢を区別できるように、
+   *   住所とは別に必ず添える。
+   */
+  propertyCount: number;
 }
 
 /**
@@ -355,7 +373,14 @@ export async function lookupPasteDuplicates(
         OR: prefixCandidates.map((prefix) => ({ name: { startsWith: prefix } })),
         isArchived: false,
       },
-      select: { id: true, name: true, currentAddress: true, address: true },
+      select: {
+        id: true,
+        name: true,
+        currentAddress: true,
+        address: true,
+        // 所有物件の件数(非個人情報の識別子)。氏名も住所も同じ候補を見分けるため。
+        _count: { select: { propertyOwners: true } },
+      },
       take: OWNER_CANDIDATE_FETCH_LIMIT,
     });
     const matchedRows = ownerRows.filter(
@@ -368,6 +393,7 @@ export async function lookupPasteDuplicates(
       : null;
 
     const nameLevel = ownerDisplayConfig.name;
+    const addressLevel = ownerDisplayConfig.address;
     ownerCandidates = matchedRows.map((row) => {
       let matchKind: OwnerCandidate["matchKind"] = "name_only";
       if (draftKey !== null) {
@@ -386,7 +412,16 @@ export async function lookupPasteDuplicates(
       // ⚠氏名は owners と同じく maskValue を通してから返す。
       //   (上の②で searchable なレベルに限っているため現状は素通しだが、
       //    レベルの集合が将来広がったときに素の値が漏れる口を残さない。)
-      return { id: row.id, name: maskValue(row.name, nameLevel), matchKind };
+      // 住所は「連絡先住所があればそれ、無ければ登記上住所」を、必ず表示レベル
+      // 経由で返す(どちらを出しているかは matchKind と併せて人が読める)。
+      const shownAddressRaw = row.currentAddress?.trim() || row.address?.trim() || null;
+      return {
+        id: row.id,
+        name: maskValue(row.name, nameLevel),
+        matchKind,
+        address: maskValue(shownAddressRaw, addressLevel),
+        propertyCount: row._count?.propertyOwners ?? 0,
+      };
     })
     // 名前を出せない候補は「どれのことか」を人が選べないので返さない。
     .filter((c): c is OwnerCandidate => c.name !== null);

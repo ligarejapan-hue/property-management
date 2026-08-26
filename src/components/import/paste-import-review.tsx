@@ -42,6 +42,35 @@ export interface OwnerCandidateSummary {
   id: string;
   name: string;
   matchKind: OwnerMatchKind;
+  /** 表示レベルを通した住所（連絡先住所が無ければ登記上住所）。 */
+  address: string | null;
+  /** その所有者に紐づく物件の件数（非個人情報の識別の手がかり）。 */
+  propertyCount: number;
+}
+
+const MATCH_KIND_LABELS: Record<OwnerMatchKind, string> = {
+  current_address: "連絡先の住所も一致",
+  registry_address: "登記上の住所と一致",
+  name_only: "氏名だけ一致（同姓同名の別人かもしれません）",
+};
+
+/**
+ * 所有者候補1件の表示文。
+ *
+ * ⚠**2つの候補が完全に同じ表示になってはいけない**(@codex PR#414 8巡目 ②)。
+ *   氏名と一致種別だけだと、同姓同名・同一致種別の候補が**すべて同じ文字**に見え、
+ *   どれを選んでいるか分からないまま選ぶことになる。別人に紐付ければ
+ *   **他人にDMが届く**。
+ * ⚠住所は表示レベルで伏せられうるので、住所だけに頼らない。
+ *   所有物件の件数（非個人情報）と、所有者の管理番号（先頭8桁。応答に元から
+ *   含まれている id の一部で、新たな露出ではない）を必ず添える。
+ *   → **どの2件も必ず違う表示になる**（id が違えば必ず違う）。
+ */
+export function ownerCandidateLabel(c: OwnerCandidateSummary): string {
+  const parts = [MATCH_KIND_LABELS[c.matchKind], `所有物件 ${c.propertyCount}件`];
+  if (c.address) parts.push(c.address);
+  parts.push(`管理番号 ${c.id.slice(0, 8)}`);
+  return `${c.name}（${parts.join(" / ")}）`;
 }
 
 export type OwnerMode = "link" | "new" | "none";
@@ -79,12 +108,6 @@ const OWNER_FIELD_LABELS: { key: OwnerFieldKey; label: string }[] = [
   { key: "email", label: "メールアドレス" },
   { key: "currentAddress", label: "現住所" },
 ];
-
-const MATCH_KIND_LABELS: Record<OwnerMatchKind, string> = {
-  current_address: "連絡先の住所も一致",
-  registry_address: "登記上の住所と一致",
-  name_only: "氏名だけ一致（同姓同名の別人かもしれません）",
-};
 
 /**
  * 直したら**重複の見直し**を起こす欄。
@@ -358,11 +381,19 @@ export function PasteImportReview({
    *   利用者が選んだ意図を勝手に読み替えない。
    */
   const ownerNameMissing = mode === "new" && oValues.name.trim() === "";
+  /**
+   * ⚠「既存の所有者に紐付ける」を選んだのに相手が選ばれていない状態
+   *   (@codex PR#414 8巡目 ①)。再判定で候補が入れ替わると起こりうる。
+   *   **見えない紐付けのまま登録させない**。
+   */
+  const linkTargetMissing = mode === "link" && !linkedOwnerId;
   const blockReason = dup.blocked
     ? "この案件は登録済みのため登録できません"
     : ownerNameMissing
       ? "所有者の氏名を入力してください（所有者を作らない場合は「所有者なしで登録する」を選んでください）"
-      : null;
+      : linkTargetMissing
+        ? "紐付ける所有者が選ばれていません"
+        : null;
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
@@ -557,9 +588,7 @@ export function PasteImportReview({
                   onLinkedOwnerChange?.(c.id);
                 }}
               />
-              <span>
-                {c.name}（{MATCH_KIND_LABELS[c.matchKind]}）
-              </span>
+              <span>{ownerCandidateLabel(c)}</span>
             </label>
           ))}
 
@@ -616,6 +645,11 @@ export function PasteImportReview({
           )}
         </div>
         {/* ⚠止めた理由は title 属性だけにしない(スマホでは出ない)。画面に文字で出す。 */}
+        {linkTargetMissing && !dup.blocked && (
+          <p role="alert" className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+            紐付ける所有者が選ばれていません。候補から選ぶか、「新しい所有者として登録する」「所有者なしで登録する」を選んでください。
+          </p>
+        )}
         {ownerNameMissing && !dup.blocked && (
           <p role="alert" className="mt-2 text-sm text-amber-700 dark:text-amber-400">
             所有者の氏名を入力してください。所有者を作らない場合は「所有者なしで登録する」を選んでください。

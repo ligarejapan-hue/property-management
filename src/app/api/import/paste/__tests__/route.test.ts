@@ -92,6 +92,17 @@ const jsonReq = (body: unknown) => {
   });
 };
 
+/**
+ * 候補から「id / 氏名 / 一致の種類」だけを取り出す。
+ * ⚠住所・所有物件数（同姓同名を見分けるための項目）は**別のテストで**固定する。
+ *   ここは一致の種類の判定を見るテスト群なので、そこだけを比べる。
+ */
+function pickKind(
+  candidates: { id: string; name: string; matchKind: string }[],
+): { id: string; name: string; matchKind: string }[] {
+  return candidates.map(({ id, name, matchKind }) => ({ id, name, matchKind }));
+}
+
 beforeEach(() => {
   mockSession = { id: "user-1" };
   mockPerms = FULL_PERMS;
@@ -197,7 +208,7 @@ describe("POST /api/import/paste", () => {
     const res = await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([]);
+    expect(pickKind(body.ownerCandidates)).toEqual([]);
     expect(mockOwnerFindMany).not.toHaveBeenCalled();
   });
 
@@ -212,7 +223,7 @@ describe("POST /api/import/paste", () => {
     );
     const body = await res.json();
     expect(mockOwnerFindMany).toHaveBeenCalledTimes(1);
-    expect(body.ownerCandidates).toEqual([
+    expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "o1", name: "山田太郎", matchKind: "current_address" },
     ]);
   });
@@ -230,7 +241,7 @@ describe("POST /api/import/paste", () => {
       }),
     );
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([
+    expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "o1b", name: "山田太郎", matchKind: "registry_address" },
     ]);
   });
@@ -250,7 +261,7 @@ describe("POST /api/import/paste", () => {
       }),
     );
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([
+    expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "o1c", name: "山田太郎", matchKind: "current_address" },
     ]);
   });
@@ -265,7 +276,7 @@ describe("POST /api/import/paste", () => {
       }),
     );
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([
+    expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "o2", name: "山田太郎", matchKind: "name_only" },
     ]);
   });
@@ -281,7 +292,7 @@ describe("POST /api/import/paste", () => {
       jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 佐藤　花子" }),
     );
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([
+    expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "s1", name: "佐藤花子", matchKind: "name_only" },
     ]);
   });
@@ -294,7 +305,7 @@ describe("POST /api/import/paste", () => {
       jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 佐藤花子" }),
     );
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([
+    expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "s2", name: "佐藤　花子", matchKind: "name_only" },
     ]);
   });
@@ -307,7 +318,7 @@ describe("POST /api/import/paste", () => {
       jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 佐藤　花子" }), // 全角
     );
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([
+    expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "s3", name: "佐藤 花子", matchKind: "name_only" },
     ]);
   });
@@ -324,7 +335,7 @@ describe("POST /api/import/paste", () => {
       jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： ABC商事" }),
     );
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([
+    expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "w1", name: "ＡＢＣ商事", matchKind: "name_only" },
     ]);
   });
@@ -337,7 +348,7 @@ describe("POST /api/import/paste", () => {
       jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： ＡＢＣ商事" }),
     );
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([
+    expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "w2", name: "ABC商事", matchKind: "name_only" },
     ]);
   });
@@ -352,7 +363,7 @@ describe("POST /api/import/paste", () => {
       jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： ﾀﾅｶ商店" }),
     );
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([
+    expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "w3", name: "タナカ商店", matchKind: "name_only" },
     ]);
   });
@@ -368,7 +379,7 @@ describe("POST /api/import/paste", () => {
       jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： ABC商事" }),
     );
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([]);
+    expect(pickKind(body.ownerCandidates)).toEqual([]);
   });
 
   it("★別人(佐藤太郎)は正規化しすぎて拾わない", async () => {
@@ -381,7 +392,7 @@ describe("POST /api/import/paste", () => {
       jsonReq({ text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 佐藤　花子" }),
     );
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([]);
+    expect(pickKind(body.ownerCandidates)).toEqual([]);
   });
 
   it("★所有者候補のDB取得件数上限(take)を固定する(上限が消えても気づけるように)", async () => {
@@ -413,7 +424,7 @@ describe("POST /api/import/paste", () => {
       }),
     );
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([
+    expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "t-cur", name: "田中一郎", matchKind: "current_address" },
       { id: "t-reg", name: "田中一郎", matchKind: "registry_address" },
       { id: "t-name", name: "田中一郎", matchKind: "name_only" },
@@ -430,7 +441,10 @@ describe("POST /api/import/paste", () => {
     expect(args.where?.isArchived).toBe(false);
   });
 
-  it("★所有者候補のレスポンスに電話番号・メールアドレス・住所を含めない", async () => {
+  it("★所有者候補のレスポンスに電話番号・メールアドレスを含めない（住所は表示レベル経由でのみ返す）", async () => {
+    // ⚠住所は**同姓同名を見分けるために**返すようになった(@codex PR#414 8巡目 ②)。
+    //   ただし必ず maskValue を通す＝/api/owners と同じ扱い。電話・メールは従来どおり
+    //   一切返さない。「登記上住所」も、連絡先住所がある候補では返さない。
     mockOwnerFindMany.mockResolvedValue([
       {
         id: "o3",
@@ -443,23 +457,42 @@ describe("POST /api/import/paste", () => {
     ]);
     const res = await POST(
       jsonReq({
-        text: "■物件所在地： 東京都A区B1-2-3\n■お名前： 山田太郎\n■現住所： 東京都渋谷区X1-1-1",
+        text: "■物件所在地： 東京都A区B1-2-3" + NL + "■お名前： 山田太郎" + NL + "■現住所： 東京都渋谷区X1-1-1",
       }),
     );
     const body = await res.json();
-    // ⚠body.draft.owner.currentAddress には貼った現住所がそのまま入る(既存の仕様=
-    //   確認画面用の下書きが原文の構造化値を持つのは正しい)。ここで確かめたいのは
-    //   「所有者候補(ownerCandidates)」側にDBの電話・メール・登記住所が絶対に
-    //   漏れていないことなので、対象を ownerCandidates に絞って確認する。
     const rawCandidates = JSON.stringify(body.ownerCandidates);
     expect(rawCandidates).not.toContain("09099999999");
     expect(rawCandidates).not.toContain("yamada@example.com");
+    // 連絡先住所がある候補では、登記上住所のほうは返さない。
     expect(rawCandidates).not.toContain("登記上の住所テキスト");
-    // candidate.currentAddress の値そのもの(現住所)も候補には含めない。
-    expect(rawCandidates).not.toContain("渋谷区X1-1-1");
     expect(body.ownerCandidates).toEqual([
-      { id: "o3", name: "山田太郎", matchKind: "current_address" },
+      {
+        id: "o3",
+        name: "山田太郎",
+        matchKind: "current_address",
+        address: "東京都渋谷区X1-1-1",
+        propertyCount: 0,
+      },
     ]);
+  });
+
+  it("★住所は表示レベルを通す（生の住所をそのまま返さない）", async () => {
+    // ⚠maskValue を外すと、この期待が「素の住所」に変わって落ちる。
+    //   現在の検索可否のゲート(氏名と住所が edit/full/read)では read までしか
+    //   到達しないため素通しになるが、レベルの集合が将来広がったときに
+    //   生値が漏れる口を残さないための固定。
+    const { maskValue } = await import("@/lib/permissions");
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "o-lv", name: "山田太郎", currentAddress: "東京都渋谷区X1-1-1", address: null },
+    ]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" + NL + "■お名前： 山田太郎" }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates[0].address).toBe(
+      maskValue("東京都渋谷区X1-1-1", "full"),
+    );
   });
 
   it("★下書きに貼った原文をそのまま含めない（PII を返しっぱなしにしない）", async () => {
@@ -490,7 +523,7 @@ describe("所有者候補は owners と同じ規則で守る（検索オラク�
     const res = await POST(jsonReq({ text: nameAndAddress }));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([]);
+    expect(pickKind(body.ownerCandidates)).toEqual([]);
     // 「引かない」ことまで固定する(引いてから捨てるのでは、DB負荷も
     //  タイミング差による観測も残る)。
     expect(mockOwnerFindMany).not.toHaveBeenCalled();
@@ -504,7 +537,7 @@ describe("所有者候補は owners と同じ規則で守る（検索オラク�
     const res = await POST(jsonReq({ text: nameAndAddress }));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([]);
+    expect(pickKind(body.ownerCandidates)).toEqual([]);
     expect(mockOwnerFindMany).not.toHaveBeenCalled();
   });
 
@@ -526,7 +559,7 @@ describe("所有者候補は owners と同じ規則で守る（検索オラク�
     const res = await POST(jsonReq({ text: nameAndAddress }));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([]);
+    expect(pickKind(body.ownerCandidates)).toEqual([]);
     expect(mockOwnerFindMany).not.toHaveBeenCalled();
   });
 
@@ -550,7 +583,7 @@ describe("所有者候補は owners と同じ規則で守る（検索オラク�
     ]);
     const res = await POST(jsonReq({ text: nameAndAddress }));
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([]);
+    expect(pickKind(body.ownerCandidates)).toEqual([]);
     expect(JSON.stringify(body)).not.toContain("registry_address");
   });
 
@@ -560,7 +593,7 @@ describe("所有者候補は owners と同じ規則で守る（検索オラク�
     ]);
     const res = await POST(jsonReq({ text: nameAndAddress }));
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([
+    expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "o-ok", name: "山田太郎", matchKind: "current_address" },
     ]);
   });
@@ -719,7 +752,7 @@ describe("氏名の先頭1文字（全体レビュー m-1）", () => {
     expect(prefixes).toContain("𠮷");
     expect(prefixes.every((x) => x !== undefined && Array.from(x).length === 1)).toBe(true);
     const body = await res.json();
-    expect(body.ownerCandidates).toEqual([
+    expect(pickKind(body.ownerCandidates)).toEqual([
       { id: "sp1", name: "𠮷田太郎", matchKind: "name_only" },
     ]);
   });
@@ -1110,5 +1143,62 @@ describe("物件を読む権限(property:read)が無ければ、物件情報を�
     const res = await POST(jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" }));
     const body = await res.json();
     expect(body.similar.map((x: { id: string }) => x.id)).toEqual(["p-ok"]);
+  });
+});
+
+describe("同姓同名の候補を見分けられる（8巡目 ②）", () => {
+  it("★同じ氏名・同じ一致種別でも、住所と所有物件数で見分けられる", async () => {
+    // 別人に紐付ければ他人にDMが届く。選択肢が同じ文字に見えてはいけない。
+    mockOwnerFindMany.mockResolvedValue([
+      {
+        id: "same-1", name: "山田太郎",
+        currentAddress: null, address: "東京都A区1-1-1",
+        _count: { propertyOwners: 3 },
+      },
+      {
+        id: "same-2", name: "山田太郎",
+        currentAddress: null, address: "大阪府B市2-2-2",
+        _count: { propertyOwners: 7 },
+      },
+    ]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" + NL + "■お名前： 山田太郎" }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates).toEqual([
+      { id: "same-1", name: "山田太郎", matchKind: "name_only", address: "東京都A区1-1-1", propertyCount: 3 },
+      { id: "same-2", name: "山田太郎", matchKind: "name_only", address: "大阪府B市2-2-2", propertyCount: 7 },
+    ]);
+  });
+
+  it("★所有物件数は DB から取る（既定値でごまかしていない）", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      { id: "c1", name: "山田太郎", currentAddress: null, address: null, _count: { propertyOwners: 5 } },
+    ]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" + NL + "■お名前： 山田太郎" }),
+    );
+    expect((await res.json()).ownerCandidates[0].propertyCount).toBe(5);
+    // クエリが実際に件数を要求していること(選択で要求を落とすと 0 に化ける)。
+    const args = mockOwnerFindMany.mock.calls[0][0] as {
+      select?: { _count?: { select?: { propertyOwners?: boolean } } };
+    };
+    expect(args.select?._count?.select?.propertyOwners).toBe(true);
+  });
+
+  it("連絡先住所があればそちらを出す（登記上住所は出さない）", async () => {
+    mockOwnerFindMany.mockResolvedValue([
+      {
+        id: "c2", name: "山田太郎",
+        currentAddress: "連絡先の住所", address: "登記上の住所",
+        _count: { propertyOwners: 1 },
+      },
+    ]);
+    const res = await POST(
+      jsonReq({ text: "■物件所在地： 東京都A区B1-2-3" + NL + "■お名前： 山田太郎" }),
+    );
+    const body = await res.json();
+    expect(body.ownerCandidates[0].address).toBe("連絡先の住所");
+    expect(JSON.stringify(body.ownerCandidates)).not.toContain("登記上の住所");
   });
 });

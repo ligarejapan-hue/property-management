@@ -162,8 +162,14 @@ export default function PasteImportPage() {
           address: propertyValues.address,
           lotNumber: propertyValues.lotNumber,
           externalLinkKey,
-          ownerName: ownerMode === "new" ? (ownerValues?.name ?? "") : "",
-          ownerCurrentAddress: ownerMode === "new" ? (ownerValues?.currentAddress ?? "") : "",
+          // ⚠**link(既存の所有者に紐付ける)のときも氏名で引く**
+          //   (@codex PR#414 8巡目 ①)。空で送ると候補ゼロが返り、画面から
+          //   選択肢が消えるのに linkedOwnerId だけ残る＝**画面に何も出ていない
+          //   相手に紐付いたまま登録が通る**。候補を見つけたときと同じ値
+          //   (人が直した氏名・現住所)で引き直し、選択が見えたままになるようにする。
+          ownerName: ownerMode === "none" ? "" : (ownerValues?.name ?? ""),
+          ownerCurrentAddress:
+            ownerMode === "none" ? "" : (ownerValues?.currentAddress ?? ""),
         }),
       });
       if (!res.ok) throw new Error(await readApiErrorMessage(res));
@@ -171,6 +177,20 @@ export default function PasteImportPage() {
       setDuplicates(data.duplicates);
       setSimilar(data.similar);
       setOwnerCandidates(data.ownerCandidates);
+
+      // ⚠**見えない紐付けを残さない**。選んでいた相手が候補から消えたら、
+      //   選択そのものを外して理由を出す(登録は下のガードで止まる)。
+      if (
+        linkedOwnerId !== null &&
+        !data.ownerCandidates.some((c) => c.id === linkedOwnerId)
+      ) {
+        setLinkedOwnerId(null);
+        setRecheckError(
+          "選んでいた所有者が候補から外れました。所有者の扱いを選び直してください。",
+        );
+        return data;
+      }
+
       setRecheckError(null);
       return data;
     } catch (e) {
@@ -182,7 +202,7 @@ export default function PasteImportPage() {
       );
       return null;
     }
-  }, [propertyValues, ownerValues, ownerMode, externalLinkKey]);
+  }, [propertyValues, ownerValues, ownerMode, externalLinkKey, linkedOwnerId]);
 
   const handleRegister = useCallback(async () => {
     if (!draft || !propertyValues || !ownerValues) return;
@@ -196,6 +216,14 @@ export default function PasteImportPage() {
     if (ownerMode === "new" && ownerValues.name.trim() === "") {
       setRegisterError(
         "所有者の氏名を入力してください。所有者を作らない場合は「所有者なしで登録する」を選んでください。",
+      );
+      return;
+    }
+    // ⚠link のまま相手が選ばれていない状態では登録させない
+    //   (見えない紐付けを作らない・@codex PR#414 8巡目 ①)。
+    if (ownerMode === "link" && !linkedOwnerId) {
+      setRegisterError(
+        "紐付ける所有者が選ばれていません。候補から選ぶか、「新しい所有者として登録する」「所有者なしで登録する」を選んでください。",
       );
       return;
     }
@@ -221,6 +249,20 @@ export default function PasteImportPage() {
 
       if (latest.duplicates.blocked) {
         setRegisterError("この案件は登録済みです");
+        return;
+      }
+
+      // ⚠再判定の結果、選んでいた相手が候補から消えていたら**紐付けごと外す**。
+      //   確認できない相手に紐付けたまま登録させない。
+      if (
+        ownerMode === "link" &&
+        (linkedOwnerId === null ||
+          !latest.ownerCandidates.some((c) => c.id === linkedOwnerId))
+      ) {
+        setLinkedOwnerId(null);
+        setRegisterError(
+          "選んでいた所有者が候補から外れました。所有者の扱いを選び直してください。",
+        );
         return;
       }
 

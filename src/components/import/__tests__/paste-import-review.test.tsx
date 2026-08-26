@@ -13,6 +13,7 @@ import {
   foldNoColumnFieldsIntoNote,
   DUPLICATE_INPUT_FIELDS,
   DUPLICATE_OWNER_FIELDS,
+  ownerCandidateLabel,
 } from "../paste-import-review";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
 
@@ -178,9 +179,9 @@ describe("PasteImportReview（3状態の描き分け・空洞テスト対策）"
         draft,
         rawText: "",
         ownerCandidates: [
-          { id: "o1", name: "山田太郎", matchKind: "current_address" },
-          { id: "o2", name: "山田太郎", matchKind: "registry_address" },
-          { id: "o3", name: "山田太郎", matchKind: "name_only" },
+          { id: "o1", name: "山田太郎", matchKind: "current_address", address: "東京都A区1-1", propertyCount: 1 },
+          { id: "o2", name: "山田太郎", matchKind: "registry_address", address: "東京都B区2-2", propertyCount: 2 },
+          { id: "o3", name: "山田太郎", matchKind: "name_only", address: null, propertyCount: 0 },
         ],
       }),
     );
@@ -503,5 +504,116 @@ describe("重複の見直しは、直したあとに起こる（6巡目 ②③�
     // 査定ナンバーの欄は常に対象
     const keyBlock = source.slice(source.indexOf('fieldKey="externalLinkKey"'));
     expect(keyBlock.slice(0, 500)).toContain("onBlur={onDuplicateInputBlur}");
+  });
+});
+
+describe("所有者候補の表示は、2件が完全に同じにならない（8巡目 ②）", () => {
+  const base = {
+    id: "aaaaaaaa-1111-2222-3333-444444444444",
+    name: "山田太郎",
+    matchKind: "name_only" as const,
+    address: "東京都A区1-1-1",
+    propertyCount: 3,
+  };
+
+  it("★住所だけが違う2件は、違う表示になる", () => {
+    expect(ownerCandidateLabel(base)).not.toBe(
+      ownerCandidateLabel({ ...base, address: "大阪府B市2-2-2" }),
+    );
+  });
+
+  it("★所有物件数だけが違う2件は、違う表示になる（住所が伏せられていても区別できる）", () => {
+    const masked = { ...base, address: null };
+    expect(ownerCandidateLabel(masked)).not.toBe(
+      ownerCandidateLabel({ ...masked, propertyCount: 7 }),
+    );
+  });
+
+  it("★住所も件数も同じでも、違う所有者なら違う表示になる（完全一致を作れない）", () => {
+    expect(ownerCandidateLabel(base)).not.toBe(
+      ownerCandidateLabel({ ...base, id: "bbbbbbbb-1111-2222-3333-444444444444" }),
+    );
+  });
+
+  it("★一致の種類は引き続き読める", () => {
+    expect(ownerCandidateLabel(base)).toContain("氏名だけ一致");
+    expect(ownerCandidateLabel({ ...base, matchKind: "current_address" })).toContain(
+      "連絡先の住所も一致",
+    );
+  });
+
+  it("★画面にも住所と所有物件数が出る（部品が値を捨てていない）", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft,
+        rawText: "",
+        ownerCandidates: [
+          { ...base, id: "id-a", address: "東京都A区1-1-1", propertyCount: 3 },
+          { ...base, id: "id-b", address: "大阪府B市2-2-2", propertyCount: 7 },
+        ],
+      }),
+    );
+    expect(out).toContain("東京都A区1-1-1");
+    expect(out).toContain("大阪府B市2-2-2");
+    expect(out).toContain("所有物件 3件");
+    expect(out).toContain("所有物件 7件");
+  });
+});
+
+describe("見えない紐付けを残さない（8巡目 ①）", () => {
+  const candidate = {
+    id: "own-1",
+    name: "山田太郎",
+    matchKind: "name_only" as const,
+    address: "東京都A区1-1-1",
+    propertyCount: 2,
+  };
+
+  it("★link のまま相手が選ばれていなければ、登録ボタンが無効で理由が画面に出る", () => {
+    // 再判定で候補が入れ替わると、選択だけが残って画面に何も出ない状態が作れた。
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft, rawText: "", ownerMode: "link", linkedOwnerId: null,
+        ownerCandidates: [candidate],
+      }),
+    );
+    expect(registerButtonDisabled(out)).toBe(true);
+    expect(out).toContain(">紐付ける所有者が選ばれていません。");
+  });
+
+  it("★候補が空になったのに link のままなら、やはり止まる（選択肢が消えたのに紐付けが残る状態を作れない）", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft, rawText: "", ownerMode: "link", linkedOwnerId: null, ownerCandidates: [],
+      }),
+    );
+    expect(registerButtonDisabled(out)).toBe(true);
+    expect(out).toContain(">紐付ける所有者が選ばれていません。");
+  });
+
+  it("★相手が選ばれていて候補にも出ていれば止めない（止めすぎていない）", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft, rawText: "", ownerMode: "link", linkedOwnerId: "own-1",
+        ownerCandidates: [candidate],
+      }),
+    );
+    expect(registerButtonDisabled(out)).toBe(false);
+    expect(out).not.toContain(">紐付ける所有者が選ばれていません。");
+    // 選んでいる相手が画面に見えていること。
+    expect(out).toContain("山田太郎");
+    expect(out).toContain("所有物件 2件");
+  });
+
+  it("★new / none のときはこの理由を出さない", () => {
+    for (const mode of ["new", "none"] as const) {
+      const out = renderToStaticMarkup(
+        createElement(PasteImportReview, {
+          draft, rawText: "", ownerMode: mode,
+          ownerValues: { name: "山田太郎", nameKana: "", phone: "", email: "", currentAddress: "" },
+        }),
+      );
+      expect(out).not.toContain(">紐付ける所有者が選ばれていません。");
+    }
   });
 });

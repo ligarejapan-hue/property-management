@@ -188,3 +188,37 @@ describe("登録直前の再判定は、結果を全部見る（7巡目 ②）",
     expect(deps.slice(0, 200)).toContain("ownerCandidates");
   });
 });
+
+describe("link モードの再判定と、見えない紐付けの排除（8巡目 ①）", () => {
+  it("★link のときも氏名で引き直す（空で送って候補を消さない）", () => {
+    // 空で送ると候補ゼロが返り、画面から選択肢が消えるのに linkedOwnerId は残る。
+    expect(source).toContain('ownerName: ownerMode === "none" ? "" : (ownerValues?.name ?? ""),');
+    expect(source).not.toContain('ownerName: ownerMode === "new" ? (ownerValues?.name ?? "") : "",');
+  });
+
+  it("★選んでいた相手が候補から消えたら、紐付けも必ず外す", () => {
+    expect(source).toContain("!data.ownerCandidates.some((c) => c.id === linkedOwnerId)");
+    expect(source).toContain("選んでいた所有者が候補から外れました");
+    // 外すのは「理由を出すだけ」ではなく、選択そのもの。
+    const at = source.indexOf("!data.ownerCandidates.some((c) => c.id === linkedOwnerId)");
+    expect(source.slice(at, at + 300)).toContain("setLinkedOwnerId(null)");
+  });
+
+  it("★登録の直前にも、選択が候補に残っているか確かめてから送る", () => {
+    expect(source).toContain("!latest.ownerCandidates.some((c) => c.id === linkedOwnerId)");
+    const at = source.indexOf("!latest.ownerCandidates.some((c) => c.id === linkedOwnerId)");
+    const postAt = source.indexOf('fetch("/api/import/paste/commit"');
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(postAt).toBeGreaterThan(at);
+    expect(source.slice(at, at + 300)).toContain("setLinkedOwnerId(null)");
+  });
+
+  it("★link のまま相手が未選択なら、そもそも登録に進まない", () => {
+    expect(source).toContain('if (ownerMode === "link" && !linkedOwnerId)');
+    expect(source).toContain("紐付ける所有者が選ばれていません");
+  });
+
+  it("★選択の有無を見るための値が依存に入っている", () => {
+    expect(source).toContain('externalLinkKey, linkedOwnerId]');
+  });
+});
