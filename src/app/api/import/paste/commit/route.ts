@@ -14,7 +14,38 @@ import { lockPropertyRow } from "@/lib/property-record-guard";
 import { isPdfBuffer } from "@/lib/pdf-extract";
 import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES, MAX_FILE_SIZE } from "@/lib/storage";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
+import { PROPERTY_TYPE_VALUES, OCCUPANCY_STATUS_LABELS } from "@/lib/property-types";
 import type { PropertyType, OccupancyStatus } from "@/generated/prisma";
+
+// ---------------------------------------------------------------------------
+// 入力の検査（全体レビュー I-3）
+//
+// ⚠確認画面の欄は**全部が自由入力**で、人がその場で直す前提の画面。生の文字列を
+//   そのまま Prisma に渡すと、Prisma 側の例外が handleApiError で
+//   「サーバーエラーが発生しました」(500) に化け、**どの欄が悪いのか誰にも
+//   分からない**まま入力内容が失われる。ここで欄の名前つきで 400 を返す。
+// ---------------------------------------------------------------------------
+
+/** 面積として受け付ける形。Decimal(8,2) 列にそのまま渡せる素の数字だけ。 */
+const AREA_PATTERN = /^\d+(\.\d+)?$/;
+
+const PROPERTY_TYPE_SET = new Set<string>(PROPERTY_TYPE_VALUES);
+/** 現況(OccupancyStatus)の許容値。表示ラベルの定義元と同じ集合を使う。 */
+const OCCUPANCY_STATUS_SET = new Set<string>(Object.keys(OCCUPANCY_STATUS_LABELS));
+
+/** 面積の検査。空欄は null（未入力は誤りではない）。 */
+function parseAreaInput(raw: string | null | undefined, fieldLabel: string): string | null {
+  const v = (raw ?? "").trim();
+  if (v === "") return null;
+  if (!AREA_PATTERN.test(v)) {
+    throw new ApiError(
+      400,
+      `${fieldLabel}は数字だけで入力してください（例: 70 または 70.5）。単位や「約」は入れないでください`,
+      "BAD_REQUEST",
+    );
+  }
+  return v;
+}
 
 // ---------- POST /api/import/paste/commit ----------
 // 「貼り付けて物件化」の確認画面で人が直した最終値を受け取り、物件・所有者・
@@ -56,6 +87,11 @@ export async function POST(request: NextRequest) {
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
+    // ⚠取込系 route は例外なく import:write を先に要求する（全体レビュー I-1）。
+    //   src/app/api/import/** の他の全 route と同じ順序・同じ文言に揃える。
+    if (!hasPermission(perms, "import", "write")) {
+      throw new ApiError(403, "権限がありません", "FORBIDDEN");
+    }
     if (!hasPermission(perms, "property", "write")) {
       throw new ApiError(403, "物件を作る権限がありません", "FORBIDDEN");
     }
@@ -123,6 +159,24 @@ export async function POST(request: NextRequest) {
 
     const p = body.property;
 
+    // ---- 値の検査（全体レビュー I-3）。Prisma に渡す前に、欄の名前つきで断る ----
+    const exclusiveArea = parseAreaInput(p.exclusiveArea, "専有面積");
+
+    const propertyTypeInput = (p.propertyType ?? "").trim() || "unknown";
+    if (!PROPERTY_TYPE_SET.has(propertyTypeInput)) {
+      throw new ApiError(400, "物件種別が正しくありません。一覧から選び直してください", "BAD_REQUEST");
+    }
+    const propertyType = propertyTypeInput as PropertyType;
+
+    const occupancyInput = (p.occupancyStatus ?? "").trim();
+    if (occupancyInput !== "" && !OCCUPANCY_STATUS_SET.has(occupancyInput)) {
+      throw new ApiError(400, "現況が正しくありません。一覧から選び直してください", "BAD_REQUEST");
+    }
+    const occupancyStatus = occupancyInput === "" ? null : (occupancyInput as OccupancyStatus);
+
+    // 外部キー（査定ナンバー等）。空文字は「無い」と同じに畳む。
+    const externalLinkKey = body.externalLinkKey?.trim() || null;
+
     // PDF があるときだけ、物件 id を先に確定する。ストレージ保存(外部I/O)を
     // トランザクションの外で行うために、保存先キーへ埋め込む id が要る。
     // PDF が無ければ id は Prisma の既定(uuid)に任せる。
@@ -142,6 +196,31 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
+      // ---- 二重登録を**サーバー側で**止める（全体レビュー Critical 1） ----
+      // ⚠これまで重複判定は下書き route (/api/import/paste) にしか無く、確定側は
+      //   externalLinkKey を無検査で書いていた。Property.externalLinkKey は
+      //   @@index であって @@unique ではないため、二重登録を防いでいたのは
+      //   画面のボタンの disabled だけだった。同じ査定依頼を2人が貼る／確認画面を
+      //   開いたまま同僚が先に登録する、のどちらでも 200 で通り、物件・所有者・
+      //   お手紙・有料の謄本取得がもう一式できてしまう。
+      //
+      // ⚠advisory lock は**省略しない**。素の findFirst だけでは足りない:
+      //   READ COMMITTED では、待っている間に別トランザクションが確定させた行は
+      //   **先に開始した文からは見えない**（#402 で実測済み）。同じキーの確定を
+      //   advisory lock で直列化し、ロックを取った**あとに**存在を確かめる。
+      //   xact lock はトランザクション終了時に自動解放される
+      //   (src/app/api/import/reception-property/route.ts と同じ型)。
+      if (externalLinkKey) {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${externalLinkKey}))`;
+        const already = await tx.property.findFirst({
+          where: { externalLinkKey, isArchived: false },
+          select: { id: true },
+        });
+        if (already) {
+          throw new ApiError(409, "この案件は登録済みです", "DUPLICATE");
+        }
+      }
+
       const property = await tx.property.create({
         data: {
           ...(pregenPropertyId ? { id: pregenPropertyId } : {}),
@@ -149,12 +228,12 @@ export async function POST(request: NextRequest) {
           lotNumber: p.lotNumber?.trim() || null,
           buildingName: p.buildingName?.trim() || null,
           roomNo: p.roomNo?.trim() || null,
-          propertyType: (p.propertyType || "unknown") as PropertyType,
-          // Decimal(8,2) 列。文字列のまま渡してよい(空文字は null にする)。
-          exclusiveArea: p.exclusiveArea ? p.exclusiveArea : null,
+          propertyType,
+          // Decimal(8,2) 列。素の数字であることは上で検査済み(空欄は null)。
+          exclusiveArea,
           layoutType: p.layoutType?.trim() || null,
-          occupancyStatus: (p.occupancyStatus || null) as OccupancyStatus | null,
-          externalLinkKey: body.externalLinkKey?.trim() || null,
+          occupancyStatus,
+          externalLinkKey,
           note: p.note?.trim() || null,
           introductionRoute: "web_inquiry",
           caseStatus: "new_case",
@@ -228,7 +307,7 @@ export async function POST(request: NextRequest) {
         ownerCreated: result.ownerCreated,
         ownerLinked: result.ownerId !== null,
         attachmentCreated: result.attachmentId !== null,
-        hasExternalKey: Boolean(body.externalLinkKey),
+        hasExternalKey: externalLinkKey !== null,
       },
     });
 

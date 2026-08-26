@@ -3,14 +3,22 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockSession = { id: "user-1" };
 // ⚠granted: true が無いと hasPermission は全件 false を返す(このリポジトリの
 //   テスト作法のハマりどころ)。brief の見本にこのキーが抜けていたので補った。
-let mockPerms: unknown = [
+const FULL_PERMS = [
+  { resource: "import", action: "write", granted: true },
   { resource: "property", action: "write", granted: true },
   { resource: "owner", action: "write", granted: true },
 ];
+let mockPerms: unknown = FULL_PERMS;
 const created: Record<string, unknown[]> = {};
 const auditCalls: unknown[] = [];
-/** lockPropertyRow(→$queryRaw) と attachment.create の呼び出し順を記録する。 */
+/** lockPropertyRow / advisory lock (→$queryRaw) と create の呼び出し順を記録する。 */
 const callOrder: string[] = [];
+/** $queryRaw に渡された SQL 断片(結合済み)。 */
+const sqlSeen: string[] = [];
+/** property.findFirst に渡された引数。 */
+const findFirstArgs: unknown[] = [];
+/** 外部キー一致で既に存在する物件の id (null = 未登録)。 */
+let existingByExternalKey: string | null = null;
 
 // ⚠api-helpers を vi.importActual すると実物の "@/lib/auth" まで読み込まれ、
 //   next-auth 内部の拡張子なし "next/server" import が node の ESM 解決に失敗する
@@ -61,10 +69,18 @@ vi.mock("@/lib/prisma", () => {
   const tx = {
     property: {
       create: vi.fn(async ({ data }: { data: unknown }) => {
+        callOrder.push("property.create");
         (created.property ??= []).push(data);
         return { id: "new-prop", ...(data as object) };
       }),
       findUnique: vi.fn(async () => ({ id: "new-prop" })),
+      // 外部キーによる登録済み判定。existingByExternalKey に id を入れると
+      // 「既に登録済み」を再現できる。
+      findFirst: vi.fn(async (args: { where?: { externalLinkKey?: string } }) => {
+        callOrder.push("property.findFirst");
+        findFirstArgs.push(args);
+        return existingByExternalKey === null ? null : { id: existingByExternalKey };
+      }),
     },
     owner: {
       create: vi.fn(async ({ data }: { data: unknown }) => {
@@ -86,8 +102,13 @@ vi.mock("@/lib/prisma", () => {
         return { id: "att-1", ...(data as object) };
       }),
     },
-    $queryRaw: vi.fn(async (..._args: unknown[]) => {
-      callOrder.push("lockPropertyRow");
+    // ⚠$queryRaw は2つの用途で使われる(親の物件行ロックと advisory lock)。
+    //   SQL の中身で区別しないと、順序の検証がどちらのロックを見ているのか
+    //   分からなくなる(タグ付きテンプレートの第1引数が SQL の断片配列)。
+    $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+      const sql = Array.isArray(strings) ? strings.join(" ") : String(strings);
+      sqlSeen.push(sql);
+      callOrder.push(sql.includes("pg_advisory_xact_lock") ? "advisoryLock" : "lockPropertyRow");
       return [{ id: "new-prop" }];
     }),
   };
@@ -150,13 +171,13 @@ beforeEach(() => {
   //   累積呼び出しを拾って失敗するのを防ぐ(実装の実装をREADME通りにモックの実装
   //   自体はここでは消えない=clearAllMocksは呼び出し履歴だけを消す)。
   vi.clearAllMocks();
-  mockPerms = [
-    { resource: "property", action: "write", granted: true },
-    { resource: "owner", action: "write", granted: true },
-  ];
+  mockPerms = FULL_PERMS;
+  existingByExternalKey = null;
   for (const k of Object.keys(created)) delete created[k];
   auditCalls.length = 0;
   callOrder.length = 0;
+  sqlSeen.length = 0;
+  findFirstArgs.length = 0;
 });
 
 describe("POST /api/import/paste/commit", () => {
@@ -289,5 +310,146 @@ describe("POST /api/import/paste/commit", () => {
       expect(dumped).not.toContain("山田太郎");
       expect(dumped).not.toContain("shokai.pdf");
     });
+  });
+});
+
+// ===========================================================================
+// 全体レビュー Critical 1 / I-1 / I-3
+// ===========================================================================
+
+describe("二重登録は確定側(サーバー)で止める", () => {
+  const withKey = { ...baseBody, externalLinkKey: "SA2608-1234567" };
+
+  it("★同じ外部キーの物件が既にあれば409を返し、何も作らない", async () => {
+    existingByExternalKey = "prop-existing-1";
+    const res = await POST(req(withKey));
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.message).toContain("この案件は登録済みです");
+    // 物件・所有者・紐付けのどれも作られていない。
+    expect(created.property).toBeUndefined();
+    expect(created.owner).toBeUndefined();
+    expect(created.propertyOwner).toBeUndefined();
+    // 監査ログも書かない(作っていないので)。
+    expect(auditCalls).toEqual([]);
+  });
+
+  it("★所有者つきでも409のときは所有者を作らない", async () => {
+    existingByExternalKey = "prop-existing-1";
+    const res = await POST(req({
+      ...withKey,
+      owner: { name: "山田太郎", nameKana: null, phone: null, email: null, currentAddress: null },
+    }));
+    expect(res.status).toBe(409);
+    expect(created.owner).toBeUndefined();
+  });
+
+  it("★advisory lock を、存在確認より**先に**取る(順序を固定する)", async () => {
+    // ⚠これが逆だと、READ COMMITTED では待っている間に他トランザクションが
+    //   確定させた行が見えず(#402 で実測済み)、素通りして二重登録になる。
+    await POST(req(withKey));
+    const lockIdx = callOrder.indexOf("advisoryLock");
+    const findIdx = callOrder.indexOf("property.findFirst");
+    expect(lockIdx).toBeGreaterThanOrEqual(0);
+    expect(findIdx).toBeGreaterThan(lockIdx);
+    // 実際に advisory lock の SQL を投げていること(名前だけの偽装を防ぐ)。
+    expect(sqlSeen.some((q) => q.includes("pg_advisory_xact_lock"))).toBe(true);
+  });
+
+  it("★存在確認は物件の作成より**先**(作ってから気づくのでは遅い)", async () => {
+    await POST(req(withKey));
+    const findIdx = callOrder.indexOf("property.findFirst");
+    const createIdx = callOrder.indexOf("property.create");
+    expect(findIdx).toBeGreaterThanOrEqual(0);
+    expect(createIdx).toBeGreaterThan(findIdx);
+  });
+
+  it("★存在確認は isArchived: false の同じ外部キーで引く", async () => {
+    await POST(req(withKey));
+    expect(findFirstArgs[0]).toMatchObject({
+      where: { externalLinkKey: "SA2608-1234567", isArchived: false },
+    });
+  });
+
+  it("★外部キーが無ければロックも存在確認もせず、これまで通り登録できる", async () => {
+    const res = await POST(req(baseBody));
+    expect(res.status).toBe(200);
+    expect(callOrder).not.toContain("advisoryLock");
+    expect(callOrder).not.toContain("property.findFirst");
+    expect(created.property?.[0]).toMatchObject({ address: "東京都A区B1-2-3" });
+  });
+
+  it("外部キーがあり、まだ登録されていなければ登録できる", async () => {
+    existingByExternalKey = null;
+    const res = await POST(req(withKey));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ externalLinkKey: "SA2608-1234567" });
+  });
+});
+
+describe("取込系routeの共通ゲート(import:write)", () => {
+  it("★import:write が無ければ403(全体レビュー I-1)", async () => {
+    mockPerms = FULL_PERMS.filter((p) => p.resource !== "import");
+    const res = await POST(req(baseBody));
+    expect(res.status).toBe(403);
+    expect(created.property).toBeUndefined();
+  });
+});
+
+describe("入力の検査: 直せる形の400で断る(500に化けさせない・全体レビュー I-3)", () => {
+  const area = (v: string) => ({ ...baseBody, property: { ...baseBody.property, exclusiveArea: v } });
+
+  it("★専有面積に単位が付いていたら400で、どの欄かを伝える", async () => {
+    const res = await POST(req(area("70㎡")));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.message).toContain("専有面積");
+    expect(created.property).toBeUndefined();
+  });
+
+  it("★専有面積が「約70」でも400", async () => {
+    const res = await POST(req(area("約70")));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.message).toContain("専有面積");
+  });
+
+  it("専有面積が素の数字なら通る(小数も)", async () => {
+    expect((await POST(req(area("70")))).status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ exclusiveArea: "70" });
+  });
+
+  it("専有面積が空欄なら null で通る(未入力は誤りではない)", async () => {
+    const res = await POST(req(area("")));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ exclusiveArea: null });
+  });
+
+  it("★物件種別が enum に無い値なら400", async () => {
+    const res = await POST(req({
+      ...baseBody,
+      property: { ...baseBody.property, propertyType: "一般住宅" },
+    }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.message).toContain("物件種別");
+    expect(created.property).toBeUndefined();
+  });
+
+  it("★現況が enum に無い値なら400", async () => {
+    const res = await POST(req({
+      ...baseBody,
+      property: { ...baseBody.property, occupancyStatus: "居住中" },
+    }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.message).toContain("現況");
+    expect(created.property).toBeUndefined();
+  });
+
+  it("現況が enum の値なら通る", async () => {
+    const res = await POST(req({
+      ...baseBody,
+      property: { ...baseBody.property, occupancyStatus: "occupied" },
+    }));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ occupancyStatus: "occupied" });
   });
 });
