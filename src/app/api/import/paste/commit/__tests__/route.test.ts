@@ -34,9 +34,12 @@ let storedExternalKey: string | null = null;
 let ownerLinkable = true;
 /** owner.updateMany に渡された引数。 */
 const ownerUpdateManyArgs: unknown[] = [];
-/** storage.upload に渡された key / storage.delete に渡された key。 */
-const uploadedKeys: string[] = [];
+/** storage.upload に**要求した** key / アダプタが実際に**保存した** key / delete に渡された key。 */
+const requestedKeys: string[] = [];
+const storedKeys: string[] = [];
 const deletedKeys: string[] = [];
+/** アダプタが要求と違う key へ保存する状況の再現(null = 要求どおり)。 */
+let storedKeyOverride: string | null = null;
 
 // ⚠api-helpers を vi.importActual すると実物の "@/lib/auth" まで読み込まれ、
 //   next-auth 内部の拡張子なし "next/server" import が node の ESM 解決に失敗する
@@ -75,11 +78,17 @@ vi.mock("@/lib/storage", async (importOriginal) => {
       // ⚠upload に渡された key を控える。孤児 PDF の削除が「アップロードした
       //   その key」で呼ばれたかを確かめるため(固定文字列の assert では、
       //   別の key を消していても緑になる)。
+      // ⚠**要求した key と、実際に保存された key を分けて返す**。本番の server
+      //   アダプタは最終的な保存先を返すため、要求 key で消しに行くと存在しない
+      //   パスを消して実物は孤児のまま残る。requestedKeys / storedKeys を
+      //   別々に記録し、削除が**返ってきた方**で呼ばれることを見る。
       upload: vi.fn(async (_buf: unknown, opts: { key: string }) => {
-        uploadedKeys.push(opts.key);
+        requestedKeys.push(opts.key);
+        const stored = storedKeyOverride ?? opts.key;
+        storedKeys.push(stored);
         return {
           url: "https://storage.local/properties/x/paste-import/x.pdf",
-          key: opts.key,
+          key: stored,
         };
       }),
       delete: vi.fn(async (key: string) => { deletedKeys.push(key); }),
@@ -237,8 +246,10 @@ beforeEach(() => {
   storedExternalKey = null;
   ownerLinkable = true;
   ownerUpdateManyArgs.length = 0;
-  uploadedKeys.length = 0;
+  requestedKeys.length = 0;
+  storedKeys.length = 0;
   deletedKeys.length = 0;
+  storedKeyOverride = null;
   for (const k of Object.keys(created)) delete created[k];
   auditCalls.length = 0;
   callOrder.length = 0;
@@ -477,8 +488,10 @@ describe("二重登録は確定側(サーバー)で止める", () => {
   storedExternalKey = null;
   ownerLinkable = true;
   ownerUpdateManyArgs.length = 0;
-  uploadedKeys.length = 0;
+  requestedKeys.length = 0;
+  storedKeys.length = 0;
   deletedKeys.length = 0;
+  storedKeyOverride = null;
     const res = await POST(req(withKey));
     expect(res.status).toBe(200);
     expect(created.property?.[0]).toMatchObject({ externalLinkKey: "SA2608-1234567" });
@@ -746,9 +759,9 @@ describe("トランザクションが失敗したら、先に保存したPDFを�
       await multipartReq({ ...baseBody, externalLinkKey: "SA2608-1234567" }, pdfFile("shokai.pdf")),
     );
     expect(res.status).toBe(409);
-    expect(uploadedKeys).toHaveLength(1);
-    // 「消した」だけでなく「**アップロードしたその key を**消した」ことを見る。
-    expect(deletedKeys).toEqual([uploadedKeys[0]]);
+    expect(storedKeys).toHaveLength(1);
+    // 「消した」だけでなく「**保存されたその key を**消した」ことを見る。
+    expect(deletedKeys).toEqual([storedKeys[0]]);
   });
 
   it("★アーカイブ済み所有者による409でも消す（409の経路が1つだけではない）", async () => {
@@ -757,13 +770,13 @@ describe("トランザクションが失敗したら、先に保存したPDFを�
       await multipartReq({ ...baseBody, linkExistingOwnerId: "existing-owner-1" }, pdfFile()),
     );
     expect(res.status).toBe(409);
-    expect(deletedKeys).toEqual([uploadedKeys[0]]);
+    expect(deletedKeys).toEqual([storedKeys[0]]);
   });
 
   it("★成功したときは消さない（消しすぎていない）", async () => {
     const res = await POST(await multipartReq(baseBody, pdfFile()));
     expect(res.status).toBe(200);
-    expect(uploadedKeys).toHaveLength(1);
+    expect(storedKeys).toHaveLength(1);
     expect(deletedKeys).toEqual([]);
   });
 
@@ -794,7 +807,7 @@ describe("multipart は formData() の前に大きさを見る（P1②）", () =
     const res = await POST(reqTooBig);
     expect(res.status).toBe(413);
     expect(created.property).toBeUndefined();
-    expect(uploadedKeys).toEqual([]);
+    expect(storedKeys).toEqual([]);
   });
 
   it("★Content-Length が無い multipart は411", async () => {
@@ -908,5 +921,63 @@ describe("メールアドレスの形式を通常の所有者作成と同じ規�
     const res = await POST(req(ownerEmail("yamada@example.jp")));
     expect(res.status).toBe(200);
     expect(created.owner?.[0]).toMatchObject({ email: "yamada@example.jp" });
+  });
+});
+
+// ===========================================================================
+// @codex PR#414 4巡目
+// ===========================================================================
+
+describe("削除は「アダプタが実際に保存した key」で行う（4巡目 ①）", () => {
+  it("★アップロードが要求と違う key を返したとき、**返ってきた方**で削除する", async () => {
+    // 本番の server アダプタは最終的な保存先を返す。要求 key で消しに行くと
+    // 存在しないパスを消し、**実物のPDFは孤児のまま残る**。
+    storedKeyOverride = "properties/actual/where-it-really-went.pdf";
+    existingByExternalKey = "prop-existing-1";
+    const res = await POST(
+      await multipartReq({ ...baseBody, externalLinkKey: "SA2608-1234567" }, pdfFile()),
+    );
+    expect(res.status).toBe(409);
+    expect(requestedKeys).toHaveLength(1);
+    expect(storedKeys).toEqual(["properties/actual/where-it-really-went.pdf"]);
+    // 返ってきた key を消していること。
+    expect(deletedKeys).toEqual(["properties/actual/where-it-really-went.pdf"]);
+    // 要求した key は消していないこと（両者は実際に別物）。
+    expect(requestedKeys[0]).not.toBe(storedKeys[0]);
+    expect(deletedKeys).not.toContain(requestedKeys[0]);
+  });
+});
+
+describe("監査ログが管理画面で「物件」として拾え、中身も伏せ字にならない（4巡目 ⑤⑥）", () => {
+  it("★targetTable は複数形 properties（本番の audit_logs に合わせる）", async () => {
+    await POST(req(baseBody));
+    expect(auditCalls).toHaveLength(1);
+    expect(auditCalls[0]).toMatchObject({ targetTable: "properties" });
+  });
+
+  it("★route が実際に書いた detail が、管理画面の安全化を通っても伏せ字にならない", async () => {
+    // ⚠2段そろって初めて監査になる: ①route が detail に書く
+    //   ②audit-log-detail-safety の allowlist に載っている。
+    //   ①だけだと記録はされるのに監査画面では [REDACTED] になり、
+    //   所有者・紐付け・添付が作られたのかが管理者に一切分からない。
+    const { sanitizeAuditDetail, REDACTED } = await import("@/lib/audit-log-detail-safety");
+    await POST(await multipartReq({
+      ...baseBody,
+      owner: { name: "山田太郎", nameKana: null, phone: null, email: null, currentAddress: null },
+      externalLinkKey: "SA2608-1234567",
+    }, pdfFile()));
+
+    const call = auditCalls[0] as { action: string; detail: Record<string, unknown> };
+    // 記録した4つの真偽値が、まず route 側で正しい値になっている。
+    expect(call.detail).toEqual({
+      ownerCreated: true,
+      ownerLinked: true,
+      attachmentCreated: true,
+      hasExternalKey: true,
+    });
+    // その**同じ detail** を管理画面と同じ関数に通しても、1つも伏せ字にならない。
+    const shown = sanitizeAuditDetail(call.action, call.detail) as Record<string, unknown>;
+    expect(shown).toEqual(call.detail);
+    expect(Object.values(shown)).not.toContain(REDACTED);
   });
 });

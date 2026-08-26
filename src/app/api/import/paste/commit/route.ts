@@ -297,7 +297,11 @@ export async function POST(request: NextRequest) {
         fileName: pdfFileName,
       });
       uploadedUrl = uploaded.url;
-      uploadedKey = key;
+      // ⚠**要求した key ではなく、アダプタが返した最終的な保存先**を控える
+      //   (@codex PR#414 4巡目)。server アダプタは実際に保存した key を返すため、
+      //   要求と違う場所に保存された場合、要求した key で消しに行くと
+      //   **存在しないパスを消して、実物のPDFは孤児のまま残る**。
+      uploadedKey = uploaded.key;
     }
 
     // ⚠トランザクションが失敗したら、**先に保存した PDF を best-effort で消す**。
@@ -457,7 +461,10 @@ export async function POST(request: NextRequest) {
     await writeAuditLog({
       userId: session.id,
       action: "paste_import_property_create",
-      targetTable: "property",
+      // ⚠**"properties"（複数形）**。本番の audit_logs は properties が1,334件・
+      //   property は0件で、単数形にすると管理画面で「物件」を絞ったときに
+      //   **この機能の記録だけが漏れる**(@codex PR#414 4巡目)。
+      targetTable: "properties",
       targetId: result.propertyId,
       detail: {
         ownerCreated: result.ownerCreated,

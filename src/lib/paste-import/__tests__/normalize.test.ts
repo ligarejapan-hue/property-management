@@ -111,3 +111,31 @@ describe("addressSearchPrefix（DB前方一致の種・@codex PR#414 P2）", () 
     expect(addressSearchPrefix("")).toBeNull();
   });
 });
+
+describe("parseAreaSqm: 平米だと分かるものだけ採る（4巡目 ③）", () => {
+  it("★「20坪（66.1㎡）」は null（20を拾って m² と表示しない）", () => {
+    // 最初の数値を拾うと、66.1㎡ の物件が **20㎡** として登録される。
+    // 値を捨てるのではなく意味を静かに書き換える＝空欄より悪い。
+    expect(parseAreaSqm("20坪（66.1㎡）")).toBeNull();
+  });
+
+  it("★坪・帖・畳は換算せず null（換算は新たな推測になる）", () => {
+    expect(parseAreaSqm("20坪")).toBeNull();
+    expect(parseAreaSqm("6帖")).toBeNull();
+    expect(parseAreaSqm("6畳")).toBeNull();
+  });
+
+  it("★数値が複数あるものは null（どれが面積か決められない）", () => {
+    expect(parseAreaSqm("66.1㎡ / 20坪")).toBeNull();
+    expect(parseAreaSqm("1階 70㎡")).toBeNull();
+  });
+
+  it("★平米だと明示された単位付き・素の数値は従来どおり採る", () => {
+    expect(parseAreaSqm("70㎡")).toBe(70);
+    expect(parseAreaSqm("70 平米")).toBe(70);
+    expect(parseAreaSqm("70m2")).toBe(70);
+    expect(parseAreaSqm("70")).toBe(70);
+    expect(parseAreaSqm("1,234.5 ㎡")).toBe(1234.5);
+    expect(parseAreaSqm("70平方メートル")).toBe(70);
+  });
+});

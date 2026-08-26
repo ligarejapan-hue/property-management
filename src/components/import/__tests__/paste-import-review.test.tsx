@@ -29,6 +29,27 @@ function extractFieldBlock(source: string, fieldKey: string): string {
   return next === -1 ? source.slice(start) : source.slice(start, next);
 }
 
+/**
+ * 「この内容で登録」ボタンの開始タグを取り出す。
+ * ⚠**`/disabled/` で全体を検索してはいけない**。Button の className には
+ *   `disabled:cursor-not-allowed` `disabled:opacity-60` が常に入っており、
+ *   **無効化されていなくても必ず一致する**（空洞テストになる。実際に
+ *   このリポの既存テストがこれで通っていた）。属性そのものを見る。
+ */
+function registerButtonTag(source: string): string {
+  const labelAt = source.indexOf("この内容で登録");
+  expect(labelAt).toBeGreaterThanOrEqual(0);
+  const openAt = source.lastIndexOf("<button", labelAt);
+  expect(openAt).toBeGreaterThanOrEqual(0);
+  const closeAt = source.indexOf(">", openAt);
+  return source.slice(openAt, closeAt + 1);
+}
+
+/** ボタンが本当に無効化されているか（属性 disabled="" が付いているか）。 */
+function registerButtonDisabled(source: string): boolean {
+  return registerButtonTag(source).includes('disabled=""');
+}
+
 describe("PasteImportReview（確認画面）", () => {
   it("拾えた値を表示する", () => {
     expect(html).toContain("東京都A区B1-2-3");
@@ -124,8 +145,8 @@ describe("PasteImportReview（3状態の描き分け・空洞テスト対策）"
     );
     expect(out).toContain("この案件は登録済みです");
     expect(out).toContain("/properties/prop-existing-1");
-    // disabled 属性が実際に出ている(register ボタンが無効化されている)ことまで見る
-    expect(out).toMatch(/disabled(=""|="disabled")?[^>]*>[\s\S]*?登録/);
+    // ⚠登録ボタンの**属性**を見る(className の disabled:… に当たる空洞テストにしない)
+    expect(registerButtonDisabled(out)).toBe(true);
   });
 
   it("similar が非空のとき、類似物件の一覧（住所つき）をブロックせずに出す", () => {
@@ -312,5 +333,62 @@ describe("読み取れなかった行(unlabeled)を原文側に出す（再レ�
     );
     expect(out).not.toContain('data-section="unlabeled"');
     expect(out).not.toContain("項目として読み取れなかった行");
+  });
+});
+
+describe("「新しい所有者として登録する」のまま氏名が空なら登録を止める（4巡目 ②）", () => {
+  const emptyOwner = {
+    name: "", nameKana: "ヤマダタロウ", phone: "09012345678",
+    email: "a@example.jp", currentAddress: "東京都A区B1-2-3",
+  };
+
+  it("★氏名が空なら登録ボタンが無効で、理由が画面に出る", () => {
+    // 以前は氏名を消した瞬間に owner が null に落ち、**所有者なしで登録が成功**して
+    // 入力済みの電話・メール・住所も捨てられていた（画面は「新しい所有者として
+    // 登録する」を選んだままなのに）。「所有者なしで登録する」は別の選択肢。
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft, rawText: "", ownerMode: "new", ownerValues: emptyOwner,
+      }),
+    );
+    expect(registerButtonDisabled(out)).toBe(true);
+    // ⚠**画面に文字で出ている**ことを見る(title 属性にも同じ趣旨の文が入るので、
+    //   素の toContain だと title だけでも通ってしまう)。要素の中身として出る
+    //   句点つきの言い回しを、開き山括弧の直後で照合する。
+    expect(out).toContain(">所有者の氏名を入力してください。");
+    expect(out).toContain('role="alert"');
+  });
+
+  it("★氏名があれば止めない（止めすぎていない）", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft, rawText: "", ownerMode: "new",
+        ownerValues: { ...emptyOwner, name: "山田太郎" },
+      }),
+    );
+    expect(out).not.toContain(">所有者の氏名を入力してください。");
+    expect(registerButtonDisabled(out)).toBe(false);
+  });
+
+  it("★「所有者なしで登録する」を選んでいれば、氏名が空でも止めない", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft, rawText: "", ownerMode: "none", ownerValues: emptyOwner,
+      }),
+    );
+    expect(out).not.toContain(">所有者の氏名を入力してください。");
+    expect(registerButtonDisabled(out)).toBe(false);
+  });
+
+  it("登録済みでブロックされているときは、そちらの理由を優先して出す", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft, rawText: "", ownerMode: "new", ownerValues: emptyOwner,
+        duplicates: { blocked: true, blockedByPropertyId: "p1", similarPropertyIds: [] },
+      }),
+    );
+    expect(out).toContain("この案件は登録済みです");
+    expect(out).not.toContain(">所有者の氏名を入力してください。");
+    expect(registerButtonDisabled(out)).toBe(true);
   });
 });

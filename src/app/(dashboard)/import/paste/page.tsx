@@ -138,6 +138,15 @@ export default function PasteImportPage() {
       setRegisterError("住所を入力してください");
       return;
     }
+    // ⚠「新しい所有者として登録する」のまま氏名が空なら送らない。以前はここで
+    //   無言に owner: null へ落ち、**所有者なしで登録が成功**していた
+    //   (電話・メール・住所も一緒に捨てられる)。利用者の選択を読み替えない。
+    if (ownerMode === "new" && ownerValues.name.trim() === "") {
+      setRegisterError(
+        "所有者の氏名を入力してください。所有者を作らない場合は「所有者なしで登録する」を選んでください。",
+      );
+      return;
+    }
     setRegistering(true);
     setRegisterError(null);
     try {

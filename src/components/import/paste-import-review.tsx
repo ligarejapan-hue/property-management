@@ -314,6 +314,21 @@ export function PasteImportReview({
   const candidates = ownerCandidates ?? [];
   const mode = ownerMode ?? defaultOwnerMode(draft);
 
+  /**
+   * ⚠「新しい所有者として登録する」を選んだまま氏名が空のとき、**登録を止める**
+   *   (@codex PR#414 4巡目)。以前は氏名を消した瞬間に owner が null に落ち、
+   *   そのまま登録すると**所有者なしで成功**して、入力済みの電話・メール・住所も
+   *   捨てられていた。画面は「新しい所有者として登録する」を選んだままなのに、である。
+   *   「所有者なしで登録する」という選択肢は別に用意してあるので、
+   *   利用者が選んだ意図を勝手に読み替えない。
+   */
+  const ownerNameMissing = mode === "new" && oValues.name.trim() === "";
+  const blockReason = dup.blocked
+    ? "この案件は登録済みのため登録できません"
+    : ownerNameMissing
+      ? "所有者の氏名を入力してください（所有者を作らない場合は「所有者なしで登録する」を選んでください）"
+      : null;
+
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
       {/* 左: 貼った原文 */}
@@ -532,8 +547,8 @@ export function PasteImportReview({
         <div className="mt-4 flex items-center gap-3">
           <Button
             onClick={onRegister}
-            disabled={dup.blocked || Boolean(registering)}
-            title={dup.blocked ? "この案件は登録済みのため登録できません" : undefined}
+            disabled={blockReason !== null || Boolean(registering)}
+            title={blockReason ?? undefined}
           >
             {registering ? "登録しています…" : "この内容で登録"}
           </Button>
@@ -543,6 +558,12 @@ export function PasteImportReview({
             </span>
           )}
         </div>
+        {/* ⚠止めた理由は title 属性だけにしない(スマホでは出ない)。画面に文字で出す。 */}
+        {ownerNameMissing && !dup.blocked && (
+          <p role="alert" className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+            所有者の氏名を入力してください。所有者を作らない場合は「所有者なしで登録する」を選んでください。
+          </p>
+        )}
       </section>
     </div>
   );

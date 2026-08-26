@@ -57,13 +57,50 @@ export function warekiToSeireki(raw: string): number | null {
   return seireki ? Number(seireki[1]) : null;
 }
 
-/** 「70 平米」「70.55㎡」などを数値へ。数値が無ければ null。 */
+/**
+ * 面積として受け付ける単位の書き方（数値を取り除いた残り。空白は除去済み）。
+ * ⚠**平米だと明示されたものだけ**。空文字＝単位なしの素の数値も認める。
+ */
+const AREA_SQM_UNITS: ReadonlySet<string> = new Set([
+  "",
+  "m2",
+  "m²",
+  "㎡",
+  "平米",
+  "平方m",
+  // ⚠toHalfWidth は長音記号(ー)もハイフンに寄せるため、「平方メートル」は
+  //   ここに来る時点で「平方メ-トル」になっている。両方を載せておく
+  //   (toHalfWidth の挙動は他から使われているので変えない)。
+  "平方メートル",
+  "平方メ-トル",
+]);
+
+/**
+ * 「70 平米」「70.55㎡」などを数値へ。**平米だと分かるものだけ**を採り、
+ * それ以外は null（数値が無い / 単位が坪・帖・畳 / 数値が複数 など）。
+ *
+ * ⚠**最初に見つけた数値を拾ってはいけない**（@codex PR#414 4巡目）。
+ *   `20坪（66.1㎡）` から 20 を取ると、確認画面は「20 m²」と表示し、
+ *   **66.1㎡ の物件が 20㎡ として登録される**。これはこの機能の設計原則
+ *   「拾えなかったから推測で埋める、は行わない」に正面から反する:
+ *   値を捨てるのではなく**意味を静かに書き換えている**ので、空欄より悪い。
+ * ⚠**坪を換算しない**。換算は新たな推測になる。人が確認画面で入力する。
+ */
 export function parseAreaSqm(raw: string): number | null {
-  const s = toHalfWidth(raw).replace(/,/g, "");
-  const m = /(\d+(?:\.\d+)?)/.exec(s);
-  if (!m) return null;
-  const n = Number(m[1]);
-  return Number.isFinite(n) ? n : null;
+  // ⚠`m2` の「2」を面積の数値と数え違えないよう、先に `㎡` へ畳んでから数える
+  //   (`70m2` が「70 と 2 の2つ」に見えて null になっていた)。
+  const s = toHalfWidth(raw)
+    .replace(/,/g, "")
+    .replace(/[mM][\s　]*2(?![0-9.])/g, "㎡");
+  const numbers = s.match(/\d+(?:\.\d+)?/g) ?? [];
+  // 数値が無い / 2つ以上（例: `20坪（66.1㎡）`）はどちらが面積か決められない。
+  if (numbers.length !== 1) return null;
+  const n = Number(numbers[0]);
+  if (!Number.isFinite(n)) return null;
+  // 数値以外に何が書かれているか（空白は無視して単位だけを見る）。
+  const unit = s.replace(numbers[0], "").replace(/[\s　]/g, "");
+  if (!AREA_SQM_UNITS.has(unit)) return null;
+  return n;
 }
 
 /**
