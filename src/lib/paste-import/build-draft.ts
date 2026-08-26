@@ -117,6 +117,7 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
   if (mappedType !== null && !mappedType.confident) {
     warnings.push({
       code: "property_type_unknown",
+      field: "propertyType",
       message: `物件種別「${typeRaw}」を判別できませんでした。選び直してください。`,
     });
   }
@@ -133,13 +134,41 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
         currentAddress: field(raw("ownerAddress"), label("ownerAddress")),
       };
 
-  const builtYearRaw = raw("builtYearRaw");
-  const builtYear = builtYearRaw === null ? null : warekiToSeireki(builtYearRaw, options);
-  const areaRaw = raw("exclusiveArea");
-  const area = areaRaw === null ? null : parseAreaSqm(areaRaw);
-  const landAreaRaw = raw("landArea");
-  const landArea = landAreaRaw === null ? null : parseAreaSqm(landAreaRaw);
-  const occRaw = raw("occupancyRaw");
+  // ---- 値を解釈できなかった欄の共通処理 ----
+  // ⚠**捨てて黙らない**(@codex PR#414 9巡目 ②)。5巡目で「単位が確かでなければ
+  //   null」にした結果、`20坪（66.1㎡）` のような値は確認画面で
+  //   「元の資料に記載がありません」と出ていた＝**元資料には書いてあるのに
+  //   無いと言う**＝利用者への嘘で、設計の「誤解させない」に正面から反する。
+  //   ①警告を出す ②生の値を備考へ残す(辞書に無い見出しと同じ扱い＝情報を失わない)
+  //   ③欄は空のまま(推測で埋めない) の3つを同時に行う。
+  // ⚠面積に限らず、**見出しは辞書にあるのに値を解釈できなかった場合すべて**に
+  //   同じ扱いをする(築年の元号エラー・現況の言い換え不明も同型)。
+  function readOrKeepRaw<T>(
+    key: DraftFieldKey,
+    fieldKey: string,
+    fieldLabel: string,
+    parse: (raw: string) => T | null,
+  ): T | null {
+    const rawValue = raw(key);
+    if (rawValue === null) return null;
+    const parsed = parse(rawValue);
+    if (parsed !== null) return parsed;
+    warnings.push({
+      code: "value_unreadable",
+      field: fieldKey,
+      message: `${fieldLabel}「${rawValue}」を読み取れませんでした。ご確認のうえ入力してください。`,
+    });
+    // 備考へ回す(見出しは元の表記のまま＝原文と突き合わせられる)。
+    unmapped.push({ label: label(key) || fieldLabel, value: rawValue });
+    return null;
+  }
+
+  const builtYear = readOrKeepRaw("builtYearRaw", "builtYear", "築年", (v) =>
+    warekiToSeireki(v, options),
+  );
+  const area = readOrKeepRaw("exclusiveArea", "exclusiveArea", "専有面積", parseAreaSqm);
+  const landArea = readOrKeepRaw("landArea", "landArea", "土地面積", parseAreaSqm);
+  const occupancy = readOrKeepRaw("occupancyRaw", "occupancyStatus", "現況", occupancyFor);
 
   return {
     sourceProfile,
@@ -153,10 +182,7 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
       exclusiveArea: field(area === null ? null : String(area), label("exclusiveArea")),
       landArea: field(landArea === null ? null : String(landArea), label("landArea")),
       layoutType: field(raw("layoutType"), label("layoutType")),
-      occupancyStatus: field(
-        occRaw === null ? null : occupancyFor(occRaw),
-        label("occupancyRaw"),
-      ),
+      occupancyStatus: field(occupancy, label("occupancyRaw")),
       builtYear: field(builtYear === null ? null : String(builtYear), label("builtYearRaw")),
     },
     owner,

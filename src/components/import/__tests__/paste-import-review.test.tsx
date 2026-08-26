@@ -617,3 +617,95 @@ describe("見えない紐付けを残さない（8巡目 ①）", () => {
     }
   });
 });
+
+describe("登録処理中は入力欄とラジオも触らせない（9巡目 ③）", () => {
+  /** その id を持つ入力要素の開始タグ（属性そのものを見るため）。 */
+  function tagById(source: string, id: string): string {
+    const at = source.indexOf(`id="${id}"`);
+    expect(at, `${id} が見つからない`).toBeGreaterThanOrEqual(0);
+    const open = source.lastIndexOf("<", at);
+    return source.slice(open, source.indexOf(">", at) + 1);
+  }
+  /** name="paste-owner-mode" のラジオの開始タグを全部。 */
+  function ownerModeRadioTags(source: string): string[] {
+    const tags: string[] = [];
+    let at = source.indexOf('name="paste-owner-mode"');
+    while (at !== -1) {
+      const open = source.lastIndexOf("<", at);
+      tags.push(source.slice(open, source.indexOf(">", at) + 1));
+      at = source.indexOf('name="paste-owner-mode"', at + 1);
+    }
+    return tags;
+  }
+
+  const props = {
+    draft,
+    rawText: "",
+    ownerMode: "new" as const,
+    ownerValues: {
+      name: "山田太郎", nameKana: "", phone: "", email: "", currentAddress: "",
+    },
+  };
+  const idle = renderToStaticMarkup(createElement(PasteImportReview, props));
+  const busy = renderToStaticMarkup(
+    createElement(PasteImportReview, { ...props, registering: true }),
+  );
+
+  it("★登録中は物件の入力欄が無効になる（属性で確認）", () => {
+    // ⚠className の `disabled:` に当たる空振りを避けるため、
+    //   その入力要素のタグに `disabled=""` が付いているかだけを見る。
+    for (const id of ["paste-field-address", "paste-field-lotNumber", "paste-field-externalLinkKey"]) {
+      expect(tagById(busy, id)).toContain('disabled=""');
+      expect(tagById(idle, id)).not.toContain('disabled=""');
+    }
+  });
+
+  it("★登録中は選択式の欄（種別・現況）も無効になる", () => {
+    for (const id of ["paste-field-propertyType", "paste-field-occupancyStatus"]) {
+      expect(tagById(busy, id)).toContain('disabled=""');
+      expect(tagById(idle, id)).not.toContain('disabled=""');
+    }
+  });
+
+  it("★登録中は所有者の入力欄と備考も無効になる", () => {
+    for (const id of ["paste-field-owner-name", "paste-field-owner-phone", "paste-field-note"]) {
+      expect(tagById(busy, id)).toContain('disabled=""');
+      expect(tagById(idle, id)).not.toContain('disabled=""');
+    }
+  });
+
+  it("★登録中は所有者の扱いのラジオも無効になる（全部）", () => {
+    const busyTags = ownerModeRadioTags(busy);
+    expect(busyTags.length).toBeGreaterThan(0);
+    for (const t of busyTags) expect(t).toContain('disabled=""');
+    for (const t of ownerModeRadioTags(idle)) expect(t).not.toContain('disabled=""');
+  });
+});
+
+describe("読み取れなかった値の見せ方（9巡目 ②・画面）", () => {
+  const d = buildPasteDraft(
+    "■物件所在地： 東京都A区B1-2-3" + NL + "■建物（専有）面積： 20坪（66.1㎡）",
+  );
+  const out = renderToStaticMarkup(createElement(PasteImportReview, { draft: d, rawText: "" }));
+  const block = extractFieldBlock(out, "exclusiveArea");
+
+  it("★その欄に「読み取れませんでした」の警告が出る", () => {
+    const w = d.warnings.find((x) => x.field === "exclusiveArea");
+    expect(w).toBeTruthy();
+    expect(block).toContain(w!.message);
+    expect(block).toContain("20坪（66.1㎡）");
+  });
+
+  it("★その欄に「元の資料に記載がありません」は出さない（元資料には書いてある）", () => {
+    expect(block).not.toContain("元の資料に記載がありません");
+  });
+
+  it("★欄そのものは空のまま（推測で埋めない）", () => {
+    expect(block).toContain('value=""');
+  });
+
+  it("本当に記載が無い欄には従来どおり「元の資料に記載がありません」が出る", () => {
+    const layout = extractFieldBlock(out, "layoutType");
+    expect(layout).toContain("元の資料に記載がありません");
+  });
+});

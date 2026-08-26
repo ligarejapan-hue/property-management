@@ -52,6 +52,8 @@ describe("propertyTypeForRaw（物件種別の言い換え）", () => {
 
 /** 言い換え語 → 「その語が指しているもの」の表示ラベル（property-types.ts の語彙）。 */
 const EXPECTED_LABEL_FOR_PHRASE: Record<string, string> = {
+  "マンション用地": "土地",
+  "住宅用地": "土地",
   "一棟マンション": "一棟マンション",
   "一棟アパート": "一棟アパート",
   "区分所有": "区分マンション",
@@ -81,4 +83,39 @@ describe("辞書の対応先ラベルが言い換え語の意味と一致する"
       expect(PROPERTY_TYPE_LABELS[mapped.value]).toBe(EXPECTED_LABEL_FOR_PHRASE[rule.needle]);
     });
   }
+});
+
+describe("辞書の並び順そのものを固定する（9巡目 ①）", () => {
+  it("★後ろの語が前の語を丸ごと含んではいけない（限定的な語を先に置く規律）", () => {
+    // 部分一致は先に当たったものが勝つ。広い語(住宅)が限定的な語(住宅用地)より
+    // 前にあると、土地が戸建に化ける。個別に入れ替えるだけでは同じ形がまた出るので、
+    // 並び順そのものを機械的に検査する。語を足して順序を間違えたら名指しで落ちる。
+    const offenders: string[] = [];
+    for (let i = 0; i < PROPERTY_TYPE_RULES.length; i++) {
+      for (let j = i + 1; j < PROPERTY_TYPE_RULES.length; j++) {
+        const earlier = PROPERTY_TYPE_RULES[i].needle;
+        const later = PROPERTY_TYPE_RULES[j].needle;
+        if (later !== earlier && later.includes(earlier)) {
+          offenders.push(`「${later}」(${j}番目) は「${earlier}」(${i}番目) より前に置くこと`);
+        }
+      }
+    }
+    expect(offenders, offenders.join(" / ")).toEqual([]);
+  });
+
+  it("★「住宅用地」は土地（戸建に化けない）", () => {
+    expect(propertyTypeForRaw("住宅用地").value).toBe("land");
+    expect(propertyTypeForRaw("住宅用地").confident).toBe(true);
+  });
+
+  it("★「マンション用地」も土地", () => {
+    expect(propertyTypeForRaw("マンション用地").value).toBe("land");
+  });
+
+  it("★既存の判定が壊れていない", () => {
+    expect(propertyTypeForRaw("一棟マンション").value).toBe("apartment_building");
+    expect(propertyTypeForRaw("一般住宅").value).toBe("house");
+    expect(propertyTypeForRaw("マンション").value).toBe("apartment_unit");
+    expect(propertyTypeForRaw("土地").value).toBe("land");
+  });
 });

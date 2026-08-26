@@ -4,11 +4,24 @@ export type DraftWarningCode =
   | "no_labeled_lines"
   | "lot_number_missing"
   | "property_type_unknown"
-  | "address_missing";
+  | "address_missing"
+  /**
+   * 見出しは辞書にあったのに、**値を解釈できなかった**。
+   * ⚠捨てて黙る（＝確認画面に「元の資料に記載がありません」と出る）のは
+   *   **利用者への嘘**になる。元資料には書いてあるのだから、
+   *   ①警告を出す ②生の値を備考へ残す ③欄は空のまま、の3つを同時に行う。
+   */
+  | "value_unreadable";
 
 export interface DraftWarning {
   code: DraftWarningCode;
   message: string;
+  /**
+   * どの欄についての警告か（PasteDraft["property"] のキー）。
+   * 確認画面はこれを見て、その欄に警告を添え、
+   * 「元の資料に記載がありません」を**出さない**ようにする。
+   */
+  field?: string;
 }
 
 /** 1つの欄。**どの見出しから来たか**を持つ（確認画面で原文と照らすため）。 */

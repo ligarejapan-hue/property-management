@@ -21,10 +21,19 @@ export interface PropertyTypeRule {
 }
 
 /**
- * 部分一致で判定する。**順序が意味を持つ**: 長い語を先に置く。
- * 「一棟マンション」が「マンション」より前にないと apartment_unit になってしまう。
+ * 部分一致で判定する。**順序が意味を持つ**。
+ *
+ * ⚠規律: **より限定的な語（別の語を丸ごと含む語）を、広い語より必ず先に置く**。
+ *   - 「一棟マンション」が「マンション」より前にないと apartment_unit になる
+ *   - 「住宅用地」が「住宅」より前にないと house になる（＝土地が戸建に化ける）
+ *   同じ形の取り違えが2回起きたので、**順序そのものをテストで固定**した
+ *   (__tests__/property-type-dictionary.test.ts。後ろの語を前の語が含んでいたら
+ *   名指しで落ちる)。語を足す人が順序を間違えたら気づける。
  */
 export const PROPERTY_TYPE_RULES: readonly PropertyTypeRule[] = [
+  // 「◯◯用地」は**土地**。広い語(住宅 / マンション)より必ず前に置く。
+  { needle: "マンション用地", value: "land" },
+  { needle: "住宅用地", value: "land" },
   { needle: "一棟マンション", value: "apartment_building" },
   { needle: "一棟アパート", value: "apartment_block" },
   { needle: "区分所有", value: "apartment_unit" },

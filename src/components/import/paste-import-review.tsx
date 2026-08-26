@@ -212,6 +212,7 @@ function FieldRow({
   onChange,
   onBlur,
   selectOptions,
+  disabled,
 }: {
   fieldKey: string;
   label: string;
@@ -224,9 +225,14 @@ function FieldRow({
   /** 入力を終えた（フォーカスが外れた）とき。重複の見直しを起こすために使う。 */
   onBlur?: () => void;
   selectOptions?: { value: string; label: string }[];
+  /** 登録処理中は編集させない(直したつもりで無視される事故を防ぐ)。 */
+  disabled?: boolean;
 }) {
   const hasValue = value.trim() !== "";
-  const boxClass = !hasValue ? BOX_MISSING : warningMessage ? BOX_WARN : BOX_OK;
+  // ⚠**警告があるときは「元の資料に記載がありません」を出さない**
+  //   (@codex PR#414 9巡目 ②)。元資料には書いてあるのに読み取れなかった、という
+  //   場合にそう出すのは利用者への嘘になる。警告のほうを出す。
+  const boxClass = warningMessage ? BOX_WARN : !hasValue ? BOX_MISSING : BOX_OK;
   const handleChange = (
     e: ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => onChange?.(e.target.value);
@@ -248,6 +254,7 @@ function FieldRow({
             value={value}
             onChange={handleChange}
             onBlur={onBlur}
+            disabled={disabled}
           >
             <option value="">（未選択）</option>
             {selectOptions.map((opt) => (
@@ -264,6 +271,7 @@ function FieldRow({
             value={value}
             onChange={handleChange}
             onBlur={onBlur}
+            disabled={disabled}
           />
         )}
         {hasValue && sourceLabel && (
@@ -271,12 +279,12 @@ function FieldRow({
             {sourceLabel} から
           </span>
         )}
-        {!hasValue && (
+        {!hasValue && !warningMessage && (
           <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
             元の資料に記載がありません
           </p>
         )}
-        {hasValue && warningMessage && (
+        {warningMessage && (
           <p role="alert" className="mt-0.5 text-[11px] text-amber-700 dark:text-amber-400">
             {warningMessage}
           </p>
@@ -387,6 +395,13 @@ export function PasteImportReview({
    *   **見えない紐付けのまま登録させない**。
    */
   const linkTargetMissing = mode === "link" && !linkedOwnerId;
+  /**
+   * ⚠登録処理中（再判定・PDFのアップロードを含む）は**入力欄とラジオも触らせない**
+   *   (@codex PR#414 9巡目 ③)。ボタンだけ止めていた頃は、「登録しています…」の
+   *   間に直しても登録は捕捉済みの値で進み、**その修正は黙って無視された**。
+   *   利用者は直したつもりでいる。
+   */
+  const busy = Boolean(registering);
   const blockReason = dup.blocked
     ? "この案件は登録済みのため登録できません"
     : ownerNameMissing
@@ -505,14 +520,17 @@ export function PasteImportReview({
           noColumnHint="※同じ番号の物件は登録できません。空にすると住所で判断します"
           onChange={(v) => onExternalLinkKeyChange?.(v)}
           onBlur={onDuplicateInputBlur}
+          disabled={busy}
         />
 
         {PROPERTY_FIELD_LABELS.map((f) => {
           const draftField = draft.property[f.key];
+          // ⚠欄に紐づく警告は **field** で引く(値を読み取れなかった警告はここに来る)。
+          //   従来の code 指定は残す(片方だけ直る食い違いを作らない)。
           const warningCode = FIELD_WARNING_CODE[f.key];
-          const warning = warningCode
-            ? draft.warnings.find((w) => w.code === warningCode)
-            : undefined;
+          const warning =
+            draft.warnings.find((w) => w.field === f.key) ??
+            (warningCode ? draft.warnings.find((w) => w.code === warningCode) : undefined);
           return (
             <FieldRow
               key={f.key}
@@ -524,6 +542,7 @@ export function PasteImportReview({
               noColumnHint={FIELD_NO_COLUMN_HINT[f.key]}
               onChange={(v) => onPropertyFieldChange?.(f.key, v)}
               onBlur={DUPLICATE_INPUT_FIELDS.has(f.key) ? onDuplicateInputBlur : undefined}
+              disabled={busy}
               selectOptions={
                 f.key === "propertyType"
                   ? PROPERTY_TYPE_OPTIONS.filter((o) =>
@@ -550,6 +569,7 @@ export function PasteImportReview({
               value={noteValue}
               onChange={(e) => onNoteChange?.(e.target.value)}
               aria-describedby="paste-field-note-visibility"
+              disabled={busy}
             />
             {/*
               ⚠備考には、辞書に無かった見出しがそのまま入る(実サンプルの査定依頼には
@@ -582,6 +602,7 @@ export function PasteImportReview({
               <input
                 type="radio"
                 name="paste-owner-mode"
+                disabled={busy}
                 checked={mode === "link" && linkedOwnerId === c.id}
                 onChange={() => {
                   onOwnerModeChange?.("link");
@@ -596,6 +617,7 @@ export function PasteImportReview({
             <input
               type="radio"
               name="paste-owner-mode"
+              disabled={busy}
               checked={mode === "new"}
               onChange={() => onOwnerModeChange?.("new")}
             />
@@ -606,6 +628,7 @@ export function PasteImportReview({
             <input
               type="radio"
               name="paste-owner-mode"
+              disabled={busy}
               checked={mode === "none"}
               onChange={() => onOwnerModeChange?.("none")}
             />
@@ -625,6 +648,7 @@ export function PasteImportReview({
                 sourceLabel={draftField?.sourceLabel ?? null}
                 onChange={(v) => onOwnerFieldChange?.(f.key, v)}
                 onBlur={DUPLICATE_OWNER_FIELDS.has(f.key) ? onDuplicateInputBlur : undefined}
+                disabled={busy}
               />
             );
           })}

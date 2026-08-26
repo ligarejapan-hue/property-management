@@ -206,3 +206,65 @@ describe("buildPasteDraft も年の上限を引数で受け取る（6巡目 ④�
     expect(d.property.builtYear.value).toBe("2099");
   });
 });
+
+describe("値を解釈できなかった欄は、捨てても黙りもしない（9巡目 ②）", () => {
+  const NLL = "\n";
+
+  it("★面積『20坪（66.1㎡）』: 警告が出る / 生の値が備考に残る / 欄は空", () => {
+    // 捨てて黙ると、確認画面に「元の資料に記載がありません」と出る＝
+    // 元資料には書いてあるのに無いと言う＝利用者への嘘。
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NLL + "■建物（専有）面積： 20坪（66.1㎡）",
+    );
+    expect(d.property.exclusiveArea.value).toBeNull();
+    const w = d.warnings.find((x) => x.code === "value_unreadable" && x.field === "exclusiveArea");
+    expect(w).toBeTruthy();
+    expect(w!.message).toContain("20坪（66.1㎡）");
+    expect(d.noteFromUnmapped).toContain("20坪（66.1㎡）");
+    expect(d.noteFromUnmapped).toContain("建物（専有）面積");
+  });
+
+  it("★土地面積でも同じ扱い", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NLL + "■土地面積： 30坪",
+    );
+    expect(d.property.landArea.value).toBeNull();
+    expect(d.warnings.some((x) => x.code === "value_unreadable" && x.field === "landArea")).toBe(true);
+    expect(d.noteFromUnmapped).toContain("30坪");
+  });
+
+  it("★築年の元号エラー（平成32年）でも同じ扱い（面積だけ直していない）", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NLL + "■築年数： 平成32年建築",
+    );
+    expect(d.property.builtYear.value).toBeNull();
+    const w = d.warnings.find((x) => x.code === "value_unreadable" && x.field === "builtYear");
+    expect(w).toBeTruthy();
+    expect(w!.message).toContain("平成32年建築");
+    expect(d.noteFromUnmapped).toContain("平成32年建築");
+  });
+
+  it("★現況の言い換えが分からないときも同じ扱い", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NLL + "■現況： 未定",
+    );
+    expect(d.property.occupancyStatus.value).toBeNull();
+    expect(d.warnings.some((x) => x.code === "value_unreadable" && x.field === "occupancyStatus")).toBe(true);
+    expect(d.noteFromUnmapped).toContain("未定");
+  });
+
+  it("★読み取れた値では警告も備考行も作らない（過剰に出していない）", () => {
+    const d = buildPasteDraft(
+      "■物件所在地： 東京都A区B1-2-3" + NLL + "■建物（専有）面積： 70 平米" + NLL + "■築年（西暦）： 2013 年",
+    );
+    expect(d.property.exclusiveArea.value).toBe("70");
+    expect(d.property.builtYear.value).toBe("2013");
+    expect(d.warnings.some((x) => x.code === "value_unreadable")).toBe(false);
+    expect(d.noteFromUnmapped).not.toContain("70 平米");
+  });
+
+  it("★見出しそのものが無ければ警告は出さない（本当に記載が無い場合）", () => {
+    const d = buildPasteDraft("■物件所在地： 東京都A区B1-2-3");
+    expect(d.warnings.some((x) => x.code === "value_unreadable")).toBe(false);
+  });
+});

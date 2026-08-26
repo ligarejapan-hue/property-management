@@ -423,6 +423,8 @@ export default function PasteImportPage() {
             <Button
               variant="secondary"
               size="sm"
+              // 登録処理中は貼り直しもさせない(進行中の登録の足元を崩さない)。
+              disabled={registering}
               onClick={() => {
                 setDraft(null);
                 setDuplicates(null);
