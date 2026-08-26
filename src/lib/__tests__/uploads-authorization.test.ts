@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   authorizeUploadAccess,
   resolveRegistryServeMeta,
+  resolveProtectedServeMeta,
   escapePrismaLikePattern,
   isEveryOwnerFieldMaskFree,
   referralGatedOwnerFields,
@@ -956,6 +957,9 @@ describe("resolveRegistryServeMeta (S1b-4)", () => {
       ],
     });
     expect(await resolveRegistryServeMeta(REG_KEY, prisma)).toEqual({
+      // ⚠24巡目で registry/referral を1回の問い合わせで判定するようにしたため
+      //   kind が付く（registry 側の中身は不変）。
+      kind: "registry",
       isRegistry: true,
       attachmentId: "att-reg-1",
       propertyId: "p1",
@@ -972,6 +976,7 @@ describe("resolveRegistryServeMeta (S1b-4)", () => {
     });
     const meta = await resolveRegistryServeMeta(REG_KEY, prisma);
     expect(meta).toEqual({
+      kind: "registry",
       isRegistry: true,
       attachmentId: "att-reg-2",
       propertyId: "p1",
@@ -1395,5 +1400,123 @@ describe("isEveryOwnerFieldMaskFree / referralGatedOwnerFields", () => {
     expect(
       await authorizeUploadAccess({ key: REF_KEY2, session: officeStaff, permissions: perms, prisma }),
     ).toBe("forbidden");
+  });
+});
+
+// ============================================================
+// resolveProtectedServeMeta（@codex PR#414 24巡目）
+//
+// ⚠**キャッシュさせない添付**（registry / referral）を1回の問い合わせで判定する。
+//   referral を漏らすと、配信側が `private, max-age=3600` + ETag に落ち、
+//   権限剥奪後も最大1時間ブラウザキャッシュから読めてしまう。
+// ============================================================
+describe("resolveProtectedServeMeta", () => {
+  const REF_KEY = "properties/p1/paste-import/1-abc.pdf";
+  const REG_KEY2 = "properties/p1/registry/200.pdf";
+  const GEN_KEY = "properties/p1/attachments/9.pdf";
+
+  it("★active referral 添付 → kind:'referral' と保存名の材料（登録日）を返す", async () => {
+    const created = new Date("2026-08-25T16:00:00.000Z");
+    const prisma = makeDb({
+      attachments: [
+        {
+          id: "att-ref-1",
+          fileUrl: `/uploads/${REF_KEY}`,
+          isDeleted: false,
+          targetType: "property",
+          targetId: "p1",
+          propertyId: "p1",
+          type: "referral",
+          createdAt: created,
+        },
+      ],
+    });
+    expect(await resolveProtectedServeMeta(REF_KEY, prisma)).toEqual({
+      kind: "referral",
+      attachmentId: "att-ref-1",
+      propertyId: "p1",
+      createdAt: created,
+    });
+  });
+
+  it("★削除済みの referral は null（保護対象として扱わない＝404 経路）", async () => {
+    const prisma = makeDb({
+      attachments: [
+        {
+          id: "att-ref-2",
+          fileUrl: `/uploads/${REF_KEY}`,
+          isDeleted: true,
+          targetType: "property",
+          targetId: "p1",
+          propertyId: "p1",
+          type: "referral",
+          createdAt: new Date(),
+        },
+      ],
+    });
+    expect(await resolveProtectedServeMeta(REF_KEY, prisma)).toBeNull();
+  });
+
+  it("★registry も従来どおり kind:'registry' で返る", async () => {
+    const created = new Date("2026-08-25T03:00:00.000Z");
+    const prisma = makeDb({
+      attachments: [
+        {
+          id: "att-reg-9",
+          fileUrl: `/uploads/${REG_KEY2}`,
+          isDeleted: false,
+          targetType: "property",
+          targetId: "p1",
+          propertyId: "p1",
+          type: "registry",
+          registryCertificateType: "all",
+          createdAt: created,
+        },
+      ],
+    });
+    expect(await resolveProtectedServeMeta(REG_KEY2, prisma)).toEqual({
+      kind: "registry",
+      isRegistry: true,
+      attachmentId: "att-reg-9",
+      propertyId: "p1",
+      certificateType: "all",
+      createdAt: created,
+    });
+  });
+
+  it("★一般添付は null（従来ヘッダのまま配信される）", async () => {
+    const prisma = makeDb({
+      attachments: [
+        {
+          id: "att-gen-9",
+          fileUrl: `/uploads/${GEN_KEY}`,
+          isDeleted: false,
+          targetType: "property",
+          targetId: "p1",
+          propertyId: "p1",
+          type: "general",
+          createdAt: new Date(),
+        },
+      ],
+    });
+    expect(await resolveProtectedServeMeta(GEN_KEY, prisma)).toBeNull();
+  });
+
+  it("resolveRegistryServeMeta は referral を返さない（registry 専用の入口のまま）", async () => {
+    const prisma = makeDb({
+      attachments: [
+        {
+          id: "att-ref-3",
+          fileUrl: `/uploads/${REF_KEY}`,
+          isDeleted: false,
+          targetType: "property",
+          targetId: "p1",
+          propertyId: "p1",
+          type: "referral",
+          createdAt: new Date(),
+        },
+      ],
+    });
+    expect(await resolveRegistryServeMeta(REF_KEY, prisma)).toBeNull();
   });
 });

@@ -111,8 +111,9 @@ const ATTR_CHAR = /[A-Za-z0-9!#$&+\-.^_`|~]/;
  *   RFC 5987 が許すのは attr-char（英数字と `!#$&+-.^_\`|~`）だけで、丸括弧は入っていない。
  *   「謄本(所有者事項)」の括弧が生のままヘッダに出ると、厳しめの実装で壊れ得る。
  *   許可した文字だけを通し、それ以外はすべてバイト単位で %XX にする。
+ * ⚠他の添付の Content-Disposition(反響資料など)からも使う。符号化の決まりを写さない。
  */
-function encodeRfc5987(value: string): string {
+export function encodeRfc5987(value: string): string {
   const bytes = new TextEncoder().encode(value);
   let out = "";
   for (const b of bytes) {

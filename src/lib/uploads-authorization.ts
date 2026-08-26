@@ -400,10 +400,38 @@ export interface RegistryServeMeta {
   createdAt: Date | null;
 }
 
-export async function resolveRegistryServeMeta(
+/**
+ * 反響資料(referral) の serve 用メタ。
+ * ⚠registry と**同じ扱い**にするために要る(@codex PR#414 24巡目)。
+ *   referral PDF には所有者の氏名・住所・電話・メールが入っているのに、
+ *   非 registry として `private, max-age=3600` + ETag で配信していたため、
+ *   一度開いた利用者は**権限を剥がされても最大1時間はブラウザキャッシュから
+ *   読めて**いた(認可ゲートに到達しない)。R16 以降のゲートがキャッシュ経由で
+ *   素通しになる形だった。
+ */
+export interface ReferralServeMeta {
+  kind: "referral";
+  attachmentId: string;
+  propertyId: string | null;
+  /** 保存名の材料（登録日）。生の fileName は**返さない**。 */
+  createdAt: Date | null;
+}
+
+/**
+ * **キャッシュさせない添付**(registry / referral) の serve 用メタ。
+ *
+ * ⚠1回の問い合わせで両方を判定する（配信のたびに2回引かない）。
+ * ⚠これは **access 判定をしない**。authorizeUploadAccess が既に許可した前提で、
+ *   表示用ヘッダと監査のためだけに使う。
+ */
+export type ProtectedServeMeta =
+  | (RegistryServeMeta & { kind: "registry" })
+  | ReferralServeMeta;
+
+export async function resolveProtectedServeMeta(
   key: string,
   prisma?: PrismaLike,
-): Promise<RegistryServeMeta | null> {
+): Promise<ProtectedServeMeta | null> {
   const db: PrismaLike = prisma ?? prismaDefault;
   if (!isValidStorageKey(key)) return null;
 
@@ -427,6 +455,7 @@ export async function resolveRegistryServeMeta(
     if (resolveStoredFileUrlToKey(a.fileUrl) !== key) continue;
     if (a.type === "registry") {
       return {
+        kind: "registry",
         isRegistry: true,
         attachmentId: a.id,
         propertyId: a.propertyId ?? a.targetId ?? null,
@@ -434,6 +463,23 @@ export async function resolveRegistryServeMeta(
         createdAt: a.createdAt ?? null,
       };
     }
+    if (a.type === "referral") {
+      return {
+        kind: "referral",
+        attachmentId: a.id,
+        propertyId: a.propertyId ?? a.targetId ?? null,
+        createdAt: a.createdAt ?? null,
+      };
+    }
   }
   return null;
+}
+
+/** 従来の registry 専用の入口（判定は resolveProtectedServeMeta に1本化してある）。 */
+export async function resolveRegistryServeMeta(
+  key: string,
+  prisma?: PrismaLike,
+): Promise<RegistryServeMeta | null> {
+  const meta = await resolveProtectedServeMeta(key, prisma);
+  return meta !== null && meta.kind === "registry" ? meta : null;
 }
