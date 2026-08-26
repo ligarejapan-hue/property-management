@@ -19,7 +19,14 @@ import {
   assertImportMultipartBodySize,
 } from "@/lib/import-body-size";
 import { PROPERTY_TYPE_VALUES, OCCUPANCY_STATUS_LABELS } from "@/lib/property-types";
-import { toHalfWidth, toFullWidth } from "@/lib/paste-import/normalize";
+import {
+  toFullWidth,
+  normalizeExternalLinkKey,
+} from "@/lib/paste-import/normalize";
+import {
+  REFERRAL_ATTACHMENT_TYPE,
+  referralDisplayName,
+} from "@/lib/attachments/referral-display-name";
 import {
   normalizeBuildingName,
   normalizeUnitOnlyFields,
@@ -302,9 +309,7 @@ export async function POST(request: NextRequest) {
     //   査定ナンバーは元々半角ASCIIなので、実際に保存される文字列は変わらない。
     //   ⚠この route は画面以外からも呼べるので、下書き側(build-draft.ts)で
     //   正規化済みでも**ここでも必ず通す**。
-    const externalLinkKeyRaw = body.externalLinkKey ?? null;
-    const externalLinkKey =
-      externalLinkKeyRaw === null ? null : toHalfWidth(externalLinkKeyRaw).trim() || null;
+    const externalLinkKey = normalizeExternalLinkKey(body.externalLinkKey);
     // ⚠**検索だけは全角形も見る**(@codex PR#414 2巡目 P2)。CSV取込
     //   (src/app/api/import/csv/route.ts) は externalLinkKey を**生値のまま**保存する
     //   ため、全角で入った既存行は正規化後の完全一致では見つからない。
@@ -469,8 +474,15 @@ export async function POST(request: NextRequest) {
               targetType: "property",
               targetId: property.id,
               propertyId: property.id,
-              type: "general",
-              fileName: pdfFileName,
+              // ⚠**"general" にしない**(@codex PR#414 16巡目 ①)。反響PDFには
+              //   所有者の氏名・住所・電話・メールが入っている。general のままだと
+              //   **物件を読めるだけの利用者全員が原本を開ける**＝所有者マスクの
+              //   迂回路になる。referral は uploads-authorization で owner:read を
+              //   AND で要求する(謄本 registry と同じ構造)。
+              type: REFERRAL_ATTACHMENT_TYPE,
+              // ⚠元のファイル名を使わない。「佐藤花子様査定依頼.pdf」のように
+              //   名前自体が個人情報を含み得る(添付一覧・検索・ゴミ箱に出る)。
+              fileName: referralDisplayName(new Date()),
               fileUrl: uploadedUrl,
               fileSize: pdfBuffer.length,
               mimeType: "application/pdf",

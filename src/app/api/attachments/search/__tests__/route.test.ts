@@ -331,3 +331,56 @@ describe("GET /api/attachments/search", () => {
     expect(pm.attachment.findMany).not.toHaveBeenCalled();
   });
 });
+
+describe("referral(反響資料) が一覧から見えなくならない（@codex PR#414 16巡目 ①）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedGetSession.mockResolvedValue({
+      id: "admin-1",
+      email: "a@a",
+      name: "Admin",
+      role: "admin",
+    });
+    mockedGetPerms.mockResolvedValue(BASE_PERMS);
+    mockedGetDisplay.mockResolvedValue({ ...ALL_VISIBLE });
+    pm.attachment.findMany.mockResolvedValue([]);
+  });
+
+  it("★種類フィルタ未指定なら where.type を立てない＝referral も一覧に出る", async () => {
+    pm.attachment.findMany.mockResolvedValue([
+      {
+        id: "att-ref",
+        fileName: "反響資料_2026-08-26.pdf",
+        type: "referral",
+        createdAt: new Date("2026-08-26T02:00:00Z"),
+        targetType: "property",
+        targetId: UUID,
+      },
+    ]);
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect(lastWhere()).not.toHaveProperty("type");
+    const body = await res.json();
+    expect(body.data.map((h: { type: string }) => h.type)).toEqual(["referral"]);
+  });
+
+  it("★種類フィルタで referral を選べる", async () => {
+    const res = await GET(req("?type=referral"));
+    expect(res.status).toBe(200);
+    expect(lastWhere().type).toBe("referral");
+  });
+
+  it("既存の general / registry フィルタは変わらない", async () => {
+    await GET(req("?type=general"));
+    expect(lastWhere().type).toBe("general");
+    vi.clearAllMocks();
+    pm.attachment.findMany.mockResolvedValue([]);
+    await GET(req("?type=registry"));
+    expect(lastWhere().type).toBe("registry");
+  });
+
+  it("知らない種類は従来どおり 400", async () => {
+    const res = await GET(req("?type=unknown-kind"));
+    expect(res.status).toBe(400);
+  });
+});

@@ -27,6 +27,22 @@ export function toFullWidth(s: string): string {
 }
 
 /**
+ * 外部キー(査定ナンバー)の表記ゆれを畳む **唯一の決まりごと**。
+ *
+ * ⚠**下書き・再判定・確定の3ルートが必ずこれを通ること**(@codex PR#414 16巡目 ②)。
+ *   1か所忘れると「画面は重複なしと言うのに登録は409」のような食い違いが出る。
+ *   同種の取りこぼしがこの作業で6回起きているので、3ルートが通っていることを
+ *   走査テスト(__tests__/external-link-key-normalization.test.ts)で固定してある。
+ * ⚠新しい正規化規則は作らない。既存の toHalfWidth + 前後の空白除去だけ。
+ *   空になったら null(「無い」と同じに畳む)。
+ */
+export function normalizeExternalLinkKey(raw: string | null | undefined): string | null {
+  if (raw === null || raw === undefined) return null;
+  const v = toHalfWidth(raw).trim();
+  return v === "" ? null : v;
+}
+
+/**
  * 元号の開始年（その元号の1年＝この西暦）と、**その元号に実在する最後の年**。
  *
  * ⚠上限を見ないと、存在しない年が**もっともらしい西暦に化ける**

@@ -43,8 +43,9 @@ export function isAutoFetchedRegistry(certType?: string | null): boolean {
  * ⚠サーバーのタイムゾーンは UTC のことがあるため、実行環境のローカル時刻に頼らない。
  *   頼ると、夜に取った謄本の日付が画面(日本時間)と保存名(UTC)で1日ずれる。
  * 読めない値・空の値は null を返し、呼び出し側は日付を付けない。
+ * ⚠他の添付の定型名(反響資料など)からも使う。タイムゾーンの決まりを写さない。
  */
-function toJstDateString(
+export function toJstDateString(
   value?: Date | string | number | null,
 ): string | null {
   if (value === null || value === undefined || value === "") return null;

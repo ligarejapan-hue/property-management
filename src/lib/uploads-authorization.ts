@@ -226,6 +226,19 @@ export async function authorizeUploadAccess(
         continue;
       }
     }
+    // 反響資料(type="referral") は **owner:read** で gate する
+    //  (@codex PR#414 16巡目 ①)。反響PDF(査定依頼など)には所有者の氏名・住所・
+    //  電話・メールが入っているため、物件を読めるだけの利用者には
+    //  バイトを一切返さない(hard boundary)。
+    //  ⚠registry_pdf 権限は**謄本専用の意味**なので流用しない。所有者PIIを含む
+    //    書類を開ける最低権限は owner:read。
+    //  上の registry と同じく、下の targetType scope とは独立に AND で課す。
+    if (a.type === "referral") {
+      if (!hasPermission(permissions, "owner", "read")) {
+        decisions.push("forbidden");
+        continue;
+      }
+    }
     if (a.targetType === "property") {
       const propertyId = a.propertyId ?? a.targetId;
       decisions.push(

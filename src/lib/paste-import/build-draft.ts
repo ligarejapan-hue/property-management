@@ -4,10 +4,10 @@
  */
 import { parseLabeledLines, isBlankValue, type LabeledLine } from "./parse-labeled-lines";
 import {
-  toHalfWidth,
   warekiToSeireki,
   parseAreaSqm,
   splitLotNumberFromAddress,
+  normalizeExternalLinkKey,
   type YearBoundOptions,
 } from "./normalize";
 import { fieldKeyForLabel, type DraftFieldKey } from "./label-dictionary";
@@ -32,16 +32,6 @@ function occupancyFor(raw: string): string | null {
   return null;
 }
 
-/**
- * 外部キーの表記ゆれを畳む。**新しい正規化規則は作らない**:
- * 既存の toHalfWidth（全角英数→半角・全角ハイフン類→"-"）と前後の空白除去だけ。
- * 空になったら null（「無い」と同じに畳む）。
- */
-function normalizeExternalLinkKey(raw: string | null): string | null {
-  if (raw === null) return null;
-  const v = toHalfWidth(raw).trim();
-  return v === "" ? null : v;
-}
 
 /**
  * ⚠**時計を読むのは API 層（境界）だけ**。ここは上限を引数で受け取るだけで、

@@ -1138,3 +1138,106 @@ describe("authorizeUploadAccess — server backend fileUrl 解決 (Codex A)", ()
     expect(decision).toBe("not_found");
   });
 });
+
+// ============================================================
+// 反響資料(referral) は owner:read で gate する（@codex PR#414 16巡目 ①）
+//
+// ⚠反響PDF(査定依頼など)には所有者の氏名・住所・電話・メールが入っている。
+//   general のままだと**物件を読めるだけの利用者全員が原本を開けた**＝
+//   備考で塞いだ「所有者マスクの迂回」と同じ形が添付の経路に残っていた。
+// ⚠registry_pdf 権限は謄本専用の意味なので流用しない。所有者PIIを含む書類を
+//   開ける最低権限は owner:read。
+// ============================================================
+describe("authorizeUploadAccess — referral gating", () => {
+  const REF_KEY = "properties/p1/paste-import/1-abc.pdf";
+  const refAtt = (over: Partial<Att> = {}): Att => ({
+    id: "att-ref-1",
+    fileUrl: `/uploads/${REF_KEY}`,
+    isDeleted: false,
+    targetType: "property",
+    targetId: "p1",
+    propertyId: "p1",
+    type: "referral",
+    ...over,
+  });
+  const prop: Prop = { id: "p1", createdBy: "u-office", assignedTo: null };
+  const propertyReadOnly: PermissionEntry[] = [
+    { resource: "property", action: "read", granted: true },
+  ];
+  const withOwnerRead: PermissionEntry[] = [
+    ...propertyReadOnly,
+    { resource: "owner", action: "read", granted: true },
+  ];
+
+  it("★owner:read 無 → forbidden（property:read だけでは取得不可＝hard boundary）", async () => {
+    const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: propertyReadOnly, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("★owner:read 有 → ok", async () => {
+    const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: withOwnerRead, prisma }),
+    ).toBe("ok");
+  });
+
+  it("★download でも同じゲート（owner:read 無なら forbidden）", async () => {
+    const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: propertyReadOnly, downloadIntent: true, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("★registry_pdf 権限では開けない（謄本専用の意味を流用しない）", async () => {
+    const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+    const registryOnly: PermissionEntry[] = [
+      ...propertyReadOnly,
+      { resource: "registry_pdf", action: "preview", granted: true },
+      { resource: "registry_pdf", action: "download", granted: true },
+    ];
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: registryOnly, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("★owner:read 有 でも field_staff scope 外 → forbidden（perm と scope の AND）", async () => {
+    const prisma = makeDb({
+      attachments: [refAtt()],
+      properties: [{ id: "p1", createdBy: "u-someone", assignedTo: null }],
+    });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: fieldStaff, permissions: withOwnerRead, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("referral isDeleted → not_found（gate より前に判定）", async () => {
+    const prisma = makeDb({ attachments: [refAtt({ isDeleted: true })], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: propertyReadOnly, prisma }),
+    ).toBe("not_found");
+  });
+
+  it("★既存の general / registry の挙動は変わらない", async () => {
+    const genKey = "properties/p1/attachments/9.pdf";
+    const genDb = makeDb({
+      attachments: [refAtt({ id: "att-gen", fileUrl: `/uploads/${genKey}`, type: "general" })],
+      properties: [prop],
+    });
+    // general は owner:read が無くても従来どおり ok。
+    expect(
+      await authorizeUploadAccess({ key: genKey, session: officeStaff, permissions: propertyReadOnly, prisma: genDb }),
+    ).toBe("ok");
+
+    const regKey = "properties/p1/registry/100.pdf";
+    const regDb = makeDb({
+      attachments: [refAtt({ id: "att-reg", fileUrl: `/uploads/${regKey}`, type: "registry" })],
+      properties: [prop],
+    });
+    // registry は owner:read があっても registry_pdf:preview が無ければ forbidden。
+    expect(
+      await authorizeUploadAccess({ key: regKey, session: officeStaff, permissions: withOwnerRead, prisma: regDb }),
+    ).toBe("forbidden");
+  });
+});

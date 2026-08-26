@@ -411,3 +411,49 @@ describe("同じ所有者が、住所の編集だけで一致の種類を落と�
     expect(weakened.ownerCandidates[0].matchKind).toBe("name_only");
   });
 });
+
+describe("外部キーは下書き・確定と同じ正規化を通る（16巡目 ②）", () => {
+  /** 保存されている外部キーの表記を1つだけ持つDB。where を実際に適用する。 */
+  function dbWithKey(stored: string) {
+    const row = {
+      id: "p-key",
+      address: "東京都A区B1-2-3",
+      lotNumber: null,
+      externalLinkKey: stored,
+      createdBy: "user-1",
+      assignedTo: null,
+    };
+    mockFindMany.mockImplementation(
+      async (args: { where?: { externalLinkKey?: { in?: string[] } } }) => {
+        if (args?.where?.externalLinkKey) {
+          return (args.where.externalLinkKey.in ?? []).includes(stored) ? [row] : [];
+        }
+        return [];
+      },
+    );
+  }
+
+  it("★全角の査定ナンバーで再判定しても、半角で保存された既存行がヒットして blocked になる", async () => {
+    // ⚠ここが生値のままだと「再判定は重複なし・登録は409」の食い違いになる。
+    dbWithKey("SA2608-1234567");
+    const res = await POST(req({ externalLinkKey: "ＳＡ２６０８－１２３４５６７" }));
+    const body = await res.json();
+    expect(body.duplicates.blocked).toBe(true);
+    expect(body.duplicates.blockedByPropertyId).toBe("p-key");
+  });
+
+  it("★問い合わせに使う値が正規化後（半角）であること", async () => {
+    dbWithKey("SA2608-1234567");
+    await POST(req({ externalLinkKey: "　ＳＡ２６０８－１２３４５６７　" }));
+    const keyCall = mockFindMany.mock.calls
+      .map((c) => c[0] as { where?: { externalLinkKey?: { in?: string[] } } })
+      .find((a) => a?.where?.externalLinkKey !== undefined);
+    expect(keyCall?.where?.externalLinkKey?.in?.[0]).toBe("SA2608-1234567");
+  });
+
+  it("半角で送っても従来どおり blocked（挙動が変わっていない）", async () => {
+    dbWithKey("SA2608-1234567");
+    const res = await POST(req({ externalLinkKey: "SA2608-1234567" }));
+    expect((await res.json()).duplicates.blocked).toBe(true);
+  });
+});

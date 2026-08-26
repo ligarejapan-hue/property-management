@@ -9,6 +9,7 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
 import { lookupPasteDuplicates } from "@/lib/paste-import-duplicates";
+import { normalizeExternalLinkKey } from "@/lib/paste-import/normalize";
 
 // ---------- POST /api/import/paste/recheck ----------
 //
@@ -64,7 +65,12 @@ export async function POST(request: NextRequest) {
     const result = await lookupPasteDuplicates(session, perms, {
       address: orNull(body.address),
       lotNumber: orNull(body.lotNumber),
-      externalLinkKey: orNull(body.externalLinkKey),
+      // ⚠**下書き・確定と同じ関数で正規化する**(@codex PR#414 16巡目 ②)。
+      //   ここだけ生値で引いていたため、利用者が査定ナンバーを全角に直すと
+      //   recheck は「重複なし」と言い、commit は正規化して 409 を返す＝
+      //   画面の最終確認と実際の結果が食い違っていた。
+      //   3ルートが同じ関数を通ることは走査テストで固定してある。
+      externalLinkKey: normalizeExternalLinkKey(orNull(body.externalLinkKey)),
       ownerName: orNull(body.ownerName),
       ownerCurrentAddress: orNull(body.ownerCurrentAddress),
     });

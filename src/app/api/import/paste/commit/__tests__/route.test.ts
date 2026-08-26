@@ -356,10 +356,14 @@ describe("POST /api/import/paste/commit", () => {
         targetType: "property",
         targetId: body.propertyId,
         propertyId: body.propertyId,
-        fileName: "shokai.pdf",
+        // ⚠種類は referral(反響資料)。general にすると物件を読めるだけの利用者
+        //   全員が原本を開けてしまう(16巡目 ①)。
+        type: "referral",
+        // ⚠元のファイル名は使わない(名前自体が所有者名を含み得る)。
         mimeType: "application/pdf",
         uploadedBy: "user-1",
       });
+      expect(created.attachment?.[0]).not.toMatchObject({ fileName: "shokai.pdf" });
       // 親行ロック(lockPropertyRow → $queryRaw)が attachment.create より先。
       const lockIdx = callOrder.indexOf("lockPropertyRow");
       const createIdx = callOrder.indexOf("attachment.create");
@@ -1164,5 +1168,29 @@ describe("所有者オブジェクトを送るなら氏名は必須（13巡目 �
     const res = await POST(req(withOwner("山田太郎")));
     expect(res.status).toBe(200);
     expect(created.owner?.[0]).toMatchObject({ name: "山田太郎" });
+  });
+});
+
+describe("反響PDFは referral として保存し、名前を定型化する（16巡目 ①）", () => {
+  it("★type は referral（general にしない）", async () => {
+    await POST(await multipartReq(baseBody, pdfFile("佐藤花子様査定依頼.pdf")));
+    expect(created.attachment?.[0]).toMatchObject({ type: "referral" });
+  });
+
+  it("★保存する fileName は定型名。元のファイル名は含まれない", async () => {
+    // ⚠元名は「佐藤花子様査定依頼.pdf」のように名前自体が個人情報を含み得る。
+    await POST(await multipartReq(baseBody, pdfFile("佐藤花子様査定依頼.pdf")));
+    const saved = created.attachment?.[0] as { fileName: string };
+    expect(saved.fileName).toMatch(/^反響資料_\d{4}-\d{2}-\d{2}\.pdf$/);
+    expect(saved.fileName).not.toContain("佐藤");
+    expect(saved.fileName).not.toContain("査定依頼");
+  });
+
+  it("★親の物件行ロックの後に作る（既存の規約が崩れていない）", async () => {
+    await POST(await multipartReq(baseBody, pdfFile()));
+    const lockIdx = callOrder.indexOf("lockPropertyRow");
+    const createIdx = callOrder.indexOf("attachment.create");
+    expect(lockIdx).toBeGreaterThanOrEqual(0);
+    expect(createIdx).toBeGreaterThan(lockIdx);
   });
 });
