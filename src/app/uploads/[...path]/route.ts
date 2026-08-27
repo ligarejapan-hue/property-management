@@ -126,12 +126,19 @@ export async function GET(
   // Phase 1 は安全性優先で read 後に判定するため storage fetch 自体は走り、
   // スキップされるのは本文転送のみ。fetch 回避（exists/metadata read）は
   // adapter interface 拡張を伴うため次 PR 候補（docs 参照）。
+  //
+  // ⚠**非 registry は `private, no-cache`**（発注者決定 2026-08-28・PIIキャッシュ方針B案）。
+  //   `max-age=3600` だと、権限を剥奪された本人のブラウザが最大1時間サーバーへ問い合わせず
+  //   PII（写真・添付）を表示し続ける＝**認可が効かない窓**ができる。`no-cache` は
+  //   「毎回再検証」であって「キャッシュ禁止」ではないので、ETag/304 による本文転送の
+  //   削減（F11 の帯域効果）は維持したまま、失効だけが即時になる。
+  //   ⚠`no-store`（registry / referral）とは別物。取り違えると帯域効果が消える。
   if (etag && ifNoneMatchMatches(req.headers.get("if-none-match"), etag)) {
     return new Response(null, {
       status: 304,
       headers: {
         ETag: etag,
-        "Cache-Control": "private, max-age=3600",
+        "Cache-Control": "private, no-cache",
       },
     });
   }
@@ -139,7 +146,7 @@ export async function GET(
   const headers: Record<string, string> = {
     "Content-Type": result.contentType,
     "Content-Length": String(result.size),
-    "Cache-Control": "private, max-age=3600",
+    "Cache-Control": "private, no-cache",
   };
 
   if (etag) {
