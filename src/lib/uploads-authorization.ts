@@ -18,7 +18,11 @@
  */
 
 import prismaDefault from "@/lib/prisma";
-import { hasPermission } from "@/lib/permissions";
+import {
+  hasPermission,
+  isMaskFreeLevel,
+  resolveOwnerDisplayConfig,
+} from "@/lib/permissions";
 import { isValidStorageKey } from "@/lib/storage/key-validation";
 import { getStorage } from "@/lib/storage";
 import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
@@ -26,6 +30,56 @@ import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
 type PrismaLike = typeof prismaDefault;
 
 export type UploadAuthDecision = "ok" | "forbidden" | "not_found";
+
+/**
+ * 反響資料(type="referral") の原本を開いてよいか。
+ *
+ * ⚠**`owner:read` の有無だけでは粗すぎる**(@codex PR#414 17巡目 ①)。
+ *   既定の field_staff テンプレート(prisma/seed.ts)は `owner:read` を持ちつつ
+ *   `owner_phone: masked` / `owner_address: partial` なので、画面では電話が
+ *   `***5678` にマスクされるのに、**PDFを開けば生のまま読めて**しまう。
+ *   文書はフィールド単位でマスクできないのだから、
+ *   **文書に含まれ得る全PIIフィールドを素通しで見られる利用者だけ**に開ける。
+ * ⚠「素通しになるレベル」の集合は**発明しない**。`maskValue` を実際に叩いて
+ *   値がそのまま返るレベルだけを採っている(MASK_FREE_DISPLAY_LEVELS)。
+ * ⚠download と preview で段を分けない(registry のような二段権限は作らない)。
+ *   見られる人はダウンロードもできる、で揃える。
+ */
+/**
+ * 表示レベル設定の**全フィールド**がマスク無しで見えるか。
+ *
+ * ⚠**フィールド名を書き並べない**(@codex PR#414 19巡目 ①)。
+ *   R16→R17→R18 と 1個→4個→5個とフィールドを追いかけたが、それは列挙の反射だった。
+ *   この口が受けるのは**汎用のPDF**(どの業者の書式でも)なので、
+ *   「この書式に入っている項目」で数えるのが誤り。
+ *   `resolveOwnerDisplayConfig` が返す**全キー**を機械的に見る。
+ *   将来 display config にフィールドが増えても自動で追随する。
+ * ⚠この関数に渡すオブジェクトは**値がすべて表示レベル**であること
+ *   (メタ情報を混ぜない)。混ざると isMaskFreeLevel が false を返して
+ *   全員が開けなくなる＝安全側に倒れるが、意図しない締め出しになる。
+ */
+export function isEveryOwnerFieldMaskFree(
+  display: Record<string, string>,
+): boolean {
+  const levels = Object.values(display);
+  // 空のオブジェクトを「全部素通し」にしない(fail-closed)。
+  if (levels.length === 0) return false;
+  return levels.every((level) => isMaskFreeLevel(level));
+}
+
+/**
+ * 反響資料のゲートが見る所有者の項目一覧（**機械的に導出**）。
+ * ⚠固定の配列ではなく、表示レベル設定のキーそのもの。
+ *   R18 の「見本に実在する項目を覆っているか」の突き合わせは、
+ *   これに対する**下限テスト**として残している。
+ */
+export function referralGatedOwnerFields(): string[] {
+  return Object.keys(resolveOwnerDisplayConfig([]));
+}
+export function canOpenReferralDocument(permissions: PermissionEntry[]): boolean {
+  if (!hasPermission(permissions, "owner", "read")) return false;
+  return isEveryOwnerFieldMaskFree({ ...resolveOwnerDisplayConfig(permissions) });
+}
 
 export interface AuthorizeUploadAccessArgs {
   key: string;
@@ -226,6 +280,19 @@ export async function authorizeUploadAccess(
         continue;
       }
     }
+    // 反響資料(type="referral") は **owner:read** で gate する
+    //  (@codex PR#414 16巡目 ①)。反響PDF(査定依頼など)には所有者の氏名・住所・
+    //  電話・メールが入っているため、物件を読めるだけの利用者には
+    //  バイトを一切返さない(hard boundary)。
+    //  ⚠registry_pdf 権限は**謄本専用の意味**なので流用しない。所有者PIIを含む
+    //    書類を開ける最低権限は owner:read。
+    //  上の registry と同じく、下の targetType scope とは独立に AND で課す。
+    if (a.type === "referral") {
+      if (!canOpenReferralDocument(permissions)) {
+        decisions.push("forbidden");
+        continue;
+      }
+    }
     if (a.targetType === "property") {
       const propertyId = a.propertyId ?? a.targetId;
       decisions.push(
@@ -333,10 +400,38 @@ export interface RegistryServeMeta {
   createdAt: Date | null;
 }
 
-export async function resolveRegistryServeMeta(
+/**
+ * 反響資料(referral) の serve 用メタ。
+ * ⚠registry と**同じ扱い**にするために要る(@codex PR#414 24巡目)。
+ *   referral PDF には所有者の氏名・住所・電話・メールが入っているのに、
+ *   非 registry として `private, max-age=3600` + ETag で配信していたため、
+ *   一度開いた利用者は**権限を剥がされても最大1時間はブラウザキャッシュから
+ *   読めて**いた(認可ゲートに到達しない)。R16 以降のゲートがキャッシュ経由で
+ *   素通しになる形だった。
+ */
+export interface ReferralServeMeta {
+  kind: "referral";
+  attachmentId: string;
+  propertyId: string | null;
+  /** 保存名の材料（登録日）。生の fileName は**返さない**。 */
+  createdAt: Date | null;
+}
+
+/**
+ * **キャッシュさせない添付**(registry / referral) の serve 用メタ。
+ *
+ * ⚠1回の問い合わせで両方を判定する（配信のたびに2回引かない）。
+ * ⚠これは **access 判定をしない**。authorizeUploadAccess が既に許可した前提で、
+ *   表示用ヘッダと監査のためだけに使う。
+ */
+export type ProtectedServeMeta =
+  | (RegistryServeMeta & { kind: "registry" })
+  | ReferralServeMeta;
+
+export async function resolveProtectedServeMeta(
   key: string,
   prisma?: PrismaLike,
-): Promise<RegistryServeMeta | null> {
+): Promise<ProtectedServeMeta | null> {
   const db: PrismaLike = prisma ?? prismaDefault;
   if (!isValidStorageKey(key)) return null;
 
@@ -360,6 +455,7 @@ export async function resolveRegistryServeMeta(
     if (resolveStoredFileUrlToKey(a.fileUrl) !== key) continue;
     if (a.type === "registry") {
       return {
+        kind: "registry",
         isRegistry: true,
         attachmentId: a.id,
         propertyId: a.propertyId ?? a.targetId ?? null,
@@ -367,6 +463,23 @@ export async function resolveRegistryServeMeta(
         createdAt: a.createdAt ?? null,
       };
     }
+    if (a.type === "referral") {
+      return {
+        kind: "referral",
+        attachmentId: a.id,
+        propertyId: a.propertyId ?? a.targetId ?? null,
+        createdAt: a.createdAt ?? null,
+      };
+    }
   }
   return null;
+}
+
+/** 従来の registry 専用の入口（判定は resolveProtectedServeMeta に1本化してある）。 */
+export async function resolveRegistryServeMeta(
+  key: string,
+  prisma?: PrismaLike,
+): Promise<RegistryServeMeta | null> {
+  const meta = await resolveProtectedServeMeta(key, prisma);
+  return meta !== null && meta.kind === "registry" ? meta : null;
 }

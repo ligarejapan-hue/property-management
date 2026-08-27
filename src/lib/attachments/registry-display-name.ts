@@ -43,8 +43,9 @@ export function isAutoFetchedRegistry(certType?: string | null): boolean {
  * ⚠サーバーのタイムゾーンは UTC のことがあるため、実行環境のローカル時刻に頼らない。
  *   頼ると、夜に取った謄本の日付が画面(日本時間)と保存名(UTC)で1日ずれる。
  * 読めない値・空の値は null を返し、呼び出し側は日付を付けない。
+ * ⚠他の添付の定型名(反響資料など)からも使う。タイムゾーンの決まりを写さない。
  */
-function toJstDateString(
+export function toJstDateString(
   value?: Date | string | number | null,
 ): string | null {
   if (value === null || value === undefined || value === "") return null;
@@ -110,8 +111,9 @@ const ATTR_CHAR = /[A-Za-z0-9!#$&+\-.^_`|~]/;
  *   RFC 5987 が許すのは attr-char（英数字と `!#$&+-.^_\`|~`）だけで、丸括弧は入っていない。
  *   「謄本(所有者事項)」の括弧が生のままヘッダに出ると、厳しめの実装で壊れ得る。
  *   許可した文字だけを通し、それ以外はすべてバイト単位で %XX にする。
+ * ⚠他の添付の Content-Disposition(反響資料など)からも使う。符号化の決まりを写さない。
  */
-function encodeRfc5987(value: string): string {
+export function encodeRfc5987(value: string): string {
   const bytes = new TextEncoder().encode(value);
   let out = "";
   for (const b of bytes) {

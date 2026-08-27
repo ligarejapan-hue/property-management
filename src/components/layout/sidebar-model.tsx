@@ -8,6 +8,7 @@ import {
   FileText,
   HelpCircle,
   ClipboardList,
+  ClipboardPaste,
   History,
   Upload,
   KeyRound,
@@ -94,6 +95,8 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       //   そこへ送るだけの転送ページで、素の /import へ送ると受付帳の取込と
       //   見分けがつかない場所に着いてしまう。
       { label: "所有者CSV取込", href: "/import#owner-match", icon: ic(Users), minRole: "office_staff" },
+      // 社外から届いたメール・PDF・ブラウザ画面を貼って物件にする(2026-08 新設)。
+      { label: "貼り付けて物件化", href: "/import/paste", icon: ic(ClipboardPaste), minRole: "office_staff" },
     ],
   },
   {

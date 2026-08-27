@@ -76,3 +76,89 @@ export function maskValue(
       return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// 表示レベルの共有ロジック（@codex PR#414 17巡目 ①）
+//
+// ⚠**「マスク無しで見える」レベルの集合を発明しない**。`maskValue` の実装を
+//   実際に叩いて、値が**そのまま返るレベルだけ**を採る。閾値を手で書くと、
+//   maskValue 側が変わったときに静かに食い違う（一番危険な形）。
+// ---------------------------------------------------------------------------
+
+/** 表示レベルの全種類（強い順）。 */
+export const OWNER_DISPLAY_LEVELS: readonly string[] = [
+  "edit",
+  "full",
+  "read",
+  "partial",
+  "masked",
+  "hidden",
+];
+
+/**
+ * `maskValue` が**値をそのまま返す**レベルの集合（実測で決める）。
+ * 探り値は partial(先頭3文字+***) と masked(***+末尾4文字) の両方で必ず変わる長さにする。
+ */
+export const MASK_FREE_DISPLAY_LEVELS: ReadonlySet<string> = (() => {
+  const probe = "ABCDEFGHIJ";
+  return new Set(
+    OWNER_DISPLAY_LEVELS.filter((level) => maskValue(probe, level) === probe),
+  );
+})();
+
+/** その表示レベルなら生値が見えるか（＝マスクが掛からないか）。 */
+export function isMaskFreeLevel(level: string): boolean {
+  return MASK_FREE_DISPLAY_LEVELS.has(level);
+}
+
+export interface OwnerDisplayConfigShape {
+  name: string;
+  nameKana: string;
+  phone: string;
+  zip: string;
+  address: string;
+  note: string;
+  email: string;
+  corporateNumber: string;
+}
+
+/**
+ * owner 各フィールドの表示レベルを**権限配列だけから**解決する純関数。
+ *
+ * ⚠`getOwnerDisplayConfig`（@/lib/api-helpers）の中身をここへ移したもの。
+ *   api-helpers は next-auth を読み込むため、権限判定だけを使いたい場所
+ *   （uploads-authorization など）から呼べない。**実装は1本**にして、
+ *   api-helpers 側はこれを呼ぶだけにしてある（二重管理で食い違わせない）。
+ */
+export function resolveOwnerDisplayConfig(
+  permissions: PermissionEntry[],
+): OwnerDisplayConfigShape {
+  const resolveLevel = (field: string): string =>
+    getOwnerFieldLevel(permissions, field);
+
+  // owner_email が権限テンプレートに明示設定されていない場合は owner_phone に
+  // フォールバック（seed 実行前の既存本番テンプレートで email が意図せず hidden に
+  // ならないようにする既存挙動）。
+  const hasExplicitEmailEntry = permissions.some((p) => p.resource === "owner_email");
+  const emailLevel = hasExplicitEmailEntry
+    ? resolveLevel("owner_email")
+    : resolveLevel("owner_phone");
+
+  const hasExplicitCorporateNumberEntry = permissions.some(
+    (p) => p.resource === "owner_corporate_number",
+  );
+  const corporateNumberLevel = hasExplicitCorporateNumberEntry
+    ? resolveLevel("owner_corporate_number")
+    : resolveLevel("owner_name");
+
+  return {
+    name: resolveLevel("owner_name"),
+    nameKana: resolveLevel("owner_name_kana"),
+    phone: resolveLevel("owner_phone"),
+    zip: resolveLevel("owner_zip"),
+    address: resolveLevel("owner_address"),
+    note: resolveLevel("owner_note"),
+    email: emailLevel,
+    corporateNumber: corporateNumberLevel,
+  };
+}

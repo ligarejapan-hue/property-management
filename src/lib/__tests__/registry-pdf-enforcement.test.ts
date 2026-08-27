@@ -37,6 +37,8 @@ describe("S1b-4: uploads-authorization の registry gating", () => {
 
   it("serve 用 resolveRegistryServeMeta を export する", () => {
     expect(authSrc).toMatch(/export async function resolveRegistryServeMeta/);
+    // 24巡目: 実体は resolveProtectedServeMeta（registry / referral を1回で判定）。
+    expect(authSrc).toMatch(/export async function resolveProtectedServeMeta/);
   });
 });
 
@@ -48,12 +50,18 @@ describe("S1b-4: /uploads route の header / 監査", () => {
     expect(routeSrc).toMatch(/authorizeUploadAccess\(\{[\s\S]*downloadIntent[\s\S]*\}\)/);
   });
 
-  it("serve 時に resolveRegistryServeMeta を引く", () => {
-    expect(routeSrc).toMatch(/resolveRegistryServeMeta\(key\)/);
+  it("serve 時に保護対象(registry / referral)のメタを引く", () => {
+    // ⚠24巡目: registry と referral を**1回の問い合わせ**で判定する
+    //   resolveProtectedServeMeta に一本化した（referral も no-store の対象）。
+    expect(routeSrc).toMatch(/resolveProtectedServeMeta\(key\)/);
+    // registry の扱いはメタの kind から導出する（判定の二重化をしない）。
+    expect(routeSrc).toMatch(/serveMeta\?\.kind === "registry"/);
   });
 
-  it("registry のみ Cache-Control: no-store", () => {
+  it("保護対象(registry / referral)に Cache-Control: no-store", () => {
     expect(routeSrc).toMatch(/no-store/);
+    // ⚠no-store と ETag/304 は両立しない。保護対象は 304 の対象外であること。
+    expect(routeSrc).toMatch(/const etag = serveMeta \? null : buildUploadsEtag\(key\)/);
   });
 
   it("registry の Content-Disposition は共通関数が組み立てる（route で手書きしない）", () => {

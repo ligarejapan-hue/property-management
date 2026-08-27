@@ -16,7 +16,7 @@ import { Loader2 } from "lucide-react";
 interface TrashItem {
   id: string;
   fileName: string;
-  type: "general" | "registry";
+  type: "general" | "registry" | "referral";
   createdAt: string;
   deletedAt: string | null;
   targetType: "property" | "owner" | "comment";
@@ -28,6 +28,7 @@ const RETENTION_DAYS = 90;
 const TYPE_LABELS: Record<string, string> = {
   general: "一般",
   registry: "謄本",
+  referral: "反響資料",
 };
 
 function daysLeft(deletedAt: string | null, type: TrashItem["type"]): string {

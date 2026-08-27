@@ -9,7 +9,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   authorizeUploadAccess,
   resolveRegistryServeMeta,
+  resolveProtectedServeMeta,
   escapePrismaLikePattern,
+  isEveryOwnerFieldMaskFree,
+  referralGatedOwnerFields,
 } from "@/lib/uploads-authorization";
 import { __resetStorageForTest } from "@/lib/storage";
 import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
@@ -954,6 +957,9 @@ describe("resolveRegistryServeMeta (S1b-4)", () => {
       ],
     });
     expect(await resolveRegistryServeMeta(REG_KEY, prisma)).toEqual({
+      // ⚠24巡目で registry/referral を1回の問い合わせで判定するようにしたため
+      //   kind が付く（registry 側の中身は不変）。
+      kind: "registry",
       isRegistry: true,
       attachmentId: "att-reg-1",
       propertyId: "p1",
@@ -970,6 +976,7 @@ describe("resolveRegistryServeMeta (S1b-4)", () => {
     });
     const meta = await resolveRegistryServeMeta(REG_KEY, prisma);
     expect(meta).toEqual({
+      kind: "registry",
       isRegistry: true,
       attachmentId: "att-reg-2",
       propertyId: "p1",
@@ -1136,5 +1143,380 @@ describe("authorizeUploadAccess — server backend fileUrl 解決 (Codex A)", ()
     });
     // getStorage() が throw → viaAdapter = null → step 2 は null → not_found
     expect(decision).toBe("not_found");
+  });
+});
+
+// ============================================================
+// 反響資料(referral) は owner:read で gate する（@codex PR#414 16巡目 ①）
+//
+// ⚠反響PDF(査定依頼など)には所有者の氏名・住所・電話・メールが入っている。
+//   general のままだと**物件を読めるだけの利用者全員が原本を開けた**＝
+//   備考で塞いだ「所有者マスクの迂回」と同じ形が添付の経路に残っていた。
+// ⚠registry_pdf 権限は謄本専用の意味なので流用しない。所有者PIIを含む書類を
+//   開ける最低権限は owner:read。
+// ============================================================
+describe("authorizeUploadAccess — referral gating", () => {
+  const REF_KEY = "properties/p1/paste-import/1-abc.pdf";
+  const refAtt = (over: Partial<Att> = {}): Att => ({
+    id: "att-ref-1",
+    fileUrl: `/uploads/${REF_KEY}`,
+    isDeleted: false,
+    targetType: "property",
+    targetId: "p1",
+    propertyId: "p1",
+    type: "referral",
+    ...over,
+  });
+  const prop: Prop = { id: "p1", createdBy: "u-office", assignedTo: null };
+  const propertyReadOnly: PermissionEntry[] = [
+    { resource: "property", action: "read", granted: true },
+  ];
+  /** owner:read はあるが、項目ごとの表示レベルが無い（＝全部 hidden）。 */
+  const withOwnerRead: PermissionEntry[] = [
+    ...propertyReadOnly,
+    { resource: "owner", action: "read", granted: true },
+  ];
+  /**
+   * 所有者の表示レベル設定の**全項目**が素通しで見える人。
+   * ⚠19巡目でゲートは全フィールドになった（書式に載る項目を数え上げない）。
+   */
+  const allPiiVisible: PermissionEntry[] = [
+    ...withOwnerRead,
+    { resource: "owner_name", action: "full", granted: true },
+    { resource: "owner_name_kana", action: "full", granted: true },
+    { resource: "owner_address", action: "full", granted: true },
+    { resource: "owner_phone", action: "full", granted: true },
+    { resource: "owner_email", action: "full", granted: true },
+    { resource: "owner_zip", action: "full", granted: true },
+    { resource: "owner_note", action: "full", granted: true },
+    { resource: "owner_corporate_number", action: "full", granted: true },
+  ];
+  /** 既定の field_staff テンプレート相当（電話 masked / 住所 partial）。 */
+  const seedFieldStaffLike: PermissionEntry[] = [
+    ...withOwnerRead,
+    { resource: "owner_name", action: "full", granted: true },
+    { resource: "owner_name_kana", action: "full", granted: true },
+    { resource: "owner_address", action: "partial", granted: true },
+    { resource: "owner_phone", action: "masked", granted: true },
+    { resource: "owner_email", action: "full", granted: true },
+  ];
+
+  it("★owner:read 無 → forbidden（property:read だけでは取得不可＝hard boundary）", async () => {
+    const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: propertyReadOnly, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("★全項目が素通しで見える人 → ok", async () => {
+    const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: allPiiVisible, prisma }),
+    ).toBe("ok");
+  });
+
+  it("★owner:read はあっても項目の表示レベルが無ければ forbidden（全部 hidden）", async () => {
+    const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: withOwnerRead, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("★フリガナだけ masked でも forbidden（実サンプルBに実在する項目）", async () => {
+    // ⚠17巡目でこの項目を入れ忘れ、owner_name_kana をマスクする利用者が
+    //   PDFでは生のカナを読めていた。
+    const kanaMasked: PermissionEntry[] = [
+      ...allPiiVisible.filter((p) => p.resource !== "owner_name_kana"),
+      { resource: "owner_name_kana", action: "masked", granted: true },
+    ];
+    const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: kanaMasked, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("★既定の field_staff（電話 masked）は forbidden — 画面で伏せた電話がPDFで生に見えない", async () => {
+    // ⚠これが17巡目の指摘そのもの。owner:read の有無だけでは粗すぎた。
+    const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: seedFieldStaffLike, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("★どれか1つでもマスクされていれば forbidden（全項目 × 全マスクレベルの総当たり）", async () => {
+    // 文書はフィールド単位でマスクできない。1つでも伏せる約束があるなら開けない。
+    // ⚠19巡目: 書式に載る項目だけでなく**全項目**を見る。
+    const fields = [
+      "owner_name",
+      "owner_name_kana",
+      "owner_address",
+      "owner_phone",
+      "owner_email",
+      "owner_zip",
+      "owner_note",
+      "owner_corporate_number",
+    ];
+    const maskedLevels = ["partial", "masked", "hidden"];
+    for (const field of fields) {
+      for (const level of maskedLevels) {
+        const perms: PermissionEntry[] = [
+          ...allPiiVisible.filter((p) => p.resource !== field),
+          { resource: field, action: level, granted: true },
+        ];
+        const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+        expect(
+          await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: perms, prisma }),
+          `${field}=${level}`,
+        ).toBe("forbidden");
+      }
+    }
+  });
+
+  it("★download でも同じゲート（preview で見られる人だけが download もできる）", async () => {
+    const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: propertyReadOnly, downloadIntent: true, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("★registry_pdf 権限では開けない（謄本専用の意味を流用しない）", async () => {
+    const prisma = makeDb({ attachments: [refAtt()], properties: [prop] });
+    const registryOnly: PermissionEntry[] = [
+      ...propertyReadOnly,
+      { resource: "registry_pdf", action: "preview", granted: true },
+      { resource: "registry_pdf", action: "download", granted: true },
+    ];
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: registryOnly, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("★全項目が見える人でも field_staff scope 外 → forbidden（perm と scope の AND）", async () => {
+    const prisma = makeDb({
+      attachments: [refAtt()],
+      properties: [{ id: "p1", createdBy: "u-someone", assignedTo: null }],
+    });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: fieldStaff, permissions: allPiiVisible, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("referral isDeleted → not_found（gate より前に判定）", async () => {
+    const prisma = makeDb({ attachments: [refAtt({ isDeleted: true })], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY, session: officeStaff, permissions: propertyReadOnly, prisma }),
+    ).toBe("not_found");
+  });
+
+  it("★既存の general / registry の挙動は変わらない", async () => {
+    const genKey = "properties/p1/attachments/9.pdf";
+    const genDb = makeDb({
+      attachments: [refAtt({ id: "att-gen", fileUrl: `/uploads/${genKey}`, type: "general" })],
+      properties: [prop],
+    });
+    // general は owner の項目が見えなくても従来どおり ok。
+    expect(
+      await authorizeUploadAccess({ key: genKey, session: officeStaff, permissions: propertyReadOnly, prisma: genDb }),
+    ).toBe("ok");
+
+    const regKey = "properties/p1/registry/100.pdf";
+    const regDb = makeDb({
+      attachments: [refAtt({ id: "att-reg", fileUrl: `/uploads/${regKey}`, type: "registry" })],
+      properties: [prop],
+    });
+    // registry は owner の項目が全部見えても registry_pdf:preview が無ければ forbidden。
+    expect(
+      await authorizeUploadAccess({ key: regKey, session: officeStaff, permissions: allPiiVisible, prisma: regDb }),
+    ).toBe("forbidden");
+  });
+});
+
+// ============================================================
+// ゲートは「表示レベル設定の全フィールド」を見る（@codex PR#414 19巡目 ①）
+//
+// ⚠R16→R17→R18 と 1個→4個→5個とフィールドを追いかけたのは列挙の反射だった。
+//   この口が受けるのは**汎用のPDF**なので、書式に載る項目で数えるのが誤り。
+// ============================================================
+describe("isEveryOwnerFieldMaskFree / referralGatedOwnerFields", () => {
+  it("★全部が素通しレベルなら true", () => {
+    expect(
+      isEveryOwnerFieldMaskFree({ a: "full", b: "read", c: "edit" }),
+    ).toBe(true);
+  });
+
+  it("★1つでも伏せるレベルがあれば false", () => {
+    for (const level of ["partial", "masked", "hidden"]) {
+      expect(isEveryOwnerFieldMaskFree({ a: "full", b: level }), level).toBe(false);
+    }
+  });
+
+  it("★**新しいフィールドが増えたら自動でゲート対象になる**", () => {
+    // 架空のフィールドを足しただけで、伏せるレベルなら拒否になる＝
+    // 個別のフィールド名を書いていないことの証拠。
+    const base = { name: "full", address: "full", phone: "full", email: "full" };
+    expect(isEveryOwnerFieldMaskFree(base)).toBe(true);
+    expect(isEveryOwnerFieldMaskFree({ ...base, brandNewField: "masked" })).toBe(false);
+    expect(isEveryOwnerFieldMaskFree({ ...base, brandNewField: "full" })).toBe(true);
+  });
+
+  it("★空の設定は「全部素通し」にしない（fail-closed）", () => {
+    expect(isEveryOwnerFieldMaskFree({})).toBe(false);
+  });
+
+  it("★ゲートの対象は表示レベル設定の全キー（zip / note / corporateNumber も含む）", () => {
+    const fields = referralGatedOwnerFields();
+    for (const f of [
+      "name", "nameKana", "phone", "zip", "address", "note", "email", "corporateNumber",
+    ]) {
+      expect(fields, f).toContain(f);
+    }
+  });
+
+  it("★owner_zip だけ masked でも forbidden（書式に載らない項目でも守る）", async () => {
+    const REF_KEY2 = "properties/p9/paste-import/2-abc.pdf";
+    const att: Att = {
+      id: "att-ref-zip",
+      fileUrl: `/uploads/${REF_KEY2}`,
+      isDeleted: false,
+      targetType: "property",
+      targetId: "p9",
+      propertyId: "p9",
+      type: "referral",
+    };
+    const property: Prop = { id: "p9", createdBy: "u-office", assignedTo: null };
+    const perms: PermissionEntry[] = [
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_corporate_number", action: "full", granted: true },
+      { resource: "owner_zip", action: "masked", granted: true },
+    ];
+    const prisma = makeDb({ attachments: [att], properties: [property] });
+    expect(
+      await authorizeUploadAccess({ key: REF_KEY2, session: officeStaff, permissions: perms, prisma }),
+    ).toBe("forbidden");
+  });
+});
+
+// ============================================================
+// resolveProtectedServeMeta（@codex PR#414 24巡目）
+//
+// ⚠**キャッシュさせない添付**（registry / referral）を1回の問い合わせで判定する。
+//   referral を漏らすと、配信側が `private, max-age=3600` + ETag に落ち、
+//   権限剥奪後も最大1時間ブラウザキャッシュから読めてしまう。
+// ============================================================
+describe("resolveProtectedServeMeta", () => {
+  const REF_KEY = "properties/p1/paste-import/1-abc.pdf";
+  const REG_KEY2 = "properties/p1/registry/200.pdf";
+  const GEN_KEY = "properties/p1/attachments/9.pdf";
+
+  it("★active referral 添付 → kind:'referral' と保存名の材料（登録日）を返す", async () => {
+    const created = new Date("2026-08-25T16:00:00.000Z");
+    const prisma = makeDb({
+      attachments: [
+        {
+          id: "att-ref-1",
+          fileUrl: `/uploads/${REF_KEY}`,
+          isDeleted: false,
+          targetType: "property",
+          targetId: "p1",
+          propertyId: "p1",
+          type: "referral",
+          createdAt: created,
+        },
+      ],
+    });
+    expect(await resolveProtectedServeMeta(REF_KEY, prisma)).toEqual({
+      kind: "referral",
+      attachmentId: "att-ref-1",
+      propertyId: "p1",
+      createdAt: created,
+    });
+  });
+
+  it("★削除済みの referral は null（保護対象として扱わない＝404 経路）", async () => {
+    const prisma = makeDb({
+      attachments: [
+        {
+          id: "att-ref-2",
+          fileUrl: `/uploads/${REF_KEY}`,
+          isDeleted: true,
+          targetType: "property",
+          targetId: "p1",
+          propertyId: "p1",
+          type: "referral",
+          createdAt: new Date(),
+        },
+      ],
+    });
+    expect(await resolveProtectedServeMeta(REF_KEY, prisma)).toBeNull();
+  });
+
+  it("★registry も従来どおり kind:'registry' で返る", async () => {
+    const created = new Date("2026-08-25T03:00:00.000Z");
+    const prisma = makeDb({
+      attachments: [
+        {
+          id: "att-reg-9",
+          fileUrl: `/uploads/${REG_KEY2}`,
+          isDeleted: false,
+          targetType: "property",
+          targetId: "p1",
+          propertyId: "p1",
+          type: "registry",
+          registryCertificateType: "all",
+          createdAt: created,
+        },
+      ],
+    });
+    expect(await resolveProtectedServeMeta(REG_KEY2, prisma)).toEqual({
+      kind: "registry",
+      isRegistry: true,
+      attachmentId: "att-reg-9",
+      propertyId: "p1",
+      certificateType: "all",
+      createdAt: created,
+    });
+  });
+
+  it("★一般添付は null（従来ヘッダのまま配信される）", async () => {
+    const prisma = makeDb({
+      attachments: [
+        {
+          id: "att-gen-9",
+          fileUrl: `/uploads/${GEN_KEY}`,
+          isDeleted: false,
+          targetType: "property",
+          targetId: "p1",
+          propertyId: "p1",
+          type: "general",
+          createdAt: new Date(),
+        },
+      ],
+    });
+    expect(await resolveProtectedServeMeta(GEN_KEY, prisma)).toBeNull();
+  });
+
+  it("resolveRegistryServeMeta は referral を返さない（registry 専用の入口のまま）", async () => {
+    const prisma = makeDb({
+      attachments: [
+        {
+          id: "att-ref-3",
+          fileUrl: `/uploads/${REF_KEY}`,
+          isDeleted: false,
+          targetType: "property",
+          targetId: "p1",
+          propertyId: "p1",
+          type: "referral",
+          createdAt: new Date(),
+        },
+      ],
+    });
+    expect(await resolveRegistryServeMeta(REF_KEY, prisma)).toBeNull();
   });
 });

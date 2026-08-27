@@ -412,6 +412,15 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "providerErrorCode",
     "confirmed",
   ]),
+  // 「貼り付けて物件化」の登録監査。detail は**真偽値4つだけ**で、
+  // 貼った原文・氏名・電話・メール・住所は route 側で載せていない
+  // (社内の恒久ルール「ログに外部由来の文字を出すときは許可リスト」)。
+  //   attachmentCreated = 取込元PDFを添付として保存したか
+  //   hasExternalKey    = 査定ナンバー等の外部キーがあったか
+  // ⚠ownerCreated / ownerLinked は /owner/i の denylist に当たるため
+  //   force-safe 側で保持する(値は boolean ゆえ PII 流入余地なし)。
+  // ⚠ここに氏名・住所・原文のキーは**足さない**(安全なものだけを並べる方式)。
+  paste_import_property_create: new Set(["attachmentCreated", "hasExternalKey"]),
 };
 
 /**
@@ -460,6 +469,12 @@ const ACTION_FORCE_SAFE_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // corporate-restore-apply: addressMode は /addr/i denylist に当たるが
   // "nta" | "cleaned" の enum(住所の反映モード)で PII 流入余地なし。force-safe で保持する。
   owner_correction_corporate_restore_apply: new Set(["addressMode"]),
+  // 「貼り付けて物件化」: ownerCreated / ownerLinked は「所有者を作ったか・
+  // 紐付けたか」の boolean。/owner/i denylist に当たるが値は boolean ゆえ
+  // PII 流入余地なし(owner_created_from_reception の hasAddress と同型)。
+  // これが伏せ字のままだと、所有者・紐付けが実際に作られたのかが
+  // 管理者に一切分からない = 監査の意味が消える(@codex PR#414 4巡目)。
+  paste_import_property_create: new Set(["ownerCreated", "ownerLinked"]),
 };
 
 /**

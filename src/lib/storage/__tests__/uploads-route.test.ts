@@ -24,11 +24,12 @@ import { GET } from "@/app/uploads/[...path]/route";
 import { getApiSession, getUserPermissions, ApiError } from "@/lib/api-helpers";
 import {
   authorizeUploadAccess,
-  resolveRegistryServeMeta,
+  resolveProtectedServeMeta,
 } from "@/lib/uploads-authorization";
 import { buildUploadsEtag } from "@/lib/uploads-etag";
 import { writeAuditLog } from "@/lib/audit";
 import { registryContentDisposition } from "@/lib/attachments/registry-display-name";
+import { referralContentDisposition } from "@/lib/attachments/referral-display-name";
 
 vi.mock("@/lib/api-helpers", () => {
   class ApiError extends Error {
@@ -59,9 +60,9 @@ vi.mock("@/lib/api-helpers", () => {
 // で担保するため、本 mock では既定で "ok" を返し、配信パスをそのまま通す。
 vi.mock("@/lib/uploads-authorization", () => ({
   authorizeUploadAccess: vi.fn().mockResolvedValue("ok"),
-  // S1b-4: 既存 route テストは非 registry 配信の整合確認が目的。registry メタは null
-  // （= 非 registry）を返し、従来ヘッダ・挙動のまま通す。
-  resolveRegistryServeMeta: vi.fn().mockResolvedValue(null),
+  // S1b-4 / 24巡目: 既存 route テストは**保護対象でない**配信の整合確認が目的。
+  // メタは null（= 写真・一般添付）を返し、従来ヘッダ・挙動のまま通す。
+  resolveProtectedServeMeta: vi.fn().mockResolvedValue(null),
 }));
 
 // registry 配信の監査呼び出しを runtime で検証するため mock する。
@@ -360,6 +361,7 @@ describe("Phase B: getUserPermissions auth error handling", () => {
 // ============================================================
 describe("F11: registry 配信ヘッダ/監査 + 配信現状ロック", () => {
   const REGISTRY_META = {
+    kind: "registry" as const,
     isRegistry: true as const,
     attachmentId: "att-1",
     propertyId: "prop-1",
@@ -378,7 +380,7 @@ describe("F11: registry 配信ヘッダ/監査 + 配信現状ロック", () => {
       role: "admin",
     });
     vi.mocked(authorizeUploadAccess).mockResolvedValue("ok");
-    vi.mocked(resolveRegistryServeMeta).mockResolvedValue(null);
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValue(null);
     vi.mocked(writeAuditLog).mockClear();
   });
 
@@ -392,7 +394,7 @@ describe("F11: registry 配信ヘッダ/監査 + 配信現状ロック", () => {
 
   it("registry preview: no-store / nosniff / inline / 監査 registry_pdf_preview（runtime）", async () => {
     const parts = await writeRegistryPdf();
-    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce(REGISTRY_META);
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValueOnce(REGISTRY_META);
 
     const res = await callGet(parts);
     expect(res.status).toBe(200);
@@ -413,7 +415,7 @@ describe("F11: registry 配信ヘッダ/監査 + 配信現状ロック", () => {
 
   it("registry download (?download=1): 種別＋登録日の保存名 / ASCII フォールバック維持 / 監査 registry_pdf_download", async () => {
     const parts = await writeRegistryPdf();
-    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce(REGISTRY_META);
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValueOnce(REGISTRY_META);
 
     const res = await callGet(parts, { query: "?download=1" });
     expect(res.status).toBe(200);
@@ -441,7 +443,7 @@ describe("F11: registry 配信ヘッダ/監査 + 配信現状ロック", () => {
 
   it("registry download: 種別が記録されていない謄本でも、元ファイル名は保存名に出さない", async () => {
     const parts = await writeRegistryPdf();
-    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce({
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValueOnce({
       ...REGISTRY_META,
       certificateType: null,
     });
@@ -459,7 +461,7 @@ describe("F11: registry 配信ヘッダ/監査 + 配信現状ロック", () => {
 
   it("registry: propertyId が null の場合 detail は undefined（非 PII 維持）", async () => {
     const parts = await writeRegistryPdf();
-    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce({
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValueOnce({
       ...REGISTRY_META,
       propertyId: null,
     });
@@ -538,6 +540,7 @@ describe("F11: registry 配信ヘッダ/監査 + 配信現状ロック", () => {
 // ============================================================
 describe("ETag/304: 非 registry の条件付き GET", () => {
   const REGISTRY_META = {
+    kind: "registry" as const,
     isRegistry: true as const,
     attachmentId: "att-1",
     propertyId: "prop-1",
@@ -557,7 +560,7 @@ describe("ETag/304: 非 registry の条件付き GET", () => {
     });
     vi.mocked(authorizeUploadAccess).mockResolvedValue("ok");
     vi.mocked(authorizeUploadAccess).mockClear();
-    vi.mocked(resolveRegistryServeMeta).mockResolvedValue(null);
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValue(null);
     vi.mocked(writeAuditLog).mockClear();
   });
 
@@ -695,7 +698,7 @@ describe("ETag/304: 非 registry の条件付き GET", () => {
   it("registry PDF は 304 対象外: If-None-Match 一致相当でも 200 全量 + no-store + 監査（ETag なし）", async () => {
     const rel = "properties/p1/registry/200.pdf";
     await writePhoto(rel, Buffer.from("%PDF-1.4 regi"));
-    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce(REGISTRY_META);
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValueOnce(REGISTRY_META);
 
     // 仮に client が key 由来 ETag を偽装して送っても registry は常に全量配信+監査
     const res = await callGet(["properties", "p1", "registry", "200.pdf"], {
@@ -717,7 +720,7 @@ describe("ETag/304: 非 registry の条件付き GET", () => {
   it("registry download (?download=1) + If-None-Match でも no-store / attachment 維持", async () => {
     const rel = "properties/p1/registry/201.pdf";
     await writePhoto(rel, Buffer.from("%PDF-1.4 dl"));
-    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce(REGISTRY_META);
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValueOnce(REGISTRY_META);
 
     const res = await callGet(["properties", "p1", "registry", "201.pdf"], {
       query: "?download=1",
@@ -795,6 +798,7 @@ describe("ETag/304: 非 registry の条件付き GET", () => {
 // ============================================================
 describe("19-A: 無認証 401 ヘッダ衛生 + registry ETag 不発行ロック", () => {
   const REGISTRY_META = {
+    kind: "registry" as const,
     isRegistry: true as const,
     attachmentId: "att-1",
     propertyId: "prop-1",
@@ -815,8 +819,8 @@ describe("19-A: 無認証 401 ヘッダ衛生 + registry ETag 不発行ロック
     vi.mocked(getUserPermissions).mockClear();
     vi.mocked(authorizeUploadAccess).mockResolvedValue("ok");
     vi.mocked(authorizeUploadAccess).mockClear();
-    vi.mocked(resolveRegistryServeMeta).mockResolvedValue(null);
-    vi.mocked(resolveRegistryServeMeta).mockClear();
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValue(null);
+    vi.mocked(resolveProtectedServeMeta).mockClear();
     vi.mocked(writeAuditLog).mockClear();
   });
 
@@ -885,7 +889,7 @@ describe("19-A: 無認証 401 ヘッダ衛生 + registry ETag 不発行ロック
     // 一切実行されない（順序ロック）
     expect(getUserPermissions).not.toHaveBeenCalled();
     expect(authorizeUploadAccess).not.toHaveBeenCalled();
-    expect(resolveRegistryServeMeta).not.toHaveBeenCalled();
+    expect(resolveProtectedServeMeta).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
@@ -894,7 +898,7 @@ describe("19-A: 無認証 401 ヘッダ衛生 + registry ETag 不発行ロック
     // 素の preview / download でも ETag 不発行であることを固定する。
     const rel = "properties/p1/registry/plain.pdf";
     await writeFile(rel, Buffer.from("%PDF-1.4 plain"));
-    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce(REGISTRY_META);
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValueOnce(REGISTRY_META);
 
     const res = await callGet(["properties", "p1", "registry", "plain.pdf"]);
     expect(res.status).toBe(200);
@@ -905,7 +909,7 @@ describe("19-A: 無認証 401 ヘッダ衛生 + registry ETag 不発行ロック
   it("registry download（If-None-Match なし）にも ETag を発行しない", async () => {
     const rel = "properties/p1/registry/plain-dl.pdf";
     await writeFile(rel, Buffer.from("%PDF-1.4 plain dl"));
-    vi.mocked(resolveRegistryServeMeta).mockResolvedValueOnce(REGISTRY_META);
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValueOnce(REGISTRY_META);
 
     const res = await callGet(["properties", "p1", "registry", "plain-dl.pdf"], {
       query: "?download=1",
@@ -917,5 +921,115 @@ describe("19-A: 無認証 401 ヘッダ衛生 + registry ETag 不発行ロック
     expect(res.headers.get("Content-Disposition")).toContain(
       'attachment; filename="registry.pdf"',
     );
+  });
+});
+
+// ============================================================
+// 反響資料(referral) の配信ヘッダ（@codex PR#414 24巡目）
+//
+// ⚠referral PDF には所有者の氏名・住所・電話・メールが入っているのに、
+//   非 registry として `private, max-age=3600` + ETag で配信していた。
+//   一度開いた利用者は**権限を剥がされても最大1時間はブラウザキャッシュから
+//   読めて**しまう（認可ゲートに到達しない）。registry と同じ扱いにする。
+// ============================================================
+describe("referral 配信ヘッダ（no-store / 304 対象外 / 定型名）", () => {
+  const REFERRAL_META = {
+    kind: "referral" as const,
+    attachmentId: "att-ref-1",
+    propertyId: "prop-1",
+    // JST 2026-08-26。
+    createdAt: new Date("2026-08-25T16:00:00.000Z") as Date | null,
+  };
+
+  beforeEach(() => {
+    process.env.STORAGE_BACKEND = "local";
+    process.env.LOCAL_UPLOAD_ROOT = tmpRoot;
+    vi.mocked(getApiSession).mockResolvedValue({
+      id: "u1",
+      email: "a@a",
+      name: "A",
+      role: "admin",
+    });
+    vi.mocked(authorizeUploadAccess).mockResolvedValue("ok");
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValue(null);
+    vi.mocked(writeAuditLog).mockClear();
+  });
+
+  async function writeReferralPdf() {
+    const rel = "properties/p1/paste-import/1-abc.pdf";
+    const abs = path.join(tmpRoot, rel);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, Buffer.from("%PDF-1.4 referral"));
+    return ["properties", "p1", "paste-import", "1-abc.pdf"];
+  }
+
+  it("★referral preview: Cache-Control が no-store（キャッシュに残さない）", async () => {
+    const parts = await writeReferralPdf();
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValueOnce(REFERRAL_META);
+
+    const res = await callGet(parts);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Content-Disposition")).toBe("inline");
+  });
+
+  it("★referral には ETag を発行しない（no-store と 304 は両立しない）", async () => {
+    const parts = await writeReferralPdf();
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValueOnce(REFERRAL_META);
+
+    const res = await callGet(parts);
+    expect(res.headers.get("ETag")).toBeNull();
+  });
+
+  it("★If-None-Match を送っても 304 にならず、毎回全量配信される", async () => {
+    const parts = await writeReferralPdf();
+    const etag = buildUploadsEtag("properties/p1/paste-import/1-abc.pdf");
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValueOnce(REFERRAL_META);
+
+    const res = await callGet(parts, { headers: { "If-None-Match": etag } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    const body = new Uint8Array(await res.arrayBuffer());
+    expect(body.byteLength).toBeGreaterThan(0);
+  });
+
+  it("★referral download: 定型名で落ちる（元のファイル名は使わない）", async () => {
+    const parts = await writeReferralPdf();
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValueOnce(REFERRAL_META);
+
+    const res = await callGet(parts, { query: "?download=1" });
+    const cd = res.headers.get("Content-Disposition") ?? "";
+    expect(cd).toBe(
+      referralContentDisposition({ downloadIntent: true, createdAt: REFERRAL_META.createdAt }),
+    );
+    expect(cd).toContain("attachment");
+    // 日本語名は RFC5987 で符号化され、ASCII フォールバックが付く。
+    expect(cd).toContain('filename="referral.pdf"');
+    expect(cd).toContain("filename*=UTF-8''");
+    // 元のファイル名（所有者名を含み得る）は出ない。
+    expect(cd).not.toContain("1-abc.pdf");
+  });
+
+  it("★referral では監査を書かない（registry の既存仕様に足していない）", async () => {
+    const parts = await writeReferralPdf();
+    vi.mocked(resolveProtectedServeMeta).mockResolvedValueOnce(REFERRAL_META);
+
+    await callGet(parts);
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("保護対象でない添付（写真・一般添付）のヘッダは不変", async () => {
+    const rel = "properties/abc/photos/x.png";
+    const abs = path.join(tmpRoot, rel);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]));
+
+    const res = await callGet(["properties", "abc", "photos", "x.png"]);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("private, max-age=3600");
+    expect(res.headers.get("ETag")).toBe(buildUploadsEtag(rel));
+    expect(res.headers.get("X-Content-Type-Options")).toBeNull();
+    expect(res.headers.get("Content-Disposition")).toBeNull();
   });
 });

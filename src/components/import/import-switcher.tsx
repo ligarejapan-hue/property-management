@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Upload, FileText, Files } from "lucide-react";
+import { Upload, FileText, Files, ClipboardPaste } from "lucide-react";
 import { IMPORT_TYPE_LABELS } from "@/lib/import-labels";
 
 /**
  * 取込画面の入口統合コンポーネント。
  *
- * `/import`、`/import/registry-pdf`、`/import/registry-dm` の各ページ先頭に表示し、
- * 「受付帳CSV」「謄本PDF」「登記DM取込」の3タブを横並びで表示する。
+ * `/import`、`/import/registry-pdf`、`/import/registry-dm`、`/import/paste` の各ページ先頭に表示し、
+ * 「受付帳CSV」「謄本PDF」「登記DM取込」「貼り付けて物件化」の4タブを横並びで表示する。
  *
  * - 内部ロジック・APIは既存ページ側そのまま（このコンポーネントは導線のみ）
  * - 既存URLは温存（既存リンク・ブックマーク互換）
@@ -20,6 +20,7 @@ const ITEMS: { href: string; label: string; icon: React.ComponentType<{ classNam
   { href: "/import", label: IMPORT_TYPE_LABELS.property_csv, icon: Upload },
   { href: "/import/registry-pdf", label: IMPORT_TYPE_LABELS.registry_pdf, icon: FileText },
   { href: "/import/registry-dm", label: "登記DM取込", icon: Files },
+  { href: "/import/paste", label: "貼り付けて物件化", icon: ClipboardPaste },
 ];
 
 export default function ImportSwitcher() {

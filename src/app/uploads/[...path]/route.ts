@@ -3,11 +3,12 @@ import { getStorage } from "@/lib/storage";
 import { getApiSession, getUserPermissions, ApiError } from "@/lib/api-helpers";
 import {
   authorizeUploadAccess,
-  resolveRegistryServeMeta,
+  resolveProtectedServeMeta,
 } from "@/lib/uploads-authorization";
 import { buildUploadsEtag, ifNoneMatchMatches } from "@/lib/uploads-etag";
 import { writeAuditLog } from "@/lib/audit";
 import { registryContentDisposition } from "@/lib/attachments/registry-display-name";
+import { referralContentDisposition } from "@/lib/attachments/referral-display-name";
 
 /**
  * /uploads/[...path] 配信 proxy。
@@ -87,17 +88,21 @@ export async function GET(
     return new Response("Not Found", { status: 404 });
   }
 
-  // S1b-4: 謄本PDF(registry) のみ no-store / Content-Disposition / nosniff を付与し、
-  // server-side で preview / download を監査する。hard boundary（preview 権限が無ければ
-  // バイトを返さない）は authorizeUploadAccess 側で既に適用済。
-  // 非 registry（写真・一般添付・owner 系）は従来ヘッダ・挙動のまま。
+  // S1b-4 / @codex PR#414 24巡目:
+  // **所有者PIIを含む添付（謄本 registry / 反響資料 referral）** には
+  // no-store / Content-Disposition / nosniff を付与する。hard boundary
+  // （権限が無ければバイトを返さない）は authorizeUploadAccess 側で既に適用済。
+  // それ以外（写真・一般添付・owner 系）は従来ヘッダ・挙動のまま。
   // ※ 304（条件付き GET）の適用可否判定に必要なため storage read より前に解決する。
-  //   registry は no-store + 毎配信監査を維持するため 304 の対象外（常に全量配信）。
-  const registryMeta = await resolveRegistryServeMeta(key);
+  //   ⚠no-store と ETag/304 は両立しない。**保護対象は 304 の対象外（常に全量配信）**。
+  //   これが無いと、権限を剥がされた後もブラウザキャッシュから最大1時間読めてしまう
+  //   （認可ゲートに到達しない）。
+  const serveMeta = await resolveProtectedServeMeta(key);
+  const registryMeta = serveMeta?.kind === "registry" ? serveMeta : null;
 
-  // 非 registry のみ: storage key は immutable（採番一意・UUID込み・上書きなし）
+  // 保護対象以外のみ: storage key は immutable（採番一意・UUID込み・上書きなし）
   // のため key 由来の ETag が strong validator として成立する（uploads-etag.ts 参照）。
-  const etag = registryMeta ? null : buildUploadsEtag(key);
+  const etag = serveMeta ? null : buildUploadsEtag(key);
 
   let result;
   try {
@@ -142,22 +147,31 @@ export async function GET(
     headers["ETag"] = etag;
   }
 
-  if (registryMeta) {
-    // 権限剥奪を即時反映するため registry PDF はキャッシュさせない。
+  if (serveMeta) {
+    // 権限剥奪を即時反映するため、保護対象（registry / referral）はキャッシュさせない。
     headers["Cache-Control"] = "no-store";
     headers["X-Content-Type-Options"] = "nosniff";
     // ⚠**手元に落ちるファイル名を決めるのはここ**（同一オリジンでも Content-Disposition の
     //   filename が指定されていればブラウザはそちらを採る＝画面側の download 属性は効かない）。
     // 名前は種別＋登録日から組み立てる共通関数に一本化する。元の添付ファイル名
     // （所有者名等の PII の恐れ）は依然として一切使わない。
-    headers["Content-Disposition"] = registryContentDisposition({
-      downloadIntent,
-      certType: registryMeta.certificateType,
-      createdAt: registryMeta.createdAt,
-    });
+    headers["Content-Disposition"] =
+      serveMeta.kind === "registry"
+        ? registryContentDisposition({
+            downloadIntent,
+            certType: serveMeta.certificateType,
+            createdAt: serveMeta.createdAt,
+          })
+        : referralContentDisposition({
+            downloadIntent,
+            createdAt: serveMeta.createdAt,
+          });
+  }
 
+  if (registryMeta) {
     // 非PII の監査のみ（fileName / 所有者情報は記録しない）。
     // preview は iframe 再読込でログが増え得る点に留意（PR 本文に明記）。
+    // ⚠監査は registry の既存仕様のまま（referral には足していない）。
     await writeAuditLog({
       userId: session.id,
       action: downloadIntent ? "registry_pdf_download" : "registry_pdf_preview",
