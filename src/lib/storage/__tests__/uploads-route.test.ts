@@ -139,7 +139,7 @@ describe("/uploads/[...path] with LocalStorageAdapter", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("image/png");
     expect(res.headers.get("Content-Length")).toBe(String(bytes.length));
-    expect(res.headers.get("Cache-Control")).toBe("private, max-age=3600");
+    expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
     const arr = new Uint8Array(await res.arrayBuffer());
     expect(Buffer.from(arr).equals(bytes)).toBe(true);
   });
@@ -480,7 +480,7 @@ describe("F11: registry 配信ヘッダ/監査 + 配信現状ロック", () => {
 
     const res = await callGet(["properties", "p1", "photos", "plain.png"]);
     expect(res.status).toBe(200);
-    expect(res.headers.get("Cache-Control")).toBe("private, max-age=3600");
+    expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
     // 非 registry には nosniff / Content-Disposition を付けない（現状仕様）
     expect(res.headers.get("X-Content-Type-Options")).toBeNull();
     expect(res.headers.get("Content-Disposition")).toBeNull();
@@ -583,7 +583,7 @@ describe("ETag/304: 非 registry の条件付き GET", () => {
     const res2 = await callGet(["properties", "p1", "photos", "etag.png"]);
     expect(res2.headers.get("ETag")).toBe(etag);
     // Cache-Control は従来のまま（public 化しない）
-    expect(res1.headers.get("Cache-Control")).toBe("private, max-age=3600");
+    expect(res1.headers.get("Cache-Control")).toBe("private, no-cache");
   });
 
   it("If-None-Match 一致 → 認可+実体確認の後に 304・本文なし・ETag/Cache-Control 付き", async () => {
@@ -596,7 +596,7 @@ describe("ETag/304: 非 registry の条件付き GET", () => {
     expect(res.status).toBe(304);
     expect(await res.text()).toBe(""); // 本文なし（転送スキップ）
     expect(res.headers.get("ETag")).toBe(etag);
-    expect(res.headers.get("Cache-Control")).toBe("private, max-age=3600");
+    expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
     // 304 でも認可は必ず通っている（認可前 304 禁止）
     expect(authorizeUploadAccess).toHaveBeenCalledTimes(1);
   });
@@ -928,7 +928,7 @@ describe("19-A: 無認証 401 ヘッダ衛生 + registry ETag 不発行ロック
 // 反響資料(referral) の配信ヘッダ（@codex PR#414 24巡目）
 //
 // ⚠referral PDF には所有者の氏名・住所・電話・メールが入っているのに、
-//   非 registry として `private, max-age=3600` + ETag で配信していた。
+//   非 registry として `private, no-cache` + ETag で配信していた。
 //   一度開いた利用者は**権限を剥がされても最大1時間はブラウザキャッシュから
 //   読めて**しまう（認可ゲートに到達しない）。registry と同じ扱いにする。
 // ============================================================
@@ -1027,7 +1027,7 @@ describe("referral 配信ヘッダ（no-store / 304 対象外 / 定型名）", (
 
     const res = await callGet(["properties", "abc", "photos", "x.png"]);
     expect(res.status).toBe(200);
-    expect(res.headers.get("Cache-Control")).toBe("private, max-age=3600");
+    expect(res.headers.get("Cache-Control")).toBe("private, no-cache");
     expect(res.headers.get("ETag")).toBe(buildUploadsEtag(rel));
     expect(res.headers.get("X-Content-Type-Options")).toBeNull();
     expect(res.headers.get("Content-Disposition")).toBeNull();
