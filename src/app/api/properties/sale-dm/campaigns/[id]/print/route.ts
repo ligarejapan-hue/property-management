@@ -18,6 +18,13 @@ import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/track
 import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
 import { buildTrackingArtifacts } from "@/lib/sale-dm-letter/qr";
 import { renderTrackingSlotHtml } from "@/lib/sale-dm-letter/tracking-slot";
+import { buildTrackingQrSvg } from "@/lib/sale-dm-letter/qr";
+import { renderUnsubscribeSlotHtml } from "@/lib/sale-dm-letter/unsubscribe-slot";
+import {
+  buildUnsubscribeToken,
+  buildUnsubscribeUrl,
+  deriveUnsubscribeKey,
+} from "@/lib/sale-dm-letter/unsubscribe-token";
 import { composeAddresseeHonorific } from "@/lib/sale-dm-letter/recipients";
 
 // 確定済み(status=confirmed)の全通をページ区切りで連結した印刷用 HTML を返す。
@@ -67,6 +74,14 @@ export async function GET(
     // 生成/再生成と同様、印刷も差出人未設定なら fail-closed(503)する(郵送前に止める)。
     if (!isSenderConfigured(saleDmCfg)) {
       throw new ApiError(503, "差出人情報(差出人名 / 連絡先)が未設定です", "SENDER_NOT_CONFIGURED");
+    }
+    // 配信停止QRの署名鍵(NEXTAUTH_SECRET 由来)。無ければ署名できない=停止QRの無い
+    // 手紙を黙って刷らず fail-closed(503)。通常運用では next-auth の前提のため常に在る。
+    let unsubscribeKey: Buffer;
+    try {
+      unsubscribeKey = deriveUnsubscribeKey();
+    } catch {
+      throw new ApiError(503, "配信停止QRの署名鍵を導出できません(NEXTAUTH_SECRET 未設定)", "UNSUBSCRIBE_KEY_NOT_CONFIGURED");
     }
 
     // 拒否・宛先不明(terminal 反響)は**印刷の直前にもう一度**検査して除外する
@@ -153,6 +168,17 @@ export async function GET(
       const letters: LetterRenderInput[] = await Promise.all(
         printableDrafts.map(async (d) => {
           const artifacts = await buildTrackingArtifacts(d.trackingToken, trackingBaseUrl);
+          // 配信停止QR: `<trackingToken>.<HMAC署名>` を /u/ へ。追跡トークン単体では
+          // 停止できない(署名は紙面にしか存在しない)。追跡枠へ**連結**して差し込む
+          // (テンプレの slot 契約は据え置き)。
+          const unsubscribeUrl = buildUnsubscribeUrl(
+            buildUnsubscribeToken(d.trackingToken, unsubscribeKey),
+            trackingBaseUrl,
+          );
+          const unsubscribeSlotHtml = renderUnsubscribeSlotHtml({
+            url: unsubscribeUrl,
+            qrSvg: await buildTrackingQrSvg(unsubscribeUrl),
+          });
           return {
             designTemplate: d.variant.designTemplate,
             body: d.body,
@@ -163,7 +189,9 @@ export async function GET(
             senderName,
             senderContact,
             trackingToken: d.trackingToken,
-            trackingSlotHtml: renderTrackingSlotHtml(artifacts, { caption: "スマホで読み取り(無料査定)" }),
+            trackingSlotHtml:
+              renderTrackingSlotHtml(artifacts, { caption: "スマホで読み取り(無料査定)" }) +
+              unsubscribeSlotHtml,
           };
         }),
       );

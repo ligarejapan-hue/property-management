@@ -132,6 +132,9 @@ const ALWAYS_SAFE_KEYS: ReadonlySet<string> = new Set([
  * unknown action にはこれを付与せず ALWAYS_SAFE_KEYS のみで最も厳しく扱う。
  */
 const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
+  // 配信停止(郵送QR・公開経路)。draftId=対象宛先のUUID(非PII)・markedSent=送付済み
+  // 未押下の手紙をその場で送付済み化したか・at=ISO時刻。氏名・住所は書かない設計。
+  sale_dm_qr_unsubscribe: new Set(["draftId", "markedSent", "at"]),
   // 取込ロールバックの監査メタデータ（PIIではなく復元対象の構造情報・件数）。
   // 件数/状態系（*Count / blocked）は何件削除・復元・ブロックされたかの非PII監査情報。
   // allowlist のみ（force-safe ではない）ため unknown / 他 action では保持されない。

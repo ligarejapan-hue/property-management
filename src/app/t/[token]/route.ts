@@ -5,14 +5,26 @@ import { writeAuditLog } from "@/lib/audit";
 import { recordTrackingHit } from "@/lib/sale-dm-letter/tracking-record";
 import { isAbsoluteHttpUrl } from "@/lib/sale-dm-letter/tracking";
 import { loadSaleDmLpUrl } from "@/lib/sale-dm-letter/config-store";
+import { clientRateKey, createRateLimiter } from "@/lib/public-rate-limit";
 
 // 認証不要の公開エンドポイント(proxy.ts の PUBLIC_PATHS に "/t/" を追加済み)。
 // 受け手(所有者)は本システムのログインユーザーではないため認証免除が必須。
 // no-store: 個人を特定し得る遷移(どの宛先がアクセスしたか)をキャッシュさせない。
+// 公開エンドポイントの回数制限(尽力ベース・詳細は public-rate-limit.ts)。
+// 読み取り(転送)系なので溢れたときは通す=正規の受け手を巻き込まない。
+const trackingLimiter = createRateLimiter(
+  { limit: 60, windowMs: 60_000 },
+  { onOverflow: "allow" },
+);
+
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ token: string }> },
 ) {
+  // 機械的な連打・列挙の門前払い(記録・転送より先)。
+  if (!trackingLimiter.hit(`t-get:${clientRateKey(req.headers)}`)) {
+    return new NextResponse(null, { status: 429, headers: { "Cache-Control": "no-store" } });
+  }
   const { token } = await params;
   // 既定LP は設定(DB→env)から解決する。型ごとLP は recordTrackingHit が返す variantLpUrl が優先。
   // 公開・未認証経路ゆえ LP URL だけを読む専用ローダーを使う(課金APIキーを取得/復号しない)。
