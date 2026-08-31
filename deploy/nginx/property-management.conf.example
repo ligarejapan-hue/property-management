@@ -29,6 +29,7 @@ server {
     # 追跡URLが http:// 設定の場合、印刷されたURLはまず この80番へ届くため)。
     location ^~ /u/ {
         access_log off;
+        error_log /dev/null crit;
         return 301 https://$host$request_uri;
     }
 
@@ -65,9 +66,12 @@ server {
     # 配信停止ページ(/u/<署名付きトークン>)は**アクセスログに残さない**。
     # URLパス自体が停止の権限(HMAC署名)を持つため、ログを読めた者が URL を再生して
     # 他人を配信停止にできてしまう(@codex #416 P2)。QR読取(GET)・停止送信(POST)とも
-    # この location を通る。error_log は URL を含まない通常運用のため据え置き。
+    # この location を通る。
     location ^~ /u/ {
         access_log off;
+        # error_log にもリクエスト行(=/u/<署名付きトークン>)が載る(上流断・タイムアウト時)。
+        # 停止URLは再生可能な権限なので、この location のエラーは記録しない(@codex #416 R3 P2)。
+        error_log /dev/null crit;
 
         proxy_pass         http://127.0.0.1:3000;
         proxy_http_version 1.1;

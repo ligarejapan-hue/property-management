@@ -75,6 +75,14 @@ const KEY = deriveUnsubscribeKey("unit-test-secret");
 const TRK = "trk_abc123";
 const VALID = buildUnsubscribeToken(TRK, KEY);
 
+// ⚠route はトークン単位のレート制限(5回/時)も持ち、モジュール保持でテスト間リセットされない。
+// POST するテストは freshValid() で**毎回別トークン**を使う(VALID の使い回しは5回で共食い)。
+let tokSeq = 0;
+function freshValid(): string {
+  tokSeq += 1;
+  return buildUnsubscribeToken(`trk_t${tokSeq}`, KEY);
+}
+
 // ⚠route モジュールの postGlobalLimiter(全体上限 60/時)はテスト間でリセットされない。
 // このファイルの POST 呼び出し合計が 60 に近づくと共食いで 429 になる。テストを足すときは
 // 合計回数に注意する(現在は20回未満)。per-IP 側は下の ipSeq で毎回別IPにして回避している。
@@ -150,7 +158,8 @@ describe("GET /u/[token](確認画面)", () => {
 
 describe("POST /u/[token](停止の記録)", () => {
   it("正当トークン: Owner→物件→子の順にロックし、拒否を書いて同期・監査する", async () => {
-    const res = await POST(req("POST", VALID), ctx(VALID));
+    const tk = freshValid();
+    const res = await POST(req("POST", tk), ctx(tk));
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("受け付けました");
 
@@ -183,7 +192,8 @@ describe("POST /u/[token](停止の記録)", () => {
 
   it("既に拒否済みなら書かずに同じ完了画面(冪等・二度読み取りで壊れない)", async () => {
     state.logs = [baseLog({ reactionStatus: "refused", reactionSource: "manual" })];
-    const res = await POST(req("POST", VALID), ctx(VALID));
+    const tk = freshValid();
+    const res = await POST(req("POST", tk), ctx(tk));
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("受け付けました");
     const client = prisma as unknown as {
@@ -210,7 +220,8 @@ describe("POST /u/[token](停止の記録)", () => {
 
   it("正当署名だが宛先が消えている: 同じ完了画面(在否を答えない)+監査 missing", async () => {
     state.draft = null;
-    const res = await POST(req("POST", VALID), ctx(VALID));
+    const tk = freshValid();
+    const res = await POST(req("POST", tk), ctx(tk));
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("受け付けました");
     expect(writeAuditLog).toHaveBeenCalledWith(
@@ -221,7 +232,8 @@ describe("POST /u/[token](停止の記録)", () => {
   it("送付済み未押下(confirmed・行なし): その場で送付済み化+送付記録を作って拒否まで記録する(@codex R2 P1)", async () => {
     state.logs = [];
     state.draft!.status = "confirmed";
-    const res = await POST(req("POST", VALID), ctx(VALID));
+    const tk = freshValid();
+    const res = await POST(req("POST", tk), ctx(tk));
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("受け付けました");
 
@@ -253,7 +265,8 @@ describe("POST /u/[token](停止の記録)", () => {
   it("下書きへ戻っていた(status=draft): 成功と言わず連絡先へ誘導+監査 unsent", async () => {
     state.logs = [];
     state.draft!.status = "draft";
-    const res = await POST(req("POST", VALID), ctx(VALID));
+    const tk = freshValid();
+    const res = await POST(req("POST", tk), ctx(tk));
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain("確認できませんでした");
@@ -271,15 +284,17 @@ describe("POST /u/[token](停止の記録)", () => {
   it("sent なのに行が無い(mark-sent との交差): 書かずに「混み合っています」で再押下へ", async () => {
     state.logs = [];
     state.draft!.status = "sent";
-    const res = await POST(req("POST", VALID), ctx(VALID));
+    const tk = freshValid();
+    const res = await POST(req("POST", tk), ctx(tk));
     expect(res.status).toBe(409);
     expect(await res.text()).toContain("混み合って");
   });
 
   it("Origin が自分と違えば 403(第三者サイトから踏ませる攻撃)", async () => {
+    const tk = freshValid();
     const res = await POST(
-      req("POST", VALID, { origin: "https://evil.example" }),
-      ctx(VALID),
+      req("POST", tk, { origin: "https://evil.example" }),
+      ctx(tk),
     );
     expect(res.status).toBe(403);
     const client = prisma as unknown as {
@@ -292,9 +307,10 @@ describe("POST /u/[token](停止の記録)", () => {
     const fixed = { "x-forwarded-for": "198.51.100.200" };
     let last: Response | null = null;
     for (let i = 0; i < 11; i++) {
+      const tk = freshValid(); // トークン制限に引っ掛けない(per-IP だけを検証)
       last = await POST(
-        new Request(`http://app.test/u/${VALID}`, { method: "POST", headers: fixed }) as never,
-        ctx(VALID),
+        new Request(`http://app.test/u/${tk}`, { method: "POST", headers: fixed }) as never,
+        ctx(tk),
       );
     }
     expect(last?.status).toBe(429);
@@ -310,9 +326,31 @@ describe("POST /u/[token](停止の記録)", () => {
       const res = await POST(req("POST", forged), ctx(forged));
       expect(res.status).toBe(400);
     }
-    const ok = await POST(req("POST", VALID), ctx(VALID));
+    const tk = freshValid();
+    const ok = await POST(req("POST", tk), ctx(tk));
     expect(ok.status).toBe(200);
     expect(await ok.text()).toContain("受け付けました");
+  });
+
+  it("同一トークンの連打は5回で頭打ち(1枚の手紙が全体枠を食い潰せない・@codex R3 P1)", async () => {
+    const tk = freshValid();
+    let last: Response | null = null;
+    for (let i = 0; i < 6; i++) {
+      last = await POST(req("POST", tk), ctx(tk)); // IPは毎回変わる=per-IPには当たらない
+    }
+    expect(last?.status).toBe(429);
+    // 別の手紙(別トークン)は影響を受けない
+    const other = freshValid();
+    const ok = await POST(req("POST", other), ctx(other));
+    expect(ok.status).toBe(200);
+  });
+
+  it("監査に targetId(対象draft)が入る(許可リスト運用と独立に対象を辿れる)", async () => {
+    const tk = freshValid();
+    await POST(req("POST", tk), ctx(tk));
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ targetId: "d1" }),
+    );
   });
 
   it("ロック後の再読取で所有者集合が変わっていたら書かずに「混み合っています」", async () => {

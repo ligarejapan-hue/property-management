@@ -59,6 +59,10 @@ const postIpLimiter = createRateLimiter(
 // 全体上限: XFF 偽装で per-IP をすり抜けても、1時間あたりの停止処理はここで頭打ち。
 // 正規運用では1キャンペーンでも停止は数件/日の想定=60/時は十分に余裕がある。
 const postGlobalLimiter = createRateLimiter({ limit: 60, windowMs: 3_600_000 });
+// トークン単位の上限: **1枚の手紙(正当な署名)の連打再送**が全体枠を食い潰さないように、
+// 全体枠より先に同一トークンを 5回/時 で頭打ちにする(@codex #416 R3 P1)。正規の利用は
+// 1回(+押し直し数回)で足りる。これにより1トークンが消費できる全体枠は最大5に絞られる。
+const tokenLimiter = createRateLimiter({ limit: 5, windowMs: 3_600_000 });
 // 全体上限に達した事実の監査は5分に1回まで(攻撃中に audit_logs を肥大させない)。
 const throttleAuditLimiter = createRateLimiter({ limit: 1, windowMs: 300_000 });
 
@@ -134,6 +138,12 @@ export async function POST(
       renderUnsubscribeInvalidPage(),
       parseUnsubscribeToken(token) ? 400 : 404,
     );
+  }
+
+  // トークン単位の上限(5/時)。同一の手紙の連打・再送をここで頭打ちにし、
+  // 全体枠(60/時)を1枚の手紙が使い切れないようにする。
+  if (!tokenLimiter.hit(`u-token:${trackingToken}`)) {
+    return html(renderUnsubscribeThrottledPage(), 429);
   }
 
   // 全体上限(60/時)は**正当な署名を通った要求だけ**が消費する(@codex #416 P1)。
@@ -368,6 +378,8 @@ export async function POST(
   await writeAuditLog({
     action: "sale_dm_qr_unsubscribe",
     targetTable: "property_dm_logs",
+    // 対象の draft を targetId にも入れる(detail の許可リスト運用と独立に対象を辿れるように)。
+    targetId: draft.id,
     detail: {
       result: result.kind,
       ...(result.kind === "recorded" && result.markedSent
