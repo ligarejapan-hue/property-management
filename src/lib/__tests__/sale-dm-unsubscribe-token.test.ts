@@ -26,7 +26,19 @@ describe("deriveUnsubscribeKey", () => {
   });
 
   it("secret 未設定/空は throw(署名できない状態で手紙を刷らせない=fail-closed)", () => {
-    expect(() => deriveUnsubscribeKey(undefined)).toThrow();
+    // ⚠引数 undefined は既定値経由で process.env.NEXTAUTH_SECRET へフォールバックする。
+    //   CI は env を設定している(ci.yml)ため、env を消してから検証しないと環境で結果が変わる
+    //   (実際にローカル緑・CI赤の食い違いを起こした)。env は必ず元へ戻す。
+    const saved = process.env.NEXTAUTH_SECRET;
+    try {
+      delete process.env.NEXTAUTH_SECRET;
+      expect(() => deriveUnsubscribeKey(undefined)).toThrow();
+    } finally {
+      if (saved === undefined) delete process.env.NEXTAUTH_SECRET;
+      else process.env.NEXTAUTH_SECRET = saved;
+    }
+    // 明示的な空・空白は env に依存せず常に throw。
+    expect(() => deriveUnsubscribeKey("")).toThrow();
     expect(() => deriveUnsubscribeKey("  ")).toThrow();
   });
 });
