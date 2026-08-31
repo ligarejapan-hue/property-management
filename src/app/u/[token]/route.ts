@@ -14,7 +14,6 @@ import {
 import {
   applyManualReaction,
   isRefusalProtected,
-  isTerminalReaction,
   jstCalendarDay,
 } from "@/lib/dm-reaction/core";
 import {
@@ -328,9 +327,12 @@ export async function POST(
       const reactedAt = new Date(`${jstCalendarDay(new Date())}T00:00:00Z`);
       let changed = false;
       for (const row of fresh) {
-        // すでに拒否(退避含む)・宛先不明なら書かない(冪等: 同じQRの二度読みで壊れない。
-        // terminal は既に全出口の自動除外が効いている)。
-        if (isTerminalReaction(row.reactionStatus) || isRefusalProtected(row)) {
+        // スキップは**守られた拒否(退避含む)だけ**(冪等: 同じQRの二度読みで壊れない)。
+        // ⚠「宛先不明」はスキップしない(@codex #416 R4 P1): 同期由来の undeliverable は
+        // 後から返送記録の訂正で cleared→no_response に戻り得る。その上に拒否を残さないと、
+        // お客様の停止の意思が訂正と同時に消える。手動 refused は同期 undeliverable にも
+        // cleared にも上書きされない(core の優先規則)ため、ここで書いておけば消えない。
+        if (isRefusalProtected(row)) {
           continue;
         }
         // 手動記録と同一の適用規則(優先規則に新しい経路を作らない)。出所はメモと監査で残す。

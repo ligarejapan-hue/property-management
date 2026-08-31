@@ -345,6 +345,39 @@ describe("POST /u/[token](停止の記録)", () => {
     expect(ok.status).toBe(200);
   });
 
+  it("「宛先不明」(同期由来)の上には拒否を上書きする(訂正で戻っても停止の意思が残る・@codex R4 P1)", async () => {
+    state.logs = [
+      baseLog({ reactionStatus: "undeliverable", reactionSource: "sale_dm_sync" }),
+    ];
+    const tk = freshValid();
+    const res = await POST(req("POST", tk), ctx(tk));
+    expect(res.status).toBe(200);
+    const client = prisma as unknown as {
+      propertyDmLog: { update: ReturnType<typeof vi.fn> };
+    };
+    const data = client.propertyDmLog.update.mock.calls[0][0].data;
+    expect(data.reactionStatus).toBe("refused");
+    expect(data.reactionSource).toBe("manual");
+  });
+
+  it("退避(shadow)に拒否を持つ行はそのまま(見た目undeliverableでも二重に書かない)", async () => {
+    state.logs = [
+      baseLog({
+        reactionStatus: "undeliverable",
+        reactionSource: "sale_dm_sync",
+        manualReactionShadow: { status: "refused", reactedAt: null, note: null },
+      }),
+    ];
+    const tk = freshValid();
+    const res = await POST(req("POST", tk), ctx(tk));
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("受け付けました");
+    const client = prisma as unknown as {
+      propertyDmLog: { update: ReturnType<typeof vi.fn> };
+    };
+    expect(client.propertyDmLog.update).not.toHaveBeenCalled();
+  });
+
   it("監査に targetId(対象draft)が入る(許可リスト運用と独立に対象を辿れる)", async () => {
     const tk = freshValid();
     await POST(req("POST", tk), ctx(tk));
