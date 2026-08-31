@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
@@ -91,7 +92,11 @@ export async function GET(
   return html(renderUnsubscribeConfirmPage(), 200);
 }
 
-type UnsubscribeResult = "recorded" | "already" | "unsent" | "conflict";
+type UnsubscribeResult =
+  | { kind: "recorded"; markedSent: boolean }
+  | { kind: "already" }
+  | { kind: "unsent" }
+  | { kind: "conflict" };
 
 const NOTE_MARK = "QRコードからの配信停止申込";
 
@@ -181,21 +186,52 @@ export async function POST(
         where: { draftId: draft.id },
         select: LOG_SELECT,
       });
-      // ブリッジ行なし=「送付済み」の印がまだ押されていない。作らない(勝手な送付記録を
-      // 増やさない)。監査に残し、完了画面は同じにする(お客様の申し出は受理した扱い。
-      // 運用は「投函したらその場で送付済みを押す」が前提=この窓は狭い)。
-      if (pre.length === 0) return "unsent";
+      // ロック対象の所有者集合。ブリッジ行があれば行から、無ければ draft から列挙する。
+      let preOwnerIds: string[];
+      let draftForSend: {
+        status: string;
+        representativeOwnerId: string | null;
+        generatedBy: string;
+        draftOwners: { ownerId: string }[];
+      } | null = null;
+      if (pre.length > 0) {
+        preOwnerIds = pre.flatMap((r) => [
+          ...(r.ownerId ? [r.ownerId] : []),
+          ...r.logOwners.map((o) => o.ownerId),
+        ]);
+      } else {
+        // ブリッジ行なし=「送付済み」の印がまだ押されていない(@codex #416 R2 P1)。
+        // 署名付きQRの所持=印刷済みの手紙が実在する証拠なので、**その場で送付済みへの
+        // 遷移+送付記録の作成を mark-sent と同じ規律で行い**、拒否まで一続きに記録する。
+        // 「受け付けました」と言いながら何も残さない虚偽応答を作らない。
+        const d = await tx.dmRecipientDraft.findUnique({
+          where: { id: draft.id },
+          select: {
+            status: true,
+            representativeOwnerId: true,
+            generatedBy: true,
+            draftOwners: { select: { ownerId: true } },
+          },
+        });
+        if (!d) return { kind: "conflict" } as const;
+        // sent なのに行が無いのは mark-sent との一瞬の交差=再押下で解決(conflict)。
+        if (d.status === "sent") return { kind: "conflict" } as const;
+        // confirmed 以外(編集で下書きへ戻った等)は正規の手紙が確認できない扱い。
+        if (d.status !== "confirmed") return { kind: "unsent" } as const;
+        draftForSend = d;
+        preOwnerIds = [
+          ...(d.representativeOwnerId ? [d.representativeOwnerId] : []),
+          ...d.draftOwners.map((o) => o.ownerId),
+        ];
+      }
 
-      const preOwnerIds = pre.flatMap((r) => [
-        ...(r.ownerId ? [r.ownerId] : []),
-        ...r.logOwners.map((o) => o.ownerId),
-      ]);
-      // R47: Owner(FOR UPDATE・id順) → 物件親行 → 子行。terminal(拒否)を書くため必須。
+      // R47: Owner(FOR UPDATE・id順) → 物件親行 → 子行。terminal(拒否)を書くため必須
+      // (mark-sent の FOR SHARE より強い側に寄せる=このtxは必ず拒否を書く)。
       await lockOwnersForUpdate(tx as unknown as RawTx, preOwnerIds);
       await lockPropertyRow(tx, draft.propertyId);
 
       // ロック下で再読取。所有者集合が変わっていたら中止(名寄せの付け替えレース)。
-      const fresh = await tx.propertyDmLog.findMany({
+      let fresh = await tx.propertyDmLog.findMany({
         where: { draftId: draft.id },
         select: LOG_SELECT,
       });
@@ -204,7 +240,80 @@ export async function POST(
         ...(r.ownerId ? [r.ownerId] : []),
         ...r.logOwners.map((o) => o.ownerId),
       ]);
-      if (freshOwnerIds.some((id) => !lockedSet.has(id))) return "conflict";
+      if (freshOwnerIds.some((id) => !lockedSet.has(id)))
+        return { kind: "conflict" } as const;
+
+      let markedSent = false;
+      if (fresh.length === 0) {
+        if (!draftForSend) return { kind: "conflict" } as const;
+        // ロック下で draft を読み直し、所有者集合・状態を検証してから
+        // confirmed→sent(mark-sent と同じ条件付き遷移。並行の mark-sent が先に勝てば
+        // count=0=そちらが行を作る途中なので中止→もう一度押していただく)。
+        const d2 = await tx.dmRecipientDraft.findUnique({
+          where: { id: draft.id },
+          select: {
+            status: true,
+            representativeOwnerId: true,
+            generatedBy: true,
+            draftOwners: { select: { ownerId: true } },
+          },
+        });
+        const d2Owners = [
+          ...(d2?.representativeOwnerId ? [d2.representativeOwnerId] : []),
+          ...(d2?.draftOwners.map((o) => o.ownerId) ?? []),
+        ];
+        if (!d2 || d2Owners.some((id) => !lockedSet.has(id)))
+          return { kind: "conflict" } as const;
+        if (d2.status !== "confirmed") return { kind: "conflict" } as const;
+        const now = new Date();
+        const transitioned = await tx.dmRecipientDraft.updateMany({
+          where: { id: draft.id, status: "confirmed" },
+          data: { status: "sent", sentAt: now },
+        });
+        if (transitioned.count === 0) return { kind: "conflict" } as const;
+        // PropertyDmLog.sentAt は @db.Date=+9h して UTC暦日=JST暦日(mark-sent と同じ規約)。
+        // sentBy はこの手紙を生成した利用者(公開経路にセッションは無い)。
+        const logId = randomUUID();
+        await tx.propertyDmLog.create({
+          data: {
+            id: logId,
+            propertyId: draft.propertyId,
+            ownerId: d2.representativeOwnerId,
+            dmType: null,
+            batchId: null,
+            draftId: draft.id,
+            sentAt: new Date(now.getTime() + 9 * 60 * 60 * 1000),
+            method: "sale_dm",
+            sentBy: d2.generatedBy,
+          },
+        });
+        const linkTargets =
+          d2.draftOwners.length > 0
+            ? d2.draftOwners.map((o) => o.ownerId)
+            : d2.representativeOwnerId
+              ? [d2.representativeOwnerId]
+              : [];
+        if (linkTargets.length > 0) {
+          await tx.propertyDmLogOwner.createMany({
+            data: linkTargets.map((ownerId) => ({ logId, ownerId })),
+            skipDuplicates: true,
+          });
+        }
+        markedSent = true;
+        // 作った行はこの tx 内の既知の初期値(no_response)。再取得せず手元で組む。
+        fresh = [
+          {
+            id: logId,
+            ownerId: d2.representativeOwnerId,
+            reactionStatus: "no_response",
+            reactedAt: null,
+            reactionNote: null,
+            reactionSource: null,
+            manualReactionShadow: null,
+            logOwners: linkTargets.map((ownerId) => ({ ownerId })),
+          },
+        ];
+      }
 
       const reactedAt = new Date(`${jstCalendarDay(new Date())}T00:00:00Z`);
       let changed = false;
@@ -244,11 +353,13 @@ export async function POST(
         // ブリッジ行の保存直後に同一 tx で再導出(手動反響 PATCH と同じ後処理)。
         await syncSaleDmReaction(tx as unknown as ReactionSyncTx, draft.id);
       }
-      return changed ? "recorded" : "already";
+      return changed
+        ? ({ kind: "recorded", markedSent } as const)
+        : ({ kind: "already" } as const);
     });
   } catch (e) {
     if (e instanceof SyncOwnerSetChangedError) {
-      result = "conflict";
+      result = { kind: "conflict" };
     } else {
       throw e;
     }
@@ -257,12 +368,24 @@ export async function POST(
   await writeAuditLog({
     action: "sale_dm_qr_unsubscribe",
     targetTable: "property_dm_logs",
-    detail: { result, draftId: draft.id, at: new Date().toISOString() },
+    detail: {
+      result: result.kind,
+      ...(result.kind === "recorded" && result.markedSent
+        ? { markedSent: true }
+        : {}),
+      draftId: draft.id,
+      at: new Date().toISOString(),
+    },
   });
 
-  if (result === "conflict") {
+  if (result.kind === "conflict") {
     // まれな並行競合。虚偽の「受け付けました」を出さず、もう一度押していただく。
     return html(renderUnsubscribeBusyPage(), 409);
+  }
+  if (result.kind === "unsent") {
+    // 正規の手紙が確認できない(編集で下書きへ戻った等)。**成功と言わない**
+    // (@codex #416 R2 P1)。お手紙の連絡先(電話)での停止受付へ誘導する。
+    return html(renderUnsubscribeInvalidPage(), 200);
   }
   return html(renderUnsubscribeDonePage(), 200);
 }

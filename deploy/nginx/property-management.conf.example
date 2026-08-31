@@ -25,6 +25,13 @@ server {
         root /var/www/certbot;
     }
 
+    # 配信停止ページ(/u/)は**転送側でもアクセスログに残さない**(下の443側と同じ理由。
+    # 追跡URLが http:// 設定の場合、印刷されたURLはまず この80番へ届くため)。
+    location ^~ /u/ {
+        access_log off;
+        return 301 https://$host$request_uri;
+    }
+
     location / {
         return 301 https://$host$request_uri;
     }

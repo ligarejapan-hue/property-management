@@ -20,6 +20,9 @@ export function renderUnsubscribeSlotHtml(artifacts: {
   qrSvg: string;
 }): string {
   return [
+    // qrcode の SVG は viewBox のみで width/height を持たない。枠(14mm)だけ絞っても
+    // 中の SVG は既定の内在サイズで溢れ得るため、SVG 自体を枠へ追従させる(@codex #416 R2 P2)。
+    `<style>.sale-dm-unsub-qr svg{width:100%;height:100%;display:block}</style>`,
     `<div class="sale-dm-unsubscribe" style="margin-top:4mm;padding-top:3mm;border-top:1px solid #ddd;display:flex;align-items:center;gap:4mm;justify-content:center">`,
     // QR は追跡枠より一回り小さく(主役は査定QR。停止は選べる導線として明示)。
     `<div class="sale-dm-unsub-qr" style="width:14mm;height:14mm;flex:none">${artifacts.qrSvg}</div>`,

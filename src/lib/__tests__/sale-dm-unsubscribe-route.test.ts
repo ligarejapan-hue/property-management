@@ -27,8 +27,17 @@ type LogRow = {
   logOwners: { ownerId: string }[];
 };
 
+type DraftRow = {
+  id: string;
+  propertyId: string;
+  status: string;
+  representativeOwnerId: string | null;
+  generatedBy: string;
+  draftOwners: { ownerId: string }[];
+};
+
 const state: {
-  draft: { id: string; propertyId: string } | null;
+  draft: DraftRow | null;
   logs: LogRow[];
 } = { draft: null, logs: [] };
 
@@ -36,10 +45,15 @@ vi.mock("@/lib/prisma", () => {
   const client: Record<string, unknown> = {
     dmRecipientDraft: {
       findUnique: vi.fn(async () => state.draft),
+      updateMany: vi.fn(async () => ({ count: 1 })),
     },
     propertyDmLog: {
       findMany: vi.fn(async () => state.logs),
       update: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => args),
+      create: vi.fn(async (args: { data: Record<string, unknown> }) => args),
+    },
+    propertyDmLogOwner: {
+      createMany: vi.fn(async () => ({ count: 1 })),
     },
     $queryRaw: vi.fn(async () => []),
   };
@@ -98,7 +112,14 @@ function baseLog(over: Partial<LogRow> = {}): LogRow {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  state.draft = { id: "d1", propertyId: "p1" };
+  state.draft = {
+    id: "d1",
+    propertyId: "p1",
+    status: "sent",
+    representativeOwnerId: "own1",
+    generatedBy: "user1",
+    draftOwners: [{ ownerId: "own1" }, { ownerId: "own2" }],
+  };
   state.logs = [baseLog()];
 });
 
@@ -197,13 +218,62 @@ describe("POST /u/[token](停止の記録)", () => {
     );
   });
 
-  it("送付済みの印が無い(ブリッジ行なし): 完了画面+監査 unsent(黙って握りつぶさない)", async () => {
+  it("送付済み未押下(confirmed・行なし): その場で送付済み化+送付記録を作って拒否まで記録する(@codex R2 P1)", async () => {
     state.logs = [];
+    state.draft!.status = "confirmed";
     const res = await POST(req("POST", VALID), ctx(VALID));
     expect(res.status).toBe(200);
+    expect(await res.text()).toContain("受け付けました");
+
+    const client = prisma as unknown as {
+      dmRecipientDraft: { updateMany: ReturnType<typeof vi.fn> };
+      propertyDmLog: { create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
+      propertyDmLogOwner: { createMany: ReturnType<typeof vi.fn> };
+    };
+    // confirmed→sent の条件付き遷移(mark-sent と同じ冪等ガード=後から係が押しても二重にならない)
+    expect(client.dmRecipientDraft.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "d1", status: "confirmed" } }),
+    );
+    // ブリッジ行の作成: sentBy は手紙の生成者・method sale_dm・draftId 紐付け
+    const created = client.propertyDmLog.create.mock.calls[0][0].data;
+    expect(created.method).toBe("sale_dm");
+    expect(created.sentBy).toBe("user1");
+    expect(created.draftId).toBe("d1");
+    expect(client.propertyDmLogOwner.createMany).toHaveBeenCalled();
+    // 作った行へ拒否が書かれる
+    const written = client.propertyDmLog.update.mock.calls[0][0].data;
+    expect(written.reactionStatus).toBe("refused");
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: expect.objectContaining({ result: "recorded", markedSent: true }),
+      }),
+    );
+  });
+
+  it("下書きへ戻っていた(status=draft): 成功と言わず連絡先へ誘導+監査 unsent", async () => {
+    state.logs = [];
+    state.draft!.status = "draft";
+    const res = await POST(req("POST", VALID), ctx(VALID));
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("確認できませんでした");
+    expect(body).not.toContain("受け付けました");
+    const client = prisma as unknown as {
+      propertyDmLog: { create: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
+    };
+    expect(client.propertyDmLog.create).not.toHaveBeenCalled();
+    expect(client.propertyDmLog.update).not.toHaveBeenCalled();
     expect(writeAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({ detail: expect.objectContaining({ result: "unsent" }) }),
     );
+  });
+
+  it("sent なのに行が無い(mark-sent との交差): 書かずに「混み合っています」で再押下へ", async () => {
+    state.logs = [];
+    state.draft!.status = "sent";
+    const res = await POST(req("POST", VALID), ctx(VALID));
+    expect(res.status).toBe(409);
+    expect(await res.text()).toContain("混み合って");
   });
 
   it("Origin が自分と違えば 403(第三者サイトから踏ませる攻撃)", async () => {
