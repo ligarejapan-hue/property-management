@@ -83,13 +83,20 @@ export function createRateLimiter(
 }
 
 /**
- * レート制限の鍵にする送信元IP。x-forwarded-for 先頭値 → x-real-ip → "unknown"。
- * ⚠上記の偽装可能性の注記どおり、これは識別のヒントであって認証ではない。
+ * レート制限の鍵にする送信元IP。**信頼できる側から**取る:
+ *  1. x-real-ip — 本番の nginx(deploy/nginx/property-management.conf.example)が
+ *     `$remote_addr` で**上書き設定**する=クライアントが直接付けても届かない。
+ *  2. x-forwarded-for の**末尾**値 — nginx の `$proxy_add_x_forwarded_for` は
+ *     クライアント申告の後ろへ実IPを**追記**するため、信頼できるのは末尾だけ。
+ *     先頭値を使うと偽装値で per-IP 制限を無限にすり抜けられる(@codex #416 P1 併記指摘)。
+ * ⚠プロキシ無しで直接届いた場合は両ヘッダともクライアントの自由=識別のヒントに過ぎない。
  * 長さを切り詰めるのは、でたらめな長大ヘッダで鍵(Map のキー)を肥大させないため。
  */
 export function clientRateKey(headers: Headers): string {
+  const realIp = headers.get("x-real-ip")?.trim();
+  if (realIp) return realIp.slice(0, 64);
   const xff = headers.get("x-forwarded-for");
-  const first = xff?.split(",")[0]?.trim();
-  const raw = first || headers.get("x-real-ip")?.trim() || "unknown";
-  return raw.slice(0, 64);
+  const parts = xff?.split(",") ?? [];
+  const last = parts[parts.length - 1]?.trim();
+  return (last || "unknown").slice(0, 64);
 }

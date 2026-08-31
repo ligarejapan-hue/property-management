@@ -231,6 +231,20 @@ describe("POST /u/[token](停止の記録)", () => {
     expect(await last!.text()).toContain("アクセスが集中");
   });
 
+  it("偽署名の連投は全体上限(60/時)を消費しない(@codex P1: 正規の停止を429で締め出せない)", async () => {
+    // でたらめな署名で70回(全体上限60を超える回数)叩く。全て署名検証で弾かれ、
+    // 全体枠は減らない → その後の正当な申込は通る。
+    const badSig = "A".repeat(22);
+    for (let i = 0; i < 70; i++) {
+      const forged = `${TRK}.${badSig}`;
+      const res = await POST(req("POST", forged), ctx(forged));
+      expect(res.status).toBe(400);
+    }
+    const ok = await POST(req("POST", VALID), ctx(VALID));
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toContain("受け付けました");
+  });
+
   it("ロック後の再読取で所有者集合が変わっていたら書かずに「混み合っています」", async () => {
     const client = prisma as unknown as {
       propertyDmLog: { findMany: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };

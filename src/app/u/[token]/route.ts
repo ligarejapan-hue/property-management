@@ -99,18 +99,8 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> },
 ) {
-  // 回数制限(per-IP → 全体)。
+  // per-IP 制限(尽力ベース)。全体上限は**署名検証の後**で消費する(下記)。
   if (!postIpLimiter.hit(`u-post:${clientRateKey(req.headers)}`)) {
-    return html(renderUnsubscribeThrottledPage(), 429);
-  }
-  if (!postGlobalLimiter.hit("global")) {
-    if (throttleAuditLimiter.hit("audit")) {
-      await writeAuditLog({
-        action: "sale_dm_qr_unsubscribe",
-        targetTable: "property_dm_logs",
-        detail: { result: "throttled", at: new Date().toISOString() },
-      });
-    }
     return html(renderUnsubscribeThrottledPage(), 429);
   }
 
@@ -139,6 +129,22 @@ export async function POST(
       renderUnsubscribeInvalidPage(),
       parseUnsubscribeToken(token) ? 400 : 404,
     );
+  }
+
+  // 全体上限(60/時)は**正当な署名を通った要求だけ**が消費する(@codex #416 P1)。
+  // 検証前に消費すると、署名を持たない攻撃者がでたらめな連投で枠を使い切り、
+  // 正規の停止申込を1時間まるごと 429 にできてしまう(per-IP は XFF 偽装ですり抜く)。
+  // 署名は紙面の所持者しか作れないため、ここでの上限は「大量の実手紙を使った濫用」だけを
+  // 頭打ちにし、正規の少数の申込を巻き込まない。
+  if (!postGlobalLimiter.hit("global")) {
+    if (throttleAuditLimiter.hit("audit")) {
+      await writeAuditLog({
+        action: "sale_dm_qr_unsubscribe",
+        targetTable: "property_dm_logs",
+        detail: { result: "throttled", at: new Date().toISOString() },
+      });
+    }
+    return html(renderUnsubscribeThrottledPage(), 429);
   }
 
   // 署名を通った要求だけが DB に到達する。

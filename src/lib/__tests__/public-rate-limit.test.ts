@@ -76,15 +76,21 @@ describe("createRateLimiter(保持+鍵上限)", () => {
 });
 
 describe("clientRateKey(送信元IPの鍵)", () => {
-  it("x-forwarded-for の先頭値を使う", () => {
-    const h = new Headers({ "x-forwarded-for": "203.0.113.9, 10.0.0.1" });
+  it("x-real-ip(本番nginxが実IPで上書き設定)を最優先で使う", () => {
+    const h = new Headers({
+      "x-real-ip": "198.51.100.7",
+      "x-forwarded-for": "spoofed-by-client, 198.51.100.7",
+    });
+    expect(clientRateKey(h)).toBe("198.51.100.7");
+  });
+
+  it("x-real-ip が無ければ x-forwarded-for の**末尾**値(プロキシが追記した側)を使う", () => {
+    // 先頭はクライアント申告(偽装可能)。末尾が nginx の $proxy_add_x_forwarded_for の追記分。
+    const h = new Headers({ "x-forwarded-for": "1.2.3.4, 203.0.113.9" });
     expect(clientRateKey(h)).toBe("203.0.113.9");
   });
 
-  it("x-forwarded-for が無ければ x-real-ip、どちらも無ければ unknown", () => {
-    expect(clientRateKey(new Headers({ "x-real-ip": "198.51.100.7" }))).toBe(
-      "198.51.100.7",
-    );
+  it("どちらも無ければ unknown", () => {
     expect(clientRateKey(new Headers())).toBe("unknown");
   });
 
