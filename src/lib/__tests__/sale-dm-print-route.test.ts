@@ -89,7 +89,7 @@ const ENV = process.env;
 beforeEach(() => {
   vi.clearAllMocks();
   // 郵送QRには絶対URLが必須。通常系は追跡baseを設定して通す。
-  process.env = { ...ENV, SALE_DM_TRACKING_BASE_URL: "https://dm.example.com", SALE_DM_LP_URL: "https://lp.example.com", SALE_DM_SENDER_NAME: "△△不動産", SALE_DM_SENDER_CONTACT: "03-0000-0000" };
+  process.env = { ...ENV, SALE_DM_TRACKING_BASE_URL: "https://dm.example.com", SALE_DM_LP_URL: "https://lp.example.com", SALE_DM_SENDER_NAME: "△△不動産", SALE_DM_SENDER_CONTACT: "03-0000-0000", NEXTAUTH_SECRET: "print-test-secret" };
   requireSaleDmAccess.mockResolvedValue({ session: { id: "u1" } });
   pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "テスト", createdBy: "u1" });
   pm.dmRecipientDraft.findMany.mockResolvedValue([draft]);
@@ -113,6 +113,23 @@ describe("GET .../campaigns/[id]/print", () => {
     expect(arg.where.campaignId).toBe("c1");
     expect(arg.where.status).toBe("confirmed");
     expect(arg.where.body).toEqual({ not: "" });
+  });
+
+  it("配信停止QR(署名付き /u/)が紙面に配線されている(追跡QRとは別トークン)", async () => {
+    const res = await GET(req() as never, ctx);
+    const html = await res.text();
+    // 停止枠(専用クラス)+ /u/<trackingToken>.<署名> の絶対URL
+    expect(html).toContain("sale-dm-unsubscribe");
+    expect(html).toMatch(/https:\/\/dm\.example\.com\/u\/tok1\.[A-Za-z0-9_-]{22}/);
+    // 追跡トークン素のままでは /u/ に載らない(署名なしURLを紙面に出さない)
+    expect(html).not.toContain("https://dm.example.com/u/tok1<");
+    expect(html).not.toMatch(/\/u\/tok1["<]/);
+  });
+
+  it("NEXTAUTH_SECRET 未設定なら 503(停止QRを署名できない手紙を刷らせない=fail-closed)", async () => {
+    delete process.env.NEXTAUTH_SECRET;
+    const res = await GET(req() as never, ctx);
+    expect(res.status).toBe(503);
   });
 
   it("追跡baseURL(SALE_DM_TRACKING_BASE_URL)未設定なら 503(郵送QRが相対パスで機能しないため fail-closed)", async () => {
