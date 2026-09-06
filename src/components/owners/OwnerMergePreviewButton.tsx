@@ -266,8 +266,12 @@ export function OwnerMergePreviewButton({
               result.eligible ? "text-green-800 dark:text-green-300" : "text-red-800 dark:text-red-300"
             }`}
           >
+            {/* ⚠「実行は未実装」と書かれていた名残に注意。execute は
+                Phase 2-B-β で実装済み（下に「統合を実行」ボタンが出る）。
+                機能側を直したのに文言だけ古いまま残ると、使えるのに
+                使われない状態になる（2026-09-06 修正）。 */}
             {result.eligible
-              ? "✓ 統合可能（実行は未実装）"
+              ? "✓ 統合可能"
               : "✗ 統合不可"}
           </p>
 
