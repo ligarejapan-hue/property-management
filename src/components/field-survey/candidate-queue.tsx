@@ -192,9 +192,12 @@ export default function CandidateQueue({
   const [rejectError, setRejectError] = useState<string | null>(null);
   // 物件詳細へ遷移できない権限構成で物件化した時の成功表示 (一覧に留まる)。
   const [convertedNotice, setConvertedNotice] = useState(false);
-  // 取得上限超過 (古い候補が data に含まれていない) の正確な通知は API の
-  // truncated フラグで受ける (件数一致だけではちょうど上限件数と区別できない)。
-  const [truncated, setTruncated] = useState(false);
+  // 「もっと見る」で渡す続きの位置。null = これ以上は無い。
+  // ⚠件数一致では「ちょうど上限件数」と「まだ続きがある」を区別できないため、
+  //   API が返すこの値だけを根拠にする (件数から推測しない)。
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [convertPinId, setConvertPinId] = useState<string | null>(null);
   // 経過日数の基準時刻。render 中の new Date() 連発を避け、読込ごとに固定する。
@@ -275,7 +278,9 @@ export default function CandidateQueue({
     // 切替の取得が失敗すると、トグルは新しい選択のまま一覧に反対側の
     // データが残って食い違う。クリアしておけば失敗時は空+エラー表示になる)。
     setRows(null);
-    setTruncated(false);
+    setNextCursor(null);
+    setLoadingMore(false);
+    setMoreError(null);
     setError(null);
     setShownPhotoIds(new Set());
     setBrokenThumbIds(new Set());
@@ -286,7 +291,7 @@ export default function CandidateQueue({
       const r = await listCandidatePins(order);
       if (generation !== loadGenerationRef.current) return;
       setRows(r.data);
-      setTruncated(r.truncated === true);
+      setNextCursor(r.nextCursor ?? null);
       setAgeBase(new Date());
     } catch {
       if (generation !== loadGenerationRef.current) return;
@@ -294,8 +299,45 @@ export default function CandidateQueue({
     }
   }, [order]);
 
+  /**
+   * 「もっと見る」= 続きを**下に足す**。
+   * ⚠load() と違い、表示中の行・開いた写真・取得済みの座標は消さない
+   *   (読み終えた分をやり直させない)。
+   * ⚠並び順の切替や再読込が走ったら generation が変わるので、遅れて届いた
+   *   続きは捨てる (別の並びの行が混ざらない)。
+   * ⚠同じカーソルで二重に足さないよう loadingMore で入口を閉じる。
+   */
+  const loadMore = useCallback(async () => {
+    if (loadingMore) return;
+    const cursor = nextCursor;
+    if (!cursor) return;
+    const generation = loadGenerationRef.current;
+    setLoadingMore(true);
+    setMoreError(null);
+    try {
+      const r = await listCandidatePins(order, cursor);
+      if (generation !== loadGenerationRef.current) return;
+      setRows((prev) => {
+        if (prev === null) return r.data;
+        // 二重表示の最後の砦。キーセット方式では原理的に重複しないが、
+        // ここが破れると同じ候補を2回物件化しかける。
+        const seen = new Set(prev.map((p) => p.id));
+        return [...prev, ...r.data.filter((p) => !seen.has(p.id))];
+      });
+      setNextCursor(r.nextCursor ?? null);
+    } catch {
+      if (generation !== loadGenerationRef.current) return;
+      setMoreError("続きを読み込めませんでした。もう一度お試しください。");
+    } finally {
+      if (generation === loadGenerationRef.current) setLoadingMore(false);
+    }
+  }, [loadingMore, nextCursor, order]);
+
+  // 一覧データ取得エフェクトの標準形（sales-sheets/new と同様）。
+  // ⚠以前ここに `react-hooks/set-state-in-effect` の disable を置いていたが、
+  //   loadMore の追加で lint の解析結果が変わり**不要な抑制**になった
+  //   (「未使用の disable」警告が出る)。抑制は必要になった時だけ書く。
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: 一覧データ取得エフェクトの標準形（sales-sheets/new と同様）。取得開始時に error をリセットする同期 setState。
     void load();
   }, [load]);
 
@@ -391,7 +433,7 @@ export default function CandidateQueue({
               className="rounded-full bg-emerald-50 dark:bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300"
             >
               {rows.length}
-              {truncated ? "件以上" : "件"}
+              {nextCursor !== null ? "件以上" : "件"}
             </span>
           ) : undefined
         }
@@ -444,18 +486,6 @@ export default function CandidateQueue({
         </div>
       )}
 
-      {rows !== null && truncated && (
-        <div
-          role="status"
-          data-testid="candidate-limit-warning"
-          className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
-        >
-          候補が{CANDIDATE_LIST_LIMIT}件を超えているため、
-          {order === "newest"
-            ? "これより古い候補は表示されていません。「古い順」に切り替えると、放置されている古い候補から確認できます。"
-            : "これより新しい候補は表示されていません(古い順で表示中)。古いものから物件化を進めて減らしてください。"}
-        </div>
-      )}
 
       {rows === null ? (
         // 取得失敗時は上のエラー表示のみ (スピナーを回し続けない)
@@ -677,6 +707,35 @@ export default function CandidateQueue({
             );
           })}
         </ul>
+      )}
+
+      {/* 続きの読み込み。⚠出すかどうかは API の nextCursor だけで決める
+          (件数からの推測にすると、ちょうど上限件数のときに出ない/出続ける)。 */}
+      {rows !== null && rows.length > 0 && nextCursor !== null && (
+        <div className="mt-4 flex flex-col items-center gap-2">
+          <button
+            type="button"
+            data-testid="candidate-load-more"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+            className="inline-flex min-h-[44px] items-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+          >
+            {loadingMore && <Loader2 className="h-4 w-4 animate-spin" />}
+            {loadingMore ? "読み込み中…" : "もっと見る"}
+          </button>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            さらに候補があります（{CANDIDATE_LIST_LIMIT}件ずつ表示）
+          </p>
+          {moreError && (
+            <p
+              role="status"
+              data-testid="candidate-load-more-error"
+              className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300"
+            >
+              {moreError}
+            </p>
+          )}
+        </div>
       )}
 
       {convertPinId && (
