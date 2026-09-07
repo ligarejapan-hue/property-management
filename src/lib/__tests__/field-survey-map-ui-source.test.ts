@@ -447,14 +447,12 @@ describe("レイヤー OFF で吹き出しを浮遊させない（総点検P3）
     );
   });
 
+  // ⚠ピンの吹き出しは第2弾C2(タップで直接詳細)で**廃止**した。旧仕様
+  //   「吹き出しは layers.pins が ON のときだけ描く」を確かめる it.skip が
+  //   ここに残っていたが、真下の it が「吹き出しが存在しないこと」を既に
+  //   固定しており、復活させると必ず落ちる**死んだテスト**だった(2026-09-07 削除)。
   it("ピンの吹き出しは存在しない(第2弾C2: タップで直接詳細)", () => {
     expect(MAP_SRC).not.toContain('selected.kind === "pin"');
     expect(MAP_SRC).toContain("onOpenPinDetail(pin.id)");
-  });
-
-  it.skip("(旧仕様)ピンの吹き出しは layers.pins が ON のときだけ描く", () => {
-    expect(MAP_SRC).toMatch(
-      /selected &&\s*\n\s*!captureMapClick &&\s*\n\s*layers\.pins &&\s*\n\s*selected\.kind === "pin"/,
-    );
   });
 });
