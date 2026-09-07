@@ -3206,18 +3206,27 @@ export interface CandidatePinRow {
  */
 export async function listCandidatePins(
   order: "newest" | "oldest" = "newest",
+  /** 続きの位置 (前回応答の nextCursor)。未指定なら先頭から。 */
+  after?: string | null,
 ): Promise<{
   data: CandidatePinRow[];
-  /** 取得上限を超える候補があり、反対側の並びが data に含まれていない場合 true。 */
+  /** まだ続きがある場合 true (= nextCursor が入る)。 */
   truncated?: boolean;
+  /** 次の「もっと見る」に渡す位置。続きが無ければ null。 */
+  nextCursor?: string | null;
 }> {
   if (USE_MOCK) {
     await mockDelay();
-    return { data: [], truncated: false };
+    return { data: [], truncated: false, nextCursor: null };
   }
-  return apiFetch<{ data: CandidatePinRow[]; truncated?: boolean }>(
-    `/api/field-survey/pins/candidates?order=${order}`,
-  );
+  // ⚠カーソルは日時+IDの合成文字列。必ず URL エンコードして渡す。
+  const qs = new URLSearchParams({ order });
+  if (after) qs.set("after", after);
+  return apiFetch<{
+    data: CandidatePinRow[];
+    truncated?: boolean;
+    nextCursor?: string | null;
+  }>(`/api/field-survey/pins/candidates?${qs.toString()}`);
 }
 
 // ---------- Audit Logs ----------

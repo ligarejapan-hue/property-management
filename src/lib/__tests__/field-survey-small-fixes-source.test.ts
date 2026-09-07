@@ -152,10 +152,14 @@ describe("3. 物件化成功後の遷移", () => {
 });
 
 describe("4. 完成待ち一覧の放置可視化", () => {
-  it("件数バッジ・経過日数・上限警告の表示要素がある", () => {
+  it("件数バッジ・経過日数・「もっと見る」の表示要素がある", () => {
     expect(QUEUE_SRC).toMatch(/data-testid="candidate-count"/);
     expect(QUEUE_SRC).toMatch(/data-testid="candidate-age"/);
-    expect(QUEUE_SRC).toMatch(/data-testid="candidate-limit-warning"/);
+    // ⚠上限警告(candidate-limit-warning)はページ送りの導入で役目を終えた。
+    //   「続きが見られない」お断りから「続きを見る」導線に置き換わっている。
+    //   警告だけ残すと、押せば見られるのに「見られません」と嘘をつく。
+    expect(QUEUE_SRC).toMatch(/data-testid="candidate-load-more"/);
+    expect(QUEUE_SRC).not.toMatch(/candidate-limit-warning/);
   });
 
   it("経過日数は純関数 describeCandidateAge 経由 (stale で強調)", () => {
@@ -184,8 +188,11 @@ describe("4. 完成待ち一覧の放置可視化", () => {
     );
   });
 
-  it("件数バッジは切り捨て時に「以上」を付ける (警告と矛盾しない)", () => {
-    expect(QUEUE_SRC).toMatch(/truncated \? "件以上" : "件"/);
+  it("件数バッジは続きがあるとき「以上」を付ける (もっと見ると矛盾しない)", () => {
+    // ⚠根拠は API の nextCursor だけ。件数から推測すると「ちょうど上限件数」で
+    //   出ない/出続けるの誤表示になる。
+    expect(QUEUE_SRC).toMatch(/nextCursor !== null \? "件以上" : "件"/);
+    expect(QUEUE_SRC).not.toMatch(/rows\.length >= CANDIDATE_LIST_LIMIT/);
   });
 
   it("進入時に権限を再取得し、完了まで判定を保留する (stale 権限で遷移しない)", () => {
@@ -207,8 +214,9 @@ describe("4. 完成待ち一覧の放置可視化", () => {
   it("並び順切替で古い候補へ到達できる (上限超過時の案内と矛盾しない)", () => {
     // Codex P2: 新しい順 200 件のみだと「古いものから処理して」と案内しつつ
     // 古い候補が開けない。allowlist の order パラメータ (newest/oldest) を追加。
+    // 並び順は allowlist (oldest 以外は newest に倒す)。変数名には縛られない形で固定。
     expect(CANDIDATES_ROUTE_SRC).toMatch(
-      /searchParams\.get\("order"\)\s*===\s*"oldest"/,
+      /\.get\("order"\)\s*===\s*"oldest"/,
     );
     expect(CANDIDATES_ROUTE_SRC).toMatch(/\{ createdAt: order \}/);
     expect(QUEUE_SRC).toMatch(/candidate-order-\$\{value\}/);
@@ -230,30 +238,72 @@ describe("4. 完成待ち一覧の放置可視化", () => {
     // 取得前に一覧をクリア (失敗時に反対側のデータが残って
     // トグル表示と食い違うのを防ぐ。Codex P2)
     expect(loadFn?.[0] ?? "").toMatch(
-      /setRows\(null\);[\s\S]{0,40}setTruncated\(false\)/,
+      /setRows\(null\);[\s\S]{0,60}setNextCursor\(null\)/,
     );
     // 失敗時はスピナーを回し続けない (エラー表示のみ)
     expect(QUEUE_SRC).toMatch(/error \? null : \(/);
-    // 警告文は並び順に応じて「どちら側が隠れているか」を正しく伝える
-    expect(QUEUE_SRC).toMatch(/「古い順」に切り替える/);
-    expect(QUEUE_SRC).toMatch(/古い順で表示中/);
+    // ⚠並び順を変えたら**先頭から**読み直す。続きの位置(カーソル)は反対側の
+    //   並びでは意味が違うため、持ち越すと行が飛ぶ/重複する。
+    expect(loadFn?.[0] ?? "").toMatch(/setNextCursor\(null\)/);
+    // 「もっと見る」は必ず現在の並び順で続きを取る (order を渡す)
+    expect(QUEUE_SRC).toMatch(/listCandidatePins\(order, cursor\)/);
   });
 
-  it("上限警告は truncated フラグ基準 (ちょうど上限件数では誤警告しない)", () => {
-    // Codex P2: 件数一致 (length >= LIMIT) では 200 件ちょうどと 201 件以上を
-    // 区別できない。route が 1 件余分に取得して truncated を返し、UI はそれを見る。
+  it("続きの有無は nextCursor 基準 (ちょうど上限件数で誤表示しない)", () => {
+    // Codex P2 の元の要件は不変: 件数一致 (length >= LIMIT) では 200 件ちょうどと
+    // 201 件以上を区別できない。route が 1 件余分に取得して判定する。
     expect(CANDIDATES_ROUTE_SRC).toMatch(/take:\s*MAX \+ 1/);
     expect(CANDIDATES_ROUTE_SRC).toMatch(/truncated\s*=\s*rows\.length > MAX/);
-    expect(CANDIDATES_ROUTE_SRC).toMatch(/apiResponse\(\{ data, truncated \}\)/);
-    expect(QUEUE_SRC).toMatch(/truncated && \(/);
+    expect(CANDIDATES_ROUTE_SRC).toMatch(/apiResponse\(\{ data, truncated, nextCursor \}\)/);
+    // ⚠カーソルは**返した最後の行**から作る。切り捨てた MAX+1 件目から作ると
+    //   その行が次のページで飛ぶ。
+    expect(CANDIDATES_ROUTE_SRC).toMatch(/const last = limited\[limited\.length - 1\]/);
+    expect(QUEUE_SRC).toMatch(/nextCursor !== null && \(/);
     expect(QUEUE_SRC).not.toMatch(/rows\.length >= CANDIDATE_LIST_LIMIT/);
   });
 
-  it("警告・強調はダークモード配色を持つ", () => {
-    const warning = QUEUE_SRC.match(
-      /data-testid="candidate-limit-warning"[\s\S]{0,300}/,
+  it("ページ送りは件数ではなく行そのものを基準にする (途中で行が消えても飛ばない)", () => {
+    // ⚠skip/offset を使うと、読んでいる間に物件化/却下で行が消えた分だけ
+    //   後続が繰り上がり、次のページで行が飛ぶ。取りこぼし防止の画面で
+    //   取りこぼしを作るため、キーセット方式のみ許す。
+    expect(CANDIDATES_ROUTE_SRC).toMatch(/candidateKeysetWhere/);
+    expect(CANDIDATES_ROUTE_SRC).not.toMatch(/\bskip:/);
+    // 並びとカーソルは同じ2段 (createdAt, id)。片方だけ変えると同時刻の行が壊れる
+    expect(CANDIDATES_ROUTE_SRC).toMatch(
+      /orderBy: \[\{ createdAt: order \}, \{ id: order \}\]/,
     );
-    expect(warning?.[0] ?? "").toMatch(/dark:/);
+    // 壊れたカーソルは黙って先頭へ倒さず 400 (終わらない一覧を作らない)
+    expect(CANDIDATES_ROUTE_SRC).toMatch(/rawAfter !== null && cursor === null/);
+    expect(CANDIDATES_ROUTE_SRC).toMatch(/400,/);
+  });
+
+  it("「もっと見る」は表示中の行を消さずに足す (読み終えた分をやり直させない)", () => {
+    const moreFn = QUEUE_SRC.match(
+      /const loadMore = useCallback\([\s\S]*?\}, \[loadingMore, nextCursor, order\]\);/,
+    );
+    expect(moreFn).not.toBeNull();
+    const src = moreFn?.[0] ?? "";
+    // 追記であって置換ではない
+    expect(src).toMatch(/\[\.\.\.prev, \.\.\.r\.data\.filter/);
+    // 表示中の写真・座標をリセットしない (load() との違い)
+    expect(src).not.toMatch(/setShownPhotoIds/);
+    expect(src).not.toMatch(/setPlaceCoords/);
+    // 二重押し・遅延応答の混入を止める
+    expect(src).toMatch(/if \(loadingMore\) return;/);
+    expect(src).toMatch(/generation !== loadGenerationRef\.current/);
+    // 同じ候補を2回出さない最後の砦
+    expect(src).toMatch(/const seen = new Set\(prev\.map/);
+  });
+
+  it("読み込み中・失敗表示はダークモード配色を持つ", () => {
+    const more = QUEUE_SRC.match(
+      /data-testid="candidate-load-more"[\s\S]{0,600}/,
+    );
+    expect(more?.[0] ?? "").toMatch(/dark:/);
+    const err = QUEUE_SRC.match(
+      /data-testid="candidate-load-more-error"[\s\S]{0,300}/,
+    );
+    expect(err?.[0] ?? "").toMatch(/dark:/);
   });
 });
 
