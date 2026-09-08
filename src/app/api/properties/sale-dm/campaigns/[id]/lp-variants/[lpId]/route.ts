@@ -15,7 +15,7 @@ const OPTION_KEYS = ["tone", "length", "appeal", "strength"] as const;
  * 送付済みの宛先が1件でもあれば label を含め一切変更不可(DM型と同じ・ラベルは A/B集計・送付履歴に
  * 載るため)。送付済みが無く確定のみの凍結(列 OR 配下に確定)中は文体を変えられない、label だけは通る。
  * LP は印刷物ではないので、DM型の PATCH と違い確定の解除はしない(刷り上がりが変わらない)。
- * ロック順序: dm_lp_variants のみ(dm_variants は触らない)。
+ * ロック順序: dm_lp_variants → properties(dm_variants は触らない)。
  */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string; lpId: string }> }) {
   try {
@@ -66,6 +66,37 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
             "送付実績のあるLP型の文面の設定(トーン・長さ・訴求・押しの強さ)は変更できません。文面を変えるときは新しいLP型を追加してください",
             "VARIANT_LOCKED",
           );
+        }
+        // ⚠field_staff の担当範囲を、**設定を変える前に**確かめる(@codex R2 P1・DM型の
+        //   variants/[variantId] PATCH と同じ形)。この型の文章は担当外(再割当で隠れた)の
+        //   宛先のLPにも表示されるので、設定変更で原文・切り分け結果を消すと、自分に見えない
+        //   宛先の表示まで白紙にしてしまう。1件でも担当外が居れば拒否する(label だけ＝何も
+        //   消えない場合はここを通さない)。
+        // ⚠判定は**物件親行をロックしてから**数える(数えた直後〜commit の間に担当が
+        //   変わるのを防ぐ)。ロック順序は dm_lp_variants(:28 で取得済み)→ properties。
+        if (session.role === "field_staff") {
+          // 送付済みは上の sentCount>0 で既に 409 なので、ここに残るのは未送付だけ。
+          const targets = await tx.dmRecipientDraft.findMany({
+            where: { campaignId: id, lpVariantId: lpId, status: { not: "sent" } },
+            select: { propertyId: true },
+          });
+          const propertyIds = [...new Set(targets.map((t) => t.propertyId))].sort();
+          if (propertyIds.length > 0) {
+            await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${propertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
+            const outOfScope = await tx.dmRecipientDraft.count({
+              where: {
+                campaignId: id,
+                lpVariantId: lpId,
+                status: { not: "sent" },
+                // 「担当外」= 可視条件(createdBy==me OR assignedTo==me)の否定。assignedTo が NULL の
+                // 未割当物件も担当外として数えるため、`{not}` の AND ではなく NOT(OR) を使う。
+                property: { NOT: { OR: [{ createdBy: session.id }, { assignedTo: session.id }] } },
+              },
+            });
+            if (outOfScope > 0) {
+              throw new ApiError(403, "担当外の宛先を含むLP型は設定を変更できません", "FORBIDDEN");
+            }
+          }
         }
         // 古いプロンプトで作った文章を新しい設定の型として使えないよう、原文・切り分け結果・控えを消す。
         data.promptText = null;

@@ -19,7 +19,7 @@ vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     dmCampaign: { findFirst: vi.fn(), findUnique: vi.fn() },
     dmLpVariant: { findMany: vi.fn(async () => []), findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
-    dmRecipientDraft: { count: vi.fn(async () => 0) },
+    dmRecipientDraft: { count: vi.fn(async () => 0), findMany: vi.fn(async () => []) },
     $queryRaw: vi.fn(async () => []),
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
@@ -37,7 +37,7 @@ type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
   dmCampaign: { findFirst: Fn; findUnique: Fn };
   dmLpVariant: { findMany: Fn; findFirst: Fn; create: Fn; update: Fn; deleteMany: Fn };
-  dmRecipientDraft: { count: Fn };
+  dmRecipientDraft: { count: Fn; findMany: Fn };
   $queryRaw: Fn;
 };
 const READS = ["property", "csv_export", "csv_export_personal", "owner"];
@@ -64,6 +64,7 @@ beforeEach(() => {
   pm.dmLpVariant.update.mockResolvedValue({ id: "l1", label: "A" });
   pm.dmLpVariant.deleteMany.mockResolvedValue({ count: 1 });
   pm.dmRecipientDraft.count.mockResolvedValue(0);
+  pm.dmRecipientDraft.findMany.mockResolvedValue([]);
 });
 
 describe("GET/POST lp-variants", () => {
@@ -116,6 +117,37 @@ describe("PATCH lp-variants/[lpId]", () => {
   it("dm_lp_variants 行を FOR UPDATE でロックしてから判定する", async () => {
     await PATCH(req("PATCH", { options: { tone: "soft" } }), ctxLp);
     expect(sqlCalls().join("\n")).toMatch(/FROM dm_lp_variants[\s\S]*FOR UPDATE/);
+  });
+  it("field_staff は担当外の宛先が居ると文体を変えられない(403・何も消さない)", async () => {
+    // 設定変更はこの型の原文・切り分け結果を消す=担当外(再割当で隠れた)宛先のLP表示まで白紙にする。
+    // ⚠count は3回(sentCount / settledCount / 担当外の件数)呼ばれるが、`Once` の並びで組むと
+    //   実装が1回呼ばなくなっただけで余りが次のテストへ漏れる。where の形で答えを決める。
+    (getApiSession as Fn).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.count.mockImplementation(async (args: { where?: { property?: unknown } }) =>
+      args?.where?.property ? 1 : 0,
+    );
+    pm.dmRecipientDraft.findMany.mockResolvedValue([{ propertyId: "p-hidden" }]);
+    const res = await PATCH(req("PATCH", { options: { tone: "soft" } }), ctxLp);
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("FORBIDDEN");
+    expect(pm.dmLpVariant.update).not.toHaveBeenCalled();
+    // 担当外の判定は NOT(OR) で行う(assignedTo が NULL の未割当物件も担当外として数える)。
+    expect(pm.dmRecipientDraft.count.mock.calls[2][0].where.property).toEqual({
+      NOT: { OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] },
+    });
+    // 物件親行のロックは dm_lp_variants の後(ロック順序)。
+    const sql = sqlCalls();
+    expect(sql[0]).toMatch(/dm_lp_variants/);
+    expect(sql[1]).toMatch(/FROM properties[\s\S]*FOR UPDATE/);
+  });
+  it("field_staff でも label だけなら物件親行を掴まずに 200(何も消えないため)", async () => {
+    (getApiSession as Fn).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.findMany.mockResolvedValue([{ propertyId: "p-hidden" }]);
+    const res = await PATCH(req("PATCH", { label: "B" }), ctxLp);
+    expect(res.status).toBe(200);
+    expect(pm.dmRecipientDraft.findMany).not.toHaveBeenCalled();
+    expect(sqlCalls().join("\n")).not.toMatch(/FROM properties/);
+    expect(pm.dmLpVariant.update.mock.calls[0][0].data).toEqual({ label: "B" });
   });
   it("存在しない LP型は 404", async () => {
     pm.dmLpVariant.findFirst.mockResolvedValue(null);
