@@ -18,6 +18,8 @@ vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     dmCampaign: { findFirst: vi.fn() },
     dmVariant: { findMany: vi.fn(), updateMany: vi.fn(async () => ({ count: 0 })) },
+    // LP型は0件(既存キャンペーンの挙動不変・両軸化は sale-dm-assign-cross-route.test.ts で検証)。
+    dmLpVariant: { findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({ count: 0 })) },
     dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn() },
     // 割当は updateMany の前に型行をロックする(PR-D1・デッドロック回避)。
     $queryRaw: vi.fn(async () => []),

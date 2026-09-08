@@ -5,7 +5,7 @@ import { handleApiError, parseJsonBody, ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess } from "@/lib/sale-dm-letter/route-guard";
 import { validateLetterBody } from "@/lib/sale-dm-letter/body-validation";
-import { markVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
+import { markVariantsFrozen, markLpVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
 import { lockOwnersForShare } from "@/lib/dm-batch/locks";
 import {
   findTerminalExclusions,
@@ -56,6 +56,7 @@ export async function POST(request: NextRequest) {
           id: true,
           body: true,
           variantId: true,
+          lpVariantId: true,
           propertyId: true,
           recipientZip: true,
           recipientAddress: true,
@@ -82,6 +83,11 @@ export async function POST(request: NextRequest) {
       const variantIds = [...new Set(pre.map((d) => d.variantId))].sort();
       if (variantIds.length > 0) {
         await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ANY(${variantIds}::uuid[]) ORDER BY id FOR UPDATE`;
+      }
+      // ロック順序(設計 2026-09-08): dm_variants → dm_lp_variants。
+      const lpVariantIds = [...new Set(pre.map((d) => d.lpVariantId).filter((x): x is string => !!x))].sort();
+      if (lpVariantIds.length > 0) {
+        await tx.$queryRaw`SELECT id FROM dm_lp_variants WHERE id = ANY(${lpVariantIds}::uuid[]) ORDER BY id FOR UPDATE`;
       }
 
       // 物件親行を**全ロールで**先にロックする(@codex #384 R3 P1)。所有者なしの
@@ -164,6 +170,7 @@ export async function POST(request: NextRequest) {
           id: true,
           body: true,
           variantId: true,
+          lpVariantId: true,
           propertyId: true,
           recipientZip: true,
           recipientAddress: true,
@@ -237,6 +244,7 @@ export async function POST(request: NextRequest) {
       // ⚠確定を作る前に、その型へ凍結印を立てる（設計 §2.4）。確定の証拠は割当や
       //   個別編集で型から離れる／解除されるので、消える前に列へ固定する。
       await markVariantsFrozen(tx, drafts.map((d) => d.variantId));
+      await markLpVariantsFrozen(tx, drafts.map((d) => d.lpVariantId));
 
       const result = await tx.dmRecipientDraft.updateMany({
         where: { ...where, id: { in: drafts.map((d) => d.id) } },

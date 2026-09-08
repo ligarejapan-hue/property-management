@@ -3,9 +3,9 @@ import prisma from "@/lib/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess, assertSaleDmCampaignOwned, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
-import { markVariantsFrozen, SETTLED_DRAFT_STATUSES } from "@/lib/sale-dm-letter/freeze";
+import { markVariantsFrozen, markLpVariantsFrozen, SETTLED_DRAFT_STATUSES } from "@/lib/sale-dm-letter/freeze";
 import { saleDmAssignSchema } from "@/lib/validators-sale-dm";
-import { assignVariantsEvenly, applyManualAssignment } from "@/lib/sale-dm-letter/assign";
+import { assignCrossEvenly, applyManualAssignment } from "@/lib/sale-dm-letter/assign";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -14,9 +14,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     await assertSaleDmCampaignOwned(id, session.id); // 作成者本人のキャンペーンのみ割当可。
     const body = saleDmAssignSchema.parse(await parseJsonBody(request));
 
-    const [variants, recipients] = await Promise.all([
+    const [variants, lpVariants, recipients] = await Promise.all([
       prisma.dmVariant.findMany({ where: { campaignId: id }, select: { id: true }, orderBy: { label: "asc" } }),
-      // 送付済み(sent)は A/B バケットを再割当しない(送付済みの配達/反響結果が別型へ移るのを防ぐ)。
+      prisma.dmLpVariant.findMany({ where: { campaignId: id }, select: { id: true }, orderBy: { label: "asc" } }),
       prisma.dmRecipientDraft.findMany({ where: { campaignId: id, status: { not: "sent" } }, select: { id: true, property: { select: { createdBy: true, assignedTo: true } } }, orderBy: { id: "asc" } }),
     ]);
 
@@ -25,25 +25,42 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const variantIds = variants.map((v) => v.id);
+    const lpVariantIds = lpVariants.map((v) => v.id);
     // field_staff は現在の物件 record scope の宛先のみ割当対象にする(担当外物件の本文を
     // 勝手にクリア/再割当しない・GET campaign / print / export と統一)。
     const recipientIds = filterDraftsByFieldStaffScope(recipients, session).map((r) => r.id);
 
-    const assignment =
-      body.mode === "manual"
-        ? applyManualAssignment(recipientIds, variantIds, body.assignments ?? [])
-        : assignVariantsEvenly(recipientIds, variantIds, { order: body.order ?? "sequential" });
+    // DM軸の割当(既存の形)。LP軸は別 Map に分ける(LP は本文に影響しないので本文を消さない)。
+    const dmAssignment = new Map<string, string>();
+    const lpAssignment = new Map<string, string>();
+    if (body.mode === "manual") {
+      for (const [rid, vid] of applyManualAssignment(recipientIds, variantIds, body.assignments ?? [])) dmAssignment.set(rid, vid);
+      const lpManual = (body.lpAssignments ?? []).map((a) => ({ recipientId: a.recipientId, variantId: a.lpVariantId }));
+      for (const [rid, lid] of applyManualAssignment(recipientIds, lpVariantIds, lpManual)) lpAssignment.set(rid, lid);
+    } else {
+      for (const [rid, a] of assignCrossEvenly(recipientIds, variantIds, lpVariantIds, { order: body.order ?? "sequential" })) {
+        dmAssignment.set(rid, a.variantId);
+        if (a.lpVariantId) lpAssignment.set(rid, a.lpVariantId);
+      }
+    }
 
-    // variantId ごとに recipient id をまとめ、型ごとに 1 回の updateMany で反映(N+1 回避)。
     const byVariant = new Map<string, string[]>();
-    for (const [recipientId, variantId] of assignment) {
+    for (const [recipientId, variantId] of dmAssignment) {
       const bucket = byVariant.get(variantId);
       if (bucket) bucket.push(recipientId);
       else byVariant.set(variantId, [recipientId]);
     }
+    const byLpVariant = new Map<string, string[]>();
+    for (const [recipientId, lpVariantId] of lpAssignment) {
+      const bucket = byLpVariant.get(lpVariantId);
+      if (bucket) bucket.push(recipientId);
+      else byLpVariant.set(lpVariantId, [recipientId]);
+    }
 
     let assigned = 0;
+    let assignedLp = 0;
     const perVariant: Record<string, number> = {};
+    const perLpVariant: Record<string, number> = {};
     // 型ごとの updateMany を1トランザクションにまとめる。途中失敗(例: 対象 variant が並行削除されFK違反)で
     // 一部の宛先だけ本文がクリアされる部分破壊(=一部だけ要再生成の半端な状態)を防ぐ(all-or-nothing)。
     await prisma.$transaction(async (tx) => {
@@ -59,19 +76,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       //   markVariantsFrozen は「その型をロック済みであること」が前提なので、漏れた型へ
       //   印を立てると取得順の保証が崩れる（型の取り方が違う処理どうしが互い違いに待つ）。
       //   移動する下書きの移動元は、状態に関わらず**全部**掴む（型はキャンペーン内で数個）。
-      const allIds = [...byVariant.values()].flat();
+      const allIds = [...new Set([...[...byVariant.values()].flat(), ...[...byLpVariant.values()].flat()])];
       const sourcesPre = await tx.dmRecipientDraft.findMany({
         where: { id: { in: allIds }, campaignId: id },
-        select: { variantId: true },
+        select: { variantId: true, lpVariantId: true },
       });
-      const lockVariantIds = [
-        ...new Set([
-          ...byVariant.keys(),
-          ...sourcesPre.map((d) => d.variantId),
-        ]),
-      ].sort();
+      const lockVariantIds = [...new Set([...byVariant.keys(), ...sourcesPre.map((d) => d.variantId)])].sort();
       if (lockVariantIds.length > 0) {
         await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ANY(${lockVariantIds}::uuid[]) AND campaign_id = ${id}::uuid ORDER BY id FOR UPDATE`;
+      }
+      // ロック順序(設計 2026-09-08): dm_variants → dm_lp_variants。移動元・移動先の両方を id 順に。
+      const lockLpIds = [...new Set([...byLpVariant.keys(), ...sourcesPre.map((d) => d.lpVariantId).filter((x): x is string => !!x)])].sort();
+      if (lockLpIds.length > 0) {
+        await tx.$queryRaw`SELECT id FROM dm_lp_variants WHERE id = ANY(${lockLpIds}::uuid[]) AND campaign_id = ${id}::uuid ORDER BY id FOR UPDATE`;
       }
 
       // ⚠確定済み/送付済みの下書きを別の型へ移すと、移動元の型から「確定があった」
@@ -83,9 +100,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           campaignId: id,
           status: { in: [...SETTLED_DRAFT_STATUSES] },
         },
-        select: { variantId: true },
+        select: { variantId: true, lpVariantId: true },
       });
       await markVariantsFrozen(tx, movingSettled.map((d) => d.variantId));
+      await markLpVariantsFrozen(tx, movingSettled.map((d) => d.lpVariantId));
       for (const [variantId, ids] of byVariant) {
         if (ids.length === 0) continue;
         const result = await tx.dmRecipientDraft.updateMany({
@@ -100,16 +118,26 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         assigned += result.count;
         perVariant[variantId] = result.count;
       }
+      for (const [lpVariantId, ids] of byLpVariant) {
+        if (ids.length === 0) continue;
+        // LP型は本文に影響しない(表示のたびに展開)ので、本文・状態は触らない。
+        const result = await tx.dmRecipientDraft.updateMany({
+          where: { id: { in: ids }, campaignId: id, status: { not: "sent" }, NOT: { lpVariantId } },
+          data: { lpVariantId },
+        });
+        assignedLp += result.count;
+        perLpVariant[lpVariantId] = result.count;
+      }
     });
 
     await writeAuditLog({
       userId: session.id,
       action: "sale_dm_assign_variants",
       targetTable: "dm_recipient_drafts",
-      detail: { campaignId: id, mode: body.mode, order: body.order ?? null, assigned, perVariant, assignedAt: new Date().toISOString() },
+      detail: { campaignId: id, mode: body.mode, order: body.order ?? null, assigned, assignedLp, perVariant, assignedAt: new Date().toISOString() },
     });
 
-    return NextResponse.json({ assigned, perVariant }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ assigned, perVariant, assignedLp, perLpVariant }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return handleApiError(error);
   }

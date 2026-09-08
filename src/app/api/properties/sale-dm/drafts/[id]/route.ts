@@ -5,7 +5,7 @@ import { Prisma } from "@/generated/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess } from "@/lib/sale-dm-letter/route-guard";
-import { markVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
+import { markVariantsFrozen, markLpVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
 import { saleDmOptionsOverrideSchema } from "@/lib/validators-sale-dm";
 import {
   letterBodyIssueMessage,
@@ -37,6 +37,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         campaignId: true,
         status: true,
         variantId: true,
+        lpVariantId: true,
         campaign: { select: { createdBy: true } },
         property: { select: { createdBy: true, assignedTo: true } },
       },
@@ -109,7 +110,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (resetsConfirmation && draft.status === "confirmed") {
       await prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ${draft.variantId}::uuid FOR UPDATE`;
+        if (draft.lpVariantId) {
+          await tx.$queryRaw`SELECT id FROM dm_lp_variants WHERE id = ${draft.lpVariantId}::uuid FOR UPDATE`;
+        }
         await markVariantsFrozen(tx, [draft.variantId]);
+        await markLpVariantsFrozen(tx, [draft.lpVariantId]);
       });
     }
 
