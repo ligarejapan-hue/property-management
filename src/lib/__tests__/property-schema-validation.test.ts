@@ -7,7 +7,7 @@ const base = { propertyType: "land", address: "東京都〇〇区1-2-3" };
 describe("createPropertySchema: 物件の入力バリデーション(A2)", () => {
   it("正常値・空・未指定は通る(任意項目・既存編集を壊さない)", () => {
     expect(() => createPropertySchema.parse(base)).not.toThrow();
-    expect(() => createPropertySchema.parse({ ...base, postalCode: "1000001", realEstateNumber: "1234567890123", gpsLat: 35.68, gpsLng: 139.76 })).not.toThrow();
+    expect(() => createPropertySchema.parse({ ...base, postalCode: "1000001", gpsLat: 35.68, gpsLng: 139.76 })).not.toThrow();
     expect(() => createPropertySchema.parse({ ...base, postalCode: "100-0001" })).not.toThrow();
     expect(() => createPropertySchema.parse({ ...base, postalCode: "", realEstateNumber: "" })).not.toThrow();
     expect(() => createPropertySchema.parse({ ...base, postalCode: null, gpsLat: null })).not.toThrow();
@@ -16,7 +16,6 @@ describe("createPropertySchema: 物件の入力バリデーション(A2)", () =>
   it("全角・スペース入りの郵便番号/不動産番号は正規化して通す(import・住所補完と一貫・@codex R1)", () => {
     expect(() => createPropertySchema.parse({ ...base, postalCode: "１００−０００１" })).not.toThrow();
     expect(() => createPropertySchema.parse({ ...base, postalCode: "100 0001" })).not.toThrow();
-    expect(() => createPropertySchema.parse({ ...base, realEstateNumber: "１２３" })).not.toThrow();
   });
 
   it("不正な郵便番号を弾く", () => {
@@ -24,11 +23,20 @@ describe("createPropertySchema: 物件の入力バリデーション(A2)", () =>
     expect(() => createPropertySchema.parse({ ...base, postalCode: "123" })).toThrow();
   });
 
-  it("数字以外・数字混在の不動産番号を弾く(@codex R1/R2)", () => {
+  it("⚠不動産番号は**どんな値でも**弾く。空にすることだけ許す(@codex #420 P2)", () => {
+    // 2026-09-08 発注者判断=番号は今後も作らない。番号が入った物件は所在検索の
+    // 対象外になり、番号での取得は実サイトへ未配線=**謄本が取れない行き止まり**。
+    // ⚠画面から欄を消すだけでは、反映前に開いたままのタブ・直接 API を叩く
+    //   クライアントが素通りする。サーバーでも断る。
+    expect(() => createPropertySchema.parse({ ...base, realEstateNumber: "1234567890123" })).toThrow(); // 正しい13桁でも弾く
+    expect(() => createPropertySchema.parse({ ...base, realEstateNumber: "１２３" })).toThrow();
     expect(() => createPropertySchema.parse({ ...base, realEstateNumber: "あいうえお!!" })).toThrow();
-    expect(() => createPropertySchema.parse({ ...base, realEstateNumber: "12345678901234" })).toThrow(); // 14桁は超過
-    expect(() => createPropertySchema.parse({ ...base, realEstateNumber: "abc123" })).toThrow(); // 英字混在(正規化で数字だけ残る誤検知を防ぐ)
-    expect(() => createPropertySchema.parse({ ...base, realEstateNumber: "12あ34" })).toThrow(); // かな混在
+    // ⚠**消す**操作は通す(編集画面の「空にする」が null を送る)
+    expect(() => createPropertySchema.parse({ ...base, realEstateNumber: null })).not.toThrow();
+    expect(() => createPropertySchema.parse({ ...base, realEstateNumber: "" })).not.toThrow();
+    expect(() => createPropertySchema.parse({ ...base, realEstateNumber: "   " })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ version: 1, realEstateNumber: null })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ version: 1, realEstateNumber: "1234567890123" })).toThrow();
   });
 
   it("範囲外の緯度・経度を弾く", () => {
