@@ -107,20 +107,50 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     //   どちらも「その型に確定があった」証拠を消すので、消える前に列へ固定する。
     const resetsConfirmation =
       data.status === "draft" || parsed.variantId !== undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updateData = data as any;
+    let updatedCount: number;
     if (resetsConfirmation && draft.status === "confirmed") {
-      await prisma.$transaction(async (tx) => {
+      // ⚠**凍結印と確定の解除を1つの tx にまとめる**(@codex R3 P2)。分けると、印を立てる tx と
+      //   下の updateMany の間に /assign が「まだ確定のままの」この下書きを別の型へ移せてしまう
+      //   (例: LP L1→L2)。その場合、印は先読みした古い L1 にしか立たず、そのあと解除で
+      //   **L2 の「確定があった」最後の証拠が消える**＝L2 の文面を差し替え放題になる。
+      //   ロックの下で型の割当を読み直し、先読みと違っていたら 409 でやり直してもらう。
+      //   ロック順序（設計 §2.3/§2.8）: dm_variants → dm_lp_variants → dm_recipient_drafts。
+      updatedCount = await prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ${draft.variantId}::uuid FOR UPDATE`;
         if (draft.lpVariantId) {
           await tx.$queryRaw`SELECT id FROM dm_lp_variants WHERE id = ${draft.lpVariantId}::uuid FOR UPDATE`;
         }
+        // 読み直しは素の select（ロックではない）。ロック済みの型の下でこの下書きの割当を確かめる。
+        const current = await tx.dmRecipientDraft.findUnique({
+          where: { id },
+          select: { variantId: true, lpVariantId: true, status: true },
+        });
+        if (
+          !current ||
+          current.variantId !== draft.variantId ||
+          (current.lpVariantId ?? null) !== (draft.lpVariantId ?? null)
+        ) {
+          throw new ApiError(
+            409,
+            "編集の途中で型の割当が変わりました。画面を更新してからやり直してください",
+            "VARIANT_CHANGED",
+          );
+        }
         await markVariantsFrozen(tx, [draft.variantId]);
         await markLpVariantsFrozen(tx, [draft.lpVariantId]);
+        // 並行で sent になっていれば 0 行＝下の ALREADY_SENT（印は残す＝送付済みの型は凍結が正）。
+        const r = await tx.dmRecipientDraft.updateMany({ where: { id, status: { not: "sent" } }, data: updateData });
+        return r.count;
       });
+    } else {
+      // 確定を消さない編集（override だけ・draft のままの本文編集など）は凍結印が要らないので、
+      // これまでどおり単発の条件付き updateMany で済ませる。
+      const result = await prisma.dmRecipientDraft.updateMany({ where: { id, status: { not: "sent" } }, data: updateData });
+      updatedCount = result.count;
     }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await prisma.dmRecipientDraft.updateMany({ where: { id, status: { not: "sent" } }, data: data as any });
-    if (result.count === 0) {
+    if (updatedCount === 0) {
       throw new ApiError(409, "送付済みの宛先は編集できません", "ALREADY_SENT");
     }
 

@@ -26,6 +26,8 @@ vi.mock("@/lib/prisma", () => {
     dmRecipientDraft: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     dmVariant: { findFirst: vi.fn(), updateMany: vi.fn(async () => ({ count: 0 })) },
     // 確定を戻す/型を移す前に凍結印を立てる(PR-D2 設計§2.4)。tx=同db委譲。
+    // 凍結印(DM型/LP型)→割当の読み直し→解除、までを同じ tx で行う(@codex R3 P2)。
+    dmLpVariant: { updateMany: vi.fn(async () => ({ count: 0 })) },
     $queryRaw: vi.fn(async () => []),
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
@@ -40,7 +42,8 @@ import { Prisma } from "@/generated/prisma";
 
 const pm = prismaMock as never as {
   dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
-  dmVariant: { findFirst: ReturnType<typeof vi.fn> };
+  dmVariant: { findFirst: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
+  dmLpVariant: { updateMany: ReturnType<typeof vi.fn> };
 };
 const ALL = ["property", "csv_export", "csv_export_personal", "owner"];
 const grant = (...keys: string[]) =>
@@ -115,6 +118,42 @@ describe("PATCH draft (拡張)", () => {
     const data = pm.dmRecipientDraft.updateMany.mock.calls[0][0].data;
     expect(data.body).toBeUndefined();
     expect(data.status).toBeUndefined();
+  });
+
+  it("凍結印を立てる直前に型の割当が変わっていたら 409 VARIANT_CHANGED・解除しない", async () => {
+    // 先読み(L1)と、型をロックしてからの読み直し(L2)が食い違う=途中で /assign が動いた。
+    // そのまま進めると印は古い L1 にしか立たず、解除で L2 の「確定があった」証拠が消える(@codex R3 P2)。
+    // ⚠`Once` の並びで組むと、実装が読み直しをやめただけで余りが次のテストへ漏れる。
+    //   先読み(campaign を select する)と tx 内の読み直しを select の形で見分ける。
+    pm.dmRecipientDraft.findUnique.mockImplementation(async (args: { select?: Record<string, unknown> }) =>
+      args?.select?.campaign
+        ? { id: "r1", campaignId: "c1", status: "confirmed", variantId: "v1", lpVariantId: "L1", campaign: { createdBy: "u1" } }
+        : { variantId: "v1", lpVariantId: "L2", status: "confirmed" },
+    );
+    const res = await patchDraft(patch({ body: "編集後" }) as never, ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("VARIANT_CHANGED");
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+    // 割当が食い違ったまま凍結印を立てない(古い型だけ凍結して終わらせない)。
+    expect(pm.dmVariant.updateMany).not.toHaveBeenCalled();
+    expect(pm.dmLpVariant.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("確定の解除は凍結印・読み直し・解除を同じ tx で行う(印の後に updateMany)", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v1", lpVariantId: "L1", campaign: { createdBy: "u1" } });
+    const res = await patchDraft(patch({ body: "編集後" }) as never, ctx);
+    expect(res.status).toBe(200);
+    expect(pm.dmVariant.updateMany).toHaveBeenCalledWith({ where: { id: { in: ["v1"] }, templateFrozenAt: null }, data: { templateFrozenAt: expect.any(Date) } });
+    expect(pm.dmLpVariant.updateMany).toHaveBeenCalledWith({ where: { id: { in: ["L1"] }, templateFrozenAt: null }, data: { templateFrozenAt: expect.any(Date) } });
+    expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0].where).toEqual({ id: "r1", status: { not: "sent" } });
+  });
+
+  it("確定解除の経路でも、並行して sent になっていれば(count=0)409 ALREADY_SENT", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v1", campaign: { createdBy: "u1" } });
+    pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
+    const res = await patchDraft(patch({ body: "編集後" }) as never, ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("ALREADY_SENT");
   });
 
   it("他キャンペーンの variantId は 404/400(更新しない)", async () => {
