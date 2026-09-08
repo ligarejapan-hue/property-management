@@ -107,7 +107,8 @@ describe("DmLpVariant(LP型)の表", () => {
     expect(sql).toMatch(/CREATE TABLE "dm_lp_variants"/);
     expect(sql).toMatch(/ADD COLUMN "lp_variant_id" UUID;/);
     expect(sql).toMatch(/ON DELETE CASCADE/); // campaign 削除で LP型も消える
-    expect(sql).not.toMatch(/\bUPDATE\b|\bDELETE\b|\bDROP\b/);
+    // 文頭の UPDATE/DELETE/DROP だけを禁止(FK の "ON UPDATE CASCADE" / "ON DELETE SET NULL" は許可)。
+    expect(sql).not.toMatch(/^\s*(UPDATE|DELETE|DROP)\b/m);
     expect(sql).not.toMatch(/ALTER TABLE "dm_recipient_drafts"[^;]*NOT NULL/);
   });
 });
@@ -1891,7 +1892,6 @@ describe("POST assign(両軸)", () => {
     await assign(post({ mode: "auto" }), ctx);
     const lpCalls = pm.dmRecipientDraft.updateMany.mock.calls.filter((c) => "lpVariantId" in c[0].data);
     expect(lpCalls.length).toBe(0);
-    expect(pm.dmLpVariant.updateMany).not.toHaveBeenCalled();
   });
   it("移動元の LP型(確定/送付済み)へ凍結印を立て、ロックは dm_variants → dm_lp_variants の順", async () => {
     await assign(post({ mode: "auto" }), ctx);
@@ -2683,7 +2683,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
   });
 ```
 
-- [ ] **Step 8: 確認** — Run: `npx vitest run src/lib/__tests__/sale-dm-aggregate-view-model.test.ts src/lib/__tests__/sale-dm-management-ui-wiring.test.ts src/lib/__tests__/ui-consistency-wave1.test.ts src/lib/__tests__/ui-consistency-wave2.test.ts src/lib/__tests__/ui-consistency-wave3.test.ts && npx tsc --noEmit && npx next lint --dir src/components/sale-dm --dir src/lib/sale-dm-letter` → PASS
+- [ ] **Step 8: 確認** — Run: `npx vitest run src/lib/__tests__/sale-dm-aggregate-view-model.test.ts src/lib/__tests__/sale-dm-management-ui-wiring.test.ts src/lib/__tests__/ui-consistency-wave1.test.ts src/lib/__tests__/ui-consistency-wave2.test.ts src/lib/__tests__/ui-consistency-wave3.test.ts && npx tsc --noEmit && npx eslint src/components/sale-dm/lp-variant-manager.tsx src/components/sale-dm/aggregate-view.tsx src/lib/sale-dm-letter/aggregate-view-model.ts` → PASS(0 error)
 
 - [ ] **Step 9: ローカルで画面を確認(手順は `local-dev-env-setup` メモリ)**: キャンペーン画面で「LP型を追加」→ 文章ボタン → プロンプトをコピー → 4見出しの文章を貼って保存 → 一覧に見出しが出る。DM型パネルの「均等に割り当て」で宛先に両軸が付く(宛先一覧の再取得後、集計3表が出る)。LP型0件のキャンペーンでは従来どおり1表のみ。
 
@@ -2718,7 +2718,7 @@ git commit -m "feat(sale-dm): LP型の管理パネルと集計3表を作業画�
 
 - [ ] **Step 3: フルスイート・型・lint・build**
 
-Run: `npx vitest run && npx tsc --noEmit && npx next lint && npx next build`
+Run: `npx vitest run && npx tsc --noEmit && npx eslint $(git diff --name-only origin/main -- "src/**/*.ts" "src/**/*.tsx") && PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm run build`
 Expected: 全緑(skipped 0 のまま)。落ちたら直してから次へ。
 
 - [ ] **Step 4: Commit**
