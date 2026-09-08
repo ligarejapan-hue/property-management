@@ -275,7 +275,7 @@ export default function RegistryLocationSearchButton({
   //   **消えたボタンへ誘導しない**（同じ文言を2か所に書くと、片方だけ直してずれる）。
   const reasonText = (reason: string): string =>
     reason === "has_real_estate_number"
-      ? "不動産番号があるため、所在検索の対象外です。⚠現在この経路では取得できません（番号での取得は準備中）。"
+      ? "不動産番号が入っているため、この画面からは取得できません。番号を空にして地番（建物は家屋番号）を登録すると取得できます。"
       : reason === "insufficient_location"
         ? "所在（住所）が未登録のため検索できません。物件情報に所在を登録してください。"
         : "この物件は所在検索の対象外です。";

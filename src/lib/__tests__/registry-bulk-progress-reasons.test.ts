@@ -31,7 +31,7 @@ describe("除外理由の内訳", () => {
     ["missing_identifier", "地番・家屋番号が未入力"],
     ["malformed_identifier", "地番/家屋番号の書き方"],
     ["insufficient_location", "住所が未入力"],
-    ["has_real_estate_number", "所在検索の対象外（この経路では取得できません）"],
+    ["has_real_estate_number", "不動産番号を空にして地番を登録すると取得できます"],
     ["identifier_changed", "内容が変わりました"],
     ["not_approved", "確認を通していません"],
     ["ambiguous_candidate", "候補が複数"],
@@ -41,11 +41,14 @@ describe("除外理由の内訳", () => {
     expect(BULK_SKIP_REASON_LABEL[code]).toContain(label);
   });
 
-  it("⚠不動産番号は「入力の不備」ではなく「対象外」として書く", () => {
-    // 直せば通るものではない（番号での取得は途中で止まる既存の行き止まり）。
-    expect(BULK_SKIP_REASON_LABEL.has_real_estate_number).toContain(
-      "所在検索の対象外",
-    );
+  it("⚠不動産番号は「行き止まり」ではなく「抜け出す手順」を書く", () => {
+    // ⚠2026-09-08: 旧文言は「所在検索の対象外（この経路では取得できません）」で、
+    //   読んだ人が次に何をすればよいか分からなかった。不動産番号は今後も作らない
+    //   方針が決まったので、**番号を空にすれば取れる**ことを書く。
+    const label = BULK_SKIP_REASON_LABEL.has_real_estate_number;
+    expect(label).toContain("空に");
+    expect(label).toContain("地番");
+    expect(label).not.toContain("準備中");
   });
 
   it("⚠画面はラベルを自前で持たない（サーバの断り文句と同じ定義元を使う）", () => {

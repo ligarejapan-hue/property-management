@@ -89,12 +89,12 @@ const QUALITY_RULES: ReadonlyArray<{
     message: "地番が未入力です",
     where: { OR: [{ lotNumber: null }, { lotNumber: "" }] },
   },
-  {
-    code: "NO_REAL_ESTATE_NUMBER",
-    severity: "info",
-    message: "不動産番号が未入力です",
-    where: { OR: [{ realEstateNumber: null }, { realEstateNumber: "" }] },
-  },
+  // ⚠`NO_REAL_ESTATE_NUMBER`(不動産番号が未入力です)は**意図的に廃止**
+  //   (2026-09-08 発注者判断=不動産番号は今後も作らない)。
+  //   この指摘は「番号を入れてください」と促すが、番号が入った物件は所在検索の
+  //   対象外になり、番号での取得は実サイトへ未配線 = **謄本が取れない行き止まり**
+  //   になる。**システムが自ら詰む操作を勧めていた**ため、ルールごと外す。
+  //   再開する場合は「番号での取得」を実サイトへ配線してからにすること。
   {
     code: "INVESTIGATION_NOT_CONFIRMED",
     severity: "warning",

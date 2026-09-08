@@ -111,7 +111,10 @@ const FORM_FIELDS: FormField[] = [
     section: "基本",
     maxLength: BUILDING_NAME_MAX_LENGTH,
   },
-  { key: "realEstateNumber", label: "不動産番号", type: "text", section: "基本" },
+  // ⚠不動産番号の欄は**意図的に外している**(2026-09-08 発注者判断=番号は作らない)。
+  //   番号が入ると所在検索の対象外になり、番号での取得は実サイトへ未配線=
+  //   **謄本が取れない行き止まり**になる。このフォームは「変更した項目だけ送る」
+  //   PATCH なので、欄を外しても既存の値は消えない(物件詳細に表示は残る)。
   { key: "registryStatus", label: "登記状況", type: "select", section: "基本", options: [
     { value: "unconfirmed", label: "未取得" },
     { value: "scheduled", label: "取得中" },

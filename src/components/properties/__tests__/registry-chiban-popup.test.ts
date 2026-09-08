@@ -275,7 +275,7 @@ describe("⚠不動産番号を持つ物件では出さない（設計 §3.1）"
     expect(route).toContain("realEstateNumber: p.realEstateNumber");
   });
 
-  it("番号ありのときは「所在検索の対象外」と案内する", () => {
+  it("番号ありのときは「どうすれば取得できるか」を案内する", () => {
     const shared = readFileSync(
       join(
         process.cwd(),
@@ -283,11 +283,39 @@ describe("⚠不動産番号を持つ物件では出さない（設計 §3.1）"
       ),
       "utf8",
     );
-    expect(shared).toContain("所在検索の対象外です");
-    // ⚠番号での取得は実サイトに触れる前に止まる（段階②が未実装）ので、
+    // ⚠2026-09-08: 旧文言は「⚠現在この経路では取得できません（番号での取得は
+    //   準備中）」で、読んだ人が次に何をすればよいか分からない**行き止まり**だった。
+    //   不動産番号は今後も作らない方針が決まったので、抜け出す手順を書く。
+    expect(shared).toContain("番号を空にして");
+    expect(shared).toContain("地番");
+    // ⚠コメントではなく**画面に出る文字列リテラル**だけを見る
+    //   (経緯をコメントに書き残せなくなるため)。
+    expect(shared.match(/["'`][^"'`\n]*準備中[^"'`\n]*["'`]/g)).toBeNull();
+    // ⚠番号での取得は実サイトに触れる前に止まるので、
     //   「通常の自動取得をどうぞ」と**必ず失敗する経路へ誘導しない**。
-    expect(shared).toContain("この経路では取得できません");
     expect(shared).not.toContain("通常の「謄本を自動取得」をご利用ください");
+  });
+
+  it("⚠同じ断り文句は2か所にあり、必ず一致させる", () => {
+    // 片方だけ直すとずれる（過去に実際にずれた）。同じ文字列を持つことを固定する。
+    const shared = readFileSync(
+      join(
+        process.cwd(),
+        "src/components/properties/registry-preflight-warnings.tsx",
+      ),
+      "utf8",
+    );
+    const button = readFileSync(
+      join(
+        process.cwd(),
+        "src/components/properties/registry-location-search-button.tsx",
+      ),
+      "utf8",
+    );
+    const MSG =
+      "不動産番号が入っているため、この画面からは取得できません。番号を空にして地番（建物は家屋番号）を登録すると取得できます";
+    expect(shared).toContain(MSG);
+    expect(button).toContain(MSG);
   });
 });
 
