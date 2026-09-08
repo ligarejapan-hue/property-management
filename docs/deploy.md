@@ -564,6 +564,9 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 
 その数分間は売却DMの操作をしないこと（旧ルートと新ルートが混ざる窓を作らない）。
 
+#### 売却DM LP型の土台(2026-09): migration
+
+`20260909000000_add_dm_lp_variants` は additive のみ(表 `dm_lp_variants` 新設・`dm_recipient_drafts.lp_variant_id` 追加・FK は SET NULL)。バックフィル無し。既存キャンペーンは LP型0件=従来どおり(割当・集計・QR転送の結果は変わらない)。rollback は列と表の DROP で戻せる(enum の追加なし)。
 
 #### 反響の記録リリース（migration `add_dm_reaction_columns`）: 旧 sale_dm 送付記録の照合
 
