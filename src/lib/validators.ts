@@ -140,7 +140,7 @@ const optionalPostalCode = z
  * ⚠CSV取込・謄本PDF取込はこのスキーマを通らない=従来どおり番号が入る
  *   (重複判定の第1キーなので意図的に残す)。
  */
-const clearOnlyRealEstateNumber = z
+export const clearOnlyRealEstateNumber = z
   .string()
   .optional()
   .nullable()
