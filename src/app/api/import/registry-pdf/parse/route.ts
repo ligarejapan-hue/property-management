@@ -17,7 +17,7 @@ import {
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
 
 const SCANNED_PDF_WARNING =
-  "PDF本文を十分に抽出できませんでした。画像化された謄本PDFの可能性があります。OCRは未対応のため、抽出結果を手動で確認してください。";
+  "PDF本文を十分に抽出できませんでした。画像化された謄本PDFの可能性があります。本文を手で貼り付けて投入してください。";
 
 // ---------- POST /api/import/registry-pdf/parse ----------
 // プレビュー専用: PDF または テキストを受け取り、解析結果だけを返す。
