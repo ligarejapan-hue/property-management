@@ -17,6 +17,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const [variants, lpVariants, recipients] = await Promise.all([
       prisma.dmVariant.findMany({ where: { campaignId: id }, select: { id: true }, orderBy: { label: "asc" } }),
       prisma.dmLpVariant.findMany({ where: { campaignId: id }, select: { id: true }, orderBy: { label: "asc" } }),
+      // 送付済み(sent)は A/B バケットを再割当しない(送付済みの配達/反響結果が別型へ移るのを防ぐ)。
       prisma.dmRecipientDraft.findMany({ where: { campaignId: id, status: { not: "sent" } }, select: { id: true, property: { select: { createdBy: true, assignedTo: true } } }, orderBy: { id: "asc" } }),
     ]);
 
@@ -121,8 +122,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       for (const [lpVariantId, ids] of byLpVariant) {
         if (ids.length === 0) continue;
         // LP型は本文に影響しない(表示のたびに展開)ので、本文・状態は触らない。
+        // ⚠`lpVariantId` は NULL 許容列。Prisma の `not` は NULL 行にマッチしないため、
+        //   `NOT: { lpVariantId }` だと未割当(NULL)の下書きが更新対象から漏れる
+        //   (下書きは全て lpVariantId=NULL で始まる)。NULL 行を明示的に含める。
         const result = await tx.dmRecipientDraft.updateMany({
-          where: { id: { in: ids }, campaignId: id, status: { not: "sent" }, NOT: { lpVariantId } },
+          where: { id: { in: ids }, campaignId: id, status: { not: "sent" }, OR: [{ lpVariantId: null }, { lpVariantId: { not: lpVariantId } }] },
           data: { lpVariantId },
         });
         assignedLp += result.count;

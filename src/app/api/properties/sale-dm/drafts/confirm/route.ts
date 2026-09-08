@@ -194,6 +194,18 @@ export async function POST(request: NextRequest) {
           "VARIANT_CHANGED",
         );
       }
+      // ⚠LP型も同じ理由で中止する。先読み〜ロックの間に手動割当が宛先を
+      //   ロックしていない LP型へ動かすと、そのまま凍結印を立てたときロック順序が
+      //   dm_lp_variants(先読みから) → properties(このtx) → dm_lp_variants(未ロック分)
+      //   と逆転し得る。DM軸と同じく**中止して取り直してもらう**。
+      const lockedLpIds = new Set(lpVariantIds);
+      if (drafts.some((d) => d.lpVariantId && !lockedLpIds.has(d.lpVariantId))) {
+        throw new ApiError(
+          409,
+          "確定の途中でLP型の割当が変わった宛先があります。もう一度確定してください",
+          "VARIANT_CHANGED",
+        );
+      }
 
       // ⚠確定は**印刷の直前の唯一の関所**。個別編集の入口だけを塞いでも、AI生成の出力や
       //   この反映より前からあるデータに不正な本文があれば通ってしまう(@codex #375)。

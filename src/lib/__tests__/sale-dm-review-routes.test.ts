@@ -327,6 +327,39 @@ describe("POST confirm (bulk)", () => {
     expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled(); // 確定もしない
   });
 
+  it("読み直しでロックしていない LP型が出てきたら中止する(LP軸の VARIANT_CHANGED)", async () => {
+    // ⚠LP型の凍結印(dm_lp_variants ロック)は先読みの lpVariantId から決めている。
+    //   先読み〜ロックの間に手動割当が宛先を別の LP型へ動かすと、読み直しには
+    //   ロックしていない LP型が現れる。DM軸(上のテスト)と同じく**中止して取り直してもらう**。
+    grant(...ALL);
+    setupFreshDrafts(
+      [{ id: "11111111-1111-4111-8111-111111111111", recipientZip: null, recipientAddress: "渋谷区神宮前1-1-1", ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+      [{ id: "aaaaaaaa-1111-4111-8111-111111111111", zip: null, address: null, currentZip: null, currentAddress: "渋谷区神宮前1-1-1" }],
+    );
+    const row = {
+      id: "11111111-1111-4111-8111-111111111111",
+      body: "拝啓 時下ますますご清祥のこととお喜び申し上げます。",
+      recipientZip: null,
+      recipientAddress: "渋谷区神宮前1-1-1",
+      representativeOwnerId: "aaaaaaaa-1111-4111-8111-111111111111",
+      draftOwners: [{ ownerId: "aaaaaaaa-1111-4111-8111-111111111111" }],
+      variantId: "vvvvvvvv-1111-4111-8111-111111111111",
+      propertyId: "pppppppp-1111-4111-8111-111111111111",
+    };
+    pm._tx.dmRecipientDraft.findMany.mockImplementation(
+      async (args: { where?: { body?: unknown } }) =>
+        args?.where?.body !== undefined
+          ? [{ ...row, lpVariantId: "l1" }] // 先読み: LP型l1(ロック対象)
+          : [{ ...row, lpVariantId: "l2" }], // 読み直し: 別のLP型へ移動済み(ロックしていない)
+    );
+    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: ["11111111-1111-4111-8111-111111111111"] }) }) as never);
+    expect(res.status).toBe(409);
+    const b = (await res.json()) as { error: { code: string } };
+    expect(b.error.code).toBe("VARIANT_CHANGED");
+    expect(pm._tx.dmVariant.updateMany).not.toHaveBeenCalled();   // 凍結印を立てない
+    expect(pm._tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled(); // 確定もしない
+  });
+
   it("不正な JSON ボディは 400(500 でなく)・更新しない", async () => {
     grant(...ALL);
     const res = await confirmDrafts(new Request("http://x", { method: "POST", body: "{ broken" }) as never);

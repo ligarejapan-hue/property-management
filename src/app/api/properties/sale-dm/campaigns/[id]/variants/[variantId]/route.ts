@@ -82,6 +82,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ${variantId}::uuid AND campaign_id = ${id}::uuid FOR UPDATE`;
 
       // 確定の解除は LP型の「確定があった」証拠も消す。dm_variants の直後に dm_lp_variants を掴む(設計 2026-09-08)。
+      // ⚠settledLp はここ(draft 行のロック**前**)で読むが、下の settledCount は draft 行を
+      //   FOR UPDATE した**後**に数える。この窓が壊れていない理由:
+      //   ①確定を作る経路(drafts/confirm)は dm_variants を先に掴むので、この tx が :82 で
+      //     この variant を掴んでいる間、新しい確定はここへ生まれない(直列化済み)。
+      //   ②confirmed→sent(mark-sent)は元々 settled 集合(confirmed も sent も
+      //     SETTLED_DRAFT_STATUSES)に含まれるので、状態が sent に進んでも settled かどうかの
+      //     判定は変わらない。
+      //   よって draft ロックの前後で「この variant 配下の settled 集合」自体は変わらず、
+      //   先読みした settledLp は draft ロック後の settledCount と同じ集合を指す。
       const settledLp = await tx.dmRecipientDraft.findMany({
         where: { campaignId: id, variantId, status: { in: [...SETTLED_DRAFT_STATUSES] } },
         select: { lpVariantId: true },

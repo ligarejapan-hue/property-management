@@ -74,7 +74,8 @@ describe("POST assign(両軸)", () => {
     expect(lpCalls.length).toBe(2);
     for (const c of lpCalls) {
       expect(c.data).toEqual({ lpVariantId: expect.any(String) });
-      expect(c.where).toMatchObject({ campaignId: "c1", status: { not: "sent" }, NOT: { lpVariantId: c.data.lpVariantId } });
+      expect(c.where).toMatchObject({ campaignId: "c1", status: { not: "sent" } });
+      expect(c.where.OR).toEqual([{ lpVariantId: null }, { lpVariantId: { not: c.data.lpVariantId } }]);
     }
     const j = await res.json();
     expect(j).toHaveProperty("perLpVariant");
