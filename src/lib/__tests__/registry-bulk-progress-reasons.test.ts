@@ -31,7 +31,7 @@ describe("除外理由の内訳", () => {
     ["missing_identifier", "地番・家屋番号が未入力"],
     ["malformed_identifier", "地番/家屋番号の書き方"],
     ["insufficient_location", "住所が未入力"],
-    ["has_real_estate_number", "不動産番号を空にして地番を登録すると取得できます"],
+    ["has_real_estate_number", "不動産番号を空にして地番（建物は家屋番号）を登録すると取得できます"],
     ["identifier_changed", "内容が変わりました"],
     ["not_approved", "確認を通していません"],
     ["ambiguous_candidate", "候補が複数"],
@@ -48,6 +48,9 @@ describe("除外理由の内訳", () => {
     const label = BULK_SKIP_REASON_LABEL.has_real_estate_number;
     expect(label).toContain("空に");
     expect(label).toContain("地番");
+    // ⚠建物の物件で「地番を入れろ」と読ませない(@codex #420 P2)。地番を入れると
+    //   土地の謄本を取りに行ってしまう。1件ずつの案内と同じ言い方に揃える。
+    expect(label).toContain("建物は家屋番号");
     expect(label).not.toContain("準備中");
   });
 

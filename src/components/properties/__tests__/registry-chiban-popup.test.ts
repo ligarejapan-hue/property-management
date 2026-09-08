@@ -380,3 +380,42 @@ describe("⚠一括は「何を買うか」を承認の前に見せる（@codex 
     expect(SHARED).not.toMatch(/mismatchWarning[\s\S]{0,120}disabled/);
   });
 });
+
+describe("⚠「番号を空にして」と案内する以上、空にする手段が画面にある", () => {
+  /**
+   * @codex #420 P1: 入口(入力欄)を閉じただけでは足りない。
+   * CSV取込・謄本PDF取込からは番号が入り得るのに、消す手段まで消すと
+   * 「番号を空にしてください」という案内に**従えない本当の行き止まり**になる。
+   */
+  const EDIT_FORM = readFileSync(
+    join(process.cwd(), "src/components/properties/property-edit-form.tsx"),
+    "utf8",
+  );
+
+  it("物件編集に「消すだけの欄」がある (新しく入力はできない)", () => {
+    expect(EDIT_FORM).toMatch(/type: "clearOnly"/);
+    expect(EDIT_FORM).toContain('key: "realEstateNumber"');
+    // ⚠**描画部だけを見る**。ファイル全体に対して toContain すると、経緯を書いた
+    //   コメントの「空にする手段が…」に当たって**ボタンが無くても緑になる**
+    //   (実際に空振りしていた)。
+    const branch = EDIT_FORM.match(
+      /field\.type === "clearOnly" \? \([\s\S]*?\) : field\.type === "textarea"/,
+    );
+    expect(branch).not.toBeNull();
+    const m = branch?.[0] ?? "";
+    expect(m).toContain("空にする");
+    // 打ち直せない = readOnly。onChange で自由入力させない。
+    expect(m).toMatch(/readOnly/);
+    expect(m).not.toMatch(/onChange=\{\(e\)/);
+    // 空にするボタンは値が空なら押せない (無意味な保存を出さない)
+    expect(m).toMatch(/disabled=\{\(values\[field\.key\] \?\? ""\) === ""\}/);
+    // 押すと空になる (別の値を入れない)
+    expect(m).toMatch(/onClick=\{\(\) => handleChange\(field\.key, ""\)\}/);
+  });
+
+  it("元から値がある物件でだけ出す (空の物件に欄が生えて入力されない)", () => {
+    expect(EDIT_FORM).toMatch(/if \(field\.type === "clearOnly"\) return clearableKeys\.has\(field\.key\)/);
+    // 判定は**開いた時点の値**で固定する (編集中に消した瞬間に欄が消えない)
+    expect(EDIT_FORM).toMatch(/setClearableKeys\(/);
+  });
+});

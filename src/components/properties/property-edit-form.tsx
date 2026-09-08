@@ -56,7 +56,7 @@ interface PropertyEditFormProps {
 interface FormField {
   key: string;
   label: string;
-  type: "text" | "number" | "select" | "textarea";
+  type: "text" | "number" | "select" | "textarea" | "clearOnly";
   options?: Array<{ value: string; label: string }>;
   section: string;
   /**
@@ -88,10 +88,17 @@ function isOverMaxLength(
 function isFieldVisible(
   field: FormField,
   values: Record<string, string>,
+  /** 元々(このフォームを開いた時点で)値が入っていた clearOnly 項目のキー。 */
+  clearableKeys: ReadonlySet<string>,
 ): boolean {
   if (field.key === "buildingName") {
     return supportsBuildingName(values.propertyType);
   }
+  // ⚠clearOnly は「新しく入れる」ためではなく「消す」ための欄。
+  //   元から値がある物件でだけ出す(空の物件に欄が生えると、入れられてしまう)。
+  //   判定は**開いた時点の値**で固定する。編集中に消した瞬間に欄が消えると、
+  //   保存前に取り消せなくなる。
+  if (field.type === "clearOnly") return clearableKeys.has(field.key);
   return true;
 }
 
@@ -111,10 +118,14 @@ const FORM_FIELDS: FormField[] = [
     section: "基本",
     maxLength: BUILDING_NAME_MAX_LENGTH,
   },
-  // ⚠不動産番号の欄は**意図的に外している**(2026-09-08 発注者判断=番号は作らない)。
+  // ⚠不動産番号は**新しく入れられない**が、**消すことはできる**(clearOnly)。
   //   番号が入ると所在検索の対象外になり、番号での取得は実サイトへ未配線=
-  //   **謄本が取れない行き止まり**になる。このフォームは「変更した項目だけ送る」
-  //   PATCH なので、欄を外しても既存の値は消えない(物件詳細に表示は残る)。
+  //   **謄本が取れない行き止まり**になる(2026-09-08 発注者判断=番号は作らない)。
+  //   ⚠ただし CSV取込・謄本PDF取込からは**番号が入り得る**(重複判定の第1キー
+  //   なので塞がない)。案内文が「番号を空にしてください」と言う以上、
+  //   **空にする手段が画面に無ければ本当の行き止まりになる**(@codex #420 P1)。
+  //   よって「元から値がある物件でだけ出る、消すだけの欄」を残す。
+  { key: "realEstateNumber", label: "不動産番号", type: "clearOnly", section: "基本" },
   { key: "registryStatus", label: "登記状況", type: "select", section: "基本", options: [
     { value: "unconfirmed", label: "未取得" },
     { value: "scheduled", label: "取得中" },
@@ -159,6 +170,12 @@ export default function PropertyEditForm({
   const [users, setUsers] = useState<AssigneeOption[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
 
+  // ⚠「消すだけの欄」を出すかは**開いた時点の値**で決める(編集中に欄が
+  //   消えて取り消せなくなるのを防ぐ)。property が差し替わった時だけ更新。
+  const [clearableKeys, setClearableKeys] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+
   useEffect(() => {
     const initial: Record<string, string> = {};
     for (const f of FORM_FIELDS) {
@@ -166,6 +183,13 @@ export default function PropertyEditForm({
       initial[f.key] = val != null ? String(val) : "";
     }
     setValues(initial);
+    setClearableKeys(
+      new Set(
+        FORM_FIELDS.filter(
+          (f) => f.type === "clearOnly" && (initial[f.key] ?? "").trim() !== "",
+        ).map((f) => f.key),
+      ),
+    );
     // prop（既存値）再投入は user-edit ではない＝signal をリセット（初期ロードで検索しない）。
     setAddressEdited(false);
   }, [property]);
@@ -211,7 +235,9 @@ export default function PropertyEditForm({
     // ⚠**いま表示している項目だけ**を見る。隠れている項目を理由に止めると、
     // 画面に無いものを直せと言うことになり手詰まりになる。
     const tooLong = FORM_FIELDS.find(
-      (f) => isFieldVisible(f, values) && isOverMaxLength(f, values[f.key]),
+      (f) =>
+        isFieldVisible(f, values, clearableKeys) &&
+        isOverMaxLength(f, values[f.key]),
     );
     if (tooLong) {
       setError(
@@ -305,7 +331,7 @@ export default function PropertyEditForm({
                 {FORM_FIELDS.filter((f) => f.section === section)
                   // 条件つきの項目 (物件名など) はここで出し入れする。
                   // ⚠判定は保存前の検証と共有する (isFieldVisible)。
-                  .filter((f) => isFieldVisible(f, values))
+                  .filter((f) => isFieldVisible(f, values, clearableKeys))
                   .map(
                   (field) => (
                     <div
@@ -345,6 +371,34 @@ export default function PropertyEditForm({
                             ))
                           )}
                         </select>
+                      ) : field.type === "clearOnly" ? (
+                        // ⚠**消すだけの欄**。打ち直せないが空にはできる。
+                        //   CSV取込等で入った番号がある物件は謄本を取れないため、
+                        //   「番号を空にしてください」という案内に従う手段として必要。
+                        <>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              readOnly
+                              value={values[field.key] ?? ""}
+                              data-testid={`clear-only-${field.key}`}
+                              placeholder="(なし)"
+                              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleChange(field.key, "")}
+                              disabled={(values[field.key] ?? "") === ""}
+                              data-testid={`clear-only-${field.key}-clear`}
+                              className="shrink-0 rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                            >
+                              空にする
+                            </button>
+                          </div>
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            新しく入力することはできません。空にして保存すると、地番（建物は家屋番号）での謄本取得が使えるようになります。
+                          </p>
+                        </>
                       ) : field.type === "textarea" ? (
                         <textarea
                           value={values[field.key] ?? ""}

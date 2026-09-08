@@ -177,9 +177,14 @@ describe("配線 — 同じ判定を UI と API の両方が通る", () => {
     // 欄は消えるのに検証だけ残り、**画面に無い項目を理由に保存できなくなる**。
     const src = read("src/components/properties/property-edit-form.tsx");
     expect(src).toMatch(/function isFieldVisible\(/);
-    expect(src).toMatch(/\.filter\(\(f\) => isFieldVisible\(f, values\)\)/);
+    // ⚠2026-09-08: 「消すだけの欄」(clearOnly) の導入で第3引数 clearableKeys が
+    //   増えた。守りたいのは引数の並びではなく**描画と検証が同じ判定を通ること**
+    //   なので、両方が**同じ引数**で呼ばれることを固定する。
     expect(src).toMatch(
-      /isFieldVisible\(f, values\) && isOverMaxLength\(f, values\[f\.key\]\)/,
+      /\.filter\(\(f\) => isFieldVisible\(f, values, clearableKeys\)\)/,
+    );
+    expect(src).toMatch(
+      /isFieldVisible\(f, values, clearableKeys\) &&\s*isOverMaxLength\(f, values\[f\.key\]\)/,
     );
   });
 

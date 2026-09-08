@@ -15,7 +15,11 @@ export const BULK_SKIP_REASON_LABEL: Record<string, string> = {
   insufficient_location: "住所が未入力",
   // ⚠「直せば通る」ものではない…ではなく、**番号を空にすれば通る**。
   //   2026-09-08: 番号は今後も作らない方針が決まったので、抜け出す手順を書く。
-  has_real_estate_number: "不動産番号を空にして地番を登録すると取得できます",
+  //   ⚠**土地/建物の区別をここで落とさない**(@codex #420 P2)。「地番を登録」
+  //   とだけ書くと、建物の物件で地番が入り、土地の謄本を取りに行ってしまう。
+  //   1件ずつの案内(registry-preflight-warnings)と**同じ言い方**にする。
+  has_real_estate_number:
+    "不動産番号を空にして地番（建物は家屋番号）を登録すると取得できます",
   identifier_changed: "内容が変わりました（確認して選び直してください）",
   // ⚠確認画面を通していない物件(古い画面のまま実行された等)。
   not_approved: "確認を通していません（選び直してください）",
