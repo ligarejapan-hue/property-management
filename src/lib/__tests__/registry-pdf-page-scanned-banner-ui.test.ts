@@ -42,6 +42,16 @@ describe("import/registry-pdf page F-1 scanned 警告バナー", () => {
     expect(pageSrc).toMatch(/role=("|')alert\1/);
   });
 
+  it("⚠バナーは断定しない(判定は「取り出せた文字が50字未満」だけ)", () => {
+    // @codex #421 P2: 文字はあるが少ないPDFを「画像です」と言い切ると、
+    // 取れている抽出結果まで捨てさせてしまう。可能性の表現を保つ。
+    const code = stripComments(pageSrc);
+    expect(code).toMatch(/画像化された謄本PDFの可能性があります/);
+    expect(code).not.toMatch(/画像化された謄本PDFです/);
+    expect(code).not.toMatch(/文字の情報を持っていない/);
+    expect(code).toMatch(/ほとんど抽出できませんでした/);
+  });
+
   it("バナーは「画像化謄本PDF」と、次にやること(貼り付け)を伝える", () => {
     expect(pageSrc).toMatch(/画像化された謄本PDF/);
     // ⚠OCR の語は 2026-09-08 に画面から撤去(機能はサーバー側に残す)。

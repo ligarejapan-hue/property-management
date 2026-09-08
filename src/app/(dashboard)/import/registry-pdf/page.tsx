@@ -713,14 +713,18 @@ export default function RegistryPdfPage() {
             >
               <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-red-700 dark:text-red-300">
                 <AlertTriangle className="h-4 w-4" />
-                画像化された謄本PDFです
+                画像化された謄本PDFの可能性があります
               </h4>
               <p className="text-sm text-red-700 dark:text-red-300">
-                このPDFは文字の情報を持っていないため、本文を取り出せませんでした
+                {/* ⚠**断定しない**(@codex #421 P2)。判定は「取り出せた文字が
+                    50字未満」だけで、画像だけのPDFである証明にはならない。
+                    文字はあるが少ないPDFを「画像です」と言い切ると、
+                    取れている抽出結果まで捨てさせてしまう。 */}
+                PDF本文をほとんど抽出できませんでした
                 {embeddedTextLength !== null && (
                   <>（取り出せた文字数: {embeddedTextLength} 文字）</>
                 )}
-                。お手数ですが、本文をテキストにしてから、下のボタンで「テキストを貼り付けるモード」に切り替えて投入してください。
+                。読み取れた内容が不足している場合は、本文をテキストにしてから、下のボタンで「テキストを貼り付けるモード」に切り替えて投入してください。
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-3">
                 <button
@@ -744,7 +748,7 @@ export default function RegistryPdfPage() {
                   テキストを貼り付けるモードに切り替える
                 </button>
                 <span className="text-[11px] text-red-700 dark:text-red-300">
-                  ※ 画像から自動で文字にすることはできません。
+                  ※ 画像から自動で文字にすることはできません。抽出できた内容がそのまま使える場合は、このまま先へ進めます。
                 </span>
               </div>
             </div>

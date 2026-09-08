@@ -27,7 +27,7 @@ function stripComments(src: string): string {
 describe("registry-pdf page Phase F-2a 強化 UI", () => {
   it("scanned 警告バナーは既存 data-testid を維持する（F-1 互換）", () => {
     expect(pageSrc).toMatch(/data-testid="scanned-pdf-banner"/);
-    expect(pageSrc).toMatch(/画像化された謄本PDFです/);
+    expect(pageSrc).toMatch(/画像化された謄本PDFの可能性があります/);
   });
 
   it("⚠バナーに OCR の語を出さない(2026-09-08 発注者判断で画面から撤去)", () => {
