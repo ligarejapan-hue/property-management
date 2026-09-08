@@ -231,6 +231,12 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   sale_dm_variant_create: new Set(["createdAt"]),
   sale_dm_variant_update: new Set(["updatedAt"]),
   sale_dm_variant_delete: new Set(["deletedAt"]),
+  // LP型(設計 2026-09-08)。DM型と同じく件数/ID/日時のみ。見出し・本文・ラベルは載せない。
+  sale_dm_lp_variant_create: new Set(["createdAt"]),
+  sale_dm_lp_variant_update: new Set(["updatedAt"]),
+  sale_dm_lp_variant_delete: new Set(["deletedAt"]),
+  sale_dm_lp_prompt_view: new Set(["viewedAt"]),
+  sale_dm_lp_body_paste: new Set(["pastedAt", "faqCount", "bodyLength"]),
   // 外部AI方式(PR-D2)。⚠プロンプト本文・手紙本文は detail に載せない(件数/ID/日時のみ)。
   sale_dm_prompt_view: new Set(["viewedAt"]),
   sale_dm_body_paste: new Set(["clearedCount", "pastedAt"]),
