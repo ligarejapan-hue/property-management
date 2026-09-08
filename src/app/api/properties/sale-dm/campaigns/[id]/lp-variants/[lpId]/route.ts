@@ -12,7 +12,8 @@ const OPTION_KEYS = ["tone", "length", "appeal", "strength"] as const;
 /**
  * LP型の設定変更(設計 2026-09-08 §2.1/§2.8)。
  * 文体4項目はプロンプトに載るので、実際に変わったら原文・切り分け結果・控えを消す(DM型と同じ)。
- * 凍結(列 OR 配下に確定/送付済み)中は文体を変えられない。label だけは変えられる。
+ * 送付済みの宛先が1件でもあれば label を含め一切変更不可(DM型と同じ・ラベルは A/B集計・送付履歴に
+ * 載るため)。送付済みが無く確定のみの凍結(列 OR 配下に確定)中は文体を変えられない、label だけは通る。
  * LP は印刷物ではないので、DM型の PATCH と違い確定の解除はしない(刷り上がりが変わらない)。
  * ロック順序: dm_lp_variants のみ(dm_variants は触らない)。
  */
@@ -30,6 +31,19 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         select: { id: true, tone: true, length: true, appeal: true, strength: true, templateFrozenAt: true },
       });
       if (!existing) throw new ApiError(404, "指定されたLP型が見つかりません", "LP_VARIANT_NOT_FOUND");
+
+      // 送付済みの宛先が使っているLP型は label を含め一切変更不可(DM型と同じ・ラベルは
+      // A/B集計・送付履歴に載るため、文体を変えなくても送付後の書き換えは整合を崩す)。
+      const sentCount = await tx.dmRecipientDraft.count({
+        where: { campaignId: id, lpVariantId: lpId, status: "sent" },
+      });
+      if (sentCount > 0) {
+        throw new ApiError(
+          409,
+          "送付済みの宛先があるLP型は設定を変更できません(A/B履歴の整合のため)",
+          "VARIANT_LOCKED",
+        );
+      }
 
       const data: Prisma.DmLpVariantUpdateInput = {};
       if (parsed.label !== undefined) data.label = parsed.label;
@@ -61,7 +75,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         data.bodyText = null;
         data.faqJson = Prisma.DbNull;
       }
-      return tx.dmLpVariant.update({ where: { id: lpId }, data });
+      return tx.dmLpVariant.update({ where: { id: lpId, campaignId: id }, data });
     });
 
     await writeAuditLog({

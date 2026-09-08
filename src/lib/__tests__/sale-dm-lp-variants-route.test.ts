@@ -95,12 +95,19 @@ describe("PATCH lp-variants/[lpId]", () => {
     await PATCH(req("PATCH", { label: "B", options: { tone: "formal" } }), ctxLp);
     expect(pm.dmLpVariant.update.mock.calls[0][0].data).toEqual({ label: "B", tone: "formal" });
   });
-  it("凍結中(配下に確定/送付済み)の文体変更は 409 VARIANT_LOCKED、label だけなら通る", async () => {
-    pm.dmRecipientDraft.count.mockResolvedValue(1);
+  it("凍結中(配下に確定のみ・送付済みなし)の文体変更は 409 VARIANT_LOCKED、label だけなら通る", async () => {
+    // 呼び出し順: 1回目PATCH = sentCount(0) → settledCount(1・確定のみ) / 2回目PATCH(label のみ) = sentCount(0)。
+    pm.dmRecipientDraft.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1).mockResolvedValueOnce(0);
     const r1 = await PATCH(req("PATCH", { options: { tone: "soft" } }), ctxLp);
     expect(r1.status).toBe(409);
     expect((await r1.json()).error.code).toBe("VARIANT_LOCKED");
     expect((await PATCH(req("PATCH", { label: "B" }), ctxLp)).status).toBe(200);
+  });
+  it("送付済みが1件でもあれば label だけでも 409 VARIANT_LOCKED", async () => {
+    pm.dmRecipientDraft.count.mockResolvedValue(1);
+    const res = await PATCH(req("PATCH", { label: "B" }), ctxLp);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("VARIANT_LOCKED");
   });
   it("凍結印の列だけでも止まる(二重判定)", async () => {
     pm.dmLpVariant.findFirst.mockResolvedValue({ id: "l1", campaignId: "c1", ...OPT, templateFrozenAt: new Date() });
