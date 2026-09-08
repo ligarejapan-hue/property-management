@@ -136,6 +136,23 @@ describe("PUT lp template(貼り戻し保存)", () => {
     pm.property.findMany.mockResolvedValue([]);
     expect((await PUT(put({ body: GOOD }), ctx)).status).toBe(403);
   });
+  it("凍結LP型の初期化でも、担当外の**送付済み**宛先が居れば 403(LPは送付後も表示される)", async () => {
+    // 送付済みしか残っていない凍結LP型(原文が空=初期化なので凍結チェックは通る)。status で絞ると
+    // 対象が0件になり、担当外へ再割当された宛先に表示される文章を元担当が入れられる(@codex R1 P1)。
+    (getApiSession as Fn).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.count.mockResolvedValue(1); // 凍結(配下に confirmed/sent が1件)
+    arm(); // rawTemplate=null → 初期化として許可
+    pm.dmRecipientDraft.findMany.mockResolvedValue([{ propertyId: "p-hidden" }]);
+    pm.property.findMany.mockResolvedValue([]); // 担当外=可視0件
+    const res = await PUT(put({ body: GOOD }), ctx);
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("FORBIDDEN");
+    expect(pm.dmLpVariant.update).not.toHaveBeenCalled();
+    // 担当範囲の集合は status で絞らない(送付済みを外すと上の穴が開く)。
+    const where = pm.dmRecipientDraft.findMany.mock.calls[0][0].where;
+    expect(where).toEqual({ campaignId: "c1", lpVariantId: "l1" });
+    expect("status" in where).toBe(false);
+  });
   it("ロックは dm_lp_variants → properties の順", async () => {
     (getApiSession as Fn).mockResolvedValue({ id: "u1", role: "field_staff" });
     pm.dmRecipientDraft.findMany.mockResolvedValue([{ propertyId: "p1" }]);

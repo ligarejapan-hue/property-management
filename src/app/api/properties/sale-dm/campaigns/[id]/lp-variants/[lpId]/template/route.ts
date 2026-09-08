@@ -51,11 +51,16 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       if (!split.ok) throw new ApiError(400, lpSplitIssueMessage(split.issue), "INVALID_LP_TEMPLATE");
 
       if (session.role === "field_staff") {
-        const unsent = await tx.dmRecipientDraft.findMany({
-          where: { campaignId: id, lpVariantId: lpId, status: { not: "sent" } },
+        // ⚠**送付済みの宛先も担当範囲の対象に含める**(@codex R1 P1)。DM本文は送付の時点で
+        //   下書きに焼き付くが、**LPは送付済みの宛先にも表示される**(QRを読むたびに、この型の
+        //   文章をその場で展開する)。status で絞ると、担当外へ再割当された送付済み宛先しか
+        //   残っていない凍結LP型(原文が空＝初期化は許可)で対象が0件になり、元担当が
+        //   「自分には見えない宛先へ表示される文章」を入れられてしまう。
+        const targets = await tx.dmRecipientDraft.findMany({
+          where: { campaignId: id, lpVariantId: lpId },
           select: { propertyId: true },
         });
-        const propertyIds = [...new Set(unsent.map((d) => d.propertyId))].sort();
+        const propertyIds = [...new Set(targets.map((d) => d.propertyId))].sort();
         if (propertyIds.length > 0) {
           await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${propertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
           const visible = await tx.property.findMany({
