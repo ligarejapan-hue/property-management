@@ -44,7 +44,7 @@
   - 原文を残す理由: 切り分け規則を後で直したときに再切り分けできる。
 - **宛先に両方を割当**: `DmRecipientDraft.lpVariantId String?`(LP型が0件のキャンペーン=null=従来どおり外部転送)。
 - **割当(総当たり均等)**: 新純関数 `assignCrossEvenly(recipientIds, dmVariantIds, lpVariantIds, opts)`。
-  - 組 `(dm_i, lp_j)` を `n×m` の順序列(ラテン方陣の巡回: i=k mod n, j=(k+⌊k/n⌋) mod m)で並べ、宛先 k 番目に `seq[k mod n·m]`。端数は先頭の組から1つずつ多い(既存 `evenVariantSequence` と同じ規約)。
+  - 組 `(dm_i, lp_j)` を `n×m` の順序列(ラテン方陣の巡回: i=k mod n, j=(k mod n + ⌊k/n⌋) mod m)で並べ、宛先 k 番目に `seq[k mod n·m]`。端数は先頭の組から1つずつ多い(既存 `evenVariantSequence` と同じ規約)。組の偏りは最大1、LP軸だけの周辺は最大2(テストで固定)。
   - `random` は本数分布を保ったまま順だけシャッフル(既存 `shuffle` を共用)。
   - LP型が0件のときは既存 `assignVariantsEvenly` と**完全一致**の結果(後方互換をテストで固定)。
   - 手動割当は軸ごと(`applyManualAssignment` を LP軸にも適用・未指定宛先は現状維持)。
