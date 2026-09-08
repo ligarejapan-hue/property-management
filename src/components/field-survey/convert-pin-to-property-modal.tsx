@@ -9,7 +9,6 @@ import {
   suggestPinAddress,
 } from "@/lib/api-client";
 import { buildExternalMapUrl } from "@/lib/external-maps-url";
-import { normalizeRealEstateNumber } from "@/lib/address-normalizer";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 
@@ -32,9 +31,6 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onSubmitting
   const [addressEdited, setAddressEdited] = useState(false);
   const [lotNumber, setLotNumber] = useState("");
   const [buildingNumber, setBuildingNumber] = useState("");
-  // 不動産番号が既に分かっている場合の近道 (13桁)。あれば通常の謄本自動取得が
-  // 所在検索より確実に使える。API/validator は元々受け付けており入力欄のみ追加。
-  const [realEstateNumber, setRealEstateNumber] = useState("");
   const [submitting, setSubmitting] = useState(false);
   // 親(詳細パネル)の Escape 制御用に送信中を通知する(@codex #408 R2 P2)。
   // photos セクションの onBusyChange と同じ event 駆動パターン。
@@ -217,23 +213,6 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onSubmitting
       setError("住所を入力してください");
       return;
     }
-    // 不動産番号は正規化して保存する (全角数字・区切り付きの生値のまま保存すると
-    // CSV 取込の重複判定 [完全一致] をすり抜けて二重登録になり得る。Codex P2)。
-    // 新規入力は 13 桁ちょうどを要求する (Codex P2: 桁足らずでも値が入ると
-    // 所在検索が「番号あり」と誤認して無効化され、謄本自動取得には不正な
-    // 番号がそのまま渡る = この欄の目的である確実な取得経路を自ら塞ぐ)。
-    const rawRen = realEstateNumber.trim();
-    const normalizedRen = normalizeRealEstateNumber(rawRen);
-    if (
-      rawRen !== "" &&
-      !(
-        /^[0-9０-９\s　\-‐-―ー－−]+$/.test(rawRen) &&
-        /^\d{13}$/.test(normalizedRen)
-      )
-    ) {
-      setError("不動産番号は13桁の数字で入力してください");
-      return;
-    }
     setSubmitting(true);
     try {
       const result = await convertPinToProperty(pinId, {
@@ -242,7 +221,11 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onSubmitting
         address: address.trim(),
         lotNumber: lotNumber.trim() || null,
         buildingNumber: buildingNumber.trim() || null,
-        realEstateNumber: rawRen === "" ? null : normalizedRen,
+        // ⚠不動産番号は**入力させない**(2026-09-08 発注者判断=番号は今後も作らない)。
+        //   番号が入った物件は所在検索の対象外になり、番号での取得は実サイトへ
+        //   未配線=**謄本が取れない行き止まり**になるため。null 固定で送る。
+        //   CSV 取込からは従来どおり入り得る(重複判定の第1キーのため塞がない)。
+        realEstateNumber: null,
       });
       onConverted(result.id);
     } catch (err) {
@@ -402,24 +385,11 @@ export default function ConvertPinToPropertyModal({ pinId, onClose, onSubmitting
             />
           </div>
 
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-200">
-              不動産番号 <span className="text-xs text-gray-400 dark:text-gray-500">任意(13桁・分かる場合)</span>
-            </label>
-            <input
-              type="text"
-              inputMode="numeric"
-              value={realEstateNumber}
-              onChange={(e) => setRealEstateNumber(e.target.value)}
-              disabled={submitting}
-              placeholder="例: 0123456789012"
-              data-testid="convert-real-estate-number"
-              className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
-            />
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              入力しておくと、謄本の自動取得をすぐに使えます。
-            </p>
-          </div>
+          {/* ⚠不動産番号の入力欄は**意図的に置かない**(2026-09-08 発注者判断)。
+              番号が入った物件は所在検索の対象外になり、番号での取得は実サイトへ
+              未配線 = **謄本が取れない行き止まり**になる。欄があると善意で
+              埋められて詰むため、入口ごと閉じる。既に入っている番号は物件詳細に
+              表示され、CSV 取込からは従来どおり入る(重複判定の第1キー)。 */}
 
           <div className="flex items-center justify-end gap-2 border-t border-gray-100 dark:border-gray-800 pt-4">
             <button

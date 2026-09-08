@@ -139,8 +139,8 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
 
-    // 6 ルールぶんの findMany すべてに id:{in:[UUID1,UUID2]} と isArchived:false、take なし
-    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    // 5 ルールぶんの findMany すべてに id:{in:[UUID1,UUID2]} と isArchived:false、take なし
+    expect(pm.property.findMany).toHaveBeenCalledTimes(5);
     for (const call of pm.property.findMany.mock.calls) {
       const args = call[0] as { where: Where; take?: number; select: Where };
       expect(args.where.id).toEqual({ in: [UUID1, UUID2] });
@@ -177,7 +177,7 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
     expect(body.summary.issuesLimited).toBe(false);
     expect(body.summary.propertiesChecked).toBe(2);
     // rules は全ルール hasMore=false / totalCount=実数
-    expect(body.rules).toHaveLength(6);
+    expect(body.rules).toHaveLength(5);
     for (const meta of body.rules) {
       expect(meta.hasMore).toBe(false);
       expect(meta.nextOffset).toBeNull();
@@ -195,7 +195,7 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
         "?propertyIds=" + encodeURIComponent(` ${UUID1} , ,${UUID2},${UUID1},`),
       ),
     );
-    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    expect(pm.property.findMany).toHaveBeenCalledTimes(5);
     const args = pm.property.findMany.mock.calls[0][0] as { where: Where };
     expect(args.where.id).toEqual({ in: [UUID1, UUID2] });
   });
@@ -255,7 +255,7 @@ describe("quality-check scoped モード（?propertyIds=）", () => {
     const upper = UUID1.toUpperCase();
     const res = await GET(makeRequest(`?propertyIds=${upper}`));
     expect(res.status).toBe(200);
-    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    expect(pm.property.findMany).toHaveBeenCalledTimes(5);
     const args = pm.property.findMany.mock.calls[0][0] as { where: Where };
     expect(args.where.id).toEqual({ in: [upper] });
   });
@@ -299,7 +299,7 @@ describe("quality-check scoped モード — ロール別可視範囲（Codex P1
     vi.mocked(getApiSession).mockResolvedValue(FS_SESSION as never);
     pm.property.count.mockResolvedValue(0);
     await GET(makeRequest(`?propertyIds=${UUID1},${UUID2}`));
-    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    expect(pm.property.findMany).toHaveBeenCalledTimes(5);
     for (const call of pm.property.findMany.mock.calls) {
       const where = (call[0] as { where: Where }).where;
       expect(where.id).toEqual({ in: [UUID1, UUID2] });
@@ -314,7 +314,7 @@ describe("quality-check scoped モード — ロール別可視範囲（Codex P1
     await GET(makeRequest(`?propertyIds=${UUID1}`));
     const countWhere = pm.property.count.mock.calls[0][0].where as Where;
     expect(countWhere.AND).toBeUndefined();
-    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    expect(pm.property.findMany).toHaveBeenCalledTimes(5);
     for (const call of pm.property.findMany.mock.calls) {
       expect((call[0] as { where: Where }).where.AND).toBeUndefined();
     }
@@ -354,13 +354,13 @@ describe("quality-check scoped モード — モード優先・既定回帰・�
 
   it("既定モード（propertyIds なし）は where に id が入らない（回帰防止）", async () => {
     await GET(makeRequest(""));
-    expect(pm.property.findMany).toHaveBeenCalledTimes(6);
+    expect(pm.property.findMany).toHaveBeenCalledTimes(5);
     for (const call of pm.property.findMany.mock.calls) {
       const args = call[0] as { where: Where; take?: number };
       expect(args.where.id).toBeUndefined();
       expect(args.take).toBe(1000); // 既定モードは従来どおり take あり
     }
-    expect(pm.property.count).toHaveBeenCalledTimes(7); // NOT_ARCHIVED + 6 ルール
+    expect(pm.property.count).toHaveBeenCalledTimes(6); // NOT_ARCHIVED + 5 ルール
   });
 
   it("property:read 欠如 → 403・DB 未実行（scoped モード）", async () => {

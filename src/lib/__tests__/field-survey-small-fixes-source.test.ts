@@ -5,8 +5,8 @@
  *    2 枚目写真の最短経路)
  * 2. 利用者向け文言から技術用語「session」を一掃 (平易語ルール)
  * 3. 物件化成功後は新しい物件ページへ直行 (propertyId を捨てない)
- * 4. 完成待ち一覧: 件数バッジ + 経過日数 (7日以上は強調) + 上限到達警告
- * 5. 物件化モーダルに不動産番号 (任意) 入力欄
+ * 4. 完成待ち一覧: 件数バッジ + 経過日数 (7日以上は強調) + 「もっと見る」
+ * 5. 物件化モーダルは不動産番号を**入力させない**(行き止まり防止)
  */
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
@@ -307,20 +307,24 @@ describe("4. 完成待ち一覧の放置可視化", () => {
   });
 });
 
-describe("5. 物件化モーダルの不動産番号 (任意)", () => {
-  it("入力欄があり、正規化した値を payload に渡す (生値保存で重複判定をすり抜けない)", () => {
-    expect(CONVERT_SRC).toMatch(/data-testid="convert-real-estate-number"/);
-    // Codex P2: 全角数字・区切り付きの生値を保存すると CSV 取込の重複判定
-    // (完全一致) をすり抜ける → normalizeRealEstateNumber で正規化して送る
-    expect(CONVERT_SRC).toMatch(/normalizeRealEstateNumber\(rawRen\)/);
-    expect(CONVERT_SRC).toMatch(
-      /realEstateNumber:\s*rawRen === "" \? null : normalizedRen/,
-    );
-    // 数字にならない/桁足らずの入力は黙って捨てず・保存もせず、その場エラー
-    // (桁足らずでも値が入ると所在検索が誤無効化され、自動取得に不正番号が渡る)
-    expect(CONVERT_SRC).toMatch(/不動産番号は13桁の数字で入力してください/);
-    expect(CONVERT_SRC).toMatch(/\\d\{13\}/);
-    // 任意項目 (必須ガードに含めない)
-    expect(CONVERT_SRC).toMatch(/任意/);
+describe("5. 物件化モーダルの不動産番号 (入力させない)", () => {
+  it("入力欄を置かない (善意で埋めると謄本が取れなくなるため)", () => {
+    // ⚠2026-09-08 発注者判断=不動産番号は今後も作らない。
+    //   番号が入った物件は所在検索の対象外になり、番号での取得は実サイトへ
+    //   未配線 = **謄本が取れない行き止まり**。欄があると善意で埋められて詰むので
+    //   入口ごと閉じる。物件化は必ず null で送る。
+    expect(CONVERT_SRC).not.toMatch(/data-testid="convert-real-estate-number"/);
+    expect(CONVERT_SRC).not.toMatch(/setRealEstateNumber/);
+    expect(CONVERT_SRC).toMatch(/realEstateNumber:\s*null,/);
+    // 入力させないので 13 桁の検証も残さない (死んだ検証を置かない)
+    expect(CONVERT_SRC).not.toMatch(/不動産番号は13桁の数字で入力してください/);
+  });
+
+  it("⚠CSV取込の重複判定は塞がない (外部データの番号は重複検出の第1キー)", () => {
+    // 入口を閉じるのは**人が手で入れる欄だけ**。CSV 取込は番号で同一物件を
+    // 見分ける一番目の手がかりなので、ここまで塞ぐと重複物件が増える。
+    const dedupe = readSrc("src/lib/import-dedupe.ts");
+    expect(dedupe).toMatch(/realEstateNumber/);
+    expect(dedupe).toMatch(/1\. realEstateNumber/);
   });
 });

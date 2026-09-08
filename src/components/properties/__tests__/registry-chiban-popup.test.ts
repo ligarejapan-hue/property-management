@@ -275,7 +275,7 @@ describe("⚠不動産番号を持つ物件では出さない（設計 §3.1）"
     expect(route).toContain("realEstateNumber: p.realEstateNumber");
   });
 
-  it("番号ありのときは「所在検索の対象外」と案内する", () => {
+  it("番号ありのときは「どうすれば取得できるか」を案内する", () => {
     const shared = readFileSync(
       join(
         process.cwd(),
@@ -283,11 +283,39 @@ describe("⚠不動産番号を持つ物件では出さない（設計 §3.1）"
       ),
       "utf8",
     );
-    expect(shared).toContain("所在検索の対象外です");
-    // ⚠番号での取得は実サイトに触れる前に止まる（段階②が未実装）ので、
+    // ⚠2026-09-08: 旧文言は「⚠現在この経路では取得できません（番号での取得は
+    //   準備中）」で、読んだ人が次に何をすればよいか分からない**行き止まり**だった。
+    //   不動産番号は今後も作らない方針が決まったので、抜け出す手順を書く。
+    expect(shared).toContain("番号を空にして");
+    expect(shared).toContain("地番");
+    // ⚠コメントではなく**画面に出る文字列リテラル**だけを見る
+    //   (経緯をコメントに書き残せなくなるため)。
+    expect(shared.match(/["'`][^"'`\n]*準備中[^"'`\n]*["'`]/g)).toBeNull();
+    // ⚠番号での取得は実サイトに触れる前に止まるので、
     //   「通常の自動取得をどうぞ」と**必ず失敗する経路へ誘導しない**。
-    expect(shared).toContain("この経路では取得できません");
     expect(shared).not.toContain("通常の「謄本を自動取得」をご利用ください");
+  });
+
+  it("⚠同じ断り文句は2か所にあり、必ず一致させる", () => {
+    // 片方だけ直すとずれる（過去に実際にずれた）。同じ文字列を持つことを固定する。
+    const shared = readFileSync(
+      join(
+        process.cwd(),
+        "src/components/properties/registry-preflight-warnings.tsx",
+      ),
+      "utf8",
+    );
+    const button = readFileSync(
+      join(
+        process.cwd(),
+        "src/components/properties/registry-location-search-button.tsx",
+      ),
+      "utf8",
+    );
+    const MSG =
+      "不動産番号が入っているため、この画面からは取得できません。番号を空にして地番（建物は家屋番号）を登録すると取得できます";
+    expect(shared).toContain(MSG);
+    expect(button).toContain(MSG);
   });
 });
 
@@ -350,5 +378,44 @@ describe("⚠一括は「何を買うか」を承認の前に見せる（@codex 
 
   it("食い違いは見せるだけで止めない（発注者判断）", () => {
     expect(SHARED).not.toMatch(/mismatchWarning[\s\S]{0,120}disabled/);
+  });
+});
+
+describe("⚠「番号を空にして」と案内する以上、空にする手段が画面にある", () => {
+  /**
+   * @codex #420 P1: 入口(入力欄)を閉じただけでは足りない。
+   * CSV取込・謄本PDF取込からは番号が入り得るのに、消す手段まで消すと
+   * 「番号を空にしてください」という案内に**従えない本当の行き止まり**になる。
+   */
+  const EDIT_FORM = readFileSync(
+    join(process.cwd(), "src/components/properties/property-edit-form.tsx"),
+    "utf8",
+  );
+
+  it("物件編集に「消すだけの欄」がある (新しく入力はできない)", () => {
+    expect(EDIT_FORM).toMatch(/type: "clearOnly"/);
+    expect(EDIT_FORM).toContain('key: "realEstateNumber"');
+    // ⚠**描画部だけを見る**。ファイル全体に対して toContain すると、経緯を書いた
+    //   コメントの「空にする手段が…」に当たって**ボタンが無くても緑になる**
+    //   (実際に空振りしていた)。
+    const branch = EDIT_FORM.match(
+      /field\.type === "clearOnly" \? \([\s\S]*?\) : field\.type === "textarea"/,
+    );
+    expect(branch).not.toBeNull();
+    const m = branch?.[0] ?? "";
+    expect(m).toContain("空にする");
+    // 打ち直せない = readOnly。onChange で自由入力させない。
+    expect(m).toMatch(/readOnly/);
+    expect(m).not.toMatch(/onChange=\{\(e\)/);
+    // 空にするボタンは値が空なら押せない (無意味な保存を出さない)
+    expect(m).toMatch(/disabled=\{\(values\[field\.key\] \?\? ""\) === ""\}/);
+    // 押すと空になる (別の値を入れない)
+    expect(m).toMatch(/onClick=\{\(\) => handleChange\(field\.key, ""\)\}/);
+  });
+
+  it("元から値がある物件でだけ出す (空の物件に欄が生えて入力されない)", () => {
+    expect(EDIT_FORM).toMatch(/if \(field\.type === "clearOnly"\) return clearableKeys\.has\(field\.key\)/);
+    // 判定は**開いた時点の値**で固定する (編集中に消した瞬間に欄が消えない)
+    expect(EDIT_FORM).toMatch(/setClearableKeys\(/);
   });
 });

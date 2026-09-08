@@ -34,6 +34,9 @@ const CODE_LABELS: Record<string, string> = {
   NO_OWNER: "所有者未紐づけ",
   REGISTRY_DM_MISMATCH: "登記とDMの不整合",
   NO_LOT_NUMBER: "地番未入力",
+  // ⚠ルール自体は 2026-09-08 に廃止済み(「番号を入れろ」と促すと謄本が
+  //   取れない行き止まりを作るため)。過去データ表示用に残すだけで、
+  //   新しく発生することはない。
   NO_REAL_ESTATE_NUMBER: "不動産番号未入力",
   INVESTIGATION_NOT_CONFIRMED: "調査未確認",
   NO_ASSIGNEE: "担当者未設定",

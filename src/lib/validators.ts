@@ -5,7 +5,6 @@ import {
   normalizeCompanyRegistryNumber,
 } from "@/lib/corporate-number";
 import { isValidPostalCode } from "@/lib/address-lookup/normalize";
-import { normalizeRealEstateNumber } from "@/lib/address-normalizer";
 import {
   FIELD_SURVEY_MEMO_MAX_LEN,
   FIELD_SURVEY_PIN_TYPES,
@@ -124,16 +123,32 @@ const optionalPostalCode = z
   .nullable()
   // 全角数字/空白/各種ダッシュも許容(import・住所補完と同じ isValidPostalCode で判定)。生値でなく正規化後を検査(@codex R1)。
   .refine((v) => v == null || v === "" || isValidPostalCode(v), "郵便番号は7桁の数字で入力してください(例: 1000001 / 100-0001)");
-const optionalRealEstateNumber = z
+// ⚠`optionalRealEstateNumber`(数字1〜13桁の形式検査)は 2026-09-08 に削除した。
+//   手入力を全面的に断るようにした結果、**形式を検査する相手がいなくなった**
+//   (使わない検査を残すと「入れられる」と誤読される)。
+//   番号での取得を実サイトへ配線して手入力を再開するときは、
+//   `normalizeRealEstateNumber`(address-normalizer) を使って書き直すこと。
+//   ⚠正規化そのものは CSV取込側で今も使っている。
+/**
+ * 不動産番号は**手作業では新しく入れられない**(2026-09-08 発注者判断=番号は作らない)。
+ *
+ * ⚠画面から欄を消すだけでは足りない(@codex #420 P2): 反映前に開いたままのタブ、
+ *   直接 API を叩く別クライアントは素通りし、**謄本が取れない物件**が再び生まれる。
+ *   手入力の口(物件の新規作成 / ピンからの物件化 / 物件の編集)は**サーバーでも断る**。
+ * ⚠null / 空文字は**許す**。既存の番号を**消す**操作(編集画面の「空にする」)は
+ *   通さなければならない。断るのは「新しく値を入れる」ときだけ。
+ * ⚠CSV取込・謄本PDF取込はこのスキーマを通らない=従来どおり番号が入る
+ *   (重複判定の第1キーなので意図的に残す)。
+ */
+export const clearOnlyRealEstateNumber = z
   .string()
   .optional()
   .nullable()
-  // 数字(半/全角)+空白+区切りダッシュのみ許可し、正規化後が1〜13桁か。normalizeRealEstateNumber は非数字を削るため、
-  // かな/英字/記号の混入("abc123"等)を許すと生値のまま保存され、数字番号として誤保存/誤突合される(@codex R1/R2)。
   .refine(
-    (v) => v == null || v === "" || (/^[0-9０-９\s　\-‐-―ー－−]+$/.test(v) && /^\d{1,13}$/.test(normalizeRealEstateNumber(v))),
-    "不動産番号は数字(最大13桁)で入力してください",
+    (v) => v == null || v.trim() === "",
+    "不動産番号は入力できません。地番（建物は家屋番号）を登録してください",
   );
+
 const optionalLatitude = z.number().min(-90, "緯度は -90〜90 の範囲で入力してください").max(90, "緯度は -90〜90 の範囲で入力してください").optional().nullable();
 const optionalLongitude = z.number().min(-180, "経度は -180〜180 の範囲で入力してください").max(180, "経度は -180〜180 の範囲で入力してください").optional().nullable();
 
@@ -153,7 +168,7 @@ export const createPropertySchema = z.object({
     .max(BUILDING_NAME_MAX_LENGTH, "物件名が長すぎます")
     .optional()
     .nullable(),
-  realEstateNumber: optionalRealEstateNumber,
+  realEstateNumber: clearOnlyRealEstateNumber,
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).default("unconfirmed"),
   dmStatus: z.enum(["send", "hold", "no_send"]).default("hold"),
   caseStatus: z.enum(CASE_STATUS_VALUES).default("new_case"),
@@ -172,7 +187,7 @@ export const convertPinToPropertySchema = z.object({
   postalCode: optionalPostalCode,
   lotNumber: z.string().optional().nullable(),
   buildingNumber: z.string().optional().nullable(),
-  realEstateNumber: optionalRealEstateNumber,
+  realEstateNumber: clearOnlyRealEstateNumber,
 });
 export type ConvertPinToPropertyInput = z.infer<typeof convertPinToPropertySchema>;
 
@@ -194,7 +209,7 @@ export const updatePropertySchema = z.object({
     .max(BUILDING_NAME_MAX_LENGTH, "物件名が長すぎます")
     .optional()
     .nullable(),
-  realEstateNumber: optionalRealEstateNumber,
+  realEstateNumber: clearOnlyRealEstateNumber,
   registryStatus: z.enum(["unconfirmed", "scheduled", "obtained"]).optional(),
   dmStatus: z.enum(["send", "hold", "no_send"]).optional(),
   caseStatus: z.enum(CASE_STATUS_VALUES).optional(),
