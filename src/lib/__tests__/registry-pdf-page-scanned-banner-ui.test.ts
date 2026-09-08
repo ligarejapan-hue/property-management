@@ -52,6 +52,24 @@ describe("import/registry-pdf page F-1 scanned 警告バナー", () => {
     expect(code).toMatch(/ほとんど抽出できませんでした/);
   });
 
+  it("⚠APIの警告文も条件付き(バナーと同じ姿勢・両方に出るため)", () => {
+    // @codex #421 P2: この文は抽出画面と確認画面の両方に出る。無条件に
+    // 「貼り付けてください」と書くと、使える抽出結果まで捨てさせてしまう。
+    const route = fs.readFileSync(
+      path.resolve(
+        process.cwd(),
+        "src/app/api/import/registry-pdf/parse/route.ts",
+      ),
+      "utf8",
+    );
+    const code = stripComments(route);
+    expect(code).toMatch(/画像化された謄本PDFの可能性があります/);
+    expect(code).toMatch(/読み取れた内容が不足している場合は/);
+    expect(code).not.toMatch(/本文を手で貼り付けて投入してください/);
+    // 画面から OCR を消した方針は API の文言にも及ぶ
+    expect(code).not.toMatch(/OCR/i);
+  });
+
   it("バナーは「画像化謄本PDF」と、次にやること(貼り付け)を伝える", () => {
     expect(pageSrc).toMatch(/画像化された謄本PDF/);
     // ⚠OCR の語は 2026-09-08 に画面から撤去(機能はサーバー側に残す)。
