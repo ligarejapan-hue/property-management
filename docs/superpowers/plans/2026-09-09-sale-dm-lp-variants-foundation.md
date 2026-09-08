@@ -718,7 +718,7 @@ describe("assignCrossEvenly(総当たり)", () => {
   it("random は本数分布を変えず並びだけ変える(rng 注入)", () => {
     const rec = ids("r", 9);
     const a = assignCrossEvenly(rec, ids("d", 2), ids("l", 2));
-    const b = assignCrossEvenly(rec, ids("d", 2), ids("l", 2), { order: "random", rng: () => 0.99 });
+    const b = assignCrossEvenly(rec, ids("d", 2), ids("l", 2), { order: "random", rng: () => 0 });
     expect(counts(a).pair).toEqual(counts(b).pair);
     expect([...a.values()]).not.toEqual([...b.values()]);
   });
