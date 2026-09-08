@@ -3,6 +3,16 @@ import { assignCrossEvenly, assignVariantsEvenly } from "../sale-dm-letter/assig
 
 const ids = (p: string, n: number) => Array.from({ length: n }, (_, i) => `${p}${i}`);
 
+// 決定的な擬似乱数(LCG)。同じ seed で新しく作れば、同じ回数呼んだときに同じ列を返す
+// (Math.random だと呼び出しごとに状態が続くので使えない)。
+function makeLcg(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 1103515245 + 12345) % 2147483648;
+    return state / 2147483648;
+  };
+}
+
 function counts(map: Map<string, { variantId: string; lpVariantId: string | null }>) {
   const pair = new Map<string, number>(); const dm = new Map<string, number>(); const lp = new Map<string, number>();
   for (const v of map.values()) {
@@ -57,6 +67,19 @@ describe("assignCrossEvenly(総当たり)", () => {
     const b = assignCrossEvenly(rec, ids("d", 2), ids("l", 2), { order: "random", rng: () => 0 });
     expect(counts(a).pair).toEqual(counts(b).pair);
     expect([...a.values()]).not.toEqual([...b.values()]);
+  });
+  it("random でも DM軸は assignVariantsEvenly と宛先ごとに一致する(同じ rng 列を注入)", () => {
+    for (let n = 1; n <= 3; n++) for (let r = 0; r <= 12; r++) {
+      const dm = ids("d", n); const rec = ids("r", r);
+      // shuffle が消費する呼び出し回数は recipientIds の長さで決まるため、両方に
+      // 同じ seed で新しく作った LCG を渡せば同じ並びを再現できる。
+      const cross = assignCrossEvenly(rec, dm, [], { order: "random", rng: makeLcg(7) });
+      const legacy = assignVariantsEvenly(rec, dm, { order: "random", rng: makeLcg(7) });
+      expect(cross.size).toBe(legacy.size);
+      for (const rid of rec) {
+        expect(cross.get(rid)?.variantId, `n=${n} r=${r} rid=${rid}`).toBe(legacy.get(rid));
+      }
+    }
   });
   it("DM型か宛先が空なら空 Map", () => {
     expect(assignCrossEvenly([], ids("d", 2), ids("l", 2)).size).toBe(0);

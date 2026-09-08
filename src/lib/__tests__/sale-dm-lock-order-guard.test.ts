@@ -109,3 +109,17 @@ describe("型の割当(assign)のロック順序", () => {
     expect(s).toMatch(/\.sort\(\)[\s\S]{0,400}FROM dm_variants/);
   });
 });
+
+describe("LP型の貼り戻し保存(lp-variants/[lpId]/template)のロック順序", () => {
+  const s = src(
+    "src/app/api/properties/sale-dm/campaigns/[id]/lp-variants/[lpId]/template/route.ts",
+  );
+
+  it("dm_lp_variants のロックが properties のロックより先に来る", () => {
+    const l = s.search(/FROM dm_lp_variants[\s\S]{0,200}FOR UPDATE/);
+    const p = s.search(/FROM properties[\s\S]{0,200}FOR UPDATE/);
+    expect(l).toBeGreaterThan(-1);
+    expect(p).toBeGreaterThan(-1);
+    expect(l).toBeLessThan(p);
+  });
+});

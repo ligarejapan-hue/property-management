@@ -104,7 +104,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
         </button>
       </div>
       {campaign.lpVariants.length === 0 && (
-        <p className="text-xs text-gray-500">LP型がまだありません。追加すると、QRの飛び先がアプリ内のご案内ページになります(追加しなければ今までどおり外部LPへ転送)。</p>
+        <p className="text-xs text-gray-500">LP型がまだありません。この段階で作れるのは文章とA/Bの割当までで、QRの飛び先は当面これまでどおり外部LPです(アプリ内のご案内ページは次の段階で公開されます)。</p>
       )}
       {error && <p className="text-xs text-red-600">{error}</p>}
 

@@ -6,7 +6,7 @@ import { buildVariantRows, buildDmViewRows, buildLpVariantRows, buildPairRows } 
 const th = "px-3 py-2 font-medium text-gray-600";
 const td = "px-3 py-2";
 
-function Table({ title, head, rows }: { title: string; head: string[]; rows: Array<{ key: string; cells: Array<string | number>; strong?: number[] }> }) {
+function Table({ title, head, rows }: { title: string; head: string[]; rows: Array<{ key: string; cells: Array<string | number>; strong?: number[]; danger?: number[] }> }) {
   if (rows.length === 0) return null;
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
@@ -19,7 +19,12 @@ function Table({ title, head, rows }: { title: string; head: string[]; rows: Arr
           {rows.map((r) => (
             <tr key={r.key}>
               {r.cells.map((c, i) => (
-                <td key={i} className={`${td} ${i === 0 ? "font-semibold" : ""} ${r.strong?.includes(i) ? "font-medium text-indigo-700" : ""}`}>{c}</td>
+                <td
+                  key={i}
+                  className={`${td} ${i === 0 ? "font-semibold" : ""} ${r.danger?.includes(i) ? "font-medium text-red-700" : r.strong?.includes(i) ? "font-medium text-indigo-700" : ""}`}
+                >
+                  {c}
+                </td>
               ))}
             </tr>
           ))}
@@ -43,7 +48,7 @@ export default function SaleDmAggregateView({ campaign }: { campaign: SaleDmCamp
         head={["型", "送付", "到達", "宛先不明", "閲覧", "閲覧率", "反響", "反響率", "宛先不明率"]}
         rows={dmRows.map((r) => {
           const v = viewRows.get(r.variantId);
-          return { key: r.variantId, cells: [`型 ${r.label}`, r.sent, r.delivered, r.undeliverable, v?.viewed ?? 0, v?.viewRate ?? "—", r.inquiries, r.inquiryRate, r.undeliverableRate], strong: [5, 7] };
+          return { key: r.variantId, cells: [`型 ${r.label}`, r.sent, r.delivered, r.undeliverable, v?.viewed ?? 0, v?.viewRate ?? "—", r.inquiries, r.inquiryRate, r.undeliverableRate], strong: [5, 7], danger: [8] };
         })}
       />
       <Table

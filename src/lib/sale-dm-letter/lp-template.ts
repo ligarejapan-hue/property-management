@@ -9,7 +9,7 @@ export const LP_SECTIONS = ["見出し", "リード文", "本文", "よくある
 export type LpSection = (typeof LP_SECTIONS)[number];
 export const LP_LIMITS = { headline: 60, lead: 300, body: 4000, faqItem: 300, faqCount: 6 } as const;
 
-export interface LpFaqItem { q: string; a: string }
+export type LpFaqItem = { q: string; a: string };
 export interface LpTemplateParts { headline: string; lead: string | null; body: string; faq: LpFaqItem[] | null }
 
 export type LpSplitIssue =

@@ -77,7 +77,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
           headline: parts.headline,
           lead: parts.lead,
           bodyText: parts.body,
-          faqJson: parts.faq === null ? Prisma.DbNull : (parts.faq as unknown as Prisma.InputJsonValue),
+          faqJson: parts.faq === null ? Prisma.DbNull : parts.faq,
         },
       });
       return {

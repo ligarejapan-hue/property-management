@@ -27,6 +27,8 @@ vi.mock("@/lib/prisma", () => {
     owner: { findMany: vi.fn() },
     // 確定は「確定を作る前に型へ凍結印を立てる」(PR-D2 設計§2.4)。
     dmVariant: { updateMany: vi.fn(async () => ({ count: 0 })) },
+    // 確定は LP型へも同じく凍結印を立てる(markLpVariantsFrozen、設計 2026-09-08 §2.8)。
+    dmLpVariant: { updateMany: vi.fn(async () => ({ count: 0 })) },
     // 確定は field_staff のとき、物件親行をロックしたまま担当範囲を見直す(PR-D1)。
     property: { findMany: vi.fn(async () => []) },
     $queryRaw: vi.fn(async () => []),
@@ -65,8 +67,10 @@ const pm = prismaMock as never as {
     dmRecipientDraft: { findMany: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
     owner: { findMany: ReturnType<typeof vi.fn> };
     dmVariant: { updateMany: ReturnType<typeof vi.fn> };
+    dmLpVariant: { updateMany: ReturnType<typeof vi.fn> };
     property: { findMany: ReturnType<typeof vi.fn> };
     propertyDmLog: { findMany: ReturnType<typeof vi.fn> };
+    $queryRaw: ReturnType<typeof vi.fn>;
   };
 };
 
@@ -250,6 +254,42 @@ describe("POST confirm (bulk)", () => {
     const where = pm._tx.dmRecipientDraft.updateMany.mock.calls[0][0].where;
     expect(where.status).toBe("draft");
     expect(where.body).toEqual({ not: "" });
+  });
+
+  it("LP型が割り当てられた宛先の確定成功パス: markLpVariantsFrozen が dmLpVariant.updateMany を呼ぶ", async () => {
+    // 先読み・読み直しの両方が同じ LP型 l1 を返す(=LP型の割当が確定の途中で変わっていない)。
+    // この route は where.body の有無で先読み(条件あり)と読み直し(条件なし。@codex #375 R3)を
+    // 区別している(drafts/confirm/route.ts の `whereForReread` 参照)。
+    grant(...ALL);
+    const ID = "11111111-1111-4111-8111-111111111111";
+    const OID = "aaaaaaaa-1111-4111-8111-111111111111";
+    setupFreshDrafts(
+      [{ id: ID, recipientZip: "150-0001", recipientAddress: "渋谷区神宮前1-1-1", ownerId: OID }],
+      [{ id: OID, zip: "231-0842", address: "横浜市南区旧住所", currentZip: "150-0001", currentAddress: "渋谷区神宮前1-1-1" }],
+    );
+    const row = {
+      id: ID,
+      body: "拝啓 時下ますますご清祥のこととお喜び申し上げます。",
+      recipientZip: "150-0001",
+      recipientAddress: "渋谷区神宮前1-1-1",
+      representativeOwnerId: OID,
+      draftOwners: [{ ownerId: OID }],
+      variantId: "vvvvvvvv-1111-4111-8111-111111111111",
+      propertyId: "pppppppp-1111-4111-8111-111111111111",
+      lpVariantId: "l1",
+    };
+    // 先読み(where.body あり)・読み直し(where.body なし)いずれも同じ行(lpVariantId: "l1")を返す。
+    pm._tx.dmRecipientDraft.findMany.mockImplementation(async () => [row]);
+    const res = await confirmDrafts(new Request("http://x", { method: "POST", body: JSON.stringify({ ids: [ID] }) }) as never);
+    expect(res.status).toBe(200);
+    expect(pm._tx.dmLpVariant.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: ["l1"] }, templateFrozenAt: null } }),
+    );
+    const sqls = (pm._tx.$queryRaw as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) =>
+      Array.isArray(c[0]) ? (c[0] as string[]).join("?") : String(c[0]),
+    );
+    expect(sqls.some((q: string) => q.includes("dm_lp_variants"))).toBe(true);
+    expect(pm._tx.dmRecipientDraft.updateMany).toHaveBeenCalled();
   });
 
   it("⚠宛先が変わった下書きは確定させない（409・作り直してもらう）", async () => {

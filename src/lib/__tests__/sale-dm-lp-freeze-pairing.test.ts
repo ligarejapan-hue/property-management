@@ -31,6 +31,8 @@ describe("DM型へ凍結印を立てる経路は LP型へも立てる", () => {
       const l = s.search(/FROM dm_lp_variants[\s\S]{0,200}FOR UPDATE/);
       expect(l, `${rel} が dm_lp_variants をロックしていない`).toBeGreaterThan(-1);
       if (v > -1) expect(l).toBeGreaterThan(v);
+      const p = s.search(/FROM properties[\s\S]{0,200}FOR UPDATE/);
+      if (p > -1) expect(p, `${rel}: dm_lp_variants のロックは properties より先`).toBeGreaterThan(l);
     });
   }
 });
