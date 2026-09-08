@@ -1881,7 +1881,8 @@ describe("POST assign(両軸)", () => {
     expect(lpCalls.length).toBe(2);
     for (const c of lpCalls) {
       expect(c.data).toEqual({ lpVariantId: expect.any(String) });
-      expect(c.where).toMatchObject({ campaignId: "c1", status: { not: "sent" }, NOT: { lpVariantId: c.data.lpVariantId } });
+      expect(c.where).toMatchObject({ campaignId: "c1", status: { not: "sent" } });
+      expect(c.where.OR).toEqual([{ lpVariantId: null }, { lpVariantId: { not: c.data.lpVariantId } }]);
     }
     const j = await res.json();
     expect(j).toHaveProperty("perLpVariant");
@@ -2009,7 +2010,8 @@ tx の中(L62-88)を次に(移動元の収集に lpVariantId も含め、dm_vari
         if (ids.length === 0) continue;
         // LP型は本文に影響しない(表示のたびに展開)ので、本文・状態は触らない。
         const result = await tx.dmRecipientDraft.updateMany({
-          where: { id: { in: ids }, campaignId: id, status: { not: "sent" }, NOT: { lpVariantId } },
+          // NULL(未割当)の行も対象にする(Prisma の not は NULL 行に一致しない)。
+          where: { id: { in: ids }, campaignId: id, status: { not: "sent" }, OR: [{ lpVariantId: null }, { lpVariantId: { not: lpVariantId } }] },
           data: { lpVariantId },
         });
         assignedLp += result.count;
