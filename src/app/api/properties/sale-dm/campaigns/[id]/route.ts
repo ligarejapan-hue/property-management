@@ -12,6 +12,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       where: { id },
       include: {
         variants: true,
+        lpVariants: { orderBy: { label: "asc" } },
         recipients: {
           orderBy: { createdAt: "asc" },
           include: { property: { select: { createdBy: true, assignedTo: true } } },
@@ -32,6 +33,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const recipients = visible.map((r) => ({
       id: r.id,
       variantId: r.variantId,
+      lpVariantId: r.lpVariantId,
       propertyId: r.propertyId,
       recipientName: r.recipientName,
       recipientZip: r.recipientZip,

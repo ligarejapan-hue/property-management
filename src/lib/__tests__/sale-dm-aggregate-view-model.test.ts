@@ -4,7 +4,7 @@ import type { SaleDmCampaign } from "@/lib/api-client";
 
 function draft(over: Partial<SaleDmCampaign["recipients"][number]>): SaleDmCampaign["recipients"][number] {
   return {
-    id: Math.random().toString(36), variantId: "v1", propertyId: "p", recipientName: "x", recipientZip: null,
+    id: Math.random().toString(36), variantId: "v1", lpVariantId: null, propertyId: "p", recipientName: "x", recipientZip: null,
     recipientAddress: null, honorific: "様", coOwnerCount: 1, body: "", status: "sent", outcome: "none",
     deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, ...over,
   };
@@ -15,6 +15,7 @@ const campaign: SaleDmCampaign = {
   variants: [
     { id: "v1", label: "A", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null, lpUrl: null },
   ],
+  lpVariants: [],
   recipients: [
     draft({ deliveryStatus: "delivered", lpFirstAccessAt: "2026-06-20T00:00:00Z" }), // 到達+反響
     draft({ deliveryStatus: "delivered" }),                                          // 到達のみ
