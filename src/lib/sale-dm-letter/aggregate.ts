@@ -102,3 +102,44 @@ export function aggregateByVariant(drafts: AggregateDraftInput[]): CampaignAggre
 
   return { byVariant, total };
 }
+
+// ---- 二軸集計(設計 2026-09-08 §2.1)。DM型=閲覧率、LP型=閲覧(申込率は PR4 で追加)、組み合わせ表。
+export const LP_NONE = "__none__";
+
+export interface TwoAxisDraftInput extends AggregateDraftInput {
+  lpVariantId: string | null;
+}
+interface ViewBucket { sent: number; delivered: number; viewed: number; deliveredViewed: number }
+export interface DmViewAggregate { variantId: string; sent: number; delivered: number; viewed: number; deliveredViewed: number; viewRate: number | null }
+export interface LpVariantAggregate { lpVariantId: string; sent: number; delivered: number; viewed: number; deliveredViewed: number; viewRate: number | null }
+export interface PairAggregate { variantId: string; lpVariantId: string; sent: number; delivered: number; viewed: number }
+export interface TwoAxisAggregate { byDmVariant: DmViewAggregate[]; byLpVariant: LpVariantAggregate[]; byPair: PairAggregate[] }
+
+function bump(map: Map<string, ViewBucket>, key: string, draft: TwoAxisDraftInput): void {
+  const b = map.get(key) ?? { sent: 0, delivered: 0, viewed: 0, deliveredViewed: 0 };
+  const isDelivered = draft.deliveryStatus === "delivered";
+  const isViewed = draft.lpFirstAccessAt != null;
+  b.sent += 1;
+  if (isDelivered) b.delivered += 1;
+  if (isViewed) b.viewed += 1;
+  if (isDelivered && isViewed) b.deliveredViewed += 1;
+  map.set(key, b);
+}
+
+export function aggregateTwoAxis(drafts: TwoAxisDraftInput[]): TwoAxisAggregate {
+  const dm = new Map<string, ViewBucket>();
+  const lp = new Map<string, ViewBucket>();
+  const pair = new Map<string, ViewBucket>();
+  for (const draft of drafts) {
+    const lpKey = draft.lpVariantId ?? LP_NONE;
+    bump(dm, draft.variantId, draft);
+    bump(lp, lpKey, draft);
+    bump(pair, `${draft.variantId}|${lpKey}`, draft);
+  }
+  const sortKeys = (m: Map<string, ViewBucket>) => [...m.keys()].sort((a, b) => a.localeCompare(b));
+  return {
+    byDmVariant: sortKeys(dm).map((k) => { const b = dm.get(k)!; return { variantId: k, sent: b.sent, delivered: b.delivered, viewed: b.viewed, deliveredViewed: b.deliveredViewed, viewRate: rate(b.deliveredViewed, b.delivered) }; }),
+    byLpVariant: sortKeys(lp).map((k) => { const b = lp.get(k)!; return { lpVariantId: k, sent: b.sent, delivered: b.delivered, viewed: b.viewed, deliveredViewed: b.deliveredViewed, viewRate: rate(b.deliveredViewed, b.delivered) }; }),
+    byPair: sortKeys(pair).map((k) => { const b = pair.get(k)!; const [variantId, lpVariantId] = k.split("|"); return { variantId, lpVariantId, sent: b.sent, delivered: b.delivered, viewed: b.viewed }; }),
+  };
+}
