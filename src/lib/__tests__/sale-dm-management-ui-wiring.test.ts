@@ -139,4 +139,19 @@ describe("一括送付済みの terminal スキップ(workspace)", () => {
       .join("\n");
     expect(codeOnly).not.toMatch(/\bthrow\b/);
   });
+
+  it("LP型の管理パネルは 作成/更新/削除/プロンプト/貼り戻し の client を呼び、削除と文体変更で確認を出す", () => {
+    const src = read("../../components/sale-dm/lp-variant-manager.tsx");
+    for (const fn of ["createSaleDmLpVariant", "updateSaleDmLpVariant", "deleteSaleDmLpVariant", "fetchSaleDmLpVariantPrompt", "saveSaleDmLpVariantTemplate"]) {
+      expect(src).toContain(fn);
+    }
+    expect(src).toContain("window.confirm");
+    expect(src).not.toContain("bg-blue-600");
+  });
+  it("作業画面に LP型の管理パネルと3表の集計を組み込んでいる", () => {
+    expect(read("../../app/(dashboard)/properties/sale-dm/[campaignId]/page.tsx")).toContain("SaleDmLpVariantManager");
+    const agg = read("../../components/sale-dm/aggregate-view.tsx");
+    expect(agg).toContain("buildLpVariantRows");
+    expect(agg).toContain("buildPairRows");
+  });
 });

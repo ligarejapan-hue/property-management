@@ -17,6 +17,7 @@ import { renderLetterHtml } from "@/lib/sale-dm-letter/templates";
 import { composeAddresseeHonorific } from "@/lib/sale-dm-letter/addressee";
 import SaleDmAdjustPanel from "@/components/sale-dm/adjust-panel";
 import SaleDmVariantManager from "@/components/sale-dm/variant-manager";
+import SaleDmLpVariantManager from "@/components/sale-dm/lp-variant-manager";
 import SaleDmRecipientList from "@/components/sale-dm/recipient-list";
 import SaleDmAggregateView from "@/components/sale-dm/aggregate-view";
 
@@ -228,6 +229,9 @@ export default function SaleDmWorkspacePage() {
           </div>
           <div className="rounded-lg border border-gray-200 bg-white p-4">
             <SaleDmVariantManager campaign={campaign} onChanged={load} />
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-white p-4">
+            <SaleDmLpVariantManager campaign={campaign} onChanged={load} />
           </div>
         </div>
 
