@@ -13,16 +13,32 @@ const pageSrc = fs.readFileSync(
   "utf8",
 );
 
+// コメントを取り除く。⚠経緯の説明はコメントに書き残したいので、
+// 「画面に出るか」を見る検査はコメントを外してから行う。
+// 行頭が // の行と、ブロックコメントだけを落とす(URL の // は残す)。
+function stripComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((l) => !/^\s*\/\//.test(l))
+    .join("\n");
+}
+
 describe("registry-pdf page Phase F-2a 強化 UI", () => {
   it("scanned 警告バナーは既存 data-testid を維持する（F-1 互換）", () => {
     expect(pageSrc).toMatch(/data-testid="scanned-pdf-banner"/);
     expect(pageSrc).toMatch(/画像化された謄本PDFの可能性があります/);
   });
 
-  it("F-2a: バナー文言に OCR 未対応の明示と外部 OCR 誘導が含まれる", () => {
-    expect(pageSrc).toMatch(/OCR.{0,3}未対応/);
-    expect(pageSrc).toMatch(/外部のOCRツール|外部OCR/);
-    expect(pageSrc).toMatch(/手動/);
+  it("⚠バナーに OCR の語を出さない(2026-09-08 発注者判断で画面から撤去)", () => {
+    // ⚠**機能そのものは残っている**(src/lib/registry-ocr/* と ocr-draft route)。
+    //   消したのは**画面の導線と文言だけ**。実測で「横向き・低品質のスキャンは
+    //   文字数が1/3しか拾えない」と分かり、あると期待させてしまうため。
+    // ⚠**コメントを取り除いてから**見る。経緯をコメントに書き残せるようにしつつ、
+    //   文字列リテラルだけでなく **JSX の素のテキスト**も取りこぼさない。
+    expect(stripComments(pageSrc)).not.toMatch(/OCR/i);
+    // 代わりに「どうすればよいか」を書く
+    expect(pageSrc).toMatch(/テキストを貼り付けるモード/);
   });
 
   it("F-2a: 「テキストを貼り付けるモードに切り替える」ボタンがある", () => {
@@ -51,17 +67,17 @@ describe("registry-pdf page Phase F-2a 強化 UI", () => {
   });
 
   it("F-2a: 抽出文字数のみ画面表示（本文・raw text は持ち出さない）", () => {
-    expect(pageSrc).toMatch(/抽出文字数:\s*\{embeddedTextLength\}\s*文字/);
+    expect(pageSrc).toMatch(/取り出せた文字数:\s*\{embeddedTextLength\}\s*文字/);
     expect(pageSrc).not.toMatch(/_rawTextPreview/);
     expect(pageSrc).not.toMatch(/result\.rawText/);
   });
 
-  it("ローカル OCR エンジン（tesseract/sharp）はページに同梱せず、OCR は localhost サービスへ委譲する", () => {
-    // ブラウザ内 OCR 実行や OCR エンジンの同梱はしない（PII egress 防止・bundle 肥大回避）。
+  it("ローカル OCR エンジンをページに同梱しない(PII持ち出し防止・bundle肥大回避)", () => {
     expect(pageSrc).not.toMatch(/tesseract/i);
     expect(pageSrc).not.toMatch(/from\s+"sharp"/);
-    // OCR は gated client(requestRegistryOcrDraft)経由でサーバ route へ委譲する。
-    expect(pageSrc).toMatch(/requestRegistryOcrDraft/);
+    // ⚠画面からの呼び出し(requestRegistryOcrDraft)は 2026-09-08 に撤去した。
+    //   サーバー側の route は残っている(復活はこの1行を戻すだけ)。
+    expect(pageSrc).not.toMatch(/requestRegistryOcrDraft/);
   });
 
   it("F-2a: 既存 isLikelyScanned 後方互換読みも残す", () => {

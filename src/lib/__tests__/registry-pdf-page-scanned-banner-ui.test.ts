@@ -19,6 +19,17 @@ const pageSrc = fs.readFileSync(
   "utf8",
 );
 
+// コメントを取り除く。⚠経緯の説明はコメントに書き残したいので、
+// 「画面に出るか」を見る検査はコメントを外してから行う。
+// 行頭が // の行と、ブロックコメントだけを落とす(URL の // は残す)。
+function stripComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((l) => !/^\s*\/\//.test(l))
+    .join("\n");
+}
+
 describe("import/registry-pdf page F-1 scanned 警告バナー", () => {
   it("isLikelyScanned state を保持している", () => {
     expect(pageSrc).toMatch(/\[\s*isLikelyScanned\s*,\s*setIsLikelyScanned\s*\]/);
@@ -31,10 +42,41 @@ describe("import/registry-pdf page F-1 scanned 警告バナー", () => {
     expect(pageSrc).toMatch(/role=("|')alert\1/);
   });
 
-  it("バナー文言に画像化謄本PDF・OCR未対応・手動確認の表現が含まれる", () => {
+  it("⚠バナーは断定しない(判定は「取り出せた文字が50字未満」だけ)", () => {
+    // @codex #421 P2: 文字はあるが少ないPDFを「画像です」と言い切ると、
+    // 取れている抽出結果まで捨てさせてしまう。可能性の表現を保つ。
+    const code = stripComments(pageSrc);
+    expect(code).toMatch(/画像化された謄本PDFの可能性があります/);
+    expect(code).not.toMatch(/画像化された謄本PDFです/);
+    expect(code).not.toMatch(/文字の情報を持っていない/);
+    expect(code).toMatch(/ほとんど抽出できませんでした/);
+  });
+
+  it("⚠APIの警告文も条件付き(バナーと同じ姿勢・両方に出るため)", () => {
+    // @codex #421 P2: この文は抽出画面と確認画面の両方に出る。無条件に
+    // 「貼り付けてください」と書くと、使える抽出結果まで捨てさせてしまう。
+    const route = fs.readFileSync(
+      path.resolve(
+        process.cwd(),
+        "src/app/api/import/registry-pdf/parse/route.ts",
+      ),
+      "utf8",
+    );
+    const code = stripComments(route);
+    expect(code).toMatch(/画像化された謄本PDFの可能性があります/);
+    expect(code).toMatch(/読み取れた内容が不足している場合は/);
+    expect(code).not.toMatch(/本文を手で貼り付けて投入してください/);
+    // 画面から OCR を消した方針は API の文言にも及ぶ
+    expect(code).not.toMatch(/OCR/i);
+  });
+
+  it("バナーは「画像化謄本PDF」と、次にやること(貼り付け)を伝える", () => {
     expect(pageSrc).toMatch(/画像化された謄本PDF/);
-    expect(pageSrc).toMatch(/OCR/);
-    expect(pageSrc).toMatch(/手動/);
+    // ⚠OCR の語は 2026-09-08 に画面から撤去(機能はサーバー側に残す)。
+    //   ⚠**コメントを取り除いてから**見る。経緯をコメントに書き残せるようにしつつ、
+    //   文字列リテラルだけでなく **JSX の素のテキスト**も取りこぼさない。
+    expect(stripComments(pageSrc)).not.toMatch(/OCR/i);
+    expect(pageSrc).toMatch(/テキストを貼り付けるモード/);
   });
 
   it("parse レスポンスから extractionSource / isLikelyScanned を受け取る", () => {
