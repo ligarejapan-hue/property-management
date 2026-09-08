@@ -71,3 +71,38 @@ export function applyManualAssignment(
   }
   return map;
 }
+
+export interface CrossAssignment {
+  variantId: string;
+  lpVariantId: string | null;
+}
+
+/**
+ * DM型×LP型の両軸へ総当たりで均等割り(設計 2026-09-08 §2.1)。
+ *  - 宛先 k 番目: DM型 = dm[k % n](既存 assignVariantsEvenly と同じ順)、
+ *    LP型 = lp[(k % n + floor(k / n)) % m](行ごとにずらすラテン方陣。n×m の1周で全組を1回ずつ)。
+ *  - 端数は先頭の組から1つずつ多い。random は本数分布を保ったまま並びだけシャッフル。
+ *  - LP型が0件なら lpVariantId=null で、DM軸は既存関数と完全一致(後方互換)。
+ */
+export function assignCrossEvenly(
+  recipientIds: string[],
+  dmVariantIds: string[],
+  lpVariantIds: string[],
+  opts?: AssignOptions,
+): Map<string, CrossAssignment> {
+  const map = new Map<string, CrossAssignment>();
+  if (dmVariantIds.length === 0 || recipientIds.length === 0) return map;
+  const n = dmVariantIds.length;
+  const m = lpVariantIds.length;
+  let seq: CrossAssignment[] = [];
+  for (let k = 0; k < recipientIds.length; k++) {
+    const dmIdx = k % n;
+    const lp = m === 0 ? null : lpVariantIds[(dmIdx + Math.floor(k / n)) % m];
+    seq.push({ variantId: dmVariantIds[dmIdx], lpVariantId: lp });
+  }
+  if (opts?.order === "random") {
+    seq = shuffle(seq, opts.rng ?? Math.random);
+  }
+  recipientIds.forEach((rid, i) => map.set(rid, seq[i]));
+  return map;
+}
