@@ -220,6 +220,7 @@ export async function createSaleDmCampaign(body: CreateSaleDmCampaignBody) {
 export interface SaleDmDraft {
   id: string;
   variantId: string;
+  lpVariantId: string | null;
   propertyId: string;
   recipientName: string;
   recipientZip: string | null;
@@ -247,18 +248,37 @@ export interface SaleDmVariant {
   lpUrl: string | null;
 }
 
+export interface SaleDmLpVariantOptions {
+  tone: string;
+  length: string;
+  appeal: string;
+  strength: string;
+}
+// LP型(設計 2026-09-08)。文章そのもの(rawTemplate/bodyText)は一覧には載せない(プロンプト画面で取る)。
+export interface SaleDmLpVariant {
+  id: string;
+  label: string;
+  tone: string;
+  length: string;
+  appeal: string;
+  strength: string;
+  headline: string | null;
+  templateFrozenAt: string | null;
+}
+
 export interface SaleDmCampaign {
   id: string;
   name: string;
   status: string;
   variants: SaleDmVariant[];
+  lpVariants: SaleDmLpVariant[];
   recipients: SaleDmDraft[];
 }
 
 export async function fetchSaleDmCampaign(id: string) {
   if (USE_MOCK) {
     await mockDelay();
-    return { campaign: { id, name: "モック売却DM", status: "draft", variants: [], recipients: [] } as SaleDmCampaign };
+    return { campaign: { id, name: "モック売却DM", status: "draft", variants: [], lpVariants: [], recipients: [] } as SaleDmCampaign };
   }
   return apiFetch<{ campaign: SaleDmCampaign }>(`/api/properties/sale-dm/campaigns/${id}`);
 }
@@ -400,19 +420,85 @@ export async function applySaleDmVariantTemplate(
   );
 }
 
-export async function assignSaleDmVariants(
-  campaignId: string,
-  body: { mode: "auto" | "manual"; order?: "sequential" | "random"; assignments?: { recipientId: string; variantId: string }[] },
-) {
+// ---- LP型(設計 2026-09-08 §2.1/§2.2)
+export async function createSaleDmLpVariant(campaignId: string, body: { label: string; options: SaleDmLpVariantOptions }) {
   if (USE_MOCK) {
     await mockDelay();
-    return { assigned: 0, perVariant: {} as Record<string, number> };
+    return { lpVariant: { id: `mock-lp-${body.label}`, label: body.label, ...body.options, headline: null, templateFrozenAt: null } as SaleDmLpVariant };
   }
-  return apiFetch<{ assigned: number; perVariant: Record<string, number> }>(`/api/properties/sale-dm/campaigns/${campaignId}/assign`, {
+  return apiFetch<{ lpVariant: SaleDmLpVariant }>(`/api/properties/sale-dm/campaigns/${campaignId}/lp-variants`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+export async function updateSaleDmLpVariant(campaignId: string, lpId: string, body: { label?: string; options?: Partial<SaleDmLpVariantOptions> }) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { lpVariant: { id: lpId } as SaleDmLpVariant };
+  }
+  return apiFetch<{ lpVariant: SaleDmLpVariant }>(`/api/properties/sale-dm/campaigns/${campaignId}/lp-variants/${lpId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteSaleDmLpVariant(campaignId: string, lpId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { deleted: lpId };
+  }
+  return apiFetch<{ deleted: string }>(`/api/properties/sale-dm/campaigns/${campaignId}/lp-variants/${lpId}`, { method: "DELETE" });
+}
+
+export async function fetchSaleDmLpVariantPrompt(campaignId: string, lpId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { prompt: "（モック）LP用プロンプト", digest: "0".repeat(64), frozen: false, rawTemplate: null as string | null, bodyDigest: "0".repeat(64) };
+  }
+  return apiFetch<{ prompt: string; digest: string; frozen: boolean; rawTemplate: string | null; bodyDigest: string }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/lp-variants/${lpId}/prompt`,
+  );
+}
+
+export async function saveSaleDmLpVariantTemplate(
+  campaignId: string,
+  lpId: string,
+  body: { body: string; promptDigest: string; baseBodyDigest: string },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { changed: true, bodyDigest: "0".repeat(64), parts: { headline: "見出し", lead: null as string | null, faqCount: 0, bodyLength: 0 } };
+  }
+  return apiFetch<{ changed: boolean; bodyDigest: string; parts?: { headline: string; lead: string | null; faqCount: number; bodyLength: number } }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/lp-variants/${lpId}/template`,
+    { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
+}
+
+export async function assignSaleDmVariants(
+  campaignId: string,
+  body: {
+    mode: "auto" | "manual";
+    order?: "sequential" | "random";
+    assignments?: { recipientId: string; variantId: string }[];
+    lpAssignments?: { recipientId: string; lpVariantId: string | null }[];
+  },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { assigned: 0, perVariant: {} as Record<string, number>, assignedLp: 0, perLpVariant: {} as Record<string, number> };
+  }
+  return apiFetch<{ assigned: number; perVariant: Record<string, number>; assignedLp: number; perLpVariant: Record<string, number> }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/assign`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 // 物件の「宛先不明」フラグを手動解除(任意で dmStatus を send/hold へ戻す)。

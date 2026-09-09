@@ -226,11 +226,18 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // campaignId/variantId/propertyId/count/fields は ALWAYS_SAFE。本文・宛名・住所・メモ・trackingToken は
   // detail に載せておらず、ここにも含めない(perVariant の variantId キー別件数は redact のまま)。
   sale_dm_campaign_create: new Set(["requested", "generated", "saved", "skippedByUnlink", "excludedTerminal", "truncated", "createdAt"]),
-  sale_dm_assign_variants: new Set(["mode", "order", "assigned", "assignedAt"]),
+  sale_dm_assign_variants: new Set(["mode", "order", "assigned", "assignedLp", "assignedAt"]),
   sale_dm_campaign_print: new Set(["printedAt", "excludedTerminal"]),
   sale_dm_variant_create: new Set(["createdAt"]),
   sale_dm_variant_update: new Set(["updatedAt"]),
   sale_dm_variant_delete: new Set(["deletedAt"]),
+  // LP型(設計 2026-09-08)。DM型と同じく件数/ID/日時のみ。見出し・本文・ラベルは載せない。
+  sale_dm_lp_variant_create: new Set(["createdAt"]),
+  sale_dm_lp_variant_update: new Set(["updatedAt"]),
+  // detachedCount = 削除時に割当なしへ戻した未送付宛先の件数(数値のみ・PIIなし)。
+  sale_dm_lp_variant_delete: new Set(["deletedAt", "detachedCount"]),
+  sale_dm_lp_prompt_view: new Set(["viewedAt"]),
+  sale_dm_lp_body_paste: new Set(["pastedAt", "faqCount", "bodyLength"]),
   // 外部AI方式(PR-D2)。⚠プロンプト本文・手紙本文は detail に載せない(件数/ID/日時のみ)。
   sale_dm_prompt_view: new Set(["viewedAt"]),
   sale_dm_body_paste: new Set(["clearedCount", "pastedAt"]),

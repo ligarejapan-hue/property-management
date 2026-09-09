@@ -5,7 +5,7 @@ import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmVariantUpdateSchema } from "@/lib/validators-sale-dm";
-import { SETTLED_DRAFT_STATUSES, isVariantFrozen, markVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
+import { SETTLED_DRAFT_STATUSES, isVariantFrozen, markVariantsFrozen, markLpVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string; variantId: string }> }) {
   try {
@@ -80,6 +80,25 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       // 凍結判定のため variant を先に取るので、こちらも先に取らないと互いに待ち合って
       // デッドロックする。
       await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ${variantId}::uuid AND campaign_id = ${id}::uuid FOR UPDATE`;
+
+      // 確定の解除は LP型の「確定があった」証拠も消す。dm_variants の直後に dm_lp_variants を掴む(設計 2026-09-08)。
+      // ⚠settledLp はここ(draft 行のロック**前**)で読むが、下の settledCount は draft 行を
+      //   FOR UPDATE した**後**に数える。この窓が壊れていない理由:
+      //   ①確定を作る経路(drafts/confirm)は dm_variants を先に掴むので、この tx が :82 で
+      //     この variant を掴んでいる間、新しい確定はここへ生まれない(直列化済み)。
+      //   ②confirmed→sent(mark-sent)は元々 settled 集合(confirmed も sent も
+      //     SETTLED_DRAFT_STATUSES)に含まれるので、状態が sent に進んでも settled かどうかの
+      //     判定は変わらない。
+      //   よって draft ロックの前後で「この variant 配下の settled 集合」自体は変わらず、
+      //   先読みした settledLp は draft ロック後の settledCount と同じ集合を指す。
+      const settledLp = await tx.dmRecipientDraft.findMany({
+        where: { campaignId: id, variantId, status: { in: [...SETTLED_DRAFT_STATUSES] } },
+        select: { lpVariantId: true },
+      });
+      const settledLpIds = [...new Set(settledLp.map((d) => d.lpVariantId).filter((x): x is string => !!x))].sort();
+      if (settledLpIds.length > 0) {
+        await tx.$queryRaw`SELECT id FROM dm_lp_variants WHERE id = ANY(${settledLpIds}::uuid[]) ORDER BY id FOR UPDATE`;
+      }
 
       // ⚠担当範囲は**物件親行をロックしてから数え直す**(@codex #376 R9)。ロックの外で数えると、
       //   数えた直後〜commit の間に担当が変わった宛先の本文・印刷結果まで変えてしまう
@@ -171,6 +190,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         //   確定が1件も無い型には立てない（見た目を変えただけの型の文面まで縛らない）。
         if (settledCount > 0) {
           await markVariantsFrozen(tx, [variantId]);
+          await markLpVariantsFrozen(tx, settledLpIds);
         }
         // LP・デザインの変更は本文を変えないが、確定済み(=印刷対象)の宛先の**刷り上がり**を変える
         // (LP=QRの遷移先・デザイン=紙面の体裁)。承認したものと違うものが刷られるのを防ぐため

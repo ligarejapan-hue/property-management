@@ -84,6 +84,33 @@ export const saleDmAssignSchema = z.object({
   assignments: z
     .array(z.object({ recipientId: z.string(), variantId: z.string() }))
     .optional(),
+  // LP型の手動割当(設計 2026-09-08 §2.1)。DM型の assignments と独立に指定する。
+  lpAssignments: z
+    .array(z.object({ recipientId: z.string(), lpVariantId: z.string().nullable() }))
+    .optional(),
 });
 
 export type SaleDmAssign = z.infer<typeof saleDmAssignSchema>;
+
+// ---- LP型(設計 2026-09-08 §2.1/§2.2)。文体4項目は DM型と同じ列挙。印刷デザイン・追加の指示は持たない。
+export const saleDmLpVariantOptionsSchema = z.object({
+  tone: z.enum(["formal", "standard", "soft"]),
+  length: z.enum(["short", "medium", "long"]),
+  appeal: z.enum(["price", "inheritance", "vacant", "buyer"]),
+  strength: z.enum(["low", "medium", "high"]),
+});
+export type SaleDmLpVariantOptions = z.infer<typeof saleDmLpVariantOptionsSchema>;
+
+export const saleDmLpVariantCreateSchema = z.object({
+  label: z.string().min(1).max(40),
+  options: saleDmLpVariantOptionsSchema,
+});
+export const saleDmLpVariantUpdateSchema = z.object({
+  label: z.string().min(1).max(40).optional(),
+  options: saleDmLpVariantOptionsSchema.partial().optional(),
+});
+export const saleDmLpTemplatePutSchema = z.object({
+  body: z.string(),
+  promptDigest: z.string().length(64),
+  baseBodyDigest: z.string().length(64),
+});

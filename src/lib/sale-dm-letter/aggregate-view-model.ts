@@ -1,5 +1,6 @@
 import type { SaleDmCampaign } from "@/lib/api-client";
 import { isInquiry } from "./recipient-actions";
+import { aggregateTwoAxis, LP_NONE } from "./aggregate";
 
 export function formatRate(numerator: number, denominator: number): string {
   if (denominator <= 0) return "—";
@@ -41,4 +42,60 @@ export function buildVariantRows(campaign: SaleDmCampaign): VariantRow[] {
       undeliverableRate: formatRate(undeliverable, sent),
     };
   });
+}
+
+export const LP_NONE_LABEL = "LP型なし(外部LP)";
+
+function sentDraftsForTwoAxis(campaign: SaleDmCampaign) {
+  return campaign.recipients
+    .filter((r) => r.status === "sent")
+    .map((r) => ({
+      variantId: r.variantId,
+      lpVariantId: r.lpVariantId ?? null,
+      deliveryStatus: r.deliveryStatus,
+      lpFirstAccessAt: r.lpFirstAccessAt ? new Date(r.lpFirstAccessAt) : null,
+      phoneInquiryAt: r.phoneInquiryAt ? new Date(r.phoneInquiryAt) : null,
+    }));
+}
+
+export interface DmViewRow { variantId: string; label: string; delivered: number; viewed: number; viewRate: string }
+export interface LpVariantRow { lpVariantId: string; label: string; sent: number; delivered: number; viewed: number; viewRate: string }
+export interface PairRow { key: string; label: string; sent: number; delivered: number; viewed: number }
+
+// DM型の成績 = 閲覧率(設計 2026-09-08 §2.1)。到達かつ閲覧 ÷ 到達。
+export function buildDmViewRows(campaign: SaleDmCampaign): DmViewRow[] {
+  const label = new Map(campaign.variants.map((v) => [v.id, v.label]));
+  return aggregateTwoAxis(sentDraftsForTwoAxis(campaign)).byDmVariant.map((v) => ({
+    variantId: v.variantId,
+    label: label.get(v.variantId) ?? v.variantId,
+    delivered: v.delivered,
+    viewed: v.viewed,
+    viewRate: formatRate(v.deliveredViewed, v.delivered),
+  }));
+}
+
+export function buildLpVariantRows(campaign: SaleDmCampaign): LpVariantRow[] {
+  if (campaign.lpVariants.length === 0) return [];
+  const label = new Map(campaign.lpVariants.map((v) => [v.id, v.label]));
+  return aggregateTwoAxis(sentDraftsForTwoAxis(campaign)).byLpVariant.map((v) => ({
+    lpVariantId: v.lpVariantId,
+    label: v.lpVariantId === LP_NONE ? LP_NONE_LABEL : (label.get(v.lpVariantId) ?? v.lpVariantId),
+    sent: v.sent,
+    delivered: v.delivered,
+    viewed: v.viewed,
+    viewRate: formatRate(v.deliveredViewed, v.delivered),
+  }));
+}
+
+export function buildPairRows(campaign: SaleDmCampaign): PairRow[] {
+  if (campaign.lpVariants.length === 0) return [];
+  const dm = new Map(campaign.variants.map((v) => [v.id, v.label]));
+  const lp = new Map(campaign.lpVariants.map((v) => [v.id, v.label]));
+  return aggregateTwoAxis(sentDraftsForTwoAxis(campaign)).byPair.map((p) => ({
+    key: `${p.variantId}|${p.lpVariantId}`,
+    label: `${dm.get(p.variantId) ?? p.variantId} × ${p.lpVariantId === LP_NONE ? "LP型なし" : (lp.get(p.lpVariantId) ?? p.lpVariantId)}`,
+    sent: p.sent,
+    delivered: p.delivered,
+    viewed: p.viewed,
+  }));
 }

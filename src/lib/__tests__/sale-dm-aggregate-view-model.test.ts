@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { formatRate, buildVariantRows } from "../sale-dm-letter/aggregate-view-model";
+import { formatRate, buildVariantRows, buildDmViewRows, buildLpVariantRows, buildPairRows } from "../sale-dm-letter/aggregate-view-model";
 import type { SaleDmCampaign } from "@/lib/api-client";
 
 function draft(over: Partial<SaleDmCampaign["recipients"][number]>): SaleDmCampaign["recipients"][number] {
   return {
-    id: Math.random().toString(36), variantId: "v1", propertyId: "p", recipientName: "x", recipientZip: null,
+    id: Math.random().toString(36), variantId: "v1", lpVariantId: null, propertyId: "p", recipientName: "x", recipientZip: null,
     recipientAddress: null, honorific: "様", coOwnerCount: 1, body: "", status: "sent", outcome: "none",
     deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, ...over,
   };
@@ -15,6 +15,7 @@ const campaign: SaleDmCampaign = {
   variants: [
     { id: "v1", label: "A", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null, lpUrl: null },
   ],
+  lpVariants: [],
   recipients: [
     draft({ deliveryStatus: "delivered", lpFirstAccessAt: "2026-06-20T00:00:00Z" }), // 到達+反響
     draft({ deliveryStatus: "delivered" }),                                          // 到達のみ
@@ -71,5 +72,37 @@ describe("buildVariantRows", () => {
     const a = buildVariantRows(c).find((r) => r.variantId === "v1")!;
     expect(a.sent).toBe(1); // 送付済み 1 件のみ(未送付 2 件は除外)
     expect(a.delivered).toBe(1);
+  });
+});
+
+describe("二軸の表(設計 2026-09-08)", () => {
+  const base = { propertyId: "p", recipientName: "", recipientZip: null, recipientAddress: null, honorific: "様", coOwnerCount: 1, body: "b", outcome: "none", phoneInquiryAt: null };
+  const campaign = {
+    id: "c", name: "n", status: "sent",
+    variants: [{ id: "v1", label: "A", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null, lpUrl: null }],
+    lpVariants: [{ id: "l1", label: "X", tone: "formal", length: "medium", appeal: "price", strength: "low", headline: null, templateFrozenAt: null }],
+    recipients: [
+      { ...base, id: "r1", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z" },
+      { ...base, id: "r2", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: null },
+      { ...base, id: "r3", variantId: "v1", lpVariantId: null, status: "sent", deliveryStatus: "unknown", lpFirstAccessAt: null },
+      { ...base, id: "r4", variantId: "v1", lpVariantId: "l1", status: "draft", deliveryStatus: "unknown", lpFirstAccessAt: null },
+    ],
+  } as unknown as SaleDmCampaign;
+  it("DM型の閲覧率 = 到達かつ閲覧 ÷ 到達", () => {
+    expect(buildDmViewRows(campaign)).toEqual([{ variantId: "v1", label: "A", delivered: 2, viewed: 1, viewRate: "50.0%" }]);
+  });
+  it("LP型ごと(LP型なしの宛先は『LP型なし(外部LP)』)・送付済みのみ", () => {
+    expect(buildLpVariantRows(campaign)).toEqual([
+      { lpVariantId: "__none__", label: "LP型なし(外部LP)", sent: 1, delivered: 0, viewed: 0, viewRate: "—" },
+      { lpVariantId: "l1", label: "X", sent: 2, delivered: 2, viewed: 1, viewRate: "50.0%" },
+    ]);
+  });
+  it("組み合わせ表", () => {
+    expect(buildPairRows(campaign).map((r) => r.label)).toEqual(["A × LP型なし", "A × X"]);
+  });
+  it("LP型が0件なら LP型の表と組み合わせ表は空(既存キャンペーンは今までどおり1表)", () => {
+    const c = { ...campaign, lpVariants: [], recipients: campaign.recipients.map((r) => ({ ...r, lpVariantId: null })) } as SaleDmCampaign;
+    expect(buildLpVariantRows(c)).toEqual([]);
+    expect(buildPairRows(c)).toEqual([]);
   });
 });

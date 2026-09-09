@@ -5,7 +5,7 @@ import { Prisma } from "@/generated/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess } from "@/lib/sale-dm-letter/route-guard";
-import { markVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
+import { markVariantsFrozen, markLpVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
 import { saleDmOptionsOverrideSchema } from "@/lib/validators-sale-dm";
 import {
   letterBodyIssueMessage,
@@ -37,6 +37,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         campaignId: true,
         status: true,
         variantId: true,
+        lpVariantId: true,
         campaign: { select: { createdBy: true } },
         property: { select: { createdBy: true, assignedTo: true } },
       },
@@ -106,16 +107,58 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     //   どちらも「その型に確定があった」証拠を消すので、消える前に列へ固定する。
     const resetsConfirmation =
       data.status === "draft" || parsed.variantId !== undefined;
-    if (resetsConfirmation && draft.status === "confirmed") {
-      await prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ${draft.variantId}::uuid FOR UPDATE`;
-        await markVariantsFrozen(tx, [draft.variantId]);
-      });
-    }
-
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await prisma.dmRecipientDraft.updateMany({ where: { id, status: { not: "sent" } }, data: data as any });
-    if (result.count === 0) {
+    const updateData = data as any;
+    let updatedCount: number;
+    if (resetsConfirmation && draft.status === "confirmed") {
+      // ⚠**凍結印と確定の解除を1つの tx にまとめる**(@codex R3 P2)。分けると、印を立てる tx と
+      //   下の updateMany の間に /assign が「まだ確定のままの」この下書きを別の型へ移せてしまう
+      //   (例: LP L1→L2)。その場合、印は先読みした古い L1 にしか立たず、そのあと解除で
+      //   **L2 の「確定があった」最後の証拠が消える**＝L2 の文面を差し替え放題になる。
+      //   ロックの下で型の割当を読み直し、先読みと違っていたら 409 でやり直してもらう。
+      //   ロック順序（設計 §2.3/§2.8）: dm_variants → dm_lp_variants → dm_recipient_drafts。
+      updatedCount = await prisma.$transaction(async (tx) => {
+        // ⚠**いまの型と移動先の型をまとめて id 順に掴む**(@codex R2 P3)。片方だけ掴むと、
+        //   V1→V2 と V2→V1 の付け替えが同時に走ったときに互い違いになる: 下の updateMany は
+        //   draft の variantId を書き換える＝PostgreSQL が**移動先**の型行へ KEY SHARE ロックを
+        //   後から取るため、掴んでいない側で必ず待たされ、両者が止まって片方が 500 で落ちる。
+        //   1文で id 順に取れば取得順がそろい待ち合いにならない(移動しないときは1件のまま)。
+        const variantLockIds = [
+          ...new Set([draft.variantId, parsed.variantId ?? draft.variantId]),
+        ].sort();
+        await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ANY(${variantLockIds}::uuid[]) ORDER BY id FOR UPDATE`;
+        if (draft.lpVariantId) {
+          await tx.$queryRaw`SELECT id FROM dm_lp_variants WHERE id = ${draft.lpVariantId}::uuid FOR UPDATE`;
+        }
+        // 読み直しは素の select（ロックではない）。ロック済みの型の下でこの下書きの割当を確かめる。
+        const current = await tx.dmRecipientDraft.findUnique({
+          where: { id },
+          select: { variantId: true, lpVariantId: true, status: true },
+        });
+        if (
+          !current ||
+          current.variantId !== draft.variantId ||
+          (current.lpVariantId ?? null) !== (draft.lpVariantId ?? null)
+        ) {
+          throw new ApiError(
+            409,
+            "編集の途中で型の割当が変わりました。画面を更新してからやり直してください",
+            "VARIANT_CHANGED",
+          );
+        }
+        await markVariantsFrozen(tx, [draft.variantId]);
+        await markLpVariantsFrozen(tx, [draft.lpVariantId]);
+        // 並行で sent になっていれば 0 行＝下の ALREADY_SENT（印は残す＝送付済みの型は凍結が正）。
+        const r = await tx.dmRecipientDraft.updateMany({ where: { id, status: { not: "sent" } }, data: updateData });
+        return r.count;
+      });
+    } else {
+      // 確定を消さない編集（override だけ・draft のままの本文編集など）は凍結印が要らないので、
+      // これまでどおり単発の条件付き updateMany で済ませる。
+      const result = await prisma.dmRecipientDraft.updateMany({ where: { id, status: { not: "sent" } }, data: updateData });
+      updatedCount = result.count;
+    }
+    if (updatedCount === 0) {
       throw new ApiError(409, "送付済みの宛先は編集できません", "ALREADY_SENT");
     }
 

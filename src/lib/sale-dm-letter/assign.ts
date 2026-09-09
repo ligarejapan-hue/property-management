@@ -71,3 +71,53 @@ export function applyManualAssignment(
   }
   return map;
 }
+
+export interface CrossAssignment {
+  variantId: string;
+  lpVariantId: string | null;
+}
+
+// ユークリッドの互除法(module-private)。
+function gcd(a: number, b: number): number {
+  let x = a;
+  let y = b;
+  while (y !== 0) {
+    [x, y] = [y, x % y];
+  }
+  return x;
+}
+
+/**
+ * DM型×LP型の両軸へ総当たりで均等割り(設計 2026-09-08 §2.1、@codex R7-1 指摘を受け改訂)。
+ *  - 宛先 k 番目: DM型 = dm[k % n](既存 assignVariantsEvenly と同じ順)、
+ *    LP型 = lp[(k + floor(k / L)) % m]、L = lcm(n, m) = n * m / gcd(n, m)。
+ *  - 各ブロック(長さ L)内では (k mod n, (k+j) mod m) が全て異なり、
+ *    「lp − dm ≡ j (mod g)」の類(g = gcd(n, m))を1回ずつ埋める。
+ *    ブロック長は m の倍数なので LP軸は完全な巡回、類は g ブロックで一巡する。
+ *    よって任意の接頭辞で組の偏り ≤ 1・LP軸の偏り ≤ 1・DM軸は既存 assignVariantsEvenly と一致。
+ *  - 端数は先頭の組から1つずつ多い。random は本数分布を保ったまま並びだけシャッフル。
+ *  - LP型が0件なら lpVariantId=null で、DM軸は既存関数と完全一致(後方互換)。
+ */
+export function assignCrossEvenly(
+  recipientIds: string[],
+  dmVariantIds: string[],
+  lpVariantIds: string[],
+  opts?: AssignOptions,
+): Map<string, CrossAssignment> {
+  const map = new Map<string, CrossAssignment>();
+  if (dmVariantIds.length === 0 || recipientIds.length === 0) return map;
+  const n = dmVariantIds.length;
+  const m = lpVariantIds.length;
+  const L = m === 0 ? 0 : (n * m) / gcd(n, m);
+  let seq: CrossAssignment[] = [];
+  for (let k = 0; k < recipientIds.length; k++) {
+    const dmIdx = k % n;
+    const lp = m === 0 ? null : lpVariantIds[(k + Math.floor(k / L)) % m];
+    seq.push({ variantId: dmVariantIds[dmIdx], lpVariantId: lp });
+  }
+  if (opts?.order === "random") {
+    seq = shuffle(seq, opts.rng ?? Math.random);
+  }
+  recipientIds.forEach((rid, i) => map.set(rid, seq[i]));
+  return map;
+}

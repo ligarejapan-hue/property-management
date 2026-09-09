@@ -49,6 +49,7 @@ vi.mock("@/lib/prisma", () => ({
   default: {
     dmCampaign: { findUnique: vi.fn() },
     dmVariant: { findMany: vi.fn() },
+    dmLpVariant: { findMany: vi.fn(async () => []) },
     dmRecipientDraft: { findMany: vi.fn() },
   },
 }));
@@ -60,6 +61,7 @@ import { GET } from "../../app/api/properties/sale-dm/campaigns/[id]/aggregate/r
 const pm = prismaMock as never as {
   dmCampaign: { findUnique: ReturnType<typeof vi.fn> };
   dmVariant: { findMany: ReturnType<typeof vi.fn> };
+  dmLpVariant: { findMany: ReturnType<typeof vi.fn> };
   dmRecipientDraft: { findMany: ReturnType<typeof vi.fn> };
 };
 const ctx = (id = "c1") => ({ params: Promise.resolve({ id }) });
@@ -72,6 +74,7 @@ beforeEach(() => {
     { id: "vA", label: "A" },
     { id: "vB", label: "B" },
   ]);
+  pm.dmLpVariant.findMany.mockResolvedValue([]);
 });
 
 describe("GET aggregate", () => {
@@ -149,5 +152,21 @@ describe("GET aggregate", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.total.sent).toBe(2);
+  });
+
+  it("旗が false のあいだ byLpVariant / byPair は返さない(DM型ごとの閲覧率は返す)", async () => {
+    // 公開の追跡リンク(/t/)が LP型ごとにページを出し分けるまで、LP型別の閲覧は「ページの成績」に
+    // ならない。画面を隠すだけでなく **API も出さない**(@codex R4 P2)。
+    // 旗が true のときに両方を返すことは sale-dm-aggregate-route-lp-metrics.test.ts が見る。
+    pm.dmVariant.findMany.mockResolvedValue([{ id: "v1", label: "A" }]);
+    pm.dmLpVariant.findMany.mockResolvedValue([{ id: "l1", label: "X" }]);
+    pm.dmRecipientDraft.findMany.mockResolvedValue([
+      { variantId: "v1", lpVariantId: "l1", deliveryStatus: "delivered", lpFirstAccessAt: new Date(), phoneInquiryAt: null, property: { createdBy: "u1", assignedTo: null } },
+      { variantId: "v1", lpVariantId: null, deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, property: { createdBy: "u1", assignedTo: null } },
+    ]);
+    const json = await (await GET(new Request("http://x") as never, ctx())).json();
+    expect(Object.keys(json)).not.toContain("byLpVariant");
+    expect(Object.keys(json)).not.toContain("byPair");
+    expect(json.byDmVariantView[0]).toMatchObject({ label: "A", viewed: 1, delivered: 2, viewRate: 0.5 });
   });
 });

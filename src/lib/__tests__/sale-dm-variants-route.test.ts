@@ -25,6 +25,8 @@ vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     dmCampaign: { findUnique: vi.fn(), findFirst: vi.fn() },
     dmVariant: { findMany: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), deleteMany: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn(async () => ({ count: 0 })) },
+    // 確定の解除は LP型の凍結印も立てる(既定は対象0件=既存挙動不変)。
+    dmLpVariant: { updateMany: vi.fn(async () => ({ count: 0 })) },
     dmRecipientDraft: { count: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(async () => []) },
   };
   // $transaction はコールバックに同じ db を tx として渡す(tx.* === pm.* なので既存アサーションがそのまま効く)。

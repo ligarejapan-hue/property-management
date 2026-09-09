@@ -56,3 +56,25 @@ export async function markVariantsFrozen(
   });
   return r.count;
 }
+
+/** LP型の凍結印(DM型の markVariantsFrozen と同じ規則)。呼び出し側は dm_lp_variants 行をロック済みであること。 */
+export async function markLpVariantsFrozen(
+  tx: {
+    dmLpVariant: {
+      updateMany: (args: {
+        where: Record<string, unknown>;
+        data: Record<string, unknown>;
+      }) => Promise<{ count: number }>;
+    };
+  },
+  lpVariantIds: Array<string | null | undefined>,
+  at: Date = new Date(),
+): Promise<number> {
+  const ids = [...new Set(lpVariantIds.filter((x): x is string => typeof x === "string" && x.length > 0))].sort();
+  if (ids.length === 0) return 0;
+  const r = await tx.dmLpVariant.updateMany({
+    where: { id: { in: ids }, templateFrozenAt: null },
+    data: { templateFrozenAt: at },
+  });
+  return r.count;
+}

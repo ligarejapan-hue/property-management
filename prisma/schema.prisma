@@ -1140,6 +1140,7 @@ model DmCampaign {
 
   creator    User              @relation("DmCampaignCreator", fields: [createdBy], references: [id])
   variants   DmVariant[]
+  lpVariants DmLpVariant[]
   recipients DmRecipientDraft[]
 
   @@map("dm_campaigns")
@@ -1178,6 +1179,8 @@ model DmRecipientDraft {
   propertyId            String           @map("property_id") @db.Uuid
   representativeOwnerId String?          @map("representative_owner_id") @db.Uuid
   variantId             String           @map("variant_id") @db.Uuid
+  /// LP型(DmLpVariant)。null = LP型なし(QR は従来どおり外部LPへ転送)。
+  lpVariantId           String?          @map("lp_variant_id") @db.Uuid
   overrideJson          Json?            @map("override_json")
   recipientName         String           @map("recipient_name")
   recipientZip          String?          @map("recipient_zip")
@@ -1203,13 +1206,43 @@ model DmRecipientDraft {
 
   campaign  DmCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   variant   DmVariant  @relation(fields: [variantId], references: [id])
+  lpVariant DmLpVariant? @relation(fields: [lpVariantId], references: [id])
   property  Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   generator User       @relation("DmRecipientGenerator", fields: [generatedBy], references: [id])
   draftOwners DmRecipientDraftOwner[]
 
   @@index([campaignId])
   @@index([propertyId])
+  @@index([lpVariantId])
   @@map("dm_recipient_drafts")
+}
+
+/// 売却DMの「LP型」(設計 2026-09-08 §2.1)。DM型(DmVariant)と独立の A/B 軸。
+/// 貼り戻した原文(rawTemplate)と切り分け結果(headline/lead/bodyText/faqJson)を同時に持つ。
+/// 凍結は DmVariant と同じ二重判定(templateFrozenAt OR 配下に confirmed/sent)。
+model DmLpVariant {
+  id               String    @id @default(uuid()) @db.Uuid
+  campaignId       String    @map("campaign_id") @db.Uuid
+  label            String
+  tone             String
+  length           String
+  appeal           String
+  strength         String
+  promptText       String?   @map("prompt_text")
+  rawTemplate      String?   @map("raw_template")
+  headline         String?
+  lead             String?
+  bodyText         String?   @map("body_text")
+  faqJson          Json?     @map("faq_json")
+  templateFrozenAt DateTime? @map("template_frozen_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  campaign   DmCampaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  recipients DmRecipientDraft[]
+
+  @@index([campaignId])
+  @@map("dm_lp_variants")
 }
 
 enum DmCampaignStatus {

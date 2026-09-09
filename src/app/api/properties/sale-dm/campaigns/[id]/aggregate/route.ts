@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
-import { aggregateByVariant } from "@/lib/sale-dm-letter/aggregate";
+import { aggregateByVariant, aggregateTwoAxis, LP_NONE } from "@/lib/sale-dm-letter/aggregate";
+// 画面と同じ1か所を見る(@codex R4 P2)。画面だけ隠して API が出し続けると、まだ意味を持たない
+// 数字が JSON に載ったまま配られる。
+import { LP_METRICS_ENABLED } from "@/lib/sale-dm-letter/lp-metrics-flag";
 
 export async function GET(
   _request: NextRequest,
@@ -20,8 +23,12 @@ export async function GET(
     if (!campaign || campaign.createdBy !== session.id) throw new ApiError(404, "キャンペーンが見つかりません", "NOT_FOUND");
 
     // 集計入力は反響シグナルの生値から計算する(outcome カラムに依存しない)。
-    const [variants, drafts] = await Promise.all([
+    const [variants, lpVariants, drafts] = await Promise.all([
       prisma.dmVariant.findMany({
+        where: { campaignId: id },
+        select: { id: true, label: true },
+      }),
+      prisma.dmLpVariant.findMany({
         where: { campaignId: id },
         select: { id: true, label: true },
       }),
@@ -31,6 +38,7 @@ export async function GET(
         where: { campaignId: id, status: "sent" },
         select: {
           variantId: true,
+          lpVariantId: true,
           deliveryStatus: true,
           lpFirstAccessAt: true,
           phoneInquiryAt: true,
@@ -45,6 +53,9 @@ export async function GET(
     const visibleDrafts = filterDraftsByFieldStaffScope(drafts, session);
     const aggregate = aggregateByVariant(visibleDrafts);
     const labelByVariantId = new Map(variants.map((v) => [v.id, v.label]));
+    // 二軸集計(設計 2026-09-08 §2.1): DM型×LP型の閲覧率。visibleDrafts と同じ scope で計算する。
+    const twoAxis = aggregateTwoAxis(visibleDrafts);
+    const lpLabel = new Map(lpVariants.map((v) => [v.id, v.label]));
 
     return NextResponse.json(
       {
@@ -55,6 +66,15 @@ export async function GET(
           label: labelByVariantId.get(v.variantId) ?? v.variantId,
         })),
         total: aggregate.total,
+        // DM型ごとの閲覧率は LP の出し分けと無関係(文面の成績)なので常に返す。
+        byDmVariantView: twoAxis.byDmVariant.map((v) => ({ ...v, label: labelByVariantId.get(v.variantId) ?? v.variantId })),
+        // LP型ごと/組み合わせは /t/ が LP型ごとにページを出し分けるまで返さない。
+        ...(LP_METRICS_ENABLED
+          ? {
+              byLpVariant: twoAxis.byLpVariant.map((v) => ({ ...v, label: v.lpVariantId === LP_NONE ? "LP型なし(外部LP)" : (lpLabel.get(v.lpVariantId) ?? v.lpVariantId) })),
+              byPair: twoAxis.byPair.map((p) => ({ ...p, label: `${labelByVariantId.get(p.variantId) ?? p.variantId} × ${p.lpVariantId === LP_NONE ? "LP型なし" : (lpLabel.get(p.lpVariantId) ?? p.lpVariantId)}` })),
+            }
+          : {}),
       },
       { headers: { "Cache-Control": "no-store" } },
     );
