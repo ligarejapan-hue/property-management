@@ -16,6 +16,7 @@ export type LpSplitIssue =
   | { code: "MISSING_SECTION" | "DUPLICATE_SECTION" | "ORDER_MISMATCH" | "UNKNOWN_SECTION" | "EMPTY_SECTION" | "HEADLINE_MULTILINE" | "UNKNOWN_TAG"; section: string }
   | { code: "TOO_LONG"; section: string; limit: number }
   | { code: "FAQ_PAIR_MISMATCH" }
+  | { code: "FAQ_EMPTY_ITEM" }
   | { code: "FAQ_TOO_MANY"; limit: number };
 
 export type LpSplitResult = { ok: true; parts: LpTemplateParts } | { ok: false; issue: LpSplitIssue };
@@ -44,7 +45,10 @@ function parseFaq(lines: string[]): { faq: LpFaqItem[] } | { issue: LpSplitIssue
     const a = FAQ_A.exec(line);
     if (q) {
       if (cur && cur.a === null) return { issue: { code: "FAQ_PAIR_MISMATCH" } };
-      if (cur) items.push({ q: cur.q, a: cur.a as string });
+      if (cur) {
+        if (cur.q.trim() === "" || (cur.a as string).trim() === "") return { issue: { code: "FAQ_EMPTY_ITEM" } };
+        items.push({ q: cur.q, a: cur.a as string });
+      }
       cur = { q: q[1].trim(), a: null };
     } else if (a) {
       if (!cur || cur.a !== null) return { issue: { code: "FAQ_PAIR_MISMATCH" } };
@@ -58,6 +62,7 @@ function parseFaq(lines: string[]): { faq: LpFaqItem[] } | { issue: LpSplitIssue
   }
   if (cur) {
     if (cur.a === null) return { issue: { code: "FAQ_PAIR_MISMATCH" } };
+    if (cur.q.trim() === "" || cur.a.trim() === "") return { issue: { code: "FAQ_EMPTY_ITEM" } };
     items.push({ q: cur.q, a: cur.a });
   }
   return { faq: items };
@@ -144,6 +149,7 @@ export function lpSplitIssueMessage(issue: LpSplitIssue): string {
     case "UNKNOWN_TAG": return `【${issue.section}】に使えない差し込み記号があります。使えるのは {{物件所在}} と {{物件種別}} だけです`;
     case "TOO_LONG": return `【${issue.section}】が長すぎます(上限 ${issue.limit} 字)`;
     case "FAQ_PAIR_MISMATCH": return "【よくある質問】は Q. と A. を対にして書いてください";
+    case "FAQ_EMPTY_ITEM": return "【よくある質問】に、質問か答えが空の組があります";
     case "FAQ_TOO_MANY": return `【よくある質問】は ${issue.limit} 組までです`;
   }
 }
