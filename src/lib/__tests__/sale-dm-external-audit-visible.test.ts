@@ -33,6 +33,8 @@ const CASES: Array<{ action: string; detail: Record<string, unknown> }> = [
   },
   { action: "sale_dm_lp_prompt_view", detail: { campaignId: "c1", viewedAt: "2026-09-09T00:00:00.000Z" } },
   { action: "sale_dm_lp_body_paste", detail: { campaignId: "c1", faqCount: 3, bodyLength: 120, pastedAt: "2026-09-09T00:00:00.000Z" } },
+  // LP型削除は割当なしへ戻した件数(detachedCount)も残す(@codex R5 finding)。
+  { action: "sale_dm_lp_variant_delete", detail: { campaignId: "c1", detachedCount: 2, deletedAt: "2026-09-09T00:00:00.000Z" } },
 ];
 
 describe("外部AI方式の監査 detail は表示でも消えない", () => {

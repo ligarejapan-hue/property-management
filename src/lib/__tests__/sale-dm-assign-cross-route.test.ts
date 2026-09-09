@@ -182,4 +182,22 @@ describe("POST assign(両軸)", () => {
     expect(lp[0].where.id).toEqual({ in: ["r2"] });
     expect(lp[0].data).toEqual({ lpVariantId: "l1" });
   });
+
+  it("manual で lpVariantId: null は割当なしに戻す updateMany を発行する(@codex R5)", async () => {
+    const res = await assign(post({ mode: "manual", lpAssignments: [{ recipientId: "r2", lpVariantId: null }] }), ctx);
+    expect(res.status).toBe(200);
+    const calls = pm.dmRecipientDraft.updateMany.mock.calls.map((c) => c[0]);
+    // 通常のLP軸(型付け)の updateMany は0件(非null指定が無いため)。アンサイン専用の1件のみ。
+    const nullCalls = calls.filter((c) => "lpVariantId" in c.data && c.data.lpVariantId === null);
+    expect(nullCalls.length).toBe(1);
+    expect(nullCalls[0].where).toEqual({
+      id: { in: ["r2"] },
+      campaignId: "c1",
+      status: { not: "sent" },
+      lpVariantId: { not: null },
+    });
+    expect(nullCalls[0].data).toEqual({ lpVariantId: null });
+    const j = await res.json();
+    expect(j.perLpVariant).toHaveProperty("__none__");
+  });
 });

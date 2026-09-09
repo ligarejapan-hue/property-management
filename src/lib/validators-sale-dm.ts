@@ -86,7 +86,7 @@ export const saleDmAssignSchema = z.object({
     .optional(),
   // LP型の手動割当(設計 2026-09-08 §2.1)。DM型の assignments と独立に指定する。
   lpAssignments: z
-    .array(z.object({ recipientId: z.string(), lpVariantId: z.string() }))
+    .array(z.object({ recipientId: z.string(), lpVariantId: z.string().nullable() }))
     .optional(),
 });
 

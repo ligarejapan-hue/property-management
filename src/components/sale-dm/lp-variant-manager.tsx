@@ -64,7 +64,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
     return run(() => updateSaleDmLpVariant(campaign.id, editing, { label: form.label, options: form.options }));
   };
   const remove = (v: SaleDmLpVariant) => {
-    if (!window.confirm(`LP型「${v.label}」を削除します。よろしいですか？(宛先が割り当てられているLP型は削除できません)`)) return;
+    if (!window.confirm(`LP型「${v.label}」を削除します。割り当て中の未送付宛先は割当なしに戻ります。よろしいですか？(確定・送付済みの宛先があるLP型は削除できません)`)) return;
     run(() => deleteSaleDmLpVariant(campaign.id, v.id));
   };
 

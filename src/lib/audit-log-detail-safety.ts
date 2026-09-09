@@ -234,7 +234,8 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // LP型(設計 2026-09-08)。DM型と同じく件数/ID/日時のみ。見出し・本文・ラベルは載せない。
   sale_dm_lp_variant_create: new Set(["createdAt"]),
   sale_dm_lp_variant_update: new Set(["updatedAt"]),
-  sale_dm_lp_variant_delete: new Set(["deletedAt"]),
+  // detachedCount = 削除時に割当なしへ戻した未送付宛先の件数(数値のみ・PIIなし)。
+  sale_dm_lp_variant_delete: new Set(["deletedAt", "detachedCount"]),
   sale_dm_lp_prompt_view: new Set(["viewedAt"]),
   sale_dm_lp_body_paste: new Set(["pastedAt", "faqCount", "bodyLength"]),
   // 外部AI方式(PR-D2)。⚠プロンプト本文・手紙本文は detail に載せない(件数/ID/日時のみ)。

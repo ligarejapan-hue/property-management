@@ -484,7 +484,7 @@ export async function assignSaleDmVariants(
     mode: "auto" | "manual";
     order?: "sequential" | "random";
     assignments?: { recipientId: string; variantId: string }[];
-    lpAssignments?: { recipientId: string; lpVariantId: string }[];
+    lpAssignments?: { recipientId: string; lpVariantId: string | null }[];
   },
 ) {
   if (USE_MOCK) {

@@ -19,7 +19,7 @@ vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     dmCampaign: { findFirst: vi.fn(), findUnique: vi.fn() },
     dmLpVariant: { findMany: vi.fn(async () => []), findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
-    dmRecipientDraft: { count: vi.fn(async () => 0), findMany: vi.fn(async () => []) },
+    dmRecipientDraft: { count: vi.fn(async () => 0), findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({ count: 0 })) },
     $queryRaw: vi.fn(async () => []),
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
@@ -37,7 +37,7 @@ type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
   dmCampaign: { findFirst: Fn; findUnique: Fn };
   dmLpVariant: { findMany: Fn; findFirst: Fn; create: Fn; update: Fn; deleteMany: Fn };
-  dmRecipientDraft: { count: Fn; findMany: Fn };
+  dmRecipientDraft: { count: Fn; findMany: Fn; updateMany: Fn };
   $queryRaw: Fn;
 };
 const READS = ["property", "csv_export", "csv_export_personal", "owner"];
@@ -198,5 +198,21 @@ describe("DELETE lp-variants/[lpId]", () => {
   it("割当済みなら 409 VARIANT_IN_USE", async () => {
     pm.dmLpVariant.deleteMany.mockResolvedValue({ count: 0 });
     expect((await (await DELETE(req("DELETE"), ctxLp)).json()).error.code).toBe("VARIANT_IN_USE");
+  });
+  it("削除前に未送付の宛先を割当なしへ戻す(updateMany → deleteMany の順・@codex R5)", async () => {
+    pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 2 });
+    const res = await DELETE(req("DELETE"), ctxLp);
+    expect(res.status).toBe(200);
+    expect(pm.dmRecipientDraft.updateMany).toHaveBeenCalledWith({
+      where: { campaignId: "c1", lpVariantId: "l1", status: { not: "sent" } },
+      data: { lpVariantId: null },
+    });
+    const updateOrder = pm.dmRecipientDraft.updateMany.mock.invocationCallOrder[0];
+    const deleteOrder = pm.dmLpVariant.deleteMany.mock.invocationCallOrder[0];
+    expect(updateOrder).toBeLessThan(deleteOrder);
+    expect((writeAuditLog as Fn).mock.calls[0][0]).toMatchObject({
+      action: "sale_dm_lp_variant_delete",
+      detail: expect.objectContaining({ detachedCount: 2 }),
+    });
   });
 });

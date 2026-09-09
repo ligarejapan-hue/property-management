@@ -25,4 +25,8 @@ describe("LP型の zod", () => {
     const r = saleDmAssignSchema.parse({ mode: "manual", lpAssignments: [{ recipientId: "r1", lpVariantId: "l1" }] });
     expect(r.lpAssignments).toEqual([{ recipientId: "r1", lpVariantId: "l1" }]);
   });
+  it("lpAssignments.lpVariantId は null(割当なしに戻す)を受け付ける(@codex R5)", () => {
+    const r = saleDmAssignSchema.parse({ mode: "manual", lpAssignments: [{ recipientId: "r2", lpVariantId: null }] });
+    expect(r.lpAssignments).toEqual([{ recipientId: "r2", lpVariantId: null }]);
+  });
 });

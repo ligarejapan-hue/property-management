@@ -152,7 +152,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     const { id, lpId } = await params;
     await assertSaleDmCampaignOwned(id, session.id);
 
-    const deleted = await prisma.$transaction(async (tx) => {
+    const { deleted, detachedCount } = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM dm_lp_variants WHERE id = ${lpId}::uuid AND campaign_id = ${id}::uuid FOR UPDATE`;
       const row = await tx.dmLpVariant.findFirst({ where: { id: lpId, campaignId: id }, select: { templateFrozenAt: true } });
       if (!row) throw new ApiError(404, "指定されたLP型が見つかりません", "LP_VARIANT_NOT_FOUND");
@@ -162,8 +162,19 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
       if (isVariantFrozen({ templateFrozenAt: row.templateFrozenAt, settledCount })) {
         throw new ApiError(409, "送付実績のあるLP型は削除できません", "VARIANT_FROZEN");
       }
-      // 宛先を1件も持たない場合のみ削除(count→delete の隙間を作らない)。
-      return tx.dmLpVariant.deleteMany({ where: { id: lpId, campaignId: id, recipients: { none: {} } } });
+      // ⚠削除前に未送付の宛先を割当なしへ戻す(@codex R5 finding)。ここまで来ていれば
+      //   確定/送付済みの宛先は無い(上の isVariantFrozen が settledCount>0 で既に拒否済み)ので、
+      //   この型を参照している下書きは status="draft" のみ(status: not sent は将来の競合への保険)。
+      //   このLP型を持ったまま宛先が残っていると、下の deleteMany の recipients:{none:{}} 条件に
+      //   引っかかって削除できない(＝唯一のLP型が消せなくなる原因)。
+      const detach = await tx.dmRecipientDraft.updateMany({
+        where: { campaignId: id, lpVariantId: lpId, status: { not: "sent" } },
+        data: { lpVariantId: null },
+      });
+      // 宛先を1件も持たない場合のみ削除(count→delete の隙間を作らない)。上の detach 後は
+      // 通常0件のはずだが、万一残っていれば(競合で送付済みが紛れ込んだ等)ここで 409 に倒す。
+      const result = await tx.dmLpVariant.deleteMany({ where: { id: lpId, campaignId: id, recipients: { none: {} } } });
+      return { deleted: result, detachedCount: detach.count };
     });
     if (deleted.count === 0) throw new ApiError(409, "このLP型は宛先に割り当てられているため削除できません", "VARIANT_IN_USE");
 
@@ -172,7 +183,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
       action: "sale_dm_lp_variant_delete",
       targetTable: "dm_lp_variants",
       targetId: lpId,
-      detail: { campaignId: id, deletedAt: new Date().toISOString() },
+      detail: { campaignId: id, detachedCount, deletedAt: new Date().toISOString() },
     });
     return NextResponse.json({ deleted: lpId }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

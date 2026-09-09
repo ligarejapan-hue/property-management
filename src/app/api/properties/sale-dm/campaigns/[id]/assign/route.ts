@@ -34,10 +34,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // DM軸の割当(既存の形)。LP軸は別 Map に分ける(LP は本文に影響しないので本文を消さない)。
     const dmAssignment = new Map<string, string>();
     const lpAssignment = new Map<string, string>();
+    // lpVariantId: null の指定は「割当なしに戻す」(手動アンサイン)。applyManualAssignment は
+    // string の variantId しか扱わないため、null 指定は別扱いで集める(@codex R5 finding)。
+    const lpUnassign: string[] = [];
     if (body.mode === "manual") {
       for (const [rid, vid] of applyManualAssignment(recipientIds, variantIds, body.assignments ?? [])) dmAssignment.set(rid, vid);
-      const lpManual = (body.lpAssignments ?? []).map((a) => ({ recipientId: a.recipientId, variantId: a.lpVariantId }));
+      const recipientSet = new Set(recipientIds);
+      const lpManual = (body.lpAssignments ?? [])
+        .filter((a): a is { recipientId: string; lpVariantId: string } => a.lpVariantId !== null)
+        .map((a) => ({ recipientId: a.recipientId, variantId: a.lpVariantId }));
       for (const [rid, lid] of applyManualAssignment(recipientIds, lpVariantIds, lpManual)) lpAssignment.set(rid, lid);
+      for (const a of body.lpAssignments ?? []) {
+        if (a.lpVariantId === null && recipientSet.has(a.recipientId)) lpUnassign.push(a.recipientId);
+      }
     } else {
       for (const [rid, a] of assignCrossEvenly(recipientIds, variantIds, lpVariantIds, { order: body.order ?? "sequential" })) {
         dmAssignment.set(rid, a.variantId);
@@ -77,7 +86,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       //   markVariantsFrozen は「その型をロック済みであること」が前提なので、漏れた型へ
       //   印を立てると取得順の保証が崩れる（型の取り方が違う処理どうしが互い違いに待つ）。
       //   移動する下書きの移動元は、状態に関わらず**全部**掴む（型はキャンペーン内で数個）。
-      const allIds = [...new Set([...[...byVariant.values()].flat(), ...[...byLpVariant.values()].flat()])];
+      // ⚠手動アンサイン(lpUnassign)の宛先も allIds に含める。この宛先が今のLP型から
+      //   外れるだけでも、その移動元LP型を lockLpIds に含めて FOR UPDATE で掴む必要があり
+      //   (下の sourcesPre 経由で lockLpIds に反映される)、含め忘れると凍結印の前提が崩れる。
+      const allIds = [...new Set([...[...byVariant.values()].flat(), ...[...byLpVariant.values()].flat(), ...lpUnassign])];
       const sourcesPre = await tx.dmRecipientDraft.findMany({
         where: { id: { in: allIds }, campaignId: id },
         select: { variantId: true, lpVariantId: true, propertyId: true },
@@ -175,6 +187,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         });
         assignedLp += result.count;
         perLpVariant[lpVariantId] = result.count;
+      }
+      // 手動アンサイン: lpVariantId を null に戻す(割当なしに戻す・@codex R5 finding)。
+      // 送付済みは対象外(過去の反響/実績の型付けを保全)。既に null の宛先は対象外(件数を汚さない)。
+      if (lpUnassign.length > 0) {
+        const result = await tx.dmRecipientDraft.updateMany({
+          where: { id: { in: lpUnassign }, campaignId: id, status: { not: "sent" }, lpVariantId: { not: null } },
+          data: { lpVariantId: null },
+        });
+        assignedLp += result.count;
+        perLpVariant["__none__"] = result.count;
       }
     });
 
