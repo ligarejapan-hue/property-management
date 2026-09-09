@@ -21,6 +21,9 @@ vi.mock("@/lib/prisma", () => {
     // LP型は0件(既存キャンペーンの挙動不変・両軸化は sale-dm-assign-cross-route.test.ts で検証)。
     dmLpVariant: { findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({ count: 0 })) },
     dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn() },
+    // 物件親行をロックしたあとの担当範囲の読み直し(@codex R2 P1)。既定は「ロックの下でも
+    // 全件見えたまま」= 頼まれた id をそのまま返す(担当が変わる筋は cross-route 側で実測)。
+    property: { findMany: vi.fn(async (args: { where: { id: { in: string[] } } }) => args.where.id.in.map((id) => ({ id }))) },
     // 割当は updateMany の前に型行をロックする(PR-D1・デッドロック回避)。
     $queryRaw: vi.fn(async () => []),
   };

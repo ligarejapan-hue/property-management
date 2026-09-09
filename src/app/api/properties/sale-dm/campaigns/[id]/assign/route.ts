@@ -80,7 +80,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const allIds = [...new Set([...[...byVariant.values()].flat(), ...[...byLpVariant.values()].flat()])];
       const sourcesPre = await tx.dmRecipientDraft.findMany({
         where: { id: { in: allIds }, campaignId: id },
-        select: { variantId: true, lpVariantId: true },
+        select: { variantId: true, lpVariantId: true, propertyId: true },
       });
       const lockVariantIds = [...new Set([...byVariant.keys(), ...sourcesPre.map((d) => d.variantId)])].sort();
       if (lockVariantIds.length > 0) {
@@ -90,6 +90,36 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const lockLpIds = [...new Set([...byLpVariant.keys(), ...sourcesPre.map((d) => d.lpVariantId).filter((x): x is string => !!x)])].sort();
       if (lockLpIds.length > 0) {
         await tx.$queryRaw`SELECT id FROM dm_lp_variants WHERE id = ANY(${lockLpIds}::uuid[]) AND campaign_id = ${id}::uuid ORDER BY id FOR UPDATE`;
+      }
+
+      // ⚠**物件親行をロックしてから担当範囲を確かめ直す**（@codex R2 P1）。:32 の scope 絞り込みは
+      //   トランザクションの**外**の先読みなので、読んだ直後〜commit の間に物件が別担当へ再割当
+      //   されると、担当外になった宛先の DM型/LP型まで書き換えてしまう（本文もクリアされる）。
+      //   ロック順序（設計 §2.3/§2.8）: dm_variants → dm_lp_variants → properties → dm_recipient_drafts。
+      // ⚠ロック自体は**全ロールで**取る。admin/office が取らないと、確定(drafts/confirm)や反響の
+      //   書き手と取得順がそろわず互い違いに待つ（確定は物件親行を全ロールで掴む）。
+      const targetPropertyIds = [...new Set(sourcesPre.map((d) => d.propertyId))].sort();
+      if (targetPropertyIds.length > 0) {
+        await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${targetPropertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
+        // where のリレーション述語はステートメントのスナップショットで評価されるため、
+        // ロックの下で**物件そのもの**を読み直す（確定 route と同じ形・可視条件は
+        // createdBy==me OR assignedTo==me）。1件でも見えなくなっていたらやり直してもらう。
+        if (session.role === "field_staff") {
+          const visible = await tx.property.findMany({
+            where: {
+              id: { in: targetPropertyIds },
+              OR: [{ createdBy: session.id }, { assignedTo: session.id }],
+            },
+            select: { id: true },
+          });
+          if (visible.length !== targetPropertyIds.length) {
+            throw new ApiError(
+              403,
+              "担当が変わった宛先が含まれています。画面を更新してからやり直してください",
+              "FORBIDDEN",
+            );
+          }
+        }
       }
 
       // ⚠確定済み/送付済みの下書きを別の型へ移すと、移動元の型から「確定があった」

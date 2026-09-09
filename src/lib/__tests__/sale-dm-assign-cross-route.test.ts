@@ -20,6 +20,8 @@ vi.mock("@/lib/prisma", () => {
     dmVariant: { findMany: vi.fn(), updateMany: vi.fn(async () => ({ count: 0 })) },
     dmLpVariant: { findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({ count: 0 })) },
     dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn(async () => ({ count: 1 })) },
+    // 物件親行をロックしたあとの担当範囲の読み直し(@codex R2 P1)。
+    property: { findMany: vi.fn(async () => []) },
     $queryRaw: vi.fn(async () => []),
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
@@ -37,6 +39,7 @@ const pm = prismaMock as never as {
   dmVariant: { findMany: Fn; updateMany: Fn };
   dmLpVariant: { findMany: Fn; updateMany: Fn };
   dmRecipientDraft: { findMany: Fn; updateMany: Fn };
+  property: { findMany: Fn };
   $queryRaw: Fn;
 };
 const READS = ["property", "csv_export", "csv_export_personal", "owner"];
@@ -56,11 +59,24 @@ beforeEach(() => {
   pm.dmCampaign.findFirst.mockResolvedValue({ id: "c1" });
   pm.dmVariant.findMany.mockResolvedValue([{ id: "d0" }, { id: "d1" }]);
   pm.dmLpVariant.findMany.mockResolvedValue([{ id: "l0" }, { id: "l1" }]);
-  // 1回目=対象宛先(先読み)、2回目=移動元の型(sourcesPre)、3回目=確定/送付済み(movingSettled)
-  pm.dmRecipientDraft.findMany
-    .mockResolvedValueOnce([{ id: "r0", property: prop }, { id: "r1", property: prop }, { id: "r2", property: prop }, { id: "r3", property: prop }])
-    .mockResolvedValueOnce([{ variantId: "d0", lpVariantId: null }, { variantId: "d0", lpVariantId: "l0" }])
-    .mockResolvedValueOnce([{ variantId: "d1", lpVariantId: "l1" }]);
+  // ⚠`Once` の並びで組まない。途中で 403/409 に落ちるテストが余りを残し、次のテストの
+  //   1回目の読みがその余りになる(先読みの結果が別物になって落ちる)。読みの形で答えを決める。
+  //   ①先読み(tx外・property を select)②移動元の型+物件(sourcesPre)③確定/送付済み(movingSettled)。
+  pm.dmRecipientDraft.findMany.mockImplementation(
+    async (args: { where?: Record<string, unknown>; select?: Record<string, unknown> }) => {
+      if (args?.select?.property) {
+        return [{ id: "r0", property: prop }, { id: "r1", property: prop }, { id: "r2", property: prop }, { id: "r3", property: prop }];
+      }
+      const status = args?.where?.status as { in?: unknown } | undefined;
+      if (status && "in" in status) return [{ variantId: "d1", lpVariantId: "l1" }];
+      return [
+        { variantId: "d0", lpVariantId: null, propertyId: "p1" },
+        { variantId: "d0", lpVariantId: "l0", propertyId: "p2" },
+      ];
+    },
+  );
+  // 既定は「ロックの下でも全件見える」(admin/office はそもそも読み直さない)。
+  pm.property.findMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
 });
 
 describe("POST assign(両軸)", () => {
@@ -87,14 +103,43 @@ describe("POST assign(両軸)", () => {
     const lpCalls = pm.dmRecipientDraft.updateMany.mock.calls.filter((c) => "lpVariantId" in c[0].data);
     expect(lpCalls.length).toBe(0);
   });
-  it("移動元の LP型(確定/送付済み)へ凍結印を立て、ロックは dm_variants → dm_lp_variants の順", async () => {
+  it("移動元の LP型(確定/送付済み)へ凍結印を立て、ロックは dm_variants → dm_lp_variants → properties の順", async () => {
     await assign(post({ mode: "auto" }), ctx);
     expect(pm.dmLpVariant.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: ["l1"] }, templateFrozenAt: null } }));
     const sql = sqlCalls();
     const v = sql.findIndex((s) => /dm_variants/.test(s) && !/dm_lp_variants/.test(s));
     const l = sql.findIndex((s) => /dm_lp_variants/.test(s));
+    const p = sql.findIndex((s) => /FROM properties/.test(s));
     expect(v).toBeGreaterThan(-1);
     expect(l).toBeGreaterThan(v);
+    // 物件親行は admin/office でも掴む(確定・反響の書き手と取得順をそろえる)。
+    expect(p).toBeGreaterThan(l);
+  });
+
+  it("担当が変わって見えなくなった物件の宛先が含まれると field_staff は 403・1件も書き換えない", async () => {
+    // 先読み(:32 の scope 絞り込み)を通った宛先でも、ロックの下で読み直すと p2 が担当外に
+    // なっている=そのまま進めると自分に見えない宛先の型・本文まで書き換わる(@codex R2 P1)。
+    (getApiSession as Fn).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.property.findMany.mockResolvedValue([{ id: "p1" }]);
+    const res = await assign(post({ mode: "auto" }), ctx);
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("FORBIDDEN");
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+    expect(pm.dmVariant.updateMany).not.toHaveBeenCalled();
+    expect(pm.dmLpVariant.updateMany).not.toHaveBeenCalled();
+    // 読み直しは物件親行のロックの後(ロック順序)。
+    const sql = sqlCalls();
+    expect(sql[sql.length - 1]).toMatch(/FROM properties[\s\S]*FOR UPDATE/);
+  });
+
+  it("field_staff でもロックの下で全件見えていれば通常どおり割り当てる(可視条件は createdBy OR assignedTo)", async () => {
+    (getApiSession as Fn).mockResolvedValue({ id: "u1", role: "field_staff" });
+    const res = await assign(post({ mode: "auto" }), ctx);
+    expect(res.status).toBe(200);
+    expect(pm.property.findMany.mock.calls[0][0].where).toEqual({
+      id: { in: ["p1", "p2"] },
+      OR: [{ createdBy: "u1" }, { assignedTo: "u1" }],
+    });
   });
   it("manual は assignments と lpAssignments を軸ごとに独立に反映する", async () => {
     await assign(post({ mode: "manual", lpAssignments: [{ recipientId: "r2", lpVariantId: "l1" }] }), ctx);
