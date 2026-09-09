@@ -153,5 +153,7 @@ describe("一括送付済みの terminal スキップ(workspace)", () => {
     const agg = read("../../components/sale-dm/aggregate-view.tsx");
     expect(agg).toContain("buildLpVariantRows");
     expect(agg).toContain("buildPairRows");
+    expect(agg).toContain("LP_METRICS_ENABLED = false");
+    expect(agg).toContain("次の段階から表示します");
   });
 });
