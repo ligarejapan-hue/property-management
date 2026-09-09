@@ -44,6 +44,7 @@ const pm = prismaMock as never as {
   dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
   dmVariant: { findFirst: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
   dmLpVariant: { updateMany: ReturnType<typeof vi.fn> };
+  $queryRaw: ReturnType<typeof vi.fn>;
 };
 const ALL = ["property", "csv_export", "csv_export_personal", "owner"];
 const grant = (...keys: string[]) =>
@@ -146,6 +147,30 @@ describe("PATCH draft (拡張)", () => {
     expect(pm.dmVariant.updateMany).toHaveBeenCalledWith({ where: { id: { in: ["v1"] }, templateFrozenAt: null }, data: { templateFrozenAt: expect.any(Date) } });
     expect(pm.dmLpVariant.updateMany).toHaveBeenCalledWith({ where: { id: { in: ["L1"] }, templateFrozenAt: null }, data: { templateFrozenAt: expect.any(Date) } });
     expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0].where).toEqual({ id: "r1", status: { not: "sent" } });
+  });
+
+  it("型を移すときは移動元と移動先の両方を1文で id 順に掴む(逆向きの付け替えと互い違いにしない)", async () => {
+    // V1→V2 と V2→V1 が同時に走ると、片方ずつ掴む書き方では移動先で待たされて両者が止まる
+    // (updateMany が参照先の型行へ KEY SHARE を後から取るため)。取得順を id 順にそろえる。
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v-old", campaign: { createdBy: "u1" } });
+    pm.dmVariant.findFirst.mockResolvedValue({ id: "vB" });
+    const res = await patchDraft(patch({ variantId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11" }) as never, ctx);
+    expect(res.status).toBe(200);
+    // $queryRaw はタグ付きテンプレート: 第2引数が ${} の値(=ロックする id の配列)。
+    const lockCall = pm.$queryRaw.mock.calls.find((c: unknown[]) =>
+      (Array.isArray(c[0]) ? (c[0] as string[]).join("?") : String(c[0])).includes("FROM dm_variants"),
+    );
+    expect(lockCall?.[1]).toEqual(["a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", "v-old"]);
+  });
+
+  it("型を移さないときは今の型だけを掴む(1件のまま)", async () => {
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v1", campaign: { createdBy: "u1" } });
+    const res = await patchDraft(patch({ body: "編集後" }) as never, ctx);
+    expect(res.status).toBe(200);
+    const lockCall = pm.$queryRaw.mock.calls.find((c: unknown[]) =>
+      (Array.isArray(c[0]) ? (c[0] as string[]).join("?") : String(c[0])).includes("FROM dm_variants"),
+    );
+    expect(lockCall?.[1]).toEqual(["v1"]);
   });
 
   it("確定解除の経路でも、並行して sent になっていれば(count=0)409 ALREADY_SENT", async () => {

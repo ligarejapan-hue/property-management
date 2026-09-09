@@ -118,7 +118,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       //   ロックの下で型の割当を読み直し、先読みと違っていたら 409 でやり直してもらう。
       //   ロック順序（設計 §2.3/§2.8）: dm_variants → dm_lp_variants → dm_recipient_drafts。
       updatedCount = await prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ${draft.variantId}::uuid FOR UPDATE`;
+        // ⚠**いまの型と移動先の型をまとめて id 順に掴む**(@codex R2 P3)。片方だけ掴むと、
+        //   V1→V2 と V2→V1 の付け替えが同時に走ったときに互い違いになる: 下の updateMany は
+        //   draft の variantId を書き換える＝PostgreSQL が**移動先**の型行へ KEY SHARE ロックを
+        //   後から取るため、掴んでいない側で必ず待たされ、両者が止まって片方が 500 で落ちる。
+        //   1文で id 順に取れば取得順がそろい待ち合いにならない(移動しないときは1件のまま)。
+        const variantLockIds = [
+          ...new Set([draft.variantId, parsed.variantId ?? draft.variantId]),
+        ].sort();
+        await tx.$queryRaw`SELECT id FROM dm_variants WHERE id = ANY(${variantLockIds}::uuid[]) ORDER BY id FOR UPDATE`;
         if (draft.lpVariantId) {
           await tx.$queryRaw`SELECT id FROM dm_lp_variants WHERE id = ${draft.lpVariantId}::uuid FOR UPDATE`;
         }

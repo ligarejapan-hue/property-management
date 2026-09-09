@@ -14,6 +14,19 @@ function src(p: string) {
   return readFileSync(path.resolve(process.cwd(), p), "utf-8");
 }
 
+/**
+ * コメント行を落としたソース。
+ * ⚠ロックの有無を素の本文で走査すると、**コメントアウトされたロック**を「有る」と
+ * 誤判定する(`// await tx.$queryRaw\`… FOR UPDATE\`` が正規表現に当たる)。
+ * 順序を見るテストは必ずこちらを使う(位置の比較は同じ文字列の中で完結するので影響なし)。
+ */
+function code(p: string) {
+  return src(p)
+    .split("\n")
+    .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+    .join("\n");
+}
+
 describe("型の設定変更(variant PATCH)のロック順序", () => {
   const s = src(
     "src/app/api/properties/sale-dm/campaigns/[id]/variants/[variantId]/route.ts",
@@ -107,6 +120,82 @@ describe("型の割当(assign)のロック順序", () => {
 
   it("型 id を並べ替えてから取る(取得順を全経路でそろえる)", () => {
     expect(s).toMatch(/\.sort\(\)[\s\S]{0,400}FROM dm_variants/);
+  });
+
+  // ⚠割当は担当外になった物件の宛先まで書き換え得る(:32 の scope 絞り込みは tx の外の先読み)。
+  //   物件親行を掴んでから確かめ直す。順序は dm_variants → dm_lp_variants → properties
+  //   (確定 drafts/confirm と同じ並び。違う並びで掴むと互い違いに待つ)。
+  const c = code("src/app/api/properties/sale-dm/campaigns/[id]/assign/route.ts");
+
+  it("dm_variants → dm_lp_variants → properties の順にロックを取る(@codex R2 P1)", () => {
+    const v = c.search(/FROM dm_variants[\s\S]{0,200}FOR UPDATE/);
+    const l = c.search(/FROM dm_lp_variants[\s\S]{0,200}FOR UPDATE/);
+    const p = c.search(/FROM properties[\s\S]{0,200}FOR UPDATE/);
+    expect(v).toBeGreaterThan(-1);
+    expect(l).toBeGreaterThan(v);
+    expect(p).toBeGreaterThan(l);
+  });
+
+  it("物件親行のロックは updateMany より先に来る", () => {
+    const p = c.search(/FROM properties[\s\S]{0,200}FOR UPDATE/);
+    const u = c.indexOf("tx.dmRecipientDraft.updateMany");
+    expect(p).toBeGreaterThan(-1);
+    expect(u).toBeGreaterThan(-1);
+    expect(p).toBeLessThan(u);
+  });
+
+  it("ロックの下で担当範囲を読み直す(先読みの判定だけで書き換えない)", () => {
+    const p = c.search(/FROM properties[\s\S]{0,200}FOR UPDATE/);
+    const after = c.slice(p);
+    expect(after).toContain("field_staff");
+    expect(after).toMatch(/assignedTo/);
+  });
+});
+
+describe("LP型の設定変更(lp-variants/[lpId] PATCH)のロック順序", () => {
+  const s = code(
+    "src/app/api/properties/sale-dm/campaigns/[id]/lp-variants/[lpId]/route.ts",
+  );
+
+  // ⚠ラベルだけの変更は下書き行に触れない=行ロックが無いと mark-sent と直列化されず、
+  //   「送付済み0件」と数えた直後の送付確定を見落とす(@codex R2 P2)。
+  it("dm_lp_variants → properties → dm_recipient_drafts の順にロックを取る", () => {
+    const l = s.search(/FROM dm_lp_variants[\s\S]{0,200}FOR UPDATE/);
+    const p = s.search(/FROM properties[\s\S]{0,200}FOR UPDATE/);
+    const d = s.search(/FROM dm_recipient_drafts[\s\S]{0,200}FOR UPDATE/);
+    expect(l).toBeGreaterThan(-1);
+    expect(p).toBeGreaterThan(l);
+    expect(d).toBeGreaterThan(p);
+  });
+
+  it("送付済みの件数は draft 行のロックの後で数える", () => {
+    const d = s.search(/FROM dm_recipient_drafts[\s\S]{0,200}FOR UPDATE/);
+    const sentBefore = s.indexOf("const sentBefore");
+    expect(d).toBeGreaterThan(-1);
+    expect(sentBefore).toBeGreaterThan(d);
+  });
+});
+
+describe("宛先の付け替え(drafts/[id] PATCH)のロック順序", () => {
+  const s = code("src/app/api/properties/sale-dm/drafts/[id]/route.ts");
+
+  // ⚠V1→V2 と V2→V1 が同時に走ると、片方ずつ掴む書き方では互い違いに待つ(@codex R2 P3)。
+  it("いまの型と移動先の型を1文でまとめて id 順に掴む", () => {
+    expect(s).toMatch(/FROM dm_variants WHERE id = ANY\([\s\S]{0,80}ORDER BY id FOR UPDATE/);
+    const ids = s.indexOf("const variantLockIds");
+    const lock = s.search(/FROM dm_variants[\s\S]{0,200}FOR UPDATE/);
+    expect(ids).toBeGreaterThan(-1);
+    expect(lock).toBeGreaterThan(ids);
+    const decl = s.slice(ids, lock);
+    expect(decl).toContain("parsed.variantId");
+    expect(decl).toContain(".sort()");
+  });
+
+  it("dm_variants のロックが dm_lp_variants より先に来る", () => {
+    const v = s.search(/FROM dm_variants[\s\S]{0,200}FOR UPDATE/);
+    const l = s.search(/FROM dm_lp_variants[\s\S]{0,200}FOR UPDATE/);
+    expect(v).toBeGreaterThan(-1);
+    expect(l).toBeGreaterThan(v);
   });
 });
 
