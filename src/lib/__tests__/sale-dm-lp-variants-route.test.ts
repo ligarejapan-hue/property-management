@@ -97,7 +97,7 @@ describe("PATCH lp-variants/[lpId]", () => {
     expect(pm.dmLpVariant.update.mock.calls[0][0].data).toEqual({ label: "B", tone: "formal" });
   });
   it("凍結中(配下に確定のみ・送付済みなし)の文体変更は 409 VARIANT_LOCKED、label だけなら通る", async () => {
-    // 呼び出し順: 1回目PATCH = sentCount(0) → settledCount(1・確定のみ) / 2回目PATCH(label のみ) = sentCount(0)。
+    // 呼び出し順: 1回目PATCH = sentBefore(0) → settledCount(1・確定のみ) / 2回目PATCH(label のみ) = sentBefore(0)。
     pm.dmRecipientDraft.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1).mockResolvedValueOnce(0);
     const r1 = await PATCH(req("PATCH", { options: { tone: "soft" } }), ctxLp);
     expect(r1.status).toBe(409);
@@ -114,14 +114,38 @@ describe("PATCH lp-variants/[lpId]", () => {
     pm.dmLpVariant.findFirst.mockResolvedValue({ id: "l1", campaignId: "c1", ...OPT, templateFrozenAt: new Date() });
     expect((await PATCH(req("PATCH", { options: { appeal: "vacant" } }), ctxLp)).status).toBe(409);
   });
-  it("dm_lp_variants 行を FOR UPDATE でロックしてから判定する", async () => {
+  it("dm_lp_variants 行 → この型の宛先行 の順に FOR UPDATE でロックしてから判定する", async () => {
     await PATCH(req("PATCH", { options: { tone: "soft" } }), ctxLp);
-    expect(sqlCalls().join("\n")).toMatch(/FROM dm_lp_variants[\s\S]*FOR UPDATE/);
+    const sql = sqlCalls();
+    expect(sql.join("\n")).toMatch(/FROM dm_lp_variants[\s\S]*FOR UPDATE/);
+    // ⚠ラベルだけの変更は宛先行に触れない=行ロックが無いと mark-sent と直列化されず、
+    //   「送付済み0件」と数えた直後の送付確定を見落とす(@codex R2 P2)。
+    const l = sql.findIndex((s) => /FROM dm_lp_variants[\s\S]*FOR UPDATE/.test(s));
+    const d = sql.findIndex((s) => /FROM dm_recipient_drafts[\s\S]*FOR UPDATE/.test(s));
+    expect(l).toBeGreaterThan(-1);
+    expect(d).toBeGreaterThan(l);
+  });
+  it("label だけの変更でも宛先行をロックする(送付確定との競合を検出する土台)", async () => {
+    await PATCH(req("PATCH", { label: "B" }), ctxLp);
+    expect(sqlCalls().some((s) => /FROM dm_recipient_drafts[\s\S]*FOR UPDATE/.test(s))).toBe(true);
+  });
+  it("更新後に送付確定が入っていたら 409 VARIANT_LOCKED(sentAfter)", async () => {
+    // 呼び出し順: sentBefore(0) → settledCount(0) → update → sentAfter(1)。
+    // ロックの内側でも念のため後ろでも数える(DM型の PATCH と同じ二重の備え)。
+    pm.dmRecipientDraft.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1);
+    const res = await PATCH(req("PATCH", { options: { tone: "soft" } }), ctxLp);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("VARIANT_LOCKED");
+    // update は呼ばれるが tx 全体がロールバックされる(mock では例外の送出で表す)。
+    expect(pm.dmLpVariant.update).toHaveBeenCalled();
   });
   it("field_staff は担当外の宛先が居ると文体を変えられない(403・何も消さない)", async () => {
     // 設定変更はこの型の原文・切り分け結果を消す=担当外(再割当で隠れた)宛先のLP表示まで白紙にする。
-    // ⚠count は3回(sentCount / settledCount / 担当外の件数)呼ばれるが、`Once` の並びで組むと
-    //   実装が1回呼ばなくなっただけで余りが次のテストへ漏れる。where の形で答えを決める。
+    // ⚠count は複数回(担当外の件数 / sentBefore / settledCount …)呼ばれるが、`Once` の並びで
+    //   組むと実装が1回呼ばなくなっただけで余りが次のテストへ漏れる。where の形で答えを決める。
     (getApiSession as Fn).mockResolvedValue({ id: "u1", role: "field_staff" });
     pm.dmRecipientDraft.count.mockImplementation(async (args: { where?: { property?: unknown } }) =>
       args?.where?.property ? 1 : 0,
@@ -132,10 +156,14 @@ describe("PATCH lp-variants/[lpId]", () => {
     expect((await res.json()).error.code).toBe("FORBIDDEN");
     expect(pm.dmLpVariant.update).not.toHaveBeenCalled();
     // 担当外の判定は NOT(OR) で行う(assignedTo が NULL の未割当物件も担当外として数える)。
-    expect(pm.dmRecipientDraft.count.mock.calls[2][0].where.property).toEqual({
+    // ⚠呼び出し番号で指すと並べ替えのたびに落ちる。where の形で当該の count を探す。
+    const scopeCall = pm.dmRecipientDraft.count.mock.calls.find(
+      (c) => (c[0] as { where?: { property?: unknown } } | undefined)?.where?.property,
+    ) as [{ where: { property: unknown } }] | undefined;
+    expect(scopeCall?.[0].where.property).toEqual({
       NOT: { OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] },
     });
-    // 物件親行のロックは dm_lp_variants の後(ロック順序)。
+    // 物件親行のロックは dm_lp_variants の後(ロック順序)。403 で止まるので宛先行までは行かない。
     const sql = sqlCalls();
     expect(sql[0]).toMatch(/dm_lp_variants/);
     expect(sql[1]).toMatch(/FROM properties[\s\S]*FOR UPDATE/);

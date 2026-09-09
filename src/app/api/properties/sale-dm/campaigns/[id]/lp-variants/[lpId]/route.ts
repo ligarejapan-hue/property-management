@@ -15,7 +15,7 @@ const OPTION_KEYS = ["tone", "length", "appeal", "strength"] as const;
  * 送付済みの宛先が1件でもあれば label を含め一切変更不可(DM型と同じ・ラベルは A/B集計・送付履歴に
  * 載るため)。送付済みが無く確定のみの凍結(列 OR 配下に確定)中は文体を変えられない、label だけは通る。
  * LP は印刷物ではないので、DM型の PATCH と違い確定の解除はしない(刷り上がりが変わらない)。
- * ロック順序: dm_lp_variants → properties(dm_variants は触らない)。
+ * ロック順序: dm_lp_variants → properties → dm_recipient_drafts(dm_variants は触らない)。
  */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string; lpId: string }> }) {
   try {
@@ -32,19 +32,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       });
       if (!existing) throw new ApiError(404, "指定されたLP型が見つかりません", "LP_VARIANT_NOT_FOUND");
 
-      // 送付済みの宛先が使っているLP型は label を含め一切変更不可(DM型と同じ・ラベルは
-      // A/B集計・送付履歴に載るため、文体を変えなくても送付後の書き換えは整合を崩す)。
-      const sentCount = await tx.dmRecipientDraft.count({
-        where: { campaignId: id, lpVariantId: lpId, status: "sent" },
-      });
-      if (sentCount > 0) {
-        throw new ApiError(
-          409,
-          "送付済みの宛先があるLP型は設定を変更できません(A/B履歴の整合のため)",
-          "VARIANT_LOCKED",
-        );
-      }
-
       const data: Prisma.DmLpVariantUpdateInput = {};
       if (parsed.label !== undefined) data.label = parsed.label;
       let optionFieldChanged = false;
@@ -56,6 +43,61 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           if (v !== existing[k]) optionFieldChanged = true;
         }
       }
+
+      // ⚠field_staff の担当範囲を、**設定を変える前に**確かめる(@codex R2 P1・DM型の
+      //   variants/[variantId] PATCH と同じ形)。この型の文章は担当外(再割当で隠れた)の
+      //   宛先のLPにも表示されるので、設定変更で原文・切り分け結果を消すと、自分に見えない
+      //   宛先の表示まで白紙にしてしまう。1件でも担当外が居れば拒否する(label だけ＝何も
+      //   消えない場合はここを通さない)。
+      // ⚠判定は**物件親行をロックしてから**数える(数えた直後〜commit の間に担当が
+      //   変わるのを防ぐ)。ロック順序は dm_lp_variants(:28 で取得済み)→ properties → draft 行。
+      //   物件親行は**必ず draft 行のロックより先**に取る(取得順を全経路でそろえる)。
+      if (optionFieldChanged && session.role === "field_staff") {
+        // 送付済みは下の sentBefore>0 で 409 になるが、担当範囲の判定は未送付だけを見る
+        // (消えるのは未送付の表示だけ・送付済みは status で除外)。
+        const targets = await tx.dmRecipientDraft.findMany({
+          where: { campaignId: id, lpVariantId: lpId, status: { not: "sent" } },
+          select: { propertyId: true },
+        });
+        const propertyIds = [...new Set(targets.map((t) => t.propertyId))].sort();
+        if (propertyIds.length > 0) {
+          await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${propertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
+          const outOfScope = await tx.dmRecipientDraft.count({
+            where: {
+              campaignId: id,
+              lpVariantId: lpId,
+              status: { not: "sent" },
+              // 「担当外」= 可視条件(createdBy==me OR assignedTo==me)の否定。assignedTo が NULL の
+              // 未割当物件も担当外として数えるため、`{not}` の AND ではなく NOT(OR) を使う。
+              property: { NOT: { OR: [{ createdBy: session.id }, { assignedTo: session.id }] } },
+            },
+          });
+          if (outOfScope > 0) {
+            throw new ApiError(403, "担当外の宛先を含むLP型は設定を変更できません", "FORBIDDEN");
+          }
+        }
+      }
+
+      // ⚠**このLP型の宛先行をロックしてから送付済みを数える**(@codex R2 P2・DM型の PATCH と同じ形)。
+      //   ラベルだけの変更は下書き行に触れないので、ロックが無いと mark-sent と直列化されない
+      //   ＝「送付済み0件」と数えた直後に送付が確定し、そのあとで書いたラベルの下に
+      //   **すでに送り終えた実績**がぶら下がる(集計はラベルをその都度引くため)。
+      //   ロック順序(設計 §2.3/§2.8): dm_lp_variants → properties → dm_recipient_drafts。
+      await tx.$queryRaw`SELECT id FROM dm_recipient_drafts WHERE campaign_id = ${id}::uuid AND lp_variant_id = ${lpId}::uuid FOR UPDATE`;
+
+      // 送付済みの宛先が使っているLP型は label を含め一切変更不可(DM型と同じ・ラベルは
+      // A/B集計・送付履歴に載るため、文体を変えなくても送付後の書き換えは整合を崩す)。
+      const sentBefore = await tx.dmRecipientDraft.count({
+        where: { campaignId: id, lpVariantId: lpId, status: "sent" },
+      });
+      if (sentBefore > 0) {
+        throw new ApiError(
+          409,
+          "送付済みの宛先があるLP型は設定を変更できません(A/B履歴の整合のため)",
+          "VARIANT_LOCKED",
+        );
+      }
+
       if (optionFieldChanged) {
         const settledCount = await tx.dmRecipientDraft.count({
           where: { campaignId: id, lpVariantId: lpId, status: { in: [...SETTLED_DRAFT_STATUSES] } },
@@ -67,37 +109,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
             "VARIANT_LOCKED",
           );
         }
-        // ⚠field_staff の担当範囲を、**設定を変える前に**確かめる(@codex R2 P1・DM型の
-        //   variants/[variantId] PATCH と同じ形)。この型の文章は担当外(再割当で隠れた)の
-        //   宛先のLPにも表示されるので、設定変更で原文・切り分け結果を消すと、自分に見えない
-        //   宛先の表示まで白紙にしてしまう。1件でも担当外が居れば拒否する(label だけ＝何も
-        //   消えない場合はここを通さない)。
-        // ⚠判定は**物件親行をロックしてから**数える(数えた直後〜commit の間に担当が
-        //   変わるのを防ぐ)。ロック順序は dm_lp_variants(:28 で取得済み)→ properties。
-        if (session.role === "field_staff") {
-          // 送付済みは上の sentCount>0 で既に 409 なので、ここに残るのは未送付だけ。
-          const targets = await tx.dmRecipientDraft.findMany({
-            where: { campaignId: id, lpVariantId: lpId, status: { not: "sent" } },
-            select: { propertyId: true },
-          });
-          const propertyIds = [...new Set(targets.map((t) => t.propertyId))].sort();
-          if (propertyIds.length > 0) {
-            await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${propertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
-            const outOfScope = await tx.dmRecipientDraft.count({
-              where: {
-                campaignId: id,
-                lpVariantId: lpId,
-                status: { not: "sent" },
-                // 「担当外」= 可視条件(createdBy==me OR assignedTo==me)の否定。assignedTo が NULL の
-                // 未割当物件も担当外として数えるため、`{not}` の AND ではなく NOT(OR) を使う。
-                property: { NOT: { OR: [{ createdBy: session.id }, { assignedTo: session.id }] } },
-              },
-            });
-            if (outOfScope > 0) {
-              throw new ApiError(403, "担当外の宛先を含むLP型は設定を変更できません", "FORBIDDEN");
-            }
-          }
-        }
         // 古いプロンプトで作った文章を新しい設定の型として使えないよう、原文・切り分け結果・控えを消す。
         data.promptText = null;
         data.rawTemplate = null;
@@ -106,7 +117,20 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         data.bodyText = null;
         data.faqJson = Prisma.DbNull;
       }
-      return tx.dmLpVariant.update({ where: { id: lpId, campaignId: id }, data });
+      const updated = await tx.dmLpVariant.update({ where: { id: lpId, campaignId: id }, data });
+      // 更新中に別 request がこのLP型の宛先を sent 化していたら、送った構成を書き換えたことに
+      // なる → ロールバック(DM型の sentAfter と同じ二重の備え)。
+      const sentAfter = await tx.dmRecipientDraft.count({
+        where: { campaignId: id, lpVariantId: lpId, status: "sent" },
+      });
+      if (sentAfter > 0) {
+        throw new ApiError(
+          409,
+          "送付済みの宛先があるLP型は設定を変更できません(A/B履歴の整合のため)",
+          "VARIANT_LOCKED",
+        );
+      }
+      return updated;
     });
 
     await writeAuditLog({
