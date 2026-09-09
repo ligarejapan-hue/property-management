@@ -153,7 +153,10 @@ describe("一括送付済みの terminal スキップ(workspace)", () => {
     const agg = read("../../components/sale-dm/aggregate-view.tsx");
     expect(agg).toContain("buildLpVariantRows");
     expect(agg).toContain("buildPairRows");
-    expect(agg).toContain("LP_METRICS_ENABLED = false");
+    expect(agg).toContain("LP_METRICS_ENABLED");
     expect(agg).toContain("次の段階から表示します");
+    // 旗は共有モジュールに1本だけ置き、画面と API の両方がそこを見る(@codex R4 P2)。
+    expect(read("../sale-dm-letter/lp-metrics-flag.ts")).toContain("LP_METRICS_ENABLED = false");
+    expect(read("../../app/api/properties/sale-dm/campaigns/[id]/aggregate/route.ts")).toContain("lp-metrics-flag");
   });
 });

@@ -3,6 +3,9 @@ import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
 import { aggregateByVariant, aggregateTwoAxis, LP_NONE } from "@/lib/sale-dm-letter/aggregate";
+// 画面と同じ1か所を見る(@codex R4 P2)。画面だけ隠して API が出し続けると、まだ意味を持たない
+// 数字が JSON に載ったまま配られる。
+import { LP_METRICS_ENABLED } from "@/lib/sale-dm-letter/lp-metrics-flag";
 
 export async function GET(
   _request: NextRequest,
@@ -63,9 +66,15 @@ export async function GET(
           label: labelByVariantId.get(v.variantId) ?? v.variantId,
         })),
         total: aggregate.total,
+        // DM型ごとの閲覧率は LP の出し分けと無関係(文面の成績)なので常に返す。
         byDmVariantView: twoAxis.byDmVariant.map((v) => ({ ...v, label: labelByVariantId.get(v.variantId) ?? v.variantId })),
-        byLpVariant: twoAxis.byLpVariant.map((v) => ({ ...v, label: v.lpVariantId === LP_NONE ? "LP型なし(外部LP)" : (lpLabel.get(v.lpVariantId) ?? v.lpVariantId) })),
-        byPair: twoAxis.byPair.map((p) => ({ ...p, label: `${labelByVariantId.get(p.variantId) ?? p.variantId} × ${p.lpVariantId === LP_NONE ? "LP型なし" : (lpLabel.get(p.lpVariantId) ?? p.lpVariantId)}` })),
+        // LP型ごと/組み合わせは /t/ が LP型ごとにページを出し分けるまで返さない。
+        ...(LP_METRICS_ENABLED
+          ? {
+              byLpVariant: twoAxis.byLpVariant.map((v) => ({ ...v, label: v.lpVariantId === LP_NONE ? "LP型なし(外部LP)" : (lpLabel.get(v.lpVariantId) ?? v.lpVariantId) })),
+              byPair: twoAxis.byPair.map((p) => ({ ...p, label: `${labelByVariantId.get(p.variantId) ?? p.variantId} × ${p.lpVariantId === LP_NONE ? "LP型なし" : (lpLabel.get(p.lpVariantId) ?? p.lpVariantId)}` })),
+            }
+          : {}),
       },
       { headers: { "Cache-Control": "no-store" } },
     );

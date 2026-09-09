@@ -154,7 +154,10 @@ describe("GET aggregate", () => {
     expect(json.total.sent).toBe(2);
   });
 
-  it("二軸集計(byLpVariant / byPair)を返し、LP型なしは「LP型なし(外部LP)」のラベル", async () => {
+  it("旗が false のあいだ byLpVariant / byPair は返さない(DM型ごとの閲覧率は返す)", async () => {
+    // 公開の追跡リンク(/t/)が LP型ごとにページを出し分けるまで、LP型別の閲覧は「ページの成績」に
+    // ならない。画面を隠すだけでなく **API も出さない**(@codex R4 P2)。
+    // 旗が true のときに両方を返すことは sale-dm-aggregate-route-lp-metrics.test.ts が見る。
     pm.dmVariant.findMany.mockResolvedValue([{ id: "v1", label: "A" }]);
     pm.dmLpVariant.findMany.mockResolvedValue([{ id: "l1", label: "X" }]);
     pm.dmRecipientDraft.findMany.mockResolvedValue([
@@ -162,8 +165,8 @@ describe("GET aggregate", () => {
       { variantId: "v1", lpVariantId: null, deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, property: { createdBy: "u1", assignedTo: null } },
     ]);
     const json = await (await GET(new Request("http://x") as never, ctx())).json();
-    expect(json.byLpVariant.map((x: { label: string }) => x.label)).toEqual(["LP型なし(外部LP)", "X"]);
-    expect(json.byPair.length).toBe(2);
+    expect(Object.keys(json)).not.toContain("byLpVariant");
+    expect(Object.keys(json)).not.toContain("byPair");
     expect(json.byDmVariantView[0]).toMatchObject({ label: "A", viewed: 1, delivered: 2, viewRate: 0.5 });
   });
 });

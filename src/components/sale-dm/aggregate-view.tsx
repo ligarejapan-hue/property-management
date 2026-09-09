@@ -2,6 +2,8 @@
 
 import type { SaleDmCampaign } from "@/lib/api-client";
 import { buildVariantRows, buildDmViewRows, buildLpVariantRows, buildPairRows } from "@/lib/sale-dm-letter/aggregate-view-model";
+// 表示の可否は画面と API で**同じ1か所**を見る(@codex R4 P2)。
+import { LP_METRICS_ENABLED } from "@/lib/sale-dm-letter/lp-metrics-flag";
 
 const th = "px-3 py-2 font-medium text-gray-600";
 const td = "px-3 py-2";
@@ -33,11 +35,6 @@ function Table({ title, head, rows }: { title: string; head: string[]; rows: Arr
     </div>
   );
 }
-
-// LP型ごと/組み合わせの表は、公開の追跡リンク(/t/)が LP型ごとにページを出し分けるようになるまで隠す。
-// いまは全員が同じ外部LPを見るため、LP型別の閲覧は「ページの成績」ではない(@codex R3 P1)。
-// 次の段階(アプリ内LPの公開)で true にする。
-export const LP_METRICS_ENABLED = false;
 
 // 3つの見方(設計 2026-09-08 §2.1)。率の隣に必ず分母と件数を置く(少数での早合点を防ぐ)。
 export default function SaleDmAggregateView({ campaign }: { campaign: SaleDmCampaign }) {
