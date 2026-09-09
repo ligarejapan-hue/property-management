@@ -39,19 +39,32 @@ describe("assignCrossEvenly(総当たり)", () => {
       for (const [rid, vid] of legacy) expect(cross.get(rid)).toEqual({ variantId: vid, lpVariantId: null });
     }
   });
-  it("DM型×LP型の全組が最大1差で均等、DM型の周辺も既存と同じ順、LP型の周辺は最大2差", () => {
-    for (let n = 1; n <= 4; n++) for (let m = 1; m <= 4; m++) for (let r = 0; r <= 40; r++) {
+  it("DM×LPの総当たり: 組の偏り≤1・DM軸は既存と一致・LP軸の偏り≤1(n=1..7 m=0..7 r=0..100)", () => {
+    for (let n = 1; n <= 7; n++) for (let m = 0; m <= 7; m++) for (let r = 0; r <= 100; r++) {
       const dm = ids("d", n); const lp = ids("l", m); const rec = ids("r", r);
       const map = assignCrossEvenly(rec, dm, lp);
-      expect(map.size).toBe(r);
+      expect(map.size, `n=${n} m=${m} r=${r}`).toBe(r);
       const c = counts(map);
-      expect(spread(c.pair, n * m), `n=${n} m=${m} r=${r}`).toBeLessThanOrEqual(1);
-      expect(spread(c.dm, n)).toBeLessThanOrEqual(1);
-      expect(spread(c.lp, m)).toBeLessThanOrEqual(2);
+      expect(spread(c.dm, n), `n=${n} m=${m} r=${r} dm`).toBeLessThanOrEqual(1);
       const legacy = assignVariantsEvenly(rec, dm);
-      for (const [rid, vid] of legacy) expect(map.get(rid)?.variantId).toBe(vid);
+      for (const [rid, vid] of legacy) expect(map.get(rid)?.variantId, `n=${n} m=${m} r=${r} rid=${rid}`).toBe(vid);
+      if (m === 0) {
+        for (const v of map.values()) expect(v.lpVariantId, `n=${n} m=${m} r=${r}`).toBeNull();
+        continue;
+      }
+      expect(spread(c.pair, n * m), `n=${n} m=${m} r=${r} pair`).toBeLessThanOrEqual(1);
+      expect(spread(c.lp, m), `n=${n} m=${m} r=${r} lp`).toBeLessThanOrEqual(1);
       for (const v of map.values()) expect(lp).toContain(v.lpVariantId);
     }
+  });
+  it("@codex R7-1 の指摘例: n=3 m=5 r=7 → LP軸の本数は全て {1,2} のいずれか(偏り≤1)", () => {
+    const map = assignCrossEvenly(ids("r", 7), ids("d", 3), ids("l", 5));
+    const c = counts(map);
+    for (const l of ids("l", 5)) {
+      const cnt = c.lp.get(l) ?? 0;
+      expect([1, 2], `l=${l} count=${cnt}`).toContain(cnt);
+    }
+    expect(spread(c.lp, 5)).toBeLessThanOrEqual(1);
   });
   it("端数は先頭の組から1つずつ多い(sequential・n=2 m=2 r=5)", () => {
     const map = assignCrossEvenly(ids("r", 5), ids("d", 2), ids("l", 2));
