@@ -47,6 +47,9 @@ const ctx = { params: Promise.resolve({ id: "c1" }) };
 const post = (b: unknown) => new Request("http://x", { method: "POST", body: JSON.stringify(b) }) as never;
 const prop = { createdBy: "u1", assignedTo: null };
 const sqlCalls = () => pm.$queryRaw.mock.calls.map((c) => (Array.isArray(c[0]) ? c[0].join("?") : String(c[0])));
+// ロックの下での読み直し(targetsPost)。テストごとに差し替えて「途中で動いた」状況を作る。
+type Post = { variantId: string; lpVariantId: string | null; status: string };
+let targetsPost: Post[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -61,17 +64,24 @@ beforeEach(() => {
   pm.dmLpVariant.findMany.mockResolvedValue([{ id: "l0" }, { id: "l1" }]);
   // ⚠`Once` の並びで組まない。途中で 403/409 に落ちるテストが余りを残し、次のテストの
   //   1回目の読みがその余りになる(先読みの結果が別物になって落ちる)。読みの形で答えを決める。
-  //   ①先読み(tx外・property を select)②移動元の型+物件(sourcesPre)③確定/送付済み(movingSettled)。
+  //   ①先読み(tx外・property を select)②移動元の型+物件(sourcesPre = propertyId を select)
+  //   ③ロックの下の読み直し(targetsPost = status を select・凍結の元にもなる)。
+  targetsPost = [
+    { variantId: "d0", lpVariantId: null, status: "draft" },
+    { variantId: "d0", lpVariantId: "l0", status: "draft" },
+    { variantId: "d1", lpVariantId: "l1", status: "confirmed" },
+  ];
   pm.dmRecipientDraft.findMany.mockImplementation(
     async (args: { where?: Record<string, unknown>; select?: Record<string, unknown> }) => {
       if (args?.select?.property) {
         return [{ id: "r0", property: prop }, { id: "r1", property: prop }, { id: "r2", property: prop }, { id: "r3", property: prop }];
       }
-      const status = args?.where?.status as { in?: unknown } | undefined;
-      if (status && "in" in status) return [{ variantId: "d1", lpVariantId: "l1" }];
+      if (args?.select?.status) return targetsPost;
       return [
         { variantId: "d0", lpVariantId: null, propertyId: "p1" },
         { variantId: "d0", lpVariantId: "l0", propertyId: "p2" },
+        // 確定済みの移動元(d1/l1)も先読みで見えている=ロック集合に入る。
+        { variantId: "d1", lpVariantId: "l1", propertyId: "p2" },
       ];
     },
   );
@@ -114,6 +124,28 @@ describe("POST assign(両軸)", () => {
     expect(l).toBeGreaterThan(v);
     // 物件親行は admin/office でも掴む(確定・反響の書き手と取得順をそろえる)。
     expect(p).toBeGreaterThan(l);
+  });
+
+  it("先読みのあとに別の割当が下書きを掴んでいない LP型へ移していたら 409・1件も書き換えず凍結印も立てない", async () => {
+    // ロックの下で読み直すと移動元が l9(ロック集合の外)。そのまま凍結印を立てると
+    // **ロックしていない dm_lp_variants 行**を properties ロックの後に書き換える=取得順が逆になる。
+    targetsPost = [{ variantId: "d0", lpVariantId: "l9", status: "confirmed" }];
+    const res = await assign(post({ mode: "auto" }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("VARIANT_CHANGED");
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+    expect(pm.dmVariant.updateMany).not.toHaveBeenCalled();
+    expect(pm.dmLpVariant.updateMany).not.toHaveBeenCalled();
+    // 物件ロックまで進まない(=読み直しは dm_lp_variants ロックの直後)。
+    expect(sqlCalls().some((s) => /FROM properties/.test(s))).toBe(false);
+  });
+
+  it("読み直しで移動元が掴んでいない DM型に変わっていても 409", async () => {
+    targetsPost = [{ variantId: "d9", lpVariantId: null, status: "draft" }];
+    const res = await assign(post({ mode: "auto" }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("VARIANT_CHANGED");
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
   it("担当が変わって見えなくなった物件の宛先が含まれると field_staff は 403・1件も書き換えない", async () => {

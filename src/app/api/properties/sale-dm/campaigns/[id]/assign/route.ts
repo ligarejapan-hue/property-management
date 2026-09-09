@@ -92,6 +92,25 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         await tx.$queryRaw`SELECT id FROM dm_lp_variants WHERE id = ANY(${lockLpIds}::uuid[]) AND campaign_id = ${id}::uuid ORDER BY id FOR UPDATE`;
       }
 
+      // ⚠**ロックの下で移動元をもう一度読み、掴んだ型の集合に収まっているか確かめる**（@codex R4 P2）。
+      //   上の lockVariantIds / lockLpIds は**ロック前**の sourcesPre で決めた集合。読んでから
+      //   ロックが取れるまでの間に別の割当がこの下書きを**別の型へ移す**と、移動元がロック集合の
+      //   外に出る。そのまま進むと markVariantsFrozen / markLpVariantsFrozen が**ロックしていない行**を
+      //   物件ロックの後に書き換え、取得順が dm_lp_variants → properties の逆になる
+      //   （LP文面の保存 PUT は dm_lp_variants を掴んでから properties を待つ＝互い違いに止まる）。
+      //   追いかけて掴み直すと順序がさらに崩れるので、**やり直してもらう**（409）。
+      const targetsPost = await tx.dmRecipientDraft.findMany({
+        where: { id: { in: allIds }, campaignId: id },
+        select: { variantId: true, lpVariantId: true, status: true },
+      });
+      const lockedVariantIds = new Set(lockVariantIds);
+      const lockedLpIds = new Set(lockLpIds);
+      for (const d of targetsPost) {
+        if (!lockedVariantIds.has(d.variantId) || (d.lpVariantId != null && !lockedLpIds.has(d.lpVariantId))) {
+          throw new ApiError(409, "割当の途中で別の割当が動きました。画面を更新してからやり直してください", "VARIANT_CHANGED");
+        }
+      }
+
       // ⚠**物件親行をロックしてから担当範囲を確かめ直す**（@codex R2 P1）。:32 の scope 絞り込みは
       //   トランザクションの**外**の先読みなので、読んだ直後〜commit の間に物件が別担当へ再割当
       //   されると、担当外になった宛先の DM型/LP型まで書き換えてしまう（本文もクリアされる）。
@@ -124,15 +143,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
       // ⚠確定済み/送付済みの下書きを別の型へ移すと、移動元の型から「確定があった」
       //   証拠が消える。移す前に**移動元**の型へ凍結印を立てる（設計 §2.4 @codex R24/R31）。
-      //   ロックを保持したまま読み直す（先読み〜ロックの間の移動を取りこぼさない）。
-      const movingSettled = await tx.dmRecipientDraft.findMany({
-        where: {
-          id: { in: allIds },
-          campaignId: id,
-          status: { in: [...SETTLED_DRAFT_STATUSES] },
-        },
-        select: { variantId: true, lpVariantId: true },
-      });
+      //   ロックを保持したまま読み直した targetsPost から絞る（先読み〜ロックの間の移動を
+      //   取りこぼさない・上でロック集合に収まっていることを確かめ済み）。
+      const settled = new Set<string>(SETTLED_DRAFT_STATUSES);
+      const movingSettled = targetsPost.filter((d) => settled.has(d.status));
       await markVariantsFrozen(tx, movingSettled.map((d) => d.variantId));
       await markLpVariantsFrozen(tx, movingSettled.map((d) => d.lpVariantId));
       for (const [variantId, ids] of byVariant) {
