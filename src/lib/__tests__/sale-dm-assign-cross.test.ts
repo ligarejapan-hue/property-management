@@ -39,7 +39,8 @@ describe("assignCrossEvenly(総当たり)", () => {
       for (const [rid, vid] of legacy) expect(cross.get(rid)).toEqual({ variantId: vid, lpVariantId: null });
     }
   });
-  it("DM×LPの総当たり: 組の偏り≤1・DM軸は既存と一致・LP軸の偏り≤1(n=1..7 m=0..7 r=0..100)", () => {
+  // 総当たり(約5,600通り×最大100宛先)はフルスイートの負荷下で既定の5秒を超えることがある(単体では約1秒)。
+  it("DM×LPの総当たり: 組の偏り≤1・DM軸は既存と一致・LP軸の偏り≤1(n=1..7 m=0..7 r=0..100)", { timeout: 60_000 }, () => {
     for (let n = 1; n <= 7; n++) for (let m = 0; m <= 7; m++) for (let r = 0; r <= 100; r++) {
       const dm = ids("d", n); const lp = ids("l", m); const rec = ids("r", r);
       const map = assignCrossEvenly(rec, dm, lp);
