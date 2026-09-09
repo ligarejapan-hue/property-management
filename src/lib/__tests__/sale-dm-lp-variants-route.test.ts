@@ -215,4 +215,32 @@ describe("DELETE lp-variants/[lpId]", () => {
       detail: expect.objectContaining({ detachedCount: 2 }),
     });
   });
+  it("field_staff は担当外の宛先が居ると削除できない(403・detach も delete も呼ばない・@codex R6)", async () => {
+    // この型を可視の宛先から削除しても、同じ型を参照する担当外(再割当で隠れた)宛先の
+    // 割当まで detach で巻き込んで外してしまう=表示上の削除のつもりが担当外の状態を変える。
+    (getApiSession as Fn).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.count.mockImplementation(async (args: { where?: { property?: unknown } }) =>
+      args?.where?.property ? 1 : 0,
+    );
+    pm.dmRecipientDraft.findMany.mockResolvedValue([{ propertyId: "p-hidden" }]);
+    const res = await DELETE(req("DELETE"), ctxLp);
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("FORBIDDEN");
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+    expect(pm.dmLpVariant.deleteMany).not.toHaveBeenCalled();
+  });
+  it("field_staff でも宛先が全て可視なら削除でき、SQL は dm_lp_variants → properties の順(@codex R6)", async () => {
+    (getApiSession as Fn).mockResolvedValue({ id: "u1", role: "field_staff" });
+    pm.dmRecipientDraft.findMany.mockResolvedValue([{ propertyId: "p-visible" }]);
+    // 担当外の件数を数える count は 0(全て可視)。凍結判定の settledCount 用 count も 0。
+    const res = await DELETE(req("DELETE"), ctxLp);
+    expect(res.status).toBe(200);
+    expect(pm.dmRecipientDraft.updateMany).toHaveBeenCalled();
+    expect(pm.dmLpVariant.deleteMany).toHaveBeenCalled();
+    const sql = sqlCalls();
+    const l = sql.findIndex((s) => /FROM dm_lp_variants[\s\S]*FOR UPDATE/.test(s));
+    const p = sql.findIndex((s) => /FROM properties[\s\S]*FOR UPDATE/.test(s));
+    expect(l).toBeGreaterThan(-1);
+    expect(p).toBeGreaterThan(l);
+  });
 });

@@ -162,6 +162,35 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
       if (isVariantFrozen({ templateFrozenAt: row.templateFrozenAt, settledCount })) {
         throw new ApiError(409, "送付実績のあるLP型は削除できません", "VARIANT_FROZEN");
       }
+      // ⚠field_staff の担当範囲を、**下の detach で割当を外す前に**確かめる(@codex R6 P1・
+      //   PATCH の同種チェックと同じ形)。この型を可視の(自分が担当する)宛先から削除しても、
+      //   同じ型を参照している担当外(再割当で隠れた)宛先の割当を巻き込みで外してしまうため
+      //   (1件でも担当外が居れば削除自体を拒否する)。
+      // ⚠判定は**物件親行をロックしてから**数える(数えた直後〜commit の間に担当が
+      //   変わるのを防ぐ)。ロック順序は dm_lp_variants(上でロック済み)→ properties → draft 行。
+      if (session.role === "field_staff") {
+        const targets = await tx.dmRecipientDraft.findMany({
+          where: { campaignId: id, lpVariantId: lpId, status: { not: "sent" } },
+          select: { propertyId: true },
+        });
+        const propertyIds = [...new Set(targets.map((t) => t.propertyId))].sort();
+        if (propertyIds.length > 0) {
+          await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${propertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
+          const outOfScope = await tx.dmRecipientDraft.count({
+            where: {
+              campaignId: id,
+              lpVariantId: lpId,
+              status: { not: "sent" },
+              // 「担当外」= 可視条件(createdBy==me OR assignedTo==me)の否定。assignedTo が NULL の
+              // 未割当物件も担当外として数えるため、`{not}` の AND ではなく NOT(OR) を使う。
+              property: { NOT: { OR: [{ createdBy: session.id }, { assignedTo: session.id }] } },
+            },
+          });
+          if (outOfScope > 0) {
+            throw new ApiError(403, "担当外の宛先を含むLP型は削除できません", "FORBIDDEN");
+          }
+        }
+      }
       // ⚠削除前に未送付の宛先を割当なしへ戻す(@codex R5 finding)。ここまで来ていれば
       //   確定/送付済みの宛先は無い(上の isVariantFrozen が settledCount>0 で既に拒否済み)ので、
       //   この型を参照している下書きは status="draft" のみ(status: not sent は将来の競合への保険)。
