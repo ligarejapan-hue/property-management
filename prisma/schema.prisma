@@ -197,6 +197,7 @@ model User {
   dmRecipientDrafts       DmRecipientDraft[]      @relation("DmRecipientGenerator")
   registryFetchJobs       RegistryFetchJob[]      @relation("RegistryFetchJobRequestedBy")
   dmExportBatches         DmExportBatch[]         @relation("DmExportBatchCreator")
+  lpAssets                DmLpAsset[]             @relation("DmLpAssetCreator")
 
   @@map("users")
 }
@@ -1240,9 +1241,52 @@ model DmLpVariant {
 
   campaign   DmCampaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   recipients DmRecipientDraft[]
+  media      DmLpVariantMedia[]
 
   @@index([campaignId])
   @@map("dm_lp_variants")
+}
+
+/// LP用の写真ライブラリ(設計 2026-09-08 §2.3)。全キャンペーン共通。画面側で長辺1600pxへ縮小した
+/// 1枚だけを保存する(原寸は保存しない)。公開口は publicId(32hex乱数)だけで1枚を返す。
+model DmLpAsset {
+  id         String    @id @default(uuid()) @db.Uuid
+  publicId   String    @unique @map("public_id")
+  storageKey String    @map("storage_key")
+  mime       String
+  width      Int
+  height     Int
+  bytes      Int
+  label      String?
+  createdBy  String    @map("created_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at")
+  deletedAt  DateTime? @map("deleted_at")
+
+  creator User               @relation("DmLpAssetCreator", fields: [createdBy], references: [id])
+  media   DmLpVariantMedia[]
+
+  @@index([createdAt])
+  @@map("dm_lp_assets")
+}
+
+/// LP型の「写真と図」の枠。slot="hero"(ヒーロー1枚・heading は null)か slot="section"(■小見出しごと・
+/// heading=小見出しの文字列)。写真(assetId)か図(figureKind)のどちらか一方を持つ(アプリ側で保証)。
+model DmLpVariantMedia {
+  id          String   @id @default(uuid()) @db.Uuid
+  lpVariantId String   @map("lp_variant_id") @db.Uuid
+  slot        String
+  heading     String?
+  assetId     String?  @map("asset_id") @db.Uuid
+  figureKind  String?  @map("figure_kind")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  lpVariant DmLpVariant @relation(fields: [lpVariantId], references: [id], onDelete: Cascade)
+  asset     DmLpAsset?  @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@index([lpVariantId])
+  @@index([assetId])
+  @@map("dm_lp_variant_media")
 }
 
 enum DmCampaignStatus {
