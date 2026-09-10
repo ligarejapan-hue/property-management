@@ -266,6 +266,31 @@ export interface SaleDmLpVariant {
   templateFrozenAt: string | null;
 }
 
+// LP用の写真(設計 2026-09-08 §2.3)。画面は /lp-assets/<publicId> だけを使う(/uploads/ は返さない)。
+export interface SaleDmLpAsset {
+  id: string;
+  publicId: string;
+  mime: string;
+  width: number;
+  height: number;
+  bytes: number;
+  label: string | null;
+  createdAt: string;
+  referenced: boolean;
+}
+export type SaleDmLpMediaRef = { kind: "asset"; assetId: string } | { kind: "figure"; figureKind: string };
+export interface SaleDmLpMediaPlan {
+  hero: { assetId: string } | null;
+  sections: Array<{ heading: string; media: SaleDmLpMediaRef | null }>;
+}
+export interface SaleDmLpMediaResponse {
+  plan: SaleDmLpMediaPlan;
+  headings: string[];
+  frozen: boolean;
+  assets: SaleDmLpAsset[];
+}
+export const LP_ASSET_URL = (publicId: string) => `/lp-assets/${publicId}`;
+
 export interface SaleDmCampaign {
   id: string;
   name: string;

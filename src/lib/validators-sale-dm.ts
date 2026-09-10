@@ -114,3 +114,24 @@ export const saleDmLpTemplatePutSchema = z.object({
   promptDigest: z.string().length(64),
   baseBodyDigest: z.string().length(64),
 });
+
+// ---- LP型の写真と図(設計 2026-09-08 §2.3)
+const lpMediaRefSchema = z.union([
+  z.object({ kind: z.literal("asset"), assetId: z.string().uuid() }),
+  z.object({ kind: z.literal("figure"), figureKind: z.string().min(1).max(40) }),
+]);
+export const saleDmLpMediaPutSchema = z.object({
+  hero: z.object({ assetId: z.string().uuid() }).nullable(),
+  sections: z
+    .array(z.object({ heading: z.string().min(1).max(200), media: lpMediaRefSchema.nullable() }))
+    .max(50),
+});
+export type SaleDmLpMediaPut = z.infer<typeof saleDmLpMediaPutSchema>;
+
+export const saleDmLpImagePromptQuerySchema = z.object({
+  slot: z.enum(["hero", "section"]),
+  heading: z.string().max(200).optional(),
+  style: z.enum(["photo", "illustration", "flat"]).default("photo"),
+});
+
+export const saleDmLpAssetLabelSchema = z.string().trim().max(80);

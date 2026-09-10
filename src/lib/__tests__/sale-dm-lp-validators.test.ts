@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { saleDmLpVariantCreateSchema, saleDmLpVariantUpdateSchema, saleDmLpTemplatePutSchema, saleDmAssignSchema } from "../validators-sale-dm";
+import { saleDmLpVariantCreateSchema, saleDmLpVariantUpdateSchema, saleDmLpTemplatePutSchema, saleDmAssignSchema, saleDmLpMediaPutSchema, saleDmLpImagePromptQuerySchema, saleDmLpAssetLabelSchema } from "../validators-sale-dm";
 
 const OPT = { tone: "formal", length: "medium", appeal: "price", strength: "low" };
 
@@ -28,5 +28,23 @@ describe("LP型の zod", () => {
   it("lpAssignments.lpVariantId は null(割当なしに戻す)を受け付ける(@codex R5)", () => {
     const r = saleDmAssignSchema.parse({ mode: "manual", lpAssignments: [{ recipientId: "r2", lpVariantId: null }] });
     expect(r.lpAssignments).toEqual([{ recipientId: "r2", lpVariantId: null }]);
+  });
+});
+
+describe("LP型 写真と図の zod", () => {
+  const U = "11111111-1111-4111-8111-111111111111";
+  it("枠: hero は uuid か null、節は写真か図か null", () => {
+    const r = saleDmLpMediaPutSchema.parse({ hero: { assetId: U }, sections: [{ heading: "h", media: { kind: "figure", figureKind: "sale_flow" } }, { heading: "g", media: null }] });
+    expect(r.sections.length).toBe(2);
+    expect(() => saleDmLpMediaPutSchema.parse({ hero: { assetId: "x" }, sections: [] })).toThrow();
+    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: "", media: null }] })).toThrow();
+  });
+  it("画像プロンプトの query: style は既定 photo", () => {
+    expect(saleDmLpImagePromptQuerySchema.parse({ slot: "hero" })).toEqual({ slot: "hero", style: "photo" });
+    expect(() => saleDmLpImagePromptQuerySchema.parse({ slot: "nope" })).toThrow();
+  });
+  it("写真のラベルは80字まで(空可)", () => {
+    expect(saleDmLpAssetLabelSchema.parse("  会社の外観 ")).toBe("会社の外観");
+    expect(() => saleDmLpAssetLabelSchema.parse("あ".repeat(81))).toThrow();
   });
 });
