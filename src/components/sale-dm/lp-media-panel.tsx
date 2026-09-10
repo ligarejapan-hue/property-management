@@ -27,7 +27,11 @@ export default function LpMediaPanel({ campaignId, lpId, label, onClose }: { cam
 
   useEffect(() => {
     let alive = true;
+    setData(null);
+    setPlan(null);
+    setNotice(null);
     setError(null);
+    setPicking(null);
     fetchSaleDmLpMedia(campaignId, lpId)
       .then((d) => { if (alive) { setData(d); setPlan(d.plan); } })
       .catch((e) => { if (alive) setError(e instanceof Error ? e.message : "読み込みに失敗しました"); });
@@ -41,13 +45,17 @@ export default function LpMediaPanel({ campaignId, lpId, label, onClose }: { cam
   };
   const assetById = (id: string): SaleDmLpAsset | undefined => data?.assets.find((a) => a.id === id);
   const refreshAssets = async () => {
-    const r = await fetchSaleDmLpAssets();
-    setData((d) => (d ? { ...d, assets: r.assets } : d));
+    try {
+      const r = await fetchSaleDmLpAssets();
+      setData((d) => (d ? { ...d, assets: r.assets } : d));
+    } catch {
+      setError("写真の一覧を更新できませんでした");
+    }
   };
   const pick = (a: SaleDmLpAsset) => {
     if (!plan || !picking) return;
     const next = picking.kind === "hero" ? setHero(plan, a.id) : setSectionChoice(plan, picking.heading, { kind: "asset", assetId: a.id });
-    if (assetCountOf(next) > LP_MEDIA_MAX_ASSETS) { setError(`写真は ${LP_MEDIA_MAX_ASSETS} 枚までです`); setPicking(null); return; }
+    if (assetCountOf(next) > LP_MEDIA_MAX_ASSETS) { setError(`写真は ${LP_MEDIA_MAX_ASSETS} 枚までです`); setNotice(null); setPicking(null); return; }
     setPlan(next);
     setPicking(null);
   };
@@ -64,7 +72,7 @@ export default function LpMediaPanel({ campaignId, lpId, label, onClose }: { cam
   };
   const copyPrompt = async (slot: Slot) => {
     if (busy) return;
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setNotice(null);
     try {
       const r = await fetchSaleDmLpImagePrompt(campaignId, lpId, { slot: slot.kind, heading: slot.kind === "section" ? slot.heading : undefined, style });
       await navigator.clipboard.writeText(r.prompt);
@@ -83,6 +91,7 @@ export default function LpMediaPanel({ campaignId, lpId, label, onClose }: { cam
       <img src={LP_ASSET_URL(a.publicId)} alt={a.label ?? "写真"} width={a.width} height={a.height} className="h-16 w-28 rounded object-cover" />
     );
   };
+  const clearSection = (heading: string) => { if (!plan) return; setPlan(setSectionChoice(plan, heading, { kind: "none" })); };
   const sectionChoice = (heading: string, choice: SlotChoice) => (
     <div className="flex flex-wrap items-center gap-2">
       <select value={choice.kind === "figure" ? `figure:${choice.figureKind}` : choice.kind} disabled={!!data?.frozen || busy}
@@ -95,13 +104,19 @@ export default function LpMediaPanel({ campaignId, lpId, label, onClose }: { cam
         }}
         className="rounded border border-gray-300 px-2 py-1 text-xs">
         <option value="none">なし</option>
-        <option value="asset">写真を選ぶ…</option>
+        <option value="asset">{choice.kind === "asset" ? "写真" : "写真を選ぶ…"}</option>
         {FIGURE_KINDS.map((k) => <option key={k} value={`figure:${k}`}>図: {FIGURE_LABELS[k]}</option>)}
       </select>
       {choice.kind === "asset" && thumb(choice.assetId)}
       {choice.kind === "figure" && isFigureKind(choice.figureKind) && (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={figureDataUrl(choice.figureKind)} alt={FIGURE_LABELS[choice.figureKind]} width={640} height={360} className="h-16 w-28 rounded border border-gray-200 object-contain" />
+      )}
+      {!data?.frozen && choice.kind === "asset" && (
+        <>
+          <button type="button" onClick={() => setPicking({ kind: "section", heading })} disabled={busy} className="text-indigo-700 hover:underline disabled:opacity-50">写真を選ぶ…</button>
+          <button type="button" onClick={() => clearSection(heading)} disabled={busy} className="text-gray-600 hover:underline">外す</button>
+        </>
       )}
       {!data?.frozen && <button type="button" onClick={() => void copyPrompt({ kind: "section", heading })} disabled={busy} className="inline-flex items-center gap-1 text-indigo-700 hover:underline disabled:opacity-50"><Copy className="h-3 w-3" />画像の指示文</button>}
     </div>

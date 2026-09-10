@@ -22,16 +22,16 @@ export default function LpAssetLibrary({ open, onClose, onPick, assets, onAssets
   const fileRef = useRef<HTMLInputElement>(null);
 
   const addFiles = async (files: File[]) => {
+    if (busy) return;
     const images = files.filter((f) => f.type.startsWith("image/"));
     if (images.length === 0) { setError("画像ファイルを選んでください"); return; }
-    if (busy) return;
     setBusy(true);
     setError(null);
     try {
       for (const f of images.slice(0, 5)) {
         const prepared = await prepareLpAssetForUpload(f);
         if (!prepared.ok) { setError(prepared.message); continue; }
-        await uploadSaleDmLpAsset(prepared.blob, prepared.fileName, label || undefined);
+        await uploadSaleDmLpAsset(prepared.blob, prepared.fileName, label.trim() || undefined);
       }
       setLabel("");
       onAssetsChanged();
@@ -57,6 +57,7 @@ export default function LpAssetLibrary({ open, onClose, onPick, assets, onAssets
     <ModalShell
       title="LPの写真"
       onClose={onClose}
+      size="lg"
       footer={<Button type="button" variant="secondary" onClick={onClose}>閉じる</Button>}
     >
       <div tabIndex={0} onPaste={onPaste} onDrop={onDrop} onDragOver={(e) => e.preventDefault()} className="space-y-3 outline-none">

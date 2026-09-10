@@ -188,7 +188,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
         </div>
       )}
 
-      {mediaFor && <LpMediaPanel campaignId={campaign.id} lpId={mediaFor.id} label={mediaFor.label} onClose={() => setMediaFor(null)} />}
+      {mediaFor && <LpMediaPanel key={mediaFor.id} campaignId={campaign.id} lpId={mediaFor.id} label={mediaFor.label} onClose={() => setMediaFor(null)} />}
     </div>
   );
 }

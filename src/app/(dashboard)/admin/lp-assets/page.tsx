@@ -23,7 +23,7 @@ export default function AdminLpAssetsPage() {
     if (!target || busy) return;
     setBusy(true); setError(null);
     try { await deleteSaleDmLpAsset(target.id); setTarget(null); await load(); }
-    catch (e) { setError(e instanceof Error ? e.message : "削除に失敗しました"); }
+    catch (e) { setError(e instanceof Error ? e.message : "削除に失敗しました"); setTarget(null); }
     finally { setBusy(false); }
   };
 
@@ -32,7 +32,7 @@ export default function AdminLpAssetsPage() {
       <PageHeader title="LPの写真" description="売却DMのご案内ページ(LP)で使う写真の一覧です。追加は各キャンペーンのLP型「写真と図」から行います。LP型で使われている写真は削除できません。" />
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
       {assets === null ? (
-        <p className="text-sm text-gray-500"><Loader2 className="inline h-4 w-4 animate-spin" /> 読み込み中</p>
+        error ? null : <p className="text-sm text-gray-500"><Loader2 className="inline h-4 w-4 animate-spin" /> 読み込み中</p>
       ) : assets.length === 0 ? (
         <p className="text-sm text-gray-500">写真はまだありません。</p>
       ) : (
