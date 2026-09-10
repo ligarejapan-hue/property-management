@@ -29,6 +29,45 @@ describe("物件一覧の所有者絞り込み", () => {
     expect(src).toContain('params.set("ownerId", ownerFilter)');
   });
 
+  it("buildFilterParams の依存配列に ownerFilter が入っている(外すと古い値を見続けるstale closure)", () => {
+    const build = src.match(
+      /const buildFilterParams = useCallback\(\(\) => \{[\s\S]*?\n {2}\}, \[([^\]]*)\]\);/,
+    );
+    expect(build).not.toBeNull();
+    const deps = build![1].split(",").map((s) => s.trim());
+    expect(deps).toContain("ownerFilter");
+  });
+
+  it("URL 同期 useEffect の依存配列に ownerFilter が入っている(外すと ownerId が消えたURLのまま止まる)", () => {
+    const effect = src.match(
+      /router\.replace\(qs \? `\$\{pathname\}\?\$\{qs\}` : pathname, \{ scroll: false \}\);\n {2}\}, \[([^\]]*)\]\);/,
+    );
+    expect(effect).not.toBeNull();
+    const deps = effect![1].split(",").map((s) => s.trim());
+    expect(deps).toContain("ownerFilter");
+  });
+
+  it("「全フィルタをリセット」が ownerFilter も解除する", () => {
+    const reset = src.match(
+      /const handleResetFilters = \(\) => \{[\s\S]*?\n {2}\};/,
+    );
+    expect(reset).not.toBeNull();
+    expect(reset![0]).toContain('setOwnerFilter("");');
+  });
+
+  it("hasActiveFilter が ownerFilter も見ている(所有者リンクで入っただけでリセットボタンが活性化する)", () => {
+    const hasActive = src.match(/const hasActiveFilter =[\s\S]*?;/);
+    expect(hasActive).not.toBeNull();
+    expect(hasActive![0]).toContain("!!ownerFilter");
+  });
+
+  it("activeFilterCount が ownerFilter も数える", () => {
+    const count = src.match(/const activeFilterCount = \[([\s\S]*?)\]/);
+    expect(count).not.toBeNull();
+    const deps = count![1].split(",").map((s) => s.trim());
+    expect(deps).toContain("ownerFilter");
+  });
+
   it("絞り込み中であることを画面に出し、解除できる", () => {
     expect(src).toContain("この所有者の物件だけを表示しています");
     expect(src).toContain("絞り込みを解除");

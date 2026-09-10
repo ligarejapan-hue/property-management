@@ -815,6 +815,7 @@ function PropertiesPageInner() {
     setCaseFilter("");
     setIntroductionRouteFilter("");
     setAssigneeFilter("");
+    setOwnerFilter("");
     setUpdatedFromFilter("");
     setUpdatedToFilter("");
     setWarningOnly(false);
@@ -828,7 +829,7 @@ function PropertiesPageInner() {
   // 何らかのフィルタが効いているか（リセットボタン活性化用）
   const hasActiveFilter =
     !!searchInput || !!searchText || !!searchAllDraft || !!mgmtIdText || !!typeFilter || !!registryFilter || !!dmFilter ||
-    !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!updatedFromFilter || !!updatedToFilter ||
+    !!caseFilter || !!introductionRouteFilter || !!assigneeFilter || !!ownerFilter || !!updatedFromFilter || !!updatedToFilter ||
     warningOnly || undeliverableOnly || resendOnly || !!sendCountMaxFilter || sort !== "updatedAt:desc";
 
   // 更新日の開始>終了(逆転)は結果が必ず0件になるので警告する(UI総点検 B-9)。YYYY-MM-DD は文字列比較で日付順になる。
@@ -837,7 +838,7 @@ function PropertiesPageInner() {
   // アクティブなフィルタ条件数（モバイルトグルバッジ用）
   const activeFilterCount = [
     searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter,
-    introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, sendCountMaxFilter,
+    introductionRouteFilter, assigneeFilter, ownerFilter, updatedFromFilter, updatedToFilter, sendCountMaxFilter,
   ].filter(Boolean).length + (warningOnly ? 1 : 0) + (sort !== "updatedAt:desc" ? 1 : 0);
 
   // 折りたたみ内(詳細条件)に適用されている件数。畳んでいても見落とさないよう
