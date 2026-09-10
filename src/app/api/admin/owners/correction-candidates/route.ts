@@ -17,6 +17,7 @@ import {
   isOwnerAddressEffectivelyEmpty,
 } from "@/lib/owner-correction";
 import { maskCorporateNumber } from "@/lib/display-level";
+import { pickSinglePropertyId } from "@/lib/owner-property-link";
 
 type RecommendedAction = "hold" | "review" | "delete_candidate" | "merge_candidate";
 
@@ -47,6 +48,12 @@ type Candidate = {
   hasExternalLinkKey: boolean;
   version: number;
   propertyOwnerCount: number;
+  /**
+   * 紐づき物件がちょうど1件のときの物件ID。0件・2件以上は null。
+   * 画面はこの値をリンク先の判定(resolveOwnerPropertyLink)に渡すだけで、
+   * 物件の住所などの中身はここでは一切返さない。
+   */
+  singlePropertyId: string | null;
   changeLogCount: number;
   importFileName: string | null;
   importRowNumber: number | null;
@@ -127,6 +134,9 @@ export async function GET(request: NextRequest) {
         externalLinkKey: true,
         version: true,
         _count: { select: { propertyOwners: true } },
+        // 紐づきがちょうど1件のときだけ物件IDを返すため、2件だけ読む。
+        // (1件か2件以上かの判別にはこれで足りる。全件読むと重い)
+        propertyOwners: { select: { propertyId: true }, take: 2 },
       },
       orderBy: { createdAt: "asc" },
     });
@@ -192,6 +202,7 @@ export async function GET(request: NextRequest) {
     // 4. 候補リスト構築
     const candidates: Candidate[] = owners.map((owner): Candidate => {
       const propertyOwnerCount = owner._count.propertyOwners;
+      const singlePropertyId = pickSinglePropertyId(owner.propertyOwners);
       const changeLogCount = changeLogCountMap.get(owner.id) ?? 0;
       const importInfo = importRowMap.get(owner.id) ?? null;
 
@@ -265,6 +276,7 @@ export async function GET(request: NextRequest) {
         hasExternalLinkKey: !!owner.externalLinkKey,
         version: owner.version,
         propertyOwnerCount,
+        singlePropertyId,
         changeLogCount,
         importFileName: importInfo?.fileName ?? null,
         importRowNumber: importInfo?.rowNumber ?? null,
