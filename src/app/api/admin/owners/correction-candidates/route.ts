@@ -547,6 +547,14 @@ export async function GET(request: NextRequest) {
       // 値自体は boolean のみで PII は含まない。UI は権限不足メッセージの
       // 表示判断に使う。
       corporateNumberDuplicateAvailable,
+      // P2 (#139 fallout): singlePropertyId と同じく property:read が無い
+      // セッションを示す capability flag。UI はこれを見て「物件」列の
+      // リンクそのものを消す(count > 0 かつ singlePropertyId=null で
+      // resolveOwnerPropertyLink が many 判定してしまい、property:read の
+      // 無いユーザーに必ず 403 になる /properties?ownerId=... リンクを
+      // 出していた回帰の修正)。corporateNumberDuplicateAvailable と同じ形:
+      // 値は boolean のみで PII は含まない。
+      propertyLinkAvailable: hasPropertyRead,
       allCount: candidates.filter((c) => c.types.length > 0).length,
     };
 

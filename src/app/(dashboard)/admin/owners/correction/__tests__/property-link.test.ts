@@ -22,6 +22,19 @@ describe("補正候補画面の物件リンク", () => {
     expect(uses.length).toBe(2);
   });
 
+  it("両方の呼び出しが propertyLinkAvailable を渡している(P2 #139 fallout)", () => {
+    // summary.propertyLinkAvailable=false のとき「物件」列のリンクを消す修正。
+    // 呼び出し側がこの flag を渡し忘れると、property:read の無いユーザーに
+    // 必ず 403 になるリンクが復活してしまう。渡し忘れをここで固定する。
+    const calls = page.match(/<OwnerPropertyCountCell\b[\s\S]*?\/>/g) ?? [];
+    expect(calls.length).toBe(2);
+    for (const call of calls) {
+      expect(call, `propertyLinkAvailable が渡っていない呼び出し: ${call}`).toContain(
+        "propertyLinkAvailable=",
+      );
+    }
+  });
+
   it("部品を import している", () => {
     expect(page).toContain(
       'import { OwnerPropertyCountCell } from "@/components/owners/owner-property-count-cell"',

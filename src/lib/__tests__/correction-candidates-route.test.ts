@@ -2190,6 +2190,9 @@ describe("GET correction-candidates: Codex P1 (#139 finding) singlePropertyId �
     // スコープ対象外・変更しない契約)。
     expect(c.propertyOwnerCount).toBe(1);
     expect(c.id).toBe(OWNER_ID);
+    // P2 (#139 fallout): summary 側の capability flag も false になり、
+    // 画面はこれを見て「物件」列のリンク自体を消す(count>0 でも)。
+    expect(json.summary.propertyLinkAvailable).toBe(false);
   });
 
   it("property:read があるセッションは従来通り singlePropertyId に物件IDが返る(over-block防止)", async () => {
@@ -2207,6 +2210,8 @@ describe("GET correction-candidates: Codex P1 (#139 finding) singlePropertyId �
     const json = await res.json();
     expect(json.candidates).toHaveLength(1);
     expect(json.candidates[0].singlePropertyId).toBe(`${OWNER_ID}-property-1`);
+    // P2 (#139 fallout): property:read があるセッションでは flag は true。
+    expect(json.summary.propertyLinkAvailable).toBe(true);
   });
 
   it("field_staff セッションでは propertyOwners の nested selection に可視範囲スコープ(where)が付く", async () => {

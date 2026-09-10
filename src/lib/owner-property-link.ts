@@ -19,6 +19,14 @@ export interface OwnerPropertyLinkInput {
   propertyOwnerCount: number;
   /** 紐づきがちょうど1件のときの物件ID。分からなければ null。 */
   singlePropertyId: string | null;
+  /**
+   * P2 (#139 fallout): セッションが property:read を持つか
+   * (API summary.propertyLinkAvailable と同じ値)。false なら他の入力に
+   * 関わらず必ず none にする。count > 0 かつ singlePropertyId=null で
+   * many 分岐へ落ちると `/properties?ownerId=...` を作ってしまい、
+   * property:read の無いユーザーには常に 403 になる死んだリンクになる。
+   */
+  propertyLinkAvailable: boolean;
 }
 
 /**
@@ -33,7 +41,13 @@ export function ownerFilteredPropertyListHref(ownerId: string): string {
 export function resolveOwnerPropertyLink(
   input: OwnerPropertyLinkInput,
 ): OwnerPropertyLink {
-  const { ownerId, propertyOwnerCount, singlePropertyId } = input;
+  const { ownerId, propertyOwnerCount, singlePropertyId, propertyLinkAvailable } =
+    input;
+  // property:read の無いセッションには、件数や物件IDの中身を見るまでもなく
+  // 最優先で none にする(他の分岐より前)。この画面は property:read が無くても
+  // 動き続ける契約なので、count > 0 のときに /properties?ownerId=... のような
+  // 必ず 403 になるリンクを出してはいけない。
+  if (!propertyLinkAvailable) return { kind: "none" };
   // ownerId が空だと `?ownerId=` になり、絞り込み無しの全件一覧を
   // 「この所有者の物件」として見せてしまう。リンクにしない。
   if (ownerId === "") return { kind: "none" };

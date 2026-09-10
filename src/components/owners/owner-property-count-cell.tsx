@@ -13,11 +13,18 @@ export function OwnerPropertyCountCell({
   ownerId,
   count,
   singlePropertyId,
+  propertyLinkAvailable,
   zeroClassName,
 }: {
   ownerId: string;
   count: number;
   singlePropertyId: string | null;
+  /**
+   * P2 (#139 fallout): セッションが property:read を持つか
+   * (API summary.propertyLinkAvailable)。false ならリンクにせず件数だけ描く
+   * (件数自体は非秘匿・今までどおり表示する)。
+   */
+  propertyLinkAvailable: boolean;
   /** 0件のときの見た目。指定が無ければ通常色。 */
   zeroClassName?: string;
 }) {
@@ -25,6 +32,7 @@ export function OwnerPropertyCountCell({
     ownerId,
     propertyOwnerCount: count,
     singlePropertyId,
+    propertyLinkAvailable,
   });
 
   if (link.kind === "none") {

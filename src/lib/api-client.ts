@@ -3412,6 +3412,13 @@ export interface OwnerCorrectionCandidatesResponse {
      * UI は権限不足メッセージの表示判断に使う。値は boolean のみで PII を含まない。
      */
     corporateNumberDuplicateAvailable?: boolean;
+    /**
+     * P2 (#139 fallout): singlePropertyId と同じくセッションが property:read
+     * を持つか(boolean のみ・PII を含まない)。false のとき、UI は「物件」列の
+     * リンクを出さず件数だけ表示する(property:read が無いユーザーには
+     * /properties?ownerId=... が必ず 403 になるため)。
+     */
+    propertyLinkAvailable?: boolean;
     allCount: number;
   };
 }

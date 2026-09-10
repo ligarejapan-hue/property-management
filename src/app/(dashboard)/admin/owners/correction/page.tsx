@@ -432,6 +432,9 @@ function OwnerCorrectionPageInner() {
                   <DuplicateGroupSummary
                     candidates={visibleCandidates}
                     onExecuted={() => load(filterType)}
+                    propertyLinkAvailable={
+                      data.summary.propertyLinkAvailable ?? false
+                    }
                   />
                 )}
 
@@ -491,6 +494,9 @@ function OwnerCorrectionPageInner() {
                           ownerId={c.id}
                           count={c.propertyOwnerCount}
                           singlePropertyId={c.singlePropertyId}
+                          propertyLinkAvailable={
+                            data.summary.propertyLinkAvailable ?? false
+                          }
                           zeroClassName="font-medium text-orange-600"
                         />
                       </td>
@@ -685,11 +691,14 @@ function DuplicateSubFilterBar({
 interface DuplicateGroupSummaryProps {
   candidates: OwnerCorrectionCandidate[];
   onExecuted?: () => void;
+  /** P2 (#139 fallout): summary.propertyLinkAvailable をそのまま下へ流す。 */
+  propertyLinkAvailable: boolean;
 }
 
 function DuplicateGroupSummary({
   candidates,
   onExecuted,
+  propertyLinkAvailable,
 }: DuplicateGroupSummaryProps) {
   // duplicate グループは API 側で server-side の正規化キーで判定済み。
   // UI は duplicateGroupId（opaque）で再構築するだけ。raw display value で
@@ -728,6 +737,7 @@ function DuplicateGroupSummary({
             groupIndex={idx + 1}
             members={members}
             onExecuted={onExecuted}
+            propertyLinkAvailable={propertyLinkAvailable}
           />
         ))}
       </div>
@@ -739,12 +749,15 @@ interface DuplicateGroupCardProps {
   groupIndex: number;
   members: OwnerCorrectionCandidate[];
   onExecuted?: () => void;
+  /** P2 (#139 fallout): summary.propertyLinkAvailable をそのまま下へ流す。 */
+  propertyLinkAvailable: boolean;
 }
 
 function DuplicateGroupCard({
   groupIndex,
   members,
   onExecuted,
+  propertyLinkAvailable,
 }: DuplicateGroupCardProps) {
   // master / source の選択（明示・operator まかせ）
   const [masterId, setMasterId] = useState<string | null>(null);
@@ -857,6 +870,7 @@ function DuplicateGroupCard({
                   ownerId={m.id}
                   count={m.propertyOwnerCount}
                   singlePropertyId={m.singlePropertyId}
+                  propertyLinkAvailable={propertyLinkAvailable}
                 />
               </td>
               <td className="px-2 py-1 text-center">{m.changeLogCount}</td>
