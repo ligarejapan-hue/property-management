@@ -108,10 +108,16 @@ function makeOwner(overrides: {
   propertyOwnerCount?: number;
   /**
    * 実クエリの `propertyOwners: { select: { propertyId: true }, take: 2 }` を
-   * fixture 側でも再現するための override。指定しなければ
-   * propertyOwnerCount から自動生成する（下記参照）。実クエリと同様に
-   * **常に先頭2件までしか返らない**ため、指定してもここで 2 件に切り詰める
-   * （3件以上を渡しても take:2 後の実際の挙動と食い違わせない）。
+   * fixture 側でも再現するための override。**件数(何件返すか)は常に
+   * propertyOwnerCount から決まる**(下記 derivedLength)。この override が
+   * 決めてよいのは「どの id にするか」だけで「何件にするか」ではない
+   * ——件数まで override 側で決められると、`propertyOwnerCount: 5` なのに
+   * `propertyOwnerIds` を1件だけ渡すような、実クエリ(take:2で常に
+   * min(count,2)件)では絶対に起こらない形の fixture を作れてしまう。
+   * 指定された id は先頭から derivedLength 件ぶんだけ使い、足りない分は
+   * 自動生成の id で埋める。derivedLength を超える id を渡した場合は
+   * 「その fixture は実クエリでは存在し得ない」ことを示すため construction
+   * 時点で例外にする(黙って切り詰めない)。
    */
   propertyOwnerIds?: string[];
   version?: number;
@@ -125,13 +131,24 @@ function makeOwner(overrides: {
   // 3にして propertyOwners を3件返す、というような「実クエリでは起こり得ない
   // 組み合わせ」を fixture が作れてしまうと、`pickSinglePropertyId` が
   // undefined を読む今回のような regression を再び見逃す。
-  const defaultPropertyOwnerIds = Array.from(
-    { length: Math.min(propertyOwnerCount, 2) },
-    (_, i) => `${overrides.id}-property-${i + 1}`,
-  );
-  const propertyOwnerIds = (
-    overrides.propertyOwnerIds ?? defaultPropertyOwnerIds
-  ).slice(0, 2);
+  const derivedLength = Math.min(propertyOwnerCount, 2);
+  const overrideIds = overrides.propertyOwnerIds;
+  if (overrideIds !== undefined && overrideIds.length > derivedLength) {
+    throw new Error(
+      `makeOwner(${overrides.id}): propertyOwnerIds has ${overrideIds.length} id(s) ` +
+        `but propertyOwnerCount=${propertyOwnerCount} only allows ${derivedLength} ` +
+        `propertyOwners row(s) (the real query caps at take: 2). This fixture ` +
+        `describes a shape the real query can never return — reduce propertyOwnerIds ` +
+        `or raise propertyOwnerCount.`,
+    );
+  }
+  const propertyOwnerIds: string[] = [];
+  for (let i = 0; i < derivedLength; i++) {
+    const overrideId = overrideIds !== undefined ? overrideIds[i] : undefined;
+    propertyOwnerIds.push(
+      overrideId !== undefined ? overrideId : `${overrides.id}-property-${i + 1}`,
+    );
+  }
 
   return {
     id: overrides.id,
@@ -2058,5 +2075,32 @@ describe("GET correction-candidates: singlePropertyId (propertyOwners take:2 fix
     const json = await res.json();
     expect(json.candidates).toHaveLength(1);
     expect(json.candidates[0].singlePropertyId).toBe("custom-property-id-xyz");
+  });
+
+  it("propertyOwnerIds が propertyOwnerCount(=take:2 後の件数)より多いと makeOwner が例外を投げる", () => {
+    // propertyOwnerCount:1 → derivedLength=1 だが id を2件渡している。
+    // 実クエリは take:2 でも「count=1 かつ2件返る」ことはあり得ないので、
+    // 黙って切り詰めず construction 時点で失敗させる。
+    expect(() =>
+      makeOwner({
+        id: "66666666-6666-4666-8666-666666666666",
+        name: "不整合五郎",
+        propertyOwnerCount: 1,
+        propertyOwnerIds: ["id-a", "id-b"],
+      }),
+    ).toThrow(/propertyOwnerIds has 2 id\(s\)/);
+  });
+
+  it("propertyOwnerCount:0 に propertyOwnerIds を1件でも渡すと makeOwner が例外を投げる", () => {
+    // derivedLength=0(実クエリは0件しか返さない)なので、id を1件でも
+    // 渡した時点で「実クエリでは起こり得ない fixture」になる。
+    expect(() =>
+      makeOwner({
+        id: "77777777-7777-4777-8777-777777777777",
+        name: "不整合六郎",
+        propertyOwnerCount: 0,
+        propertyOwnerIds: ["id-a"],
+      }),
+    ).toThrow(/propertyOwnerCount=0 only allows 0/);
   });
 });
