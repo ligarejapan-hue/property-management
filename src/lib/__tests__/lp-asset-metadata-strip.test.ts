@@ -26,9 +26,20 @@ function sof0(width: number, height: number): Buffer {
   p[6] = 1; p[7] = 0x11; p[8] = 0;
   return seg(0xc0, p);
 }
-const DQT = seg(0xdb, Buffer.alloc(65, 0x10));
-const DHT = seg(0xc4, Buffer.alloc(20, 0x01));
+/** DQT: Pq/Tq(上位4bit=0 なので 8bit 表 = 64 byte)。 */
+function dqt(payload: Buffer = Buffer.concat([Buffer.from([0x00]), Buffer.alloc(64, 0x10)])): Buffer {
+  return seg(0xdb, payload);
+}
+/** DHT: Tc/Th(1) + 符号長ごとの個数(16) + 個数の合計ぶんの値。 */
+function dht(counts: number[] = [1], values = 1): Buffer {
+  const c = Buffer.alloc(16);
+  counts.forEach((n, i) => { c[i] = n; });
+  return seg(0xc4, Buffer.concat([Buffer.from([0x00]), c, Buffer.alloc(values, 0x0a)]));
+}
+const DQT = dqt();
+const DHT = dht();
 const DRI = seg(0xdd, Buffer.from([0x00, 0x04]));
+const DNL = seg(0xdc, Buffer.from([0x00, 0x30]));
 const SOS = seg(0xda, Buffer.from([0x01, 0x01, 0x00, 0x00, 0x3f, 0x00]));
 /** entropy-coded data(0xFF00 スタッフと RST0 を含める)。 */
 const ENTROPY = Buffer.from([0x12, 0xff, 0x00, 0x34, 0xff, 0xd0, 0x56, 0x78]);
@@ -40,6 +51,11 @@ const APP13 = seg(0xed, Buffer.from("Photoshop 3.0\0IPTC-payload", "latin1"));
 
 const CLEAN_JPEG = Buffer.concat([SOI, DQT, DHT, sof0(1600, 900), DRI, SOS, ENTROPY, EOI]);
 const DIRTY_JPEG = Buffer.concat([SOI, APP0, APP1, COM, DQT, APP13, DHT, sof0(1600, 900), DRI, SOS, ENTROPY, EOI]);
+
+/** 1本の segment を差し込んだ最小 JPEG(構造検査の枝を1本ずつ通すため)。 */
+function jpegWith(extra: Buffer): Buffer {
+  return Buffer.concat([SOI, extra, sof0(64, 48), SOS, ENTROPY, EOI]);
+}
 
 const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 /** PNG chunk。CRC は検証しないので固定値を入れる(残す chunk は原文のまま出る確認に使う)。 */
@@ -74,6 +90,10 @@ const DIRTY_PNG = Buffer.concat([
   PNG_IDAT,
   PNG_IEND,
 ]);
+/** 1本の chunk を差し込んだ最小 PNG。 */
+function pngWith(extra: Buffer): Buffer {
+  return Buffer.concat([PNG_SIG, ihdr(8, 8), extra, PNG_IDAT, PNG_IEND]);
+}
 
 /** RIFF chunk(奇数 size は 1 byte pad)。 */
 function riffChunk(fourcc: string, data: Buffer): Buffer {
@@ -114,6 +134,7 @@ const ok = (r: ReturnType<typeof stripLpAssetMetadata>) => {
   if (!r.ok) throw new Error(`expected ok, got ${r.reason}`);
   return r;
 };
+const malformed = { ok: false, reason: "malformed" } as const;
 
 describe("stripLpAssetMetadata: JPEG", () => {
   it("APP0/APP1/COM/APP13 を全て落とし、デコードに要る segment は1バイトも変えない", () => {
@@ -152,10 +173,55 @@ describe("stripLpAssetMetadata: JPEG", () => {
     expect(r.buffer.equals(Buffer.concat([SOI, DQT, DHT, sof0(64, 48), SOS, ENTROPY, DHT, SOS, ENTROPY, EOI]))).toBe(true);
   });
   it("構造不正は malformed(SOI 無し・長さ超過・SOS 無し・EOI 無し)", () => {
-    expect(stripLpAssetMetadata(Buffer.from([0x00, 0x01, 0x02, 0x03]), "image/jpeg")).toEqual({ ok: false, reason: "malformed" });
-    expect(stripLpAssetMetadata(Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x00, 0xff]), "image/jpeg")).toEqual({ ok: false, reason: "malformed" });
-    expect(stripLpAssetMetadata(Buffer.concat([SOI, DQT, EOI]), "image/jpeg")).toEqual({ ok: false, reason: "malformed" });
-    expect(stripLpAssetMetadata(Buffer.concat([SOI, DQT, sof0(8, 8), SOS, ENTROPY]), "image/jpeg")).toEqual({ ok: false, reason: "malformed" });
+    expect(stripLpAssetMetadata(Buffer.from([0x00, 0x01, 0x02, 0x03]), "image/jpeg")).toEqual(malformed);
+    expect(stripLpAssetMetadata(Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x00, 0xff]), "image/jpeg")).toEqual(malformed);
+    expect(stripLpAssetMetadata(Buffer.concat([SOI, DQT, EOI]), "image/jpeg")).toEqual(malformed);
+    expect(stripLpAssetMetadata(Buffer.concat([SOI, DQT, sof0(8, 8), SOS, ENTROPY]), "image/jpeg")).toEqual(malformed);
+  });
+});
+
+describe("stripLpAssetMetadata: JPEG 残す segment の中身も検査する(ruling R9)", () => {
+  it("DQT: 表を数え切って余りが出るもの・Pq が 0/1 以外は malformed", () => {
+    // 64byte 表のうしろに情報を隠した DQT
+    const smuggled = dqt(Buffer.concat([Buffer.from([0x00]), Buffer.alloc(64, 0x10), Buffer.from("SECRET-PAYLOAD", "latin1")]));
+    expect(stripLpAssetMetadata(jpegWith(smuggled), "image/jpeg")).toEqual(malformed);
+    // 16bit 表(Pq=1)を名乗るのに 64byte しかない
+    expect(stripLpAssetMetadata(jpegWith(dqt(Buffer.alloc(65, 0x10))), "image/jpeg")).toEqual(malformed);
+    // Pq = 2(仕様外)
+    expect(stripLpAssetMetadata(jpegWith(dqt(Buffer.alloc(65, 0x20))), "image/jpeg")).toEqual(malformed);
+    // 空の DQT
+    expect(stripLpAssetMetadata(jpegWith(dqt(Buffer.alloc(0))), "image/jpeg")).toEqual(malformed);
+    // 正しい DQT は通る
+    expect(ok(stripLpAssetMetadata(jpegWith(dqt()), "image/jpeg")).buffer.includes(dqt())).toBe(true);
+  });
+  it("DHT: 個数の合計と値の数が合わないものは malformed", () => {
+    expect(stripLpAssetMetadata(jpegWith(dht([1], 0)), "image/jpeg")).toEqual(malformed); // 値が足りない
+    expect(stripLpAssetMetadata(jpegWith(dht([1], 5)), "image/jpeg")).toEqual(malformed); // 値が余る
+    expect(stripLpAssetMetadata(jpegWith(dht([2, 3], 5)), "image/jpeg")).not.toEqual(malformed); // 合計5でぴったり
+    expect(stripLpAssetMetadata(jpegWith(dht([2, 3], 6)), "image/jpeg")).toEqual(malformed);
+  });
+  it("SOFn: 成分数(Nf)と segment 長が合わないものは malformed", () => {
+    const bad = Buffer.concat([Buffer.from([8]), Buffer.from([0, 48, 0, 64]), Buffer.from([2]), Buffer.alloc(3), Buffer.from("hidden", "latin1")]);
+    expect(stripLpAssetMetadata(Buffer.concat([SOI, DQT, seg(0xc0, bad), SOS, ENTROPY, EOI]), "image/jpeg")).toEqual(malformed);
+    const nfZero = Buffer.concat([Buffer.from([8]), Buffer.from([0, 48, 0, 64]), Buffer.from([0])]);
+    expect(stripLpAssetMetadata(Buffer.concat([SOI, DQT, seg(0xc0, nfZero), SOS, ENTROPY, EOI]), "image/jpeg")).toEqual(malformed);
+  });
+  it("DRI / SOS: 長さが仕様どおりでないものは malformed", () => {
+    expect(stripLpAssetMetadata(jpegWith(seg(0xdd, Buffer.from([0, 4, 0, 0]))), "image/jpeg")).toEqual(malformed);
+    const fatSos = Buffer.concat([SOI, DQT, sof0(64, 48), seg(0xda, Buffer.from([0x01, 0x01, 0x00, 0x00, 0x3f, 0x00, 0x99])), ENTROPY, EOI]);
+    expect(stripLpAssetMetadata(fatSos, "image/jpeg")).toEqual(malformed);
+  });
+  it("DNL(0xDC)はスキャンの後ろに来ても残す(隣の COM は落ちる)", () => {
+    const input = Buffer.concat([SOI, DQT, DHT, sof0(64, 48), SOS, ENTROPY, DNL, COM, EOI]);
+    const r = ok(stripLpAssetMetadata(input, "image/jpeg"));
+    expect(r.buffer.equals(Buffer.concat([SOI, DQT, DHT, sof0(64, 48), SOS, ENTROPY, DNL, EOI]))).toBe(true);
+    expect(r.buffer.includes(Buffer.from([0xff, 0xdc, 0x00, 0x04]))).toBe(true);
+    expect(r.buffer.includes(Buffer.from("山田太郎", "utf8"))).toBe(false);
+    // 長さが 4 でない DNL は malformed
+    expect(stripLpAssetMetadata(
+      Buffer.concat([SOI, DQT, sof0(64, 48), SOS, ENTROPY, seg(0xdc, Buffer.from("0123", "latin1")), EOI]),
+      "image/jpeg",
+    )).toEqual(malformed);
   });
 });
 
@@ -181,12 +247,43 @@ describe("stripLpAssetMetadata: PNG", () => {
   it("構造不正は malformed(署名違い・IEND 無し・長さ超過・先頭が IHDR でない)", () => {
     const badSig = Buffer.from(CLEAN_PNG);
     badSig[1] = 0x00;
-    expect(stripLpAssetMetadata(badSig, "image/png")).toEqual({ ok: false, reason: "malformed" });
-    expect(stripLpAssetMetadata(Buffer.concat([PNG_SIG, ihdr(8, 8), PNG_IDAT]), "image/png")).toEqual({ ok: false, reason: "malformed" });
+    expect(stripLpAssetMetadata(badSig, "image/png")).toEqual(malformed);
+    expect(stripLpAssetMetadata(Buffer.concat([PNG_SIG, ihdr(8, 8), PNG_IDAT]), "image/png")).toEqual(malformed);
     const overflow = Buffer.concat([PNG_SIG, ihdr(8, 8), chunk("IDAT", Buffer.alloc(4))]);
     overflow.writeUInt32BE(0x0fffffff, PNG_SIG.length + 25);
-    expect(stripLpAssetMetadata(overflow, "image/png")).toEqual({ ok: false, reason: "malformed" });
-    expect(stripLpAssetMetadata(Buffer.concat([PNG_SIG, PNG_IDAT, PNG_IEND]), "image/png")).toEqual({ ok: false, reason: "malformed" });
+    expect(stripLpAssetMetadata(overflow, "image/png")).toEqual(malformed);
+    expect(stripLpAssetMetadata(Buffer.concat([PNG_SIG, PNG_IDAT, PNG_IEND]), "image/png")).toEqual(malformed);
+  });
+});
+
+describe("stripLpAssetMetadata: PNG 残す chunk の長さも検査する(ruling R9)", () => {
+  it("固定長の chunk に余りバイトが付いていたら malformed(pHYs/gAMA/cHRM/sRGB)", () => {
+    // pHYs は 9 byte。うしろに情報を足した器は通さない
+    expect(stripLpAssetMetadata(pngWith(chunk("pHYs", Buffer.concat([Buffer.alloc(9), Buffer.from("SECRET", "latin1")]))), "image/png")).toEqual(malformed);
+    expect(stripLpAssetMetadata(pngWith(chunk("gAMA", Buffer.alloc(8))), "image/png")).toEqual(malformed);
+    expect(stripLpAssetMetadata(pngWith(chunk("cHRM", Buffer.alloc(31))), "image/png")).toEqual(malformed);
+    expect(stripLpAssetMetadata(pngWith(chunk("sRGB", Buffer.alloc(2))), "image/png")).toEqual(malformed);
+    // 正しい長さなら残る
+    const good = ok(stripLpAssetMetadata(pngWith(chunk("pHYs", Buffer.alloc(9, 0x01))), "image/png"));
+    expect(good.buffer.includes(Buffer.from("pHYs", "latin1"))).toBe(true);
+  });
+  it("IHDR の長さが 13 でなければ malformed", () => {
+    const bad = Buffer.concat([PNG_SIG, chunk("IHDR", Buffer.alloc(14)), PNG_IDAT, PNG_IEND]);
+    expect(stripLpAssetMetadata(bad, "image/png")).toEqual(malformed);
+  });
+  it("可変長の chunk も刻みと上限を守らせる(PLTE/tRNS/hIST/sBIT/bKGD)", () => {
+    expect(stripLpAssetMetadata(pngWith(chunk("PLTE", Buffer.alloc(10))), "image/png")).toEqual(malformed); // 3の倍数でない
+    expect(stripLpAssetMetadata(pngWith(chunk("PLTE", Buffer.alloc(771))), "image/png")).toEqual(malformed); // 768 超え
+    expect(stripLpAssetMetadata(pngWith(chunk("tRNS", Buffer.alloc(257))), "image/png")).toEqual(malformed);
+    expect(stripLpAssetMetadata(pngWith(chunk("hIST", Buffer.alloc(9))), "image/png")).toEqual(malformed); // 奇数
+    expect(stripLpAssetMetadata(pngWith(chunk("hIST", Buffer.alloc(514))), "image/png")).toEqual(malformed); // 512 超え
+    expect(stripLpAssetMetadata(pngWith(chunk("sBIT", Buffer.alloc(5))), "image/png")).toEqual(malformed);
+    expect(stripLpAssetMetadata(pngWith(chunk("bKGD", Buffer.alloc(7))), "image/png")).toEqual(malformed);
+    // 上限内は通る
+    expect(ok(stripLpAssetMetadata(pngWith(chunk("PLTE", Buffer.alloc(768))), "image/png")).ok).toBe(true);
+    expect(ok(stripLpAssetMetadata(pngWith(chunk("tRNS", Buffer.alloc(256))), "image/png")).ok).toBe(true);
+    // IDAT は任意長のまま(画素そのもの)
+    expect(ok(stripLpAssetMetadata(pngWith(chunk("IDAT", Buffer.alloc(4096))), "image/png")).ok).toBe(true);
   });
 });
 
@@ -222,11 +319,26 @@ describe("stripLpAssetMetadata: WebP", () => {
   it("構造不正は malformed(RIFF size が実長と違う・chunk が入り切らない)", () => {
     const lying = Buffer.from(DIRTY_WEBP);
     lying.writeUInt32LE(lying.length, 4); // 本来は length-8
-    expect(stripLpAssetMetadata(lying, "image/webp")).toEqual({ ok: false, reason: "malformed" });
+    expect(stripLpAssetMetadata(lying, "image/webp")).toEqual(malformed);
     const overflow = riff(riffChunk("VP8 ", Buffer.from([1, 2, 3, 4])));
     overflow.writeUInt32LE(0x0fffffff, 16);
-    expect(stripLpAssetMetadata(overflow, "image/webp")).toEqual({ ok: false, reason: "malformed" });
-    expect(stripLpAssetMetadata(Buffer.from("RIFX0000WEBP", "latin1"), "image/webp")).toEqual({ ok: false, reason: "malformed" });
+    expect(stripLpAssetMetadata(overflow, "image/webp")).toEqual(malformed);
+    expect(stripLpAssetMetadata(Buffer.from("RIFX0000WEBP", "latin1"), "image/webp")).toEqual(malformed);
+  });
+  it("アニメーション WebP は受け付けない(ANIM/ANMF chunk・VP8X の Anim flag)", () => {
+    // ANMF は subchunk を入れ子で持てる = 許可リストの抜け道になるので丸ごと拒否
+    const anmfInner = Buffer.concat([Buffer.alloc(16), riffChunk("XMP ", Buffer.from("山田太郎", "utf8"))]);
+    const withAnim = riff(Buffer.concat([vp8x(0x10), riffChunk("ANIM", Buffer.alloc(6)), VP8_ODD]));
+    const withAnmf = riff(Buffer.concat([vp8x(0x10), riffChunk("ANMF", anmfInner), VP8_ODD]));
+    expect(stripLpAssetMetadata(withAnim, "image/webp")).toEqual(malformed);
+    expect(stripLpAssetMetadata(withAnmf, "image/webp")).toEqual(malformed);
+    // VP8X の Anim flag(0x02)だけが立っている場合も拒否
+    expect(stripLpAssetMetadata(riff(Buffer.concat([vp8x(0x12), VP8_ODD])), "image/webp")).toEqual(malformed);
+  });
+  it("VP8X の payload が 10 byte でなければ malformed", () => {
+    expect(stripLpAssetMetadata(riff(Buffer.concat([riffChunk("VP8X", Buffer.alloc(12)), VP8_ODD])), "image/webp")).toEqual(malformed);
+    expect(stripLpAssetMetadata(riff(Buffer.concat([riffChunk("VP8X", Buffer.alloc(4)), VP8_ODD])), "image/webp")).toEqual(malformed);
+    expect(stripLpAssetMetadata(riff(Buffer.concat([riffChunk("VP8X", Buffer.alloc(0)), VP8_ODD])), "image/webp")).toEqual(malformed);
   });
 });
 

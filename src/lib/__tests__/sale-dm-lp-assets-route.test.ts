@@ -52,13 +52,17 @@ const READS = ["property", "csv_export", "csv_export_personal", "owner"];
 // APP0 / COM は「EXIF ではないが公開配信の画像に残ってはいけない」付随情報の代表。
 const COM_TEXT = "撮影者 山田太郎";
 function jpegBytes(width: number, height: number, withExif = false): Buffer {
-  const sof = Buffer.alloc(10); sof[0] = 0xff; sof[1] = 0xc0; sof.writeUInt16BE(8, 2); sof[4] = 8; sof.writeUInt16BE(height, 5); sof.writeUInt16BE(width, 7); sof[9] = 3;
+  // SOF0: 長さ(2) + precision(1) + 高さ(2) + 幅(2) + 成分数(1) + 成分ごとに3byte。
+  // ⚠許可リスト strip は残す segment の中身の長さまで検査するので、成分数と長さを合わせる。
+  const sof = Buffer.alloc(13); sof[0] = 0xff; sof[1] = 0xc0; sof.writeUInt16BE(11, 2); sof[4] = 8; sof.writeUInt16BE(height, 5); sof.writeUInt16BE(width, 7); sof[9] = 1; sof[10] = 1; sof[11] = 0x11; sof[12] = 0;
   const app0 = Buffer.from([0xff, 0xe0, 0x00, 0x04, 0x00, 0x00]);
   const comPayload = Buffer.from(COM_TEXT, "utf8");
   const com = Buffer.concat([Buffer.from([0xff, 0xfe]), (() => { const l = Buffer.alloc(2); l.writeUInt16BE(comPayload.length + 2, 0); return l; })(), comPayload]);
   const exifPayload = Buffer.concat([Buffer.from("Exif\0\0", "latin1"), Buffer.from("II*\0\x08\0\0\0\0\0", "latin1")]);
   const app1 = withExif ? Buffer.concat([Buffer.from([0xff, 0xe1]), (() => { const l = Buffer.alloc(2); l.writeUInt16BE(exifPayload.length + 2, 0); return l; })(), exifPayload]) : Buffer.alloc(0);
-  return Buffer.concat([Buffer.from([0xff, 0xd8]), app0, app1, com, sof, Buffer.from([0xff, 0xda, 0x00, 0x02]), Buffer.from([0xff, 0xd9])]);
+  // SOS: 長さ(2) + Ns(1) + 成分ごとに2byte + Ss/Se/AhAl(3)
+  const sos = Buffer.from([0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00]);
+  return Buffer.concat([Buffer.from([0xff, 0xd8]), app0, app1, com, sof, sos, Buffer.from([0xff, 0xd9])]);
 }
 function multipart(bytes: Buffer, mime: string, name = "a.jpg", label?: string): Request {
   const fd = new FormData();
