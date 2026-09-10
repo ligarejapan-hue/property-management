@@ -122,9 +122,10 @@ const lpMediaRefSchema = z.union([
 ]);
 export const saleDmLpMediaPutSchema = z.object({
   hero: z.object({ assetId: z.string().uuid() }).nullable(),
+  // 本文の小見出し数の上限に合わせる(splitLpTemplate 側の上限と揃える)。
   sections: z
     .array(z.object({ heading: z.string().min(1).max(200), media: lpMediaRefSchema.nullable() }))
-    .max(50),
+    .max(200),
 });
 export type SaleDmLpMediaPut = z.infer<typeof saleDmLpMediaPutSchema>;
 

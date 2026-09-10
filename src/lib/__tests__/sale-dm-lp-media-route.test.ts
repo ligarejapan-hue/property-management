@@ -65,6 +65,14 @@ beforeEach(() => {
 });
 
 describe("GET media", () => {
+  it("本文に同じ■見出しが2回あっても節は1件にまとめる", async () => {
+    pm.dmLpVariant.findFirst.mockResolvedValue(variant({ bodyText: "■費用について\nA\n■費用について\nB" }));
+    pm.dmLpVariantMedia.findMany.mockResolvedValue([]);
+    pm.dmLpAsset.findMany.mockResolvedValue([]);
+    const j = await (await GET(new Request("http://x") as never, ctx)).json();
+    expect(j.headings).toEqual(["費用について"]);
+    expect(j.plan.sections).toEqual([{ heading: "費用について", media: null }]);
+  });
   it("DB行を枠に組み立て、本文の小見出し一覧と凍結状態とライブラリを返す", async () => {
     pm.dmLpVariantMedia.findMany.mockResolvedValue([
       { slot: "hero", heading: null, assetId: U1, figureKind: null, sortOrder: 0 },
@@ -93,8 +101,8 @@ describe("PUT media", () => {
     const rows = pm.dmLpVariantMedia.createMany.mock.calls[0][0].data;
     expect(rows).toEqual([
       { lpVariantId: "lp1", slot: "hero", heading: null, assetId: U1, figureKind: null, sortOrder: 0 },
-      { lpVariantId: "lp1", slot: "section", heading: "売却の進め方", assetId: null, figureKind: "sale_flow", sortOrder: 0 },
-      { lpVariantId: "lp1", slot: "section", heading: "費用について", assetId: U2, figureKind: null, sortOrder: 1 },
+      { lpVariantId: "lp1", slot: "section", heading: "売却の進め方", assetId: null, figureKind: "sale_flow", sortOrder: 1 },
+      { lpVariantId: "lp1", slot: "section", heading: "費用について", assetId: U2, figureKind: null, sortOrder: 2 },
     ]);
     expect(writeAuditLog.mock.calls[0][0]).toMatchObject({ action: "sale_dm_lp_media_update", detail: { campaignId: "c1", assetCount: 2, figureCount: 1 } });
     expect(JSON.stringify(writeAuditLog.mock.calls[0][0].detail)).not.toContain("売却の進め方");
@@ -139,6 +147,12 @@ describe("PUT media", () => {
     const assetsIdx = pm.$queryRaw.mock.calls.findIndex((c: unknown[]) => String(c[0]).includes("dm_lp_assets"));
     expect(propertiesIdx).toBeGreaterThan(-1);
     expect(assetsIdx).toBeGreaterThan(propertiesIdx);
+  });
+  it("本文に同じ■見出しが2回あっても、その見出し1件を指す枠の保存は通る", async () => {
+    pm.dmLpVariant.findFirst.mockResolvedValue(variant({ bodyText: "■費用について\nA\n■費用について\nB" }));
+    pm.dmLpAsset.findMany.mockResolvedValue([{ id: U1 }]);
+    const r = await put({ hero: null, sections: [{ heading: "費用について", media: { kind: "asset", assetId: U1 } }] });
+    expect(r.status).toBe(200);
   });
   it("文章が未保存(本文なし)のLP型には枠を付けられない", async () => {
     pm.dmLpVariant.findFirst.mockResolvedValue(variant({ bodyText: null }));

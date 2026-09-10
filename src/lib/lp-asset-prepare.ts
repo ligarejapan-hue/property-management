@@ -3,6 +3,9 @@
  *  - サーバーは JPEG/PNG/WebP・8MB以下・長辺1600px以下だけ受ける(画像ライブラリを入れない方針)。
  *  - ここで長辺1600に縮小し JPEG(品質0.85)へ再エンコードする。HEIC もここで吸収する。
  *  - canvas 経由で EXIF は消える(サーバーの EXIF strip と二重防御)。
+ *  - PNG/WebP は無変換(pass)にしない(PNG の iTXt/tEXt・WebP の XMP など、EXIF 以外の
+ *    付随情報が残り得るため)。無変換で通すのは JPEG だけにし、PNG/WebP は毎回 JPEG へ
+ *    再エンコードして落とす(画面経由の登録のみ。API を直接叩けば残る=docs/deploy.md 参照)。
  *  - 判定と名前は純関数(node で検証)。browser API は prepare 本体だけが触る。
  *  - 画像内容・ファイル名を console に出さない。
  */
@@ -10,7 +13,7 @@ import { MAX_FILE_SIZE } from "@/lib/storage/types";
 import { fitWithinMaxEdge } from "@/lib/field-survey-photo-prepare";
 
 export const LP_ASSET_MAX_EDGE = 1600;
-export const LP_ASSET_PASS_THROUGH_MIMES = ["image/jpeg", "image/png", "image/webp"] as const;
+export const LP_ASSET_PASS_THROUGH_MIMES = ["image/jpeg"] as const;
 const JPEG_QUALITY = 0.85;
 
 export type LpAssetAction = "pass" | "convert" | "unsupported";
@@ -54,6 +57,9 @@ export async function prepareLpAssetForUpload(file: File): Promise<PreparedLpAss
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (!ctx) return { ok: false, message: "この端末では画像を処理できません" };
+    // PNG 等の透過は JPEG で黒くなるため白で敷く。
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
     ctx.drawImage(bitmap, 0, 0, width, height);
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY));
     if (!blob) return { ok: false, message: "画像の変換に失敗しました" };

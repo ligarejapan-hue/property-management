@@ -62,7 +62,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
     if (!editing) return;
     const prev = campaign.lpVariants.find((v) => v.id === editing);
     const optionChanged = !!prev && (["tone", "length", "appeal", "strength"] as const).some((k) => prev[k] !== form.options[k]);
-    if (optionChanged && !window.confirm("文体の設定を変えると、このLP型に保存済みの文章は消えます(貼り直しが必要です)。続けますか？")) return;
+    if (optionChanged && !window.confirm("文体の設定を変えると、このLP型に保存済みの文章と写真・図の枠は消えます(貼り直しが必要です)。続けますか？")) return;
     return run(() => updateSaleDmLpVariant(campaign.id, editing, { label: form.label, options: form.options }));
   };
   const remove = (v: SaleDmLpVariant) => {
@@ -122,7 +122,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
             </div>
             <div className="flex gap-1">
               <button type="button" onClick={() => openLetter(v)} disabled={busy} aria-label={`LP型「${v.label}」の文章`} title="プロンプトを表示して、手元のAIで作った文章を貼り付けます" className="rounded p-1 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"><FileText className="h-3.5 w-3.5" /></button>
-              <button type="button" onClick={() => { setLetterFor(null); setLetter(null); setMediaFor(v); }} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」の写真と図`} title={v.headline ? "写真と図" : "先に文章を保存してください"} className="inline-flex items-center gap-1 rounded border border-gray-300 bg-white px-2 py-0.5 text-gray-700 hover:bg-gray-50 disabled:opacity-50"><ImageIcon className="h-3.5 w-3.5" />写真と図</button>
+              <button type="button" onClick={() => { setLetterFor(null); setLetter(null); setMediaFor(v); }} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」の写真と図`} title={v.headline ? "写真と図" : "先に文章を保存してください"} className="rounded p-1 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><ImageIcon className="h-3.5 w-3.5" /></button>
               <button type="button" onClick={() => startEdit(v)} disabled={busy} aria-label={`LP型「${v.label}」を編集`} className="rounded p-1 text-gray-600 hover:bg-gray-100 disabled:opacity-50"><Pencil className="h-3.5 w-3.5" /></button>
               <button type="button" onClick={() => remove(v)} disabled={busy} aria-label={`LP型「${v.label}」を削除`} className="rounded p-1 text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>
             </div>

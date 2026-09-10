@@ -22,14 +22,18 @@ function routeFiles(dir: string): string[] {
   });
 }
 
-/** 書き込み門を要求しない route（理由を必ず書く）。 */
-const WRITE_GATE_EXCEPTIONS: Record<string, string> = {
+/** 書き込み門を要求しない route（理由を必ず書く）。mustContain を書けば、代わりにその
+ *  文字列を含むことを固定できる(「例外だから何も確かめない」にしない)。 */
+const WRITE_GATE_EXCEPTIONS: Record<string, { reason: string; mustContain?: string }> = {
   // AI直結の再生成は廃止(設計§2.1)。設定も権限も見ずに 410 を返すだけの入口なので、
   // 書き込み門は不要(そもそも何も読まない・書かない)。
-  "src/app/api/properties/sale-dm/drafts/[id]/regenerate/route.ts":
-    "410 を返すだけ(データに触れない)",
-  "src/app/api/properties/sale-dm/lp-assets/[assetId]/route.ts":
-    "管理者(user_management:write)限定の削除。requireSaleDmWriteAccess より強い門を inline で通す",
+  "src/app/api/properties/sale-dm/drafts/[id]/regenerate/route.ts": {
+    reason: "410 を返すだけ(データに触れない)",
+  },
+  "src/app/api/properties/sale-dm/lp-assets/[assetId]/route.ts": {
+    reason: "管理者(user_management:write)限定の削除。requireSaleDmWriteAccess より強い門を inline で通す",
+    mustContain: 'hasPermission(perms, "user_management", "write")',
+  },
 };
 
 const FILES = routeFiles(ROOT);
@@ -51,10 +55,15 @@ describe("sale-dm: 書き込み系 route は property:write を要求する", ()
 
   for (const file of writeRoutes) {
     const rel = path.relative(process.cwd(), file).replace(/\\/g, "/");
-    const reason = WRITE_GATE_EXCEPTIONS[rel];
-    it(`${rel}${reason ? `（除外: ${reason}）` : ""}`, () => {
-      if (reason) return;
+    const exception = WRITE_GATE_EXCEPTIONS[rel];
+    it(`${rel}${exception ? `（除外: ${exception.reason}）` : ""}`, () => {
       const s = readFileSync(file, "utf-8");
+      if (exception) {
+        // 「例外だから見ない」にせず、mustContain があればその門(より強い権限チェック等)が
+        // 実際にソースへ残っていることを固定する。
+        if (exception.mustContain) expect(s).toContain(exception.mustContain);
+        return;
+      }
       const guarded =
         s.includes("requireSaleDmWriteAccess") ||
         /hasPermission\([^)]*"property"[^)]*"write"/.test(s);

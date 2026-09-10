@@ -19,6 +19,7 @@ vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     dmCampaign: { findFirst: vi.fn(), findUnique: vi.fn() },
     dmLpVariant: { findMany: vi.fn(async () => []), findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
+    dmLpVariantMedia: { deleteMany: vi.fn(async () => ({ count: 0 })) },
     dmRecipientDraft: { count: vi.fn(async () => 0), findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({ count: 0 })) },
     $queryRaw: vi.fn(async () => []),
   };
@@ -37,6 +38,7 @@ type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
   dmCampaign: { findFirst: Fn; findUnique: Fn };
   dmLpVariant: { findMany: Fn; findFirst: Fn; create: Fn; update: Fn; deleteMany: Fn };
+  dmLpVariantMedia: { deleteMany: Fn };
   dmRecipientDraft: { count: Fn; findMany: Fn; updateMany: Fn };
   $queryRaw: Fn;
 };
@@ -95,6 +97,14 @@ describe("PATCH lp-variants/[lpId]", () => {
   it("同じ値の再送(no-op)や label だけなら原文を消さない", async () => {
     await PATCH(req("PATCH", { label: "B", options: { tone: "formal" } }), ctxLp);
     expect(pm.dmLpVariant.update.mock.calls[0][0].data).toEqual({ label: "B", tone: "formal" });
+  });
+  it("文体を実際に変えたら写真と図の枠も消す(枠だけ残ると消せない写真になる)", async () => {
+    await PATCH(req("PATCH", { options: { tone: "soft" } }), ctxLp);
+    expect(pm.dmLpVariantMedia.deleteMany).toHaveBeenCalledWith({ where: { lpVariantId: "l1" } });
+  });
+  it("label だけの変更では写真と図の枠を消さない", async () => {
+    await PATCH(req("PATCH", { label: "B" }), ctxLp);
+    expect(pm.dmLpVariantMedia.deleteMany).not.toHaveBeenCalled();
   });
   it("凍結中(配下に確定のみ・送付済みなし)の文体変更は 409 VARIANT_LOCKED、label だけなら通る", async () => {
     // 呼び出し順: 1回目PATCH = sentBefore(0) → settledCount(1・確定のみ) / 2回目PATCH(label のみ) = sentBefore(0)。

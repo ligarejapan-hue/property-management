@@ -41,7 +41,7 @@ export function planToRows(lpVariantId: string, plan: MediaPlan): Prisma.DmLpVar
       heading: s.heading,
       assetId: s.media.kind === "asset" ? s.media.assetId : null,
       figureKind: s.media.kind === "figure" ? s.media.figureKind : null,
-      sortOrder: i,
+      sortOrder: i + 1,
     });
   });
   return rows;
@@ -64,7 +64,8 @@ export async function GET(_req: NextRequest, { params }: Ctx) {
       prisma.dmRecipientDraft.count({ where: { campaignId: id, lpVariantId: lpId, status: { in: [...SETTLED_DRAFT_STATUSES] } } }),
       listAssets(),
     ]);
-    const headings = lpBodyHeadings(v.bodyText ?? "");
+    // 同じ小見出しが本文に2回あると節が2件になり枠の保存が壊れるため、重複は1件にまとめる。
+    const headings = [...new Set(lpBodyHeadings(v.bodyText ?? ""))];
     return NextResponse.json(
       { plan: rowsToPlan(rows, headings), headings, frozen: isVariantFrozen({ templateFrozenAt: v.templateFrozenAt, settledCount }), assets },
       { headers: { "Cache-Control": "no-store" } },
@@ -101,7 +102,8 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
       if (isVariantFrozen({ templateFrozenAt: v.templateFrozenAt, settledCount })) {
         throw new ApiError(409, "送付実績のあるLP型の写真や図は変更できません。変えるときは新しいLP型を追加してください", "VARIANT_FROZEN");
       }
-      const headings = lpBodyHeadings(v.bodyText);
+      // 同じ小見出しが本文に2回あると節が2件になり枠の保存が壊れるため、重複は1件にまとめる。
+      const headings = [...new Set(lpBodyHeadings(v.bodyText))];
       const issue = validateMediaPlan(plan, headings);
       if (issue) throw new ApiError(400, mediaPlanIssueMessage(issue), "INVALID_MEDIA_PLAN");
       const assetIds = referencedAssetIds(plan);

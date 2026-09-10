@@ -116,6 +116,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         data.lead = null;
         data.bodyText = null;
         data.faqJson = Prisma.DbNull;
+        // 文体を変えると本文の小見出しが消えるので写真と図の枠も一緒に外す(枠だけ残ると
+        // LP型に付いたまま消せない写真になる)。
+        await tx.dmLpVariantMedia.deleteMany({ where: { lpVariantId: lpId } });
       }
       const updated = await tx.dmLpVariant.update({ where: { id: lpId, campaignId: id }, data });
       // 更新中に別 request がこのLP型の宛先を sent 化していたら、送った構成を書き換えたことに

@@ -25,7 +25,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const v = await prisma.dmLpVariant.findFirst({ where: { id: lpId, campaignId: id }, select: { appeal: true, lead: true, bodyText: true } });
     if (!v) throw new ApiError(404, "指定されたLP型が見つかりません", "LP_VARIANT_NOT_FOUND");
     if (q.slot === "section") {
-      if (!q.heading || !lpBodyHeadings(v.bodyText ?? "").includes(q.heading)) {
+      // 重複の有無に関わらず判定は同じ(見出しの存在確認だけ)だが、他の route と揃えて重複を1件にまとめる。
+      if (!q.heading || ![...new Set(lpBodyHeadings(v.bodyText ?? ""))].includes(q.heading)) {
         throw new ApiError(400, "その小見出しは本文にありません", "HEADING_NOT_FOUND");
       }
     }

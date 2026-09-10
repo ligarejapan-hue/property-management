@@ -99,15 +99,16 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         heading: r.heading ?? "",
         media: r.assetId ? { kind: "asset" as const, assetId: r.assetId } : r.figureKind && isFigureKind(r.figureKind) ? { kind: "figure" as const, figureKind: r.figureKind } : null,
       }));
-      const newHeadings = lpBodyHeadings(parts.body);
-      const kept = reconcileSectionMedia(lpBodyHeadings(v.bodyText ?? ""), newHeadings, oldSections);
+      // 同じ小見出しが本文に2回あると節が2件になり枠の引き継ぎが壊れるため、重複は1件にまとめる。
+      const newHeadings = [...new Set(lpBodyHeadings(parts.body))];
+      const kept = reconcileSectionMedia([...new Set(lpBodyHeadings(v.bodyText ?? ""))], newHeadings, oldSections);
       const mediaDropped = oldSections.filter((s) => s.media && !newHeadings.includes(s.heading)).length;
       await tx.dmLpVariantMedia.deleteMany({ where: { lpVariantId: lpId, slot: "section" } });
       const keptRows = kept.flatMap((s, i) => s.media ? [{
         lpVariantId: lpId, slot: "section", heading: s.heading,
         assetId: s.media.kind === "asset" ? s.media.assetId : null,
         figureKind: s.media.kind === "figure" ? s.media.figureKind : null,
-        sortOrder: i,
+        sortOrder: i + 1,
       }] : []);
       if (keptRows.length > 0) await tx.dmLpVariantMedia.createMany({ data: keptRows });
 

@@ -38,6 +38,7 @@ const CASES: Array<{ action: string; detail: Record<string, unknown> }> = [
   { action: "sale_dm_lp_asset_upload", detail: { bytes: 1234, width: 1600, height: 900, uploadedAt: "2026-09-10T00:00:00.000Z" } },
   { action: "sale_dm_lp_media_update", detail: { campaignId: "c1", assetCount: 2, figureCount: 1, updatedAt: "2026-09-10T00:00:00.000Z" } },
   { action: "sale_dm_lp_image_prompt_view", detail: { campaignId: "c1", slot: "hero", viewedAt: "2026-09-10T00:00:00.000Z" } },
+  { action: "sale_dm_lp_asset_delete", detail: { deletedAt: "2026-09-10T00:00:00.000Z" } },
 ];
 
 describe("外部AI方式の監査 detail は表示でも消えない", () => {

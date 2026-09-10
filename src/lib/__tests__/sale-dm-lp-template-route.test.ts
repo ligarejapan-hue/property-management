@@ -183,7 +183,7 @@ describe("template PUT: 貼り直しで小見出しが変わると枠を引き�
     expect(pm.dmLpVariantMedia.deleteMany.mock.calls[0][0].where).toEqual({ lpVariantId: "l1", slot: "section" });
     const rows = pm.dmLpVariantMedia.createMany.mock.calls[0][0].data;
     expect(rows).toEqual([
-      { lpVariantId: "l1", slot: "section", heading: "費用について", assetId: U2, figureKind: null, sortOrder: 0 },
+      { lpVariantId: "l1", slot: "section", heading: "費用について", assetId: U2, figureKind: null, sortOrder: 1 },
     ]);
     const j = await res.json();
     expect(j.parts.mediaDropped).toBe(1);

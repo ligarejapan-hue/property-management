@@ -2,9 +2,12 @@ import { describe, it, expect } from "vitest";
 import { classifyLpAsset, lpAssetFileName, LP_ASSET_MAX_EDGE } from "../lp-asset-prepare";
 
 describe("classifyLpAsset", () => {
-  it("JPEG/PNG/WebP で長辺1600以下・8MB以下なら無変換", () => {
+  it("JPEG で長辺1600以下・8MB以下なら無変換", () => {
     expect(classifyLpAsset({ mime: "image/jpeg", width: 1600, height: 900, size: 100 })).toBe("pass");
-    expect(classifyLpAsset({ mime: "image/webp", width: 100, height: 1600, size: 100 })).toBe("pass");
+  });
+  it("PNG/WebP は上限内でも常に変換(iTXt/XMP 等の付随情報を落とすため無変換にしない)", () => {
+    expect(classifyLpAsset({ mime: "image/png", width: 100, height: 100, size: 100 })).toBe("convert");
+    expect(classifyLpAsset({ mime: "image/webp", width: 100, height: 1600, size: 100 })).toBe("convert");
   });
   it("長辺が超える・大きすぎる・HEIC は変換", () => {
     expect(classifyLpAsset({ mime: "image/jpeg", width: 1601, height: 900, size: 100 })).toBe("convert");
