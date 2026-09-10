@@ -459,7 +459,7 @@ URL同期の `useEffect`（`if (assigneeFilter) params.set("assignedTo", assigne
 
 - [ ] **Step 5: 絞り込み中の表示と解除ボタンを足す**
 
-一覧のヘッダ直下（検索欄より前・`<FilterPanel` の手前）に追加:
+`<PageHeader title="物件一覧" />`（966行目）の直後、`{/* Action row */}` の手前に追加:
 
 ```tsx
       {ownerFilter && (
