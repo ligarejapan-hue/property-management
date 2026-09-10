@@ -65,9 +65,16 @@ export default function LpMediaPanel({ campaignId, lpId, label, onClose }: { cam
     try {
       const r = await saveSaleDmLpMedia(campaignId, lpId, plan);
       setNotice(`保存しました(写真 ${r.assetCount} 枚・図 ${r.figureCount} 点)`);
-      await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : "保存に失敗しました");
+      setBusy(false);
+      return;
+    }
+    setData((d) => (d ? { ...d, plan } : d));
+    try {
+      await reload();
+    } catch {
+      setError("保存はできましたが、最新の状態を読み込めませんでした。パネルを開き直してください");
     } finally { setBusy(false); }
   };
   const copyPrompt = async (slot: Slot) => {

@@ -39,4 +39,13 @@ describe("LP写真の画面: 公開口だけを使い、生HTMLを流し込ま�
     const managerSrc = readFileSync(path.resolve(process.cwd(), "src/components/sale-dm/lp-variant-manager.tsx"), "utf8");
     expect(managerSrc).toContain("key={mediaFor.id}");
   });
+  it("写真ライブラリの追加は、途中で失敗しても成功分の反映(finally での onAssetsChanged)を止めない", () => {
+    const src = FILES[0][1];
+    expect(src).toContain("finally");
+    expect(src).toContain("uploaded > 0");
+  });
+  it("LP型パネルの保存後リロード失敗は、保存成功とは別に案内する", () => {
+    const panelSrc = readFileSync(path.resolve(process.cwd(), "src/components/sale-dm/lp-media-panel.tsx"), "utf8");
+    expect(panelSrc).toContain("最新の状態を読み込めませんでした");
+  });
 });

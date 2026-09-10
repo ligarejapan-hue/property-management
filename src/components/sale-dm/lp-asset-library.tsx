@@ -27,18 +27,21 @@ export default function LpAssetLibrary({ open, onClose, onPick, assets, onAssets
     if (images.length === 0) { setError("画像ファイルを選んでください"); return; }
     setBusy(true);
     setError(null);
+    let uploaded = 0;
     try {
       for (const f of images.slice(0, 5)) {
         const prepared = await prepareLpAssetForUpload(f);
         if (!prepared.ok) { setError(prepared.message); continue; }
         await uploadSaleDmLpAsset(prepared.blob, prepared.fileName, label.trim() || undefined);
+        uploaded += 1;
       }
       setLabel("");
-      onAssetsChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "写真を追加できませんでした");
+      const message = e instanceof Error ? e.message : "写真を追加できませんでした";
+      setError(uploaded > 0 ? `${uploaded}枚は登録できました。残りの追加に失敗しました: ${message}` : message);
     } finally {
       setBusy(false);
+      if (uploaded > 0) onAssetsChanged();
     }
   };
   const onPaste = (e: ClipboardEvent<HTMLDivElement>) => {
