@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LP_LIMITS } from "@/lib/sale-dm-letter/lp-template";
 
 export const saleDmOptionsSchema = z.object({
   designTemplate: z.enum(["formal", "soft", "impact"]),
@@ -122,16 +123,17 @@ const lpMediaRefSchema = z.union([
 ]);
 export const saleDmLpMediaPutSchema = z.object({
   hero: z.object({ assetId: z.string().uuid() }).nullable(),
-  // 本文の小見出し数の上限に合わせる(splitLpTemplate 側の上限と揃える)。
+  // 文章の保存時(splitLpTemplate/LP_LIMITS)と同じ上限を使う。揃えないと、文章は保存できるのに
+  // 写真の枠だけ弾かれて保存できないLP型が作れてしまう。
   sections: z
-    .array(z.object({ heading: z.string().min(1).max(200), media: lpMediaRefSchema.nullable() }))
-    .max(200),
+    .array(z.object({ heading: z.string().min(1).max(LP_LIMITS.heading), media: lpMediaRefSchema.nullable() }))
+    .max(LP_LIMITS.headingCount),
 });
 export type SaleDmLpMediaPut = z.infer<typeof saleDmLpMediaPutSchema>;
 
 export const saleDmLpImagePromptQuerySchema = z.object({
   slot: z.enum(["hero", "section"]),
-  heading: z.string().max(200).optional(),
+  heading: z.string().max(LP_LIMITS.heading).optional(),
   style: z.enum(["photo", "illustration", "flat"]).default("photo"),
 });
 

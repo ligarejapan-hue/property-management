@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { saleDmLpVariantCreateSchema, saleDmLpVariantUpdateSchema, saleDmLpTemplatePutSchema, saleDmAssignSchema, saleDmLpMediaPutSchema, saleDmLpImagePromptQuerySchema, saleDmLpAssetLabelSchema } from "../validators-sale-dm";
+import { LP_LIMITS } from "../sale-dm-letter/lp-template";
 
 const OPT = { tone: "formal", length: "medium", appeal: "price", strength: "low" };
 
@@ -46,5 +47,25 @@ describe("LP型 写真と図の zod", () => {
   it("写真のラベルは80字まで(空可)", () => {
     expect(saleDmLpAssetLabelSchema.parse("  会社の外観 ")).toBe("会社の外観");
     expect(() => saleDmLpAssetLabelSchema.parse("あ".repeat(81))).toThrow();
+  });
+  it("枠: 小見出しは60字まで・節は30個まで(文章保存の上限と揃える)", () => {
+    const heading61 = "あ".repeat(61);
+    const heading60 = "あ".repeat(60);
+    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: heading61, media: null }] })).toThrow();
+    expect(saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: heading60, media: null }] }).sections[0].heading).toBe(heading60);
+    const sections31 = Array.from({ length: 31 }, (_, i) => ({ heading: `h${i}`, media: null }));
+    const sections30 = sections31.slice(0, 30);
+    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: sections31 })).toThrow();
+    expect(saleDmLpMediaPutSchema.parse({ hero: null, sections: sections30 }).sections.length).toBe(30);
+  });
+  it("枠の上限は LP_LIMITS(splitLpTemplate と同じ定数)から来ている", () => {
+    const atHeadingLimit = "あ".repeat(LP_LIMITS.heading);
+    const overHeadingLimit = "あ".repeat(LP_LIMITS.heading + 1);
+    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: atHeadingLimit, media: null }] })).not.toThrow();
+    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: overHeadingLimit, media: null }] })).toThrow();
+    const atCountLimit = Array.from({ length: LP_LIMITS.headingCount }, (_, i) => ({ heading: `h${i}`, media: null }));
+    const overCountLimit = [...atCountLimit, { heading: "extra", media: null }];
+    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: atCountLimit })).not.toThrow();
+    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: overCountLimit })).toThrow();
   });
 });
