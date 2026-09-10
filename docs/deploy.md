@@ -576,6 +576,8 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 
 `STORAGE_BACKEND=server` の環境では `lp-assets/` 配下にファイルが増える(uploads と同じストレージ層を共用)。写真は端末側で長辺1600pxのJPEGへ縮小してから送るため、この機能で新規に追加したサーバー側の依存パッケージは無い。
 
+画面経由の登録は JPEG に再エンコードされるので付随情報は残らないが、API を直接叩いて PNG/WebP を登録した場合は PNG iTXt/tEXt・WebP XMP が残り得る(EXIF/位置情報のチャンクは除去済み)。
+
 #### 反響の記録リリース（migration `add_dm_reaction_columns`）: 旧 sale_dm 送付記録の照合
 
 この migration は既存の送付記録を全件「反応なし（no_response）」で初期化する。過去の売却DMで
