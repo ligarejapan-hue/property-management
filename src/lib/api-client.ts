@@ -495,9 +495,9 @@ export async function saveSaleDmLpVariantTemplate(
 ) {
   if (USE_MOCK) {
     await mockDelay();
-    return { changed: true, bodyDigest: "0".repeat(64), parts: { headline: "見出し", lead: null as string | null, faqCount: 0, bodyLength: 0 } };
+    return { changed: true, bodyDigest: "0".repeat(64), parts: { headline: "見出し", lead: null as string | null, faqCount: 0, bodyLength: 0, mediaDropped: 0 } };
   }
-  return apiFetch<{ changed: boolean; bodyDigest: string; parts?: { headline: string; lead: string | null; faqCount: number; bodyLength: number } }>(
+  return apiFetch<{ changed: boolean; bodyDigest: string; parts?: { headline: string; lead: string | null; faqCount: number; bodyLength: number; mediaDropped?: number } }>(
     `/api/properties/sale-dm/campaigns/${campaignId}/lp-variants/${lpId}/template`,
     { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
   );
