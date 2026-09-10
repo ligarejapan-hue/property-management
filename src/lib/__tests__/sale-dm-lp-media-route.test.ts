@@ -85,6 +85,10 @@ describe("PUT media", () => {
     const res = await put(okPlan);
     expect(res.status).toBe(200);
     expect(String(pm.$queryRaw.mock.calls[0][0])).toContain("dm_lp_variants");
+    // 最後の $queryRaw は写真の実在確認をロックする dm_lp_assets で、行の入れ替え(deleteMany)より先に走る。
+    const lastQueryRawIdx = pm.$queryRaw.mock.calls.length - 1;
+    expect(String(pm.$queryRaw.mock.calls[lastQueryRawIdx][0])).toContain("dm_lp_assets");
+    expect(pm.$queryRaw.mock.invocationCallOrder[lastQueryRawIdx]).toBeLessThan(pm.dmLpVariantMedia.deleteMany.mock.invocationCallOrder[0]);
     expect(pm.dmLpVariantMedia.deleteMany.mock.calls[0][0].where).toEqual({ lpVariantId: "lp1" });
     const rows = pm.dmLpVariantMedia.createMany.mock.calls[0][0].data;
     expect(rows).toEqual([
@@ -124,6 +128,17 @@ describe("PUT media", () => {
     expect(r.status).toBe(403);
     expect(pm.dmRecipientDraft.findMany.mock.calls[0][0].where).toEqual({ campaignId: "c1", lpVariantId: "lp1" });
     expect(String(pm.$queryRaw.mock.calls[1][0])).toContain("properties");
+  });
+  it("field_staff で担当範囲内なら properties を dm_lp_assets より先にロックする", async () => {
+    (getApiSession as Fn).mockResolvedValue({ id: "u9", role: "field_staff" });
+    pm.dmRecipientDraft.findMany.mockResolvedValue([{ propertyId: "p1" }]);
+    pm.property.findMany.mockResolvedValue([{ id: "p1" }]);
+    const r = await put(okPlan);
+    expect(r.status).toBe(200);
+    const propertiesIdx = pm.$queryRaw.mock.calls.findIndex((c: unknown[]) => String(c[0]).includes("properties"));
+    const assetsIdx = pm.$queryRaw.mock.calls.findIndex((c: unknown[]) => String(c[0]).includes("dm_lp_assets"));
+    expect(propertiesIdx).toBeGreaterThan(-1);
+    expect(assetsIdx).toBeGreaterThan(propertiesIdx);
   });
   it("文章が未保存(本文なし)のLP型には枠を付けられない", async () => {
     pm.dmLpVariant.findFirst.mockResolvedValue(variant({ bodyText: null }));

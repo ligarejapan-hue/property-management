@@ -31,7 +31,7 @@ vi.mock("@/lib/prisma", () => {
     dmLpVariantMedia: { count: vi.fn(async () => 0) },
     $queryRaw: vi.fn(async () => []),
   };
-  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  db.$transaction = vi.fn(async (fn: (tx: typeof db) => unknown) => fn(db));
   return { default: db };
 });
 
@@ -44,6 +44,7 @@ type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
   dmLpAsset: { findMany: Fn; findUnique: Fn; create: Fn; update: Fn };
   dmLpVariantMedia: { count: Fn };
+  $queryRaw: Fn;
 };
 const READS = ["property", "csv_export", "csv_export_personal", "owner"];
 
@@ -142,6 +143,19 @@ describe("DELETE lp-assets/[assetId]", () => {
     const r = await DELETE(new Request("http://x", { method: "DELETE" }) as never, ctx);
     expect(r.status).toBe(409);
     expect((await r.json()).error.code).toBe("REFERENCED");
+    // 参照ありで 409 のときは論理削除まで進まない(削除/添付の競合を閉じるロックの後に判定している証拠)。
+    expect(pm.dmLpAsset.update).not.toHaveBeenCalled();
+  });
+  it("対象行を FOR UPDATE でロックしてから参照件数を数える(削除/添付の競合を閉じる)", async () => {
+    pm.dmLpAsset.update.mockResolvedValue({ id: "a1" });
+    const r = await DELETE(new Request("http://x", { method: "DELETE" }) as never, ctx);
+    expect(r.status).toBe(200);
+    expect(pm.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(String(pm.$queryRaw.mock.calls[0][0])).toContain("dm_lp_assets");
+    expect(String(pm.$queryRaw.mock.calls[0][0])).toContain("FOR UPDATE");
+    const lockOrder = pm.$queryRaw.mock.invocationCallOrder[0];
+    const countOrder = pm.dmLpVariantMedia.count.mock.invocationCallOrder[0];
+    expect(lockOrder).toBeLessThan(countOrder);
   });
   it("参照が無ければ論理削除し、実ファイルは best-effort で消す", async () => {
     pm.dmLpAsset.update.mockResolvedValue({ id: "a1" });

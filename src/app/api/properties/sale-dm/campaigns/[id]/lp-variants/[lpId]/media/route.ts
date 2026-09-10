@@ -75,9 +75,13 @@ export async function GET(_req: NextRequest, { params }: Ctx) {
 }
 
 /**
- * 枠の保存(設計 §2.3/§2.8)。template route と同じ順序: dm_lp_variants FOR UPDATE → 凍結なら 409
- * (写真図は初期化の例外なし=送付後は一切変えない)→ 本文の小見出しと照合 → 写真の実在 →
- * 担当範囲(field_staff は物件親行をロックして読み直す。送付済み宛先も含める=template と同じ理由)→ 行を入れ替え。
+ * 枠の保存(設計 §2.3/§2.8)。ロック順序は dm_lp_variants → properties → dm_lp_assets
+ * (この route での最終段が dm_lp_assets)。template route と同じ並びで進める: dm_lp_variants
+ * FOR UPDATE → 凍結なら 409(写真図は初期化の例外なし=送付後は一切変えない)→ 本文の小見出しと照合 →
+ * 担当範囲(field_staff は物件親行をロックして読み直す。送付済み宛先も含める=template と同じ理由)→
+ * 写真の実在(dm_lp_assets を FOR UPDATE でロックしてから未削除か確認。ロックせずに読むと、
+ * 管理者の削除(lp-assets/[assetId] DELETE)と本 PUT の間で「削除読み取り→参照0件→削除確定」が
+ * 割り込み、削除済みのアセットを指す行がこの PUT のコミットで生き残る) → 行を入れ替え。
  */
 export async function PUT(request: NextRequest, { params }: Ctx) {
   try {
@@ -101,10 +105,6 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
       const issue = validateMediaPlan(plan, headings);
       if (issue) throw new ApiError(400, mediaPlanIssueMessage(issue), "INVALID_MEDIA_PLAN");
       const assetIds = referencedAssetIds(plan);
-      if (assetIds.length > 0) {
-        const found = await tx.dmLpAsset.findMany({ where: { id: { in: assetIds }, deletedAt: null }, select: { id: true } });
-        if (found.length !== assetIds.length) throw new ApiError(422, "選んだ写真の一部が削除されています。選び直してください", "ASSET_NOT_FOUND");
-      }
       if (session.role === "field_staff") {
         const targets = await tx.dmRecipientDraft.findMany({ where: { campaignId: id, lpVariantId: lpId }, select: { propertyId: true } });
         const propertyIds = [...new Set(targets.map((d) => d.propertyId))].sort();
@@ -113,6 +113,13 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
           const visible = await tx.property.findMany({ where: { id: { in: propertyIds }, OR: [{ createdBy: session.id }, { assignedTo: session.id }] }, select: { id: true } });
           if (visible.length !== propertyIds.length) throw new ApiError(403, "担当外の宛先を含むLP型は写真や図を変更できません", "FORBIDDEN");
         }
+      }
+      if (assetIds.length > 0) {
+        // dm_lp_assets はこの route のロック順序の最終段。削除(lp-assets/[assetId] DELETE)と
+        // 競合させないため、実在確認の前に対象行を FOR UPDATE でロックする。
+        await tx.$queryRaw`SELECT id FROM dm_lp_assets WHERE id = ANY(${assetIds}::uuid[]) ORDER BY id FOR UPDATE`;
+        const found = await tx.dmLpAsset.findMany({ where: { id: { in: assetIds }, deletedAt: null }, select: { id: true } });
+        if (found.length !== assetIds.length) throw new ApiError(422, "選んだ写真の一部が削除されています。選び直してください", "ASSET_NOT_FOUND");
       }
       const rows = planToRows(lpId, plan);
       await tx.dmLpVariantMedia.deleteMany({ where: { lpVariantId: lpId } });

@@ -212,3 +212,52 @@ describe("LP型の貼り戻し保存(lp-variants/[lpId]/template)のロック順
     expect(l).toBeLessThan(p);
   });
 });
+
+describe("LP型の写真と図の枠(lp-variants/[lpId]/media PUT)のロック順序", () => {
+  const s = code(
+    "src/app/api/properties/sale-dm/campaigns/[id]/lp-variants/[lpId]/media/route.ts",
+  );
+
+  // ⚠dm_lp_assets はこの route のロック順序の最終段。ロックせずに読むと、管理者の削除
+  //   (lp-assets/[assetId] DELETE)がこの PUT の実在確認とコミットの間に割り込み、
+  //   削除済み(実ファイルも失った)アセットを指す行がこの PUT のコミットで生き残る。
+  it("dm_lp_variants → properties → dm_lp_assets の順にロックを取る", () => {
+    const v = s.search(/FROM dm_lp_variants[\s\S]{0,200}FOR UPDATE/);
+    const p = s.search(/FROM properties[\s\S]{0,200}FOR UPDATE/);
+    const a = s.search(/FROM dm_lp_assets[\s\S]{0,200}FOR UPDATE/);
+    expect(v).toBeGreaterThan(-1);
+    expect(p).toBeGreaterThan(v);
+    expect(a).toBeGreaterThan(p);
+  });
+
+  it("dm_lp_assets のロックは行の入れ替え(deleteMany)より先に来る", () => {
+    const a = s.search(/FROM dm_lp_assets[\s\S]{0,200}FOR UPDATE/);
+    const d = s.indexOf("tx.dmLpVariantMedia.deleteMany");
+    expect(a).toBeGreaterThan(-1);
+    expect(d).toBeGreaterThan(-1);
+    expect(a).toBeLessThan(d);
+  });
+});
+
+describe("写真ライブラリの削除(lp-assets/[assetId] DELETE)のロック順序", () => {
+  const s = code("src/app/api/properties/sale-dm/lp-assets/[assetId]/route.ts");
+
+  // ⚠この route は dm_lp_assets だけを掴む(media PUT のロック順序の末尾と同じ一段)。
+  //   ロックの後に参照カウントと論理削除を読み直すことで、media PUT との削除/添付の競合を閉じる。
+  it("対象行を FOR UPDATE でロックしてから参照カウントを数える", () => {
+    const a = s.search(/FROM dm_lp_assets[\s\S]{0,200}FOR UPDATE/);
+    const c = s.indexOf("tx.dmLpVariantMedia.count");
+    expect(a).toBeGreaterThan(-1);
+    expect(c).toBeGreaterThan(-1);
+    expect(a).toBeLessThan(c);
+  });
+
+  it("ロックと存在確認・参照カウント・論理削除は1つの tx にまとまっている", () => {
+    const tx = s.indexOf("prisma.$transaction");
+    const a = s.search(/FROM dm_lp_assets[\s\S]{0,200}FOR UPDATE/);
+    const u = s.indexOf("tx.dmLpAsset.update");
+    expect(tx).toBeGreaterThan(-1);
+    expect(a).toBeGreaterThan(tx);
+    expect(u).toBeGreaterThan(a);
+  });
+});
