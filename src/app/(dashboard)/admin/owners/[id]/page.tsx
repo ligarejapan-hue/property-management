@@ -20,6 +20,7 @@ import Link from "next/link";
 import { ArrowLeft, AlertTriangle, Loader2 } from "lucide-react";
 import {
   fetchAdminOwnerCorporateCandidate,
+  fetchProperties,
   type AdminOwnerCorporateCandidateResponse,
 } from "@/lib/api-client";
 import CorporateLookupPanel from "@/components/owners/corporate-lookup-panel";
@@ -202,6 +203,42 @@ export default function AdminOwnerDetailPage() {
     load();
   }, [load]);
 
+  // 紐づく物件。専用APIは作らず物件一覧APIを所有者で絞って呼ぶ＝
+  // 担当者スコープと権限をそのまま継承する(見えない物件がここだけ見える、を防ぐ)。
+  const [linkedProperties, setLinkedProperties] = useState<
+    Array<{ id: string; address: string; lotNumber: string | null }>
+  >([]);
+  const [linkedTotal, setLinkedTotal] = useState(0);
+  const [linkedLoaded, setLinkedLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!ownerId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetchProperties({ ownerId, limit: "20" });
+        if (cancelled) return;
+        setLinkedProperties(
+          (res.data as Array<{ id: string; address: string; lotNumber: string | null }>) ?? [],
+        );
+        setLinkedTotal(
+          (res.pagination as { total?: number } | undefined)?.total ?? 0,
+        );
+      } catch {
+        // 一覧が出ないだけで所有者詳細そのものは使える(best-effort)。
+        if (!cancelled) {
+          setLinkedProperties([]);
+          setLinkedTotal(0);
+        }
+      } finally {
+        if (!cancelled) setLinkedLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ownerId]);
+
   const owner = data?.owner;
   const candidate = data?.candidate;
 
@@ -275,6 +312,42 @@ export default function AdminOwnerDetailPage() {
                 mono
               />
             </dl>
+            <div className="mt-4 border-t border-gray-200 pt-3 dark:border-gray-800">
+              <h3 className="mb-2 text-xs font-semibold text-gray-600 dark:text-gray-300">
+                紐づく物件
+              </h3>
+              {!linkedLoaded ? (
+                <p className="text-xs text-gray-400 dark:text-gray-500">
+                  読み込んでいます…
+                </p>
+              ) : linkedProperties.length === 0 ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  紐づく物件はありません
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-1">
+                  {linkedProperties.map((p) => (
+                    <li key={p.id} className="text-xs">
+                      <Link
+                        href={`/properties/${p.id}`}
+                        className="text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-300 dark:hover:text-blue-200"
+                      >
+                        {p.address}
+                        {p.lotNumber ? ` ${p.lotNumber}` : ""}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {linkedTotal > linkedProperties.length && (
+                <Link
+                  href={`/properties?ownerId=${encodeURIComponent(ownerId)}`}
+                  className="mt-2 inline-block text-xs text-blue-700 underline underline-offset-2 dark:text-blue-300"
+                >
+                  すべて見る（{linkedTotal}件）
+                </Link>
+              )}
+            </div>
           </section>
 
           {/* 法人番号補正セクション */}
