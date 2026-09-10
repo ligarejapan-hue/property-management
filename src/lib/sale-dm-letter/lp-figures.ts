@@ -53,15 +53,24 @@ function steps(items: string[], y: number, sub?: string[]): string {
   return out;
 }
 
-/** 横棒(割合の目安) */
+/**
+ * 横棒(割合の目安)。3列 = 見出し / 棒 / 補足。
+ * viewBox は 640 幅しかないので、補足(note)は**右端 632 に右寄せ**で置き、棒の右端は
+ * 422 で止める(補足に 200px 以上を確保する)。左寄せのまま x=590 に置くと
+ * 「価格×3%+6万円+税」のような補足が画面の外まではみ出して切れる(@codex R1 P2)。
+ */
+const BAR_LABEL_X = 24;
+const BAR_X = 232;
+const BAR_W = 190; // 棒の右端 = 422。note 領域は 432〜632 の 200px
+const NOTE_X = 632;
 function bars(rows: Array<[string, number, string]>, y0: number): string {
   let out = "";
   rows.forEach(([label, ratio, note], i) => {
     const y = y0 + i * 48;
-    out += text(24, y + 18, label, 14, INK);
-    out += `<rect x="200" y="${y}" width="380" height="24" rx="6" fill="${SOFT}"/>`;
-    out += `<rect x="200" y="${y}" width="${Math.round(380 * ratio)}" height="24" rx="6" fill="${ACCENT}"/>`;
-    out += text(590, y + 18, note, 12, MUTED, "start");
+    out += text(BAR_LABEL_X, y + 18, label, 14, INK);
+    out += `<rect x="${BAR_X}" y="${y}" width="${BAR_W}" height="24" rx="6" fill="${SOFT}"/>`;
+    out += `<rect x="${BAR_X}" y="${y}" width="${Math.round(BAR_W * ratio)}" height="24" rx="6" fill="${ACCENT}"/>`;
+    out += text(NOTE_X, y + 18, note, 12, MUTED, "end");
   });
   return out;
 }
