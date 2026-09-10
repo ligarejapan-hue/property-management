@@ -28,9 +28,22 @@ describe("補正候補画面の物件リンク", () => {
     );
   });
 
-  it("生の件数だけを描く箇所が残っていない", () => {
-    expect(page).not.toContain("{m.propertyOwnerCount}");
-    expect(page).not.toContain("{c.propertyOwnerCount}");
+  it("件数を描くのは共通部品だけ(生の描画も分岐も残っていない)", () => {
+    // 旧実装の「0件だけ橙色」の分岐が JSX に残っていないこと
+    expect(page).not.toContain("c.propertyOwnerCount === 0");
+    // propertyOwnerCount の登場は「型宣言」「並べ替えの比較」「部品への受け渡し」だけ。
+    // 危険なものを除く書き方ではなく、安全なものだけを許す書き方にする(許可リスト方式)。
+    const lines = page
+      .split("\n")
+      .filter((l) => l.includes("propertyOwnerCount"));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      const allowed =
+        /propertyOwnerCount\??:\s*number;/.test(line) ||
+        /[ab]\.propertyOwnerCount/.test(line) ||
+        /count=\{[cm]\.propertyOwnerCount\}/.test(line);
+      expect(allowed, `想定外の使い方: ${line.trim()}`).toBe(true);
+    }
   });
 
   it("住所なしタブの 0 件は今までどおり橙色で目立たせる", () => {
