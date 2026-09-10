@@ -48,13 +48,17 @@ const pm = prismaMock as never as {
 };
 const READS = ["property", "csv_export", "csv_export_personal", "owner"];
 
-// 合成 JPEG(実画像なし): SOI + APP0 + SOF0(width×height) + SOS + EOI。APP1(EXIF)を付ける版も作る。
+// 合成 JPEG(実画像なし): SOI + APP0(JFIF) + [APP1(EXIF)] + COM(コメント) + SOF0(width×height) + SOS + EOI。
+// APP0 / COM は「EXIF ではないが公開配信の画像に残ってはいけない」付随情報の代表。
+const COM_TEXT = "撮影者 山田太郎";
 function jpegBytes(width: number, height: number, withExif = false): Buffer {
   const sof = Buffer.alloc(10); sof[0] = 0xff; sof[1] = 0xc0; sof.writeUInt16BE(8, 2); sof[4] = 8; sof.writeUInt16BE(height, 5); sof.writeUInt16BE(width, 7); sof[9] = 3;
   const app0 = Buffer.from([0xff, 0xe0, 0x00, 0x04, 0x00, 0x00]);
+  const comPayload = Buffer.from(COM_TEXT, "utf8");
+  const com = Buffer.concat([Buffer.from([0xff, 0xfe]), (() => { const l = Buffer.alloc(2); l.writeUInt16BE(comPayload.length + 2, 0); return l; })(), comPayload]);
   const exifPayload = Buffer.concat([Buffer.from("Exif\0\0", "latin1"), Buffer.from("II*\0\x08\0\0\0\0\0", "latin1")]);
   const app1 = withExif ? Buffer.concat([Buffer.from([0xff, 0xe1]), (() => { const l = Buffer.alloc(2); l.writeUInt16BE(exifPayload.length + 2, 0); return l; })(), exifPayload]) : Buffer.alloc(0);
-  return Buffer.concat([Buffer.from([0xff, 0xd8]), app0, app1, sof, Buffer.from([0xff, 0xda, 0x00, 0x02]), Buffer.from([0xff, 0xd9])]);
+  return Buffer.concat([Buffer.from([0xff, 0xd8]), app0, app1, com, sof, Buffer.from([0xff, 0xda, 0x00, 0x02]), Buffer.from([0xff, 0xd9])]);
 }
 function multipart(bytes: Buffer, mime: string, name = "a.jpg", label?: string): Request {
   const fd = new FormData();
@@ -90,6 +94,14 @@ describe("POST lp-assets(アップロード)", () => {
     expect(JSON.stringify(j)).not.toContain("storageKey");
     const uploaded: Buffer = storageStub.upload.mock.calls[0][0];
     expect(uploaded.includes(Buffer.from("Exif\0\0", "latin1"))).toBe(false);
+    // EXIF だけでなく、デコードに要らない segment は1つも残らない(許可リストで組み立て直す)。
+    const sosAt = uploaded.indexOf(Buffer.from([0xff, 0xda]));
+    expect(sosAt).toBeGreaterThan(0);
+    const head = uploaded.subarray(0, sosAt);
+    for (let m = 0xe0; m <= 0xef; m += 1) expect(head.includes(Buffer.from([0xff, m]))).toBe(false); // APPn
+    expect(head.includes(Buffer.from([0xff, 0xfe]))).toBe(false); // COM
+    expect(uploaded.includes(Buffer.from(COM_TEXT, "utf8"))).toBe(false);
+    expect(uploaded.includes(Buffer.from("JFIF", "latin1"))).toBe(false);
     expect(storageStub.upload.mock.calls[0][1].key).toMatch(/^lp-assets\/[0-9a-f-]{36}\.jpg$/);
     expect(writeAuditLog.mock.calls[0][0].action).toBe("sale_dm_lp_asset_upload");
     expect(JSON.stringify(writeAuditLog.mock.calls[0][0].detail)).not.toContain("外観");

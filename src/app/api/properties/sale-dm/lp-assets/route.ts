@@ -5,6 +5,7 @@ import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { getStorage, validateFile, MAX_FILE_SIZE } from "@/lib/storage";
 import { stripFieldSurveyPhotoMetadata } from "@/lib/field-survey/exif-strip";
+import { stripLpAssetMetadata } from "@/lib/lp-asset-metadata-strip";
 import { readImageDimensions } from "@/lib/image-dimensions";
 import { requireSaleDmAccess, requireSaleDmWriteAccess } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmLpAssetLabelSchema } from "@/lib/validators-sale-dm";
@@ -82,7 +83,15 @@ export async function POST(request: NextRequest) {
     // 保存前に EXIF(位置情報を含む)を除く。失敗は fail-closed。
     const stripped = stripFieldSurveyPhotoMetadata(raw, mimeType);
     if (!stripped.ok) throw new ApiError(422, "画像ファイルを処理できませんでした", "VALIDATION_ERROR");
-    const buffer = stripped.buffer;
+    // さらに、デコードに要らないバイトを**許可リスト**で全て落とす(@codex R1 P1)。
+    // 上の EXIF strip は APP1 / eXIf / EXIF chunk だけを狙うため、JPEG の COM・APP0(JFIF)・
+    // APP13(IPTC)、PNG の tEXt/zTXt/iTXt、WebP の XMP/ICCP が残る。この写真は
+    // 公開口 /lp-assets/<publicId> で誰にでも配られるので、残さない。
+    // 注意: この段で Orientation の最小 Exif も落ちる(画面側の canvas 変換で向きは
+    // 焼き込み済み = LP用写真では保持しない方針)。
+    const lean = stripLpAssetMetadata(stripped.buffer, mimeType);
+    if (!lean.ok) throw new ApiError(422, "画像ファイルを処理できませんでした", "VALIDATION_ERROR");
+    const buffer = lean.buffer;
     if (buffer.length > MAX_FILE_SIZE) throw new ApiError(422, "ファイルサイズが上限を超えています", "VALIDATION_ERROR");
 
     const dims = readImageDimensions(buffer, mimeType);

@@ -576,7 +576,7 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 
 `STORAGE_BACKEND=server` の環境では `lp-assets/` 配下にファイルが増える(uploads と同じストレージ層を共用)。写真は端末側で長辺1600pxのJPEGへ縮小してから送るため、この機能で新規に追加したサーバー側の依存パッケージは無い。
 
-画面経由の登録は JPEG に再エンコードされるので付随情報は残らないが、API を直接叩いて PNG/WebP を登録した場合は PNG iTXt/tEXt・WebP XMP が残り得る(EXIF/位置情報のチャンクは除去済み)。
+公開配信する画像なので、**付随情報(メタデータ)はサーバー側で許可リスト方式により全て除去する**(`src/lib/lp-asset-metadata-strip.ts`)。EXIF/位置情報だけを狙って落とすのではなく、**表示に要るものだけを残して組み立て直す**ため、画面経由・API 直叩きのどちらでも残余は無い。残すのは JPEG が SOI/SOFn/DQT/DHT/DAC/DRI/SOS 以降(entropy データ)/EOI、PNG が IHDR/PLTE/IDAT/IEND と tRNS/gAMA/cHRM/sRGB/sBIT/pHYs/bKGD/hIST、WebP が VP8 /VP8L/VP8X/ALPH/ANIM/ANMF だけ。したがって JPEG の APPn(JFIF APP0・Exif APP1・IPTC APP13 等)と COM、PNG の tEXt/zTXt/iTXt/tIME/eXIf/iCCP と未知チャンク、WebP の EXIF/XMP /ICCP と未知チャンクは全て落ちる(VP8X の ICC/EXIF/XMP フラグも消し、RIFF サイズを数え直す)。⚠この段で **Exif の向き(Orientation)も落ちる**(画面側の変換で向きを焼き込んでから送るため保持しない)。構造が読み切れない画像は保存せず 422 にする(fail-closed)。
 
 #### 反響の記録リリース（migration `add_dm_reaction_columns`）: 旧 sale_dm 送付記録の照合
 
