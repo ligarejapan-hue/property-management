@@ -90,7 +90,10 @@ describe("mock モードの所有者絞り込み", () => {
   ).replace(/\r\n/g, "\n");
 
   it("mock データには所有者の紐づきが無いので空を返す(全件を他人の物件として見せない)", () => {
-    expect(client).toContain("if (params.ownerId)");
-    expect(client).toContain("filtered = [];");
+    // if とその中身を1つの正規表現でまとめて見る。別々に toContain すると
+    // ファイル内の無関係な `filtered = [];` でも通ってしまう。
+    expect(client).toMatch(
+      /if \(params\.ownerId\) \{\s*\n\s*filtered = \[\];\s*\n\s*\}/,
+    );
   });
 });

@@ -18,7 +18,13 @@ describe("所有者詳細の紐づく物件一覧", () => {
   });
 
   it("20件を超えたら物件一覧へ逃がす導線を出す(超えているときだけ描画される)", () => {
-    expect(src).toContain("/properties?ownerId=");
+    // URL は直書きせず共有ヘルパーで組み立てる(所有者補正候補の同種リンクと
+    // 食い違わないように1箇所に閉じ込めてある。src/lib/owner-property-link.ts)。
+    expect(src).toContain(
+      'import { ownerFilteredPropertyListHref } from "@/lib/owner-property-link"',
+    );
+    expect(src).toContain("href={ownerFilteredPropertyListHref(ownerId)}");
+    expect(src).not.toContain("/properties?ownerId=");
     // 「すべて見る」の直前が「(表示済み件数) < (総数)」のガードで閉じていること。
     // 文字列がどこかに存在するだけでは、常時描画するリファクタでも通ってしまうため、
     // ガード式が「すべて見る」を含む JSX ブロックを直接囲んでいることを構造で確認する。

@@ -26,6 +26,7 @@ import {
 import CorporateLookupPanel from "@/components/owners/corporate-lookup-panel";
 import CorporateCleanupPanel from "@/components/owners/corporate-cleanup-panel";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
+import { ownerFilteredPropertyListHref } from "@/lib/owner-property-link";
 
 type FieldEditable = {
   name: boolean;
@@ -359,8 +360,14 @@ export default function AdminOwnerDetailPage() {
                         href={`/properties/${p.id}`}
                         className="text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-300 dark:hover:text-blue-200"
                       >
-                        {p.address}
-                        {p.lotNumber ? ` ${p.lotNumber}` : ""}
+                        {/* 住所は行(a)が button 同様に screen-protection の container
+                            方式から除外されるため、明示 span で保護する
+                            (SalesSheetPropertyPicker と同方式)。所有者面ではなく
+                            物件面: ここに載るのは物件住所であって所有者住所ではない。 */}
+                        <span data-pii-protected data-pii-surface="property">
+                          {p.address}
+                          {p.lotNumber ? ` ${p.lotNumber}` : ""}
+                        </span>
                       </Link>
                     </li>
                   ))}
@@ -368,7 +375,7 @@ export default function AdminOwnerDetailPage() {
               )}
               {linkedLoaded && !linkedFailed && linkedTotal > linkedProperties.length && (
                 <Link
-                  href={`/properties?ownerId=${encodeURIComponent(ownerId)}`}
+                  href={ownerFilteredPropertyListHref(ownerId)}
                   className="mt-2 inline-block text-xs text-blue-700 underline underline-offset-2 dark:text-blue-300"
                 >
                   すべて見る（{linkedTotal}件）

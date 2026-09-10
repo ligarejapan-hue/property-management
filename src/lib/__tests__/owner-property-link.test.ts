@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   resolveOwnerPropertyLink,
   pickSinglePropertyId,
+  ownerFilteredPropertyListHref,
 } from "../owner-property-link";
 
 const OWNER = "11111111-1111-4111-8111-111111111111";
@@ -80,6 +81,29 @@ describe("resolveOwnerPropertyLink", () => {
     }) as { href: string };
     expect(many.href).toBe(`/properties?ownerId=${OWNER}`);
     expect(single.href).toBe(`/properties/${PROP}`);
+  });
+});
+
+describe("ownerFilteredPropertyListHref", () => {
+  it("所有者で絞り込んだ物件一覧の URL を組み立てる", () => {
+    expect(ownerFilteredPropertyListHref(OWNER)).toBe(
+      `/properties?ownerId=${OWNER}`,
+    );
+  });
+
+  it("resolveOwnerPropertyLink の many/href と同じ値を返す(URL が2箇所で食い違わない)", () => {
+    const many = resolveOwnerPropertyLink({
+      ownerId: OWNER,
+      propertyOwnerCount: 5,
+      singlePropertyId: null,
+    }) as { href: string };
+    expect(ownerFilteredPropertyListHref(OWNER)).toBe(many.href);
+  });
+
+  it("ID を URL エンコードする", () => {
+    expect(ownerFilteredPropertyListHref("a b")).toBe(
+      "/properties?ownerId=a%20b",
+    );
   });
 });
 

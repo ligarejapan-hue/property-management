@@ -21,6 +21,15 @@ export interface OwnerPropertyLinkInput {
   singlePropertyId: string | null;
 }
 
+/**
+ * 所有者で絞り込んだ物件一覧への URL を1箇所で組み立てる。
+ * `resolveOwnerPropertyLink` とページ側の直書きリンクの両方がこれを使う。
+ * クエリパラメータ名を変えるときはここだけ直せばよい。
+ */
+export function ownerFilteredPropertyListHref(ownerId: string): string {
+  return `/properties?ownerId=${encodeURIComponent(ownerId)}`;
+}
+
 export function resolveOwnerPropertyLink(
   input: OwnerPropertyLinkInput,
 ): OwnerPropertyLink {
@@ -36,7 +45,7 @@ export function resolveOwnerPropertyLink(
   // 壊れたリンクを出すより、絞り込んだ一覧へ逃がす方が安全。
   return {
     kind: "many",
-    href: `/properties?ownerId=${encodeURIComponent(ownerId)}`,
+    href: ownerFilteredPropertyListHref(ownerId),
   };
 }
 
