@@ -75,6 +75,21 @@ function bars(rows: Array<[string, number, string]>, y0: number): string {
   return out;
 }
 
+/**
+ * 相続の期限(時間軸)の目盛り。[見出し, 目盛りの x, 補足]。
+ * ⚠**最後の目盛りだけは文字を右端に寄せる**。中央寄せのままだと 12px の補足
+ * 「空き家特例の目安」(8文字 ≒ 96px)の右端が 592+48 = 640 = viewBox の縁に
+ * ちょうど触れて切れて見える。end 寄せ・x=632 なら右に 8px の余白が残る。
+ * (丸は目盛りの位置 592 のまま。文字だけを内側へ寄せる)
+ */
+const DEADLINE_MARKS: Array<[label: string, x: number, sub: string]> = [
+  ["相続の開始", 48, "被相続人の死亡"],
+  ["10か月", 240, "相続税の申告・納付"],
+  ["3年", 420, "相続登記の期限(義務)"],
+  ["3年目の年末", 592, "空き家特例の目安"],
+];
+const DEADLINE_LAST_TEXT_X = 632;
+
 const RENDERERS: Record<FigureKind, () => string> = {
   sale_flow: () =>
     wrap(
@@ -95,8 +110,15 @@ const RENDERERS: Record<FigureKind, () => string> = {
   inheritance_deadlines: () =>
     wrap(
       `<line x1="48" y1="180" x2="592" y2="180" stroke="${ACCENT}" stroke-width="3"/>` +
-      [["相続の開始", 48, "被相続人の死亡"], ["10か月", 240, "相続税の申告・納付"], ["3年", 420, "相続登記の期限(義務)"], ["3年目の年末", 592, "空き家特例の目安"]]
-        .map(([label, x, sub]) => `<circle cx="${x}" cy="180" r="8" fill="${ACCENT}"/>` + text(Number(x), 150, String(label), 15, INK, "middle", "700") + text(Number(x), 214, String(sub), 12, MUTED, "middle"))
+      DEADLINE_MARKS
+        .map(([label, x, sub], i) => {
+          const last = i === DEADLINE_MARKS.length - 1;
+          const tx = last ? DEADLINE_LAST_TEXT_X : x;
+          const anchor = last ? "end" : "middle";
+          return `<circle cx="${x}" cy="180" r="8" fill="${ACCENT}"/>` +
+            text(tx, 150, label, 15, INK, anchor, "700") +
+            text(tx, 214, sub, 12, MUTED, anchor);
+        })
         .join("") +
       text(24, 300, "※期限は一般的な目安です。個別の事情は専門家にご確認ください", 13, MUTED),
       FIGURE_LABELS.inheritance_deadlines,

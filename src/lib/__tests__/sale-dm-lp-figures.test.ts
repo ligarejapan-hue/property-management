@@ -50,6 +50,41 @@ describe("renderFigureSvg", () => {
       }
     }
   });
+  it("中央寄せの文字は、文字の幅まで数えても viewBox(640)を出ない: x + 文字数×font-size÷2 <= 640", () => {
+    // 和文は 1 文字 ≒ font-size ぶんの幅。中央寄せは左右へ半分ずつ伸びるので、
+    // 右端 = x + 文字数 × font-size ÷ 2。5種すべてに同じ物差しを当てる。
+    for (const k of FIGURE_KINDS) {
+      const svg = renderFigureSvg(k);
+      const els = [...svg.matchAll(/<text\b([^>]*)>([^<]*)<\/text>/g)];
+      expect(els.length).toBeGreaterThan(0);
+      let middles = 0;
+      for (const [, attrs, body] of els) {
+        const anchor = /text-anchor="([a-z]+)"/.exec(attrs)?.[1] ?? "start";
+        if (anchor !== "middle") continue;
+        middles += 1;
+        const x = Number(/\bx="(-?[\d.]+)"/.exec(attrs)?.[1]);
+        const fontSize = Number(/font-size="([\d.]+)"/.exec(attrs)?.[1]);
+        expect(Number.isFinite(x)).toBe(true);
+        expect(Number.isFinite(fontSize)).toBe(true);
+        // 属性値ではなく描かれる文字を数える(実体参照を戻してから)
+        const label = body
+          .replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+          .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+          .replace(/&amp;/g, "&");
+        const half = 0.5 * label.length * fontSize;
+        expect(x + half).toBeLessThanOrEqual(640);
+        expect(x - half).toBeGreaterThanOrEqual(0);
+      }
+      // 中央寄せが1つも無い図があってもよい(横棒の図など)
+      expect(middles).toBeGreaterThanOrEqual(0);
+    }
+    // 相続の期限: 最後の目盛りだけは右端 632 に end 寄せ(中央寄せのままだと縁で切れる)
+    const deadlines = renderFigureSvg("inheritance_deadlines");
+    expect(deadlines).toMatch(/<text x="632"[^>]*text-anchor="end"[^>]*>空き家特例の目安<\/text>/);
+    expect(deadlines).toMatch(/<text x="632"[^>]*text-anchor="end"[^>]*>3年目の年末<\/text>/);
+    expect(deadlines).not.toContain('<circle cx="632"');
+    expect(deadlines).toContain('<circle cx="592" cy="180" r="8"');
+  });
   it("横棒の図: 補足は右寄せ(anchor=end・x=632)で、棒は補足の領域に食い込まない", () => {
     const NOTES: Record<string, string[]> = {
       cost_breakdown: ["価格×3%+6万円+税", "契約書に貼付", "抵当権抹消など", "利益が出た場合"],
