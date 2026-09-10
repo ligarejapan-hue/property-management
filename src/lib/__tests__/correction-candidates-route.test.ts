@@ -106,11 +106,33 @@ function makeOwner(overrides: {
   zip?: string | null;
   phone?: string | null;
   propertyOwnerCount?: number;
+  /**
+   * 実クエリの `propertyOwners: { select: { propertyId: true }, take: 2 }` を
+   * fixture 側でも再現するための override。指定しなければ
+   * propertyOwnerCount から自動生成する（下記参照）。実クエリと同様に
+   * **常に先頭2件までしか返らない**ため、指定してもここで 2 件に切り詰める
+   * （3件以上を渡しても take:2 後の実際の挙動と食い違わせない）。
+   */
+  propertyOwnerIds?: string[];
   version?: number;
   note?: string | null;
   externalLinkKey?: string | null;
   corporateNumber?: string | null;
 }) {
+  const propertyOwnerCount = overrides.propertyOwnerCount ?? 0;
+  // 実クエリが `take: 2` で読むのと同じく、propertyOwnerCount が3以上でも
+  // fixture が返す propertyOwners 行は最大2件。3件以上あるとして _count だけ
+  // 3にして propertyOwners を3件返す、というような「実クエリでは起こり得ない
+  // 組み合わせ」を fixture が作れてしまうと、`pickSinglePropertyId` が
+  // undefined を読む今回のような regression を再び見逃す。
+  const defaultPropertyOwnerIds = Array.from(
+    { length: Math.min(propertyOwnerCount, 2) },
+    (_, i) => `${overrides.id}-property-${i + 1}`,
+  );
+  const propertyOwnerIds = (
+    overrides.propertyOwnerIds ?? defaultPropertyOwnerIds
+  ).slice(0, 2);
+
   return {
     id: overrides.id,
     name: overrides.name,
@@ -121,7 +143,8 @@ function makeOwner(overrides: {
     externalLinkKey: overrides.externalLinkKey ?? null,
     corporateNumber: overrides.corporateNumber ?? null,
     version: overrides.version ?? 1,
-    _count: { propertyOwners: overrides.propertyOwnerCount ?? 0 },
+    _count: { propertyOwners: propertyOwnerCount },
+    propertyOwners: propertyOwnerIds.map((propertyId) => ({ propertyId })),
   };
 }
 
@@ -1941,5 +1964,99 @@ describe("GET correction-candidates: Phase 2-B 空白のみ address", () => {
     const c = jsonAll.candidates[0];
     expect(c.types).not.toContain("address_null");
     expect(c.addressIsWhitespaceOnly).toBe(false);
+  });
+});
+
+// ── singlePropertyId: propertyOwners fixture (take:2) の end-to-end 検証 ──
+//
+// 回帰の原因: route 側が `propertyOwners: { select: { propertyId: true },
+// take: 2 }` を select するようになったのに、テストの makeOwner fixture が
+// `_count.propertyOwners` だけ持って `propertyOwners` 配列を返していなかった
+// ため、`pickSinglePropertyId(owner.propertyOwners)` が undefined.length で
+// 例外を投げていた。ここでは実クエリと同じ形の fixture を通して、
+// route が返す singlePropertyId が 0件/1件/2件以上のそれぞれで正しいことを
+// 直接確認する（fixture を直しただけで満足せず、route の出力まで見る）。
+describe("GET correction-candidates: singlePropertyId (propertyOwners take:2 fixture)", () => {
+  it("紐づき物件が0件の owner は singlePropertyId=null", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "ゼロ件太郎",
+        propertyOwnerCount: 0,
+      }),
+    ]);
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].propertyOwnerCount).toBe(0);
+    expect(json.candidates[0].singlePropertyId).toBeNull();
+  });
+
+  it("紐づき物件がちょうど1件の owner は singlePropertyId にその物件IDが返る", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "一件花子",
+        // address は既定の null のまま（address_null type で "all" フィルタに
+        // 拾わせる。orphan ではないので判定に propertyOwnerCount=1 が効く）。
+        propertyOwnerCount: 1,
+      }),
+    ]);
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].propertyOwnerCount).toBe(1);
+    expect(json.candidates[0].singlePropertyId).toBe(
+      "22222222-2222-4222-8222-222222222222-property-1",
+    );
+  });
+
+  it("紐づき物件が2件の owner は singlePropertyId=null（1件に確定できない）", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "33333333-3333-4333-8333-333333333333",
+        name: "二件次郎",
+        // address は既定の null のまま（address_null type で "all" フィルタに拾わせる）。
+        propertyOwnerCount: 2,
+      }),
+    ]);
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].propertyOwnerCount).toBe(2);
+    expect(json.candidates[0].singlePropertyId).toBeNull();
+  });
+
+  it("紐づき物件が3件以上の owner も singlePropertyId=null（take:2 で2件しか読まないが1件確定にはならない）", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "44444444-4444-4444-8444-444444444444",
+        name: "多数件三郎",
+        // address は既定の null のまま（address_null type で "all" フィルタに拾わせる）。
+        propertyOwnerCount: 5,
+      }),
+    ]);
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    // _count は実件数の5だが、propertyOwners fixture は take:2 と同じく2件だけ持つ。
+    expect(json.candidates[0].propertyOwnerCount).toBe(5);
+    expect(json.candidates[0].singlePropertyId).toBeNull();
+  });
+
+  it("override した propertyOwnerIds を1件だけ渡すと、その物件IDが singlePropertyId に返る", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "55555555-5555-4555-8555-555555555555",
+        name: "指定四郎",
+        // address は既定の null のまま（address_null type で "all" フィルタに拾わせる）。
+        propertyOwnerCount: 1,
+        propertyOwnerIds: ["custom-property-id-xyz"],
+      }),
+    ]);
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].singlePropertyId).toBe("custom-property-id-xyz");
   });
 });
