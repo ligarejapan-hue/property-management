@@ -18,6 +18,7 @@ import {
 } from "@/lib/owner-correction";
 import { maskCorporateNumber } from "@/lib/display-level";
 import { pickSinglePropertyId } from "@/lib/owner-property-link";
+import { propertyVisibilityScopeWhere } from "@/lib/property-list-query";
 
 type RecommendedAction = "hold" | "review" | "delete_candidate" | "merge_candidate";
 
@@ -52,6 +53,9 @@ type Candidate = {
    * 紐づき物件がちょうど1件のときの物件ID。0件・2件以上は null。
    * 画面はこの値をリンク先の判定(resolveOwnerPropertyLink)に渡すだけで、
    * 物件の住所などの中身はここでは一切返さない。
+   * Codex P1: セッションが property:read を持たない場合は常に null
+   * (#139 finding)。property:read があっても、field_staff は
+   * propertyVisibilityScopeWhere で担当外の物件を除外した後の値。
    */
   singlePropertyId: string | null;
   changeLogCount: number;
@@ -100,6 +104,8 @@ type Candidate = {
 //
 // 権限: user_management:read（管理者エリア） + owner:read（PII閲覧）の両方必須。
 //   既存 /api/owners と同じ getOwnerDisplayConfig / maskValue を適用する。
+//   singlePropertyId は上記2つとは別に property:read も必要（#139 finding）。
+//   無ければ endpoint 自体は 403 にせず、その項目だけ null にする。
 
 export async function GET(request: NextRequest) {
   try {
@@ -115,6 +121,13 @@ export async function GET(request: NextRequest) {
 
     // PII フィールドの表示レベルを取得（/api/owners と同じ制御）
     const displayConfig = await getOwnerDisplayConfig(session.id, perms);
+
+    // Codex P1: singlePropertyId は物件の存在(UUID)と1件確定であることを外に出す。
+    // property:read を持たないセッションには渡さない(#139 finding)。
+    // property list / detail API と同じ可視範囲スコープを nested selection にも
+    // 適用し、field_staff が担当外の物件IDを受け取らないようにする。
+    const hasPropertyRead = hasPermission(perms, "property", "read");
+    const propertyVisibilityScope = propertyVisibilityScopeWhere(session);
 
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type") ?? "all";
@@ -133,10 +146,21 @@ export async function GET(request: NextRequest) {
         corporateNumber: true,
         externalLinkKey: true,
         version: true,
+        // propertyOwnerCount(_count)は既存の孤児/重複判定が依存するため
+        // 可視範囲スコープを適用しない(変更しない・スコープ対象は下の
+        // propertyOwners selection のみ)。
         _count: { select: { propertyOwners: true } },
         // 紐づきがちょうど1件のときだけ物件IDを返すため、2件だけ読む。
         // (1件か2件以上かの判別にはこれで足りる。全件読むと重い)
-        propertyOwners: { select: { propertyId: true }, take: 2 },
+        // where は property list/detail API と同じ propertyVisibilityScopeWhere。
+        // field_staff は担当外の物件を持つ行を読まない(=そもそも候補に出せない)。
+        propertyOwners: {
+          select: { propertyId: true },
+          take: 2,
+          ...(propertyVisibilityScope
+            ? { where: { property: propertyVisibilityScope } }
+            : {}),
+        },
       },
       orderBy: { createdAt: "asc" },
     });
@@ -202,7 +226,11 @@ export async function GET(request: NextRequest) {
     // 4. 候補リスト構築
     const candidates: Candidate[] = owners.map((owner): Candidate => {
       const propertyOwnerCount = owner._count.propertyOwners;
-      const singlePropertyId = pickSinglePropertyId(owner.propertyOwners);
+      // property:read が無いセッションには渡さない(#139 finding)。
+      // propertyOwnerCount(_count)は上記の通りスコープ対象外・変更しない。
+      const singlePropertyId = hasPropertyRead
+        ? pickSinglePropertyId(owner.propertyOwners)
+        : null;
       const changeLogCount = changeLogCountMap.get(owner.id) ?? 0;
       const importInfo = importRowMap.get(owner.id) ?? null;
 

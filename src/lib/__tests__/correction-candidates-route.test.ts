@@ -39,6 +39,12 @@ vi.mock("@/lib/api-helpers", () => {
     getUserPermissions: vi.fn().mockResolvedValue([
       { resource: "user_management", action: "read", granted: true },
       { resource: "owner", action: "read", granted: true },
+      // Codex P1 (#139 finding): singlePropertyId は property:read 必須。
+      // デフォルト fixture は「property:read を持つ admin」を表す既存の
+      // singlePropertyId テスト群(take:2 end-to-end)の前提を保つため付与する。
+      // property:read を**持たない**セッションのテストは個別に
+      // mockResolvedValueOnce でこのエントリを外した権限配列に差し替える。
+      { resource: "property", action: "read", granted: true },
       { resource: "owner_name", action: "full", granted: true },
       { resource: "owner_address", action: "full", granted: true },
       { resource: "owner_zip", action: "full", granted: true },
@@ -2102,5 +2108,152 @@ describe("GET correction-candidates: singlePropertyId (propertyOwners take:2 fix
         propertyOwnerIds: ["id-a"],
       }),
     ).toThrow(/propertyOwnerCount=0 only allows 0/);
+  });
+});
+
+// ── Codex P1 (#139 finding): singlePropertyId の権限ゲート + 可視範囲スコープ ──
+//
+// 修正前は user_management:read + owner:read だけで singlePropertyId(物件UUID)が
+// 返っていた。property:read を持たないセッションにも物件の存在と1件確定である
+// ことが漏れ、field_staff が担当外の物件IDを受け取ることもあった。
+//   1. property:read が無ければ singlePropertyId=null(他のフィールドは不変・
+//      endpoint は 403 にしない)
+//   2. property:read があれば従来通り id が返る(over-block していないことの確認)
+//   3. field_staff セッションでは propertyOwners の nested selection に
+//      propertyVisibilityScopeWhere と同じ where が付く(実際に prisma へ渡った
+//      引数を検証する — スコープが落ちたら fail する)
+//   4. field_staff 以外(admin 等)はスコープが付かない(既存挙動維持)
+describe("GET correction-candidates: Codex P1 (#139 finding) singlePropertyId 権限ゲート/可視範囲スコープ", () => {
+  const OWNER_ID = "11111111-1111-4111-8111-111111111111";
+
+  it("property:read が無いセッションは singlePropertyId=null(1件確定でも)・他フィールドは不変・403にはしない", async () => {
+    const { getUserPermissions } = await import("@/lib/api-helpers");
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      // property:read を含めない
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+    ]);
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "一件太郎",
+        propertyOwnerCount: 1,
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    // endpoint 自体は 403 にしない(画面は動き続ける)。
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    const c = json.candidates[0];
+    expect(c.singlePropertyId).toBeNull();
+    // singlePropertyId 以外は不変(propertyOwnerCount は _count 由来で
+    // スコープ対象外・変更しない契約)。
+    expect(c.propertyOwnerCount).toBe(1);
+    expect(c.id).toBe(OWNER_ID);
+  });
+
+  it("property:read があるセッションは従来通り singlePropertyId に物件IDが返る(over-block防止)", async () => {
+    // デフォルト mock 権限は property:read を含む(admin 相当)。
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "一件太郎",
+        propertyOwnerCount: 1,
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].singlePropertyId).toBe(`${OWNER_ID}-property-1`);
+  });
+
+  it("field_staff セッションでは propertyOwners の nested selection に可視範囲スコープ(where)が付く", async () => {
+    const { getApiSession, getUserPermissions } = await import(
+      "@/lib/api-helpers"
+    );
+    const FIELD_STAFF_ID = "field-staff-99999999-9999-4999-8999-999999999999";
+    vi.mocked(getApiSession).mockResolvedValueOnce({
+      id: FIELD_STAFF_ID,
+      email: "field@test.com",
+      name: "現地スタッフ",
+      role: "field_staff",
+    });
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+    ]);
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "一件太郎",
+        propertyOwnerCount: 1,
+      }),
+    ]);
+
+    await GET(makeRequest("all"));
+
+    expect(pm.owner.findMany).toHaveBeenCalledTimes(1);
+    const callArgs = pm.owner.findMany.mock.calls[0][0] as {
+      select: {
+        propertyOwners: {
+          select: { propertyId: true };
+          take: number;
+          where?: {
+            property: {
+              OR: Array<{ createdBy: string } | { assignedTo: string }>;
+            };
+          };
+        };
+      };
+    };
+    // property list/detail API と同一の propertyVisibilityScopeWhere が
+    // nested selection の where としてそのまま prisma に渡っていること。
+    expect(callArgs.select.propertyOwners.where).toEqual({
+      property: {
+        OR: [
+          { createdBy: FIELD_STAFF_ID },
+          { assignedTo: FIELD_STAFF_ID },
+        ],
+      },
+    });
+  });
+
+  it("field_staff 以外(admin等)のセッションでは propertyOwners の nested selection にスコープが付かない(既存挙動維持)", async () => {
+    // デフォルト mock は role: "admin"。propertyVisibilityScopeWhere は
+    // field_staff 以外に null を返すため、where は付与されない。
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "一件太郎",
+        propertyOwnerCount: 1,
+      }),
+    ]);
+
+    await GET(makeRequest("all"));
+
+    expect(pm.owner.findMany).toHaveBeenCalledTimes(1);
+    const callArgs = pm.owner.findMany.mock.calls[0][0] as {
+      select: { propertyOwners: { where?: unknown } };
+    };
+    expect(callArgs.select.propertyOwners.where).toBeUndefined();
   });
 });
