@@ -3351,6 +3351,7 @@ export interface OwnerCorrectionCandidate {
   hasExternalLinkKey: boolean;
   version: number;
   propertyOwnerCount: number;
+  singlePropertyId: string | null;
   changeLogCount: number;
   importFileName: string | null;
   importRowNumber: number | null;
