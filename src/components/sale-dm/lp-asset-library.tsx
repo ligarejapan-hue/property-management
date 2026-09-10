@@ -19,6 +19,7 @@ export default function LpAssetLibrary({ open, onClose, onPick, assets, onAssets
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [label, setLabel] = useState("");
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const addFiles = async (files: File[]) => {
@@ -27,13 +28,15 @@ export default function LpAssetLibrary({ open, onClose, onPick, assets, onAssets
     if (images.length === 0) { setError("画像ファイルを選んでください"); return; }
     setBusy(true);
     setError(null);
+    setProgress({ done: 0, total: images.length });
     let uploaded = 0;
     try {
-      for (const f of images.slice(0, 5)) {
+      for (const f of images) {
         const prepared = await prepareLpAssetForUpload(f);
         if (!prepared.ok) { setError(prepared.message); continue; }
         await uploadSaleDmLpAsset(prepared.blob, prepared.fileName, label.trim() || undefined);
         uploaded += 1;
+        setProgress({ done: uploaded, total: images.length });
       }
       setLabel("");
     } catch (e) {
@@ -41,6 +44,7 @@ export default function LpAssetLibrary({ open, onClose, onPick, assets, onAssets
       setError(uploaded > 0 ? `${uploaded}枚は登録できました。残りの追加に失敗しました: ${message}` : message);
     } finally {
       setBusy(false);
+      setProgress(null);
       if (uploaded > 0) onAssetsChanged();
     }
   };
@@ -73,6 +77,7 @@ export default function LpAssetLibrary({ open, onClose, onPick, assets, onAssets
             </Button>
             <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { void addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
           </div>
+          {progress && <p className="mt-2 text-gray-500">{progress.done}/{progress.total} 枚を登録中…</p>}
           {error && <p className="mt-2 text-red-600">{error}</p>}
         </div>
         {assets.length === 0 ? (
