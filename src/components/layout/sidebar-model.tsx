@@ -23,6 +23,7 @@ import {
   Newspaper,
   Mail,
   MailX,
+  Image as ImageIcon,
 } from "lucide-react";
 import { canSee, type AppRole } from "@/lib/nav/roles";
 
@@ -108,6 +109,7 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       // ここはそこへの分かりやすい入口を足すもの。
       { label: "DMメニュー", href: "/dm", icon: ic(Mail), minRole: "office_staff" },
       { label: "売却DM設定", href: "/admin/sale-dm-settings", icon: ic(Mail), minRole: "admin" },
+      { label: "LPの写真", href: "/admin/lp-assets", icon: ic(ImageIcon), minRole: "admin" },
       // ⚠「データ品質」から移動(DM の道具がそこに紛れていた)。
       { label: "送付記録の訂正", href: "/admin/orphan-dm-logs", icon: ic(MailX), minRole: "admin" },
     ],

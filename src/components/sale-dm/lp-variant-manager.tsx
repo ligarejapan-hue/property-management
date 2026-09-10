@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Plus, Trash2, Pencil, FileText, Copy } from "lucide-react";
+import { Loader2, Plus, Trash2, Pencil, FileText, Copy, Image as ImageIcon } from "lucide-react";
 import type { SaleDmCampaign, SaleDmLpVariant, SaleDmLpVariantOptions } from "@/lib/api-client";
 import {
   createSaleDmLpVariant,
@@ -11,6 +11,7 @@ import {
   saveSaleDmLpVariantTemplate,
 } from "@/lib/api-client";
 import { TONE_OPTIONS, LENGTH_OPTIONS, APPEAL_OPTIONS, STRENGTH_OPTIONS } from "@/lib/sale-dm-letter/adjust-model";
+import LpMediaPanel from "./lp-media-panel";
 
 const DEFAULT_OPTIONS: SaleDmLpVariantOptions = { tone: "formal", length: "medium", appeal: "price", strength: "low" };
 type FormState = { label: string; options: SaleDmLpVariantOptions };
@@ -27,6 +28,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
   const [letter, setLetter] = useState<{ prompt: string; digest: string; frozen: boolean; rawTemplate: string | null; bodyDigest: string } | null>(null);
   const [pasteBody, setPasteBody] = useState("");
   const [letterNotice, setLetterNotice] = useState<string | null>(null);
+  const [mediaFor, setMediaFor] = useState<SaleDmLpVariant | null>(null);
 
   const run = async (fn: () => Promise<unknown>, keepPanel = false) => {
     if (busy) return;
@@ -70,6 +72,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
 
   const openLetter = (v: SaleDmLpVariant) =>
     run(async () => {
+      setMediaFor(null);
       const res = await fetchSaleDmLpVariantPrompt(campaign.id, v.id);
       setLetterFor(v);
       setLetter(res);
@@ -88,9 +91,10 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
       const r = await saveSaleDmLpVariantTemplate(campaign.id, letterFor.id, { body: pasteBody, promptDigest: letter.digest, baseBodyDigest: letter.bodyDigest });
       // 保存の応答が返した指紋へ更新する(取り直さない。DM型と同じ理由)。
       setLetter({ ...letter, rawTemplate: pasteBody, bodyDigest: r.bodyDigest });
+      const mediaDropped = r.parts?.mediaDropped ?? 0;
       setLetterNotice(
         r.changed && r.parts
-          ? `保存しました。見出し「${r.parts.headline}」・本文 ${r.parts.bodyLength} 字・よくある質問 ${r.parts.faqCount} 組${r.parts.lead ? "・リード文あり" : "・リード文なし"}`
+          ? `保存しました。見出し「${r.parts.headline}」・本文 ${r.parts.bodyLength} 字・よくある質問 ${r.parts.faqCount} 組${r.parts.lead ? "・リード文あり" : "・リード文なし"}${mediaDropped > 0 ? `・小見出しが変わったため写真や図を外した節 ${mediaDropped}` : ""}`
           : "同じ文章が保存済みです(変更はありません)",
       );
     }, true);
@@ -118,6 +122,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
             </div>
             <div className="flex gap-1">
               <button type="button" onClick={() => openLetter(v)} disabled={busy} aria-label={`LP型「${v.label}」の文章`} title="プロンプトを表示して、手元のAIで作った文章を貼り付けます" className="rounded p-1 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"><FileText className="h-3.5 w-3.5" /></button>
+              <button type="button" onClick={() => { setLetterFor(null); setLetter(null); setMediaFor(v); }} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」の写真と図`} title={v.headline ? "写真と図" : "先に文章を保存してください"} className="inline-flex items-center gap-1 rounded border border-gray-300 bg-white px-2 py-0.5 text-gray-700 hover:bg-gray-50 disabled:opacity-50"><ImageIcon className="h-3.5 w-3.5" />写真と図</button>
               <button type="button" onClick={() => startEdit(v)} disabled={busy} aria-label={`LP型「${v.label}」を編集`} className="rounded p-1 text-gray-600 hover:bg-gray-100 disabled:opacity-50"><Pencil className="h-3.5 w-3.5" /></button>
               <button type="button" onClick={() => remove(v)} disabled={busy} aria-label={`LP型「${v.label}」を削除`} className="rounded p-1 text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>
             </div>
@@ -182,6 +187,8 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
           {letterNotice && <p className="mt-2 rounded bg-white px-2 py-1.5 text-gray-700">{letterNotice}</p>}
         </div>
       )}
+
+      {mediaFor && <LpMediaPanel campaignId={campaign.id} lpId={mediaFor.id} label={mediaFor.label} onClose={() => setMediaFor(null)} />}
     </div>
   );
 }
