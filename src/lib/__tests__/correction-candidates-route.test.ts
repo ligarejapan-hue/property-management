@@ -126,26 +126,57 @@ function makeOwner(overrides: {
    * 時点で例外にする(黙って切り詰めない)。
    */
   propertyOwnerIds?: string[];
+  /**
+   * Codex P1 (#139 finding round 3): `propertyOwners` の nested selection に
+   * propertyVisibilityScopeWhere が where として掛かるようになった後は、
+   * 「_count(スコープなし件数)は1件だが、スコープ済みの propertyOwners 配列は
+   * 0件」という組み合わせが**実際に起こり得る**(field_staff が自分の
+   * 担当外の物件しか持たない owner を見たとき)。これは下の
+   * propertyOwnerIds ガードが「実クエリでは起こり得ない」と主張していた
+   * 前提を崩した——ガードを緩めず、この1パターンだけ明示的な opt-in で
+   * 作れるようにする。true にすると propertyOwnerCount の値に関わらず
+   * propertyOwners は必ず空配列になる(=スコープで除外された状態)。
+   * propertyOwnerIds との同時指定は禁止(「見えないのに id を渡す」は矛盾)。
+   */
+  scopedOut?: boolean;
   version?: number;
   note?: string | null;
   externalLinkKey?: string | null;
   corporateNumber?: string | null;
 }) {
   const propertyOwnerCount = overrides.propertyOwnerCount ?? 0;
+  const scopedOut = overrides.scopedOut ?? false;
+  const overrideIds = overrides.propertyOwnerIds;
+
+  if (scopedOut && overrideIds !== undefined) {
+    throw new Error(
+      `makeOwner(${overrides.id}): scopedOut と propertyOwnerIds は同時に指定できない ` +
+        `(scopedOut は「可視範囲スコープで除外されて0件」を表すため、id を渡すのは矛盾する)。`,
+    );
+  }
+
   // 実クエリが `take: 2` で読むのと同じく、propertyOwnerCount が3以上でも
   // fixture が返す propertyOwners 行は最大2件。3件以上あるとして _count だけ
-  // 3にして propertyOwners を3件返す、というような「実クエリでは起こり得ない
-  // 組み合わせ」を fixture が作れてしまうと、`pickSinglePropertyId` が
-  // undefined を読む今回のような regression を再び見逃す。
-  const derivedLength = Math.min(propertyOwnerCount, 2);
-  const overrideIds = overrides.propertyOwnerIds;
-  if (overrideIds !== undefined && overrideIds.length > derivedLength) {
+  // 3にして propertyOwners を3件返す、というような「スコープなしのクエリでは
+  // 起こり得ない組み合わせ」を fixture が作れてしまうと、`pickSinglePropertyId`
+  // が undefined を読む regression を再び見逃す。
+  // ⚠ scopedOut:true のときはこの上限計算を無視して常に0件にする
+  // (上記の通り、スコープ適用後はこれが正しい実クエリの結果)。
+  const derivedLength = scopedOut ? 0 : Math.min(propertyOwnerCount, 2);
+  if (
+    !scopedOut &&
+    overrideIds !== undefined &&
+    overrideIds.length > derivedLength
+  ) {
     throw new Error(
       `makeOwner(${overrides.id}): propertyOwnerIds has ${overrideIds.length} id(s) ` +
         `but propertyOwnerCount=${propertyOwnerCount} only allows ${derivedLength} ` +
-        `propertyOwners row(s) (the real query caps at take: 2). This fixture ` +
-        `describes a shape the real query can never return — reduce propertyOwnerIds ` +
-        `or raise propertyOwnerCount.`,
+        `propertyOwners row(s) for an UNSCOPED query (take: 2 caps it). This mismatch ` +
+        `is impossible for an unscoped query — reduce propertyOwnerIds, raise ` +
+        `propertyOwnerCount, or (if you're modelling a field_staff session whose ` +
+        `visibility scope excludes this owner's linked properties) pass scopedOut: true ` +
+        `instead — that is the one case where _count > 0 with an empty propertyOwners ` +
+        `array is exactly what the real scoped query returns.`,
     );
   }
   const propertyOwnerIds: string[] = [];
@@ -2235,6 +2266,56 @@ describe("GET correction-candidates: Codex P1 (#139 finding) singlePropertyId �
         ],
       },
     });
+  });
+
+  it("field_staff が担当外の物件しか持たない owner を見ると、_count=1のままでも singlePropertyId=null(スコープで除外された0件が正)", async () => {
+    // Codex P1 (#139 finding round 3): この P1 が本来問題にしていた形そのもの。
+    // _count(スコープなし件数)は1件のまま(propertyOwnerCount は既存挙動により
+    // 不変・別スクリーンの孤児/重複判定が依存するので変えない契約)だが、
+    // propertyVisibilityScopeWhere を通した propertyOwners 配列は0件で返る
+    // (=担当外の物件だけを持つ owner)。ここで実装が singlePropertyId を
+    // (誤って)_count から再導出していたら 1件確定として id を返してしまう
+    // regression になるが、この route は配列(pickSinglePropertyId)からしか
+    // 導出しないため null になる。
+    const { getApiSession, getUserPermissions } = await import(
+      "@/lib/api-helpers"
+    );
+    const FIELD_STAFF_ID = "field-staff-88888888-8888-4888-8888-888888888888";
+    vi.mocked(getApiSession).mockResolvedValueOnce({
+      id: FIELD_STAFF_ID,
+      email: "field2@test.com",
+      name: "現地スタッフ2",
+      role: "field_staff",
+    });
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+    ]);
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "担当外一件太郎",
+        propertyOwnerCount: 1,
+        scopedOut: true,
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    const c = json.candidates[0];
+    expect(c.singlePropertyId).toBeNull();
+    // _count 由来の propertyOwnerCount はスコープ対象外・不変の契約通り 1 のまま。
+    expect(c.propertyOwnerCount).toBe(1);
   });
 
   it("field_staff 以外(admin等)のセッションでは propertyOwners の nested selection にスコープが付かない(既存挙動維持)", async () => {
