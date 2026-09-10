@@ -80,6 +80,7 @@ export async function buildPropertyListWhere(
     caseStatus,
     introductionRoute,
     assignedTo,
+    ownerId,
     updatedFrom,
     updatedTo,
     includeArchived,
@@ -195,6 +196,17 @@ export async function buildPropertyListWhere(
     where.AND = [
       ...(where.AND ?? []),
       ...buildResendCandidateWhere(new Date(), getResendCooldownDays()),
+    ];
+  }
+
+  // 所有者で絞り込む(所有者詳細・所有者補正候補からのリンク)。
+  // ⚠where.OR(keyword 条件)と混ぜず AND に足す。OR に入れると
+  //   「keyword に一致すれば別の所有者の物件まで返る」穴になる
+  //   (field_staff スコープを AND にしているのと同じ理由)。
+  if (ownerId) {
+    where.AND = [
+      ...(where.AND ?? []),
+      { propertyOwners: { some: { ownerId } } },
     ];
   }
 
