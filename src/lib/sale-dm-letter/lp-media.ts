@@ -2,11 +2,11 @@
  * LP型の「写真と図」の枠(設計 2026-09-08 §2.3)。DB を触らない純関数のみ。
  *  - validateMediaPlan: 枠の整合(本文に無い小見出し・重複・写真10枚・未知の図)
  *  - reconcileSectionMedia: 貼り直しで小見出しが変わったとき、同じ見出しの行だけ引き継ぐ
- *  - buildImagePrompt: 生成AI向けの画像プロンプト(所有者・物件の事実は引数に無い)
+ *  - buildImagePrompt: 生成AI向けの画像プロンプト(所有者・物件の事実も自由文も引数に無い)
  */
 import { FIGURE_KINDS, type FigureKind } from "./lp-figures";
 import { APPEAL_JA } from "./prompt";
-import { LETTER_TAGS, propertyTypeLabel } from "./tags";
+import { propertyTypeLabel } from "./tags";
 
 export const LP_MEDIA_MAX_ASSETS = 10;
 
@@ -63,11 +63,15 @@ export function reconcileSectionMedia(
   return newHeadings.map((heading) => ({ heading, media: byHeading.get(heading) ?? null }));
 }
 
-export type ImageSlot = { kind: "hero" } | { kind: "section"; heading: string };
+/**
+ * 画像を置く枠。節は**位置(何番目の節か)だけ**で表す。
+ * 見出しの文字そのものは渡さない(@codex R1 P1・ruling R8(b))。見出しもリード文も
+ * 貼り付けられた自由文で氏名・住所が紛れ得るため、**プロンプトに入る口を構造として持たない**。
+ */
+export type ImageSlot = { kind: "hero" } | { kind: "section"; index: number; total: number };
 export type ImageStyle = "photo" | "illustration" | "flat";
 export interface ImagePromptInput {
   slot: ImageSlot;
-  leadSummary: string | null;
   appeal: string;
   propertyKind: string | null;
   style: ImageStyle;
@@ -76,23 +80,23 @@ export interface ImagePromptInput {
 const STYLE_JA: Record<ImageStyle, string> = { photo: "写真風", illustration: "イラスト風", flat: "フラットな図解" };
 const STYLE_EN: Record<ImageStyle, string> = { photo: "photorealistic photograph", illustration: "soft illustration", flat: "flat vector illustration" };
 
-function stripTags(s: string): string {
-  return LETTER_TAGS.reduce((acc, tag) => acc.split(`{{${tag}}}`).join(""), s).replace(/\s{2,}/g, " ").trim();
-}
-
-/** 生成AI(画像)へ貼るプロンプト。引数は LP型の設定値と文章の要旨だけ(所有者・物件の事実は渡せない)。 */
+/**
+ * 生成AI(画像)へ貼るプロンプト。材料は LP型の設定値(訴求の軸・画風)と物件種別、枠の位置だけ。
+ * **自由文(リード文・小見出し・本文)は一切入らない** = 所有者や物件を特定する文字が
+ * 構造上プロンプトに載らない。
+ */
 export function buildImagePrompt(input: ImagePromptInput): string {
   const aspect = input.slot.kind === "hero" ? "16:9(横長)" : "4:3";
   const aspectEn = input.slot.kind === "hero" ? "16:9" : "4:3";
   const kind = input.propertyKind ? propertyTypeLabel(input.propertyKind) : null;
-  const scene = input.slot.kind === "hero" ? "ページの一番上に出る、印象を決める1枚" : `「${stripTags(input.slot.heading)}」の節の下に置く1枚`;
-  const summary = input.leadSummary ? stripTags(input.leadSummary) : "";
+  const scene = input.slot.kind === "hero"
+    ? "ページの一番上に出る、印象を決める1枚"
+    : `本文の ${input.slot.index} 番目(全 ${input.slot.total} 節)の節の下に置く1枚`;
   return [
     `不動産の売却をご案内するページに載せる画像を作ってください。用途: ${scene}。`,
     `画風: ${STYLE_JA[input.style]}。縦横比: ${aspect}。`,
     `雰囲気: 日本の住宅街。${kind ? `${kind}をお持ちの方が` : "所有者の方が"}安心して相談できる、明るく落ち着いた印象。`,
     `訴求の軸: ${APPEAL_JA[input.appeal] ?? input.appeal}。`,
-    summary ? `ページの要旨: ${summary}` : "",
     "",
     "【必ず守ること】",
     "- 画像の中に文字を入れない(看板・標識・書類の文字も読めない程度に)。",

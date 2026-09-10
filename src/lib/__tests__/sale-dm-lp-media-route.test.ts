@@ -164,18 +164,31 @@ describe("PUT media", () => {
 
 describe("GET image-prompt", () => {
   const q = (qs: string) => PROMPT(new Request(`http://x/?${qs}`) as never, ctx);
-  it("ヒーロー用: 訴求と要旨から組み立て、監査に slot だけ残す。所有者情報は出ない", async () => {
+  it("ヒーロー用: 訴求から組み立て、監査に slot だけ残す。リード文も所有者情報も出ない", async () => {
     const j = await (await q("slot=hero&style=photo")).json();
     expect(j.prompt).toContain("16:9");
     expect(j.prompt).toContain("相続");
     expect(j.prompt).not.toContain("{{");
+    // 貼り付けられた自由文(リード文)はプロンプトに載せない(@codex R1 P1)
+    expect(j.prompt).not.toContain("ご所有の");
     expect(writeAuditLog.mock.calls[0][0]).toMatchObject({ action: "sale_dm_lp_image_prompt_view", detail: { campaignId: "c1", slot: "hero" } });
     expect(JSON.stringify(writeAuditLog.mock.calls[0][0].detail)).not.toContain("prompt");
   });
+  it("節用: 見出しは受け取るが、プロンプトには『何番目の節か』だけを載せる", async () => {
+    const r = await q("slot=section&heading=" + encodeURIComponent("費用について"));
+    expect(r.status).toBe(200);
+    const j = await r.json();
+    expect(j.prompt).toContain("4:3");
+    expect(j.prompt).toContain("2 番目"); // 本文の見出しは [売却の進め方, 費用について]
+    expect(j.prompt).toContain("全 2 節");
+    expect(j.prompt).not.toContain("費用について");
+    expect(j.prompt).not.toContain("売却の進め方");
+    expect(j.prompt).not.toContain("ご所有の");
+  });
   it("節用: 本文に無い小見出しは 400 HEADING_NOT_FOUND", async () => {
-    expect((await q("slot=section&heading=" + encodeURIComponent("費用について"))).status).toBe(200);
     const r = await q("slot=section&heading=" + encodeURIComponent("無い"));
     expect(r.status).toBe(400);
     expect((await r.json()).error.code).toBe("HEADING_NOT_FOUND");
+    expect((await q("slot=section")).status).toBe(400);
   });
 });

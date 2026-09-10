@@ -54,7 +54,7 @@ describe("referencedAssetIds", () => {
 });
 
 describe("buildImagePrompt", () => {
-  const base = { leadSummary: "ご所有の{{物件種別}}の相場と進め方", appeal: "inheritance", propertyKind: "house", style: "photo" as const };
+  const base = { appeal: "inheritance", propertyKind: "house", style: "photo" as const };
   it("枠に合った縦横比と画風・決まり文句・英語の定型行を含む", () => {
     const hero = buildImagePrompt({ ...base, slot: { kind: "hero" } });
     expect(hero).toContain("16:9");
@@ -62,12 +62,27 @@ describe("buildImagePrompt", () => {
     expect(hero).toContain("ロゴ");
     expect(hero).toContain("no text");
     expect(hero).toContain("photo");
-    const sec = buildImagePrompt({ ...base, slot: { kind: "section", heading: "費用について" }, style: "flat" });
+    const sec = buildImagePrompt({ ...base, slot: { kind: "section", index: 2, total: 3 }, style: "flat" });
     expect(sec).toContain("4:3");
-    expect(sec).toContain("費用について");
+    expect(sec).toContain("2 番目");
+    expect(sec).toContain("全 3 節");
     expect(sec).toContain("flat");
   });
-  it("差し込み記号は要旨から取り除く・所有者情報を渡す口が無い", () => {
+  it("節を選んでも本文の文字は入らない=見出しもリード文も渡す口が無い(@codex R1 P1)", () => {
+    const sec = buildImagePrompt({ ...base, slot: { kind: "section", index: 1, total: 2 } });
+    expect(sec).not.toContain("費用について");
+    expect(sec).not.toContain("ご所有の");
+    // 型を無視して自由文を押し込んでも出力には現れない(構造としてPIIが載らない)
+    const forced = buildImagePrompt({
+      ...base,
+      slot: { kind: "section", index: 1, total: 2, heading: "東京都千代田区1-1-1 山田太郎様の件" },
+      leadSummary: "ご所有の港区の土地について",
+    } as never);
+    expect(forced).not.toContain("山田太郎");
+    expect(forced).not.toContain("千代田区");
+    expect(forced).not.toContain("港区");
+  });
+  it("差し込み記号は出ない・所有者情報を渡す口が無い", () => {
     const p = buildImagePrompt({ ...base, slot: { kind: "hero" } });
     expect(p).not.toContain("{{");
     expect(buildImagePrompt.length).toBe(1);
