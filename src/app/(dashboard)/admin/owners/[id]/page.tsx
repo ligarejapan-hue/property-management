@@ -205,11 +205,20 @@ export default function AdminOwnerDetailPage() {
 
   // 紐づく物件。専用APIは作らず物件一覧APIを所有者で絞って呼ぶ＝
   // 担当者スコープと権限をそのまま継承する(見えない物件がここだけ見える、を防ぐ)。
-  const [linkedProperties, setLinkedProperties] = useState<
-    Array<{ id: string; address: string; lotNumber: string | null }>
-  >([]);
-  const [linkedTotal, setLinkedTotal] = useState(0);
-  const [linkedLoaded, setLinkedLoaded] = useState(false);
+  //
+  // ⚠取得結果は「どの ownerId に対する結果か」を一緒に保持する(loadedForOwnerId)。
+  // App Router は動的セグメントが変わるだけではこのコンポーネントを再マウントしない
+  // ので、owner→owner の client 遷移では旧 ownerId の結果が state に残ったまま
+  // 次の owner の画面に見えてしまう(stale)。effect の先頭で同期的に state を
+  // クリアする直し方は react-hooks/set-state-in-effect に触れるため使わない。
+  // 代わりに「今の ownerId と結果の loadedForOwnerId が一致するときだけ結果とみなす」
+  // 形にし、setState は非同期コールバック内で1回だけ行う。
+  const [linkedResult, setLinkedResult] = useState<{
+    loadedForOwnerId: string;
+    properties: Array<{ id: string; address: string; lotNumber: string | null }>;
+    total: number;
+    failed: boolean;
+  } | null>(null);
 
   useEffect(() => {
     if (!ownerId) return;
@@ -218,26 +227,38 @@ export default function AdminOwnerDetailPage() {
       try {
         const res = await fetchProperties({ ownerId, limit: "20" });
         if (cancelled) return;
-        setLinkedProperties(
-          (res.data as Array<{ id: string; address: string; lotNumber: string | null }>) ?? [],
-        );
-        setLinkedTotal(
-          (res.pagination as { total?: number } | undefined)?.total ?? 0,
-        );
+        setLinkedResult({
+          loadedForOwnerId: ownerId,
+          properties:
+            (res.data as Array<{ id: string; address: string; lotNumber: string | null }>) ??
+            [],
+          total: (res.pagination as { total?: number } | undefined)?.total ?? 0,
+          failed: false,
+        });
       } catch {
         // 一覧が出ないだけで所有者詳細そのものは使える(best-effort)。
+        // ただし「0件です」と偽らないよう failed を別途持つ(Finding 3)。
         if (!cancelled) {
-          setLinkedProperties([]);
-          setLinkedTotal(0);
+          setLinkedResult({
+            loadedForOwnerId: ownerId,
+            properties: [],
+            total: 0,
+            failed: true,
+          });
         }
-      } finally {
-        if (!cancelled) setLinkedLoaded(true);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [ownerId]);
+
+  // 今の ownerId 宛ての結果でなければ「未取得(読み込み中)」として扱う。
+  // これにより owner 切り替え直後は前 owner の一覧が一瞬たりとも見えない。
+  const linkedLoaded = linkedResult?.loadedForOwnerId === ownerId;
+  const linkedProperties = linkedLoaded ? linkedResult!.properties : [];
+  const linkedTotal = linkedLoaded ? linkedResult!.total : 0;
+  const linkedFailed = linkedLoaded ? linkedResult!.failed : false;
 
   const owner = data?.owner;
   const candidate = data?.candidate;
@@ -320,6 +341,12 @@ export default function AdminOwnerDetailPage() {
                 <p className="text-xs text-gray-400 dark:text-gray-500">
                   読み込んでいます…
                 </p>
+              ) : linkedFailed ? (
+                // Finding 3: 取得失敗を「0件です」と偽らない。物件が無い所有者と
+                // 一覧が読めなかった所有者は、統合判断の材料として意味が違う。
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  物件一覧を読み込めませんでした
+                </p>
               ) : linkedProperties.length === 0 ? (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   紐づく物件はありません
@@ -339,7 +366,7 @@ export default function AdminOwnerDetailPage() {
                   ))}
                 </ul>
               )}
-              {linkedTotal > linkedProperties.length && (
+              {linkedLoaded && !linkedFailed && linkedTotal > linkedProperties.length && (
                 <Link
                   href={`/properties?ownerId=${encodeURIComponent(ownerId)}`}
                   className="mt-2 inline-block text-xs text-blue-700 underline underline-offset-2 dark:text-blue-300"
