@@ -137,6 +137,7 @@ export interface ParsedOwnerRow {
 
 export interface PropertyCandidate {
   id: string;
+  /** 物件住所。受付帳の住所キー(H+I+J+K)と正規化一致させる突合条件の一部(地番だけでは一致させない) */
   address: string;
   lotNumber: string | null;
   buildingNumber: string | null;
@@ -420,8 +421,16 @@ export function matchReceptionToOwners(
 }
 
 /**
- * 受付帳1行に対して、lotNumber/buildingNumber ベースで物件候補を探す。
- * 比較は normalizeReceptionKeyPart による正規化一致。
+ * 受付帳1行に対して物件候補を探す。
+ *
+ * 一致条件は **住所キー(H+I+J+K)と 地番/家屋番号の両方** が正規化一致すること。
+ * 比較は normalizeReceptionKeyPart による正規化一致(住所側は末尾「外N」も除去)。
+ *
+ * ⚠2026-09-10 本番事故の再発防止: 以前は地番/家屋番号だけで照合していたため、
+ * 物件が12万件(1都3県)に増えた時点で別区の同地番物件へ誤って紐付いた
+ * (例: 目黒区柿の木坂2丁目289-7 の所有者が 狛江市駒井町2丁目289-7 に付いた)。
+ * 地番だけの一致は「候補」にも入れない(→ not_found = 要レビュー)。
+ * 住所キーが空の行は地番があっても照合できないので no_key。
  */
 export function matchPropertyByReception(
   reception: ParsedReceptionRow,
@@ -433,8 +442,9 @@ export function matchPropertyByReception(
     : reception.buildingNumber
       ? { field: "buildingNumber" as const, value: normalizeReceptionKeyPart(reception.buildingNumber) }
       : null;
+  const addressKey = buildOwnerMatchKey(reception.matchKey);
 
-  if (!target || !target.value) {
+  if (!target || !target.value || !addressKey) {
     return { status: "no_key" };
   }
 
@@ -442,7 +452,10 @@ export function matchPropertyByReception(
     const v = normalizeReceptionKeyPart(
       target.field === "lotNumber" ? p.lotNumber : p.buildingNumber,
     );
-    if (v && v === target.value) hits.push(p);
+    if (!v || v !== target.value) continue;
+    // 物件側の住所も受付帳と同じ規則で正規化(全角/半角・空白・外N を吸収)
+    if (buildOwnerMatchKey(p.address) !== addressKey) continue;
+    hits.push(p);
   }
   if (hits.length === 0) return { status: "not_found" };
   if (hits.length === 1) return { status: "matched", property: hits[0] };
