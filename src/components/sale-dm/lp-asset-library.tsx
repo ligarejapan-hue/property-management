@@ -62,7 +62,7 @@ export default function LpAssetLibrary({ open, onClose, onPick, assets, onAssets
     >
       <div tabIndex={0} onPaste={onPaste} onDrop={onDrop} onDragOver={(e) => e.preventDefault()} className="space-y-3 outline-none">
         <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-3 text-xs text-gray-600">
-          <p>写真をここに<strong>貼り付け(Ctrl+V)</strong>するか、ドラッグして置くか、「ファイルを選ぶ」で追加します。JPEG / PNG / WebP / HEIC。大きい写真は自動で縮小されます(長辺1600px)。</p>
+          <p>写真をここに<strong>貼り付け(Ctrl+V)</strong>するか、ドラッグして置くか、「ファイルを選ぶ」で追加します。JPEG / PNG / WebP / HEIC。写真はどの形式でも端末側でJPEGに変換して登録します(長辺1600pxに縮小・透過は白・撮影情報は残しません)。</p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={80} placeholder="ラベル(任意・例: 会社の外観)" className="rounded border border-gray-300 px-2 py-1 text-xs" />
             <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={() => fileRef.current?.click()}>
