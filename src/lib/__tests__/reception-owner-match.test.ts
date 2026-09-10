@@ -313,7 +313,7 @@ describe("matchPropertyByReception", () => {
     const out = matchPropertyByReception(
       {
         rowNumber: 2,
-        matchKey: "K",
+        matchKey: "東京都港区赤坂1丁目100-1",
         fColumn: "土地",
         kColumn: "100-1",
         lotNumber: "100-1",
@@ -323,7 +323,10 @@ describe("matchPropertyByReception", () => {
         coOwnersNote: "",
         propertyAddress: null,
       },
-      [prop("p1", { lotNumber: "100-1" }), prop("p2", { lotNumber: "100-2" })],
+      [
+        prop("p1", { address: "東京都港区赤坂１丁目１００－１", lotNumber: "100-1" }),
+        prop("p2", { address: "東京都港区赤坂１丁目１００－２", lotNumber: "100-2" }),
+      ],
     );
     expect(out.status).toBe("matched");
     expect(out.property?.id).toBe("p1");
@@ -333,7 +336,7 @@ describe("matchPropertyByReception", () => {
     const out = matchPropertyByReception(
       {
         rowNumber: 2,
-        matchKey: "K",
+        matchKey: "東京都港区赤坂1丁目A-101",
         fColumn: "建物",
         kColumn: "Ａ－１０１",
         lotNumber: null,
@@ -343,7 +346,7 @@ describe("matchPropertyByReception", () => {
         coOwnersNote: "",
         propertyAddress: null,
       },
-      [prop("p1", { buildingNumber: "A-101" })],
+      [prop("p1", { address: "東京都港区赤坂１丁目Ａ－１０１", buildingNumber: "A-101" })],
     );
     expect(out.status).toBe("matched");
     expect(out.property?.id).toBe("p1");
@@ -353,7 +356,7 @@ describe("matchPropertyByReception", () => {
     const out = matchPropertyByReception(
       {
         rowNumber: 2,
-        matchKey: "K",
+        matchKey: "東京都港区赤坂1丁目100",
         fColumn: "土地",
         kColumn: "100",
         lotNumber: "100",
@@ -363,7 +366,10 @@ describe("matchPropertyByReception", () => {
         coOwnersNote: "",
         propertyAddress: null,
       },
-      [prop("p1", { lotNumber: "100" }), prop("p2", { lotNumber: "100" })],
+      [
+        prop("p1", { address: "東京都港区赤坂１丁目１００", lotNumber: "100" }),
+        prop("p2", { address: "東京都港区赤坂１丁目１００", lotNumber: "100" }),
+      ],
     );
     expect(out.status).toBe("multiple");
     expect(out.candidates?.map((c) => c.id)).toEqual(["p1", "p2"]);
@@ -373,7 +379,7 @@ describe("matchPropertyByReception", () => {
     const out = matchPropertyByReception(
       {
         rowNumber: 2,
-        matchKey: "K",
+        matchKey: "東京都港区赤坂1丁目999",
         fColumn: "土地",
         kColumn: "999",
         lotNumber: "999",
@@ -383,7 +389,7 @@ describe("matchPropertyByReception", () => {
         coOwnersNote: "",
         propertyAddress: null,
       },
-      [prop("p1", { lotNumber: "100" })],
+      [prop("p1", { address: "東京都港区赤坂１丁目１００", lotNumber: "100" })],
     );
     expect(out.status).toBe("not_found");
   });
@@ -392,7 +398,7 @@ describe("matchPropertyByReception", () => {
     const out = matchPropertyByReception(
       {
         rowNumber: 2,
-        matchKey: "K",
+        matchKey: "東京都港区赤坂1丁目100",
         fColumn: "未定",
         kColumn: "100",
         lotNumber: null,
@@ -402,9 +408,128 @@ describe("matchPropertyByReception", () => {
         coOwnersNote: "",
         propertyAddress: null,
       },
-      [prop("p1", { lotNumber: "100" })],
+      [prop("p1", { address: "東京都港区赤坂１丁目１００", lotNumber: "100" })],
     );
     expect(out.status).toBe("no_key");
+  });
+
+  // ---- 2026-09-10 本番事故の再発防止: 地番だけの一致では紐付けない ----
+  const row = (
+    overrides: Partial<ParsedReceptionRow> & { matchKey: string },
+  ): ParsedReceptionRow => ({
+    rowNumber: 2,
+    fColumn: "土地",
+    kColumn: "289-7",
+    lotNumber: "289-7",
+    buildingNumber: null,
+    dlMarked: false,
+    shinkiValue: "",
+    coOwnersNote: "",
+    propertyAddress: null,
+    ...overrides,
+  });
+
+  it("地番が同じでも住所が違う物件には一致しない → not_found（狛江/目黒 289-7 の実例）", () => {
+    const out = matchPropertyByReception(
+      row({ matchKey: "東京都目黒区柿の木坂2丁目289-7" }),
+      [prop("komae", { address: "東京都狛江市駒井町２丁目２８９－７", lotNumber: "２８９－７" })],
+    );
+    expect(out.status).toBe("not_found");
+    expect(out.property).toBeUndefined();
+  });
+
+  it("地番が同じ物件が複数あっても、住所が一致する1件だけを選ぶ → matched", () => {
+    const out = matchPropertyByReception(
+      row({ matchKey: "東京都目黒区柿の木坂2丁目289-7" }),
+      [
+        prop("komae", { address: "東京都狛江市駒井町２丁目２８９－７", lotNumber: "２８９－７" }),
+        prop("meguro", { address: "東京都目黒区柿の木坂２丁目２８９－７", lotNumber: "２８９－７" }),
+        prop("setagaya", { address: "東京都世田谷区上馬２丁目２８９－７", lotNumber: "２８９－７" }),
+      ],
+    );
+    expect(out.status).toBe("matched");
+    expect(out.property?.id).toBe("meguro");
+  });
+
+  it("住所の全角/半角・空白・外N の違いは吸収して一致する", () => {
+    const out = matchPropertyByReception(
+      row({ matchKey: "東京都目黒区柿の木坂2丁目289-7" }),
+      [prop("meguro", { address: "東京都 目黒区 柿の木坂２丁目 ２８９－７ 外１", lotNumber: "２８９－７" })],
+    );
+    expect(out.status).toBe("matched");
+    expect(out.property?.id).toBe("meguro");
+  });
+
+  it("家屋番号でも住所の一致を要求する", () => {
+    const out = matchPropertyByReception(
+      row({
+        matchKey: "東京都目黒区柿の木坂2丁目289-7-3",
+        fColumn: "建物",
+        kColumn: "289-7-3",
+        lotNumber: null,
+        buildingNumber: "289-7-3",
+      }),
+      [prop("komae", { address: "東京都狛江市駒井町２丁目２８９－７－３", buildingNumber: "２８９－７－３" })],
+    );
+    expect(out.status).toBe("not_found");
+  });
+
+  it("住所は同じだが地番が違う物件にも一致しない（住所だけでは決めない）", () => {
+    const out = matchPropertyByReception(
+      row({ matchKey: "東京都目黒区柿の木坂2丁目289-7" }),
+      [prop("x", { address: "東京都目黒区柿の木坂２丁目２８９－７", lotNumber: "289-8" })],
+    );
+    expect(out.status).toBe("not_found");
+  });
+
+  it("住所と地番が同じ物件が2件 → multiple（地番だけ同じ別区の物件は候補に入らない）", () => {
+    const out = matchPropertyByReception(
+      row({ matchKey: "東京都目黒区柿の木坂2丁目289-7" }),
+      [
+        prop("komae", { address: "東京都狛江市駒井町２丁目２８９－７", lotNumber: "２８９－７" }),
+        prop("m1", { address: "東京都目黒区柿の木坂２丁目２８９－７", lotNumber: "２８９－７" }),
+        prop("m2", { address: "東京都目黒区柿の木坂２丁目２８９－７", lotNumber: "２８９－７" }),
+      ],
+    );
+    expect(out.status).toBe("multiple");
+    expect(out.candidates?.map((c) => c.id)).toEqual(["m1", "m2"]);
+  });
+
+  it("住所キーが空なら地番があっても照合しない → no_key", () => {
+    const out = matchPropertyByReception(
+      row({ matchKey: "" }),
+      [prop("komae", { address: "東京都狛江市駒井町２丁目２８９－７", lotNumber: "２８９－７" })],
+    );
+    expect(out.status).toBe("no_key");
+  });
+
+  it("総当たり: matched が返るときは必ず住所キーと地番の両方が一致している", () => {
+    const addrs = ["東京都目黒区柿の木坂2丁目", "東京都狛江市駒井町2丁目", "東京都世田谷区上馬2丁目"];
+    const lots = ["289-7", "289-8"];
+    const properties: PropertyCandidate[] = [];
+    for (const a of addrs) {
+      for (const l of lots) {
+        properties.push(prop(`${a}/${l}`, { address: a + l, lotNumber: l }));
+      }
+    }
+    for (const a of addrs) {
+      for (const l of lots) {
+        const out = matchPropertyByReception(
+          row({ matchKey: a + l, kColumn: l, lotNumber: l }),
+          properties,
+        );
+        expect(out.status).toBe("matched");
+        expect(out.property?.id).toBe(`${a}/${l}`);
+      }
+    }
+    // 受付帳側の住所がどの物件にも無い → 地番が全物件と衝突していても not_found
+    for (const l of lots) {
+      const out = matchPropertyByReception(
+        row({ matchKey: "東京都新宿区北新宿3丁目" + l, kColumn: l, lotNumber: l }),
+        properties,
+      );
+      expect(out.status).toBe("not_found");
+    }
   });
 });
 
@@ -431,9 +556,9 @@ describe("buildCombinedMatches + summarizeMatches", () => {
       ],
     );
     const properties: PropertyCandidate[] = [
-      { id: "p1", address: "", lotNumber: "100", buildingNumber: null, buildingName: null, roomNo: null },
-      { id: "p2", address: "", lotNumber: "50", buildingNumber: null, buildingName: null, roomNo: null },
-      { id: "p3", address: "", lotNumber: "50", buildingNumber: null, buildingName: null, roomNo: null },
+      { id: "p1", address: "東京都港区1-2-3 100", lotNumber: "100", buildingNumber: null, buildingName: null, roomNo: null },
+      { id: "p2", address: "名古屋中区3 50", lotNumber: "50", buildingNumber: null, buildingName: null, roomNo: null },
+      { id: "p3", address: "名古屋中区3 50", lotNumber: "50", buildingNumber: null, buildingName: null, roomNo: null },
     ];
 
     const combined = buildCombinedMatches(reception, owners, properties);
