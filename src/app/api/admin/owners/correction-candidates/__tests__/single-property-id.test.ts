@@ -62,14 +62,26 @@ describe("補正候補APIの singlePropertyId", () => {
     expect(src).toContain("singlePropertyId,");
   });
 
-  it("物件の住所など物件の中身は読まない(IDだけ)", () => {
-    // Codex P1 (#139 finding): field_staff の可視範囲を絞るため
-    // `where: { property: propertyVisibilityScope } }` (createdBy/assignedTo
-    // のみの絞り込み)が入るのは正当。禁止したいのは「物件の中身を select する」
-    // こと(住所や `property: { select: {...} }` のようなネストした物件 select)。
-    const block = extractBraceBlock(src, "propertyOwners: {");
-    expect(block).not.toContain("address");
-    expect(block).not.toMatch(/property:\s*\{\s*select/);
+  it("物件の住所など物件の中身は読まない(IDだけ) — select は propertyId のみをallowlist)", () => {
+    // 禁止パターンを列挙する形(not.toContain("address") / not.toMatch(/property:\s*\{\s*select/))
+    // は、列挙し忘れた形で必ず抜ける(このリポジトリの durable ルール
+    // `redaction-allowlist-not-pattern`)。`property: true` は Prisma で
+    // 物件の全カラム(住所含む)を丸ごと返すが、"address" という文字列も
+    // "property: { select" という形も含まないため、旧アサーションは
+    // これを素通しする。
+    //
+    // ここでは逆に「許可されている形」だけを定義する: `propertyOwners.select`
+    // の中身は `propertyId: true` **だけ**でなければ fail にする。
+    // (`where: { property: propertyVisibilityScope } }` は select の外にある
+    // scope filter で、Codex P1 (#139 finding) の正当な修正なのでここでは触れない。)
+    const outer = extractBraceBlock(src, "propertyOwners: {");
+    const selectBlock = extractBraceBlock(outer, "select: {");
+    const inner = selectBlock.slice("select: {".length, -1);
+    const keys = inner
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    expect(keys).toEqual(["propertyId: true"]);
   });
 
   it("property:read が無いセッションには singlePropertyId を返さない(#139 finding)", () => {
