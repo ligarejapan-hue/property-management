@@ -1,11 +1,17 @@
 /**
  * LP用写真の端末側前処理(設計 2026-09-08 §2.3)。
  *  - サーバーは JPEG/PNG/WebP・8MB以下・長辺1600px以下だけ受ける(画像ライブラリを入れない方針)。
- *  - ここで長辺1600に縮小し JPEG(品質0.85)へ再エンコードする。HEIC もここで吸収する。
- *  - canvas 経由で EXIF は消える(サーバーの EXIF strip と二重防御)。
- *  - PNG/WebP は無変換(pass)にしない(PNG の iTXt/tEXt・WebP の XMP など、EXIF 以外の
- *    付随情報が残り得るため)。無変換で通すのは JPEG だけにし、PNG/WebP は毎回 JPEG へ
- *    再エンコードして落とす(画面経由の登録のみ。API を直接叩けば残る=docs/deploy.md 参照)。
+ *  - **例外なく全ての画像**を canvas で再エンコードする(長辺1600に縮小し JPEG 品質0.85)。
+ *    HEIC もここで吸収する。無変換で送る道(pass)は用意しない。
+ *  - 無変換を廃した理由:
+ *      (1) サーバー側の許可リスト strip(src/lib/lp-asset-metadata-strip.ts)は
+ *          **Orientation の APP1 も含めて付随情報を全て落とす**(docs/deploy.md)。
+ *          無変換で送ると回転情報だけが失われ、写真が横倒しで公開されてしまう。
+ *      (2) PNG の iTXt/tEXt・WebP の XMP など EXIF 以外の付随情報も、端末側で落としておきたい。
+ *    そこで createImageBitmap に `{ imageOrientation: "from-image" }` を明示して
+ *    **向きを画素そのものに焼き込んでから**送る(Chromium/WebKit の既定も from-image だが、
+ *    実装依存にせず明示する)。
+ *  - canvas を通すので EXIF は消える(サーバーの strip と二重防御)。
  *  - 判定と名前は純関数(node で検証)。browser API は prepare 本体だけが触る。
  *  - 画像内容・ファイル名を console に出さない。
  */
@@ -13,16 +19,16 @@ import { MAX_FILE_SIZE } from "@/lib/storage/types";
 import { fitWithinMaxEdge } from "@/lib/field-survey-photo-prepare";
 
 export const LP_ASSET_MAX_EDGE = 1600;
-export const LP_ASSET_PASS_THROUGH_MIMES = ["image/jpeg"] as const;
 const JPEG_QUALITY = 0.85;
 
-export type LpAssetAction = "pass" | "convert" | "unsupported";
+export type LpAssetAction = "convert" | "unsupported";
 
+/**
+ * 画像なら必ず "convert"(向きを焼き込むため無変換の道は無い)、それ以外は "unsupported"。
+ * width/height/size は呼び出し側の記録用に受けるが、判定には使わない。
+ */
 export function classifyLpAsset(input: { mime: string; width: number; height: number; size: number }): LpAssetAction {
-  if (!input.mime.startsWith("image/")) return "unsupported";
-  const passMime = (LP_ASSET_PASS_THROUGH_MIMES as readonly string[]).includes(input.mime);
-  const fits = Math.max(input.width, input.height) <= LP_ASSET_MAX_EDGE && input.size <= MAX_FILE_SIZE;
-  return passMime && fits ? "pass" : "convert";
+  return input.mime.startsWith("image/") ? "convert" : "unsupported";
 }
 
 export function lpAssetFileName(name: string, action: LpAssetAction): string {
@@ -43,14 +49,14 @@ export async function prepareLpAssetForUpload(file: File): Promise<PreparedLpAss
   if (!file.type.startsWith("image/")) return { ok: false, message: UNSUPPORTED };
   let bitmap: ImageBitmap;
   try {
-    bitmap = await createImageBitmap(file);
+    // EXIF の向きを画素に反映させた bitmap を得る(明示しないと実装依存になる)。
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
   } catch {
     return { ok: false, message: DECODE_FAILED };
   }
   try {
     const action = classifyLpAsset({ mime: file.type, width: bitmap.width, height: bitmap.height, size: file.size });
     if (action === "unsupported") return { ok: false, message: UNSUPPORTED };
-    if (action === "pass") return { ok: true, blob: file, fileName: lpAssetFileName(file.name, "pass") };
     const { width, height } = fitWithinMaxEdge(bitmap.width, bitmap.height, LP_ASSET_MAX_EDGE);
     const canvas = document.createElement("canvas");
     canvas.width = width;

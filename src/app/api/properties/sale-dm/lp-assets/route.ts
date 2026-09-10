@@ -87,8 +87,10 @@ export async function POST(request: NextRequest) {
     // 上の EXIF strip は APP1 / eXIf / EXIF chunk だけを狙うため、JPEG の COM・APP0(JFIF)・
     // APP13(IPTC)、PNG の tEXt/zTXt/iTXt、WebP の XMP/ICCP が残る。この写真は
     // 公開口 /lp-assets/<publicId> で誰にでも配られるので、残さない。
-    // 注意: この段で Orientation の最小 Exif も落ちる(画面側の canvas 変換で向きは
-    // 焼き込み済み = LP用写真では保持しない方針)。
+    // 注意: この段で Orientation の最小 Exif も落ちる。画面側(prepareLpAssetForUpload)は
+    // **例外なく全ての画像を canvas で再エンコード**して向きを画素に焼き込んでから送るため
+    // (無変換で送る道は無い)、メタデータ側の向き情報は要らない。
+    // 残す器の中身(chunk / segment の長さ)まで検査するので、仕様に合わない画像は 422。
     const lean = stripLpAssetMetadata(stripped.buffer, mimeType);
     if (!lean.ok) throw new ApiError(422, "画像ファイルを処理できませんでした", "VALIDATION_ERROR");
     const buffer = lean.buffer;
