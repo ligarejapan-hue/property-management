@@ -153,6 +153,9 @@ function PropertiesPageInner() {
   const [caseFilter, setCaseFilter] = useState(() => sp.get("caseStatus") ?? "");
   const [introductionRouteFilter, setIntroductionRouteFilter] = useState(() => sp.get("introductionRoute") ?? "");
   const [assigneeFilter, setAssigneeFilter] = useState(() => sp.get("assignedTo") ?? "");
+  // 所有者での絞り込み。所有者詳細・所有者補正候補からのリンクで入ってくる値で、
+  // この画面に入力欄は無い(解除だけできる)。
+  const [ownerFilter, setOwnerFilter] = useState(() => sp.get("ownerId") ?? "");
   const [updatedFromFilter, setUpdatedFromFilter] = useState(() => sp.get("updatedFrom") ?? "");
   const [updatedToFilter, setUpdatedToFilter] = useState(() => sp.get("updatedTo") ?? "");
   const [warningOnly, setWarningOnly] = useState(() => sp.get("hasWarning") === "true");
@@ -369,6 +372,7 @@ function PropertiesPageInner() {
     if (caseFilter) params.caseStatus = caseFilter;
     if (introductionRouteFilter) params.introductionRoute = introductionRouteFilter;
     if (assigneeFilter) params.assignedTo = assigneeFilter;
+    if (ownerFilter) params.ownerId = ownerFilter;
     if (updatedFromFilter) params.updatedFrom = updatedFromFilter;
     if (updatedToFilter) params.updatedTo = updatedToFilter;
     if (warningOnly) params.hasWarning = "true";
@@ -379,7 +383,7 @@ function PropertiesPageInner() {
     if (sortBy) params.sortBy = sortBy;
     if (sortOrder) params.sortOrder = sortOrder;
     return params;
-  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, resendOnly, sendCountMaxFilter, sort]);
+  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, ownerFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, resendOnly, sendCountMaxFilter, sort]);
 
   // 売却促進DM: 現在の検索条件で「送付可」物件から下書きを作成し、作業画面へ遷移する。
   // 差出人は env 既定を route が補完(初版・調整は作業画面)。集計・型は variant 基準。
@@ -592,6 +596,7 @@ function PropertiesPageInner() {
     if (caseFilter) params.set("caseStatus", caseFilter);
     if (introductionRouteFilter) params.set("introductionRoute", introductionRouteFilter);
     if (assigneeFilter) params.set("assignedTo", assigneeFilter);
+    if (ownerFilter) params.set("ownerId", ownerFilter);
     if (updatedFromFilter) params.set("updatedFrom", updatedFromFilter);
     if (updatedToFilter) params.set("updatedTo", updatedToFilter);
     if (warningOnly) params.set("hasWarning", "true");
@@ -602,7 +607,7 @@ function PropertiesPageInner() {
     if (page > 1) params.set("page", String(page));
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, resendOnly, sendCountMaxFilter, sort, page, pathname, router]);
+  }, [searchText, mgmtIdText, typeFilter, registryFilter, dmFilter, caseFilter, introductionRouteFilter, assigneeFilter, ownerFilter, updatedFromFilter, updatedToFilter, warningOnly, undeliverableOnly, resendOnly, sendCountMaxFilter, sort, page, pathname, router]);
 
   // 警告バッジは「現在ページに表示中の物件」だけに scope して取得する（17-C F2）。
   // properties が変わるたび（page/filter/sort 変更・mutation 後の再取得）に追従するため、
@@ -964,6 +969,25 @@ function PropertiesPageInner() {
   return (
     <div className="pt-2">
       <PageHeader title="物件一覧" />
+
+      {ownerFilter && (
+        <div
+          data-testid="owner-filter-notice"
+          className="mb-3 flex flex-wrap items-center gap-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200"
+        >
+          <span>この所有者の物件だけを表示しています</span>
+          <button
+            type="button"
+            onClick={() => {
+              setOwnerFilter("");
+              setPage(1);
+            }}
+            className="rounded-md border border-blue-300 px-2 py-1 text-xs hover:bg-blue-100 dark:border-blue-800 dark:hover:bg-blue-900/40"
+          >
+            絞り込みを解除
+          </button>
+        </div>
+      )}
 
       {/* Action row */}
       <div className="mb-4 flex flex-wrap justify-end gap-2">

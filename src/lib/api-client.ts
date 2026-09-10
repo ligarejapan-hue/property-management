@@ -74,6 +74,12 @@ export async function fetchProperties(params: Record<string, string> = {}) {
     await mockDelay();
     let filtered = [...MOCK_PROPERTIES];
 
+    // mock データは所有者との紐づきを持たない。ここで全件を返すと
+    // 「この所有者の物件」として無関係な物件を見せてしまうので空にする。
+    if (params.ownerId) {
+      filtered = [];
+    }
+
     if (params.keyword) {
       const kw = params.keyword.toLowerCase();
       filtered = filtered.filter(
