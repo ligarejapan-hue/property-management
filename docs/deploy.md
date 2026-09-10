@@ -568,6 +568,14 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 
 `20260909000000_add_dm_lp_variants` は additive のみ(表 `dm_lp_variants` 新設・`dm_recipient_drafts.lp_variant_id` 追加・FK は SET NULL)。バックフィル無し。既存キャンペーンは LP型0件=従来どおり(割当・集計・QR転送の結果は変わらない)。rollback は列と表の DROP で戻せる(enum の追加なし)。
 
+#### 売却DM LP型「写真と図」(2026-09): migration
+
+`20260910100000_add_dm_lp_assets` は additive のみ(表 `dm_lp_assets` 新設=写真ライブラリ、`dm_lp_variant_media` 新設=LP型の枠)。バックフィル無し。FK は `dm_lp_variant_media.asset_id → dm_lp_assets.id` が `ON DELETE RESTRICT`(使用中の写真は消せない=アプリ側でも先に枠から外させる)、`dm_lp_variant_media.lp_variant_id → dm_lp_variants.id` が `ON DELETE CASCADE`(LP型を消せば枠も一緒に消える)。rollback は2表の DROP で戻せる(enum の追加なし)。
+
+公開口 `/lp-assets/<publicId>` は認証なし(`src/proxy.ts` の `PUBLIC_PATHS` に追加済み)。`publicId` は32桁の乱数で、いずれかのLP型が参照している写真だけを返す(ライブラリに入れただけ・削除済みは404)。レート制限は300/分。`Cache-Control: immutable` で1年キャッシュするため、**削除しても配布済みのキャッシュ（閲覧者のブラウザやCDN）にはしばらく残る**運用上の注意がある(差し替えは新しい `publicId` で行う設計)。nginx のアクセスログ除外は`/t/`・`/u/`と違って**行わない**(`publicId` は乱数でPIIではない)。
+
+`STORAGE_BACKEND=server` の環境では `lp-assets/` 配下にファイルが増える(uploads と同じストレージ層を共用)。写真は端末側で長辺1600pxのJPEGへ縮小してから送るため、この機能で新規に追加したサーバー側の依存パッケージは無い。
+
 #### 反響の記録リリース（migration `add_dm_reaction_columns`）: 旧 sale_dm 送付記録の照合
 
 この migration は既存の送付記録を全件「反応なし（no_response）」で初期化する。過去の売却DMで
