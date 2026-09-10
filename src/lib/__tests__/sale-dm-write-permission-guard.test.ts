@@ -28,6 +28,8 @@ const WRITE_GATE_EXCEPTIONS: Record<string, string> = {
   // 書き込み門は不要(そもそも何も読まない・書かない)。
   "src/app/api/properties/sale-dm/drafts/[id]/regenerate/route.ts":
     "410 を返すだけ(データに触れない)",
+  "src/app/api/properties/sale-dm/lp-assets/[assetId]/route.ts":
+    "管理者(user_management:write)限定の削除。requireSaleDmWriteAccess より強い門を inline で通す",
 };
 
 const FILES = routeFiles(ROOT);
