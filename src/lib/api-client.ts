@@ -296,6 +296,8 @@ export interface SaleDmLpMediaResponse {
   assets: SaleDmLpAsset[];
 }
 export const LP_ASSET_URL = (publicId: string) => `/lp-assets/${publicId}`;
+export const LP_PREVIEW_URL = (campaignId: string, lpId: string, device: "sp" | "pc") =>
+  `/api/properties/sale-dm/campaigns/${campaignId}/lp-variants/${lpId}/preview?device=${device}`;
 
 export interface SaleDmCampaign {
   id: string;
