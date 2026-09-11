@@ -9,6 +9,10 @@ import { loadSaleDmPublicPageConfig } from "./config-store";
 import { buildUnsubscribeToken, buildUnsubscribeUrl, deriveUnsubscribeKey } from "./unsubscribe-token";
 
 const SELECT = {
+  // id / propertyId は PII ではない(内部の識別子)。ページを実際に返せたときだけ立てる
+  // 閲覧計測(recordLpPageView)に渡すためだけに読む。
+  id: true,
+  propertyId: true,
   status: true,
   trackingToken: true,
   lpVariant: {
@@ -21,13 +25,18 @@ const SELECT = {
 } as const;
 
 type Row = {
+  id: string;
+  propertyId: string;
   status: "draft" | "confirmed" | "sent";
   trackingToken: string;
   lpVariant: { headline: string | null; lead: string | null; bodyText: string | null; faqJson: unknown; media: Array<{ slot: string; heading: string | null; figureKind: string | null; asset: { publicId: string; width: number; height: number; deletedAt: Date | null } | null }> } | null;
   property: { address: string | null; propertyType: string | null };
 };
 export interface LpPageClientLike { dmRecipientDraft: { findUnique: (args: { where: { trackingToken: string }; select: typeof SELECT }) => Promise<Row | null> } }
-export type LpPageData = { kind: "none" } | { kind: "page"; html: string; status: Row["status"] };
+// draftId / propertyId: ページを返せたときだけ立てる閲覧(lpPageFirstAt)の記録先。呼び出し元の route が使う。
+export type LpPageData =
+  | { kind: "none" }
+  | { kind: "page"; html: string; status: Row["status"]; draftId: string; propertyId: string };
 
 // 配信停止URL: 印刷 route(お手紙の停止QR)と同じ導出をそのまま写す
 // (deriveUnsubscribeKey → buildUnsubscribeToken → buildUnsubscribeUrl)。鍵が未導出(NEXTAUTH_SECRET
@@ -73,5 +82,5 @@ export async function loadLpPageData(client: LpPageClientLike, token: string): P
       phoneTapToken: mode === "live" ? row.trackingToken : null,
     },
   );
-  return { kind: "page", html: renderLpPage(input), status: row.status };
+  return { kind: "page", html: renderLpPage(input), status: row.status, draftId: row.id, propertyId: row.propertyId };
 }

@@ -150,6 +150,17 @@ describe("DM 反響 writer のロック順序(PR-B・R47: terminal は Owner FOR
     expect(body).not.toMatch(/syncSaleDmReaction|lockOwnersForUpdate|outcome/);
   });
 
+  it("公開LPのページ閲覧: 親行ロック→初回の条件付きupdateMany→count++(反響ではないので syncSaleDmReaction を呼ばない)", () => {
+    const src = read("src/lib/sale-dm-letter/lp-page-view-record.ts");
+    const body = src.slice(src.indexOf("export async function recordLpPageView"));
+    assertOrder("lp-page-view", body, [
+      "lockPropertyRow",
+      "tx.dmRecipientDraft.updateMany",
+      "tx.dmRecipientDraft.update",
+    ]);
+    expect(body).not.toMatch(/syncSaleDmReaction|lockOwnersForUpdate|outcome/);
+  });
+
   it("同期ヘルパー: terminal は Owner FOR UPDATE→再読取→適用(変化なしはロックしない)", () => {
     const src = read("src/lib/dm-reaction/sync.ts");
     const body = src.slice(src.indexOf("export async function syncSaleDmReaction"));
