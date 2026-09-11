@@ -83,6 +83,11 @@ describe("所有者詳細の紐づく物件一覧", () => {
     expect(hiddenMessage).not.toBe("紐づく物件はありません");
     // 「物件はある」ことが伝わる(0件だと誤読させない)。
     expect(hiddenMessage).toContain("あります");
+    // コーディネーター指示: 制限を告げるだけでなく理由も伝える(「担当」の語を使う)。
+    // 単なる部分一致ではなく文言全体をピン留めする。
+    expect(hiddenMessage).toBe(
+      "紐づく物件はありますが、担当範囲外のため表示できません",
+    );
     // 開発者語彙("スコープ"・"field_staff"・権限/ロール名)をユーザー文言に出さない。
     expect(hiddenMessage).not.toMatch(
       /スコープ|scope|field_staff|field-staff|権限|ロール|role/i,

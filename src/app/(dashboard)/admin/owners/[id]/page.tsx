@@ -354,7 +354,7 @@ export default function AdminOwnerDetailPage() {
                 // 「紐づく物件はありません」と出て件数表示と矛盾していた。
                 // 件数>0なのに一覧が空のときは「無い」ではなく「見えない」と伝える。
                 <p className="text-xs text-gray-500 dark:text-gray-400">
-                  紐づく物件はありますが、あなたには表示できません
+                  紐づく物件はありますが、担当範囲外のため表示できません
                 </p>
               ) : linkedProperties.length === 0 ? (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
