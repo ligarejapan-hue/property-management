@@ -1199,6 +1199,10 @@ model DmRecipientDraft {
   lpFirstAccessAt       DateTime?        @map("lp_first_access_at")
   lpAccessCount         Int              @default(0) @map("lp_access_count")
   phoneInquiryAt        DateTime?        @map("phone_inquiry_at")
+  // 公開LPの電話ボタンのタップ(設計 2026-09-08 §2.4)。タップ≠通話なので反響(outcome)は立てない。
+  // phoneInquiryAt(担当者が手で立てる電話反響)とは別物。
+  phoneTapCount         Int              @default(0) @map("phone_tap_count")
+  phoneTapFirstAt       DateTime?        @map("phone_tap_first_at")
   outcome               DmOutcome        @default(none)
   outcomeNote           String?          @map("outcome_note")
   generatedBy           String           @map("generated_by") @db.Uuid
