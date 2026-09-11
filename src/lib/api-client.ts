@@ -676,14 +676,12 @@ export async function fetchSaleDmSettings(): Promise<{ data: SaleDmSettings }> {
 
 // 部分更新。APIキーは指定時のみ送る(空文字=クリア・未指定=現状維持)。
 export async function updateSaleDmSettings(body: {
-  provider?: string | null;
-  model?: string;
+  // 画面から送るのは4項目だけ(AI関連の欄は 2026-09-12 に画面から外した。
+  // サーバー側は部分更新なので、送らない列は触られない)。
   trackingBaseUrl?: string;
   lpUrl?: string;
   senderName?: string;
   senderContact?: string;
-  anthropicApiKey?: string;
-  openaiApiKey?: string;
 }): Promise<{ data: SaleDmSettings }> {
   if (USE_MOCK) {
     await mockDelay();

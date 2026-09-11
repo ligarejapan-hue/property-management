@@ -45,9 +45,45 @@ describe("売却DM設定画面の案内がサーバーの判定と食い違わ�
     expect(PAGE).toContain("物件情報の編集");
   });
 
-  it("AIの種類・APIキーの欄は残すが、使っていないことを明記する", () => {
-    // 欄自体を消すかは別判断。残す以上、埋めなくてよいと分かる必要がある
-    //（分からないと不要な有料API契約に進みかねない）。
-    expect(PAGE).toContain("現在の運用では使いません");
+  it("⚠使わないAIの欄(AIの種類/APIキー/生成モデル)は画面から消す(2026-09-12 発注者決定・DB列は残す)", () => {
+    // 使わない入力欄が管理画面にあると「設定しないと動かない」と誤解を生み、
+    // 不要な有料API契約に進みかねない。欄と保存処理を外し、DB列は将来の復活用に残す。
+    for (const gone of [
+      "AIの種類",
+      "APIキー",
+      "生成モデル",
+      "現在の運用では使いません",
+      "anthropicApiKey",
+      "openaiApiKey",
+      "setProvider",
+      "setModel",
+      "KeyField",
+      "encryptionConfigured",
+    ]) {
+      expect(PAGE, gone).not.toContain(gone);
+    }
+    // 残す4項目は必ずある
+    for (const kept of ["追跡用URL", "既定LP URL", "差出人名", "差出人連絡先"]) {
+      expect(PAGE, kept).toContain(kept);
+    }
+  });
+
+  it("画面が送る保存内容は残す4項目だけ(api-client の更新型に AI 欄を持たない)", () => {
+    const API_CLIENT = read(join(SRC, "lib", "api-client.ts"));
+    const start = API_CLIENT.indexOf("export async function updateSaleDmSettings(");
+    expect(start).toBeGreaterThan(-1);
+    const block = API_CLIENT.slice(start, API_CLIENT.indexOf("}): Promise", start));
+    for (const gone of ["provider", "model", "anthropicApiKey", "openaiApiKey"]) {
+      expect(block, gone).not.toContain(gone);
+    }
+    for (const kept of ["trackingBaseUrl", "lpUrl", "senderName", "senderContact"]) {
+      expect(block, kept).toContain(kept);
+    }
+  });
+
+  it("マニュアルの「画面に古い注意書きが残っている」記述は消えている(欄ごと無くなったため)", () => {
+    const MANUAL = read(join(SRC, "..", "public", "docs", "manual.html"));
+    expect(MANUAL).not.toContain("古い注意書きが残っています");
+    expect(MANUAL).not.toContain("画面の直し漏れ");
   });
 });
