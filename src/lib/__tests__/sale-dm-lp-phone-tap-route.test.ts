@@ -16,7 +16,12 @@ vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRow }));
 
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
-    dmRecipientDraft: { findUnique: vi.fn(), update: vi.fn(async () => ({})) },
+    dmRecipientDraft: {
+      findUnique: vi.fn(),
+      // 既定=初回(count:1)。再訪ケースは各テストで mockResolvedValueOnce({count:0}) に差し替える。
+      updateMany: vi.fn(async () => ({ count: 1 })),
+      update: vi.fn(async () => ({})),
+    },
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
   return { default: db };
@@ -27,7 +32,7 @@ import { POST } from "../../app/t/[token]/phone-tap/route";
 import { recordPhoneTap } from "../sale-dm-letter/phone-tap-record";
 
 type Fn = ReturnType<typeof vi.fn>;
-const pm = prismaMock as never as { dmRecipientDraft: { findUnique: Fn; update: Fn } };
+const pm = prismaMock as never as { dmRecipientDraft: { findUnique: Fn; updateMany: Fn; update: Fn } };
 const req = (ip = "10.0.0.1") =>
   new Request("http://x/t/tok/phone-tap", { method: "POST", headers: { "x-real-ip": ip } }) as never;
 // Origin 付き(よそのサイトからの送信=計上しない、の検証用)。
@@ -41,31 +46,35 @@ beforeEach(() => {
     id: "d1",
     propertyId: "p1",
     status: "sent",
-    phoneTapFirstAt: null,
   });
   // vi.clearAllMocks() は呼び出し履歴だけをクリアし、前のテストが仕込んだ
   // mockRejectedValue 等の差し替え実装までは消さない。毎回明示的に既定実装へ戻す
   // (先の「更新に失敗しても例外を投げない」テストの状態が後続に漏れるのを防ぐ)。
+  pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
   pm.dmRecipientDraft.update.mockResolvedValue({});
 });
 
 describe("recordPhoneTap", () => {
-  it("送付済みなら物件行をロックして回数+1・初回だけ phoneTapFirstAt", async () => {
+  it("送付済みなら物件行をロックして回数+1・初回(updateMany count:1)だけ first=true", async () => {
     const r = await recordPhoneTap(prismaMock as never, "tok");
     expect(r).toEqual({ matched: true, first: true, draftId: "d1" });
-    expect(lockPropertyRow.mock.invocationCallOrder[0]).toBeLessThan(
-      pm.dmRecipientDraft.update.mock.invocationCallOrder[0],
-    );
+    // ロック→(初回判定の)条件付きupdateMany→count++ の順(Codex指摘: 初回判定はロックの外で
+    // 決めない。invocationCallOrder で3者の順序を確認する)。
+    const lockOrder = lockPropertyRow.mock.invocationCallOrder[0];
+    const updateManyOrder = pm.dmRecipientDraft.updateMany.mock.invocationCallOrder[0];
+    const updateOrder = pm.dmRecipientDraft.update.mock.invocationCallOrder[0];
+    expect(lockOrder).toBeLessThan(updateManyOrder);
+    expect(updateManyOrder).toBeLessThan(updateOrder);
+    expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0]).toEqual({
+      where: { id: "d1", phoneTapFirstAt: null },
+      data: { phoneTapFirstAt: expect.any(Date) },
+    });
     expect(pm.dmRecipientDraft.update.mock.calls[0][0].data).toEqual({
       phoneTapCount: { increment: 1 },
-      phoneTapFirstAt: expect.any(Date),
     });
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({
-      id: "d1",
-      propertyId: "p1",
-      status: "sent",
-      phoneTapFirstAt: new Date(),
-    });
+
+    // 再訪(2回目以降): updateMany が対象0件(既に別アクセスが埋めた)→ count:0 → first=false。
+    pm.dmRecipientDraft.updateMany.mockResolvedValueOnce({ count: 0 });
     expect(await recordPhoneTap(prismaMock as never, "tok")).toEqual({
       matched: true,
       first: false,
@@ -81,17 +90,36 @@ describe("recordPhoneTap", () => {
       id: "d1",
       propertyId: "p1",
       status: "confirmed",
-      phoneTapFirstAt: null,
     });
     expect(await recordPhoneTap(prismaMock as never, "tok")).toEqual({ matched: false, first: false });
     pm.dmRecipientDraft.findUnique.mockResolvedValue(null);
     expect(await recordPhoneTap(prismaMock as never, "tok")).toEqual({ matched: false, first: false });
+    expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
     expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
     expect(JSON.stringify(pm.dmRecipientDraft.update.mock.calls)).not.toContain("outcome");
   });
 
-  it("更新に失敗しても例外を投げない", async () => {
+  it("2つの同時タップは両方 first=true にならない(updateMany の count で排他される)", async () => {
+    // 1本目が先に null→date を確定させ、2本目は対象0件を引く想定(実DBでは行ロックで
+    // 直列化される。ここでは mock の戻り値で「2本目は取れなかった」を再現する)。
+    pm.dmRecipientDraft.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    const [r1, r2] = await Promise.all([
+      recordPhoneTap(prismaMock as never, "tok"),
+      recordPhoneTap(prismaMock as never, "tok"),
+    ]);
+    const firsts = [r1, r2].filter((r) => r.matched && r.first);
+    expect(firsts.length).toBe(1);
+  });
+
+  it("更新(update)に失敗しても例外を投げない", async () => {
     pm.dmRecipientDraft.update.mockRejectedValue(new Error("db"));
+    expect(await recordPhoneTap(prismaMock as never, "tok")).toEqual({ matched: false, first: false });
+  });
+
+  it("初回判定の updateMany に失敗しても例外を投げない", async () => {
+    pm.dmRecipientDraft.updateMany.mockRejectedValue(new Error("db"));
     expect(await recordPhoneTap(prismaMock as never, "tok")).toEqual({ matched: false, first: false });
   });
 

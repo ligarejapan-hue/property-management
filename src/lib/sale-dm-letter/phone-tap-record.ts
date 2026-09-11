@@ -11,8 +11,12 @@ import { lockPropertyRow } from "@/lib/property-record-guard";
  * 汚さないよう別カウンタ phoneTapCount/phoneTapFirstAt にだけ積む)。
  *  - 該当 draft が無ければ matched=false(更新しない)。
  *  - draft が未送付(status != sent)なら matched=false(送付前タップは計上しない)。
- *  - 初回(phoneTapFirstAt == null)のみ phoneTapFirstAt = now をセット。
- *  - phoneTapCount は常に increment(+1)。
+ *  - 「初回かどうか」はロックの外(pre-lock の findUnique)では判定しない(@codex P2:
+ *    ほぼ同時に来た2つのタップが両方 phoneTapFirstAt===null を読んでしまい、両方
+ *    first=true になり得るため)。ロック内で条件付き updateMany
+ *    (where に phoneTapFirstAt: null を含める)を行い、実際に更新できた行数(count)
+ *    で「自分がその場で null→date にできたか」を判定する(first = count === 1)。
+ *  - phoneTapCount は常に increment(+1)(別の update で行う)。
  *  - 検索失敗(findUnique)・更新失敗(DBエラー・ロック競合)いずれも best-effort。
  *    呼び出し元(公開 POST)の 204 応答を止めないよう、例外は投げず matched=false を返す。
  */
@@ -21,13 +25,17 @@ export interface PhoneTapDraftRow {
   id: string;
   propertyId: string;
   status: string;
-  phoneTapFirstAt: Date | null;
 }
 
 /** $transaction のコールバックが受け取るクライアント。lockPropertyRow の TxLike と構造的に一致させる。 */
 export interface PhoneTapTx {
   $queryRaw: <T>(query: TemplateStringsArray, ...values: unknown[]) => Promise<T>;
   dmRecipientDraft: {
+    // 「初回」の確定はこの条件付き updateMany の戻り値(count)で行う(ロック内)。
+    updateMany: (args: {
+      where: { id: string; phoneTapFirstAt: null };
+      data: { phoneTapFirstAt: Date };
+    }) => Promise<{ count: number }>;
     update: (args: {
       where: { id: string };
       data: Prisma.DmRecipientDraftUpdateInput;
@@ -43,7 +51,6 @@ export interface PhoneTapClientLike {
         id: true;
         propertyId: true;
         status: true;
-        phoneTapFirstAt: true;
       };
     }) => Promise<PhoneTapDraftRow | null>;
   };
@@ -60,23 +67,25 @@ export async function recordPhoneTap(
   try {
     const draft = await client.dmRecipientDraft.findUnique({
       where: { trackingToken: token },
-      select: { id: true, propertyId: true, status: true, phoneTapFirstAt: true },
+      select: { id: true, propertyId: true, status: true },
     });
     if (!draft) return { matched: false, first: false };
     // 送付確定(sent)前のタップ(印刷プレビュー等)は計上しない。
     if (draft.status !== "sent") return { matched: false, first: false };
 
-    const first = draft.phoneTapFirstAt == null;
-
+    let first = false;
     await client.$transaction(async (tx) => {
       await lockPropertyRow(tx, draft.propertyId);
+      // ロックの中で「null→date にできたか」を条件付き updateMany の count で確定する
+      // (pre-lock の読み取りで first を決めない=二重初回を防ぐ)。
+      const claimed = await tx.dmRecipientDraft.updateMany({
+        where: { id: draft.id, phoneTapFirstAt: null },
+        data: { phoneTapFirstAt: new Date() },
+      });
+      first = claimed.count === 1;
       await tx.dmRecipientDraft.update({
         where: { id: draft.id },
-        data: {
-          phoneTapCount: { increment: 1 },
-          // 初回のみセット(2回目以降は既存値を上書きしない)。
-          ...(first ? { phoneTapFirstAt: new Date() } : {}),
-        },
+        data: { phoneTapCount: { increment: 1 } },
       });
     });
     return { matched: true, first, draftId: draft.id };
