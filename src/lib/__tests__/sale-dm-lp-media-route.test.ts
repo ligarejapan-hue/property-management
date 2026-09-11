@@ -162,6 +162,33 @@ describe("PUT media", () => {
   });
 });
 
+describe("前回反映分(60字超/30個超の小見出しが保存済みの本文)", () => {
+  // splitLpTemplate の LP_LIMITS.heading(60)/headingCount(30) は新しい文章の保存時にだけ効く。
+  // 反映前に保存された本文はそのまま残るので、写真の枠(saleDmLpMediaPutSchema)はその形を拒否してはいけない。
+  const LEGACY_HEADING = "あ".repeat(80);
+  const LEGACY_BODY = `■${LEGACY_HEADING}\n流れの説明`;
+  it("GET は60字超の小見出しでもそのまま返す", async () => {
+    pm.dmLpVariant.findFirst.mockResolvedValue(variant({ bodyText: LEGACY_BODY }));
+    pm.dmLpVariantMedia.findMany.mockResolvedValue([]);
+    pm.dmLpAsset.findMany.mockResolvedValue([]);
+    const j = await (await GET(new Request("http://x") as never, ctx)).json();
+    expect(j.headings).toEqual([LEGACY_HEADING]);
+    expect(j.plan.sections).toEqual([{ heading: LEGACY_HEADING, media: null }]);
+  });
+  it("PUT はその60字超の小見出しを指す枠なら通る(hero だけの差し替えでも保存できる)", async () => {
+    pm.dmLpVariant.findFirst.mockResolvedValue(variant({ bodyText: LEGACY_BODY }));
+    pm.dmLpAsset.findMany.mockResolvedValue([{ id: U1 }]);
+    const r = await put({ hero: { assetId: U1 }, sections: [{ heading: LEGACY_HEADING, media: null }] });
+    expect(r.status).toBe(200);
+  });
+  it("PUT は本文に無い小見出しなら60字超でもやはり 400 INVALID_MEDIA_PLAN", async () => {
+    pm.dmLpVariant.findFirst.mockResolvedValue(variant({ bodyText: LEGACY_BODY }));
+    const r = await put({ hero: null, sections: [{ heading: "あ".repeat(80) + "違う", media: null }] });
+    expect(r.status).toBe(400);
+    expect((await r.json()).error.code).toBe("INVALID_MEDIA_PLAN");
+  });
+});
+
 describe("GET image-prompt", () => {
   const q = (qs: string) => PROMPT(new Request(`http://x/?${qs}`) as never, ctx);
   it("ヒーロー用: 訴求から組み立て、監査に slot だけ残す。リード文も所有者情報も出ない", async () => {

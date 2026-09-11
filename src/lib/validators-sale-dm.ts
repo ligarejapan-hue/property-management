@@ -123,17 +123,18 @@ const lpMediaRefSchema = z.union([
 ]);
 export const saleDmLpMediaPutSchema = z.object({
   hero: z.object({ assetId: z.string().uuid() }).nullable(),
-  // 文章の保存時(splitLpTemplate/LP_LIMITS)と同じ上限を使う。揃えないと、文章は保存できるのに
-  // 写真の枠だけ弾かれて保存できないLP型が作れてしまう。
+  // 保存済みの本文(前回反映分)には 60字超/30個超の小見出しがあり得るので、ここでは本文に入り得る
+  // 形なら通し、実在するかどうかは media route が validateMediaPlan で本文の小見出しと照合して決める
+  // (新しい文章の保存時の上限は splitLpTemplate 側)。
   sections: z
-    .array(z.object({ heading: z.string().min(1).max(LP_LIMITS.heading), media: lpMediaRefSchema.nullable() }))
-    .max(LP_LIMITS.headingCount),
+    .array(z.object({ heading: z.string().min(1).max(LP_LIMITS.body), media: lpMediaRefSchema.nullable() }))
+    .max(1000), // 4,000字の本文に入り得る■行数の上限(1行2文字「■\n」として)
 });
 export type SaleDmLpMediaPut = z.infer<typeof saleDmLpMediaPutSchema>;
 
 export const saleDmLpImagePromptQuerySchema = z.object({
   slot: z.enum(["hero", "section"]),
-  heading: z.string().max(LP_LIMITS.heading).optional(),
+  heading: z.string().max(LP_LIMITS.body).optional(),
   style: z.enum(["photo", "illustration", "flat"]).default("photo"),
 });
 

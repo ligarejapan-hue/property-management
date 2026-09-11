@@ -48,24 +48,17 @@ describe("LP型 写真と図の zod", () => {
     expect(saleDmLpAssetLabelSchema.parse("  会社の外観 ")).toBe("会社の外観");
     expect(() => saleDmLpAssetLabelSchema.parse("あ".repeat(81))).toThrow();
   });
-  it("枠: 小見出しは60字まで・節は30個まで(文章保存の上限と揃える)", () => {
-    const heading61 = "あ".repeat(61);
-    const heading60 = "あ".repeat(60);
-    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: heading61, media: null }] })).toThrow();
-    expect(saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: heading60, media: null }] }).sections[0].heading).toBe(heading60);
-    const sections31 = Array.from({ length: 31 }, (_, i) => ({ heading: `h${i}`, media: null }));
-    const sections30 = sections31.slice(0, 30);
-    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: sections31 })).toThrow();
-    expect(saleDmLpMediaPutSchema.parse({ hero: null, sections: sections30 }).sections.length).toBe(30);
+  it("枠: 前回反映分の本文(60字超の小見出し・30個超の節)も通す(実在チェックは media route 側)", () => {
+    const heading200 = "あ".repeat(200);
+    expect(saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: heading200, media: null }] }).sections[0].heading).toBe(heading200);
+    const sections100 = Array.from({ length: 100 }, (_, i) => ({ heading: `h${i}`, media: null }));
+    expect(saleDmLpMediaPutSchema.parse({ hero: null, sections: sections100 }).sections.length).toBe(100);
   });
-  it("枠の上限は LP_LIMITS(splitLpTemplate と同じ定数)から来ている", () => {
-    const atHeadingLimit = "あ".repeat(LP_LIMITS.heading);
-    const overHeadingLimit = "あ".repeat(LP_LIMITS.heading + 1);
-    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: atHeadingLimit, media: null }] })).not.toThrow();
-    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: overHeadingLimit, media: null }] })).toThrow();
-    const atCountLimit = Array.from({ length: LP_LIMITS.headingCount }, (_, i) => ({ heading: `h${i}`, media: null }));
-    const overCountLimit = [...atCountLimit, { heading: "extra", media: null }];
-    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: atCountLimit })).not.toThrow();
-    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: overCountLimit })).toThrow();
+  it("枠: 空の小見出しは拒否・LP_LIMITS.body(本文全体の上限)を超える小見出しは拒否", () => {
+    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: "", media: null }] })).toThrow();
+    const atBodyLimit = "あ".repeat(LP_LIMITS.body);
+    const overBodyLimit = "あ".repeat(LP_LIMITS.body + 1);
+    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: atBodyLimit, media: null }] })).not.toThrow();
+    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: overBodyLimit, media: null }] })).toThrow();
   });
 });
