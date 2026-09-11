@@ -584,6 +584,12 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 
 `20260911100000_add_dm_phone_tap` は additive のみ(`dm_recipient_drafts` に `phone_tap_count`(既定0)・`phone_tap_first_at`(nullable)を追加)。バックフィル無し。rollback は2列の DROP で戻せる(enum の追加なし)。
 
+`20260912100000_add_dm_lp_page_view` も additive のみ(`dm_recipient_drafts` に `lp_page_first_at`(nullable)・`lp_page_view_count`(既定0)を追加)。バックフィル無し。rollback は2列の DROP で戻せる(enum の追加なし)。
+
+**⚠「閲覧」は2種類あり、表によって使い分ける(@codex R10)**: `lp_first_access_at` は**QRを読み取られた**時刻で、飛び先がアプリ内ページでも外部LPでも立つ(計数 `recordTrackingHit` はページを出すかどうかの判定より前に走るため)。`lp_page_first_at` は**アプリ内のご案内ページを実際に返せた**時刻で、公開スイッチ未投入・LP型に文章なし・読み出し失敗のときは立たない。**DM型ごとの表(文面の成績)は前者**、**LP型ごと/組み合わせの表(ページの成績)と電話タップ率の分母は後者**を使う。前者だけで LP型を比べると、全員が同じ外部LPへ飛んでいる期間の訪問が「LP型別のページ成績」として出てしまう。
+
+**⚠LP型ごと/組み合わせの集計は公開スイッチと同じ `SALE_DM_LP_PUBLIC_ENABLED` で出し分ける**: 未投入のうちは集計API が `byLpVariant`/`byPair` を返さず(応答の `lpMetricsEnabled: false`)、画面も表を出さない(「次の段階から表示します」の注記のみ)。画面(ブラウザ側)は env を読めないため、判定はサーバーで行い応答の `lpMetricsEnabled` を画面が見る。`DM型ごと`の閲覧率と反響の表はスイッチに関係なく従来どおり出る。
+
 `/t/<token>` は今回から HTML を返す**経路を持つ**ようになる(公開ロールアウトゲート `SALE_DM_LP_PUBLIC_ENABLED` が有効かつ宛先に付いたLP型に文章が保存されていればアプリ内のご案内ページ、それ以外(ゲート無効・LP型なし)は従来どおり302で外部LPへ転送。未知tokenは従来どおり302(有効なtokenはゲート有効時のみページが出るため応答は当然異なる。tokenは11桁の base64url・60/分の制限))。レスポンスヘッダは `Cache-Control: no-store`・`X-Robots-Tag: noindex`・CSP `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`(外部読み込みなし・インラインCSSとscript1本のみ。`connect-src 'self'` は電話タップの送信が自分自身宛のときだけ通るようにするもので、これが無いと送信ごと遮断される)。電話ボタンのタップは `POST /t/<token>/phone-tap` で受け(常に204を返す=宛先の存在有無を漏らさない・レート制限60/分)、送付済み(`sent`)の宛先のときだけ `phone_tap_count`/`phone_tap_first_at` を更新する(反響としては数えない=反響は引き続き手入力)。社内プレビュー(LP型編集画面のプレビュー)はこのゲートの対象外で常に見える。
 
 公開経路の設定読み出しは新設の `loadSaleDmPublicPageConfig`(会社案内・電話番号・公開ゲートの有無など表示判定に要る列/envだけを読み、謄本取得等の課金用APIキー列には触れない)。nginx のアクセスログ除外は引き続き `/u/` のみ(`/t/` は追加しない=既存方針を維持)。
