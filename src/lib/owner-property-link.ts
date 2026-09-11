@@ -27,6 +27,16 @@ export interface OwnerPropertyLinkInput {
    * property:read の無いユーザーには常に 403 になる死んだリンクになる。
    */
   propertyLinkAvailable: boolean;
+  /**
+   * P2 (#139 二次回帰): このビューアがこの所有者の紐づき物件を実際に
+   * 1件以上見られるか(API の候補ごとの `hasReachableProperty` と同じ値)。
+   * propertyLinkAvailable(権限そのものの有無)とは別の質問——
+   * こちらは「権限はあるが、この所有者の紐づき物件がこのビューアの
+   * 可視範囲(担当/作成)に1件も無い」を表す。件数(propertyOwnerCount)は
+   * 可視範囲スコープ対象外の _count なので、件数が正でもこちらが false に
+   * なりうる。両方揃って初めてリンクを作ってよい。
+   */
+  hasReachableProperty: boolean;
 }
 
 /**
@@ -41,8 +51,13 @@ export function ownerFilteredPropertyListHref(ownerId: string): string {
 export function resolveOwnerPropertyLink(
   input: OwnerPropertyLinkInput,
 ): OwnerPropertyLink {
-  const { ownerId, propertyOwnerCount, singlePropertyId, propertyLinkAvailable } =
-    input;
+  const {
+    ownerId,
+    propertyOwnerCount,
+    singlePropertyId,
+    propertyLinkAvailable,
+    hasReachableProperty,
+  } = input;
   // property:read の無いセッションには、件数や物件IDの中身を見るまでもなく
   // 最優先で none にする(他の分岐より前)。この画面は property:read が無くても
   // 動き続ける契約なので、count > 0 のときに /properties?ownerId=... のような
@@ -52,6 +67,10 @@ export function resolveOwnerPropertyLink(
   // 「この所有者の物件」として見せてしまう。リンクにしない。
   if (ownerId === "") return { kind: "none" };
   if (propertyOwnerCount <= 0) return { kind: "none" };
+  // P2 (#139 二次回帰): 件数(スコープ対象外の _count)は正でも、この
+  // ビューアの可視範囲に紐づき物件が1件も無ければリンクを作らない。
+  // propertyLinkAvailable(権限)とは別の質問で、両方揃って初めて先へ進む。
+  if (!hasReachableProperty) return { kind: "none" };
   if (propertyOwnerCount === 1 && singlePropertyId !== null) {
     return { kind: "single", href: `/properties/${singlePropertyId}` };
   }

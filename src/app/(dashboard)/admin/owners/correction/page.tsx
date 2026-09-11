@@ -497,6 +497,7 @@ function OwnerCorrectionPageInner() {
                           propertyLinkAvailable={
                             data.summary.propertyLinkAvailable ?? false
                           }
+                          hasReachableProperty={c.hasReachableProperty}
                           zeroClassName="font-medium text-orange-600"
                         />
                       </td>
@@ -871,6 +872,7 @@ function DuplicateGroupCard({
                   count={m.propertyOwnerCount}
                   singlePropertyId={m.singlePropertyId}
                   propertyLinkAvailable={propertyLinkAvailable}
+                  hasReachableProperty={m.hasReachableProperty}
                 />
               </td>
               <td className="px-2 py-1 text-center">{m.changeLogCount}</td>

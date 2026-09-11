@@ -14,6 +14,7 @@ export function OwnerPropertyCountCell({
   count,
   singlePropertyId,
   propertyLinkAvailable,
+  hasReachableProperty,
   zeroClassName,
 }: {
   ownerId: string;
@@ -25,6 +26,13 @@ export function OwnerPropertyCountCell({
    * (件数自体は非秘匿・今までどおり表示する)。
    */
   propertyLinkAvailable: boolean;
+  /**
+   * P2 (#139 二次回帰): この所有者の紐づき物件を、このビューアが実際に
+   * 1件以上見られるか(API の候補ごとの `hasReachableProperty`)。
+   * count(_count・可視範囲スコープ対象外)は正でも、担当外の物件しか
+   * 無ければここが false になる——そのときはリンクにせず件数だけ描く。
+   */
+  hasReachableProperty: boolean;
   /**
    * 0件のときの見た目。指定が無ければ通常色。
    *
@@ -40,12 +48,13 @@ export function OwnerPropertyCountCell({
     propertyOwnerCount: count,
     singlePropertyId,
     propertyLinkAvailable,
+    hasReachableProperty,
   });
 
   if (link.kind === "none") {
     // 橙色(zeroClassName)は「0件だから削除候補」という所有者補正画面の意味を
     // 背負っている。count <= 0 のときだけ橙にする。count > 0 なのにリンクが
-    // 無い(property:read 不足など)場合は、リンクの下線・色だけを外した通常の
+    // 無い(property:read 不足・可視範囲に紐づき無し等)場合は、リンクの下線・色だけを外した通常の
     // 文字色で描く(＝リンクがあったときと同じ色から下線と青だけを引いたもの)。
     // link.kind === "none" をそのまま橙の条件にしない(件数の主張とビューアの
     // 事情の主張を混ぜない)。

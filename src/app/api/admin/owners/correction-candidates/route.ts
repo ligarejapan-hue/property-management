@@ -58,6 +58,17 @@ type Candidate = {
    * propertyVisibilityScopeWhere で担当外の物件を除外した後の値。
    */
   singlePropertyId: string | null;
+  /**
+   * P2 (#139 二次回帰): このビューアが実際にこの所有者の紐づき物件を
+   * 1件以上見られるか(スコープ済み propertyOwners 配列が非空かどうか)。
+   * propertyOwnerCount(_count)は可視範囲スコープ対象外のため、
+   * 「件数は正だがスコープ内の紐づきが0件」というケース(field_staff が
+   * 担当外の物件だけを持つ owner を見たとき)がありうる。このケースでは
+   * resolveOwnerPropertyLink がリンク先を作れず、件数だけリンクになっている
+   * 死んだリンク(/properties?ownerId=... が必ず空リストになる)を出していた
+   * ([#139] fallout の再発)。boolean のみで物件ID/件数などの中身は含まない。
+   */
+  hasReachableProperty: boolean;
   changeLogCount: number;
   importFileName: string | null;
   importRowNumber: number | null;
@@ -231,6 +242,11 @@ export async function GET(request: NextRequest) {
       const singlePropertyId = hasPropertyRead
         ? pickSinglePropertyId(owner.propertyOwners)
         : null;
+      // P2 (#139 二次回帰): スコープ済み配列(owner.propertyOwners)が
+      // 非空かどうかだけを見る。propertyOwnerCount(_count)は使わない
+      // ——不一致(件数は正だがスコープ内は0件)こそがこの flag で拾いたい
+      // ケースそのもの。
+      const hasReachableProperty = owner.propertyOwners.length > 0;
       const changeLogCount = changeLogCountMap.get(owner.id) ?? 0;
       const importInfo = importRowMap.get(owner.id) ?? null;
 
@@ -305,6 +321,7 @@ export async function GET(request: NextRequest) {
         version: owner.version,
         propertyOwnerCount,
         singlePropertyId,
+        hasReachableProperty,
         changeLogCount,
         importFileName: importInfo?.fileName ?? null,
         importRowNumber: importInfo?.rowNumber ?? null,

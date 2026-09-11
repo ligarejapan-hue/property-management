@@ -61,6 +61,20 @@ describe("補正候補画面の物件リンク", () => {
     }
   });
 
+  it("両方の呼び出しが hasReachableProperty を渡している(P2 #139 二次回帰)", () => {
+    // 件数は正だが可視範囲スコープ内の紐づきが0件のとき、この flag を
+    // 渡し忘れると壊れたデフォルト(undefined→falsy 扱い)でリンクの有無が
+    // 決まってしまう。呼び出し側の渡し忘れをここで固定する。
+    const calls = page.match(/<OwnerPropertyCountCell\b[\s\S]*?\/>/g) ?? [];
+    expect(calls.length).toBe(2);
+    for (const call of calls) {
+      expect(
+        call,
+        `hasReachableProperty が渡っていない呼び出し: ${call}`,
+      ).toContain("hasReachableProperty=");
+    }
+  });
+
   it("部品を import している", () => {
     expect(page).toContain(
       'import { OwnerPropertyCountCell } from "@/components/owners/owner-property-count-cell"',
@@ -100,6 +114,11 @@ describe("物件件数セルの部品", () => {
 
   it("none のときはリンクにしない", () => {
     expect(cell).toContain('link.kind === "none"');
+  });
+
+  it("hasReachableProperty を純関数へそのまま渡す(P2 #139 二次回帰)", () => {
+    const callBlock = extractBraceBlock(cellCode, "resolveOwnerPropertyLink({");
+    expect(callBlock).toContain("hasReachableProperty");
   });
 
   it("行き先が分かる説明を付ける(平易な日本語)", () => {

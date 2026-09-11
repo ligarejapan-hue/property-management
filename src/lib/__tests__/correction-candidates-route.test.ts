@@ -2343,3 +2343,130 @@ describe("GET correction-candidates: Codex P1 (#139 finding) singlePropertyId �
     expect(callArgs.select.propertyOwners.where).toBeUndefined();
   });
 });
+
+// ── P2 (#139 二次回帰): hasReachableProperty ──
+//
+// 修正前は「件数は正だがスコープ済み propertyOwners 配列が空」のとき
+// (field_staff が担当外の物件だけを持つ owner を見たとき)でも
+// propertyLinkAvailable=true・singlePropertyId=null のまま返っていたため、
+// resolveOwnerPropertyLink が many 判定に落ちて /properties?ownerId=... という
+// 必ず空リストになる死んだリンクを作っていた。hasReachableProperty は
+// スコープ済み配列の非空性だけを見て、この不一致を画面側へ伝える。
+describe("GET correction-candidates: P2 (#139 二次回帰) hasReachableProperty", () => {
+  const OWNER_ID = "11111111-1111-4111-8111-111111111111";
+
+  it("field_staff: 件数は正だがスコープ済み配列が空(scopedOut) → hasReachableProperty=false", async () => {
+    const { getApiSession, getUserPermissions } = await import(
+      "@/lib/api-helpers"
+    );
+    const FIELD_STAFF_ID = "field-staff-77777777-7777-4777-8777-777777777777";
+    vi.mocked(getApiSession).mockResolvedValueOnce({
+      id: FIELD_STAFF_ID,
+      email: "field3@test.com",
+      name: "現地スタッフ3",
+      role: "field_staff",
+    });
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+    ]);
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "担当外一件太郎",
+        propertyOwnerCount: 1,
+        scopedOut: true,
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    const c = json.candidates[0];
+    // 件数(_count 由来)は不変で正のまま。
+    expect(c.propertyOwnerCount).toBe(1);
+    expect(c.hasReachableProperty).toBe(false);
+    // capability flag(権限そのもの)は true のまま——これは別の質問。
+    expect(json.summary.propertyLinkAvailable).toBe(true);
+  });
+
+  it("field_staff: スコープ済み配列が非空 → hasReachableProperty=true", async () => {
+    const { getApiSession, getUserPermissions } = await import(
+      "@/lib/api-helpers"
+    );
+    const FIELD_STAFF_ID = "field-staff-66666666-6666-4666-8666-666666666666";
+    vi.mocked(getApiSession).mockResolvedValueOnce({
+      id: FIELD_STAFF_ID,
+      email: "field4@test.com",
+      name: "現地スタッフ4",
+      role: "field_staff",
+    });
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+    ]);
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "担当内一件太郎",
+        propertyOwnerCount: 1,
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].hasReachableProperty).toBe(true);
+  });
+
+  it("非 field_staff(スコープ無し): 紐づきがあれば常に hasReachableProperty=true", async () => {
+    // デフォルト mock は role: "admin"(スコープ対象外)。
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "管理者から見た所有者",
+        propertyOwnerCount: 3,
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].propertyOwnerCount).toBe(3);
+    expect(json.candidates[0].hasReachableProperty).toBe(true);
+  });
+
+  it("紐づきが0件の owner は hasReachableProperty=false(通常の0件と同じ)", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "ゼロ件太郎",
+        propertyOwnerCount: 0,
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].hasReachableProperty).toBe(false);
+  });
+});

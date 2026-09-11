@@ -3352,6 +3352,14 @@ export interface OwnerCorrectionCandidate {
   version: number;
   propertyOwnerCount: number;
   singlePropertyId: string | null;
+  /**
+   * P2 (#139 二次回帰): このビューアが実際にこの所有者の紐づき物件を
+   * 1件以上見られるか(スコープ済み propertyOwners 配列が非空かどうか)。
+   * propertyOwnerCount(_count)は可視範囲スコープ対象外なので、件数は正でも
+   * これが false になりうる(担当外の物件しか無い owner を field_staff が
+   * 見たとき)。boolean のみで物件ID等の中身は含まない。
+   */
+  hasReachableProperty: boolean;
   changeLogCount: number;
   importFileName: string | null;
   importRowNumber: number | null;
