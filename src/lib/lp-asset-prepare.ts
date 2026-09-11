@@ -2,7 +2,7 @@
  * LP用写真の端末側前処理(設計 2026-09-08 §2.3)。
  *  - サーバーは JPEG/PNG/WebP・8MB以下・長辺1600px以下だけ受ける(画像ライブラリを入れない方針)。
  *  - **例外なく全ての画像**を canvas で再エンコードする(長辺1600に縮小し JPEG 品質0.85)。
- *    HEIC もここで吸収する。無変換で送る道(pass)は用意しない。
+ *    HEIC は端末のデコーダが対応する場合(Apple 製)だけ変換できる。無変換で送る道(pass)は用意しない。
  *  - 無変換を廃した理由:
  *      (1) サーバー側の許可リスト strip(src/lib/lp-asset-metadata-strip.ts)は
  *          **Orientation の APP1 も含めて付随情報を全て落とす**(docs/deploy.md)。
@@ -39,8 +39,8 @@ export function lpAssetFileName(name: string, action: LpAssetAction): string {
 
 export type PreparedLpAsset = { ok: true; blob: Blob; fileName: string } | { ok: false; message: string };
 
-const UNSUPPORTED = "画像ファイル(JPEG / PNG / WebP / HEIC)を選んでください";
-const DECODE_FAILED = "この画像はこの端末では読み込めませんでした。iPhone は「設定 > カメラ > フォーマット > 互換性優先」、Android は HEIF をオフにして撮り直すか、JPEG に変換してからお試しください";
+const UNSUPPORTED = "画像ファイル(JPEG / PNG / WebP)を選んでください";
+const DECODE_FAILED = "この画像はこの端末では読み込めませんでした。HEIC(iPhoneの写真)は iPhone・iPad・Mac のブラウザからなら追加できます。ほかの端末では JPEG に変換してから追加するか、iPhone の「設定 > カメラ > フォーマット > 互換性優先」で撮り直してください";
 
 export async function prepareLpAssetForUpload(file: File): Promise<PreparedLpAsset> {
   if (typeof createImageBitmap !== "function" || typeof document === "undefined") {
