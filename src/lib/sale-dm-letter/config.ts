@@ -40,6 +40,22 @@ export function saleDmLpUrlFromEnv(): string | null {
   return trimOrNull(process.env.SALE_DM_LP_URL);
 }
 
+// 公開LPページ描画(/t/<token> のページ本体)用: LP URL・送付元表示・追跡base の env 値だけを読む
+// (APIキー等の秘匿 env は読み込まない)。saleDmLpUrlFromEnv と同じ理由で分離した専用リーダー。
+export function saleDmPublicPageConfigFromEnv(): {
+  lpUrl: string | null;
+  senderName: string | null;
+  senderContact: string | null;
+  trackingBaseUrl: string | null;
+} {
+  return {
+    lpUrl: trimOrNull(process.env.SALE_DM_LP_URL),
+    senderName: trimOrNull(process.env.SALE_DM_SENDER_NAME),
+    senderContact: trimOrNull(process.env.SALE_DM_SENDER_CONTACT),
+    trackingBaseUrl: trimOrNull(process.env.SALE_DM_TRACKING_BASE_URL),
+  };
+}
+
 // DB 行(非秘匿項目)+ 復号済みキー + env をマージ。DB 値(非null/非空)が優先・無ければ env。
 // 復号はこの関数の外(config-store)で行い、ここには復号済み(or null)を渡す純関数に保つ。
 export function mergeSaleDmConfig(

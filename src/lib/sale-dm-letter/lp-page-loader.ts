@@ -5,8 +5,7 @@
  */
 import { buildLpRenderInput } from "./lp-render-input";
 import { renderLpPage } from "./lp-page";
-import { loadSaleDmConfig } from "./config-store";
-import { resolveTrackingBaseUrl } from "./tracking";
+import { loadSaleDmPublicPageConfig } from "./config-store";
 import { buildUnsubscribeToken, buildUnsubscribeUrl, deriveUnsubscribeKey } from "./unsubscribe-token";
 
 const SELECT = {
@@ -33,7 +32,8 @@ export type LpPageData = { kind: "none" } | { kind: "page"; html: string; status
 // 配信停止URL: 印刷 route(お手紙の停止QR)と同じ導出をそのまま写す
 // (deriveUnsubscribeKey → buildUnsubscribeToken → buildUnsubscribeUrl)。鍵が未導出(NEXTAUTH_SECRET
 // 未設定)の環境では null を返し、ページは配信停止の案内なしで描画する(入口を壊さない)。
-// baseUrl は印刷 route と同じ解決(resolveTrackingBaseUrl=絶対http(s)検証込み)を使う。
+// baseUrl は loadSaleDmPublicPageConfig が印刷 route と同じ解決(resolveTrackingBaseUrl=絶対http(s)検証込み)を
+// 適用済みの値を渡す。
 function unsubscribeUrlFor(trackingToken: string, trackingBaseUrl: string | null): string | null {
   try {
     const key = deriveUnsubscribeKey();
@@ -47,9 +47,12 @@ function unsubscribeUrlFor(trackingToken: string, trackingBaseUrl: string | null
 export async function loadLpPageData(client: LpPageClientLike, token: string): Promise<LpPageData> {
   const row = await client.dmRecipientDraft.findUnique({ where: { trackingToken: token }, select: SELECT });
   const v = row?.lpVariant;
-  if (!row || !v || !v.headline || !v.bodyText || v.bodyText.trim().length === 0) return { kind: "none" };
-  const cfg = await loadSaleDmConfig();
-  const trackingBaseUrl = resolveTrackingBaseUrl(cfg) ?? null;
+  // headline/bodyText は空白のみも未保存扱い(見た目上は空文と同じ=ページを出さない)。
+  if (!row || !v || !v.headline?.trim() || !v.bodyText || v.bodyText.trim().length === 0) return { kind: "none" };
+  // 公開・未認証・高頻度の /t 経路ゆえ秘匿APIキー列を読まない専用リーダーを使う
+  // (loadSaleDmConfig は使わない=このページ描画パスで課金キーを materialize しない不変条件)。
+  const cfg = await loadSaleDmPublicPageConfig();
+  const trackingBaseUrl = cfg.trackingBaseUrl ?? null;
   const mode = row.status === "sent" ? "live" : "preview";
   const input = buildLpRenderInput(
     {

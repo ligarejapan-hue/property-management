@@ -30,6 +30,8 @@ export async function GET(
   const { token } = await params;
   // 既定LP は設定(DB→env)から解決する。型ごとLP は recordTrackingHit が返す variantLpUrl が優先。
   // 公開・未認証経路ゆえ LP URL だけを読む専用ローダーを使う(課金APIキーを取得/復号しない)。
+  // ページ本体(下の loadLpPageData)も同じ理由で別の専用ローダー(loadSaleDmPublicPageConfig)を使う。
+  // どちらも loadSaleDmConfig(全設定+復号)は呼ばない=この公開経路で課金APIキーを materialize しない。
   const lpUrl = await loadSaleDmLpUrl();
 
   // 転送先 LP 未設定なら fail-closed(404)。受け手は LP に到達できないため、トラッキングも

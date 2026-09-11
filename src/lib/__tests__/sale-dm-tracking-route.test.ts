@@ -295,6 +295,9 @@ d2("GET /t/[token]", () => {
     e2(res.headers.get("content-type")).toContain("text/html");
     e2(res.headers.get("cache-control")).toBe("no-store");
     e2(res.headers.get("x-robots-tag")).toContain("noindex");
+    // Ruling R4: 公開LPページは CSP で外部読み込みなしをブラウザに強制する。
+    e2(res.headers.get("content-security-policy")).toContain("default-src 'none'");
+    e2(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     e2(await res.text()).toContain("LP");
     const pm = prismaMock as never as { dmRecipientDraft: { update: ReturnType<typeof vi.fn> } };
     e2(pm.dmRecipientDraft.update).toHaveBeenCalledOnce(); // 計数は従来どおり
@@ -308,6 +311,9 @@ d2("GET /t/[token]", () => {
     loadLpPageData.mockResolvedValueOnce({ kind: "page", html: "<html>プレビュー</html>", status: "confirmed" });
     const res = await GET(new Request("http://x/t/tok-presend") as never, ctx("tok-presend"));
     e2(res.status).toBe(200);
+    // Ruling R4: プレビュー帯付きページも CSP は同じ(公開LPページ共通ヘッダ)。
+    e2(res.headers.get("content-security-policy")).toContain("default-src 'none'");
+    e2(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     e2(pm.dmRecipientDraft.update).not.toHaveBeenCalled(); // 送付前は計上しない(既存の recordTrackingHit の挙動どおり)
   });
 
