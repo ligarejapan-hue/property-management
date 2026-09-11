@@ -25,7 +25,14 @@ export function OwnerPropertyCountCell({
    * (件数自体は非秘匿・今までどおり表示する)。
    */
   propertyLinkAvailable: boolean;
-  /** 0件のときの見た目。指定が無ければ通常色。 */
+  /**
+   * 0件のときの見た目。指定が無ければ通常色。
+   *
+   * P2 (#139 fallout の再発): この色は「件数が0件である」というデータの主張で
+   * あって、「リンクが無い」というビューアの事情の主張ではない。
+   * link.kind === "none" は「0件」と「property:read が無い」の両方で起きうる
+   * ため、キーを link.kind ではなく count 自体に取る(下記参照)。
+   */
   zeroClassName?: string;
 }) {
   const link = resolveOwnerPropertyLink({
@@ -36,11 +43,17 @@ export function OwnerPropertyCountCell({
   });
 
   if (link.kind === "none") {
-    return (
-      <span className={zeroClassName ?? "text-gray-700 dark:text-gray-200"}>
-        {count}
-      </span>
-    );
+    // 橙色(zeroClassName)は「0件だから削除候補」という所有者補正画面の意味を
+    // 背負っている。count <= 0 のときだけ橙にする。count > 0 なのにリンクが
+    // 無い(property:read 不足など)場合は、リンクの下線・色だけを外した通常の
+    // 文字色で描く(＝リンクがあったときと同じ色から下線と青だけを引いたもの)。
+    // link.kind === "none" をそのまま橙の条件にしない(件数の主張とビューアの
+    // 事情の主張を混ぜない)。
+    const className =
+      count <= 0
+        ? (zeroClassName ?? "text-gray-700 dark:text-gray-200")
+        : "text-gray-700 dark:text-gray-200";
+    return <span className={className}>{count}</span>;
   }
 
   return (

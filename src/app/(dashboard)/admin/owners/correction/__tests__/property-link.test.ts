@@ -16,6 +16,32 @@ const cell = readFileSync(
   "utf-8",
 ).replace(/\r\n/g, "\n");
 
+/**
+ * コメントを剥がしてから走査する。剥がさないと、marker や条件式の文字列を
+ * "たまたま含むだけの説明コメント" を実コードと取り違える
+ * (このリポジトリで実際に起きた事故と同型)。
+ */
+function stripComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "");
+}
+
+/** marker(末尾が "{") から対応する閉じ "}" までを波かっこの深さで取り出す。 */
+function extractBraceBlock(text: string, marker: string): string {
+  const start = text.indexOf(marker);
+  if (start === -1) throw new Error(`marker not found: ${marker}`);
+  let depth = 1;
+  for (let i = start + marker.length; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  throw new Error(`unbalanced braces after marker: ${marker}`);
+}
+
+const cellCode = stripComments(cell);
+
 describe("補正候補画面の物件リンク", () => {
   it("物件件数のセルを共通部品にしている(2箇所とも)", () => {
     const uses = page.match(/<OwnerPropertyCountCell/g) ?? [];
@@ -79,5 +105,19 @@ describe("物件件数セルの部品", () => {
   it("行き先が分かる説明を付ける(平易な日本語)", () => {
     expect(cell).toContain("この物件の基本情報を開く");
     expect(cell).toContain("この所有者の物件を一覧で見る");
+  });
+  it("橙色は『0件』という**データ**の主張。リンクが無いだけの行には付けない", () => {
+    // link.kind === "none" は「0件」と「property:read が無い」の両方で起きる。
+    // 橙を link.kind に紐づけると、物件を持つ所有者が削除候補の色で出てしまう。
+    const noneBlock = extractBraceBlock(cellCode, 'if (link.kind === "none") {');
+    // 橙の選択は count で決めること。
+    expect(noneBlock).toMatch(/count\s*<=\s*0\s*\?[\s\S]*zeroClassName/);
+    // zeroClassName が count のガードの外で使われていないこと(登場は1回だけ)。
+    expect(noneBlock.split("zeroClassName").length - 1).toBe(1);
+  });
+
+  it("リンクが無くても件数そのものは必ず描く", () => {
+    const noneBlock = extractBraceBlock(cellCode, 'if (link.kind === "none") {');
+    expect(noneBlock).toContain("{count}");
   });
 });
