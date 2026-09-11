@@ -348,6 +348,14 @@ export default function AdminOwnerDetailPage() {
                 <p className="text-xs text-amber-700 dark:text-amber-400">
                   物件一覧を読み込めませんでした
                 </p>
+              ) : linkedProperties.length === 0 && owner.propertyOwnerCount > 0 ? (
+                // P2 (外部レビュー): 上の「紐づき物件数」は可視範囲スコープ対象外の
+                // 件数なので、担当外の物件しか無い所有者ではここが0件のまま
+                // 「紐づく物件はありません」と出て件数表示と矛盾していた。
+                // 件数>0なのに一覧が空のときは「無い」ではなく「見えない」と伝える。
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  紐づく物件はありますが、あなたには表示できません
+                </p>
               ) : linkedProperties.length === 0 ? (
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   紐づく物件はありません
