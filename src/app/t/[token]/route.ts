@@ -6,6 +6,8 @@ import { recordTrackingHit } from "@/lib/sale-dm-letter/tracking-record";
 import { isAbsoluteHttpUrl } from "@/lib/sale-dm-letter/tracking";
 import { loadSaleDmLpUrl } from "@/lib/sale-dm-letter/config-store";
 import { clientRateKey, createRateLimiter } from "@/lib/public-rate-limit";
+import { loadLpPageData, type LpPageData } from "@/lib/sale-dm-letter/lp-page-loader";
+import { LP_PAGE_HEADERS } from "@/lib/sale-dm-letter/lp-page";
 
 // 認証不要の公開エンドポイント(proxy.ts の PUBLIC_PATHS に "/t/" を追加済み)。
 // 受け手(所有者)は本システムのログインユーザーではないため認証免除が必須。
@@ -58,6 +60,17 @@ export async function GET(
       targetTable: "dm_recipient_drafts",
       detail: { firstHit: true, at: new Date().toISOString() },
     });
+  }
+
+  // LP型に文章がある宛先はアプリ内のご案内ページを返す(設計 §2.4)。読めなければ従来の転送(入口を壊さない)。
+  let page: LpPageData = { kind: "none" };
+  try {
+    page = await loadLpPageData(prisma, token);
+  } catch {
+    page = { kind: "none" };
+  }
+  if (page.kind === "page") {
+    return new NextResponse(page.html, { status: 200, headers: { ...LP_PAGE_HEADERS } });
   }
 
   // 遷移先: 当該宛先の型に lpUrl があればその型のLPへ(型A→LP1/型B→LP2 の振り分け)、無ければ既定 LP へ。

@@ -1,0 +1,68 @@
+/**
+ * /t/[token] のページ描画用の読み出し(設計 §2.4)。計数(recordTrackingHit)とは分け、読むだけ。
+ * select に氏名・宛先住所・所有者を**含めない**(テストで固定)。ページの材料は LP型の文章/枠/写真の publicId と
+ * 物件の所在(町名まで)・種別・会社案内・配信停止URL だけ。
+ */
+import { buildLpRenderInput } from "./lp-render-input";
+import { renderLpPage } from "./lp-page";
+import { loadSaleDmConfig } from "./config-store";
+import { resolveTrackingBaseUrl } from "./tracking";
+import { buildUnsubscribeToken, buildUnsubscribeUrl, deriveUnsubscribeKey } from "./unsubscribe-token";
+
+const SELECT = {
+  status: true,
+  trackingToken: true,
+  lpVariant: {
+    select: {
+      headline: true, lead: true, bodyText: true, faqJson: true,
+      media: { select: { slot: true, heading: true, figureKind: true, asset: { select: { publicId: true, width: true, height: true, deletedAt: true } } }, orderBy: { sortOrder: "asc" as const } },
+    },
+  },
+  property: { select: { address: true, propertyType: true } },
+} as const;
+
+type Row = {
+  status: "draft" | "confirmed" | "sent";
+  trackingToken: string;
+  lpVariant: { headline: string | null; lead: string | null; bodyText: string | null; faqJson: unknown; media: Array<{ slot: string; heading: string | null; figureKind: string | null; asset: { publicId: string; width: number; height: number; deletedAt: Date | null } | null }> } | null;
+  property: { address: string | null; propertyType: string | null };
+};
+export interface LpPageClientLike { dmRecipientDraft: { findUnique: (args: { where: { trackingToken: string }; select: typeof SELECT }) => Promise<Row | null> } }
+export type LpPageData = { kind: "none" } | { kind: "page"; html: string; status: Row["status"] };
+
+// 配信停止URL: 印刷 route(お手紙の停止QR)と同じ導出をそのまま写す
+// (deriveUnsubscribeKey → buildUnsubscribeToken → buildUnsubscribeUrl)。鍵が未導出(NEXTAUTH_SECRET
+// 未設定)の環境では null を返し、ページは配信停止の案内なしで描画する(入口を壊さない)。
+// baseUrl は印刷 route と同じ解決(resolveTrackingBaseUrl=絶対http(s)検証込み)を使う。
+function unsubscribeUrlFor(trackingToken: string, trackingBaseUrl: string | null): string | null {
+  try {
+    const key = deriveUnsubscribeKey();
+    const token = buildUnsubscribeToken(trackingToken, key);
+    return buildUnsubscribeUrl(token, trackingBaseUrl ?? undefined);
+  } catch {
+    return null;
+  }
+}
+
+export async function loadLpPageData(client: LpPageClientLike, token: string): Promise<LpPageData> {
+  const row = await client.dmRecipientDraft.findUnique({ where: { trackingToken: token }, select: SELECT });
+  const v = row?.lpVariant;
+  if (!row || !v || !v.headline || !v.bodyText || v.bodyText.trim().length === 0) return { kind: "none" };
+  const cfg = await loadSaleDmConfig();
+  const trackingBaseUrl = resolveTrackingBaseUrl(cfg) ?? null;
+  const mode = row.status === "sent" ? "live" : "preview";
+  const input = buildLpRenderInput(
+    {
+      variant: { headline: v.headline, lead: v.lead, bodyText: v.bodyText, faqJson: v.faqJson },
+      media: v.media,
+      property: row.property,
+      company: { senderName: cfg.senderName, senderContact: cfg.senderContact },
+    },
+    {
+      mode,
+      unsubscribeUrl: mode === "live" ? unsubscribeUrlFor(row.trackingToken, trackingBaseUrl) : null,
+      phoneTapToken: mode === "live" ? row.trackingToken : null,
+    },
+  );
+  return { kind: "page", html: renderLpPage(input), status: row.status };
+}
