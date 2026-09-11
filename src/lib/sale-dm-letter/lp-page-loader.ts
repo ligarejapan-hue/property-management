@@ -45,13 +45,19 @@ function unsubscribeUrlFor(trackingToken: string, trackingBaseUrl: string | null
 }
 
 export async function loadLpPageData(client: LpPageClientLike, token: string): Promise<LpPageData> {
+  // ロールアウトゲート(社内プレビュー route は対象外・このローダーを呼ぶのは公開 /t/[token] のみ):
+  // SALE_DM_LP_PUBLIC_ENABLED が立つまでは常に none。draft の内容を見るより前に判定し、無効時は
+  // DB 読み取り(dmRecipientDraft.findUnique)自体を行わない(送付済みの以前の印刷分が HTTPS 移行前に
+  // 本番へデプロイした瞬間アプリ内ページとして出てしまう事故を止める)。
+  // 公開・未認証・高頻度の /t 経路ゆえ秘匿APIキー列を読まない専用リーダーを使う
+  // (loadSaleDmConfig は使わない=このページ描画パスで課金キーを materialize しない不変条件)。
+  const cfg = await loadSaleDmPublicPageConfig();
+  if (!cfg.lpPublicEnabled) return { kind: "none" };
+
   const row = await client.dmRecipientDraft.findUnique({ where: { trackingToken: token }, select: SELECT });
   const v = row?.lpVariant;
   // headline/bodyText は空白のみも未保存扱い(見た目上は空文と同じ=ページを出さない)。
   if (!row || !v || !v.headline?.trim() || !v.bodyText || v.bodyText.trim().length === 0) return { kind: "none" };
-  // 公開・未認証・高頻度の /t 経路ゆえ秘匿APIキー列を読まない専用リーダーを使う
-  // (loadSaleDmConfig は使わない=このページ描画パスで課金キーを materialize しない不変条件)。
-  const cfg = await loadSaleDmPublicPageConfig();
   const trackingBaseUrl = cfg.trackingBaseUrl ?? null;
   const mode = row.status === "sent" ? "live" : "preview";
   const input = buildLpRenderInput(

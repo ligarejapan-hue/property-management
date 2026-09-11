@@ -18,6 +18,12 @@ const trimOrNull = (v: string | null | undefined): string | null => {
   return t && t.length > 0 ? t : null;
 };
 
+// "1" / "true"(大小無視)のみ true。未設定・それ以外(例: "yes", "0")は false(既定=無効側に倒す)。
+const isTruthyFlag = (v: string | null | undefined): boolean => {
+  const t = v?.trim().toLowerCase();
+  return t === "1" || t === "true";
+};
+
 // env のみから設定を解決(DB 未使用)。reader の既定値=従来どおりの env ベース挙動。
 export function saleDmConfigFromEnv(): SaleDmResolvedConfig {
   return {
@@ -40,18 +46,22 @@ export function saleDmLpUrlFromEnv(): string | null {
   return trimOrNull(process.env.SALE_DM_LP_URL);
 }
 
-// 公開LPページ描画(/t/<token> のページ本体)用: 送付元表示・追跡base の env 値だけを読む
+// 公開LPページ描画(/t/<token> のページ本体)用: 送付元表示・追跡base・公開スイッチの env 値だけを読む
 // (APIキー等の秘匿 env は読み込まない)。saleDmLpUrlFromEnv と同じ理由で分離した専用リーダー。
 // 外部LPの住所(SALE_DM_LP_URL)はページ描画に使わないため読まない(転送は saleDmLpUrlFromEnv 側)。
+// lpPublicEnabled: SALE_DM_LP_PUBLIC_ENABLED が真値("1"/"true")のときだけ true。DB列は無い
+// (env 専用のロールアウトゲート・HTTPS 移行前に本番へ公開LPを出さないための止め弁)。
 export function saleDmPublicPageConfigFromEnv(): {
   senderName: string | null;
   senderContact: string | null;
   trackingBaseUrl: string | null;
+  lpPublicEnabled: boolean;
 } {
   return {
     senderName: trimOrNull(process.env.SALE_DM_SENDER_NAME),
     senderContact: trimOrNull(process.env.SALE_DM_SENDER_CONTACT),
     trackingBaseUrl: trimOrNull(process.env.SALE_DM_TRACKING_BASE_URL),
+    lpPublicEnabled: isTruthyFlag(process.env.SALE_DM_LP_PUBLIC_ENABLED),
   };
 }
 

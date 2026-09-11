@@ -322,6 +322,14 @@ d2("GET /t/[token]", () => {
     e2(pm.dmRecipientDraft.update).not.toHaveBeenCalled(); // 送付前は計上しない(既存の recordTrackingHit の挙動どおり)
   });
 
+  i2("公開LPロールアウトゲート無効時は loader が none を返す→従来どおり外部LPへ302(loader.test 側で cfg.lpPublicEnabled=false を担保・ここは route 側の分岐だけ確認)", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    loadLpPageData.mockResolvedValueOnce({ kind: "none" });
+    const res = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
+    e2(res.status).toBe(302);
+    e2(res.headers.get("Location")).toBe("https://lp.example.com/sell");
+  });
+
   i2("LP型なしは従来どおり 302、loader が例外でも 302(入口を壊さない)", async () => {
     process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
     loadLpPageData.mockResolvedValueOnce({ kind: "none" });

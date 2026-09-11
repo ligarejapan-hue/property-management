@@ -16,7 +16,7 @@ vi.mock("../sale-dm-letter/secret-crypto", async (importOriginal) => {
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import crypto from "crypto";
 import prismaMock from "@/lib/prisma";
-import { saleDmConfigFromEnv, saleDmLpUrlFromEnv } from "../sale-dm-letter/config";
+import { saleDmConfigFromEnv, saleDmLpUrlFromEnv, saleDmPublicPageConfigFromEnv } from "../sale-dm-letter/config";
 import { loadSaleDmConfig, loadSaleDmLpUrl, loadSaleDmPublicPageConfig } from "../sale-dm-letter/config-store";
 import { encryptSecret, decryptSecret } from "../sale-dm-letter/secret-crypto";
 
@@ -30,6 +30,7 @@ beforeEach(() => {
   for (const k of [
     "SALE_DM_LETTER_PROVIDER", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "SALE_DM_LETTER_MODEL",
     "SALE_DM_TRACKING_BASE_URL", "SALE_DM_LP_URL", "SALE_DM_SENDER_NAME", "SALE_DM_SENDER_CONTACT", "NEXT_PUBLIC_USE_MOCK",
+    "SALE_DM_LP_PUBLIC_ENABLED",
   ]) delete process.env[k];
 });
 afterEach(() => { process.env = ENV; });
@@ -45,6 +46,21 @@ describe("saleDmConfigFromEnv", () => {
   it("空白のみの値は null 扱い", () => {
     process.env.SALE_DM_LP_URL = "   ";
     expect(saleDmConfigFromEnv().lpUrl).toBeNull();
+  });
+});
+
+describe("saleDmPublicPageConfigFromEnv: lpPublicEnabled(公開LPロールアウトゲート)の env 解析", () => {
+  it.each([
+    ["1", true],
+    ["true", true],
+    ["TRUE", true],
+    ["0", false],
+    [undefined, false],
+    ["yes", false],
+  ] as const)("SALE_DM_LP_PUBLIC_ENABLED=%s → %s", (v, expected) => {
+    if (v === undefined) delete process.env.SALE_DM_LP_PUBLIC_ENABLED;
+    else process.env.SALE_DM_LP_PUBLIC_ENABLED = v;
+    expect(saleDmPublicPageConfigFromEnv().lpPublicEnabled).toBe(expected);
   });
 });
 
@@ -214,6 +230,14 @@ describe("loadSaleDmPublicPageConfig: 公開/tページ描画用・送付元/追
     pm.saleDmConfig.findUnique.mockResolvedValue({ trackingBaseUrl: null, senderName: null, senderContact: null });
     await loadSaleDmPublicPageConfig();
     expect(saleDmConfigFromEnv).not.toHaveBeenCalled();
+  });
+
+  it("lpPublicEnabled は DB列を持たず env 値をそのまま通す(DB行があっても env が権威)", async () => {
+    process.env.SALE_DM_LP_PUBLIC_ENABLED = "1";
+    pm.saleDmConfig.findUnique.mockResolvedValue({ trackingBaseUrl: null, senderName: null, senderContact: null });
+    expect((await loadSaleDmPublicPageConfig()).lpPublicEnabled).toBe(true);
+    delete process.env.SALE_DM_LP_PUBLIC_ENABLED;
+    expect((await loadSaleDmPublicPageConfig()).lpPublicEnabled).toBe(false);
   });
 });
 

@@ -584,13 +584,15 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 
 `20260911100000_add_dm_phone_tap` は additive のみ(`dm_recipient_drafts` に `phone_tap_count`(既定0)・`phone_tap_first_at`(nullable)を追加)。バックフィル無し。rollback は2列の DROP で戻せる(enum の追加なし)。
 
-`/t/<token>` は今回から HTML を返すようになる(宛先に付いたLP型に文章が保存されていればアプリ内のご案内ページ、無ければ従来どおり302で外部LPへ転送。未知tokenは従来どおり302(有効なtokenはページが出るため応答は当然異なる。tokenは11桁の base64url・60/分の制限))。レスポンスヘッダは `Cache-Control: no-store`・`X-Robots-Tag: noindex`・CSP `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`(外部読み込みなし・インラインCSSとscript1本のみ。`connect-src 'self'` は電話タップの送信が自分自身宛のときだけ通るようにするもので、これが無いと送信ごと遮断される)。電話ボタンのタップは `POST /t/<token>/phone-tap` で受け(常に204を返す=宛先の存在有無を漏らさない・レート制限60/分)、送付済み(`sent`)の宛先のときだけ `phone_tap_count`/`phone_tap_first_at` を更新する(反響としては数えない=反響は引き続き手入力)。
+`/t/<token>` は今回から HTML を返す**経路を持つ**ようになる(公開ロールアウトゲート `SALE_DM_LP_PUBLIC_ENABLED` が有効かつ宛先に付いたLP型に文章が保存されていればアプリ内のご案内ページ、それ以外(ゲート無効・LP型なし)は従来どおり302で外部LPへ転送。未知tokenは従来どおり302(有効なtokenはゲート有効時のみページが出るため応答は当然異なる。tokenは11桁の base64url・60/分の制限))。レスポンスヘッダは `Cache-Control: no-store`・`X-Robots-Tag: noindex`・CSP `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`(外部読み込みなし・インラインCSSとscript1本のみ。`connect-src 'self'` は電話タップの送信が自分自身宛のときだけ通るようにするもので、これが無いと送信ごと遮断される)。電話ボタンのタップは `POST /t/<token>/phone-tap` で受け(常に204を返す=宛先の存在有無を漏らさない・レート制限60/分)、送付済み(`sent`)の宛先のときだけ `phone_tap_count`/`phone_tap_first_at` を更新する(反響としては数えない=反響は引き続き手入力)。社内プレビュー(LP型編集画面のプレビュー)はこのゲートの対象外で常に見える。
 
-公開経路の設定読み出しは新設の `loadSaleDmPublicPageConfig`(会社案内・電話番号など表示に要る列だけを読み、謄本取得等の課金用APIキー列には触れない)。nginx のアクセスログ除外は引き続き `/u/` のみ(`/t/` は追加しない=既存方針を維持)。
+公開経路の設定読み出しは新設の `loadSaleDmPublicPageConfig`(会社案内・電話番号・公開ゲートの有無など表示判定に要る列/envだけを読み、謄本取得等の課金用APIキー列には触れない)。nginx のアクセスログ除外は引き続き `/u/` のみ(`/t/` は追加しない=既存方針を維持)。
 
 監査ログの action は2つ追加(社内プレビュー表示=`sale_dm_lp_preview_view`・電話タップ=`sale_dm_lp_phone_tap`)。公開LP表示は既存の `sale_dm_tracking_hit` をそのまま使う(この action は allowlist に載っていなかったので補完した=漏れの是正)。
 
-**所有者に実際に見せるための前提=公開LP用HTTPS(発注者作業)**: (1) Xserver の「DNSレコード設定」で `lp.ligarejapan.com` の A レコードを1行追加しVPSへ向ける、(2) こちらで証明書を取得(`certbot`)、(3) nginx に server block を追加(`deploy/nginx/property-management.conf.example` の既存設定を参考に `lp.ligarejapan.com` 用の server を追加)、(4) 売却DM設定画面の「追跡URL(trackingBaseUrl)」をこの https の住所へ切り替える。切替前は(これから印刷する手紙も含め)従来どおり外部LPへ飛ぶだけなので、切替は任意のタイミングでよい(⚠切替後に印刷した手紙から新しいURLになる=既に配布済みの手紙のQRは古いURLのまま変わらない)。
+**⚠公開ロールアウトゲート`SALE_DM_LP_PUBLIC_ENABLED`が無いと、本番反映と同時に既存の印刷済みQRがそのまま公開LPになる**: 本番の追跡ホスト(`lp.ligarejapan.com`)は既にこのアプリへ着地する設定のため、このゲートが無ければ反映した瞬間に「送付済み・LP型に文章あり」の宛先へ以前印刷済みの `/t/<token>` が(HTTPS 切替前の平文HTTPのままでも)アプリ内ページとして出てしまう。そのためゲートの既定値は無効(未設定)で、下の切替手順の最後で明示的に有効化するまで `/t/` は従来どおり外部LPへ転送し続ける。
+
+**所有者に実際に見せるための切替手順(発注者作業を含む・この順で行う)**: (1) Xserver の「DNSレコード設定」で `lp.ligarejapan.com` の A レコードを1行追加しVPSへ向ける、(2) こちらで証明書を取得(`certbot`)、(3) nginx に server block を追加(`deploy/nginx/property-management.conf.example` の既存設定を参考に `lp.ligarejapan.com` 用の server を追加)、(4) 売却DM設定画面の「追跡URL(trackingBaseUrl)」をこの https の住所へ切り替える、(5) **`SALE_DM_LP_PUBLIC_ENABLED=1` を app.env に追加して `systemctl restart property-management`**(env は起動時読みのため restart 必須)、(6) 印刷し直す(切替後に印刷した手紙から新しいURL・アプリ内ページになる)。**(5)のスイッチを入れるまでは、(4)まで終えて trackingBaseUrl を https に切り替えていても `/t/` は従来どおり外部LPへ転送するだけ**(LP型に文章を保存した宛先でも同じ)。⚠切替後に印刷した手紙から新しいURLになる=既に配布済みの手紙のQRは古いURLのまま変わらない。
 
 #### 反響の記録リリース（migration `add_dm_reaction_columns`）: 旧 sale_dm 送付記録の照合
 

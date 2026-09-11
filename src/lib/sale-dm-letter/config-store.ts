@@ -70,6 +70,7 @@ export async function loadSaleDmPublicPageConfig(): Promise<{
   senderName: string | null;
   senderContact: string | null;
   trackingBaseUrl: string | undefined;
+  lpPublicEnabled: boolean;
 }> {
   let db: {
     senderName: string | null; senderContact: string | null; trackingBaseUrl: string | null;
@@ -77,7 +78,8 @@ export async function loadSaleDmPublicPageConfig(): Promise<{
   try {
     db = await prisma.saleDmConfig.findUnique({
       where: { id: SALE_DM_CONFIG_ID },
-      // ← 送付元表示/追跡base列のみ。秘匿(キー)列は取得しない。
+      // ← 送付元表示/追跡base列のみ。秘匿(キー)列は取得しない。lpPublicEnabled は DB列を持たない
+      // (env 専用のロールアウトゲート)ため select にも含めない。
       select: { senderName: true, senderContact: true, trackingBaseUrl: true },
     });
   } catch {
@@ -90,5 +92,7 @@ export async function loadSaleDmPublicPageConfig(): Promise<{
     senderName: pick(db?.senderName, env.senderName),
     senderContact: pick(db?.senderContact, env.senderContact),
     trackingBaseUrl: resolveTrackingBaseUrl({ trackingBaseUrl: pick(db?.trackingBaseUrl, env.trackingBaseUrl) }),
+    // DB列は無い(env 専用のロールアウトゲート)。DB経路は env 値をそのまま通すだけ。
+    lpPublicEnabled: env.lpPublicEnabled,
   };
 }

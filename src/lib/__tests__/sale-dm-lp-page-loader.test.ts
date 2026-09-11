@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 vi.mock("@/lib/sale-dm-letter/config-store", () => ({
   loadSaleDmPublicPageConfig: vi.fn(async () => ({
     senderName: "株式会社リガーレ", senderContact: "TEL 03-1234-5678",
-    trackingBaseUrl: "https://lp.example.com",
+    trackingBaseUrl: "https://lp.example.com", lpPublicEnabled: true,
   })),
 }));
 import { loadLpPageData } from "../sale-dm-letter/lp-page-loader";
@@ -53,6 +53,17 @@ describe("loadLpPageData", () => {
     const c = client(draft());
     await loadLpPageData(c as never, "tok");
     expect(loadSaleDmPublicPageConfig).toHaveBeenCalled();
+  });
+
+  it("ロールアウトゲート: lpPublicEnabled=false なら送付済み・LP型ありの draft でも none(DB読み取りも省略)", async () => {
+    vi.mocked(loadSaleDmPublicPageConfig).mockResolvedValueOnce({
+      senderName: "株式会社リガーレ", senderContact: "TEL 03-1234-5678",
+      trackingBaseUrl: "https://lp.example.com", lpPublicEnabled: false,
+    });
+    const c = client(draft());
+    const r = await loadLpPageData(c as never, "tok");
+    expect(r.kind).toBe("none");
+    expect(c.dmRecipientDraft.findUnique).not.toHaveBeenCalled();
   });
 
   describe("R1: 配信停止URLの有無は NEXTAUTH_SECRET の有無に依存し、他のテストの実行順に依存しない", () => {
