@@ -298,6 +298,9 @@ d2("GET /t/[token]", () => {
     // Ruling R4: 公開LPページは CSP で外部読み込みなしをブラウザに強制する。
     e2(res.headers.get("content-security-policy")).toContain("default-src 'none'");
     e2(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    // 電話タップの送信(sendBeacon/fetch)は自分自身宛だけ通す。これが無いと遮断される。
+    e2(res.headers.get("content-security-policy")).toContain("connect-src 'self'");
+    e2(res.headers.get("content-security-policy")).toContain("base-uri 'none'");
     e2(await res.text()).toContain("LP");
     const pm = prismaMock as never as { dmRecipientDraft: { update: ReturnType<typeof vi.fn> } };
     e2(pm.dmRecipientDraft.update).toHaveBeenCalledOnce(); // 計数は従来どおり
@@ -314,6 +317,8 @@ d2("GET /t/[token]", () => {
     // Ruling R4: プレビュー帯付きページも CSP は同じ(公開LPページ共通ヘッダ)。
     e2(res.headers.get("content-security-policy")).toContain("default-src 'none'");
     e2(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    e2(res.headers.get("content-security-policy")).toContain("connect-src 'self'");
+    e2(res.headers.get("content-security-policy")).toContain("base-uri 'none'");
     e2(pm.dmRecipientDraft.update).not.toHaveBeenCalled(); // 送付前は計上しない(既存の recordTrackingHit の挙動どおり)
   });
 

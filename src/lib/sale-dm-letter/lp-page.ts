@@ -15,10 +15,13 @@ export const LP_CTA_LABEL = "無料査定を申し込む";
 const CONTACT_ID = "contact";
 
 /** 公開LP用の応答ヘッダ。外部読み込みなしを regex ではなくブラウザに強制させる(CSP)。
+ *  - `connect-src 'self'` = 電話タップの送信先が自分自身のときだけ通る(これが無いと sendBeacon/fetch ごと遮断される)。
+ *  - `form-action 'self'` / `base-uri 'none'` = 万一 HTML に細工が入っても外部へ送出・相対URLの付け替えをさせない。
  *  preview route(社内プレビュー・iframe埋め込み)は呼び出し側で frame-ancestors 'self' に上書きする。 */
 export const LP_PAGE_HEADERS: Readonly<Record<string, string>> = {
   ...PUBLIC_PAGE_HEADERS,
-  "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'none'",
+  "Content-Security-Policy":
+    "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
 };
 
 /** JSON.stringify の出力を <script> タグ内にそのまま埋め込んでも安全な文字列にする。

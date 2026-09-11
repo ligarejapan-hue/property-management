@@ -101,4 +101,13 @@ describe("LP_PAGE_HEADERS", () => {
     expect(LP_PAGE_HEADERS["Content-Security-Policy"]).toContain("default-src 'none'");
     expect(LP_PAGE_HEADERS["Cache-Control"]).toBe("no-store");
   });
+
+  it("電話タップの送信を CSP が塞がない(connect-src 'self')・base-uri も塞ぐ", () => {
+    const csp = LP_PAGE_HEADERS["Content-Security-Policy"] ?? "";
+    // connect-src が無いと default-src 'none' に落ちて sendBeacon/fetch ごと遮断される(電話タップが永久に届かない)。
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).toContain("form-action 'self'");
+    expect(csp).toContain("base-uri 'none'");
+    expect(csp).toContain("frame-ancestors 'none'");
+  });
 });

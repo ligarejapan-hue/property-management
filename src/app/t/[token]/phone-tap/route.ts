@@ -19,10 +19,32 @@ function noContent(): NextResponse {
   return new NextResponse(null, { status: 204, headers: { "Cache-Control": "no-store" } });
 }
 
+/** よそのサイトに置かれたページからの送信かどうかの判定。
+ *  Origin ヘッダが付いていて、その相手先が自分自身でなければ「よそから」= 数えない。
+ *  Origin が無いとき(sendBeacon の一部経路など)は従来どおり通す
+ *  = 本物のタップを取りこぼさない方を優先する。
+ *  ⚠弾くときも応答は同じ 204(no-store)のまま。ここで 403 を返すと
+ *    「弾かれた=そのURLは実在する」という手掛かりになってしまう(列挙耐性)。 */
+function isForeignOrigin(req: NextRequest): boolean {
+  const origin = req.headers.get("origin");
+  if (!origin) return false;
+  let originHost: string;
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    return true; // URL として読めない Origin は自分自身ではない。
+  }
+  return originHost !== new URL(req.url).host;
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> },
 ) {
+  // よそのサイトからの送信は数えない(応答は同じ 204)。判定はDBに触る前に済ませる。
+  if (isForeignOrigin(req)) {
+    return noContent();
+  }
   // 機械的な連打の門前払い(記録より先)。溢れたときは黙って 204(存在・件数を漏らさない)。
   if (!tapLimiter.hit(`t-tap:${clientRateKey(req.headers)}`)) {
     return noContent();

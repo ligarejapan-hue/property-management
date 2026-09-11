@@ -30,6 +30,9 @@ type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as { dmRecipientDraft: { findUnique: Fn; update: Fn } };
 const req = (ip = "10.0.0.1") =>
   new Request("http://x/t/tok/phone-tap", { method: "POST", headers: { "x-real-ip": ip } }) as never;
+// Origin 付き(よそのサイトからの送信=計上しない、の検証用)。
+const reqWithOrigin = (origin: string, ip = "10.0.0.1") =>
+  new Request("http://x/t/tok/phone-tap", { method: "POST", headers: { "x-real-ip": ip, origin } }) as never;
 const ctx = { params: Promise.resolve({ token: "tok" }) };
 
 beforeEach(() => {
@@ -111,10 +114,33 @@ describe("POST /t/[token]/phone-tap", () => {
     expect(Object.keys(writeAuditLog.mock.calls[0][0].detail)).toEqual(["at"]);
   });
 
-  it("未知 token も 204(存在を漏らさない)・2回目は監査なし", async () => {
+  it("未知 token も 204(存在を漏らさない)・計上も監査もしない", async () => {
     pm.dmRecipientDraft.findUnique.mockResolvedValue(null);
     expect((await POST(req("10.0.0.2"), ctx)).status).toBe(204);
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("よそのサイトからの送信(Origin 不一致)は 204 のまま計上しない", async () => {
+    const res = await POST(reqWithOrigin("https://evil.example.com", "10.0.1.1"), ctx);
+    // 応答は正常時とまったく同じ(弾いたことを応答で悟らせない)。
+    expect(res.status).toBe(204);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("URL として読めない Origin も計上しない", async () => {
+    const res = await POST(reqWithOrigin("null", "10.0.1.2"), ctx);
+    expect(res.status).toBe(204);
+    expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+  });
+
+  it("Origin が自分自身なら従来どおり計上する", async () => {
+    const res = await POST(reqWithOrigin("http://x", "10.0.1.3"), ctx);
+    expect(res.status).toBe(204);
+    expect(pm.dmRecipientDraft.update).toHaveBeenCalledOnce();
+    expect(writeAuditLog).toHaveBeenCalledOnce();
   });
 
   it("recordPhoneTap が想定外に例外を投げても 204/no-store・監査なし", async () => {

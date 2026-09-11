@@ -65,7 +65,6 @@ beforeEach(() => {
     { property: { propertyType: "mansion_unit" } },
   ]);
   loadSaleDmPublicPageConfig.mockResolvedValue({
-    lpUrl: "https://example.com/lp",
     senderName: "テスト不動産",
     senderContact: "03-1234-5678",
     trackingBaseUrl: "https://example.com",
@@ -82,6 +81,10 @@ describe("GET LPプレビュー(社内)", () => {
     const csp = res.headers.get("Content-Security-Policy") ?? "";
     expect(csp).toContain("frame-ancestors 'self'");
     expect(csp).toContain("default-src 'none'");
+    // frame-ancestors だけを差し替えている(他の指示は公開LPと同じ)ことを固定する。
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).toContain("base-uri 'none'");
+    expect(csp).not.toContain("frame-ancestors 'none'");
     const html = await res.text();
     expect(html).toContain("プレビュー");
     expect(html).toContain("○○区○○町");
