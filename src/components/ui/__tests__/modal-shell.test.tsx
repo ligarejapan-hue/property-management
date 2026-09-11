@@ -64,10 +64,12 @@ describe("ModalShell", () => {
     expect(html).not.toContain("gap-3");
   });
 
-  it("size で幅が変わる(sm/md/lg)", () => {
+  it("size で幅が変わる(sm/md/lg/xl)", () => {
     expect(render(<ModalShell size="sm" title="t" footer={<i />} />)).toContain("max-w-sm");
     expect(render(<ModalShell title="t" footer={<i />} />)).toContain("max-w-md");
     expect(render(<ModalShell size="lg" title="t" footer={<i />} />)).toContain("max-w-lg");
+    // xl = 実寸の画面を見せる用(LPプレビューの PC枠 1000px が縮まずに入る)。
+    expect(render(<ModalShell size="xl" title="t" footer={<i />} />)).toContain("max-w-[1080px]");
   });
 
   it("本文(children)は省略できる(確認だけのダイアログ)", () => {

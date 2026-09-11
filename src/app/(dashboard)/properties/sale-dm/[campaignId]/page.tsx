@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { Loader2, CheckCircle2, Printer, Download, Send } from "lucide-react";
 import {
   fetchSaleDmCampaign,
+  fetchSaleDmAggregate,
   confirmSaleDmDrafts,
   markSaleDmDraftSent,
   apiErrorCode,
@@ -26,6 +27,9 @@ export default function SaleDmWorkspacePage() {
   const campaignId = params.campaignId;
 
   const [campaign, setCampaign] = useState<SaleDmCampaign | null>(null);
+  // LP型ごと/組み合わせの表を出してよいか(公開LPのロールアウトスイッチ)。画面は env を読めないので
+  // 集計API の応答から受け取る(@codex R10 P1)。取得前・取得失敗時は false=出さない側に倒す。
+  const [lpMetricsEnabled, setLpMetricsEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -38,6 +42,13 @@ export default function SaleDmWorkspacePage() {
       const { campaign } = await fetchSaleDmCampaign(campaignId);
       setCampaign(campaign);
       setSelectedId((prev) => prev ?? campaign.recipients[0]?.id ?? null);
+      // 表示の可否だけを取りに行く軽い問い合わせ。失敗しても作業画面は止めない(表を出さないだけ)。
+      try {
+        const agg = await fetchSaleDmAggregate(campaignId);
+        setLpMetricsEnabled(agg.lpMetricsEnabled === true);
+      } catch {
+        setLpMetricsEnabled(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "キャンペーンの取得に失敗しました");
     } finally {
@@ -219,7 +230,7 @@ export default function SaleDmWorkspacePage() {
         {(actionBusy || loading) && <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />}
       </div>
 
-      <SaleDmAggregateView campaign={campaign} />
+      <SaleDmAggregateView campaign={campaign} lpMetricsEnabled={lpMetricsEnabled} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr_320px]">
         {/* 左: 調整パネル + A/B型管理 */}

@@ -31,7 +31,8 @@ export interface ModalShellProps {
   children?: ReactNode;
   /** ボタン群(共通 Button を渡す)。justify-end gap-2 で並ぶ。 */
   footer: ReactNode;
-  size?: "sm" | "md" | "lg";
+  /** xl = 実寸の画面をそのまま見せる用(LPプレビューの 1000px 枠など)。 */
+  size?: "sm" | "md" | "lg" | "xl";
   /** Escape(cancel)の通知先。省略時は Escape で閉じない(状態の食い違い防止)。 */
   onClose?: () => void;
   className?: string;
@@ -41,6 +42,8 @@ const SIZE_CLASSES: Record<NonNullable<ModalShellProps["size"]>, string> = {
   sm: "max-w-sm",
   md: "max-w-md",
   lg: "max-w-lg",
+  // Tailwind の max-w-* は 7xl(80rem)まで飛ぶので、PC枠 1000px + 余白がちょうど入る実寸を指定する。
+  xl: "max-w-[1080px]",
 };
 
 export function ModalShell({

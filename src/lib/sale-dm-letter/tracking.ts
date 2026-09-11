@@ -9,8 +9,11 @@ export { isAbsoluteHttpUrl } from "./print-ready";
 export const TRACKING_PATH_PREFIX = "/t/";
 
 // 郵送QRの base(設定: trackingBaseUrl)。未設定/非絶対は undefined → print が 503 fail-closed。
-// cfg は DB→env 解決済み。no-arg は env のみ(後方互換)。
-export function resolveTrackingBaseUrl(cfg: SaleDmResolvedConfig = saleDmConfigFromEnv()): string | undefined {
+// cfg は DB→env 解決済み。no-arg は env のみ(後方互換)。参照するのは trackingBaseUrl だけ
+// (Pick で受ける。resolveLpUrl と同じ理由=公開経路は秘匿キーを含まない最小オブジェクトを渡せる)。
+export function resolveTrackingBaseUrl(
+  cfg: Pick<SaleDmResolvedConfig, "trackingBaseUrl"> = saleDmConfigFromEnv(),
+): string | undefined {
   return resolveAbsoluteHttpUrl(cfg.trackingBaseUrl);
 }
 

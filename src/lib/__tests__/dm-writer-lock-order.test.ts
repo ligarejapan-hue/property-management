@@ -24,7 +24,10 @@ function firstTx(src: string): string {
 function assertOrder(label: string, text: string, needles: string[]) {
   let last = -1;
   for (const n of needles) {
-    const idx = text.indexOf(n);
+    // last+1 から探す(単なる indexOf(n) だと、前の needle がこの needle の文字列を
+    // prefix に含む場合に同じ位置へマッチして順序判定が崩れる。例:
+    // "tx.dmRecipientDraft.update" は "tx.dmRecipientDraft.updateMany" の prefix)。
+    const idx = text.indexOf(n, last + 1);
     expect(idx, `${label}: 「${n}」が見つからない`).toBeGreaterThan(-1);
     expect(idx, `${label}: 「${n}」の順序が規約と逆`).toBeGreaterThan(last);
     last = idx;
@@ -134,6 +137,28 @@ describe("DM 反響 writer のロック順序(PR-B・R47: terminal は Owner FOR
       "allowTerminal: false",
     ]);
     expect(body).not.toMatch(/lockOwnersForUpdate/);
+  });
+
+  it("公開LP電話タップ: 親行ロック→初回の条件付きupdateMany→count++(反響ではないので syncSaleDmReaction を呼ばない)", () => {
+    const src = read("src/lib/sale-dm-letter/phone-tap-record.ts");
+    const body = src.slice(src.indexOf("export async function recordPhoneTap"));
+    assertOrder("phone-tap", body, [
+      "lockPropertyRow",
+      "tx.dmRecipientDraft.updateMany",
+      "tx.dmRecipientDraft.update",
+    ]);
+    expect(body).not.toMatch(/syncSaleDmReaction|lockOwnersForUpdate|outcome/);
+  });
+
+  it("公開LPのページ閲覧: 親行ロック→初回の条件付きupdateMany→count++(反響ではないので syncSaleDmReaction を呼ばない)", () => {
+    const src = read("src/lib/sale-dm-letter/lp-page-view-record.ts");
+    const body = src.slice(src.indexOf("export async function recordLpPageView"));
+    assertOrder("lp-page-view", body, [
+      "lockPropertyRow",
+      "tx.dmRecipientDraft.updateMany",
+      "tx.dmRecipientDraft.update",
+    ]);
+    expect(body).not.toMatch(/syncSaleDmReaction|lockOwnersForUpdate|outcome/);
   });
 
   it("同期ヘルパー: terminal は Owner FOR UPDATE→再読取→適用(変化なしはロックしない)", () => {

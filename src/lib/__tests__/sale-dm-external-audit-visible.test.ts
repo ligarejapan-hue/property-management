@@ -39,6 +39,15 @@ const CASES: Array<{ action: string; detail: Record<string, unknown> }> = [
   { action: "sale_dm_lp_media_update", detail: { campaignId: "c1", assetCount: 2, figureCount: 1, updatedAt: "2026-09-10T00:00:00.000Z" } },
   { action: "sale_dm_lp_image_prompt_view", detail: { campaignId: "c1", slot: "hero", viewedAt: "2026-09-10T00:00:00.000Z" } },
   { action: "sale_dm_lp_asset_delete", detail: { deletedAt: "2026-09-10T00:00:00.000Z" } },
+  {
+    action: "sale_dm_tracking_hit",
+    detail: { firstHit: true, at: "2026-09-11T00:00:00.000Z" },
+  },
+  { action: "sale_dm_lp_phone_tap", detail: { at: "2026-09-11T00:00:00.000Z" } },
+  {
+    action: "sale_dm_lp_preview_view",
+    detail: { campaignId: "c1", device: "sp", viewedAt: "2026-09-11T00:00:00.000Z" },
+  },
 ];
 
 describe("外部AI方式の監査 detail は表示でも消えない", () => {

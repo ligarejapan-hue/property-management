@@ -6,6 +6,9 @@ import { recordTrackingHit } from "@/lib/sale-dm-letter/tracking-record";
 import { isAbsoluteHttpUrl } from "@/lib/sale-dm-letter/tracking";
 import { loadSaleDmLpUrl } from "@/lib/sale-dm-letter/config-store";
 import { clientRateKey, createRateLimiter } from "@/lib/public-rate-limit";
+import { loadLpPageData, type LpPageData } from "@/lib/sale-dm-letter/lp-page-loader";
+import { recordLpPageView } from "@/lib/sale-dm-letter/lp-page-view-record";
+import { LP_PAGE_HEADERS } from "@/lib/sale-dm-letter/lp-page";
 
 // 認証不要の公開エンドポイント(proxy.ts の PUBLIC_PATHS に "/t/" を追加済み)。
 // 受け手(所有者)は本システムのログインユーザーではないため認証免除が必須。
@@ -28,6 +31,8 @@ export async function GET(
   const { token } = await params;
   // 既定LP は設定(DB→env)から解決する。型ごとLP は recordTrackingHit が返す variantLpUrl が優先。
   // 公開・未認証経路ゆえ LP URL だけを読む専用ローダーを使う(課金APIキーを取得/復号しない)。
+  // ページ本体(下の loadLpPageData)も同じ理由で別の専用ローダー(loadSaleDmPublicPageConfig)を使う。
+  // どちらも loadSaleDmConfig(全設定+復号)は呼ばない=この公開経路で課金APIキーを materialize しない。
   const lpUrl = await loadSaleDmLpUrl();
 
   // 転送先 LP 未設定なら fail-closed(404)。受け手は LP に到達できないため、トラッキングも
@@ -58,6 +63,25 @@ export async function GET(
       targetTable: "dm_recipient_drafts",
       detail: { firstHit: true, at: new Date().toISOString() },
     });
+  }
+
+  // LP型に文章がある宛先はアプリ内のご案内ページを返す(設計 §2.4)。読めなければ従来の転送(入口を壊さない)。
+  let page: LpPageData = { kind: "none" };
+  try {
+    page = await loadLpPageData(prisma, token);
+  } catch {
+    page = { kind: "none" };
+  }
+  if (page.kind === "page") {
+    // 送付済みの宛先にアプリ内ページを**実際に返せた**ときだけ、LP型の成績用の閲覧を積む(@codex R10 P1)。
+    // 上の recordTrackingHit(QRの読み取り)はページを出すかどうかの判定より前に走るため、外部LPへ
+    // 転送しただけの訪問でも立つ。その数字を LP型ごとの「ページの成績」として使うと比較が汚れる。
+    // 送付前(プレビュー)は計上しない(電話タップ・QR計数と同じ扱い)。
+    // 監査は初回ヒットの sale_dm_tracking_hit が既に拾っているので追加しない。
+    if (page.status === "sent") {
+      await recordLpPageView(prisma, { draftId: page.draftId, propertyId: page.propertyId });
+    }
+    return new NextResponse(page.html, { status: 200, headers: { ...LP_PAGE_HEADERS } });
   }
 
   // 遷移先: 当該宛先の型に lpUrl があればその型のLPへ(型A→LP1/型B→LP2 の振り分け)、無ければ既定 LP へ。

@@ -66,8 +66,11 @@ const pm = prismaMock as never as {
 };
 const ctx = (id = "c1") => ({ params: Promise.resolve({ id }) });
 
+const ENV = process.env;
 beforeEach(() => {
   vi.clearAllMocks();
+  // 公開LPのスイッチは既定(未投入)のまま使う。入れた世界は sale-dm-aggregate-route-lp-metrics.test.ts。
+  process.env = { ...ENV };
   (requireSaleDmAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ session: { id: "u1" } });
   pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "テスト", createdBy: "u1" });
   pm.dmVariant.findMany.mockResolvedValue([
@@ -154,19 +157,28 @@ describe("GET aggregate", () => {
     expect(json.total.sent).toBe(2);
   });
 
-  it("旗が false のあいだ byLpVariant / byPair は返さない(DM型ごとの閲覧率は返す)", async () => {
-    // 公開の追跡リンク(/t/)が LP型ごとにページを出し分けるまで、LP型別の閲覧は「ページの成績」に
-    // ならない。画面を隠すだけでなく **API も出さない**(@codex R4 P2)。
-    // 旗が true のときに両方を返すことは sale-dm-aggregate-route-lp-metrics.test.ts が見る。
+  it("公開LPのスイッチが入っていれば byLpVariant / byPair も返す(電話タップ列を含む)", async () => {
+    // 公開LPのスイッチが入って初めて /t/ が LP型ごとにページを出し分ける=LP型別の閲覧が
+    // 「ページの成績」として意味を持つ(@codex R10 P1)。未投入時の応答は lp-metrics のテストで固定。
+    process.env.SALE_DM_LP_PUBLIC_ENABLED = "1";
     pm.dmVariant.findMany.mockResolvedValue([{ id: "v1", label: "A" }]);
     pm.dmLpVariant.findMany.mockResolvedValue([{ id: "l1", label: "X" }]);
     pm.dmRecipientDraft.findMany.mockResolvedValue([
-      { variantId: "v1", lpVariantId: "l1", deliveryStatus: "delivered", lpFirstAccessAt: new Date(), phoneInquiryAt: null, property: { createdBy: "u1", assignedTo: null } },
-      { variantId: "v1", lpVariantId: null, deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, property: { createdBy: "u1", assignedTo: null } },
+      { variantId: "v1", lpVariantId: "l1", deliveryStatus: "delivered", lpFirstAccessAt: new Date(), lpPageFirstAt: new Date(), phoneInquiryAt: null, phoneTapFirstAt: new Date(), property: { createdBy: "u1", assignedTo: null } },
+      { variantId: "v1", lpVariantId: null, deliveryStatus: "delivered", lpFirstAccessAt: null, lpPageFirstAt: null, phoneInquiryAt: null, phoneTapFirstAt: null, property: { createdBy: "u1", assignedTo: null } },
     ]);
     const json = await (await GET(new Request("http://x") as never, ctx())).json();
-    expect(Object.keys(json)).not.toContain("byLpVariant");
-    expect(Object.keys(json)).not.toContain("byPair");
+    expect(Object.keys(json)).toContain("byLpVariant");
+    expect(Object.keys(json)).toContain("byPair");
     expect(json.byDmVariantView[0]).toMatchObject({ label: "A", viewed: 1, delivered: 2, viewRate: 0.5 });
+    const lpX = json.byLpVariant.find((v: { lpVariantId: string }) => v.lpVariantId === "l1");
+    expect(lpX).toMatchObject({ label: "X", viewed: 1, phoneTapped: 1, phoneTapRate: 1 });
+  });
+
+  it("集計対象の select に phoneTapFirstAt と lpPageFirstAt を含む", async () => {
+    pm.dmRecipientDraft.findMany.mockResolvedValue([]);
+    await GET(new Request("http://x") as never, ctx());
+    // lpPageFirstAt = アプリ内ご案内ページを実際に返せた閲覧(LP型ごと/組み合わせの分子・@codex R10)。
+    expect(pm.dmRecipientDraft.findMany.mock.calls[0][0].select).toMatchObject({ phoneTapFirstAt: true, lpPageFirstAt: true, lpFirstAccessAt: true });
   });
 });

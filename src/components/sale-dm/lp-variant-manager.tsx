@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Plus, Trash2, Pencil, FileText, Copy, Image as ImageIcon } from "lucide-react";
+import { Loader2, Plus, Trash2, Pencil, FileText, Copy, Image as ImageIcon, Eye } from "lucide-react";
 import type { SaleDmCampaign, SaleDmLpVariant, SaleDmLpVariantOptions } from "@/lib/api-client";
 import {
   createSaleDmLpVariant,
@@ -12,6 +12,7 @@ import {
 } from "@/lib/api-client";
 import { TONE_OPTIONS, LENGTH_OPTIONS, APPEAL_OPTIONS, STRENGTH_OPTIONS } from "@/lib/sale-dm-letter/adjust-model";
 import LpMediaPanel from "./lp-media-panel";
+import LpPreviewPanel from "./lp-preview-panel";
 
 const DEFAULT_OPTIONS: SaleDmLpVariantOptions = { tone: "formal", length: "medium", appeal: "price", strength: "low" };
 type FormState = { label: string; options: SaleDmLpVariantOptions };
@@ -29,6 +30,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
   const [pasteBody, setPasteBody] = useState("");
   const [letterNotice, setLetterNotice] = useState<string | null>(null);
   const [mediaFor, setMediaFor] = useState<SaleDmLpVariant | null>(null);
+  const [previewFor, setPreviewFor] = useState<SaleDmLpVariant | null>(null);
 
   const run = async (fn: () => Promise<unknown>, keepPanel = false) => {
     if (busy) return;
@@ -73,12 +75,25 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
   const openLetter = (v: SaleDmLpVariant) =>
     run(async () => {
       setMediaFor(null);
+      setPreviewFor(null);
       const res = await fetchSaleDmLpVariantPrompt(campaign.id, v.id);
       setLetterFor(v);
       setLetter(res);
       setPasteBody(res.rawTemplate ?? "");
       setLetterNotice(null);
     }, true);
+  const openMedia = (v: SaleDmLpVariant) => {
+    setLetterFor(null);
+    setLetter(null);
+    setPreviewFor(null);
+    setMediaFor(v);
+  };
+  const openPreview = (v: SaleDmLpVariant) => {
+    setLetterFor(null);
+    setLetter(null);
+    setMediaFor(null);
+    setPreviewFor(v);
+  };
   const copyPrompt = () =>
     run(async () => {
       if (!letter) return;
@@ -122,7 +137,8 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
             </div>
             <div className="flex gap-1">
               <button type="button" onClick={() => openLetter(v)} disabled={busy} aria-label={`LP型「${v.label}」の文章`} title="プロンプトを表示して、手元のAIで作った文章を貼り付けます" className="rounded p-1 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"><FileText className="h-3.5 w-3.5" /></button>
-              <button type="button" onClick={() => { setLetterFor(null); setLetter(null); setMediaFor(v); }} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」の写真と図`} title={v.headline ? "写真と図" : "先に文章を保存してください"} className="rounded p-1 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><ImageIcon className="h-3.5 w-3.5" /></button>
+              <button type="button" onClick={() => openMedia(v)} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」の写真と図`} title={v.headline ? "写真と図" : "先に文章を保存してください"} className="rounded p-1 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><ImageIcon className="h-3.5 w-3.5" /></button>
+              <button type="button" onClick={() => openPreview(v)} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」のプレビュー`} title={v.headline ? "プレビュー" : "先に文章を保存してください"} className="rounded p-1 text-sky-700 hover:bg-sky-50 disabled:opacity-50"><Eye className="h-3.5 w-3.5" /></button>
               <button type="button" onClick={() => startEdit(v)} disabled={busy} aria-label={`LP型「${v.label}」を編集`} className="rounded p-1 text-gray-600 hover:bg-gray-100 disabled:opacity-50"><Pencil className="h-3.5 w-3.5" /></button>
               <button type="button" onClick={() => remove(v)} disabled={busy} aria-label={`LP型「${v.label}」を削除`} className="rounded p-1 text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>
             </div>
@@ -189,6 +205,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
       )}
 
       {mediaFor && <LpMediaPanel key={mediaFor.id} campaignId={campaign.id} lpId={mediaFor.id} label={mediaFor.label} onClose={() => setMediaFor(null)} />}
+      {previewFor && <LpPreviewPanel key={previewFor.id} campaignId={campaign.id} lpId={previewFor.id} label={previewFor.label} onClose={() => setPreviewFor(null)} />}
     </div>
   );
 }

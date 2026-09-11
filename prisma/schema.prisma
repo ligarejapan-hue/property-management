@@ -1198,7 +1198,16 @@ model DmRecipientDraft {
   trackingToken         String           @unique @map("tracking_token")
   lpFirstAccessAt       DateTime?        @map("lp_first_access_at")
   lpAccessCount         Int              @default(0) @map("lp_access_count")
+  // アプリ内ご案内ページを実際に返した閲覧(公開LP §2.4)。lpFirstAccessAt(QR読み取り)とは別物:
+  // QRを読んだ時点で lpFirstAccessAt は立つが、公開スイッチ未投入・LP型に文章なし・読み出し失敗の
+  // ときは外部LPへ転送しており、アプリ内ページは出していない。LP型ごとの成績はこちらで数える。
+  lpPageFirstAt         DateTime?        @map("lp_page_first_at")
+  lpPageViewCount       Int              @default(0) @map("lp_page_view_count")
   phoneInquiryAt        DateTime?        @map("phone_inquiry_at")
+  // 公開LPの電話ボタンのタップ(設計 2026-09-08 §2.4)。タップ≠通話なので反響(outcome)は立てない。
+  // phoneInquiryAt(担当者が手で立てる電話反響)とは別物。
+  phoneTapCount         Int              @default(0) @map("phone_tap_count")
+  phoneTapFirstAt       DateTime?        @map("phone_tap_first_at")
   outcome               DmOutcome        @default(none)
   outcomeNote           String?          @map("outcome_note")
   generatedBy           String           @map("generated_by") @db.Uuid

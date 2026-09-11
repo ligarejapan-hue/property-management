@@ -2,8 +2,6 @@
 
 import type { SaleDmCampaign } from "@/lib/api-client";
 import { buildVariantRows, buildDmViewRows, buildLpVariantRows, buildPairRows } from "@/lib/sale-dm-letter/aggregate-view-model";
-// 表示の可否は画面と API で**同じ1か所**を見る(@codex R4 P2)。
-import { LP_METRICS_ENABLED } from "@/lib/sale-dm-letter/lp-metrics-flag";
 
 const th = "px-3 py-2 font-medium text-gray-600";
 const td = "px-3 py-2";
@@ -37,7 +35,11 @@ function Table({ title, head, rows }: { title: string; head: string[]; rows: Arr
 }
 
 // 3つの見方(設計 2026-09-08 §2.1)。率の隣に必ず分母と件数を置く(少数での早合点を防ぐ)。
-export default function SaleDmAggregateView({ campaign }: { campaign: SaleDmCampaign }) {
+//
+// lpMetricsEnabled: LP型ごと/組み合わせの表を出してよいか。**サーバーの集計API の応答**
+// (lpMetricsEnabled)をそのまま渡す(@codex R10 P1)。画面は env を読めないため、公開LPの
+// ロールアウトスイッチの状態は API 経由でしか知れない。既定 false=出さない側に倒す。
+export default function SaleDmAggregateView({ campaign, lpMetricsEnabled }: { campaign: SaleDmCampaign; lpMetricsEnabled: boolean }) {
   const dmRows = buildVariantRows(campaign);
   const viewRows = new Map(buildDmViewRows(campaign).map((r) => [r.variantId, r]));
   const lpRows = buildLpVariantRows(campaign);
@@ -53,12 +55,12 @@ export default function SaleDmAggregateView({ campaign }: { campaign: SaleDmCamp
           return { key: r.variantId, cells: [`型 ${r.label}`, r.sent, r.delivered, r.undeliverable, v?.viewed ?? 0, v?.viewRate ?? "—", r.inquiries, r.inquiryRate, r.undeliverableRate], strong: [5, 7], danger: [8] };
         })}
       />
-      {LP_METRICS_ENABLED ? (
+      {lpMetricsEnabled ? (
         <>
           <Table
-            title="LP型ごと(ページの成績。申込率は申込フォーム対応後に追加)"
-            head={["LP型", "送付", "到達", "閲覧", "閲覧率"]}
-            rows={lpRows.map((r) => ({ key: r.lpVariantId, cells: [r.label, r.sent, r.delivered, r.viewed, r.viewRate], strong: [4] }))}
+            title="LP型ごと(ページの成績。閲覧=ご案内ページを実際に表示した数。申込率は申込フォーム対応後に追加)"
+            head={["LP型", "送付", "到達", "閲覧", "閲覧率", "電話タップ"]}
+            rows={lpRows.map((r) => ({ key: r.lpVariantId, cells: [r.label, r.sent, r.delivered, r.viewed, r.viewRate, r.phoneTapLabel], strong: [4] }))}
           />
           <Table
             title="組み合わせ(DM型 × LP型)"

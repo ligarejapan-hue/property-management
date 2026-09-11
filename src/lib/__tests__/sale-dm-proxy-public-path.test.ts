@@ -36,4 +36,7 @@ describe("proxy public paths(/t/ 追跡リンク)", () => {
     expect(isPublicPath("/lp")).toBe(false);
     expect(isPublicPath("/api/properties/sale-dm/lp-assets")).toBe(false);
   });
+  it("社内プレビュー route は公開パスではない(認証必須)", () => {
+    expect(isPublicPath("/api/properties/sale-dm/campaigns/x/lp-variants/y/preview")).toBe(false);
+  });
 });

@@ -14,6 +14,16 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/dm-reaction/sync", () => ({ syncSaleDmReaction: vi.fn() }));
 // 親行ロックも呼び出し順の検証のため mock(実物は api-helpers 経由で next-auth を引き込む)。
 vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRow: vi.fn() }));
+// LP型ページの読み出しは lp-page-loader.test.ts で担保。ここでは route の呼び出し順・
+// 302/200 の分岐だけを検証するため mock(既定は {kind:"none"}=従来どおり 302)。
+const { loadLpPageData } = vi.hoisted(() => ({ loadLpPageData: vi.fn() }));
+vi.mock("@/lib/sale-dm-letter/lp-page-loader", () => ({ loadLpPageData }));
+// アプリ内ページを実際に返せたときの閲覧記録(@codex R10)。本体は lp-page-view-record 側で担保し、
+// ここでは route が「どのときに呼ぶ/呼ばない」かだけを見る。
+const { recordLpPageView } = vi.hoisted(() => ({
+  recordLpPageView: vi.fn(async (_client: unknown, _draft: { draftId: string; propertyId: string }) => ({ first: true })),
+}));
+vi.mock("@/lib/sale-dm-letter/lp-page-view-record", () => ({ recordLpPageView }));
 vi.mock("@/lib/prisma", () => {
   const client: Record<string, unknown> = {
     dmRecipientDraft: {
@@ -168,7 +178,12 @@ import { GET } from "../../app/t/[token]/route";
 
 const ctx = (token: string) => ({ params: Promise.resolve({ token }) });
 const ENV = process.env;
-b2(() => { vi.clearAllMocks(); process.env = { ...ENV }; });
+b2(() => {
+  vi.clearAllMocks();
+  process.env = { ...ENV };
+  // 既定は LP型なし(従来どおり 302)。ケースごとに mockResolvedValueOnce/mockRejectedValueOnce で上書きする。
+  loadLpPageData.mockResolvedValue({ kind: "none" });
+});
 
 d2("GET /t/[token]", () => {
   i2("既知トークン + LP 設定で 302 → LP・記録する・no-store", async () => {
@@ -275,5 +290,95 @@ d2("GET /t/[token]", () => {
     const res = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
     e2(res.status).toBe(302);
     e2(res.headers.get("Location")).toBe("https://variant-b-lp.example.com"); // 計上失敗でも既定でなく型LP
+  });
+
+  i2("LP型に文章がある送付済み宛先は 302 ではなく HTML(200・no-store・noindex)を返し、計数と監査は従来どおり", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    loadLpPageData.mockResolvedValueOnce({ kind: "page", html: "<!doctype html><html><body>LP</body></html>", status: "sent", draftId: "r1", propertyId: "p1" });
+    // 既定の findUnique = { id: "r1", propertyId: "p1", lpFirstAccessAt: null, status: "sent" }(送付済み・初回ヒット)。
+    const res = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
+    e2(res.status).toBe(200);
+    e2(res.headers.get("content-type")).toContain("text/html");
+    e2(res.headers.get("cache-control")).toBe("no-store");
+    e2(res.headers.get("x-robots-tag")).toContain("noindex");
+    // Ruling R4: 公開LPページは CSP で外部読み込みなしをブラウザに強制する。
+    e2(res.headers.get("content-security-policy")).toContain("default-src 'none'");
+    e2(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    // 電話タップの送信(sendBeacon/fetch)は自分自身宛だけ通す。これが無いと遮断される。
+    e2(res.headers.get("content-security-policy")).toContain("connect-src 'self'");
+    e2(res.headers.get("content-security-policy")).toContain("base-uri 'none'");
+    e2(await res.text()).toContain("LP");
+    const pm = prismaMock as never as { dmRecipientDraft: { update: ReturnType<typeof vi.fn> } };
+    e2(pm.dmRecipientDraft.update).toHaveBeenCalledOnce(); // 計数は従来どおり
+    e2(writeAuditLog).toHaveBeenCalledOnce(); // 初回計数の監査は変わらない
+  });
+
+  i2("送付前でも LP型に文章があればプレビュー帯付き HTML(計数なし)", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    const pm = prismaMock as never as { dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> } };
+    pm.dmRecipientDraft.findUnique.mockResolvedValueOnce({ id: "r1", lpFirstAccessAt: null, status: "confirmed" });
+    loadLpPageData.mockResolvedValueOnce({ kind: "page", html: "<html>プレビュー</html>", status: "confirmed", draftId: "r1", propertyId: "p1" });
+    const res = await GET(new Request("http://x/t/tok-presend") as never, ctx("tok-presend"));
+    e2(res.status).toBe(200);
+    // Ruling R4: プレビュー帯付きページも CSP は同じ(公開LPページ共通ヘッダ)。
+    e2(res.headers.get("content-security-policy")).toContain("default-src 'none'");
+    e2(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    e2(res.headers.get("content-security-policy")).toContain("connect-src 'self'");
+    e2(res.headers.get("content-security-policy")).toContain("base-uri 'none'");
+    e2(pm.dmRecipientDraft.update).not.toHaveBeenCalled(); // 送付前は計上しない(既存の recordTrackingHit の挙動どおり)
+  });
+
+  i2("公開LPロールアウトゲート無効時は loader が none を返す→従来どおり外部LPへ302(loader.test 側で cfg.lpPublicEnabled=false を担保・ここは route 側の分岐だけ確認)", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    loadLpPageData.mockResolvedValueOnce({ kind: "none" });
+    const res = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
+    e2(res.status).toBe(302);
+    e2(res.headers.get("Location")).toBe("https://lp.example.com/sell");
+  });
+
+  i2("LP型なしは従来どおり 302、loader が例外でも 302(入口を壊さない)", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    loadLpPageData.mockResolvedValueOnce({ kind: "none" });
+    e2((await GET(new Request("http://x/t/tok") as never, ctx("tok"))).status).toBe(302);
+    loadLpPageData.mockRejectedValueOnce(new Error("db"));
+    e2((await GET(new Request("http://x/t/tok") as never, ctx("tok"))).status).toBe(302);
+  });
+
+  i2("送付済みでページを返せたときだけ 閲覧(lpPageFirstAt)を記録する(@codex R10)", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    loadLpPageData.mockResolvedValueOnce({ kind: "page", html: "<html>LP</html>", status: "sent", draftId: "r1", propertyId: "p1" });
+    const res = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
+    e2(res.status).toBe(200);
+    e2(recordLpPageView).toHaveBeenCalledOnce();
+    e2(recordLpPageView.mock.calls[0][1]).toEqual({ draftId: "r1", propertyId: "p1" });
+  });
+
+  i2("送付前(プレビュー)のページ表示は 閲覧に数えない", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    loadLpPageData.mockResolvedValueOnce({ kind: "page", html: "<html>プレビュー</html>", status: "confirmed", draftId: "r1", propertyId: "p1" });
+    e2((await GET(new Request("http://x/t/tok") as never, ctx("tok"))).status).toBe(200);
+    e2(recordLpPageView).not.toHaveBeenCalled();
+  });
+
+  i2("外部LPへ転送した訪問(ページなし)と loader 失敗では 閲覧に数えない(LP型の成績を汚さない)", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    loadLpPageData.mockResolvedValueOnce({ kind: "none" });
+    e2((await GET(new Request("http://x/t/tok") as never, ctx("tok"))).status).toBe(302);
+    loadLpPageData.mockRejectedValueOnce(new Error("db"));
+    e2((await GET(new Request("http://x/t/tok") as never, ctx("tok"))).status).toBe(302);
+    e2(recordLpPageView).not.toHaveBeenCalled();
+  });
+
+  i2("既定LP未設定は LP型があっても 404(fail-closed 維持)・未知 token は 302", async () => {
+    delete process.env.SALE_DM_LP_URL;
+    const notConfigured = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
+    e2(notConfigured.status).toBe(404);
+    e2(loadLpPageData).not.toHaveBeenCalled(); // 既定LP未設定は loader を呼ぶ前に 404(fail-closed 維持)
+
+    process.env.SALE_DM_LP_URL = "https://default-lp.example.com";
+    const pm = prismaMock as never as { dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn> } };
+    pm.dmRecipientDraft.findUnique.mockResolvedValueOnce(null); // 未知トークン
+    const unknown = await GET(new Request("http://x/t/nope") as never, ctx("nope"));
+    e2(unknown.status).toBe(302); // 未知トークンは(loader も既定で none を返し)従来どおり列挙耐性の 302
   });
 });
