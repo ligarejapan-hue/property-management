@@ -136,6 +136,13 @@ describe("DM 反響 writer のロック順序(PR-B・R47: terminal は Owner FOR
     expect(body).not.toMatch(/lockOwnersForUpdate/);
   });
 
+  it("公開LP電話タップ: 親行ロック→draft更新(反響ではないので syncSaleDmReaction を呼ばない)", () => {
+    const src = read("src/lib/sale-dm-letter/phone-tap-record.ts");
+    const body = src.slice(src.indexOf("export async function recordPhoneTap"));
+    assertOrder("phone-tap", body, ["lockPropertyRow", "tx.dmRecipientDraft.update"]);
+    expect(body).not.toMatch(/syncSaleDmReaction|lockOwnersForUpdate|outcome/);
+  });
+
   it("同期ヘルパー: terminal は Owner FOR UPDATE→再読取→適用(変化なしはロックしない)", () => {
     const src = read("src/lib/dm-reaction/sync.ts");
     const body = src.slice(src.indexOf("export async function syncSaleDmReaction"));

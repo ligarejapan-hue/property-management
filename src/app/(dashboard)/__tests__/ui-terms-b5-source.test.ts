@@ -136,6 +136,8 @@ describe("B-5: 監査ログの操作種別を日本語化", () => {
     expect(src).toMatch(/registry_auto_fetch:\s*"謄本自動取得"/);
     expect(src).toMatch(/sale_dm_campaign_create:/);
     expect(src).toMatch(/sale_dm_tracking_hit:/);
+    expect(src).toMatch(/sale_dm_lp_phone_tap:/);
+    expect(src).toMatch(/sale_dm_lp_preview_view:/);
     expect(src).toMatch(/sales_sheet_design_create:/);
     expect(src).toMatch(/attachment_search:/);
     expect(src).toMatch(/company_profile_update:/);

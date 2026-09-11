@@ -166,6 +166,8 @@ const ACTION_LABELS: Record<string, string> = {
   sale_dm_undeliverable_clear: "売却DM宛先不明の解除",
   sale_dm_tracking_hit: "売却DMリンク開封",
   sale_dm_qr_unsubscribe: "売却DM配信停止(QR)",
+  sale_dm_lp_phone_tap: "売却DM LP 電話タップ",
+  sale_dm_lp_preview_view: "売却DM LP プレビュー表示",
   // --- 販売図面・その他 ---
   sales_sheet_design_create: "販売図面作成",
   sales_sheet_design_update: "販売図面更新",
