@@ -17,6 +17,8 @@ import {
   isOwnerAddressEffectivelyEmpty,
 } from "@/lib/owner-correction";
 import { maskCorporateNumber } from "@/lib/display-level";
+import { pickSinglePropertyId } from "@/lib/owner-property-link";
+import { propertyVisibilityScopeWhere } from "@/lib/property-list-query";
 
 type RecommendedAction = "hold" | "review" | "delete_candidate" | "merge_candidate";
 
@@ -47,6 +49,26 @@ type Candidate = {
   hasExternalLinkKey: boolean;
   version: number;
   propertyOwnerCount: number;
+  /**
+   * 紐づき物件がちょうど1件のときの物件ID。0件・2件以上は null。
+   * 画面はこの値をリンク先の判定(resolveOwnerPropertyLink)に渡すだけで、
+   * 物件の住所などの中身はここでは一切返さない。
+   * Codex P1: セッションが property:read を持たない場合は常に null
+   * (#139 finding)。property:read があっても、field_staff は
+   * propertyVisibilityScopeWhere で担当外の物件を除外した後の値。
+   */
+  singlePropertyId: string | null;
+  /**
+   * P2 (#139 二次回帰): このビューアが実際にこの所有者の紐づき物件を
+   * 1件以上見られるか(スコープ済み propertyOwners 配列が非空かどうか)。
+   * propertyOwnerCount(_count)は可視範囲スコープ対象外のため、
+   * 「件数は正だがスコープ内の紐づきが0件」というケース(field_staff が
+   * 担当外の物件だけを持つ owner を見たとき)がありうる。このケースでは
+   * resolveOwnerPropertyLink がリンク先を作れず、件数だけリンクになっている
+   * 死んだリンク(/properties?ownerId=... が必ず空リストになる)を出していた
+   * ([#139] fallout の再発)。boolean のみで物件ID/件数などの中身は含まない。
+   */
+  hasReachableProperty: boolean;
   changeLogCount: number;
   importFileName: string | null;
   importRowNumber: number | null;
@@ -93,6 +115,8 @@ type Candidate = {
 //
 // 権限: user_management:read（管理者エリア） + owner:read（PII閲覧）の両方必須。
 //   既存 /api/owners と同じ getOwnerDisplayConfig / maskValue を適用する。
+//   singlePropertyId は上記2つとは別に property:read も必要（#139 finding）。
+//   無ければ endpoint 自体は 403 にせず、その項目だけ null にする。
 
 export async function GET(request: NextRequest) {
   try {
@@ -108,6 +132,13 @@ export async function GET(request: NextRequest) {
 
     // PII フィールドの表示レベルを取得（/api/owners と同じ制御）
     const displayConfig = await getOwnerDisplayConfig(session.id, perms);
+
+    // Codex P1: singlePropertyId は物件の存在(UUID)と1件確定であることを外に出す。
+    // property:read を持たないセッションには渡さない(#139 finding)。
+    // property list / detail API と同じ可視範囲スコープを nested selection にも
+    // 適用し、field_staff が担当外の物件IDを受け取らないようにする。
+    const hasPropertyRead = hasPermission(perms, "property", "read");
+    const propertyVisibilityScope = propertyVisibilityScopeWhere(session);
 
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type") ?? "all";
@@ -126,7 +157,21 @@ export async function GET(request: NextRequest) {
         corporateNumber: true,
         externalLinkKey: true,
         version: true,
+        // propertyOwnerCount(_count)は既存の孤児/重複判定が依存するため
+        // 可視範囲スコープを適用しない(変更しない・スコープ対象は下の
+        // propertyOwners selection のみ)。
         _count: { select: { propertyOwners: true } },
+        // 紐づきがちょうど1件のときだけ物件IDを返すため、2件だけ読む。
+        // (1件か2件以上かの判別にはこれで足りる。全件読むと重い)
+        // where は property list/detail API と同じ propertyVisibilityScopeWhere。
+        // field_staff は担当外の物件を持つ行を読まない(=そもそも候補に出せない)。
+        propertyOwners: {
+          select: { propertyId: true },
+          take: 2,
+          ...(propertyVisibilityScope
+            ? { where: { property: propertyVisibilityScope } }
+            : {}),
+        },
       },
       orderBy: { createdAt: "asc" },
     });
@@ -192,6 +237,22 @@ export async function GET(request: NextRequest) {
     // 4. 候補リスト構築
     const candidates: Candidate[] = owners.map((owner): Candidate => {
       const propertyOwnerCount = owner._count.propertyOwners;
+      // property:read が無いセッションには渡さない(#139 finding)。
+      // propertyOwnerCount(_count)は上記の通りスコープ対象外・変更しない。
+      const singlePropertyId = hasPropertyRead
+        ? pickSinglePropertyId(owner.propertyOwners)
+        : null;
+      // P2 (#139 二次回帰): スコープ済み配列(owner.propertyOwners)が
+      // 非空かどうかだけを見る。propertyOwnerCount(_count)は使わない
+      // ——不一致(件数は正だがスコープ内は0件)こそがこの flag で拾いたい
+      // ケースそのもの。
+      // ⚠property:read が無いセッションには false を返す(singlePropertyId と同じゲート)。
+      // これが無いと「この所有者の物件のうち少なくとも1件はあなたの担当」という
+      // 1bit が、物件を読めない相手に渡る。この窓口から出す物件由来の値は全て
+      // hasPropertyRead を通す。
+      const hasReachableProperty = hasPropertyRead
+        ? owner.propertyOwners.length > 0
+        : false;
       const changeLogCount = changeLogCountMap.get(owner.id) ?? 0;
       const importInfo = importRowMap.get(owner.id) ?? null;
 
@@ -265,6 +326,8 @@ export async function GET(request: NextRequest) {
         hasExternalLinkKey: !!owner.externalLinkKey,
         version: owner.version,
         propertyOwnerCount,
+        singlePropertyId,
+        hasReachableProperty,
         changeLogCount,
         importFileName: importInfo?.fileName ?? null,
         importRowNumber: importInfo?.rowNumber ?? null,
@@ -507,6 +570,14 @@ export async function GET(request: NextRequest) {
       // 値自体は boolean のみで PII は含まない。UI は権限不足メッセージの
       // 表示判断に使う。
       corporateNumberDuplicateAvailable,
+      // P2 (#139 fallout): singlePropertyId と同じく property:read が無い
+      // セッションを示す capability flag。UI はこれを見て「物件」列の
+      // リンクそのものを消す(count > 0 かつ singlePropertyId=null で
+      // resolveOwnerPropertyLink が many 判定してしまい、property:read の
+      // 無いユーザーに必ず 403 になる /properties?ownerId=... リンクを
+      // 出していた回帰の修正)。corporateNumberDuplicateAvailable と同じ形:
+      // 値は boolean のみで PII は含まない。
+      propertyLinkAvailable: hasPropertyRead,
       allCount: candidates.filter((c) => c.types.length > 0).length,
     };
 

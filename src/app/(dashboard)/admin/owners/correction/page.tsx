@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { Tabs, tabPanelProps } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui/page-header";
+import { OwnerPropertyCountCell } from "@/components/owners/owner-property-count-cell";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -431,6 +432,9 @@ function OwnerCorrectionPageInner() {
                   <DuplicateGroupSummary
                     candidates={visibleCandidates}
                     onExecuted={() => load(filterType)}
+                    propertyLinkAvailable={
+                      data.summary.propertyLinkAvailable ?? false
+                    }
                   />
                 )}
 
@@ -486,15 +490,16 @@ function OwnerCorrectionPageInner() {
                         {c.phone ?? "—"}
                       </td>
                       <td className="px-3 py-2 text-center">
-                        <span
-                          className={
-                            c.propertyOwnerCount === 0
-                              ? "font-medium text-orange-600"
-                              : "text-gray-700 dark:text-gray-200"
+                        <OwnerPropertyCountCell
+                          ownerId={c.id}
+                          count={c.propertyOwnerCount}
+                          singlePropertyId={c.singlePropertyId}
+                          propertyLinkAvailable={
+                            data.summary.propertyLinkAvailable ?? false
                           }
-                        >
-                          {c.propertyOwnerCount}
-                        </span>
+                          hasReachableProperty={c.hasReachableProperty}
+                          zeroClassName="font-medium text-orange-600"
+                        />
                       </td>
                       <td className="px-3 py-2 text-center text-gray-700 dark:text-gray-200">
                         {c.changeLogCount}
@@ -687,11 +692,14 @@ function DuplicateSubFilterBar({
 interface DuplicateGroupSummaryProps {
   candidates: OwnerCorrectionCandidate[];
   onExecuted?: () => void;
+  /** P2 (#139 fallout): summary.propertyLinkAvailable をそのまま下へ流す。 */
+  propertyLinkAvailable: boolean;
 }
 
 function DuplicateGroupSummary({
   candidates,
   onExecuted,
+  propertyLinkAvailable,
 }: DuplicateGroupSummaryProps) {
   // duplicate グループは API 側で server-side の正規化キーで判定済み。
   // UI は duplicateGroupId（opaque）で再構築するだけ。raw display value で
@@ -730,6 +738,7 @@ function DuplicateGroupSummary({
             groupIndex={idx + 1}
             members={members}
             onExecuted={onExecuted}
+            propertyLinkAvailable={propertyLinkAvailable}
           />
         ))}
       </div>
@@ -741,12 +750,15 @@ interface DuplicateGroupCardProps {
   groupIndex: number;
   members: OwnerCorrectionCandidate[];
   onExecuted?: () => void;
+  /** P2 (#139 fallout): summary.propertyLinkAvailable をそのまま下へ流す。 */
+  propertyLinkAvailable: boolean;
 }
 
 function DuplicateGroupCard({
   groupIndex,
   members,
   onExecuted,
+  propertyLinkAvailable,
 }: DuplicateGroupCardProps) {
   // master / source の選択（明示・operator まかせ）
   const [masterId, setMasterId] = useState<string | null>(null);
@@ -854,7 +866,15 @@ function DuplicateGroupCard({
               <td className="px-2 py-1 font-mono text-[10px] text-gray-400 dark:text-gray-500">
                 {m.id.slice(0, 8)}…
               </td>
-              <td className="px-2 py-1 text-center">{m.propertyOwnerCount}</td>
+              <td className="px-2 py-1 text-center">
+                <OwnerPropertyCountCell
+                  ownerId={m.id}
+                  count={m.propertyOwnerCount}
+                  singlePropertyId={m.singlePropertyId}
+                  propertyLinkAvailable={propertyLinkAvailable}
+                  hasReachableProperty={m.hasReachableProperty}
+                />
+              </td>
               <td className="px-2 py-1 text-center">{m.changeLogCount}</td>
               <td className="px-2 py-1 text-center">{m.version}</td>
               <td className="px-2 py-1 font-mono text-[10px] text-gray-500 dark:text-gray-400">

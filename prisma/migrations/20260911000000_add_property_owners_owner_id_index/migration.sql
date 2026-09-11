@@ -1,0 +1,12 @@
+-- property_owners に ownerId 単体の index を追加(additive のみ・データ変更なし)。
+-- 背景: owner-to-property-links で追加した所有者専用の物件一覧クエリが
+-- { propertyOwners: { some: { ownerId } } } で絞り込むが、既存の複合 unique
+-- (property_id, owner_id) は property_id が先頭のため owner_id 単独の検索には使えず
+-- 表を全スキャンしていた(外部レビューで指摘・本番で確認済み)。
+--
+-- 現在 property_owners は1,350行のみで CREATE INDEX は一瞬(long lock の心配なし)。
+-- ただし所有者紐付けは現状19地区分のみで、残り約12万件の物件へ今後拡張される想定のため、
+-- 表がまだ小さい今のうちに index を用意しておく。
+--
+-- CreateIndex
+CREATE INDEX "property_owners_owner_id_idx" ON "property_owners"("owner_id");

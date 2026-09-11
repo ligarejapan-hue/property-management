@@ -466,6 +466,7 @@ model PropertyOwner {
   owner    Owner    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
   @@unique([propertyId, ownerId])
+  @@index([ownerId])
   @@map("property_owners")
 }
 

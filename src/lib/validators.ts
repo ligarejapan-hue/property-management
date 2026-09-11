@@ -97,6 +97,10 @@ export const propertyListQuerySchema = z.object({
   caseStatus: z.enum(CASE_STATUS_VALUES).optional(),
   introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional(),
   assignedTo: z.string().uuid().optional(),
+  // 所有者で絞り込む。所有者詳細・所有者補正候補からのリンク専用で、一覧画面に入力欄は無い。
+  // ⚠UUID 以外は schema で弾く＝where に入るのは検証済みの値だけ。空文字は
+  //   「絞り込み無し」に化けると別人の物件を見せてしまうため通さない。
+  ownerId: z.string().uuid().optional(),
   updatedFrom: z.string().optional(),
   updatedTo: z.string().optional(),
   includeArchived: z

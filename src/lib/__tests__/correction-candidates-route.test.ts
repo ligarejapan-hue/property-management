@@ -39,6 +39,12 @@ vi.mock("@/lib/api-helpers", () => {
     getUserPermissions: vi.fn().mockResolvedValue([
       { resource: "user_management", action: "read", granted: true },
       { resource: "owner", action: "read", granted: true },
+      // Codex P1 (#139 finding): singlePropertyId は property:read 必須。
+      // デフォルト fixture は「property:read を持つ admin」を表す既存の
+      // singlePropertyId テスト群(take:2 end-to-end)の前提を保つため付与する。
+      // property:read を**持たない**セッションのテストは個別に
+      // mockResolvedValueOnce でこのエントリを外した権限配列に差し替える。
+      { resource: "property", action: "read", granted: true },
       { resource: "owner_name", action: "full", granted: true },
       { resource: "owner_address", action: "full", granted: true },
       { resource: "owner_zip", action: "full", granted: true },
@@ -106,11 +112,81 @@ function makeOwner(overrides: {
   zip?: string | null;
   phone?: string | null;
   propertyOwnerCount?: number;
+  /**
+   * 実クエリの `propertyOwners: { select: { propertyId: true }, take: 2 }` を
+   * fixture 側でも再現するための override。**件数(何件返すか)は常に
+   * propertyOwnerCount から決まる**(下記 derivedLength)。この override が
+   * 決めてよいのは「どの id にするか」だけで「何件にするか」ではない
+   * ——件数まで override 側で決められると、`propertyOwnerCount: 5` なのに
+   * `propertyOwnerIds` を1件だけ渡すような、実クエリ(take:2で常に
+   * min(count,2)件)では絶対に起こらない形の fixture を作れてしまう。
+   * 指定された id は先頭から derivedLength 件ぶんだけ使い、足りない分は
+   * 自動生成の id で埋める。derivedLength を超える id を渡した場合は
+   * 「その fixture は実クエリでは存在し得ない」ことを示すため construction
+   * 時点で例外にする(黙って切り詰めない)。
+   */
+  propertyOwnerIds?: string[];
+  /**
+   * Codex P1 (#139 finding round 3): `propertyOwners` の nested selection に
+   * propertyVisibilityScopeWhere が where として掛かるようになった後は、
+   * 「_count(スコープなし件数)は1件だが、スコープ済みの propertyOwners 配列は
+   * 0件」という組み合わせが**実際に起こり得る**(field_staff が自分の
+   * 担当外の物件しか持たない owner を見たとき)。これは下の
+   * propertyOwnerIds ガードが「実クエリでは起こり得ない」と主張していた
+   * 前提を崩した——ガードを緩めず、この1パターンだけ明示的な opt-in で
+   * 作れるようにする。true にすると propertyOwnerCount の値に関わらず
+   * propertyOwners は必ず空配列になる(=スコープで除外された状態)。
+   * propertyOwnerIds との同時指定は禁止(「見えないのに id を渡す」は矛盾)。
+   */
+  scopedOut?: boolean;
   version?: number;
   note?: string | null;
   externalLinkKey?: string | null;
   corporateNumber?: string | null;
 }) {
+  const propertyOwnerCount = overrides.propertyOwnerCount ?? 0;
+  const scopedOut = overrides.scopedOut ?? false;
+  const overrideIds = overrides.propertyOwnerIds;
+
+  if (scopedOut && overrideIds !== undefined) {
+    throw new Error(
+      `makeOwner(${overrides.id}): scopedOut と propertyOwnerIds は同時に指定できない ` +
+        `(scopedOut は「可視範囲スコープで除外されて0件」を表すため、id を渡すのは矛盾する)。`,
+    );
+  }
+
+  // 実クエリが `take: 2` で読むのと同じく、propertyOwnerCount が3以上でも
+  // fixture が返す propertyOwners 行は最大2件。3件以上あるとして _count だけ
+  // 3にして propertyOwners を3件返す、というような「スコープなしのクエリでは
+  // 起こり得ない組み合わせ」を fixture が作れてしまうと、`pickSinglePropertyId`
+  // が undefined を読む regression を再び見逃す。
+  // ⚠ scopedOut:true のときはこの上限計算を無視して常に0件にする
+  // (上記の通り、スコープ適用後はこれが正しい実クエリの結果)。
+  const derivedLength = scopedOut ? 0 : Math.min(propertyOwnerCount, 2);
+  if (
+    !scopedOut &&
+    overrideIds !== undefined &&
+    overrideIds.length > derivedLength
+  ) {
+    throw new Error(
+      `makeOwner(${overrides.id}): propertyOwnerIds has ${overrideIds.length} id(s) ` +
+        `but propertyOwnerCount=${propertyOwnerCount} only allows ${derivedLength} ` +
+        `propertyOwners row(s) for an UNSCOPED query (take: 2 caps it). This mismatch ` +
+        `is impossible for an unscoped query — reduce propertyOwnerIds, raise ` +
+        `propertyOwnerCount, or (if you're modelling a field_staff session whose ` +
+        `visibility scope excludes this owner's linked properties) pass scopedOut: true ` +
+        `instead — that is the one case where _count > 0 with an empty propertyOwners ` +
+        `array is exactly what the real scoped query returns.`,
+    );
+  }
+  const propertyOwnerIds: string[] = [];
+  for (let i = 0; i < derivedLength; i++) {
+    const overrideId = overrideIds !== undefined ? overrideIds[i] : undefined;
+    propertyOwnerIds.push(
+      overrideId !== undefined ? overrideId : `${overrides.id}-property-${i + 1}`,
+    );
+  }
+
   return {
     id: overrides.id,
     name: overrides.name,
@@ -121,7 +197,8 @@ function makeOwner(overrides: {
     externalLinkKey: overrides.externalLinkKey ?? null,
     corporateNumber: overrides.corporateNumber ?? null,
     version: overrides.version ?? 1,
-    _count: { propertyOwners: overrides.propertyOwnerCount ?? 0 },
+    _count: { propertyOwners: propertyOwnerCount },
+    propertyOwners: propertyOwnerIds.map((propertyId) => ({ propertyId })),
   };
 }
 
@@ -1941,5 +2018,494 @@ describe("GET correction-candidates: Phase 2-B 空白のみ address", () => {
     const c = jsonAll.candidates[0];
     expect(c.types).not.toContain("address_null");
     expect(c.addressIsWhitespaceOnly).toBe(false);
+  });
+});
+
+// ── singlePropertyId: propertyOwners fixture (take:2) の end-to-end 検証 ──
+//
+// 回帰の原因: route 側が `propertyOwners: { select: { propertyId: true },
+// take: 2 }` を select するようになったのに、テストの makeOwner fixture が
+// `_count.propertyOwners` だけ持って `propertyOwners` 配列を返していなかった
+// ため、`pickSinglePropertyId(owner.propertyOwners)` が undefined.length で
+// 例外を投げていた。ここでは実クエリと同じ形の fixture を通して、
+// route が返す singlePropertyId が 0件/1件/2件以上のそれぞれで正しいことを
+// 直接確認する（fixture を直しただけで満足せず、route の出力まで見る）。
+describe("GET correction-candidates: singlePropertyId (propertyOwners take:2 fixture)", () => {
+  it("紐づき物件が0件の owner は singlePropertyId=null", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "ゼロ件太郎",
+        propertyOwnerCount: 0,
+      }),
+    ]);
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].propertyOwnerCount).toBe(0);
+    expect(json.candidates[0].singlePropertyId).toBeNull();
+  });
+
+  it("紐づき物件がちょうど1件の owner は singlePropertyId にその物件IDが返る", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "一件花子",
+        // address は既定の null のまま（address_null type で "all" フィルタに
+        // 拾わせる。orphan ではないので判定に propertyOwnerCount=1 が効く）。
+        propertyOwnerCount: 1,
+      }),
+    ]);
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].propertyOwnerCount).toBe(1);
+    expect(json.candidates[0].singlePropertyId).toBe(
+      "22222222-2222-4222-8222-222222222222-property-1",
+    );
+  });
+
+  it("紐づき物件が2件の owner は singlePropertyId=null（1件に確定できない）", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "33333333-3333-4333-8333-333333333333",
+        name: "二件次郎",
+        // address は既定の null のまま（address_null type で "all" フィルタに拾わせる）。
+        propertyOwnerCount: 2,
+      }),
+    ]);
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].propertyOwnerCount).toBe(2);
+    expect(json.candidates[0].singlePropertyId).toBeNull();
+  });
+
+  it("紐づき物件が3件以上の owner も singlePropertyId=null（take:2 で2件しか読まないが1件確定にはならない）", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "44444444-4444-4444-8444-444444444444",
+        name: "多数件三郎",
+        // address は既定の null のまま（address_null type で "all" フィルタに拾わせる）。
+        propertyOwnerCount: 5,
+      }),
+    ]);
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    // _count は実件数の5だが、propertyOwners fixture は take:2 と同じく2件だけ持つ。
+    expect(json.candidates[0].propertyOwnerCount).toBe(5);
+    expect(json.candidates[0].singlePropertyId).toBeNull();
+  });
+
+  it("override した propertyOwnerIds を1件だけ渡すと、その物件IDが singlePropertyId に返る", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: "55555555-5555-4555-8555-555555555555",
+        name: "指定四郎",
+        // address は既定の null のまま（address_null type で "all" フィルタに拾わせる）。
+        propertyOwnerCount: 1,
+        propertyOwnerIds: ["custom-property-id-xyz"],
+      }),
+    ]);
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].singlePropertyId).toBe("custom-property-id-xyz");
+  });
+
+  it("propertyOwnerIds が propertyOwnerCount(=take:2 後の件数)より多いと makeOwner が例外を投げる", () => {
+    // propertyOwnerCount:1 → derivedLength=1 だが id を2件渡している。
+    // 実クエリは take:2 でも「count=1 かつ2件返る」ことはあり得ないので、
+    // 黙って切り詰めず construction 時点で失敗させる。
+    expect(() =>
+      makeOwner({
+        id: "66666666-6666-4666-8666-666666666666",
+        name: "不整合五郎",
+        propertyOwnerCount: 1,
+        propertyOwnerIds: ["id-a", "id-b"],
+      }),
+    ).toThrow(/propertyOwnerIds has 2 id\(s\)/);
+  });
+
+  it("propertyOwnerCount:0 に propertyOwnerIds を1件でも渡すと makeOwner が例外を投げる", () => {
+    // derivedLength=0(実クエリは0件しか返さない)なので、id を1件でも
+    // 渡した時点で「実クエリでは起こり得ない fixture」になる。
+    expect(() =>
+      makeOwner({
+        id: "77777777-7777-4777-8777-777777777777",
+        name: "不整合六郎",
+        propertyOwnerCount: 0,
+        propertyOwnerIds: ["id-a"],
+      }),
+    ).toThrow(/propertyOwnerCount=0 only allows 0/);
+  });
+});
+
+// ── Codex P1 (#139 finding): singlePropertyId の権限ゲート + 可視範囲スコープ ──
+//
+// 修正前は user_management:read + owner:read だけで singlePropertyId(物件UUID)が
+// 返っていた。property:read を持たないセッションにも物件の存在と1件確定である
+// ことが漏れ、field_staff が担当外の物件IDを受け取ることもあった。
+//   1. property:read が無ければ singlePropertyId=null(他のフィールドは不変・
+//      endpoint は 403 にしない)
+//   2. property:read があれば従来通り id が返る(over-block していないことの確認)
+//   3. field_staff セッションでは propertyOwners の nested selection に
+//      propertyVisibilityScopeWhere と同じ where が付く(実際に prisma へ渡った
+//      引数を検証する — スコープが落ちたら fail する)
+//   4. field_staff 以外(admin 等)はスコープが付かない(既存挙動維持)
+describe("GET correction-candidates: Codex P1 (#139 finding) singlePropertyId 権限ゲート/可視範囲スコープ", () => {
+  const OWNER_ID = "11111111-1111-4111-8111-111111111111";
+
+  it("property:read が無いセッションは singlePropertyId=null(1件確定でも)・他フィールドは不変・403にはしない", async () => {
+    const { getUserPermissions } = await import("@/lib/api-helpers");
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      // property:read を含めない
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+    ]);
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "一件太郎",
+        propertyOwnerCount: 1,
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    // endpoint 自体は 403 にしない(画面は動き続ける)。
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    const c = json.candidates[0];
+    expect(c.singlePropertyId).toBeNull();
+    // singlePropertyId 以外は不変(propertyOwnerCount は _count 由来で
+    // スコープ対象外・変更しない契約)。
+    expect(c.propertyOwnerCount).toBe(1);
+    expect(c.id).toBe(OWNER_ID);
+    // P2 (#139 fallout): summary 側の capability flag も false になり、
+    // 画面はこれを見て「物件」列のリンク自体を消す(count>0 でも)。
+    expect(json.summary.propertyLinkAvailable).toBe(false);
+  });
+
+  it("property:read があるセッションは従来通り singlePropertyId に物件IDが返る(over-block防止)", async () => {
+    // デフォルト mock 権限は property:read を含む(admin 相当)。
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "一件太郎",
+        propertyOwnerCount: 1,
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].singlePropertyId).toBe(`${OWNER_ID}-property-1`);
+    // P2 (#139 fallout): property:read があるセッションでは flag は true。
+    expect(json.summary.propertyLinkAvailable).toBe(true);
+  });
+
+  it("field_staff セッションでは propertyOwners の nested selection に可視範囲スコープ(where)が付く", async () => {
+    const { getApiSession, getUserPermissions } = await import(
+      "@/lib/api-helpers"
+    );
+    const FIELD_STAFF_ID = "field-staff-99999999-9999-4999-8999-999999999999";
+    vi.mocked(getApiSession).mockResolvedValueOnce({
+      id: FIELD_STAFF_ID,
+      email: "field@test.com",
+      name: "現地スタッフ",
+      role: "field_staff",
+    });
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+    ]);
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "一件太郎",
+        propertyOwnerCount: 1,
+      }),
+    ]);
+
+    await GET(makeRequest("all"));
+
+    expect(pm.owner.findMany).toHaveBeenCalledTimes(1);
+    const callArgs = pm.owner.findMany.mock.calls[0][0] as {
+      select: {
+        propertyOwners: {
+          select: { propertyId: true };
+          take: number;
+          where?: {
+            property: {
+              OR: Array<{ createdBy: string } | { assignedTo: string }>;
+            };
+          };
+        };
+      };
+    };
+    // property list/detail API と同一の propertyVisibilityScopeWhere が
+    // nested selection の where としてそのまま prisma に渡っていること。
+    expect(callArgs.select.propertyOwners.where).toEqual({
+      property: {
+        OR: [
+          { createdBy: FIELD_STAFF_ID },
+          { assignedTo: FIELD_STAFF_ID },
+        ],
+      },
+    });
+  });
+
+  it("field_staff が担当外の物件しか持たない owner を見ると、_count=1のままでも singlePropertyId=null(スコープで除外された0件が正)", async () => {
+    // Codex P1 (#139 finding round 3): この P1 が本来問題にしていた形そのもの。
+    // _count(スコープなし件数)は1件のまま(propertyOwnerCount は既存挙動により
+    // 不変・別スクリーンの孤児/重複判定が依存するので変えない契約)だが、
+    // propertyVisibilityScopeWhere を通した propertyOwners 配列は0件で返る
+    // (=担当外の物件だけを持つ owner)。ここで実装が singlePropertyId を
+    // (誤って)_count から再導出していたら 1件確定として id を返してしまう
+    // regression になるが、この route は配列(pickSinglePropertyId)からしか
+    // 導出しないため null になる。
+    const { getApiSession, getUserPermissions } = await import(
+      "@/lib/api-helpers"
+    );
+    const FIELD_STAFF_ID = "field-staff-88888888-8888-4888-8888-888888888888";
+    vi.mocked(getApiSession).mockResolvedValueOnce({
+      id: FIELD_STAFF_ID,
+      email: "field2@test.com",
+      name: "現地スタッフ2",
+      role: "field_staff",
+    });
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+    ]);
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "担当外一件太郎",
+        propertyOwnerCount: 1,
+        scopedOut: true,
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    const c = json.candidates[0];
+    expect(c.singlePropertyId).toBeNull();
+    // _count 由来の propertyOwnerCount はスコープ対象外・不変の契約通り 1 のまま。
+    expect(c.propertyOwnerCount).toBe(1);
+  });
+
+  it("field_staff 以外(admin等)のセッションでは propertyOwners の nested selection にスコープが付かない(既存挙動維持)", async () => {
+    // デフォルト mock は role: "admin"。propertyVisibilityScopeWhere は
+    // field_staff 以外に null を返すため、where は付与されない。
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "一件太郎",
+        propertyOwnerCount: 1,
+      }),
+    ]);
+
+    await GET(makeRequest("all"));
+
+    expect(pm.owner.findMany).toHaveBeenCalledTimes(1);
+    const callArgs = pm.owner.findMany.mock.calls[0][0] as {
+      select: { propertyOwners: { where?: unknown } };
+    };
+    expect(callArgs.select.propertyOwners.where).toBeUndefined();
+  });
+});
+
+// ── P2 (#139 二次回帰): hasReachableProperty ──
+//
+// 修正前は「件数は正だがスコープ済み propertyOwners 配列が空」のとき
+// (field_staff が担当外の物件だけを持つ owner を見たとき)でも
+// propertyLinkAvailable=true・singlePropertyId=null のまま返っていたため、
+// resolveOwnerPropertyLink が many 判定に落ちて /properties?ownerId=... という
+// 必ず空リストになる死んだリンクを作っていた。hasReachableProperty は
+// スコープ済み配列の非空性だけを見て、この不一致を画面側へ伝える。
+describe("GET correction-candidates: P2 (#139 二次回帰) hasReachableProperty", () => {
+  const OWNER_ID = "11111111-1111-4111-8111-111111111111";
+
+  it("field_staff: 件数は正だがスコープ済み配列が空(scopedOut) → hasReachableProperty=false", async () => {
+    const { getApiSession, getUserPermissions } = await import(
+      "@/lib/api-helpers"
+    );
+    const FIELD_STAFF_ID = "field-staff-77777777-7777-4777-8777-777777777777";
+    vi.mocked(getApiSession).mockResolvedValueOnce({
+      id: FIELD_STAFF_ID,
+      email: "field3@test.com",
+      name: "現地スタッフ3",
+      role: "field_staff",
+    });
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+    ]);
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "担当外一件太郎",
+        propertyOwnerCount: 1,
+        scopedOut: true,
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    const c = json.candidates[0];
+    // 件数(_count 由来)は不変で正のまま。
+    expect(c.propertyOwnerCount).toBe(1);
+    expect(c.hasReachableProperty).toBe(false);
+    // capability flag(権限そのもの)は true のまま——これは別の質問。
+    expect(json.summary.propertyLinkAvailable).toBe(true);
+  });
+
+  it("field_staff: スコープ済み配列が非空 → hasReachableProperty=true", async () => {
+    const { getApiSession, getUserPermissions } = await import(
+      "@/lib/api-helpers"
+    );
+    const FIELD_STAFF_ID = "field-staff-66666666-6666-4666-8666-666666666666";
+    vi.mocked(getApiSession).mockResolvedValueOnce({
+      id: FIELD_STAFF_ID,
+      email: "field4@test.com",
+      name: "現地スタッフ4",
+      role: "field_staff",
+    });
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+    ]);
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "担当内一件太郎",
+        propertyOwnerCount: 1,
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].hasReachableProperty).toBe(true);
+  });
+
+  it("非 field_staff(スコープ無し): 紐づきがあれば常に hasReachableProperty=true", async () => {
+    // デフォルト mock は role: "admin"(スコープ対象外)。
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "管理者から見た所有者",
+        propertyOwnerCount: 3,
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].propertyOwnerCount).toBe(3);
+    expect(json.candidates[0].hasReachableProperty).toBe(true);
+  });
+
+  it("紐づきが0件の owner は hasReachableProperty=false(通常の0件と同じ)", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "ゼロ件太郎",
+        propertyOwnerCount: 0,
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    expect(json.candidates[0].hasReachableProperty).toBe(false);
+  });
+
+  it("property:read が無いセッションは hasReachableProperty=false(紐づきがあってもゲート)", async () => {
+    const { getUserPermissions } = await import("@/lib/api-helpers");
+    // property:read を含めない権限配列で上書き
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      // property:read を含めない（これが本テストの核心）
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+    ]);
+    // 実際に紐づきが1件存在する owner
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "紐づき一件太郎",
+        propertyOwnerCount: 1,
+        // scopedOut: false のため propertyOwners 配列は1件入る（スコープなし）
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    const c = json.candidates[0];
+    // property:read がなければ hasReachableProperty は false にゲートされる
+    // （紐づきが実際には1件あってもセッションは見えないため）
+    expect(c.hasReachableProperty).toBe(false);
+    // propertyOwnerCount は _count 由来でスコープ対象外・不変の契約
+    expect(c.propertyOwnerCount).toBe(1);
+    // endpoint 自体は 403 にしない
+    expect(c.id).toBe(OWNER_ID);
   });
 });

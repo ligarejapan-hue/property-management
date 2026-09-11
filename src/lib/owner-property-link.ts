@@ -1,0 +1,93 @@
+/**
+ * 所有者から物件へのリンク先を決める純関数。
+ *
+ * 画面(所有者補正候補・所有者詳細)は結果を表示するだけにし、分岐はここに集約する。
+ * 3通りしかないが、**件数と物件IDが食い違う場合**を画面側で場当たりに扱うと
+ * `/properties/undefined` のような壊れたリンクが出る。判定を1箇所に閉じ込める。
+ *
+ * href に載せてよいのは所有者ID・物件IDだけ。氏名/住所/法人番号/externalLinkKey は
+ * URL に絶対に入れない(既存の明文ルール)。
+ */
+
+export type OwnerPropertyLink =
+  | { kind: "none" }
+  | { kind: "single"; href: string }
+  | { kind: "many"; href: string };
+
+export interface OwnerPropertyLinkInput {
+  ownerId: string;
+  propertyOwnerCount: number;
+  /** 紐づきがちょうど1件のときの物件ID。分からなければ null。 */
+  singlePropertyId: string | null;
+  /**
+   * P2 (#139 fallout): セッションが property:read を持つか
+   * (API summary.propertyLinkAvailable と同じ値)。false なら他の入力に
+   * 関わらず必ず none にする。count > 0 かつ singlePropertyId=null で
+   * many 分岐へ落ちると `/properties?ownerId=...` を作ってしまい、
+   * property:read の無いユーザーには常に 403 になる死んだリンクになる。
+   */
+  propertyLinkAvailable: boolean;
+  /**
+   * P2 (#139 二次回帰): このビューアがこの所有者の紐づき物件を実際に
+   * 1件以上見られるか(API の候補ごとの `hasReachableProperty` と同じ値)。
+   * propertyLinkAvailable(権限そのものの有無)とは別の質問——
+   * こちらは「権限はあるが、この所有者の紐づき物件がこのビューアの
+   * 可視範囲(担当/作成)に1件も無い」を表す。件数(propertyOwnerCount)は
+   * 可視範囲スコープ対象外の _count なので、件数が正でもこちらが false に
+   * なりうる。両方揃って初めてリンクを作ってよい。
+   */
+  hasReachableProperty: boolean;
+}
+
+/**
+ * 所有者で絞り込んだ物件一覧への URL を1箇所で組み立てる。
+ * `resolveOwnerPropertyLink` とページ側の直書きリンクの両方がこれを使う。
+ * クエリパラメータ名を変えるときはここだけ直せばよい。
+ */
+export function ownerFilteredPropertyListHref(ownerId: string): string {
+  return `/properties?ownerId=${encodeURIComponent(ownerId)}`;
+}
+
+export function resolveOwnerPropertyLink(
+  input: OwnerPropertyLinkInput,
+): OwnerPropertyLink {
+  const {
+    ownerId,
+    propertyOwnerCount,
+    singlePropertyId,
+    propertyLinkAvailable,
+    hasReachableProperty,
+  } = input;
+  // property:read の無いセッションには、件数や物件IDの中身を見るまでもなく
+  // 最優先で none にする(他の分岐より前)。この画面は property:read が無くても
+  // 動き続ける契約なので、count > 0 のときに /properties?ownerId=... のような
+  // 必ず 403 になるリンクを出してはいけない。
+  if (!propertyLinkAvailable) return { kind: "none" };
+  // ownerId が空だと `?ownerId=` になり、絞り込み無しの全件一覧を
+  // 「この所有者の物件」として見せてしまう。リンクにしない。
+  if (ownerId === "") return { kind: "none" };
+  if (propertyOwnerCount <= 0) return { kind: "none" };
+  // P2 (#139 二次回帰): 件数(スコープ対象外の _count)は正でも、この
+  // ビューアの可視範囲に紐づき物件が1件も無ければリンクを作らない。
+  // propertyLinkAvailable(権限)とは別の質問で、両方揃って初めて先へ進む。
+  if (!hasReachableProperty) return { kind: "none" };
+  if (propertyOwnerCount === 1 && singlePropertyId !== null) {
+    return { kind: "single", href: `/properties/${singlePropertyId}` };
+  }
+  // 1件なのに物件IDが分からない場合もここに落とす(担当外で読めない等)。
+  // 壊れたリンクを出すより、絞り込んだ一覧へ逃がす方が安全。
+  return {
+    kind: "many",
+    href: ownerFilteredPropertyListHref(ownerId),
+  };
+}
+
+/**
+ * 紐づき物件が「ちょうど1件」のときだけ物件IDを返す。
+ * 呼び出し側は `take: 2` で2件だけ読めば足りる(1件か2件以上かの判別に十分)。
+ */
+export function pickSinglePropertyId(
+  rows: ReadonlyArray<{ propertyId: string }>,
+): string | null {
+  return rows.length === 1 ? rows[0].propertyId : null;
+}

@@ -74,6 +74,12 @@ export async function fetchProperties(params: Record<string, string> = {}) {
     await mockDelay();
     let filtered = [...MOCK_PROPERTIES];
 
+    // mock データは所有者との紐づきを持たない。ここで全件を返すと
+    // 「この所有者の物件」として無関係な物件を見せてしまうので空にする。
+    if (params.ownerId) {
+      filtered = [];
+    }
+
     if (params.keyword) {
       const kw = params.keyword.toLowerCase();
       filtered = filtered.filter(
@@ -3414,6 +3420,15 @@ export interface OwnerCorrectionCandidate {
   hasExternalLinkKey: boolean;
   version: number;
   propertyOwnerCount: number;
+  singlePropertyId: string | null;
+  /**
+   * P2 (#139 二次回帰): このビューアが実際にこの所有者の紐づき物件を
+   * 1件以上見られるか(スコープ済み propertyOwners 配列が非空かどうか)。
+   * propertyOwnerCount(_count)は可視範囲スコープ対象外なので、件数は正でも
+   * これが false になりうる(担当外の物件しか無い owner を field_staff が
+   * 見たとき)。boolean のみで物件ID等の中身は含まない。
+   */
+  hasReachableProperty: boolean;
   changeLogCount: number;
   importFileName: string | null;
   importRowNumber: number | null;
@@ -3474,6 +3489,13 @@ export interface OwnerCorrectionCandidatesResponse {
      * UI は権限不足メッセージの表示判断に使う。値は boolean のみで PII を含まない。
      */
     corporateNumberDuplicateAvailable?: boolean;
+    /**
+     * P2 (#139 fallout): singlePropertyId と同じくセッションが property:read
+     * を持つか(boolean のみ・PII を含まない)。false のとき、UI は「物件」列の
+     * リンクを出さず件数だけ表示する(property:read が無いユーザーには
+     * /properties?ownerId=... が必ず 403 になるため)。
+     */
+    propertyLinkAvailable?: boolean;
     allCount: number;
   };
 }
