@@ -61,7 +61,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     // 宛先で最も多い物件種別(image-prompt route と同じ集計)。無ければ "house"。
-    const kinds = await prisma.dmRecipientDraft.findMany({ where: { campaignId: id }, select: { property: { select: { propertyType: true } } }, take: 500 });
+    // ⚠take: 500 で切るので並び順を固定しないと、同じキャンペーンでも呼ぶたびに違う500件を見て
+    //   結果が揺れる(image-prompt route と同じ orderBy にして両者の答えを一致させる)。
+    const kinds = await prisma.dmRecipientDraft.findMany({ where: { campaignId: id }, select: { property: { select: { propertyType: true } } }, orderBy: { id: "asc" }, take: 500 });
     const tally = new Map<string, number>();
     for (const k of kinds) { const t = k.property?.propertyType; if (t) tally.set(t, (tally.get(t) ?? 0) + 1); }
     const propertyType = [...tally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "house";

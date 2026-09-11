@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { formatRate, buildVariantRows, buildDmViewRows, buildLpVariantRows, buildPairRows } from "../sale-dm-letter/aggregate-view-model";
 import type { SaleDmCampaign } from "@/lib/api-client";
 
@@ -6,7 +7,7 @@ function draft(over: Partial<SaleDmCampaign["recipients"][number]>): SaleDmCampa
   return {
     id: Math.random().toString(36), variantId: "v1", lpVariantId: null, propertyId: "p", recipientName: "x", recipientZip: null,
     recipientAddress: null, honorific: "様", coOwnerCount: 1, body: "", status: "sent", outcome: "none",
-    deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, ...over,
+    deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, phoneTapFirstAt: null, ...over,
   };
 }
 
@@ -94,7 +95,7 @@ describe("二軸の表(設計 2026-09-08)", () => {
   it("LP型ごと(LP型なしの宛先は『LP型なし(外部LP)』)・送付済みのみ・電話タップは件数と分母=閲覧の率", () => {
     expect(buildLpVariantRows(campaign)).toEqual([
       { lpVariantId: "__none__", label: "LP型なし(外部LP)", sent: 1, delivered: 0, viewed: 0, viewRate: "—", phoneTapped: 0, phoneTapLabel: "—" },
-      { lpVariantId: "l1", label: "X", sent: 2, delivered: 2, viewed: 1, viewRate: "50.0%", phoneTapped: 1, phoneTapLabel: "1 / 1 (100%)" },
+      { lpVariantId: "l1", label: "X", sent: 2, delivered: 2, viewed: 1, viewRate: "50.0%", phoneTapped: 1, phoneTapLabel: "1 / 1 (100.0%)" },
     ]);
   });
   it("組み合わせ表", () => {
@@ -105,7 +106,7 @@ describe("二軸の表(設計 2026-09-08)", () => {
     expect(buildLpVariantRows(c)).toEqual([]);
     expect(buildPairRows(c)).toEqual([]);
   });
-  it("電話タップ表示は『件数 / 閲覧数 (率%)』(例: 1/4で25%)", () => {
+  it("電話タップ表示は『件数 / 閲覧数 (率%)』・率の桁は閲覧率と同じ小数1桁(例: 1/4で25.0%)", () => {
     const c = {
       ...campaign,
       recipients: [
@@ -118,6 +119,18 @@ describe("二軸の表(設計 2026-09-08)", () => {
     const row = buildLpVariantRows(c).find((r) => r.lpVariantId === "l1")!;
     expect(row.viewed).toBe(4);
     expect(row.phoneTapped).toBe(1);
-    expect(row.phoneTapLabel).toBe("1 / 4 (25%)");
+    // 閲覧率(formatRate)と同じ体裁。整数丸め(toFixed(0))に戻ると 25% になって表内で桁が揃わなくなる。
+    expect(row.phoneTapLabel).toBe("1 / 4 (25.0%)");
+    expect(row.viewRate).toBe("100.0%");
+  });
+
+  it("電話タップの率は集計(phoneTapRate)をそのまま表示し、view-model では割り算をしない", () => {
+    const src = readFileSync(new URL("../sale-dm-letter/aggregate-view-model.ts", import.meta.url), "utf8");
+    // 率の再計算(toFixed(0) などの独自計算)が戻ってきたら落とす。
+    expect(src).not.toContain("toFixed(0)");
+    expect(src).toContain("formatPhoneTapLabel(v.phoneTapped, v.viewed, v.phoneTapRate)");
+    // api-client の SaleDmDraft が phoneTapFirstAt を持つので、局所的な型の拡張(キャスト)は要らない。
+    expect(src).not.toContain("DraftWithPhoneTap");
+    expect(src).not.toContain("as unknown as");
   });
 });

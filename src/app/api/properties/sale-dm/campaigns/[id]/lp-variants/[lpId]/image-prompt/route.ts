@@ -39,7 +39,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       slot = { kind: "section", index: at + 1, total: headings.length };
     }
     // 宛先で最も多い種別(種別は文面の差し込みにも使う非PII)。relation 名は schema の DmRecipientDraft.property を確認して合わせる。
-    const kinds = await prisma.dmRecipientDraft.findMany({ where: { campaignId: id }, select: { property: { select: { propertyType: true } } }, take: 500 });
+    // ⚠take: 500 で切るので並び順を固定しないと、同じキャンペーンでも呼ぶたびに違う500件を見て
+    //   結果が揺れる(preview route と同じ orderBy にして両者の答えを一致させる)。
+    const kinds = await prisma.dmRecipientDraft.findMany({ where: { campaignId: id }, select: { property: { select: { propertyType: true } } }, orderBy: { id: "asc" }, take: 500 });
     const tally = new Map<string, number>();
     for (const k of kinds) { const t = k.property?.propertyType; if (t) tally.set(t, (tally.get(t) ?? 0) + 1); }
     const propertyKind = [...tally.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;

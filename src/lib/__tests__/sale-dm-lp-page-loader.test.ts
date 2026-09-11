@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 vi.mock("@/lib/sale-dm-letter/config-store", () => ({
   loadSaleDmPublicPageConfig: vi.fn(async () => ({
     senderName: "株式会社リガーレ", senderContact: "TEL 03-1234-5678",
-    trackingBaseUrl: "https://lp.example.com", lpUrl: "https://x.example/lp",
+    trackingBaseUrl: "https://lp.example.com",
   })),
 }));
 import { loadLpPageData } from "../sale-dm-letter/lp-page-loader";

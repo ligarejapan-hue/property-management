@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { expandLpText, extractPhone, splitBodyIntoSections, buildLpRenderInput, LP_RENDER_INPUT_KEYS, type LpSourceRows } from "../sale-dm-letter/lp-render-input";
+import { lpBodyHeadings } from "../sale-dm-letter/lp-template";
 
 const rows = (over: Partial<LpSourceRows> = {}): LpSourceRows => ({
   variant: { headline: "ご所有の{{物件種別}}のご売却について", lead: "{{物件所在}}周辺で売却をご検討の方へ", bodyText: "はじめに一言。\n\n■売却の進め方\n流れの説明。\n\n二段落目。\n■費用について\n費用の説明。", faqJson: [{ q: "費用は？", a: "無料です。" }] },
@@ -50,6 +51,15 @@ describe("splitBodyIntoSections", () => {
     const r = splitBodyIntoSections("■\nonly");
     expect(r.intro).toEqual(["only"]);
     expect(r.sections).toEqual([]);
+  });
+  it("小見出しの取り出し方は lpBodyHeadings と完全に一致する(同じ正規化を2か所に書いている)", () => {
+    // 写真と図の欄(lpBodyHeadings)と表示(splitBodyIntoSections)が別々に見出しを数えているため、
+    // 片方だけ正規化を変えると「欄には出るのにページには出ない小見出し」が生まれる。
+    // 先頭の空行・CRLF・「■ 」の前後空白・見出しの無い単独の■・同じ見出しの重複を一度に通す。
+    const body = "\r\n\r\n  \r\n前置き。\r\n\r\n■ 売却の進め方 \r\n一\r\n■\r\n二\r\n■費用について\r\n三\r\n■ 売却の進め方\r\n四";
+    expect(splitBodyIntoSections(body).sections.map((s) => s.heading)).toEqual(lpBodyHeadings(body));
+    // 素通ししていないこと(両方とも空配列なら一致しても意味がない)の確認。
+    expect(lpBodyHeadings(body)).toEqual(["売却の進め方", "費用について", "売却の進め方"]);
   });
 });
 

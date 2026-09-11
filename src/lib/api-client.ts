@@ -239,6 +239,8 @@ export interface SaleDmDraft {
   deliveryStatus: string;
   lpFirstAccessAt: string | null;
   phoneInquiryAt: string | null;
+  // 公開LPの電話ボタンを最初にタップした時刻(反響とは別物=自動計測。手入力の phoneInquiryAt とは独立)。
+  phoneTapFirstAt: string | null;
 }
 
 export interface SaleDmVariant {

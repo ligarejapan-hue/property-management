@@ -69,7 +69,8 @@ export async function GET(
         total: aggregate.total,
         // DM型ごとの閲覧率は LP の出し分けと無関係(文面の成績)なので常に返す。
         byDmVariantView: twoAxis.byDmVariant.map((v) => ({ ...v, label: labelByVariantId.get(v.variantId) ?? v.variantId })),
-        // LP型ごと/組み合わせは /t/ が LP型ごとにページを出し分けるまで返さない。
+        // LP型ごと/組み合わせは /t/ が LP型ごとにページを出し分けるようになったので返す。
+        // `LP_METRICS_ENABLED` は画面と API で共通の1定数=表と中身が食い違わない。
         ...(LP_METRICS_ENABLED
           ? {
               byLpVariant: twoAxis.byLpVariant.map((v) => ({ ...v, label: v.lpVariantId === LP_NONE ? "LP型なし(外部LP)" : (lpLabel.get(v.lpVariantId) ?? v.lpVariantId) })),
