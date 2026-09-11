@@ -12,9 +12,23 @@ describe("LPプレビュー画面", () => {
     expect(panel).toContain("1000");
     expect(panel).not.toContain("dangerouslySetInnerHTML");
   });
+  it("プレビューは広いダイアログで開き、枠は sandbox を絞る(Ruling R7)", () => {
+    // LP型の欄は狭いため、中に出すと 1000px の枠が潰れて実物と同じ見え方にならない。
+    expect(panel).toContain('size="xl"');
+    expect(panel).toContain("ModalShell");
+    // 同一オリジンの自前ページなので allow-same-origin だけ。script/form/別窓は禁じたまま。
+    expect(panel).toContain('sandbox="allow-same-origin"');
+  });
   it("LP型の行にプレビューのボタンがあり、文章未保存では押せない", () => {
     expect(manager).toMatch(/aria-label=\{`LP型「\$\{v\.label\}」のプレビュー`\}/);
     expect(manager).toMatch(/previewFor/);
     expect(manager).toContain('key={previewFor.id}');
+  });
+  it("文章・写真と図・プレビューは同時に開かない(相互排他を固定する)", () => {
+    // openLetter と openMedia の中で閉じる(ダイアログの onClose を含めると3か所)。
+    expect((manager.match(/setPreviewFor\(null\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    // 逆向き: プレビューを開くときは写真と図を閉じる。
+    expect(manager).toMatch(/const openPreview = \([^)]*\) => \{[^}]*setMediaFor\(null\)/);
+    expect(manager).toMatch(/const openPreview = \([^)]*\) => \{[^}]*setLetterFor\(null\)/);
   });
 });
