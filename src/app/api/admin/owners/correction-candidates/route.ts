@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+﻿import { NextRequest } from "next/server";
 import prisma from "@/lib/prisma";
 import {
   getApiSession,
@@ -22,9 +22,9 @@ import { propertyVisibilityScopeWhere } from "@/lib/property-list-query";
 
 type RecommendedAction = "hold" | "review" | "delete_candidate" | "merge_candidate";
 
-// Phase 2-A: 重複グループの一致経路。1 候補が複数経路で同時にヒットする場合、
-// 既存挙動を優先するため name_address > corporate_number > external_link_key の順で
-// 1 つだけ採用する（duplicateGroupId / duplicateGroupSize と同じグループに紐づく）。
+// Phase 2-A: 驥崎､・げ繝ｫ繝ｼ繝励・荳閾ｴ邨瑚ｷｯ縲・ 蛟呵｣懊′隍・焚邨瑚ｷｯ縺ｧ蜷梧凾縺ｫ繝偵ャ繝医☆繧句ｴ蜷医・
+// 譌｢蟄俶嫌蜍輔ｒ蜆ｪ蜈医☆繧九◆繧・name_address > corporate_number > external_link_key 縺ｮ鬆・〒
+// 1 縺､縺縺第治逕ｨ縺吶ｋ・・uplicateGroupId / duplicateGroupSize 縺ｨ蜷後§繧ｰ繝ｫ繝ｼ繝励↓邏舌▼縺擾ｼ峨・
 type DuplicateMatchedBy =
   | "name_address"
   | "corporate_number"
@@ -37,12 +37,12 @@ type Candidate = {
   zip: string | null;
   phone: string | null;
   /**
-   * Phase E: 既存 Owner.corporateNumber を display-level に従ってマスクして返す。
-   * 事前確定方針:
-   * - owner_corporate_number=full → 生値
-   * - edit/read/masked/partial → 先頭4桁＋***
-   * - hidden または列が null → null
-   * 法人番号生値は AuditLog detail に絶対に入れない。
+   * Phase E: 譌｢蟄・Owner.corporateNumber 繧・display-level 縺ｫ蠕薙▲縺ｦ繝槭せ繧ｯ縺励※霑斐☆縲・
+   * 莠句燕遒ｺ螳壽婿驥・
+   * - owner_corporate_number=full 竊・逕溷､
+   * - edit/read/masked/partial 竊・蜈磯ｭ4譯・ｼ・**
+   * - hidden 縺ｾ縺溘・蛻励′ null 竊・null
+   * 豕穂ｺｺ逡ｪ蜿ｷ逕溷､縺ｯ AuditLog detail 縺ｫ邨ｶ蟇ｾ縺ｫ蜈･繧後↑縺・・
    */
   corporateNumberMasked: string | null;
   hasNote: boolean;
@@ -50,23 +50,23 @@ type Candidate = {
   version: number;
   propertyOwnerCount: number;
   /**
-   * 紐づき物件がちょうど1件のときの物件ID。0件・2件以上は null。
-   * 画面はこの値をリンク先の判定(resolveOwnerPropertyLink)に渡すだけで、
-   * 物件の住所などの中身はここでは一切返さない。
-   * Codex P1: セッションが property:read を持たない場合は常に null
-   * (#139 finding)。property:read があっても、field_staff は
-   * propertyVisibilityScopeWhere で担当外の物件を除外した後の値。
+   * 邏舌▼縺咲黄莉ｶ縺後■繧・≧縺ｩ1莉ｶ縺ｮ縺ｨ縺阪・迚ｩ莉ｶID縲・莉ｶ繝ｻ2莉ｶ莉･荳翫・ null縲・
+   * 逕ｻ髱｢縺ｯ縺薙・蛟､繧偵Μ繝ｳ繧ｯ蜈医・蛻､螳・resolveOwnerPropertyLink)縺ｫ貂｡縺吶□縺代〒縲・
+   * 迚ｩ莉ｶ縺ｮ菴乗園縺ｪ縺ｩ縺ｮ荳ｭ霄ｫ縺ｯ縺薙％縺ｧ縺ｯ荳蛻・ｿ斐＆縺ｪ縺・・
+   * Codex P1: 繧ｻ繝・す繝ｧ繝ｳ縺・property:read 繧呈戟縺溘↑縺・ｴ蜷医・蟶ｸ縺ｫ null
+   * (#139 finding)縲Ｑroperty:read 縺後≠縺｣縺ｦ繧ゅ’ield_staff 縺ｯ
+   * propertyVisibilityScopeWhere 縺ｧ諡・ｽ灘､悶・迚ｩ莉ｶ繧帝勁螟悶＠縺溷ｾ後・蛟､縲・
    */
   singlePropertyId: string | null;
   /**
-   * P2 (#139 二次回帰): このビューアが実際にこの所有者の紐づき物件を
-   * 1件以上見られるか(スコープ済み propertyOwners 配列が非空かどうか)。
-   * propertyOwnerCount(_count)は可視範囲スコープ対象外のため、
-   * 「件数は正だがスコープ内の紐づきが0件」というケース(field_staff が
-   * 担当外の物件だけを持つ owner を見たとき)がありうる。このケースでは
-   * resolveOwnerPropertyLink がリンク先を作れず、件数だけリンクになっている
-   * 死んだリンク(/properties?ownerId=... が必ず空リストになる)を出していた
-   * ([#139] fallout の再発)。boolean のみで物件ID/件数などの中身は含まない。
+   * P2 (#139 莠梧ｬ｡蝗槫ｸｰ): 縺薙・繝薙Η繝ｼ繧｢縺悟ｮ滄圀縺ｫ縺薙・謇譛芽・・邏舌▼縺咲黄莉ｶ繧・
+   * 1莉ｶ莉･荳願ｦ九ｉ繧後ｋ縺・繧ｹ繧ｳ繝ｼ繝玲ｸ医∩ propertyOwners 驟榊・縺碁撼遨ｺ縺九←縺・°)縲・
+   * propertyOwnerCount(_count)縺ｯ蜿ｯ隕也ｯ・峇繧ｹ繧ｳ繝ｼ繝怜ｯｾ雎｡螟悶・縺溘ａ縲・
+   * 縲御ｻｶ謨ｰ縺ｯ豁｣縺縺後せ繧ｳ繝ｼ繝怜・縺ｮ邏舌▼縺阪′0莉ｶ縲阪→縺・≧繧ｱ繝ｼ繧ｹ(field_staff 縺・
+   * 諡・ｽ灘､悶・迚ｩ莉ｶ縺縺代ｒ謖√▽ owner 繧定ｦ九◆縺ｨ縺・縺後≠繧翫≧繧九ゅ％縺ｮ繧ｱ繝ｼ繧ｹ縺ｧ縺ｯ
+   * resolveOwnerPropertyLink 縺後Μ繝ｳ繧ｯ蜈医ｒ菴懊ｌ縺壹∽ｻｶ謨ｰ縺縺代Μ繝ｳ繧ｯ縺ｫ縺ｪ縺｣縺ｦ縺・ｋ
+   * 豁ｻ繧薙□繝ｪ繝ｳ繧ｯ(/properties?ownerId=... 縺悟ｿ・★遨ｺ繝ｪ繧ｹ繝医↓縺ｪ繧・繧貞・縺励※縺・◆
+   * ([#139] fallout 縺ｮ蜀咲匱)縲Ｃoolean 縺ｮ縺ｿ縺ｧ迚ｩ莉ｶID/莉ｶ謨ｰ縺ｪ縺ｩ縺ｮ荳ｭ霄ｫ縺ｯ蜷ｫ縺ｾ縺ｪ縺・・
    */
   hasReachableProperty: boolean;
   changeLogCount: number;
@@ -76,47 +76,47 @@ type Candidate = {
   recommendedAction: RecommendedAction;
   types: string[];
   /**
-   * duplicate グループの opaque な ID。
-   *   - name_address 一致         : "dup-N"
-   *   - corporate_number 一致     : "dup-cn-N"
-   *   - external_link_key 一致    : "dup-elk-N"
-   * グループサイズ >= 2 のグループに属する candidate のみ非 null。
-   * **raw name/address/corporateNumber/externalLinkKey/normalized key を
-   * 含まない**（PII / 法人番号 / 外部キー復元防止）。
+   * duplicate 繧ｰ繝ｫ繝ｼ繝励・ opaque 縺ｪ ID縲・
+   *   - name_address 荳閾ｴ         : "dup-N"
+   *   - corporate_number 荳閾ｴ     : "dup-cn-N"
+   *   - external_link_key 荳閾ｴ    : "dup-elk-N"
+   * 繧ｰ繝ｫ繝ｼ繝励し繧､繧ｺ >= 2 縺ｮ繧ｰ繝ｫ繝ｼ繝励↓螻槭☆繧・candidate 縺ｮ縺ｿ髱・null縲・
+   * **raw name/address/corporateNumber/externalLinkKey/normalized key 繧・
+   * 蜷ｫ縺ｾ縺ｪ縺・*・・II / 豕穂ｺｺ逡ｪ蜿ｷ / 螟夜Κ繧ｭ繝ｼ蠕ｩ蜈・亟豁｢・峨・
    */
   duplicateGroupId: string | null;
   /**
-   * duplicate グループ内の候補件数。groupId が null なら null。
+   * duplicate 繧ｰ繝ｫ繝ｼ繝怜・縺ｮ蛟呵｣應ｻｶ謨ｰ縲ＨroupId 縺・null 縺ｪ繧・null縲・
    */
   duplicateGroupSize: number | null;
   /**
-   * Phase 2-A: duplicate グループへ採用された経路。複数経路でヒットした
-   * candidate にも 1 つだけ付与する（優先順: name_address > corporate_number
-   * > external_link_key）。groupId が null なら null。
+   * Phase 2-A: duplicate 繧ｰ繝ｫ繝ｼ繝励∈謗｡逕ｨ縺輔ｌ縺溽ｵ瑚ｷｯ縲り､・焚邨瑚ｷｯ縺ｧ繝偵ャ繝医＠縺・
+   * candidate 縺ｫ繧・1 縺､縺縺台ｻ倅ｸ弱☆繧具ｼ亥━蜈磯・ name_address > corporate_number
+   * > external_link_key・峨ＨroupId 縺・null 縺ｪ繧・null縲・
    */
   duplicateMatchedBy: DuplicateMatchedBy | null;
   /**
-   * Phase 2-B: address が DB 上 null ではないが trim 後に空（半角/全角空白・タブ等のみ）
-   * の場合に true。既存 types/address_null は維持しつつ「実質空欄」を区別したい
-   * UI 用フラグ。PII は含まない (boolean のみ)。
+   * Phase 2-B: address 縺・DB 荳・null 縺ｧ縺ｯ縺ｪ縺・′ trim 蠕後↓遨ｺ・亥濠隗・蜈ｨ隗堤ｩｺ逋ｽ繝ｻ繧ｿ繝也ｭ峨・縺ｿ・・
+   * 縺ｮ蝣ｴ蜷医↓ true縲よ里蟄・types/address_null 縺ｯ邯ｭ謖√＠縺､縺､縲悟ｮ溯ｳｪ遨ｺ谺・阪ｒ蛹ｺ蛻･縺励◆縺・
+   * UI 逕ｨ繝輔Λ繧ｰ縲１II 縺ｯ蜷ｫ縺ｾ縺ｪ縺・(boolean 縺ｮ縺ｿ)縲・
    */
   addressIsWhitespaceOnly: boolean;
 };
 
 // ---------- GET /api/admin/owners/correction-candidates ----------
 //
-// Owner 補正候補を dry-run で返す。DB は一切変更しない。
+// Owner 陬懈ｭ｣蛟呵｣懊ｒ dry-run 縺ｧ霑斐☆縲・B 縺ｯ荳蛻・､画峩縺励↑縺・・
 //
-// type クエリパラメータ:
-//   orphan       — PropertyOwner 件数 = 0
-//   address_null — address が null または空文字
-//   duplicate    — normalizeName+normalizeAddress が一致する Owner が複数
-//   all (default)— 上記いずれかに該当するもの全て
+// type 繧ｯ繧ｨ繝ｪ繝代Λ繝｡繝ｼ繧ｿ:
+//   orphan       窶・PropertyOwner 莉ｶ謨ｰ = 0
+//   address_null 窶・address 縺・null 縺ｾ縺溘・遨ｺ譁・ｭ・
+//   duplicate    窶・normalizeName+normalizeAddress 縺御ｸ閾ｴ縺吶ｋ Owner 縺瑚､・焚
+//   all (default)窶・荳願ｨ倥＞縺壹ｌ縺九↓隧ｲ蠖薙☆繧九ｂ縺ｮ蜈ｨ縺ｦ
 //
-// 権限: user_management:read（管理者エリア） + owner:read（PII閲覧）の両方必須。
-//   既存 /api/owners と同じ getOwnerDisplayConfig / maskValue を適用する。
-//   singlePropertyId は上記2つとは別に property:read も必要（#139 finding）。
-//   無ければ endpoint 自体は 403 にせず、その項目だけ null にする。
+// 讓ｩ髯・ user_management:read・育ｮ｡逅・・お繝ｪ繧｢・・+ owner:read・・II髢ｲ隕ｧ・峨・荳｡譁ｹ蠢・医・
+//   譌｢蟄・/api/owners 縺ｨ蜷後§ getOwnerDisplayConfig / maskValue 繧帝←逕ｨ縺吶ｋ縲・
+//   singlePropertyId 縺ｯ荳願ｨ・縺､縺ｨ縺ｯ蛻･縺ｫ property:read 繧ょｿ・ｦ・ｼ・139 finding・峨・
+//   辟｡縺代ｌ縺ｰ endpoint 閾ｪ菴薙・ 403 縺ｫ縺帙★縲√◎縺ｮ鬆・岼縺縺・null 縺ｫ縺吶ｋ縲・
 
 export async function GET(request: NextRequest) {
   try {
@@ -124,27 +124,27 @@ export async function GET(request: NextRequest) {
     const perms = await getUserPermissions(session.id);
 
     if (!hasPermission(perms, "user_management", "read")) {
-      throw new ApiError(403, "権限がありません", "FORBIDDEN");
+      throw new ApiError(403, "讓ｩ髯舌′縺ゅｊ縺ｾ縺帙ｓ", "FORBIDDEN");
     }
     if (!hasPermission(perms, "owner", "read")) {
-      throw new ApiError(403, "所有者閲覧の権限がありません", "FORBIDDEN");
+      throw new ApiError(403, "謇譛芽・夢隕ｧ縺ｮ讓ｩ髯舌′縺ゅｊ縺ｾ縺帙ｓ", "FORBIDDEN");
     }
 
-    // PII フィールドの表示レベルを取得（/api/owners と同じ制御）
+    // PII 繝輔ぅ繝ｼ繝ｫ繝峨・陦ｨ遉ｺ繝ｬ繝吶Ν繧貞叙蠕暦ｼ・api/owners 縺ｨ蜷後§蛻ｶ蠕｡・・
     const displayConfig = await getOwnerDisplayConfig(session.id, perms);
 
-    // Codex P1: singlePropertyId は物件の存在(UUID)と1件確定であることを外に出す。
-    // property:read を持たないセッションには渡さない(#139 finding)。
-    // property list / detail API と同じ可視範囲スコープを nested selection にも
-    // 適用し、field_staff が担当外の物件IDを受け取らないようにする。
+    // Codex P1: singlePropertyId 縺ｯ迚ｩ莉ｶ縺ｮ蟄伜惠(UUID)縺ｨ1莉ｶ遒ｺ螳壹〒縺ゅｋ縺薙→繧貞､悶↓蜃ｺ縺吶・
+    // property:read 繧呈戟縺溘↑縺・そ繝・す繝ｧ繝ｳ縺ｫ縺ｯ貂｡縺輔↑縺・#139 finding)縲・
+    // property list / detail API 縺ｨ蜷後§蜿ｯ隕也ｯ・峇繧ｹ繧ｳ繝ｼ繝励ｒ nested selection 縺ｫ繧・
+    // 驕ｩ逕ｨ縺励’ield_staff 縺梧球蠖灘､悶・迚ｩ莉ｶID繧貞女縺大叙繧峨↑縺・ｈ縺・↓縺吶ｋ縲・
     const hasPropertyRead = hasPermission(perms, "property", "read");
     const propertyVisibilityScope = propertyVisibilityScopeWhere(session);
 
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type") ?? "all";
 
-    // 1. 全アクティブ Owner を PropertyOwner 件数付きで取得
-    // Phase E: corporateNumber も取得し、display-level に従ってマスクして返す。
+    // 1. 蜈ｨ繧｢繧ｯ繝・ぅ繝・Owner 繧・PropertyOwner 莉ｶ謨ｰ莉倥″縺ｧ蜿門ｾ・
+    // Phase E: corporateNumber 繧ょ叙蠕励＠縲‥isplay-level 縺ｫ蠕薙▲縺ｦ繝槭せ繧ｯ縺励※霑斐☆縲・
     const owners = await prisma.owner.findMany({
       where: { isArchived: false },
       select: {
@@ -157,14 +157,14 @@ export async function GET(request: NextRequest) {
         corporateNumber: true,
         externalLinkKey: true,
         version: true,
-        // propertyOwnerCount(_count)は既存の孤児/重複判定が依存するため
-        // 可視範囲スコープを適用しない(変更しない・スコープ対象は下の
-        // propertyOwners selection のみ)。
+        // propertyOwnerCount(_count)縺ｯ譌｢蟄倥・蟄､蜈・驥崎､・愛螳壹′萓晏ｭ倥☆繧九◆繧・
+        // 蜿ｯ隕也ｯ・峇繧ｹ繧ｳ繝ｼ繝励ｒ驕ｩ逕ｨ縺励↑縺・螟画峩縺励↑縺・・繧ｹ繧ｳ繝ｼ繝怜ｯｾ雎｡縺ｯ荳九・
+        // propertyOwners selection 縺ｮ縺ｿ)縲・
         _count: { select: { propertyOwners: true } },
-        // 紐づきがちょうど1件のときだけ物件IDを返すため、2件だけ読む。
-        // (1件か2件以上かの判別にはこれで足りる。全件読むと重い)
-        // where は property list/detail API と同じ propertyVisibilityScopeWhere。
-        // field_staff は担当外の物件を持つ行を読まない(=そもそも候補に出せない)。
+        // 邏舌▼縺阪′縺｡繧・≧縺ｩ1莉ｶ縺ｮ縺ｨ縺阪□縺醍黄莉ｶID繧定ｿ斐☆縺溘ａ縲・莉ｶ縺縺題ｪｭ繧縲・
+        // (1莉ｶ縺・莉ｶ莉･荳翫°縺ｮ蛻､蛻･縺ｫ縺ｯ縺薙ｌ縺ｧ雜ｳ繧翫ｋ縲ょ・莉ｶ隱ｭ繧縺ｨ驥阪＞)
+        // where 縺ｯ property list/detail API 縺ｨ蜷後§ propertyVisibilityScopeWhere縲・
+        // field_staff 縺ｯ諡・ｽ灘､悶・迚ｩ莉ｶ繧呈戟縺､陦後ｒ隱ｭ縺ｾ縺ｪ縺・=縺昴ｂ縺昴ｂ蛟呵｣懊↓蜃ｺ縺帙↑縺・縲・
         propertyOwners: {
           select: { propertyId: true },
           take: 2,
@@ -178,7 +178,7 @@ export async function GET(request: NextRequest) {
 
     const ownerIds = owners.map((o) => o.id);
 
-    // 2. ChangeLog 件数（Owner には直接リレーションなし — 別クエリで集計）
+    // 2. ChangeLog 莉ｶ謨ｰ・・wner 縺ｫ縺ｯ逶ｴ謗･繝ｪ繝ｬ繝ｼ繧ｷ繝ｧ繝ｳ縺ｪ縺・窶・蛻･繧ｯ繧ｨ繝ｪ縺ｧ髮・ｨ茨ｼ・
     const changeLogRows =
       ownerIds.length > 0
         ? await prisma.changeLog.findMany({
@@ -194,7 +194,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // 3. ImportJobRow 逆引き（owner_csv のみ — createdId = Owner.id）
+    // 3. ImportJobRow 騾・ｼ輔″・・wner_csv 縺ｮ縺ｿ 窶・createdId = Owner.id・・
     const importRows =
       ownerIds.length > 0
         ? await prisma.importJobRow.findMany({
@@ -211,7 +211,7 @@ export async function GET(request: NextRequest) {
             orderBy: { createdAt: "asc" },
           })
         : [];
-    // 同一 Owner に複数行あれば最初の success 行を優先し、なければ最初の行を使用
+    // 蜷御ｸ Owner 縺ｫ隍・焚陦後≠繧後・譛蛻昴・ success 陦後ｒ蜆ｪ蜈医＠縲√↑縺代ｌ縺ｰ譛蛻昴・陦後ｒ菴ｿ逕ｨ
     const importRowMap = new Map<
       string,
       { fileName: string; rowNumber: number; status: string }
@@ -225,7 +225,7 @@ export async function GET(request: NextRequest) {
           status: r.status,
         });
       } else if (existing.status !== "success" && r.status === "success") {
-        // success 行があればそちらに上書き
+        // success 陦後′縺ゅｌ縺ｰ縺昴■繧峨↓荳頑嶌縺・
         importRowMap.set(r.createdId!, {
           fileName: r.job.fileName,
           rowNumber: r.rowNumber,
@@ -234,19 +234,22 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 4. 候補リスト構築
+    // 4. 蛟呵｣懊Μ繧ｹ繝域ｧ狗ｯ・
     const candidates: Candidate[] = owners.map((owner): Candidate => {
       const propertyOwnerCount = owner._count.propertyOwners;
-      // property:read が無いセッションには渡さない(#139 finding)。
-      // propertyOwnerCount(_count)は上記の通りスコープ対象外・変更しない。
+      // property:read 縺檎┌縺・そ繝・す繝ｧ繝ｳ縺ｫ縺ｯ貂｡縺輔↑縺・#139 finding)縲・
+      // propertyOwnerCount(_count)縺ｯ荳願ｨ倥・騾壹ｊ繧ｹ繧ｳ繝ｼ繝怜ｯｾ雎｡螟悶・螟画峩縺励↑縺・・
       const singlePropertyId = hasPropertyRead
         ? pickSinglePropertyId(owner.propertyOwners)
         : null;
-      // P2 (#139 二次回帰): スコープ済み配列(owner.propertyOwners)が
-      // 非空かどうかだけを見る。propertyOwnerCount(_count)は使わない
-      // ——不一致(件数は正だがスコープ内は0件)こそがこの flag で拾いたい
-      // ケースそのもの。
-      const hasReachableProperty = owner.propertyOwners.length > 0;
+      // P2 (#139 莠梧ｬ｡蝗槫ｸｰ): 繧ｹ繧ｳ繝ｼ繝玲ｸ医∩驟榊・(owner.propertyOwners)縺・
+      // 髱樒ｩｺ縺九←縺・°縺縺代ｒ隕九ｋ縲ＱropertyOwnerCount(_count)縺ｯ菴ｿ繧上↑縺・
+      // 窶披比ｸ堺ｸ閾ｴ(莉ｶ謨ｰ縺ｯ豁｣縺縺後せ繧ｳ繝ｼ繝怜・縺ｯ0莉ｶ)縺薙◎縺後％縺ｮ flag 縺ｧ諡ｾ縺・◆縺・
+      // 繧ｱ繝ｼ繧ｹ縺昴・繧ゅ・縲・
+      // property:read 縺檎┌縺・そ繝・す繝ｧ繝ｳ縺ｯ縺薙・ flag 繧・false・・inglePropertyId 縺ｨ蜷後§繧ｲ繝ｼ繝茨ｼ峨・
+      const hasReachableProperty = hasPropertyRead
+        ? owner.propertyOwners.length > 0
+        : false;
       const changeLogCount = changeLogCountMap.get(owner.id) ?? 0;
       const importInfo = importRowMap.get(owner.id) ?? null;
 
@@ -261,18 +264,18 @@ export async function GET(request: NextRequest) {
         blockReasons.push("import_row_not_success");
 
       const isOrphan = propertyOwnerCount === 0;
-      // Phase 2-B: 全角空白 / タブ等のみの address も「実質空欄」として扱う。
-      // 既存 address_null 判定の意図と整合（trim 後 0 文字 = 空欄）。
+      // Phase 2-B: 蜈ｨ隗堤ｩｺ逋ｽ / 繧ｿ繝也ｭ峨・縺ｿ縺ｮ address 繧ゅ悟ｮ溯ｳｪ遨ｺ谺・阪→縺励※謇ｱ縺・・
+      // 譌｢蟄・address_null 蛻､螳壹・諢丞峙縺ｨ謨ｴ蜷茨ｼ・rim 蠕・0 譁・ｭ・= 遨ｺ谺・ｼ峨・
       const isAddressNull = isOwnerAddressEffectivelyEmpty(owner.address);
-      // address は DB 上は非 null だが trim 後 0 文字、というケースのみ true。
-      // UI バッジで「空白のみ」と「null」を区別するために返す。
+      // address 縺ｯ DB 荳翫・髱・null 縺縺・trim 蠕・0 譁・ｭ励√→縺・≧繧ｱ繝ｼ繧ｹ縺ｮ縺ｿ true縲・
+      // UI 繝舌ャ繧ｸ縺ｧ縲檎ｩｺ逋ｽ縺ｮ縺ｿ縲阪→縲系ull縲阪ｒ蛹ｺ蛻･縺吶ｋ縺溘ａ縺ｫ霑斐☆縲・
       const addressIsWhitespaceOnly =
         owner.address !== null && owner.address.trim() === "";
 
       const types: string[] = [];
       if (isOrphan) types.push("orphan");
       if (isAddressNull) types.push("address_null");
-      // duplicate は後段で付与
+      // duplicate 縺ｯ蠕梧ｮｵ縺ｧ莉倅ｸ・
 
       const hasSafeguard = blockReasons.some((r) =>
         [
@@ -293,9 +296,9 @@ export async function GET(request: NextRequest) {
         recommendedAction = "review";
       }
 
-      // Phase E: corporateNumber は display-level に応じてマスクして保持。
-      // 重複検出は raw name/address/zip/phone のみで行うため、ここでマスクしても影響なし。
-      // 事前確定方針: full のみ生値、edit/read/masked/partial はマスク、hidden は null。
+      // Phase E: corporateNumber 縺ｯ display-level 縺ｫ蠢懊§縺ｦ繝槭せ繧ｯ縺励※菫晄戟縲・
+      // 驥崎､・､懷・縺ｯ raw name/address/zip/phone 縺ｮ縺ｿ縺ｧ陦後≧縺溘ａ縲√％縺薙〒繝槭せ繧ｯ縺励※繧ょｽｱ髻ｿ縺ｪ縺励・
+      // 莠句燕遒ｺ螳壽婿驥・ full 縺ｮ縺ｿ逕溷､縲‘dit/read/masked/partial 縺ｯ繝槭せ繧ｯ縲”idden 縺ｯ null縲・
       let corporateNumberMasked: string | null = null;
       if (owner.corporateNumber != null) {
         const cnLevel = displayConfig.corporateNumber;
@@ -304,7 +307,7 @@ export async function GET(request: NextRequest) {
         } else if (cnLevel === "hidden") {
           corporateNumberMasked = null;
         } else {
-          // edit / read / masked / partial → 全てマスク
+          // edit / read / masked / partial 竊・蜈ｨ縺ｦ繝槭せ繧ｯ
           corporateNumberMasked = maskCorporateNumber(owner.corporateNumber);
         }
       }
@@ -335,26 +338,26 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // 5. 重複検出: 3 系統で並行にグループ化する。
-    //    - name_address: buildOwnerDuplicateCandidateKey（既存 / merge-preview と共有）
-    //    - corporate_number: buildOwnerCorporateNumberDuplicateKey（13 桁 digits）
-    //    - external_link_key: buildOwnerExternalLinkKeyDuplicateKey（trim 後非空）
+    // 5. 驥崎､・､懷・: 3 邉ｻ邨ｱ縺ｧ荳ｦ陦後↓繧ｰ繝ｫ繝ｼ繝怜喧縺吶ｋ縲・
+    //    - name_address: buildOwnerDuplicateCandidateKey・域里蟄・/ merge-preview 縺ｨ蜈ｱ譛会ｼ・
+    //    - corporate_number: buildOwnerCorporateNumberDuplicateKey・・3 譯・digits・・
+    //    - external_link_key: buildOwnerExternalLinkKeyDuplicateKey・・rim 蠕碁撼遨ｺ・・
     //
-    //    1 owner が複数経路で同時にヒットした場合、duplicateGroupId は **1 つ**だけ
-    //    保持する（型上単一フィールド）。優先順位は既存挙動を維持するため
-    //    name_address > corporate_number > external_link_key。先に当たった経路で
-    //    duplicateGroupId / duplicateGroupSize / duplicateMatchedBy が確定したら
-    //    以降の経路では上書きしない。
+    //    1 owner 縺瑚､・焚邨瑚ｷｯ縺ｧ蜷梧凾縺ｫ繝偵ャ繝医＠縺溷ｴ蜷医‥uplicateGroupId 縺ｯ **1 縺､**縺縺・
+    //    菫晄戟縺吶ｋ・亥梛荳雁腰荳繝輔ぅ繝ｼ繝ｫ繝会ｼ峨ょ━蜈磯・ｽ阪・譌｢蟄俶嫌蜍輔ｒ邯ｭ謖√☆繧九◆繧・
+    //    name_address > corporate_number > external_link_key縲ょ・縺ｫ蠖薙◆縺｣縺溽ｵ瑚ｷｯ縺ｧ
+    //    duplicateGroupId / duplicateGroupSize / duplicateMatchedBy 縺檎｢ｺ螳壹＠縺溘ｉ
+    //    莉･髯阪・邨瑚ｷｯ縺ｧ縺ｯ荳頑嶌縺阪＠縺ｪ縺・・
     //
-    //    types["duplicate"] は経路に関わらず実際に group に組まれた候補へ一度だけ
-    //    付与する。一方 recommendedAction="merge_candidate" への昇格は
-    //    **name_address 限定**（merge-preview が name+address 検証しか持たないため、
-    //    corporate_number / external_link_key 由来候補を merge_candidate にすると
-    //    UI 上 merge できそうに見えて preview/execute では block されてしまう）。
+    //    types["duplicate"] 縺ｯ邨瑚ｷｯ縺ｫ髢｢繧上ｉ縺壼ｮ滄圀縺ｫ group 縺ｫ邨・∪繧後◆蛟呵｣懊∈荳蠎ｦ縺縺・
+    //    莉倅ｸ弱☆繧九ゆｸ譁ｹ recommendedAction="merge_candidate" 縺ｸ縺ｮ譏・ｼ縺ｯ
+    //    **name_address 髯仙ｮ・*・・erge-preview 縺・name+address 讀懆ｨｼ縺励°謖√◆縺ｪ縺・◆繧√・
+    //    corporate_number / external_link_key 逕ｱ譚･蛟呵｣懊ｒ merge_candidate 縺ｫ縺吶ｋ縺ｨ
+    //    UI 荳・merge 縺ｧ縺阪◎縺・↓隕九∴縺ｦ preview/execute 縺ｧ縺ｯ block 縺輔ｌ縺ｦ縺励∪縺・ｼ峨・
     const candidateById = new Map<string, Candidate>();
     for (const c of candidates) candidateById.set(c.id, c);
 
-    // 5-a. name_address グループ
+    // 5-a. name_address 繧ｰ繝ｫ繝ｼ繝・
     const nameAddrGroups = new Map<string, string[]>();
     for (const c of candidates) {
       const key = buildOwnerDuplicateCandidateKey({
@@ -368,16 +371,16 @@ export async function GET(request: NextRequest) {
       nameAddrGroups.set(key, arr);
     }
 
-    // 5-b. corporate_number グループ（owner の raw 値を直接参照。candidate 側の
-    //      corporateNumberMasked は display-level に依存するため使わない）
+    // 5-b. corporate_number 繧ｰ繝ｫ繝ｼ繝暦ｼ・wner 縺ｮ raw 蛟､繧堤峩謗･蜿ら・縲Ｄandidate 蛛ｴ縺ｮ
+    //      corporateNumberMasked 縺ｯ display-level 縺ｫ萓晏ｭ倥☆繧九◆繧∽ｽｿ繧上↑縺・ｼ・
     //
-    // Codex P1: 法人番号の重複検出は、displayConfig.corporateNumber === "full"
-    // のオペレーターのみに開放する。masked / hidden / partial / read / edit などの
-    // 制限付きユーザーでも duplicateMatchedBy="corporate_number" や opaque
-    // ID dup-cn-* / duplicateMatchedByCounts.corporate_number > 0 が見えると
-    // 「同一法人番号を持つ Owner が存在する」という raw equality を推測でき、
-    // 法人番号の表示権限を迂回する情報漏えいになる。安全側でグループ化自体を
-    // スキップする（=候補も件数も外に出ない）。
+    // Codex P1: 豕穂ｺｺ逡ｪ蜿ｷ縺ｮ驥崎､・､懷・縺ｯ縲‥isplayConfig.corporateNumber === "full"
+    // 縺ｮ繧ｪ繝壹Ξ繝ｼ繧ｿ繝ｼ縺ｮ縺ｿ縺ｫ髢区叛縺吶ｋ縲Ｎasked / hidden / partial / read / edit 縺ｪ縺ｩ縺ｮ
+    // 蛻ｶ髯蝉ｻ倥″繝ｦ繝ｼ繧ｶ繝ｼ縺ｧ繧・duplicateMatchedBy="corporate_number" 繧・opaque
+    // ID dup-cn-* / duplicateMatchedByCounts.corporate_number > 0 縺瑚ｦ九∴繧九→
+    // 縲悟酔荳豕穂ｺｺ逡ｪ蜿ｷ繧呈戟縺､ Owner 縺悟ｭ伜惠縺吶ｋ縲阪→縺・≧ raw equality 繧呈耳貂ｬ縺ｧ縺阪・
+    // 豕穂ｺｺ逡ｪ蜿ｷ縺ｮ陦ｨ遉ｺ讓ｩ髯舌ｒ霑ょ屓縺吶ｋ諠・ｱ貍上∴縺・↓縺ｪ繧九ょｮ牙・蛛ｴ縺ｧ繧ｰ繝ｫ繝ｼ繝怜喧閾ｪ菴薙ｒ
+    // 繧ｹ繧ｭ繝・・縺吶ｋ・・蛟呵｣懊ｂ莉ｶ謨ｰ繧ょ､悶↓蜃ｺ縺ｪ縺・ｼ峨・
     const corporateNumberDuplicateAvailable =
       displayConfig.corporateNumber === "full";
     const cnGroups = new Map<string, string[]>();
@@ -391,7 +394,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 5-c. external_link_key グループ
+    // 5-c. external_link_key 繧ｰ繝ｫ繝ｼ繝・
     const elkGroups = new Map<string, string[]>();
     for (const o of owners) {
       const key = buildOwnerExternalLinkKeyDuplicateKey(o.externalLinkKey);
@@ -401,22 +404,22 @@ export async function GET(request: NextRequest) {
       elkGroups.set(key, arr);
     }
 
-    // Codex P1: グループ割当は atomic に行う。
+    // Codex P1: 繧ｰ繝ｫ繝ｼ繝怜牡蠖薙・ atomic 縺ｫ陦後≧縲・
     //
-    // 旧実装は memberIds の全件サイズを duplicateGroupSize にしていたため、
-    // 低優先グループのメンバーの一部が既に高優先グループへ割り当て済みの場合、
-    //   - 「未割当の 1 人だけ」に dup-cn-N / size=2 を付けてしまう
-    //   - その 1 人と同じ groupId を持つ仲間が存在せず、UI 側の
-    //     `arr.length >= 2` で落ちて duplicate サマリーから消える
-    // という不整合（孤立 group）が発生していた。
+    // 譌ｧ螳溯｣・・ memberIds 縺ｮ蜈ｨ莉ｶ繧ｵ繧､繧ｺ繧・duplicateGroupSize 縺ｫ縺励※縺・◆縺溘ａ縲・
+    // 菴主━蜈医げ繝ｫ繝ｼ繝励・繝｡繝ｳ繝舌・縺ｮ荳驛ｨ縺梧里縺ｫ鬮伜━蜈医げ繝ｫ繝ｼ繝励∈蜑ｲ繧雁ｽ薙※貂医∩縺ｮ蝣ｴ蜷医・
+    //   - 縲梧悴蜑ｲ蠖薙・ 1 莠ｺ縺縺代阪↓ dup-cn-N / size=2 繧剃ｻ倥￠縺ｦ縺励∪縺・
+    //   - 縺昴・ 1 莠ｺ縺ｨ蜷後§ groupId 繧呈戟縺､莉ｲ髢薙′蟄伜惠縺帙★縲ゞI 蛛ｴ縺ｮ
+    //     `arr.length >= 2` 縺ｧ關ｽ縺｡縺ｦ duplicate 繧ｵ繝槭Μ繝ｼ縺九ｉ豸医∴繧・
+    // 縺ｨ縺・≧荳肴紛蜷茨ｼ亥ｭ､遶・group・峨′逋ｺ逕溘＠縺ｦ縺・◆縲・
     //
-    // 修正:
-    //   1. 既に割り当て済み（duplicateGroupId !== null）のメンバーは触らない
-    //   2. 未割当メンバーだけで実グループを組む
-    //   3. 未割当が < 2 ならグループ自体を作らない
-    //      （types["duplicate"] / merge_candidate も付与しない）
-    //   4. 未割当 >= 2 のときだけ opaque ID を割り当て、size は **未割当数**
-    //   5. counter は実際にグループが組まれたときのみ進めて連番の飛びを防ぐ
+    // 菫ｮ豁｣:
+    //   1. 譌｢縺ｫ蜑ｲ繧雁ｽ薙※貂医∩・・uplicateGroupId !== null・峨・繝｡繝ｳ繝舌・縺ｯ隗ｦ繧峨↑縺・
+    //   2. 譛ｪ蜑ｲ蠖薙Γ繝ｳ繝舌・縺縺代〒螳溘げ繝ｫ繝ｼ繝励ｒ邨・・
+    //   3. 譛ｪ蜑ｲ蠖薙′ < 2 縺ｪ繧峨げ繝ｫ繝ｼ繝苓・菴薙ｒ菴懊ｉ縺ｪ縺・
+    //      ・・ypes["duplicate"] / merge_candidate 繧ゆｻ倅ｸ弱＠縺ｪ縺・ｼ・
+    //   4. 譛ｪ蜑ｲ蠖・>= 2 縺ｮ縺ｨ縺阪□縺・opaque ID 繧貞牡繧雁ｽ薙※縲《ize 縺ｯ **譛ｪ蜑ｲ蠖捺焚**
+    //   5. counter 縺ｯ螳滄圀縺ｫ繧ｰ繝ｫ繝ｼ繝励′邨・∪繧後◆縺ｨ縺阪・縺ｿ騾ｲ繧√※騾｣逡ｪ縺ｮ鬟帙・繧帝亟縺・
     function assignGroup(
       memberIds: string[],
       opaqueId: string,
@@ -428,22 +431,22 @@ export async function GET(request: NextRequest) {
         if (!c) continue;
         if (c.duplicateGroupId === null) unassigned.push(c);
       }
-      // 未割当が 1 人以下なら group を作らない（孤立 group 防止）。
+      // 譛ｪ蜑ｲ蠖薙′ 1 莠ｺ莉･荳九↑繧・group 繧剃ｽ懊ｉ縺ｪ縺・ｼ亥ｭ､遶・group 髦ｲ豁｢・峨・
       if (unassigned.length < 2) return false;
       const size = unassigned.length;
-      // Codex P2-round-2: merge_candidate への昇格は name_address group 限定。
-      // merge-preview API は buildOwnerDuplicateCandidateKey (name+address) でしか
-      // ペア検証していないため、corporate_number / external_link_key 由来の候補に
-      // merge_candidate を付けると UI 上 merge できそうに見えて preview/execute で
-      // name_address_normalize_mismatch によりブロックされ、operator に誤解を
-      // 与える機能不整合になる。
+      // Codex P2-round-2: merge_candidate 縺ｸ縺ｮ譏・ｼ縺ｯ name_address group 髯仙ｮ壹・
+      // merge-preview API 縺ｯ buildOwnerDuplicateCandidateKey (name+address) 縺ｧ縺励°
+      // 繝壹い讀懆ｨｼ縺励※縺・↑縺・◆繧√…orporate_number / external_link_key 逕ｱ譚･縺ｮ蛟呵｣懊↓
+      // merge_candidate 繧剃ｻ倥￠繧九→ UI 荳・merge 縺ｧ縺阪◎縺・↓隕九∴縺ｦ preview/execute 縺ｧ
+      // name_address_normalize_mismatch 縺ｫ繧医ｊ繝悶Ο繝・け縺輔ｌ縲｛perator 縺ｫ隱､隗｣繧・
+      // 荳弱∴繧区ｩ溯・荳肴紛蜷医↓縺ｪ繧九・
       //
-      // Codex P1 (round 3): non-name 経路 (corporate_number / external_link_key)
-      // で duplicate と判定された候補は **delete_candidate を維持しない**。
-      // orphan + import success + safeguards なしの owner が「未解決の重複候補」
-      // のまま delete_candidate として残ると、orphan タブの archive ボタンから
-      // 削除されてデータ損失する。データ損失防止を優先し、non-name duplicate は
-      // 少なくとも review に落として人間の確認に回す（hold はそのまま維持）。
+      // Codex P1 (round 3): non-name 邨瑚ｷｯ (corporate_number / external_link_key)
+      // 縺ｧ duplicate 縺ｨ蛻､螳壹＆繧後◆蛟呵｣懊・ **delete_candidate 繧堤ｶｭ謖√＠縺ｪ縺・*縲・
+      // orphan + import success + safeguards 縺ｪ縺励・ owner 縺後梧悴隗｣豎ｺ縺ｮ驥崎､・呵｣懊・
+      // 縺ｮ縺ｾ縺ｾ delete_candidate 縺ｨ縺励※谿九ｋ縺ｨ縲｛rphan 繧ｿ繝悶・ archive 繝懊ち繝ｳ縺九ｉ
+      // 蜑企勁縺輔ｌ縺ｦ繝・・繧ｿ謳榊､ｱ縺吶ｋ縲ゅョ繝ｼ繧ｿ謳榊､ｱ髦ｲ豁｢繧貞━蜈医＠縲］on-name duplicate 縺ｯ
+      // 蟆代↑縺上→繧・review 縺ｫ關ｽ縺ｨ縺励※莠ｺ髢薙・遒ｺ隱阪↓蝗槭☆・・old 縺ｯ縺昴・縺ｾ縺ｾ邯ｭ謖・ｼ峨・
       const promoteToMergeCandidate = matchedBy === "name_address";
       const nonNameMatchedBy =
         matchedBy === "corporate_number" ||
@@ -463,17 +466,17 @@ export async function GET(request: NextRequest) {
         ) {
           c.recommendedAction = "merge_candidate";
         } else if (nonNameMatchedBy) {
-          // delete_candidate を必ず review に落とす（データ損失防止）。
-          // merge_candidate は本来 non-name で付かないが防御的に review へ。
-          // hold / review はそのまま維持（hold は safeguards 由来で重要、
-          // review は既にデフォルト確認状態）。
+          // delete_candidate 繧貞ｿ・★ review 縺ｫ關ｽ縺ｨ縺呻ｼ医ョ繝ｼ繧ｿ謳榊､ｱ髦ｲ豁｢・峨・
+          // merge_candidate 縺ｯ譛ｬ譚･ non-name 縺ｧ莉倥°縺ｪ縺・′髦ｲ蠕｡逧・↓ review 縺ｸ縲・
+          // hold / review 縺ｯ縺昴・縺ｾ縺ｾ邯ｭ謖・ｼ・old 縺ｯ safeguards 逕ｱ譚･縺ｧ驥崎ｦ√・
+          // review 縺ｯ譌｢縺ｫ繝・ヵ繧ｩ繝ｫ繝育｢ｺ隱咲憾諷具ｼ峨・
           if (
             c.recommendedAction === "delete_candidate" ||
             c.recommendedAction === "merge_candidate"
           ) {
             c.recommendedAction = "review";
           }
-          // 非 PII の reason を blockReasons に追加（重複出さない）。
+          // 髱・PII 縺ｮ reason 繧・blockReasons 縺ｫ霑ｽ蜉・磯㍾隍・・縺輔↑縺・ｼ峨・
           if (
             nonNameReviewReason &&
             !c.blockReasons.includes(nonNameReviewReason)
@@ -488,8 +491,8 @@ export async function GET(request: NextRequest) {
       return true;
     }
 
-    // 5-d. opaque ID 割当（Map 挿入順で安定した連番）
-    //      counter は assignGroup 成功時のみ進める（飛び番号を作らない）。
+    // 5-d. opaque ID 蜑ｲ蠖難ｼ・ap 謖ｿ蜈･鬆・〒螳牙ｮ壹＠縺滄｣逡ｪ・・
+    //      counter 縺ｯ assignGroup 謌仙粥譎ゅ・縺ｿ騾ｲ繧√ｋ・磯｣帙・逡ｪ蜿ｷ繧剃ｽ懊ｉ縺ｪ縺・ｼ峨・
     let naCounter = 0;
     for (const group of nameAddrGroups.values()) {
       if (group.length < 2) continue;
@@ -514,7 +517,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 6. type フィルタ
+    // 6. type 繝輔ぅ繝ｫ繧ｿ
     let result: typeof candidates;
     if (type === "orphan") {
       result = candidates.filter((c) => c.types.includes("orphan"));
@@ -526,7 +529,7 @@ export async function GET(request: NextRequest) {
       result = candidates.filter((c) => c.types.length > 0);
     }
 
-    // 7. PII フィールドにマスキングを適用（重複検出は生値で完了済み）
+    // 7. PII 繝輔ぅ繝ｼ繝ｫ繝峨↓繝槭せ繧ｭ繝ｳ繧ｰ繧帝←逕ｨ・磯㍾隍・､懷・縺ｯ逕溷､縺ｧ螳御ｺ・ｸ医∩・・
     const maskedResult = result.map((c) => ({
       ...c,
       name: maskValue(c.name, displayConfig.name),
@@ -535,9 +538,9 @@ export async function GET(request: NextRequest) {
       phone: maskValue(c.phone, displayConfig.phone),
     }));
 
-    // Phase 2-A: duplicate 経路別件数も集計する。1 candidate は単一の
-    // duplicateMatchedBy を持つので合計しても duplicateCount を超えない。
-    // 件数のみで PII / 法人番号生値 / externalLinkKey 生値は一切含まない。
+    // Phase 2-A: duplicate 邨瑚ｷｯ蛻･莉ｶ謨ｰ繧る寔險医☆繧九・ candidate 縺ｯ蜊倅ｸ縺ｮ
+    // duplicateMatchedBy 繧呈戟縺､縺ｮ縺ｧ蜷郁ｨ医＠縺ｦ繧・duplicateCount 繧定ｶ・∴縺ｪ縺・・
+    // 莉ｶ謨ｰ縺ｮ縺ｿ縺ｧ PII / 豕穂ｺｺ逡ｪ蜿ｷ逕溷､ / externalLinkKey 逕溷､縺ｯ荳蛻・性縺ｾ縺ｪ縺・・
     const duplicateMatchedByCounts = {
       name_address: candidates.filter(
         (c) => c.duplicateMatchedBy === "name_address",
@@ -558,24 +561,24 @@ export async function GET(request: NextRequest) {
       duplicateCount: candidates.filter((c) => c.types.includes("duplicate"))
         .length,
       duplicateMatchedByCounts,
-      // Codex P1: 法人番号重複検出が現セッション権限で利用可能かを示す。
-      // false の場合、duplicateMatchedBy="corporate_number" の候補は API
-      // レスポンスに含まれない（matchedByCounts.corporate_number=0 になる）。
-      // 値自体は boolean のみで PII は含まない。UI は権限不足メッセージの
-      // 表示判断に使う。
+      // Codex P1: 豕穂ｺｺ逡ｪ蜿ｷ驥崎､・､懷・縺檎樟繧ｻ繝・す繝ｧ繝ｳ讓ｩ髯舌〒蛻ｩ逕ｨ蜿ｯ閭ｽ縺九ｒ遉ｺ縺吶・
+      // false 縺ｮ蝣ｴ蜷医‥uplicateMatchedBy="corporate_number" 縺ｮ蛟呵｣懊・ API
+      // 繝ｬ繧ｹ繝昴Φ繧ｹ縺ｫ蜷ｫ縺ｾ繧後↑縺・ｼ・atchedByCounts.corporate_number=0 縺ｫ縺ｪ繧具ｼ峨・
+      // 蛟､閾ｪ菴薙・ boolean 縺ｮ縺ｿ縺ｧ PII 縺ｯ蜷ｫ縺ｾ縺ｪ縺・６I 縺ｯ讓ｩ髯蝉ｸ崎ｶｳ繝｡繝・そ繝ｼ繧ｸ縺ｮ
+      // 陦ｨ遉ｺ蛻､譁ｭ縺ｫ菴ｿ縺・・
       corporateNumberDuplicateAvailable,
-      // P2 (#139 fallout): singlePropertyId と同じく property:read が無い
-      // セッションを示す capability flag。UI はこれを見て「物件」列の
-      // リンクそのものを消す(count > 0 かつ singlePropertyId=null で
-      // resolveOwnerPropertyLink が many 判定してしまい、property:read の
-      // 無いユーザーに必ず 403 になる /properties?ownerId=... リンクを
-      // 出していた回帰の修正)。corporateNumberDuplicateAvailable と同じ形:
-      // 値は boolean のみで PII は含まない。
+      // P2 (#139 fallout): singlePropertyId 縺ｨ蜷後§縺・property:read 縺檎┌縺・
+      // 繧ｻ繝・す繝ｧ繝ｳ繧堤､ｺ縺・capability flag縲６I 縺ｯ縺薙ｌ繧定ｦ九※縲檎黄莉ｶ縲榊・縺ｮ
+      // 繝ｪ繝ｳ繧ｯ縺昴・繧ゅ・繧呈ｶ医☆(count > 0 縺九▽ singlePropertyId=null 縺ｧ
+      // resolveOwnerPropertyLink 縺・many 蛻､螳壹＠縺ｦ縺励∪縺・｝roperty:read 縺ｮ
+      // 辟｡縺・Θ繝ｼ繧ｶ繝ｼ縺ｫ蠢・★ 403 縺ｫ縺ｪ繧・/properties?ownerId=... 繝ｪ繝ｳ繧ｯ繧・
+      // 蜃ｺ縺励※縺・◆蝗槫ｸｰ縺ｮ菫ｮ豁｣)縲ＤorporateNumberDuplicateAvailable 縺ｨ蜷後§蠖｢:
+      // 蛟､縺ｯ boolean 縺ｮ縺ｿ縺ｧ PII 縺ｯ蜷ｫ縺ｾ縺ｪ縺・・
       propertyLinkAvailable: hasPropertyRead,
       allCount: candidates.filter((c) => c.types.length > 0).length,
     };
 
-    // 8. 監査ログ（PII は含めない — type・件数・内訳のみ）
+    // 8. 逶｣譟ｻ繝ｭ繧ｰ・・II 縺ｯ蜷ｫ繧√↑縺・窶・type繝ｻ莉ｶ謨ｰ繝ｻ蜀・ｨｳ縺ｮ縺ｿ・・
     await writeAuditLog({
       userId: session.id,
       action: "owner_correction_candidates_list",

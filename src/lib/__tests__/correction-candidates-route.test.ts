@@ -2469,4 +2469,43 @@ describe("GET correction-candidates: P2 (#139 二次回帰) hasReachableProperty
     expect(json.candidates).toHaveLength(1);
     expect(json.candidates[0].hasReachableProperty).toBe(false);
   });
+
+  it("property:read が無いセッションは hasReachableProperty=false(紐づきがあってもゲート)", async () => {
+    const { getUserPermissions } = await import("@/lib/api-helpers");
+    // property:read を含めない権限配列で上書き
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "user_management", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+      // property:read を含めない（これが本テストの核心）
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      { resource: "owner_phone", action: "full", granted: true },
+      { resource: "owner_email", action: "full", granted: true },
+      { resource: "owner_note", action: "full", granted: true },
+      { resource: "owner_name_kana", action: "full", granted: true },
+    ]);
+    // 実際に紐づきが1件存在する owner
+    pm.owner.findMany.mockResolvedValue([
+      makeOwner({
+        id: OWNER_ID,
+        name: "紐づき一件太郎",
+        propertyOwnerCount: 1,
+        // scopedOut: false のため propertyOwners 配列は1件入る（スコープなし）
+      }),
+    ]);
+
+    const res = await GET(makeRequest("all"));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.candidates).toHaveLength(1);
+    const c = json.candidates[0];
+    // property:read がなければ hasReachableProperty は false にゲートされる
+    // （紐づきが実際には1件あってもセッションは見えないため）
+    expect(c.hasReachableProperty).toBe(false);
+    // propertyOwnerCount は _count 由来でスコープ対象外・不変の契約
+    expect(c.propertyOwnerCount).toBe(1);
+    // endpoint 自体は 403 にしない
+    expect(c.id).toBe(OWNER_ID);
+  });
 });
