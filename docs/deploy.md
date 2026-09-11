@@ -580,6 +580,18 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 
 前回反映分の本文に上限超えの小見出しがあっても写真の保存はできる(照合は本文との一致で行う)。バックフィルは不要。
 
+#### 売却DM LP型「公開LP」(2026-09): migration
+
+`20260911100000_add_dm_phone_tap` は additive のみ(`dm_recipient_drafts` に `phone_tap_count`(既定0)・`phone_tap_first_at`(nullable)を追加)。バックフィル無し。rollback は2列の DROP で戻せる(enum の追加なし)。
+
+`/t/<token>` は今回から HTML を返すようになる(宛先に付いたLP型に文章が保存されていればアプリ内のご案内ページ、無ければ従来どおり302で外部LPへ転送。未知tokenは302のまま=列挙耐性は現状維持)。レスポンスヘッダは `Cache-Control: no-store`・`X-Robots-Tag: noindex`・CSP `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'none'`(外部読み込みなし・インラインCSSとscript1本のみ)。電話ボタンのタップは `POST /t/<token>/phone-tap` で受け(常に204を返す=宛先の存在有無を漏らさない・レート制限60/分)、送付済み(`sent`)の宛先のときだけ `phone_tap_count`/`phone_tap_first_at` を更新する(反響としては数えない=反響は引き続き手入力)。
+
+公開経路の設定読み出しは新設の `loadSaleDmPublicPageConfig`(会社案内・電話番号など表示に要る列だけを読み、謄本取得等の課金用APIキー列には触れない)。nginx のアクセスログ除外は引き続き `/u/` のみ(`/t/` は追加しない=既存方針を維持)。
+
+社内プレビュー表示・電話タップ・公開LP表示のそれぞれに監査ログの action を追加(`sale_dm_lp_preview_view`・`sale_dm_lp_phone_tap`)。既存の `sale_dm_tracking_hit` も allowlist に補完(漏れの是正)。
+
+**所有者に実際に見せるための前提=公開LP用HTTPS(発注者作業)**: (1) Xserver の「DNSレコード設定」で `lp.ligarejapan.com` の A レコードを1行追加しVPSへ向ける、(2) こちらで証明書を取得(`certbot`)、(3) nginx に server block を追加(`deploy/nginx/property-management.conf.example` の既存設定を参考に `lp.ligarejapan.com` 用の server を追加)、(4) 売却DM設定画面の「追跡URL(trackingBaseUrl)」をこの https の住所へ切り替える。切替前は(これから印刷する手紙も含め)従来どおり外部LPへ飛ぶだけなので、切替は任意のタイミングでよい(⚠切替後に印刷した手紙から新しいURLになる=既に配布済みの手紙のQRは古いURLのまま変わらない)。
+
 #### 反響の記録リリース（migration `add_dm_reaction_columns`）: 旧 sale_dm 送付記録の照合
 
 この migration は既存の送付記録を全件「反応なし（no_response）」で初期化する。過去の売却DMで
