@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { saleDmLpVariantCreateSchema, saleDmLpVariantUpdateSchema, saleDmLpTemplatePutSchema, saleDmAssignSchema, saleDmLpMediaPutSchema, saleDmLpImagePromptQuerySchema, saleDmLpAssetLabelSchema } from "../validators-sale-dm";
-import { LP_LIMITS } from "../sale-dm-letter/lp-template";
+import { LP_LIMITS, LP_MAX_SECTIONS } from "../sale-dm-letter/lp-template";
 
 const OPT = { tone: "formal", length: "medium", appeal: "price", strength: "low" };
 
@@ -60,5 +60,13 @@ describe("LP型 写真と図の zod", () => {
     const overBodyLimit = "あ".repeat(LP_LIMITS.body + 1);
     expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: atBodyLimit, media: null }] })).not.toThrow();
     expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: [{ heading: overBodyLimit, media: null }] })).toThrow();
+  });
+  it("sections の配列上限は本文(4,000字)の理論上の最大■行数から導出する(@codex P2)", () => {
+    // 「■x\n」の3文字(■・見出し文字1字・改行)が最短の小見出し行 → 本文4,000字に入り得る行数の理論上限。
+    expect(LP_MAX_SECTIONS).toBe(Math.ceil(LP_LIMITS.body / 3));
+    const atMax = Array.from({ length: LP_MAX_SECTIONS }, (_, i) => ({ heading: `h${i}`, media: null }));
+    const overMax = Array.from({ length: LP_MAX_SECTIONS + 1 }, (_, i) => ({ heading: `h${i}`, media: null }));
+    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: atMax })).not.toThrow();
+    expect(() => saleDmLpMediaPutSchema.parse({ hero: null, sections: overMax })).toThrow();
   });
 });

@@ -38,6 +38,15 @@
  * **必ず** canvas で再エンコードして向きを画素に焼き込んでから送るため
  * (prepareLpAssetForUpload = 無変換で送る道は無い)、メタデータ側の向き情報は要らない。
  *
+ * 注意: **PNG の透過情報(sBIT/bKGD/hIST/tRNS)は保持しない**(@codex P2)。これらは
+ * colour type ごとに厳密な固定長を持つ(例: greyscale の sBIT は1byte・greyscale の tRNS は
+ * 2byte)ため、colour type に応じた個別の長さ検査を持たない範囲チェックのままでは余りバイトを
+ * 隠せる/不正な chunk を通せてしまう。そこで PNG の残す chunk は
+ * `IHDR/PLTE/IDAT/IEND/gAMA(4)/cHRM(32)/sRGB(1)/pHYs(9)`(全て固定長または構造で決まる)
+ * のみとし、sBIT/bKGD/hIST/tRNS は他の未知 chunk と同じく落とす。direct API 経由の PNG は
+ * 透過を失うが、画面(UI)経由の LP用写真は**必ず** JPEG に再エンコードされる
+ * (JPEG に透過は無い)ため実害はない。
+ *
  * 依存なし(pure TypeScript + Node Buffer)。入力 buffer は mutate しない。例外は投げない
  * (内部で throw されても malformed に倒す = fail-closed)。
  */
@@ -225,14 +234,20 @@ function stripJpeg(input: Buffer): LpAssetStripResult {
 // ---------------------------------------------------------------
 
 /**
- * 残す chunk。critical(IHDR/PLTE/IDAT/IEND)と、表示の見た目に効く安全な補助 chunk のみ。
+ * 残す chunk。critical(IHDR/PLTE/IDAT/IEND)と、固定長または構造で決まる安全な補助 chunk
+ * (gAMA/cHRM/sRGB/pHYs)のみ。
  * 注意: `iCCP` は残さない。任意のバイト列(埋め込みプロファイル)を運べる器で、
  *   外して困る場面がほぼ無い(ブラウザは sRGB として描く)。
  *   tEXt/zTXt/iTXt/tIME/eXIf/未知 chunk も当然落とす。
+ * ⚠`sBIT`/`bKGD`/`hIST`/`tRNS` は**残さない**(@codex P2)。これらは colour type ごとに
+ *   厳密な固定長(例: greyscale の sBIT は1byte・greyscale の tRNS は2byte)を持つが、
+ *   colour type に応じた個別の長さ検査を持たない範囲チェックのままでは余りバイトを
+ *   隠せる/不正な chunk を通せる。LP用写真の UI 経路は必ず JPEG に再エンコードされ
+ *   (透過を持たない)、direct API 経由の PNG でだけ透過情報を失うが許容する。
  */
 const PNG_KEEP_CHUNKS = new Set([
   "IHDR", "PLTE", "IDAT", "IEND",
-  "tRNS", "gAMA", "cHRM", "sRGB", "sBIT", "pHYs", "bKGD", "hIST",
+  "gAMA", "cHRM", "sRGB", "pHYs",
 ]);
 
 /** 長さが1通りしかない chunk(それ以外の長さ = 余りバイトを運べる器)。 */
@@ -245,17 +260,14 @@ const PNG_FIXED_LENGTHS: Record<string, number> = {
   IEND: 0,
 };
 
-/** 残す chunk の payload 長が仕様どおりか(画素そのものの IDAT だけは任意長)。 */
+/** 残す chunk の payload 長が仕様どおりか(画素そのものの IDAT・パレットの PLTE だけは可変長)。 */
 function pngChunkLengthOk(chunkType: string, dataLen: number): boolean {
   const fixed = PNG_FIXED_LENGTHS[chunkType];
   if (fixed !== undefined) return dataLen === fixed;
   switch (chunkType) {
     case "IDAT": return true;
-    case "sBIT": return dataLen >= 1 && dataLen <= 4;
-    case "bKGD": return dataLen >= 1 && dataLen <= 6;
-    case "tRNS": return dataLen <= 256;
-    case "PLTE": return dataLen % 3 === 0 && dataLen <= 768;
-    case "hIST": return dataLen % 2 === 0 && dataLen <= 512;
+    // PLTE: 1〜256 エントリ(1エントリ = RGB 3byte)。0エントリ(空)は malformed。
+    case "PLTE": return dataLen >= 3 && dataLen <= 768 && dataLen % 3 === 0;
     default: return false; // 許可リストの chunk はここに来ない(来たら fail-closed)
   }
 }
@@ -337,6 +349,7 @@ function stripPng(input: Buffer): LpAssetStripResult {
       }
       if (chunkType === "PLTE") {
         if (sawIdat) return MALFORMED; // PLTE は最初の IDAT より前でなければならない
+        if (colourType === 0 || colourType === 4) return MALFORMED; // greyscale 系に PLTE は現れない(@codex P2)
         sawPlte = true;
       }
       if (chunkType === "IDAT") {

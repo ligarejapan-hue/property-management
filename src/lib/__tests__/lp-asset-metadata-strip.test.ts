@@ -331,19 +331,34 @@ describe("stripLpAssetMetadata: PNG 残す chunk の長さも検査する(ruling
     const bad = Buffer.concat([PNG_SIG, chunk("IHDR", Buffer.alloc(14)), PNG_IDAT, PNG_IEND]);
     expect(stripLpAssetMetadata(bad, "image/png")).toEqual(malformed);
   });
-  it("可変長の chunk も刻みと上限を守らせる(PLTE/tRNS/hIST/sBIT/bKGD)", () => {
+  it("PLTE は3の倍数かつ 3〜768(1〜256エントリ)を守らせる。0エントリは malformed", () => {
     expect(stripLpAssetMetadata(pngWith(chunk("PLTE", Buffer.alloc(10))), "image/png")).toEqual(malformed); // 3の倍数でない
     expect(stripLpAssetMetadata(pngWith(chunk("PLTE", Buffer.alloc(771))), "image/png")).toEqual(malformed); // 768 超え
-    expect(stripLpAssetMetadata(pngWith(chunk("tRNS", Buffer.alloc(257))), "image/png")).toEqual(malformed);
-    expect(stripLpAssetMetadata(pngWith(chunk("hIST", Buffer.alloc(9))), "image/png")).toEqual(malformed); // 奇数
-    expect(stripLpAssetMetadata(pngWith(chunk("hIST", Buffer.alloc(514))), "image/png")).toEqual(malformed); // 512 超え
-    expect(stripLpAssetMetadata(pngWith(chunk("sBIT", Buffer.alloc(5))), "image/png")).toEqual(malformed);
-    expect(stripLpAssetMetadata(pngWith(chunk("bKGD", Buffer.alloc(7))), "image/png")).toEqual(malformed);
+    expect(stripLpAssetMetadata(pngWith(chunk("PLTE", Buffer.alloc(0))), "image/png")).toEqual(malformed); // 0エントリ
     // 上限内は通る
     expect(ok(stripLpAssetMetadata(pngWith(chunk("PLTE", Buffer.alloc(768))), "image/png")).ok).toBe(true);
-    expect(ok(stripLpAssetMetadata(pngWith(chunk("tRNS", Buffer.alloc(256))), "image/png")).ok).toBe(true);
     // IDAT は任意長のまま(画素そのもの)
     expect(ok(stripLpAssetMetadata(pngWith(chunk("IDAT", Buffer.alloc(4096))), "image/png")).ok).toBe(true);
+  });
+  it("sBIT/bKGD/hIST/tRNS は他の未知 chunk と同じく残さず落とす(@codex P2: colour type 依存の固定長を範囲チェックで守れないため)", () => {
+    const withAncillary = Buffer.concat([
+      PNG_SIG,
+      ihdr(8, 8),
+      chunk("sBIT", Buffer.alloc(3, 0x08)),
+      chunk("bKGD", Buffer.alloc(6, 0x01)),
+      chunk("hIST", Buffer.alloc(4, 0x00)),
+      chunk("tRNS", Buffer.alloc(2, 0xff)),
+      PNG_IDAT,
+      PNG_IEND,
+    ]);
+    const r = ok(stripLpAssetMetadata(withAncillary, "image/png"));
+    expect(r.changed).toBe(true);
+    for (const t of ["sBIT", "bKGD", "hIST", "tRNS"]) {
+      expect(r.buffer.includes(Buffer.from(t, "latin1"))).toBe(false);
+    }
+    // 落とした結果、素通しの CLEAN_PNG(IHDR+sRGB+IDAT+IEND のみ)より小さくはならない(sRGB を持たないため)
+    // が、IHDR/IDAT/IEND だけ(12+21+12+12byte)にはなる。
+    expect(r.buffer.equals(Buffer.concat([PNG_SIG, ihdr(8, 8), PNG_IDAT, PNG_IEND]))).toBe(true);
   });
 });
 
@@ -369,6 +384,15 @@ describe("stripLpAssetMetadata: PNG は実データ(IDAT)と CRC が無いと ma
     expect(ok(stripLpAssetMetadata(withPlteBeforeIdat, "image/png")).ok).toBe(true);
     const plteAfterIdat = Buffer.concat([PNG_SIG, ihdr(8, 8, 3), PNG_IDAT, chunk("PLTE", Buffer.alloc(3, 0x20)), PNG_IEND]);
     expect(stripLpAssetMetadata(plteAfterIdat, "image/png")).toEqual(malformed);
+  });
+  it("PLTE は colour type 0/4(greyscale系)には現れてはならない(@codex P2)", () => {
+    const plteOnGreyscale = Buffer.concat([PNG_SIG, ihdr(8, 8, 0), chunk("PLTE", Buffer.alloc(3, 0x20)), PNG_IDAT, PNG_IEND]);
+    expect(stripLpAssetMetadata(plteOnGreyscale, "image/png")).toEqual(malformed);
+    const plteOnGreyscaleAlpha = Buffer.concat([PNG_SIG, ihdr(8, 8, 4), chunk("PLTE", Buffer.alloc(3, 0x20)), PNG_IDAT, PNG_IEND]);
+    expect(stripLpAssetMetadata(plteOnGreyscaleAlpha, "image/png")).toEqual(malformed);
+    // colour type 3(インデックス)は最小 1 エントリ以上あれば良い(2エントリ=6byte も通る)
+    const plteTwoEntries = Buffer.concat([PNG_SIG, ihdr(8, 8, 3), chunk("PLTE", Buffer.alloc(6, 0x20)), PNG_IDAT, PNG_IEND]);
+    expect(ok(stripLpAssetMetadata(plteTwoEntries, "image/png")).ok).toBe(true);
   });
   it("IHDR が仕様の値域外なら malformed(bit depth/colour type/interlace)", () => {
     const withIhdr = (patch: (d: Buffer) => void) => {

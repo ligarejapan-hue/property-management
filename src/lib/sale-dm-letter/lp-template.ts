@@ -10,6 +10,9 @@ export type LpSection = (typeof LP_SECTIONS)[number];
 // heading/headingCount: 本文の ■小見出し の上限(heading=1つあたりtrim後の文字数、headingCount=重複を
 // 除いた種類数)。media route(写真/図の保存)の saleDmLpMediaPutSchema と同じ上限を使う。
 export const LP_LIMITS = { headline: 60, lead: 300, body: 4000, faqItem: 300, faqCount: 6, heading: 60, headingCount: 30 } as const;
+// sections(写真/図の枠)の配列上限(@codex P2): 本文の理論上の最大■行数から導出する。
+// 「■x」の3文字(■・見出し文字1字・改行)が最短の小見出し行なので、本文上限を3で割った値が上限になる。
+export const LP_MAX_SECTIONS = Math.ceil(LP_LIMITS.body / 3);
 
 export type LpFaqItem = { q: string; a: string };
 export interface LpTemplateParts { headline: string; lead: string | null; body: string; faq: LpFaqItem[] | null }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LP_LIMITS } from "@/lib/sale-dm-letter/lp-template";
+import { LP_LIMITS, LP_MAX_SECTIONS } from "@/lib/sale-dm-letter/lp-template";
 
 export const saleDmOptionsSchema = z.object({
   designTemplate: z.enum(["formal", "soft", "impact"]),
@@ -128,7 +128,7 @@ export const saleDmLpMediaPutSchema = z.object({
   // (新しい文章の保存時の上限は splitLpTemplate 側)。
   sections: z
     .array(z.object({ heading: z.string().min(1).max(LP_LIMITS.body), media: lpMediaRefSchema.nullable() }))
-    .max(1000), // 4,000字の本文に入り得る■行数の上限(1行2文字「■\n」として)
+    .max(LP_MAX_SECTIONS), // 本文に入り得る■行数の理論上限(LP_MAX_SECTIONS = Math.ceil(body / 3)、@codex P2)
 });
 export type SaleDmLpMediaPut = z.infer<typeof saleDmLpMediaPutSchema>;
 
