@@ -52,4 +52,9 @@ describe("LP写真の画面: 公開口だけを使い、生HTMLを流し込ま�
     const panelSrc = readFileSync(path.resolve(process.cwd(), "src/components/sale-dm/lp-media-panel.tsx"), "utf8");
     expect(panelSrc).toContain("最新の状態を読み込めませんでした");
   });
+  it("LPの写真の削除は、一覧の再読み込みが失敗しても削除自体をローカルで反映する", () => {
+    const src = FILES[2][1];
+    expect(src).toContain("一覧の再読み込みに失敗しました");
+    expect(src).toContain("filter((x) => x.id !== ");
+  });
 });

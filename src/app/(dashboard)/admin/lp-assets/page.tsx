@@ -22,7 +22,13 @@ export default function AdminLpAssetsPage() {
   const remove = async () => {
     if (!target || busy) return;
     setBusy(true); setError(null);
-    try { await deleteSaleDmLpAsset(target.id); setTarget(null); await load(); }
+    try {
+      await deleteSaleDmLpAsset(target.id);
+      setAssets((a) => a ? a.filter((x) => x.id !== target.id) : a);
+      setTarget(null);
+      try { setAssets((await fetchSaleDmLpAssets()).assets); }
+      catch { setError("削除はできましたが、一覧の再読み込みに失敗しました。ページを開き直してください"); }
+    }
     catch (e) { setError(e instanceof Error ? e.message : "削除に失敗しました"); setTarget(null); }
     finally { setBusy(false); }
   };
