@@ -60,9 +60,17 @@ function jpegBytes(width: number, height: number, withExif = false): Buffer {
   const com = Buffer.concat([Buffer.from([0xff, 0xfe]), (() => { const l = Buffer.alloc(2); l.writeUInt16BE(comPayload.length + 2, 0); return l; })(), comPayload]);
   const exifPayload = Buffer.concat([Buffer.from("Exif\0\0", "latin1"), Buffer.from("II*\0\x08\0\0\0\0\0", "latin1")]);
   const app1 = withExif ? Buffer.concat([Buffer.from([0xff, 0xe1]), (() => { const l = Buffer.alloc(2); l.writeUInt16BE(exifPayload.length + 2, 0); return l; })(), exifPayload]) : Buffer.alloc(0);
+  // ⚠許可リスト strip は DQT を最低1つ・DHT/DAC を最低1つ・entropy-coded data を
+  // 1byte 以上必須にした(@codex P2=実データの無い画像を弾く)。この合成 JPEG も満たす。
+  const dqtPayload = Buffer.concat([Buffer.from([0x00]), Buffer.alloc(64, 0x10)]); // Pq/Tq=0 の 8bit 量子化表(64byte)
+  const dqt = Buffer.concat([Buffer.from([0xff, 0xdb]), (() => { const l = Buffer.alloc(2); l.writeUInt16BE(dqtPayload.length + 2, 0); return l; })(), dqtPayload]);
+  const dhtCounts = Buffer.alloc(16); dhtCounts[0] = 1; // 符号長1が1個
+  const dhtPayload = Buffer.concat([Buffer.from([0x00]), dhtCounts, Buffer.from([0x0a])]); // 値1個
+  const dht = Buffer.concat([Buffer.from([0xff, 0xc4]), (() => { const l = Buffer.alloc(2); l.writeUInt16BE(dhtPayload.length + 2, 0); return l; })(), dhtPayload]);
   // SOS: 長さ(2) + Ns(1) + 成分ごとに2byte + Ss/Se/AhAl(3)
   const sos = Buffer.from([0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00]);
-  return Buffer.concat([Buffer.from([0xff, 0xd8]), app0, app1, com, sof, sos, Buffer.from([0xff, 0xd9])]);
+  const entropy = Buffer.from([0x12, 0x34]); // entropy-coded data(実データ)
+  return Buffer.concat([Buffer.from([0xff, 0xd8]), app0, app1, com, dqt, dht, sof, sos, entropy, Buffer.from([0xff, 0xd9])]);
 }
 function multipart(bytes: Buffer, mime: string, name = "a.jpg", label?: string): Request {
   const fd = new FormData();

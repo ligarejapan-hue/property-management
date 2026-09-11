@@ -52,26 +52,53 @@ const APP13 = seg(0xed, Buffer.from("Photoshop 3.0\0IPTC-payload", "latin1"));
 const CLEAN_JPEG = Buffer.concat([SOI, DQT, DHT, sof0(1600, 900), DRI, SOS, ENTROPY, EOI]);
 const DIRTY_JPEG = Buffer.concat([SOI, APP0, APP1, COM, DQT, APP13, DHT, sof0(1600, 900), DRI, SOS, ENTROPY, EOI]);
 
-/** 1本の segment を差し込んだ最小 JPEG(構造検査の枝を1本ずつ通すため)。 */
+/**
+ * 1本の segment を差し込んだ最小 JPEG(構造検査の枝を1本ずつ通すため)。
+ * ⚠実装は「DQT 最低1つ・DHT/DAC 最低1つ・entropy 1byte 以上」も必須にした(@codex P2)ので、
+ * 差し込む extra とは別に基本の DQT/DHT を常に持たせる(extra 自体が DQT/DHT の
+ * 壊れた版でも、パース中にその場で malformed 判定される=このデフォルトと衝突しない)。
+ */
 function jpegWith(extra: Buffer): Buffer {
-  return Buffer.concat([SOI, extra, sof0(64, 48), SOS, ENTROPY, EOI]);
+  return Buffer.concat([SOI, DQT, DHT, extra, sof0(64, 48), SOS, ENTROPY, EOI]);
+}
+
+/**
+ * CRC32(PNG仕様: 多項式 0xEDB88320)。実装(lp-asset-metadata-strip.ts)とは独立に
+ * 標準アルゴリズムをもう一度書き下ろしたもの(=実装を鏡合わせに検証するテストにしないため)。
+ * 実装が CRC を検算するようになった(@codex P2)ので、フィクスチャは正しい CRC を持たせる。
+ */
+function crc32(buf: Buffer): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i += 1) {
+    crc ^= buf[i];
+    for (let k = 0; k < 8; k += 1) {
+      crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-/** PNG chunk。CRC は検証しないので固定値を入れる(残す chunk は原文のまま出る確認に使う)。 */
+/** PNG chunk。正しい CRC32(type+data)を書く(実装が検算するため)。 */
 function chunk(type: string, data: Buffer): Buffer {
   const out = Buffer.alloc(12 + data.length);
   out.writeUInt32BE(data.length, 0);
   out.write(type, 4, "latin1");
   data.copy(out, 8);
-  out.writeUInt32BE(0xdeadbeef, 8 + data.length);
+  out.writeUInt32BE(crc32(Buffer.concat([Buffer.from(type, "latin1"), data])), 8 + data.length);
   return out;
 }
-function ihdr(width: number, height: number): Buffer {
+/** CRC だけをわざと壊した chunk(malformed 判定の確認用)。 */
+function withBadCrc(c: Buffer): Buffer {
+  const bad = Buffer.from(c);
+  bad[bad.length - 1] ^= 0xff;
+  return bad;
+}
+function ihdr(width: number, height: number, colourType = 6): Buffer {
   const d = Buffer.alloc(13);
   d.writeUInt32BE(width, 0);
   d.writeUInt32BE(height, 4);
-  d[8] = 8; d[9] = 6;
+  d[8] = 8; d[9] = colourType;
   return chunk("IHDR", d);
 }
 const PNG_IDAT = chunk("IDAT", Buffer.from([0x78, 0x9c, 0x01, 0x00]));
@@ -120,7 +147,9 @@ function vp8x(flags: number): Buffer {
   d.writeUIntLE(899, 7, 3);
   return riffChunk("VP8X", d);
 }
-const VP8_ODD = riffChunk("VP8 ", Buffer.from([0x01, 0x02, 0x03, 0x04, 0x05])); // size 5 = 奇数
+// VP8(lossy)の frame tag(3byte, 値は未検査) + key-frame start code(0x9d 0x01 0x2a・実装の必須要件)
+// + 幅/高さ相当のダミー5byte = payload 11byte(奇数 = pad 1byte を試す枝も兼ねる)。
+const VP8_ODD = riffChunk("VP8 ", Buffer.from([0x01, 0x02, 0x03, 0x9d, 0x01, 0x2a, 0x40, 0x00, 0x38, 0x00, 0x00]));
 const CLEAN_WEBP = riff(Buffer.concat([vp8x(0x10), riffChunk("ALPH", Buffer.from([0x01, 0x02])), VP8_ODD]));
 const DIRTY_WEBP = riff(Buffer.concat([
   vp8x(0x2c), // ICC(0x20) + EXIF(0x08) + XMP(0x04)
@@ -225,6 +254,37 @@ describe("stripLpAssetMetadata: JPEG 残す segment の中身も検査する(rul
   });
 });
 
+describe("stripLpAssetMetadata: JPEG は実データ(entropy-coded data)が無いと malformed(@codex P2)", () => {
+  it("SOS が無ければ malformed(DQT/DHT/SOFn はあっても画素が無い)", () => {
+    const noSos = Buffer.concat([SOI, DQT, DHT, sof0(64, 48), EOI]);
+    expect(stripLpAssetMetadata(noSos, "image/jpeg")).toEqual(malformed);
+  });
+  it("DHT も DAC も無ければ malformed(DQT だけでは足りない)", () => {
+    const noDht = Buffer.concat([SOI, DQT, sof0(64, 48), SOS, ENTROPY, EOI]);
+    expect(stripLpAssetMetadata(noDht, "image/jpeg")).toEqual(malformed);
+  });
+  it("DQT が無ければ malformed(DHT だけでは足りない)", () => {
+    const noDqt = Buffer.concat([SOI, DHT, sof0(64, 48), SOS, ENTROPY, EOI]);
+    expect(stripLpAssetMetadata(noDqt, "image/jpeg")).toEqual(malformed);
+  });
+  it("SOS の後に entropy-coded data が1byteも無ければ malformed(器だけあって画素が無い)", () => {
+    const emptyEntropy = Buffer.concat([SOI, DQT, DHT, sof0(64, 48), SOS, EOI]);
+    expect(stripLpAssetMetadata(emptyEntropy, "image/jpeg")).toEqual(malformed);
+  });
+  it("SOFn より前に SOS が来る(=SOFn が無い)のは malformed", () => {
+    const sosBeforeSof = Buffer.concat([SOI, DQT, DHT, SOS, ENTROPY, EOI]);
+    expect(stripLpAssetMetadata(sosBeforeSof, "image/jpeg")).toEqual(malformed);
+  });
+  it("SOFn の幅/高さが 0 なら malformed", () => {
+    expect(stripLpAssetMetadata(Buffer.concat([SOI, DQT, DHT, sof0(0, 48), SOS, ENTROPY, EOI]), "image/jpeg")).toEqual(malformed);
+    expect(stripLpAssetMetadata(Buffer.concat([SOI, DQT, DHT, sof0(64, 0), SOS, ENTROPY, EOI]), "image/jpeg")).toEqual(malformed);
+  });
+  it("DQT/DHT/SOFn/SOS/entropy が全て揃っていれば ok", () => {
+    const complete = Buffer.concat([SOI, DQT, DHT, sof0(64, 48), SOS, ENTROPY, EOI]);
+    expect(ok(stripLpAssetMetadata(complete, "image/jpeg")).ok).toBe(true);
+  });
+});
+
 describe("stripLpAssetMetadata: PNG", () => {
   it("tEXt/iTXt/eXIf/tIME/iCCP/未知 chunk を落とし、許可した chunk だけを原文のまま残す", () => {
     const r = ok(stripLpAssetMetadata(DIRTY_PNG, "image/png"));
@@ -287,6 +347,46 @@ describe("stripLpAssetMetadata: PNG 残す chunk の長さも検査する(ruling
   });
 });
 
+describe("stripLpAssetMetadata: PNG は実データ(IDAT)と CRC が無いと malformed(@codex P2)", () => {
+  it("IHDR の直後 IEND だけ(IDAT 無し)は malformed", () => {
+    const noIdat = Buffer.concat([PNG_SIG, ihdr(8, 8), PNG_IEND]);
+    expect(stripLpAssetMetadata(noIdat, "image/png")).toEqual(malformed);
+  });
+  it("IDAT が長さ0のみ(画素データが実質無い)は malformed", () => {
+    const emptyIdat = Buffer.concat([PNG_SIG, ihdr(8, 8), chunk("IDAT", Buffer.alloc(0)), PNG_IEND]);
+    expect(stripLpAssetMetadata(emptyIdat, "image/png")).toEqual(malformed);
+  });
+  it("残す chunk の CRC が違えば malformed(中身をすり替えても検知する)", () => {
+    const badAncillaryCrc = Buffer.concat([PNG_SIG, ihdr(8, 8), withBadCrc(chunk("pHYs", Buffer.alloc(9, 0x01))), PNG_IDAT, PNG_IEND]);
+    expect(stripLpAssetMetadata(badAncillaryCrc, "image/png")).toEqual(malformed);
+    const badIdatCrc = Buffer.concat([PNG_SIG, ihdr(8, 8), withBadCrc(PNG_IDAT), PNG_IEND]);
+    expect(stripLpAssetMetadata(badIdatCrc, "image/png")).toEqual(malformed);
+  });
+  it("colour type 3(インデックス)なのに PLTE が無ければ malformed。PLTE は最初の IDAT より前でなければならない", () => {
+    const noPlte = Buffer.concat([PNG_SIG, ihdr(8, 8, 3), PNG_IDAT, PNG_IEND]);
+    expect(stripLpAssetMetadata(noPlte, "image/png")).toEqual(malformed);
+    const withPlteBeforeIdat = Buffer.concat([PNG_SIG, ihdr(8, 8, 3), chunk("PLTE", Buffer.alloc(3, 0x20)), PNG_IDAT, PNG_IEND]);
+    expect(ok(stripLpAssetMetadata(withPlteBeforeIdat, "image/png")).ok).toBe(true);
+    const plteAfterIdat = Buffer.concat([PNG_SIG, ihdr(8, 8, 3), PNG_IDAT, chunk("PLTE", Buffer.alloc(3, 0x20)), PNG_IEND]);
+    expect(stripLpAssetMetadata(plteAfterIdat, "image/png")).toEqual(malformed);
+  });
+  it("IHDR が仕様の値域外なら malformed(bit depth/colour type/interlace)", () => {
+    const withIhdr = (patch: (d: Buffer) => void) => {
+      const d = Buffer.alloc(13);
+      d.writeUInt32BE(8, 0); d.writeUInt32BE(8, 4);
+      d[8] = 8; d[9] = 6; d[10] = 0; d[11] = 0; d[12] = 0;
+      patch(d);
+      return Buffer.concat([PNG_SIG, chunk("IHDR", d), PNG_IDAT, PNG_IEND]);
+    };
+    expect(stripLpAssetMetadata(withIhdr((d) => { d[8] = 3; }), "image/png")).toEqual(malformed); // bit depth
+    expect(stripLpAssetMetadata(withIhdr((d) => { d[9] = 5; }), "image/png")).toEqual(malformed); // colour type
+    expect(stripLpAssetMetadata(withIhdr((d) => { d[10] = 1; }), "image/png")).toEqual(malformed); // compression
+    expect(stripLpAssetMetadata(withIhdr((d) => { d[11] = 1; }), "image/png")).toEqual(malformed); // filter
+    expect(stripLpAssetMetadata(withIhdr((d) => { d[12] = 2; }), "image/png")).toEqual(malformed); // interlace
+    expect(ok(stripLpAssetMetadata(withIhdr(() => {}), "image/png")).ok).toBe(true); // 素通しは ok
+  });
+});
+
 describe("stripLpAssetMetadata: WebP", () => {
   it("EXIF/XMP/ICCP を落とし、VP8X の flag を消し、RIFF size を数え直す(奇数 size の pad 込み)", () => {
     const r = ok(stripLpAssetMetadata(DIRTY_WEBP, "image/webp"));
@@ -300,8 +400,8 @@ describe("stripLpAssetMetadata: WebP", () => {
     expect(r.buffer.toString("latin1", 8, 12)).toBe("WEBP");
     expect(r.buffer.toString("latin1", 12, 16)).toBe("VP8X");
     expect(r.buffer[20]).toBe(0x00); // flags: 0x2C(ICC+EXIF+XMP)が全て落ちる
-    // 残った chunk = VP8X + VP8 (奇数 size 5 → pad 1 byte)
-    expect(r.buffer.length).toBe(12 + (8 + 10) + (8 + 6));
+    // 残った chunk = VP8X + VP8 (奇数 size 11 → pad 1 byte、VP8_ODD.length は pad 込み)
+    expect(r.buffer.length).toBe(12 + (8 + 10) + VP8_ODD.length);
     expect(r.buffer.toString("latin1", 30, 34)).toBe("VP8 ");
     expect(readImageDimensions(r.buffer, "image/webp")).toEqual({ width: 1600, height: 900 });
   });
@@ -339,6 +439,34 @@ describe("stripLpAssetMetadata: WebP", () => {
     expect(stripLpAssetMetadata(riff(Buffer.concat([riffChunk("VP8X", Buffer.alloc(12)), VP8_ODD])), "image/webp")).toEqual(malformed);
     expect(stripLpAssetMetadata(riff(Buffer.concat([riffChunk("VP8X", Buffer.alloc(4)), VP8_ODD])), "image/webp")).toEqual(malformed);
     expect(stripLpAssetMetadata(riff(Buffer.concat([riffChunk("VP8X", Buffer.alloc(0)), VP8_ODD])), "image/webp")).toEqual(malformed);
+  });
+});
+
+describe("stripLpAssetMetadata: WebP は画像 chunk(VP8/VP8L)が無いと malformed(@codex P2)", () => {
+  it("VP8X だけ(VP8 も VP8L も無い)は malformed", () => {
+    expect(stripLpAssetMetadata(riff(vp8x(0x00)), "image/webp")).toEqual(malformed);
+  });
+  it("VP8 の key-frame start code が違えば malformed", () => {
+    const badStartCode = riff(riffChunk("VP8 ", Buffer.from([0x01, 0x02, 0x03, 0x9d, 0x01, 0x2b, 0x40, 0x00, 0x38, 0x00])));
+    expect(stripLpAssetMetadata(badStartCode, "image/webp")).toEqual(malformed);
+  });
+  it("VP8 の payload が10byte未満は malformed", () => {
+    const tooShort = riff(riffChunk("VP8 ", Buffer.from([0x01, 0x02, 0x03, 0x9d, 0x01, 0x2a, 0x40, 0x00, 0x38])));
+    expect(stripLpAssetMetadata(tooShort, "image/webp")).toEqual(malformed);
+  });
+  it("VP8X があるのに先頭 chunk でなければ malformed", () => {
+    const vp8xNotFirst = riff(Buffer.concat([VP8_ODD, vp8x(0x00)]));
+    expect(stripLpAssetMetadata(vp8xNotFirst, "image/webp")).toEqual(malformed);
+  });
+  it("VP8L: signature byte(0x2f)が違えば malformed・正しく5byte以上あれば ok", () => {
+    const badVp8l = riff(riffChunk("VP8L", Buffer.from([0x00, 0x00, 0x00, 0x00, 0x00])));
+    expect(stripLpAssetMetadata(badVp8l, "image/webp")).toEqual(malformed);
+    const goodVp8l = riff(riffChunk("VP8L", Buffer.from([0x2f, 0x00, 0x00, 0x00, 0x00])));
+    expect(ok(stripLpAssetMetadata(goodVp8l, "image/webp")).ok).toBe(true);
+  });
+  it("VP8 と VP8L が両方あれば malformed(画像 chunk はちょうど1つ)", () => {
+    const both = riff(Buffer.concat([VP8_ODD, riffChunk("VP8L", Buffer.from([0x2f, 0x00, 0x00, 0x00, 0x00]))]));
+    expect(stripLpAssetMetadata(both, "image/webp")).toEqual(malformed);
   });
 });
 

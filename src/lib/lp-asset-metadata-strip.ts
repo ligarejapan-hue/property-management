@@ -16,6 +16,23 @@
  * WebP は**アニメーション(ANIM/ANMF chunk・VP8X の Anim flag)を受け付けない**
  * (ANMF は subchunk を入れ子で持てるため抜け道になる。画面側は静止 JPEG しか作らない)。
  *
+ * ⚠**構造の完全性(実データの有無)も検査する**(@codex P2)。器の形が仕様どおりでも、
+ * **画素そのものが無い**(PNG が IHDR の直後 IEND だけ・JPEG が SOS はあるが
+ * entropy-coded data が0byte 等)入力は寸法だけ読めてしまい、ブラウザがデコードできない
+ * まま保存・配信されてしまう。そこで:
+ *   - PNG: `IDAT` chunk を最低1つ・合計 payload 長 > 0 を必須にし、colour type=3
+ *     (インデックスカラー)なら最初の `IDAT` より前に `PLTE` を必須にする。IHDR の
+ *     幅/高さ/bit depth/colour type/compression/filter/interlace も仕様の値域か確かめる。
+ *     **残す chunk 全ての CRC32**(type+data・多項式 0xEDB88320)も検算し、合わなければ
+ *     malformed に倒す(CRC を検証しない = 中身を丸ごとすり替えられても気づけない)。
+ *   - JPEG: `DQT` を最低1つ・`DHT`/`DAC` を最低1つ・最初の `SOS` の前に `SOFn` を
+ *     必須にし、SOFn の幅/高さ>0 を検査、`SOS` 開始から `EOI` までの
+ *     entropy-coded data が1byte 以上あることを確かめる。
+ *   - WebP: `VP8 `/`VP8L` のどちらか**ちょうど1つ**を必須にする(両方/どちらも
+ *     無しは malformed)。`VP8 ` は payload≥10byte かつ key-frame start code
+ *     (bytes[3..5] = 0x9d 0x01 0x2a)、`VP8L` は payload≥5byte かつ byte[0]=0x2f を
+ *     検査し、`VP8X` があれば先頭 chunk であることも必須にする。
+ *
  * 注意: **向き(Orientation)は保持しない**。既存の EXIF strip は Orientation だけを
  * 最小 Exif として再注入するが、本 utility はその APP1 も落とす。LP用写真は画面側が
  * **必ず** canvas で再エンコードして向きを画素に焼き込んでから送るため
@@ -93,6 +110,9 @@ function jpegPayloadOk(marker: number, payload: Buffer): boolean {
   if (isJpegSof(marker)) {
     // precision(1) + height(2) + width(2) + Nf(1) + 成分ごとに 3 byte
     if (payload.length < 6) return false;
+    const height = payload.readUInt16BE(1);
+    const width = payload.readUInt16BE(3);
+    if (width === 0 || height === 0) return false; // 実データの無い(0x0)画像は弾く
     const nf = payload[5];
     return nf >= 1 && nf <= 4 && payload.length === 6 + 3 * nf;
   }
@@ -146,6 +166,10 @@ function stripJpeg(input: Buffer): LpAssetStripResult {
   const kept: Buffer[] = [JPEG_SOI];
   let sawSos = false;
   let sawEoi = false;
+  let sawSof = false; // 最初の SOS より前に SOFn を見たか(無いと寸法もデコードも決まらない)
+  let sawDqt = false;
+  let sawDhtOrDac = false;
+  let entropyBytes = 0; // 最初の SOS 〜 EOI の entropy-coded data の合計(0 = 画素データ無し)
   let pos = 2;
   while (pos < input.length) {
     if (input[pos] !== 0xff) return MALFORMED;
@@ -162,9 +186,13 @@ function stripJpeg(input: Buffer): LpAssetStripResult {
     const segLen = input.readUInt16BE(pos);
     if (segLen < 2 || pos + segLen > input.length) return MALFORMED;
     const segEnd = pos + segLen;
+    if (marker === 0xda && !sawSof) return MALFORMED; // SOS の前に SOFn が無い = 寸法が決まらない
     if (JPEG_KEEP_SEGMENTS.has(marker)) {
       // 残す segment は中身の長さまで検査する(余ったバイトに情報を隠せないように)
       if (!jpegPayloadOk(marker, input.subarray(pos + 2, segEnd))) return MALFORMED;
+      if (isJpegSof(marker)) sawSof = true;
+      if (marker === 0xdb) sawDqt = true;
+      if (marker === 0xc4 || marker === 0xcc) sawDhtOrDac = true;
       kept.push(input.subarray(markerPos - 1, segEnd));
     }
     pos = segEnd;
@@ -183,9 +211,11 @@ function stripJpeg(input: Buffer): LpAssetStripResult {
       break;
     }
     if (pos >= input.length) return MALFORMED; // EOI に届かない
+    entropyBytes += pos - scanStart;
     kept.push(input.subarray(scanStart, pos));
   }
-  if (!sawSos || !sawEoi) return MALFORMED;
+  if (!sawSos || !sawEoi || !sawDqt || !sawDhtOrDac) return MALFORMED;
+  if (entropyBytes <= 0) return MALFORMED; // SOS はあるが画素データが無い(@codex P2)
   kept.push(JPEG_EOI);
   return settle(input, Buffer.concat(kept));
 }
@@ -230,6 +260,50 @@ function pngChunkLengthOk(chunkType: string, dataLen: number): boolean {
   }
 }
 
+/** IHDR(13byte 固定): 幅(4)+高さ(4)+bit depth(1)+colour type(1)+compression(1)+filter(1)+interlace(1)。 */
+function pngIhdrOk(data: Buffer): boolean {
+  if (data.length !== 13) return false;
+  const width = data.readUInt32BE(0);
+  const height = data.readUInt32BE(4);
+  const bitDepth = data[8];
+  const colourType = data[9];
+  const compression = data[10];
+  const filter = data[11];
+  const interlace = data[12];
+  if (width === 0 || height === 0) return false; // 実データの無い(0x0)画像は弾く
+  if (bitDepth !== 1 && bitDepth !== 2 && bitDepth !== 4 && bitDepth !== 8 && bitDepth !== 16) return false;
+  if (colourType !== 0 && colourType !== 2 && colourType !== 3 && colourType !== 4 && colourType !== 6) return false;
+  if (compression !== 0) return false;
+  if (filter !== 0) return false;
+  if (interlace !== 0 && interlace !== 1) return false;
+  return true;
+}
+
+/**
+ * PNG chunk の CRC32(仕様: type+data に対する CRC・多項式 0xEDB88320・zlib と同じ表)。
+ * **残す chunk のバイトが本当に元のままか**(中身をすり替えられていないか)を確かめるために使う
+ * (@codex P2)。標準 CRC32 の実装であり、本 utility の他の検査ロジックとは独立。
+ */
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(buf: Buffer): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i += 1) {
+    crc = CRC32_TABLE[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 function stripPng(input: Buffer): LpAssetStripResult {
@@ -239,6 +313,10 @@ function stripPng(input: Buffer): LpAssetStripResult {
   let pos = PNG_SIGNATURE.length;
   let first = true;
   let sawIend = false;
+  let colourType = -1;
+  let idatTotalLen = 0;
+  let sawIdat = false;
+  let sawPlte = false;
   while (pos < input.length) {
     if (pos + 8 > input.length) return MALFORMED;
     const dataLen = input.readUInt32BE(pos);
@@ -252,12 +330,30 @@ function stripPng(input: Buffer): LpAssetStripResult {
     if (PNG_KEEP_CHUNKS.has(chunkType)) {
       // 残す chunk は長さまで検査する(余ったバイトに情報を隠せないように)
       if (!pngChunkLengthOk(chunkType, dataLen)) return MALFORMED;
+      const data = input.subarray(pos + 8, pos + 8 + dataLen);
+      if (chunkType === "IHDR") {
+        if (!pngIhdrOk(data)) return MALFORMED;
+        colourType = data[9];
+      }
+      if (chunkType === "PLTE") {
+        if (sawIdat) return MALFORMED; // PLTE は最初の IDAT より前でなければならない
+        sawPlte = true;
+      }
+      if (chunkType === "IDAT") {
+        sawIdat = true;
+        idatTotalLen += dataLen;
+      }
+      // 残す chunk は CRC32(type+data)も検算する(中身がすり替えられていないか)
+      const storedCrc = input.readUInt32BE(chunkEnd - 4);
+      if (crc32(input.subarray(pos + 4, pos + 8 + dataLen)) !== storedCrc) return MALFORMED;
       kept.push(input.subarray(pos, chunkEnd));
     }
     pos = chunkEnd;
     if (chunkType === "IEND") { sawIend = true; break; }
   }
   if (!sawIend) return MALFORMED;
+  if (idatTotalLen <= 0) return MALFORMED; // 画素データ(IDAT)が無い(@codex P2)
+  if (colourType === 3 && !sawPlte) return MALFORMED; // インデックスカラーは PLTE が必須
   // IEND より後ろの余剰バイトは(あっても)落とす = 許可リストの外
   return settle(input, Buffer.concat(kept));
 }
@@ -282,6 +378,15 @@ const VP8X_ANIMATION_FLAG = 0x02;
 /** VP8X payload = flags(1) + reserved(3) + canvas幅-1(3) + canvas高-1(3)。 */
 const VP8X_PAYLOAD_LEN = 10;
 
+/** VP8(lossy) key-frame start code(payload bytes[3..5])。RFC 6386 §9.1。 */
+const VP8_START_CODE = [0x9d, 0x01, 0x2a];
+/** VP8(lossy) の最小 payload 長 = frame tag(3) + start code(3) + 幅/高さ(4)。 */
+const VP8_MIN_PAYLOAD_LEN = 10;
+/** VP8L(lossless) の signature byte(payload[0])。 */
+const VP8L_SIGNATURE = 0x2f;
+/** VP8L の最小 payload 長 = signature(1) + 幅/高さ/alpha/version(4 の一部)。 */
+const VP8L_MIN_PAYLOAD_LEN = 5;
+
 function stripWebp(input: Buffer): LpAssetStripResult {
   if (input.length < 12) return MALFORMED;
   if (input.toString("latin1", 0, 4) !== "RIFF") return MALFORMED;
@@ -291,6 +396,9 @@ function stripWebp(input: Buffer): LpAssetStripResult {
   let pos = 12;
   let bodyLen = 0;
   let vp8xOffsetInBody = -1;
+  let chunkIndex = 0;
+  let sawVp8 = false;
+  let sawVp8l = false;
   while (pos < input.length) {
     if (pos + 8 > input.length) return MALFORMED;
     const fourcc = input.toString("latin1", pos, pos + 4);
@@ -299,6 +407,19 @@ function stripWebp(input: Buffer): LpAssetStripResult {
     const chunkEnd = pos + 8 + paddedLen;
     if (dataLen > input.length || chunkEnd > input.length) return MALFORMED;
     if (WEBP_ANIMATION_CHUNKS.has(fourcc)) return MALFORMED; // アニメーションは受け付けない
+    if (fourcc === "VP8X" && chunkIndex !== 0) return MALFORMED; // VP8X は先頭 chunk でなければならない
+    if (fourcc === "VP8 ") {
+      // key-frame の frame tag(3byte)+ start code(3byte)+ 幅/高さ(4byte)を最低限持つか
+      if (dataLen < VP8_MIN_PAYLOAD_LEN) return MALFORMED;
+      const s0 = input[pos + 8 + 3], s1 = input[pos + 8 + 4], s2 = input[pos + 8 + 5];
+      if (s0 !== VP8_START_CODE[0] || s1 !== VP8_START_CODE[1] || s2 !== VP8_START_CODE[2]) return MALFORMED;
+      sawVp8 = true;
+    }
+    if (fourcc === "VP8L") {
+      if (dataLen < VP8L_MIN_PAYLOAD_LEN) return MALFORMED;
+      if (input[pos + 8] !== VP8L_SIGNATURE) return MALFORMED;
+      sawVp8l = true;
+    }
     if (WEBP_KEEP_CHUNKS.has(fourcc)) {
       if (fourcc === "VP8X") {
         if (dataLen !== VP8X_PAYLOAD_LEN) return MALFORMED;
@@ -309,7 +430,10 @@ function stripWebp(input: Buffer): LpAssetStripResult {
       bodyLen += chunkEnd - pos;
     }
     pos = chunkEnd;
+    chunkIndex += 1;
   }
+  // 画像そのもの(VP8 か VP8L)がちょうど1つ無いと表示できない(@codex P2: 無い/両方は malformed)
+  if (sawVp8 === sawVp8l) return MALFORMED;
   const body = Buffer.concat(kept, bodyLen); // concat = 新規確保。入力は mutate されない
   if (vp8xOffsetInBody >= 0) {
     // ICC / EXIF / XMP の chunk を落としたので、拡張ヘッダの該当 flag も落とす
