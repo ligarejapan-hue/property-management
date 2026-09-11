@@ -1,5 +1,7 @@
+import type { Prisma } from "@/generated/prisma";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 
+// ⚠この説明を関数直上へ移すと dm-writer-lock-order の走査(関数本文の文字列)に引っかかる
 /**
  * 公開LPの電話ボタンのタップ計測(設計 §2.4)。
  *
@@ -11,8 +13,8 @@ import { lockPropertyRow } from "@/lib/property-record-guard";
  *  - draft が未送付(status != sent)なら matched=false(送付前タップは計上しない)。
  *  - 初回(phoneTapFirstAt == null)のみ phoneTapFirstAt = now をセット。
  *  - phoneTapCount は常に increment(+1)。
- *  - 更新失敗(DBエラー・ロック競合)は best-effort。呼び出し元(公開 POST)の 204 応答を
- *    止めないよう、例外は投げず matched=false を返す。
+ *  - 検索失敗(findUnique)・更新失敗(DBエラー・ロック競合)いずれも best-effort。
+ *    呼び出し元(公開 POST)の 204 応答を止めないよう、例外は投げず matched=false を返す。
  */
 
 export interface PhoneTapDraftRow {
@@ -28,7 +30,7 @@ export interface PhoneTapTx {
   dmRecipientDraft: {
     update: (args: {
       where: { id: string };
-      data: Record<string, unknown>;
+      data: Prisma.DmRecipientDraftUpdateInput;
     }) => Promise<unknown>;
   };
 }
@@ -51,18 +53,21 @@ export interface PhoneTapClientLike {
 export async function recordPhoneTap(
   client: PhoneTapClientLike,
   token: string,
-): Promise<{ matched: boolean; first: boolean; draftId?: string }> {
-  const draft = await client.dmRecipientDraft.findUnique({
-    where: { trackingToken: token },
-    select: { id: true, propertyId: true, status: true, phoneTapFirstAt: true },
-  });
-  if (!draft) return { matched: false, first: false };
-  // 送付確定(sent)前のタップ(印刷プレビュー等)は計上しない。
-  if (draft.status !== "sent") return { matched: false, first: false };
-
-  const first = draft.phoneTapFirstAt == null;
-
+): Promise<
+  | { matched: false; first: false }
+  | { matched: true; first: boolean; draftId: string }
+> {
   try {
+    const draft = await client.dmRecipientDraft.findUnique({
+      where: { trackingToken: token },
+      select: { id: true, propertyId: true, status: true, phoneTapFirstAt: true },
+    });
+    if (!draft) return { matched: false, first: false };
+    // 送付確定(sent)前のタップ(印刷プレビュー等)は計上しない。
+    if (draft.status !== "sent") return { matched: false, first: false };
+
+    const first = draft.phoneTapFirstAt == null;
+
     await client.$transaction(async (tx) => {
       await lockPropertyRow(tx, draft.propertyId);
       await tx.dmRecipientDraft.update({
@@ -74,8 +79,9 @@ export async function recordPhoneTap(
         },
       });
     });
+    return { matched: true, first, draftId: draft.id };
   } catch {
+    // findUnique・$transaction いずれの失敗もここに落ちる。公開 POST の 204 応答を止めない。
     return { matched: false, first: false };
   }
-  return { matched: true, first, draftId: draft.id };
 }

@@ -91,6 +91,11 @@ describe("recordPhoneTap", () => {
     pm.dmRecipientDraft.update.mockRejectedValue(new Error("db"));
     expect(await recordPhoneTap(prismaMock as never, "tok")).toEqual({ matched: false, first: false });
   });
+
+  it("検索(findUnique)に失敗しても例外を投げない", async () => {
+    pm.dmRecipientDraft.findUnique.mockRejectedValue(new Error("db"));
+    expect(await recordPhoneTap(prismaMock as never, "tok")).toEqual({ matched: false, first: false });
+  });
 });
 
 describe("POST /t/[token]/phone-tap", () => {
@@ -112,8 +117,19 @@ describe("POST /t/[token]/phone-tap", () => {
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
+  it("recordPhoneTap が想定外に例外を投げても 204/no-store・監査なし", async () => {
+    pm.dmRecipientDraft.findUnique.mockRejectedValue(new Error("db"));
+    const res = await POST(req("10.0.0.3"), ctx);
+    expect(res.status).toBe(204);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
   it("同じ端末から1分に60回を超えると黙って 204(計数しない)", async () => {
-    for (let i = 0; i < 61; i++) await POST(req("10.9.9.9"), ctx);
-    expect(pm.dmRecipientDraft.update.mock.calls.length).toBeLessThanOrEqual(60);
+    let last: Awaited<ReturnType<typeof POST>> | undefined;
+    for (let i = 0; i < 61; i++) last = await POST(req("10.9.9.9"), ctx);
+    expect(pm.dmRecipientDraft.update.mock.calls.length).toBe(60);
+    expect(last?.status).toBe(204);
+    expect(last?.headers.get("cache-control")).toBe("no-store");
   });
 });
