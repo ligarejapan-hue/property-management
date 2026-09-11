@@ -18,8 +18,11 @@ const trimOrNull = (v: string | null | undefined): string | null => {
   return t && t.length > 0 ? t : null;
 };
 
+// 公開LPのロールアウトゲート(SALE_DM_LP_PUBLIC_ENABLED)の読み方。
 // "1" / "true"(大小無視)のみ true。未設定・それ以外(例: "yes", "0")は false(既定=無効側に倒す)。
-const isTruthyFlag = (v: string | null | undefined): boolean => {
+// ⚠公開ページ(saleDmPublicPageConfigFromEnv)と集計の可否(lp-metrics-flag)は**同じこの関数**を使う。
+// 別々に書くと、片方だけ "TRUE" を受け付ける等で「ページは出ないのに集計だけ出る」食い違いが起きる。
+export const parseLpPublicEnabled = (v: string | null | undefined): boolean => {
   const t = v?.trim().toLowerCase();
   return t === "1" || t === "true";
 };
@@ -61,7 +64,7 @@ export function saleDmPublicPageConfigFromEnv(): {
     senderName: trimOrNull(process.env.SALE_DM_SENDER_NAME),
     senderContact: trimOrNull(process.env.SALE_DM_SENDER_CONTACT),
     trackingBaseUrl: trimOrNull(process.env.SALE_DM_TRACKING_BASE_URL),
-    lpPublicEnabled: isTruthyFlag(process.env.SALE_DM_LP_PUBLIC_ENABLED),
+    lpPublicEnabled: parseLpPublicEnabled(process.env.SALE_DM_LP_PUBLIC_ENABLED),
   };
 }
 

@@ -54,6 +54,7 @@ function sentDraftsForTwoAxis(campaign: SaleDmCampaign) {
       lpVariantId: r.lpVariantId ?? null,
       deliveryStatus: r.deliveryStatus,
       lpFirstAccessAt: r.lpFirstAccessAt ? new Date(r.lpFirstAccessAt) : null,
+      lpPageFirstAt: r.lpPageFirstAt ? new Date(r.lpPageFirstAt) : null,
       phoneInquiryAt: r.phoneInquiryAt ? new Date(r.phoneInquiryAt) : null,
       phoneTapFirstAt: r.phoneTapFirstAt ? new Date(r.phoneTapFirstAt) : null,
     }));

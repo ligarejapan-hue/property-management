@@ -9,7 +9,7 @@ import { loadLpPageData } from "../sale-dm-letter/lp-page-loader";
 import { loadSaleDmPublicPageConfig } from "../sale-dm-letter/config-store";
 
 const draft = (over: Record<string, unknown> = {}) => ({
-  status: "sent", trackingToken: "tok",
+  id: "r1", propertyId: "p1", status: "sent", trackingToken: "tok",
   lpVariant: { headline: "ご所有の{{物件種別}}", lead: null, bodyText: "■A\nx", faqJson: null, media: [] },
   property: { address: "東京都世田谷区経堂1-2-3", propertyType: "house" },
   ...over,
@@ -28,6 +28,9 @@ describe("loadLpPageData", () => {
     expect(r.status).toBe("sent");
     expect(r.html).toContain("ご所有の戸建");
     expect(r.html).not.toContain("プレビュー");
+    // ページを返せたときの閲覧記録(recordLpPageView)へ渡す識別子(@codex R10)。PII ではない。
+    expect(r.draftId).toBe("r1");
+    expect(r.propertyId).toBe("p1");
   });
   it("送付前なら preview モード(帯あり・script なし)", async () => {
     const r = await loadLpPageData(client(draft({ status: "confirmed" })) as never, "tok");

@@ -18,6 +18,12 @@ vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRow: vi.fn() }));
 // 302/200 の分岐だけを検証するため mock(既定は {kind:"none"}=従来どおり 302)。
 const { loadLpPageData } = vi.hoisted(() => ({ loadLpPageData: vi.fn() }));
 vi.mock("@/lib/sale-dm-letter/lp-page-loader", () => ({ loadLpPageData }));
+// アプリ内ページを実際に返せたときの閲覧記録(@codex R10)。本体は lp-page-view-record 側で担保し、
+// ここでは route が「どのときに呼ぶ/呼ばない」かだけを見る。
+const { recordLpPageView } = vi.hoisted(() => ({
+  recordLpPageView: vi.fn(async (_client: unknown, _draft: { draftId: string; propertyId: string }) => ({ first: true })),
+}));
+vi.mock("@/lib/sale-dm-letter/lp-page-view-record", () => ({ recordLpPageView }));
 vi.mock("@/lib/prisma", () => {
   const client: Record<string, unknown> = {
     dmRecipientDraft: {
@@ -288,7 +294,7 @@ d2("GET /t/[token]", () => {
 
   i2("LP型に文章がある送付済み宛先は 302 ではなく HTML(200・no-store・noindex)を返し、計数と監査は従来どおり", async () => {
     process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
-    loadLpPageData.mockResolvedValueOnce({ kind: "page", html: "<!doctype html><html><body>LP</body></html>", status: "sent" });
+    loadLpPageData.mockResolvedValueOnce({ kind: "page", html: "<!doctype html><html><body>LP</body></html>", status: "sent", draftId: "r1", propertyId: "p1" });
     // 既定の findUnique = { id: "r1", propertyId: "p1", lpFirstAccessAt: null, status: "sent" }(送付済み・初回ヒット)。
     const res = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
     e2(res.status).toBe(200);
@@ -311,7 +317,7 @@ d2("GET /t/[token]", () => {
     process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
     const pm = prismaMock as never as { dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> } };
     pm.dmRecipientDraft.findUnique.mockResolvedValueOnce({ id: "r1", lpFirstAccessAt: null, status: "confirmed" });
-    loadLpPageData.mockResolvedValueOnce({ kind: "page", html: "<html>プレビュー</html>", status: "confirmed" });
+    loadLpPageData.mockResolvedValueOnce({ kind: "page", html: "<html>プレビュー</html>", status: "confirmed", draftId: "r1", propertyId: "p1" });
     const res = await GET(new Request("http://x/t/tok-presend") as never, ctx("tok-presend"));
     e2(res.status).toBe(200);
     // Ruling R4: プレビュー帯付きページも CSP は同じ(公開LPページ共通ヘッダ)。
@@ -336,6 +342,31 @@ d2("GET /t/[token]", () => {
     e2((await GET(new Request("http://x/t/tok") as never, ctx("tok"))).status).toBe(302);
     loadLpPageData.mockRejectedValueOnce(new Error("db"));
     e2((await GET(new Request("http://x/t/tok") as never, ctx("tok"))).status).toBe(302);
+  });
+
+  i2("送付済みでページを返せたときだけ 閲覧(lpPageFirstAt)を記録する(@codex R10)", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    loadLpPageData.mockResolvedValueOnce({ kind: "page", html: "<html>LP</html>", status: "sent", draftId: "r1", propertyId: "p1" });
+    const res = await GET(new Request("http://x/t/tok") as never, ctx("tok"));
+    e2(res.status).toBe(200);
+    e2(recordLpPageView).toHaveBeenCalledOnce();
+    e2(recordLpPageView.mock.calls[0][1]).toEqual({ draftId: "r1", propertyId: "p1" });
+  });
+
+  i2("送付前(プレビュー)のページ表示は 閲覧に数えない", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    loadLpPageData.mockResolvedValueOnce({ kind: "page", html: "<html>プレビュー</html>", status: "confirmed", draftId: "r1", propertyId: "p1" });
+    e2((await GET(new Request("http://x/t/tok") as never, ctx("tok"))).status).toBe(200);
+    e2(recordLpPageView).not.toHaveBeenCalled();
+  });
+
+  i2("外部LPへ転送した訪問(ページなし)と loader 失敗では 閲覧に数えない(LP型の成績を汚さない)", async () => {
+    process.env.SALE_DM_LP_URL = "https://lp.example.com/sell";
+    loadLpPageData.mockResolvedValueOnce({ kind: "none" });
+    e2((await GET(new Request("http://x/t/tok") as never, ctx("tok"))).status).toBe(302);
+    loadLpPageData.mockRejectedValueOnce(new Error("db"));
+    e2((await GET(new Request("http://x/t/tok") as never, ctx("tok"))).status).toBe(302);
+    e2(recordLpPageView).not.toHaveBeenCalled();
   });
 
   i2("既定LP未設定は LP型があっても 404(fail-closed 維持)・未知 token は 302", async () => {

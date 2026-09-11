@@ -237,7 +237,10 @@ export interface SaleDmDraft {
   status: string;
   outcome: string;
   deliveryStatus: string;
+  // QRを読み取られた初回時刻(飛び先がアプリ内ページでも外部LPでも立つ)。DM型ごとの表の「閲覧」。
   lpFirstAccessAt: string | null;
+  // アプリ内ご案内ページを実際に表示した初回時刻。LP型ごと/組み合わせの表の「閲覧」。
+  lpPageFirstAt: string | null;
   phoneInquiryAt: string | null;
   // 公開LPの電話ボタンを最初にタップした時刻(反響とは別物=自動計測。手入力の phoneInquiryAt とは独立)。
   phoneTapFirstAt: string | null;
@@ -308,6 +311,23 @@ export interface SaleDmCampaign {
   variants: SaleDmVariant[];
   lpVariants: SaleDmLpVariant[];
   recipients: SaleDmDraft[];
+}
+
+// 集計API の応答のうち、画面が使うのは lpMetricsEnabled だけ(表そのものは宛先一覧から画面側で組む)。
+// ⚠client は env を読めないため、LP型ごと/組み合わせの表を出してよいかはサーバーのこの項目で決める
+//   (公開LPのロールアウトスイッチと同じ判定・@codex R10)。
+export interface SaleDmAggregateResponse {
+  campaignId: string;
+  campaignName: string;
+  lpMetricsEnabled: boolean;
+}
+
+export async function fetchSaleDmAggregate(id: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { campaignId: id, campaignName: "モック売却DM", lpMetricsEnabled: false } as SaleDmAggregateResponse;
+  }
+  return apiFetch<SaleDmAggregateResponse>(`/api/properties/sale-dm/campaigns/${id}/aggregate`);
 }
 
 export async function fetchSaleDmCampaign(id: string) {

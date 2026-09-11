@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// 旗を **true にした世界**だけを見る別ファイル(@codex R4 P2)。同じファイル内で旗を差し替えると
-// 他のテスト(旗 false のときは返さない)まで巻き添えになるため、モジュール単位で分ける。
-vi.mock("@/lib/sale-dm-letter/lp-metrics-flag", () => ({ LP_METRICS_ENABLED: true }));
+// LP型ごと/組み合わせの可否は公開LPのロールアウトスイッチ(SALE_DM_LP_PUBLIC_ENABLED)と同じ env で
+// 決まる(@codex R10 P1)。ここでは **env を入れた世界と入れない世界の両方** を見る。
+// env は毎回退避→復元する(他のテストへ漏らさない)。
 
 vi.mock("next/server", () => {
   class MockNextRequest extends Request {}
@@ -66,28 +66,66 @@ const pm = prismaMock as never as {
 };
 const ctx = (id = "c1") => ({ params: Promise.resolve({ id }) });
 
+const ENV = process.env;
 beforeEach(() => {
   vi.clearAllMocks();
+  process.env = { ...ENV };
   (requireSaleDmAccess as Fn).mockResolvedValue({ session: { id: "u1" } });
   pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "テスト", createdBy: "u1" });
+  pm.dmVariant.findMany.mockResolvedValue([{ id: "v1", label: "A" }]);
+  pm.dmLpVariant.findMany.mockResolvedValue([{ id: "l1", label: "X" }]);
+  pm.dmRecipientDraft.findMany.mockResolvedValue([
+    { variantId: "v1", lpVariantId: "l1", deliveryStatus: "delivered", lpFirstAccessAt: new Date(), lpPageFirstAt: new Date(), phoneInquiryAt: null, phoneTapFirstAt: new Date(), property: { createdBy: "u1", assignedTo: null } },
+    { variantId: "v1", lpVariantId: null, deliveryStatus: "delivered", lpFirstAccessAt: null, lpPageFirstAt: null, phoneInquiryAt: null, phoneTapFirstAt: null, property: { createdBy: "u1", assignedTo: null } },
+  ]);
+});
+afterEach(() => {
+  process.env = ENV;
 });
 
-describe("GET aggregate(LP指標の旗が true)", () => {
-  it("二軸集計(byLpVariant / byPair)を返し、LP型なしは「LP型なし(外部LP)」のラベル", async () => {
-    pm.dmVariant.findMany.mockResolvedValue([{ id: "v1", label: "A" }]);
-    pm.dmLpVariant.findMany.mockResolvedValue([{ id: "l1", label: "X" }]);
-    pm.dmRecipientDraft.findMany.mockResolvedValue([
-      { variantId: "v1", lpVariantId: "l1", deliveryStatus: "delivered", lpFirstAccessAt: new Date(), phoneInquiryAt: null, phoneTapFirstAt: new Date(), property: { createdBy: "u1", assignedTo: null } },
-      { variantId: "v1", lpVariantId: null, deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, phoneTapFirstAt: null, property: { createdBy: "u1", assignedTo: null } },
-    ]);
+describe("GET aggregate(公開LPのスイッチが入っている)", () => {
+  beforeEach(() => {
+    process.env.SALE_DM_LP_PUBLIC_ENABLED = "1";
+  });
+
+  it("lpMetricsEnabled=true と二軸集計(byLpVariant / byPair)を返し、LP型なしは「LP型なし(外部LP)」のラベル", async () => {
     const json = await (await GET(new Request("http://x") as never, ctx())).json();
+    expect(json.lpMetricsEnabled).toBe(true);
     expect(json.byLpVariant.map((x: { label: string }) => x.label)).toEqual(["LP型なし(外部LP)", "X"]);
     expect(json.byPair.length).toBe(2);
     expect(json.byPair[0].label).toContain("×");
-    // DM型ごとの閲覧率は旗に関係なく同じ。
+    // DM型ごとの閲覧率はスイッチに関係なく同じ(文面の成績=QRの読み取り)。
     expect(json.byDmVariantView[0]).toMatchObject({ label: "A", viewed: 1, delivered: 2, viewRate: 0.5 });
-    // LP型ごとに電話タップの件数/率も返す(分母=閲覧)。
+    // LP型ごとに電話タップの件数/率も返す(分母=アプリ内ページの閲覧)。
     const lpX = json.byLpVariant.find((x: { lpVariantId: string }) => x.lpVariantId === "l1");
     expect(lpX).toMatchObject({ viewed: 1, phoneTapped: 1, phoneTapRate: 1 });
+  });
+
+  it('"true"(大小無視)でも有効・"yes" や "0" は無効(公開ページの判定と同じ読み方)', async () => {
+    process.env.SALE_DM_LP_PUBLIC_ENABLED = "TRUE";
+    expect((await (await GET(new Request("http://x") as never, ctx())).json()).lpMetricsEnabled).toBe(true);
+    process.env.SALE_DM_LP_PUBLIC_ENABLED = "yes";
+    expect((await (await GET(new Request("http://x") as never, ctx())).json()).lpMetricsEnabled).toBe(false);
+    process.env.SALE_DM_LP_PUBLIC_ENABLED = "0";
+    expect((await (await GET(new Request("http://x") as never, ctx())).json()).lpMetricsEnabled).toBe(false);
+  });
+});
+
+describe("GET aggregate(公開LPのスイッチが未投入=段階反映中の既定)", () => {
+  beforeEach(() => {
+    delete process.env.SALE_DM_LP_PUBLIC_ENABLED;
+  });
+
+  it("lpMetricsEnabled=false で byLpVariant / byPair を**返さない**(外部LPへの訪問をページの成績として配らない)", async () => {
+    const json = await (await GET(new Request("http://x") as never, ctx())).json();
+    expect(json.lpMetricsEnabled).toBe(false);
+    expect(Object.keys(json)).not.toContain("byLpVariant");
+    expect(Object.keys(json)).not.toContain("byPair");
+  });
+
+  it("DM型ごとの閲覧率(文面の成績)と反響の表はスイッチに関係なく返す", async () => {
+    const json = await (await GET(new Request("http://x") as never, ctx())).json();
+    expect(json.byDmVariantView[0]).toMatchObject({ label: "A", viewed: 1, delivered: 2, viewRate: 0.5 });
+    expect(json.total.sent).toBe(2);
   });
 });

@@ -7,7 +7,7 @@ function draft(over: Partial<SaleDmCampaign["recipients"][number]>): SaleDmCampa
   return {
     id: Math.random().toString(36), variantId: "v1", lpVariantId: null, propertyId: "p", recipientName: "x", recipientZip: null,
     recipientAddress: null, honorific: "様", coOwnerCount: 1, body: "", status: "sent", outcome: "none",
-    deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, phoneTapFirstAt: null, ...over,
+    deliveryStatus: "delivered", lpFirstAccessAt: null, lpPageFirstAt: null, phoneInquiryAt: null, phoneTapFirstAt: null, ...over,
   };
 }
 
@@ -83,7 +83,7 @@ describe("二軸の表(設計 2026-09-08)", () => {
     variants: [{ id: "v1", label: "A", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null, lpUrl: null }],
     lpVariants: [{ id: "l1", label: "X", tone: "formal", length: "medium", appeal: "price", strength: "low", headline: null, templateFrozenAt: null }],
     recipients: [
-      { ...base, id: "r1", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: "2026-09-09T00:05:00Z" },
+      { ...base, id: "r1", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", lpPageFirstAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: "2026-09-09T00:05:00Z" },
       { ...base, id: "r2", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: null, phoneTapFirstAt: null },
       { ...base, id: "r3", variantId: "v1", lpVariantId: null, status: "sent", deliveryStatus: "unknown", lpFirstAccessAt: null, phoneTapFirstAt: null },
       { ...base, id: "r4", variantId: "v1", lpVariantId: "l1", status: "draft", deliveryStatus: "unknown", lpFirstAccessAt: null, phoneTapFirstAt: null },
@@ -110,10 +110,10 @@ describe("二軸の表(設計 2026-09-08)", () => {
     const c = {
       ...campaign,
       recipients: [
-        { ...base, id: "s1", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: "2026-09-09T00:05:00Z" },
-        { ...base, id: "s2", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: null },
-        { ...base, id: "s3", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: null },
-        { ...base, id: "s4", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: null },
+        { ...base, id: "s1", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", lpPageFirstAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: "2026-09-09T00:05:00Z" },
+        { ...base, id: "s2", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", lpPageFirstAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: null },
+        { ...base, id: "s3", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", lpPageFirstAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: null },
+        { ...base, id: "s4", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", lpPageFirstAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: null },
       ],
     } as unknown as SaleDmCampaign;
     const row = buildLpVariantRows(c).find((r) => r.lpVariantId === "l1")!;
@@ -122,6 +122,19 @@ describe("二軸の表(設計 2026-09-08)", () => {
     // 閲覧率(formatRate)と同じ体裁。整数丸め(toFixed(0))に戻ると 25% になって表内で桁が揃わなくなる。
     expect(row.phoneTapLabel).toBe("1 / 4 (25.0%)");
     expect(row.viewRate).toBe("100.0%");
+  });
+
+  it("QRだけ読まれた宛先は DM型では閲覧・LP型と組み合わせでは閲覧に数えない(@codex R10)", () => {
+    // 公開スイッチ未投入などで外部LPへ転送しただけの訪問(lpPageFirstAt が null)。
+    const c = {
+      ...campaign,
+      recipients: [
+        { ...base, id: "q1", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", lpPageFirstAt: null, phoneTapFirstAt: null },
+      ],
+    } as unknown as SaleDmCampaign;
+    expect(buildDmViewRows(c)[0]).toMatchObject({ viewed: 1, viewRate: "100.0%" });
+    expect(buildLpVariantRows(c).find((r) => r.lpVariantId === "l1")).toMatchObject({ viewed: 0, viewRate: "0.0%" });
+    expect(buildPairRows(c)[0]).toMatchObject({ viewed: 0 });
   });
 
   it("電話タップの率は集計(phoneTapRate)をそのまま表示し、view-model では割り算をしない", () => {

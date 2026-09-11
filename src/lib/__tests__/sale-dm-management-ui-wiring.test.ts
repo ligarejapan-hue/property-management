@@ -153,13 +153,29 @@ describe("一括送付済みの terminal スキップ(workspace)", () => {
     const agg = read("../../components/sale-dm/aggregate-view.tsx");
     expect(agg).toContain("buildLpVariantRows");
     expect(agg).toContain("buildPairRows");
-    expect(agg).toContain("LP_METRICS_ENABLED");
     expect(agg).toContain("次の段階から表示します");
     // LP型ごとの表に電話タップ列がある(2026-09-11 公開LPで解禁)。
     expect(agg).toContain("電話タップ");
-    // 旗は共有モジュールに1本だけ置き、画面と API の両方がそこを見る(@codex R4 P2)。
-    // 2026-09-11 公開LP(PR3)で /t/ が LP型ごとにページを出すようになったため true(解禁)。
-    expect(read("../sale-dm-letter/lp-metrics-flag.ts")).toContain("LP_METRICS_ENABLED = true");
-    expect(read("../../app/api/properties/sale-dm/campaigns/[id]/aggregate/route.ts")).toContain("lp-metrics-flag");
+  });
+
+  it("LP型ごとの表の可否は **集計API の応答(lpMetricsEnabled)** で決める(画面は env を読めない)", () => {
+    // @codex R10 P1: 公開LPのスイッチ未投入のうちは全員が同じ外部LPへ飛ぶため、LP型別の「閲覧」は
+    // ページの成績ではない。判定はサーバー(env)にあり、画面は応答の項目を見るだけにする。
+    const agg = read("../../components/sale-dm/aggregate-view.tsx");
+    expect(agg).toContain("lpMetricsEnabled");
+    // 画面から旗モジュールを直接 import しない(client は env を読めない=常に既定値になる)。
+    expect(agg).not.toContain("lp-metrics-flag");
+    // 旗の中身は公開LPのロールアウトゲートと同じ env・同じ読み方(config の共通パーサ)。
+    const flag = read("../sale-dm-letter/lp-metrics-flag.ts");
+    expect(flag).toContain("parseLpPublicEnabled(process.env.SALE_DM_LP_PUBLIC_ENABLED)");
+    expect(flag).not.toContain("LP_METRICS_ENABLED = true");
+    // API は判定結果を応答に載せ、旗が立つときだけ LP型ごと/組み合わせを返す。
+    const route = read("../../app/api/properties/sale-dm/campaigns/[id]/aggregate/route.ts");
+    expect(route).toContain("isLpMetricsEnabled()");
+    expect(route).toContain("lpMetricsEnabled,");
+    // 作業画面が集計API を引いて画面へ渡している。
+    const page = read("../../app/(dashboard)/properties/sale-dm/[campaignId]/page.tsx");
+    expect(page).toContain("fetchSaleDmAggregate");
+    expect(page).toContain("lpMetricsEnabled={lpMetricsEnabled}");
   });
 });

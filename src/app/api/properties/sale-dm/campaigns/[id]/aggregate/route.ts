@@ -3,9 +3,9 @@ import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
 import { aggregateByVariant, aggregateTwoAxis, LP_NONE } from "@/lib/sale-dm-letter/aggregate";
-// 画面と同じ1か所を見る(@codex R4 P2)。画面だけ隠して API が出し続けると、まだ意味を持たない
-// 数字が JSON に載ったまま配られる。
-import { LP_METRICS_ENABLED } from "@/lib/sale-dm-letter/lp-metrics-flag";
+// LP型ごと/組み合わせを出してよいかは公開LPのロールアウトゲートと同じ env で決める(@codex R10 P1)。
+// 画面(client)は env を読めないので、判定結果を応答の lpMetricsEnabled に載せて画面へ渡す。
+import { isLpMetricsEnabled } from "@/lib/sale-dm-letter/lp-metrics-flag";
 
 export async function GET(
   _request: NextRequest,
@@ -41,6 +41,8 @@ export async function GET(
           lpVariantId: true,
           deliveryStatus: true,
           lpFirstAccessAt: true,
+          // アプリ内ご案内ページを実際に返せた閲覧(LP型ごと/組み合わせの分子)。
+          lpPageFirstAt: true,
           phoneInquiryAt: true,
           phoneTapFirstAt: true,
           property: { select: { createdBy: true, assignedTo: true } },
@@ -57,6 +59,7 @@ export async function GET(
     // 二軸集計(設計 2026-09-08 §2.1): DM型×LP型の閲覧率。visibleDrafts と同じ scope で計算する。
     const twoAxis = aggregateTwoAxis(visibleDrafts);
     const lpLabel = new Map(lpVariants.map((v) => [v.id, v.label]));
+    const lpMetricsEnabled = isLpMetricsEnabled();
 
     return NextResponse.json(
       {
@@ -69,9 +72,12 @@ export async function GET(
         total: aggregate.total,
         // DM型ごとの閲覧率は LP の出し分けと無関係(文面の成績)なので常に返す。
         byDmVariantView: twoAxis.byDmVariant.map((v) => ({ ...v, label: labelByVariantId.get(v.variantId) ?? v.variantId })),
-        // LP型ごと/組み合わせは /t/ が LP型ごとにページを出し分けるようになったので返す。
-        // `LP_METRICS_ENABLED` は画面と API で共通の1定数=表と中身が食い違わない。
-        ...(LP_METRICS_ENABLED
+        // 画面はこの項目だけを見て LP型ごと/組み合わせの表を出す(client は env を読めない)。
+        lpMetricsEnabled,
+        // LP型ごと/組み合わせは、公開スイッチが入って /t/ が実際にアプリ内ページを出すようになって
+        // から返す。スイッチ未投入のうちは全員が同じ外部LPへ飛ぶため、LP型別の「閲覧」は
+        // ページの成績ではない(@codex R10 P1)。
+        ...(lpMetricsEnabled
           ? {
               byLpVariant: twoAxis.byLpVariant.map((v) => ({ ...v, label: v.lpVariantId === LP_NONE ? "LP型なし(外部LP)" : (lpLabel.get(v.lpVariantId) ?? v.lpVariantId) })),
               byPair: twoAxis.byPair.map((p) => ({ ...p, label: `${labelByVariantId.get(p.variantId) ?? p.variantId} × ${p.lpVariantId === LP_NONE ? "LP型なし" : (lpLabel.get(p.lpVariantId) ?? p.lpVariantId)}` })),
