@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderLpPage, LP_CTA_LABEL } from "../sale-dm-letter/lp-page";
+import { renderLpPage, LP_CTA_LABEL, LP_PAGE_HEADERS } from "../sale-dm-letter/lp-page";
 import type { LpRenderInput } from "../sale-dm-letter/lp-render-input";
 
 const input = (over: Partial<LpRenderInput> = {}): LpRenderInput => ({
@@ -75,5 +75,30 @@ describe("renderLpPage", () => {
   });
   it("入力に無い文字列(氏名など)が出ない=入力の全値以外の文字を持ち込まない", () => {
     expect(html).not.toMatch(/山田|様/);
+  });
+  it("ヒーローは eager+fetchpriority=high、節の写真は lazy のまま", () => {
+    expect(html).toMatch(new RegExp(`<img class="hero"[^>]*loading="eager" fetchpriority="high"`));
+    expect(html).not.toMatch(new RegExp(`<img class="hero"[^>]*loading="lazy"`));
+    expect(html).toMatch(new RegExp(`<img class=""[^>]*src="/lp-assets/${"b".repeat(32)}"[^>]*loading="lazy"`));
+  });
+  it("phoneTapToken に </script> が含まれても script タグを閉じない(</script>-safe な埋め込み)", () => {
+    const h = renderLpPage(input({ phoneTapToken: "</script><img>" }));
+    expect((h.match(/<script/g) ?? []).length).toBe(1);
+    expect(h).not.toContain("</script><img>");
+    expect(h).toContain("sendBeacon(");
+  });
+  it("節見出しの \" と < は alt 属性の中でエスケープされる(属性を壊さない)", () => {
+    const h = renderLpPage(input({ sections: [
+      { heading: `危険"な<見出し`, paragraphs: ["x"], media: { kind: "asset", image: { publicId: "c".repeat(32), width: 100, height: 100 } } },
+    ] }));
+    expect(h).toContain(`alt="危険&quot;な&lt;見出し"`);
+    expect(h).not.toMatch(/alt="危険"な/);
+  });
+});
+
+describe("LP_PAGE_HEADERS", () => {
+  it("CSP を持ち、no-store も維持する", () => {
+    expect(LP_PAGE_HEADERS["Content-Security-Policy"]).toContain("default-src 'none'");
+    expect(LP_PAGE_HEADERS["Cache-Control"]).toBe("no-store");
   });
 });

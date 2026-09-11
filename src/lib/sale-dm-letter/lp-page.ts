@@ -2,15 +2,30 @@
  * 公開LP(設計 2026-09-08 §2.4)。React を使わない純関数。unsubscribe-page.ts と同じ作り。
  *  - 全ての動的値は escapeHtml。図(renderFigureSvg)だけは自前生成の SVG としてそのまま埋める。
  *  - CSS は inline・外部読み込みなし。スマホ(〜767px)=1列+画面下の固定バー、PC(768px〜)=中央1列 760px。
- *  - <script> は電話タップ送信の固定文字列1本(live のみ)。token は JSON.stringify で埋める。
+ *  - <script> は電話タップ送信の固定文字列1本(live のみ)。token は jsString(JSON.stringify を
+ *    </script>-safe にしたもの)で埋める。
  */
 import { escapeHtml } from "./templates/index";
 import { renderFigureSvg } from "./lp-figures";
 import type { LpRenderInput, LpImage } from "./lp-render-input";
+import { PUBLIC_PAGE_HEADERS } from "./unsubscribe-page";
 export { PUBLIC_PAGE_HEADERS } from "./unsubscribe-page";
 
 export const LP_CTA_LABEL = "無料査定を申し込む";
 const CONTACT_ID = "contact";
+
+/** 公開LP用の応答ヘッダ。外部読み込みなしを regex ではなくブラウザに強制させる(CSP)。
+ *  preview route(社内プレビュー・iframe埋め込み)は呼び出し側で frame-ancestors 'self' に上書きする。 */
+export const LP_PAGE_HEADERS: Readonly<Record<string, string>> = {
+  ...PUBLIC_PAGE_HEADERS,
+  "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'none'",
+};
+
+/** JSON.stringify の出力を <script> タグ内にそのまま埋め込んでも安全な文字列にする。
+ *  "</script>" のような文字列が値に含まれていても要素を閉じない(U+003C/E/&をエスケープ)。 */
+function jsString(s: string): string {
+  return JSON.stringify(s).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
+}
 
 const CSS = [
   ":root{color-scheme:light}",
@@ -55,8 +70,9 @@ const CSS = [
   "html{scroll-behavior:smooth}",
 ].join("\n");
 
-function img(image: LpImage, cls: string, alt: string): string {
-  return `<img class="${cls}" src="/lp-assets/${escapeHtml(image.publicId)}" width="${image.width}" height="${image.height}" alt="${escapeHtml(alt)}" loading="lazy" decoding="async" />`;
+function img(image: LpImage, cls: string, alt: string, priority = false): string {
+  const loadAttrs = priority ? `loading="eager" fetchpriority="high"` : `loading="lazy"`;
+  return `<img class="${cls}" src="/lp-assets/${escapeHtml(image.publicId)}" width="${image.width}" height="${image.height}" alt="${escapeHtml(alt)}" ${loadAttrs} decoding="async" />`;
 }
 
 function paragraphs(ps: string[]): string {
@@ -85,12 +101,12 @@ export function renderLpPage(input: LpRenderInput): string {
     : `<div class="bar single">${cta}</div>`;
   const script = input.mode === "live" && input.phoneTapToken && telHref
     ? (() => {
-        const url = JSON.stringify(`/t/${input.phoneTapToken}/phone-tap`);
+        const url = jsString(`/t/${input.phoneTapToken}/phone-tap`);
         return `<script>(function(){document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("[data-phone-tap]"):null;if(!a)return;try{if(navigator.sendBeacon){navigator.sendBeacon(${url})}else{fetch(${url},{method:"POST",keepalive:true}).catch(function(){})}}catch(_){}});})();</script>`;
       })()
     : "";
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="robots" content="noindex,nofollow" /><meta name="referrer" content="no-referrer" /><title>${escapeHtml(input.headline)}</title><style>${CSS}</style></head><body>${band}<main>` +
-    (input.hero ? img(input.hero, "hero", "") : "") +
+    (input.hero ? img(input.hero, "hero", "", true) : "") +
     `<div class="wrap"><h1>${escapeHtml(input.headline)}</h1>` +
     (input.lead ? `<p class="lead">${escapeHtml(input.lead)}</p>` : "") +
     `<div style="margin:16px 0 8px">${cta}</div>` +

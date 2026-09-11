@@ -24,7 +24,7 @@ export interface LpRenderInput {
   phoneTapToken: string | null;
   form: null;
 }
-export const LP_RENDER_INPUT_KEYS = ["mode", "headline", "lead", "intro", "sections", "faq", "hero", "company", "unsubscribeUrl", "phoneTapToken", "form"] as const;
+export const LP_RENDER_INPUT_KEYS = ["mode", "headline", "lead", "intro", "sections", "faq", "hero", "company", "unsubscribeUrl", "phoneTapToken", "form"] as const satisfies readonly (keyof LpRenderInput)[];
 
 const FALLBACK_LOCATION = "ご所有の物件の周辺";
 const FALLBACK_TYPE = "不動産";
@@ -54,15 +54,20 @@ export function splitBodyIntoSections(body: string): { intro: string[]; sections
     const line = raw.trim();
     if (line.startsWith("■")) {
       flush();
-      sections.push({ heading: line.slice(1).trim(), paragraphs: [] });
-      target = sections[sections.length - 1].paragraphs;
+      const heading = line.slice(1).trim();
+      // 見出しが空("■"だけの行)のときは新しい節を作らない(直前の target に積み続ける)。
+      // ここで空見出しの節を作ると、以前は後段の filter で節ごと落ちて配下の段落が消えてしまっていた。
+      if (heading.length > 0) {
+        sections.push({ heading, paragraphs: [] });
+        target = sections[sections.length - 1].paragraphs;
+      }
       continue;
     }
     if (line === "") { flush(); continue; }
     cur.push(line);
   }
   flush();
-  return { intro, sections: sections.filter((s) => s.heading.length > 0) };
+  return { intro, sections };
 }
 
 export interface LpSourceRows {

@@ -42,6 +42,15 @@ describe("splitBodyIntoSections", () => {
   it("同じ■見出しが2回あっても2つの節として並ぶ(表示は本文どおり)", () => {
     expect(splitBodyIntoSections("■A\nx\n■A\ny").sections.length).toBe(2);
   });
+  it("見出しの無い単独の■行では段落を落とさない(直前の節/introに積み続ける)", () => {
+    const r = splitBodyIntoSections("■A\nx\n■\ny\n■B\nz");
+    expect(r.sections).toEqual([{ heading: "A", paragraphs: ["x", "y"] }, { heading: "B", paragraphs: ["z"] }]);
+  });
+  it("本文の先頭が単独の■行でも後続の段落は intro に残る(節は作られない)", () => {
+    const r = splitBodyIntoSections("■\nonly");
+    expect(r.intro).toEqual(["only"]);
+    expect(r.sections).toEqual([]);
+  });
 });
 
 describe("buildLpRenderInput", () => {
