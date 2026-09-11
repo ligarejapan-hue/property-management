@@ -42,6 +42,7 @@ export async function GET(
           deliveryStatus: true,
           lpFirstAccessAt: true,
           phoneInquiryAt: true,
+          phoneTapFirstAt: true,
           property: { select: { createdBy: true, assignedTo: true } },
         },
       }),

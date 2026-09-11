@@ -46,8 +46,12 @@ export function buildVariantRows(campaign: SaleDmCampaign): VariantRow[] {
 
 export const LP_NONE_LABEL = "LP型なし(外部LP)";
 
+// SaleDmDraft(api-client.ts)は電話タップの生値をまだ型に持たない(サーバの応答には
+// phoneTapFirstAt が載っている・api-client.ts は Task 6 と同時編集中のため別ファイルで型を広げる)。
+type DraftWithPhoneTap = SaleDmCampaign["recipients"][number] & { phoneTapFirstAt?: string | null };
+
 function sentDraftsForTwoAxis(campaign: SaleDmCampaign) {
-  return campaign.recipients
+  return (campaign.recipients as DraftWithPhoneTap[])
     .filter((r) => r.status === "sent")
     .map((r) => ({
       variantId: r.variantId,
@@ -55,12 +59,20 @@ function sentDraftsForTwoAxis(campaign: SaleDmCampaign) {
       deliveryStatus: r.deliveryStatus,
       lpFirstAccessAt: r.lpFirstAccessAt ? new Date(r.lpFirstAccessAt) : null,
       phoneInquiryAt: r.phoneInquiryAt ? new Date(r.phoneInquiryAt) : null,
+      phoneTapFirstAt: r.phoneTapFirstAt ? new Date(r.phoneTapFirstAt) : null,
     }));
 }
 
 export interface DmViewRow { variantId: string; label: string; delivered: number; viewed: number; viewRate: string }
-export interface LpVariantRow { lpVariantId: string; label: string; sent: number; delivered: number; viewed: number; viewRate: string }
+// phoneTapLabel: 「件数 / 閲覧 分母(率%)」の表示文字列(分母=閲覧の分母を明示)。閲覧0は "—"。
+export interface LpVariantRow { lpVariantId: string; label: string; sent: number; delivered: number; viewed: number; viewRate: string; phoneTapped: number; phoneTapLabel: string }
 export interface PairRow { key: string; label: string; sent: number; delivered: number; viewed: number }
+
+// 電話タップの表示: 「件数 / 閲覧数(率%)」。閲覧0(分母0)は率が定義できないため "—"。
+function formatPhoneTapLabel(phoneTapped: number, viewed: number): string {
+  if (viewed <= 0) return "—";
+  return `${phoneTapped} / ${viewed} (${((phoneTapped / viewed) * 100).toFixed(0)}%)`;
+}
 
 // DM型の成績 = 閲覧率(設計 2026-09-08 §2.1)。到達かつ閲覧 ÷ 到達。
 export function buildDmViewRows(campaign: SaleDmCampaign): DmViewRow[] {
@@ -84,6 +96,8 @@ export function buildLpVariantRows(campaign: SaleDmCampaign): LpVariantRow[] {
     delivered: v.delivered,
     viewed: v.viewed,
     viewRate: formatRate(v.deliveredViewed, v.delivered),
+    phoneTapped: v.phoneTapped,
+    phoneTapLabel: formatPhoneTapLabel(v.phoneTapped, v.viewed),
   }));
 }
 

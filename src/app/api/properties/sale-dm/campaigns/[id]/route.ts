@@ -46,6 +46,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       deliveryStatus: r.deliveryStatus,
       lpFirstAccessAt: r.lpFirstAccessAt,
       phoneInquiryAt: r.phoneInquiryAt,
+      // 電話ボタンのタップ(公開LP §2.4)。LP型ごとの集計表(電話タップ列)が画面側で使う。
+      phoneTapFirstAt: r.phoneTapFirstAt,
     }));
     // ワークスペース閲覧は宛名・住所・本文(PII)を返す read。print/export と同様、PII アクセスを
     // 非PIIメタで監査する(AuditLog での PII アクセス追跡。閲覧しただけで痕跡が残らない穴を塞ぐ)。

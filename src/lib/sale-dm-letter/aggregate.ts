@@ -108,21 +108,28 @@ export const LP_NONE = "__none__";
 
 export interface TwoAxisDraftInput extends AggregateDraftInput {
   lpVariantId: string | null;
+  // 電話ボタンのタップ(公開LP §2.4)。初回タップ時刻・タップされていなければ null。
+  // 閲覧(lpFirstAccessAt)とは独立に立つ(閲覧なしでタップだけ、ということもあり得る)。
+  phoneTapFirstAt: Date | null;
 }
-interface ViewBucket { sent: number; delivered: number; viewed: number; deliveredViewed: number }
+interface ViewBucket { sent: number; delivered: number; viewed: number; deliveredViewed: number; phoneTapped: number }
 export interface DmViewAggregate { variantId: string; sent: number; delivered: number; viewed: number; deliveredViewed: number; viewRate: number | null }
-export interface LpVariantAggregate { lpVariantId: string; sent: number; delivered: number; viewed: number; deliveredViewed: number; viewRate: number | null }
+// phoneTapped: 電話ボタンをタップした件数(phoneTapFirstAt != null)。
+// phoneTapRate: phoneTapped / viewed。閲覧(viewed)0 のときは null。閲覧なしのタップも分子には数えるため、
+// データ上は viewed より phoneTapped が多く率が100%を超えることもあり得る(クランプしない・そのまま出す)。
+export interface LpVariantAggregate { lpVariantId: string; sent: number; delivered: number; viewed: number; deliveredViewed: number; viewRate: number | null; phoneTapped: number; phoneTapRate: number | null }
 export interface PairAggregate { variantId: string; lpVariantId: string; sent: number; delivered: number; viewed: number }
 export interface TwoAxisAggregate { byDmVariant: DmViewAggregate[]; byLpVariant: LpVariantAggregate[]; byPair: PairAggregate[] }
 
 function bump(map: Map<string, ViewBucket>, key: string, draft: TwoAxisDraftInput): void {
-  const b = map.get(key) ?? { sent: 0, delivered: 0, viewed: 0, deliveredViewed: 0 };
+  const b = map.get(key) ?? { sent: 0, delivered: 0, viewed: 0, deliveredViewed: 0, phoneTapped: 0 };
   const isDelivered = draft.deliveryStatus === "delivered";
   const isViewed = draft.lpFirstAccessAt != null;
   b.sent += 1;
   if (isDelivered) b.delivered += 1;
   if (isViewed) b.viewed += 1;
   if (isDelivered && isViewed) b.deliveredViewed += 1;
+  if (draft.phoneTapFirstAt != null) b.phoneTapped += 1;
   map.set(key, b);
 }
 
@@ -139,7 +146,7 @@ export function aggregateTwoAxis(drafts: TwoAxisDraftInput[]): TwoAxisAggregate 
   const sortKeys = (m: Map<string, ViewBucket>) => [...m.keys()].sort((a, b) => a.localeCompare(b));
   return {
     byDmVariant: sortKeys(dm).map((k) => { const b = dm.get(k)!; return { variantId: k, sent: b.sent, delivered: b.delivered, viewed: b.viewed, deliveredViewed: b.deliveredViewed, viewRate: rate(b.deliveredViewed, b.delivered) }; }),
-    byLpVariant: sortKeys(lp).map((k) => { const b = lp.get(k)!; return { lpVariantId: k, sent: b.sent, delivered: b.delivered, viewed: b.viewed, deliveredViewed: b.deliveredViewed, viewRate: rate(b.deliveredViewed, b.delivered) }; }),
+    byLpVariant: sortKeys(lp).map((k) => { const b = lp.get(k)!; return { lpVariantId: k, sent: b.sent, delivered: b.delivered, viewed: b.viewed, deliveredViewed: b.deliveredViewed, viewRate: rate(b.deliveredViewed, b.delivered), phoneTapped: b.phoneTapped, phoneTapRate: rate(b.phoneTapped, b.viewed) }; }),
     byPair: sortKeys(pair).map((k) => { const b = pair.get(k)!; const [variantId, lpVariantId] = k.split("|"); return { variantId, lpVariantId, sent: b.sent, delivered: b.delivered, viewed: b.viewed }; }),
   };
 }

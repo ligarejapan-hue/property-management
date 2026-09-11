@@ -77,8 +77,8 @@ describe("GET aggregate(LP指標の旗が true)", () => {
     pm.dmVariant.findMany.mockResolvedValue([{ id: "v1", label: "A" }]);
     pm.dmLpVariant.findMany.mockResolvedValue([{ id: "l1", label: "X" }]);
     pm.dmRecipientDraft.findMany.mockResolvedValue([
-      { variantId: "v1", lpVariantId: "l1", deliveryStatus: "delivered", lpFirstAccessAt: new Date(), phoneInquiryAt: null, property: { createdBy: "u1", assignedTo: null } },
-      { variantId: "v1", lpVariantId: null, deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, property: { createdBy: "u1", assignedTo: null } },
+      { variantId: "v1", lpVariantId: "l1", deliveryStatus: "delivered", lpFirstAccessAt: new Date(), phoneInquiryAt: null, phoneTapFirstAt: new Date(), property: { createdBy: "u1", assignedTo: null } },
+      { variantId: "v1", lpVariantId: null, deliveryStatus: "delivered", lpFirstAccessAt: null, phoneInquiryAt: null, phoneTapFirstAt: null, property: { createdBy: "u1", assignedTo: null } },
     ]);
     const json = await (await GET(new Request("http://x") as never, ctx())).json();
     expect(json.byLpVariant.map((x: { label: string }) => x.label)).toEqual(["LP型なし(外部LP)", "X"]);
@@ -86,5 +86,8 @@ describe("GET aggregate(LP指標の旗が true)", () => {
     expect(json.byPair[0].label).toContain("×");
     // DM型ごとの閲覧率は旗に関係なく同じ。
     expect(json.byDmVariantView[0]).toMatchObject({ label: "A", viewed: 1, delivered: 2, viewRate: 0.5 });
+    // LP型ごとに電話タップの件数/率も返す(分母=閲覧)。
+    const lpX = json.byLpVariant.find((x: { lpVariantId: string }) => x.lpVariantId === "l1");
+    expect(lpX).toMatchObject({ viewed: 1, phoneTapped: 1, phoneTapRate: 1 });
   });
 });

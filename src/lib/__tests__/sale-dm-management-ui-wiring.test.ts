@@ -155,8 +155,11 @@ describe("一括送付済みの terminal スキップ(workspace)", () => {
     expect(agg).toContain("buildPairRows");
     expect(agg).toContain("LP_METRICS_ENABLED");
     expect(agg).toContain("次の段階から表示します");
+    // LP型ごとの表に電話タップ列がある(2026-09-11 公開LPで解禁)。
+    expect(agg).toContain("電話タップ");
     // 旗は共有モジュールに1本だけ置き、画面と API の両方がそこを見る(@codex R4 P2)。
-    expect(read("../sale-dm-letter/lp-metrics-flag.ts")).toContain("LP_METRICS_ENABLED = false");
+    // 2026-09-11 公開LP(PR3)で /t/ が LP型ごとにページを出すようになったため true(解禁)。
+    expect(read("../sale-dm-letter/lp-metrics-flag.ts")).toContain("LP_METRICS_ENABLED = true");
     expect(read("../../app/api/properties/sale-dm/campaigns/[id]/aggregate/route.ts")).toContain("lp-metrics-flag");
   });
 });

@@ -57,8 +57,8 @@ export default function SaleDmAggregateView({ campaign }: { campaign: SaleDmCamp
         <>
           <Table
             title="LP型ごと(ページの成績。申込率は申込フォーム対応後に追加)"
-            head={["LP型", "送付", "到達", "閲覧", "閲覧率"]}
-            rows={lpRows.map((r) => ({ key: r.lpVariantId, cells: [r.label, r.sent, r.delivered, r.viewed, r.viewRate], strong: [4] }))}
+            head={["LP型", "送付", "到達", "閲覧", "閲覧率", "電話タップ"]}
+            rows={lpRows.map((r) => ({ key: r.lpVariantId, cells: [r.label, r.sent, r.delivered, r.viewed, r.viewRate, r.phoneTapLabel], strong: [4] }))}
           />
           <Table
             title="組み合わせ(DM型 × LP型)"

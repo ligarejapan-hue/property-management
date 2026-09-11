@@ -82,19 +82,19 @@ describe("二軸の表(設計 2026-09-08)", () => {
     variants: [{ id: "v1", label: "A", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null, lpUrl: null }],
     lpVariants: [{ id: "l1", label: "X", tone: "formal", length: "medium", appeal: "price", strength: "low", headline: null, templateFrozenAt: null }],
     recipients: [
-      { ...base, id: "r1", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z" },
-      { ...base, id: "r2", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: null },
-      { ...base, id: "r3", variantId: "v1", lpVariantId: null, status: "sent", deliveryStatus: "unknown", lpFirstAccessAt: null },
-      { ...base, id: "r4", variantId: "v1", lpVariantId: "l1", status: "draft", deliveryStatus: "unknown", lpFirstAccessAt: null },
+      { ...base, id: "r1", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: "2026-09-09T00:05:00Z" },
+      { ...base, id: "r2", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: null, phoneTapFirstAt: null },
+      { ...base, id: "r3", variantId: "v1", lpVariantId: null, status: "sent", deliveryStatus: "unknown", lpFirstAccessAt: null, phoneTapFirstAt: null },
+      { ...base, id: "r4", variantId: "v1", lpVariantId: "l1", status: "draft", deliveryStatus: "unknown", lpFirstAccessAt: null, phoneTapFirstAt: null },
     ],
   } as unknown as SaleDmCampaign;
   it("DM型の閲覧率 = 到達かつ閲覧 ÷ 到達", () => {
     expect(buildDmViewRows(campaign)).toEqual([{ variantId: "v1", label: "A", delivered: 2, viewed: 1, viewRate: "50.0%" }]);
   });
-  it("LP型ごと(LP型なしの宛先は『LP型なし(外部LP)』)・送付済みのみ", () => {
+  it("LP型ごと(LP型なしの宛先は『LP型なし(外部LP)』)・送付済みのみ・電話タップは件数と分母=閲覧の率", () => {
     expect(buildLpVariantRows(campaign)).toEqual([
-      { lpVariantId: "__none__", label: "LP型なし(外部LP)", sent: 1, delivered: 0, viewed: 0, viewRate: "—" },
-      { lpVariantId: "l1", label: "X", sent: 2, delivered: 2, viewed: 1, viewRate: "50.0%" },
+      { lpVariantId: "__none__", label: "LP型なし(外部LP)", sent: 1, delivered: 0, viewed: 0, viewRate: "—", phoneTapped: 0, phoneTapLabel: "—" },
+      { lpVariantId: "l1", label: "X", sent: 2, delivered: 2, viewed: 1, viewRate: "50.0%", phoneTapped: 1, phoneTapLabel: "1 / 1 (100%)" },
     ]);
   });
   it("組み合わせ表", () => {
@@ -104,5 +104,20 @@ describe("二軸の表(設計 2026-09-08)", () => {
     const c = { ...campaign, lpVariants: [], recipients: campaign.recipients.map((r) => ({ ...r, lpVariantId: null })) } as SaleDmCampaign;
     expect(buildLpVariantRows(c)).toEqual([]);
     expect(buildPairRows(c)).toEqual([]);
+  });
+  it("電話タップ表示は『件数 / 閲覧数 (率%)』(例: 1/4で25%)", () => {
+    const c = {
+      ...campaign,
+      recipients: [
+        { ...base, id: "s1", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: "2026-09-09T00:05:00Z" },
+        { ...base, id: "s2", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: null },
+        { ...base, id: "s3", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: null },
+        { ...base, id: "s4", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: null },
+      ],
+    } as unknown as SaleDmCampaign;
+    const row = buildLpVariantRows(c).find((r) => r.lpVariantId === "l1")!;
+    expect(row.viewed).toBe(4);
+    expect(row.phoneTapped).toBe(1);
+    expect(row.phoneTapLabel).toBe("1 / 4 (25%)");
   });
 });
