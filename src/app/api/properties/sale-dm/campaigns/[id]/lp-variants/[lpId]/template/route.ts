@@ -6,7 +6,9 @@ import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
 import { buildLpExternalPrompt, promptDigest, bodyTemplateDigest } from "@/lib/sale-dm-letter/external-prompt";
 import { SETTLED_DRAFT_STATUSES, isVariantFrozen } from "@/lib/sale-dm-letter/freeze";
-import { splitLpTemplate, lpSplitIssueMessage } from "@/lib/sale-dm-letter/lp-template";
+import { splitLpTemplate, lpSplitIssueMessage, lpBodyHeadings } from "@/lib/sale-dm-letter/lp-template";
+import { isFigureKind } from "@/lib/sale-dm-letter/lp-figures";
+import { reconcileSectionMedia } from "@/lib/sale-dm-letter/lp-media";
 import { saleDmLpTemplatePutSchema } from "@/lib/validators-sale-dm";
 
 /**
@@ -26,7 +28,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       await tx.$queryRaw`SELECT id FROM dm_lp_variants WHERE id = ${lpId}::uuid AND campaign_id = ${id}::uuid FOR UPDATE`;
       const v = await tx.dmLpVariant.findFirst({
         where: { id: lpId, campaignId: id },
-        select: { id: true, tone: true, length: true, appeal: true, strength: true, templateFrozenAt: true, rawTemplate: true },
+        select: { id: true, tone: true, length: true, appeal: true, strength: true, templateFrozenAt: true, rawTemplate: true, bodyText: true },
       });
       if (!v) throw new ApiError(404, "指定されたLP型が見つかりません", "LP_VARIANT_NOT_FOUND");
       if (v.rawTemplate === parsed.body) {
@@ -85,10 +87,35 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
           faqJson: parts.faq === null ? Prisma.DbNull : parts.faq,
         },
       });
+
+      // 写真と図の枠を新しい小見出しに引き継ぐ(設計 §2.3)。見出しの完全一致だけ残し、
+      // 消えた見出しの行は落とす。ヒーロー行は本文と無関係なので触らない。
+      const oldRows = await tx.dmLpVariantMedia.findMany({
+        where: { lpVariantId: lpId, slot: "section" },
+        orderBy: { sortOrder: "asc" },
+        select: { heading: true, assetId: true, figureKind: true },
+      });
+      const oldSections = oldRows.map((r) => ({
+        heading: r.heading ?? "",
+        media: r.assetId ? { kind: "asset" as const, assetId: r.assetId } : r.figureKind && isFigureKind(r.figureKind) ? { kind: "figure" as const, figureKind: r.figureKind } : null,
+      }));
+      // 同じ小見出しが本文に2回あると節が2件になり枠の引き継ぎが壊れるため、重複は1件にまとめる。
+      const newHeadings = [...new Set(lpBodyHeadings(parts.body))];
+      const kept = reconcileSectionMedia([...new Set(lpBodyHeadings(v.bodyText ?? ""))], newHeadings, oldSections);
+      const mediaDropped = oldSections.filter((s) => s.media && !newHeadings.includes(s.heading)).length;
+      await tx.dmLpVariantMedia.deleteMany({ where: { lpVariantId: lpId, slot: "section" } });
+      const keptRows = kept.flatMap((s, i) => s.media ? [{
+        lpVariantId: lpId, slot: "section", heading: s.heading,
+        assetId: s.media.kind === "asset" ? s.media.assetId : null,
+        figureKind: s.media.kind === "figure" ? s.media.figureKind : null,
+        sortOrder: i + 1,
+      }] : []);
+      if (keptRows.length > 0) await tx.dmLpVariantMedia.createMany({ data: keptRows });
+
       return {
         changed: true as const,
         bodyDigest: bodyTemplateDigest(parsed.body),
-        parts: { headline: parts.headline, lead: parts.lead, faqCount: parts.faq?.length ?? 0, bodyLength: parts.body.length },
+        parts: { headline: parts.headline, lead: parts.lead, faqCount: parts.faq?.length ?? 0, bodyLength: parts.body.length, mediaDropped },
       };
     });
 

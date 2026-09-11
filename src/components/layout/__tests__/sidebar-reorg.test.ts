@@ -181,6 +181,7 @@ describe("DM グループ(新設)", () => {
     expect(group("dm")?.items.map((i) => i.href)).toEqual([
       "/dm",
       "/admin/sale-dm-settings",
+      "/admin/lp-assets",
       "/admin/orphan-dm-logs",
     ]);
   });

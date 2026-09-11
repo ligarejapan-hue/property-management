@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LP_LIMITS, LP_MAX_SECTIONS } from "@/lib/sale-dm-letter/lp-template";
 
 export const saleDmOptionsSchema = z.object({
   designTemplate: z.enum(["formal", "soft", "impact"]),
@@ -114,3 +115,27 @@ export const saleDmLpTemplatePutSchema = z.object({
   promptDigest: z.string().length(64),
   baseBodyDigest: z.string().length(64),
 });
+
+// ---- LP型の写真と図(設計 2026-09-08 §2.3)
+const lpMediaRefSchema = z.union([
+  z.object({ kind: z.literal("asset"), assetId: z.string().uuid() }),
+  z.object({ kind: z.literal("figure"), figureKind: z.string().min(1).max(40) }),
+]);
+export const saleDmLpMediaPutSchema = z.object({
+  hero: z.object({ assetId: z.string().uuid() }).nullable(),
+  // 保存済みの本文(前回反映分)には 60字超/30個超の小見出しがあり得るので、ここでは本文に入り得る
+  // 形なら通し、実在するかどうかは media route が validateMediaPlan で本文の小見出しと照合して決める
+  // (新しい文章の保存時の上限は splitLpTemplate 側)。
+  sections: z
+    .array(z.object({ heading: z.string().min(1).max(LP_LIMITS.body), media: lpMediaRefSchema.nullable() }))
+    .max(LP_MAX_SECTIONS), // 本文に入り得る■行数の理論上限(LP_MAX_SECTIONS = Math.ceil(body / 3)、@codex P2)
+});
+export type SaleDmLpMediaPut = z.infer<typeof saleDmLpMediaPutSchema>;
+
+export const saleDmLpImagePromptQuerySchema = z.object({
+  slot: z.enum(["hero", "section"]),
+  heading: z.string().max(LP_LIMITS.body).optional(),
+  style: z.enum(["photo", "illustration", "flat"]).default("photo"),
+});
+
+export const saleDmLpAssetLabelSchema = z.string().trim().max(80);

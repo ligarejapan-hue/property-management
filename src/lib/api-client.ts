@@ -266,6 +266,31 @@ export interface SaleDmLpVariant {
   templateFrozenAt: string | null;
 }
 
+// LP用の写真(設計 2026-09-08 §2.3)。画面は /lp-assets/<publicId> だけを使う(/uploads/ は返さない)。
+export interface SaleDmLpAsset {
+  id: string;
+  publicId: string;
+  mime: string;
+  width: number;
+  height: number;
+  bytes: number;
+  label: string | null;
+  createdAt: string;
+  referenced: boolean;
+}
+export type SaleDmLpMediaRef = { kind: "asset"; assetId: string } | { kind: "figure"; figureKind: string };
+export interface SaleDmLpMediaPlan {
+  hero: { assetId: string } | null;
+  sections: Array<{ heading: string; media: SaleDmLpMediaRef | null }>;
+}
+export interface SaleDmLpMediaResponse {
+  plan: SaleDmLpMediaPlan;
+  headings: string[];
+  frozen: boolean;
+  assets: SaleDmLpAsset[];
+}
+export const LP_ASSET_URL = (publicId: string) => `/lp-assets/${publicId}`;
+
 export interface SaleDmCampaign {
   id: string;
   name: string;
@@ -470,12 +495,56 @@ export async function saveSaleDmLpVariantTemplate(
 ) {
   if (USE_MOCK) {
     await mockDelay();
-    return { changed: true, bodyDigest: "0".repeat(64), parts: { headline: "見出し", lead: null as string | null, faqCount: 0, bodyLength: 0 } };
+    return { changed: true, bodyDigest: "0".repeat(64), parts: { headline: "見出し", lead: null as string | null, faqCount: 0, bodyLength: 0, mediaDropped: 0 } };
   }
-  return apiFetch<{ changed: boolean; bodyDigest: string; parts?: { headline: string; lead: string | null; faqCount: number; bodyLength: number } }>(
+  return apiFetch<{ changed: boolean; bodyDigest: string; parts?: { headline: string; lead: string | null; faqCount: number; bodyLength: number; mediaDropped?: number } }>(
     `/api/properties/sale-dm/campaigns/${campaignId}/lp-variants/${lpId}/template`,
     { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
   );
+}
+
+// ---- LP用の写真と図(設計 2026-09-08 §2.3)
+export async function fetchSaleDmLpAssets() {
+  if (USE_MOCK) { await mockDelay(); return { assets: [] as SaleDmLpAsset[] }; }
+  return apiFetch<{ assets: SaleDmLpAsset[] }>(`/api/properties/sale-dm/lp-assets`);
+}
+
+export async function uploadSaleDmLpAsset(blob: Blob, fileName: string, label?: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { asset: { id: "mock-asset", publicId: "0".repeat(32), mime: "image/jpeg", width: 1, height: 1, bytes: blob.size, label: label ?? null, createdAt: new Date().toISOString(), referenced: false } as SaleDmLpAsset };
+  }
+  const fd = new FormData();
+  fd.append("file", blob, fileName);
+  if (label && label.trim()) fd.append("label", label.trim());
+  // multipart は Content-Type を付けない(ブラウザが boundary 付きで付ける)。
+  return apiFetch<{ asset: SaleDmLpAsset }>(`/api/properties/sale-dm/lp-assets`, { method: "POST", body: fd });
+}
+
+export async function deleteSaleDmLpAsset(assetId: string) {
+  if (USE_MOCK) { await mockDelay(); return { deleted: assetId }; }
+  return apiFetch<{ deleted: string }>(`/api/properties/sale-dm/lp-assets/${assetId}`, { method: "DELETE" });
+}
+
+export async function fetchSaleDmLpMedia(campaignId: string, lpId: string) {
+  if (USE_MOCK) { await mockDelay(); return { plan: { hero: null, sections: [] }, headings: [], frozen: false, assets: [] } as SaleDmLpMediaResponse; }
+  return apiFetch<SaleDmLpMediaResponse>(`/api/properties/sale-dm/campaigns/${campaignId}/lp-variants/${lpId}/media`);
+}
+
+export async function saveSaleDmLpMedia(campaignId: string, lpId: string, plan: SaleDmLpMediaPlan) {
+  if (USE_MOCK) { await mockDelay(); return { plan, assetCount: 0, figureCount: 0 }; }
+  return apiFetch<{ plan: SaleDmLpMediaPlan; assetCount: number; figureCount: number }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/lp-variants/${lpId}/media`,
+    { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(plan) },
+  );
+}
+
+export async function fetchSaleDmLpImagePrompt(campaignId: string, lpId: string, q: { slot: "hero" | "section"; heading?: string; style?: "photo" | "illustration" | "flat" }) {
+  if (USE_MOCK) { await mockDelay(); return { prompt: "（モック）画像プロンプト" }; }
+  const p = new URLSearchParams({ slot: q.slot });
+  if (q.heading) p.set("heading", q.heading);
+  if (q.style) p.set("style", q.style);
+  return apiFetch<{ prompt: string }>(`/api/properties/sale-dm/campaigns/${campaignId}/lp-variants/${lpId}/image-prompt?${p.toString()}`);
 }
 
 export async function assignSaleDmVariants(

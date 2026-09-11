@@ -7,7 +7,12 @@ import { LETTER_TAGS } from "./tags";
 
 export const LP_SECTIONS = ["見出し", "リード文", "本文", "よくある質問"] as const;
 export type LpSection = (typeof LP_SECTIONS)[number];
-export const LP_LIMITS = { headline: 60, lead: 300, body: 4000, faqItem: 300, faqCount: 6 } as const;
+// heading/headingCount: 本文の ■小見出し の上限(heading=1つあたりtrim後の文字数、headingCount=重複を
+// 除いた種類数)。media route(写真/図の保存)の saleDmLpMediaPutSchema と同じ上限を使う。
+export const LP_LIMITS = { headline: 60, lead: 300, body: 4000, faqItem: 300, faqCount: 6, heading: 60, headingCount: 30 } as const;
+// sections(写真/図の枠)の配列上限(@codex P2): 本文の理論上の最大■行数から導出する。
+// 「■x」の3文字(■・見出し文字1字・改行)が最短の小見出し行なので、本文上限を3で割った値が上限になる。
+export const LP_MAX_SECTIONS = Math.ceil(LP_LIMITS.body / 3);
 
 export type LpFaqItem = { q: string; a: string };
 export interface LpTemplateParts { headline: string; lead: string | null; body: string; faq: LpFaqItem[] | null }
@@ -15,6 +20,8 @@ export interface LpTemplateParts { headline: string; lead: string | null; body: 
 export type LpSplitIssue =
   | { code: "MISSING_SECTION" | "DUPLICATE_SECTION" | "ORDER_MISMATCH" | "UNKNOWN_SECTION" | "EMPTY_SECTION" | "HEADLINE_MULTILINE" | "UNKNOWN_TAG"; section: string }
   | { code: "TOO_LONG"; section: string; limit: number }
+  | { code: "HEADING_TOO_LONG"; section: string; limit: number }
+  | { code: "TOO_MANY_HEADINGS"; section: string; limit: number }
   | { code: "FAQ_PAIR_MISMATCH" }
   | { code: "FAQ_EMPTY_ITEM" }
   | { code: "FAQ_TOO_MANY"; limit: number };
@@ -119,6 +126,16 @@ export function splitLpTemplate(raw: string): LpSplitResult {
   if (body.length === 0) return fail({ code: "EMPTY_SECTION", section: "本文" });
   if (body.length > LP_LIMITS.body) return fail({ code: "TOO_LONG", section: "本文", limit: LP_LIMITS.body });
   if (hasBadTag(body)) return fail({ code: "UNKNOWN_TAG", section: "本文" });
+  // media route(写真/図の保存)は本文の ■小見出し を重複除去して枠にするため、そちら側の
+  // 上限(saleDmLpMediaPutSchema)と揃えてここでも弾く(揃えないと文章は保存できても写真枠が保存できない)。
+  const headings = lpBodyHeadings(body);
+  for (const heading of headings) {
+    if (heading.length > LP_LIMITS.heading) return fail({ code: "HEADING_TOO_LONG", section: "本文", limit: LP_LIMITS.heading });
+  }
+  const distinctHeadingCount = new Set(headings).size;
+  if (distinctHeadingCount > LP_LIMITS.headingCount) {
+    return fail({ code: "TOO_MANY_HEADINGS", section: "本文", limit: LP_LIMITS.headingCount });
+  }
 
   let faq: LpFaqItem[] | null = null;
   if (found.has("よくある質問")) {
@@ -148,6 +165,8 @@ export function lpSplitIssueMessage(issue: LpSplitIssue): string {
     case "HEADLINE_MULTILINE": return "【見出し】は1行にしてください";
     case "UNKNOWN_TAG": return `【${issue.section}】に使えない差し込み記号があります。使えるのは {{物件所在}} と {{物件種別}} だけです`;
     case "TOO_LONG": return `【${issue.section}】が長すぎます(上限 ${issue.limit} 字)`;
+    case "HEADING_TOO_LONG": return `【${issue.section}】の小見出し(■)は1つ ${issue.limit} 字までです`;
+    case "TOO_MANY_HEADINGS": return `【${issue.section}】の小見出し(■)は ${issue.limit} 個までです`;
     case "FAQ_PAIR_MISMATCH": return "【よくある質問】は Q. と A. を対にして書いてください";
     case "FAQ_EMPTY_ITEM": return "【よくある質問】に、質問か答えが空の組があります";
     case "FAQ_TOO_MANY": return `【よくある質問】は ${issue.limit} 組までです`;

@@ -568,6 +568,18 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 
 `20260909000000_add_dm_lp_variants` は additive のみ(表 `dm_lp_variants` 新設・`dm_recipient_drafts.lp_variant_id` 追加・FK は SET NULL)。バックフィル無し。既存キャンペーンは LP型0件=従来どおり(割当・集計・QR転送の結果は変わらない)。rollback は列と表の DROP で戻せる(enum の追加なし)。
 
+#### 売却DM LP型「写真と図」(2026-09): migration
+
+`20260910100000_add_dm_lp_assets` は additive のみ(表 `dm_lp_assets` 新設=写真ライブラリ、`dm_lp_variant_media` 新設=LP型の枠)。バックフィル無し。FK は `dm_lp_variant_media.asset_id → dm_lp_assets.id` が `ON DELETE RESTRICT`(使用中の写真は消せない=アプリ側でも先に枠から外させる)、`dm_lp_variant_media.lp_variant_id → dm_lp_variants.id` が `ON DELETE CASCADE`(LP型を消せば枠も一緒に消える)。rollback は2表の DROP で戻せる(enum の追加なし)。
+
+公開口 `/lp-assets/<publicId>` は認証なし(`src/proxy.ts` の `PUBLIC_PATHS` に追加済み)。`publicId` は32桁の乱数で、いずれかのLP型が参照している写真だけを返す(ライブラリに入れただけ・削除済みは404)。レート制限は300/分。`Cache-Control: immutable` で1年キャッシュするため、**削除しても配布済みのキャッシュ（閲覧者のブラウザやCDN）にはしばらく残る**運用上の注意がある(差し替えは新しい `publicId` で行う設計)。nginx のアクセスログ除外は`/t/`・`/u/`と違って**行わない**(`publicId` は乱数でPIIではない)。
+
+`STORAGE_BACKEND=server` の環境では `lp-assets/` 配下にファイルが増える(uploads と同じストレージ層を共用)。写真は**端末側で例外なく canvas 再エンコード**して長辺1600pxのJPEGにしてから送る(`src/lib/lp-asset-prepare.ts`。JPEGを含め無変換で送る道は無い=向きを画素に焼き込むため)ので、この機能で新規に追加したサーバー側の依存パッケージは無い。
+
+公開配信する画像なので、**付随情報(メタデータ)はサーバー側で許可リスト方式により全て除去する**(`src/lib/lp-asset-metadata-strip.ts`)。メタデータのセグメント/チャンクは許可リスト方式で全て除去する(JPEG は SOI/DQT/DHT/DAC/DRI/DNL/SOFn/SOS〜EOI のみ、PNG は IHDR/PLTE/IDAT/IEND と固定長の色情報チャンク(gAMA/cHRM/sRGB/pHYs)のみ、WebP は VP8/VP8L/VP8X/ALPH のみ・アニメーションは拒否)。残るのは画素データそのもの(IDAT/エントロピー符号/VP8 ビットストリーム)だけで、そこに任意のバイトを載せることは形式上防げない(画像として表示される内容と同じ)。したがって JPEG の APPn(JFIF APP0・Exif APP1・IPTC APP13 等)と COM、PNG の tEXt/zTXt/iTXt/tIME/eXIf/iCCP と未知チャンク、WebP の EXIF/XMP /ICCP と未知チャンクは全て落ちる(VP8X の ICC/EXIF/XMP フラグも消し、RIFF サイズを数え直す)。⚠**PNG の `sBIT`/`bKGD`/`hIST`/`tRNS` は残さない**(@codex P2): これらは colour type ごとに厳密な固定長を持つため範囲チェックだけでは余りバイトを隠せてしまう。direct API 経由の PNG は透過情報を失うが、UI 経路は必ず JPEG に再エンコードされる(透過を持たない)ため実害はない。⚠**残す器の中身も検査する**: 固定長の PNG チャンク(IHDR=13/gAMA=4/cHRM=32/sRGB=1/pHYs=9)と PLTE(3の倍数かつ 3〜768=1〜256エントリ・0は malformed・colour type 0/4 には現れてはならない)、JPEG の SOFn/DQT/DHT/DAC/DRI/DNL/SOS の内部構造をぴったり使い切るかまで確かめ、余りバイトが出るものは 422 にする(許可した器の余白に情報を隠されないため)。⚠**アニメーション WebP(ANIM/ANMF チャンク・VP8X の Anim フラグ)は受け付けない**(ANMF は入れ子のサブチャンクを持てるため抜け道になる。画面側は静止JPEGしか作らないので実害なし)。⚠この段で **Exif の向き(Orientation)も落ちる**(画面側が全ての画像を canvas で再エンコードし向きを画素に焼き込んでから送るため保持しない)。⚠**器の形だけでなく構造の完全性(実データの有無)も検査する**(@codex P2): PNG は IDAT(合計 payload 長 > 0)が最低1つ必須・colour type=3(インデックス)なら最初の IDAT より前の PLTE が必須・IHDR の値域(幅高さ>0/bit depth/colour type/compression/filter/interlace)を検査・**残す chunk 全ての CRC32 を検算**し合わなければ 422、JPEG は DQT 最低1つ・DHT/DAC 最低1つ・最初の SOS の前の SOFn(幅高さ>0)・SOS〜EOI の entropy-coded data が1byte以上を必須にし、WebP は VP8/VP8L のどちらか1つ(key-frame start code / signature byte 込み)を必須にする。構造が読み切れない画像は保存せず 422 にする(fail-closed)。
+
+前回反映分の本文に上限超えの小見出しがあっても写真の保存はできる(照合は本文との一致で行う)。バックフィルは不要。
+
 #### 反響の記録リリース（migration `add_dm_reaction_columns`）: 旧 sale_dm 送付記録の照合
 
 この migration は既存の送付記録を全件「反応なし（no_response）」で初期化する。過去の売却DMで

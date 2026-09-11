@@ -27,4 +27,13 @@ describe("proxy public paths(/t/ 追跡リンク)", () => {
     expect(isPublicPath("/api/properties")).toBe(false);
     expect(isPublicPath("/")).toBe(false);
   });
+  it("/lp-assets/<publicId> は公開(LP の写真は未認証の所有者が見る)", () => {
+    expect(isPublicPath("/lp-assets/abcdef")).toBe(true);
+    expect(isPublicPath("/lp-assets/")).toBe(true);
+  });
+  it("/lp-assets/ に前方一致しない近接パスは公開しない", () => {
+    expect(isPublicPath("/lp-assets")).toBe(false);
+    expect(isPublicPath("/lp")).toBe(false);
+    expect(isPublicPath("/api/properties/sale-dm/lp-assets")).toBe(false);
+  });
 });

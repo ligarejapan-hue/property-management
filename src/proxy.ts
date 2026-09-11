@@ -7,7 +7,9 @@ import type { NextRequest } from "next/server";
 // isPublicPath を export し sale-dm-proxy-public-path.test.ts で /t/ の公開を担保する。
 // "/u/" = 売却DMの配信停止(郵送QR)。/t/ と同じく受け手(所有者)向けの公開ページ。
 //   停止の書き込みは route 側の HMAC 署名検証+回数制限+Origin 検査で守る。
-const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads", "/t/", "/u/"];
+// "/lp-assets/" = LP用写真の公開口(設計 2026-09-08 §2.3)。publicId(32hex乱数)だけで1枚を返し、
+// 一覧は取れない。どこかのLP型が参照している資産だけを返す(route 側で判定)。
+const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads", "/t/", "/u/", "/lp-assets/"];
 
 // 完全一致で公開するパス。前方一致（startsWith）だと /api/health-xxx 等まで認証免除が
 // 広がってしまうため、必要最小の範囲（完全一致）でのみ公開する。

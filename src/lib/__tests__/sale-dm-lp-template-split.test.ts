@@ -85,4 +85,39 @@ describe("splitLpTemplate: 異常系(どこが問題かを返す)", () => {
     expect(splitLpTemplate(`【見出し】t\n【本文】b\n【よくある質問】\n${seven}`)).toMatchObject({ ok: false, issue: { code: "FAQ_TOO_MANY", limit: LP_LIMITS.faqCount } });
     expect(splitLpTemplate(`【見出し】${long(60)}\n【本文】${long(4000)}`).ok).toBe(true);
   });
+
+  it("本文の■小見出し: 61字は HEADING_TOO_LONG", () => {
+    const long = (n: number) => "あ".repeat(n);
+    const r = splitLpTemplate(`【見出し】t\n【本文】\n■ ${long(61)}\nx`);
+    expect(r).toMatchObject({ ok: false, issue: { code: "HEADING_TOO_LONG", section: "本文", limit: LP_LIMITS.heading } });
+    if (r.ok) return;
+    expect(lpSplitIssueMessage(r.issue)).toContain("60");
+  });
+
+  it("本文の■小見出し: 60字ちょうどは通る", () => {
+    const long = (n: number) => "あ".repeat(n);
+    const r = splitLpTemplate(`【見出し】t\n【本文】\n■ ${long(60)}\nx`);
+    expect(r.ok).toBe(true);
+  });
+
+  it("本文の■小見出し: 異なる31種は TOO_MANY_HEADINGS", () => {
+    const body = Array.from({ length: 31 }, (_, i) => `■ 見出し${i}\nx`).join("\n");
+    const r = splitLpTemplate(`【見出し】t\n【本文】\n${body}`);
+    expect(r).toMatchObject({ ok: false, issue: { code: "TOO_MANY_HEADINGS", section: "本文", limit: LP_LIMITS.headingCount } });
+    if (r.ok) return;
+    expect(lpSplitIssueMessage(r.issue)).toContain("30");
+  });
+
+  it("本文の■小見出し: ちょうど30種は通る", () => {
+    const body = Array.from({ length: 30 }, (_, i) => `■ 見出し${i}\nx`).join("\n");
+    const r = splitLpTemplate(`【見出し】t\n【本文】\n${body}`);
+    expect(r.ok).toBe(true);
+  });
+
+  it("本文の■小見出し: 31個でも重複を除くと30種以下なら通る(media route と同じ重複除去)", () => {
+    const distinct = Array.from({ length: 30 }, (_, i) => `■ 見出し${i}\nx`).join("\n");
+    const body = `${distinct}\n■ 見出し0\nx`; // 31個目は既存見出しの重複 → 重複除去後は30種
+    const r = splitLpTemplate(`【見出し】t\n【本文】\n${body}`);
+    expect(r.ok).toBe(true);
+  });
 });

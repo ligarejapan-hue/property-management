@@ -19,6 +19,7 @@ vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     dmCampaign: { findFirst: vi.fn() },
     dmLpVariant: { findFirst: vi.fn(), update: vi.fn() },
+    dmLpVariantMedia: { findMany: vi.fn(async () => []), deleteMany: vi.fn(async () => ({ count: 0 })), createMany: vi.fn(async () => ({ count: 0 })) },
     dmRecipientDraft: { count: vi.fn(async () => 0), findMany: vi.fn(async () => []) },
     property: { findMany: vi.fn(async () => []) },
     $queryRaw: vi.fn(async () => []),
@@ -39,6 +40,7 @@ type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
   dmCampaign: { findFirst: Fn };
   dmLpVariant: { findFirst: Fn; update: Fn };
+  dmLpVariantMedia: { findMany: Fn; deleteMany: Fn; createMany: Fn };
   dmRecipientDraft: { count: Fn; findMany: Fn };
   property: { findMany: Fn };
   $queryRaw: Fn;
@@ -161,5 +163,29 @@ describe("PUT lp template(貼り戻し保存)", () => {
     const sql = sqlCalls();
     expect(sql[0]).toMatch(/dm_lp_variants/);
     expect(sql[1]).toMatch(/properties/);
+  });
+});
+
+describe("template PUT: 貼り直しで小見出しが変わると枠を引き継ぐ", () => {
+  const U2 = "22222222-2222-4222-8222-222222222222";
+  const OLD_RAW = "【見出し】旧\n【本文】■売却の進め方\n流れの説明\n■費用について\n費用の説明";
+  const NEW_RAW = "【見出し】新\n【本文】■費用について\n費用の説明";
+
+  it("同じ見出しの行は残し、消えた見出しの行は落とし、mediaDropped に数える", async () => {
+    // 既存の節: 「売却の進め方」(図)・「費用について」(写真)。新本文には「費用について」だけ残る。
+    pm.dmLpVariantMedia.findMany.mockResolvedValue([
+      { heading: "売却の進め方", assetId: null, figureKind: "sale_flow" },
+      { heading: "費用について", assetId: U2, figureKind: null },
+    ]);
+    arm({ rawTemplate: OLD_RAW });
+    const res = await PUT(put({ body: NEW_RAW }), ctx);
+    expect(res.status).toBe(200);
+    expect(pm.dmLpVariantMedia.deleteMany.mock.calls[0][0].where).toEqual({ lpVariantId: "l1", slot: "section" });
+    const rows = pm.dmLpVariantMedia.createMany.mock.calls[0][0].data;
+    expect(rows).toEqual([
+      { lpVariantId: "l1", slot: "section", heading: "費用について", assetId: U2, figureKind: null, sortOrder: 1 },
+    ]);
+    const j = await res.json();
+    expect(j.parts.mediaDropped).toBe(1);
   });
 });

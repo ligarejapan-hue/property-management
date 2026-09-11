@@ -238,6 +238,11 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   sale_dm_lp_variant_delete: new Set(["deletedAt", "detachedCount"]),
   sale_dm_lp_prompt_view: new Set(["viewedAt"]),
   sale_dm_lp_body_paste: new Set(["pastedAt", "faqCount", "bodyLength"]),
+  // LP型の写真と図(設計 2026-09-08 §2.3)。ファイル名・ラベル・見出し・プロンプト本文は載せない。
+  sale_dm_lp_asset_upload: new Set(["bytes", "width", "height", "uploadedAt"]),
+  sale_dm_lp_asset_delete: new Set(["deletedAt"]),
+  sale_dm_lp_media_update: new Set(["assetCount", "figureCount", "updatedAt"]),
+  sale_dm_lp_image_prompt_view: new Set(["slot", "viewedAt"]),
   // 外部AI方式(PR-D2)。⚠プロンプト本文・手紙本文は detail に載せない(件数/ID/日時のみ)。
   sale_dm_prompt_view: new Set(["viewedAt"]),
   sale_dm_body_paste: new Set(["clearedCount", "pastedAt"]),
