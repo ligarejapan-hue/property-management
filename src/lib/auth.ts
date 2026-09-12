@@ -1,10 +1,23 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { compare } from "bcryptjs";
+import { compare, hashSync, getRounds } from "bcryptjs";
 import prisma from "@/lib/prisma";
 
 const MAX_LOGIN_FAILURES = 5;
 const LOCK_DURATION_MS = 30 * 60 * 1000; // 30 minutes
+
+// パスワードハッシュのコスト(アプリ全体で統一。ユーザー作成/パスワード変更/seed も同値)。
+// ここを唯一の基準にし、ログイン成功時に古いコストのハッシュを検出したら焼き直す。
+const BCRYPT_COST = 10;
+
+// アカウント列挙(タイミング差)対策のダミー bcrypt ハッシュ。
+// 存在しない/無効/ロック中のメールは即 return null だと bcrypt.compare を通らず
+// 応答が速く、実在アカウントだけ遅くなる＝応答時間で実在メールを判別できる。
+// 否定パスでもこのダミーと compare を走らせ、正規パスと処理時間を揃える。
+// どのパスワードとも一致しない固定ハッシュ(cost=10・本番ハッシュと同コスト)。
+const DUMMY_PASSWORD_HASH =
+  "$2b$10$LfAHoLM/9RoUVP20znoEwu6ZDMRAqucSo5Asfk2OrY/dZ41QFT0Mq";
+
 // セッションは「無操作1時間でログアウト」のスライド式。実際の無操作判定と延長は
 // クライアントの IdleSessionGuard が行い、以下はその前提となる cookie 側の寿命設定。
 // - IDLE_TIMEOUT: クライアントの無操作ログアウト時間(idle-session-guard の IDLE_TIMEOUT_MS と一致)。
@@ -43,10 +56,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const user = await prisma.user.findUnique({ where: { email } });
 
         // Check if user exists and is active
-        if (!user || !user.isActive) return null;
+        if (!user || !user.isActive) {
+          // タイミングを揃える: 実在アカウントと同じく bcrypt.compare を1回走らせてから
+          // return null する(存在しない/無効メールが速く返るのを防ぎ、列挙を封じる)。
+          await compare(password, DUMMY_PASSWORD_HASH);
+          return null;
+        }
 
         // Check if account is locked
         if (user.lockedUntil && user.lockedUntil > new Date()) {
+          // ロック中も「パスワード誤り」と応答時間を揃える(ロック有無を時間で漏らさない)。
+          await compare(password, DUMMY_PASSWORD_HASH);
           return null;
         }
 
@@ -76,13 +96,30 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
 
         // Reset failed count on success
+        const successData: {
+          loginFailedCount: number;
+          lockedUntil: null;
+          lastLoginAt: Date;
+          passwordHash?: string;
+        } = {
+          loginFailedCount: 0,
+          lockedUntil: null,
+          lastLoginAt: new Date(),
+        };
+
+        // rehash-on-login: 保存済みハッシュのコストが現行(BCRYPT_COST)と違えば、
+        // 今この瞬間だけ手元にある平文で焼き直して保存する。DB書き込みは元々ある
+        // 成功時 update に相乗りするので追加の往復は無い。旧コスト(例: 過去の cost12)が
+        // 残っていると、そのアカウントだけログイン時の compare 時間が食い違い、
+        // タイミングによるアカウント列挙の手掛かりになる(@codex #428)。一度でも
+        // ログインすれば恒久的に現行コストへ揃う。既存ハッシュは compare 済みで妥当。
+        if (getRounds(user.passwordHash) !== BCRYPT_COST) {
+          successData.passwordHash = hashSync(password, BCRYPT_COST);
+        }
+
         await prisma.user.update({
           where: { id: user.id },
-          data: {
-            loginFailedCount: 0,
-            lockedUntil: null,
-            lastLoginAt: new Date(),
-          },
+          data: successData,
         });
 
         return {

@@ -302,7 +302,10 @@ async function main() {
           "ADMIN_INITIAL_PASSWORD は12文字以上にしてください。"
         );
       }
-      const hash = hashSync(adminInitialPassword, 12);
+      // コストはアプリ全体と揃える(10)。パスワード変更・ユーザー作成の各経路が cost=10
+      // で hash するため、ここだけ 12 だとログイン時の bcrypt.compare 時間が他アカウントと
+      // 食い違い、アカウント列挙のタイミング対策(auth.ts の DUMMY_PASSWORD_HASH)の前提が崩れる。
+      const hash = hashSync(adminInitialPassword, 10);
       await prisma.user.upsert({
         where: { email: adminEmail },
         update: {},
