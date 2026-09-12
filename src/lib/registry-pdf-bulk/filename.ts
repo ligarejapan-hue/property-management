@@ -20,24 +20,6 @@ export interface RegistryPdfBulkFilename {
 const FILENAME_PATTERN =
   /^(.+?)不動産登記（(土地|建物)?所有者事項）(\d{10,20})(?:\s*\(\d+\))?\.pdf$/i;
 
-/**
- * ファイル名から謄本の請求種別を推定する。
- *
- * 一括取込・手動添付は種別を UI で選ばない(単発取込だけが2択を持つ)。外部製ソフトの
- * 出力名は「…（土地|建物所有者事項）…」形式なので、名前から owner/all を判定して
- * Attachment.registryCertificateType に保存する。判定できなければ null(その他扱い)。
- * 物件基本情報の「謄本 ○件」の種別内訳がこの値に依存する(@codex #429 P2)。
- */
-export function inferRegistryCertificateType(
-  fileName: string | null | undefined,
-): "owner" | "all" | null {
-  if (!fileName) return null;
-  const s = fileName.normalize("NFC");
-  if (s.includes("所有者事項")) return "owner";
-  if (s.includes("全部事項")) return "all";
-  return null;
-}
-
 export function parseRegistryPdfBulkFilename(
   fileName: string | null | undefined,
 ): RegistryPdfBulkFilename | null {

@@ -63,8 +63,10 @@ describe("物件基本情報の謄本行", () => {
 
   it("謄本の追加/削除後に親を再取得して件数を更新する(@codex #429 P2)", () => {
     // 添付タブは謄本を増減しても自分の一覧しか更新しない=基本情報の件数が古いまま。
-    // 親から fetchProperty を渡し、謄本の増減時だけ呼び戻す。
-    expect(src).toMatch(/<AttachmentTab[\s\S]{0,120}onRegistryMutated=\{fetchProperty\}/);
+    // 親から「静かな再取得」を渡し、謄本の増減時だけ呼び戻す。fetchProperty(全体再読込で
+    // ページをアンマウント・一時失敗でエラー差替)ではなく refreshPropertyQuietly を使う(@codex #429 P2)。
+    expect(src).toMatch(/<AttachmentTab[\s\S]{0,500}onRegistryMutated=\{refreshPropertyQuietly\}/);
+    expect(src).not.toMatch(/onRegistryMutated=\{fetchProperty\}/);
     // 添付タブ側: prop を受け取り、謄本の upload/delete 成功時に呼ぶ。
     expect(attachmentTab).toContain("onRegistryMutated");
     // 謄本アップロード成功後に通知(type==="registry" のときだけ)。

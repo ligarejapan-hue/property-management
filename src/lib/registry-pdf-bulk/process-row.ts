@@ -8,7 +8,6 @@ import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { writeAuditLog } from "@/lib/audit";
 import { matchProperty, type PropertyIndex } from "./match";
-import { inferRegistryCertificateType } from "./filename";
 
 /**
  * 所有者事項PDF一括取込: 1行(=1ファイル)の処理。
@@ -323,9 +322,11 @@ export async function processRegistryPdfBulkRow(args: {
             targetId: match.propertyId,
             propertyId: match.propertyId,
             type: "registry",
-            // 請求種別をファイル名から保存する(所有者事項→owner)。無いと基本情報の
-            // 件数が「その他」に寄る(@codex #429 P2)。一括取込の名前は所有者事項形式。
-            registryCertificateType: inferRegistryCertificateType(fileName),
+            // この一括ジョブ(registry_pdf_bulk)は「取得済み所有者事項PDF」専用=
+            // 作成される謄本は全て所有者事項。ファイル名がリネーム/非標準でも(内容突合で
+            // 成功し得る)ジョブ種別で owner を保存する(@codex #429 P2)。全部事項は
+            // 単発取込(2択・args.certificateType)の担当で、この経路には来ない。
+            registryCertificateType: "owner",
             fileName: fileName || "registry.pdf",
             fileUrl: uploaded.url,
             fileSize: buf.length,

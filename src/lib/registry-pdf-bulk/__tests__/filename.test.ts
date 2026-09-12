@@ -1,39 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  parseRegistryPdfBulkFilename,
-  inferRegistryCertificateType,
-} from "../filename";
-
-describe("inferRegistryCertificateType(謄本の種別をファイル名から判定)", () => {
-  it("所有者事項 → owner", () => {
-    expect(
-      inferRegistryCertificateType(
-        "世田谷区上馬２丁目７５２－３不動産登記（建物所有者事項）2024121200118150.PDF",
-      ),
-    ).toBe("owner");
-    expect(inferRegistryCertificateType("○○（土地所有者事項）1234567890.pdf")).toBe(
-      "owner",
-    );
-  });
-
-  it("全部事項 → all", () => {
-    expect(
-      inferRegistryCertificateType("世田谷区上馬２丁目全部事項証明書.pdf"),
-    ).toBe("all");
-  });
-
-  it("判定できない/空/null → null(=その他扱い)", () => {
-    expect(inferRegistryCertificateType("registry.pdf")).toBeNull();
-    expect(inferRegistryCertificateType("")).toBeNull();
-    expect(inferRegistryCertificateType(null)).toBeNull();
-    expect(inferRegistryCertificateType(undefined)).toBeNull();
-  });
-
-  it("NFD分解でも NFC 正規化して判定する", () => {
-    const nfd = "建物所有者事項".normalize("NFD");
-    expect(inferRegistryCertificateType(`x（${nfd}）1234567890.pdf`)).toBe("owner");
-  });
-});
+import { parseRegistryPdfBulkFilename } from "../filename";
 
 describe("parseRegistryPdfBulkFilename", () => {
   it("建物所有者事項のファイル名を分解できる", () => {
