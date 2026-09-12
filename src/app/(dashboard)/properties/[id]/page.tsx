@@ -177,6 +177,11 @@ interface ApiProperty {
   buildingName: string | null;
   realEstateNumber: string | null;
   registryStatus: string;
+  /**
+   * 謄本(registry)添付の件数(基本情報の「謄本 ○件」行)。件数のみ・ファイル名/所在は含まない。
+   * null = registry_pdf:preview を持たない閲覧者(=行自体を出さない)。
+   */
+  registryAttachmentCounts: { owner: number; all: number; other: number } | null;
   dmStatus: string;
   caseStatus: string;
   isArchived: boolean;
@@ -772,7 +777,7 @@ export default function PropertyDetailPage({
 
       {/* Tab content */}
       <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
-        {activeTab === "basic" && <BasicTab property={property} onRefresh={fetchProperty} canWrite={canWriteProperty} />}
+        {activeTab === "basic" && <BasicTab property={property} onRefresh={fetchProperty} canWrite={canWriteProperty} onOpenAttachments={() => setActiveTab("attachments")} />}
         {activeTab === "owner" && (
           <OwnerTab
             owners={property.propertyOwners}
@@ -800,6 +805,10 @@ export default function PropertyDetailPage({
           <AttachmentTab
             propertyId={property.id}
             refreshToken={attachmentsRefreshToken}
+            // 謄本の増減後は「静かな再取得」で件数だけ更新する。fetchProperty は
+            // loading を立てて添付タブを一旦アンマウントし、GET が一時失敗すると
+            // 成功した添付操作ごとページをエラーに差し替えてしまう(@codex #429 P2)。
+            onRegistryMutated={refreshPropertyQuietly}
           />
         )}
         {activeTab === "history" && (
@@ -828,10 +837,12 @@ function BasicTab({
   property,
   onRefresh,
   canWrite,
+  onOpenAttachments,
 }: {
   property: ApiProperty;
   onRefresh: () => void;
   canWrite: boolean;
+  onOpenAttachments: () => void;
 }) {
   // 旧値 "unit" と新値 "apartment_unit" の両方を区分扱いにする
   const isUnit =
@@ -914,6 +925,16 @@ function BasicTab({
         badgeStyle={registryBadgeStyles[property.registryStatus]}
         badgeLabel={REGISTRY_STATUS_LABELS[property.registryStatus]}
       />
+      {/* 謄本(registry)添付の件数。⚠registryAttachmentCounts が null のとき
+          (謄本を見る権限が無い閲覧者)は行自体を出さない。件数と種別だけを出し、
+          ファイル名/所在は出さない(サーバも件数しか返さない)。「添付を見る」で
+          同じ画面の添付タブへ切り替える(別ページに飛ばさない)。 */}
+      {property.registryAttachmentCounts != null && (
+        <RegistryCountField
+          counts={property.registryAttachmentCounts}
+          onOpenAttachments={onOpenAttachments}
+        />
+      )}
       <Field
         label="DM判断"
         value={property.dmStatus}
@@ -2009,6 +2030,40 @@ function Field({
           </span>
         ) : (
           value || "-"
+        )}
+      </dd>
+    </div>
+  );
+}
+
+// 基本情報の「謄本 ○件」行。件数と種別(所有者事項/全部事項/その他)だけを出し、
+// ファイル名や所在は出さない(サーバも件数しか返さない)。「添付を見る」で同じ画面の
+// 添付タブへ切り替える。0件のときも「謄本 0件」を出す(投入前の正直な表示)。
+function RegistryCountField({
+  counts,
+  onOpenAttachments,
+}: {
+  counts: { owner: number; all: number; other: number };
+  onOpenAttachments: () => void;
+}) {
+  const parts = [`所有者事項 ${counts.owner}件`, `全部事項 ${counts.all}件`];
+  if (counts.other > 0) parts.push(`その他 ${counts.other}件`);
+  const total = counts.owner + counts.all + counts.other;
+  return (
+    <div>
+      <dt className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+        謄本
+      </dt>
+      <dd className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-900 dark:text-gray-100">
+        <span>{total > 0 ? parts.join(" ／ ") : "謄本 0件"}</span>
+        {total > 0 && (
+          <button
+            type="button"
+            onClick={onOpenAttachments}
+            className="text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-300 dark:hover:text-blue-200"
+          >
+            添付を見る
+          </button>
         )}
       </dd>
     </div>

@@ -164,6 +164,9 @@ export async function POST(
             targetId: propertyId,
             propertyId,
             type: "registry",
+            // 一括取込(registry_pdf_bulk)の要確認行を人手で物件へ結ぶ経路。元の一括
+            // ジョブは所有者事項専用なので owner を保存する(@codex #429 P2)。
+            registryCertificateType: "owner",
             fileName,
             fileUrl: uploaded.url,
             fileSize: buf.length,
