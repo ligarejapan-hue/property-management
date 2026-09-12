@@ -71,6 +71,21 @@ describe("ログインのタイミング差を塞ぐ(アカウント列挙対策
     expect(offenders, `cost!=10 の hashSync: ${offenders.join(", ")}`).toEqual([]);
   });
 
+  it("ログイン成功時に旧コストのハッシュを現行(10)へ焼き直す(rehash-on-login)", () => {
+    // BCRYPT_COST を唯一の基準にしている。
+    expect(src).toMatch(/BCRYPT_COST\s*=\s*10\b/);
+    // 成功パスで、保存済みハッシュのコストが現行と違えば hashSync で焼き直す。
+    expect(authorize).toMatch(
+      /getRounds\(\s*user\.passwordHash\s*\)\s*!==\s*BCRYPT_COST/,
+    );
+    expect(authorize).toMatch(
+      /passwordHash\s*=\s*hashSync\(\s*password\s*,\s*BCRYPT_COST\s*\)/,
+    );
+    // 追加のDB往復を作らない=成功時の既存 update に相乗りする(別の prisma.user.update を足さない)。
+    const updates = authorize.match(/prisma\.user\.update/g) ?? [];
+    expect(updates.length).toBe(2); // 失敗時の1回 + 成功時の1回のみ
+  });
+
   it("既存のロックアウト(5回で30分)を壊していない", () => {
     expect(src).toMatch(/MAX_LOGIN_FAILURES\s*=\s*5\b/);
     expect(src).toMatch(/LOCK_DURATION_MS\s*=\s*30\s*\*\s*60\s*\*\s*1000/);
