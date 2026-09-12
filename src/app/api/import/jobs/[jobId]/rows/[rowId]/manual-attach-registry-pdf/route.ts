@@ -18,6 +18,7 @@ import {
   validateFile,
   ALLOWED_ATTACHMENT_MIMES,
 } from "@/lib/storage";
+import { inferRegistryCertificateType } from "@/lib/registry-pdf-bulk/filename";
 
 // ============================================================
 // POST /api/import/jobs/[jobId]/rows/[rowId]/manual-attach-registry-pdf
@@ -164,6 +165,8 @@ export async function POST(
             targetId: propertyId,
             propertyId,
             type: "registry",
+            // 一括取込と同じく、請求種別をファイル名から保存する(@codex #429 P2)。
+            registryCertificateType: inferRegistryCertificateType(fileName),
             fileName,
             fileUrl: uploaded.url,
             fileSize: buf.length,

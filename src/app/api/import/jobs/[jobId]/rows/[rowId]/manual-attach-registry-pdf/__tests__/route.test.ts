@@ -158,6 +158,8 @@ describe("POST .../manual-attach-registry-pdf", () => {
         data: expect.objectContaining({
           propertyId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           type: "registry",
+          // 所有者事項のファイル名 → owner を保存する(@codex #429 P2)。
+          registryCertificateType: "owner",
           uploadedBy: "u1",
         }),
         select: { id: true },

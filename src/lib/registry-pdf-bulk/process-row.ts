@@ -8,6 +8,7 @@ import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { writeAuditLog } from "@/lib/audit";
 import { matchProperty, type PropertyIndex } from "./match";
+import { inferRegistryCertificateType } from "./filename";
 
 /**
  * 所有者事項PDF一括取込: 1行(=1ファイル)の処理。
@@ -322,6 +323,9 @@ export async function processRegistryPdfBulkRow(args: {
             targetId: match.propertyId,
             propertyId: match.propertyId,
             type: "registry",
+            // 請求種別をファイル名から保存する(所有者事項→owner)。無いと基本情報の
+            // 件数が「その他」に寄る(@codex #429 P2)。一括取込の名前は所有者事項形式。
+            registryCertificateType: inferRegistryCertificateType(fileName),
             fileName: fileName || "registry.pdf",
             fileUrl: uploaded.url,
             fileSize: buf.length,

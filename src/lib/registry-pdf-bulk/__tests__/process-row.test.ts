@@ -133,6 +133,8 @@ describe("processRegistryPdfBulkRow", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           type: "registry",
+          // 所有者事項のファイル名 → owner を保存する(@codex #429 P2)。
+          registryCertificateType: "owner",
           propertyId: "p1",
           uploadedBy: "u1",
           mimeType: "application/pdf",
