@@ -96,6 +96,7 @@ function withDownloadIntent(url: string): string {
 export default function AttachmentTab({
   propertyId,
   refreshToken = 0,
+  onRegistryMutated,
 }: {
   propertyId: string;
   /**
@@ -105,6 +106,12 @@ export default function AttachmentTab({
    *   『取り込めていない』と誤解された原因がこれ（実際は成功していた）。
    */
   refreshToken?: number;
+  /**
+   * registry 添付(謄本)を追加/削除して成功したときに呼ぶ。親(物件詳細)が物件を
+   * 取り直し、基本情報の件数行を最新にするために使う(@codex #429 P2)。
+   * このタブ自身の一覧は fetchAttachmentsData で別途更新される。
+   */
+  onRegistryMutated?: () => void;
 }) {
   const [attachments, setAttachments] = useState<AttachmentData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -190,6 +197,8 @@ export default function AttachmentTab({
     try {
       await uploadFile(propertyId, file, "attachment", { attachmentType: type });
       await fetchAttachmentsData();
+      // 謄本の増減時だけ親へ通知(基本情報の件数を取り直す)。一般添付は件数行に無関係。
+      if (type === "registry") onRegistryMutated?.();
     } catch (err) {
       setUploadError(
         err instanceof Error ? err.message : "アップロードに失敗しました",
@@ -217,9 +226,13 @@ export default function AttachmentTab({
   };
 
   const handleDelete = async (id: string) => {
+    // 削除前に種別を控える(削除後は一覧から消えて判定できない)。謄本のときだけ親へ通知。
+    const wasRegistry =
+      attachments.find((a) => a.id === id)?.type === "registry";
     try {
       await deleteAttachment(propertyId, id);
       await fetchAttachmentsData();
+      if (wasRegistry) onRegistryMutated?.();
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "削除に失敗しました",

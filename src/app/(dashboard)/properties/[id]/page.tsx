@@ -805,6 +805,7 @@ export default function PropertyDetailPage({
           <AttachmentTab
             propertyId={property.id}
             refreshToken={attachmentsRefreshToken}
+            onRegistryMutated={fetchProperty}
           />
         )}
         {activeTab === "history" && (

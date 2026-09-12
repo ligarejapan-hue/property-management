@@ -15,6 +15,10 @@ const api = readFileSync(
   resolve(__dirname, "../../../../../lib/api-client.ts"),
   "utf-8",
 ).replace(/\r\n/g, "\n");
+const attachmentTab = readFileSync(
+  resolve(__dirname, "../../../../../components/properties/attachment-tab.tsx"),
+  "utf-8",
+).replace(/\r\n/g, "\n");
 
 describe("物件基本情報の謄本行", () => {
   it("ApiProperty 型に registryAttachmentCounts がある(null=権限なし)", () => {
@@ -55,5 +59,19 @@ describe("物件基本情報の謄本行", () => {
     expect(src).toMatch(/onOpenAttachments\s*=\s*\{\s*\(\)\s*=>\s*setActiveTab\("attachments"\)\s*\}/);
     // BasicTab はそのコールバックを受け取る。
     expect(src).toMatch(/onOpenAttachments/);
+  });
+
+  it("謄本の追加/削除後に親を再取得して件数を更新する(@codex #429 P2)", () => {
+    // 添付タブは謄本を増減しても自分の一覧しか更新しない=基本情報の件数が古いまま。
+    // 親から fetchProperty を渡し、謄本の増減時だけ呼び戻す。
+    expect(src).toMatch(/<AttachmentTab[\s\S]{0,120}onRegistryMutated=\{fetchProperty\}/);
+    // 添付タブ側: prop を受け取り、謄本の upload/delete 成功時に呼ぶ。
+    expect(attachmentTab).toContain("onRegistryMutated");
+    // 謄本アップロード成功後に通知(type==="registry" のときだけ)。
+    expect(attachmentTab).toMatch(/type === "registry"[\s\S]{0,40}onRegistryMutated/);
+    // 謄本削除の成功時にも通知(削除対象が registry だったときだけ)。
+    const del = attachmentTab.match(/const handleDelete[\s\S]*?\n {2}\};/);
+    expect(del).not.toBeNull();
+    expect(del![0]).toContain("onRegistryMutated");
   });
 });
