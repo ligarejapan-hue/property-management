@@ -39,6 +39,8 @@ vi.mock("@/lib/prisma", () => ({
   default: {
     property: { findUnique: vi.fn() },
     importJobRow: { findFirst: vi.fn() },
+    // GET は謄本添付の件数を groupBy で集計する(基本情報の「謄本 ○件」行)。
+    attachment: { groupBy: vi.fn() },
   },
 }));
 
@@ -49,6 +51,7 @@ import { GET } from "../route";
 type PrismaMock = {
   property: { findUnique: Mock };
   importJobRow: { findFirst: Mock };
+  attachment: { groupBy: Mock };
 };
 const pm = prisma as unknown as PrismaMock;
 
@@ -84,6 +87,7 @@ beforeEach(() => {
   (getApiSession as Mock).mockResolvedValue({ id: "u1", role: "admin" });
   (getUserPermissions as Mock).mockResolvedValue([]);
   pm.importJobRow.findFirst.mockResolvedValue(null);
+  pm.attachment.groupBy.mockResolvedValue([]);
 });
 
 describe("GET /api/properties/[id] — building 列の拡張(@codex P2)", () => {

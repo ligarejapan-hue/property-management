@@ -129,6 +129,15 @@ export interface PropertyDetailBuildingSummary {
 
 export type PropertyDetailResult = (typeof MOCK_PROPERTIES)[0] & {
   building?: PropertyDetailBuildingSummary | null;
+  /**
+   * 謄本(registry)添付の件数(基本情報の「謄本 ○件」行)。件数のみでファイル名/所在は含まない。
+   * ⚠registry_pdf:preview を持たない閲覧者には null(サーバが集計せず返さない=画面は行を出さない)。
+   */
+  registryAttachmentCounts?: {
+    owner: number;
+    all: number;
+    other: number;
+  } | null;
 };
 
 export async function fetchPropertyDetail(id: string): Promise<PropertyDetailResult> {

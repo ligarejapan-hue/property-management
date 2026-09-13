@@ -143,7 +143,40 @@ export async function GET(
         : { id: po.owner.id },
     }));
 
-    return apiResponse({ ...property, propertyOwners: maskedPropertyOwners, importSource });
+    // 謄本(registry)添付の件数を種別ごとに集計する(基本情報の「謄本 ○件」行)。
+    // ⚠registry_pdf:preview を持たない閲覧者には null を返す(集計クエリも投げない)=
+    //   件数もファイル名も渡さず、画面は行自体を出さない。件数のみで所在/ファイル名は
+    //   一切返さない(基本情報の伏せ字方針)。集計条件は添付タブ(attachments GET)と同一。
+    let registryAttachmentCounts:
+      | { owner: number; all: number; other: number }
+      | null = null;
+    if (hasPermission(permissions, "registry_pdf", "preview")) {
+      const grouped = await prisma.attachment.groupBy({
+        by: ["registryCertificateType"],
+        where: {
+          targetType: "property",
+          targetId: id,
+          type: "registry",
+          isDeleted: false,
+        },
+        _count: { _all: true },
+      });
+      const counts = { owner: 0, all: 0, other: 0 };
+      for (const g of grouped) {
+        const n = g._count._all;
+        if (g.registryCertificateType === "owner") counts.owner += n;
+        else if (g.registryCertificateType === "all") counts.all += n;
+        else counts.other += n;
+      }
+      registryAttachmentCounts = counts;
+    }
+
+    return apiResponse({
+      ...property,
+      propertyOwners: maskedPropertyOwners,
+      importSource,
+      registryAttachmentCounts,
+    });
   } catch (error) {
     return handleApiError(error);
   }
