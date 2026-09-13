@@ -10,7 +10,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const dir = dirname(fileURLToPath(import.meta.url));
-const read = (...p: string[]) => readFileSync(join(dir, ...p), "utf8");
+// 改行は LF に正規化する(手元は CRLF・CI は LF。位置や "}\n}" の検索が環境で変わらないように)
+const read = (...p: string[]) => readFileSync(join(dir, ...p), "utf8").replace(/\r\n/g, "\n");
 
 const header = read("..", "header.tsx");
 const sidebar = read("..", "sidebar.tsx");
@@ -29,6 +30,8 @@ const adminUsers = read(
 const auditLogs = read(
   "..", "..", "..", "app", "(dashboard)", "admin", "audit-logs", "page.tsx",
 );
+const globalsCss = read("..", "..", "..", "app", "globals.css");
+const loginPage = read("..", "..", "..", "app", "(auth)", "login", "page.tsx");
 
 describe("header — モバイルで1行に収まる", () => {
   it("タイトルは truncate + min-w-0（縦折れしない）", () => {
@@ -141,5 +144,40 @@ describe("管理者系の表 — 横スクロール枠", () => {
   });
   it("監査ログの表は overflow-x-auto ラッパー内", () => {
     expect(auditLogs).toContain('<div className="overflow-x-auto">');
+  });
+});
+
+describe("iOS の入力欄フォーカス時の自動拡大を起こさない(2026-09-14)", () => {
+  // iOS の Safari/Chrome は文字が 16px 未満の入力欄にフォーカスすると画面を自動で拡大し、
+  // フォーカスを外しても拡大が戻らない。ログイン欄が text-sm(14px) なので、初回アクセスで
+  // 必ず拡大が起き「画面より大きいまま」になっていた(発注者報告 2026-09-14)。
+  const MQ = "@media (hover: none) and (pointer: coarse)";
+  const start = globalsCss.indexOf(MQ);
+  // media query ブロックの終わり = 先頭から見て最初の「閉じ括弧が2つ続く」位置
+  const end = start >= 0 ? globalsCss.indexOf("}\n}", start) : -1;
+  const block = start >= 0 && end >= 0 ? globalsCss.slice(start, end + 3) : "";
+
+  it("タッチ端末(hover なし・粗いポインタ)だけを対象にする media query がある", () => {
+    expect(start).toBeGreaterThan(-1);
+  });
+  it("入力欄・選択欄・複数行欄の文字を 16px にする(自動拡大の閾値)", () => {
+    expect(block).toMatch(/input[^{]*,\s*select,\s*textarea\s*\{[^}]*font-size:\s*16px;/);
+  });
+  it("チェックボックス/ラジオ/レンジ/ファイルは対象外(文字ではないため)", () => {
+    for (const t of ["checkbox", "radio", "range", "file"]) {
+      expect(block, t).toContain(`:not([type="${t}"])`);
+    }
+  });
+  it("ルールは @layer の外(層の外の宣言は utilities 層の text-sm より優先される)", () => {
+    // @layer の内側に書くと text-sm が勝って 16px にならない。globals.css に @layer 宣言(行頭)が無いことで固定
+    // (コメント中の「@layer」は対象外にするため、行頭の宣言だけを見る)
+    expect(globalsCss).not.toMatch(/^\s*@layer\b/m);
+  });
+  it("PC には影響しない(media query の外に同じ font-size 指定が無い)", () => {
+    const outside = globalsCss.slice(0, start) + globalsCss.slice(start + block.length);
+    expect(outside).not.toMatch(/textarea\s*\{[^}]*font-size:\s*16px/);
+  });
+  it("ログイン欄は text-sm のまま(PC の見た目は変えない)", () => {
+    expect(loginPage).toMatch(/<input[\s\S]*?className="[^"]*text-sm/);
   });
 });
