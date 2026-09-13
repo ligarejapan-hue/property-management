@@ -87,3 +87,20 @@ body {
     print-color-adjust: exact;
   }
 }
+
+/*
+ * 2026-09-14 スマホの自動拡大対策(発注者報告「最初にアクセスしたあと縮めると画面にフィットする」):
+ * iOS の Safari/Chrome は文字が 16px 未満の入力欄にフォーカスすると画面を自動で拡大し、
+ * フォーカスを外しても拡大が戻らない。ログイン欄が text-sm(14px) なので初回アクセスで必ず起きていた。
+ * タッチ端末(hover なし・粗いポインタ)だけ、入力欄・選択欄・複数行欄の文字を 16px にして
+ * 自動拡大を起こさせない。文字ではない input(チェック/ラジオ/レンジ/ファイル)は対象外。
+ * ⚠ @layer の外に置くこと(層の外の宣言は utilities 層の text-sm より必ず優先される)。
+ * PC(hover あり)は media query に入らないので見た目は変わらない。
+ */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
