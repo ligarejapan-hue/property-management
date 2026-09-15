@@ -65,10 +65,10 @@ describe("renderDocumentToHtml — SalesSheetRenderer パリティガード", ()
     });
   }
 
-  // sampleDocument（上の KEY_SIGNALS が使う手組みfixture）は会社帯(buildFooterBand)を
+  // sampleDocument（上の KEY_SIGNALS が使う手組みfixture）は会社帯(buildConsumerFooterBand)を
   // 含まないため、実際のビルダー(buildSaleMansionDocument)が組む帯付きdocで別途1件
   // 担保する（[Task3] footerDetails:string → footer:FooterBandData 移行後のパリティ）。
-  it("会社帯（buildFooterBand）の会社名が両レンダラの出力に含まれる", () => {
+  it("会社帯（buildConsumerFooterBand）の会社名が両レンダラの出力に含まれる", () => {
     const doc = buildSaleMansionDocument({
       property: { address: "東京都世田谷区上馬４丁目" },
       overrides: { transactionType: "専任媒介" },
