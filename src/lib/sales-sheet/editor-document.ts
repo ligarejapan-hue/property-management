@@ -1036,9 +1036,12 @@ function isMonospaceFamily(family: string | undefined): boolean {
 /**
  * 表の描画上の高さの概算 (mm)。
  *
- * レンダラ (SalesSheetRenderer / render-html) は <table> を直接絶対配置する
- * ため、CSS の height は最小値扱いで、行数の増加やセル内の折返しで保存 h を
- * 超えて描画される (overflow:hidden は table 要素の行を切り取らない・@codex #310)。
+ * レンダラ (SalesSheetRenderer / render-html) は非 borderless(旧ひな型)の
+ * <table> を直接絶対配置するため、CSS の height は最小値扱いで、行数の増加や
+ * セル内の折返しで保存 h を超えて描画される (overflow:hidden は table 要素
+ * 自身の行を切り取らない・@codex #310)。borderless(消費者向けひな型)の表は
+ * 外側の <div> が overflow:hidden で実際に切り取るため保存 h を超えない
+ * (この関数の呼び出し側 findTextTableOverlaps は borderless では使わない・F1)。
  * 行ごとに「セル幅(label 32% / value 68%)に収まらない分の折返し行数」を
  * 全角=フォント幅 1 文字分として概算する (厳密なテキスト実測はしない)。
  */
@@ -1063,25 +1066,6 @@ function estimatedTableHeightMm(el: TableElement, mono: boolean, maxHeightMm: nu
     if (total >= maxHeightMm) return total;
   }
   return total;
-}
-
-/** 入りきらないか調べる表(消費者向けひな型の主要表・詳細表)。 */
-const OVERFLOW_CHECK_TABLE_IDS = ["overview", "overview-detail-a", "overview-detail-b"] as const;
-
-/**
- * 描画上の高さが枠を超える表の id を返す(読み取り専用・編集画面の警告用)。
- * 旧ひな型は対象外(空配列)。
- */
-export function findTableOverflows(doc: SalesSheetDocument): string[] {
-  if (!isConsumerTemplate(doc)) return [];
-  const mono = isMonospaceFamily(doc.theme.fontFamily);
-  const out: string[] = [];
-  for (const id of OVERFLOW_CHECK_TABLE_IDS) {
-    const el = doc.elements.find((e): e is TableElement => e.id === id && e.type === "table");
-    if (!el) continue;
-    if (estimatedTableHeightMm(el, mono, el.h + 10) > el.h + OVERLAP_TOLERANCE_MM) out.push(id);
-  }
-  return out;
 }
 
 /**
@@ -1488,7 +1472,9 @@ function textRenderedLineRectsMm(el: TextElement, mono: boolean): RectMm[] {
  * - text は箱全体でなく「文字が描画される範囲」の概算で判定 (箱だけ大きい
  *   text の透明余白では警告しない・@codex #310 R5)
  * - 表は保存 h と「行数・折返しから見積もった描画上の高さ」の大きい方で判定
- *   (はみ出して描画される表との重なりも検知する・@codex #310)
+ *   (はみ出して描画される表との重なりも検知する・@codex #310)。ただし
+ *   borderless(消費者向けひな型)の表は外側の <div> の overflow:hidden で
+ *   実際に切り取られるため、保存された箱 {x,y,w,h} をそのまま使う(F1)。
  */
 export function findTextTableOverlaps(
   document: SalesSheetDocument,
@@ -1517,19 +1503,26 @@ export function findTextTableOverlaps(
           }
         : {
             id: e.id,
-            rects: [
-              {
-                x: e.x,
-                y: e.y,
-                // セルの折返し不可な長い値は表の右へはみ出して描画される
-                // (@codex #310 R23: overflow hidden は table box に効かない)
-                w: estimatedTableWidthMm(e, themeMono, document.page.width),
-                h: Math.max(
-                  e.h,
-                  estimatedTableHeightMm(e, themeMono, document.page.height),
-                ),
-              },
-            ],
+            // borderless(消費者向けひな型の主要表/詳細表): 外側の <div> が
+            // overflow:hidden で実際に描画を切り取るため、保存された箱
+            // {x,y,w,h} を超えて重なることは無い(F1)。非 borderless(旧
+            // ひな型)の <table> は箱に切り取られず、行数や折返しで保存 h/w を
+            // 超えて描画されるため、従来どおり見積りで育てた矩形を使う。
+            rects: e.style.borderless
+              ? [{ x: e.x, y: e.y, w: e.w, h: e.h }]
+              : [
+                  {
+                    x: e.x,
+                    y: e.y,
+                    // セルの折返し不可な長い値は表の右へはみ出して描画される
+                    // (@codex #310 R23: overflow hidden は table box に効かない)
+                    w: estimatedTableWidthMm(e, themeMono, document.page.width),
+                    h: Math.max(
+                      e.h,
+                      estimatedTableHeightMm(e, themeMono, document.page.height),
+                    ),
+                  },
+                ],
           },
     );
   const rectsOverlap = (a: RectMm, b: RectMm): boolean => {

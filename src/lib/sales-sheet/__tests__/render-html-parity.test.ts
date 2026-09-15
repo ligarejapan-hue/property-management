@@ -198,4 +198,11 @@ describe("パリティ: 線なし・1行おき色の表(消費者向けひな型
     expect(serializerTableTag).not.toContain("100mm");
     expect(reactTableTag).not.toContain("100mm");
   });
+
+  // F2: 編集画面の表はみ出し警告は描画実測(ResizeObserver)に基づく。測定対象を
+  // 一意に見つけるため、borderless の外枠 div にだけ data-sheet-table を持たせる。
+  it('両レンダラとも外枠divに data-sheet-table="t" を持つ(borderless)', () => {
+    expect(serializer).toContain('data-sheet-table="t"');
+    expect(react).toContain('data-sheet-table="t"');
+  });
 });

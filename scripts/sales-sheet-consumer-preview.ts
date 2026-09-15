@@ -13,7 +13,6 @@ import {
   buildSaleLandDocument,
 } from "../src/lib/sales-sheet/build-document";
 import { renderDocumentToImage } from "../src/lib/sales-sheet/render-to-output";
-import { findTableOverflows } from "../src/lib/sales-sheet/editor-document";
 import type { SalesSheetDocument } from "../src/lib/sales-sheet/document-schema";
 
 async function placeholders(specs: [label: string, w: number, h: number, color: string][]): Promise<{ fileUrl: string }[]> {
@@ -78,7 +77,7 @@ async function main(): Promise<void> {
 
   for (const [name, doc] of docs) {
     writeFileSync(join(outDir, `${name}.png`), await renderDocumentToImage(doc, "png"));
-    console.log(`${name}: overflow=${JSON.stringify(findTableOverflows(doc))}`);
+    console.log(`${name}: ok`);
   }
 }
 

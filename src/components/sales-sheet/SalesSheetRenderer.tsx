@@ -107,7 +107,16 @@ function TableEl({ el }: { el: TableElement }) {
   // borderless: 箱サイズは外側の <div>(boxStyle)が持ち、<table> は width:100% のみ
   // (height を持たせるとブラウザが余白を行へ均等配分してしまうため・[Fix round 1])。
   // borderless で無い(旧ひな型)表は従来どおり <table> 自身が箱サイズを持つ(後方互換)。
-  return s.borderless ? <div style={boxStyle(el)}>{table}</div> : table;
+  // data-sheet-table: 編集画面が描画後の実寸を測って「入りきっていない表」を
+  // 判定するための目印(仕様書 §4.8・F2)。overflow:hidden で実際に切り取る
+  // borderless の外枠 div にだけ付ける。
+  return s.borderless ? (
+    <div data-sheet-table={el.id} style={boxStyle(el)}>
+      {table}
+    </div>
+  ) : (
+    table
+  );
 }
 
 function BadgeEl({ el }: { el: BadgeElement }) {

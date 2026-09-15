@@ -106,7 +106,10 @@ function renderElement(el: SalesSheetElement): string {
         "table-layout": "fixed",
         "font-size": s.fontSizePt ? `${s.fontSizePt}pt` : null,
       });
-      return `<div style="${esc(wrapperStyle)}"><table style="${esc(tableStyle)}"><tbody>${rows}</tbody></table></div>`;
+      // data-sheet-table: 編集画面が描画後の実寸(scrollHeight/clientHeight)を
+      // 測って「入りきっていない表」を判定するための目印(仕様書 §4.8・F2)。
+      // borderless の外枠 div(overflow:hidden で実際に切り取る箱)にだけ付ける。
+      return `<div data-sheet-table="${esc(el.id)}" style="${esc(wrapperStyle)}"><table style="${esc(tableStyle)}"><tbody>${rows}</tbody></table></div>`;
     }
     // borderless で無い(旧ひな型の)表は従来どおり <table> 自体が箱サイズを持つ
     // (出力をバイト単位で不変に保つ・後方互換)。

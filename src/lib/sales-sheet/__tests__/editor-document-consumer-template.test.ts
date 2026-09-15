@@ -1,12 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   type EditorState, autoArrangePhotos, autoBalanceLayout, addMapQrElement, editFooterData,
-  setAsFloorPlan, findTableOverflows, MAP_QR_ID,
+  setAsFloorPlan, MAP_QR_ID,
 } from "../editor-document";
 import { parseSalesSheetDocument, A4_LANDSCAPE } from "../document-schema";
 import { CONSUMER_PHOTO_ZONE, CONSUMER_MAP_QR_SLOT, CONSUMER_FOOTER } from "../layout-engine";
 import { buildConsumerFooterBand, readFooterData } from "../footer-band";
-import { buildSaleHouseDocument } from "../build-document";
 
 const SRC = "/uploads/properties/a/1.jpg";
 function makeState(elements: unknown[], template: boolean = true): EditorState {
@@ -39,9 +38,6 @@ describe("旧ひな型(theme.template なし)では自動機能が何も変え�
     const fp = next.document.elements.find((e) => e.id === "floor-plan");
     expect(fp).toMatchObject({ x: 140, y: 60, w: 90, h: 60 });
   });
-  it("findTableOverflows は空", () => {
-    expect(findTableOverflows(legacy().document)).toEqual([]);
-  });
 });
 
 describe("新ひな型", () => {
@@ -67,14 +63,5 @@ describe("新ひな型", () => {
     expect(readFooterData(next.document.elements)).toMatchObject({ transactionType: "専任", staff: "山田" });
     expect(next.document.elements.find((e) => e.id === "footer-staff-table")).toMatchObject({ style: { borderless: true } });
     expect(() => parseSalesSheetDocument(next.document)).not.toThrow();
-  });
-  it("findTableOverflows: 作成直後の図面(戸建・項目少なめ)はあふれない", () => {
-    const doc = buildSaleHouseDocument({ property: { address: "東京都練馬区富士見台2-1", layoutType: "4LDK" }, overrides: { access: "徒歩6分", structure: "木造" } });
-    expect(findTableOverflows(doc)).toEqual([]);
-  });
-  it("findTableOverflows: 行が枠より多い詳細表を返す", () => {
-    const rows = Array.from({ length: 40 }, (_, i) => ({ label: `項目${i}`, value: "値" }));
-    const doc = makeState([{ id: "overview-detail-a", type: "table", x: 136, y: 110, w: 75.5, h: 20, z: 1, rows, style: { fontSizePt: 8, borderless: true, cellPaddingMm: 0.8 } }]).document;
-    expect(findTableOverflows(doc)).toEqual(["overview-detail-a"]);
   });
 });

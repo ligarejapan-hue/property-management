@@ -10,7 +10,8 @@
  *   定番なので対象外
  */
 import { describe, it, expect } from "vitest";
-import { findTextTableOverlaps } from "../editor-document";
+import { findTextTableOverlaps, resolveTextTableOverlapsInDocument } from "../editor-document";
+import { buildSaleHouseDocument } from "../build-document";
 import {
   parseSalesSheetDocument,
   A4_LANDSCAPE,
@@ -34,6 +35,11 @@ const table = (id: string, x: number, y: number, w = 80, h = 60) => ({
 });
 const image = (id: string, x: number, y: number, w = 90, h = 60) => ({
   id, type: "image", x, y, w, h, z: 2, src: "/uploads/properties/a/1.jpg", fit: "cover",
+});
+/** 見積りだと箱を大きく超える行数の表 (8行)。borderless の有無を差し替えて比較する。 */
+const manyRows = Array.from({ length: 8 }, (_, i) => ({ label: `項目${i}`, value: "値" }));
+const borderlessTable = (id: string, x: number, y: number, w = 80, h = 10) => ({
+  id, type: "table", x, y, w, h, z: 1, rows: manyRows, style: { borderless: true },
 });
 
 describe("findTextTableOverlaps", () => {
@@ -461,6 +467,41 @@ describe("findTextTableOverlaps", () => {
     // 可視色なら従来どおり検出
     const visible = { ...invisible, style: { color: "#d0331a" } };
     expect(findTextTableOverlaps(makeDoc([visible, tbl]))).toHaveLength(1);
+  });
+
+  it("線なし(borderless)の表は箱(clip)で判定=長い交通アクセスでも主要表/詳細表は重ならない (F1再現・実測=57.3mm<64.9mm)", () => {
+    const doc = buildSaleHouseDocument({
+      property: {
+        address: "神奈川県横浜市港北区日吉4-5-6",
+        layoutType: "4LDK",
+        zoningDistrict: "第一種低層住居専用地域",
+        buildingCoverageRatio: "50",
+        floorAreaRatio: "100",
+        roadType: "公道",
+        roadWidth: "4.0",
+        occupancyStatus: "vacant",
+      },
+      photos: [{ fileUrl: "/uploads/a.jpg" }],
+      overrides: {
+        access:
+          "JR山手線「池袋」駅 徒歩10分 / 東京メトロ丸ノ内線「新大塚」駅 徒歩8分",
+      },
+    });
+    expect(findTextTableOverlaps(doc)).toEqual([]);
+    const resolved = resolveTextTableOverlapsInDocument(doc);
+    expect(resolved.document).toBe(doc);
+  });
+
+  it("線なし(borderless)の表は保存箱を超えて描画されない=見積りが箱外へ伸びても箱外の文字とは重ならない (F1)", () => {
+    const doc = makeDoc([borderlessTable("overview", 100, 10, 80, 10), text("below", 110, 30)]);
+    expect(findTextTableOverlaps(doc)).toHaveLength(0);
+  });
+
+  it("同じ中身でも線あり(旧ひな型)の表は従来どおり見積り高さで重なりを検知する (F1・後方互換)", () => {
+    const doc = makeDoc([table("overview", 100, 10, 80, 10), text("below", 110, 30)].map((e) =>
+      e.id === "overview" ? { ...e, rows: manyRows } : e,
+    ));
+    expect(findTextTableOverlaps(doc)).toHaveLength(1);
   });
 
   it("要素を動かさない read-only ヘルパ (document は不変)", () => {

@@ -35,7 +35,6 @@ import {
   markSavedIfCurrent,
   exportWithSaveGuard,
   findTextTableOverlaps,
-  findTableOverflows,
   resolveTextTableOverlapsInDocument,
   resolveOverlapsInState,
 } from "@/lib/sales-sheet/editor-document";
@@ -47,6 +46,7 @@ import { PhotoGalleryPanel } from "./PhotoGalleryPanel";
 import { TransactionInfoDialog } from "./TransactionInfoDialog";
 import { readFooterData } from "@/lib/sales-sheet/footer-band";
 import { safeRandomId } from "@/lib/random-id";
+import { overflowingTableIds } from "./table-overflow";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -502,11 +502,42 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     () => findTextTableOverlaps(editorState.document).length,
     [editorState.document],
   );
+  // 描画された紙面(data-canvas-stage)を測るための ref。表(data-sheet-table)は
+  // この配下に描かれる。
+  const canvasStageRef = useRef<HTMLDivElement>(null);
+  const [overflowTableIds, setOverflowTableIds] = useState<string[]>([]);
   // 表の文字が枠からあふれていないか(仕様書 §4.8)。重なりとは別軸の注意。
-  const tableOverflowCount = useMemo(
-    () => findTableOverflows(editorState.document).length,
-    [editorState.document],
-  );
+  // 見積りではなく実際の描画(data-sheet-table・ResizeObserver)を測る(F2)。
+  useEffect(() => {
+    const container = canvasStageRef.current;
+    if (!container) return;
+    // jsdom(テスト環境)には ResizeObserver が無い。無ければ何もしない
+    // (見積りへは戻さない=「表の入りきり」は実測のみで判定する・F2)。
+    if (typeof ResizeObserver === "undefined") return;
+    const wrappers = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-sheet-table]"),
+    );
+    if (wrappers.length === 0) return;
+    // 外枠 div(overflow:hidden・箱サイズ固定)自体はコンテンツが伸びても
+    // 自分の大きさは変わらないため ResizeObserver は発火しない。中身の
+    // <table>(自然な高さで伸びる)を観測し、コールバックで外枠の
+    // scrollHeight/clientHeight を読む。
+    const observer = new ResizeObserver(() => {
+      const boxes = wrappers.map((w) => ({
+        id: w.getAttribute("data-sheet-table") ?? "",
+        scrollHeight: w.scrollHeight,
+        clientHeight: w.clientHeight,
+      }));
+      const ids = overflowingTableIds(boxes);
+      setOverflowTableIds((prev) => (prev.join(",") === ids.join(",") ? prev : ids));
+    });
+    for (const wrapper of wrappers) {
+      const table = wrapper.querySelector("table");
+      if (table) observer.observe(table);
+    }
+    return () => observer.disconnect();
+  }, [editorState.document]);
+  const tableOverflowCount = overflowTableIds.length;
   const layoutWarning =
     [
       textTableOverlapCount > 0
@@ -634,6 +665,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
              */}
             <div
               data-canvas-stage
+              ref={canvasStageRef}
               style={{
                 width: scaledW,
                 height: scaledH,
