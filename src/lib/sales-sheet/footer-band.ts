@@ -2,6 +2,7 @@ import type { Rect } from "./layout-engine";
 import type { SalesSheetElement } from "./document-schema";
 import { COMPANY_INFO } from "./company-info";
 import type { CompanyProfile } from "./company-profile-store";
+import { CONSUMER_COLORS } from "./consumer-theme";
 
 /**
  * footer-band.ts
@@ -310,4 +311,102 @@ export function buildFooterBand(
   elements.push(...buildFooterTransactionElements(footer, data));
 
   return elements;
+}
+
+// ---------------------------------------------------------------------------
+// 消費者向けひな型(2026-09)の会社帯。仕様書 §4.6。
+// 左から 会社ブロック(105mm) / 取引6項目(表2つ) / 電話(72mm)。右端22mmは地図QRの置き場。
+// 帯の外枠 footer-band は取引情報パネルが帯の位置を復元するため残す(白・線なし)。
+// ---------------------------------------------------------------------------
+
+export const CONSUMER_TEL_CTA = "内覧のご希望・ご質問はお電話で";
+
+const CONSUMER_COMPANY_W_MM = 105;
+const CONSUMER_TERMS_X_MM = 108;
+const CONSUMER_STAFF_X_MM = 147;
+const CONSUMER_TX_TABLE_W_MM = 36;
+const CONSUMER_TEL_X_MM = 186;
+const CONSUMER_TEL_W_MM = 72;
+const CONSUMER_LINE_H_MM = 3.8;
+
+function consumerText(
+  id: string,
+  rect: Rect,
+  content: string,
+  fontSizePt: number,
+  opts: { bold?: boolean; color?: string; align?: "left" | "center" | "right"; lineHeight?: number } = {},
+): SalesSheetElement {
+  return {
+    id,
+    type: "text",
+    ...rect,
+    z: 2,
+    content,
+    style: {
+      fontSizePt,
+      color: opts.color ?? CONSUMER_COLORS.ink,
+      bold: opts.bold ?? false,
+      ...(opts.align ? { align: opts.align } : {}),
+      ...(opts.lineHeight ? { lineHeight: opts.lineHeight } : {}),
+    },
+  };
+}
+
+/** 取引条件/担当の表(線なし)。作成時と取引情報パネルの再生成で共有する。 */
+export function buildConsumerFooterTransactionElements(footer: Rect, data: FooterBandData): SalesSheetElement[] {
+  const hasStaff = !!(data.staff || data.agent || data.specialNotes);
+  const tableStyle = { fontSizePt: 7.5, labelColor: CONSUMER_COLORS.navy, valueColor: CONSUMER_COLORS.ink, borderless: true, cellPaddingMm: 0.4 };
+  const termsRows = pickRows([
+    [TERMS_LABELS.transactionType, data.transactionType],
+    [TERMS_LABELS.adType, data.adType],
+    [TERMS_LABELS.compensation, data.compensation],
+  ]);
+  const elements: SalesSheetElement[] = [
+    {
+      id: "footer-terms-table",
+      type: "table",
+      ...clampRect({ x: footer.x + CONSUMER_TERMS_X_MM, y: footer.y + 2, w: CONSUMER_TX_TABLE_W_MM, h: footer.h - 4 }, footer),
+      z: 2,
+      rows: termsRows.length > 0 ? termsRows : [{ label: "", value: "" }],
+      style: tableStyle,
+    },
+  ];
+  if (hasStaff) {
+    elements.push({
+      id: "footer-staff-table",
+      type: "table",
+      ...clampRect({ x: footer.x + CONSUMER_STAFF_X_MM, y: footer.y + 2, w: CONSUMER_TX_TABLE_W_MM, h: footer.h - 4 }, footer),
+      z: 2,
+      rows: pickRows([
+        [STAFF_LABELS.staff, data.staff],
+        [STAFF_LABELS.agent, data.agent],
+        [STAFF_LABELS.specialNotes, data.specialNotes],
+      ]),
+      style: { ...tableStyle },
+    });
+  }
+  return elements;
+}
+
+export function buildConsumerFooterBand(
+  footer: Rect,
+  data: FooterBandData,
+  company: CompanyProfile = COMPANY_INFO,
+): SalesSheetElement[] {
+  const { x, y } = footer;
+  const line = (i: number): number => y + 7 + CONSUMER_LINE_H_MM * i;
+  const halfW = CONSUMER_COMPANY_W_MM / 2;
+  return [
+    { id: "footer-band", type: "shape", ...clampRect({ x, y, w: footer.w, h: footer.h }, footer), z: 1, shape: "rect", fill: CONSUMER_COLORS.white },
+    consumerText("footer-name-ja", clampRect({ x, y: y + 1, w: CONSUMER_COMPANY_W_MM, h: 6 }, footer), company.nameJa, 10, { bold: true, color: CONSUMER_COLORS.navy }),
+    consumerText("footer-license", clampRect({ x, y: line(0), w: CONSUMER_COMPANY_W_MM, h: CONSUMER_LINE_H_MM }, footer), company.license, 7),
+    consumerText("footer-address", clampRect({ x, y: line(1), w: CONSUMER_COMPANY_W_MM, h: CONSUMER_LINE_H_MM }, footer), `所在地 ${company.address}`, 7),
+    consumerText("footer-contact", clampRect({ x, y: line(2), w: CONSUMER_COMPANY_W_MM, h: CONSUMER_LINE_H_MM }, footer), `TEL ${company.tel}　FAX ${company.fax}`, 7),
+    consumerText("footer-email", clampRect({ x, y: line(3), w: halfW, h: CONSUMER_LINE_H_MM }, footer), `Email ${company.email}`, 7),
+    consumerText("footer-hp", clampRect({ x: x + halfW, y: line(3), w: halfW, h: CONSUMER_LINE_H_MM }, footer), `HP ${company.hp}`, 7),
+    // 最下行(y+22.2〜25)は第③段の規約行のために空けておく。
+    ...buildConsumerFooterTransactionElements(footer, data),
+    consumerText("footer-tel-cta", clampRect({ x: x + CONSUMER_TEL_X_MM, y: y + 2, w: CONSUMER_TEL_W_MM, h: 5 }, footer), CONSUMER_TEL_CTA, 8, { bold: true, color: CONSUMER_COLORS.navy, align: "right" }),
+    consumerText("footer-tel-number", clampRect({ x: x + CONSUMER_TEL_X_MM, y: y + 7, w: CONSUMER_TEL_W_MM, h: 10 }, footer), company.tel, 19, { bold: true, color: CONSUMER_COLORS.navy, align: "right", lineHeight: 1.2 }),
+  ];
 }
