@@ -174,10 +174,14 @@ function lastDocument() {
     }[];
   };
 }
-// [F2-A Task4] 売土地スペック表（overview テーブル要素）の行を label で引く小道具。
+// [F2-A Task4] 売土地スペック表の行を label で引く小道具。[Task5] 消費者向けひな型は
+// 主要表(overview)/詳細表(overview-detail-a/b)の3表に分かれるため、overview だけでなく
+// footer-* を除く全テーブルを走査する（build-*.test.ts の tableRow と同じパターン）。
 function landOverviewRow(label: string): string | undefined {
-  const overview = lastDocument().elements.find((e) => e.id === "overview");
-  return overview?.rows?.find((r) => r.label === label)?.value;
+  return lastDocument()
+    .elements.filter((e) => e.type === "table" && !e.id?.startsWith("footer-"))
+    .flatMap((e) => e.rows ?? [])
+    .find((r) => r.label === label)?.value;
 }
 function lastTemplateId() {
   return (createDesign as Mock).mock.calls[0][0].templateId as string;
@@ -282,7 +286,9 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
       params: Promise.resolve({ id: "p1" }),
     });
     expect(res.status).toBe(201);
-    expect(landOverviewRow("引渡時期")).toBe("即時");
+    // [Task5] delivery は主要表「現況・引渡」に occupancy と合成される(現況は自動反映元が
+    // null のため空・delivery のみ「引渡 」プレフィックス付き)。
+    expect(landOverviewRow("現況・引渡")).toBe("引渡 即時");
   });
 
   it("201 — 土地: 用途地域は自動反映(zoningDistrict)+overrideの追加選択を併記する", async () => {
@@ -375,9 +381,12 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
       body: JSON.stringify(body),
     });
   }
+  // [Task5] land と同じく全テーブル(overview/overview-detail-a/b)を走査する。
   function houseOverviewRow(label: string): string | undefined {
-    const overview = lastDocument().elements.find((e) => e.id === "overview");
-    return overview?.rows?.find((r) => r.label === label)?.value;
+    return lastDocument()
+      .elements.filter((e) => e.type === "table" && !e.id?.startsWith("footer-"))
+      .flatMap((e) => e.rows ?? [])
+      .find((r) => r.label === label)?.value;
   }
 
   it("201 — 戸建: 新schemaの multiselect（地目）を受理し、生成documentのスペック表に併記される", async () => {
@@ -417,7 +426,9 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
       params: Promise.resolve({ id: "p1" }),
     });
     expect(res.status).toBe(201);
-    expect(houseOverviewRow("引渡時期")).toBe("即時");
+    // [Task5] delivery は主要表「現況・引渡」に occupancy と合成される(現況は自動反映元が
+    // null のため空・delivery のみ「引渡 」プレフィックス付き)。
+    expect(houseOverviewRow("現況・引渡")).toBe("引渡 即時");
   });
 
   it("201 — 戸建: 見出し要素は「売戸建」固定（自社マイソク様式・field-model駆動の証跡）", async () => {
@@ -454,9 +465,12 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
       body: JSON.stringify(body),
     });
   }
+  // [Task5] land/house と同じく全テーブル(overview/overview-detail-a/b)を走査する。
   function buildingOverviewRow(label: string): string | undefined {
-    const overview = lastDocument().elements.find((e) => e.id === "overview");
-    return overview?.rows?.find((r) => r.label === label)?.value;
+    return lastDocument()
+      .elements.filter((e) => e.type === "table" && !e.id?.startsWith("footer-"))
+      .flatMap((e) => e.rows ?? [])
+      .find((r) => r.label === label)?.value;
   }
 
   it("201 — 一棟: 新schemaの multiselect（地目）を受理し、スペック表に併記される", async () => {
@@ -477,7 +491,8 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
     expect(res.status).toBe(201);
     expect(buildingOverviewRow("総戸数")).toBe("12戸");
     expect(buildingOverviewRow("想定利回り")).toBe("7.8％");
-    expect(buildingOverviewRow("満室想定収入(年額)")).toBe("980万円");
+    // [Task5] 主要表の行ラベルは「満室想定収入」(field-model の「満室想定収入(年額)」から短縮)。
+    expect(buildingOverviewRow("満室想定収入")).toBe("980万円");
     expect(buildingOverviewRow("付帯権利")).toBe("所有権");
   });
 
