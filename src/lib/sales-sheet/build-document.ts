@@ -1,5 +1,6 @@
 import {
   A4_LANDSCAPE,
+  CONSUMER_TEMPLATE,
   type SalesSheetDocument,
   type SalesSheetElement,
 } from "./document-schema";
@@ -12,9 +13,17 @@ import {
   mapOccupancyStatusToLandOccupancy,
 } from "./occupancy";
 import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS, BUILDING_FIELDS } from "./field-model";
-import { buildSheetRows, type SheetValues } from "./sheet-rows";
-import { computeSpecSheetLayout, DEFAULT_FOOTER_H, type Rect } from "./layout-engine";
-import { buildFooterBand, type FooterBandData } from "./footer-band";
+import type { SheetValues } from "./sheet-rows";
+import {
+  computeConsumerLayout,
+  packPhotoCells,
+  MAIN_TABLE_PAD_MM,
+  DETAIL_TABLE_PAD_MM,
+  type Rect,
+} from "./layout-engine";
+import { buildConsumerFooterBand, type FooterBandData } from "./footer-band";
+import { splitMainDetailRows, splitDetailColumns, type SheetRow } from "./main-detail-rows";
+import { CONSUMER_COLORS, CONSUMER_FONT_FAMILY } from "./consumer-theme";
 import { computeTsuboUnitPrice } from "./tsubo";
 import type { CompanyProfile } from "./company-profile-store";
 
@@ -38,10 +47,6 @@ export function toCanonicalUploadsSrc(
   // 図面全体を 422 で弾く。
   return isSafeImageSrc(candidate) ? candidate : null;
 }
-
-const NAVY = "#15324f";
-const RED = "#d0331a";
-const FONT = '"Yu Gothic UI","Meiryo",sans-serif';
 
 // ---------------------------------------------------------------------------
 // 全種別(売マンション/売土地/売戸建/一棟)を自社マイソク様式（buildSpecSheetDocument・
@@ -141,33 +146,9 @@ function fmtExclusiveArea(area?: string | null, method?: string | null): string 
   return fmtAreaWithMethod(area, method);
 }
 
-/** 左カラム（表題・価格の下）に写真を最大3枚レイアウトする位置。座標は
- *  `computeSpecSheetLayout` が返す `photoSlots`（写真枚数・左右分割幅から決定的に
- *  算出）を使う（[Task2] 固定 PHOTO_LAYOUTS テーブルから移行）。 */
-function photoElements(
-  photos: { fileUrl: string }[] | undefined,
-  slots: Rect[],
-): SalesSheetElement[] {
-  const list = (photos ?? []).slice(0, 3);
-  return list.map((ph, i) => ({
-    id: `photo-${i + 1}`,
-    type: "image" as const,
-    x: slots[i].x,
-    y: slots[i].y,
-    w: slots[i].w,
-    h: slots[i].h,
-    z: 1,
-    src: ph.fileUrl,
-    // 縦横比を変えない（要件②）＝作成時の種写真も切り取らず全体表示。自動整列の contain と一致。
-    fit: "contain" as const,
-    radiusMm: 2,
-    alt: "物件写真",
-  }));
-}
-
 // ---- 売マンション（区分） ----
 // 自社マイソク様式（キャッチ帯/写真+セールスポイント/間取り枠/全項目スペック表/会社フッター）。
-// スペック表の行は field-model(MANSION_FIELDS) + sheet-rows(buildSheetRows) に委譲する。
+// 主要表/詳細表の行は field-model(MANSION_FIELDS) + main-detail-rows(splitMainDetailRows) に委譲する。
 export interface SaleMansionOverrides {
   /**
    * 物件種目（新築マンション/中古マンション等）。field-model 上は autoFrom:"propertyType"
@@ -322,88 +303,104 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
 }
 
 /**
- * 種別非依存の版面パーツ。自社マイソク様式（キャッチ帯/見出し+価格/全項目スペック表/
- * セールスポイント/会社帯/写真/間取り枠）の入力を型で表す。
- * `buildSpecSheetDocument` の唯一の引数（[F2-A Task1] buildSaleMansionDocument から抽出）。
+ * 種別非依存の版面パーツ。消費者向けひな型（2026-09・案3「整理型」×紺）の入力を型で表す。
+ * `buildSpecSheetDocument` の唯一の引数（[F2-A Task1] buildSaleMansionDocument から抽出。
+ * [Task5] 旧 rows:単一表 から mainRows/detailRows の2表構成へ置換）。
  */
 export interface SpecSheetParts {
-  /** 左上見出し（建物名+号室 / 「売土地」等）。 */
   heading: string;
-  /** 例 "6590万円"（空可）。 */
   priceText: string;
-  /** スペック表の行。 */
-  rows: { label: string; value: string }[];
+  /** キャッチ帯右の物件種目(例: 中古戸建)。 */
+  kindLabel: string;
+  /** 主要表(8行・空行も残す)。 */
+  mainRows: SheetRow[];
+  /** 詳細表(空行なし・左右2列に分けて置く)。 */
+  detailRows: SheetRow[];
   photos?: { fileUrl: string }[];
   catchCopy?: string;
-  /** ◆区切りで結合して sales-points 要素に表示。 */
   salesPoints?: string[];
-  /** 会社帯（取引態様/広告/報酬/担当/取引士/特記事項）。buildFooterBand(L.footer, …) へ渡す
-   *  （[Task3] 旧 footerDetails:string を構造化・会社定数自体は COMPANY_INFO 固定）。 */
   footer?: FooterBandData;
-  /** 会社帯の会社情報（未指定時は COMPANY_INFO 既定）。 */
   company?: CompanyProfile;
-  /** 間取り図（任意）。指定時のみキャッチ帯下にプレースホルダ画像を置く。 */
   floorPlanImage?: { fileUrl: string } | null;
 }
 
+/** ポイントは3つまで(4つ目以降は出さない)。仕様書 §4.5。 */
+const SALES_POINTS_MAX = 3;
+
+/** 写真(最大3枚)と間取り図を写真枠へ初期配置する。間取り図は代表写真の次。 */
+function photoAndFloorPlanElements(
+  photos: { fileUrl: string }[] | undefined,
+  floorPlanImage: { fileUrl: string } | null | undefined,
+  zone: Rect,
+): SalesSheetElement[] {
+  const items: { id: string; src: string; alt: string; radiusMm?: number }[] = (photos ?? [])
+    .slice(0, 3)
+    .map((ph, i) => ({ id: `photo-${i + 1}`, src: ph.fileUrl, alt: "物件写真", radiusMm: 2 }));
+  if (floorPlanImage?.fileUrl) {
+    items.splice(Math.min(1, items.length), 0, { id: "floor-plan", src: floorPlanImage.fileUrl, alt: "間取り図" });
+  }
+  const cells = packPhotoCells(items.length, zone.w, zone.h);
+  return items.map((it, i) => ({
+    id: it.id,
+    type: "image" as const,
+    x: zone.x + cells[i].x,
+    y: zone.y + cells[i].y,
+    w: cells[i].w,
+    h: cells[i].h,
+    z: 1,
+    src: it.src,
+    fit: "contain" as const,
+    alt: it.alt,
+    ...(it.radiusMm ? { radiusMm: it.radiusMm } : {}),
+  }));
+}
+
+/** 物件種目の入力があればそれ、無ければ種別の既定名。 */
+function kindLabelOf(values: SheetValues, fallback: string): string {
+  const v = values.propertyType;
+  return typeof v === "string" && v.trim() ? v.trim() : fallback;
+}
+
 /**
- * A4横 自社マイソク様式の版面レイアウトを種別非依存に組む純関数（[F2-A Task1]）。
- * catch-band/catch-copy/heading/price/overview表/sales-points/会社帯(footer-*・
- * buildFooterBand)/photos/floor-plan の要素構成・id・type・style種別・theme は不変
- * （[Task2] で座標算出を computeSpecSheetLayout へ委譲した後も同一。[Task3] でフッター2要素
- * →会社帯へ置換）。座標(x/y/w/h)と overview表の style.fontSizePt は、写真枚数・スペック表
- * 行数・間取り図有無からエンジンが決定的に算出する（build-mansion.test.ts 等のレイアウト
- * テストはこのエンジン出力を期待値として検証しており、固定値の特性化テストではない）。
+ * 消費者向けひな型(2026-09・案3「整理型」×紺)の紙面を種別非依存に組む純関数。
+ * 座標と表の文字サイズは computeConsumerLayout(エディタと共有)が決める。仕様書 §3 / §4.5。
  */
 export function buildSpecSheetDocument(parts: SpecSheetParts): SalesSheetDocument {
-  // レイアウト（座標/概要表フォント）は最適化エンジンに委譲する（[Task2]）。
-  // 要素構成・id・type・style種別・themeは不変（このエンジン化の前後で同一）。
-  const photos = (parts.photos ?? []).slice(0, 3);
-  const L = computeSpecSheetLayout({
-    photoCount: photos.length,
-    specRowCount: parts.rows.length,
-    hasFloorPlan: !!parts.floorPlanImage?.fileUrl,
-    footerHeight: DEFAULT_FOOTER_H,
-  });
-
-  const salesPointsText = (parts.salesPoints ?? [])
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => `◆${s}`)
-    .join("　");
+  const L = computeConsumerLayout({ mainRowCount: parts.mainRows.length, detailRowCount: parts.detailRows.length });
+  const { left, right } = splitDetailColumns(parts.detailRows);
+  const points = (parts.salesPoints ?? []).map((s) => s.trim()).filter(Boolean).slice(0, SALES_POINTS_MAX);
+  const salesPointsText = points.length > 0 ? ["おすすめポイント", ...points.map((s) => `◆${s}`)].join("　") : "";
+  const C = CONSUMER_COLORS;
+  const g = (r: Rect) => ({ x: r.x, y: r.y, w: r.w, h: r.h });
+  const detailStyle = { fontSizePt: L.detailFontSizePt, labelColor: C.muted, valueColor: C.ink, borderless: true, cellPaddingMm: DETAIL_TABLE_PAD_MM };
 
   const elements: SalesSheetElement[] = [
-    // キャッチ帯（全幅の上部バナー）。右スペック表はこの帯の下から始まるため重ならない。
-    { id: "catch-band", type: "shape", x: L.catchBand.x, y: L.catchBand.y, w: L.catchBand.w, h: L.catchBand.h, z: 1,
-      shape: "rect", fill: NAVY },
-    { id: "catch-copy", type: "text", x: L.catchCopy.x, y: L.catchCopy.y, w: L.catchCopy.w, h: L.catchCopy.h, z: 2,
-      content: parts.catchCopy ?? "", style: { fontSizePt: 13, bold: true, color: "#ffffff", align: "center" } },
-    // 左上: 見出し（建物名+号室 等） / 価格（大）
-    { id: "heading", type: "text", x: L.heading.x, y: L.heading.y, w: L.heading.w, h: L.heading.h, z: 2,
-      content: parts.heading, style: { fontSizePt: 11, bold: true, color: NAVY } },
-    { id: "price", type: "text", x: L.price.x, y: L.price.y, w: L.price.w, h: L.price.h, z: 2,
-      content: parts.priceText, style: { fontSizePt: 20, bold: true, color: RED } },
-    // 右: 全項目スペック表（行が多いほどエンジンが fontSize を下げ h を拡大）
-    { id: "overview", type: "table", x: L.overview.x, y: L.overview.y, w: L.overview.w, h: L.overview.h, z: 1,
-      rows: parts.rows, style: { fontSizePt: L.overview.fontSizePt, borderColor: "#cccccc", labelColor: NAVY } },
-    // 写真下: セールスポイント（◆区切り）
-    { id: "sales-points", type: "text", x: L.salesPoints.x, y: L.salesPoints.y, w: L.salesPoints.w, h: L.salesPoints.h, z: 2,
-      content: salesPointsText, style: { fontSizePt: 9, bold: true, color: NAVY } },
-    // 会社帯（下部・全幅）: 会社ブロック(COMPANY_INFO固定)＋取引条件/担当テーブル（[Task3]
-    // 旧2text要素(company/company-details)から置換・~15要素は帯矩形 L.footer 内に収まる）。
-    ...buildFooterBand(L.footer, parts.footer ?? {}, parts.company),
-    ...photoElements(photos, L.photoSlots),
+    { id: "catch-band", type: "shape", ...g(L.catchBand), z: 1, shape: "rect", fill: C.navy },
+    // lineHeight は帯の高さ÷文字の高さ=1行を帯の縦中央に置く。
+    { id: "catch-copy", type: "text", ...g(L.catchCopy), z: 2, content: parts.catchCopy ?? "",
+      style: { fontSizePt: 16, bold: true, color: C.white, lineHeight: 2.8 } },
+    { id: "kind-tag", type: "text", ...g(L.kindTag), z: 2, content: parts.kindLabel,
+      style: { fontSizePt: 9, bold: true, color: C.white, align: "right", lineHeight: 5 } },
+    { id: "heading", type: "text", ...g(L.heading), z: 2, content: parts.heading,
+      style: { fontSizePt: 14, bold: true, color: C.navy } },
+    { id: "price", type: "text", ...g(L.price), z: 2, content: parts.priceText,
+      style: { fontSizePt: 32, bold: true, color: C.price, lineHeight: 1 } },
+    { id: "overview", type: "table", ...g(L.mainTable), z: 1, rows: parts.mainRows,
+      style: { fontSizePt: L.mainTable.fontSizePt, labelColor: C.navy, valueColor: C.ink, borderless: true, stripeColor: C.soft, cellPaddingMm: MAIN_TABLE_PAD_MM } },
+    { id: "overview-detail-a", type: "table", ...g(L.detailLeft), z: 1, rows: left, style: detailStyle },
+    { id: "overview-detail-b", type: "table", ...g(L.detailRight), z: 1, rows: right, style: { ...detailStyle } },
+    { id: "sales-points-band", type: "shape", ...g(L.salesPointsBand), z: 1, shape: "rect", fill: C.soft },
+    { id: "sales-points", type: "text", ...g(L.salesPoints), z: 2, content: salesPointsText,
+      style: { fontSizePt: 10.5, bold: true, color: C.navy, lineHeight: 3.2 } },
+    ...buildConsumerFooterBand(L.footer, parts.footer ?? {}, parts.company),
+    ...photoAndFloorPlanElements(parts.photos, parts.floorPlanImage, L.photoZone),
   ];
 
-  // 間取り枠: 提供時のみ、キャッチ帯下・写真上の隙間にプレースホルダ画像を置く（任意）。
-  if (parts.floorPlanImage?.fileUrl && L.floorPlan) {
-    elements.push({
-      id: "floor-plan", type: "image", x: L.floorPlan.x, y: L.floorPlan.y, w: L.floorPlan.w, h: L.floorPlan.h, z: 1,
-      src: parts.floorPlanImage.fileUrl, fit: "contain", alt: "間取り図",
-    });
-  }
-
-  return { page: A4_LANDSCAPE, theme: { fontFamily: FONT, accentColor: NAVY }, elements };
+  return {
+    page: A4_LANDSCAPE,
+    theme: { fontFamily: CONSUMER_FONT_FAMILY, accentColor: C.navy, template: CONSUMER_TEMPLATE },
+    elements,
+  };
 }
 
 export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDocument {
@@ -412,7 +409,7 @@ export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDoc
   const b = input.building ?? {};
 
   const values = buildMansionValues(input);
-  const rows = buildSheetRows(MANSION_SPEC_FIELDS, values);
+  const { main, detail } = splitMainDetailRows("mansion", MANSION_SPEC_FIELDS, values);
 
   const heading = [b.name, p.roomNo ? `${p.roomNo}号室` : null].filter(Boolean).join("　");
   const priceText = fmtManYen(o.price);
@@ -420,7 +417,9 @@ export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDoc
   return buildSpecSheetDocument({
     heading,
     priceText,
-    rows,
+    kindLabel: kindLabelOf(values, "マンション"),
+    mainRows: main,
+    detailRows: detail,
     photos: input.photos,
     catchCopy: o.catchCopy,
     salesPoints: o.salesPoints,
@@ -439,7 +438,7 @@ export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDoc
 
 // ---- 売土地 ----
 // 自社マイソク様式（キャッチ帯/写真+セールスポイント/全項目スペック表/会社フッター）。
-// スペック表の行は field-model(LAND_FIELDS) + sheet-rows(buildSheetRows) に委譲する
+// 主要表/詳細表の行は field-model(LAND_FIELDS) + main-detail-rows(splitMainDetailRows) に委譲する
 // （[F2-A Task3] 旧 baseSheet 版の buildSaleLandDocument を置換）。土地は消費税欄を
 // 持たない（非課税・LAND_FIELDS に tax/taxAmount 無し）。
 export interface SaleLandOverrides {
@@ -589,7 +588,7 @@ export function buildSaleLandDocument(input: SaleLandInput): SalesSheetDocument 
   const o = input.overrides ?? {};
 
   const values = buildLandValues(input);
-  const rows = buildSheetRows(LAND_SPEC_FIELDS, values);
+  const { main, detail } = splitMainDetailRows("land", LAND_SPEC_FIELDS, values);
 
   const priceText = fmtManYen(o.price);
   // photos(複数)優先・無ければ legacy な photo(単数)を1枚配列として扱う。
@@ -598,7 +597,9 @@ export function buildSaleLandDocument(input: SaleLandInput): SalesSheetDocument 
   return buildSpecSheetDocument({
     heading: "売土地",
     priceText,
-    rows,
+    kindLabel: kindLabelOf(values, "売土地"),
+    mainRows: main,
+    detailRows: detail,
     photos,
     catchCopy: o.catchCopy,
     salesPoints: o.salesPoints,
@@ -624,7 +625,7 @@ export async function buildInitialSalesSheetDocument(
 
 // ---- 売戸建 ----
 // 自社マイソク様式（キャッチ帯/写真+セールスポイント/全項目スペック表/会社フッター）。
-// スペック表の行は field-model(HOUSE_FIELDS) + sheet-rows(buildSheetRows) に委譲する
+// 主要表/詳細表の行は field-model(HOUSE_FIELDS) + main-detail-rows(splitMainDetailRows) に委譲する
 // （[F2-B Task2] 旧 baseSheet 版の buildSaleHouseDocument を置換）。マンションと同じく
 // 消費税(課税/不課税)欄を持つ（土地と異なり戸建は課税対象）。house は building relation を
 // 配線しない(現行踏襲)ため、建物構造/築年月/増改築年月/各階面積/地上階・地下階は
@@ -799,14 +800,16 @@ export function buildSaleHouseDocument(input: SaleHouseInput): SalesSheetDocumen
   const o = input.overrides ?? {};
 
   const values = buildHouseValues(input);
-  const rows = buildSheetRows(HOUSE_SPEC_FIELDS, values);
+  const { main, detail } = splitMainDetailRows("house", HOUSE_SPEC_FIELDS, values);
 
   const priceText = fmtManYen(o.price);
 
   return buildSpecSheetDocument({
     heading: "売戸建",
     priceText,
-    rows,
+    kindLabel: kindLabelOf(values, "売戸建"),
+    mainRows: main,
+    detailRows: detail,
     photos: input.photos,
     catchCopy: o.catchCopy,
     salesPoints: o.salesPoints,
@@ -825,7 +828,7 @@ export function buildSaleHouseDocument(input: SaleHouseInput): SalesSheetDocumen
 
 // ---- 一棟（マンション / アパート） ----
 // 自社マイソク様式（キャッチ帯/写真+セールスポイント/全項目スペック表/会社フッター）。
-// スペック表の行は field-model(BUILDING_FIELDS) + sheet-rows(buildSheetRows) に委譲する
+// 主要表/詳細表の行は field-model(BUILDING_FIELDS) + main-detail-rows(splitMainDetailRows) に委譲する
 // （[F2-C Task2] 旧 baseSheet 版の buildSaleBuildingDocument を置換）。売戸建と同じく消費税
 // (課税/不課税)欄を持ち、加えて収益系(総戸数/想定利回り/満室想定収入)・付帯権利を持つ。
 // house 同様 building relation は配線しない(現行踏襲)ため構造/築年月/収益系は常に手入力。
@@ -997,7 +1000,7 @@ export function buildSaleBuildingDocument(input: SaleBuildingInput): SalesSheetD
   const o = input.overrides ?? {};
 
   const values = buildBuildingValues(input);
-  const rows = buildSheetRows(BUILDING_SPEC_FIELDS, values);
+  const { main, detail } = splitMainDetailRows("building", BUILDING_SPEC_FIELDS, values);
 
   // 見出し: kind により二分岐（apartment=一棟アパート・それ以外/未指定=一棟マンション）。
   const heading = input.kind === "apartment" ? "一棟アパート" : "一棟マンション";
@@ -1006,7 +1009,9 @@ export function buildSaleBuildingDocument(input: SaleBuildingInput): SalesSheetD
   return buildSpecSheetDocument({
     heading,
     priceText,
-    rows,
+    kindLabel: kindLabelOf(values, heading),
+    mainRows: main,
+    detailRows: detail,
     photos: input.photos,
     catchCopy: o.catchCopy,
     salesPoints: o.salesPoints,

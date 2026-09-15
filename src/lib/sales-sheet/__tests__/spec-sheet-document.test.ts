@@ -1,232 +1,101 @@
 import { describe, it, expect } from "vitest";
 import { buildSpecSheetDocument, type SpecSheetParts } from "../build-document";
-import { salesSheetDocumentSchema } from "../document-schema";
-import { computeSpecSheetLayout, DEFAULT_FOOTER_H } from "../layout-engine";
-import { buildFooterBand } from "../footer-band";
-import { COMPANY_INFO } from "../company-info";
+import { salesSheetDocumentSchema, isConsumerTemplate, type SalesSheetElement } from "../document-schema";
+import { computeConsumerLayout, CONSUMER_PHOTO_ZONE, type Rect } from "../layout-engine";
+import { buildConsumerFooterBand } from "../footer-band";
+import { CONSUMER_FONT_FAMILY } from "../consumer-theme";
 
-const findEl = (doc: { elements: unknown[] }, id: string) =>
-  (doc.elements as { id: string }[]).find((e) => e.id === id);
-
-const tableLabels = (doc: { elements: unknown[] }): string[] => {
-  for (const el of doc.elements as { type: string; rows?: { label: string; value: string }[] }[]) {
-    if (el.type === "table") return (el.rows ?? []).map((row) => row.label);
-  }
-  return [];
+const rows = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => ({ label: `${prefix}${i + 1}`, value: `値${i + 1}` }));
+const base: SpecSheetParts = {
+  heading: "練馬区富士見台二丁目 中古戸建",
+  priceText: "6980万円",
+  kindLabel: "中古戸建",
+  mainRows: rows("主要", 8),
+  detailRows: rows("詳細", 5),
 };
+const byId = (els: SalesSheetElement[], id: string) => els.find((e) => e.id === id);
+const geom = (r: Rect) => ({ x: r.x, y: r.y, w: r.w, h: r.h });
+const inside = (outer: Rect, r: Rect) => r.x >= outer.x - 1e-6 && r.y >= outer.y - 1e-6 && r.x + r.w <= outer.x + outer.w + 1e-6 && r.y + r.h <= outer.y + outer.h + 1e-6;
+const overlaps = (a: Rect, b: Rect) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
-const imageCount = (doc: { elements: { type: string }[] }) =>
-  doc.elements.filter((e) => e.type === "image").length;
-
-const baseParts: SpecSheetParts = {
-  heading: "西荻リリエンハイム　4号室",
-  priceText: "6590万円",
-  rows: [
-    { label: "所在地", value: "東京都杉並区西荻北1-4-3" },
-    { label: "用途地域", value: "第一種中高層住居専用地域" },
-  ],
-};
-
-/**
- * [Task2] 座標/概要表フォントは computeSpecSheetLayout（最適化エンジン）に委譲された
- * ため、決め打ち値ではなくエンジンの出力を期待値として使う（＝buildSpecSheetDocument が
- * L.* を正しい要素へ配線しているかを検証する）。baseParts は photos/floorPlanImage
- * 未指定＝photoCount:0・hasFloorPlan:false。footerHeight はビルダー内の
- * DEFAULT_FOOTER_H と同値（インポートして直接使う＝定数がズレても追従する）。
- */
-const FOOTER_H = DEFAULT_FOOTER_H;
-const L0 = computeSpecSheetLayout({
-  photoCount: 0,
-  specRowCount: baseParts.rows.length,
-  hasFloorPlan: false,
-  footerHeight: FOOTER_H,
-});
-/** floorPlanImage 指定時（hasFloorPlan:true）の期待値。座標は [@review Fix1] でエンジンが
- * 決定的に算出する（写真域の上端＝固定値ではない）ため、固定値ではなくエンジン出力を使う。 */
-const L0Plan = computeSpecSheetLayout({
-  photoCount: 0,
-  specRowCount: baseParts.rows.length,
-  hasFloorPlan: true,
-  footerHeight: FOOTER_H,
-});
-
-describe("buildSpecSheetDocument（種別非依存の自社マイソク版面レイアウト・[F2-A Task1]）", () => {
-  it("与えた rows がそのままスペック表(overview)要素に入る", () => {
-    const doc = buildSpecSheetDocument(baseParts);
-    const labels = tableLabels(doc);
-    expect(labels).toEqual(["所在地", "用途地域"]);
-    expect(findEl(doc, "overview")).toMatchObject({
-      type: "table",
-      x: L0.overview.x,
-      y: L0.overview.y,
-      w: L0.overview.w,
-      h: L0.overview.h,
-      z: 1,
-      rows: baseParts.rows,
-      style: { fontSizePt: L0.overview.fontSizePt, borderColor: "#cccccc", labelColor: "#15324f" },
-    });
+describe("buildSpecSheetDocument(消費者向けひな型)", () => {
+  it("theme に目印・書体・紺を入れる", () => {
+    const doc = buildSpecSheetDocument(base);
+    expect(isConsumerTemplate(doc)).toBe(true);
+    expect(doc.theme).toEqual({ fontFamily: CONSUMER_FONT_FAMILY, accentColor: "#1f3a5f", template: "consumer-2026-09" });
   });
 
-  it("catchCopy が空('') でも catch-band(shape) と catch-copy(text) 要素は常に出る", () => {
-    const doc = buildSpecSheetDocument({ ...baseParts, catchCopy: undefined });
-    expect(findEl(doc, "catch-band")).toMatchObject({
-      type: "shape",
-      x: 10,
-      y: 8,
-      w: 277,
-      h: 16,
-      z: 1,
-      shape: "rect",
-      fill: "#15324f",
-    });
-    expect(findEl(doc, "catch-copy")).toMatchObject({
-      type: "text",
-      x: 16,
-      y: 8,
-      w: 265,
-      h: 16,
-      z: 2,
-      content: "",
-      style: { fontSizePt: 13, bold: true, color: "#ffffff", align: "center" },
-    });
-  });
-
-  it("catchCopy を渡すと catch-copy 要素の content に反映される", () => {
-    const doc = buildSpecSheetDocument({ ...baseParts, catchCopy: "北東角部屋" });
-    expect(findEl(doc, "catch-copy")).toMatchObject({ content: "北東角部屋" });
-  });
-
-  it("heading/priceText が heading/price 要素にそのまま入る", () => {
-    const doc = buildSpecSheetDocument(baseParts);
-    expect(findEl(doc, "heading")).toMatchObject({
-      type: "text",
-      x: L0.heading.x,
-      y: L0.heading.y,
-      w: L0.heading.w,
-      h: L0.heading.h,
-      z: 2,
-      content: "西荻リリエンハイム　4号室",
-      style: { fontSizePt: 11, bold: true, color: "#15324f" },
-    });
-    expect(findEl(doc, "price")).toMatchObject({
-      type: "text",
-      x: L0.price.x,
-      y: L0.price.y,
-      w: L0.price.w,
-      h: L0.price.h,
-      z: 2,
-      content: "6590万円",
-      style: { fontSizePt: 20, bold: true, color: "#d0331a" },
-    });
-  });
-
-  it("priceText が空文字でも price 要素は出る(contentが空)", () => {
-    const doc = buildSpecSheetDocument({ ...baseParts, priceText: "" });
-    expect(findEl(doc, "price")).toMatchObject({ type: "text", content: "" });
-  });
-
-  it("salesPoints は ◆ 区切りで結合して sales-points 要素に入る(未指定なら空文字)", () => {
-    const withPoints = buildSpecSheetDocument({
-      ...baseParts,
-      salesPoints: ["リノベ済", "南向き", "即入居可"],
-    });
-    expect(findEl(withPoints, "sales-points")).toMatchObject({
-      type: "text",
-      x: L0.salesPoints.x,
-      y: L0.salesPoints.y,
-      w: L0.salesPoints.w,
-      h: L0.salesPoints.h,
-      z: 2,
-      content: "◆リノベ済　◆南向き　◆即入居可",
-      style: { fontSizePt: 9, bold: true, color: "#15324f" },
-    });
-
-    const withoutPoints = buildSpecSheetDocument(baseParts);
-    expect(findEl(withoutPoints, "sales-points")).toMatchObject({ content: "" });
-  });
-
-  it("salesPoints の前後空白はtrimされ、空要素は落ちる", () => {
-    const doc = buildSpecSheetDocument({
-      ...baseParts,
-      salesPoints: ["  リノベ済  ", "", "   ", "南向き"],
-    });
-    expect(findEl(doc, "sales-points")).toMatchObject({ content: "◆リノベ済　◆南向き" });
-  });
-
-  it("footer は buildFooterBand(L.footer, parts.footer) の展開がそのまま入る（[Task3] company/company-detailsから置換）", () => {
-    const doc = buildSpecSheetDocument({ ...baseParts, footer: { transactionType: "専任媒介" } });
-    const expectedFooterEls = buildFooterBand(L0.footer, { transactionType: "専任媒介" });
-    expect(expectedFooterEls.length).toBeGreaterThan(0);
-    for (const expectedEl of expectedFooterEls) {
-      expect(findEl(doc, expectedEl.id)).toEqual(expectedEl);
-    }
-  });
-
-  it("footer未指定でも会社ブロック(COMPANY_INFO固定)は出る。取引条件/担当が全空なら担当テーブルは省略", () => {
-    const withoutFooter = buildSpecSheetDocument(baseParts);
-    expect(findEl(withoutFooter, "footer-name-ja")).toMatchObject({ content: COMPANY_INFO.nameJa });
-    expect(findEl(withoutFooter, "footer-staff-table")).toBeUndefined();
-  });
-
-  it("floorPlanImage を指定したときのみ floor-plan の image 要素が追加される", () => {
-    const withPlan = buildSpecSheetDocument({
-      ...baseParts,
-      floorPlanImage: { fileUrl: "/uploads/plan.jpg" },
-    });
-    expect(L0Plan.floorPlan).not.toBeNull();
-    const fp = L0Plan.floorPlan!;
-    expect(findEl(withPlan, "floor-plan")).toMatchObject({
-      type: "image",
-      x: fp.x,
-      y: fp.y,
-      w: fp.w,
-      h: fp.h,
-      z: 1,
-      src: "/uploads/plan.jpg",
-      fit: "contain",
-      alt: "間取り図",
-    });
-
-    const withoutPlan = buildSpecSheetDocument(baseParts);
-    expect(findEl(withoutPlan, "floor-plan")).toBeUndefined();
-
-    const withNullPlan = buildSpecSheetDocument({ ...baseParts, floorPlanImage: null });
-    expect(findEl(withNullPlan, "floor-plan")).toBeUndefined();
-  });
-
-  it("photos を渡すと写真枚数分の image 要素が追加される(0〜3枚)", () => {
-    const photos3 = [
-      { fileUrl: "/uploads/1.jpg" },
-      { fileUrl: "/uploads/2.jpg" },
-      { fileUrl: "/uploads/3.jpg" },
+  it("各要素が computeConsumerLayout の位置に置かれる", () => {
+    const doc = buildSpecSheetDocument(base);
+    const L = computeConsumerLayout({ mainRowCount: 8, detailRowCount: 5 });
+    const expected: [string, Rect][] = [
+      ["catch-band", L.catchBand], ["catch-copy", L.catchCopy], ["kind-tag", L.kindTag], ["heading", L.heading],
+      ["price", L.price], ["overview", L.mainTable], ["overview-detail-a", L.detailLeft], ["overview-detail-b", L.detailRight],
+      ["sales-points-band", L.salesPointsBand], ["sales-points", L.salesPoints],
     ];
-    expect(imageCount(buildSpecSheetDocument({ ...baseParts, photos: photos3 }))).toBe(3);
-    expect(imageCount(buildSpecSheetDocument({ ...baseParts, photos: [] }))).toBe(0);
-    expect(imageCount(buildSpecSheetDocument(baseParts))).toBe(0);
+    for (const [id, r] of expected) expect(byId(doc.elements, id)).toMatchObject(geom(r));
+    expect(byId(doc.elements, "overview")).toMatchObject({ style: { fontSizePt: L.mainTable.fontSizePt } });
+    expect(byId(doc.elements, "overview-detail-a")).toMatchObject({ style: { fontSizePt: L.detailFontSizePt } });
   });
 
-  it("作成時の種写真も切り取らず全体表示（fit:\"contain\"・要件②）", () => {
-    const doc = buildSpecSheetDocument({
-      ...baseParts,
-      photos: [{ fileUrl: "/uploads/1.jpg" }, { fileUrl: "/uploads/2.jpg" }],
-    });
-    const photoImgs = doc.elements.filter((e) => e.type === "image" && e.id.startsWith("photo-"));
-    expect(photoImgs).toHaveLength(2);
-    for (const img of photoImgs) {
-      expect((img as { fit: string }).fit).toBe("contain");
+  it("文字と色(紺帯・白いキャッチ・赤い価格・物件種目)", () => {
+    const doc = buildSpecSheetDocument({ ...base, catchCopy: "駅徒歩6分" });
+    expect(byId(doc.elements, "catch-band")).toMatchObject({ type: "shape", fill: "#1f3a5f" });
+    expect(byId(doc.elements, "catch-copy")).toMatchObject({ content: "駅徒歩6分", style: { fontSizePt: 16, bold: true, color: "#ffffff" } });
+    expect(byId(doc.elements, "kind-tag")).toMatchObject({ content: "中古戸建", style: { color: "#ffffff", align: "right" } });
+    expect(byId(doc.elements, "heading")).toMatchObject({ style: { fontSizePt: 14, bold: true, color: "#1f3a5f" } });
+    expect(byId(doc.elements, "price")).toMatchObject({ content: "6980万円", style: { fontSizePt: 32, bold: true, color: "#b7281e" } });
+  });
+
+  it("主要表=8行・線なし・1行おき淡紺 / 詳細表=左右に分割・線なし・色なし", () => {
+    const doc = buildSpecSheetDocument(base);
+    expect(byId(doc.elements, "overview")).toMatchObject({ rows: base.mainRows, style: { borderless: true, stripeColor: "#eef2f7", cellPaddingMm: 1.2 } });
+    const a = byId(doc.elements, "overview-detail-a");
+    const b = byId(doc.elements, "overview-detail-b");
+    expect(a).toMatchObject({ rows: base.detailRows.slice(0, 3), style: { borderless: true, cellPaddingMm: 0.8 } });
+    expect(b).toMatchObject({ rows: base.detailRows.slice(3) });
+    expect(a?.type === "table" && a.style.stripeColor).toBeFalsy();
+  });
+
+  it("ポイントは見出し付きで最大3つ・無ければ空", () => {
+    const doc = buildSpecSheetDocument({ ...base, salesPoints: ["南向き", " ", "外壁塗装済", "学校近い", "4つ目"] });
+    expect(byId(doc.elements, "sales-points")).toMatchObject({ content: "おすすめポイント　◆南向き　◆外壁塗装済　◆学校近い" });
+    expect(byId(buildSpecSheetDocument(base).elements, "sales-points")).toMatchObject({ content: "" });
+    expect(byId(doc.elements, "sales-points-band")).toMatchObject({ type: "shape", fill: "#eef2f7" });
+  });
+
+  it("会社帯は buildConsumerFooterBand と同じ", () => {
+    const footer = { transactionType: "専任媒介", staff: "山田" };
+    const doc = buildSpecSheetDocument({ ...base, footer });
+    const L = computeConsumerLayout({ mainRowCount: 8, detailRowCount: 5 });
+    for (const el of buildConsumerFooterBand(L.footer, footer)) expect(byId(doc.elements, el.id)).toEqual(el);
+  });
+
+  for (const photoCount of [0, 1, 3]) {
+    for (const withPlan of [false, true]) {
+      it(`写真${photoCount}枚・間取り図${withPlan ? "あり" : "なし"}: 写真枠内・重ならない・並び順`, () => {
+        const doc = buildSpecSheetDocument({
+          ...base,
+          photos: Array.from({ length: photoCount }, (_, i) => ({ fileUrl: `/uploads/p${i}.jpg` })),
+          floorPlanImage: withPlan ? { fileUrl: "/uploads/plan.png" } : null,
+        });
+        const images = doc.elements.filter((e) => e.type === "image");
+        const expectedIds = Array.from({ length: photoCount }, (_, i) => `photo-${i + 1}`);
+        if (withPlan) expectedIds.splice(Math.min(1, expectedIds.length), 0, "floor-plan");
+        expect(images.map((e) => e.id)).toEqual(expectedIds);
+        for (const img of images) {
+          expect(inside(CONSUMER_PHOTO_ZONE, img)).toBe(true);
+          expect(img.type === "image" && img.fit).toBe("contain");
+        }
+        for (let i = 0; i < images.length; i++) for (let j = i + 1; j < images.length; j++) expect(overlaps(images[i], images[j])).toBe(false);
+        expect(salesSheetDocumentSchema.safeParse(doc).success).toBe(true);
+      });
     }
-  });
+  }
 
-  it("A4横で schema 検証を通る（保存可能な document）", () => {
-    const doc = buildSpecSheetDocument({
-      ...baseParts,
-      catchCopy: "駅近角部屋",
-      salesPoints: ["リノベ済", "南向き"],
-      footer: { transactionType: "専任媒介" },
-      photos: [{ fileUrl: "/uploads/1.jpg" }],
-      floorPlanImage: { fileUrl: "/uploads/plan.jpg" },
+  for (const n of [0, 12, 26]) {
+    it(`詳細${n}行でも保存できる(schema)`, () => {
+      expect(salesSheetDocumentSchema.safeParse(buildSpecSheetDocument({ ...base, detailRows: rows("詳細", n) })).success).toBe(true);
     });
-    expect(doc.page.orientation).toBe("landscape");
-    expect(salesSheetDocumentSchema.safeParse(doc).success).toBe(true);
-  });
+  }
 });

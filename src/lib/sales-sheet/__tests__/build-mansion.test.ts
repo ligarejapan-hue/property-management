@@ -2,8 +2,6 @@ import { describe, it, expect } from "vitest";
 import { buildSaleMansionDocument } from "../build-document";
 import { salesSheetDocumentSchema } from "../document-schema";
 import { mapOccupancyStatusToMansionOccupancy } from "../occupancy";
-import { computeSpecSheetLayout, DEFAULT_FOOTER_H } from "../layout-engine";
-import { buildFooterBand } from "../footer-band";
 
 const base = {
   property: {
@@ -28,12 +26,10 @@ const tableRow = (doc: { elements: unknown[] }, label: string): string | undefin
   }
   return undefined;
 };
-const tableLabels = (doc: { elements: unknown[] }): string[] => {
-  for (const el of doc.elements as { type: string; rows?: { label: string; value: string }[] }[]) {
-    if (el.type === "table") return (el.rows ?? []).map((row) => row.label);
-  }
-  return [];
-};
+const tableLabels = (doc: { elements: unknown[] }): string[] =>
+  (doc.elements as { type: string; rows?: { label: string; value: string }[] }[])
+    .filter((el) => el.type === "table" && !(el as { id?: string }).id?.startsWith("footer-"))
+    .flatMap((el) => (el.rows ?? []).map((row) => row.label));
 const imageCount = (doc: { elements: { type: string }[] }) =>
   doc.elements.filter((e) => e.type === "image").length;
 
@@ -120,25 +116,26 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
       building: { ...base.building, managementCompany: "リガーレ管理", totalUnits: 24 },
       photos: base.photos,
     });
-    expect(tableRow(doc, "管理費")).toBe("12,000円/月");
-    expect(tableRow(doc, "修繕積立金")).toBe("8,500円/月");
-    expect(tableRow(doc, "所在階")).toBe("4階");
-    expect(tableRow(doc, "地上階")).toBe("7階");
+    expect(tableRow(doc, "管理費・修繕積立金")).toBe("管理費 12,000円/月 / 修繕 8,500円/月");
+    expect(tableRow(doc, "所在階・階数")).toBe("4階 / 地上7階");
     expect(tableRow(doc, "総戸数")).toBe("24戸");
     expect(tableRow(doc, "管理会社")).toBe("リガーレ管理");
     // mapOccupancyStatusToMansionOccupancy(occupied) = "居住中"（売マンションの選択肢語彙。
     // 旧: localizeOccupancy(occupied) = "入居中" だった → @codex P2 fix で語彙を統一）。
-    expect(tableRow(doc, "現況")).toBe("居住中");
+    expect(tableRow(doc, "現況・引渡")).toBe("居住中");
   });
 
   it("物件種目(propertyType)は自動反映元が無く、overrideのみで反映される([T4→T5]で新規配線)", () => {
+    // [Task5] 物件種目は表の行ではなくキャッチ帯右の kind-tag に出る(表には出さない仕様)。
     const withOverride = buildSaleMansionDocument({
       ...base,
       overrides: { propertyType: "中古マンション" },
     });
-    expect(tableRow(withOverride, "物件種目")).toBe("中古マンション");
+    expect(tableLabels(withOverride)).not.toContain("物件種目");
+    expect(findEl(withOverride, "kind-tag")).toMatchObject({ content: "中古マンション" });
     const withoutOverride = buildSaleMansionDocument({ ...base, overrides: {} });
-    expect(tableRow(withoutOverride, "物件種目")).toBe("");
+    // kindLabelOf のフォールバック(種別の既定名)。
+    expect(findEl(withoutOverride, "kind-tag")).toMatchObject({ content: "マンション" });
   });
 
   it("現況(occupancy)はoverride優先、無ければmapOccupancyStatusToMansionOccupancyの決定的デフォルト(@codex P2 fix: 売マンションの選択肢語彙に統一)", () => {
@@ -147,7 +144,7 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
       property: { ...base.property, occupancyStatus: "vacant" },
       overrides: { occupancy: "賃貸中" },
     });
-    expect(tableRow(overridden, "現況")).toBe("賃貸中");
+    expect(tableRow(overridden, "現況・引渡")).toBe("賃貸中");
     const auto = buildSaleMansionDocument({
       ...base,
       property: { ...base.property, occupancyStatus: "vacant" },
@@ -155,7 +152,7 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     });
     // mapOccupancyStatusToMansionOccupancy(vacant) = "空家"。
     // 旧: localizeOccupancy(vacant) = "空室"（マイソクの選択肢[居住中/空家/賃貸中/未完成]に無い語彙だった）。
-    expect(tableRow(auto, "現況")).toBe("空家");
+    expect(tableRow(auto, "現況・引渡")).toBe("空家");
   });
 
   it.each([
@@ -177,9 +174,9 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
         property: { ...base.property, occupancyStatus },
         overrides: { occupancy: mapOccupancyStatusToMansionOccupancy(occupancyStatus) },
       });
-      expect(tableRow(withoutOverride, "現況")).toBe(expected);
+      expect(tableRow(withoutOverride, "現況・引渡")).toBe(expected);
       // タイミングに関わらず同一物件は同一の現況になる（本 P2 fix の核心）。
-      expect(tableRow(withoutOverride, "現況")).toBe(tableRow(withAutoSeededOverride, "現況"));
+      expect(tableRow(withoutOverride, "現況・引渡")).toBe(tableRow(withAutoSeededOverride, "現況・引渡"));
     },
   );
 
@@ -244,106 +241,18 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     expect(findEl(doc, "price")).toMatchObject({ content: "6590万円" });
   });
 
-  // 版面レイアウトは computeSpecSheetLayout（最適化エンジン）に委譲されている
-  // （[Task2]）。id・content・スタイル(フォント種別/太字/色)は不変であることを固定しつつ、
-  // 座標とoverviewのfontSizePtはエンジンの出力(L)を期待値として使う＝
-  // buildSaleMansionDocument→buildSpecSheetDocument が L.* を正しい要素へ配線している
-  // ことを検証する（決め打ち座標ではなくエンジン契約に対するリグレッション）。
-  it("レイアウト: catch-band/heading/price/overview/sales-points/会社帯(footer-*) のid・座標・スタイルがエンジン出力どおりに配線される", () => {
+  it("新しい紙面で組まれる(物件名・価格・物件種目・主要表)", () => {
     const doc = buildSaleMansionDocument({
       ...base,
-      overrides: {
-        price: "6590",
-        catchCopy: "北東角部屋",
-        salesPoints: ["リノベ済"],
-        transactionType: "専任媒介",
-      },
+      overrides: { price: "6590", propertyType: "中古マンション", catchCopy: "北東角部屋", salesPoints: ["リノベ済"], transactionType: "専任媒介" },
     });
-
-    // base.photos は1枚・floorPlanImage未指定＝hasFloorPlan false。行数はスペック表の
-    // 実際の行から取得する（field-model側の項目数に依存させない）。
-    const overviewEl = findEl(doc, "overview") as { rows: unknown[] } | undefined;
-    const L = computeSpecSheetLayout({
-      photoCount: 1,
-      specRowCount: overviewEl?.rows.length ?? 0,
-      hasFloorPlan: false,
-      footerHeight: DEFAULT_FOOTER_H, // build-document.ts の DEFAULT_FOOTER_H と同値
-    });
-
-    expect(findEl(doc, "catch-band")).toMatchObject({
-      type: "shape",
-      x: L.catchBand.x,
-      y: L.catchBand.y,
-      w: L.catchBand.w,
-      h: L.catchBand.h,
-      z: 1,
-      shape: "rect",
-      fill: "#15324f",
-    });
-
-    expect(findEl(doc, "catch-copy")).toMatchObject({
-      type: "text",
-      x: L.catchCopy.x,
-      y: L.catchCopy.y,
-      w: L.catchCopy.w,
-      h: L.catchCopy.h,
-      z: 2,
-      content: "北東角部屋",
-      style: { fontSizePt: 13, bold: true, color: "#ffffff", align: "center" },
-    });
-
-    expect(findEl(doc, "heading")).toMatchObject({
-      type: "text",
-      x: L.heading.x,
-      y: L.heading.y,
-      w: L.heading.w,
-      h: L.heading.h,
-      z: 2,
-      content: "西荻リリエンハイム",
-      style: { fontSizePt: 11, bold: true, color: "#15324f" },
-    });
-
-    expect(findEl(doc, "price")).toMatchObject({
-      type: "text",
-      x: L.price.x,
-      y: L.price.y,
-      w: L.price.w,
-      h: L.price.h,
-      z: 2,
-      content: "6590万円",
-      style: { fontSizePt: 20, bold: true, color: "#d0331a" },
-    });
-
-    expect(findEl(doc, "overview")).toMatchObject({
-      type: "table",
-      x: L.overview.x,
-      y: L.overview.y,
-      w: L.overview.w,
-      h: L.overview.h,
-      z: 1,
-      style: { fontSizePt: L.overview.fontSizePt, borderColor: "#cccccc", labelColor: "#15324f" },
-    });
-
-    expect(findEl(doc, "sales-points")).toMatchObject({
-      type: "text",
-      x: L.salesPoints.x,
-      y: L.salesPoints.y,
-      w: L.salesPoints.w,
-      h: L.salesPoints.h,
-      z: 2,
-      content: "◆リノベ済",
-      style: { fontSizePt: 9, bold: true, color: "#15324f" },
-    });
-
-    // 会社帯（buildFooterBand）: overrides.transactionType のみ指定＝担当/取引士/特記事項は
-    // 全空なのでコンパクト版（footer-staff-table 省略）。エンジンの footer 矩形 + 同じ
-    // FooterBandData を渡した buildFooterBand の出力と厳密に一致することを検証する
-    // （[Task3] company/company-details の2text要素から置換）。
-    const expectedFooterEls = buildFooterBand(L.footer, { transactionType: "専任媒介" });
-    expect(expectedFooterEls.length).toBeGreaterThan(0);
-    for (const expectedEl of expectedFooterEls) {
-      expect(findEl(doc, expectedEl.id)).toEqual(expectedEl);
-    }
+    expect(doc.theme.template).toBe("consumer-2026-09");
+    expect(findEl(doc, "heading")).toMatchObject({ content: "西荻リリエンハイム" });
+    expect(findEl(doc, "price")).toMatchObject({ content: "6590万円", style: { color: "#b7281e" } });
+    expect(findEl(doc, "kind-tag")).toMatchObject({ content: "中古マンション" });
+    expect(findEl(doc, "sales-points")).toMatchObject({ content: "おすすめポイント　◆リノベ済" });
+    const overview = findEl(doc, "overview") as { rows?: { label: string }[] } | undefined;
+    expect(overview?.rows?.map((r) => r.label)).toEqual(["交通", "間取り", "専有面積", "バルコニー", "築年月", "所在階・階数", "管理費・修繕積立金", "現況・引渡"]);
     expect(findEl(doc, "footer-staff-table")).toBeUndefined();
   });
 
