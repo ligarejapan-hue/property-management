@@ -9,7 +9,7 @@ export type SheetValues = Record<string, SheetValue>;
  * 接道幅員 等）でユーザーが単位まで入力した場合の二重付与を防ぐ（例: "3,480万円" +
  * unit"万円" → "3,480万円"のまま／"3,480万円万円"にしない）。
  */
-function formatValue(field: SheetField, v: SheetValue): string {
+export function formatValue(field: SheetField, v: SheetValue): string {
   if (field.widget === "multiselect") {
     return Array.isArray(v) ? v.filter(Boolean).join(" / ") : "";
   }
