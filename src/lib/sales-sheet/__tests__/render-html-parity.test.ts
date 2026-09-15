@@ -154,3 +154,27 @@ describe("renderDocumentToHtml — SalesSheetRenderer パリティガード", ()
     expect(() => renderToStaticMarkup(createElement(SalesSheetRenderer, { document: bad }))).toThrow();
   });
 });
+
+describe("パリティ: 線なし・1行おき色の表(消費者向けひな型)", () => {
+  const doc = parseSalesSheetDocument({
+    page: A4_LANDSCAPE,
+    theme: { fontFamily: "sans-serif", accentColor: "#1f3a5f" },
+    elements: [{
+      id: "t", type: "table", x: 0, y: 0, w: 100, h: 30, z: 1,
+      rows: [{ label: "交通", value: "徒歩6分" }, { label: "間取り", value: "4LDK" }],
+      style: { borderless: true, stripeColor: "#eef2f7", cellPaddingMm: 1.2 },
+    }],
+  });
+  const serializer = renderDocumentToHtml(doc);
+  const react = renderToStaticMarkup(createElement(SalesSheetRenderer, { document: doc }));
+  for (const signal of ["#eef2f7", "1.2mm 1.44mm", "徒歩6分"]) {
+    it(`両レンダラが "${signal}" を含む`, () => {
+      expect(serializer).toContain(signal);
+      expect(react).toContain(signal);
+    });
+  }
+  it("両レンダラとも罫線を出さない", () => {
+    expect(serializer).not.toContain("0.2mm solid");
+    expect(react).not.toContain("0.2mm solid");
+  });
+});

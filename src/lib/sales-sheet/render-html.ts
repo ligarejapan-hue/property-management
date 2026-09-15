@@ -1,6 +1,7 @@
 import type { SalesSheetDocument, SalesSheetElement } from "./document-schema";
 import { parseSalesSheetDocument } from "./document-schema";
 import { sanitizeCssValue } from "./css-safety";
+import { tableCellStyle } from "./table-cell-style";
 
 /**
  * document を完全なHTML文書に直列化する。
@@ -85,8 +86,6 @@ function renderElement(el: SalesSheetElement): string {
 
   if (el.type === "table") {
     const s = el.style;
-    const safeBorderColor = sanitizeCssValue(s.borderColor ?? "#cccccc");
-    const border = `0.2mm solid ${safeBorderColor}`;
     const safeLabelColor = s.labelColor ? sanitizeCssValue(s.labelColor) : null;
     const safeValueColor = s.valueColor ? sanitizeCssValue(s.valueColor) : null;
     const tableStyle = inlineStyle({
@@ -95,9 +94,10 @@ function renderElement(el: SalesSheetElement): string {
       "table-layout": "fixed",
       "font-size": s.fontSizePt ? `${s.fontSizePt}pt` : null,
     });
-    const rows = el.rows.map((r) => {
-      const tdLabelStyle = inlineStyle({ border, color: safeLabelColor, padding: "0.5mm 1mm", width: "32%", "font-weight": "600", "vertical-align": "top" });
-      const tdValueStyle = inlineStyle({ border, color: safeValueColor, padding: "0.5mm 1mm", "vertical-align": "top" });
+    const rows = el.rows.map((r, i) => {
+      const c = tableCellStyle(s, i);
+      const tdLabelStyle = inlineStyle({ border: c.border, color: safeLabelColor, padding: c.padding, width: "32%", "font-weight": "600", "vertical-align": "top", background: c.background });
+      const tdValueStyle = inlineStyle({ border: c.border, color: safeValueColor, padding: c.padding, "vertical-align": "top", background: c.background });
       return `<tr><td style="${esc(tdLabelStyle)}">${esc(r.label)}</td><td style="${esc(tdValueStyle)}">${esc(r.value)}</td></tr>`;
     }).join("");
     return `<table style="${esc(tableStyle)}"><tbody>${rows}</tbody></table>`;

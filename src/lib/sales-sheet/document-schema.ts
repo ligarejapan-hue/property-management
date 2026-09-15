@@ -54,6 +54,12 @@ export const tableElementSchema = z.object({
       labelColor: z.string().refine(isCssColor, "unsafe color").optional(),
       valueColor: z.string().refine(isCssColor, "unsafe color").optional(),
       borderColor: z.string().refine(isCssColor, "unsafe color").optional(),
+      /** 罫線を出さない(消費者向けひな型)。未指定=従来どおり罫線あり。 */
+      borderless: z.boolean().optional(),
+      /** 偶数行(2,4,…行目)のセル背景色。 */
+      stripeColor: z.string().refine(isCssColor, "unsafe color").optional(),
+      /** セル余白(mm)。上下=値・左右=値×1.2。未指定=0.5mm 1mm。 */
+      cellPaddingMm: z.number().nonnegative().optional(),
     })
     .default({}),
 });
@@ -102,9 +108,13 @@ export const pageSchema = z.object({
   orientation: z.enum(["landscape", "portrait"]),
 });
 
+/** 消費者向けひな型(2026-09)で作った図面の目印。無い図面は旧ひな型。 */
+export const CONSUMER_TEMPLATE = "consumer-2026-09" as const;
+
 export const themeSchema = z.object({
   fontFamily: z.string().refine(isSafeFontFamily, "unsafe font-family"),
   accentColor: z.string().refine(isCssColor, "unsafe color"),
+  template: z.literal(CONSUMER_TEMPLATE).optional(),
 });
 
 export const salesSheetDocumentSchema = z.object({
@@ -130,4 +140,9 @@ export const A4_PORTRAIT: SalesSheetPage = { width: 210, height: 297, orientatio
 
 export function parseSalesSheetDocument(input: unknown): SalesSheetDocument {
   return salesSheetDocumentSchema.parse(input);
+}
+
+/** 消費者向けひな型で作った図面か(自動整列などの新しい計算が使えるか)。 */
+export function isConsumerTemplate(doc: { theme: { template?: string } }): boolean {
+  return doc.theme.template === CONSUMER_TEMPLATE;
 }

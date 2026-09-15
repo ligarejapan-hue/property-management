@@ -11,6 +11,7 @@ import type {
 } from "@/lib/sales-sheet/document-schema";
 import { parseSalesSheetDocument } from "@/lib/sales-sheet/document-schema";
 import { sanitizeCssValue } from "@/lib/sales-sheet/css-safety";
+import { tableCellStyle } from "@/lib/sales-sheet/table-cell-style";
 
 const mm = (v: number) => `${v}mm`;
 
@@ -64,8 +65,6 @@ function ImageEl({ el }: { el: ImageElement }) {
 
 function TableEl({ el }: { el: TableElement }) {
   const s = el.style;
-  const safeBorderColor = sanitizeCssValue(s.borderColor ?? "#cccccc");
-  const border = `0.2mm solid ${safeBorderColor}`;
   const safeLabelColor = s.labelColor ? sanitizeCssValue(s.labelColor) : undefined;
   const safeValueColor = s.valueColor ? sanitizeCssValue(s.valueColor) : undefined;
   return (
@@ -78,16 +77,21 @@ function TableEl({ el }: { el: TableElement }) {
       }}
     >
       <tbody>
-        {el.rows.map((r, i) => (
-          <tr key={i}>
-            <td style={{ border, color: safeLabelColor, padding: "0.5mm 1mm", width: "32%", fontWeight: 600, verticalAlign: "top" }}>
-              {r.label}
-            </td>
-            <td style={{ border, color: safeValueColor, padding: "0.5mm 1mm", verticalAlign: "top" }}>
-              {r.value}
-            </td>
-          </tr>
-        ))}
+        {el.rows.map((r, i) => {
+          const c = tableCellStyle(s, i);
+          const border = c.border ?? undefined;
+          const background = c.background ?? undefined;
+          return (
+            <tr key={i}>
+              <td style={{ border, color: safeLabelColor, padding: c.padding, width: "32%", fontWeight: 600, verticalAlign: "top", background }}>
+                {r.label}
+              </td>
+              <td style={{ border, color: safeValueColor, padding: c.padding, verticalAlign: "top", background }}>
+                {r.value}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
