@@ -133,7 +133,9 @@ function consumerText(
 /** 取引条件/担当の表(線なし)。作成時と取引情報パネルの再生成で共有する。 */
 export function buildConsumerFooterTransactionElements(footer: Rect, data: FooterBandData): SalesSheetElement[] {
   const hasStaff = !!(data.staff || data.agent || data.specialNotes);
-  const tableStyle = { fontSizePt: 7.5, labelColor: CONSUMER_COLORS.navy, valueColor: CONSUMER_COLORS.ink, borderless: true, cellPaddingMm: 0.4 };
+  // cellPaddingMm=0.2(旧0.4): 0.4 だと「取引態様」のラベルが2行に折り返す。フォントサイズは
+  // 7.5pt のまま、左右パディングのみ詰めて1行に収める([Fix round 1]・コントローラ裁定)。
+  const tableStyle = { fontSizePt: 7.5, labelColor: CONSUMER_COLORS.navy, valueColor: CONSUMER_COLORS.ink, borderless: true, cellPaddingMm: 0.2 };
   const termsRows = pickRows([
     [TERMS_LABELS.transactionType, data.transactionType],
     [TERMS_LABELS.adType, data.adType],

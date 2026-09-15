@@ -22,6 +22,15 @@ describe("renderDocumentToHtml", () => {
     const html = renderDocumentToHtml(sampleDocument);
     expect(html).toMatch(/isolation\s*:\s*isolate/);
   });
+
+  // [Fix round 1] 回帰ガード: borderless を指定していない(旧ひな型の)表は、
+  // 従来通り <table> 自体が箱サイズ(height含む)を持つ。sampleDocument の
+  // "overview" テーブルは borderless 未指定・h=120。
+  it("borderless指定が無い(旧ひな型の)表は <table> が height を保持する(後方互換)", () => {
+    const html = renderDocumentToHtml(sampleDocument);
+    const tableTag = html.match(/<table[^>]*>/)?.[0] ?? "";
+    expect(tableTag).toContain("height:120mm");
+  });
 });
 
 describe("renderDocumentToHtml — font-family XSSエスケープ (CSS breakout防止)", () => {

@@ -67,14 +67,23 @@ function TableEl({ el }: { el: TableElement }) {
   const s = el.style;
   const safeLabelColor = s.labelColor ? sanitizeCssValue(s.labelColor) : undefined;
   const safeValueColor = s.valueColor ? sanitizeCssValue(s.valueColor) : undefined;
-  return (
+  const table = (
     <table
-      style={{
-        ...boxStyle(el),
-        borderCollapse: "collapse",
-        tableLayout: "fixed",
-        fontSize: s.fontSizePt ? `${s.fontSizePt}pt` : undefined,
-      }}
+      style={
+        s.borderless
+          ? {
+              width: "100%",
+              borderCollapse: "collapse",
+              tableLayout: "fixed",
+              fontSize: s.fontSizePt ? `${s.fontSizePt}pt` : undefined,
+            }
+          : {
+              ...boxStyle(el),
+              borderCollapse: "collapse",
+              tableLayout: "fixed",
+              fontSize: s.fontSizePt ? `${s.fontSizePt}pt` : undefined,
+            }
+      }
     >
       <tbody>
         {el.rows.map((r, i) => {
@@ -95,6 +104,10 @@ function TableEl({ el }: { el: TableElement }) {
       </tbody>
     </table>
   );
+  // borderless: 箱サイズは外側の <div>(boxStyle)が持ち、<table> は width:100% のみ
+  // (height を持たせるとブラウザが余白を行へ均等配分してしまうため・[Fix round 1])。
+  // borderless で無い(旧ひな型)表は従来どおり <table> 自身が箱サイズを持つ(後方互換)。
+  return s.borderless ? <div style={boxStyle(el)}>{table}</div> : table;
 }
 
 function BadgeEl({ el }: { el: BadgeElement }) {

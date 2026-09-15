@@ -177,4 +177,25 @@ describe("パリティ: 線なし・1行おき色の表(消費者向けひな型
     expect(serializer).not.toContain("0.2mm solid");
     expect(react).not.toContain("0.2mm solid");
   });
+
+  // [Fix round 1] 行が枠いっぱいに伸びる不具合の再発防止: borderless な表は
+  // <table> 自体に height を持たせず、箱サイズ(position/width/height)は外側の
+  // <div>(boxStyle)に持たせる。table 側は width:100% のみで高さは行の内容に従う。
+  it("両レンダラとも <table> の開始タグに height を持たない(borderless)", () => {
+    const serializerTableTag = serializer.match(/<table[^>]*>/)?.[0] ?? "";
+    const reactTableTag = react.match(/<table[^>]*>/)?.[0] ?? "";
+    expect(serializerTableTag).not.toBe("");
+    expect(reactTableTag).not.toBe("");
+    expect(serializerTableTag).not.toMatch(/height/);
+    expect(reactTableTag).not.toMatch(/height/);
+  });
+
+  it("両レンダラとも要素の箱サイズ(width:100mm)は外側のdivが持ち、<table>自体は持たない", () => {
+    expect(serializer).toContain("width:100mm");
+    expect(react).toContain("width:100mm");
+    const serializerTableTag = serializer.match(/<table[^>]*>/)?.[0] ?? "";
+    const reactTableTag = react.match(/<table[^>]*>/)?.[0] ?? "";
+    expect(serializerTableTag).not.toContain("100mm");
+    expect(reactTableTag).not.toContain("100mm");
+  });
 });
