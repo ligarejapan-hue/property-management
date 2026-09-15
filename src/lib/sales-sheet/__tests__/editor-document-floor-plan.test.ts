@@ -54,7 +54,19 @@ describe("setAsFloorPlan / unsetFloorPlan(間取り図は写真の仲間)", () =
     expect(next.selectedId).toBe("back");
     const back = next.document.elements[0];
     expect(back.w / back.h).toBeCloseTo(0.8, 3);
-    expect(unsetFloorPlan(makeState([img(1)]), "x")).toEqual(makeState([img(1)]));
+    // F6: 間取り図が無ければ入力と同一参照を返す(no-op 規約。toEqual ではなく toBe)
+    const noFloorPlan = makeState([img(1)]);
+    expect(unsetFloorPlan(noFloorPlan, "x")).toBe(noFloorPlan);
+  });
+  // F3: renameAspects は付け替え先(to)に古い実寸比が残っていても、付け替え元
+  // (from)に実寸比が無ければ to を消す(別の写真の比率を使い回さない)。
+  it("古い間取り図の実寸比(0.7)は、実寸比未指定の新しい間取り図には引き継がれない (F3)", () => {
+    const s = makeState([{ ...img(1), id: "floor-plan" }, img(2)]);
+    const next = setAsFloorPlan(s, "img-2", "demoted", { "floor-plan": 0.7 });
+    const fp = next.document.elements.find((e) => e.id === "floor-plan");
+    // img-2 の実寸比が渡されていないため、autoArrangePhotos は呼び出し時点の
+    // 枠の比 (img(2) は w=90,h=60 → 1.5) にフォールバックする。0.7 は使わない。
+    expect(fp && fp.w / fp.h).toBeCloseTo(90 / 60, 3);
   });
   it("整列済みへの再整列は同一参照", () => {
     const s = setAsFloorPlan(makeState([img(1), img(2)]), "img-2", "d", { "img-1": 1.5, "img-2": 1 });

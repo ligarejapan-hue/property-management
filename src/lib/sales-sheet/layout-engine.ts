@@ -21,7 +21,8 @@ export interface Rect {
 }
 
 // ---------------------------------------------------------------------------
-// 写真敷詰め (packPhotoCells) — computeConsumerLayout と editor の autoArrangePhotos が使う
+// 写真敷詰め (packPhotoCells) — build-document の写真配置(buildSpecSheetDocument
+// 経由)と editor の autoBalanceLayout が使う(autoArrangePhotos は packMosaic を使う)
 // （計画⑥から移設。以前は editor-document.ts にあり layout-engine と循環importになっていた）
 // ---------------------------------------------------------------------------
 

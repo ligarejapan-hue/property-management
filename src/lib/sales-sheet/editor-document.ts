@@ -792,7 +792,13 @@ function renameAspects(
 ): Record<string, number> | undefined {
   if (!aspects) return undefined;
   const out = { ...aspects };
-  for (const [from, to] of renames) if (aspects[from] !== undefined) out[to] = aspects[from];
+  for (const [from, to] of renames) {
+    // from に実寸比が無ければ to も消す。out は aspects のコピーのため、
+    // to が別の付け替えで既に値を持っている(古い写真の実寸比が残っている)
+    // ことがあり、消さないと無関係な画像の比率を使い回してしまう(F3)。
+    if (aspects[from] !== undefined) out[to] = aspects[from];
+    else delete out[to];
+  }
   return out;
 }
 
