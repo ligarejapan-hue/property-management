@@ -435,7 +435,10 @@ export function computeConsumerLayout(input: { mainRowCount: number; detailRowCo
   const perColumn = Math.ceil(Math.max(0, input.detailRowCount) / 2);
   const fonts = chooseTableFonts(mainRows, perColumn);
 
-  const mainH = Math.max(MIN_TABLE_H_MM, mainRows * tableRowHeightMm(fonts.mainPt, MAIN_TABLE_PAD_MM));
+  // 主要表の高さを枠内に留め、詳細表が右列の下限を超えないようにする。
+  const maxMainH = RIGHT_BOTTOM_MM - TABLE_TOP_MM - TABLE_GAP_MM - MIN_TABLE_H_MM;
+  const rawMainH = mainRows * tableRowHeightMm(fonts.mainPt, MAIN_TABLE_PAD_MM);
+  const mainH = Math.min(maxMainH, Math.max(MIN_TABLE_H_MM, rawMainH));
   const detailY = TABLE_TOP_MM + mainH + TABLE_GAP_MM;
   const detailH = Math.max(MIN_TABLE_H_MM, RIGHT_BOTTOM_MM - detailY);
   const detailW = (RIGHT_W_MM - DETAIL_COL_GAP_MM) / 2;
@@ -455,6 +458,6 @@ export function computeConsumerLayout(input: { mainRowCount: number; detailRowCo
     footer: { ...CONSUMER_FOOTER },
     photoZone: { ...CONSUMER_PHOTO_ZONE },
     mapQrSlot: { ...CONSUMER_MAP_QR_SLOT },
-    overflow: fonts.overflow,
+    overflow: fonts.overflow || rawMainH > maxMainH,
   };
 }

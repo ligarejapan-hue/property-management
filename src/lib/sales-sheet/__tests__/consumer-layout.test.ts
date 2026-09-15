@@ -61,4 +61,13 @@ describe("computeConsumerLayout", () => {
     expect(L.footer).toEqual(CONSUMER_FOOTER);
     expect(L.mapQrSlot).toEqual(CONSUMER_MAP_QR_SLOT);
   });
+  it("主要表の行が多すぎても表は右列の枠内に収まり overflow になる", () => {
+    const L = computeConsumerLayout({ mainRowCount: 20, detailRowCount: 0 });
+    expect(L.overflow).toBe(true);
+    expect(L.mainTable.fontSizePt).toBe(11);
+    for (const r of [L.mainTable, L.detailLeft, L.detailRight]) expect(inside(r)).toBe(true);
+    expect(L.detailLeft.y + L.detailLeft.h).toBeLessThanOrEqual(167.5 + 1e-6);
+    expect(overlaps(L.mainTable, L.detailLeft)).toBe(false);
+    expect(overlaps(L.detailLeft, L.salesPointsBand)).toBe(false);
+  });
 });
