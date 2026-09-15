@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import type { ImageElement, SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
+import { isConsumerTemplate } from "@/lib/sales-sheet/document-schema";
 import type { EditorState, EditThemePatch } from "@/lib/sales-sheet/editor-document";
 import { editorHistoryReducer, initHistoryState } from "@/lib/sales-sheet/editor-history";
 import {
@@ -24,27 +25,24 @@ import {
   addBadgeElement,
   addQrElement,
   addMapQrElement,
-  deleteMapQr,
-  MAP_QR_ID,
-  positionMapQrInState,
   autoArrangePhotos,
   autoBalanceLayout,
   setAsFloorPlan,
   unsetFloorPlan,
-  commitFloorPlanGeometry,
   clampElementsToPage,
   editFooterData,
   deleteElement,
   markSavedIfCurrent,
   exportWithSaveGuard,
   findTextTableOverlaps,
+  findTableOverflows,
   resolveTextTableOverlapsInDocument,
   resolveOverlapsInState,
 } from "@/lib/sales-sheet/editor-document";
 import { EditorCanvas } from "./EditorCanvas";
 import { ElementPanel } from "./ElementPanel";
 import type { ElementPanelChange } from "./ElementPanel";
-import { EditorToolbar } from "./EditorToolbar";
+import { EditorToolbar, LEGACY_TEMPLATE_NOTE } from "./EditorToolbar";
 import { PhotoGalleryPanel } from "./PhotoGalleryPanel";
 import { TransactionInfoDialog } from "./TransactionInfoDialog";
 import { readFooterData } from "@/lib/sales-sheet/footer-band";
@@ -83,6 +81,9 @@ const DEFAULT_ZOOM = 0.75;
 
 /** Millimetres to pixels at 96 dpi (96 / 25.4). */
 const MM_TO_PX = 96 / 25.4;
+
+/** 表の文字が枠に入りきらないときの注意(仕様書 §4.8)。PDFには出さない。 */
+const TABLE_OVERFLOW_WARNING = "表の文字が入りきっていません(項目を減らすか、枠を広げてください)";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -209,11 +210,9 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     });
   }
 
-  /** ギャラリー写真(floor-plan 除く image)の実寸比を id→比 で測る(失敗した写真は省く)。 */
+  /** ギャラリー写真(すべての image。間取り図も写真の仲間)の実寸比を id→比 で測る(失敗した写真は省く)。 */
   async function measureGalleryAspects(doc: SalesSheetDocument): Promise<Record<string, number>> {
-    const targets = doc.elements.filter(
-      (e): e is ImageElement => e.type === "image" && e.id !== "floor-plan",
-    );
+    const targets = doc.elements.filter((e): e is ImageElement => e.type === "image");
     const out: Record<string, number> = {};
     await Promise.all(
       targets.map(async (el) => {
@@ -226,8 +225,8 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
 
   /**
    * キャッシュ済みの実寸比のみを id→比 で **同期的に** 集める(未キャッシュは省く=
-   * autoArrangePhotos が現枠 w/h にフォールバック)。中央列(間取り図)の move/resize/指定/解除/
-   * 削除はこれを使い **同期** で確定する。これにより (a) 非同期待ちの間に react-moveable が
+   * autoArrangePhotos が現枠 w/h にフォールバック)。間取り図(写真の仲間)の指定/解除は
+   * これを使い **同期** で確定する。これにより (a) 非同期待ちの間に react-moveable が
    * ドラッグ時スタイルをリセットしてヒットボックスが崩れる問題 (b) 複数の floor-plan 操作が
    * 画像ロード順で入れ替わる競合 を原理的に無くす(@codex #298)。キャッシュはマウント時と
    * 写真追加/自動整列で暖める。
@@ -235,17 +234,14 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
   function cachedGalleryAspects(doc: SalesSheetDocument): Record<string, number> {
     const out: Record<string, number> = {};
     for (const el of doc.elements) {
-      if (el.type !== "image" || el.id === "floor-plan") continue;
+      if (el.type !== "image") continue;
       const a = aspectCacheRef.current.get(el.src);
       if (a !== undefined) out[el.id] = a;
     }
     return out;
   }
 
-  // マウント時に **全 image**(floor-plan 含む)の実寸比を先読みしてキャッシュを暖める。
-  // floor-plan も含めるのが要点(@codex #298): 既存図面が最初から floor-plan を持つ場合、
-  // それを写真へ戻す/差し替える際に実寸比が要る。measureGalleryAspects は floor-plan を
-  // 除外するため、ここは src 単位の measureAspect で全画像を暖める。fire-and-forget。
+  // マウント時に全 image(間取り図も含む)の実寸比を先読みしてキャッシュを暖める。fire-and-forget。
   useEffect(() => {
     for (const el of initial.document.elements) {
       if (el.type === "image") void measureAspect(el.src);
@@ -262,43 +258,18 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
 
   /** Dispatches moveElement reducer — called by EditorCanvas onDragEnd. */
   function handleMove(id: string, pos: { x: number; y: number }): void {
-    // 中央列(間取り図)は幾何確定+写真リフローを1更新で行う専用経路へ(undo1回・反比例)。
-    if (id === "floor-plan") {
-      commitFloorPlan({ mode: "move", x: pos.x, y: pos.y });
-      return;
-    }
     setEditorState((prev) => moveElement(prev, id, pos));
   }
 
   /** リサイズ確定 — サイズと(top/leftハンドルで動いた)原点を1回の更新で適用=
    *  「元に戻す」1回でリサイズ全体が戻る(位置とサイズが別履歴に割れない)。 */
   function handleResize(id: string, size: { w: number; h: number; x?: number; y?: number }): void {
-    if (id === "floor-plan") {
-      // どの向きのハンドルでも右端を概要表の左へアンカーし、左端が動く=写真が反比例で狭まる。
-      commitFloorPlan({ mode: "resize", w: size.w, h: size.h, y: size.y });
-      return;
-    }
     setEditorState((prev) =>
       size.x !== undefined && size.y !== undefined
         ? // サイズと原点の同時変更は一括クランプ(順次適用だと旧値でクランプされ歪む)。
           resizeElementWithOrigin(prev, id, { x: size.x, y: size.y, w: size.w, h: size.h })
         : resizeElement(prev, id, size),
     );
-  }
-
-  /** 中央列(間取り図)の move/resize を確定し、右端アンカー＋写真リフローを1更新で行う。
-   *  実寸比は src 由来(位置非依存)なので確定前 document から測る。測定中に document が
-   *  変わっていたら適用しない(遅延した整列で intervening な編集を上書きしない・@codex #298)。 */
-  /** 中央列(間取り図)の move/resize を **同期** で確定(右端アンカー＋写真リフローを1更新)。
-   *  実寸比はキャッシュから同期取得するため、非同期待ちに伴うヒットボックス崩れ/操作競合が無い。 */
-  function commitFloorPlan(geom: {
-    mode: "resize" | "move";
-    x?: number;
-    y?: number;
-    w?: number;
-    h?: number;
-  }): void {
-    setEditorState((prev) => commitFloorPlanGeometry(prev, geom, cachedGalleryAspects(prev.document)));
   }
 
   /** Dispatches the appropriate Task-D reducer for every ElementPanel change. */
@@ -311,23 +282,6 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     if (change.type === "unsetFloorPlan") {
       handleUnsetFloorPlan();
       return;
-    }
-    // 中央列(間取り図)の X/Y/幅/高さをパネルで編集した場合も、キャンバスのドラッグと同じ
-    // アンカー＋写真リフロー経路へ通す(汎用 move/resize だと概要表に食い込む/写真が非連動・@codex #298)。
-    if (editorState.selectedId === "floor-plan") {
-      if (change.type === "move") {
-        commitFloorPlan({ mode: "move", x: change.x, y: change.y });
-        return;
-      }
-      if (change.type === "resize") {
-        commitFloorPlan({ mode: "resize", w: change.w, h: change.h });
-        return;
-      }
-      if (change.type === "delete") {
-        // 中央列を削除したら写真を左2/3へ詰め直す(削除だけだと写真が狭いまま中央が空白・@codex #298)。
-        handleDeleteFloorPlan();
-        return;
-      }
     }
     setEditorState((prev) => {
       const id = prev.selectedId;
@@ -342,10 +296,7 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         case "sendToBack":
           return sendToBack(prev, id);
         case "delete":
-          // 地図QR削除時は、縮めた間取図を全高へ戻し写真を再整列する(@codex #300)。
-          return id === MAP_QR_ID
-            ? deleteMapQr(prev, cachedGalleryAspects(prev.document))
-            : deleteElement(prev, id);
+          return deleteElement(prev, id);
         case "editText":
           // 文字サイズ変更での自動再バランスは撤去（@codex P2 / review 3件が指摘）: レイアウトを
           // 駆動する概要表フォントは editText 対象外ゆえ、見出し等の text フォント変更では枠が
@@ -397,60 +348,26 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     setEditorState((prev) => (prev.document === docAtCall ? autoArrangePhotos(prev, { aspects }) : prev));
   }
 
-  /** 選択中の写真を中央列の間取り図/敷地図にする（**同期**・キャッシュ実寸比で写真を図の左へ）。 */
+  /** 選択中の写真を間取り図にする(**同期**・キャッシュ済みの実寸比で並べ直す)。 */
   function handleSetFloorPlan(): void {
     const id = editorState.selectedId;
     if (!id) return;
     const demotedId = safeRandomId();
-    setEditorState((prev) => {
-      if (prev.selectedId !== id) return prev;
-      const aspects = cachedGalleryAspects(prev.document);
-      // 既存の間取り図を写真へ降格する場合、その実寸比を demotedId で登録(未登録だと旧・中央列
-      // 枠の縦横比にフォールバックし余白/歪みが出る)。キャッシュ済みなので同期で取れる。
-      const existingFp = prev.document.elements.find(
-        (e): e is ImageElement => e.id === "floor-plan" && e.type === "image",
-      );
-      if (existingFp) {
-        const a = aspectCacheRef.current.get(existingFp.src);
-        if (a !== undefined) aspects[demotedId] = a;
-      }
-      return setAsFloorPlan(prev, id, demotedId, aspects);
-    });
+    setEditorState((prev) =>
+      prev.selectedId !== id ? prev : setAsFloorPlan(prev, id, demotedId, cachedGalleryAspects(prev.document)),
+    );
   }
 
-  /** 中央列の間取り図/敷地図を通常の写真へ戻す（**同期**）。 */
+  /** 間取り図を通常の写真へ戻す(**同期**)。 */
   function handleUnsetFloorPlan(): void {
     const newId = safeRandomId();
-    setEditorState((prev) => {
-      if (prev.selectedId !== "floor-plan") return prev;
-      const aspects = cachedGalleryAspects(prev.document);
-      const fp = prev.document.elements.find(
-        (e): e is ImageElement => e.id === "floor-plan" && e.type === "image",
-      );
-      if (fp) {
-        const a = aspectCacheRef.current.get(fp.src);
-        if (a !== undefined) aspects[newId] = a;
-      }
-      return unsetFloorPlan(prev, newId, aspects);
-    });
-  }
-
-  /** 中央列(間取り図)を削除し、写真を左2/3(2列)へ詰め直す(**同期**・@codex #298)。
-   *  地図QRがあれば右下フォールバックへ戻す(図が消えて写真が中央へ広がるため・@codex #300)。 */
-  function handleDeleteFloorPlan(): void {
     setEditorState((prev) =>
-      prev.selectedId === "floor-plan"
-        ? positionMapQrInState(
-            autoArrangePhotos(deleteElement(prev, "floor-plan"), {
-              aspects: cachedGalleryAspects(prev.document),
-            }),
-          )
-        : prev,
+      prev.selectedId !== "floor-plan" ? prev : unsetFloorPlan(prev, newId, cachedGalleryAspects(prev.document)),
     );
   }
 
   /** テンプレ全体を内容に合わせてワンボタン再バランスする（機能A）。
-   *  中央列(間取り図)・概要表・見出し等を整え直したうえで、写真は残りスペースへモザイクで
+   *  写真と間取り図・概要表・見出し等を整え直したうえで、写真は残りスペースへモザイクで
    *  詰め直す（「写真を自動整列」と結果を揃える＝レイアウト自動調整でも写真がきれいに並ぶ）。 */
   async function handleAutoBalance(): Promise<void> {
     const docAtCall = editorState.document;
@@ -472,16 +389,11 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     setEditorState((prev) => addQrElement(prev, { id: safeRandomId(), content: "https://" }));
   }
 
-  /** 物件の場所を Google マップ検索する QR を、間取図の下(無ければ右下)へ差し込む。 */
+  /** 物件の場所を Google マップ検索する QR を、会社帯の右端に差し込む。 */
   const canAddMapQr = !!initial.propertyAddress && initial.propertyAddress.trim() !== "";
   function handleAddMapQr(): void {
     if (!canAddMapQr) return;
-    setEditorState((prev) =>
-      addMapQrElement(prev, {
-        address: initial.propertyAddress ?? "",
-        aspects: cachedGalleryAspects(prev.document),
-      }),
-    );
+    setEditorState((prev) => addMapQrElement(prev, { address: initial.propertyAddress ?? "" }));
   }
 
   /** 文書テーマ（フォント/基調色）を変更する（計画⑧）。 */
@@ -582,16 +494,28 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
       ? (editorState.document.elements.find((e) => e.id === editorState.selectedId) ?? null)
       : null;
 
+  const isConsumer = isConsumerTemplate(editorState.document);
+
   // B-8: 文字・表どうしの重なりは自動整列/自動調整では解消されない(手動配置の
   // 尊重)ため、常時検知して出力前に気付けるよう控えめに注意を出す。
   const textTableOverlapCount = useMemo(
     () => findTextTableOverlaps(editorState.document).length,
     [editorState.document],
   );
+  // 表の文字が枠からあふれていないか(仕様書 §4.8)。重なりとは別軸の注意。
+  const tableOverflowCount = useMemo(
+    () => findTableOverflows(editorState.document).length,
+    [editorState.document],
+  );
   const layoutWarning =
-    textTableOverlapCount > 0
-      ? `文字・表が重なっています(${textTableOverlapCount}箇所)。出力にもそのまま写るため、ドラッグで位置を調整してください`
-      : null;
+    [
+      textTableOverlapCount > 0
+        ? `文字・表が重なっています(${textTableOverlapCount}箇所)。出力にもそのまま写るため、ドラッグで位置を調整してください`
+        : null,
+      tableOverflowCount > 0 ? TABLE_OVERFLOW_WARNING : null,
+    ]
+      .filter(Boolean)
+      .join("／") || null;
   // B-8 案A (2026-08-23 発注者判断): ボタンを押したときだけ自動で直す。
   // 勝手には一切動かさない(「手動配置の尊重」との両立)。結果は履歴に乗る=
   // 「元に戻す」で丸ごと戻せる。
@@ -662,11 +586,14 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
         onAddBadge={handleAddBadge}
         onAddQr={handleAddQr}
         onAddMapQr={handleAddMapQr}
-        canAddMapQr={canAddMapQr}
+        canAddMapQr={canAddMapQr && isConsumer}
+        mapQrDisabledReason={!isConsumer ? LEGACY_TEMPLATE_NOTE : undefined}
+        canAutoLayout={isConsumer}
         onOpenTransactionInfo={() => setTxInfoOpen(true)}
-        canEditTransactionInfo={editorState.document.elements.some((e) => e.id === "footer-band")}
+        canEditTransactionInfo={isConsumer && editorState.document.elements.some((e) => e.id === "footer-band")}
+        transactionInfoDisabledReason={!isConsumer ? LEGACY_TEMPLATE_NOTE : undefined}
         layoutWarning={layoutWarning}
-        onAutoFixOverlaps={handleAutoFixOverlaps}
+        onAutoFixOverlaps={textTableOverlapCount > 0 ? handleAutoFixOverlaps : undefined}
         autoFixNotice={autoFixNotice}
       />
 

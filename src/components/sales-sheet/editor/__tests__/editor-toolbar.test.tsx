@@ -1,8 +1,22 @@
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EditorToolbar } from "../EditorToolbar";
+import { EditorToolbar, LEGACY_TEMPLATE_NOTE } from "../EditorToolbar";
 
 const noop = async () => {};
+
+/** 既存テストが繰り返し渡している必須 props をまとめたもの(Step1 の新テストで使う)。 */
+const baseProps = {
+  dirty: false,
+  onSave: noop,
+  onExport: noop,
+  onDelete: noop,
+  onAddPhoto: () => {},
+  onAutoArrange: () => {},
+  onAutoBalance: () => {},
+  onAddBadge: () => {},
+  onAddQr: () => {},
+  onOpenTransactionInfo: () => {},
+};
 
 describe("EditorToolbar — 描画", () => {
   it("data-editor-toolbar を持つルート要素を描画する", () => {
@@ -254,9 +268,8 @@ describe("EditorToolbar — B-8 効果範囲注記と重なり注意", () => {
 
   it("自動整列・自動調整ボタンに効果範囲の title 注記がある", () => {
     const html = renderToStaticMarkup(<EditorToolbar {...base} />);
-    // 自動整列は概要表をスナップするため「表は動きません」とは書かない
-    // (@codex R7: 概要表を整える説明と矛盾しない表現にする)
-    expect(html).toContain("文字・バッジ・QR・概要表以外の表は動きません");
+    // 自動整列は写真と間取り図を左の写真枠へ並べ直すだけ(Task 7: 文字・表・バッジ・QRは動かない)。
+    expect(html).toContain("写真と間取り図を左の写真枠に並べ直します。文字・表・バッジ・QRは動きません");
     // 自動調整はテンプレ文字 (見出し/価格等) を手で動かしていても戻すため、
     // 「動かないのは自分で追加した要素」と明確化 (@codex R10)。地図QRは
     // positionMapQr が定位置へ戻すため「動く」側に明記 (@codex R12)
@@ -291,5 +304,31 @@ describe("EditorToolbar — B-8 効果範囲注記と重なり注意", () => {
   it("layoutWarning 未指定なら注意表示は出ない(後方互換)", () => {
     const html = renderToStaticMarkup(<EditorToolbar {...base} />);
     expect(html).not.toContain("data-toolbar-layout-warning");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 7: 旧ひな型では自動機能のボタンを止める
+// ---------------------------------------------------------------------------
+
+describe("旧ひな型では自動機能のボタンを止める", () => {
+  it("canAutoLayout=false で自動整列・自動調整が無効になり、理由が出る", () => {
+    const html = renderToStaticMarkup(<EditorToolbar {...baseProps} canAutoLayout={false} />);
+    for (const attr of ["data-toolbar-auto-arrange", "data-toolbar-auto-balance"]) {
+      const s = html.slice(html.indexOf(attr));
+      expect(s.slice(0, s.indexOf(">"))).toContain("disabled");
+    }
+    expect(html).toContain(LEGACY_TEMPLATE_NOTE);
+  });
+  it("地図QR・取引情報は渡された理由を title に出す", () => {
+    const html = renderToStaticMarkup(
+      <EditorToolbar {...baseProps} canAddMapQr={false} mapQrDisabledReason={LEGACY_TEMPLATE_NOTE} canEditTransactionInfo={false} transactionInfoDisabledReason={LEGACY_TEMPLATE_NOTE} />,
+    );
+    expect(html.split(LEGACY_TEMPLATE_NOTE).length - 1).toBeGreaterThanOrEqual(2);
+  });
+  it("地図QRの説明は「会社帯の右端」", () => {
+    const html = renderToStaticMarkup(<EditorToolbar {...baseProps} canAddMapQr />);
+    expect(html).toContain("会社帯の右端");
+    expect(html).not.toContain("間取図の下");
   });
 });
