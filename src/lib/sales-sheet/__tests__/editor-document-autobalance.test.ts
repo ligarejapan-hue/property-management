@@ -1,254 +1,66 @@
-/**
- * TDD: editor-document 自動レイアウト再バランス（Task3）
- *   autoBalanceLayout: document 全体を computeSpecSheetLayout（最適化エンジン）で
- *   再バランスする。動かすのは「既知idのテンプレ枠」（catch-band/catch-copy/heading/
- *   price/overview/sales-points/company/company-details/floor-plan）と「type==="image"
- *   の写真要素（配列順）」のみ。未知idの非image要素（ユーザーが手で足した独自要素）は
- *   参照ごと不動。autoArrangePhotos と同じ no-op（変更ゼロ→同一 state 参照）規約。
- */
 import { describe, it, expect } from "vitest";
-import { type EditorState, autoBalanceLayout, autoArrangePhotos } from "../editor-document";
+import { type EditorState, autoBalanceLayout } from "../editor-document";
 import { buildSaleHouseDocument } from "../build-document";
-import {
-  computeSpecSheetLayout,
-  DEFAULT_FOOTER_H,
-  MAIN_BOTTOM_MARGIN_MM,
-  SALES_POINTS_H_MM,
-  PHOTO_GAP_MM,
-} from "../layout-engine";
-import {
-  salesSheetDocumentSchema,
-  type SalesSheetDocument,
-  type SalesSheetElement,
-  type ImageElement,
-  type TableElement,
-} from "../document-schema";
+import { computeConsumerLayout, CONSUMER_PHOTO_ZONE, CONSUMER_MAP_QR_SLOT } from "../layout-engine";
+import { salesSheetDocumentSchema, A4_PORTRAIT, type SalesSheetElement } from "../document-schema";
 
-const baseHouseInput = {
-  property: {
-    address: "東京都杉並区西荻北1-4-3",
-    layoutType: "3LDK",
-    zoningDistrict: "第一種中高層住居専用地域",
-    buildingCoverageRatio: "60",
-    floorAreaRatio: "200",
-    roadType: "公道",
-    roadWidth: "4.0",
-    occupancyStatus: "vacant",
-  },
+const houseDoc = () => buildSaleHouseDocument({
+  property: { address: "東京都杉並区西荻北1-4-3", layoutType: "3LDK", buildingCoverageRatio: "60", floorAreaRatio: "200", roadType: "公道", roadWidth: "4.0" },
   photos: [{ fileUrl: "/uploads/1.jpg" }, { fileUrl: "/uploads/2.jpg" }],
-};
-
-function makeState(document: SalesSheetDocument): EditorState {
-  return { document, selectedId: null, dirty: false };
-}
-
-/** 指定 id の要素の x/y だけをずらす（ユーザーが手でドラッグした状態を模す）。他フィールドは保持。 */
-function moveEl(doc: SalesSheetDocument, id: string, x: number, y: number): SalesSheetDocument {
-  return {
-    ...doc,
-    elements: doc.elements.map((el) =>
-      el.id === id ? ({ ...el, x, y } as unknown as SalesSheetElement) : el,
-    ),
-  };
-}
-
-/** overview（table）の style.fontSizePt だけを差し替える（行を増減しても現状の reducer は
- *  フォントを自動更新しないため、現在の行数と整合しない「古い」値が残った状態を模す）。
- *  他フィールドは保持。 */
-function setOverviewFontPt(doc: SalesSheetDocument, fontSizePt: number): SalesSheetDocument {
-  return {
-    ...doc,
-    elements: doc.elements.map((el) =>
-      el.id === "overview"
-        ? ({ ...el, style: { ...(el as TableElement).style, fontSizePt } } as unknown as SalesSheetElement)
-        : el,
-    ),
-  };
-}
-
-function findEl(doc: SalesSheetDocument, id: string): SalesSheetElement | undefined {
-  return doc.elements.find((e) => e.id === id);
-}
-
-const images = (doc: SalesSheetDocument): ImageElement[] =>
-  doc.elements.filter((e): e is ImageElement => e.type === "image");
-
-describe("autoBalanceLayout", () => {
-  it("写真枠・overviewを手でズラした後に掛けると、computeSpecSheetLayoutの期待値へ揃う", () => {
-    const built = buildSaleHouseDocument({
-      ...baseHouseInput,
-      overrides: { price: "5280", landCategory: ["宅地"] },
-    });
-    const [firstPhoto] = images(built);
-    let doc = moveEl(built, firstPhoto.id, 3, 3);
-    doc = moveEl(doc, "overview", 5, 5);
-
-    const state = autoBalanceLayout(makeState(doc));
-
-    const rows = (findEl(built, "overview") as TableElement).rows;
-    const L = computeSpecSheetLayout({
-      photoCount: images(built).length,
-      specRowCount: rows.length,
-      hasFloorPlan: !!findEl(built, "floor-plan"),
-      footerHeight: DEFAULT_FOOTER_H,
-    });
-
-    const overview = findEl(state.document, "overview") as TableElement;
-    expect(overview.x).toBeCloseTo(L.overview.x, 6);
-    expect(overview.y).toBeCloseTo(L.overview.y, 6);
-    expect(overview.w).toBeCloseTo(L.overview.w, 6);
-    expect(overview.h).toBeCloseTo(L.overview.h, 6);
-    expect(overview.style.fontSizePt).toBeCloseTo(L.overview.fontSizePt, 6);
-
-    const photosAfter = images(state.document);
-    expect(photosAfter).toHaveLength(2);
-    photosAfter.forEach((img, k) => {
-      expect(img.x).toBeCloseTo(L.photoSlots[k].x, 6);
-      expect(img.y).toBeCloseTo(L.photoSlots[k].y, 6);
-      expect(img.w).toBeCloseTo(L.photoSlots[k].w, 6);
-      expect(img.h).toBeCloseTo(L.photoSlots[k].h, 6);
-    });
-    expect(state.dirty).toBe(true);
-  });
-
-  it("overviewの古い(現在の行数に整合しない)フォントを、行数から再計算した値で上書きする（overviewFontPtを渡さない・@review Fix B）", () => {
-    const built = buildSaleHouseDocument({ ...baseHouseInput, overrides: { price: "5280" } });
-    const rows = (findEl(built, "overview") as TableElement).rows;
-    const freshFontPt = computeSpecSheetLayout({
-      photoCount: images(built).length,
-      specRowCount: rows.length,
-      hasFloorPlan: !!findEl(built, "floor-plan"),
-      footerHeight: DEFAULT_FOOTER_H,
-    }).overview.fontSizePt;
-
-    // 行数はそのまま、フォントだけ現在の行数に整合しない「古い」値へ差し替える
-    // （必ず freshFontPt と異なる値になる）。
-    const staleFontPt = freshFontPt === 5 ? 9 : 5;
-    const doc = setOverviewFontPt(built, staleFontPt);
-
-    const state = autoBalanceLayout(makeState(doc));
-    const overview = findEl(state.document, "overview") as TableElement;
-
-    // 古い値をそのまま素通しするのではなく、行数から再計算した値になる。
-    expect(overview.style.fontSizePt).toBeCloseTo(freshFontPt, 6);
-    expect(overview.style.fontSizePt).not.toBe(staleFontPt);
-  });
-
-  it("未知idのtext要素（ユーザーが手で足した独自要素）は参照ごと不動", () => {
-    const built = buildSaleHouseDocument({ ...baseHouseInput, overrides: { price: "5280" } });
-    const customEl: SalesSheetElement = {
-      id: "custom-note",
-      type: "text",
-      x: 50,
-      y: 150,
-      w: 40,
-      h: 10,
-      z: 99,
-      content: "手書きメモ",
-      style: {},
-    };
-    const doc: SalesSheetDocument = { ...built, elements: [...built.elements, customEl] };
-    // ついでに overview もズラして「変化が起きる」ことを保証する（no-opにしない）。
-    const shifted = moveEl(doc, "overview", 1, 1);
-
-    const state = autoBalanceLayout(makeState(shifted));
-
-    const before = findEl(shifted, "custom-note");
-    const after = findEl(state.document, "custom-note");
-    expect(after).toBe(before);
-  });
-
-  it("すでにバランス済みのdocumentに掛けると同一state参照（no-op）", () => {
-    const built = buildSaleHouseDocument({ ...baseHouseInput, overrides: { price: "5280" } });
-    const state = makeState(built);
-    expect(autoBalanceLayout(state)).toBe(state);
-  });
-
-  it("画像0枚でもoverview等は再配置され、写真は増えない", () => {
-    const built = buildSaleHouseDocument({
-      ...baseHouseInput,
-      photos: [],
-      overrides: { price: "5280" },
-    });
-    const shifted = moveEl(built, "overview", 9, 9);
-    const state = autoBalanceLayout(makeState(shifted));
-
-    const rows = (findEl(built, "overview") as TableElement).rows;
-    const L = computeSpecSheetLayout({
-      photoCount: 0,
-      specRowCount: rows.length,
-      hasFloorPlan: false,
-      footerHeight: DEFAULT_FOOTER_H,
-    });
-    const overview = findEl(state.document, "overview") as TableElement;
-    expect(overview.x).toBeCloseTo(L.overview.x, 6);
-    expect(overview.y).toBeCloseTo(L.overview.y, 6);
-    expect(images(state.document)).toHaveLength(0);
-  });
-
-  it("結果documentはschema検証を通る（保存可能）", () => {
-    const built = buildSaleHouseDocument({
-      ...baseHouseInput,
-      overrides: { price: "5280" },
-    });
-    const shifted = moveEl(built, "overview", 1, 1);
-    const state = autoBalanceLayout(makeState(shifted));
-    expect(salesSheetDocumentSchema.safeParse(state.document).success).toBe(true);
-  });
-
-  it("selectedIdは変更しない", () => {
-    const built = buildSaleHouseDocument({ ...baseHouseInput, overrides: { price: "5280" } });
-    const shifted = moveEl(built, "overview", 1, 1);
-    const before: EditorState = { document: shifted, selectedId: "overview", dirty: false };
-    const after = autoBalanceLayout(before);
-    expect(after.selectedId).toBe("overview");
-  });
-
-  it("手で動かした会社帯要素(footer-*)は再バランスで動かさない（手動配置を保持）", () => {
-    const built = buildSaleHouseDocument({
-      ...baseHouseInput,
-      overrides: { price: "5280", transactionType: "専任媒介", staff: "村山廉太郎" },
-    });
-    // 帯要素(社名)を手でドラッグしてずらした状態を作る
-    const shifted = moveEl(built, "footer-name-ja", 200, 60);
-    expect(findEl(shifted, "footer-name-ja")).toMatchObject({ x: 200, y: 60 });
-    const out = autoBalanceLayout(makeState(shifted));
-    // 会社帯は自動調整の対象外＝手動配置(200,60)のまま保持される（正規位置へ戻さない）
-    const after = findEl(out.document, "footer-name-ja")!;
-    expect(after.x).toBe(200);
-    expect(after.y).toBe(60);
-  });
-
-  it("A4縦では no-op（用紙外座標を書き込まない・fail-closed）（総点検P3）", () => {
-    // 版面エンジンは A4横(297×210)専用。A4縦(幅210)に掛けると右端287mm等の
-    // 用紙外座標を書き込み、保存の幾何検証(±10000mm)は素通りする。
-    // A4縦は保存境界(design-service)が公式に許可しており API 経由で実在し得る。
-    const built = buildSaleHouseDocument({ ...baseHouseInput, overrides: { price: "5280" } });
-    const portrait: SalesSheetDocument = {
-      ...built,
-      page: { width: 210, height: 297, orientation: "portrait" },
-    };
-    const state = makeState(portrait);
-    const out = autoBalanceLayout(state);
-    // 変更ゼロ＝同一 state 参照（autoArrangePhotos と同じ no-op 規約）
-    expect(out).toBe(state);
-    // 用紙外座標が書き込まれていない（全要素 x+w ≤ 210 のまま…ビルダーは
-    // A4横で作るため一部要素は元々 210 を超える。ここでは「ガードにより
-    // 参照が変わっていない＝何も書き込まれていない」ことが本質の表明）
-  });
+  floorPlanImage: { fileUrl: "/uploads/plan.png" },
+  overrides: { access: "徒歩6分", remarks: "南向き" },
+});
+const stateOf = (document = houseDoc()): EditorState => ({ document, selectedId: null, dirty: false });
+const byId = (s: EditorState, id: string) => s.document.elements.find((e) => e.id === id) as SalesSheetElement;
+const moved = (s: EditorState, id: string, dx: number): EditorState => ({
+  ...s,
+  document: { ...s.document, elements: s.document.elements.map((e) => (e.id === id ? { ...e, x: e.x + dx } : e)) },
 });
 
-describe("autoArrangePhotos × 会社帯 / salesPoints", () => {
-  it("写真自動整列後、写真は salesPoints帯・会社帯を侵さない（@codex R1/R2）", () => {
-    const built = buildSaleHouseDocument({ ...baseHouseInput, overrides: { price: "5280" } });
-    const out = autoArrangePhotos(makeState(built));
-    // エンジンが写真敷詰めを止める下端＝mainBottom − salesPoints − gap（写真はこの上まで）。
-    const photoPackBottom =
-      210 - DEFAULT_FOOTER_H - MAIN_BOTTOM_MARGIN_MM - SALES_POINTS_H_MM - PHOTO_GAP_MM;
-    const imgs = images(out.document);
-    expect(imgs.length).toBeGreaterThan(0);
-    for (const img of imgs) {
-      expect(img.y + img.h).toBeLessThanOrEqual(photoPackBottom + 0.001);
+describe("autoBalanceLayout(新ひな型)", () => {
+  it("作成直後の図面は同一参照(バランス済み)", () => {
+    const s = stateOf();
+    expect(autoBalanceLayout(s)).toBe(s);
+  });
+  it("手で動かした定型項目・表・写真を標準の位置へ戻す", () => {
+    const s0 = stateOf();
+    const s = ["heading", "overview", "overview-detail-b", "sales-points-band", "photo-1", "floor-plan"].reduce((acc, id) => moved(acc, id, 3), s0);
+    const next = autoBalanceLayout(s);
+    for (const id of ["heading", "overview", "overview-detail-b", "sales-points-band", "photo-1", "floor-plan"]) {
+      expect(byId(next, id)).toMatchObject({ x: byId(s0, id).x, y: byId(s0, id).y, w: byId(s0, id).w, h: byId(s0, id).h });
     }
+    expect(next.dirty).toBe(true);
+    expect(salesSheetDocumentSchema.safeParse(next.document).success).toBe(true);
+  });
+  it("表の行数が変わったら文字サイズを計算し直す", () => {
+    const s0 = stateOf();
+    const rows = Array.from({ length: 13 }, (_, i) => ({ label: `L${i}`, value: "v" }));
+    const s: EditorState = { ...s0, document: { ...s0.document, elements: s0.document.elements.map((e) =>
+      e.type === "table" && (e.id === "overview-detail-a" || e.id === "overview-detail-b") ? { ...e, rows } : e) } };
+    const next = autoBalanceLayout(s);
+    const L = computeConsumerLayout({ mainRowCount: 8, detailRowCount: 26 });
+    expect(byId(next, "overview-detail-a")).toMatchObject({ style: { fontSizePt: L.detailFontSizePt } });
+    expect(byId(next, "overview")).toMatchObject({ style: { fontSizePt: L.mainTable.fontSizePt } });
+  });
+  it("地図QRは枠へ戻し、利用者が足した文字と会社帯は動かさない", () => {
+    const s0 = stateOf();
+    const extra = { id: "my-note", type: "text" as const, x: 150, y: 150, w: 30, h: 8, z: 5, content: "メモ", style: {} };
+    const qr = { id: "map-qr", type: "qr" as const, x: 10, y: 10, w: 20, h: 20, z: 6, dataUrl: "data:image/png;base64,AAAA" };
+    const s = moved({ ...s0, document: { ...s0.document, elements: [...s0.document.elements, extra, qr] } }, "footer-name-ja", 2);
+    const next = autoBalanceLayout(s);
+    expect(byId(next, "map-qr")).toMatchObject(CONSUMER_MAP_QR_SLOT);
+    expect(byId(next, "my-note")).toBe(byId(s, "my-note"));
+    expect(byId(next, "footer-name-ja")).toBe(byId(s, "footer-name-ja"));
+  });
+  it("写真と間取り図は写真枠の中", () => {
+    const next = autoBalanceLayout(moved(stateOf(), "photo-2", 100));
+    for (const e of next.document.elements.filter((el) => el.type === "image")) {
+      expect(e.x + e.w).toBeLessThanOrEqual(CONSUMER_PHOTO_ZONE.x + CONSUMER_PHOTO_ZONE.w + 1e-6);
+    }
+  });
+  it("A4縦では何もしない", () => {
+    const s0 = stateOf();
+    const s: EditorState = { ...s0, document: { ...s0.document, page: A4_PORTRAIT } };
+    expect(autoBalanceLayout(s)).toBe(s);
   });
 });

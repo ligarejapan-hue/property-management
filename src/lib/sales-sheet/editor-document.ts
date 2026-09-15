@@ -18,23 +18,23 @@ import { isCssColor, isSafeFontFamily, isSafeImageSrc } from "./css-safety";
 import { generateQrDataUrl } from "./qr-code";
 import { buildMapsSearchUrl } from "./maps-url";
 import {
-  computeSpecSheetLayout,
-  DEFAULT_FOOTER_H,
-  MAIN_BOTTOM_MARGIN_MM,
-  SALES_POINTS_H_MM,
+  computeConsumerLayout,
+  packPhotoCells,
+  CONSUMER_PHOTO_ZONE,
+  CONSUMER_MAP_QR_SLOT,
   PHOTO_GAP_MM,
-  PHOTO_AREA_TO_OVERVIEW_GAP_MM,
-  COLUMN_GAP_MM,
+  type Rect,
 } from "./layout-engine";
 import { packMosaic } from "./mosaic-pack";
 import {
-  buildFooterTransactionElements,
+  buildConsumerFooterTransactionElements,
   readFooterData,
   footerDataEqual,
   type FooterBandData,
 } from "./footer-band";
 import {
   A4_LANDSCAPE,
+  isConsumerTemplate,
   type SalesSheetDocument,
   type SalesSheetElement,
   type TextElement,
@@ -542,184 +542,31 @@ export function addQrElement(
   };
 }
 
-/** 地図QR(物件の場所の Google マップ QR)の固定 id。中央列の間取図と同じく1枚のみ。 */
+/** 地図QR(物件の場所の Google マップ QR)の固定 id。1枚のみ。 */
 export const MAP_QR_ID = "map-qr";
-/** QR と直上の間取図の間の余白(mm)。 */
-const MAP_QR_GAP_MM = 4;
-/** 間取図/写真ゾーンから予約する QR の高さ(mm)。QR は後でリサイズ可能だが、予約量は既定サイズ
- *  固定にする＝ユーザーが QR をリサイズしても予約(図の縮み/写真帯)や削除時の復元判定がずれない
- *  (@codex #300)。 */
-const MAP_QR_RESERVE_H_MM = DEFAULT_QR_SIZE_MM;
 
 /**
- * 地図QR(id="map-qr")の位置を版面に合わせて整える(@codex #300):
- * - floor-plan があれば、その真下・会社帯の上に収まるよう図を縮め/上へ寄せ、QR を図の下・
- *   幅内中央へ。QR は会社帯/セールスポイントの上端(contentBottom)より下へは出さない。
- * - floor-plan が無ければ、図面の右下(会社帯の上)へ戻す(図を削除/解除したら写真が中央へ
- *   広がるため、QR をその場に残さずフォールバック位置へ)。
- * - map-qr が無ければ同一参照。追加/図の指定・解除・削除・リサイズ・レイアウト自動調整の
- *   各経路の末尾で呼び、位置を一貫させる。
+ * 物件の住所から Google マップ検索の QR を作り、会社帯右端の枠(CONSUMER_MAP_QR_SLOT)に置く。
+ * - 旧ひな型では何もしない(枠が旧会社帯と重なるため)。住所空/生成不能も同一参照。
+ * - 既存の地図QRは置き換え(1枚)。写真や間取り図は動かさない。z=最前面・自動選択・dirty。
  */
-function positionMapQr(
-  elements: SalesSheetElement[],
-  page: { width: number; height: number },
-): SalesSheetElement[] {
-  const qrIdx = elements.findIndex((e) => e.id === MAP_QR_ID && e.type === "qr");
-  if (qrIdx === -1) return elements;
-  const qr = elements[qrIdx];
-  const contentBottom = page.height - PHOTO_ZONE_BOTTOM_MARGIN_MM;
-  const fpIdx = elements.findIndex((e) => e.id === "floor-plan" && e.type === "image");
-  if (fpIdx === -1) {
-    // 図なし → 右下(会社帯の上)フォールバック。
-    // 概要表(右1/3)を避けるため、その左端の手前・会社帯の上に置く(右端ぴったりだと
-    // 概要表のセルを覆う・@codex #300 P1)。概要表の実位置(無ければ定位置)を基準にする。
-    const overviewEl = elements.find((e) => e.id === "overview");
-    const ovLeft = overviewEl
-      ? overviewEl.x
-      : page.width - PHOTO_ZONE_X_MM - page.width / 3;
-    const qrX = clamp(ovLeft - COLUMN_GAP_MM - qr.w, 0, Math.max(0, page.width - qr.w));
-    const qrY = clamp(contentBottom - qr.h, 0, Math.max(0, page.height - qr.h));
-    if (nearlyEqual(qrX, qr.x) && nearlyEqual(qrY, qr.y)) return elements;
-    const next = elements.slice();
-    next[qrIdx] = applyGeom(qr, { x: qrX, y: qrY });
-    return next;
-  }
-  const fp = elements[fpIdx];
-  // 予約量は固定(MAP_QR_RESERVE_H_MM)＝ユーザーが QR をリサイズしても図の縮み量が変わらない。
-  // 図(最小高)+ gap + 予約 が contentBottom 内に収まる図の最大 y。図を会社帯へ近づけ過ぎると
-  // 下に空きが作れず QR が図の上へ回り込むため、その場合は図を上へ寄せる(@codex #300)。
-  const maxFloorY = Math.max(0, contentBottom - MIN_ELEMENT_SIZE_MM - MAP_QR_GAP_MM - MAP_QR_RESERVE_H_MM);
-  const fpY = Math.min(fp.y, maxFloorY);
-  // 図の下に QR(gap+予約高さ)を収めるための図の最大下端。下端いっぱいなら縮める。
-  const maxFloorBottom = contentBottom - MAP_QR_GAP_MM - MAP_QR_RESERVE_H_MM;
-  const newFpH =
-    fpY + fp.h > maxFloorBottom
-      ? Math.max(MIN_ELEMENT_SIZE_MM, maxFloorBottom - fpY)
-      : fp.h;
-  // 図が QR より細い(commitFloorPlanGeometry は図を MIN_ELEMENT_SIZE_MM まで許容)場合、
-  // QR を図の列幅に収める(縮小時は正方形を保ちスキャン性を維持・@codex #300)。写真域/概要表へ
-  // はみ出さないよう横幅も制約する。
-  const fits = qr.w <= fp.w;
-  const qrW = fits ? qr.w : fp.w;
-  const qrH = fits ? qr.h : fp.w;
-  const qrX = clamp(fp.x + (fp.w - qrW) / 2, 0, Math.max(0, page.width - qrW));
-  // 会社帯の上(contentBottom − h)を上限にクランプ。図の y を上へ寄せた分、QR は必ず図の真下。
-  const qrY = clamp(fpY + newFpH + MAP_QR_GAP_MM, 0, Math.max(0, contentBottom - qrH));
-  const fpChanged = !nearlyEqual(fpY, fp.y) || !nearlyEqual(newFpH, fp.h);
-  const qrChanged =
-    !nearlyEqual(qrX, qr.x) ||
-    !nearlyEqual(qrY, qr.y) ||
-    !nearlyEqual(qrW, qr.w) ||
-    !nearlyEqual(qrH, qr.h);
-  if (!fpChanged && !qrChanged) return elements;
-  const next = elements.slice();
-  if (fpChanged) next[fpIdx] = applyGeom(fp, { y: fpY, h: newFpH });
-  next[qrIdx] = applyGeom(qr, { x: qrX, y: qrY, w: qrW, h: qrH });
-  return next;
-}
-
-/** state に地図QRの位置調整(positionMapQr)を適用。変更なしは同一参照。
- *  間取図の配置/差替え/リサイズ/解除/削除の各経路の末尾で呼び、地図QRの位置を保つ。 */
-export function positionMapQrInState(state: EditorState): EditorState {
-  const reserved = positionMapQr(state.document.elements, state.document.page);
-  if (reserved === state.document.elements) return state;
-  return { ...state, dirty: true, document: { ...state.document, elements: reserved } };
-}
-
-/**
- * 物件の住所から Google マップ検索の QR を作り、間取図(中央列)の下に差し込む。
- * - 住所が空 / URL 生成不能 / QR 生成不能なら no-op(同一参照)。
- * - 地図QR は id="map-qr" の1枚(既存があれば置き換え)。floor-plan があればその真下・図の幅内で
- *   中央寄せ(図を縮めて会社帯を覆わない・positionMapQr)、無ければ図面の右下
- *   (会社帯の上)。用紙内クランプ・z=最前面・自動選択・dirty。
- * - QR の中身(content)= Maps URL。後からパネルで移動/リサイズ/内容編集も可(通常の qr 要素)。
- */
-export function addMapQrElement(
-  state: EditorState,
-  params: { address: string; aspects?: Record<string, number> },
-): EditorState {
+export function addMapQrElement(state: EditorState, params: { address: string }): EditorState {
+  const { document } = state;
+  if (!isConsumerTemplate(document)) return state;
   const url = buildMapsSearchUrl(params.address);
   if (url === null) return state;
   const dataUrl = generateQrDataUrl(url);
   if (dataUrl === null) return state;
-  const { document } = state;
-  const { page } = document;
-  const w = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(DEFAULT_QR_SIZE_MM, page.width - 10));
-  const h = Math.max(MIN_ELEMENT_SIZE_MM, Math.min(DEFAULT_QR_SIZE_MM, page.height - 10));
-  const contentBottom = page.height - PHOTO_ZONE_BOTTOM_MARGIN_MM;
-
-  // 地図QR は1枚に(既存を置き換え)。
   const base = document.elements.filter((e) => e.id !== MAP_QR_ID);
-  const floorPlanEl = base.find((e) => e.id === "floor-plan" && e.type === "image");
-  // 初期位置: 図ありは仮に真下(この後 reserve で確定)、図なしは右下・会社帯の上。
-  let x: number;
-  let y: number;
-  if (floorPlanEl) {
-    x = floorPlanEl.x + (floorPlanEl.w - w) / 2;
-    y = floorPlanEl.y + floorPlanEl.h + MAP_QR_GAP_MM;
-  } else {
-    x = page.width - w - 10;
-    y = contentBottom - h;
-  }
-  x = clamp(x, 0, Math.max(0, page.width - w));
-  y = clamp(y, 0, Math.max(0, contentBottom - h));
   const z = base.length ? Math.max(...base.map((e) => e.z)) + 1 : 1;
-  const mapQrEl: QrElement = {
-    id: MAP_QR_ID,
-    type: "qr",
-    x,
-    y,
-    w,
-    h,
-    z,
-    dataUrl,
-    content: url,
-  };
-  const withQr: EditorState = {
+  const slot = CONSUMER_MAP_QR_SLOT;
+  const mapQrEl: QrElement = { id: MAP_QR_ID, type: "qr", x: slot.x, y: slot.y, w: slot.w, h: slot.h, z, dataUrl, content: url };
+  return {
     ...state,
     dirty: true,
     selectedId: MAP_QR_ID,
     document: { ...document, elements: [...base, mapQrEl] },
   };
-  // 先に autoArrangePhotos(概要表を定位置へスナップ・写真帯を予約・写真を再整列)を行い、
-  // その後に positionMapQr で QR を最終レイアウト(スナップ後の概要表/図)基準で置く。順序を
-  // 逆にすると QR が旧概要表位置基準になりスナップ後にずれる(@codex #300)。
-  const arranged = autoArrangePhotos(withQr, params.aspects ? { aspects: params.aspects } : undefined);
-  return positionMapQrInState(arranged);
-}
-
-/**
- * 地図QR(map-qr)を削除し、QR の予約のために縮めた間取図の高さを解放する(@codex #300)。
- * - map-qr が無ければ no-op。floor-plan が無ければ削除のみ。
- * - **予約境界にちょうど収まっている図だけ**を全高(会社帯の上端=contentBottom まで)へ戻す。
- *   手動で別の高さにした図(予約境界と一致しない)は尊重してそのまま(@codex #300: 高さ保持)。
- */
-export function deleteMapQr(
-  state: EditorState,
-  aspects?: Record<string, number>,
-): EditorState {
-  if (!state.document.elements.some((e) => e.id === MAP_QR_ID && e.type === "qr")) return state;
-  const removed = deleteElement(state, MAP_QR_ID);
-  const { document } = removed;
-  const { page } = document;
-  const contentBottom = page.height - PHOTO_ZONE_BOTTOM_MARGIN_MM;
-  const fpIdx = document.elements.findIndex((e) => e.id === "floor-plan" && e.type === "image");
-  let released = removed;
-  if (fpIdx !== -1) {
-    const fp = document.elements[fpIdx];
-    // 予約時の図の下端(固定予約量ベース=QR をリサイズしても不変)にちょうど一致する図だけ、
-    // 全高へ戻して空白を解消。手動で別の高さにした図は尊重する(@codex #300)。
-    const reservedBottom = contentBottom - MAP_QR_GAP_MM - MAP_QR_RESERVE_H_MM;
-    const fullH = Math.max(MIN_ELEMENT_SIZE_MM, contentBottom - fp.y);
-    if (nearlyEqual(fp.y + fp.h, reservedBottom) && !nearlyEqual(fp.h, fullH)) {
-      const elements = document.elements.slice();
-      elements[fpIdx] = applyGeom(fp, { h: fullH });
-      released = { ...removed, dirty: true, document: { ...document, elements } };
-    }
-  }
-  // QR が消え予約が解けたので写真を再整列する(図なしで縮めていた写真ゾーンを全高へ広げる・
-  // 図ありでも変化ゼロなら同一参照・@codex #300)。
-  return autoArrangePhotos(released, aspects ? { aspects } : undefined);
 }
 
 /**
@@ -848,36 +695,32 @@ export function removeTableRow(
 // ---------------------------------------------------------------------------
 
 /**
- * 会社帯の物件別6項目(取引態様/広告/報酬/担当者/取引士/特記事項)をまとめて更新する。
- * - 帯外枠 footer-band の矩形を帯領域として、取引条件/担当テーブル(+担当区切り線)だけを
- *   buildFooterTransactionElements で再生成し、既存の取引系要素と差し替える。
- * - 会社ブロック・写真・他要素・footer-divider-terms は不変。
- * - footer-band が無い document(壊れた図面)では no-op(同一参照)。
- * - 現状の6値(readFooterData)と等価(footerDataEqual)なら no-op(同一参照)＝手動配置も保持。
- * - 要素順は footer-divider-terms の直後へ挿入して保つ。変更時 dirty=true。
+ * 会社帯の物件別6項目をまとめて更新する(取引条件/担当の表だけ作り直す)。
+ * - 旧ひな型・footer-band の無い図面・値が同じときは同一参照。
+ * - 作り直した表は、元の取引表があった位置(配列順)に入れる。
  */
 export function editFooterData(state: EditorState, data: FooterBandData): EditorState {
   const { document } = state;
+  if (!isConsumerTemplate(document)) return state;
   const band = document.elements.find((e) => e.id === "footer-band");
   if (!band) return state;
   if (footerDataEqual(readFooterData(document.elements), data)) return state;
 
-  const footer = { x: band.x, y: band.y, w: band.w, h: band.h };
-  const regenerated = buildFooterTransactionElements(footer, data);
-  const TX_IDS = new Set(["footer-terms-table", "footer-divider-staff", "footer-staff-table"]);
-
+  const regenerated = buildConsumerFooterTransactionElements({ x: band.x, y: band.y, w: band.w, h: band.h }, data);
+  const TX_IDS = new Set(["footer-terms-table", "footer-staff-table"]);
   const elements: SalesSheetElement[] = [];
   let inserted = false;
   for (const el of document.elements) {
-    if (TX_IDS.has(el.id)) continue;
-    elements.push(el);
-    if (el.id === "footer-divider-terms") {
-      elements.push(...regenerated);
-      inserted = true;
+    if (TX_IDS.has(el.id)) {
+      if (!inserted) {
+        elements.push(...regenerated);
+        inserted = true;
+      }
+      continue;
     }
+    elements.push(el);
   }
   if (!inserted) elements.push(...regenerated);
-
   return { ...state, dirty: true, document: { ...document, elements } };
 }
 
@@ -885,140 +728,54 @@ export function editFooterData(state: EditorState, data: FooterBandData): Editor
 // 自動レイアウト（計画⑥）
 // ---------------------------------------------------------------------------
 
-/**
- * buildSpecSheetDocument が組む既知のテンプレ要素 id。これらの id を持つ要素は
- * 「テンプレ枠」として扱う（type==="image" 判定より優先）。floor-plan は type="image"
- * だが、この集合に含めることで写真ゾーン（写真スロット）ではなく専用の間取り図枠で
- * 扱い、autoArrangePhotos の整列対象・autoBalanceLayout の写真カウントに混入させない。
- */
-const TEMPLATE_ELEMENT_IDS = new Set([
-  "catch-band",
-  "catch-copy",
-  "heading",
-  "price",
-  "overview",
-  "sales-points",
-  "company",
-  "company-details",
-  "floor-plan",
-]);
-
-/** 写真ゾーン: テンプレの左カラム（タイトル/価格帯の下・概要表の左・会社帯の上）。 */
-const PHOTO_ZONE_X_MM = 10;
-const PHOTO_ZONE_Y_MM = 46;
-/** overview 要素が無い素の版面での写真ゾーン右境界＝ページ幅の 2/3（要件⑤の思想）。 */
-const PHOTO_ZONE_FALLBACK_RATIO = 2 / 3;
-// 写真ゾーン下端を、エンジンが写真敷詰めを止める位置（photoPackBottom = mainBottom −
-// salesPoints帯 − gap）に合わせる（@codex R1/R2）。会社帯だけでなく salesPoints 帯も避け、
-// 作成/再バランス経路と同じ予約にする。page 下端からの余白＝帯高 + main下余白 + salesPoints高 + gap。
-const PHOTO_ZONE_BOTTOM_MARGIN_MM =
-  DEFAULT_FOOTER_H + MAIN_BOTTOM_MARGIN_MM + SALES_POINTS_H_MM + PHOTO_GAP_MM;
+/** A4横の図面か(新しい紙面の計算は A4横専用)。 */
+function isA4Landscape(document: SalesSheetDocument): boolean {
+  return document.page.width === A4_LANDSCAPE.width && document.page.height === A4_LANDSCAPE.height;
+}
 
 /**
- * すべてのギャラリー写真を写真ゾーンへ「モザイク配置」で整列し直す
- * （ワンボタン自動レイアウト／写真追加時にも自動実行）。
- * - 対象はギャラリー写真のみ。テンプレ枠(TEMPLATE_ELEMENT_IDS・floor-plan含む)は不動。
- * - 写真ゾーンは**常に左2/3固定**: 右端 = OVERVIEW_MIN_X_MM(188) − 水平余白(11) = 177。
- *   overview 要素が無い自由版面のみページ幅の2/3を右境界にする。
- * - **overview(物件種目の枠)は定位置へスナップ**: 左端が定位置(188)からずれていれば
- *   x=188 / 右端=287 に寄せる(y/h維持)＝古い図面でも「最初からその位置」でレイアウト。
- * - 並び順=呼び出し時点の**見た目の順**(上の行から左→右)。opts.appendedId は末尾。
- * - 枠は各写真の実寸縦横比(opts.aspects[id]・無ければ現枠のw/h比)を保ったまま、
- *   スライシング木の全列挙で最も無駄の少ない配置を選ぶ(packMosaic・写真ごとに大小差が付く)。
- *   縦長2枚+横長1枚のような組合せでも「細い1列」に潰れず左2/3を使い切る。切り取りなし。
- * - fit:"contain"(枠比=写真比のため見た目は全面表示)。src/焦点/角丸/alt/z は保存。
- * - 純・決定的。変更ゼロなら同一参照(no-op)。変更があれば dirty=true。
+ * 写真と間取り図(type=image すべて)を写真枠(CONSUMER_PHOTO_ZONE)へモザイク配置で並べ直す。
+ * - 旧ひな型・A4横以外は同一参照。
+ * - 並び順=配列順(代表写真が先頭)。opts.appendedId は末尾。
+ * - 枠は実寸比(opts.aspects[id]・無ければ現枠の w/h)を保つ。fit:"contain"。
+ * - 純・決定的。変更ゼロなら同一参照。
  */
 export function autoArrangePhotos(
   state: EditorState,
   opts?: { appendedId?: string; aspects?: Record<string, number> },
 ): EditorState {
   const { document } = state;
-  const { page } = document;
-  // 対象はギャラリー写真のみ。間取り図など既知のテンプレ枠（floor-plan は type=image）は
-  // 専用枠に留めるため整列対象から除外する（autoBalanceLayout と同じ扱い）。
+  if (!isConsumerTemplate(document) || !isA4Landscape(document)) return state;
   const targets: number[] = [];
   document.elements.forEach((e, i) => {
-    if (e.type === "image" && !TEMPLATE_ELEMENT_IDS.has(e.id)) targets.push(i);
+    if (e.type === "image") targets.push(i);
   });
   if (targets.length === 0) return state;
 
-  // overview(物件種目の枠)は定位置(右1/3)へスナップ。写真ゾーンは常に左側固定。
-  // 定位置はページ幅から相対計算する(A4横なら x=188/右端287 で従来定数と一致)。
-  // 固定定数だと A4縦(幅210)で右端287を書き込み用紙外→保存不能になる(@codex #294 R5)。
-  const ovRight = page.width - PHOTO_ZONE_X_MM;
-  const ovMinX = ovRight - page.width / 3;
-  const overviewIdx = document.elements.findIndex((e) => e.id === "overview");
-  const overviewEl = overviewIdx >= 0 ? document.elements[overviewIdx] : null;
-  const boundaryX = overviewEl ? ovMinX : page.width * PHOTO_ZONE_FALLBACK_RATIO;
-  const overviewNeedsSnap =
-    overviewEl !== null &&
-    (!nearlyEqual(overviewEl.x, ovMinX) || !nearlyEqual(overviewEl.w, ovRight - ovMinX));
-
-  // 間取り図/敷地図(floor-plan)は 3列構成の「中央列」。写真ゾーンはその左に置く＝
-  // 写真ゾーン右端 = 図の左端 − COLUMN_GAP（図があるとき）。図を広げる(左端を左へ動かす)と
-  // 写真ゾーンが反比例で狭くなる。図が無ければ従来どおり overview 左（or 2/3）まで。
-  // 図は横に並ぶので写真は上端から敷く（図の下へ寄せない）。
-  const floorPlanEl = document.elements.find((e) => e.id === "floor-plan" && e.type === "image");
-  const zoneX = PHOTO_ZONE_X_MM;
-  const zoneY = PHOTO_ZONE_Y_MM;
-  const overviewBoundaryRight = boundaryX - PHOTO_AREA_TO_OVERVIEW_GAP_MM;
-  const zoneRight = floorPlanEl
-    ? Math.min(overviewBoundaryRight, floorPlanEl.x - COLUMN_GAP_MM)
-    : overviewBoundaryRight;
-  const zoneW = Math.max(0, zoneRight - zoneX);
-  // 図が無く地図QRがある場合は、写真ゾーン下端を QR(高さ+gap)分だけ上げて予約する
-  // (QR は positionMapQr がその下帯・概要表の左へ置く=写真と重ならない・@codex #300 P1)。
-  // 図がある場合は floor-plan 側の予約で処理するのでここでは不要。
-  const mapQrEl = document.elements.find((e) => e.id === MAP_QR_ID && e.type === "qr");
-  const mapQrBand = !floorPlanEl && mapQrEl ? MAP_QR_RESERVE_H_MM + COLUMN_GAP_MM : 0;
-  const zoneH = Math.max(0, page.height - zoneY - PHOTO_ZONE_BOTTOM_MARGIN_MM - mapQrBand);
-  // ゾーンが最小要素サイズ未満に潰れている(例: 間取り図を縦に大きくリサイズ)場合は
-  // 整列しない=非正/極小寸法を document に書き込まない(書き込むと schema の positive
-  // 検証で保存不能になる・提出前レビュー指摘)。
-  if (zoneW < MIN_ELEMENT_SIZE_MM || zoneH < MIN_ELEMENT_SIZE_MM) return state;
-
-  // 並び順=ドキュメント配列順(=写真の追加順・代表写真が先頭)。
-  // モザイク配置(packMosaic)は行構造でない(右に縦長1列など)ため、位置から読み順を
-  // 再導出すると再適用で順序が入れ替わり冪等性が壊れる。配列順は整列間で不変(整列は
-  // elements[idx] を in-place 置換し配列順を変えない)なので、これを読み順にすることで
-  // 「整列済みへの再適用=no-op」を構造的に保証する。写真は append 追加なので配列順=追加順。
   const ordered = targets.slice();
   if (opts?.appendedId) {
     const k = ordered.findIndex((idx) => document.elements[idx].id === opts.appendedId);
     if (k >= 0) ordered.push(...ordered.splice(k, 1));
   }
-
-  // 各写真の縦横比: 実測値(opts.aspects)優先・無ければ現枠の w/h(非正は justified 側が矯正)。
   const aspects = ordered.map((idx) => {
     const el = document.elements[idx];
     return opts?.aspects?.[el.id] ?? (el.h > 0 ? el.w / el.h : 0);
   });
-  const rects = packMosaic(aspects, zoneW, zoneH, PHOTO_GAP_MM);
+  const zone = CONSUMER_PHOTO_ZONE;
+  const rects = packMosaic(aspects, zone.w, zone.h, PHOTO_GAP_MM);
 
   let changed = false;
   const elements = document.elements.slice() as SalesSheetElement[];
   ordered.forEach((idx, k) => {
     const el = elements[idx] as ImageElement;
     const r = rects[k];
-    const x = zoneX + r.x;
-    const y = zoneY + r.y;
-    // 幾何は 1/1000mm 単位で比較(浮動小数の等値比較で毎回 dirty 化しない・冪等)。
-    if (
-      !nearlyEqual(el.x, x) ||
-      !nearlyEqual(el.y, y) ||
-      !nearlyEqual(el.w, r.w) ||
-      !nearlyEqual(el.h, r.h) ||
-      el.fit !== "contain"
-    ) {
+    const x = zone.x + r.x;
+    const y = zone.y + r.y;
+    if (!nearlyEqual(el.x, x) || !nearlyEqual(el.y, y) || !nearlyEqual(el.w, r.w) || !nearlyEqual(el.h, r.h) || el.fit !== "contain") {
       changed = true;
       elements[idx] = { ...el, x, y, w: r.w, h: r.h, fit: "contain" };
     }
   });
-  if (overviewNeedsSnap && overviewEl) {
-    changed = true;
-    elements[overviewIdx] = applyGeom(overviewEl, { x: ovMinX, w: ovRight - ovMinX });
-  }
   if (!changed) return state;
   return { ...state, dirty: true, document: { ...document, elements } };
 }
@@ -1028,55 +785,20 @@ function nearlyEqual(a: number, b: number): boolean {
   return Math.abs(a - b) < 0.001;
 }
 
-/**
- * 中央列(間取り図/敷地図)の既定 rect をページ寸法から算出する。
- * 版面を概ね三等分し、中央列の右端は概要表の左に近接、左端は写真域と半々。
- * 実編集ではユーザーが幅をドラッグで調整し、写真は残りスペースへ詰め直される。
- */
-function defaultFloorPlanRect(page: { width: number; height: number }): {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-} {
-  const ovRight = page.width - PHOTO_ZONE_X_MM;
-  const ovMinX = ovRight - page.width / 3;
-  const floorPlanRight = ovMinX - COLUMN_GAP_MM;
-  const leftRegionW = floorPlanRight - PHOTO_ZONE_X_MM; // 写真域+中央列の合計幅
-  const w = Math.max(MIN_ELEMENT_SIZE_MM, (leftRegionW - COLUMN_GAP_MM) / 2);
-  const x = floorPlanRight - w;
-  const y = PHOTO_ZONE_Y_MM;
-  const h = Math.max(MIN_ELEMENT_SIZE_MM, page.height - PHOTO_ZONE_BOTTOM_MARGIN_MM - PHOTO_ZONE_Y_MM);
-  return { x, y, w, h };
+/** 実寸比の表を、id の付け替えに合わせて写し替える(元の表は変えない)。 */
+function renameAspects(
+  aspects: Record<string, number> | undefined,
+  renames: [from: string, to: string][],
+): Record<string, number> | undefined {
+  if (!aspects) return undefined;
+  const out = { ...aspects };
+  for (const [from, to] of renames) if (aspects[from] !== undefined) out[to] = aspects[from];
+  return out;
 }
 
 /**
- * overview(概要表)を定位置(右1/3)へスナップする(破壊的に elements を書き換え)。
- * autoArrangePhotos も同じスナップを行うが、写真0枚だと同関数が対象0で早期 return し
- * スナップ前に抜けるため、floor-plan 操作側でも概要表の定位置を保証する(@codex #298)。
- * 変更があれば true。elements は呼び出し側で slice 済みの前提。
- */
-function snapOverviewInPlace(
-  elements: SalesSheetElement[],
-  page: { width: number; height: number },
-): boolean {
-  const idx = elements.findIndex((e) => e.id === "overview");
-  if (idx === -1) return false;
-  const ov = elements[idx];
-  const ovRight = page.width - PHOTO_ZONE_X_MM;
-  const ovMinX = ovRight - page.width / 3;
-  if (nearlyEqual(ov.x, ovMinX) && nearlyEqual(ov.w, ovRight - ovMinX)) return false;
-  elements[idx] = applyGeom(ov, { x: ovMinX, w: ovRight - ovMinX });
-  return true;
-}
-
-/**
- * 選択中の写真を中央列の「間取り図/敷地図」(id="floor-plan")にする。
- * - 対象は image かつ id!=="floor-plan"。それ以外は no-op(同一参照)。
- * - 既存の floor-plan があれば demotedId へ改名して写真へ降格(中央は常に1枚)。
- * - 対象を id="floor-plan"・fit:"contain"・中央列の既定 rect へ。
- * - 続けて autoArrangePhotos で写真を図の左へ詰め直す。selectedId は "floor-plan" に。
- * - id はサーバでなく呼び出し側が safeRandomId で用意する(reducer は純・決定的)。
+ * 選んだ写真を間取り図(id="floor-plan")にする。既存の間取り図は demotedId の写真に戻す(常に1枚)。
+ * 位置は写真枠の並べ直しに任せる(旧ひな型では並べ直さない)。selectedId は "floor-plan"。
  */
 export function setAsFloorPlan(
   state: EditorState,
@@ -1092,38 +814,14 @@ export function setAsFloorPlan(
 
   const elements = document.elements.slice() as SalesSheetElement[];
   const existingIdx = elements.findIndex((e) => e.id === "floor-plan");
-  if (existingIdx !== -1) {
-    // 既存の間取り図を写真へ降格(id を付け替え・幾何/内容は保持=整列で再配置される)。
-    elements[existingIdx] = { ...elements[existingIdx], id: demotedId } as SalesSheetElement;
-  }
-  const rect = defaultFloorPlanRect(document.page);
-  elements[idx] = {
-    ...(target as ImageElement),
-    id: "floor-plan",
-    fit: "contain",
-    x: rect.x,
-    y: rect.y,
-    w: rect.w,
-    h: rect.h,
-  };
-  // 写真が0枚(この1枚を図にした)だと autoArrangePhotos が overview スナップ前に return する
-  // ため、ここで概要表を定位置へ寄せて中央列との重なりを防ぐ(@codex #298)。
-  snapOverviewInPlace(elements, document.page);
-  const next: EditorState = {
-    ...state,
-    dirty: true,
-    selectedId: "floor-plan",
-    document: { ...document, elements },
-  };
-  // 写真を図の左へモザイクで詰め直し、地図QRがあれば新しい図の真下へ再確保する(@codex #300)。
-  return positionMapQrInState(autoArrangePhotos(next, aspects ? { aspects } : undefined));
+  if (existingIdx !== -1) elements[existingIdx] = { ...elements[existingIdx], id: demotedId } as SalesSheetElement;
+  elements[idx] = { ...(target as ImageElement), id: "floor-plan", fit: "contain" };
+  const next: EditorState = { ...state, dirty: true, selectedId: "floor-plan", document: { ...document, elements } };
+  const renamed = renameAspects(aspects, [["floor-plan", demotedId], [id, "floor-plan"]]);
+  return autoArrangePhotos(next, renamed ? { aspects: renamed } : undefined);
 }
 
-/**
- * 中央列の「間取り図/敷地図」(id="floor-plan")を通常の写真へ戻す(解除)。
- * - floor-plan が無ければ no-op。id を newId へ改名して写真化 → autoArrangePhotos で整列。
- * - selectedId は newId に。id は呼び出し側が safeRandomId で用意。
- */
+/** 間取り図(id="floor-plan")を newId の写真に戻す。無ければ同一参照。selectedId は newId。 */
 export function unsetFloorPlan(
   state: EditorState,
   newId: string,
@@ -1134,82 +832,10 @@ export function unsetFloorPlan(
   if (idx === -1) return state;
   const elements = document.elements.slice() as SalesSheetElement[];
   elements[idx] = { ...elements[idx], id: newId } as SalesSheetElement;
-  const next: EditorState = {
-    ...state,
-    dirty: true,
-    selectedId: newId,
-    document: { ...document, elements },
-  };
-  // 図を解除したら写真が中央へ広がるため、地図QRを右下フォールバックへ戻す(@codex #300)。
-  return positionMapQrInState(autoArrangePhotos(next, aspects ? { aspects } : undefined));
+  const next: EditorState = { ...state, dirty: true, selectedId: newId, document: { ...document, elements } };
+  const renamed = renameAspects(aspects, [["floor-plan", newId]]);
+  return autoArrangePhotos(next, renamed ? { aspects: renamed } : undefined);
 }
-
-/**
- * 中央列(間取り図/敷地図=floor-plan)の move/resize を確定し、右端を概要表の左へアンカー
- * したうえで写真を再整列する。**幾何確定と写真リフローを1回の更新で行う**(=undo 1回で
- * リサイズ全体が戻る・@codex #298)。
- * - mode="resize": 右端を anchorRight に固定＝どの向きのハンドルで広げても左端が動く→写真が
- *   反比例で狭まる。概要表への食い込みも起きない(@codex #298 の右ハンドル問題を解消)。
- * - mode="move": 右端が概要表を越えない範囲で自由移動(左へ動かすと写真が狭まる)。縦は自由。
- * - floor-plan が無ければ no-op。写真ゾーンが最小要素サイズ未満に潰れない幅にクランプ。
- */
-export function commitFloorPlanGeometry(
-  state: EditorState,
-  geom: { mode: "resize" | "move"; x?: number; y?: number; w?: number; h?: number },
-  aspects?: Record<string, number>,
-): EditorState {
-  const { document } = state;
-  const { page } = document;
-  const idx = document.elements.findIndex((e) => e.id === "floor-plan" && e.type === "image");
-  if (idx === -1) return state;
-  const fp = document.elements[idx];
-
-  const overviewEl = document.elements.find((e) => e.id === "overview");
-  const ovRight = page.width - PHOTO_ZONE_X_MM;
-  const ovMinX = ovRight - page.width / 3;
-  const boundaryX = overviewEl ? ovMinX : page.width * PHOTO_ZONE_FALLBACK_RATIO;
-  const anchorRight = boundaryX - COLUMN_GAP_MM; // 図の右端(概要表の左に近接)
-  // 図の左端の下限＝写真域が最小要素サイズ分は残る位置。
-  const minX = PHOTO_ZONE_X_MM + MIN_ELEMENT_SIZE_MM + COLUMN_GAP_MM;
-  const maxW = Math.max(MIN_ELEMENT_SIZE_MM, anchorRight - minX);
-
-  const w = clamp(geom.w ?? fp.w, MIN_ELEMENT_SIZE_MM, maxW);
-  const y = clamp(geom.y ?? fp.y, 0, Math.max(0, page.height - MIN_ELEMENT_SIZE_MM));
-  const h = clamp(geom.h ?? fp.h, MIN_ELEMENT_SIZE_MM, Math.max(MIN_ELEMENT_SIZE_MM, page.height - y));
-  const x =
-    geom.mode === "resize"
-      ? Math.max(0, anchorRight - w) // 右端アンカー
-      : // move も左端の下限は minX(写真域が最小サイズ分残る位置)。PHOTO_ZONE_X_MM まで許すと
-        // 写真ゾーンが潰れ autoArrangePhotos が写真を動かせず図が写真に重なる(@codex #298 P1)。
-        clamp(geom.x ?? fp.x, minX, Math.max(minX, anchorRight - w));
-
-  const fpChanged =
-    !nearlyEqual(x, fp.x) || !nearlyEqual(y, fp.y) || !nearlyEqual(w, fp.w) || !nearlyEqual(h, fp.h);
-  let elements = document.elements;
-  if (fpChanged) {
-    elements = document.elements.slice();
-    elements[idx] = applyGeom(fp, { x, y, w, h });
-  }
-  // 概要表を定位置へ(写真0枚だと autoArrangePhotos がスナップ前に return するため・@codex #298)。
-  if (elements === document.elements) {
-    const copy = document.elements.slice();
-    if (snapOverviewInPlace(copy, page)) elements = copy;
-  } else {
-    snapOverviewInPlace(elements, page);
-  }
-  const moved: EditorState =
-    elements === document.elements
-      ? state
-      : { ...state, dirty: true, document: { ...document, elements } };
-  // 写真を図の左へ詰め直し、地図QRがあれば図の真下へ再確保する(リサイズ/移動に追従・@codex #300)。
-  return positionMapQrInState(autoArrangePhotos(moved, aspects ? { aspects } : undefined));
-}
-
-// ---------------------------------------------------------------------------
-// レイアウト自動再バランス（写真枚数/概要表行数/間取り有無に応じて、テンプレ枠と写真を
-// computeSpecSheetLayout の算出値へ再配置するワンボタン操作）。
-// ---------------------------------------------------------------------------
-
 
 /** x/y/w/h がすべて等しいか（幾何の変更検知用）。 */
 function geomEquals(
@@ -1220,138 +846,75 @@ function geomEquals(
 }
 
 /**
- * document を computeSpecSheetLayout（自社マイソク版面の最適化エンジン）で再バランスする。
- * autoArrangePhotos と同じ流儀（純・変更ゼロは同一 state 参照・変更あれば dirty=true）。
- *
- * - 動かすのは「既知idのテンプレ枠」（catch-band/catch-copy/heading/price/overview/
- *   sales-points/company/company-details/floor-plan）と「type==="image" の写真要素
- *   （既知id以外・配列順・枚数は任意）」のみ。未知idの非image要素（ユーザーが手で足した
- *   独自要素）は参照ごと不動。
- * - overview（id="overview" かつ type="table"）が存在すれば、その行数を specRowCount として
- *   エンジンへ渡す。フォント(style.fontSizePt)は overviewFontPt を渡さず、常にエンジンの
- *   自動計算（行数からの clamp）に委ねる — overview は table 要素で editText の対象外
- *   （ユーザーが直接フォントを変更する手段が無い）ため「ユーザー選択の保持」は成立せず、
- *   行数変化に追従した再計算が正しい（@review Fix B・build-document.ts のビルダー側も
- *   overviewFontPt を渡していないので一貫）。存在しなければ specRowCount=0。
- * - floor-plan は該当要素が存在する（hasFloorPlan）ときのみ、エンジンが返す非nullの
- *   L.floorPlan へ更新する。
- * - 写真（配列順）は L.photoSlots[k] の x/y/w/h へ更新する。src/fit/焦点/z/角丸/alt と
- *   配列内の位置は保持する。slots が足りない分（通常発生しない）は不動。
- * - 幾何(x/y/w/h)以外は一切変更しない（overview の style.fontSizePt のみ例外）。
+ * 定型項目・表・写真・地図QRを、computeConsumerLayout の標準位置へ戻す(「レイアウト自動調整」)。
+ * - 旧ひな型・A4横以外は同一参照。
+ * - 表(overview / overview-detail-a / -b)は行数から文字サイズも計算し直す。
+ * - 写真と間取り図は写真枠へ均等に置く(エディタが続けてモザイク整列で仕上げる)。
+ * - 会社帯(footer-*)と利用者が足した要素は動かさない。変更ゼロなら同一参照。
  */
 export function autoBalanceLayout(state: EditorState): EditorState {
   const { document } = state;
-  // ⚠版面エンジン(computeSpecSheetLayout)は A4横(297×210)専用の固定座標を返す
-  // （総点検P3・autoArrangePhotos の @codex #294 R5 と同根）。A4縦(幅210)に
-  // 適用すると右端287mm等の用紙外座標を書き込み、保存の幾何検証(±10000mm)は
-  // 素通りして壊れたレイアウトが永続化する。A4横以外では何もしない(fail-closed
-  // no-op・同一参照 return)。将来 A4縦へ正式対応する際はこのガードを外し、
-  // エンジンに page 寸法を渡す改修が必要。
-  if (
-    document.page.width !== A4_LANDSCAPE.width ||
-    document.page.height !== A4_LANDSCAPE.height
-  ) {
-    return state;
-  }
-  const { elements } = document;
-
-  const overviewIdx = elements.findIndex((e) => e.id === "overview" && e.type === "table");
-  const overviewEl = overviewIdx === -1 ? null : (elements[overviewIdx] as TableElement);
-  const specRowCount = overviewEl ? overviewEl.rows.length : 0;
-
-  const hasFloorPlan = elements.some((e) => e.id === "floor-plan");
-
-  const photoIdxs: number[] = [];
-  elements.forEach((e, i) => {
-    if (e.type === "image" && !TEMPLATE_ELEMENT_IDS.has(e.id)) photoIdxs.push(i);
-  });
-
-  // overviewFontPt は渡さない＝エンジンに specRowCount からフォントを再計算させる
-  // （@review Fix B・table フォントは editText 対象外でユーザーが直接変更できないため、
-  // 既存値の「保持」を優先する理由が無い）。
-  const L = computeSpecSheetLayout({
-    photoCount: photoIdxs.length,
-    specRowCount,
-    hasFloorPlan,
-    footerHeight: DEFAULT_FOOTER_H,
-  });
-
-  const templateRects: Record<string, { x: number; y: number; w: number; h: number }> = {
-    "catch-band": L.catchBand,
-    "catch-copy": L.catchCopy,
-    heading: L.heading,
-    price: L.price,
-    "sales-points": L.salesPoints,
-    company: L.company,
-    "company-details": L.companyDetails,
+  if (!isConsumerTemplate(document) || !isA4Landscape(document)) return state;
+  const rowsOf = (id: string): number => {
+    const el = document.elements.find((e) => e.id === id);
+    return el && el.type === "table" ? el.rows.length : 0;
   };
-  // 会社帯(footer-*)は自動調整の対象に含めない：ユーザーが編集画面で手動配置した
-  // 会社帯レイアウトを「レイアウト自動調整」で消さずに保持するため（プロダクト判断）。
-  // 会社帯は作成時の位置から出発し、以後の配置はユーザーの手動編集を優先する。
+  const L = computeConsumerLayout({
+    mainRowCount: rowsOf("overview"),
+    detailRowCount: rowsOf("overview-detail-a") + rowsOf("overview-detail-b"),
+  });
+  const rects = new Map<string, Rect>([
+    ["catch-band", L.catchBand],
+    ["catch-copy", L.catchCopy],
+    ["kind-tag", L.kindTag],
+    ["heading", L.heading],
+    ["price", L.price],
+    ["sales-points-band", L.salesPointsBand],
+    ["sales-points", L.salesPoints],
+    [MAP_QR_ID, L.mapQrSlot],
+  ]);
+  const tables = new Map<string, { rect: Rect; fontSizePt: number }>([
+    ["overview", { rect: L.mainTable, fontSizePt: L.mainTable.fontSizePt }],
+    ["overview-detail-a", { rect: L.detailLeft, fontSizePt: L.detailFontSizePt }],
+    ["overview-detail-b", { rect: L.detailRight, fontSizePt: L.detailFontSizePt }],
+  ]);
 
   let changed = false;
   const next = document.elements.slice() as SalesSheetElement[];
-
-  for (const [id, rect] of Object.entries(templateRects)) {
-    const idx = next.findIndex((e) => e.id === id);
-    if (idx === -1) continue;
-    const el = next[idx];
-    if (!geomEquals(el, rect)) {
-      changed = true;
-      next[idx] = applyGeom(el, { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
-    }
-  }
-
-  if (overviewIdx !== -1) {
-    const el = next[overviewIdx] as TableElement;
-    const rect = L.overview;
-    if (!geomEquals(el, rect) || el.style.fontSizePt !== rect.fontSizePt) {
-      changed = true;
-      next[overviewIdx] = {
-        ...el,
-        x: rect.x,
-        y: rect.y,
-        w: rect.w,
-        h: rect.h,
-        style: { ...el.style, fontSizePt: rect.fontSizePt },
-      };
-    }
-  }
-
-  if (L.floorPlan) {
-    const floorPlanRect = L.floorPlan;
-    const idx = next.findIndex((e) => e.id === "floor-plan");
-    if (idx !== -1) {
-      const el = next[idx];
-      if (!geomEquals(el, floorPlanRect)) {
+  next.forEach((el, i) => {
+    const table = tables.get(el.id);
+    if (table && el.type === "table") {
+      const r = table.rect;
+      if (!geomEquals(el, r) || el.style.fontSizePt !== table.fontSizePt) {
         changed = true;
-        next[idx] = applyGeom(el, {
-          x: floorPlanRect.x,
-          y: floorPlanRect.y,
-          w: floorPlanRect.w,
-          h: floorPlanRect.h,
-        });
+        next[i] = { ...el, x: r.x, y: r.y, w: r.w, h: r.h, style: { ...el.style, fontSizePt: table.fontSizePt } };
       }
+      return;
     }
-  }
-
-  photoIdxs.forEach((idx, k) => {
-    if (k >= L.photoSlots.length) return;
-    const el = next[idx];
-    const rect = L.photoSlots[k];
-    if (!geomEquals(el, rect)) {
+    const r = rects.get(el.id);
+    if (r && !geomEquals(el, r)) {
       changed = true;
-      next[idx] = applyGeom(el, { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+      next[i] = applyGeom(el, { x: r.x, y: r.y, w: r.w, h: r.h });
     }
   });
 
-  // 地図QR(id="map-qr")がある場合、全高に戻した間取図が QR を覆わないよう、図を縮めて
-  // QR を真下へ再確保する(@codex #300: 追加時の予約を自動調整でも保つ)。
-  const reserved = positionMapQr(next, document.page);
-  if (reserved !== next) changed = true;
+  const imageIdxs: number[] = [];
+  next.forEach((e, i) => {
+    if (e.type === "image") imageIdxs.push(i);
+  });
+  const zone = L.photoZone;
+  const cells = packPhotoCells(imageIdxs.length, zone.w, zone.h);
+  imageIdxs.forEach((idx, k) => {
+    const c = cells[k];
+    const r = { x: zone.x + c.x, y: zone.y + c.y, w: c.w, h: c.h };
+    if (!geomEquals(next[idx], r)) {
+      changed = true;
+      next[idx] = applyGeom(next[idx], r);
+    }
+  });
 
   if (!changed) return state;
-  return { ...state, dirty: true, document: { ...document, elements: reserved } };
+  return { ...state, dirty: true, document: { ...document, elements: next } };
 }
 
 /**
@@ -1479,41 +1042,46 @@ function isMonospaceFamily(family: string | undefined): boolean {
  * 行ごとに「セル幅(label 32% / value 68%)に収まらない分の折返し行数」を
  * 全角=フォント幅 1 文字分として概算する (厳密なテキスト実測はしない)。
  */
-function estimatedTableHeightMm(
-  el: TableElement,
-  mono: boolean,
-  maxHeightMm: number,
-): number {
-  // fontSizePt 未指定時、両レンダラは font-size を出力せずブラウザ既定の
-  // 16px = 12pt を継承する (@codex #310 R3: 9pt と仮定すると過小見積りになる)。
+function estimatedTableHeightMm(el: TableElement, mono: boolean, maxHeightMm: number): number {
   const fontMm = (el.style.fontSizePt ?? 12) * PT_TO_MM;
   const lineMm = fontMm * 1.3;
-  // 左右 padding 1mm×2 相当を引いたセル幅。極端に狭い表でも 1 文字分は確保。
-  const labelW = Math.max(el.w * 0.32 - 2, fontMm);
-  const valueW = Math.max(el.w * 0.68 - 2, fontMm);
-  // 行容量 (em) は端数を保つ (@codex #310 R24: floor すると実際には収まる
-  // 混在幅の塊を clip 扱いにしてしまう)
+  // 余白: 未指定は従来の 0.5mm 1mm。指定時は上下=値・左右=値×1.2(table-cell-style と同じ)。
+  const padV = el.style.cellPaddingMm ?? 0.5;
+  const padH = el.style.cellPaddingMm !== undefined ? el.style.cellPaddingMm * 1.2 : 1;
+  const rowExtraMm = padV * 2 + (el.style.borderless ? 0 : 0.4);
+  const labelW = Math.max(el.w * 0.32 - padH * 2, fontMm);
+  const valueW = Math.max(el.w * 0.68 - padH * 2, fontMm);
   const labelChars = Math.max(0.1, labelW / fontMm);
   const valueChars = Math.max(0.1, valueW / fontMm);
-  // 判定はページ内要素との交差にしか使わないため、高さ maxHeightMm (ページ高
-  // 相当) 分を超えたら行数・走査とも打ち切ってよい (@codex #310 R17/R18:
-  // 巨大セルの同期計測で main thread を塞がない・切り詰めは行数上限で行う)。
   const lineCap = Math.max(1, Math.ceil(maxHeightMm / lineMm));
-  // セルは white-space: normal (@codex #310 R15): 連続空白・タブ・改行は
-  // 1 つの空白に潰れ、空セルは文字行を作らない (collapseWs=true)。
   const cellLines = (s: string, chars: number): number =>
     measureParagraph(s, chars, mono, lineCap + 1, true).length;
   let total = 0;
   for (const r of el.rows) {
-    const rowLines = Math.max(
-      cellLines(r.label, labelChars),
-      cellLines(r.value, valueChars),
-    );
-    // 空行でも罫線+上下 padding (≒1.4mm) は残る
-    total += rowLines * lineMm + 1.4;
-    if (total >= maxHeightMm) return total; // これ以上は判定に影響しない
+    const rowLines = Math.max(cellLines(r.label, labelChars), cellLines(r.value, valueChars));
+    total += rowLines * lineMm + rowExtraMm;
+    if (total >= maxHeightMm) return total;
   }
   return total;
+}
+
+/** 入りきらないか調べる表(消費者向けひな型の主要表・詳細表)。 */
+const OVERFLOW_CHECK_TABLE_IDS = ["overview", "overview-detail-a", "overview-detail-b"] as const;
+
+/**
+ * 描画上の高さが枠を超える表の id を返す(読み取り専用・編集画面の警告用)。
+ * 旧ひな型は対象外(空配列)。
+ */
+export function findTableOverflows(doc: SalesSheetDocument): string[] {
+  if (!isConsumerTemplate(doc)) return [];
+  const mono = isMonospaceFamily(doc.theme.fontFamily);
+  const out: string[] = [];
+  for (const id of OVERFLOW_CHECK_TABLE_IDS) {
+    const el = doc.elements.find((e): e is TableElement => e.id === id && e.type === "table");
+    if (!el) continue;
+    if (estimatedTableHeightMm(el, mono, el.h + 10) > el.h + OVERLAP_TOLERANCE_MM) out.push(id);
+  }
+  return out;
 }
 
 /**

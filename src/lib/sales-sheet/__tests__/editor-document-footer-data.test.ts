@@ -1,16 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { editFooterData } from "../editor-document";
 import type { EditorState } from "../editor-document";
-import { buildFooterBand, readFooterData, type FooterBandData } from "../footer-band";
+import { buildConsumerFooterBand, readFooterData, type FooterBandData } from "../footer-band";
 import { A4_LANDSCAPE, parseSalesSheetDocument } from "../document-schema";
-import type { Rect } from "../layout-engine";
-
-const FOOTER: Rect = { x: 10, y: 180, w: 277, h: 24 };
+import { CONSUMER_FOOTER } from "../layout-engine";
 
 function stateWith(data: FooterBandData): EditorState {
-  const elements = buildFooterBand(FOOTER, data);
+  const elements = buildConsumerFooterBand(CONSUMER_FOOTER, data);
   return {
-    document: { page: A4_LANDSCAPE, theme: { fontFamily: "sans-serif", accentColor: "#15324f" }, elements },
+    document: { page: A4_LANDSCAPE, theme: { fontFamily: "sans-serif", accentColor: "#1f3a5f", template: "consumer-2026-09" }, elements },
     selectedId: null,
     dirty: false,
   };
@@ -60,12 +58,5 @@ describe("editFooterData", () => {
     };
     const s1 = editFooterData(stripped, { transactionType: "一般媒介" });
     expect(s1).toBe(stripped);
-  });
-
-  it("要素順: 取引表は footer-divider-terms の直後に来る", () => {
-    const s0 = stateWith({ transactionType: "専任" });
-    const s1 = editFooterData(s0, { transactionType: "一般媒介" });
-    const ids = s1.document.elements.map((e) => e.id);
-    expect(ids.indexOf("footer-terms-table")).toBe(ids.indexOf("footer-divider-terms") + 1);
   });
 });

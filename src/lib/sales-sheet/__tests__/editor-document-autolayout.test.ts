@@ -12,10 +12,12 @@ import {
   parseSalesSheetDocument,
   salesSheetDocumentSchema,
   A4_LANDSCAPE,
+  A4_PORTRAIT,
   type SalesSheetDocument,
   type SalesSheetPage,
   type ImageElement,
 } from "../document-schema";
+import { CONSUMER_PHOTO_ZONE } from "../layout-engine";
 
 const SRC = "/uploads/properties/a/1.jpg";
 
@@ -25,7 +27,7 @@ function makeDoc(
 ): SalesSheetDocument {
   return parseSalesSheetDocument({
     page,
-    theme: { fontFamily: "sans-serif", accentColor: "#1f4e79" },
+    theme: { fontFamily: "sans-serif", accentColor: "#1f4e79", template: "consumer-2026-09" },
     elements,
   });
 }
@@ -41,11 +43,6 @@ const imageEl = (n: number, over: Record<string, unknown> = {}) => ({
 });
 const textEl = () => ({
   id: "t-1", type: "text", x: 10, y: 8, w: 180, h: 10, z: 9, content: "売土地", style: {},
-});
-/** id="overview" の概要表(物件種目の枠)。 */
-const overviewEl = (x: number) => ({
-  id: "overview", type: "table", x, y: 26, w: 287 - x, h: 158, z: 1,
-  rows: [{ label: "物件種別", value: "売地" }], style: {},
 });
 
 const images = (s: EditorState): ImageElement[] =>
@@ -68,10 +65,13 @@ function expectNoOverlaps(imgs: ImageElement[]): void {
   }
 }
 
-/** 写真ゾーン(A4横): 左2/3固定。overview あり=右端177(188−11)・無し=187(198−11)。
- *  下端=mainBottom(184) − salesPoints(7) − gap(4) = 173。 */
-const ZONE_WITH_OVERVIEW = { x: 10, y: 46, right: 177, bottom: 173 };
-const ZONE_FREEFORM = { x: 10, y: 46, right: 187, bottom: 173 };
+/** 写真ゾーン(消費者向けひな型): CONSUMER_PHOTO_ZONE(x7 y19.5 w124 h148)固定。 */
+const ZONE = {
+  x: CONSUMER_PHOTO_ZONE.x,
+  y: CONSUMER_PHOTO_ZONE.y,
+  right: CONSUMER_PHOTO_ZONE.x + CONSUMER_PHOTO_ZONE.w,
+  bottom: CONSUMER_PHOTO_ZONE.y + CONSUMER_PHOTO_ZONE.h,
+};
 
 function expectInZone(
   img: { x: number; y: number; w: number; h: number },
@@ -117,44 +117,11 @@ describe("autoArrangePhotos(段組み詰め)", () => {
     );
     const imgs = images(s);
     expect(imgs).toHaveLength(5);
-    for (const img of imgs) expectInZone(img, ZONE_FREEFORM);
+    for (const img of imgs) expectInZone(img, ZONE);
     expectNoOverlaps(imgs);
-    const zoneArea = (ZONE_FREEFORM.right - 10) * (ZONE_FREEFORM.bottom - 46);
+    const zoneArea = CONSUMER_PHOTO_ZONE.w * CONSUMER_PHOTO_ZONE.h;
     const used = imgs.reduce((s2, r) => s2 + r.w * r.h, 0);
     expect(used / zoneArea).toBeGreaterThan(0.5);
-  });
-
-  it("overview があるときは写真ゾーン右端=177(常に左2/3固定)", () => {
-    const s = autoArrangePhotos(
-      makeState([overviewEl(188), imageEl(1), imageEl(2), imageEl(3), imageEl(4)]),
-    );
-    for (const img of images(s)) expectInZone(img, ZONE_WITH_OVERVIEW);
-  });
-
-  it("overview が定位置より左(古い図面)なら x=188/右端287 へスナップし、写真は177まで", () => {
-    const s = autoArrangePhotos(makeState([overviewEl(120), imageEl(1), imageEl(2)]));
-    const ov = s.document.elements.find((e) => e.id === "overview")!;
-    expect(ov.x).toBe(188);
-    expect(ov.x + ov.w).toBe(287);
-    expect(ov.y).toBe(26); // y/h は維持
-    for (const img of images(s)) {
-      expect(img.x + img.w).toBeLessThanOrEqual(177 + 0.01);
-    }
-  });
-
-  it("A4縦でも overview スナップは用紙内(ページ幅から相対計算・@codex R5)", () => {
-    const portrait = { width: 210, height: 297, orientation: "portrait" } as const;
-    const ov = { id: "overview", type: "table", x: 120, y: 26, w: 80, h: 150, z: 1,
-      rows: [{ label: "物件種別", value: "売地" }], style: {} };
-    const s = autoArrangePhotos(makeState([ov, imageEl(1)], portrait));
-    const after = s.document.elements.find((e) => e.id === "overview")!;
-    // 定位置 = 右端(210-10=200)から幅の1/3(70): x=130・右端200 ≤ 210。
-    expect(after.x).toBeCloseTo(130, 3);
-    expect(after.x + after.w).toBeLessThanOrEqual(210);
-    for (const img of images(s)) {
-      expect(img.x + img.w).toBeLessThanOrEqual(210);
-    }
-    expect(salesSheetDocumentSchema.safeParse(s.document).success).toBe(true);
   });
 
   it("読み順=ドキュメント配列順(代表=先頭が読み順で先)", () => {
@@ -206,42 +173,6 @@ describe("autoArrangePhotos(段組み詰め)", () => {
     }
   });
 
-  it("間取り図(floor-plan)は中央列・不動、写真はその左に敷く(3列)", () => {
-    // 3列構成: 図は中央列。写真は図の左に詰まる（図の下ではない）。
-    const floorPlan = {
-      id: "floor-plan", type: "image", x: 99, y: 46, w: 83, h: 110, z: 1, src: SRC, fit: "contain",
-    };
-    const before = makeState([floorPlan, imageEl(1), imageEl(2)]);
-    const after = autoArrangePhotos(before);
-    expect(after.document.elements[0]).toBe(before.document.elements[0]); // 図は不動
-    const fp = after.document.elements[0];
-    for (const img of images(after)) {
-      expect(overlaps(img, fp)).toBe(false);
-      expect(img.x + img.w).toBeLessThanOrEqual(fp.x + 0.01); // 図の左に収まる
-    }
-  });
-
-  it("間取り図が広すぎて写真ゾーン(左)が潰れている場合は no-op(負寸法を書き込まない)", () => {
-    // floor-plan を横に大きく広げる → 写真ゾーン幅(図の左)が最小要素サイズ未満 → 整列しない。
-    const wideFloorPlan = {
-      id: "floor-plan", type: "image", x: 13, y: 46, w: 169, h: 110, z: 1, src: SRC, fit: "contain",
-    };
-    const s2 = makeState([wideFloorPlan, imageEl(1), imageEl(2)]);
-    expect(autoArrangePhotos(s2)).toBe(s2);
-  });
-
-  it("間取り図の左端を左へ動かすと写真ゾーンが反比例で狭くなる", () => {
-    const mk = (fpx: number) =>
-      makeState([
-        { id: "floor-plan", type: "image", x: fpx, y: 46, w: 182 - fpx, h: 110, z: 1, src: SRC, fit: "contain" },
-        imageEl(1), imageEl(2),
-      ]);
-    const wide = images(autoArrangePhotos(mk(120))); // 図が狭い→写真ゾーン広い
-    const narrow = images(autoArrangePhotos(mk(80))); // 図が広い→写真ゾーン狭い
-    const rightMost = (imgs: ReturnType<typeof images>) => Math.max(...imgs.map((i) => i.x + i.w));
-    expect(rightMost(narrow)).toBeLessThan(rightMost(wide)); // 図を広げると写真は左へ狭まる
-  });
-
   it("非画像要素(テキスト)は参照ごと不動・幾何/fit以外(id/src/焦点/alt/z)は保存", () => {
     const before = makeState([
       textEl(),
@@ -279,10 +210,15 @@ describe("autoArrangePhotos(段組み詰め)", () => {
     const imgs = images(s);
     expect(imgs).toHaveLength(12);
     for (const img of imgs) {
-      expectInZone(img, ZONE_FREEFORM);
+      expectInZone(img, ZONE);
       expect(img.w).toBeGreaterThan(0);
       expect(img.h).toBeGreaterThan(0);
     }
     expectNoOverlaps(imgs);
+  });
+
+  it("A4縦の図面では何もしない", () => {
+    const s = makeState([imageEl(1), imageEl(2)], A4_PORTRAIT);
+    expect(autoArrangePhotos(s)).toBe(s);
   });
 });
