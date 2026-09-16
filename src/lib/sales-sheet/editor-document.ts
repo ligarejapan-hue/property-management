@@ -762,9 +762,10 @@ export function isInitialPhotoGrid(document: SalesSheetDocument): boolean {
       el.fit === "contain" &&
       el.focalX === undefined &&
       el.focalY === undefined &&
-      // 角丸も見た目の設定(ElementPanel から変えられる)。作成時の既定は
-      // 写真=CONSUMER_PHOTO_RADIUS_MM・間取り図=無し。そこから外れていれば触った扱い。
-      (el.radiusMm === undefined || el.radiusMm === CONSUMER_PHOTO_RADIUS_MM)
+      // 角丸も見た目の設定(ElementPanel から変えられる)。既定は役割で違う
+      // (写真=CONSUMER_PHOTO_RADIUS_MM・間取り図=無し)。どちらの既定も一律に許すと、
+      // 間取り図に角丸を付けた/写真の角丸を外した図面を作成直後と誤判定する(@codex #432 P2)。
+      el.radiusMm === (el.id === "floor-plan" ? undefined : CONSUMER_PHOTO_RADIUS_MM)
     );
   });
 }

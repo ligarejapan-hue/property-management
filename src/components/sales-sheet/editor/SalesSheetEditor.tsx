@@ -252,9 +252,13 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     void (async () => {
       const aspects = await measureGalleryAspects(initial.document);
       if (cancelled) return;
-      setEditorState((prev) =>
-        isInitialPhotoGrid(prev.document) ? autoArrangePhotos(prev, { aspects }) : prev,
-      );
+      // rebase = 履歴に積まない。初期整列は「編集」ではなく読み込みの続きで、
+      // 編集として積むと 元に戻す→保存 で作成直後のグリッドが意図的な配置として
+      // 保存され、次に開いたときにまた整列されてしまう(@codex #432 P2)。
+      dispatch({
+        type: "rebase",
+        fn: (prev) => (isInitialPhotoGrid(prev.document) ? autoArrangePhotos(prev, { aspects }) : prev),
+      });
     })();
     return () => {
       cancelled = true;

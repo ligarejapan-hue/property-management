@@ -23,7 +23,10 @@ import { CONSUMER_PHOTO_ZONE, CONSUMER_PHOTO_RADIUS_MM, packPhotoCells } from ".
 const SRC = "/uploads/properties/a/1.jpg";
 const Z = CONSUMER_PHOTO_ZONE;
 
-/** 作成直後(build-document)と同じ配置の image 要素を n 枚ぶん作る。 */
+/**
+ * 作成直後(build-document の photoAndFloorPlanElements)と同じ image 要素を n 枚ぶん作る。
+ * 角丸は写真にだけ付く(間取り図には付かない)ので、実物と同じ既定をそのまま写す。
+ */
 function gridImages(n: number): unknown[] {
   const cells = packPhotoCells(n, Z.w, Z.h);
   return cells.map((c, i) => ({
@@ -36,6 +39,7 @@ function gridImages(n: number): unknown[] {
     z: 1,
     src: SRC,
     fit: "contain",
+    radiusMm: CONSUMER_PHOTO_RADIUS_MM,
   }));
 }
 
@@ -149,8 +153,36 @@ describe("isInitialPhotoGrid — 角丸の変更も『触った』とみなす",
     const els = (gridImages(3) as Record<string, unknown>[]).map((e) => ({ ...e, radiusMm: CONSUMER_PHOTO_RADIUS_MM }));
     expect(isInitialPhotoGrid(makeState([textEl(), ...els]).document)).toBe(true);
   });
+});
 
-  it("間取り図のように角丸が無い要素も true(作成時の既定)", () => {
-    expect(isInitialPhotoGrid(makeState([textEl(), ...gridImages(3)]).document)).toBe(true);
+// @codex #432 P2(3巡目): 角丸の既定は役割で違う(写真=2mm・間取り図=無し)。
+// どちらの既定も一律に許すと、間取り図に2mmを付けた/写真の角丸を外した図面を
+// 「作成直後」と誤判定して配置を組み替えてしまう。
+describe("isInitialPhotoGrid — 角丸の既定は写真と間取り図で別", () => {
+  /** 作成直後(build-document)と同じ: 写真=2mm・間取り図(2枚目)=角丸なし。 */
+  function gridWithFloorPlan(): Record<string, unknown>[] {
+    const els = gridImages(3) as Record<string, unknown>[];
+    return els.map((e, i) => {
+      if (i !== 1) return { ...e };
+      const floorPlan = { ...e, id: "floor-plan" };
+      delete floorPlan.radiusMm; // 間取り図には角丸を付けない(build-document と同じ)
+      return floorPlan;
+    });
+  }
+
+  it("作成直後の組み合わせは true", () => {
+    expect(isInitialPhotoGrid(makeState([textEl(), ...gridWithFloorPlan()]).document)).toBe(true);
+  });
+
+  it("間取り図に写真と同じ角丸を付けていれば false", () => {
+    const els = gridWithFloorPlan();
+    els[1] = { ...els[1], radiusMm: CONSUMER_PHOTO_RADIUS_MM };
+    expect(isInitialPhotoGrid(makeState([textEl(), ...els]).document)).toBe(false);
+  });
+
+  it("写真の角丸を外していれば false", () => {
+    const els = gridWithFloorPlan();
+    delete els[0].radiusMm;
+    expect(isInitialPhotoGrid(makeState([textEl(), ...els]).document)).toBe(false);
   });
 });

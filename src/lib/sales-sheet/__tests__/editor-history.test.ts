@@ -105,3 +105,55 @@ describe("editorHistoryReducer", () => {
     expect(s.past.length).toBe(HISTORY_LIMIT);
   });
 });
+
+// @codex #432 P2: 開いた直後の初期整列は「編集」ではなく「読み込みの続き」。
+// 履歴に積むと、元に戻す→保存で作成直後のグリッドが意図的な配置として保存され、
+// 次に開いたときにまた整列されてしまう(ユーザーの選択が効かない)。
+describe("rebase — 履歴に積まない土台の差し替え", () => {
+  const rebaseTo = (doc: SalesSheetDocument) => ({
+    type: "rebase" as const,
+    fn: (prev: EditorState): EditorState => ({ ...prev, dirty: true, document: doc }),
+  });
+
+  it("past に積まない=元に戻す先が増えない", () => {
+    const a = makeDoc([textEl("a")]);
+    const b = makeDoc([textEl("b")]);
+    const s = editorHistoryReducer(makeState(a), rebaseTo(b));
+    expect(s.editor.document).toBe(b);
+    expect(s.past).toEqual([]);
+  });
+
+  it("rebase の直後に元に戻しても何も起きない", () => {
+    const a = makeDoc([textEl("a")]);
+    const b = makeDoc([textEl("b")]);
+    const s = editorHistoryReducer(makeState(a), rebaseTo(b));
+    const undone = editorHistoryReducer(s, { type: "undo" });
+    expect(undone.editor.document).toBe(b);
+  });
+
+  it("no-op(同一参照)なら状態も同一参照", () => {
+    const a = makeDoc([textEl("a")]);
+    const s0 = makeState(a);
+    const s = editorHistoryReducer(s0, { type: "rebase", fn: (prev) => prev });
+    expect(s).toBe(s0);
+  });
+
+  it("rebase の後の通常の編集は従来どおり履歴に積む", () => {
+    const a = makeDoc([textEl("a")]);
+    const b = makeDoc([textEl("b")]);
+    const c = makeDoc([textEl("c")]);
+    const s = editorHistoryReducer(makeState(a), rebaseTo(b));
+    const s2 = editorHistoryReducer(s, editTo(c));
+    expect(s2.past).toEqual([b]);
+    expect(editorHistoryReducer(s2, { type: "undo" }).editor.document).toBe(b);
+  });
+
+  it("既に積まれた履歴は捨てない", () => {
+    const a = makeDoc([textEl("a")]);
+    const b = makeDoc([textEl("b")]);
+    const c = makeDoc([textEl("c")]);
+    const s = editorHistoryReducer(makeState(a), editTo(b));
+    const s2 = editorHistoryReducer(s, rebaseTo(c));
+    expect(s2.past).toEqual([a]);
+  });
+});

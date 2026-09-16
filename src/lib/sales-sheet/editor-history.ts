@@ -23,6 +23,12 @@ export interface HistoryState {
 
 export type HistoryAction =
   | { type: "edit"; fn: (prev: EditorState) => EditorState }
+  /**
+   * 履歴に積まない土台の差し替え(開いた直後の初期整列など「読み込みの続き」)。
+   * 編集として積むと、元に戻す→保存で作成直後のグリッドが意図的な配置として保存され、
+   * 次に開いたときにまた整列される=ユーザーの選択が効かない(@codex #432 P2)。
+   */
+  | { type: "rebase"; fn: (prev: EditorState) => EditorState }
   | { type: "undo" }
   | { type: "redo" };
 
@@ -53,6 +59,12 @@ export function editorHistoryReducer(state: HistoryState, action: HistoryAction)
         past: [...state.past.slice(-(HISTORY_LIMIT - 1)), state.editor.document],
         future: [],
       };
+    }
+    case "rebase": {
+      const next = action.fn(state.editor);
+      if (next === state.editor) return state;
+      // past/future はそのまま(積まない・捨てない)。
+      return { ...state, editor: next };
     }
     case "undo": {
       if (state.past.length === 0) return state;
