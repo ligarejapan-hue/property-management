@@ -128,6 +128,13 @@ describe("GET 申込一覧", () => {
     const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
     expect(body.inquiries[0]).toMatchObject({ phone: "090", contactHidden: false, email: null, emailHidden: true });
   });
+  it("電話は見えない(masked)がメール(owner_email)は見える(full)なら、メールは返り電話等だけ伏せる(email は phone とは独立・P2)", async () => {
+    guard.requireSaleDmAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "masked", email: "full" } });
+    db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
+    db.dmInquiry.findMany.mockResolvedValueOnce([{ ...INQ, email: "a@b.jp" }]);
+    const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
+    expect(body.inquiries[0]).toMatchObject({ email: "a@b.jp", emailHidden: false, phone: null, contactHidden: true });
+  });
   it("field_staff は担当外の物件の申込を返さない", async () => {
     guard.requireSaleDmAccess.mockResolvedValueOnce({ session: { id: "u1", role: "field_staff" }, permissions: [], ownerDisplayConfig: { phone: "full", email: "full" } });
     db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });

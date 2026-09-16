@@ -16,12 +16,12 @@ describe("toInquiryListRows", () => {
     expect(out.map((r) => r.id)).toEqual(["a", "b", "c"]);
     expect(out.every((r) => r.phone === null && r.contactHidden)).toBe(true);
   });
-  it("連絡先を見る権限が無ければ、名前と日時と状態だけ(連絡先系は null・contactHidden=true・emailHidden=true)", () => {
-    const [r] = toInquiryListRows([row("a", "open", "2026-09-20T00:00:00Z")], { contact: false, email: true });
+  it("連絡先・メール両方の権限が無ければ、名前と日時と状態だけ(連絡先系・email は null・contactHidden=true・emailHidden=true)", () => {
+    const [r] = toInquiryListRows([row("a", "open", "2026-09-20T00:00:00Z")], { contact: false, email: false });
     expect(r).toMatchObject({ name: "名a", phone: null, email: null, contactPref: null, contactTime: null, message: null, contactHidden: true, emailHidden: true });
   });
   it("連絡先を見る権限が無ければ、対応メモ(handleNote)も伏せる(折り返し番号を含みうる・@codex P1)", () => {
-    const [r] = toInquiryListRows([{ ...row("a", "open", "2026-09-20T00:00:00Z"), handleNote: "折り返し 090-1111-2222" }], { contact: false, email: true });
+    const [r] = toInquiryListRows([{ ...row("a", "open", "2026-09-20T00:00:00Z"), handleNote: "折り返し 090-1111-2222" }], { contact: false, email: false });
     expect(r.handleNote).toBeNull();
   });
   it("連絡先を見る権限があれば対応メモを返す(メールだけ伏せる権限でも返す)", () => {
@@ -36,5 +36,18 @@ describe("toInquiryListRows", () => {
   it("両方の権限があれば全項目・contactHidden=false・emailHidden=false", () => {
     const [r] = toInquiryListRows([row("a", "open", "2026-09-20T00:00:00Z")], { contact: true, email: true });
     expect(r).toMatchObject({ phone: "090-0000-0000", email: "a@b.jp", message: "要望", contactHidden: false, emailHidden: false });
+  });
+  it("電話は見られないがメールは見られる権限では、メールは返り電話等だけ伏せる(contactHidden=true・emailHidden=false・email は phone とは独立)", () => {
+    const [r] = toInquiryListRows([row("a", "open", "2026-09-20T00:00:00Z")], { contact: false, email: true });
+    expect(r).toMatchObject({
+      email: "a@b.jp",
+      emailHidden: false,
+      phone: null,
+      contactPref: null,
+      contactTime: null,
+      message: null,
+      handleNote: null,
+      contactHidden: true,
+    });
   });
 });

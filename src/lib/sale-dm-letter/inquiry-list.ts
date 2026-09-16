@@ -15,9 +15,9 @@ export interface InquiryListRow {
   handleStatus: string;
   handledAt: Date | null;
   handleNote: string | null;
-  /** 連絡先(電話・メール・希望連絡方法・時間帯・要望・対応メモ handleNote)を権限不足で伏せたか。対応メモは折り返し番号などを含みうるため一緒に伏せる(@codex P1) */
+  /** 電話・希望連絡方法・時間帯・要望・対応メモ handleNote(email を除く)を権限不足で伏せたか。対応メモは折り返し番号などを含みうるため一緒に伏せる(@codex P1) */
   contactHidden: boolean;
-  /** メール(owner_email の表示レベル)を権限不足で伏せたか */
+  /** メール(owner_email の表示レベル)を権限不足で伏せたか。phone/contact の可否とは独立に決まる(@codex P2) */
   emailHidden: boolean;
 }
 
@@ -31,15 +31,19 @@ export interface InquiryVisibility {
 
 export function toInquiryListRows(rows: SourceRow[], visibility: InquiryVisibility): InquiryListRow[] {
   // 並べ替えはしない: DB が submittedAt desc, id desc の不変順で返す(@codex P2)。
-  return rows.map((r) => {
-    if (!visibility.contact) {
-      return { ...r, phone: null, email: null, contactPref: null, contactTime: null, message: null, handleNote: null, contactHidden: true, emailHidden: true };
-    }
-    if (!visibility.email) {
-      return { ...r, email: null, contactHidden: false, emailHidden: true };
-    }
-    return { ...r, contactHidden: false, emailHidden: false };
-  });
+  // email は phone/contact とは別の owner_email 表示レベルで独立に決まる(@codex P2):
+  // 「電話は伏せるがメールは表示する」も成立する組み合わせのため、それぞれ個別に算出する。
+  return rows.map((r) => ({
+    ...r,
+    phone: visibility.contact ? r.phone : null,
+    contactPref: visibility.contact ? r.contactPref : null,
+    contactTime: visibility.contact ? r.contactTime : null,
+    message: visibility.contact ? r.message : null,
+    handleNote: visibility.contact ? r.handleNote : null,
+    contactHidden: !visibility.contact,
+    email: visibility.email ? r.email : null,
+    emailHidden: !visibility.email,
+  }));
 }
 
 /**

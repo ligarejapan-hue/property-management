@@ -21,6 +21,14 @@ describe("申込の社内画面", () => {
     expect(panel).toContain("emailHidden");
     expect(panel).toMatch(/表示する権限がありません/);
   });
+  it("連絡先(電話等)を伏せる分岐の中でも、メールは emailHidden で別に判定して出す(@codex P2: email は phone に連動させない)", () => {
+    // 三項演算子の contactHidden=true 側の枝だけを取り出す(false 側の `) : (` 以降は含めない)。
+    const start = panel.indexOf("i.contactHidden ? (") + "i.contactHidden ? (".length;
+    const end = panel.indexOf(") : (", start);
+    expect(end).toBeGreaterThan(start);
+    const trueBranch = panel.slice(start, end);
+    expect(trueBranch).toContain("emailHidden");
+  });
   it("走査規約: bg-blue-600・手書きモーダルを使わない", () => {
     expect(panel).not.toContain("bg-blue-600");
     expect(panel).not.toContain("fixed inset-0");
