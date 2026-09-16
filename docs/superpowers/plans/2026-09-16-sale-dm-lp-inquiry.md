@@ -24,6 +24,7 @@
 - **走査テストの縛り**: `src/` に `saleDmLetter` を書かない; Tailwind `bg-blue-600` 禁止・`fixed inset-0` モーダル/`border-b-2` タブ手書き禁止(`ModalShell`/`ConfirmDialog`); dashboard page に生 `<h1` 禁止; 公開の書き込み route の `crypto.randomUUID` 禁止(`@/lib/random-id` の `safeRandomId`)。
 - 各ファイルの改行は既存に合わせる(CRLF 混在禁止)・NUL 等の制御文字禁止・`git add` は列挙・commit 末尾に次の2行:
   `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>` / `Claude-Session: https://claude.ai/code/session_01GfXgLxCNNbT1KsYRPXDnr8`
+- **⚠制御文字の化け(この計画書で実際に起きた)**: ファイル書き込みツールは、コード中の「バックスラッシュ+u+16進4桁」の表記(Task 3 の制御文字の正規表現・テスト文字列)を**本物の制御文字(NUL 等)に化かす**ことがある。Task 3 のファイルを書いたら必ず `python -c "d=open('<file>','rb').read();print(sum(1 for b in d if (b<32 and b not in (9,10)) or b==127))"` が `0` であることを確認し、化けていたら表記に戻す。`git diff --stat` に `Bin` が出たら混入のしるし。
 - 「緑」の前に `npx vitest run`(フル)+`npx tsc --noEmit`+`npx eslint <変更ファイル>`+`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm run build`。
 - 専用 worktree `property-management-worktrees/sale-dm-lp-inquiry`(branch `feat/sale-dm-lp-inquiry`・base `origin/main` 9199a3fd)。
 
@@ -514,7 +515,7 @@ describe("parseInquiryForm", () => {
     expect(parseInquiryForm(form({ ...OK, contactPref: "email", email: "a@b.jp" }))).toMatchObject({ kind: "ok", value: { contactPref: "email", email: "a@b.jp" } });
   });
   it("制御文字は落とす(要望の改行は残す)", () => {
-    const r = parseInquiryForm(form({ ...OK, name: "山田 太郎", message: "一行目\r\n二行目" }));
+    const r = parseInquiryForm(form({ ...OK, name: "山田\u0000太郎", message: "一行目\r\n二行目\u0007" }));
     expect(r).toMatchObject({ kind: "ok", value: { name: "山田太郎", message: "一行目\n二行目" } });
   });
   it("同意は consent=yes のときだけ", () => {
@@ -580,8 +581,8 @@ export type InquiryParse =
   | { kind: "invalid"; errors: InquiryFieldError[] };
 
 // 改行(\n)以外の制御文字。要望以外は改行も落とす。
-const CONTROL_EXCEPT_NL = /[ -	-]/g;
-const CONTROL_ALL = /[ -]/g;
+const CONTROL_EXCEPT_NL = /[\u0000-\u0009\u000b-\u001f\u007f]/g;
+const CONTROL_ALL = /[\u0000-\u001f\u007f]/g;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function single(v: string | null): string {
