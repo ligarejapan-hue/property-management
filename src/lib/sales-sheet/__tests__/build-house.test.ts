@@ -126,9 +126,9 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
     expect(tableRow(doc, "用途地域")).toBe("第一種低層住居専用地域 / 近隣商業地域");
   });
 
-  it("建蔽率/容積率/接道種別/接道幅員/間取りを自動反映する(詳細表に集約)", () => {
+  it("建蔽率・容積率/接道種別/接道幅員/間取りを自動反映する(詳細表に集約)", () => {
     const doc = buildSaleHouseDocument({ ...base, overrides: {} });
-    expect(tableRow(doc, "建蔽率/容積率")).toBe("50％ / 100％");
+    expect(tableRow(doc, "建蔽率・容積率")).toBe("50％ / 100％");
     expect(tableRow(doc, "接道")).toBe("公道 / 幅員4.0m");
     expect(tableRow(doc, "間取り")).toBe("4LDK");
   });
@@ -253,7 +253,7 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
   it("表題は「売戸建」固定、価格はoverride×万円", () => {
     const doc = buildSaleHouseDocument({ ...base, overrides: { price: "5280" } });
     expect(findEl(doc, "heading")).toMatchObject({ content: "売戸建" });
-    expect(findEl(doc, "price")).toMatchObject({ content: "5280万円" });
+    expect(findEl(doc, "price")).toMatchObject({ content: "5,280万円" });
   });
 
   it("価格にすでに「万円」が付いていても二重化しない", () => {

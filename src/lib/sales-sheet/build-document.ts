@@ -14,9 +14,12 @@ import {
 } from "./occupancy";
 import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS, BUILDING_FIELDS } from "./field-model";
 import type { SheetValues } from "./sheet-rows";
+import { unitApplies, groupDigits } from "./sheet-rows";
 import {
   computeConsumerLayout,
   packPhotoCells,
+  CONSUMER_PHOTO_RADIUS_MM,
+  CONSUMER_PHOTO_Z,
   MAIN_TABLE_PAD_MM,
   DETAIL_TABLE_PAD_MM,
   type Rect,
@@ -59,7 +62,10 @@ export function toCanonicalUploadsSrc(
 function fmtYen(n: number): string {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
-/** 築年月：override（月精度）優先、無ければ建物の築年（"2015年"）。 */
+/**
+ * 築年月：override（月精度）優先、無ければ建物の築年（"2015年"）。
+ * ⚠ここは桁区切りを通さない（年は "2,018年" にしない・@codex #432 P2 の対象外）。
+ */
 function fmtBuiltYear(override?: string | null, builtYear?: number | null): string {
   if (override) return override;
   if (builtYear != null) return `${builtYear}年`;
@@ -79,7 +85,9 @@ function fmtAreaWithMethod(area?: string | null, method?: string | null): string
   if (!trimmed) return "";
   const s = trimmed.endsWith("㎡") ? trimmed.slice(0, -"㎡".length) : trimmed;
   const m = typeof method === "string" ? method.trim() : "";
-  return `${s}㎡${m ? `（${m}）` : ""}`;
+  // 「㎡（実測）」まで組み立ててから field-model へ渡すため、ここで区切らないと
+  // sheet-rows 側の桁区切りを素通りする(値が純粋な数字でなくなるため・@codex #432 P2)。
+  return `${groupDigits(s.trim())}㎡${m ? `（${m}）` : ""}`;
 }
 
 /**
@@ -93,15 +101,18 @@ function fmtValueWithUnit(value?: string | null, unit?: string | null): string {
   const s = typeof value === "string" ? value.trim() : "";
   if (!s) return "";
   const u = typeof unit === "string" ? unit.trim() : "";
-  if (u && s.endsWith(u)) return s;
-  return `${s}${u}`;
+  if (u && s.endsWith(u)) return `${groupDigits(s.slice(0, -u.length).trim())}${u}`;
+  // 「なし」「無」等の数量でない値には単位を付けない（sheet-rows.formatValue と同じ判定）。
+  if (u && !unitApplies(s)) return s;
+  return `${groupDigits(s)}${u}`;
 }
 
 /**
- * 価格文字列 → "3480万円"（すでに末尾が「万円」ならそのまま／付け直さない、空なら ""）。
- * 桁区切りカンマ等は付与しない＝price は自由入力文字列のまま扱う従来仕様を維持する
- * （"3480"→"3480万円"、"3,480"→"3,480万円"）。売マンション/売土地の priceText で
- * 共通利用し、両者の挙動を一致させる（@codex Important fix: 現行の売土地ダイアログは
+ * 価格文字列 → "3,480万円"（すでに末尾が「万円」ならそのまま／付け直さない、空なら ""）。
+ * 数字だけの入力には3桁区切りを入れる（発注者判断 2026-09-16: 消費者向けひな型の価格は
+ * "18,800万円" 表記。「1億8,800万円」の億表記は採らない）。"3,480" のように既に区切られた
+ * 入力や "応談" のような自由入力はそのまま通す。売マンション/売土地/売戸建/一棟の
+ * priceText で共通利用し、挙動を一致させる（@codex Important fix: 現行の売土地ダイアログは
  * プレーン自由入力のため "3,480万円" と単位まで入力されると "3,480万円万円" に
  * 二重化していた）。
  */
@@ -109,7 +120,7 @@ function fmtManYen(price?: string): string {
   const s = typeof price === "string" ? price.trim() : "";
   if (!s) return "";
   const stripped = s.endsWith("万円") ? s.slice(0, -"万円".length) : s;
-  return `${stripped}万円`;
+  return `${groupDigits(stripped.trim())}万円`;
 }
 
 /**
@@ -122,7 +133,9 @@ function fmtPercent(v?: string | null): string {
   const s = typeof v === "string" ? v.trim() : "";
   if (!s) return "";
   const stripped = s.replace(/[%％]\s*$/, "").trimEnd();
-  return stripped ? `${stripped}％` : "";
+  // 建蔽率/容積率(unit"％"で sheet-rows が付ける欄)と表記を揃えるため、ここでも
+  // 同じ桁区切り・全角→半角の正規化を通す(@codex #432 P2 と同じ穴を残さない)。
+  return stripped ? `${groupDigits(stripped)}％` : "";
 }
 
 /**
@@ -135,7 +148,7 @@ function fmtAnnualIncome(v?: string | null): string {
   const s = typeof v === "string" ? v.trim() : "";
   if (!s) return "";
   const stripped = s.replace(/(万円\s*\/\s*年|万円|\/\s*年)\s*$/, "").trim();
-  return stripped ? `${stripped}万円` : "";
+  return stripped ? `${groupDigits(stripped)}万円` : "";
 }
 
 /**
@@ -335,7 +348,7 @@ function photoAndFloorPlanElements(
 ): SalesSheetElement[] {
   const items: { id: string; src: string; alt: string; radiusMm?: number }[] = (photos ?? [])
     .slice(0, 3)
-    .map((ph, i) => ({ id: `photo-${i + 1}`, src: ph.fileUrl, alt: "物件写真", radiusMm: 2 }));
+    .map((ph, i) => ({ id: `photo-${i + 1}`, src: ph.fileUrl, alt: "物件写真", radiusMm: CONSUMER_PHOTO_RADIUS_MM }));
   if (floorPlanImage?.fileUrl) {
     items.splice(Math.min(1, items.length), 0, { id: "floor-plan", src: floorPlanImage.fileUrl, alt: "間取り図" });
   }
@@ -347,7 +360,7 @@ function photoAndFloorPlanElements(
     y: zone.y + cells[i].y,
     w: cells[i].w,
     h: cells[i].h,
-    z: 1,
+    z: CONSUMER_PHOTO_Z,
     src: it.src,
     fit: "contain" as const,
     alt: it.alt,
@@ -386,7 +399,7 @@ export function buildSpecSheetDocument(parts: SpecSheetParts): SalesSheetDocumen
     { id: "price", type: "text", ...g(L.price), z: 2, content: parts.priceText,
       style: { fontSizePt: 32, bold: true, color: C.price, lineHeight: 1 } },
     { id: "overview", type: "table", ...g(L.mainTable), z: 1, rows: parts.mainRows,
-      style: { fontSizePt: L.mainTable.fontSizePt, labelColor: C.navy, valueColor: C.ink, borderless: true, stripeColor: C.soft, cellPaddingMm: MAIN_TABLE_PAD_MM } },
+      style: { fontSizePt: L.mainTable.fontSizePt, labelColor: C.navy, valueColor: C.ink, borderless: true, fillHeight: true, stripeColor: C.soft, cellPaddingMm: MAIN_TABLE_PAD_MM } },
     { id: "overview-detail-a", type: "table", ...g(L.detailLeft), z: 1, rows: left, style: detailStyle },
     { id: "overview-detail-b", type: "table", ...g(L.detailRight), z: 1, rows: right, style: { ...detailStyle } },
     { id: "sales-points-band", type: "shape", ...g(L.salesPointsBand), z: 1, shape: "rect", fill: C.soft },

@@ -26,6 +26,7 @@ import {
   addQrElement,
   addMapQrElement,
   autoArrangePhotos,
+  isInitialPhotoGrid,
   autoBalanceLayout,
   setAsFloorPlan,
   unsetFloorPlan,
@@ -241,12 +242,35 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     return out;
   }
 
-  // マウント時に全 image(間取り図も含む)の実寸比を先読みしてキャッシュを暖める。fire-and-forget。
+  // マウント時に全 image(間取り図も含む)の実寸比を先読みしてキャッシュを暖める。
+  // 併せて、作成直後(人がまだ写真に触っていない)の図面なら一度だけ「自動整列」と同じ
+  // 並びへ寄せる(発注者判断 2026-09-16)。作成時はサーバーに実寸比が無く均等グリッドで
+  // 置くしかないため、枚数によっては縦積みの細長い帯になっていた。
+  // 触った後・整列済みの図面は isInitialPhotoGrid が false になり組み替えない。
   useEffect(() => {
-    for (const el of initial.document.elements) {
-      if (el.type === "image") void measureAspect(el.src);
-    }
-    // 初回のみ暖める(以後は写真追加/自動整列/測定で更新)。
+    let cancelled = false;
+    void (async () => {
+      const aspects = await measureGalleryAspects(initial.document);
+      if (cancelled) return;
+      // rebase = 履歴に積まない。初期整列は「編集」ではなく読み込みの続きで、
+      // 編集として積むと 元に戻す→保存 で作成直後のグリッドが意図的な配置として
+      // 保存され、次に開いたときにまた整列されてしまう(@codex #432 P2)。
+      dispatch({
+        type: "rebase",
+        fn: (prev) => (isInitialPhotoGrid(prev.document) ? autoArrangePhotos(prev, { aspects }) : prev),
+        // 読み込みの完了前に別の箇所を編集していると、履歴に整列前のグリッドが残る。
+        // そこへ戻って保存すると次に開いたときにまた整列される堂々巡りになるため、
+        // 履歴の中の古い版にも同じ整列を当てる。
+        mapSnapshot: (doc) =>
+          isInitialPhotoGrid(doc)
+            ? autoArrangePhotos({ document: doc, selectedId: null, dirty: false }, { aspects }).document
+            : doc,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // 初回のみ(以後は写真追加/自動整列/測定で更新)。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

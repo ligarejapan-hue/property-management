@@ -73,6 +73,8 @@ function TableEl({ el }: { el: TableElement }) {
         s.borderless
           ? {
               width: "100%",
+              // fillHeight の表(主要表)だけ枠の底まで伸ばす。render-html.ts と対。
+              ...(s.fillHeight ? { height: "100%" } : {}),
               borderCollapse: "collapse",
               tableLayout: "fixed",
               fontSize: s.fontSizePt ? `${s.fontSizePt}pt` : undefined,

@@ -21,6 +21,8 @@ import {
   computeConsumerLayout,
   packPhotoCells,
   CONSUMER_PHOTO_ZONE,
+  CONSUMER_PHOTO_RADIUS_MM,
+  CONSUMER_PHOTO_Z,
   CONSUMER_MAP_QR_SLOT,
   PHOTO_GAP_MM,
   type Rect,
@@ -731,6 +733,46 @@ export function editFooterData(state: EditorState, data: FooterBandData): Editor
 /** A4横の図面か(新しい紙面の計算は A4横専用)。 */
 function isA4Landscape(document: SalesSheetDocument): boolean {
   return document.page.width === A4_LANDSCAPE.width && document.page.height === A4_LANDSCAPE.height;
+}
+
+/**
+ * 作成直後(build-document の packPhotoCells グリッド)のまま、まだ誰も写真に触っていないか。
+ *
+ * 作成時はサーバーに写真の実寸比が無いため均等グリッドで置くしかなく、枚数によっては
+ * 縦積みの細長い帯になる。実寸比が分かるのはブラウザで描画したときだけなので、編集画面を
+ * 最初に開いた一度だけ autoArrangePhotos(=「自動整列」ボタン)へ寄せる。その門番。
+ * 人が1枚でも動かす/大きさを変える、または一度整列した後は false になり、以後の open で
+ * 紙面を勝手に組み替えない。純関数。
+ */
+export function isInitialPhotoGrid(document: SalesSheetDocument): boolean {
+  if (!isConsumerTemplate(document) || !isA4Landscape(document)) return false;
+  const images = document.elements.filter((e): e is ImageElement => e.type === "image");
+  if (images.length === 0) return false;
+  const zone = CONSUMER_PHOTO_ZONE;
+  const cells = packPhotoCells(images.length, zone.w, zone.h);
+  return images.every((el, i) => {
+    const c = cells[i];
+    return (
+      nearlyEqual(el.x, zone.x + c.x) &&
+      nearlyEqual(el.y, zone.y + c.y) &&
+      nearlyEqual(el.w, c.w) &&
+      nearlyEqual(el.h, c.h) &&
+      // 枠は動かさずに見せ方だけ変えた図面(contain→cover・焦点位置の指定)も「触った」
+      // とみなす。位置と大きさだけで判定すると、開いただけで autoArrangePhotos が
+      // fit を contain に戻し、保存済みの設定を黙って消す(@codex #432 P2)。
+      // ⚠build-document の photoAndFloorPlanElements が作成時に決める項目は、ここで
+      // 全て突き合わせる(位置/大きさ/重ね順/表示方法/焦点位置/角丸)。1つでも
+      // 見落とすと、その項目だけ変えた図面を「作成直後」と誤判定して組み替える。
+      el.z === CONSUMER_PHOTO_Z &&
+      el.fit === "contain" &&
+      el.focalX === undefined &&
+      el.focalY === undefined &&
+      // 角丸も見た目の設定(ElementPanel から変えられる)。既定は役割で違う
+      // (写真=CONSUMER_PHOTO_RADIUS_MM・間取り図=無し)。どちらの既定も一律に許すと、
+      // 間取り図に角丸を付けた/写真の角丸を外した図面を作成直後と誤判定する(@codex #432 P2)。
+      el.radiusMm === (el.id === "floor-plan" ? undefined : CONSUMER_PHOTO_RADIUS_MM)
+    );
+  });
 }
 
 /**

@@ -502,7 +502,7 @@ describe("POST /api/properties/[id]/sales-sheets/new", () => {
       params: Promise.resolve({ id: "p1" }),
     });
     expect(res.status).toBe(201);
-    expect(buildingOverviewRow("うち消費税")).toBe("1200万円");
+    expect(buildingOverviewRow("うち消費税")).toBe("1,200万円");
   });
 
   it("201 — 一棟: 旧キー名 deliveryTiming を後方互換で受理し、引渡時期欄に入る（本番稼働中の旧ダイアログ対応）", async () => {

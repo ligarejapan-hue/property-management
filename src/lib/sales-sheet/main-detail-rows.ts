@@ -65,7 +65,8 @@ export const MAIN_ROW_SPECS: Record<SheetKind, readonly RowSpec[]> = {
 
 /** 詳細表で1行にまとめる組。field-model の並びで最初に現れた項目の位置に出す。 */
 export const DETAIL_GROUPS: readonly RowSpec[] = [
-  { label: "建蔽率/容積率", parts: [part("coverageRatio"), part("floorRatio")] },
+  // 主要表(売土地)と同じ「・」区切り。「/」だと枠幅に対して最後の1字が折り返す。
+  { label: "建蔽率・容積率", parts: [part("coverageRatio"), part("floorRatio")] },
   { label: "接道", parts: [part("roadDirections"), part("roadKind"), part("roadWidth", "幅員")] },
   { label: "各階面積", parts: [part("floor1Area", "1階 "), part("floor2Area", "2階 "), part("floor3Area", "3階 ")] },
 ];

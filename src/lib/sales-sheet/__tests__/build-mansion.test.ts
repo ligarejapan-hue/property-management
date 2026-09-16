@@ -238,7 +238,7 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
 
   it("価格にすでに「万円」が付いていても二重化しない(売土地と共有するfmtManYenのガード・@codex Important fix)", () => {
     const doc = buildSaleMansionDocument({ ...base, overrides: { price: "6590万円" } });
-    expect(findEl(doc, "price")).toMatchObject({ content: "6590万円" });
+    expect(findEl(doc, "price")).toMatchObject({ content: "6,590万円" });
   });
 
   it("新しい紙面で組まれる(物件名・価格・物件種目・主要表)", () => {
@@ -248,7 +248,7 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     });
     expect(doc.theme.template).toBe("consumer-2026-09");
     expect(findEl(doc, "heading")).toMatchObject({ content: "西荻リリエンハイム" });
-    expect(findEl(doc, "price")).toMatchObject({ content: "6590万円", style: { color: "#b7281e" } });
+    expect(findEl(doc, "price")).toMatchObject({ content: "6,590万円", style: { color: "#b7281e" } });
     expect(findEl(doc, "kind-tag")).toMatchObject({ content: "中古マンション" });
     expect(findEl(doc, "sales-points")).toMatchObject({ content: "おすすめポイント　◆リノベ済" });
     const overview = findEl(doc, "overview") as { rows?: { label: string }[] } | undefined;
