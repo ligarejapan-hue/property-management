@@ -392,6 +392,8 @@ const rb = vi.hoisted(() => {
   const tx = {
     importJob: { findUnique: vi.fn(), update: vi.fn() },
     dmInquiry: { count: vi.fn() },
+    dmRecipientDraft: { findMany: vi.fn() },
+    $queryRaw: vi.fn(),
     property: { delete: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
   };
   return {
@@ -478,10 +480,17 @@ describe("rollback: 査定申込がある物件は削除しない(has_dm_inquiri
     rb.lockPropertyRow.mockImplementation(async (_tx: unknown, id: string) => {
       rb.order.push(`lock:${id}`);
     });
+    rb.tx.$queryRaw.mockImplementation(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      rb.order.push(`lock:${JSON.stringify(values[0])}`);
+      return [];
+    });
     // p-late は事前分類の後(実行直前)に申込が入ったケース
-    rb.tx.dmInquiry.count.mockImplementation(async ({ where }: { where: { draft: { propertyId: string } } }) => {
-      rb.order.push(`count:${where.draft.propertyId}`);
-      return where.draft.propertyId === "p-late" ? 1 : 0;
+    rb.tx.dmRecipientDraft.findMany.mockImplementation(async () => {
+      rb.order.push("inquiries");
+      return [{ propertyId: "p-late" }];
+    });
+    rb.tx.property.delete.mockImplementation(async ({ where }: { where: { id: string } }) => {
+      rb.order.push(`delete:${where.id}`);
     });
   });
 
@@ -497,7 +506,7 @@ describe("rollback: 査定申込がある物件は削除しない(has_dm_inquiri
     expect(select._count.select.dmRecipientDrafts).toEqual({ where: { inquiries: { some: {} } } });
   });
 
-  it("実行: 申込のある物件は消さず blocked に載せ、他の行は削除を続ける(tx 内は 親行ロック→件数→削除)", async () => {
+  it("実行: 申込のある物件は消さず blocked に載せ、他の行は削除を続ける(tx 内は 一括ロック→一括照会→削除)", async () => {
     const res = await call(false);
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -509,7 +518,35 @@ describe("rollback: 査定申込がある物件は削除しない(has_dm_inquiri
       { rowNumber: 1, action: "delete", reason: "査定申込があるため削除できません (has_dm_inquiries)" },
       { rowNumber: 3, action: "delete", reason: "査定申込があるため削除できません (has_dm_inquiries)" },
     ]);
-    expect(rb.order).toEqual(["lock:p-ok", "count:p-ok", "lock:p-late", "count:p-late"]);
+    // 行ごとの往復をしない(対話 tx の既定 5 秒で大きなロールバックが落ちるため): ロック1文 → 申込の照会1回 → 削除
+    expect(rb.tx.$queryRaw).toHaveBeenCalledTimes(1);
+    const lockSql = (rb.tx.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join("?");
+    expect(lockSql).toMatch(/FROM properties WHERE id = ANY\(\?::uuid\[\]\) ORDER BY id FOR UPDATE/);
+    expect(rb.tx.$queryRaw.mock.calls[0][1]).toEqual(["p-late", "p-ok"]);
+    expect(rb.tx.dmRecipientDraft.findMany).toHaveBeenCalledTimes(1);
+    expect(rb.tx.dmRecipientDraft.findMany).toHaveBeenCalledWith({
+      where: { propertyId: { in: ["p-ok", "p-late"] }, inquiries: { some: {} } },
+      select: { propertyId: true },
+    });
+    expect(rb.tx.dmInquiry.count).not.toHaveBeenCalled();
+    expect(rb.lockPropertyRow).not.toHaveBeenCalled();
+    expect(rb.order).toEqual(['lock:["p-late","p-ok"]', "inquiries", "delete:p-ok"]);
     expect(rb.tx.importJob.update).toHaveBeenCalledWith({ where: { id: "j1" }, data: { status: "rolled_back" } });
+  });
+
+  it("実行: 削除候補が0件なら ロックも申込の照会もしない", async () => {
+    rb.propertyFindMany.mockResolvedValue([
+      { id: "p-inq", updatedAt: completedAt, _count: { ...zeroCounts, dmRecipientDrafts: 1 } },
+    ]);
+    rb.jobFindUnique.mockResolvedValue({
+      id: "j1", jobType: "property_csv", status: "completed", executedBy: "user-1",
+      createdAt: completedAt, startedAt: completedAt, completedAt,
+      rows: [row(1, "p-inq")],
+    });
+    const res = await call(false);
+    expect(res.status).toBe(200);
+    expect(rb.tx.$queryRaw).not.toHaveBeenCalled();
+    expect(rb.tx.dmRecipientDraft.findMany).not.toHaveBeenCalled();
+    expect(rb.tx.property.delete).not.toHaveBeenCalled();
   });
 });

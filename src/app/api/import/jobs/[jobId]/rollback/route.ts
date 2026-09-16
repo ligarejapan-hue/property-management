@@ -20,7 +20,7 @@ import {
   type JobWindow,
 } from "@/lib/import-rollback";
 import { extractUpdatedFields } from "@/lib/import-row-display";
-import { lockPropertyRow } from "@/lib/property-record-guard";
+import { lockPropertiesForUpdate } from "@/lib/dm-batch/locks";
 
 interface BlockedDetail {
   rowNumber: number;
@@ -408,14 +408,22 @@ export async function POST(
           "CONFLICT",
         );
       }
-      for (const row of deletable) {
-        // 事前分類の後に申込が入った物件を消さない。⚠親の物件行をロックしてから数える
-        // (公開の申込記録も「親の物件行→子」でロックするため、数えた後に増えない=P2003 で tx が落ちない)。
-        await lockPropertyRow(tx, row.createdId!);
-        const inquiryCount = await tx.dmInquiry.count({
-          where: { draft: { propertyId: row.createdId! } },
+      // 事前分類の後に申込が入った物件を消さない。⚠親の物件行をロックしてから調べる
+      // (公開の申込記録も「親の物件行→子」でロックするため、調べた後に増えない=P2003 で tx が落ちない)。
+      // 行ごとにロック+照会すると往復が件数×2 になり、対話 tx の既定タイムアウト(5 秒)で
+      // 大きなロールバックが丸ごと落ちるため、ロック1文(id 昇順)+申込の照会1回にまとめる。
+      const deleteIds = deletable.map((row) => row.createdId!);
+      const inquiryPropertyIds = new Set<string>();
+      if (deleteIds.length > 0) {
+        await lockPropertiesForUpdate(tx, deleteIds);
+        const draftsWithInquiries = await tx.dmRecipientDraft.findMany({
+          where: { propertyId: { in: deleteIds }, inquiries: { some: {} } },
+          select: { propertyId: true },
         });
-        if (inquiryCount > 0) {
+        for (const d of draftsWithInquiries) inquiryPropertyIds.add(d.propertyId);
+      }
+      for (const row of deletable) {
+        if (inquiryPropertyIds.has(row.createdId!)) {
           blockedDetails.push({
             rowNumber: row.rowNumber,
             action: "delete",
