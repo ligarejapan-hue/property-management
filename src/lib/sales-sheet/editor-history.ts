@@ -86,11 +86,15 @@ export function editorHistoryReducer(state: HistoryState, action: HistoryAction)
     }
     case "rebase": {
       const next = action.fn(state.editor);
+      // 現在の版が変わらなかった=差し替える理由が無かった(門番が止めた)。履歴も触らない。
+      // ここで履歴だけ写し替えると、元に戻した先が勝手に差し替わる(@codex #432 P2)。
+      if (next === state.editor) return state;
       // 積まない・捨てない。ただし履歴に残った古い版には同じ写し替えを当てる。
-      const past = mapSnapshots(state.past, action.mapSnapshot);
-      const future = mapSnapshots(state.future, action.mapSnapshot);
-      if (next === state.editor && past === state.past && future === state.future) return state;
-      return { editor: next, past, future };
+      return {
+        editor: next,
+        past: mapSnapshots(state.past, action.mapSnapshot),
+        future: mapSnapshots(state.future, action.mapSnapshot),
+      };
     }
     case "undo": {
       if (state.past.length === 0) return state;

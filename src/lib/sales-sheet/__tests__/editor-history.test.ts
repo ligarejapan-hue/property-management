@@ -199,3 +199,22 @@ describe("rebase — 履歴に残った古い版も一緒に差し替える", ()
     expect(rebased.past).toBe(past);
   });
 });
+
+// @codex #432 P2(3巡目): 読み込みの完了前に写真そのものを触っていた場合、現在の版は
+// 整列しない(門番が止める)。そのとき履歴だけ整列後に書き換えると、元に戻した先が
+// 勝手に整列済みになってしまう。「現在の版を実際に整列したときだけ履歴も直す」。
+describe("rebase — 現在の版が変わらなければ履歴も触らない", () => {
+  it("fn が何もしなければ mapSnapshot を指定しても履歴は不変", () => {
+    const a = makeDoc([textEl("a")]);
+    const b = makeDoc([textEl("b")]);
+    const arranged = makeDoc([textEl("arranged")]);
+    const edited = editorHistoryReducer(makeState(a), editTo(b));
+    const rebased = editorHistoryReducer(edited, {
+      type: "rebase",
+      fn: (prev) => prev, // 門番が止めた=整列しない
+      mapSnapshot: (doc) => (doc === a ? arranged : doc),
+    });
+    expect(rebased).toBe(edited);
+    expect(editorHistoryReducer(rebased, { type: "undo" }).editor.document).toBe(a);
+  });
+});
