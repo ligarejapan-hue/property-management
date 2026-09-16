@@ -383,15 +383,15 @@ export interface SaleDmInquiry {
   emailHidden: boolean;
 }
 
-// 申込一覧は区分(active=未対応・対応中 / done=対応済み)ごとにカーソルでたどる。
-export async function fetchSaleDmInquiries(campaignId: string, segment: "active" | "done" = "active", cursor?: string | null) {
+// 申込一覧は状態で絞らない1本のカーソルでたどる(振り分けは画面側)。counts は状態別の件数(範囲全体)。
+export async function fetchSaleDmInquiries(campaignId: string, cursor?: string | null) {
   if (USE_MOCK) {
     await mockDelay();
-    return { inquiries: [] as SaleDmInquiry[], hasMore: false, nextCursor: null as string | null };
+    return { inquiries: [] as SaleDmInquiry[], hasMore: false, nextCursor: null as string | null, counts: { active: 0, done: 0 } };
   }
-  const cursorQuery = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
-  return apiFetch<{ inquiries: SaleDmInquiry[]; hasMore: boolean; nextCursor: string | null }>(
-    `/api/properties/sale-dm/campaigns/${campaignId}/inquiries?segment=${segment}${cursorQuery}`,
+  const cursorQuery = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiFetch<{ inquiries: SaleDmInquiry[]; hasMore: boolean; nextCursor: string | null; counts: { active: number; done: number } }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/inquiries${cursorQuery}`,
   );
 }
 

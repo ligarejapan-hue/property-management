@@ -30,7 +30,7 @@ export interface InquiryVisibility {
 }
 
 export function toInquiryListRows(rows: SourceRow[], visibility: InquiryVisibility): InquiryListRow[] {
-  // 並べ替えはしない: 区分(segment)ごとに DB が submittedAt desc, id desc の不変順で返す(@codex P2)。
+  // 並べ替えはしない: DB が submittedAt desc, id desc の不変順で返す(@codex P2)。
   return rows.map((r) => {
     if (!visibility.contact) {
       return { ...r, phone: null, email: null, contactPref: null, contactTime: null, message: null, handleNote: null, contactHidden: true, emailHidden: true };
@@ -43,18 +43,17 @@ export function toInquiryListRows(rows: SourceRow[], visibility: InquiryVisibili
 }
 
 /**
- * 一覧の区分(@codex P2)。状態が変わると行が区分をまたぐため、区分ごとに独立してたどる。
- * active=未対応・対応中(先に表示)/ done=対応済み。
+ * 状態別の件数(groupBy の結果)を「対応が必要」(未対応・対応中)と「対応済み」にまとめる。
+ * 未知の状態は取りこぼさないよう「対応が必要」に数える。
  */
-export const INQUIRY_SEGMENTS = ["active", "done"] as const;
-export type InquirySegment = (typeof INQUIRY_SEGMENTS)[number];
-
-export function isInquirySegment(v: string): v is InquirySegment {
-  return (INQUIRY_SEGMENTS as readonly string[]).includes(v);
-}
-
-export function inquirySegmentWhere(segment: InquirySegment) {
-  return segment === "done" ? { handleStatus: "done" } : { handleStatus: { in: ["open", "in_progress"] } };
+export function countInquiriesByGroup(groups: Array<{ handleStatus: string; _count: { _all: number } }>): { active: number; done: number } {
+  let active = 0;
+  let done = 0;
+  for (const g of groups) {
+    if (g.handleStatus === "done") done += g._count._all;
+    else active += g._count._all;
+  }
+  return { active, done };
 }
 
 /** キーセットのカーソル = base64url(JSON {t: submittedAt ISO, i: id})。並びは submittedAt desc, id desc。 */

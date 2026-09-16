@@ -15,9 +15,7 @@ function formatJst(iso: string): string {
   return new Date(iso).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
-type Segment = "active" | "done";
-
-// 追加ページは id で重複を除いて後ろにつなぐ。
+// 追加ページは id で重複を除いて後ろにつなぐ(API の並び順を保つ)。
 function appendUnique(prev: SaleDmInquiry[] | null, added: SaleDmInquiry[]): SaleDmInquiry[] {
   const existingIds = new Set((prev ?? []).map((i) => i.id));
   return [...(prev ?? []), ...added.filter((i) => !existingIds.has(i.id))];
@@ -25,52 +23,36 @@ function appendUnique(prev: SaleDmInquiry[] | null, added: SaleDmInquiry[]): Sal
 
 /**
  * キャンペーン画面の「査定申込」一覧(設計 §2.5)。
- * 「対応が必要」(未対応・対応中)を先に出し、「対応済み」は押したときだけ読む。
- * 区分ごとにカーソルでたどる(@codex P2: 途中で申込が届いても・状態が変わっても重複や取りこぼしが出ない)。
+ * 状態で絞らない1本のカーソルで新しい順に読み込み、画面で「対応が必要」(未対応・対応中)と
+ * 「対応済み」に振り分ける(@codex P2: 途中で状態が変わっても取りこぼさない)。
+ * 読み込んでいない古いページに残りがあるかは counts(状態別の件数)で知らせる。
  */
 export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: SaleDmCampaign; reloadKey: number }) {
-  // 対応が必要(未対応・対応中)
+  // 読み込んだ全行(API の順・id で重複なし)
   const [items, setItems] = useState<SaleDmInquiry[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  // 対応済み(押すまで読まない。null=未読込)
-  const [doneItems, setDoneItems] = useState<SaleDmInquiry[] | null>(null);
-  const [doneNextCursor, setDoneNextCursor] = useState<string | null>(null);
-  const [loadingDone, setLoadingDone] = useState(false);
+  const [counts, setCounts] = useState<{ active: number; done: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [loadingMore, setLoadingMore] = useState<Segment | null>(null);
-  // 先頭から読み直した後に古い「さらに表示」の応答が混ざらないよう、区分ごとに世代を数える。
-  const generation = useRef<Record<Segment, number>>({ active: 0, done: 0 });
-  const doneOpen = doneItems !== null;
+  const [loadingMore, setLoadingMore] = useState(false);
+  // 対応済みは既定で畳む(読み込み済みの行を出し入れするだけ・取得はしない)
+  const [showDone, setShowDone] = useState(false);
+  // 先頭から読み直した後に古い「さらに読み込む」の応答が混ざらないよう、世代を数える。
+  const generation = useRef(0);
 
-  // 「対応が必要」の先頭ページを取得して置き換える(初回・reloadKey 変化・対応状況の変更後)。
+  // 先頭ページを取得して置き換える(初回・reloadKey 変化・対応状況の変更後)。
   const load = useCallback(async () => {
-    const gen = ++generation.current.active;
+    const gen = ++generation.current;
     try {
-      const res = await fetchSaleDmInquiries(campaign.id, "active");
-      if (gen !== generation.current.active) return;
+      const res = await fetchSaleDmInquiries(campaign.id);
+      if (gen !== generation.current) return;
       setItems(res.inquiries);
       setNextCursor(res.nextCursor);
+      setCounts(res.counts);
       setError(null);
     } catch (e) {
+      if (gen !== generation.current) return;
       setError(e instanceof Error ? e.message : "申込を読み込めませんでした");
-    }
-  }, [campaign.id]);
-
-  // 「対応済み」の先頭ページを取得して置き換える(「対応済みを表示」・開いている間の読み直し)。
-  const loadDone = useCallback(async () => {
-    const gen = ++generation.current.done;
-    setLoadingDone(true);
-    try {
-      const res = await fetchSaleDmInquiries(campaign.id, "done");
-      if (gen !== generation.current.done) return;
-      setDoneItems(res.inquiries);
-      setDoneNextCursor(res.nextCursor);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "対応済みの申込を読み込めませんでした");
-    } finally {
-      setLoadingDone(false);
     }
   }, [campaign.id]);
 
@@ -78,26 +60,22 @@ export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: S
     void load();
   }, [load, reloadKey]);
 
-  const loadMore = async (segment: Segment) => {
-    const cursor = segment === "active" ? nextCursor : doneNextCursor;
-    if (cursor === null) return;
-    const gen = generation.current[segment];
-    setLoadingMore(segment);
+  const loadMore = async () => {
+    if (nextCursor === null || loadingMore) return;
+    const gen = generation.current;
+    setLoadingMore(true);
     try {
-      const res = await fetchSaleDmInquiries(campaign.id, segment, cursor);
-      if (gen !== generation.current[segment]) return;
-      if (segment === "active") {
-        setItems((prev) => appendUnique(prev, res.inquiries));
-        setNextCursor(res.nextCursor);
-      } else {
-        setDoneItems((prev) => appendUnique(prev, res.inquiries));
-        setDoneNextCursor(res.nextCursor);
-      }
+      const res = await fetchSaleDmInquiries(campaign.id, nextCursor);
+      if (gen !== generation.current) return;
+      setItems((prev) => appendUnique(prev, res.inquiries));
+      setNextCursor(res.nextCursor);
+      setCounts(res.counts);
       setError(null);
     } catch (e) {
+      if (gen !== generation.current) return;
       setError(e instanceof Error ? e.message : "申込を読み込めませんでした");
     } finally {
-      setLoadingMore(null);
+      setLoadingMore(false);
     }
   };
 
@@ -110,8 +88,8 @@ export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: S
     setBusyId(id);
     try {
       await updateSaleDmInquiryStatus(id, { handleStatus });
-      // 行が区分をまたいで移動するので先頭から読み直す(対応済みは開いているときだけ)。
-      await Promise.all([load(), doneOpen ? loadDone() : Promise.resolve()]);
+      // 件数と振り分けが変わるので先頭から読み直す。
+      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "対応状況を変更できませんでした");
     } finally {
@@ -119,7 +97,11 @@ export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: S
     }
   };
 
-  const openCount = items?.filter((i) => i.handleStatus === "open").length ?? 0;
+  const activeItems = items?.filter((i) => i.handleStatus !== "done") ?? [];
+  const doneItems = items?.filter((i) => i.handleStatus === "done") ?? [];
+  const openCount = activeItems.filter((i) => i.handleStatus === "open").length;
+  const activeUnloaded = counts !== null && activeItems.length < counts.active;
+  const doneUnloaded = counts !== null && doneItems.length < counts.done;
 
   const renderList = (list: SaleDmInquiry[]) => (
     <ul className="divide-y divide-gray-100 dark:divide-gray-800" data-pii-protected data-pii-surface="owner">
@@ -159,20 +141,6 @@ export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: S
     </ul>
   );
 
-  const renderMore = (segment: Segment, cursor: string | null) =>
-    cursor !== null && (
-      <div className="mt-3 flex justify-center">
-        <button
-          type="button"
-          onClick={() => void loadMore(segment)}
-          disabled={loadingMore === segment}
-          className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-        >
-          さらに表示
-        </button>
-      </div>
-    );
-
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
       <div className="mb-3 flex items-center gap-2">
@@ -196,50 +164,64 @@ export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: S
 
       <section>
         <div className="mb-1 flex flex-wrap items-center gap-2">
-          <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200">対応が必要</h3>
-          {items && (
-            <span className="text-xs text-gray-500">
-              {items.length}件表示{nextCursor !== null ? "(続きあり)" : ""}
-              {openCount > 0 ? `・表示中の未対応 ${openCount}件` : ""}
-            </span>
-          )}
+          <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+            対応が必要{counts !== null ? ` ${counts.active}件` : ""}
+          </h3>
+          {openCount > 0 && <span className="text-xs text-gray-500">表示中の未対応 {openCount}件</span>}
         </div>
+        {activeUnloaded && (
+          <p className="mb-1 text-xs text-amber-700 dark:text-amber-400">
+            まだ読み込んでいない古い申込にも対応が必要なものがあります。下の「さらに読み込む」で表示します。
+          </p>
+        )}
         {items === null && !error ? (
           <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
-        ) : items === null ? null : items.length === 0 ? (
+        ) : items === null ? null : activeItems.length > 0 ? (
+          renderList(activeItems)
+        ) : counts?.active === 0 ? (
           <p className="py-4 text-center text-sm text-gray-500">対応が必要な申込はありません</p>
-        ) : (
-          renderList(items)
-        )}
-        {renderMore("active", nextCursor)}
+        ) : null}
       </section>
 
-      <section className="mt-4 border-t border-gray-100 pt-3 dark:border-gray-800">
-        <div className="mb-1 flex flex-wrap items-center gap-2">
-          <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200">対応済み</h3>
-          {doneItems && (
-            <span className="text-xs text-gray-500">
-              {doneItems.length}件表示{doneNextCursor !== null ? "(続きあり)" : ""}
-            </span>
+      {items !== null && (
+        <section className="mt-4 border-t border-gray-100 pt-3 dark:border-gray-800">
+          <div className="mb-1 flex flex-wrap items-center gap-2">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200">対応済み</h3>
+            <button
+              type="button"
+              onClick={() => setShowDone((v) => !v)}
+              aria-expanded={showDone}
+              className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+            >
+              {showDone ? "対応済みを隠す" : `対応済みを表示(${counts?.done ?? 0}件)`}
+            </button>
+          </div>
+          {showDone && (
+            <>
+              {doneItems.length > 0
+                ? renderList(doneItems)
+                : counts?.done === 0 && <p className="py-4 text-center text-sm text-gray-500">対応済みの申込はありません</p>}
+              {doneUnloaded && (
+                <p className="mt-1 text-xs text-gray-500">古い対応済みの申込は「さらに読み込む」で表示します。</p>
+              )}
+            </>
           )}
-        </div>
-        {doneItems === null ? (
+        </section>
+      )}
+
+      {nextCursor !== null && (
+        <div className="mt-3 flex justify-center">
           <button
             type="button"
-            onClick={() => void loadDone()}
-            disabled={loadingDone}
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
             className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
-            {loadingDone && <Loader2 className="h-3 w-3 animate-spin" />}
-            対応済みを表示
+            {loadingMore && <Loader2 className="h-3 w-3 animate-spin" />}
+            さらに読み込む
           </button>
-        ) : doneItems.length === 0 ? (
-          <p className="py-4 text-center text-sm text-gray-500">対応済みの申込はありません</p>
-        ) : (
-          renderList(doneItems)
-        )}
-        {doneItems !== null && renderMore("done", doneNextCursor)}
-      </section>
+        </div>
+      )}
     </div>
   );
 }

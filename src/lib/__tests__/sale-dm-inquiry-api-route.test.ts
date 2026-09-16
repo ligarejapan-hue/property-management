@@ -69,7 +69,7 @@ vi.mock("@/lib/dm-export", () => ({ isPlainOwnerLevel: (l: string) => l === "ful
 const db = vi.hoisted(() => {
   const self = {
     dmCampaign: { findUnique: vi.fn() },
-    dmInquiry: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+    dmInquiry: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn(), groupBy: vi.fn() },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(self)),
   };
   return self;
@@ -90,7 +90,10 @@ const INQ = {
   draft: { property: { createdBy: "u1", assignedTo: null } },
 };
 
-beforeEach(() => { vi.clearAllMocks(); });
+beforeEach(() => {
+  vi.clearAllMocks();
+  db.dmInquiry.groupBy.mockResolvedValue([]);
+});
 
 describe("GET 申込一覧", () => {
   it("作成者本人のキャンペーンのみ。他人は 404", async () => {
@@ -136,37 +139,65 @@ describe("GET 申込一覧", () => {
   const cursorOf = (t: string, i: string) => Buffer.from(JSON.stringify({ t, i })).toString("base64url");
   const UUID = "0b9c7f1e-2a3d-4e5f-8a9b-1c2d3e4f5a6b";
 
-  it("既定は segment=active: 未対応・対応中だけ・順序は不変の submittedAt desc, id desc・skip なし・take 101", async () => {
+  it("状態で絞らない1本の不変ストリーム: handleStatus 条件なし・submittedAt desc, id desc・skip なし・take 101(@codex P2)", async () => {
     db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
     db.dmInquiry.findMany.mockResolvedValueOnce([]);
     await get();
     const args = db.dmInquiry.findMany.mock.calls[0][0];
-    expect(args.where.handleStatus).toEqual({ in: ["open", "in_progress"] });
+    expect(args.where).not.toHaveProperty("handleStatus");
     expect(args.where).not.toHaveProperty("OR");
+    expect(args.where.draft).toEqual({ campaignId: "c1" });
     expect(args.orderBy).toEqual([{ submittedAt: "desc" }, { id: "desc" }]);
     expect(args).not.toHaveProperty("skip");
     expect(args.take).toBe(101);
   });
-  it("segment=done は対応済みだけ", async () => {
+  it("segment パラメータは無視する(状態で絞らない)", async () => {
     db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
     db.dmInquiry.findMany.mockResolvedValueOnce([]);
-    await get("?segment=done");
-    expect(db.dmInquiry.findMany.mock.calls[0][0].where.handleStatus).toBe("done");
+    const res = await get("?segment=done");
+    expect(res.status).toBe(200);
+    expect(db.dmInquiry.findMany.mock.calls[0][0].where).not.toHaveProperty("handleStatus");
   });
-  it.each(["all", "", "DONE"])("不正な segment=%s は 400 で DB を引かない", async (seg) => {
-    db.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
-    const res = await get(`?segment=${seg}`);
-    expect(res.status).toBe(400);
-    expect(db.dmInquiry.findMany).not.toHaveBeenCalled();
-    db.dmCampaign.findUnique.mockReset();
+  it("counts は groupBy 1回で集計(未対応+対応中=active・対応済み=done・未知の状態は active)", async () => {
+    db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
+    db.dmInquiry.findMany.mockResolvedValueOnce([INQ]);
+    db.dmInquiry.groupBy.mockResolvedValueOnce([
+      { handleStatus: "open", _count: { _all: 3 } },
+      { handleStatus: "in_progress", _count: { _all: 2 } },
+      { handleStatus: "done", _count: { _all: 4 } },
+    ]);
+    const body = await (await get()).json();
+    expect(body.counts).toEqual({ active: 5, done: 4 });
+    expect(db.dmInquiry.groupBy).toHaveBeenCalledTimes(1);
+    const args = db.dmInquiry.groupBy.mock.calls[0][0];
+    expect(args.by).toEqual(["handleStatus"]);
+    expect(args._count).toEqual({ _all: true });
+    const audit = (writeAuditLog as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(audit.detail.count).toBe(1);
+    expect(audit.detail).not.toHaveProperty("counts");
+
+    db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
+    db.dmInquiry.findMany.mockResolvedValueOnce([]);
+    db.dmInquiry.groupBy.mockResolvedValueOnce([{ handleStatus: "weird", _count: { _all: 2 } }]);
+    expect((await (await get()).json()).counts).toEqual({ active: 2, done: 0 });
+  });
+  it("groupBy の条件はキャンペーン+field_staff の担当範囲だけで、カーソル条件を含まない", async () => {
+    guard.requireSaleDmAccess.mockResolvedValueOnce({ session: { id: "u1", role: "field_staff" }, permissions: [], ownerDisplayConfig: { phone: "full", email: "full" } });
+    db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
+    db.dmInquiry.findMany.mockResolvedValueOnce([]);
+    await get(`?cursor=${cursorOf("2026-09-20T01:02:03.456Z", UUID)}`);
+    const where = db.dmInquiry.groupBy.mock.calls[0][0].where;
+    expect(where).toEqual({ draft: { campaignId: "c1", property: { OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] } } });
+    expect(where).not.toHaveProperty("OR");
+    expect(where).not.toHaveProperty("handleStatus");
   });
   it("正しい cursor はキーセット条件(submittedAt < t または 同時刻で id < i)を積む", async () => {
     db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
     db.dmInquiry.findMany.mockResolvedValueOnce([]);
     const t = "2026-09-20T01:02:03.456Z";
-    await get(`?segment=done&cursor=${cursorOf(t, UUID)}`);
+    await get(`?cursor=${cursorOf(t, UUID)}`);
     const where = db.dmInquiry.findMany.mock.calls[0][0].where;
-    expect(where.handleStatus).toBe("done");
+    expect(where).not.toHaveProperty("handleStatus");
     expect(where.OR).toEqual([
       { submittedAt: { lt: new Date(t) } },
       { submittedAt: new Date(t), id: { lt: UUID } },
@@ -208,7 +239,7 @@ describe("GET 申込一覧", () => {
     await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) });
     const args = db.dmInquiry.findMany.mock.calls[0][0];
     expect(args.where.draft.property.OR).toEqual([{ createdBy: "u1" }, { assignedTo: "u1" }]);
-    expect(args.where.handleStatus).toEqual({ in: ["open", "in_progress"] });
+    expect(args.where).not.toHaveProperty("handleStatus");
   });
 });
 

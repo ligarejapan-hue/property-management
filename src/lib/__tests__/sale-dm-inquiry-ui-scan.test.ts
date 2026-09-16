@@ -39,17 +39,22 @@ describe("申込の社内画面", () => {
     expect(route).toContain("formInquiryFirstAt: r.formInquiryFirstAt");
     expect(route).not.toMatch(/trackingToken:\s*r\./);
   });
-  it("一覧は「対応が必要」と「対応済み」に分け、カーソル方式で「さらに表示」できる(合計は名乗らない・@codex P2)", () => {
+  it("一覧は状態で絞らない1本のカーソルでたどり、画面で「対応が必要」「対応済み」に振り分ける(@codex P2)", () => {
     const api = read("src/lib/api-client.ts");
-    expect(panel).toContain("さらに表示");
+    expect(panel).toContain("さらに読み込む");
     expect(panel).toContain("対応が必要");
     expect(panel).toContain("対応済みを表示");
+    expect(panel).toContain("対応済みを隠す");
+    expect(panel).toContain("counts.active");
+    expect(panel).toContain("まだ読み込んでいない古い申込にも");
     expect(panel).toContain("nextCursor");
-    expect(api).toContain("segment=");
-    expect(api).toContain("cursor=");
+    expect(panel).not.toContain("segment");
     expect(panel).not.toContain("nextOffset");
     expect(panel).not.toContain("?offset=");
     const fetcher = api.slice(api.indexOf("export async function fetchSaleDmInquiries"), api.indexOf("export async function updateSaleDmInquiryStatus"));
+    expect(api).not.toContain("segment=");
+    expect(fetcher).toContain("cursor=");
+    expect(fetcher).toContain("counts");
     expect(fetcher).not.toContain("nextOffset");
     expect(fetcher).not.toContain("?offset=");
   });
