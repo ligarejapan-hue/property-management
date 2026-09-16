@@ -22,7 +22,12 @@ export function unitApplies(value: string): boolean {
  * 数量の欄（widget:"number"）にだけ使う。築年月のような文字の欄に使うと "2,018年" になる。
  */
 export function groupDigits(s: string): string {
-  const m = /^(\d+)(\.\d+)?$/.exec(s);
+  // 日本語入力(IME)のまま全角で打たれた数字は \d に当たらず区切れない(@codex #432 P2)。
+  // 数量として読める場合に限り半角へ揃えてから区切る。読めない値は元の文字列のまま返す。
+  const half = s
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/．/g, ".");
+  const m = /^(\d+)(\.\d+)?$/.exec(half);
   if (!m) return s;
   return m[1].replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (m[2] ?? "");
 }

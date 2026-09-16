@@ -91,7 +91,8 @@ describe("⑥ 数字を含まない値には単位を付けない", () => {
     expect(formatValue(field("㎡"), "5")).toBe("5㎡");
     expect(formatValue(field("㎡"), "12.34")).toBe("12.34㎡");
     expect(formatValue(field("㎡"), "約5")).toBe("約5㎡");
-    expect(formatValue(field("㎡"), "５")).toBe("５㎡");
+    // 全角で打たれた数字は半角へ揃える(@codex #432 P2 の対応で挙動を確定させた)。
+    expect(formatValue(field("㎡"), "５")).toBe("5㎡");
   });
 
   it("既に単位で終わっていれば付け直さない(従来の契約を維持)", () => {
@@ -174,5 +175,35 @@ describe("⑤-2 価格以外の数量にも桁区切りを入れる", () => {
       .filter((e) => e.type === "table")
       .flatMap((e) => e.rows ?? []);
     expect(rows.find((r) => r.label.startsWith("満室想定収入"))?.value).toBe("9,800万円");
+  });
+});
+
+// @codex #432 P2: 日本語入力(IME)で全角のまま入力された数字は \d に当たらず桁区切りが
+// 効かなかった。number の欄は全角数字を半角へ揃えてから区切る。
+describe("⑤-3 全角で入力された数字", () => {
+  const numField = (unit?: string): SheetField =>
+    ({ key: "x", label: "x", widget: "number", section: "価格", unit }) as SheetField;
+
+  it("価格(ビルダー側)", () => {
+    const doc = buildSaleHouseDocument({ ...base, overrides: { price: "１８８００" } } as never);
+    expect(priceText(doc)).toBe("18,800万円");
+  });
+
+  it("数量の欄(表の行)", () => {
+    expect(formatValue(numField("万円"), "１２００")).toBe("1,200万円");
+    expect(formatValue(numField("㎡"), "１２５．３")).toBe("125.3㎡");
+  });
+
+  it("4桁未満の全角も半角へ揃える", () => {
+    expect(formatValue(numField("階"), "１２")).toBe("12階");
+  });
+
+  it("文字の欄は全角のまま触らない", () => {
+    const textField = { key: "builtYearMonth", label: "築年月", widget: "text", section: "建物" } as SheetField;
+    expect(formatValue(textField, "２０１８年３月")).toBe("２０１８年３月");
+  });
+
+  it("数字以外が混じる全角はそのまま", () => {
+    expect(formatValue(numField("万円"), "応談")).toBe("応談");
   });
 });
