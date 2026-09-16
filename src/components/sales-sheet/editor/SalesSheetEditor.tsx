@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useReducer, useRef, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import type { ImageElement, SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
+import type { SalesSheetDocument } from "@/lib/sales-sheet/document-schema";
 import { isConsumerTemplate } from "@/lib/sales-sheet/document-schema";
 import type { EditorState, EditThemePatch } from "@/lib/sales-sheet/editor-document";
 import { editorHistoryReducer, initHistoryState } from "@/lib/sales-sheet/editor-history";
@@ -26,7 +26,7 @@ import {
   addQrElement,
   addMapQrElement,
   autoArrangePhotos,
-  isInitialPhotoGrid,
+  toggleHero,
   autoBalanceLayout,
   setAsFloorPlan,
   unsetFloorPlan,
@@ -191,89 +191,6 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // ── 写真の実寸縦横比の計測(src→比のキャッシュ) ─────────────────────────────
-  // 段組み詰めは写真の実寸比で枠を作る。ブラウザで naturalWidth/Height を読み(同一
-  // オリジン /uploads・エディタで既に表示済みならキャッシュヒット)、id→比で渡す。
-  const aspectCacheRef = useRef(new Map<string, number>());
-
-  function measureAspect(src: string): Promise<number | null> {
-    const cached = aspectCacheRef.current.get(src);
-    if (cached !== undefined) return Promise.resolve(cached);
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        const a = img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : null;
-        if (a !== null) aspectCacheRef.current.set(src, a);
-        resolve(a);
-      };
-      img.onerror = () => resolve(null);
-      img.src = src;
-    });
-  }
-
-  /** ギャラリー写真(すべての image。間取り図も写真の仲間)の実寸比を id→比 で測る(失敗した写真は省く)。 */
-  async function measureGalleryAspects(doc: SalesSheetDocument): Promise<Record<string, number>> {
-    const targets = doc.elements.filter((e): e is ImageElement => e.type === "image");
-    const out: Record<string, number> = {};
-    await Promise.all(
-      targets.map(async (el) => {
-        const a = await measureAspect(el.src);
-        if (a !== null) out[el.id] = a;
-      }),
-    );
-    return out;
-  }
-
-  /**
-   * キャッシュ済みの実寸比のみを id→比 で **同期的に** 集める(未キャッシュは省く=
-   * autoArrangePhotos が現枠 w/h にフォールバック)。間取り図(写真の仲間)の指定/解除は
-   * これを使い **同期** で確定する。これにより (a) 非同期待ちの間に react-moveable が
-   * ドラッグ時スタイルをリセットしてヒットボックスが崩れる問題 (b) 複数の floor-plan 操作が
-   * 画像ロード順で入れ替わる競合 を原理的に無くす(@codex #298)。キャッシュはマウント時と
-   * 写真追加/自動整列で暖める。
-   */
-  function cachedGalleryAspects(doc: SalesSheetDocument): Record<string, number> {
-    const out: Record<string, number> = {};
-    for (const el of doc.elements) {
-      if (el.type !== "image") continue;
-      const a = aspectCacheRef.current.get(el.src);
-      if (a !== undefined) out[el.id] = a;
-    }
-    return out;
-  }
-
-  // マウント時に全 image(間取り図も含む)の実寸比を先読みしてキャッシュを暖める。
-  // 併せて、作成直後(人がまだ写真に触っていない)の図面なら一度だけ「自動整列」と同じ
-  // 並びへ寄せる(発注者判断 2026-09-16)。作成時はサーバーに実寸比が無く均等グリッドで
-  // 置くしかないため、枚数によっては縦積みの細長い帯になっていた。
-  // 触った後・整列済みの図面は isInitialPhotoGrid が false になり組み替えない。
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const aspects = await measureGalleryAspects(initial.document);
-      if (cancelled) return;
-      // rebase = 履歴に積まない。初期整列は「編集」ではなく読み込みの続きで、
-      // 編集として積むと 元に戻す→保存 で作成直後のグリッドが意図的な配置として
-      // 保存され、次に開いたときにまた整列されてしまう(@codex #432 P2)。
-      dispatch({
-        type: "rebase",
-        fn: (prev) => (isInitialPhotoGrid(prev.document) ? autoArrangePhotos(prev, { aspects }) : prev),
-        // 読み込みの完了前に別の箇所を編集していると、履歴に整列前のグリッドが残る。
-        // そこへ戻って保存すると次に開いたときにまた整列される堂々巡りになるため、
-        // 履歴の中の古い版にも同じ整列を当てる。
-        mapSnapshot: (doc) =>
-          isInitialPhotoGrid(doc)
-            ? autoArrangePhotos({ document: doc, selectedId: null, dirty: false }, { aspects }).document
-            : doc,
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // 初回のみ(以後は写真追加/自動整列/測定で更新)。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // ── Handlers ────────────────────────────────────────────────────────────
 
   function handleSelect(id: string | null): void {
@@ -305,6 +222,10 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     }
     if (change.type === "unsetFloorPlan") {
       handleUnsetFloorPlan();
+      return;
+    }
+    if (change.type === "toggleHero") {
+      setEditorState((prev) => (prev.selectedId ? toggleHero(prev, prev.selectedId) : prev));
       return;
     }
     setEditorState((prev) => {
@@ -345,61 +266,42 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     });
   }
 
-  /** ギャラリーで選んだ写真を新しい image 要素として追加し、その場で段組み詰めする（要件④）。 */
-  async function handleAddImage(src: string, alt?: string): Promise<void> {
+  /**
+   * ギャラリーで選んだ写真を追加し、その場で詰め直す。既にある写真の大きさは変えず、
+   * 追加した写真は「主役以外の写真」と同じ大きさで末尾に入る(発注者判断 2026-09-16)。
+   * 並べ方は写真の縦横に左右されない(fit:contain)ため、実寸比の計測は要らない=同期。
+   */
+  function handleAddImage(src: string, alt?: string): void {
     // crypto.randomUUID は secure context 外(HTTP)で未定義ゆえフォールバック付き ID を使う。
     const id = safeRandomId();
-    // 実寸比を先に測ってから、追加→整列を1回の state 更新で行う(中間配置のちらつきなし)。
-    const docAtCall = editorState.document;
-    const aspects = await measureGalleryAspects(docAtCall);
-    const newAspect = await measureAspect(src);
-    if (newAspect !== null) aspects[id] = newAspect;
-    setEditorState((prev) => {
-      const added = addImageElement(prev, { id, src, alt });
-      // 計測待ちの間にユーザーが編集していたら、遅延した整列で上書きしない(追加のみ・
-      // @codex #294 R3)。整列はボタンでいつでもやり直せる。
-      if (prev.document !== docAtCall) return added;
-      return autoArrangePhotos(added, { appendedId: id, aspects });
-    });
+    setEditorState((prev) => autoArrangePhotos(addImageElement(prev, { id, src, alt }), { appendedId: id }));
   }
 
-  /** 写真を写真ゾーンへワンボタン段組み詰めする（手動上書き可・元に戻すで復元可）。 */
-  async function handleAutoArrange(): Promise<void> {
-    const docAtCall = editorState.document;
-    const aspects = await measureGalleryAspects(docAtCall);
-    // 計測待ちの間に編集が入っていたら適用しない(古い前提の整列で上書きしない・
-    // @codex #294 R3)。必要ならユーザーがもう一度押す。
-    setEditorState((prev) => (prev.document === docAtCall ? autoArrangePhotos(prev, { aspects }) : prev));
+  /** 「写真を自動整列」= 大きさは保って位置だけ詰める(元に戻すで復元可)。 */
+  function handleAutoArrange(): void {
+    setEditorState((prev) => autoArrangePhotos(prev));
   }
 
-  /** 選択中の写真を間取り図にする(**同期**・キャッシュ済みの実寸比で並べ直す)。 */
+  /** 選択中の写真を間取り図にする。 */
   function handleSetFloorPlan(): void {
     const id = editorState.selectedId;
     if (!id) return;
     const demotedId = safeRandomId();
-    setEditorState((prev) =>
-      prev.selectedId !== id ? prev : setAsFloorPlan(prev, id, demotedId, cachedGalleryAspects(prev.document)),
-    );
+    setEditorState((prev) => (prev.selectedId !== id ? prev : setAsFloorPlan(prev, id, demotedId)));
   }
 
-  /** 間取り図を通常の写真へ戻す(**同期**)。 */
+  /** 間取り図を通常の写真へ戻す。 */
   function handleUnsetFloorPlan(): void {
     const newId = safeRandomId();
-    setEditorState((prev) =>
-      prev.selectedId !== "floor-plan" ? prev : unsetFloorPlan(prev, newId, cachedGalleryAspects(prev.document)),
-    );
+    setEditorState((prev) => (prev.selectedId !== "floor-plan" ? prev : unsetFloorPlan(prev, newId)));
   }
 
-  /** テンプレ全体を内容に合わせてワンボタン再バランスする（機能A）。
-   *  写真と間取り図・概要表・見出し等を整え直したうえで、写真は残りスペースへモザイクで
-   *  詰め直す（「写真を自動整列」と結果を揃える＝レイアウト自動調整でも写真がきれいに並ぶ）。 */
-  async function handleAutoBalance(): Promise<void> {
-    const docAtCall = editorState.document;
-    const aspects = await measureGalleryAspects(docAtCall);
-    // 計測待ちの間に編集/undo が入っていたら適用しない(古い前提で再バランスしない・@codex #298)。
-    setEditorState((prev) =>
-      prev.document === docAtCall ? autoArrangePhotos(autoBalanceLayout(prev), { aspects }) : prev,
-    );
+  /**
+   * 「レイアウト自動調整」= 紙面全体を内容に合わせて組み直す。写真は主役1枚+残りは
+   * 同じ大きさに戻す(手で変えた大きさもリセット=大きさを作り直したいときの逃げ道)。
+   */
+  function handleAutoBalance(): void {
+    setEditorState((prev) => autoBalanceLayout(prev));
   }
 
   /** オリジナルバッジを追加する（バッジデザイナー・計画⑦）。 */

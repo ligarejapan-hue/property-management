@@ -43,12 +43,12 @@ describe("旧ひな型(theme.template なし)では自動機能が何も変え�
 describe("新ひな型", () => {
   it("autoArrangePhotos: 間取り図も写真枠に並ぶ・重ならない", () => {
     const s = makeState([img(1), { ...img(2), id: "floor-plan" }, img(3)]);
-    const next = autoArrangePhotos(s, { aspects: { "img-1": 1.5, "floor-plan": 1, "img-3": 0.75 } });
+    const next = autoArrangePhotos(s);
     const images = next.document.elements.filter((e) => e.type === "image");
     expect(images).toHaveLength(3);
     for (const r of images) expect(insideZone(r)).toBe(true);
     expect(next.document.elements.find((e) => e.id === "floor-plan")?.type === "image").toBe(true);
-    expect(autoArrangePhotos(next, { aspects: { "img-1": 1.5, "floor-plan": 1, "img-3": 0.75 } })).toBe(next);
+    expect(autoArrangePhotos(next)).toBe(next);
   });
   it("addMapQrElement: 会社帯右端の枠に置き、写真は動かさない", () => {
     const s = makeState([img(1)]);

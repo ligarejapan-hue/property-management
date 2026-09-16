@@ -91,15 +91,15 @@ describe("autoArrangePhotos(段組み詰め)", () => {
     expect(autoArrangePhotos(s2)).toBe(s2);
   });
 
-  it("枠は写真の実寸縦横比になる(aspects 指定・切り取り/letterboxなし)", () => {
+  it("入りきるなら大きさはそのまま・写真は切らずに全体を見せる(fit:contain)", () => {
+    // 第②段(発注者判断 2026-09-16): 自動整列は大きさを保って位置だけ詰める。
     const s = autoArrangePhotos(
-      makeState([imageEl(1), imageEl(2), imageEl(3)]),
-      { aspects: { "img-1": 16 / 9, "img-2": 3 / 4, "img-3": 4 / 3 } },
+      makeState([imageEl(1, { w: 60, h: 34 }), imageEl(2, { w: 30, h: 40 }), imageEl(3, { w: 40, h: 30 })]),
     );
     const [a, b, c] = images(s);
-    expect(a.w / a.h).toBeCloseTo(16 / 9, 3);
-    expect(b.w / b.h).toBeCloseTo(3 / 4, 3);
-    expect(c.w / c.h).toBeCloseTo(4 / 3, 3);
+    expect([a.w, a.h]).toEqual([60, 34]);
+    expect([b.w, b.h]).toEqual([30, 40]);
+    expect([c.w, c.h]).toEqual([40, 30]);
     for (const img of images(s)) expect(img.fit).toBe("contain");
     expect(s.dirty).toBe(true);
   });
@@ -110,18 +110,22 @@ describe("autoArrangePhotos(段組み詰め)", () => {
     expect(img.w / img.h).toBeCloseTo(2, 3);
   });
 
-  it("ゾーン内・重なりなし(混在比5枚)・面積使用率が高い", () => {
+  it("ゾーン内・重なりなし(大きさの違う5枚・入りきらなければ同じ割合で縮む)", () => {
     const s = autoArrangePhotos(
-      makeState([imageEl(1), imageEl(2), imageEl(3), imageEl(4), imageEl(5)]),
-      { aspects: { "img-1": 1.78, "img-2": 0.75, "img-3": 1.33, "img-4": 1.33, "img-5": 1.5 } },
+      makeState([
+        imageEl(1, { w: 90, h: 60 }),
+        imageEl(2, { w: 45, h: 60 }),
+        imageEl(3, { w: 80, h: 60 }),
+        imageEl(4, { w: 80, h: 60 }),
+        imageEl(5, { w: 90, h: 60 }),
+      ]),
     );
     const imgs = images(s);
     expect(imgs).toHaveLength(5);
     for (const img of imgs) expectInZone(img, ZONE);
     expectNoOverlaps(imgs);
-    const zoneArea = CONSUMER_PHOTO_ZONE.w * CONSUMER_PHOTO_ZONE.h;
-    const used = imgs.reduce((s2, r) => s2 + r.w * r.h, 0);
-    expect(used / zoneArea).toBeGreaterThan(0.5);
+    // 縮めるときは全部同じ割合(大きさの比を保つ)
+    expect(imgs[0].w / imgs[1].w).toBeCloseTo(90 / 45, 3);
   });
 
   it("読み順=ドキュメント配列順(代表=先頭が読み順で先)", () => {
@@ -198,9 +202,8 @@ describe("autoArrangePhotos(段組み詰め)", () => {
   });
 
   it("決定的・冪等: 整列済みへの再適用は no-op(同一参照)", () => {
-    const aspects = { "img-1": 1.78, "img-2": 1.33, "img-3": 0.75 };
-    const once = autoArrangePhotos(makeState([imageEl(1), imageEl(2), imageEl(3)]), { aspects });
-    const twice = autoArrangePhotos(once, { aspects });
+    const once = autoArrangePhotos(makeState([imageEl(1), imageEl(2), imageEl(3)]));
+    const twice = autoArrangePhotos(once);
     expect(twice).toBe(once);
   });
 

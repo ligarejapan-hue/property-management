@@ -21,23 +21,15 @@ export interface Rect {
 }
 
 // ---------------------------------------------------------------------------
-// 写真敷詰め (packPhotoCells) — build-document の写真配置(buildSpecSheetDocument
-// 経由)と editor の autoBalanceLayout が使う(autoArrangePhotos は packMosaic を使う)
-// （計画⑥から移設。以前は editor-document.ts にあり layout-engine と循環importになっていた）
+// 写真の置き場の共通値 — build-document(作成時の初期配置)と editor-document(並べ直し)が使う
 // ---------------------------------------------------------------------------
 
-/** 写真間の余白(mm)。テンプレの写真レイアウトと同じ。 */
+/** 写真間の余白(mm)。 */
 export const PHOTO_GAP_MM = 4;
-/**
- * 作成時に写真へ付ける角丸(mm)。間取り図には付けない。
- * build-document(付ける側)と editor-document の isInitialPhotoGrid(作成直後かの判定)が
- * 同じ値を見るための唯一の出どころ。
- */
+/** 作成時に写真へ付ける角丸(mm)。間取り図には付けない。 */
 export const CONSUMER_PHOTO_RADIUS_MM = 2;
 /** 作成時の写真・間取り図の重ね順。 */
 export const CONSUMER_PHOTO_Z = 1;
-/** セルの目標縦横比（3:2 横長）。行数の選択にのみ使う。 */
-const PHOTO_TARGET_ASPECT = 1.5;
 /** セル寸法の下限(mm)。editor の MIN_ELEMENT_SIZE_MM と同値（循環import回避のためローカル定義）。 */
 const MIN_PHOTO_CELL_MM = 5;
 
@@ -48,54 +40,200 @@ export interface PhotoCell {
   h: number;
 }
 
+// ---------------------------------------------------------------------------
+// 主役1枚+残りは全部同じ大きさ(販売図面 第②段・発注者判断 2026-09-16)
+// ---------------------------------------------------------------------------
+
+/** 主役の高さ = (写真枠の高さ - 間隔) × この比率。残りは下側に並ぶ。 */
+export const HERO_HEIGHT_RATIO = 0.55;
 /**
- * n 個のセルを W×H の枠へ「行数を選び、各行は幅いっぱい均等割り」で敷き詰める
- * （穴なし・全行同高）。プロト autolayout-v4 の packCells をベースに 2 点調整:
- * - 行数の選択は「最悪セルの縦横比の PHOTO_TARGET_ASPECT からの乖離」を最小化
- *   （ミニマックス）。均等な配分（例: 4枚→2×2）が横長の帯より優先される。
- * - 端数は後方の行に配る＝先頭行が少列（幅広）になり、代表写真（配列先頭）が
- *   最上段の大きな枠を得る（テンプレの3枚レイアウトと同じ構造）。
- * セル寸法が非正になる行数は候補から除外し、全滅する極端な枚数では 1 行へ
- * フォールバックして MIN_PHOTO_CELL_MM でクランプ（非正寸法を返さないことを優先）。
+ * 同じ大きさの格子を選ぶときに近づける縦横比(4:3 横長=一般的な写真)。写真は切らずに
+ * 全体を見せる(fit:contain)ため、各写真の実際の縦横には合わせない=並べ方は枚数だけで決まる。
  */
-export function packPhotoCells(n: number, W: number, H: number): PhotoCell[] {
+const UNIFORM_CELL_TARGET_ASPECT = 4 / 3;
+
+/** m 個を W×H へ全部同じ大きさで並べる(行×列を選ぶ・左上から詰める)。 */
+function uniformGridCells(m: number, W: number, H: number): PhotoCell[] {
+  if (m <= 0) return [];
   const gap = PHOTO_GAP_MM;
-  let best: { rows: number; counts: number[]; score: number } | null = null;
-  for (let rows = 1; rows <= n; rows++) {
-    const base = Math.floor(n / rows);
-    const extra = n % rows;
-    const counts: number[] = [];
-    for (let r = 0; r < rows; r++) counts.push(base + (r >= rows - extra ? 1 : 0));
-    const th = (H - (rows - 1) * gap) / rows;
-    if (th <= 0) continue;
-    let score = 0;
-    for (const cols of counts) {
-      const tw = (W - (cols - 1) * gap) / cols;
-      if (tw <= 0) {
-        score = Number.POSITIVE_INFINITY;
-        break;
-      }
-      score = Math.max(score, Math.abs(Math.log(tw / th / PHOTO_TARGET_ASPECT)));
+  let best: { cols: number; cw: number; ch: number; score: number; empty: number } | null = null;
+  for (let cols = 1; cols <= m; cols++) {
+    const rows = Math.ceil(m / cols);
+    const cw = (W - (cols - 1) * gap) / cols;
+    const ch = (H - (rows - 1) * gap) / rows;
+    if (cw <= 0 || ch <= 0) continue;
+    const score = Math.abs(Math.log(cw / ch / UNIFORM_CELL_TARGET_ASPECT));
+    const empty = rows * cols - m;
+    // 形の近さが同じなら空きマスの少ない方(例: 3枚で 2×2 より 1×3 が同点ならこちら)。
+    if (!best || score < best.score - 1e-9 || (Math.abs(score - best.score) <= 1e-9 && empty < best.empty)) {
+      best = { cols, cw, ch, score, empty };
     }
-    if (!Number.isFinite(score)) continue;
-    if (!best || score < best.score) best = { rows, counts, score };
   }
   if (!best) {
-    const w = Math.max(MIN_PHOTO_CELL_MM, (W - (n - 1) * gap) / n);
-    const h = Math.max(MIN_PHOTO_CELL_MM, H);
-    return Array.from({ length: n }, (_, c) => ({ x: c * (w + gap), y: 0, w, h }));
+    const w = Math.max(MIN_PHOTO_CELL_MM, W);
+    const h = Math.max(MIN_PHOTO_CELL_MM, (H - (m - 1) * gap) / m);
+    return Array.from({ length: m }, (_, i) => ({ x: 0, y: i * (h + gap), w, h }));
   }
-  const { rows, counts } = best;
-  const th = (H - (rows - 1) * gap) / rows;
-  const cells: PhotoCell[] = [];
-  for (let r = 0; r < rows; r++) {
-    const cols = counts[r];
-    const tw = (W - (cols - 1) * gap) / cols;
-    for (let c = 0; c < cols; c++) {
-      cells.push({ x: c * (tw + gap), y: r * (th + gap), w: tw, h: th });
+  const { cols, cw, ch } = best;
+  return Array.from({ length: m }, (_, i) => ({
+    x: (i % cols) * (cw + gap),
+    y: Math.floor(i / cols) * (ch + gap),
+    w: cw,
+    h: ch,
+  }));
+}
+
+/**
+ * n 枚を W×H の写真枠へ「主役1枚を上に大きく+残りはその下に全部同じ大きさ」で並べる。
+ * heroIndex が null/範囲外なら全部同じ大きさ。1枚なら主役の有無にかかわらず枠いっぱい。
+ * 戻り値は入力と同じ並び(i 番目 = i 番目の写真の枠)。純・決定的。
+ */
+export function heroGridCells(n: number, heroIndex: number | null, W: number, H: number): PhotoCell[] {
+  if (n <= 0) return [];
+  const hasHero = heroIndex !== null && heroIndex >= 0 && heroIndex < n && n > 1;
+  if (!hasHero) return uniformGridCells(n, W, H);
+  const gap = PHOTO_GAP_MM;
+  const heroH = (H - gap) * HERO_HEIGHT_RATIO;
+  const restTop = heroH + gap;
+  const rest = uniformGridCells(n - 1, W, H - restTop).map((c) => ({ ...c, y: c.y + restTop }));
+  const out: PhotoCell[] = [];
+  let k = 0;
+  for (let i = 0; i < n; i++) {
+    out.push(i === heroIndex ? { x: 0, y: 0, w: W, h: heroH } : rest[k++]);
+  }
+  return out;
+}
+
+/**
+ * 今の大きさを保ったまま、写真枠の左上から行ごとに詰め直す(「写真を自動整列」)。
+ * - 並び順は主役(heroIndex)が先頭、残りは配列順。
+ * - 枠より横に広い写真は縦横比を保って枠の幅まで縮める。
+ * - 全体が枠の高さに入りきらなければ、全部を**同じ割合で**縮めて収める(大きさの比は保つ)。
+ * 戻り値は入力と同じ並び。純・決定的。
+ */
+export function repackKeepingSizes(
+  sizes: readonly { w: number; h: number }[],
+  heroIndex: number | null,
+  W: number,
+  H: number,
+): PhotoCell[] {
+  const n = sizes.length;
+  if (n === 0) return [];
+  const gap = PHOTO_GAP_MM;
+  // 行を折り返すかの判定の許容誤差(mm)。浮動小数の誤差で、ぴったり1行に収まる並び
+  // (作成直後の同寸格子など)が折り返されないようにする。境目の計算も同じ値を使う。
+  const WRAP_EPS = 1e-9;
+  const order: number[] = [];
+  if (heroIndex !== null && heroIndex >= 0 && heroIndex < n) order.push(heroIndex);
+  for (let i = 0; i < n; i++) if (i !== heroIndex) order.push(i);
+
+  const place = (scale: number): { cells: PhotoCell[]; height: number } => {
+    const cells: PhotoCell[] = new Array(n);
+    let x = 0;
+    let y = 0;
+    let rowH = 0;
+    for (const i of order) {
+      let w = Math.max(MIN_PHOTO_CELL_MM, sizes[i].w * scale);
+      let h = Math.max(MIN_PHOTO_CELL_MM, sizes[i].h * scale);
+      if (w > W) {
+        h = Math.max(MIN_PHOTO_CELL_MM, (h * W) / w);
+        w = W;
+      }
+      if (x > 0 && x + w > W + WRAP_EPS) {
+        x = 0;
+        y += rowH + gap;
+        rowH = 0;
+      }
+      cells[i] = { x, y, w, h };
+      x += w + gap;
+      rowH = Math.max(rowH, h);
+    }
+    return { cells, height: y + rowH };
+  };
+
+  const fits = (scale: number): boolean => place(scale).height <= H + 1e-9;
+  if (fits(1)) return place(1).cells;
+
+  // 入りきる最大の縮小率を求める。⚠行の区切りは縮小率で変わるため「入りきるか」は縮小率に
+  // 対して単調ではない(二分探索だと必要以上に縮める・@codex #433 P2)。
+  // 行の区切りが変わりうる境目を挙げ、境目どうしの間(区切りが変わらず高さが増える一方の区間)
+  // を上から順に調べて、入る最初の区間の中で二分探索する。
+  //
+  // 各写真の幅は縮小率 s に対して折れ線: s ≤ 5/w は 5mm で止まる/5/w < s ≤ W/w は w×s/
+  // それ以上は枠の幅 W で止まる(place() と同じ決まり)。境目は
+  //   (1) 幅が止まる/動き出す縮小率 5/w・W/w
+  //   (2) 折れ線の各区間の中で、連続する写真 r..i がちょうど1行に収まる縮小率
+  //       (幅の合計 = 傾き×s + 切片 → s = (W + WRAP_EPS - 間隔×(i-r) - 切片) / 傾き)
+  // さらに、将来この決まりが増えて境目を取りこぼしても誤差を 1/20000 に抑える安全網として
+  // 細かい刻みも境目に混ぜる(写真 100mm で 0.005mm=見た目に表れない)。
+  const cuts = new Set<number>([1]);
+  const GRID = 20000;
+  for (let k = 1; k < GRID; k++) cuts.add(k / GRID);
+  const clampCuts: number[] = [0, 1];
+  for (const i of order) {
+    for (const c of [MIN_PHOTO_CELL_MM / sizes[i].w, W / sizes[i].w]) {
+      if (c > 0 && c < 1) {
+        clampCuts.push(c);
+        cuts.add(c);
+      }
     }
   }
-  return cells;
+  clampCuts.sort((x, y) => x - y);
+  for (let c = 0; c < clampCuts.length - 1; c++) {
+    const a = clampCuts[c];
+    const b = clampCuts[c + 1];
+    if (b - a <= 0) continue;
+    const mid = (a + b) / 2;
+    // この区間での各写真の幅 = slope×s + intercept
+    const slope: number[] = [];
+    const intercept: number[] = [];
+    for (const i of order) {
+      const wm = sizes[i].w * mid;
+      if (wm < MIN_PHOTO_CELL_MM) {
+        slope.push(0);
+        intercept.push(MIN_PHOTO_CELL_MM);
+      } else if (wm > W) {
+        slope.push(0);
+        intercept.push(W);
+      } else {
+        slope.push(sizes[i].w);
+        intercept.push(0);
+      }
+    }
+    for (let r = 0; r < n; r++) {
+      let A = slope[r];
+      let B = intercept[r];
+      for (let i = r + 1; i < n; i++) {
+        A += slope[i];
+        B += intercept[i];
+        if (A <= 0) continue;
+        const bp = (W + WRAP_EPS - gap * (i - r) - B) / A;
+        if (bp > a && bp < b) cuts.add(bp);
+      }
+    }
+  }
+  const sorted = [...cuts].sort((x, y) => y - x);
+  sorted.push(0);
+  for (let j = 0; j < sorted.length - 1; j++) {
+    const hi = sorted[j];
+    const lo = sorted[j + 1];
+    // 区間の下端のすぐ上。刻みが小さすぎると浮動小数で下端と同じ折り返し方のまま評価して
+    // しまい、入りきる区間を丸ごと見落とす(@codex #433 P2)。境目は許容誤差込みで出して
+    // あるので、下端から 1e-7(区間が狭ければ真ん中)だけ内側を試す。
+    const justAboveLo = lo + Math.min((hi - lo) / 2, 1e-7);
+    if (!fits(justAboveLo)) continue;
+    if (fits(hi)) return place(hi).cells;
+    let x0 = justAboveLo;
+    let x1 = hi;
+    for (let iter = 0; iter < 60; iter++) {
+      const m = (x0 + x1) / 2;
+      if (fits(m)) x0 = m;
+      else x1 = m;
+    }
+    return place(x0).cells;
+  }
+  // どこまで縮めても入らない(写真の下限の大きさ×枚数が枠を超える)。最小で返す。
+  return place(sorted[sorted.length - 2]).cells;
 }
 
 // ---------------------------------------------------------------------------

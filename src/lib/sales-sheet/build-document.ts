@@ -17,7 +17,7 @@ import type { SheetValues } from "./sheet-rows";
 import { unitApplies, groupDigits } from "./sheet-rows";
 import {
   computeConsumerLayout,
-  packPhotoCells,
+  heroGridCells,
   CONSUMER_PHOTO_RADIUS_MM,
   CONSUMER_PHOTO_Z,
   MAIN_TABLE_PAD_MM,
@@ -340,7 +340,12 @@ export interface SpecSheetParts {
 /** ポイントは3つまで(4つ目以降は出さない)。仕様書 §4.5。 */
 const SALES_POINTS_MAX = 3;
 
-/** 写真(最大3枚)と間取り図を写真枠へ初期配置する。間取り図は代表写真の次。 */
+/**
+ * 写真(最大3枚)と間取り図を写真枠へ初期配置する。間取り図は代表写真の次。
+ * 代表写真(1枚目)を主役にし、主役1枚+残りは全部同じ大きさで置く(発注者判断 2026-09-16)。
+ * 写真は切らずに全体を見せる(fit:contain)ため並べ方は写真の縦横に左右されない=
+ * サーバーで最終の並びが作れる(編集画面を開いた直後に整列し直す必要は無い)。
+ */
 function photoAndFloorPlanElements(
   photos: { fileUrl: string }[] | undefined,
   floorPlanImage: { fileUrl: string } | null | undefined,
@@ -352,7 +357,8 @@ function photoAndFloorPlanElements(
   if (floorPlanImage?.fileUrl) {
     items.splice(Math.min(1, items.length), 0, { id: "floor-plan", src: floorPlanImage.fileUrl, alt: "間取り図" });
   }
-  const cells = packPhotoCells(items.length, zone.w, zone.h);
+  const heroIndex = items.findIndex((it) => it.id === "photo-1");
+  const cells = heroGridCells(items.length, heroIndex >= 0 ? heroIndex : null, zone.w, zone.h);
   return items.map((it, i) => ({
     id: it.id,
     type: "image" as const,
@@ -365,6 +371,7 @@ function photoAndFloorPlanElements(
     fit: "contain" as const,
     alt: it.alt,
     ...(it.radiusMm ? { radiusMm: it.radiusMm } : {}),
+    ...(i === heroIndex ? { hero: true } : {}),
   }));
 }
 
