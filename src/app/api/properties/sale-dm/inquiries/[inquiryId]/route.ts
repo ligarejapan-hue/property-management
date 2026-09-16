@@ -38,6 +38,23 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const now = new Date();
     const updated = await prisma.$transaction(async (tx) => {
       await lockPropertyRow(tx, found.draft.propertyId);
+      // ロック取得後に再読取して再判定する(@codex P2): 先の読み取りと lockPropertyRow の
+      // 間に物件の担当替え/キャンペーンの作成者変更が挟まると、権限を失った field_staff が
+      // それでも更新できてしまう窓が残るため。
+      const locked = await tx.dmInquiry.findUnique({
+        where: { id: inquiryId },
+        select: {
+          draft: { select: { propertyId: true, campaign: { select: { createdBy: true } }, property: { select: { createdBy: true, assignedTo: true } } } },
+        },
+      });
+      if (
+        !locked ||
+        locked.draft.propertyId !== found.draft.propertyId ||
+        locked.draft.campaign.createdBy !== session.id ||
+        filterDraftsByFieldStaffScope([{ property: locked.draft.property }], session).length === 0
+      ) {
+        throw new ApiError(404, "申込が見つかりません", "NOT_FOUND");
+      }
       return tx.dmInquiry.update({
         where: { id: inquiryId },
         data: {

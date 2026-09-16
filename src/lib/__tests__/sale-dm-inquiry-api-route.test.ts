@@ -139,7 +139,7 @@ describe("PATCH 対応状況", () => {
     expect((await patch({ handleStatus: "done" })).status).toBe(404);
   });
   it("親の物件行をロックしてから更新。done は処理者と時刻を入れ、open に戻すと時刻を消す。監査は状態と時刻のみ", async () => {
-    db.dmInquiry.findUnique.mockResolvedValueOnce(FOUND);
+    db.dmInquiry.findUnique.mockResolvedValueOnce(FOUND).mockResolvedValueOnce(FOUND);
     db.dmInquiry.update.mockResolvedValueOnce({ id: "i1", handleStatus: "done", handledAt: new Date(), handleNote: "折り返し済み" });
     const res = await patch({ handleStatus: "done", handleNote: "折り返し済み" });
     expect(res.status).toBe(200);
@@ -151,9 +151,30 @@ describe("PATCH 対応状況", () => {
     expect(Object.keys(audit.detail).sort()).toEqual(["handleStatus", "updatedAt"]);
     expect(JSON.stringify(audit)).not.toContain("折り返し済み");
 
-    db.dmInquiry.findUnique.mockResolvedValueOnce(FOUND);
+    db.dmInquiry.findUnique.mockResolvedValueOnce(FOUND).mockResolvedValueOnce(FOUND);
     db.dmInquiry.update.mockResolvedValueOnce({ id: "i1", handleStatus: "open", handledAt: null, handleNote: null });
     await patch({ handleStatus: "open" });
     expect(db.dmInquiry.update.mock.calls[1][0].data).toMatchObject({ handleStatus: "open", handledAt: null, handledById: null });
+  });
+  it("ロック後に担当が外れていたら 404 で更新しない", async () => {
+    guard.requireSaleDmWriteAccess.mockResolvedValueOnce({ session: { id: "u1", role: "field_staff" }, permissions: [], ownerDisplayConfig: { phone: "full" } });
+    db.dmInquiry.findUnique
+      .mockResolvedValueOnce({ id: "i1", draft: { propertyId: "p1", campaign: { createdBy: "u1" }, property: { createdBy: "x", assignedTo: "u1" } } })
+      .mockResolvedValueOnce({ draft: { propertyId: "p1", campaign: { createdBy: "u1" }, property: { createdBy: "x", assignedTo: "other" } } });
+    const res = await patch({ handleStatus: "done" });
+    expect(res.status).toBe(404);
+    expect(lockPropertyRow).toHaveBeenCalledWith(db, "p1");
+    expect(db.dmInquiry.update).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+  it("ロック後に作成者が変わっていたら 404", async () => {
+    db.dmInquiry.findUnique
+      .mockResolvedValueOnce(FOUND)
+      .mockResolvedValueOnce({ draft: { propertyId: "p1", campaign: { createdBy: "other" }, property: { createdBy: "u1", assignedTo: null } } });
+    const res = await patch({ handleStatus: "done" });
+    expect(res.status).toBe(404);
+    expect(lockPropertyRow).toHaveBeenCalledWith(db, "p1");
+    expect(db.dmInquiry.update).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 });

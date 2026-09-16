@@ -210,8 +210,8 @@ describe("DM 反響 writer のロック順序(PR-B・R47: terminal は Owner FOR
     ]);
   });
 
-  it("申込の対応状況変更: 親行ロック→申込 update", () => {
+  it("申込の対応状況変更: 親行ロック→ロック後の再読取→申込 update", () => {
     const tx = firstTx(read("src/app/api/properties/sale-dm/inquiries/[inquiryId]/route.ts"));
-    assertOrder("inquiry-status", tx, ["lockPropertyRow", "tx.dmInquiry.update"]);
+    assertOrder("inquiry-status", tx, ["lockPropertyRow", "tx.dmInquiry.findUnique", "tx.dmInquiry.update"]);
   });
 });
