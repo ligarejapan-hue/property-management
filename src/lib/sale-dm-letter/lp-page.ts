@@ -113,7 +113,7 @@ function formSection(form: LpFormInput): string {
     `<div><strong>ご希望の連絡方法</strong><span class="opt">任意</span><div class="pref">${pref("phone", "電話")}${pref("email", "メール")}${pref("either", "どちらでも")}</div></div>` +
     `<label>連絡のつきやすい時間帯<span class="opt">任意</span><input name="contactTime" type="text" maxlength="${INQUIRY_LIMITS.contactTime}" placeholder="例: 平日18時以降" /></label>` +
     `<label>ご要望・ご質問<span class="opt">任意</span><textarea name="message" maxlength="${INQUIRY_LIMITS.message}" rows="4"></textarea></label>` +
-    `<div class="hp" aria-hidden="true"><label>ウェブサイト<input name="${HONEYPOT_FIELD}" type="text" tabindex="-1" autocomplete="off" /></label></div>` +
+    `<div class="hp" aria-hidden="true"><label>この欄は空のままにしてください<input name="${HONEYPOT_FIELD}" type="text" tabindex="-1" autocomplete="off" /></label></div>` +
     `<div class="privacy">${privacy}</div>` +
     `<label class="consent"><input type="checkbox" name="consent" value="yes" required />個人情報の取り扱いに同意する</label>` +
     `<button type="submit" class="cta">${escapeHtml(LP_CTA_LABEL)}</button>` +
@@ -148,7 +148,7 @@ export function renderLpPage(input: LpRenderInput): string {
       })()
     : "";
   const submitGuard = input.form && !input.form.disabled
-    ? `<script>(function(){var f=document.querySelector("form[data-inquiry]");if(!f)return;f.addEventListener("submit",function(){var b=f.querySelector("button[type=submit]");if(b){setTimeout(function(){b.disabled=true},0)}});})();</script>`
+    ? `<script>(function(){var f=document.querySelector("form[data-inquiry]");if(!f)return;f.addEventListener("submit",function(){var b=f.querySelector("button[type=submit]");if(b){setTimeout(function(){b.disabled=true},0)}});window.addEventListener("pageshow",function(){var b=f.querySelector("button[type=submit]");if(b){b.disabled=false}});})();</script>`
     : "";
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="robots" content="noindex,nofollow" /><meta name="referrer" content="same-origin" /><title>${escapeHtml(input.headline)}</title><style>${CSS}</style></head><body>${band}<main>` +
     (input.hero ? img(input.hero, "hero", "", true) : "") +

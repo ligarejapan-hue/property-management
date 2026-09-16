@@ -5,8 +5,12 @@
 export const INQUIRY_LIMITS = { name: 50, phone: 20, email: 254, contactTime: 60, message: 1000 } as const;
 export const CONTACT_PREFS = ["phone", "email", "either"] as const;
 export type ContactPref = (typeof CONTACT_PREFS)[number];
-/** ボット除けの隠し欄。人には見えない位置に置き、埋まっていれば機械送信とみなす。 */
-export const HONEYPOT_FIELD = "website";
+/**
+ * ボット除けの隠し欄。人には見えない位置に置き、埋まっていれば機械送信とみなす。
+ * ⚠名前を website/url 系にしない: Safari の連絡先 AutoFill や自動入力の拡張機能が画面外の欄まで埋め、
+ *   本物の申込が「受け付けました」を返したまま捨てられる。
+ */
+export const HONEYPOT_FIELD = "hp_extra_note";
 
 export interface InquiryInput {
   name: string;

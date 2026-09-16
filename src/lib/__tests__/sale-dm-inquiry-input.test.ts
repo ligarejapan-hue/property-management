@@ -15,6 +15,9 @@ describe("parseInquiryForm", () => {
     const r = parseInquiryForm(form({ ...OK, name: "  山田  ", phone: "０９０ー１２３４ー５６７８" }));
     expect(r).toMatchObject({ kind: "ok", value: { name: "山田", phone: "090-1234-5678" } });
   });
+  it("honeypot の欄名は自動入力に狙われにくい名前(website/URL 系ではない)", () => {
+    expect(HONEYPOT_FIELD).toBe("hp_extra_note");
+  });
   it("honeypot が埋まっていれば bot(他の不備より先に判定)", () => {
     expect(parseInquiryForm(form({ [HONEYPOT_FIELD]: "http://spam" }))).toEqual({ kind: "bot" });
   });

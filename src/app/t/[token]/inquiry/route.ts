@@ -7,6 +7,7 @@ import { isCrossSiteOrigin } from "@/lib/public-origin";
 import { parseInquiryForm, INQUIRY_ERROR_MESSAGES } from "@/lib/sale-dm-letter/inquiry-input";
 import { recordInquiry, type InquiryClientLike } from "@/lib/sale-dm-letter/inquiry-record";
 import { PUBLIC_PAGE_HEADERS } from "@/lib/sale-dm-letter/unsubscribe-page";
+import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 import {
   renderInquiryBusyPage,
   renderInquiryDonePage,
@@ -24,6 +25,8 @@ import {
  *  2. 送信元判定(public-origin.ts) — よそのサイトから踏ませる送信を 403。DB に触らない。
  *  3. token の形式門前払い(TOKEN_FORMAT・DB 無アクセス) — 追跡 token は randomBytes(8).toString("base64url")
  *     で発行するため、緩い 1..64 文字の許可は本物の token を絶対に弾かない。回数制限キーの長さも頭打ちにする。
+ *     続けて公開ロールアウトゲート(lpPublicEnabled)— 無効なら 404(申込・回数制限の枠に触らない)。
+ *     GET /t/<token> がフォームを出さない間に、受け口だけが直接の POST を受け付けないようにする。
  *  4. honeypot — 機械送信は「受け付けました」を返して何も残さない。
  *  5. 入力検証(inquiry-input.ts) — 不備は 422。入力値は画面に送り返さない。
  *  6. 存在確認(読み取りのみ・DB 書き込みなし) — 未知 token はここで 404(記録・監査なし)。
@@ -66,6 +69,17 @@ export async function POST(
     return html(renderInquiryUnavailablePage(), 404);
   }
 
+  // 公開ロールアウトゲート。読み込みに失敗したら無効扱い(安全側)。
+  let publicEnabled = false;
+  try {
+    publicEnabled = (await loadSaleDmPublicPageConfig()).lpPublicEnabled;
+  } catch {
+    publicEnabled = false;
+  }
+  if (!publicEnabled) {
+    return html(renderInquiryUnavailablePage(), 404);
+  }
+
   let form: FormData;
   try {
     form = await req.formData();
@@ -94,7 +108,12 @@ export async function POST(
       where: { trackingToken: token },
       select: { id: true },
     });
-  } catch {
+  } catch (err) {
+    // ⚠エラーの message は引数(token・入力)を含み得るので出さない。許可リスト(name/code)だけ。
+    console.error("[sale_dm_inquiry] existence lookup failed", {
+      name: err instanceof Error ? err.name : "Unknown",
+      code: typeof (err as { code?: unknown })?.code === "string" ? (err as { code: string }).code : null,
+    });
     return html(renderInquiryBusyPage(), 503);
   }
   if (!exists) {
@@ -118,7 +137,12 @@ export async function POST(
   let result: Awaited<ReturnType<typeof recordInquiry>>;
   try {
     result = await recordInquiry(prisma as unknown as InquiryClientLike, token, parsed.value);
-  } catch {
+  } catch (err) {
+    // ⚠エラーの message は引数(申込者の入力)を含み得るので出さない。許可リスト(name/code)だけ。
+    console.error("[sale_dm_inquiry] record failed", {
+      name: err instanceof Error ? err.name : "Unknown",
+      code: typeof (err as { code?: unknown })?.code === "string" ? (err as { code: string }).code : null,
+    });
     return html(renderInquiryBusyPage(), 503);
   }
 

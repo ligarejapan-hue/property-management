@@ -6,11 +6,14 @@ vi.mock("@/lib/prisma", () => ({
   default: { dmRecipientDraft: { findUnique: vi.fn() } },
 }));
 vi.mock("@/lib/sale-dm-letter/inquiry-record", () => ({ recordInquiry: vi.fn() }));
+vi.mock("@/lib/sale-dm-letter/config-store", () => ({ loadSaleDmPublicPageConfig: vi.fn() }));
 
 import { POST } from "@/app/t/[token]/inquiry/route";
 import { recordInquiry } from "@/lib/sale-dm-letter/inquiry-record";
 import { writeAuditLog } from "@/lib/audit";
 import prisma from "@/lib/prisma";
+import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
+import { HONEYPOT_FIELD } from "@/lib/sale-dm-letter/inquiry-input";
 
 const rec = recordInquiry as unknown as ReturnType<typeof vi.fn>;
 const findUnique = (
@@ -18,6 +21,7 @@ const findUnique = (
     dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn> };
   }
 ).dmRecipientDraft.findUnique;
+const loadCfg = loadSaleDmPublicPageConfig as unknown as ReturnType<typeof vi.fn>;
 const VALID = { name: "山田", phone: "090-1234-5678", consent: "yes" };
 
 // ⚠レート制限はモジュール保持でテスト間リセットされない。IP と token をテストごとに変える。
@@ -41,6 +45,9 @@ function call(fields: Record<string, string>, headers: Record<string, string> = 
 
 beforeEach(() => {
   vi.clearAllMocks();
+  loadCfg.mockResolvedValue({
+    senderName: null, senderContact: null, trackingBaseUrl: undefined, lpPublicEnabled: true, privacyText: null,
+  });
   rec.mockResolvedValue({ kind: "recorded", inquiryId: "inq1", draftId: "d1", first: true });
   findUnique.mockImplementation(
     async ({ where }: { where: { trackingToken: string } }) =>
@@ -76,7 +83,7 @@ describe("POST /t/[token]/inquiry", () => {
   });
 
   it("honeypot が埋まっていれば記録せず完了ページ(監査もしない)", async () => {
-    const res = await call({ ...VALID, website: "http://spam" });
+    const res = await call({ ...VALID, [HONEYPOT_FIELD]: "http://spam" });
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("受け付けました");
     expect(rec).not.toHaveBeenCalled();
@@ -109,11 +116,21 @@ describe("POST /t/[token]/inquiry", () => {
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
-  it("記録で例外が出たら 503 混雑ページ(黙って完了と言わない)", async () => {
-    rec.mockRejectedValueOnce(new Error("lock timeout"));
-    const res = await call(VALID);
-    expect(res.status).toBe(503);
-    expect(await res.text()).toContain("混み合っています");
+  it("記録で例外が出たら 503 混雑ページ(黙って完了と言わない)。ログは許可リスト(name/code)だけ", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      rec.mockRejectedValueOnce(Object.assign(new Error("lock timeout 山田"), { code: "P2034" }));
+      const res = await call(VALID);
+      expect(res.status).toBe(503);
+      expect(await res.text()).toContain("混み合っています");
+      expect(spy).toHaveBeenCalledWith("[sale_dm_inquiry] record failed", expect.any(Object));
+      const logged = spy.mock.calls.find((c) => c[0] === "[sale_dm_inquiry] record failed")!;
+      expect(Object.keys(logged[1] as object).sort()).toEqual(["code", "name"]);
+      expect(logged[1]).toEqual({ name: "Error", code: "P2034" });
+      expect(JSON.stringify(spy.mock.calls)).not.toMatch(/lock timeout|山田|090/);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("同じ token は1時間に5回まで(6回目は 429・記録しない)", async () => {
@@ -157,11 +174,46 @@ describe("POST /t/[token]/inquiry", () => {
     expect(rec).toHaveBeenCalledTimes(1);
   });
 
-  it("存在確認で例外なら 503", async () => {
-    findUnique.mockRejectedValueOnce(new Error("db down"));
+  it("存在確認で例外なら 503。ログは許可リスト(name/code)だけ", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      findUnique.mockRejectedValueOnce(new Error("db down"));
+      const res = await call(VALID);
+      expect(res.status).toBe(503);
+      expect(await res.text()).toContain("混み合っています");
+      expect(rec).not.toHaveBeenCalled();
+      const logged = spy.mock.calls.find((c) => c[0] === "[sale_dm_inquiry] existence lookup failed");
+      expect(logged).toBeDefined();
+      expect(Object.keys(logged![1] as object).sort()).toEqual(["code", "name"]);
+      expect(logged![1]).toEqual({ name: "Error", code: null });
+      expect(JSON.stringify(spy.mock.calls)).not.toContain("db down");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("公開ロールアウトゲートが無効なら 404(DB・回数制限・記録に触らない)", async () => {
+    loadCfg.mockResolvedValue({
+      senderName: null, senderContact: null, trackingBaseUrl: undefined, lpPublicEnabled: false, privacyText: null,
+    });
+    for (let i = 0; i < 7; i += 1) {
+      const res = await call(VALID, {}, "tok_gate");
+      expect(res.status).toBe(404);
+    }
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(rec).not.toHaveBeenCalled();
+    // token 枠(5/時)を消費していない
+    loadCfg.mockResolvedValue({
+      senderName: null, senderContact: null, trackingBaseUrl: undefined, lpPublicEnabled: true, privacyText: null,
+    });
+    expect((await call(VALID, {}, "tok_gate")).status).toBe(200);
+  });
+
+  it("設定の読み込みで例外なら無効扱いで 404", async () => {
+    loadCfg.mockRejectedValueOnce(new Error("config down"));
     const res = await call(VALID);
-    expect(res.status).toBe(503);
-    expect(await res.text()).toContain("混み合っています");
+    expect(res.status).toBe(404);
+    expect(findUnique).not.toHaveBeenCalled();
     expect(rec).not.toHaveBeenCalled();
   });
 });

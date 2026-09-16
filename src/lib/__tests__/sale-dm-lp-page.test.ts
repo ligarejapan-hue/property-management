@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { renderLpPage, LP_CTA_LABEL, LP_PAGE_HEADERS } from "../sale-dm-letter/lp-page";
 import type { LpRenderInput } from "../sale-dm-letter/lp-render-input";
+import { HONEYPOT_FIELD } from "../sale-dm-letter/inquiry-input";
 
 const input = (over: Partial<LpRenderInput> = {}): LpRenderInput => ({
   mode: "live",
@@ -123,7 +124,11 @@ describe("申込フォーム(PR4)", () => {
     expect(html).toMatch(/name="email"[^>]*type="email"[^>]*maxlength="254"/);
     expect(html).toMatch(/name="contactTime"[^>]*maxlength="60"/);
     expect(html).toMatch(/<textarea[^>]*name="message"[^>]*maxlength="1000"/);
-    expect(html).toMatch(/name="website"[^>]*tabindex="-1"/);
+    expect(html).toMatch(new RegExp(`<div class="hp" aria-hidden="true"><label>この欄は空のままにしてください<input name="${HONEYPOT_FIELD}"[^>]*tabindex="-1"[^>]*autocomplete="off"`));
+    // 自動入力(連絡先の AutoFill 等)が埋めやすい名前・ラベルを使わない=本物の申込を bot 扱いで捨てない
+    expect(html).not.toMatch(/name="website"|ウェブサイト/);
+    // エラー後に戻る(bfcache 復帰)と送信ボタンが押せないままにならない
+    expect(html).toContain('window.addEventListener("pageshow"');
     expect(html).toMatch(/type="checkbox" name="consent" value="yes" required/);
     expect(html).toContain(`>${LP_CTA_LABEL}</button>`);
   });
