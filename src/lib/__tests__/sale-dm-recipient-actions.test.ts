@@ -11,6 +11,7 @@ const baseDraft: SaleDmDraft = {
   id: "r1", variantId: "v1", lpVariantId: null, propertyId: "p1", recipientName: "田中 一郎", recipientZip: null,
   recipientAddress: null, honorific: "様", coOwnerCount: 1, body: "本文", status: "draft", outcome: "none",
   deliveryStatus: "unknown", lpFirstAccessAt: null, lpPageFirstAt: null, phoneInquiryAt: null, phoneTapFirstAt: null,
+  formInquiryCount: 0, formInquiryFirstAt: null,
 };
 
 describe("variantLabel", () => {

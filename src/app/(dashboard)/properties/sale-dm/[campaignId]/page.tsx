@@ -21,6 +21,7 @@ import SaleDmVariantManager from "@/components/sale-dm/variant-manager";
 import SaleDmLpVariantManager from "@/components/sale-dm/lp-variant-manager";
 import SaleDmRecipientList from "@/components/sale-dm/recipient-list";
 import SaleDmAggregateView from "@/components/sale-dm/aggregate-view";
+import SaleDmInquiryList from "@/components/sale-dm/inquiry-list";
 
 export default function SaleDmWorkspacePage() {
   const params = useParams<{ campaignId: string }>();
@@ -34,6 +35,8 @@ export default function SaleDmWorkspacePage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  // キャンペーンを取り直すたびに増える。査定申込パネルの再読込の合図。
+  const [reloadKey, setReloadKey] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -41,6 +44,7 @@ export default function SaleDmWorkspacePage() {
     try {
       const { campaign } = await fetchSaleDmCampaign(campaignId);
       setCampaign(campaign);
+      setReloadKey((k) => k + 1);
       setSelectedId((prev) => prev ?? campaign.recipients[0]?.id ?? null);
       // 表示の可否だけを取りに行く軽い問い合わせ。失敗しても作業画面は止めない(表を出さないだけ)。
       try {
@@ -231,6 +235,8 @@ export default function SaleDmWorkspacePage() {
       </div>
 
       <SaleDmAggregateView campaign={campaign} lpMetricsEnabled={lpMetricsEnabled} />
+
+      <SaleDmInquiryList campaign={campaign} reloadKey={reloadKey} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr_320px]">
         {/* 左: 調整パネル + A/B型管理 */}

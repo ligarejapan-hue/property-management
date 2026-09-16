@@ -1,0 +1,34 @@
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+const read = (p: string) => readFileSync(path.resolve(process.cwd(), p), "utf8").replace(/\r\n/g, "\n");
+
+describe("申込の社内画面", () => {
+  const panel = read("src/components/sale-dm/inquiry-list.tsx");
+  it("申込者の個人情報を画面保護(S1b)の対象にする", () => {
+    expect(panel).toContain("data-pii-protected");
+    expect(panel).toContain('data-pii-surface="owner"');
+  });
+  it("状態は3つだけ・日本語ラベル", () => {
+    for (const s of ['"open"', '"in_progress"', '"done"', "未対応", "対応中", "対応済み"]) expect(panel).toContain(s);
+  });
+  it("権限で伏せたときの案内がある", () => {
+    expect(panel).toContain("contactHidden");
+    expect(panel).toMatch(/表示する権限がありません/);
+  });
+  it("走査規約: bg-blue-600・手書きモーダルを使わない", () => {
+    expect(panel).not.toContain("bg-blue-600");
+    expect(panel).not.toContain("fixed inset-0");
+  });
+  it("キャンペーン画面に配置され、宛先一覧に申込バッジがある", () => {
+    expect(read("src/app/(dashboard)/properties/sale-dm/[campaignId]/page.tsx")).toContain("<SaleDmInquiryList");
+    expect(read("src/components/sale-dm/recipient-list.tsx")).toMatch(/formInquiryCount/);
+  });
+  it("キャンペーン API は宛先の申込計数を返す(token は返さない)", () => {
+    const route = read("src/app/api/properties/sale-dm/campaigns/[id]/route.ts");
+    expect(route).toContain("formInquiryCount: r.formInquiryCount");
+    expect(route).toContain("formInquiryFirstAt: r.formInquiryFirstAt");
+    expect(route).not.toMatch(/trackingToken:\s*r\./);
+  });
+});

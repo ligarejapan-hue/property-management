@@ -74,6 +74,11 @@ export default function SaleDmRecipientList({
                     反響あり
                   </span>
                 )}
+                {r.formInquiryCount > 0 && (
+                  <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
+                    申込 {r.formInquiryCount}
+                  </span>
+                )}
               </div>
 
               {/* 配達結果/反響は確定(sent)後のみ入力可 */}

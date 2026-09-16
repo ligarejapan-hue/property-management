@@ -253,6 +253,9 @@ export interface SaleDmDraft {
   phoneInquiryAt: string | null;
   // 公開LPの電話ボタンを最初にタップした時刻(反響とは別物=自動計測。手入力の phoneInquiryAt とは独立)。
   phoneTapFirstAt: string | null;
+  // 公開LPの査定申込の回数と初回時刻(中身は fetchSaleDmInquiries)。
+  formInquiryCount: number;
+  formInquiryFirstAt: string | null;
 }
 
 export interface SaleDmVariant {
@@ -361,6 +364,44 @@ export async function updateSaleDmOutcome(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+export interface SaleDmInquiry {
+  id: string;
+  draftId: string;
+  submittedAt: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  contactPref: string | null;
+  contactTime: string | null;
+  message: string | null;
+  handleStatus: "open" | "in_progress" | "done";
+  handledAt: string | null;
+  handleNote: string | null;
+  contactHidden: boolean;
+}
+
+export async function fetchSaleDmInquiries(campaignId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { inquiries: [] as SaleDmInquiry[] };
+  }
+  return apiFetch<{ inquiries: SaleDmInquiry[] }>(`/api/properties/sale-dm/campaigns/${campaignId}/inquiries`);
+}
+
+export async function updateSaleDmInquiryStatus(
+  inquiryId: string,
+  body: { handleStatus: SaleDmInquiry["handleStatus"]; handleNote?: string | null },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { inquiry: { id: inquiryId, handleStatus: body.handleStatus, handledAt: null, handleNote: body.handleNote ?? null } };
+  }
+  return apiFetch<{ inquiry: Pick<SaleDmInquiry, "id" | "handleStatus" | "handledAt" | "handleNote"> }>(
+    `/api/properties/sale-dm/inquiries/${inquiryId}`,
+    { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
 }
 
 // 下書きの本文 / 割当型(variantId)の部分更新。

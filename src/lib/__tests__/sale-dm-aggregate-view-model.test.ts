@@ -7,7 +7,8 @@ function draft(over: Partial<SaleDmCampaign["recipients"][number]>): SaleDmCampa
   return {
     id: Math.random().toString(36), variantId: "v1", lpVariantId: null, propertyId: "p", recipientName: "x", recipientZip: null,
     recipientAddress: null, honorific: "様", coOwnerCount: 1, body: "", status: "sent", outcome: "none",
-    deliveryStatus: "delivered", lpFirstAccessAt: null, lpPageFirstAt: null, phoneInquiryAt: null, phoneTapFirstAt: null, ...over,
+    deliveryStatus: "delivered", lpFirstAccessAt: null, lpPageFirstAt: null, phoneInquiryAt: null, phoneTapFirstAt: null,
+    formInquiryCount: 0, formInquiryFirstAt: null, ...over,
   };
 }
 
