@@ -2,7 +2,7 @@ import { lockPropertyRow } from "@/lib/property-record-guard";
 import { syncSaleDmReaction, type ReactionSyncTx } from "@/lib/dm-reaction/sync";
 import type { InquiryInput } from "./inquiry-input";
 
-// ⚠この説明を関数直上へ移すと dm-writer-lock-order の走査(関数本文の文字列)に引っかかる
+// ⚠この説明は関数の外に置く。dm-writer-lock-order の走査は関数本文(export async function recordInquiry 以降)の呼び出し順を見るため、本文内のコメントに呼び出し名を書くと順序判定を狂わせる
 /**
  * 公開LPの査定申込の記録(設計 §2.5)。
  *
