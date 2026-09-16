@@ -177,3 +177,52 @@ describe("repackKeepingSizes — 大きさを保って位置だけ詰める", ()
     }
   });
 });
+
+// @codex #433 P2: 棚詰めは縮小率によって行の区切りが変わるため、「入りきるか」は縮小率に
+// 対して単調ではない。二分探索だと必要以上に縮める(下の例: 0.96 で入るのに約 0.847)。
+describe("repackKeepingSizes — 必要以上に縮めない(行の区切りが変わる場合)", () => {
+  /** 結果の縮小率(1枚目の幅の比)。 */
+  const scaleOf = (cells: PhotoCell[], sizes: { w: number; h: number }[]) => cells[0].w / sizes[0].w;
+
+  /** 細かく刻んで全部試したときの「入りきる最大の縮小率」(照合用・遅くてよい)。 */
+  function bruteForceMaxScale(sizes: { w: number; h: number }[], heroIndex: number | null): number {
+    for (let k = 10000; k >= 1; k--) {
+      const s = k / 10000;
+      const scaled = sizes.map((z) => ({ w: z.w * s, h: z.h * s }));
+      const cells = repackKeepingSizes(scaled, heroIndex, W, H);
+      // 縮めなくても入る=その縮小率で入りきる
+      if (cells.every((c, i) => Math.abs(c.w - scaled[i].w) < 1e-9 && Math.abs(c.h - scaled[i].h) < 1e-9)) return s;
+    }
+    return 0;
+  }
+
+  it("指摘の例: 40×30 / 90×50 / 30×120 は 0.96 倍で収まる(0.847 まで縮めない)", () => {
+    const sizes = [
+      { w: 40, h: 30 },
+      { w: 90, h: 50 },
+      { w: 30, h: 120 },
+    ];
+    const cells = repackKeepingSizes(sizes, null, W, H);
+    expect(scaleOf(cells, sizes)).toBeCloseTo(0.96, 6);
+    assertNoOverlapInside(cells);
+  });
+
+  it("総当たりの最大値と一致する(大きさの組み合わせ多数)", () => {
+    // 決定的な擬似乱数で大きさの組み合わせを作る
+    let seed = 12345;
+    const rand = () => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    };
+    for (let t = 0; t < 40; t++) {
+      const n = 2 + Math.floor(rand() * 5);
+      const sizes = Array.from({ length: n }, () => ({ w: 20 + rand() * 100, h: 20 + rand() * 120 }));
+      const hero = rand() < 0.5 ? null : Math.floor(rand() * n);
+      const cells = repackKeepingSizes(sizes, hero, W, H);
+      assertNoOverlapInside(cells);
+      const got = scaleOf(cells, sizes);
+      const best = Math.min(1, bruteForceMaxScale(sizes, hero));
+      expect(got, `case ${t} n=${n} hero=${hero}`).toBeGreaterThanOrEqual(best - 1e-9);
+    }
+  });
+});

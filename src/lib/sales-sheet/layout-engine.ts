@@ -148,17 +148,45 @@ export function repackKeepingSizes(
     return { cells, height: y + rowH };
   };
 
-  const full = place(1);
-  if (full.height <= H + 1e-9) return full.cells;
-  // 入りきる最大の縮小率を二分探索(同じ割合で縮める)。
-  let lo = 0;
-  let hi = 1;
-  for (let iter = 0; iter < 40; iter++) {
-    const mid = (lo + hi) / 2;
-    if (place(mid).height <= H + 1e-9) lo = mid;
-    else hi = mid;
+  const fits = (scale: number): boolean => place(scale).height <= H + 1e-9;
+  if (fits(1)) return place(1).cells;
+
+  // 入りきる最大の縮小率を求める。⚠行の区切りは縮小率で変わるため「入りきるか」は縮小率に
+  // 対して単調ではない(二分探索だと必要以上に縮める・@codex #433 P2)。そこで行の区切りが
+  // 変わりうる境目を全部挙げる: 連続する写真 r..i が1行に並ぶ条件は
+  //   scale×(r..i の幅の合計) + 間隔×(i-r) ≤ W  → 境目 = (W - 間隔×(i-r)) / 幅の合計
+  // 境目どうしの間では行の区切りが変わらず、高さは縮小率に対して増える一方(単調)。
+  // 上の区間から順に「区間の下端のすぐ上で入るか」を見て、入る最初の区間の中で二分探索する。
+  // 下限(MIN_PHOTO_CELL_MM)で幅が止まる極小の縮小率に備えて 1/100 刻みも境目に混ぜる。
+  const cuts = new Set<number>([1]);
+  for (let k = 1; k < 100; k++) cuts.add(k / 100);
+  for (let r = 0; r < n; r++) {
+    let sum = sizes[order[r]].w;
+    for (let i = r + 1; i < n; i++) {
+      sum += sizes[order[i]].w;
+      const bp = (W - gap * (i - r)) / sum;
+      if (bp > 0 && bp < 1) cuts.add(bp);
+    }
   }
-  return place(lo).cells;
+  const sorted = [...cuts].sort((x, y) => y - x);
+  sorted.push(0);
+  for (let j = 0; j < sorted.length - 1; j++) {
+    const hi = sorted[j];
+    const lo = sorted[j + 1];
+    const justAboveLo = lo + (hi - lo) * 1e-9;
+    if (!fits(justAboveLo)) continue;
+    if (fits(hi)) return place(hi).cells;
+    let a = justAboveLo;
+    let b = hi;
+    for (let iter = 0; iter < 60; iter++) {
+      const mid = (a + b) / 2;
+      if (fits(mid)) a = mid;
+      else b = mid;
+    }
+    return place(a).cells;
+  }
+  // どこまで縮めても入らない(写真の下限の大きさ×枚数が枠を超える)。最小で返す。
+  return place(sorted[sorted.length - 2]).cells;
 }
 
 // ---------------------------------------------------------------------------
