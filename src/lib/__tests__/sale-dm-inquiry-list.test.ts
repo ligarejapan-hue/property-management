@@ -7,14 +7,14 @@ const row = (id: string, handleStatus: string, iso: string) => ({
 });
 
 describe("toInquiryListRows", () => {
-  it("未対応→対応中→対応済み、同じ状態の中は新しい順", () => {
+  it("並べ替えはしない(DB の submittedAt desc, id desc の順をそのまま保つ)", () => {
     const out = toInquiryListRows([
       row("a", "done", "2026-09-20T00:00:00Z"),
       row("b", "open", "2026-09-18T00:00:00Z"),
       row("c", "in_progress", "2026-09-21T00:00:00Z"),
-      row("d", "open", "2026-09-19T00:00:00Z"),
-    ], { contact: true, email: true });
-    expect(out.map((r) => r.id)).toEqual(["d", "b", "c", "a"]);
+    ], { contact: false, email: false });
+    expect(out.map((r) => r.id)).toEqual(["a", "b", "c"]);
+    expect(out.every((r) => r.phone === null && r.contactHidden)).toBe(true);
   });
   it("連絡先を見る権限が無ければ、名前と日時と状態だけ(連絡先系は null・contactHidden=true・emailHidden=true)", () => {
     const [r] = toInquiryListRows([row("a", "open", "2026-09-20T00:00:00Z")], { contact: false, email: true });

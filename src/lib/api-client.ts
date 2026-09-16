@@ -383,13 +383,15 @@ export interface SaleDmInquiry {
   emailHidden: boolean;
 }
 
-export async function fetchSaleDmInquiries(campaignId: string, offset = 0) {
+// 申込一覧は区分(active=未対応・対応中 / done=対応済み)ごとにカーソルでたどる。
+export async function fetchSaleDmInquiries(campaignId: string, segment: "active" | "done" = "active", cursor?: string | null) {
   if (USE_MOCK) {
     await mockDelay();
-    return { inquiries: [] as SaleDmInquiry[], hasMore: false, nextOffset: null as number | null };
+    return { inquiries: [] as SaleDmInquiry[], hasMore: false, nextCursor: null as string | null };
   }
-  return apiFetch<{ inquiries: SaleDmInquiry[]; hasMore: boolean; nextOffset: number | null }>(
-    `/api/properties/sale-dm/campaigns/${campaignId}/inquiries?offset=${offset}`,
+  const cursorQuery = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
+  return apiFetch<{ inquiries: SaleDmInquiry[]; hasMore: boolean; nextCursor: string | null }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/inquiries?segment=${segment}${cursorQuery}`,
   );
 }
 

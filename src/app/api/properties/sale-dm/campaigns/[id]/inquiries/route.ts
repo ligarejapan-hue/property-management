@@ -1,31 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { handleApiError } from "@/lib/api-helpers";
+import { ApiError, handleApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
 import { isPlainOwnerLevel } from "@/lib/dm-export";
-import { toInquiryListRows } from "@/lib/sale-dm-letter/inquiry-list";
+import {
+  toInquiryListRows,
+  isInquirySegment,
+  inquirySegmentWhere,
+  decodeInquiryCursor,
+  encodeInquiryCursor,
+  inquiryCursorWhere,
+} from "@/lib/sale-dm-letter/inquiry-list";
 
 const PAGE_SIZE = 100;
-
-/** offset クエリパラメータの読み取り。不正値(NaN/負/大きすぎ)は先頭ページ扱いにする。 */
-function parseOffset(req: NextRequest): number {
-  const raw = new URL(req.url).searchParams.get("offset");
-  const n = raw === null ? NaN : Number(raw);
-  if (!Number.isInteger(n) || n < 0 || n > 1_000_000) return 0;
-  return n;
-}
 
 // 社内の申込一覧(設計 §2.5・§2.7)。作成者本人のキャンペーンのみ・field_staff は担当範囲のみ。
 // 連絡先(電話・要望など)は所有者の電話を平文で見られる利用者にだけ返す。
 // メールは所有者の owner_email を平文で見られる利用者にだけ返す(電話とは別レベル・@codex P1)。
-// ページングはオフセット方式・固定ページサイズ。並べ替えは DB 側で行いページをまたいでも一貫させる
-// (@codex P2: 無制限一覧は件数が増えると重い・応答も大きくなる)。
+// ページングは区分(segment=active: 未対応・対応中 / done: 対応済み)ごとのキーセット方式(@codex P2)。
+// 区分内の順序は submittedAt desc, id desc の不変順なので、ページの合間に新しい申込が届いたり
+// 対応状況が変わったりしても、同じ行の重複や取りこぼしが起きない(オフセット方式はずれた)。
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { session, ownerDisplayConfig } = await requireSaleDmAccess();
     const { id } = await params;
-    const offset = parseOffset(req);
+    const searchParams = new URL(req.url).searchParams;
+    const segmentRaw = searchParams.get("segment") ?? "active";
+    if (!isInquirySegment(segmentRaw)) {
+      throw new ApiError(400, "segment は active か done のいずれかです", "INVALID_SEGMENT");
+    }
+    // 不正なカーソルは先頭ページ扱い(利用者の操作でエラーにしない)。
+    const cursor = decodeInquiryCursor(searchParams.get("cursor"));
     const campaign = await prisma.dmCampaign.findUnique({ where: { id }, select: { id: true, createdBy: true } });
     if (!campaign || campaign.createdBy !== session.id) {
       return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404, headers: { "Cache-Control": "no-store" } });
@@ -38,11 +44,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           // だけだと、担当外の行がページを埋めてしまい以降のページが空に痩せる)。
           ...(session.role === "field_staff" ? { property: { OR: [{ createdBy: session.id }, { assignedTo: session.id }] } } : {}),
         },
+        ...inquirySegmentWhere(segmentRaw),
+        ...(cursor ? inquiryCursorWhere(cursor) : {}),
       },
-      // handleStatus は "open" > "in_progress" > "done" の文字列辞書順が desc で望む順
-      // (未対応が先)になる。状態値が増えたら要見直し。
-      orderBy: [{ handleStatus: "desc" }, { submittedAt: "desc" }, { id: "desc" }],
-      skip: offset,
+      orderBy: [{ submittedAt: "desc" }, { id: "desc" }],
       take: PAGE_SIZE + 1,
       select: {
         id: true, draftId: true, submittedAt: true, name: true, phone: true, email: true,
@@ -52,6 +57,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     });
     const hasMore = rows.length > PAGE_SIZE;
     const page = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
+    // 次のカーソルは DB が返した最後の行(担当範囲の多層防御で落とす前)で作る。
+    const nextCursor = hasMore ? encodeInquiryCursor(page[page.length - 1]) : null;
     // Ruling P2: 「...rest」での未使用変数化(draft/property を捨てて destructure)は eslint の
     // unused-vars に引っかかるため、返す項目を明示的に列挙して組み立てる(出力は同じ)。
     // filterDraftsByFieldStaffScope は SQL 側の絞り込みに対する多層防御として残す。
@@ -84,7 +91,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       detail: { count: inquiries.length, viewedAt: new Date().toISOString() },
     });
     return NextResponse.json(
-      { inquiries, hasMore, nextOffset: hasMore ? offset + PAGE_SIZE : null },
+      { inquiries, hasMore, nextCursor },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

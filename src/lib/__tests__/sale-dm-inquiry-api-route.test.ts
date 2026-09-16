@@ -132,23 +132,74 @@ describe("GET 申込一覧", () => {
     const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
     expect(body.inquiries).toEqual([]);
   });
-  it("skip/take/orderBy をオフセット方式で組み立てる", async () => {
+  const get = (qs = "") => GET(new Request(`http://x/api${qs}`) as never, { params: Promise.resolve({ id: "c1" }) });
+  const cursorOf = (t: string, i: string) => Buffer.from(JSON.stringify({ t, i })).toString("base64url");
+  const UUID = "0b9c7f1e-2a3d-4e5f-8a9b-1c2d3e4f5a6b";
+
+  it("既定は segment=active: 未対応・対応中だけ・順序は不変の submittedAt desc, id desc・skip なし・take 101", async () => {
     db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
     db.dmInquiry.findMany.mockResolvedValueOnce([]);
-    await GET(new Request("http://x/api?offset=100") as never, { params: Promise.resolve({ id: "c1" }) });
+    await get();
     const args = db.dmInquiry.findMany.mock.calls[0][0];
-    expect(args.skip).toBe(100);
+    expect(args.where.handleStatus).toEqual({ in: ["open", "in_progress"] });
+    expect(args.where).not.toHaveProperty("OR");
+    expect(args.orderBy).toEqual([{ submittedAt: "desc" }, { id: "desc" }]);
+    expect(args).not.toHaveProperty("skip");
     expect(args.take).toBe(101);
-    expect(args.orderBy).toEqual([{ handleStatus: "desc" }, { submittedAt: "desc" }, { id: "desc" }]);
   });
-  it("101件返ると hasMore=true・nextOffset=100・100件だけ返す", async () => {
+  it("segment=done は対応済みだけ", async () => {
     db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
-    const rows = Array.from({ length: 101 }, (_, i) => ({ ...INQ, id: `i${i}` }));
+    db.dmInquiry.findMany.mockResolvedValueOnce([]);
+    await get("?segment=done");
+    expect(db.dmInquiry.findMany.mock.calls[0][0].where.handleStatus).toBe("done");
+  });
+  it.each(["all", "", "DONE"])("不正な segment=%s は 400 で DB を引かない", async (seg) => {
+    db.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
+    const res = await get(`?segment=${seg}`);
+    expect(res.status).toBe(400);
+    expect(db.dmInquiry.findMany).not.toHaveBeenCalled();
+    db.dmCampaign.findUnique.mockReset();
+  });
+  it("正しい cursor はキーセット条件(submittedAt < t または 同時刻で id < i)を積む", async () => {
+    db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
+    db.dmInquiry.findMany.mockResolvedValueOnce([]);
+    const t = "2026-09-20T01:02:03.456Z";
+    await get(`?segment=done&cursor=${cursorOf(t, UUID)}`);
+    const where = db.dmInquiry.findMany.mock.calls[0][0].where;
+    expect(where.handleStatus).toBe("done");
+    expect(where.OR).toEqual([
+      { submittedAt: { lt: new Date(t) } },
+      { submittedAt: new Date(t), id: { lt: UUID } },
+    ]);
+  });
+  it.each([
+    ["壊れた base64", "!!!"],
+    ["JSON でない", Buffer.from("xyz").toString("base64url")],
+    ["日時が不正", Buffer.from(JSON.stringify({ t: "nope", i: "0b9c7f1e-2a3d-4e5f-8a9b-1c2d3e4f5a6b" })).toString("base64url")],
+    ["id が UUID でない", Buffer.from(JSON.stringify({ t: "2026-09-20T00:00:00.000Z", i: "x" })).toString("base64url")],
+  ])("不正な cursor(%s)は先頭ページ扱い(キーセット条件なし)", async (_label, cursor) => {
+    db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
+    db.dmInquiry.findMany.mockResolvedValueOnce([]);
+    const res = await get(`?cursor=${encodeURIComponent(cursor)}`);
+    expect(res.status).toBe(200);
+    expect(db.dmInquiry.findMany.mock.calls[0][0].where).not.toHaveProperty("OR");
+  });
+  it("101件返ると hasMore=true・100件だけ返し、nextCursor は100件目の submittedAt/id", async () => {
+    db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
+    const rows = Array.from({ length: 101 }, (_, i) => ({ ...INQ, id: `i${i}`, submittedAt: new Date(Date.UTC(2026, 8, 20, 0, 0, 0) - i * 1000) }));
     db.dmInquiry.findMany.mockResolvedValueOnce(rows);
-    const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
+    const body = await (await get()).json();
     expect(body.hasMore).toBe(true);
-    expect(body.nextOffset).toBe(100);
     expect(body.inquiries).toHaveLength(100);
+    expect(body).not.toHaveProperty("nextOffset");
+    expect(JSON.parse(Buffer.from(body.nextCursor, "base64url").toString("utf8"))).toEqual({ t: rows[99].submittedAt.toISOString(), i: "i99" });
+  });
+  it("最後のページは hasMore=false・nextCursor=null", async () => {
+    db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
+    db.dmInquiry.findMany.mockResolvedValueOnce([INQ]);
+    const body = await (await get()).json();
+    expect(body.hasMore).toBe(false);
+    expect(body.nextCursor).toBeNull();
   });
   it("field_staff は where.draft.property.OR に本人条件を積む(SQL側の絞り込み)", async () => {
     guard.requireSaleDmAccess.mockResolvedValueOnce({ session: { id: "u1", role: "field_staff" }, permissions: [], ownerDisplayConfig: { phone: "full", email: "full" } });
@@ -157,12 +208,7 @@ describe("GET 申込一覧", () => {
     await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) });
     const args = db.dmInquiry.findMany.mock.calls[0][0];
     expect(args.where.draft.property.OR).toEqual([{ createdBy: "u1" }, { assignedTo: "u1" }]);
-  });
-  it.each(["-5", "abc"])("不正な offset=%s は 0 扱い", async (offset) => {
-    db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
-    db.dmInquiry.findMany.mockResolvedValueOnce([]);
-    await GET(new Request(`http://x/api?offset=${offset}`) as never, { params: Promise.resolve({ id: "c1" }) });
-    expect(db.dmInquiry.findMany.mock.calls[0][0].skip).toBe(0);
+    expect(args.where.handleStatus).toEqual({ in: ["open", "in_progress"] });
   });
 });
 
