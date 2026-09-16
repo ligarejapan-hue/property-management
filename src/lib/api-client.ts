@@ -704,6 +704,7 @@ export interface SaleDmSettings {
   lpUrl: string | null;
   senderName: string | null;
   senderContact: string | null;
+  privacyText: string | null;
   hasAnthropicKey: boolean;
   hasOpenaiKey: boolean;
   encryptionConfigured: boolean;
@@ -712,7 +713,7 @@ export interface SaleDmSettings {
 
 const EMPTY_SALE_DM_SETTINGS: SaleDmSettings = {
   provider: null, model: null, trackingBaseUrl: null, lpUrl: null,
-  senderName: null, senderContact: null, hasAnthropicKey: false, hasOpenaiKey: false,
+  senderName: null, senderContact: null, privacyText: null, hasAnthropicKey: false, hasOpenaiKey: false,
   encryptionConfigured: false, updatedAt: null,
 };
 
@@ -732,6 +733,7 @@ export async function updateSaleDmSettings(body: {
   lpUrl?: string;
   senderName?: string;
   senderContact?: string;
+  privacyText?: string;
 }): Promise<{ data: SaleDmSettings }> {
   if (USE_MOCK) {
     await mockDelay();

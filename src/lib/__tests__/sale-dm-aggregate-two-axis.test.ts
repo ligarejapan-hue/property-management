@@ -10,10 +10,12 @@ const d = (
   viewed: boolean,
   phoneTap = false,
   pageViewed = viewed,
+  inquired = false,
 ) => ({
   variantId, lpVariantId, deliveryStatus, lpFirstAccessAt: viewed ? new Date() : null, phoneInquiryAt: null,
   lpPageFirstAt: pageViewed ? new Date() : null,
   phoneTapFirstAt: phoneTap ? new Date() : null,
+  formInquiryFirstAt: inquired ? new Date() : null,
 });
 
 describe("aggregateTwoAxis", () => {
@@ -30,8 +32,8 @@ describe("aggregateTwoAxis", () => {
   it("LP型ごとと組み合わせごとを出し、到達0は率 null", () => {
     const r = aggregateTwoAxis([d("A", "X", "unknown", true), d("B", "X", "delivered", true), d("A", "Y", "delivered", false)]);
     expect(r.byLpVariant).toEqual([
-      { lpVariantId: "X", sent: 2, delivered: 1, viewed: 2, deliveredViewed: 1, viewRate: 1, phoneTapped: 0, phoneTapRate: 0 },
-      { lpVariantId: "Y", sent: 1, delivered: 1, viewed: 0, deliveredViewed: 0, viewRate: 0, phoneTapped: 0, phoneTapRate: null },
+      { lpVariantId: "X", sent: 2, delivered: 1, viewed: 2, deliveredViewed: 1, viewRate: 1, phoneTapped: 0, phoneTapRate: 0, inquired: 0, inquiryRate: 0 },
+      { lpVariantId: "Y", sent: 1, delivered: 1, viewed: 0, deliveredViewed: 0, viewRate: 0, phoneTapped: 0, phoneTapRate: null, inquired: 0, inquiryRate: null },
     ]);
     expect(r.byPair).toEqual([
       { variantId: "A", lpVariantId: "X", sent: 1, delivered: 0, viewed: 1 },
@@ -84,5 +86,22 @@ describe("aggregateTwoAxis", () => {
     expect(y.viewed).toBe(0);
     expect(y.phoneTapped).toBe(0);
     expect(y.phoneTapRate).toBeNull(); // 閲覧0は率なし
+  });
+
+  it("LP型ごとの申込: 分子=申込あり・分母=アプリ内ページの閲覧", () => {
+    const r = aggregateTwoAxis([
+      d("A", "L1", "delivered", true, false, true, true),
+      d("A", "L1", "delivered", true, false, true, false),
+      d("A", "L1", "delivered", false),
+    ]);
+    const lp = r.byLpVariant.find((v) => v.lpVariantId === "L1")!;
+    expect(lp.inquired).toBe(1);
+    expect(lp.inquiryRate).toBeCloseTo(0.5);
+  });
+
+  it("閲覧0なら申込率は null", () => {
+    const lp = aggregateTwoAxis([d("A", "L2", "delivered", false)]).byLpVariant[0];
+    expect(lp.inquired).toBe(0);
+    expect(lp.inquiryRate).toBeNull();
   });
 });

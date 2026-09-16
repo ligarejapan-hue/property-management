@@ -45,6 +45,7 @@ export async function GET(
           lpPageFirstAt: true,
           phoneInquiryAt: true,
           phoneTapFirstAt: true,
+          formInquiryFirstAt: true,
           property: { select: { createdBy: true, assignedTo: true } },
         },
       }),

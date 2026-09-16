@@ -58,9 +58,9 @@ export default function SaleDmAggregateView({ campaign, lpMetricsEnabled }: { ca
       {lpMetricsEnabled ? (
         <>
           <Table
-            title="LP型ごと(ページの成績。閲覧=ご案内ページを実際に表示した数。申込率は申込フォーム対応後に追加)"
-            head={["LP型", "送付", "到達", "閲覧", "閲覧率", "電話タップ"]}
-            rows={lpRows.map((r) => ({ key: r.lpVariantId, cells: [r.label, r.sent, r.delivered, r.viewed, r.viewRate, r.phoneTapLabel], strong: [4] }))}
+            title="LP型ごと(ページの成績 = 申込率。閲覧=ご案内ページを実際に表示した数)"
+            head={["LP型", "送付", "到達", "閲覧", "閲覧率", "電話タップ", "申込"]}
+            rows={lpRows.map((r) => ({ key: r.lpVariantId, cells: [r.label, r.sent, r.delivered, r.viewed, r.viewRate, r.phoneTapLabel, r.inquiryLabel], strong: [6] }))}
           />
           <Table
             title="組み合わせ(DM型 × LP型)"
