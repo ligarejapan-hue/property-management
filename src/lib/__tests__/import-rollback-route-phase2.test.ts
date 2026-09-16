@@ -10,7 +10,7 @@
  * - 二重実行防止は維持（tx 内で status 再確認）
  * - recordChanges を api source で呼ぶ（rollback 実行者の API 操作扱い）
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -382,5 +382,134 @@ describe("rollback route Phase 2 — source-assertion", () => {
       /property_stale_at_execute[\s\S]{0,300}continue;[\s\S]{0,200}restoredPropertyCount\+\+/,
     );
     expect(staleBlockToCounter).not.toBeNull();
+  });
+});
+
+// ---- 査定申込がある物件は削除側で blocked(has_dm_inquiries)・他の行は続行 ----
+// dm_inquiries.draft_id は RESTRICT(申込の個人情報は消さない)。消そうとすると P2003 で tx 全体が落ち、
+// 無関係な行のロールバックまで巻き添えになるため、事前分類でも tx 内でも blocked に振り分ける。
+const rb = vi.hoisted(() => {
+  const tx = {
+    importJob: { findUnique: vi.fn(), update: vi.fn() },
+    dmInquiry: { count: vi.fn() },
+    property: { delete: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
+  };
+  return {
+    tx,
+    jobFindUnique: vi.fn(),
+    propertyFindMany: vi.fn(),
+    lockPropertyRow: vi.fn(),
+    order: [] as string[],
+  };
+});
+
+vi.mock("next/server", () => ({ NextRequest: Request }));
+vi.mock("@/lib/prisma", () => ({
+  default: {
+    importJob: { findUnique: rb.jobFindUnique },
+    property: { findMany: rb.propertyFindMany },
+    changeLog: { findMany: vi.fn().mockResolvedValue([]) },
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(rb.tx)),
+  },
+}));
+vi.mock("@/lib/api-helpers", () => {
+  class MockApiError extends Error {
+    status: number;
+    code: string;
+    constructor(status: number, message: string, code = "ERROR") {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
+  }
+  return {
+    ApiError: MockApiError,
+    getApiSession: vi.fn().mockResolvedValue({ id: "user-1", email: "a@a", name: "A", role: "admin" }),
+    getUserPermissions: vi.fn().mockResolvedValue([]),
+    handleApiError: vi.fn((error: unknown) => {
+      if (error instanceof MockApiError) {
+        return Response.json({ error: { message: error.message, code: error.code } }, { status: error.status });
+      }
+      return Response.json({ error: { message: "Server error", code: "INTERNAL_ERROR" } }, { status: 500 });
+    }),
+    apiResponse: vi.fn((data: unknown, status = 200) => Response.json(data, { status })),
+  };
+});
+vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+vi.mock("@/lib/change-log", () => ({ recordChanges: vi.fn() }));
+vi.mock("@/lib/permissions", () => ({ hasPermission: vi.fn(() => true) }));
+vi.mock("@/lib/import-job-guard", () => ({ assertImportJobMutable: vi.fn() }));
+vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRow: rb.lockPropertyRow }));
+
+import { POST as rollbackPOST } from "@/app/api/import/jobs/[jobId]/rollback/route";
+
+describe("rollback: 査定申込がある物件は削除しない(has_dm_inquiries)", () => {
+  const completedAt = new Date("2026-09-01T00:00:00Z");
+  const zeroCounts = {
+    photos: 0, attachments: 0, propertyOwners: 0, comments: 0, nextActions: 0, dmLogs: 0,
+    investigationLogs: 0, dmRecipientDrafts: 0,
+  };
+  const row = (n: number, createdId: string) => ({
+    id: `r${n}`, rowNumber: n, status: "success", createdId, errorMessage: null,
+  });
+  const call = (dryRun: boolean) =>
+    rollbackPOST(
+      new Request("http://localhost/api/import/jobs/j1/rollback", {
+        method: "POST",
+        body: JSON.stringify({ dryRun }),
+      }) as never,
+      { params: Promise.resolve({ jobId: "j1" }) },
+    );
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    rb.order.length = 0;
+    rb.jobFindUnique.mockResolvedValue({
+      id: "j1", jobType: "property_csv", status: "completed", executedBy: "user-1",
+      createdAt: completedAt, startedAt: completedAt, completedAt,
+      rows: [row(1, "p-inq"), row(2, "p-ok"), row(3, "p-late")],
+    });
+    rb.propertyFindMany.mockResolvedValue([
+      { id: "p-inq", updatedAt: completedAt, _count: { ...zeroCounts, dmRecipientDrafts: 1 } },
+      { id: "p-ok", updatedAt: completedAt, _count: zeroCounts },
+      { id: "p-late", updatedAt: completedAt, _count: zeroCounts },
+    ]);
+    rb.tx.importJob.findUnique.mockResolvedValue({ status: "completed" });
+    rb.lockPropertyRow.mockImplementation(async (_tx: unknown, id: string) => {
+      rb.order.push(`lock:${id}`);
+    });
+    // p-late は事前分類の後(実行直前)に申込が入ったケース
+    rb.tx.dmInquiry.count.mockImplementation(async ({ where }: { where: { draft: { propertyId: string } } }) => {
+      rb.order.push(`count:${where.draft.propertyId}`);
+      return where.draft.propertyId === "p-late" ? 1 : 0;
+    });
+  });
+
+  it("事前分類: 申込のある物件は blocked(has_dm_inquiries)で、申込の有無は宛先の件数(申込あり)で数える", async () => {
+    const res = await call(true);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.summary.deletable).toBe(2);
+    expect(json.blockedDetails).toEqual([
+      { rowNumber: 1, action: "delete", reason: "査定申込があるため削除できません (has_dm_inquiries)" },
+    ]);
+    const select = rb.propertyFindMany.mock.calls[0][0].select;
+    expect(select._count.select.dmRecipientDrafts).toEqual({ where: { inquiries: { some: {} } } });
+  });
+
+  it("実行: 申込のある物件は消さず blocked に載せ、他の行は削除を続ける(tx 内は 親行ロック→件数→削除)", async () => {
+    const res = await call(false);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(rb.tx.property.delete).toHaveBeenCalledTimes(1);
+    expect(rb.tx.property.delete).toHaveBeenCalledWith({ where: { id: "p-ok" } });
+    expect(json.deletedCount).toBe(1);
+    expect(json.summary.deletable).toBe(1);
+    expect(json.blockedDetails).toEqual([
+      { rowNumber: 1, action: "delete", reason: "査定申込があるため削除できません (has_dm_inquiries)" },
+      { rowNumber: 3, action: "delete", reason: "査定申込があるため削除できません (has_dm_inquiries)" },
+    ]);
+    expect(rb.order).toEqual(["lock:p-ok", "count:p-ok", "lock:p-late", "count:p-late"]);
+    expect(rb.tx.importJob.update).toHaveBeenCalledWith({ where: { id: "j1" }, data: { status: "rolled_back" } });
   });
 });

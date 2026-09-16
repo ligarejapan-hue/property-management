@@ -20,6 +20,7 @@ import {
   type JobWindow,
 } from "@/lib/import-rollback";
 import { extractUpdatedFields } from "@/lib/import-row-display";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 
 interface BlockedDetail {
   rowNumber: number;
@@ -37,6 +38,10 @@ interface RestoreFieldDetail {
 }
 
 const TOLERANCE_MS = 5000;
+
+// 査定申込(dm_inquiries)の個人情報は消さない(draft_id の FK は RESTRICT)。申込がある物件を消そうとすると
+// P2003 で tx 全体が落ち、無関係な行のロールバックまで巻き添えになるため、削除対象から外して blocked に載せる。
+const HAS_DM_INQUIRIES_REASON = "査定申込があるため削除できません (has_dm_inquiries)";
 
 export async function POST(
   req: NextRequest,
@@ -123,6 +128,8 @@ export async function POST(
                   nextActions: true,
                   dmLogs: true,
                   investigationLogs: true,
+                  // 申込が1件でもある宛先の数(申込の中身は読まない)。
+                  dmRecipientDrafts: { where: { inquiries: { some: {} } } },
                 },
               },
             },
@@ -144,6 +151,14 @@ export async function POST(
         continue;
       }
       const c = prop._count;
+      if (c.dmRecipientDrafts > 0) {
+        blockedDetails.push({
+          rowNumber: row.rowNumber,
+          action: "delete",
+          reason: HAS_DM_INQUIRIES_REASON,
+        });
+        continue;
+      }
       const hasRelated =
         c.photos > 0 ||
         c.attachments > 0 ||
@@ -394,6 +409,20 @@ export async function POST(
         );
       }
       for (const row of deletable) {
+        // 事前分類の後に申込が入った物件を消さない。⚠親の物件行をロックしてから数える
+        // (公開の申込記録も「親の物件行→子」でロックするため、数えた後に増えない=P2003 で tx が落ちない)。
+        await lockPropertyRow(tx, row.createdId!);
+        const inquiryCount = await tx.dmInquiry.count({
+          where: { draft: { propertyId: row.createdId! } },
+        });
+        if (inquiryCount > 0) {
+          blockedDetails.push({
+            rowNumber: row.rowNumber,
+            action: "delete",
+            reason: HAS_DM_INQUIRIES_REASON,
+          });
+          continue;
+        }
         await tx.property.delete({ where: { id: row.createdId! } });
         deletedCount++;
       }
@@ -516,7 +545,8 @@ export async function POST(
       alreadyRolledBack: false,
       eligible: true,
       summary: {
-        deletable: deletable.length,
+        // 実適用件数(実行直前に申込が入って外した物件を含めない)
+        deletable: deletedCount,
         restorable: restoredPropertyCount,
         restorableFieldCount: restoredFieldCount,
         blocked: blockedDetails.length,
