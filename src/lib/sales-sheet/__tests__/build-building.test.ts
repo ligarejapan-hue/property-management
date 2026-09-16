@@ -30,12 +30,10 @@ const tableRow = (doc: { elements: unknown[] }, label: string): string | undefin
   }
   return undefined;
 };
-const tableLabels = (doc: { elements: unknown[] }): string[] => {
-  for (const el of doc.elements as { type: string; rows?: { label: string; value: string }[] }[]) {
-    if (el.type === "table") return (el.rows ?? []).map((row) => row.label);
-  }
-  return [];
-};
+const tableLabels = (doc: { elements: unknown[] }): string[] =>
+  (doc.elements as { type: string; rows?: { label: string; value: string }[] }[])
+    .filter((el) => el.type === "table" && !(el as { id?: string }).id?.startsWith("footer-"))
+    .flatMap((el) => (el.rows ?? []).map((row) => row.label));
 const imageCount = (doc: { elements: { type: string }[] }) =>
   doc.elements.filter((e) => e.type === "image").length;
 
@@ -59,7 +57,7 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
     expect(labels).toContain("延床面積");
     expect(labels).toContain("総戸数");
     expect(labels).toContain("想定利回り");
-    expect(findEl(doc, "catch-band")).toMatchObject({ type: "shape", shape: "rect", fill: "#15324f" });
+    expect(findEl(doc, "catch-band")).toMatchObject({ type: "shape", shape: "rect", fill: "#1f3a5f" });
     expect(doc.elements.some((e) => e.type === "text" && e.content.includes("満室稼働中"))).toBe(true);
   });
 
@@ -82,7 +80,7 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
     });
     expect(tableRow(doc, "総戸数")).toBe("12戸");
     expect(tableRow(doc, "想定利回り")).toBe("7.8％");
-    expect(tableRow(doc, "満室想定収入(年額)")).toBe("980万円");
+    expect(tableRow(doc, "満室想定収入")).toBe("980万円");
     expect(tableRow(doc, "延床面積")).toBe("560.50㎡");
   });
 
@@ -97,7 +95,7 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
 
   it("満室想定収入はすでに万円が付いていても二重化しない", () => {
     expect(
-      tableRow(buildSaleBuildingDocument({ ...base, overrides: { expectedIncome: "980万円" } }), "満室想定収入(年額)"),
+      tableRow(buildSaleBuildingDocument({ ...base, overrides: { expectedIncome: "980万円" } }), "満室想定収入"),
     ).toBe("980万円");
   });
 
@@ -106,10 +104,10 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
     // build-document-templates.test.ts が使っていた形）。年額は field-model のラベルで表すため
     // 値側は "980万円" に正規化する（末尾の「万円/年」「/年」も剥がして二重付与を防ぐ）。
     expect(
-      tableRow(buildSaleBuildingDocument({ ...base, overrides: { expectedIncome: "980万円/年" } }), "満室想定収入(年額)"),
+      tableRow(buildSaleBuildingDocument({ ...base, overrides: { expectedIncome: "980万円/年" } }), "満室想定収入"),
     ).toBe("980万円");
     expect(
-      tableRow(buildSaleBuildingDocument({ ...base, overrides: { expectedIncome: "980/年" } }), "満室想定収入(年額)"),
+      tableRow(buildSaleBuildingDocument({ ...base, overrides: { expectedIncome: "980/年" } }), "満室想定収入"),
     ).toBe("980万円");
   });
 
@@ -119,7 +117,8 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
       overrides: { landCategory: ["宅地", "雑種地"], roadDirections: ["南", "東"] },
     });
     expect(tableRow(doc, "地目")).toBe("宅地 / 雑種地");
-    expect(tableRow(doc, "接道方向")).toBe("南 / 東");
+    // 接道方向/接道種別/接道幅員は詳細表の「接道」1行にまとめられる。
+    expect(tableRow(doc, "接道")).toBe("南 / 東 / 公道 / 幅員6.0m");
   });
 
   it("課税ならうち消費税行が出て、不課税なら出ない", () => {
@@ -161,19 +160,17 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
     expect(tableRow(doc, "用途地域")).toBe("商業地域 / 近隣商業地域");
   });
 
-  it("建蔽率/容積率/接道種別/接道幅員を自動反映する", () => {
+  it("建蔽率/容積率/接道種別/接道幅員を自動反映する(詳細表に集約)", () => {
     const doc = buildSaleBuildingDocument({ ...base, overrides: {} });
-    expect(tableRow(doc, "建蔽率")).toBe("80％");
-    expect(tableRow(doc, "容積率")).toBe("400％");
-    expect(tableRow(doc, "接道種別")).toBe("公道");
-    expect(tableRow(doc, "接道幅員")).toBe("6.0m");
+    expect(tableRow(doc, "建蔽率/容積率")).toBe("80％ / 400％");
+    expect(tableRow(doc, "接道")).toBe("公道 / 幅員6.0m");
   });
 
   it("接道幅員はoverride優先、無ければproperty.roadWidthから自動反映", () => {
     const overridden = buildSaleBuildingDocument({ ...base, overrides: { roadWidth: "8.0" } });
-    expect(tableRow(overridden, "接道幅員")).toBe("8.0m");
+    expect(tableRow(overridden, "接道")).toBe("公道 / 幅員8.0m");
     const auto = buildSaleBuildingDocument({ ...base, overrides: {} });
-    expect(tableRow(auto, "接道幅員")).toBe("6.0m");
+    expect(tableRow(auto, "接道")).toBe("公道 / 幅員6.0m");
   });
 
   it("現況(occupancy)はoverride優先、無ければmapOccupancyStatusToMansionOccupancyの決定的デフォルト", () => {
@@ -241,7 +238,8 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
       overrides: { setback: "0.5", setbackUnit: "m", aboveFloors: "5", basementFloors: "1" },
     });
     expect(tableRow(doc, "セットバック")).toBe("0.5m");
-    expect(tableRow(doc, "地上階")).toBe("5階");
+    // 地上階は主要表「構造・階数」に構造と合成される(構造未指定のためaboveFloorsのみ)。
+    expect(tableRow(doc, "構造・階数")).toBe("地上5階");
     expect(tableRow(doc, "地下階")).toBe("1階");
   });
 
@@ -251,7 +249,8 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
       overrides: { access: "JR山手線 池袋駅 徒歩3分", structure: "RC", builtYearMonth: "2010年5月" },
     });
     expect(tableRow(doc, "交通")).toBe("JR山手線 池袋駅 徒歩3分");
-    expect(tableRow(doc, "構造")).toBe("RC");
+    // 構造は主要表「構造・階数」に地上階と合成される(地上階未指定のためstructureのみ)。
+    expect(tableRow(doc, "構造・階数")).toBe("RC");
     expect(tableRow(doc, "築年月")).toBe("2010年5月");
   });
 

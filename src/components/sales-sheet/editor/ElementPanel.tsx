@@ -464,7 +464,7 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
         <section className="p-3" data-image-editor>
           <p className={sectionHeadCls}>写真</p>
           <div className="flex flex-col gap-2">
-            {/* 間取り図/敷地図の指定・解除（中央列）。この画像を中央の間取り図にする／写真に戻す。 */}
+            {/* 間取り図/敷地図の指定・解除。間取り図も写真の仲間として写真枠に並ぶ。 */}
             {imageEl.id === "floor-plan" ? (
               <button
                 type="button"
@@ -472,7 +472,7 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
                 onClick={() => onChange({ type: "unsetFloorPlan" })}
                 className="w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600"
               >
-                写真に戻す（中央の間取り図を解除）
+                写真に戻す（間取り図を解除）
               </button>
             ) : (
               <button
@@ -481,7 +481,7 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
                 onClick={() => onChange({ type: "setFloorPlan" })}
                 className="w-full rounded border border-blue-500 bg-blue-50 px-2 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-100 dark:border-blue-400 dark:bg-blue-900/30 dark:text-blue-300"
               >
-                間取り図にする（中央列へ）
+                間取り図にする
               </button>
             )}
             {/* Fit */}

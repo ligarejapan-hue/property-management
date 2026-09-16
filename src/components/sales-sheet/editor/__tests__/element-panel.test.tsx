@@ -286,6 +286,29 @@ describe("ElementPanel — 画像編集（写真管理・計画④）", () => {
     const html = renderToStaticMarkup(<ElementPanel element={el} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />);
     expect(html).toMatch(/aria-label="焦点 左上"[^>]*aria-pressed="true"/);
   });
+
+  // Task 7: 間取り図も写真の仲間(専用の「中央列」は無くなった)ため、ボタン文言から
+  // 「中央列」表現を落とす。basePanelProps / imageElement(id) は既存テストの props を
+  // そのまま流用(imageElement を id 違いで複製)して作る。
+  it("間取り図ボタンの文言に「中央列」を含めない", () => {
+    const basePanelProps = { onChange: () => {}, theme: THEME, onThemeChange: () => {} };
+    const photo = renderToStaticMarkup(
+      <ElementPanel {...basePanelProps} element={{ ...imageElement, id: "img-1" }} />,
+    );
+    expect(photo).toContain("間取り図にする");
+    expect(photo).not.toContain("中央列");
+    const plan = renderToStaticMarkup(
+      <ElementPanel {...basePanelProps} element={{ ...imageElement, id: "floor-plan" }} />,
+    );
+    expect(plan).toContain("写真に戻す");
+    // 「中央」は焦点グリッドの「焦点 中央」プリセットにも出るため(このボタンとは無関係)、
+    // 判定は floor-plan 解除ボタン自体の文言に絞る。
+    const planBtn = plan.slice(
+      plan.indexOf('data-action="unset-floor-plan"'),
+      plan.indexOf("</button>", plan.indexOf('data-action="unset-floor-plan"')),
+    );
+    expect(planBtn).not.toContain("中央");
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import type { SalesSheetDocument, SalesSheetElement } from "./document-schema";
 import { parseSalesSheetDocument } from "./document-schema";
 import { sanitizeCssValue } from "./css-safety";
+import { tableCellStyle } from "./table-cell-style";
 
 /**
  * document を完全なHTML文書に直列化する。
@@ -85,21 +86,39 @@ function renderElement(el: SalesSheetElement): string {
 
   if (el.type === "table") {
     const s = el.style;
-    const safeBorderColor = sanitizeCssValue(s.borderColor ?? "#cccccc");
-    const border = `0.2mm solid ${safeBorderColor}`;
     const safeLabelColor = s.labelColor ? sanitizeCssValue(s.labelColor) : null;
     const safeValueColor = s.valueColor ? sanitizeCssValue(s.valueColor) : null;
+    const rows = el.rows.map((r, i) => {
+      const c = tableCellStyle(s, i);
+      const tdLabelStyle = inlineStyle({ border: c.border, color: safeLabelColor, padding: c.padding, width: "32%", "font-weight": "600", "vertical-align": "top", background: c.background });
+      const tdValueStyle = inlineStyle({ border: c.border, color: safeValueColor, padding: c.padding, "vertical-align": "top", background: c.background });
+      return `<tr><td style="${esc(tdLabelStyle)}">${esc(r.label)}</td><td style="${esc(tdValueStyle)}">${esc(r.value)}</td></tr>`;
+    }).join("");
+    // borderless(消費者向けひな型の主要表/詳細表): 箱サイズ(位置/幅/高さ)は外側の <div>
+    // (boxStyle)に持たせ、<table> 自身には height を与えない。<table> に height を
+    // 直接指定すると、ブラウザが余った高さを各行へ均等配分し、行数が少ない表(詳細表など)で
+    // 行間が間延びする([Fix round 1]・コントローラ裁定)。
+    if (s.borderless) {
+      const wrapperStyle = inlineStyle(boxStyle(el));
+      const tableStyle = inlineStyle({
+        width: "100%",
+        "border-collapse": "collapse",
+        "table-layout": "fixed",
+        "font-size": s.fontSizePt ? `${s.fontSizePt}pt` : null,
+      });
+      // data-sheet-table: 編集画面が描画後の実寸(scrollHeight/clientHeight)を
+      // 測って「入りきっていない表」を判定するための目印(仕様書 §4.8・F2)。
+      // borderless の外枠 div(overflow:hidden で実際に切り取る箱)にだけ付ける。
+      return `<div data-sheet-table="${esc(el.id)}" style="${esc(wrapperStyle)}"><table style="${esc(tableStyle)}"><tbody>${rows}</tbody></table></div>`;
+    }
+    // borderless で無い(旧ひな型の)表は従来どおり <table> 自体が箱サイズを持つ
+    // (出力をバイト単位で不変に保つ・後方互換)。
     const tableStyle = inlineStyle({
       ...boxStyle(el),
       "border-collapse": "collapse",
       "table-layout": "fixed",
       "font-size": s.fontSizePt ? `${s.fontSizePt}pt` : null,
     });
-    const rows = el.rows.map((r) => {
-      const tdLabelStyle = inlineStyle({ border, color: safeLabelColor, padding: "0.5mm 1mm", width: "32%", "font-weight": "600", "vertical-align": "top" });
-      const tdValueStyle = inlineStyle({ border, color: safeValueColor, padding: "0.5mm 1mm", "vertical-align": "top" });
-      return `<tr><td style="${esc(tdLabelStyle)}">${esc(r.label)}</td><td style="${esc(tdValueStyle)}">${esc(r.value)}</td></tr>`;
-    }).join("");
     return `<table style="${esc(tableStyle)}"><tbody>${rows}</tbody></table>`;
   }
 

@@ -11,6 +11,7 @@ import type {
 } from "@/lib/sales-sheet/document-schema";
 import { parseSalesSheetDocument } from "@/lib/sales-sheet/document-schema";
 import { sanitizeCssValue } from "@/lib/sales-sheet/css-safety";
+import { tableCellStyle } from "@/lib/sales-sheet/table-cell-style";
 
 const mm = (v: number) => `${v}mm`;
 
@@ -64,32 +65,57 @@ function ImageEl({ el }: { el: ImageElement }) {
 
 function TableEl({ el }: { el: TableElement }) {
   const s = el.style;
-  const safeBorderColor = sanitizeCssValue(s.borderColor ?? "#cccccc");
-  const border = `0.2mm solid ${safeBorderColor}`;
   const safeLabelColor = s.labelColor ? sanitizeCssValue(s.labelColor) : undefined;
   const safeValueColor = s.valueColor ? sanitizeCssValue(s.valueColor) : undefined;
-  return (
+  const table = (
     <table
-      style={{
-        ...boxStyle(el),
-        borderCollapse: "collapse",
-        tableLayout: "fixed",
-        fontSize: s.fontSizePt ? `${s.fontSizePt}pt` : undefined,
-      }}
+      style={
+        s.borderless
+          ? {
+              width: "100%",
+              borderCollapse: "collapse",
+              tableLayout: "fixed",
+              fontSize: s.fontSizePt ? `${s.fontSizePt}pt` : undefined,
+            }
+          : {
+              ...boxStyle(el),
+              borderCollapse: "collapse",
+              tableLayout: "fixed",
+              fontSize: s.fontSizePt ? `${s.fontSizePt}pt` : undefined,
+            }
+      }
     >
       <tbody>
-        {el.rows.map((r, i) => (
-          <tr key={i}>
-            <td style={{ border, color: safeLabelColor, padding: "0.5mm 1mm", width: "32%", fontWeight: 600, verticalAlign: "top" }}>
-              {r.label}
-            </td>
-            <td style={{ border, color: safeValueColor, padding: "0.5mm 1mm", verticalAlign: "top" }}>
-              {r.value}
-            </td>
-          </tr>
-        ))}
+        {el.rows.map((r, i) => {
+          const c = tableCellStyle(s, i);
+          const border = c.border ?? undefined;
+          const background = c.background ?? undefined;
+          return (
+            <tr key={i}>
+              <td style={{ border, color: safeLabelColor, padding: c.padding, width: "32%", fontWeight: 600, verticalAlign: "top", background }}>
+                {r.label}
+              </td>
+              <td style={{ border, color: safeValueColor, padding: c.padding, verticalAlign: "top", background }}>
+                {r.value}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
+  );
+  // borderless: 箱サイズは外側の <div>(boxStyle)が持ち、<table> は width:100% のみ
+  // (height を持たせるとブラウザが余白を行へ均等配分してしまうため・[Fix round 1])。
+  // borderless で無い(旧ひな型)表は従来どおり <table> 自身が箱サイズを持つ(後方互換)。
+  // data-sheet-table: 編集画面が描画後の実寸を測って「入りきっていない表」を
+  // 判定するための目印(仕様書 §4.8・F2)。overflow:hidden で実際に切り取る
+  // borderless の外枠 div にだけ付ける。
+  return s.borderless ? (
+    <div data-sheet-table={el.id} style={boxStyle(el)}>
+      {table}
+    </div>
+  ) : (
+    table
   );
 }
 

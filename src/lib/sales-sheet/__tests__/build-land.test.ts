@@ -28,12 +28,10 @@ const tableRow = (doc: { elements: unknown[] }, label: string): string | undefin
   }
   return undefined;
 };
-const tableLabels = (doc: { elements: unknown[] }): string[] => {
-  for (const el of doc.elements as { type: string; rows?: { label: string; value: string }[] }[]) {
-    if (el.type === "table") return (el.rows ?? []).map((row) => row.label);
-  }
-  return [];
-};
+const tableLabels = (doc: { elements: unknown[] }): string[] =>
+  (doc.elements as { type: string; rows?: { label: string; value: string }[] }[])
+    .filter((el) => el.type === "table" && !(el as { id?: string }).id?.startsWith("footer-"))
+    .flatMap((el) => (el.rows ?? []).map((row) => row.label));
 const imageCount = (doc: { elements: { type: string }[] }) =>
   doc.elements.filter((e) => e.type === "image").length;
 
@@ -41,7 +39,7 @@ const findEl = (doc: { elements: unknown[] }, id: string) =>
   (doc.elements as { id: string }[]).find((e) => e.id === id);
 
 describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", () => {
-  it("スペック表に主要行(用途地域/地目/接道方向)が入り、catch-band要素を含む", () => {
+  it("スペック表に主要行(用途地域/地目/接道)が入り、catch-band要素を含む", () => {
     const doc = buildSaleLandDocument({
       ...base,
       overrides: {
@@ -54,8 +52,9 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
     const labels = tableLabels(doc);
     expect(labels).toContain("用途地域");
     expect(labels).toContain("地目");
-    expect(labels).toContain("接道方向");
-    expect(findEl(doc, "catch-band")).toMatchObject({ type: "shape", shape: "rect", fill: "#15324f" });
+    // 接道方向は主要表「接道」(接道方向/接道種別/接道幅員の合成)の一部。
+    expect(labels).toContain("接道");
+    expect(findEl(doc, "catch-band")).toMatchObject({ type: "shape", shape: "rect", fill: "#1f3a5f" });
     expect(doc.elements.some((e) => e.type === "text" && e.content.includes("南西角地"))).toBe(true);
   });
 
@@ -115,19 +114,17 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
     expect(tableRow(doc, "用途地域")).toBe("第一種低層住居専用地域 / 近隣商業地域");
   });
 
-  it("建蔽率/容積率/接道種別/接道幅員を自動反映する", () => {
+  it("建蔽率・容積率/接道種別/接道幅員を自動反映する", () => {
     const doc = buildSaleLandDocument({ ...base, overrides: {} });
-    expect(tableRow(doc, "建蔽率")).toBe("50％");
-    expect(tableRow(doc, "容積率")).toBe("100％");
-    expect(tableRow(doc, "接道種別")).toBe("公道");
-    expect(tableRow(doc, "接道幅員")).toBe("4.0m");
+    expect(tableRow(doc, "建蔽率・容積率")).toBe("50％ / 100％");
+    expect(tableRow(doc, "接道")).toBe("公道 / 幅員4.0m");
   });
 
   it("接道幅員はoverride優先、無ければproperty.roadWidthから自動反映", () => {
     const overridden = buildSaleLandDocument({ ...base, overrides: { roadWidth: "5.5" } });
-    expect(tableRow(overridden, "接道幅員")).toBe("5.5m");
+    expect(tableRow(overridden, "接道")).toBe("公道 / 幅員5.5m");
     const auto = buildSaleLandDocument({ ...base, overrides: {} });
-    expect(tableRow(auto, "接道幅員")).toBe("4.0m");
+    expect(tableRow(auto, "接道")).toBe("公道 / 幅員4.0m");
   });
 
   it("現況(occupancy)はoverride優先、無ければmapOccupancyStatusToLandOccupancyの決定的デフォルト(vacant→更地)", () => {
@@ -136,14 +133,14 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
       property: { ...base.property, occupancyStatus: "vacant" },
       overrides: {},
     });
-    expect(tableRow(auto, "現況")).toBe("更地");
+    expect(tableRow(auto, "現況・引渡")).toBe("更地");
 
     const overridden = buildSaleLandDocument({
       ...base,
       property: { ...base.property, occupancyStatus: "vacant" },
       overrides: { occupancy: "上物有" },
     });
-    expect(tableRow(overridden, "現況")).toBe("上物有");
+    expect(tableRow(overridden, "現況・引渡")).toBe("上物有");
   });
 
   it.each([
@@ -162,8 +159,8 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
         property: { ...base.property, occupancyStatus },
         overrides: { occupancy: mapOccupancyStatusToLandOccupancy(occupancyStatus) },
       });
-      expect(tableRow(withoutOverride, "現況")).toBe(expected);
-      expect(tableRow(withoutOverride, "現況")).toBe(tableRow(withAutoSeededOverride, "現況"));
+      expect(tableRow(withoutOverride, "現況・引渡")).toBe(expected);
+      expect(tableRow(withoutOverride, "現況・引渡")).toBe(tableRow(withAutoSeededOverride, "現況・引渡"));
     },
   );
 
@@ -192,9 +189,9 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
     expect(tableRow(withSqm, "セットバック")).toBe("3㎡");
   });
 
-  it("セットバックが無ければ空文字", () => {
+  it("セットバックが無ければ行自体が出ない(詳細表は空行を出さない)", () => {
     const doc = buildSaleLandDocument({ ...base, overrides: { setbackUnit: "m" } });
-    expect(tableRow(doc, "セットバック")).toBe("");
+    expect(tableLabels(doc)).not.toContain("セットバック");
   });
 
   it("坪単価: 未指定なら価格と土地面積から自動計算し、行に「万円」付きで表示される([Task1])", () => {

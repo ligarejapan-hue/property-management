@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 
+/** 旧ひな型の図面で自動機能を止めたときの説明。 */
+export const LEGACY_TEMPLATE_NOTE = "古いひな型の図面では使えません（新しいひな型で作り直すと使えます）";
+
 export interface EditorToolbarProps {
   dirty: boolean;
   onSave: () => Promise<void>;
@@ -16,16 +19,22 @@ export interface EditorToolbarProps {
   onAddBadge: () => void;
   /** QR コード要素を追加（計画⑧）。 */
   onAddQr: () => void;
-  /** 物件の場所を Google マップ検索する QR を間取図の下(無ければ右下)へ追加。 */
+  /** 物件の場所を Google マップ検索する QR を会社帯の右端へ追加。 */
   onAddMapQr?: () => void;
   /** 物件の住所が登録されているか。false のとき地図QRボタンを無効化。 */
   canAddMapQr?: boolean;
+  /** 地図QRボタンが無効なときの理由(未指定は「物件の住所が未登録です」)。 */
+  mapQrDisabledReason?: string;
   /** 会社帯の物件別6項目(取引情報)の編集モーダルを開く。 */
   onOpenTransactionInfo: () => void;
   /** 会社帯(footer-band)を持つ図面か。古い様式で作成され帯が無い図面では
    *  「取引情報」を編集しても反映先が無いため、ボタンを無効化して黙って捨てるのを防ぐ。
    *  未指定は true(帯ありとして扱う)。 */
   canEditTransactionInfo?: boolean;
+  /** 取引情報ボタンが無効なときの理由(未指定は従来の文言)。 */
+  transactionInfoDisabledReason?: string;
+  /** 新しい紙面の自動機能(写真を自動整列・レイアウト自動調整)が使えるか。旧ひな型は false。未指定 true。 */
+  canAutoLayout?: boolean;
   /** 元に戻す(Ctrl+Z)。canUndo=false のとき非活性。未指定はボタン非表示(後方互換)。 */
   onUndo?: () => void;
   canUndo?: boolean;
@@ -41,7 +50,7 @@ export interface EditorToolbarProps {
   autoFixNotice?: string | null;
 }
 
-export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr, onAddMapQr, canAddMapQr = false, onOpenTransactionInfo, canEditTransactionInfo = true, onUndo, canUndo = false, onRedo, canRedo = false, layoutWarning = null, onAutoFixOverlaps, autoFixNotice = null }: EditorToolbarProps) {
+export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, onAutoArrange, onAutoBalance, onAddBadge, onAddQr, onAddMapQr, canAddMapQr = false, mapQrDisabledReason, onOpenTransactionInfo, canEditTransactionInfo = true, transactionInfoDisabledReason, canAutoLayout = true, onUndo, canUndo = false, onRedo, canRedo = false, layoutWarning = null, onAutoFixOverlaps, autoFixNotice = null }: EditorToolbarProps) {
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -146,8 +155,8 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         type="button"
         data-toolbar-auto-arrange
         onClick={onAutoArrange}
-        disabled={busy}
-        title="写真がある場合に、写真の並びと概要表の位置を整えます。文字・バッジ・QR・概要表以外の表は動きません"
+        disabled={busy || !canAutoLayout}
+        title={!canAutoLayout ? LEGACY_TEMPLATE_NOTE : "写真と間取り図を左の写真枠に並べ直します。文字・表・バッジ・QRは動きません"}
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         写真を自動整列
@@ -156,8 +165,8 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         type="button"
         data-toolbar-auto-balance
         onClick={onAutoBalance}
-        disabled={busy}
-        title="見出し・価格・キャッチコピー・概要表・間取図・写真・地図QRなどの定型項目を標準の配置に戻します(手で動かしていても戻ります)。自分で追加した文字・バッジ・QR(地図QRを除く)は動きません"
+        disabled={busy || !canAutoLayout}
+        title={!canAutoLayout ? LEGACY_TEMPLATE_NOTE : "見出し・価格・キャッチコピー・表・写真・間取り図・地図QRなどの定型項目を標準の配置に戻します(手で動かしていても戻ります)。自分で追加した文字・バッジ・QR(地図QRを除く)は動きません"}
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         レイアウト自動調整
@@ -185,7 +194,7 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         data-toolbar-add-map-qr
         onClick={onAddMapQr}
         disabled={busy || !canAddMapQr}
-        title={!canAddMapQr ? "物件の住所が未登録です" : "物件の場所（Googleマップ）のQRを間取図の下に追加"}
+        title={!canAddMapQr ? (mapQrDisabledReason ?? "物件の住所が未登録です") : "物件の場所（Googleマップ）のQRを会社帯の右端に追加"}
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         地図QRを追加
@@ -195,7 +204,7 @@ export function EditorToolbar({ dirty, onSave, onExport, onDelete, onAddPhoto, o
         data-toolbar-transaction-info
         onClick={onOpenTransactionInfo}
         disabled={busy || !canEditTransactionInfo}
-        title={!canEditTransactionInfo ? "この図面には会社帯がありません（古い様式で作成された図面）" : undefined}
+        title={!canEditTransactionInfo ? (transactionInfoDisabledReason ?? "この図面には会社帯がありません（古い様式で作成された図面）") : undefined}
         className="rounded px-3 py-1.5 text-sm border border-neutral-300 dark:border-zinc-600 hover:bg-neutral-100 dark:hover:bg-zinc-700 disabled:opacity-50 dark:text-neutral-200"
       >
         取引情報

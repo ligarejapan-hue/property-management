@@ -30,12 +30,10 @@ const tableRow = (doc: { elements: unknown[] }, label: string): string | undefin
   }
   return undefined;
 };
-const tableLabels = (doc: { elements: unknown[] }): string[] => {
-  for (const el of doc.elements as { type: string; rows?: { label: string; value: string }[] }[]) {
-    if (el.type === "table") return (el.rows ?? []).map((row) => row.label);
-  }
-  return [];
-};
+const tableLabels = (doc: { elements: unknown[] }): string[] =>
+  (doc.elements as { type: string; rows?: { label: string; value: string }[] }[])
+    .filter((el) => el.type === "table" && !(el as { id?: string }).id?.startsWith("footer-"))
+    .flatMap((el) => (el.rows ?? []).map((row) => row.label));
 const imageCount = (doc: { elements: { type: string }[] }) =>
   doc.elements.filter((e) => e.type === "image").length;
 
@@ -56,8 +54,8 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
     const labels = tableLabels(doc);
     expect(labels).toContain("用途地域");
     expect(labels).toContain("地目");
-    expect(labels).toContain("建物面積(延べ)");
-    expect(findEl(doc, "catch-band")).toMatchObject({ type: "shape", shape: "rect", fill: "#15324f" });
+    expect(labels).toContain("建物面積");
+    expect(findEl(doc, "catch-band")).toMatchObject({ type: "shape", shape: "rect", fill: "#1f3a5f" });
     expect(doc.elements.some((e) => e.type === "text" && e.content.includes("南向き陽当り良好"))).toBe(
       true,
     );
@@ -71,12 +69,13 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
     expect(tableRow(doc, "地目")).toBe("宅地 / 雑種地");
   });
 
-  it("接道方向の複数選択も「 / 」で併記される", () => {
+  it("接道方向の複数選択も「 / 」で併記される(詳細表「接道」に集約)", () => {
     const doc = buildSaleHouseDocument({
       ...base,
       overrides: { roadDirections: ["南", "東"] },
     });
-    expect(tableRow(doc, "接道方向")).toBe("南 / 東");
+    // 接道方向/接道種別/接道幅員は詳細表の「接道」1行にまとめられる(main-detail-rows.ts DETAIL_GROUPS)。
+    expect(tableRow(doc, "接道")).toBe("南 / 東 / 公道 / 幅員4.0m");
   });
 
   it("課税ならうち消費税行が出て、不課税なら出ない", () => {
@@ -127,20 +126,18 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
     expect(tableRow(doc, "用途地域")).toBe("第一種低層住居専用地域 / 近隣商業地域");
   });
 
-  it("建蔽率/容積率/接道種別/接道幅員/間取りを自動反映する", () => {
+  it("建蔽率/容積率/接道種別/接道幅員/間取りを自動反映する(詳細表に集約)", () => {
     const doc = buildSaleHouseDocument({ ...base, overrides: {} });
-    expect(tableRow(doc, "建蔽率")).toBe("50％");
-    expect(tableRow(doc, "容積率")).toBe("100％");
-    expect(tableRow(doc, "接道種別")).toBe("公道");
-    expect(tableRow(doc, "接道幅員")).toBe("4.0m");
+    expect(tableRow(doc, "建蔽率/容積率")).toBe("50％ / 100％");
+    expect(tableRow(doc, "接道")).toBe("公道 / 幅員4.0m");
     expect(tableRow(doc, "間取り")).toBe("4LDK");
   });
 
   it("接道幅員はoverride優先、無ければproperty.roadWidthから自動反映", () => {
     const overridden = buildSaleHouseDocument({ ...base, overrides: { roadWidth: "5.5" } });
-    expect(tableRow(overridden, "接道幅員")).toBe("5.5m");
+    expect(tableRow(overridden, "接道")).toBe("公道 / 幅員5.5m");
     const auto = buildSaleHouseDocument({ ...base, overrides: {} });
-    expect(tableRow(auto, "接道幅員")).toBe("4.0m");
+    expect(tableRow(auto, "接道")).toBe("公道 / 幅員4.0m");
   });
 
   it("現況(occupancy)はoverride優先、無ければmapOccupancyStatusToMansionOccupancyの決定的デフォルト(vacant→空家)", () => {
@@ -149,14 +146,14 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
       property: { ...base.property, occupancyStatus: "vacant" },
       overrides: {},
     });
-    expect(tableRow(auto, "現況")).toBe("空家");
+    expect(tableRow(auto, "現況・引渡")).toBe("空家");
 
     const overridden = buildSaleHouseDocument({
       ...base,
       property: { ...base.property, occupancyStatus: "vacant" },
       overrides: { occupancy: "賃貸中" },
     });
-    expect(tableRow(overridden, "現況")).toBe("賃貸中");
+    expect(tableRow(overridden, "現況・引渡")).toBe("賃貸中");
   });
 
   it.each([
@@ -175,19 +172,20 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
         property: { ...base.property, occupancyStatus },
         overrides: { occupancy: mapOccupancyStatusToMansionOccupancy(occupancyStatus) },
       });
-      expect(tableRow(withoutOverride, "現況")).toBe(expected);
-      expect(tableRow(withoutOverride, "現況")).toBe(tableRow(withAutoSeededOverride, "現況"));
+      expect(tableRow(withoutOverride, "現況・引渡")).toBe(expected);
+      expect(tableRow(withoutOverride, "現況・引渡")).toBe(tableRow(withAutoSeededOverride, "現況・引渡"));
     },
   );
 
   it("deliveryTiming(旧キー・@deprecated)はdeliveryの別名として後方互換で使われる(deliveryが優先)", () => {
+    // delivery は主要表「現況・引渡」に occupancy と合成される(base.property.occupancyStatus="vacant"→空家)。
     const legacy = buildSaleHouseDocument({ ...base, overrides: { deliveryTiming: "相談" } });
-    expect(tableRow(legacy, "引渡時期")).toBe("相談");
+    expect(tableRow(legacy, "現況・引渡")).toBe("空家 / 引渡 相談");
     const both = buildSaleHouseDocument({
       ...base,
       overrides: { delivery: "即時", deliveryTiming: "相談" },
     });
-    expect(tableRow(both, "引渡時期")).toBe("即時");
+    expect(tableRow(both, "現況・引渡")).toBe("空家 / 引渡 即時");
   });
 
   it("土地面積は面積計測方式と合成される(120.5㎡（実測）)", () => {
@@ -215,9 +213,9 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
     expect(tableRow(withSqm, "セットバック")).toBe("3㎡");
   });
 
-  it("セットバックが無ければ空文字", () => {
+  it("セットバックが無ければ行自体が出ない(詳細表は空行を出さない)", () => {
     const doc = buildSaleHouseDocument({ ...base, overrides: { setbackUnit: "m" } });
-    expect(tableRow(doc, "セットバック")).toBe("");
+    expect(tableLabels(doc)).not.toContain("セットバック");
   });
 
   it("新設項目(土地権利/私道負担/地勢/建築確認区分/再建築/駐車場/増改築年月/地上階/地下階/各階面積)がそのまま表に反映される", () => {
@@ -245,11 +243,11 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
     expect(tableRow(doc, "再建築")).toBe("再建築可");
     expect(tableRow(doc, "駐車場")).toBe("有");
     expect(tableRow(doc, "増改築年月")).toBe("2020年3月");
-    expect(tableRow(doc, "地上階")).toBe("2階");
+    // 地上階は主要表「構造・階数」に構造と合成される(構造未指定のためaboveFloorsのみ)。
+    expect(tableRow(doc, "構造・階数")).toBe("地上2階");
     expect(tableRow(doc, "地下階")).toBe("0階");
-    expect(tableRow(doc, "1階面積")).toBe("55.30㎡");
-    expect(tableRow(doc, "2階面積")).toBe("40.30㎡");
-    expect(tableRow(doc, "3階面積")).toBe("0㎡");
+    // 1〜3階面積は詳細表「各階面積」1行にまとめられる。
+    expect(tableRow(doc, "各階面積")).toBe("1階 55.30㎡ / 2階 40.30㎡ / 3階 0㎡");
   });
 
   it("表題は「売戸建」固定、価格はoverride×万円", () => {
@@ -296,10 +294,10 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
     expect(JSON.stringify(doc.elements)).toContain("株式会社リガーレジャパン");
   });
 
-  it("概要表フォントは行数に応じてエンジンが決める(多行=小さめ)", () => {
-    // [Task2] overview.style.fontSizePt はもう決め打ち(7pt固定)ではなく、
-    // computeSpecSheetLayout が行数(specRowCount)から算出する。行を多く埋めても
-    // クランプ範囲(5..9pt)に収まっている＝エンジン駆動であることの証跡。
+  it("表の文字は主要11〜12pt・詳細8〜10ptに収まる", () => {
+    // [Task5] overview(主要表)/overview-detail-a(詳細表)の style.fontSizePt は
+    // computeConsumerLayout が行数から算出する。クランプ範囲に収まっている
+    // ＝エンジン駆動であることの証跡。
     const doc = buildSaleHouseDocument({
       ...base,
       overrides: {
@@ -349,8 +347,11 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
       },
     });
     const ov = findEl(doc, "overview") as { style?: { fontSizePt?: number } } | undefined;
-    expect(ov?.style?.fontSizePt).toBeGreaterThanOrEqual(5);
-    expect(ov?.style?.fontSizePt).toBeLessThanOrEqual(9);
+    const da = findEl(doc, "overview-detail-a") as { style?: { fontSizePt?: number } } | undefined;
+    expect(ov?.style?.fontSizePt).toBeGreaterThanOrEqual(11);
+    expect(ov?.style?.fontSizePt).toBeLessThanOrEqual(12);
+    expect(da?.style?.fontSizePt).toBeGreaterThanOrEqual(8);
+    expect(da?.style?.fontSizePt).toBeLessThanOrEqual(10);
   });
 
   it("A4横でschema検証を通る（保存可能なdocument）", () => {

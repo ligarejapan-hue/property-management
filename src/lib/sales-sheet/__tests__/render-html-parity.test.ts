@@ -65,10 +65,10 @@ describe("renderDocumentToHtml — SalesSheetRenderer パリティガード", ()
     });
   }
 
-  // sampleDocument（上の KEY_SIGNALS が使う手組みfixture）は会社帯(buildFooterBand)を
+  // sampleDocument（上の KEY_SIGNALS が使う手組みfixture）は会社帯(buildConsumerFooterBand)を
   // 含まないため、実際のビルダー(buildSaleMansionDocument)が組む帯付きdocで別途1件
   // 担保する（[Task3] footerDetails:string → footer:FooterBandData 移行後のパリティ）。
-  it("会社帯（buildFooterBand）の会社名が両レンダラの出力に含まれる", () => {
+  it("会社帯（buildConsumerFooterBand）の会社名が両レンダラの出力に含まれる", () => {
     const doc = buildSaleMansionDocument({
       property: { address: "東京都世田谷区上馬４丁目" },
       overrides: { transactionType: "専任媒介" },
@@ -152,5 +152,57 @@ describe("renderDocumentToHtml — SalesSheetRenderer パリティガード", ()
       ],
     };
     expect(() => renderToStaticMarkup(createElement(SalesSheetRenderer, { document: bad }))).toThrow();
+  });
+});
+
+describe("パリティ: 線なし・1行おき色の表(消費者向けひな型)", () => {
+  const doc = parseSalesSheetDocument({
+    page: A4_LANDSCAPE,
+    theme: { fontFamily: "sans-serif", accentColor: "#1f3a5f" },
+    elements: [{
+      id: "t", type: "table", x: 0, y: 0, w: 100, h: 30, z: 1,
+      rows: [{ label: "交通", value: "徒歩6分" }, { label: "間取り", value: "4LDK" }],
+      style: { borderless: true, stripeColor: "#eef2f7", cellPaddingMm: 1.2 },
+    }],
+  });
+  const serializer = renderDocumentToHtml(doc);
+  const react = renderToStaticMarkup(createElement(SalesSheetRenderer, { document: doc }));
+  for (const signal of ["#eef2f7", "1.2mm 1.44mm", "徒歩6分"]) {
+    it(`両レンダラが "${signal}" を含む`, () => {
+      expect(serializer).toContain(signal);
+      expect(react).toContain(signal);
+    });
+  }
+  it("両レンダラとも罫線を出さない", () => {
+    expect(serializer).not.toContain("0.2mm solid");
+    expect(react).not.toContain("0.2mm solid");
+  });
+
+  // [Fix round 1] 行が枠いっぱいに伸びる不具合の再発防止: borderless な表は
+  // <table> 自体に height を持たせず、箱サイズ(position/width/height)は外側の
+  // <div>(boxStyle)に持たせる。table 側は width:100% のみで高さは行の内容に従う。
+  it("両レンダラとも <table> の開始タグに height を持たない(borderless)", () => {
+    const serializerTableTag = serializer.match(/<table[^>]*>/)?.[0] ?? "";
+    const reactTableTag = react.match(/<table[^>]*>/)?.[0] ?? "";
+    expect(serializerTableTag).not.toBe("");
+    expect(reactTableTag).not.toBe("");
+    expect(serializerTableTag).not.toMatch(/height/);
+    expect(reactTableTag).not.toMatch(/height/);
+  });
+
+  it("両レンダラとも要素の箱サイズ(width:100mm)は外側のdivが持ち、<table>自体は持たない", () => {
+    expect(serializer).toContain("width:100mm");
+    expect(react).toContain("width:100mm");
+    const serializerTableTag = serializer.match(/<table[^>]*>/)?.[0] ?? "";
+    const reactTableTag = react.match(/<table[^>]*>/)?.[0] ?? "";
+    expect(serializerTableTag).not.toContain("100mm");
+    expect(reactTableTag).not.toContain("100mm");
+  });
+
+  // F2: 編集画面の表はみ出し警告は描画実測(ResizeObserver)に基づく。測定対象を
+  // 一意に見つけるため、borderless の外枠 div にだけ data-sheet-table を持たせる。
+  it('両レンダラとも外枠divに data-sheet-table="t" を持つ(borderless)', () => {
+    expect(serializer).toContain('data-sheet-table="t"');
+    expect(react).toContain('data-sheet-table="t"');
   });
 });
