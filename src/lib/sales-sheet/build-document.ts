@@ -18,6 +18,7 @@ import { unitApplies, groupDigits } from "./sheet-rows";
 import {
   computeConsumerLayout,
   packPhotoCells,
+  CONSUMER_PHOTO_RADIUS_MM,
   MAIN_TABLE_PAD_MM,
   DETAIL_TABLE_PAD_MM,
   type Rect,
@@ -346,7 +347,7 @@ function photoAndFloorPlanElements(
 ): SalesSheetElement[] {
   const items: { id: string; src: string; alt: string; radiusMm?: number }[] = (photos ?? [])
     .slice(0, 3)
-    .map((ph, i) => ({ id: `photo-${i + 1}`, src: ph.fileUrl, alt: "物件写真", radiusMm: 2 }));
+    .map((ph, i) => ({ id: `photo-${i + 1}`, src: ph.fileUrl, alt: "物件写真", radiusMm: CONSUMER_PHOTO_RADIUS_MM }));
   if (floorPlanImage?.fileUrl) {
     items.splice(Math.min(1, items.length), 0, { id: "floor-plan", src: floorPlanImage.fileUrl, alt: "間取り図" });
   }

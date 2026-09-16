@@ -21,6 +21,7 @@ import {
   computeConsumerLayout,
   packPhotoCells,
   CONSUMER_PHOTO_ZONE,
+  CONSUMER_PHOTO_RADIUS_MM,
   CONSUMER_MAP_QR_SLOT,
   PHOTO_GAP_MM,
   type Rect,
@@ -760,7 +761,10 @@ export function isInitialPhotoGrid(document: SalesSheetDocument): boolean {
       // fit を contain に戻し、保存済みの設定を黙って消す(@codex #432 P2)。
       el.fit === "contain" &&
       el.focalX === undefined &&
-      el.focalY === undefined
+      el.focalY === undefined &&
+      // 角丸も見た目の設定(ElementPanel から変えられる)。作成時の既定は
+      // 写真=CONSUMER_PHOTO_RADIUS_MM・間取り図=無し。そこから外れていれば触った扱い。
+      (el.radiusMm === undefined || el.radiusMm === CONSUMER_PHOTO_RADIUS_MM)
     );
   });
 }

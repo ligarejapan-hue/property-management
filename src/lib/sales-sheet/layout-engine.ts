@@ -28,6 +28,12 @@ export interface Rect {
 
 /** 写真間の余白(mm)。テンプレの写真レイアウトと同じ。 */
 export const PHOTO_GAP_MM = 4;
+/**
+ * 作成時に写真へ付ける角丸(mm)。間取り図には付けない。
+ * build-document(付ける側)と editor-document の isInitialPhotoGrid(作成直後かの判定)が
+ * 同じ値を見るための唯一の出どころ。
+ */
+export const CONSUMER_PHOTO_RADIUS_MM = 2;
 /** セルの目標縦横比（3:2 横長）。行数の選択にのみ使う。 */
 const PHOTO_TARGET_ASPECT = 1.5;
 /** セル寸法の下限(mm)。editor の MIN_ELEMENT_SIZE_MM と同値（循環import回避のためローカル定義）。 */

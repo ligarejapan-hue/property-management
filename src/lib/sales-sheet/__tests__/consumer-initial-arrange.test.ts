@@ -18,7 +18,7 @@ import {
   A4_PORTRAIT,
   type SalesSheetPage,
 } from "../document-schema";
-import { CONSUMER_PHOTO_ZONE, packPhotoCells } from "../layout-engine";
+import { CONSUMER_PHOTO_ZONE, CONSUMER_PHOTO_RADIUS_MM, packPhotoCells } from "../layout-engine";
 
 const SRC = "/uploads/properties/a/1.jpg";
 const Z = CONSUMER_PHOTO_ZONE;
@@ -126,6 +126,31 @@ describe("isInitialPhotoGrid — 見せ方の変更も『触った』とみな�
   });
 
   it("作成直後(fit:contain・焦点位置なし)は true のまま", () => {
+    expect(isInitialPhotoGrid(makeState([textEl(), ...gridImages(3)]).document)).toBe(true);
+  });
+});
+
+// @codex #432 P2(2巡目): 角丸(radiusMm)も ElementPanel から変えられる見た目の設定。
+// 作成時の既定(写真=2mm・間取り図=無し)から外れていれば「触った」とみなす。
+describe("isInitialPhotoGrid — 角丸の変更も『触った』とみなす", () => {
+  it("角丸を作成時の既定から変えていれば false", () => {
+    const els = gridImages(3) as Record<string, unknown>[];
+    els[0] = { ...els[0], radiusMm: 5 };
+    expect(isInitialPhotoGrid(makeState([textEl(), ...els]).document)).toBe(false);
+  });
+
+  it("角丸を0(角のまま)にした場合も false", () => {
+    const els = gridImages(3) as Record<string, unknown>[];
+    els[1] = { ...els[1], radiusMm: 0 };
+    expect(isInitialPhotoGrid(makeState([textEl(), ...els]).document)).toBe(false);
+  });
+
+  it("作成時の既定(写真=2mm)はそのまま true", () => {
+    const els = (gridImages(3) as Record<string, unknown>[]).map((e) => ({ ...e, radiusMm: CONSUMER_PHOTO_RADIUS_MM }));
+    expect(isInitialPhotoGrid(makeState([textEl(), ...els]).document)).toBe(true);
+  });
+
+  it("間取り図のように角丸が無い要素も true(作成時の既定)", () => {
     expect(isInitialPhotoGrid(makeState([textEl(), ...gridImages(3)]).document)).toBe(true);
   });
 });
