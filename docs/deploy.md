@@ -596,9 +596,17 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 
 監査ログの action は2つ追加(社内プレビュー表示=`sale_dm_lp_preview_view`・電話タップ=`sale_dm_lp_phone_tap`)。公開LP表示は既存の `sale_dm_tracking_hit` をそのまま使う(この action は allowlist に載っていなかったので補完した=漏れの是正)。
 
-**⚠公開ロールアウトゲート`SALE_DM_LP_PUBLIC_ENABLED`が無いと、本番反映と同時に既存の印刷済みQRがそのまま公開LPになる**: 本番の追跡ホスト(`lp.ligarejapan.com`)は既にこのアプリへ着地する設定のため、このゲートが無ければ反映した瞬間に「送付済み・LP型に文章あり」の宛先へ以前印刷済みの `/t/<token>` が(HTTPS 切替前の平文HTTPのままでも)アプリ内ページとして出てしまう。そのためゲートの既定値は無効(未設定)で、下の切替手順の最後で明示的に有効化するまで `/t/` は従来どおり外部LPへ転送し続ける。
+**⚠公開ロールアウトゲート`SALE_DM_LP_PUBLIC_ENABLED`が無いと、本番反映と同時に既存の印刷済みQRがそのまま公開LPになる**: 公開LPのホストは `app.ligarejapan.com`(nginx の server ブロックで `/t/` `/u/` `/lp-assets/` だけを公開し、それ以外は 404。443 は公開アドレス限定で listen=tailscaled が 443 を保持しているため)で、このアプリに届く経路が既にあるため、このゲートが無ければ反映した瞬間に「送付済み・LP型に文章あり」の宛先へ以前印刷済みの `/t/<token>` が(HTTPS 切替前の平文HTTPのままでも)アプリ内ページとして出てしまう。そのためゲートの既定値は無効(未設定)で、下の切替手順の最後で明示的に有効化するまで `/t/` は従来どおり外部LPへ転送し続ける。
 
 **所有者に実際に見せるための切替手順(発注者作業を含む・この順で行う)**: (1) Xserver の「DNSレコード設定」で `lp.ligarejapan.com` の A レコードを1行追加しVPSへ向ける、(2) こちらで証明書を取得(`certbot`)、(3) nginx に server block を追加(`deploy/nginx/property-management.conf.example` の既存設定を参考に `lp.ligarejapan.com` 用の server を追加)、(4) 売却DM設定画面の「追跡URL(trackingBaseUrl)」をこの https の住所へ切り替える、(5) **`SALE_DM_LP_PUBLIC_ENABLED=1` を app.env に追加して `systemctl restart property-management`**(env は起動時読みのため restart 必須)、(6) 印刷し直す(切替後に印刷した手紙から新しいURL・アプリ内ページになる)。**(5)のスイッチを入れるまでは、(4)まで終えて trackingBaseUrl を https に切り替えていても `/t/` は従来どおり外部LPへ転送するだけ**(LP型に文章を保存した宛先でも同じ)。⚠切替後に印刷した手紙から新しいURLになる=既に配布済みの手紙のQRは古いURLのまま変わらない。
+
+#### 売却DM 公開LP「査定申込フォーム」(2026-09): migration
+
+`20260916100000_add_dm_inquiries` は additive のみ(表 `dm_inquiries` 新設・`dm_recipient_drafts` に `form_inquiry_count`(既定0)・`form_inquiry_first_at`(nullable)を追加・`sale_dm_config` に `privacy_text`(nullable)を追加)。バックフィル無し。**`dm_inquiries.draft_id → dm_recipient_drafts.id` の外部キーは `ON DELETE RESTRICT`**(申込の個人情報を宛先の削除に巻き込んで消さない=申込がある宛先は削除できない)、`handled_by_id → users.id` は `SET NULL`。rollback は表の DROP と3列の DROP で戻せる(enum の追加なし)。⚠一度でも申込が入ったあとに rollback する場合は、`dm_inquiries` の行(氏名・電話などの個人情報)を先に退避するか消去の判断を取ってから DROP する。
+
+**⚠公開の書き込み口(配信停止 `/u/`・電話タップ `/t/<token>/phone-tap`・査定申込 `/t/<token>/inquiry`)の送信元判定は Host ヘッダ基準**(`src/lib/public-origin.ts`)。nginx は `proxy_set_header Host $host;` を必ず渡す(外すとアプリが自分自身からの送信を「よそ」と判定して拒否する=配信停止ボタン・申込フォームが 403、電話タップが数えられない)。`Origin: null`(Referrer-Policy が厳しいページからのフォーム送信で実ブラウザが付ける)と Origin なしは拒否しない。公開ページの `Referrer-Policy` は `same-origin`。
+
+申込は `status=sent` の宛先だけ記録する(送付前は 409「プレビュー中」)。レート制限は端末IP 10/分・token 5/時・全体 120/時。申込者への自動返信は無く、担当者へのメール通知は次段(`notify_status` 列は次段のために作成済み・今は `pending` のまま)。
 
 #### 反響の記録リリース（migration `add_dm_reaction_columns`）: 旧 sale_dm 送付記録の照合
 
