@@ -241,6 +241,23 @@ describe("PATCH 対応状況", () => {
     await patch({ handleStatus: "open" });
     expect(db.dmInquiry.update.mock.calls[1][0].data).toMatchObject({ handleStatus: "open", handledAt: null, handledById: null });
   });
+  it("電話の表示権限が無ければ、更新結果の対応メモを返さない(contactHidden=true・@codex P1)", async () => {
+    guard.requireSaleDmWriteAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "masked", email: "masked" } });
+    db.dmInquiry.findUnique.mockResolvedValueOnce(FOUND).mockResolvedValueOnce(FOUND);
+    db.dmInquiry.update.mockResolvedValueOnce({ id: "i1", handleStatus: "in_progress", handledAt: new Date(), handleNote: "折り返し 090-1111-2222" });
+    const res = await patch({ handleStatus: "in_progress" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.inquiry).toMatchObject({ id: "i1", handleStatus: "in_progress", handleNote: null, contactHidden: true });
+    expect(JSON.stringify(body)).not.toContain("090-1111-2222");
+  });
+  it("電話を平文で見られる利用者には、更新結果の対応メモを返す(contactHidden=false)", async () => {
+    guard.requireSaleDmWriteAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "full", email: "masked" } });
+    db.dmInquiry.findUnique.mockResolvedValueOnce(FOUND).mockResolvedValueOnce(FOUND);
+    db.dmInquiry.update.mockResolvedValueOnce({ id: "i1", handleStatus: "done", handledAt: new Date(), handleNote: "折り返し済み" });
+    const body = await (await patch({ handleStatus: "done" })).json();
+    expect(body.inquiry).toMatchObject({ id: "i1", handleStatus: "done", handleNote: "折り返し済み", contactHidden: false });
+  });
   it("ロック後に担当が外れていたら 404 で更新しない", async () => {
     guard.requireSaleDmWriteAccess.mockResolvedValueOnce({ session: { id: "u1", role: "field_staff" }, permissions: [], ownerDisplayConfig: { phone: "full", email: "full" } });
     db.dmInquiry.findUnique

@@ -6,6 +6,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { requireSaleDmWriteAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
 import { HANDLE_STATUSES } from "@/lib/sale-dm-letter/inquiry-list";
+import { isPlainOwnerLevel } from "@/lib/dm-export";
 
 const bodySchema = z.object({
   handleStatus: z.enum(HANDLE_STATUSES),
@@ -16,7 +17,7 @@ const bodySchema = z.object({
 // 物件配下の書き込みなので親の物件行をロックしてから更新する(R50)。
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ inquiryId: string }> }) {
   try {
-    const { session } = await requireSaleDmWriteAccess();
+    const { session, ownerDisplayConfig } = await requireSaleDmWriteAccess();
     const { inquiryId } = await params;
     const body = bodySchema.parse(await parseJsonBody(request));
 
@@ -74,7 +75,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       targetId: inquiryId,
       detail: { handleStatus: body.handleStatus, updatedAt: now.toISOString() },
     });
-    return NextResponse.json({ inquiry: updated }, { headers: { "Cache-Control": "no-store" } });
+    // 対応メモは折り返し番号などを含みうるので、一覧(GET)と同じく電話を平文で見られる利用者にだけ返す(@codex P1)。
+    // 書き込み自体は伏せ対象の利用者にも許す(状態の対応は書き込み権限で足りる・既存メモの中身だけ見せない)。
+    const contactVisible = isPlainOwnerLevel(ownerDisplayConfig.phone);
+    return NextResponse.json(
+      { inquiry: { ...updated, handleNote: contactVisible ? updated.handleNote : null, contactHidden: !contactVisible } },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     return handleApiError(error);
   }

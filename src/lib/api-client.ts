@@ -401,9 +401,10 @@ export async function updateSaleDmInquiryStatus(
 ) {
   if (USE_MOCK) {
     await mockDelay();
-    return { inquiry: { id: inquiryId, handleStatus: body.handleStatus, handledAt: null, handleNote: body.handleNote ?? null } };
+    return { inquiry: { id: inquiryId, handleStatus: body.handleStatus, handledAt: null, handleNote: body.handleNote ?? null, contactHidden: false } };
   }
-  return apiFetch<{ inquiry: Pick<SaleDmInquiry, "id" | "handleStatus" | "handledAt" | "handleNote"> }>(
+  // handleNote は電話を平文で見られない利用者には null(contactHidden=true)で返る。
+  return apiFetch<{ inquiry: Pick<SaleDmInquiry, "id" | "handleStatus" | "handledAt" | "handleNote" | "contactHidden"> }>(
     `/api/properties/sale-dm/inquiries/${inquiryId}`,
     { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
   );
