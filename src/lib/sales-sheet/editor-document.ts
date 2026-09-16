@@ -868,6 +868,7 @@ export function autoBalanceLayout(state: EditorState): EditorState {
   const L = computeConsumerLayout({
     mainRowCount: rowsOf("overview"),
     detailRowCount: rowsOf("overview-detail-a") + rowsOf("overview-detail-b"),
+    detailPerColumn: Math.max(rowsOf("overview-detail-a"), rowsOf("overview-detail-b")),
   });
   const rects = new Map<string, Rect>([
     ["catch-band", L.catchBand],

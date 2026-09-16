@@ -70,4 +70,32 @@ describe("computeConsumerLayout", () => {
     expect(overlaps(L.mainTable, L.detailLeft)).toBe(false);
     expect(overlaps(L.detailLeft, L.salesPointsBand)).toBe(false);
   });
+
+  describe("detailPerColumn(左右の行数が偏っている場合)", () => {
+    it("detailPerColumnが与えられたら合計/2の派生値より優先される", () => {
+      const withPerColumn = computeConsumerLayout({ mainRowCount: 8, detailRowCount: 14, detailPerColumn: 13 });
+      const withoutPerColumn = computeConsumerLayout({ mainRowCount: 8, detailRowCount: 14 });
+      expect(withPerColumn.detailFontSizePt).toBeLessThan(withoutPerColumn.detailFontSizePt);
+      for (const r of [withPerColumn.mainTable, withPerColumn.detailLeft, withPerColumn.detailRight]) {
+        expect(inside(r)).toBe(true);
+      }
+    });
+    it("detailPerColumn省略時は今まで通り合計/2切上げと完全に一致する", () => {
+      for (const detailRowCount of [12, 26]) {
+        const withDefault = computeConsumerLayout({ mainRowCount: 8, detailRowCount });
+        const explicitOldFormula = computeConsumerLayout({
+          mainRowCount: 8, detailRowCount, detailPerColumn: Math.ceil(detailRowCount / 2),
+        });
+        expect(withDefault).toEqual(explicitOldFormula);
+      }
+    });
+    it("小数は切上げ・負値は0として扱う", () => {
+      const fractional = computeConsumerLayout({ mainRowCount: 8, detailRowCount: 14, detailPerColumn: 6.2 });
+      const roundedUp = computeConsumerLayout({ mainRowCount: 8, detailRowCount: 14, detailPerColumn: 7 });
+      expect(fractional).toEqual(roundedUp);
+      const negative = computeConsumerLayout({ mainRowCount: 8, detailRowCount: 14, detailPerColumn: -5 });
+      const zero = computeConsumerLayout({ mainRowCount: 8, detailRowCount: 14, detailPerColumn: 0 });
+      expect(negative).toEqual(zero);
+    });
+  });
 });

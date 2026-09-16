@@ -168,10 +168,21 @@ function chooseTableFonts(
   return { mainPt: MAIN_TABLE_FONT_PT.min, detailPt: DETAIL_TABLE_FONT_PT.min, overflow: true };
 }
 
-/** 消費者向けひな型の紙面(A4横)を、主要表・詳細表の行数から決定的に計算する純関数。 */
-export function computeConsumerLayout(input: { mainRowCount: number; detailRowCount: number }): ConsumerLayout {
+/**
+ * 消費者向けひな型の紙面(A4横)を、主要表・詳細表の行数から決定的に計算する純関数。
+ *
+ * `detailPerColumn` は左右の詳細表の行数が偏っている場合に、多い方の行数を渡す
+ * (編集画面では片方の表だけ行を足したり減らしたりできるため、`detailRowCount`
+ * の合計を単純に2等分すると、行数が多い側の表がはみ出す/枠を突き破ることがある)。
+ * 省略時は従来どおり `detailRowCount / 2` の切り上げを使う。
+ */
+export function computeConsumerLayout(input: {
+  mainRowCount: number;
+  detailRowCount: number;
+  detailPerColumn?: number;
+}): ConsumerLayout {
   const mainRows = Math.max(0, input.mainRowCount);
-  const perColumn = Math.ceil(Math.max(0, input.detailRowCount) / 2);
+  const perColumn = Math.max(0, Math.ceil(input.detailPerColumn ?? Math.max(0, input.detailRowCount) / 2));
   const fonts = chooseTableFonts(mainRows, perColumn);
 
   // 主要表の高さを枠内に留め、詳細表が右列の下限を超えないようにする。

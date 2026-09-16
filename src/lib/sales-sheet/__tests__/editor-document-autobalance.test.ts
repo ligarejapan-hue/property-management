@@ -42,6 +42,23 @@ describe("autoBalanceLayout(新ひな型)", () => {
     expect(byId(next, "overview-detail-a")).toMatchObject({ style: { fontSizePt: L.detailFontSizePt } });
     expect(byId(next, "overview")).toMatchObject({ style: { fontSizePt: L.mainTable.fontSizePt } });
   });
+  it("片方の表だけ行を足した(13行/1行)ときは多い方に合わせて文字を縮める", () => {
+    const s0 = stateOf();
+    const rowsA = Array.from({ length: 13 }, (_, i) => ({ label: `L${i}`, value: "v" }));
+    const rowsB = Array.from({ length: 1 }, (_, i) => ({ label: `R${i}`, value: "v" }));
+    const s: EditorState = { ...s0, document: { ...s0.document, elements: s0.document.elements.map((e) => {
+      if (e.type !== "table") return e;
+      if (e.id === "overview-detail-a") return { ...e, rows: rowsA };
+      if (e.id === "overview-detail-b") return { ...e, rows: rowsB };
+      return e;
+    }) } };
+    const next = autoBalanceLayout(s);
+    const expected = computeConsumerLayout({ mainRowCount: 8, detailRowCount: 14, detailPerColumn: 13 });
+    const oldSummedWay = computeConsumerLayout({ mainRowCount: 8, detailRowCount: 14 });
+    expect(byId(next, "overview-detail-a")).toMatchObject({ style: { fontSizePt: expected.detailFontSizePt } });
+    expect(byId(next, "overview-detail-b")).toMatchObject({ style: { fontSizePt: expected.detailFontSizePt } });
+    expect(expected.detailFontSizePt).toBeLessThan(oldSummedWay.detailFontSizePt);
+  });
   it("地図QRは枠へ戻し、利用者が足した文字と会社帯は動かさない", () => {
     const s0 = stateOf();
     const extra = { id: "my-note", type: "text" as const, x: 150, y: 150, w: 30, h: 8, z: 5, content: "メモ", style: {} };
