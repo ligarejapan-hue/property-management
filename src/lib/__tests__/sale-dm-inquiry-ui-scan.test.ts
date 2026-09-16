@@ -21,6 +21,10 @@ describe("申込の社内画面", () => {
     expect(panel).not.toContain("bg-blue-600");
     expect(panel).not.toContain("fixed inset-0");
   });
+  it("読み込み失敗時はスピナーを止めて再読み込みできる", () => {
+    expect(panel).toContain("items === null && !error");
+    expect(panel).toContain("再読み込み");
+  });
   it("キャンペーン画面に配置され、宛先一覧に申込バッジがある", () => {
     expect(read("src/app/(dashboard)/properties/sale-dm/[campaignId]/page.tsx")).toContain("<SaleDmInquiryList");
     expect(read("src/components/sale-dm/recipient-list.tsx")).toMatch(/formInquiryCount/);

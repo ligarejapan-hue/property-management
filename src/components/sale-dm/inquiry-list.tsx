@@ -61,10 +61,23 @@ export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: S
         <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">査定申込</h2>
         {items && <span className="text-xs text-gray-500">{items.length}件{openCount > 0 ? `(未対応 ${openCount}件)` : ""}</span>}
       </div>
-      {error && <p className="mb-2 text-xs text-red-600" role="alert">{error}</p>}
-      {items === null ? (
+      {error && (
+        <p className="mb-2 flex flex-wrap items-center gap-2 text-xs text-red-600" role="alert">
+          <span>{error}</span>
+          {items === null && (
+            <button
+              type="button"
+              onClick={() => void load()}
+              className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+            >
+              再読み込み
+            </button>
+          )}
+        </p>
+      )}
+      {items === null && !error ? (
         <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
-      ) : items.length === 0 ? (
+      ) : items === null ? null : items.length === 0 ? (
         <p className="py-4 text-center text-sm text-gray-500">申込はまだありません</p>
       ) : (
         <ul className="divide-y divide-gray-100 dark:divide-gray-800" data-pii-protected data-pii-surface="owner">
