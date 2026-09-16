@@ -90,11 +90,13 @@ export function renderUnsubscribeThrottledPage(): string {
   );
 }
 
-/** 公開ページ共通の応答ヘッダ(キャッシュ禁止・索引拒否・token を referrer に漏らさない)。 */
+/** 公開ページ共通の応答ヘッダ(キャッシュ禁止・索引拒否・token をよそのサイトの referrer に漏らさない)。
+ *  Referrer-Policy は same-origin(よそへは参照元を送らない)。no-referrer にすると、同じサイトへの
+ *  フォーム送信でもブラウザが Origin を null にし、送信元判定(public-origin.ts)が働かなくなる。 */
 export const PUBLIC_PAGE_HEADERS: Readonly<Record<string, string>> = {
   "Content-Type": "text/html; charset=utf-8",
   "Cache-Control": "no-store",
   "X-Robots-Tag": "noindex, nofollow",
-  "Referrer-Policy": "no-referrer",
+  "Referrer-Policy": "same-origin",
   "X-Content-Type-Options": "nosniff",
 };

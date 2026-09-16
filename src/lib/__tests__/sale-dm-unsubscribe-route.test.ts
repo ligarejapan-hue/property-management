@@ -139,7 +139,7 @@ describe("GET /u/[token](確認画面)", () => {
     expect(html).toContain("配信停止のお手続き");
     expect(html).toContain('method="post"');
     expect(res.headers.get("Cache-Control")).toBe("no-store");
-    expect(res.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(res.headers.get("Referrer-Policy")).toBe("same-origin");
     const client = prisma as unknown as {
       dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn> };
     };
@@ -301,6 +301,21 @@ describe("POST /u/[token](停止の記録)", () => {
       dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn> };
     };
     expect(client.dmRecipientDraft.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("前段(nginx)越しの本番: Origin=公開ホスト名・Host=公開ホスト名 なら 403 にしない(自分自身)", async () => {
+    const tk = freshValid();
+    const res = await POST(
+      req("POST", tk, { origin: "https://app.ligarejapan.com", host: "app.ligarejapan.com" }),
+      ctx(tk),
+    );
+    expect(res.status).not.toBe(403);
+  });
+
+  it("Origin: null(実ブラウザのフォーム送信)でも 403 にしない", async () => {
+    const tk = freshValid();
+    const res = await POST(req("POST", tk, { origin: "null" }), ctx(tk));
+    expect(res.status).not.toBe(403);
   });
 
   it("同一IPの連打は 429(per-IP 制限)", async () => {
