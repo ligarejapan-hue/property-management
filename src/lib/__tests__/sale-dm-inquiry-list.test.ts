@@ -1,0 +1,27 @@
+import { describe, it, expect } from "vitest";
+import { toInquiryListRows } from "@/lib/sale-dm-letter/inquiry-list";
+
+const row = (id: string, handleStatus: string, iso: string) => ({
+  id, draftId: `d-${id}`, submittedAt: new Date(iso), name: `名${id}`, phone: "090-0000-0000", email: "a@b.jp",
+  contactPref: "phone", contactTime: "夜", message: "要望", handleStatus, handledAt: null, handleNote: null,
+});
+
+describe("toInquiryListRows", () => {
+  it("未対応→対応中→対応済み、同じ状態の中は新しい順", () => {
+    const out = toInquiryListRows([
+      row("a", "done", "2026-09-20T00:00:00Z"),
+      row("b", "open", "2026-09-18T00:00:00Z"),
+      row("c", "in_progress", "2026-09-21T00:00:00Z"),
+      row("d", "open", "2026-09-19T00:00:00Z"),
+    ], true);
+    expect(out.map((r) => r.id)).toEqual(["d", "b", "c", "a"]);
+  });
+  it("連絡先を見る権限が無ければ、名前と日時と状態だけ(連絡先系は null・contactHidden=true)", () => {
+    const [r] = toInquiryListRows([row("a", "open", "2026-09-20T00:00:00Z")], false);
+    expect(r).toMatchObject({ name: "名a", phone: null, email: null, contactPref: null, contactTime: null, message: null, contactHidden: true });
+  });
+  it("権限があれば全項目・contactHidden=false", () => {
+    const [r] = toInquiryListRows([row("a", "open", "2026-09-20T00:00:00Z")], true);
+    expect(r).toMatchObject({ phone: "090-0000-0000", email: "a@b.jp", message: "要望", contactHidden: false });
+  });
+});

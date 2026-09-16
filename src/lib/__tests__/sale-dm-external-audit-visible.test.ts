@@ -49,6 +49,8 @@ const CASES: Array<{ action: string; detail: Record<string, unknown> }> = [
     detail: { campaignId: "c1", device: "sp", viewedAt: "2026-09-11T00:00:00.000Z" },
   },
   { action: "sale_dm_inquiry_submit", detail: { first: true, at: "2026-09-20T00:00:00.000Z" } },
+  { action: "sale_dm_inquiry_view", detail: { count: 3, viewedAt: "2026-09-20T00:00:00.000Z" } },
+  { action: "sale_dm_inquiry_status_update", detail: { handleStatus: "done", updatedAt: "2026-09-20T00:00:00.000Z" } },
 ];
 
 describe("外部AI方式の監査 detail は表示でも消えない", () => {
