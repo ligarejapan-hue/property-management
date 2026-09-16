@@ -127,7 +127,7 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
       overrides: { price: "39800", tax: "課税", taxAmount: "1200" },
     });
     expect(tableLabels(taxed)).toContain("うち消費税");
-    expect(tableRow(taxed, "うち消費税")).toBe("1200万円");
+    expect(tableRow(taxed, "うち消費税")).toBe("1,200万円");
 
     const untaxed = buildSaleBuildingDocument({ ...base, overrides: { price: "39800", tax: "不課税" } });
     expect(tableLabels(untaxed)).not.toContain("うち消費税");

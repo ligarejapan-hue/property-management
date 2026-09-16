@@ -17,7 +17,7 @@ it("number は単位付与、multiselect は併記、controlOnly は除外", () 
   };
   const rows = buildSheetRows(fields, values);
   expect(rows).toEqual([
-    { label: "価格", value: "6590万円" },
+    { label: "価格", value: "6,590万円" },
     { label: "うち消費税", value: "120万円" },
     { label: "用途地域", value: "第一種住居地域 / 近隣商業地域" },
     { label: "備考", value: "角部屋" },
@@ -40,7 +40,7 @@ it("すでに末尾が unit と一致する値は付け直さない(二重単位
     { key: "price", label: "価格", widget: "number", section: "価格", unit: "万円" },
   ];
   expect(buildSheetRows(priceFields, { price: "3,480万円" })[0].value).toBe("3,480万円");
-  expect(buildSheetRows(priceFields, { price: "3480" })[0].value).toBe("3480万円");
+  expect(buildSheetRows(priceFields, { price: "3480" })[0].value).toBe("3,480万円");
 });
 
 it("すでに末尾が unit と一致する値は付け直さない(二重単位防止・m)", () => {

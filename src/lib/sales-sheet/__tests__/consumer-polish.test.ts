@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSaleHouseDocument } from "../build-document";
+import { buildSaleHouseDocument, buildSaleBuildingDocument } from "../build-document";
 import { DETAIL_GROUPS } from "../main-detail-rows";
 import { formatValue } from "../sheet-rows";
 import type { SheetField } from "../field-model";
@@ -118,5 +118,61 @@ describe("② 主要項目の表を枠の下まで伸ばす", () => {
     const doc = buildSaleHouseDocument(base as never);
     expect(tableEl(doc, "overview-detail-a")?.style?.fillHeight).toBeUndefined();
     expect(tableEl(doc, "overview-detail-b")?.style?.fillHeight).toBeUndefined();
+  });
+});
+
+// 発注者追加指示(2026-09-16): 桁区切りは価格だけでなく、数量の欄すべてに入れる。
+describe("⑤-2 価格以外の数量にも桁区切りを入れる", () => {
+  const numField = (unit?: string): SheetField =>
+    ({ key: "x", label: "x", widget: "number", section: "価格", unit }) as SheetField;
+  const textField = (): SheetField =>
+    ({ key: "builtYearMonth", label: "築年月", widget: "text", section: "建物" }) as SheetField;
+
+  it("万円の欄(うち消費税・坪単価など)", () => {
+    expect(formatValue(numField("万円"), "1200")).toBe("1,200万円");
+  });
+
+  it("円/月の欄(管理費・修繕積立金・駐車場月額)", () => {
+    expect(formatValue(numField("円/月"), "15000")).toBe("15,000円/月");
+  });
+
+  it("面積(㎡)", () => {
+    expect(formatValue(numField("㎡"), "1234.56")).toBe("1,234.56㎡");
+  });
+
+  it("単位の無い数量の欄(土地面積・満室想定収入など)", () => {
+    expect(formatValue(numField(undefined), "1200")).toBe("1,200");
+  });
+
+  it("戸数", () => {
+    expect(formatValue(numField("戸"), "1200")).toBe("1,200戸");
+  });
+
+  it("4桁未満はそのまま(階・％など)", () => {
+    expect(formatValue(numField("階"), "3")).toBe("3階");
+    expect(formatValue(numField("％"), "200")).toBe("200％");
+  });
+
+  it("単位まで入力されていても数字部分に区切りを入れる", () => {
+    expect(formatValue(numField("万円"), "1200万円")).toBe("1,200万円");
+  });
+
+  it("既にカンマ入りなら触らない", () => {
+    expect(formatValue(numField("万円"), "1,200")).toBe("1,200万円");
+  });
+
+  it("文字の欄(築年月)は数字だけでも区切らない=「2,018年」にしない", () => {
+    expect(formatValue(textField(), "2018")).toBe("2018");
+  });
+
+  it("満室想定収入(ビルダー側で合成する欄)にも入る", () => {
+    const doc = buildSaleBuildingDocument({
+      ...base,
+      overrides: { expectedIncome: "9800" },
+    } as never);
+    const rows = (doc.elements as { type: string; rows?: { label: string; value: string }[] }[])
+      .filter((e) => e.type === "table")
+      .flatMap((e) => e.rows ?? []);
+    expect(rows.find((r) => r.label.startsWith("満室想定収入"))?.value).toBe("9,800万円");
   });
 });

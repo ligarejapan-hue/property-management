@@ -14,7 +14,7 @@ import {
 } from "./occupancy";
 import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS, BUILDING_FIELDS } from "./field-model";
 import type { SheetValues } from "./sheet-rows";
-import { unitApplies } from "./sheet-rows";
+import { unitApplies, groupDigits } from "./sheet-rows";
 import {
   computeConsumerLayout,
   packPhotoCells,
@@ -94,21 +94,10 @@ function fmtValueWithUnit(value?: string | null, unit?: string | null): string {
   const s = typeof value === "string" ? value.trim() : "";
   if (!s) return "";
   const u = typeof unit === "string" ? unit.trim() : "";
-  if (u && s.endsWith(u)) return s;
+  if (u && s.endsWith(u)) return `${groupDigits(s.slice(0, -u.length).trim())}${u}`;
   // 「なし」「無」等の数量でない値には単位を付けない（sheet-rows.formatValue と同じ判定）。
   if (u && !unitApplies(s)) return s;
-  return `${s}${u}`;
-}
-
-/**
- * 数字だけの値に3桁区切りのカンマを入れる（"18800"→"18,800"、"18800.5"→"18,800.5"）。
- * 既にカンマが入っている／数字以外を含む（"3,480"・"応談"）ものは触らない＝自由入力を
- * 壊さない。整数部のみ区切る。
- */
-function groupDigits(s: string): string {
-  const m = /^(\d+)(\.\d+)?$/.exec(s);
-  if (!m) return s;
-  return m[1].replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (m[2] ?? "");
+  return `${groupDigits(s)}${u}`;
 }
 
 /**
@@ -150,7 +139,7 @@ function fmtAnnualIncome(v?: string | null): string {
   const s = typeof v === "string" ? v.trim() : "";
   if (!s) return "";
   const stripped = s.replace(/(万円\s*\/\s*年|万円|\/\s*年)\s*$/, "").trim();
-  return stripped ? `${stripped}万円` : "";
+  return stripped ? `${groupDigits(stripped)}万円` : "";
 }
 
 /**

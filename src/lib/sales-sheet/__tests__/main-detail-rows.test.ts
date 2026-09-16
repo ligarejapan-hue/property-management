@@ -33,7 +33,7 @@ describe("splitMainDetailRows", () => {
   });
   it("区分: 管理費・修繕積立金と所在階・階数", () => {
     const { main } = splitMainDetailRows("mansion", MANSION_FIELDS, { managementFee: "12800", repairFee: "15600", floorNo: "5", totalFloors: "11" });
-    expect(main.find((r) => r.label === "管理費・修繕積立金")?.value).toBe("管理費 12800円/月 / 修繕 15600円/月");
+    expect(main.find((r) => r.label === "管理費・修繕積立金")?.value).toBe("管理費 12,800円/月 / 修繕 15,600円/月");
     expect(main.find((r) => r.label === "所在階・階数")?.value).toBe("5階 / 地上11階");
   });
   it("詳細: 主要・価格・物件種目・建物名称・会社の項目を出さず、空行を出さない", () => {
