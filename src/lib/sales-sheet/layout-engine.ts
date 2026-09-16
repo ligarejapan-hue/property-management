@@ -155,21 +155,61 @@ export function repackKeepingSizes(
   if (fits(1)) return place(1).cells;
 
   // 入りきる最大の縮小率を求める。⚠行の区切りは縮小率で変わるため「入りきるか」は縮小率に
-  // 対して単調ではない(二分探索だと必要以上に縮める・@codex #433 P2)。そこで行の区切りが
-  // 変わりうる境目を全部挙げる: 連続する写真 r..i が1行に並ぶ条件は
-  //   scale×(r..i の幅の合計) + 間隔×(i-r) ≤ W  → 境目 = (W - 間隔×(i-r)) / 幅の合計
-  // 境目どうしの間では行の区切りが変わらず、高さは縮小率に対して増える一方(単調)。
-  // 上の区間から順に「区間の下端のすぐ上で入るか」を見て、入る最初の区間の中で二分探索する。
-  // 下限(MIN_PHOTO_CELL_MM)で幅が止まる極小の縮小率に備えて 1/100 刻みも境目に混ぜる。
+  // 対して単調ではない(二分探索だと必要以上に縮める・@codex #433 P2)。
+  // 行の区切りが変わりうる境目を挙げ、境目どうしの間(区切りが変わらず高さが増える一方の区間)
+  // を上から順に調べて、入る最初の区間の中で二分探索する。
+  //
+  // 各写真の幅は縮小率 s に対して折れ線: s ≤ 5/w は 5mm で止まる/5/w < s ≤ W/w は w×s/
+  // それ以上は枠の幅 W で止まる(place() と同じ決まり)。境目は
+  //   (1) 幅が止まる/動き出す縮小率 5/w・W/w
+  //   (2) 折れ線の各区間の中で、連続する写真 r..i がちょうど1行に収まる縮小率
+  //       (幅の合計 = 傾き×s + 切片 → s = (W + WRAP_EPS - 間隔×(i-r) - 切片) / 傾き)
+  // さらに、将来この決まりが増えて境目を取りこぼしても誤差を 1/20000 に抑える安全網として
+  // 細かい刻みも境目に混ぜる(写真 100mm で 0.005mm=見た目に表れない)。
   const cuts = new Set<number>([1]);
-  for (let k = 1; k < 100; k++) cuts.add(k / 100);
-  for (let r = 0; r < n; r++) {
-    let sum = sizes[order[r]].w;
-    for (let i = r + 1; i < n; i++) {
-      sum += sizes[order[i]].w;
-      // 折り返し判定(x + w > W + WRAP_EPS)と同じ許容誤差で境目を出す。
-      const bp = (W + WRAP_EPS - gap * (i - r)) / sum;
-      if (bp > 0 && bp < 1) cuts.add(bp);
+  const GRID = 20000;
+  for (let k = 1; k < GRID; k++) cuts.add(k / GRID);
+  const clampCuts: number[] = [0, 1];
+  for (const i of order) {
+    for (const c of [MIN_PHOTO_CELL_MM / sizes[i].w, W / sizes[i].w]) {
+      if (c > 0 && c < 1) {
+        clampCuts.push(c);
+        cuts.add(c);
+      }
+    }
+  }
+  clampCuts.sort((x, y) => x - y);
+  for (let c = 0; c < clampCuts.length - 1; c++) {
+    const a = clampCuts[c];
+    const b = clampCuts[c + 1];
+    if (b - a <= 0) continue;
+    const mid = (a + b) / 2;
+    // この区間での各写真の幅 = slope×s + intercept
+    const slope: number[] = [];
+    const intercept: number[] = [];
+    for (const i of order) {
+      const wm = sizes[i].w * mid;
+      if (wm < MIN_PHOTO_CELL_MM) {
+        slope.push(0);
+        intercept.push(MIN_PHOTO_CELL_MM);
+      } else if (wm > W) {
+        slope.push(0);
+        intercept.push(W);
+      } else {
+        slope.push(sizes[i].w);
+        intercept.push(0);
+      }
+    }
+    for (let r = 0; r < n; r++) {
+      let A = slope[r];
+      let B = intercept[r];
+      for (let i = r + 1; i < n; i++) {
+        A += slope[i];
+        B += intercept[i];
+        if (A <= 0) continue;
+        const bp = (W + WRAP_EPS - gap * (i - r) - B) / A;
+        if (bp > a && bp < b) cuts.add(bp);
+      }
     }
   }
   const sorted = [...cuts].sort((x, y) => y - x);
@@ -183,14 +223,14 @@ export function repackKeepingSizes(
     const justAboveLo = lo + Math.min((hi - lo) / 2, 1e-7);
     if (!fits(justAboveLo)) continue;
     if (fits(hi)) return place(hi).cells;
-    let a = justAboveLo;
-    let b = hi;
+    let x0 = justAboveLo;
+    let x1 = hi;
     for (let iter = 0; iter < 60; iter++) {
-      const mid = (a + b) / 2;
-      if (fits(mid)) a = mid;
-      else b = mid;
+      const m = (x0 + x1) / 2;
+      if (fits(m)) x0 = m;
+      else x1 = m;
     }
-    return place(a).cells;
+    return place(x0).cells;
   }
   // どこまで縮めても入らない(写真の下限の大きさ×枚数が枠を超える)。最小で返す。
   return place(sorted[sorted.length - 2]).cells;
