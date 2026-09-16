@@ -30,7 +30,8 @@ describe("parseInquiryForm", () => {
     for (const phone of ["090-1234-567a", "0".repeat(21), "03-1234-567", "(03)1234-5678"]) {
       expect(parseInquiryForm(form({ ...OK, phone }))).toEqual({ kind: "invalid", errors: ["phone_invalid"] });
     }
-    expect(parseInquiryForm(form({ ...OK, phone: "+81 90 1234 5678" }))).toMatchObject({ kind: "ok" });
+    expect(parseInquiryForm(form({ ...OK, phone: "+81 90 1234 5678" }))).toMatchObject({ kind: "ok", value: { phone: "+819012345678" } });
+    expect(parseInquiryForm(form({ ...OK, phone: "090　1234　5678" }))).toMatchObject({ kind: "ok", value: { phone: "09012345678" } });
   });
   it("メール: 形式不正・254字超は不正。空は null", () => {
     expect(parseInquiryForm(form({ ...OK, email: "not-mail" }))).toEqual({ kind: "invalid", errors: ["email_invalid"] });

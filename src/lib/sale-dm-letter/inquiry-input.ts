@@ -59,7 +59,8 @@ function multi(v: string | null): string {
 
 function normalizePhone(v: string): string {
   // NFKC 後に残る長音・マイナス類をハイフンへ(全角入力の「ー」「−」)。
-  return v.replace(/[ー−–—―]/g, "-");
+  // 空白(全角スペースは NFKC で半角化済み)は除去し、保存値を数字/ハイフン/+ のみにする。
+  return v.replace(/[ー−–—―]/g, "-").replace(/\s+/g, "");
 }
 
 export function parseInquiryForm(get: (key: string) => string | null): InquiryParse {
@@ -75,7 +76,7 @@ export function parseInquiryForm(get: (key: string) => string | null): InquiryPa
   if (phone === "") errors.push("phone_required");
   else if (
     phone.length > INQUIRY_LIMITS.phone ||
-    !/^[0-9+\- ]+$/.test(phone) ||
+    !/^[0-9+\-]+$/.test(phone) ||
     phone.replace(/[^0-9]/g, "").length < 10
   ) errors.push("phone_invalid");
 
