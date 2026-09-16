@@ -104,3 +104,28 @@ describe("isInitialPhotoGrid — 作成直後のままか", () => {
     expect(isInitialPhotoGrid(makeState([textEl(), ...els]).document)).toBe(true);
   });
 });
+
+// @codex #432 P2: 位置と大きさしか見ていなかったため、「枠はそのままで見せ方だけ
+// 変えた」図面(contain→cover に切替、焦点位置を指定)を作成直後と誤判定し、開いた
+// だけでその設定を消していた。見せ方も門番に含める。
+describe("isInitialPhotoGrid — 見せ方の変更も『触った』とみなす", () => {
+  it("1枚でも fit:cover にしていれば false", () => {
+    const els = gridImages(3) as Record<string, unknown>[];
+    els[0] = { ...els[0], fit: "cover" };
+    expect(isInitialPhotoGrid(makeState([textEl(), ...els]).document)).toBe(false);
+  });
+
+  it("焦点位置(中心のずらし)が指定されていれば false", () => {
+    const els = gridImages(3) as Record<string, unknown>[];
+    els[1] = { ...els[1], focalX: 30 };
+    expect(isInitialPhotoGrid(makeState([textEl(), ...els]).document)).toBe(false);
+
+    const els2 = gridImages(3) as Record<string, unknown>[];
+    els2[2] = { ...els2[2], focalY: 80 };
+    expect(isInitialPhotoGrid(makeState([textEl(), ...els2]).document)).toBe(false);
+  });
+
+  it("作成直後(fit:contain・焦点位置なし)は true のまま", () => {
+    expect(isInitialPhotoGrid(makeState([textEl(), ...gridImages(3)]).document)).toBe(true);
+  });
+});

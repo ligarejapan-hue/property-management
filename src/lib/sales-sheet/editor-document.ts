@@ -754,7 +754,13 @@ export function isInitialPhotoGrid(document: SalesSheetDocument): boolean {
       nearlyEqual(el.x, zone.x + c.x) &&
       nearlyEqual(el.y, zone.y + c.y) &&
       nearlyEqual(el.w, c.w) &&
-      nearlyEqual(el.h, c.h)
+      nearlyEqual(el.h, c.h) &&
+      // 枠は動かさずに見せ方だけ変えた図面(contain→cover・焦点位置の指定)も「触った」
+      // とみなす。位置と大きさだけで判定すると、開いただけで autoArrangePhotos が
+      // fit を contain に戻し、保存済みの設定を黙って消す(@codex #432 P2)。
+      el.fit === "contain" &&
+      el.focalX === undefined &&
+      el.focalY === undefined
     );
   });
 }
