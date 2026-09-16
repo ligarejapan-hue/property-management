@@ -17,6 +17,10 @@ describe("申込の社内画面", () => {
     expect(panel).toContain("contactHidden");
     expect(panel).toMatch(/表示する権限がありません/);
   });
+  it("メールは電話とは別レベルで伏せられ、伏せたときの案内がある(@codex P1)", () => {
+    expect(panel).toContain("emailHidden");
+    expect(panel).toMatch(/表示する権限がありません/);
+  });
   it("走査規約: bg-blue-600・手書きモーダルを使わない", () => {
     expect(panel).not.toContain("bg-blue-600");
     expect(panel).not.toContain("fixed inset-0");

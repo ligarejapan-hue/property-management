@@ -48,8 +48,8 @@ vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRow: vi.fn() }));
 const { requireSaleDmAccess, requireSaleDmWriteAccess } = vi.hoisted(() => {
   const session = { id: "u1", role: "admin" };
   return {
-    requireSaleDmAccess: vi.fn(async () => ({ session, permissions: [], ownerDisplayConfig: { phone: "full" } })),
-    requireSaleDmWriteAccess: vi.fn(async () => ({ session, permissions: [], ownerDisplayConfig: { phone: "full" } })),
+    requireSaleDmAccess: vi.fn(async () => ({ session, permissions: [], ownerDisplayConfig: { phone: "full", email: "full" } })),
+    requireSaleDmWriteAccess: vi.fn(async () => ({ session, permissions: [], ownerDisplayConfig: { phone: "full", email: "full" } })),
   };
 });
 vi.mock("@/lib/sale-dm-letter/route-guard", () => ({
@@ -112,14 +112,21 @@ describe("GET 申込一覧", () => {
     expect(Object.keys(audit.detail).sort()).toEqual(["count", "viewedAt"]);
   });
   it("電話の表示権限が無ければ連絡先を伏せる", async () => {
-    guard.requireSaleDmAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "masked" } });
+    guard.requireSaleDmAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "masked", email: "masked" } });
     db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
     db.dmInquiry.findMany.mockResolvedValueOnce([INQ]);
     const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
-    expect(body.inquiries[0]).toMatchObject({ phone: null, contactHidden: true });
+    expect(body.inquiries[0]).toMatchObject({ phone: null, contactHidden: true, emailHidden: true });
+  });
+  it("電話は見えるがメール(owner_email)の表示権限が無ければメールだけ伏せる(@codex P1)", async () => {
+    guard.requireSaleDmAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "full", email: "masked" } });
+    db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
+    db.dmInquiry.findMany.mockResolvedValueOnce([{ ...INQ, email: "a@b.jp" }]);
+    const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
+    expect(body.inquiries[0]).toMatchObject({ phone: "090", contactHidden: false, email: null, emailHidden: true });
   });
   it("field_staff は担当外の物件の申込を返さない", async () => {
-    guard.requireSaleDmAccess.mockResolvedValueOnce({ session: { id: "u1", role: "field_staff" }, permissions: [], ownerDisplayConfig: { phone: "full" } });
+    guard.requireSaleDmAccess.mockResolvedValueOnce({ session: { id: "u1", role: "field_staff" }, permissions: [], ownerDisplayConfig: { phone: "full", email: "full" } });
     db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
     db.dmInquiry.findMany.mockResolvedValueOnce([{ ...INQ, draft: { property: { createdBy: "x", assignedTo: "y" } } }]);
     const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
@@ -144,7 +151,7 @@ describe("GET 申込一覧", () => {
     expect(body.inquiries).toHaveLength(100);
   });
   it("field_staff は where.draft.property.OR に本人条件を積む(SQL側の絞り込み)", async () => {
-    guard.requireSaleDmAccess.mockResolvedValueOnce({ session: { id: "u1", role: "field_staff" }, permissions: [], ownerDisplayConfig: { phone: "full" } });
+    guard.requireSaleDmAccess.mockResolvedValueOnce({ session: { id: "u1", role: "field_staff" }, permissions: [], ownerDisplayConfig: { phone: "full", email: "full" } });
     db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
     db.dmInquiry.findMany.mockResolvedValueOnce([]);
     await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) });
@@ -189,7 +196,7 @@ describe("PATCH 対応状況", () => {
     expect(db.dmInquiry.update.mock.calls[1][0].data).toMatchObject({ handleStatus: "open", handledAt: null, handledById: null });
   });
   it("ロック後に担当が外れていたら 404 で更新しない", async () => {
-    guard.requireSaleDmWriteAccess.mockResolvedValueOnce({ session: { id: "u1", role: "field_staff" }, permissions: [], ownerDisplayConfig: { phone: "full" } });
+    guard.requireSaleDmWriteAccess.mockResolvedValueOnce({ session: { id: "u1", role: "field_staff" }, permissions: [], ownerDisplayConfig: { phone: "full", email: "full" } });
     db.dmInquiry.findUnique
       .mockResolvedValueOnce({ id: "i1", draft: { propertyId: "p1", campaign: { createdBy: "u1" }, property: { createdBy: "x", assignedTo: "u1" } } })
       .mockResolvedValueOnce({ draft: { propertyId: "p1", campaign: { createdBy: "u1" }, property: { createdBy: "x", assignedTo: "other" } } });

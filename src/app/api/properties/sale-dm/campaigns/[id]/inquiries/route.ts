@@ -17,7 +17,8 @@ function parseOffset(req: NextRequest): number {
 }
 
 // 社内の申込一覧(設計 §2.5・§2.7)。作成者本人のキャンペーンのみ・field_staff は担当範囲のみ。
-// 連絡先(電話・メール・要望など)は所有者の電話を平文で見られる利用者にだけ返す。
+// 連絡先(電話・要望など)は所有者の電話を平文で見られる利用者にだけ返す。
+// メールは所有者の owner_email を平文で見られる利用者にだけ返す(電話とは別レベル・@codex P1)。
 // ページングはオフセット方式・固定ページサイズ。並べ替えは DB 側で行いページをまたいでも一貫させる
 // (@codex P2: 無制限一覧は件数が増えると重い・応答も大きくなる)。
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -71,7 +72,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       handledAt: r.handledAt,
       handleNote: r.handleNote,
     }));
-    const inquiries = toInquiryListRows(visible, isPlainOwnerLevel(ownerDisplayConfig.phone));
+    const inquiries = toInquiryListRows(visible, {
+      contact: isPlainOwnerLevel(ownerDisplayConfig.phone),
+      email: isPlainOwnerLevel(ownerDisplayConfig.email),
+    });
     await writeAuditLog({
       userId: session.id,
       action: "sale_dm_inquiry_view",

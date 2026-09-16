@@ -131,7 +131,11 @@ export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: S
               ) : (
                 <dl className="mt-1 grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-0.5 text-xs text-gray-700 dark:text-gray-300">
                   <dt className="text-gray-500">電話</dt><dd>{i.phone}</dd>
-                  {i.email && (<><dt className="text-gray-500">メール</dt><dd className="break-all">{i.email}</dd></>)}
+                  {i.emailHidden ? (
+                    <><dt className="text-gray-500">メール</dt><dd className="text-gray-400">表示する権限がありません</dd></>
+                  ) : (
+                    i.email && (<><dt className="text-gray-500">メール</dt><dd className="break-all">{i.email}</dd></>)
+                  )}
                   {i.contactPref && (<><dt className="text-gray-500">希望の連絡方法</dt><dd>{PREF_LABEL[i.contactPref] ?? i.contactPref}</dd></>)}
                   {i.contactTime && (<><dt className="text-gray-500">時間帯</dt><dd>{i.contactTime}</dd></>)}
                   {i.message && (<><dt className="text-gray-500">要望</dt><dd className="whitespace-pre-wrap">{i.message}</dd></>)}

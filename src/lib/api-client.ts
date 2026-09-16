@@ -380,6 +380,7 @@ export interface SaleDmInquiry {
   handledAt: string | null;
   handleNote: string | null;
   contactHidden: boolean;
+  emailHidden: boolean;
 }
 
 export async function fetchSaleDmInquiries(campaignId: string, offset = 0) {
