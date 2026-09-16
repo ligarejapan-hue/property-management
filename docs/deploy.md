@@ -598,7 +598,21 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 
 **⚠公開ロールアウトゲート`SALE_DM_LP_PUBLIC_ENABLED`が無いと、本番反映と同時に既存の印刷済みQRがそのまま公開LPになる**: 公開LPのホストは `app.ligarejapan.com`(nginx の server ブロックで `/t/` `/u/` `/lp-assets/` だけを公開し、それ以外は 404。443 は公開アドレス限定で listen=tailscaled が 443 を保持しているため)で、このアプリに届く経路が既にあるため、このゲートが無ければ反映した瞬間に「送付済み・LP型に文章あり」の宛先へ以前印刷済みの `/t/<token>` が(HTTPS 切替前の平文HTTPのままでも)アプリ内ページとして出てしまう。そのためゲートの既定値は無効(未設定)で、下の切替手順の最後で明示的に有効化するまで `/t/` は従来どおり外部LPへ転送し続ける。
 
-**所有者に実際に見せるための切替手順(発注者作業を含む・この順で行う)**: (1) Xserver の「DNSレコード設定」で `lp.ligarejapan.com` の A レコードを1行追加しVPSへ向ける、(2) こちらで証明書を取得(`certbot`)、(3) nginx に server block を追加(`deploy/nginx/property-management.conf.example` の既存設定を参考に `lp.ligarejapan.com` 用の server を追加)、(4) 売却DM設定画面の「追跡URL(trackingBaseUrl)」をこの https の住所へ切り替える、(5) **`SALE_DM_LP_PUBLIC_ENABLED=1` を app.env に追加して `systemctl restart property-management`**(env は起動時読みのため restart 必須)、(6) 印刷し直す(切替後に印刷した手紙から新しいURL・アプリ内ページになる)。**(5)のスイッチを入れるまでは、(4)まで終えて trackingBaseUrl を https に切り替えていても `/t/` は従来どおり外部LPへ転送するだけ**(LP型に文章を保存した宛先でも同じ)。⚠切替後に印刷した手紙から新しいURLになる=既に配布済みの手紙のQRは古いURLのまま変わらない。
+**所有者に実際に見せるための切替: 2026-09-16 切替完了(公開ホスト=`app.ligarejapan.com`)**。やり直し・拡張するときの記録(本番で確認済みの事実のみ):
+
+1. DNS: `ligarejapan.com` のネームサーバーを Xserver(`ns1`〜`ns5.xserver.jp`)から お名前.com(`01`〜`04.dnsv.jp`)へ移した(ドメインは発注者のお名前.com アカウントで登録されており、Xserver の DNS は発注者が編集できないため)。移す前に既存レコードを全てお名前.com のゾーン取込で写し、Xserver の応答と照合済み(apex A `183.181.89.111`・ワイルドカード `*` A `183.181.89.111`・MX `0 ligarejapan.com`・SPF TXT・`lp` A と `www.lp` A `103.169.142.0`・`lp` TXT `canva-domain-verify`=Canva サイト)。会社サイト・メール・Canva は止まっていない。
+2. 公開LPのホスト: お名前.com に A レコード `app` → `133.117.72.225` を追加。
+3. 証明書: `certbot --nginx -d app.ligarejapan.com`(Let's Encrypt・自動更新。期限の通知は info@ligarejapan.com)。
+4. nginx: `/etc/nginx/sites-available/app.ligarejapan.com`(有効化済み)。`/t/` `/u/` `/lp-assets/` だけを `proxy_set_header Host $host;` 付きで中継し、それ以外は 404(ログイン画面・社内API はこのホストに出さない)。**公開の口を新しく足したら、ここにも location を足す**。
+5. 設定: `sale_dm_config.tracking_base_url` = `https://app.ligarejapan.com`、予備の `lp_url` = `https://ligarejapan.com/`(会社ホームページ=アプリ内LPの文章が無い手紙はここへ転送)。
+6. `SALE_DM_LP_PUBLIC_ENABLED=1` を `/etc/property-management/app.env` に追加して restart 済み。
+7. 切替前に印刷した手紙のQRは古いURLのまま(切替時点の送付済みは0通)。
+
+⚠**nginx の 443 の罠**: certbot は `listen 443 ssl;`(全アドレス)を書くが、このサーバーでは tailscaled が tailnet 側アドレスで 443 を持っているため**黙って bind に失敗する**。`nginx -t` は通り reload も「成功」するのに、nginx は古い設定のまま動き続ける。エラーは `/var/log/nginx/error.log` の `bind() to 0.0.0.0:443 failed (98: Address already in use)` と `ss -tlnp | grep :443` でしか見えない。直し方=公開アドレスだけで listen する: `listen 133.117.72.225:443 ssl;` と `listen [2400:8500:2002:3371:133:117:72:225]:443 ssl;`。**今後ほかのホストで `certbot --nginx` を使うときも同じ修正が要る**。
+
+⚠**`lp.ligarejapan.com` は Canva のサイト(公開中)=触らない**(A/TXT を変えない・このアプリへ向けない)。
+
+外から確かめるとき、DNS のキャッシュが古い間は `curl --resolve app.ligarejapan.com:443:133.117.72.225 https://app.ligarejapan.com/...` を使う(手元のリゾルバが古いワイルドカード `183.181.89.111`=Xserver を返すことがあり、その 404・証明書エラーはアプリではない)。
 
 #### 売却DM 公開LP「査定申込フォーム」(2026-09): migration
 
