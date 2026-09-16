@@ -35,4 +35,9 @@ describe("申込の社内画面", () => {
     expect(route).toContain("formInquiryFirstAt: r.formInquiryFirstAt");
     expect(route).not.toMatch(/trackingToken:\s*r\./);
   });
+  it("一覧はオフセットページングで「さらに表示」できる(合計は名乗らない)", () => {
+    expect(panel).toContain("さらに表示");
+    expect(panel).toContain("nextOffset");
+    expect(read("src/lib/api-client.ts")).toContain("?offset=");
+  });
 });

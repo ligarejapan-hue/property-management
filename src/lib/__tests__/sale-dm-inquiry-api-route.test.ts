@@ -125,6 +125,38 @@ describe("GET 申込一覧", () => {
     const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
     expect(body.inquiries).toEqual([]);
   });
+  it("skip/take/orderBy をオフセット方式で組み立てる", async () => {
+    db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
+    db.dmInquiry.findMany.mockResolvedValueOnce([]);
+    await GET(new Request("http://x/api?offset=100") as never, { params: Promise.resolve({ id: "c1" }) });
+    const args = db.dmInquiry.findMany.mock.calls[0][0];
+    expect(args.skip).toBe(100);
+    expect(args.take).toBe(101);
+    expect(args.orderBy).toEqual([{ handleStatus: "desc" }, { submittedAt: "desc" }, { id: "desc" }]);
+  });
+  it("101件返ると hasMore=true・nextOffset=100・100件だけ返す", async () => {
+    db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
+    const rows = Array.from({ length: 101 }, (_, i) => ({ ...INQ, id: `i${i}` }));
+    db.dmInquiry.findMany.mockResolvedValueOnce(rows);
+    const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
+    expect(body.hasMore).toBe(true);
+    expect(body.nextOffset).toBe(100);
+    expect(body.inquiries).toHaveLength(100);
+  });
+  it("field_staff は where.draft.property.OR に本人条件を積む(SQL側の絞り込み)", async () => {
+    guard.requireSaleDmAccess.mockResolvedValueOnce({ session: { id: "u1", role: "field_staff" }, permissions: [], ownerDisplayConfig: { phone: "full" } });
+    db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
+    db.dmInquiry.findMany.mockResolvedValueOnce([]);
+    await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) });
+    const args = db.dmInquiry.findMany.mock.calls[0][0];
+    expect(args.where.draft.property.OR).toEqual([{ createdBy: "u1" }, { assignedTo: "u1" }]);
+  });
+  it.each(["-5", "abc"])("不正な offset=%s は 0 扱い", async (offset) => {
+    db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
+    db.dmInquiry.findMany.mockResolvedValueOnce([]);
+    await GET(new Request(`http://x/api?offset=${offset}`) as never, { params: Promise.resolve({ id: "c1" }) });
+    expect(db.dmInquiry.findMany.mock.calls[0][0].skip).toBe(0);
+  });
 });
 
 describe("PATCH 対応状況", () => {

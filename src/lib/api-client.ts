@@ -382,12 +382,14 @@ export interface SaleDmInquiry {
   contactHidden: boolean;
 }
 
-export async function fetchSaleDmInquiries(campaignId: string) {
+export async function fetchSaleDmInquiries(campaignId: string, offset = 0) {
   if (USE_MOCK) {
     await mockDelay();
-    return { inquiries: [] as SaleDmInquiry[] };
+    return { inquiries: [] as SaleDmInquiry[], hasMore: false, nextOffset: null as number | null };
   }
-  return apiFetch<{ inquiries: SaleDmInquiry[] }>(`/api/properties/sale-dm/campaigns/${campaignId}/inquiries`);
+  return apiFetch<{ inquiries: SaleDmInquiry[]; hasMore: boolean; nextOffset: number | null }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/inquiries?offset=${offset}`,
+  );
 }
 
 export async function updateSaleDmInquiryStatus(

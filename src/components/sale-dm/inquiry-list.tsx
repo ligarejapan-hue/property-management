@@ -20,11 +20,16 @@ export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: S
   const [items, setItems] = useState<SaleDmInquiry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
 
+  // 先頭ページを取得して置き換える(初回・reloadKey 変化・対応状況の変更後)。
+  // 対応状況が変わると行がページをまたいで移動しうるので、常に先頭ページへ戻す。
   const load = useCallback(async () => {
     try {
       const res = await fetchSaleDmInquiries(campaign.id);
       setItems(res.inquiries);
+      setNextOffset(res.nextOffset);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "申込を読み込めませんでした");
@@ -34,6 +39,25 @@ export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: S
   useEffect(() => {
     void load();
   }, [load, reloadKey]);
+
+  const loadMore = async () => {
+    if (nextOffset === null) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchSaleDmInquiries(campaign.id, nextOffset);
+      setItems((prev) => {
+        const existingIds = new Set((prev ?? []).map((i) => i.id));
+        const added = res.inquiries.filter((i) => !existingIds.has(i.id));
+        return [...(prev ?? []), ...added];
+      });
+      setNextOffset(res.nextOffset);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "申込を読み込めませんでした");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const recipientName = (draftId: string) => {
     const r = campaign.recipients.find((x) => x.id === draftId);
@@ -59,7 +83,12 @@ export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: S
       <div className="mb-3 flex items-center gap-2">
         <Inbox className="h-4 w-4 text-gray-500" />
         <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">査定申込</h2>
-        {items && <span className="text-xs text-gray-500">{items.length}件{openCount > 0 ? `(未対応 ${openCount}件)` : ""}</span>}
+        {items && (
+          <span className="text-xs text-gray-500">
+            {items.length}件表示{nextOffset !== null ? "(続きあり)" : ""}
+            {openCount > 0 ? `・表示中の未対応 ${openCount}件` : ""}
+          </span>
+        )}
       </div>
       {error && (
         <p className="mb-2 flex flex-wrap items-center gap-2 text-xs text-red-600" role="alert">
@@ -111,6 +140,18 @@ export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: S
             </li>
           ))}
         </ul>
+      )}
+      {nextOffset !== null && (
+        <div className="mt-3 flex justify-center">
+          <button
+            type="button"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+            className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            さらに表示
+          </button>
+        </div>
       )}
     </div>
   );
