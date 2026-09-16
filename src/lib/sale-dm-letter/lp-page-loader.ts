@@ -3,7 +3,7 @@
  * select に氏名・宛先住所・所有者を**含めない**(テストで固定)。ページの材料は LP型の文章/枠/写真の publicId と
  * 物件の所在(町名まで)・種別・会社案内・配信停止URL だけ。
  */
-import { buildLpRenderInput } from "./lp-render-input";
+import { buildLpRenderInput, hasRenderableLpVariant } from "./lp-render-input";
 import { renderLpPage } from "./lp-page";
 import { loadSaleDmPublicPageConfig } from "./config-store";
 import { buildUnsubscribeToken, buildUnsubscribeUrl, deriveUnsubscribeKey } from "./unsubscribe-token";
@@ -67,12 +67,15 @@ export async function loadLpPageData(client: LpPageClientLike, token: string): P
   const row = await client.dmRecipientDraft.findUnique({ where: { trackingToken: token }, select: SELECT });
   const v = row?.lpVariant;
   // headline/bodyText は空白のみも未保存扱い(見た目上は空文と同じ=ページを出さない)。
-  if (!row || !v || !v.headline?.trim() || !v.bodyText || v.bodyText.trim().length === 0) return { kind: "none" };
+  // この判定は hasRenderableLpVariant(lp-render-input.ts)に一本化(POST /inquiry 側と規則を揃える)。
+  if (!row || !hasRenderableLpVariant(v)) return { kind: "none" };
   const trackingBaseUrl = cfg.trackingBaseUrl ?? null;
   const mode = row.status === "sent" ? "live" : "preview";
   const input = buildLpRenderInput(
     {
-      variant: { headline: v.headline, lead: v.lead, bodyText: v.bodyText, faqJson: v.faqJson },
+      // hasRenderableLpVariant により headline/bodyText は空白以外の文字を持つ非空文字列だが、
+      // 型は string | null のまま(narrow は v 自体の null 除去まで)なので ?? "" は型合わせのみ(未到達)。
+      variant: { headline: v.headline ?? "", lead: v.lead, bodyText: v.bodyText ?? "", faqJson: v.faqJson },
       media: v.media,
       property: row.property,
       company: { senderName: cfg.senderName, senderContact: cfg.senderContact },

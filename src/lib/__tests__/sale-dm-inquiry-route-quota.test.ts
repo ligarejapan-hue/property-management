@@ -5,7 +5,11 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 vi.mock("next/server", () => ({ NextResponse: Response }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
-  default: { dmRecipientDraft: { findUnique: vi.fn(async () => ({ id: "d1" })) } },
+  default: {
+    dmRecipientDraft: {
+      findUnique: vi.fn(async () => ({ id: "d1", lpVariant: { headline: "見出し", bodyText: "本文" } })),
+    },
+  },
 }));
 vi.mock("@/lib/sale-dm-letter/inquiry-record", () => ({
   recordInquiry: vi.fn(async () => ({ kind: "recorded", inquiryId: "inq1", draftId: "d1", first: true })),

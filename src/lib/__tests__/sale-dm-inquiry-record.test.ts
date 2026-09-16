@@ -10,12 +10,22 @@ import { syncSaleDmReaction } from "@/lib/dm-reaction/sync";
 const INPUT = { name: "山田", phone: "090-1234-5678", email: null, contactPref: null, contactTime: null, message: "相談したい" };
 const NOW = new Date("2026-09-20T01:00:00.000Z");
 
-function makeClient(draft: { id: string; propertyId: string; status: string } | null, lockedStatus = draft?.status, claims = { form: 1, lp: 0 }) {
+const RENDERABLE_LP_VARIANT = { headline: "見出し", bodyText: "本文" };
+
+function makeClient(
+  draft: { id: string; propertyId: string; status: string } | null,
+  lockedStatus = draft?.status,
+  claims = { form: 1, lp: 0 },
+  lockedLpVariant: { headline: string | null; bodyText: string | null } | null = RENDERABLE_LP_VARIANT,
+) {
   const calls: string[] = [];
   const tx = {
     $queryRaw: vi.fn(),
     dmRecipientDraft: {
-      findUnique: vi.fn(async () => { calls.push("tx.findUnique"); return draft ? { status: lockedStatus } : null; }),
+      findUnique: vi.fn(async () => {
+        calls.push("tx.findUnique");
+        return draft ? { status: lockedStatus, lpVariant: lockedLpVariant } : null;
+      }),
       updateMany: vi.fn(async (args: { where: Record<string, unknown> }) => {
         calls.push(`tx.updateMany:${Object.keys(args.where).join(",")}`);
         return { count: "formInquiryFirstAt" in args.where ? claims.form : claims.lp };
@@ -52,6 +62,25 @@ describe("recordInquiry", () => {
     const { client, tx } = makeClient({ id: "d1", propertyId: "p1", status: "sent" }, "confirmed");
     expect(await recordInquiry(client as never, "t", INPUT, NOW)).toEqual({ kind: "not_sent" });
     expect(tx.dmInquiry.create).not.toHaveBeenCalled();
+  });
+
+  it("ロック後に読み直して送付済みだが LP型が無い(headline/bodyText とも null)なら no_form(INSERT・計数・同期しない)", async () => {
+    const { client, tx } = makeClient({ id: "d1", propertyId: "p1", status: "sent" }, "sent", { form: 1, lp: 0 }, null);
+    expect(await recordInquiry(client as never, "t", INPUT, NOW)).toEqual({ kind: "no_form" });
+    expect(tx.dmInquiry.create).not.toHaveBeenCalled();
+    expect(tx.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
+    expect(tx.dmRecipientDraft.update).not.toHaveBeenCalled();
+    expect(syncSaleDmReaction).not.toHaveBeenCalled();
+  });
+
+  it("ロック後に読み直して送付済みだが本文が空白のみなら no_form(INSERT しない)", async () => {
+    const { client, tx } = makeClient(
+      { id: "d1", propertyId: "p1", status: "sent" }, "sent", { form: 1, lp: 0 },
+      { headline: "見出し", bodyText: "   " },
+    );
+    expect(await recordInquiry(client as never, "t", INPUT, NOW)).toEqual({ kind: "no_form" });
+    expect(tx.dmInquiry.create).not.toHaveBeenCalled();
+    expect(syncSaleDmReaction).not.toHaveBeenCalled();
   });
 
   it("送付済み: 親行ロック→読み直し→INSERT→初回→QR読み取りの補い→アプリ内ページ表示の補い→計数+outcome→同期(allowTerminal:false)", async () => {

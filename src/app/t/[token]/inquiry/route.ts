@@ -6,6 +6,7 @@ import { clientRateKey, createRateLimiter } from "@/lib/public-rate-limit";
 import { isCrossSiteOrigin } from "@/lib/public-origin";
 import { parseInquiryForm, INQUIRY_ERROR_MESSAGES } from "@/lib/sale-dm-letter/inquiry-input";
 import { recordInquiry, type InquiryClientLike } from "@/lib/sale-dm-letter/inquiry-record";
+import { hasRenderableLpVariant } from "@/lib/sale-dm-letter/lp-render-input";
 import { PUBLIC_PAGE_HEADERS } from "@/lib/sale-dm-letter/unsubscribe-page";
 import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 import {
@@ -30,12 +31,18 @@ import {
  *  4. honeypot — 機械送信は「受け付けました」を返して何も残さない。
  *  5. 入力検証(inquiry-input.ts) — 不備は 422。入力値は画面に送り返さない。
  *  6. 存在確認(読み取りのみ・DB 書き込みなし) — 未知 token はここで 404(記録・監査なし)。
- *     **token/全体の回数制限は実在する token の要求だけが消費する**(/u/ が署名検証を通った要求だけ
- *     全体上限を消費するのと同じ考え方)。でたらめな token を毎分何十件連投しても、ここで先に 404 になり
- *     limiter を一切消費しないため、実在する宛先からの正規の申込枠(120/時)を減らせない。
+ *     あわせて LP型が描画可能(hasRenderableLpVariant)かもここで確認する。GET /t/[token] が
+ *     フォームを一度も描画しない draft(見出し/本文が未保存・空白のみ)への直接 POST も同じ 404
+ *     (記録・監査なし)。判定は lp-page-loader.ts と同じ関数を使い、「フォームを出す条件」と
+ *     「申込を受け付ける条件」がずれないようにする。
+ *     **token/全体の回数制限は実在し描画可能な token の要求だけが消費する**(/u/ が署名検証を通った
+ *     要求だけ全体上限を消費するのと同じ考え方)。でたらめな token・描画不能な draft への連投は
+ *     ここで先に 404 になり limiter を一切消費しないため、実在する宛先からの正規の申込枠(120/時)を
+ *     減らせない。
  *  7. token の回数制限(5/時)と全体の回数制限(120/時) — 存在確認を通った要求だけが消費する。
- *  8. 送付済みの宛先だけ記録 — 送付前は 409(recordInquiry 側の unknown→404 は、存在確認から記録までの
- *     間に宛先が消えるごく短い窓のレース安全網として残す)。
+ *  8. 送付済み・LP型が描画可能な宛先だけ記録 — 送付前は 409。recordInquiry 側の unknown→404・
+ *     no_form→404(監査なし)は、存在確認から記録までの間に宛先や LP型が変わるごく短い窓の
+ *     レース安全網として残す(ロック下の再読取が最終判定)。
  *  9. 監査は draftId と非PII(first/at)のみ。入力文字は出さない。
  */
 const ipLimiter = createRateLimiter({ limit: 10, windowMs: 60_000 }, { onOverflow: "deny" });
@@ -183,13 +190,14 @@ export async function POST(
     return reply("invalid", 422, messages);
   }
 
-  // 存在確認(読み取りのみ)。未知 token はここで 404 にし、token/全体の回数制限を一切消費しない
-  // (でたらめな token の連投が実在する宛先の申込枠を食い潰せないようにする)。
-  let exists: { id: string } | null;
+  // 存在確認(読み取りのみ)。未知 token・LP型が描画不能(hasRenderableLpVariant=false)な draft は
+  // ここで 404 にし、token/全体の回数制限を一切消費しない(でたらめな token・描画されない draft への
+  // 連投が実在する宛先の申込枠を食い潰せないようにする)。
+  let exists: { id: string; lpVariant: { headline: string | null; bodyText: string | null } | null } | null;
   try {
     exists = await prisma.dmRecipientDraft.findUnique({
       where: { trackingToken: token },
-      select: { id: true },
+      select: { id: true, lpVariant: { select: { headline: true, bodyText: true } } },
     });
   } catch (err) {
     // ⚠エラーの message は引数(token・入力)を含み得るので出さない。許可リスト(name/code)だけ。
@@ -199,7 +207,7 @@ export async function POST(
     });
     return reply("busy", 503);
   }
-  if (!exists) {
+  if (!exists || !hasRenderableLpVariant(exists.lpVariant)) {
     return reply("unavailable", 404);
   }
 
@@ -238,6 +246,7 @@ export async function POST(
   }
 
   if (result.kind === "unknown") return reply("unavailable", 404);
+  if (result.kind === "no_form") return reply("unavailable", 404);
   if (result.kind === "not_sent") return reply("preview", 409);
 
   await writeAuditLog({

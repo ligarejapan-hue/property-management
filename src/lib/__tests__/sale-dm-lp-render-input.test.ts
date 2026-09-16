@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { expandLpText, extractPhone, splitBodyIntoSections, buildLpRenderInput, LP_RENDER_INPUT_KEYS, type LpSourceRows } from "../sale-dm-letter/lp-render-input";
+import { expandLpText, extractPhone, splitBodyIntoSections, buildLpRenderInput, hasRenderableLpVariant, LP_RENDER_INPUT_KEYS, type LpSourceRows } from "../sale-dm-letter/lp-render-input";
 import { lpBodyHeadings } from "../sale-dm-letter/lp-template";
 
 const rows = (over: Partial<LpSourceRows> = {}): LpSourceRows => ({
@@ -12,6 +12,27 @@ const rows = (over: Partial<LpSourceRows> = {}): LpSourceRows => ({
   property: { address: "東京都世田谷区経堂1-2-3 ○○ハイツ101", propertyType: "house" },
   company: { senderName: "株式会社リガーレ", senderContact: "TEL 03-1234-5678 / info@example.com" },
   ...over,
+});
+
+describe("hasRenderableLpVariant", () => {
+  it("null/undefined は false", () => {
+    expect(hasRenderableLpVariant(null)).toBe(false);
+    expect(hasRenderableLpVariant(undefined)).toBe(false);
+  });
+  it("見出しが空(空文字/空白のみ)なら false", () => {
+    expect(hasRenderableLpVariant({ headline: "", bodyText: "本文" })).toBe(false);
+    expect(hasRenderableLpVariant({ headline: "   ", bodyText: "本文" })).toBe(false);
+    expect(hasRenderableLpVariant({ headline: null, bodyText: "本文" })).toBe(false);
+  });
+  it("本文が空(空文字/空白のみ)なら false", () => {
+    expect(hasRenderableLpVariant({ headline: "見出し", bodyText: "" })).toBe(false);
+    expect(hasRenderableLpVariant({ headline: "見出し", bodyText: "   \n  " })).toBe(false);
+    expect(hasRenderableLpVariant({ headline: "見出し", bodyText: null })).toBe(false);
+  });
+  it("両方とも空白以外の文字があれば true", () => {
+    expect(hasRenderableLpVariant({ headline: "見出し", bodyText: "本文" })).toBe(true);
+    expect(hasRenderableLpVariant({ headline: "  見出し  ", bodyText: "\n本文\n" })).toBe(true);
+  });
 });
 
 describe("expandLpText", () => {

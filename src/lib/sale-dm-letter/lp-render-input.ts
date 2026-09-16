@@ -28,6 +28,20 @@ export interface LpRenderInput {
 }
 export const LP_RENDER_INPUT_KEYS = ["mode", "headline", "lead", "intro", "sections", "faq", "hero", "company", "unsubscribeUrl", "phoneTapToken", "form"] as const satisfies readonly (keyof LpRenderInput)[];
 
+/**
+ * LP型が実際にフォームを描画できるか(見出し・本文の両方が空白以外)の唯一の判定。
+ * 「フォームを出す判断」と「申込を受け付ける判断」を同じ規則にするため、
+ * lp-page-loader.ts(GET /t/[token])と inquiry-record.ts(POST .../inquiry のロック下再読取)の
+ * 両方がこの関数を呼ぶ。片方だけを見て判定すると、ページには出ない draft への直接 POST が
+ * 通ってしまう(見出し/本文が空でも status だけで受理してしまう抜け穴)。
+ */
+export function hasRenderableLpVariant<V extends { headline: string | null; bodyText: string | null }>(
+  v: V | null | undefined,
+): v is V {
+  if (!v) return false;
+  return !!v.headline?.trim() && !!v.bodyText?.trim();
+}
+
 const FALLBACK_LOCATION = "ご所有の物件の周辺";
 const FALLBACK_TYPE = "不動産";
 

@@ -51,7 +51,9 @@ beforeEach(() => {
   rec.mockResolvedValue({ kind: "recorded", inquiryId: "inq1", draftId: "d1", first: true });
   findUnique.mockImplementation(
     async ({ where }: { where: { trackingToken: string } }) =>
-      where.trackingToken.startsWith("junk") ? null : { id: "d1" },
+      where.trackingToken.startsWith("junk")
+        ? null
+        : { id: "d1", lpVariant: { headline: "見出し", bodyText: "本文" } },
   );
 });
 
@@ -116,6 +118,13 @@ describe("POST /t/[token]/inquiry", () => {
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
+  it("記録がロック下の再読取で no_form(LP型が描画不能)を返したら 404(監査なし)", async () => {
+    rec.mockResolvedValueOnce({ kind: "no_form" });
+    const res = await call(VALID);
+    expect(res.status).toBe(404);
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
   it("記録で例外が出たら 503 混雑ページ(黙って完了と言わない)。ログは許可リスト(name/code)だけ", async () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
@@ -172,6 +181,23 @@ describe("POST /t/[token]/inquiry", () => {
     const res = await call(VALID, {}, `tok_exists_${seq}`);
     expect(res.status).toBe(200);
     expect(rec).toHaveBeenCalledTimes(1);
+  });
+
+  it("存在確認で LP型が描画不能(headline/bodyText とも空)な token は 404 で記録・回数制限の枠を消費しない", async () => {
+    findUnique.mockImplementation(async () => ({ id: "d1", lpVariant: null }));
+    for (let i = 0; i < 6; i += 1) {
+      const res = await call(VALID, {}, "tok_no_form");
+      expect(res.status).toBe(404);
+    }
+    expect(rec).not.toHaveBeenCalled();
+    // token 枠(5/時)を消費していない: 描画可能な別 token(同じ関数呼び出し内で切替)ならまだ通る
+    findUnique.mockImplementation(
+      async ({ where }: { where: { trackingToken: string } }) =>
+        where.trackingToken === "tok_no_form"
+          ? { id: "d1", lpVariant: null }
+          : { id: "d1", lpVariant: { headline: "見出し", bodyText: "本文" } },
+    );
+    expect((await call(VALID, {}, "tok_no_form")).status).toBe(404);
   });
 
   it("存在確認で例外なら 503。ログは許可リスト(name/code)だけ", async () => {

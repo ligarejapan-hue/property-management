@@ -1,5 +1,6 @@
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { syncSaleDmReaction, type ReactionSyncTx } from "@/lib/dm-reaction/sync";
+import { hasRenderableLpVariant } from "./lp-render-input";
 import type { InquiryInput } from "./inquiry-input";
 
 // ⚠この説明は関数の外に置く。dm-writer-lock-order の走査は関数本文(export async function recordInquiry 以降)の呼び出し順を見るため、本文内のコメントに呼び出し名を書くと順序判定を狂わせる
@@ -7,7 +8,9 @@ import type { InquiryInput } from "./inquiry-input";
  * 公開LPの査定申込の記録(設計 §2.5)。
  *
  * 順序(R50=物件配下の書込は親行ロックから・recordTrackingHit と同じ):
- *   親の物件行ロック → ロック下で宛先の状態を読み直す(送付済みでなければ書かない)
+ *   親の物件行ロック → ロック下で宛先の状態を読み直す(送付済みでなければ書かない。送付済みでも
+ *   LP型が描画可能(hasRenderableLpVariant=見出し・本文とも空白以外)でなければ書かない=公開ページが
+ *   一度も表示されない draft への直接 POST で申込・初回時刻を作らせない)
  *   → 申込 INSERT → 初回時刻(条件付き updateMany の count で確定=同時の二重初回を防ぐ)
  *   → QR読み取り・アプリ内ページ表示の2つの初回時刻の補い(下記) → 申込回数 +1・outcome=inquiry
  *   → 送付記録への反響同期。
@@ -34,10 +37,18 @@ export interface InquiryDraftRow {
   status: string;
 }
 
+export interface InquiryLockedRow {
+  status: string;
+  lpVariant: { headline: string | null; bodyText: string | null } | null;
+}
+
 export interface InquiryTx {
   $queryRaw: <T>(query: TemplateStringsArray, ...values: unknown[]) => Promise<T>;
   dmRecipientDraft: {
-    findUnique: (args: { where: { id: string }; select: { status: true } }) => Promise<{ status: string } | null>;
+    findUnique: (args: {
+      where: { id: string };
+      select: { status: true; lpVariant: { select: { headline: true; bodyText: true } } };
+    }) => Promise<InquiryLockedRow | null>;
     updateMany: (args: {
       where: { id: string; formInquiryFirstAt?: null; lpFirstAccessAt?: null; lpPageFirstAt?: null };
       data: { formInquiryFirstAt?: Date; lpFirstAccessAt?: Date; lpPageFirstAt?: Date };
@@ -68,6 +79,7 @@ export interface InquiryClientLike {
 export type RecordInquiryResult =
   | { kind: "unknown" }
   | { kind: "not_sent" }
+  | { kind: "no_form" }
   | { kind: "recorded"; inquiryId: string; draftId: string; first: boolean };
 
 export async function recordInquiry(
@@ -85,8 +97,12 @@ export async function recordInquiry(
 
   return client.$transaction(async (tx): Promise<RecordInquiryResult> => {
     await lockPropertyRow(tx, draft.propertyId);
-    const locked = await tx.dmRecipientDraft.findUnique({ where: { id: draft.id }, select: { status: true } });
+    const locked = await tx.dmRecipientDraft.findUnique({
+      where: { id: draft.id },
+      select: { status: true, lpVariant: { select: { headline: true, bodyText: true } } },
+    });
     if (!locked || locked.status !== "sent") return { kind: "not_sent" };
+    if (!hasRenderableLpVariant(locked.lpVariant)) return { kind: "no_form" };
 
     const created = await tx.dmInquiry.create({
       data: {
