@@ -32,6 +32,7 @@ import type {
   TableElement,
   SalesSheetTheme,
 } from "@/lib/sales-sheet/document-schema";
+import { isConsumerTemplate } from "@/lib/sales-sheet/document-schema";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -47,6 +48,8 @@ export type ElementPanelChange =
   | { type: "editImage"; patch: EditImagePatch }
   | { type: "setFloorPlan" }
   | { type: "unsetFloorPlan" }
+  /** 「この写真を大きく」。主役にする/主役を解除する(消費者向けひな型のみ)。 */
+  | { type: "toggleHero" }
   | { type: "editBadge"; patch: EditBadgePatch }
   | { type: "editQr"; patch: EditQrPatch }
   | { type: "editTableRow"; index: number; patch: EditTableRowPatch }
@@ -464,6 +467,23 @@ export function ElementPanel({ element, onChange, theme, onThemeChange }: Elemen
         <section className="p-3" data-image-editor>
           <p className={sectionHeadCls}>写真</p>
           <div className="flex flex-col gap-2">
+            {/* 主役の指定・解除(発注者判断 2026-09-16)。主役1枚を上に大きく、残りは同じ大きさ。
+                旧ひな型では並べ直さないため出さない。 */}
+            {isConsumerTemplate({ theme }) && (
+              <button
+                type="button"
+                data-action="toggle-hero"
+                aria-pressed={imageEl.hero === true}
+                onClick={() => onChange({ type: "toggleHero" })}
+                className={
+                  imageEl.hero === true
+                    ? "w-full rounded border border-neutral-300 bg-white px-2 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-600"
+                    : "w-full rounded border border-blue-500 bg-blue-50 px-2 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-100 dark:border-blue-400 dark:bg-blue-900/30 dark:text-blue-300"
+                }
+              >
+                {imageEl.hero === true ? "大きくするのをやめる" : "この写真を大きく"}
+              </button>
+            )}
             {/* 間取り図/敷地図の指定・解除。間取り図も写真の仲間として写真枠に並ぶ。 */}
             {imageEl.id === "floor-plan" ? (
               <button

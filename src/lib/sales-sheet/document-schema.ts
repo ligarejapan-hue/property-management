@@ -42,6 +42,11 @@ export const imageElementSchema = z.object({
    *  CSS object-position に反映（数値のみ＝注入不可）。 */
   focalX: z.number().min(0).max(100).optional(),
   focalY: z.number().min(0).max(100).optional(),
+  /**
+   * 主役の写真(消費者向けひな型・「この写真を大きく」)。写真枠の上に大きく置き、残りは
+   * その下に全部同じ大きさで並べる。図面の中で常に1枚まで。未指定=主役ではない。
+   */
+  hero: z.boolean().optional(),
 });
 
 export const tableElementSchema = z.object({

@@ -440,3 +440,45 @@ describe("ElementPanel — バリデーションガード", () => {
     expect(isSafeFontFamily("url(http://evil.com)")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 第②段(発注者判断 2026-09-16): 「この写真を大きく」
+// ---------------------------------------------------------------------------
+
+describe("ElementPanel — 主役の指定", () => {
+  const CONSUMER_THEME = { ...THEME, template: "consumer-2026-09" as const };
+  const heroBtn = (html: string): string => {
+    const i = html.indexOf('data-action="toggle-hero"');
+    return i < 0 ? "" : html.slice(i, html.indexOf("</button>", i));
+  };
+
+  it("新しいひな型の写真には「この写真を大きく」が出る", () => {
+    const html = renderToStaticMarkup(
+      <ElementPanel element={imageElement} onChange={() => {}} theme={CONSUMER_THEME} onThemeChange={() => {}} />,
+    );
+    expect(heroBtn(html)).toContain("この写真を大きく");
+    expect(heroBtn(html)).toContain('aria-pressed="false"');
+  });
+
+  it("主役の写真では「大きくするのをやめる」になる", () => {
+    const html = renderToStaticMarkup(
+      <ElementPanel element={{ ...imageElement, hero: true } as SalesSheetElement} onChange={() => {}} theme={CONSUMER_THEME} onThemeChange={() => {}} />,
+    );
+    expect(heroBtn(html)).toContain("大きくするのをやめる");
+    expect(heroBtn(html)).toContain('aria-pressed="true"');
+  });
+
+  it("間取り図も主役にできる", () => {
+    const html = renderToStaticMarkup(
+      <ElementPanel element={{ ...imageElement, id: "floor-plan" }} onChange={() => {}} theme={CONSUMER_THEME} onThemeChange={() => {}} />,
+    );
+    expect(heroBtn(html)).toContain("この写真を大きく");
+  });
+
+  it("旧ひな型では出さない(並べ直さないため)", () => {
+    const html = renderToStaticMarkup(
+      <ElementPanel element={imageElement} onChange={() => {}} theme={THEME} onThemeChange={() => {}} />,
+    );
+    expect(html).not.toContain('data-action="toggle-hero"');
+  });
+});

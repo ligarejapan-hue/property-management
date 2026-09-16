@@ -19,15 +19,12 @@ import { generateQrDataUrl } from "./qr-code";
 import { buildMapsSearchUrl } from "./maps-url";
 import {
   computeConsumerLayout,
-  packPhotoCells,
+  heroGridCells,
+  repackKeepingSizes,
   CONSUMER_PHOTO_ZONE,
-  CONSUMER_PHOTO_RADIUS_MM,
-  CONSUMER_PHOTO_Z,
   CONSUMER_MAP_QR_SLOT,
-  PHOTO_GAP_MM,
   type Rect,
 } from "./layout-engine";
-import { packMosaic } from "./mosaic-pack";
 import {
   buildConsumerFooterTransactionElements,
   readFooterData,
@@ -735,63 +732,81 @@ function isA4Landscape(document: SalesSheetDocument): boolean {
   return document.page.width === A4_LANDSCAPE.width && document.page.height === A4_LANDSCAPE.height;
 }
 
-/**
- * 作成直後(build-document の packPhotoCells グリッド)のまま、まだ誰も写真に触っていないか。
- *
- * 作成時はサーバーに写真の実寸比が無いため均等グリッドで置くしかなく、枚数によっては
- * 縦積みの細長い帯になる。実寸比が分かるのはブラウザで描画したときだけなので、編集画面を
- * 最初に開いた一度だけ autoArrangePhotos(=「自動整列」ボタン)へ寄せる。その門番。
- * 人が1枚でも動かす/大きさを変える、または一度整列した後は false になり、以後の open で
- * 紙面を勝手に組み替えない。純関数。
- */
-export function isInitialPhotoGrid(document: SalesSheetDocument): boolean {
-  if (!isConsumerTemplate(document) || !isA4Landscape(document)) return false;
-  const images = document.elements.filter((e): e is ImageElement => e.type === "image");
-  if (images.length === 0) return false;
-  const zone = CONSUMER_PHOTO_ZONE;
-  const cells = packPhotoCells(images.length, zone.w, zone.h);
-  return images.every((el, i) => {
-    const c = cells[i];
-    return (
-      nearlyEqual(el.x, zone.x + c.x) &&
-      nearlyEqual(el.y, zone.y + c.y) &&
-      nearlyEqual(el.w, c.w) &&
-      nearlyEqual(el.h, c.h) &&
-      // 枠は動かさずに見せ方だけ変えた図面(contain→cover・焦点位置の指定)も「触った」
-      // とみなす。位置と大きさだけで判定すると、開いただけで autoArrangePhotos が
-      // fit を contain に戻し、保存済みの設定を黙って消す(@codex #432 P2)。
-      // ⚠build-document の photoAndFloorPlanElements が作成時に決める項目は、ここで
-      // 全て突き合わせる(位置/大きさ/重ね順/表示方法/焦点位置/角丸)。1つでも
-      // 見落とすと、その項目だけ変えた図面を「作成直後」と誤判定して組み替える。
-      el.z === CONSUMER_PHOTO_Z &&
-      el.fit === "contain" &&
-      el.focalX === undefined &&
-      el.focalY === undefined &&
-      // 角丸も見た目の設定(ElementPanel から変えられる)。既定は役割で違う
-      // (写真=CONSUMER_PHOTO_RADIUS_MM・間取り図=無し)。どちらの既定も一律に許すと、
-      // 間取り図に角丸を付けた/写真の角丸を外した図面を作成直後と誤判定する(@codex #432 P2)。
-      el.radiusMm === (el.id === "floor-plan" ? undefined : CONSUMER_PHOTO_RADIUS_MM)
-    );
+/** 図面の写真(type=image すべて。間取り図も写真の仲間)の、配列上の位置。 */
+function imageIndexes(document: SalesSheetDocument): number[] {
+  const out: number[] = [];
+  document.elements.forEach((e, i) => {
+    if (e.type === "image") out.push(i);
   });
+  return out;
+}
+
+/** 写真の並び(imageIndexes の順)の中で主役が何番目か。無ければ null。 */
+function heroPosition(document: SalesSheetDocument, idxs: readonly number[]): number | null {
+  const k = idxs.findIndex((idx) => (document.elements[idx] as ImageElement).hero === true);
+  return k >= 0 ? k : null;
 }
 
 /**
- * 写真と間取り図(type=image すべて)を写真枠(CONSUMER_PHOTO_ZONE)へモザイク配置で並べ直す。
- * - 旧ひな型・A4横以外は同一参照。
- * - 並び順=配列順(代表写真が先頭)。opts.appendedId は末尾。
- * - 枠は実寸比(opts.aspects[id]・無ければ現枠の w/h)を保つ。fit:"contain"。
- * - 純・決定的。変更ゼロなら同一参照。
+ * 写真を「主役1枚+残りは全部同じ大きさ」に組み直す(発注者判断 2026-09-16)。
+ * 大きさもリセットする=「レイアウト自動調整」と「この写真を大きく」が使う。
+ * 並び順は配列順。写真は切らずに全体を見せる(fit:contain)。変更ゼロなら同一参照。
  */
-export function autoArrangePhotos(
-  state: EditorState,
-  opts?: { appendedId?: string; aspects?: Record<string, number> },
-): EditorState {
+function layoutPhotosHeroGrid(document: SalesSheetDocument, elements: SalesSheetElement[]): boolean {
+  const idxs = imageIndexes(document);
+  if (idxs.length === 0) return false;
+  const zone = CONSUMER_PHOTO_ZONE;
+  const cells = heroGridCells(idxs.length, heroPosition({ ...document, elements }, idxs), zone.w, zone.h);
+  let changed = false;
+  idxs.forEach((idx, k) => {
+    const el = elements[idx] as ImageElement;
+    const c = cells[k];
+    const x = zone.x + c.x;
+    const y = zone.y + c.y;
+    if (!nearlyEqual(el.x, x) || !nearlyEqual(el.y, y) || !nearlyEqual(el.w, c.w) || !nearlyEqual(el.h, c.h) || el.fit !== "contain") {
+      changed = true;
+      elements[idx] = { ...el, x, y, w: c.w, h: c.h, fit: "contain" };
+    }
+  });
+  return changed;
+}
+
+/**
+ * 「この写真を大きく」。選んだ写真を主役にし(主役は常に1枚)、主役1枚+残りは同じ大きさに
+ * 組み直す。既に主役の写真を選んで押すと解除=全部同じ大きさ。
+ * - 旧ひな型・A4横以外・写真以外・存在しない id は同一参照。
+ */
+export function toggleHero(state: EditorState, id: string): EditorState {
   const { document } = state;
   if (!isConsumerTemplate(document) || !isA4Landscape(document)) return state;
-  const targets: number[] = [];
-  document.elements.forEach((e, i) => {
-    if (e.type === "image") targets.push(i);
-  });
+  const target = document.elements.find((e) => e.id === id);
+  if (!target || target.type !== "image") return state;
+  const makeHero = target.hero !== true;
+  const elements = document.elements.map((e) => {
+    if (e.type !== "image") return e;
+    if (e.id === id && makeHero) return { ...e, hero: true };
+    if (e.hero === undefined) return e;
+    const { hero: _hero, ...rest } = e;
+    void _hero;
+    return rest;
+  }) as SalesSheetElement[];
+  layoutPhotosHeroGrid(document, elements);
+  return { ...state, dirty: true, document: { ...document, elements } };
+}
+
+/**
+ * 「写真を自動整列」= **今の大きさを保って位置だけ詰める**(発注者判断 2026-09-16)。
+ * - 並び順は主役が先頭、残りは配列順。opts.appendedId(写真を追加した直後)は末尾。
+ * - 追加した写真の大きさは、既にある「主役以外の写真」に合わせる(無ければ主役1枚+残りの格子の大きさ)。
+ *   追加直後の仮の大きさ(DEFAULT_IMAGE_*)のまま詰めると、1枚だけ大きさが揃わないため。
+ * - 入りきらなければ全部を同じ割合で縮める(repackKeepingSizes)。
+ * - 写真は切らずに全体を見せる(fit:contain)。
+ * - 旧ひな型・A4横以外・写真なしは同一参照。変更ゼロなら同一参照。
+ */
+export function autoArrangePhotos(state: EditorState, opts?: { appendedId?: string }): EditorState {
+  const { document } = state;
+  if (!isConsumerTemplate(document) || !isA4Landscape(document)) return state;
+  const targets = imageIndexes(document);
   if (targets.length === 0) return state;
 
   const ordered = targets.slice();
@@ -799,12 +814,25 @@ export function autoArrangePhotos(
     const k = ordered.findIndex((idx) => document.elements[idx].id === opts.appendedId);
     if (k >= 0) ordered.push(...ordered.splice(k, 1));
   }
-  const aspects = ordered.map((idx) => {
-    const el = document.elements[idx];
-    return opts?.aspects?.[el.id] ?? (el.h > 0 ? el.w / el.h : 0);
-  });
   const zone = CONSUMER_PHOTO_ZONE;
-  const rects = packMosaic(aspects, zone.w, zone.h, PHOTO_GAP_MM);
+  const heroK = heroPosition(document, ordered);
+  const sizes = ordered.map((idx) => {
+    const el = document.elements[idx] as ImageElement;
+    return { w: el.w, h: el.h };
+  });
+  if (opts?.appendedId) {
+    const appendedK = ordered.length - 1;
+    if (document.elements[ordered[appendedK]].id === opts.appendedId) {
+      const peer = ordered.findIndex((_idx, k) => k !== appendedK && k !== heroK);
+      if (peer >= 0) {
+        sizes[appendedK] = { ...sizes[peer] };
+      } else {
+        const cell = heroGridCells(ordered.length, heroK, zone.w, zone.h)[appendedK];
+        sizes[appendedK] = { w: cell.w, h: cell.h };
+      }
+    }
+  }
+  const rects = repackKeepingSizes(sizes, heroK, zone.w, zone.h);
 
   let changed = false;
   const elements = document.elements.slice() as SalesSheetElement[];
@@ -827,33 +855,11 @@ function nearlyEqual(a: number, b: number): boolean {
   return Math.abs(a - b) < 0.001;
 }
 
-/** 実寸比の表を、id の付け替えに合わせて写し替える(元の表は変えない)。 */
-function renameAspects(
-  aspects: Record<string, number> | undefined,
-  renames: [from: string, to: string][],
-): Record<string, number> | undefined {
-  if (!aspects) return undefined;
-  const out = { ...aspects };
-  for (const [from, to] of renames) {
-    // from に実寸比が無ければ to も消す。out は aspects のコピーのため、
-    // to が別の付け替えで既に値を持っている(古い写真の実寸比が残っている)
-    // ことがあり、消さないと無関係な画像の比率を使い回してしまう(F3)。
-    if (aspects[from] !== undefined) out[to] = aspects[from];
-    else delete out[to];
-  }
-  return out;
-}
-
 /**
  * 選んだ写真を間取り図(id="floor-plan")にする。既存の間取り図は demotedId の写真に戻す(常に1枚)。
  * 位置は写真枠の並べ直しに任せる(旧ひな型では並べ直さない)。selectedId は "floor-plan"。
  */
-export function setAsFloorPlan(
-  state: EditorState,
-  id: string,
-  demotedId: string,
-  aspects?: Record<string, number>,
-): EditorState {
+export function setAsFloorPlan(state: EditorState, id: string, demotedId: string): EditorState {
   const { document } = state;
   const idx = document.elements.findIndex((e) => e.id === id);
   if (idx === -1) return state;
@@ -865,24 +871,18 @@ export function setAsFloorPlan(
   if (existingIdx !== -1) elements[existingIdx] = { ...elements[existingIdx], id: demotedId } as SalesSheetElement;
   elements[idx] = { ...(target as ImageElement), id: "floor-plan", fit: "contain" };
   const next: EditorState = { ...state, dirty: true, selectedId: "floor-plan", document: { ...document, elements } };
-  const renamed = renameAspects(aspects, [["floor-plan", demotedId], [id, "floor-plan"]]);
-  return autoArrangePhotos(next, renamed ? { aspects: renamed } : undefined);
+  return autoArrangePhotos(next);
 }
 
 /** 間取り図(id="floor-plan")を newId の写真に戻す。無ければ同一参照。selectedId は newId。 */
-export function unsetFloorPlan(
-  state: EditorState,
-  newId: string,
-  aspects?: Record<string, number>,
-): EditorState {
+export function unsetFloorPlan(state: EditorState, newId: string): EditorState {
   const { document } = state;
   const idx = document.elements.findIndex((e) => e.id === "floor-plan" && e.type === "image");
   if (idx === -1) return state;
   const elements = document.elements.slice() as SalesSheetElement[];
   elements[idx] = { ...elements[idx], id: newId } as SalesSheetElement;
   const next: EditorState = { ...state, dirty: true, selectedId: newId, document: { ...document, elements } };
-  const renamed = renameAspects(aspects, [["floor-plan", newId]]);
-  return autoArrangePhotos(next, renamed ? { aspects: renamed } : undefined);
+  return autoArrangePhotos(next);
 }
 
 /** x/y/w/h がすべて等しいか（幾何の変更検知用）。 */
@@ -897,7 +897,7 @@ function geomEquals(
  * 定型項目・表・写真・地図QRを、computeConsumerLayout の標準位置へ戻す(「レイアウト自動調整」)。
  * - 旧ひな型・A4横以外は同一参照。
  * - 表(overview / overview-detail-a / -b)は行数から文字サイズも計算し直す。
- * - 写真と間取り図は写真枠へ均等に置く(エディタが続けてモザイク整列で仕上げる)。
+ * - 写真と間取り図は「主役1枚+残りは同じ大きさ」に組み直す(手で変えた大きさもリセット)。
  * - 会社帯(footer-*)と利用者が足した要素は動かさない。変更ゼロなら同一参照。
  */
 export function autoBalanceLayout(state: EditorState): EditorState {
@@ -947,20 +947,8 @@ export function autoBalanceLayout(state: EditorState): EditorState {
     }
   });
 
-  const imageIdxs: number[] = [];
-  next.forEach((e, i) => {
-    if (e.type === "image") imageIdxs.push(i);
-  });
-  const zone = L.photoZone;
-  const cells = packPhotoCells(imageIdxs.length, zone.w, zone.h);
-  imageIdxs.forEach((idx, k) => {
-    const c = cells[k];
-    const r = { x: zone.x + c.x, y: zone.y + c.y, w: c.w, h: c.h };
-    if (!geomEquals(next[idx], r)) {
-      changed = true;
-      next[idx] = applyGeom(next[idx], r);
-    }
-  });
+  // 写真は主役1枚+残りは同じ大きさに組み直す(手で変えた大きさもリセット=発注者判断 2026-09-16)。
+  if (layoutPhotosHeroGrid(document, next)) changed = true;
 
   if (!changed) return state;
   return { ...state, dirty: true, document: { ...document, elements: next } };

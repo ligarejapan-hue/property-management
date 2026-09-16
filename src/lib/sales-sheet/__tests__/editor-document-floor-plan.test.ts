@@ -23,23 +23,19 @@ const ids = (s: EditorState) => s.document.elements.filter((e) => e.type === "im
 describe("setAsFloorPlan / unsetFloorPlan(間取り図は写真の仲間)", () => {
   it("選んだ写真が floor-plan になり、写真枠に並び直る", () => {
     const s = makeState([img(1), img(2)]);
-    const next = setAsFloorPlan({ ...s, selectedId: "img-2" }, "img-2", "demoted", { "img-1": 1.5, "img-2": 1 });
+    const next = setAsFloorPlan({ ...s, selectedId: "img-2" }, "img-2", "demoted");
     expect(ids(next)).toEqual(["img-1", "floor-plan"]);
     expect(next.selectedId).toBe("floor-plan");
     expect(next.dirty).toBe(true);
     for (const e of next.document.elements) expect(insideZone(e)).toBe(true);
     const fp = next.document.elements.find((e) => e.id === "floor-plan");
     expect(fp?.type === "image" && fp.fit).toBe("contain");
-    // 実寸比は新しい id に引き継がれる(1:1 のまま並ぶ)
-    expect(fp && fp.w / fp.h).toBeCloseTo(1, 3);
     expect(salesSheetDocumentSchema.safeParse(next.document).success).toBe(true);
   });
   it("既存の間取り図は demotedId の写真に戻る(常に1枚)", () => {
     const s = makeState([{ ...img(1), id: "floor-plan" }, img(2)]);
-    const next = setAsFloorPlan(s, "img-2", "demoted", { "floor-plan": 0.7, "img-2": 1.5 });
+    const next = setAsFloorPlan(s, "img-2", "demoted");
     expect(ids(next).sort()).toEqual(["demoted", "floor-plan"]);
-    const demoted = next.document.elements.find((e) => e.id === "demoted");
-    expect(demoted && demoted.w / demoted.h).toBeCloseTo(0.7, 3);
   });
   it("写真でない id・floor-plan 自身は何もしない", () => {
     const s = makeState([{ id: "t", type: "text", x: 0, y: 0, w: 10, h: 10, z: 1, content: "x" }, { ...img(1), id: "floor-plan" }]);
@@ -47,29 +43,31 @@ describe("setAsFloorPlan / unsetFloorPlan(間取り図は写真の仲間)", () =
     expect(setAsFloorPlan(s, "floor-plan", "d")).toBe(s);
     expect(setAsFloorPlan(s, "none", "d")).toBe(s);
   });
-  it("unsetFloorPlan は newId の写真に戻し、実寸比を引き継ぐ", () => {
+  it("unsetFloorPlan は newId の写真に戻す", () => {
     const s = makeState([{ ...img(1), id: "floor-plan" }]);
-    const next = unsetFloorPlan(s, "back", { "floor-plan": 0.8 });
+    const next = unsetFloorPlan(s, "back");
     expect(ids(next)).toEqual(["back"]);
     expect(next.selectedId).toBe("back");
-    const back = next.document.elements[0];
-    expect(back.w / back.h).toBeCloseTo(0.8, 3);
     // F6: 間取り図が無ければ入力と同一参照を返す(no-op 規約。toEqual ではなく toBe)
     const noFloorPlan = makeState([img(1)]);
     expect(unsetFloorPlan(noFloorPlan, "x")).toBe(noFloorPlan);
   });
-  // F3: renameAspects は付け替え先(to)に古い実寸比が残っていても、付け替え元
-  // (from)に実寸比が無ければ to を消す(別の写真の比率を使い回さない)。
-  it("古い間取り図の実寸比(0.7)は、実寸比未指定の新しい間取り図には引き継がれない (F3)", () => {
-    const s = makeState([{ ...img(1), id: "floor-plan" }, img(2)]);
-    const next = setAsFloorPlan(s, "img-2", "demoted", { "floor-plan": 0.7 });
+  it("間取り図にしても/写真に戻しても、大きさは保つ(第②段: 並べ直しは位置だけ)", () => {
+    const s = makeState([img(1, { w: 70, h: 50 }), img(2, { w: 40, h: 30 })]);
+    const next = setAsFloorPlan(s, "img-2", "demoted");
+    const fp = next.document.elements.find((e) => e.id === "floor-plan")!;
+    expect([fp.w, fp.h]).toEqual([40, 30]);
+    const back = unsetFloorPlan(next, "back").document.elements.find((e) => e.id === "back")!;
+    expect([back.w, back.h]).toEqual([40, 30]);
+  });
+  it("主役の写真を間取り図にしても主役の印は残る", () => {
+    const s = makeState([img(1, { hero: true }), img(2)]);
+    const next = setAsFloorPlan(s, "img-1", "demoted");
     const fp = next.document.elements.find((e) => e.id === "floor-plan");
-    // img-2 の実寸比が渡されていないため、autoArrangePhotos は呼び出し時点の
-    // 枠の比 (img(2) は w=90,h=60 → 1.5) にフォールバックする。0.7 は使わない。
-    expect(fp && fp.w / fp.h).toBeCloseTo(90 / 60, 3);
+    expect(fp?.type === "image" && fp.hero).toBe(true);
   });
   it("整列済みへの再整列は同一参照", () => {
-    const s = setAsFloorPlan(makeState([img(1), img(2)]), "img-2", "d", { "img-1": 1.5, "img-2": 1 });
-    expect(autoArrangePhotos(s, { aspects: { "img-1": 1.5, "floor-plan": 1 } })).toBe(s);
+    const s = setAsFloorPlan(makeState([img(1), img(2)]), "img-2", "d");
+    expect(autoArrangePhotos(s)).toBe(s);
   });
 });

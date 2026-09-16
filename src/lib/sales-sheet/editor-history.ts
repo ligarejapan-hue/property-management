@@ -23,21 +23,6 @@ export interface HistoryState {
 
 export type HistoryAction =
   | { type: "edit"; fn: (prev: EditorState) => EditorState }
-  /**
-   * 履歴に積まない土台の差し替え(開いた直後の初期整列など「読み込みの続き」)。
-   * 編集として積むと、元に戻す→保存で作成直後のグリッドが意図的な配置として保存され、
-   * 次に開いたときにまた整列される=ユーザーの選択が効かない(@codex #432 P2)。
-   */
-  | {
-      type: "rebase";
-      fn: (prev: EditorState) => EditorState;
-      /**
-       * 履歴に残っている古い版の写し替え。写真の読み込みが終わる前に別の箇所を編集して
-       * いると past(先に元に戻していれば future)に整列前のグリッドが残り、そこへ戻って
-       * 保存すると次に開いたときにまた整列される堂々巡りになる。同じ写し替えを履歴にも当てる。
-       */
-      mapSnapshot?: (doc: SalesSheetDocument) => SalesSheetDocument;
-    }
   | { type: "undo" }
   | { type: "redo" };
 
@@ -54,21 +39,6 @@ function reconcileSelection(
   return doc.elements.some((e) => e.id === selectedId) ? selectedId : null;
 }
 
-/** 履歴の版を写し替える。1つも変わらなければ元の配列を同一参照で返す。 */
-function mapSnapshots(
-  docs: SalesSheetDocument[],
-  map?: (doc: SalesSheetDocument) => SalesSheetDocument,
-): SalesSheetDocument[] {
-  if (!map) return docs;
-  let changed = false;
-  const out = docs.map((d) => {
-    const n = map(d);
-    if (n !== d) changed = true;
-    return n;
-  });
-  return changed ? out : docs;
-}
-
 export function editorHistoryReducer(state: HistoryState, action: HistoryAction): HistoryState {
   switch (action.type) {
     case "edit": {
@@ -82,18 +52,6 @@ export function editorHistoryReducer(state: HistoryState, action: HistoryAction)
         editor: next,
         past: [...state.past.slice(-(HISTORY_LIMIT - 1)), state.editor.document],
         future: [],
-      };
-    }
-    case "rebase": {
-      const next = action.fn(state.editor);
-      // 現在の版が変わらなかった=差し替える理由が無かった(門番が止めた)。履歴も触らない。
-      // ここで履歴だけ写し替えると、元に戻した先が勝手に差し替わる(@codex #432 P2)。
-      if (next === state.editor) return state;
-      // 積まない・捨てない。ただし履歴に残った古い版には同じ写し替えを当てる。
-      return {
-        editor: next,
-        past: mapSnapshots(state.past, action.mapSnapshot),
-        future: mapSnapshots(state.future, action.mapSnapshot),
       };
     }
     case "undo": {
