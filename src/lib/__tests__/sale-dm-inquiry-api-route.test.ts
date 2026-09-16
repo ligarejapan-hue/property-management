@@ -114,9 +114,9 @@ describe("GET 申込一覧", () => {
   it("電話の表示権限が無ければ連絡先を伏せる", async () => {
     guard.requireSaleDmAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "masked", email: "masked" } });
     db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
-    db.dmInquiry.findMany.mockResolvedValueOnce([INQ]);
+    db.dmInquiry.findMany.mockResolvedValueOnce([{ ...INQ, handleNote: "折り返し 090-1111-2222" }]);
     const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
-    expect(body.inquiries[0]).toMatchObject({ phone: null, contactHidden: true, emailHidden: true });
+    expect(body.inquiries[0]).toMatchObject({ phone: null, handleNote: null, contactHidden: true, emailHidden: true });
   });
   it("電話は見えるがメール(owner_email)の表示権限が無ければメールだけ伏せる(@codex P1)", async () => {
     guard.requireSaleDmAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "full", email: "masked" } });

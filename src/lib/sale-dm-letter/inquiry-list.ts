@@ -15,7 +15,7 @@ export interface InquiryListRow {
   handleStatus: string;
   handledAt: Date | null;
   handleNote: string | null;
-  /** 連絡先(電話・希望連絡方法・時間帯・要望)を権限不足で伏せたか */
+  /** 連絡先(電話・メール・希望連絡方法・時間帯・要望・対応メモ handleNote)を権限不足で伏せたか。対応メモは折り返し番号などを含みうるため一緒に伏せる(@codex P1) */
   contactHidden: boolean;
   /** メール(owner_email の表示レベル)を権限不足で伏せたか */
   emailHidden: boolean;
@@ -36,7 +36,7 @@ export function toInquiryListRows(rows: SourceRow[], visibility: InquiryVisibili
     .sort((a, b) => (ORDER[a.handleStatus] ?? 9) - (ORDER[b.handleStatus] ?? 9) || b.submittedAt.getTime() - a.submittedAt.getTime())
     .map((r) => {
       if (!visibility.contact) {
-        return { ...r, phone: null, email: null, contactPref: null, contactTime: null, message: null, contactHidden: true, emailHidden: true };
+        return { ...r, phone: null, email: null, contactPref: null, contactTime: null, message: null, handleNote: null, contactHidden: true, emailHidden: true };
       }
       if (!visibility.email) {
         return { ...r, email: null, contactHidden: false, emailHidden: true };
