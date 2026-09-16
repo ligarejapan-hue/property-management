@@ -60,7 +60,10 @@ export function toCanonicalUploadsSrc(
 function fmtYen(n: number): string {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
-/** 築年月：override（月精度）優先、無ければ建物の築年（"2015年"）。 */
+/**
+ * 築年月：override（月精度）優先、無ければ建物の築年（"2015年"）。
+ * ⚠ここは桁区切りを通さない（年は "2,018年" にしない・@codex #432 P2 の対象外）。
+ */
 function fmtBuiltYear(override?: string | null, builtYear?: number | null): string {
   if (override) return override;
   if (builtYear != null) return `${builtYear}年`;
@@ -80,7 +83,9 @@ function fmtAreaWithMethod(area?: string | null, method?: string | null): string
   if (!trimmed) return "";
   const s = trimmed.endsWith("㎡") ? trimmed.slice(0, -"㎡".length) : trimmed;
   const m = typeof method === "string" ? method.trim() : "";
-  return `${s}㎡${m ? `（${m}）` : ""}`;
+  // 「㎡（実測）」まで組み立ててから field-model へ渡すため、ここで区切らないと
+  // sheet-rows 側の桁区切りを素通りする(値が純粋な数字でなくなるため・@codex #432 P2)。
+  return `${groupDigits(s.trim())}㎡${m ? `（${m}）` : ""}`;
 }
 
 /**
@@ -126,7 +131,9 @@ function fmtPercent(v?: string | null): string {
   const s = typeof v === "string" ? v.trim() : "";
   if (!s) return "";
   const stripped = s.replace(/[%％]\s*$/, "").trimEnd();
-  return stripped ? `${stripped}％` : "";
+  // 建蔽率/容積率(unit"％"で sheet-rows が付ける欄)と表記を揃えるため、ここでも
+  // 同じ桁区切り・全角→半角の正規化を通す(@codex #432 P2 と同じ穴を残さない)。
+  return stripped ? `${groupDigits(stripped)}％` : "";
 }
 
 /**

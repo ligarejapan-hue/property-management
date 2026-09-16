@@ -207,3 +207,43 @@ describe("⑤-3 全角で入力された数字", () => {
     expect(formatValue(numField("万円"), "応談")).toBe("応談");
   });
 });
+
+// @codex #432 P2: 面積は fmtAreaWithMethod が「㎡（実測）」まで組み立ててから
+// field-model へ渡すため、単位の無い欄として formatValue を通っても素通しだった
+// (値が純粋な数字でなくなっているため)。合成する側で区切る。
+describe("⑤-4 注記が付く欄(面積)にも桁区切りを入れる", () => {
+  const rowsOf = (doc: { elements: unknown[] }) =>
+    (doc.elements as { type: string; rows?: { label: string; value: string }[] }[])
+      .filter((e) => e.type === "table")
+      .flatMap((e) => e.rows ?? []);
+  const rowValue = (doc: { elements: unknown[] }, label: string) =>
+    rowsOf(doc).find((r) => r.label === label)?.value;
+
+  it("土地面積(注記なし)", () => {
+    const doc = buildSaleHouseDocument({ ...base, overrides: { landArea: "1234.56" } } as never);
+    expect(rowValue(doc, "土地面積")).toBe("1,234.56㎡");
+  });
+
+  it("土地面積(「実測」などの注記つき)", () => {
+    const doc = buildSaleHouseDocument({
+      ...base,
+      overrides: { landArea: "1234.56", areaMethod: "実測" },
+    } as never);
+    expect(rowValue(doc, "土地面積")).toBe("1,234.56㎡（実測）");
+  });
+
+  it("全角で入力された面積も半角へ揃えて区切る", () => {
+    const doc = buildSaleHouseDocument({ ...base, overrides: { landArea: "１２３４．５６" } } as never);
+    expect(rowValue(doc, "土地面積")).toBe("1,234.56㎡");
+  });
+
+  it("単位まで入力されていても二重にしない", () => {
+    const doc = buildSaleHouseDocument({ ...base, overrides: { landArea: "1234.56㎡" } } as never);
+    expect(rowValue(doc, "土地面積")).toBe("1,234.56㎡");
+  });
+
+  it("築年月は数字だけでも区切らない(「2,018年」にしない)", () => {
+    const doc = buildSaleHouseDocument({ ...base, overrides: { builtYearMonth: "2018" } } as never);
+    expect(rowValue(doc, "築年月")).toBe("2018");
+  });
+});
