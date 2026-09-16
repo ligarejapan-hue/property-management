@@ -120,6 +120,9 @@ export function repackKeepingSizes(
   const n = sizes.length;
   if (n === 0) return [];
   const gap = PHOTO_GAP_MM;
+  // 行を折り返すかの判定の許容誤差(mm)。浮動小数の誤差で、ぴったり1行に収まる並び
+  // (作成直後の同寸格子など)が折り返されないようにする。境目の計算も同じ値を使う。
+  const WRAP_EPS = 1e-9;
   const order: number[] = [];
   if (heroIndex !== null && heroIndex >= 0 && heroIndex < n) order.push(heroIndex);
   for (let i = 0; i < n; i++) if (i !== heroIndex) order.push(i);
@@ -136,7 +139,7 @@ export function repackKeepingSizes(
         h = Math.max(MIN_PHOTO_CELL_MM, (h * W) / w);
         w = W;
       }
-      if (x > 0 && x + w > W + 1e-9) {
+      if (x > 0 && x + w > W + WRAP_EPS) {
         x = 0;
         y += rowH + gap;
         rowH = 0;
@@ -164,7 +167,8 @@ export function repackKeepingSizes(
     let sum = sizes[order[r]].w;
     for (let i = r + 1; i < n; i++) {
       sum += sizes[order[i]].w;
-      const bp = (W - gap * (i - r)) / sum;
+      // 折り返し判定(x + w > W + WRAP_EPS)と同じ許容誤差で境目を出す。
+      const bp = (W + WRAP_EPS - gap * (i - r)) / sum;
       if (bp > 0 && bp < 1) cuts.add(bp);
     }
   }
@@ -173,7 +177,10 @@ export function repackKeepingSizes(
   for (let j = 0; j < sorted.length - 1; j++) {
     const hi = sorted[j];
     const lo = sorted[j + 1];
-    const justAboveLo = lo + (hi - lo) * 1e-9;
+    // 区間の下端のすぐ上。刻みが小さすぎると浮動小数で下端と同じ折り返し方のまま評価して
+    // しまい、入りきる区間を丸ごと見落とす(@codex #433 P2)。境目は許容誤差込みで出して
+    // あるので、下端から 1e-7(区間が狭ければ真ん中)だけ内側を試す。
+    const justAboveLo = lo + Math.min((hi - lo) / 2, 1e-7);
     if (!fits(justAboveLo)) continue;
     if (fits(hi)) return place(hi).cells;
     let a = justAboveLo;

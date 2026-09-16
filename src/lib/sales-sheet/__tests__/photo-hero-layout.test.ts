@@ -184,14 +184,34 @@ describe("repackKeepingSizes — 必要以上に縮めない(行の区切りが�
   /** 結果の縮小率(1枚目の幅の比)。 */
   const scaleOf = (cells: PhotoCell[], sizes: { w: number; h: number }[]) => cells[0].w / sizes[0].w;
 
-  /** 細かく刻んで全部試したときの「入りきる最大の縮小率」(照合用・遅くてよい)。 */
-  function bruteForceMaxScale(sizes: { w: number; h: number }[], heroIndex: number | null): number {
-    for (let k = 10000; k >= 1; k--) {
-      const s = k / 10000;
-      const scaled = sizes.map((z) => ({ w: z.w * s, h: z.h * s }));
-      const cells = repackKeepingSizes(scaled, heroIndex, W, H);
-      // 縮めなくても入る=その縮小率で入りきる
-      if (cells.every((c, i) => Math.abs(c.w - scaled[i].w) < 1e-9 && Math.abs(c.h - scaled[i].h) < 1e-9)) return s;
+  /**
+   * 照合用の「入りきる最大の縮小率」。検査対象(repackKeepingSizes)を呼ばず、同じ規則の
+   * 棚詰めをここで素朴に書き直して細かく刻んで全部試す(独立した物差し)。
+   * 規則: 主役が先頭・残りは配列順/1行に並べて幅 W を超えたら次の行(誤差 1e-9 を許す)/
+   * 行の高さ=その行の最大の高さ/行間=間隔。
+   */
+  function bruteForceMaxScale(sizes: { w: number; h: number }[], heroIndex: number | null, steps = 20000): number {
+    const order = heroIndex !== null ? [heroIndex, ...sizes.map((_, i) => i).filter((i) => i !== heroIndex)] : sizes.map((_, i) => i);
+    const heightAt = (sc: number): number => {
+      let x = 0;
+      let y = 0;
+      let rowH = 0;
+      for (const i of order) {
+        const w = sizes[i].w * sc;
+        const h = sizes[i].h * sc;
+        if (x > 0 && x + w > W + 1e-9) {
+          x = 0;
+          y += rowH + PHOTO_GAP_MM;
+          rowH = 0;
+        }
+        x += w + PHOTO_GAP_MM;
+        rowH = Math.max(rowH, h);
+      }
+      return y + rowH;
+    };
+    for (let k = steps; k >= 1; k--) {
+      const sc = k / steps;
+      if (heightAt(sc) <= H + 1e-9) return sc;
     }
     return 0;
   }
@@ -207,6 +227,20 @@ describe("repackKeepingSizes — 必要以上に縮めない(行の区切りが�
     assertNoOverlapInside(cells);
   });
 
+  // @codex #433 P2(2巡目): 境目のすぐ上を試す刻みが、行の折り返し判定の許容誤差より小さいと
+  // 折り返し方が変わらず、入りきる区間を丸ごと見落としていた(0.81 倍で入るのに 0.59 倍)。
+  it("指摘の例: 96×29 / 53×95 / 74×149 は約 0.81 倍で収まる(0.59 倍まで縮めない)", () => {
+    const sizes = [
+      { w: 96, h: 29 },
+      { w: 53, h: 95 },
+      { w: 74, h: 149 },
+    ];
+    const cells = repackKeepingSizes(sizes, null, W, H);
+    assertNoOverlapInside(cells);
+    expect(scaleOf(cells, sizes)).toBeGreaterThan(0.808);
+    expect(scaleOf(cells, sizes)).toBeGreaterThanOrEqual(bruteForceMaxScale(sizes, null) - 1e-9);
+  });
+
   it("総当たりの最大値と一致する(大きさの組み合わせ多数)", () => {
     // 決定的な擬似乱数で大きさの組み合わせを作る
     let seed = 12345;
@@ -214,14 +248,14 @@ describe("repackKeepingSizes — 必要以上に縮めない(行の区切りが�
       seed = (seed * 1103515245 + 12345) % 2147483648;
       return seed / 2147483648;
     };
-    for (let t = 0; t < 40; t++) {
+    for (let t = 0; t < 1500; t++) {
       const n = 2 + Math.floor(rand() * 5);
       const sizes = Array.from({ length: n }, () => ({ w: 20 + rand() * 100, h: 20 + rand() * 120 }));
       const hero = rand() < 0.5 ? null : Math.floor(rand() * n);
       const cells = repackKeepingSizes(sizes, hero, W, H);
       assertNoOverlapInside(cells);
       const got = scaleOf(cells, sizes);
-      const best = Math.min(1, bruteForceMaxScale(sizes, hero));
+      const best = Math.min(1, bruteForceMaxScale(sizes, hero, 2000));
       expect(got, `case ${t} n=${n} hero=${hero}`).toBeGreaterThanOrEqual(best - 1e-9);
     }
   });
