@@ -26,6 +26,7 @@ import {
   addQrElement,
   addMapQrElement,
   autoArrangePhotos,
+  isInitialPhotoGrid,
   autoBalanceLayout,
   setAsFloorPlan,
   unsetFloorPlan,
@@ -241,12 +242,24 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     return out;
   }
 
-  // マウント時に全 image(間取り図も含む)の実寸比を先読みしてキャッシュを暖める。fire-and-forget。
+  // マウント時に全 image(間取り図も含む)の実寸比を先読みしてキャッシュを暖める。
+  // 併せて、作成直後(人がまだ写真に触っていない)の図面なら一度だけ「自動整列」と同じ
+  // 並びへ寄せる(発注者判断 2026-09-16)。作成時はサーバーに実寸比が無く均等グリッドで
+  // 置くしかないため、枚数によっては縦積みの細長い帯になっていた。
+  // 触った後・整列済みの図面は isInitialPhotoGrid が false になり組み替えない。
   useEffect(() => {
-    for (const el of initial.document.elements) {
-      if (el.type === "image") void measureAspect(el.src);
-    }
-    // 初回のみ暖める(以後は写真追加/自動整列/測定で更新)。
+    let cancelled = false;
+    void (async () => {
+      const aspects = await measureGalleryAspects(initial.document);
+      if (cancelled) return;
+      setEditorState((prev) =>
+        isInitialPhotoGrid(prev.document) ? autoArrangePhotos(prev, { aspects }) : prev,
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // 初回のみ(以後は写真追加/自動整列/測定で更新)。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -52,7 +52,7 @@ describe("splitMainDetailRows", () => {
       { label: "所在地", value: "東京都練馬区富士見台二丁目" },
       { label: "各階面積", value: "1階 50㎡ / 2階 48.5㎡" },
       { label: "接道", value: "東 / 公道 / 幅員5.0m" },
-      { label: "建蔽率/容積率", value: "60％ / 200％" },
+      { label: "建蔽率・容積率", value: "60％ / 200％" },
     ]);
   });
   it("詳細: うち消費税は課税のときだけ", () => {
@@ -63,7 +63,7 @@ describe("splitMainDetailRows", () => {
     const { main, detail } = splitMainDetailRows("land", LAND_FIELDS, { roadKind: "公道", roadWidth: "4", coverageRatio: "60", floorRatio: "200" });
     expect(main.find((r) => r.label === "接道")?.value).toBe("公道 / 幅員4m");
     expect(detail.map((r) => r.label)).not.toContain("接道");
-    expect(detail.map((r) => r.label)).not.toContain("建蔽率/容積率");
+    expect(detail.map((r) => r.label)).not.toContain("建蔽率・容積率");
   });
 });
 

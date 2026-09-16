@@ -98,10 +98,13 @@ function renderElement(el: SalesSheetElement): string {
     // (boxStyle)に持たせ、<table> 自身には height を与えない。<table> に height を
     // 直接指定すると、ブラウザが余った高さを各行へ均等配分し、行数が少ない表(詳細表など)で
     // 行間が間延びする([Fix round 1]・コントローラ裁定)。
+    // 例外: style.fillHeight を明示した表(消費者向けひな型の主要表)だけは height:100% を
+    // 与え、その均等配分をあえて使って枠の底まで埋める(発注者判断 2026-09-16)。
     if (s.borderless) {
       const wrapperStyle = inlineStyle(boxStyle(el));
       const tableStyle = inlineStyle({
         width: "100%",
+        ...(s.fillHeight ? { height: "100%" } : {}),
         "border-collapse": "collapse",
         "table-layout": "fixed",
         "font-size": s.fontSizePt ? `${s.fontSizePt}pt` : null,

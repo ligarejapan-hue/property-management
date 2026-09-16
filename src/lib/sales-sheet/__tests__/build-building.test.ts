@@ -64,7 +64,7 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
   it("表題はkindで二分岐(一棟マンション/一棟アパート)、kind未指定は一棟マンション", () => {
     const mansion = buildSaleBuildingDocument({ ...base, kind: "mansion", overrides: { price: "39800" } });
     expect(findEl(mansion, "heading")).toMatchObject({ content: "一棟マンション" });
-    expect(findEl(mansion, "price")).toMatchObject({ content: "39800万円" });
+    expect(findEl(mansion, "price")).toMatchObject({ content: "39,800万円" });
 
     const apartment = buildSaleBuildingDocument({ ...base, kind: "apartment", overrides: { price: "18000" } });
     expect(findEl(apartment, "heading")).toMatchObject({ content: "一棟アパート" });
@@ -160,9 +160,9 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
     expect(tableRow(doc, "用途地域")).toBe("商業地域 / 近隣商業地域");
   });
 
-  it("建蔽率/容積率/接道種別/接道幅員を自動反映する(詳細表に集約)", () => {
+  it("建蔽率・容積率/接道種別/接道幅員を自動反映する(詳細表に集約)", () => {
     const doc = buildSaleBuildingDocument({ ...base, overrides: {} });
-    expect(tableRow(doc, "建蔽率/容積率")).toBe("80％ / 400％");
+    expect(tableRow(doc, "建蔽率・容積率")).toBe("80％ / 400％");
     expect(tableRow(doc, "接道")).toBe("公道 / 幅員6.0m");
   });
 

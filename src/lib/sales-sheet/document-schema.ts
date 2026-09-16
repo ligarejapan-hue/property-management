@@ -56,6 +56,11 @@ export const tableElementSchema = z.object({
       borderColor: z.string().refine(isCssColor, "unsafe color").optional(),
       /** 罫線を出さない(消費者向けひな型)。未指定=従来どおり罫線あり。 */
       borderless: z.boolean().optional(),
+      /**
+       * 行の間隔を均等に広げて枠の底まで埋める(消費者向けひな型の主要表)。borderless の
+       * 表にのみ効く。行数が少ない表(詳細表)に付けると間延びするため opt-in。
+       */
+      fillHeight: z.boolean().optional(),
       /** 偶数行(2,4,…行目)のセル背景色。 */
       stripeColor: z.string().refine(isCssColor, "unsafe color").optional(),
       /** セル余白(mm)。上下=値・左右=値×1.2。未指定=0.5mm 1mm。 */

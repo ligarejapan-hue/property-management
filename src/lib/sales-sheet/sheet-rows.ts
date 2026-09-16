@@ -3,6 +3,18 @@ import type { SheetField } from "./field-model";
 export type SheetValue = string | string[] | undefined;
 export type SheetValues = Record<string, SheetValue>;
 
+/** 半角/全角いずれかの数字を含むか。単位を付けてよい値かの判定に使う。 */
+const DIGIT_RE = /[0-9０-９]/;
+
+/**
+ * 数量ではない値（「なし」「無」「－」「相談」等）に単位を付けない。number ウィジェットでも
+ * 自由入力なので「なし」と書かれることがあり、従来は unit をそのまま足して
+ * 「私道負担 なし㎡」になっていた。build-document.ts の fmtValueWithUnit も同じ判定を使う。
+ */
+export function unitApplies(value: string): boolean {
+  return DIGIT_RE.test(value);
+}
+
 /**
  * value が既に unit の末尾一致で終わっている場合は付け直さない（build-document.ts の
  * fmtValueWithUnit と同じ厳密な末尾一致判定）。自由入力の number フィールド（価格/
@@ -17,6 +29,7 @@ export function formatValue(field: SheetField, v: SheetValue): string {
   if (!s) return "";
   if (!field.unit) return s;
   if (s.endsWith(field.unit)) return s;
+  if (!unitApplies(s)) return s;
   return `${s}${field.unit}`;
 }
 

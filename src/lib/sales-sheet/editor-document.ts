@@ -734,6 +734,32 @@ function isA4Landscape(document: SalesSheetDocument): boolean {
 }
 
 /**
+ * 作成直後(build-document の packPhotoCells グリッド)のまま、まだ誰も写真に触っていないか。
+ *
+ * 作成時はサーバーに写真の実寸比が無いため均等グリッドで置くしかなく、枚数によっては
+ * 縦積みの細長い帯になる。実寸比が分かるのはブラウザで描画したときだけなので、編集画面を
+ * 最初に開いた一度だけ autoArrangePhotos(=「自動整列」ボタン)へ寄せる。その門番。
+ * 人が1枚でも動かす/大きさを変える、または一度整列した後は false になり、以後の open で
+ * 紙面を勝手に組み替えない。純関数。
+ */
+export function isInitialPhotoGrid(document: SalesSheetDocument): boolean {
+  if (!isConsumerTemplate(document) || !isA4Landscape(document)) return false;
+  const images = document.elements.filter((e): e is ImageElement => e.type === "image");
+  if (images.length === 0) return false;
+  const zone = CONSUMER_PHOTO_ZONE;
+  const cells = packPhotoCells(images.length, zone.w, zone.h);
+  return images.every((el, i) => {
+    const c = cells[i];
+    return (
+      nearlyEqual(el.x, zone.x + c.x) &&
+      nearlyEqual(el.y, zone.y + c.y) &&
+      nearlyEqual(el.w, c.w) &&
+      nearlyEqual(el.h, c.h)
+    );
+  });
+}
+
+/**
  * 写真と間取り図(type=image すべて)を写真枠(CONSUMER_PHOTO_ZONE)へモザイク配置で並べ直す。
  * - 旧ひな型・A4横以外は同一参照。
  * - 並び順=配列順(代表写真が先頭)。opts.appendedId は末尾。

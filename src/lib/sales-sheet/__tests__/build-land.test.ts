@@ -225,7 +225,7 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
   it("表題は「売土地」固定、価格はoverride×万円", () => {
     const doc = buildSaleLandDocument({ ...base, overrides: { price: "3480" } });
     expect(findEl(doc, "heading")).toMatchObject({ content: "売土地" });
-    expect(findEl(doc, "price")).toMatchObject({ content: "3480万円" });
+    expect(findEl(doc, "price")).toMatchObject({ content: "3,480万円" });
   });
 
   it("価格にすでに「万円」が付いていても二重化しない(現行の売土地ダイアログは自由入力のため単位まで入力されうる・@codex Important fix)", () => {
@@ -257,7 +257,7 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
       ...base,
       overrides: { price: "3480", landArea: "150.5", areaMethod: "実測" },
     });
-    expect(findEl(doc, "price")).toMatchObject({ content: "3480万円" });
+    expect(findEl(doc, "price")).toMatchObject({ content: "3,480万円" });
     expect(tableRow(doc, "土地面積")).toBe("150.5㎡（実測）");
   });
 
