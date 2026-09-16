@@ -7,6 +7,7 @@ import { buildLpRenderInput } from "./lp-render-input";
 import { renderLpPage } from "./lp-page";
 import { loadSaleDmPublicPageConfig } from "./config-store";
 import { buildUnsubscribeToken, buildUnsubscribeUrl, deriveUnsubscribeKey } from "./unsubscribe-token";
+import { DEFAULT_PRIVACY_TEXT } from "./privacy-text";
 
 const SELECT = {
   // id / propertyId は PII ではない(内部の識別子)。ページを実際に返せたときだけ立てる
@@ -80,6 +81,12 @@ export async function loadLpPageData(client: LpPageClientLike, token: string): P
       mode,
       unsubscribeUrl: mode === "live" ? unsubscribeUrlFor(row.trackingToken, trackingBaseUrl) : null,
       phoneTapToken: mode === "live" ? row.trackingToken : null,
+      // 送信先は QR の token 配下(nginx の公開範囲 /t/ の中に収まる)。送付前は送信不可(受け口でも 409)。
+      form: {
+        action: `/t/${encodeURIComponent(row.trackingToken)}/inquiry`,
+        privacyText: cfg.privacyText ?? DEFAULT_PRIVACY_TEXT,
+        disabled: mode !== "live",
+      },
     },
   );
   return { kind: "page", html: renderLpPage(input), status: row.status, draftId: row.id, propertyId: row.propertyId };

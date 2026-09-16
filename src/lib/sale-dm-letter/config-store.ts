@@ -71,16 +71,18 @@ export async function loadSaleDmPublicPageConfig(): Promise<{
   senderContact: string | null;
   trackingBaseUrl: string | undefined;
   lpPublicEnabled: boolean;
+  privacyText: string | null;
 }> {
   let db: {
     senderName: string | null; senderContact: string | null; trackingBaseUrl: string | null;
+    privacyText: string | null;
   } | null = null;
   try {
     db = await prisma.saleDmConfig.findUnique({
       where: { id: SALE_DM_CONFIG_ID },
-      // ← 送付元表示/追跡base列のみ。秘匿(キー)列は取得しない。lpPublicEnabled は DB列を持たない
+      // ← 送付元表示/追跡base/同意文の列のみ。秘匿(キー)列は取得しない。lpPublicEnabled は DB列を持たない
       // (env 専用のロールアウトゲート)ため select にも含めない。
-      select: { senderName: true, senderContact: true, trackingBaseUrl: true },
+      select: { senderName: true, senderContact: true, trackingBaseUrl: true, privacyText: true },
     });
   } catch {
     db = null; // DB未接続/テーブル無等は env フォールバック(fail-safe)。
@@ -94,5 +96,7 @@ export async function loadSaleDmPublicPageConfig(): Promise<{
     trackingBaseUrl: resolveTrackingBaseUrl({ trackingBaseUrl: pick(db?.trackingBaseUrl, env.trackingBaseUrl) }),
     // DB列は無い(env 専用のロールアウトゲート)。DB経路は env 値をそのまま通すだけ。
     lpPublicEnabled: env.lpPublicEnabled,
+    // env フォールバックは持たない=同意文は画面から設定する。
+    privacyText: db?.privacyText && db.privacyText.trim().length > 0 ? db.privacyText : null,
   };
 }

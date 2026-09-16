@@ -65,7 +65,7 @@ describe("splitBodyIntoSections", () => {
 
 describe("buildLpRenderInput", () => {
   it("差し込み済みの見出し/リード・節ごとの枠・ヒーロー・会社案内・電話を組み立てる", () => {
-    const out = buildLpRenderInput(rows(), { mode: "live", unsubscribeUrl: "https://lp.example.com/u/x", phoneTapToken: "tok" });
+    const out = buildLpRenderInput(rows(), { mode: "live", unsubscribeUrl: "https://lp.example.com/u/x", phoneTapToken: "tok", form: null });
     expect(out.headline).toBe("ご所有の戸建のご売却について");
     expect(out.lead).toBe("東京都世田谷区経堂周辺で売却をご検討の方へ");
     expect(out.intro).toEqual(["はじめに一言。"]);
@@ -82,20 +82,26 @@ describe("buildLpRenderInput", () => {
       { slot: "hero", heading: null, figureKind: null, asset: { publicId: "z".repeat(32), width: 1, height: 1, deletedAt: new Date() } },
       { slot: "section", heading: "売却の進め方", figureKind: "nope", asset: null },
       { slot: "section", heading: "無い見出し", figureKind: "sale_flow", asset: null },
-    ] }), { mode: "preview", unsubscribeUrl: null, phoneTapToken: null });
+    ] }), { mode: "preview", unsubscribeUrl: null, phoneTapToken: null, form: null });
     expect(out.hero).toBeNull();
     expect(out.sections.map((s) => s.media)).toEqual([null, null]);
   });
   it("所在が読めない物件でも波括弧は出ない・faqJson が壊れていれば空配列", () => {
-    const out = buildLpRenderInput(rows({ property: { address: null, propertyType: null }, variant: { ...rows().variant, faqJson: "broken" } }), { mode: "live", unsubscribeUrl: null, phoneTapToken: "t" });
+    const out = buildLpRenderInput(rows({ property: { address: null, propertyType: null }, variant: { ...rows().variant, faqJson: "broken" } }), { mode: "live", unsubscribeUrl: null, phoneTapToken: "t", form: null });
     expect(out.headline).toBe("ご所有の不動産のご売却について");
     expect(out.lead).not.toMatch(/[{}]/);
     expect(out.faq).toEqual([]);
   });
   it("入力型のキー集合は固定(氏名・番地・所有者住所・token 以外の識別子が増えたら落ちる)", () => {
-    const out = buildLpRenderInput(rows(), { mode: "live", unsubscribeUrl: null, phoneTapToken: "t" });
+    const out = buildLpRenderInput(rows(), { mode: "live", unsubscribeUrl: null, phoneTapToken: "t", form: null });
     expect(Object.keys(out).sort()).toEqual([...LP_RENDER_INPUT_KEYS].sort());
     expect(LP_RENDER_INPUT_KEYS).toEqual(["mode", "headline", "lead", "intro", "sections", "faq", "hero", "company", "unsubscribeUrl", "phoneTapToken", "form"]);
     for (const k of LP_RENDER_INPUT_KEYS) expect(/name|zip|address|owner|recipient/i.test(k) && k !== "company").toBe(false);
+  });
+  it("form は opts から素通しで渡る(PII を足さない)", () => {
+    const form = { action: "/t/tok/inquiry", privacyText: "文", disabled: false };
+    const out = buildLpRenderInput(rows(), { mode: "live", unsubscribeUrl: null, phoneTapToken: "tok", form });
+    expect(out.form).toEqual(form);
+    expect(Object.keys(out).sort()).toEqual([...LP_RENDER_INPUT_KEYS].sort());
   });
 });

@@ -111,3 +111,48 @@ describe("LP_PAGE_HEADERS", () => {
     expect(csp).toContain("frame-ancestors 'none'");
   });
 });
+
+describe("申込フォーム(PR4)", () => {
+  const FORM = { action: "/t/tok_live/inquiry", privacyText: "利用目的は査定のご連絡です。\n<script>x</script>", disabled: false };
+
+  it("フォームあり: 送信先・必須欄・上限・隠し欄・同意・固定文言のボタン", () => {
+    const html = renderLpPage(input({ mode: "live", form: FORM }));
+    expect(html).toContain('<form method="post" action="/t/tok_live/inquiry"');
+    expect(html).toMatch(/name="name"[^>]*required[^>]*maxlength="50"/);
+    expect(html).toMatch(/name="phone"[^>]*type="tel"[^>]*required[^>]*maxlength="20"/);
+    expect(html).toMatch(/name="email"[^>]*type="email"[^>]*maxlength="254"/);
+    expect(html).toMatch(/name="contactTime"[^>]*maxlength="60"/);
+    expect(html).toMatch(/<textarea[^>]*name="message"[^>]*maxlength="1000"/);
+    expect(html).toMatch(/name="website"[^>]*tabindex="-1"/);
+    expect(html).toMatch(/type="checkbox" name="consent" value="yes" required/);
+    expect(html).toContain(`>${LP_CTA_LABEL}</button>`);
+  });
+
+  it("同意文は escape し、改行だけ <br />", () => {
+    const html = renderLpPage(input({ mode: "live", form: FORM }));
+    expect(html).toContain("利用目的は査定のご連絡です。<br />&lt;script&gt;x&lt;/script&gt;");
+  });
+
+  it("CTA(本文中・固定バー)はフォームへ飛ぶ。フォームが無ければ従来どおり会社案内へ", () => {
+    expect(renderLpPage(input({ mode: "live", form: FORM }))).toContain('href="#inquiry"');
+    const without = renderLpPage(input({ mode: "live", form: null }));
+    expect(without).toContain('href="#contact"');
+    expect(without).not.toContain("<form");
+  });
+
+  it("送付前(disabled): fieldset disabled で送信不可", () => {
+    const html = renderLpPage(input({ mode: "preview", form: { ...FORM, action: "#", disabled: true } }));
+    expect(html).toContain("<fieldset disabled>");
+  });
+
+  it("入力欄の文字は16px以上(iOS の自動拡大を起こさない)", () => {
+    const html = renderLpPage(input({ mode: "live", form: FORM }));
+    expect(html).toMatch(/\.inquiry input,\.inquiry textarea\{[^}]*font-size:16px/);
+  });
+
+  it("参照元方針は same-origin(no-referrer だとフォーム送信の Origin が null になる)", () => {
+    const html = renderLpPage(input({ mode: "live", form: FORM }));
+    expect(html).toContain('<meta name="referrer" content="same-origin" />');
+    expect(html).not.toContain("no-referrer");
+  });
+});

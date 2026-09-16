@@ -11,6 +11,8 @@ import { isFigureKind, type FigureKind } from "./lp-figures";
 export type LpMode = "live" | "preview";
 export interface LpImage { publicId: string; width: number; height: number }
 export type LpSectionMedia = { kind: "asset"; image: LpImage } | { kind: "figure"; figureKind: FigureKind } | null;
+/** 申込フォームの描画入力。action=送信先(/t/<token>/inquiry・社内プレビューは "#")。disabled=送付前(送信不可)。 */
+export interface LpFormInput { action: string; privacyText: string; disabled: boolean }
 export interface LpRenderInput {
   mode: LpMode;
   headline: string;
@@ -22,7 +24,7 @@ export interface LpRenderInput {
   company: { name: string | null; contact: string | null; phone: string | null };
   unsubscribeUrl: string | null;
   phoneTapToken: string | null;
-  form: null;
+  form: LpFormInput | null;
 }
 export const LP_RENDER_INPUT_KEYS = ["mode", "headline", "lead", "intro", "sections", "faq", "hero", "company", "unsubscribeUrl", "phoneTapToken", "form"] as const satisfies readonly (keyof LpRenderInput)[];
 
@@ -87,7 +89,7 @@ function toImage(asset: LpSourceRows["media"][number]["asset"]): LpImage | null 
   return { publicId: asset.publicId, width: asset.width, height: asset.height };
 }
 
-export function buildLpRenderInput(rows: LpSourceRows, opts: { mode: LpMode; unsubscribeUrl: string | null; phoneTapToken: string | null }): LpRenderInput {
+export function buildLpRenderInput(rows: LpSourceRows, opts: { mode: LpMode; unsubscribeUrl: string | null; phoneTapToken: string | null; form: LpFormInput | null }): LpRenderInput {
   const values = { location: coarsePropertyLocation(rows.property.address), propertyType: propertyTypeLabel(rows.property.propertyType) };
   const { intro, sections } = splitBodyIntoSections(rows.variant.bodyText);
   const heroRow = rows.media.find((m) => m.slot === "hero");
@@ -112,6 +114,6 @@ export function buildLpRenderInput(rows: LpSourceRows, opts: { mode: LpMode; uns
     company: { name: rows.company.senderName, contact: rows.company.senderContact, phone: extractPhone(rows.company.senderContact) },
     unsubscribeUrl: opts.unsubscribeUrl,
     phoneTapToken: opts.phoneTapToken,
-    form: null,
+    form: opts.form,
   };
 }
