@@ -103,6 +103,17 @@ export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: S
   const activeUnloaded = counts !== null && activeItems.length < counts.active;
   const doneUnloaded = counts !== null && doneItems.length < counts.done;
 
+  // 先頭ページから読み直す(再読み込みと同じ見た目)。
+  const refreshButton = (
+    <button
+      type="button"
+      onClick={() => void load()}
+      className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+    >
+      最新に更新
+    </button>
+  );
+
   const renderList = (list: SaleDmInquiry[]) => (
     <ul className="divide-y divide-gray-100 dark:divide-gray-800" data-pii-protected data-pii-surface="owner">
       {list.map((i) => (
@@ -169,9 +180,16 @@ export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: S
           </h3>
           {openCount > 0 && <span className="text-xs text-gray-500">表示中の未対応 {openCount}件</span>}
         </div>
-        {activeUnloaded && (
+        {activeUnloaded && nextCursor !== null && (
           <p className="mb-1 text-xs text-amber-700 dark:text-amber-400">
             まだ読み込んでいない古い申込にも対応が必要なものがあります。下の「さらに読み込む」で表示します。
+          </p>
+        )}
+        {/* 最後のページまで読んだのに足りない=一覧を開いた後に届いた新しい申込(先頭ページより前に並ぶ)。 */}
+        {activeUnloaded && nextCursor === null && (
+          <p className="mb-1 flex flex-wrap items-center gap-2 text-xs text-amber-700 dark:text-amber-400">
+            <span>新しい申込が届いています。</span>
+            {refreshButton}
           </p>
         )}
         {items === null && !error ? (
@@ -201,8 +219,14 @@ export default function SaleDmInquiryList({ campaign, reloadKey }: { campaign: S
               {doneItems.length > 0
                 ? renderList(doneItems)
                 : counts?.done === 0 && <p className="py-4 text-center text-sm text-gray-500">対応済みの申込はありません</p>}
-              {doneUnloaded && (
+              {doneUnloaded && nextCursor !== null && (
                 <p className="mt-1 text-xs text-gray-500">古い対応済みの申込は「さらに読み込む」で表示します。</p>
+              )}
+              {doneUnloaded && nextCursor === null && (
+                <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                  <span>一覧を開いた後に状態が変わった申込があります。</span>
+                  {refreshButton}
+                </p>
               )}
             </>
           )}

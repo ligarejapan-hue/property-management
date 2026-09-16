@@ -58,4 +58,13 @@ describe("申込の社内画面", () => {
     expect(fetcher).not.toContain("nextOffset");
     expect(fetcher).not.toContain("?offset=");
   });
+  it("最後まで読んでも件数に足りない(開いた後に新しい申込・状態の変更)ときは「最新に更新」を出す", () => {
+    expect(panel).toContain("新しい申込が届いています");
+    expect(panel).toContain("一覧を開いた後に状態が変わった申込があります");
+    expect(panel).toContain("最新に更新");
+    // 古い行の案内は「さらに読み込む」が残っているときだけ
+    expect(panel).toMatch(/activeUnloaded\s*&&\s*nextCursor\s*!==\s*null/);
+    expect(panel).toMatch(/activeUnloaded\s*&&\s*nextCursor\s*===\s*null/);
+    expect(panel).toMatch(/doneUnloaded\s*&&\s*nextCursor\s*===\s*null/);
+  });
 });
