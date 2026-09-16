@@ -148,6 +148,30 @@ describe("申込フォーム(PR4)", () => {
   it("送付前(disabled): fieldset disabled で送信不可", () => {
     const html = renderLpPage(input({ mode: "preview", form: { ...FORM, action: "#", disabled: true } }));
     expect(html).toContain("<fieldset disabled>");
+    // 送信用のスクリプト(fetch)も出さない
+    expect(html).not.toContain("fetch(f.action");
+    expect(html).not.toContain("preventDefault");
+  });
+
+  it("JS あり: 画面を離れずに送信し、サーバーの指摘は送信ボタンの上に出す(入力は残る)", () => {
+    const html = renderLpPage(input({ mode: "live", form: FORM }));
+    // 状態表示の場所は送信ボタンの直前
+    expect(html).toContain('<div class="inq-msg" role="alert" aria-live="assertive" hidden></div><button type="submit"');
+    expect(html).toContain("preventDefault");
+    expect(html).toContain('"accept":"application/json"');
+    expect(html).toContain('"content-type":"application/x-www-form-urlencoded;charset=UTF-8"');
+    expect(html).toContain('credentials:"same-origin"');
+    // fetch / URLSearchParams が無いブラウザは通常の送信に任せる
+    expect(html).toMatch(/if\(!window\.fetch\|\|!window\.URLSearchParams\|\|!window\.FormData\)/);
+    expect(html).toContain("お申し込みを受け付けました。内容を確認のうえ、担当者からご連絡いたします。");
+    expect(html).toContain("まだお申し込みを受け付けていません。お急ぎの場合はお電話ください。");
+    expect(html).toContain("アクセスが集中しています。しばらく時間をおいてもう一度お試しください。");
+    expect(html).toContain("お申し込みを完了できませんでした。少し時間をおいてもう一度お試しいただくか、お電話ください。");
+    // DOM は textContent/createElement だけで組む
+    expect(html).not.toContain("innerHTML");
+    expect(html).toContain('window.addEventListener("pageshow"');
+    expect(html).toMatch(/\.inq-msg\{[^}]*color:#a8481a/);
+    expect(html).toMatch(/\.inq-done\{/);
   });
 
   it("入力欄の文字は16px以上(iOS の自動拡大を起こさない)", () => {

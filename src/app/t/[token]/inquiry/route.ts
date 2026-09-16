@@ -54,8 +54,40 @@ const TOKEN_FORMAT = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_BODY_BYTES = 32 * 1024;
 const FORM_CONTENT_TYPE = "application/x-www-form-urlencoded";
 
-function html(body: string, status: number): NextResponse {
-  return new NextResponse(body, { status, headers: { ...PUBLIC_PAGE_HEADERS } });
+type ReplyKind = "done" | "invalid" | "preview" | "unavailable" | "busy" | "throttled";
+
+// accept: application/json のとき(LP の送信スクリプト)の応答ヘッダ。入力値は JSON にも入れない。
+const JSON_HEADERS: Readonly<Record<string, string>> = {
+  "Content-Type": "application/json; charset=utf-8",
+  "Cache-Control": "no-store",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "same-origin",
+};
+
+function renderReplyPage(kind: ReplyKind, messages: readonly string[], backHref: string): string {
+  switch (kind) {
+    case "done": return renderInquiryDonePage();
+    case "invalid": return renderInquiryInvalidPage(messages, backHref);
+    case "preview": return renderInquiryPreviewPage();
+    case "unavailable": return renderInquiryUnavailablePage();
+    case "busy": return renderInquiryBusyPage();
+    case "throttled": return renderInquiryThrottledPage();
+  }
+}
+
+/** 結果の返し方を1か所に。JS 送信(accept: application/json)は画面を離れないよう JSON、
+ *  それ以外(JS なしの通常送信)は従来どおり HTML ページ。状態コードは両方同じ。 */
+function createResponder(wantsJson: boolean, backHref: string) {
+  return (kind: ReplyKind, status: number, messages: readonly string[] = []): NextResponse => {
+    if (wantsJson) {
+      const payload = kind === "invalid" ? { result: kind, messages } : { result: kind };
+      return new NextResponse(JSON.stringify(payload), { status, headers: { ...JSON_HEADERS } });
+    }
+    return new NextResponse(renderReplyPage(kind, messages, backHref), {
+      status,
+      headers: { ...PUBLIC_PAGE_HEADERS },
+    });
+  };
 }
 
 /** 本文を上限つきで読む。上限を超えた時点で読むのをやめて 413(content-length の無い分割送信も含む)。 */
@@ -94,17 +126,20 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> },
 ) {
+  const { token } = await params;
+  const wantsJson = (req.headers.get("accept") ?? "").toLowerCase().includes("application/json");
+  const reply = createResponder(wantsJson, `/t/${encodeURIComponent(token)}#inquiry`);
+
   if (!ipLimiter.hit(`inq-ip:${clientRateKey(req.headers)}`)) {
-    return html(renderInquiryThrottledPage(), 429);
+    return reply("throttled", 429);
   }
   if (isCrossSiteOrigin(req.headers, req.url)) {
-    return html(renderInquiryUnavailablePage(), 403);
+    return reply("unavailable", 403);
   }
-  const { token } = await params;
 
   // 形式外は DB にも回数制限のキーにも触らせない(存在確認より先に頭打ち)。
   if (!TOKEN_FORMAT.test(token)) {
-    return html(renderInquiryUnavailablePage(), 404);
+    return reply("unavailable", 404);
   }
 
   // 公開ロールアウトゲート。読み込みに失敗したら無効扱い(安全側)。
@@ -115,37 +150,37 @@ export async function POST(
     publicEnabled = false;
   }
   if (!publicEnabled) {
-    return html(renderInquiryUnavailablePage(), 404);
+    return reply("unavailable", 404);
   }
 
   // 本文を読む前に形式と宣言された大きさで絞る(フォームは urlencoded だけ・charset 付きは可)。
   const contentType = (req.headers.get("content-type") ?? "").toLowerCase();
   if (!contentType.startsWith(FORM_CONTENT_TYPE)) {
-    return html(renderInquiryUnavailablePage(), 415);
+    return reply("unavailable", 415);
   }
   const contentLength = req.headers.get("content-length");
   if (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) > MAX_BODY_BYTES)) {
-    return html(renderInquiryUnavailablePage(), 413);
+    return reply("unavailable", 413);
   }
   const body = await readBoundedBody(req, MAX_BODY_BYTES);
   if (!body.ok) {
-    return html(renderInquiryUnavailablePage(), body.status);
+    return reply("unavailable", body.status);
   }
   let fields: URLSearchParams;
   try {
     fields = new URLSearchParams(body.text);
   } catch {
-    return html(renderInquiryUnavailablePage(), 400);
+    return reply("unavailable", 400);
   }
   const get = (key: string): string | null => fields.get(key);
 
   const parsed = parseInquiryForm(get);
   if (parsed.kind === "bot") {
-    return html(renderInquiryDonePage(), 200);
+    return reply("done", 200);
   }
   if (parsed.kind === "invalid") {
     const messages = parsed.errors.map((e) => INQUIRY_ERROR_MESSAGES[e]);
-    return html(renderInquiryInvalidPage(messages, `/t/${encodeURIComponent(token)}#inquiry`), 422);
+    return reply("invalid", 422, messages);
   }
 
   // 存在確認(読み取りのみ)。未知 token はここで 404 にし、token/全体の回数制限を一切消費しない
@@ -162,14 +197,14 @@ export async function POST(
       name: err instanceof Error ? err.name : "Unknown",
       code: typeof (err as { code?: unknown })?.code === "string" ? (err as { code: string }).code : null,
     });
-    return html(renderInquiryBusyPage(), 503);
+    return reply("busy", 503);
   }
   if (!exists) {
-    return html(renderInquiryUnavailablePage(), 404);
+    return reply("unavailable", 404);
   }
 
   if (!tokenLimiter.hit(`inq-token:${token}`)) {
-    return html(renderInquiryThrottledPage(), 429);
+    return reply("throttled", 429);
   }
   if (!globalLimiter.hit("global")) {
     if (throttleAuditLimiter.hit("audit")) {
@@ -179,7 +214,7 @@ export async function POST(
         detail: { result: "throttled", at: new Date().toISOString() },
       });
     }
-    return html(renderInquiryThrottledPage(), 429);
+    return reply("throttled", 429);
   }
 
   let result: Awaited<ReturnType<typeof recordInquiry>>;
@@ -191,11 +226,11 @@ export async function POST(
       name: err instanceof Error ? err.name : "Unknown",
       code: typeof (err as { code?: unknown })?.code === "string" ? (err as { code: string }).code : null,
     });
-    return html(renderInquiryBusyPage(), 503);
+    return reply("busy", 503);
   }
 
-  if (result.kind === "unknown") return html(renderInquiryUnavailablePage(), 404);
-  if (result.kind === "not_sent") return html(renderInquiryPreviewPage(), 409);
+  if (result.kind === "unknown") return reply("unavailable", 404);
+  if (result.kind === "not_sent") return reply("preview", 409);
 
   await writeAuditLog({
     action: "sale_dm_inquiry_submit",
@@ -203,5 +238,5 @@ export async function POST(
     targetId: result.draftId,
     detail: { first: result.first, at: new Date().toISOString() },
   });
-  return html(renderInquiryDonePage(), 200);
+  return reply("done", 200);
 }

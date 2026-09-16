@@ -71,6 +71,9 @@ const CSS = [
   ".inquiry .consent{display:flex;align-items:center;gap:8px;font-weight:700;min-height:44px}",
   ".inquiry button{margin-top:12px;width:100%;border:0;cursor:pointer;font:inherit;font-size:17px;font-weight:700}",
   ".inquiry fieldset:disabled button{background:#9fb3ae;cursor:not-allowed}",
+  ".inq-msg{color:#a8481a;background:#fbeadf;border-radius:8px;padding:10px 12px;margin:8px 0;font-weight:700}",
+  ".inq-msg ul{margin:0;padding-left:1.2em}",
+  ".inq-done{color:#1f2a2d;background:#e8f1ee;border-radius:8px;padding:14px 12px;margin:0;font-weight:700}",
   ".hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}",
   ".unsub{margin-top:28px;font-size:13px;color:#6b7a7d;text-align:center}",
   ".unsub a{color:#6b7a7d}",
@@ -100,6 +103,49 @@ function paragraphs(ps: string[]): string {
   return ps.map((p) => `<p>${escapeHtml(p).replace(/\n/g, "<br />")}</p>`).join("");
 }
 
+/** 申込フォームの送信スクリプト(フォームが有効なときだけ出す・固定文字列)。
+ *  - fetch/URLSearchParams/FormData があれば画面を離れずに送る(accept: application/json)。
+ *    サーバーの指摘(422 等)は送信ボタンの上の .inq-msg に出し、入力はそのまま残す。
+ *  - 無いブラウザは preventDefault せず従来どおり通常送信(JS なしと同じ)+二重送信防止だけ。
+ *  - 表示は textContent / createElement だけで組む(innerHTML は使わない)。
+ *  - bfcache から戻ったとき(pageshow)は送信ボタンを押せる状態に戻す。 */
+const INQUIRY_SUBMIT_SCRIPT = [
+  "(function(){",
+  'var f=document.querySelector("form[data-inquiry]");if(!f)return;',
+  'var M={done:"お申し込みを受け付けました。内容を確認のうえ、担当者からご連絡いたします。",' +
+    'preview:"まだお申し込みを受け付けていません。お急ぎの場合はお電話ください。",' +
+    'throttled:"アクセスが集中しています。しばらく時間をおいてもう一度お試しください。",' +
+    'fail:"お申し込みを完了できませんでした。少し時間をおいてもう一度お試しいただくか、お電話ください。"};',
+  "var sending=false;",
+  'function btn(){return f.querySelector("button[type=submit]")}',
+  "function enable(){sending=false;var b=btn();if(b){b.disabled=false}}",
+  'function box(){return f.querySelector(".inq-msg")}',
+  "function show(lines,asList){var x=box();if(!x)return;while(x.firstChild){x.removeChild(x.firstChild)}" +
+    'if(asList){var ul=document.createElement("ul");for(var i=0;i<lines.length;i++){var li=document.createElement("li");li.textContent=lines[i];ul.appendChild(li)}x.appendChild(ul)}' +
+    "else{x.textContent=lines[0]}x.hidden=false}",
+  'function done(){while(f.firstChild){f.removeChild(f.firstChild)}var p=document.createElement("p");p.className="inq-done";p.setAttribute("role","status");p.textContent=M.done;f.appendChild(p)}',
+  "function handle(d){var k=d&&d.result;" +
+    'if(k==="done"){done();return}' +
+    'if(k==="invalid"){var ms=[];if(d.messages&&d.messages.length){for(var i=0;i<d.messages.length;i++){if(typeof d.messages[i]==="string"){ms.push(d.messages[i])}}}' +
+    "if(ms.length){show(ms,true);enable();return}}" +
+    'if(k==="preview"){show([M.preview]);enable();return}' +
+    'if(k==="throttled"){show([M.throttled]);enable();return}' +
+    "show([M.fail]);enable()}",
+  'f.addEventListener("submit",function(e){',
+  "if(sending){e.preventDefault();return}",
+  "var body=null;",
+  // 古いブラウザの new URLSearchParams(formData) は黙って "[object FormData]" になるため、forEach で文字列欄だけ詰める。
+  'if(!window.fetch||!window.URLSearchParams||!window.FormData){body=null}else{try{var fd=new FormData(f);if(typeof fd.forEach==="function"){var q=new URLSearchParams();fd.forEach(function(v,k){if(typeof v==="string"){q.append(k,v)}});body=q.toString()}}catch(_){body=null}}',
+  // 送れないときは preventDefault せず通常送信(JS なしと同じ)。二重送信防止だけ残す。
+  'if(body===null){var b0=btn();if(b0){setTimeout(function(){b0.disabled=true},0)}return}',
+  "e.preventDefault();sending=true;var b=btn();if(b){b.disabled=true}var x=box();if(x){x.hidden=true}",
+  'fetch(f.action,{method:"POST",headers:{"accept":"application/json","content-type":"application/x-www-form-urlencoded;charset=UTF-8"},body:body,credentials:"same-origin"})',
+  ".then(function(r){return r.json()}).then(handle,function(){show([M.fail]);enable()})",
+  "});",
+  'window.addEventListener("pageshow",function(){var b=btn();if(b){b.disabled=false}sending=false});',
+  "})();",
+].join("");
+
 function formSection(form: LpFormInput): string {
   const privacy = escapeHtml(form.privacyText).replace(/\n/g, "<br />");
   const pref = (value: string, label: string) =>
@@ -116,6 +162,7 @@ function formSection(form: LpFormInput): string {
     `<div class="hp" aria-hidden="true"><label>この欄は空のままにしてください<input name="${HONEYPOT_FIELD}" type="text" tabindex="-1" autocomplete="off" /></label></div>` +
     `<div class="privacy">${privacy}</div>` +
     `<label class="consent"><input type="checkbox" name="consent" value="yes" required />個人情報の取り扱いに同意する</label>` +
+    `<div class="inq-msg" role="alert" aria-live="assertive" hidden></div>` +
     `<button type="submit" class="cta">${escapeHtml(LP_CTA_LABEL)}</button>` +
     `</fieldset></form></section>`;
 }
@@ -148,7 +195,7 @@ export function renderLpPage(input: LpRenderInput): string {
       })()
     : "";
   const submitGuard = input.form && !input.form.disabled
-    ? `<script>(function(){var f=document.querySelector("form[data-inquiry]");if(!f)return;f.addEventListener("submit",function(){var b=f.querySelector("button[type=submit]");if(b){setTimeout(function(){b.disabled=true},0)}});window.addEventListener("pageshow",function(){var b=f.querySelector("button[type=submit]");if(b){b.disabled=false}});})();</script>`
+    ? `<script>${INQUIRY_SUBMIT_SCRIPT}</script>`
     : "";
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="robots" content="noindex,nofollow" /><meta name="referrer" content="same-origin" /><title>${escapeHtml(input.headline)}</title><style>${CSS}</style></head><body>${band}<main>` +
     (input.hero ? img(input.hero, "hero", "", true) : "") +

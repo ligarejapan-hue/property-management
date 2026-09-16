@@ -280,3 +280,76 @@ describe("POST /t/[token]/inquiry 本文の大きさと形式(読む前に絞る
     expect(rec).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /t/[token]/inquiry accept: application/json(画面を離れずに結果を返す)", () => {
+  const JSON_ACCEPT = { accept: "application/json" };
+
+  async function expectJson(res: Response, status: number, body: unknown) {
+    expect(res.status).toBe(status);
+    expect(res.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("referrer-policy")).toBe("same-origin");
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual(body);
+    return text;
+  }
+
+  it("完了は {result:done}(200)。honeypot でも同じ", async () => {
+    await expectJson(await call(VALID, JSON_ACCEPT), 200, { result: "done" });
+    await expectJson(await call({ ...VALID, [HONEYPOT_FIELD]: "http://spam" }, JSON_ACCEPT), 200, { result: "done" });
+    expect(rec).toHaveBeenCalledTimes(1);
+  });
+
+  it("入力不備は {result:invalid, messages}(422)。入力値は含めない", async () => {
+    const text = await expectJson(
+      await call({ name: "山田", phone: "(03)1234", email: "yamada@example" }, JSON_ACCEPT),
+      422,
+      {
+        result: "invalid",
+        messages: expect.arrayContaining([
+          expect.stringContaining("電話番号は数字とハイフンで"),
+          "個人情報の取り扱いへの同意が必要です。",
+        ]),
+      },
+    );
+    expect(text).not.toMatch(/山田|\(03\)|yamada/);
+    expect(rec).not.toHaveBeenCalled();
+  });
+
+  it("送付前は {result:preview}(409)", async () => {
+    rec.mockResolvedValueOnce({ kind: "not_sent" });
+    await expectJson(await call(VALID, JSON_ACCEPT), 409, { result: "preview" });
+  });
+
+  it("受け付けられない要求は {result:unavailable} で状態コードは保つ(415・404)", async () => {
+    await expectJson(
+      await call(VALID, { ...JSON_ACCEPT, "content-type": "application/json" }),
+      415,
+      { result: "unavailable" },
+    );
+    await expectJson(await call(VALID, JSON_ACCEPT, "junk_json"), 404, { result: "unavailable" });
+  });
+
+  it("回数制限は {result:throttled}(429)", async () => {
+    for (let i = 0; i < 5; i += 1) expect((await call(VALID, JSON_ACCEPT, "tok_json_limit")).status).toBe(200);
+    await expectJson(await call(VALID, JSON_ACCEPT, "tok_json_limit"), 429, { result: "throttled" });
+  });
+
+  it("記録の例外は {result:busy}(503)", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      rec.mockRejectedValueOnce(new Error("lock timeout"));
+      await expectJson(await call(VALID, JSON_ACCEPT), 503, { result: "busy" });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("accept が HTML なら従来どおり HTML ページ", async () => {
+    const res = await call({ name: "山田", phone: "abc" }, { accept: "text/html,application/xhtml+xml" });
+    expect(res.status).toBe(422);
+    expect(res.headers.get("content-type") ?? "").not.toContain("application/json");
+    expect(await res.text()).toContain("入力内容をご確認ください");
+  });
+});
