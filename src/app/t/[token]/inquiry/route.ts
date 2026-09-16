@@ -48,8 +48,46 @@ const throttleAuditLimiter = createRateLimiter({ limit: 1, windowMs: 300_000 });
 // 緩い 1..64 文字は本物の token を弾かず、回数制限キー(`inq-token:${token}`)の長さを頭打ちにする。
 const TOKEN_FORMAT = /^[A-Za-z0-9_-]{1,64}$/;
 
+// 本文の上限。フォームの正規の最大(全欄を上限文字数まで埋め、UTF-8 の多バイト文字を
+// percent-encode した長さ=おおむね 1,384 文字×9 バイト ≒ 12.5KB)より十分大きく、
+// nginx の 12MB よりはるかに小さい。認証なしの受け口で大きな本文を解析させない。
+const MAX_BODY_BYTES = 32 * 1024;
+const FORM_CONTENT_TYPE = "application/x-www-form-urlencoded";
+
 function html(body: string, status: number): NextResponse {
   return new NextResponse(body, { status, headers: { ...PUBLIC_PAGE_HEADERS } });
+}
+
+/** 本文を上限つきで読む。上限を超えた時点で読むのをやめて 413(content-length の無い分割送信も含む)。 */
+async function readBoundedBody(
+  req: Request,
+  max: number,
+): Promise<{ ok: true; text: string } | { ok: false; status: 413 | 400 }> {
+  if (!req.body) return { ok: true, text: "" };
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > max) {
+        await reader.cancel().catch(() => {});
+        return { ok: false, status: 413 };
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const c of chunks) {
+      bytes.set(c, offset);
+      offset += c.byteLength;
+    }
+    return { ok: true, text: new TextDecoder("utf-8").decode(bytes) };
+  } catch {
+    return { ok: false, status: 400 };
+  }
 }
 
 export async function POST(
@@ -80,16 +118,26 @@ export async function POST(
     return html(renderInquiryUnavailablePage(), 404);
   }
 
-  let form: FormData;
+  // 本文を読む前に形式と宣言された大きさで絞る(フォームは urlencoded だけ・charset 付きは可)。
+  const contentType = (req.headers.get("content-type") ?? "").toLowerCase();
+  if (!contentType.startsWith(FORM_CONTENT_TYPE)) {
+    return html(renderInquiryUnavailablePage(), 415);
+  }
+  const contentLength = req.headers.get("content-length");
+  if (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) > MAX_BODY_BYTES)) {
+    return html(renderInquiryUnavailablePage(), 413);
+  }
+  const body = await readBoundedBody(req, MAX_BODY_BYTES);
+  if (!body.ok) {
+    return html(renderInquiryUnavailablePage(), body.status);
+  }
+  let fields: URLSearchParams;
   try {
-    form = await req.formData();
+    fields = new URLSearchParams(body.text);
   } catch {
     return html(renderInquiryUnavailablePage(), 400);
   }
-  const get = (key: string): string | null => {
-    const v = form.get(key);
-    return typeof v === "string" ? v : null;
-  };
+  const get = (key: string): string | null => fields.get(key);
 
   const parsed = parseInquiryForm(get);
   if (parsed.kind === "bot") {

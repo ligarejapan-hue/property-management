@@ -217,3 +217,66 @@ describe("POST /t/[token]/inquiry", () => {
     expect(rec).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /t/[token]/inquiry 本文の大きさと形式(読む前に絞る)", () => {
+  it("フォーム形式以外(JSON・multipart)は 415。存在確認も記録もしない", async () => {
+    for (const ct of ["application/json", "multipart/form-data; boundary=x"]) {
+      const res = await call(VALID, { "content-type": ct });
+      expect(res.status).toBe(415);
+      expect(await res.text()).toContain("受け付けられませんでした");
+    }
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(rec).not.toHaveBeenCalled();
+  });
+
+  it("charset 付きの urlencoded は従来どおり受け付ける(200)", async () => {
+    const res = await call(VALID, { "content-type": "application/x-www-form-urlencoded; charset=UTF-8" });
+    expect(res.status).toBe(200);
+    expect(rec).toHaveBeenCalledTimes(1);
+  });
+
+  it("content-length が上限(32KB)超なら本文を読まずに 413", async () => {
+    const res = await call(VALID, { "content-length": "40000" });
+    expect(res.status).toBe(413);
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(rec).not.toHaveBeenCalled();
+  });
+
+  it("content-length が数字でなければ 413", async () => {
+    const res = await call(VALID, { "content-length": "12abc" });
+    expect(res.status).toBe(413);
+    expect(rec).not.toHaveBeenCalled();
+  });
+
+  it("content-length なし(分割送信)でも 32KB を超えた時点で 413", async () => {
+    seq += 1;
+    const tk = `tok_chunk_${seq}`;
+    const chunk = new TextEncoder().encode("message=" + "a".repeat(9_992));
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (sent >= 4) {
+          controller.close();
+          return;
+        }
+        sent += 1;
+        controller.enqueue(chunk);
+      },
+    });
+    const req = new Request(`http://localhost:3000/t/${tk}/inquiry`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        host: "app.ligarejapan.com",
+        "x-forwarded-for": `10.7.0.${seq % 250}`,
+      },
+      body: stream,
+      duplex: "half",
+    } as RequestInit);
+    expect(req.headers.get("content-length")).toBeNull();
+    const res = await POST(req as never, { params: Promise.resolve({ token: tk }) });
+    expect(res.status).toBe(413);
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(rec).not.toHaveBeenCalled();
+  });
+});
