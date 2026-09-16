@@ -22,18 +22,28 @@ import {
  * 守り(多層・/u/ と同じ考え方):
  *  1. 端末IPの回数制限(10/分・溢れたら拒否) — 尽力ベース(送信元IPは偽装し得る)。
  *  2. 送信元判定(public-origin.ts) — よそのサイトから踏ませる送信を 403。DB に触らない。
- *  3. honeypot — 機械送信は「受け付けました」を返して何も残さない。
- *  4. 入力検証(inquiry-input.ts) — 不備は 422。入力値は画面に送り返さない。
- *  5. token の回数制限(5/時)と全体の回数制限(120/時) — 検証を通った送信だけが消費する
- *     (でたらめな連投で正規の申込枠を使い切らせない)。
- *  6. 送付済みの宛先だけ記録 — 送付前は 409・未知 token は 404(記録なし)。
- *  7. 監査は draftId と非PII(first/at)のみ。入力文字は出さない。
+ *  3. token の形式門前払い(TOKEN_FORMAT・DB 無アクセス) — 追跡 token は randomBytes(8).toString("base64url")
+ *     で発行するため、緩い 1..64 文字の許可は本物の token を絶対に弾かない。回数制限キーの長さも頭打ちにする。
+ *  4. honeypot — 機械送信は「受け付けました」を返して何も残さない。
+ *  5. 入力検証(inquiry-input.ts) — 不備は 422。入力値は画面に送り返さない。
+ *  6. 存在確認(読み取りのみ・DB 書き込みなし) — 未知 token はここで 404(記録・監査なし)。
+ *     **token/全体の回数制限は実在する token の要求だけが消費する**(/u/ が署名検証を通った要求だけ
+ *     全体上限を消費するのと同じ考え方)。でたらめな token を毎分何十件連投しても、ここで先に 404 になり
+ *     limiter を一切消費しないため、実在する宛先からの正規の申込枠(120/時)を減らせない。
+ *  7. token の回数制限(5/時)と全体の回数制限(120/時) — 存在確認を通った要求だけが消費する。
+ *  8. 送付済みの宛先だけ記録 — 送付前は 409(recordInquiry 側の unknown→404 は、存在確認から記録までの
+ *     間に宛先が消えるごく短い窓のレース安全網として残す)。
+ *  9. 監査は draftId と非PII(first/at)のみ。入力文字は出さない。
  */
 const ipLimiter = createRateLimiter({ limit: 10, windowMs: 60_000 }, { onOverflow: "deny" });
 const tokenLimiter = createRateLimiter({ limit: 5, windowMs: 3_600_000 });
 const globalLimiter = createRateLimiter({ limit: 120, windowMs: 3_600_000 });
 // 全体上限に達した事実の監査は5分に1回まで(攻撃中に audit_logs を肥大させない)。
 const throttleAuditLimiter = createRateLimiter({ limit: 1, windowMs: 300_000 });
+
+// 追跡 token の形式(recordTrackingHit 発行 = randomBytes(8).toString("base64url"))。
+// 緩い 1..64 文字は本物の token を弾かず、回数制限キー(`inq-token:${token}`)の長さを頭打ちにする。
+const TOKEN_FORMAT = /^[A-Za-z0-9_-]{1,64}$/;
 
 function html(body: string, status: number): NextResponse {
   return new NextResponse(body, { status, headers: { ...PUBLIC_PAGE_HEADERS } });
@@ -50,6 +60,11 @@ export async function POST(
     return html(renderInquiryUnavailablePage(), 403);
   }
   const { token } = await params;
+
+  // 形式外は DB にも回数制限のキーにも触らせない(存在確認より先に頭打ち)。
+  if (!TOKEN_FORMAT.test(token)) {
+    return html(renderInquiryUnavailablePage(), 404);
+  }
 
   let form: FormData;
   try {
@@ -69,6 +84,21 @@ export async function POST(
   if (parsed.kind === "invalid") {
     const messages = parsed.errors.map((e) => INQUIRY_ERROR_MESSAGES[e]);
     return html(renderInquiryInvalidPage(messages, `/t/${encodeURIComponent(token)}#inquiry`), 422);
+  }
+
+  // 存在確認(読み取りのみ)。未知 token はここで 404 にし、token/全体の回数制限を一切消費しない
+  // (でたらめな token の連投が実在する宛先の申込枠を食い潰せないようにする)。
+  let exists: { id: string } | null;
+  try {
+    exists = await prisma.dmRecipientDraft.findUnique({
+      where: { trackingToken: token },
+      select: { id: true },
+    });
+  } catch {
+    return html(renderInquiryBusyPage(), 503);
+  }
+  if (!exists) {
+    return html(renderInquiryUnavailablePage(), 404);
   }
 
   if (!tokenLimiter.hit(`inq-token:${token}`)) {

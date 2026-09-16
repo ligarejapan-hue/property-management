@@ -2,14 +2,22 @@ import { vi, describe, it, expect, beforeEach } from "vitest";
 
 vi.mock("next/server", () => ({ NextResponse: Response }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
-vi.mock("@/lib/prisma", () => ({ default: {} }));
+vi.mock("@/lib/prisma", () => ({
+  default: { dmRecipientDraft: { findUnique: vi.fn() } },
+}));
 vi.mock("@/lib/sale-dm-letter/inquiry-record", () => ({ recordInquiry: vi.fn() }));
 
 import { POST } from "@/app/t/[token]/inquiry/route";
 import { recordInquiry } from "@/lib/sale-dm-letter/inquiry-record";
 import { writeAuditLog } from "@/lib/audit";
+import prisma from "@/lib/prisma";
 
 const rec = recordInquiry as unknown as ReturnType<typeof vi.fn>;
+const findUnique = (
+  prisma as unknown as {
+    dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn> };
+  }
+).dmRecipientDraft.findUnique;
 const VALID = { name: "山田", phone: "090-1234-5678", consent: "yes" };
 
 // ⚠レート制限はモジュール保持でテスト間リセットされない。IP と token をテストごとに変える。
@@ -34,6 +42,10 @@ function call(fields: Record<string, string>, headers: Record<string, string> = 
 beforeEach(() => {
   vi.clearAllMocks();
   rec.mockResolvedValue({ kind: "recorded", inquiryId: "inq1", draftId: "d1", first: true });
+  findUnique.mockImplementation(
+    async ({ where }: { where: { trackingToken: string } }) =>
+      where.trackingToken.startsWith("junk") ? null : { id: "d1" },
+  );
 });
 
 describe("POST /t/[token]/inquiry", () => {
@@ -123,5 +135,33 @@ describe("POST /t/[token]/inquiry", () => {
       last = res.status;
     }
     expect(last).toBe(429);
+  });
+
+  it("形式外の token は DB に触らず 404", async () => {
+    const dotRes = await call(VALID, {}, "bad.token");
+    expect(dotRes.status).toBe(404);
+    const longRes = await call(VALID, {}, "a".repeat(65));
+    expect(longRes.status).toBe(404);
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(rec).not.toHaveBeenCalled();
+  });
+
+  it("存在しない token は 404 で、token/全体の枠を消費しない", async () => {
+    for (let i = 0; i < 130; i += 1) {
+      const res = await call(VALID, {}, `junk_${i}`);
+      expect(res.status).toBe(404);
+    }
+    expect(rec).not.toHaveBeenCalled();
+    const res = await call(VALID, {}, `tok_exists_${seq}`);
+    expect(res.status).toBe(200);
+    expect(rec).toHaveBeenCalledTimes(1);
+  });
+
+  it("存在確認で例外なら 503", async () => {
+    findUnique.mockRejectedValueOnce(new Error("db down"));
+    const res = await call(VALID);
+    expect(res.status).toBe(503);
+    expect(await res.text()).toContain("混み合っています");
+    expect(rec).not.toHaveBeenCalled();
   });
 });
