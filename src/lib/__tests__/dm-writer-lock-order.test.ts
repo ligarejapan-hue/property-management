@@ -161,6 +161,21 @@ describe("DM 反響 writer のロック順序(PR-B・R47: terminal は Owner FOR
     expect(body).not.toMatch(/syncSaleDmReaction|lockOwnersForUpdate|outcome/);
   });
 
+  it("公開LPの査定申込: 親行ロック→読み直し→申込INSERT→宛先の計数→同期(allowTerminal:false=Ownerロック不要)", () => {
+    const src = read("src/lib/sale-dm-letter/inquiry-record.ts");
+    const body = src.slice(src.indexOf("export async function recordInquiry"));
+    assertOrder("inquiry", body, [
+      "lockPropertyRow",
+      "tx.dmRecipientDraft.findUnique",
+      "tx.dmInquiry.create",
+      "tx.dmRecipientDraft.updateMany",
+      "tx.dmRecipientDraft.update({",
+      "syncSaleDmReaction",
+      "allowTerminal: false",
+    ]);
+    expect(body).not.toMatch(/lockOwnersForUpdate/);
+  });
+
   it("同期ヘルパー: terminal は Owner FOR UPDATE→再読取→適用(変化なしはロックしない)", () => {
     const src = read("src/lib/dm-reaction/sync.ts");
     const body = src.slice(src.indexOf("export async function syncSaleDmReaction"));
