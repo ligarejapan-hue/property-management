@@ -54,7 +54,7 @@ describe("recordInquiry", () => {
     expect(tx.dmInquiry.create).not.toHaveBeenCalled();
   });
 
-  it("送付済み: 親行ロック→読み直し→INSERT→初回→QR読み取りの補い→計数+outcome→同期(allowTerminal:false)", async () => {
+  it("送付済み: 親行ロック→読み直し→INSERT→初回→QR読み取りの補い→アプリ内ページ表示の補い→計数+outcome→同期(allowTerminal:false)", async () => {
     const { client, tx, calls } = makeClient({ id: "d1", propertyId: "p1", status: "sent" });
     const r = await recordInquiry(client as never, "t", INPUT, NOW);
     expect(r).toEqual({ kind: "recorded", inquiryId: "inq1", draftId: "d1", first: true });
@@ -64,11 +64,24 @@ describe("recordInquiry", () => {
       "tx.dmInquiry.create",
       "tx.updateMany:id,formInquiryFirstAt",
       "tx.updateMany:id,lpFirstAccessAt",
+      "tx.updateMany:id,lpPageFirstAt",
       "tx.update",
     ]);
     expect(tx.dmInquiry.create).toHaveBeenCalledWith({
       data: { draftId: "d1", submittedAt: NOW, name: "山田", phone: "090-1234-5678", email: null, contactPref: null, contactTime: null, message: "相談したい" },
       select: { id: true },
+    });
+    expect(tx.dmRecipientDraft.updateMany).toHaveBeenNthCalledWith(1, {
+      where: { id: "d1", formInquiryFirstAt: null },
+      data: { formInquiryFirstAt: NOW },
+    });
+    expect(tx.dmRecipientDraft.updateMany).toHaveBeenNthCalledWith(2, {
+      where: { id: "d1", lpFirstAccessAt: null },
+      data: { lpFirstAccessAt: NOW },
+    });
+    expect(tx.dmRecipientDraft.updateMany).toHaveBeenNthCalledWith(3, {
+      where: { id: "d1", lpPageFirstAt: null },
+      data: { lpPageFirstAt: NOW },
     });
     expect(tx.dmRecipientDraft.update).toHaveBeenCalledWith({
       where: { id: "d1" },
