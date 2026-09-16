@@ -75,6 +75,49 @@ describe("createRateLimiter(保持+鍵上限)", () => {
   });
 });
 
+describe("createRateLimiter.wouldAllow(数えずに確かめる)", () => {
+  it("実装に存在する(新しい interface メンバーを具象で固定)", () => {
+    expect(typeof createRateLimiter({ limit: 1, windowMs: 1000 }).wouldAllow).toBe("function");
+  });
+
+  it("何度呼んでも枠を消費しない(10回確かめた後でも hit は許可)", () => {
+    const rl = createRateLimiter({ limit: 1, windowMs: 60_000 });
+    for (let i = 0; i < 10; i += 1) expect(rl.wouldAllow("a", 1_000)).toBe(true);
+    expect(rl.hit("a", 1_000)).toBe(true);
+    expect(rl.hit("a", 1_001)).toBe(false);
+  });
+
+  it("窓が埋まっていれば false、窓が過ぎれば true(確かめただけでは数えない)", () => {
+    const rl = createRateLimiter({ limit: 2, windowMs: 1_000 });
+    expect(rl.hit("a", 0)).toBe(true);
+    expect(rl.hit("a", 100)).toBe(true);
+    expect(rl.wouldAllow("a", 200)).toBe(false);
+    expect(rl.wouldAllow("a", 1_001)).toBe(true);
+    // 1_001 時点の窓内は 100 の1件だけ → あと1回許可、その次は拒否
+    expect(rl.hit("a", 1_001)).toBe(true);
+    expect(rl.hit("a", 1_002)).toBe(false);
+  });
+
+  it("鍵が maxKeys で溢れる新しい鍵は onOverflow に従う(期限切れは掃除して判定)", () => {
+    const deny = createRateLimiter({ limit: 10, windowMs: 60_000 }, { maxKeys: 1, onOverflow: "deny" });
+    expect(deny.hit("k1", 1_000)).toBe(true);
+    expect(deny.wouldAllow("k2", 1_000)).toBe(false);
+    expect(deny.wouldAllow("k1", 1_000)).toBe(true);
+    expect(deny.wouldAllow("k2", 62_000)).toBe(true);
+
+    const allow = createRateLimiter({ limit: 10, windowMs: 60_000 }, { maxKeys: 1, onOverflow: "allow" });
+    expect(allow.hit("k1", 1_000)).toBe(true);
+    expect(allow.wouldAllow("k2", 1_000)).toBe(true);
+  });
+
+  it("新しい鍵を確かめても鍵を作らない(maxKeys を食わない)", () => {
+    const rl = createRateLimiter({ limit: 10, windowMs: 60_000 }, { maxKeys: 1, onOverflow: "deny" });
+    expect(rl.wouldAllow("x", 1_000)).toBe(true);
+    expect(rl.wouldAllow("y", 1_000)).toBe(true);
+    expect(rl.hit("z", 1_000)).toBe(true);
+  });
+});
+
 describe("clientRateKey(送信元IPの鍵)", () => {
   it("x-real-ip(本番nginxが実IPで上書き設定)を最優先で使う", () => {
     const h = new Headers({

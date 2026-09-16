@@ -203,10 +203,16 @@ export async function POST(
     return reply("unavailable", 404);
   }
 
-  if (!tokenLimiter.hit(`inq-token:${token}`)) {
+  // token と全体の枠は「両方通るときだけ両方消費する」。先に token を hit すると、全体上限で断った
+  // 再試行が宛先の 5/時を食い潰す。先に全体を hit すると、1通の手紙の持ち主が token で断られる要求で
+  // 全体の枠を食い潰せる。だから数えずに両方確かめてから続けて hit する(間に await を挟まない=
+  // 単一スレッドなので確認と消費の間に他の要求が割り込めない)。
+  const tokenKey = `inq-token:${token}`;
+  const rateNow = Date.now();
+  if (!tokenLimiter.wouldAllow(tokenKey, rateNow)) {
     return reply("throttled", 429);
   }
-  if (!globalLimiter.hit("global")) {
+  if (!globalLimiter.wouldAllow("global", rateNow)) {
     if (throttleAuditLimiter.hit("audit")) {
       await writeAuditLog({
         action: "sale_dm_inquiry_submit",
@@ -216,6 +222,8 @@ export async function POST(
     }
     return reply("throttled", 429);
   }
+  tokenLimiter.hit(tokenKey, rateNow);
+  globalLimiter.hit("global", rateNow);
 
   let result: Awaited<ReturnType<typeof recordInquiry>>;
   try {
