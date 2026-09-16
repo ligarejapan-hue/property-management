@@ -186,3 +186,24 @@ describe("isInitialPhotoGrid — 角丸の既定は写真と間取り図で別",
     expect(isInitialPhotoGrid(makeState([textEl(), ...els]).document)).toBe(false);
   });
 });
+
+// @codex #432 P2(4巡目): 重ね順(z)も ElementPanel から変えられる。作成時は全て
+// CONSUMER_PHOTO_Z。前面/背面へ動かした図面を「作成直後」と誤判定すると、
+// 重なり方が変わってしまう。
+describe("isInitialPhotoGrid — 重ね順の変更も『触った』とみなす", () => {
+  it("前面へ出していれば false", () => {
+    const els = gridImages(3) as Record<string, unknown>[];
+    els[2] = { ...els[2], z: 9 };
+    expect(isInitialPhotoGrid(makeState([textEl(), ...els]).document)).toBe(false);
+  });
+
+  it("背面へ送っていれば false", () => {
+    const els = gridImages(3) as Record<string, unknown>[];
+    els[0] = { ...els[0], z: 0 };
+    expect(isInitialPhotoGrid(makeState([textEl(), ...els]).document)).toBe(false);
+  });
+
+  it("作成時の重ね順のままなら true", () => {
+    expect(isInitialPhotoGrid(makeState([textEl(), ...gridImages(3)]).document)).toBe(true);
+  });
+});

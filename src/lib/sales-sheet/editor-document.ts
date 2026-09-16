@@ -22,6 +22,7 @@ import {
   packPhotoCells,
   CONSUMER_PHOTO_ZONE,
   CONSUMER_PHOTO_RADIUS_MM,
+  CONSUMER_PHOTO_Z,
   CONSUMER_MAP_QR_SLOT,
   PHOTO_GAP_MM,
   type Rect,
@@ -759,6 +760,10 @@ export function isInitialPhotoGrid(document: SalesSheetDocument): boolean {
       // 枠は動かさずに見せ方だけ変えた図面(contain→cover・焦点位置の指定)も「触った」
       // とみなす。位置と大きさだけで判定すると、開いただけで autoArrangePhotos が
       // fit を contain に戻し、保存済みの設定を黙って消す(@codex #432 P2)。
+      // ⚠build-document の photoAndFloorPlanElements が作成時に決める項目は、ここで
+      // 全て突き合わせる(位置/大きさ/重ね順/表示方法/焦点位置/角丸)。1つでも
+      // 見落とすと、その項目だけ変えた図面を「作成直後」と誤判定して組み替える。
+      el.z === CONSUMER_PHOTO_Z &&
       el.fit === "contain" &&
       el.focalX === undefined &&
       el.focalY === undefined &&

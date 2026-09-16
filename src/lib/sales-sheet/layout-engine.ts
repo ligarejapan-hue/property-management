@@ -34,6 +34,8 @@ export const PHOTO_GAP_MM = 4;
  * 同じ値を見るための唯一の出どころ。
  */
 export const CONSUMER_PHOTO_RADIUS_MM = 2;
+/** 作成時の写真・間取り図の重ね順。 */
+export const CONSUMER_PHOTO_Z = 1;
 /** セルの目標縦横比（3:2 横長）。行数の選択にのみ使う。 */
 const PHOTO_TARGET_ASPECT = 1.5;
 /** セル寸法の下限(mm)。editor の MIN_ELEMENT_SIZE_MM と同値（循環import回避のためローカル定義）。 */
