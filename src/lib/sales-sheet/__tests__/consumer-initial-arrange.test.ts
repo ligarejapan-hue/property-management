@@ -164,7 +164,7 @@ describe("isInitialPhotoGrid — 角丸の既定は写真と間取り図で別",
     const els = gridImages(3) as Record<string, unknown>[];
     return els.map((e, i) => {
       if (i !== 1) return { ...e };
-      const floorPlan = { ...e, id: "floor-plan" };
+      const floorPlan: Record<string, unknown> = { ...e, id: "floor-plan" };
       delete floorPlan.radiusMm; // 間取り図には角丸を付けない(build-document と同じ)
       return floorPlan;
     });

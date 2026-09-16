@@ -258,6 +258,13 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
       dispatch({
         type: "rebase",
         fn: (prev) => (isInitialPhotoGrid(prev.document) ? autoArrangePhotos(prev, { aspects }) : prev),
+        // 読み込みの完了前に別の箇所を編集していると、履歴に整列前のグリッドが残る。
+        // そこへ戻って保存すると次に開いたときにまた整列される堂々巡りになるため、
+        // 履歴の中の古い版にも同じ整列を当てる。
+        mapSnapshot: (doc) =>
+          isInitialPhotoGrid(doc)
+            ? autoArrangePhotos({ document: doc, selectedId: null, dirty: false }, { aspects }).document
+            : doc,
       });
     })();
     return () => {

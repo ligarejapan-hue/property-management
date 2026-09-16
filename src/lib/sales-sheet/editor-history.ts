@@ -28,7 +28,16 @@ export type HistoryAction =
    * 編集として積むと、元に戻す→保存で作成直後のグリッドが意図的な配置として保存され、
    * 次に開いたときにまた整列される=ユーザーの選択が効かない(@codex #432 P2)。
    */
-  | { type: "rebase"; fn: (prev: EditorState) => EditorState }
+  | {
+      type: "rebase";
+      fn: (prev: EditorState) => EditorState;
+      /**
+       * 履歴に残っている古い版の写し替え。写真の読み込みが終わる前に別の箇所を編集して
+       * いると past(先に元に戻していれば future)に整列前のグリッドが残り、そこへ戻って
+       * 保存すると次に開いたときにまた整列される堂々巡りになる。同じ写し替えを履歴にも当てる。
+       */
+      mapSnapshot?: (doc: SalesSheetDocument) => SalesSheetDocument;
+    }
   | { type: "undo" }
   | { type: "redo" };
 
@@ -43,6 +52,21 @@ function reconcileSelection(
 ): string | null {
   if (selectedId === null) return null;
   return doc.elements.some((e) => e.id === selectedId) ? selectedId : null;
+}
+
+/** 履歴の版を写し替える。1つも変わらなければ元の配列を同一参照で返す。 */
+function mapSnapshots(
+  docs: SalesSheetDocument[],
+  map?: (doc: SalesSheetDocument) => SalesSheetDocument,
+): SalesSheetDocument[] {
+  if (!map) return docs;
+  let changed = false;
+  const out = docs.map((d) => {
+    const n = map(d);
+    if (n !== d) changed = true;
+    return n;
+  });
+  return changed ? out : docs;
 }
 
 export function editorHistoryReducer(state: HistoryState, action: HistoryAction): HistoryState {
@@ -62,9 +86,11 @@ export function editorHistoryReducer(state: HistoryState, action: HistoryAction)
     }
     case "rebase": {
       const next = action.fn(state.editor);
-      if (next === state.editor) return state;
-      // past/future はそのまま(積まない・捨てない)。
-      return { ...state, editor: next };
+      // 積まない・捨てない。ただし履歴に残った古い版には同じ写し替えを当てる。
+      const past = mapSnapshots(state.past, action.mapSnapshot);
+      const future = mapSnapshots(state.future, action.mapSnapshot);
+      if (next === state.editor && past === state.past && future === state.future) return state;
+      return { editor: next, past, future };
     }
     case "undo": {
       if (state.past.length === 0) return state;

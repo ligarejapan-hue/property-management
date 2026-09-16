@@ -157,3 +157,45 @@ describe("rebase — 履歴に積まない土台の差し替え", () => {
     expect(s2.past).toEqual([a]);
   });
 });
+
+// @codex #432 P2(2巡目): 写真の読み込みが終わる前に別の箇所を編集していると、
+// past(や future)に整列前のグリッドが残る。そこへ「元に戻す」で戻って保存すると、
+// 次に開いたときにまた整列される堂々巡りになる。履歴の中の古い版も一緒に直す。
+describe("rebase — 履歴に残った古い版も一緒に差し替える", () => {
+  const a = makeDoc([textEl("a")]);
+  const b = makeDoc([textEl("b")]);
+  const arranged = makeDoc([textEl("arranged")]);
+  /** 「整列前(a)なら整列後(arranged)にする」写し替え。 */
+  const mapSnapshot = (doc: SalesSheetDocument) => (doc === a ? arranged : doc);
+  const rebase = {
+    type: "rebase" as const,
+    fn: (prev: EditorState): EditorState => ({ ...prev, dirty: true, document: arranged }),
+    mapSnapshot,
+  };
+
+  it("past に残った整列前の版が整列後に差し替わる=元に戻してもグリッドに戻らない", () => {
+    const edited = editorHistoryReducer(makeState(a), editTo(b));
+    const rebased = editorHistoryReducer(edited, rebase);
+    expect(editorHistoryReducer(rebased, { type: "undo" }).editor.document).toBe(arranged);
+  });
+
+  it("先に元に戻していた場合(future 側)も差し替わる", () => {
+    const edited = editorHistoryReducer(makeState(a), editTo(b));
+    const undone = editorHistoryReducer(edited, { type: "undo" });
+    const rebased = editorHistoryReducer(undone, rebase);
+    expect(editorHistoryReducer(rebased, { type: "redo" }).editor.document).toBe(b);
+    expect(rebased.editor.document).toBe(arranged);
+  });
+
+  it("写し替える版が無ければ履歴は同一参照のまま", () => {
+    const edited = editorHistoryReducer(makeState(b), editTo(a));
+    const past = edited.past;
+    const rebased = editorHistoryReducer(edited, {
+      type: "rebase",
+      fn: (prev) => prev,
+      mapSnapshot: (doc) => doc,
+    });
+    expect(rebased).toBe(edited);
+    expect(rebased.past).toBe(past);
+  });
+});
