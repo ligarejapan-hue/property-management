@@ -8,7 +8,7 @@ import { parseInquiryForm, INQUIRY_ERROR_MESSAGES } from "@/lib/sale-dm-letter/i
 import { recordInquiry, type InquiryClientLike } from "@/lib/sale-dm-letter/inquiry-record";
 import { hasRenderableLpVariant } from "@/lib/sale-dm-letter/lp-render-input";
 import { PUBLIC_PAGE_HEADERS } from "@/lib/sale-dm-letter/unsubscribe-page";
-import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
+import { loadSaleDmLpUrl, loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 import {
   renderInquiryBusyPage,
   renderInquiryDonePage,
@@ -157,6 +157,18 @@ export async function POST(
     publicEnabled = false;
   }
   if (!publicEnabled) {
+    return reply("unavailable", 404);
+  }
+
+  // GET /t/<token> は既定LP(DB→env)が無いとページを出さず 404 にする。フォームが表示され得ない
+  // 状態で直接 POST された申込を記録しない(@codex R12)。読み込み失敗も未設定扱い(安全側)。
+  let defaultLpUrl: string | undefined;
+  try {
+    defaultLpUrl = await loadSaleDmLpUrl();
+  } catch {
+    defaultLpUrl = undefined;
+  }
+  if (!defaultLpUrl) {
     return reply("unavailable", 404);
   }
 

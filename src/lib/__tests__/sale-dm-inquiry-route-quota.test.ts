@@ -15,6 +15,7 @@ vi.mock("@/lib/sale-dm-letter/inquiry-record", () => ({
   recordInquiry: vi.fn(async () => ({ kind: "recorded", inquiryId: "inq1", draftId: "d1", first: true })),
 }));
 vi.mock("@/lib/sale-dm-letter/config-store", () => ({
+  loadSaleDmLpUrl: vi.fn(async () => "https://ligarejapan.com/"),
   loadSaleDmPublicPageConfig: vi.fn(async () => ({
     senderName: null, senderContact: null, trackingBaseUrl: undefined, lpPublicEnabled: true, privacyText: null,
   })),

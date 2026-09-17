@@ -6,13 +6,16 @@ vi.mock("@/lib/prisma", () => ({
   default: { dmRecipientDraft: { findUnique: vi.fn() } },
 }));
 vi.mock("@/lib/sale-dm-letter/inquiry-record", () => ({ recordInquiry: vi.fn() }));
-vi.mock("@/lib/sale-dm-letter/config-store", () => ({ loadSaleDmPublicPageConfig: vi.fn() }));
+vi.mock("@/lib/sale-dm-letter/config-store", () => ({
+  loadSaleDmPublicPageConfig: vi.fn(),
+  loadSaleDmLpUrl: vi.fn(),
+}));
 
 import { POST } from "@/app/t/[token]/inquiry/route";
 import { recordInquiry } from "@/lib/sale-dm-letter/inquiry-record";
 import { writeAuditLog } from "@/lib/audit";
 import prisma from "@/lib/prisma";
-import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
+import { loadSaleDmLpUrl, loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 import { HONEYPOT_FIELD } from "@/lib/sale-dm-letter/inquiry-input";
 
 const rec = recordInquiry as unknown as ReturnType<typeof vi.fn>;
@@ -22,6 +25,7 @@ const findUnique = (
   }
 ).dmRecipientDraft.findUnique;
 const loadCfg = loadSaleDmPublicPageConfig as unknown as ReturnType<typeof vi.fn>;
+const loadLp = loadSaleDmLpUrl as unknown as ReturnType<typeof vi.fn>;
 const VALID = { name: "山田", phone: "090-1234-5678", consent: "yes" };
 
 // ⚠レート制限はモジュール保持でテスト間リセットされない。IP と token をテストごとに変える。
@@ -48,6 +52,7 @@ beforeEach(() => {
   loadCfg.mockResolvedValue({
     senderName: null, senderContact: null, trackingBaseUrl: undefined, lpPublicEnabled: true, privacyText: null,
   });
+  loadLp.mockResolvedValue("https://ligarejapan.com/");
   rec.mockResolvedValue({ kind: "recorded", inquiryId: "inq1", draftId: "d1", first: true });
   findUnique.mockImplementation(
     async ({ where }: { where: { trackingToken: string } }) =>
@@ -233,6 +238,23 @@ describe("POST /t/[token]/inquiry", () => {
       senderName: null, senderContact: null, trackingBaseUrl: undefined, lpPublicEnabled: true, privacyText: null,
     });
     expect((await call(VALID, {}, "tok_gate")).status).toBe(200);
+  });
+
+  it("既定LPが未設定(GET がページを出さない状態)なら 404(DB・回数制限・記録に触らない)", async () => {
+    loadLp.mockResolvedValue(undefined);
+    for (let i = 0; i < 7; i += 1) {
+      expect((await call(VALID, {}, "tok_nolp")).status).toBe(404);
+    }
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(rec).not.toHaveBeenCalled();
+    loadLp.mockResolvedValue("https://ligarejapan.com/");
+    expect((await call(VALID, {}, "tok_nolp")).status).toBe(200);
+  });
+
+  it("既定LPの読み込みで例外なら未設定扱いで 404", async () => {
+    loadLp.mockRejectedValueOnce(new Error("lp down"));
+    expect((await call(VALID)).status).toBe(404);
+    expect(rec).not.toHaveBeenCalled();
   });
 
   it("設定の読み込みで例外なら無効扱いで 404", async () => {
