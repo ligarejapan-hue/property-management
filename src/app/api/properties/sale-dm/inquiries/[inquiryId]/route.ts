@@ -75,11 +75,14 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       targetId: inquiryId,
       detail: { handleStatus: body.handleStatus, updatedAt: now.toISOString() },
     });
-    // 対応メモは折り返し番号などを含みうるので、一覧(GET)と同じく電話を平文で見られる利用者にだけ返す(@codex P1)。
+    // 対応メモ(handleNote)は自由記述で折り返し番号やメールアドレスなどを含みうるので、
+    // 一覧(GET・toInquiryListRows)と同じ基準=電話とメールの**両方**を平文で見られる
+    // 利用者にだけ返す(@codex R10 P1: 電話だけでは足りない。メールアドレスが書かれていると
+    // 「電話フル・メール伏せ」の利用者に見えてしまうため)。
     // 書き込み自体は伏せ対象の利用者にも許す(状態の対応は書き込み権限で足りる・既存メモの中身だけ見せない)。
-    const contactVisible = isPlainOwnerLevel(ownerDisplayConfig.phone);
+    const freeTextVisible = isPlainOwnerLevel(ownerDisplayConfig.phone) && isPlainOwnerLevel(ownerDisplayConfig.email);
     return NextResponse.json(
-      { inquiry: { ...updated, handleNote: contactVisible ? updated.handleNote : null, contactHidden: !contactVisible } },
+      { inquiry: { ...updated, handleNote: freeTextVisible ? updated.handleNote : null, freeTextHidden: !freeTextVisible } },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

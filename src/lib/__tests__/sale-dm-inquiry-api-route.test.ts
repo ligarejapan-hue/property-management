@@ -108,7 +108,7 @@ describe("GET 申込一覧", () => {
     const res = await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.inquiries[0]).toMatchObject({ id: "i1", name: "山田", phone: "090", contactHidden: false });
+    expect(body.inquiries[0]).toMatchObject({ id: "i1", name: "山田", phone: "090", contactHidden: false, freeTextHidden: false });
     expect(body.inquiries[0]).not.toHaveProperty("draft");
     const audit = (writeAuditLog as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(audit).toMatchObject({ action: "sale_dm_inquiry_view", targetId: "c1" });
@@ -119,21 +119,27 @@ describe("GET 申込一覧", () => {
     db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
     db.dmInquiry.findMany.mockResolvedValueOnce([{ ...INQ, handleNote: "折り返し 090-1111-2222" }]);
     const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
-    expect(body.inquiries[0]).toMatchObject({ phone: null, handleNote: null, contactHidden: true, emailHidden: true });
+    expect(body.inquiries[0]).toMatchObject({ phone: null, handleNote: null, contactHidden: true, emailHidden: true, freeTextHidden: true });
   });
-  it("電話は見えるがメール(owner_email)の表示権限が無ければメールだけ伏せる(@codex P1)", async () => {
+  it("電話は見えるがメール(owner_email)の表示権限が無ければメールだけ伏せる(@codex P1)。message・handleNote は自由記述なのでメールを伏せる時点で一緒に伏せる(freeTextHidden=true・@codex R10 P1)", async () => {
     guard.requireSaleDmAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "full", email: "masked" } });
     db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
-    db.dmInquiry.findMany.mockResolvedValueOnce([{ ...INQ, email: "a@b.jp" }]);
+    db.dmInquiry.findMany.mockResolvedValueOnce([{ ...INQ, email: "a@b.jp", message: "要望です", handleNote: "折り返し済み" }]);
     const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
-    expect(body.inquiries[0]).toMatchObject({ phone: "090", contactHidden: false, email: null, emailHidden: true });
+    expect(body.inquiries[0]).toMatchObject({
+      phone: "090", contactHidden: false, email: null, emailHidden: true,
+      message: null, handleNote: null, freeTextHidden: true,
+    });
   });
-  it("電話は見えない(masked)がメール(owner_email)は見える(full)なら、メールは返り電話等だけ伏せる(email は phone とは独立・P2)", async () => {
+  it("電話は見えない(masked)がメール(owner_email)は見える(full)なら、メールは返り電話等だけ伏せる(email は phone とは独立・P2)。message・handleNote も伏せる(freeTextHidden=true)", async () => {
     guard.requireSaleDmAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "masked", email: "full" } });
     db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
-    db.dmInquiry.findMany.mockResolvedValueOnce([{ ...INQ, email: "a@b.jp" }]);
+    db.dmInquiry.findMany.mockResolvedValueOnce([{ ...INQ, email: "a@b.jp", message: "要望です", handleNote: "折り返し済み" }]);
     const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
-    expect(body.inquiries[0]).toMatchObject({ email: "a@b.jp", emailHidden: false, phone: null, contactHidden: true });
+    expect(body.inquiries[0]).toMatchObject({
+      email: "a@b.jp", emailHidden: false, phone: null, contactHidden: true,
+      message: null, handleNote: null, freeTextHidden: true,
+    });
   });
   it("field_staff は担当外の物件の申込を返さない", async () => {
     guard.requireSaleDmAccess.mockResolvedValueOnce({ session: { id: "u1", role: "field_staff" }, permissions: [], ownerDisplayConfig: { phone: "full", email: "full" } });
@@ -279,22 +285,37 @@ describe("PATCH 対応状況", () => {
     await patch({ handleStatus: "open" });
     expect(db.dmInquiry.update.mock.calls[1][0].data).toMatchObject({ handleStatus: "open", handledAt: null, handledById: null });
   });
-  it("電話の表示権限が無ければ、更新結果の対応メモを返さない(contactHidden=true・@codex P1)", async () => {
+  it("電話の表示権限が無ければ、更新結果の対応メモを返さない(freeTextHidden=true・@codex P1)", async () => {
     guard.requireSaleDmWriteAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "masked", email: "masked" } });
     db.dmInquiry.findUnique.mockResolvedValueOnce(FOUND).mockResolvedValueOnce(FOUND);
     db.dmInquiry.update.mockResolvedValueOnce({ id: "i1", handleStatus: "in_progress", handledAt: new Date(), handleNote: "折り返し 090-1111-2222" });
     const res = await patch({ handleStatus: "in_progress" });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.inquiry).toMatchObject({ id: "i1", handleStatus: "in_progress", handleNote: null, contactHidden: true });
+    expect(body.inquiry).toMatchObject({ id: "i1", handleStatus: "in_progress", handleNote: null, freeTextHidden: true });
+    expect(body.inquiry).not.toHaveProperty("contactHidden");
     expect(JSON.stringify(body)).not.toContain("090-1111-2222");
   });
-  it("電話を平文で見られる利用者には、更新結果の対応メモを返す(contactHidden=false)", async () => {
+  it("電話は平文で見えるがメール(owner_email)が伏せなら、対応メモは自由記述なので返さない(freeTextHidden=true・@codex R10 P1: 対応メモはメールアドレス等を含みうるため phone だけでなく email も必要)", async () => {
     guard.requireSaleDmWriteAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "full", email: "masked" } });
     db.dmInquiry.findUnique.mockResolvedValueOnce(FOUND).mockResolvedValueOnce(FOUND);
     db.dmInquiry.update.mockResolvedValueOnce({ id: "i1", handleStatus: "done", handledAt: new Date(), handleNote: "折り返し済み" });
     const body = await (await patch({ handleStatus: "done" })).json();
-    expect(body.inquiry).toMatchObject({ id: "i1", handleStatus: "done", handleNote: "折り返し済み", contactHidden: false });
+    expect(body.inquiry).toMatchObject({ id: "i1", handleStatus: "done", handleNote: null, freeTextHidden: true });
+  });
+  it("電話は伏せでメール(owner_email)は平文でも、対応メモは自由記述なので返さない(freeTextHidden=true)", async () => {
+    guard.requireSaleDmWriteAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "masked", email: "full" } });
+    db.dmInquiry.findUnique.mockResolvedValueOnce(FOUND).mockResolvedValueOnce(FOUND);
+    db.dmInquiry.update.mockResolvedValueOnce({ id: "i1", handleStatus: "done", handledAt: new Date(), handleNote: "折り返し済み" });
+    const body = await (await patch({ handleStatus: "done" })).json();
+    expect(body.inquiry).toMatchObject({ id: "i1", handleStatus: "done", handleNote: null, freeTextHidden: true });
+  });
+  it("電話・メールの両方を平文で見られる利用者には、更新結果の対応メモを返す(freeTextHidden=false)", async () => {
+    guard.requireSaleDmWriteAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "full", email: "full" } });
+    db.dmInquiry.findUnique.mockResolvedValueOnce(FOUND).mockResolvedValueOnce(FOUND);
+    db.dmInquiry.update.mockResolvedValueOnce({ id: "i1", handleStatus: "done", handledAt: new Date(), handleNote: "折り返し済み" });
+    const body = await (await patch({ handleStatus: "done" })).json();
+    expect(body.inquiry).toMatchObject({ id: "i1", handleStatus: "done", handleNote: "折り返し済み", freeTextHidden: false });
   });
   it("ロック後に担当が外れていたら 404 で更新しない", async () => {
     guard.requireSaleDmWriteAccess.mockResolvedValueOnce({ session: { id: "u1", role: "field_staff" }, permissions: [], ownerDisplayConfig: { phone: "full", email: "full" } });

@@ -381,6 +381,7 @@ export interface SaleDmInquiry {
   handleNote: string | null;
   contactHidden: boolean;
   emailHidden: boolean;
+  freeTextHidden: boolean;
 }
 
 // 申込一覧は状態で絞らない1本のカーソルでたどる(振り分けは画面側)。counts は状態別の件数(範囲全体)。
@@ -401,10 +402,10 @@ export async function updateSaleDmInquiryStatus(
 ) {
   if (USE_MOCK) {
     await mockDelay();
-    return { inquiry: { id: inquiryId, handleStatus: body.handleStatus, handledAt: null, handleNote: body.handleNote ?? null, contactHidden: false } };
+    return { inquiry: { id: inquiryId, handleStatus: body.handleStatus, handledAt: null, handleNote: body.handleNote ?? null, freeTextHidden: false } };
   }
-  // handleNote は電話を平文で見られない利用者には null(contactHidden=true)で返る。
-  return apiFetch<{ inquiry: Pick<SaleDmInquiry, "id" | "handleStatus" | "handledAt" | "handleNote" | "contactHidden"> }>(
+  // handleNote は電話・メールの両方を平文で見られない利用者には null(freeTextHidden=true)で返る(@codex R10 P1)。
+  return apiFetch<{ inquiry: Pick<SaleDmInquiry, "id" | "handleStatus" | "handledAt" | "handleNote" | "freeTextHidden"> }>(
     `/api/properties/sale-dm/inquiries/${inquiryId}`,
     { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
   );
