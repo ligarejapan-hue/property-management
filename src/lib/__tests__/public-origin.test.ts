@@ -32,7 +32,7 @@ describe("isCrossSiteOrigin(公開の書き込み口の送信元判定)", () => 
 });
 
 describe("公開ページの参照元方針", () => {
-  it("same-origin(no-referrer だとフォーム送信の Origin が null になり、よそ判定が意味を失う)", () => {
-    expect(PUBLIC_PAGE_HEADERS["Referrer-Policy"]).toBe("same-origin");
+  it("strict-origin(same-origin だと favicon 等の同一オリジン自動サブリクエストが token を含む Referer を送ってしまう。no-referrer だとフォーム送信の Origin が null になり、よそ判定が意味を失う)", () => {
+    expect(PUBLIC_PAGE_HEADERS["Referrer-Policy"]).toBe("strict-origin");
   });
 });

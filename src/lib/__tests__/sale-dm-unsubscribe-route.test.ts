@@ -139,7 +139,7 @@ describe("GET /u/[token](確認画面)", () => {
     expect(html).toContain("配信停止のお手続き");
     expect(html).toContain('method="post"');
     expect(res.headers.get("Cache-Control")).toBe("no-store");
-    expect(res.headers.get("Referrer-Policy")).toBe("same-origin");
+    expect(res.headers.get("Referrer-Policy")).toBe("strict-origin");
     const client = prisma as unknown as {
       dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn> };
     };

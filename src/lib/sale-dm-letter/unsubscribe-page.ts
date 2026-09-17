@@ -95,12 +95,18 @@ export function renderUnsubscribeThrottledPage(): string {
 }
 
 /** 公開ページ共通の応答ヘッダ(キャッシュ禁止・索引拒否・token をよそのサイトの referrer に漏らさない)。
- *  Referrer-Policy は same-origin(よそへは参照元を送らない)。no-referrer にすると、同じサイトへの
- *  フォーム送信でもブラウザが Origin を null にし、送信元判定(public-origin.ts)が働かなくなる。 */
+ *  Referrer-Policy は strict-origin(Referer はオリジンのみ・パスは送らない)。
+ *  - same-origin にしない理由: 同じホストへの自動サブリクエスト(ブラウザの favicon.ico 取得・
+ *    `/lp-assets/...` の画像読み込みなど)にも `Referer` としてページの完全な URL(=`/t/<token>`)が
+ *    付いてしまい、nginx のアクセスログ(除外対象外のパス)に token が残ってしまう(@codex R10)。
+ *  - no-referrer にしない理由: 同じサイトへのフォーム送信でもブラウザが Origin を null にし、
+ *    送信元判定(public-origin.ts)が働かなくなる。
+ *  strict-origin は両立する: 同一オリジンのフォーム POST/sendBeacon には本物の Origin(パスなし)が
+ *  付き、Referer はオリジンだけ(`http(s)://host/`)で token を含まない(実 Chromium で確認済み)。 */
 export const PUBLIC_PAGE_HEADERS: Readonly<Record<string, string>> = {
   "Content-Type": "text/html; charset=utf-8",
   "Cache-Control": "no-store",
   "X-Robots-Tag": "noindex, nofollow",
-  "Referrer-Policy": "same-origin",
+  "Referrer-Policy": "strict-origin",
   "X-Content-Type-Options": "nosniff",
 };

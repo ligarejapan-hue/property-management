@@ -179,9 +179,10 @@ describe("申込フォーム(PR4)", () => {
     expect(html).toMatch(/\.inquiry input,\.inquiry textarea\{[^}]*font-size:16px/);
   });
 
-  it("参照元方針は same-origin(no-referrer だとフォーム送信の Origin が null になる)", () => {
+  it("参照元方針は strict-origin(same-origin だと favicon 等の自動サブリクエストが token を含む Referer を送る。no-referrer だとフォーム送信の Origin が null になる)", () => {
     const html = renderLpPage(input({ mode: "live", form: FORM }));
-    expect(html).toContain('<meta name="referrer" content="same-origin" />');
+    expect(html).toContain('<meta name="referrer" content="strict-origin" />');
+    expect(html).not.toContain('content="same-origin"');
     expect(html).not.toContain("no-referrer");
   });
 });

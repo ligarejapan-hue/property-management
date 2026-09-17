@@ -68,7 +68,7 @@ const JSON_HEADERS: Readonly<Record<string, string>> = {
   "Content-Type": "application/json; charset=utf-8",
   "Cache-Control": "no-store",
   "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "same-origin",
+  "Referrer-Policy": "strict-origin",
 };
 
 function renderReplyPage(kind: ReplyKind, messages: readonly string[], backHref: string): string {

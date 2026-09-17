@@ -58,11 +58,11 @@ beforeEach(() => {
 });
 
 describe("POST /t/[token]/inquiry", () => {
-  it("送付済み・正しい入力: 記録して完了ページ(200・no-store・same-origin)。監査は draftId と非PIIのみ", async () => {
+  it("送付済み・正しい入力: 記録して完了ページ(200・no-store・strict-origin)。監査は draftId と非PIIのみ", async () => {
     const res = await call(VALID, { origin: "https://app.ligarejapan.com" });
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(res.headers.get("referrer-policy")).toBe("same-origin");
+    expect(res.headers.get("referrer-policy")).toBe("strict-origin");
     expect(await res.text()).toContain("受け付けました");
     expect(rec).toHaveBeenCalledWith(expect.anything(), expect.stringMatching(/^tok_/), {
       name: "山田", phone: "090-1234-5678", email: null, contactPref: null, contactTime: null, message: null,
@@ -315,7 +315,7 @@ describe("POST /t/[token]/inquiry accept: application/json(画面を離れずに
     expect(res.headers.get("content-type")).toBe("application/json; charset=utf-8");
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(res.headers.get("referrer-policy")).toBe("same-origin");
+    expect(res.headers.get("referrer-policy")).toBe("strict-origin");
     const text = await res.text();
     expect(JSON.parse(text)).toEqual(body);
     return text;

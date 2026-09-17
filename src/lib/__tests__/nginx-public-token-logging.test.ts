@@ -3,9 +3,11 @@ import { readFileSync } from "fs";
 import path from "path";
 
 // @codex PR#434 P1是正のピン: `/t/<token>` は査定申込フォームを送信できる権限そのもので、
-// `/lp-assets/<publicId>` は Referrer-Policy: same-origin により Referer ヘッダに
-// `/t/<token>` を載せて運ぶ。nginx の設定例でこの2つの location が access_log off に
-// なっていないと、本番のアクセスログにトークンが残ってしまう(docs/deploy.md 参照)。
+// リクエスト行自体に token が載るためアクセスログ除外が必須。`/lp-assets/<publicId>` は
+// token を URL に含まないが、Referrer-Policy を strict-origin(オリジンのみ・パスなし)に
+// してもなお多層防御としてアクセスログ除外を維持する(@codex R10)。nginx の設定例で
+// この2つの location が access_log off になっていないと、本番のアクセスログにトークンが
+// 残ってしまう(docs/deploy.md 参照)。
 
 const read = (p: string) =>
   readFileSync(path.join(process.cwd(), p), "utf8").replace(/\r\n/g, "\n");
