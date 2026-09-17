@@ -79,18 +79,18 @@ enum EditLockResource {
 }
 
 model EditLock {
-  id              String           @id @default(cuid())
+  id              String           @id @default(uuid()) @db.Uuid
   resourceType    EditLockResource @map("resource_type")
-  resourceId      String           @map("resource_id")
-  userId          String           @map("user_id")
+  resourceId      String           @map("resource_id") @db.Uuid
+  userId          String           @map("user_id") @db.Uuid
   screenTokenHash String           @map("screen_token_hash")
   acquiredAt      DateTime         @default(now()) @map("acquired_at")
   heartbeatAt     DateTime         @default(now()) @map("heartbeat_at")
   activityAt      DateTime         @default(now()) @map("activity_at")
   forceReleasedAt DateTime?        @map("force_released_at")
-  forceReleasedBy String?          @map("force_released_by")
+  forceReleasedBy String?          @map("force_released_by") @db.Uuid
 
-  user User @relation(fields: [userId], references: [id])
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([resourceType, resourceId])
   @@index([userId])
@@ -98,6 +98,8 @@ model EditLock {
 }
 ```
 
+- ID はすべて既存の表と同じ **UUID 型(`@db.Uuid`)**。`User.id` が UUID 型なので、`user_id` を文字列型にすると外部キーの作成で migration が失敗する(@codex R5 P1)。
+- 利用者への関係は **`onDelete: Cascade`**(既存の `user_permissions` 等と同じ)。期限切れ・解除済みの行は次の取得まで残るため、制限のままだと**鍵を一度取っただけの利用者が削除できなくなる**(`DELETE /api/admin/users/[id]` は物理削除)(@codex R5 P2)。
 - `resourceId` は物件/所有者への**外部キーを張らない**(資源が2種類のため)。資源の削除・アーカイブ・統合時は 4.6 で明示的に消す。
 - **管理者の解除は行を消さずに `force_released_at`/`force_released_by` を立てる(墓標)**。解除と同じ1文で書くので、監査ログの書き込みが失敗しても「管理者に外された」ことが失われない(@codex R2 P2。`writeAuditLog` は失敗を握りつぶす作りのため、監査ログを判別の根拠にしない)。墓標の行は次の取得で上書きされ、そのとき列は NULL に戻る。
 - 行は「今の鍵」だけを持つ(1資源1行)。**履歴は `audit_logs` に残す**(3.2)。期限切れの行は次の取得で上書きされるので、お掃除の定期処理は足さない(最大でも「編集されたことのある物件+所有者」の行数)。
@@ -136,7 +138,9 @@ model EditLock {
 1. トランザクション内で**資源の行をロック**(物件=`lockPropertyRow`/所有者=所有者行の `SELECT … FOR UPDATE`)。→ 5.2 の保存と直列化する。
 2. 既存の鍵を読み、`evaluateLock` で判定。
 3. `INSERT … ON CONFLICT (resource_type, resource_id) DO UPDATE SET … WHERE <期限切れ OR 解除済み(force_released_at IS NOT NULL) OR (同じ保持者 AND force_released_at IS NULL)>` を1文で実行(`now()` 基準)。行が返らなければ他の人が保持中。
-   - ⚠**保持者が変わるとき(期限切れの横取り)は `id` と `acquired_at` を必ず振り直す**(`SET id = <新しいID>, acquired_at = now(), …`)。`ON CONFLICT DO UPDATE` は既定で主キーを残すため、振り直さないと管理者が古い画面の `lockId` で**新しい保持者の鍵を外してしまう**(4.4 の前提が崩れる)。**同じ保持者の取り直しでは `id` を変えない**。解除済みの行を取るときは保持者が同じでも `id` を振り直し、`force_released_at`/`force_released_by` を NULL に戻す。
+   - ⚠**取得に成功するたびに `id`(=鍵の世代)と `acquired_at` を必ず振り直す**(`SET id = <新しいUUID>, acquired_at = now(), force_released_at = NULL, force_released_by = NULL, …`)。**同じ保持者の取り直しでも変える**。
+     - 理由1: `ON CONFLICT DO UPDATE` は既定で主キーを残すため、横取りで変えないと管理者が古い画面の `lockId` で**新しい保持者の鍵を外してしまう**(@codex R1 P2)。
+     - 理由2: 再読み込みは同じ合言葉を使う(D6)ため、**再読み込み前の `pagehide` の解除が、読み込み直した画面が取り直した鍵より遅れて届くと、合言葉だけでは新しい鍵を消してしまう**。解除を世代で照合するには、取り直しでも世代を変える必要がある(@codex R5 P1。初版の「同じ保持者では変えない」を撤回)。
 4. 応答:
    - 取得 → `200 { state: "mine", lockId, since }`(期限切れの横取りなら監査 `edit_lock_takeover_expired`)
    - 保持中 → `423 { code: "EDIT_LOCKED", state: "held_by_other" | "held_by_self_other_screen", holderName, since }`
@@ -164,8 +168,8 @@ UPDATE edit_locks
 
 ### 4.4 `POST /api/edit-locks/release` / `POST /api/edit-locks/force-release`
 
-- `release`: 本文 `{ resourceType, resourceId }`。`DELETE … WHERE 資源 AND user_id AND screen_token_hash AND force_released_at IS NULL`。0件でも 200(冪等)。⚠**墓標は通常の解除で消さない**(消すと、管理者に外された画面を閉じた直後に遅れて届いた保存が「鍵なし」で通る。墓標を消せるのは次の取得だけ)(@codex R4 P1)。`sendBeacon` から呼ばれる前提で、**本文は `text/plain` の JSON も受ける**(beacon は Content-Type を自由に付けられないため)。ヘッダが付けられない beacon 用に、合言葉は本文の `screenToken` でも受ける(この窓口に限る)。
-- `force-release`(管理者): 本文 `{ resourceType, resourceId, lockId }`。**トランザクション内で、取得・保存と同じ順序で資源の行をロックしてから**(物件=`lockPropertyRow`/所有者=所有者行 `FOR UPDATE`)、`UPDATE edit_locks SET force_released_at = now(), force_released_by = $admin WHERE id = $lockId AND force_released_at IS NULL`(**行は消さない=墓標**。**画面に出ていた鍵だけを外す**。見ている間に別の人が取り直した新しい鍵は `id` が違うので外れない)。0件 → `409 { code: "EDIT_LOCK_CHANGED" }`。監査 `edit_lock_force_release` は従来どおり書くが、判別には使わない。⚠**資源の行ロックを取らないと、すでに資源をロックして自分の有効な鍵を確認し終えた保存が、解除の応答を返した後に書き込めてしまう**(画面には「終了しました」と出たのに保存が通る)。ロックを取れば、解除はその保存が終わるまで待つ=「解除の応答より後に通る保存は無い」(@codex R4 P1)。
+- `release`: 本文 `{ resourceType, resourceId, lockId }`(`lockId` は取得の応答で受け取った世代。beacon にも入れる)。`DELETE … WHERE id = $lockId AND 資源 AND user_id AND screen_token_hash AND force_released_at IS NULL`。**世代が違う(=その後に取り直された)鍵は消さない**(@codex R5 P1)。0件でも 200(冪等)。⚠**墓標は通常の解除で消さない**(消すと、管理者に外された画面を閉じた直後に遅れて届いた保存が「鍵なし」で通る。墓標を消せるのは次の取得だけ)(@codex R4 P1)。`sendBeacon` から呼ばれる前提で、**本文は `text/plain` の JSON も受ける**(beacon は Content-Type を自由に付けられないため)。ヘッダが付けられない beacon 用に、合言葉は本文の `screenToken` でも受ける(この窓口に限る)。
+- `force-release`(管理者): 本文 `{ resourceType, resourceId, lockId }`。**トランザクション内で、取得・保存と同じ順序で資源の行をロックしてから**(物件=`lockPropertyRow`/所有者=所有者行 `FOR UPDATE`)、`UPDATE edit_locks SET force_released_at = now(), force_released_by = $admin WHERE id = $lockId AND resource_type = $t AND resource_id = $id AND force_released_at IS NULL`(**`id` だけでなく資源も一致させる**=ロックした資源と違う鍵を外さない。食い違えば0件=409)(@codex R5 P2)(**行は消さない=墓標**。**画面に出ていた鍵だけを外す**。見ている間に別の人が取り直した新しい鍵は `id` が違うので外れない)。0件 → `409 { code: "EDIT_LOCK_CHANGED" }`。監査 `edit_lock_force_release` は従来どおり書くが、判別には使わない。⚠**資源の行ロックを取らないと、すでに資源をロックして自分の有効な鍵を確認し終えた保存が、解除の応答を返した後に書き込めてしまう**(画面には「終了しました」と出たのに保存が通る)。ロックを取れば、解除はその保存が終わるまで待つ=「解除の応答より後に通る保存は無い」(@codex R4 P1)。
 
 ### 4.5 `POST /api/edit-locks/status`
 
@@ -243,7 +247,8 @@ UPDATE edit_locks
 
 `useEditLock({ resourceType, resourceId })` → `{ acquire(), release(), status, noteActivity() }`
 
-- `acquire()`: 4.2 を呼ぶ。取れたら合図を開始。
+- `acquire()`: 4.2 を呼ぶ。取れたら応答の `lockId`(世代)を覚えて合図を開始。取り直すたびに新しい `lockId` に置き換える。
+- `release()`・`pagehide` の beacon は、**覚えている `lockId` を必ず送る**(4.4)。
 - 合図: 30秒ごと。`active` は前回からの操作の有無(編集ウィンドウ/カード内の `input`・`keydown`・`pointerdown`)。
 - 55分操作なし → 帯「操作がないため、あと5分で編集を終了します」。
 - 応答が `lost: expired` → 帯「しばらく画面が止まっていたため、編集の鍵が外れました。入力すると自動で取り直します」。**入力は消さない**。次に入力したとき `acquire()` を自動で再試行し、取れたら帯を消す。
@@ -295,8 +300,11 @@ UPDATE edit_locks
 - **同時取得**: 実DBで2本同時に取得 → ちょうど1本だけ成功(一意制約+`ON CONFLICT … WHERE`)。
 - 合図: 生きている鍵→更新/期限切れ→`lost`(生き返らない)/他人に取られた→`taken`/管理者解除後→`lost: force_released`。
 - 外す: 本人のみ・冪等・`text/plain` 本文(beacon)。管理者解除: 管理者以外403/`lockId` 不一致409。
-- **期限切れの横取りで `id` が変わる**こと。**横取りの前に表示していた古い `lockId` で管理者が解除 → 409 `EDIT_LOCK_CHANGED`・新しい保持者の鍵は残る**。同じ保持者の取り直しでは `id` が変わらないこと(@codex R1 P2)。
+- **期限切れの横取りで `id` が変わる**こと。**横取りの前に表示していた古い `lockId` で管理者が解除 → 409 `EDIT_LOCK_CHANGED`・新しい保持者の鍵は残る**。**同じ保持者の取り直しでも `id` が変わること**(@codex R5 P1)。
 - 所有者の鍵: `owner:write` と項目の書込権限が1つ以上あれば担当範囲に関係なく取れる(D11)/**項目の書込権限が1つも無ければ403**(取得・合図とも)(@codex R2 P2)。物件の鍵はアルバイトの担当外なら403。
+- **再読み込みと遅れた beacon**: 画面Aが取得(世代1) → 同じ合言葉で再読み込みして取得(世代2) → 世代1の beacon が遅れて届く → **世代2の鍵は残る**(@codex R5 P1)。
+- 管理者解除で `lockId` と資源が食い違う → 409・どの鍵も変わらない(@codex R5 P2)。
+- 鍵の行を持つ利用者を削除できる(行も消える)(@codex R5 P2)。migration が実DBで通る(UUID 型の外部キー)(@codex R5 P1)。
 - **管理者解除と保存の交差**: 保存が資源をロックして鍵を確認し終えた状態で管理者解除を並行に投げる → 解除はその保存の完了を待ってから返る/解除の応答より後に書き込まれる保存が無い(@codex R4 P1)。
 - **通常の解除で墓標が消えない**: 墓標がある状態で本人の `release`(beacon含む)→ 行は残る → その画面からの遅れた保存は 423 `EDIT_LOCK_FORCE_RELEASED`(@codex R4 P1)。
 - **管理者解除の墓標**: 解除後の合図 → `lost: force_released`/**監査ログの書き込みを失敗させても** `force_released` と判別でき、画面の自動の取り直しが起きない/解除済みの行を次の人が取ると `id` が変わり墓標の列が NULL に戻る/解除済みの行は状態で `free`(@codex R2 P2)。
@@ -401,3 +409,12 @@ Playwright で**ブラウザを2つ**同時に動かす: **タブの複製(`wind
 | P1 | 通常の解除の DELETE が墓標まで消し、遅れた保存が通る | 4.4 で `force_released_at IS NULL` の行だけ消す |
 | P2 | 自動取得の監査に残す見送りフラグが許可リストに無く `[REDACTED]` | 5.3 で `registry_auto_fetch` の許可に追加 |
 | P2 | migration の戻し手順が無い | 9.2 に安全な逆順(画面→窓口→表)と停止時間を明記 |
+
+### @codex R5(2026-09-17・commit `34062696`)— 4件すべて事実と確認
+
+| 重要度 | 指摘 | 対応 |
+|---|---|---|
+| P1 | `user_id` を文字列型にすると UUID 型の `users.id` への外部キーで migration が失敗 | 3.1 で ID をすべて `@db.Uuid` に |
+| P1 | 再読み込み前の遅れた beacon が、同じ合言葉で取り直した新しい鍵を消す | 4.2 で取得のたびに世代(`id`)を変え、4.4 の解除を世代で照合 |
+| P2 | 管理者解除の UPDATE が `id` だけで照合し、ロックした資源と違う鍵を外せる | 4.4 で `id`+資源の一致を必須に |
+| P2 | 利用者への関係が制限のままで、鍵を取った利用者を削除できない | 3.1 で `onDelete: Cascade` |
