@@ -29,15 +29,15 @@ describe("toInquiryListRows", () => {
         contactHidden: false, emailHidden: false, freeTextHidden: false,
       });
     });
-    it("(true, false): 構造化項目(電話等)は返すが、message/handleNote/email は伏せる・freeTextHidden=true", () => {
+    it("(true, false): 電話・希望連絡方法は返すが、contactTime/message/handleNote/email は自由記述扱いで伏せる・freeTextHidden=true", () => {
       const [r] = toInquiryListRows([row("a", "open", "2026-09-20T00:00:00Z")], { contact: true, email: false });
       expect(r).toMatchObject({
-        phone: "090-0000-0000", contactPref: "phone", contactTime: "夜",
+        phone: "090-0000-0000", contactPref: "phone", contactTime: null,
         message: null, handleNote: null, email: null,
         contactHidden: false, emailHidden: true, freeTextHidden: true,
       });
     });
-    it("(false, true): email は返すが、構造化項目(電話等)と message/handleNote は伏せる・freeTextHidden=true", () => {
+    it("(false, true): email は返すが、構造化項目(電話等)と contactTime/message/handleNote は伏せる・freeTextHidden=true", () => {
       const [r] = toInquiryListRows([row("a", "open", "2026-09-20T00:00:00Z")], { contact: false, email: true });
       expect(r).toMatchObject({
         phone: null, contactPref: null, contactTime: null,
@@ -61,5 +61,19 @@ describe("toInquiryListRows", () => {
     expect(toInquiryListRows([src], { contact: true, email: false })[0].handleNote).toBeNull();
     expect(toInquiryListRows([src], { contact: false, email: true })[0].handleNote).toBeNull();
     expect(toInquiryListRows([src], { contact: false, email: false })[0].handleNote).toBeNull();
+  });
+
+  // 連絡のつきやすい時間帯(contactTime)は自由入力欄で、申込者がメールアドレス等を
+  // 書き込める(構造化項目ではない)ため、message/handleNote と同じ自由記述グループに入れ
+  // freeTextHidden(contact && email の両方)で伏せる(@codex L1 P1)。contactPref(enum)は
+  // 引き続き contact だけで決まる構造化項目のまま。
+  it("時間帯(contactTime)は自由記述なので freeTextHidden(contact && email)で伏せる(@codex L1 P1)", () => {
+    const src = { ...row("a", "open", "2026-09-20T00:00:00Z"), contactTime: "夜(携帯: foo@example.com へ連絡)" };
+    expect(toInquiryListRows([src], { contact: true, email: true })[0]).toMatchObject({ contactTime: "夜(携帯: foo@example.com へ連絡)", freeTextHidden: false });
+    for (const visibility of [{ contact: true, email: false }, { contact: false, email: true }, { contact: false, email: false }]) {
+      const [r] = toInquiryListRows([src], visibility);
+      expect(r.freeTextHidden).toBe(true);
+      expect(r.contactTime).toBeNull();
+    }
   });
 });

@@ -21,9 +21,9 @@ describe("申込の社内画面", () => {
     expect(panel).toContain("emailHidden");
     expect(panel).toMatch(/表示する権限がありません/);
   });
-  it("要望・対応メモ(自由記述)は freeTextHidden で伏せられ、伏せたときの案内がある(@codex R10 P1)", () => {
+  it("時間帯・要望・対応メモ(自由記述)は freeTextHidden で伏せられ、伏せたときの案内がある(@codex R10 P1/L1 P1)", () => {
     expect(panel).toContain("freeTextHidden");
-    expect(panel).toContain("要望・メモ: 表示する権限がありません");
+    expect(panel).toContain("時間帯・要望・メモ: 表示する権限がありません");
   });
   it("連絡先(電話等)を伏せる分岐の中でも、メールは emailHidden で別に判定して出す(@codex P2: email は phone に連動させない)", () => {
     // 三項演算子の contactHidden=true 側の枝だけを取り出す(false 側の `) : (` 以降は含めない)。

@@ -121,14 +121,14 @@ describe("GET 申込一覧", () => {
     const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
     expect(body.inquiries[0]).toMatchObject({ phone: null, handleNote: null, contactHidden: true, emailHidden: true, freeTextHidden: true });
   });
-  it("電話は見えるがメール(owner_email)の表示権限が無ければメールだけ伏せる(@codex P1)。message・handleNote は自由記述なのでメールを伏せる時点で一緒に伏せる(freeTextHidden=true・@codex R10 P1)", async () => {
+  it("電話は見えるがメール(owner_email)の表示権限が無ければメールだけ伏せる(@codex P1)。message・handleNote・contactTime は自由記述なのでメールを伏せる時点で一緒に伏せる(freeTextHidden=true・@codex R10 P1/L1 P1)", async () => {
     guard.requireSaleDmAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "full", email: "masked" } });
     db.dmCampaign.findUnique.mockResolvedValueOnce({ id: "c1", createdBy: "u1" });
-    db.dmInquiry.findMany.mockResolvedValueOnce([{ ...INQ, email: "a@b.jp", message: "要望です", handleNote: "折り返し済み" }]);
+    db.dmInquiry.findMany.mockResolvedValueOnce([{ ...INQ, email: "a@b.jp", contactTime: "夜", message: "要望です", handleNote: "折り返し済み" }]);
     const body = await (await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) })).json();
     expect(body.inquiries[0]).toMatchObject({
       phone: "090", contactHidden: false, email: null, emailHidden: true,
-      message: null, handleNote: null, freeTextHidden: true,
+      contactTime: null, message: null, handleNote: null, freeTextHidden: true,
     });
   });
   it("電話は見えない(masked)がメール(owner_email)は見える(full)なら、メールは返り電話等だけ伏せる(email は phone とは独立・P2)。message・handleNote も伏せる(freeTextHidden=true)", async () => {

@@ -15,13 +15,15 @@ export interface InquiryListRow {
   handleStatus: string;
   handledAt: Date | null;
   handleNote: string | null;
-  /** 電話・希望連絡方法・時間帯(構造化された連絡先項目。email を除く)を権限不足で伏せたか。
-   *  message・handleNote はここには連動しない(下の freeTextHidden を見る)。 */
+  /** 電話・希望連絡方法(enum の contactPref。構造化された連絡先項目。email を除く)を
+   *  権限不足で伏せたか。contactTime・message・handleNote はここには連動しない
+   *  (自由記述なので下の freeTextHidden を見る)。 */
   contactHidden: boolean;
   /** メール(owner_email の表示レベル)を権限不足で伏せたか。phone/contact の可否とは独立に決まる(@codex P2) */
   emailHidden: boolean;
-  /** 自由記述(message=申込者の要望・handleNote=対応メモ)を権限不足で伏せたか。
-   *  自由記述はメールアドレスなど email 相当の情報を含みうるため、phone(contact)と
+  /** 自由記述(contactTime=連絡のつきやすい時間帯・message=申込者の要望・handleNote=対応メモ)を
+   *  権限不足で伏せたか。自由記述は申込者が自由に書けるためメールアドレスなど email 相当の
+   *  情報を含みうる(contactTime も例外ではない・@codex L1 P1)ので、phone(contact)と
    *  email の**両方**を見られる利用者にだけ返す(= !(contact && email))(@codex R10 P1)。 */
   freeTextHidden: boolean;
 }
@@ -38,15 +40,15 @@ export function toInquiryListRows(rows: SourceRow[], visibility: InquiryVisibili
   // 並べ替えはしない: DB が submittedAt desc, id desc の不変順で返す(@codex P2)。
   // email は phone/contact とは別の owner_email 表示レベルで独立に決まる(@codex P2):
   // 「電話は伏せるがメールは表示する」も成立する組み合わせのため、それぞれ個別に算出する。
-  // message/handleNote は自由記述でメールアドレス等を含みうるため、contact と email の
-  // **両方**を見られる利用者にだけ返す(@codex R10 P1)。構造化項目(phone/contactPref/
-  // contactTime)は contact だけ、email は email だけで独立に決まる(従来どおり)。
+  // contactTime/message/handleNote は自由記述でメールアドレス等を含みうるため、contact と
+  // email の**両方**を見られる利用者にだけ返す(@codex R10 P1・contactTime は L1 P1)。
+  // 構造化項目(phone/contactPref)は contact だけ、email は email だけで独立に決まる(従来どおり)。
   const freeTextVisible = visibility.contact && visibility.email;
   return rows.map((r) => ({
     ...r,
     phone: visibility.contact ? r.phone : null,
     contactPref: visibility.contact ? r.contactPref : null,
-    contactTime: visibility.contact ? r.contactTime : null,
+    contactTime: freeTextVisible ? r.contactTime : null,
     message: freeTextVisible ? r.message : null,
     handleNote: freeTextVisible ? r.handleNote : null,
     contactHidden: !visibility.contact,
