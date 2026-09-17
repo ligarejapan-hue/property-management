@@ -296,6 +296,23 @@ describe("PATCH 対応状況", () => {
     expect(body.inquiry).not.toHaveProperty("contactHidden");
     expect(JSON.stringify(body)).not.toContain("090-1111-2222");
   });
+  it("電話・メールの両方を平文で見られない利用者が handleNote を送っても 403 で書き込まない(@codex L2 P1: 読めない対応メモを上書き/消去できてしまう)", async () => {
+    guard.requireSaleDmWriteAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "full", email: "masked" } });
+    const res = await patch({ handleStatus: "done", handleNote: "新しいメモ" });
+    expect(res.status).toBe(403);
+    expect(db.dmInquiry.update).not.toHaveBeenCalled();
+    expect(lockPropertyRow).not.toHaveBeenCalled();
+    expect(db.dmInquiry.findUnique).not.toHaveBeenCalled();
+  });
+  it("電話・メールの両方を平文で見られない利用者でも handleStatus だけの更新(handleNote 無し)は許す(@codex L2 P1)", async () => {
+    guard.requireSaleDmWriteAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "full", email: "masked" } });
+    db.dmInquiry.findUnique.mockResolvedValueOnce(FOUND).mockResolvedValueOnce(FOUND);
+    db.dmInquiry.update.mockResolvedValueOnce({ id: "i1", handleStatus: "done", handledAt: new Date(), handleNote: null });
+    const res = await patch({ handleStatus: "done" });
+    expect(res.status).toBe(200);
+    const data = db.dmInquiry.update.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty("handleNote");
+  });
   it("電話は平文で見えるがメール(owner_email)が伏せなら、対応メモは自由記述なので返さない(freeTextHidden=true・@codex R10 P1: 対応メモはメールアドレス等を含みうるため phone だけでなく email も必要)", async () => {
     guard.requireSaleDmWriteAccess.mockResolvedValueOnce({ session, permissions: [], ownerDisplayConfig: { phone: "full", email: "masked" } });
     db.dmInquiry.findUnique.mockResolvedValueOnce(FOUND).mockResolvedValueOnce(FOUND);
