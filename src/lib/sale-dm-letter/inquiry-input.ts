@@ -22,7 +22,7 @@ export interface InquiryInput {
 }
 
 export type InquiryFieldError =
-  | "name_required" | "name_too_long"
+  | "name_required" | "name_too_long" | "name_invalid"
   | "phone_required" | "phone_invalid"
   | "email_invalid" | "email_required_for_pref"
   | "contact_pref_invalid"
@@ -33,6 +33,7 @@ export type InquiryFieldError =
 export const INQUIRY_ERROR_MESSAGES: Readonly<Record<InquiryFieldError, string>> = {
   name_required: "お名前をご入力ください。",
   name_too_long: `お名前は${INQUIRY_LIMITS.name}文字以内でご入力ください。`,
+  name_invalid: "お名前に数字や「@」は使えません。電話番号・メールアドレスはそれぞれの欄にご入力ください。",
   phone_required: "電話番号をご入力ください。",
   phone_invalid: "電話番号は数字とハイフンで、10桁以上ご入力ください。",
   email_invalid: "メールアドレスの形式をご確認ください。",
@@ -52,6 +53,12 @@ export type InquiryParse =
 const CONTROL_EXCEPT_NL = /[\u0000-\u0009\u000b-\u001f\u007f]/g;
 const CONTROL_ALL = /[\u0000-\u001f\u007f]/g;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/**
+ * お名前に連絡先が紛れ込んだとみなす文字(NFKC 後=全角数字・全角@も含む)。お名前は社内一覧で
+ * 電話・メールの表示権限と無関係に出すため、電話番号やメールアドレスを書けないようにする(@codex R13 P1)。
+ * 一覧側(inquiry-list.ts)も同じ判定で伏せる=入力検証より前に保存された行への二重の備え。
+ */
+export const NAME_CONTACT_LIKE_RE = /[0-9@]/;
 
 function single(v: string | null): string {
   return (v ?? "").normalize("NFKC").replace(CONTROL_ALL, "").trim();
@@ -75,6 +82,7 @@ export function parseInquiryForm(get: (key: string) => string | null): InquiryPa
   const name = single(get("name"));
   if (name === "") errors.push("name_required");
   else if ([...name].length > INQUIRY_LIMITS.name) errors.push("name_too_long");
+  else if (NAME_CONTACT_LIKE_RE.test(name)) errors.push("name_invalid");
 
   const phone = normalizePhone(single(get("phone")));
   if (phone === "") errors.push("phone_required");

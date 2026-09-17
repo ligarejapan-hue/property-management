@@ -1,4 +1,8 @@
 /** 社内の申込一覧の区分・カーソルと連絡先の伏せ(純関数)。 */
+import { NAME_CONTACT_LIKE_RE } from "./inquiry-input";
+
+/** 数字や @ を含むお名前(連絡先が紛れた可能性)を、自由記述を見られない利用者に出すときの代わりの表示 */
+export const HIDDEN_NAME_PLACEHOLDER = "(お名前は表示する権限がありません)";
 export const HANDLE_STATUSES = ["open", "in_progress", "done"] as const;
 export type HandleStatus = (typeof HANDLE_STATUSES)[number];
 
@@ -46,6 +50,8 @@ export function toInquiryListRows(rows: SourceRow[], visibility: InquiryVisibili
   const freeTextVisible = visibility.contact && visibility.email;
   return rows.map((r) => ({
     ...r,
+    // お名前は常に出すが、数字や @ を含む(=電話・メールが紛れた可能性がある)ときは自由記述と同じ扱い(@codex R13 P1)。
+    name: freeTextVisible || !NAME_CONTACT_LIKE_RE.test(r.name.normalize("NFKC")) ? r.name : HIDDEN_NAME_PLACEHOLDER,
     phone: visibility.contact ? r.phone : null,
     contactPref: visibility.contact ? r.contactPref : null,
     contactTime: freeTextVisible ? r.contactTime : null,

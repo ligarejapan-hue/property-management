@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toInquiryListRows } from "@/lib/sale-dm-letter/inquiry-list";
+import { toInquiryListRows, HIDDEN_NAME_PLACEHOLDER } from "@/lib/sale-dm-letter/inquiry-list";
 
 const row = (id: string, handleStatus: string, iso: string) => ({
   id, draftId: `d-${id}`, submittedAt: new Date(iso), name: `名${id}`, phone: "090-0000-0000", email: "a@b.jp",
@@ -20,6 +20,18 @@ describe("toInquiryListRows", () => {
   // message/handleNote(自由記述・メールアドレス等を含みうる)は contact と email の
   // 両方が揃ったときだけ返す(@codex R10 P1)。構造化項目(phone/contactPref/contactTime)は
   // 従来どおり contact だけで決まり、email は email だけで決まる(互いに独立)。
+  it("数字や @ を含むお名前は contact と email の両方を見られる利用者にだけそのまま返す(@codex R13 P1)", () => {
+    const withContact = { ...row("a", "open", "2026-09-20T00:00:00Z"), name: "山田 090-1234-5678" };
+    const withMail = { ...row("b", "open", "2026-09-20T00:00:00Z"), name: "山田 ｔａｒｏ＠ｅｘ.jp" };
+    const plain = row("c", "open", "2026-09-20T00:00:00Z");
+    for (const vis of [{ contact: true, email: false }, { contact: false, email: true }, { contact: false, email: false }]) {
+      const out = toInquiryListRows([withContact, withMail, plain], vis);
+      expect(out.map((r) => r.name)).toEqual([HIDDEN_NAME_PLACEHOLDER, HIDDEN_NAME_PLACEHOLDER, "名c"]);
+    }
+    const all = toInquiryListRows([withContact, withMail, plain], { contact: true, email: true });
+    expect(all.map((r) => r.name)).toEqual(["山田 090-1234-5678", "山田 ｔａｒｏ＠ｅｘ.jp", "名c"]);
+  });
+
   describe("2x2: (contact, email) の組み合わせ", () => {
     it("(true, true): 全項目を返す・freeTextHidden=false", () => {
       const [r] = toInquiryListRows([row("a", "open", "2026-09-20T00:00:00Z")], { contact: true, email: true });

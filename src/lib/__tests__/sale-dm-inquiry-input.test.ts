@@ -50,11 +50,17 @@ describe("parseInquiryForm", () => {
     const r = parseInquiryForm(form({ ...OK, name: "山田\u0000太郎", message: "一行目\r\n二行目\u0007" }));
     expect(r).toMatchObject({ kind: "ok", value: { name: "山田太郎", message: "一行目\n二行目" } });
   });
+  it("お名前に数字や @ (全角含む)があれば name_invalid(連絡先を名前欄に書かせない・@codex R13)", () => {
+    for (const name of ["山田 090-1234-5678", "山田０９０", "taro@example.jp", "山田＠example"]) {
+      expect(parseInquiryForm(form({ ...OK, name }))).toEqual({ kind: "invalid", errors: ["name_invalid"] });
+    }
+    expect(parseInquiryForm(form({ ...OK, name: "山田・太郎 (やまだ)" }))).toMatchObject({ kind: "ok" });
+  });
   it("同意は consent=yes のときだけ", () => {
     expect(parseInquiryForm(form({ ...OK, consent: "no" }))).toEqual({ kind: "invalid", errors: ["consent_required"] });
   });
   it("すべてのエラーに日本語の文言がある", () => {
-    const keys = ["name_required", "name_too_long", "phone_required", "phone_invalid", "email_invalid", "email_required_for_pref", "contact_pref_invalid", "contact_time_too_long", "message_too_long", "consent_required"] as const;
+    const keys = ["name_required", "name_too_long", "name_invalid", "phone_required", "phone_invalid", "email_invalid", "email_required_for_pref", "contact_pref_invalid", "contact_time_too_long", "message_too_long", "consent_required"] as const;
     for (const k of keys) expect(INQUIRY_ERROR_MESSAGES[k].length).toBeGreaterThan(0);
   });
 });
