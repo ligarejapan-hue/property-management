@@ -35,7 +35,7 @@
 ### 2.2 決まり
 
 1. **1つの資源に鍵は1本だけ**。台帳の一意制約 `(resource_type, resource_id)` で物理的に二重取得を防ぐ。
-2. **鍵が有効** ⇔ `now - heartbeat_at ≤ 5分` **かつ** `now - activity_at ≤ 60分`。どちらかを超えた鍵は**期限切れ**で、次に来た人がそのまま取れる。
+2. **鍵が有効** ⇔ `force_released_at IS NULL` **かつ** `now - heartbeat_at ≤ 5分` **かつ** `now - activity_at ≤ 60分`。合図か操作の期限を超えた鍵は**期限切れ**、管理者に外された鍵は**解除済み**で、どちらも次に来た人がそのまま取れる。
 3. **期限の判定はデータベースの時計(`now()`)が権威**。端末の時計は使わない。端末は「直前の合図から操作があったか」(真偽値)だけを送る。
 4. 取得できる条件: 鍵が無い/期限切れ/**同じ保持者**(同じ利用者かつ同じ合言葉)。それ以外は取れない(同じ利用者でも合言葉が違えば取れない=D6)。**管理者も同じ規則**で、他人の鍵を取るにはまず「管理者が外す」を使う。
 5. 外れ方:
@@ -87,6 +87,8 @@ model EditLock {
   acquiredAt      DateTime         @default(now()) @map("acquired_at")
   heartbeatAt     DateTime         @default(now()) @map("heartbeat_at")
   activityAt      DateTime         @default(now()) @map("activity_at")
+  forceReleasedAt DateTime?        @map("force_released_at")
+  forceReleasedBy String?          @map("force_released_by")
 
   user User @relation(fields: [userId], references: [id])
 
@@ -97,6 +99,7 @@ model EditLock {
 ```
 
 - `resourceId` は物件/所有者への**外部キーを張らない**(資源が2種類のため)。資源の削除・アーカイブ・統合時は 4.6 で明示的に消す。
+- **管理者の解除は行を消さずに `force_released_at`/`force_released_by` を立てる(墓標)**。解除と同じ1文で書くので、監査ログの書き込みが失敗しても「管理者に外された」ことが失われない(@codex R2 P2。`writeAuditLog` は失敗を握りつぶす作りのため、監査ログを判別の根拠にしない)。墓標の行は次の取得で上書きされ、そのとき列は NULL に戻る。
 - 行は「今の鍵」だけを持つ(1資源1行)。**履歴は `audit_logs` に残す**(3.2)。期限切れの行は次の取得で上書きされるので、お掃除の定期処理は足さない(最大でも「編集されたことのある物件+所有者」の行数)。
 
 ### 3.2 監査ログ
@@ -120,7 +123,7 @@ model EditLock {
 
 | 窓口 | 必要な権限 |
 |---|---|
-| 取得・合図・外す | その資源の**書き込み権限**。物件=`property:write`+`canAccessPropertyRecord`(アルバイトの担当範囲)/所有者=`owner:write` のみ(D11=担当範囲では絞らない。既存の `PATCH /api/owners/[id]` と同じ) |
+| 取得・合図・外す | その資源の**書き込み権限**。物件=`property:write`+`canAccessPropertyRecord`(アルバイトの担当範囲)/所有者=`owner:write` **かつ、所有者の項目のどれか1つ以上に明示の書込権限**(`hasExplicitWritePerm`。既存 `PATCH /api/owners/[id]` の項目ごとの確認と、画面の `canEditOwner` の「編集できる項目がある」と同じ判定を共有関数にする)。担当範囲では絞らない(D11)。⚠項目の権限が1つも無い利用者は画面に編集ボタンが出ないのに、窓口を直接呼ぶと鍵だけ取って他の人を締め出せてしまうため(@codex R2 P2) |
 | 状態を見る | その資源の**閲覧権限**。物件=`property:read`+`canAccessPropertyRecord`/所有者=`owner:read`。閲覧できない資源については「鍵の有無」も返さない |
 | 管理者が外す | `session.role === "admin"` |
 
@@ -130,8 +133,8 @@ model EditLock {
 
 1. トランザクション内で**資源の行をロック**(物件=`lockPropertyRow`/所有者=所有者行の `SELECT … FOR UPDATE`)。→ 5.2 の保存と直列化する。
 2. 既存の鍵を読み、`evaluateLock` で判定。
-3. `INSERT … ON CONFLICT (resource_type, resource_id) DO UPDATE SET … WHERE <期限切れ OR 同じ保持者>` を1文で実行(`now()` 基準)。行が返らなければ他の人が保持中。
-   - ⚠**保持者が変わるとき(期限切れの横取り)は `id` と `acquired_at` を必ず振り直す**(`SET id = <新しいID>, acquired_at = now(), …`)。`ON CONFLICT DO UPDATE` は既定で主キーを残すため、振り直さないと管理者が古い画面の `lockId` で**新しい保持者の鍵を外してしまう**(4.4 の前提が崩れる)。**同じ保持者の取り直しでは `id` を変えない**。
+3. `INSERT … ON CONFLICT (resource_type, resource_id) DO UPDATE SET … WHERE <期限切れ OR 解除済み(force_released_at IS NOT NULL) OR (同じ保持者 AND force_released_at IS NULL)>` を1文で実行(`now()` 基準)。行が返らなければ他の人が保持中。
+   - ⚠**保持者が変わるとき(期限切れの横取り)は `id` と `acquired_at` を必ず振り直す**(`SET id = <新しいID>, acquired_at = now(), …`)。`ON CONFLICT DO UPDATE` は既定で主キーを残すため、振り直さないと管理者が古い画面の `lockId` で**新しい保持者の鍵を外してしまう**(4.4 の前提が崩れる)。**同じ保持者の取り直しでは `id` を変えない**。解除済みの行を取るときは保持者が同じでも `id` を振り直し、`force_released_at`/`force_released_by` を NULL に戻す。
 4. 応答:
    - 取得 → `200 { state: "mine", lockId, since }`(期限切れの横取りなら監査 `edit_lock_takeover_expired`)
    - 保持中 → `423 { code: "EDIT_LOCKED", state: "held_by_other" | "held_by_self_other_screen", holderName, since }`
@@ -147,24 +150,25 @@ UPDATE edit_locks
        activity_at  = CASE WHEN $active THEN now() ELSE activity_at END
  WHERE resource_type = $t AND resource_id = $id
    AND user_id = $user AND screen_token_hash = $hash
+   AND force_released_at IS NULL
    AND heartbeat_at >= now() - interval '5 minutes'
    AND activity_at  >= now() - interval '60 minutes'
 ```
 
 - 1件更新 → `200 { state: "mine", idleSince }`
 - 0件 → 現状を読んで `200 { state: "lost", reason: "expired" | "force_released" }` または `200 { state: "taken", holderName, since }`
-  - `force_released` の判別: 直近の監査ログ(`edit_lock_force_release`・同資源・`previousUserId = 自分`)を見る
+  - `force_released` の判別: **同じ資源の行が自分(利用者+合言葉)のもので、`force_released_at` が立っている**こと(墓標)。監査ログは見ない
 - **期限切れの鍵を合図で生き返らせない**(取り直しは 4.2 を通す=監査と直列化のため)。
 
 ### 4.4 `POST /api/edit-locks/release` / `POST /api/edit-locks/force-release`
 
 - `release`: 本文 `{ resourceType, resourceId }`。`DELETE … WHERE 資源 AND user_id AND screen_token_hash`。0件でも 200(冪等)。`sendBeacon` から呼ばれる前提で、**本文は `text/plain` の JSON も受ける**(beacon は Content-Type を自由に付けられないため)。ヘッダが付けられない beacon 用に、合言葉は本文の `screenToken` でも受ける(この窓口に限る)。
-- `force-release`(管理者): 本文 `{ resourceType, resourceId, lockId }`。`DELETE … WHERE id = $lockId`(**画面に出ていた鍵だけを外す**。見ている間に別の人が取り直した新しい鍵は外さない)。0件 → `409 { code: "EDIT_LOCK_CHANGED" }`。
+- `force-release`(管理者): 本文 `{ resourceType, resourceId, lockId }`。`UPDATE edit_locks SET force_released_at = now(), force_released_by = $admin WHERE id = $lockId AND force_released_at IS NULL`(**行は消さない=墓標**。**画面に出ていた鍵だけを外す**。見ている間に別の人が取り直した新しい鍵は `id` が違うので外れない)。0件 → `409 { code: "EDIT_LOCK_CHANGED" }`。監査 `edit_lock_force_release` は従来どおり書くが、判別には使わない。
 
 ### 4.5 `POST /api/edit-locks/status`
 
 本文 `{ resources: [{ resourceType, resourceId }] }`(物件1件+所有者カード分をまとめて1回)。上限50件。
-応答は資源ごとに `free` / `mine`(この画面) / `held_by_self_other_screen { since }` / `held_by_other { holderName, since, lockId? }`。`lockId` は**管理者にだけ**返す。
+解除済み(墓標)の行は `free` として返す。応答は資源ごとに `free` / `mine`(この画面) / `held_by_self_other_screen { since }` / `held_by_other { holderName, since, lockId? }`。`lockId` は**管理者にだけ**返す。
 
 ### 4.6 資源の削除・アーカイブ・統合
 
@@ -207,11 +211,15 @@ UPDATE edit_locks
 - 補完は物件の行をロックしてから(`lockPropertyRow`)、有効な鍵が**誰かに**あるかを見る(取込は画面を持たないので保持者の区別はしない)。鍵があれば補完を書かない。**PDFの保存・所有者の登録と紐付けは従来どおり進める**。
 - 結果に `propertyFillSkippedByEditLock: true` を足す。人の取込画面は「編集中のため、地番・家屋番号・不動産番号の補完を見送りました」を表示。自動取得は監査ログの detail に同じフラグを残す。
 - 見送った欄は空のまま残る(鍵を持つ人が入れる/次の取込で埋まる)。
+- **所有者の法人番号の補完も同じ扱い**(D10の「空欄の補完」に含める)。`reflectParsedOwners` は既存の所有者の `corporateNumber` が空のときだけ埋める(`process.ts` の2か所)。所有者行をロックしてから、**その所有者に有効な鍵があれば見送り**、結果に `ownerCorporateFillSkippedByEditLock` を足す。
+- ⚠**補完するときは `Owner.version` を必ず進める**(@codex R2 P1)。**これは鍵と無関係に今の本番にもある不具合**: 取込は版番号を進めずに法人番号を埋めるため、取込より前から所有者の編集画面を開いていた人が保存すると、画面に残った空の法人番号が同じ版番号のまま通り、**取込で入った番号が警告なしに消える**(`owner-edit-utils.ts` の `buildOwnerUpdatePayload` は法人番号の権限があれば空でも送る)。版番号を進めれば、この保存は既存の409で止まる。第1段に含める。
 
 ### 5.4 止めないもの(D7)
 
 別の窓口なので鍵を見ない: 添付・写真・コメント・ToDo・所有者メモ・物件と所有者の紐付け・DM・謄本の自動取得・一括取込・管理者の一括修正(`admin/owners/correction/*`)。
-→ これらが鍵の間に物件/所有者の行を書き換えると、鍵を持つ人の保存は**既存の409(版番号)**で弾かれる。頻度は低く、入力は画面に残るので許容する(7章に明記)。
+→ これらが鍵の間に物件/所有者の「編集で変える項目」を書き換えると、鍵を持つ人の保存は**既存の409(版番号)**で弾かれる。頻度は低く、入力は画面に残るので許容する。
+⚠**この前提は「その書き込みが版番号を進める」ときだけ成り立つ**(@codex R2 P1 で、取込の法人番号補完が進めていなかった実例)。進めない書き込みは、鍵を持つ人の古い入力で**黙って上書き**される。
+→ **計画段階で、物件・所有者の「編集で変える項目」を書く全経路を洗い出し、1つ残らず版番号を進めることを確認する**。進めていない経路は第1段で進めるように直す。走査テスト(8.3)で固定する。
 
 ## 6. 画面
 
@@ -282,7 +290,8 @@ UPDATE edit_locks
 - 合図: 生きている鍵→更新/期限切れ→`lost`(生き返らない)/他人に取られた→`taken`/管理者解除後→`lost: force_released`。
 - 外す: 本人のみ・冪等・`text/plain` 本文(beacon)。管理者解除: 管理者以外403/`lockId` 不一致409。
 - **期限切れの横取りで `id` が変わる**こと。**横取りの前に表示していた古い `lockId` で管理者が解除 → 409 `EDIT_LOCK_CHANGED`・新しい保持者の鍵は残る**。同じ保持者の取り直しでは `id` が変わらないこと(@codex R1 P2)。
-- 所有者の鍵は `owner:write` だけで取れる(担当範囲で絞らない=D11)。物件の鍵はアルバイトの担当外なら403。
+- 所有者の鍵: `owner:write` と項目の書込権限が1つ以上あれば担当範囲に関係なく取れる(D11)/**項目の書込権限が1つも無ければ403**(取得・合図とも)(@codex R2 P2)。物件の鍵はアルバイトの担当外なら403。
+- **管理者解除の墓標**: 解除後の合図 → `lost: force_released`/**監査ログの書き込みを失敗させても** `force_released` と判別でき、画面の自動の取り直しが起きない/解除済みの行を次の人が取ると `id` が変わり墓標の列が NULL に戻る/解除済みの行は状態で `free`(@codex R2 P2)。
 - 状態: 閲覧権限のない資源は返さない/`lockId` は管理者だけ。
 - 削除・アーカイブ・統合で鍵行が消える。
 
@@ -291,6 +300,8 @@ UPDATE edit_locks
 - `PATCH /api/properties/[id]`・`PATCH /api/owners/[id]`・`POST /api/owners/[id]/corporate-apply`: 他人の鍵→423/自分の画面の鍵→通過/鍵なし→通過/期限切れ→通過/合言葉ヘッダなし+他人の鍵→423(再読み込み文言)/鍵なし+版番号不一致→従来の409。
 - **走査テスト**: `src/` 内で上記3窓口へ送る箇所を全部洗い出し、**6入口すべてが `X-Edit-Screen` を付けていること**。新しい入口が増えたら落ちる。改行は LF に正規化してから数える。
 - 5.4 の窓口が鍵を見ないこと(鍵の間も通る)。
+- **版番号の走査**: 物件・所有者の「編集で変える項目」を書く `update`/`updateMany` を全部洗い出し、すべてが `version: { increment: 1 }` を伴うこと(除外は理由つきの許可リスト)(@codex R2 P1)。
+- **取込の法人番号補完**: 鍵あり → 埋めない・`ownerCorporateFillSkippedByEditLock`/鍵なし → 埋めて `Owner.version` が進む/**取込前から開いていた所有者の編集画面の保存が409になり、法人番号が消えない**(今の不具合の回帰テスト)。
 - **取込の補完(D10)**: 鍵あり → 空欄を埋めない・`propertyFillSkippedByEditLock: true`・PDFと所有者の紐付けは成功/鍵なし → 従来どおり埋める。**人の取込と謄本の自動取得の両経路**で確認(@codex R1 P1)。
 
 ### 8.4 画面(ローカル実機)
@@ -331,6 +342,8 @@ Playwright で**ブラウザを2つ**同時に動かす: **タブの複製(`wind
 | 期限の判定が端末の時計に左右される | 判定はDBの `now()` のみ(2.2-3) |
 | 鍵の間に取込があると地番等の空欄が埋まらない(D10) | 結果に見送りを表示・監査に記録。鍵を持つ人が入れるか、次の取込で埋まる |
 | `BroadcastChannel` の無い環境でタブの複製を判別できない | まれ。版番号の守りで上書きは防げる |
+| 版番号を進めない書き込み経路が残り、黙って上書きされる | 計画段階で全経路を洗い出し、走査テストで固定(5.4・8.3) |
+| 監査ログが書けずに管理者解除の理由が分からなくなる | 判別は墓標の列で行い、監査ログに頼らない(3.1・4.3) |
 
 ## 11. レビューの反映記録
 
@@ -343,3 +356,11 @@ Playwright で**ブラウザを2つ**同時に動かす: **タブの複製(`wind
 | P1 | `scopeOwnerProperties` は応答を絞るだけで、アクセスを断る判定ではない | 発注者判断 D11(所有者は担当範囲で絞らない=現状維持)。4.1 をそれに合わせて修正 |
 | P2 | 横取りで `lockId` が変わらず、管理者の古い解除が新しい鍵を外す | 4.2 で横取り時に `id`・`acquired_at` を振り直す |
 | P2 | タブの複製で `sessionStorage` の合言葉が複製される | 6.1 に `BroadcastChannel` による複製の判別を追加 |
+
+### @codex R2(2026-09-17・commit `8bf87e58`)— 3件すべて実コードで事実と確認
+
+| 重要度 | 指摘 | 対応 |
+|---|---|---|
+| P1 | 取込の法人番号補完が `Owner.version` を進めず、「止めない書き込みは409で守られる」という前提が崩れる。開いていた編集画面の保存で取込の番号が黙って消える | **鍵と無関係の既存の不具合**。5.3 で補完時に版番号を進め、鍵の間は見送る。5.4 で「全経路が版番号を進める」ことを計画段階の確認事項＋走査テストに |
+| P2 | 管理者解除の判別を、失敗を握りつぶす監査ログに頼っている | 3.1・4.3・4.4 で解除を行の墓標(`force_released_at`)として同じ1文で残す |
+| P2 | 項目の書込権限が1つも無い利用者でも所有者の鍵を取れる | 4.1 で「項目の明示の書込権限が1つ以上」を必須に(既存の PATCH・画面と同じ判定を共有) |
