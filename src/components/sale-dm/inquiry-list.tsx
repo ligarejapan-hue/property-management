@@ -110,6 +110,9 @@ export default function SaleDmInquiryList(props: SaleDmInquiryListProps) {
         setCounts(res.counts);
       }
       setError(null);
+      // 先頭ページから読み直すたびに行ごとの再送エラーも消す(whole-branch review Important #2:
+      // 読み直した後の状態と食い違う古い per-row メッセージが居座らないようにする)。
+      setResendErrors({});
     } catch (e) {
       if (gen !== generation.current) return;
       setError(e instanceof Error ? e.message : "申込を読み込めませんでした");
@@ -271,11 +274,32 @@ export default function SaleDmInquiryList(props: SaleDmInquiryListProps) {
               {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
-          {i.notifyStatus === "failed" && (
+          {/* whole-branch review Important #2: failed だけでなく pending/sending も出す。
+              "sending" のまま固まった行(サーバー再起動で in-process リトライが打ち切られた等)が
+              一覧から消えて見えなくなる=再送で失敗した通知が「成功したように見える」事故を防ぐ。
+              再送ボタンはこれらの行でも押せる(API 側は failed/pending/保有期限切れの sending を
+              受け付け、保有がまだ新しい sending は 409 を返すだけ=行ごとの resendErrors に出る)。 */}
+          {(i.notifyStatus === "failed" || i.notifyStatus === "pending" || i.notifyStatus === "sending") && (
             <div className="mt-1 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
-                {resendingIds.has(i.id) ? "通知を送り直しています" : "通知できていません"}
-              </span>
+              {resendingIds.has(i.id) ? (
+                <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                  通知を送り直しています
+                </span>
+              ) : i.notifyStatus === "failed" ? (
+                <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                  {/* whole-branch review Minor #5: 通知先0人・メール未設定は失敗の理由を行ごとに出す
+                      (notifyLastError は個人情報を含まない固定の内部コードなので伏せ対象にしない)。 */}
+                  {i.notifyLastError === "no_recipients"
+                    ? "通知先が設定されていません"
+                    : i.notifyLastError === "mail_not_configured"
+                      ? "メール送信設定が未完成です"
+                      : "通知できていません"}
+                </span>
+              ) : (
+                <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                  通知を送信中
+                </span>
+              )}
               {/* 送信中もボタンは残す(disabled だけ切り替える)。押した直後にボタンごと消すと、
                   クリック直後にフォーカスが失われる(fix round 1・Minor #2)。 */}
               <button

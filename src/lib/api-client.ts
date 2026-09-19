@@ -394,6 +394,8 @@ export interface SaleDmInquiry {
   freeTextHidden: boolean;
   /** 通知メールの送信状況(pending/sending/sent/failed)。 */
   notifyStatus: string;
+  /** 通知失敗時の内部コード(no_recipients/mail_not_configured 等)。失敗していないときは null。 */
+  notifyLastError: string | null;
 }
 
 // 申込一覧は状態で絞らない1本のカーソルでたどる(振り分けは画面側)。counts は状態別の件数(範囲全体)。

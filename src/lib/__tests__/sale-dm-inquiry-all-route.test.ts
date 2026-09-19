@@ -201,6 +201,23 @@ describe("GET /api/properties/sale-dm/inquiries(横断)", () => {
     expect(body.notifyRecipientCount).toBe(0);
   });
 
+  // whole-branch review Minor #5: notifyRecipientCount>0 でも「その全員が売却DMの閲覧権限を
+  // 持たない」場合は毎回 no_recipients で失敗する。N+1 の権限チェックを足さず、行の
+  // notifyLastError をそのまま返して画面側で案内する(個人情報ではないので伏せない)。
+  it("notifyLastError を行に含めて返す(個人情報ではないので表示権限に関わらず返す)", async () => {
+    db.dmInquiry.findMany.mockResolvedValueOnce([
+      { ...INQ, notifyStatus: "failed", notifyLastError: "no_recipients" },
+    ]);
+    const body = await (await get()).json();
+    expect(body.inquiries[0].notifyLastError).toBe("no_recipients");
+  });
+
+  it("notifyLastError=null(未失敗)はそのまま null で返る", async () => {
+    db.dmInquiry.findMany.mockResolvedValueOnce([{ ...INQ, notifyLastError: null }]);
+    const body = await (await get()).json();
+    expect(body.inquiries[0].notifyLastError).toBeNull();
+  });
+
   it("行に campaignId/campaignName/location(物件所在の粗い表示)/propertyTypeLabel を付与する。住所そのものは含まない", async () => {
     db.dmInquiry.findMany.mockResolvedValueOnce([INQ]);
     const body = await (await get()).json();

@@ -51,7 +51,12 @@ vi.mock("@/lib/sale-dm-letter/route-guard", () => ({
       ? drafts.filter((d) => d.property?.createdBy === s.id || d.property?.assignedTo === s.id)
       : drafts,
 }));
-vi.mock("@/lib/sale-dm-letter/inquiry-notify", () => ({ startInquiryNotify: vi.fn() }));
+// NOTIFY_STALE_CLAIM_MS は本物と同じ値(15分)をここでも export する(route.ts はこのモック
+// 経由で import するため、値を揃えないと stale/fresh の境界がテストとずれる)。
+vi.mock("@/lib/sale-dm-letter/inquiry-notify", () => ({
+  startInquiryNotify: vi.fn(),
+  NOTIFY_STALE_CLAIM_MS: 15 * 60_000,
+}));
 
 const db = vi.hoisted(() => ({
   dmInquiry: { findUnique: vi.fn() },
@@ -59,13 +64,14 @@ const db = vi.hoisted(() => ({
 vi.mock("@/lib/prisma", () => ({ default: db }));
 
 import { POST } from "@/app/api/properties/sale-dm/inquiries/[inquiryId]/notify/route";
-import { startInquiryNotify } from "@/lib/sale-dm-letter/inquiry-notify";
+import { startInquiryNotify, NOTIFY_STALE_CLAIM_MS } from "@/lib/sale-dm-letter/inquiry-notify";
 
 const notify = startInquiryNotify as unknown as ReturnType<typeof vi.fn>;
 
 const FOUND = {
   id: "inq1",
   notifyStatus: "failed",
+  notifyClaimedAt: null as Date | null,
   draft: { property: { createdBy: "u1", assignedTo: null } },
 };
 
@@ -121,14 +127,39 @@ describe("POST /api/properties/sale-dm/inquiries/[inquiryId]/notify(再送)", ()
     expect(notify).toHaveBeenCalledWith("inq1");
   });
 
-  it("notifyStatus が failed 以外なら 409 NOT_FAILED", async () => {
-    for (const status of ["pending", "sending", "sent"]) {
-      db.dmInquiry.findUnique.mockResolvedValueOnce({ ...FOUND, notifyStatus: status });
-      const res = await post();
-      expect(res.status).toBe(409);
-      const body = await res.json();
-      expect(body.error.code).toBe("NOT_FAILED");
-    }
+  // whole-branch review Important #1: "sending" のまま固まった行(サーバー再起動などで
+  // in-process リトライが打ち切られたもの)を、この route からも直せるようにする。
+  it("pending なら再送できる(202)", async () => {
+    db.dmInquiry.findUnique.mockResolvedValueOnce({ ...FOUND, notifyStatus: "pending", notifyClaimedAt: null });
+    const res = await post();
+    expect(res.status).toBe(202);
+    expect(notify).toHaveBeenCalledWith("inq1");
+  });
+
+  it("sending でも保有(notifyClaimedAt)が保有期限より古ければ再送できる(202)", async () => {
+    const stale = new Date(Date.now() - NOTIFY_STALE_CLAIM_MS - 1_000);
+    db.dmInquiry.findUnique.mockResolvedValueOnce({ ...FOUND, notifyStatus: "sending", notifyClaimedAt: stale });
+    const res = await post();
+    expect(res.status).toBe(202);
+    expect(notify).toHaveBeenCalledWith("inq1");
+  });
+
+  it("sending で保有がまだ新しい(いま送信中)なら 409 NOT_FAILED", async () => {
+    const fresh = new Date(Date.now() - 1_000);
+    db.dmInquiry.findUnique.mockResolvedValueOnce({ ...FOUND, notifyStatus: "sending", notifyClaimedAt: fresh });
+    const res = await post();
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("NOT_FAILED");
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("sent なら 409 NOT_FAILED", async () => {
+    db.dmInquiry.findUnique.mockResolvedValueOnce({ ...FOUND, notifyStatus: "sent", notifyClaimedAt: new Date() });
+    const res = await post();
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("NOT_FAILED");
     expect(notify).not.toHaveBeenCalled();
   });
 

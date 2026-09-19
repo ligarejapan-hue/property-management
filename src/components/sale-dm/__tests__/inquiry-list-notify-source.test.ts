@@ -22,8 +22,8 @@ describe("査定の申込 画面", () => {
   it("画面保護の印を保つ", () => {
     expect(list).toContain('data-pii-protected');
   });
-  it("サイドバー: DM グループに office_staff で「査定の申込」", () => {
-    expect(sidebar).toMatch(/label:\s*"査定の申込",\s*href:\s*"\/properties\/sale-dm\/inquiries"[^}]*minRole:\s*"office_staff"/);
+  it("サイドバー: DM グループに field_staff で「査定の申込」(fix wave Minor #4: 通知メールは field_staff にも届く)", () => {
+    expect(sidebar).toMatch(/label:\s*"査定の申込",\s*href:\s*"\/properties\/sale-dm\/inquiries"[^}]*minRole:\s*"field_staff"/);
   });
 });
 
@@ -86,5 +86,49 @@ describe("再送ボタンと再送エラーの表示(fix round 1)", () => {
     const resendNotifyFn = list.slice(start, bodyEnd);
     expect(resendNotifyFn).toContain("setResendErrors");
     expect(resendNotifyFn).not.toMatch(/setError\(/);
+  });
+});
+
+// whole-branch review Important #2: "sending"/"pending" のまま固まった行が一覧から消えて
+// 「成功したように見える」事故を防ぐ。failed だけでなく pending/sending でもバッジと再送
+// ボタンを出す。ゲートの条件式そのものを検証する(文字列の存在だけでは、条件を外して
+// 常時表示にしても緑のまま通ってしまう)。
+describe("通知バッジは failed/pending/sending の3状態で出す(whole-branch review Important #2)", () => {
+  it("表示ゲートが notifyStatus の3状態(failed/pending/sending)になっている", () => {
+    const guard = list.match(
+      /\{\(i\.notifyStatus === "failed" \|\| i\.notifyStatus === "pending" \|\| i\.notifyStatus === "sending"\) && \(/,
+    );
+    expect(guard, "3状態ゲートが見つかりません").not.toBeNull();
+  });
+
+  it("failed 以外(=旧: 単独の notifyStatus === \"failed\" ガード)には戻っていない", () => {
+    expect(list).not.toMatch(/\{i\.notifyStatus === "failed" && \(\s*\n\s*<div/);
+  });
+
+  it("送信中でも失敗でもない neutral バッジ「通知を送信中」を出す", () => {
+    expect(list).toContain("通知を送信中");
+  });
+
+  it("再送を押した直後の状態(「通知を送り直しています」)は3状態のどれでも最優先で出る", () => {
+    const start = list.indexOf('{(i.notifyStatus === "failed" || i.notifyStatus === "pending" || i.notifyStatus === "sending")');
+    expect(start).toBeGreaterThan(-1);
+    const block = list.slice(start, start + 2000);
+    const resendingIdx = block.indexOf("通知を送り直しています");
+    const sendingIdx = block.indexOf("通知を送信中");
+    const failedIdx = block.indexOf("通知できていません");
+    expect(resendingIdx).toBeGreaterThan(-1);
+    expect(resendingIdx).toBeLessThan(sendingIdx);
+    expect(resendingIdx).toBeLessThan(failedIdx);
+  });
+});
+
+// whole-branch review Minor #5: notifyLastError(通知先0人/メール未設定)を行ごとに案内する。
+// PII ではないので伏せ対象にしない(notifyStatus と同じ扱い)。
+describe("通知失敗の理由を notifyLastError から出す(whole-branch review Minor #5)", () => {
+  it("no_recipients / mail_not_configured の専用メッセージを持つ", () => {
+    expect(list).toContain("通知先が設定されていません");
+    expect(list).toContain("メール送信設定が未完成です");
+    expect(list).toContain('i.notifyLastError === "no_recipients"');
+    expect(list).toContain('i.notifyLastError === "mail_not_configured"');
   });
 });

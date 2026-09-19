@@ -49,7 +49,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         select: {
           id: true, draftId: true, submittedAt: true, name: true, phone: true, email: true,
           contactPref: true, contactTime: true, message: true, handleStatus: true, handledAt: true, handleNote: true,
-          notifyStatus: true,
+          notifyStatus: true, notifyLastError: true,
           draft: { select: { property: { select: { createdBy: true, assignedTo: true } } } },
         },
       }),
@@ -81,6 +81,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       handledAt: r.handledAt,
       handleNote: r.handleNote,
       notifyStatus: r.notifyStatus,
+      notifyLastError: r.notifyLastError,
     }));
     const inquiries = toInquiryListRows(visible, {
       contact: isPlainOwnerLevel(ownerDisplayConfig.phone),
