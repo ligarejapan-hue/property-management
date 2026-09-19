@@ -27,11 +27,11 @@ export async function POST(request: Request) {
       // ⚠存在・アーカイブ・担当範囲の確認は**ロックの後**に行う(@codex R6 P2)。
       if (resourceType === "property") {
         await lockPropertyRow(tx, resourceId);
-        // ⚠読み取り自体は base client(prisma)。行ロック(FOR UPDATE)を tx 側で
-        //   同期的に取り終えた**直後**に読むため、先に進んでいた他の書き込みは
-        //   ここまでに commit 済み・後から来る書き込みはこの後ろでブロックされる
-        //   (READ COMMITTED でも順序は崩れない)。
-        const property = await prisma.property.findUnique({
+        // ⚠読み取りは**同じトランザクションの tx**で行う(base client=別コネクションでは
+        //   行ロックが守っている状態を見られない。この直後にアーカイブ/担当変更が
+        //   commit された場合、tx の再読み取りでなければそれを取りこぼし、
+        //   消えた資源へ孤児の鍵を作ってしまう。設計 §4.2)。
+        const property = await tx.property.findUnique({
           where: { id: resourceId },
           // ⚠`isArchived` も読む(@codex R10 P2)。読まないと、一覧から消えているアーカイブ済みの
           //   物件に対して、窓口を直接呼ぶだけで鍵を取り続けられる(所有者側は既に弾いている)。
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
         assertCanLockProperty(session, perms, property);
       } else {
         await tx.$queryRaw`SELECT id FROM owners WHERE id = ${resourceId}::uuid FOR UPDATE`;
-        const owner = await prisma.owner.findUnique({
+        const owner = await tx.owner.findUnique({
           where: { id: resourceId },
           select: { id: true, isArchived: true },
         });

@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
+// ⚠設計 §4.2: 存在・アーカイブ・担当範囲の再読み取りは**同じトランザクション(tx)**で行う
+//   (行ロックが守っている状態を base client の別コネクションからは見られないため)。
+//   $transaction のコールバックに渡す tx は、base client とは別の findUnique モックを持たせ、
+//   「tx 側が呼ばれ、base 側は呼ばれない」ことをテストで固定できるようにする。
+const txMocks = vi.hoisted(() => ({
+  propertyFindUnique: vi.fn(),
+  ownerFindUnique: vi.fn(),
+  queryRaw: vi.fn(),
+}));
+
 vi.mock("@/lib/api-helpers", () => {
   class MockApiError extends Error {
     status: number; code: string;
@@ -20,7 +30,14 @@ vi.mock("@/lib/prisma", () => ({
     property: { findUnique: vi.fn(), findMany: vi.fn() },
     owner: { findUnique: vi.fn() },
     user: { findMany: vi.fn() },
-    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({ $queryRaw: vi.fn().mockResolvedValue([]) })),
+    // tx はロック済みの行を読む専用の findUnique を持つ(base client とは別モック)。
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        $queryRaw: txMocks.queryRaw,
+        property: { findUnique: txMocks.propertyFindUnique },
+        owner: { findUnique: txMocks.ownerFindUnique },
+      }),
+    ),
     $queryRaw: vi.fn().mockResolvedValue([]),
   },
 }));
@@ -79,10 +96,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   (getApiSession as unknown as Mock).mockResolvedValue({ id: UID, role: "general" });
   (getUserPermissions as unknown as Mock).mockResolvedValue(WRITE);
+  // heartbeat はロックしないので base client(prisma.property.findUnique)を直接読む。
   pm.property.findUnique.mockResolvedValue({ createdBy: UID, assignedTo: null, isArchived: false });
   pm.property.findMany.mockResolvedValue([]);
   pm.owner.findUnique.mockResolvedValue({ id: PROP, isArchived: false });
   pm.user.findMany.mockResolvedValue([]);
+  // acquire はロック後に**同じ tx**で読む。base client とは別モックにして混同を防ぐ。
+  txMocks.propertyFindUnique.mockResolvedValue({ createdBy: UID, assignedTo: null, isArchived: false });
+  txMocks.ownerFindUnique.mockResolvedValue({ id: PROP, isArchived: false });
+  txMocks.queryRaw.mockResolvedValue([]);
   (readEditLocks as unknown as Mock).mockResolvedValue({ dbNow: new Date(), locks: [] });
 });
 
@@ -136,7 +158,7 @@ describe("POST /api/edit-locks/acquire", () => {
   });
 
   it("アーカイブ済みの物件は 404(鍵を取らせない)", async () => {
-    pm.property.findUnique.mockResolvedValue({ createdBy: UID, assignedTo: null, isArchived: true });
+    txMocks.propertyFindUnique.mockResolvedValue({ createdBy: UID, assignedTo: null, isArchived: true });
     const res = await acquire(req("http://localhost/api/edit-locks/acquire", { resourceType: "property", resourceId: PROP }));
     expect(res.status).toBe(404);
   });
@@ -145,6 +167,39 @@ describe("POST /api/edit-locks/acquire", () => {
     (getApiSession as unknown as Mock).mockResolvedValue({ id: "other-user", role: "field_staff" });
     const res = await acquire(req("http://localhost/api/edit-locks/acquire", { resourceType: "property", resourceId: PROP }));
     expect(res.status).toBe(403);
+  });
+
+  it("存在・アーカイブの再読み取りは同じトランザクション(tx)で行う(base client では読まない)", async () => {
+    (acquireEditLock as unknown as Mock).mockResolvedValue({
+      state: "mine", lockId: "lock-1", since: new Date(), takeover: null,
+    });
+    const res = await acquire(req("http://localhost/api/edit-locks/acquire", { resourceType: "property", resourceId: PROP }));
+    expect(res.status).toBe(200);
+    expect(txMocks.propertyFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: PROP } }),
+    );
+    // base client 側の findUnique は行ロックを見られない別コネクションなので、
+    // 存在・アーカイブの判定には使ってはいけない。
+    expect(pm.property.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("所有者も同じトランザクション(tx)で存在・アーカイブを読む", async () => {
+    (acquireEditLock as unknown as Mock).mockResolvedValue({
+      state: "mine", lockId: "lock-owner", since: new Date(), takeover: null,
+    });
+    const OWNER_ID = "77777777-7777-4777-8777-777777777777";
+    const res = await acquire(req("http://localhost/api/edit-locks/acquire", { resourceType: "owner", resourceId: OWNER_ID }));
+    expect(res.status).toBe(200);
+    expect(txMocks.ownerFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: OWNER_ID } }),
+    );
+    expect(pm.owner.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("所有者がアーカイブ済みなら 404", async () => {
+    txMocks.ownerFindUnique.mockResolvedValue({ id: PROP, isArchived: true });
+    const res = await acquire(req("http://localhost/api/edit-locks/acquire", { resourceType: "owner", resourceId: PROP }));
+    expect(res.status).toBe(404);
   });
 });
 
