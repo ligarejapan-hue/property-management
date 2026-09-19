@@ -12,6 +12,7 @@ import {
   updateSaleDmSettings,
   type SaleDmSettings,
 } from "@/lib/api-client";
+import { DEFAULT_PRIVACY_TEXT } from "@/lib/sale-dm-letter/privacy-text";
 
 // 売却促進DM の設定(管理者のみ)。
 // 設定するのは「追跡用URL・既定LP URL・差出人名・差出人連絡先」の4つだけ。
@@ -29,12 +30,14 @@ export default function SaleDmSettingsPage() {
   const [lpUrl, setLpUrl] = useState("");
   const [senderName, setSenderName] = useState("");
   const [senderContact, setSenderContact] = useState("");
+  const [privacyText, setPrivacyText] = useState("");
 
   const applySettings = (data: SaleDmSettings) => {
     setTrackingBaseUrl(data.trackingBaseUrl ?? "");
     setLpUrl(data.lpUrl ?? "");
     setSenderName(data.senderName ?? "");
     setSenderContact(data.senderContact ?? "");
+    setPrivacyText(data.privacyText ?? "");
   };
 
   useEffect(() => {
@@ -61,6 +64,7 @@ export default function SaleDmSettingsPage() {
         lpUrl,
         senderName,
         senderContact,
+        privacyText,
       });
       applySettings(res.data);
       setMessage({ kind: "ok", text: "設定を保存しました" });
@@ -119,6 +123,10 @@ export default function SaleDmSettingsPage() {
         </Field>
         <Field label="差出人連絡先">
           <input value={senderContact} onChange={(e) => setSenderContact(e.target.value)} placeholder="例: 03-0000-0000" maxLength={200} className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" />
+        </Field>
+        <Field label="個人情報の取扱い文(公開LPの申込フォームに表示)">
+          <textarea value={privacyText} onChange={(e) => setPrivacyText(e.target.value)} placeholder={DEFAULT_PRIVACY_TEXT} maxLength={2000} rows={5} className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100" />
+          <span className="mt-1 block text-xs text-gray-500">空欄のときは、薄く表示している見本の文章をそのまま使います。</span>
         </Field>
       </div>
 

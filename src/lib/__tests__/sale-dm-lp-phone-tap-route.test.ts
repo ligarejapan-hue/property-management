@@ -159,9 +159,15 @@ describe("POST /t/[token]/phone-tap", () => {
   });
 
   it("URL として読めない Origin も計上しない", async () => {
-    const res = await POST(reqWithOrigin("null", "10.0.1.2"), ctx);
+    const res = await POST(reqWithOrigin("::::", "10.0.1.2"), ctx);
     expect(res.status).toBe(204);
     expect(pm.dmRecipientDraft.update).not.toHaveBeenCalled();
+  });
+
+  it("Origin: null(no-referrer ページからのフォーム送信で実ブラウザが付ける値)は計上する", async () => {
+    const res = await POST(reqWithOrigin("null", "10.0.1.9"), ctx);
+    expect(res.status).toBe(204);
+    expect(pm.dmRecipientDraft.update).toHaveBeenCalledOnce();
   });
 
   it("Origin が自分自身なら従来どおり計上する", async () => {
@@ -169,6 +175,19 @@ describe("POST /t/[token]/phone-tap", () => {
     expect(res.status).toBe(204);
     expect(pm.dmRecipientDraft.update).toHaveBeenCalledOnce();
     expect(writeAuditLog).toHaveBeenCalledOnce();
+  });
+
+  it("前段(nginx)越しの本番: Origin=公開ホスト名・Host=公開ホスト名 のタップは数える", async () => {
+    // req.url(localhost:3000)と公開ホスト名が食い違う本番の状況を Host 見出しで再現する。
+    const res = await POST(
+      new Request("http://localhost:3000/t/tok/phone-tap", {
+        method: "POST",
+        headers: { "x-real-ip": "10.0.0.77", origin: "https://app.ligarejapan.com", host: "app.ligarejapan.com" },
+      }) as never,
+      ctx,
+    );
+    expect(res.status).toBe(204);
+    expect(pm.dmRecipientDraft.update).toHaveBeenCalled();
   });
 
   it("recordPhoneTap が想定外に例外を投げても 204/no-store・監査なし", async () => {

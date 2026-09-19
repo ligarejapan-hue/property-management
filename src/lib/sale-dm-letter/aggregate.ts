@@ -120,26 +120,30 @@ export interface TwoAxisDraftInput extends AggregateDraftInput {
   // 電話ボタンのタップ(公開LP §2.4)。初回タップ時刻・タップされていなければ null。
   // 閲覧とは独立に立つ(記録に失敗して閲覧が付かずタップだけ、ということもあり得る)。
   phoneTapFirstAt: Date | null;
+  // 査定申込フォームの送信(公開LP §2.5)。初回送信時刻・申込がなければ null。
+  formInquiryFirstAt: Date | null;
 }
-interface ViewBucket { sent: number; delivered: number; viewed: number; deliveredViewed: number; phoneTapped: number }
+interface ViewBucket { sent: number; delivered: number; viewed: number; deliveredViewed: number; phoneTapped: number; inquired: number }
 export interface DmViewAggregate { variantId: string; sent: number; delivered: number; viewed: number; deliveredViewed: number; viewRate: number | null }
 // phoneTapped: 電話ボタンをタップした件数(phoneTapFirstAt != null)。
 // phoneTapRate: phoneTapped / viewed(この表の viewed = アプリ内ページを返せた閲覧)。閲覧0 のときは null。
 // 閲覧なしのタップも分子には数えるため、データ上は viewed より phoneTapped が多く率が100%を超える
 // こともあり得る(クランプしない・そのまま出す)。
-export interface LpVariantAggregate { lpVariantId: string; sent: number; delivered: number; viewed: number; deliveredViewed: number; viewRate: number | null; phoneTapped: number; phoneTapRate: number | null }
+// inquired: 査定申込あり(formInquiryFirstAt != null)。inquiryRate: inquired / viewed(閲覧0は null)。LP型の成績=申込率(設計 §0-5)。
+export interface LpVariantAggregate { lpVariantId: string; sent: number; delivered: number; viewed: number; deliveredViewed: number; viewRate: number | null; phoneTapped: number; phoneTapRate: number | null; inquired: number; inquiryRate: number | null }
 export interface PairAggregate { variantId: string; lpVariantId: string; sent: number; delivered: number; viewed: number }
 export interface TwoAxisAggregate { byDmVariant: DmViewAggregate[]; byLpVariant: LpVariantAggregate[]; byPair: PairAggregate[] }
 
 // isViewed は呼び出し側が渡す(表ごとに「閲覧」の定義が違うため・上の注記)。
 function bump(map: Map<string, ViewBucket>, key: string, draft: TwoAxisDraftInput, isViewed: boolean): void {
-  const b = map.get(key) ?? { sent: 0, delivered: 0, viewed: 0, deliveredViewed: 0, phoneTapped: 0 };
+  const b = map.get(key) ?? { sent: 0, delivered: 0, viewed: 0, deliveredViewed: 0, phoneTapped: 0, inquired: 0 };
   const isDelivered = draft.deliveryStatus === "delivered";
   b.sent += 1;
   if (isDelivered) b.delivered += 1;
   if (isViewed) b.viewed += 1;
   if (isDelivered && isViewed) b.deliveredViewed += 1;
   if (draft.phoneTapFirstAt != null) b.phoneTapped += 1;
+  if (draft.formInquiryFirstAt != null) b.inquired += 1;
   map.set(key, b);
 }
 
@@ -159,7 +163,7 @@ export function aggregateTwoAxis(drafts: TwoAxisDraftInput[]): TwoAxisAggregate 
   const sortKeys = (m: Map<string, ViewBucket>) => [...m.keys()].sort((a, b) => a.localeCompare(b));
   return {
     byDmVariant: sortKeys(dm).map((k) => { const b = dm.get(k)!; return { variantId: k, sent: b.sent, delivered: b.delivered, viewed: b.viewed, deliveredViewed: b.deliveredViewed, viewRate: rate(b.deliveredViewed, b.delivered) }; }),
-    byLpVariant: sortKeys(lp).map((k) => { const b = lp.get(k)!; return { lpVariantId: k, sent: b.sent, delivered: b.delivered, viewed: b.viewed, deliveredViewed: b.deliveredViewed, viewRate: rate(b.deliveredViewed, b.delivered), phoneTapped: b.phoneTapped, phoneTapRate: rate(b.phoneTapped, b.viewed) }; }),
+    byLpVariant: sortKeys(lp).map((k) => { const b = lp.get(k)!; return { lpVariantId: k, sent: b.sent, delivered: b.delivered, viewed: b.viewed, deliveredViewed: b.deliveredViewed, viewRate: rate(b.deliveredViewed, b.delivered), phoneTapped: b.phoneTapped, phoneTapRate: rate(b.phoneTapped, b.viewed), inquired: b.inquired, inquiryRate: rate(b.inquired, b.viewed) }; }),
     byPair: sortKeys(pair).map((k) => { const b = pair.get(k)!; const [variantId, lpVariantId] = k.split("|"); return { variantId, lpVariantId, sent: b.sent, delivered: b.delivered, viewed: b.viewed }; }),
   };
 }

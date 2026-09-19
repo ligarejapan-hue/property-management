@@ -142,6 +142,13 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   sale_dm_lp_phone_tap: new Set(["at"]),
   // 公開LPのプレビュー表示(Task 6 で使用)。device=enum(sp/pc 等)・viewedAt=ISO時刻。
   sale_dm_lp_preview_view: new Set(["device", "viewedAt"]),
+  // 公開LPの査定申込(設計 §2.5)。first=この宛先の初回申込か・at=ISO時刻・result=throttled(全体上限)。
+  // 入力文字(氏名・電話・メール・要望)は載せない。宛先は targetId(draftId)で辿る。
+  sale_dm_inquiry_submit: new Set(["first", "at", "result"]),
+  // 社内の申込一覧の閲覧(PII アクセスの痕跡)。count=表示件数・viewedAt=ISO時刻。対象キャンペーンは targetId。
+  sale_dm_inquiry_view: new Set(["count", "viewedAt"]),
+  // 申込の対応状況の変更。handleStatus=列挙値・updatedAt=ISO時刻(メモ本文は載せない)。
+  sale_dm_inquiry_status_update: new Set(["handleStatus", "updatedAt"]),
   // 取込ロールバックの監査メタデータ（PIIではなく復元対象の構造情報・件数）。
   // 件数/状態系（*Count / blocked）は何件削除・復元・ブロックされたかの非PII監査情報。
   // allowlist のみ（force-safe ではない）ため unknown / 他 action では保持されない。

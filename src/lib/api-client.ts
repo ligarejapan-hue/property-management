@@ -253,6 +253,9 @@ export interface SaleDmDraft {
   phoneInquiryAt: string | null;
   // 公開LPの電話ボタンを最初にタップした時刻(反響とは別物=自動計測。手入力の phoneInquiryAt とは独立)。
   phoneTapFirstAt: string | null;
+  // 公開LPの査定申込の回数と初回時刻(中身は fetchSaleDmInquiries)。
+  formInquiryCount: number;
+  formInquiryFirstAt: string | null;
 }
 
 export interface SaleDmVariant {
@@ -361,6 +364,51 @@ export async function updateSaleDmOutcome(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+export interface SaleDmInquiry {
+  id: string;
+  draftId: string;
+  submittedAt: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  contactPref: string | null;
+  contactTime: string | null;
+  message: string | null;
+  handleStatus: "open" | "in_progress" | "done";
+  handledAt: string | null;
+  handleNote: string | null;
+  contactHidden: boolean;
+  emailHidden: boolean;
+  freeTextHidden: boolean;
+}
+
+// 申込一覧は状態で絞らない1本のカーソルでたどる(振り分けは画面側)。counts は状態別の件数(範囲全体)。
+export async function fetchSaleDmInquiries(campaignId: string, cursor?: string | null) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { inquiries: [] as SaleDmInquiry[], hasMore: false, nextCursor: null as string | null, counts: { active: 0, done: 0 } };
+  }
+  const cursorQuery = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiFetch<{ inquiries: SaleDmInquiry[]; hasMore: boolean; nextCursor: string | null; counts: { active: number; done: number } }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/inquiries${cursorQuery}`,
+  );
+}
+
+export async function updateSaleDmInquiryStatus(
+  inquiryId: string,
+  body: { handleStatus: SaleDmInquiry["handleStatus"]; handleNote?: string | null },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { inquiry: { id: inquiryId, handleStatus: body.handleStatus, handledAt: null, handleNote: body.handleNote ?? null, freeTextHidden: false } };
+  }
+  // handleNote は電話・メールの両方を平文で見られない利用者には null(freeTextHidden=true)で返る(@codex R10 P1)。
+  return apiFetch<{ inquiry: Pick<SaleDmInquiry, "id" | "handleStatus" | "handledAt" | "handleNote" | "freeTextHidden"> }>(
+    `/api/properties/sale-dm/inquiries/${inquiryId}`,
+    { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
 }
 
 // 下書きの本文 / 割当型(variantId)の部分更新。
@@ -663,6 +711,7 @@ export interface SaleDmSettings {
   lpUrl: string | null;
   senderName: string | null;
   senderContact: string | null;
+  privacyText: string | null;
   hasAnthropicKey: boolean;
   hasOpenaiKey: boolean;
   encryptionConfigured: boolean;
@@ -671,7 +720,7 @@ export interface SaleDmSettings {
 
 const EMPTY_SALE_DM_SETTINGS: SaleDmSettings = {
   provider: null, model: null, trackingBaseUrl: null, lpUrl: null,
-  senderName: null, senderContact: null, hasAnthropicKey: false, hasOpenaiKey: false,
+  senderName: null, senderContact: null, privacyText: null, hasAnthropicKey: false, hasOpenaiKey: false,
   encryptionConfigured: false, updatedAt: null,
 };
 
@@ -691,6 +740,7 @@ export async function updateSaleDmSettings(body: {
   lpUrl?: string;
   senderName?: string;
   senderContact?: string;
+  privacyText?: string;
 }): Promise<{ data: SaleDmSettings }> {
   if (USE_MOCK) {
     await mockDelay();

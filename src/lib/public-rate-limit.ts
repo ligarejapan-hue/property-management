@@ -48,6 +48,11 @@ export interface RateLimiterOptions {
 export interface RateLimiter {
   /** 1回のアクセスを数え、許可なら true。now はテスト用の注入(省略時は実時刻)。 */
   hit(key: string, now?: number): boolean;
+  /**
+   * 今 hit したら許可されるかを**数えずに**返す(期限切れ鍵の掃除以外は保持を変えない)。
+   * 複数の枠を「全部通るときだけまとめて消費する」ために使う(await を挟まず続けて hit する)。
+   */
+  wouldAllow(key: string, now?: number): boolean;
 }
 
 export function createRateLimiter(
@@ -78,6 +83,14 @@ export function createRateLimiter(
       const d = decideRate(hits, now, rule);
       store.set(key, d.hits);
       return d.allowed;
+    },
+    wouldAllow(key: string, now: number = Date.now()): boolean {
+      const hits = store.get(key);
+      if (hits !== undefined) return decideRate(hits, now, rule).allowed;
+      if (store.size < maxKeys) return true;
+      pruneExpired(now);
+      if (store.size < maxKeys) return true;
+      return onOverflow === "allow";
     },
   };
 }

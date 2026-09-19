@@ -33,6 +33,24 @@ server {
         return 301 https://$host$request_uri;
     }
 
+    # QR追跡URL(/t/<token>)も同じ理由で転送側からアクセスログに残さない。
+    # <token> は査定申込フォーム(/t/<token>/inquiry)を送信できる権限そのもので、
+    # ログを読めた者がトークンを再生して申込を送信できてしまう(@codex PR#434 P1)。
+    location ^~ /t/ {
+        access_log off;
+        error_log /dev/null crit;
+        return 301 https://$host$request_uri;
+    }
+
+    # LP掲載写真(/lp-assets/<publicId>)自体はPIIではないが、公開ページの
+    # Referrer-Policy: same-origin により Referer ヘッダに参照元ページのURL
+    # (=/t/<token>)がそのまま載るため、/t/ と同様にログへ残さない。
+    location ^~ /lp-assets/ {
+        access_log off;
+        error_log /dev/null crit;
+        return 301 https://$host$request_uri;
+    }
+
     location / {
         return 301 https://$host$request_uri;
     }
@@ -71,6 +89,44 @@ server {
         access_log off;
         # error_log にもリクエスト行(=/u/<署名付きトークン>)が載る(上流断・タイムアウト時)。
         # 停止URLは再生可能な権限なので、この location のエラーは記録しない(@codex #416 R3 P2)。
+        error_log /dev/null crit;
+
+        proxy_pass         http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout  60s;
+        proxy_send_timeout  60s;
+    }
+
+    # QR追跡URL(/t/<署名なしトークン>)も**アクセスログに残さない**。
+    # <token> は査定申込フォーム(POST /t/<token>/inquiry)を送信できる権限そのもので、
+    # ログを読めた者がURLを再生して他人になりすまし申込を送信できてしまう
+    # (@codex PR#434 P1)。GET(ページ表示・電話タップ)・POST(申込送信)ともこの location を通る。
+    location ^~ /t/ {
+        access_log off;
+        # /u/ と同じ理由でエラーログにもリクエスト行(=/t/<token>)を残さない。
+        error_log /dev/null crit;
+
+        proxy_pass         http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout  60s;
+        proxy_send_timeout  60s;
+    }
+
+    # LP掲載写真(/lp-assets/<publicId>)。publicId自体は乱数でPIIではないが、
+    # 公開ページの Referrer-Policy: same-origin により、このリクエストの Referer
+    # ヘッダには参照元ページのURL(=/t/<token>)がそのまま載る。nginx既定の
+    # combined ログ形式は Referer を記録するため、/t/ と同様にログへ残さない
+    # (@codex PR#434 P1)。
+    location ^~ /lp-assets/ {
+        access_log off;
         error_log /dev/null crit;
 
         proxy_pass         http://127.0.0.1:3000;

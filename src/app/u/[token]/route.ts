@@ -21,6 +21,7 @@ import {
   parseUnsubscribeToken,
   verifyUnsubscribeToken,
 } from "@/lib/sale-dm-letter/unsubscribe-token";
+import { isCrossSiteOrigin } from "@/lib/public-origin";
 import {
   PUBLIC_PAGE_HEADERS,
   renderUnsubscribeBusyPage,
@@ -112,18 +113,9 @@ export async function POST(
     return html(renderUnsubscribeThrottledPage(), 429);
   }
 
-  // Origin 検査: ブラウザが付ける Origin が自ホストと違えば第三者サイト経由=拒否。
-  // Origin 無し(直接POST等)は素通し — その場合も署名の所持が前提で、CSRF(被害者の
-  // ブラウザに踏ませる攻撃)は Origin が必ず付くため、この検査で塞がる。
-  const origin = req.headers.get("origin");
-  if (origin) {
-    try {
-      if (new URL(origin).host !== new URL(req.url).host) {
-        return html(renderUnsubscribeInvalidPage(), 403);
-      }
-    } catch {
-      return html(renderUnsubscribeInvalidPage(), 403);
-    }
+  // Origin 検査: 第三者サイトのフォームから踏ませる送信を拒否(判定の詳細は public-origin.ts)。
+  if (isCrossSiteOrigin(req.headers, req.url)) {
+    return html(renderUnsubscribeInvalidPage(), 403);
   }
 
   const key = getKey();

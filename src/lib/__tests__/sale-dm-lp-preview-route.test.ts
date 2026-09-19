@@ -68,6 +68,7 @@ beforeEach(() => {
     senderName: "テスト不動産",
     senderContact: "03-1234-5678",
     trackingBaseUrl: "https://example.com",
+    privacyText: null,
   });
 });
 

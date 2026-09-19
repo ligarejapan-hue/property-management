@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { renderLpPage, LP_CTA_LABEL, LP_PAGE_HEADERS } from "../sale-dm-letter/lp-page";
 import type { LpRenderInput } from "../sale-dm-letter/lp-render-input";
+import { HONEYPOT_FIELD } from "../sale-dm-letter/inquiry-input";
 
 const input = (over: Partial<LpRenderInput> = {}): LpRenderInput => ({
   mode: "live",
@@ -109,5 +110,79 @@ describe("LP_PAGE_HEADERS", () => {
     expect(csp).toContain("form-action 'self'");
     expect(csp).toContain("base-uri 'none'");
     expect(csp).toContain("frame-ancestors 'none'");
+  });
+});
+
+describe("申込フォーム(PR4)", () => {
+  const FORM = { action: "/t/tok_live/inquiry", privacyText: "利用目的は査定のご連絡です。\n<script>x</script>", disabled: false };
+
+  it("フォームあり: 送信先・必須欄・上限・隠し欄・同意・固定文言のボタン", () => {
+    const html = renderLpPage(input({ mode: "live", form: FORM }));
+    expect(html).toContain('<form method="post" action="/t/tok_live/inquiry"');
+    expect(html).toMatch(/name="name"[^>]*required[^>]*maxlength="50"/);
+    expect(html).toMatch(/name="phone"[^>]*type="tel"[^>]*required[^>]*maxlength="20"/);
+    expect(html).toMatch(/name="email"[^>]*type="email"[^>]*maxlength="254"/);
+    expect(html).toMatch(/name="contactTime"[^>]*maxlength="60"/);
+    expect(html).toMatch(/<textarea[^>]*name="message"[^>]*maxlength="1000"/);
+    expect(html).toMatch(new RegExp(`<div class="hp" aria-hidden="true"><label>この欄は空のままにしてください<input name="${HONEYPOT_FIELD}"[^>]*tabindex="-1"[^>]*autocomplete="off"`));
+    // 自動入力(連絡先の AutoFill 等)が埋めやすい名前・ラベルを使わない=本物の申込を bot 扱いで捨てない
+    expect(html).not.toMatch(/name="website"|ウェブサイト/);
+    // エラー後に戻る(bfcache 復帰)と送信ボタンが押せないままにならない
+    expect(html).toContain('window.addEventListener("pageshow"');
+    expect(html).toMatch(/type="checkbox" name="consent" value="yes" required/);
+    expect(html).toContain(`>${LP_CTA_LABEL}</button>`);
+  });
+
+  it("同意文は escape し、改行だけ <br />", () => {
+    const html = renderLpPage(input({ mode: "live", form: FORM }));
+    expect(html).toContain("利用目的は査定のご連絡です。<br />&lt;script&gt;x&lt;/script&gt;");
+  });
+
+  it("CTA(本文中・固定バー)はフォームへ飛ぶ。フォームが無ければ従来どおり会社案内へ", () => {
+    expect(renderLpPage(input({ mode: "live", form: FORM }))).toContain('href="#inquiry"');
+    const without = renderLpPage(input({ mode: "live", form: null }));
+    expect(without).toContain('href="#contact"');
+    expect(without).not.toContain("<form");
+  });
+
+  it("送付前(disabled): fieldset disabled で送信不可", () => {
+    const html = renderLpPage(input({ mode: "preview", form: { ...FORM, action: "#", disabled: true } }));
+    expect(html).toContain("<fieldset disabled>");
+    // 送信用のスクリプト(fetch)も出さない
+    expect(html).not.toContain("fetch(f.action");
+    expect(html).not.toContain("preventDefault");
+  });
+
+  it("JS あり: 画面を離れずに送信し、サーバーの指摘は送信ボタンの上に出す(入力は残る)", () => {
+    const html = renderLpPage(input({ mode: "live", form: FORM }));
+    // 状態表示の場所は送信ボタンの直前
+    expect(html).toContain('<div class="inq-msg" role="alert" aria-live="assertive" hidden></div><button type="submit"');
+    expect(html).toContain("preventDefault");
+    expect(html).toContain('"accept":"application/json"');
+    expect(html).toContain('"content-type":"application/x-www-form-urlencoded;charset=UTF-8"');
+    expect(html).toContain('credentials:"same-origin"');
+    // fetch / URLSearchParams が無いブラウザは通常の送信に任せる
+    expect(html).toMatch(/if\(!window\.fetch\|\|!window\.URLSearchParams\|\|!window\.FormData\)/);
+    expect(html).toContain("お申し込みを受け付けました。内容を確認のうえ、担当者からご連絡いたします。");
+    expect(html).toContain("まだお申し込みを受け付けていません。お急ぎの場合はお電話ください。");
+    expect(html).toContain("アクセスが集中しています。しばらく時間をおいてもう一度お試しください。");
+    expect(html).toContain("お申し込みを完了できませんでした。少し時間をおいてもう一度お試しいただくか、お電話ください。");
+    // DOM は textContent/createElement だけで組む
+    expect(html).not.toContain("innerHTML");
+    expect(html).toContain('window.addEventListener("pageshow"');
+    expect(html).toMatch(/\.inq-msg\{[^}]*color:#a8481a/);
+    expect(html).toMatch(/\.inq-done\{/);
+  });
+
+  it("入力欄の文字は16px以上(iOS の自動拡大を起こさない)", () => {
+    const html = renderLpPage(input({ mode: "live", form: FORM }));
+    expect(html).toMatch(/\.inquiry input,\.inquiry textarea\{[^}]*font-size:16px/);
+  });
+
+  it("参照元方針は strict-origin(same-origin だと favicon 等の自動サブリクエストが token を含む Referer を送る。no-referrer だとフォーム送信の Origin が null になる)", () => {
+    const html = renderLpPage(input({ mode: "live", form: FORM }));
+    expect(html).toContain('<meta name="referrer" content="strict-origin" />');
+    expect(html).not.toContain('content="same-origin"');
+    expect(html).not.toContain("no-referrer");
   });
 });
