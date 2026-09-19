@@ -296,6 +296,17 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // (値ではない・ALWAYS_SAFE)・updatedAt=ISO日時。会社情報の値そのものは detail に載せず、
   // 混入しても denylist(/name/i,/addr/i,tel,fax,mail 等)で [REDACTED]。
   company_profile_update: new Set(["target", "updatedAt"]),
+  // メール送信設定 更新(管理画面)。fields=変更したフィールド名の配列(値ではない・ALWAYS_SAFE)。
+  // SMTPホスト/ユーザー/差出人/パスワード等の値は detail に載せず、混入しても denylist(/mail/i 等)で [REDACTED]。
+  mail_settings_update: new Set(["fields"]),
+  // メール送信設定のテスト送信。result=sent|failed の enum のみ。宛先・SMTP応答の生メッセージは載せない。
+  mail_settings_test: new Set(["result"]),
+  // 査定申込の通知メール送信(後続タスクで使用)。attempt=試行回数、recipientUserIds=通知先ユーザーIDの
+  // 配列(UUID・氏名やメールアドレスではない)。本文・宛先メールアドレスは detail に載せない。
+  inquiry_notify_sent: new Set(["attempt", "recipientUserIds"]),
+  // 通知メール送信の失敗(後続タスクで使用)。code=safeErrorCode() 由来の分類コードのみ(SMTP応答の生
+  // メッセージ・宛先は載せない)。
+  inquiry_notify_failed: new Set(["attempt", "code"]),
   // 表示名監査（read-only レポート）の閲覧/CSV 出力監査。detail は操作事実の
   // 非PIIメタデータのみ（entity/format=enum・viewedAt=ISO日時・各種件数/真偽）。
   // owner-prefixed な件数/真偽（ownerGroupCount/ownerTruncated/ownerNameVisible）は
