@@ -73,10 +73,34 @@ async function loadPropertyScope(
   });
 }
 
-// 通知先の絞り込み(設計 §2.6)。field_staff は自分が作成/担当の物件のみ・売却DMの表示権限が
-// 平文でない利用者には送らない(通知メールに載せる情報を本人が画面でも見られない、はNG)。
-// ⚠checkSaleDmAccessFor は権限/表示の拒否は ok:false で返すが、DB 例外は投げ得る。1人の失敗で
-// 他の宛先まで巻き込まないよう、呼び出し側ごとに try/catch する。
+// 1人ぶんの適格性判定+詳しさ算出(設計 §2.6 の核心)。field_staff は自分が作成/担当の物件の
+// スコープ内のみ・売却DMの表示権限が平文でない利用者には送らない(通知メールに載せる情報を
+// 本人が画面でも見られない、はNG)。
+// P1修正(Finding1): ラウンド先頭の一括解決(resolveRecipients)と、送信「直前」の最終チェック
+// (recheckRecipientBeforeSend)の両方がこの関数を通ることで、2つの判定基準が絶対にズレない
+// ようにする。⚠checkSaleDmAccessFor は権限/表示の拒否は ok:false で返すが、DB 例外は投げ得る。
+// 1人の失敗で他の宛先まで巻き込まないよう、ここで try/catch する(呼び出し側はもう包まない)。
+async function resolveOneRecipient(
+  u: { id: string; email: string; role: string; inquiryNotifyEmail: string | null },
+  scope: { createdBy: string | null; assignedTo: string | null },
+  config: MailSendConfig,
+): Promise<Recipient | null> {
+  if (u.role === "field_staff" && scope.createdBy !== u.id && scope.assignedTo !== u.id) return null;
+  let access;
+  try {
+    access = await checkSaleDmAccessFor(u.id);
+  } catch {
+    // この利用者の判定だけ諦める(1人のDB例外で通知全体を止めない)。
+    return null;
+  }
+  if (!access.ok) return null;
+  const bothPlain = isPlainOwnerLevel(access.ownerDisplayConfig.phone) && isPlainOwnerLevel(access.ownerDisplayConfig.email);
+  const address = u.inquiryNotifyEmail && u.inquiryNotifyEmail.trim() !== "" ? u.inquiryNotifyEmail : u.email;
+  return { userId: u.id, address, detail: config.inquiryMailDetail === "full" && bothPlain ? "full" : "minimal" };
+}
+
+// 通知先の絞り込み(ラウンド先頭の一括解決)。在籍/通知ONの利用者を一括で読み、1人ずつ
+// resolveOneRecipient に判定させる。
 async function resolveRecipients(
   scope: { createdBy: string | null; assignedTo: string | null },
   config: MailSendConfig,
@@ -88,20 +112,37 @@ async function resolveRecipients(
   });
   const out: Recipient[] = [];
   for (const u of users) {
-    if (u.role === "field_staff" && scope.createdBy !== u.id && scope.assignedTo !== u.id) continue;
-    let access;
-    try {
-      access = await checkSaleDmAccessFor(u.id);
-    } catch {
-      // この利用者の判定だけ諦めて次へ(1人のDB例外で通知全体を止めない)。
-      continue;
-    }
-    if (!access.ok) continue;
-    const bothPlain = isPlainOwnerLevel(access.ownerDisplayConfig.phone) && isPlainOwnerLevel(access.ownerDisplayConfig.email);
-    const address = u.inquiryNotifyEmail && u.inquiryNotifyEmail.trim() !== "" ? u.inquiryNotifyEmail : u.email;
-    out.push({ userId: u.id, address, detail: config.inquiryMailDetail === "full" && bothPlain ? "full" : "minimal" });
+    const r = await resolveOneRecipient(u, scope, config);
+    if (r) out.push(r);
   }
   return out;
+}
+
+// P1修正(Finding1): 送信「直前」に、この宛先1人だけ現在の適格性を再チェックする。宛先1件
+// あたりの SMTP 送信は最長~35秒かかり得るため、宛先が多いラウンドでは後方の宛先の番が来る
+// までに在籍/通知設定/権限/現場担当範囲が変わり得る。ラウンド先頭の一括解決(toSend)は
+// あくまで「そのラウンド開始時点」のスナップショットでしかないので、ここでもう一段新鮮な
+// 判定を挟む。在籍/通知ONは利用者行を個別に読み直して確認し、現場担当範囲は物件を個別に
+// 読み直した(loadPropertyScope)スコープで判定する。適格性/詳しさの計算そのものは
+// resolveOneRecipient を再利用し、一括解決とここでの判定基準がズレないようにする。
+// ⚠field_staff でない利用者にはスコープの読み直しは不要(判定に使わない)ので省く。
+async function recheckRecipientBeforeSend(
+  userId: string,
+  propertyId: string,
+  config: MailSendConfig,
+): Promise<Recipient | null> {
+  const u = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, role: true, inquiryNotifyEmail: true, isActive: true, inquiryNotifyEnabled: true },
+  });
+  if (!u || !u.isActive || !u.inquiryNotifyEnabled) return null;
+  let scope: { createdBy: string | null; assignedTo: string | null } = { createdBy: null, assignedTo: null };
+  if (u.role === "field_staff") {
+    const freshScope = await loadPropertyScope(propertyId);
+    if (!freshScope) return null;
+    scope = freshScope;
+  }
+  return resolveOneRecipient(u, scope, config);
 }
 
 // 取り合いキー(notifyClaimedAt)を自分が最後に書いた値(claimedAt)で保有確認しながら
@@ -174,11 +215,6 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
     const row = await loadFacts(inquiryId);
     if (!row) return "skipped";
 
-    const config = await loadMailSendConfig();
-    if (!config) {
-      return (await finish(inquiryId, claimedAt, 1, { status: "failed", code: "mail_not_configured" }, [])) ? "failed" : "skipped";
-    }
-
     const facts: InquiryNotifyFacts = {
       inquiryId: row.id,
       submittedAt: row.submittedAt,
@@ -225,8 +261,19 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
       }
       attempts += 1;
 
-      // P1修正: 宛先の適格性(在籍/通知ON/売却DM閲覧可/field_staffの担当範囲)と詳しさ
-      // (full/minimal)は、試行のたびに再解決する。1回目の前に確定させて使い回すと、
+      // P1修正(Finding2): 送信設定(inquiryMailDetail 込み)は試行のたびに読み直す。1回目の
+      // 前に読んで使い回すと、待ち時間(最長10分)の間に管理者が full→minimal に切り替えても
+      // 古い詳しさのまま本文を組み立ててしまう。設定が壊れた/消えた(null)場合は、この試行
+      // 時点の実際の attempts で既存の mail_not_configured 終端処理に合流させる(古い設定の
+      // まま送るくらいなら、ここで止める)。
+      const config = await loadMailSendConfig();
+      if (!config) {
+        const wrote = await finish(inquiryId, claimedAt, attempts, { status: "failed", code: "mail_not_configured" }, []);
+        return wrote ? "failed" : "skipped";
+      }
+
+      // P1修正(Finding1系): 宛先の適格性(在籍/通知ON/売却DM閲覧可/field_staffの担当範囲)と
+      // 詳しさ(full/minimal)は、試行のたびに再解決する。1回目の前に確定させて使い回すと、
       // 待ち時間(最長10分)の間に設定が変わっても古い許可のまま個人情報を送ってしまう。
       // field_staff の担当範囲(createdBy/assignedTo)も同じ理由で試行のたびに物件から
       // 読み直す(loadPropertyScope)。物件が読めなければ(削除済み等)この試行は誰も適格で
@@ -257,9 +304,24 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
           claimedAt = t;
           lastRefreshMs = t.getTime();
         }
-        const mail = buildInquiryNotifyMail(facts, { detail: r.detail, appBaseUrl: config.appBaseUrl });
-        const res = await sendPlainMail(config, { to: r.address, subject: mail.subject, text: mail.text });
-        if (res.ok) succeeded.add(r.userId);
+
+        // P1修正(Finding1): sendPlainMail を呼ぶ直前に、この宛先だけもう一段新鮮な適格性
+        // チェックを挟む(recheckRecipientBeforeSend)。ラウンド先頭の toSend は「ラウンド
+        // 開始時点」のスナップショットでしかなく、直前の宛先への送信(~35秒)を挟む間に在籍/
+        // 通知設定/権限/現場担当範囲が変わり得る。ここで求まった宛先(アドレス/詳しさ)だけを
+        // 使う(toSend の r はもう使わない)。DB例外もこの宛先だけ諦めて次へ進む(1人の失敗で
+        // 他の宛先まで巻き込まない=既存の1人ずつのfault isolationをここでも踏襲)。
+        let fresh: Recipient | null;
+        try {
+          fresh = await recheckRecipientBeforeSend(r.userId, row.draft.propertyId, config);
+        } catch {
+          fresh = null;
+        }
+        if (!fresh) continue;
+
+        const mail = buildInquiryNotifyMail(facts, { detail: fresh.detail, appBaseUrl: config.appBaseUrl });
+        const res = await sendPlainMail(config, { to: fresh.address, subject: mail.subject, text: mail.text });
+        if (res.ok) succeeded.add(fresh.userId);
       }
       const stillPending = recipients.some((r) => !succeeded.has(r.userId));
       if (!stillPending) {

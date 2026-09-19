@@ -3,7 +3,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 vi.mock("@/lib/prisma", () => ({
   default: {
     dmInquiry: { updateMany: vi.fn(), findUnique: vi.fn() },
-    user: { findMany: vi.fn(), count: vi.fn() },
+    user: { findMany: vi.fn(), findUnique: vi.fn(), count: vi.fn() },
     property: { findUnique: vi.fn() },
   },
 }));
@@ -43,7 +43,7 @@ const pm = prisma as unknown as {
     updateMany: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
   };
-  user: { findMany: ReturnType<typeof vi.fn>; count: ReturnType<typeof vi.fn> };
+  user: { findMany: ReturnType<typeof vi.fn>; findUnique: ReturnType<typeof vi.fn>; count: ReturnType<typeof vi.fn> };
   property: { findUnique: ReturnType<typeof vi.fn> };
 };
 const audit = writeAuditLog as ReturnType<typeof vi.fn>;
@@ -126,8 +126,30 @@ function draftRow(overrides: Partial<typeof PROPERTY> = {}) {
   };
 }
 
-function user(id: string, opts: Partial<{ role: string; email: string; inquiryNotifyEmail: string | null }> = {}) {
-  return { id, email: opts.email ?? `${id}@example.com`, role: opts.role ?? "office_staff", inquiryNotifyEmail: opts.inquiryNotifyEmail ?? null };
+// P1修正(Finding1)で送信直前に prisma.user.findUnique による個別の再読み込みが加わった。
+// isActive/inquiryNotifyEnabled はその再読み込みで実際に判定される(既定は在籍・通知ON)。
+function user(
+  id: string,
+  opts: Partial<{ role: string; email: string; inquiryNotifyEmail: string | null; isActive: boolean; inquiryNotifyEnabled: boolean }> = {},
+) {
+  return {
+    id,
+    email: opts.email ?? `${id}@example.com`,
+    role: opts.role ?? "office_staff",
+    inquiryNotifyEmail: opts.inquiryNotifyEmail ?? null,
+    isActive: opts.isActive ?? true,
+    inquiryNotifyEnabled: opts.inquiryNotifyEnabled ?? true,
+  };
+}
+
+// pm.user.findMany(ラウンド先頭の一括解決)と pm.user.findUnique(送信直前の個別再読み込み・
+// Finding1)を同じ利用者一覧から返す。個別に findUnique だけ差し替えたいテストは、この後で
+// pm.user.findUnique.mockImplementation / mockResolvedValueOnce 等を追加で上書きすればよい。
+function setUsers(list: ReturnType<typeof user>[]) {
+  pm.user.findMany.mockResolvedValue(list);
+  pm.user.findUnique.mockImplementation(async ({ where: { id } }: { where: { id: string } }) =>
+    list.find((u) => u.id === id) ?? null,
+  );
 }
 
 beforeEach(() => {
@@ -136,7 +158,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   pm.dmInquiry.updateMany.mockResolvedValue({ count: 1 });
   pm.dmInquiry.findUnique.mockResolvedValue(draftRow());
-  pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+  setUsers([user("u-a"), user("u-b")]);
   pm.user.count.mockResolvedValue(0);
   pm.property.findUnique.mockResolvedValue(NO_SCOPE);
   loadCfg.mockResolvedValue(FULL_CONFIG);
@@ -203,7 +225,7 @@ describe("notifyInquiry: 設定未完成", () => {
 
 describe("notifyInquiry: 宛先0人", () => {
   it("通知ONの利用者がいない場合 no_recipients・再試行なし", async () => {
-    pm.user.findMany.mockResolvedValue([]);
+    setUsers([]);
     const result = await notifyInquiry(INQUIRY_ID, { now: nowFn });
     expect(result).toBe("failed");
     expect(pm.dmInquiry.updateMany).toHaveBeenLastCalledWith({
@@ -237,7 +259,7 @@ describe("notifyInquiry: 宛先0人", () => {
   });
 
   it("1人の checkSaleDmAccessFor が例外でも他の宛先は届く(1人の失敗で全体を止めない)", async () => {
-    pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+    setUsers([user("u-a"), user("u-b")]);
     checkAccess.mockImplementation(async (userId: string) => {
       if (userId === "u-a") throw new Error("db down");
       return PLAIN_ACCESS;
@@ -255,7 +277,7 @@ describe("notifyInquiry: field_staff の範囲", () => {
   it("物件の createdBy/assignedTo どちらでもない field_staff には送らない。office/admin には送る", async () => {
     pm.dmInquiry.findUnique.mockResolvedValue(draftRow());
     pm.property.findUnique.mockResolvedValue({ createdBy: "u-owner", assignedTo: null });
-    pm.user.findMany.mockResolvedValue([
+    setUsers([
       user("u-owner", { role: "field_staff" }),
       user("u-other-field", { role: "field_staff" }),
       user("u-office", { role: "office_staff" }),
@@ -276,7 +298,7 @@ describe("notifyInquiry: field_staff の範囲", () => {
   it("field_staff が assignedTo で一致していれば送る", async () => {
     pm.dmInquiry.findUnique.mockResolvedValue(draftRow());
     pm.property.findUnique.mockResolvedValue({ createdBy: null, assignedTo: "u-assignee" });
-    pm.user.findMany.mockResolvedValue([user("u-assignee", { role: "field_staff" })]);
+    setUsers([user("u-assignee", { role: "field_staff" })]);
     const result = await notifyInquiry(INQUIRY_ID, { now: nowFn });
     expect(result).toBe("sent");
     expect(send).toHaveBeenCalledWith(FULL_CONFIG, expect.objectContaining({ to: "u-assignee@example.com" }));
@@ -285,7 +307,7 @@ describe("notifyInquiry: field_staff の範囲", () => {
 
 describe("notifyInquiry: 宛先アドレス", () => {
   it("inquiryNotifyEmail が設定されていればそちら優先・無ければ email", async () => {
-    pm.user.findMany.mockResolvedValue([
+    setUsers([
       user("u-a", { email: "a@example.com", inquiryNotifyEmail: "a-notify@example.com" }),
       user("u-b", { email: "b@example.com", inquiryNotifyEmail: null }),
     ]);
@@ -306,7 +328,7 @@ describe("notifyInquiry: 受け手ごとの詳しさ", () => {
   });
 
   it("設定 full で、電話/メールとも平文の受け手は full・メールが masked の受け手は minimal(宛先ごとに検証)", async () => {
-    pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+    setUsers([user("u-a"), user("u-b")]);
     checkAccess.mockImplementation(async (userId: string) =>
       userId === "u-b" ? { ok: true, permissions: [], ownerDisplayConfig: { ...PLAIN_ACCESS.ownerDisplayConfig, email: "masked" } } : PLAIN_ACCESS,
     );
@@ -318,7 +340,7 @@ describe("notifyInquiry: 受け手ごとの詳しさ", () => {
 
   it("設定 minimal なら電話/メールとも平文でも全員 minimal(宛先ごとに検証)", async () => {
     loadCfg.mockResolvedValue({ ...FULL_CONFIG, inquiryMailDetail: "minimal" });
-    pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+    setUsers([user("u-a"), user("u-b")]);
     await notifyInquiry(INQUIRY_ID, { now: nowFn });
     const byAddress = Object.fromEntries(send.mock.calls.map((c) => [c[1].to, c[1].subject]));
     expect(byAddress["u-a@example.com"]).toBe("S-minimal");
@@ -328,7 +350,7 @@ describe("notifyInquiry: 受け手ごとの詳しさ", () => {
 
 describe("notifyInquiry: 成功", () => {
   it("全員成功 → sent・監査にアドレスを含まない recipientUserIds", async () => {
-    pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+    setUsers([user("u-a"), user("u-b")]);
     const result = await notifyInquiry(INQUIRY_ID, { now: nowFn });
     expect(result).toBe("sent");
     expect(pm.dmInquiry.updateMany).toHaveBeenLastCalledWith({
@@ -357,7 +379,7 @@ describe("notifyInquiry: 再試行", () => {
     "1回目でBだけ失敗→ちょうど30秒後にBだけへ再送→成功でsent(1ms早くては再送しない)",
     { timeout: 20_000 },
     async () => {
-      pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+      setUsers([user("u-a"), user("u-b")]);
       let bCalls = 0;
       send.mockImplementation(async (_config, mail: { to: string }) => {
         if (mail.to === "u-b@example.com") {
@@ -403,7 +425,7 @@ describe("notifyInquiry: 再試行", () => {
     "Bが4回とも(1回目+再試行3回)失敗し続けたらfailed+partial・待ち時間はNOTIFY_RETRY_DELAYS_MSの順",
     { timeout: 20_000 },
     async () => {
-      pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+      setUsers([user("u-a"), user("u-b")]);
       send.mockImplementation(async (_config, mail: { to: string }) =>
         mail.to === "u-b@example.com" ? { ok: false, code: "ECONNECTION" } : { ok: true },
       );
@@ -440,7 +462,7 @@ describe("notifyInquiry: 再試行", () => {
     "全員が失敗し続けたらsend_failed",
     { timeout: 20_000 },
     async () => {
-      pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+      setUsers([user("u-a"), user("u-b")]);
       send.mockResolvedValue({ ok: false, code: "ECONNECTION" });
 
       const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
@@ -466,7 +488,7 @@ describe("notifyInquiry: 取り合いキーの保有(controller ruling 送信中
   // Important 1: 宛先ループの途中で保有キーが期限切れ・他ワーカーに奪われた場合、その場で
   // 送信を止め、未送信の宛先には送らず、終端状態も書かない(二重送信防止の核心)。
   it("宛先ループの途中で保有キーが奪われたら即座に止め、以降の宛先には送らず終端状態も書かない", async () => {
-    pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b"), user("u-c")]);
+    setUsers([user("u-a"), user("u-b"), user("u-c")]);
     const t0 = NOW;
     const t1 = new Date(NOW.getTime() + NOTIFY_STALE_CLAIM_MS / 3 + 1_000); // 更新間隔の閾値超え
     let calls = 0;
@@ -497,7 +519,7 @@ describe("notifyInquiry: 取り合いキーの保有(controller ruling 送信中
   // Important 2: 終端の finish() も同じ保有チェックを通す。書き込み時点で既に保有が他ワーカーへ
   // 移っていたら(stale worker)、監査を書かず・notifyAttempts も増やさずに諦める。
   it("送信完了時に既に保有キーが他ワーカーへ移っていたら(stale worker)監査を書かずskippedで終わる", async () => {
-    pm.user.findMany.mockResolvedValue([user("u-a")]);
+    setUsers([user("u-a")]);
     pm.dmInquiry.updateMany
       .mockResolvedValueOnce({ count: 1 }) // 初回claim
       .mockResolvedValueOnce({ count: 0 }); // finish(sent) は既に保有を失っている
@@ -519,7 +541,7 @@ describe("notifyInquiry: sleep直前の保有チェック(fix round 2 — Import
     "sleepに入る直前にも保有チェック付きで更新する(タイマーを一切進めていない時点で既に記録される=寝る前のrefreshの直接証拠)",
     { timeout: 20_000 },
     async () => {
-      pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+      setUsers([user("u-a"), user("u-b")]);
       let bCalls = 0;
       send.mockImplementation(async (_config, mail: { to: string }) => {
         if (mail.to === "u-b@example.com") {
@@ -562,7 +584,7 @@ describe("notifyInquiry: sleep直前の保有チェック(fix round 2 — Import
   );
 
   it("sleep直前の保有チェックで既に奪われていたら、寝る前に止めて以降の送信も終端書き込みもしない", async () => {
-    pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+    setUsers([user("u-a"), user("u-b")]);
     send.mockImplementation(async (_config, mail: { to: string }) =>
       mail.to === "u-b@example.com" ? { ok: false, code: "ECONNECTION" } : { ok: true },
     );
@@ -616,7 +638,7 @@ describe("notifyInquiry: 想定外の例外で sending のまま残さない(con
 
   // Minor 2: catch は attempts/succeeded を固定値(1件)に丸めず、実際の進捗を使う。
   it("再試行の途中(attempt 4)で想定外の例外が起きたら、attempt:1に丸めず実際のattempts/partialを記録する", { timeout: 20_000 }, async () => {
-    pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+    setUsers([user("u-a"), user("u-b")]);
     let bFail = 0;
     send.mockImplementation(async (_config, mail: { to: string }) => {
       if (mail.to === "u-a@example.com") return { ok: true };
@@ -649,13 +671,15 @@ describe("notifyInquiry: 再解決(P1修正 — 試行ごとに適格性/詳し�
     "(a) 1回目と2回目の間に適格性が失われた宛先には2回目で何も送らない",
     { timeout: 20_000 },
     async () => {
-      pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+      setUsers([user("u-a"), user("u-b")]);
       let bAccessCalls = 0;
       checkAccess.mockImplementation(async (userId: string) => {
         if (userId !== "u-b") return PLAIN_ACCESS;
         bAccessCalls += 1;
-        // 1回目(1回目の再解決)は通す・2回目(再試行前の再解決)からは権限を失っている。
-        return bAccessCalls === 1 ? PLAIN_ACCESS : { ok: false, reason: "display" };
+        // attempt1 は一括解決(1回目)+送信直前の最終チェック(2回目)の計2回とも通す。
+        // attempt2 の一括解決(3回目)からは権限を失っている(最終チェックまで辿り着かず、
+        // 一括解決の時点で候補から除外される)。
+        return bAccessCalls <= 2 ? PLAIN_ACCESS : { ok: false, reason: "display" };
       });
       send.mockImplementation(async (_config, mail: { to: string }) =>
         mail.to === "u-b@example.com" ? { ok: false, code: "ECONNECTION" } : { ok: true },
@@ -686,7 +710,7 @@ describe("notifyInquiry: 再解決(P1修正 — 試行ごとに適格性/詳し�
     "(b) 1回目と2回目の間に詳しさが full→minimal に変わったら再送は minimal 本文で届く",
     { timeout: 20_000 },
     async () => {
-      pm.user.findMany.mockResolvedValue([user("u-b")]);
+      setUsers([user("u-b")]);
       buildMail.mockImplementation((_facts: unknown, opts: { detail: "minimal" | "full" }) => ({
         subject: `S-${opts.detail}`,
         text: `T-${opts.detail}`,
@@ -694,7 +718,9 @@ describe("notifyInquiry: 再解決(P1修正 — 試行ごとに適格性/詳し�
       let accessCalls = 0;
       checkAccess.mockImplementation(async () => {
         accessCalls += 1;
-        return accessCalls === 1
+        // attempt1 は一括解決(1回目)+送信直前の最終チェック(2回目)の計2回とも full 条件を
+        // 満たす。attempt2(3・4回目)からはメールが masked になっている。
+        return accessCalls <= 2
           ? PLAIN_ACCESS
           : { ok: true, permissions: [], ownerDisplayConfig: { ...PLAIN_ACCESS.ownerDisplayConfig, email: "masked" } };
       });
@@ -720,7 +746,7 @@ describe("notifyInquiry: 再解決(P1修正 — 試行ごとに適格性/詳し�
   );
 
   it("(c) 既に成功した宛先は、再解決の一覧に再び現れても二度と送らない", async () => {
-    pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+    setUsers([user("u-a"), user("u-b")]);
     send.mockImplementation(async (_config, mail: { to: string }) =>
       mail.to === "u-b@example.com" ? { ok: false, code: "ECONNECTION" } : { ok: true },
     );
@@ -747,7 +773,7 @@ describe("notifyInquiry: 再解決(P1修正 — 試行ごとに適格性/詳し�
     "(d) 再試行の前に全員が適格性を失ったら、それ以上送らずno_recipients相当で終わる",
     { timeout: 20_000 },
     async () => {
-      pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+      setUsers([user("u-a"), user("u-b")]);
       let revoked = false;
       checkAccess.mockImplementation(async () => (revoked ? { ok: false, reason: "display" } : PLAIN_ACCESS));
       send.mockResolvedValue({ ok: false, code: "ECONNECTION" }); // 1回目は両方とも送信自体が失敗
@@ -779,7 +805,7 @@ describe("notifyInquiry: 再解決(P1修正 — 試行ごとに適格性/詳し�
     "(e) 何も変わらない再試行(happy path)は従来どおり sent・再解決自体は毎回起きている",
     { timeout: 20_000 },
     async () => {
-      pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+      setUsers([user("u-a"), user("u-b")]);
       let bCalls = 0;
       send.mockImplementation(async (_config, mail: { to: string }) => {
         if (mail.to === "u-b@example.com") {
@@ -811,10 +837,14 @@ describe("notifyInquiry: 物件スコープの再読み込み(P1修正 — 現�
     "(a) 現場担当者が1回目と2回目の間に外されたら、2回目には何も送らない",
     { timeout: 20_000 },
     async () => {
-      pm.user.findMany.mockResolvedValue([user("u-field", { role: "field_staff" })]);
-      pm.property.findUnique
-        .mockResolvedValueOnce({ createdBy: "u-field", assignedTo: null }) // attempt1: まだ担当
-        .mockResolvedValueOnce({ createdBy: "u-other", assignedTo: null }); // attempt2: 外された
+      setUsers([user("u-field", { role: "field_staff" })]);
+      let scopeCalls = 0;
+      pm.property.findUnique.mockImplementation(async () => {
+        scopeCalls += 1;
+        // 呼び出し順: 1=attempt1の一括解決, 2=attempt1の送信直前の最終チェック(Finding1),
+        // 3=attempt2の一括解決(ここで担当から外れる)。
+        return scopeCalls <= 2 ? { createdBy: "u-field", assignedTo: null } : { createdBy: "u-other", assignedTo: null };
+      });
       send.mockResolvedValue({ ok: false, code: "ECONNECTION" }); // attempt1で失敗させて再試行させる
 
       const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
@@ -832,7 +862,9 @@ describe("notifyInquiry: 物件スコープの再読み込み(P1修正 — 現�
         where: { id: INQUIRY_ID, notifyStatus: "sending", notifyClaimedAt: NOW },
         data: { notifyStatus: "failed", notifyLastError: "no_recipients", notifyAttempts: { increment: 2 } },
       });
-      expect(pm.property.findUnique).toHaveBeenCalledTimes(2);
+      // attempt1: 一括解決+送信直前の最終チェックの2回・attempt2: 一括解決の1回(担当外れで
+      // toSend が空になり、最終チェックまで辿り着かない)=計3回。
+      expect(pm.property.findUnique).toHaveBeenCalledTimes(3);
     },
   );
 
@@ -840,10 +872,15 @@ describe("notifyInquiry: 物件スコープの再読み込み(P1修正 — 現�
     "(b) 1回目と2回目の間に新しく付け替えられた現場担当者は、2回目から適格になる",
     { timeout: 20_000 },
     async () => {
-      pm.user.findMany.mockResolvedValue([user("u-office"), user("u-field", { role: "field_staff" })]);
-      pm.property.findUnique
-        .mockResolvedValueOnce({ createdBy: null, assignedTo: null }) // attempt1: 誰も担当していない
-        .mockResolvedValueOnce({ createdBy: null, assignedTo: "u-field" }); // attempt2: u-field が付け替え
+      setUsers([user("u-office"), user("u-field", { role: "field_staff" })]);
+      let scopeCalls = 0;
+      pm.property.findUnique.mockImplementation(async () => {
+        scopeCalls += 1;
+        // 呼び出し順: 1=attempt1の一括解決(誰も担当していない)。2回目以降(attempt2の一括解決+
+        // u-fieldの送信直前の最終チェック)はすべて u-field が付け替えられた後の値を返す
+        // (どちらも同じ「今の」スコープを見なければならない=一括解決と最終チェックの整合性)。
+        return scopeCalls <= 1 ? { createdBy: null, assignedTo: null } : { createdBy: null, assignedTo: "u-field" };
+      });
       let officeCalls = 0;
       send.mockImplementation(async (_config, mail: { to: string }) => {
         if (mail.to === "u-office@example.com") {
@@ -875,7 +912,7 @@ describe("notifyInquiry: 物件スコープの再読み込み(P1修正 — 現�
     "(c) 物件スコープの読み直しは試行ごとにちょうど1回(クエリの形も固定)",
     { timeout: 20_000 },
     async () => {
-      pm.user.findMany.mockResolvedValue([user("u-a")]);
+      setUsers([user("u-a")]);
       let calls = 0;
       send.mockImplementation(async () => {
         calls += 1;
@@ -901,7 +938,7 @@ describe("notifyInquiry: 物件スコープの再読み込み(P1修正 — 現�
     "(d) 付け替えが起きない再試行(回帰)は従来どおり sent・スコープは毎回同じ値で読み直される",
     { timeout: 20_000 },
     async () => {
-      pm.user.findMany.mockResolvedValue([user("u-field", { role: "field_staff" })]);
+      setUsers([user("u-field", { role: "field_staff" })]);
       pm.property.findUnique.mockResolvedValue({ createdBy: "u-field", assignedTo: null }); // 両試行とも同じ担当
       let calls = 0;
       send.mockImplementation(async () => {
@@ -918,11 +955,184 @@ describe("notifyInquiry: 物件スコープの再読み込み(P1修正 — 現�
 
       expect(result).toBe("sent");
       expect(send).toHaveBeenCalledTimes(2);
-      expect(pm.property.findUnique).toHaveBeenCalledTimes(2);
+      // attempt1・attempt2 とも「一括解決+送信直前の最終チェック」の2回ずつスコープを読む
+      // (送信が両試行とも実際に起きるため)=計4回。
+      expect(pm.property.findUnique).toHaveBeenCalledTimes(4);
       expect(pm.dmInquiry.updateMany).toHaveBeenLastCalledWith({
         where: { id: INQUIRY_ID, notifyStatus: "sending", notifyClaimedAt: NOW },
         data: { notifyStatus: "sent", notifyLastError: null, notifyAttempts: { increment: 2 } },
       });
+    },
+  );
+});
+
+describe("notifyInquiry: 送信直前の最終チェック+設定の毎回読み直し(codex r4 P1修正×2)", () => {
+  // Finding1: 宛先が複数いる1回の試行の中でも、SMTP送信は宛先ごとに最長~35秒かかり得るため、
+  // 前の宛先へ送信している間に後ろの宛先の適格性/詳しさが変わり得る。ラウンド先頭の一括解決
+  // (toSend)だけでは古いまま送ってしまうので、sendPlainMail の直前でもう一段だけ再チェックする。
+  it(
+    "(a) 1件目を送信している間に2件目が適格性を失ったら、2件目はスキップされ実行は正常に完了する",
+    { timeout: 20_000 },
+    async () => {
+      setUsers([user("u-a"), user("u-b")]);
+      let bIneligible = false;
+      checkAccess.mockImplementation(async (userId: string) => {
+        if (userId === "u-b" && bIneligible) return { ok: false, reason: "display" };
+        return PLAIN_ACCESS;
+      });
+      send.mockImplementation(async (_config, mail: { to: string }) => {
+        // u-a への送信が起きた時点(=同じ試行内でu-bの番が回ってくる前)でu-bが適格性を失う。
+        if (mail.to === "u-a@example.com") bIneligible = true;
+        return { ok: true };
+      });
+
+      const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+      await vi.advanceTimersByTimeAsync(0);
+      // attempt1: u-aだけに送っている。u-bは送信直前の最終チェックでスキップされ、送信自体
+      // 発生しない(toSendのスナップショットにはまだu-bが残っていても、実際には送らない)。
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0][1].to).toBe("u-a@example.com");
+
+      await vi.advanceTimersByTimeAsync(NOTIFY_RETRY_DELAYS_MS[0]);
+      const result = await promise;
+
+      expect(result).toBe("sent");
+      // u-bには一度も送っていない(スキップされ続けるので再試行でも増えない)。
+      expect(send).toHaveBeenCalledTimes(1);
+      const call = audit.mock.calls[0][0];
+      expect(call.detail).toEqual({ attempt: 2, recipientUserIds: ["u-a"] });
+    },
+  );
+
+  it(
+    "(b) 1件目を送信している間に2件目の権限がfull→minimalに落ちたら、2件目はminimal本文で届く",
+    { timeout: 20_000 },
+    async () => {
+      setUsers([user("u-a"), user("u-b")]);
+      buildMail.mockImplementation((_facts: unknown, opts: { detail: "minimal" | "full" }) => ({
+        subject: `S-${opts.detail}`,
+        text: `T-${opts.detail}`,
+      }));
+      let bMasked = false;
+      checkAccess.mockImplementation(async (userId: string) => {
+        if (userId === "u-b" && bMasked) {
+          return { ok: true, permissions: [], ownerDisplayConfig: { ...PLAIN_ACCESS.ownerDisplayConfig, email: "masked" } };
+        }
+        return PLAIN_ACCESS;
+      });
+      send.mockImplementation(async (_config, mail: { to: string }) => {
+        if (mail.to === "u-a@example.com") bMasked = true; // u-aの送信中にu-bの権限が下がる
+        return { ok: true };
+      });
+
+      const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+      await vi.advanceTimersByTimeAsync(0);
+      const result = await promise;
+
+      expect(result).toBe("sent");
+      const byAddress = Object.fromEntries(send.mock.calls.map((c) => [c[1].to, c[1].subject]));
+      expect(byAddress["u-a@example.com"]).toBe("S-full");
+      // 送信直前の最終チェックで詳しさを再計算しているので minimal 本文になる(ラウンド先頭の
+      // 一括解決の時点ではまだ full だった=そのまま使い回していたら S-full のまま届いてしまう)。
+      expect(byAddress["u-b@example.com"]).toBe("S-minimal");
+    },
+  );
+
+  // Finding2: メール設定(inquiryMailDetail 込み)は1回目の前に読んで使い回すのではなく、
+  // 試行のたびに読み直す。待ち時間(最長10分)の間に管理者が切り替えても追随する。
+  it(
+    "(c) 試行1と試行2の間に管理者が設定をfull→minimalに切り替えたら、再送はminimal本文で届く",
+    { timeout: 20_000 },
+    async () => {
+      setUsers([user("u-b")]);
+      buildMail.mockImplementation((_facts: unknown, opts: { detail: "minimal" | "full" }) => ({
+        subject: `S-${opts.detail}`,
+        text: `T-${opts.detail}`,
+      }));
+      let cfgCalls = 0;
+      loadCfg.mockImplementation(async () => {
+        cfgCalls += 1;
+        return cfgCalls === 1 ? FULL_CONFIG : { ...FULL_CONFIG, inquiryMailDetail: "minimal" as const };
+      });
+      let bCalls = 0;
+      send.mockImplementation(async () => {
+        bCalls += 1;
+        return bCalls === 1 ? { ok: false, code: "ECONNECTION" } : { ok: true };
+      });
+
+      const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0][1].subject).toBe("S-full");
+
+      await vi.advanceTimersByTimeAsync(NOTIFY_RETRY_DELAYS_MS[0]);
+      const result = await promise;
+
+      expect(result).toBe("sent");
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(send.mock.calls[1][1].subject).toBe("S-minimal");
+    },
+  );
+
+  it(
+    "(d) 再試行の前に設定が読めなくなったら、以降は一切送らずmail_not_configuredで終わる",
+    { timeout: 20_000 },
+    async () => {
+      setUsers([user("u-a"), user("u-b")]);
+      let cfgCalls = 0;
+      loadCfg.mockImplementation(async () => {
+        cfgCalls += 1;
+        return cfgCalls === 1 ? FULL_CONFIG : null;
+      });
+      send.mockResolvedValue({ ok: false, code: "ECONNECTION" }); // 1回目は両方とも送信自体が失敗(再試行させる)
+
+      const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(send).toHaveBeenCalledTimes(2); // attempt1: A,Bとも失敗
+
+      await vi.advanceTimersByTimeAsync(NOTIFY_RETRY_DELAYS_MS[0]);
+      const result = await promise;
+
+      expect(result).toBe("failed");
+      expect(send).toHaveBeenCalledTimes(2); // 設定が読めなくなった以降、追加送信は一切発生しない
+      expect(pm.dmInquiry.updateMany).toHaveBeenLastCalledWith({
+        where: { id: INQUIRY_ID, notifyStatus: "sending", notifyClaimedAt: NOW },
+        data: { notifyStatus: "failed", notifyLastError: "mail_not_configured", notifyAttempts: { increment: 2 } },
+      });
+      expect(audit).toHaveBeenCalledWith({
+        action: "inquiry_notify_failed",
+        targetTable: "dm_inquiries",
+        targetId: INQUIRY_ID,
+        detail: { attempt: 2, code: "mail_not_configured" },
+      });
+    },
+  );
+
+  it(
+    "(e) 何も変わらないハッピーパスは従来どおり sent・誰にも二重には送らない",
+    { timeout: 20_000 },
+    async () => {
+      setUsers([user("u-a"), user("u-b")]);
+      let bCalls = 0;
+      send.mockImplementation(async (_config, mail: { to: string }) => {
+        if (mail.to === "u-b@example.com") {
+          bCalls += 1;
+          return bCalls === 1 ? { ok: false, code: "ECONNECTION" } : { ok: true };
+        }
+        return { ok: true };
+      });
+
+      const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(NOTIFY_RETRY_DELAYS_MS[0]);
+      const result = await promise;
+
+      expect(result).toBe("sent");
+      expect(send).toHaveBeenCalledTimes(3); // attempt1: A,B(B失敗) + attempt2: Bのみ
+      const aCalls = send.mock.calls.filter((c) => c[1].to === "u-a@example.com");
+      expect(aCalls).toHaveLength(1); // Aは一度しか送っていない(送信直前の最終チェックが二重送信を招いていない)
+      const call = audit.mock.calls[0][0];
+      expect(call.detail.recipientUserIds.sort()).toEqual(["u-a", "u-b"]);
     },
   );
 });
