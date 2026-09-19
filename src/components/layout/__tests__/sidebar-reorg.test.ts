@@ -180,11 +180,30 @@ describe("DM グループ(新設)", () => {
   it("入口ページを先頭に、送る流れの順で並ぶ", () => {
     expect(group("dm")?.items.map((i) => i.href)).toEqual([
       "/dm",
+      "/properties/sale-dm/inquiries",
       "/admin/sale-dm-settings",
       "/admin/mail-settings",
       "/admin/lp-assets",
       "/admin/orphan-dm-logs",
     ]);
+  });
+});
+
+describe("「査定の申込」画面への入口(発注者判断 2026-09-18)", () => {
+  it("DMメニューの直後に office_staff で置く", () => {
+    expect(byHref("/properties/sale-dm/inquiries")?.label).toBe("査定の申込");
+    expect(byHref("/properties/sale-dm/inquiries")?.minRole).toBe("office_staff");
+  });
+
+  it("物件一覧の現在地ハイライトと衝突しない(既存の PROPERTIES_NON_LIST 判定を利用)", () => {
+    // /properties/sale-dm を含む道は「物件一覧」ではないので、このページを開いても
+    // /properties の項目は光らない。
+    expect(
+      isNavItemActive("/properties", "/properties/sale-dm/inquiries"),
+    ).toBe(false);
+    expect(
+      isNavItemActive("/properties/sale-dm/inquiries", "/properties/sale-dm/inquiries"),
+    ).toBe(true);
   });
 });
 

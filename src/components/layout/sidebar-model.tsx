@@ -24,6 +24,7 @@ import {
   Mail,
   MailX,
   Image as ImageIcon,
+  Inbox,
 } from "lucide-react";
 import { canSee, type AppRole } from "@/lib/nav/roles";
 
@@ -108,6 +109,9 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       // 入口ページ(案B)。宛名CSVや売却DMの作成は従来どおり物件一覧にあり、
       // ここはそこへの分かりやすい入口を足すもの。
       { label: "DMメニュー", href: "/dm", icon: ic(Mail), minRole: "office_staff" },
+      // 公開LPから届いた査定申込の横断一覧(発注者判断 2026-09-18: キャンペーン作成者に
+      // 限らず、売却DMを使える人は誰でも見て対応できる)。通知メールのリンク先。
+      { label: "査定の申込", href: "/properties/sale-dm/inquiries", icon: ic(Inbox), minRole: "office_staff" },
       { label: "売却DM設定", href: "/admin/sale-dm-settings", icon: ic(Mail), minRole: "admin" },
       // 査定申込の通知メールを送る Xserver メールボックスの設定(2026-09 新設)。
       { label: "メール送信設定", href: "/admin/mail-settings", icon: ic(Mail), minRole: "admin" },
