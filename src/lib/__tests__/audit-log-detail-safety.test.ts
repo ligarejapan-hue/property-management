@@ -812,3 +812,16 @@ describe("sanitizeAuditDetail: 取込ガード(corporateRepair)のサマリ", ()
     expect(out.corporateRepair).toBe(REDACTED);
   });
 });
+
+describe("sanitizeAuditDetail: 編集中の鍵(edit_lock_*)", () => {
+  it("編集中の鍵の detail は伏せ字にならない(氏名・合言葉は載せない設計)", () => {
+    const safe = sanitizeAuditDetail("edit_lock_takeover_expired", {
+      resourceType: "property", resourceId: "r1", previousUserId: "u1", expiredBy: "idle",
+    });
+    expect(safe).toEqual({ resourceType: "property", resourceId: "r1", previousUserId: "u1", expiredBy: "idle" });
+  });
+  it("鍵の detail に紛れ込んだ氏名は伏せ字のまま", () => {
+    const safe = sanitizeAuditDetail("edit_lock_acquire", { resourceType: "property", holderName: "山田" }) as Record<string, unknown>;
+    expect(safe.holderName).toBe(REDACTED);
+  });
+});

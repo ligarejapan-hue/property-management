@@ -443,6 +443,12 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   //   force-safe 側で保持する(値は boolean ゆえ PII 流入余地なし)。
   // ⚠ここに氏名・住所・原文のキーは**足さない**(安全なものだけを並べる方式)。
   paste_import_property_create: new Set(["attachmentCreated", "hasExternalKey"]),
+  // 編集中の鍵(設計 2026-09-17)。detail は UUID と enum のみ。
+  // 氏名・画面の合言葉(生値もハッシュも)は載せない。
+  edit_lock_acquire: new Set(["resourceType", "resourceId"]),
+  edit_lock_takeover_expired: new Set(["resourceType", "resourceId", "previousUserId", "expiredBy"]),
+  edit_lock_release: new Set(["resourceType", "resourceId"]),
+  edit_lock_force_release: new Set(["resourceType", "resourceId", "previousUserId"]),
 };
 
 /**
