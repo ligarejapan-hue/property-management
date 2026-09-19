@@ -4,6 +4,7 @@ vi.mock("@/lib/prisma", () => ({
   default: {
     dmInquiry: { updateMany: vi.fn(), findUnique: vi.fn() },
     user: { findMany: vi.fn(), count: vi.fn() },
+    property: { findUnique: vi.fn() },
   },
 }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
@@ -43,6 +44,7 @@ const pm = prisma as unknown as {
     findUnique: ReturnType<typeof vi.fn>;
   };
   user: { findMany: ReturnType<typeof vi.fn>; count: ReturnType<typeof vi.fn> };
+  property: { findUnique: ReturnType<typeof vi.fn> };
 };
 const audit = writeAuditLog as ReturnType<typeof vi.fn>;
 const loadCfg = loadMailSendConfig as ReturnType<typeof vi.fn>;
@@ -90,12 +92,19 @@ const FULL_CONFIG = {
   inquiryMailDetail: "full" as const,
 };
 
-const PROPERTY: { address: string; propertyType: string; createdBy: string | null; assignedTo: string | null } = {
+// P1修正で property.createdBy/assignedTo は draft のスナップショットではなく、試行のたびに
+// prisma.property.findUnique(PROPERTY_ID)を読み直して得る(下の pm.property.findUnique)。
+// draft.property にはメール本文の材料(住所/種別)だけが残る。
+const PROPERTY_ID = "prop-1";
+
+const PROPERTY: { address: string; propertyType: string } = {
   address: "東京都渋谷区1-2-3",
   propertyType: "mansion",
-  createdBy: null,
-  assignedTo: null,
 };
+
+// 既定の物件スコープ(現場担当者なし)。field_staff の担当範囲テストは
+// pm.property.findUnique を個別に上書きする。
+const NO_SCOPE = { createdBy: null, assignedTo: null };
 
 function draftRow(overrides: Partial<typeof PROPERTY> = {}) {
   return {
@@ -111,6 +120,7 @@ function draftRow(overrides: Partial<typeof PROPERTY> = {}) {
       campaign: { name: "秋キャンペーン" },
       variant: { label: "A型" },
       lpVariant: { label: "LP-A" },
+      propertyId: PROPERTY_ID,
       property: { ...PROPERTY, ...overrides },
     },
   };
@@ -128,6 +138,7 @@ beforeEach(() => {
   pm.dmInquiry.findUnique.mockResolvedValue(draftRow());
   pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
   pm.user.count.mockResolvedValue(0);
+  pm.property.findUnique.mockResolvedValue(NO_SCOPE);
   loadCfg.mockResolvedValue(FULL_CONFIG);
   checkAccess.mockResolvedValue(PLAIN_ACCESS);
   send.mockResolvedValue({ ok: true });
@@ -242,7 +253,8 @@ describe("notifyInquiry: 宛先0人", () => {
 
 describe("notifyInquiry: field_staff の範囲", () => {
   it("物件の createdBy/assignedTo どちらでもない field_staff には送らない。office/admin には送る", async () => {
-    pm.dmInquiry.findUnique.mockResolvedValue(draftRow({ createdBy: "u-owner" }));
+    pm.dmInquiry.findUnique.mockResolvedValue(draftRow());
+    pm.property.findUnique.mockResolvedValue({ createdBy: "u-owner", assignedTo: null });
     pm.user.findMany.mockResolvedValue([
       user("u-owner", { role: "field_staff" }),
       user("u-other-field", { role: "field_staff" }),
@@ -262,7 +274,8 @@ describe("notifyInquiry: field_staff の範囲", () => {
   });
 
   it("field_staff が assignedTo で一致していれば送る", async () => {
-    pm.dmInquiry.findUnique.mockResolvedValue(draftRow({ assignedTo: "u-assignee" }));
+    pm.dmInquiry.findUnique.mockResolvedValue(draftRow());
+    pm.property.findUnique.mockResolvedValue({ createdBy: null, assignedTo: "u-assignee" });
     pm.user.findMany.mockResolvedValue([user("u-assignee", { role: "field_staff" })]);
     const result = await notifyInquiry(INQUIRY_ID, { now: nowFn });
     expect(result).toBe("sent");
@@ -786,6 +799,130 @@ describe("notifyInquiry: 再解決(P1修正 — 試行ごとに適格性/詳し�
       expect(pm.user.findMany.mock.calls.length).toBeGreaterThanOrEqual(2);
       const call = audit.mock.calls[0][0];
       expect(call.detail.recipientUserIds.sort()).toEqual(["u-a", "u-b"]);
+    },
+  );
+});
+
+describe("notifyInquiry: 物件スコープの再読み込み(P1修正 — 現場担当者の再配置)", () => {
+  // resolveRecipients に渡す property.createdBy/assignedTo は、試行のたびに
+  // prisma.property.findUnique(PROPERTY_ID) を読み直した「今の」値でなければならない。
+  // 1回目の前にまとめて読んで使い回す実装に戻すと、これらのテストは失敗する。
+  it(
+    "(a) 現場担当者が1回目と2回目の間に外されたら、2回目には何も送らない",
+    { timeout: 20_000 },
+    async () => {
+      pm.user.findMany.mockResolvedValue([user("u-field", { role: "field_staff" })]);
+      pm.property.findUnique
+        .mockResolvedValueOnce({ createdBy: "u-field", assignedTo: null }) // attempt1: まだ担当
+        .mockResolvedValueOnce({ createdBy: "u-other", assignedTo: null }); // attempt2: 外された
+      send.mockResolvedValue({ ok: false, code: "ECONNECTION" }); // attempt1で失敗させて再試行させる
+
+      const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(send).toHaveBeenCalledTimes(1); // attempt1: まだ担当なので送信は試みる(失敗)
+
+      await vi.advanceTimersByTimeAsync(NOTIFY_RETRY_DELAYS_MS[0]);
+      const result = await promise;
+
+      // attempt2 では u-field は物件の担当から外れているので resolveRecipients の結果が
+      // 0人になり、送信自体が発生しない(送信回数は attempt1 の1回のまま)。
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(result).toBe("failed");
+      expect(pm.dmInquiry.updateMany).toHaveBeenLastCalledWith({
+        where: { id: INQUIRY_ID, notifyStatus: "sending", notifyClaimedAt: NOW },
+        data: { notifyStatus: "failed", notifyLastError: "no_recipients", notifyAttempts: { increment: 2 } },
+      });
+      expect(pm.property.findUnique).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it(
+    "(b) 1回目と2回目の間に新しく付け替えられた現場担当者は、2回目から適格になる",
+    { timeout: 20_000 },
+    async () => {
+      pm.user.findMany.mockResolvedValue([user("u-office"), user("u-field", { role: "field_staff" })]);
+      pm.property.findUnique
+        .mockResolvedValueOnce({ createdBy: null, assignedTo: null }) // attempt1: 誰も担当していない
+        .mockResolvedValueOnce({ createdBy: null, assignedTo: "u-field" }); // attempt2: u-field が付け替え
+      let officeCalls = 0;
+      send.mockImplementation(async (_config, mail: { to: string }) => {
+        if (mail.to === "u-office@example.com") {
+          officeCalls += 1;
+          return officeCalls === 1 ? { ok: false, code: "ECONNECTION" } : { ok: true };
+        }
+        return { ok: true }; // u-field は現れたときは常に成功
+      });
+
+      const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+      await vi.advanceTimersByTimeAsync(0);
+      // attempt1: u-field はまだ担当外なので送っていない(office_staff の u-office だけ・失敗)。
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0][1].to).toBe("u-office@example.com");
+
+      await vi.advanceTimersByTimeAsync(NOTIFY_RETRY_DELAYS_MS[0]);
+      const result = await promise;
+
+      expect(result).toBe("sent");
+      // attempt2 で u-office(再送)・u-field(新規に適格)の両方に届く。
+      const toAddresses = send.mock.calls.map((c) => c[1].to);
+      expect(toAddresses).toEqual(["u-office@example.com", "u-office@example.com", "u-field@example.com"]);
+      const call = audit.mock.calls[0][0];
+      expect(call.detail.recipientUserIds.sort()).toEqual(["u-field", "u-office"]);
+    },
+  );
+
+  it(
+    "(c) 物件スコープの読み直しは試行ごとにちょうど1回(クエリの形も固定)",
+    { timeout: 20_000 },
+    async () => {
+      pm.user.findMany.mockResolvedValue([user("u-a")]);
+      let calls = 0;
+      send.mockImplementation(async () => {
+        calls += 1;
+        return calls === 1 ? { ok: false, code: "ECONNECTION" } : { ok: true };
+      });
+
+      const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(pm.property.findUnique).toHaveBeenCalledTimes(1); // attempt1で1回
+
+      await vi.advanceTimersByTimeAsync(NOTIFY_RETRY_DELAYS_MS[0]);
+      const result = await promise;
+
+      expect(result).toBe("sent");
+      expect(pm.property.findUnique).toHaveBeenCalledTimes(2); // attempt2でさらに1回(合計2=試行数と一致)
+      for (const call of pm.property.findUnique.mock.calls) {
+        expect(call[0]).toEqual({ where: { id: PROPERTY_ID }, select: { createdBy: true, assignedTo: true } });
+      }
+    },
+  );
+
+  it(
+    "(d) 付け替えが起きない再試行(回帰)は従来どおり sent・スコープは毎回同じ値で読み直される",
+    { timeout: 20_000 },
+    async () => {
+      pm.user.findMany.mockResolvedValue([user("u-field", { role: "field_staff" })]);
+      pm.property.findUnique.mockResolvedValue({ createdBy: "u-field", assignedTo: null }); // 両試行とも同じ担当
+      let calls = 0;
+      send.mockImplementation(async () => {
+        calls += 1;
+        return calls === 1 ? { ok: false, code: "ECONNECTION" } : { ok: true };
+      });
+
+      const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(send).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(NOTIFY_RETRY_DELAYS_MS[0]);
+      const result = await promise;
+
+      expect(result).toBe("sent");
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(pm.property.findUnique).toHaveBeenCalledTimes(2);
+      expect(pm.dmInquiry.updateMany).toHaveBeenLastCalledWith({
+        where: { id: INQUIRY_ID, notifyStatus: "sending", notifyClaimedAt: NOW },
+        data: { notifyStatus: "sent", notifyLastError: null, notifyAttempts: { increment: 2 } },
+      });
     },
   );
 });

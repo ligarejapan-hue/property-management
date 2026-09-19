@@ -44,10 +44,32 @@ async function loadFacts(inquiryId: string) {
           campaign: { select: { name: true } },
           variant: { select: { label: true } },
           lpVariant: { select: { label: true } },
-          property: { select: { address: true, propertyType: true, createdBy: true, assignedTo: true } },
+          // ⚠物件の createdBy/assignedTo(現場担当範囲の判定)はここでは取らない。ここで読むのは
+          // メール本文の材料(住所/種別)だけで、担当範囲は試行のたびに loadPropertyScope で
+          // 読み直す(P1修正・下記参照)。propertyId だけはその読み直しの鍵として保持する。
+          propertyId: true,
+          property: { select: { address: true, propertyType: true } },
         },
       },
     },
+  });
+}
+
+// 物件の現在の担当範囲(createdBy/assignedTo)だけを読み直す。P1修正: resolveRecipients は
+// 試行のたびに呼ぶようになったが、渡す物件情報が最初の1回だけ読んだスナップショット
+// (row.draft.property)のままでは、待ち時間(最長10分)の間に現場担当者が付け替えられても
+// 古い担当者のままスコープ判定してしまい、外れた元担当者に個人情報が届いてしまう。そこで
+// この関数だけを試行のたびに呼び、常に「今の」createdBy/assignedTo で絞り込む。
+// ⚠メール本文の材料(住所/種別/申込者情報)は最初の1回の読み込み(loadFacts)のまま変えない
+// (設計どおり=担当範囲の判定だけを新鮮にする)。
+// ⚠物件がすでに読めない(削除済み等)場合は null を返す。呼び出し側は「この試行は誰も適格
+// でない」として扱う(既存の no_recipients 相当の分岐に合流させる。例外にはしない)。
+async function loadPropertyScope(
+  propertyId: string,
+): Promise<{ createdBy: string | null; assignedTo: string | null } | null> {
+  return prisma.property.findUnique({
+    where: { id: propertyId },
+    select: { createdBy: true, assignedTo: true },
   });
 }
 
@@ -56,7 +78,7 @@ async function loadFacts(inquiryId: string) {
 // ⚠checkSaleDmAccessFor は権限/表示の拒否は ok:false で返すが、DB 例外は投げ得る。1人の失敗で
 // 他の宛先まで巻き込まないよう、呼び出し側ごとに try/catch する。
 async function resolveRecipients(
-  property: { createdBy: string | null; assignedTo: string | null },
+  scope: { createdBy: string | null; assignedTo: string | null },
   config: MailSendConfig,
 ): Promise<Recipient[]> {
   const users = await prisma.user.findMany({
@@ -66,7 +88,7 @@ async function resolveRecipients(
   });
   const out: Recipient[] = [];
   for (const u of users) {
-    if (u.role === "field_staff" && property.createdBy !== u.id && property.assignedTo !== u.id) continue;
+    if (u.role === "field_staff" && scope.createdBy !== u.id && scope.assignedTo !== u.id) continue;
     let access;
     try {
       access = await checkSaleDmAccessFor(u.id);
@@ -206,9 +228,13 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
       // P1修正: 宛先の適格性(在籍/通知ON/売却DM閲覧可/field_staffの担当範囲)と詳しさ
       // (full/minimal)は、試行のたびに再解決する。1回目の前に確定させて使い回すと、
       // 待ち時間(最長10分)の間に設定が変わっても古い許可のまま個人情報を送ってしまう。
+      // field_staff の担当範囲(createdBy/assignedTo)も同じ理由で試行のたびに物件から
+      // 読み直す(loadPropertyScope)。物件が読めなければ(削除済み等)この試行は誰も適格で
+      // ないものとして扱う(例外にしない・追加クエリはこの1回だけ)。
       // ⚠succeeded(userId基準)はラウンドをまたいで保持するので、既に成功した宛先は
       // 再解決後の一覧に再び現れても二度と送らない。
-      const recipients = await resolveRecipients(row.draft.property, config);
+      const scope = await loadPropertyScope(row.draft.propertyId);
+      const recipients = scope ? await resolveRecipients(scope, config) : [];
       const toSend = recipients.filter((r) => !succeeded.has(r.userId));
 
       if (toSend.length === 0) {
