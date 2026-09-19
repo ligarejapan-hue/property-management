@@ -48,6 +48,7 @@ import { TransactionInfoDialog } from "./TransactionInfoDialog";
 import { readFooterData } from "@/lib/sales-sheet/footer-band";
 import { safeRandomId } from "@/lib/random-id";
 import { overflowingTableIds } from "./table-overflow";
+import { WritebackNotice } from "./WritebackNotice";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -525,6 +526,9 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
 
   return (
     <div className="flex flex-col h-full bg-neutral-200 dark:bg-zinc-900">
+      {/* ── 物件への保存結果の知らせ(F3 Task6・一度だけ) ─────────────────── */}
+      <WritebackNotice designId={initial.sheetId} />
+
       {/* ── Toolbar — Task H ─────────────────────────────────────────── */}
       <EditorToolbar
         dirty={editorState.dirty}
