@@ -33,30 +33,43 @@ function appendUnique(prev: InquiryRow[] | null, added: InquiryRow[]): InquiryRo
   return [...(prev ?? []), ...added.filter((i) => !existingIds.has(i.id))];
 }
 
+// mode を判別子にした discriminated union(fix round 1・Important #4)。campaign モードでは
+// campaign が必須(省略すると型エラー)、all モードでは campaign を渡せない(渡すと型エラー)。
+// 「campaign を忘れた campaign モード呼び出しが黙って空一覧になる」を型で防ぐ。
+type SaleDmInquiryListProps =
+  | {
+      mode?: "campaign";
+      /** campaign モード必須(宛先名の参照元)。 */
+      campaign: SaleDmCampaign;
+      reloadKey?: number;
+      focusId?: never;
+    }
+  | {
+      mode: "all";
+      campaign?: never;
+      reloadKey?: number;
+      /** `?focus=<inquiryId>` で開いたときに強調・スクロールする対象。 */
+      focusId?: string | null;
+    };
+
 /**
  * 「査定申込」一覧(設計 §2.5・発注者判断 2026-09-18)。
  * mode="campaign"(既定): 従来どおりキャンペーン画面のパネル(campaign.recipients から宛先名を引く)。
+ * 通知の失敗札・再送ボタンも campaign モードに出る(コントローラー裁定2026-09-19: 作成者が
+ * 自分の画面から再送できることが目的で、cross-campaign 専用ではない)。
  * mode="all": 「査定の申込」画面(横断)。キャンペーン作成者に限らず、売却DMを使える人は誰でも見て
  * 対応できる。行に宛先名の代わりにキャンペーン名・所在(町名まで)・種別を出し、通知メールの
- * 送信先が居ない(notifyRecipientCount===0)ときの案内もこちらだけに出す(campaign モードには
- * その項目が無い)。
+ * 送信先が居ない(notifyRecipientCount===0)ときの案内は**こちらだけ**に出す(campaign モードの
+ * 応答には notifyRecipientCount が無い)。
  * 状態で絞らない1本のカーソルで新しい順に読み込み、画面で「対応が必要」(未対応・対応中)と
  * 「対応済み」に振り分ける(@codex P2: 途中で状態が変わっても取りこぼさない)。
  * 読み込んでいない古いページに残りがあるかは counts(状態別の件数)で知らせる。
  */
-export default function SaleDmInquiryList({
-  mode = "campaign",
-  campaign,
-  reloadKey = 0,
-  focusId = null,
-}: {
-  mode?: "campaign" | "all";
-  /** campaign モードのみ必須(宛先名の参照元)。all モードでは使わない。 */
-  campaign?: SaleDmCampaign;
-  reloadKey?: number;
-  /** all モードのみ: `?focus=<inquiryId>` で開いたときに強調・スクロールする対象。 */
-  focusId?: string | null;
-}) {
+export default function SaleDmInquiryList(props: SaleDmInquiryListProps) {
+  const mode = props.mode ?? "campaign";
+  const campaign = props.mode === "all" ? undefined : props.campaign;
+  const reloadKey = props.reloadKey ?? 0;
+  const focusId = props.mode === "all" ? (props.focusId ?? null) : null;
   // 読み込んだ全行(API の順・id で重複なし)
   const [items, setItems] = useState<InquiryRow[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -68,6 +81,9 @@ export default function SaleDmInquiryList({
   const [loadingMore, setLoadingMore] = useState(false);
   // 再送を押した直後の申込 id(「通知を送り直しています」表示・数秒後に自動で外れる)。
   const [resendingIds, setResendingIds] = useState<Set<string>>(new Set());
+  // 再送の失敗(409/404等)を行ごとに持つ(fix round 1・Minor #3: パネル全体のエラー帯ではなく
+  // 該当行に出す)。id をキーにした Record。
+  const [resendErrors, setResendErrors] = useState<Record<string, string>>({});
   // 対応済みは既定で畳む(読み込み済みの行を出し入れするだけ・取得はしない)
   const [showDone, setShowDone] = useState(false);
   // すでに focus 行までスクロールしたか(再読込のたびに繰り返さない)。
@@ -142,8 +158,15 @@ export default function SaleDmInquiryList({
 
   // 通知メールの再送(notifyStatus==="failed" の行のみ・resend route が 409 で弾く)。
   // 成功したら数秒待ってから読み直し、実際の送信結果(sent/失敗)を反映する。
+  // 失敗はパネル全体のエラー帯(setError)ではなく、該当行にだけ出す(resendErrors)。
   const resendNotify = async (id: string) => {
     setResendingIds((prev) => new Set(prev).add(id));
+    setResendErrors((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
     try {
       await resendSaleDmInquiryNotify(id);
       setTimeout(() => {
@@ -160,7 +183,7 @@ export default function SaleDmInquiryList({
         next.delete(id);
         return next;
       });
-      setError(e instanceof Error ? e.message : "再送を開始できませんでした");
+      setResendErrors((prev) => ({ ...prev, [id]: e instanceof Error ? e.message : "再送を開始できませんでした" }));
     }
   };
 
@@ -253,16 +276,22 @@ export default function SaleDmInquiryList({
               <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
                 {resendingIds.has(i.id) ? "通知を送り直しています" : "通知できていません"}
               </span>
-              {!resendingIds.has(i.id) && (
-                <button
-                  type="button"
-                  onClick={() => void resendNotify(i.id)}
-                  className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
-                >
-                  再送
-                </button>
-              )}
+              {/* 送信中もボタンは残す(disabled だけ切り替える)。押した直後にボタンごと消すと、
+                  クリック直後にフォーカスが失われる(fix round 1・Minor #2)。 */}
+              <button
+                type="button"
+                onClick={() => void resendNotify(i.id)}
+                disabled={resendingIds.has(i.id)}
+                className="rounded-md border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                再送
+              </button>
             </div>
+          )}
+          {resendErrors[i.id] && (
+            <p className="mt-1 text-xs text-red-600" role="alert">
+              {resendErrors[i.id]}
+            </p>
           )}
           {i.contactHidden ? (
             <div className="mt-1 text-xs text-gray-700 dark:text-gray-300">
