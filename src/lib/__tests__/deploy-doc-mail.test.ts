@@ -59,6 +59,21 @@ describe("docs/deploy.md: 申込の通知メールの反映手順", () => {
     expect(deploySrc).toContain("パスワード");
     expect(deploySrc).toMatch(/パスワード.*(書かない|入力しない)|書かない.*パスワード/);
   });
+
+  // fix round 1 (Important #2): resolveRecipients (src/lib/sale-dm-letter/inquiry-notify.ts) は
+  // field_staff を担当外の物件で完全に除外する(通知の宛先一覧に入れない)。「最小限の内容が届く」
+  // という誤記載(=実際には何も届かない)に戻らないよう固定する。
+  it("現場担当者は担当外の物件では通知が一切届かないと明記している(最小限が届くという誤りに戻さない)", () => {
+    expect(deploySrc).toContain("現場担当者(field_staff)は、自分が作成または担当している物件の申込についてのみ通知の対象になる");
+    expect(deploySrc).toContain("担当外の物件については、最小限の内容であっても通知が届かない");
+    expect(deploySrc).not.toContain("現場担当者が担当外の物件で受け取る通知には町名までの所在などの最小限だけが載る");
+  });
+
+  // fix round 1 (Minor #3): 通知の成功は画面上のラベルではなく「失敗の帯が出ない」ことでしか
+  // 分からない(「送付済み」という固有の状態ラベルは無い)。
+  it("通知成功を「送付済み」という画面ラベルであるかのように書いていない", () => {
+    expect(deploySrc).not.toContain("全員へ送り終えた申込は「送付済み」");
+  });
 });
 
 describe("public/docs/guide.html: 「査定の申込」画面の説明", () => {
@@ -117,5 +132,36 @@ describe("public/docs/manual.html: 通知の使い方説明", () => {
 
   it("次の段階で追加予定という古い記載が残っていない", () => {
     expect(manualSrc).not.toContain("次の段階で追加予定");
+  });
+});
+
+// fix round 1 (Important #1): 「メール送信設定」はサイドバー「DM」グループにあり(sidebar-model.tsx)、
+// 「システム管理」配下ではない。この2語が同じ説明行に同居していたら誤記載が戻ったサインとする。
+describe("Task 12 fix round 1: 「メール送信設定」の設置場所(サイドバー「DM」グループ)", () => {
+  it("guide.html の説明行は「メール送信設定」を「システム管理」の配下として書いていない", () => {
+    const offending = guideSrc
+      .split("\n")
+      .filter((line) => line.includes("メール送信設定") && line.includes("システム管理"));
+    expect(offending).toEqual([]);
+  });
+
+  it("manual.html の説明行は「メール送信設定」を「システム管理」の配下として書いていない", () => {
+    const offending = manualSrc
+      .split("\n")
+      .filter((line) => line.includes("メール送信設定") && line.includes("システム管理"));
+    expect(offending).toEqual([]);
+  });
+});
+
+// fix round 1 (Important #2): guide.html 側も、現場担当者が担当外の物件では通知そのものを
+// 受け取らない(最小限の内容ですら届かない)ことを明記する。
+describe("Task 12 fix round 1: guide.html の現場担当者の通知範囲", () => {
+  it("担当外の物件では通知そのものが届かないと明記している", () => {
+    expect(guideSrc).toContain("現場担当者は、自分が作成または担当している物件の申込についてのみ通知が届きます");
+    expect(guideSrc).toContain("担当外の物件については、通知そのものが届きません");
+  });
+
+  it("「担当外の物件でも最小限の内容が届く」という誤りに戻っていない", () => {
+    expect(guideSrc).not.toContain("担当外の物件について現場担当者が受け取る通知には、町名までの所在など最小限だけが載ります");
   });
 });
