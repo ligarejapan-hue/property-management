@@ -473,10 +473,9 @@ describe("forceReleaseEditLock", () => {
 });
 
 describe("assertNotEditLockedByOther", () => {
+  // ⚠この窓口は SQL 側で active / force_released を計算して返す(DBの時計が権威)。
   const holder = (over: Record<string, unknown> = {}) => [{
-    id: "l1", user_id: "other", screen_token_hash: "h-other",
-    acquired_at: new Date(), heartbeat_at: new Date(), activity_at: new Date(),
-    force_released_at: null, ...over,
+    user_id: "other", screen_token_hash: "h-other", force_released: false, active: true, ...over,
   }];
 
   it("他人が持っていれば 423 EDIT_LOCKED", async () => {
@@ -484,8 +483,15 @@ describe("assertNotEditLockedByOther", () => {
     await expect(assertNotEditLockedByOther(db, BASE)).rejects.toMatchObject({ status: 423, code: "EDIT_LOCKED" });
   });
   it("自分の墓標なら 423 EDIT_LOCK_FORCE_RELEASED", async () => {
-    const { db } = fakeDb(holder({ user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash, force_released_at: new Date() }));
+    const { db } = fakeDb(holder({ user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash, force_released: true, active: false }));
     await expect(assertNotEditLockedByOther(db, BASE)).rejects.toMatchObject({ status: 423, code: "EDIT_LOCK_FORCE_RELEASED" });
+  });
+  it("期限の判定はDBの now() で行う(SQL側で active を計算する)", async () => {
+    const { db, queryRaw } = fakeDb([]);
+    await assertNotEditLockedByOther(db, BASE);
+    const sql = sqlOf(queryRaw.mock.calls[0]);
+    expect(sql).toMatch(/AS active/);
+    expect(sql).toMatch(/now\(\) - make_interval/);
   });
   it("自分の鍵なら通す", async () => {
     const { db } = fakeDb(holder({ user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash }));
@@ -685,16 +691,27 @@ export async function assertNotEditLockedByOther(
   db: Db,
   input: Target & { userId: string; screenTokenHash: string | null },
 ): Promise<void> {
-  const lock = await readOne(db, input);
-  if (!lock) return;
-  const state = evaluateLock(lock, new Date(), {
-    userId: input.userId,
-    screenTokenHash: input.screenTokenHash ?? "",
-  });
+  // ⚠期限の判定は **DB の now()** で行う(@codex R6 P2)。取得・合図が DB 時計を権威に
+  //   しているのに、ここだけアプリの時計で判定すると、5分の境目で食い違って
+  //   「生きている鍵を期限切れとみなして書き込む」ことが起きる。
+  const rows = await db.$queryRaw<{ user_id: string; screen_token_hash: string; force_released: boolean; active: boolean }[]>`
+    SELECT "user_id", "screen_token_hash",
+           ("force_released_at" IS NOT NULL) AS force_released,
+           ("force_released_at" IS NULL
+            AND "heartbeat_at" >= now() - make_interval(secs => ${GRACE_SEC})
+            AND "activity_at" >= now() - make_interval(secs => ${IDLE_SEC})) AS active
+    FROM "edit_locks"
+    WHERE "resource_type" = ${input.resourceType}::"EditLockResource" AND "resource_id" = ${input.resourceId}::uuid
+  `;
+  const row = rows[0];
+  if (!row) return;
+  const sameHolder =
+    row.user_id === input.userId && row.screen_token_hash === (input.screenTokenHash ?? "");
+  const state = { state: row.force_released && sameHolder ? "force_released_mine" : !row.active ? "free" : sameHolder ? "mine" : "held" } as const;
   if (state.state === "force_released_mine") {
     throw new ApiError(423, "管理者が編集を終了しました。この内容は保存できません", "EDIT_LOCK_FORCE_RELEASED");
   }
-  if (state.state === "held_by_other" || state.state === "held_by_self_other_screen") {
+  if (state.state === "held") {
     const suffix = input.screenTokenHash ? "" : "。画面を再読み込みしてください";
     throw new ApiError(423, `他の画面で編集中です${suffix}`, "EDIT_LOCKED");
   }
@@ -922,8 +939,10 @@ git commit -m "feat(edit-lock): 合言葉の読み取りと鍵の権限判定"
 **共通の前処理(各 route で同じ):**
 1. `getApiSession()` → `getUserPermissions(session.id)`
 2. 本文を zod で検証(`resourceType` は `"property" | "owner"`、`resourceId` は uuid)
-3. 資源の存在と権限: 物件は `prisma.property.findUnique({ select: { createdBy, assignedTo } })` → `assertCanLockProperty`、所有者は `prisma.owner.findUnique({ select: { id, isArchived } })` → `assertCanLockOwner`(アーカイブ済みは 404)
-4. `readScreenTokenHash(request)`(`release` は本文の `screenToken` も可)
+3. `readScreenTokenHash(request)`(`release` は本文の `screenToken` も可)
+4. ⚠**資源の存在・アーカイブ・担当範囲の確認は、トランザクションの中で資源の行をロックした後に行う**(@codex R6 P2)。
+   ロックの前に確認すると、その隙間に所有者がアーカイブされた(アーカイブ側は鍵の後始末を済ませている)・担当が外れた、という場合に
+   **消えた資源へ孤児の鍵を作る/担当外の物件の鍵を取れる**。読み直しは `tx.property.findUnique` / `tx.owner.findUnique` を使う。
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -1103,28 +1122,25 @@ export async function POST(request: Request) {
       throw new ApiError(400, "画面の識別子がありません。画面を再読み込みしてください", "EDIT_SCREEN_REQUIRED");
     }
 
-    if (resourceType === "property") {
-      const property = await prisma.property.findUnique({
-        where: { id: resourceId },
-        select: { createdBy: true, assignedTo: true },
-      });
-      if (!property) throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
-      assertCanLockProperty(session, perms, property);
-    } else {
-      const owner = await prisma.owner.findUnique({
-        where: { id: resourceId },
-        select: { id: true, isArchived: true },
-      });
-      if (!owner || owner.isArchived) throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
-      assertCanLockOwner(perms);
-    }
-
     const result = await prisma.$transaction(async (tx) => {
       // ロック順序: 所有者 → 物件の親行(既存規約)。保存・管理者解除と同じ順序で直列化する。
+      // ⚠存在・アーカイブ・担当範囲の確認は**ロックの後**に行う(@codex R6 P2)。
       if (resourceType === "property") {
         await lockPropertyRow(tx, resourceId);
+        const property = await tx.property.findUnique({
+          where: { id: resourceId },
+          select: { createdBy: true, assignedTo: true },
+        });
+        if (!property) throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+        assertCanLockProperty(session, perms, property);
       } else {
         await tx.$queryRaw`SELECT id FROM owners WHERE id = ${resourceId}::uuid FOR UPDATE`;
+        const owner = await tx.owner.findUnique({
+          where: { id: resourceId },
+          select: { id: true, isArchived: true },
+        });
+        if (!owner || owner.isArchived) throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
+        assertCanLockOwner(perms);
       }
       return acquireEditLock(tx, { resourceType, resourceId, userId: session.id, screenTokenHash });
     });
@@ -1281,12 +1297,23 @@ const patch = (body: unknown, token: string | null = "screen-1") =>
   );
 
 describe("PATCH /api/properties/[id] と編集中の鍵", () => {
-  it("鍵の確認は資源の行をロックしたトランザクションの中で、書き込みより前に呼ばれる", async () => {
+  // ⚠「呼ばれたこと」だけを見るテストでは、トランザクションの外で呼んでも
+  //   書き込みの後に呼んでも通ってしまう(@codex R6 P2)。**順序そのもの**を記録して検査する。
+  it("トランザクション開始 → 行ロック → 鍵の確認 → 条件つき更新 の順で呼ばれる", async () => {
+    const order: string[] = [];
+    (prisma.$transaction as unknown as Mock).mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      order.push("tx");
+      return fn({
+        property: { updateMany: vi.fn(async () => { order.push("update"); return { count: 1 }; }) },
+        $queryRaw: vi.fn(async () => []),
+      });
+    });
+    (lockPropertyRow as unknown as Mock).mockImplementation(async () => { order.push("lock"); });
+    (assertNotEditLockedByOther as unknown as Mock).mockImplementation(async () => { order.push("assert"); });
+
     await patch({ version: 1, note: "x" });
-    expect(assertNotEditLockedByOther).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ resourceType: "property", resourceId: PROP }),
-    );
+
+    expect(order).toEqual(["tx", "lock", "assert", "update"]);
   });
 
   it("鍵が他人のものなら 423 を返し、版番号の更新は走らない", async () => {
@@ -1369,7 +1396,10 @@ git commit -m "feat(edit-lock): 保存の窓口3本で他人の鍵を断る"
 - Produces: `processRegistryPdf` の戻り値に `propertyFillSkippedByEditLock: boolean` と `ownerCorporateFillSkippedByEditLock: boolean`
 
 **変更の要点:**
-1. 物件の空欄補完(`realEstateNumber`/`lotNumber`/`buildingNumber`)の直前で、物件の行をロックしたトランザクション内で**鍵が誰かにあるか**を見る。あれば補完を書かずにフラグを立てる。
+1. 物件の空欄補完(`realEstateNumber`/`lotNumber`/`buildingNumber`)の直前で、物件の行をロックしたトランザクション内で**鍵が誰かにあるか**を見る。あれば**その3項目だけ**書かずにフラグを立てる。
+   ⚠**`registryStatus` の `unconfirmed` → `obtained` は鍵の間も必ず進める**(@codex R6 P1)。現在の実装はこの状態変更を空欄補完と同じ1回の `updateMany` にまとめているため、まるごと見送ると**PDFが付いているのに未確認のまま残る**。
+   - したがって更新を2つに分ける: (a) 取得状況(常に実行・版番号を進める) (b) 3項目の補完(鍵が無いときだけ)。両方あるときは**1回の updateMany にまとめてよい**(鍵が無い場合)。
+   - ⚠取得状況は編集ウィンドウでも変えられる項目なので、鍵の間に進めると**鍵を持つ人の保存が既存の409になることがある**。入力は画面に残り、やり直せば通る。**記録が誤ったまま残るより軽い害**として、この1項目だけ D10 の例外とする。
 2. 所有者の法人番号の補完(`reflectParsedOwners` の2か所)も同じ。**補完するときは `version: { increment: 1 }` を必ず付ける**(今は付いていない=編集画面の古い内容で黙って消える)。
 3. 監査の detail に2つのフラグを載せ、`ACTION_EXTRA_KEYS.registry_auto_fetch` に許可を足す。
 
@@ -1401,6 +1431,8 @@ describe("取込と編集中の鍵", () => {
     // property.updateMany が呼ばれないこと、
     // 戻り値の propertyFillSkippedByEditLock が true であることを検査する。
     // ⚠PDFの保存と所有者の紐付けは従来どおり実行されること(呼ばれた回数で確認)。
+    // ⚠**取得状況は鍵があっても obtained に進むこと**(updateMany の data に registryStatus が入り、
+    //   realEstateNumber/lotNumber/buildingNumber が入らないことを1回の呼び出しで確認)(@codex R6 P1)。
   });
 
   it("所有者に鍵があれば法人番号を埋めず、フラグを立てる", async () => {
@@ -1428,7 +1460,24 @@ const locks = await readEditLocks(prisma, [{ resourceType: "property", resourceI
 const propertyLocked = locks.some((l) => !l.forceReleasedAt && !isLockExpired(l, new Date()));
 ```
 
-- 補完の実行を `if (!propertyLocked)` で包み、そうでなければ `propertyFillSkippedByEditLock = true`。
+- **取得状況の更新は `propertyLocked` に関わらず実行**し、3項目の補完だけ `if (!propertyLocked)` で包む。見送ったときは `propertyFillSkippedByEditLock = true`。
+  例(既存の `updates` の組み立てを2つに分ける):
+
+```ts
+const statusUpdates: Record<string, unknown> = {};
+if (existing.registryStatus === "unconfirmed" && parsed.realEstateNumber) {
+  statusUpdates.registryStatus = "obtained"; // 鍵があっても進める(R6 P1)
+}
+const fieldUpdates: Record<string, unknown> = {};
+if (!propertyLocked) {
+  if (!existing.realEstateNumber && parsed.realEstateNumber) fieldUpdates.realEstateNumber = parsed.realEstateNumber;
+  if (!existing.lotNumber && parsed.lotNumber) fieldUpdates.lotNumber = parsed.lotNumber;
+  if (!existing.buildingNumber && parsed.buildingNumber) fieldUpdates.buildingNumber = parsed.buildingNumber;
+} else if (parsed.realEstateNumber || parsed.lotNumber || parsed.buildingNumber) {
+  propertyFillSkippedByEditLock = true;
+}
+const updates = { ...statusUpdates, ...fieldUpdates };
+```
 - 法人番号の2か所も同様に、対象の所有者IDで `readEditLocks` を引き、`updateMany` の `data` に `version: { increment: 1 }` を足す。
 - 監査の detail に2つのフラグを足し、`ACTION_EXTRA_KEYS` に:
 
@@ -1585,7 +1634,9 @@ grep -rn "property\.update\|property\.updateMany\|owner\.update\|owner\.updateMa
 wc -l /tmp/writes.txt
 ```
 
-1件ずつ開き、次の表を `docs/superpowers/plans/2026-09-18-edit-lock-version-inventory.md` に作る。
+1件ずつ開き、**その呼び出しの引数そのもの**(近くの行ではなく、その `data:` の中身)を読んで、次の表を
+`docs/superpowers/plans/2026-09-18-edit-lock-version-inventory.md` に作る。同じ内容を走査テストの `VERSIONED` /
+`ALLOWED_WITHOUT_VERSION` にも写す(テストは「検出した箇所が1件残らず一覧にあるか」だけを機械的に見る)。
 
 | ファイル:行 | 書く項目 | 版番号 | 判定 |
 |---|---|---|---|
@@ -1608,30 +1659,45 @@ import { execSync } from "node:child_process";
  * 進めない経路は、編集画面で変えられない項目だけを書くものに限り、ここに理由つきで載せる。
  * ⚠新しい書き込みを足したら、版番号を進めるか、この一覧に理由つきで足すかのどちらか。
  */
+/** 版番号を進める書き込み(人が編集できる項目を書く)。値は「何を書くか」の説明。 */
+const VERSIONED: Record<string, string> = {
+  // 例: "src/app/api/properties/[id]/route.ts:352": "編集ウィンドウの保存",
+};
+
+/** 版番号を進めない書き込み。**編集画面で変えられない項目だけ**を書くものに限る。値は理由。 */
 const ALLOWED_WITHOUT_VERSION: Record<string, string> = {
   // 例: "src/lib/dm/undeliverable.ts:42": "宛先不明フラグのみ。編集画面の項目ではない",
 };
 
+/**
+ * 検出は**広めに**取る(@codex R6 P2)。Prisma の呼び方だけでなく、生SQLの UPDATE も拾う。
+ * 検出した箇所は**1件残らず**一覧(下の INVENTORY)に載っていること、が合格条件。
+ * 「近くに increment があるか」では、別の更新の increment を誤って自分のものと数えるため使わない。
+ */
 function writeSites(): string[] {
-  const out = execSync(
-    `grep -rn "property\.update\|property\.updateMany\|owner\.update\|owner\.updateMany" src --include=*.ts`,
-    { encoding: "utf8" },
-  );
-  return out.split(/\r?\n/).filter((l) => l && !l.includes("__tests__"));
+  const pattern = [
+    "(property|owner)\\.(update|updateMany|upsert)\\(",
+    'UPDATE "?(properties|owners)"?',
+  ].join("|");
+  const out = execSync(`grep -rnE '${pattern}' src --include=*.ts`, { encoding: "utf8" });
+  return out
+    .split(/\r?\n/)
+    .filter((l) => l && !l.includes("__tests__"))
+    .map((l) => l.split(":").slice(0, 2).join(":"));
 }
 
 describe("版番号の走査", () => {
-  it("版番号を進めない書き込みは、許可リストに載っているものだけ", () => {
-    const offenders: string[] = [];
-    for (const line of writeSites()) {
-      const [file, lineNo] = line.split(":");
-      const key = `${file}:${lineNo}`;
-      if (key in ALLOWED_WITHOUT_VERSION) continue;
-      // 同じ文の中に version の増分があるかを、前後12行の窓で見る。
-      const src = execSync(`sed -n '${Math.max(1, Number(lineNo))},${Number(lineNo) + 12}p' "${file}"`, { encoding: "utf8" });
-      if (!/version:\s*\{\s*increment:\s*1\s*\}/.test(src)) offenders.push(key);
-    }
-    expect(offenders).toEqual([]);
+  it("物件・所有者を書き換える箇所は、1件残らず一覧に載っている", () => {
+    const known = new Set([...Object.keys(VERSIONED), ...Object.keys(ALLOWED_WITHOUT_VERSION)]);
+    const unknown = writeSites().filter((k) => !known.has(k));
+    // 新しい書き込みを足したら、この一覧にも足す(版番号を進めるか、理由つきで除外するか)。
+    expect(unknown).toEqual([]);
+  });
+
+  it("一覧に載っている行は、今もその場所に存在する(行のずれを検出する)", () => {
+    const sites = new Set(writeSites());
+    const stale = [...Object.keys(VERSIONED), ...Object.keys(ALLOWED_WITHOUT_VERSION)].filter((k) => !sites.has(k));
+    expect(stale).toEqual([]);
   });
 });
 ```
@@ -1661,7 +1727,10 @@ git commit -m "test(edit-lock): 版番号を進めない書き込みが無いこ
 - [ ] 9タスクすべてコミット済み
 - [ ] `npx vitest run` 全緑・`tsc --noEmit` 0・`eslint` 0・`npm run build` 成功
 - [ ] 実DBでの同時取得の確認の出力をPRに貼った
-- [ ] **画面はまだ鍵を取らない**(この時点で本番に出しても挙動は変わらない)ことを、`src/app`(dashboard 配下)に `acquire` を呼ぶコードが無いことで確認
+- [ ] **画面はまだ鍵を取らない**ことを、`src/app`(dashboard 配下)に `acquire` を呼ぶコードが無いことで確認
+- [ ] ⚠**「挙動はまったく変わらない」とは言わない**(@codex R6 P2)。第1段で実際に変わるのは次の2点。発注者への説明と実機確認に含める。
+  1. **謄本PDF取込・謄本の自動取得が、所有者の法人番号を埋めるときに版番号を進める**ようになる。取込の前から所有者の編集画面を開いていた人の保存が、これまで(黙って上書き)から**409(先に更新されています)**に変わる。これは修正であって退行ではない
+  2. **鍵の窓口は動いている**ので、画面を介さず窓口を直接呼べば鍵を作れる。その状態では保存が423になりうる。通常の利用では起こらないが、「鍵は1本も生まれない」と断言はしない
 - [ ] PR を作成し、`@codex review` の指摘に対応
 
 ## この計画に含めないもの(第2段)
