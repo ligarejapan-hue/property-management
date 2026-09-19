@@ -24,6 +24,7 @@ import {
   Mail,
   MailX,
   Image as ImageIcon,
+  Inbox,
 } from "lucide-react";
 import { canSee, type AppRole } from "@/lib/nav/roles";
 
@@ -108,7 +109,17 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       // 入口ページ(案B)。宛名CSVや売却DMの作成は従来どおり物件一覧にあり、
       // ここはそこへの分かりやすい入口を足すもの。
       { label: "DMメニュー", href: "/dm", icon: ic(Mail), minRole: "office_staff" },
+      // 公開LPから届いた査定申込の横断一覧(発注者判断 2026-09-18: キャンペーン作成者に
+      // 限らず、売却DMを使える人は誰でも見て対応できる)。通知メールのリンク先。
+      // ⚠minRole は field_staff(whole-branch review Minor #4): 通知メールは自分が作成/担当
+      // する物件の申込について field_staff にも届く(inquiry-notify.ts resolveRecipients)が、
+      // その担当者はメールのリンクからしかこの画面に到達できなかった(サイドバーに出ない=
+      // 一覧から他の申込へ気付けない)。認可自体は route 側(field_staff は担当範囲のみ)の
+      // ままなので、メニューに出すだけでは見える範囲は広がらない。
+      { label: "査定の申込", href: "/properties/sale-dm/inquiries", icon: ic(Inbox), minRole: "field_staff" },
       { label: "売却DM設定", href: "/admin/sale-dm-settings", icon: ic(Mail), minRole: "admin" },
+      // 査定申込の通知メールを送る Xserver メールボックスの設定(2026-09 新設)。
+      { label: "メール送信設定", href: "/admin/mail-settings", icon: ic(Mail), minRole: "admin" },
       { label: "LPの写真", href: "/admin/lp-assets", icon: ic(ImageIcon), minRole: "admin" },
       // ⚠「データ品質」から移動(DM の道具がそこに紛れていた)。
       { label: "送付記録の訂正", href: "/admin/orphan-dm-logs", icon: ic(MailX), minRole: "admin" },

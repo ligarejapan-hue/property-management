@@ -6,6 +6,7 @@ vi.mock("@/lib/prisma", () => ({
   default: { dmRecipientDraft: { findUnique: vi.fn() } },
 }));
 vi.mock("@/lib/sale-dm-letter/inquiry-record", () => ({ recordInquiry: vi.fn() }));
+vi.mock("@/lib/sale-dm-letter/inquiry-notify", () => ({ startInquiryNotify: vi.fn() }));
 vi.mock("@/lib/sale-dm-letter/config-store", () => ({
   loadSaleDmPublicPageConfig: vi.fn(),
   loadSaleDmLpUrl: vi.fn(),
@@ -13,12 +14,14 @@ vi.mock("@/lib/sale-dm-letter/config-store", () => ({
 
 import { POST } from "@/app/t/[token]/inquiry/route";
 import { recordInquiry } from "@/lib/sale-dm-letter/inquiry-record";
+import { startInquiryNotify } from "@/lib/sale-dm-letter/inquiry-notify";
 import { writeAuditLog } from "@/lib/audit";
 import prisma from "@/lib/prisma";
 import { loadSaleDmLpUrl, loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 import { HONEYPOT_FIELD } from "@/lib/sale-dm-letter/inquiry-input";
 
 const rec = recordInquiry as unknown as ReturnType<typeof vi.fn>;
+const notify = startInquiryNotify as unknown as ReturnType<typeof vi.fn>;
 const findUnique = (
   prisma as unknown as {
     dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn> };
@@ -76,12 +79,29 @@ describe("POST /t/[token]/inquiry", () => {
     expect(audit).toMatchObject({ action: "sale_dm_inquiry_submit", targetTable: "dm_recipient_drafts", targetId: "d1" });
     expect(Object.keys(audit.detail).sort()).toEqual(["at", "first"]);
     expect(JSON.stringify(audit)).not.toMatch(/山田|090/);
+    // 通知は監査の後に1回だけ起動する(待たない=応答はここまでに返っている)。
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith("inq1");
+    const auditOrder = (writeAuditLog as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    const notifyOrder = notify.mock.invocationCallOrder[0];
+    expect(notifyOrder).toBeGreaterThan(auditOrder);
+  });
+
+  it("startInquiryNotify が throw しても応答は変わらない(200・記録済み扱い)", async () => {
+    notify.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    const res = await call(VALID);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("受け付けました");
+    expect(notify).toHaveBeenCalledTimes(1);
   });
 
   it("よそのサイトからは 403(記録しない)", async () => {
     const res = await call(VALID, { origin: "https://evil.example" });
     expect(res.status).toBe(403);
     expect(rec).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("Origin: null(実ブラウザ)は通す", async () => {
@@ -95,6 +115,7 @@ describe("POST /t/[token]/inquiry", () => {
     expect(await res.text()).toContain("受け付けました");
     expect(rec).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("入力不備は 422。文言と戻り先(#inquiry)を出し、入力値は送り返さない", async () => {
@@ -106,6 +127,7 @@ describe("POST /t/[token]/inquiry", () => {
     expect(html).toContain('href="/t/tok_back#inquiry"');
     expect(html).not.toContain("山田");
     expect(rec).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("送付前は 409 プレビュー中ページ", async () => {
@@ -114,6 +136,7 @@ describe("POST /t/[token]/inquiry", () => {
     expect(res.status).toBe(409);
     expect(await res.text()).toContain("まだお申し込みを受け付けていません");
     expect(writeAuditLog).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("未知 token は 404(記録・監査なし)", async () => {
@@ -121,6 +144,7 @@ describe("POST /t/[token]/inquiry", () => {
     const res = await call(VALID);
     expect(res.status).toBe(404);
     expect(writeAuditLog).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("記録がロック下の再読取で no_form(LP型が描画不能)を返したら 404(監査なし)", async () => {
@@ -142,6 +166,7 @@ describe("POST /t/[token]/inquiry", () => {
       expect(Object.keys(logged[1] as object).sort()).toEqual(["code", "name"]);
       expect(logged[1]).toEqual({ name: "Error", code: "P2034" });
       expect(JSON.stringify(spy.mock.calls)).not.toMatch(/lock timeout|山田|090/);
+      expect(notify).not.toHaveBeenCalled();
     } finally {
       spy.mockRestore();
     }
@@ -149,9 +174,11 @@ describe("POST /t/[token]/inquiry", () => {
 
   it("同じ token は1時間に5回まで(6回目は 429・記録しない)", async () => {
     for (let i = 0; i < 5; i += 1) expect((await call(VALID, {}, "tok_limit")).status).toBe(200);
+    notify.mockClear();
     const res = await call(VALID, {}, "tok_limit");
     expect(res.status).toBe(429);
     expect(rec).toHaveBeenCalledTimes(5);
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("同じ端末IPは1分に10回まで(11回目は 429)", async () => {

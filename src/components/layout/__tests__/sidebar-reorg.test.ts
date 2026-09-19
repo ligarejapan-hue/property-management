@@ -180,10 +180,30 @@ describe("DM グループ(新設)", () => {
   it("入口ページを先頭に、送る流れの順で並ぶ", () => {
     expect(group("dm")?.items.map((i) => i.href)).toEqual([
       "/dm",
+      "/properties/sale-dm/inquiries",
       "/admin/sale-dm-settings",
+      "/admin/mail-settings",
       "/admin/lp-assets",
       "/admin/orphan-dm-logs",
     ]);
+  });
+});
+
+describe("「査定の申込」画面への入口(発注者判断 2026-09-18・fix wave で minRole を field_staff に修正)", () => {
+  it("DMメニューの直後に field_staff で置く(通知メールは field_staff にも届くため・whole-branch review Minor #4)", () => {
+    expect(byHref("/properties/sale-dm/inquiries")?.label).toBe("査定の申込");
+    expect(byHref("/properties/sale-dm/inquiries")?.minRole).toBe("field_staff");
+  });
+
+  it("物件一覧の現在地ハイライトと衝突しない(既存の PROPERTIES_NON_LIST 判定を利用)", () => {
+    // /properties/sale-dm を含む道は「物件一覧」ではないので、このページを開いても
+    // /properties の項目は光らない。
+    expect(
+      isNavItemActive("/properties", "/properties/sale-dm/inquiries"),
+    ).toBe(false);
+    expect(
+      isNavItemActive("/properties/sale-dm/inquiries", "/properties/sale-dm/inquiries"),
+    ).toBe(true);
   });
 });
 
@@ -281,15 +301,16 @@ describe("謄本取得の資格情報は廃止", () => {
 });
 
 describe("⚠変えないもの", () => {
-  it("スマホの現場スタッフに出るメニューは従来どおり", () => {
-    // 現地調査3項目 + 資料3項目 + ホーム。増やさない/減らさない。
+  it("スマホの現場スタッフに出るメニューは、「査定の申込」が1件増える以外は従来どおり(fix wave Minor #4)", () => {
+    // 現地調査3項目 + 資料3項目 + ホーム + 査定の申込(通知メールのリンク先を自分でも開けるように)。
     const staff = visibleSidebar("field_staff");
-    expect(staff.map((g) => g.key)).toEqual(["home", "field", "doc"]);
+    expect(staff.map((g) => g.key)).toEqual(["home", "field", "dm", "doc"]);
     expect(staff.flatMap((g) => g.items).map((i) => i.href)).toEqual([
       "/home",
       "/field-survey/map",
       "/field-survey/sessions",
       "/field-survey/candidates",
+      "/properties/sale-dm/inquiries",
       "/docs/guide.html",
       "/docs/manual.html",
       "/help",

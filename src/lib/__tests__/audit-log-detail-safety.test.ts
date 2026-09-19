@@ -746,6 +746,17 @@ describe("sanitizeAuditDetail: 設定更新監査の target/changed を保持(@c
     expect(out.nameJa).toBe(REDACTED);
     expect(out.tel).toBe(REDACTED);
   });
+
+  it("mail_settings_test は result/code(許可リスト一致のSMTPコード)を保持・生メッセージ混入は [REDACTED]", () => {
+    const out = sanitizeAuditDetail("mail_settings_test", {
+      result: "failed",
+      code: "EAUTH",
+      message: "Invalid login: 535 5.7.8",
+    }) as Record<string, unknown>;
+    expect(out.result).toBe("failed");
+    expect(out.code).toBe("EAUTH");
+    expect(out.message).toBe(REDACTED);
+  });
 });
 
 describe("sanitizeAuditDetail: 法人番号復元(corporate-restore)の action 固有キー", () => {

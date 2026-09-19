@@ -6,6 +6,7 @@ import { clientRateKey, createRateLimiter } from "@/lib/public-rate-limit";
 import { isCrossSiteOrigin } from "@/lib/public-origin";
 import { parseInquiryForm, INQUIRY_ERROR_MESSAGES } from "@/lib/sale-dm-letter/inquiry-input";
 import { recordInquiry, type InquiryClientLike } from "@/lib/sale-dm-letter/inquiry-record";
+import { startInquiryNotify } from "@/lib/sale-dm-letter/inquiry-notify";
 import { hasRenderableLpVariant } from "@/lib/sale-dm-letter/lp-render-input";
 import { PUBLIC_PAGE_HEADERS } from "@/lib/sale-dm-letter/unsubscribe-page";
 import { loadSaleDmLpUrl, loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
@@ -267,5 +268,11 @@ export async function POST(
     targetId: result.draftId,
     detail: { first: result.first, at: new Date().toISOString() },
   });
+  // 通知メールは記録の後に起動するだけ(待たない)。失敗しても申込者への応答は変えない(設計 §2.6)。
+  try {
+    startInquiryNotify(result.inquiryId);
+  } catch {
+    // startInquiryNotify は throw しない設計。念のため応答を守る。
+  }
   return reply("done", 200);
 }
