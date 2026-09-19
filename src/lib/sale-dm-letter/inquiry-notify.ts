@@ -86,6 +86,10 @@ async function resolveRecipients(
 // 更新する。他ワーカーが既に取り直していれば(=期限切れで再取り合いされた)0件更新になり、
 // false を返す。⚠終端書き込みも同じ保有チェックを通す(Important 2):古いワーカーの
 // finish が新しいワーカーの状態を上書きして行を再び claimable に戻す事故を防ぐ。
+// ⚠書き込み自体は成功したのに、その応答(Promise)だけが通信断で失敗することもあり得る。
+// その場合このワーカーが持つ claimedAt は実際の DB の値より古くなり、以後の refreshClaim/
+// finish はすべて 0 件更新(保有喪失)として扱われる。行は "sending" のまま残るが、
+// 15分の保有期限が来れば他ワーカーが取り直せる=自己修復するので、ここでは何もしない。
 async function refreshClaim(inquiryId: string, claimedAt: Date, nextClaimedAt: Date): Promise<boolean> {
   const r = await prisma.dmInquiry.updateMany({
     where: { id: inquiryId, notifyStatus: "sending", notifyClaimedAt: claimedAt },
@@ -183,11 +187,23 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
 
     for (let i = 0; i <= NOTIFY_RETRY_DELAYS_MS.length; i += 1) {
       if (i > 0) {
+        // ⚠sleep に入る直前にも保有チェック付きで更新する(寝る前の refresh)。宛先ループ内の
+        // 更新は「前回更新から1/3経過」でしか起きないため、直前の更新が最大5分前・そこから
+        // 最後の送信(~35秒)を挟んで最長10分の sleep に入ると、寝ている間に合計で15分の保有
+        // 期限を超えて他ワーカーに奪われ得る(寝た後の更新だけでは検知が遅すぎる)。寝る直前に
+        // 一度フレッシュな時刻で更新しておけば、次に危険なのは「sleep の長さ+送信1件分」で
+        // 収まり、最長10分の sleep でも15分の期限内に収まる。
+        const preSleep = now();
+        if (!(await refreshClaim(inquiryId, claimedAt, preSleep))) return "skipped";
+        claimedAt = preSleep;
+        lastRefreshMs = preSleep.getTime();
+
         await sleep(NOTIFY_RETRY_DELAYS_MS[i - 1]);
-        const next = now();
-        if (!(await refreshClaim(inquiryId, claimedAt, next))) return "skipped";
-        claimedAt = next;
-        lastRefreshMs = next.getTime();
+
+        const postSleep = now();
+        if (!(await refreshClaim(inquiryId, claimedAt, postSleep))) return "skipped";
+        claimedAt = postSleep;
+        lastRefreshMs = postSleep.getTime();
       }
       attempts += 1;
       for (const r of recipients) {

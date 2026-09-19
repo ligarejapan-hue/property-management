@@ -496,6 +496,81 @@ describe("notifyInquiry: 取り合いキーの保有(controller ruling 送信中
   });
 });
 
+describe("notifyInquiry: sleep直前の保有チェック(fix round 2 — Important再発防止)", () => {
+  // 寝る前の refresh がないと、宛先ループ内の最後の更新(最大5分前)+送信(~35秒)+最長10分の
+  // sleep が合計15分の保有期限を超え、寝ている間に他ワーカーへ正規に奪われ得る。このワーカーは
+  // 目覚めた後に保有喪失を検知して何も書かない(安全側)が、既に送った宛先は新しいワーカーから
+  // 二重に届いてしまう。寝る直前にもフレッシュな時刻で更新しておけば、最長でも
+  // 「sleep の長さ(最大10分)+送信1件分」で15分以内に収まる。
+  it(
+    "sleepに入る直前にも保有チェック付きで更新する(タイマーを一切進めていない時点で既に記録される=寝る前のrefreshの直接証拠)",
+    { timeout: 20_000 },
+    async () => {
+      pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+      let bCalls = 0;
+      send.mockImplementation(async (_config, mail: { to: string }) => {
+        if (mail.to === "u-b@example.com") {
+          bCalls += 1;
+          return bCalls === 1 ? { ok: false, code: "ECONNECTION" } : { ok: true };
+        }
+        return { ok: true };
+      });
+
+      const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(send).toHaveBeenCalledTimes(2); // attempt1: A,B(Bは失敗)
+
+      // ここではまだフェイクタイマーを1msも進めていない(=sleep(30秒)はまだ始まったばかりの
+      // はず)。それでも既に保有チェック付きの更新(寝る前のrefresh)が1件記録されているはず。
+      // これを削除すると、この時点では refresh が0件のまま失敗する。
+      const preSleepRefreshes = pm.dmInquiry.updateMany.mock.calls.filter(
+        ([arg]) => "notifyClaimedAt" in arg.data && !("notifyStatus" in arg.data),
+      );
+      expect(preSleepRefreshes).toHaveLength(1);
+      expect(preSleepRefreshes[0][0]).toEqual({
+        where: { id: INQUIRY_ID, notifyStatus: "sending", notifyClaimedAt: NOW },
+        data: { notifyClaimedAt: NOW },
+      });
+      // 寝る前に更新しただけで、まだ次ラウンドの送信(sleep明け)は起きていない=順序の証拠。
+      expect(send).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(NOTIFY_RETRY_DELAYS_MS[0]);
+      const result = await promise;
+
+      expect(result).toBe("sent");
+      expect(send).toHaveBeenCalledTimes(3); // attempt2: sleep明けにBへ届く
+
+      // sleep明けの更新(寝た後のrefresh)も別に記録されている=寝る前・寝た後の両方で更新。
+      const allRefreshes = pm.dmInquiry.updateMany.mock.calls.filter(
+        ([arg]) => "notifyClaimedAt" in arg.data && !("notifyStatus" in arg.data),
+      );
+      expect(allRefreshes.length).toBeGreaterThanOrEqual(2);
+    },
+  );
+
+  it("sleep直前の保有チェックで既に奪われていたら、寝る前に止めて以降の送信も終端書き込みもしない", async () => {
+    pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+    send.mockImplementation(async (_config, mail: { to: string }) =>
+      mail.to === "u-b@example.com" ? { ok: false, code: "ECONNECTION" } : { ok: true },
+    );
+    // 1回目=初回claim(count1), 2回目=sleep直前のrefresh(count0=既に奪われている)
+    pm.dmInquiry.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+
+    const result = await notifyInquiry(INQUIRY_ID, { now: nowFn });
+
+    expect(result).toBe("skipped");
+    // 1回目のA,Bだけ送っていて、sleep前の保有チェックで止まったので2回目のラウンドには進まない。
+    expect(send).toHaveBeenCalledTimes(2);
+    // updateMany は claim + 奪われたsleep直前の更新の2回だけ(終端 finish は一切呼ばれていない)。
+    expect(pm.dmInquiry.updateMany).toHaveBeenCalledTimes(2);
+    expect(audit).not.toHaveBeenCalled();
+    // sleep を呼ぶ前に止まったので、setTimeout は一切予約されていない。
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
 describe("notifyInquiry: 想定外の例外で sending のまま残さない(controller ruling 2)", () => {
   it("findUnique が reject しても終端状態(failed/send_failed)を記録してから投げ直す", async () => {
     pm.dmInquiry.findUnique.mockRejectedValue(new Error("db down"));
