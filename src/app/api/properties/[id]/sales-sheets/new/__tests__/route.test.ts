@@ -107,10 +107,23 @@ const MANSION_PROPERTY = {
   },
 };
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
+// [F3 Task4] route.ts の POST は「図面作成 + 物件・棟への保存」を1つの
+// prisma.$transaction にまとめた（原子性のため）。このテストは writeback の
+// 呼ばれ方自体は検証しない（別ファイル __tests__/writeback.test.ts の対象）ため、
+// $transaction はコールバックへ同じ mock(自分自身)をそのまま渡すだけの薄いモック。
+// property.update 等は一部の test body が RULES に該当するキー（price/tax 等）を
+// 送るため実際に呼ばれ得るが、成功で返せば足りる。
+vi.mock("@/lib/prisma", () => {
+  const mock = {
     property: {
       findUnique: vi.fn(async () => LAND_PROPERTY),
+      update: vi.fn(async () => ({})),
+    },
+    building: {
+      update: vi.fn(async () => ({})),
+    },
+    changeLog: {
+      createMany: vi.fn(async () => ({ count: 0 })),
     },
     propertyOwner: {
       findFirst: vi.fn(async () => null),
@@ -118,8 +131,11 @@ vi.mock("@/lib/prisma", () => ({
     propertyPhoto: {
       findMany: vi.fn(async () => []),
     },
-  },
-}));
+    $queryRaw: vi.fn(async () => []),
+    $transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb(mock)),
+  };
+  return { default: mock };
+});
 
 // createDesign: DB書き込みはモック。ただし parseSalesSheetDocument を通じた
 // document 検証は実行する（無効な document が 422 になることをこのテストで検出できるように）。

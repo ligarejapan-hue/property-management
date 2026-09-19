@@ -149,3 +149,15 @@ export function buildWriteback(input: {
 
   return out;
 }
+
+/** 保存した列名 → 日本語ラベル(応答の `saved` に出す)。 */
+export function labelsOf(kind: SalesSheetTemplateKind, result: WritebackResult): string[] {
+  const out: string[] = [];
+  for (const rule of RULES[kind]) {
+    const bag = rule.to === "property" ? result.property : result.building;
+    if (rule.column in bag) out.push(rule.label);
+  }
+  const builtBag = BUILT_TARGET[kind] === "building" ? result.building : result.property;
+  if ("builtYear" in builtBag || "builtMonth" in builtBag) out.push(BUILT_LABEL);
+  return out;
+}

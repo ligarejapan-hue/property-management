@@ -24,6 +24,8 @@ import { salesSheetTemplateKindFor } from "@/lib/sales-sheet/template-kind";
 import { isImageKeyAuthorizedForProperty } from "@/lib/sales-sheet/authorize-document-images";
 import { getStorage } from "@/lib/storage";
 import { writeAuditLog } from "@/lib/audit";
+import { buildWriteback, labelsOf } from "@/lib/sales-sheet/property-writeback/build-writeback";
+import { applyWriteback } from "@/lib/sales-sheet/property-writeback/apply-writeback";
 
 // 作成ダイアログが収集する任意の上書き項目（システムに無い値）。種別ごとに異なる。
 // [F2-A Task4] LAND_FIELDS(field-model) の手入力キー全域 + レイアウト専用(catchCopy/
@@ -303,12 +305,34 @@ export async function POST(
         // ⚠物件そのものに入れた物件名。建物マスタを作らずに登録した区分
         // マンションはこちらにしか名前が無い (@codex #354 P2)。
         buildingName: true,
+        // --- F3: 図面 → 物件への保存（楽観ロック用 version + 保存先16列） ---
+        version: true,
+        salePrice: true,
+        saleTaxType: true,
+        saleTaxAmount: true,
+        access: true,
+        landArea: true,
+        landAreaMethod: true,
+        totalFloorArea: true,
+        builtYear: true,
+        builtMonth: true,
+        structureType: true,
+        aboveFloors: true,
+        basementFloors: true,
+        parking: true,
+        totalUnits: true,
+        grossYield: true,
+        expectedIncome: true,
         building: {
           select: {
+            id: true,
+            version: true,
             name: true,
             totalFloors: true,
             builtYear: true,
+            builtMonth: true,
             structureType: true,
+            basementFloors: true,
             managementCompany: true,
             totalUnits: true,
           },
@@ -327,6 +351,11 @@ export async function POST(
 
     // 作成ダイアログの上書き項目（空ボディ → {}・不正 JSON → 400）。
     const body = await parseJsonBody(request);
+    const bodyObj = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+    // F3: 物件・棟への保存の指示（既定ON・省略時は今の版を気にしない）。
+    const saveToProperty = bodyObj.saveToProperty !== false;
+    const propertyVersion = typeof bodyObj.propertyVersion === "number" ? bodyObj.propertyVersion : null;
+    const buildingVersion = typeof bodyObj.buildingVersion === "number" ? bodyObj.buildingVersion : null;
 
     // 写真を最大 N 枚 seed。保存前に1枚ずつ認可（caller が読める＋この物件に属する）。
     // 未認可 / 解決不能 / 別物件は落とす（サーバ生成は 422 ではなく drop 方針）＝未認可 key を
@@ -450,7 +479,50 @@ export async function POST(
       templateId = "sale-building";
     }
 
-    const design = await createDesign({ propertyId: id, document, userId: session.id, templateId });
+    // 図面の作成 + 物件・棟への保存（読み取れた値のみ）を1トランザクションにまとめる
+    // （原子性: 途中で失敗したら図面も作らない）。物件配下を書き換える前に親の行を
+    // 先にロックする既存の決まりに合わせ、区分は棟の行も併せてロックする。
+    const { design, writeback } = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM properties WHERE id = ${id}::uuid FOR UPDATE`;
+      if (property.building?.id) {
+        await tx.$queryRaw`SELECT id FROM buildings WHERE id = ${property.building.id}::uuid FOR UPDATE`;
+      }
+
+      const created = await createDesign(
+        { propertyId: id, document, userId: session.id, templateId },
+        tx,
+      );
+
+      if (!saveToProperty) {
+        return { design: created, writeback: { saved: [] as string[], unreadable: [] as string[], conflict: false } };
+      }
+
+      const conflict =
+        (propertyVersion !== null && propertyVersion !== property.version) ||
+        (buildingVersion !== null &&
+          property.building !== null &&
+          buildingVersion !== property.building.version);
+      if (conflict) {
+        return { design: created, writeback: { saved: [] as string[], unreadable: [] as string[], conflict: true } };
+      }
+
+      const result = buildWriteback({
+        kind,
+        values: bodyObj as Record<string, string | undefined>,
+        current: { property, building: property.building ?? null },
+      });
+      await applyWriteback(tx, {
+        propertyId: id,
+        buildingId: property.building?.id ?? null,
+        result,
+        before: { property, building: property.building ?? null },
+        userId: session.id,
+      });
+      return {
+        design: created,
+        writeback: { saved: labelsOf(kind, result), unreadable: result.unreadable, conflict: false },
+      };
+    });
 
     // 監査ログ（非PIIメタのみ: document 本文・画像 key・overrides・住所等は記録しない）。
     await writeAuditLog({
@@ -461,7 +533,7 @@ export async function POST(
       detail: { propertyId: id },
     });
 
-    return NextResponse.json({ id: design.id }, { status: 201 });
+    return NextResponse.json({ id: design.id, propertyWriteback: writeback }, { status: 201 });
   } catch (error) {
     return handleApiError(error);
   }

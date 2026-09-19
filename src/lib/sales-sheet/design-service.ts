@@ -1,4 +1,5 @@
 import prismaDefault from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
 import { z } from "zod";
 import {
   parseSalesSheetDocument,
@@ -76,7 +77,10 @@ export interface SaveDesignInput {
   userId: string;
 }
 
-export async function createDesign(input: SaveDesignInput, db: PrismaLike = prismaDefault) {
+export async function createDesign(
+  input: SaveDesignInput,
+  db: PrismaLike | Prisma.TransactionClient = prismaDefault,
+) {
   const document = parseSalesSheetDocument(input.document); // 不正は throw
   assertSavableDocument(document); // サイズ上限（DB 肥大化防止）
   return db.salesSheetDesign.create({
