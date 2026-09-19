@@ -539,6 +539,10 @@ describe("assertNotEditLockedByOther", () => {
       status: 423, code: "EDIT_LOCK_STALE",
     });
   });
+  it("他人の世代を貼り付けても通らない(保持者が違えば 423)", async () => {
+    const { db } = fakeDb([{ id: "lock-1", user_id: "other", screen_token_hash: "h-other", force_released: false, active: true }]);
+    await expect(assertNotEditLockedByOther(db, { ...BASE, lockId: "lock-1" })).rejects.toMatchObject({ status: 423 });
+  });
   it("世代が今の鍵と一致すれば通す", async () => {
     const { db } = fakeDb([{ id: "lock-1", user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash, force_released: false, active: true }]);
     await expect(assertNotEditLockedByOther(db, { ...BASE, lockId: "lock-1" })).resolves.toBeUndefined();
@@ -830,7 +834,9 @@ export async function assertNotEditLockedByOther(
   }
   // 世代を持って来た保存(=編集ウィンドウ/所有者カード)は、その世代が今も生きているときだけ通す。
   if (input.lockId) {
-    const stillMine = row && row.id === input.lockId && row.active;
+    // ⚠**世代だけでは足りない**(@codex R11 P2)。世代は状態の窓口から管理者に見えるので、
+    //   他の画面の世代を貼り付けて保存できてしまう。保持者(利用者+合言葉)の一致も必須にする。
+    const stillMine = row && row.id === input.lockId && row.active && sameHolder;
     if (!stillMine) {
       throw new ApiError(423, "編集の鍵が外れています。画面を開き直してください", "EDIT_LOCK_STALE");
     }
@@ -934,14 +940,17 @@ const P = (...entries: [string, string][]) => entries.map(([resource, action]) =
 
 describe("所有者の鍵", () => {
   it("owner:write だけでは取れない(項目の書込権限が要る)", () => {
-    expect(() => assertCanLockOwner(P(["owner", "write"]))).toThrowError(/権限/);
+    expect(() => assertCanLockOwner(P(["owner", "read"], ["owner", "write"]))).toThrowError(/権限/);
   });
   it("項目の書込権限が1つでもあれば取れる", () => {
     expect(canWriteOwnerAnyField(P(["owner", "write"], ["owner_name", "full"]))).toBe(true);
-    expect(() => assertCanLockOwner(P(["owner", "write"], ["owner_name", "full"]))).not.toThrow();
+    expect(() => assertCanLockOwner(P(["owner", "read"], ["owner", "write"], ["owner_name", "full"]))).not.toThrow();
   });
   it("owner:write が無ければ取れない", () => {
     expect(() => assertCanLockOwner(P(["owner_name", "full"]))).toThrowError(/権限/);
+  });
+  it("読めない利用者は取れない(書きだけ与えられている場合)", () => {
+    expect(() => assertCanLockOwner(P(["owner", "write"], ["owner_name", "full"]))).toThrowError(/権限/);
   });
 });
 
@@ -1022,7 +1031,14 @@ export function canWriteOwnerAnyField(perms: PermissionEntry[]): boolean {
  * 出ないのに窓口を直接呼べば鍵だけ取って他人を締め出せてしまうため、ここで断る。
  */
 export function assertCanLockOwner(perms: PermissionEntry[]): void {
-  if (!hasPermission(perms, "owner", "write") || !canWriteOwnerAnyField(perms)) {
+  // ⚠**閲覧権限も要る**(@codex R11 P2)。画面の `canEditOwner` は canReadOwner を前提にしており、
+  //   読めない利用者は編集ボタンに到達できない。読みを外すと、窓口を直接呼ぶことで
+  //   「自分では編集できないのに他人を締め出せる」状態を作れてしまう。
+  if (
+    !hasPermission(perms, "owner", "read") ||
+    !hasPermission(perms, "owner", "write") ||
+    !canWriteOwnerAnyField(perms)
+  ) {
     throw new ApiError(403, "この所有者を編集する権限がありません", "FORBIDDEN");
   }
 }
@@ -1773,6 +1789,15 @@ describe("鍵の後始末", () => {
     });
   }
 });
+
+// ⚠走査(名前が出てくるか)だけでは順序の穴を防げない(@codex R11 P2)。
+//   取り消しの経路については、順序を記録して検査する。
+describe("取り消しは 行ロック → 後始末 → 削除 の順", () => {
+  it("物件の行をロックしてから鍵を消し、最後に物件を消す", async () => {
+    // $transaction のモックで順序を配列に記録し、["lockRows", "deleteLocks", "deleteProperty"]
+    // になることを検査する。ロックより前に後始末が走る実装はここで落ちる。
+  });
+});
 ```
 
 - [ ] **Step 2: テストを走らせて落ちることを確認**
@@ -1782,13 +1807,23 @@ Expected: FAIL(4件とも)
 
 - [ ] **Step 3: 4経路に後始末を足し、手動確認スクリプトを作る**
 
-各経路の削除・アーカイブと**同じトランザクション内**で:
+各経路の削除・アーカイブと**同じトランザクション内**で、かつ**資源の行をロックした後**に呼ぶ(@codex R11 P2)。
+⚠**同じトランザクションに入れるだけでは足りない**: 取り消しの経路は物件の行をロックせずに削除を始めるため、
+後始末が「まだ commit されていない取得」を見落とし、その取得が commit された後に物件だけ消えて**鍵が孤児になる**。
+順序は「資源の行をロック → 後始末 → 削除/アーカイブ」。取り消しは削除する物件をまとめてロックしてから進める:
 
 ```ts
 await deleteEditLocksFor(tx, [{ resourceType: "property", resourceId: id }]);
 ```
 
 (統合は消える側の所有者、取り消しは削除対象の物件すべてを配列で渡す)
+
+```ts
+// 取り消しの例: 削除する物件をまとめてロック → 後始末 → 削除
+await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${ids}::uuid[]) ORDER BY id FOR UPDATE`;
+await deleteEditLocksFor(tx, ids.map((id) => ({ resourceType: "property" as const, resourceId: id })));
+for (const id of ids) await tx.property.delete({ where: { id } });
+```
 
 `scripts/edit-lock-concurrency-check.mjs`(開発DBに対して1回だけ手で走らせる):
 
