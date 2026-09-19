@@ -375,10 +375,12 @@ git commit -m "feat(edit-lock): 台帳 edit_locks の追加(migration)"
   - `acquireEditLock(tx, input): Promise<{ state: "mine"; lockId: string; since: Date; takeover: { previousUserId: string; expiredBy: "heartbeat" | "idle" } | null } | { state: "held"; current: EditLockRow }>`
     ⚠**横取りかどうかと原因は、同じトランザクションの中で DB の `now()` で判定して返す**(@codex R8 P2)。
     呼び出し側がアプリの時計で計算し直すと、時計のずれで「横取りなのに通常の取得として記録」などが起きる。
-  - `heartbeatEditLock(db, input): Promise<{ ok: true } | { ok: false; current: EditLockRow | null }>`
+  - `heartbeatEditLock(db, input): Promise<{ ok: true } | { ok: false; current: DbClassifiedLock | null }>`
+    ⚠`current` は**DB が判定した状態**(`active` / `force_released` の真偽値つき)。呼び出し側がアプリの時計で判定し直さない(@codex R9 P2)
   - `releaseEditLock(db, input): Promise<{ deleted: number }>`
   - `forceReleaseEditLock(tx, input): Promise<{ previousUserId: string } | null>`
-  - `readEditLocks(db, resources): Promise<EditLockRow[]>`(`resourceType`/`resourceId` 付き)
+  - `readEditLocks(db, resources): Promise<DbClassifiedLock[]>`(`resourceType`/`resourceId` と、DB が判定した `active` / `force_released` 付き)
+  - 型 `DbClassifiedLock = { id, resourceType, resourceId, userId, screenTokenHash, acquiredAt, active, forceReleased }`
   - `assertNotEditLockedByOther(tx, input): Promise<void>`(違反時 `ApiError`)
   - `isResourceEditLocked(db, target): Promise<boolean>`(保持者を持たない処理=取込が使う。DBの now() で判定)
   - `deleteEditLocksFor(tx, resources): Promise<number>`
@@ -509,6 +511,12 @@ describe("assertNotEditLockedByOther", () => {
     const { db } = fakeDb(holder());
     await expect(assertNotEditLockedByOther(db, BASE)).rejects.toMatchObject({ status: 423, code: "EDIT_LOCKED" });
   });
+  it("墓標は世代の検査より先に見る(世代つきの保存でも FORCE_RELEASED が出る)", async () => {
+    const { db } = fakeDb([{ id: "lock-1", user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash, force_released: true, active: false }]);
+    await expect(assertNotEditLockedByOther(db, { ...BASE, lockId: "lock-1" })).rejects.toMatchObject({
+      status: 423, code: "EDIT_LOCK_FORCE_RELEASED",
+    });
+  });
   it("自分の墓標なら 423 EDIT_LOCK_FORCE_RELEASED", async () => {
     const { db } = fakeDb(holder({ user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash, force_released: true, active: false }));
     await expect(assertNotEditLockedByOther(db, BASE)).rejects.toMatchObject({ status: 423, code: "EDIT_LOCK_FORCE_RELEASED" });
@@ -606,6 +614,35 @@ function toRow(r: RawRow): EditLockRow {
 type Target = { resourceType: EditLockResourceType; resourceId: string };
 type Holder = { userId: string; screenTokenHash: string };
 
+/**
+ * DB が判定した状態つきで1件読む。期限の判定を**アプリの時計に持ち込まない**ための入口。
+ * 合図・状態・保存の確認はすべてこれを使う(取得だけは upsert の WHERE が判定する)。
+ */
+async function readClassified(db: Db, t: Target): Promise<DbClassifiedLock | null> {
+  const rows = await db.$queryRaw<(RawRow & { active: boolean; force_released: boolean })[]>`
+    SELECT "id", "user_id", "screen_token_hash", "acquired_at",
+           ("force_released_at" IS NOT NULL) AS force_released,
+           ("force_released_at" IS NULL
+            AND "heartbeat_at" >= now() - make_interval(secs => ${GRACE_SEC})
+            AND "activity_at" >= now() - make_interval(secs => ${IDLE_SEC})) AS active
+    FROM "edit_locks"
+    WHERE "resource_type" = ${t.resourceType}::"EditLockResource" AND "resource_id" = ${t.resourceId}::uuid
+  `;
+  const r = rows[0];
+  return r
+    ? {
+        id: r.id,
+        resourceType: t.resourceType,
+        resourceId: t.resourceId,
+        userId: r.user_id,
+        screenTokenHash: r.screen_token_hash,
+        acquiredAt: r.acquired_at,
+        active: r.active,
+        forceReleased: r.force_released,
+      }
+    : null;
+}
+
 async function readOne(db: Db, t: Target): Promise<EditLockRow | null> {
   const rows = await db.$queryRaw<RawRow[]>`
     SELECT "id", "user_id", "screen_token_hash", "acquired_at", "heartbeat_at", "activity_at", "force_released_at"
@@ -629,8 +666,8 @@ export async function acquireEditLock(
   | { state: "held"; current: EditLockRow }
 > {
   // ⚠横取りの判定は**DBの now()** で行う(@codex R8 P2)。取得のSQLと同じ基準にそろえる。
-  const prevRows = await db.$queryRaw<{ user_id: string; expired_by: "heartbeat" | "idle" | null }[]>`
-    SELECT "user_id",
+  const prevRows = await db.$queryRaw<{ user_id: string; screen_token_hash: string; expired_by: "heartbeat" | "idle" | null }[]>`
+    SELECT "user_id", "screen_token_hash",
            CASE
              WHEN "heartbeat_at" < now() - make_interval(secs => ${GRACE_SEC}) THEN 'heartbeat'
              WHEN "activity_at" < now() - make_interval(secs => ${IDLE_SEC}) THEN 'idle'
@@ -660,8 +697,13 @@ export async function acquireEditLock(
     RETURNING "id", "acquired_at"
   `;
   if (got[0]) {
+    // ⚠**同じ利用者の別タブでも横取りは横取り**(@codex R9 P2)。D6 で別タブは他人と同じ扱いにしているので、
+    //   利用者IDで除外すると、その取得が通常の取得として記録され、期限切れの原因も残らない。
+    //   自分の同じ画面の取り直し(同じ合言葉)は、そもそも期限切れでなければ expired_by が null になる。
+    const sameScreen =
+      prev && prev.user_id === input.userId && prev.screen_token_hash === input.screenTokenHash;
     const takeover =
-      prev && prev.expired_by && prev.user_id !== input.userId
+      prev && prev.expired_by && !sameScreen
         ? { previousUserId: prev.user_id, expiredBy: prev.expired_by }
         : null;
     return { state: "mine", lockId: got[0].id, since: got[0].acquired_at, takeover };
@@ -690,7 +732,9 @@ export async function heartbeatEditLock(
     RETURNING "id"
   `;
   if (updated[0]) return { ok: true };
-  return { ok: false, current: await readOne(db, input) };
+  // ⚠状態の判定は DB に任せる(@codex R9 P2)。アプリの時計で期限を測り直すと、
+  //   5分・60分の境目で「生きている他人の鍵を期限切れと報告」して余計な取り直しを起こす。
+  return { ok: false, current: await readClassified(db, input) };
 }
 
 export async function releaseEditLock(
@@ -775,6 +819,15 @@ export async function assertNotEditLockedByOther(
     WHERE "resource_type" = ${input.resourceType}::"EditLockResource" AND "resource_id" = ${input.resourceId}::uuid
   `;
   const row = rows[0];
+  const sameHolder =
+    !!row && row.user_id === input.userId && row.screen_token_hash === (input.screenTokenHash ?? "");
+
+  // ⚠**順番が大事**(@codex R9 P2): 墓標の行は active が false なので、世代の検査を先に置くと
+  //   管理者に外された人にまで「鍵が外れています(EDIT_LOCK_STALE)」を返してしまい、
+  //   約束した「管理者が編集を終了しました」の文言が出なくなる。**墓標を先に見る**。
+  if (row && row.force_released && sameHolder) {
+    throw new ApiError(423, "管理者が編集を終了しました。この内容は保存できません", "EDIT_LOCK_FORCE_RELEASED");
+  }
   // 世代を持って来た保存(=編集ウィンドウ/所有者カード)は、その世代が今も生きているときだけ通す。
   if (input.lockId) {
     const stillMine = row && row.id === input.lockId && row.active;
@@ -783,12 +836,7 @@ export async function assertNotEditLockedByOther(
     }
   }
   if (!row) return;
-  const sameHolder =
-    row.user_id === input.userId && row.screen_token_hash === (input.screenTokenHash ?? "");
-  const state = { state: row.force_released && sameHolder ? "force_released_mine" : !row.active ? "free" : sameHolder ? "mine" : "held" } as const;
-  if (state.state === "force_released_mine") {
-    throw new ApiError(423, "管理者が編集を終了しました。この内容は保存できません", "EDIT_LOCK_FORCE_RELEASED");
-  }
+  const state = { state: !row.active ? "free" : sameHolder ? "mine" : "held" } as const;
   if (state.state === "held") {
     const suffix = input.screenTokenHash ? "" : "。画面を再読み込みしてください";
     throw new ApiError(423, `他の画面で編集中です${suffix}`, "EDIT_LOCKED");
@@ -1108,6 +1156,17 @@ describe("POST /api/edit-locks/acquire", () => {
     expect(writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: "edit_lock_acquire" }));
   });
 
+  it("同じ利用者の別タブからの期限切れ横取りも takeover として記録する", async () => {
+    (acquireEditLock as unknown as Mock).mockResolvedValue({
+      state: "mine", lockId: "lock-3", since: new Date(),
+      takeover: { previousUserId: UID, expiredBy: "idle" }, // 前の保持者は自分(別タブ)
+    });
+    await acquire(req({ resourceType: "property", resourceId: PROP }));
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "edit_lock_takeover_expired" }),
+    );
+  });
+
   it("期限切れの横取りは takeover の監査を書く", async () => {
     (acquireEditLock as unknown as Mock).mockResolvedValue({
       state: "mine", lockId: "lock-2", since: new Date(),
@@ -1274,10 +1333,10 @@ export async function POST(request: Request) {
 `heartbeat` / `release` / `force-release` / `status` も**上の acquire と同じ骨格**(前処理1〜4 → 必要なら資源の行ロック → service を呼ぶ → 応答)で作る。
 ⚠この4本はコードを丸写しせず、次の契約だけを決めてある。**実装時は acquire のコードを開いて同じ形に揃える**こと(応答の形・エラーの投げ方・監査の書き方をばらつかせない)。
 
-- `heartbeat`: 本文に `active: z.boolean()`。**資源の行はロックしない**。`heartbeatEditLock` が `ok:false` なら現在の行を `evaluateLock` にかけ、`force_released_mine` → `{ state: "lost", reason: "force_released" }`、空き/期限切れ → `{ state: "lost", reason: "expired" }`、他人 → `{ state: "taken", holderName, since }`。監査は書かない。
+- `heartbeat`: 本文に `active: z.boolean()`。**資源の行はロックしない**。`heartbeatEditLock` が `ok:false` なら、返ってきた `current`(**DBが判定した状態**)で分岐する(@codex R9 P2): 自分の行で `forceReleased` → `{ state: "lost", reason: "force_released" }`/行が無い・`active` でない → `{ state: "lost", reason: "expired" }`/他人の `active` な鍵 → `{ state: "taken", holderName, since }`。**アプリの時計で期限を測り直さない**。監査は書かない。
 - `release`: 本文 `{ resourceType, resourceId, lockId }`。合言葉は**ヘッダが無ければ本文 `screenToken` から**読む(beacon 用)。`Content-Type` が `text/plain` でも `await request.text()` → `JSON.parse` で受ける。常に 200(冪等)。削除できたときだけ監査 `edit_lock_release`。
 - `force-release`: `session.role !== "admin"` なら 403。acquire と同じ順序で資源の行をロックしたトランザクション内で `forceReleaseEditLock`。null なら 409 `EDIT_LOCK_CHANGED`。
-- `status`: 本文 `{ resources: z.array(...).max(50) }`。閲覧権限(物件=`property:read`+担当範囲、所有者=`owner:read`)のある資源だけ返す。`readEditLocks` → `evaluateLock` → `free` / `mine` / `held_by_self_other_screen` / `held_by_other`(氏名つき)。`lockId` は `session.role === "admin"` のときだけ含める。
+- `status`: 本文 `{ resources: z.array(...).max(50) }`。閲覧権限(物件=`property:read`+担当範囲、所有者=`owner:read`)のある資源だけ返す。`readEditLocks` が返す**DBの判定**(`active`)で `free` / `mine` / `held_by_self_other_screen` / `held_by_other`(氏名つき)を決める(@codex R9 P2。`active` でない行と墓標は `free`)。`lockId` は `session.role === "admin"` のときだけ含める。
 
 `src/lib/audit-log-detail-safety.ts` の `ACTION_EXTRA_KEYS` に追加:
 
