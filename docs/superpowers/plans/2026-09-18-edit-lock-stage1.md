@@ -372,7 +372,9 @@ git commit -m "feat(edit-lock): 台帳 edit_locks の追加(migration)"
 **Interfaces:**
 - Consumes: Task 1 の定数・型
 - Produces:
-  - `acquireEditLock(tx, input): Promise<{ state: "mine"; lockId: string; since: Date; previous: EditLockRow | null } | { state: "held"; current: EditLockRow }>`
+  - `acquireEditLock(tx, input): Promise<{ state: "mine"; lockId: string; since: Date; takeover: { previousUserId: string; expiredBy: "heartbeat" | "idle" } | null } | { state: "held"; current: EditLockRow }>`
+    ⚠**横取りかどうかと原因は、同じトランザクションの中で DB の `now()` で判定して返す**(@codex R8 P2)。
+    呼び出し側がアプリの時計で計算し直すと、時計のずれで「横取りなのに通常の取得として記録」などが起きる。
   - `heartbeatEditLock(db, input): Promise<{ ok: true } | { ok: false; current: EditLockRow | null }>`
   - `releaseEditLock(db, input): Promise<{ deleted: number }>`
   - `forceReleaseEditLock(tx, input): Promise<{ previousUserId: string } | null>`
@@ -522,6 +524,17 @@ describe("assertNotEditLockedByOther", () => {
     const { db } = fakeDb(holder({ user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash }));
     await expect(assertNotEditLockedByOther(db, BASE)).resolves.toBeUndefined();
   });
+  it("世代を持つ保存は、その世代が今の鍵と一致しないと 423 EDIT_LOCK_STALE", async () => {
+    // 管理者が外す → 別の人が取って外す(墓標は消える) → 元の画面の遅れた保存、を想定。
+    const { db } = fakeDb([]); // 鍵の行がもう無い
+    await expect(assertNotEditLockedByOther(db, { ...BASE, lockId: "lock-old" })).rejects.toMatchObject({
+      status: 423, code: "EDIT_LOCK_STALE",
+    });
+  });
+  it("世代が今の鍵と一致すれば通す", async () => {
+    const { db } = fakeDb([{ id: "lock-1", user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash, force_released: false, active: true }]);
+    await expect(assertNotEditLockedByOther(db, { ...BASE, lockId: "lock-1" })).resolves.toBeUndefined();
+  });
   it("鍵が無ければ通す(合言葉が無い古い画面も同じ)", async () => {
     const { db } = fakeDb([]);
     await expect(assertNotEditLockedByOther(db, { ...BASE, screenTokenHash: null })).resolves.toBeUndefined();
@@ -609,7 +622,19 @@ export async function acquireEditLock(
   | { state: "mine"; lockId: string; since: Date; previous: EditLockRow | null }
   | { state: "held"; current: EditLockRow }
 > {
-  const previous = await readOne(db, input);
+  // ⚠横取りの判定は**DBの now()** で行う(@codex R8 P2)。取得のSQLと同じ基準にそろえる。
+  const prevRows = await db.$queryRaw<{ user_id: string; expired_by: "heartbeat" | "idle" | null }[]>`
+    SELECT "user_id",
+           CASE
+             WHEN "heartbeat_at" < now() - make_interval(secs => ${GRACE_SEC}) THEN 'heartbeat'
+             WHEN "activity_at" < now() - make_interval(secs => ${IDLE_SEC}) THEN 'idle'
+             ELSE NULL
+           END AS expired_by
+    FROM "edit_locks"
+    WHERE "resource_type" = ${input.resourceType}::"EditLockResource" AND "resource_id" = ${input.resourceId}::uuid
+      AND "force_released_at" IS NULL
+  `;
+  const prev = prevRows[0] ?? null;
   const got = await db.$queryRaw<{ id: string; acquired_at: Date }[]>`
     INSERT INTO "edit_locks" ("id", "resource_type", "resource_id", "user_id", "screen_token_hash", "acquired_at", "heartbeat_at", "activity_at")
     VALUES (gen_random_uuid(), ${input.resourceType}::"EditLockResource", ${input.resourceId}::uuid, ${input.userId}::uuid, ${input.screenTokenHash}, now(), now(), now())
@@ -629,9 +654,13 @@ export async function acquireEditLock(
     RETURNING "id", "acquired_at"
   `;
   if (got[0]) {
-    return { state: "mine", lockId: got[0].id, since: got[0].acquired_at, previous };
+    const takeover =
+      prev && prev.expired_by && prev.user_id !== input.userId
+        ? { previousUserId: prev.user_id, expiredBy: prev.expired_by }
+        : null;
+    return { state: "mine", lockId: got[0].id, since: got[0].acquired_at, takeover };
   }
-  const current = (await readOne(db, input)) ?? previous;
+  const current = await readOne(db, input);
   // 取れず、かつ行も消えている = 直前に別の誰かが取って外した。もう一度取りにいかせる。
   if (!current) throw new ApiError(409, "鍵の状態が変わりました。もう一度お試しください", "EDIT_LOCK_CHANGED");
   return { state: "held", current };
@@ -714,13 +743,24 @@ export async function readEditLocks(
  */
 export async function assertNotEditLockedByOther(
   db: Db,
-  input: Target & { userId: string; screenTokenHash: string | null },
+  input: Target & {
+    userId: string;
+    screenTokenHash: string | null;
+    /**
+     * 編集ウィンドウ/所有者カードが持っている鍵の世代(取得の応答の lockId)。
+     * ⚠**世代を持って来た保存は、その世代が今の鍵と一致するときだけ通す**(@codex R8 P1)。
+     *   管理者が外した後に別の人が取って外すと墓標が消えるため、墓標だけでは
+     *   「外された画面からの遅れた保存」を止めきれない。世代で見ればいつでも止まる。
+     * プルダウンや地番ポップアップのように鍵を持たない入口は null。
+     */
+    lockId: string | null;
+  },
 ): Promise<void> {
   // ⚠期限の判定は **DB の now()** で行う(@codex R6 P2)。取得・合図が DB 時計を権威に
   //   しているのに、ここだけアプリの時計で判定すると、5分の境目で食い違って
   //   「生きている鍵を期限切れとみなして書き込む」ことが起きる。
-  const rows = await db.$queryRaw<{ user_id: string; screen_token_hash: string; force_released: boolean; active: boolean }[]>`
-    SELECT "user_id", "screen_token_hash",
+  const rows = await db.$queryRaw<{ id: string; user_id: string; screen_token_hash: string; force_released: boolean; active: boolean }[]>`
+    SELECT "id", "user_id", "screen_token_hash",
            ("force_released_at" IS NOT NULL) AS force_released,
            ("force_released_at" IS NULL
             AND "heartbeat_at" >= now() - make_interval(secs => ${GRACE_SEC})
@@ -729,6 +769,13 @@ export async function assertNotEditLockedByOther(
     WHERE "resource_type" = ${input.resourceType}::"EditLockResource" AND "resource_id" = ${input.resourceId}::uuid
   `;
   const row = rows[0];
+  // 世代を持って来た保存(=編集ウィンドウ/所有者カード)は、その世代が今も生きているときだけ通す。
+  if (input.lockId) {
+    const stillMine = row && row.id === input.lockId && row.active;
+    if (!stillMine) {
+      throw new ApiError(423, "編集の鍵が外れています。画面を開き直してください", "EDIT_LOCK_STALE");
+    }
+  }
   if (!row) return;
   const sameHolder =
     row.user_id === input.userId && row.screen_token_hash === (input.screenTokenHash ?? "");
@@ -786,6 +833,7 @@ git commit -m "feat(edit-lock): 台帳の読み書き(取得・合図・解除�
 - Consumes: `hasPermission` / `hasExplicitWritePerm`(`@/lib/permissions`)・`canAccessPropertyRecord`(`@/lib/property-access`)
 - Produces:
   - `readScreenTokenHash(request: Request): string | null`(ヘッダ `X-Edit-Screen` を sha256。無ければ null)
+  - `readLockId(request: Request): string | null`(ヘッダ `X-Edit-Lock` = 取得で受け取った鍵の世代。無ければ null)
   - `hashScreenToken(token: string): string`
   - `canWriteOwnerAnyField(perms): boolean`
   - `assertCanLockProperty(session, perms, property): void`(不可なら `ApiError(403)`)
@@ -870,6 +918,13 @@ import { createHash } from "node:crypto";
 
 /** ブラウザのタブごとの合言葉を送るヘッダ名。 */
 export const EDIT_SCREEN_HEADER = "X-Edit-Screen";
+/** 鍵の世代(取得の応答の lockId)を送るヘッダ名。鍵を持つ画面の保存だけが付ける。 */
+export const EDIT_LOCK_HEADER = "X-Edit-Lock";
+
+export function readLockId(request: Request): string | null {
+  const raw = request.headers.get(EDIT_LOCK_HEADER);
+  return raw && raw.trim() !== "" ? raw.trim() : null;
+}
 
 export function hashScreenToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -1039,7 +1094,7 @@ beforeEach(() => {
 describe("POST /api/edit-locks/acquire", () => {
   it("取得できたら 200 と世代を返し、監査を書く", async () => {
     (acquireEditLock as unknown as Mock).mockResolvedValue({
-      state: "mine", lockId: "lock-1", since: new Date("2026-09-18T10:00:00Z"), previous: null,
+      state: "mine", lockId: "lock-1", since: new Date("2026-09-18T10:00:00Z"), takeover: null,
     });
     const res = await acquire(req({ resourceType: "property", resourceId: PROP }));
     expect(res.status).toBe(200);
@@ -1050,7 +1105,7 @@ describe("POST /api/edit-locks/acquire", () => {
   it("期限切れの横取りは takeover の監査を書く", async () => {
     (acquireEditLock as unknown as Mock).mockResolvedValue({
       state: "mine", lockId: "lock-2", since: new Date(),
-      previous: { id: "old", userId: "other", screenTokenHash: "h", acquiredAt: new Date(0), heartbeatAt: new Date(0), activityAt: new Date(0), forceReleasedAt: null },
+      takeover: { previousUserId: "other", expiredBy: "heartbeat" },
     });
     await acquire(req({ resourceType: "property", resourceId: PROP }));
     expect(writeAuditLog).toHaveBeenCalledWith(
@@ -1186,20 +1241,19 @@ export async function POST(request: Request) {
       );
     }
 
-    const tookOver = result.previous && isLockExpired(result.previous, new Date());
+    // ⚠横取りの判定・原因は service が DB の now() で決めた値をそのまま使う(@codex R8 P2)。
+    //   ここでアプリの時計で計算し直さない。
     await writeAuditLog({
       userId: session.id,
-      action: tookOver ? "edit_lock_takeover_expired" : "edit_lock_acquire",
+      action: result.takeover ? "edit_lock_takeover_expired" : "edit_lock_acquire",
       targetTable: "edit_locks",
       targetId: result.lockId,
-      detail: tookOver
+      detail: result.takeover
         ? {
             resourceType,
             resourceId,
-            previousUserId: result.previous!.userId,
-            // ⚠**それぞれの上限と比べる**(@codex R7 P2)。古さの大小で決めると、
-            //   合図6分・操作50分(=合図の上限5分だけ超過)を idle と誤って記録する。
-            expiredBy: expiryCause(result.previous!, new Date()),
+            previousUserId: result.takeover.previousUserId,
+            expiredBy: result.takeover.expiredBy,
           }
         : { resourceType, resourceId },
     });
@@ -1287,6 +1341,7 @@ const guardedUpdate = await prisma.$transaction(async (tx) => {
     resourceId: id,
     userId: session.id,
     screenTokenHash: readScreenTokenHash(request),
+    lockId: readLockId(request),
   });
   return tx.property.updateMany({
     where: { id, version, ...(touchesRegistryKey ? { registryStatus: { not: "scheduled" } } : {}) },
@@ -1379,6 +1434,7 @@ describe("保存の窓口の鍵の確認", () => {
       const src = readFileSync(join(process.cwd(), rel), "utf8").replace(/\r\n/g, "\n");
       expect(src).toMatch(/assertNotEditLockedByOther\(/);
       expect(src).toMatch(/readScreenTokenHash\(/);
+      expect(src).toMatch(/readLockId\(/);
     });
   }
 });
@@ -1546,12 +1602,24 @@ const updates = { ...statusUpdates, ...fieldUpdates };
 - 監査の detail に2つのフラグを足し、`ACTION_EXTRA_KEYS` に:
 
 ```ts
+  // ACTION_EXTRA_KEYS に追加
   // 謄本の自動取得。鍵のため補完を見送ったことを管理画面で読めるようにする(D10)。
   registry_auto_fetch: new Set([
     "propertyFillSkippedByEditLock",
     "ownerCorporateFillSkippedByEditLock",
   ]),
 ```
+
+⚠**`ownerCorporateFillSkippedByEditLock` は許可リストだけでは足りない**(@codex R8 P2)。
+`sanitizeAuditDetail` は**危険キーの判定を許可リストより先に**行い、その中に `/owner/i` があるため、
+このキーは名前に owner を含むだけで `[REDACTED]` になる。`ACTION_FORCE_SAFE_KEYS` にも足す:
+
+```ts
+  // ACTION_FORCE_SAFE_KEYS に追加(/owner/i の denylist を上書きする。値は真偽値のみ)
+  registry_auto_fetch: new Set(["ownerCorporateFillSkippedByEditLock"]),
+```
+
+テストは**伏せ字にならないこと**を実際の `sanitizeAuditDetail` の出力で確認する(名前の一致だけを見ない)。
 
 - ⚠**自動取得の監査は `auto-fetch.ts` が detail を自分で組み立てている**(結果をそのまま展開していない)ので、
   `processRegistryPdf` の戻り値にフラグを足すだけでは**監査に出ない**(@codex R7 P2)。
@@ -1563,13 +1631,17 @@ const updates = { ...statusUpdates, ...fieldUpdates };
 
 - [ ] **Step 4: テストが通ることを確認**
 
-Run: `npx vitest run src/lib/registry-pdf src/lib/__tests__/audit-log-detail-safety.test.ts`
+Run: `npx vitest run src/lib/registry-pdf src/lib/registry-fetch src/lib/__tests__/audit-log-detail-safety.test.ts "src/app/(dashboard)/import"`
+(⚠この Task の成果物は4つ=取込処理・自動取得の監査・取込画面の表示・許可リスト。**どれか1つでも走っていなければゲートとして不足**(@codex R8 P2))
 Expected: PASS
 
 - [ ] **Step 5: コミット**
 
 ```bash
-git add src/lib/registry-pdf/process.ts src/lib/registry-pdf/__tests__/edit-lock-skip.test.ts src/lib/audit-log-detail-safety.ts src/lib/__tests__/audit-log-detail-safety.test.ts
+git add src/lib/registry-pdf/process.ts src/lib/registry-pdf/__tests__/edit-lock-skip.test.ts \
+  src/lib/registry-fetch/auto-fetch.ts src/lib/registry-fetch/__tests__/auto-fetch-edit-lock-audit.test.ts \
+  "src/app/(dashboard)/import/registry-pdf/page.tsx" \
+  src/lib/audit-log-detail-safety.ts src/lib/__tests__/audit-log-detail-safety.test.ts
 git commit -m "fix(registry-pdf): 法人番号の補完で版番号を進め、編集中は補完を見送る"
 ```
 
