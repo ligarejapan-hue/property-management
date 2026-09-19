@@ -305,34 +305,17 @@ export async function POST(
         // ⚠物件そのものに入れた物件名。建物マスタを作らずに登録した区分
         // マンションはこちらにしか名前が無い (@codex #354 P2)。
         buildingName: true,
-        // --- F3: 図面 → 物件への保存（楽観ロック用 version + 保存先16列） ---
-        version: true,
-        salePrice: true,
-        saleTaxType: true,
-        saleTaxAmount: true,
-        access: true,
-        landArea: true,
-        landAreaMethod: true,
-        totalFloorArea: true,
-        builtYear: true,
-        builtMonth: true,
-        structureType: true,
-        aboveFloors: true,
-        basementFloors: true,
-        parking: true,
-        totalUnits: true,
-        grossYield: true,
-        expectedIncome: true,
         building: {
           select: {
+            // ⚠id だけは「棟の行も FOR UPDATE でロックするか」の判定に使う
+            // (F3 writeback)。version・F3 の保存先列は**ここでは読まない**
+            // (C1: ロック前の値を version 判定・差分計算に使わない。ロック後に
+            // tx 内で読み直した値を使う → 下の `fresh` 参照)。
             id: true,
-            version: true,
             name: true,
             totalFloors: true,
             builtYear: true,
-            builtMonth: true,
             structureType: true,
-            basementFloors: true,
             managementCompany: true,
             totalUnits: true,
           },
@@ -386,9 +369,13 @@ export async function POST(
     const company = await loadCompanyProfile();
     let document: SalesSheetDocument;
     let templateId: string;
+    // I1: writeback は zod 検証済みの overrides(各分岐の `o`)を使う。生の body を直接
+    // 渡すと schema に無いキー(例: mansion の layout/balconyDir)が無検証で列に入り得る。
+    let overrides: Record<string, string | undefined>;
 
     if (kind === "land") {
       const o = landOverridesSchema.parse(body);
+      overrides = o as unknown as Record<string, string | undefined>;
       document = buildSaleLandDocument({
         property: {
           address: property.address,
@@ -407,6 +394,7 @@ export async function POST(
       templateId = "sale-land";
     } else if (kind === "mansion") {
       const o = mansionOverridesSchema.parse(body);
+      overrides = o as unknown as Record<string, string | undefined>;
       document = buildSaleMansionDocument({
         property: {
           address: property.address,
@@ -443,6 +431,7 @@ export async function POST(
       templateId = "sale-mansion";
     } else if (kind === "house") {
       const o = houseOverridesSchema.parse(body);
+      overrides = o as unknown as Record<string, string | undefined>;
       document = buildSaleHouseDocument({
         property: {
           address: property.address,
@@ -461,6 +450,7 @@ export async function POST(
       templateId = "sale-house";
     } else {
       const o = buildingOverridesSchema.parse(body);
+      overrides = o as unknown as Record<string, string | undefined>;
       document = buildSaleBuildingDocument({
         property: {
           address: property.address,
@@ -479,6 +469,9 @@ export async function POST(
       templateId = "sale-building";
     }
 
+    const noWriteback = { saved: [] as string[], unreadable: [] as string[], conflict: false };
+    const conflictWriteback = { saved: [] as string[], unreadable: [] as string[], conflict: true };
+
     // 図面の作成 + 物件・棟への保存（読み取れた値のみ）を1トランザクションにまとめる
     // （原子性: 途中で失敗したら図面も作らない）。物件配下を書き換える前に親の行を
     // 先にロックする既存の決まりに合わせ、区分は棟の行も併せてロックする。
@@ -494,30 +487,87 @@ export async function POST(
       );
 
       if (!saveToProperty) {
-        return { design: created, writeback: { saved: [] as string[], unreadable: [] as string[], conflict: false } };
+        return { design: created, writeback: noWriteback };
       }
 
-      const conflict =
-        (propertyVersion !== null && propertyVersion !== property.version) ||
-        (buildingVersion !== null &&
-          property.building !== null &&
-          buildingVersion !== property.building.version);
-      if (conflict) {
-        return { design: created, writeback: { saved: [] as string[], unreadable: [] as string[], conflict: true } };
+      // C1: ロックを掴んだ**直後に読み直す**。最初の読み取り(282行目)と ここの間には
+      // 写真取得・認可・会社プロフィール読込・document 組み立てという I/O が挟まるため、
+      // version 判定・buildWriteback の current・ChangeLog の oldValue は
+      // すべてこの読み直した値(fresh)を基準にする(最初の読み取りの値は使わない)。
+      const fresh = await tx.property.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          version: true,
+          salePrice: true,
+          saleTaxType: true,
+          saleTaxAmount: true,
+          access: true,
+          landArea: true,
+          landAreaMethod: true,
+          totalFloorArea: true,
+          builtYear: true,
+          builtMonth: true,
+          structureType: true,
+          aboveFloors: true,
+          basementFloors: true,
+          parking: true,
+          totalUnits: true,
+          grossYield: true,
+          expectedIncome: true,
+          building: {
+            select: {
+              id: true,
+              version: true,
+              structureType: true,
+              totalFloors: true,
+              basementFloors: true,
+              totalUnits: true,
+              builtYear: true,
+              builtMonth: true,
+            },
+          },
+        },
+      });
+      if (!fresh) {
+        // FOR UPDATE の直後に消えている(想定外)。writeback は諦め図面だけ作る。
+        return { design: created, writeback: conflictWriteback };
+      }
+
+      const hasBuilding = fresh.building !== null;
+      // C2/I6: saveToProperty=true なのに version が無い/数値でない場合は無条件で
+      // 上書きせず conflict 扱いにする(現行クライアントは version を送らない=Task 5 まで
+      // 常にここを通る。図面自体は作る)。棟がある物件は buildingVersion も同様。
+      const versionMissing =
+        propertyVersion === null || (hasBuilding && buildingVersion === null);
+      const versionStale =
+        !versionMissing &&
+        (propertyVersion !== fresh.version ||
+          (hasBuilding && buildingVersion !== fresh.building!.version));
+      if (versionMissing || versionStale) {
+        return { design: created, writeback: conflictWriteback };
       }
 
       const result = buildWriteback({
         kind,
-        values: bodyObj as Record<string, string | undefined>,
-        current: { property, building: property.building ?? null },
+        values: overrides,
+        current: { property: fresh, building: fresh.building },
       });
-      await applyWriteback(tx, {
+      const applied = await applyWriteback(tx, {
         propertyId: id,
-        buildingId: property.building?.id ?? null,
+        buildingId: fresh.building?.id ?? null,
         result,
-        before: { property, building: property.building ?? null },
+        before: { property: fresh, building: fresh.building },
+        propertyVersion: fresh.version,
+        buildingVersion: fresh.building?.version ?? null,
         userId: session.id,
       });
+      if (!applied.ok) {
+        // FOR UPDATE 下では理論上起きないはずだが、書き込み自体にも条件を付ける
+        // (@codex #394 R29 P1 と同じ考え方)防御として扱う。
+        return { design: created, writeback: conflictWriteback };
+      }
+
       return {
         design: created,
         writeback: { saved: labelsOf(kind, result), unreadable: result.unreadable, conflict: false },

@@ -63,6 +63,22 @@ vi.mock("@/lib/property-access", () => ({
   ),
 }));
 
+type BuildingFixture = {
+  id: string;
+  version: number;
+  name?: string;
+  totalFloors: number | null;
+  builtYear: number | null;
+  builtMonth: number | null;
+  structureType: string | null;
+  basementFloors: number | null;
+  managementCompany?: string | null;
+  totalUnits: number | null;
+};
+
+// route.ts は「最初の読み取り(アクセス制御・document組み立て用)」と「FOR UPDATE 後の
+// 読み直し(writeback用・C1)」の2回 property.findUnique を呼ぶ。この mock はどちらの
+// select にも対応できるよう、両方で使うフィールドを1つのオブジェクトにまとめて持つ。
 const baseProperty = {
   id: "11111111-1111-1111-1111-111111111111",
   createdBy: "u1",
@@ -101,20 +117,34 @@ const baseProperty = {
   totalUnits: null,
   grossYield: null,
   expectedIncome: null,
-  building: null as null | { id: string; version: number },
+  building: null as BuildingFixture | null,
 };
 
 const baseMansion = { ...baseProperty, propertyType: "apartment_unit" };
 
-// prisma の mock。$transaction はコールバックへ pm をそのまま渡す(実トランザクションは張らない)。
+const testBuilding: BuildingFixture = {
+  id: "b1",
+  version: 1,
+  name: "テストレジデンス",
+  totalFloors: null,
+  builtYear: null,
+  builtMonth: null,
+  structureType: null,
+  basementFloors: null,
+  managementCompany: null,
+  totalUnits: null,
+};
+
+// prisma の mock。$transaction はコールバックへ mock 自身(= 下の pm)をそのまま渡す
+// (実トランザクションは張らない・呼び出しの配線だけを見る)。
 vi.mock("@/lib/prisma", () => {
   const mock = {
     property: {
       findUnique: vi.fn(async () => baseProperty),
-      update: vi.fn(async () => ({})),
+      updateMany: vi.fn(async () => ({ count: 1 })),
     },
     building: {
-      update: vi.fn(async () => ({})),
+      updateMany: vi.fn(async () => ({ count: 1 })),
     },
     changeLog: {
       createMany: vi.fn(async () => ({ count: 0 })),
@@ -163,11 +193,12 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
+import { createDesign } from "@/lib/sales-sheet/design-service";
 import { POST } from "../route";
 
 type PrismaMock = {
-  property: { findUnique: Mock; update: Mock };
-  building: { update: Mock };
+  property: { findUnique: Mock; updateMany: Mock };
+  building: { updateMany: Mock };
   changeLog: { createMany: Mock };
   salesSheetDesign: { create: Mock };
   propertyOwner: { findFirst: Mock };
@@ -177,11 +208,12 @@ type PrismaMock = {
 };
 const pm = prisma as unknown as PrismaMock;
 
-const updateMock = pm.property.update;
-const buildingUpdateMock = pm.building.update;
+const updateManyMock = pm.property.updateMany;
+const buildingUpdateManyMock = pm.building.updateMany;
 const changeLogCreateManyMock = pm.changeLog.createMany;
 const propertyFindMock = pm.property.findUnique;
 const designCreateMock = pm.salesSheetDesign.create;
+const queryRawMock = pm.$queryRaw;
 
 const ADMIN_SESSION = { id: "u1", email: "a@b.com", name: "Admin", role: "admin" };
 const WRITE_PERMS = [{ resource: "property", action: "write", granted: true }];
@@ -194,6 +226,11 @@ const req = (body: unknown) =>
     body: JSON.stringify(body),
   });
 
+/** $queryRaw のタグ付きテンプレート呼び出しを文字列化(SQL文のFROM句等を確認する用)。 */
+function sqlOf(call: unknown[]): string {
+  return (call[0] as string[]).join("?");
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   (getApiSession as Mock).mockResolvedValue(ADMIN_SESSION);
@@ -202,77 +239,212 @@ beforeEach(() => {
   pm.propertyOwner.findFirst.mockResolvedValue(null);
   pm.propertyPhoto.findMany.mockResolvedValue([]);
   designCreateMock.mockResolvedValue({ id: "sheet-1" });
+  updateManyMock.mockResolvedValue({ count: 1 });
+  buildingUpdateManyMock.mockResolvedValue({ count: 1 });
 });
 
 describe("POST /sales-sheets/new — 物件への保存", () => {
   it("既定(チェックON)で変わった欄だけ物件を更新し、変更履歴を1欄1行残す", async () => {
-    const res = await POST(req({ price: "3480", access: "○○線 徒歩8分" }), ctx);
+    const res = await POST(req({ price: "3480", access: "○○線 徒歩8分", propertyVersion: 1 }), ctx);
     expect(res.status).toBe(201);
     const json = await res.json();
     expect(json.propertyWriteback).toEqual({ saved: ["価格", "交通"], unreadable: [], conflict: false });
-    // property.update は1回・ChangeLog は2行
-    expect(updateMock).toHaveBeenCalledTimes(1);
-    expect(updateMock.mock.calls[0][0].data).toMatchObject({
-      salePrice: 3480,
-      access: "○○線 徒歩8分",
-      version: { increment: 1 },
+    // C1: 書き込み条件に version を付ける(updateMany)。property.updateMany は1回・ChangeLog は2行。
+    expect(updateManyMock).toHaveBeenCalledTimes(1);
+    expect(updateManyMock.mock.calls[0][0]).toMatchObject({
+      where: { id: baseProperty.id, version: 1 },
+      data: { salePrice: 3480, access: "○○線 徒歩8分", version: { increment: 1 } },
     });
-    expect(changeLogCreateManyMock.mock.calls[0][0].data).toHaveLength(2);
+    // I3: ChangeLog の中身(targetTable/source/changedBy/fieldName/oldValue/newValue)を固定する。
+    const logs = changeLogCreateManyMock.mock.calls[0][0].data;
+    expect(logs).toHaveLength(2);
+    expect(logs).toContainEqual({
+      targetTable: "properties",
+      targetId: baseProperty.id,
+      fieldName: "salePrice",
+      oldValue: null,
+      newValue: "3480",
+      source: "manual",
+      changedBy: "u1",
+    });
+    expect(logs).toContainEqual({
+      targetTable: "properties",
+      targetId: baseProperty.id,
+      fieldName: "access",
+      oldValue: null,
+      newValue: "○○線 徒歩8分",
+      source: "manual",
+      changedBy: "u1",
+    });
   });
 
   it("チェックOFFなら物件を更新しない", async () => {
     const res = await POST(req({ price: "3480", saveToProperty: false }), ctx);
     expect(res.status).toBe(201);
-    expect(updateMock).not.toHaveBeenCalled();
+    expect(updateManyMock).not.toHaveBeenCalled();
     expect((await res.json()).propertyWriteback).toEqual({ saved: [], unreadable: [], conflict: false });
   });
 
   it("読み取れない値は保存せず知らせに出す", async () => {
-    const res = await POST(req({ price: "応談" }), ctx);
+    const res = await POST(req({ price: "応談", propertyVersion: 1 }), ctx);
     const json = await res.json();
     expect(json.propertyWriteback.saved).toEqual([]);
     expect(json.propertyWriteback.unreadable).toEqual(["価格"]);
-    expect(updateMock).not.toHaveBeenCalled();
+    expect(updateManyMock).not.toHaveBeenCalled();
   });
 
-  it("他の人が先に更新していたら物件は保存せず図面は作る", async () => {
-    // 現在の version は 5、画面が持っていたのは 4
-    propertyFindMock.mockResolvedValueOnce({ ...baseProperty, version: 5 });
-    const res = await POST(req({ price: "3480", propertyVersion: 4 }), ctx);
+  // C2/I6: 現行クライアントは version を送らない(Task 5 で送るようになる)。無条件で
+  // 上書きせず、conflict 扱いにして物件へは書かない(図面自体は作る)。
+  it("propertyVersion を送らないと conflict 扱いで書き込まない(C2)", async () => {
+    const res = await POST(req({ price: "3480" }), ctx);
     expect(res.status).toBe(201);
-    expect(updateMock).not.toHaveBeenCalled();
-    expect((await res.json()).propertyWriteback.conflict).toBe(true);
-    // 図面自体は作られる(原子性は保つが、保存の巻き戻り対象ではない)。
+    expect(updateManyMock).not.toHaveBeenCalled();
+    expect((await res.json()).propertyWriteback).toEqual({ saved: [], unreadable: [], conflict: true });
     expect(designCreateMock).toHaveBeenCalledTimes(1);
   });
 
-  it("区分は棟へ保存する", async () => {
-    propertyFindMock.mockResolvedValueOnce({ ...baseMansion, building: { id: "b1", version: 1 } });
-    const res = await POST(req({ structure: "RC", totalUnits: "48" }), ctx);
+  it("propertyVersion が数値でないと conflict 扱いで書き込まない(C2)", async () => {
+    const res = await POST(req({ price: "3480", propertyVersion: "4" }), ctx);
     expect(res.status).toBe(201);
-    expect(buildingUpdateMock).toHaveBeenCalledTimes(1);
-    expect(buildingUpdateMock.mock.calls[0][0].data).toMatchObject({
-      structureType: "RC",
-      totalUnits: 48,
-      version: { increment: 1 },
+    expect(updateManyMock).not.toHaveBeenCalled();
+    expect((await res.json()).propertyWriteback.conflict).toBe(true);
+  });
+
+  it("棟がある物件で buildingVersion を送らないと conflict 扱い(C2)", async () => {
+    propertyFindMock.mockResolvedValue({ ...baseMansion, building: testBuilding });
+    const res = await POST(req({ structure: "RC", propertyVersion: 1 }), ctx); // buildingVersion 省略
+    expect(res.status).toBe(201);
+    expect(updateManyMock).not.toHaveBeenCalled();
+    expect(buildingUpdateManyMock).not.toHaveBeenCalled();
+    expect((await res.json()).propertyWriteback.conflict).toBe(true);
+  });
+
+  // C1: version 判定・差分は「ロック前の最初の読み取り」ではなく「ロック後に読み直した値」
+  // を基準にすること。最初の読み取りが(たまたま)クライアントの propertyVersion と一致して
+  // いても、ロック後の読み直しが別の値なら衝突として検知できなければならない。
+  it("ロック前に読んだ版ではなく、ロック後に読み直した版で conflict を判定する(C1)", async () => {
+    propertyFindMock
+      .mockResolvedValueOnce({ ...baseProperty, version: 4 }) // 最初の読み取り(ロック前)
+      .mockResolvedValueOnce({ ...baseProperty, version: 5 }); // ロック後の読み直し(他の人が先に更新済み)
+    const res = await POST(req({ price: "3480", propertyVersion: 4 }), ctx);
+    expect(res.status).toBe(201);
+    expect(updateManyMock).not.toHaveBeenCalled();
+    expect((await res.json()).propertyWriteback.conflict).toBe(true);
+    expect(designCreateMock).toHaveBeenCalledTimes(1);
+  });
+
+  // ⚠mansionOverridesSchema には RULES.mansion の "structure"/"totalFloors"/"totalUnits"
+  // (to: building)キーが無い(=このルートからは書けない・schema のギャップは
+  // task-4-report.md に記録)。schema にある建物向けキーは basementFloors と
+  // builtYearMonth のみのため、これで「区分は棟へ保存する」を確認する。
+  it("区分は棟へ保存する(basementFloors/builtYearMonth→棟)", async () => {
+    propertyFindMock.mockResolvedValue({ ...baseMansion, building: testBuilding });
+    const res = await POST(
+      req({ basementFloors: "2", builtYearMonth: "2015年3月", propertyVersion: 1, buildingVersion: 1 }),
+      ctx,
+    );
+    expect(res.status).toBe(201);
+    expect(buildingUpdateManyMock).toHaveBeenCalledTimes(1);
+    expect(buildingUpdateManyMock.mock.calls[0][0]).toMatchObject({
+      where: { id: "b1", version: 1 },
+      data: { basementFloors: 2, builtYear: 2015, builtMonth: 3, version: { increment: 1 } },
+    });
+    // I3: 棟側の ChangeLog(targetTable: "buildings")も固定する。
+    const logs = changeLogCreateManyMock.mock.calls[0][0].data;
+    expect(logs).toContainEqual({
+      targetTable: "buildings",
+      targetId: "b1",
+      fieldName: "basementFloors",
+      oldValue: null,
+      newValue: "2",
+      source: "manual",
+      changedBy: "u1",
+    });
+    expect(logs).toContainEqual({
+      targetTable: "buildings",
+      targetId: "b1",
+      fieldName: "builtYear",
+      oldValue: null,
+      newValue: "2015",
+      source: "manual",
+      changedBy: "u1",
+    });
+    expect(logs).toContainEqual({
+      targetTable: "buildings",
+      targetId: "b1",
+      fieldName: "builtMonth",
+      oldValue: null,
+      newValue: "3",
+      source: "manual",
+      changedBy: "u1",
     });
   });
 
-  it("一棟は棟へ保存しない(一棟物件は building relation を持たない前提)", async () => {
-    propertyFindMock.mockResolvedValueOnce({ ...baseProperty, propertyType: "apartment_building" });
-    const res = await POST(req({ totalUnits: "12" }), ctx);
+  // I4: 「一棟」kind(RULES.building に to:"building" のルールが無い)は、たとえ物件に
+  // building relation が付いていても棟へは書かない、という保存先の仕分けそのものを見る。
+  it("一棟は(棟が紐づいていても)棟へ保存しない", async () => {
+    propertyFindMock.mockResolvedValue({
+      ...baseProperty,
+      propertyType: "apartment_building",
+      building: testBuilding,
+    });
+    const res = await POST(req({ totalUnits: "12", propertyVersion: 1, buildingVersion: 1 }), ctx);
     expect(res.status).toBe(201);
-    expect(buildingUpdateMock).not.toHaveBeenCalled();
-    expect(updateMock).toHaveBeenCalledTimes(1);
-    expect(updateMock.mock.calls[0][0].data).toMatchObject({ totalUnits: 12 });
+    expect(buildingUpdateManyMock).not.toHaveBeenCalled();
+    expect(updateManyMock).toHaveBeenCalledTimes(1);
+    expect(updateManyMock.mock.calls[0][0].data).toMatchObject({ totalUnits: 12 });
   });
 
   it("保存の途中で失敗したら図面も作らない", async () => {
-    updateMock.mockRejectedValueOnce(new Error("db down"));
-    const res = await POST(req({ price: "3480" }), ctx);
+    updateManyMock.mockRejectedValueOnce(new Error("db down"));
+    const res = await POST(req({ price: "3480", propertyVersion: 1 }), ctx);
     // 単体テストの prisma mock は実トランザクションを張らないため巻き戻りそのものは
     // 検証できない(原子性は「1つの $transaction にまとめてある」ことで担保し、レビューで
     // 確認する)。ここでは応答が 500 であることだけを確かめる。
     expect(res.status).toBe(500);
+  });
+
+  // I2: $transaction を外しても(=図面作成と物件更新が別々の呼び出しになっても)このテストが
+  // 緑のままにならないよう、$transaction 自体が使われていること・createDesign に渡された tx
+  // が物件更新にも使われている(同じ prisma mock)ことを固定する。
+  it("図面作成と物件更新は同じトランザクション(tx)の中で行われる", async () => {
+    const res = await POST(req({ price: "3480", propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    expect(pm.$transaction).toHaveBeenCalledTimes(1);
+    const txPassedToCreateDesign = (createDesign as Mock).mock.calls[0][1];
+    expect(txPassedToCreateDesign).toBe(pm);
+    expect(updateManyMock).toHaveBeenCalledTimes(1);
+  });
+
+  // I5: FOR UPDATE でロックしてから更新すること(呼び出し順)を固定する。区分は棟の行も
+  // 先にロックする。
+  it("FOR UPDATE で物件(区分は棟も)をロックしてから更新する", async () => {
+    propertyFindMock.mockResolvedValue({ ...baseMansion, building: testBuilding });
+    const res = await POST(
+      req({ price: "3480", basementFloors: "2", propertyVersion: 1, buildingVersion: 1 }),
+      ctx,
+    );
+    expect(res.status).toBe(201);
+    expect(queryRawMock).toHaveBeenCalledTimes(2);
+    expect(sqlOf(queryRawMock.mock.calls[0])).toMatch(/FROM properties/);
+    expect(sqlOf(queryRawMock.mock.calls[0])).toMatch(/FOR UPDATE/);
+    expect(sqlOf(queryRawMock.mock.calls[1])).toMatch(/FROM buildings/);
+    expect(sqlOf(queryRawMock.mock.calls[1])).toMatch(/FOR UPDATE/);
+    expect(updateManyMock).toHaveBeenCalledTimes(1);
+    expect(buildingUpdateManyMock).toHaveBeenCalledTimes(1);
+    const lastLockOrder = Math.max(...queryRawMock.mock.invocationCallOrder);
+    expect(lastLockOrder).toBeLessThan(updateManyMock.mock.invocationCallOrder[0]);
+    expect(lastLockOrder).toBeLessThan(buildingUpdateManyMock.mock.invocationCallOrder[0]);
+  });
+
+  // I1: writeback は zod 検証済みの overrides を使う。schema に無いキー(mansion の
+  // layout/balconyDir は field-model 由来だが mansionOverridesSchema には無い)は
+  // 無検証で列へ入らないこと。
+  it("schema に無いキーは無検証で保存されない(I1)", async () => {
+    propertyFindMock.mockResolvedValue(baseMansion);
+    const res = await POST(req({ layout: "3LDK", balconyDir: "南", propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    expect(updateManyMock).not.toHaveBeenCalled();
+    expect((await res.json()).propertyWriteback).toEqual({ saved: [], unreadable: [], conflict: false });
   });
 });

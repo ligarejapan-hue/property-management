@@ -111,16 +111,17 @@ const MANSION_PROPERTY = {
 // prisma.$transaction にまとめた（原子性のため）。このテストは writeback の
 // 呼ばれ方自体は検証しない（別ファイル __tests__/writeback.test.ts の対象）ため、
 // $transaction はコールバックへ同じ mock(自分自身)をそのまま渡すだけの薄いモック。
-// property.update 等は一部の test body が RULES に該当するキー（price/tax 等）を
-// 送るため実際に呼ばれ得るが、成功で返せば足りる。
+// このテストの body は propertyVersion を送らないため、C2 の仕様(version 省略時は
+// conflict 扱いで書かない)により property.updateMany 等は実際には呼ばれない想定だが、
+// 呼ばれても壊れないよう成功で返す。
 vi.mock("@/lib/prisma", () => {
   const mock = {
     property: {
       findUnique: vi.fn(async () => LAND_PROPERTY),
-      update: vi.fn(async () => ({})),
+      updateMany: vi.fn(async () => ({ count: 1 })),
     },
     building: {
-      update: vi.fn(async () => ({})),
+      updateMany: vi.fn(async () => ({ count: 1 })),
     },
     changeLog: {
       createMany: vi.fn(async () => ({ count: 0 })),
