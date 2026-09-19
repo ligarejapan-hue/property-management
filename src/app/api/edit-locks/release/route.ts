@@ -1,6 +1,6 @@
 import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { apiResponse, getApiSession, handleApiError } from "@/lib/api-helpers";
+import { ApiError, apiResponse, getApiSession, handleApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { releaseEditLock } from "@/lib/edit-lock/service";
 import { hashScreenToken, readScreenTokenHash } from "@/lib/edit-lock/screen-token";
@@ -55,6 +55,12 @@ export async function POST(request: Request) {
     }
     return apiResponse({ ok: true });
   } catch (error) {
+    // ⚠sendBeacon はページ離脱時に飛ぶため、セッションが切れていることがある。
+    //   常に200(冪等)という契約は認証切れにも及ぶ(何もせず200を返す・DBには触れない)。
+    //   他のエラーはそのまま handleApiError に渡す(ここで握り潰すのは未認証だけ)。
+    if (error instanceof ApiError && error.status === 401) {
+      return apiResponse({ ok: true });
+    }
     return handleApiError(error);
   }
 }

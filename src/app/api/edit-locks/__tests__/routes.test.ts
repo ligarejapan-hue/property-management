@@ -51,7 +51,7 @@ vi.mock("@/lib/edit-lock/service", () => ({
 }));
 
 import prisma from "@/lib/prisma";
-import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
+import { ApiError, getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import {
   acquireEditLock,
@@ -61,6 +61,7 @@ import {
   readEditLocks,
 } from "@/lib/edit-lock/service";
 import { hashScreenToken } from "@/lib/edit-lock/screen-token";
+import { lockPropertyRow } from "@/lib/property-record-guard";
 import { POST as acquire } from "../acquire/route";
 import { POST as forceRelease } from "../force-release/route";
 import { POST as heartbeat } from "../heartbeat/route";
@@ -319,6 +320,16 @@ describe("POST /api/edit-locks/release", () => {
     expect(res.status).toBe(200);
     expect(releaseEditLock).not.toHaveBeenCalled();
   });
+
+  it("セッションが無い/切れていても 200(sendBeacon はページ離脱時に飛ぶため)", async () => {
+    (getApiSession as unknown as Mock).mockRejectedValue(new ApiError(401, "認証が必要です", "UNAUTHORIZED"));
+    const res = await release(
+      req("http://localhost/api/edit-locks/release", { resourceType: "property", resourceId: PROP, lockId: LOCK1 }),
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true });
+    expect(releaseEditLock).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/edit-locks/force-release", () => {
@@ -357,6 +368,28 @@ describe("POST /api/edit-locks/force-release", () => {
     expect(writeAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({ action: "edit_lock_force_release", detail: expect.objectContaining({ previousUserId: "victim" }) }),
     );
+  });
+
+  // ⚠acquire で一度直した取り違え(base client vs tx)と同じ型の穴を、force-release でも
+  //   固定する。lockPropertyRow / 生の FOR UPDATE は必ず「トランザクションの tx」で
+  //   呼ばれる必要がある(base client に移動していても気づけるように)。
+  it("物件は lockPropertyRow に tx を渡す(base client には渡さない)", async () => {
+    (forceReleaseEditLock as unknown as Mock).mockResolvedValue({ previousUserId: "victim" });
+    await fr({ resourceType: "property", resourceId: PROP, lockId: LOCK1 });
+    expect(lockPropertyRow).toHaveBeenCalledWith(
+      expect.objectContaining({ $queryRaw: txMocks.queryRaw }),
+      PROP,
+    );
+    expect(lockPropertyRow).not.toHaveBeenCalledWith(prisma, PROP);
+  });
+
+  it("所有者は同じトランザクション(tx)の $queryRaw で行をロックする", async () => {
+    (forceReleaseEditLock as unknown as Mock).mockResolvedValue({ previousUserId: "victim" });
+    const OWNER_ID = "88888888-8888-4888-8888-888888888888";
+    await fr({ resourceType: "owner", resourceId: OWNER_ID, lockId: LOCK1 });
+    expect(txMocks.queryRaw).toHaveBeenCalled();
+    // base client の $queryRaw(prisma.$queryRaw)はここでは使ってはいけない。
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 });
 
