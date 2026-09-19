@@ -156,10 +156,6 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
     if (!config) {
       return (await finish(inquiryId, claimedAt, 1, { status: "failed", code: "mail_not_configured" }, [])) ? "failed" : "skipped";
     }
-    const recipients = await resolveRecipients(row.draft.property, config);
-    if (recipients.length === 0) {
-      return (await finish(inquiryId, claimedAt, 1, { status: "failed", code: "no_recipients" }, [])) ? "failed" : "skipped";
-    }
 
     const facts: InquiryNotifyFacts = {
       inquiryId: row.id,
@@ -206,8 +202,29 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
         lastRefreshMs = postSleep.getTime();
       }
       attempts += 1;
-      for (const r of recipients) {
-        if (succeeded.has(r.userId)) continue;
+
+      // P1修正: 宛先の適格性(在籍/通知ON/売却DM閲覧可/field_staffの担当範囲)と詳しさ
+      // (full/minimal)は、試行のたびに再解決する。1回目の前に確定させて使い回すと、
+      // 待ち時間(最長10分)の間に設定が変わっても古い許可のまま個人情報を送ってしまう。
+      // ⚠succeeded(userId基準)はラウンドをまたいで保持するので、既に成功した宛先は
+      // 再解決後の一覧に再び現れても二度と送らない。
+      const recipients = await resolveRecipients(row.draft.property, config);
+      const toSend = recipients.filter((r) => !succeeded.has(r.userId));
+
+      if (toSend.length === 0) {
+        if (succeeded.size > 0) {
+          // このラウンドの時点で適格な宛先は全員すでに送信済み(=適格性を失った人は単に
+          // 除外されるだけで、送信済みの結果を覆さない)。監査には実際に送った宛先だけを残す。
+          const wrote = await finish(inquiryId, claimedAt, attempts, { status: "sent" }, [...succeeded]);
+          return wrote ? "sent" : "skipped";
+        }
+        // 誰にも送れたことが一度もない(最初から0人、または再解決の結果みな適格性を失った)。
+        // ループを続けず、既存の no_recipients と同じ扱いで終える。
+        const wrote = await finish(inquiryId, claimedAt, attempts, { status: "failed", code: "no_recipients" }, []);
+        return wrote ? "failed" : "skipped";
+      }
+
+      for (const r of toSend) {
         const t = now();
         if (t.getTime() - lastRefreshMs >= REFRESH_INTERVAL_MS) {
           if (!(await refreshClaim(inquiryId, claimedAt, t))) return "skipped";
@@ -218,8 +235,9 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
         const res = await sendPlainMail(config, { to: r.address, subject: mail.subject, text: mail.text });
         if (res.ok) succeeded.add(r.userId);
       }
-      if (succeeded.size === recipients.length) {
-        const wrote = await finish(inquiryId, claimedAt, attempts, { status: "sent" }, recipients.map((r) => r.userId));
+      const stillPending = recipients.some((r) => !succeeded.has(r.userId));
+      if (!stillPending) {
+        const wrote = await finish(inquiryId, claimedAt, attempts, { status: "sent" }, [...succeeded]);
         return wrote ? "sent" : "skipped";
       }
     }

@@ -631,6 +631,165 @@ describe("notifyInquiry: 想定外の例外で sending のまま残さない(con
   });
 });
 
+describe("notifyInquiry: 再解決(P1修正 — 試行ごとに適格性/詳しさを取り直す)", () => {
+  it(
+    "(a) 1回目と2回目の間に適格性が失われた宛先には2回目で何も送らない",
+    { timeout: 20_000 },
+    async () => {
+      pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+      let bAccessCalls = 0;
+      checkAccess.mockImplementation(async (userId: string) => {
+        if (userId !== "u-b") return PLAIN_ACCESS;
+        bAccessCalls += 1;
+        // 1回目(1回目の再解決)は通す・2回目(再試行前の再解決)からは権限を失っている。
+        return bAccessCalls === 1 ? PLAIN_ACCESS : { ok: false, reason: "display" };
+      });
+      send.mockImplementation(async (_config, mail: { to: string }) =>
+        mail.to === "u-b@example.com" ? { ok: false, code: "ECONNECTION" } : { ok: true },
+      );
+
+      const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(send).toHaveBeenCalledTimes(2); // attempt1: A成功・B失敗
+
+      await vi.advanceTimersByTimeAsync(NOTIFY_RETRY_DELAYS_MS[0]);
+      const result = await promise;
+
+      // Bは2回目の再解決で ok:false になっているので、再送は一切発生しない。
+      const bCalls = send.mock.calls.filter((c) => c[1].to === "u-b@example.com");
+      expect(bCalls).toHaveLength(1);
+      // Aは適格なまま成功済みなので、それだけで sent(Bが脱落しても失敗にはしない)。
+      expect(result).toBe("sent");
+      expect(pm.dmInquiry.updateMany).toHaveBeenLastCalledWith({
+        where: { id: INQUIRY_ID, notifyStatus: "sending", notifyClaimedAt: NOW },
+        data: { notifyStatus: "sent", notifyLastError: null, notifyAttempts: { increment: 2 } },
+      });
+      const call = audit.mock.calls[0][0];
+      expect(call.detail).toEqual({ attempt: 2, recipientUserIds: ["u-a"] });
+    },
+  );
+
+  it(
+    "(b) 1回目と2回目の間に詳しさが full→minimal に変わったら再送は minimal 本文で届く",
+    { timeout: 20_000 },
+    async () => {
+      pm.user.findMany.mockResolvedValue([user("u-b")]);
+      buildMail.mockImplementation((_facts: unknown, opts: { detail: "minimal" | "full" }) => ({
+        subject: `S-${opts.detail}`,
+        text: `T-${opts.detail}`,
+      }));
+      let accessCalls = 0;
+      checkAccess.mockImplementation(async () => {
+        accessCalls += 1;
+        return accessCalls === 1
+          ? PLAIN_ACCESS
+          : { ok: true, permissions: [], ownerDisplayConfig: { ...PLAIN_ACCESS.ownerDisplayConfig, email: "masked" } };
+      });
+      let bCalls = 0;
+      send.mockImplementation(async () => {
+        bCalls += 1;
+        return bCalls === 1 ? { ok: false, code: "ECONNECTION" } : { ok: true };
+      });
+
+      const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0][1].subject).toBe("S-full");
+
+      await vi.advanceTimersByTimeAsync(NOTIFY_RETRY_DELAYS_MS[0]);
+      const result = await promise;
+
+      expect(result).toBe("sent");
+      expect(send).toHaveBeenCalledTimes(2);
+      // 2回目は電話は平文・メールが masked になった=full の条件を満たさず minimal。
+      expect(send.mock.calls[1][1].subject).toBe("S-minimal");
+    },
+  );
+
+  it("(c) 既に成功した宛先は、再解決の一覧に再び現れても二度と送らない", async () => {
+    pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+    send.mockImplementation(async (_config, mail: { to: string }) =>
+      mail.to === "u-b@example.com" ? { ok: false, code: "ECONNECTION" } : { ok: true },
+    );
+    const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(send).toHaveBeenCalledTimes(2); // A成功・B失敗
+
+    send.mockResolvedValue({ ok: true }); // 2回目からBも成功するようにする
+    await vi.advanceTimersByTimeAsync(NOTIFY_RETRY_DELAYS_MS[0]);
+    const result = await promise;
+
+    expect(result).toBe("sent");
+    // resolveRecipients(= user.findMany)が2回目にも呼ばれている=再解決が実際に起きている証拠
+    // (直せば毎回呼ぶ・戻せば1回目しか呼ばれない=このassertが revert 検出になる)。
+    expect(pm.user.findMany.mock.calls.length).toBeGreaterThanOrEqual(2);
+    // resolveRecipients は毎回 u-a を含めて返す(user.findMany のモックは変えていない)が、
+    // 既に成功している u-a には2回目で送っていない(送信は計3回=1回目A,B+2回目Bのみ)。
+    expect(send).toHaveBeenCalledTimes(3);
+    const aCalls = send.mock.calls.filter((c) => c[1].to === "u-a@example.com");
+    expect(aCalls).toHaveLength(1);
+  });
+
+  it(
+    "(d) 再試行の前に全員が適格性を失ったら、それ以上送らずno_recipients相当で終わる",
+    { timeout: 20_000 },
+    async () => {
+      pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+      let revoked = false;
+      checkAccess.mockImplementation(async () => (revoked ? { ok: false, reason: "display" } : PLAIN_ACCESS));
+      send.mockResolvedValue({ ok: false, code: "ECONNECTION" }); // 1回目は両方とも送信自体が失敗
+
+      const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(send).toHaveBeenCalledTimes(2); // attempt1: A,Bとも失敗・誰も成功していない
+
+      revoked = true; // 再試行の前に全員が適格性を失う
+      await vi.advanceTimersByTimeAsync(NOTIFY_RETRY_DELAYS_MS[0]);
+      const result = await promise;
+
+      expect(result).toBe("failed");
+      expect(send).toHaveBeenCalledTimes(2); // 追加送信は一切発生しない
+      expect(pm.dmInquiry.updateMany).toHaveBeenLastCalledWith({
+        where: { id: INQUIRY_ID, notifyStatus: "sending", notifyClaimedAt: NOW },
+        data: { notifyStatus: "failed", notifyLastError: "no_recipients", notifyAttempts: { increment: 2 } },
+      });
+      expect(audit).toHaveBeenCalledWith({
+        action: "inquiry_notify_failed",
+        targetTable: "dm_inquiries",
+        targetId: INQUIRY_ID,
+        detail: { attempt: 2, code: "no_recipients" },
+      });
+    },
+  );
+
+  it(
+    "(e) 何も変わらない再試行(happy path)は従来どおり sent・再解決自体は毎回起きている",
+    { timeout: 20_000 },
+    async () => {
+      pm.user.findMany.mockResolvedValue([user("u-a"), user("u-b")]);
+      let bCalls = 0;
+      send.mockImplementation(async (_config, mail: { to: string }) => {
+        if (mail.to === "u-b@example.com") {
+          bCalls += 1;
+          return bCalls === 1 ? { ok: false, code: "ECONNECTION" } : { ok: true };
+        }
+        return { ok: true };
+      });
+
+      const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(NOTIFY_RETRY_DELAYS_MS[0]);
+      const result = await promise;
+
+      expect(result).toBe("sent");
+      // resolveRecipients(= user.findMany)が1回目・2回目とも呼ばれている=再解決が起きた証拠。
+      expect(pm.user.findMany.mock.calls.length).toBeGreaterThanOrEqual(2);
+      const call = audit.mock.calls[0][0];
+      expect(call.detail.recipientUserIds.sort()).toEqual(["u-a", "u-b"]);
+    },
+  );
+});
+
 describe("startInquiryNotify: 例外で落ちない", () => {
   it("内部で何が throw しても外に投げず、console.error は name/code(許可リスト一致)だけ", async () => {
     pm.dmInquiry.findUnique.mockRejectedValue(Object.assign(new Error("db down"), { code: "ECONNECTION" }));
