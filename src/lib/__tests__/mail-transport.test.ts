@@ -35,6 +35,17 @@ describe("sendPlainMail", () => {
     expect(JSON.stringify(spy.mock.calls)).not.toContain("info@ligarejapan.com");
     spy.mockRestore();
   });
+  it("STARTTLS(secure=false)は requireTLS=true で fail closed にする", async () => {
+    sendMail.mockResolvedValue({});
+    const cfg = { ...CFG, secure: false, port: 587 };
+    await sendPlainMail(cfg, { to: "a@example.jp", subject: "s", text: "t" });
+    expect(createTransport).toHaveBeenCalledWith(expect.objectContaining({ secure: false, requireTLS: true }));
+  });
+  it("SSL(secure=true)は requireTLS を要求しない", async () => {
+    sendMail.mockResolvedValue({});
+    await sendPlainMail(CFG, { to: "a@example.jp", subject: "s", text: "t" });
+    expect(createTransport).toHaveBeenCalledWith(expect.objectContaining({ secure: true, requireTLS: false }));
+  });
   it("差し替え口が使われる", async () => {
     const fake = vi.fn(async () => {});
     setMailSenderForTest(fake);

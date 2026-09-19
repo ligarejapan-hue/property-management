@@ -44,6 +44,28 @@ describe("利用者ごとの通知設定ダイアログ", () => {
   });
 });
 
+describe("読み込み失敗時は保存を止める(review fix: 無言での通知OFF/宛先クリア防止)", () => {
+  it("保存ボタンは loaded=false のとき disabled", () => {
+    expect(dialog).toMatch(/disabled=\{saving \|\| loading \|\| !loaded\}/);
+  });
+  it("読み込み失敗の案内文言と再読み込み導線がある", () => {
+    expect(dialog).toContain("設定を読み込めませんでした。再読み込みしてください。");
+    expect(dialog).toContain("再読み込み");
+    expect(dialog).toMatch(/onClick=\{load\}/);
+  });
+  it("loaded は読み込み成功時だけ true になる(失敗時は false のまま)", () => {
+    const start = dialog.indexOf("const load = ");
+    const end = dialog.indexOf("}, [userId]);", start);
+    const fn = dialog.slice(start, end);
+    const catchIdx = fn.indexOf("} catch");
+    const trueIdx = fn.indexOf("setLoaded(true)");
+    const falseIdx = fn.indexOf("setLoaded(false)");
+    expect(trueIdx).toBeGreaterThan(-1);
+    expect(trueIdx).toBeLessThan(catchIdx);
+    expect(falseIdx).toBeGreaterThan(catchIdx);
+  });
+});
+
 describe("ユーザー一覧: 通知ボタン", () => {
   it("権限リンクの隣に type=button の通知ボタンがある", () => {
     const shieldIdx = page.indexOf("権限");

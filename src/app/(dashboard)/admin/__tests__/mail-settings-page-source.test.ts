@@ -55,6 +55,34 @@ describe("接続方式とポートの連動(fix round 1・Important)", () => {
   });
 });
 
+describe("初回読み込み失敗時は保存・テスト送信を止める(review fix: 破壊的上書き防止)", () => {
+  it("保存ボタンは loaded=false のとき disabled", () => {
+    expect(page).toMatch(/onClick=\{save\}\s*\n\s*disabled=\{saving \|\| !loaded\}/);
+  });
+  it("テスト送信ボタンは loaded=false のとき disabled", () => {
+    expect(page).toMatch(/onClick=\{runTest\}\s*\n\s*disabled=\{testing \|\| saving \|\| !loaded\}/);
+  });
+  it("読み込み失敗の案内文言と再読み込み導線がある", () => {
+    expect(page).toContain("設定を読み込めませんでした。再読み込みしてください。");
+    expect(page).toContain("再読み込み");
+    expect(page).toMatch(/onClick=\{loadSettings\}/);
+  });
+  it("loaded は読み込み成功時だけ true になる(失敗時は false のまま)", () => {
+    const start = page.indexOf("const loadSettings = ");
+    const end = page.indexOf("}, []);", start);
+    const fn = page.slice(start, end);
+    expect(fn).toMatch(/setLoaded\(true\)/);
+    expect(fn).toMatch(/setLoaded\(false\)/);
+    // catch 節で false、try の中(catch より前)で true を呼んでいる=成功時だけ true。
+    const catchIdx = fn.indexOf("} catch");
+    const trueIdx = fn.indexOf("setLoaded(true)");
+    const falseIdx = fn.indexOf("setLoaded(false)");
+    expect(trueIdx).toBeGreaterThan(-1);
+    expect(trueIdx).toBeLessThan(catchIdx);
+    expect(falseIdx).toBeGreaterThan(catchIdx);
+  });
+});
+
 describe("smtpCodeHint の RESET 系(fix round 1・Minor)", () => {
   it("ECONNRESET 等(RESET を含むコード)は接続系の案内と同じ枝に入る", () => {
     const start = page.indexOf("function smtpCodeHint");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Loader2, Save, Send, ShieldCheck, ShieldAlert, AlertTriangle } from "lucide-react";
 import {
@@ -19,6 +19,10 @@ import {
 //   欄は毎回空で始まり、空のまま保存すると「変更しない」として扱われる(サーバー側の挙動)。
 export default function MailSettingsPage() {
   const [loading, setLoading] = useState(true);
+  // 初回読み込みが一度でも成功したか。⚠これが false の間は保存・テスト送信を必ず止める
+  // (読み込み失敗のまま空の初期値で保存すると、保存済みのホスト/ユーザー名/送信元/URL が
+  //  null に正規化されて上書きされ、動いていた設定を壊してしまうため)。
+  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -89,17 +93,26 @@ export default function MailSettingsPage() {
     });
   };
 
+  // 読み込み(初回・再読み込み共通)。失敗しても loaded は true にしない=
+  // 保存・テスト送信ボタンは disabled のまま。
+  const loadSettings = useCallback(async () => {
+    setLoading(true);
+    setMessage(null);
+    try {
+      const res = await getMailSettings();
+      applySettings(res.data);
+      setLoaded(true);
+    } catch (e) {
+      setLoaded(false);
+      setMessage({ kind: "err", text: e instanceof Error ? e.message : "設定の取得に失敗しました" });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await getMailSettings();
-        applySettings(res.data);
-      } catch (e) {
-        setMessage({ kind: "err", text: e instanceof Error ? e.message : "設定の取得に失敗しました" });
-      } finally {
-        setLoading(false);
-      }
-    })();
+    loadSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 未保存の変更があるか(パスワードは「入力欄に何か入っているか」で見る=元の値と比較できないため)。
@@ -312,7 +325,7 @@ export default function MailSettingsPage() {
         <button
           type="button"
           onClick={save}
-          disabled={saving}
+          disabled={saving || !loaded}
           className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -321,13 +334,27 @@ export default function MailSettingsPage() {
         <button
           type="button"
           onClick={runTest}
-          disabled={testing || saving}
+          disabled={testing || saving || !loaded}
           className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
         >
           {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           テスト送信
         </button>
       </div>
+
+      {!loaded && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-red-300 bg-red-50 p-3 text-xs text-red-800 dark:border-red-700 dark:bg-red-950/40 dark:text-red-300">
+          <ShieldAlert className="h-4 w-4 shrink-0" />
+          <span>設定を読み込めませんでした。再読み込みしてください。保存・テスト送信は行えません。</span>
+          <button
+            type="button"
+            onClick={loadSettings}
+            className="ml-auto inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-2 py-1 font-medium text-red-700 hover:bg-red-100 dark:border-red-700 dark:bg-gray-900 dark:text-red-300 dark:hover:bg-red-950"
+          >
+            再読み込み
+          </button>
+        </div>
+      )}
 
       {testMessage && (
         <div className={`rounded-md border p-3 text-xs ${testMessage.kind === "ok" ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" : "border-red-300 bg-red-50 text-red-800 dark:border-red-700 dark:bg-red-950/40 dark:text-red-300"}`} role="alert">

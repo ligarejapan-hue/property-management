@@ -8,7 +8,7 @@
  * (src/lib/sale-dm-letter/inquiry-notify.ts の宛先絞り込みと同じ条件)ため、
  * その旨をここで警告する。
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Button } from "@/components/ui/button";
@@ -34,31 +34,32 @@ export function InquiryNotifyDialog({
   const [email, setEmail] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
   const [canUseSaleDm, setCanUseSaleDm] = useState(true);
+  // 初回読み込みが一度でも成功したか。⚠これが false の間は保存を必ず止める
+  // (読み込み失敗のまま既定値 enabled=false・email="" で保存すると、
+  //  その利用者の通知を無言で無効化し、宛先も空にしてしまうため)。
+  const [loaded, setLoaded] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await getUserInquiryNotify(userId);
+      setEnabled(res.data.enabled);
+      setEmail(res.data.email ?? "");
+      setLoginEmail(res.data.loginEmail);
+      setCanUseSaleDm(res.data.canUseSaleDm);
+      setLoaded(true);
+    } catch (err) {
+      setLoaded(false);
+      setError(err instanceof Error ? err.message : "読み込みに失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await getUserInquiryNotify(userId);
-        if (cancelled) return;
-        setEnabled(res.data.enabled);
-        setEmail(res.data.email ?? "");
-        setLoginEmail(res.data.loginEmail);
-        setCanUseSaleDm(res.data.canUseSaleDm);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "読み込みに失敗しました");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [userId]);
+    load();
+  }, [load]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -88,7 +89,7 @@ export function InquiryNotifyDialog({
           <Button variant="secondary" onClick={onClose} disabled={saving}>
             キャンセル
           </Button>
-          <Button variant="primary" onClick={handleSave} disabled={saving || loading}>
+          <Button variant="primary" onClick={handleSave} disabled={saving || loading || !loaded}>
             {saving && <Loader2 className="h-4 w-4 animate-spin" />}
             保存
           </Button>
@@ -103,7 +104,19 @@ export function InquiryNotifyDialog({
         <div className="space-y-3">
           {error && (
             <div className="rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-300">
-              {error}
+              <p>{error}</p>
+              {!loaded && (
+                <>
+                  <p className="mt-1">設定を読み込めませんでした。再読み込みしてください。保存は行えません。</p>
+                  <button
+                    type="button"
+                    onClick={load}
+                    className="mt-2 inline-flex items-center gap-1 rounded-md border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100 dark:border-red-500/40 dark:bg-gray-900 dark:text-red-300 dark:hover:bg-red-950"
+                  >
+                    再読み込み
+                  </button>
+                </>
+              )}
             </div>
           )}
           {!canUseSaleDm && (

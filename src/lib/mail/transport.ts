@@ -27,6 +27,10 @@ const realSender: Sender = async (config, mail) => {
     host: config.host,
     port: config.port,
     secure: config.secure,
+    // STARTTLS(secure=false)は「機会的アップグレード」任せにしない。
+    // サーバーが STARTTLS を広告しない(または攻撃者に剥がされた)場合は
+    // 平文のまま送らず、必ず失敗させる(fail closed)。
+    requireTLS: !config.secure,
     auth: { user: config.user, pass: config.pass },
     connectionTimeout: 15_000,
     greetingTimeout: 10_000,
