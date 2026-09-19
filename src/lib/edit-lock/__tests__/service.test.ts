@@ -232,7 +232,7 @@ describe("assertNotEditLockedByOther", () => {
 
   it("他人が持っていれば 423 EDIT_LOCKED", async () => {
     const { db } = fakeDb(holder());
-    await expect(assertNotEditLockedByOther(db, BASE)).rejects.toMatchObject({ status: 423, code: "EDIT_LOCKED" });
+    await expect(assertNotEditLockedByOther(db, { ...BASE, lockId: null })).rejects.toMatchObject({ status: 423, code: "EDIT_LOCKED" });
   });
   it("墓標は世代の検査より先に見る(世代つきの保存でも FORCE_RELEASED が出る)", async () => {
     const { db } = fakeDb([{ id: "lock-1", user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash, force_released: true, active: false }]);
@@ -242,11 +242,11 @@ describe("assertNotEditLockedByOther", () => {
   });
   it("自分の墓標なら 423 EDIT_LOCK_FORCE_RELEASED", async () => {
     const { db } = fakeDb(holder({ user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash, force_released: true, active: false }));
-    await expect(assertNotEditLockedByOther(db, BASE)).rejects.toMatchObject({ status: 423, code: "EDIT_LOCK_FORCE_RELEASED" });
+    await expect(assertNotEditLockedByOther(db, { ...BASE, lockId: null })).rejects.toMatchObject({ status: 423, code: "EDIT_LOCK_FORCE_RELEASED" });
   });
   it("期限の判定はDBの now() で行う(SQL側で active を計算する)", async () => {
     const { db, queryRaw } = fakeDb([]);
-    await assertNotEditLockedByOther(db, BASE);
+    await assertNotEditLockedByOther(db, { ...BASE, lockId: null });
     const sql = sqlOf(queryRaw.mock.calls[0]);
     expect(sql).toMatch(/AS active/);
     // ⚠Global Constraint により now() ではなく clock_timestamp()。
@@ -254,7 +254,7 @@ describe("assertNotEditLockedByOther", () => {
   });
   it("自分の鍵なら通す", async () => {
     const { db } = fakeDb(holder({ user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash }));
-    await expect(assertNotEditLockedByOther(db, BASE)).resolves.toBeUndefined();
+    await expect(assertNotEditLockedByOther(db, { ...BASE, lockId: null })).resolves.toBeUndefined();
   });
   it("世代を持つ保存は、その世代が今の鍵と一致しないと 423 EDIT_LOCK_STALE", async () => {
     // 管理者が外す → 別の人が取って外す(墓標は消える) → 元の画面の遅れた保存、を想定。
@@ -273,11 +273,11 @@ describe("assertNotEditLockedByOther", () => {
   });
   it("鍵が無ければ通す(合言葉が無い古い画面も同じ)", async () => {
     const { db } = fakeDb([]);
-    await expect(assertNotEditLockedByOther(db, { ...BASE, screenTokenHash: null })).resolves.toBeUndefined();
+    await expect(assertNotEditLockedByOther(db, { ...BASE, screenTokenHash: null, lockId: null })).resolves.toBeUndefined();
   });
   it("他人が持っていて合言葉が無ければ、再読み込みの案内を文言に足す", async () => {
     const { db } = fakeDb(holder());
-    await expect(assertNotEditLockedByOther(db, { ...BASE, screenTokenHash: null })).rejects.toMatchObject({
+    await expect(assertNotEditLockedByOther(db, { ...BASE, screenTokenHash: null, lockId: null })).rejects.toMatchObject({
       status: 423,
       message: expect.stringContaining("再読み込み"),
     });
@@ -291,7 +291,7 @@ describe("SQL の期限しきい値と rules.ts の一致(コントローラ決�
 
     // SQL 側: rules.ts の定数から導いた秒数がそのまま現れる(手で決め打ちした別の値になっていない)。
     const { db, queryRaw } = fakeDb([]);
-    await assertNotEditLockedByOther(db, BASE);
+    await assertNotEditLockedByOther(db, { ...BASE, lockId: null });
     const sql = sqlOf(queryRaw.mock.calls[0]);
     expect(sql).toContain(`make_interval(secs => {${GRACE_SEC}})`);
     expect(sql).toContain(`make_interval(secs => {${IDLE_SEC}})`);

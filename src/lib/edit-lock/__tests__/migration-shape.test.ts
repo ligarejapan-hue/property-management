@@ -15,7 +15,9 @@ describe("edit_locks の migration", () => {
     expect(sql).toMatch(/"force_released_by" UUID/);
   });
   it("1資源1行の一意制約がある", () => {
-    expect(sql).toMatch(/UNIQUE INDEX .*edit_locks.*resource_type.*resource_id/s);
+    // ⚠`s`(dotAll)フラグは tsconfig の target(ES2017)未対応のため使わない。
+    // `[\s\S]*` は改行もまたぐので、`s` フラグと同じ挙動を保ったまま型検査を通す。
+    expect(sql).toMatch(/UNIQUE INDEX [\s\S]*edit_locks[\s\S]*resource_type[\s\S]*resource_id/);
   });
   it("利用者を消したら鍵も消える", () => {
     expect(sql).toMatch(/FOREIGN KEY \("user_id"\) REFERENCES "users"\("id"\) ON DELETE CASCADE/);
