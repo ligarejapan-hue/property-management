@@ -45,6 +45,42 @@ interface PropertyData {
   note: string | null;
   assignedTo: string | null;
   version: number;
+  // ── 「販売」区分(F3 Task7) ─────────────────────────────────────────────
+  salePrice: number | null;
+  saleTaxType: string | null;
+  saleTaxAmount: number | null;
+  access: string | null;
+  landArea: number | null;
+  landAreaMethod: string | null;
+  totalFloorArea: number | null;
+  builtYear: number | null;
+  builtMonth: number | null;
+  structureType: string | null;
+  aboveFloors: number | null;
+  basementFloors: number | null;
+  parking: string | null;
+  totalUnits: number | null;
+  grossYield: number | null;
+  expectedIncome: number | null;
+  exclusiveArea: number | null;
+  balconyArea: number | null;
+  layoutType: string | null;
+  orientation: string | null;
+  floorNo: number | null;
+  managementFee: number | null;
+  repairReserveFee: number | null;
+  // ⚠区分マンションの構造・地上階・総戸数・築年月・地下階は「棟の値が正」
+  //   (既存設計)。この画面からは編集できない・読み取り専用表示のみ。
+  building: {
+    id: string;
+    name: string;
+    structureType: string | null;
+    totalFloors: number | null;
+    totalUnits: number | null;
+    basementFloors: number | null;
+    builtYear: number | null;
+    builtMonth: number | null;
+  } | null;
 }
 
 interface PropertyEditFormProps {
@@ -100,6 +136,69 @@ function isFieldVisible(
   //   保存前に取り消せなくなる。
   if (field.type === "clearOnly") return clearableKeys.has(field.key);
   return true;
+}
+
+/** 区分マンション(新値/旧値どちらも)か。棟の項目を読み取り専用にする判定に使う。 */
+function isMansionUnit(propertyType: string): boolean {
+  return propertyType === "apartment_unit" || propertyType === "unit";
+}
+
+/**
+ * 「販売」区分に出す欄(物件の種別ごと)。仕様書 §5.1。
+ * ⚠区分マンションの構造・地上階・総戸数は含めない(棟の値が正・読み取り専用の
+ *   別ブロックで表示する)。
+ */
+export function salesFieldsFor(propertyType: string): FormField[] {
+  const price: FormField[] = [
+    { key: "salePrice", label: "価格(万円)", type: "number", section: "販売" },
+  ];
+  const tax: FormField[] = [
+    { key: "saleTaxType", label: "消費税", type: "text", section: "販売" },
+    { key: "saleTaxAmount", label: "うち消費税(万円)", type: "number", section: "販売" },
+  ];
+  const access: FormField[] = [{ key: "access", label: "交通", type: "text", section: "販売" }];
+  const land: FormField[] = [
+    { key: "landArea", label: "土地面積(㎡)", type: "number", section: "販売" },
+    { key: "landAreaMethod", label: "面積計測方式", type: "text", section: "販売" },
+  ];
+  const buildingBody: FormField[] = [
+    { key: "totalFloorArea", label: "建物面積(延べ・㎡)", type: "number", section: "販売" },
+    { key: "builtYear", label: "築年", type: "number", section: "販売" },
+    { key: "builtMonth", label: "築月", type: "number", section: "販売" },
+    { key: "structureType", label: "構造", type: "text", section: "販売" },
+    { key: "aboveFloors", label: "地上階", type: "number", section: "販売" },
+    { key: "basementFloors", label: "地下階", type: "number", section: "販売" },
+    { key: "parking", label: "駐車場", type: "text", section: "販売" },
+  ];
+  switch (propertyType) {
+    case "land":
+      return [...price, ...access, ...land];
+    case "house":
+      return [...price, ...tax, ...access, ...land, ...buildingBody];
+    case "apartment_building":
+    case "apartment_block":
+      return [
+        ...price, ...tax, ...access, ...land, ...buildingBody,
+        { key: "totalUnits", label: "総戸数", type: "number", section: "販売" },
+        { key: "grossYield", label: "想定利回り(%)", type: "number", section: "販売" },
+        { key: "expectedIncome", label: "満室想定収入(万円/年)", type: "number", section: "販売" },
+      ];
+    case "apartment_unit":
+    case "unit":
+      return [
+        ...price, ...tax, ...access,
+        { key: "exclusiveArea", label: "専有面積(㎡)", type: "number", section: "販売" },
+        { key: "balconyArea", label: "バルコニー面積(㎡)", type: "number", section: "販売" },
+        { key: "layoutType", label: "間取り", type: "text", section: "販売" },
+        { key: "orientation", label: "向き", type: "text", section: "販売" },
+        { key: "floorNo", label: "所在階", type: "number", section: "販売" },
+        { key: "managementFee", label: "管理費(円/月)", type: "number", section: "販売" },
+        { key: "repairReserveFee", label: "修繕積立金(円/月)", type: "number", section: "販売" },
+        { key: "parking", label: "駐車場", type: "text", section: "販売" },
+      ];
+    default:
+      return [];
+  }
 }
 
 const FORM_FIELDS: FormField[] = [
@@ -177,22 +276,34 @@ export default function PropertyEditForm({
   );
 
   useEffect(() => {
+    // 「販売」区分(F3 Task7)は物件の種別によって出す欄が変わるため、開いた時点の
+    // 種別で組み立てる(FORM_FIELDS だけでは salePrice 等の初期値が読み込まれない)。
+    const fieldsToLoad = [...FORM_FIELDS, ...salesFieldsFor(property.propertyType)];
     const initial: Record<string, string> = {};
-    for (const f of FORM_FIELDS) {
+    for (const f of fieldsToLoad) {
       const val = (property as unknown as Record<string, unknown>)[f.key];
       initial[f.key] = val != null ? String(val) : "";
     }
     setValues(initial);
     setClearableKeys(
       new Set(
-        FORM_FIELDS.filter(
-          (f) => f.type === "clearOnly" && (initial[f.key] ?? "").trim() !== "",
-        ).map((f) => f.key),
+        fieldsToLoad
+          .filter(
+            (f) => f.type === "clearOnly" && (initial[f.key] ?? "").trim() !== "",
+          )
+          .map((f) => f.key),
       ),
     );
     // prop（既存値）再投入は user-edit ではない＝signal をリセット（初期ロードで検索しない）。
     setAddressEdited(false);
   }, [property]);
+
+  // 「販売」区分の欄は種別ごとに変わる(編集中の select 変更にも追従する)。
+  // ⚠values.propertyType は上の effect が走るまで未設定なので property.propertyType へ
+  //   フォールバックする(初回描画のちらつき防止)。
+  const salesFields = salesFieldsFor(values.propertyType ?? property.propertyType);
+  const allFields = [...FORM_FIELDS, ...salesFields];
+  const isMansion = isMansionUnit(values.propertyType ?? property.propertyType);
 
   useEffect(() => {
     let cancelled = false;
@@ -234,7 +345,7 @@ export default function PropertyEditForm({
     // ⚠API も 422 で弾くが、どの項目かを画面で示すほうが直しやすい。
     // ⚠**いま表示している項目だけ**を見る。隠れている項目を理由に止めると、
     // 画面に無いものを直せと言うことになり手詰まりになる。
-    const tooLong = FORM_FIELDS.find(
+    const tooLong = allFields.find(
       (f) =>
         isFieldVisible(f, values, clearableKeys) &&
         isOverMaxLength(f, values[f.key]),
@@ -254,7 +365,7 @@ export default function PropertyEditForm({
       // 状態に陥る。初期値(property)と一致する項目は送らないことでこれを防ぎ、未編集項目の上書き(競合)も避ける。
       const payload: Record<string, unknown> = { version: property.version };
       const propRecord = property as unknown as Record<string, unknown>;
-      for (const f of FORM_FIELDS) {
+      for (const f of allFields) {
         const raw = values[f.key] ?? "";
         const initialRaw = propRecord[f.key];
         const initialStr = initialRaw != null ? String(initialRaw) : "";
@@ -294,7 +405,7 @@ export default function PropertyEditForm({
     }
   };
 
-  const sections = [...new Set(FORM_FIELDS.map((f) => f.section))];
+  const sections = [...new Set(allFields.map((f) => f.section))];
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 py-8">
@@ -328,7 +439,7 @@ export default function PropertyEditForm({
                 {section}情報
               </h4>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                {FORM_FIELDS.filter((f) => f.section === section)
+                {allFields.filter((f) => f.section === section)
                   // 条件つきの項目 (物件名など) はここで出し入れする。
                   // ⚠判定は保存前の検証と共有する (isFieldVisible)。
                   .filter((f) => isFieldVisible(f, values, clearableKeys))
@@ -456,6 +567,27 @@ export default function PropertyEditForm({
                   ),
                 )}
               </div>
+              {/* 区分マンション: 構造・地上階・地下階・総戸数・築年月は「棟の値が正」
+                  (既存設計)。この画面では編集できない・読み取り専用表示+棟の画面への
+                  リンクのみ(F3 Task7)。 */}
+              {section === "販売" && isMansion && property.building && (
+                <div className="mt-3 rounded border border-neutral-200 p-2 text-sm dark:border-neutral-700">
+                  <p className="mb-1 font-semibold">棟の項目(この画面では変更できません)</p>
+                  <p>
+                    構造 {property.building.structureType ?? "—"} / 地上階{" "}
+                    {property.building.totalFloors ?? "—"} / 地下階{" "}
+                    {property.building.basementFloors ?? "—"} / 総戸数{" "}
+                    {property.building.totalUnits ?? "—"} / 築年月{" "}
+                    {property.building.builtYear ?? "—"}年{property.building.builtMonth ?? "—"}月
+                  </p>
+                  <a
+                    href={`/buildings/${property.building.id}`}
+                    className="text-blue-600 underline dark:text-blue-400"
+                  >
+                    棟の画面で直す
+                  </a>
+                </div>
+              )}
             </div>
           ))}
         </div>

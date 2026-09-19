@@ -237,6 +237,33 @@ export const updatePropertySchema = z.object({
   architectureNote: z.string().optional().nullable(),
   note: z.string().optional().nullable(),
   assignedTo: z.string().uuid().optional().nullable(),
+  // ── 「販売」区分(F3 Task7・物件編集画面から編集できる列) ──────────────────
+  // ⚠区分マンションの構造・地上階・総戸数・地下階・築年月は棟の値が正のため、
+  //   ここには含めない(引き続き棟の画面でのみ編集する・R12/R13 と同じ扱い)。
+  salePrice: z.number().optional().nullable(),
+  saleTaxType: z.string().optional().nullable(),
+  saleTaxAmount: z.number().optional().nullable(),
+  access: z.string().optional().nullable(),
+  landArea: z.number().optional().nullable(),
+  landAreaMethod: z.string().optional().nullable(),
+  totalFloorArea: z.number().optional().nullable(),
+  builtYear: z.number().int().optional().nullable(),
+  builtMonth: z.number().int().min(1).max(12).optional().nullable(),
+  structureType: z.string().optional().nullable(),
+  aboveFloors: z.number().int().optional().nullable(),
+  basementFloors: z.number().int().optional().nullable(),
+  parking: z.string().optional().nullable(),
+  totalUnits: z.number().int().optional().nullable(),
+  grossYield: z.number().optional().nullable(),
+  expectedIncome: z.number().optional().nullable(),
+  // 区分マンションの部屋固有項目(既存列。画面からは今回はじめて編集できるようにする)。
+  exclusiveArea: z.number().optional().nullable(),
+  balconyArea: z.number().optional().nullable(),
+  layoutType: z.string().optional().nullable(),
+  orientation: z.string().optional().nullable(),
+  floorNo: z.number().int().optional().nullable(),
+  managementFee: z.number().int().optional().nullable(),
+  repairReserveFee: z.number().int().optional().nullable(),
   version: z.number().int(), // optimistic locking
 });
 

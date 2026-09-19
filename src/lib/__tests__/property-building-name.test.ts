@@ -149,8 +149,10 @@ describe("長さの扱い — 整えてから測り、超えたら断る (@codex
     // 代わりに超過を画面で伝え、保存も止める
     expect(modal).toMatch(/isBuildingNameTooLong\(buildingName\)/);
     expect(edit).toMatch(/isOverMaxLength\(field, values\[field\.key\]\)/);
-    // 保存前の検査は「表示中の項目だけ」を見る (別テストで判定の共有も固定)
-    expect(edit).toMatch(/const tooLong = FORM_FIELDS\.find\(/);
+    // 保存前の検査は「表示中の項目だけ」を見る (別テストで判定の共有も固定)。
+    // ⚠F3 Task7 で「販売」区分(種別ごとに変わる allFields)も対象に含めるよう広げた
+    // (FORM_FIELDS 固定 → allFields = FORM_FIELDS + salesFieldsFor(...))。
+    expect(edit).toMatch(/const tooLong = allFields\.find\(/);
   });
 });
 
