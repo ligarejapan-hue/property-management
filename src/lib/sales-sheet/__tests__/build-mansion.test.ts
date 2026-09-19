@@ -208,6 +208,108 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     expect(tableRow(noArea, "専有面積")).toBe("");
   });
 
+  // R16: exclusiveArea/balconyArea/balconyDir/layout/floorNo/managementFee/repairFee の
+  // 7項目は override 優先(空/未指定なら property の自動反映値)。図面作成時に物件へ書き戻す
+  // (buildWriteback)のと同じ入力から図面を組むことで、「入力した値が図面に出ない」ズレを
+  // 防ぐ(structure/totalFloors/totalUnits は棟が正のため対象外・変更していない)。
+  it("R16: exclusiveArea を override すると図面は override 値を使う(property の古い値ではない)", () => {
+    const doc = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, exclusiveArea: "65.00" }, // property の「古い値」
+      overrides: { exclusiveArea: "67.21" }, // 作成画面で入力した値
+    });
+    expect(tableRow(doc, "専有面積")).toBe("67.21㎡");
+  });
+
+  it("R16: exclusiveArea を override しなければ従来どおり property の自動反映値を使う", () => {
+    const doc = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, exclusiveArea: "65.00" },
+      overrides: {},
+    });
+    expect(tableRow(doc, "専有面積")).toBe("65.00㎡");
+  });
+
+  it("R16: balconyArea/balconyDir を override すると「バルコニー」行に反映される", () => {
+    const overridden = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, balconyArea: "8.20", orientation: "北" },
+      overrides: { balconyArea: "10.50", balconyDir: "南" },
+    });
+    expect(tableRow(overridden, "バルコニー")).toBe("10.50㎡ / 南");
+    const auto = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, balconyArea: "8.20", orientation: "北" },
+      overrides: {},
+    });
+    expect(tableRow(auto, "バルコニー")).toBe("8.20㎡ / 北");
+  });
+
+  it("R16: layout を override すると「間取り」行に反映される", () => {
+    const overridden = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, layoutType: "2LDK" }, // property の「古い値」
+      overrides: { layout: "3LDK" },
+    });
+    expect(tableRow(overridden, "間取り")).toBe("3LDK");
+    const auto = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, layoutType: "2LDK" },
+      overrides: {},
+    });
+    expect(tableRow(auto, "間取り")).toBe("2LDK");
+  });
+
+  it("R16: floorNo を override すると「所在階・階数」行に反映される", () => {
+    const overridden = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, floorNo: 4 }, // property の「古い値」
+      overrides: { floorNo: "7" },
+    });
+    expect(tableRow(overridden, "所在階・階数")).toBe("7階 / 地上7階");
+    const auto = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, floorNo: 4 },
+      overrides: {},
+    });
+    expect(tableRow(auto, "所在階・階数")).toBe("4階 / 地上7階");
+  });
+
+  it("R16: managementFee/repairFee を override すると「管理費・修繕積立金」行に反映される", () => {
+    const overridden = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, managementFee: 12000, repairReserveFee: 8500 }, // 古い値
+      overrides: { managementFee: "15000", repairFee: "9000" },
+    });
+    expect(tableRow(overridden, "管理費・修繕積立金")).toBe("管理費 15,000円/月 / 修繕 9,000円/月");
+    const auto = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, managementFee: 12000, repairReserveFee: 8500 },
+      overrides: {},
+    });
+    expect(tableRow(auto, "管理費・修繕積立金")).toBe("管理費 12,000円/月 / 修繕 8,500円/月");
+  });
+
+  it("R16: override が空文字なら未指定と同じ扱いで property の自動反映値を使う", () => {
+    const doc = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, exclusiveArea: "65.00" },
+      overrides: { exclusiveArea: "" },
+    });
+    expect(tableRow(doc, "専有面積")).toBe("65.00㎡");
+  });
+
+  it("R16: structure/totalFloors/totalUnits は対象外(棟の値のみ・override機構を持たない)", () => {
+    // building.structureType が正で、SaleMansionOverrides に structure/totalFloors/
+    // totalUnits の override フィールド自体が(型上も)存在しない=今回変更していないこと
+    // をスペック表(building の値がそのまま出ること)で確認する。
+    const doc = buildSaleMansionDocument({ ...base, overrides: {} });
+    expect(tableRow(doc, "建物構造")).toBe("RC");
+    // base.property に floorNo が無いため、空パートは除かれ "地上7階"(totalFloors=building.
+    // totalFloors)のみになる(joinParts の filter(Boolean)挙動)。
+    expect(tableRow(doc, "所在階・階数")).toBe("地上7階");
+  });
+
   it("写真3枚→image要素3、0枚→0", () => {
     const photos3 = [
       { fileUrl: "/uploads/1.jpg" },

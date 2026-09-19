@@ -231,6 +231,24 @@ function sqlOf(call: unknown[]): string {
   return (call[0] as string[]).join("?");
 }
 
+/**
+ * createDesign(実装は薄いモックだが document 自体は build-document.ts の実関数で組む)
+ * に渡された document から、スペック表(footer-* を除く table 要素)の行を label で引く。
+ * R16: 図面と物件が同じ入力から作られることを確認するのに使う。
+ */
+function documentTableRow(label: string): string | undefined {
+  const doc = (createDesign as Mock).mock.calls[0][0].document as {
+    elements: { type: string; id?: string; rows?: { label: string; value: string }[] }[];
+  };
+  for (const el of doc.elements) {
+    if (el.type === "table" && !el.id?.startsWith("footer-")) {
+      const r = el.rows?.find((row) => row.label === label);
+      if (r) return r.value;
+    }
+  }
+  return undefined;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   (getApiSession as Mock).mockResolvedValue(ADMIN_SESSION);
@@ -486,6 +504,30 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
       source: "manual",
       changedBy: "u1",
     });
+  });
+
+  // R16: buildMansionValues(build-document.ts)が override を読まず常に property の
+  // 自動反映値を使っていたため、「物件には新しい値が保存されるが、同じリクエストで
+  // 作られる図面には物件の古い値が出る」というズレがあった。図面(document)と物件
+  // (property.updateMany)が同じ入力から作られる(=一致する)ことをこのテストで固定する。
+  it("区分で exclusiveArea を送ると、図面にその値が出て物件にも同じ値が保存される(R16)", async () => {
+    // 物件の「古い値」は 65.00。作成画面で 67.21 を入力する想定。
+    propertyFindMock.mockResolvedValue({ ...baseMansion, exclusiveArea: "65.00" });
+    const res = await POST(req({ exclusiveArea: "67.21", propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    // 図面: 入力値(67.21)が出る。物件の古い値(65.00)ではない。
+    expect(documentTableRow("専有面積")).toBe("67.21㎡");
+    // 物件: 同じ入力値(数値化した 67.21)が保存される。
+    expect(updateManyMock).toHaveBeenCalledTimes(1);
+    expect(updateManyMock.mock.calls[0][0].data).toMatchObject({ exclusiveArea: 67.21 });
+  });
+
+  it("区分で exclusiveArea を送らなければ、図面は従来どおり物件の値を使う(R16)", async () => {
+    propertyFindMock.mockResolvedValue({ ...baseMansion, exclusiveArea: "65.00" });
+    const res = await POST(req({ propertyVersion: 1 }), ctx); // exclusiveArea 省略
+    expect(res.status).toBe(201);
+    expect(documentTableRow("専有面積")).toBe("65.00㎡");
+    expect(updateManyMock).not.toHaveBeenCalled(); // 差分が無いので書き戻しも起きない
   });
 
   it("区分で layout を送ると layoutType に入る(R14)", async () => {

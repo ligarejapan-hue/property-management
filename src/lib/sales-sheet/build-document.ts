@@ -174,6 +174,10 @@ export interface SaleMansionOverrides {
   unitPrice?: string;
   tax?: string;
   taxAmount?: string;
+  /** ⚠R16: override 優先(空/未指定なら property の自動反映値)。書き戻しとも一致させる。 */
+  managementFee?: string;
+  /** ⚠R16: 同上。 */
+  repairFee?: string;
   // 所在・交通
   access?: string;
   // 土地・権利
@@ -184,6 +188,16 @@ export interface SaleMansionOverrides {
   useDistrict?: string[];
   areaMethod?: string;
   // 建物
+  /** ⚠R16: override 優先(空/未指定なら property の自動反映値)。書き戻しとも一致させる。 */
+  exclusiveArea?: string;
+  /** ⚠R16: 同上。 */
+  balconyArea?: string;
+  /** ⚠R16: 同上(→ orientation)。 */
+  balconyDir?: string;
+  /** ⚠R16: 同上(→ layoutType)。 */
+  layout?: string;
+  /** ⚠R16: 同上。 */
+  floorNo?: string;
   basementFloors?: string;
   /** 築年月（月精度）。無ければ building.builtYear（年精度）へフォールバック。 */
   builtYearMonth?: string;
@@ -263,7 +277,7 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
   );
 
   return {
-    // 価格・費用（管理費/修繕積立金は自動反映のみ・price/unitPrice/tax/taxAmountは手入力のみ）
+    // 価格・費用（price/unitPrice/tax/taxAmountは手入力のみ）
     // propertyType: 自動反映元なし（DB enum が語彙不一致のため常に手入力=override のみ）。
     propertyType: o.propertyType,
     buildingName: b.name ?? undefined,
@@ -271,8 +285,21 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
     unitPrice: o.unitPrice,
     tax: o.tax,
     taxAmount: o.taxAmount,
-    managementFee: p.managementFee != null ? fmtYen(p.managementFee) : undefined,
-    repairFee: p.repairReserveFee != null ? fmtYen(p.repairReserveFee) : undefined,
+    // ⚠R16: 管理費/修繕積立金は override 優先(空/未指定なら property の自動反映値)。
+    // 図面(この document)と物件(buildWriteback)を同じ入力から作るため
+    // (土地・戸建・一棟の他項目と同じ「o.x が非空なら o.x、そうでなければ auto」の書き方)。
+    managementFee:
+      o.managementFee && o.managementFee.trim() !== ""
+        ? o.managementFee
+        : p.managementFee != null
+          ? fmtYen(p.managementFee)
+          : undefined,
+    repairFee:
+      o.repairFee && o.repairFee.trim() !== ""
+        ? o.repairFee
+        : p.repairReserveFee != null
+          ? fmtYen(p.repairReserveFee)
+          : undefined,
     // 所在・交通
     address: p.address,
     access: o.access,
@@ -285,12 +312,24 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
     areaMethod: o.areaMethod,
     // 専有面積: 面積計測方式(壁芯/内法)を括弧書きで併記して1つの表示値に合成する
     // （field-model.exclusiveArea は unit を持たないため ㎡ もここで付与する）。
-    exclusiveArea: fmtExclusiveArea(p.exclusiveArea, o.areaMethod),
-    balconyArea: p.balconyArea ?? undefined,
-    balconyDir: p.orientation ?? undefined,
-    layout: p.layoutType ?? undefined,
+    // ⚠R16: override 優先(空/未指定なら property の自動反映値)。
+    exclusiveArea: fmtExclusiveArea(
+      o.exclusiveArea && o.exclusiveArea.trim() !== "" ? o.exclusiveArea : p.exclusiveArea,
+      o.areaMethod,
+    ),
+    // ⚠R16: 以下4項目も override 優先(空/未指定なら property の自動反映値)。
+    balconyArea:
+      o.balconyArea && o.balconyArea.trim() !== "" ? o.balconyArea : (p.balconyArea ?? undefined),
+    balconyDir:
+      o.balconyDir && o.balconyDir.trim() !== "" ? o.balconyDir : (p.orientation ?? undefined),
+    layout: o.layout && o.layout.trim() !== "" ? o.layout : (p.layoutType ?? undefined),
     structure: b.structureType ?? undefined,
-    floorNo: p.floorNo != null ? String(p.floorNo) : undefined,
+    floorNo:
+      o.floorNo && o.floorNo.trim() !== ""
+        ? o.floorNo
+        : p.floorNo != null
+          ? String(p.floorNo)
+          : undefined,
     totalFloors: b.totalFloors != null ? String(b.totalFloors) : undefined,
     basementFloors: o.basementFloors,
     builtYearMonth: fmtBuiltYear(o.builtYearMonth, b.builtYear),
