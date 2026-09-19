@@ -39,6 +39,23 @@ export default function MailSettingsPage() {
   const [appBaseUrl, setAppBaseUrl] = useState("");
   const [inquiryMailDetail, setInquiryMailDetail] = useState<"minimal" | "full">("minimal");
 
+  // 接続方式ごとの既定ポート(選択を変えたときだけポートを合わせる用)。
+  const KNOWN_DEFAULT_PORTS = ["465", "587"];
+
+  // 接続方式(SSL/STARTTLS)を変えたとき、ポートが空欄か「もう一方の既定値」のままなら
+  // 新しい既定値へ合わせる。手入力で別のポート(例: 2525)を使っている場合は変えない。
+  // ⚠読み込み時(applySettings)からは呼ばない=保存済みの値を勝手に書き換えない。
+  const handleSmtpSecureChange = (nextSecure: boolean) => {
+    setSmtpSecure(nextSecure);
+    setSmtpPort((prev) => {
+      const trimmed = prev.trim();
+      if (trimmed === "" || KNOWN_DEFAULT_PORTS.includes(trimmed)) {
+        return nextSecure ? "465" : "587";
+      }
+      return prev;
+    });
+  };
+
   // 直近に保存された値(未保存の変更があるかどうかの判定に使う)。パスワードは含めない
   // (欄は常に空スタートのため、未保存判定は「入力されているか」だけで見る)。
   const [savedSnapshot, setSavedSnapshot] = useState({
@@ -163,6 +180,15 @@ export default function MailSettingsPage() {
 
   const complete = meta?.complete ?? false;
 
+  // 接続方式とポートの既知の食い違い(ヒントのみ=保存は止めない)。
+  const trimmedPort = smtpPort.trim();
+  const portMismatchNote =
+    smtpSecure && trimmedPort === "587"
+      ? "この接続方式では通常 465 を使います(587 のままでも保存はできます)"
+      : !smtpSecure && trimmedPort === "465"
+        ? "この接続方式では通常 587 を使います(465 のままでも保存はできます)"
+        : null;
+
   return (
     <div className="mx-auto max-w-2xl space-y-5 p-4 sm:p-6">
       <PageHeader
@@ -216,11 +242,14 @@ export default function MailSettingsPage() {
             maxLength={5}
             className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
+          {portMismatchNote && (
+            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">{portMismatchNote}</p>
+          )}
         </Field>
         <Field label="接続方式">
           <select
             value={smtpSecure ? "ssl" : "starttls"}
-            onChange={(e) => setSmtpSecure(e.target.value === "ssl")}
+            onChange={(e) => handleSmtpSecureChange(e.target.value === "ssl")}
             className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           >
             <option value="ssl">SSL(465)</option>
@@ -321,7 +350,14 @@ function smtpCodeHint(code: string): string | null {
   if (code.includes("AUTH")) {
     return "ユーザー名またはパスワードが違う可能性があります";
   }
-  if (code.includes("TIMEOUT") || code.includes("TIMED") || code.includes("CONNECTION") || code.includes("ECONNREFUSED") || code.includes("ENOTFOUND")) {
+  if (
+    code.includes("TIMEOUT") ||
+    code.includes("TIMED") ||
+    code.includes("CONNECTION") ||
+    code.includes("ECONNREFUSED") ||
+    code.includes("ENOTFOUND") ||
+    code.includes("RESET")
+  ) {
     return "送信サーバー名またはポートが違う可能性があります";
   }
   return null;
