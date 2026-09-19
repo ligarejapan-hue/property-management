@@ -1142,7 +1142,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   (getApiSession as unknown as Mock).mockResolvedValue({ id: UID, role: "general" });
   (getUserPermissions as unknown as Mock).mockResolvedValue(WRITE);
-  pm.property.findUnique.mockResolvedValue({ createdBy: UID, assignedTo: null });
+  pm.property.findUnique.mockResolvedValue({ createdBy: UID, assignedTo: null, isArchived: false });
 });
 
 describe("POST /api/edit-locks/acquire", () => {
@@ -1192,6 +1192,12 @@ describe("POST /api/edit-locks/acquire", () => {
   it("合言葉のヘッダが無ければ 400", async () => {
     const res = await acquire(req({ resourceType: "property", resourceId: PROP }, null));
     expect(res.status).toBe(400);
+  });
+
+  it("アーカイブ済みの物件は 404(鍵を取らせない)", async () => {
+    pm.property.findUnique.mockResolvedValue({ createdBy: UID, assignedTo: null, isArchived: true });
+    const res = await acquire(req({ resourceType: "property", resourceId: PROP }));
+    expect(res.status).toBe(404);
   });
 
   it("担当外のアルバイトは 403", async () => {
@@ -1274,9 +1280,11 @@ export async function POST(request: Request) {
         await lockPropertyRow(tx, resourceId);
         const property = await tx.property.findUnique({
           where: { id: resourceId },
-          select: { createdBy: true, assignedTo: true },
+          // ⚠`isArchived` も読む(@codex R10 P2)。読まないと、一覧から消えているアーカイブ済みの
+          //   物件に対して、窓口を直接呼ぶだけで鍵を取り続けられる(所有者側は既に弾いている)。
+          select: { createdBy: true, assignedTo: true, isArchived: true },
         });
-        if (!property) throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
+        if (!property || property.isArchived) throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
         assertCanLockProperty(session, perms, property);
       } else {
         await tx.$queryRaw`SELECT id FROM owners WHERE id = ${resourceId}::uuid FOR UPDATE`;
@@ -1571,6 +1579,15 @@ describe("取込と編集中の鍵", () => {
     // owner.updateMany の data に version: { increment: 1 } が含まれることを検査する。
   });
 
+  it("鍵があっても、埋める余地が無ければフラグを立てない", async () => {
+    // 3項目とも既に値が入っている物件 + 鍵あり → propertyFillSkippedByEditLock は false
+    // (取込画面の警告も監査のフラグも出ない)(@codex R10 P2)。
+  });
+
+  it("所有者の法人番号も、既に入っていれば見送りのフラグを立てない", async () => {
+    // 既存所有者の corporateNumber が既にある + 鍵あり → ownerCorporateFillSkippedByEditLock は false。
+  });
+
   it("物件に鍵があれば空欄を埋めず、フラグを立てる", async () => {
     (readEditLocks as unknown as Mock).mockResolvedValue([
       { id: "l1", resourceType: "property", resourceId: "p1", userId: "u", screenTokenHash: "h", acquiredAt: new Date(), heartbeatAt: new Date(), activityAt: new Date(), forceReleasedAt: null },
@@ -1651,7 +1668,13 @@ if (!propertyLocked) {
   if (!existing.realEstateNumber && parsed.realEstateNumber) fieldUpdates.realEstateNumber = parsed.realEstateNumber;
   if (!existing.lotNumber && parsed.lotNumber) fieldUpdates.lotNumber = parsed.lotNumber;
   if (!existing.buildingNumber && parsed.buildingNumber) fieldUpdates.buildingNumber = parsed.buildingNumber;
-} else if (parsed.realEstateNumber || parsed.lotNumber || parsed.buildingNumber) {
+} else if (
+  // ⚠**実際に埋まるはずだった欄があるときだけ**立てる(@codex R10 P2)。
+  //   すでに全部埋まっている物件で「見送りました」と出すと、取込画面にも監査にも嘘が残る。
+  (!existing.realEstateNumber && parsed.realEstateNumber) ||
+  (!existing.lotNumber && parsed.lotNumber) ||
+  (!existing.buildingNumber && parsed.buildingNumber)
+) {
   propertyFillSkippedByEditLock = true;
 }
 const updates = { ...statusUpdates, ...fieldUpdates };
@@ -1772,9 +1795,13 @@ await deleteEditLocksFor(tx, [{ resourceType: "property", resourceId: id }]);
 ```js
 // 同時取得が1本しか通らないことを実DBで確かめる。
 // 使い方: npx dotenv -e .env -- node scripts/edit-lock-concurrency-check.mjs <propertyId>
+// ⚠この repo は Prisma 7 の driver adapter 構成(src/lib/prisma.ts)。**アダプタを渡さないと
+//   クライアントの初期化で落ちる**ので、同じ形で接続する(@codex R10 P2)。
 import { PrismaClient } from "../src/generated/prisma/index.js";
+import { PrismaPg } from "@prisma/adapter-pg";
 
-const prisma = new PrismaClient();
+const adapter = new PrismaPg(process.env.DATABASE_URL);
+const prisma = new PrismaClient({ adapter });
 const resourceId = process.argv[2];
 if (!resourceId) throw new Error("物件のUUIDを引数に渡してください");
 
