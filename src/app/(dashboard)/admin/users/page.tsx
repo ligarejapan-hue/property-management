@@ -16,9 +16,11 @@ import {
   LockOpen,
   ChevronRight,
   Trash2,
+  Mail,
 } from "lucide-react";
 import StatusBadge, { USER_ROLE_INTENT } from "@/components/ui/status-badge";
 import { ROLE_LABELS } from "@/lib/role-labels";
+import { InquiryNotifyDialog } from "@/components/admin/inquiry-notify-dialog";
 
 interface UserItem {
   id: string;
@@ -43,6 +45,7 @@ export default function UsersPage() {
   const [actionType, setActionType] = useState<
     "deactivate" | "activate" | "resetPw" | "unlock" | "delete" | null
   >(null);
+  const [notifyUser, setNotifyUser] = useState<UserItem | null>(null);
   const { data: sessionData } = useSession();
   const selfId = (sessionData?.user as { id?: string } | undefined)?.id ?? null;
   const [message, setMessage] = useState<{
@@ -259,6 +262,15 @@ export default function UsersPage() {
                           <Shield className="h-3.5 w-3.5" />
                           <span className="text-xs">権限</span>
                         </Link>
+                        <button
+                          type="button"
+                          onClick={() => setNotifyUser(u)}
+                          className="flex items-center gap-0.5 text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-gray-100"
+                          title="査定申込の通知設定"
+                        >
+                          <Mail className="h-3.5 w-3.5" />
+                          <span className="text-xs">通知</span>
+                        </button>
                         {u.isActive ? (
                           <button
                             onClick={() => {
@@ -406,6 +418,16 @@ export default function UsersPage() {
             flash("ok", "ユーザーを作成しました");
             load();
           }}
+        />
+      )}
+
+      {/* 通知設定ダイアログ */}
+      {notifyUser && (
+        <InquiryNotifyDialog
+          userId={notifyUser.id}
+          userName={notifyUser.name}
+          onClose={() => setNotifyUser(null)}
+          onSaved={() => flash("ok", "通知設定を保存しました")}
         />
       )}
     </div>

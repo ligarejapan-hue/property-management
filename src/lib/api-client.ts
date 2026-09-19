@@ -1106,6 +1106,48 @@ export async function fetchUsers() {
   return apiFetch<{ data: typeof MOCK_USERS }>("/api/users");
 }
 
+// ---------- 利用者ごとの査定申込の通知先(管理者) ----------
+
+export interface UserInquiryNotify {
+  enabled: boolean;
+  // null=ログインの email に送る。
+  email: string | null;
+  loginEmail: string;
+  // false のとき、enabled=true でもこの人には通知が届かない(売却DMを使う権限が無い)。
+  canUseSaleDm: boolean;
+}
+
+const EMPTY_USER_INQUIRY_NOTIFY: UserInquiryNotify = {
+  enabled: false,
+  email: null,
+  loginEmail: "",
+  canUseSaleDm: true,
+};
+
+export async function getUserInquiryNotify(id: string): Promise<{ data: UserInquiryNotify }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { ...EMPTY_USER_INQUIRY_NOTIFY } };
+  }
+  return apiFetch<{ data: UserInquiryNotify }>(`/api/admin/users/${id}/inquiry-notify`);
+}
+
+// 部分更新。email: ""(または null)=クリア(ログインの email を使う)。未指定の項目は触らない。
+export async function updateUserInquiryNotify(
+  id: string,
+  body: { enabled?: boolean; email?: string | "" | null },
+): Promise<{ data: UserInquiryNotify }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { ...EMPTY_USER_INQUIRY_NOTIFY, ...body, email: body.email ?? null } };
+  }
+  return apiFetch<{ data: UserInquiryNotify }>(`/api/admin/users/${id}/inquiry-notify`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 // ---------- Import Jobs ----------
 
 export interface FetchImportJobsParams {
