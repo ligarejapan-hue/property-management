@@ -4,6 +4,7 @@ import { toInquiryListRows, HIDDEN_NAME_PLACEHOLDER } from "@/lib/sale-dm-letter
 const row = (id: string, handleStatus: string, iso: string) => ({
   id, draftId: `d-${id}`, submittedAt: new Date(iso), name: `名${id}`, phone: "090-0000-0000", email: "a@b.jp",
   contactPref: "phone", contactTime: "夜", message: "要望", handleStatus, handledAt: null, handleNote: "対応メモ",
+  notifyStatus: "pending",
 });
 
 describe("toInquiryListRows", () => {
@@ -65,6 +66,18 @@ describe("toInquiryListRows", () => {
         contactHidden: true, emailHidden: true, freeTextHidden: true,
       });
     });
+  });
+
+  it("notifyStatus は個人情報ではないので表示権限に関わらずそのまま返す(伏せない・発注者判断 2026-09-18)", () => {
+    const src = { ...row("a", "open", "2026-09-20T00:00:00Z"), notifyStatus: "failed" };
+    for (const visibility of [
+      { contact: true, email: true },
+      { contact: true, email: false },
+      { contact: false, email: true },
+      { contact: false, email: false },
+    ]) {
+      expect(toInquiryListRows([src], visibility)[0].notifyStatus).toBe("failed");
+    }
   });
 
   it("対応メモ(handleNote)は折り返し番号などを含みうるため message と同じ (contact && email) で伏せる(@codex R10 P1)", () => {

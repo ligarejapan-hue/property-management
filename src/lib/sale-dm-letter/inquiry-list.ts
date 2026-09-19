@@ -19,6 +19,8 @@ export interface InquiryListRow {
   handleStatus: string;
   handledAt: Date | null;
   handleNote: string | null;
+  /** 通知メールの送信状況(pending/sending/sent/failed)。個人情報ではないので伏せ対象にしない。 */
+  notifyStatus: string;
   /** 電話・希望連絡方法(enum の contactPref。構造化された連絡先項目。email を除く)を
    *  権限不足で伏せたか。contactTime・message・handleNote はここには連動しない
    *  (自由記述なので下の freeTextHidden を見る)。 */

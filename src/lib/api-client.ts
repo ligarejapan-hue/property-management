@@ -392,6 +392,8 @@ export interface SaleDmInquiry {
   contactHidden: boolean;
   emailHidden: boolean;
   freeTextHidden: boolean;
+  /** 通知メールの送信状況(pending/sending/sent/failed)。 */
+  notifyStatus: string;
 }
 
 // 申込一覧は状態で絞らない1本のカーソルでたどる(振り分けは画面側)。counts は状態別の件数(範囲全体)。
@@ -406,6 +408,38 @@ export async function fetchSaleDmInquiries(campaignId: string, cursor?: string |
   );
 }
 
+/** 全キャンペーン横断の申込一覧の1行(発注者判断 2026-09-18: 売却DMを使える人全員が見て対応できる)。 */
+export interface SaleDmInquiryAcrossCampaigns extends SaleDmInquiry {
+  campaignId: string | null;
+  campaignName: string | null;
+  /** 物件所在の粗い表示(coarsePropertyLocation)。物件の住所そのものは返らない。 */
+  location: string | null;
+  propertyTypeLabel: string | null;
+}
+
+// 全キャンペーン横断の申込一覧。振り分け(状態)は画面側、カーソルは fetchSaleDmInquiries と同じ作法。
+// notifyRecipientCount は通知メールを受け取る利用者が居ない(=0)ときに画面が警告するための件数。
+export async function getAllSaleDmInquiries(cursor?: string | null) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      inquiries: [] as SaleDmInquiryAcrossCampaigns[],
+      hasMore: false,
+      nextCursor: null as string | null,
+      counts: { active: 0, done: 0 },
+      notifyRecipientCount: 0,
+    };
+  }
+  const cursorQuery = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiFetch<{
+    inquiries: SaleDmInquiryAcrossCampaigns[];
+    hasMore: boolean;
+    nextCursor: string | null;
+    counts: { active: number; done: number };
+    notifyRecipientCount: number;
+  }>(`/api/properties/sale-dm/inquiries${cursorQuery}`);
+}
+
 export async function updateSaleDmInquiryStatus(
   inquiryId: string,
   body: { handleStatus: SaleDmInquiry["handleStatus"]; handleNote?: string | null },
@@ -418,6 +452,19 @@ export async function updateSaleDmInquiryStatus(
   return apiFetch<{ inquiry: Pick<SaleDmInquiry, "id" | "handleStatus" | "handledAt" | "handleNote" | "freeTextHidden"> }>(
     `/api/properties/sale-dm/inquiries/${inquiryId}`,
     { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
+}
+
+// 通知メールの再送(notifyStatus が failed の申込のみ・Task 9 で作った POST .../notify)。
+// 202 { data: { started: true } } / 404 / 409 NOT_FAILED はそのまま呼び出し元(画面)に返る。
+export async function resendSaleDmInquiryNotify(inquiryId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { started: true } };
+  }
+  return apiFetch<{ data: { started: boolean } }>(
+    `/api/properties/sale-dm/inquiries/${inquiryId}/notify`,
+    { method: "POST" },
   );
 }
 

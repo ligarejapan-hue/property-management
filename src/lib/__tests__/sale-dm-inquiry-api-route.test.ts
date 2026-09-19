@@ -87,6 +87,7 @@ import { lockPropertyRow } from "@/lib/property-record-guard";
 const INQ = {
   id: "i1", draftId: "d1", submittedAt: new Date("2026-09-20T00:00:00Z"), name: "山田", phone: "090", email: null,
   contactPref: null, contactTime: null, message: null, handleStatus: "open", handledAt: null, handleNote: null,
+  notifyStatus: "pending",
   draft: { property: { createdBy: "u1", assignedTo: null } },
 };
 
@@ -108,7 +109,7 @@ describe("GET 申込一覧", () => {
     const res = await GET(new Request("http://x/api") as never, { params: Promise.resolve({ id: "c1" }) });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.inquiries[0]).toMatchObject({ id: "i1", name: "山田", phone: "090", contactHidden: false, freeTextHidden: false });
+    expect(body.inquiries[0]).toMatchObject({ id: "i1", name: "山田", phone: "090", contactHidden: false, freeTextHidden: false, notifyStatus: "pending" });
     expect(body.inquiries[0]).not.toHaveProperty("draft");
     const audit = (writeAuditLog as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(audit).toMatchObject({ action: "sale_dm_inquiry_view", targetId: "c1" });
@@ -258,14 +259,19 @@ describe("GET 申込一覧", () => {
 
 describe("PATCH 対応状況", () => {
   const patch = (b: unknown) => PATCH(new Request("http://x/api", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(b) }) as never, { params: Promise.resolve({ inquiryId: "i1" }) });
-  const FOUND = { id: "i1", draft: { propertyId: "p1", campaign: { createdBy: "u1" }, property: { createdBy: "u1", assignedTo: null } } };
+  const FOUND = { id: "i1", draft: { propertyId: "p1", property: { createdBy: "u1", assignedTo: null } } };
 
   it("列挙外の状態は 422", async () => {
     expect((await patch({ handleStatus: "closed" })).status).toBe(422);
   });
-  it("他人のキャンペーンの申込は 404", async () => {
-    db.dmInquiry.findUnique.mockResolvedValueOnce({ ...FOUND, draft: { ...FOUND.draft, campaign: { createdBy: "other" } } });
-    expect((await patch({ handleStatus: "done" })).status).toBe(404);
+  it("作成者でないキャンペーンの申込でも通る(申込は売却DMを使える人全員が対応できる・発注者判断 2026-09-18)", async () => {
+    const found = { id: "i1", draft: { propertyId: "p1", property: { createdBy: "someone-else", assignedTo: null } } };
+    db.dmInquiry.findUnique.mockResolvedValueOnce(found).mockResolvedValueOnce(found);
+    db.dmInquiry.update.mockResolvedValueOnce({ id: "i1", handleStatus: "done", handledAt: new Date(), handleNote: null });
+    const res = await patch({ handleStatus: "done" });
+    expect(res.status).toBe(200);
+    // findUnique の select にキャンペーンの作成者条件(campaign)を含めていないことも確認する。
+    expect(JSON.stringify(db.dmInquiry.findUnique.mock.calls[0][0].select)).not.toContain("campaign");
   });
   it("親の物件行をロックしてから更新。done は処理者と時刻を入れ、open に戻すと時刻を消す。監査は状態と時刻のみ", async () => {
     db.dmInquiry.findUnique.mockResolvedValueOnce(FOUND).mockResolvedValueOnce(FOUND);
@@ -345,14 +351,13 @@ describe("PATCH 対応状況", () => {
     expect(db.dmInquiry.update).not.toHaveBeenCalled();
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
-  it("ロック後に作成者が変わっていたら 404", async () => {
-    db.dmInquiry.findUnique
-      .mockResolvedValueOnce(FOUND)
-      .mockResolvedValueOnce({ draft: { propertyId: "p1", campaign: { createdBy: "other" }, property: { createdBy: "u1", assignedTo: null } } });
+  it("ロック後の再読取もキャンペーンの作成者を条件にしない(発注者判断 2026-09-18)", async () => {
+    db.dmInquiry.findUnique.mockResolvedValueOnce(FOUND).mockResolvedValueOnce(FOUND);
+    db.dmInquiry.update.mockResolvedValueOnce({ id: "i1", handleStatus: "done", handledAt: new Date(), handleNote: null });
     const res = await patch({ handleStatus: "done" });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
     expect(lockPropertyRow).toHaveBeenCalledWith(db, "p1");
-    expect(db.dmInquiry.update).not.toHaveBeenCalled();
-    expect(writeAuditLog).not.toHaveBeenCalled();
+    // ロック後の再読取(2回目の findUnique)の select にも campaign を含めない。
+    expect(JSON.stringify(db.dmInquiry.findUnique.mock.calls[1][0].select)).not.toContain("campaign");
   });
 });

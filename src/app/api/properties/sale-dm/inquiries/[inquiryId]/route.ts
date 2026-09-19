@@ -13,7 +13,8 @@ const bodySchema = z.object({
   handleNote: z.string().trim().max(500).nullable().optional(),
 });
 
-// 申込の対応状況の変更(設計 §2.5)。書き込み権限+作成者本人のキャンペーン+field_staff の担当範囲。
+// 申込の対応状況の変更(設計 §2.5)。書き込み権限+field_staff の担当範囲。
+// 発注者判断 2026-09-18: 申込は売却DMを使える人全員が対応できる(キャンペーンの作成者に限らない)。
 // 物件配下の書き込みなので親の物件行をロックしてから更新する(R50)。
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ inquiryId: string }> }) {
   try {
@@ -34,12 +35,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       where: { id: inquiryId },
       select: {
         id: true,
-        draft: { select: { propertyId: true, campaign: { select: { createdBy: true } }, property: { select: { createdBy: true, assignedTo: true } } } },
+        draft: { select: { propertyId: true, property: { select: { createdBy: true, assignedTo: true } } } },
       },
     });
     if (
       !found ||
-      found.draft.campaign.createdBy !== session.id ||
       filterDraftsByFieldStaffScope([{ property: found.draft.property }], session).length === 0
     ) {
       throw new ApiError(404, "申込が見つかりません", "NOT_FOUND");
@@ -49,18 +49,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const updated = await prisma.$transaction(async (tx) => {
       await lockPropertyRow(tx, found.draft.propertyId);
       // ロック取得後に再読取して再判定する(@codex P2): 先の読み取りと lockPropertyRow の
-      // 間に物件の担当替え/キャンペーンの作成者変更が挟まると、権限を失った field_staff が
-      // それでも更新できてしまう窓が残るため。
+      // 間に物件の担当替えが挟まると、権限を失った field_staff がそれでも更新できてしまう
+      // 窓が残るため。
       const locked = await tx.dmInquiry.findUnique({
         where: { id: inquiryId },
         select: {
-          draft: { select: { propertyId: true, campaign: { select: { createdBy: true } }, property: { select: { createdBy: true, assignedTo: true } } } },
+          draft: { select: { propertyId: true, property: { select: { createdBy: true, assignedTo: true } } } },
         },
       });
       if (
         !locked ||
         locked.draft.propertyId !== found.draft.propertyId ||
-        locked.draft.campaign.createdBy !== session.id ||
         filterDraftsByFieldStaffScope([{ property: locked.draft.property }], session).length === 0
       ) {
         throw new ApiError(404, "申込が見つかりません", "NOT_FOUND");
