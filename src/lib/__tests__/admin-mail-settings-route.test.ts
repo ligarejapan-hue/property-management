@@ -26,8 +26,12 @@ vi.mock("@/lib/prisma", () => ({
     user: { findUnique: vi.fn(), count: vi.fn() },
   },
 }));
-// SMTP送信は実サーバーに触れない: transport ごとモックする(setMailSenderForTest ではなくモジュール差し替え)。
-vi.mock("@/lib/mail/transport", () => ({ sendPlainMail: vi.fn() }));
+// SMTP送信は実サーバーに触れない: sendPlainMail だけモックし、safeErrorCode(許可リスト検査の純関数・
+// 副作用なし)は実装をそのまま使う(route側の再検査ロジックを実物で検証するため)。
+vi.mock("@/lib/mail/transport", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/mail/transport")>();
+  return { ...actual, sendPlainMail: vi.fn() };
+});
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import crypto from "crypto";
@@ -219,17 +223,55 @@ describe("POST /api/admin/mail-settings/test", () => {
     await POST();
     expect((sendPlainMail as ReturnType<typeof vi.fn>).mock.calls[0][1].to).toBe("op@example.com");
   });
-  it("送信失敗で502・監査result=failed・SMTP応答の生コードは応答に出さない", async () => {
+  // 発注者判断: 失敗時は許可リスト一致のSMTPコード(safeErrorCode 由来)だけ応答・監査に含める。
+  // 管理者がパスワード誤り(EAUTH)/接続不可等を切り分けられるようにするため。
+  it("送信失敗(許可リスト一致コード)で502・応答のsmtpCodeとaudit.detail.codeに同じコードを載せる", async () => {
     admin();
     pm.mailConfig.findUnique.mockResolvedValue(completeRow());
-    (sendPlainMail as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, code: "ECONNECTION" });
+    (sendPlainMail as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, code: "EAUTH" });
     const res = await POST();
     expect(res.status).toBe(502);
     const json = await res.json();
     expect(json.error.code).toBe("MAIL_SEND_FAILED");
-    expect(JSON.stringify(json)).not.toContain("ECONNECTION");
+    expect(json.error.smtpCode).toBe("EAUTH");
     const audit = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(audit.action).toBe("mail_settings_test");
-    expect(audit.detail).toEqual({ result: "failed" });
+    expect(audit.detail).toEqual({ result: "failed", code: "EAUTH" });
+  });
+  it("送信失敗(許可リスト外のコード)は応答・auditとも null(生文字列は出さない)", async () => {
+    admin();
+    pm.mailConfig.findUnique.mockResolvedValue(completeRow());
+    (sendPlainMail as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, code: "bad code a@b" });
+    const res = await POST();
+    expect(res.status).toBe(502);
+    const json = await res.json();
+    expect(json.error.smtpCode).toBeNull();
+    expect(JSON.stringify(json)).not.toContain("bad code a@b");
+    const audit = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(audit.detail).toEqual({ result: "failed", code: null });
+    expect(JSON.stringify(audit.detail)).not.toContain("bad code a@b");
+  });
+  it("送信失敗(コード無し)は応答・auditともnull", async () => {
+    admin();
+    pm.mailConfig.findUnique.mockResolvedValue(completeRow());
+    (sendPlainMail as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, code: null });
+    const res = await POST();
+    expect(res.status).toBe(502);
+    const json = await res.json();
+    expect(json.error.smtpCode).toBeNull();
+    const audit = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(audit.detail).toEqual({ result: "failed", code: null });
+  });
+  it("失敗応答は生メッセージ・宛先・パスワードを含まない", async () => {
+    admin();
+    pm.mailConfig.findUnique.mockResolvedValue(completeRow());
+    pm.user.findUnique.mockResolvedValue({ email: "op@example.com", inquiryNotifyEmail: "notify@example.com" });
+    (sendPlainMail as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, code: "EAUTH" });
+    const res = await POST();
+    const json = await res.json();
+    const s = JSON.stringify(json);
+    expect(s).not.toContain("notify@example.com");
+    expect(s).not.toContain("secret-pass");
+    expect(s).not.toContain("Invalid login: 535 5.7.8 authentication failed");
   });
 });

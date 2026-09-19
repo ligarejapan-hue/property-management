@@ -299,8 +299,10 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // メール送信設定 更新(管理画面)。fields=変更したフィールド名の配列(値ではない・ALWAYS_SAFE)。
   // SMTPホスト/ユーザー/差出人/パスワード等の値は detail に載せず、混入しても denylist(/mail/i 等)で [REDACTED]。
   mail_settings_update: new Set(["fields"]),
-  // メール送信設定のテスト送信。result=sent|failed の enum のみ。宛先・SMTP応答の生メッセージは載せない。
-  mail_settings_test: new Set(["result"]),
+  // メール送信設定のテスト送信。result=sent|failed の enum / code=safeErrorCode() 由来の許可リスト一致
+  // コードのみ(/^[A-Z][A-Z0-9_]{1,40}$/・管理者が原因(パスワード誤り/接続不可等)を切り分けるため)。
+  // 宛先・SMTP応答の生メッセージは載せない。
+  mail_settings_test: new Set(["result", "code"]),
   // 査定申込の通知メール送信(後続タスクで使用)。attempt=試行回数、recipientUserIds=通知先ユーザーIDの
   // 配列(UUID・氏名やメールアドレスではない)。本文・宛先メールアドレスは detail に載せない。
   inquiry_notify_sent: new Set(["attempt", "recipientUserIds"]),
