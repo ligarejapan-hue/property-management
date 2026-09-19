@@ -7,7 +7,7 @@ import {
   isLockExpired,
   type EditLockRow,
 } from "../rules";
-import { IDLE_TIMEOUT_MS } from "@/components/auth/idle-session-guard";
+import { IDLE_TIMEOUT_MS } from "@/lib/idle-timeout";
 
 const NOW = new Date("2026-09-18T10:00:00.000Z");
 const ago = (ms: number) => new Date(NOW.getTime() - ms);

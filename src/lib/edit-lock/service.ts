@@ -39,6 +39,10 @@ type RawRow = {
 // SQL の make_interval に渡す秒数。rules.ts の定数から導く(手で決め打ちしない)。
 // コントローラ決定②: この2つの定数から導いた値が SQL 文字列に現れることをテストで固定している
 // (src/lib/edit-lock/__tests__/service.test.ts「SQL の期限しきい値と rules.ts の一致」)。
+// ⚠`make_interval(secs => ${GRACE_SEC})` は Prisma が整数値の JS number を integer 型で
+//   bind するため、make_interval の `secs`(double precision)とパラメータ型が食い違い、
+//   実行時(本番 DB)にしか出ないエラーになる(CI に DB が無く検出できない)。
+//   全ての利用箇所で `${GRACE_SEC}::double precision` のように明示キャストする。
 const GRACE_SEC = EDIT_LOCK_HEARTBEAT_GRACE_MS / 1000;
 const IDLE_SEC = EDIT_LOCK_IDLE_LIMIT_MS / 1000;
 
@@ -83,8 +87,8 @@ export async function acquireEditLock(
   const prevRows = await db.$queryRaw<{ user_id: string; screen_token_hash: string; expired_by: "heartbeat" | "idle" | null }[]>`
     SELECT "user_id", "screen_token_hash",
            CASE
-             WHEN "heartbeat_at" < clock_timestamp() - make_interval(secs => ${GRACE_SEC}) THEN 'heartbeat'
-             WHEN "activity_at" < clock_timestamp() - make_interval(secs => ${IDLE_SEC}) THEN 'idle'
+             WHEN "heartbeat_at" < clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision) THEN 'heartbeat'
+             WHEN "activity_at" < clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision) THEN 'idle'
              ELSE NULL
            END AS expired_by
     FROM "edit_locks"
@@ -105,8 +109,8 @@ export async function acquireEditLock(
         "force_released_at" = NULL,
         "force_released_by" = NULL
     WHERE "edit_locks"."force_released_at" IS NOT NULL
-       OR "edit_locks"."heartbeat_at" < clock_timestamp() - make_interval(secs => ${GRACE_SEC})
-       OR "edit_locks"."activity_at" < clock_timestamp() - make_interval(secs => ${IDLE_SEC})
+       OR "edit_locks"."heartbeat_at" < clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision)
+       OR "edit_locks"."activity_at" < clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision)
        OR ("edit_locks"."user_id" = EXCLUDED."user_id" AND "edit_locks"."screen_token_hash" = EXCLUDED."screen_token_hash")
     RETURNING "id", "acquired_at"
   `;
@@ -141,8 +145,8 @@ export async function heartbeatEditLock(
       AND "user_id" = ${input.userId}::uuid
       AND "screen_token_hash" = ${input.screenTokenHash}
       AND "force_released_at" IS NULL
-      AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC})
-      AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC})
+      AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision)
+      AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision)
     RETURNING "id"
   `;
   if (updated[0]) return { ok: true };
@@ -243,8 +247,8 @@ export async function isResourceEditLocked(db: Db, target: Target): Promise<bool
       WHERE "resource_type" = ${target.resourceType}::"EditLockResource"
         AND "resource_id" = ${target.resourceId}::uuid
         AND "force_released_at" IS NULL
-        AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC})
-        AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC})
+        AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision)
+        AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision)
     ) AS locked
   `;
   return rows[0]?.locked ?? false;
@@ -279,8 +283,8 @@ export async function assertNotEditLockedByOther(
     SELECT "id", "user_id", "screen_token_hash",
            ("force_released_at" IS NOT NULL) AS force_released,
            ("force_released_at" IS NULL
-            AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC})
-            AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC})) AS active
+            AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision)
+            AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision)) AS active
     FROM "edit_locks"
     WHERE "resource_type" = ${input.resourceType}::"EditLockResource" AND "resource_id" = ${input.resourceId}::uuid
   `;

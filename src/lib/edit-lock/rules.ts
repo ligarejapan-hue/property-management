@@ -2,7 +2,10 @@
  * 編集中の鍵の判定ルール(純関数)。DB にも画面にも依存させない。
  * SQL 側(service.ts)とこのファイルは同じ定数から条件を組み立てる。
  */
-import { IDLE_TIMEOUT_MS } from "@/components/auth/idle-session-guard";
+// ⚠"use client" の idle-session-guard.tsx(react・next-auth/react を引き込む)を経由しない。
+// service.ts 経由でサーバ側 route handler(Task 5-6)にバンドルされるため、依存の無い
+// プレーンなモジュールから読む(idle-session-guard.tsx は同じ値を re-export している)。
+import { IDLE_TIMEOUT_MS } from "@/lib/idle-timeout";
 
 export const EDIT_LOCK_HEARTBEAT_INTERVAL_MS = 30_000;
 export const EDIT_LOCK_HEARTBEAT_GRACE_MS = 5 * 60_000;

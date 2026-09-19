@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/api-helpers", () => {
   class MockApiError extends Error {
@@ -29,6 +29,24 @@ function sqlOf(call: unknown[]): string {
 function fakeDb(result: unknown[] = []) {
   const queryRaw = vi.fn().mockResolvedValue(result);
   return { queryRaw, db: { $queryRaw: queryRaw } as never };
+}
+
+const GRACE_SEC = EDIT_LOCK_HEARTBEAT_GRACE_MS / 1000;
+const IDLE_SEC = EDIT_LOCK_IDLE_LIMIT_MS / 1000;
+
+/**
+ * `heartbeat_at` が GRACE_SEC(5分)、`activity_at` が IDLE_SEC(60分)で判定されている
+ * ことを、列名としきい値を1本の正規表現で結びつけて確認する(コントローラ指摘②)。
+ * 片方だけ見る assert だと「合図5分・操作60分」が逆(合図60分・操作5分)になっても
+ * 全テストが通ってしまう。`::double precision` キャスト(コントローラ指摘③)もここで固定する。
+ */
+function expectColumnThresholds(sql: string): void {
+  expect(sql).toMatch(
+    new RegExp(
+      `"heartbeat_at"[\\s\\S]*?make_interval\\(secs => \\{${GRACE_SEC}\\}::double precision\\)` +
+        `[\\s\\S]*?"activity_at"[\\s\\S]*?make_interval\\(secs => \\{${IDLE_SEC}\\}::double precision\\)`,
+    ),
+  );
 }
 
 const BASE = {
@@ -62,8 +80,7 @@ describe("acquireEditLock", () => {
     // ⚠brief の Step1 サンプルは "now()" だが、Global Constraint(clock_timestamp() を使う・
     // 行ロック待ちで書いた直後の鍵が期限切れにならないように)と Step3 サンプル自体が
     // clock_timestamp() を使っているため、こちらに合わせて固定する。
-    expect(sql).toMatch(/"edit_locks"\."heartbeat_at" < clock_timestamp\(\) - make_interval/);
-    expect(sql).toMatch(/"edit_locks"\."activity_at" < clock_timestamp\(\) - make_interval/);
+    expectColumnThresholds(sql);
     expect(sql).toMatch(/"edit_locks"\."user_id" = EXCLUDED\."user_id" AND "edit_locks"\."screen_token_hash" = EXCLUDED\."screen_token_hash"/);
   });
 
@@ -73,6 +90,60 @@ describe("acquireEditLock", () => {
     queryRaw.mockResolvedValueOnce([current]).mockResolvedValueOnce([]).mockResolvedValueOnce([current]);
     const res = await acquireEditLock(db, BASE);
     expect(res).toMatchObject({ state: "held" });
+  });
+
+  describe("takeover(横取り)の判定", () => {
+    // ⚠これは acquire 経路の中で唯一 SQL の WHERE ではなく JS 側で決めている分岐
+    // (sameScreen の比較)。SQL がどう判定したか(prevRows の1本目のクエリ)を
+    // 直接モックして、takeover の中身を固定する。
+    it("期限切れ+別人 ⇒ takeover に前の保持者と原因が入る", async () => {
+      const { db, queryRaw } = fakeDb([]);
+      queryRaw
+        .mockResolvedValueOnce([{ user_id: "other", screen_token_hash: "h-other", expired_by: "heartbeat" }])
+        .mockResolvedValueOnce([{ id: "new-lock", acquired_at: new Date("2026-09-18T10:00:00Z") }]);
+      const res = await acquireEditLock(db, BASE);
+      if (res.state !== "mine") throw new Error("expected mine");
+      expect(res.takeover).toEqual({ previousUserId: "other", expiredBy: "heartbeat" });
+    });
+
+    it("期限切れ+同じ利用者でも別タブ(合言葉違い)なら横取り扱い(D6)", async () => {
+      const { db, queryRaw } = fakeDb([]);
+      queryRaw
+        .mockResolvedValueOnce([{ user_id: BASE.userId, screen_token_hash: "other-tab-hash", expired_by: "idle" }])
+        .mockResolvedValueOnce([{ id: "new-lock", acquired_at: new Date("2026-09-18T10:00:00Z") }]);
+      const res = await acquireEditLock(db, BASE);
+      if (res.state !== "mine") throw new Error("expected mine");
+      expect(res.takeover).toEqual({ previousUserId: BASE.userId, expiredBy: "idle" });
+    });
+
+    it("同じ利用者・同じ合言葉(同じ画面の取り直し)なら takeover は null", async () => {
+      const { db, queryRaw } = fakeDb([]);
+      // sameScreen が真なら、たとえ expired_by が付いていても takeover は立てない
+      // (sameScreen の分岐そのものを検証する。実際の DB では同一画面が期限切れになる前に
+      // 合図で延びているはずだが、ここでは JS 側の分岐ロジックだけを切り出して確かめる)。
+      queryRaw
+        .mockResolvedValueOnce([{ user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash, expired_by: "heartbeat" }])
+        .mockResolvedValueOnce([{ id: "new-lock", acquired_at: new Date("2026-09-18T10:00:00Z") }]);
+      const res = await acquireEditLock(db, BASE);
+      if (res.state !== "mine") throw new Error("expected mine");
+      expect(res.takeover).toBeNull();
+    });
+
+    it("横取りの原因を計算するSQLは heartbeat_at を activity_at より先に見る", async () => {
+      const { db, queryRaw } = fakeDb([]);
+      queryRaw
+        .mockResolvedValueOnce([{ user_id: "other", screen_token_hash: "h-other", expired_by: "heartbeat" }])
+        .mockResolvedValueOnce([{ id: "new-lock", acquired_at: new Date("2026-09-18T10:00:00Z") }]);
+      await acquireEditLock(db, BASE);
+      const sql = sqlOf(queryRaw.mock.calls[0]);
+      expectColumnThresholds(sql);
+      expect(sql).toMatch(
+        new RegExp(
+          `WHEN "heartbeat_at" < clock_timestamp\\(\\) - make_interval\\(secs => \\{${GRACE_SEC}\\}::double precision\\) THEN 'heartbeat'` +
+            `[\\s\\S]*WHEN "activity_at" < clock_timestamp\\(\\) - make_interval\\(secs => \\{${IDLE_SEC}\\}::double precision\\) THEN 'idle'`,
+        ),
+      );
+    });
   });
 });
 
@@ -85,6 +156,7 @@ describe("heartbeatEditLock", () => {
     expect(sql).toMatch(/"heartbeat_at" = clock_timestamp\(\)/);
     expect(sql).toMatch(/"activity_at" = CASE WHEN \{true\} THEN clock_timestamp\(\) ELSE "activity_at" END/);
     expect(sql).toMatch(/"force_released_at" IS NULL/);
+    expectColumnThresholds(sql);
   });
 
   it("更新できなければ、DBが判定した現在の状態(dbNow付き)を返す(アプリの時計で判定し直さない)", async () => {
@@ -195,6 +267,7 @@ describe("isResourceEditLocked", () => {
     expect(sql).toMatch(/EXISTS/);
     expect(sql).toMatch(/clock_timestamp\(\)/);
     expect(sql).toMatch(/"force_released_at" IS NULL/);
+    expectColumnThresholds(sql);
   });
 
   it("行が無ければ false", async () => {
@@ -251,6 +324,7 @@ describe("assertNotEditLockedByOther", () => {
     expect(sql).toMatch(/AS active/);
     // ⚠Global Constraint により now() ではなく clock_timestamp()。
     expect(sql).toMatch(/clock_timestamp\(\) - make_interval/);
+    expectColumnThresholds(sql);
   });
   it("自分の鍵なら通す", async () => {
     const { db } = fakeDb(holder({ user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash }));
@@ -286,15 +360,13 @@ describe("assertNotEditLockedByOther", () => {
 
 describe("SQL の期限しきい値と rules.ts の一致(コントローラ決定②)", () => {
   it("SQL の make_interval 秒数は rules.ts の定数から導き、expiryCause と同じ境界で切り替わる", async () => {
-    const GRACE_SEC = EDIT_LOCK_HEARTBEAT_GRACE_MS / 1000;
-    const IDLE_SEC = EDIT_LOCK_IDLE_LIMIT_MS / 1000;
-
     // SQL 側: rules.ts の定数から導いた秒数がそのまま現れる(手で決め打ちした別の値になっていない)。
+    // ⚠`::double precision` キャストも一緒に固定する(コントローラ指摘③)。
     const { db, queryRaw } = fakeDb([]);
     await assertNotEditLockedByOther(db, { ...BASE, lockId: null });
     const sql = sqlOf(queryRaw.mock.calls[0]);
-    expect(sql).toContain(`make_interval(secs => {${GRACE_SEC}})`);
-    expect(sql).toContain(`make_interval(secs => {${IDLE_SEC}})`);
+    expect(sql).toContain(`make_interval(secs => {${GRACE_SEC}}::double precision)`);
+    expect(sql).toContain(`make_interval(secs => {${IDLE_SEC}}::double precision)`);
 
     // 純関数側: 同じ秒数を使って、expiryCause がその境界ちょうどで切り替わることを確かめる。
     // (SQL は `<`、expiryCause は `差分 > 上限` なので、境界の等号側は両方とも「期限切れではない」で揃う)
