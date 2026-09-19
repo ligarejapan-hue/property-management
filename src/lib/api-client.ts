@@ -51,6 +51,9 @@ async function toApiError(res: Response): Promise<Error> {
   return Object.assign(err, {
     code: typeof body?.error?.code === "string" ? body.error.code : null,
     status: res.status,
+    // メール送信設定のテスト送信(502)だけが持つ、SMTP側の許可リスト一致コード(自由文なし)。
+    // 他の応答には無い(undefined のまま)ので、既存の呼び出し元には影響しない。
+    smtpCode: typeof body?.error?.smtpCode === "string" ? body.error.smtpCode : null,
   });
 }
 
@@ -59,6 +62,13 @@ export function apiErrorCode(e: unknown): string | null {
   if (!(e instanceof Error)) return null;
   const code = (e as Error & { code?: unknown }).code;
   return typeof code === "string" ? code : null;
+}
+
+/** 応答エラーから SMTP コード(EAUTH 等)を取り出す（メール送信設定のテスト送信専用）。 */
+export function apiErrorSmtpCode(e: unknown): string | null {
+  if (!(e instanceof Error)) return null;
+  const smtpCode = (e as Error & { smtpCode?: unknown }).smtpCode;
+  return typeof smtpCode === "string" ? smtpCode : null;
 }
 
 async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
@@ -796,6 +806,82 @@ export async function updateCompanySettings(body: {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+  });
+}
+
+// ---------- メール送信設定(管理者・査定申込の通知メール) ----------
+
+// パスワードは値を返さず hasPassword(設定済/未設定)のみ。GET/PUT 共通形式。
+export interface MailSettings {
+  smtpHost: string | null;
+  smtpPort: number | null;
+  smtpSecure: boolean;
+  smtpUser: string | null;
+  hasPassword: boolean;
+  fromAddress: string | null;
+  appBaseUrl: string | null;
+  inquiryMailDetail: "minimal" | "full";
+  // この設定で通知メールが送れる状態かどうか(サーバー側 isMailConfigComplete と同じ判定)。
+  complete: boolean;
+  // false のとき、サーバーに暗号化キーが無くパスワードを保存できない。
+  cryptoConfigured: boolean;
+  // 通知を受け取る利用者数。0 のとき、設定を完了させても届く先が無い。
+  notifyRecipientCount: number;
+}
+
+const EMPTY_MAIL_SETTINGS: MailSettings = {
+  smtpHost: null,
+  smtpPort: 465,
+  smtpSecure: true,
+  smtpUser: null,
+  hasPassword: false,
+  fromAddress: null,
+  appBaseUrl: null,
+  inquiryMailDetail: "minimal",
+  complete: false,
+  cryptoConfigured: true,
+  notifyRecipientCount: 0,
+};
+
+export async function getMailSettings(): Promise<{ data: MailSettings }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { ...EMPTY_MAIL_SETTINGS } };
+  }
+  return apiFetch<{ data: MailSettings }>("/api/admin/mail-settings");
+}
+
+// 部分更新。smtpPassword は指定時のみ送る(空文字=クリア・未指定=現状維持=画面には値を返さない)。
+export async function updateMailSettings(body: {
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpSecure?: boolean;
+  smtpUser?: string;
+  smtpPassword?: string;
+  fromAddress?: string;
+  appBaseUrl?: string;
+  inquiryMailDetail?: "minimal" | "full";
+}): Promise<{ data: MailSettings }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { ...EMPTY_MAIL_SETTINGS } };
+  }
+  return apiFetch<{ data: MailSettings }>("/api/admin/mail-settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// テスト送信。保存済みの設定で送る(サーバー側は現在の DB 値を使う・未保存の変更は反映されない)。
+// 失敗(502)は toApiError が smtpCode を運ぶので、呼び出し元は apiErrorSmtpCode(e) で取り出す。
+export async function sendMailSettingsTest(): Promise<{ data: { result: string } }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { result: "sent" } };
+  }
+  return apiFetch<{ data: { result: string } }>("/api/admin/mail-settings/test", {
+    method: "POST",
   });
 }
 

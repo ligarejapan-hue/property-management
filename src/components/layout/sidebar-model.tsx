@@ -109,6 +109,8 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       // ここはそこへの分かりやすい入口を足すもの。
       { label: "DMメニュー", href: "/dm", icon: ic(Mail), minRole: "office_staff" },
       { label: "売却DM設定", href: "/admin/sale-dm-settings", icon: ic(Mail), minRole: "admin" },
+      // 査定申込の通知メールを送る Xserver メールボックスの設定(2026-09 新設)。
+      { label: "メール送信設定", href: "/admin/mail-settings", icon: ic(Mail), minRole: "admin" },
       { label: "LPの写真", href: "/admin/lp-assets", icon: ic(ImageIcon), minRole: "admin" },
       // ⚠「データ品質」から移動(DM の道具がそこに紛れていた)。
       { label: "送付記録の訂正", href: "/admin/orphan-dm-logs", icon: ic(MailX), minRole: "admin" },
