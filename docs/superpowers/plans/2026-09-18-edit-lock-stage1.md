@@ -13,7 +13,11 @@
 ## Global Constraints
 
 - ID はすべて UUID(`@db.Uuid`)。`users.id` が UUID のため、文字列型にすると外部キーで migration が失敗する。
-- 期限の判定に**端末の時計を使わない**。すべて DB の `now()`。定数は `src/lib/edit-lock/rules.ts` から SQL に渡す。
+- 期限の判定に**端末の時計を使わない**。すべて DB の時刻。定数は `src/lib/edit-lock/rules.ts` から SQL に渡す。
+- ⚠**SQL では `now()` ではなく `clock_timestamp()` を使う**(@codex R12 P2)。PostgreSQL の `now()` は
+  **トランザクション開始時刻**で固定される。取得は資源の行ロックを待ってから鍵を書くため、待ち時間が
+  5分を超えると、**書いた直後の鍵が既に期限切れの時刻**で記録され、最初の合図で「鍵が外れた」と報告される。
+  列の既定値(`@default(now())`)はそのままでよい(行を作る瞬間に評価されるため)。
 - 時間の定数: 合図 30 秒 / 合図の猶予 5 分 / 無操作 60 分(自動ログアウトの `IDLE_TIMEOUT_MS` と一致) / 予告 55 分 / 状態の再確認 30 秒。
 - ロック順序は既存規約どおり **所有者 → 物件の親行 → 子行**。合図(`heartbeat`)だけは資源の行をロックしない。
 - 監査ログの `detail` は **ID と enum だけ**。氏名・住所・画面の合言葉(生値もハッシュも)は入れない。`audit-log-detail-safety.ts` の action 別許可リストに足さないと管理画面で `[REDACTED]` になる。
@@ -573,7 +577,8 @@ Expected: FAIL(`Cannot find module '../service'`)
 /**
  * 編集中の鍵の台帳(edit_locks)への読み書き。SQL はこのファイルだけに置く。
  *
- * ⚠期限の判定は **DB の now()** が権威。JS の時刻は使わない。
+ * ⚠期限の判定は **DB の時刻**が権威。JS の時刻は使わない。
+ * ⚠`now()` はトランザクション開始時刻で固定されるため、**`clock_timestamp()`** を使う(@codex R12 P2)。
  * ⚠取得・保存の確認・管理者解除は、呼び出し側が**先に資源の行をロック**してから
  *   呼ぶ(ロック順序 = 所有者 → 物件の親行 → 子行)。合図だけはロックしない。
  */
@@ -627,8 +632,8 @@ async function readClassified(db: Db, t: Target): Promise<DbClassifiedLock | nul
     SELECT "id", "user_id", "screen_token_hash", "acquired_at",
            ("force_released_at" IS NOT NULL) AS force_released,
            ("force_released_at" IS NULL
-            AND "heartbeat_at" >= now() - make_interval(secs => ${GRACE_SEC})
-            AND "activity_at" >= now() - make_interval(secs => ${IDLE_SEC})) AS active
+            AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC})
+            AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC})) AS active
     FROM "edit_locks"
     WHERE "resource_type" = ${t.resourceType}::"EditLockResource" AND "resource_id" = ${t.resourceId}::uuid
   `;
@@ -673,8 +678,8 @@ export async function acquireEditLock(
   const prevRows = await db.$queryRaw<{ user_id: string; screen_token_hash: string; expired_by: "heartbeat" | "idle" | null }[]>`
     SELECT "user_id", "screen_token_hash",
            CASE
-             WHEN "heartbeat_at" < now() - make_interval(secs => ${GRACE_SEC}) THEN 'heartbeat'
-             WHEN "activity_at" < now() - make_interval(secs => ${IDLE_SEC}) THEN 'idle'
+             WHEN "heartbeat_at" < clock_timestamp() - make_interval(secs => ${GRACE_SEC}) THEN 'heartbeat'
+             WHEN "activity_at" < clock_timestamp() - make_interval(secs => ${IDLE_SEC}) THEN 'idle'
              ELSE NULL
            END AS expired_by
     FROM "edit_locks"
@@ -684,19 +689,19 @@ export async function acquireEditLock(
   const prev = prevRows[0] ?? null;
   const got = await db.$queryRaw<{ id: string; acquired_at: Date }[]>`
     INSERT INTO "edit_locks" ("id", "resource_type", "resource_id", "user_id", "screen_token_hash", "acquired_at", "heartbeat_at", "activity_at")
-    VALUES (gen_random_uuid(), ${input.resourceType}::"EditLockResource", ${input.resourceId}::uuid, ${input.userId}::uuid, ${input.screenTokenHash}, now(), now(), now())
+    VALUES (gen_random_uuid(), ${input.resourceType}::"EditLockResource", ${input.resourceId}::uuid, ${input.userId}::uuid, ${input.screenTokenHash}, clock_timestamp(), clock_timestamp(), clock_timestamp())
     ON CONFLICT ("resource_type", "resource_id") DO UPDATE
     SET "id" = gen_random_uuid(),
         "user_id" = EXCLUDED."user_id",
         "screen_token_hash" = EXCLUDED."screen_token_hash",
-        "acquired_at" = now(),
-        "heartbeat_at" = now(),
-        "activity_at" = now(),
+        "acquired_at" = clock_timestamp(),
+        "heartbeat_at" = clock_timestamp(),
+        "activity_at" = clock_timestamp(),
         "force_released_at" = NULL,
         "force_released_by" = NULL
     WHERE "edit_locks"."force_released_at" IS NOT NULL
-       OR "edit_locks"."heartbeat_at" < now() - make_interval(secs => ${GRACE_SEC})
-       OR "edit_locks"."activity_at" < now() - make_interval(secs => ${IDLE_SEC})
+       OR "edit_locks"."heartbeat_at" < clock_timestamp() - make_interval(secs => ${GRACE_SEC})
+       OR "edit_locks"."activity_at" < clock_timestamp() - make_interval(secs => ${IDLE_SEC})
        OR ("edit_locks"."user_id" = EXCLUDED."user_id" AND "edit_locks"."screen_token_hash" = EXCLUDED."screen_token_hash")
     RETURNING "id", "acquired_at"
   `;
@@ -724,15 +729,15 @@ export async function heartbeatEditLock(
 ): Promise<{ ok: true } | { ok: false; current: EditLockRow | null }> {
   const updated = await db.$queryRaw<{ id: string }[]>`
     UPDATE "edit_locks"
-    SET "heartbeat_at" = now(),
-        "activity_at" = CASE WHEN ${input.active} THEN now() ELSE "activity_at" END
+    SET "heartbeat_at" = clock_timestamp(),
+        "activity_at" = CASE WHEN ${input.active} THEN clock_timestamp() ELSE "activity_at" END
     WHERE "resource_type" = ${input.resourceType}::"EditLockResource"
       AND "resource_id" = ${input.resourceId}::uuid
       AND "user_id" = ${input.userId}::uuid
       AND "screen_token_hash" = ${input.screenTokenHash}
       AND "force_released_at" IS NULL
-      AND "heartbeat_at" >= now() - make_interval(secs => ${GRACE_SEC})
-      AND "activity_at" >= now() - make_interval(secs => ${IDLE_SEC})
+      AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC})
+      AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC})
     RETURNING "id"
   `;
   if (updated[0]) return { ok: true };
@@ -764,7 +769,7 @@ export async function forceReleaseEditLock(
 ): Promise<{ previousUserId: string } | null> {
   const rows = await db.$queryRaw<{ user_id: string }[]>`
     UPDATE "edit_locks"
-    SET "force_released_at" = now(), "force_released_by" = ${input.adminUserId}::uuid
+    SET "force_released_at" = clock_timestamp(), "force_released_by" = ${input.adminUserId}::uuid
     WHERE "id" = ${input.lockId}::uuid
       AND "resource_type" = ${input.resourceType}::"EditLockResource"
       AND "resource_id" = ${input.resourceId}::uuid
@@ -817,8 +822,8 @@ export async function assertNotEditLockedByOther(
     SELECT "id", "user_id", "screen_token_hash",
            ("force_released_at" IS NOT NULL) AS force_released,
            ("force_released_at" IS NULL
-            AND "heartbeat_at" >= now() - make_interval(secs => ${GRACE_SEC})
-            AND "activity_at" >= now() - make_interval(secs => ${IDLE_SEC})) AS active
+            AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC})
+            AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC})) AS active
     FROM "edit_locks"
     WHERE "resource_type" = ${input.resourceType}::"EditLockResource" AND "resource_id" = ${input.resourceId}::uuid
   `;
@@ -959,11 +964,14 @@ describe("物件の鍵", () => {
   it("property:write が無ければ 403", () => {
     expect(() => assertCanLockProperty({ id: "u1", role: "general" }, P(["property", "read"]), prop)).toThrowError(/権限/);
   });
+  it("property:read が無ければ 403(書きだけ与えられている場合)", () => {
+    expect(() => assertCanLockProperty({ id: "u1", role: "general" }, P(["property", "write"]), prop)).toThrowError(/権限/);
+  });
   it("アルバイトは担当外なら 403", () => {
-    expect(() => assertCanLockProperty({ id: "u2", role: "field_staff" }, P(["property", "write"]), prop)).toThrowError(/権限/);
+    expect(() => assertCanLockProperty({ id: "u2", role: "field_staff" }, P(["property", "read"], ["property", "write"]), prop)).toThrowError(/権限/);
   });
   it("アルバイトでも担当なら取れる", () => {
-    expect(() => assertCanLockProperty({ id: "u1", role: "field_staff" }, P(["property", "write"]), prop)).not.toThrow();
+    expect(() => assertCanLockProperty({ id: "u1", role: "field_staff" }, P(["property", "read"], ["property", "write"]), prop)).not.toThrow();
   });
 });
 ```
@@ -1048,7 +1056,13 @@ export function assertCanLockProperty(
   perms: PermissionEntry[],
   property: { createdBy: string; assignedTo: string | null },
 ): void {
-  if (!hasPermission(perms, "property", "write") || !canAccessPropertyRecord(session, property)) {
+  // ⚠**閲覧権限も要る**(@codex R12 P2)。読みと書きは管理画面で別々に付けられるため、
+  //   読めない利用者が鍵だけ取り、応答で保持者の氏名まで受け取れてしまう。所有者側と揃える。
+  if (
+    !hasPermission(perms, "property", "read") ||
+    !hasPermission(perms, "property", "write") ||
+    !canAccessPropertyRecord(session, property)
+  ) {
     throw new ApiError(403, "この物件を編集する権限がありません", "FORBIDDEN");
   }
 }
@@ -1561,6 +1575,7 @@ git commit -m "feat(edit-lock): 保存の窓口3本で他人の鍵を断る"
 - Modify: `src/lib/audit-log-detail-safety.ts`(`registry_auto_fetch` の許可)
 - Test: `src/lib/registry-pdf/__tests__/edit-lock-skip.test.ts`
 - Test: `src/lib/registry-fetch/__tests__/auto-fetch-edit-lock-audit.test.ts`
+- Test: `src/app/(dashboard)/import/registry-pdf/__tests__/edit-lock-skip-warning.test.ts`(取込画面の表示)
 
 **Interfaces:**
 - Consumes: `readEditLocks`(Task 3)
@@ -1660,8 +1675,8 @@ await prisma.$transaction(async (tx) => {
 export async function isResourceEditLocked(db: Db, t: Target): Promise<boolean> {
   const rows = await db.$queryRaw<{ active: boolean }[]>`
     SELECT ("force_released_at" IS NULL
-            AND "heartbeat_at" >= now() - make_interval(secs => ${GRACE_SEC})
-            AND "activity_at" >= now() - make_interval(secs => ${IDLE_SEC})) AS active
+            AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC})
+            AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC})) AS active
     FROM "edit_locks"
     WHERE "resource_type" = ${t.resourceType}::"EditLockResource" AND "resource_id" = ${t.resourceId}::uuid
   `;
@@ -1701,7 +1716,9 @@ const updates = { ...statusUpdates, ...fieldUpdates };
   `src/app/(dashboard)/import/registry-pdf/page.tsx` の `ImportResult` 型に2つのフラグを足し、既存の警告パネルに1行出す:
   - 物件側 = 「編集中のため、地番・家屋番号・不動産番号の補完を見送りました」
   - 所有者側 = 「編集中のため、法人番号の補完を見送りました」
-  表示のテスト(フラグが true のときにこの文言が出る/false のときは出ない)も同じ Task で書く。
+  表示のテストは **`src/app/(dashboard)/import/registry-pdf/__tests__/edit-lock-skip-warning.test.ts`** に置き、
+  **2つのフラグを別々に**検査する(@codex R12 P2): 物件だけ true → 物件の文言のみ/所有者だけ true → 所有者の文言のみ/
+  両方 false → どちらも出ない。判定関数を画面から切り出して純粋な形で検査してよい(描画まで確かめる必要はない)。
   **表示を入れないと、取込は成功したのに欄が空のままであることに誰も気づけない。**
 - 監査の detail に2つのフラグを足し、`ACTION_EXTRA_KEYS` に:
 
@@ -1744,7 +1761,7 @@ Expected: PASS
 ```bash
 git add src/lib/registry-pdf/process.ts src/lib/registry-pdf/__tests__/edit-lock-skip.test.ts \
   src/lib/registry-fetch/auto-fetch.ts src/lib/registry-fetch/__tests__/auto-fetch-edit-lock-audit.test.ts \
-  "src/app/(dashboard)/import/registry-pdf/page.tsx" \
+  "src/app/(dashboard)/import/registry-pdf/page.tsx" "src/app/(dashboard)/import/registry-pdf/__tests__/edit-lock-skip-warning.test.ts" \
   src/lib/audit-log-detail-safety.ts src/lib/__tests__/audit-log-detail-safety.test.ts
 git commit -m "fix(registry-pdf): 法人番号の補完で版番号を進め、編集中は補完を見送る"
 ```
@@ -1842,14 +1859,14 @@ if (!resourceId) throw new Error("物件のUUIDを引数に渡してください
 
 const acquire = (userId, hash) => prisma.$queryRaw`
   INSERT INTO "edit_locks" ("id","resource_type","resource_id","user_id","screen_token_hash","acquired_at","heartbeat_at","activity_at")
-  VALUES (gen_random_uuid(), 'property'::"EditLockResource", ${resourceId}::uuid, ${userId}::uuid, ${hash}, now(), now(), now())
+  VALUES (gen_random_uuid(), 'property'::"EditLockResource", ${resourceId}::uuid, ${userId}::uuid, ${hash}, clock_timestamp(), clock_timestamp(), clock_timestamp())
   ON CONFLICT ("resource_type","resource_id") DO UPDATE
   SET "id" = gen_random_uuid(), "user_id" = EXCLUDED."user_id", "screen_token_hash" = EXCLUDED."screen_token_hash",
-      "acquired_at" = now(), "heartbeat_at" = now(), "activity_at" = now(),
+      "acquired_at" = clock_timestamp(), "heartbeat_at" = clock_timestamp(), "activity_at" = clock_timestamp(),
       "force_released_at" = NULL, "force_released_by" = NULL
   WHERE "edit_locks"."force_released_at" IS NOT NULL
-     OR "edit_locks"."heartbeat_at" < now() - make_interval(secs => 300)
-     OR "edit_locks"."activity_at" < now() - make_interval(secs => 3600)
+     OR "edit_locks"."heartbeat_at" < clock_timestamp() - make_interval(secs => 300)
+     OR "edit_locks"."activity_at" < clock_timestamp() - make_interval(secs => 3600)
      OR ("edit_locks"."user_id" = EXCLUDED."user_id" AND "edit_locks"."screen_token_hash" = EXCLUDED."screen_token_hash")
   RETURNING "id"
 `;
