@@ -13,15 +13,43 @@ export async function assertSaleDmCampaignOwned(campaignId: string, sessionId: s
   if (!owned) throw new ApiError(404, "キャンペーンが見つかりません", "NOT_FOUND");
 }
 
+// 売却DMを使うために必要な4権限(read)。requireSaleDmAccess / checkSaleDmAccessFor で共有する。
+const SALE_DM_REQUIRED_READS = [
+  ["property", "物件一覧の閲覧権限がありません"],
+  ["csv_export", "CSV エクスポートの権限がありません"],
+  ["csv_export_personal", "個人情報を含む出力の権限がありません"],
+  ["owner", "所有者情報の閲覧権限がありません"],
+] as const;
+
+export type SaleDmAccessCheck =
+  | {
+      ok: true;
+      permissions: Awaited<ReturnType<typeof getUserPermissions>>;
+      ownerDisplayConfig: Awaited<ReturnType<typeof getOwnerDisplayConfig>>;
+    }
+  | { ok: false; reason: "permission" | "display" };
+
+// 任意の利用者(ログイン中の本人とは限らない)が売却DMを使えるかを判定する。
+// 通知の宛先判定など、セッションを持たない利用者に対しても呼べるように requireSaleDmAccess
+// から条件だけを切り出したもの。判定条件は requireSaleDmAccess と完全に同一だが、
+// こちらは例外を投げず ok/reason で結果を返す(候補者を1人ずつ判定するため 403 で
+// 処理全体を止めるわけにいかない)。
+export async function checkSaleDmAccessFor(userId: string): Promise<SaleDmAccessCheck> {
+  const permissions = await getUserPermissions(userId);
+  for (const [res] of SALE_DM_REQUIRED_READS) {
+    if (!hasPermission(permissions, res, "read")) return { ok: false, reason: "permission" };
+  }
+  const cfg = await getOwnerDisplayConfig(userId, permissions);
+  if (!isPlainOwnerLevel(cfg.name) || !isPlainOwnerLevel(cfg.zip) || !isPlainOwnerLevel(cfg.address)) {
+    return { ok: false, reason: "display" };
+  }
+  return { ok: true, permissions, ownerDisplayConfig: cfg };
+}
+
 export async function requireSaleDmAccess() {
   const session = await getApiSession();
   const permissions = await getUserPermissions(session.id);
-  for (const [res, msg] of [
-    ["property", "物件一覧の閲覧権限がありません"],
-    ["csv_export", "CSV エクスポートの権限がありません"],
-    ["csv_export_personal", "個人情報を含む出力の権限がありません"],
-    ["owner", "所有者情報の閲覧権限がありません"],
-  ] as const) {
+  for (const [res, msg] of SALE_DM_REQUIRED_READS) {
     if (!hasPermission(permissions, res, "read")) throw new ApiError(403, msg, "FORBIDDEN");
   }
   const cfg = await getOwnerDisplayConfig(session.id, permissions);
