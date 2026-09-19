@@ -80,6 +80,11 @@ describe("アイドルガード: 実際に効く延長/失効の配線(@codex #2
 
   it("無操作1時間で signOut、操作中は getSession で延長する", () => {
     expect(idleTimeoutSrc).toMatch(/IDLE_TIMEOUT_MS\s*=\s*60\s*\*\s*60\s*\*\s*1000/);
+    // ⚠値の定義(idle-timeout.ts)と使用箇所(guard の signOut 判定)は別ファイルなので、
+    // guard が実際にその値を @/lib/idle-timeout から import していることも結びつけて確認する。
+    // これが無いと、guard 側で IDLE_TIMEOUT_MS をローカルに上書き(例: 30分の決め打ち)しても
+    // 上の2つのチェックはどちらも素通りしてしまう。
+    expect(guardSrc).toMatch(/import\s*\{\s*IDLE_TIMEOUT_MS\s*\}\s*from\s*"@\/lib\/idle-timeout"/);
     expect(guardSrc).toMatch(/REFRESH_INTERVAL_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/);
     // 無操作上限超過で signOut。
     expect(guardSrc).toMatch(/idleFor\s*>=\s*IDLE_TIMEOUT_MS[\s\S]{0,80}signOut/);
