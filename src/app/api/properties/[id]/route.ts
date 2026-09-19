@@ -54,6 +54,10 @@ export async function GET(
             totalUnits: true,
             managementCompany: true,
             builtYear: true,
+            // [F3 Task5] 作成ダイアログの「物件にも保存する」が使う棟の version（楽観ロック用の
+            // buildingVersion）と、同じ棟に属する物件数（「同じ棟の N部屋」の N）。
+            version: true,
+            _count: { select: { properties: true } },
           },
         },
         propertyOwners: {

@@ -72,6 +72,10 @@ const SAMPLE_BUILDING = {
   totalUnits: 50,
   managementCompany: "サンプル管理株式会社",
   builtYear: 2015,
+  // [F3 Task5] 作成ダイアログの「物件にも保存する」が使う棟の version と、
+  // 同じ棟に属する物件数（「同じ棟の N部屋」の N）。
+  version: 2,
+  _count: { properties: 3 },
 };
 
 async function callGet(id = "p1") {
@@ -108,6 +112,8 @@ describe("GET /api/properties/[id] — building 列の拡張(@codex P2)", () => 
       totalUnits: true,
       managementCompany: true,
       builtYear: true,
+      version: true,
+      _count: { select: { properties: true } },
     });
   });
 

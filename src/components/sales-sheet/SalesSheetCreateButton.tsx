@@ -55,10 +55,13 @@ const FIELD_SETS: Record<SalesSheetTemplateKind, FieldConfig> = {
  * 新規デザイン作成 API へのリクエスト内容を組み立てる純関数。
  * テンプレ種別はサーバ側で物件種別から判定するため body には含めない（上書き項目のみ）。
  * mansion/land は multiselect（用途地域/地目 等）があるため string[] も許容する。
+ * [F3 Task5] saveToProperty(boolean)/propertyVersion・buildingVersion(number) も同じ body に
+ * 混ぜて送るため、値の型は unknown まで緩める（呼び出し元テストは従来どおり string/string[] のみで
+ * 呼んでも後方互換）。
  */
 export function buildCreateRequest(
   propertyId: string,
-  values: Record<string, string | string[]>,
+  values: Record<string, unknown>,
 ): { url: string; init: RequestInit } {
   return {
     url: `/api/properties/${propertyId}/sales-sheets/new`,
@@ -157,6 +160,31 @@ const AUTO_ONLY_KEYS_BY_KIND: Record<SalesSheetTemplateKind, ReadonlySet<string>
   house: HOUSE_AUTO_ONLY_KEYS,
   building: BUILDING_AUTO_ONLY_KEYS,
 };
+
+/**
+ * [F3 Task5] ダイアログが「物件にも保存する」を送るために必要な、物件/棟の version と
+ * 棟の表示情報（呼び出し側がまだ持っていなければダイアログ自身が GET /api/properties/[id]
+ * から取得する＝下記 property prop 省略時の fetchedMeta と同じ形）。
+ */
+export interface SalesSheetPropertyMeta {
+  version: number;
+  buildingName: string;
+  /** 同じ棟に属する物件数（=「同じ棟の N部屋」の N）。棟が無ければ 0。 */
+  buildingUnitCount: number;
+  buildingVersion: number | null;
+}
+
+/**
+ * [F3 Task5・コントローラ判断 R13] 区分マンションの作成ダイアログで、値を変えると
+ * 「同じ棟の N部屋にも反映されます」の注意を出すキー。
+ *
+ * ⚠brief 記載の BUILDING_KEYS には structure/totalFloors/totalUnits も含まれるが、この3項目は
+ * MANSION_AUTO_ONLY_KEYS（棟の値が正・図面からは書き換えられない＝サーバ側 route.ts の
+ * buildWriteback も実際にはこの2キーしか棟へ書き戻さない）。保存されない項目で
+ * 「反映されます」と告げるのは嘘になるため、実際に棟へ書き戻される basementFloors と
+ * builtYearMonth の2キーだけに絞る。
+ */
+const BUILDING_KEYS: readonly string[] = ["basementFloors", "builtYearMonth"];
 
 function groupBySection(
   fields: readonly SheetField[],
@@ -977,24 +1005,44 @@ export function CatchCopyFields({
 export function SalesSheetCreateDialog({
   propertyId,
   kind,
-  open,
+  open = true,
   onClose,
+  property,
+  initialValues,
 }: {
   propertyId: string;
   kind: SalesSheetTemplateKind;
-  open: boolean;
+  /** 既定 open（/sales-sheets/new のピッカーは常に開いた状態で mount するため未指定で呼ぶ）。 */
+  open?: boolean;
   onClose: () => void;
+  /**
+   * [F3 Task5] 「物件にも保存する」の送信に使う物件/棟の version と棟の表示情報。呼び出し側
+   * （物件詳細ページ等・既に GET /api/properties/[id] 済み）が持っていれば渡す。省略時は
+   * ダイアログ自身が open 時に取得する（下記 useEffect の fetchedMeta）。
+   */
+  property?: SalesSheetPropertyMeta;
+  /** テスト/SSR 検証用の初期 field-model values（本番の通常経路では未指定＝空で開始）。 */
+  initialValues?: FieldModelValues;
 }) {
   const router = useRouter();
   const cfg = FIELD_SETS[kind];
   const fieldModel = FIELDS_BY_KIND[kind];
   const [values, setValues] = useState<Record<string, string>>({});
-  const [fieldModelValues, setFieldModelValues] = useState<FieldModelValues>({});
+  const [fieldModelValues, setFieldModelValues] = useState<FieldModelValues>(
+    () => initialValues ?? {},
+  );
   const [autoPreview, setAutoPreview] = useState<Record<string, string>>({});
   const [occupancySeed, setOccupancySeed] = useState<string | undefined>(undefined);
   const [hints, setHints] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // saveToProperty: 既定ON（[F3 Task5]・外すと saveToProperty:false を送る＝物件へは保存しない）。
+  const [saveToProperty, setSaveToProperty] = useState(true);
+  // property prop が無い呼び出し元（/sales-sheets/new のピッカー等）向けの自前フェッチ結果。
+  // property prop が渡っていればそちらを優先する（テストはこちらを使う＝SSR は effect を
+  // 実行しないため fetchedMeta は常に null のまま）。
+  const [fetchedMeta, setFetchedMeta] = useState<SalesSheetPropertyMeta | null>(null);
+  const meta = property ?? fetchedMeta;
 
   // field-model がある種別(mansion/land)のみ: 開いたときに物件（＋建物、mansionのみ）データを
   // 取得し、自動反映専用フィールドのプレビューと occupancy(現況) select の表示ヒント、
@@ -1022,6 +1070,16 @@ export function SalesSheetCreateDialog({
         setAutoPreview(auto.preview);
         setOccupancySeed(auto.occupancySeed);
         setHints(auto.hints);
+        // [F3 Task5] property prop 省略時のみ: 同じフェッチ結果から version/棟情報も拾う
+        // （呼び出し元が別途 GET しない経路＝/sales-sheets/new のピッカー用のフォールバック）。
+        if (!property) {
+          setFetchedMeta({
+            version: raw.version,
+            buildingName: raw.building?.name ?? "",
+            buildingUnitCount: raw.building?._count.properties ?? 0,
+            buildingVersion: raw.building?.version ?? null,
+          });
+        }
       })
       .catch(() => {
         /* ベストエフォート。取得失敗時は自動反映プレビュー無しで継続する。 */
@@ -1029,13 +1087,22 @@ export function SalesSheetCreateDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, kind, propertyId]);
+  }, [open, kind, propertyId, property]);
 
   async function create() {
     setBusy(true);
     setError(null);
     try {
-      const body = fieldModel ? buildFieldModelOverridePayload(fieldModelValues) : values;
+      const overrides = fieldModel ? buildFieldModelOverridePayload(fieldModelValues) : values;
+      // [F3 Task5] saveToProperty と version を必ず送る。version を送らない/数値でないと
+      // サーバは安全側で conflict:true を返し物件へは書き込まない（route.ts の設計）ため、
+      // meta がまだ取得できていない場合も undefined のまま送る（意図的＝勝手に上書きしない）。
+      const body: Record<string, unknown> = {
+        ...overrides,
+        saveToProperty,
+        propertyVersion: meta?.version,
+        buildingVersion: meta?.buildingVersion ?? undefined,
+      };
       const { url, init } = buildCreateRequest(propertyId, body);
       const res = await fetch(url, init);
       if (!res.ok) {
@@ -1045,7 +1112,20 @@ export function SalesSheetCreateDialog({
         setError(errBody?.error?.message ?? "販売図面の作成に失敗しました");
         return;
       }
-      const { id } = (await res.json()) as { id: string };
+      const { id, propertyWriteback } = (await res.json()) as {
+        id: string;
+        propertyWriteback?: { saved: string[]; unreadable: string[]; conflict: boolean };
+      };
+      // エディタへ移る前に、物件への保存結果を残しておく（Task 6 がエディタ上部で読んで
+      // 一度だけ知らせる）。sessionStorage が使えない環境（プライベートウィンドウ等）でも
+      // 作成そのものは成功させる＝知らせが出ないだけに留める。
+      try {
+        if (propertyWriteback) {
+          sessionStorage.setItem(`sales-sheet-writeback:${id}`, JSON.stringify(propertyWriteback));
+        }
+      } catch {
+        /* プライベートウィンドウ等で保存できないだけ。作成自体は成功している。 */
+      }
       router.push(`/properties/${propertyId}/sales-sheets/${id}/edit`);
     } catch {
       setError("販売図面の作成に失敗しました");
@@ -1055,6 +1135,19 @@ export function SalesSheetCreateDialog({
   }
 
   if (!open) return null;
+
+  // [F3 Task5・R13] 棟へ実際に書き戻される basementFloors/builtYearMonth のどちらかに
+  // 値が入っているか（BUILDING_KEYS の定義・理由は定数コメント参照）。
+  const buildingFieldTouched = BUILDING_KEYS.some((k) => {
+    const v = fieldModelValues[k];
+    return typeof v === "string" && v.trim() !== "";
+  });
+  const showBuildingNote =
+    saveToProperty &&
+    kind === "mansion" &&
+    buildingFieldTouched &&
+    meta !== null &&
+    meta.buildingUnitCount > 1;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -1106,6 +1199,20 @@ export function SalesSheetCreateDialog({
             ))}
           </div>
         )}
+        <label className="mt-3 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <input
+            type="checkbox"
+            checked={saveToProperty}
+            onChange={(e) => setSaveToProperty(e.target.checked)}
+            className="h-4 w-4"
+          />
+          入れた値を物件にも保存する
+        </label>
+        {showBuildingNote && meta && (
+          <p className="mt-1 pl-6 text-xs text-gray-600 dark:text-gray-400">
+            構造・築年月などは棟「{meta.buildingName}」の値です。同じ棟の {meta.buildingUnitCount}部屋 にも反映されます。
+          </p>
+        )}
         {error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
           <button
@@ -1135,10 +1242,17 @@ export function SalesSheetCreateButton({
   propertyId,
   canWrite,
   kind,
+  property,
 }: {
   propertyId: string;
   canWrite: boolean;
   kind: SalesSheetTemplateKind;
+  /**
+   * [F3 Task5] 呼び出し元（物件詳細ページ等）が既に GET /api/properties/[id] 済みなら渡す
+   * （version の再取得を待たずにダイアログが「物件にも保存する」を送れる）。省略時はダイアログが
+   * 自前で取得する（SalesSheetCreateDialog の property prop と同じ・任意）。
+   */
+  property?: SalesSheetPropertyMeta;
 }) {
   const cfg = FIELD_SETS[kind];
   const [open, setOpen] = useState(false);
@@ -1161,6 +1275,7 @@ export function SalesSheetCreateButton({
         kind={kind}
         open={open}
         onClose={() => setOpen(false)}
+        property={property}
       />
     </div>
   );

@@ -206,7 +206,10 @@ interface ApiProperty {
   investigationConfirmedAt: string | null;
   // Unit-specific fields
   buildingId: string | null;
-  building: { id: string; name: string } | null;
+  // [F3 Task5] version/_count は作成ダイアログの「物件にも保存する」（棟の楽観ロック用
+  // buildingVersion・「同じ棟の N部屋」の N）が読む。GET /api/properties/[id] の
+  // building select 拡張と対応する。
+  building: { id: string; name: string; version: number; _count: { properties: number } } | null;
   roomNo: string | null;
   floorNo: number | null;
   exclusiveArea: number | null;
@@ -647,6 +650,14 @@ export default function PropertyDetailPage({
               propertyId={property.id}
               canWrite={canWriteProperty}
               kind={salesSheetKind}
+              // [F3 Task5] この画面は既に GET /api/properties/[id] 済み（property state）
+              // なので、version/棟情報をそのまま渡す（ダイアログの二重フェッチを避ける）。
+              property={{
+                version: property.version,
+                buildingName: property.building?.name ?? "",
+                buildingUnitCount: property.building?._count.properties ?? 0,
+                buildingVersion: property.building?.version ?? null,
+              }}
             />
           )}
           <button
