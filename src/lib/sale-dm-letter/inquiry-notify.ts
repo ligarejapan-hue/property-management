@@ -2,7 +2,7 @@ import prisma from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { isPlainOwnerLevel } from "@/lib/dm-export";
 import { loadMailSendConfig, type MailSendConfig } from "@/lib/mail/mail-config";
-import { sendPlainMail } from "@/lib/mail/transport";
+import { sendPlainMail, safeErrorCode } from "@/lib/mail/transport";
 import { checkSaleDmAccessFor } from "./route-guard";
 import { buildInquiryNotifyMail, type InquiryNotifyFacts } from "./inquiry-notify-mail";
 import { coarsePropertyLocation, propertyTypeLabel } from "./tags";
@@ -82,24 +82,41 @@ async function resolveRecipients(
   return out;
 }
 
+// 取り合いキー(notifyClaimedAt)を自分が最後に書いた値(claimedAt)で保有確認しながら
+// 更新する。他ワーカーが既に取り直していれば(=期限切れで再取り合いされた)0件更新になり、
+// false を返す。⚠終端書き込みも同じ保有チェックを通す(Important 2):古いワーカーの
+// finish が新しいワーカーの状態を上書きして行を再び claimable に戻す事故を防ぐ。
+async function refreshClaim(inquiryId: string, claimedAt: Date, nextClaimedAt: Date): Promise<boolean> {
+  const r = await prisma.dmInquiry.updateMany({
+    where: { id: inquiryId, notifyStatus: "sending", notifyClaimedAt: claimedAt },
+    data: { notifyClaimedAt: nextClaimedAt },
+  });
+  return r.count > 0;
+}
+
+// 終端状態を書く。自分がまだ claim を保有しているとき(notifyClaimedAt が一致するとき)だけ
+// 書き込み、監査も残す。0件更新(=保有が移った)なら何も書かず false を返す。
 async function finish(
   inquiryId: string,
+  claimedAt: Date,
   attempts: number,
   result: { status: "sent" } | { status: "failed"; code: string },
   recipientUserIds: string[],
-) {
-  await prisma.dmInquiry.update({
-    where: { id: inquiryId },
+): Promise<boolean> {
+  const updated = await prisma.dmInquiry.updateMany({
+    where: { id: inquiryId, notifyStatus: "sending", notifyClaimedAt: claimedAt },
     data:
       result.status === "sent"
         ? { notifyStatus: "sent", notifyLastError: null, notifyAttempts: { increment: attempts } }
         : { notifyStatus: "failed", notifyLastError: result.code, notifyAttempts: { increment: attempts } },
   });
+  if (updated.count === 0) return false;
   await writeAuditLog(
     result.status === "sent"
       ? { action: "inquiry_notify_sent", targetTable: "dm_inquiries", targetId: inquiryId, detail: { attempt: attempts, recipientUserIds } }
       : { action: "inquiry_notify_failed", targetTable: "dm_inquiries", targetId: inquiryId, detail: { attempt: attempts, code: result.code } },
   );
+  return true;
 }
 
 // 通知の本体(設計 §2.6)。申込の記録が終わってから呼ぶ。1回目+再試行(30秒→2分→10分)。
@@ -108,7 +125,9 @@ async function finish(
 //   (failed / send_failed)を記録してから投げ直す(呼び出し元 startInquiryNotify は投げない)。
 export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date } = {}): Promise<NotifyOutcome> {
   const now = opts.now ?? (() => new Date());
-  const claimedAt = now();
+  // ⚠claimedAt = 「今このワーカーが保有している notifyClaimedAt の値」。ラウンド間・宛先ループの
+  // 途中で更新するたびに書き換える(refreshClaim/finish の where 節はこの値でしか保有確認できない)。
+  let claimedAt = now();
   const claim = await prisma.dmInquiry.updateMany({
     where: {
       id: inquiryId,
@@ -121,19 +140,21 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
   });
   if (claim.count === 0) return "skipped";
 
+  // 想定外の例外で "sending" のまま行を残さないため、進捗(attempts/succeeded)を try の外で
+  // 保持し catch でも使う(Minor 2: catch を attempt:1 固定にしない)。
+  let attempts = 0;
+  const succeeded = new Set<string>();
   try {
     const row = await loadFacts(inquiryId);
     if (!row) return "skipped";
 
     const config = await loadMailSendConfig();
     if (!config) {
-      await finish(inquiryId, 1, { status: "failed", code: "mail_not_configured" }, []);
-      return "failed";
+      return (await finish(inquiryId, claimedAt, 1, { status: "failed", code: "mail_not_configured" }, [])) ? "failed" : "skipped";
     }
     const recipients = await resolveRecipients(row.draft.property, config);
     if (recipients.length === 0) {
-      await finish(inquiryId, 1, { status: "failed", code: "no_recipients" }, []);
-      return "failed";
+      return (await finish(inquiryId, claimedAt, 1, { status: "failed", code: "no_recipients" }, [])) ? "failed" : "skipped";
     }
 
     const facts: InquiryNotifyFacts = {
@@ -152,33 +173,51 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
       message: row.message,
     };
 
-    const succeeded = new Set<string>();
-    let attempts = 0;
+    // ⚠宛先1件あたり SMTP タイムアウトまで長くて~35秒かかり得る。宛先が多いと、ラウンド間の
+    // sleep 後の更新だけでは 15分の保有期限(NOTIFY_STALE_CLAIM_MS)内に収まらないことがある
+    // (Important 1)。そこで宛先ループの中でも、最後に更新してから期限の1/3を超えたら
+    // 更新する。更新できなかった(=他ワーカーに保有が移った)ら、その場で送信を止めて
+    // 終端状態を一切書かずに返す(まだ書いていない宛先は二重送信にならない)。
+    const REFRESH_INTERVAL_MS = NOTIFY_STALE_CLAIM_MS / 3;
+    let lastRefreshMs = claimedAt.getTime();
+
     for (let i = 0; i <= NOTIFY_RETRY_DELAYS_MS.length; i += 1) {
       if (i > 0) {
         await sleep(NOTIFY_RETRY_DELAYS_MS[i - 1]);
-        await prisma.dmInquiry.updateMany({ where: { id: inquiryId, notifyStatus: "sending" }, data: { notifyClaimedAt: now() } });
+        const next = now();
+        if (!(await refreshClaim(inquiryId, claimedAt, next))) return "skipped";
+        claimedAt = next;
+        lastRefreshMs = next.getTime();
       }
       attempts += 1;
       for (const r of recipients) {
         if (succeeded.has(r.userId)) continue;
+        const t = now();
+        if (t.getTime() - lastRefreshMs >= REFRESH_INTERVAL_MS) {
+          if (!(await refreshClaim(inquiryId, claimedAt, t))) return "skipped";
+          claimedAt = t;
+          lastRefreshMs = t.getTime();
+        }
         const mail = buildInquiryNotifyMail(facts, { detail: r.detail, appBaseUrl: config.appBaseUrl });
         const res = await sendPlainMail(config, { to: r.address, subject: mail.subject, text: mail.text });
         if (res.ok) succeeded.add(r.userId);
       }
       if (succeeded.size === recipients.length) {
-        await finish(inquiryId, attempts, { status: "sent" }, recipients.map((r) => r.userId));
-        return "sent";
+        const wrote = await finish(inquiryId, claimedAt, attempts, { status: "sent" }, recipients.map((r) => r.userId));
+        return wrote ? "sent" : "skipped";
       }
     }
-    await finish(inquiryId, attempts, { status: "failed", code: succeeded.size > 0 ? "partial" : "send_failed" }, []);
-    return "failed";
+    const code = succeeded.size > 0 ? "partial" : "send_failed";
+    const wrote = await finish(inquiryId, claimedAt, attempts, { status: "failed", code }, []);
+    return wrote ? "failed" : "skipped";
   } catch (err) {
     // ここに来るのは resolveRecipients/loadFacts/sendPlainMail 等が想定外に投げた場合(すべて
     // throw しない設計だが、DB 接続断など予期しない失敗まで飲み込まない)。"sending" のまま
-    // 行を残さないよう、失敗の記録だけ試みてから投げ直す(記録自体が失敗しても再送は残る)。
+    // 行を残さないよう、実際の進捗(attempts/succeeded)から終端状態を記録してから投げ直す
+    // (記録自体が失敗しても、行は保有期限切れで再送に回る)。
     try {
-      await finish(inquiryId, 1, { status: "failed", code: "send_failed" }, []);
+      const code = succeeded.size > 0 ? "partial" : "send_failed";
+      await finish(inquiryId, claimedAt, attempts === 0 ? 1 : attempts, { status: "failed", code }, []);
     } catch {
       // 記録できなくても、行は 15 分後に notifyClaimedAt の期限切れで取り直せる。
     }
@@ -191,7 +230,7 @@ export function startInquiryNotify(inquiryId: string): void {
   void notifyInquiry(inquiryId).catch((err: unknown) => {
     console.error("[sale_dm_inquiry_notify] failed", {
       name: err instanceof Error ? err.name : "Unknown",
-      code: typeof (err as { code?: unknown })?.code === "string" ? (err as { code: string }).code : null,
+      code: safeErrorCode(err),
     });
   });
 }

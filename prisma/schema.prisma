@@ -1283,7 +1283,7 @@ model DmInquiry {
   handledById     String?   @map("handled_by_id") @db.Uuid
   handledAt       DateTime? @map("handled_at")
   handleNote      String?   @map("handle_note")
-  // pending | sent | failed(メール通知 PR5 が使う。PR4 では触らない)
+  // pending | sending | sent | failed(メール通知 PR5 が使う。PR4 では触らない)
   notifyStatus    String    @default("pending") @map("notify_status")
   notifyAttempts  Int       @default(0) @map("notify_attempts")
   // 定型コードのみ(外部由来の文字を入れない)
