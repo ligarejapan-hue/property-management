@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { Prisma } from "@/generated/prisma";
 import { buildWriteback } from "../build-writeback";
 
 const emptyCurrent = { property: {}, building: null };
@@ -47,6 +48,24 @@ describe("buildWriteback — 土地", () => {
     expect(r.property).toEqual({});
     expect(r.unreadable).toEqual(["価格", "面積計測方式"]);
   });
+
+  it("Decimal の値は正しく比較される(125.30 と 125.3 は同じ)", () => {
+    const r = buildWriteback({
+      kind: "land",
+      values: { landArea: "125.30" },
+      current: { property: { landArea: new Prisma.Decimal("125.30") }, building: null },
+    });
+    expect(r.property).toEqual({});
+  });
+
+  it("Decimal の値が実際に異なる場合は保存される", () => {
+    const r = buildWriteback({
+      kind: "land",
+      values: { landArea: "126" },
+      current: { property: { landArea: new Prisma.Decimal("125.30") }, building: null },
+    });
+    expect(r.property).toEqual({ landArea: 126 });
+  });
 });
 
 describe("buildWriteback — 戸建", () => {
@@ -73,6 +92,24 @@ describe("buildWriteback — 戸建", () => {
     });
     expect(r.property).toEqual({});
     expect(r.unreadable).toEqual(["築年月"]);
+  });
+
+  it("年だけ読めて月が読めない場合、月は保存しない", () => {
+    const r = buildWriteback({
+      kind: "house",
+      values: { builtYearMonth: "平成20年" },
+      current: { property: { builtYear: 2007, builtMonth: 5 }, building: null },
+    });
+    expect(r.property).toEqual({ builtYear: 2008 });
+  });
+
+  it("年だけ読めて月が読めない場合、年が同じなら保存なし", () => {
+    const r = buildWriteback({
+      kind: "house",
+      values: { builtYearMonth: "平成20年" },
+      current: { property: { builtYear: 2008, builtMonth: 5 }, building: null },
+    });
+    expect(r.property).toEqual({});
   });
 });
 
