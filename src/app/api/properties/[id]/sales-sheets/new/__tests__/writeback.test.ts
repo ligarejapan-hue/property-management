@@ -437,14 +437,62 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     expect(lastLockOrder).toBeLessThan(buildingUpdateManyMock.mock.invocationCallOrder[0]);
   });
 
-  // I1: writeback は zod 検証済みの overrides を使う。schema に無いキー(mansion の
-  // layout/balconyDir は field-model 由来だが mansionOverridesSchema には無い)は
-  // 無検証で列へ入らないこと。
-  it("schema に無いキーは無検証で保存されない(I1)", async () => {
-    propertyFindMock.mockResolvedValue(baseMansion);
-    const res = await POST(req({ layout: "3LDK", balconyDir: "南", propertyVersion: 1 }), ctx);
+  // I1: writeback は zod 検証済みの overrides を使う。schema に無いキーは無検証で
+  // 列へ入らないこと。⚠R14 で exclusiveArea/balconyArea/layout/balconyDir/floorNo/
+  // managementFee/repairFee は schema に追加した(区分の書き戻し・下のテスト参照)ため、
+  // この題材には使えない。`structure`(→building.structureType)は既存の意図的な設計
+  // (自動反映専用・上書き機構を持たない)により schema に無いままなので、これで確かめる。
+  it("schema に無いキー(structure)は無検証で保存されない(I1)", async () => {
+    propertyFindMock.mockResolvedValue({ ...baseMansion, building: testBuilding });
+    const res = await POST(req({ structure: "RC", propertyVersion: 1, buildingVersion: 1 }), ctx);
     expect(res.status).toBe(201);
     expect(updateManyMock).not.toHaveBeenCalled();
+    expect(buildingUpdateManyMock).not.toHaveBeenCalled();
     expect((await res.json()).propertyWriteback).toEqual({ saved: [], unreadable: [], conflict: false });
+  });
+
+  // R14: 区分マンションの物件側7項目(仕様書 §4.4)。mansionOverridesSchema に無かった
+  // ため書き戻し経路から到達不能になっていたギャップの修正確認。
+  it("区分で exclusiveArea と managementFee を送ると物件に保存される(R14)", async () => {
+    propertyFindMock.mockResolvedValue(baseMansion);
+    const res = await POST(
+      req({ exclusiveArea: "62.45", managementFee: "12000", propertyVersion: 1 }),
+      ctx,
+    );
+    expect(res.status).toBe(201);
+    const json = await res.json();
+    expect(json.propertyWriteback).toEqual({ saved: ["専有面積", "管理費"], unreadable: [], conflict: false });
+    expect(updateManyMock).toHaveBeenCalledTimes(1);
+    expect(updateManyMock.mock.calls[0][0]).toMatchObject({
+      where: { id: baseProperty.id, version: 1 },
+      data: { exclusiveArea: 62.45, managementFee: 12000, version: { increment: 1 } },
+    });
+    const logs = changeLogCreateManyMock.mock.calls[0][0].data;
+    expect(logs).toContainEqual({
+      targetTable: "properties",
+      targetId: baseProperty.id,
+      fieldName: "exclusiveArea",
+      oldValue: null,
+      newValue: "62.45",
+      source: "manual",
+      changedBy: "u1",
+    });
+    expect(logs).toContainEqual({
+      targetTable: "properties",
+      targetId: baseProperty.id,
+      fieldName: "managementFee",
+      oldValue: null,
+      newValue: "12000",
+      source: "manual",
+      changedBy: "u1",
+    });
+  });
+
+  it("区分で layout を送ると layoutType に入る(R14)", async () => {
+    propertyFindMock.mockResolvedValue(baseMansion);
+    const res = await POST(req({ layout: "3LDK", propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    expect(updateManyMock.mock.calls[0][0].data).toMatchObject({ layoutType: "3LDK" });
+    expect((await res.json()).propertyWriteback.saved).toEqual(["間取り"]);
   });
 });

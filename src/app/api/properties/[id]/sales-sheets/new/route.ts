@@ -98,6 +98,11 @@ const landOverridesSchema = z.object({
 // `structure`（構造）は自動反映専用（building.structureType が正）で上書き機構を持たない
 // ため、旧スキーマにあった stale なキーとして削除。`deliveryTiming` は builder 側のキー名
 // `delivery` へ改称（field-model の "引渡時期" と一致させる）。
+// ⚠F3 Task4 レビュー(R14)で追加: exclusiveArea/balconyArea/balconyDir/layout/floorNo/
+// managementFee/repairFee は仕様書 §4.4 の区分の書き戻し対象だが、
+// buildMansionValues(build-document.ts) は常に物件の自動反映値(p.*)を使い、この
+// override は読まない(=このキーを追加しても図面の見た目は変わらない)。ここに追加した
+// 唯一の目的は「図面作成時に物件へ書き戻す」(buildWriteback)ための入力経路を用意すること。
 const mansionOverridesSchema = z.object({
   // 価格・費用（DB enum と語彙が1:1対応しないため propertyType は常に手入力）
   propertyType: z.string().max(50).optional(),
@@ -105,6 +110,9 @@ const mansionOverridesSchema = z.object({
   unitPrice: z.string().max(200).optional(),
   tax: z.string().max(50).optional(),
   taxAmount: z.string().max(200).optional(),
+  // ⚠document には反映されない(上記コメント参照)。書き戻し専用。
+  managementFee: z.string().max(200).optional(),
+  repairFee: z.string().max(200).optional(),
   // 所在・交通
   access: z.string().max(500).optional(),
   // 土地・権利
@@ -114,6 +122,13 @@ const mansionOverridesSchema = z.object({
   useDistrict: z.array(z.string().max(100)).max(20).optional(),
   areaMethod: z.string().max(50).optional(),
   // 建物
+  // ⚠exclusiveArea/balconyArea/balconyDir/layout/floorNo も document には反映されない
+  // (上記コメント参照)。書き戻し専用。
+  exclusiveArea: z.string().max(200).optional(),
+  balconyArea: z.string().max(200).optional(),
+  balconyDir: z.string().max(50).optional(),
+  layout: z.string().max(50).optional(),
+  floorNo: z.string().max(50).optional(),
   basementFloors: z.string().max(50).optional(),
   builtYearMonth: z.string().max(100).optional(),
   parking: z.string().max(100).optional(),
@@ -515,6 +530,15 @@ export async function POST(
           totalUnits: true,
           grossYield: true,
           expectedIncome: true,
+          // ⚠R14: 区分マンションの物件側7項目(仕様書 §4.4)。「今の値と同じか」の判定と
+          // ChangeLog の oldValue に使う(選ばないと常に undefined 扱いになり両方壊れる)。
+          exclusiveArea: true,
+          balconyArea: true,
+          layoutType: true,
+          orientation: true,
+          floorNo: true,
+          managementFee: true,
+          repairReserveFee: true,
           building: {
             select: {
               id: true,
