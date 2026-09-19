@@ -49,7 +49,7 @@
 
 **Interfaces:**
 - Consumes: なし
-- Produces: `EDIT_LOCK_HEARTBEAT_INTERVAL_MS` / `EDIT_LOCK_HEARTBEAT_GRACE_MS` / `EDIT_LOCK_IDLE_LIMIT_MS` / `EDIT_LOCK_IDLE_WARN_MS` / `EDIT_LOCK_STATUS_POLL_MS`、型 `EditLockResourceType` = `"property" | "owner"`、型 `EditLockRow`、型 `EditLockRequester`、型 `EditLockState`、関数 `isLockExpired(lock: EditLockRow, now: Date): boolean`、関数 `evaluateLock(lock: EditLockRow | null, now: Date, requester: EditLockRequester): EditLockState`
+- Produces: `EDIT_LOCK_HEARTBEAT_INTERVAL_MS` / `EDIT_LOCK_HEARTBEAT_GRACE_MS` / `EDIT_LOCK_IDLE_LIMIT_MS` / `EDIT_LOCK_IDLE_WARN_MS` / `EDIT_LOCK_STATUS_POLL_MS`、型 `EditLockResourceType` = `"property" | "owner"`、型 `EditLockRow`、型 `EditLockRequester`、型 `EditLockState`、関数 `isLockExpired(lock: EditLockRow, now: Date): boolean`、関数 `expiryCause(lock: EditLockRow, now: Date): "heartbeat" | "idle" | null`(両方超えていたら heartbeat を優先・期限内は null)、関数 `evaluateLock(lock: EditLockRow | null, now: Date, requester: EditLockRequester): EditLockState`
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -60,6 +60,7 @@ import {
   EDIT_LOCK_HEARTBEAT_GRACE_MS,
   EDIT_LOCK_IDLE_LIMIT_MS,
   evaluateLock,
+  expiryCause,
   isLockExpired,
   type EditLockRow,
 } from "../rules";
@@ -99,6 +100,21 @@ describe("isLockExpired", () => {
   });
   it("操作が上限を超えたら期限切れ", () => {
     expect(isLockExpired(row({ activityAt: ago(EDIT_LOCK_IDLE_LIMIT_MS + 1) }), NOW)).toBe(true);
+  });
+});
+
+describe("expiryCause: それぞれの上限で判定する", () => {
+  it("合図6分・操作50分 は heartbeat(古さの大小で決めない)", () => {
+    expect(expiryCause(row({ heartbeatAt: ago(6 * 60_000), activityAt: ago(50 * 60_000) }), NOW)).toBe("heartbeat");
+  });
+  it("合図1分・操作61分 は idle", () => {
+    expect(expiryCause(row({ heartbeatAt: ago(60_000), activityAt: ago(61 * 60_000) }), NOW)).toBe("idle");
+  });
+  it("両方超えていたら heartbeat を優先", () => {
+    expect(expiryCause(row({ heartbeatAt: ago(6 * 60_000), activityAt: ago(61 * 60_000) }), NOW)).toBe("heartbeat");
+  });
+  it("期限内なら null", () => {
+    expect(expiryCause(row(), NOW)).toBeNull();
   });
 });
 
@@ -178,11 +194,19 @@ export type EditLockState =
   | { state: "force_released_mine"; lockId: string };
 
 export function isLockExpired(lock: EditLockRow, now: Date): boolean {
+  return expiryCause(lock, now) !== null;
+}
+
+/**
+ * 何が原因で期限切れになったか。監査に残す。
+ * ⚠合図と操作は**上限が違う**(5分と60分)ので、古さの大小で決めてはいけない。
+ * 両方超えているときは、先に効く合図の側を原因とする。
+ */
+export function expiryCause(lock: EditLockRow, now: Date): "heartbeat" | "idle" | null {
   const t = now.getTime();
-  return (
-    t - lock.heartbeatAt.getTime() > EDIT_LOCK_HEARTBEAT_GRACE_MS ||
-    t - lock.activityAt.getTime() > EDIT_LOCK_IDLE_LIMIT_MS
-  );
+  if (t - lock.heartbeatAt.getTime() > EDIT_LOCK_HEARTBEAT_GRACE_MS) return "heartbeat";
+  if (t - lock.activityAt.getTime() > EDIT_LOCK_IDLE_LIMIT_MS) return "idle";
+  return null;
 }
 
 export function evaluateLock(
@@ -354,6 +378,7 @@ git commit -m "feat(edit-lock): 台帳 edit_locks の追加(migration)"
   - `forceReleaseEditLock(tx, input): Promise<{ previousUserId: string } | null>`
   - `readEditLocks(db, resources): Promise<EditLockRow[]>`(`resourceType`/`resourceId` 付き)
   - `assertNotEditLockedByOther(tx, input): Promise<void>`(違反時 `ApiError`)
+  - `isResourceEditLocked(db, target): Promise<boolean>`(保持者を持たない処理=取込が使う。DBの now() で判定)
   - `deleteEditLocksFor(tx, resources): Promise<number>`
   - 入力はすべて `{ resourceType, resourceId, userId, screenTokenHash }` を基本形とする
 
@@ -1172,11 +1197,9 @@ export async function POST(request: Request) {
             resourceType,
             resourceId,
             previousUserId: result.previous!.userId,
-            expiredBy:
-              new Date().getTime() - result.previous!.heartbeatAt.getTime() >
-              new Date().getTime() - result.previous!.activityAt.getTime()
-                ? "heartbeat"
-                : "idle",
+            // ⚠**それぞれの上限と比べる**(@codex R7 P2)。古さの大小で決めると、
+            //   合図6分・操作50分(=合図の上限5分だけ超過)を idle と誤って記録する。
+            expiredBy: expiryCause(result.previous!, new Date()),
           }
         : { resourceType, resourceId },
     });
@@ -1388,8 +1411,11 @@ git commit -m "feat(edit-lock): 保存の窓口3本で他人の鍵を断る"
 
 **Files:**
 - Modify: `src/lib/registry-pdf/process.ts`
+- Modify: `src/lib/registry-fetch/auto-fetch.ts`(監査の detail に2つのフラグを渡す)
+- Modify: `src/app/(dashboard)/import/registry-pdf/page.tsx`(取込結果に見送りの表示)
 - Modify: `src/lib/audit-log-detail-safety.ts`(`registry_auto_fetch` の許可)
 - Test: `src/lib/registry-pdf/__tests__/edit-lock-skip.test.ts`
+- Test: `src/lib/registry-fetch/__tests__/auto-fetch-edit-lock-audit.test.ts`
 
 **Interfaces:**
 - Consumes: `readEditLocks`(Task 3)
@@ -1435,6 +1461,12 @@ describe("取込と編集中の鍵", () => {
     //   realEstateNumber/lotNumber/buildingNumber が入らないことを1回の呼び出しで確認)(@codex R6 P1)。
   });
 
+  it("確認と書き込みが同じトランザクションで、行ロックの後に行われる", async () => {
+    // $transaction のモックで順序を配列に記録し、
+    // ["tx", "lock", "lockCheck", "update"] の順になることを検査する(@codex R7 P1)。
+    // ⚠「鍵の状態を先に読んでおいて、後から更新する」実装はこのテストで落ちる。
+  });
+
   it("所有者に鍵があれば法人番号を埋めず、フラグを立てる", async () => {
     (readEditLocks as unknown as Mock).mockResolvedValue([
       { id: "l2", resourceType: "owner", resourceId: "o1", userId: "u", screenTokenHash: "h", acquiredAt: new Date(), heartbeatAt: new Date(), activityAt: new Date(), forceReleasedAt: null },
@@ -1453,12 +1485,37 @@ Expected: FAIL
 
 - [ ] **Step 3: 実装を書く**
 
-- `process.ts` の空欄補完の直前に:
+- ⚠**確認と書き込みは1つのトランザクションの中で行う**(@codex R7 P1)。トランザクションの外で読むと、
+  読んだ後・書く前に編集者が鍵を取れてしまい、**守るはずの3項目を取込が書いてしまう**。
+  順序は取得・保存と同じ「物件の行をロック → 鍵の確認 → 条件つき更新」。期限の判定は**DBの now()**(Task 3 の
+  `assertNotEditLockedByOther` と同じSQL)を使い、アプリの時計で判定しない。
 
 ```ts
-const locks = await readEditLocks(prisma, [{ resourceType: "property", resourceId: propertyId }]);
-const propertyLocked = locks.some((l) => !l.forceReleasedAt && !isLockExpired(l, new Date()));
+// process.ts: 物件の更新をトランザクションに包む
+await prisma.$transaction(async (tx) => {
+  await lockPropertyRow(tx, propertyId);
+  const propertyLocked = await isResourceEditLocked(tx, { resourceType: "property", resourceId: propertyId });
+  // ここで statusUpdates / fieldUpdates を組み立て、同じ tx で updateMany する
+});
 ```
+
+  Task 3 の service に次を足す(SQL は `assertNotEditLockedByOther` と同じ条件・戻り値は真偽値だけ):
+
+```ts
+/** その資源に「今生きている鍵」があるか。取込のように保持者を持たない処理が使う。 */
+export async function isResourceEditLocked(db: Db, t: Target): Promise<boolean> {
+  const rows = await db.$queryRaw<{ active: boolean }[]>`
+    SELECT ("force_released_at" IS NULL
+            AND "heartbeat_at" >= now() - make_interval(secs => ${GRACE_SEC})
+            AND "activity_at" >= now() - make_interval(secs => ${IDLE_SEC})) AS active
+    FROM "edit_locks"
+    WHERE "resource_type" = ${t.resourceType}::"EditLockResource" AND "resource_id" = ${t.resourceId}::uuid
+  `;
+  return rows[0]?.active === true;
+}
+```
+
+  所有者の法人番号の補完も同じ形(所有者の行を `FOR UPDATE` → `isResourceEditLocked` → `updateMany`)。
 
 - **取得状況の更新は `propertyLocked` に関わらず実行**し、3項目の補完だけ `if (!propertyLocked)` で包む。見送ったときは `propertyFillSkippedByEditLock = true`。
   例(既存の `updates` の組み立てを2つに分ける):
@@ -1478,7 +1535,14 @@ if (!propertyLocked) {
 }
 const updates = { ...statusUpdates, ...fieldUpdates };
 ```
-- 法人番号の2か所も同様に、対象の所有者IDで `readEditLocks` を引き、`updateMany` の `data` に `version: { increment: 1 }` を足す。
+- 法人番号の2か所も同様に、**所有者の行をロックしたトランザクション内で** `isResourceEditLocked` を見てから、
+  `updateMany` の `data` に `version: { increment: 1 }` を足す。
+- ⚠**人の取込画面の表示も、この Task に含める**(@codex R7 P2。第2段ではない)。
+  `src/app/(dashboard)/import/registry-pdf/page.tsx` の `ImportResult` 型に2つのフラグを足し、既存の警告パネルに1行出す:
+  - 物件側 = 「編集中のため、地番・家屋番号・不動産番号の補完を見送りました」
+  - 所有者側 = 「編集中のため、法人番号の補完を見送りました」
+  表示のテスト(フラグが true のときにこの文言が出る/false のときは出ない)も同じ Task で書く。
+  **表示を入れないと、取込は成功したのに欄が空のままであることに誰も気づけない。**
 - 監査の detail に2つのフラグを足し、`ACTION_EXTRA_KEYS` に:
 
 ```ts
@@ -1488,6 +1552,12 @@ const updates = { ...statusUpdates, ...fieldUpdates };
     "ownerCorporateFillSkippedByEditLock",
   ]),
 ```
+
+- ⚠**自動取得の監査は `auto-fetch.ts` が detail を自分で組み立てている**(結果をそのまま展開していない)ので、
+  `processRegistryPdf` の戻り値にフラグを足すだけでは**監査に出ない**(@codex R7 P2)。
+  `src/lib/registry-fetch/auto-fetch.ts` の `action: "registry_auto_fetch"` を書いている箇所で、
+  detail に `propertyFillSkippedByEditLock` / `ownerCorporateFillSkippedByEditLock` を渡す。
+  テスト `auto-fetch-edit-lock-audit.test.ts` で、見送りが起きた実行の監査 detail に両方の値が入ることを検査する。
 
 ⚠`registry_auto_fetch` には既存の detail キー(mode/status など)もある。**実装時に既存の detail を1件読み、必要なキーをこの Set に併せて足す**(足さないと従来どおり `[REDACTED]` のまま)。
 
