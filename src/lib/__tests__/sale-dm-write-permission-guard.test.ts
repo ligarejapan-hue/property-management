@@ -34,6 +34,12 @@ const WRITE_GATE_EXCEPTIONS: Record<string, { reason: string; mustContain?: stri
     reason: "管理者(user_management:write)限定の削除。requireSaleDmWriteAccess より強い門を inline で通す",
     mustContain: 'hasPermission(perms, "user_management", "write")',
   },
+  // 通知の再送は「もう一度メールを投げる」だけで dm_inquiries 等を書き換えない(発注者判断
+  // 2026-09-18)。門は閲覧権限(requireSaleDmAccess)で足りるとして意図的に write 門を外している。
+  "src/app/api/properties/sale-dm/inquiries/[inquiryId]/notify/route.ts": {
+    reason: "通知の再送は書き込みを伴わない。requireSaleDmAccess(閲覧権限)で足りる(発注者判断 2026-09-18)",
+    mustContain: "requireSaleDmAccess",
+  },
 };
 
 const FILES = routeFiles(ROOT);
