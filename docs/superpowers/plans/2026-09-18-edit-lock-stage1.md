@@ -619,7 +619,13 @@ export async function acquireEditLock(
   db: Db,
   input: Target & Holder,
 ): Promise<
-  | { state: "mine"; lockId: string; since: Date; previous: EditLockRow | null }
+  | {
+      state: "mine";
+      lockId: string;
+      since: Date;
+      /** 期限切れの鍵を横取りしたときだけ入る(判定は DB の now()・@codex R8 P2)。 */
+      takeover: { previousUserId: string; expiredBy: "heartbeat" | "idle" } | null;
+    }
   | { state: "held"; current: EditLockRow }
 > {
   // ⚠横取りの判定は**DBの now()** で行う(@codex R8 P2)。取得のSQLと同じ基準にそろえる。
