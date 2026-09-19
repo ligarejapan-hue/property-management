@@ -39,6 +39,9 @@ async function loadFacts(inquiryId: string) {
       contactPref: true,
       contactTime: true,
       message: true,
+      // P2修正(Finding2): 過去のrun(手動再送ボタン/サーバー再起動後の再開)で既に送信できた
+      // 宛先を、この run の succeeded の初期値として使う(seed)。二度と同じ宛先へ送らない。
+      notifySentUserIds: true,
       draft: {
         select: {
           campaign: { select: { name: true } },
@@ -210,10 +213,15 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
   // 想定外の例外で "sending" のまま行を残さないため、進捗(attempts/succeeded)を try の外で
   // 保持し catch でも使う(Minor 2: catch を attempt:1 固定にしない)。
   let attempts = 0;
+  // succeeded: 二重送信防止に使う累積集合(過去のrunで永続化済みの分 + このrunで送った分)。
   const succeeded = new Set<string>();
+  // sentThisRun: 監査(recipientUserIds)専用。「このrunで実際に送った宛先」だけを持つ
+  // (P2修正: 永続化列は累積するが、監査は累積させない=仕様どおり)。
+  const sentThisRun = new Set<string>();
   try {
     const row = await loadFacts(inquiryId);
     if (!row) return "skipped";
+    for (const id of row.notifySentUserIds) succeeded.add(id);
 
     const facts: InquiryNotifyFacts = {
       inquiryId: row.id,
@@ -287,8 +295,9 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
       if (toSend.length === 0) {
         if (succeeded.size > 0) {
           // このラウンドの時点で適格な宛先は全員すでに送信済み(=適格性を失った人は単に
-          // 除外されるだけで、送信済みの結果を覆さない)。監査には実際に送った宛先だけを残す。
-          const wrote = await finish(inquiryId, claimedAt, attempts, { status: "sent" }, [...succeeded]);
+          // 除外されるだけで、送信済みの結果を覆さない)。監査には「このrunで」実際に
+          // 送った宛先だけを残す(P2修正: 累積のsucceededではなくsentThisRun)。
+          const wrote = await finish(inquiryId, claimedAt, attempts, { status: "sent" }, [...sentThisRun]);
           return wrote ? "sent" : "skipped";
         }
         // 誰にも送れたことが一度もない(最初から0人、または再解決の結果みな適格性を失った)。
@@ -305,27 +314,52 @@ export async function notifyInquiry(inquiryId: string, opts: { now?: () => Date 
           lastRefreshMs = t.getTime();
         }
 
+        // P1修正(Finding1・宛先間の鮮度): メール設定(inquiryMailDetail 込み)も送信直前に
+        // もう一段読み直す。1回の試行の中でも宛先ごとの送信は逐次(最長~35秒/件)なので、
+        // 前の宛先への送信中に管理者が full→minimal へ設定を締め直しても、ラウンド先頭で
+        // 読んだ config を使い回すと、まだ締め直し前のまま後方の宛先へ個人情報を送ってしまう。
+        // 設定が壊れた/消えた場合は、古い設定のまま送るくらいならここで止める(既存の
+        // mail_not_configured 終端処理に合流。recipientUserIds は空でよい=失敗監査は
+        // recipientUserIds を使わない)。
+        const freshConfig = await loadMailSendConfig();
+        if (!freshConfig) {
+          const wrote = await finish(inquiryId, claimedAt, attempts, { status: "failed", code: "mail_not_configured" }, []);
+          return wrote ? "failed" : "skipped";
+        }
+
         // P1修正(Finding1): sendPlainMail を呼ぶ直前に、この宛先だけもう一段新鮮な適格性
         // チェックを挟む(recheckRecipientBeforeSend)。ラウンド先頭の toSend は「ラウンド
         // 開始時点」のスナップショットでしかなく、直前の宛先への送信(~35秒)を挟む間に在籍/
         // 通知設定/権限/現場担当範囲が変わり得る。ここで求まった宛先(アドレス/詳しさ)だけを
-        // 使う(toSend の r はもう使わない)。DB例外もこの宛先だけ諦めて次へ進む(1人の失敗で
-        // 他の宛先まで巻き込まない=既存の1人ずつのfault isolationをここでも踏襲)。
+        // 使う(toSend の r はもう使わない)。詳しさは今読み直した freshConfig から計算する。
+        // DB例外もこの宛先だけ諦めて次へ進む(1人の失敗で他の宛先まで巻き込まない=既存の
+        // 1人ずつのfault isolationをここでも踏襲)。
         let fresh: Recipient | null;
         try {
-          fresh = await recheckRecipientBeforeSend(r.userId, row.draft.propertyId, config);
+          fresh = await recheckRecipientBeforeSend(r.userId, row.draft.propertyId, freshConfig);
         } catch {
           fresh = null;
         }
         if (!fresh) continue;
 
-        const mail = buildInquiryNotifyMail(facts, { detail: fresh.detail, appBaseUrl: config.appBaseUrl });
-        const res = await sendPlainMail(config, { to: fresh.address, subject: mail.subject, text: mail.text });
-        if (res.ok) succeeded.add(fresh.userId);
+        const mail = buildInquiryNotifyMail(facts, { detail: fresh.detail, appBaseUrl: freshConfig.appBaseUrl });
+        const res = await sendPlainMail(freshConfig, { to: fresh.address, subject: mail.subject, text: mail.text });
+        if (res.ok) {
+          succeeded.add(fresh.userId);
+          sentThisRun.add(fresh.userId);
+          // P2修正(Finding2): 送信できた宛先はすぐ永続化する。read-modify-write ではなく
+          // Prisma の push で追記する(他ワーカーが書いた分を上書きしない・取り合いキーの
+          // 保有チェックは不要=この追記自体を失っても、そのぶん再送に回るだけで安全側)。
+          await prisma.dmInquiry.update({
+            where: { id: inquiryId },
+            data: { notifySentUserIds: { push: fresh.userId } },
+          });
+        }
       }
       const stillPending = recipients.some((r) => !succeeded.has(r.userId));
       if (!stillPending) {
-        const wrote = await finish(inquiryId, claimedAt, attempts, { status: "sent" }, [...succeeded]);
+        // 監査には「このrunで」実際に送った宛先だけを残す(P2修正)。
+        const wrote = await finish(inquiryId, claimedAt, attempts, { status: "sent" }, [...sentThisRun]);
         return wrote ? "sent" : "skipped";
       }
     }

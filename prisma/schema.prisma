@@ -1269,28 +1269,33 @@ model DmLpVariant {
 /// 宛先の削除は外部キー RESTRICT で止める(申込がある宛先・キャンペーンは消せない)。
 /// 状態(handleStatus / notifyStatus)は enum を使わず文字列(rollback で enum ADD VALUE を残さない・§2.9)。
 model DmInquiry {
-  id              String    @id @default(uuid()) @db.Uuid
-  draftId         String    @map("draft_id") @db.Uuid
-  submittedAt     DateTime  @default(now()) @map("submitted_at")
-  name            String
-  phone           String
-  email           String?
-  contactPref     String?   @map("contact_pref")
-  contactTime     String?   @map("contact_time")
-  message         String?
+  id                String    @id @default(uuid()) @db.Uuid
+  draftId           String    @map("draft_id") @db.Uuid
+  submittedAt       DateTime  @default(now()) @map("submitted_at")
+  name              String
+  phone             String
+  email             String?
+  contactPref       String?   @map("contact_pref")
+  contactTime       String?   @map("contact_time")
+  message           String?
   // open | in_progress | done
-  handleStatus    String    @default("open") @map("handle_status")
-  handledById     String?   @map("handled_by_id") @db.Uuid
-  handledAt       DateTime? @map("handled_at")
-  handleNote      String?   @map("handle_note")
+  handleStatus      String    @default("open") @map("handle_status")
+  handledById       String?   @map("handled_by_id") @db.Uuid
+  handledAt         DateTime? @map("handled_at")
+  handleNote        String?   @map("handle_note")
   // pending | sending | sent | failed(メール通知 PR5 が使う。PR4 では触らない)
-  notifyStatus    String    @default("pending") @map("notify_status")
-  notifyAttempts  Int       @default(0) @map("notify_attempts")
+  notifyStatus      String    @default("pending") @map("notify_status")
+  notifyAttempts    Int       @default(0) @map("notify_attempts")
   // 定型コードのみ(外部由来の文字を入れない)
-  notifyLastError String?   @map("notify_last_error")
+  notifyLastError   String?   @map("notify_last_error")
   // 通知を取り合った時刻。sending のまま15分を超えたら残骸とみなして取り直せる。
-  notifyClaimedAt DateTime? @map("notify_claimed_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
+  notifyClaimedAt   DateTime? @map("notify_claimed_at")
+  // 送信に成功した宛先の user id を追記していく(read-modify-write ではなく Prisma の push で
+  // 追記=他ワーカーが書いた分を上書きしない)。手動の再送ボタン/サーバー再起動後の再開で
+  // 同じ宛先に二重送信しないための唯一の正本(P2修正)。user id のみ=個人情報を含まない・
+  // 内部メタデータなので申込一覧のAPI/画面には出さない。
+  notifySentUserIds String[]  @default([]) @map("notify_sent_user_ids") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at")
 
   draft     DmRecipientDraft @relation(fields: [draftId], references: [id], onDelete: Restrict)
   handledBy User?            @relation("DmInquiryHandler", fields: [handledById], references: [id])

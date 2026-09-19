@@ -628,6 +628,8 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 
 `20260918100000_add_mail_config_and_inquiry_notify` は additive のみ(表 `mail_config` 新設[singleton・1行のみ運用]・`users` に `inquiry_notify_enabled`(既定 false)・`inquiry_notify_email`(nullable)を追加・`dm_inquiries` に `notify_claimed_at`(nullable)を追加)。バックフィル無し。rollback は表の DROP と3列の DROP で戻せる(enum の追加なし)。
 
+`20260919100000_add_inquiry_notify_sent_user_ids` も additive のみ(`dm_inquiries` に `notify_sent_user_ids`(`UUID[]` 既定 `'{}'`・NOT NULL)を追加)。レビュー指摘対応(P2): 送信に成功した宛先の user id をこの列へ逐次 push で追記し、手動の「再送」ボタン・サーバー再起動後の再開が同じ宛先へ二重送信しないための唯一の正本にする。バックフィル無し(既存行は空配列のまま=過去分は再送の対象になり得るが個人情報の重複送信ではなく実害はメール1通の再送のみ)。列は user id のみで個人情報を含まず、申込一覧の API/画面には出さない内部メタデータ。rollback は列の DROP で戻せる(enum の追加なし)。
+
 新規の npm 依存 `nodemailer`(`@types/nodemailer` は devDependencies)。
 > **注意(新規依存の到達性)**: 依存の取得コマンドが npm レジストリ(`registry.npmjs.org`)に到達できることが、このリリースの hard gate(他リリースの `cdn.sheetjs.com` 到達確認と同様に、反映前に到達を確認すること)。
 

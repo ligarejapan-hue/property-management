@@ -2,7 +2,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/lib/prisma", () => ({
   default: {
-    dmInquiry: { updateMany: vi.fn(), findUnique: vi.fn() },
+    dmInquiry: { updateMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
     user: { findMany: vi.fn(), findUnique: vi.fn(), count: vi.fn() },
     property: { findUnique: vi.fn() },
   },
@@ -42,6 +42,7 @@ const pm = prisma as unknown as {
   dmInquiry: {
     updateMany: ReturnType<typeof vi.fn>;
     findUnique: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
   };
   user: { findMany: ReturnType<typeof vi.fn>; findUnique: ReturnType<typeof vi.fn>; count: ReturnType<typeof vi.fn> };
   property: { findUnique: ReturnType<typeof vi.fn> };
@@ -106,7 +107,10 @@ const PROPERTY: { address: string; propertyType: string } = {
 // pm.property.findUnique を個別に上書きする。
 const NO_SCOPE = { createdBy: null, assignedTo: null };
 
-function draftRow(overrides: Partial<typeof PROPERTY> = {}) {
+// P2修正(Finding2): notifySentUserIds は過去のrunで既に永続化された宛先のシード値。
+// 既定は空(=まだ誰にも送っていない)。手動の再送ボタン/サーバー再起動後の再開を模す
+// テストだけが明示的に上書きする。
+function draftRow(overrides: Partial<typeof PROPERTY> = {}, notifySentUserIds: string[] = []) {
   return {
     id: INQUIRY_ID,
     submittedAt: NOW,
@@ -116,6 +120,7 @@ function draftRow(overrides: Partial<typeof PROPERTY> = {}) {
     contactPref: "phone",
     contactTime: null,
     message: null,
+    notifySentUserIds,
     draft: {
       campaign: { name: "秋キャンペーン" },
       variant: { label: "A型" },
@@ -158,6 +163,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   pm.dmInquiry.updateMany.mockResolvedValue({ count: 1 });
   pm.dmInquiry.findUnique.mockResolvedValue(draftRow());
+  pm.dmInquiry.update.mockResolvedValue({});
   setUsers([user("u-a"), user("u-b")]);
   pm.user.count.mockResolvedValue(0);
   pm.property.findUnique.mockResolvedValue(NO_SCOPE);
@@ -1049,15 +1055,20 @@ describe("notifyInquiry: 送信直前の最終チェック+設定の毎回読み
         subject: `S-${opts.detail}`,
         text: `T-${opts.detail}`,
       }));
-      let cfgCalls = 0;
-      loadCfg.mockImplementation(async () => {
-        cfgCalls += 1;
-        return cfgCalls === 1 ? FULL_CONFIG : { ...FULL_CONFIG, inquiryMailDetail: "minimal" as const };
-      });
+      // P1修正(宛先間の鮮度)で loadMailSendConfig は宛先ごとにも読み直すようになったので、
+      // 呼び出し回数ではなく「attempt1の送信が失敗した後」で切り替える(=attempt境界での
+      // 切り替えを表現する。生の呼び出し回数で切り替えると、attempt1の宛先ループ内の
+      // 追加読み直しで意図せず先に切り替わってしまう)。
+      let tightened = false;
+      loadCfg.mockImplementation(async () => (tightened ? { ...FULL_CONFIG, inquiryMailDetail: "minimal" as const } : FULL_CONFIG));
       let bCalls = 0;
       send.mockImplementation(async () => {
         bCalls += 1;
-        return bCalls === 1 ? { ok: false, code: "ECONNECTION" } : { ok: true };
+        if (bCalls === 1) {
+          tightened = true;
+          return { ok: false, code: "ECONNECTION" };
+        }
+        return { ok: true };
       });
 
       const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
@@ -1079,12 +1090,17 @@ describe("notifyInquiry: 送信直前の最終チェック+設定の毎回読み
     { timeout: 20_000 },
     async () => {
       setUsers([user("u-a"), user("u-b")]);
-      let cfgCalls = 0;
-      loadCfg.mockImplementation(async () => {
-        cfgCalls += 1;
-        return cfgCalls === 1 ? FULL_CONFIG : null;
-      });
-      send.mockResolvedValue({ ok: false, code: "ECONNECTION" }); // 1回目は両方とも送信自体が失敗(再試行させる)
+      // P1修正(宛先間の鮮度)で loadMailSendConfig は宛先ごとにも読み直すようになったので、
+      // 呼び出し回数ではなく「attempt1の送信が両方とも終わった後」で使えなくなる、という
+      // attempt境界の切り替えを表現する。
+      let sendCount = 0;
+      let configGone = false;
+      loadCfg.mockImplementation(async () => (configGone ? null : FULL_CONFIG));
+      send.mockImplementation(async () => {
+        sendCount += 1;
+        if (sendCount === 2) configGone = true;
+        return { ok: false, code: "ECONNECTION" };
+      }); // 1回目は両方とも送信自体が失敗(再試行させる)
 
       const promise = notifyInquiry(INQUIRY_ID, { now: nowFn });
       await vi.advanceTimersByTimeAsync(0);
@@ -1135,6 +1151,118 @@ describe("notifyInquiry: 送信直前の最終チェック+設定の毎回読み
       expect(call.detail.recipientUserIds.sort()).toEqual(["u-a", "u-b"]);
     },
   );
+});
+
+describe("notifyInquiry: r5レビュー修正(宛先ごとの設定の鮮度+送信済み宛先の永続化)", () => {
+  // Finding1(P1・宛先間の鮮度): 1回の試行の中でも宛先ごとの送信は逐次(最長~35秒/件)。
+  // ラウンド先頭で読んだ設定を使い回すと、1件目を送っている間に管理者が full→minimal に
+  // 締め直しても、2件目以降は古い(締め直し前の)設定のまま送ってしまう。
+  it("(a) 1件目を送信している間に設定がfull→minimalへ締め直されたら、2件目はminimal本文で届く", async () => {
+    setUsers([user("u-a"), user("u-b")]);
+    buildMail.mockImplementation((_facts: unknown, opts: { detail: "minimal" | "full" }) => ({
+      subject: `S-${opts.detail}`,
+      text: `T-${opts.detail}`,
+    }));
+    let tightened = false;
+    loadCfg.mockImplementation(async () => (tightened ? { ...FULL_CONFIG, inquiryMailDetail: "minimal" as const } : FULL_CONFIG));
+    send.mockImplementation(async (_config, mail: { to: string }) => {
+      // u-aへの送信(~35秒相当)の最中に管理者が設定を締め直す。
+      if (mail.to === "u-a@example.com") tightened = true;
+      return { ok: true };
+    });
+
+    const result = await notifyInquiry(INQUIRY_ID, { now: nowFn });
+
+    expect(result).toBe("sent");
+    const byAddress = Object.fromEntries(send.mock.calls.map((c) => [c[1].to, c[1].subject]));
+    // u-aは締め直し前に読み直し済みなのでfullのまま(送信直前の再読み込みの結果を尊重する)。
+    expect(byAddress["u-a@example.com"]).toBe("S-full");
+    // u-bは締め直し後に読み直すのでminimal。ラウンド先頭で読んだ設定を使い回す実装に戻すと
+    // 両方とも S-full のままになり、このassertが失敗する(revert検出)。
+    expect(byAddress["u-b@example.com"]).toBe("S-minimal");
+  });
+
+  // Finding1: 設定が読めなくなった時点(宛先の途中)で即座に止め、古い設定のままでは送らない。
+  it("(b) 1件目の送信中に設定が読めなくなったら、以降は一切送らずmail_not_configuredで終わる", async () => {
+    setUsers([user("u-a"), user("u-b")]);
+    let gone = false;
+    loadCfg.mockImplementation(async () => (gone ? null : FULL_CONFIG));
+    send.mockImplementation(async (_config, mail: { to: string }) => {
+      if (mail.to === "u-a@example.com") gone = true;
+      return { ok: true };
+    });
+
+    const result = await notifyInquiry(INQUIRY_ID, { now: nowFn });
+
+    expect(result).toBe("failed");
+    // u-aだけ送っていて、u-bの直前で設定が読めなくなったのでu-bには送っていない。
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][1].to).toBe("u-a@example.com");
+    expect(pm.dmInquiry.updateMany).toHaveBeenLastCalledWith({
+      where: { id: INQUIRY_ID, notifyStatus: "sending", notifyClaimedAt: NOW },
+      data: { notifyStatus: "failed", notifyLastError: "mail_not_configured", notifyAttempts: { increment: 1 } },
+    });
+    // u-aへの送信自体は成功しているので、その分は永続化されている(次のrunで二重に送らない)。
+    expect(pm.dmInquiry.update).toHaveBeenCalledWith({
+      where: { id: INQUIRY_ID },
+      data: { notifySentUserIds: { push: "u-a" } },
+    });
+  });
+
+  // Finding2(P2): partial で終わった前回のrunの永続化列(notifySentUserIds)を、次のrun
+  // (手動の再送ボタン/サーバー再起動後の再開)の succeeded の初期値として使う。
+  it("(c) 前のrunで送信済みの宛先は、次のrun(手動再送)では二度と送らない", async () => {
+    setUsers([user("u-a"), user("u-b")]);
+    pm.dmInquiry.findUnique.mockResolvedValue(draftRow({}, ["u-a"])); // 前のrunでu-aは送信済み
+    send.mockResolvedValue({ ok: true });
+
+    const result = await notifyInquiry(INQUIRY_ID, { now: nowFn });
+
+    expect(result).toBe("sent");
+    const toAddresses = send.mock.calls.map((c) => c[1].to);
+    // u-aには一度も送らない(送信自体が発生しない=re-send buttonを押しても二重送信しない)。
+    expect(toAddresses).toEqual(["u-b@example.com"]);
+  });
+
+  it("(d) 送信成功の監査はこのrunで送った宛先だけ(永続化列はpushで累積・上書きしない)", async () => {
+    setUsers([user("u-a"), user("u-b")]);
+    pm.dmInquiry.findUnique.mockResolvedValue(draftRow({}, ["u-a"])); // 前のrunでu-aは送信済み
+    send.mockResolvedValue({ ok: true });
+
+    const result = await notifyInquiry(INQUIRY_ID, { now: nowFn });
+
+    expect(result).toBe("sent");
+    // 監査には「このrunで」実際に送った u-b だけ(累積のsucceededである u-a は含まない)。
+    const call = audit.mock.calls[0][0];
+    expect(call.detail).toEqual({ attempt: 1, recipientUserIds: ["u-b"] });
+    // 永続化はread-modify-writeの上書きではなくpushで追記する(他ワーカー/前回runの分を
+    // 消さない)。
+    expect(pm.dmInquiry.update).toHaveBeenCalledWith({
+      where: { id: INQUIRY_ID },
+      data: { notifySentUserIds: { push: "u-b" } },
+    });
+    expect(pm.dmInquiry.update).not.toHaveBeenCalledWith(expect.objectContaining({ data: { notifySentUserIds: { push: "u-a" } } }));
+  });
+
+  // Finding2: ハッピーパス(永続化なし=notifySentUserIdsが空)は従来どおり全員に届く。
+  it("(e) 何も変わらないハッピーパスは従来どおり sent・全員に一度ずつ届く", async () => {
+    setUsers([user("u-a"), user("u-b")]);
+    send.mockResolvedValue({ ok: true });
+
+    const result = await notifyInquiry(INQUIRY_ID, { now: nowFn });
+
+    expect(result).toBe("sent");
+    const toAddresses = send.mock.calls.map((c) => c[1].to).sort();
+    expect(toAddresses).toEqual(["u-a@example.com", "u-b@example.com"]);
+    expect(pm.dmInquiry.update).toHaveBeenCalledWith({
+      where: { id: INQUIRY_ID },
+      data: { notifySentUserIds: { push: "u-a" } },
+    });
+    expect(pm.dmInquiry.update).toHaveBeenCalledWith({
+      where: { id: INQUIRY_ID },
+      data: { notifySentUserIds: { push: "u-b" } },
+    });
+  });
 });
 
 describe("startInquiryNotify: 例外で落ちない", () => {
