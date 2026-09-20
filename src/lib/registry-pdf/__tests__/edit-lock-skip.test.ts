@@ -320,6 +320,44 @@ describe("物件の空欄補完と編集中の鍵", () => {
     expect(result.action).toBe("matched");
     expect(result.propertyFillSkippedByEditLock).toBe(false);
   });
+
+  it("変更履歴の『変更前』も、外側の古い値ではなくロック後に読み直した現在値を使う(round1再点検 M1)", async () => {
+    // 外側で読んだ existing は realEstateNumber="OLD-NUM"(埋まっている)だが、
+    // 行ロックを取るまでの間に鍵の持ち主がそれを消し(null に戻し)ていた、
+    // というシナリオ。もし oldValues に外側の値をそのまま使うと、
+    // 「OLD-NUM → 新しい番号」という記録になるが、実際に上書きされた値は
+    // null なので嘘になる。fresh(トランザクション内の読み直し)を使えば
+    // 「(空) → 新しい番号」という正しい記録になる。
+    const stale = {
+      ...BASE_PROPERTY,
+      version: 1,
+      realEstateNumber: "OLD-NUM",
+      lotNumber: null,
+      buildingNumber: null,
+      registryStatus: "unconfirmed",
+    };
+    const fresh = {
+      ...BASE_PROPERTY,
+      version: 1,
+      realEstateNumber: null, // ロック取得までの間に他の書き込みで消えていた
+      lotNumber: null,
+      buildingNumber: null,
+      registryStatus: "unconfirmed",
+    };
+    pm.property.findUnique
+      .mockResolvedValueOnce(stale) // Mode A 入口の existing 読み取り
+      .mockResolvedValue(fresh); // tx 内の読み直し(以降は全てこれ)
+    (isResourceEditLocked as unknown as Mock).mockResolvedValue(false); // 鍵なし=補完も進む
+
+    await run();
+
+    expect(recordChanges).toHaveBeenCalledTimes(1);
+    const call = (recordChanges as Mock).mock.calls[0][0];
+    // 「変更前」は fresh(null) であって、外側の stale("OLD-NUM")ではない。
+    expect(call.oldValues.realEstateNumber).toBeNull();
+    expect(call.oldValues.realEstateNumber).not.toBe("OLD-NUM");
+    expect(call.newValues.realEstateNumber).toBe("0100012345678");
+  });
 });
 
 describe("所有者の法人番号補完と編集中の鍵", () => {

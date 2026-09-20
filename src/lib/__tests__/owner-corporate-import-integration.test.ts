@@ -147,17 +147,37 @@ describe("registry-pdf route Phase D 統合", () => {
     expect(registryPdfSrc).toMatch(/decideCorporateImport\(/);
   });
 
-  it("reuse パスで updateMany(where corporateNumber:null) による空欄埋め", () => {
-    // D10(編集中の鍵): この updateMany は fillOwnerCorporateNumberIfUnlocked に
-    // 括り出され、所有者の行をロックしたトランザクションの中で実行される
-    // (呼び出し側の変数名は candidateOwnerId!/cnDecision.corporateNumber だが、
-    //  ヘルパー内部では ownerId/corporateNumber という仮引数名になる)。
-    // ⚠レビュー round1 #5: `version: { increment: 1 }` は D10 の実際のバグ修正
-    //   (これが無いと編集画面の古い内容で黙って消える)。regex がここで止まると
-    //   1か所だけ version を落とす回帰にこのテストが気づけないため、増分まで含める。
-    expect(registryPdfSrc).toMatch(
-      /async function fillOwnerCorporateNumberIfUnlocked[\s\S]{0,1500}where:\s*\{\s*id:\s*ownerId,\s*corporateNumber:\s*null\s*\}[\s\S]{0,100}data:\s*\{\s*corporateNumber,\s*version:\s*\{\s*increment:\s*1\s*\}\s*\}/,
+  // ⚠レビュー round1 #5 → round2 M2: 元は「ヘルパーの定義から書き込みまで」を
+  // 1つの正規表現の距離({0,1500})でまとめて見ていたため、ヘルパー本体に
+  // コメントが増えるだけで(中身は何も変えていなくても)この距離を超えて
+  // テストが「原因不明のまま」落ちる恐れがあった(本リポジトリで前例あり)。
+  // 距離に依存しない2つの独立した事実に分割する:
+  //   (a) ヘルパー自身が corporateNumber の空欄埋めで version increment を
+  //       必ず一緒に書いている(D10 の実バグ修正・落ちたら「両者は近接して
+  //       いるはずが離れた/消えた」と分かる)。
+  //   (b) 両方の reuse パス(住所なし/住所あり)が、直接 updateMany を書かず
+  //       このヘルパーを経由している(呼び出し1本を個別に増減させる回帰は
+  //       振る舞いテスト(edit-lock-skip.test.ts)側で検出する。ここは
+  //       「ヘルパー経由の窓口が2つとも生きているか」の低コストな見張り)。
+  it("(a) ヘルパー自身が corporateNumber の空欄埋めで version increment を必ず書く", () => {
+    expect(
+      registryPdfSrc,
+      "fillOwnerCorporateNumberIfUnlocked の updateMany から corporateNumber または version:{increment:1} が消えている(D10のバグ修正が後退した可能性)",
+    ).toMatch(
+      /where:\s*\{\s*id:\s*ownerId,\s*corporateNumber:\s*null\s*\}[\s\S]{0,100}data:\s*\{\s*corporateNumber,\s*version:\s*\{\s*increment:\s*1\s*\}\s*\}/,
     );
+  });
+
+  it("(b) 住所なし/住所ありの両方の reuse パスが fillOwnerCorporateNumberIfUnlocked を経由する", () => {
+    // 定義1回 + 呼び出し2回(住所なし経路・住所あり経路)= 3回のはず。
+    const occurrences = (
+      registryPdfSrc.match(/fillOwnerCorporateNumberIfUnlocked\(/g) ?? []
+    ).length;
+    expect(
+      occurrences,
+      `fillOwnerCorporateNumberIfUnlocked( の出現回数が期待(定義1+呼び出し2=3)と異なる(${occurrences}件)。` +
+        "どちらかの reuse パスが直接 updateMany を書いてヘルパーを経由しなくなった可能性がある。",
+    ).toBe(3);
   });
 
   it("create パスで data.corporateNumber を save action のみ乗せる", () => {

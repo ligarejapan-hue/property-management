@@ -594,7 +594,16 @@ export async function processRegistryPdf(
       // 埋める欄も進める状態も無ければ、鍵の有無に関わらず結果は変わらない。
       // (毎回の取込のたびに無条件で行ロックを取ると、実質 no-op の再取込でも
       //  他の編集を待たせてしまう。既存の挙動(条件が無ければ何もしない)も保つ。)
-      const updates: Record<string, unknown> =
+      // ⚠**recordChanges の oldValues もトランザクション内で読み直した値
+      // (fresh)から作る**(レビュー round1 #2 の再点検 M1)。newValues(merged)は
+      // fresh 基準で組み立てているのに、oldValues だけ外側の stale な `existing`
+      // を使うと、鍵の持ち主がロック取得までの間にその項目を変えていた場合、
+      // 変更履歴の「変更前」が実際の変更前と食い違う。
+      type PropertyTxResult = {
+        merged: Record<string, unknown>;
+        fresh: Record<string, unknown> | null;
+      };
+      const { merged: updates, fresh: freshForChangeLog }: PropertyTxResult =
         wouldFillProperty || wouldAdvanceStatus
           ? await prisma.$transaction(async (tx) => {
               await lockPropertyRow(tx, propertyId);
@@ -617,7 +626,7 @@ export async function processRegistryPdf(
               });
               // ロック直後に取れない=行ロックとfindUniqueの間で削除された。
               // 何も書かず終える(既存の404判定は入口で既に済んでいる)。
-              if (!fresh) return {};
+              if (!fresh) return { merged: {}, fresh: null };
 
               const propertyLocked = await isResourceEditLocked(tx, {
                 resourceType: "property",
@@ -660,7 +669,7 @@ export async function processRegistryPdf(
               // 鍵が無いときは(a)(b)を1回の updateMany にまとめる。鍵があるときは
               // fieldUpdates が常に空なので、実質(a)だけの1回になる。
               const merged = { ...statusUpdates, ...fieldUpdates };
-              if (Object.keys(merged).length === 0) return {};
+              if (Object.keys(merged).length === 0) return { merged: {}, fresh };
 
               const written = await tx.property.updateMany({
                 where: { id: propertyId, version: fresh.version },
@@ -670,16 +679,22 @@ export async function processRegistryPdf(
               // updateMany の間でさらに割り込まれた場合は 0 件もあり得る。
               // その場合は「何も書けていない」を正直に返す(recordChanges へ
               // 嘘を渡さない)。
-              return written.count > 0 ? merged : {};
+              return { merged: written.count > 0 ? merged : {}, fresh };
             })
-          : {};
+          : { merged: {}, fresh: null };
 
       if (Object.keys(updates).length > 0) {
         await recordChanges({
           targetTable: "properties",
           targetId: propertyId,
           changedBy: session.id,
-          oldValues: existing as unknown as Record<string, unknown>,
+          // ⚠oldValues はトランザクション内で読み直した fresh を使う(上記コメント)。
+          // updates が非空の時点で fresh は必ず non-null(空を返す全経路は
+          // merged も空にしている)。
+          oldValues: (freshForChangeLog ?? existing) as unknown as Record<
+            string,
+            unknown
+          >,
           newValues: updates,
           trackedFields: PROPERTY_TRACKED_FIELDS,
           source: "pdf_import",
