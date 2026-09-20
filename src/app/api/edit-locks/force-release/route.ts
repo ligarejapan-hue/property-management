@@ -4,6 +4,7 @@ import { ApiError, apiResponse, getApiSession, handleApiError } from "@/lib/api-
 import { writeAuditLog } from "@/lib/audit";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { forceReleaseEditLock } from "@/lib/edit-lock/service";
+import { lockOwnerRow } from "@/lib/edit-lock/row-locks";
 
 const schema = z.object({
   resourceType: z.enum(["property", "owner"]),
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
       if (resourceType === "property") {
         await lockPropertyRow(tx, resourceId);
       } else {
-        await tx.$queryRaw`SELECT id FROM owners WHERE id = ${resourceId}::uuid FOR UPDATE`;
+        await lockOwnerRow(tx, resourceId);
       }
       return forceReleaseEditLock(tx, { resourceType, resourceId, lockId, adminUserId: session.id });
     });
