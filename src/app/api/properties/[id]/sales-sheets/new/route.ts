@@ -453,6 +453,14 @@ export async function POST(
           repairReserveFee: property.repairReserveFee,
           zoningDistrict: property.zoningDistrict,
           occupancyStatus: property.occupancyStatus,
+          // [Task10 C-1] 物件に保存済みの販売条件を既定値として読み戻す(区分は building
+          // relation を持つが、この5項目は buildWriteback が RULES.mansion で property の
+          // スカラ列へ保存するため land/house/building と同じく property から読む)。
+          salePrice: property.salePrice?.toString() ?? null,
+          saleTaxType: property.saleTaxType,
+          saleTaxAmount: property.saleTaxAmount?.toString() ?? null,
+          access: property.access,
+          parking: property.parking,
         },
         // ⚠**建物マスタが無くても物件名だけは渡す** (@codex #354 P2)。
         // 建物マスタを作らずに登録した区分マンションは property.building が

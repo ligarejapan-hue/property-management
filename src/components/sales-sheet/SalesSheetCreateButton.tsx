@@ -230,6 +230,16 @@ interface MansionAutoSource {
   floorNo?: number | null;
   managementFee?: number | null;
   repairReserveFee?: number | null;
+  /**
+   * [Task10 C-1] F3で物件へ保存した販売条件。land/house/building の AutoSource と同じ
+   * 5項目(区分は building relation を持つが、これらは buildWriteback が RULES.mansion で
+   * property のスカラ列へ保存するため property から読む)。
+   */
+  salePrice?: number | string | null;
+  saleTaxType?: string | null;
+  saleTaxAmount?: number | string | null;
+  access?: string | null;
+  parking?: string | null;
   building?: {
     name?: string | null;
     totalFloors?: number | null;
@@ -378,6 +388,15 @@ function computeMansionAutoValues(data: MansionAutoSource): FieldModelAutoValues
   if (b?.basementFloors != null) {
     hints.basementFloors = savedValueHint(`${b.basementFloors}階`);
   }
+  // [Task10 C-1] F3で物件へ保存した販売条件(build-document.ts の buildMansionValues と
+  // 同じ既定値・house/land/building と同じ5項目)。
+  if (data.salePrice != null && data.salePrice !== "") hints.price = savedValueHint(`${data.salePrice}万円`);
+  if (data.saleTaxType) hints.tax = savedValueHint(data.saleTaxType);
+  if (data.saleTaxAmount != null && data.saleTaxAmount !== "") {
+    hints.taxAmount = savedValueHint(`${data.saleTaxAmount}万円`);
+  }
+  if (data.access) hints.access = savedValueHint(data.access);
+  if (data.parking) hints.parking = savedValueHint(data.parking);
   return {
     preview: {
       // 建物マスタ優先・無ければ物件のスカラを使う。

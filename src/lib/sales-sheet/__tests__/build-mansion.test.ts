@@ -409,6 +409,60 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     expect(salesSheetDocumentSchema.safeParse(doc).success).toBe(true);
   });
 
+  // [Task10 C-1] 1枚目の図面作成で物件へ保存した価格・交通・駐車場・消費税が、2枚目の図面の
+  // 作成時にダイアログ/図面のどちらにも出てこなかった不具合の修正確認。区分マンションは
+  // 構造・地上階・総戸数は棟が正(override機構なし)だが、price/tax/taxAmount/access/parkingの
+  // 5項目は buildWriteback(RULES.mansion)が property のスカラ列へ保存するため、他3種別
+  // (land/house/building)と同じ「手入力 > 物件の値 > 空」で読み戻す。
+  describe("物件(property)の値を既定値として使う([Task10 C-1])", () => {
+    const propertyWithSaleFields = {
+      ...base.property,
+      salePrice: "6590",
+      saleTaxType: "課税",
+      saleTaxAmount: "300",
+      access: "JR中央線 西荻窪駅 徒歩8分",
+      parking: "有",
+    };
+
+    it("override が無ければ property の値を既定値として使う", () => {
+      const doc = buildSaleMansionDocument({
+        ...base,
+        property: propertyWithSaleFields,
+        overrides: {},
+      });
+      expect(findEl(doc, "price")).toMatchObject({ content: "6,590万円" });
+      expect(tableRow(doc, "うち消費税")).toBe("300万円"); // tax:"課税" の既定値が showWhen を通す
+      expect(tableRow(doc, "交通")).toBe("JR中央線 西荻窪駅 徒歩8分");
+      expect(tableRow(doc, "駐車場")).toBe("有");
+    });
+
+    it("手入力(override)があればoverrideが優先される(手入力 > 物件の値 > 空)", () => {
+      const doc = buildSaleMansionDocument({
+        ...base,
+        property: propertyWithSaleFields,
+        overrides: {
+          price: "6980",
+          tax: "不課税",
+          access: "△△線 徒歩3分",
+          parking: "無",
+        },
+      });
+      expect(findEl(doc, "price")).toMatchObject({ content: "6,980万円" });
+      expect(tableLabels(doc)).not.toContain("うち消費税"); // 不課税(override)
+      expect(tableRow(doc, "交通")).toBe("△△線 徒歩3分");
+      expect(tableRow(doc, "駐車場")).toBe("無");
+    });
+
+    it("property に値が無く override も無ければ従来どおり空文字/行なし", () => {
+      const doc = buildSaleMansionDocument({ ...base, overrides: {} });
+      expect(findEl(doc, "price")).toMatchObject({ content: "" });
+      // 交通(access)は主要表(空でも行を残す)。
+      expect(tableRow(doc, "交通")).toBe("");
+      // 駐車場(parking)は詳細表(main-detail-rows: 空行は出さない)なので行自体が無い。
+      expect(tableLabels(doc)).not.toContain("駐車場");
+    });
+  });
+
   it("input.company が会社帯へ流れる（既定 COMPANY_INFO を上書き）", () => {
     const doc = buildSaleMansionDocument({
       ...base,

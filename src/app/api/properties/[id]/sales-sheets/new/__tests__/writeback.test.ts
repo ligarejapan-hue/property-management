@@ -629,4 +629,28 @@ describe("POST /sales-sheets/new — 図面への読み戻し(C-1)", () => {
     expect(res.status).toBe(201);
     expect(documentTableRow("築年月")).toBe("2008年3月");
   });
+
+  // [Task10 mansion readback fix] 区分マンションのみ price/tax/taxAmount/access/parking が
+  // buildMansionValues 側の override 固定(o.x のみ)で、1枚目の図面作成でbuildWriteback が
+  // property へ保存した値が2枚目の図面(この POST)に一度も出てこなかった。土地/戸建/一棟と
+  // 同じ read-back を区分マンションにも適用したことの route レベルの確認
+  // (select→buildSaleMansionDocument の受け渡しが一続きで動くこと)。
+  it("区分マンション: 物件に保存済みの価格・交通・駐車場が図面に出る", async () => {
+    propertyFindMock.mockResolvedValue({
+      ...baseMansion,
+      salePrice: 6590,
+      saleTaxType: "課税",
+      saleTaxAmount: 300,
+      access: "JR中央線 西荻窪駅 徒歩8分",
+      parking: "有",
+    });
+    const res = await POST(req({ propertyVersion: 1 }), ctx); // override 無し
+    expect(res.status).toBe(201);
+    const doc = (createDesign as Mock).mock.calls[0][0].document as {
+      elements: { id: string; content?: string }[];
+    };
+    expect(doc.elements.find((e) => e.id === "price")).toMatchObject({ content: "6,590万円" });
+    expect(documentTableRow("交通")).toBe("JR中央線 西荻窪駅 徒歩8分");
+    expect(documentTableRow("うち消費税")).toBe("300万円");
+  });
 });

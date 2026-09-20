@@ -268,6 +268,18 @@ export interface SaleMansionInput {
     repairReserveFee?: number | null;
     zoningDistrict?: string | null;
     occupancyStatus?: string | null;
+    /**
+     * [Task10 C-1] F3で物件へ保存した販売条件。override(手入力)が無ければ既定値として使う
+     * (house/land/building と同じ「手入力 > 物件の値 > 空」・区分は building relation を
+     * 配線しているが、この5項目は buildWriteback が RULES.mansion で property のスカラ列
+     * (salePrice/saleTaxType/saleTaxAmount/access/parking)へ保存するため、棟ではなく
+     * property から読む)。
+     */
+    salePrice?: string | null;
+    saleTaxType?: string | null;
+    saleTaxAmount?: string | null;
+    access?: string | null;
+    parking?: string | null;
   };
   building?: {
     name?: string | null;
@@ -303,14 +315,16 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
   );
 
   return {
-    // 価格・費用（price/unitPrice/tax/taxAmountは手入力のみ）
+    // 価格・費用（unitPriceは手入力のみ）
     // propertyType: 自動反映元なし（DB enum が語彙不一致のため常に手入力=override のみ）。
     propertyType: o.propertyType,
     buildingName: b.name ?? undefined,
-    price: o.price,
+    // [Task10 C-1] price/tax/taxAmount/access/parking は override優先、無ければ物件の
+    // 既定値(手入力 > 物件の値 > 空・house/land/building と同じ形)。
+    price: pick(o.price, p.salePrice),
     unitPrice: o.unitPrice,
-    tax: o.tax,
-    taxAmount: o.taxAmount,
+    tax: pick(o.tax, p.saleTaxType),
+    taxAmount: pick(o.taxAmount, p.saleTaxAmount),
     // ⚠R16: 管理費/修繕積立金は override 優先(空/未指定なら property の自動反映値)。
     // 図面(この document)と物件(buildWriteback)を同じ入力から作るため
     // (土地・戸建・一棟の他項目と同じ「o.x が非空なら o.x、そうでなければ auto」の書き方)。
@@ -328,7 +342,7 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
           : undefined,
     // 所在・交通
     address: p.address,
-    access: o.access,
+    access: pick(o.access, p.access),
     // 土地・権利
     siteArea: o.siteArea,
     siteRightRatio: o.siteRightRatio,
@@ -361,7 +375,7 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
     basementFloors: pick(o.basementFloors, b.basementFloors),
     builtYearMonth: fmtBuiltYear(o.builtYearMonth, b.builtYear, b.builtMonth),
     totalUnits: b.totalUnits != null ? String(b.totalUnits) : undefined,
-    parking: o.parking,
+    parking: pick(o.parking, p.parking),
     parkingFee: o.parkingFee,
     // 設備・現況・管理
     equipment: o.equipment,
