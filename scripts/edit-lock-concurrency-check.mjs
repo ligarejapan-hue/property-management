@@ -48,11 +48,13 @@
  *      期待する出力(要旨。実際は番号付きで詳細に出る):
  *        [1] 取得できた本数: 1 (1 なら正しい。それ以外は非0で終了する)
  *        [2] ON CONFLICT の make_interval 分岐: 通過(もう1本は held になった)
- *        [3] unnest ベースの IN(readEditLocks 相当): 1件読めた
+ *        [3] unnest ベースの IN(readEditLocks 相当): 1件読めた・大文字化しても同じ
+ *            件数(item Fの実地確認。一致しなければ非0で終了する)
  *        [4] unnest ベースの IN(deleteEditLocksFor 相当): 1件消せた
  *        [5] ::"EditLockResource" キャスト: 例外なし
- *        [6] 期限切れ横取りの競合再現: 「N回中M回で再現した」/「N回の試行では再現しなかった」
- *            のどちらか(**この行は結果に関わらず必ず PR に貼る**。記録すること自体が目的)
+ *        [6] 種の位置(境界のどちら側から始めたか)と、期限切れ横取りの競合再現:
+ *            「N回中M回で再現した」/「N回の試行では再現しなかった」のどちらか
+ *            (**この行は結果に関わらず必ず PR に貼る**。記録すること自体が目的)
  *        [7] rollback route と同じ ANY(::uuid[]) ORDER BY id FOR UPDATE: 2件ロックできた
  *            (properties が2件未満なら非致命的にスキップし、その旨を出力する)
  *
@@ -62,6 +64,9 @@
  *       (2本目の同時取得が INSERT ... ON CONFLICT ... WHERE 節の
  *        make_interval 比較を実地で通る)
  *   (c) unnest(...) で組んだ行単位の IN(readEditLocks/deleteEditLocksFor) → [3][4]
+ *       (review round2 Minor 2: [3] は渡された表記と大文字化した表記の両方を読み、
+ *        件数が一致することまで比較する。argv をそのまま使うだけでは、operator が
+ *        たまたま大文字UUIDを渡さない限り item F の実地確認にならないため)
  *   (d) ::"EditLockResource" enum キャスト        → [1]〜[4][7] すべてで踏む
  *   (e) acquireEditLock の pre-SELECT とその後の upsert が別文であることに
  *       起因する、期限切れ横取り時に takeover が null になり得る競合の再現 → [6]
@@ -95,12 +100,9 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-// フラグ("--"始まり)を除いた最初の位置引数を物件のUUIDとして扱う。素朴に argv[2] を
-// 見ると、フラグだけ渡して物件UUIDを渡し忘れたときに `--i-know-this-writes` という
-// 文字列そのものが「UUID」として扱われ、無効な DB へ本当に接続を試みてしまう。
-const positionalArgs = process.argv.slice(2).filter((a) => !a.startsWith("--"));
-const resourceId = positionalArgs[0];
-const hasOptIn = process.argv.includes("--i-know-this-writes");
+const USAGE =
+  "使い方: node --env-file=.env scripts/edit-lock-concurrency-check.mjs <物件のUUID> --i-know-this-writes";
+const KNOWN_FLAG = "--i-know-this-writes";
 
 let dbHost = "(DATABASE_URL の形式が不正で判読できません)";
 try {
@@ -110,10 +112,27 @@ try {
 }
 console.log(`接続先DB: ${dbHost}`);
 
+const rawArgs = process.argv.slice(2);
+
+// review round2 Minor 4: 単発ダッシュ(`-x`)は素通りし、未知の `--flag` は
+// 黙って無視されていた。既知のフラグ以外の `-` 始まりの引数はすべて拒否する。
+const unknownFlag = rawArgs.find((a) => a.startsWith("-") && a !== KNOWN_FLAG);
+if (unknownFlag) {
+  console.error(`不明な引数です: ${unknownFlag}\n${USAGE}`);
+  process.exit(1);
+}
+
+// フラグを除いた最初の位置引数を物件のUUIDとして扱う。素朴に argv[2] を見ると、
+// フラグだけ渡して物件UUIDを渡し忘れたときに `--i-know-this-writes` という
+// 文字列そのものが「UUID」として扱われ、無効な DB へ本当に接続を試みてしまう。
+const positionalArgs = rawArgs.filter((a) => a !== KNOWN_FLAG);
+const resourceId = positionalArgs[0];
+const hasOptIn = rawArgs.includes(KNOWN_FLAG);
+
 if (!resourceId || !hasOptIn) {
   console.error(
     [
-      "使い方: node --env-file=.env scripts/edit-lock-concurrency-check.mjs <物件のUUID> --i-know-this-writes",
+      USAGE,
       "",
       "このスクリプトは指定した物件の edit_locks 行を実際に DELETE/INSERT します。",
       "本番などの共有DBに対して誤実行しないよう、--i-know-this-writes を明示しない限り、",
@@ -169,18 +188,24 @@ async function takeoverAttempt(userId, hash) {
   return { won: true, takeover };
 }
 
-// review Important 2: 999,999秒ずらすと期限切れ判定が余裕を持って確定してしまい、
-// pre-SELECT/upsert の間に競合が起きる余地が無い。しきい値ぎりぎり(2ms だけ超過)に
-// 種を蒔き、DB 往復のジッタで実際に境界をまたぐ可能性を残す。
-async function seedJustExpiredLock(holderUserId) {
+// review round2 Important 1: 期限の**手前**(まだ生きている側)に種を蒔く。
+// 前回は `- interval '2 milliseconds'`(期限を2ms過ぎた側)に種を蒔いていたため、
+// pre-SELECT の時点で既に expired_by が確定してしまい、横取りの「非レース」経路
+// (正しく記録される経路)しか通らなかった(reproducedCount が常に0になる)。
+// バグが起きるのは「pre-SELECT はまだ生きていると見る → その直後の upsert の
+// WHERE 評価までの間に境界をまたいで期限切れになる」場合だけなので、種は
+// **期限のまだ手前**(+ offsetMs ミリ秒)に置き、DB往復のジッタで実際に
+// 境界をまたぐ可能性を残す。offsetMs は 0〜7ms を周回させ(呼び出し側の
+// `i % 8`)、ちょうど良い一点を運任せにしない。
+async function seedNearExpiryLock(holderUserId, offsetMs) {
   await prisma.$executeRaw`DELETE FROM "edit_locks" WHERE "resource_id" = ${resourceId}::uuid`;
   await prisma.$executeRaw`
     INSERT INTO "edit_locks" ("id","resource_type","resource_id","user_id","screen_token_hash","acquired_at","heartbeat_at","activity_at")
     VALUES (
       gen_random_uuid(), 'property'::"EditLockResource", ${resourceId}::uuid, ${holderUserId}::uuid, 'stale-screen',
-      clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision) - interval '2 milliseconds',
-      clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision) - interval '2 milliseconds',
-      clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision) - interval '2 milliseconds'
+      clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision) + (${offsetMs}::double precision * interval '1 millisecond'),
+      clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision) + (${offsetMs}::double precision * interval '1 millisecond'),
+      clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision) + (${offsetMs}::double precision * interval '1 millisecond')
     )
   `;
 }
@@ -225,19 +250,35 @@ async function main() {
 
   // [3] readEditLocks 相当: unnest ベースの行単位 IN + db_now を1クエリで読む。
   //     service.ts と同じく列側は text へ落とさず、unnest 側を enum/uuid にキャストする
-  //     (review Minor 7 の修理後の形。大文字UUIDでも一致することの実地確認も兼ねる)。
-  const readRows = await prisma.$queryRaw`
+  //     (review Minor 7 の修理後の形)。
+  //     review round2 Minor 2: argv をそのまま渡すだけでは、操作者がたまたま
+  //     小文字UUIDを渡した回だけ「緑」に見えてしまい、item F(大文字UUIDの孤児鍵
+  //     バグ)の実地確認になっていなかった。ここで明示的に大文字化した変種も
+  //     読み直し、件数が一致することを比較する — これが item F を実DBで
+  //     証明する唯一の手段。
+  const readByResourceIdVariant = (idVariant) => prisma.$queryRaw`
     SELECT clock_timestamp() AS db_now,
            "id", "resource_type", "resource_id", "user_id", "screen_token_hash",
            "acquired_at", "heartbeat_at", "activity_at", "force_released_at"
     FROM "edit_locks"
     WHERE ("resource_type", "resource_id") IN (
-      SELECT t::"EditLockResource", i::uuid FROM unnest(${["property"]}::text[], ${[resourceId]}::text[]) AS x(t, i)
+      SELECT t::"EditLockResource", i::uuid FROM unnest(${["property"]}::text[], ${[idVariant]}::text[]) AS x(t, i)
     )
   `;
-  console.log(`[3] unnest ベースの IN(readEditLocks 相当): ${readRows.length}件読めた`);
+  const readRows = await readByResourceIdVariant(resourceId);
+  const readRowsUpper = await readByResourceIdVariant(resourceId.toUpperCase());
+  console.log(`[3] unnest ベースの IN(readEditLocks 相当): ${readRows.length}件読めた(渡した表記のまま)`);
+  console.log(
+    `[3] 大文字化しても同じ件数を読めるか(item Fの実地確認): 渡した表記=${readRows.length}件 / ` +
+      `大文字化=${readRowsUpper.length}件 → ${
+        readRows.length === readRowsUpper.length ? "一致(修理済み)" : "不一致(要調査)"
+      }`,
+  );
+  if (readRows.length !== readRowsUpper.length) process.exitCode = 1;
 
   // [4] deleteEditLocksFor 相当: 同じ unnest ベースの行単位 IN で削除する。
+  // ⚠[3]と違って DELETE なので、渡された表記のまま1回だけ実行する
+  //   (先に大文字化した変種で消してしまうと、その後の[3]の比較対象が消える)。
   const deletedRows = await prisma.$queryRaw`
     DELETE FROM "edit_locks"
     WHERE ("resource_type", "resource_id") IN (
@@ -249,13 +290,20 @@ async function main() {
   console.log(`[5] ::"EditLockResource" キャスト: 例外なし(ここまで到達していれば全クエリが通過済み)`);
 
   // [6] 期限切れの横取りで pre-SELECT と upsert(2文)の間に競合が起きないかを再現する。
-  //     review Important 2: 1回だけ・999,999秒ずらして「再現しなかった」を騙るのではなく、
-  //     しきい値ぎりぎりで何度も試行し、実際に何回再現したかを報告する。
+  //     review round2 Important 1: 種は「期限のまだ手前(生きている側)」に置く
+  //     (+0〜+7ms を周回)。境界の**どちら側を狙って試したか**を先に明示する
+  //     (前回の版は無自覚に期限の向こう側を試していたため、常に「非再現」しか
+  //     出せなかった)。
   const ATTEMPTS = 200;
+  const OFFSET_SWEEP_MS = 8; // i % 8 で +0〜+7ms を周回
+  console.log(
+    `[6] 種の位置: 期限のちょうど 0〜${OFFSET_SWEEP_MS - 1}ms 手前(まだ生きている側)から開始し、` +
+      `DB往復の間に期限をまたぐかどうかで再現を狙う(${ATTEMPTS}回試行)`,
+  );
   let reproducedCount = 0;
   let inconclusiveCount = 0;
   for (let i = 0; i < ATTEMPTS; i++) {
-    await seedJustExpiredLock(u1.id);
+    await seedNearExpiryLock(u1.id, i % OFFSET_SWEEP_MS);
     const [r1, r2] = await Promise.all([
       takeoverAttempt(u1.id, `takeover-x-${i}`),
       takeoverAttempt(u2.id, `takeover-y-${i}`),

@@ -77,9 +77,9 @@ vi.mock("@/lib/prisma", () => {
     propertyDmLogOwner: { updateMany: vi.fn(async () => ({ count: 0 })) },
     dmRecipientDraftOwner: { updateMany: vi.fn(async () => ({ count: 0 })) },
     $executeRaw: vi.fn(async () => 0),
-    // Task 8: deleteEditLocksFor(統合で消える source の鍵の後始末)が
-    // tx.$queryRaw を使う。既存のテストが壊れないよう空配列を返す無害な既定にする。
-    $queryRaw: vi.fn(async () => []),
+    // Task 8: deleteEditLocksFor は下で `@/lib/edit-lock/service` ごとモックしている
+    // ため、この tx は $queryRaw を経由しない(review round2 Minor 5: 以前ここに
+    // あった $queryRaw のダミーは死んだ配線だったので削除した)。
   };
   return {
     default: {
@@ -96,9 +96,15 @@ vi.mock("@/lib/prisma", () => {
   };
 });
 
+// review round2 item 6: merge の deleteEditLocksFor(source の鍵の後始末)の置き場所は
+// これまで走査だけで守られていた。archive/rollback/property-DELETE と同じ技法
+// (関数を直接モックし、順序とtxの同一性をピン留めする)をここにも適用する。
+vi.mock("@/lib/edit-lock/service", () => ({ deleteEditLocksFor: vi.fn() }));
+
 import prisma from "@/lib/prisma";
 import { getUserPermissions } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
+import { deleteEditLocksFor } from "@/lib/edit-lock/service";
 import { POST } from "../../app/api/admin/owners/correction/merge/route";
 
 const MASTER_ID = "11111111-1111-4111-8111-111111111111";
@@ -580,6 +586,56 @@ describe("POST merge: dryRun=false 成功", () => {
         }),
       }),
     );
+  });
+
+  // review round2 item 6: master/source の行ロック(owner.updateMany touch)→
+  // deleteEditLocksFor(source の鍵の後始末)→ source archive の順で、かつ全て
+  // 同じ tx に対して呼ばれることを固定する。cleanup を lock の前や archive の後へ
+  // 動かしても、走査(`await deleteEditLocksFor(` の有無)だけでは緑のまま通って
+  // しまう(これが Task 8 の核心的な穴)。
+  it("Task 8: 行ロック(master→source)→ deleteEditLocksFor(sourceの後始末)→ source archive の順で、同じ tx を使う", async () => {
+    setupEligiblePair();
+    const order: string[] = [];
+    let cleanupTxArg: unknown;
+
+    function labelOf(args: { where: { id: string }; data: Record<string, unknown> }): string {
+      if (Object.prototype.hasOwnProperty.call(args.data, "updatedAt")) {
+        return args.where.id === MASTER_ID ? "lock-master" : "lock-source";
+      }
+      if (args.data.isArchived === true) return "archive-source";
+      return "master-bump";
+    }
+
+    pm._tx.owner.updateMany.mockImplementation(
+      async (args: { where: { id: string }; data: Record<string, unknown> }) => {
+        order.push(labelOf(args));
+        return { count: 1 };
+      },
+    );
+    (deleteEditLocksFor as unknown as Mock).mockImplementation(async (tx: unknown) => {
+      order.push("cleanup");
+      cleanupTxArg = tx;
+      return 0;
+    });
+
+    const res = await POST(
+      makeRequest({
+        masterId: MASTER_ID,
+        sourceId: SOURCE_ID,
+        masterVersion: 1,
+        sourceVersion: 1,
+        dryRun: false,
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(order).toEqual(["lock-master", "lock-source", "cleanup", "archive-source", "master-bump"]);
+    // ⚠tx そのもの(identity)に対して呼ばれたことを固定する(base client=prisma の
+    //   トップレベルではないこと)。
+    expect(cleanupTxArg).toBe(pm._tx);
+    expect(deleteEditLocksFor).toHaveBeenCalledWith(pm._tx, [
+      { resourceType: "owner", resourceId: SOURCE_ID },
+    ]);
   });
 
   it("ChangeLog が PII なしで記録される", async () => {

@@ -63,9 +63,10 @@ vi.mock("@/lib/prisma", () => {
     changeLog: { count: vi.fn(), createMany: vi.fn() },
     importJobRow: { findMany: vi.fn() },
     ownerMemo: { count: vi.fn() },
-    // Task 8: lockOwnerRow(行ロック) と deleteEditLocksFor(鍵の後始末) が
-    // tx.$queryRaw を使う。既存のテストが壊れないよう空配列を返す無害な既定にする。
-    $queryRaw: vi.fn(async () => []),
+    // Task 8: lockOwnerRow・deleteEditLocksFor は下で `@/lib/edit-lock/row-locks` /
+    // `@/lib/edit-lock/service` ごとモックしているため、この tx は $queryRaw を
+    // 経由しない(review round2 Minor 5: 以前ここにあった $queryRaw のダミーは
+    // 死んだ配線だったので削除した)。
   };
   return {
     default: {

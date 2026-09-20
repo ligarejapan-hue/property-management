@@ -271,6 +271,10 @@ describe("readEditLocks", () => {
     expect(sql).not.toMatch(/"resource_type"::text/);
     expect(sql).toMatch(/i::uuid/);
     expect(sql).toMatch(/t::"EditLockResource"/);
+    // review round2 Minor 3: 上の2つの正規表現だけでは、投影の並びを入れ替えた
+    // `SELECT i::uuid, t::"EditLockResource"`(左辺 (resource_type, resource_id) と
+    // 型が逆になり Postgres の実行時に型不一致で落ちる)も通ってしまう。並びそのものを固定する。
+    expect(sql).toContain('SELECT t::"EditLockResource", i::uuid');
   });
 });
 
@@ -325,6 +329,8 @@ describe("deleteEditLocksFor", () => {
     expect(sql).not.toMatch(/"resource_type"::text/);
     expect(sql).toMatch(/i::uuid/);
     expect(sql).toMatch(/t::"EditLockResource"/);
+    // review round2 Minor 3: readEditLocks 側と同じ理由で並びそのものを固定する。
+    expect(sql).toContain('SELECT t::"EditLockResource", i::uuid');
   });
 });
 
