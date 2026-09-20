@@ -152,8 +152,11 @@ describe("registry-pdf route Phase D 統合", () => {
     // 括り出され、所有者の行をロックしたトランザクションの中で実行される
     // (呼び出し側の変数名は candidateOwnerId!/cnDecision.corporateNumber だが、
     //  ヘルパー内部では ownerId/corporateNumber という仮引数名になる)。
+    // ⚠レビュー round1 #5: `version: { increment: 1 }` は D10 の実際のバグ修正
+    //   (これが無いと編集画面の古い内容で黙って消える)。regex がここで止まると
+    //   1か所だけ version を落とす回帰にこのテストが気づけないため、増分まで含める。
     expect(registryPdfSrc).toMatch(
-      /async function fillOwnerCorporateNumberIfUnlocked[\s\S]{0,700}where:\s*\{\s*id:\s*ownerId,\s*corporateNumber:\s*null\s*\}[\s\S]{0,100}data:\s*\{\s*corporateNumber,/,
+      /async function fillOwnerCorporateNumberIfUnlocked[\s\S]{0,1500}where:\s*\{\s*id:\s*ownerId,\s*corporateNumber:\s*null\s*\}[\s\S]{0,100}data:\s*\{\s*corporateNumber,\s*version:\s*\{\s*increment:\s*1\s*\}\s*\}/,
     );
   });
 

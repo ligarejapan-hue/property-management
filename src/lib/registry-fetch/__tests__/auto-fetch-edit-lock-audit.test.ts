@@ -96,7 +96,12 @@ vi.mock("@/lib/prisma", () => {
       update: vi.fn(),
       updateMany: vi.fn(),
     },
-    owner: { findMany: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
+    owner: {
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+      updateMany: vi.fn(),
+    },
     propertyOwner: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
@@ -124,7 +129,7 @@ const PROVIDER_PDF = Buffer.from([0x25, 0x50, 0x44, 0x46, 1, 2, 3, 4, 5, 6]);
 
 const pm = prisma as unknown as {
   property: { findUnique: Mock; update: Mock; updateMany: Mock; findFirst: Mock; create: Mock };
-  owner: { findMany: Mock; create: Mock; updateMany: Mock };
+  owner: { findUnique: Mock; findMany: Mock; create: Mock; updateMany: Mock };
   propertyOwner: { findFirst: Mock; findMany: Mock; create: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
@@ -152,8 +157,12 @@ function setProperty(over: Record<string, unknown> = {}) {
   });
 }
 
-/** その物件に既に紐づいている、住所なしの所有者(自動取得側)を仕込む。 */
+/**
+ * その物件に既に紐づいている、住所なしの所有者(自動取得側)を仕込む。
+ * ⚠`owner.findUnique`(ロック後の読み直し・レビュー round1 #3)も揃える。
+ */
 function linkedOwner(overrides: { corporateNumber?: string | null } = {}) {
+  const corporateNumber = overrides.corporateNumber ?? null;
   pm.propertyOwner.findMany.mockResolvedValue([
     {
       owner: {
@@ -161,10 +170,11 @@ function linkedOwner(overrides: { corporateNumber?: string | null } = {}) {
         name: "山田太郎",
         address: null,
         isArchived: false,
-        corporateNumber: overrides.corporateNumber ?? null,
+        corporateNumber,
       },
     },
   ]);
+  pm.owner.findUnique.mockResolvedValue({ corporateNumber });
 }
 
 beforeEach(() => {
@@ -182,6 +192,7 @@ beforeEach(() => {
   pm.attachment.create.mockResolvedValue({ id: "att-1" });
   pm.attachment.count.mockResolvedValue(0);
   pm.owner.findMany.mockResolvedValue([]);
+  pm.owner.findUnique.mockResolvedValue({ corporateNumber: null });
   pm.owner.create.mockResolvedValue({ id: "owner-x" });
   pm.owner.updateMany.mockResolvedValue({ count: 1 });
   pm.propertyOwner.findFirst.mockResolvedValue(null);

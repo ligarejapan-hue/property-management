@@ -574,6 +574,9 @@ export default function RegistryPdfPage() {
     setError(null);
   };
 
+  // レビュー round1 #7: レンダリングのたびに2回呼んでいたのを1回にまとめる。
+  const editLockSkipMsgs = result ? editLockSkipMessages(result) : [];
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
@@ -1235,7 +1238,7 @@ export default function RegistryPdfPage() {
             {/* D10: 編集中の鍵のため一部の補完を見送った場合の案内。
                 取込本体は成功しているが、地番・家屋番号・不動産番号 / 法人番号の
                 どちらか(または両方)が空のままの可能性があることを伝える。 */}
-            {editLockSkipMessages(result).length > 0 && (
+            {editLockSkipMsgs.length > 0 && (
               <div
                 role="alert"
                 data-testid="import-edit-lock-skip-warning"
@@ -1245,7 +1248,7 @@ export default function RegistryPdfPage() {
                   <AlertTriangle className="h-4 w-4" />
                   編集中のため見送った補完があります
                 </h4>
-                {editLockSkipMessages(result).map((message, i) => (
+                {editLockSkipMsgs.map((message, i) => (
                   <p key={i} className="text-sm text-amber-700 dark:text-amber-300">
                     {message}
                   </p>

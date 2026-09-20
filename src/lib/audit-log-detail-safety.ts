@@ -449,13 +449,25 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   edit_lock_takeover_expired: new Set(["resourceType", "resourceId", "previousUserId", "expiredBy"]),
   edit_lock_release: new Set(["resourceType", "resourceId"]),
   edit_lock_force_release: new Set(["resourceType", "resourceId", "previousUserId"]),
-  // 謄本の自動取得。編集中の鍵のため物件の空欄補完/所有者の法人番号補完を見送った
-  // ことを管理画面で読めるようにする(D10)。propertyFillSkippedByEditLock は
-  // denylist に当たらないためここだけで足りるが、ownerCorporateFillSkippedByEditLock は
-  // /owner/i denylist に先に当たるため ACTION_FORCE_SAFE_KEYS 側でも保持する。
+  // 謄本の自動取得。D10で追加した2フラグ(編集中の鍵のため物件の空欄補完/所有者の
+  // 法人番号補完を見送ったか)に加えて、brief(design line 183)が求めていた
+  // **既存の** detail キーもここで許可する(レビュー round1 #6: 発注者判断が
+  // 「2フラグだけに絞る」ではなく「denylistの穴を広げない」ことだった、という
+  // 巻き戻し)。生値がそのまま乗る mode/source/confirmed/providerRequestId/
+  // fetchedAt は非PII enum・日時・分類子なので通常の allowlist で足りる。
+  // propertyFillSkippedByEditLock は denylist に当たらないためここだけで足りるが、
+  // ownerCorporateFillSkippedByEditLock は /owner/i denylist に先に当たるため
+  // ACTION_FORCE_SAFE_KEYS 側でも保持する。owners{Matched,Created,Linked} は
+  // 同じく /owner/i に当たるが「件数」なので数値限定の
+  // ACTION_NUMERIC_FORCE_SAFE_KEYS 側で保持する(文字列は通さない)。
   registry_auto_fetch: new Set([
     "propertyFillSkippedByEditLock",
     "ownerCorporateFillSkippedByEditLock",
+    "mode",
+    "source",
+    "confirmed",
+    "providerRequestId",
+    "fetchedAt",
   ]),
 };
 
@@ -530,6 +542,9 @@ const ACTION_NUMERIC_FORCE_SAFE_KEYS: Readonly<
   Record<string, ReadonlySet<string>>
 > = {
   pdf_import: new Set(["ownersMatched", "ownersCreated", "ownersLinked"]),
+  // registry_auto_fetch も pdf_import と同じ owner 反映件数を detail に載せる
+  // (レビュー round1 #6)。文字列が紛れ込んでも数値限定なので通さない。
+  registry_auto_fetch: new Set(["ownersMatched", "ownersCreated", "ownersLinked"]),
   // 旧 dm-export から続く既知の表示劣化の修正: skippedAddressMissingCount は /addr/i denylist に
   // 当たるが「住所が空欄の所有者数」という有限数値のときだけ保持する(非数値は [REDACTED])。
   property_dm_csv_export: new Set(["skippedAddressMissingCount"]),

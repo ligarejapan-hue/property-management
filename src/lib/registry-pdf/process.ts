@@ -169,6 +169,19 @@ async function fillOwnerCorporateNumberIfUnlocked(
 ): Promise<{ count: number; locked: boolean }> {
   return prisma.$transaction(async (tx) => {
     await lockOwnerRow(tx, ownerId);
+    // ⚠**ロックの後に corporateNumber を読み直す**(レビュー round1 #3)。
+    // decideCorporateImport を呼んだ時点(=呼び出し側が existingCorporateNumber を
+    // 読んだ時点)から所有者の行をロックするまでの間に、別の書き込みが既に
+    // 埋めていることがある。その場合は鍵が有っても無くても書く余地が無いので、
+    // 「見送った」フラグを立てない(埋める余地が無ければ見送りにならない・R10 と同じ理屈)。
+    const fresh = await tx.owner.findUnique({
+      where: { id: ownerId },
+      select: { corporateNumber: true },
+    });
+    if (!fresh || fresh.corporateNumber !== null) {
+      // 既に埋まっている、またはロック直後に行が消えた=書く余地が無い。
+      return { count: 0, locked: false };
+    }
     const locked = await isResourceEditLocked(tx, {
       resourceType: "owner",
       resourceId: ownerId,
@@ -585,31 +598,61 @@ export async function processRegistryPdf(
         wouldFillProperty || wouldAdvanceStatus
           ? await prisma.$transaction(async (tx) => {
               await lockPropertyRow(tx, propertyId);
+
+              // ⚠**バージョン/現在値は行ロックの後に読み直す**(レビュー round1 #2)。
+              // 外側で読んだ `existing` は、行ロックを取るまでの間に鍵の持ち主が
+              // 保存していれば既に古い。古い version のまま where 条件に使うと
+              // updateMany が0件になり、実際には何も書けていないのに merged を
+              // 非空のまま返して recordChanges に「書いたことになっている」嘘の
+              // 記録を残してしまう(取得状況の前進を保証するはずが、ここで抜ける)。
+              const fresh = await tx.property.findUnique({
+                where: { id: propertyId },
+                select: {
+                  version: true,
+                  registryStatus: true,
+                  realEstateNumber: true,
+                  lotNumber: true,
+                  buildingNumber: true,
+                },
+              });
+              // ロック直後に取れない=行ロックとfindUniqueの間で削除された。
+              // 何も書かず終える(既存の404判定は入口で既に済んでいる)。
+              if (!fresh) return {};
+
               const propertyLocked = await isResourceEditLocked(tx, {
                 resourceType: "property",
                 resourceId: propertyId,
               });
 
+              // 以降の判定は全て fresh(読み直した現在値)基準にする。
+              const freshWouldFillProperty =
+                (!fresh.realEstateNumber && !!parsed.realEstateNumber) ||
+                (!fresh.lotNumber && !!parsed.lotNumber) ||
+                (!fresh.buildingNumber && !!parsed.buildingNumber);
+              const freshWouldAdvanceStatus =
+                fresh.registryStatus === "unconfirmed" &&
+                !!parsed.realEstateNumber;
+
               // (a) 取得状況の前進。鍵の有無に関わらず必ず実行する
               //     (@codex R6 P1・PDFが添付されるのに未確認のまま残るほうが害が大きい)。
               const statusUpdates: Record<string, unknown> = {};
-              if (wouldAdvanceStatus) {
+              if (freshWouldAdvanceStatus) {
                 statusUpdates.registryStatus = "obtained";
               }
 
               // (b) 3項目の補完。鍵が無いときだけ実行する。
               const fieldUpdates: Record<string, unknown> = {};
               if (!propertyLocked) {
-                if (!existing.realEstateNumber && parsed.realEstateNumber) {
+                if (!fresh.realEstateNumber && parsed.realEstateNumber) {
                   fieldUpdates.realEstateNumber = parsed.realEstateNumber;
                 }
-                if (!existing.lotNumber && parsed.lotNumber) {
+                if (!fresh.lotNumber && parsed.lotNumber) {
                   fieldUpdates.lotNumber = parsed.lotNumber;
                 }
-                if (!existing.buildingNumber && parsed.buildingNumber) {
+                if (!fresh.buildingNumber && parsed.buildingNumber) {
                   fieldUpdates.buildingNumber = parsed.buildingNumber;
                 }
-              } else if (wouldFillProperty) {
+              } else if (freshWouldFillProperty) {
                 // 実際に埋まるはずだった欄があるときだけフラグを立てる(@codex R10 P2)。
                 propertyFillSkippedByEditLock = true;
               }
@@ -617,13 +660,17 @@ export async function processRegistryPdf(
               // 鍵が無いときは(a)(b)を1回の updateMany にまとめる。鍵があるときは
               // fieldUpdates が常に空なので、実質(a)だけの1回になる。
               const merged = { ...statusUpdates, ...fieldUpdates };
-              if (Object.keys(merged).length > 0) {
-                await tx.property.updateMany({
-                  where: { id: propertyId, version: existing.version },
-                  data: { ...merged, version: { increment: 1 } },
-                });
-              }
-              return merged;
+              if (Object.keys(merged).length === 0) return {};
+
+              const written = await tx.property.updateMany({
+                where: { id: propertyId, version: fresh.version },
+                data: { ...merged, version: { increment: 1 } },
+              });
+              // fresh 基準で条件を作ったので通常 count>0 のはずだが、findUnique と
+              // updateMany の間でさらに割り込まれた場合は 0 件もあり得る。
+              // その場合は「何も書けていない」を正直に返す(recordChanges へ
+              // 嘘を渡さない)。
+              return written.count > 0 ? merged : {};
             })
           : {};
 
