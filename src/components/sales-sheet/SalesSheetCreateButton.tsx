@@ -234,15 +234,21 @@ interface MansionAutoSource {
     name?: string | null;
     totalFloors?: number | null;
     builtYear?: number | null;
+    /** [Task10 C-1] 築月。ヒント文言に「◯年◯月」の形で出す。 */
+    builtMonth?: number | null;
     structureType?: string | null;
     managementCompany?: string | null;
     totalUnits?: number | null;
+    /** [Task10 C-1] 地下階。basementFloors のヒントに使う。 */
+    basementFloors?: number | null;
   } | null;
 }
 
 /**
  * 売土地版の MansionAutoSource（[F2-A Task4]）。土地は building relation を持たないため、
  * 物件スカラのみを防御的に（すべて任意で）読む。
+ * [Task10 C-1] salePrice/access/landArea/landAreaMethod は F3 で物件へ保存した販売条件。
+ * override が無ければ document 側も既定値として使うため、ダイアログにも同じ値をヒントで出す。
  */
 interface LandAutoSource {
   address?: string | null;
@@ -252,6 +258,10 @@ interface LandAutoSource {
   floorAreaRatio?: number | string | null;
   roadType?: string | null;
   roadWidth?: number | string | null;
+  salePrice?: number | string | null;
+  access?: string | null;
+  landArea?: number | string | null;
+  landAreaMethod?: string | null;
 }
 
 /**
@@ -259,6 +269,8 @@ interface LandAutoSource {
  * LandAutoSource と同じく物件スカラのみを防御的に（すべて任意で）読む。layoutType のみ
  * LandAutoSource には無い追加フィールド（土地は間取りを持たないが house は持つ＝
  * HOUSE_AUTO_ONLY_KEYS の layout に対応）。
+ * [Task10 C-1] salePrice以下は F3 で物件へ保存した販売条件(house は building relation を
+ * 配線しないため全て property のスカラ列)。LandAutoSource と同じ理由でヒントに出す。
  */
 interface HouseAutoSource {
   address?: string | null;
@@ -269,11 +281,26 @@ interface HouseAutoSource {
   floorAreaRatio?: number | string | null;
   roadType?: string | null;
   roadWidth?: number | string | null;
+  salePrice?: number | string | null;
+  saleTaxType?: string | null;
+  saleTaxAmount?: number | string | null;
+  access?: string | null;
+  landArea?: number | string | null;
+  landAreaMethod?: string | null;
+  structureType?: string | null;
+  aboveFloors?: number | null;
+  basementFloors?: number | null;
+  totalFloorArea?: number | string | null;
+  parking?: string | null;
+  builtYear?: number | null;
+  builtMonth?: number | null;
 }
 
 /**
  * 一棟(building)版の自動反映ソース（[F2-C Task3]）。building relation は配線せず layoutType も
  * 持たないため LandAutoSource と同一形。occupancy 語彙のみ house/mansion と同じ（下記 compute 参照）。
+ * [Task10 C-1] salePrice以下は HouseAutoSource と同じ理由(+totalUnits/grossYield/
+ * expectedIncomeは一棟固有の収益系)でヒントに出す。
  */
 interface BuildingAutoSource {
   address?: string | null;
@@ -283,6 +310,22 @@ interface BuildingAutoSource {
   floorAreaRatio?: number | string | null;
   roadType?: string | null;
   roadWidth?: number | string | null;
+  salePrice?: number | string | null;
+  saleTaxType?: string | null;
+  saleTaxAmount?: number | string | null;
+  access?: string | null;
+  landArea?: number | string | null;
+  landAreaMethod?: string | null;
+  structureType?: string | null;
+  aboveFloors?: number | null;
+  basementFloors?: number | null;
+  totalFloorArea?: number | string | null;
+  parking?: string | null;
+  totalUnits?: number | null;
+  grossYield?: number | string | null;
+  expectedIncome?: number | string | null;
+  builtYear?: number | null;
+  builtMonth?: number | null;
 }
 
 /**
@@ -310,6 +353,15 @@ function toPreviewString(v: string | number | null | undefined): string {
   return v === null || v === undefined ? "" : String(v);
 }
 
+/**
+ * [Task10 C-1] F3で物件(棟)に保存済みの値のヒント文言。作成ダイアログの hints は
+ * override可能なテキスト系フィールドの上に「自動反映: 」に続けて出す案内
+ * （FieldModelAutoValues.hints 参照・useDistrict/roadWidth と同じ枠組み）。
+ */
+function savedValueHint(v: string | number): string {
+  return `${v}（前回保存した値です。変更する場合は入力してください）`;
+}
+
 /** 物件詳細フェッチ結果 → 自動反映専用プレビュー値・occupancy初期選択・テキスト系ヒント。 */
 function computeMansionAutoValues(data: MansionAutoSource): FieldModelAutoValues {
   const b = data.building ?? undefined;
@@ -318,7 +370,13 @@ function computeMansionAutoValues(data: MansionAutoSource): FieldModelAutoValues
     hints.useDistrict = `${data.zoningDistrict}（追加の用途地域があれば選択してください）`;
   }
   if (b?.builtYear != null) {
-    hints.builtYearMonth = `${b.builtYear}年（月まで分かる場合は入力してください）`;
+    // [Task10 C-1] 棟に月まで保存済みなら「2008年3月」の形で見せる(document 側の
+    // fmtBuiltYear と同じ表記)。月が無ければ従来どおり年のみ+案内文言。
+    hints.builtYearMonth =
+      b.builtMonth != null ? `${b.builtYear}年${b.builtMonth}月` : `${b.builtYear}年（月まで分かる場合は入力してください）`;
+  }
+  if (b?.basementFloors != null) {
+    hints.basementFloors = savedValueHint(`${b.basementFloors}階`);
   }
   return {
     preview: {
@@ -354,6 +412,18 @@ function computeLandAutoValues(data: LandAutoSource): FieldModelAutoValues {
   if (data.roadWidth != null && data.roadWidth !== "") {
     hints.roadWidth = `${data.roadWidth}m（より正確な値が分かる場合は入力してください）`;
   }
+  // [Task10 C-1] F3で物件へ保存した販売条件(build-document.ts の既定値と同じ3項目)。
+  if (data.salePrice != null && data.salePrice !== "") {
+    hints.price = savedValueHint(`${data.salePrice}万円`);
+  }
+  if (data.access) {
+    hints.access = savedValueHint(data.access);
+  }
+  if (data.landArea != null && data.landArea !== "") {
+    hints.landArea = savedValueHint(
+      `${data.landArea}㎡${data.landAreaMethod ? `（${data.landAreaMethod}）` : ""}`,
+    );
+  }
   return {
     preview: {
       address: toPreviewString(data.address),
@@ -382,6 +452,32 @@ function computeHouseAutoValues(data: HouseAutoSource): FieldModelAutoValues {
   if (data.roadWidth != null && data.roadWidth !== "") {
     hints.roadWidth = `${data.roadWidth}m（より正確な値が分かる場合は入力してください）`;
   }
+  // [Task10 C-1] F3で物件へ保存した販売条件(house は building relation を配線しないため
+  // 全て property のスカラ列＝build-document.ts の buildHouseValues と同じ既定値)。
+  if (data.salePrice != null && data.salePrice !== "") hints.price = savedValueHint(`${data.salePrice}万円`);
+  if (data.saleTaxType) hints.tax = savedValueHint(data.saleTaxType);
+  if (data.saleTaxAmount != null && data.saleTaxAmount !== "") {
+    hints.taxAmount = savedValueHint(`${data.saleTaxAmount}万円`);
+  }
+  if (data.access) hints.access = savedValueHint(data.access);
+  if (data.landArea != null && data.landArea !== "") {
+    hints.landArea = savedValueHint(
+      `${data.landArea}㎡${data.landAreaMethod ? `（${data.landAreaMethod}）` : ""}`,
+    );
+  }
+  if (data.structureType) hints.structure = savedValueHint(data.structureType);
+  if (data.aboveFloors != null) hints.aboveFloors = savedValueHint(`${data.aboveFloors}階`);
+  if (data.basementFloors != null) hints.basementFloors = savedValueHint(`${data.basementFloors}階`);
+  if (data.totalFloorArea != null && data.totalFloorArea !== "") {
+    hints.buildingArea = savedValueHint(`${data.totalFloorArea}㎡`);
+  }
+  if (data.parking) hints.parking = savedValueHint(data.parking);
+  if (data.builtYear != null) {
+    hints.builtYearMonth =
+      data.builtMonth != null
+        ? `${data.builtYear}年${data.builtMonth}月`
+        : `${data.builtYear}年（月まで分かる場合は入力してください）`;
+  }
   return {
     preview: {
       address: toPreviewString(data.address),
@@ -408,6 +504,37 @@ function computeBuildingAutoValues(data: BuildingAutoSource): FieldModelAutoValu
   }
   if (data.roadWidth != null && data.roadWidth !== "") {
     hints.roadWidth = `${data.roadWidth}m（より正確な値が分かる場合は入力してください）`;
+  }
+  // [Task10 C-1] F3で物件へ保存した販売条件・収益系(一棟も house と同じく building
+  // relation を配線しないため全て property のスカラ列＝buildBuildingValues と同じ既定値)。
+  if (data.salePrice != null && data.salePrice !== "") hints.price = savedValueHint(`${data.salePrice}万円`);
+  if (data.saleTaxType) hints.tax = savedValueHint(data.saleTaxType);
+  if (data.saleTaxAmount != null && data.saleTaxAmount !== "") {
+    hints.taxAmount = savedValueHint(`${data.saleTaxAmount}万円`);
+  }
+  if (data.access) hints.access = savedValueHint(data.access);
+  if (data.landArea != null && data.landArea !== "") {
+    hints.landArea = savedValueHint(
+      `${data.landArea}㎡${data.landAreaMethod ? `（${data.landAreaMethod}）` : ""}`,
+    );
+  }
+  if (data.structureType) hints.structure = savedValueHint(data.structureType);
+  if (data.aboveFloors != null) hints.aboveFloors = savedValueHint(`${data.aboveFloors}階`);
+  if (data.basementFloors != null) hints.basementFloors = savedValueHint(`${data.basementFloors}階`);
+  if (data.totalFloorArea != null && data.totalFloorArea !== "") {
+    hints.totalFloorArea = savedValueHint(`${data.totalFloorArea}㎡`);
+  }
+  if (data.parking) hints.parking = savedValueHint(data.parking);
+  if (data.totalUnits != null) hints.totalUnits = savedValueHint(`${data.totalUnits}戸`);
+  if (data.grossYield != null && data.grossYield !== "") hints.grossYield = savedValueHint(`${data.grossYield}％`);
+  if (data.expectedIncome != null && data.expectedIncome !== "") {
+    hints.expectedIncome = savedValueHint(`${data.expectedIncome}万円`);
+  }
+  if (data.builtYear != null) {
+    hints.builtYearMonth =
+      data.builtMonth != null
+        ? `${data.builtYear}年${data.builtMonth}月`
+        : `${data.builtYear}年（月まで分かる場合は入力してください）`;
   }
   return {
     preview: {
