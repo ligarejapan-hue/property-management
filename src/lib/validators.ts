@@ -240,30 +240,30 @@ export const updatePropertySchema = z.object({
   // ── 「販売」区分(F3 Task7・物件編集画面から編集できる列) ──────────────────
   // ⚠区分マンションの構造・地上階・総戸数・地下階・築年月は棟の値が正のため、
   //   ここには含めない(引き続き棟の画面でのみ編集する・R12/R13 と同じ扱い)。
-  salePrice: z.number().optional().nullable(),
-  saleTaxType: z.string().optional().nullable(),
-  saleTaxAmount: z.number().optional().nullable(),
-  access: z.string().optional().nullable(),
-  landArea: z.number().optional().nullable(),
-  landAreaMethod: z.string().optional().nullable(),
-  totalFloorArea: z.number().optional().nullable(),
-  builtYear: z.number().int().optional().nullable(),
+  salePrice: z.number().min(0).max(99999999999).optional().nullable(), // DECIMAL(12,1) 万円
+  saleTaxType: z.string().max(50).optional().nullable(),
+  saleTaxAmount: z.number().min(0).max(99999999999).optional().nullable(), // DECIMAL(12,1) 万円
+  access: z.string().max(200).optional().nullable(), // 交通・自由記述
+  landArea: z.number().min(0).max(99999999).optional().nullable(), // DECIMAL(10,2) ㎡
+  landAreaMethod: z.string().max(50).optional().nullable(),
+  totalFloorArea: z.number().min(0).max(99999999).optional().nullable(), // DECIMAL(10,2) ㎡
+  builtYear: z.number().int().min(1800).max(2200).optional().nullable(),
   builtMonth: z.number().int().min(1).max(12).optional().nullable(),
-  structureType: z.string().optional().nullable(),
-  aboveFloors: z.number().int().optional().nullable(),
-  basementFloors: z.number().int().optional().nullable(),
-  parking: z.string().optional().nullable(),
-  totalUnits: z.number().int().optional().nullable(),
-  grossYield: z.number().optional().nullable(),
-  expectedIncome: z.number().optional().nullable(),
+  structureType: z.string().max(50).optional().nullable(),
+  aboveFloors: z.number().int().min(0).max(200).optional().nullable(),
+  basementFloors: z.number().int().min(0).max(20).optional().nullable(),
+  parking: z.string().max(50).optional().nullable(),
+  totalUnits: z.number().int().min(0).max(9999).optional().nullable(),
+  grossYield: z.number().min(0).max(999.99).optional().nullable(), // DECIMAL(5,2) %
+  expectedIncome: z.number().min(0).max(99999999999).optional().nullable(), // DECIMAL(12,1) 万円/年
   // 区分マンションの部屋固有項目(既存列。画面からは今回はじめて編集できるようにする)。
-  exclusiveArea: z.number().optional().nullable(),
-  balconyArea: z.number().optional().nullable(),
-  layoutType: z.string().optional().nullable(),
-  orientation: z.string().optional().nullable(),
-  floorNo: z.number().int().optional().nullable(),
-  managementFee: z.number().int().optional().nullable(),
-  repairReserveFee: z.number().int().optional().nullable(),
+  exclusiveArea: z.number().min(0).max(999999).optional().nullable(), // DECIMAL(8,2) ㎡
+  balconyArea: z.number().min(0).max(999999).optional().nullable(), // DECIMAL(8,2) ㎡
+  layoutType: z.string().max(50).optional().nullable(),
+  orientation: z.string().max(50).optional().nullable(),
+  floorNo: z.number().int().min(-10).max(200).optional().nullable(), // 地下の部屋があるため下限は負
+  managementFee: z.number().int().min(0).max(10000000).optional().nullable(), // 円/月
+  repairReserveFee: z.number().int().min(0).max(10000000).optional().nullable(), // 円/月
   version: z.number().int(), // optimistic locking
 });
 
