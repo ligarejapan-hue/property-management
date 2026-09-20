@@ -28,9 +28,14 @@ vi.mock("@/lib/change-log", () => ({ recordChanges: vi.fn(), OWNER_TRACKED_FIELD
 vi.mock("@/lib/display-level", () => ({ applyDisplayToOwner: vi.fn((x: unknown) => x) }));
 vi.mock("@/lib/property-access", () => ({ canAccessPropertyRecord: () => true }));
 vi.mock("@/lib/edit-lock/service", () => ({ assertNotEditLockedByOther: vi.fn() }));
+// ⚠lockOwnerRow(所有者行の FOR UPDATE)は**実装のまま**(mock しない): route が
+//   実際にトランザクションの tx へ渡した $queryRaw を呼ぶことまで検証したい。
+//   base client(pm)にも updateMany/$queryRaw を置き、「tx ではなく base client を
+//   使ってしまう」回帰を「呼ばれていない」の形で拾えるようにする。
 vi.mock("@/lib/prisma", () => ({
   default: {
-    owner: { findUnique: vi.fn(), findUniqueOrThrow: vi.fn() },
+    owner: { findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), updateMany: vi.fn() },
+    $queryRaw: vi.fn(),
     $transaction: vi.fn(),
   },
 }));
@@ -41,7 +46,8 @@ import { assertNotEditLockedByOther } from "@/lib/edit-lock/service";
 import { PATCH } from "../route";
 
 type PrismaMock = {
-  owner: { findUnique: Mock; findUniqueOrThrow: Mock };
+  owner: { findUnique: Mock; findUniqueOrThrow: Mock; updateMany: Mock };
+  $queryRaw: Mock;
   $transaction: Mock;
 };
 const pm = prisma as unknown as PrismaMock;
@@ -99,14 +105,23 @@ beforeEach(() => {
 describe("PATCH /api/owners/[id] と編集中の鍵", () => {
   // ⚠「呼ばれたこと」だけを見るテストでは、トランザクションの外で呼んでも
   //   書き込みの後に呼んでも通ってしまう(@codex R6 P2)。**順序そのもの**を記録して検査する。
-  it("トランザクション開始 → 所有者行ロック → 鍵の確認 → 条件つき更新 の順で呼ばれる", async () => {
+  // ⚠さらに、順序が正しくても行ロック・鍵の確認が base client(prisma)に対して
+  //   呼ばれていたら TOCTOU の窓は閉じない。**tx そのものが渡ったこと**(identity)と
+  //   **base client の $queryRaw/updateMany が呼ばれていないこと**まで固定する
+  //   (review Important 1/2)。行ロックの SQL 自体(FOR UPDATE + 所有者id)も検査する。
+  it("トランザクション開始 → 所有者行ロック → 鍵の確認 → 条件つき更新 の順で呼ばれ、すべて同じ tx を使う", async () => {
     const order: string[] = [];
+    let lockSql = "";
+    let txClient: unknown;
     (pm.$transaction as unknown as Mock).mockImplementation(async (fn: (tx: unknown) => unknown) => {
       order.push("tx");
-      return fn({
-        $queryRaw: vi.fn(async () => {
+      // ⚠base client(pm)とは別物のオブジェクトにする。tx と base を混同する
+      //   回帰(例: assertNotEditLockedByOther(prisma, …))を検出できるようにする。
+      txClient = {
+        $queryRaw: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => {
           order.push("lock");
-          return [];
+          lockSql = strings.reduce((acc, s, i) => acc + s + (i < values.length ? String(values[i]) : ""), "");
+          return Promise.resolve([]);
         }),
         owner: {
           updateMany: vi.fn(async () => {
@@ -114,15 +129,25 @@ describe("PATCH /api/owners/[id] と編集中の鍵", () => {
             return { count: 1 };
           }),
         },
-      });
+      };
+      return fn(txClient);
     });
     (assertNotEditLockedByOther as unknown as Mock).mockImplementation(async () => {
       order.push("assert");
     });
 
-    await patch({ version: 1, note: "x" });
+    const res = await patch({ version: 1, note: "x" });
 
+    expect(res.status).toBe(200);
     expect(order).toEqual(["tx", "lock", "assert", "update"]);
+    expect(lockSql).toContain("FOR UPDATE");
+    expect(lockSql).toContain(OWNER);
+    expect(assertNotEditLockedByOther).toHaveBeenCalledTimes(1);
+    expect((assertNotEditLockedByOther as unknown as Mock).mock.calls[0][0]).toBe(txClient);
+    // 行ロック・書き込みが base client(prisma)に漏れていない
+    // (=トランザクションの外へ逃げていない)ことを固定する。
+    expect(pm.$queryRaw).not.toHaveBeenCalled();
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
   });
 
   it("鍵が他人のものなら 423 を返し、版番号の更新は走らない", async () => {

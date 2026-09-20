@@ -5,6 +5,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { acquireEditLock } from "@/lib/edit-lock/service";
 import { readScreenTokenHash } from "@/lib/edit-lock/screen-token";
+import { lockOwnerRow } from "@/lib/edit-lock/row-locks";
 import { assertCanLockOwner, assertCanLockProperty } from "@/lib/edit-lock/permissions";
 
 const schema = z.object({
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
         if (!property || property.isArchived) throw new ApiError(404, "物件が見つかりません", "NOT_FOUND");
         assertCanLockProperty(session, perms, property);
       } else {
-        await tx.$queryRaw`SELECT id FROM owners WHERE id = ${resourceId}::uuid FOR UPDATE`;
+        await lockOwnerRow(tx, resourceId);
         const owner = await tx.owner.findUnique({
           where: { id: resourceId },
           select: { id: true, isArchived: true },

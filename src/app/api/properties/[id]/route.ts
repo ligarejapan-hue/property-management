@@ -186,11 +186,6 @@ export async function GET(
 
 // ---------- PATCH /api/properties/[id] ----------
 
-// 編集の鍵の世代(X-Edit-Lock)は uuid のはず。そのまま SQL に渡すと不正値で
-// Postgres の 22P02(500)になるため、ここで弾く。値を捨てて「鍵なし」として
-// 通すのはこの検査が塞ぐはずの穴を開けるので禁止(コントローラ決定①)。
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -349,12 +344,8 @@ export async function PATCH(
       }
     }
 
-    // 編集の鍵(X-Edit-Lock)の形式チェック。無ければ「鍵なし」として通常どおり続ける
-    // (古い画面からの保存を弾かないため)。
+    // 編集の鍵(X-Edit-Lock)の形式チェックは readLockId 側で行う(不正なら 400)。
     const lockIdHeader = readLockId(request);
-    if (lockIdHeader !== null && !UUID_RE.test(lockIdHeader)) {
-      throw new ApiError(400, "編集の鍵の形式が不正です", "EDIT_LOCK_ID_INVALID");
-    }
 
     // Update property with version increment
     // ⚠保存する値は履歴と同じ persistedFields を使う (二重に組み立てない)。

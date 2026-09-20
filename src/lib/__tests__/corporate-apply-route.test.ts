@@ -774,27 +774,50 @@ describe("POST /api/owners/[id]/corporate-apply — companyRegistryNumber(12桁)
 describe("POST /api/owners/[id]/corporate-apply — 編集中の鍵(Task 6)", () => {
   // ⚠「呼ばれたこと」だけを見るテストでは、トランザクションの外で呼んでも
   //   書き込みの後に呼んでも通ってしまう(@codex R6 P2)。**順序そのもの**を記録して検査する。
-  it("トランザクション開始 → 所有者行ロック → 鍵の確認 → 条件つき更新 の順で呼ばれる", async () => {
+  // ⚠さらに、この describe 以外のテストがそうしているように $transaction が
+  //   base client(pm)をそのまま tx として渡すと、「lock/assert/update が pm に
+  //   対して呼ばれているだけ」でも同じ順序配列・200 になってしまう
+  //   (review Important 1: 書き込みが tx の外へ逃げても検出できない)。
+  //   ここだけは **base client とは別物の tx** を渡し、**tx そのものが渡ったこと**
+  //   (identity)と **base client の $queryRaw/updateMany が呼ばれていないこと**まで
+  //   固定する。行ロックの SQL 自体(FOR UPDATE + 所有者id)も検査する(review Minor 7)。
+  it("トランザクション開始 → 所有者行ロック → 鍵の確認 → 条件つき更新 の順で呼ばれ、すべて同じ tx を使う(base client は使わない)", async () => {
     const order: string[] = [];
-    pm.$transaction.mockImplementation(async (fn: (tx: typeof pm) => unknown) => {
+    let lockSql = "";
+    let txClient: { $queryRaw: Mock; owner: { updateMany: Mock } } | undefined;
+    pm.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       order.push("tx");
-      return fn(pm);
-    });
-    pm.$queryRaw.mockImplementation(async () => {
-      order.push("lock");
-      return [];
+      txClient = {
+        $queryRaw: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => {
+          order.push("lock");
+          lockSql = strings.reduce((acc, s, i) => acc + s + (i < values.length ? String(values[i]) : ""), "");
+          return Promise.resolve([]);
+        }),
+        owner: {
+          updateMany: vi.fn(async () => {
+            order.push("update");
+            return { count: 1 };
+          }),
+        },
+      };
+      return fn(txClient);
     });
     vi.mocked(assertNotEditLockedByOther).mockImplementation(async () => {
       order.push("assert");
     });
-    pm.owner.updateMany.mockImplementation(async () => {
-      order.push("update");
-      return { count: 1 };
-    });
 
     const res = await POST(makeRequest(payload()), makeParams());
+
     expect(res.status).toBe(200);
     expect(order).toEqual(["tx", "lock", "assert", "update"]);
+    expect(lockSql).toContain("FOR UPDATE");
+    expect(lockSql).toContain(OWNER_ID);
+    expect(vi.mocked(assertNotEditLockedByOther)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(assertNotEditLockedByOther).mock.calls[0][0]).toBe(txClient);
+    // 行ロック・書き込みが base client(pm)に漏れていない
+    // (=トランザクションの外へ逃げていない)ことを固定する。
+    expect(pm.$queryRaw).not.toHaveBeenCalled();
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
   });
 
   it("鍵が他人のものなら 423 を返し、反映は行われない", async () => {

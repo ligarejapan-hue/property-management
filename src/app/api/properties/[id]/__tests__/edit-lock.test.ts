@@ -31,7 +31,10 @@ vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRow: vi.fn() }));
 vi.mock("@/lib/edit-lock/service", () => ({ assertNotEditLockedByOther: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   default: {
-    property: { findUnique: vi.fn(), findUniqueOrThrow: vi.fn() },
+    // ⚠`property.updateMany` を base client 側にも置く(実装が誤って tx の代わりに
+    //   base client を使ってしまう回帰を「呼ばれていない」の形で拾えるようにするため。
+    //   本来の書き込みは必ず $transaction が渡す別オブジェクト(tx)側で行われる)。
+    property: { findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), updateMany: vi.fn() },
     changeLog: { createMany: vi.fn() },
     $transaction: vi.fn(),
   },
@@ -44,7 +47,7 @@ import { assertNotEditLockedByOther } from "@/lib/edit-lock/service";
 import { PATCH } from "../route";
 
 type PrismaMock = {
-  property: { findUnique: Mock; findUniqueOrThrow: Mock };
+  property: { findUnique: Mock; findUniqueOrThrow: Mock; updateMany: Mock };
   changeLog: { createMany: Mock };
   $transaction: Mock;
 };
@@ -133,11 +136,17 @@ beforeEach(() => {
 describe("PATCH /api/properties/[id] と編集中の鍵", () => {
   // ⚠「呼ばれたこと」だけを見るテストでは、トランザクションの外で呼んでも
   //   書き込みの後に呼んでも通ってしまう(@codex R6 P2)。**順序そのもの**を記録して検査する。
-  it("トランザクション開始 → 行ロック → 鍵の確認 → 条件つき更新 の順で呼ばれる", async () => {
+  // ⚠さらに、順序が正しくても lock/assert が base client(prisma)に対して
+  //   呼ばれていたら TOCTOU の窓は閉じない。**tx そのものが渡ったこと**(identity)と
+  //   **base client の updateMany が呼ばれていないこと**まで固定する(review Important 1/2)。
+  it("トランザクション開始 → 行ロック → 鍵の確認 → 条件つき更新 の順で呼ばれ、すべて同じ tx を使う", async () => {
     const order: string[] = [];
+    let txClient: unknown;
     (pm.$transaction as unknown as Mock).mockImplementation(async (fn: (tx: unknown) => unknown) => {
       order.push("tx");
-      return fn({
+      // ⚠base client(pm)とは別物のオブジェクトにする。tx と base を混同する
+      //   回帰(例: assertNotEditLockedByOther(prisma, …))を検出できるようにする。
+      txClient = {
         property: {
           updateMany: vi.fn(async () => {
             order.push("update");
@@ -145,7 +154,8 @@ describe("PATCH /api/properties/[id] と編集中の鍵", () => {
           }),
         },
         $queryRaw: vi.fn(async () => []),
-      });
+      };
+      return fn(txClient);
     });
     (lockPropertyRow as unknown as Mock).mockImplementation(async () => {
       order.push("lock");
@@ -154,9 +164,18 @@ describe("PATCH /api/properties/[id] と編集中の鍵", () => {
       order.push("assert");
     });
 
-    await patch({ version: 1, note: "x" });
+    const res = await patch({ version: 1, note: "x" });
 
+    expect(res.status).toBe(200);
     expect(order).toEqual(["tx", "lock", "assert", "update"]);
+    expect(lockPropertyRow).toHaveBeenCalledTimes(1);
+    expect((lockPropertyRow as unknown as Mock).mock.calls[0][0]).toBe(txClient);
+    expect((lockPropertyRow as unknown as Mock).mock.calls[0][1]).toBe(PROP);
+    expect(assertNotEditLockedByOther).toHaveBeenCalledTimes(1);
+    expect((assertNotEditLockedByOther as unknown as Mock).mock.calls[0][0]).toBe(txClient);
+    // 書き込みが base client(prisma.property.updateMany)に漏れていない
+    // (=トランザクションの外へ逃げていない)ことを固定する。
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
   });
 
   it("鍵が他人のものなら 423 を返し、版番号の更新は走らない", async () => {
