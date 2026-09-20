@@ -71,6 +71,9 @@ export const BUILDING_TRACKED_FIELDS = [
   "builtYear",
   "structureType",
   "managementCompany",
+  // F3 Task8: 築月・地下階。
+  "builtMonth",
+  "basementFloors",
   "gpsLat",
   "gpsLng",
   "note",

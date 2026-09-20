@@ -23,6 +23,9 @@ const updateBuildingSchema = z.object({
   builtYear: z.number().int().nullable().optional(),
   structureType: z.string().nullable().optional(),
   managementCompany: z.string().nullable().optional(),
+  // F3 Task8: 築月(1〜12)・地下階(0階以上)。
+  builtMonth: z.number().int().min(1).max(12).nullable().optional(),
+  basementFloors: z.number().int().min(0).max(20).nullable().optional(),
   note: z.string().nullable().optional(),
   gpsLat: z.number().nullable().optional(),
   gpsLng: z.number().nullable().optional(),
@@ -92,6 +95,9 @@ export async function PATCH(
         builtYear: true,
         structureType: true,
         managementCompany: true,
+        // F3 Task8: 変更履歴の「変更前」に使う(選ばないと oldValue が常に undefined になる)。
+        builtMonth: true,
+        basementFloors: true,
         gpsLat: true,
         gpsLng: true,
         note: true,
