@@ -81,9 +81,17 @@ vi.mock("@/lib/prisma", () => {
   };
 });
 
+// review Important 5: lockOwnerRow(行ロック)が deleteEditLocksFor(後始末)より前に、
+// かつ同じ tx に対して呼ばれることを直接ピン留めする(走査だけでは、ロックを後始末の
+// 後ろへ動かしても・消しても全テスト緑のまま通ってしまうため)。
+vi.mock("@/lib/edit-lock/row-locks", () => ({ lockOwnerRow: vi.fn() }));
+vi.mock("@/lib/edit-lock/service", () => ({ deleteEditLocksFor: vi.fn() }));
+
 import prisma from "@/lib/prisma";
 import { getUserPermissions } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
+import { lockOwnerRow } from "@/lib/edit-lock/row-locks";
+import { deleteEditLocksFor } from "@/lib/edit-lock/service";
 import { POST } from "../../app/api/admin/owners/[id]/correction/archive/route";
 
 const OWNER_ID = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -256,6 +264,47 @@ describe("POST /api/admin/owners/[id]/correction/archive", () => {
         updatedFields: ["isArchived"],
       },
     });
+  });
+
+  // review Important 5: 行ロック(lockOwnerRow)→ 後始末(deleteEditLocksFor)→
+  // 実際のアーカイブ書き込み(owner.updateMany)の順で、かつ全て同じ tx に対して
+  // 呼ばれることを固定する。行ロックを後始末の後ろへ動かしても、削除しても、
+  // このテストでなければ緑のまま通ってしまう(走査は文字列があるかしか見ない)。
+  it("Task 8: lockOwnerRow → deleteEditLocksFor → owner.updateMany(アーカイブ) の順で、同じ tx を使う", async () => {
+    setupEligible();
+    const order: string[] = [];
+    let lockTxArg: unknown;
+    let cleanupTxArg: unknown;
+
+    (lockOwnerRow as unknown as Mock).mockImplementation(async (tx: unknown) => {
+      order.push("lock");
+      lockTxArg = tx;
+    });
+    (deleteEditLocksFor as unknown as Mock).mockImplementation(async (tx: unknown) => {
+      order.push("cleanup");
+      cleanupTxArg = tx;
+      return 0;
+    });
+    pm._tx.owner.updateMany.mockImplementation(async () => {
+      order.push("archive");
+      return { count: 1 };
+    });
+
+    const res = await POST(
+      makeRequest({ version: 1, dryRun: false }),
+      makeParams(),
+    );
+
+    expect(res.status).toBe(200);
+    expect(order).toEqual(["lock", "cleanup", "archive"]);
+    // ⚠tx そのもの(identity)に対して呼ばれたこと(base client=prisma のトップレベルの
+    //   owner ではないこと)を固定する。
+    expect(lockTxArg).toBe(pm._tx);
+    expect(cleanupTxArg).toBe(pm._tx);
+    expect(lockOwnerRow).toHaveBeenCalledWith(pm._tx, OWNER_ID);
+    expect(deleteEditLocksFor).toHaveBeenCalledWith(pm._tx, [
+      { resourceType: "owner", resourceId: OWNER_ID },
+    ]);
   });
 
   it("dryRun=false, version mismatch（tx 内 updateMany count=0 + 再読込が version 差異）→ 409", async () => {

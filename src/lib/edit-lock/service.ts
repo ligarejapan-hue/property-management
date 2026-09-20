@@ -212,8 +212,14 @@ async function readRawWithDbNow(
            "id", "resource_type", "resource_id", "user_id", "screen_token_hash",
            "acquired_at", "heartbeat_at", "activity_at", "force_released_at"
     FROM "edit_locks"
-    WHERE ("resource_type"::text, "resource_id"::text) IN (
-      SELECT * FROM unnest(${types}::text[], ${ids}::text[])
+    -- ⚠列側を ::text へ落とさない(review Minor 7)。"resource_id" は uuid 列なので、
+    --   unnest 側を "resource_type"/"resource_id" と同じ型(enum/uuid)にキャストして
+    --   ネイティブ型どうしで比較する。列側を text にキャストすると、大文字混じりの
+    --   UUID(呼び出し元が URL のパス片をそのまま渡す経路がある)が uuid としては
+    --   一致するのに text としては一致せず、鍵だけが消せずに残る
+    --   (資源は消えたのに鍵が永久に外れない孤児になる)。
+    WHERE ("resource_type", "resource_id") IN (
+      SELECT t::"EditLockResource", i::uuid FROM unnest(${types}::text[], ${ids}::text[]) AS x(t, i)
     )
   `;
   // 該当する鍵が1件も無いときは db_now を積んだ行自体が無い。この場合も判定対象が無いので使われない。
@@ -322,8 +328,11 @@ export async function deleteEditLocksFor(db: Db, resources: Target[]): Promise<n
   const ids = resources.map((r) => r.resourceId);
   const rows = await db.$queryRaw<{ id: string }[]>`
     DELETE FROM "edit_locks"
-    WHERE ("resource_type"::text, "resource_id"::text) IN (
-      SELECT * FROM unnest(${types}::text[], ${ids}::text[])
+    -- ⚠readRawWithDbNow と同じ理由(review Minor 7)で列側を text に落とさない。
+    --   uuid の大文字/小文字違いでも消せなければ、資源が消えたのに鍵だけ
+    --   永久に残る(誰にも外せない)孤児になる。
+    WHERE ("resource_type", "resource_id") IN (
+      SELECT t::"EditLockResource", i::uuid FROM unnest(${types}::text[], ${ids}::text[]) AS x(t, i)
     )
     RETURNING "id"
   `;

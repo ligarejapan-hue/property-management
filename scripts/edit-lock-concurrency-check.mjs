@@ -5,33 +5,56 @@
  * 実際に実行されたことが無い。本番投入前に、開発DBに対して**1回**手で
  * 走らせて下のチェックリストを潰し、出力を PR に貼る。
  *
- * 使い方:
- *   npx dotenv -e .env -- node scripts/edit-lock-concurrency-check.mjs <物件のUUID>
+ * 使い方(review Important 3: この repo に `dotenv-cli` は無い。ライブラリの
+ * `dotenv` はあるが bin を持たないため `npx dotenv -e .env -- …` は
+ * "could not determine executable to run" で即死する。Node 24 が本番ランタイム
+ * なので `--env-file` を使う):
+ *   node --env-file=.env scripts/edit-lock-concurrency-check.mjs <物件のUUID> --i-know-this-writes
+ *
+ * ⚠**このスクリプトは実際に DELETE/INSERT する**(review Minor 9)。指定した物件の
+ *   edit_locks 行を消して作り直すため、`--i-know-this-writes` を明示しない限り、
+ *   接続先を表示するだけで**何もせず**終了する。事故で本番に対して実行できないように
+ *   するための belt-and-braces。DATABASE_URL が空の場合も即エラー終了する
+ *   (空のまま `new PrismaPg(undefined)` を作ると pg 自身の既定値に静かにフォール
+ *   バックし、意図しない DB に「成功」してしまうため)。
  *
  * ⚠この repo は Prisma 7 の driver adapter 構成(src/lib/prisma.ts と同じ形)。
  *   アダプタを渡さないとクライアントの初期化で落ちる(@codex R10 P2)。
  *
+ * ⚠**デプロイ順序(review Minor 11)**: `deleteEditLocksFor` は edit_locks への生SQLなので、
+ *   このコードを migration(`20260918100000_add_edit_locks`)適用より前にデプロイすると、
+ *   物件削除・所有者アーカイブ・所有者統合・取込ロールバックの**4つすべて**が
+ *   `relation "edit_locks" does not exist` で 500 になる(fail-closed なので、資源だけ
+ *   消えて鍵が孤児になるより安全な倒れ方ではあるが、機能停止には変わらない)。
+ *   **必ず「migration 適用 → アプリの再起動」の順で行うこと**(脚注ではなくデプロイ手順の
+ *   必須ステップとして扱う)。
+ *
  * ── 手順(番号どおりに実行し、出力を PR に貼る) ────────────────────────────
  *
  * 1. マイグレーションを実DBに当てる。
- *      コマンド: npx dotenv -e .env -- npx prisma migrate deploy
+ *      コマンド: npx prisma migrate deploy
+ *      (Prisma CLI は自分で `.env` を読むので dotenv 系のラッパーは不要)
  *      期待する出力: `20260918100000_add_edit_locks` が Applied になり、
  *        エラー無く終わる(`edit_locks` テーブルと `EditLockResource` enum が
  *        作られる)。使い捨てできる開発DBなら `npx prisma migrate dev` でも可。
  *
- * 2. users テーブルに最低2行あることを確認する(無ければ `npm run db:seed` 等で作る)。
- *      このスクリプト自身が起動時に自動チェックし、2件未満ならエラー終了する。
+ * 2. users テーブルに最低2行、properties テーブルに最低2行あることを確認する
+ *      (無ければ `npm run db:seed` 等で作る)。このスクリプト自身が起動時に
+ *      自動チェックし、不足していれば該当するチェックだけ非致命的にスキップする
+ *      (users 不足は全体を中断、properties 不足は [7] だけスキップ)。
  *
- * 3. 物件(properties)を1件用意し、その UUID を引数にこのスクリプトを実行する。
- *      コマンド: npx dotenv -e .env -- node scripts/edit-lock-concurrency-check.mjs <物件のUUID>
+ * 3. このスクリプトを実行する:
+ *      node --env-file=.env scripts/edit-lock-concurrency-check.mjs <物件のUUID> --i-know-this-writes
  *      期待する出力(要旨。実際は番号付きで詳細に出る):
- *        [1] 取得できた本数: 1 (1 なら正しい)
+ *        [1] 取得できた本数: 1 (1 なら正しい。それ以外は非0で終了する)
  *        [2] ON CONFLICT の make_interval 分岐: 通過(もう1本は held になった)
  *        [3] unnest ベースの IN(readEditLocks 相当): 1件読めた
  *        [4] unnest ベースの IN(deleteEditLocksFor 相当): 1件消せた
  *        [5] ::"EditLockResource" キャスト: 例外なし
- *        [6] 期限切れ横取りの競合再現: 再現した/しなかった のどちらか
- *            (**この行は再現有無に関わらず必ず PR に貼る**。記録すること自体が目的)
+ *        [6] 期限切れ横取りの競合再現: 「N回中M回で再現した」/「N回の試行では再現しなかった」
+ *            のどちらか(**この行は結果に関わらず必ず PR に貼る**。記録すること自体が目的)
+ *        [7] rollback route と同じ ANY(::uuid[]) ORDER BY id FOR UPDATE: 2件ロックできた
+ *            (properties が2件未満なら非致命的にスキップし、その旨を出力する)
  *
  * ── このスクリプトがカバーする項目(Task 8 レビュー観点との対応) ───────────
  *   (a) 手書きマイグレーションの実DB適用          → 手順1
@@ -39,27 +62,69 @@
  *       (2本目の同時取得が INSERT ... ON CONFLICT ... WHERE 節の
  *        make_interval 比較を実地で通る)
  *   (c) unnest(...) で組んだ行単位の IN(readEditLocks/deleteEditLocksFor) → [3][4]
- *   (d) ::"EditLockResource" enum キャスト        → [1]〜[4] すべてで踏む
+ *   (d) ::"EditLockResource" enum キャスト        → [1]〜[4][7] すべてで踏む
  *   (e) acquireEditLock の pre-SELECT とその後の upsert が別文であることに
  *       起因する、期限切れ横取り時に takeover が null になり得る競合の再現 → [6]
+ *       (review Important 2: 期限ぎりぎりで複数回試行し、再現回数を報告する。
+ *        1回きりの「再現しなかった」を確定回答として扱わない)
+ *   (g) この task が新規に書いた唯一の SQL
+ *       (`rollback/route.ts` の `ANY(${ids}::uuid[]) ORDER BY id FOR UPDATE`)の実行
+ *       → [7](review Important 1。配列バインド + text[]→uuid[] キャストは
+ *       `make_interval` の integer/double precision 食い違いと同じ「実行するまで
+ *       わからない」種類の失敗であり、CI・order test(`$queryRaw` はモック)の
+ *       どちらでも検出できない)
  *
  * ⚠[1][2][6] は src/lib/edit-lock/service.ts の acquireEditLock、[3]は
- *   readEditLocks、[4]は deleteEditLocksFor と**同じ形の SQL をこのファイルに
- *   直接書いている**(このファイルは素の Node で動かす .mjs であり、
- *   TypeScript の service.ts を直接 import できないため)。service.ts 側の
- *   SQL の形(WHERE 節・キャスト・カラム名)を変えたら、ここも合わせて直すこと。
+ *   readEditLocks、[4]は deleteEditLocksFor、[7]は rollback/route.ts の
+ *   バッチロックと**同じ形の SQL をこのファイルに直接書いている**(このファイルは
+ *   素の Node で動かす .mjs であり、TypeScript の service.ts/route.ts を直接
+ *   import できないため)。それぞれの SQL の形(WHERE 節・キャスト・カラム名)を
+ *   変えたら、ここも合わせて直すこと。
  */
 import { PrismaClient } from "../src/generated/prisma/index.js";
 import { PrismaPg } from "@prisma/adapter-pg";
 
-const adapter = new PrismaPg(process.env.DATABASE_URL);
-const prisma = new PrismaClient({ adapter });
+// ── ガード(review Important 3 / Minor 9 / Minor 8): 何かする前に必ず通す ──
 
-const resourceId = process.argv[2];
-if (!resourceId) {
-  console.error("使い方: node scripts/edit-lock-concurrency-check.mjs <物件のUUID>");
+if (!process.env.DATABASE_URL) {
+  console.error(
+    "DATABASE_URL が設定されていません。`.env` を用意し\n" +
+      "  node --env-file=.env scripts/edit-lock-concurrency-check.mjs <物件のUUID> --i-know-this-writes\n" +
+      "の形で実行してください(`npx dotenv -e .env -- …` はこの repo では動きません。dotenv-cli 未導入)。",
+  );
   process.exit(1);
 }
+
+// フラグ("--"始まり)を除いた最初の位置引数を物件のUUIDとして扱う。素朴に argv[2] を
+// 見ると、フラグだけ渡して物件UUIDを渡し忘れたときに `--i-know-this-writes` という
+// 文字列そのものが「UUID」として扱われ、無効な DB へ本当に接続を試みてしまう。
+const positionalArgs = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+const resourceId = positionalArgs[0];
+const hasOptIn = process.argv.includes("--i-know-this-writes");
+
+let dbHost = "(DATABASE_URL の形式が不正で判読できません)";
+try {
+  dbHost = new URL(process.env.DATABASE_URL).host;
+} catch {
+  // 表示できなくても致命的ではない。実際に不正なら PrismaPg の初期化で別途落ちる。
+}
+console.log(`接続先DB: ${dbHost}`);
+
+if (!resourceId || !hasOptIn) {
+  console.error(
+    [
+      "使い方: node --env-file=.env scripts/edit-lock-concurrency-check.mjs <物件のUUID> --i-know-this-writes",
+      "",
+      "このスクリプトは指定した物件の edit_locks 行を実際に DELETE/INSERT します。",
+      "本番などの共有DBに対して誤実行しないよう、--i-know-this-writes を明示しない限り、",
+      "上の接続先を表示するだけで何もせず終了します。",
+    ].join("\n"),
+  );
+  process.exit(1);
+}
+
+const adapter = new PrismaPg(process.env.DATABASE_URL);
+const prisma = new PrismaClient({ adapter });
 
 // rules.ts の EDIT_LOCK_HEARTBEAT_GRACE_MS / EDIT_LOCK_IDLE_LIMIT_MS と同じ秒数。
 const GRACE_SEC = 300;
@@ -104,11 +169,42 @@ async function takeoverAttempt(userId, hash) {
   return { won: true, takeover };
 }
 
+// review Important 2: 999,999秒ずらすと期限切れ判定が余裕を持って確定してしまい、
+// pre-SELECT/upsert の間に競合が起きる余地が無い。しきい値ぎりぎり(2ms だけ超過)に
+// 種を蒔き、DB 往復のジッタで実際に境界をまたぐ可能性を残す。
+async function seedJustExpiredLock(holderUserId) {
+  await prisma.$executeRaw`DELETE FROM "edit_locks" WHERE "resource_id" = ${resourceId}::uuid`;
+  await prisma.$executeRaw`
+    INSERT INTO "edit_locks" ("id","resource_type","resource_id","user_id","screen_token_hash","acquired_at","heartbeat_at","activity_at")
+    VALUES (
+      gen_random_uuid(), 'property'::"EditLockResource", ${resourceId}::uuid, ${holderUserId}::uuid, 'stale-screen',
+      clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision) - interval '2 milliseconds',
+      clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision) - interval '2 milliseconds',
+      clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision) - interval '2 milliseconds'
+    )
+  `;
+}
+
 async function main() {
+  // review Minor 8: 存在しない UUID を渡しても [1]〜[5] が「全部緑」に見えてしまう
+  // (0件を「成功」と誤読できる)ことを防ぐ。
+  const property = await prisma.property.findUnique({
+    where: { id: resourceId },
+    select: { id: true },
+  });
+  if (!property) {
+    console.error(`指定した物件が見つかりません: ${resourceId}`);
+    process.exitCode = 1;
+    await prisma.$disconnect();
+    return;
+  }
+
   const users = await prisma.user.findMany({ take: 2, select: { id: true } });
   if (users.length < 2) {
     console.error(`users が2件未満です(${users.length}件)。先に2ユーザー以上 seed してください。`);
-    process.exit(1);
+    process.exitCode = 1;
+    await prisma.$disconnect();
+    return;
   }
   const [u1, u2] = users;
 
@@ -124,15 +220,19 @@ async function main() {
       wonCount === 1 ? "通過(もう1本は held になった)" : "確認できず(想定外の結果。手動で再実行してください)"
     }`,
   );
+  // review Minor 8: ゲートが 0 終了で「成功」を騙らないよう、想定外なら非0で終える。
+  if (wonCount !== 1) process.exitCode = 1;
 
   // [3] readEditLocks 相当: unnest ベースの行単位 IN + db_now を1クエリで読む。
+  //     service.ts と同じく列側は text へ落とさず、unnest 側を enum/uuid にキャストする
+  //     (review Minor 7 の修理後の形。大文字UUIDでも一致することの実地確認も兼ねる)。
   const readRows = await prisma.$queryRaw`
     SELECT clock_timestamp() AS db_now,
            "id", "resource_type", "resource_id", "user_id", "screen_token_hash",
            "acquired_at", "heartbeat_at", "activity_at", "force_released_at"
     FROM "edit_locks"
-    WHERE ("resource_type"::text, "resource_id"::text) IN (
-      SELECT * FROM unnest(${["property"]}::text[], ${[resourceId]}::text[])
+    WHERE ("resource_type", "resource_id") IN (
+      SELECT t::"EditLockResource", i::uuid FROM unnest(${["property"]}::text[], ${[resourceId]}::text[]) AS x(t, i)
     )
   `;
   console.log(`[3] unnest ベースの IN(readEditLocks 相当): ${readRows.length}件読めた`);
@@ -140,8 +240,8 @@ async function main() {
   // [4] deleteEditLocksFor 相当: 同じ unnest ベースの行単位 IN で削除する。
   const deletedRows = await prisma.$queryRaw`
     DELETE FROM "edit_locks"
-    WHERE ("resource_type"::text, "resource_id"::text) IN (
-      SELECT * FROM unnest(${["property"]}::text[], ${[resourceId]}::text[])
+    WHERE ("resource_type", "resource_id") IN (
+      SELECT t::"EditLockResource", i::uuid FROM unnest(${["property"]}::text[], ${[resourceId]}::text[]) AS x(t, i)
     )
     RETURNING "id"
   `;
@@ -149,41 +249,62 @@ async function main() {
   console.log(`[5] ::"EditLockResource" キャスト: 例外なし(ここまで到達していれば全クエリが通過済み)`);
 
   // [6] 期限切れの横取りで pre-SELECT と upsert(2文)の間に競合が起きないかを再現する。
-  //     まず遥か過去のheartbeat/activityを持つ「期限切れの鍵」を u1 で作る。
-  //     その後、2本の「pre-SELECT → INSERT」(takeoverAttempt)を同時に走らせる。
-  //     片方は u1 の別タブ(同じ利用者・別画面=横取り扱い)、もう片方は u2。
-  await prisma.$executeRaw`DELETE FROM "edit_locks" WHERE "resource_id" = ${resourceId}::uuid`;
-  await prisma.$executeRaw`
-    INSERT INTO "edit_locks" ("id","resource_type","resource_id","user_id","screen_token_hash","acquired_at","heartbeat_at","activity_at")
-    VALUES (
-      gen_random_uuid(), 'property'::"EditLockResource", ${resourceId}::uuid, ${u1.id}::uuid, 'stale-screen',
-      clock_timestamp() - make_interval(secs => 999999::double precision),
-      clock_timestamp() - make_interval(secs => 999999::double precision),
-      clock_timestamp() - make_interval(secs => 999999::double precision)
-    )
-  `;
-
-  const [r1, r2] = await Promise.all([
-    takeoverAttempt(u1.id, "takeover-x"),
-    takeoverAttempt(u2.id, "takeover-y"),
-  ]);
-  const winners = [r1, r2].filter((r) => r.won);
-  const nullTakeoverAmongWinners = winners.filter((r) => r.takeover === null);
-  console.log("[6] 期限切れ横取りの競合再現(生データ):", JSON.stringify({ r1, r2 }));
-  if (winners.length === 1 && nullTakeoverAmongWinners.length === 1) {
-    console.log("[6] 結果: 再現した(勝った方の takeover が null = 監査に横取りとして残らない可能性がある)");
-  } else if (winners.length === 1) {
-    console.log("[6] 結果: 再現しなかった(勝った方の takeover は正しく記録された)");
+  //     review Important 2: 1回だけ・999,999秒ずらして「再現しなかった」を騙るのではなく、
+  //     しきい値ぎりぎりで何度も試行し、実際に何回再現したかを報告する。
+  const ATTEMPTS = 200;
+  let reproducedCount = 0;
+  let inconclusiveCount = 0;
+  for (let i = 0; i < ATTEMPTS; i++) {
+    await seedJustExpiredLock(u1.id);
+    const [r1, r2] = await Promise.all([
+      takeoverAttempt(u1.id, `takeover-x-${i}`),
+      takeoverAttempt(u2.id, `takeover-y-${i}`),
+    ]);
+    const winners = [r1, r2].filter((r) => r.won);
+    if (winners.length === 1) {
+      if (winners[0].takeover === null) reproducedCount++;
+    } else {
+      // 想定外(0本または2本勝つ)。取りこぼしとして数えるが致命的ではない。
+      inconclusiveCount++;
+    }
+  }
+  if (reproducedCount > 0) {
+    console.log(
+      `[6] 結果: ${ATTEMPTS}回中 ${reproducedCount}回で再現した(勝った方の takeover が null = 監査に横取りとして残らないケースがある。判定不能 ${inconclusiveCount}回)`,
+    );
   } else {
-    console.log("[6] 結果: 判定不能(想定外: 勝者が0本または2本)。手動で再実行してください");
+    console.log(
+      `[6] 結果: ${ATTEMPTS}回の試行では再現しなかった(判定不能 ${inconclusiveCount}回)。再現しないと確定したわけではない点に注意`,
+    );
   }
 
   await prisma.$executeRaw`DELETE FROM "edit_locks" WHERE "resource_id" = ${resourceId}::uuid`;
+
+  // [7] review Important 1: この task が新規に書いた唯一の SQL
+  //     (rollback/route.ts の ANY(${ids}::uuid[]) ORDER BY id FOR UPDATE)は、
+  //     CI(DBなし)でも order test($queryRaw はモック)でも実行されたことが無い。
+  //     配列バインド + text[]→uuid[] キャストが本番DBで本当に通るかをここで確かめる。
+  const twoProps = await prisma.property.findMany({ take: 2, select: { id: true } });
+  if (twoProps.length < 2) {
+    console.log(
+      "[7] スキップ: properties が2件未満のため確認できません(先に物件を2件以上用意してください)",
+    );
+  } else {
+    const ids = twoProps.map((p) => p.id);
+    const lockedRows = await prisma.$transaction(async (tx) => {
+      return tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${ids}::uuid[]) ORDER BY id FOR UPDATE`;
+    });
+    console.log(
+      `[7] rollback route と同じ ANY(::uuid[]) ORDER BY id FOR UPDATE: ${lockedRows.length}件ロックできた (${ids.length} なら正しい)`,
+    );
+    if (lockedRows.length !== ids.length) process.exitCode = 1;
+  }
+
   await prisma.$disconnect();
 }
 
 main().catch(async (e) => {
   console.error(e);
+  process.exitCode = 1;
   await prisma.$disconnect();
-  process.exit(1);
 });

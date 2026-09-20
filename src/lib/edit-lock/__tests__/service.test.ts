@@ -256,6 +256,22 @@ describe("readEditLocks", () => {
     expect(res.locks).toEqual([]);
     expect(queryRaw).not.toHaveBeenCalled();
   });
+
+  // review Minor 7: 修理前は ("resource_type"::text, "resource_id"::text) という形で
+  // 列側を text に落としていたため、大文字混じりの UUID が uuid としては一致するのに
+  // text としては一致せず、鍵だけが消えずに残る(資源が消えた後の孤児)可能性があった。
+  // 列側はキャストせず(enum/uuid のまま)、unnest 側を同じ型にキャストする形にする。
+  it("列側を text へ落とさず、unnest 側を enum/uuid にキャストして比較する(大文字UUIDでも一致させる)", async () => {
+    const { db, queryRaw } = fakeDb([]);
+    await readEditLocks(db, [
+      { resourceType: "owner", resourceId: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA" },
+    ]);
+    const sql = sqlOf(queryRaw.mock.calls[0]);
+    expect(sql).not.toMatch(/"resource_id"::text/);
+    expect(sql).not.toMatch(/"resource_type"::text/);
+    expect(sql).toMatch(/i::uuid/);
+    expect(sql).toMatch(/t::"EditLockResource"/);
+  });
 });
 
 describe("isResourceEditLocked", () => {
@@ -294,6 +310,21 @@ describe("deleteEditLocksFor", () => {
     const res = await deleteEditLocksFor(db, []);
     expect(res).toBe(0);
     expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  // review Minor 7: readEditLocks と同じ理由。大文字混じりの UUID が渡っても、
+  // 列側(uuid型)と unnest側(uuid にキャストした値)がネイティブ型どうしで比較され、
+  // 消せずに残る孤児鍵を防ぐ。
+  it("列側を text へ落とさず、unnest 側を enum/uuid にキャストして比較する(大文字UUIDでも一致させる)", async () => {
+    const { db, queryRaw } = fakeDb([{ id: "l1" }]);
+    await deleteEditLocksFor(db, [
+      { resourceType: "property", resourceId: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA" },
+    ]);
+    const sql = sqlOf(queryRaw.mock.calls[0]);
+    expect(sql).not.toMatch(/"resource_id"::text/);
+    expect(sql).not.toMatch(/"resource_type"::text/);
+    expect(sql).toMatch(/i::uuid/);
+    expect(sql).toMatch(/t::"EditLockResource"/);
   });
 });
 

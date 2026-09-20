@@ -14,9 +14,23 @@ describe("鍵の後始末", () => {
   for (const rel of PATHS) {
     it(`${rel} は deleteEditLocksFor を呼ぶ`, () => {
       const src = readFileSync(join(process.cwd(), rel), "utf8").replace(/\r\n/g, "\n");
-      expect(src).toMatch(/deleteEditLocksFor\(/);
+      // review Minor 10: `await deleteEditLocksFor(` まで要求する。`deleteEditLocksFor` という
+      // 文字列だけなら import 文やコメントでも素通りしてしまう。
+      expect(src).toMatch(/await deleteEditLocksFor\(/);
     });
   }
+
+  // review Important 5: 行ロックが無いまま後始末だけを足しても孤児化は防げない
+  // (これがこの task の核心)。archive はこれまで owner 行を一切ロックしていなかったため、
+  // 新規に足した lockOwnerRow がこの走査でも・実際の順序テスト(owner-archive-route.test.ts)
+  // でも両方から固定されている必要がある。
+  it("owners archive は lockOwnerRow(行ロック)を呼んでから鍵を消す", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src/app/api/admin/owners/[id]/correction/archive/route.ts"),
+      "utf8",
+    ).replace(/\r\n/g, "\n");
+    expect(src).toMatch(/await lockOwnerRow\(/);
+  });
 });
 
 // ⚠走査(名前が出てくるか)だけでは順序の穴を防げない(@codex R11 P2)。
@@ -125,6 +139,10 @@ describe("取り消しは 行ロック → 後始末 → 削除 の順", () => {
   it("物件の行をロックしてから鍵を消し、最後に物件を消す", async () => {
     const order: string[] = [];
     let txClient: unknown;
+    // review Important 4: "lockRows" というラベルは、どんな tx.$queryRaw 呼び出しでも
+    // push されてしまい、FOR UPDATE や ORDER BY id を落としても緑のまま通り得る。
+    // 実際に投げられた SQL テンプレートと束縛値を控えて、あとで文面そのものを検査する。
+    let lockRowsCall: unknown[] | null = null;
 
     pm.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       order.push("tx");
@@ -139,9 +157,10 @@ describe("取り消しは 行ロック → 後始末 → 削除 の順", () => {
             return {};
           }),
         },
-        $queryRaw: vi.fn(async () => {
+        $queryRaw: vi.fn((...args: unknown[]) => {
           order.push("lockRows");
-          return [];
+          lockRowsCall = args;
+          return Promise.resolve([]);
         }),
       };
       return fn(txClient);
@@ -160,5 +179,17 @@ describe("取り消しは 行ロック → 後始末 → 削除 の順", () => {
     // ⚠tx そのもの(identity)に対して呼ばれたこと・base client には漏れていないことを固定する。
     expect((deleteEditLocksFor as unknown as Mock).mock.calls[0][0]).toBe(txClient);
     expect(pm.property.delete).not.toHaveBeenCalled();
+
+    // review Important 4: FOR UPDATE と ORDER BY id、そして削除対象の id が
+    // 実際に SQL テンプレートに乗っていることまで固定する(名前だけの検査にしない)。
+    expect(lockRowsCall).not.toBeNull();
+    const [strings, ...values] = lockRowsCall as unknown as [TemplateStringsArray, ...unknown[]];
+    const sql = strings.reduce(
+      (acc, s, i) => acc + s + (i < values.length ? `{${String(values[i])}}` : ""),
+      "",
+    );
+    expect(sql).toMatch(/FOR UPDATE/);
+    expect(sql).toMatch(/ORDER BY id/);
+    expect(sql).toContain(PROP_ID);
   });
 });
