@@ -237,5 +237,21 @@ describe("updatePropertySchema — 販売区分フィールドの範囲検証(F3
     it("access: 200文字超過は無効", () => {
       expectInvalid({ access: "あ".repeat(201), version: 1 });
     });
+
+    it("orientation: 50文字超過は無効（将来の防御）", () => {
+      expectInvalid({ orientation: "あ".repeat(51), version: 1 });
+    });
+
+    it("parking: 50文字超過は無効（将来の防御）", () => {
+      expectInvalid({ parking: "あ".repeat(51), version: 1 });
+    });
+
+    it("saleTaxType: 50文字超過は無効（将来の防御）", () => {
+      expectInvalid({ saleTaxType: "あ".repeat(51), version: 1 });
+    });
+
+    it("landAreaMethod: 50文字超過は無効（将来の防御）", () => {
+      expectInvalid({ landAreaMethod: "あ".repeat(51), version: 1 });
+    });
   });
 });
