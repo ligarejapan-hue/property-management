@@ -4533,6 +4533,11 @@ export async function runRegistryAutoFetch(
         ownersCreated: result.ownersCreated ?? 0,
         ownersLinked: result.ownersLinked ?? 0,
         confirmed: true,
+        // D10: 編集中の鍵のため補完を見送ったこと(管理画面で読めるように・許可リストは
+        // audit-log-detail-safety.ts の ACTION_EXTRA_KEYS/ACTION_FORCE_SAFE_KEYS 側)。
+        propertyFillSkippedByEditLock: result.propertyFillSkippedByEditLock ?? false,
+        ownerCorporateFillSkippedByEditLock:
+          result.ownerCorporateFillSkippedByEditLock ?? false,
       },
     });
 

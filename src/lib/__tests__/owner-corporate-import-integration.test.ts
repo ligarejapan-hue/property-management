@@ -148,8 +148,12 @@ describe("registry-pdf route Phase D 統合", () => {
   });
 
   it("reuse パスで updateMany(where corporateNumber:null) による空欄埋め", () => {
+    // D10(編集中の鍵): この updateMany は fillOwnerCorporateNumberIfUnlocked に
+    // 括り出され、所有者の行をロックしたトランザクションの中で実行される
+    // (呼び出し側の変数名は candidateOwnerId!/cnDecision.corporateNumber だが、
+    //  ヘルパー内部では ownerId/corporateNumber という仮引数名になる)。
     expect(registryPdfSrc).toMatch(
-      /updateMany\(\{[\s\S]{0,200}corporateNumber:\s*null[\s\S]{0,150}data:\s*\{\s*corporateNumber:\s*cnDecision\.corporateNumber/,
+      /async function fillOwnerCorporateNumberIfUnlocked[\s\S]{0,700}where:\s*\{\s*id:\s*ownerId,\s*corporateNumber:\s*null\s*\}[\s\S]{0,100}data:\s*\{\s*corporateNumber,/,
     );
   });
 
@@ -185,11 +189,12 @@ describe("registry-pdf route Phase D 統合", () => {
     );
   });
 
-  it("Codex P1: reuse 用 updateMany は reusedExistingOwner 条件下でのみ実行（id:null 防止）", () => {
-    // updateMany(where: { id: candidateOwnerId!, corporateNumber: null }) は
+  it("Codex P1: reuse 用の法人番号補完は reusedExistingOwner 条件下でのみ実行（id:null 防止）", () => {
+    // D10: 実際の updateMany は fillOwnerCorporateNumberIfUnlocked の中に移ったため、
+    // ガードの内側にあるのは(直接の updateMany ではなく)そのヘルパー呼び出しになった。
     // reusedExistingOwner && cnDecision.action === "save" ガードの内側にある
     expect(registryPdfSrc).toMatch(
-      /if\s*\(\s*\n?\s*reusedExistingOwner\s*&&[\s\S]{0,150}cnDecision\.action\s*===\s*"save"[\s\S]{0,200}updateMany/,
+      /if\s*\(\s*\n?\s*reusedExistingOwner\s*&&[\s\S]{0,150}cnDecision\.action\s*===\s*"save"[\s\S]{0,200}fillOwnerCorporateNumberIfUnlocked/,
     );
   });
 

@@ -825,3 +825,32 @@ describe("sanitizeAuditDetail: 編集中の鍵(edit_lock_*)", () => {
     expect(safe.holderName).toBe(REDACTED);
   });
 });
+
+describe("sanitizeAuditDetail: 謄本自動取得の編集中の鍵スキップ(D10・registry_auto_fetch)", () => {
+  // ⚠ownerCorporateFillSkippedByEditLock は /owner/i denylist に当たるため、
+  //   allowlist(ACTION_EXTRA_KEYS)だけでは足りず ACTION_FORCE_SAFE_KEYS でも
+  //   保持している。propertyFillSkippedByEditLock は denylist に当たらないので
+  //   allowlist だけで足りる。
+  it("見送りの2フラグは伏せ字にならず、boolean のまま残る", () => {
+    const safe = sanitizeAuditDetail("registry_auto_fetch", {
+      propertyId: "p1",
+      status: "success",
+      propertyFillSkippedByEditLock: true,
+      ownerCorporateFillSkippedByEditLock: false,
+    }) as Record<string, unknown>;
+    expect(safe.propertyFillSkippedByEditLock).toBe(true);
+    expect(safe.ownerCorporateFillSkippedByEditLock).toBe(false);
+  });
+
+  it("穴は2フラグだけ。紛れ込んだ本物のPII(ownerName等)は引き続き伏せ字", () => {
+    const safe = sanitizeAuditDetail("registry_auto_fetch", {
+      propertyId: "p1",
+      propertyFillSkippedByEditLock: true,
+      ownerCorporateFillSkippedByEditLock: true,
+      ownerName: "山田太郎",
+    }) as Record<string, unknown>;
+    expect(safe.propertyFillSkippedByEditLock).toBe(true);
+    expect(safe.ownerCorporateFillSkippedByEditLock).toBe(true);
+    expect(safe.ownerName).toBe(REDACTED);
+  });
+});

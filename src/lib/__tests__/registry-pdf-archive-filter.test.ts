@@ -77,6 +77,9 @@ vi.mock("@/lib/pdf-extract", () => ({
 
 vi.mock("@/lib/prisma", () => {
   const tx = {
+    // D10: Mode A の物件フィールド補完(空欄埋め・取得状況の前進)は物件行を
+    // ロックしたトランザクション内で行う(edit-lock-skip.test.ts と同じ形)。
+    property: { updateMany: vi.fn() },
     owner: { updateMany: vi.fn() },
     propertyOwner: { findFirst: vi.fn(), create: vi.fn() },
     $queryRaw: vi.fn(async () => [{ id: "p1" }]), // 親行ロック(#364 R10)
@@ -112,6 +115,7 @@ const pm = prisma as unknown as {
   importJobRow: { create: Mock };
   $transaction: Mock;
   _tx: {
+    property: { updateMany: Mock };
     owner: { updateMany: Mock };
     propertyOwner: { findFirst: Mock; create: Mock };
   };
@@ -167,6 +171,7 @@ beforeEach(() => {
   pm.$transaction.mockImplementation((fn: (tx: unknown) => unknown) =>
     fn(pm._tx),
   );
+  pm._tx.property.updateMany.mockResolvedValue({ count: 1 });
   pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
   pm._tx.propertyOwner.findFirst.mockResolvedValue(null);
   pm._tx.propertyOwner.create.mockResolvedValue({});

@@ -17,6 +17,8 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { lockPropertyRow } from "@/lib/property-record-guard";
+import { lockOwnerRow } from "@/lib/edit-lock/row-locks";
+import { isResourceEditLocked } from "@/lib/edit-lock/service";
 import { ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
@@ -157,6 +159,29 @@ function isUniqueConstraintError(err: unknown): boolean {
   );
 }
 
+// D10: 所有者の法人番号の空欄補完(既存が null のときだけ)を、所有者の行をロックした
+// トランザクション内で「編集中の鍵」の有無を見てから行う。
+// ⚠**編集中は書かない**(自動処理が編集画面の入力を黙って上書きしないため)。
+// ⚠version を必ず進める(今までは付いておらず、編集画面の古い内容で黙って消えるバグだった)。
+async function fillOwnerCorporateNumberIfUnlocked(
+  ownerId: string,
+  corporateNumber: string,
+): Promise<{ count: number; locked: boolean }> {
+  return prisma.$transaction(async (tx) => {
+    await lockOwnerRow(tx, ownerId);
+    const locked = await isResourceEditLocked(tx, {
+      resourceType: "owner",
+      resourceId: ownerId,
+    });
+    if (locked) return { count: 0, locked: true };
+    const updated = await tx.owner.updateMany({
+      where: { id: ownerId, corporateNumber: null },
+      data: { corporateNumber, version: { increment: 1 } },
+    });
+    return { count: updated.count, locked: false };
+  });
+}
+
 // A-2c: 謄本PDF取込の所有者反映（Owner 突合/作成 + PropertyOwner link）を
 // Mode A/B 共通の private 関数に括り出す。中身は従来の Mode A ループを propertyId
 // 引数化しただけで挙動は不変（突合/正規化/archive race/法人番号の各方針を維持）。
@@ -168,8 +193,10 @@ async function reflectParsedOwners(args: {
   propertyId: string;
   owners: ReturnType<typeof parseRegistryText>["owners"];
   recordCorporateDecision: (decision: CorporateImportDecision) => void;
+  /** D10: 所有者の鍵で法人番号の補完を見送ったときに呼ぶ。 */
+  markOwnerCorporateFillSkipped: () => void;
 }): Promise<{ matched: number; created: number; linked: number }> {
-  const { propertyId, owners, recordCorporateDecision } = args;
+  const { propertyId, owners, recordCorporateDecision, markOwnerCorporateFillSkipped } = args;
   let matchedCount = 0;
   let createdCount = 0;
   let linkedCount = 0;
@@ -255,15 +282,20 @@ async function reflectParsedOwners(args: {
           outcome.existingCorporateNumber,
         );
         if (decision.action === "save" && decision.corporateNumber) {
-          const filled = await prisma.owner.updateMany({
-            where: { id: outcome.ownerId, corporateNumber: null },
-            data: { corporateNumber: decision.corporateNumber },
-          });
-          recordCorporateDecision(
-            filled.count === 0
-              ? { action: "noop", corporateNumber: null }
-              : decision,
+          const filled = await fillOwnerCorporateNumberIfUnlocked(
+            outcome.ownerId,
+            decision.corporateNumber,
           );
+          if (filled.locked) {
+            markOwnerCorporateFillSkipped();
+            recordCorporateDecision({ action: "noop", corporateNumber: null });
+          } else {
+            recordCorporateDecision(
+              filled.count === 0
+                ? { action: "noop", corporateNumber: null }
+                : decision,
+            );
+          }
         } else {
           recordCorporateDecision(decision);
         }
@@ -375,15 +407,20 @@ async function reflectParsedOwners(args: {
       cnDecision.action === "save" &&
       cnDecision.corporateNumber
     ) {
-      const cnUpdate = await prisma.owner.updateMany({
-        where: { id: candidateOwnerId!, corporateNumber: null },
-        data: { corporateNumber: cnDecision.corporateNumber },
-      });
-      recordCorporateDecision(
-        cnUpdate.count === 0
-          ? { action: "noop", corporateNumber: null }
-          : cnDecision,
+      const cnFilled = await fillOwnerCorporateNumberIfUnlocked(
+        candidateOwnerId!,
+        cnDecision.corporateNumber,
       );
+      if (cnFilled.locked) {
+        markOwnerCorporateFillSkipped();
+        recordCorporateDecision({ action: "noop", corporateNumber: null });
+      } else {
+        recordCorporateDecision(
+          cnFilled.count === 0
+            ? { action: "noop", corporateNumber: null }
+            : cnDecision,
+        );
+      }
     } else if (reusedExistingOwner) {
       // reuse 成功 + save 以外（noop / multi / conflict / none） → そのまま集計
       recordCorporateDecision(cnDecision);
@@ -496,6 +533,13 @@ export async function processRegistryPdf(
   let ownerScopeSkipped = false;
   // PR#88: Mode B で弱い住所一致のため owner 反映をスキップしたフラグ。
   let ownerWeakMatchSkipped = false;
+  // D10: 編集中の鍵のため、物件の空欄補完(地番・家屋番号・不動産番号)/所有者の法人番号
+  // 補完を見送ったフラグ。実際に埋まるはずだった欄があるときだけ true にする(@codex R10 P2)。
+  let propertyFillSkippedByEditLock = false;
+  let ownerCorporateFillSkippedByEditLock = false;
+  const markOwnerCorporateFillSkipped = () => {
+    ownerCorporateFillSkippedByEditLock = true;
+  };
   // 失敗理由（silent fail-through 用と、catch ブロックでの recovery 用）。
   // null のままなら成功扱い。
   let failureReason: string | null = null;
@@ -521,30 +565,69 @@ export async function processRegistryPdf(
         );
       }
 
-      // Build update fields (only fill empty/null fields, don't overwrite)
-      const updates: Record<string, unknown> = {};
-      if (!existing.realEstateNumber && parsed.realEstateNumber) {
-        updates.realEstateNumber = parsed.realEstateNumber;
-      }
-      if (!existing.lotNumber && parsed.lotNumber) {
-        updates.lotNumber = parsed.lotNumber;
-      }
-      if (!existing.buildingNumber && parsed.buildingNumber) {
-        updates.buildingNumber = parsed.buildingNumber;
-      }
-      if (
-        existing.registryStatus === "unconfirmed" &&
-        parsed.realEstateNumber
-      ) {
-        updates.registryStatus = "obtained";
-      }
+      // D10: 空欄補完(realEstateNumber/lotNumber/buildingNumber)は「編集中の鍵」が
+      // あれば見送る。⚠**registryStatus の unconfirmed→obtained だけは鍵の間も必ず
+      // 進める**(@codex R6 P1)。PDFが添付されるのに未確認のまま残るほうが害が大きい
+      // ためのD10の例外。確認(鍵の有無)と書き込みは同じトランザクション・同じ物件行
+      // ロックの中で行う(順序: トランザクション開始→行ロック→鍵の確認→条件つき更新)。
+      const wouldFillProperty =
+        (!existing.realEstateNumber && !!parsed.realEstateNumber) ||
+        (!existing.lotNumber && !!parsed.lotNumber) ||
+        (!existing.buildingNumber && !!parsed.buildingNumber);
+      const wouldAdvanceStatus =
+        existing.registryStatus === "unconfirmed" && !!parsed.realEstateNumber;
+
+      // ⚠**何も書く見込みが無ければ、鍵の確認自体をしない**(行ロックを取らない)。
+      // 埋める欄も進める状態も無ければ、鍵の有無に関わらず結果は変わらない。
+      // (毎回の取込のたびに無条件で行ロックを取ると、実質 no-op の再取込でも
+      //  他の編集を待たせてしまう。既存の挙動(条件が無ければ何もしない)も保つ。)
+      const updates: Record<string, unknown> =
+        wouldFillProperty || wouldAdvanceStatus
+          ? await prisma.$transaction(async (tx) => {
+              await lockPropertyRow(tx, propertyId);
+              const propertyLocked = await isResourceEditLocked(tx, {
+                resourceType: "property",
+                resourceId: propertyId,
+              });
+
+              // (a) 取得状況の前進。鍵の有無に関わらず必ず実行する
+              //     (@codex R6 P1・PDFが添付されるのに未確認のまま残るほうが害が大きい)。
+              const statusUpdates: Record<string, unknown> = {};
+              if (wouldAdvanceStatus) {
+                statusUpdates.registryStatus = "obtained";
+              }
+
+              // (b) 3項目の補完。鍵が無いときだけ実行する。
+              const fieldUpdates: Record<string, unknown> = {};
+              if (!propertyLocked) {
+                if (!existing.realEstateNumber && parsed.realEstateNumber) {
+                  fieldUpdates.realEstateNumber = parsed.realEstateNumber;
+                }
+                if (!existing.lotNumber && parsed.lotNumber) {
+                  fieldUpdates.lotNumber = parsed.lotNumber;
+                }
+                if (!existing.buildingNumber && parsed.buildingNumber) {
+                  fieldUpdates.buildingNumber = parsed.buildingNumber;
+                }
+              } else if (wouldFillProperty) {
+                // 実際に埋まるはずだった欄があるときだけフラグを立てる(@codex R10 P2)。
+                propertyFillSkippedByEditLock = true;
+              }
+
+              // 鍵が無いときは(a)(b)を1回の updateMany にまとめる。鍵があるときは
+              // fieldUpdates が常に空なので、実質(a)だけの1回になる。
+              const merged = { ...statusUpdates, ...fieldUpdates };
+              if (Object.keys(merged).length > 0) {
+                await tx.property.updateMany({
+                  where: { id: propertyId, version: existing.version },
+                  data: { ...merged, version: { increment: 1 } },
+                });
+              }
+              return merged;
+            })
+          : {};
 
       if (Object.keys(updates).length > 0) {
-        await prisma.property.updateMany({
-          where: { id: propertyId, version: existing.version },
-          data: { ...updates, version: { increment: 1 } },
-        });
-
         await recordChanges({
           targetTable: "properties",
           targetId: propertyId,
@@ -569,6 +652,7 @@ export async function processRegistryPdf(
           propertyId,
           owners: parsed.owners,
           recordCorporateDecision,
+          markOwnerCorporateFillSkipped,
         });
         ownersMatched = modeAOwners.matched;
         ownersCreated = modeAOwners.created;
@@ -662,6 +746,7 @@ export async function processRegistryPdf(
               propertyId: targetPropertyId,
               owners: parsed.owners,
               recordCorporateDecision,
+              markOwnerCorporateFillSkipped,
             });
             ownersMatched = modeBOwners.matched;
             ownersCreated = modeBOwners.created;
@@ -960,5 +1045,8 @@ export async function processRegistryPdf(
     // A-2b: 保存成功時は attachmentId。owner反映/PDF保存のスキップは warning。
     ...(attachmentId ? { attachmentId } : {}),
     ...(warning ? { warning } : {}),
+    // D10: 編集中の鍵のため見送った補完(取込画面の警告・自動取得の監査detailで使う)。
+    propertyFillSkippedByEditLock,
+    ownerCorporateFillSkippedByEditLock,
   };
 }

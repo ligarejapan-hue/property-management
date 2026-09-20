@@ -449,6 +449,14 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   edit_lock_takeover_expired: new Set(["resourceType", "resourceId", "previousUserId", "expiredBy"]),
   edit_lock_release: new Set(["resourceType", "resourceId"]),
   edit_lock_force_release: new Set(["resourceType", "resourceId", "previousUserId"]),
+  // 謄本の自動取得。編集中の鍵のため物件の空欄補完/所有者の法人番号補完を見送った
+  // ことを管理画面で読めるようにする(D10)。propertyFillSkippedByEditLock は
+  // denylist に当たらないためここだけで足りるが、ownerCorporateFillSkippedByEditLock は
+  // /owner/i denylist に先に当たるため ACTION_FORCE_SAFE_KEYS 側でも保持する。
+  registry_auto_fetch: new Set([
+    "propertyFillSkippedByEditLock",
+    "ownerCorporateFillSkippedByEditLock",
+  ]),
 };
 
 /**
@@ -503,6 +511,10 @@ const ACTION_FORCE_SAFE_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // これが伏せ字のままだと、所有者・紐付けが実際に作られたのかが
   // 管理者に一切分からない = 監査の意味が消える(@codex PR#414 4巡目)。
   paste_import_property_create: new Set(["ownerCreated", "ownerLinked"]),
+  // registry_auto_fetch: ownerCorporateFillSkippedByEditLock は「所有者の法人番号の
+  // 補完を鍵のため見送ったか」の boolean。/owner/i denylist に当たるが値は boolean
+  // ゆえ PII 流入余地なし(他の *SkippedByEditLock/*hasXxx と同型)。
+  registry_auto_fetch: new Set(["ownerCorporateFillSkippedByEditLock"]),
 };
 
 /**

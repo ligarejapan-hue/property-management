@@ -227,8 +227,12 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
     // @codex #396 R2: 住所ありの経路は「所有者 → 物件」の順でロックする。こちらが
     //   物件を握ったまま既存の所有者を掴むと**逆順**になり、同時実行で互いに待ち合って
     //   PostgreSQL がどちらかを中断する（正常な取込が失敗する）。
-    // ⇒ 既存の所有者行に触る更新（法人番号の穴埋め）はトランザクションの**外**で行う。
-    //   空のときだけ埋める条件付き更新なので直列化は要らない。
+    // ⇒ 既存の所有者行に触る更新（法人番号の穴埋め）は、物件行をロックしている
+    //   トランザクションの**外**で行う。
+    // ⚠D10(編集中の鍵)で、この更新自体は「所有者の行をロックした**別の**トランザクション」
+    //   に包まれるようになった(鍵の確認を書き込みと同じtxで行うため)。よって
+    //   「トランザクションの中かどうか」では判定できなくなった＝**ネストしていないか**
+    //   (物件ロックのtxがまだ開いたままの状態で所有者のtxが重なっていないか)を見る。
     linkedOwners([{ id: "owner-existing", name: "山田太郎" }]);
     pm.propertyOwner.findFirst.mockResolvedValue({ propertyId: PROP_ID });
     // ⚠法人番号の候補を1件返させて、既存所有者への更新を**実際に走らせる**。
@@ -236,25 +240,27 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
     (detectCorporateNumberInOwnerLike as unknown as Mock).mockReturnValue({
       candidates: ["4011001059442"],
     });
-    let inTx = false;
-    const updateManyInTx: boolean[] = [];
+    let depth = 0;
+    const depthAtUpdate: number[] = [];
     pm.$transaction.mockImplementation(async (cb: (tx: typeof prisma) => unknown) => {
-      inTx = true;
+      depth++;
       try {
         return await cb(prisma);
       } finally {
-        inTx = false;
+        depth--;
       }
     });
     pm.owner.updateMany.mockImplementation(async () => {
-      updateManyInTx.push(inTx);
+      depthAtUpdate.push(depth);
       return { count: 1 };
     });
     await run();
     // 実際に呼ばれていること（空振りのピンにしない）。
-    expect(updateManyInTx.length).toBeGreaterThan(0);
-    // そのうえで、トランザクションの中では呼ばない。
-    expect(updateManyInTx.every((v) => v === false)).toBe(true);
+    expect(depthAtUpdate.length).toBeGreaterThan(0);
+    // 呼ばれた時点でトランザクションが**1段だけ**(=自分自身の所有者ロックtxだけ)
+    // であること。2段以上なら、物件ロックのtxを握ったまま所有者のtxへ入っている
+    // (=禁止されたロック順序)ことになる。
+    expect(depthAtUpdate.every((d) => d === 1)).toBe(true);
   });
 
   it("⚠住所ありの所有者は従来どおり**全体**から照合する（この変更で経路を変えない）", async () => {
