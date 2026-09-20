@@ -161,15 +161,6 @@ export async function POST(
     const body = parsed.data;
     auditApplied = body.apply;
 
-    // ---- 編集の鍵(X-Edit-Lock)の形式チェック ----
-    // readLockId 側で不正なら 400(コード=EDIT_LOCK_ID_INVALID)。無ければ「鍵なし」
-    // として通常どおり続ける(古い画面からの保存を弾かないため)。
-    // ⚠権限判定(上)と auditApplied の設定(直前)より後、国税庁への再lookup(下の
-    // lookupCorporateNumber)より前に置く: 権限の無い呼び出し元には403を優先させ、
-    // 監査の detail.applied には実際に送られた内容を残しつつ、不正な値のためだけに
-    // 上流へ問い合わせないようにする。
-    const lockIdHeader = readLockId(request);
-
     // ---- normalize corporateNumber ----
     const normalized = normalizeCorporateNumber(body.corporateNumber);
     if (!normalized) {
@@ -245,6 +236,16 @@ export async function POST(
       auditResult = "not_found";
       throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
     }
+
+    // ---- 編集の鍵(X-Edit-Lock)の形式チェック ----
+    // readLockId 側で不正なら 400(コード=EDIT_LOCK_ID_INVALID)。無ければ「鍵なし」
+    // として通常どおり続ける(古い画面からの保存を弾かないため)。
+    // ⚠権限・入力の検査(owner:write・body形式・法人番号形式・apply組合せ・
+    // 住所郵便番号の対・field-level書込権限・所有者の実在)を**すべて通した後**、
+    // 国税庁への再lookup(下の lookupCorporateNumber)より**前**に置く: 権限や
+    // 入力が不正な呼び出し元には常にそちらの結果(403/404/422など)を優先させ、
+    // 不正な鍵ヘッダのためだけに上流へ問い合わせないようにする。
+    const lockIdHeader = readLockId(request);
 
     // ---- サーバ側で再 lookup（クライアント送信値を信用しない） ----
     let fresh;

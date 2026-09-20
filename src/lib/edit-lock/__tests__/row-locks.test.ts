@@ -30,7 +30,11 @@ function sqlOf(call: unknown[]): string {
 const OWNER_FOR_UPDATE_INLINE_SQL =
   /FROM\s+"?owners"?\s+WHERE\s+"?id"?\s*=\s*(?:\$\{[^}]+\}\s*::\s*uuid|CAST\(\s*\$\{[^}]+\}\s*AS\s*uuid\s*\))\s*FOR\s+UPDATE/i;
 
-/** `dir` 配下の `.ts` ファイルを再帰的に列挙する(`excludeDirs` は対象外)。 */
+/**
+ * `dir` 配下の `.ts`/`.tsx` ファイルを再帰的に列挙する(`excludeDirs` は対象外)。
+ * ⚠review S3: `.tsx` も対象にする。route だけでなくコンポーネント側に
+ * 生の SQL 呼び出しが生えても(サーバコンポーネント等)、この走査から隠れない。
+ */
 function listSourceFiles(dir: string, excludeDirs: readonly string[]): string[] {
   const entries = readdirSync(dir, { withFileTypes: true });
   const files: string[] = [];
@@ -39,7 +43,7 @@ function listSourceFiles(dir: string, excludeDirs: readonly string[]): string[] 
     if (entry.isDirectory()) {
       if (excludeDirs.includes(entry.name)) continue;
       files.push(...listSourceFiles(full, excludeDirs));
-    } else if (entry.isFile() && entry.name.endsWith(".ts")) {
+    } else if (entry.isFile() && (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx"))) {
       files.push(full);
     }
   }

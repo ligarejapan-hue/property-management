@@ -857,11 +857,14 @@ describe("POST /api/owners/[id]/corporate-apply — 編集中の鍵(Task 6)", ()
     expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
   });
 
-  // ⚠review R2: 鍵ヘッダの形式チェックは「権限判定の後・auditApplied 設定の後」に
+  // ⚠review R2/S1: 鍵ヘッダの形式チェックは「権限・入力の検査をすべて通した後」に
   //   置かなければならない(コントローラ決定)。位置を間違えると2つの副作用が
   //   起きる: ①権限の無い呼び出し元が 403 の代わりに 400 を受け取ってしまう
   //   (自分のリクエストの形について何かを教えてしまう)②監査の detail.applied が
-  //   実際に送った内容ではなく all-false の既定値になる。どちらも次の2本で固定する。
+  //   実際に送った内容ではなく all-false の既定値になる。粗い権限(owner:write)
+  //   だけでなく、field-level 権限(owner_name 等)より後にも置く必要がある
+  //   (S1: owner:write はあるが特定フィールドの書込権限が無い呼び出し元も、
+  //   同じく 403 を先に受け取るべき)。3本で固定する。
   it("owner:write が無ければ、鍵ヘッダが不正でも 403(権限判定が先。400にしない)", async () => {
     vi.mocked(getUserPermissions).mockResolvedValueOnce([
       { resource: "owner", action: "read", granted: true },
@@ -886,8 +889,40 @@ describe("POST /api/owners/[id]/corporate-apply — 編集中の鍵(Task 6)", ()
     expect(call.detail.result).toBe("forbidden");
   });
 
-  it("権限があっても鍵ヘッダが不正なら 400。監査の detail.applied は実際に送った内容のまま(all-falseの既定値にしない)", async () => {
-    const sentApply = { name: true, address: true, zip: true, corporateNumber: true };
+  it("owner:write はあるが field-level 書込権限(owner_corporate_number)が無ければ、鍵ヘッダが不正でも 403(field-level 判定が先。400にしない)", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "owner", action: "read", granted: true },
+      { resource: "owner", action: "write", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      // owner_corporate_number 権限なし(既定の payload() は apply.corporateNumber=true)
+    ]);
+    const req = new Request(
+      `http://localhost/api/owners/${OWNER_ID}/corporate-apply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Edit-Lock": "not-a-uuid" },
+        body: JSON.stringify(payload()),
+      },
+    ) as unknown as import("next/server").NextRequest;
+    const res = await POST(req, makeParams());
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("FORBIDDEN");
+    expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
+    const call = vi.mocked(writeAuditLog).mock.calls.at(-1)?.[0] as {
+      detail: Record<string, unknown>;
+    };
+    expect(call.detail.result).toBe("forbidden");
+  });
+
+  it("権限があっても鍵ヘッダが不正なら 400。監査の detail.applied は実際に送った内容のまま(既定値のハードコードでは通らない組み合わせにする)", async () => {
+    // ⚠review S2: payload() の既定 apply({name:true,address:true,zip:true,
+    // corporateNumber:true})と同じ値を送ると、実装が body を読まずその既定値を
+    // ハードコードしていても偶然一致して緑になる。既定と2箇所以上違う値を送り、
+    // 「送った値がそのまま監査に残る」ことを検査する。
+    const sentApply = { name: false, address: true, zip: true, corporateNumber: false };
     const req = new Request(
       `http://localhost/api/owners/${OWNER_ID}/corporate-apply`,
       {
