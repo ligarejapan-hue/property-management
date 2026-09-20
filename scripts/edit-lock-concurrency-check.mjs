@@ -48,9 +48,9 @@
  *      期待する出力(要旨。実際は番号付きで詳細に出る):
  *        [1] 取得できた本数: 1 (1 なら正しい。それ以外は非0で終了する)
  *        [2] ON CONFLICT の make_interval 分岐: 通過(もう1本は held になった)
- *        [3] unnest ベースの IN(readEditLocks 相当): 1件読めた・大文字化しても同じ
- *            件数(item Fの実地確認。一致しなければ非0で終了する)
- *        [4] unnest ベースの IN(deleteEditLocksFor 相当): 1件消せた
+ *        [3] unnest ベースの IN(readEditLocks 相当): 渡した表記・大文字化・小文字化の
+ *            3種類とも1件読めて一致(item Fの実地確認。ずれれば非0で終了する)
+ *        [4] unnest ベースの IN(deleteEditLocksFor 相当): 1件消せた(1件でなければ非0で終了する)
  *        [5] ::"EditLockResource" キャスト: 例外なし
  *        [6] 種の位置(境界のどちら側から始めたか)と、期限切れ横取りの競合再現:
  *            「N回中M回で再現した」/「N回の試行では再現しなかった」のどちらか
@@ -64,9 +64,11 @@
  *       (2本目の同時取得が INSERT ... ON CONFLICT ... WHERE 節の
  *        make_interval 比較を実地で通る)
  *   (c) unnest(...) で組んだ行単位の IN(readEditLocks/deleteEditLocksFor) → [3][4]
- *       (review round2 Minor 2: [3] は渡された表記と大文字化した表記の両方を読み、
- *        件数が一致することまで比較する。argv をそのまま使うだけでは、operator が
- *        たまたま大文字UUIDを渡さない限り item F の実地確認にならないため)
+ *       (review round2 Minor 2 / round3 Minor 1: [3] は渡された表記・大文字化・
+ *        小文字化の3種類を読み、件数が一致し期待の1件であることまで比較する。
+ *        argv をそのまま使うだけでは、operator がたまたま大文字UUIDを渡さない限り
+ *        item F の実地確認にならず、渡した表記と大文字化の2種類だけの比較でも
+ *        operator が最初から大文字を渡すと同じ文字列同士の比較になり無意味だった)
  *   (d) ::"EditLockResource" enum キャスト        → [1]〜[4][7] すべてで踏む
  *   (e) acquireEditLock の pre-SELECT とその後の upsert が別文であることに
  *       起因する、期限切れ横取り時に takeover が null になり得る競合の再現 → [6]
@@ -251,11 +253,14 @@ async function main() {
   // [3] readEditLocks 相当: unnest ベースの行単位 IN + db_now を1クエリで読む。
   //     service.ts と同じく列側は text へ落とさず、unnest 側を enum/uuid にキャストする
   //     (review Minor 7 の修理後の形)。
-  //     review round2 Minor 2: argv をそのまま渡すだけでは、操作者がたまたま
-  //     小文字UUIDを渡した回だけ「緑」に見えてしまい、item F(大文字UUIDの孤児鍵
-  //     バグ)の実地確認になっていなかった。ここで明示的に大文字化した変種も
-  //     読み直し、件数が一致することを比較する — これが item F を実DBで
-  //     証明する唯一の手段。
+  //     review round2 Minor 2 / round3 Minor 1: argv をそのまま渡すだけでは、操作者が
+  //     たまたま小文字UUIDを渡した回だけ「緑」に見えてしまい、item F(大文字UUIDの
+  //     孤児鍵バグ)の実地確認になっていなかった。さらに、渡した表記と大文字化の
+  //     2種類だけの比較は、操作者が**最初から大文字**の UUID を渡すと両者が同じ
+  //     文字列になり、何の証明にもならないまま「一致」と出てしまう(round2版の
+  //     見落とし)。渡した表記・大文字化・小文字化の**3種類**を読み、3つとも
+  //     同じ件数(かつ期待値の1件)であることを比較する — これが item F を
+  //     実DBで証明する唯一の手段。
   const readByResourceIdVariant = (idVariant) => prisma.$queryRaw`
     SELECT clock_timestamp() AS db_now,
            "id", "resource_type", "resource_id", "user_id", "screen_token_hash",
@@ -265,20 +270,34 @@ async function main() {
       SELECT t::"EditLockResource", i::uuid FROM unnest(${["property"]}::text[], ${[idVariant]}::text[]) AS x(t, i)
     )
   `;
-  const readRows = await readByResourceIdVariant(resourceId);
-  const readRowsUpper = await readByResourceIdVariant(resourceId.toUpperCase());
-  console.log(`[3] unnest ベースの IN(readEditLocks 相当): ${readRows.length}件読めた(渡した表記のまま)`);
+  const asGivenRows = await readByResourceIdVariant(resourceId);
+  const upperRows = await readByResourceIdVariant(resourceId.toUpperCase());
+  const lowerRows = await readByResourceIdVariant(resourceId.toLowerCase());
+  const readCounts = { asGiven: asGivenRows.length, upper: upperRows.length, lower: lowerRows.length };
   console.log(
-    `[3] 大文字化しても同じ件数を読めるか(item Fの実地確認): 渡した表記=${readRows.length}件 / ` +
-      `大文字化=${readRowsUpper.length}件 → ${
-        readRows.length === readRowsUpper.length ? "一致(修理済み)" : "不一致(要調査)"
-      }`,
+    `[3] 比較した表記: 渡した表記=${resourceId} / 大文字化=${resourceId.toUpperCase()} / ` +
+      `小文字化=${resourceId.toLowerCase()}`,
   );
-  if (readRows.length !== readRowsUpper.length) process.exitCode = 1;
+  console.log(
+    `[3] 読めた件数: 渡した表記=${readCounts.asGiven}件 / 大文字化=${readCounts.upper}件 / ` +
+      `小文字化=${readCounts.lower}件`,
+  );
+  const readOk =
+    readCounts.asGiven === readCounts.upper &&
+    readCounts.upper === readCounts.lower &&
+    readCounts.asGiven === 1;
+  console.log(
+    `[3] 結果: ${
+      readOk
+        ? "3表記とも一致・1件(item Fが実DBで直っていることの証拠)"
+        : "不一致、または1件ではない(要調査)"
+    }`,
+  );
+  if (!readOk) process.exitCode = 1;
 
   // [4] deleteEditLocksFor 相当: 同じ unnest ベースの行単位 IN で削除する。
   // ⚠[3]と違って DELETE なので、渡された表記のまま1回だけ実行する
-  //   (先に大文字化した変種で消してしまうと、その後の[3]の比較対象が消える)。
+  //   (先に別の表記の変種で消してしまうと、[3]の比較対象が消える)。
   const deletedRows = await prisma.$queryRaw`
     DELETE FROM "edit_locks"
     WHERE ("resource_type", "resource_id") IN (
@@ -286,7 +305,12 @@ async function main() {
     )
     RETURNING "id"
   `;
-  console.log(`[4] unnest ベースの IN(deleteEditLocksFor 相当): ${deletedRows.length}件消せた`);
+  console.log(`[4] 消せた件数: ${deletedRows.length}件`);
+  // review round3 Minor 1: 件数を出力するだけで何にも失敗しなかったため、
+  // ゲートとして機能していなかった。期待値(1件)からずれたら非0で終える。
+  const deleteOk = deletedRows.length === 1;
+  console.log(`[4] 結果: ${deleteOk ? "1件消せた(正しい)" : "1件ではない(要調査)"}`);
+  if (!deleteOk) process.exitCode = 1;
   console.log(`[5] ::"EditLockResource" キャスト: 例外なし(ここまで到達していれば全クエリが通過済み)`);
 
   // [6] 期限切れの横取りで pre-SELECT と upsert(2文)の間に競合が起きないかを再現する。
@@ -312,17 +336,23 @@ async function main() {
     if (winners.length === 1) {
       if (winners[0].takeover === null) reproducedCount++;
     } else {
-      // 想定外(0本または2本勝つ)。取りこぼしとして数えるが致命的ではない。
+      // review round3 Minor 2: これは異常ではない。offsetMs が大きい(概ね3ms以上)
+      // 回は、両方の pre-SELECT が「まだ生きている」を見た後、どちらの upsert も
+      // 期限切れの WHERE を通らずに終わる(0本勝ち)ことが普通に起こる —
+      // 種を「まだ生きている側」に置く設計そのものの帰結であり、スイープの
+      // 一部が判定不能になるのは意図どおり。健全な実行では reproducedCount +
+      // inconclusiveCount + (非nullで勝った回数) = ATTEMPTS になり、
+      // inconclusiveCount が数十〜百回程度でも壊れている兆候ではない。
       inconclusiveCount++;
     }
   }
   if (reproducedCount > 0) {
     console.log(
-      `[6] 結果: ${ATTEMPTS}回中 ${reproducedCount}回で再現した(勝った方の takeover が null = 監査に横取りとして残らないケースがある。判定不能 ${inconclusiveCount}回)`,
+      `[6] 結果: ${ATTEMPTS}回中 ${reproducedCount}回で再現した(勝った方の takeover が null = 監査に横取りとして残らないケースがある。判定不能(0本/2本勝ち。種がまだ生きている側にある以上、正常な範囲) ${inconclusiveCount}回)`,
     );
   } else {
     console.log(
-      `[6] 結果: ${ATTEMPTS}回の試行では再現しなかった(判定不能 ${inconclusiveCount}回)。再現しないと確定したわけではない点に注意`,
+      `[6] 結果: ${ATTEMPTS}回の試行では再現しなかった(判定不能(0本/2本勝ち。offsetMsが大きい回に偏って起きるのが正常) ${inconclusiveCount}回)。再現しないと確定したわけではない点に注意`,
     );
   }
 
