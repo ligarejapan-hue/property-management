@@ -838,7 +838,7 @@ describe("POST /api/owners/[id]/corporate-apply — 編集中の鍵(Task 6)", ()
     );
   });
 
-  it("X-Edit-Lock が uuid でなければ 400 を返し、鍵の確認自体が走らない", async () => {
+  it("X-Edit-Lock が uuid でなければ 400 を返し、鍵の確認自体・国税庁への問い合わせも走らない", async () => {
     const req = new Request(
       `http://localhost/api/owners/${OWNER_ID}/corporate-apply`,
       {
@@ -851,6 +851,58 @@ describe("POST /api/owners/[id]/corporate-apply — 編集中の鍵(Task 6)", ()
     expect(res.status).toBe(400);
     expect(vi.mocked(assertNotEditLockedByOther)).not.toHaveBeenCalled();
     expect(pm.owner.updateMany).not.toHaveBeenCalled();
+    // ⚠review R1: 鍵ヘッダの形式チェックは国税庁への再lookupより前に置いた
+    // (Minor 6)。これを検査していないと、チェックを再lookupの後ろへ戻す退行が
+    // 緑のまま通ってしまう。
+    expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
+  });
+
+  // ⚠review R2: 鍵ヘッダの形式チェックは「権限判定の後・auditApplied 設定の後」に
+  //   置かなければならない(コントローラ決定)。位置を間違えると2つの副作用が
+  //   起きる: ①権限の無い呼び出し元が 403 の代わりに 400 を受け取ってしまう
+  //   (自分のリクエストの形について何かを教えてしまう)②監査の detail.applied が
+  //   実際に送った内容ではなく all-false の既定値になる。どちらも次の2本で固定する。
+  it("owner:write が無ければ、鍵ヘッダが不正でも 403(権限判定が先。400にしない)", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "owner", action: "read", granted: true },
+      // owner:write なし
+    ]);
+    const req = new Request(
+      `http://localhost/api/owners/${OWNER_ID}/corporate-apply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Edit-Lock": "not-a-uuid" },
+        body: JSON.stringify(payload()),
+      },
+    ) as unknown as import("next/server").NextRequest;
+    const res = await POST(req, makeParams());
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("FORBIDDEN");
+    expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
+    const call = vi.mocked(writeAuditLog).mock.calls.at(-1)?.[0] as {
+      detail: Record<string, unknown>;
+    };
+    expect(call.detail.result).toBe("forbidden");
+  });
+
+  it("権限があっても鍵ヘッダが不正なら 400。監査の detail.applied は実際に送った内容のまま(all-falseの既定値にしない)", async () => {
+    const sentApply = { name: true, address: true, zip: true, corporateNumber: true };
+    const req = new Request(
+      `http://localhost/api/owners/${OWNER_ID}/corporate-apply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Edit-Lock": "not-a-uuid" },
+        body: JSON.stringify(payload({ apply: sentApply })),
+      },
+    ) as unknown as import("next/server").NextRequest;
+    const res = await POST(req, makeParams());
+    expect(res.status).toBe(400);
+    expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
+    const call = vi.mocked(writeAuditLog).mock.calls.at(-1)?.[0] as {
+      detail: Record<string, unknown>;
+    };
+    expect(call.detail.applied).toEqual(sentApply);
   });
 
   it("X-Edit-Lock が uuid なら世代として渡す", async () => {

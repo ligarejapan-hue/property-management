@@ -141,17 +141,12 @@ export async function POST(
     auditOwnerId = id;
     const session = await getApiSession();
     auditUserId = session.id;
-
-    // ---- 編集の鍵(X-Edit-Lock)の形式チェック ----
-    // readLockId 側で不正なら 400(コード=EDIT_LOCK_ID_INVALID)。無ければ「鍵なし」
-    // として通常どおり続ける(古い画面からの保存を弾かないため)。
-    // ⚠国税庁への再lookup(下の lookupCorporateNumber)より前に置く: 不正な値
-    // のためだけに上流へ問い合わせない。
-    const lockIdHeader = readLockId(request);
-
     const perms = await getUserPermissions(session.id);
 
     // ---- session/perm scope ----
+    // ⚠権限判定は常に先に決める(@codex方針): 権限の無い呼び出し元に、
+    //   自分の送ったリクエストの形について何も教えない。鍵ヘッダの形式チェックは
+    //   この後(権限が通ってから)に置く。
     if (!hasPermission(perms, "owner", "write")) {
       auditResult = "forbidden";
       throw new ApiError(403, "所有者を更新する権限がありません", "FORBIDDEN");
@@ -165,6 +160,15 @@ export async function POST(
     }
     const body = parsed.data;
     auditApplied = body.apply;
+
+    // ---- 編集の鍵(X-Edit-Lock)の形式チェック ----
+    // readLockId 側で不正なら 400(コード=EDIT_LOCK_ID_INVALID)。無ければ「鍵なし」
+    // として通常どおり続ける(古い画面からの保存を弾かないため)。
+    // ⚠権限判定(上)と auditApplied の設定(直前)より後、国税庁への再lookup(下の
+    // lookupCorporateNumber)より前に置く: 権限の無い呼び出し元には403を優先させ、
+    // 監査の detail.applied には実際に送られた内容を残しつつ、不正な値のためだけに
+    // 上流へ問い合わせないようにする。
+    const lockIdHeader = readLockId(request);
 
     // ---- normalize corporateNumber ----
     const normalized = normalizeCorporateNumber(body.corporateNumber);
