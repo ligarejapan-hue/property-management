@@ -113,7 +113,138 @@ describe("buildWriteback — 戸建", () => {
   });
 });
 
+describe("buildWriteback — 数値の範囲/整数制約(I-1)", () => {
+  // 仕様書 §6.1: 読み取れない値はその欄だけ保存しない。列の制約(validators.tsの
+  // updatePropertySchemaと同じ値)を満たさない値も同じ扱いにする(範囲外の値でPrisma/
+  // Postgresへ書き込んで例外→トランザクション巻き戻り→図面ごと作成失敗、を防ぐ)。
+  it("土地面積が範囲外(DECIMAL(10,2)の桁を超える)なら保存せずラベルを返す", () => {
+    const r = buildWriteback({
+      kind: "land",
+      values: { landArea: "1000000000" },
+      current: emptyCurrent,
+    });
+    expect(r.property).toEqual({});
+    expect(r.unreadable).toEqual(["土地面積"]);
+  });
+
+  it("地上階が非整数(3.5)なら保存せずラベルを返す(戸建)", () => {
+    const r = buildWriteback({
+      kind: "house",
+      values: { aboveFloors: "3.5" },
+      current: emptyCurrent,
+    });
+    expect(r.property).toEqual({});
+    expect(r.unreadable).toEqual(["地上階"]);
+  });
+
+  it("地上階が範囲外(201)なら保存せずラベルを返す(一棟)", () => {
+    const r = buildWriteback({
+      kind: "building",
+      values: { aboveFloors: "201" },
+      current: emptyCurrent,
+    });
+    expect(r.property).toEqual({});
+    expect(r.unreadable).toEqual(["地上階"]);
+  });
+
+  it("地下階が範囲外(21)なら保存せずラベルを返す(戸建)", () => {
+    const r = buildWriteback({
+      kind: "house",
+      values: { basementFloors: "21" },
+      current: emptyCurrent,
+    });
+    expect(r.property).toEqual({});
+    expect(r.unreadable).toEqual(["地下階"]);
+  });
+
+  it("管理費が範囲外(10000001)なら保存せずラベルを返す(区分)", () => {
+    const r = buildWriteback({
+      kind: "mansion",
+      values: { managementFee: "10000001" },
+      current: { property: {}, building: {} },
+    });
+    expect(r.property).toEqual({});
+    expect(r.unreadable).toEqual(["管理費"]);
+  });
+
+  it("所在階が範囲外(-11)なら保存せずラベルを返す(区分)", () => {
+    const r = buildWriteback({
+      kind: "mansion",
+      values: { floorNo: "-11" },
+      current: { property: {}, building: {} },
+    });
+    expect(r.property).toEqual({});
+    expect(r.unreadable).toEqual(["所在階"]);
+  });
+
+  it("総戸数が範囲外(10000)なら保存せずラベルを返す(一棟)", () => {
+    const r = buildWriteback({
+      kind: "building",
+      values: { totalUnits: "10000" },
+      current: { property: {}, building: {} },
+    });
+    expect(r.property).toEqual({});
+    expect(r.unreadable).toEqual(["総戸数"]);
+  });
+
+  it("想定利回りが範囲外(1000)なら保存せずラベルを返す(一棟)", () => {
+    const r = buildWriteback({
+      kind: "building",
+      values: { grossYield: "1000" },
+      current: { property: {}, building: {} },
+    });
+    expect(r.property).toEqual({});
+    expect(r.unreadable).toEqual(["想定利回り"]);
+  });
+
+  it("満室想定収入が範囲外(100000000000)なら保存せずラベルを返す(一棟)", () => {
+    const r = buildWriteback({
+      kind: "building",
+      values: { expectedIncome: "100000000000" },
+      current: { property: {}, building: {} },
+    });
+    expect(r.property).toEqual({});
+    expect(r.unreadable).toEqual(["満室想定収入"]);
+  });
+
+  it("専有面積・バルコニー面積が範囲外(1000000)なら保存せずラベルを返す(区分)", () => {
+    const r = buildWriteback({
+      kind: "mansion",
+      values: { exclusiveArea: "1000000", balconyArea: "1000000" },
+      current: { property: {}, building: {} },
+    });
+    expect(r.property).toEqual({});
+    expect(r.unreadable).toEqual(["専有面積", "バルコニー面積"]);
+  });
+
+  it("築年(1799年)は範囲外(1800〜2200)のため保存せずラベルを返す", () => {
+    const r = buildWriteback({
+      kind: "house",
+      values: { builtYearMonth: "1799年5月" },
+      current: emptyCurrent,
+    });
+    expect(r.property).toEqual({});
+    expect(r.unreadable).toEqual(["築年月"]);
+  });
+
+  it("範囲内の値は従来どおり保存される(回帰防止)", () => {
+    const r = buildWriteback({
+      kind: "house",
+      values: { aboveFloors: "2", basementFloors: "1", builtYearMonth: "2010年5月" },
+      current: emptyCurrent,
+    });
+    expect(r.property).toEqual({ aboveFloors: 2, basementFloors: 1, builtYear: 2010, builtMonth: 5 });
+    expect(r.unreadable).toEqual([]);
+  });
+});
+
 describe("buildWriteback — 区分マンション", () => {
+  // ⚠structure/totalFloors/totalUnits(to: building)は mansionOverridesSchema
+  // (src/app/api/properties/[id]/sales-sheets/new/route.ts)に対応するキーが無いため、
+  // 本番の入力経路(作成ダイアログ→route.ts)からはこの3キーは到達しない(building.
+  // structureType/totalFloors/totalUnits は棟の値が正で図面からは変更できない・
+  // 意図的な設計)。このテストは buildWriteback 自体の仕分けロジックを直接固定する
+  // 目的で残す(到達不能であることは route レベルのテスト参照)。
   it("部屋の欄は物件・棟の欄は棟へ", () => {
     const r = buildWriteback({
       kind: "mansion",

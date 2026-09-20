@@ -311,6 +311,35 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     expect(updateManyMock).not.toHaveBeenCalled();
   });
 
+  // [Task10 I-1] 範囲外/非整数の値(DECIMAL/INT列の桁・範囲を超える)を Prisma へそのまま
+  // 渡すと Postgres が例外を投げ、トランザクションが巻き戻って図面ごと作成が500で失敗する
+  // 不具合の修正確認。「その欄だけ保存しない」に倒し、図面の作成自体は成功させる。
+  it("範囲外・非整数の値はその欄だけ保存せず、図面の作成自体は成功する(500にならない)", async () => {
+    const res = await POST(
+      req({ landArea: "1000000000", access: "○○線 徒歩8分", propertyVersion: 1 }),
+      ctx,
+    );
+    expect(res.status).toBe(201); // 500にならない
+    const json = await res.json();
+    expect(json.propertyWriteback.unreadable).toEqual(["土地面積"]);
+    expect(json.propertyWriteback.saved).toEqual(["交通"]);
+    expect(updateManyMock).toHaveBeenCalledTimes(1);
+    expect(updateManyMock.mock.calls[0][0].data).not.toHaveProperty("landArea");
+    expect(updateManyMock.mock.calls[0][0].data).toMatchObject({ access: "○○線 徒歩8分" });
+    expect(designCreateMock).toHaveBeenCalledTimes(1); // 図面自体は作られる
+  });
+
+  it("階数が非整数(3.5)ならその欄だけ保存せず、図面の作成自体は成功する(500にならない)(戸建)", async () => {
+    propertyFindMock.mockResolvedValue({ ...baseProperty, propertyType: "house" });
+    const res = await POST(req({ aboveFloors: "3.5", propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    const json = await res.json();
+    expect(json.propertyWriteback.unreadable).toEqual(["地上階"]);
+    expect(json.propertyWriteback.saved).toEqual([]);
+    expect(updateManyMock).not.toHaveBeenCalled();
+    expect(designCreateMock).toHaveBeenCalledTimes(1);
+  });
+
   // C2/I6: 現行クライアントは version を送らない(Task 5 で送るようになる)。無条件で
   // 上書きせず、conflict 扱いにして物件へは書かない(図面自体は作る)。
   it("propertyVersion を送らないと conflict 扱いで書き込まない(C2)", async () => {
