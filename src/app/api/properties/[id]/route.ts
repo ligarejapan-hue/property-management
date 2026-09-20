@@ -11,7 +11,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { lockPropertyRow } from "@/lib/property-record-guard";
-import { assertNotEditLockedByOther } from "@/lib/edit-lock/service";
+import { assertNotEditLockedByOther, deleteEditLocksFor } from "@/lib/edit-lock/service";
 import { readScreenTokenHash, readLockId } from "@/lib/edit-lock/screen-token";
 import { updatePropertySchema } from "@/lib/validators";
 import {
@@ -544,6 +544,9 @@ export async function DELETE(
       await tx.propertyDmLog.deleteMany({
         where: { propertyId: id, ownerId: null, logOwners: { none: {} } },
       });
+      // 消える物件に鍵が残ると誰も外せなくなるため、削除の直前(行ロックの後・
+      // 削除の前)に鍵の後始末をする(Task 8)。
+      await deleteEditLocksFor(tx, [{ resourceType: "property", resourceId: id }]);
       await tx.property.delete({ where: { id } });
     });
 

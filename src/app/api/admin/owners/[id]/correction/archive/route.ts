@@ -14,6 +14,8 @@ import {
   isOwnerAddressEffectivelyEmpty,
   type OwnerArchiveBlockReason,
 } from "@/lib/owner-correction";
+import { lockOwnerRow } from "@/lib/edit-lock/row-locks";
+import { deleteEditLocksFor } from "@/lib/edit-lock/service";
 
 // ---------------------------------------------------------------------------
 // POST /api/admin/owners/:ownerId/correction/archive
@@ -181,6 +183,10 @@ export async function POST(
     let txNotFound = false;
     try {
       await prisma.$transaction(async (tx) => {
+        // ⚠アーカイブされる所有者に鍵が残ると誰も外せなくなる(Task 8)。行ロックを
+        //   最初に取ってから鍵を消す(acquire 側の lockOwnerRow と同じ行を取り合うことで、
+        //   ロック取得中の acquire が commit した鍵を後始末が必ず拾える)。
+        await lockOwnerRow(tx, ownerId);
         const recheck = await tx.owner.findUnique({
           where: { id: ownerId },
           select: {
@@ -229,6 +235,10 @@ export async function POST(
           txBlockedReasons = recheckSafety.reasons;
           throw new Error(TX_BLOCKED_SENTINEL);
         }
+
+        // 消える(アーカイブされる)所有者の鍵を、行ロックの後・実際のアーカイブの前に
+        // 後始末する(Task 8)。
+        await deleteEditLocksFor(tx, [{ resourceType: "owner", resourceId: ownerId }]);
 
         // 最終 updateMany の where に propertyOwners none を含める。
         // safety check 後〜updateMany 前に PropertyOwner が作成された場合でも、

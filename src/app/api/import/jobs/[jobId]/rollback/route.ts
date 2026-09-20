@@ -20,6 +20,7 @@ import {
   type JobWindow,
 } from "@/lib/import-rollback";
 import { extractUpdatedFields } from "@/lib/import-row-display";
+import { deleteEditLocksFor } from "@/lib/edit-lock/service";
 
 interface BlockedDetail {
   rowNumber: number;
@@ -391,6 +392,27 @@ export async function POST(
           409,
           "ジョブの状態が変わったためロールバックを中断しました",
           "CONFLICT",
+        );
+      }
+      // ⚠削除する物件の行をロックしてから鍵を後始末する(Task 8)。取り消しは
+      //   これまで物件行をロックせずに削除していたため、後始末だけを tx に足しても
+      //   「まだ commit されていない acquireEditLock」を取りこぼす窓が残る:
+      //     取り消しtx: 後始末 → 削除
+      //     並行acquire: (窓)lockPropertyRow → 鍵をINSERT → commit
+      //   の順で並ぶと、鍵が commit された時点で既に後始末は終わっており、直後に
+      //   物件だけ消えて鍵が孤児になる。acquire 側は必ずこの物件行を
+      //   lockPropertyRow(= SELECT ... FOR UPDATE)してから鍵を書くため、ここでも
+      //   同じ行を FOR UPDATE で押さえてから後始末すれば、どちらが先に並んでも
+      //   後始末は commit 済みの鍵を必ず拾える。
+      const deletablePropertyIds = deletable.map((row) => row.createdId!);
+      if (deletablePropertyIds.length > 0) {
+        await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${deletablePropertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
+        await deleteEditLocksFor(
+          tx,
+          deletablePropertyIds.map((id) => ({
+            resourceType: "property" as const,
+            resourceId: id,
+          })),
         );
       }
       for (const row of deletable) {

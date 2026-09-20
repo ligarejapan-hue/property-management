@@ -77,6 +77,9 @@ vi.mock("@/lib/prisma", () => {
     propertyDmLogOwner: { updateMany: vi.fn(async () => ({ count: 0 })) },
     dmRecipientDraftOwner: { updateMany: vi.fn(async () => ({ count: 0 })) },
     $executeRaw: vi.fn(async () => 0),
+    // Task 8: deleteEditLocksFor(統合で消える source の鍵の後始末)が
+    // tx.$queryRaw を使う。既存のテストが壊れないよう空配列を返す無害な既定にする。
+    $queryRaw: vi.fn(async () => []),
   };
   return {
     default: {

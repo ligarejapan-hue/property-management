@@ -63,6 +63,9 @@ vi.mock("@/lib/prisma", () => {
     changeLog: { count: vi.fn(), createMany: vi.fn() },
     importJobRow: { findMany: vi.fn() },
     ownerMemo: { count: vi.fn() },
+    // Task 8: lockOwnerRow(行ロック) と deleteEditLocksFor(鍵の後始末) が
+    // tx.$queryRaw を使う。既存のテストが壊れないよう空配列を返す無害な既定にする。
+    $queryRaw: vi.fn(async () => []),
   };
   return {
     default: {
