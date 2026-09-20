@@ -373,4 +373,76 @@ describe("buildSaleHouseDocument（自社マイソク様式・[F2-B Task2]）", 
     expect(doc.page.orientation).toBe("landscape");
     expect(salesSheetDocumentSchema.safeParse(doc).success).toBe(true);
   });
+
+  // [Task10 C-1] 1枚目の図面作成で物件へ保存した価格・築年月・構造等が、2枚目の図面の
+  // 作成時にダイアログ/図面のどちらにも出てこなかった不具合の修正確認。house は
+  // building relation を配線しないため、これらは全て property のスカラ列から読む。
+  describe("物件(property)の値を既定値として使う([Task10 C-1])", () => {
+    const propertyWithSaleFields = {
+      ...base.property,
+      salePrice: "5280",
+      saleTaxType: "課税",
+      saleTaxAmount: "480",
+      access: "東急東横線 日吉駅 徒歩10分",
+      landArea: "120.5",
+      landAreaMethod: "実測",
+      structureType: "木造",
+      aboveFloors: 2,
+      basementFloors: 1,
+      totalFloorArea: "95.60",
+      parking: "有",
+      builtYear: 2010,
+      builtMonth: 5,
+    };
+
+    it("override が無ければ property の値を既定値として使う", () => {
+      const doc = buildSaleHouseDocument({ ...base, property: propertyWithSaleFields, overrides: {} });
+      expect(findEl(doc, "price")).toMatchObject({ content: "5,280万円" });
+      expect(tableRow(doc, "うち消費税")).toBe("480万円"); // tax:"課税" の既定値が showWhen を通す
+      expect(tableRow(doc, "交通")).toBe("東急東横線 日吉駅 徒歩10分");
+      expect(tableRow(doc, "土地面積")).toBe("120.5㎡（実測）");
+      expect(tableRow(doc, "建物面積")).toBe("95.60㎡");
+      expect(tableRow(doc, "構造・階数")).toBe("木造 / 地上2階");
+      expect(tableRow(doc, "地下階")).toBe("1階");
+      expect(tableRow(doc, "駐車場")).toBe("有");
+      expect(tableRow(doc, "築年月")).toBe("2010年5月");
+    });
+
+    it("手入力(override)があればoverrideが優先される(手入力 > 物件の値 > 空)", () => {
+      const doc = buildSaleHouseDocument({
+        ...base,
+        property: propertyWithSaleFields,
+        overrides: {
+          price: "5980",
+          tax: "不課税",
+          access: "△△線 徒歩3分",
+          landArea: "150",
+          areaMethod: "公簿",
+          structure: "RC",
+          aboveFloors: "3",
+          basementFloors: "0",
+          buildingArea: "110.00",
+          parking: "無",
+          builtYearMonth: "2015年8月",
+        },
+      });
+      expect(findEl(doc, "price")).toMatchObject({ content: "5,980万円" });
+      expect(tableLabels(doc)).not.toContain("うち消費税"); // 不課税(override)
+      expect(tableRow(doc, "交通")).toBe("△△線 徒歩3分");
+      expect(tableRow(doc, "土地面積")).toBe("150㎡（公簿）");
+      expect(tableRow(doc, "建物面積")).toBe("110.00㎡");
+      expect(tableRow(doc, "構造・階数")).toBe("RC / 地上3階");
+      expect(tableRow(doc, "地下階")).toBe("0階");
+      expect(tableRow(doc, "駐車場")).toBe("無");
+      expect(tableRow(doc, "築年月")).toBe("2015年8月");
+    });
+
+    it("property に値が無く override も無ければ従来どおり空文字/行なし", () => {
+      const doc = buildSaleHouseDocument({ ...base, overrides: {} });
+      expect(findEl(doc, "price")).toMatchObject({ content: "" });
+      expect(tableRow(doc, "交通")).toBe("");
+      expect(tableRow(doc, "土地面積")).toBe("");
+      expect(tableRow(doc, "築年月")).toBe("");
+    });
+  });
 });

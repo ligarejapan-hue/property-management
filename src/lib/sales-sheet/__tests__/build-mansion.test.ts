@@ -104,6 +104,42 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     expect(tableRow(overridden, "築年月")).toBe("1972年5月");
   });
 
+  // [Task10 C-1] 棟の builtMonth(1枚目の図面作成時に buildWriteback で保存した月)が
+  // fmtBuiltYear で読まれておらず、2枚目の図面に二度と出ない不具合の修正確認。
+  it("築年月: 棟にbuiltMonthがあれば「2008年3月」の形で自動反映する(override優先は維持)", () => {
+    const withMonth = buildSaleMansionDocument({
+      ...base,
+      building: { ...base.building, builtYear: 2008, builtMonth: 3 },
+      overrides: {},
+    });
+    expect(tableRow(withMonth, "築年月")).toBe("2008年3月");
+    // 手入力(override)が最優先(手入力 > 物件(棟)の値 > 空)。
+    const overriddenWithMonth = buildSaleMansionDocument({
+      ...base,
+      building: { ...base.building, builtYear: 2008, builtMonth: 3 },
+      overrides: { builtYearMonth: "令和2年1月" },
+    });
+    expect(tableRow(overriddenWithMonth, "築年月")).toBe("令和2年1月");
+  });
+
+  // [Task10 C-1] basementFloors(地下階)も builtYearMonth と同じ「override優先＋棟の値へ
+  // フォールバック」であるべき(1枚目の図面作成時に buildWriteback で棟へ保存した値が、
+  // 2枚目の図面には出ないままだった)。
+  it("地下階: override優先、無ければ棟のbasementFloorsから自動反映", () => {
+    const auto = buildSaleMansionDocument({
+      ...base,
+      building: { ...base.building, basementFloors: 1 },
+      overrides: {},
+    });
+    expect(tableRow(auto, "地下階")).toBe("1階");
+    const overridden = buildSaleMansionDocument({
+      ...base,
+      building: { ...base.building, basementFloors: 1 },
+      overrides: { basementFloors: "2" },
+    });
+    expect(tableRow(overridden, "地下階")).toBe("2階");
+  });
+
   it("管理費/修繕積立金/所在階/地上階/現況を自動反映して整形する", () => {
     const doc = buildSaleMansionDocument({
       property: {

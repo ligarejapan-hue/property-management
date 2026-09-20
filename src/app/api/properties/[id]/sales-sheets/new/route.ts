@@ -98,11 +98,12 @@ const landOverridesSchema = z.object({
 // `structure`（構造）は自動反映専用（building.structureType が正）で上書き機構を持たない
 // ため、旧スキーマにあった stale なキーとして削除。`deliveryTiming` は builder 側のキー名
 // `delivery` へ改称（field-model の "引渡時期" と一致させる）。
-// ⚠F3 Task4 レビュー(R14)で追加: exclusiveArea/balconyArea/balconyDir/layout/floorNo/
-// managementFee/repairFee は仕様書 §4.4 の区分の書き戻し対象だが、
-// buildMansionValues(build-document.ts) は常に物件の自動反映値(p.*)を使い、この
-// override は読まない(=このキーを追加しても図面の見た目は変わらない)。ここに追加した
-// 唯一の目的は「図面作成時に物件へ書き戻す」(buildWriteback)ための入力経路を用意すること。
+// F3 Task4 レビュー(R14)で追加: exclusiveArea/balconyArea/balconyDir/layout/floorNo/
+// managementFee/repairFee は仕様書 §4.4 の区分の書き戻し対象。R16(a6f003b9)以降、
+// buildMansionValues(build-document.ts) はこれらを「override優先・空なら物件の自動
+// 反映値」で解決し、document にも反映する(常に物件の値を使う旧挙動から変更済み)。
+// ここに追加した目的は2つ: (1) 図面の作成画面でこの値を手入力して上書きできるように
+// すること (2) 図面作成時に物件へ書き戻す(buildWriteback)ための入力経路を用意すること。
 const mansionOverridesSchema = z.object({
   // 価格・費用（DB enum と語彙が1:1対応しないため propertyType は常に手入力）
   propertyType: z.string().max(50).optional(),
@@ -110,7 +111,7 @@ const mansionOverridesSchema = z.object({
   unitPrice: z.string().max(200).optional(),
   tax: z.string().max(50).optional(),
   taxAmount: z.string().max(200).optional(),
-  // ⚠document には反映されない(上記コメント参照)。書き戻し専用。
+  // R16以降 document にも反映される(override優先・空なら物件の自動反映値。上記コメント参照)。
   managementFee: z.string().max(200).optional(),
   repairFee: z.string().max(200).optional(),
   // 所在・交通
@@ -122,8 +123,7 @@ const mansionOverridesSchema = z.object({
   useDistrict: z.array(z.string().max(100)).max(20).optional(),
   areaMethod: z.string().max(50).optional(),
   // 建物
-  // ⚠exclusiveArea/balconyArea/balconyDir/layout/floorNo も document には反映されない
-  // (上記コメント参照)。書き戻し専用。
+  // exclusiveArea/balconyArea/balconyDir/layout/floorNo も同様(上記コメント参照)。
   exclusiveArea: z.string().max(200).optional(),
   balconyArea: z.string().max(200).optional(),
   balconyDir: z.string().max(50).optional(),
@@ -320,19 +320,44 @@ export async function POST(
         // ⚠物件そのものに入れた物件名。建物マスタを作らずに登録した区分
         // マンションはこちらにしか名前が無い (@codex #354 P2)。
         buildingName: true,
+        // [Task10 C-1] F3で足した「販売」区分の16列。1枚目の図面作成時に buildWriteback で
+        // ここへ保存した値を、2枚目以降の図面作成時の既定値(手入力が無ければ使う値)として
+        // 読み戻す(build-document.ts の buildLandValues/buildHouseValues/buildBuildingValues
+        // に渡す・区分マンションの部屋7項目は buildMansionValues が既に読んでいる)。
+        salePrice: true,
+        saleTaxType: true,
+        saleTaxAmount: true,
+        access: true,
+        landArea: true,
+        landAreaMethod: true,
+        totalFloorArea: true,
+        builtYear: true,
+        builtMonth: true,
+        structureType: true,
+        aboveFloors: true,
+        basementFloors: true,
+        parking: true,
+        totalUnits: true,
+        grossYield: true,
+        expectedIncome: true,
         building: {
           select: {
             // ⚠id だけは「棟の行も FOR UPDATE でロックするか」の判定に使う
-            // (F3 writeback)。version・F3 の保存先列は**ここでは読まない**
+            // (F3 writeback)。version は**ここでは読まない**
             // (C1: ロック前の値を version 判定・差分計算に使わない。ロック後に
-            // tx 内で読み直した値を使う → 下の `fresh` 参照)。
+            // tx 内で読み直した値を使う → 下の `fresh` 参照)。builtMonth/
+            // basementFloors は[Task10 C-1] 図面への既定値の読み戻し用に読む
+            // (builtYear/structureType/totalFloors/totalUnits は元々 document
+            // 組み立てに使っていたためこれまでも選択済み)。
             id: true,
             name: true,
             totalFloors: true,
             builtYear: true,
+            builtMonth: true,
             structureType: true,
             managementCompany: true,
             totalUnits: true,
+            basementFloors: true,
           },
         },
       },
@@ -401,6 +426,11 @@ export async function POST(
           roadWidth: property.roadWidth?.toString() ?? null,
           // 現況の日本語化は各ビルダー内部で行う（全テンプレで統一）。
           occupancyStatus: property.occupancyStatus,
+          // [Task10 C-1] 物件に保存済みの販売条件を既定値として読み戻す。
+          salePrice: property.salePrice?.toString() ?? null,
+          access: property.access,
+          landArea: property.landArea?.toString() ?? null,
+          landAreaMethod: property.landAreaMethod,
         },
         photos,
         overrides: o,
@@ -433,10 +463,14 @@ export async function POST(
                 name: property.building?.name ?? property.buildingName,
                 totalFloors: property.building?.totalFloors ?? null,
                 builtYear: property.building?.builtYear ?? null,
+                // [Task10 C-1] builtYearMonth の月精度を読み戻すために追加。
+                builtMonth: property.building?.builtMonth ?? null,
                 structureType: property.building?.structureType ?? null,
                 managementCompany:
                   property.building?.managementCompany ?? null,
                 totalUnits: property.building?.totalUnits ?? null,
+                // [Task10 C-1] 地下階(basementFloors)の既定値として読み戻すために追加。
+                basementFloors: property.building?.basementFloors ?? null,
               }
             : null,
         photos,
@@ -457,6 +491,21 @@ export async function POST(
           roadType: property.roadType,
           roadWidth: property.roadWidth?.toString() ?? null,
           occupancyStatus: property.occupancyStatus,
+          // [Task10 C-1] 物件に保存済みの販売条件を既定値として読み戻す(house は
+          // building relation を配線しないため、全て property のスカラ列から)。
+          salePrice: property.salePrice?.toString() ?? null,
+          saleTaxType: property.saleTaxType,
+          saleTaxAmount: property.saleTaxAmount?.toString() ?? null,
+          access: property.access,
+          landArea: property.landArea?.toString() ?? null,
+          landAreaMethod: property.landAreaMethod,
+          totalFloorArea: property.totalFloorArea?.toString() ?? null,
+          structureType: property.structureType,
+          aboveFloors: property.aboveFloors,
+          basementFloors: property.basementFloors,
+          parking: property.parking,
+          builtYear: property.builtYear,
+          builtMonth: property.builtMonth,
         },
         photos,
         overrides: o,
@@ -475,6 +524,24 @@ export async function POST(
           roadType: property.roadType,
           roadWidth: property.roadWidth?.toString() ?? null,
           occupancyStatus: property.occupancyStatus,
+          // [Task10 C-1] 物件に保存済みの販売条件・収益系を既定値として読み戻す(一棟も
+          // house と同じく building relation を配線しないため、全て property のスカラ列から)。
+          salePrice: property.salePrice?.toString() ?? null,
+          saleTaxType: property.saleTaxType,
+          saleTaxAmount: property.saleTaxAmount?.toString() ?? null,
+          access: property.access,
+          landArea: property.landArea?.toString() ?? null,
+          landAreaMethod: property.landAreaMethod,
+          totalFloorArea: property.totalFloorArea?.toString() ?? null,
+          structureType: property.structureType,
+          aboveFloors: property.aboveFloors,
+          basementFloors: property.basementFloors,
+          parking: property.parking,
+          totalUnits: property.totalUnits,
+          grossYield: property.grossYield?.toString() ?? null,
+          expectedIncome: property.expectedIncome?.toString() ?? null,
+          builtYear: property.builtYear,
+          builtMonth: property.builtMonth,
         },
         kind: property.propertyType === "apartment_block" ? "apartment" : "mansion",
         photos,

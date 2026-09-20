@@ -538,3 +538,66 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     expect((await res.json()).propertyWriteback.saved).toEqual(["間取り"]);
   });
 });
+
+// [Task10 C-1] 最初の findUnique(document組み立て用)の select に F3 の16列(+棟の
+// builtMonth/basementFloors)が入っていなかったため、1枚目の図面で物件に保存した値が
+// 2枚目の図面には一度も出てこなかった(document は常に空欄)。この describe は select と
+// build-document.ts への受け渡しが一続きで動くことを route レベルで確認する
+// (buildXxxValues 自体の詳細な優先順位は build-land/house/building/mansion.test.ts)。
+describe("POST /sales-sheets/new — 図面への読み戻し(C-1)", () => {
+  it("土地: 物件に保存済みの価格・交通・土地面積が図面に出る", async () => {
+    propertyFindMock.mockResolvedValue({
+      ...baseProperty,
+      salePrice: 3480,
+      access: "○○線 徒歩8分",
+      landArea: "150.5",
+      landAreaMethod: "実測",
+    });
+    const res = await POST(req({ propertyVersion: 1 }), ctx); // override 無し
+    expect(res.status).toBe(201);
+    const doc = (createDesign as Mock).mock.calls[0][0].document as {
+      elements: { id: string; content?: string }[];
+    };
+    expect(doc.elements.find((e) => e.id === "price")).toMatchObject({ content: "3,480万円" });
+    expect(documentTableRow("交通")).toBe("○○線 徒歩8分");
+    expect(documentTableRow("土地面積")).toBe("150.5㎡（実測）");
+  });
+
+  it("戸建: 物件に保存済みの構造・地上階・築年月が図面に出る", async () => {
+    propertyFindMock.mockResolvedValue({
+      ...baseProperty,
+      propertyType: "house",
+      structureType: "木造",
+      aboveFloors: 2,
+      builtYear: 2010,
+      builtMonth: 5,
+    });
+    const res = await POST(req({ propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    expect(documentTableRow("構造・階数")).toBe("木造 / 地上2階");
+    expect(documentTableRow("築年月")).toBe("2010年5月");
+  });
+
+  it("一棟: 物件に保存済みの総戸数・想定利回りが図面に出る", async () => {
+    propertyFindMock.mockResolvedValue({
+      ...baseProperty,
+      propertyType: "apartment_building",
+      totalUnits: 12,
+      grossYield: "7.8",
+    });
+    const res = await POST(req({ propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    expect(documentTableRow("総戸数")).toBe("12戸");
+    expect(documentTableRow("想定利回り")).toBe("7.8％");
+  });
+
+  it("区分マンション: 棟に保存済みのbuiltMonthが「◯年◯月」の形で図面に出る", async () => {
+    propertyFindMock.mockResolvedValue({
+      ...baseMansion,
+      building: { ...testBuilding, builtYear: 2008, builtMonth: 3 },
+    });
+    const res = await POST(req({ propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    expect(documentTableRow("築年月")).toBe("2008年3月");
+  });
+});

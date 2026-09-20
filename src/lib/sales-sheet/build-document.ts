@@ -63,13 +63,35 @@ function fmtYen(n: number): string {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 /**
- * 築年月：override（月精度）優先、無ければ建物の築年（"2015年"）。
+ * 築年月：override（月精度）優先、無ければ物件/棟の築年月（年+月が揃えば「2008年3月」、
+ * 月が無ければ「2015年」）。[Task10 C-1] 従来は month を受け取っておらず、buildWriteback が
+ * 保存した月(builtMonth)が二度と図面に出ない不具合があった。
  * ⚠ここは桁区切りを通さない（年は "2,018年" にしない・@codex #432 P2 の対象外）。
  */
-function fmtBuiltYear(override?: string | null, builtYear?: number | null): string {
+function fmtBuiltYear(
+  override?: string | null,
+  builtYear?: number | null,
+  builtMonth?: number | null,
+): string {
   if (override) return override;
-  if (builtYear != null) return `${builtYear}年`;
+  if (builtYear != null) return builtMonth != null ? `${builtYear}年${builtMonth}月` : `${builtYear}年`;
   return "";
+}
+
+/** override（手入力・文字列）が空でなければそれ、無ければ物件(棟)の既定値を文字列化して返す
+ * (仕様書: 手入力 > 物件(棟)の値 > 空、の順・[Task10 C-1])。 */
+function pick(
+  override: string | null | undefined,
+  fallback: string | number | null | undefined,
+): string | undefined {
+  if (typeof override === "string" && override.trim() !== "") return override;
+  if (fallback === null || fallback === undefined) return undefined;
+  return String(fallback);
+}
+
+/** SheetValue(string | string[] | undefined) から price 等の文字列だけを取り出す(priceText用)。 */
+function asStr(v: string | string[] | undefined): string | undefined {
+  return typeof v === "string" ? v : undefined;
 }
 /**
  * 面積 + 面積計測方式 → "150.5㎡（実測）"。方式未選択なら "150.5㎡"、面積が無ければ ""。
@@ -251,9 +273,13 @@ export interface SaleMansionInput {
     name?: string | null;
     totalFloors?: number | null;
     builtYear?: number | null;
+    /** [Task10 C-1] 築月。無ければ従来どおり年のみ表示。 */
+    builtMonth?: number | null;
     structureType?: string | null;
     managementCompany?: string | null;
     totalUnits?: number | null;
+    /** [Task10 C-1] 地下階。override(o.basementFloors)が無ければこの既定値を使う。 */
+    basementFloors?: number | null;
   } | null;
   photos?: { fileUrl: string }[];
   /** 間取り図（任意）。指定時のみ中央にプレースホルダ画像を配置する。 */
@@ -331,8 +357,9 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
           ? String(p.floorNo)
           : undefined,
     totalFloors: b.totalFloors != null ? String(b.totalFloors) : undefined,
-    basementFloors: o.basementFloors,
-    builtYearMonth: fmtBuiltYear(o.builtYearMonth, b.builtYear),
+    // [Task10 C-1] override優先、無ければ棟のbasementFloorsを既定値とする(builtYearMonthと同じ扱い)。
+    basementFloors: pick(o.basementFloors, b.basementFloors),
+    builtYearMonth: fmtBuiltYear(o.builtYearMonth, b.builtYear, b.builtMonth),
     totalUnits: b.totalUnits != null ? String(b.totalUnits) : undefined,
     parking: o.parking,
     parkingFee: o.parkingFee,
@@ -471,7 +498,7 @@ export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDoc
   const { main, detail } = splitMainDetailRows("mansion", MANSION_SPEC_FIELDS, values);
 
   const heading = [b.name, p.roomNo ? `${p.roomNo}号室` : null].filter(Boolean).join("　");
-  const priceText = fmtManYen(o.price);
+  const priceText = fmtManYen(asStr(values.price));
 
   return buildSpecSheetDocument({
     heading,
@@ -569,6 +596,11 @@ export interface SaleLandInput {
     roadType?: string | null;
     roadWidth?: string | null;
     occupancyStatus?: string | null;
+    /** [Task10 C-1] F3で物件へ保存した販売条件。override(手入力)が無ければ既定値として使う。 */
+    salePrice?: string | null;
+    access?: string | null;
+    landArea?: string | null;
+    landAreaMethod?: string | null;
   };
   photos?: { fileUrl: string }[];
   /** @deprecated 単数写真（legacy `sales-sheet/preview` route 用）。新規呼び出しは
@@ -599,23 +631,32 @@ function buildLandValues(input: SaleLandInput): SheetValues {
       ? [o.landCategory]
       : undefined;
 
+  // [Task10 C-1] override優先、無ければ物件の既定値(手入力 > 物件の値 > 空)。
+  const priceVal = pick(o.price, p.salePrice);
+  const accessVal = pick(o.access, p.access);
+  const landAreaVal = pick(o.landArea, p.landArea);
+  const areaMethodVal = pick(o.areaMethod, p.landAreaMethod);
+
   return {
     // 価格
     propertyType: o.propertyType,
     bestUse: o.bestUse,
-    price: o.price,
-    // 坪単価: override（手動上書き）優先、空欄なら価格÷土地面積から自動計算する
-    // （tsubo.ts の computeTsuboUnitPrice。算出不可時は ""）。マンションの
+    price: priceVal,
+    // 坪単価: override（手動上書き）優先、空欄なら価格(既定値含む)÷土地面積(既定値含む)から
+    // 自動計算する（tsubo.ts の computeTsuboUnitPrice。算出不可時は ""）。マンションの
     // buildMansionValues.unitPrice（㎡単価・自動計算なし）とは異なる。
-    unitPrice: o.unitPrice && o.unitPrice.trim() !== "" ? o.unitPrice : computeTsuboUnitPrice(o.price, o.landArea),
+    unitPrice:
+      o.unitPrice && o.unitPrice.trim() !== ""
+        ? o.unitPrice
+        : computeTsuboUnitPrice(priceVal, landAreaVal),
     // 所在・交通
     address: p.address,
-    access: o.access,
+    access: accessVal,
     // 土地: 土地面積は面積計測方式(公簿/実測)と、セットバックは単位(m/㎡)と合成した
     // 1つの表示値に組み立てる（field-model の landArea/setback は unit を持たないため、
     // sheet-rows 側での二重付与を防ぐ・fmtExclusiveArea と同じ理由）。
-    landArea: fmtAreaWithMethod(o.landArea, o.areaMethod),
-    areaMethod: o.areaMethod,
+    landArea: fmtAreaWithMethod(landAreaVal, areaMethodVal),
+    areaMethod: areaMethodVal,
     landCategory,
     privateRoad: o.privateRoad,
     terrain: o.terrain,
@@ -649,7 +690,7 @@ export function buildSaleLandDocument(input: SaleLandInput): SalesSheetDocument 
   const values = buildLandValues(input);
   const { main, detail } = splitMainDetailRows("land", LAND_SPEC_FIELDS, values);
 
-  const priceText = fmtManYen(o.price);
+  const priceText = fmtManYen(asStr(values.price));
   // photos(複数)優先・無ければ legacy な photo(単数)を1枚配列として扱う。
   const photos = input.photos ?? (input.photo ? [input.photo] : undefined);
 
@@ -770,6 +811,23 @@ export interface SaleHouseInput {
     roadType?: string | null;
     roadWidth?: string | null;
     occupancyStatus?: string | null;
+    /**
+     * [Task10 C-1] F3で物件へ保存した販売条件。house は building relation を配線しない
+     * ため、これらは全て property のスカラ列。override(手入力)が無ければ既定値として使う。
+     */
+    salePrice?: string | null;
+    saleTaxType?: string | null;
+    saleTaxAmount?: string | null;
+    access?: string | null;
+    landArea?: string | null;
+    landAreaMethod?: string | null;
+    totalFloorArea?: string | null;
+    structureType?: string | null;
+    aboveFloors?: number | null;
+    basementFloors?: number | null;
+    parking?: string | null;
+    builtYear?: number | null;
+    builtMonth?: number | null;
   };
   photos?: { fileUrl: string }[];
   /** 間取り図（任意）。指定時のみキャッチ帯下にプレースホルダ画像を配置する。 */
@@ -792,38 +850,38 @@ function buildHouseValues(input: SaleHouseInput): SheetValues {
   );
 
   return {
-    // 価格
+    // 価格。[Task10 C-1] override優先、無ければ物件の既定値(手入力 > 物件の値 > 空)。
     propertyType: o.propertyType,
-    price: o.price,
-    tax: o.tax,
-    taxAmount: o.taxAmount,
+    price: pick(o.price, p.salePrice),
+    tax: pick(o.tax, p.saleTaxType),
+    taxAmount: pick(o.taxAmount, p.saleTaxAmount),
     // 所在・交通
     address: p.address,
-    access: o.access,
+    access: pick(o.access, p.access),
     // 土地: 土地面積は面積計測方式(公簿/実測)と、セットバックは単位(m/㎡)と合成した
     // 1つの表示値に組み立てる（field-model の landArea/setback は unit を持たないため、
     // sheet-rows 側での二重付与を防ぐ・buildLandValues と同じ理由）。
-    landArea: fmtAreaWithMethod(o.landArea, o.areaMethod),
-    areaMethod: o.areaMethod,
+    landArea: fmtAreaWithMethod(pick(o.landArea, p.landArea), pick(o.areaMethod, p.landAreaMethod)),
+    areaMethod: pick(o.areaMethod, p.landAreaMethod),
     landRight: o.landRight,
     privateRoad: o.privateRoad,
     landCategory: o.landCategory,
     setback: fmtValueWithUnit(o.setback, o.setbackUnit),
     setbackUnit: o.setbackUnit,
     terrain: o.terrain,
-    // 建物: house は building relation を配線しない（現行踏襲）ため、建物構造/築年月/
-    // 増改築年月/各階面積/地上階・地下階は常に手入力（mansion のような building
-    // フォールバックを持たない）。
-    buildingArea: o.buildingArea,
+    // 建物: house は building relation を配線しない（現行踏襲）ため常に property のスカラ列
+    // から既定値を読む（[Task10 C-1]）。各階面積(floor1Area〜3Area)は物件に対応する列が
+    // 無いため引き続き常に手入力。
+    buildingArea: pick(o.buildingArea, p.totalFloorArea),
     floor1Area: o.floor1Area,
     floor2Area: o.floor2Area,
     floor3Area: o.floor3Area,
-    structure: o.structure,
-    aboveFloors: o.aboveFloors,
-    basementFloors: o.basementFloors,
+    structure: pick(o.structure, p.structureType),
+    aboveFloors: pick(o.aboveFloors, p.aboveFloors),
+    basementFloors: pick(o.basementFloors, p.basementFloors),
     layout: p.layoutType ?? undefined,
-    parking: o.parking,
-    builtYearMonth: o.builtYearMonth,
+    parking: pick(o.parking, p.parking),
+    builtYearMonth: fmtBuiltYear(o.builtYearMonth, p.builtYear, p.builtMonth),
     renovYearMonth: o.renovYearMonth,
     // 法令
     roadKind: p.roadType ?? undefined,
@@ -861,7 +919,7 @@ export function buildSaleHouseDocument(input: SaleHouseInput): SalesSheetDocumen
   const values = buildHouseValues(input);
   const { main, detail } = splitMainDetailRows("house", HOUSE_SPEC_FIELDS, values);
 
-  const priceText = fmtManYen(o.price);
+  const priceText = fmtManYen(asStr(values.price));
 
   return buildSpecSheetDocument({
     heading: "売戸建",
@@ -968,6 +1026,27 @@ export interface SaleBuildingInput {
     roadType?: string | null;
     roadWidth?: string | null;
     occupancyStatus?: string | null;
+    /**
+     * [Task10 C-1] F3で物件へ保存した販売条件・収益系。一棟も house と同じく building
+     * relation を配線しないため、これらは全て property のスカラ列。override(手入力)が
+     * 無ければ既定値として使う。
+     */
+    salePrice?: string | null;
+    saleTaxType?: string | null;
+    saleTaxAmount?: string | null;
+    access?: string | null;
+    landArea?: string | null;
+    landAreaMethod?: string | null;
+    totalFloorArea?: string | null;
+    structureType?: string | null;
+    aboveFloors?: number | null;
+    basementFloors?: number | null;
+    parking?: string | null;
+    totalUnits?: number | null;
+    grossYield?: string | null;
+    expectedIncome?: string | null;
+    builtYear?: number | null;
+    builtMonth?: number | null;
   };
   /** DB propertyType(apartment_building/apartment_block)由来。見出しの二分岐に使う（route が決定）。 */
   kind?: "mansion" | "apartment";
@@ -992,39 +1071,41 @@ function buildBuildingValues(input: SaleBuildingInput): SheetValues {
   );
 
   return {
-    // 価格
+    // 価格。[Task10 C-1] override優先、無ければ物件の既定値(手入力 > 物件の値 > 空)。
     propertyType: o.propertyType,
-    price: o.price,
-    tax: o.tax,
-    taxAmount: o.taxAmount,
+    price: pick(o.price, p.salePrice),
+    tax: pick(o.tax, p.saleTaxType),
+    taxAmount: pick(o.taxAmount, p.saleTaxAmount),
     // 所在・交通
     address: p.address,
-    access: o.access,
+    access: pick(o.access, p.access),
     // 土地: 土地面積は面積計測方式(公簿/実測)と、セットバックは単位(m/㎡)と合成した
     // 1つの表示値に組み立てる（field-model の landArea/setback は unit を持たないため、
     // sheet-rows 側での二重付与を防ぐ・buildHouseValues と同じ理由）。
-    landArea: fmtAreaWithMethod(o.landArea, o.areaMethod),
-    areaMethod: o.areaMethod,
+    landArea: fmtAreaWithMethod(pick(o.landArea, p.landArea), pick(o.areaMethod, p.landAreaMethod)),
+    areaMethod: pick(o.areaMethod, p.landAreaMethod),
     landRight: o.landRight,
     privateRoad: o.privateRoad,
     landCategory: o.landCategory,
     setback: fmtValueWithUnit(o.setback, o.setbackUnit),
     setbackUnit: o.setbackUnit,
     terrain: o.terrain,
-    // 建物: building relation 非配線=現行踏襲のため常に手入力。各階面積は持たず延床面積で表す。
-    totalFloorArea: o.totalFloorArea,
-    structure: o.structure,
-    aboveFloors: o.aboveFloors,
-    basementFloors: o.basementFloors,
-    builtYearMonth: o.builtYearMonth,
+    // 建物: building relation 非配線=現行踏襲のため常に property のスカラ列から既定値を読む
+    // （[Task10 C-1]）。各階面積は持たず延床面積で表す。
+    totalFloorArea: pick(o.totalFloorArea, p.totalFloorArea),
+    structure: pick(o.structure, p.structureType),
+    aboveFloors: pick(o.aboveFloors, p.aboveFloors),
+    basementFloors: pick(o.basementFloors, p.basementFloors),
+    builtYearMonth: fmtBuiltYear(o.builtYearMonth, p.builtYear, p.builtMonth),
     renovYearMonth: o.renovYearMonth,
-    parking: o.parking,
+    parking: pick(o.parking, p.parking),
     // 収益: 想定利回り(%)/満室想定収入(万円)は field-model に unit を持たせず、ここで合成する
     // （キャッシュ済みクライアントの単位付き自由入力での二重付与を防ぐ）。総戸数は unit"戸"で
-    // sheet-rows が付与する（旧 fmtUnits 相当）。
-    totalUnits: o.totalUnits,
-    grossYield: fmtPercent(o.grossYield),
-    expectedIncome: fmtAnnualIncome(o.expectedIncome),
+    // sheet-rows が付与する（旧 fmtUnits 相当）。[Task10 C-1] override優先、無ければ物件の
+    // 既定値。
+    totalUnits: pick(o.totalUnits, p.totalUnits),
+    grossYield: fmtPercent(pick(o.grossYield, p.grossYield)),
+    expectedIncome: fmtAnnualIncome(pick(o.expectedIncome, p.expectedIncome)),
     // 法令
     roadKind: p.roadType ?? undefined,
     roadWidth: o.roadWidth ?? p.roadWidth ?? undefined,
@@ -1063,7 +1144,7 @@ export function buildSaleBuildingDocument(input: SaleBuildingInput): SalesSheetD
 
   // 見出し: kind により二分岐（apartment=一棟アパート・それ以外/未指定=一棟マンション）。
   const heading = input.kind === "apartment" ? "一棟アパート" : "一棟マンション";
-  const priceText = fmtManYen(o.price);
+  const priceText = fmtManYen(asStr(values.price));
 
   return buildSpecSheetDocument({
     heading,
