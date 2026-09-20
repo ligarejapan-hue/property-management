@@ -849,6 +849,11 @@ describe("POST /api/owners/[id]/corporate-apply — 編集中の鍵(Task 6)", ()
     ) as unknown as import("next/server").NextRequest;
     const res = await POST(req, makeParams());
     expect(res.status).toBe(400);
+    // ⚠review T1: この窓口には他にも 400 を返す入口検査が3つある(apply が全て false・
+    // 郵便番号と住所の対など)。状態だけを見ていると、将来それらの間に新しい検査が
+    // 入ったとき「別の理由の 400」で緑のまま通ってしまうので code まで固定する。
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("EDIT_LOCK_ID_INVALID");
     expect(vi.mocked(assertNotEditLockedByOther)).not.toHaveBeenCalled();
     expect(pm.owner.updateMany).not.toHaveBeenCalled();
     // ⚠review R1: 鍵ヘッダの形式チェックは国税庁への再lookupより前に置いた
@@ -933,6 +938,9 @@ describe("POST /api/owners/[id]/corporate-apply — 編集中の鍵(Task 6)", ()
     ) as unknown as import("next/server").NextRequest;
     const res = await POST(req, makeParams());
     expect(res.status).toBe(400);
+    // ⚠review T1: 400 の理由が鍵ヘッダであることまで固定する(上の検査と同じ理由)。
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("EDIT_LOCK_ID_INVALID");
     expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
     const call = vi.mocked(writeAuditLog).mock.calls.at(-1)?.[0] as {
       detail: Record<string, unknown>;
