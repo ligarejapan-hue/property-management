@@ -1402,7 +1402,9 @@ describe("route source — note check happens before logging/DB write", () => {
     const checkIdx = source.indexOf("fieldWriteChecks");
     const recordChangesIdx = source.indexOf("recordChanges({");
     const writeAuditIdx = source.indexOf("writeAuditLog({");
-    const updateManyIdx = source.indexOf("prisma.owner.updateMany");
+    // Task 6(編集の鍵): 保存は $transaction(所有者行ロック→鍵の確認→更新)に包まれ、
+    // 実際の更新呼び出しは tx.owner.updateMany になる(prisma.owner.updateMany ではない)。
+    const updateManyIdx = source.indexOf("tx.owner.updateMany");
     expect(checkIdx).toBeGreaterThan(-1);
     expect(recordChangesIdx).toBeGreaterThan(checkIdx);
     expect(writeAuditIdx).toBeGreaterThan(checkIdx);
@@ -1614,7 +1616,8 @@ describe("PATCH route source — response owner:read gate", () => {
   });
 
   it("PATCH response gate は updateMany より後ろ（更新自体は許可される）", () => {
-    const updateManyIdx = patchSource.indexOf("prisma.owner.updateMany");
+    // Task 6(編集の鍵): 実際の更新呼び出しは $transaction 内の tx.owner.updateMany。
+    const updateManyIdx = patchSource.indexOf("tx.owner.updateMany");
     const gateIdx = patchSource.indexOf('hasPermission(perms, "owner", "read")');
     expect(updateManyIdx).toBeGreaterThan(-1);
     expect(gateIdx).toBeGreaterThan(updateManyIdx);

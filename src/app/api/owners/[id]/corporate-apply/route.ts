@@ -24,6 +24,8 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges, OWNER_TRACKED_FIELDS } from "@/lib/change-log";
 import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
+import { assertNotEditLockedByOther } from "@/lib/edit-lock/service";
+import { readScreenTokenHash, readLockId } from "@/lib/edit-lock/screen-token";
 import {
   normalizeCorporateNumber,
   normalizeCompanyRegistryNumber,
@@ -38,6 +40,11 @@ import {
   type CorporateLookupConflict,
 } from "@/lib/corporate-lookup/conflict";
 import { isRawVisible } from "@/lib/owner-corporate-candidates";
+
+// 編集の鍵の世代(X-Edit-Lock)は uuid のはず。そのまま SQL に渡すと不正値で
+// Postgres の 22P02(500)になるため、ここで弾く。値を捨てて「鍵なし」として
+// 通すのはこの検査が塞ぐはずの穴を開けるので禁止(コントローラ決定①)。
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const expectedRecordSchema = z.object({
   corporateNumber: z.string(),
@@ -336,13 +343,33 @@ export async function POST(
       }
     }
 
+    // ---- 編集の鍵(X-Edit-Lock)の形式チェック ----
+    // 無ければ「鍵なし」として通常どおり続ける(古い画面からの保存を弾かないため)。
+    const lockIdHeader = readLockId(request);
+    if (lockIdHeader !== null && !UUID_RE.test(lockIdHeader)) {
+      throw new ApiError(400, "編集の鍵の形式が不正です", "EDIT_LOCK_ID_INVALID");
+    }
+
     // ---- optimistic lock update ----
-    const result = await prisma.owner.updateMany({
-      where: { id, version: body.version },
-      data: {
-        ...updateFields,
-        version: { increment: 1 },
-      },
+    // ⚠**編集の鍵の確認は所有者行をロックした後・書き込みの前**に行う(Task 6)。
+    //   順序: トランザクション開始 → 所有者行ロック(ロック順序=所有者→物件の親行)
+    //   → 鍵の確認 → 条件つき更新。
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM owners WHERE id = ${id}::uuid FOR UPDATE`;
+      await assertNotEditLockedByOther(tx, {
+        resourceType: "owner",
+        resourceId: id,
+        userId: session.id,
+        screenTokenHash: readScreenTokenHash(request),
+        lockId: lockIdHeader,
+      });
+      return tx.owner.updateMany({
+        where: { id, version: body.version },
+        data: {
+          ...updateFields,
+          version: { increment: 1 },
+        },
+      });
     });
     if (result.count === 0) {
       auditResult = "version_conflict";

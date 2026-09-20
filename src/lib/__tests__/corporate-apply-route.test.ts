@@ -80,8 +80,18 @@ vi.mock("@/lib/prisma", () => ({
       updateMany: vi.fn(),
       create: vi.fn(),
     },
+    // Task 6(編集の鍵): 反映の updateMany は $transaction(所有者行ロック→鍵の確認→更新)
+    // に包まれる。既存の owner.updateMany 検証をそのまま使えるよう、$transaction は
+    // コールバックへ同じ prisma モックを渡すだけにする。
+    $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
   },
 }));
+
+// Task 6(編集の鍵): 反映は $transaction(所有者行ロック→鍵の確認→更新)に包まれる。
+// 既定は no-op(未設定=undefined 解決)にして、既存テスト(ヘッダ無し・鍵無し)は
+// そのまま通す。鍵まわりの検証は専用の describe でこのモックを差し替える。
+vi.mock("@/lib/edit-lock/service", () => ({ assertNotEditLockedByOther: vi.fn() }));
 
 vi.mock("@/lib/corporate-lookup", async () => {
   const actual = await vi.importActual<typeof import("@/lib/corporate-lookup")>(
@@ -94,13 +104,14 @@ vi.mock("@/lib/corporate-lookup", async () => {
 });
 
 import prisma from "@/lib/prisma";
-import { getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
+import { ApiError, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges } from "@/lib/change-log";
 import {
   lookupCorporateNumber,
   CorporateLookupError,
 } from "@/lib/corporate-lookup";
+import { assertNotEditLockedByOther } from "@/lib/edit-lock/service";
 import { POST } from "../../app/api/owners/[id]/corporate-apply/route";
 
 const pm = prisma as unknown as {
@@ -110,6 +121,8 @@ const pm = prisma as unknown as {
     updateMany: Mock;
     create: Mock;
   };
+  $transaction: Mock;
+  $queryRaw: Mock;
 };
 
 const OWNER_ID = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -185,6 +198,8 @@ function payload(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  pm.$transaction.mockImplementation((fn: (tx: typeof pm) => unknown) => fn(pm));
+  pm.$queryRaw.mockResolvedValue([]);
   vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL);
   // 既定: name/address raw-visible(full)。owner 名/住所は record と一致 → conflict="match"
   // （conflict ゲートは既定でブロックしない。conflict は専用テストで検証する）。
@@ -749,5 +764,86 @@ describe("POST /api/owners/[id]/corporate-apply — companyRegistryNumber(12桁)
     const updateArg = pm.owner.updateMany.mock.calls[0][0];
     expect(updateArg.data.corporateNumber).toBe(RAW_NUMBER);
     expect(updateArg.data).not.toHaveProperty("companyRegistryNumber");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Task 6: 保存の窓口3本目 — 編集中の鍵
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("POST /api/owners/[id]/corporate-apply — 編集中の鍵(Task 6)", () => {
+  // ⚠「呼ばれたこと」だけを見るテストでは、トランザクションの外で呼んでも
+  //   書き込みの後に呼んでも通ってしまう(@codex R6 P2)。**順序そのもの**を記録して検査する。
+  it("トランザクション開始 → 所有者行ロック → 鍵の確認 → 条件つき更新 の順で呼ばれる", async () => {
+    const order: string[] = [];
+    pm.$transaction.mockImplementation(async (fn: (tx: typeof pm) => unknown) => {
+      order.push("tx");
+      return fn(pm);
+    });
+    pm.$queryRaw.mockImplementation(async () => {
+      order.push("lock");
+      return [];
+    });
+    vi.mocked(assertNotEditLockedByOther).mockImplementation(async () => {
+      order.push("assert");
+    });
+    pm.owner.updateMany.mockImplementation(async () => {
+      order.push("update");
+      return { count: 1 };
+    });
+
+    const res = await POST(makeRequest(payload()), makeParams());
+    expect(res.status).toBe(200);
+    expect(order).toEqual(["tx", "lock", "assert", "update"]);
+  });
+
+  it("鍵が他人のものなら 423 を返し、反映は行われない", async () => {
+    vi.mocked(assertNotEditLockedByOther).mockRejectedValueOnce(
+      new ApiError(423, "他の画面で編集中です", "EDIT_LOCKED"),
+    );
+    const res = await POST(makeRequest(payload()), makeParams());
+    expect(res.status).toBe(423);
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("合言葉のヘッダが無くても呼ばれる(古い画面。鍵が無ければ通る)", async () => {
+    const res = await POST(makeRequest(payload()), makeParams());
+    expect(res.status).toBe(200);
+    expect(vi.mocked(assertNotEditLockedByOther)).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ screenTokenHash: null, lockId: null }),
+    );
+  });
+
+  it("X-Edit-Lock が uuid でなければ 400 を返し、鍵の確認自体が走らない", async () => {
+    const req = new Request(
+      `http://localhost/api/owners/${OWNER_ID}/corporate-apply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Edit-Lock": "not-a-uuid" },
+        body: JSON.stringify(payload()),
+      },
+    ) as unknown as import("next/server").NextRequest;
+    const res = await POST(req, makeParams());
+    expect(res.status).toBe(400);
+    expect(vi.mocked(assertNotEditLockedByOther)).not.toHaveBeenCalled();
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("X-Edit-Lock が uuid なら世代として渡す", async () => {
+    const lockId = "33333333-3333-4333-8333-333333333333";
+    const req = new Request(
+      `http://localhost/api/owners/${OWNER_ID}/corporate-apply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Edit-Lock": lockId },
+        body: JSON.stringify(payload()),
+      },
+    ) as unknown as import("next/server").NextRequest;
+    await POST(req, makeParams());
+    expect(vi.mocked(assertNotEditLockedByOther)).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ lockId }),
+    );
   });
 });

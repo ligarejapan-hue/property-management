@@ -11,6 +11,8 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { lockPropertyRow } from "@/lib/property-record-guard";
+import { assertNotEditLockedByOther } from "@/lib/edit-lock/service";
+import { readScreenTokenHash, readLockId } from "@/lib/edit-lock/screen-token";
 import { updatePropertySchema } from "@/lib/validators";
 import {
   normalizeBuildingName,
@@ -184,6 +186,11 @@ export async function GET(
 
 // ---------- PATCH /api/properties/[id] ----------
 
+// 編集の鍵の世代(X-Edit-Lock)は uuid のはず。そのまま SQL に渡すと不正値で
+// Postgres の 22P02(500)になるため、ここで弾く。値を捨てて「鍵なし」として
+// 通すのはこの検査が塞ぐはずの穴を開けるので禁止(コントローラ決定①)。
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -342,23 +349,42 @@ export async function PATCH(
       }
     }
 
+    // 編集の鍵(X-Edit-Lock)の形式チェック。無ければ「鍵なし」として通常どおり続ける
+    // (古い画面からの保存を弾かないため)。
+    const lockIdHeader = readLockId(request);
+    if (lockIdHeader !== null && !UUID_RE.test(lockIdHeader)) {
+      throw new ApiError(400, "編集の鍵の形式が不正です", "EDIT_LOCK_ID_INVALID");
+    }
+
     // Update property with version increment
     // ⚠保存する値は履歴と同じ persistedFields を使う (二重に組み立てない)。
     // ⚠**条件は書き込み自体に付ける**(@codex #394 R29 P1)。読んだ時点の判定だけだと、
     //   読んだ後に謄本取得がロックを取った場合に鍵の項目を書き換えてしまう。
     //   版番号もここで見る(読み取り後に別の更新が入った場合も弾く)。
-    const guardedUpdate = await prisma.property.updateMany({
-      where: {
-        id,
-        version,
-        ...(touchesRegistryKey
-          ? { registryStatus: { not: "scheduled" } }
-          : {}),
-      },
-      data: {
-        ...persistedFields,
-        version: { increment: 1 },
-      },
+    // ⚠**編集の鍵の確認は物件行をロックした後・書き込みの前**に行う(Task 6)。
+    //   順序: トランザクション開始 → 行ロック → 鍵の確認 → 条件つき更新。
+    const guardedUpdate = await prisma.$transaction(async (tx) => {
+      await lockPropertyRow(tx, id);
+      await assertNotEditLockedByOther(tx, {
+        resourceType: "property",
+        resourceId: id,
+        userId: session.id,
+        screenTokenHash: readScreenTokenHash(request),
+        lockId: lockIdHeader,
+      });
+      return tx.property.updateMany({
+        where: {
+          id,
+          version,
+          ...(touchesRegistryKey
+            ? { registryStatus: { not: "scheduled" } }
+            : {}),
+        },
+        data: {
+          ...persistedFields,
+          version: { increment: 1 },
+        },
+      });
     });
     if (guardedUpdate.count === 0) {
       // 0件の理由を弁別する(取得中 / 先に更新された)。
