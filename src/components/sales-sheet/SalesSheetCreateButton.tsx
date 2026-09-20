@@ -1059,6 +1059,14 @@ export function SalesSheetCreateDialog({
   // buildMansionValues/buildLandValues 側の決定的デフォルト
   // （mapOccupancyStatusToMansionOccupancy/mapOccupancyStatusToLandOccupancy、これらと
   // 同一関数）に委ねられる。
+  // [F3 Task5・レビュー指摘1] fetch の要否を左右するのは「property prop が渡っているか
+  // どうか」だけ（値の中身は使わない＝下の effect 内の分岐は if(!property) のみ）。にもかかわらず
+  // effect の deps に property オブジェクトをそのまま入れると、呼び出し元
+  // （properties/[id]/page.tsx）が毎レンダー新しいオブジェクトリテラルを作って渡している場合に
+  // 参照が変わるたびに再実行され、ダイアログを開いたまま無関係な再描画が起きるたびに
+  // fetchPropertyDetail が無駄に再送信される。真偽値（プリミティブ）だけを deps に入れて
+  // この揺れを断つ。
+  const hasPropertyMeta = property !== undefined;
   useEffect(() => {
     const compute = AUTO_COMPUTE_BY_KIND[kind];
     if (!open || !compute) return;
@@ -1072,7 +1080,7 @@ export function SalesSheetCreateDialog({
         setHints(auto.hints);
         // [F3 Task5] property prop 省略時のみ: 同じフェッチ結果から version/棟情報も拾う
         // （呼び出し元が別途 GET しない経路＝/sales-sheets/new のピッカー用のフォールバック）。
-        if (!property) {
+        if (!hasPropertyMeta) {
           setFetchedMeta({
             version: raw.version,
             buildingName: raw.building?.name ?? "",
@@ -1087,7 +1095,7 @@ export function SalesSheetCreateDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, kind, propertyId, property]);
+  }, [open, kind, propertyId, hasPropertyMeta]);
 
   async function create() {
     setBusy(true);
@@ -1210,7 +1218,11 @@ export function SalesSheetCreateDialog({
         </label>
         {showBuildingNote && meta && (
           <p className="mt-1 pl-6 text-xs text-gray-600 dark:text-gray-400">
-            構造・築年月などは棟「{meta.buildingName}」の値です。同じ棟の {meta.buildingUnitCount}部屋 にも反映されます。
+            {/* [F3 Task5・コントローラ判断R17] buildingUnitCount(=_count.properties) は編集中の
+                物件自身を含む棟内の総数。「にも」と言う以上、自分を除いた数で伝える
+                （buildingUnitCount - 1）。showBuildingNote の buildingUnitCount > 1 という
+                条件は「自分以外に1部屋以上ある」と同値のためそのまま。 */}
+            構造・築年月などは棟「{meta.buildingName}」の値です。同じ棟の他の {meta.buildingUnitCount - 1}部屋 にも反映されます。
           </p>
         )}
         {error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>}

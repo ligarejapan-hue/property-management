@@ -15,6 +15,10 @@ import { SalesSheetCreateDialog } from "../SalesSheetCreateButton";
 // builtYearMonth の2キーのみ（brief 記載の BUILDING_KEYS には structure/totalFloors/totalUnits も
 // 含まれるが、区分マンションのこの3項目は棟の値が正で図面からは書き換えられない＝保存されない
 // 既存設計のため、ここで注意を出すと嘘になる。コントローラ判断により2キーへ絞った）。
+//
+// [F3 Task5 R17]: property.buildingUnitCount(=_count.properties) は編集中の物件自身を含む棟内の
+// 総数。文言は「にも反映されます」＝自分を除いた数で言うべきのため、表示は buildingUnitCount-1。
+// ここでは buildingUnitCount:5 の棟 → 表示は「他の 4部屋」で固定する。
 const base = {
   propertyId: "p1",
   kind: "mansion" as const,
@@ -29,11 +33,12 @@ describe("作成ダイアログ — 物件にも保存する", () => {
     expect(html).toMatch(/type="checkbox"[^>]*checked/);
   });
 
-  it("区分で棟の項目（築年月）を変えたときだけ、棟に反映される旨を出す", () => {
+  it("区分で棟の項目（築年月）を変えたときだけ、棟に反映される旨を出す(R17: 自分を除いた数)", () => {
     const changed = renderToStaticMarkup(
       <SalesSheetCreateDialog {...base} initialValues={{ builtYearMonth: "1998年5月" }} />,
     );
-    expect(changed).toContain("同じ棟の 5部屋");
+    expect(changed).toContain("同じ棟の他の 4部屋");
+    expect(changed).not.toContain("同じ棟の 5部屋");
     const untouched = renderToStaticMarkup(<SalesSheetCreateDialog {...base} />);
     expect(untouched).not.toContain("同じ棟の");
   });
