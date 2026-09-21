@@ -165,8 +165,17 @@ function isUniqueConstraintError(err: unknown): boolean {
 async function fillOwnerCorporateNumberIfUnlocked(
   ownerId: string,
   corporateNumber: string,
+  /**
+   * すでに開いているトランザクション。渡されたときは**新しく開かない**。
+   *
+   * ⚠まとめて1txで処理する経路(添付済み謄本からの反映)では、外側のtxが
+   *   同じ所有者の行を既にロックしている。ここで別のトランザクションを開くと
+   *   外側が内側を待ち、内側は外側のロックを待つ=**同時実行が無くても固まる**
+   *   (待ち時間いっぱいで全部巻き戻る)。
+   */
+  outerTx?: DbClient,
 ): Promise<{ count: number; locked: boolean }> {
-  return prisma.$transaction(async (tx) => {
+  const run = async (tx: DbClient) => {
     await lockOwnerRow(tx, ownerId);
     // ⚠**ロックの後に corporateNumber を読み直す**(レビュー round1 #3)。
     // decideCorporateImport を呼んだ時点(=呼び出し側が existingCorporateNumber を
@@ -191,7 +200,8 @@ async function fillOwnerCorporateNumberIfUnlocked(
       data: { corporateNumber, version: { increment: 1 } },
     });
     return { count: updated.count, locked: false };
-  });
+  };
+  return outerTx ? run(outerTx) : prisma.$transaction((tx) => run(tx as DbClient));
 }
 
 // A-2c: 謄本PDF取込の所有者反映（Owner 突合/作成 + PropertyOwner link）を
@@ -317,6 +327,9 @@ async function reflectParsedOwners(args: {
             },
             select: { id: true },
           });
+          // ⚠自分が入れた分として記録する。これが漏れると、次の所有者の見直しで
+          //   **自分が今入れた紐付けを数えて 409** になり、承認した全員が巻き戻る。
+          linkedByThisRun.push(created.id);
           await tx.propertyOwner.create({
             data: {
               propertyId,
@@ -337,6 +350,8 @@ async function reflectParsedOwners(args: {
             const filled = await fillOwnerCorporateNumberIfUnlocked(
               outcome.ownerId,
               decision.corporateNumber,
+              // まとめる場合は開いているtxで実行する(新しく開くと固まる)
+              asOneBatch ? db : undefined,
             );
             if (filled.locked) {
               markOwnerCorporateFillSkipped();
@@ -456,6 +471,8 @@ async function reflectParsedOwners(args: {
         const cnFilled = await fillOwnerCorporateNumberIfUnlocked(
           candidateOwnerId!,
           cnDecision.corporateNumber,
+          // まとめる場合は開いているtxで実行する(新しく開くと固まる)
+          asOneBatch ? db : undefined,
         );
         if (cnFilled.locked) {
           markOwnerCorporateFillSkipped();

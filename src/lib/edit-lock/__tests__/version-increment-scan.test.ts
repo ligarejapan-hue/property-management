@@ -102,10 +102,10 @@ const VERSIONED: Record<string, string> = {
     "property.registryStatus=scheduled(有料取得の予約)+version increment",
   "src/lib/registry-fetch/auto-fetch.ts:4509":
     "property.registryStatus=obtained(有料取得の確定)+version increment",
-  "src/lib/registry-pdf/process.ts:189":
+  "src/lib/registry-pdf/process.ts:198":
     "owner.corporateNumber(空欄補完・fillOwnerCorporateNumberIfUnlocked)+version increment" +
     "(Task 7で修正済)",
-  "src/lib/registry-pdf/process.ts:775":
+  "src/lib/registry-pdf/process.ts:792":
     "property.registryStatus/realEstateNumber/lotNumber/buildingNumber(取得状況前進+空欄補完)+version increment",
 };
 
@@ -190,7 +190,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
       "編集画面から書けない)",
     keys: ["dmUndeliverableAt"],
   },
-  "src/lib/registry-pdf/process.ts:396": {
+  "src/lib/registry-pdf/process.ts:411": {
     reason: "owner.updatedAt のみ(既存所有者再利用時の行ロックtouch)",
     keys: ["updatedAt"],
   },

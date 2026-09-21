@@ -15,7 +15,12 @@ import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     property: { findUnique: vi.fn(), update: vi.fn() },
-    owner: { findMany: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
+    owner: {
+      findMany: vi.fn(),
+      create: vi.fn(),
+      updateMany: vi.fn(),
+      findUnique: vi.fn(),
+    },
     propertyOwner: {
       findFirst: vi.fn(),
       findMany: vi.fn(),
@@ -60,7 +65,19 @@ vi.mock("@/lib/storage", () => ({
 
 import prisma from "@/lib/prisma";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
+import { detectCorporateNumberInOwnerLike } from "@/lib/corporate-number";
 import { processRegistryPdf } from "@/lib/registry-pdf/process";
+import fs from "node:fs";
+import path from "node:path";
+
+/** 手元(CRLF)とCI(LF)で判定が変わらないよう改行を揃える。 */
+const readProcessSource = () =>
+  fs
+    .readFileSync(
+      path.join(process.cwd(), "src/lib/registry-pdf/process.ts"),
+      "utf-8",
+    )
+    .replace(/\r\n/g, "\n");
 
 const SESSION_ID = "user-1";
 const PROP_ID = "11111111-1111-4111-8111-111111111111";
@@ -69,7 +86,7 @@ const pm = prisma as unknown as {
   $queryRaw: Mock;
   $transaction: Mock;
   property: { findUnique: Mock; update: Mock };
-  owner: { findMany: Mock; create: Mock; updateMany: Mock };
+  owner: { findMany: Mock; create: Mock; updateMany: Mock; findUnique: Mock };
   propertyOwner: { findFirst: Mock; findMany: Mock; create: Mock; count: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
@@ -300,6 +317,25 @@ describe("所有者が空の物件だけに入れる指定（requireNoExistingOw
       .mockRejectedValueOnce(new Error("connection lost"));
 
     await expect(run({ requireNoExistingOwners: true })).rejects.toThrow();
+  });
+
+  // ⚠この検査はソースを見る形にしている。モックの $transaction は本物の
+  //   ロックを取らないため、「自分で自分を待って固まる」不具合を**動かしても再現できない**
+  //   (実際、振る舞いのテストを書いたら旧コードでも通ってしまった)。
+  it("⚠まとめる場合、法人番号の穴埋めで新しいトランザクションを開かない", () => {
+    const src = readProcessSource();
+    // ヘルパは渡されたトランザクションがあればそれを使う(無条件に開かない)
+    expect(src).toMatch(
+      /return outerTx\s*\?\s*run\(outerTx\)\s*:\s*prisma\.\$transaction/,
+    );
+    // 呼び出し2か所とも、まとめる場合は開いているトランザクションを渡す
+    const calls = src.match(
+      /fillOwnerCorporateNumberIfUnlocked\([\s\S]{0,200}?\);/g,
+    );
+    expect(calls).toHaveLength(2);
+    for (const call of calls ?? []) {
+      expect(call).toContain("asOneBatch ? db : undefined");
+    }
   });
 
   it("指定しない呼び出し元（手動取込など）では見直さない＝共有名義の追加を妨げない", async () => {
