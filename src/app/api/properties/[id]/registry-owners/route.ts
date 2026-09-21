@@ -45,6 +45,9 @@ import { getStorage } from "@/lib/storage";
 import { extractTextFromPdf } from "@/lib/pdf-extract";
 import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
 import { processRegistryPdf } from "@/lib/registry-pdf/process";
+// ⚠表示名は共通ヘルパを使う(日本時間で日付を作る)。自前で toISOString すると
+//   深夜0〜9時の添付が添付タブと違う日付になる。
+import { registryDisplayName } from "@/lib/attachments/registry-display-name";
 
 /** この機能が扱う謄本の種別。全部事項は対象外。 */
 const SUPPORTED_CERTIFICATE_TYPE = "owner";
@@ -55,14 +58,7 @@ const SUPPORTED_CERTIFICATE_TYPE = "owner";
  */
 const AUDIT_LABEL = "添付済みの謄本から所有者を反映";
 
-/**
- * 画面に出す謄本の呼び名。**生ファイル名は使わない**(氏名や住所を含みうる)。
- * 自動取得した謄本の付け方と同じ形にそろえる。
- */
-function registryDisplayLabel(createdAt: Date): string {
-  const d = createdAt.toISOString().slice(0, 10);
-  return `謄本(所有者事項)_${d}.pdf`;
-}
+
 
 interface LoadedRegistry {
   attachmentId: string;
@@ -198,7 +194,10 @@ export async function GET(
         id: registry.attachmentId,
         // ⚠生ファイル名は返さない。手で取り込んだ謄本は「山田太郎_謄本.pdf」の
         //   ように氏名や住所を含みうる(添付の一覧も同じ理由で固定の表示名にしている)。
-        label: registryDisplayLabel(registry.createdAt),
+        label: registryDisplayName(
+          SUPPORTED_CERTIFICATE_TYPE,
+          registry.createdAt,
+        ),
         createdAt: registry.createdAt,
       },
       owners: owners.map((o) => ({

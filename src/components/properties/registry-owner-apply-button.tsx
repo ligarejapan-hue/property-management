@@ -64,11 +64,20 @@ export default function RegistryOwnerApplyButton({
       // ⚠下見で見せた添付を明示して送る。開いている間に別の謄本が
       //   添付されていたらサーバーが拒否する(見ていない所有者を入れない)。
       await applyRegistryOwners(propertyId, attachmentId);
-      close();
-      await onApplied();
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "登録できませんでした");
       setPhase("confirm");
+      return;
+    }
+    // ⚠ここから先は**登録は成功している**。画面の読み直しに失敗しても
+    //   「登録できませんでした」とは出さない(実際には入っているため)。
+    close();
+    try {
+      await onApplied();
+    } catch {
+      setErrorMsg(
+        "登録しました。画面の表示が最新でない可能性があるので、再読み込みしてください",
+      );
     }
   }, [propertyId, preview, onApplied, close]);
 

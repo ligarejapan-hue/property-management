@@ -255,6 +255,53 @@ describe("所有者が空の物件だけに入れる指定（requireNoExistingOw
     expect(pm.propertyOwner.create).toHaveBeenCalledTimes(2);
   });
 
+  it("⚠全員ぶんを1つのトランザクションで入れる（途中で失敗しても半端に残さない）", async () => {
+    (parseRegistryText as Mock).mockReturnValue({
+      realEstateNumber: null,
+      address: "東京都渋谷区神宮前三丁目12-3",
+      lotNumber: null,
+      buildingNumber: null,
+      landCategory: null,
+      area: null,
+      owners: [
+        { name: "山田太郎", address: OWNER.address, share: "2分の1" },
+        { name: "山田花子", address: OWNER.address, share: "2分の1" },
+      ],
+      warnings: [],
+      confidence: 0.9,
+    });
+
+    await run({ requireNoExistingOwners: true });
+
+    // 2人いても、開くトランザクションは1つだけ
+    // (所有者ごとに分けると、2人目の失敗で1人目だけ残り、やり直しもできなくなる)
+    expect(pm.$transaction).toHaveBeenCalledTimes(1);
+    expect(pm.propertyOwner.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("⚠まとめる場合、2人目の失敗は握りつぶさず中断する", async () => {
+    (parseRegistryText as Mock).mockReturnValue({
+      realEstateNumber: null,
+      address: "東京都渋谷区神宮前三丁目12-3",
+      lotNumber: null,
+      buildingNumber: null,
+      landCategory: null,
+      area: null,
+      owners: [
+        { name: "山田太郎", address: OWNER.address, share: "2分の1" },
+        { name: "山田花子", address: OWNER.address, share: "2分の1" },
+      ],
+      warnings: [],
+      confidence: 0.9,
+    });
+    // 2人目の紐付けで失敗させる
+    pm.propertyOwner.create
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("connection lost"));
+
+    await expect(run({ requireNoExistingOwners: true })).rejects.toThrow();
+  });
+
   it("指定しない呼び出し元（手動取込など）では見直さない＝共有名義の追加を妨げない", async () => {
     pm.propertyOwner.count.mockResolvedValue(1);
     await run();
