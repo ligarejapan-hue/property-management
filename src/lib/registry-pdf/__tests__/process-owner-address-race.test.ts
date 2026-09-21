@@ -65,6 +65,7 @@ vi.mock("@/lib/storage", () => ({
 
 import prisma from "@/lib/prisma";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
+import { detectCorporateNumberInOwnerLike } from "@/lib/corporate-number";
 import { processRegistryPdf } from "@/lib/registry-pdf/process";
 import fs from "node:fs";
 import path from "node:path";
@@ -399,6 +400,33 @@ describe("所有者が空の物件だけに入れる指定（requireNoExistingOw
     await expect(run({ requireNoExistingOwners: true })).resolves.toBeDefined();
     // 所有者は入っている
     expect(pm.propertyOwner.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("⚠ownersOnly では法人番号を判定も書き込みもしない（下見に出していない項目）", async () => {
+    // 氏名に13桁の数字が含まれると、通常は法人番号として保存される
+    (parseRegistryText as Mock).mockReturnValue({
+      realEstateNumber: null,
+      address: "東京都渋谷区神宮前三丁目12-3",
+      lotNumber: null,
+      buildingNumber: null,
+      landCategory: null,
+      area: null,
+      owners: [{ name: "株式会社サンプル 1234567890123", address: OWNER.address, share: null }],
+      warnings: [],
+      confidence: 0.9,
+    });
+
+    // ⚠検出は差し替えているので、候補を1件返して「通常なら保存される」状況を作る
+    //   (これが無いと skip の有無に関わらず保存されず、テストが空振りする)
+    (detectCorporateNumberInOwnerLike as unknown as Mock).mockReturnValue({
+      candidates: ["1234567890123"],
+    });
+
+    await run({ requireNoExistingOwners: true, ownersOnly: true });
+
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    const data = (pm.owner.create.mock.calls[0][0] as { data: Record<string, unknown> }).data;
+    expect(data).not.toHaveProperty("corporateNumber");
   });
 
   it("指定しない呼び出し元（手動取込など）では見直さない＝共有名義の追加を妨げない", async () => {

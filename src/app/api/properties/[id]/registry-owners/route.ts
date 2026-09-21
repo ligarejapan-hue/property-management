@@ -83,8 +83,16 @@ async function loadProperty(propertyId: string, action: "preview" | "apply") {
   if (!hasPermission(perms, "registry_pdf", "preview")) {
     throw new ApiError(403, "謄本を見る権限がありません", "FORBIDDEN");
   }
-  if (action === "apply" && !hasPermission(perms, "import", "write")) {
-    throw new ApiError(403, "取込の権限がありません", "FORBIDDEN");
+  if (action === "apply") {
+    if (!hasPermission(perms, "import", "write")) {
+      throw new ApiError(403, "取込の権限がありません", "FORBIDDEN");
+    }
+    // ⚠所有者を作って紐づける操作なので、他の所有者の窓口(/owners, /owners/create-and-link)
+    //   と同じく owner:write も必須。画面はこの権限で出し分けているが、API を直接
+    //   叩かれても同じ線で止める(import:write だけだと権限の抜け道になる)。
+    if (!hasPermission(perms, "owner", "write")) {
+      throw new ApiError(403, "所有者を編集する権限がありません", "FORBIDDEN");
+    }
   }
 
   const property = await prisma.property.findUnique({

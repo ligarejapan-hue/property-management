@@ -251,9 +251,10 @@ describe("registry-pdf route Phase D 統合", () => {
 
   it("Codex P2: 未一致 owner の create path では新規 decision で一度だけ集計", () => {
     // candidateOwnerId === null のときは cnDecisionForCreate = cnDecision
+    // ⚠ループ内の判定は `decide`(= ownersOnly なら noop、それ以外は decideCorporateImport)経由
     // race fallback (candidateOwnerId !== null かつ reuse 失敗) のときは existing=null で再計算
     expect(registryPdfSrc).toMatch(
-      /cnDecisionForCreate\s*=\s*\n?\s*candidateOwnerId\s*===\s*null\s*\?\s*cnDecision\s*:\s*decideCorporateImport\(\s*\{\s*name:\s*ownerInfo\.name,\s*address:\s*ownerInfo\.address\s*\?\?\s*null\s*\},\s*null/,
+      /cnDecisionForCreate\s*=\s*\n?\s*candidateOwnerId\s*===\s*null\s*\?\s*cnDecision\s*:\s*decide\(\s*\{\s*name:\s*ownerInfo\.name,\s*address:\s*ownerInfo\.address\s*\?\?\s*null\s*\},\s*null/,
     );
     // create path で recordCorporateDecision は cnDecisionForCreate を使う（cnDecision ではない）
     // ⚠新規作成は**親の物件行をロックした tx の中**へ移したため、変数名が created → resolved に

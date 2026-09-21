@@ -230,6 +230,13 @@ async function reflectParsedOwners(args: {
    * (途中で失敗して1人目だけ残り、やり直しもできない状態を作らない)。
    */
   requireNoExistingOwners?: boolean;
+  /**
+   * 法人番号の判定・書き込みを行わない(添付済み謄本からの反映=ownersOnly)。
+   * ⚠下見で見せていない項目を黙って書かないため。氏名や住所に13桁の数字が含まれると
+   *   法人番号として新規Ownerに保存・既存Ownerの空欄に補完される経路があるが、
+   *   確認画面は氏名・住所(・持分)しか出していない。
+   */
+  skipCorporateNumber?: boolean;
 }): Promise<{ matched: number; created: number; linked: number }> {
   const { propertyId, owners, recordCorporateDecision, markOwnerCorporateFillSkipped } = args;
   let matchedCount = 0;
@@ -258,6 +265,12 @@ async function reflectParsedOwners(args: {
 
   /** 1件のトランザクションでまとめるか(=呼び出し元が空の物件を前提にしているか)。 */
   const asOneBatch = Boolean(args.requireNoExistingOwners);
+
+  /** 法人番号の判定。skipCorporateNumber のときは常に「何もしない」。 */
+  const decide: typeof decideCorporateImport = (owner, existing) =>
+    args.skipCorporateNumber
+      ? { action: "noop", corporateNumber: null }
+      : decideCorporateImport(owner, existing);
 
   /**
    * 所有者の反映本体。`db` は prisma か、まとめる場合は外側のトランザクション。
@@ -350,7 +363,7 @@ async function reflectParsedOwners(args: {
               existingCorporateNumber: reusable.corporateNumber,
             };
           }
-          const decision = decideCorporateImport({ name: ownerInfo.name, address: null }, null);
+          const decision = decide({ name: ownerInfo.name, address: null }, null);
           const created = await tx.owner.create({
             data: {
               name: ownerInfo.name,
@@ -375,7 +388,7 @@ async function reflectParsedOwners(args: {
         if (outcome.reused) {
           matchedCount++;
           // tx の外で法人番号を穴埋めする（空のときだけ・既存値は自動で上書きしない）。
-          const decision = decideCorporateImport(
+          const decision = decide(
             { name: ownerInfo.name, address: null },
             outcome.existingCorporateNumber,
           );
@@ -493,7 +506,7 @@ async function reflectParsedOwners(args: {
         resolvedOwnerId === candidateOwnerId;
 
       // reuse 成功時のみ既存 corporateNumber と比較、それ以外は existing=null として計算。
-      const cnDecision = decideCorporateImport(
+      const cnDecision = decide(
         { name: ownerInfo.name, address: ownerInfo.address ?? null },
         reusedExistingOwner ? candidateCorporateNumber : null,
       );
@@ -527,7 +540,7 @@ async function reflectParsedOwners(args: {
         const cnDecisionForCreate =
           candidateOwnerId === null
             ? cnDecision
-            : decideCorporateImport(
+            : decide(
                 { name: ownerInfo.name, address: ownerInfo.address ?? null },
                 null,
               );
@@ -866,6 +879,7 @@ export async function processRegistryPdf(
         const modeAOwners = await reflectParsedOwners({
           propertyId,
           requireNoExistingOwners: args.requireNoExistingOwners,
+          skipCorporateNumber: args.ownersOnly,
           owners: parsed.owners,
           recordCorporateDecision,
           markOwnerCorporateFillSkipped,
@@ -958,6 +972,7 @@ export async function processRegistryPdf(
             const modeBOwners = await reflectParsedOwners({
               propertyId: targetPropertyId,
               requireNoExistingOwners: args.requireNoExistingOwners,
+              skipCorporateNumber: args.ownersOnly,
               owners: parsed.owners,
               recordCorporateDecision,
               markOwnerCorporateFillSkipped,

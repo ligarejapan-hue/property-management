@@ -238,6 +238,15 @@ describe("POST（反映）", () => {
     expect(processRegistryPdf).not.toHaveBeenCalled();
   });
 
+  it("⚠所有者の編集権限(owner:write)が無ければ 403（import:write だけでは通さない）", async () => {
+    (hasPermission as unknown as Mock).mockImplementation(
+      (_p: unknown, resource: string) => resource !== "owner",
+    );
+    const res = await POST(postRequest(), context);
+    expect(res.status).toBe(403);
+    expect(processRegistryPdf).not.toHaveBeenCalled();
+  });
+
   it("取込の権限が無ければ 403", async () => {
     (hasPermission as unknown as Mock).mockImplementation(
       (_p: unknown, resource: string) => resource !== "import",
