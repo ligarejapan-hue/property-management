@@ -2019,6 +2019,10 @@ git commit -m "test(edit-lock): 版番号を進めない書き込みが無いこ
   2. **鍵の窓口は動いている**ので、画面を介さず窓口を直接呼べば鍵を作れる。その状態では保存が423になりうる。通常の利用では起こらないが、「鍵は1本も生まれない」と断言はしない
 - [ ] PR を作成し、`@codex review` の指摘に対応
 
+## デプロイ手順(M5・全ブランチレビューで追記)
+
+進める順序は**表(migration)→ コード**。`vps-deploy` の既定手順(`npx prisma migrate deploy` → `npm run build` → `restart`)どおりなら自動的にこの順になり、問題は起きない。⚠**逆順(コードを先に反映)は禁止**: `assertNotEditLockedByOther`(`PATCH /api/properties/[id]`・`PATCH /api/owners/[id]`・`POST /api/owners/[id]/corporate-apply` の**全保存**で必ず走る)が `relation "edit_locks" does not exist` で失敗し、**物件の保存・所有者の保存・法人番号の反映・取込のすべてが500になる**(`deleteEditLocksFor` を呼ぶ4つの後始末経路だけの影響ではない。手動確認スクリプト `scripts/edit-lock-concurrency-check.mjs` のヘッダに以前「4経路」とだけ書かれていたのは過小表現だった)。戻すときの順序は仕様9.2を参照(画面→窓口→表、の逆順)。
+
 ## この計画に含めないもの(第2段)
 
 画面の鍵の取得・合図・帯の表示・管理者の「鍵を外す」ボタン・6入口への `X-Edit-Screen` の付与・タブの複製の判別・Playwright の2ブラウザ試験・実機確認の項目。第2段は別の計画にする。

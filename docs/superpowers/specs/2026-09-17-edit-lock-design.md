@@ -48,6 +48,8 @@
 | 開いたまま操作なし | 最後の操作から60分(55分で予告) | 期限切れ |
 | 管理者が外す | 即時 | 管理者用の窓口 |
 
+6. **墓標(管理者に外された鍵)にも期限がある**(最終フィックスで追加)。`force_released_at` から `EDIT_LOCK_HEARTBEAT_GRACE_MS`(5分)を過ぎたら、外された本人から見ても含めて誰から見ても**空き**として扱う(通常の期限切れと同じ)。理由: 編集ウィンドウを開かない入口(案件ステータス・紹介経路のプルダウン・地番ポップアップ)は鍵の世代(`X-Edit-Lock`)を持たないため、墓標に期限が無いと、管理者に外された利用者の保存が「管理者が編集を終了しました」で無期限に断られ続ける(D6でタブの合言葉は再読み込みでも変わらないため、編集ウィンドウを開き直す以外に抜け道が無い)。墓標の目的は「外されたことを本人に伝える」ことなので、5分あれば十分と判断した。
+
 ### 2.3 定数(`src/lib/edit-lock/rules.ts`)
 
 | 名前 | 値 | 備考 |
@@ -123,6 +125,8 @@ model EditLock {
 
 すべて認証必須(`getApiSession`)。画面の合言葉はヘッダ **`X-Edit-Screen`** で送る(本文に混ぜない=保存窓口と同じ渡し方にそろえる)。サーバーは `sha256` にしてから比較・保存する。
 
+鍵を持つ画面が5章の保存窓口を呼ぶときは、鍵の世代(取得の応答で受け取った `lockId`)もヘッダ **`X-Edit-Lock`** で送る(最終フィックスで追加。値は秘密ではなく識別子なのでハッシュ化しない)。編集ウィンドウを開かない入口(案件ステータス・紹介経路のプルダウン・地番ポップアップ)は鍵を持たないので付けない。応答の扱いは4.7・5.2 を参照。
+
 ### 4.1 権限
 
 | 窓口 | 必要な権限 |
@@ -143,8 +147,9 @@ model EditLock {
      - 理由2: 再読み込みは同じ合言葉を使う(D6)ため、**再読み込み前の `pagehide` の解除が、読み込み直した画面が取り直した鍵より遅れて届くと、合言葉だけでは新しい鍵を消してしまう**。解除を世代で照合するには、取り直しでも世代を変える必要がある(@codex R5 P1。初版の「同じ保持者では変えない」を撤回)。
 4. 応答:
    - 取得 → `200 { state: "mine", lockId, since }`(期限切れの横取りなら監査 `edit_lock_takeover_expired`)
-   - 保持中 → `423 { code: "EDIT_LOCKED", state: "held_by_other" | "held_by_self_other_screen", holderName, since }`
-   - 資源が無い → 404
+   - 保持中 → `423 { code: "EDIT_LOCKED", state: "held_by_other" | "held_by_self_other_screen", holderName, since }`(**裸の状態**。4.7 参照)
+   - `X-Edit-Screen` が無い → `400 { code: "EDIT_SCREEN_REQUIRED" }`(最終フィックスで追加。エラー封筒。4.7 参照)
+   - 資源が無い/アーカイブ済み → 404
 
 ### 4.3 `POST /api/edit-locks/heartbeat`
 
@@ -161,15 +166,18 @@ UPDATE edit_locks
    AND activity_at  >= now() - interval '60 minutes'
 ```
 
-- 1件更新 → `200 { state: "mine", idleSince }`
+- `X-Edit-Screen` が無い → `400 { code: "EDIT_SCREEN_REQUIRED" }`(最終フィックスで追加。エラー封筒。4.7 参照)
+- 1件更新 → `200 { state: "mine", idleSince }`。`idleSince` は**この UPDATE と同じ文で読んだ** `activity_at`(呼び出し側で `new Date()` を作り直さない。2.2-3のDB時計の権威をここでも守る。最終フィックスで修正=以前は `{ state: "ok" }` を返しており、`idleSince` が無く語彙も acquire の `"mine"` と食い違っていた)
 - 0件 → 現状を読んで `200 { state: "lost", reason: "expired" | "force_released" }` または `200 { state: "taken", holderName, since }`
   - `force_released` の判別: **同じ資源の行が自分(利用者+合言葉)のもので、`force_released_at` が立っている**こと(墓標)。監査ログは見ない
+  - ⚠2.2-6 の墓標の期限(5分)を過ぎていれば、この判別には来ない(通常の期限切れと同じ `reason: "expired"` になる)。「管理者に外された」の帯を出せるのは、外されてから5分以内に合図が届いたときだけ
 - **期限切れの鍵を合図で生き返らせない**(取り直しは 4.2 を通す=監査と直列化のため)。
+- 資源(物件)が存在しない/アーカイブ済みなら acquire と同じく 404(最終フィックスで追加=M2。以前はアーカイブ済みの物件に鍵が残っていると、閲覧権限の無い利用者にまで `state: "taken", holderName` が届く経路があった)。
 
 ### 4.4 `POST /api/edit-locks/release` / `POST /api/edit-locks/force-release`
 
 - `release`: 本文 `{ resourceType, resourceId, lockId }`(`lockId` は取得の応答で受け取った世代。beacon にも入れる)。`DELETE … WHERE id = $lockId AND 資源 AND user_id AND screen_token_hash AND force_released_at IS NULL`。**世代が違う(=その後に取り直された)鍵は消さない**(@codex R5 P1)。0件でも 200(冪等)。⚠**墓標は通常の解除で消さない**(消すと、管理者に外された画面を閉じた直後に遅れて届いた保存が「鍵なし」で通る。墓標を消せるのは次の取得だけ)(@codex R4 P1)。`sendBeacon` から呼ばれる前提で、**本文は `text/plain` の JSON も受ける**(beacon は Content-Type を自由に付けられないため)。ヘッダが付けられない beacon 用に、合言葉は本文の `screenToken` でも受ける(この窓口に限る)。
-- `force-release`(管理者): 本文 `{ resourceType, resourceId, lockId }`。**トランザクション内で、取得・保存と同じ順序で資源の行をロックしてから**(物件=`lockPropertyRow`/所有者=所有者行 `FOR UPDATE`)、`UPDATE edit_locks SET force_released_at = now(), force_released_by = $admin WHERE id = $lockId AND resource_type = $t AND resource_id = $id AND force_released_at IS NULL`(**`id` だけでなく資源も一致させる**=ロックした資源と違う鍵を外さない。食い違えば0件=409)(@codex R5 P2)(**行は消さない=墓標**。**画面に出ていた鍵だけを外す**。見ている間に別の人が取り直した新しい鍵は `id` が違うので外れない)。0件 → `409 { code: "EDIT_LOCK_CHANGED" }`。監査 `edit_lock_force_release` は従来どおり書くが、判別には使わない。⚠**資源の行ロックを取らないと、すでに資源をロックして自分の有効な鍵を確認し終えた保存が、解除の応答を返した後に書き込めてしまう**(画面には「終了しました」と出たのに保存が通る)。ロックを取れば、解除はその保存が終わるまで待つ=「解除の応答より後に通る保存は無い」(@codex R4 P1)。
+- `force-release`(管理者): 本文 `{ resourceType, resourceId, lockId }`。**トランザクション内で、取得・保存と同じ順序で資源の行をロックしてから**(物件=`lockPropertyRow`/所有者=所有者行 `FOR UPDATE`)、`UPDATE edit_locks SET force_released_at = now(), force_released_by = $admin WHERE id = $lockId AND resource_type = $t AND resource_id = $id AND force_released_at IS NULL`(**`id` だけでなく資源も一致させる**=ロックした資源と違う鍵を外さない。食い違えば0件=409)(@codex R5 P2)(**行は消さない=墓標**。**画面に出ていた鍵だけを外す**。見ている間に別の人が取り直した新しい鍵は `id` が違うので外れない)。0件 → `409 { code: "EDIT_LOCK_CHANGED" }`。**これはエラー(状態ではない)なので、ApiError/handleApiError の封筒 `{ error: { message, code } }` を通す**(最終フィックスで修正=H2。以前は裸の `{ code: "EDIT_LOCK_CHANGED" }` を直接返しており、acquire自身が投げる同じコードと応答の形が食い違っていた。4.7 参照)。監査 `edit_lock_force_release` は従来どおり書くが、判別には使わない。⚠**資源の行ロックを取らないと、すでに資源をロックして自分の有効な鍵を確認し終えた保存が、解除の応答を返した後に書き込めてしまう**(画面には「終了しました」と出たのに保存が通る)。ロックを取れば、解除はその保存が終わるまで待つ=「解除の応答より後に通る保存は無い」(@codex R4 P1)。
 
 ### 4.5 `POST /api/edit-locks/status`
 
@@ -185,6 +193,15 @@ UPDATE edit_locks
 - 所有者の統合 `admin/owners/correction/merge`(統合されて消える側)
 - **取込の取り消し** `POST /api/import/jobs/[jobId]/rollback`(取込で作られた物件を `tx.property.delete` で消す。鍵を取っても物件の `updatedAt` や子データは変わらないので、編集中の物件も「消してよい」と判定されうる)(@codex R3 P2)
 - 上の一覧は網羅のつもりで書くが、**計画段階で物件・所有者を消す/アーカイブする全経路を洗い出し**、共通の後始末関数を呼んでいることを走査テスト(8.2)で固定する。ロック順序は既存の規約どおり
+
+### 4.7 応答の形: 状態(state)か、エラー(error)か(最終フィックスで追加)
+
+窓口の応答は2種類のどちらかで、混ぜない。
+
+- **状態(state)**: 「業務上、こうなっている」という結果。acquire の保持中(423 `EDIT_LOCKED`)がその代表で、**裸の JSON** `{ code, state, holderName, since }` を返す(`ApiError`/`handleApiError` を経由しない)。
+- **エラー(error)**: 「要求どおりに実行できなかった」。鍵の状態が変わった(`EDIT_LOCK_CHANGED`)・合言葉ヘッダが無い(`EDIT_SCREEN_REQUIRED`)・ヘッダの値が不正(`EDIT_LOCK_ID_INVALID`)・世代が一致しない(`EDIT_LOCK_STALE`)・権限が無いなど、**すべてこちら**。アプリ全体のエラー封筒 `{ error: { message, code } }` を `ApiError`/`handleApiError` 経由で返す。
+
+`EDIT_LOCK_CHANGED` は409で both acquire と force-release から出るが、**どちらもエラー**である(acquire 自身が投げるのは「保存の直前に鍵が消えた」ケース、force-release が投げるのは「世代が合わない」ケース。どちらも「業務上の状態」ではなく「要求を実行できなかった」)。force-release は最終フィックス以前、これを裸の `{ code: "EDIT_LOCK_CHANGED" }` として返しており、同じコードが2つの応答形を持っていた(H2)。第2段のクライアントはコードだけでなく応答の形も1本化して読める。
 
 ## 5. 保存の窓口での確認(D9)
 
@@ -202,9 +219,11 @@ UPDATE edit_locks
 
 ### 5.2 動き
 
-共通関数 `assertNotEditLockedByOther(tx, { resourceType, resourceId, userId, screenTokenHash | null })` を、**資源の行をロックした後・書き込みの前**に呼ぶ(4.2 と同じ順序で直列化=「確認した直後に鍵を取られて版番号だけ進む」隙間を閉じる)。
+共通関数 `assertNotEditLockedByOther(tx, { resourceType, resourceId, userId, screenTokenHash | null, lockId | null })` を、**資源の行をロックした後・書き込みの前**に呼ぶ(4.2 と同じ順序で直列化=「確認した直後に鍵を取られて版番号だけ進む」隙間を閉じる)。`lockId` は鍵を持つ画面(編集ウィンドウ・所有者カード)がヘッダ `X-Edit-Lock` で送る取得の応答の世代。鍵を持たない入口(プルダウン・地番ポップアップ)は `null`。
 
-- **解除済み(墓標)の行が、この要求と同じ保持者(利用者+合言葉)のもの** → `423 EDIT_LOCK_FORCE_RELEASED`(文言「管理者が編集を終了しました。この内容は保存できません」)。**版番号の確認より前に**断る。解除の瞬間にすでに送られていた保存や、その画面からの再試行が、解除のあとで通ってしまうのを防ぐ(@codex R3 P1)。その人が開き直して取り直せば(4.2 で墓標が消える)保存できる
+- ヘッダの `X-Edit-Lock` の値が uuid の形をしていない → `400 { code: "EDIT_LOCK_ID_INVALID" }`(最終フィックスで追加。エラー封筒。`readLockId` が入口で断る。値は小文字化して比較する=大文字混じりでも一致させる)
+- **解除済み(墓標)の行が、この要求と同じ保持者(利用者+合言葉)のもの** → `423 EDIT_LOCK_FORCE_RELEASED`(文言「管理者が編集を終了しました。この内容は保存できません」)。**版番号の確認より前に**断る。解除の瞬間にすでに送られていた保存や、その画面からの再試行が、解除のあとで通ってしまうのを防ぐ(@codex R3 P1)。その人が開き直して取り直せば(4.2 で墓標が消える)保存できる。⚠2.2-6 の墓標の期限(5分)を過ぎていれば、この分岐には来ない(次項の判定に流れる)
+- `lockId` を持つ保存で、その世代が今の鍵と一致しない(既に別の人が取り直した/期限切れになった等) → `423 { code: "EDIT_LOCK_STALE" }`(最終フィックスで追加。エラー封筒。文言「編集の鍵が外れています。画面を開き直してください」)
 - 有効な鍵を**別の保持者**が持つ → `423 EDIT_LOCKED`(文言「山田さんが編集中です(14:02〜)」)
   - 合言葉ヘッダが**無い**(反映前から開いていた古い画面) → 文言に「画面を再読み込みしてください」を足す
 - 鍵が無い/期限切れ/同じ保持者 → 通す。**版番号の確認はこれまでどおり**その後に行う
@@ -248,12 +267,14 @@ UPDATE edit_locks
 `useEditLock({ resourceType, resourceId })` → `{ acquire(), release(), status, noteActivity() }`
 
 - `acquire()`: 4.2 を呼ぶ。取れたら応答の `lockId`(世代)を覚えて合図を開始。取り直すたびに新しい `lockId` に置き換える。
+- 鍵を持っている間、5章の保存窓口を呼ぶときは覚えている `lockId` をヘッダ `X-Edit-Lock` に乗せる(最終フィックスで追加)。鍵を持たない入口(プルダウン・地番ポップアップ)は付けない。
 - `release()`・`pagehide` の beacon は、**覚えている `lockId` を必ず送る**(4.4)。
-- 合図: 30秒ごと。`active` は前回からの操作の有無(編集ウィンドウ/カード内の `input`・`keydown`・`pointerdown`)。
-- 55分操作なし → 帯「操作がないため、あと5分で編集を終了します」。
+- 合図: 30秒ごと。`active` は前回からの操作の有無(編集ウィンドウ/カード内の `input`・`keydown`・`pointerdown`)。応答 `{ state: "mine", idleSince }` の `idleSince` を使って55分の予告を判定する(クライアントの時計で無操作時間を数え直さない)。
+- 55分操作なし(`idleSince` 基準) → 帯「操作がないため、あと5分で編集を終了します」。
 - 応答が `lost: expired` → 帯「しばらく画面が止まっていたため、編集の鍵が外れました。入力すると自動で取り直します」。**入力は消さない**。次に入力したとき `acquire()` を自動で再試行し、取れたら帯を消す。
-- 応答が `lost: force_released` → 帯「**管理者が編集を終了しました。この内容は保存できません**」、保存ボタンを無効化。**自動の取り直しはしない**(管理者が外した意図を守る。続けたい場合はウィンドウを閉じて開き直す=通常の取得を通る)。
-- 応答が `taken`(または再試行が 423) → 帯「**佐藤さんが編集を始めました。この内容は保存できません**」、保存ボタンを無効化。入力は選択・コピーできるまま残す。
+- 応答が `lost: force_released` → 帯「**管理者が編集を終了しました。この内容は保存できません**」、保存ボタンを無効化。**自動の取り直しはしない**(管理者が外した意図を守る。続けたい場合はウィンドウを閉じて開き直す=通常の取得を通る)。⚠2.2-6 の墓標の期限(5分)を過ぎると、外された利用者の合図は `lost: force_released` ではなく `lost: expired` に変わる(=帯の文言も上の「しばらく画面が止まっていたため」に切り替わり、自動の取り直しが働くようになる)。
+- 応答が `taken`(または再試行が 423 `EDIT_LOCKED`) → 帯「**佐藤さんが編集を始めました。この内容は保存できません**」、保存ボタンを無効化。入力は選択・コピーできるまま残す。
+- 保存が `423 { code: "EDIT_LOCK_STALE" }` を返したら(最終フィックスで追加)、`lost: expired` と同じ扱いにする(帯を出し、次の入力で `acquire()` を自動で再試行する)。世代が合わなくなった=鍵は既に外れているので、意味は「期限切れ」と同じ。
 - 保存成功・閉じる・キャンセル → `release()`。
 - `pagehide` → `navigator.sendBeacon("/api/edit-locks/release", …)`。
 - 画面が裏に回って合図が止まることは正常(iPhone)。戻ったとき(`visibilitychange`)に即座に合図を1回送り、状態を反映する。
@@ -355,7 +376,7 @@ Playwright で**ブラウザを2つ**同時に動かす: **タブの複製(`wind
 - ⚠逆順(表だけ先に消す)は禁止
 
 
-- 第1段に migration あり(表の追加のみ・既存データ不変)。手順は vps-deploy。
+- 第1段に migration あり(表の追加のみ・既存データ不変)。手順は vps-deploy。⚠**進めるときの順序は「表(migration)→ コード」**(M5)。逆にコードを先に出すと、`assertNotEditLockedByOther`(物件・所有者の全保存+corporate-apply で必ず走る)が `relation "edit_locks" does not exist` で落ち、**物件の保存・所有者の保存・法人番号の反映・取込のすべてが500になる**(4本の後始末経路だけの話ではない)。vps-deploy の既定手順(`migrate deploy` → `build` → `restart`)を守れば起きない。
 - 反映直後は**古い画面が合言葉なしで保存**しに来る → 他人の鍵があれば「再読み込みしてください」で断る(5.2)。発注者から社員へ「編集画面を開いている人は再読み込み」を案内。
 - 反映後の確認: 2つのブラウザで取り合い→解除/監査ログに4種が出る/合図の頻度がログを汚していない。
 
@@ -422,3 +443,21 @@ Playwright で**ブラウザを2つ**同時に動かす: **タブの複製(`wind
 | P1 | 再読み込み前の遅れた beacon が、同じ合言葉で取り直した新しい鍵を消す | 4.2 で取得のたびに世代(`id`)を変え、4.4 の解除を世代で照合 |
 | P2 | 管理者解除の UPDATE が `id` だけで照合し、ロックした資源と違う鍵を外せる | 4.4 で `id`+資源の一致を必須に |
 | P2 | 利用者への関係が制限のままで、鍵を取った利用者を削除できない | 3.1 で `onDelete: Cascade` |
+
+### 全ブランチ(横断)レビューの反映(最終フィックス・2026-09-21)
+
+9タスク個別レビュー後の全ブランチ横断レビュー(`.superpowers/sdd/2026-09-18-edit-lock-stage1/whole-branch-review.md`)で Critical 0件・Important 7件(H1〜H7)・Minor 8件(M1〜M8)が出た。発注者裁定のうち本書に反映する分:
+
+| 重要度 | 指摘 | 対応 |
+|---|---|---|
+| H1 | `heartbeat` の成功応答が仕様と違い(`{ state: "ok" }`)、第2段が `idleSince` を得られない | 4.3 に明記済みの `{ state: "mine", idleSince }` を実装に反映。`idleSince` は UPDATE と同じ文の `activity_at` |
+| H2 | `EDIT_LOCK_CHANGED` が acquire(封筒)と force-release(裸)で応答形が食い違う | **裁定を反転**: 状態(state)は裸・エラー(error)は封筒、で統一(4.7 新設)。`EDIT_LOCK_CHANGED` はエラー側 |
+| H3 | 仕様に無い error code(`EDIT_LOCK_STALE`)とヘッダ(`X-Edit-Lock`)・code(`EDIT_LOCK_ID_INVALID`・`EDIT_SCREEN_REQUIRED`)が実装済み | 4章冒頭・4.2・4.3・4.7(新設)・5.2・6.2 に追記。本ラウンドの記録もこれ |
+| H4 | 5定数のうち値そのものを固定するテストが1つしか無い | 実装側(`rules.test.ts`)に1行assertを追加(仕様は変更なし) |
+| H5 | 後始末の走査がホワイトリストで、新しい削除/アーカイブ経路を検出できない | 実装側(`cleanup-paths-scan.test.ts`)をスイープに書き直し(仕様は変更なし) |
+| H6 | 手動DB確認スクリプトが `assertNotEditLockedByOther`(全保存で必ず走る)等4つのSQLを一度も実行していない | スクリプトに手順[8]〜[11]を追加(仕様は変更なし)。あわせて9.2のデプロイ順序の影響範囲を訂正(下記M5) |
+| H7 | 墓標(`force_released_at`)に期限が無く、鍵を持たない入口(プルダウン・地番ポップアップ)からの保存が無期限に断られ続ける | 2.2 に決まり6を新設(墓標も `EDIT_LOCK_HEARTBEAT_GRACE_MS` で期限切れになる)。4.3・5.2 に反映 |
+| M1 | 大文字混じりの `lockId` が常に `EDIT_LOCK_STALE` になる | 実装側(`readLockId`)で小文字化して正規化(仕様は変更なし) |
+| M2 | アーカイブ済み物件の鍵で、閲覧権限の無い利用者に保持者名が漏れる | 4.3 に「acquire と同じく404で塞ぐ」を追記 |
+| M3 | `status` がアーカイブを絞らないのは意図的(管理者の唯一の救済路) | 実装側にコメントで意図を固定(仕様は変更なし) |
+| M5 | 前進のデプロイ順序の記述箇所(手動スクリプトのヘッダのみ)が影響範囲を過小に書いていた | 手動スクリプトの注記を訂正(H6)。計画の反映章にも1行追記(下記参照) |
