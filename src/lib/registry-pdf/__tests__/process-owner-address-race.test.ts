@@ -186,22 +186,21 @@ describe("所有者が空の物件だけに入れる指定（requireNoExistingOw
     expect(pm.propertyOwner.create).not.toHaveBeenCalled();
   });
 
-  it("⚠確認を1回で打ち切らない（作成と紐付けの間に増えた場合も止める）", async () => {
-    // 作成のtxは紐付けのtxより先にコミットする。その隙に別タブが所有者を
-    // 紐づけた状況を、count の戻り値を途中で変えて再現する。
-    let call = 0;
-    pm.propertyOwner.count.mockImplementation(async () => {
-      call += 1;
-      return call === 1 ? 0 : 1; // 1回目=まだ0件 / 2回目以降=別タブが入れた
-    });
+  it("⚠作成と紐付けを1つのトランザクションで行う（孤児の所有者を残さない）", async () => {
+    // 分けると、作成がコミットしたあとに紐付け側の再確認が409になったとき
+    // 「どこにも紐付かない所有者」だけが残る(@codex 第4R)。
+    await run({ requireNoExistingOwners: true });
 
-    await expect(run({ requireNoExistingOwners: true })).rejects.toMatchObject({
-      status: 409,
-    });
-    // 紐付けは行わない
-    expect(pm.propertyOwner.create).not.toHaveBeenCalled();
-    // 2回以上数え直していること（1回で打ち切っていない）
-    expect(pm.propertyOwner.count.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    expect(pm.propertyOwner.create).toHaveBeenCalledTimes(1);
+    // 所有者1人につきトランザクションは1つ
+    expect(pm.$transaction).toHaveBeenCalledTimes(1);
+    // 作成も紐付けも、そのトランザクションが始まったあとに起きている
+    const txOrder = pm.$transaction.mock.invocationCallOrder[0];
+    expect(pm.owner.create.mock.invocationCallOrder[0]).toBeGreaterThan(txOrder);
+    expect(pm.propertyOwner.create.mock.invocationCallOrder[0]).toBeGreaterThan(
+      txOrder,
+    );
   });
 
   it("自分が入れた1人目で、2人目が止まらない（共有名義）", async () => {

@@ -190,6 +190,14 @@ describe("POST（反映）", () => {
     expect(args.fileName).toBe("添付済みの謄本から所有者を反映");
   });
 
+  it("⚠物件の項目は書き換えない（不動産番号が入ると謄本が取れなくなる）", async () => {
+    await POST(postRequest(), context);
+    const args = (processRegistryPdf as unknown as Mock).mock.calls[0][0];
+    // 所有者だけを入れる指定。これが外れると、下見で見せていない
+    // 不動産番号・地番・家屋番号・登記状況が黙って書き換わる。
+    expect(args.ownersOnly).toBe(true);
+  });
+
   it("⚠確認した添付と違う謄本が最新になっていたら 409", async () => {
     const res = await POST(postRequest("att-old"), context);
     expect(res.status).toBe(409);
