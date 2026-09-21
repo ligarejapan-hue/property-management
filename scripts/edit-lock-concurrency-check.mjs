@@ -21,13 +21,19 @@
  * ⚠この repo は Prisma 7 の driver adapter 構成(src/lib/prisma.ts と同じ形)。
  *   アダプタを渡さないとクライアントの初期化で落ちる(@codex R10 P2)。
  *
- * ⚠**デプロイ順序(review Minor 11)**: `deleteEditLocksFor` は edit_locks への生SQLなので、
- *   このコードを migration(`20260918100000_add_edit_locks`)適用より前にデプロイすると、
- *   物件削除・所有者アーカイブ・所有者統合・取込ロールバックの**4つすべて**が
- *   `relation "edit_locks" does not exist` で 500 になる(fail-closed なので、資源だけ
- *   消えて鍵が孤児になるより安全な倒れ方ではあるが、機能停止には変わらない)。
- *   **必ず「migration 適用 → アプリの再起動」の順で行うこと**(脚注ではなくデプロイ手順の
- *   必須ステップとして扱う)。
+ * ⚠**デプロイ順序(review Minor 11・M5で影響範囲を訂正)**: `deleteEditLocksFor` や
+ *   `assertNotEditLockedByOther` は edit_locks への生SQLなので、このコードを
+ *   migration(`20260918100000_add_edit_locks`)適用より前にデプロイすると、
+ *   `relation "edit_locks" does not exist` で 500 になる。**影響範囲は物件削除・
+ *   所有者アーカイブ・所有者統合・取込ロールバックの4経路だけではない**
+ *   (以前のこの注記はそう書いていたが過小だった=H6): `assertNotEditLockedByOther` は
+ *   `PATCH /api/properties/[id]`・`PATCH /api/owners/[id]`・
+ *   `POST /api/owners/[id]/corporate-apply` の**全保存**で必ず走るため、
+ *   **物件の保存・所有者の保存・法人番号の反映・取込のすべてが500になる**
+ *   (fail-closed なので、資源だけ消えて鍵が孤児になるより安全な倒れ方ではあるが、
+ *   機能停止には変わらない)。**必ず「migration 適用 → アプリの再起動」の順で
+ *   行うこと**(脚注ではなくデプロイ手順の必須ステップとして扱う。計画の
+ *   デプロイ手順章・仕様9.2にも同じ順序を明記する)。
  *
  * ── 手順(番号どおりに実行し、出力を PR に貼る) ────────────────────────────
  *
@@ -57,6 +63,13 @@
  *            (**この行は結果に関わらず必ず PR に貼る**。記録すること自体が目的)
  *        [7] rollback route と同じ ANY(::uuid[]) ORDER BY id FOR UPDATE: 2件ロックできた
  *            (properties が2件未満なら非致命的にスキップし、その旨を出力する)
+ *        [8] assertNotEditLockedByOther 相当: active/force_released が型エラー無く
+ *            boolean で返る(自分視点 true/false、他人視点も行は読める)
+ *        [9] heartbeatEditLock 相当: active=true/false の両分岐が1件ずつ更新でき、
+ *            他人の合図は0件で弾かれる(boolean パラメータ推論 + timestamptz/timestamp
+ *            の CASE 型解決が実DBで通ることの確認。CIでは絶対に踏めない)
+ *        [10] forceReleaseEditLock 相当: 1回目は1件・二重解除は0件
+ *        [11] isResourceEditLocked 相当: 墓標後は false・生きた鍵は true
  *
  * ── このスクリプトがカバーする項目(Task 8 レビュー観点との対応) ───────────
  *   (a) 手書きマイグレーションの実DB適用          → 手順1
@@ -80,13 +93,23 @@
  *       `make_interval` の integer/double precision 食い違いと同じ「実行するまで
  *       わからない」種類の失敗であり、CI・order test(`$queryRaw` はモック)の
  *       どちらでも検出できない)
+ *   (h) assertNotEditLockedByOther(物件・所有者の**全保存**+corporate-apply で
+ *       毎回走る)の実行 → [8](review Important 6=H6。この文の bind/型解決の
+ *       食い違いは、これまで一度も実DBで踏まれたことが無かった)
+ *   (i) heartbeatEditLock の CASE 分岐(boolean パラメータ推論 +
+ *       timestamptz/timestamp の型解決)の実行 → [9](H6。CIでは絶対に踏めない
+ *       種類の失敗)
+ *   (j) forceReleaseEditLock(世代+資源一致で墓標を立てる/二重解除は0件)の実行 → [10](H6)
+ *   (k) isResourceEditLocked(墓標は編集中に数えない)の実行 → [11](H6)
  *
  * ⚠[1][2][6] は src/lib/edit-lock/service.ts の acquireEditLock、[3]は
  *   readEditLocks、[4]は deleteEditLocksFor、[7]は rollback/route.ts の
  *   バッチロックと**同じ形の SQL をこのファイルに直接書いている**(このファイルは
  *   素の Node で動かす .mjs であり、TypeScript の service.ts/route.ts を直接
  *   import できないため)。それぞれの SQL の形(WHERE 節・キャスト・カラム名)を
- *   変えたら、ここも合わせて直すこと。
+ *   変えたら、ここも合わせて直すこと。[8]は assertNotEditLockedByOther、[9]は
+ *   heartbeatEditLock、[10]は forceReleaseEditLock、[11]は isResourceEditLocked
+ *   と同じ形(同じ理由)。
  */
 import { PrismaClient } from "../src/generated/prisma/index.js";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -377,6 +400,127 @@ async function main() {
     );
     if (lockedRows.length !== ids.length) process.exitCode = 1;
   }
+
+  // ── review Important 6(H6追加分)─────────────────────────────────────
+  // ここまでの[1]〜[7]は acquire の2文・rollback のバッチロックしか踏んでいない。
+  // assertNotEditLockedByOther・heartbeatEditLock・forceReleaseEditLock・
+  // isResourceEditLocked は一度も実DBで実行されていなかった。このうち
+  // assertNotEditLockedByOther は物件・所有者の**全保存**+corporate-apply で
+  // 必ず走るため、bind/型解決の食い違いが1つあれば本番の保存が全部500になる
+  // (make_interval の integer/double precision 食い違いと同じ「実行するまで
+  // わからない」種類の失敗)。heartbeatEditLock の
+  // `CASE WHEN ${active} THEN clock_timestamp() ELSE "activity_at" END` は
+  // boolean パラメータの型推論と timestamptz/timestamp の CASE 型解決を同時に
+  // 含み、CI では絶対に踏めない。
+  await prisma.$executeRaw`DELETE FROM "edit_locks" WHERE "resource_id" = ${resourceId}::uuid`;
+
+  // service.ts の assertNotEditLockedByOther と同じ形(H7で墓標にも期限を足した後の形)。
+  // ⚠実物の SQL も保持者(user_id/screen_token_hash)では絞り込まない(行を生のまま
+  //   読み、sameHolder の判定は呼び出し側のJSで行う設計。service.ts 参照)。
+  const assertNotLockedByOtherQuery = () => prisma.$queryRaw`
+    SELECT "id", "user_id", "screen_token_hash",
+           ("force_released_at" IS NOT NULL
+            AND "force_released_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision)) AS force_released,
+           ("force_released_at" IS NULL
+            AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision)
+            AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision)) AS active
+    FROM "edit_locks"
+    WHERE "resource_type" = 'property'::"EditLockResource" AND "resource_id" = ${resourceId}::uuid
+  `;
+
+  // service.ts の heartbeatEditLock と同じ形(H1で RETURNING "activity_at" を足した後の形)。
+  const heartbeatQuery = (userId, hash, active) => prisma.$queryRaw`
+    UPDATE "edit_locks"
+    SET "heartbeat_at" = clock_timestamp(),
+        "activity_at" = CASE WHEN ${active} THEN clock_timestamp() ELSE "activity_at" END
+    WHERE "resource_type" = 'property'::"EditLockResource"
+      AND "resource_id" = ${resourceId}::uuid
+      AND "user_id" = ${userId}::uuid
+      AND "screen_token_hash" = ${hash}
+      AND "force_released_at" IS NULL
+      AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision)
+      AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision)
+    RETURNING "id", "activity_at"
+  `;
+
+  // service.ts の forceReleaseEditLock と同じ形。
+  const forceReleaseQuery = (lockId, adminId) => prisma.$queryRaw`
+    UPDATE "edit_locks"
+    SET "force_released_at" = clock_timestamp(), "force_released_by" = ${adminId}::uuid
+    WHERE "id" = ${lockId}::uuid
+      AND "resource_type" = 'property'::"EditLockResource"
+      AND "resource_id" = ${resourceId}::uuid
+      AND "force_released_at" IS NULL
+    RETURNING "user_id"
+  `;
+
+  // service.ts の isResourceEditLocked と同じ形。
+  const isResourceLockedQuery = () => prisma.$queryRaw`
+    SELECT EXISTS (
+      SELECT 1 FROM "edit_locks"
+      WHERE "resource_type" = 'property'::"EditLockResource"
+        AND "resource_id" = ${resourceId}::uuid
+        AND "force_released_at" IS NULL
+        AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision)
+        AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision)
+    ) AS locked
+  `;
+
+  // [8] assertNotEditLockedByOther 相当: 生きた鍵に対して active/force_released が
+  //     型エラー無く boolean で返ることを確認する(sameHolder の判定は呼び出し側JSが行う
+  //     設計なので、このSQL自体は保持者では絞り込まない。service.ts と同じ)。
+  const got8 = await acquire(u1.id, "screen-8");
+  if (got8.length !== 1) {
+    console.error("[8] 前提の取得に失敗しました(想定外)");
+    process.exitCode = 1;
+  } else {
+    const rows8 = await assertNotLockedByOtherQuery();
+    const ok8 = rows8.length === 1 && rows8[0].active === true && rows8[0].force_released === false;
+    console.log(
+      `[8] assertNotEditLockedByOther 相当: active=${rows8[0]?.active} force_released=${rows8[0]?.force_released}` +
+        `(型エラー無く boolean が返れば正しい。true/false が正しい)`,
+    );
+    if (!ok8) process.exitCode = 1;
+  }
+
+  // [9] heartbeatEditLock 相当: active=true/false の両方の CASE 分岐と、他人の合図が
+  //     0件で弾かれることを確認する(boolean パラメータ推論 + timestamptz/timestamp の
+  //     CASE 型解決が実DBで通るかは、ここでしか確かめられない)。
+  const hbTrue = await heartbeatQuery(u1.id, "screen-8", true);
+  const hbFalse = await heartbeatQuery(u1.id, "screen-8", false);
+  const hbWrongHolder = await heartbeatQuery(u2.id, "screen-wrong-holder", true);
+  console.log(
+    `[9] heartbeatEditLock 相当: active=true ${hbTrue.length}件 / active=false ${hbFalse.length}件 / ` +
+      `他人 ${hbWrongHolder.length}件(1件・1件・0件が正しい)`,
+  );
+  if (hbTrue.length !== 1 || hbFalse.length !== 1 || hbWrongHolder.length !== 0) process.exitCode = 1;
+
+  // [10] forceReleaseEditLock 相当: 世代+資源が一致した行にだけ墓標を立て、二重解除は0件。
+  const lockRowNow = (await assertNotLockedByOtherQuery())[0];
+  const frFirst = await forceReleaseQuery(lockRowNow.id, u2.id);
+  const frSecond = await forceReleaseQuery(lockRowNow.id, u2.id);
+  console.log(
+    `[10] forceReleaseEditLock 相当: 1回目 ${frFirst.length}件 / 2回目(二重解除) ${frSecond.length}件(1件・0件が正しい)`,
+  );
+  if (frFirst.length !== 1 || frSecond.length !== 0) process.exitCode = 1;
+
+  // [11] isResourceEditLocked 相当: 墓標(force_released_at)は「編集中」に数えない/
+  //      生きた鍵は数える、の両方を確認する。
+  const lockedAfterForceRelease = await isResourceLockedQuery();
+  console.log(
+    `[11] isResourceEditLocked 相当(墓標後): locked=${lockedAfterForceRelease[0]?.locked}(falseが正しい)`,
+  );
+  if (lockedAfterForceRelease[0]?.locked !== false) process.exitCode = 1;
+
+  await prisma.$executeRaw`DELETE FROM "edit_locks" WHERE "resource_id" = ${resourceId}::uuid`;
+  const freshAcquire = await acquire(u1.id, "screen-11-fresh");
+  const lockedAfterAcquire = await isResourceLockedQuery();
+  console.log(
+    `[11] isResourceEditLocked 相当(生きた鍵): locked=${lockedAfterAcquire[0]?.locked}(trueが正しい)`,
+  );
+  if (freshAcquire.length !== 1 || lockedAfterAcquire[0]?.locked !== true) process.exitCode = 1;
+
+  await prisma.$executeRaw`DELETE FROM "edit_locks" WHERE "resource_id" = ${resourceId}::uuid`;
 
   await prisma.$disconnect();
 }
