@@ -1,6 +1,7 @@
 import type { SalesSheetTemplateKind } from "../template-kind";
 import * as M from "../option-master";
 import { parseNumeric, parseBuiltYearMonth, pickOption } from "./parse-values";
+import { fitsDecimalScale } from "@/lib/decimal-scale";
 
 export type WritebackCurrent = {
   property: Record<string, unknown>;
@@ -12,8 +13,12 @@ export type WritebackResult = {
   unreadable: string[];
 };
 
-/** 数値列の範囲/整数制約(仕様書 §6.1・I-1: 制約を満たさない値もその欄だけ保存しない)。 */
-type NumberRange = { min: number; max: number; int?: boolean };
+/**
+ * 数値列の範囲/整数制約(仕様書 §6.1・I-1: 制約を満たさない値もその欄だけ保存しない)。
+ * scale は DECIMAL(p,s) の s。[@codex P2] 桁数を見ないと DB 側が黙って丸め、図面・
+ * 変更履歴・物件の値が食い違ったまま残る。
+ */
+type NumberRange = { min: number; max: number; int?: boolean; scale?: number };
 
 /**
  * 整数列の範囲。src/lib/validators.ts の updatePropertySchema と同じ値
@@ -27,16 +32,16 @@ const INT_RANGES = {
   basementFloors: { min: 0, max: 20, int: true },
   totalUnits: { min: 0, max: 9999, int: true },
 } as const satisfies Record<string, NumberRange>;
-/** 小数列の範囲(同上・validators.ts と同じ値)。 */
+/** 小数列の範囲と桁数(同上・validators.ts / schema.prisma と同じ値)。 */
 const DECIMAL_RANGES = {
-  salePrice: { min: 0, max: 99999999999 },
-  saleTaxAmount: { min: 0, max: 99999999999 },
-  expectedIncome: { min: 0, max: 99999999999 },
-  landArea: { min: 0, max: 99999999 },
-  totalFloorArea: { min: 0, max: 99999999 },
-  exclusiveArea: { min: 0, max: 999999 },
-  balconyArea: { min: 0, max: 999999 },
-  grossYield: { min: 0, max: 999.99 },
+  salePrice: { min: 0, max: 99999999999, scale: 1 }, // DECIMAL(12,1)
+  saleTaxAmount: { min: 0, max: 99999999999, scale: 1 }, // DECIMAL(12,1)
+  expectedIncome: { min: 0, max: 99999999999, scale: 1 }, // DECIMAL(12,1)
+  landArea: { min: 0, max: 99999999, scale: 2 }, // DECIMAL(10,2)
+  totalFloorArea: { min: 0, max: 99999999, scale: 2 }, // DECIMAL(10,2)
+  exclusiveArea: { min: 0, max: 999999, scale: 2 }, // DECIMAL(8,2)
+  balconyArea: { min: 0, max: 999999, scale: 2 }, // DECIMAL(8,2)
+  grossYield: { min: 0, max: 999.99, scale: 2 }, // DECIMAL(5,2)
 } as const satisfies Record<string, NumberRange>;
 /** 築年の範囲(validators.ts の builtYear と同じ値)。月は parse-values.ts が既に1〜12へ限定済み。 */
 const BUILT_YEAR_RANGE: NumberRange = { min: 1800, max: 2200 };
@@ -45,6 +50,7 @@ function inRange(n: number, range?: NumberRange): boolean {
   if (!range) return true;
   if (n < range.min || n > range.max) return false;
   if (range.int && !Number.isInteger(n)) return false;
+  if (range.scale !== undefined && !fitsDecimalScale(n, range.scale)) return false;
   return true;
 }
 
@@ -62,14 +68,32 @@ type Rule = {
   as: "number" | "text" | { option: readonly string[] };
   /** as:"number" のときの範囲/整数制約(無ければ制約なし)。 */
   range?: NumberRange;
+  /**
+   * as:"text" のときの文字数上限(無ければ制限なし)。
+   * ⚠[@codex P2] 図面側の入力上限と物件列の上限は別物で、図面のほうが緩い項目がある
+   * (交通=図面500 / 物件200)。上限を見ずに保存すると、**物件編集画面の検証(200)を
+   * 通らない値が列に入り、以後その物件を普通の編集画面から保存できなくなる**。
+   * 勝手に切り詰めず、範囲外の数値と同じく「読めなかった欄」として報告する。
+   */
+  maxLength?: number;
 };
+
+/**
+ * text として保存する列の文字数上限。src/lib/validators.ts の updatePropertySchema と
+ * 同じ値を使う(option 判定の列は候補側で長さが決まるため対象外)。
+ */
+const TEXT_MAX_LENGTHS = {
+  access: 200,
+  layoutType: 50,
+  orientation: 50,
+} as const;
 
 const PRICE = (opts: readonly string[]): Rule[] => [
   { key: "price", label: "価格", to: "property", column: "salePrice", as: "number", range: DECIMAL_RANGES.salePrice },
   { key: "tax", label: "消費税", to: "property", column: "saleTaxType", as: { option: opts } },
   { key: "taxAmount", label: "うち消費税", to: "property", column: "saleTaxAmount", as: "number", range: DECIMAL_RANGES.saleTaxAmount },
 ];
-const ACCESS: Rule = { key: "access", label: "交通", to: "property", column: "access", as: "text" };
+const ACCESS: Rule = { key: "access", label: "交通", to: "property", column: "access", as: "text", maxLength: TEXT_MAX_LENGTHS.access };
 const LAND: Rule[] = [
   { key: "landArea", label: "土地面積", to: "property", column: "landArea", as: "number", range: DECIMAL_RANGES.landArea },
   { key: "areaMethod", label: "面積計測方式", to: "property", column: "landAreaMethod", as: { option: M.AREA_METHOD_LAND } },
@@ -90,8 +114,8 @@ const RULES: Record<SalesSheetTemplateKind, Rule[]> = {
     { key: "parking", label: "駐車場", to: "property", column: "parking", as: { option: M.PARKING_MANSION } },
     { key: "exclusiveArea", label: "専有面積", to: "property", column: "exclusiveArea", as: "number", range: DECIMAL_RANGES.exclusiveArea },
     { key: "balconyArea", label: "バルコニー面積", to: "property", column: "balconyArea", as: "number", range: DECIMAL_RANGES.balconyArea },
-    { key: "layout", label: "間取り", to: "property", column: "layoutType", as: "text" },
-    { key: "balconyDir", label: "バルコニー向き", to: "property", column: "orientation", as: "text" },
+    { key: "layout", label: "間取り", to: "property", column: "layoutType", as: "text", maxLength: TEXT_MAX_LENGTHS.layoutType },
+    { key: "balconyDir", label: "バルコニー向き", to: "property", column: "orientation", as: "text", maxLength: TEXT_MAX_LENGTHS.orientation },
     { key: "floorNo", label: "所在階", to: "property", column: "floorNo", as: "number", range: INT_RANGES.floorNo },
     { key: "managementFee", label: "管理費", to: "property", column: "managementFee", as: "number", range: INT_RANGES.managementFee },
     { key: "repairFee", label: "修繕積立金", to: "property", column: "repairReserveFee", as: "number", range: INT_RANGES.repairReserveFee },
@@ -160,7 +184,12 @@ export function buildWriteback(input: {
     if (rule.as === "number") {
       const n = parseNumeric(raw);
       next = n !== null && inRange(n, rule.range) ? n : null;
-    } else if (rule.as === "text") next = raw.trim();
+    } else if (rule.as === "text") {
+      const t = raw.trim();
+      // 上限超過は切り詰めず null(=読めなかった欄)にする。勝手に短くすると、
+      // 図面に出ている文と物件に入った文が食い違ったまま気づけない。
+      next = rule.maxLength !== undefined && t.length > rule.maxLength ? null : t;
+    }
     else next = pickOption(raw, rule.as.option);
 
     if (next === null) {

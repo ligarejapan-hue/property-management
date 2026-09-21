@@ -296,3 +296,94 @@ describe("buildWriteback — 一棟", () => {
     expect(r.building).toEqual({});
   });
 });
+
+// [@codex P2] 図面側の入力上限(交通=500字)は物件列の上限(200字)より緩い。上限を見ずに
+// 保存すると、物件編集画面の検証を通らない値が列に入り、以後その物件を普通の編集画面から
+// 保存できなくなる。切り詰めず「読めなかった欄」として返す。
+describe("buildWriteback — 文字数の上限(@codex P2)", () => {
+  it("交通は200字まで保存し、201字は読めなかった欄にする", () => {
+    const ok = buildWriteback({
+      kind: "land",
+      values: { access: "あ".repeat(200) },
+      current: emptyCurrent,
+    });
+    expect(ok.property).toEqual({ access: "あ".repeat(200) });
+    expect(ok.unreadable).toEqual([]);
+
+    const tooLong = buildWriteback({
+      kind: "land",
+      values: { access: "あ".repeat(201) },
+      current: emptyCurrent,
+    });
+    expect(tooLong.property).toEqual({});
+    expect(tooLong.unreadable).toEqual(["交通"]);
+  });
+
+  it("勝手に切り詰めない(図面の文と物件の文が食い違わないように)", () => {
+    const r = buildWriteback({
+      kind: "land",
+      values: { access: "あ".repeat(300) },
+      current: emptyCurrent,
+    });
+    expect(Object.keys(r.property)).not.toContain("access");
+  });
+
+  it("間取り・バルコニー向きは50字まで", () => {
+    const r = buildWriteback({
+      kind: "mansion",
+      values: { layout: "あ".repeat(51), balconyDir: "南".repeat(50) },
+      current: { property: {}, building: null },
+    });
+    expect(r.property).toEqual({ orientation: "南".repeat(50) });
+    expect(r.unreadable).toEqual(["間取り"]);
+  });
+});
+
+// [@codex P2] DECIMAL(p,s) の桁あふれは DB が黙って丸める＝図面・変更履歴・物件の値が
+// 食い違ったまま残る。範囲外の値と同じく、その欄だけ保存しない。
+describe("buildWriteback — 小数の桁(@codex P2)", () => {
+  it("価格(DECIMAL(12,1))は小数1桁まで", () => {
+    const ok = buildWriteback({
+      kind: "land",
+      values: { price: "3480.5" },
+      current: emptyCurrent,
+    });
+    expect(ok.property).toEqual({ salePrice: 3480.5 });
+    expect(ok.unreadable).toEqual([]);
+
+    const over = buildWriteback({
+      kind: "land",
+      values: { price: "3480.55" },
+      current: emptyCurrent,
+    });
+    expect(over.property).toEqual({});
+    expect(over.unreadable).toEqual(["価格"]);
+  });
+
+  it("土地面積(DECIMAL(10,2))は小数2桁まで", () => {
+    const ok = buildWriteback({
+      kind: "land",
+      values: { landArea: "125.30" },
+      current: emptyCurrent,
+    });
+    expect(ok.property).toEqual({ landArea: 125.3 });
+
+    const over = buildWriteback({
+      kind: "land",
+      values: { landArea: "125.305" },
+      current: emptyCurrent,
+    });
+    expect(over.property).toEqual({});
+    expect(over.unreadable).toEqual(["土地面積"]);
+  });
+
+  it("想定利回り(DECIMAL(5,2))も桁で弾く", () => {
+    const r = buildWriteback({
+      kind: "building",
+      values: { grossYield: "4.125" },
+      current: emptyCurrent,
+    });
+    expect(r.property).toEqual({});
+    expect(r.unreadable).toEqual(["想定利回り"]);
+  });
+});

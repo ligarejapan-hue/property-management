@@ -10,6 +10,22 @@ import {
   FIELD_SURVEY_PIN_TYPES,
 } from "@/lib/field-survey-constants";
 import { BUILDING_NAME_MAX_LENGTH } from "@/lib/property-building-name";
+import { fitsDecimalScale } from "@/lib/decimal-scale";
+
+/**
+ * DECIMAL(p,s) 列に入れる数値。範囲だけでなく**小数の桁数**も見る。
+ *
+ * [@codex P2] 桁数を見ないと、DB 側は黙って丸めるのに変更履歴・画面・図面には元の値が
+ * 残り、同じ項目の値が食い違う(例: DECIMAL(12,1) の価格に 1.25 → DB は 1.3 / 履歴は 1.25)。
+ */
+const decimalColumn = (max: number, scale: number) =>
+  z
+    .number()
+    .min(0)
+    .max(max)
+    .refine((n) => fitsDecimalScale(n, scale), {
+      message: `小数点以下は${scale}桁までで入力してください`,
+    });
 
 // 法人番号入力フィールド共通スキーマ:
 // - 空文字 / null / undefined → null（保存しない）
@@ -240,13 +256,13 @@ export const updatePropertySchema = z.object({
   // ── 「販売」区分(F3 Task7・物件編集画面から編集できる列) ──────────────────
   // ⚠区分マンションの構造・地上階・総戸数・地下階・築年月は棟の値が正のため、
   //   ここには含めない(引き続き棟の画面でのみ編集する・R12/R13 と同じ扱い)。
-  salePrice: z.number().min(0).max(99999999999).optional().nullable(), // DECIMAL(12,1) 万円
+  salePrice: decimalColumn(99999999999, 1).optional().nullable(), // DECIMAL(12,1) 万円
   saleTaxType: z.string().max(50).optional().nullable(),
-  saleTaxAmount: z.number().min(0).max(99999999999).optional().nullable(), // DECIMAL(12,1) 万円
+  saleTaxAmount: decimalColumn(99999999999, 1).optional().nullable(), // DECIMAL(12,1) 万円
   access: z.string().max(200).optional().nullable(), // 交通・自由記述
-  landArea: z.number().min(0).max(99999999).optional().nullable(), // DECIMAL(10,2) ㎡
+  landArea: decimalColumn(99999999, 2).optional().nullable(), // DECIMAL(10,2) ㎡
   landAreaMethod: z.string().max(50).optional().nullable(),
-  totalFloorArea: z.number().min(0).max(99999999).optional().nullable(), // DECIMAL(10,2) ㎡
+  totalFloorArea: decimalColumn(99999999, 2).optional().nullable(), // DECIMAL(10,2) ㎡
   builtYear: z.number().int().min(1800).max(2200).optional().nullable(),
   builtMonth: z.number().int().min(1).max(12).optional().nullable(),
   structureType: z.string().max(50).optional().nullable(),
@@ -254,11 +270,11 @@ export const updatePropertySchema = z.object({
   basementFloors: z.number().int().min(0).max(20).optional().nullable(),
   parking: z.string().max(50).optional().nullable(),
   totalUnits: z.number().int().min(0).max(9999).optional().nullable(),
-  grossYield: z.number().min(0).max(999.99).optional().nullable(), // DECIMAL(5,2) %
-  expectedIncome: z.number().min(0).max(99999999999).optional().nullable(), // DECIMAL(12,1) 万円/年
+  grossYield: decimalColumn(999.99, 2).optional().nullable(), // DECIMAL(5,2) %
+  expectedIncome: decimalColumn(99999999999, 1).optional().nullable(), // DECIMAL(12,1) 万円/年
   // 区分マンションの部屋固有項目(既存列。画面からは今回はじめて編集できるようにする)。
-  exclusiveArea: z.number().min(0).max(999999).optional().nullable(), // DECIMAL(8,2) ㎡
-  balconyArea: z.number().min(0).max(999999).optional().nullable(), // DECIMAL(8,2) ㎡
+  exclusiveArea: decimalColumn(999999, 2).optional().nullable(), // DECIMAL(8,2) ㎡
+  balconyArea: decimalColumn(999999, 2).optional().nullable(), // DECIMAL(8,2) ㎡
   layoutType: z.string().max(50).optional().nullable(),
   orientation: z.string().max(50).optional().nullable(),
   floorNo: z.number().int().min(-10).max(200).optional().nullable(), // 地下の部屋があるため下限は負

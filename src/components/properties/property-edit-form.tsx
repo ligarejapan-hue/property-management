@@ -201,6 +201,29 @@ export function salesFieldsFor(propertyType: string): FormField[] {
   }
 }
 
+/**
+ * [@codex P2] 「販売」区分に出しうる欄を、種別をまたいで重複なく集めたもの。
+ *
+ * 初期値の読み込みを**開いた時点の種別だけ**で行うと、編集中に種別を変えたときに
+ * 新しく現れた欄が「空」のまま扱われる。保存は初期値(property)との差分で送るため、
+ * その欄に値が入っている物件では「空へ変えた」と解釈され、**触っていない値が消える**。
+ * 欄を出すかどうかは種別で決めるが、初期値は常に全部読み込む。
+ */
+export function allSalesFields(): FormField[] {
+  // apartment_block / unit はそれぞれ apartment_building / apartment_unit の別名で
+  // 同じ欄を返すため、代表の4種別で全ての欄を網羅できる。
+  const seen = new Set<string>();
+  const out: FormField[] = [];
+  for (const t of ["land", "house", "apartment_building", "apartment_unit"]) {
+    for (const f of salesFieldsFor(t)) {
+      if (seen.has(f.key)) continue;
+      seen.add(f.key);
+      out.push(f);
+    }
+  }
+  return out;
+}
+
 const FORM_FIELDS: FormField[] = [
   { key: "propertyType", label: "種別", type: "select", section: "基本",
     options: PROPERTY_TYPE_OPTIONS },
@@ -276,9 +299,12 @@ export default function PropertyEditForm({
   );
 
   useEffect(() => {
-    // 「販売」区分(F3 Task7)は物件の種別によって出す欄が変わるため、開いた時点の
-    // 種別で組み立てる(FORM_FIELDS だけでは salePrice 等の初期値が読み込まれない)。
-    const fieldsToLoad = [...FORM_FIELDS, ...salesFieldsFor(property.propertyType)];
+    // 「販売」区分(F3 Task7)の欄は FORM_FIELDS に無いので、ここで併せて読み込む
+    // (読み込まないと salePrice 等の初期値が空のままになる)。
+    // ⚠[@codex P2] **開いた時点の種別だけ**で読むと、編集中に種別を変えて現れた欄が
+    //   空扱いになり、保存の差分判定で「消した」と解釈されて既存値が飛ぶ。
+    //   出す欄は種別で決めるが、初期値は全種別ぶん読む(allSalesFields のコメント参照)。
+    const fieldsToLoad = [...FORM_FIELDS, ...allSalesFields()];
     const initial: Record<string, string> = {};
     for (const f of fieldsToLoad) {
       const val = (property as unknown as Record<string, unknown>)[f.key];
