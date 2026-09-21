@@ -32,6 +32,7 @@ vi.mock("@/lib/api-helpers", () => ({
   ),
 }));
 vi.mock("@/lib/permissions", () => ({ hasPermission: vi.fn(() => true) }));
+vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/property-access", () => ({
   canAccessPropertyRecord: vi.fn(() => true),
 }));
@@ -50,6 +51,7 @@ vi.mock("@/lib/prisma", () => ({
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { writeAuditLog } from "@/lib/audit";
 import { getStorage } from "@/lib/storage";
 import { extractTextFromPdf } from "@/lib/pdf-extract";
 import { processRegistryPdf } from "@/lib/registry-pdf/process";
@@ -139,6 +141,19 @@ describe("GET（下見）", () => {
     expect(JSON.stringify(body)).not.toContain("山田太郎_謄本");
     expect(body.attachment.fileName).toBeUndefined();
     expect(body.attachment.label).toBe("謄本(所有者事項)_2026-09-15.pdf");
+  });
+
+  it("⚠下見も閲覧の記録に残す（氏名・住所・ファイル名は載せない）", async () => {
+    await GET(request, context);
+    expect(writeAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "registry_pdf_preview",
+        targetTable: "attachments",
+        targetId: "att-1",
+      }),
+    );
+    const call = (writeAuditLog as unknown as Mock).mock.calls[0][0];
+    expect(JSON.stringify(call)).not.toContain("山田太郎");
   });
 
   it("謄本の閲覧権限が無ければ 403", async () => {

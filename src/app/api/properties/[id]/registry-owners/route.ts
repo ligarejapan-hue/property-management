@@ -40,6 +40,7 @@ import {
   apiResponse,
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
+import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { getStorage } from "@/lib/storage";
 import { extractTextFromPdf } from "@/lib/pdf-extract";
@@ -184,9 +185,20 @@ export async function GET(
 ) {
   try {
     const { id } = await context.params;
-    const { property } = await loadProperty(id, "preview");
+    const { session, property } = await loadProperty(id, "preview");
     const registry = await loadLatestRegistryText(id);
     const owners = parseRegistryOwnerTable(registry.text) ?? [];
+
+    // ⚠この経路は謄本PDFを storage から直接読むため、`/uploads/[...path]` が
+    //   残している閲覧の記録を通らない。同じ非PIIの記録をここでも残す
+    //   (氏名・住所・ファイル名は載せない)。
+    await writeAuditLog({
+      userId: session.id,
+      action: "registry_pdf_preview",
+      targetTable: "attachments",
+      targetId: registry.attachmentId,
+      detail: { propertyId: id },
+    });
 
     return apiResponse({
       alreadyHasOwners: property.propertyOwners.length > 0,
