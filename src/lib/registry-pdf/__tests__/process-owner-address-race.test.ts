@@ -16,7 +16,12 @@ vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     property: { findUnique: vi.fn(), update: vi.fn() },
     owner: { findMany: vi.fn(), create: vi.fn(), updateMany: vi.fn() },
-    propertyOwner: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+    propertyOwner: {
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+      count: vi.fn(),
+    },
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
     attachment: { create: vi.fn() },
@@ -65,7 +70,7 @@ const pm = prisma as unknown as {
   $transaction: Mock;
   property: { findUnique: Mock; update: Mock };
   owner: { findMany: Mock; create: Mock; updateMany: Mock };
-  propertyOwner: { findFirst: Mock; findMany: Mock; create: Mock };
+  propertyOwner: { findFirst: Mock; findMany: Mock; create: Mock; count: Mock };
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
 };
@@ -95,6 +100,7 @@ beforeEach(() => {
   pm.propertyOwner.findMany.mockResolvedValue([]);
   pm.propertyOwner.findFirst.mockResolvedValue(null);
   pm.propertyOwner.create.mockResolvedValue({});
+  pm.propertyOwner.count.mockResolvedValue(0);
   pm.$transaction.mockImplementation((cb: (tx: typeof prisma) => unknown) =>
     cb(prisma),
   );
@@ -111,7 +117,7 @@ beforeEach(() => {
   });
 });
 
-const run = () =>
+const run = (extra: Record<string, unknown> = {}) =>
   processRegistryPdf({
     session: { id: SESSION_ID, role: "admin" },
     text: "dummy",
@@ -120,6 +126,7 @@ const run = () =>
     edited: undefined,
     pdfBuffer: null,
     certificateType: "owner",
+    ...extra,
   });
 
 describe("住所ありの所有者を新規作成するとき", () => {
@@ -156,5 +163,33 @@ describe("住所ありの所有者を新規作成するとき", () => {
       | { data: { ownerId: string } }
       | undefined;
     expect(link?.data.ownerId).toBe("owner-raced");
+  });
+});
+
+describe("所有者が空の物件だけに入れる指定（requireNoExistingOwners）", () => {
+  it("⚠書き込みと同じロックの中で 0 件かを見直す（事前確認は古くなりうる）", async () => {
+    await run({ requireNoExistingOwners: true });
+    expect(pm.propertyOwner.count).toHaveBeenCalled();
+    const lockOrder = pm.$queryRaw.mock.invocationCallOrder[0];
+    const countOrder = pm.propertyOwner.count.mock.invocationCallOrder[0];
+    const createOrder = pm.owner.create.mock.invocationCallOrder[0];
+    expect(lockOrder).toBeLessThan(countOrder);
+    expect(countOrder).toBeLessThan(createOrder);
+  });
+
+  it("⚠見直しで所有者が増えていたら中断する（書き込まない）", async () => {
+    pm.propertyOwner.count.mockResolvedValue(1);
+    await expect(run({ requireNoExistingOwners: true })).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(pm.owner.create).not.toHaveBeenCalled();
+    expect(pm.propertyOwner.create).not.toHaveBeenCalled();
+  });
+
+  it("指定しない呼び出し元（手動取込など）では見直さない＝共有名義の追加を妨げない", async () => {
+    pm.propertyOwner.count.mockResolvedValue(1);
+    await run();
+    expect(pm.propertyOwner.count).not.toHaveBeenCalled();
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
   });
 });

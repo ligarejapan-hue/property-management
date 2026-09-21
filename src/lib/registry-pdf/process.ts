@@ -96,6 +96,11 @@ export interface ProcessRegistryPdfArgs {
   /** multipart(PDF binary) のときのみ非 null。Attachment(type="registry") 保存用。 */
   pdfBuffer: Buffer | null;
   /**
+   * 「所有者が空の物件だけに入れる」呼び出し元向け(添付済み謄本からの反映)。
+   * 書き込みと同じ物件行ロックの中で 0 件かを見直す。既定 false = 従来どおり。
+   */
+  requireNoExistingOwners?: boolean;
+  /**
    * 有料取得の請求種別（owner|all）。有料取得フローからのみ渡る（手動取込は undefined）。
    * ⚠**"all"(全部事項)のときは所有者を物件へ反映しない**。全部事項には抹消された
    * 旧所有者が載り、今の解析は現在/抹消を区別できないため、旧所有者を現在の所有者
@@ -168,11 +173,36 @@ async function reflectParsedOwners(args: {
   propertyId: string;
   owners: ReturnType<typeof parseRegistryText>["owners"];
   recordCorporateDecision: (decision: CorporateImportDecision) => void;
+  /**
+   * 「所有者が空の物件だけに入れる」呼び出し元(添付済み謄本からの反映)向け。
+   * **最初の書き込みの直前に、物件行のロックの中で 0 件かを見直す**。
+   * route 側の事前確認と書き込みの間に別タブが所有者を紐づけると、古い判定の
+   * まま通ってしまうため。既定 false = 従来どおり(共有名義の追加を妨げない)。
+   */
+  requireNoExistingOwners?: boolean;
 }): Promise<{ matched: number; created: number; linked: number }> {
   const { propertyId, owners, recordCorporateDecision } = args;
   let matchedCount = 0;
   let createdCount = 0;
   let linkedCount = 0;
+  // 見直しは最初の1回だけ。2人目以降は自分が作った紐付けが見えるため。
+  let emptinessVerified = !args.requireNoExistingOwners;
+
+  /** 物件行のロックを握った状態で「まだ所有者が0件か」を確かめる。 */
+  const assertStillEmpty = async (
+    tx: Pick<typeof prisma, "propertyOwner">,
+  ) => {
+    if (emptinessVerified) return;
+    const existing = await tx.propertyOwner.count({ where: { propertyId } });
+    if (existing > 0) {
+      throw new ApiError(
+        409,
+        "この物件にはすでに所有者が登録されています",
+        "OWNERS_ALREADY_EXIST",
+      );
+    }
+    emptinessVerified = true;
+  };
 
   for (const ownerInfo of owners) {
     if (!ownerInfo.name) continue;
@@ -191,6 +221,7 @@ async function reflectParsedOwners(args: {
     if (!ownerInfo.address) {
       const outcome = await prisma.$transaction(async (tx) => {
         await lockPropertyRow(tx, propertyId);
+        await assertStillEmpty(tx);
         const linked = await tx.propertyOwner.findMany({
           where: { propertyId },
           select: {
@@ -322,6 +353,7 @@ async function reflectParsedOwners(args: {
           }
           // 親の物件行をロック(Owner→親の順・書き込み規約+#364 R10)。
           await lockPropertyRow(tx, propertyId);
+          await assertStillEmpty(tx);
           const existingLink = await tx.propertyOwner.findFirst({
             where: { propertyId, ownerId: candidateOwnerId! },
             select: { propertyId: true },
@@ -408,6 +440,7 @@ async function reflectParsedOwners(args: {
       // ロックを取ったあとに**もう一度**探し、先に作られていればそれを使う。
       const resolved = await prisma.$transaction(async (tx) => {
         await lockPropertyRow(tx, propertyId);
+        await assertStillEmpty(tx);
 
         if (ownerInfo.address) {
           const normName = normalizeName(ownerInfo.name);
@@ -468,6 +501,7 @@ async function reflectParsedOwners(args: {
           const ownerIdForLink = resolvedOwnerId;
           await prisma.$transaction(async (tx) => {
             await lockPropertyRow(tx, propertyId);
+            await assertStillEmpty(tx);
             await tx.propertyOwner.create({
               data: {
                 propertyId,
@@ -607,6 +641,7 @@ export async function processRegistryPdf(
       if (reflectOwners) {
         const modeAOwners = await reflectParsedOwners({
           propertyId,
+          requireNoExistingOwners: args.requireNoExistingOwners,
           owners: parsed.owners,
           recordCorporateDecision,
         });
@@ -700,6 +735,7 @@ export async function processRegistryPdf(
           } else {
             const modeBOwners = await reflectParsedOwners({
               propertyId: targetPropertyId,
+              requireNoExistingOwners: args.requireNoExistingOwners,
               owners: parsed.owners,
               recordCorporateDecision,
             });

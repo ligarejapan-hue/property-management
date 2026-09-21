@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
+import { joinSpacedKanji } from "@/lib/registry-text-normalize";
 
 /**
  * 登記情報提供サービスの「所有者事項」PDF は、罫線で囲まれた表で所有者を並べる。
@@ -177,6 +178,19 @@ describe("parseRegistryOwnerTable（サービスの定型文が混ざる実物�
     const owners = parseRegistryOwnerTable(wrappedName);
     expect(owners).toHaveLength(1);
     expect(owners?.[0]?.name).toBe("株式会社サンプル（ＡＤＭＩＮ）");
+  });
+});
+
+describe("スペース区切りの詰め方", () => {
+  it("⚠3文字以上並んでも全部詰まる（1つおきに残さない）", () => {
+    // 前後2文字を食う書き方だと「坂本 周守」のように1つおきにしか詰まらない
+    expect(joinSpacedKanji("坂 本 周 守")).toBe("坂本周守");
+    expect(joinSpacedKanji("山 田 太 郎")).toBe("山田太郎");
+    expect(joinSpacedKanji("東 京 都 渋 谷 区")).toBe("東京都渋谷区");
+  });
+
+  it("数字のまわりの空白は残す（住所の区切りを壊さない）", () => {
+    expect(joinSpacedKanji("東京都1 2番")).toBe("東京都1 2番");
   });
 });
 

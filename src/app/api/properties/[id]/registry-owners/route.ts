@@ -252,6 +252,9 @@ export async function POST(
       // ⚠必ず null。非 null にすると同じ謄本がもう一度添付されてしまう。
       pdfBuffer: null,
       certificateType: SUPPORTED_CERTIFICATE_TYPE,
+      // ⚠上の 409 判定は PDF を読む前の値なので、読んでいる間に別タブが所有者を
+      //   紐づけると古くなる。書き込みと同じ物件行ロックの中で見直してもらう。
+      requireNoExistingOwners: true,
     });
 
     return apiResponse(result);
