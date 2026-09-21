@@ -232,10 +232,11 @@ describe("POST（反映）", () => {
     const args = (processRegistryPdf as unknown as Mock).mock.calls[0][0];
     expect(typeof args.beforeFirstWrite).toBe("function");
 
-    const findFirstSame = vi.fn(
-      async (_q: { where: Record<string, unknown> }) => ({ id: "att-1" }),
-    );
-    const txSame = { attachment: { findFirst: findFirstSame } };
+    const findFirstSame = vi.fn<
+      (q: { where: Record<string, unknown> }) => Promise<{ id: string }>
+    >(async () => ({ id: "att-1" }));
+    const lockRows = vi.fn(async () => []);
+    const txSame = { attachment: { findFirst: findFirstSame }, $queryRaw: lockRows };
     await expect(args.beforeFirstWrite(txSame)).resolves.toBeUndefined();
     // ⚠見直しは削除済みを除いた所有者事項の最新1件(下見と同じ条件)
     const where = findFirstSame.mock.calls[0][0].where;
@@ -245,12 +246,28 @@ describe("POST（反映）", () => {
       isDeleted: false,
       registryCertificateType: "owner",
     });
+    // ⚠添付の削除・復元は物件行を押さえずに isDeleted を書く。見直しの前に
+    //   この物件の謄本の添付行を押さえ(FOR UPDATE)、削除・復元を確定まで待たせる。
+    expect(lockRows).toHaveBeenCalledTimes(1);
+    expect(lockRows.mock.invocationCallOrder[0]).toBeLessThan(
+      findFirstSame.mock.invocationCallOrder[0],
+    );
+    const sql = (lockRows.mock.calls[0] as unknown as [TemplateStringsArray])[0].join("?");
+    expect(sql).toContain("attachments");
+    expect(sql).toContain("FOR UPDATE");
+    expect(sql).toContain("property_id");
 
-    const txNewer = { attachment: { findFirst: vi.fn(async () => ({ id: "att-2" })) } };
+    const txNewer = {
+      attachment: { findFirst: vi.fn(async () => ({ id: "att-2" })) },
+      $queryRaw: vi.fn(async () => []),
+    };
     await expect(args.beforeFirstWrite(txNewer)).rejects.toMatchObject({ status: 409 });
 
     // 確認した添付が消えていても止める
-    const txGone = { attachment: { findFirst: vi.fn(async () => null) } };
+    const txGone = {
+      attachment: { findFirst: vi.fn(async () => null) },
+      $queryRaw: vi.fn(async () => []),
+    };
     await expect(args.beforeFirstWrite(txGone)).rejects.toMatchObject({ status: 409 });
   });
 

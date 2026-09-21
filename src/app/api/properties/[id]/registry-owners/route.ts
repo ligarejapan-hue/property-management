@@ -326,6 +326,14 @@ export async function POST(
       //   新しい謄本が添付されうる(添付の作成も同じ物件行を押さえるので、ロックの中で
       //   見直せば取りこぼさない)。最初の書き込みの直前にもう一度確かめる。
       beforeFirstWrite: async (tx) => {
+        // ⚠添付の**削除・復元**は物件行を押さえずに isDeleted を書く(添付の新規作成は
+        //   物件行で直列化されている)。この物件の謄本の添付行をここで押さえて、
+        //   削除・復元の書き込みをこの処理の確定まで待たせる。順序は 物件 → 添付。
+        await tx.$queryRaw`
+          SELECT id FROM attachments
+          WHERE property_id = ${id}::uuid AND type = 'registry'
+          FOR UPDATE
+        `;
         const latest = await findLatestOwnerRegistryAttachment(tx, id);
         if (!latest || latest.id !== attachmentId) throw attachmentChangedError();
       },

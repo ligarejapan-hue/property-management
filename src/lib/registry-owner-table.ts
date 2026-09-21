@@ -52,23 +52,33 @@ function splitCells(line: string): string[] {
 }
 
 /**
- * 氏名の列に入り込む「サービス側の刷り込み」かどうか。
+ * 氏名の列に入り込む「サービス側の刷り込み」の**目印**かどうか。
  *
  * 実物で確認できた形:
- *   - 整理番号などの数字だけの行           例) "14425"
  *   - 「…番号 0801-01-0」の形              例) "検索用資料番号 0801-01-0"
  *   - サービス名そのもの
+ *   - 目印の**後に続く**数字だけの行(整理番号)   例) "14425" → isImprintTail
  *
  * ⚠ 法人名には数字が入りうる(「第一ビル3号館」等)ので、「数字を含む=除外」には
- *   しない。上の3つの形だけを狙って外す。
+ *   しない。上の形だけを狙って外す。
  */
-function isServiceImprint(cell: string): boolean {
+function isImprintMarker(cell: string): boolean {
   const compact = stripSpaces(cell);
   if (!compact) return false;
-  if (/^[0-9０-９\-－―ー]+$/.test(compact)) return true;
   if (/番号[0-9０-９]{3,}[-－―]/.test(compact)) return true;
   if (compact.includes("登記情報提供サービス")) return true;
   return false;
+}
+
+/**
+ * 数字だけのセル。**同じまとまりで先に目印が出た後**にだけ刷り込み(整理番号)として除く。
+ * ⚠目印より前の数字だけのセルは、法人名の末尾の数字が折り返したものでありうるので残す。
+ *   実物2,500本(所有者5,142組)では、数字だけのセル100件すべてが目印の後に出た
+ *   (目印なしは0件)=この順序に頼って安全。
+ */
+function isImprintTail(cell: string): boolean {
+  const compact = stripSpaces(cell);
+  return compact.length > 0 && /^[0-9０-９\-－―ー]+$/.test(compact);
 }
 
 interface HeaderLayout {
@@ -141,10 +151,18 @@ export function parseRegistryOwnerTable(
      */
     const column = (index: number, dropImprints: boolean): string => {
       const parts: string[] = [];
+      let afterMarker = false;
       for (const cells of rows) {
         const cell = (cells[index] ?? "").trim();
         if (!cell) continue;
-        if (dropImprints && isServiceImprint(cell)) continue;
+        if (dropImprints) {
+          if (isImprintMarker(cell)) {
+            afterMarker = true;
+            continue;
+          }
+          // 数字だけのセルは目印の後だけ除く(前なら氏名の続き)
+          if (afterMarker && isImprintTail(cell)) continue;
+        }
         parts.push(cell);
       }
       return cleanValue(parts.join(""));
