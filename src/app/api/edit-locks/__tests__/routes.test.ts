@@ -28,7 +28,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
   default: {
     property: { findUnique: vi.fn(), findMany: vi.fn() },
-    owner: { findUnique: vi.fn() },
+    owner: { findUnique: vi.fn(), findMany: vi.fn() },
     user: { findMany: vi.fn() },
     // tx はロック済みの行を読む専用の findUnique を持つ(base client とは別モック)。
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
@@ -76,7 +76,7 @@ const LOCK1 = "55555555-5555-4555-8555-555555555555";
 const STALE_LOCK = "66666666-6666-4666-8666-666666666666";
 const pm = prisma as unknown as {
   property: { findUnique: Mock; findMany: Mock };
-  owner: { findUnique: Mock };
+  owner: { findUnique: Mock; findMany: Mock };
   user: { findMany: Mock };
 };
 const WRITE = [
@@ -101,6 +101,8 @@ beforeEach(() => {
   pm.property.findUnique.mockResolvedValue({ createdBy: UID, assignedTo: null, isArchived: false });
   pm.property.findMany.mockResolvedValue([]);
   pm.owner.findUnique.mockResolvedValue({ id: PROP, isArchived: false });
+  // status route の存在+アーカイブ確認用(2026-09-21 外部レビュー対応)。個別テストで上書きする。
+  pm.owner.findMany.mockResolvedValue([]);
   pm.user.findMany.mockResolvedValue([]);
   // acquire はロック後に**同じ tx**で読む。base client とは別モックにして混同を防ぐ。
   txMocks.propertyFindUnique.mockResolvedValue({ createdBy: UID, assignedTo: null, isArchived: false });
@@ -539,6 +541,7 @@ describe("POST /api/edit-locks/status", () => {
   });
 
   it("墓標(force_released_mine)は free として返す", async () => {
+    pm.owner.findMany.mockResolvedValue([{ id: PROP, isArchived: false }]);
     (readEditLocks as unknown as Mock).mockResolvedValue({
       dbNow: new Date("2026-09-18T10:00:00Z"),
       locks: [
@@ -562,5 +565,142 @@ describe("POST /api/edit-locks/status", () => {
     ]);
     const res = await st({ resources: [{ resourceType: "owner", resourceId: PROP }] });
     await expect(res.json()).resolves.toEqual({ locks: [] });
+  });
+
+  // ⚠2026-09-21 外部レビュー(@codex P2・uuid大文字小文字の3件目)対応: リクエストが
+  // 大文字混じりの uuid を送っても、zod 検証の時点で小文字化する。しなければ
+  // Postgres が返す正規小文字表記と `propertyById`/鍵の照合キーが食い違い、
+  // 保持中の鍵が free と誤報され、物件自体が結果から消えることさえあった。
+  it("大文字混じりの uuid でも保持中の鍵を held_by_other として返し、物件も結果から消えない(uuid正規化)", async () => {
+    const LOWER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const UPPER_ID = LOWER_ID.toUpperCase();
+    pm.property.findMany.mockResolvedValue([{ id: LOWER_ID, createdBy: UID, assignedTo: null }]);
+    (readEditLocks as unknown as Mock).mockResolvedValue({
+      dbNow: new Date("2026-09-18T10:00:00Z"),
+      locks: [
+        {
+          // Postgres の uuid 列は常に正規の小文字表記で返す。呼び出し元が
+          // 送った大文字表記とは無関係にこの形で返ってくる。
+          resourceType: "property", resourceId: LOWER_ID,
+          id: LOCK1, userId: OTHER_UID, screenTokenHash: "x",
+          acquiredAt: new Date("2026-09-18T09:00:00Z"), heartbeatAt: new Date("2026-09-18T09:59:00Z"),
+          activityAt: new Date("2026-09-18T09:59:00Z"), forceReleasedAt: null,
+        },
+      ],
+    });
+    pm.user.findMany.mockResolvedValue([{ id: OTHER_UID, name: "鈴木" }]);
+    const res = await st({ resources: [{ resourceType: "property", resourceId: UPPER_ID }] });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // 正規化前は propertyById のキーが一致せず、物件そのものが結果から消えていた
+    // (held_by_other どころか配列が空になっていた)。
+    expect(json.locks).toHaveLength(1);
+    expect(json.locks[0]).toMatchObject({
+      resourceId: LOWER_ID,
+      state: "held_by_other",
+      holderName: "鈴木",
+    });
+    // property.findMany には小文字化した後の id を渡す(DB の正規表記と揃える)。
+    expect(pm.property.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: [LOWER_ID] } } }),
+    );
+  });
+
+  // ⚠2026-09-21 外部レビュー(@codex 提案・受入済): M3 は「管理者の救済路を閉じない」
+  //   ためのものであって、一般利用者にアーカイブ済み資源の保持者名まで見せてよい
+  //   という裁定ではなかった。一般利用者は除外・管理者は従来どおり見える、の
+  //   両方向を固定する。
+  describe("アーカイブ済み資源: 一般利用者は除外・管理者は救済路として見える(M3改定)", () => {
+    it("一般利用者にはアーカイブ済みの物件の鍵を返さない", async () => {
+      pm.property.findMany.mockResolvedValue([{ id: PROP, createdBy: UID, assignedTo: null, isArchived: true }]);
+      (readEditLocks as unknown as Mock).mockResolvedValue({
+        dbNow: new Date("2026-09-18T10:00:00Z"),
+        locks: [
+          {
+            resourceType: "property", resourceId: PROP,
+            id: LOCK1, userId: OTHER_UID, screenTokenHash: "x",
+            acquiredAt: new Date("2026-09-18T09:00:00Z"), heartbeatAt: new Date("2026-09-18T09:59:00Z"),
+            activityAt: new Date("2026-09-18T09:59:00Z"), forceReleasedAt: null,
+          },
+        ],
+      });
+      const res = await st({ resources: [{ resourceType: "property", resourceId: PROP }] });
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({ locks: [] });
+      // アーカイブ済みと分かった時点で除外するので、readEditLocks にはそもそも渡さない。
+      expect(readEditLocks).toHaveBeenCalledWith(prisma, []);
+    });
+
+    it("管理者にはアーカイブ済みの物件でも鍵(lockId込み)を返す(孤児鍵の救済路)", async () => {
+      (getApiSession as unknown as Mock).mockResolvedValue({ id: UID, role: "admin" });
+      pm.property.findMany.mockResolvedValue([{ id: PROP, createdBy: UID, assignedTo: null, isArchived: true }]);
+      (readEditLocks as unknown as Mock).mockResolvedValue({
+        dbNow: new Date("2026-09-18T10:00:00Z"),
+        locks: [
+          {
+            resourceType: "property", resourceId: PROP,
+            id: LOCK1, userId: OTHER_UID, screenTokenHash: "x",
+            acquiredAt: new Date("2026-09-18T09:00:00Z"), heartbeatAt: new Date("2026-09-18T09:59:00Z"),
+            activityAt: new Date("2026-09-18T09:59:00Z"), forceReleasedAt: null,
+          },
+        ],
+      });
+      pm.user.findMany.mockResolvedValue([{ id: OTHER_UID, name: "鈴木" }]);
+      const res = await st({ resources: [{ resourceType: "property", resourceId: PROP }] });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.locks).toEqual([
+        expect.objectContaining({ resourceId: PROP, state: "held_by_other", holderName: "鈴木", lockId: LOCK1 }),
+      ]);
+    });
+
+    it("一般利用者にはアーカイブ済みの所有者の鍵を返さない", async () => {
+      pm.owner.findMany.mockResolvedValue([{ id: PROP, isArchived: true }]);
+      (readEditLocks as unknown as Mock).mockResolvedValue({
+        dbNow: new Date("2026-09-18T10:00:00Z"),
+        locks: [
+          {
+            resourceType: "owner", resourceId: PROP,
+            id: LOCK1, userId: OTHER_UID, screenTokenHash: "x",
+            acquiredAt: new Date("2026-09-18T09:00:00Z"), heartbeatAt: new Date("2026-09-18T09:59:00Z"),
+            activityAt: new Date("2026-09-18T09:59:00Z"), forceReleasedAt: null,
+          },
+        ],
+      });
+      const res = await st({ resources: [{ resourceType: "owner", resourceId: PROP }] });
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({ locks: [] });
+      expect(readEditLocks).toHaveBeenCalledWith(prisma, []);
+    });
+
+    it("管理者にはアーカイブ済みの所有者でも鍵(lockId込み)を返す(孤児鍵の救済路)", async () => {
+      (getApiSession as unknown as Mock).mockResolvedValue({ id: UID, role: "admin" });
+      pm.owner.findMany.mockResolvedValue([{ id: PROP, isArchived: true }]);
+      (readEditLocks as unknown as Mock).mockResolvedValue({
+        dbNow: new Date("2026-09-18T10:00:00Z"),
+        locks: [
+          {
+            resourceType: "owner", resourceId: PROP,
+            id: LOCK1, userId: OTHER_UID, screenTokenHash: "x",
+            acquiredAt: new Date("2026-09-18T09:00:00Z"), heartbeatAt: new Date("2026-09-18T09:59:00Z"),
+            activityAt: new Date("2026-09-18T09:59:00Z"), forceReleasedAt: null,
+          },
+        ],
+      });
+      pm.user.findMany.mockResolvedValue([{ id: OTHER_UID, name: "鈴木" }]);
+      const res = await st({ resources: [{ resourceType: "owner", resourceId: PROP }] });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.locks).toEqual([
+        expect.objectContaining({ resourceId: PROP, state: "held_by_other", holderName: "鈴木", lockId: LOCK1 }),
+      ]);
+    });
+
+    it("存在しない所有者の鍵は一般利用者にも管理者にも返さない", async () => {
+      pm.owner.findMany.mockResolvedValue([]);
+      const res = await st({ resources: [{ resourceType: "owner", resourceId: PROP }] });
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({ locks: [] });
+    });
   });
 });
