@@ -25,8 +25,8 @@ import { join, relative } from "node:path";
  * 一括物理削除の経路が無い)。物件をアーカイブする書き込み経路も無い。
  */
 const KNOWN_CLEANUP_SITES: Record<string, string> = {
-  "src/app/api/properties/[id]/route.ts:550": "property.delete(物件の削除)",
-  "src/app/api/import/jobs/[jobId]/rollback/route.ts:419": "property.delete(取込の取り消し)",
+  "src/app/api/properties/[id]/route.ts:557": "property.delete(物件の削除)",
+  "src/app/api/import/jobs/[jobId]/rollback/route.ts:451": "property.delete(取込の取り消し)",
   "src/app/api/admin/owners/[id]/correction/archive/route.ts:247":
     "owner.updateMany({ isArchived: true })(所有者のアーカイブ)",
   "src/app/api/admin/owners/correction/merge/route.ts:638":
@@ -341,6 +341,14 @@ describe("取り消しは 行ロック → 後始末 → 削除 の順", () => {
             return {};
           }),
         },
+        // main合流で追加された査定申込(dm_inquiries)ガード: 鍵の後始末の後に
+        // 申込がある宛先を照会する(0件=通常の削除継続経路)。
+        dmRecipientDraft: {
+          findMany: vi.fn(async () => {
+            order.push("inquiryCheck");
+            return [];
+          }),
+        },
         $queryRaw: vi.fn((...args: unknown[]) => {
           order.push("lockRows");
           lockRowsCall = args;
@@ -359,7 +367,8 @@ describe("取り消しは 行ロック → 後始末 → 削除 の順", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(order).toEqual(["tx", "lockRows", "deleteLocks", "deleteProperty"]);
+    // main合流で「deleteLocks」の直後に査定申込チェック(dmRecipientDraft.findMany)が入った。
+    expect(order).toEqual(["tx", "lockRows", "deleteLocks", "inquiryCheck", "deleteProperty"]);
     // ⚠tx そのもの(identity)に対して呼ばれたこと・base client には漏れていないことを固定する。
     expect((deleteEditLocksFor as unknown as Mock).mock.calls[0][0]).toBe(txClient);
     expect(pm.property.delete).not.toHaveBeenCalled();

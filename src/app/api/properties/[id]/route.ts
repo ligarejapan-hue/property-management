@@ -511,6 +511,13 @@ export async function DELETE(
       // 触ってから親を消すと、個別取消(親FOR UPDATE→子delete)と逆順になり 40P01 の
       // デッドロックを作る。順序を「親→子」に統一する。
       await lockPropertyRow(tx, id);
+      // 査定申込(dm_inquiries)の個人情報は消さない(draft_id の FK は RESTRICT)。申込がある物件を
+      // そのまま消すと宛先の cascade が FK に阻まれて P2003=素の 500 になるため、先に 409 で止める。
+      // ⚠親行ロックの後に数える(公開の申込記録も「親の物件行→子」でロックするので、数えた後に増えない)。
+      const inquiryCount = await tx.dmInquiry.count({ where: { draft: { propertyId: id } } });
+      if (inquiryCount > 0) {
+        throw new ApiError(409, "査定申込がある物件は削除できません", "HAS_DM_INQUIRIES");
+      }
       const photos = await tx.propertyPhoto.findMany({
         where: { propertyId: id },
         select: { fileUrl: true },

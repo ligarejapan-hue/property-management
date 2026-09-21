@@ -57,20 +57,21 @@ function sentDraftsForTwoAxis(campaign: SaleDmCampaign) {
       lpPageFirstAt: r.lpPageFirstAt ? new Date(r.lpPageFirstAt) : null,
       phoneInquiryAt: r.phoneInquiryAt ? new Date(r.phoneInquiryAt) : null,
       phoneTapFirstAt: r.phoneTapFirstAt ? new Date(r.phoneTapFirstAt) : null,
+      formInquiryFirstAt: r.formInquiryFirstAt ? new Date(r.formInquiryFirstAt) : null,
     }));
 }
 
 export interface DmViewRow { variantId: string; label: string; delivered: number; viewed: number; viewRate: string }
 // phoneTapLabel: 「件数 / 閲覧 分母(率%)」の表示文字列(分母=閲覧の分母を明示)。閲覧0は "—"。
-export interface LpVariantRow { lpVariantId: string; label: string; sent: number; delivered: number; viewed: number; viewRate: string; phoneTapped: number; phoneTapLabel: string }
+export interface LpVariantRow { lpVariantId: string; label: string; sent: number; delivered: number; viewed: number; viewRate: string; phoneTapped: number; phoneTapLabel: string; inquired: number; inquiryLabel: string }
 export interface PairRow { key: string; label: string; sent: number; delivered: number; viewed: number }
 
-// 電話タップの表示: 「件数 / 閲覧数(率%)」。閲覧0(分母0)は率が定義できないため "—"。
-// 率は集計(aggregate.ts)が出した phoneTapRate をそのまま使い、ここでは割り算をしない
+// 分子/閲覧数の表示: 「件数 / 閲覧数(率%)」。電話タップと申込の両方で使う。閲覧0(分母0)は率が
+// 定義できないため "—"。率は集計(aggregate.ts)が出した rate をそのまま使い、ここでは割り算をしない
 // (二重計算をやめる)。桁は閲覧率と同じ formatRate = 小数1桁。
-function formatPhoneTapLabel(phoneTapped: number, viewed: number, phoneTapRate: number | null): string {
-  if (phoneTapRate == null) return "—";
-  return `${phoneTapped} / ${viewed} (${formatRate(phoneTapRate, 1)})`;
+function formatPerViewLabel(numerator: number, viewed: number, perViewRate: number | null): string {
+  if (perViewRate == null) return "—";
+  return `${numerator} / ${viewed} (${formatRate(perViewRate, 1)})`;
 }
 
 // DM型の成績 = 閲覧率(設計 2026-09-08 §2.1)。到達かつ閲覧 ÷ 到達。
@@ -96,7 +97,9 @@ export function buildLpVariantRows(campaign: SaleDmCampaign): LpVariantRow[] {
     viewed: v.viewed,
     viewRate: formatRate(v.deliveredViewed, v.delivered),
     phoneTapped: v.phoneTapped,
-    phoneTapLabel: formatPhoneTapLabel(v.phoneTapped, v.viewed, v.phoneTapRate),
+    phoneTapLabel: formatPerViewLabel(v.phoneTapped, v.viewed, v.phoneTapRate),
+    inquired: v.inquired,
+    inquiryLabel: formatPerViewLabel(v.inquired, v.viewed, v.inquiryRate),
   }));
 }
 

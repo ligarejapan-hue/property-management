@@ -82,7 +82,7 @@ beforeEach(() => {
 });
 
 describe("DELETE /api/properties/[id] と鍵の後始末の順序", () => {
-  it("Task 8: lockPropertyRow(行ロック) → deleteEditLocksFor(後始末) → property.delete の順で、同じ tx を使う", async () => {
+  it("Task 8: lockPropertyRow(行ロック) → 査定申込チェック → deleteEditLocksFor(後始末) → property.delete の順で、同じ tx を使う", async () => {
     const order: string[] = [];
     let txClient: unknown;
     let lockTxArg: unknown;
@@ -91,6 +91,15 @@ describe("DELETE /api/properties/[id] と鍵の後始末の順序", () => {
     pm.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       order.push("tx");
       txClient = {
+        // main合流で追加された査定申込(dm_inquiries)ガード: 親行ロックの直後に
+        // 件数を数え、1件でもあれば 409 で止める(HAS_DM_INQUIRIES)。ここでは
+        // 0 を返して通常の削除継続経路をテストする。
+        dmInquiry: {
+          count: vi.fn(async () => {
+            order.push("inquiryCheck");
+            return 0;
+          }),
+        },
         propertyPhoto: { findMany: vi.fn(async () => []) },
         attachment: { updateMany: vi.fn(async () => ({ count: 0 })) },
         propertyDmLog: { deleteMany: vi.fn(async () => ({ count: 0 })) },
@@ -116,7 +125,10 @@ describe("DELETE /api/properties/[id] と鍵の後始末の順序", () => {
     const res = await deleteRequest();
 
     expect(res.status).toBe(200);
-    expect(order).toEqual(["tx", "lock", "cleanup", "delete"]);
+    // main合流で「lock」の直後に査定申込チェック(dmInquiry.count)が入った。
+    // 親行ロック→申込チェック→(写真/添付/DMログの後始末)→鍵の後始末→削除、
+    // という実際の順序のうち意味のある境目だけを記録している。
+    expect(order).toEqual(["tx", "lock", "inquiryCheck", "cleanup", "delete"]);
     // ⚠tx そのもの(identity)に対して呼ばれたこと(base client=prisma のトップレベル
     //   ではないこと)を固定する。
     expect(lockTxArg).toBe(txClient);

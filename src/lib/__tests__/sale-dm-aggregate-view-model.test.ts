@@ -7,7 +7,8 @@ function draft(over: Partial<SaleDmCampaign["recipients"][number]>): SaleDmCampa
   return {
     id: Math.random().toString(36), variantId: "v1", lpVariantId: null, propertyId: "p", recipientName: "x", recipientZip: null,
     recipientAddress: null, honorific: "様", coOwnerCount: 1, body: "", status: "sent", outcome: "none",
-    deliveryStatus: "delivered", lpFirstAccessAt: null, lpPageFirstAt: null, phoneInquiryAt: null, phoneTapFirstAt: null, ...over,
+    deliveryStatus: "delivered", lpFirstAccessAt: null, lpPageFirstAt: null, phoneInquiryAt: null, phoneTapFirstAt: null,
+    formInquiryCount: 0, formInquiryFirstAt: null, ...over,
   };
 }
 
@@ -94,8 +95,8 @@ describe("二軸の表(設計 2026-09-08)", () => {
   });
   it("LP型ごと(LP型なしの宛先は『LP型なし(外部LP)』)・送付済みのみ・電話タップは件数と分母=閲覧の率", () => {
     expect(buildLpVariantRows(campaign)).toEqual([
-      { lpVariantId: "__none__", label: "LP型なし(外部LP)", sent: 1, delivered: 0, viewed: 0, viewRate: "—", phoneTapped: 0, phoneTapLabel: "—" },
-      { lpVariantId: "l1", label: "X", sent: 2, delivered: 2, viewed: 1, viewRate: "50.0%", phoneTapped: 1, phoneTapLabel: "1 / 1 (100.0%)" },
+      { lpVariantId: "__none__", label: "LP型なし(外部LP)", sent: 1, delivered: 0, viewed: 0, viewRate: "—", phoneTapped: 0, phoneTapLabel: "—", inquired: 0, inquiryLabel: "—" },
+      { lpVariantId: "l1", label: "X", sent: 2, delivered: 2, viewed: 1, viewRate: "50.0%", phoneTapped: 1, phoneTapLabel: "1 / 1 (100.0%)", inquired: 0, inquiryLabel: "0 / 1 (0.0%)" },
     ]);
   });
   it("組み合わせ表", () => {
@@ -141,7 +142,7 @@ describe("二軸の表(設計 2026-09-08)", () => {
     const src = readFileSync(new URL("../sale-dm-letter/aggregate-view-model.ts", import.meta.url), "utf8");
     // 率の再計算(toFixed(0) などの独自計算)が戻ってきたら落とす。
     expect(src).not.toContain("toFixed(0)");
-    expect(src).toContain("formatPhoneTapLabel(v.phoneTapped, v.viewed, v.phoneTapRate)");
+    expect(src).toContain("formatPerViewLabel(v.phoneTapped, v.viewed, v.phoneTapRate)");
     // api-client の SaleDmDraft が phoneTapFirstAt を持つので、局所的な型の拡張(キャスト)は要らない。
     expect(src).not.toContain("DraftWithPhoneTap");
     expect(src).not.toContain("as unknown as");

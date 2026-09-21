@@ -23,7 +23,7 @@
  *
  * ⚠**デプロイ順序(review Minor 11・M5で影響範囲を訂正)**: `deleteEditLocksFor` や
  *   `assertNotEditLockedByOther` は edit_locks への生SQLなので、このコードを
- *   migration(`20260918100000_add_edit_locks`)適用より前にデプロイすると、
+ *   migration(`20260921100000_add_edit_locks`)適用より前にデプロイすると、
  *   `relation "edit_locks" does not exist` で 500 になる。**影響範囲は物件削除・
  *   所有者アーカイブ・所有者統合・取込ロールバックの4経路だけではない**
  *   (以前のこの注記はそう書いていたが過小だった=H6): `assertNotEditLockedByOther` は
@@ -40,7 +40,7 @@
  * 1. マイグレーションを実DBに当てる。
  *      コマンド: npx prisma migrate deploy
  *      (Prisma CLI は自分で `.env` を読むので dotenv 系のラッパーは不要)
- *      期待する出力: `20260918100000_add_edit_locks` が Applied になり、
+ *      期待する出力: `20260921100000_add_edit_locks` が Applied になり、
  *        エラー無く終わる(`edit_locks` テーブルと `EditLockResource` enum が
  *        作られる)。使い捨てできる開発DBなら `npx prisma migrate dev` でも可。
  *

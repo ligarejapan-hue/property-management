@@ -142,6 +142,13 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   sale_dm_lp_phone_tap: new Set(["at"]),
   // 公開LPのプレビュー表示(Task 6 で使用)。device=enum(sp/pc 等)・viewedAt=ISO時刻。
   sale_dm_lp_preview_view: new Set(["device", "viewedAt"]),
+  // 公開LPの査定申込(設計 §2.5)。first=この宛先の初回申込か・at=ISO時刻・result=throttled(全体上限)。
+  // 入力文字(氏名・電話・メール・要望)は載せない。宛先は targetId(draftId)で辿る。
+  sale_dm_inquiry_submit: new Set(["first", "at", "result"]),
+  // 社内の申込一覧の閲覧(PII アクセスの痕跡)。count=表示件数・viewedAt=ISO時刻。対象キャンペーンは targetId。
+  sale_dm_inquiry_view: new Set(["count", "viewedAt"]),
+  // 申込の対応状況の変更。handleStatus=列挙値・updatedAt=ISO時刻(メモ本文は載せない)。
+  sale_dm_inquiry_status_update: new Set(["handleStatus", "updatedAt"]),
   // 取込ロールバックの監査メタデータ（PIIではなく復元対象の構造情報・件数）。
   // 件数/状態系（*Count / blocked）は何件削除・復元・ブロックされたかの非PII監査情報。
   // allowlist のみ（force-safe ではない）ため unknown / 他 action では保持されない。
@@ -289,6 +296,19 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // (値ではない・ALWAYS_SAFE)・updatedAt=ISO日時。会社情報の値そのものは detail に載せず、
   // 混入しても denylist(/name/i,/addr/i,tel,fax,mail 等)で [REDACTED]。
   company_profile_update: new Set(["target", "updatedAt"]),
+  // メール送信設定 更新(管理画面)。fields=変更したフィールド名の配列(値ではない・ALWAYS_SAFE)。
+  // SMTPホスト/ユーザー/差出人/パスワード等の値は detail に載せず、混入しても denylist(/mail/i 等)で [REDACTED]。
+  mail_settings_update: new Set(["fields"]),
+  // メール送信設定のテスト送信。result=sent|failed の enum / code=safeErrorCode() 由来の許可リスト一致
+  // コードのみ(/^[A-Z][A-Z0-9_]{1,40}$/・管理者が原因(パスワード誤り/接続不可等)を切り分けるため)。
+  // 宛先・SMTP応答の生メッセージは載せない。
+  mail_settings_test: new Set(["result", "code"]),
+  // 査定申込の通知メール送信(後続タスクで使用)。attempt=試行回数、recipientUserIds=通知先ユーザーIDの
+  // 配列(UUID・氏名やメールアドレスではない)。本文・宛先メールアドレスは detail に載せない。
+  inquiry_notify_sent: new Set(["attempt", "recipientUserIds"]),
+  // 通知メール送信の失敗(後続タスクで使用)。code=safeErrorCode() 由来の分類コードのみ(SMTP応答の生
+  // メッセージ・宛先は載せない)。
+  inquiry_notify_failed: new Set(["attempt", "code"]),
   // 表示名監査（read-only レポート）の閲覧/CSV 出力監査。detail は操作事実の
   // 非PIIメタデータのみ（entity/format=enum・viewedAt=ISO日時・各種件数/真偽）。
   // owner-prefixed な件数/真偽（ownerGroupCount/ownerTruncated/ownerNameVisible）は

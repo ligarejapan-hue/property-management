@@ -21,6 +21,7 @@ import {
 } from "@/lib/import-rollback";
 import { extractUpdatedFields } from "@/lib/import-row-display";
 import { deleteEditLocksFor } from "@/lib/edit-lock/service";
+import { lockPropertiesForUpdate } from "@/lib/dm-batch/locks";
 
 interface BlockedDetail {
   rowNumber: number;
@@ -38,6 +39,10 @@ interface RestoreFieldDetail {
 }
 
 const TOLERANCE_MS = 5000;
+
+// 査定申込(dm_inquiries)の個人情報は消さない(draft_id の FK は RESTRICT)。申込がある物件を消そうとすると
+// P2003 で tx 全体が落ち、無関係な行のロールバックまで巻き添えになるため、削除対象から外して blocked に載せる。
+const HAS_DM_INQUIRIES_REASON = "査定申込があるため削除できません (has_dm_inquiries)";
 
 export async function POST(
   req: NextRequest,
@@ -124,6 +129,8 @@ export async function POST(
                   nextActions: true,
                   dmLogs: true,
                   investigationLogs: true,
+                  // 申込が1件でもある宛先の数(申込の中身は読まない)。
+                  dmRecipientDrafts: { where: { inquiries: { some: {} } } },
                 },
               },
             },
@@ -145,6 +152,14 @@ export async function POST(
         continue;
       }
       const c = prop._count;
+      if (c.dmRecipientDrafts > 0) {
+        blockedDetails.push({
+          rowNumber: row.rowNumber,
+          action: "delete",
+          reason: HAS_DM_INQUIRIES_REASON,
+        });
+        continue;
+      }
       const hasRelated =
         c.photos > 0 ||
         c.attachments > 0 ||
@@ -394,28 +409,45 @@ export async function POST(
           "CONFLICT",
         );
       }
-      // ⚠削除する物件の行をロックしてから鍵を後始末する(Task 8)。取り消しは
-      //   これまで物件行をロックせずに削除していたため、後始末だけを tx に足しても
-      //   「まだ commit されていない acquireEditLock」を取りこぼす窓が残る:
-      //     取り消しtx: 後始末 → 削除
+      // 事前分類の後に申込が入った物件を消さない。⚠親の物件行をロックしてから調べる
+      // (公開の申込記録も「親の物件行→子」でロックするため、調べた後に増えない=P2003 で tx が落ちない)。
+      // 行ごとにロック+照会すると往復が件数×2 になり、対話 tx の既定タイムアウト(5 秒)で
+      // 大きなロールバックが丸ごと落ちるため、ロック1文(id 昇順)+申込の照会1回にまとめる。
+      //
+      // ⚠**鍵の後始末は、この行ロックの後・削除の前に置く**(Task 8)。取り消しはこれまで
+      //   物件行をロックせずに削除していたため、後始末だけを tx に足しても「まだ commit されて
+      //   いない acquireEditLock」を取りこぼす窓が残る:
+      //     取り消しtx : 後始末 → 削除
       //     並行acquire: (窓)lockPropertyRow → 鍵をINSERT → commit
-      //   の順で並ぶと、鍵が commit された時点で既に後始末は終わっており、直後に
-      //   物件だけ消えて鍵が孤児になる。acquire 側は必ずこの物件行を
-      //   lockPropertyRow(= SELECT ... FOR UPDATE)してから鍵を書くため、ここでも
-      //   同じ行を FOR UPDATE で押さえてから後始末すれば、どちらが先に並んでも
-      //   後始末は commit 済みの鍵を必ず拾える。
-      const deletablePropertyIds = deletable.map((row) => row.createdId!);
-      if (deletablePropertyIds.length > 0) {
-        await tx.$queryRaw`SELECT id FROM properties WHERE id = ANY(${deletablePropertyIds}::uuid[]) ORDER BY id FOR UPDATE`;
+      //   の順で並ぶと、鍵が commit された時点で後始末は既に終わっており、直後に物件だけ
+      //   消えて鍵が孤児になる。acquire 側は必ず物件行を FOR UPDATE してから鍵を書くので、
+      //   同じ行をここで押さえてから後始末すれば、どちらが先に並んでも commit 済みの鍵を必ず拾える。
+      const deleteIds = deletable.map((row) => row.createdId!);
+      const inquiryPropertyIds = new Set<string>();
+      if (deleteIds.length > 0) {
+        await lockPropertiesForUpdate(tx, deleteIds);
         await deleteEditLocksFor(
           tx,
-          deletablePropertyIds.map((id) => ({
+          deleteIds.map((id) => ({
             resourceType: "property" as const,
             resourceId: id,
           })),
         );
+        const draftsWithInquiries = await tx.dmRecipientDraft.findMany({
+          where: { propertyId: { in: deleteIds }, inquiries: { some: {} } },
+          select: { propertyId: true },
+        });
+        for (const d of draftsWithInquiries) inquiryPropertyIds.add(d.propertyId);
       }
       for (const row of deletable) {
+        if (inquiryPropertyIds.has(row.createdId!)) {
+          blockedDetails.push({
+            rowNumber: row.rowNumber,
+            action: "delete",
+            reason: HAS_DM_INQUIRIES_REASON,
+          });
+          continue;
+        }
         await tx.property.delete({ where: { id: row.createdId! } });
         deletedCount++;
       }
@@ -542,7 +574,8 @@ export async function POST(
       alreadyRolledBack: false,
       eligible: true,
       summary: {
-        deletable: deletable.length,
+        // 実適用件数(実行直前に申込が入って外した物件を含めない)
+        deletable: deletedCount,
         restorable: restoredPropertyCount,
         restorableFieldCount: restoredFieldCount,
         blocked: blockedDetails.length,

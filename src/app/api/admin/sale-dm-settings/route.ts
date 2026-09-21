@@ -52,6 +52,8 @@ const putSchema = z.object({
   lpUrl: absUrlOrEmpty.optional(),
   senderName: z.string().trim().max(100).optional(),
   senderContact: z.string().trim().max(200).optional(),
+  // 公開LPの申込フォームに表示する個人情報の取扱い文。空文字はクリア(=ひな形 DEFAULT_PRIVACY_TEXT を表示)。
+  privacyText: z.string().trim().max(2000).optional(),
   // APIキー: 指定時は暗号化して保存・空文字は「クリア」・未指定(undefined)は現状維持(=画面では値を返さない)。
   anthropicApiKey: z.string().trim().max(500).optional(),
   openaiApiKey: z.string().trim().max(500).optional(),
@@ -71,6 +73,7 @@ export async function GET() {
           lpUrl: row?.lpUrl ?? null,
           senderName: row?.senderName ?? null,
           senderContact: row?.senderContact ?? null,
+          privacyText: row?.privacyText ?? null,
           // 値は返さず「設定済/未設定」だけ返す(キーを画面・レスポンスに出さない)。
           hasAnthropicKey: !!row?.anthropicApiKeyEnc,
           hasOpenaiKey: !!row?.openaiApiKeyEnc,
@@ -103,6 +106,7 @@ export async function PUT(request: NextRequest) {
     if (body.lpUrl !== undefined) { data.lpUrl = norm(body.lpUrl) ?? null; changed.push("lpUrl"); }
     if (body.senderName !== undefined) { data.senderName = norm(body.senderName) ?? null; changed.push("senderName"); }
     if (body.senderContact !== undefined) { data.senderContact = norm(body.senderContact) ?? null; changed.push("senderContact"); }
+    if (body.privacyText !== undefined) { data.privacyText = norm(body.privacyText) ?? null; changed.push("privacyText"); }
 
     // APIキー: 値があれば暗号化して保存(マスターキー必須)。空文字はクリア(null)。未指定は触らない。
     const applyKey = (raw: string | undefined, field: "anthropicApiKeyEnc" | "openaiApiKeyEnc", label: string) => {
@@ -139,6 +143,7 @@ export async function PUT(request: NextRequest) {
         data: {
           provider: row.provider, model: row.model, trackingBaseUrl: row.trackingBaseUrl,
           lpUrl: row.lpUrl, senderName: row.senderName, senderContact: row.senderContact,
+          privacyText: row.privacyText,
           hasAnthropicKey: !!row.anthropicApiKeyEnc, hasOpenaiKey: !!row.openaiApiKeyEnc,
           encryptionConfigured: isSecretCryptoConfigured(), updatedAt: row.updatedAt,
         },

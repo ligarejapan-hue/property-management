@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const sql = readFileSync(
-  join(process.cwd(), "prisma/migrations/20260918100000_add_edit_locks/migration.sql"),
+  join(process.cwd(), "prisma/migrations/20260921100000_add_edit_locks/migration.sql"),
   "utf8",
 ).replace(/\r\n/g, "\n");
 

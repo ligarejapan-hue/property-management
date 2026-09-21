@@ -572,7 +572,7 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 
 `20260910100000_add_dm_lp_assets` は additive のみ(表 `dm_lp_assets` 新設=写真ライブラリ、`dm_lp_variant_media` 新設=LP型の枠)。バックフィル無し。FK は `dm_lp_variant_media.asset_id → dm_lp_assets.id` が `ON DELETE RESTRICT`(使用中の写真は消せない=アプリ側でも先に枠から外させる)、`dm_lp_variant_media.lp_variant_id → dm_lp_variants.id` が `ON DELETE CASCADE`(LP型を消せば枠も一緒に消える)。rollback は2表の DROP で戻せる(enum の追加なし)。
 
-公開口 `/lp-assets/<publicId>` は認証なし(`src/proxy.ts` の `PUBLIC_PATHS` に追加済み)。`publicId` は32桁の乱数で、いずれかのLP型が参照している写真だけを返す(ライブラリに入れただけ・削除済みは404)。レート制限は300/分。`Cache-Control: immutable` で1年キャッシュするため、**削除しても配布済みのキャッシュ（閲覧者のブラウザやCDN）にはしばらく残る**運用上の注意がある(差し替えは新しい `publicId` で行う設計)。nginx のアクセスログ除外は`/t/`・`/u/`と違って**行わない**(`publicId` は乱数でPIIではない)。
+公開口 `/lp-assets/<publicId>` は認証なし(`src/proxy.ts` の `PUBLIC_PATHS` に追加済み)。`publicId` は32桁の乱数で、いずれかのLP型が参照している写真だけを返す(ライブラリに入れただけ・削除済みは404)。レート制限は300/分。`Cache-Control: immutable` で1年キャッシュするため、**削除しても配布済みのキャッシュ（閲覧者のブラウザやCDN）にはしばらく残る**運用上の注意がある(差し替えは新しい `publicId` で行う設計)。⚠**nginx のアクセスログ除外は `/lp-assets/` にも必須**(`publicId` 自体は乱数でPIIではなく、公開ページの `Referrer-Policy: strict-origin`(オリジンのみ・パスは送らない)により `/lp-assets/<publicId>` へのリクエストの `Referer` に `/t/<token>` が載ることは無いが、多層防御としてアクセスログ除外は維持する。詳細と設定箇所は下の「売却DM LP型「公開LP」」節を参照)。
 
 `STORAGE_BACKEND=server` の環境では `lp-assets/` 配下にファイルが増える(uploads と同じストレージ層を共用)。写真は**端末側で例外なく canvas 再エンコード**して長辺1600pxのJPEGにしてから送る(`src/lib/lp-asset-prepare.ts`。JPEGを含め無変換で送る道は無い=向きを画素に焼き込むため)ので、この機能で新規に追加したサーバー側の依存パッケージは無い。
 
@@ -592,13 +592,65 @@ npx tsx scripts/reconcile-sale-dm-template-freeze.ts --apply   # 実書込
 
 `/t/<token>` は今回から HTML を返す**経路を持つ**ようになる(公開ロールアウトゲート `SALE_DM_LP_PUBLIC_ENABLED` が有効かつ宛先に付いたLP型に文章が保存されていればアプリ内のご案内ページ、それ以外(ゲート無効・LP型なし)は従来どおり302で外部LPへ転送。未知tokenは従来どおり302(有効なtokenはゲート有効時のみページが出るため応答は当然異なる。tokenは11桁の base64url・60/分の制限))。レスポンスヘッダは `Cache-Control: no-store`・`X-Robots-Tag: noindex`・CSP `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`(外部読み込みなし・インラインCSSとscript1本のみ。`connect-src 'self'` は電話タップの送信が自分自身宛のときだけ通るようにするもので、これが無いと送信ごと遮断される)。電話ボタンのタップは `POST /t/<token>/phone-tap` で受け(常に204を返す=宛先の存在有無を漏らさない・レート制限60/分)、送付済み(`sent`)の宛先のときだけ `phone_tap_count`/`phone_tap_first_at` を更新する(反響としては数えない=反響は引き続き手入力)。社内プレビュー(LP型編集画面のプレビュー)はこのゲートの対象外で常に見える。
 
-公開経路の設定読み出しは新設の `loadSaleDmPublicPageConfig`(会社案内・電話番号・公開ゲートの有無など表示判定に要る列/envだけを読み、謄本取得等の課金用APIキー列には触れない)。nginx のアクセスログ除外は引き続き `/u/` のみ(`/t/` は追加しない=既存方針を維持)。
+公開経路の設定読み出しは新設の `loadSaleDmPublicPageConfig`(会社案内・電話番号・公開ゲートの有無など表示判定に要る列/envだけを読み、謄本取得等の課金用APIキー列には触れない)。**⚠nginx のアクセスログ除外は `/u/` だけでなく `/t/` と `/lp-assets/` にも必須**(@codex PR#434 P1是正: 以前の版はここで `/t/` をアクセスログ除外の対象外としていたが誤りだった)。`/t/<token>` は査定申込フォーム(`POST /t/<token>/inquiry`)を送信できる権限そのものであり、URL を読めた者はトークンを再生して申込を送信できてしまう(`/t/` のアクセスログ除外はこれだけで必須=リクエスト行そのものに token が載る)。公開ページの `Referrer-Policy` は `strict-origin`(Referer はオリジンのみ・パスは送らない)に変更済みで、同一オリジンの自動サブリクエスト(favicon・`/lp-assets/<publicId>` の画像読み込みなど)が `Referer` に `/t/<token>` を載せて運ぶことは無くなった(@codex R10 是正)。それでも **`/lp-assets/` のアクセスログ除外は多層防御として維持する**(`publicId` 自体はPIIではないが、nginx の版差やログ形式の変更・将来のブラウザ挙動の変化など単一の仕組みに守りを委ねない)。したがって **`/t/` を中継する nginx の server ブロック全て**(公開ホスト `app.ligarejapan.com` の vhost・`deploy/nginx/property-management.conf.example` を元にした既定の `property-management` server・今後 `/t/` を中継する他の vhost を含む)で、`location ^~ /t/` と `location ^~ /lp-assets/` の両方に `/u/` と同じ `access_log off;` と `error_log /dev/null crit;` を設定すること(`deploy/nginx/property-management.conf.example` は反映済み・本番の `/etc/nginx/sites-available/app.ligarejapan.com` にも同じ location を足すこと)。
+
+反映後の確認: `grep -c " /t/" /var/log/nginx/<vhost名>.access.log` を reload の前後で実行し、reload 後にカウントが増え続けていないことを確認する(増え続けていれば location の適用漏れ)。⚠**既存ログの点検も必要**: 本番は2026-09-16に点検済みで、ローテーション済みの古いログに実在のトークンが1行だけ記録されていたが、その時点までそのトークン宛の手紙は未送付(`status` が `sent` でない)だったため申込は記録され得ない状態だった(実害なし)。新たに `/t/` を公開ホストへ足す環境では反映前に同様の点検を行うこと。
 
 監査ログの action は2つ追加(社内プレビュー表示=`sale_dm_lp_preview_view`・電話タップ=`sale_dm_lp_phone_tap`)。公開LP表示は既存の `sale_dm_tracking_hit` をそのまま使う(この action は allowlist に載っていなかったので補完した=漏れの是正)。
 
-**⚠公開ロールアウトゲート`SALE_DM_LP_PUBLIC_ENABLED`が無いと、本番反映と同時に既存の印刷済みQRがそのまま公開LPになる**: 本番の追跡ホスト(`lp.ligarejapan.com`)は既にこのアプリへ着地する設定のため、このゲートが無ければ反映した瞬間に「送付済み・LP型に文章あり」の宛先へ以前印刷済みの `/t/<token>` が(HTTPS 切替前の平文HTTPのままでも)アプリ内ページとして出てしまう。そのためゲートの既定値は無効(未設定)で、下の切替手順の最後で明示的に有効化するまで `/t/` は従来どおり外部LPへ転送し続ける。
+**⚠公開ロールアウトゲート`SALE_DM_LP_PUBLIC_ENABLED`が無いと、本番反映と同時に既存の印刷済みQRがそのまま公開LPになる**: 公開LPのホストは `app.ligarejapan.com`(nginx の server ブロックで `/t/` `/u/` `/lp-assets/` だけを公開し、それ以外は 404。443 は公開アドレス限定で listen=tailscaled が 443 を保持しているため)で、このアプリに届く経路が既にあるため、このゲートが無ければ反映した瞬間に「送付済み・LP型に文章あり」の宛先へ以前印刷済みの `/t/<token>` が(HTTPS 切替前の平文HTTPのままでも)アプリ内ページとして出てしまう。そのためゲートの既定値は無効(未設定)で、下の切替手順の最後で明示的に有効化するまで `/t/` は従来どおり外部LPへ転送し続ける。
 
-**所有者に実際に見せるための切替手順(発注者作業を含む・この順で行う)**: (1) Xserver の「DNSレコード設定」で `lp.ligarejapan.com` の A レコードを1行追加しVPSへ向ける、(2) こちらで証明書を取得(`certbot`)、(3) nginx に server block を追加(`deploy/nginx/property-management.conf.example` の既存設定を参考に `lp.ligarejapan.com` 用の server を追加)、(4) 売却DM設定画面の「追跡URL(trackingBaseUrl)」をこの https の住所へ切り替える、(5) **`SALE_DM_LP_PUBLIC_ENABLED=1` を app.env に追加して `systemctl restart property-management`**(env は起動時読みのため restart 必須)、(6) 印刷し直す(切替後に印刷した手紙から新しいURL・アプリ内ページになる)。**(5)のスイッチを入れるまでは、(4)まで終えて trackingBaseUrl を https に切り替えていても `/t/` は従来どおり外部LPへ転送するだけ**(LP型に文章を保存した宛先でも同じ)。⚠切替後に印刷した手紙から新しいURLになる=既に配布済みの手紙のQRは古いURLのまま変わらない。
+**所有者に実際に見せるための切替: 2026-09-16 切替完了(公開ホスト=`app.ligarejapan.com`)**。やり直し・拡張するときの記録(本番で確認済みの事実のみ):
+
+1. DNS: `ligarejapan.com` のネームサーバーを Xserver(`ns1`〜`ns5.xserver.jp`)から お名前.com(`01`〜`04.dnsv.jp`)へ移した(ドメインは発注者のお名前.com アカウントで登録されており、Xserver の DNS は発注者が編集できないため)。移す前に既存レコードを全てお名前.com のゾーン取込で写し、Xserver の応答と照合済み(apex A `183.181.89.111`・ワイルドカード `*` A `183.181.89.111`・MX `0 ligarejapan.com`・SPF TXT・`lp` A と `www.lp` A `103.169.142.0`・`lp` TXT `canva-domain-verify`=Canva サイト)。会社サイト・メール・Canva は止まっていない。
+2. 公開LPのホスト: お名前.com に A レコード `app` → `133.117.72.225` を追加。
+3. 証明書: `certbot --nginx -d app.ligarejapan.com`(Let's Encrypt・自動更新。期限の通知は info@ligarejapan.com)。
+4. nginx: `/etc/nginx/sites-available/app.ligarejapan.com`(有効化済み)。`/t/` `/u/` `/lp-assets/` だけを `proxy_set_header Host $host;` 付きで中継し、それ以外は 404(ログイン画面・社内API はこのホストに出さない)。**公開の口を新しく足したら、ここにも location を足す**。
+5. 設定: `sale_dm_config.tracking_base_url` = `https://app.ligarejapan.com`、予備の `lp_url` = `https://ligarejapan.com/`(会社ホームページ=アプリ内LPの文章が無い手紙はここへ転送)。
+6. `SALE_DM_LP_PUBLIC_ENABLED=1` を `/etc/property-management/app.env` に追加して restart 済み。
+7. 切替前に印刷した手紙のQRは古いURLのまま(切替時点の送付済みは0通)。
+
+⚠**nginx の 443 の罠**: certbot は `listen 443 ssl;`(全アドレス)を書くが、このサーバーでは tailscaled が tailnet 側アドレスで 443 を持っているため**黙って bind に失敗する**。`nginx -t` は通り reload も「成功」するのに、nginx は古い設定のまま動き続ける。エラーは `/var/log/nginx/error.log` の `bind() to 0.0.0.0:443 failed (98: Address already in use)` と `ss -tlnp | grep :443` でしか見えない。直し方=公開アドレスだけで listen する: `listen 133.117.72.225:443 ssl;` と `listen [2400:8500:2002:3371:133:117:72:225]:443 ssl;`。**今後ほかのホストで `certbot --nginx` を使うときも同じ修正が要る**。
+
+⚠**`lp.ligarejapan.com` は Canva のサイト(公開中)=触らない**(A/TXT を変えない・このアプリへ向けない)。
+
+外から確かめるとき、DNS のキャッシュが古い間は `curl --resolve app.ligarejapan.com:443:133.117.72.225 https://app.ligarejapan.com/...` を使う(手元のリゾルバが古いワイルドカード `183.181.89.111`=Xserver を返すことがあり、その 404・証明書エラーはアプリではない)。
+
+#### 売却DM 公開LP「査定申込フォーム」(2026-09): migration
+
+`20260916100000_add_dm_inquiries` は additive のみ(表 `dm_inquiries` 新設・`dm_recipient_drafts` に `form_inquiry_count`(既定0)・`form_inquiry_first_at`(nullable)を追加・`sale_dm_config` に `privacy_text`(nullable)を追加)。バックフィル無し。**`dm_inquiries.draft_id → dm_recipient_drafts.id` の外部キーは `ON DELETE RESTRICT`**(申込の個人情報を宛先の削除に巻き込んで消さない=申込がある宛先は削除できない)、`handled_by_id → users.id` は `SET NULL`。rollback は表の DROP と3列の DROP で戻せる(enum の追加なし)。⚠一度でも申込が入ったあとに rollback する場合は、`dm_inquiries` の行(氏名・電話などの個人情報)を先に退避するか消去の判断を取ってから DROP する。
+
+**⚠公開の書き込み口(配信停止 `/u/`・電話タップ `/t/<token>/phone-tap`・査定申込 `/t/<token>/inquiry`)の送信元判定は Host ヘッダ基準**(`src/lib/public-origin.ts`)。nginx は `proxy_set_header Host $host;` を必ず渡す(外すとアプリが自分自身からの送信を「よそ」と判定して拒否する=配信停止ボタン・申込フォームが 403、電話タップが数えられない)。**あわせて公開ホストの vhost の `/t/` `/u/` `/lp-assets/` の location には `proxy_set_header X-Real-IP $remote_addr;` と `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` も必須**: 公開の口の端末IPごとの回数制限はこの2つをキーにする(`src/lib/public-rate-limit.ts` の `clientRateKey`)。無いと全訪問者が同じキー(`unknown`)を共有し、外部の1人が連投するだけで全員の申込フォームが回数制限にかかる。また X-Real-IP を nginx 側で上書きしないと、送信者がヘッダを偽って回数制限をすり抜けられる。(本番の `app.ligarejapan.com` の vhost は両方を設定済み=2026-09-16 確認。)`Origin: null`(Referrer-Policy が厳しいページからのフォーム送信で実ブラウザが付ける)と Origin なしは拒否しない。公開ページの `Referrer-Policy` は `strict-origin`。
+
+申込は `status=sent` の宛先だけ記録する(送付前は 409「プレビュー中」)。レート制限は端末IP 10/分・token 5/時・全体 120/時。申込者への自動返信は無く、担当者へのメール通知は次段(`notify_status` 列は次段のために作成済み・今は `pending` のまま)。
+
+#### 売却DM 申込の通知メール(2026-09): migration・新規依存
+
+`20260918100000_add_mail_config_and_inquiry_notify` は additive のみ(表 `mail_config` 新設[singleton・1行のみ運用]・`users` に `inquiry_notify_enabled`(既定 false)・`inquiry_notify_email`(nullable)を追加・`dm_inquiries` に `notify_claimed_at`(nullable)を追加)。バックフィル無し。rollback は表の DROP と3列の DROP で戻せる(enum の追加なし)。
+
+`20260919100000_add_inquiry_notify_sent_user_ids` も additive のみ(`dm_inquiries` に `notify_sent_user_ids`(`UUID[]` 既定 `'{}'`・NOT NULL)を追加)。レビュー指摘対応(P2): 送信に成功した宛先の user id をこの列へ逐次 push で追記し、手動の「再送」ボタン・サーバー再起動後の再開が同じ宛先へ二重送信しないための唯一の正本にする。バックフィル無し(既存行は空配列のまま=過去分は再送の対象になり得るが個人情報の重複送信ではなく実害はメール1通の再送のみ)。列は user id のみで個人情報を含まず、申込一覧の API/画面には出さない内部メタデータ。rollback は列の DROP で戻せる(enum の追加なし)。
+
+新規の npm 依存 `nodemailer`(`@types/nodemailer` は devDependencies)。
+> **注意(新規依存の到達性)**: 依存の取得コマンドが npm レジストリ(`registry.npmjs.org`)に到達できることが、このリリースの hard gate(他リリースの `cdn.sheetjs.com` 到達確認と同様に、反映前に到達を確認すること)。
+
+送信設定(サーバー名・ポート・ユーザー名・パスワード・送信元・アプリのURL)は **DB(`mail_config`)へ保存する方式**で、env ではない。したがって新しい環境変数は無い。パスワードの暗号化には既存の `SALE_DM_SETTINGS_ENC_KEY`(売却DM設定と共用・本番に設定済み)を使うため、鍵の追加設定も不要。
+
+反映後、次の手順で通知メールを有効化する(管理者の作業。**パスワードはこの手順の管理画面にだけ入力し、チャットや資料に書かない**):
+
+1. 管理画面の「メール送信設定」(サイドバー「DM」グループ→`/admin/mail-settings`)を開き、Xserver のメールボックスの値を入力して保存する:
+   - 送信サーバー: `sv****.xserver.jp`(Xserver サーバーパネルの「サーバー情報」で確認できる実際のホスト名)
+   - ポート: `465`・接続方式: `SSL`
+   - ユーザー名: メールボックスのメールアドレス全体(例 `info@ligarejapan.com`)
+   - パスワード: そのメールボックスのパスワード(保存後は画面に戻らない=空欄のまま保存すると変更しない)
+   - 送信元アドレス: 通知メールの From(通常はユーザー名と同じ)
+   - アプリのURL: 通知メールのリンクに使う、社内から開ける https のアドレス(Tailscale の HTTPS アドレス)
+   - 通知の詳しさ: 最小(既定)/詳しく
+2. 「テスト送信」を押し、操作者自身の通知先にテストメールが届くことを確認する。届かない場合は画面に出るSMTPコード(許可リスト一致の短い符号)とヒントを見る(パスワードの値自体は成功時・失敗時ともに画面へ返らない)。
+3. 利用者一覧の各行の「通知」ボタンから、査定申込の通知を受け取る人を個別にONにする(既定は全員OFF=このステップまでは誰にも届かない)。代替の通知先アドレスも設定できる(空欄なら本人のログインメールへ届く)。
+4. Xserver のサーバーパネルで SPF と DKIM を有効化する(迷惑メールフォルダ対策。アプリ側の変更は不要)。
+5. VPS から Xserver の SMTP ポートへ外向きに接続できることを確認する: `nc -vz sv****.xserver.jp 465`(ブロックされていると「テスト送信」が接続エラーで失敗する)。
+
+通知の送信は申込の記録が終わった後にバックグラウンドで始まり、申込者への応答(フォーム送信の結果表示)を待たせない。送信は宛先ごとに最大4回(即時→30秒後→2分後→10分後)試みる。全員へ送り終えた申込は画面上とくに変化しない(「通知できていません」の帯が出ないことが成功の目印。「送付済み」のような固有の状態ラベルは画面には無い)。1人でも最終的に失敗した申込は「査定の申込」画面(`/properties/sale-dm/inquiries`)に「通知できていません」+「再送」ボタンとして残る(押すと同じ再試行を再度行う)。通知メールの内容・宛先は受信者ごとに変わる: 電話番号・メールアドレス・ご要望まで含む詳しい内容は、その受信者が画面でも所有者の電話・メールを平文で見られる権限を持つときだけ届き、それ以外の受信者には町名までの所在などの最小限だけが載る。**現場担当者(field_staff)は、自分が作成または担当している物件の申込についてのみ通知の対象になる。担当外の物件については、最小限の内容であっても通知が届かない(宛先の一覧に入らない)**。通知先が1人も設定されていない間は、申込のたびに失敗として記録され「査定の申込」画面に注意書きが出る(上記ステップ3で解消する)。
 
 #### 反響の記録リリース（migration `add_dm_reaction_columns`）: 旧 sale_dm 送付記録の照合
 

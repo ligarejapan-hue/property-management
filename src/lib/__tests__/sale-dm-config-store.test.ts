@@ -216,7 +216,7 @@ describe("loadSaleDmPublicPageConfig: 公開/tページ描画用・送付元/追
     pm.saleDmConfig.findUnique.mockResolvedValue({ trackingBaseUrl: null, senderName: null, senderContact: null });
     await loadSaleDmPublicPageConfig();
     const arg = pm.saleDmConfig.findUnique.mock.calls[0][0] as { select?: Record<string, boolean> };
-    expect(arg.select).toEqual({ senderName: true, senderContact: true, trackingBaseUrl: true });
+    expect(arg.select).toEqual({ senderName: true, senderContact: true, trackingBaseUrl: true, privacyText: true });
     expect(arg.select?.anthropicApiKeyEnc).toBeUndefined();
     expect(arg.select?.openaiApiKeyEnc).toBeUndefined();
   });

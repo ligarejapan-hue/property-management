@@ -51,6 +51,9 @@ async function toApiError(res: Response): Promise<Error> {
   return Object.assign(err, {
     code: typeof body?.error?.code === "string" ? body.error.code : null,
     status: res.status,
+    // メール送信設定のテスト送信(502)だけが持つ、SMTP側の許可リスト一致コード(自由文なし)。
+    // 他の応答には無い(undefined のまま)ので、既存の呼び出し元には影響しない。
+    smtpCode: typeof body?.error?.smtpCode === "string" ? body.error.smtpCode : null,
   });
 }
 
@@ -59,6 +62,13 @@ export function apiErrorCode(e: unknown): string | null {
   if (!(e instanceof Error)) return null;
   const code = (e as Error & { code?: unknown }).code;
   return typeof code === "string" ? code : null;
+}
+
+/** 応答エラーから SMTP コード(EAUTH 等)を取り出す（メール送信設定のテスト送信専用）。 */
+export function apiErrorSmtpCode(e: unknown): string | null {
+  if (!(e instanceof Error)) return null;
+  const smtpCode = (e as Error & { smtpCode?: unknown }).smtpCode;
+  return typeof smtpCode === "string" ? smtpCode : null;
 }
 
 async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
@@ -253,6 +263,9 @@ export interface SaleDmDraft {
   phoneInquiryAt: string | null;
   // 公開LPの電話ボタンを最初にタップした時刻(反響とは別物=自動計測。手入力の phoneInquiryAt とは独立)。
   phoneTapFirstAt: string | null;
+  // 公開LPの査定申込の回数と初回時刻(中身は fetchSaleDmInquiries)。
+  formInquiryCount: number;
+  formInquiryFirstAt: string | null;
 }
 
 export interface SaleDmVariant {
@@ -361,6 +374,100 @@ export async function updateSaleDmOutcome(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+export interface SaleDmInquiry {
+  id: string;
+  draftId: string;
+  submittedAt: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  contactPref: string | null;
+  contactTime: string | null;
+  message: string | null;
+  handleStatus: "open" | "in_progress" | "done";
+  handledAt: string | null;
+  handleNote: string | null;
+  contactHidden: boolean;
+  emailHidden: boolean;
+  freeTextHidden: boolean;
+  /** 通知メールの送信状況(pending/sending/sent/failed)。 */
+  notifyStatus: string;
+  /** 通知失敗時の内部コード(no_recipients/mail_not_configured 等)。失敗していないときは null。 */
+  notifyLastError: string | null;
+}
+
+// 申込一覧は状態で絞らない1本のカーソルでたどる(振り分けは画面側)。counts は状態別の件数(範囲全体)。
+export async function fetchSaleDmInquiries(campaignId: string, cursor?: string | null) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { inquiries: [] as SaleDmInquiry[], hasMore: false, nextCursor: null as string | null, counts: { active: 0, done: 0 } };
+  }
+  const cursorQuery = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiFetch<{ inquiries: SaleDmInquiry[]; hasMore: boolean; nextCursor: string | null; counts: { active: number; done: number } }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/inquiries${cursorQuery}`,
+  );
+}
+
+/** 全キャンペーン横断の申込一覧の1行(発注者判断 2026-09-18: 売却DMを使える人全員が見て対応できる)。 */
+export interface SaleDmInquiryAcrossCampaigns extends SaleDmInquiry {
+  campaignId: string | null;
+  campaignName: string | null;
+  /** 物件所在の粗い表示(coarsePropertyLocation)。物件の住所そのものは返らない。 */
+  location: string | null;
+  propertyTypeLabel: string | null;
+}
+
+// 全キャンペーン横断の申込一覧。振り分け(状態)は画面側、カーソルは fetchSaleDmInquiries と同じ作法。
+// notifyRecipientCount は通知メールを受け取る利用者が居ない(=0)ときに画面が警告するための件数。
+export async function getAllSaleDmInquiries(cursor?: string | null) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      inquiries: [] as SaleDmInquiryAcrossCampaigns[],
+      hasMore: false,
+      nextCursor: null as string | null,
+      counts: { active: 0, done: 0 },
+      notifyRecipientCount: 0,
+    };
+  }
+  const cursorQuery = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiFetch<{
+    inquiries: SaleDmInquiryAcrossCampaigns[];
+    hasMore: boolean;
+    nextCursor: string | null;
+    counts: { active: number; done: number };
+    notifyRecipientCount: number;
+  }>(`/api/properties/sale-dm/inquiries${cursorQuery}`);
+}
+
+export async function updateSaleDmInquiryStatus(
+  inquiryId: string,
+  body: { handleStatus: SaleDmInquiry["handleStatus"]; handleNote?: string | null },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { inquiry: { id: inquiryId, handleStatus: body.handleStatus, handledAt: null, handleNote: body.handleNote ?? null, freeTextHidden: false } };
+  }
+  // handleNote は電話・メールの両方を平文で見られない利用者には null(freeTextHidden=true)で返る(@codex R10 P1)。
+  return apiFetch<{ inquiry: Pick<SaleDmInquiry, "id" | "handleStatus" | "handledAt" | "handleNote" | "freeTextHidden"> }>(
+    `/api/properties/sale-dm/inquiries/${inquiryId}`,
+    { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
+}
+
+// 通知メールの再送(notifyStatus が failed の申込のみ・Task 9 で作った POST .../notify)。
+// 202 { data: { started: true } } / 404 / 409 NOT_FAILED はそのまま呼び出し元(画面)に返る。
+export async function resendSaleDmInquiryNotify(inquiryId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { started: true } };
+  }
+  return apiFetch<{ data: { started: boolean } }>(
+    `/api/properties/sale-dm/inquiries/${inquiryId}/notify`,
+    { method: "POST" },
+  );
 }
 
 // 下書きの本文 / 割当型(variantId)の部分更新。
@@ -663,6 +770,7 @@ export interface SaleDmSettings {
   lpUrl: string | null;
   senderName: string | null;
   senderContact: string | null;
+  privacyText: string | null;
   hasAnthropicKey: boolean;
   hasOpenaiKey: boolean;
   encryptionConfigured: boolean;
@@ -671,7 +779,7 @@ export interface SaleDmSettings {
 
 const EMPTY_SALE_DM_SETTINGS: SaleDmSettings = {
   provider: null, model: null, trackingBaseUrl: null, lpUrl: null,
-  senderName: null, senderContact: null, hasAnthropicKey: false, hasOpenaiKey: false,
+  senderName: null, senderContact: null, privacyText: null, hasAnthropicKey: false, hasOpenaiKey: false,
   encryptionConfigured: false, updatedAt: null,
 };
 
@@ -691,6 +799,7 @@ export async function updateSaleDmSettings(body: {
   lpUrl?: string;
   senderName?: string;
   senderContact?: string;
+  privacyText?: string;
 }): Promise<{ data: SaleDmSettings }> {
   if (USE_MOCK) {
     await mockDelay();
@@ -746,6 +855,82 @@ export async function updateCompanySettings(body: {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+  });
+}
+
+// ---------- メール送信設定(管理者・査定申込の通知メール) ----------
+
+// パスワードは値を返さず hasPassword(設定済/未設定)のみ。GET/PUT 共通形式。
+export interface MailSettings {
+  smtpHost: string | null;
+  smtpPort: number | null;
+  smtpSecure: boolean;
+  smtpUser: string | null;
+  hasPassword: boolean;
+  fromAddress: string | null;
+  appBaseUrl: string | null;
+  inquiryMailDetail: "minimal" | "full";
+  // この設定で通知メールが送れる状態かどうか(サーバー側 isMailConfigComplete と同じ判定)。
+  complete: boolean;
+  // false のとき、サーバーに暗号化キーが無くパスワードを保存できない。
+  cryptoConfigured: boolean;
+  // 通知を受け取る利用者数。0 のとき、設定を完了させても届く先が無い。
+  notifyRecipientCount: number;
+}
+
+const EMPTY_MAIL_SETTINGS: MailSettings = {
+  smtpHost: null,
+  smtpPort: 465,
+  smtpSecure: true,
+  smtpUser: null,
+  hasPassword: false,
+  fromAddress: null,
+  appBaseUrl: null,
+  inquiryMailDetail: "minimal",
+  complete: false,
+  cryptoConfigured: true,
+  notifyRecipientCount: 0,
+};
+
+export async function getMailSettings(): Promise<{ data: MailSettings }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { ...EMPTY_MAIL_SETTINGS } };
+  }
+  return apiFetch<{ data: MailSettings }>("/api/admin/mail-settings");
+}
+
+// 部分更新。smtpPassword は指定時のみ送る(空文字=クリア・未指定=現状維持=画面には値を返さない)。
+export async function updateMailSettings(body: {
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpSecure?: boolean;
+  smtpUser?: string;
+  smtpPassword?: string;
+  fromAddress?: string;
+  appBaseUrl?: string;
+  inquiryMailDetail?: "minimal" | "full";
+}): Promise<{ data: MailSettings }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { ...EMPTY_MAIL_SETTINGS } };
+  }
+  return apiFetch<{ data: MailSettings }>("/api/admin/mail-settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// テスト送信。保存済みの設定で送る(サーバー側は現在の DB 値を使う・未保存の変更は反映されない)。
+// 失敗(502)は toApiError が smtpCode を運ぶので、呼び出し元は apiErrorSmtpCode(e) で取り出す。
+export async function sendMailSettingsTest(): Promise<{ data: { result: string } }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { result: "sent" } };
+  }
+  return apiFetch<{ data: { result: string } }>("/api/admin/mail-settings/test", {
+    method: "POST",
   });
 }
 
@@ -968,6 +1153,48 @@ export async function fetchUsers() {
     return { data: MOCK_USERS };
   }
   return apiFetch<{ data: typeof MOCK_USERS }>("/api/users");
+}
+
+// ---------- 利用者ごとの査定申込の通知先(管理者) ----------
+
+export interface UserInquiryNotify {
+  enabled: boolean;
+  // null=ログインの email に送る。
+  email: string | null;
+  loginEmail: string;
+  // false のとき、enabled=true でもこの人には通知が届かない(売却DMを使う権限が無い)。
+  canUseSaleDm: boolean;
+}
+
+const EMPTY_USER_INQUIRY_NOTIFY: UserInquiryNotify = {
+  enabled: false,
+  email: null,
+  loginEmail: "",
+  canUseSaleDm: true,
+};
+
+export async function getUserInquiryNotify(id: string): Promise<{ data: UserInquiryNotify }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { ...EMPTY_USER_INQUIRY_NOTIFY } };
+  }
+  return apiFetch<{ data: UserInquiryNotify }>(`/api/admin/users/${id}/inquiry-notify`);
+}
+
+// 部分更新。email: ""(または null)=クリア(ログインの email を使う)。未指定の項目は触らない。
+export async function updateUserInquiryNotify(
+  id: string,
+  body: { enabled?: boolean; email?: string | "" | null },
+): Promise<{ data: UserInquiryNotify }> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { data: { ...EMPTY_USER_INQUIRY_NOTIFY, ...body, email: body.email ?? null } };
+  }
+  return apiFetch<{ data: UserInquiryNotify }>(`/api/admin/users/${id}/inquiry-notify`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 // ---------- Import Jobs ----------

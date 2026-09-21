@@ -7,6 +7,7 @@ import { requireSaleDmAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-le
 import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 import { buildLpRenderInput } from "@/lib/sale-dm-letter/lp-render-input";
 import { renderLpPage, LP_PAGE_HEADERS } from "@/lib/sale-dm-letter/lp-page";
+import { DEFAULT_PRIVACY_TEXT } from "@/lib/sale-dm-letter/privacy-text";
 
 const DEVICE_VALUES = ["sp", "pc"] as const;
 type Device = (typeof DEVICE_VALUES)[number];
@@ -76,7 +77,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         property: { address: SAMPLE_ADDRESS, propertyType },
         company: { senderName: cfg.senderName, senderContact: cfg.senderContact },
       },
-      { mode: "preview", unsubscribeUrl: null, phoneTapToken: null },
+      { mode: "preview", unsubscribeUrl: null, phoneTapToken: null, form: { action: "#", privacyText: cfg.privacyText ?? DEFAULT_PRIVACY_TEXT, disabled: true } },
     ));
 
     await writeAuditLog({

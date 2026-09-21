@@ -13,9 +13,13 @@ const PAGE_STYLE = [
   ".note{font-size:12.5px;color:#68707d}",
   "button{display:block;width:100%;margin:20px 0 8px;padding:14px;font-size:16px;font-weight:700;color:#fff;background:#b3402f;border:none;border-radius:8px;cursor:pointer}",
   "button:active{opacity:.85}",
+  "ul{margin:0 0 12px;padding-left:1.2em;font-size:15px}",
+  "a.back{display:block;text-align:center;margin-top:16px;color:#0a5246;font-weight:700}",
 ].join("");
 
-function page(title: string, bodyHtml: string): string {
+/** お客様向けの公開カード型ページ(配信停止・査定申込の結果画面で共用)。
+ *  ⚠title と bodyHtml は呼び出し側で escape 済み(固定文)であること。 */
+export function renderPublicCardPage(title: string, bodyHtml: string): string {
   return [
     "<!doctype html>",
     '<html lang="ja"><head><meta charset="utf-8" />',
@@ -31,7 +35,7 @@ function page(title: string, bodyHtml: string): string {
 
 /** GET: 確認画面。停止は下のボタン(POST)を押したときだけ起きる。 */
 export function renderUnsubscribeConfirmPage(): string {
-  return page(
+  return renderPublicCardPage(
     "配信停止のお手続き",
     [
       "<h1>配信停止のお手続き</h1>",
@@ -46,7 +50,7 @@ export function renderUnsubscribeConfirmPage(): string {
 
 /** POST 完了: 記録済み/対象なしを問わず同じ画面(在否を答えない)。 */
 export function renderUnsubscribeDonePage(): string {
-  return page(
+  return renderPublicCardPage(
     "配信停止を受け付けました",
     [
       "<h1>配信停止を受け付けました</h1>",
@@ -58,7 +62,7 @@ export function renderUnsubscribeDonePage(): string {
 
 /** 署名不一致(改ざん・鍵ローテーション後の旧QR)。連絡先はお手紙面へ誘導する。 */
 export function renderUnsubscribeInvalidPage(): string {
-  return page(
+  return renderPublicCardPage(
     "確認できませんでした",
     [
       "<h1>このQRコードを確認できませんでした</h1>",
@@ -69,7 +73,7 @@ export function renderUnsubscribeInvalidPage(): string {
 
 /** 並行更新と衝突(まれ)。もう一度押していただく。 */
 export function renderUnsubscribeBusyPage(): string {
-  return page(
+  return renderPublicCardPage(
     "混み合っています",
     [
       "<h1>ただいま混み合っています</h1>",
@@ -81,7 +85,7 @@ export function renderUnsubscribeBusyPage(): string {
 
 /** 回数制限にかかった(攻撃・連打)。 */
 export function renderUnsubscribeThrottledPage(): string {
-  return page(
+  return renderPublicCardPage(
     "アクセスが集中しています",
     [
       "<h1>アクセスが集中しています</h1>",
@@ -90,11 +94,19 @@ export function renderUnsubscribeThrottledPage(): string {
   );
 }
 
-/** 公開ページ共通の応答ヘッダ(キャッシュ禁止・索引拒否・token を referrer に漏らさない)。 */
+/** 公開ページ共通の応答ヘッダ(キャッシュ禁止・索引拒否・token をよそのサイトの referrer に漏らさない)。
+ *  Referrer-Policy は strict-origin(Referer はオリジンのみ・パスは送らない)。
+ *  - same-origin にしない理由: 同じホストへの自動サブリクエスト(ブラウザの favicon.ico 取得・
+ *    `/lp-assets/...` の画像読み込みなど)にも `Referer` としてページの完全な URL(=`/t/<token>`)が
+ *    付いてしまい、nginx のアクセスログ(除外対象外のパス)に token が残ってしまう(@codex R10)。
+ *  - no-referrer にしない理由: 同じサイトへのフォーム送信でもブラウザが Origin を null にし、
+ *    送信元判定(public-origin.ts)が働かなくなる。
+ *  strict-origin は両立する: 同一オリジンのフォーム POST/sendBeacon には本物の Origin(パスなし)が
+ *  付き、Referer はオリジンだけ(`http(s)://host/`)で token を含まない(実 Chromium で確認済み)。 */
 export const PUBLIC_PAGE_HEADERS: Readonly<Record<string, string>> = {
   "Content-Type": "text/html; charset=utf-8",
   "Cache-Control": "no-store",
   "X-Robots-Tag": "noindex, nofollow",
-  "Referrer-Policy": "no-referrer",
+  "Referrer-Policy": "strict-origin",
   "X-Content-Type-Options": "nosniff",
 };

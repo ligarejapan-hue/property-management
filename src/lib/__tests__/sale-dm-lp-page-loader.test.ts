@@ -3,10 +3,13 @@ vi.mock("@/lib/sale-dm-letter/config-store", () => ({
   loadSaleDmPublicPageConfig: vi.fn(async () => ({
     senderName: "株式会社リガーレ", senderContact: "TEL 03-1234-5678",
     trackingBaseUrl: "https://lp.example.com", lpPublicEnabled: true,
+    privacyText: null,
   })),
 }));
 import { loadLpPageData } from "../sale-dm-letter/lp-page-loader";
 import { loadSaleDmPublicPageConfig } from "../sale-dm-letter/config-store";
+import { escapeHtml } from "../sale-dm-letter/templates/index";
+import { DEFAULT_PRIVACY_TEXT } from "../sale-dm-letter/privacy-text";
 
 const draft = (over: Record<string, unknown> = {}) => ({
   id: "r1", propertyId: "p1", status: "sent", trackingToken: "tok",
@@ -62,6 +65,7 @@ describe("loadLpPageData", () => {
     vi.mocked(loadSaleDmPublicPageConfig).mockResolvedValueOnce({
       senderName: "株式会社リガーレ", senderContact: "TEL 03-1234-5678",
       trackingBaseUrl: "https://lp.example.com", lpPublicEnabled: false,
+      privacyText: null,
     });
     const c = client(draft());
     const r = await loadLpPageData(c as never, "tok");
@@ -96,5 +100,20 @@ describe("loadLpPageData", () => {
       if (r.kind !== "page") return;
       expect(r.html).not.toContain("/u/");
     });
+  });
+
+  it("送付済み: 申込フォームの送信先は /t/<token>/inquiry・同意文は未設定ならひな形", async () => {
+    const r = await loadLpPageData(client(draft({ status: "sent" })) as never, "tok");
+    expect(r.kind).toBe("page");
+    if (r.kind !== "page") return;
+    expect(r.html).toContain('action="/t/tok/inquiry"');
+    expect(r.html).toContain(escapeHtml(DEFAULT_PRIVACY_TEXT.split("\n")[0]));
+    expect(r.html).not.toContain("<fieldset disabled>");
+  });
+
+  it("送付前: フォームは出すが送信不可", async () => {
+    const r = await loadLpPageData(client(draft({ status: "confirmed" })) as never, "tok");
+    if (r.kind !== "page") throw new Error("page expected");
+    expect(r.html).toContain("<fieldset disabled>");
   });
 });

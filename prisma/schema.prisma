@@ -162,6 +162,9 @@ model User {
   isActive           Boolean   @default(true) @map("is_active")
   lastLoginAt        DateTime? @map("last_login_at")
   mustChangePassword Boolean   @default(true) @map("must_change_password")
+  // 査定申込の通知メール(設計 §2.6)。null=ログイン email に送る。
+  inquiryNotifyEnabled Boolean  @default(false) @map("inquiry_notify_enabled")
+  inquiryNotifyEmail   String?  @map("inquiry_notify_email")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
 
@@ -195,6 +198,7 @@ model User {
   salesSheetDesignsUpdated SalesSheetDesign[]     @relation("SalesSheetDesignUpdatedBy")
   dmCampaigns             DmCampaign[]            @relation("DmCampaignCreator")
   dmRecipientDrafts       DmRecipientDraft[]      @relation("DmRecipientGenerator")
+  handledDmInquiries      DmInquiry[]             @relation("DmInquiryHandler")
   registryFetchJobs       RegistryFetchJob[]      @relation("RegistryFetchJobRequestedBy")
   dmExportBatches         DmExportBatch[]         @relation("DmExportBatchCreator")
   lpAssets                DmLpAsset[]             @relation("DmLpAssetCreator")
@@ -1209,6 +1213,9 @@ model DmRecipientDraft {
   // phoneInquiryAt(担当者が手で立てる電話反響)とは別物。
   phoneTapCount         Int              @default(0) @map("phone_tap_count")
   phoneTapFirstAt       DateTime?        @map("phone_tap_first_at")
+  // 公開LPの査定申込フォーム(設計 §2.5)。申込の中身は dm_inquiries(同一宛先の複数回も全件保存)。
+  formInquiryCount      Int              @default(0) @map("form_inquiry_count")
+  formInquiryFirstAt    DateTime?        @map("form_inquiry_first_at")
   outcome               DmOutcome        @default(none)
   outcomeNote           String?          @map("outcome_note")
   generatedBy           String           @map("generated_by") @db.Uuid
@@ -1222,6 +1229,7 @@ model DmRecipientDraft {
   property  Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   generator User       @relation("DmRecipientGenerator", fields: [generatedBy], references: [id])
   draftOwners DmRecipientDraftOwner[]
+  inquiries   DmInquiry[]
 
   @@index([campaignId])
   @@index([propertyId])
@@ -1256,6 +1264,46 @@ model DmLpVariant {
 
   @@index([campaignId])
   @@map("dm_lp_variants")
+}
+
+/// 公開LPの査定申込(設計 2026-09-08 §2.5)。申込者の個人情報を含む=自動削除しない(§0-10)。
+/// 宛先の削除は外部キー RESTRICT で止める(申込がある宛先・キャンペーンは消せない)。
+/// 状態(handleStatus / notifyStatus)は enum を使わず文字列(rollback で enum ADD VALUE を残さない・§2.9)。
+model DmInquiry {
+  id                String    @id @default(uuid()) @db.Uuid
+  draftId           String    @map("draft_id") @db.Uuid
+  submittedAt       DateTime  @default(now()) @map("submitted_at")
+  name              String
+  phone             String
+  email             String?
+  contactPref       String?   @map("contact_pref")
+  contactTime       String?   @map("contact_time")
+  message           String?
+  // open | in_progress | done
+  handleStatus      String    @default("open") @map("handle_status")
+  handledById       String?   @map("handled_by_id") @db.Uuid
+  handledAt         DateTime? @map("handled_at")
+  handleNote        String?   @map("handle_note")
+  // pending | sending | sent | failed(メール通知 PR5 が使う。PR4 では触らない)
+  notifyStatus      String    @default("pending") @map("notify_status")
+  notifyAttempts    Int       @default(0) @map("notify_attempts")
+  // 定型コードのみ(外部由来の文字を入れない)
+  notifyLastError   String?   @map("notify_last_error")
+  // 通知を取り合った時刻。sending のまま15分を超えたら残骸とみなして取り直せる。
+  notifyClaimedAt   DateTime? @map("notify_claimed_at")
+  // 送信に成功した宛先の user id を追記していく(read-modify-write ではなく Prisma の push で
+  // 追記=他ワーカーが書いた分を上書きしない)。手動の再送ボタン/サーバー再起動後の再開で
+  // 同じ宛先に二重送信しないための唯一の正本(P2修正)。user id のみ=個人情報を含まない・
+  // 内部メタデータなので申込一覧のAPI/画面には出さない。
+  notifySentUserIds String[]  @default([]) @map("notify_sent_user_ids") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  draft     DmRecipientDraft @relation(fields: [draftId], references: [id], onDelete: Restrict)
+  handledBy User?            @relation("DmInquiryHandler", fields: [handledById], references: [id])
+
+  @@index([draftId])
+  @@index([handleStatus])
+  @@map("dm_inquiries")
 }
 
 /// LP用の写真ライブラリ(設計 2026-09-08 §2.3)。全キャンペーン共通。画面側で長辺1600pxへ縮小した
@@ -1341,12 +1389,34 @@ model SaleDmConfig {
   lpUrl              String?  @map("lp_url")
   senderName         String?  @map("sender_name")
   senderContact      String?  @map("sender_contact")
+  // 公開LPの申込フォームに出す個人情報の取扱い文。未設定なら DEFAULT_PRIVACY_TEXT。凍結の対象外(§0-12)。
+  privacyText        String?  @map("privacy_text")
   anthropicApiKeyEnc String?  @map("anthropic_api_key_enc")
   openaiApiKeyEnc    String?  @map("openai_api_key_enc")
   updatedAt          DateTime @updatedAt @map("updated_at")
   updatedById        String?  @map("updated_by_id") @db.Uuid
 
   @@map("sale_dm_config")
+}
+
+// 通知メールの送信設定(設計 2026-09-08 §2.6)。Xserver SMTP を想定。パスワードは encryptSecret の暗号文のみ。
+model MailConfig {
+  id                String   @id @default("singleton")
+  smtpHost          String?  @map("smtp_host")
+  smtpPort          Int?     @map("smtp_port")
+  // true=接続時からTLS(465) / false=STARTTLS(587)
+  smtpSecure        Boolean  @default(true) @map("smtp_secure")
+  smtpUser          String?  @map("smtp_user")
+  smtpPassEnc       String?  @map("smtp_pass_enc")
+  fromAddress       String?  @map("from_address")
+  // 社内から開くアプリの絶対URL(通知メールのリンク用)。公開LPの trackingBaseUrl とは別物。
+  appBaseUrl        String?  @map("app_base_url")
+  // minimal | full
+  inquiryMailDetail String   @default("minimal") @map("inquiry_mail_detail")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  updatedById       String?  @map("updated_by_id") @db.Uuid
+
+  @@map("mail_config")
 }
 
 // 登記情報提供サービスの資格情報(フェーズ2 設定画面)。
