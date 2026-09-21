@@ -30,6 +30,15 @@ function flush(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+/** 手で解決タイミングを操るための Promise(応答の到着順を入れ替えるテスト用)。 */
+function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 /**
  * `deps.setInterval`/`clearInterval` の偽物。登録簿(Map)を持ち、
  * `fire()` は今アクティブな間隔コールバックを1回だけ手で呼ぶ。
@@ -241,5 +250,168 @@ describe("createEditLockController", () => {
     h.acquireMock.mockResolvedValue(MINE);
     await controller.acquire();
     expect(h.onStateMock).not.toHaveBeenCalled();
+  });
+
+  // review round1 で指摘された非同期の穴(C1/I1/I2/I4/m2/m3)。
+
+  it("C1a) release中に届いた古い合図の mine 応答は反映しない(release後もidleのまま)", async () => {
+    h.acquireMock.mockResolvedValue(MINE);
+    const pendingHeartbeat = createDeferred<HeartbeatResponse>();
+    h.heartbeatMock.mockReturnValue(pendingHeartbeat.promise);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+
+    // 合図を1回発火する(応答はまだ来ない=in-flight のまま)。
+    await h.registry.fire();
+    expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
+
+    // その合図の応答が届く前に release する。
+    await controller.release();
+    expect(h.releaseMock).toHaveBeenCalledWith(LOCK_ID);
+    expect(h.lastState().kind).toBe("idle");
+    const onStateCallsAfterRelease = h.onStateMock.mock.calls.length;
+
+    // 遅れて mine の応答が届いても、release 後の idle を mine に戻さない。
+    pendingHeartbeat.resolve(HEARTBEAT_MINE);
+    await flush();
+    expect(h.lastState().kind).toBe("idle");
+    expect(h.onStateMock.mock.calls.length).toBe(onStateCallsAfterRelease);
+    expect(h.registry.activeCount()).toBe(0);
+  });
+
+  it("C1b) 出遅れた合図の mine 応答が、先に届いた喪失判定を上書きしない(二重発火)", async () => {
+    h.acquireMock.mockResolvedValue(MINE);
+    const older = createDeferred<HeartbeatResponse>();
+    const newer = createDeferred<HeartbeatResponse>();
+    h.heartbeatMock.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+
+    // interval の合図(1回目=older)を発火。応答はまだ来ない。
+    await h.registry.fire();
+    // 裏から戻った合図(2回目=newer)がまだ mine のうちに発行される。
+    controller.onVisible();
+    await flush();
+    expect(h.heartbeatMock).toHaveBeenCalledTimes(2);
+
+    // 新しい方(newer)の応答が先に届き、喪失と判定される。
+    newer.resolve(HEARTBEAT_EXPIRED);
+    await flush();
+    expect(h.lastState().kind).toBe("expired");
+    expect(h.registry.activeCount()).toBe(0);
+
+    // 古い方(older)の mine 応答が遅れて届いても、喪失判定を上書きしない。
+    older.resolve(HEARTBEAT_MINE);
+    await flush();
+    expect(h.lastState().kind).toBe("expired");
+  });
+
+  it("I1a) 合図が失敗しても状態は変わらず、間隔も止まらない(一過性として無視する)", async () => {
+    h.acquireMock.mockResolvedValue(MINE);
+    h.heartbeatMock.mockRejectedValueOnce(new Error("network down"));
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+    const onStateCallsAfterAcquire = h.onStateMock.mock.calls.length;
+
+    await h.registry.fire();
+    expect(h.onStateMock.mock.calls.length).toBe(onStateCallsAfterAcquire);
+    expect(h.registry.activeCount()).toBe(1);
+  });
+
+  it("I1b) awaitしたacquireの失敗は呼び出し元にそのまま届く", async () => {
+    h.acquireMock.mockRejectedValueOnce(new Error("EDIT_SCREEN_REQUIRED"));
+    const controller = createEditLockController(h.deps);
+
+    await expect(controller.acquire()).rejects.toThrow("EDIT_SCREEN_REQUIRED");
+  });
+
+  it("I1c) 期限切れの取り直し(fire-and-forget)が失敗しても外へ投げず、expiredのまま留まる", async () => {
+    h.acquireMock.mockResolvedValueOnce(MINE);
+    h.heartbeatMock.mockResolvedValueOnce(HEARTBEAT_EXPIRED);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+    await h.registry.fire();
+    expect(h.lastState().kind).toBe("expired");
+
+    h.acquireMock.mockRejectedValueOnce(new Error("network down"));
+    expect(() => controller.noteActivity()).not.toThrow();
+    await flush();
+    expect(h.lastState().kind).toBe("expired");
+  });
+
+  it("I2a) noteSaveError: EDIT_LOCK_STALE は expired にし、合図も止める", async () => {
+    h.acquireMock.mockResolvedValue(MINE);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+    expect(h.registry.activeCount()).toBe(1);
+
+    controller.noteSaveError("EDIT_LOCK_STALE", null);
+    expect(h.lastState().kind).toBe("expired");
+    expect(h.registry.activeCount()).toBe(0);
+  });
+
+  it("I2b) noteSaveError: EDIT_LOCK_FORCE_RELEASED は force_released にする", () => {
+    const controller = createEditLockController(h.deps);
+    controller.noteSaveError("EDIT_LOCK_FORCE_RELEASED", null);
+    expect(h.lastState().kind).toBe("force_released");
+  });
+
+  it("I2c) noteSaveError: EDIT_LOCKED は保持者名つきの taken にする", () => {
+    const controller = createEditLockController(h.deps);
+    controller.noteSaveError("EDIT_LOCKED", "山田");
+    expect(h.lastState()).toMatchObject({ kind: "taken", holderName: "山田" });
+  });
+
+  it("I2d) noteSaveError: 鍵と無関係なコードは状態を変えない(onStateも呼ばない)", async () => {
+    h.acquireMock.mockResolvedValue(MINE);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+    const callsBefore = h.onStateMock.mock.calls.length;
+
+    controller.noteSaveError("CONFLICT", null);
+    expect(h.onStateMock.mock.calls.length).toBe(callsBefore);
+    expect(h.lastState().kind).toBe("mine");
+  });
+
+  it("I4) 423(他の人が持っている)でacquireが返ったら合図を始めない", async () => {
+    const held: AcquireResponse = {
+      code: "EDIT_LOCKED",
+      state: "held_by_other",
+      holderName: "山田",
+      since: SINCE,
+    };
+    h.acquireMock.mockResolvedValue(held);
+    const controller = createEditLockController(h.deps);
+
+    await controller.acquire();
+    expect(h.lastState().kind).toBe("taken");
+    expect(h.registry.activeCount()).toBe(0);
+    expect(h.heartbeatMock).not.toHaveBeenCalled();
+  });
+
+  it("m2) 鍵を持っていない間はonHiddenが何もしない(beaconを送らない)", () => {
+    const controller = createEditLockController(h.deps);
+    controller.onHidden();
+    expect(h.releaseByBeaconMock).not.toHaveBeenCalled();
+  });
+
+  it("m3) 期限切れの取り直しは、直前の入力をactiveとして次の合図で報告する", async () => {
+    h.acquireMock.mockResolvedValueOnce(MINE);
+    h.heartbeatMock.mockResolvedValueOnce(HEARTBEAT_EXPIRED);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+    await h.registry.fire();
+    expect(h.lastState().kind).toBe("expired");
+
+    // noteActivity が activeSinceLastBeat=true をセットしてから取り直す。
+    h.acquireMock.mockResolvedValueOnce(MINE);
+    h.heartbeatMock.mockResolvedValueOnce(HEARTBEAT_MINE);
+    controller.noteActivity();
+    await flush();
+    expect(h.lastState().kind).toBe("mine");
+
+    // 取り直しの引き金になった入力が、次の最初の合図で active=true として報告される。
+    await h.registry.fire();
+    expect(h.heartbeatMock.mock.calls.at(-1)?.[0]).toBe(true);
   });
 });
