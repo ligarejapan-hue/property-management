@@ -164,7 +164,7 @@ describe("edit-lock api-client", () => {
   });
 
   it("releaseEditLockByBeacon: sendBeacon の本文に合言葉(screenToken)を積む(ヘッダが使えないため)", async () => {
-    const sendBeaconMock = vi.fn((_url: string, _data?: BodyInit): boolean => true);
+    const sendBeaconMock = vi.fn<(url: string, data?: BodyInit) => boolean>(() => true);
     vi.stubGlobal("navigator", { sendBeacon: sendBeaconMock } as unknown as Navigator);
 
     releaseEditLockByBeacon("property", PROPERTY_ID, LOCK_ID);
