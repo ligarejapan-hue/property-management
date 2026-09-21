@@ -37,6 +37,11 @@ export async function POST(request: Request) {
 
     const canViewOwner = hasPermission(perms, "owner", "read");
     const canReadProperty = hasPermission(perms, "property", "read");
+    // ⚠M3(意図的): ここは isArchived で絞らない。acquire/heartbeat は
+    //   アーカイブ済み資源への操作を404で塞ぐが、status はその逆で
+    //   **管理者がアーカイブ済み資源に残った孤児鍵を見つけて force-release できる
+    //   唯一の窓口**として機能している。次に「揃えよう」として isArchived の
+    //   絞り込みを足すと、この救済路が閉じてしまうので絞り込まないこと。
     const properties = canReadProperty && propertyIds.length > 0
       ? await prisma.property.findMany({
           where: { id: { in: propertyIds } },
