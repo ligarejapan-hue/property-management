@@ -267,6 +267,39 @@ async function reflectParsedOwners(args: {
     const withTx = <T>(fn: (tx: DbClient) => Promise<T>): Promise<T> =>
       asOneBatch ? fn(db) : prisma.$transaction((tx) => fn(tx as DbClient));
 
+    if (asOneBatch) {
+      // ⚠**ロックの順序を「Owner → 物件」にそろえる**。
+      //   まとめて1つのトランザクションで処理すると、1人目で物件行を押さえたあとに
+      //   2人目で既存の所有者の行を押さえることになり、順序が「物件 → Owner」に
+      //   なる。所有者を紐づける他の窓口(/api/properties/[id]/owners)は
+      //   「Owner → 物件」の順で押さえるため、同時に走ると互いに待ち合って
+      //   PostgreSQL がどちらかを中断する。
+      //   そこで、使い回す候補になりうる既存の所有者を**先に・id順で**押さえておく。
+      //   (id順=どの処理も同じ順で押さえれば、押さえ合いは起きない)
+      const activeWithAddress = await db.owner.findMany({
+        where: { address: { not: null }, isArchived: false },
+        select: { id: true, name: true, address: true },
+      });
+      const candidateIds = new Set<string>();
+      for (const info of owners) {
+        if (!info.name || !info.address) continue;
+        const normName = normalizeName(info.name);
+        const normAddr = normalizeAddress(info.address);
+        for (const c of activeWithAddress) {
+          if (normalizeName(c.name) === normName && normalizeAddress(c.address!) === normAddr) {
+            candidateIds.add(c.id);
+          }
+        }
+      }
+      for (const id of [...candidateIds].sort()) {
+        // 行を押さえるだけ(updatedAt を今の時刻にする=既存の再利用経路と同じ手)
+        await db.owner.updateMany({
+          where: { id, isArchived: false },
+          data: { updatedAt: new Date() },
+        });
+      }
+    }
+
     for (const ownerInfo of owners) {
       if (!ownerInfo.name) continue;
 
@@ -526,13 +559,16 @@ async function reflectParsedOwners(args: {
                   normalizeName(c.name) === normName &&
                   normalizeAddress(c.address!) === normAddr,
               );
-              // ⚠**既知の制限(発注者判断 2026-09-22 で許容)**: ここで拾った所有者は
-            //   行ロックを取り直していない。通常の再利用の経路は
-            //   所有者の行を「アーカイブされていないこと」を条件に押さえてから
-            //   紐づけるが、ここは「同時に走ったもう一方が今しがた作った」場合に
-            //   しか通らない。その所有者が**さらに同じ瞬間にアーカイブされる**と、
-            //   アーカイブ済みに紐づく可能性が残る。直すなら同じ行ロックを足す。
-            if (raced) ownerId = raced.id;
+              if (raced) {
+                // ⚠通常の再利用の経路と同じく、「アーカイブされていない」条件で
+                //   行を押さえてから使う。押さえられなければ(その瞬間にアーカイブ
+                //   された)、新規作成に回す。
+                const held = await tx.owner.updateMany({
+                  where: { id: raced.id, isArchived: false },
+                  data: { updatedAt: new Date() },
+                });
+                if (held.count > 0) ownerId = raced.id;
+              }
             }
 
             const isNew = ownerId === null;
@@ -597,12 +633,8 @@ async function reflectParsedOwners(args: {
     //   (1人目だけ入って、やり直しもできない状態を作らない)。
     //   所有者ごとに全Ownerを走査するので、既定の5秒では足りないことがある。
     //
-    // ⚠**既知の制限(発注者判断 2026-09-22 で許容)**: このまとめ方だとロックの順序が
-    //   「物件 → Owner」になり、`/api/properties/[id]/owners`(Owner → 物件)と同時に
-    //   走ると取り合いになって、どちらかが PostgreSQL に中断されうる。
-    //   **データは壊れない**(このtxは丸ごと取り消され、利用者はやり直せる)。
-    //   直すには候補のOwnerを先にまとめてロックしてから物件をロックする作り替えが要り、
-    //   共有部分に手が入って手動取込など他の経路に影響しうるため見送った。
+    // ロックの順序は applyAll の冒頭で候補の所有者を先に押さえることで
+    // 「Owner → 物件」にそろえている(他の窓口と同じ順)。
     await prisma.$transaction((tx) => applyAll(tx as DbClient), {
       timeout: 30_000,
       maxWait: 10_000,
@@ -1044,38 +1076,58 @@ export async function processRegistryPdf(
   }
 
   // 成功パス（既存動作）
-  await prisma.importJob.update({
-    where: { id: job.id },
-    data: {
-      status: "completed",
-      successCount: 1,
-      errorCount: 0,
-      completedAt: new Date(),
-    },
-  });
+  // ⚠ここから先は**所有者の登録が既に確定している**。取込ジョブの記録が
+  //   失敗しても、それをエラー応答にしてはいけない(実際には入っているのに
+  //   「失敗」と伝わり、やり直すと「既に所有者がいる」で弾かれる)。
+  //   記録の失敗はログに残して、応答は成功のまま返す。
+  const bookkeeping = async (label: string, fn: () => Promise<unknown>) => {
+    try {
+      await fn();
+    } catch (err) {
+      // 非PII(ジョブIDと種別だけ)。氏名・住所・ファイル名は出さない。
+      console.error(
+        `[registry-pdf] 取込ジョブの記録に失敗(${label}) jobId=${job.id}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  };
 
-  await prisma.importJobRow.create({
-    data: {
-      jobId: job.id,
-      rowNumber: 1,
-      status: "success",
-      rawData: {
-        realEstateNumber: parsed.realEstateNumber,
-        address: parsed.address,
-        lotNumber: parsed.lotNumber,
-        buildingNumber: parsed.buildingNumber,
-        // PR#88: owner 名(PII)は rawData に残さない。件数のみ保持する。
-        ownerCount: parsed.owners.length,
-        // A-2c: owner 反映の非PII件数（名前・住所は載せない）。
-        ownersMatched,
-        ownersCreated,
-        ownersLinked,
+  await bookkeeping("job-completed", () =>
+    prisma.importJob.update({
+      where: { id: job.id },
+      data: {
+        status: "completed",
+        successCount: 1,
+        errorCount: 0,
+        completedAt: new Date(),
       },
-      // Phase D: 法人番号スキップ情報のみ追記（生値・会社名・住所は含めない）。
-      errorMessage: appendImportMessage(null, rowCorporateMessage),
-      createdId: targetPropertyId,
-    },
-  });
+    }),
+  );
+
+  await bookkeeping("job-row", () =>
+    prisma.importJobRow.create({
+      data: {
+        jobId: job.id,
+        rowNumber: 1,
+        status: "success",
+        rawData: {
+          realEstateNumber: parsed.realEstateNumber,
+          address: parsed.address,
+          lotNumber: parsed.lotNumber,
+          buildingNumber: parsed.buildingNumber,
+          // PR#88: owner 名(PII)は rawData に残さない。件数のみ保持する。
+          ownerCount: parsed.owners.length,
+          // A-2c: owner 反映の非PII件数（名前・住所は載せない）。
+          ownersMatched,
+          ownersCreated,
+          ownersLinked,
+        },
+        // Phase D: 法人番号スキップ情報のみ追記（生値・会社名・住所は含めない）。
+        errorMessage: appendImportMessage(null, rowCorporateMessage),
+        createdId: targetPropertyId,
+      },
+    }),
+  );
 
   // A-2b: 謄本PDF本体を Attachment(type="registry") として保存する。
   //  - multipart(PDF binary) のみ。text 貼り付けは pdfBuffer=null でスキップ。

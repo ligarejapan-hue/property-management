@@ -65,7 +65,6 @@ vi.mock("@/lib/storage", () => ({
 
 import prisma from "@/lib/prisma";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
-import { detectCorporateNumberInOwnerLike } from "@/lib/corporate-number";
 import { processRegistryPdf } from "@/lib/registry-pdf/process";
 import fs from "node:fs";
 import path from "node:path";
@@ -336,6 +335,70 @@ describe("所有者が空の物件だけに入れる指定（requireNoExistingOw
     for (const call of calls ?? []) {
       expect(call).toContain("asOneBatch ? db : undefined");
     }
+  });
+
+  it("⚠まとめる場合、候補の所有者を物件行より先に押さえる（ロック順を他の窓口とそろえる）", async () => {
+    // ⚠1人だけだと再利用の経路がもともと Owner→物件 の順なので差が出ない。
+    //   「1人目=新規(物件行を先に押さえる) / 2人目=既存を使い回す(所有者の行を押さえる)」
+    //   の2人構成で、先押さえが無いと 物件→Owner の順になることを捕まえる。
+    (parseRegistryText as Mock).mockReturnValue({
+      realEstateNumber: null,
+      address: "東京都渋谷区神宮前三丁目12-3",
+      lotNumber: null,
+      buildingNumber: null,
+      landCategory: null,
+      area: null,
+      owners: [
+        { name: "新規太郎", address: OWNER.address, share: "2分の1" },
+        { name: OWNER.name, address: OWNER.address, share: "2分の1" },
+      ],
+      warnings: [],
+      confidence: 0.9,
+    });
+    // 既存の所有者は2人目とだけ一致する
+    pm.owner.findMany.mockResolvedValue([
+      { id: "owner-existing", name: OWNER.name, address: OWNER.address, corporateNumber: null },
+    ]);
+    pm.owner.updateMany.mockResolvedValue({ count: 1 });
+
+    await run({ requireNoExistingOwners: true });
+
+    // 所有者の行を押さえる(updateMany)のが、最初の物件行ロック($queryRaw)より先
+    const firstOwnerLock = pm.owner.updateMany.mock.invocationCallOrder[0];
+    const firstPropertyLock = pm.$queryRaw.mock.invocationCallOrder[0];
+    expect(firstOwnerLock).toBeLessThan(firstPropertyLock);
+  });
+
+  it("⚠再探索で拾った所有者が、その瞬間にアーカイブされていたら新規作成に回す", async () => {
+    // ロック前は候補なし、ロック後の再探索では同姓同住所が見つかる(同時に作られた)
+    pm.owner.findMany
+      .mockResolvedValueOnce([]) // まとめる経路の先押さえ(候補なし)
+      .mockResolvedValueOnce([]) // ループ内の候補検索(なし)
+      .mockResolvedValueOnce([
+        { id: "owner-raced", name: OWNER.name, address: OWNER.address },
+      ]);
+    // 押さえようとしたら 0 件 = アーカイブされた直後
+    pm.owner.updateMany.mockResolvedValue({ count: 0 });
+
+    await run({ requireNoExistingOwners: true });
+
+    // アーカイブ済みには紐づけず、新しく作る
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    const link = pm.propertyOwner.create.mock.calls[0]?.[0] as
+      | { data: { ownerId: string } }
+      | undefined;
+    expect(link?.data.ownerId).not.toBe("owner-raced");
+  });
+
+  it("⚠所有者の登録が確定したあとの記録書きが失敗しても、成功として返す", async () => {
+    // 1回目=開始の記録(成功) / 2回目=完了の記録(失敗)
+    pm.importJob.update
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("connection lost"));
+
+    await expect(run({ requireNoExistingOwners: true })).resolves.toBeDefined();
+    // 所有者は入っている
+    expect(pm.propertyOwner.create).toHaveBeenCalledTimes(1);
   });
 
   it("指定しない呼び出し元（手動取込など）では見直さない＝共有名義の追加を妨げない", async () => {
