@@ -9,8 +9,6 @@ import {
 } from "../ui-state";
 import { EDIT_LOCK_IDLE_WARN_MS } from "../rules";
 
-const ALL: EditLockUiState["kind"][] = ["idle", "mine", "expired", "force_released", "taken", "deleted"];
-
 describe("鍵の表示状態(純関数)", () => {
   it("取得できたら mine(保存できる・帯なし)", () => {
     const s = uiStateFromAcquire({ state: "mine", lockId: "l1", since: "2026-09-22T01:00:00.000Z" });
@@ -67,7 +65,7 @@ describe("鍵の表示状態(純関数)", () => {
     const expected: Record<EditLockUiState["kind"], boolean> = {
       idle: false, mine: false, expired: true, force_released: false, taken: false, deleted: false,
     };
-    for (const kind of ALL) {
+    for (const kind of Object.keys(expected) as EditLockUiState["kind"][]) {
       expect(shouldReacquireOnInput({ kind } as EditLockUiState)).toBe(expected[kind]);
     }
   });
