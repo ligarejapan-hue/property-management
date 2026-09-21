@@ -213,13 +213,15 @@ async function reflectParsedOwners(args: {
     tx: Pick<typeof prisma, "propertyOwner">,
   ) => {
     if (!args.requireNoExistingOwners) return;
+    // ⚠**確かめるのは「書き始める前に空だったか」だけ**(@codex 第5R)。
+    //   1人でも紐づけたあとに数え直して 409 にすると、共有名義の謄本で
+    //   「1人目だけ入ってエラー」という中途半端な結果になる(部分適用)。
+    //   作成と紐付けは所有者ごとに1つのtxで完結しており、最初の書き込みの
+    //   時点で空だったことは保証されている。以降に別の人が所有者を足した
+    //   場合は、共有者が増えただけ＝正当な操作として受け入れる。
+    if (linkedByThisRun.length > 0) return;
     const existing = await tx.propertyOwner.count({
-      where: {
-        propertyId,
-        ...(linkedByThisRun.length > 0
-          ? { ownerId: { notIn: linkedByThisRun } }
-          : {}),
-      },
+      where: { propertyId },
     });
     if (existing > 0) {
       throw new ApiError(

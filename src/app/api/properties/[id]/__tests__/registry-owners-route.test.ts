@@ -92,7 +92,7 @@ function setAttachment(certificateType: string | null) {
       args.where.registryCertificateType === certificateType
         ? {
             id: "att-1",
-            fileName: "謄本(所有者事項)_2026-09-15.pdf",
+            fileName: "山田太郎_謄本.pdf", // ⚠PIIを含む名前でも外に出ないことを確かめる
             fileUrl: "/uploads/registry/att-1.pdf",
             createdAt: new Date("2026-09-15T00:00:00Z"),
           }
@@ -131,6 +131,14 @@ describe("GET（下見）", () => {
       },
     ]);
     expect(processRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("⚠生のファイル名を返さない（氏名や住所を含みうる）", async () => {
+    const res = await GET(request, context);
+    const body = await res.json();
+    expect(JSON.stringify(body)).not.toContain("山田太郎_謄本");
+    expect(body.attachment.fileName).toBeUndefined();
+    expect(body.attachment.label).toBe("謄本(所有者事項)_2026-09-15.pdf");
   });
 
   it("謄本の閲覧権限が無ければ 403", async () => {

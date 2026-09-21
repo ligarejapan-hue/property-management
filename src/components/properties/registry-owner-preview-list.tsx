@@ -8,7 +8,10 @@ import type { RegistryOwnerCandidate } from "@/lib/api-client";
 
 export interface RegistryOwnerPreviewListProps {
   owners: RegistryOwnerCandidate[];
-  /** 読み取り元の謄本のファイル名。どの書類から入るのかを明示する。 */
+  /**
+   * 読み取り元の謄本の呼び名。どの書類から入るのかを示す。
+   * ⚠**生ファイル名は渡さない**(氏名や住所を含みうる)。固定の呼び名を使う。
+   */
   fileName: string;
 }
 

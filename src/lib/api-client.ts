@@ -4424,7 +4424,8 @@ export interface RegistryOwnerCandidate {
 
 export interface RegistryOwnerPreview {
   alreadyHasOwners: boolean;
-  attachment: { id: string; fileName: string; createdAt: string };
+  /** ⚠生ファイル名は含めない(氏名や住所を含みうる)。label は固定の呼び名。 */
+  attachment: { id: string; label: string; createdAt: string };
   owners: RegistryOwnerCandidate[];
 }
 
@@ -4438,7 +4439,7 @@ export async function fetchRegistryOwnerPreview(
       alreadyHasOwners: false,
       attachment: {
         id: "mock",
-        fileName: "謄本(所有者事項)_2026-09-15.pdf",
+        label: "謄本(所有者事項)_2026-09-15.pdf",
         createdAt: new Date().toISOString(),
       },
       owners: [

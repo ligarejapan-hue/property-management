@@ -55,6 +55,15 @@ const SUPPORTED_CERTIFICATE_TYPE = "owner";
  */
 const AUDIT_LABEL = "添付済みの謄本から所有者を反映";
 
+/**
+ * 画面に出す謄本の呼び名。**生ファイル名は使わない**(氏名や住所を含みうる)。
+ * 自動取得した謄本の付け方と同じ形にそろえる。
+ */
+function registryDisplayLabel(createdAt: Date): string {
+  const d = createdAt.toISOString().slice(0, 10);
+  return `謄本(所有者事項)_${d}.pdf`;
+}
+
 interface LoadedRegistry {
   attachmentId: string;
   fileName: string;
@@ -187,7 +196,9 @@ export async function GET(
       alreadyHasOwners: property.propertyOwners.length > 0,
       attachment: {
         id: registry.attachmentId,
-        fileName: registry.fileName,
+        // ⚠生ファイル名は返さない。手で取り込んだ謄本は「山田太郎_謄本.pdf」の
+        //   ように氏名や住所を含みうる(添付の一覧も同じ理由で固定の表示名にしている)。
+        label: registryDisplayLabel(registry.createdAt),
         createdAt: registry.createdAt,
       },
       owners: owners.map((o) => ({

@@ -125,7 +125,7 @@ export default function RegistryOwnerApplyButton({
           <div className="space-y-3">
             <RegistryOwnerPreviewList
               owners={owners}
-              fileName={preview?.attachment.fileName ?? ""}
+              fileName={preview?.attachment.label ?? ""}
             />
             {preview?.alreadyHasOwners ? (
               <p role="alert" className="text-xs text-amber-700 dark:text-amber-400">
