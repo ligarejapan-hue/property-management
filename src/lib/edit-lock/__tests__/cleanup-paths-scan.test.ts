@@ -26,7 +26,7 @@ import { join, relative } from "node:path";
  */
 const KNOWN_CLEANUP_SITES: Record<string, string> = {
   "src/app/api/properties/[id]/route.ts:557": "property.delete(物件の削除)",
-  "src/app/api/import/jobs/[jobId]/rollback/route.ts:451": "property.delete(取込の取り消し)",
+  "src/app/api/import/jobs/[jobId]/rollback/route.ts:460": "property.delete(取込の取り消し)",
   "src/app/api/admin/owners/[id]/correction/archive/route.ts:247":
     "owner.updateMany({ isArchived: true })(所有者のアーカイブ)",
   "src/app/api/admin/owners/correction/merge/route.ts:638":
@@ -221,7 +221,16 @@ describe("鍵の後始末(仕様4.6/8.2・スイープ)", () => {
 //   取り消し(rollback)の経路は、これまで物件行をロックせずに削除していたため、
 //   後始末をただ同じ tx に足すだけでは「まだ commit されていない acquireEditLock」を
 //   取りこぼし、鍵が孤児になる窓が残る。$transaction をモックして
-//   ["tx","lockRows","deleteLocks","deleteProperty"] の順で呼ばれることを固定する。
+//   ["tx","lockRows","inquiryCheck","deleteLocks","deleteProperty"] の順で呼ばれることを固定する。
+//
+// ⚠2026-09-21 外部レビュー(@codex P2)対応: 当初の実装は
+//   ["tx","lockRows","deleteLocks","inquiryCheck","deleteProperty"] の順で、
+//   申込チェックより前に事前分類の deleteIds 全件の鍵を消していた。tx の中で
+//   新たに申込が付いて delete をスキップした物件からも鍵を消してしまい、物件は
+//   残ったまま編集中の人の鍵だけ外される事故になる(指摘: 「evicts editors of
+//   properties that then survive」)。申込の照会を先に行い、ブロック対象を除いた
+//   「実際に削除する id」だけを後始末する順に直した。下のテストに加え、
+//   2物件で片方だけ生き残るケースを別テストで固定する。
 
 vi.mock("@/lib/api-helpers", () => ({
   ApiError: class extends Error {
@@ -341,8 +350,8 @@ describe("取り消しは 行ロック → 後始末 → 削除 の順", () => {
             return {};
           }),
         },
-        // main合流で追加された査定申込(dm_inquiries)ガード: 鍵の後始末の後に
-        // 申込がある宛先を照会する(0件=通常の削除継続経路)。
+        // main合流で追加された査定申込(dm_inquiries)ガード: 行ロックの後・鍵の後始末の
+        // 前に申込がある宛先を照会する(0件=通常の削除継続経路)。
         dmRecipientDraft: {
           findMany: vi.fn(async () => {
             order.push("inquiryCheck");
@@ -367,8 +376,8 @@ describe("取り消しは 行ロック → 後始末 → 削除 の順", () => {
     });
 
     expect(res.status).toBe(200);
-    // main合流で「deleteLocks」の直後に査定申込チェック(dmRecipientDraft.findMany)が入った。
-    expect(order).toEqual(["tx", "lockRows", "deleteLocks", "inquiryCheck", "deleteProperty"]);
+    // 行ロック → 申込の照会 → (このケースは0件なので全id対象の)鍵の後始末 → 削除。
+    expect(order).toEqual(["tx", "lockRows", "inquiryCheck", "deleteLocks", "deleteProperty"]);
     // ⚠tx そのもの(identity)に対して呼ばれたこと・base client には漏れていないことを固定する。
     expect((deleteEditLocksFor as unknown as Mock).mock.calls[0][0]).toBe(txClient);
     expect(pm.property.delete).not.toHaveBeenCalled();
@@ -384,5 +393,87 @@ describe("取り消しは 行ロック → 後始末 → 削除 の順", () => {
     expect(sql).toMatch(/FOR UPDATE/);
     expect(sql).toMatch(/ORDER BY id/);
     expect(sql).toContain(PROP_ID);
+  });
+
+  // ⚠2026-09-21 外部レビュー(@codex P2)のシナリオそのもの: 事前分類(preflight)の
+  // 後・tx の中で新たに申込が入った物件は、削除をスキップされる(生き残る)。
+  // このとき鍵まで消してしまうと、その物件を編集中の人だけが理由なく鍵を失う。
+  it("tx の中で片方だけ申込が付いた場合、生き残る物件の鍵は消さず、削除される物件の鍵だけ消す", async () => {
+    const SURVIVE_ID = "33333333-3333-4333-8333-333333333333";
+    const DELETE_ID = "44444444-4444-4444-8444-444444444444";
+    pm.importJob.findUnique.mockResolvedValue({
+      ...JOB,
+      rows: [
+        { id: "row-1", rowNumber: 1, status: "success" as const, errorMessage: null, createdId: SURVIVE_ID },
+        { id: "row-2", rowNumber: 2, status: "success" as const, errorMessage: null, createdId: DELETE_ID },
+      ],
+    });
+    const zeroCounts = {
+      photos: 0, attachments: 0, propertyOwners: 0, comments: 0, nextActions: 0, dmLogs: 0, investigationLogs: 0,
+    };
+    // 事前分類の時点(preflight)ではどちらも申込ゼロ = 両方 deletable と判定される。
+    pm.property.findMany.mockResolvedValue([
+      { id: SURVIVE_ID, updatedAt: COMPLETED_AT, _count: zeroCounts },
+      { id: DELETE_ID, updatedAt: COMPLETED_AT, _count: zeroCounts },
+    ]);
+
+    const order: string[] = [];
+    let txClient: unknown;
+    pm.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      order.push("tx");
+      txClient = {
+        importJob: {
+          findUnique: vi.fn(async () => ({ status: "completed" })),
+          update: vi.fn(async () => ({})),
+        },
+        property: {
+          delete: vi.fn(async ({ where }: { where: { id: string } }) => {
+            order.push(`deleteProperty:${where.id}`);
+            return {};
+          }),
+        },
+        // tx の中で新たに照会すると SURVIVE_ID だけ申込が付いている(preflight後に挿入されたケース)。
+        dmRecipientDraft: {
+          findMany: vi.fn(async () => {
+            order.push("inquiryCheck");
+            return [{ propertyId: SURVIVE_ID }];
+          }),
+        },
+        $queryRaw: vi.fn(() => {
+          order.push("lockRows");
+          return Promise.resolve([]);
+        }),
+      };
+      return fn(txClient);
+    });
+    (deleteEditLocksFor as unknown as Mock).mockImplementation(async (_tx: unknown, resources: { resourceId: string }[]) => {
+      order.push(`deleteLocks:${resources.map((r) => r.resourceId).join(",")}`);
+      return resources.length;
+    });
+
+    const res = await rollbackPOST(rollbackRequest({ dryRun: false }), {
+      params: Promise.resolve({ jobId: JOB_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // 生き残る物件(SURVIVE_ID)は blocked、削除される物件(DELETE_ID)だけ実際に消える。
+    expect(json.blockedDetails).toEqual([
+      { rowNumber: 1, action: "delete", reason: "査定申込があるため削除できません (has_dm_inquiries)" },
+    ]);
+    expect(json.deletedCount).toBe(1);
+    // ⚠核心: 鍵の後始末は DELETE_ID だけを対象にする。SURVIVE_ID の鍵は消さない。
+    expect(order).toEqual([
+      "tx",
+      "lockRows",
+      "inquiryCheck",
+      `deleteLocks:${DELETE_ID}`,
+      `deleteProperty:${DELETE_ID}`,
+    ]);
+    expect((deleteEditLocksFor as unknown as Mock).mock.calls).toHaveLength(1);
+    expect((deleteEditLocksFor as unknown as Mock).mock.calls[0][1]).toEqual([
+      { resourceType: "property", resourceId: DELETE_ID },
+    ]);
+    expect((deleteEditLocksFor as unknown as Mock).mock.calls[0][0]).toBe(txClient);
   });
 });

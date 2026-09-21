@@ -47,7 +47,7 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/import/csv/route.ts:750":
     "property の UPDATABLE_PROPERTY_FIELDS(CSV重複更新)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/import/jobs/[jobId]/rollback/route.ts:493":
+  "src/app/api/import/jobs/[jobId]/rollback/route.ts:502":
     "property の RESTORABLE_PROPERTY_FIELDS(ロールバック復元)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
   "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:302":

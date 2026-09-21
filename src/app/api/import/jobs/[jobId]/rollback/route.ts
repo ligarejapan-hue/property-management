@@ -414,9 +414,14 @@ export async function POST(
       // 行ごとにロック+照会すると往復が件数×2 になり、対話 tx の既定タイムアウト(5 秒)で
       // 大きなロールバックが丸ごと落ちるため、ロック1文(id 昇順)+申込の照会1回にまとめる。
       //
-      // ⚠**鍵の後始末は、この行ロックの後・削除の前に置く**(Task 8)。取り消しはこれまで
-      //   物件行をロックせずに削除していたため、後始末だけを tx に足しても「まだ commit されて
-      //   いない acquireEditLock」を取りこぼす窓が残る:
+      // ⚠**鍵の後始末は、行ロックの後・削除の前に置く**(Task 8)。ただし対象は
+      //   「実際に削除する物件」だけに絞る(@codex P2・2026-09-21指摘): 申込チェックより
+      //   前に事前分類の deleteIds 全件で後始末すると、tx の中で新たに申込が付いて
+      //   delete をスキップした物件からも鍵を消してしまい、まだ編集中の人が物件は
+      //   残ったまま鍵だけ外される事故になる。申込の照会 → ブロック対象を除いた
+      //   実削除予定 id を確定 → その id だけ後始末、の順にする。
+      //   取り消しはこれまで物件行をロックせずに削除していたため、後始末だけを tx に
+      //   足しても「まだ commit されていない acquireEditLock」を取りこぼす窓が残る:
       //     取り消しtx : 後始末 → 削除
       //     並行acquire: (窓)lockPropertyRow → 鍵をINSERT → commit
       //   の順で並ぶと、鍵が commit された時点で後始末は既に終わっており、直後に物件だけ
@@ -426,18 +431,22 @@ export async function POST(
       const inquiryPropertyIds = new Set<string>();
       if (deleteIds.length > 0) {
         await lockPropertiesForUpdate(tx, deleteIds);
-        await deleteEditLocksFor(
-          tx,
-          deleteIds.map((id) => ({
-            resourceType: "property" as const,
-            resourceId: id,
-          })),
-        );
         const draftsWithInquiries = await tx.dmRecipientDraft.findMany({
           where: { propertyId: { in: deleteIds }, inquiries: { some: {} } },
           select: { propertyId: true },
         });
         for (const d of draftsWithInquiries) inquiryPropertyIds.add(d.propertyId);
+        // 実際に削除する id(申込が付いて生き残る物件を除いたもの)だけ後始末する。
+        const actualDeleteIds = deleteIds.filter((id) => !inquiryPropertyIds.has(id));
+        if (actualDeleteIds.length > 0) {
+          await deleteEditLocksFor(
+            tx,
+            actualDeleteIds.map((id) => ({
+              resourceType: "property" as const,
+              resourceId: id,
+            })),
+          );
+        }
       }
       for (const row of deletable) {
         if (inquiryPropertyIds.has(row.createdId!)) {

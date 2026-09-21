@@ -526,12 +526,22 @@ describe("rollback: 査定申込がある物件は削除しない(has_dm_inquiri
     //   2回目 = 鍵の一括後始末(deleteEditLocksFor, DELETE FROM edit_locks)
     // どちらも対象件数に関わらず1文でまとまっている、という main の意図(行ごとの
     // 往復をしない)は変わらない。
+    //
+    // ⚠2026-09-21 外部レビュー(@codex P2)対応: 鍵の後始末は「申込の照会の後」に
+    // 移し、対象も「事前分類の deleteIds 全件」ではなく「実際に削除する id
+    // (= p-late を除いた p-ok だけ)」に絞った。申込の照会より前に全件の鍵を
+    // 消すと、tx の中で新たに申込が付いて生き残る p-late からも鍵を消してしまい、
+    // 物件は残ったまま編集中の人だけ鍵を失う事故になるため。
     expect(rb.tx.$queryRaw).toHaveBeenCalledTimes(2);
     const lockSql = (rb.tx.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join("?");
     expect(lockSql).toMatch(/FROM properties WHERE id = ANY\(\?::uuid\[\]\) ORDER BY id FOR UPDATE/);
     expect(rb.tx.$queryRaw.mock.calls[0][1]).toEqual(["p-late", "p-ok"]);
     const editLockDeleteSql = (rb.tx.$queryRaw.mock.calls[1][0] as TemplateStringsArray).join("?");
     expect(editLockDeleteSql).toMatch(/DELETE FROM "edit_locks"/);
+    // ⚠核心: 鍵の後始末は実際に削除する p-ok だけを対象にする。生き残る p-late の
+    // 鍵は対象に含まれない。
+    expect(rb.tx.$queryRaw.mock.calls[1][1]).toEqual(["property"]);
+    expect(rb.tx.$queryRaw.mock.calls[1][2]).toEqual(["p-ok"]);
     expect(rb.tx.dmRecipientDraft.findMany).toHaveBeenCalledTimes(1);
     expect(rb.tx.dmRecipientDraft.findMany).toHaveBeenCalledWith({
       where: { propertyId: { in: ["p-ok", "p-late"] }, inquiries: { some: {} } },
@@ -539,11 +549,11 @@ describe("rollback: 査定申込がある物件は削除しない(has_dm_inquiri
     });
     expect(rb.tx.dmInquiry.count).not.toHaveBeenCalled();
     expect(rb.lockPropertyRow).not.toHaveBeenCalled();
-    // 行ロック → 鍵の後始末(2本目の $queryRaw)→ 申込の一括照会 → 削除、の順。
+    // 行ロック → 申込の一括照会 → 鍵の後始末(実削除対象のみ・2本目の $queryRaw)→ 削除。
     expect(rb.order).toEqual([
       'lock:["p-late","p-ok"]',
-      'lock:["property","property"]',
       "inquiries",
+      'lock:["property"]',
       "delete:p-ok",
     ]);
     expect(rb.tx.importJob.update).toHaveBeenCalledWith({ where: { id: "j1" }, data: { status: "rolled_back" } });
