@@ -42,6 +42,7 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import { findMissingOwnerFieldWritePerm } from "@/lib/owner-create";
 import { getStorage } from "@/lib/storage";
 import { extractTextFromPdf } from "@/lib/pdf-extract";
 import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
@@ -111,7 +112,7 @@ async function loadProperty(propertyId: string, action: "preview" | "apply") {
     throw new ApiError(403, "この物件を扱う権限がありません", "FORBIDDEN");
   }
 
-  return { session, property };
+  return { session, property, perms };
 }
 
 /**
@@ -238,7 +239,7 @@ export async function POST(
 ) {
   try {
     const { id } = await context.params;
-    const { session, property } = await loadProperty(id, "apply");
+    const { session, property, perms } = await loadProperty(id, "apply");
 
     // 下見で見せた添付のID。古い呼び出し元が無い新設APIなので必須にする。
     const body = (await request.json().catch(() => null)) as
@@ -270,6 +271,24 @@ export async function POST(
         "謄本から所有者を読み取れませんでした。手入力で登録してください",
         "REGISTRY_OWNERS_NOT_FOUND",
       );
+    }
+
+    // ⚠書く項目ごとの権限(owner_name / owner_address)を、他の所有者の窓口
+    //   (/owners/create-and-link)と同じ純関数で確かめる。owner:write だけでは、
+    //   氏名や住所を書けない役割でも謄本の値を保存できてしまう。
+    //   取込処理(ImportJob・監査の書き込み)を呼ぶ前に止める。
+    for (const owner of owners) {
+      const missing = findMissingOwnerFieldWritePerm(perms, {
+        name: owner.name,
+        address: owner.address,
+      });
+      if (missing) {
+        throw new ApiError(
+          403,
+          `${missing.label} を書き込む権限がありません`,
+          "FORBIDDEN",
+        );
+      }
     }
 
     const result = await processRegistryPdf({

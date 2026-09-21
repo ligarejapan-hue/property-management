@@ -31,7 +31,10 @@ vi.mock("@/lib/api-helpers", () => ({
     ),
   ),
 }));
-vi.mock("@/lib/permissions", () => ({ hasPermission: vi.fn(() => true) }));
+vi.mock("@/lib/permissions", () => ({
+  hasPermission: vi.fn(() => true),
+  hasExplicitWritePerm: vi.fn(() => true),
+}));
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/property-access", () => ({
   canAccessPropertyRecord: vi.fn(() => true),
@@ -50,7 +53,7 @@ vi.mock("@/lib/prisma", () => ({
 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { getStorage } from "@/lib/storage";
 import { extractTextFromPdf } from "@/lib/pdf-extract";
@@ -110,6 +113,7 @@ beforeEach(() => {
   });
   (getUserPermissions as unknown as Mock).mockResolvedValue([]);
   (hasPermission as unknown as Mock).mockReturnValue(true);
+  (hasExplicitWritePerm as unknown as Mock).mockReturnValue(true);
   (getStorage as unknown as Mock).mockReturnValue({
     keyFromUrl: () => "registry/att-1.pdf",
     read: async () => ({ body: Buffer.from("pdf"), contentType: "application/pdf", size: 3 }),
@@ -262,5 +266,36 @@ describe("POST（反映）", () => {
     const res = await POST(postRequest(), context);
     expect(res.status).toBe(403);
     expect(processRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  // ⚠項目ごとの書き込み権限(owner_name / owner_address)。他の所有者の窓口
+  //   (/owners/create-and-link)は書く項目ごとに確かめている。owner:write だけで
+  //   通すと、氏名や住所を書けない役割でも謄本の値を保存できてしまう。
+  it("⚠住所(owner_address)を書く権限が無ければ 403（書く項目ごとに確かめる）", async () => {
+    (hasExplicitWritePerm as unknown as Mock).mockImplementation(
+      (_p: unknown, resource: string) => resource !== "owner_address",
+    );
+    const res = await POST(postRequest(), context);
+    expect(res.status).toBe(403);
+    expect(processRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("⚠氏名(owner_name)を書く権限が無ければ 403", async () => {
+    (hasExplicitWritePerm as unknown as Mock).mockImplementation(
+      (_p: unknown, resource: string) => resource !== "owner_name",
+    );
+    const res = await POST(postRequest(), context);
+    expect(res.status).toBe(403);
+    expect(processRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("書かない項目(法人番号など)の権限は要らない", async () => {
+    (hasExplicitWritePerm as unknown as Mock).mockImplementation(
+      (_p: unknown, resource: string) =>
+        resource === "owner_name" || resource === "owner_address",
+    );
+    const res = await POST(postRequest(), context);
+    expect(res.status).toBe(200);
+    expect(processRegistryPdf).toHaveBeenCalledTimes(1);
   });
 });
