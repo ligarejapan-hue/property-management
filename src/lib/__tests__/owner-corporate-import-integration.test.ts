@@ -182,15 +182,20 @@ describe("registry-pdf route Phase D 統合", () => {
   });
 
   it("(b) 住所なし/住所ありの両方の reuse パスが fillOwnerCorporateNumberIfUnlocked を経由する", () => {
-    // 定義1回 + 呼び出し2回(住所なし経路・住所あり経路)= 3回のはず。
+    // ⚠Task 7レビュー Minor 10(持ち越し): 素の関数名(`fillOwnerCorporateNumberIfUnlocked(`)
+    // だけを数えると、関数定義自体にもコメントの文中にも一致してしまい、実際の呼び出しが
+    // 1本減ってその分「言及」が1つ増えただけでもカウントが変わらず検出できない。
+    // 実際の呼び出しは必ず `await` を伴う(この関数は Promise を返す)ので、
+    // `await fillOwnerCorporateNumberIfUnlocked(` を数える(定義行は対象外)。
+    // 住所なし経路・住所あり経路の2箇所のはず。
     const occurrences = (
-      registryPdfSrc.match(/fillOwnerCorporateNumberIfUnlocked\(/g) ?? []
+      registryPdfSrc.match(/await fillOwnerCorporateNumberIfUnlocked\(/g) ?? []
     ).length;
     expect(
       occurrences,
-      `fillOwnerCorporateNumberIfUnlocked( の出現回数が期待(定義1+呼び出し2=3)と異なる(${occurrences}件)。` +
+      `await fillOwnerCorporateNumberIfUnlocked( の出現回数が期待(呼び出し2箇所)と異なる(${occurrences}件)。` +
         "どちらかの reuse パスが直接 updateMany を書いてヘルパーを経由しなくなった可能性がある。",
-    ).toBe(3);
+    ).toBe(2);
   });
 
   it("create パスで data.corporateNumber を save action のみ乗せる", () => {

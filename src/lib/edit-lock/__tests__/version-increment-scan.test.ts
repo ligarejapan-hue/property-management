@@ -324,19 +324,36 @@ function lineStartOffsets(lines: string[]): number[] {
 /**
  * `siteLine1Based` の呼び出し(`....update(`/`updateMany(`/`upsert(`)自身の
  * 引数括弧の中身を返す。呼び出し自体が見つからなければ null。
+ *
+ * ⚠review Important 1後半(Task 7レビュー Minor 9で持ち越し): `extractBalancedSpan`は
+ * 正規表現リテラルの中の不釣り合いな括弧、正規表現の中の孤立したクォート、入れ子の
+ * テンプレートリテラルを特別扱いしないため、稀にスパンが行き過ぎ(overrun)て
+ * **後続の別の呼び出し**を自分の引数として取り込むことがある。抽出したスパンの中に
+ * 別の `.update(`/`.updateMany(`/`.upsert(` が見つかったら、黙って通さず**ここで
+ * 落ちる**(誤検出を握りつぶして「一致した」と誤判定するくらいなら、テストの失敗として
+ * 気づけるほうが安全)。
  */
 function callArgsSpanForSite(
   fullSrc: string,
   lines: string[],
   offsets: number[],
   siteLine1Based: number,
+  contextLabel: string,
 ): string | null {
   const lineIdx = siteLine1Based - 1;
   const lineText = lines[lineIdx];
   const m = /\.(update|updateMany|upsert)\(/.exec(lineText);
   if (!m) return null;
   const openParenAbs = offsets[lineIdx] + m.index + m[0].length; // '(' の直後(既に depth=1)
-  return extractBalancedSpan(fullSrc, openParenAbs, "(", ")");
+  const span = extractBalancedSpan(fullSrc, openParenAbs, "(", ")");
+  if (/\.(update|updateMany|upsert)\(/.test(span)) {
+    throw new Error(
+      `${contextLabel}: 引数括弧の中に別の .update/.updateMany/.upsert( が見つかった。` +
+        "extractBalancedSpan が正規表現リテラルの括弧や入れ子のテンプレートリテラルで" +
+        "overrunしている可能性がある。手動で確認すること。",
+    );
+  }
+  return span;
 }
 
 /**
@@ -372,9 +389,14 @@ function resolveBareDataVariableHasIncrement(
     if (/\b(?:const|let)\s+data\b/.test(lines[j])) {
       const block = lines.slice(j, siteIdx + 1).join("\n");
       const splitIdx = block.indexOf("} = {");
-      // 型注釈(`const data: { ... }`)と初期化式(`= { ... }`)の境目を飛ばす。
-      // 境目が見つからない場合は(想定外の書き方)安全側でブロック全体を見る。
-      const runtimePart = splitIdx >= 0 ? block.slice(splitIdx + 1) : block;
+      // 型注釈(`const data: { ... }`)と初期化式(`= { ... }`)の境目。
+      // ⚠review Important 1後半(Task 7レビュー Minor 9で持ち越し): 境目
+      // (`"} = {"`)が見つからないときは**false を返す**(以前はブロック全体
+      // = 型注釈だけを見てしまい、`const data: { version: { increment: 1 } }`
+      // のような型注釈だけの宣言を「実行時に version を進めている」と誤判定
+      // できてしまった)。境目が無ければ「実行時の増分の証拠は無い」とみなす。
+      if (splitIdx < 0) return false;
+      const runtimePart = block.slice(splitIdx + 1);
       return VERSION_INCREMENT_PATTERN.test(runtimePart);
     }
   }
@@ -393,8 +415,9 @@ function siteHasOwnVersionIncrement(
   lines: string[],
   offsets: number[],
   siteLine1Based: number,
+  contextLabel: string,
 ): boolean {
-  const callArgs = callArgsSpanForSite(fullSrc, lines, offsets, siteLine1Based);
+  const callArgs = callArgsSpanForSite(fullSrc, lines, offsets, siteLine1Based, contextLabel);
   if (callArgs === null) return false;
   if (VERSION_INCREMENT_PATTERN.test(callArgs)) return true;
   if (referencesBareDataVariable(callArgs)) {
@@ -413,7 +436,7 @@ function findVersionedSitesMissingIncrement(): string[] {
     const fullSrc = readFileSync(full, "utf8").replace(/\r\n/g, "\n");
     const lines = fullSrc.split("\n");
     const offsets = lineStartOffsets(lines);
-    if (!siteHasOwnVersionIncrement(fullSrc, lines, offsets, line)) {
+    if (!siteHasOwnVersionIncrement(fullSrc, lines, offsets, line, key)) {
       missing.push(key);
     }
   }
@@ -500,7 +523,7 @@ function findAllowlistedSitesWithUnexpectedKeys(): Array<{
     const fullSrc = readFileSync(full, "utf8").replace(/\r\n/g, "\n");
     const lines = fullSrc.split("\n");
     const offsets = lineStartOffsets(lines);
-    const callArgs = callArgsSpanForSite(fullSrc, lines, offsets, line);
+    const callArgs = callArgsSpanForSite(fullSrc, lines, offsets, line, key);
     if (callArgs === null) {
       offenders.push({ site: key, unexpected: ["<呼び出しを再抽出できない>"] });
       continue;

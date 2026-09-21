@@ -614,6 +614,13 @@ export async function processRegistryPdf(
               // updateMany が0件になり、実際には何も書けていないのに merged を
               // 非空のまま返して recordChanges に「書いたことになっている」嘘の
               // 記録を残してしまう(取得状況の前進を保証するはずが、ここで抜ける)。
+              // ⚠この `select` は `merged`(= statusUpdates + fieldUpdates)に入りうる
+              //   キーを**すべて**含めること。`fresh` はそのまま `recordChanges` の
+              //   `oldValues`(freshForChangeLog)としても使われるため、ここに無い
+              //   キーを `merged` に足すと、そのキーの「変更前」が undefined のまま
+              //   変更履歴に記録される(=空の "before" で残る)。新しい項目の
+              //   補完/前進をこの関数に足すときは、まずここに列を足すこと
+              //   (Task 7レビュー Minor 9・持ち越し)。
               const fresh = await tx.property.findUnique({
                 where: { id: propertyId },
                 select: {
