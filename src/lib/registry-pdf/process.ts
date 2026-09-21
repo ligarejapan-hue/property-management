@@ -303,6 +303,20 @@ async function reflectParsedOwners(args: {
     const withTx = <T>(fn: (tx: DbClient) => Promise<T>): Promise<T> =>
       asOneBatch ? fn(db) : prisma.$transaction((tx) => fn(tx as DbClient));
 
+    /**
+     * まとめる場合に、物件行より先に押さえた所有者の id。
+     * ⚠**物件行を押さえたあとは、ここに無い所有者の行を押さえに行かない**。
+     *   先押さえの後に別の処理が同じ氏名・住所の所有者を作って確定すると、以後の
+     *   探索で見えるようになるが、それを押さえると順序が「物件 → Owner」になり、
+     *   その所有者を押さえて物件を待っている /owners と互いに待ち合う。
+     *   まとめる場合は**先に押さえた所有者だけ**を使い回す(見つけても押さえない=
+     *   新規作成に回す)。まとめない場合(従来の経路)は所有者ごとに Owner → 物件の
+     *   順で押さえるので、この制限は掛けない。
+     */
+    const prelockedOwnerIds = new Set<string>();
+    /** 使い回してよい候補か(まとめる場合は先押さえ済みの所有者だけ)。 */
+    const reusable = (id: string): boolean => !asOneBatch || prelockedOwnerIds.has(id);
+
     if (asOneBatch) {
       // ⚠**ロックの順序を「Owner → 物件」にそろえる**。
       //   まとめて1つのトランザクションで処理すると、1人目で物件行を押さえたあとに
@@ -333,6 +347,7 @@ async function reflectParsedOwners(args: {
           where: { id, isArchived: false },
           data: { updatedAt: new Date() },
         });
+        prelockedOwnerIds.add(id);
       }
     }
 
@@ -456,7 +471,10 @@ async function reflectParsedOwners(args: {
           select: { id: true, name: true, address: true, corporateNumber: true },
         });
         const hit = candidates.find(
-          (c) => normalizeName(c.name) === normName && normalizeAddress(c.address!) === normAddr,
+          (c) =>
+            reusable(c.id) &&
+            normalizeName(c.name) === normName &&
+            normalizeAddress(c.address!) === normAddr,
         );
         candidateOwnerId = hit?.id ?? null;
         candidateCorporateNumber = hit?.corporateNumber ?? null;
@@ -591,6 +609,7 @@ async function reflectParsedOwners(args: {
                   // ⚠さっき使えないと判断した候補は拾い直さない(同時にアーカイブ
                   //   された候補に紐づけ直してしまうため)。
                   c.id !== candidateOwnerId &&
+                  reusable(c.id) &&
                   !c.isArchived &&
                   normalizeName(c.name) === normName &&
                   normalizeAddress(c.address!) === normAddr,

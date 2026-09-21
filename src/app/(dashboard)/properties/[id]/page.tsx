@@ -483,6 +483,7 @@ export default function PropertyDetailPage({
     canDeleteProperty,
     canWriteOwner,
     canImportWrite,
+    canWriteOwnerNameAndAddress,
     canReadOwner,
     canRemoveOwnerLink,
     canCreateOwnerMemo,
@@ -547,6 +548,12 @@ export default function PropertyDetailPage({
       effectivePermissions.some(
         (p) => p.resource === resource && p.action === "edit" && p.granted,
       );
+    // 「謄本から所有者を反映」は氏名と住所を書く。server は書く項目ごとの権限
+    // (owner_name / owner_address の full/edit)を確かめて 403 にするので、
+    // ボタンの出し分けにも同じ条件を入れる(下見して確認まで進めるのに必ず 403、を避ける)。
+    const canWriteOwnerNameAndAddress =
+      (hasFullPerm("owner_name") || hasEditPerm("owner_name")) &&
+      (hasFullPerm("owner_address") || hasEditPerm("owner_address"));
     const ownerEditableFields: OwnerEditableFields = {
       name: hasFullPerm("owner_name"),
       nameKana: hasFullPerm("owner_name_kana"),
@@ -585,6 +592,7 @@ export default function PropertyDetailPage({
       canWriteOwner,
       canReadOwner,
       canImportWrite,
+    canWriteOwnerNameAndAddress,
       canRemoveOwnerLink,
       canCreateOwnerMemo,
       corporateLookupConfigured,
@@ -794,7 +802,7 @@ export default function PropertyDetailPage({
             registryOwnerAttachmentCount={
               property.registryAttachmentCounts?.owner ?? 0
             }
-            canApplyRegistryOwners={canImportWrite}
+            canApplyRegistryOwners={canImportWrite && canWriteOwnerNameAndAddress}
             canRead={canReadOwner}
             canWrite={canWriteOwner}
             canRemoveOwnerLink={canRemoveOwnerLink}

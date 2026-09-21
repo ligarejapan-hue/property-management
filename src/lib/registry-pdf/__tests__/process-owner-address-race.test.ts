@@ -370,6 +370,78 @@ describe("所有者が空の物件だけに入れる指定（requireNoExistingOw
     expect(firstOwnerLock).toBeLessThan(firstPropertyLock);
   });
 
+  it("⚠まとめる場合、先押さえの後に現れた所有者は使い回さない（物件ロックの後に所有者の行を待たない）", async () => {
+    // ⚠先押さえ(prescan)の後に別の処理が同じ氏名・住所の所有者を作って確定すると、
+    //   2人目の探索で見えるようになる。それを押さえに行くと順序が「物件→Owner」になり、
+    //   その所有者を押さえて物件を待っている /owners と互いに待ち合う。
+    //   まとめる場合は**先に押さえた所有者だけ**を使い回す(見つけても押さえない)。
+    (parseRegistryText as Mock).mockReturnValue({
+      realEstateNumber: null,
+      address: "東京都渋谷区神宮前三丁目12-3",
+      lotNumber: null,
+      buildingNumber: null,
+      landCategory: null,
+      area: null,
+      owners: [
+        { name: "新規太郎", address: OWNER.address, share: "2分の1" },
+        { name: OWNER.name, address: OWNER.address, share: "2分の1" },
+      ],
+      warnings: [],
+      confidence: 0.9,
+    });
+    const late = {
+      id: "owner-late",
+      name: OWNER.name,
+      address: OWNER.address,
+      corporateNumber: null,
+      isArchived: false,
+    };
+    // 1回目(先押さえ)= まだ居ない / それ以降 = 現れている
+    pm.owner.findMany.mockResolvedValueOnce([]).mockResolvedValue([late]);
+
+    await run({ requireNoExistingOwners: true });
+
+    const lockedIds = pm.owner.updateMany.mock.calls.map(
+      (c: unknown[]) => (c[0] as { where: { id?: string } }).where.id,
+    );
+    expect(lockedIds).not.toContain("owner-late");
+    // 使い回さないので2人とも新規作成
+    expect(pm.owner.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("まとめない場合（手動取込など）は、見つけた所有者を押さえて使い回す＝従来どおり", async () => {
+    (parseRegistryText as Mock).mockReturnValue({
+      realEstateNumber: null,
+      address: "東京都渋谷区神宮前三丁目12-3",
+      lotNumber: null,
+      buildingNumber: null,
+      landCategory: null,
+      area: null,
+      owners: [
+        { name: "新規太郎", address: OWNER.address, share: "2分の1" },
+        { name: OWNER.name, address: OWNER.address, share: "2分の1" },
+      ],
+      warnings: [],
+      confidence: 0.9,
+    });
+    const late = {
+      id: "owner-late",
+      name: OWNER.name,
+      address: OWNER.address,
+      corporateNumber: null,
+      isArchived: false,
+    };
+    pm.owner.findMany.mockResolvedValueOnce([]).mockResolvedValue([late]);
+
+    await run();
+
+    const lockedIds = pm.owner.updateMany.mock.calls.map(
+      (c: unknown[]) => (c[0] as { where: { id?: string } }).where.id,
+    );
+    expect(lockedIds).toContain("owner-late");
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+  });
+
   it("⚠再探索で拾った所有者が、その瞬間にアーカイブされていたら新規作成に回す", async () => {
     // ロック前は候補なし、ロック後の再探索では同姓同住所が見つかる(同時に作られた)
     pm.owner.findMany

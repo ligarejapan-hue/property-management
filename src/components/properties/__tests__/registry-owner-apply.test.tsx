@@ -97,6 +97,18 @@ describe("ボタンを出す条件（物件ページ）", () => {
 
   it("⚠server が必須にしている import:write が無い人には出さない", () => {
     expect(src).toContain("canApplyRegistryOwners");
+  });
+
+  it("⚠ボタンの出し分けに、氏名と住所の項目ごとの書き込み権限を含める", () => {
+    // server は書く項目ごと(owner_name / owner_address)に確かめて 403 にする。
+    // ここに含めないと「下見して確認まで進めるのに必ず 403」になる。
+    const src = readSource("src/app/(dashboard)/properties/[id]/page.tsx");
+    const gate = src.slice(src.indexOf("const canWriteOwnerNameAndAddress"));
+    expect(gate).toContain('hasEditPerm("owner_name")');
+    expect(gate).toContain('hasEditPerm("owner_address")');
+    expect(src).toContain(
+      "canApplyRegistryOwners={canImportWrite && canWriteOwnerNameAndAddress}",
+    );
     expect(src).toContain('p.resource === "import" && p.action === "write"');
   });
 
