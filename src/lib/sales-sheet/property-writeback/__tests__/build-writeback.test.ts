@@ -387,3 +387,49 @@ describe("buildWriteback — 小数の桁(@codex P2)", () => {
     expect(r.unreadable).toEqual(["想定利回り"]);
   });
 });
+
+// [@codex P2] 棟に紐づいていない区分(物件名だけ持つ部屋)では、棟の列へ入る項目は行き先が
+// 無い。黙って捨てず「保存先が無い」として返す(知らせに出すため)。
+describe("buildWriteback — 保存先が無い項目(@codex P2)", () => {
+  it("棟が無い区分の地下階・築年月は noTarget に入る", () => {
+    const r = buildWriteback({
+      kind: "mansion",
+      values: { basementFloors: "2", builtYearMonth: "2015年3月", price: "3480" },
+      current: { property: {}, building: null },
+    });
+    expect(r.building).toEqual({});
+    expect(r.property).toEqual({ salePrice: 3480 });
+    expect(r.unreadable).toEqual([]);
+    expect(r.noTarget).toEqual(["地下階", "築年月"]);
+  });
+
+  it("棟があれば noTarget は空(保存先がある)", () => {
+    const r = buildWriteback({
+      kind: "mansion",
+      values: { basementFloors: "2", builtYearMonth: "2015年3月" },
+      current: { property: {}, building: { id: "b1" } },
+    });
+    expect(r.building).toEqual({ basementFloors: 2, builtYear: 2015, builtMonth: 3 });
+    expect(r.noTarget).toEqual([]);
+  });
+
+  it("入れていない項目は noTarget に出さない(空欄は「変更なし」のまま)", () => {
+    const r = buildWriteback({
+      kind: "mansion",
+      values: { price: "3480" },
+      current: { property: {}, building: null },
+    });
+    expect(r.noTarget).toEqual([]);
+  });
+
+  it("棟を持たない種別(土地・戸建)では noTarget は常に空", () => {
+    for (const kind of ["land", "house"] as const) {
+      const r = buildWriteback({
+        kind,
+        values: { price: "3480", basementFloors: "2", builtYearMonth: "2015年3月" },
+        current: emptyCurrent,
+      });
+      expect({ kind, noTarget: r.noTarget }).toEqual({ kind, noTarget: [] });
+    }
+  });
+});

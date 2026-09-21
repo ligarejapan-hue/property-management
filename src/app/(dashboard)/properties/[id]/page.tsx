@@ -687,6 +687,7 @@ export default function PropertyDetailPage({
                 buildingName: property.building?.name ?? "",
                 buildingUnitCount: property.building?._count.properties ?? 0,
                 buildingVersion: property.building?.version ?? null,
+                buildingId: property.building?.id ?? null,
               }}
             />
           )}

@@ -22,3 +22,33 @@ describe("writebackMessages — 知らせの文言", () => {
     expect(writebackMessages({ saved: [], unreadable: [], conflict: false })).toEqual([]);
   });
 });
+
+// [@codex P2] 棟に紐づいていない区分では、棟の列へ入る項目(築年月・地下階)は行き先が無い。
+// 「保存した」とも「読めなかった」とも言わないまま値だけ消えるのを防ぐ。
+describe("writebackMessages — 保存先が無い項目(@codex P2)", () => {
+  it("棟に紐づいていないため保存していない、と伝える", () => {
+    expect(
+      writebackMessages({
+        saved: ["価格"],
+        unreadable: [],
+        noTarget: ["地下階", "築年月"],
+        conflict: false,
+      }),
+    ).toEqual([
+      "価格を物件に保存しました",
+      "地下階・築年月は棟に保存する項目ですが、この物件は棟に紐づいていないため保存していません",
+    ]);
+  });
+
+  it("noTarget が空なら何も足さない", () => {
+    expect(
+      writebackMessages({ saved: ["価格"], unreadable: [], noTarget: [], conflict: false }),
+    ).toEqual(["価格を物件に保存しました"]);
+  });
+
+  it("反映前に作られた知らせ(noTarget が無い)でも壊れない", () => {
+    expect(writebackMessages({ saved: ["価格"], unreadable: [], conflict: false })).toEqual([
+      "価格を物件に保存しました",
+    ]);
+  });
+});

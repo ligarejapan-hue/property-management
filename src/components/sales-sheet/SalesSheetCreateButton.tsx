@@ -172,6 +172,13 @@ export interface SalesSheetPropertyMeta {
   /** 同じ棟に属する物件数（=「同じ棟の N部屋」の N）。棟が無ければ 0。 */
   buildingUnitCount: number;
   buildingVersion: number | null;
+  /**
+   * 棟の id。[@codex P1] 版番号だけで棟を照合すると、ダイアログを開いている間に別処理が
+   * 部屋の所属棟を張り替えた場合(この経路は物件の版番号を進めない)、新旧の棟がたまたま
+   * 同じ版番号なら「別の棟へ入れるはずだった値」が通ってしまう。どの棟に対する入力かを
+   * 一緒に送り、サーバ側で照合する。
+   */
+  buildingId: string | null;
 }
 
 /**
@@ -1295,6 +1302,7 @@ export function SalesSheetCreateDialog({
             buildingName: raw.building?.name ?? "",
             buildingUnitCount: raw.building?._count.properties ?? 0,
             buildingVersion: raw.building?.version ?? null,
+            buildingId: raw.building?.id ?? null,
           });
         }
         setFetchStatus("ready");
@@ -1335,6 +1343,7 @@ export function SalesSheetCreateDialog({
         saveToProperty: gate.effectiveSaveToProperty,
         propertyVersion: meta?.version,
         buildingVersion: meta?.buildingVersion ?? undefined,
+        buildingId: meta?.buildingId ?? undefined,
       };
       const { url, init } = buildCreateRequest(propertyId, body);
       const res = await fetch(url, init);

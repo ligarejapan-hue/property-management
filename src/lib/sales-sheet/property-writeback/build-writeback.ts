@@ -11,6 +11,13 @@ export type WritebackResult = {
   property: Record<string, string | number | null>;
   building: Record<string, string | number | null>;
   unreadable: string[];
+  /**
+   * 入力されたが**保存先が無い**項目([@codex P2])。
+   * 区分マンションの築年月・地下階は棟の列へ入るため、棟に紐づいていない部屋
+   * (物件名だけ持つ区分)では入れても行き先が無い。黙って捨てると、作成後の知らせが
+   * 「保存した」とも「読めなかった」とも言わないまま値だけ消える。
+   */
+  noTarget: string[];
 };
 
 /**
@@ -172,13 +179,16 @@ export function buildWriteback(input: {
   current: WritebackCurrent;
 }): WritebackResult {
   const { kind, values, current } = input;
-  const out: WritebackResult = { property: {}, building: {}, unreadable: [] };
+  const out: WritebackResult = { property: {}, building: {}, unreadable: [], noTarget: [] };
   const hasBuilding = current.building !== null;
 
   for (const rule of RULES[kind]) {
     const raw = values[rule.key];
     if (typeof raw !== "string" || raw.trim() === "") continue; // 空は変更なし
-    if (rule.to === "building" && !hasBuilding) continue;
+    if (rule.to === "building" && !hasBuilding) {
+      out.noTarget.push(rule.label); // 棟に紐づいていない＝入れても行き先が無い
+      continue;
+    }
 
     let next: string | number | null;
     if (rule.as === "number") {
@@ -207,7 +217,8 @@ export function buildWriteback(input: {
   const builtRaw = values.builtYearMonth;
   if (builtTarget && typeof builtRaw === "string" && builtRaw.trim() !== "") {
     if (builtTarget === "building" && !hasBuilding) {
-      // 棟が無い区分は保存先が無いので何もしない
+      // 棟が無い区分は保存先が無い。黙って捨てず、知らせに出す([@codex P2])。
+      out.noTarget.push(BUILT_LABEL);
     } else {
       const parsed = parseBuiltYearMonth(builtRaw);
       if (parsed === null || !inRange(parsed.year, BUILT_YEAR_RANGE)) {

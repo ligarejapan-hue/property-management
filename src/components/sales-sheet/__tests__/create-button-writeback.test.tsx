@@ -23,7 +23,13 @@ const base = {
   propertyId: "p1",
   kind: "mansion" as const,
   onClose: () => {},
-  property: { version: 3, buildingName: "○○マンション", buildingUnitCount: 5, buildingVersion: 2 },
+  property: {
+    version: 3,
+    buildingName: "○○マンション",
+    buildingUnitCount: 5,
+    buildingVersion: 2,
+    buildingId: "b1",
+  },
 };
 
 describe("作成ダイアログ — 物件にも保存する", () => {

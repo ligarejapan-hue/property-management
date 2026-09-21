@@ -380,6 +380,8 @@ export async function POST(
     const saveToProperty = bodyObj.saveToProperty !== false;
     const propertyVersion = typeof bodyObj.propertyVersion === "number" ? bodyObj.propertyVersion : null;
     const buildingVersion = typeof bodyObj.buildingVersion === "number" ? bodyObj.buildingVersion : null;
+    // @codex P1: どの棟に対する入力かも受け取る(版番号だけでは棟の張り替えを見抜けない)。
+    const buildingId = typeof bodyObj.buildingId === "string" ? bodyObj.buildingId : null;
 
     // 写真を最大 N 枚 seed。保存前に1枚ずつ認可（caller が読める＋この物件に属する）。
     // 未認可 / 解決不能 / 別物件は落とす（サーバ生成は 422 ではなく drop 方針）＝未認可 key を
@@ -560,8 +562,18 @@ export async function POST(
       templateId = "sale-building";
     }
 
-    const noWriteback = { saved: [] as string[], unreadable: [] as string[], conflict: false };
-    const conflictWriteback = { saved: [] as string[], unreadable: [] as string[], conflict: true };
+    const noWriteback = {
+      saved: [] as string[],
+      unreadable: [] as string[],
+      noTarget: [] as string[],
+      conflict: false,
+    };
+    const conflictWriteback = {
+      saved: [] as string[],
+      unreadable: [] as string[],
+      noTarget: [] as string[],
+      conflict: true,
+    };
 
     // 図面の作成 + 物件・棟への保存（読み取れた値のみ）を1トランザクションにまとめる
     // （原子性: 途中で失敗したら図面も作らない）。物件配下を書き換える前に親の行を
@@ -669,7 +681,16 @@ export async function POST(
       // buildWriteback は棟が無ければ棟向けの規則を飛ばすので、result.building が
       // 空でないなら棟は必ず存在する。
       if (Object.keys(result.building).length > 0) {
-        if (buildingVersion === null || buildingVersion !== fresh.building!.version) {
+        // @codex P1: 版番号だけでなく**どの棟か**も照合する。ダイアログを開いている間に
+        // 別処理が部屋の所属棟を張り替えると(この経路は物件の版番号を進めない)、新旧の棟が
+        // たまたま同じ版番号のときに「別の棟へ入れるはずだった値」が通ってしまう。
+        // 古いクライアントは buildingId を送らない=照合できない=安全側で conflict。
+        if (
+          buildingVersion === null ||
+          buildingVersion !== fresh.building!.version ||
+          buildingId === null ||
+          buildingId !== fresh.building!.id
+        ) {
           return { design: created, writeback: conflictWriteback };
         }
       }
@@ -690,7 +711,12 @@ export async function POST(
 
       return {
         design: created,
-        writeback: { saved: labelsOf(kind, result), unreadable: result.unreadable, conflict: false },
+        writeback: {
+          saved: labelsOf(kind, result),
+          unreadable: result.unreadable,
+          noTarget: result.noTarget,
+          conflict: false,
+        },
       };
     });
 

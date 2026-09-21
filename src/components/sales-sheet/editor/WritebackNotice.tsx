@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from "react";
 
-export type WritebackSummary = { saved: string[]; unreadable: string[]; conflict: boolean };
+export type WritebackSummary = {
+  saved: string[];
+  unreadable: string[];
+  conflict: boolean;
+  /** 入力されたが保存先が無かった項目([@codex P2]・棟に紐づいていない区分の棟項目)。 */
+  noTarget?: string[];
+};
 
 /** 知らせの文言(純関数・テストで固定する)。 */
 export function writebackMessages(s: WritebackSummary): string[] {
@@ -13,6 +19,13 @@ export function writebackMessages(s: WritebackSummary): string[] {
   }
   if (s.unreadable.length > 0) {
     out.push(`${s.unreadable.join("・")}は数値や年月として読み取れなかったため、物件には保存していません`);
+  }
+  // 反映前に作られた知らせ(noTarget が無い)でも壊れないように ?? [] で受ける。
+  const noTarget = s.noTarget ?? [];
+  if (noTarget.length > 0) {
+    out.push(
+      `${noTarget.join("・")}は棟に保存する項目ですが、この物件は棟に紐づいていないため保存していません`,
+    );
   }
   return out;
 }
