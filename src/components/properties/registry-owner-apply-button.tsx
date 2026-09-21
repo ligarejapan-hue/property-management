@@ -26,7 +26,7 @@ export interface RegistryOwnerApplyButtonProps {
   onApplied: () => Promise<void> | void;
 }
 
-type Phase = "idle" | "loading" | "confirm" | "applying";
+type Phase = "idle" | "loading" | "confirm" | "applying" | "done";
 
 export default function RegistryOwnerApplyButton({
   propertyId,
@@ -41,6 +41,12 @@ export default function RegistryOwnerApplyButton({
     setPreview(null);
     setErrorMsg(null);
   }, []);
+
+  /** 成功の表示を閉じてから、画面を読み直す。 */
+  const finish = useCallback(async () => {
+    close();
+    await onApplied();
+  }, [close, onApplied]);
 
   const openPreview = useCallback(async () => {
     setPhase("loading");
@@ -69,16 +75,12 @@ export default function RegistryOwnerApplyButton({
       setPhase("confirm");
       return;
     }
-    // ⚠ここから先は**登録は成功している**。画面の読み直しに失敗しても
-    //   「登録できませんでした」とは出さない(実際には入っているため)。
-    close();
-    try {
-      await onApplied();
-    } catch {
-      setErrorMsg(
-        "登録しました。画面の表示が最新でない可能性があるので、再読み込みしてください",
-      );
-    }
+    // ⚠ここで**先に成功を見せてから**画面を読み直す。
+    //   読み直し(onApplied = ページの fetchProperty)は失敗しても内部で受け止めて
+    //   正常に返るため、ここで失敗を捕まえられない。先に閉じてしまうと、読み直しに
+    //   失敗したとき画面がエラー表示に切り替わり、利用者は**登録が成功したことを
+    //   知るすべが無くなる**。
+    setPhase("done");
   }, [propertyId, preview, onApplied, close]);
 
   const owners = preview?.owners ?? [];
@@ -106,6 +108,22 @@ export default function RegistryOwnerApplyButton({
         <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">
           {errorMsg}
         </p>
+      ) : null}
+
+      {phase === "done" ? (
+        <ModalShell
+          title="謄本から所有者を反映"
+          size="md"
+          onClose={finish}
+          footer={<Button onClick={finish}>閉じる</Button>}
+        >
+          <p className="text-sm text-gray-800 dark:text-gray-100">
+            {owners.length}名の所有者を登録しました。
+          </p>
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            閉じると物件の表示を読み直します。
+          </p>
+        </ModalShell>
       ) : null}
 
       {phase === "confirm" || phase === "applying" ? (

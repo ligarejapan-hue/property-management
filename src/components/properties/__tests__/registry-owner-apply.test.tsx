@@ -131,6 +131,20 @@ describe("反映の安全策（ボタン部品）", () => {
     expect(src).toContain("!preview?.alreadyHasOwners");
   });
 
+  it("⚠登録に成功したら、画面を読み直す前に成功を見せる", () => {
+    // 読み直し(ページの fetchProperty)は失敗しても内部で受け止めて正常に返るため、
+    // 先に閉じると、読み直しに失敗したとき利用者は成功を知るすべが無くなる。
+    expect(src).toContain('setPhase("done")');
+    expect(src).toContain("名の所有者を登録しました");
+    // 読み直しは「閉じる」を押してから
+    const finishBody = src.slice(
+      src.indexOf("const finish = useCallback"),
+      src.indexOf("const openPreview"),
+    );
+    expect(finishBody).toContain("close();");
+    expect(finishBody).toContain("await onApplied();");
+  });
+
   it("登録中は閉じられない（二重送信を防ぐ）", () => {
     expect(src).toContain('onClose={phase === "applying" ? undefined : close}');
   });
