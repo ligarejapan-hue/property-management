@@ -28,3 +28,16 @@ describe("棟の詳細 — 地下階の 0 を消さない(@codex P2)", () => {
     expect(detailSrc).toContain('basementFloors: building.basementFloors?.toString() ?? ""');
   });
 });
+
+// [@codex P2] 築月だけ保存されている棟でも表示する(築年の有無で判定すると消える)。
+describe("棟の詳細 — 築月だけの値を消さない(@codex P2)", () => {
+  it("築年の有無で分岐せず、共通の表示関数に任せている", () => {
+    expect(detailSrc).toContain(
+      "formatBuiltYearMonth(building.builtYear, building.builtMonth) || null",
+    );
+  });
+
+  it("築年が無いと月ごと消える書き方を残さない", () => {
+    expect(detailSrc).not.toMatch(/building\.builtYear\s*\?\s*`/);
+  });
+});

@@ -10,6 +10,7 @@ import {
   mapOccupancyStatusToLandOccupancy,
 } from "@/lib/sales-sheet/occupancy";
 import { computeTsuboUnitPrice } from "@/lib/sales-sheet/tsubo";
+import { formatBuiltYearMonth } from "@/lib/built-year-month";
 import {
   OTHER_OPTION,
   hasOtherOption,
@@ -444,11 +445,13 @@ function computeMansionAutoValues(data: MansionAutoSource): FieldModelAutoValues
   if (data.zoningDistrict) {
     hints.useDistrict = `${data.zoningDistrict}（追加の用途地域があれば選択してください）`;
   }
-  if (b?.builtYear != null) {
-    // [Task10 C-1] 棟に月まで保存済みなら「2008年3月」の形で見せる(document 側の
-    // fmtBuiltYear と同じ表記)。月が無ければ従来どおり年のみ+案内文言。
+  // [Task10 C-1] 棟に月まで保存済みなら「2008年3月」の形で見せる(document 側の
+  // fmtBuiltYear と同じ表記)。月が無ければ年のみ+案内文言。
+  // @codex P2: 築月だけ保存されている棟でも出す(共通関数に集約)。
+  const builtText = formatBuiltYearMonth(b?.builtYear, b?.builtMonth);
+  if (builtText) {
     hints.builtYearMonth =
-      b.builtMonth != null ? `${b.builtYear}年${b.builtMonth}月` : `${b.builtYear}年（月まで分かる場合は入力してください）`;
+      b?.builtMonth != null ? builtText : `${builtText}（月まで分かる場合は入力してください）`;
   }
   if (b?.basementFloors != null) {
     hints.basementFloors = savedValueHint(`${b.basementFloors}階`);

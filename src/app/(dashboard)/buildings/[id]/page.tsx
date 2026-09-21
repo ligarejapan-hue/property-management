@@ -28,6 +28,7 @@ import BuildingPhotoTab from "@/components/buildings/building-photo-tab";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { CASE_STATUS_LABELS as CASE_LABELS, OCCUPANCY_STATUS_LABELS } from "@/lib/property-types";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
+import { formatBuiltYearMonth } from "@/lib/built-year-month";
 
 // ---------- Types ----------
 
@@ -405,7 +406,9 @@ export default function BuildingDetailPage({
             <InfoField label="総戸数" value={building.totalUnits ? `${building.totalUnits}戸` : null} />
             <InfoField
               label="築年"
-              value={building.builtYear ? `${building.builtYear}年${building.builtMonth ? `${building.builtMonth}月` : ""}` : null}
+              // @codex P2: 築月だけ保存されている棟でも表示する（築年の有無で
+              // 判定すると、保存されている月が画面から消える）。
+              value={formatBuiltYearMonth(building.builtYear, building.builtMonth) || null}
             />
             <InfoField label="構造" value={building.structureType} />
             <InfoField label="管理会社" value={building.managementCompany} />

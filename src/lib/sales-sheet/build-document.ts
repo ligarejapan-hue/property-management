@@ -29,6 +29,7 @@ import { splitMainDetailRows, splitDetailColumns, type SheetRow } from "./main-d
 import { CONSUMER_COLORS, CONSUMER_FONT_FAMILY } from "./consumer-theme";
 import { computeTsuboUnitPrice } from "./tsubo";
 import type { CompanyProfile } from "./company-profile-store";
+import { formatBuiltYearMonth } from "@/lib/built-year-month";
 
 /**
  * 保存する画像 src を正規化する。`PropertyPhoto.fileUrl` は storage backend に
@@ -74,8 +75,8 @@ function fmtBuiltYear(
   builtMonth?: number | null,
 ): string {
   if (override) return override;
-  if (builtYear != null) return builtMonth != null ? `${builtYear}年${builtMonth}月` : `${builtYear}年`;
-  return "";
+  // @codex P2: 築月だけ分かっている棟/物件でも落とさない（共通関数に集約）。
+  return formatBuiltYearMonth(builtYear, builtMonth);
 }
 
 /** override（手入力・文字列）が空でなければそれ、無ければ物件(棟)の既定値を文字列化して返す
