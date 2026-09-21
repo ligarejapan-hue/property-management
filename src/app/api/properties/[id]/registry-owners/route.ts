@@ -285,6 +285,9 @@ export async function POST(
       // ⚠上の 409 判定は PDF を読む前の値なので、読んでいる間に別タブが所有者を
       //   紐づけると古くなる。書き込みと同じ物件行ロックの中で見直してもらう。
       requireNoExistingOwners: true,
+      // ⚠上の担当者スコープ(canAccessPropertyRecord)の確認は受付時点の値。書き込みの
+      //   ロックまでの間に担当を外されても、ロックと同じ1文で見直して 403 にする。
+      enforcePropertyScope: true,
       // ⚠所有者だけを入れる。下見も確認画面も所有者しか見せていないので、
       //   物件の項目(不動産番号・地番・家屋番号・登記状況)は書き換えない。
       ownersOnly: true,

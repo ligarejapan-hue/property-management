@@ -436,3 +436,84 @@ describe("所有者が空の物件だけに入れる指定（requireNoExistingOw
     expect(pm.owner.create).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * ⚠なぜ必要か(@codex 第14R P1): 担当者だけの権限(field_staff)は「自分が作った/担当の
+ * 物件」しか扱えない。route の事前確認を通ったあと、書き込みのロックを取るまでの間に
+ * 担当を外されると、素のロック(lockPropertyRow)は担当を見直さないので、
+ * もう扱えない物件に所有者が永久に残る。ロックと同じ1文で担当を確かめる
+ * (lockPropertyRecordForWrite)= 付け替えはこの tx の commit まで待たされ、
+ * ロック時点で担当外なら 0 件 → 403 で何も書かない。
+ */
+describe("書き込みのロックの中で担当者スコープを見直す（enforcePropertyScope）", () => {
+  const FIELD_STAFF = { id: SESSION_ID, role: "field_staff" };
+  const runScoped = (extra: Record<string, unknown> = {}) =>
+    run({
+      session: FIELD_STAFF,
+      requireNoExistingOwners: true,
+      ownersOnly: true,
+      enforcePropertyScope: true,
+      ...extra,
+    });
+
+  beforeEach(() => {
+    // 事前確認は通る(担当者本人)
+    pm.property.findUnique.mockResolvedValue({
+      id: PROP_ID,
+      createdBy: "someone-else",
+      assignedTo: SESSION_ID,
+      address: "東京都渋谷区神宮前三丁目12-3",
+      realEstateNumber: null,
+    });
+  });
+
+  it("⚠ロックの1文に担当者の id を渡す（素のロックにしない）", async () => {
+    await runScoped();
+    // lockPropertyRowInternal の引数順 = (物件id, スコープの利用者id)
+    const scopeArgs = pm.$queryRaw.mock.calls.map((c: unknown[]) => c[2]);
+    expect(scopeArgs.length).toBeGreaterThan(0);
+    expect(scopeArgs.every((v: unknown) => v === SESSION_ID)).toBe(true);
+  });
+
+  it("⚠ロック時点で担当を外されていたら 403 で何も書かない", async () => {
+    pm.$queryRaw.mockResolvedValue([]); // 担当外 = 0 件
+    await expect(runScoped()).rejects.toMatchObject({ status: 403 });
+    expect(pm.owner.create).not.toHaveBeenCalled();
+    expect(pm.propertyOwner.create).not.toHaveBeenCalled();
+  });
+
+  it("⚠住所なしの所有者の経路も同じく 403 で止まる", async () => {
+    (parseRegistryText as Mock).mockReturnValue({
+      realEstateNumber: null,
+      address: "東京都渋谷区神宮前三丁目12-3",
+      lotNumber: null,
+      buildingNumber: null,
+      landCategory: null,
+      area: null,
+      owners: [{ name: OWNER.name, address: null, share: null }],
+      warnings: [],
+      confidence: 0.9,
+    });
+    pm.$queryRaw.mockResolvedValue([]);
+    await expect(runScoped()).rejects.toMatchObject({ status: 403 });
+    expect(pm.owner.create).not.toHaveBeenCalled();
+  });
+
+  it("⚠既存の所有者を使い回す経路も同じく 403 で止まる", async () => {
+    pm.owner.findMany.mockResolvedValue([
+      { id: "owner-existing", name: OWNER.name, address: OWNER.address, isArchived: false },
+    ]);
+    pm.$queryRaw.mockResolvedValue([]);
+    await expect(runScoped()).rejects.toMatchObject({ status: 403 });
+    expect(pm.propertyOwner.create).not.toHaveBeenCalled();
+  });
+
+  it("指定しない呼び出し元（有料取得など）は従来どおり素のロック＝担当を外されても保存を止めない", async () => {
+    // 有料取得は「課金後は止めない」。取得を頼んだ担当者がその間に外されても、
+    // 買った謄本の結果は保存される必要がある。
+    await run({ session: FIELD_STAFF, requireNoExistingOwners: true, ownersOnly: true });
+    const scopeArgs = pm.$queryRaw.mock.calls.map((c: unknown[]) => c[2]);
+    expect(scopeArgs.length).toBeGreaterThan(0);
+    expect(scopeArgs.every((v: unknown) => v === null)).toBe(true);
+  });
+});

@@ -221,6 +221,14 @@ describe("POST（反映）", () => {
     expect(args.ownersOnly).toBe(true);
   });
 
+  it("⚠書き込みのロックの中で担当者スコープを見直す指定を渡す", async () => {
+    await POST(postRequest(), context);
+    const args = (processRegistryPdf as unknown as Mock).mock.calls[0][0];
+    // これが外れると、事前の権限確認のあと(書き込みまでの間)に担当を外された
+    // 担当者でも、所有者を作って紐づけられてしまう。
+    expect(args.enforcePropertyScope).toBe(true);
+  });
+
   it("⚠確認した添付と違う謄本が最新になっていたら 409", async () => {
     const res = await POST(postRequest("att-old"), context);
     expect(res.status).toBe(409);

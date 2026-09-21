@@ -16,7 +16,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { lockPropertyRow } from "@/lib/property-record-guard";
+import { lockPropertyRecordForWrite, lockPropertyRow } from "@/lib/property-record-guard";
 import { lockOwnerRow } from "@/lib/edit-lock/row-locks";
 import { isResourceEditLocked } from "@/lib/edit-lock/service";
 import { ApiError } from "@/lib/api-helpers";
@@ -104,6 +104,17 @@ export interface ProcessRegistryPdfArgs {
    * 既定 false = 従来どおり(空の項目を謄本の値で埋める)。
    */
   ownersOnly?: boolean;
+  /**
+   * **書き込みのロックと同じ1文で担当者スコープを見直す**(添付済み謄本からの反映)。
+   * ⚠担当者だけの権限(field_staff)は、route の事前確認を通ったあと書き込みまでの
+   *   間に担当を外されうる。素のロックは担当を見直さないので、もう扱えない物件に
+   *   所有者が永久に残る。指定すると `lockPropertyRecordForWrite` を使い、ロック時点で
+   *   担当外なら 403 で何も書かない。
+   * 既定 false = 従来どおり素のロック。⚠有料取得の経路では指定しない
+   *   (「課金後は止めない」= 取得を頼んだ担当者がその間に外されても、買った謄本の
+   *   結果は保存する)。
+   */
+  enforcePropertyScope?: boolean;
   /**
    * 有料取得の請求種別（owner|all）。有料取得フローからのみ渡る（手動取込は undefined）。
    * ⚠**"all"(全部事項)のときは所有者を物件へ反映しない**。全部事項には抹消された
@@ -237,8 +248,20 @@ async function reflectParsedOwners(args: {
    *   確認画面は氏名・住所(・持分)しか出していない。
    */
   skipCorporateNumber?: boolean;
+  /**
+   * 渡されたときは、物件行のロックを `lockPropertyRecordForWrite`(ロック+担当者
+   * スコープの見直し)で取る。未指定 = 素の `lockPropertyRow`(従来どおり)。
+   * → ProcessRegistryPdfArgs.enforcePropertyScope を参照。
+   */
+  scopedSession?: RegistryPdfSession;
 }): Promise<{ matched: number; created: number; linked: number }> {
   const { propertyId, owners, recordCorporateDecision, markOwnerCorporateFillSkipped } = args;
+
+  /** 親の物件行をロックする。scopedSession があれば同じ1文で担当を見直す(0件=403)。 */
+  const lockProperty = (tx: DbClient): Promise<void> =>
+    args.scopedSession
+      ? lockPropertyRecordForWrite(tx, propertyId, args.scopedSession)
+      : lockPropertyRow(tx, propertyId);
   let matchedCount = 0;
   let createdCount = 0;
   let linkedCount = 0;
@@ -329,7 +352,7 @@ async function reflectParsedOwners(args: {
       //   直前に作った所有者を2件目が再利用できる必要がある。
       if (!ownerInfo.address) {
         const outcome = await withTx(async (tx) => {
-          await lockPropertyRow(tx, propertyId);
+          await lockProperty(tx);
           await assertStillEmpty(tx);
           const linked = await tx.propertyOwner.findMany({
             where: { propertyId },
@@ -462,7 +485,7 @@ async function reflectParsedOwners(args: {
               return { reused: false, linkCreated: false };
             }
             // 親の物件行をロック(Owner→親の順・書き込み規約+#364 R10)。
-            await lockPropertyRow(tx, propertyId);
+            await lockProperty(tx);
             await assertStillEmpty(tx);
             const existingLink = await tx.propertyOwner.findFirst({
               where: { propertyId, ownerId: candidateOwnerId! },
@@ -552,7 +575,7 @@ async function reflectParsedOwners(args: {
         let resolved: { id: string; created: boolean; linked: boolean };
         try {
           resolved = await withTx(async (tx) => {
-            await lockPropertyRow(tx, propertyId);
+            await lockProperty(tx);
             await assertStillEmpty(tx);
 
             let ownerId: string | null = null;
@@ -880,6 +903,7 @@ export async function processRegistryPdf(
           propertyId,
           requireNoExistingOwners: args.requireNoExistingOwners,
           skipCorporateNumber: args.ownersOnly,
+          scopedSession: args.enforcePropertyScope ? session : undefined,
           owners: parsed.owners,
           recordCorporateDecision,
           markOwnerCorporateFillSkipped,
@@ -973,6 +997,7 @@ export async function processRegistryPdf(
               propertyId: targetPropertyId,
               requireNoExistingOwners: args.requireNoExistingOwners,
               skipCorporateNumber: args.ownersOnly,
+              scopedSession: args.enforcePropertyScope ? session : undefined,
               owners: parsed.owners,
               recordCorporateDecision,
               markOwnerCorporateFillSkipped,
