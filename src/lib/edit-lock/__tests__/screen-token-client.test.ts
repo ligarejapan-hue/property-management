@@ -70,6 +70,7 @@ function createFakeEnv(overrides: Partial<ScreenTokenEnv> = {}): {
 describe("画面の合言葉(client)", () => {
   beforeEach(() => {
     resetScreenTokenForTest();
+    setScreenTokenEnvForTest(null);
     vi.useFakeTimers();
   });
 
@@ -89,6 +90,10 @@ describe("画面の合言葉(client)", () => {
   });
 
   it("保存が使えなくてもその画面の間は同じ値を返す(例外にしない)", () => {
+    // ⚠newId は呼ぶたびに違う値を返す(review Important 1)。固定文字列だと
+    //   メモ化(memoryToken)が無くても2回目がたまたま一致してしまい、
+    //   「その画面の間は同じ値を返す」を検査できていなかった。
+    let idCounter = 0;
     const throwingEnv: ScreenTokenEnv = {
       getItem: () => {
         throw new Error("blocked");
@@ -97,13 +102,13 @@ describe("画面の合言葉(client)", () => {
         throw new Error("blocked");
       },
       openChannel: () => null,
-      newId: () => "fake-token-blocked",
+      newId: () => `fake-token-blocked-${++idCounter}`,
     };
     setScreenTokenEnvForTest(throwingEnv);
 
     expect(() => getScreenToken()).not.toThrow();
     const a = getScreenToken();
-    expect(a).toBe("fake-token-blocked");
+    expect(a).toBe("fake-token-blocked-1");
     expect(getScreenToken()).toBe(a);
   });
 

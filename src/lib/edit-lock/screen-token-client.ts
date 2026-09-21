@@ -59,7 +59,14 @@ const browserEnv: ScreenTokenEnv = {
   openChannel(name) {
     const Ctor = globalThis.BroadcastChannel;
     if (typeof Ctor !== "function") return null;
-    const channel = new Ctor(name);
+    let channel: BroadcastChannel;
+    try {
+      channel = new Ctor(name);
+    } catch {
+      // review Minor 2: コンストラクタが投げる環境もある。他の「使えない」経路と
+      // 同じく null を返して問い合わせを省略する側に倒す。
+      return null;
+    }
     return {
       postMessage: (data) => channel.postMessage(data),
       onMessage: (handler) => {
