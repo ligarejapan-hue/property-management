@@ -47,9 +47,15 @@ describe("鍵の世代", () => {
     const lockId = "11111111-1111-1111-1111-111111111111";
     expect(readLockId(new Request("http://x/", { headers: { "X-Edit-Lock": `  ${lockId}  ` } }))).toBe(lockId);
   });
-  it("大文字混じりの uuid もそのまま(形式だけ検査・正規化はしない)", () => {
-    const lockId = "11111111-1111-1111-1111-111111111111".toUpperCase();
-    expect(readLockId(new Request("http://x/", { headers: { "X-Edit-Lock": lockId } }))).toBe(lockId);
+  // review Minor 1(H7レビュー): 大文字混じりの uuid は小文字化して返す。
+  // service.ts の `row.id === input.lockId` は素の文字列比較で、DB から返る
+  // "id" 列は常に小文字なので、正規化しないと大文字混じりの画面の保存が
+  // 常に 423 EDIT_LOCK_STALE になる。
+  it("大文字混じりの uuid は小文字化して返す(正規化する)", () => {
+    const lockId = "11111111-1111-1111-1111-111111111111";
+    expect(
+      readLockId(new Request("http://x/", { headers: { "X-Edit-Lock": lockId.toUpperCase() } })),
+    ).toBe(lockId);
   });
 
   // ⚠review Important 3: この検査は「lockId を今すぐ SQL に bind すると 500 になる」

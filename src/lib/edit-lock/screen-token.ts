@@ -37,6 +37,13 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * **入口の約束**: 将来 lockId を SQL 側の判定に使う実装に変えても、不正な形式の値は
  * ここで止まっているので 22P02 の 500 にはならない。値を捨てて「鍵なし」として
  * 通すのはこの検査が塞ぐはずの穴を開けるので禁止(コントローラ決定①)。
+ *
+ * ⚠review Minor 1(M1): **小文字化して返す**。`row.id === input.lockId` は素の
+ *   文字列比較で、行の `id`(PostgreSQL の uuid 列から返る値)は常に小文字。
+ *   SQL 側は同じ大小文字の問題を uuid 型キャストで解決済み(service.ts の
+ *   `readEditLocks`/`deleteEditLocksFor` のコメント参照)なので、JS側の比較も
+ *   同じ扱いに揃える。正規化しないと、大文字混じりの `X-Edit-Lock` を送った
+ *   画面の保存が常に `423 EDIT_LOCK_STALE` になる。
  */
 export function readLockId(request: Request): string | null {
   const raw = request.headers.get(EDIT_LOCK_HEADER);
@@ -45,5 +52,5 @@ export function readLockId(request: Request): string | null {
   if (!UUID_RE.test(trimmed)) {
     throw new ApiError(400, "編集の鍵の形式が不正です", "EDIT_LOCK_ID_INVALID");
   }
-  return trimmed;
+  return trimmed.toLowerCase();
 }
