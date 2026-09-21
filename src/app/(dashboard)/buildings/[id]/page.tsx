@@ -395,7 +395,13 @@ export default function BuildingDetailPage({
           <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3 lg:grid-cols-4">
             <InfoField label="住所" value={building.address} />
             <InfoField label="階数" value={building.totalFloors ? `${building.totalFloors}階建` : null} />
-            <InfoField label="地下階" value={building.basementFloors ? `${building.basementFloors}階` : null} />
+            {/* @codex P2: 地下階は 0 が正しい値（API も書き戻しも min(0) で受ける）。
+                真偽値で判定すると「地下なし(0)」が「未入力」と同じ空欄になって区別できない
+                ので、null/undefined だけを未入力として扱う。 */}
+            <InfoField
+              label="地下階"
+              value={building.basementFloors == null ? null : `${building.basementFloors}階`}
+            />
             <InfoField label="総戸数" value={building.totalUnits ? `${building.totalUnits}戸` : null} />
             <InfoField
               label="築年"

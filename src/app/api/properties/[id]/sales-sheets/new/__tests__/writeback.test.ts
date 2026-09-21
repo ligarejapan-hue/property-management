@@ -484,6 +484,32 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     expect(lastLockOrder).toBeLessThan(buildingUpdateManyMock.mock.invocationCallOrder[0]);
   });
 
+  // @codex P1: ロックする棟を「トランザクションに入る前に読んだ property.building.id」で
+  // 決めると、その間に別処理が building_id を張り替えたとき、古い棟をロックしたまま新しい棟を
+  // 更新しうる(張り替えでは properties.version が上がらず、棟の version も一致しがち＝どちらの
+  // 判定もすり抜ける)。棟のロックは「物件行を押さえた後の紐付け」を SQL 側で引き直して行う。
+  it("棟のロックは古い building.id を使わず、物件の現在の紐付けから引く(@codex P1)", async () => {
+    propertyFindMock.mockResolvedValue({ ...baseMansion, building: testBuilding });
+    const res = await POST(req({ basementFloors: "2", propertyVersion: 1, buildingVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    const buildingLock = queryRawMock.mock.calls[1];
+    expect(sqlOf(buildingLock)).toMatch(/JOIN properties/);
+    expect(sqlOf(buildingLock)).toMatch(/FOR UPDATE OF b/);
+    // 埋め込む値は物件 id のみ。ロック前に読んだ棟 id("b1")は使わない。
+    expect(buildingLock.slice(1)).toEqual(["11111111-1111-1111-1111-111111111111"]);
+    expect(buildingLock.slice(1)).not.toContain(testBuilding.id);
+  });
+
+  // 同じ理由の裏返し: ロック前の読み取りで棟が無く見えても、押さえた後に紐付いていれば
+  // ロックが要る。棟ロックの SQL は紐付きの有無で分岐させず必ず流す(無ければ0行)。
+  it("ロック前の読み取りで棟が無くても、棟ロックのSQLは流す(@codex P1)", async () => {
+    propertyFindMock.mockResolvedValue({ ...baseProperty, building: null });
+    const res = await POST(req({ price: "3480", propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    expect(queryRawMock).toHaveBeenCalledTimes(2);
+    expect(sqlOf(queryRawMock.mock.calls[1])).toMatch(/FROM buildings/);
+  });
+
   // I1: writeback は zod 検証済みの overrides を使う。schema に無いキーは無検証で
   // 列へ入らないこと。⚠R14 で exclusiveArea/balconyArea/layout/balconyDir/floorNo/
   // managementFee/repairFee は schema に追加した(区分の書き戻し・下のテスト参照)ため、

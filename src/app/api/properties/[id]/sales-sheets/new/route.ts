@@ -567,9 +567,18 @@ export async function POST(
     // 先にロックする既存の決まりに合わせ、区分は棟の行も併せてロックする。
     const { design, writeback } = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM properties WHERE id = ${id}::uuid FOR UPDATE`;
-      if (property.building?.id) {
-        await tx.$queryRaw`SELECT id FROM buildings WHERE id = ${property.building.id}::uuid FOR UPDATE`;
-      }
+      // @codex P1: ロックする棟を「トランザクションに入る前に読んだ property.building.id」で
+      // 決めてはいけない。最初の読み取りからここまでの間に別処理（CSV取込など）が
+      // properties.building_id を張り替えると、古い棟をロックしたまま新しい棟を更新しうる
+      // （張り替えでは properties.version が上がらず、棟の version も 1 同士で一致しがち＝
+      // version 判定は両方すり抜ける）。物件行を押さえた後なら building_id はもう動かせない
+      // ので、その時点の紐付けを SQL 側で引き直してロックする（往復を増やさない）。
+      // 紐付きが無ければ 0 行＝ロック無しで、条件分岐は不要。
+      await tx.$queryRaw`
+        SELECT b.id FROM buildings b
+        JOIN properties p ON p.building_id = b.id
+        WHERE p.id = ${id}::uuid
+        FOR UPDATE OF b`;
 
       const created = await createDesign(
         { propertyId: id, document, userId: session.id, templateId },

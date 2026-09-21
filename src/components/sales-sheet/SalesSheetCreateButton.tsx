@@ -186,6 +186,64 @@ export interface SalesSheetPropertyMeta {
  */
 const BUILDING_KEYS: readonly string[] = ["basementFloors", "builtYearMonth"];
 
+/**
+ * 物件へ書き戻すのに要る情報（version・棟の version）が揃っているか。
+ * - ready: 呼び出し元から property が渡っている、または取得済み
+ * - loading: 取得中（まだ version が無い）
+ * - failed: 取得に失敗した（version は手に入らない）
+ */
+export type WritebackMetaStatus = "ready" | "loading" | "failed";
+
+export interface WritebackGate {
+  /** 作成ボタンを押させない（物件の情報が届くのを待つ）。 */
+  submitBlocked: boolean;
+  /** 実際にサーバへ送る saveToProperty。 */
+  effectiveSaveToProperty: boolean;
+  /** チェックボックスを触らせない。 */
+  checkboxDisabled: boolean;
+  /** チェックボックスの下に出す説明（null＝出さない）。 */
+  notice: string | null;
+}
+
+/**
+ * [@codex P2] 「入れた値を物件にも保存する」の可否を、物件情報の取得状況から決める純関数。
+ *
+ * version が無いまま送るとサーバは安全側で conflict として書き戻しを捨てる（route.ts の設計）。
+ * 画面が「保存する」と表示したまま何も保存されない状態を作らないため、
+ * 取得中は作成そのものを待たせ、取得に失敗したときは保存しないことを明示する。
+ * チェックを外している人は version を必要としないので、どちらの場合も待たせない。
+ */
+export function writebackGate(
+  saveToProperty: boolean,
+  metaStatus: WritebackMetaStatus,
+): WritebackGate {
+  if (!saveToProperty || metaStatus === "ready") {
+    return {
+      submitBlocked: false,
+      effectiveSaveToProperty: saveToProperty,
+      checkboxDisabled: metaStatus === "failed",
+      notice:
+        metaStatus === "failed"
+          ? "物件の情報を読み込めませんでした。この図面の値は物件には保存されません。"
+          : null,
+    };
+  }
+  if (metaStatus === "loading") {
+    return {
+      submitBlocked: true,
+      effectiveSaveToProperty: true,
+      checkboxDisabled: false,
+      notice: "物件の情報を読み込んでいます…",
+    };
+  }
+  return {
+    submitBlocked: false,
+    effectiveSaveToProperty: false,
+    checkboxDisabled: true,
+    notice: "物件の情報を読み込めませんでした。この図面の値は物件には保存されません。",
+  };
+}
+
 function groupBySection(
   fields: readonly SheetField[],
 ): (readonly [string, SheetField[]])[] {
@@ -1188,6 +1246,11 @@ export function SalesSheetCreateDialog({
   // property prop が渡っていればそちらを優先する（テストはこちらを使う＝SSR は effect を
   // 実行しないため fetchedMeta は常に null のまま）。
   const [fetchedMeta, setFetchedMeta] = useState<SalesSheetPropertyMeta | null>(null);
+  // 上の fetch の進行状況（property prop が渡っている呼び出し元では使わない）。"loading" で
+  // 始め、成否が確定したときだけ非同期コールバックの中で更新する（effect 内の同期 setState は
+  // eslint react-hooks/set-state-in-effect が禁じているため、開き直しでの "loading" 戻しはしない
+  // ＝一度失敗した後の開き直しは再取得が成功するまで保存を控える安全側に倒れる）。
+  const [fetchStatus, setFetchStatus] = useState<WritebackMetaStatus>("loading");
   const meta = property ?? fetchedMeta;
 
   // field-model がある種別(mansion/land)のみ: 開いたときに物件（＋建物、mansionのみ）データを
@@ -1234,14 +1297,30 @@ export function SalesSheetCreateDialog({
             buildingVersion: raw.building?.version ?? null,
           });
         }
+        setFetchStatus("ready");
       })
       .catch(() => {
-        /* ベストエフォート。取得失敗時は自動反映プレビュー無しで継続する。 */
+        // 自動反映プレビューはベストエフォートのまま（無しで継続）。ただし version が
+        // 取れていない＝物件へは保存できない状態なので、下の writebackGate へ伝える。
+        if (!cancelled) setFetchStatus("failed");
       });
     return () => {
       cancelled = true;
     };
   }, [open, kind, propertyId, hasPropertyMeta]);
+
+  // @codex P2: 「物件にも保存する」は既定ONだが、version は上の fetch でしか手に入らない
+  // （property prop が無い呼び出し元＝/sales-sheets/new のピッカー経由）。取得前／取得失敗の
+  // まま送ると、サーバは version 欠落を安全側で conflict と見なして書き戻しを丸ごと捨てる＝
+  // 画面は「保存する」と言ったのに何も保存されない。状態を writebackGate に集約して、
+  // 取得中は作成を待たせ、失敗時はチェックを外して理由を出す。
+  const metaStatus: WritebackMetaStatus = hasPropertyMeta
+    ? "ready"
+    : AUTO_COMPUTE_BY_KIND[kind]
+      ? fetchStatus
+      : // 物件データを取りに行かない種別＝version を送れない（現状は該当なし）。
+        "failed";
+  const gate = writebackGate(saveToProperty, metaStatus);
 
   async function create() {
     setBusy(true);
@@ -1253,7 +1332,7 @@ export function SalesSheetCreateDialog({
       // meta がまだ取得できていない場合も undefined のまま送る（意図的＝勝手に上書きしない）。
       const body: Record<string, unknown> = {
         ...overrides,
-        saveToProperty,
+        saveToProperty: gate.effectiveSaveToProperty,
         propertyVersion: meta?.version,
         buildingVersion: meta?.buildingVersion ?? undefined,
       };
@@ -1297,7 +1376,8 @@ export function SalesSheetCreateDialog({
     return typeof v === "string" && v.trim() !== "";
   });
   const showBuildingNote =
-    saveToProperty &&
+    // 実際に保存されないときに「棟の他の部屋にも反映されます」と言うのは嘘になる。
+    gate.effectiveSaveToProperty &&
     kind === "mansion" &&
     buildingFieldTouched &&
     meta !== null &&
@@ -1356,12 +1436,16 @@ export function SalesSheetCreateDialog({
         <label className="mt-3 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
           <input
             type="checkbox"
-            checked={saveToProperty}
+            checked={gate.effectiveSaveToProperty}
+            disabled={gate.checkboxDisabled}
             onChange={(e) => setSaveToProperty(e.target.checked)}
             className="h-4 w-4"
           />
           入れた値を物件にも保存する
         </label>
+        {gate.notice && (
+          <p className="mt-1 pl-6 text-xs text-gray-600 dark:text-gray-400">{gate.notice}</p>
+        )}
         {showBuildingNote && meta && (
           <p className="mt-1 pl-6 text-xs text-gray-600 dark:text-gray-400">
             {/* [F3 Task5・コントローラ判断R17] buildingUnitCount(=_count.properties) は編集中の
@@ -1384,10 +1468,10 @@ export function SalesSheetCreateDialog({
           <button
             type="button"
             onClick={create}
-            disabled={busy}
+            disabled={busy || gate.submitBlocked}
             className="rounded bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
           >
-            {busy ? "作成中…" : "作成してエディタを開く"}
+            {gate.submitBlocked ? "物件の情報を読み込み中…" : busy ? "作成中…" : "作成してエディタを開く"}
           </button>
         </div>
       </div>
