@@ -34,9 +34,12 @@ export async function POST(request: Request) {
     });
 
     if (!result) {
-      // ⚠取得(acquire)の「held」応答と同じ流儀: 業務上の状態(世代不一致)は
-      //   ApiError/handleApiError を経由させず、直接 apiResponse で返す。
-      return apiResponse({ code: "EDIT_LOCK_CHANGED" }, 409);
+      // ⚠H2: これは「状態」ではなく「エラー」(鍵の状態が変わった)なので、acquire の
+      //   held(423・状態)とは違い ApiError/handleApiError の封筒 `{ error: { message, code } }`
+      //   を経由させる。以前は裸の `{ code: "EDIT_LOCK_CHANGED" }` を直接返していたため、
+      //   acquire 自身が投げる同じコード(service.ts の EDIT_LOCK_CHANGED)とここで
+      //   応答の形が食い違い、クライアントが2種類の読み方を書き分けねばならなかった。
+      throw new ApiError(409, "鍵の状態が変わりました。もう一度お試しください", "EDIT_LOCK_CHANGED");
     }
 
     await writeAuditLog({
