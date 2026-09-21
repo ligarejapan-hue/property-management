@@ -4,11 +4,10 @@
  */
 import { createHash } from "node:crypto";
 import { ApiError } from "@/lib/api-helpers";
+// ⚠ヘッダ名は client からも使うため素のモジュールに分けた(Task 1)。ここは再輸出だけ。
+import { EDIT_SCREEN_HEADER, EDIT_LOCK_HEADER } from "./header-names";
 
-/** ブラウザのタブごとの合言葉を送るヘッダ名。 */
-export const EDIT_SCREEN_HEADER = "X-Edit-Screen";
-/** 鍵の世代(取得の応答の lockId)を送るヘッダ名。鍵を持つ画面の保存だけが付ける。 */
-export const EDIT_LOCK_HEADER = "X-Edit-Lock";
+export { EDIT_SCREEN_HEADER, EDIT_LOCK_HEADER };
 
 export function hashScreenToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
