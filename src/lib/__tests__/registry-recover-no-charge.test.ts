@@ -221,7 +221,10 @@ describe("回収の入口(画面)", () => {
     expect(patch).toContain('current.registryStatus === "scheduled"');
     // ⚠**書き込み自体にも条件を付ける**(@codex #394 R29 P1)。読んだ時点の判定
     //   だけだと、読んだ後にロックを取られて書き換えられる。
-    const writeAt = patch.indexOf("const guardedUpdate = await prisma.property.updateMany");
+    // ⚠Task 6(編集の鍵)で保存は $transaction(物件行ロック→鍵の確認→更新)に
+    //   包まれ、実際の更新呼び出しは tx.property.updateMany になる
+    //   (prisma.property.updateMany ではない)。
+    const writeAt = patch.indexOf("return tx.property.updateMany");
     expect(writeAt).toBeGreaterThan(-1);
     const writeSeg = patch.slice(writeAt, patch.indexOf("});", writeAt));
     expect(writeSeg).toContain("version,");

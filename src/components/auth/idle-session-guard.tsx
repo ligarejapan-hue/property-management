@@ -6,6 +6,11 @@ import {
   readSharedLastActivity,
   writeSharedLastActivity,
 } from "@/lib/session-activity";
+import { IDLE_TIMEOUT_MS } from "@/lib/idle-timeout";
+
+// 値の定義は src/lib/idle-timeout.ts に一本化した(edit-lock の rules.ts がサーバ側から
+// 参照するため。このコンポーネントの公開面("use client" の外から見える名前)は変えない)。
+export { IDLE_TIMEOUT_MS };
 
 /**
  * 無操作アイドルタイムアウト(クライアント側)。
@@ -28,7 +33,6 @@ import {
  * auth.ts 側は maxAge=1h・updateAge=5min。updateAge < REFRESH_INTERVAL なので
  * 更新のたびに確実に回転する。
  */
-export const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 無操作 1 時間でログアウト
 export const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 操作中は最大5分ごとにセッションを延長
 const CHECK_INTERVAL_MS = 60 * 1000; // 1分ごとに判定
 const STORAGE_WRITE_THROTTLE_MS = 10 * 1000; // localStorage への書込は最大10秒に1回

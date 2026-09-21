@@ -346,9 +346,14 @@ export async function POST(request: NextRequest) {
             buildingNumber: current?.buildingNumber ?? null,
             roomNo: current?.roomNo ?? null,
           };
+          // ⚠**version は必ず進める**(Task 9): lotNumber/buildingNumber/roomNo は
+          //   編集画面(PropertyEditForm)で変えられる項目のため(roomNoは対象外だが
+          //   同じ更新にまとまるので一緒に進める)、進めないと編集画面を開いていた
+          //   人の保存がこの空欄補完を黙って上書きする(Task 7 が謄本取込の法人番号で
+          //   直したのと同じ穴)。
           await prisma.property.update({
             where: { id: propertyId },
-            data: updates,
+            data: { ...updates, version: { increment: 1 } },
           });
           await recordChanges({
             targetTable: "properties",
@@ -393,9 +398,13 @@ export async function POST(request: NextRequest) {
         // count=0: 別ユーザーが変更済み（no_send/send 等）→ 何もしない。
         const hasDmMark = c.owners.some((o) => isDmMarked(o.dm));
         if (hasDmMark) {
+          // ⚠**version は必ず進める**(Task 9): dmStatus は編集画面(PropertyEditForm)の
+          //   「DM判断」で変えられる項目のため、進めないと編集画面を開いていた人の
+          //   保存がこの昇格を黙って上書きする(Task 7 が謄本取込の法人番号で
+          //   直したのと同じ穴)。
           const dmUpdate = await prisma.property.updateMany({
             where: { id: propertyId, dmStatus: "hold" },
-            data: { dmStatus: "send" },
+            data: { dmStatus: "send", version: { increment: 1 } },
           });
           if (dmUpdate.count === 1) {
             await recordChanges({
@@ -670,9 +679,13 @@ async function upsertOwnerAndLink(
       // count=0 のときは既に他者が書き込んでいるため saved にしない（決定は noop 相当）。
       let effectiveDecision: CorporateImportDecision = cnDecision;
       if (cnDecision.action === "save" && cnDecision.corporateNumber) {
+        // ⚠**version は必ず進める**(Task 9): corporateNumber は所有者の編集画面で
+        //   変えられる項目のため、進めないと編集画面を開いていた人の保存が
+        //   この空欄埋めを黙って上書きする(Task 7 が謄本取込の法人番号で
+        //   直したのと同じ穴)。
         const cnUpdate = await prisma.owner.updateMany({
           where: { id: candidateOwnerId!, corporateNumber: null },
-          data: { corporateNumber: cnDecision.corporateNumber },
+          data: { corporateNumber: cnDecision.corporateNumber, version: { increment: 1 } },
         });
         if (cnUpdate.count === 0) {
           effectiveDecision = { action: "noop", corporateNumber: null };
@@ -680,6 +693,8 @@ async function upsertOwnerAndLink(
       } else if (repair.corporateNumber13) {
         // 取込ガード: 分断型で復元した12/13桁を、既存 owner が未設定の場合のみ埋める
         // (cnDecision と同じ corporateNumber:null レースガード。既存値は上書きしない)。
+        // ⚠**version は必ず進める**(Task 9): 同上の理由(corporateNumber/
+        //   companyRegistryNumber は所有者の編集画面で変えられる項目)。
         await prisma.owner.updateMany({
           where: { id: candidateOwnerId!, corporateNumber: null },
           data: {
@@ -687,6 +702,7 @@ async function upsertOwnerAndLink(
             ...(repair.companyRegistryNumber12
               ? { companyRegistryNumber: repair.companyRegistryNumber12 }
               : {}),
+            version: { increment: 1 },
           },
         });
       }

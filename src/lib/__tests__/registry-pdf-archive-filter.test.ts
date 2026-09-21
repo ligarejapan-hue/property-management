@@ -77,9 +77,19 @@ vi.mock("@/lib/pdf-extract", () => ({
 
 vi.mock("@/lib/prisma", () => {
   const tx = {
-    // 新規 Owner の作成は**親の物件行をロックしたトランザクションの中**で行う
-    // (同時反映で同姓同住所の Owner が2件できるのを防ぐ)。そのため findMany/create も tx 側。
-    owner: { updateMany: vi.fn(), findMany: vi.fn(), create: vi.fn() },
+    // D10: Mode A の物件フィールド補完(空欄埋め・取得状況の前進)は物件行を
+    // ロックしたトランザクション内で行う(edit-lock-skip.test.ts と同じ形)。
+    // ⚠findUnique はロック後の読み直し(レビュー round1 #2)で使う。
+    property: { findUnique: vi.fn(), updateMany: vi.fn() },
+    // ⚠findUnique はロック後の corporateNumber 読み直し(レビュー round1 #3)で使う。
+    // ⚠新規 Owner の作成と紐付けは**同じトランザクションの中**で行う(分けると、
+    //   紐付けで中断したときに「どこにも紐付かない所有者」が残る)。
+    owner: {
+      findUnique: vi.fn(),
+      updateMany: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+    },
     propertyOwner: { findFirst: vi.fn(), create: vi.fn() },
     $queryRaw: vi.fn(async () => [{ id: "p1" }]), // 親行ロック(#364 R10)
   };
@@ -114,7 +124,13 @@ const pm = prisma as unknown as {
   importJobRow: { create: Mock };
   $transaction: Mock;
   _tx: {
-    owner: { updateMany: Mock; findMany: Mock; create: Mock };
+    property: { findUnique: Mock; updateMany: Mock };
+    owner: {
+      findUnique: Mock;
+      updateMany: Mock;
+      findMany: Mock;
+      create: Mock;
+    };
     propertyOwner: { findFirst: Mock; create: Mock };
   };
 };
@@ -169,11 +185,23 @@ beforeEach(() => {
   pm.$transaction.mockImplementation((fn: (tx: unknown) => unknown) =>
     fn(pm._tx),
   );
+  // D10: ロック後の読み直し(レビュー round1 #2/#3)に使う既定値。外側の
+  // pm.property.findUnique と同じ形にしておく(この tx は全呼び出し共通なので)。
+  pm._tx.property.findUnique.mockResolvedValue({
+    version: 1,
+    realEstateNumber: null,
+    lotNumber: null,
+    buildingNumber: null,
+    registryStatus: "unconfirmed",
+  });
+  pm._tx.owner.findUnique.mockResolvedValue({ corporateNumber: null });
+  pm._tx.property.updateMany.mockResolvedValue({ count: 1 });
   pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
-  // ロック取得後の再確認(既定は「まだ誰も作っていない」)
+  // ロック取得後の見直し(既定は「まだ誰も作っていない」)
   pm._tx.owner.findMany.mockResolvedValue([]);
-  pm._tx.owner.create.mockImplementation(({ data }: { data: { name: string } }) =>
-    Promise.resolve({ id: `owner-${data.name}` }),
+  pm._tx.owner.create.mockImplementation(
+    ({ data }: { data: { name: string } }) =>
+      Promise.resolve({ id: `owner-${data.name}` }),
   );
   pm._tx.propertyOwner.findFirst.mockResolvedValue(null);
   pm._tx.propertyOwner.create.mockResolvedValue({});
@@ -210,8 +238,6 @@ describe("POST /api/import/registry-pdf: archived owner を既存候補にしな
       data: { name: OWNER_NAME, address: OWNER_ADDRESS },
       select: { id: true },
     });
-    // tx の外で作っていないこと(同時反映で二重に作られる形に戻さないための歯止め)
-    expect(pm.owner.create).not.toHaveBeenCalled();
     // PropertyOwner 作成(新規 Owner と link・tx 内=親行ロック #364 R10)
     expect(pm._tx.propertyOwner.create).toHaveBeenCalledTimes(1);
     const linkArgs = pm._tx.propertyOwner.create.mock.calls[0][0];

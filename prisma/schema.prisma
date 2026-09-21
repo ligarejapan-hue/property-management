@@ -202,6 +202,7 @@ model User {
   registryFetchJobs       RegistryFetchJob[]      @relation("RegistryFetchJobRequestedBy")
   dmExportBatches         DmExportBatch[]         @relation("DmExportBatchCreator")
   lpAssets                DmLpAsset[]             @relation("DmLpAssetCreator")
+  editLocks               EditLock[]
 
   @@map("users")
 }
@@ -1372,6 +1373,11 @@ enum DmDeliveryStatus {
   returned_other
 }
 
+enum EditLockResource {
+  property
+  owner
+}
+
 // 売却促進DM の設定保管(管理画面から編集)。1行のみ(id="singleton")。
 // APIキーは暗号化して保存(平文では持たない)。provider/model/各URL/差出人は平文(非秘匿)。
 // 値が未設定(null/空)の項目は env をフォールバックに使う(loadSaleDmConfig が「DB→env」で解決)。
@@ -1548,4 +1554,24 @@ model AddressResidencePoint {
   @@index([lat, lng])
   @@index([prefecture, city])
   @@map("address_residence_points")
+}
+
+/// 編集中の鍵(1資源1行)。設計 docs/superpowers/specs/2026-09-17-edit-lock-design.md
+model EditLock {
+  id              String           @id @default(uuid()) @db.Uuid
+  resourceType    EditLockResource @map("resource_type")
+  resourceId      String           @map("resource_id") @db.Uuid
+  userId          String           @map("user_id") @db.Uuid
+  screenTokenHash String           @map("screen_token_hash")
+  acquiredAt      DateTime         @default(now()) @map("acquired_at")
+  heartbeatAt     DateTime         @default(now()) @map("heartbeat_at")
+  activityAt      DateTime         @default(now()) @map("activity_at")
+  forceReleasedAt DateTime?        @map("force_released_at")
+  forceReleasedBy String?          @map("force_released_by") @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([resourceType, resourceId])
+  @@index([userId])
+  @@map("edit_locks")
 }

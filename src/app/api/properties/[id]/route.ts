@@ -11,6 +11,8 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { lockPropertyRow } from "@/lib/property-record-guard";
+import { assertNotEditLockedByOther, deleteEditLocksFor } from "@/lib/edit-lock/service";
+import { readScreenTokenHash, readLockId } from "@/lib/edit-lock/screen-token";
 import { updatePropertySchema } from "@/lib/validators";
 import {
   normalizeBuildingName,
@@ -342,23 +344,38 @@ export async function PATCH(
       }
     }
 
+    // 編集の鍵(X-Edit-Lock)の形式チェックは readLockId 側で行う(不正なら 400)。
+    const lockIdHeader = readLockId(request);
+
     // Update property with version increment
     // ⚠保存する値は履歴と同じ persistedFields を使う (二重に組み立てない)。
     // ⚠**条件は書き込み自体に付ける**(@codex #394 R29 P1)。読んだ時点の判定だけだと、
     //   読んだ後に謄本取得がロックを取った場合に鍵の項目を書き換えてしまう。
     //   版番号もここで見る(読み取り後に別の更新が入った場合も弾く)。
-    const guardedUpdate = await prisma.property.updateMany({
-      where: {
-        id,
-        version,
-        ...(touchesRegistryKey
-          ? { registryStatus: { not: "scheduled" } }
-          : {}),
-      },
-      data: {
-        ...persistedFields,
-        version: { increment: 1 },
-      },
+    // ⚠**編集の鍵の確認は物件行をロックした後・書き込みの前**に行う(Task 6)。
+    //   順序: トランザクション開始 → 行ロック → 鍵の確認 → 条件つき更新。
+    const guardedUpdate = await prisma.$transaction(async (tx) => {
+      await lockPropertyRow(tx, id);
+      await assertNotEditLockedByOther(tx, {
+        resourceType: "property",
+        resourceId: id,
+        userId: session.id,
+        screenTokenHash: readScreenTokenHash(request),
+        lockId: lockIdHeader,
+      });
+      return tx.property.updateMany({
+        where: {
+          id,
+          version,
+          ...(touchesRegistryKey
+            ? { registryStatus: { not: "scheduled" } }
+            : {}),
+        },
+        data: {
+          ...persistedFields,
+          version: { increment: 1 },
+        },
+      });
     });
     if (guardedUpdate.count === 0) {
       // 0件の理由を弁別する(取得中 / 先に更新された)。
@@ -534,6 +551,9 @@ export async function DELETE(
       await tx.propertyDmLog.deleteMany({
         where: { propertyId: id, ownerId: null, logOwners: { none: {} } },
       });
+      // 消える物件に鍵が残ると誰も外せなくなるため、削除の直前(行ロックの後・
+      // 削除の前)に鍵の後始末をする(Task 8)。
+      await deleteEditLocksFor(tx, [{ resourceType: "property", resourceId: id }]);
       await tx.property.delete({ where: { id } });
     });
 

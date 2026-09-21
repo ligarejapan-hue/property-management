@@ -90,6 +90,11 @@ vi.mock("@/lib/prisma", () => ({
       findMany: vi.fn(),
       create: vi.fn(),
     },
+    // PATCH は Task 6(編集の鍵)で $transaction(所有者行ロック→鍵の確認→更新)に
+    // 包まれる。既存の owner.updateMany 検証をそのまま使えるよう、
+    // $transaction はコールバックへ同じ prisma モックを渡すだけにする。
+    $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
   },
 }));
 
@@ -108,6 +113,8 @@ const pm = prisma as unknown as {
     findMany: Mock;
     create: Mock;
   };
+  $transaction: Mock;
+  $queryRaw: Mock;
 };
 
 const OWNER_ID = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -159,6 +166,8 @@ const baseOwner = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  pm.$transaction.mockImplementation((fn: (tx: typeof pm) => unknown) => fn(pm));
+  pm.$queryRaw.mockResolvedValue([]);
   vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL);
   pm.owner.findUnique.mockResolvedValue(baseOwner);
   pm.owner.updateMany.mockResolvedValue({ count: 1 });

@@ -227,8 +227,24 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
     // @codex #396 R2: 住所ありの経路は「所有者 → 物件」の順でロックする。こちらが
     //   物件を握ったまま既存の所有者を掴むと**逆順**になり、同時実行で互いに待ち合って
     //   PostgreSQL がどちらかを中断する（正常な取込が失敗する）。
-    // ⇒ 既存の所有者行に触る更新（法人番号の穴埋め）はトランザクションの**外**で行う。
-    //   空のときだけ埋める条件付き更新なので直列化は要らない。
+    // ⇒ 既存の所有者行に触る更新（法人番号の穴埋め）は、物件行をロックしている
+    //   トランザクションの**外**で行う。
+    // ⚠D10(編集中の鍵)で、この更新自体は「所有者の行をロックした**別の**トランザクション」
+    //   に包まれるようになった(鍵の確認を書き込みと同じtxで行うため)。よって
+    //   「トランザクションの中かどうか」では判定できなくなった＝**ネストしていないか**
+    //   (物件ロックのtxがまだ開いたままの状態で所有者のtxが重なっていないか)を見る。
+    // ⚠レビュー指摘(round1・Important): depth だけでは「ネストしていない」ことしか
+    //   証明できず、「どのtxか」は証明しない。fillOwnerCorporateNumberIfUnlocked の
+    //   呼び出しを誤って reuse-lookup tx(:219、lockPropertyRow を呼ぶ側)の中へ
+    //   移してしまう回帰(=物件→所有者の逆順そのもの)でも depth は 1 のままになり、
+    //   このテストは緑のまま通ってしまう。**同一性で証明する**: 所有者の updateMany が
+    //   実行された tx を特定し、(a) その tx で lockOwnerRow(所有者の行ロック)が
+    //   呼ばれていること、(b) その tx で lockPropertyRow(物件の行ロック)が
+    //   一度も呼ばれていないこと、の両方を見る。
+    //   ⚠lockPropertyRow/lockOwnerRow は本ファイルではモックせず実物を使う
+    //   (他のテスト(照会順序テスト等)が実物の $queryRaw 呼び出しに依存しているため)。
+    //   実物はどちらも `tx.$queryRaw` で SQL を発行するので、テーブル名
+    //   (`FROM properties` / `FROM owners`)で呼び出し元を判別する。
     linkedOwners([{ id: "owner-existing", name: "山田太郎" }]);
     pm.propertyOwner.findFirst.mockResolvedValue({ propertyId: PROP_ID });
     // ⚠法人番号の候補を1件返させて、既存所有者への更新を**実際に走らせる**。
@@ -236,25 +252,57 @@ describe("同じ謄本を取り直しても住所なしの所有者が増えな�
     (detectCorporateNumberInOwnerLike as unknown as Mock).mockReturnValue({
       candidates: ["4011001059442"],
     });
-    let inTx = false;
-    const updateManyInTx: boolean[] = [];
-    pm.$transaction.mockImplementation(async (cb: (tx: typeof prisma) => unknown) => {
-      inTx = true;
-      try {
-        return await cb(prisma);
-      } finally {
-        inTx = false;
-      }
+
+    type FakeTx = {
+      $queryRaw: Mock;
+      propertyOwner: { findMany: Mock };
+      owner: { findUnique: Mock; updateMany: Mock };
+    };
+    const propertyLockTxs: FakeTx[] = [];
+    const ownerLockTxs: FakeTx[] = [];
+    // ⚠**全ての呼び出しを集める**(1回だけを見る変数にすると、後から正しい
+    //   tx でもう一度呼ばれて上書きされたときに最初の違反を見逃す)。
+    const ownerUpdateManyTxs: FakeTx[] = [];
+
+    // $transaction が呼ばれるたびに、識別用の**別オブジェクト**を tx として渡す
+    // (edit-lock-skip.test.ts の同一性テストと同じ考え方)。
+    pm.$transaction.mockImplementation((cb: (tx: FakeTx) => unknown) => {
+      const tx: FakeTx = {
+        $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+          const sql = strings.join("");
+          if (sql.includes("FROM properties")) propertyLockTxs.push(tx);
+          if (sql.includes("FROM owners")) ownerLockTxs.push(tx);
+          return [{ id: "locked-row" }];
+        }),
+        propertyOwner: { findMany: pm.propertyOwner.findMany },
+        owner: {
+          // ⚠レビュー round1 #3: ロック後に corporateNumber を読み直す。まだ
+          // 空(null)を返し、実際の updateMany を空振りさせない。
+          findUnique: vi.fn(async () => ({ corporateNumber: null })),
+          updateMany: vi.fn(async () => {
+            ownerUpdateManyTxs.push(tx);
+            return { count: 1 };
+          }),
+        },
+      };
+      return cb(tx);
     });
-    pm.owner.updateMany.mockImplementation(async () => {
-      updateManyInTx.push(inTx);
-      return { count: 1 };
-    });
+
     await run();
+
     // 実際に呼ばれていること（空振りのピンにしない）。
-    expect(updateManyInTx.length).toBeGreaterThan(0);
-    // そのうえで、トランザクションの中では呼ばない。
-    expect(updateManyInTx.every((v) => v === false)).toBe(true);
+    expect(ownerUpdateManyTxs.length).toBeGreaterThan(0);
+    // (a) 所有者の updateMany が走った tx は**全て**、所有者の行ロックが
+    //     呼ばれた tx と同一。
+    for (const tx of ownerUpdateManyTxs) {
+      expect(ownerLockTxs).toContain(tx);
+    }
+    // (b) その tx では物件の行ロックが一度も呼ばれていない
+    //     (=物件ロックを握ったトランザクションのままここへ来ていない＝禁止された順序ではない)。
+    //     ⚠1回でも違反した呼び出しがあれば検出する(最後だけを見ない)。
+    for (const tx of ownerUpdateManyTxs) {
+      expect(propertyLockTxs).not.toContain(tx);
+    }
   });
 
   it("⚠住所ありの所有者は従来どおり**全体**から照合する（この変更で経路を変えない）", async () => {

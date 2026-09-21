@@ -136,6 +136,19 @@ describe("reception-owner route Phase D 統合", () => {
       /select:\s*\{[\s\S]{0,200}corporateNumber:\s*true/,
     );
   });
+
+  // Task 9: この空欄埋めは version を進めていなかった。corporateNumber は
+  // 所有者の編集画面(properties/[id]/page.tsx の所有者カード)で変えられる項目
+  // なので、進めないと編集画面を開いていた人の保存が黙って上書きする
+  // (Task 7 が謄本取込の法人番号で直したのと同じ穴)。
+  it("(Task 9) reuse パスの空欄埋めは version: { increment: 1 } を必ず書く", () => {
+    expect(
+      receptionOwnerSrc,
+      "reception-owner の corporateNumber:null 空欄埋めから version:{increment:1} が消えている(Task 9のバグ修正が後退した可能性)",
+    ).toMatch(
+      /where:\s*\{\s*id:\s*candidateOwnerId!,\s*corporateNumber:\s*null\s*\}[\s\S]{0,100}data:\s*\{\s*corporateNumber:\s*cnDecision\.corporateNumber,\s*version:\s*\{\s*increment:\s*1\s*\}\s*\}/,
+    );
+  });
 });
 
 describe("registry-pdf route Phase D 統合", () => {
@@ -147,10 +160,42 @@ describe("registry-pdf route Phase D 統合", () => {
     expect(registryPdfSrc).toMatch(/decideCorporateImport\(/);
   });
 
-  it("reuse パスで updateMany(where corporateNumber:null) による空欄埋め", () => {
-    expect(registryPdfSrc).toMatch(
-      /updateMany\(\{[\s\S]{0,200}corporateNumber:\s*null[\s\S]{0,150}data:\s*\{\s*corporateNumber:\s*cnDecision\.corporateNumber/,
+  // ⚠レビュー round1 #5 → round2 M2: 元は「ヘルパーの定義から書き込みまで」を
+  // 1つの正規表現の距離({0,1500})でまとめて見ていたため、ヘルパー本体に
+  // コメントが増えるだけで(中身は何も変えていなくても)この距離を超えて
+  // テストが「原因不明のまま」落ちる恐れがあった(本リポジトリで前例あり)。
+  // 距離に依存しない2つの独立した事実に分割する:
+  //   (a) ヘルパー自身が corporateNumber の空欄埋めで version increment を
+  //       必ず一緒に書いている(D10 の実バグ修正・落ちたら「両者は近接して
+  //       いるはずが離れた/消えた」と分かる)。
+  //   (b) 両方の reuse パス(住所なし/住所あり)が、直接 updateMany を書かず
+  //       このヘルパーを経由している(呼び出し1本を個別に増減させる回帰は
+  //       振る舞いテスト(edit-lock-skip.test.ts)側で検出する。ここは
+  //       「ヘルパー経由の窓口が2つとも生きているか」の低コストな見張り)。
+  it("(a) ヘルパー自身が corporateNumber の空欄埋めで version increment を必ず書く", () => {
+    expect(
+      registryPdfSrc,
+      "fillOwnerCorporateNumberIfUnlocked の updateMany から corporateNumber または version:{increment:1} が消えている(D10のバグ修正が後退した可能性)",
+    ).toMatch(
+      /where:\s*\{\s*id:\s*ownerId,\s*corporateNumber:\s*null\s*\}[\s\S]{0,100}data:\s*\{\s*corporateNumber,\s*version:\s*\{\s*increment:\s*1\s*\}\s*\}/,
     );
+  });
+
+  it("(b) 住所なし/住所ありの両方の reuse パスが fillOwnerCorporateNumberIfUnlocked を経由する", () => {
+    // ⚠Task 7レビュー Minor 10(持ち越し): 素の関数名(`fillOwnerCorporateNumberIfUnlocked(`)
+    // だけを数えると、関数定義自体にもコメントの文中にも一致してしまい、実際の呼び出しが
+    // 1本減ってその分「言及」が1つ増えただけでもカウントが変わらず検出できない。
+    // 実際の呼び出しは必ず `await` を伴う(この関数は Promise を返す)ので、
+    // `await fillOwnerCorporateNumberIfUnlocked(` を数える(定義行は対象外)。
+    // 住所なし経路・住所あり経路の2箇所のはず。
+    const occurrences = (
+      registryPdfSrc.match(/await fillOwnerCorporateNumberIfUnlocked\(/g) ?? []
+    ).length;
+    expect(
+      occurrences,
+      `await fillOwnerCorporateNumberIfUnlocked( の出現回数が期待(呼び出し2箇所)と異なる(${occurrences}件)。` +
+        "どちらかの reuse パスが直接 updateMany を書いてヘルパーを経由しなくなった可能性がある。",
+    ).toBe(2);
   });
 
   it("create パスで data.corporateNumber を save action のみ乗せる", () => {
@@ -185,11 +230,12 @@ describe("registry-pdf route Phase D 統合", () => {
     );
   });
 
-  it("Codex P1: reuse 用 updateMany は reusedExistingOwner 条件下でのみ実行（id:null 防止）", () => {
-    // updateMany(where: { id: candidateOwnerId!, corporateNumber: null }) は
+  it("Codex P1: reuse 用の法人番号補完は reusedExistingOwner 条件下でのみ実行（id:null 防止）", () => {
+    // D10: 実際の updateMany は fillOwnerCorporateNumberIfUnlocked の中に移ったため、
+    // ガードの内側にあるのは(直接の updateMany ではなく)そのヘルパー呼び出しになった。
     // reusedExistingOwner && cnDecision.action === "save" ガードの内側にある
     expect(registryPdfSrc).toMatch(
-      /if\s*\(\s*\n?\s*reusedExistingOwner\s*&&[\s\S]{0,150}cnDecision\.action\s*===\s*"save"[\s\S]{0,200}updateMany/,
+      /if\s*\(\s*\n?\s*reusedExistingOwner\s*&&[\s\S]{0,150}cnDecision\.action\s*===\s*"save"[\s\S]{0,200}fillOwnerCorporateNumberIfUnlocked/,
     );
   });
 

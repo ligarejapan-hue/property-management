@@ -24,6 +24,9 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges, OWNER_TRACKED_FIELDS } from "@/lib/change-log";
 import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
+import { assertNotEditLockedByOther } from "@/lib/edit-lock/service";
+import { readScreenTokenHash, readLockId } from "@/lib/edit-lock/screen-token";
+import { lockOwnerRow } from "@/lib/edit-lock/row-locks";
 import {
   normalizeCorporateNumber,
   normalizeCompanyRegistryNumber,
@@ -141,6 +144,9 @@ export async function POST(
     const perms = await getUserPermissions(session.id);
 
     // ---- session/perm scope ----
+    // ⚠権限判定は常に先に決める(@codex方針): 権限の無い呼び出し元に、
+    //   自分の送ったリクエストの形について何も教えない。鍵ヘッダの形式チェックは
+    //   この後(権限が通ってから)に置く。
     if (!hasPermission(perms, "owner", "write")) {
       auditResult = "forbidden";
       throw new ApiError(403, "所有者を更新する権限がありません", "FORBIDDEN");
@@ -230,6 +236,16 @@ export async function POST(
       auditResult = "not_found";
       throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
     }
+
+    // ---- 編集の鍵(X-Edit-Lock)の形式チェック ----
+    // readLockId 側で不正なら 400(コード=EDIT_LOCK_ID_INVALID)。無ければ「鍵なし」
+    // として通常どおり続ける(古い画面からの保存を弾かないため)。
+    // ⚠権限・入力の検査(owner:write・body形式・法人番号形式・apply組合せ・
+    // 住所郵便番号の対・field-level書込権限・所有者の実在)を**すべて通した後**、
+    // 国税庁への再lookup(下の lookupCorporateNumber)より**前**に置く: 権限や
+    // 入力が不正な呼び出し元には常にそちらの結果(403/404/422など)を優先させ、
+    // 不正な鍵ヘッダのためだけに上流へ問い合わせないようにする。
+    const lockIdHeader = readLockId(request);
 
     // ---- サーバ側で再 lookup（クライアント送信値を信用しない） ----
     let fresh;
@@ -337,12 +353,25 @@ export async function POST(
     }
 
     // ---- optimistic lock update ----
-    const result = await prisma.owner.updateMany({
-      where: { id, version: body.version },
-      data: {
-        ...updateFields,
-        version: { increment: 1 },
-      },
+    // ⚠**編集の鍵の確認は所有者行をロックした後・書き込みの前**に行う(Task 6)。
+    //   順序: トランザクション開始 → 所有者行ロック(ロック順序=所有者→物件の親行)
+    //   → 鍵の確認 → 条件つき更新。
+    const result = await prisma.$transaction(async (tx) => {
+      await lockOwnerRow(tx, id);
+      await assertNotEditLockedByOther(tx, {
+        resourceType: "owner",
+        resourceId: id,
+        userId: session.id,
+        screenTokenHash: readScreenTokenHash(request),
+        lockId: lockIdHeader,
+      });
+      return tx.owner.updateMany({
+        where: { id, version: body.version },
+        data: {
+          ...updateFields,
+          version: { increment: 1 },
+        },
+      });
     });
     if (result.count === 0) {
       auditResult = "version_conflict";

@@ -26,19 +26,21 @@ describe("capability の置換", () => {
     expect(FILES.length).toBeGreaterThan(100);
   });
 
+  // ⚠src 配下を全部読む走査テストは、フルスイートの負荷下では既定の 5 秒を超えることがある
+  //   (2026-09-20 に実際に時間切れ)。単体では通るため、制限時間を明示して安定させる。
   it("旧 saleDmLetter は 1 件も残っていない", () => {
     const left = FILES.filter((f) =>
       readFileSync(f, "utf-8").includes("saleDmLetter"),
     ).map((f) => path.relative(process.cwd(), f).split(path.sep).join("/"));
     expect(left).toEqual([]);
-  });
+  }, 30_000);
 
   it("新 saleDmPrintReady が使われている", () => {
     const used = FILES.filter((f) =>
       readFileSync(f, "utf-8").includes("saleDmPrintReady"),
     );
     expect(used.length).toBeGreaterThanOrEqual(3);
-  });
+  }, 30_000);
 
   it("印刷の前提だけを見る(AI設定 isSaleDmConfigured を条件にしない)", () => {
     const src = readFileSync(

@@ -44,11 +44,21 @@ export async function POST(
       throw new ApiError(403, "この物件を操作する権限がありません", "FORBIDDEN");
     }
 
-    const data: { dmUndeliverableAt: null; dmStatus?: "send" | "hold" } = {
+    const data: {
+      dmUndeliverableAt: null;
+      dmStatus?: "send" | "hold";
+      version?: { increment: 1 };
+    } = {
       dmUndeliverableAt: null,
     };
     if (restoreDmStatus !== undefined) {
+      // ⚠**version は必ず進める**(Task 9): dmStatus は物件の編集画面
+      //   (PropertyEditForm「DM判断」)で変えられる項目のため、進めないと
+      //   編集画面を開いていた人の保存がこの書き戻しを黙って上書きする
+      //   (Task 7 が謄本取込の法人番号で直したのと同じ穴)。dmUndeliverableAt
+      //   だけを消す(restoreDmStatus 未指定)の分岐は編集画面の項目を書かないため対象外。
       data.dmStatus = restoreDmStatus;
+      data.version = { increment: 1 };
     }
 
     await prisma.property.update({ where: { id }, data });
