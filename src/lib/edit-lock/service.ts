@@ -135,8 +135,15 @@ export async function acquireEditLock(
 export async function heartbeatEditLock(
   db: Db,
   input: Target & Holder & { active: boolean },
-): Promise<{ ok: true } | { ok: false; dbNow: Date; current: EditLockRow | null }> {
-  const updated = await db.$queryRaw<{ id: string }[]>`
+): Promise<
+  | { ok: true; idleSince: Date }
+  | { ok: false; dbNow: Date; current: EditLockRow | null }
+> {
+  // ⚠H1: 成功応答の `idleSince` は**この UPDATE と同じ文で読んだ** `activity_at` を使う
+  //   (呼び出し側で `new Date()` を積み直さない)。DB時計が権威という原則(2.2-3)を
+  //   heartbeat の成功応答にも通す。第2段の「あと5分で編集を終了します」の帯は
+  //   このタイムスタンプを起点にしないと、DB時計とクライアント時計のずれが積み重なる。
+  const updated = await db.$queryRaw<{ id: string; activity_at: Date }[]>`
     UPDATE "edit_locks"
     SET "heartbeat_at" = clock_timestamp(),
         "activity_at" = CASE WHEN ${input.active} THEN clock_timestamp() ELSE "activity_at" END
@@ -147,9 +154,9 @@ export async function heartbeatEditLock(
       AND "force_released_at" IS NULL
       AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision)
       AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision)
-    RETURNING "id"
+    RETURNING "id", "activity_at"
   `;
-  if (updated[0]) return { ok: true };
+  if (updated[0]) return { ok: true, idleSince: updated[0].activity_at };
   // ⚠状態の判定は DB に任せる(@codex R9 P2)。アプリの時計で期限を測り直すと、
   //   5分・60分の境目で「生きている他人の鍵を期限切れと報告」して余計な取り直しを起こす。
   //   呼び出し側は返ってきた dbNow を使って evaluateLock で判定すること(自前の now() を使わない)。
@@ -285,9 +292,17 @@ export async function assertNotEditLockedByOther(
   // ⚠期限の判定は **DB の now()** で行う(@codex R6 P2)。取得・合図が DB 時計を権威に
   //   しているのに、ここだけアプリの時計で判定すると、5分の境目で食い違って
   //   「生きている鍵を期限切れとみなして書き込む」ことが起きる。
+  // ⚠H7: 墓標(force_released_at)にも期限がある。`EDIT_LOCK_HEARTBEAT_GRACE_MS` を
+  //   過ぎた墓標は「解除されていない」ものとして扱う(force_released=false)。
+  //   期限切れの墓標のまま残る `force_released_at` 列自体は次の取得まで NULL に
+  //   戻らないため、active も同時に false のまま(=free として扱われる)。理由は
+  //   rules.ts の evaluateLock 側のコメントと同じ: 編集ウィンドウを開かない入口
+  //   (プルダウン・地番ポップアップ)は世代(lockId)を持たないため、期限が無いと
+  //   外された本人の保存が無期限に断られ続ける。
   const rows = await db.$queryRaw<{ id: string; user_id: string; screen_token_hash: string; force_released: boolean; active: boolean }[]>`
     SELECT "id", "user_id", "screen_token_hash",
-           ("force_released_at" IS NOT NULL) AS force_released,
+           ("force_released_at" IS NOT NULL
+            AND "force_released_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision)) AS force_released,
            ("force_released_at" IS NULL
             AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision)
             AND "activity_at" >= clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision)) AS active

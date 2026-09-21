@@ -208,11 +208,15 @@ describe("POST /api/edit-locks/heartbeat", () => {
   const hb = (body: unknown, token: string | null = "screen-1") =>
     heartbeat(req("http://localhost/api/edit-locks/heartbeat", body, token));
 
-  it("更新できたら 200 と state:ok", async () => {
-    (heartbeatEditLock as unknown as Mock).mockResolvedValue({ ok: true });
+  // review Important 1(H1): 仕様 4.3 は `200 { state: "mine", idleSince }`。
+  // `idleSince` は service が UPDATE と同じ文で読んだ activity_at をそのまま返す
+  // (ここで new Date() を作り直さない)。
+  it("更新できたら 200 と state:mine・idleSince(DBが読んだ値)", async () => {
+    const idleSince = new Date("2026-09-18T09:59:30Z");
+    (heartbeatEditLock as unknown as Mock).mockResolvedValue({ ok: true, idleSince });
     const res = await hb({ resourceType: "property", resourceId: PROP, active: true });
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual({ state: "ok" });
+    await expect(res.json()).resolves.toEqual({ state: "mine", idleSince: idleSince.toISOString() });
     expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
@@ -221,7 +225,25 @@ describe("POST /api/edit-locks/heartbeat", () => {
     expect(res.status).toBe(400);
   });
 
-  it("自分の行が管理者に外されていたら lost/force_released", async () => {
+  it("自分の行が管理者に外されていたら lost/force_released(墓標の猶予=5分以内)", async () => {
+    (heartbeatEditLock as unknown as Mock).mockResolvedValue({
+      ok: false,
+      dbNow: new Date("2026-09-18T10:00:00Z"),
+      current: {
+        id: LOCK1, userId: UID, screenTokenHash: hashScreenToken("screen-1"),
+        acquiredAt: new Date("2026-09-18T09:00:00Z"), heartbeatAt: new Date("2026-09-18T09:00:00Z"),
+        activityAt: new Date("2026-09-18T09:00:00Z"), forceReleasedAt: new Date("2026-09-18T09:59:00Z"),
+      },
+    });
+    const res = await hb({ resourceType: "property", resourceId: PROP, active: true });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ state: "lost", reason: "force_released" });
+  });
+
+  // review Important 7(H7): 墓標にも期限(EDIT_LOCK_HEARTBEAT_GRACE_MS=5分)がある。
+  // 過ぎていれば lost/force_released ではなく lost/expired として返す
+  // (evaluateLock が free を返すため)。
+  it("自分の行の墓標が5分を超えていたら lost/expired として扱う(H7)", async () => {
     (heartbeatEditLock as unknown as Mock).mockResolvedValue({
       ok: false,
       dbNow: new Date("2026-09-18T10:00:00Z"),
@@ -233,7 +255,7 @@ describe("POST /api/edit-locks/heartbeat", () => {
     });
     const res = await hb({ resourceType: "property", resourceId: PROP, active: true });
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual({ state: "lost", reason: "force_released" });
+    await expect(res.json()).resolves.toEqual({ state: "lost", reason: "expired" });
   });
 
   it("行が無ければ lost/expired", async () => {
@@ -265,6 +287,39 @@ describe("POST /api/edit-locks/heartbeat", () => {
     (getApiSession as unknown as Mock).mockResolvedValue({ id: "other-user", role: "field_staff" });
     const res = await hb({ resourceType: "property", resourceId: PROP, active: true });
     expect(res.status).toBe(403);
+    expect(heartbeatEditLock).not.toHaveBeenCalled();
+  });
+
+  it("直前のUPDATEと本読み取りの間に生き返っていたら mine+idleSince を返す(競合)", async () => {
+    const activityAt = new Date("2026-09-18T09:58:00Z");
+    (heartbeatEditLock as unknown as Mock).mockResolvedValue({
+      ok: false,
+      dbNow: new Date("2026-09-18T10:00:00Z"),
+      current: {
+        id: LOCK1, userId: UID, screenTokenHash: hashScreenToken("screen-1"),
+        acquiredAt: new Date("2026-09-18T09:00:00Z"), heartbeatAt: new Date("2026-09-18T09:59:55Z"),
+        activityAt, forceReleasedAt: null,
+      },
+    });
+    const res = await hb({ resourceType: "property", resourceId: PROP, active: true });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ state: "mine", idleSince: activityAt.toISOString() });
+  });
+
+  // review Important 2(M2): アーカイブ済み(または存在しない)物件は acquire と同じく
+  // 404で塞ぐ。以前は isArchived のときだけ権限確認を素通りしていたため、閲覧権限の
+  // 無い利用者にまで holderName が届く経路があった。
+  it("アーカイブ済みの物件は 404(保持者名を渡さない・acquireと同じ)", async () => {
+    pm.property.findUnique.mockResolvedValue({ createdBy: UID, assignedTo: null, isArchived: true });
+    const res = await hb({ resourceType: "property", resourceId: PROP, active: true });
+    expect(res.status).toBe(404);
+    expect(heartbeatEditLock).not.toHaveBeenCalled();
+  });
+
+  it("存在しない物件は 404", async () => {
+    pm.property.findUnique.mockResolvedValue(null);
+    const res = await hb({ resourceType: "property", resourceId: PROP, active: true });
+    expect(res.status).toBe(404);
     expect(heartbeatEditLock).not.toHaveBeenCalled();
   });
 });
@@ -348,11 +403,15 @@ describe("POST /api/edit-locks/force-release", () => {
     expect(res.status).toBe(403);
   });
 
-  it("世代が合わなければ 409 EDIT_LOCK_CHANGED", async () => {
+  // review Important 2(H2): これは「状態」ではなく「エラー」なので、acquire の
+  // held(423・裸の状態)ではなく、他のエラーと同じ封筒 `{ error: { message, code } }` を経由する。
+  it("世代が合わなければ 409 EDIT_LOCK_CHANGED(エラー封筒)", async () => {
     (forceReleaseEditLock as unknown as Mock).mockResolvedValue(null);
     const res = await fr({ resourceType: "property", resourceId: PROP, lockId: STALE_LOCK });
     expect(res.status).toBe(409);
-    await expect(res.json()).resolves.toMatchObject({ code: "EDIT_LOCK_CHANGED" });
+    await expect(res.json()).resolves.toEqual({
+      error: { message: expect.any(String), code: "EDIT_LOCK_CHANGED" },
+    });
   });
 
   it("lockId が uuid 形式でなければ service を呼ばずに拒否する(22P02 の 500 化を防ぐ)", async () => {

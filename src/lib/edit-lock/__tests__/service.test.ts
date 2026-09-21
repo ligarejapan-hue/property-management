@@ -159,6 +159,17 @@ describe("heartbeatEditLock", () => {
     expectColumnThresholds(sql);
   });
 
+  // review Important 1(H1): 成功応答の idleSince は、この UPDATE と**同じ文**で
+  // 読んだ activity_at を使う(呼び出し側で new Date() を積み直さない)。
+  it("成功時は同じ文で読んだ activity_at を idleSince として返す(RETURNING)", async () => {
+    const activityAt = new Date("2026-09-18T09:59:00Z");
+    const { db, queryRaw } = fakeDb([{ id: "l1", activity_at: activityAt }]);
+    const res = await heartbeatEditLock(db, { ...BASE, active: false });
+    expect(res).toEqual({ ok: true, idleSince: activityAt });
+    const sql = sqlOf(queryRaw.mock.calls[0]);
+    expect(sql).toMatch(/RETURNING "id", "activity_at"/);
+  });
+
   it("更新できなければ、DBが判定した現在の状態(dbNow付き)を返す(アプリの時計で判定し直さない)", async () => {
     const dbNow = new Date("2026-09-18T11:00:00Z");
     const currentRaw = {
@@ -362,6 +373,30 @@ describe("assertNotEditLockedByOther", () => {
     // ⚠Global Constraint により now() ではなく clock_timestamp()。
     expect(sql).toMatch(/clock_timestamp\(\) - make_interval/);
     expectColumnThresholds(sql);
+  });
+
+  // review Important 7(H7): 墓標(force_released_at)にも期限が無いと、編集ウィンドウを
+  // 開かない入口(プルダウン・地番ポップアップ)からの保存が無期限に断られ続ける。
+  // SQL 側でも `force_released_at` の古さを GRACE_SEC で判定していることを固定する。
+  it("墓標(force_released)の判定にも合図の猶予(GRACE_SEC)を使う(H7)", async () => {
+    const { db, queryRaw } = fakeDb([]);
+    await assertNotEditLockedByOther(db, { ...BASE, lockId: null });
+    const sql = sqlOf(queryRaw.mock.calls[0]);
+    expect(sql).toMatch(
+      new RegExp(
+        `\\("force_released_at" IS NOT NULL[\\s\\S]*?"force_released_at" >= clock_timestamp\\(\\) - make_interval\\(secs => \\{${GRACE_SEC}\\}::double precision\\)\\) AS force_released`,
+      ),
+    );
+  });
+
+  it("墓標が猶予(5分)を過ぎていれば、外された本人の保存も通す(H7: 期限のある救済)", async () => {
+    // SQL が評価した結果(force_released=false・active=false)を模す:
+    // 墓標から5分超過し、force_released 列は「解除されていない」扱いに戻る。
+    // heartbeat は force_released_at が NULL に戻らない限り凍結されたままなので active も false。
+    const { db } = fakeDb([
+      { id: "lock-1", user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash, force_released: false, active: false },
+    ]);
+    await expect(assertNotEditLockedByOther(db, { ...BASE, lockId: null })).resolves.toBeUndefined();
   });
   it("自分の鍵なら通す", async () => {
     const { db } = fakeDb(holder({ user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash }));

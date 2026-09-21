@@ -64,6 +64,15 @@ export function evaluateLock(
   // 管理者に外された鍵は、外された本人にだけ「外された」と伝える(遅れて届く保存を断るため)。
   // 他の人から見れば空き。
   if (lock.forceReleasedAt) {
+    // ⚠墓標にも期限がある(H7)。`EDIT_LOCK_HEARTBEAT_GRACE_MS` を過ぎたら、外された
+    //   本人から見ても空きとして扱う。編集ウィンドウを開かない入口(案件ステータス・
+    //   紹介経路のプルダウン・地番ポップアップ)は鍵の世代(lockId)を持たないため、
+    //   墓標に期限が無いと「管理者が編集を終了しました」の423が無期限に続く
+    //   (D6でタブの合言葉は再読み込みでも変わらず、開き直す以外に抜け道が無い)。
+    //   墓標の目的は「外されたことを本人に伝える」ことなので、5分あれば十分。
+    const tombstoneExpired =
+      now.getTime() - lock.forceReleasedAt.getTime() > EDIT_LOCK_HEARTBEAT_GRACE_MS;
+    if (tombstoneExpired) return { state: "free" };
     return sameHolder
       ? { state: "force_released_mine", lockId: lock.id }
       : { state: "free" };

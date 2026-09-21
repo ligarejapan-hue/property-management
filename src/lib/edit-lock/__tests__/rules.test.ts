@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   EDIT_LOCK_HEARTBEAT_GRACE_MS,
+  EDIT_LOCK_HEARTBEAT_INTERVAL_MS,
   EDIT_LOCK_IDLE_LIMIT_MS,
+  EDIT_LOCK_IDLE_WARN_MS,
+  EDIT_LOCK_STATUS_POLL_MS,
   evaluateLock,
   expiryCause,
   isLockExpired,
@@ -28,6 +31,20 @@ const B = { userId: "user-b", screenTokenHash: "hash-b" };
 describe("定数", () => {
   it("無操作の上限は自動ログアウトと一致する", () => {
     expect(EDIT_LOCK_IDLE_LIMIT_MS).toBe(IDLE_TIMEOUT_MS);
+  });
+  // review Important 4: 以下は SQL 側のしきい値と同じ定数から導かれるため、値そのものを
+  // 1行 assert しないと、5分を5秒に書き換えてもテストスイート全体が緑のまま通ってしまう。
+  it("合図の猶予は5分(D4: 発注者決定・墓標の期限もこの値を使う[H7])", () => {
+    expect(EDIT_LOCK_HEARTBEAT_GRACE_MS).toBe(5 * 60_000);
+  });
+  it("合図の間隔は30秒(2.3節)", () => {
+    expect(EDIT_LOCK_HEARTBEAT_INTERVAL_MS).toBe(30_000);
+  });
+  it("無操作の予告は55分(D5の5分前・2.3節)", () => {
+    expect(EDIT_LOCK_IDLE_WARN_MS).toBe(55 * 60_000);
+  });
+  it("状態の再確認間隔は30秒(2.3節)", () => {
+    expect(EDIT_LOCK_STATUS_POLL_MS).toBe(30_000);
   });
 });
 
@@ -89,5 +106,19 @@ describe("evaluateLock: 総当たり", () => {
   it("期限切れかつ外された鍵も空き(外された本人以外)", () => {
     const both = row({ forceReleasedAt: ago(1_000), heartbeatAt: ago(EDIT_LOCK_HEARTBEAT_GRACE_MS + 1) });
     expect(evaluateLock(both, NOW, B)).toEqual({ state: "free" });
+  });
+
+  // review Important 7(H7): 墓標(force_released_at)にも期限が無いと、管理者に外された
+  // 本人が編集ウィンドウを開かない入口(プルダウン・地番ポップアップ)から保存し続ける限り
+  // 無期限に断られる。5分(EDIT_LOCK_HEARTBEAT_GRACE_MS)を過ぎたら空きとして扱う。
+  it("墓標は猶予(5分)を過ぎたら、外された本人から見ても空き(H7)", () => {
+    const expiredTombstone = row({ forceReleasedAt: ago(EDIT_LOCK_HEARTBEAT_GRACE_MS + 1) });
+    for (const who of [A, A2, B]) {
+      expect(evaluateLock(expiredTombstone, NOW, who)).toEqual({ state: "free" });
+    }
+  });
+  it("墓標はちょうど猶予までは有効(境界)", () => {
+    const boundaryTombstone = row({ forceReleasedAt: ago(EDIT_LOCK_HEARTBEAT_GRACE_MS) });
+    expect(evaluateLock(boundaryTombstone, NOW, A)).toMatchObject({ state: "force_released_mine" });
   });
 });
