@@ -1161,10 +1161,15 @@ export async function processRegistryPdf(
     try {
       await fn();
     } catch (err) {
-      // 非PII(ジョブIDと種別だけ)。氏名・住所・ファイル名は出さない。
+      // ⚠**生のエラー文は出さない**。Prisma の検証エラーは拒否した呼び出しのデータ
+      //   (rawData の住所など)を message に埋め込む。出してよいのは許可リストの
+      //   「エラーの種類(クラス名)」と「コード(英数字)」だけ。ジョブIDと種別は非PII。
+      const kind = err instanceof Error ? err.name : typeof err;
+      const rawCode = (err as { code?: unknown } | null)?.code;
+      const code =
+        typeof rawCode === "string" && /^[A-Za-z0-9_]{1,32}$/.test(rawCode) ? rawCode : "-";
       console.error(
-        `[registry-pdf] 取込ジョブの記録に失敗(${label}) jobId=${job.id}:`,
-        err instanceof Error ? err.message : String(err),
+        `[registry-pdf] 取込ジョブの記録に失敗(${label}) jobId=${job.id} kind=${kind} code=${code}`,
       );
     }
   };

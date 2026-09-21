@@ -511,6 +511,29 @@ describe("所有者が空の物件だけに入れる指定（requireNoExistingOw
     expect(pm.propertyOwner.create).toHaveBeenCalledTimes(1);
   });
 
+  it("⚠記録書きの失敗ログに、生のエラー文(住所などを含みうる)を出さない", async () => {
+    // Prisma の検証エラーは、拒否した呼び出しのデータ(rawData の住所など)を message に
+    // 埋め込む。ログに出してよいのは「エラーの種類」と「コード」だけ(許可リスト方式)。
+    const leaky = Object.assign(
+      new Error("Invalid invocation: rawData: { address: '東京都渋谷区神宮前三丁目12-3' }"),
+      { code: "P2009", name: "PrismaClientValidationError" },
+    );
+    pm.importJobRow.create.mockRejectedValueOnce(leaky);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(run({ requireNoExistingOwners: true })).resolves.toBeDefined();
+      expect(errorSpy).toHaveBeenCalled();
+      const logged = errorSpy.mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+      expect(logged).not.toContain("神宮前");
+      expect(logged).not.toContain("rawData");
+      expect(logged).toContain("job-row");
+      expect(logged).toContain("PrismaClientValidationError");
+      expect(logged).toContain("P2009");
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it("⚠ownersOnly では法人番号を判定も書き込みもしない（下見に出していない項目）", async () => {
     // 氏名に13桁の数字が含まれると、通常は法人番号として保存される
     (parseRegistryText as Mock).mockReturnValue({
