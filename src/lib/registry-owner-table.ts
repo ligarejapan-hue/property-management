@@ -131,24 +131,32 @@ export function parseRegistryOwnerTable(
     }
     if (readHeader(rows[0])) return;
 
-    /** 列ごとに、サービスの刷り込みを除いた断片をつなぐ。 */
-    const column = (index: number): string => {
+    /**
+     * 列ごとに断片をつなぐ。
+     *
+     * @param dropImprints サービスの刷り込み(整理番号など)を除くか。
+     *   ⚠**氏名の列だけ**に使う。住所に当てると「101」のような
+     *   数字だけの続き(部屋番号)まで消えて、住所が切れる。
+     *   実物では刷り込みは氏名の列にだけ現れる。
+     */
+    const column = (index: number, dropImprints: boolean): string => {
       const parts: string[] = [];
       for (const cells of rows) {
         const cell = (cells[index] ?? "").trim();
-        if (!cell || isServiceImprint(cell)) continue;
+        if (!cell) continue;
+        if (dropImprints && isServiceImprint(cell)) continue;
         parts.push(cell);
       }
       return cleanValue(parts.join(""));
     };
 
-    const name = column(layout.name);
+    const name = column(layout.name, true);
     if (!name) return; // 氏名が無ければ所有者として扱わない
-    const address = column(layout.address);
+    const address = column(layout.address, false);
     const share =
       layout.share === null
         ? ""
-        : toHalfWidthDigits(stripSpaces(column(layout.share)));
+        : toHalfWidthDigits(stripSpaces(column(layout.share, false)));
 
     owners.push({
       name,
