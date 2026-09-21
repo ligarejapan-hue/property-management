@@ -174,6 +174,13 @@ describe("反映の安全策（ボタン部品）", () => {
     expect(finishBody).toContain("await onApplied();");
   });
 
+  it("⚠登録した人数は、読み取った行数ではなく実際に紐づいた数(ownersLinked)を出す", () => {
+    // 同じ人が謄本に2回載っていると、登録は1人にまとまる。行数を出すと嘘になる。
+    expect(src).toContain("result.ownersLinked");
+    expect(src).toContain("{appliedCount}名の所有者を登録しました");
+    expect(src).not.toContain("{owners.length}名の所有者を登録しました");
+  });
+
   it("登録中は閉じられない（二重送信を防ぐ）", () => {
     expect(src).toContain('onClose={phase === "applying" ? undefined : close}');
   });

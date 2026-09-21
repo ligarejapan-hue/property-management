@@ -122,11 +122,16 @@ async function loadProperty(propertyId: string, action: "preview" | "apply") {
  *   添付がそれと同じであることを確かめる(違えば 409)。確認画面を開いている間に
  *   別の謄本が添付された場合に、見ていない方の所有者を入れてしまわないため。
  */
-async function loadLatestRegistryText(
+/**
+ * いちばん新しい所有者事項の添付(削除済みを除く)。
+ * ⚠下見・反映の受付・**書き込みのロックの中の見直し**で同じ条件を使う(条件が
+ *   ずれると「見直しでは別の添付が最新」になり、正しい操作が 409 になる)。
+ */
+function findLatestOwnerRegistryAttachment(
+  db: Pick<typeof prisma, "attachment">,
   propertyId: string,
-  expectedAttachmentId?: string,
-): Promise<LoadedRegistry> {
-  const attachment = await prisma.attachment.findFirst({
+) {
+  return db.attachment.findFirst({
     where: {
       propertyId,
       type: "registry",
@@ -136,6 +141,20 @@ async function loadLatestRegistryText(
     orderBy: { createdAt: "desc" },
     select: { id: true, fileName: true, fileUrl: true, createdAt: true },
   });
+}
+
+const attachmentChangedError = () =>
+  new ApiError(
+    409,
+    "確認した謄本とは別の謄本が追加されています。開き直してもう一度確認してください",
+    "REGISTRY_ATTACHMENT_CHANGED",
+  );
+
+async function loadLatestRegistryText(
+  propertyId: string,
+  expectedAttachmentId?: string,
+): Promise<LoadedRegistry> {
+  const attachment = await findLatestOwnerRegistryAttachment(prisma, propertyId);
   if (!attachment) {
     throw new ApiError(
       404,
@@ -144,11 +163,7 @@ async function loadLatestRegistryText(
     );
   }
   if (expectedAttachmentId && attachment.id !== expectedAttachmentId) {
-    throw new ApiError(
-      409,
-      "確認した謄本とは別の謄本が追加されています。開き直してもう一度確認してください",
-      "REGISTRY_ATTACHMENT_CHANGED",
-    );
+    throw attachmentChangedError();
   }
 
   const storage = getStorage();
@@ -307,6 +322,13 @@ export async function POST(
       // ⚠上の担当者スコープ(canAccessPropertyRecord)の確認は受付時点の値。書き込みの
       //   ロックまでの間に担当を外されても、ロックと同じ1文で見直して 403 にする。
       enforcePropertyScope: true,
+      // ⚠「確認した添付が最新か」の上の判定は受付時点の値。書き込みのロックまでの間に
+      //   新しい謄本が添付されうる(添付の作成も同じ物件行を押さえるので、ロックの中で
+      //   見直せば取りこぼさない)。最初の書き込みの直前にもう一度確かめる。
+      beforeFirstWrite: async (tx) => {
+        const latest = await findLatestOwnerRegistryAttachment(tx, id);
+        if (!latest || latest.id !== attachmentId) throw attachmentChangedError();
+      },
       // ⚠所有者だけを入れる。下見も確認画面も所有者しか見せていないので、
       //   物件の項目(不動産番号・地番・家屋番号・登記状況)は書き換えない。
       ownersOnly: true,

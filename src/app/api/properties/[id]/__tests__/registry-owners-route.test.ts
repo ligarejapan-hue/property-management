@@ -225,6 +225,35 @@ describe("POST（反映）", () => {
     expect(args.ownersOnly).toBe(true);
   });
 
+  it("⚠書き込みのロックの中で、確認した添付が今も最新かを見直す関数を渡す", async () => {
+    // 上の 409 判定(受付時点)の後、書き込みのロックまでの間に新しい謄本が添付されうる。
+    // 添付の作成も同じ物件行を押さえるので、ロックの中で見直せば取りこぼさない。
+    await POST(postRequest(), context);
+    const args = (processRegistryPdf as unknown as Mock).mock.calls[0][0];
+    expect(typeof args.beforeFirstWrite).toBe("function");
+
+    const findFirstSame = vi.fn(
+      async (_q: { where: Record<string, unknown> }) => ({ id: "att-1" }),
+    );
+    const txSame = { attachment: { findFirst: findFirstSame } };
+    await expect(args.beforeFirstWrite(txSame)).resolves.toBeUndefined();
+    // ⚠見直しは削除済みを除いた所有者事項の最新1件(下見と同じ条件)
+    const where = findFirstSame.mock.calls[0][0].where;
+    expect(where).toMatchObject({
+      propertyId: PROPERTY_ID,
+      type: "registry",
+      isDeleted: false,
+      registryCertificateType: "owner",
+    });
+
+    const txNewer = { attachment: { findFirst: vi.fn(async () => ({ id: "att-2" })) } };
+    await expect(args.beforeFirstWrite(txNewer)).rejects.toMatchObject({ status: 409 });
+
+    // 確認した添付が消えていても止める
+    const txGone = { attachment: { findFirst: vi.fn(async () => null) } };
+    await expect(args.beforeFirstWrite(txGone)).rejects.toMatchObject({ status: 409 });
+  });
+
   it("⚠書き込みのロックの中で担当者スコープを見直す指定を渡す", async () => {
     await POST(postRequest(), context);
     const args = (processRegistryPdf as unknown as Mock).mock.calls[0][0];

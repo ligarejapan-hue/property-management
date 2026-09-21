@@ -538,6 +538,31 @@ describe("所有者が空の物件だけに入れる指定（requireNoExistingOw
     expect(data).not.toHaveProperty("corporateNumber");
   });
 
+  it("⚠まとめる場合、物件行のロックの中・最初の書き込みの前に beforeFirstWrite を呼ぶ", async () => {
+    // 呼び出し元が受付時点で確かめたこと(下見で見せた添付が今も最新か)を、
+    // 書き込みと同じロックの中で見直すための入口。
+    const hook = vi.fn(async () => {});
+    await run({ requireNoExistingOwners: true, beforeFirstWrite: hook });
+
+    expect(hook).toHaveBeenCalledTimes(1);
+    const lockOrder = pm.$queryRaw.mock.invocationCallOrder[0];
+    const hookOrder = hook.mock.invocationCallOrder[0];
+    const createOrder = pm.owner.create.mock.invocationCallOrder[0];
+    expect(lockOrder).toBeLessThan(hookOrder);
+    expect(hookOrder).toBeLessThan(createOrder);
+  });
+
+  it("⚠beforeFirstWrite が中断したら何も書かない", async () => {
+    const hook = vi.fn(async () => {
+      throw Object.assign(new Error("changed"), { status: 409 });
+    });
+    await expect(
+      run({ requireNoExistingOwners: true, beforeFirstWrite: hook }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(pm.owner.create).not.toHaveBeenCalled();
+    expect(pm.propertyOwner.create).not.toHaveBeenCalled();
+  });
+
   it("指定しない呼び出し元（手動取込など）では見直さない＝共有名義の追加を妨げない", async () => {
     pm.propertyOwner.count.mockResolvedValue(1);
     await run();

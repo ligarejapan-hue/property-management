@@ -43,11 +43,14 @@ export default function RegistryOwnerApplyButton({
   const [phase, setPhase] = useState<Phase>("idle");
   const [preview, setPreview] = useState<RegistryOwnerPreview | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  /** 実際に物件へ紐づいた人数(POST の応答)。⚠読み取った行数ではない。 */
+  const [appliedCount, setAppliedCount] = useState(0);
 
   const close = useCallback(() => {
     setPhase("idle");
     setPreview(null);
     setErrorMsg(null);
+    setAppliedCount(0);
   }, []);
 
   /** 成功の表示を閉じてから、画面を読み直す。 */
@@ -77,7 +80,9 @@ export default function RegistryOwnerApplyButton({
     try {
       // ⚠下見で見せた添付を明示して送る。開いている間に別の謄本が
       //   添付されていたらサーバーが拒否する(見ていない所有者を入れない)。
-      await applyRegistryOwners(propertyId, attachmentId);
+      const result = await applyRegistryOwners(propertyId, attachmentId);
+      // ⚠同じ人が謄本に2回載っていると1人にまとまる。行数ではなく紐づいた数を出す。
+      setAppliedCount(result.ownersLinked);
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "登録できませんでした");
       setPhase("confirm");
@@ -129,8 +134,13 @@ export default function RegistryOwnerApplyButton({
           footer={<Button onClick={finish}>閉じる</Button>}
         >
           <p className="text-sm text-gray-800 dark:text-gray-100">
-            {owners.length}名の所有者を登録しました。
+            {appliedCount}名の所有者を登録しました。
           </p>
+          {appliedCount < owners.length ? (
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              謄本には{owners.length}行ありましたが、同じ人はまとめて1人として登録しています。
+            </p>
+          ) : null}
           <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
             閉じると物件の表示を読み直します。
           </p>
