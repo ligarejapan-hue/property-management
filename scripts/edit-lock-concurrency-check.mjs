@@ -58,9 +58,12 @@
  *            3種類とも1件読めて一致(item Fの実地確認。ずれれば非0で終了する)
  *        [4] unnest ベースの IN(deleteEditLocksFor 相当): 1件消せた(1件でなければ非0で終了する)
  *        [5] ::"EditLockResource" キャスト: 例外なし
- *        [6] 種の位置(境界のどちら側から始めたか)と、期限切れ横取りの競合再現:
- *            「N回中M回で再現した」/「N回の試行では再現しなかった」のどちらか
- *            (**この行は結果に関わらず必ず PR に貼る**。記録すること自体が目的)
+ *        [6] 種の位置(境界のどちら側から始めたか)と、期限切れ横取りの回帰確認:
+ *            2026-09-21 round2対応で pre-SELECT と upsert が同じ dbNow を bind する
+ *            ようになったため、この境界(T1〜T2の間で期限切れになるケース)は
+ *            **再現しないことが正しい**。1件でも再現したら非0で終了する
+ *            (「N回試行して1件も再現しなかった」が合格。再現した場合は
+ *            regressionとして扱い、詳細をログに出す)。
  *        [7] rollback route と同じ ANY(::uuid[]) ORDER BY id FOR UPDATE: 2件ロックできた
  *            (properties が2件未満なら非致命的にスキップし、その旨を出力する)
  *        [8] assertNotEditLockedByOther 相当: active/force_released が型エラー無く
@@ -85,9 +88,11 @@
  *        operator が最初から大文字を渡すと同じ文字列同士の比較になり無意味だった)
  *   (d) ::"EditLockResource" enum キャスト        → [1]〜[4][7] すべてで踏む
  *   (e) acquireEditLock の pre-SELECT とその後の upsert が別文であることに
- *       起因する、期限切れ横取り時に takeover が null になり得る競合の再現 → [6]
- *       (review Important 2: 期限ぎりぎりで複数回試行し、再現回数を報告する。
- *        1回きりの「再現しなかった」を確定回答として扱わない)
+ *       起因していた、期限切れ横取り時に takeover が null になり得る競合の
+ *       **回帰確認** → [6](review Important 2で発見・2026-09-21 round2で修正)。
+ *       修正後は pre-SELECT が bind した dbNow を upsert の WHERE がそのまま使うため、
+ *       この境界を掃引しても構造的に再現しないはず。1件でも再現したら退行として扱い
+ *       非0で終了する。
  *   (g) この task が新規に書いた唯一の SQL
  *       (`rollback/route.ts` の `ANY(${ids}::uuid[]) ORDER BY id FOR UPDATE`)の実行
  *       → [7](review Important 1。配列バインド + text[]→uuid[] キャストは
@@ -176,7 +181,14 @@ const GRACE_SEC = 300;
 const IDLE_SEC = 3600;
 
 // service.ts の acquireEditLock の INSERT ... ON CONFLICT と同じ形。
-const acquire = (userId, hash) => prisma.$queryRaw`
+// ⚠2026-09-21 外部レビュー round2(@codex P2・発注者裁定=決着)対応: WHERE節の期限
+//   比較は、呼び出し側が pre-SELECT で読んだ dbNow を bind する(ここで新たに
+//   clock_timestamp() を呼ばない)。SET節(実際の書き込み時刻)は引き続き
+//   clock_timestamp() のまま。理由は service.ts の acquireEditLock 冒頭コメント
+//   と同じ: 判定(pre-SELECTのexpired_by)と分類(upsertが通るか)を同じ瞬間に
+//   固定しないと、期限切れが2文の間で起きたときに「upsertは通るのに
+//   takeoverの記録は無い」という不整合が起きる。
+const acquire = (userId, hash, dbNow) => prisma.$queryRaw`
   INSERT INTO "edit_locks" ("id","resource_type","resource_id","user_id","screen_token_hash","acquired_at","heartbeat_at","activity_at")
   VALUES (gen_random_uuid(), 'property'::"EditLockResource", ${resourceId}::uuid, ${userId}::uuid, ${hash}, clock_timestamp(), clock_timestamp(), clock_timestamp())
   ON CONFLICT ("resource_type","resource_id") DO UPDATE
@@ -184,27 +196,46 @@ const acquire = (userId, hash) => prisma.$queryRaw`
       "acquired_at" = clock_timestamp(), "heartbeat_at" = clock_timestamp(), "activity_at" = clock_timestamp(),
       "force_released_at" = NULL, "force_released_by" = NULL
   WHERE "edit_locks"."force_released_at" IS NOT NULL
-     OR "edit_locks"."heartbeat_at" < clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision)
-     OR "edit_locks"."activity_at" < clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision)
+     OR "edit_locks"."heartbeat_at" < ${dbNow}::timestamptz - make_interval(secs => ${GRACE_SEC}::double precision)
+     OR "edit_locks"."activity_at" < ${dbNow}::timestamptz - make_interval(secs => ${IDLE_SEC}::double precision)
      OR ("edit_locks"."user_id" = EXCLUDED."user_id" AND "edit_locks"."screen_token_hash" = EXCLUDED."screen_token_hash")
   RETURNING "id"
 `;
 
-// service.ts の acquireEditLock の pre-SELECT と同じ形(横取り情報の判定用)。
-async function takeoverAttempt(userId, hash) {
+// service.ts の acquireEditLock の pre-SELECT(CTE + LEFT JOIN で必ず1行返す形)と同じ。
+// 資源に鍵が無くても db_now は必要(横取りが無くても upsert の bind 値として使うため)。
+async function preSelectForAcquire() {
   const prevRows = await prisma.$queryRaw`
-    SELECT "user_id", "screen_token_hash",
+    WITH now_ts AS (SELECT clock_timestamp() AS db_now)
+    SELECT now_ts.db_now, "edit_locks"."user_id", "edit_locks"."screen_token_hash",
            CASE
-             WHEN "heartbeat_at" < clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision) THEN 'heartbeat'
-             WHEN "activity_at" < clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision) THEN 'idle'
+             WHEN "edit_locks"."heartbeat_at" < now_ts.db_now - make_interval(secs => ${GRACE_SEC}::double precision) THEN 'heartbeat'
+             WHEN "edit_locks"."activity_at" < now_ts.db_now - make_interval(secs => ${IDLE_SEC}::double precision) THEN 'idle'
              ELSE NULL
            END AS expired_by
-    FROM "edit_locks"
-    WHERE "resource_type" = 'property'::"EditLockResource" AND "resource_id" = ${resourceId}::uuid
-      AND "force_released_at" IS NULL
+    FROM now_ts
+    LEFT JOIN "edit_locks"
+      ON "edit_locks"."resource_type" = 'property'::"EditLockResource"
+     AND "edit_locks"."resource_id" = ${resourceId}::uuid
+     AND "edit_locks"."force_released_at" IS NULL
   `;
-  const prev = prevRows[0] ?? null;
-  const got = await acquire(userId, hash);
+  return prevRows[0];
+}
+
+// [1][2][8][11] のように prev/takeover の中身を見ない箇所向けの薄いラッパ。
+// production の acquireEditLock は必ず pre-SELECT → upsert の順で呼ぶので、
+// dbNow だけ要る場面でも省略せず同じ2文を踏む(本番の呼び出し形を保つ)。
+async function acquireWithPreSelect(userId, hash) {
+  const row = await preSelectForAcquire();
+  return acquire(userId, hash, row.db_now);
+}
+
+// service.ts の acquireEditLock 全体(pre-SELECT→upsert、同じ dbNow を bind)と同じ形。
+async function takeoverAttempt(userId, hash) {
+  const row = await preSelectForAcquire();
+  const dbNow = row.db_now;
+  const prev = row.user_id != null ? { user_id: row.user_id, screen_token_hash: row.screen_token_hash, expired_by: row.expired_by } : null;
+  const got = await acquire(userId, hash, dbNow);
   if (got.length === 0) return { won: false, takeover: null };
   const sameScreen = prev && prev.user_id === userId && prev.screen_token_hash === hash;
   const takeover =
@@ -223,6 +254,10 @@ async function takeoverAttempt(userId, hash) {
 // **期限のまだ手前**(+ offsetMs ミリ秒)に置き、DB往復のジッタで実際に
 // 境界をまたぐ可能性を残す。offsetMs は 0〜7ms を周回させ(呼び出し側の
 // `i % 8`)、ちょうど良い一点を運任せにしない。
+//
+// ⚠2026-09-21 round2対応後: 種はそのまま(境界の掃引そのものに意味がある =
+//   下記コメント参照)だが、[6] の合否判定は「再現した=失敗」に反転した
+//   (service.ts が直った後は、この境界を掃引しても再現しないことが正しい状態)。
 async function seedNearExpiryLock(holderUserId, offsetMs) {
   await prisma.$executeRaw`DELETE FROM "edit_locks" WHERE "resource_id" = ${resourceId}::uuid`;
   await prisma.$executeRaw`
@@ -263,7 +298,7 @@ async function main() {
 
   // [1][2] 同時取得は1本だけ通る。ON CONFLICT ... WHERE 節の make_interval 比較を
   //        実地で踏む(片方は既存行に conflict し、WHERE を評価するため)。
-  const [a, b] = await Promise.all([acquire(u1.id, "screen-a"), acquire(u2.id, "screen-b")]);
+  const [a, b] = await Promise.all([acquireWithPreSelect(u1.id, "screen-a"), acquireWithPreSelect(u2.id, "screen-b")]);
   const wonCount = [a, b].filter((r) => r.length > 0).length;
   console.log(`[1] 取得できた本数: ${wonCount} (1 なら正しい)`);
   console.log(
@@ -337,28 +372,36 @@ async function main() {
   if (!deleteOk) process.exitCode = 1;
   console.log(`[5] ::"EditLockResource" キャスト: 例外なし(ここまで到達していれば全クエリが通過済み)`);
 
-  // [6] 期限切れの横取りで pre-SELECT と upsert(2文)の間に競合が起きないかを再現する。
-  //     review round2 Important 1: 種は「期限のまだ手前(生きている側)」に置く
-  //     (+0〜+7ms を周回)。境界の**どちら側を狙って試したか**を先に明示する
-  //     (前回の版は無自覚に期限の向こう側を試していたため、常に「非再現」しか
-  //     出せなかった)。
+  // [6] 期限切れの横取りで pre-SELECT と upsert(2文)の間に競合が起きないことを
+  //     確かめる**回帰チェック**(review round2 Important 1で発見・2026-09-21 round2で
+  //     修正)。種は「期限のまだ手前(生きている側)」に置く(+0〜+7ms を周回)。
+  //     境界を掃引することそのものに意味がある(修正前はここで実際に再現した)。
+  //     ⚠反転(2026-09-21): 修正後は pre-SELECT が bind した dbNow を upsert の
+  //     WHERE がそのまま使うため、この境界は**構造的に再現しなくなった**。よって
+  //     「再現した/しなかった」を記録するだけの手動ゲートではなく、1件でも
+  //     再現したら退行(regression)として非0で終了する自動ゲートにする。
   const ATTEMPTS = 200;
   const OFFSET_SWEEP_MS = 8; // i % 8 で +0〜+7ms を周回
   console.log(
     `[6] 種の位置: 期限のちょうど 0〜${OFFSET_SWEEP_MS - 1}ms 手前(まだ生きている側)から開始し、` +
-      `DB往復の間に期限をまたぐかどうかで再現を狙う(${ATTEMPTS}回試行)`,
+      `DB往復の間に期限をまたぐかどうかを掃引する(${ATTEMPTS}回試行・再現しないことが正しい)`,
   );
   let reproducedCount = 0;
   let inconclusiveCount = 0;
+  const reproducedAtOffsets = [];
   for (let i = 0; i < ATTEMPTS; i++) {
-    await seedNearExpiryLock(u1.id, i % OFFSET_SWEEP_MS);
+    const offsetMs = i % OFFSET_SWEEP_MS;
+    await seedNearExpiryLock(u1.id, offsetMs);
     const [r1, r2] = await Promise.all([
       takeoverAttempt(u1.id, `takeover-x-${i}`),
       takeoverAttempt(u2.id, `takeover-y-${i}`),
     ]);
     const winners = [r1, r2].filter((r) => r.won);
     if (winners.length === 1) {
-      if (winners[0].takeover === null) reproducedCount++;
+      if (winners[0].takeover === null) {
+        reproducedCount++;
+        reproducedAtOffsets.push(offsetMs);
+      }
     } else {
       // review round3 Minor 2: これは異常ではない。offsetMs が大きい(概ね3ms以上)
       // 回は、両方の pre-SELECT が「まだ生きている」を見た後、どちらの upsert も
@@ -371,12 +414,19 @@ async function main() {
     }
   }
   if (reproducedCount > 0) {
-    console.log(
-      `[6] 結果: ${ATTEMPTS}回中 ${reproducedCount}回で再現した(勝った方の takeover が null = 監査に横取りとして残らないケースがある。判定不能(0本/2本勝ち。種がまだ生きている側にある以上、正常な範囲) ${inconclusiveCount}回)`,
+    console.error(
+      `[6] 結果: 退行を検出。${ATTEMPTS}回中 ${reproducedCount}回で再現した` +
+        `(勝った方の takeover が null = 監査に edit_lock_acquire として記録され、` +
+        `edit_lock_takeover_expired が記録されないケースが実際に起きた。` +
+        `再現したoffsetMs: ${[...new Set(reproducedAtOffsets)].join(", ")})。` +
+        `service.ts の acquireEditLock で upsert の WHERE が再び生の clock_timestamp() を` +
+        `呼んでいないか確認すること(判定不能 ${inconclusiveCount}回)`,
     );
+    process.exitCode = 1;
   } else {
     console.log(
-      `[6] 結果: ${ATTEMPTS}回の試行では再現しなかった(判定不能(0本/2本勝ち。offsetMsが大きい回に偏って起きるのが正常) ${inconclusiveCount}回)。再現しないと確定したわけではない点に注意`,
+      `[6] 結果: ${ATTEMPTS}回の試行で再現しなかった(正しい。判定不能(0本/2本勝ち。` +
+        `offsetMsが大きい回に偏って起きるのが正常) ${inconclusiveCount}回)`,
     );
   }
 
@@ -470,7 +520,7 @@ async function main() {
   // [8] assertNotEditLockedByOther 相当: 生きた鍵に対して active/force_released が
   //     型エラー無く boolean で返ることを確認する(sameHolder の判定は呼び出し側JSが行う
   //     設計なので、このSQL自体は保持者では絞り込まない。service.ts と同じ)。
-  const got8 = await acquire(u1.id, "screen-8");
+  const got8 = await acquireWithPreSelect(u1.id, "screen-8");
   if (got8.length !== 1) {
     console.error("[8] 前提の取得に失敗しました(想定外)");
     process.exitCode = 1;
@@ -545,7 +595,7 @@ async function main() {
   if (lockedAfterForceRelease[0]?.locked !== false) process.exitCode = 1;
 
   await prisma.$executeRaw`DELETE FROM "edit_locks" WHERE "resource_id" = ${resourceId}::uuid`;
-  const freshAcquire = await acquire(u1.id, "screen-11-fresh");
+  const freshAcquire = await acquireWithPreSelect(u1.id, "screen-11-fresh");
   const lockedAfterAcquire = await isResourceLockedQuery();
   console.log(
     `[11] isResourceEditLocked 相当(生きた鍵): locked=${lockedAfterAcquire[0]?.locked}(trueが正しい)`,

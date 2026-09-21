@@ -31,6 +31,16 @@ function fakeDb(result: unknown[] = []) {
   return { queryRaw, db: { $queryRaw: queryRaw } as never };
 }
 
+/**
+ * acquireEditLock の pre-SELECT(T1)は LEFT JOIN で組んでいるため、鍵が1件も
+ * 無い資源でも**必ず1行**返る(db_now だけ埋まり、鍵の列は全部 null)。
+ * 2026-09-21 外部レビュー round2 対応前は「鍵が無い=空配列」だったが、今は
+ * 空配列を返すモックは本番のクエリ形と矛盾する(bind する db_now が無くなる)。
+ */
+function noPrevLockRow(dbNow: Date = new Date("2026-09-18T09:59:00Z")) {
+  return [{ db_now: dbNow, user_id: null, screen_token_hash: null, expired_by: null }];
+}
+
 const GRACE_SEC = EDIT_LOCK_HEARTBEAT_GRACE_MS / 1000;
 const IDLE_SEC = EDIT_LOCK_IDLE_LIMIT_MS / 1000;
 
@@ -62,7 +72,7 @@ describe("acquireEditLock", () => {
   it("取得できたら世代(lockId)を返す", async () => {
     const { db, queryRaw } = fakeDb([]);
     queryRaw
-      .mockResolvedValueOnce([]) // 既存の読み取り
+      .mockResolvedValueOnce(noPrevLockRow()) // 既存の読み取り(鍵なし=1行だけ・列は全部null)
       .mockResolvedValueOnce([{ id: "44444444-4444-4444-8444-444444444444", acquired_at: new Date("2026-09-18T10:00:00Z") }]);
     const res = await acquireEditLock(db, BASE);
     expect(res).toMatchObject({ state: "mine", lockId: "44444444-4444-4444-8444-444444444444" });
@@ -70,7 +80,7 @@ describe("acquireEditLock", () => {
 
   it("取得のSQLは 期限切れ・解除済み・同じ保持者 のときだけ上書きし、世代を振り直す", async () => {
     const { db, queryRaw } = fakeDb([]);
-    queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: "x", acquired_at: new Date() }]);
+    queryRaw.mockResolvedValueOnce(noPrevLockRow()).mockResolvedValueOnce([{ id: "x", acquired_at: new Date() }]);
     await acquireEditLock(db, BASE);
     const sql = sqlOf(queryRaw.mock.calls[1]);
     expect(sql).toMatch(/ON CONFLICT \("resource_type", "resource_id"\) DO UPDATE/);
@@ -79,9 +89,40 @@ describe("acquireEditLock", () => {
     expect(sql).toMatch(/WHERE[\s\S]*"edit_locks"\."force_released_at" IS NOT NULL/);
     // ⚠brief の Step1 サンプルは "now()" だが、Global Constraint(clock_timestamp() を使う・
     // 行ロック待ちで書いた直後の鍵が期限切れにならないように)と Step3 サンプル自体が
-    // clock_timestamp() を使っているため、こちらに合わせて固定する。
+    // clock_timestamp() を使っているため、こちらに合わせて固定する(SET 側の話。
+    // WHERE 側の閾値比較は round2 対応で pre-SELECT が bind した db_now を使う=下のテスト)。
     expectColumnThresholds(sql);
     expect(sql).toMatch(/"edit_locks"\."user_id" = EXCLUDED\."user_id" AND "edit_locks"\."screen_token_hash" = EXCLUDED\."screen_token_hash"/);
+  });
+
+  // ⚠2026-09-21 外部レビュー round2(@codex P2・発注者裁定=決着): pre-SELECT(T1)と
+  //   upsert(T2)が別々に clock_timestamp() を呼ぶと、期限切れが T1〜T2 の間に起きた
+  //   ケースで「upsert は通るのに expired_by は null のまま」という不整合が起きる
+  //   (行が変わる競合ではなく、時計を2回引く時間競合)。二度と生の clock_timestamp()
+  //   に戻らないよう、upsert の WHERE がその場で新しく時刻を引いていないこと
+  //   (pre-SELECT が bind した db_now をそのまま使っていること)を SQL 自体で固定する。
+  it("upsert の WHERE は bind した db_now を使う。新たに clock_timestamp() を呼ばない(round2再発防止)", async () => {
+    const { db, queryRaw } = fakeDb([]);
+    const dbNow = new Date("2026-09-18T09:54:00Z");
+    queryRaw.mockResolvedValueOnce(noPrevLockRow(dbNow)).mockResolvedValueOnce([{ id: "x", acquired_at: new Date() }]);
+    await acquireEditLock(db, BASE);
+    const sql = sqlOf(queryRaw.mock.calls[1]);
+    const whereClause = sql.slice(sql.indexOf("WHERE"));
+    // WHERE節の中に生の clock_timestamp() 呼び出しが無い(SET節にはあってよいので
+    // WHERE 以降だけを切り出して検査する)。誰かがここに clock_timestamp() を
+    // 書き戻したら、このアサーションが落ちる。
+    expect(whereClause).not.toMatch(/clock_timestamp\(\)/);
+    // 実際に bind された値そのもの(Date インスタンスの同一性)が pre-SELECT の
+    // db_now であることを、文字列化の癖(Date.toString()の書式)に頼らず確認する。
+    const [, ...upsertValues] = queryRaw.mock.calls[1] as [TemplateStringsArray, ...unknown[]];
+    const dbNowBindCount = upsertValues.filter((v) => v === dbNow).length;
+    expect(dbNowBindCount).toBe(2); // heartbeat_at 用・activity_at 用の2箇所
+    expect(whereClause).toMatch(
+      new RegExp(`"edit_locks"\\."heartbeat_at" < \\{[\\s\\S]*?\\}::timestamptz - make_interval\\(secs => \\{${GRACE_SEC}\\}::double precision\\)`),
+    );
+    expect(whereClause).toMatch(
+      new RegExp(`"edit_locks"\\."activity_at" < \\{[\\s\\S]*?\\}::timestamptz - make_interval\\(secs => \\{${IDLE_SEC}\\}::double precision\\)`),
+    );
   });
 
   it("0件なら他人が保持中として現在の行を返す", async () => {
@@ -137,12 +178,78 @@ describe("acquireEditLock", () => {
       await acquireEditLock(db, BASE);
       const sql = sqlOf(queryRaw.mock.calls[0]);
       expectColumnThresholds(sql);
+      // round2対応: 判定基準は pre-SELECT が1回だけ引いた now_ts.db_now(CTE経由)。
+      // clock_timestamp() を直接ここで(複数回)呼んでいない。
       expect(sql).toMatch(
         new RegExp(
-          `WHEN "heartbeat_at" < clock_timestamp\\(\\) - make_interval\\(secs => \\{${GRACE_SEC}\\}::double precision\\) THEN 'heartbeat'` +
-            `[\\s\\S]*WHEN "activity_at" < clock_timestamp\\(\\) - make_interval\\(secs => \\{${IDLE_SEC}\\}::double precision\\) THEN 'idle'`,
+          `WHEN "edit_locks"\\."heartbeat_at" < now_ts\\.db_now - make_interval\\(secs => \\{${GRACE_SEC}\\}::double precision\\) THEN 'heartbeat'` +
+            `[\\s\\S]*WHEN "edit_locks"\\."activity_at" < now_ts\\.db_now - make_interval\\(secs => \\{${IDLE_SEC}\\}::double precision\\) THEN 'idle'`,
         ),
       );
+    });
+
+    // ⚠2026-09-21 外部レビュー round2(@codex P2・発注者裁定=決着)向けの2ケース。
+    // pre-SELECT(T1)と upsert(T2)を同じ db_now に固定した結果、次の2つが
+    // 正しく起きることを固定する:
+    //   (a) T1 の時点で既に期限切れ ⇒ upsert も同じ db_now で見て当然「期限切れ」
+    //       側の WHERE を通る想定 ⇒ takeover に前の保持者と原因が入る。
+    //   (b) T1〜T2 の間(=DB往復のジッタ)で期限切れになった場合 ⇒ T1 はまだ
+    //       「生きている」と見ているので、その db_now を bind された upsert の
+    //       WHERE も同じく「生きている」と判定し、上書きしない(=held を返す)。
+    //       サイレントな横取り(takeover が null のまま acquire 扱いになる)は
+    //       もう起きない。
+    it("round2(a): T1 の時点で既に期限切れなら takeover に前の保持者と原因が入る", async () => {
+      const { db, queryRaw } = fakeDb([]);
+      const dbNow = new Date("2026-09-18T10:00:00Z");
+      queryRaw
+        .mockResolvedValueOnce([{ db_now: dbNow, user_id: "other", screen_token_hash: "h-other", expired_by: "heartbeat" }])
+        .mockResolvedValueOnce([{ id: "new-lock", acquired_at: new Date("2026-09-18T10:00:01Z") }]);
+      const res = await acquireEditLock(db, BASE);
+      if (res.state !== "mine") throw new Error("expected mine");
+      expect(res.takeover).toEqual({ previousUserId: "other", expiredBy: "heartbeat" });
+      // route はこの takeover を見て edit_lock_takeover_expired を記録する
+      // (acquire/route.ts の分岐。ここでは service が正しい材料を返すことまでを固定する)。
+    });
+
+    it("round2(b): T1〜T2の間で期限切れになっても、この試行では横取りしない(upsertが不成立=held)", async () => {
+      const { db, queryRaw } = fakeDb([]);
+      const dbNow = new Date("2026-09-18T10:00:00Z");
+      // T1: db_now の時点ではまだ生きている(expired_by=null)と判定。
+      queryRaw
+        .mockResolvedValueOnce([{ db_now: dbNow, user_id: "other", screen_token_hash: "h-other", expired_by: null }])
+        // upsert の WHERE は bind された同じ dbNow で「生きている」と見るため、
+        // 本物の Postgres では DO UPDATE が不成立になり RETURNING は0行になる
+        // (=このモックは「修正後の正しい振る舞い」を模している)。
+        .mockResolvedValueOnce([])
+        // got=[] の後、readOne で現在の行を読み直す(held の current)。
+        .mockResolvedValueOnce([
+          {
+            id: "still-there",
+            user_id: "other",
+            screen_token_hash: "h-other",
+            acquired_at: new Date("2026-09-18T09:00:00Z"),
+            heartbeat_at: new Date("2026-09-18T09:59:00Z"),
+            activity_at: new Date("2026-09-18T09:59:00Z"),
+            force_released_at: null,
+          },
+        ]);
+      const res = await acquireEditLock(db, BASE);
+      expect(res.state).toBe("held");
+      if (res.state !== "held") throw new Error("expected held");
+      expect(res.current.userId).toBe("other");
+      // takeover が null のまま「取れた」ことにはならない(=falseな
+      // edit_lock_acquire が記録される余地が無い。route側の固定は routes.test.ts)。
+      // ⚠この held という結果は「たまたま2本目のモックを [] にしたから」ではなく、
+      //   upsert の WHERE が実際に T1 の db_now を bind していることの帰結として
+      //   起きるはず。SQL 自体がまだそれを守っているかをここでも固定する
+      //   (誰かが upsert の WHERE を生の clock_timestamp() に戻すと、このアサーションが
+      //   落ちる。戻っても got=[] を返し続けるモックのおかげで state:"held" 自体は
+      //   偽陽性で緑になり得るため、SQL 側も見ないとこのテストが回帰を見逃す)。
+      const upsertSql = sqlOf(queryRaw.mock.calls[1]);
+      const upsertWhere = upsertSql.slice(upsertSql.indexOf("WHERE"));
+      expect(upsertWhere).not.toMatch(/clock_timestamp\(\)/);
+      const [, ...upsertValues] = queryRaw.mock.calls[1] as [TemplateStringsArray, ...unknown[]];
+      expect(upsertValues.filter((v) => v === dbNow).length).toBe(2);
     });
   });
 });

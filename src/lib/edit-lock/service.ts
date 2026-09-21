@@ -84,18 +84,51 @@ export async function acquireEditLock(
   | { state: "held"; current: EditLockRow }
 > {
   // ⚠横取りの判定は**DBの now()** で行う(@codex R8 P2)。取得のSQLと同じ基準にそろえる。
-  const prevRows = await db.$queryRaw<{ user_id: string; screen_token_hash: string; expired_by: "heartbeat" | "idle" | null }[]>`
-    SELECT "user_id", "screen_token_hash",
+  // ⚠2026-09-21 外部レビュー round2(@codex P2・発注者裁定=決着): この pre-SELECT(T1)と
+  //   下の upsert の WHERE(従来は T2 に別途 clock_timestamp() を呼んでいた)が**別々の
+  //   瞬間**を見ていたため、T1では「まだ生きている」→ DB往復の間に期限をまたいで
+  //   T2では「期限切れ」という窓で、upsert は通る(横取りに成功する)のに
+  //   prev.expired_by は null のまま=呼び出し側が edit_lock_acquire を記録してしまう
+  //   (本来は edit_lock_takeover_expired であるべき)不整合が起きていた。
+  //   ⚠これは**行が変わる書き込み競合ではない**(行の中身はこの間ずっと同じ)。
+  //   変わるのは時計だけ: T1のSELECTと(元コードの)T2のupsertが別々に
+  //   clock_timestamp() を呼ぶ**時間競合**なので、行ロックを足しても直らない。
+  //   直し方 = T1で読んだ「今」(db_now)を bind パラメータとして T2 の WHERE に渡し、
+  //   判定(expired_by)と分類(upsert が通るかどうか)を**同じ瞬間**に固定する。
+  //   SET側の各カラム(acquired_at 等)は実際の書き込み時刻を残す意味があるので
+  //   clock_timestamp() のままにする(bind しない)。
+  //   ⚠結果として受け入れる帰結: T1〜T2 の間に切れた鍵は**この試行では横取りされない**
+  //   (呼び出し元には通常の held が返り、次の試行で成功する)。サイレントな横取りが
+  //   誤った監査ラベルで記録されるより、一貫した拒否のほうが安全という判断。
+  //   ⚠必ず1行だけ返る形にする(LEFT JOIN の左側=単一行の now_ts): 資源に鍵が
+  //   一件も無い場合でも db_now は必要(そうしないと bind する値そのものが無くなる)。
+  //   `now_ts` は SELECT 内で1回だけ参照する構成にしているため、Postgres が
+  //   clock_timestamp() を複数回評価する(自動インライン化される)心配はない。
+  const prevRows = await db.$queryRaw<
+    { db_now: Date; user_id: string | null; screen_token_hash: string | null; expired_by: "heartbeat" | "idle" | null }[]
+  >`
+    WITH now_ts AS (SELECT clock_timestamp() AS db_now)
+    SELECT now_ts.db_now, "edit_locks"."user_id", "edit_locks"."screen_token_hash",
            CASE
-             WHEN "heartbeat_at" < clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision) THEN 'heartbeat'
-             WHEN "activity_at" < clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision) THEN 'idle'
+             WHEN "edit_locks"."heartbeat_at" < now_ts.db_now - make_interval(secs => ${GRACE_SEC}::double precision) THEN 'heartbeat'
+             WHEN "edit_locks"."activity_at" < now_ts.db_now - make_interval(secs => ${IDLE_SEC}::double precision) THEN 'idle'
              ELSE NULL
            END AS expired_by
-    FROM "edit_locks"
-    WHERE "resource_type" = ${input.resourceType}::"EditLockResource" AND "resource_id" = ${input.resourceId}::uuid
-      AND "force_released_at" IS NULL
+    FROM now_ts
+    LEFT JOIN "edit_locks"
+      ON "edit_locks"."resource_type" = ${input.resourceType}::"EditLockResource"
+     AND "edit_locks"."resource_id" = ${input.resourceId}::uuid
+     AND "edit_locks"."force_released_at" IS NULL
   `;
-  const prev = prevRows[0] ?? null;
+  const dbNow = prevRows[0].db_now;
+  const prev =
+    prevRows[0].user_id != null
+      ? {
+          user_id: prevRows[0].user_id,
+          screen_token_hash: prevRows[0].screen_token_hash as string,
+          expired_by: prevRows[0].expired_by,
+        }
+      : null;
   const got = await db.$queryRaw<{ id: string; acquired_at: Date }[]>`
     INSERT INTO "edit_locks" ("id", "resource_type", "resource_id", "user_id", "screen_token_hash", "acquired_at", "heartbeat_at", "activity_at")
     VALUES (gen_random_uuid(), ${input.resourceType}::"EditLockResource", ${input.resourceId}::uuid, ${input.userId}::uuid, ${input.screenTokenHash}, clock_timestamp(), clock_timestamp(), clock_timestamp())
@@ -109,8 +142,8 @@ export async function acquireEditLock(
         "force_released_at" = NULL,
         "force_released_by" = NULL
     WHERE "edit_locks"."force_released_at" IS NOT NULL
-       OR "edit_locks"."heartbeat_at" < clock_timestamp() - make_interval(secs => ${GRACE_SEC}::double precision)
-       OR "edit_locks"."activity_at" < clock_timestamp() - make_interval(secs => ${IDLE_SEC}::double precision)
+       OR "edit_locks"."heartbeat_at" < ${dbNow}::timestamptz - make_interval(secs => ${GRACE_SEC}::double precision)
+       OR "edit_locks"."activity_at" < ${dbNow}::timestamptz - make_interval(secs => ${IDLE_SEC}::double precision)
        OR ("edit_locks"."user_id" = EXCLUDED."user_id" AND "edit_locks"."screen_token_hash" = EXCLUDED."screen_token_hash")
     RETURNING "id", "acquired_at"
   `;

@@ -153,6 +153,12 @@ describe("POST /api/edit-locks/acquire", () => {
     const res = await acquire(req("http://localhost/api/edit-locks/acquire", { resourceType: "property", resourceId: PROP }));
     expect(res.status).toBe(423);
     await expect(res.json()).resolves.toMatchObject({ code: "EDIT_LOCKED", holderName: "山田" });
+    // ⚠2026-09-21 外部レビュー round2(@codex P2)対応: T1〜T2 の間に期限切れが起きた
+    //   ケースは、service 側の修正後は「横取りを試みたのに takeover が記録されない
+    //   まま acquire として残る」のではなく、この held の分岐に落ちる(一貫した拒否)。
+    //   held のときは監査を一切書かない(edit_lock_acquire も
+    //   edit_lock_takeover_expired も書かれない)ことを固定する。
+    expect(writeAuditLog).not.toHaveBeenCalled();
   });
 
   it("合言葉のヘッダが無ければ 400", async () => {
