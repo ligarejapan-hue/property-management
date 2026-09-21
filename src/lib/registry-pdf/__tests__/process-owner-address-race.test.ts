@@ -409,6 +409,43 @@ describe("所有者が空の物件だけに入れる指定（requireNoExistingOw
     expect(pm.owner.create).toHaveBeenCalledTimes(2);
   });
 
+  it("⚠まとめる場合でも、この処理の中で作った所有者は使い回す（同じ人が2回載っていても1人にする）", async () => {
+    // 同じ氏名・住所が謄本に2回載っていて、既存の所有者が居ないとき:
+    // 1人目で作った所有者は先押さえの集合に無いが、**自分が作った行**なので押さえても
+    // 順序の問題は起きない。使い回さないと同じ人が2人でき、両方が物件に紐づく。
+    (parseRegistryText as Mock).mockReturnValue({
+      realEstateNumber: null,
+      address: "東京都渋谷区神宮前三丁目12-3",
+      lotNumber: null,
+      buildingNumber: null,
+      landCategory: null,
+      area: null,
+      owners: [
+        { name: OWNER.name, address: OWNER.address, share: "2分の1" },
+        { name: OWNER.name, address: OWNER.address, share: "2分の1" },
+      ],
+      warnings: [],
+      confidence: 0.9,
+    });
+    // 作った所有者は、以後の探索で見える(同じトランザクションの中)
+    const createdRows: Array<Record<string, unknown>> = [];
+    pm.owner.findMany.mockImplementation(async () => createdRows);
+    pm.owner.create.mockImplementation(async () => {
+      createdRows.push({
+        id: "owner-new",
+        name: OWNER.name,
+        address: OWNER.address,
+        corporateNumber: null,
+        isArchived: false,
+      });
+      return { id: "owner-new" };
+    });
+
+    await run({ requireNoExistingOwners: true });
+
+    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+  });
+
   it("まとめない場合（手動取込など）は、見つけた所有者を押さえて使い回す＝従来どおり", async () => {
     (parseRegistryText as Mock).mockReturnValue({
       realEstateNumber: null,

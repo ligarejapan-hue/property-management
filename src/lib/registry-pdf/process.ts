@@ -309,13 +309,18 @@ async function reflectParsedOwners(args: {
      *   先押さえの後に別の処理が同じ氏名・住所の所有者を作って確定すると、以後の
      *   探索で見えるようになるが、それを押さえると順序が「物件 → Owner」になり、
      *   その所有者を押さえて物件を待っている /owners と互いに待ち合う。
-     *   まとめる場合は**先に押さえた所有者だけ**を使い回す(見つけても押さえない=
-     *   新規作成に回す)。まとめない場合(従来の経路)は所有者ごとに Owner → 物件の
-     *   順で押さえるので、この制限は掛けない。
+     *   まとめる場合は**先に押さえた所有者**と**この処理の中で作った/紐づけた所有者**
+     *   だけを使い回す(それ以外は見つけても押さえない=新規作成に回す)。
+     *   ⚠自分が作った行は自分のトランザクションが既に持っているので、押さえても
+     *     順序の問題は起きない。これを除くと、同じ人が謄本に2回載っているとき
+     *     同じ氏名・住所の所有者が2人でき、両方が物件に紐づく。
+     *   まとめない場合(従来の経路)は所有者ごとに Owner → 物件の順で押さえるので、
+     *   この制限は掛けない。
      */
     const prelockedOwnerIds = new Set<string>();
-    /** 使い回してよい候補か(まとめる場合は先押さえ済みの所有者だけ)。 */
-    const reusable = (id: string): boolean => !asOneBatch || prelockedOwnerIds.has(id);
+    /** 使い回してよい候補か(まとめる場合は先押さえ済み or この処理で作った/紐づけた所有者だけ)。 */
+    const canReuseOwner = (id: string): boolean =>
+      !asOneBatch || prelockedOwnerIds.has(id) || linkedByThisRun.includes(id);
 
     if (asOneBatch) {
       // ⚠**ロックの順序を「Owner → 物件」にそろえる**。
@@ -472,7 +477,7 @@ async function reflectParsedOwners(args: {
         });
         const hit = candidates.find(
           (c) =>
-            reusable(c.id) &&
+            canReuseOwner(c.id) &&
             normalizeName(c.name) === normName &&
             normalizeAddress(c.address!) === normAddr,
         );
@@ -609,7 +614,7 @@ async function reflectParsedOwners(args: {
                   // ⚠さっき使えないと判断した候補は拾い直さない(同時にアーカイブ
                   //   された候補に紐づけ直してしまうため)。
                   c.id !== candidateOwnerId &&
-                  reusable(c.id) &&
+                  canReuseOwner(c.id) &&
                   !c.isArchived &&
                   normalizeName(c.name) === normName &&
                   normalizeAddress(c.address!) === normAddr,

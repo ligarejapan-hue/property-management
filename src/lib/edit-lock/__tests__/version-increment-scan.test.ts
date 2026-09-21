@@ -105,7 +105,7 @@ const VERSIONED: Record<string, string> = {
   "src/lib/registry-pdf/process.ts:209":
     "owner.corporateNumber(空欄補完・fillOwnerCorporateNumberIfUnlocked)+version increment" +
     "(Task 7で修正済)",
-  "src/lib/registry-pdf/process.ts:885":
+  "src/lib/registry-pdf/process.ts:890":
     "property.registryStatus/realEstateNumber/lotNumber/buildingNumber(取得状況前進+空欄補完)+version increment",
 };
 
@@ -190,19 +190,19 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
       "編集画面から書けない)",
     keys: ["dmUndeliverableAt"],
   },
-  "src/lib/registry-pdf/process.ts:346": {
+  "src/lib/registry-pdf/process.ts:351": {
     reason:
       "owner.updatedAt のみ(添付済み謄本からの反映で、候補の所有者を物件行より先に" +
       "id順で押さえる touch。ロック順を /owners 窓口と同じ Owner→物件 にそろえる)",
     keys: ["updatedAt"],
   },
-  "src/lib/registry-pdf/process.ts:621": {
+  "src/lib/registry-pdf/process.ts:626": {
     reason:
       "owner.updatedAt のみ(ロック後の再探索で拾った所有者を、アーカイブされていない" +
       "条件で押さえる touch。押さえられなければ新規作成に回す)",
     keys: ["updatedAt"],
   },
-  "src/lib/registry-pdf/process.ts:498": {
+  "src/lib/registry-pdf/process.ts:503": {
     reason: "owner.updatedAt のみ(既存所有者再利用時の行ロックtouch)",
     keys: ["updatedAt"],
   },
