@@ -66,7 +66,6 @@
     "embedded-postgres": "^18.3.0-beta.16",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
-    "jsdom": "^29.1.1",
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "^5",
