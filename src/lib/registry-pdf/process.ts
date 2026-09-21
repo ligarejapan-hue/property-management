@@ -185,15 +185,32 @@ async function reflectParsedOwners(args: {
   let matchedCount = 0;
   let createdCount = 0;
   let linkedCount = 0;
-  // 見直しは最初の1回だけ。2人目以降は自分が作った紐付けが見えるため。
-  let emptinessVerified = !args.requireNoExistingOwners;
+  /**
+   * この実行で自分が紐づけた所有者。0件の見直しから除くために覚えておく
+   * (共有名義の2人目を、自分が入れた1人目で止めないため)。
+   */
+  const linkedByThisRun: string[] = [];
 
-  /** 物件行のロックを握った状態で「まだ所有者が0件か」を確かめる。 */
+  /**
+   * 物件行のロックを握った状態で「自分以外の所有者がまだ0件か」を確かめる。
+   *
+   * ⚠**一度確認したら打ち切る、にしてはいけない**。作成のトランザクションは
+   *   紐付けのトランザクションより先にコミットするので、その隙に別タブが
+   *   所有者を紐づけても気づけなくなる(@codex 第3ラウンド)。
+   *   ロックを取るたびに数え直す。
+   */
   const assertStillEmpty = async (
     tx: Pick<typeof prisma, "propertyOwner">,
   ) => {
-    if (emptinessVerified) return;
-    const existing = await tx.propertyOwner.count({ where: { propertyId } });
+    if (!args.requireNoExistingOwners) return;
+    const existing = await tx.propertyOwner.count({
+      where: {
+        propertyId,
+        ...(linkedByThisRun.length > 0
+          ? { ownerId: { notIn: linkedByThisRun } }
+          : {}),
+      },
+    });
     if (existing > 0) {
       throw new ApiError(
         409,
@@ -201,7 +218,6 @@ async function reflectParsedOwners(args: {
         "OWNERS_ALREADY_EXIST",
       );
     }
-    emptinessVerified = true;
   };
 
   for (const ownerInfo of owners) {
@@ -269,6 +285,9 @@ async function reflectParsedOwners(args: {
           },
           select: { id: true },
         });
+        // ⚠紐付けの直前にもう一度確認(このtxはロックを握ったまま)
+        await assertStillEmpty(tx);
+        linkedByThisRun.push(created.id);
         await tx.propertyOwner.create({
           data: {
             propertyId,
@@ -360,6 +379,8 @@ async function reflectParsedOwners(args: {
           });
           let linkCreated = false;
           if (!existingLink) {
+            await assertStillEmpty(tx);
+            linkedByThisRun.push(candidateOwnerId!);
             await tx.propertyOwner.create({
               data: {
                 propertyId,
@@ -502,6 +523,8 @@ async function reflectParsedOwners(args: {
           await prisma.$transaction(async (tx) => {
             await lockPropertyRow(tx, propertyId);
             await assertStillEmpty(tx);
+            await assertStillEmpty(tx);
+            linkedByThisRun.push(ownerIdForLink);
             await tx.propertyOwner.create({
               data: {
                 propertyId,
