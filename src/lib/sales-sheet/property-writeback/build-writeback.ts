@@ -40,14 +40,16 @@ const INT_RANGES = {
   totalUnits: { min: 0, max: 9999, int: true },
 } as const satisfies Record<string, NumberRange>;
 /** 小数列の範囲と桁数(同上・validators.ts / schema.prisma と同じ値)。 */
+// [@codex P2] 上限は列が実際に入れられる最大値に合わせる(DECIMAL(p,s) は整数部 p-s 桁 +
+// 小数 s 桁)。整数部だけで切ると、DB は受け付ける値を画面が「範囲外」と言うことになる。
 const DECIMAL_RANGES = {
-  salePrice: { min: 0, max: 99999999999, scale: 1 }, // DECIMAL(12,1)
-  saleTaxAmount: { min: 0, max: 99999999999, scale: 1 }, // DECIMAL(12,1)
-  expectedIncome: { min: 0, max: 99999999999, scale: 1 }, // DECIMAL(12,1)
-  landArea: { min: 0, max: 99999999, scale: 2 }, // DECIMAL(10,2)
-  totalFloorArea: { min: 0, max: 99999999, scale: 2 }, // DECIMAL(10,2)
-  exclusiveArea: { min: 0, max: 999999, scale: 2 }, // DECIMAL(8,2)
-  balconyArea: { min: 0, max: 999999, scale: 2 }, // DECIMAL(8,2)
+  salePrice: { min: 0, max: 99999999999.9, scale: 1 }, // DECIMAL(12,1)
+  saleTaxAmount: { min: 0, max: 99999999999.9, scale: 1 }, // DECIMAL(12,1)
+  expectedIncome: { min: 0, max: 99999999999.9, scale: 1 }, // DECIMAL(12,1)
+  landArea: { min: 0, max: 99999999.99, scale: 2 }, // DECIMAL(10,2)
+  totalFloorArea: { min: 0, max: 99999999.99, scale: 2 }, // DECIMAL(10,2)
+  exclusiveArea: { min: 0, max: 999999.99, scale: 2 }, // DECIMAL(8,2)
+  balconyArea: { min: 0, max: 999999.99, scale: 2 }, // DECIMAL(8,2)
   grossYield: { min: 0, max: 999.99, scale: 2 }, // DECIMAL(5,2)
 } as const satisfies Record<string, NumberRange>;
 /** 築年の範囲(validators.ts の builtYear と同じ値)。月は parse-values.ts が既に1〜12へ限定済み。 */
@@ -227,8 +229,13 @@ export function buildWriteback(input: {
         const currentBag = builtTarget === "property" ? current.property : (current.building ?? {});
         const bag = builtTarget === "property" ? out.property : out.building;
         if (!same(currentBag.builtYear, parsed.year)) bag.builtYear = parsed.year;
-        if (parsed.month !== null && !same(currentBag.builtMonth, parsed.month)) {
-          bag.builtMonth = parsed.month;
+        if (parsed.month !== null) {
+          if (!same(currentBag.builtMonth, parsed.month)) bag.builtMonth = parsed.month;
+        } else if (currentBag.builtMonth !== null && currentBag.builtMonth !== undefined) {
+          // [@codex P2] 「2020年」と年だけ書き直したのに前の月が残ると、図面は「2020年」
+          // なのに物件は「2020年3月」になり、次に作る図面へ勝手に月が復活する。
+          // 入れ直した内容に合わせて月も消す。
+          bag.builtMonth = null;
         }
       }
     }

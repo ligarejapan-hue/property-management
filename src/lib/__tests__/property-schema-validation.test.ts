@@ -88,3 +88,23 @@ describe("updatePropertySchema: DECIMAL 列の小数桁(@codex P2)", () => {
     expect(() => updatePropertySchema.parse({ ...v, grossYield: 1000 })).toThrow();
   });
 });
+
+// [@codex P2] 上限は列が実際に入れられる最大値(整数部 p-s 桁 + 小数 s 桁)に合わせる。
+// 整数部だけで切ると、DB は受け付ける値を画面が「範囲外」と言うことになる。
+describe("updatePropertySchema: DECIMAL 列の上限いっぱい(@codex P2)", () => {
+  const v = { version: 1 };
+  it("DECIMAL(12,1) は 99999999999.9 まで", () => {
+    expect(() => updatePropertySchema.parse({ ...v, salePrice: 99999999999.9 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, salePrice: 100000000000 })).toThrow();
+  });
+  it("DECIMAL(10,2) は 99999999.99 まで", () => {
+    expect(() => updatePropertySchema.parse({ ...v, landArea: 99999999.99 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, totalFloorArea: 99999999.99 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, landArea: 100000000 })).toThrow();
+  });
+  it("DECIMAL(8,2) は 999999.99 まで", () => {
+    expect(() => updatePropertySchema.parse({ ...v, exclusiveArea: 999999.99 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, balconyArea: 999999.99 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, exclusiveArea: 1000000 })).toThrow();
+  });
+});

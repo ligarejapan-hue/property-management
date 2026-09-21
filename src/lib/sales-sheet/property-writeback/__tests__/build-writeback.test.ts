@@ -94,22 +94,25 @@ describe("buildWriteback — 戸建", () => {
     expect(r.unreadable).toEqual(["築年月"]);
   });
 
-  it("年だけ読めて月が読めない場合、月は保存しない", () => {
+  // ⚠[@codex P2] 旧仕様は「年だけのときは月をそのまま残す」だったが、それだと図面は
+  // 「平成20年」なのに物件は「2008年5月」になり、次に作る図面へ勝手に月が復活する。
+  // 入れ直した内容に合わせて月も消す(下の「年だけ入れ直したときの月」の節も参照)。
+  it("年だけ書いたら、残っていた月は消す", () => {
     const r = buildWriteback({
       kind: "house",
       values: { builtYearMonth: "平成20年" },
       current: { property: { builtYear: 2007, builtMonth: 5 }, building: null },
     });
-    expect(r.property).toEqual({ builtYear: 2008 });
+    expect(r.property).toEqual({ builtYear: 2008, builtMonth: null });
   });
 
-  it("年だけ読めて月が読めない場合、年が同じなら保存なし", () => {
+  it("年が同じでも、残っていた月は消す", () => {
     const r = buildWriteback({
       kind: "house",
       values: { builtYearMonth: "平成20年" },
       current: { property: { builtYear: 2008, builtMonth: 5 }, building: null },
     });
-    expect(r.property).toEqual({});
+    expect(r.property).toEqual({ builtMonth: null });
   });
 });
 
@@ -431,5 +434,86 @@ describe("buildWriteback — 保存先が無い項目(@codex P2)", () => {
       });
       expect({ kind, noTarget: r.noTarget }).toEqual({ kind, noTarget: [] });
     }
+  });
+});
+
+// [@codex P2] 年だけ書き直したのに前の月が残ると、図面は「2020年」なのに物件は
+// 「2020年3月」になり、次に作る図面へ勝手に月が復活する。
+describe("buildWriteback — 年だけ入れ直したときの月(@codex P2)", () => {
+  it("月が入っている物件に「2020年」を入れ直すと月を消す", () => {
+    const r = buildWriteback({
+      kind: "house",
+      values: { builtYearMonth: "2020年" },
+      current: { property: { builtYear: 2015, builtMonth: 3 }, building: null },
+    });
+    expect(r.property).toEqual({ builtYear: 2020, builtMonth: null });
+  });
+
+  it("年が同じでも、月だけ消す入れ直しを取りこぼさない", () => {
+    const r = buildWriteback({
+      kind: "house",
+      values: { builtYearMonth: "2015年" },
+      current: { property: { builtYear: 2015, builtMonth: 3 }, building: null },
+    });
+    expect(r.property).toEqual({ builtMonth: null });
+  });
+
+  it("元から月が無ければ何も足さない", () => {
+    const r = buildWriteback({
+      kind: "house",
+      values: { builtYearMonth: "2015年" },
+      current: { property: { builtYear: 2015, builtMonth: null }, building: null },
+    });
+    expect(r.property).toEqual({});
+  });
+
+  it("月まで入れ直したときは従来どおり月を入れる", () => {
+    const r = buildWriteback({
+      kind: "house",
+      values: { builtYearMonth: "2020年5月" },
+      current: { property: { builtYear: 2015, builtMonth: 3 }, building: null },
+    });
+    expect(r.property).toEqual({ builtYear: 2020, builtMonth: 5 });
+  });
+
+  it("区分(棟へ入る)でも同じ", () => {
+    const r = buildWriteback({
+      kind: "mansion",
+      values: { builtYearMonth: "2020年" },
+      current: { property: {}, building: { id: "b1", builtYear: 2015, builtMonth: 3 } },
+    });
+    expect(r.building).toEqual({ builtYear: 2020, builtMonth: null });
+  });
+});
+
+// [@codex P2] 上限は列が実際に入れられる最大値(整数部 p-s 桁 + 小数 s 桁)に合わせる。
+describe("buildWriteback — 列の上限いっぱいの値(@codex P2)", () => {
+  it("DECIMAL(12,1) の最大値を受ける", () => {
+    const r = buildWriteback({
+      kind: "land",
+      values: { price: "99999999999.9" },
+      current: emptyCurrent,
+    });
+    expect(r.property).toEqual({ salePrice: 99999999999.9 });
+    expect(r.unreadable).toEqual([]);
+  });
+
+  it("DECIMAL(10,2) の最大値を受ける", () => {
+    const r = buildWriteback({
+      kind: "land",
+      values: { landArea: "99999999.99" },
+      current: emptyCurrent,
+    });
+    expect(r.property).toEqual({ landArea: 99999999.99 });
+  });
+
+  it("上限を超えたものは従来どおり読めなかった欄にする", () => {
+    const r = buildWriteback({
+      kind: "land",
+      values: { price: "100000000000" },
+      current: emptyCurrent,
+    });
+    expect(r.property).toEqual({});
+    expect(r.unreadable).toEqual(["価格"]);
   });
 });
