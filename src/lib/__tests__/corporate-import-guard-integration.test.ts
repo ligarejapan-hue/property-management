@@ -105,6 +105,20 @@ describe("reception-owner route 取込ガード統合", () => {
   it("AuditLog detail に corporateRepair サマリ(件数のみ)が乗っている", () => {
     expect(receptionOwnerSrc).toMatch(/corporateRepair:\s*corporateRepairSummary/);
   });
+
+  // Task 9: 復元した12/13桁の空欄埋めも version を進めていなかった。
+  // corporateNumber/companyRegistryNumber は所有者の編集画面で変えられる項目
+  // なので、進めないと編集画面を開いていた人の保存が黙って上書きする
+  // (Task 7 が謄本取込の法人番号で直したのと同じ穴)。
+  it("(Task 9) 分断型復元の空欄埋めは version: { increment: 1 } を必ず書く", () => {
+    expect(
+      receptionOwnerSrc,
+      "reception-owner の分断型復元(repair.corporateNumber13)の空欄埋めから" +
+        " version:{increment:1} が消えている(Task 9のバグ修正が後退した可能性)",
+    ).toMatch(
+      /repair\.corporateNumber13[\s\S]{0,600}where:\s*\{\s*id:\s*candidateOwnerId!,\s*corporateNumber:\s*null\s*\}[\s\S]{0,300}version:\s*\{\s*increment:\s*1\s*\}/,
+    );
+  });
 });
 
 describe("PII 安全性", () => {

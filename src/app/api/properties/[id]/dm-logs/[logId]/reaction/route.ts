@@ -269,9 +269,13 @@ export async function PATCH(
       let undeliverableLinked = false;
       let undeliverableCleared = false;
       if (finalStatus === "undeliverable" && prevStatus !== "undeliverable") {
+        // ⚠**version は必ず進める**(Task 9): dmStatus は物件の編集画面
+        //   (PropertyEditForm「DM判断」)で変えられる項目のため、進めないと
+        //   編集画面を開いていた人の保存がこの連動を黙って上書きする
+        //   (Task 7 が謄本取込の法人番号で直したのと同じ穴)。
         await tx.property.update({
           where: { id: propertyId },
-          data: { dmStatus: "no_send", dmUndeliverableAt: new Date() },
+          data: { dmStatus: "no_send", dmUndeliverableAt: new Date(), version: { increment: 1 } },
         });
         undeliverableLinked = true;
       } else if (

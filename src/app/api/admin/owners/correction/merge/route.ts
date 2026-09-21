@@ -15,6 +15,7 @@ import {
   type OwnerMergeBlockReason,
 } from "@/lib/owner-merge";
 import { buildOwnerDuplicateCandidateKey } from "@/lib/owner-correction";
+import { deleteEditLocksFor } from "@/lib/edit-lock/service";
 
 // ---------------------------------------------------------------------------
 // POST /api/admin/owners/correction/merge
@@ -449,6 +450,12 @@ export async function POST(request: NextRequest) {
           txNotFound = true;
           throw new Error(TX_BLOCKED_SENTINEL);
         }
+
+        // 1b. 統合で消える(archive される)のは source 側だけなので、source の鍵だけ
+        //     後始末する。master は生き残るので鍵はそのまま残してよい。
+        //     行ロック(1.の updateMany touch)の直後・実際の archive(8.)より前に置く
+        //     (Task 8: 行ロック → 後始末 → 削除/アーカイブ)。
+        await deleteEditLocksFor(tx, [{ resourceType: "owner", resourceId: source.id }]);
 
         // 2. tx 内で再取得
         const [masterFresh, sourceFresh] = await Promise.all([

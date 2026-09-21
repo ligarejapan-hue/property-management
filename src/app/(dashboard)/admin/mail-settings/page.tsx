@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
 import { Loader2, Save, Send, ShieldCheck, ShieldAlert, AlertTriangle } from "lucide-react";
 import {
@@ -219,7 +220,13 @@ export default function MailSettingsPage() {
       {meta && meta.notifyRecipientCount === 0 && (
         <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          通知先が未設定です。利用者一覧の「通知」から、通知を受け取る人を設定してください。
+          <span>
+            通知先が未設定です。
+            <Link href="/admin/users" className="font-semibold underline underline-offset-2">
+              ユーザー管理を開く
+            </Link>
+            → 対象の方の「通知」から、通知を受け取る人を設定してください。
+          </span>
         </div>
       )}
 

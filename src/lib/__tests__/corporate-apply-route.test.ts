@@ -80,8 +80,18 @@ vi.mock("@/lib/prisma", () => ({
       updateMany: vi.fn(),
       create: vi.fn(),
     },
+    // Task 6(編集の鍵): 反映の updateMany は $transaction(所有者行ロック→鍵の確認→更新)
+    // に包まれる。既存の owner.updateMany 検証をそのまま使えるよう、$transaction は
+    // コールバックへ同じ prisma モックを渡すだけにする。
+    $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
   },
 }));
+
+// Task 6(編集の鍵): 反映は $transaction(所有者行ロック→鍵の確認→更新)に包まれる。
+// 既定は no-op(未設定=undefined 解決)にして、既存テスト(ヘッダ無し・鍵無し)は
+// そのまま通す。鍵まわりの検証は専用の describe でこのモックを差し替える。
+vi.mock("@/lib/edit-lock/service", () => ({ assertNotEditLockedByOther: vi.fn() }));
 
 vi.mock("@/lib/corporate-lookup", async () => {
   const actual = await vi.importActual<typeof import("@/lib/corporate-lookup")>(
@@ -94,13 +104,14 @@ vi.mock("@/lib/corporate-lookup", async () => {
 });
 
 import prisma from "@/lib/prisma";
-import { getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
+import { ApiError, getUserPermissions, getOwnerDisplayConfig } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { recordChanges } from "@/lib/change-log";
 import {
   lookupCorporateNumber,
   CorporateLookupError,
 } from "@/lib/corporate-lookup";
+import { assertNotEditLockedByOther } from "@/lib/edit-lock/service";
 import { POST } from "../../app/api/owners/[id]/corporate-apply/route";
 
 const pm = prisma as unknown as {
@@ -110,6 +121,8 @@ const pm = prisma as unknown as {
     updateMany: Mock;
     create: Mock;
   };
+  $transaction: Mock;
+  $queryRaw: Mock;
 };
 
 const OWNER_ID = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -185,6 +198,8 @@ function payload(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  pm.$transaction.mockImplementation((fn: (tx: typeof pm) => unknown) => fn(pm));
+  pm.$queryRaw.mockResolvedValue([]);
   vi.mocked(getUserPermissions).mockResolvedValue(PERMS_FULL);
   // 既定: name/address raw-visible(full)。owner 名/住所は record と一致 → conflict="match"
   // （conflict ゲートは既定でブロックしない。conflict は専用テストで検証する）。
@@ -749,5 +764,204 @@ describe("POST /api/owners/[id]/corporate-apply — companyRegistryNumber(12桁)
     const updateArg = pm.owner.updateMany.mock.calls[0][0];
     expect(updateArg.data.corporateNumber).toBe(RAW_NUMBER);
     expect(updateArg.data).not.toHaveProperty("companyRegistryNumber");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Task 6: 保存の窓口3本目 — 編集中の鍵
+// ─────────────────────────────────────────────────────────────────────────
+
+describe("POST /api/owners/[id]/corporate-apply — 編集中の鍵(Task 6)", () => {
+  // ⚠「呼ばれたこと」だけを見るテストでは、トランザクションの外で呼んでも
+  //   書き込みの後に呼んでも通ってしまう(@codex R6 P2)。**順序そのもの**を記録して検査する。
+  // ⚠さらに、この describe 以外のテストがそうしているように $transaction が
+  //   base client(pm)をそのまま tx として渡すと、「lock/assert/update が pm に
+  //   対して呼ばれているだけ」でも同じ順序配列・200 になってしまう
+  //   (review Important 1: 書き込みが tx の外へ逃げても検出できない)。
+  //   ここだけは **base client とは別物の tx** を渡し、**tx そのものが渡ったこと**
+  //   (identity)と **base client の $queryRaw/updateMany が呼ばれていないこと**まで
+  //   固定する。行ロックの SQL 自体(FOR UPDATE + 所有者id)も検査する(review Minor 7)。
+  it("トランザクション開始 → 所有者行ロック → 鍵の確認 → 条件つき更新 の順で呼ばれ、すべて同じ tx を使う(base client は使わない)", async () => {
+    const order: string[] = [];
+    let lockSql = "";
+    let txClient: { $queryRaw: Mock; owner: { updateMany: Mock } } | undefined;
+    pm.$transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      order.push("tx");
+      txClient = {
+        $queryRaw: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => {
+          order.push("lock");
+          lockSql = strings.reduce((acc, s, i) => acc + s + (i < values.length ? String(values[i]) : ""), "");
+          return Promise.resolve([]);
+        }),
+        owner: {
+          updateMany: vi.fn(async () => {
+            order.push("update");
+            return { count: 1 };
+          }),
+        },
+      };
+      return fn(txClient);
+    });
+    vi.mocked(assertNotEditLockedByOther).mockImplementation(async () => {
+      order.push("assert");
+    });
+
+    const res = await POST(makeRequest(payload()), makeParams());
+
+    expect(res.status).toBe(200);
+    expect(order).toEqual(["tx", "lock", "assert", "update"]);
+    expect(lockSql).toContain("FOR UPDATE");
+    expect(lockSql).toContain(OWNER_ID);
+    expect(vi.mocked(assertNotEditLockedByOther)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(assertNotEditLockedByOther).mock.calls[0][0]).toBe(txClient);
+    // 行ロック・書き込みが base client(pm)に漏れていない
+    // (=トランザクションの外へ逃げていない)ことを固定する。
+    expect(pm.$queryRaw).not.toHaveBeenCalled();
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("鍵が他人のものなら 423 を返し、反映は行われない", async () => {
+    vi.mocked(assertNotEditLockedByOther).mockRejectedValueOnce(
+      new ApiError(423, "他の画面で編集中です", "EDIT_LOCKED"),
+    );
+    const res = await POST(makeRequest(payload()), makeParams());
+    expect(res.status).toBe(423);
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("合言葉のヘッダが無くても呼ばれる(古い画面。鍵が無ければ通る)", async () => {
+    const res = await POST(makeRequest(payload()), makeParams());
+    expect(res.status).toBe(200);
+    expect(vi.mocked(assertNotEditLockedByOther)).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ screenTokenHash: null, lockId: null }),
+    );
+  });
+
+  it("X-Edit-Lock が uuid でなければ 400 を返し、鍵の確認自体・国税庁への問い合わせも走らない", async () => {
+    const req = new Request(
+      `http://localhost/api/owners/${OWNER_ID}/corporate-apply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Edit-Lock": "not-a-uuid" },
+        body: JSON.stringify(payload()),
+      },
+    ) as unknown as import("next/server").NextRequest;
+    const res = await POST(req, makeParams());
+    expect(res.status).toBe(400);
+    // ⚠review T1: この窓口には他にも 400 を返す入口検査が3つある(apply が全て false・
+    // 郵便番号と住所の対など)。状態だけを見ていると、将来それらの間に新しい検査が
+    // 入ったとき「別の理由の 400」で緑のまま通ってしまうので code まで固定する。
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("EDIT_LOCK_ID_INVALID");
+    expect(vi.mocked(assertNotEditLockedByOther)).not.toHaveBeenCalled();
+    expect(pm.owner.updateMany).not.toHaveBeenCalled();
+    // ⚠review R1: 鍵ヘッダの形式チェックは国税庁への再lookupより前に置いた
+    // (Minor 6)。これを検査していないと、チェックを再lookupの後ろへ戻す退行が
+    // 緑のまま通ってしまう。
+    expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
+  });
+
+  // ⚠review R2/S1: 鍵ヘッダの形式チェックは「権限・入力の検査をすべて通した後」に
+  //   置かなければならない(コントローラ決定)。位置を間違えると2つの副作用が
+  //   起きる: ①権限の無い呼び出し元が 403 の代わりに 400 を受け取ってしまう
+  //   (自分のリクエストの形について何かを教えてしまう)②監査の detail.applied が
+  //   実際に送った内容ではなく all-false の既定値になる。粗い権限(owner:write)
+  //   だけでなく、field-level 権限(owner_name 等)より後にも置く必要がある
+  //   (S1: owner:write はあるが特定フィールドの書込権限が無い呼び出し元も、
+  //   同じく 403 を先に受け取るべき)。3本で固定する。
+  it("owner:write が無ければ、鍵ヘッダが不正でも 403(権限判定が先。400にしない)", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "owner", action: "read", granted: true },
+      // owner:write なし
+    ]);
+    const req = new Request(
+      `http://localhost/api/owners/${OWNER_ID}/corporate-apply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Edit-Lock": "not-a-uuid" },
+        body: JSON.stringify(payload()),
+      },
+    ) as unknown as import("next/server").NextRequest;
+    const res = await POST(req, makeParams());
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("FORBIDDEN");
+    expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
+    const call = vi.mocked(writeAuditLog).mock.calls.at(-1)?.[0] as {
+      detail: Record<string, unknown>;
+    };
+    expect(call.detail.result).toBe("forbidden");
+  });
+
+  it("owner:write はあるが field-level 書込権限(owner_corporate_number)が無ければ、鍵ヘッダが不正でも 403(field-level 判定が先。400にしない)", async () => {
+    vi.mocked(getUserPermissions).mockResolvedValueOnce([
+      { resource: "owner", action: "read", granted: true },
+      { resource: "owner", action: "write", granted: true },
+      { resource: "owner_name", action: "full", granted: true },
+      { resource: "owner_address", action: "full", granted: true },
+      { resource: "owner_zip", action: "full", granted: true },
+      // owner_corporate_number 権限なし(既定の payload() は apply.corporateNumber=true)
+    ]);
+    const req = new Request(
+      `http://localhost/api/owners/${OWNER_ID}/corporate-apply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Edit-Lock": "not-a-uuid" },
+        body: JSON.stringify(payload()),
+      },
+    ) as unknown as import("next/server").NextRequest;
+    const res = await POST(req, makeParams());
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("FORBIDDEN");
+    expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
+    const call = vi.mocked(writeAuditLog).mock.calls.at(-1)?.[0] as {
+      detail: Record<string, unknown>;
+    };
+    expect(call.detail.result).toBe("forbidden");
+  });
+
+  it("権限があっても鍵ヘッダが不正なら 400。監査の detail.applied は実際に送った内容のまま(既定値のハードコードでは通らない組み合わせにする)", async () => {
+    // ⚠review S2: payload() の既定 apply({name:true,address:true,zip:true,
+    // corporateNumber:true})と同じ値を送ると、実装が body を読まずその既定値を
+    // ハードコードしていても偶然一致して緑になる。既定と2箇所以上違う値を送り、
+    // 「送った値がそのまま監査に残る」ことを検査する。
+    const sentApply = { name: false, address: true, zip: true, corporateNumber: false };
+    const req = new Request(
+      `http://localhost/api/owners/${OWNER_ID}/corporate-apply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Edit-Lock": "not-a-uuid" },
+        body: JSON.stringify(payload({ apply: sentApply })),
+      },
+    ) as unknown as import("next/server").NextRequest;
+    const res = await POST(req, makeParams());
+    expect(res.status).toBe(400);
+    // ⚠review T1: 400 の理由が鍵ヘッダであることまで固定する(上の検査と同じ理由)。
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("EDIT_LOCK_ID_INVALID");
+    expect(vi.mocked(lookupCorporateNumber)).not.toHaveBeenCalled();
+    const call = vi.mocked(writeAuditLog).mock.calls.at(-1)?.[0] as {
+      detail: Record<string, unknown>;
+    };
+    expect(call.detail.applied).toEqual(sentApply);
+  });
+
+  it("X-Edit-Lock が uuid なら世代として渡す", async () => {
+    const lockId = "33333333-3333-4333-8333-333333333333";
+    const req = new Request(
+      `http://localhost/api/owners/${OWNER_ID}/corporate-apply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Edit-Lock": lockId },
+        body: JSON.stringify(payload()),
+      },
+    ) as unknown as import("next/server").NextRequest;
+    await POST(req, makeParams());
+    expect(vi.mocked(assertNotEditLockedByOther)).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ lockId }),
+    );
   });
 });

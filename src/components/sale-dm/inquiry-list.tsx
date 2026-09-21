@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { Loader2, Inbox } from "lucide-react";
 import {
+  USE_MOCK,
   fetchSaleDmInquiries,
   getAllSaleDmInquiries,
   updateSaleDmInquiryStatus,
@@ -18,6 +21,14 @@ const STATUS_OPTIONS: Array<{ value: SaleDmInquiry["handleStatus"]; label: strin
   { value: "done", label: "対応済み" },
 ];
 const PREF_LABEL: Record<string, string> = { phone: "電話", email: "メール", either: "どちらでも" };
+
+// 通知が失敗した理由ごとの「直しに行く先」。文章で画面名を書くだけだと、利用者はその画面を
+// 探して回ることになる(発注者指摘 2026-09-20)ので、原因が設定不足のときはリンクを添える。
+function fixLinkFor(code: string | null | undefined): { href: string; label: string } | null {
+  if (code === "no_recipients") return { href: "/admin/users", label: "ユーザー管理を開く" };
+  if (code === "mail_not_configured") return { href: "/admin/mail-settings", label: "メール送信設定を開く" };
+  return null;
+}
 
 // 一覧の1行の形。campaign モード(SaleDmInquiry)・all モード(SaleDmInquiryAcrossCampaigns)の
 // どちらの応答もそのまま items に積めるよう、横断項目は任意にしておく。
@@ -67,6 +78,9 @@ type SaleDmInquiryListProps =
  */
 export default function SaleDmInquiryList(props: SaleDmInquiryListProps) {
   const mode = props.mode ?? "campaign";
+  // 直しに行く先のリンクは管理者にだけ出す(DMメニューと同じ判定・src/app/(dashboard)/dm/page.tsx)。
+  const { data: session } = useSession();
+  const isAdmin = USE_MOCK || (session?.user as { role?: string } | undefined)?.role === "admin";
   const campaign = props.mode === "all" ? undefined : props.campaign;
   const reloadKey = props.reloadKey ?? 0;
   const focusId = props.mode === "all" ? (props.focusId ?? null) : null;
@@ -300,6 +314,16 @@ export default function SaleDmInquiryList(props: SaleDmInquiryListProps) {
                   通知を送信中
                 </span>
               )}
+              {/* 設定不足が原因の失敗は、直せる画面へその場から行けるようにする(迷子の防止)。
+                  リンクは権限のある管理者にだけ出す=押しても入れない画面へは誘導しない。 */}
+              {isAdmin && !resendingIds.has(i.id) && i.notifyStatus === "failed" && fixLinkFor(i.notifyLastError) ? (
+                <Link
+                  href={fixLinkFor(i.notifyLastError)!.href}
+                  className="text-xs font-medium text-indigo-700 underline underline-offset-2 hover:text-indigo-900 dark:text-indigo-400"
+                >
+                  {fixLinkFor(i.notifyLastError)!.label}
+                </Link>
+              ) : null}
               {/* 送信中もボタンは残す(disabled だけ切り替える)。押した直後にボタンごと消すと、
                   クリック直後にフォーカスが失われる(fix round 1・Minor #2)。 */}
               <button
@@ -375,7 +399,17 @@ export default function SaleDmInquiryList(props: SaleDmInquiryListProps) {
           notifyRecipientCount が無いので、こちらだけに出す(campaign モードには出さない)。 */}
       {mode === "all" && notifyRecipientCount === 0 && (
         <p className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-300">
-          通知先が未設定です。管理者に、利用者一覧の「通知」から設定を依頼してください。
+          {isAdmin ? (
+            <>
+              通知先が未設定です。
+              <Link href="/admin/users" className="ml-1 font-semibold underline underline-offset-2">
+                ユーザー管理を開く
+              </Link>
+              <span className="ml-1">→ 対象の方の「通知」から設定してください。</span>
+            </>
+          ) : (
+            "通知先が未設定です。管理者に、ユーザー管理の「通知」から設定を依頼してください。"
+          )}
         </p>
       )}
 
