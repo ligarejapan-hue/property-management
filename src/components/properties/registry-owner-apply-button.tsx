@@ -22,6 +22,13 @@ import {
 
 export interface RegistryOwnerApplyButtonProps {
   propertyId: string;
+  /**
+   * 所有者の住所を書く権限(owner_address の full/edit)。
+   * server は**住所のある所有者にだけ**この権限を求める。ボタンで一律に閉じると、
+   * 住所の無い謄本(氏名の権限だけで反映できる)まで隠してしまうので、
+   * 下見の結果に住所があるときだけ確認画面で止める。
+   */
+  canWriteOwnerAddress: boolean;
   /** 反映後に物件を読み直す。 */
   onApplied: () => Promise<void> | void;
 }
@@ -30,6 +37,7 @@ type Phase = "idle" | "loading" | "confirm" | "applying" | "done";
 
 export default function RegistryOwnerApplyButton({
   propertyId,
+  canWriteOwnerAddress,
   onApplied,
 }: RegistryOwnerApplyButtonProps) {
   const [phase, setPhase] = useState<Phase>("idle");
@@ -81,10 +89,13 @@ export default function RegistryOwnerApplyButton({
     //   失敗したとき画面がエラー表示に切り替わり、利用者は**登録が成功したことを
     //   知るすべが無くなる**。
     setPhase("done");
-  }, [propertyId, preview, onApplied, close]);
+  }, [propertyId, preview]);
 
   const owners = preview?.owners ?? [];
-  const canApply = owners.length > 0 && !preview?.alreadyHasOwners;
+  // 住所のある所有者がいて、住所を書く権限が無い → server が 403 にするので、ここで止める
+  const needsAddressPerm = owners.some((o) => o.address) && !canWriteOwnerAddress;
+  const canApply =
+    owners.length > 0 && !preview?.alreadyHasOwners && !needsAddressPerm;
 
   return (
     <>
@@ -157,6 +168,11 @@ export default function RegistryOwnerApplyButton({
             {preview?.alreadyHasOwners ? (
               <p role="alert" className="text-xs text-amber-700 dark:text-amber-400">
                 この物件にはすでに所有者が登録されています。二重に登録しないため、ここからは反映できません。
+              </p>
+            ) : null}
+            {needsAddressPerm ? (
+              <p role="alert" className="text-xs text-amber-700 dark:text-amber-400">
+                この謄本には住所が載っていますが、所有者の住所を書き込む権限がありません。管理者に権限の設定を確認してください。
               </p>
             ) : null}
             {errorMsg ? (

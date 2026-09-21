@@ -483,7 +483,8 @@ export default function PropertyDetailPage({
     canDeleteProperty,
     canWriteOwner,
     canImportWrite,
-    canWriteOwnerNameAndAddress,
+    canWriteOwnerName,
+    canWriteOwnerAddress,
     canReadOwner,
     canRemoveOwnerLink,
     canCreateOwnerMemo,
@@ -548,12 +549,15 @@ export default function PropertyDetailPage({
       effectivePermissions.some(
         (p) => p.resource === resource && p.action === "edit" && p.granted,
       );
-    // 「謄本から所有者を反映」は氏名と住所を書く。server は書く項目ごとの権限
-    // (owner_name / owner_address の full/edit)を確かめて 403 にするので、
-    // ボタンの出し分けにも同じ条件を入れる(下見して確認まで進めるのに必ず 403、を避ける)。
-    const canWriteOwnerNameAndAddress =
-      (hasFullPerm("owner_name") || hasEditPerm("owner_name")) &&
-      (hasFullPerm("owner_address") || hasEditPerm("owner_address"));
+    // 「謄本から所有者を反映」は氏名(必ず)と住所(載っていれば)を書く。server は
+    // 書く項目ごとの権限(owner_name / owner_address の full/edit)を確かめて 403 にする。
+    // 氏名はボタンの出し分けに入れる(下見して確認まで進めるのに必ず 403、を避ける)。
+    // ⚠住所はボタンで一律に閉じない。server は住所のある所有者にだけ求めるので、
+    //   住所の無い謄本は氏名の権限だけで反映できる。住所の権限は部品に渡し、
+    //   下見の結果に住所があるときだけ止める。
+    const canWriteOwnerName = hasFullPerm("owner_name") || hasEditPerm("owner_name");
+    const canWriteOwnerAddress =
+      hasFullPerm("owner_address") || hasEditPerm("owner_address");
     const ownerEditableFields: OwnerEditableFields = {
       name: hasFullPerm("owner_name"),
       nameKana: hasFullPerm("owner_name_kana"),
@@ -592,7 +596,8 @@ export default function PropertyDetailPage({
       canWriteOwner,
       canReadOwner,
       canImportWrite,
-    canWriteOwnerNameAndAddress,
+    canWriteOwnerName,
+    canWriteOwnerAddress,
       canRemoveOwnerLink,
       canCreateOwnerMemo,
       corporateLookupConfigured,
@@ -802,7 +807,8 @@ export default function PropertyDetailPage({
             registryOwnerAttachmentCount={
               property.registryAttachmentCounts?.owner ?? 0
             }
-            canApplyRegistryOwners={canImportWrite && canWriteOwnerNameAndAddress}
+            canApplyRegistryOwners={canImportWrite && canWriteOwnerName}
+            canWriteOwnerAddress={canWriteOwnerAddress}
             canRead={canReadOwner}
             canWrite={canWriteOwner}
             canRemoveOwnerLink={canRemoveOwnerLink}
@@ -1005,6 +1011,7 @@ function OwnerTab({
   propertyId,
   registryOwnerAttachmentCount,
   canApplyRegistryOwners,
+  canWriteOwnerAddress,
   canRead,
   canWrite,
   canRemoveOwnerLink,
@@ -1021,8 +1028,14 @@ function OwnerTab({
    * ⚠null(謄本の閲覧権限が無い人)は呼び出し側で 0 に畳んでいる。
    */
   registryOwnerAttachmentCount: number;
-  /** server 側と同じ import:write。無い人にはボタンを出さない(押しても403のため)。 */
+  /** server 側と同じ import:write + owner_name。無い人にはボタンを出さない(押しても403のため)。 */
   canApplyRegistryOwners: boolean;
+  /**
+   * 所有者の住所を書く権限(owner_address の full/edit)。
+   * ⚠ボタンの出し分けには使わない。server は住所のある所有者にだけ求めるので、
+   *   下見の結果に住所があるときだけ確認画面で止める。
+   */
+  canWriteOwnerAddress: boolean;
   canRead: boolean;
   canWrite: boolean;
   /** 「この物件から外す」を出してよいか(= 管理者)。server 側と同じ条件。 */
@@ -1063,6 +1076,7 @@ function OwnerTab({
             canApplyRegistryOwners && (
               <RegistryOwnerApplyButton
                 propertyId={propertyId}
+                canWriteOwnerAddress={canWriteOwnerAddress}
                 onApplied={onRefresh}
               />
             )}

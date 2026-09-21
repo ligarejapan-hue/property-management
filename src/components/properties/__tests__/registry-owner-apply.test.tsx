@@ -99,17 +99,26 @@ describe("ボタンを出す条件（物件ページ）", () => {
     expect(src).toContain("canApplyRegistryOwners");
   });
 
-  it("⚠ボタンの出し分けに、氏名と住所の項目ごとの書き込み権限を含める", () => {
+  it("⚠ボタンの出し分けに、氏名の項目ごとの書き込み権限を含める", () => {
     // server は書く項目ごと(owner_name / owner_address)に確かめて 403 にする。
-    // ここに含めないと「下見して確認まで進めるのに必ず 403」になる。
-    const src = readSource("src/app/(dashboard)/properties/[id]/page.tsx");
-    const gate = src.slice(src.indexOf("const canWriteOwnerNameAndAddress"));
+    // 氏名は必ず書くのでボタンの条件に入れる(入れないと「下見して確認まで進めるのに
+    // 必ず 403」になる)。
+    const gate = src.slice(src.indexOf("const canWriteOwnerName ="));
     expect(gate).toContain('hasEditPerm("owner_name")');
-    expect(gate).toContain('hasEditPerm("owner_address")');
     expect(src).toContain(
-      "canApplyRegistryOwners={canImportWrite && canWriteOwnerNameAndAddress}",
+      "canApplyRegistryOwners={canImportWrite && canWriteOwnerName}",
     );
     expect(src).toContain('p.resource === "import" && p.action === "write"');
+  });
+
+  it("⚠住所の権限はボタンで一律に閉じない（住所の無い謄本は氏名の権限だけで反映できる）", () => {
+    // 住所を書く権限が無くても、読み取った所有者に住所が無ければ server は通す。
+    // ボタンの条件に住所の権限を入れると、その人が使える操作まで隠してしまう。
+    // → 住所の権限は部品に渡し、下見の結果に住所があるときだけ止める。
+    const gate = src.slice(src.indexOf("const canWriteOwnerAddress ="));
+    expect(gate).toContain('hasEditPerm("owner_address")');
+    expect(src).not.toContain("canApplyRegistryOwners={canImportWrite && canWriteOwnerName &&");
+    expect(src).toContain("canWriteOwnerAddress={canWriteOwnerAddress}");
   });
 
   it("⚠謄本の件数は所有者事項(owner)だけを数える", () => {
@@ -141,6 +150,14 @@ describe("反映の安全策（ボタン部品）", () => {
 
   it("⚠すでに所有者がいると返ってきたら登録ボタンを押せない", () => {
     expect(src).toContain("!preview?.alreadyHasOwners");
+  });
+
+  it("⚠下見の結果に住所があり、住所を書く権限が無ければ登録ボタンを押せない（理由を出す）", () => {
+    // server は住所を書く権限を「住所がある所有者」にだけ求める。同じ判定を確認画面で行い、
+    // 住所の無い謄本は氏名の権限だけで反映できるようにする。
+    expect(src).toContain("owners.some((o) => o.address) && !canWriteOwnerAddress");
+    expect(src).toContain("!needsAddressPerm");
+    expect(src).toContain("住所を書き込む権限がありません");
   });
 
   it("⚠登録に成功したら、画面を読み直す前に成功を見せる", () => {
