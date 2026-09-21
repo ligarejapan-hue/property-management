@@ -23,6 +23,20 @@ function findAssignmentLine(source: string, key: string): string | null {
   return source.match(re)?.[0] ?? null;
 }
 
+/**
+ * `return { ... }` の中に、`key,` だけの行(shorthand プロパティ)があるか。
+ * ⚠(review round2 n6) `state`/`warnIdle` は `key: value` ではなく `state,`
+ *   のような shorthand で返している。`findAssignmentLine`(コロン必須)では
+ *   拾えないので専用の判定を用意する。`\bkey\b` のような書き方は宣言・コメント
+ *   にもヒットして削除しても失敗しない(vacuous)ため使わない。
+ */
+function returnsShorthandProperty(source: string, key: string): boolean {
+  const returnStart = source.indexOf("return {");
+  if (returnStart === -1) return false;
+  const returnBlock = source.slice(returnStart, returnStart + 1200);
+  return new RegExp(`^\\s*${key},\\s*$`, "m").test(returnBlock);
+}
+
 describe("useEditLock の配線", () => {
   it("client component 宣言がある", () => {
     expect(src).toMatch(/^["']use client["'];/m);
@@ -105,10 +119,16 @@ describe("useEditLock の配線", () => {
     }
   });
 
-  it("state・canSave・warnIdle・lockId を公開する(整形の揺れに強い形で固定)", () => {
+  it("canSave・lockId を公開する(整形の揺れに強い形で固定)", () => {
     expect(findAssignmentLine(src, "canSave")).toMatch(/state\.kind\s*===\s*"mine"/);
     expect(findAssignmentLine(src, "lockId")).toMatch(/state\.kind\s*===\s*"mine"/);
-    expect(src).toMatch(/\bwarnIdle\b/);
-    expect(src).toMatch(/\bstate\b/);
+  });
+
+  it("(review round2 n6) state・warnIdle を公開する(shorthandプロパティとして返している)", () => {
+    // 以前は /\bwarnIdle\b/ / /\bstate\b/ で「削除しても失敗しない」vacuous な
+    // アサーションだった(宣言・コメントにもヒットする)。return { ... } の中身を
+    // 直接見て、shorthand の行が実在することを固定する。
+    expect(returnsShorthandProperty(src, "state")).toBe(true);
+    expect(returnsShorthandProperty(src, "warnIdle")).toBe(true);
   });
 });
