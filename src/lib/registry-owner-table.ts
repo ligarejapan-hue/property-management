@@ -42,6 +42,9 @@ function stripSpaces(s: string): string {
   return s.replace(/[\s　]/g, "");
 }
 
+/** 表の下枠(┗━━┷━━┛)。所有者の表はここで終わる。 */
+const BOTTOM_BORDER = /^[\s　]*[┗┕┖└]/;
+
 /** 1行を罫線で区切ってセルの配列にする。両端の罫線は落とす。 */
 function splitCells(line: string): string[] {
   return line
@@ -193,6 +196,12 @@ export function parseRegistryOwnerTable(
     }
     // 罫線(区切り・上枠・下枠)や空行は、まとまりの終わり
     flushGroup();
+    // ⚠**所有者の表の下枠で読み取りを終える**。全部事項や手動で上げた謄本には、
+    //   所有者の表の後に「順位番号│登記の目的│…」など別の表が続く。読み続けると
+    //   列数が足りる行が全部「所有者」になる(氏名「登記の目的」の所有者が作られる)。
+    //   実物4,000本では下枠は必ず1つで、その後にセルの行は0件(複数ページの20本も
+    //   見出しの繰り返しは下枠より前)=下枠で終えても続きを取りこぼさない。
+    if (layout && BOTTOM_BORDER.test(line)) break;
   }
   flushGroup();
 
