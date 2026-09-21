@@ -9,6 +9,7 @@ import {
   supportsBuildingName,
 } from "@/lib/property-building-name";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
+import { formatBuiltYearMonth } from "@/lib/built-year-month";
 
 interface AssigneeOption {
   id: string;
@@ -604,7 +605,13 @@ export default function PropertyEditForm({
                     {property.building.totalFloors ?? "—"} / 地下階{" "}
                     {property.building.basementFloors ?? "—"} / 総戸数{" "}
                     {property.building.totalUnits ?? "—"} / 築年月{" "}
-                    {property.building.builtYear ?? "—"}年{property.building.builtMonth ?? "—"}月
+                    {/* @codex P2: 築年と築月は片方だけでも保存できる。両方に年・月を
+                        付けると「2020年—月」のような読めない表示になるため、共通の
+                        表示関数に任せる。 */}
+                    {formatBuiltYearMonth(
+                      property.building.builtYear,
+                      property.building.builtMonth,
+                    ) || "—"}
                   </p>
                   <a
                     href={`/buildings/${property.building.id}`}

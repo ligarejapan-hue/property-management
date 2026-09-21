@@ -180,3 +180,38 @@ describe("PropertyEditForm レンダリング固定: 区分マンションの棟
     });
   });
 });
+
+// [@codex P2] 築年と築月は片方だけでも保存できる。読み取り専用の棟ブロックが年・月の
+// 単位を直書きしていたため、月が未入力の棟では「2020年—月」と読めない表示になっていた。
+// (この節も走査ではなく実際に描かれた HTML を見る)
+describe("PropertyEditForm レンダリング固定: 棟の築年月(@codex P2)", () => {
+  const renderWith = (b: BuildingRef) =>
+    renderToStaticMarkup(
+      <PropertyEditForm
+        property={makeProperty("apartment_unit", b)}
+        onClose={() => {}}
+        onSaved={() => {}}
+      />,
+    );
+
+  it("年月が揃っていれば年月で出す", () => {
+    expect(renderWith({ ...testBuilding, builtYear: 2000, builtMonth: 4 })).toContain("2000年4月");
+  });
+
+  it("月が未入力なら「—月」を付けない", () => {
+    const html = renderWith({ ...testBuilding, builtYear: 2020, builtMonth: null });
+    expect(html).toContain("2020年");
+    expect(html).not.toContain("2020年—月");
+  });
+
+  it("月だけでも消さずに出す", () => {
+    const html = renderWith({ ...testBuilding, builtYear: null, builtMonth: 3 });
+    expect(html).toContain("3月");
+    expect(html).not.toContain("—年3月");
+  });
+
+  it("どちらも無ければ年月の欄は「—」だけ", () => {
+    const html = renderWith({ ...testBuilding, builtYear: null, builtMonth: null });
+    expect(html).not.toContain("—年—月");
+  });
+});

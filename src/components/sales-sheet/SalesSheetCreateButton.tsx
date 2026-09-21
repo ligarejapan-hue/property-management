@@ -195,6 +195,24 @@ export interface SalesSheetPropertyMeta {
 const BUILDING_KEYS: readonly string[] = ["basementFloors", "builtYearMonth"];
 
 /**
+ * 築年月の「保存済みの値」ヒント文。
+ *
+ * [@codex P2] 区分・戸建・一棟で同じ分岐を3回書いていたため、片方だけ直すと
+ * 食い違った(実際に「区分だけ直して戸建・一棟が残る」指摘を受けた)。1か所に集約する。
+ * 築年と築月は片方だけでも保存できるので、月だけでも出す(図面側の
+ * formatBuiltYearMonth は月だけの値も出すため、ここで出さないと
+ * 「作成画面には何も出ていないのに図面には月が入る」ことになる)。
+ */
+export function builtYearMonthHint(
+  builtYear: number | null | undefined,
+  builtMonth: number | null | undefined,
+): string | undefined {
+  const text = formatBuiltYearMonth(builtYear, builtMonth);
+  if (!text) return undefined;
+  return builtMonth != null ? text : `${text}（月まで分かる場合は入力してください）`;
+}
+
+/**
  * 物件へ書き戻すのに要る情報（version・棟の version）が揃っているか。
  * - ready: 呼び出し元から property が渡っている、または取得済み
  * - loading: 取得中（まだ version が無い）
@@ -447,12 +465,8 @@ function computeMansionAutoValues(data: MansionAutoSource): FieldModelAutoValues
   }
   // [Task10 C-1] 棟に月まで保存済みなら「2008年3月」の形で見せる(document 側の
   // fmtBuiltYear と同じ表記)。月が無ければ年のみ+案内文言。
-  // @codex P2: 築月だけ保存されている棟でも出す(共通関数に集約)。
-  const builtText = formatBuiltYearMonth(b?.builtYear, b?.builtMonth);
-  if (builtText) {
-    hints.builtYearMonth =
-      b?.builtMonth != null ? builtText : `${builtText}（月まで分かる場合は入力してください）`;
-  }
+  const mansionBuiltHint = builtYearMonthHint(b?.builtYear, b?.builtMonth);
+  if (mansionBuiltHint) hints.builtYearMonth = mansionBuiltHint;
   if (b?.basementFloors != null) {
     hints.basementFloors = savedValueHint(`${b.basementFloors}階`);
   }
@@ -559,12 +573,8 @@ function computeHouseAutoValues(data: HouseAutoSource): FieldModelAutoValues {
     hints.buildingArea = savedValueHint(`${data.totalFloorArea}㎡`);
   }
   if (data.parking) hints.parking = savedValueHint(data.parking);
-  if (data.builtYear != null) {
-    hints.builtYearMonth =
-      data.builtMonth != null
-        ? `${data.builtYear}年${data.builtMonth}月`
-        : `${data.builtYear}年（月まで分かる場合は入力してください）`;
-  }
+  const builtHint = builtYearMonthHint(data.builtYear, data.builtMonth);
+  if (builtHint) hints.builtYearMonth = builtHint;
   return {
     preview: {
       address: toPreviewString(data.address),
@@ -617,12 +627,8 @@ function computeBuildingAutoValues(data: BuildingAutoSource): FieldModelAutoValu
   if (data.expectedIncome != null && data.expectedIncome !== "") {
     hints.expectedIncome = savedValueHint(`${data.expectedIncome}万円`);
   }
-  if (data.builtYear != null) {
-    hints.builtYearMonth =
-      data.builtMonth != null
-        ? `${data.builtYear}年${data.builtMonth}月`
-        : `${data.builtYear}年（月まで分かる場合は入力してください）`;
-  }
+  const builtHint = builtYearMonthHint(data.builtYear, data.builtMonth);
+  if (builtHint) hints.builtYearMonth = builtHint;
   return {
     preview: {
       address: toPreviewString(data.address),

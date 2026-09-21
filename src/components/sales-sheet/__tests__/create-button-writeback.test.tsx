@@ -5,7 +5,14 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-import { SalesSheetCreateDialog, writebackGate } from "../SalesSheetCreateButton";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import {
+  SalesSheetCreateDialog,
+  writebackGate,
+  builtYearMonthHint,
+} from "../SalesSheetCreateButton";
 
 // Node environment（jsdom 非導入）: SSR 静的構造のみ検証する。renderToStaticMarkup は effect を
 // 実行しないため fetchPropertyDetail は呼ばれない＝物件/棟情報は `property` prop（呼び出し側が
@@ -147,5 +154,40 @@ describe("作成ダイアログ — 物件情報が未取得のとき(SSR)", () 
     const html = renderToStaticMarkup(<SalesSheetCreateDialog {...base} />);
     expect(html).toContain("作成してエディタを開く");
     expect(html).not.toContain("物件の情報を読み込んでいます…");
+  });
+});
+
+// [@codex P2] 築年月の「保存済みの値」ヒントは、区分・戸建・一棟で同じ分岐を3回書いて
+// いたため、片方だけ直して食い違った実績がある。1か所に集約したものをここで固定する。
+describe("builtYearMonthHint — 築年月の保存済みヒント", () => {
+  it("年月が揃っていればそのまま出す", () => {
+    expect(builtYearMonthHint(2008, 3)).toBe("2008年3月");
+  });
+
+  it("年だけなら月の入力を促す", () => {
+    expect(builtYearMonthHint(2008, null)).toBe("2008年（月まで分かる場合は入力してください）");
+  });
+
+  it("月だけでも出す(図面には月が入るため)", () => {
+    expect(builtYearMonthHint(null, 3)).toBe("3月");
+  });
+
+  it("どちらも無ければ出さない", () => {
+    expect(builtYearMonthHint(null, null)).toBeUndefined();
+    expect(builtYearMonthHint(undefined, undefined)).toBeUndefined();
+  });
+});
+
+describe("作成ダイアログ — 築年月ヒントの分岐が1か所にまとまっている(@codex P2)", () => {
+  it("種別ごとに年・月を組み立て直す書き方を残さない", () => {
+    const src = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "..", "SalesSheetCreateButton.tsx"),
+      "utf8",
+    ).replace(/\r\n/g, "\n");
+    // `${...builtYear}年${...builtMonth}月` のような直書きが残っていないこと。
+    expect(src).not.toMatch(/\$\{[^}]*builtYear\}年/);
+    // ヒントは共通関数経由。
+    expect(src).toContain("builtYearMonthHint(b?.builtYear, b?.builtMonth)");
+    expect(src.match(/builtYearMonthHint\(data\.builtYear, data\.builtMonth\)/g)?.length).toBe(2);
   });
 });
