@@ -42,7 +42,7 @@ function stripSpaces(s: string): string {
   return s.replace(/[\s　]/g, "");
 }
 
-/** 表の下枠(┗━━┷━━┛)。所有者の表はここで終わる。 */
+/** 表の下枠(┗━━┷━━┛)。所有者の表はここで一旦終わる(見出しが再び出れば続きを読む)。 */
 const BOTTOM_BORDER = /^[\s　]*[┗┕┖└]/;
 
 /** 1行を罫線で区切ってセルの配列にする。両端の罫線は落とす。 */
@@ -186,9 +186,30 @@ export function parseRegistryOwnerTable(
     });
   };
 
+  /**
+   * 所有者の表の下枠を通過したか。
+   * ⚠**下枠の後は、所有者の見出し(住所/氏名)が再び出るまで読まない**。
+   *   全部事項や手動で上げた謄本には、所有者の表の後に「順位番号│登記の目的│…」など
+   *   別の表が続く。読み続けると列数が足りる行が全部「所有者」になる(氏名「登記の目的」
+   *   の所有者が作られる)。一方、ページ送りで上枠+見出しが繰り返される形もあるので、
+   *   見出しが再び出たら続きとして読む。
+   *   実物4,000本では下枠は必ず1つで、その後にセルの行は0件(複数ページの20本も
+   *   見出しの繰り返しは下枠より前)=どちらの形でも取りこぼさない。
+   */
+  let closed = false;
+
   for (const line of lines) {
     if (VERTICAL_RULE.test(line)) {
       const cells = splitCells(line);
+      if (closed) {
+        // 見出しが再び出たときだけ読み直す(見出しの行そのものは中身ではない)
+        const reopened = readHeader(cells);
+        if (reopened) {
+          layout = reopened;
+          closed = false;
+        }
+        continue;
+      }
       // 表題など、列が足りない行はまとまりに入れない
       if (layout && cells.length < layout.cellCount) continue;
       group.push(cells);
@@ -196,12 +217,7 @@ export function parseRegistryOwnerTable(
     }
     // 罫線(区切り・上枠・下枠)や空行は、まとまりの終わり
     flushGroup();
-    // ⚠**所有者の表の下枠で読み取りを終える**。全部事項や手動で上げた謄本には、
-    //   所有者の表の後に「順位番号│登記の目的│…」など別の表が続く。読み続けると
-    //   列数が足りる行が全部「所有者」になる(氏名「登記の目的」の所有者が作られる)。
-    //   実物4,000本では下枠は必ず1つで、その後にセルの行は0件(複数ページの20本も
-    //   見出しの繰り返しは下枠より前)=下枠で終えても続きを取りこぼさない。
-    if (layout && BOTTOM_BORDER.test(line)) break;
+    if (layout && BOTTOM_BORDER.test(line)) closed = true;
   }
   flushGroup();
 
