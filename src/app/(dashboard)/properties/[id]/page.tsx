@@ -206,7 +206,23 @@ interface ApiProperty {
   investigationConfirmedAt: string | null;
   // Unit-specific fields
   buildingId: string | null;
-  building: { id: string; name: string } | null;
+  // [F3 Task5] version/_count は作成ダイアログの「物件にも保存する」（棟の楽観ロック用
+  // buildingVersion・「同じ棟の N部屋」の N）が読む。GET /api/properties/[id] の
+  // building select 拡張と対応する。
+  // [F3 Task7] structureType/totalFloors/totalUnits/basementFloors/builtYear/builtMonth は
+  // 物件編集画面の「販売」区分が読み取り専用で表示する（棟の値が正・この画面からは編集不可）。
+  building: {
+    id: string;
+    name: string;
+    version: number;
+    _count: { properties: number };
+    structureType: string | null;
+    totalFloors: number | null;
+    totalUnits: number | null;
+    basementFloors: number | null;
+    builtYear: number | null;
+    builtMonth: number | null;
+  } | null;
   roomNo: string | null;
   floorNo: number | null;
   exclusiveArea: number | null;
@@ -220,6 +236,23 @@ interface ApiProperty {
   introductionRoute: string | null;
   importSource: string | null;
   version: number;
+  // ── 「販売」区分(F3 Task7) ─────────────────────────────────────────────
+  salePrice: number | null;
+  saleTaxType: string | null;
+  saleTaxAmount: number | null;
+  access: string | null;
+  landArea: number | null;
+  landAreaMethod: string | null;
+  totalFloorArea: number | null;
+  builtYear: number | null;
+  builtMonth: number | null;
+  structureType: string | null;
+  aboveFloors: number | null;
+  basementFloors: number | null;
+  parking: string | null;
+  totalUnits: number | null;
+  grossYield: number | null;
+  expectedIncome: number | null;
   createdAt: string;
   updatedAt: string;
   assignedTo: string | null;
@@ -647,6 +680,15 @@ export default function PropertyDetailPage({
               propertyId={property.id}
               canWrite={canWriteProperty}
               kind={salesSheetKind}
+              // [F3 Task5] この画面は既に GET /api/properties/[id] 済み（property state）
+              // なので、version/棟情報をそのまま渡す（ダイアログの二重フェッチを避ける）。
+              property={{
+                version: property.version,
+                buildingName: property.building?.name ?? "",
+                buildingUnitCount: property.building?._count.properties ?? 0,
+                buildingVersion: property.building?.version ?? null,
+                buildingId: property.building?.id ?? null,
+              }}
             />
           )}
           <button

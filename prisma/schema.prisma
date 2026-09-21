@@ -276,6 +276,8 @@ model Building {
   totalFloors         Int?      @map("total_floors")
   totalUnits          Int?      @map("total_units")
   builtYear           Int?      @map("built_year")
+  builtMonth          Int?      @map("built_month")
+  basementFloors      Int?      @map("basement_floors")
   structureType       String?   @map("structure_type")
   managementCompany   String?   @map("management_company")
   note                String?
@@ -322,6 +324,24 @@ model Property {
   repairReserveFee         Int?              @map("repair_reserve_fee")
   occupancyStatus          OccupancyStatus?  @map("occupancy_status")
   ownershipShareNote       String?           @map("ownership_share_note")
+
+  // --- 販売図面 F3: 販売条件(図面の作成画面から保存する・仕様書 §4.1) ---
+  salePrice                Decimal?          @map("sale_price") @db.Decimal(12, 1)
+  saleTaxType              String?           @map("sale_tax_type")
+  saleTaxAmount            Decimal?          @map("sale_tax_amount") @db.Decimal(12, 1)
+  access                   String?           @map("access")
+  landArea                 Decimal?          @map("land_area") @db.Decimal(10, 2)
+  landAreaMethod           String?           @map("land_area_method")
+  totalFloorArea           Decimal?          @map("total_floor_area") @db.Decimal(10, 2)
+  builtYear                Int?              @map("built_year")
+  builtMonth               Int?              @map("built_month")
+  structureType            String?           @map("structure_type")
+  aboveFloors              Int?              @map("above_floors")
+  basementFloors           Int?              @map("basement_floors")
+  parking                  String?           @map("parking")
+  totalUnits               Int?              @map("total_units")
+  grossYield               Decimal?          @map("gross_yield") @db.Decimal(5, 2)
+  expectedIncome           Decimal?          @map("expected_income") @db.Decimal(12, 1)
 
   registryStatus           RegistryStatus    @map("registry_status")
   dmStatus                 DmStatus          @map("dm_status")

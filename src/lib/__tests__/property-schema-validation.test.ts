@@ -58,3 +58,53 @@ describe("updatePropertySchema: 同じ入力バリデーション(A2)", () => {
     expect(() => updatePropertySchema.parse({ version: 1, gpsLat: 999 })).toThrow();
   });
 });
+
+// [@codex P2] DECIMAL(p,s) 列は桁あふれを黙って丸める。範囲だけ見て通すと、DB には
+// 丸めた値、変更履歴・画面には元の値が残り、同じ項目の値が食い違う。
+describe("updatePropertySchema: DECIMAL 列の小数桁(@codex P2)", () => {
+  const v = { version: 1 };
+
+  it("DECIMAL(12,1) の金額は小数1桁まで", () => {
+    expect(() => updatePropertySchema.parse({ ...v, salePrice: 18800 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, salePrice: 18800.5 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, salePrice: 1.25 })).toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, saleTaxAmount: 1.25 })).toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, expectedIncome: 1.25 })).toThrow();
+  });
+
+  it("DECIMAL(10,2)/(8,2)/(5,2) は小数2桁まで", () => {
+    expect(() => updatePropertySchema.parse({ ...v, landArea: 120.55 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, landArea: 120.555 })).toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, totalFloorArea: 98.765 })).toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, exclusiveArea: 55.555 })).toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, balconyArea: 8.001 })).toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, grossYield: 4.125 })).toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, grossYield: 4.12 })).not.toThrow();
+  });
+
+  it("桁数以外の既存の制約(範囲・null許容)はそのまま", () => {
+    expect(() => updatePropertySchema.parse({ ...v, salePrice: null })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, salePrice: -1 })).toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, grossYield: 1000 })).toThrow();
+  });
+});
+
+// [@codex P2] 上限は列が実際に入れられる最大値(整数部 p-s 桁 + 小数 s 桁)に合わせる。
+// 整数部だけで切ると、DB は受け付ける値を画面が「範囲外」と言うことになる。
+describe("updatePropertySchema: DECIMAL 列の上限いっぱい(@codex P2)", () => {
+  const v = { version: 1 };
+  it("DECIMAL(12,1) は 99999999999.9 まで", () => {
+    expect(() => updatePropertySchema.parse({ ...v, salePrice: 99999999999.9 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, salePrice: 100000000000 })).toThrow();
+  });
+  it("DECIMAL(10,2) は 99999999.99 まで", () => {
+    expect(() => updatePropertySchema.parse({ ...v, landArea: 99999999.99 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, totalFloorArea: 99999999.99 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, landArea: 100000000 })).toThrow();
+  });
+  it("DECIMAL(8,2) は 999999.99 まで", () => {
+    expect(() => updatePropertySchema.parse({ ...v, exclusiveArea: 999999.99 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, balconyArea: 999999.99 })).not.toThrow();
+    expect(() => updatePropertySchema.parse({ ...v, exclusiveArea: 1000000 })).toThrow();
+  });
+});

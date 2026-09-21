@@ -56,6 +56,14 @@ export async function GET(
             totalUnits: true,
             managementCompany: true,
             builtYear: true,
+            // [F3 Task5] 作成ダイアログの「物件にも保存する」が使う棟の version（楽観ロック用の
+            // buildingVersion）と、同じ棟に属する物件数（「同じ棟の N部屋」の N）。
+            version: true,
+            _count: { select: { properties: true } },
+            // [F3 Task7] 物件編集画面の「販売」区分が読み取り専用で表示する
+            // 棟の地下階・築月（棟の値が正・この画面からは編集不可）。
+            basementFloors: true,
+            builtMonth: true,
           },
         },
         propertyOwners: {
@@ -241,6 +249,31 @@ export async function PATCH(
         rosenkaYear: true,
         rebuildPermission: true,
         architectureNote: true,
+        // [F3 Task7] 「販売」区分(変更履歴の「変更前」に使う。選ばないと oldValue が
+        // 常に null になり、変更していない値まで「(空)→値」という嘘の履歴になる)。
+        salePrice: true,
+        saleTaxType: true,
+        saleTaxAmount: true,
+        access: true,
+        landArea: true,
+        landAreaMethod: true,
+        totalFloorArea: true,
+        builtYear: true,
+        builtMonth: true,
+        structureType: true,
+        aboveFloors: true,
+        basementFloors: true,
+        parking: true,
+        totalUnits: true,
+        grossYield: true,
+        expectedIncome: true,
+        exclusiveArea: true,
+        balconyArea: true,
+        layoutType: true,
+        orientation: true,
+        floorNo: true,
+        managementFee: true,
+        repairReserveFee: true,
         note: true,
       },
     });

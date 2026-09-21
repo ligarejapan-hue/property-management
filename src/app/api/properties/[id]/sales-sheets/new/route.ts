@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import { lockPropertyRecordForWrite } from "@/lib/property-record-guard";
 import { createDesign } from "@/lib/sales-sheet/design-service";
 import {
   buildSaleLandDocument,
@@ -24,6 +25,8 @@ import { salesSheetTemplateKindFor } from "@/lib/sales-sheet/template-kind";
 import { isImageKeyAuthorizedForProperty } from "@/lib/sales-sheet/authorize-document-images";
 import { getStorage } from "@/lib/storage";
 import { writeAuditLog } from "@/lib/audit";
+import { buildWriteback, labelsOf } from "@/lib/sales-sheet/property-writeback/build-writeback";
+import { applyWriteback } from "@/lib/sales-sheet/property-writeback/apply-writeback";
 
 // 作成ダイアログが収集する任意の上書き項目（システムに無い値）。種別ごとに異なる。
 // [F2-A Task4] LAND_FIELDS(field-model) の手入力キー全域 + レイアウト専用(catchCopy/
@@ -96,6 +99,12 @@ const landOverridesSchema = z.object({
 // `structure`（構造）は自動反映専用（building.structureType が正）で上書き機構を持たない
 // ため、旧スキーマにあった stale なキーとして削除。`deliveryTiming` は builder 側のキー名
 // `delivery` へ改称（field-model の "引渡時期" と一致させる）。
+// F3 Task4 レビュー(R14)で追加: exclusiveArea/balconyArea/balconyDir/layout/floorNo/
+// managementFee/repairFee は仕様書 §4.4 の区分の書き戻し対象。R16(a6f003b9)以降、
+// buildMansionValues(build-document.ts) はこれらを「override優先・空なら物件の自動
+// 反映値」で解決し、document にも反映する(常に物件の値を使う旧挙動から変更済み)。
+// ここに追加した目的は2つ: (1) 図面の作成画面でこの値を手入力して上書きできるように
+// すること (2) 図面作成時に物件へ書き戻す(buildWriteback)ための入力経路を用意すること。
 const mansionOverridesSchema = z.object({
   // 価格・費用（DB enum と語彙が1:1対応しないため propertyType は常に手入力）
   propertyType: z.string().max(50).optional(),
@@ -103,6 +112,9 @@ const mansionOverridesSchema = z.object({
   unitPrice: z.string().max(200).optional(),
   tax: z.string().max(50).optional(),
   taxAmount: z.string().max(200).optional(),
+  // R16以降 document にも反映される(override優先・空なら物件の自動反映値。上記コメント参照)。
+  managementFee: z.string().max(200).optional(),
+  repairFee: z.string().max(200).optional(),
   // 所在・交通
   access: z.string().max(500).optional(),
   // 土地・権利
@@ -112,6 +124,12 @@ const mansionOverridesSchema = z.object({
   useDistrict: z.array(z.string().max(100)).max(20).optional(),
   areaMethod: z.string().max(50).optional(),
   // 建物
+  // exclusiveArea/balconyArea/balconyDir/layout/floorNo も同様(上記コメント参照)。
+  exclusiveArea: z.string().max(200).optional(),
+  balconyArea: z.string().max(200).optional(),
+  balconyDir: z.string().max(50).optional(),
+  layout: z.string().max(50).optional(),
+  floorNo: z.string().max(50).optional(),
   basementFloors: z.string().max(50).optional(),
   builtYearMonth: z.string().max(100).optional(),
   parking: z.string().max(100).optional(),
@@ -303,14 +321,44 @@ export async function POST(
         // ⚠物件そのものに入れた物件名。建物マスタを作らずに登録した区分
         // マンションはこちらにしか名前が無い (@codex #354 P2)。
         buildingName: true,
+        // [Task10 C-1] F3で足した「販売」区分の16列。1枚目の図面作成時に buildWriteback で
+        // ここへ保存した値を、2枚目以降の図面作成時の既定値(手入力が無ければ使う値)として
+        // 読み戻す(build-document.ts の buildLandValues/buildHouseValues/buildBuildingValues
+        // に渡す・区分マンションの部屋7項目は buildMansionValues が既に読んでいる)。
+        salePrice: true,
+        saleTaxType: true,
+        saleTaxAmount: true,
+        access: true,
+        landArea: true,
+        landAreaMethod: true,
+        totalFloorArea: true,
+        builtYear: true,
+        builtMonth: true,
+        structureType: true,
+        aboveFloors: true,
+        basementFloors: true,
+        parking: true,
+        totalUnits: true,
+        grossYield: true,
+        expectedIncome: true,
         building: {
           select: {
+            // ⚠id だけは「棟の行も FOR UPDATE でロックするか」の判定に使う
+            // (F3 writeback)。version は**ここでは読まない**
+            // (C1: ロック前の値を version 判定・差分計算に使わない。ロック後に
+            // tx 内で読み直した値を使う → 下の `fresh` 参照)。builtMonth/
+            // basementFloors は[Task10 C-1] 図面への既定値の読み戻し用に読む
+            // (builtYear/structureType/totalFloors/totalUnits は元々 document
+            // 組み立てに使っていたためこれまでも選択済み)。
+            id: true,
             name: true,
             totalFloors: true,
             builtYear: true,
+            builtMonth: true,
             structureType: true,
             managementCompany: true,
             totalUnits: true,
+            basementFloors: true,
           },
         },
       },
@@ -327,6 +375,13 @@ export async function POST(
 
     // 作成ダイアログの上書き項目（空ボディ → {}・不正 JSON → 400）。
     const body = await parseJsonBody(request);
+    const bodyObj = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+    // F3: 物件・棟への保存の指示（既定ON・省略時は今の版を気にしない）。
+    const saveToProperty = bodyObj.saveToProperty !== false;
+    const propertyVersion = typeof bodyObj.propertyVersion === "number" ? bodyObj.propertyVersion : null;
+    const buildingVersion = typeof bodyObj.buildingVersion === "number" ? bodyObj.buildingVersion : null;
+    // @codex P1: どの棟に対する入力かも受け取る(版番号だけでは棟の張り替えを見抜けない)。
+    const buildingId = typeof bodyObj.buildingId === "string" ? bodyObj.buildingId : null;
 
     // 写真を最大 N 枚 seed。保存前に1枚ずつ認可（caller が読める＋この物件に属する）。
     // 未認可 / 解決不能 / 別物件は落とす（サーバ生成は 422 ではなく drop 方針）＝未認可 key を
@@ -357,9 +412,13 @@ export async function POST(
     const company = await loadCompanyProfile();
     let document: SalesSheetDocument;
     let templateId: string;
+    // I1: writeback は zod 検証済みの overrides(各分岐の `o`)を使う。生の body を直接
+    // 渡すと schema に無いキー(例: mansion の layout/balconyDir)が無検証で列に入り得る。
+    let overrides: Record<string, string | undefined>;
 
     if (kind === "land") {
       const o = landOverridesSchema.parse(body);
+      overrides = o as unknown as Record<string, string | undefined>;
       document = buildSaleLandDocument({
         property: {
           address: property.address,
@@ -370,6 +429,11 @@ export async function POST(
           roadWidth: property.roadWidth?.toString() ?? null,
           // 現況の日本語化は各ビルダー内部で行う（全テンプレで統一）。
           occupancyStatus: property.occupancyStatus,
+          // [Task10 C-1] 物件に保存済みの販売条件を既定値として読み戻す。
+          salePrice: property.salePrice?.toString() ?? null,
+          access: property.access,
+          landArea: property.landArea?.toString() ?? null,
+          landAreaMethod: property.landAreaMethod,
         },
         photos,
         overrides: o,
@@ -378,6 +442,7 @@ export async function POST(
       templateId = "sale-land";
     } else if (kind === "mansion") {
       const o = mansionOverridesSchema.parse(body);
+      overrides = o as unknown as Record<string, string | undefined>;
       document = buildSaleMansionDocument({
         property: {
           address: property.address,
@@ -391,6 +456,14 @@ export async function POST(
           repairReserveFee: property.repairReserveFee,
           zoningDistrict: property.zoningDistrict,
           occupancyStatus: property.occupancyStatus,
+          // [Task10 C-1] 物件に保存済みの販売条件を既定値として読み戻す(区分は building
+          // relation を持つが、この5項目は buildWriteback が RULES.mansion で property の
+          // スカラ列へ保存するため land/house/building と同じく property から読む)。
+          salePrice: property.salePrice?.toString() ?? null,
+          saleTaxType: property.saleTaxType,
+          saleTaxAmount: property.saleTaxAmount?.toString() ?? null,
+          access: property.access,
+          parking: property.parking,
         },
         // ⚠**建物マスタが無くても物件名だけは渡す** (@codex #354 P2)。
         // 建物マスタを作らずに登録した区分マンションは property.building が
@@ -401,10 +474,14 @@ export async function POST(
                 name: property.building?.name ?? property.buildingName,
                 totalFloors: property.building?.totalFloors ?? null,
                 builtYear: property.building?.builtYear ?? null,
+                // [Task10 C-1] builtYearMonth の月精度を読み戻すために追加。
+                builtMonth: property.building?.builtMonth ?? null,
                 structureType: property.building?.structureType ?? null,
                 managementCompany:
                   property.building?.managementCompany ?? null,
                 totalUnits: property.building?.totalUnits ?? null,
+                // [Task10 C-1] 地下階(basementFloors)の既定値として読み戻すために追加。
+                basementFloors: property.building?.basementFloors ?? null,
               }
             : null,
         photos,
@@ -414,6 +491,7 @@ export async function POST(
       templateId = "sale-mansion";
     } else if (kind === "house") {
       const o = houseOverridesSchema.parse(body);
+      overrides = o as unknown as Record<string, string | undefined>;
       document = buildSaleHouseDocument({
         property: {
           address: property.address,
@@ -424,6 +502,21 @@ export async function POST(
           roadType: property.roadType,
           roadWidth: property.roadWidth?.toString() ?? null,
           occupancyStatus: property.occupancyStatus,
+          // [Task10 C-1] 物件に保存済みの販売条件を既定値として読み戻す(house は
+          // building relation を配線しないため、全て property のスカラ列から)。
+          salePrice: property.salePrice?.toString() ?? null,
+          saleTaxType: property.saleTaxType,
+          saleTaxAmount: property.saleTaxAmount?.toString() ?? null,
+          access: property.access,
+          landArea: property.landArea?.toString() ?? null,
+          landAreaMethod: property.landAreaMethod,
+          totalFloorArea: property.totalFloorArea?.toString() ?? null,
+          structureType: property.structureType,
+          aboveFloors: property.aboveFloors,
+          basementFloors: property.basementFloors,
+          parking: property.parking,
+          builtYear: property.builtYear,
+          builtMonth: property.builtMonth,
         },
         photos,
         overrides: o,
@@ -432,6 +525,7 @@ export async function POST(
       templateId = "sale-house";
     } else {
       const o = buildingOverridesSchema.parse(body);
+      overrides = o as unknown as Record<string, string | undefined>;
       document = buildSaleBuildingDocument({
         property: {
           address: property.address,
@@ -441,6 +535,24 @@ export async function POST(
           roadType: property.roadType,
           roadWidth: property.roadWidth?.toString() ?? null,
           occupancyStatus: property.occupancyStatus,
+          // [Task10 C-1] 物件に保存済みの販売条件・収益系を既定値として読み戻す(一棟も
+          // house と同じく building relation を配線しないため、全て property のスカラ列から)。
+          salePrice: property.salePrice?.toString() ?? null,
+          saleTaxType: property.saleTaxType,
+          saleTaxAmount: property.saleTaxAmount?.toString() ?? null,
+          access: property.access,
+          landArea: property.landArea?.toString() ?? null,
+          landAreaMethod: property.landAreaMethod,
+          totalFloorArea: property.totalFloorArea?.toString() ?? null,
+          structureType: property.structureType,
+          aboveFloors: property.aboveFloors,
+          basementFloors: property.basementFloors,
+          parking: property.parking,
+          totalUnits: property.totalUnits,
+          grossYield: property.grossYield?.toString() ?? null,
+          expectedIncome: property.expectedIncome?.toString() ?? null,
+          builtYear: property.builtYear,
+          builtMonth: property.builtMonth,
         },
         kind: property.propertyType === "apartment_block" ? "apartment" : "mansion",
         photos,
@@ -450,7 +562,163 @@ export async function POST(
       templateId = "sale-building";
     }
 
-    const design = await createDesign({ propertyId: id, document, userId: session.id, templateId });
+    const noWriteback = {
+      saved: [] as string[],
+      unreadable: [] as string[],
+      noTarget: [] as string[],
+      conflict: false,
+    };
+    const conflictWriteback = {
+      saved: [] as string[],
+      unreadable: [] as string[],
+      noTarget: [] as string[],
+      conflict: true,
+    };
+
+    // 図面の作成 + 物件・棟への保存（読み取れた値のみ）を1トランザクションにまとめる
+    // （原子性: 途中で失敗したら図面も作らない）。物件配下を書き換える前に親の行を
+    // 先にロックする既存の決まりに合わせ、区分は棟の行も併せてロックする。
+    const { design, writeback } = await prisma.$transaction(async (tx) => {
+      // @codex P1: 親行のロックと同時に、担当者スコープ（field_staff）をロック下でもう一度
+      // 確かめる。367行目の canAccessPropertyRecord はトランザクションに入る前の判定で、
+      // その後の写真取得・会社プロフィール読込・document 組み立ての間に担当が外れると、
+      // 外れた本人が物件（区分なら共有の棟まで）を書き換えられてしまう。共通の
+      // lockPropertyRecordForWrite は「ロックしつつスコープで絞る」1文なので、条件から
+      // 外れていれば 0 行＝403 になり、図面の作成ごと取り消される（＝権限を失った人の
+      // 作成は成立させない）。
+      await lockPropertyRecordForWrite(tx, id, session);
+      // @codex P1: ロックする棟を「トランザクションに入る前に読んだ property.building.id」で
+      // 決めてはいけない。最初の読み取りからここまでの間に別処理（CSV取込など）が
+      // properties.building_id を張り替えると、古い棟をロックしたまま新しい棟を更新しうる
+      // （張り替えでは properties.version が上がらず、棟の version も 1 同士で一致しがち＝
+      // version 判定は両方すり抜ける）。物件行を押さえた後なら building_id はもう動かせない
+      // ので、その時点の紐付けを SQL 側で引き直してロックする（往復を増やさない）。
+      // 紐付きが無ければ 0 行＝ロック無しで、条件分岐は不要。
+      await tx.$queryRaw`
+        SELECT b.id FROM buildings b
+        JOIN properties p ON p.building_id = b.id
+        WHERE p.id = ${id}::uuid
+        FOR UPDATE OF b`;
+
+      const created = await createDesign(
+        { propertyId: id, document, userId: session.id, templateId },
+        tx,
+      );
+
+      if (!saveToProperty) {
+        return { design: created, writeback: noWriteback };
+      }
+
+      // C1: ロックを掴んだ**直後に読み直す**。最初の読み取り(282行目)と ここの間には
+      // 写真取得・認可・会社プロフィール読込・document 組み立てという I/O が挟まるため、
+      // version 判定・buildWriteback の current・ChangeLog の oldValue は
+      // すべてこの読み直した値(fresh)を基準にする(最初の読み取りの値は使わない)。
+      const fresh = await tx.property.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          version: true,
+          salePrice: true,
+          saleTaxType: true,
+          saleTaxAmount: true,
+          access: true,
+          landArea: true,
+          landAreaMethod: true,
+          totalFloorArea: true,
+          builtYear: true,
+          builtMonth: true,
+          structureType: true,
+          aboveFloors: true,
+          basementFloors: true,
+          parking: true,
+          totalUnits: true,
+          grossYield: true,
+          expectedIncome: true,
+          // ⚠R14: 区分マンションの物件側7項目(仕様書 §4.4)。「今の値と同じか」の判定と
+          // ChangeLog の oldValue に使う(選ばないと常に undefined 扱いになり両方壊れる)。
+          exclusiveArea: true,
+          balconyArea: true,
+          layoutType: true,
+          orientation: true,
+          floorNo: true,
+          managementFee: true,
+          repairReserveFee: true,
+          building: {
+            select: {
+              id: true,
+              version: true,
+              structureType: true,
+              totalFloors: true,
+              basementFloors: true,
+              totalUnits: true,
+              builtYear: true,
+              builtMonth: true,
+            },
+          },
+        },
+      });
+      if (!fresh) {
+        // FOR UPDATE の直後に消えている(想定外)。writeback は諦め図面だけ作る。
+        return { design: created, writeback: conflictWriteback };
+      }
+
+      // C2/I6: saveToProperty=true なのに version が無い/数値でない場合は無条件で
+      // 上書きせず conflict 扱いにする(version を送らない呼び出しは物件へ書かない)。
+      // 図面自体は作る。
+      if (propertyVersion === null || propertyVersion !== fresh.version) {
+        return { design: created, writeback: conflictWriteback };
+      }
+
+      const result = buildWriteback({
+        kind,
+        values: overrides,
+        current: { property: fresh, building: fresh.building },
+      });
+
+      // @codex P2: 棟の version を要るのは**実際に棟へ書くときだけ**。棟に紐付いている
+      // かどうかで要求すると、棟へ一切書かない種別(一棟=RULES.building は全て物件列)で
+      // 「棟が別途更新された」だけで物件への保存がまるごと捨てられる。
+      // buildWriteback は棟が無ければ棟向けの規則を飛ばすので、result.building が
+      // 空でないなら棟は必ず存在する。
+      if (Object.keys(result.building).length > 0) {
+        // @codex P1: 版番号だけでなく**どの棟か**も照合する。ダイアログを開いている間に
+        // 別処理が部屋の所属棟を張り替えると(この経路は物件の版番号を進めない)、新旧の棟が
+        // たまたま同じ版番号のときに「別の棟へ入れるはずだった値」が通ってしまう。
+        // 古いクライアントは buildingId を送らない=照合できない=安全側で conflict。
+        if (
+          buildingVersion === null ||
+          buildingVersion !== fresh.building!.version ||
+          buildingId === null ||
+          buildingId !== fresh.building!.id
+        ) {
+          return { design: created, writeback: conflictWriteback };
+        }
+      }
+      const applied = await applyWriteback(tx, {
+        propertyId: id,
+        buildingId: fresh.building?.id ?? null,
+        result,
+        before: { property: fresh, building: fresh.building },
+        propertyVersion: fresh.version,
+        buildingVersion: fresh.building?.version ?? null,
+        userId: session.id,
+      });
+      if (!applied.ok) {
+        // FOR UPDATE 下では理論上起きないはずだが、書き込み自体にも条件を付ける
+        // (@codex #394 R29 P1 と同じ考え方)防御として扱う。
+        return { design: created, writeback: conflictWriteback };
+      }
+
+      return {
+        design: created,
+        writeback: {
+          saved: labelsOf(kind, result),
+          unreadable: result.unreadable,
+          noTarget: result.noTarget,
+          conflict: false,
+        },
+      };
+    });
 
     // 監査ログ（非PIIメタのみ: document 本文・画像 key・overrides・住所等は記録しない）。
     await writeAuditLog({
@@ -461,7 +729,7 @@ export async function POST(
       detail: { propertyId: id },
     });
 
-    return NextResponse.json({ id: design.id }, { status: 201 });
+    return NextResponse.json({ id: design.id, propertyWriteback: writeback }, { status: 201 });
   } catch (error) {
     return handleApiError(error);
   }

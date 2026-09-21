@@ -135,6 +135,17 @@ export interface PropertyDetailBuildingSummary {
   totalUnits: number | null;
   managementCompany: string | null;
   builtYear: number | null;
+  /**
+   * [F3 Task5] 楽観ロック用の棟の version。作成ダイアログの「物件にも保存する」が
+   * buildingVersion として送る（区分マンションのみ。値が古ければサーバは conflict:true で
+   * 棟へは書き込まない）。
+   */
+  version: number;
+  /**
+   * [F3 Task5] 同じ棟に属する物件数（＝作成ダイアログが出す「同じ棟の N部屋にも反映されます」の
+   * N）。棟が無い物件では building 自体が null。
+   */
+  _count: { properties: number };
 }
 
 export type PropertyDetailResult = (typeof MOCK_PROPERTIES)[0] & {

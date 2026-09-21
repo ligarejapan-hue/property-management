@@ -86,10 +86,14 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:276":
     "property.dmStatus(undeliverable連動のno_send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/properties/[id]/route.ts:366":
+  "src/app/api/properties/[id]/route.ts:399":
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
   "src/app/api/properties/bulk-update/route.ts:87":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",
+  "src/lib/sales-sheet/property-writeback/apply-writeback.ts:30":
+    "property の販売条件(販売図面の作成画面で入れた値の書き戻し)+version increment" +
+    "(F3で追加。呼び出し側が FOR UPDATE と担当者スコープを取った上で、" +
+    "where に version を付けて書く)",
   "src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:244":
     "property.dmStatus(宛先不明連動のno_send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",

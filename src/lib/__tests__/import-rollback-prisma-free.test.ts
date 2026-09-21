@@ -121,7 +121,7 @@ describe("property-field-constants.ts は Prisma-free (Codex P1)", () => {
     ]);
   });
 
-  it("BUILDING_TRACKED_FIELDS の中身 (13 項目・21-C PR-1 で postalCode 追加)", () => {
+  it("BUILDING_TRACKED_FIELDS の中身 (15 項目・F3 Task8 で築月・地下階追加)", () => {
     expect(BUILDING_TRACKED_FIELDS).toEqual([
       "name",
       "address",
@@ -133,6 +133,8 @@ describe("property-field-constants.ts は Prisma-free (Codex P1)", () => {
       "builtYear",
       "structureType",
       "managementCompany",
+      "builtMonth",
+      "basementFloors",
       "gpsLat",
       "gpsLng",
       "note",

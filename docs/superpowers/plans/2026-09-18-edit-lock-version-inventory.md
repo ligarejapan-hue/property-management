@@ -78,7 +78,8 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/owners/[id]/corporate-cleanup/route.ts:248` | `owner.name`/`address`/`note`/`corporateNumber` |
 | `src/app/api/owners/[id]/route.ts:213` | `owner` の編集画面フィールド一式(編集画面本体の保存窓口) |
 | `src/app/api/properties/[id]/actions/route.ts:157` | `property` のアクション実行結果フィールド |
-| `src/app/api/properties/[id]/route.ts:366` | `property` の編集画面フィールド一式(編集画面本体の保存窓口) |
+| `src/app/api/properties/[id]/route.ts:399` | `property` の編集画面フィールド一式(編集画面本体の保存窓口) |
+| `src/lib/sales-sheet/property-writeback/apply-writeback.ts:30` | `property` の販売条件(販売図面の作成画面で入れた値の書き戻し。F3で追加。呼び出し側が `FOR UPDATE`+担当者スコープを取った上で `where` に version を付けて書く) |
 | `src/app/api/properties/bulk-update/route.ts:87` | `property.caseStatus`/`registryStatus`/`dmStatus`/`assignedTo` |
 | `src/lib/investigation/fetch-investigation.ts:646` | `property.zoningDistrict`/`buildingCoverageRatio`/`floorAreaRatio` |
 | `src/lib/registry-fetch/auto-fetch.ts:4294` | `property.registryStatus = scheduled`(有料取得の予約) |
@@ -87,6 +88,8 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/lib/registry-pdf/process.ts:681` | `property.registryStatus`/`realEstateNumber`/`lotNumber`/`buildingNumber` |
 
 合計: 要修正11 + 対象外15 + 対応済28 = **54件**(全件解決・unresolved行なし)。
+
+⚠追記(F3・販売図面の書き戻し): `apply-writeback.ts:30` を1件足して **55件**。同ファイルの `building.updateMany`(50行目)は走査の対象表(物件・所有者)に入らないため一覧には載らない(版番号は同じく `where` で照合し `increment` している)。
 
 ## 判定の根拠にした資料
 

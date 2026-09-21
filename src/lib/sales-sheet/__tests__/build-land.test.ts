@@ -286,6 +286,54 @@ describe("buildSaleLandDocument（自社マイソク様式・[F2-A Task3]）", (
     expect(JSON.stringify(doc.elements)).toContain("株式会社リガーレジャパン");
   });
 
+  // [Task10 C-1] 1枚目の図面作成で物件へ保存した価格・交通・土地面積が、2枚目の図面の
+  // 作成時にダイアログ/図面のどちらにも出てこなかった不具合の修正確認。
+  describe("物件(property)の値を既定値として使う([Task10 C-1])", () => {
+    it("価格・交通・土地面積は override が無ければ property の値を既定値として使う", () => {
+      const doc = buildSaleLandDocument({
+        ...base,
+        property: {
+          ...base.property,
+          salePrice: "3480",
+          access: "○○線 徒歩8分",
+          landArea: "150.5",
+          landAreaMethod: "実測",
+        },
+        overrides: {},
+      });
+      expect(findEl(doc, "price")).toMatchObject({ content: "3,480万円" });
+      expect(tableRow(doc, "交通")).toBe("○○線 徒歩8分");
+      expect(tableRow(doc, "土地面積")).toBe("150.5㎡（実測）");
+      // 坪単価も既定値の価格・土地面積から自動計算される(computeTsuboUnitPrice と同じ計算)。
+      // 3480万円 × 400 ÷ (121 × 150.5) ≒ 76.4万円/坪(tsubo.test.ts と同じ計算)。
+      expect(tableRow(doc, "坪単価")).toBe("76.4万円");
+    });
+
+    it("手入力(override)があればoverrideが優先される(手入力 > 物件の値 > 空)", () => {
+      const doc = buildSaleLandDocument({
+        ...base,
+        property: {
+          ...base.property,
+          salePrice: "3480",
+          access: "○○線 徒歩8分",
+          landArea: "150.5",
+          landAreaMethod: "実測",
+        },
+        overrides: { price: "3980", access: "△△線 徒歩3分", landArea: "180", areaMethod: "公簿" },
+      });
+      expect(findEl(doc, "price")).toMatchObject({ content: "3,980万円" });
+      expect(tableRow(doc, "交通")).toBe("△△線 徒歩3分");
+      expect(tableRow(doc, "土地面積")).toBe("180㎡（公簿）");
+    });
+
+    it("property に値が無く override も無ければ従来どおり空文字", () => {
+      const doc = buildSaleLandDocument({ ...base, overrides: {} });
+      expect(findEl(doc, "price")).toMatchObject({ content: "" });
+      expect(tableRow(doc, "交通")).toBe("");
+      expect(tableRow(doc, "土地面積")).toBe("");
+    });
+  });
+
   it("A4横でschema検証を通る（保存可能なdocument）", () => {
     const doc = buildSaleLandDocument({
       ...base,

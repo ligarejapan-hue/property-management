@@ -72,6 +72,13 @@ const SAMPLE_BUILDING = {
   totalUnits: 50,
   managementCompany: "サンプル管理株式会社",
   builtYear: 2015,
+  // [F3 Task5] 作成ダイアログの「物件にも保存する」が使う棟の version と、
+  // 同じ棟に属する物件数（「同じ棟の N部屋」の N）。
+  version: 2,
+  _count: { properties: 3 },
+  // [F3 Task7] 物件編集画面の「販売」区分が読み取り専用で表示する棟の地下階・築月。
+  basementFloors: 1,
+  builtMonth: 4,
 };
 
 async function callGet(id = "p1") {
@@ -91,7 +98,7 @@ beforeEach(() => {
 });
 
 describe("GET /api/properties/[id] — building 列の拡張(@codex P2)", () => {
-  it("Prisma クエリの building select に structureType/totalFloors/totalUnits/managementCompany/builtYear を含める（既存 id/name は維持・追加のみ）", async () => {
+  it("Prisma クエリの building select に structureType/totalFloors/totalUnits/managementCompany/builtYear/basementFloors/builtMonth を含める（既存 id/name は維持・追加のみ）", async () => {
     pm.property.findUnique.mockResolvedValue({ ...BASE_PROPERTY, building: SAMPLE_BUILDING });
 
     await callGet();
@@ -108,10 +115,14 @@ describe("GET /api/properties/[id] — building 列の拡張(@codex P2)", () => 
       totalUnits: true,
       managementCompany: true,
       builtYear: true,
+      version: true,
+      _count: { select: { properties: true } },
+      basementFloors: true,
+      builtMonth: true,
     });
   });
 
-  it("レスポンスの building に structureType/totalFloors/totalUnits/managementCompany/builtYear がそのまま含まれる（作成ダイアログの自動反映プレビューが読む列）", async () => {
+  it("レスポンスの building に structureType/totalFloors/totalUnits/managementCompany/builtYear/basementFloors/builtMonth がそのまま含まれる（作成ダイアログの自動反映プレビュー・物件編集画面の販売区分が読む列）", async () => {
     pm.property.findUnique.mockResolvedValue({ ...BASE_PROPERTY, building: SAMPLE_BUILDING });
 
     const { status, body } = await callGet();

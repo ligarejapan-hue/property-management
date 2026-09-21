@@ -28,6 +28,7 @@ import BuildingPhotoTab from "@/components/buildings/building-photo-tab";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { CASE_STATUS_LABELS as CASE_LABELS, OCCUPANCY_STATUS_LABELS } from "@/lib/property-types";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
+import { formatBuiltYearMonth } from "@/lib/built-year-month";
 
 // ---------- Types ----------
 
@@ -41,8 +42,10 @@ interface BuildingData {
   totalFloors: number | null;
   totalUnits: number | null;
   builtYear: number | null;
+  builtMonth: number | null;
   structureType: string | null;
   managementCompany: string | null;
+  basementFloors: number | null;
   note: string | null;
   gpsLat: number | null;
   gpsLng: number | null;
@@ -176,8 +179,10 @@ export default function BuildingDetailPage({
       totalFloors: building.totalFloors?.toString() ?? "",
       totalUnits: building.totalUnits?.toString() ?? "",
       builtYear: building.builtYear?.toString() ?? "",
+      builtMonth: building.builtMonth?.toString() ?? "",
       structureType: building.structureType ?? "",
       managementCompany: building.managementCompany ?? "",
+      basementFloors: building.basementFloors?.toString() ?? "",
       note: building.note ?? "",
     });
     // 保存値ロードは user-edit ではない＝signal をリセット（開いただけでは検索しない）。
@@ -219,8 +224,10 @@ export default function BuildingDetailPage({
         totalFloors: editForm.totalFloors ? Number(editForm.totalFloors) : null,
         totalUnits: editForm.totalUnits ? Number(editForm.totalUnits) : null,
         builtYear: editForm.builtYear ? Number(editForm.builtYear) : null,
+        builtMonth: editForm.builtMonth ? Number(editForm.builtMonth) : null,
         structureType: editForm.structureType || null,
         managementCompany: editForm.managementCompany || null,
+        basementFloors: editForm.basementFloors ? Number(editForm.basementFloors) : null,
         note: editForm.note || null,
         version: building.version,
       });
@@ -308,8 +315,10 @@ export default function BuildingDetailPage({
                 { key: "postalCode", label: "郵便番号" },
                 { key: "address", label: "住所", required: true },
                 { key: "totalFloors", label: "階数", type: "number" },
+                { key: "basementFloors", label: "地下階", type: "number" },
                 { key: "totalUnits", label: "総戸数", type: "number" },
                 { key: "builtYear", label: "築年", type: "number" },
+                { key: "builtMonth", label: "築月", type: "number" },
                 { key: "structureType", label: "構造" },
                 { key: "managementCompany", label: "管理会社" },
               ].map((f) => (
@@ -387,8 +396,20 @@ export default function BuildingDetailPage({
           <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3 lg:grid-cols-4">
             <InfoField label="住所" value={building.address} />
             <InfoField label="階数" value={building.totalFloors ? `${building.totalFloors}階建` : null} />
+            {/* @codex P2: 地下階は 0 が正しい値（API も書き戻しも min(0) で受ける）。
+                真偽値で判定すると「地下なし(0)」が「未入力」と同じ空欄になって区別できない
+                ので、null/undefined だけを未入力として扱う。 */}
+            <InfoField
+              label="地下階"
+              value={building.basementFloors == null ? null : `${building.basementFloors}階`}
+            />
             <InfoField label="総戸数" value={building.totalUnits ? `${building.totalUnits}戸` : null} />
-            <InfoField label="築年" value={building.builtYear ? `${building.builtYear}年` : null} />
+            <InfoField
+              label="築年"
+              // @codex P2: 築月だけ保存されている棟でも表示する（築年の有無で
+              // 判定すると、保存されている月が画面から消える）。
+              value={formatBuiltYearMonth(building.builtYear, building.builtMonth) || null}
+            />
             <InfoField label="構造" value={building.structureType} />
             <InfoField label="管理会社" value={building.managementCompany} />
             <InfoField label="登録者" value={building.creator.name} />

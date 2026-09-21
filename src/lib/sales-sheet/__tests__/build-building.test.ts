@@ -278,6 +278,91 @@ describe("buildSaleBuildingDocument（自社マイソク様式・[F2-C Task2]）
     expect(JSON.stringify(doc.elements)).toContain("株式会社リガーレジャパン");
   });
 
+  // [Task10 C-1] 1枚目の図面作成で物件へ保存した価格・収益系・構造等が、2枚目の図面の
+  // 作成時にダイアログ/図面のどちらにも出てこなかった不具合の修正確認。一棟は house と
+  // 同じく building relation を配線しないため、property のスカラ列から読む
+  // (house と異なり totalUnits/grossYield/expectedIncome も対象)。
+  describe("物件(property)の値を既定値として使う([Task10 C-1])", () => {
+    const propertyWithSaleFields = {
+      ...base.property,
+      salePrice: "39800",
+      saleTaxType: "課税",
+      saleTaxAmount: "1200",
+      access: "JR山手線 池袋駅 徒歩3分",
+      landArea: "330.5",
+      landAreaMethod: "実測",
+      structureType: "RC",
+      aboveFloors: 5,
+      basementFloors: 1,
+      totalFloorArea: "560.50",
+      parking: "有",
+      totalUnits: 12,
+      grossYield: "7.8",
+      expectedIncome: "980",
+      builtYear: 2010,
+      builtMonth: 5,
+    };
+
+    it("override が無ければ property の値を既定値として使う", () => {
+      const doc = buildSaleBuildingDocument({ ...base, property: propertyWithSaleFields, overrides: {} });
+      expect(findEl(doc, "price")).toMatchObject({ content: "39,800万円" });
+      expect(tableRow(doc, "うち消費税")).toBe("1,200万円"); // tax:"課税" の既定値が showWhen を通す
+      expect(tableRow(doc, "交通")).toBe("JR山手線 池袋駅 徒歩3分");
+      expect(tableRow(doc, "土地面積")).toBe("330.5㎡（実測）");
+      expect(tableRow(doc, "延床面積")).toBe("560.50㎡");
+      expect(tableRow(doc, "構造・階数")).toBe("RC / 地上5階");
+      expect(tableRow(doc, "地下階")).toBe("1階");
+      expect(tableRow(doc, "駐車場")).toBe("有");
+      expect(tableRow(doc, "総戸数")).toBe("12戸");
+      expect(tableRow(doc, "想定利回り")).toBe("7.8％");
+      expect(tableRow(doc, "満室想定収入")).toBe("980万円");
+      expect(tableRow(doc, "築年月")).toBe("2010年5月");
+    });
+
+    it("手入力(override)があればoverrideが優先される(手入力 > 物件の値 > 空)", () => {
+      const doc = buildSaleBuildingDocument({
+        ...base,
+        property: propertyWithSaleFields,
+        overrides: {
+          price: "42000",
+          tax: "不課税",
+          access: "△△線 徒歩3分",
+          landArea: "300",
+          areaMethod: "公簿",
+          structure: "SRC",
+          aboveFloors: "8",
+          basementFloors: "0",
+          totalFloorArea: "600.00",
+          parking: "無",
+          totalUnits: "20",
+          grossYield: "9.0",
+          expectedIncome: "1500",
+          builtYearMonth: "2015年8月",
+        },
+      });
+      expect(findEl(doc, "price")).toMatchObject({ content: "42,000万円" });
+      expect(tableLabels(doc)).not.toContain("うち消費税"); // 不課税(override)
+      expect(tableRow(doc, "交通")).toBe("△△線 徒歩3分");
+      expect(tableRow(doc, "土地面積")).toBe("300㎡（公簿）");
+      expect(tableRow(doc, "延床面積")).toBe("600.00㎡");
+      expect(tableRow(doc, "構造・階数")).toBe("SRC / 地上8階");
+      expect(tableRow(doc, "地下階")).toBe("0階");
+      expect(tableRow(doc, "駐車場")).toBe("無");
+      expect(tableRow(doc, "総戸数")).toBe("20戸");
+      expect(tableRow(doc, "想定利回り")).toBe("9.0％");
+      expect(tableRow(doc, "満室想定収入")).toBe("1,500万円");
+      expect(tableRow(doc, "築年月")).toBe("2015年8月");
+    });
+
+    it("property に値が無く override も無ければ従来どおり空文字/行なし", () => {
+      const doc = buildSaleBuildingDocument({ ...base, overrides: {} });
+      expect(findEl(doc, "price")).toMatchObject({ content: "" });
+      expect(tableRow(doc, "交通")).toBe("");
+      expect(tableRow(doc, "総戸数")).toBe("");
+      expect(tableRow(doc, "築年月")).toBe("");
+    });
+  });
+
   it("A4横でschema検証を通る（保存可能なdocument）", () => {
     const doc = buildSaleBuildingDocument({
       ...base,

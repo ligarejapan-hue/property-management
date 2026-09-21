@@ -23,10 +23,15 @@ const updateBuildingSchema = z.object({
   builtYear: z.number().int().nullable().optional(),
   structureType: z.string().nullable().optional(),
   managementCompany: z.string().nullable().optional(),
+  // F3 Task8: 築月(1〜12)・地下階(0階以上)。
+  builtMonth: z.number().int().min(1).max(12).nullable().optional(),
+  basementFloors: z.number().int().min(0).max(20).nullable().optional(),
   note: z.string().nullable().optional(),
   gpsLat: z.number().nullable().optional(),
   gpsLng: z.number().nullable().optional(),
-  version: z.number().int().optional(),
+  // @codex P1: 版番号は必須。省略を許すと、下の updateMany の条件に付けるものが無くなり
+  // 「読んだときの版のまま書く」保証が作れない(画面は元から送っている)。
+  version: z.number().int(),
 });
 
 // ---------- GET /api/buildings/:id ----------
@@ -92,6 +97,9 @@ export async function PATCH(
         builtYear: true,
         structureType: true,
         managementCompany: true,
+        // F3 Task8: 変更履歴の「変更前」に使う(選ばないと oldValue が常に undefined になる)。
+        builtMonth: true,
+        basementFloors: true,
         gpsLat: true,
         gpsLng: true,
         note: true,
@@ -105,8 +113,8 @@ export async function PATCH(
     const body = await request.json();
     const data = updateBuildingSchema.parse(body);
 
-    // Optimistic locking
-    if (data.version !== undefined && data.version !== existing.version) {
+    // Optimistic locking（早めに気づかせるための事前判定。本当の保証は下の updateMany）
+    if (data.version !== existing.version) {
       throw new ApiError(
         409,
         "データが他のユーザーにより更新されています。画面をリロードしてください。",
@@ -114,16 +122,31 @@ export async function PATCH(
       );
     }
 
-    const { version: _v, ...updateFields } = data;
+    const { version, ...updateFields } = data;
     const updateData: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(updateFields)) {
       if (val !== undefined) updateData[key] = val;
     }
     updateData.version = { increment: 1 };
 
-    const building = await prisma.building.update({
-      where: { id },
+    // @codex P1: **条件は書き込み自体に付ける**。上の事前判定だけでは、判定と書き込みの
+    // 間に別の更新(販売図面からの書き戻しなど。あちらは行ロックを取って書く)が入ったとき、
+    // ロック解放後に古いフォームの値をそのまま上書きしてしまう。棟の編集フォームは
+    // 築月・地下階も毎回送るため、無関係な項目だけ直したつもりの保存でも、図面から
+    // 書き戻したばかりの値を黙って消し得る。version を条件にして、0件なら競合として返す。
+    const updated = await prisma.building.updateMany({
+      where: { id, version },
       data: updateData,
+    });
+    if (updated.count === 0) {
+      throw new ApiError(
+        409,
+        "データが他のユーザーにより更新されています。画面をリロードしてください。",
+        "CONFLICT",
+      );
+    }
+    const building = await prisma.building.findUnique({
+      where: { id },
       include: {
         creator: { select: { id: true, name: true } },
         _count: { select: { properties: true } },

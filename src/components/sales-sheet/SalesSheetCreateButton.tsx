@@ -10,6 +10,7 @@ import {
   mapOccupancyStatusToLandOccupancy,
 } from "@/lib/sales-sheet/occupancy";
 import { computeTsuboUnitPrice } from "@/lib/sales-sheet/tsubo";
+import { formatBuiltYearMonth } from "@/lib/built-year-month";
 import {
   OTHER_OPTION,
   hasOtherOption,
@@ -55,10 +56,13 @@ const FIELD_SETS: Record<SalesSheetTemplateKind, FieldConfig> = {
  * 新規デザイン作成 API へのリクエスト内容を組み立てる純関数。
  * テンプレ種別はサーバ側で物件種別から判定するため body には含めない（上書き項目のみ）。
  * mansion/land は multiselect（用途地域/地目 等）があるため string[] も許容する。
+ * [F3 Task5] saveToProperty(boolean)/propertyVersion・buildingVersion(number) も同じ body に
+ * 混ぜて送るため、値の型は unknown まで緩める（呼び出し元テストは従来どおり string/string[] のみで
+ * 呼んでも後方互換）。
  */
 export function buildCreateRequest(
   propertyId: string,
-  values: Record<string, string | string[]>,
+  values: Record<string, unknown>,
 ): { url: string; init: RequestInit } {
   return {
     url: `/api/properties/${propertyId}/sales-sheets/new`,
@@ -158,6 +162,114 @@ const AUTO_ONLY_KEYS_BY_KIND: Record<SalesSheetTemplateKind, ReadonlySet<string>
   building: BUILDING_AUTO_ONLY_KEYS,
 };
 
+/**
+ * [F3 Task5] ダイアログが「物件にも保存する」を送るために必要な、物件/棟の version と
+ * 棟の表示情報（呼び出し側がまだ持っていなければダイアログ自身が GET /api/properties/[id]
+ * から取得する＝下記 property prop 省略時の fetchedMeta と同じ形）。
+ */
+export interface SalesSheetPropertyMeta {
+  version: number;
+  buildingName: string;
+  /** 同じ棟に属する物件数（=「同じ棟の N部屋」の N）。棟が無ければ 0。 */
+  buildingUnitCount: number;
+  buildingVersion: number | null;
+  /**
+   * 棟の id。[@codex P1] 版番号だけで棟を照合すると、ダイアログを開いている間に別処理が
+   * 部屋の所属棟を張り替えた場合(この経路は物件の版番号を進めない)、新旧の棟がたまたま
+   * 同じ版番号なら「別の棟へ入れるはずだった値」が通ってしまう。どの棟に対する入力かを
+   * 一緒に送り、サーバ側で照合する。
+   */
+  buildingId: string | null;
+}
+
+/**
+ * [F3 Task5・コントローラ判断 R13] 区分マンションの作成ダイアログで、値を変えると
+ * 「同じ棟の N部屋にも反映されます」の注意を出すキー。
+ *
+ * ⚠brief 記載の BUILDING_KEYS には structure/totalFloors/totalUnits も含まれるが、この3項目は
+ * MANSION_AUTO_ONLY_KEYS（棟の値が正・図面からは書き換えられない＝サーバ側 route.ts の
+ * buildWriteback も実際にはこの2キーしか棟へ書き戻さない）。保存されない項目で
+ * 「反映されます」と告げるのは嘘になるため、実際に棟へ書き戻される basementFloors と
+ * builtYearMonth の2キーだけに絞る。
+ */
+const BUILDING_KEYS: readonly string[] = ["basementFloors", "builtYearMonth"];
+
+/**
+ * 築年月の「保存済みの値」ヒント文。
+ *
+ * [@codex P2] 区分・戸建・一棟で同じ分岐を3回書いていたため、片方だけ直すと
+ * 食い違った(実際に「区分だけ直して戸建・一棟が残る」指摘を受けた)。1か所に集約する。
+ * 築年と築月は片方だけでも保存できるので、月だけでも出す(図面側の
+ * formatBuiltYearMonth は月だけの値も出すため、ここで出さないと
+ * 「作成画面には何も出ていないのに図面には月が入る」ことになる)。
+ */
+export function builtYearMonthHint(
+  builtYear: number | null | undefined,
+  builtMonth: number | null | undefined,
+): string | undefined {
+  const text = formatBuiltYearMonth(builtYear, builtMonth);
+  if (!text) return undefined;
+  return builtMonth != null ? text : `${text}（月まで分かる場合は入力してください）`;
+}
+
+/**
+ * 物件へ書き戻すのに要る情報（version・棟の version）が揃っているか。
+ * - ready: 呼び出し元から property が渡っている、または取得済み
+ * - loading: 取得中（まだ version が無い）
+ * - failed: 取得に失敗した（version は手に入らない）
+ */
+export type WritebackMetaStatus = "ready" | "loading" | "failed";
+
+export interface WritebackGate {
+  /** 作成ボタンを押させない（物件の情報が届くのを待つ）。 */
+  submitBlocked: boolean;
+  /** 実際にサーバへ送る saveToProperty。 */
+  effectiveSaveToProperty: boolean;
+  /** チェックボックスを触らせない。 */
+  checkboxDisabled: boolean;
+  /** チェックボックスの下に出す説明（null＝出さない）。 */
+  notice: string | null;
+}
+
+/**
+ * [@codex P2] 「入れた値を物件にも保存する」の可否を、物件情報の取得状況から決める純関数。
+ *
+ * version が無いまま送るとサーバは安全側で conflict として書き戻しを捨てる（route.ts の設計）。
+ * 画面が「保存する」と表示したまま何も保存されない状態を作らないため、
+ * 取得中は作成そのものを待たせ、取得に失敗したときは保存しないことを明示する。
+ * チェックを外している人は version を必要としないので、どちらの場合も待たせない。
+ */
+export function writebackGate(
+  saveToProperty: boolean,
+  metaStatus: WritebackMetaStatus,
+): WritebackGate {
+  if (!saveToProperty || metaStatus === "ready") {
+    return {
+      submitBlocked: false,
+      effectiveSaveToProperty: saveToProperty,
+      checkboxDisabled: metaStatus === "failed",
+      notice:
+        metaStatus === "failed"
+          ? "物件の情報を読み込めませんでした。この図面の値は物件には保存されません。"
+          : null,
+    };
+  }
+  if (metaStatus === "loading") {
+    return {
+      submitBlocked: true,
+      effectiveSaveToProperty: true,
+      checkboxDisabled: false,
+      notice: "物件の情報を読み込んでいます…",
+    };
+  }
+  return {
+    submitBlocked: false,
+    effectiveSaveToProperty: false,
+    checkboxDisabled: true,
+    notice: "物件の情報を読み込めませんでした。この図面の値は物件には保存されません。",
+  };
+}
+
 function groupBySection(
   fields: readonly SheetField[],
 ): (readonly [string, SheetField[]])[] {
@@ -202,19 +314,35 @@ interface MansionAutoSource {
   floorNo?: number | null;
   managementFee?: number | null;
   repairReserveFee?: number | null;
+  /**
+   * [Task10 C-1] F3で物件へ保存した販売条件。land/house/building の AutoSource と同じ
+   * 5項目(区分は building relation を持つが、これらは buildWriteback が RULES.mansion で
+   * property のスカラ列へ保存するため property から読む)。
+   */
+  salePrice?: number | string | null;
+  saleTaxType?: string | null;
+  saleTaxAmount?: number | string | null;
+  access?: string | null;
+  parking?: string | null;
   building?: {
     name?: string | null;
     totalFloors?: number | null;
     builtYear?: number | null;
+    /** [Task10 C-1] 築月。ヒント文言に「◯年◯月」の形で出す。 */
+    builtMonth?: number | null;
     structureType?: string | null;
     managementCompany?: string | null;
     totalUnits?: number | null;
+    /** [Task10 C-1] 地下階。basementFloors のヒントに使う。 */
+    basementFloors?: number | null;
   } | null;
 }
 
 /**
  * 売土地版の MansionAutoSource（[F2-A Task4]）。土地は building relation を持たないため、
  * 物件スカラのみを防御的に（すべて任意で）読む。
+ * [Task10 C-1] salePrice/access/landArea/landAreaMethod は F3 で物件へ保存した販売条件。
+ * override が無ければ document 側も既定値として使うため、ダイアログにも同じ値をヒントで出す。
  */
 interface LandAutoSource {
   address?: string | null;
@@ -224,6 +352,10 @@ interface LandAutoSource {
   floorAreaRatio?: number | string | null;
   roadType?: string | null;
   roadWidth?: number | string | null;
+  salePrice?: number | string | null;
+  access?: string | null;
+  landArea?: number | string | null;
+  landAreaMethod?: string | null;
 }
 
 /**
@@ -231,6 +363,8 @@ interface LandAutoSource {
  * LandAutoSource と同じく物件スカラのみを防御的に（すべて任意で）読む。layoutType のみ
  * LandAutoSource には無い追加フィールド（土地は間取りを持たないが house は持つ＝
  * HOUSE_AUTO_ONLY_KEYS の layout に対応）。
+ * [Task10 C-1] salePrice以下は F3 で物件へ保存した販売条件(house は building relation を
+ * 配線しないため全て property のスカラ列)。LandAutoSource と同じ理由でヒントに出す。
  */
 interface HouseAutoSource {
   address?: string | null;
@@ -241,11 +375,26 @@ interface HouseAutoSource {
   floorAreaRatio?: number | string | null;
   roadType?: string | null;
   roadWidth?: number | string | null;
+  salePrice?: number | string | null;
+  saleTaxType?: string | null;
+  saleTaxAmount?: number | string | null;
+  access?: string | null;
+  landArea?: number | string | null;
+  landAreaMethod?: string | null;
+  structureType?: string | null;
+  aboveFloors?: number | null;
+  basementFloors?: number | null;
+  totalFloorArea?: number | string | null;
+  parking?: string | null;
+  builtYear?: number | null;
+  builtMonth?: number | null;
 }
 
 /**
  * 一棟(building)版の自動反映ソース（[F2-C Task3]）。building relation は配線せず layoutType も
  * 持たないため LandAutoSource と同一形。occupancy 語彙のみ house/mansion と同じ（下記 compute 参照）。
+ * [Task10 C-1] salePrice以下は HouseAutoSource と同じ理由(+totalUnits/grossYield/
+ * expectedIncomeは一棟固有の収益系)でヒントに出す。
  */
 interface BuildingAutoSource {
   address?: string | null;
@@ -255,6 +404,22 @@ interface BuildingAutoSource {
   floorAreaRatio?: number | string | null;
   roadType?: string | null;
   roadWidth?: number | string | null;
+  salePrice?: number | string | null;
+  saleTaxType?: string | null;
+  saleTaxAmount?: number | string | null;
+  access?: string | null;
+  landArea?: number | string | null;
+  landAreaMethod?: string | null;
+  structureType?: string | null;
+  aboveFloors?: number | null;
+  basementFloors?: number | null;
+  totalFloorArea?: number | string | null;
+  parking?: string | null;
+  totalUnits?: number | null;
+  grossYield?: number | string | null;
+  expectedIncome?: number | string | null;
+  builtYear?: number | null;
+  builtMonth?: number | null;
 }
 
 /**
@@ -282,6 +447,15 @@ function toPreviewString(v: string | number | null | undefined): string {
   return v === null || v === undefined ? "" : String(v);
 }
 
+/**
+ * [Task10 C-1] F3で物件(棟)に保存済みの値のヒント文言。作成ダイアログの hints は
+ * override可能なテキスト系フィールドの上に「自動反映: 」に続けて出す案内
+ * （FieldModelAutoValues.hints 参照・useDistrict/roadWidth と同じ枠組み）。
+ */
+function savedValueHint(v: string | number): string {
+  return `${v}（前回保存した値です。変更する場合は入力してください）`;
+}
+
 /** 物件詳細フェッチ結果 → 自動反映専用プレビュー値・occupancy初期選択・テキスト系ヒント。 */
 function computeMansionAutoValues(data: MansionAutoSource): FieldModelAutoValues {
   const b = data.building ?? undefined;
@@ -289,9 +463,22 @@ function computeMansionAutoValues(data: MansionAutoSource): FieldModelAutoValues
   if (data.zoningDistrict) {
     hints.useDistrict = `${data.zoningDistrict}（追加の用途地域があれば選択してください）`;
   }
-  if (b?.builtYear != null) {
-    hints.builtYearMonth = `${b.builtYear}年（月まで分かる場合は入力してください）`;
+  // [Task10 C-1] 棟に月まで保存済みなら「2008年3月」の形で見せる(document 側の
+  // fmtBuiltYear と同じ表記)。月が無ければ年のみ+案内文言。
+  const mansionBuiltHint = builtYearMonthHint(b?.builtYear, b?.builtMonth);
+  if (mansionBuiltHint) hints.builtYearMonth = mansionBuiltHint;
+  if (b?.basementFloors != null) {
+    hints.basementFloors = savedValueHint(`${b.basementFloors}階`);
   }
+  // [Task10 C-1] F3で物件へ保存した販売条件(build-document.ts の buildMansionValues と
+  // 同じ既定値・house/land/building と同じ5項目)。
+  if (data.salePrice != null && data.salePrice !== "") hints.price = savedValueHint(`${data.salePrice}万円`);
+  if (data.saleTaxType) hints.tax = savedValueHint(data.saleTaxType);
+  if (data.saleTaxAmount != null && data.saleTaxAmount !== "") {
+    hints.taxAmount = savedValueHint(`${data.saleTaxAmount}万円`);
+  }
+  if (data.access) hints.access = savedValueHint(data.access);
+  if (data.parking) hints.parking = savedValueHint(data.parking);
   return {
     preview: {
       // 建物マスタ優先・無ければ物件のスカラを使う。
@@ -326,6 +513,18 @@ function computeLandAutoValues(data: LandAutoSource): FieldModelAutoValues {
   if (data.roadWidth != null && data.roadWidth !== "") {
     hints.roadWidth = `${data.roadWidth}m（より正確な値が分かる場合は入力してください）`;
   }
+  // [Task10 C-1] F3で物件へ保存した販売条件(build-document.ts の既定値と同じ3項目)。
+  if (data.salePrice != null && data.salePrice !== "") {
+    hints.price = savedValueHint(`${data.salePrice}万円`);
+  }
+  if (data.access) {
+    hints.access = savedValueHint(data.access);
+  }
+  if (data.landArea != null && data.landArea !== "") {
+    hints.landArea = savedValueHint(
+      `${data.landArea}㎡${data.landAreaMethod ? `（${data.landAreaMethod}）` : ""}`,
+    );
+  }
   return {
     preview: {
       address: toPreviewString(data.address),
@@ -354,6 +553,28 @@ function computeHouseAutoValues(data: HouseAutoSource): FieldModelAutoValues {
   if (data.roadWidth != null && data.roadWidth !== "") {
     hints.roadWidth = `${data.roadWidth}m（より正確な値が分かる場合は入力してください）`;
   }
+  // [Task10 C-1] F3で物件へ保存した販売条件(house は building relation を配線しないため
+  // 全て property のスカラ列＝build-document.ts の buildHouseValues と同じ既定値)。
+  if (data.salePrice != null && data.salePrice !== "") hints.price = savedValueHint(`${data.salePrice}万円`);
+  if (data.saleTaxType) hints.tax = savedValueHint(data.saleTaxType);
+  if (data.saleTaxAmount != null && data.saleTaxAmount !== "") {
+    hints.taxAmount = savedValueHint(`${data.saleTaxAmount}万円`);
+  }
+  if (data.access) hints.access = savedValueHint(data.access);
+  if (data.landArea != null && data.landArea !== "") {
+    hints.landArea = savedValueHint(
+      `${data.landArea}㎡${data.landAreaMethod ? `（${data.landAreaMethod}）` : ""}`,
+    );
+  }
+  if (data.structureType) hints.structure = savedValueHint(data.structureType);
+  if (data.aboveFloors != null) hints.aboveFloors = savedValueHint(`${data.aboveFloors}階`);
+  if (data.basementFloors != null) hints.basementFloors = savedValueHint(`${data.basementFloors}階`);
+  if (data.totalFloorArea != null && data.totalFloorArea !== "") {
+    hints.buildingArea = savedValueHint(`${data.totalFloorArea}㎡`);
+  }
+  if (data.parking) hints.parking = savedValueHint(data.parking);
+  const builtHint = builtYearMonthHint(data.builtYear, data.builtMonth);
+  if (builtHint) hints.builtYearMonth = builtHint;
   return {
     preview: {
       address: toPreviewString(data.address),
@@ -381,6 +602,33 @@ function computeBuildingAutoValues(data: BuildingAutoSource): FieldModelAutoValu
   if (data.roadWidth != null && data.roadWidth !== "") {
     hints.roadWidth = `${data.roadWidth}m（より正確な値が分かる場合は入力してください）`;
   }
+  // [Task10 C-1] F3で物件へ保存した販売条件・収益系(一棟も house と同じく building
+  // relation を配線しないため全て property のスカラ列＝buildBuildingValues と同じ既定値)。
+  if (data.salePrice != null && data.salePrice !== "") hints.price = savedValueHint(`${data.salePrice}万円`);
+  if (data.saleTaxType) hints.tax = savedValueHint(data.saleTaxType);
+  if (data.saleTaxAmount != null && data.saleTaxAmount !== "") {
+    hints.taxAmount = savedValueHint(`${data.saleTaxAmount}万円`);
+  }
+  if (data.access) hints.access = savedValueHint(data.access);
+  if (data.landArea != null && data.landArea !== "") {
+    hints.landArea = savedValueHint(
+      `${data.landArea}㎡${data.landAreaMethod ? `（${data.landAreaMethod}）` : ""}`,
+    );
+  }
+  if (data.structureType) hints.structure = savedValueHint(data.structureType);
+  if (data.aboveFloors != null) hints.aboveFloors = savedValueHint(`${data.aboveFloors}階`);
+  if (data.basementFloors != null) hints.basementFloors = savedValueHint(`${data.basementFloors}階`);
+  if (data.totalFloorArea != null && data.totalFloorArea !== "") {
+    hints.totalFloorArea = savedValueHint(`${data.totalFloorArea}㎡`);
+  }
+  if (data.parking) hints.parking = savedValueHint(data.parking);
+  if (data.totalUnits != null) hints.totalUnits = savedValueHint(`${data.totalUnits}戸`);
+  if (data.grossYield != null && data.grossYield !== "") hints.grossYield = savedValueHint(`${data.grossYield}％`);
+  if (data.expectedIncome != null && data.expectedIncome !== "") {
+    hints.expectedIncome = savedValueHint(`${data.expectedIncome}万円`);
+  }
+  const builtHint = builtYearMonthHint(data.builtYear, data.builtMonth);
+  if (builtHint) hints.builtYearMonth = builtHint;
   return {
     preview: {
       address: toPreviewString(data.address),
@@ -977,24 +1225,49 @@ export function CatchCopyFields({
 export function SalesSheetCreateDialog({
   propertyId,
   kind,
-  open,
+  open = true,
   onClose,
+  property,
+  initialValues,
 }: {
   propertyId: string;
   kind: SalesSheetTemplateKind;
-  open: boolean;
+  /** 既定 open（/sales-sheets/new のピッカーは常に開いた状態で mount するため未指定で呼ぶ）。 */
+  open?: boolean;
   onClose: () => void;
+  /**
+   * [F3 Task5] 「物件にも保存する」の送信に使う物件/棟の version と棟の表示情報。呼び出し側
+   * （物件詳細ページ等・既に GET /api/properties/[id] 済み）が持っていれば渡す。省略時は
+   * ダイアログ自身が open 時に取得する（下記 useEffect の fetchedMeta）。
+   */
+  property?: SalesSheetPropertyMeta;
+  /** テスト/SSR 検証用の初期 field-model values（本番の通常経路では未指定＝空で開始）。 */
+  initialValues?: FieldModelValues;
 }) {
   const router = useRouter();
   const cfg = FIELD_SETS[kind];
   const fieldModel = FIELDS_BY_KIND[kind];
   const [values, setValues] = useState<Record<string, string>>({});
-  const [fieldModelValues, setFieldModelValues] = useState<FieldModelValues>({});
+  const [fieldModelValues, setFieldModelValues] = useState<FieldModelValues>(
+    () => initialValues ?? {},
+  );
   const [autoPreview, setAutoPreview] = useState<Record<string, string>>({});
   const [occupancySeed, setOccupancySeed] = useState<string | undefined>(undefined);
   const [hints, setHints] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // saveToProperty: 既定ON（[F3 Task5]・外すと saveToProperty:false を送る＝物件へは保存しない）。
+  const [saveToProperty, setSaveToProperty] = useState(true);
+  // property prop が無い呼び出し元（/sales-sheets/new のピッカー等）向けの自前フェッチ結果。
+  // property prop が渡っていればそちらを優先する（テストはこちらを使う＝SSR は effect を
+  // 実行しないため fetchedMeta は常に null のまま）。
+  const [fetchedMeta, setFetchedMeta] = useState<SalesSheetPropertyMeta | null>(null);
+  // 上の fetch の進行状況（property prop が渡っている呼び出し元では使わない）。"loading" で
+  // 始め、成否が確定したときだけ非同期コールバックの中で更新する（effect 内の同期 setState は
+  // eslint react-hooks/set-state-in-effect が禁じているため、開き直しでの "loading" 戻しはしない
+  // ＝一度失敗した後の開き直しは再取得が成功するまで保存を控える安全側に倒れる）。
+  const [fetchStatus, setFetchStatus] = useState<WritebackMetaStatus>("loading");
+  const meta = property ?? fetchedMeta;
 
   // field-model がある種別(mansion/land)のみ: 開いたときに物件（＋建物、mansionのみ）データを
   // 取得し、自動反映専用フィールドのプレビューと occupancy(現況) select の表示ヒント、
@@ -1011,6 +1284,14 @@ export function SalesSheetCreateDialog({
   // buildMansionValues/buildLandValues 側の決定的デフォルト
   // （mapOccupancyStatusToMansionOccupancy/mapOccupancyStatusToLandOccupancy、これらと
   // 同一関数）に委ねられる。
+  // [F3 Task5・レビュー指摘1] fetch の要否を左右するのは「property prop が渡っているか
+  // どうか」だけ（値の中身は使わない＝下の effect 内の分岐は if(!property) のみ）。にもかかわらず
+  // effect の deps に property オブジェクトをそのまま入れると、呼び出し元
+  // （properties/[id]/page.tsx）が毎レンダー新しいオブジェクトリテラルを作って渡している場合に
+  // 参照が変わるたびに再実行され、ダイアログを開いたまま無関係な再描画が起きるたびに
+  // fetchPropertyDetail が無駄に再送信される。真偽値（プリミティブ）だけを deps に入れて
+  // この揺れを断つ。
+  const hasPropertyMeta = property !== undefined;
   useEffect(() => {
     const compute = AUTO_COMPUTE_BY_KIND[kind];
     if (!open || !compute) return;
@@ -1022,20 +1303,57 @@ export function SalesSheetCreateDialog({
         setAutoPreview(auto.preview);
         setOccupancySeed(auto.occupancySeed);
         setHints(auto.hints);
+        // [F3 Task5] property prop 省略時のみ: 同じフェッチ結果から version/棟情報も拾う
+        // （呼び出し元が別途 GET しない経路＝/sales-sheets/new のピッカー用のフォールバック）。
+        if (!hasPropertyMeta) {
+          setFetchedMeta({
+            version: raw.version,
+            buildingName: raw.building?.name ?? "",
+            buildingUnitCount: raw.building?._count.properties ?? 0,
+            buildingVersion: raw.building?.version ?? null,
+            buildingId: raw.building?.id ?? null,
+          });
+        }
+        setFetchStatus("ready");
       })
       .catch(() => {
-        /* ベストエフォート。取得失敗時は自動反映プレビュー無しで継続する。 */
+        // 自動反映プレビューはベストエフォートのまま（無しで継続）。ただし version が
+        // 取れていない＝物件へは保存できない状態なので、下の writebackGate へ伝える。
+        if (!cancelled) setFetchStatus("failed");
       });
     return () => {
       cancelled = true;
     };
-  }, [open, kind, propertyId]);
+  }, [open, kind, propertyId, hasPropertyMeta]);
+
+  // @codex P2: 「物件にも保存する」は既定ONだが、version は上の fetch でしか手に入らない
+  // （property prop が無い呼び出し元＝/sales-sheets/new のピッカー経由）。取得前／取得失敗の
+  // まま送ると、サーバは version 欠落を安全側で conflict と見なして書き戻しを丸ごと捨てる＝
+  // 画面は「保存する」と言ったのに何も保存されない。状態を writebackGate に集約して、
+  // 取得中は作成を待たせ、失敗時はチェックを外して理由を出す。
+  const metaStatus: WritebackMetaStatus = hasPropertyMeta
+    ? "ready"
+    : AUTO_COMPUTE_BY_KIND[kind]
+      ? fetchStatus
+      : // 物件データを取りに行かない種別＝version を送れない（現状は該当なし）。
+        "failed";
+  const gate = writebackGate(saveToProperty, metaStatus);
 
   async function create() {
     setBusy(true);
     setError(null);
     try {
-      const body = fieldModel ? buildFieldModelOverridePayload(fieldModelValues) : values;
+      const overrides = fieldModel ? buildFieldModelOverridePayload(fieldModelValues) : values;
+      // [F3 Task5] saveToProperty と version を必ず送る。version を送らない/数値でないと
+      // サーバは安全側で conflict:true を返し物件へは書き込まない（route.ts の設計）ため、
+      // meta がまだ取得できていない場合も undefined のまま送る（意図的＝勝手に上書きしない）。
+      const body: Record<string, unknown> = {
+        ...overrides,
+        saveToProperty: gate.effectiveSaveToProperty,
+        propertyVersion: meta?.version,
+        buildingVersion: meta?.buildingVersion ?? undefined,
+        buildingId: meta?.buildingId ?? undefined,
+      };
       const { url, init } = buildCreateRequest(propertyId, body);
       const res = await fetch(url, init);
       if (!res.ok) {
@@ -1045,7 +1363,20 @@ export function SalesSheetCreateDialog({
         setError(errBody?.error?.message ?? "販売図面の作成に失敗しました");
         return;
       }
-      const { id } = (await res.json()) as { id: string };
+      const { id, propertyWriteback } = (await res.json()) as {
+        id: string;
+        propertyWriteback?: { saved: string[]; unreadable: string[]; conflict: boolean };
+      };
+      // エディタへ移る前に、物件への保存結果を残しておく（Task 6 がエディタ上部で読んで
+      // 一度だけ知らせる）。sessionStorage が使えない環境（プライベートウィンドウ等）でも
+      // 作成そのものは成功させる＝知らせが出ないだけに留める。
+      try {
+        if (propertyWriteback) {
+          sessionStorage.setItem(`sales-sheet-writeback:${id}`, JSON.stringify(propertyWriteback));
+        }
+      } catch {
+        /* プライベートウィンドウ等で保存できないだけ。作成自体は成功している。 */
+      }
       router.push(`/properties/${propertyId}/sales-sheets/${id}/edit`);
     } catch {
       setError("販売図面の作成に失敗しました");
@@ -1055,6 +1386,20 @@ export function SalesSheetCreateDialog({
   }
 
   if (!open) return null;
+
+  // [F3 Task5・R13] 棟へ実際に書き戻される basementFloors/builtYearMonth のどちらかに
+  // 値が入っているか（BUILDING_KEYS の定義・理由は定数コメント参照）。
+  const buildingFieldTouched = BUILDING_KEYS.some((k) => {
+    const v = fieldModelValues[k];
+    return typeof v === "string" && v.trim() !== "";
+  });
+  const showBuildingNote =
+    // 実際に保存されないときに「棟の他の部屋にも反映されます」と言うのは嘘になる。
+    gate.effectiveSaveToProperty &&
+    kind === "mansion" &&
+    buildingFieldTouched &&
+    meta !== null &&
+    meta.buildingUnitCount > 1;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -1106,6 +1451,28 @@ export function SalesSheetCreateDialog({
             ))}
           </div>
         )}
+        <label className="mt-3 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <input
+            type="checkbox"
+            checked={gate.effectiveSaveToProperty}
+            disabled={gate.checkboxDisabled}
+            onChange={(e) => setSaveToProperty(e.target.checked)}
+            className="h-4 w-4"
+          />
+          入れた値を物件にも保存する
+        </label>
+        {gate.notice && (
+          <p className="mt-1 pl-6 text-xs text-gray-600 dark:text-gray-400">{gate.notice}</p>
+        )}
+        {showBuildingNote && meta && (
+          <p className="mt-1 pl-6 text-xs text-gray-600 dark:text-gray-400">
+            {/* [F3 Task5・コントローラ判断R17] buildingUnitCount(=_count.properties) は編集中の
+                物件自身を含む棟内の総数。「にも」と言う以上、自分を除いた数で伝える
+                （buildingUnitCount - 1）。showBuildingNote の buildingUnitCount > 1 という
+                条件は「自分以外に1部屋以上ある」と同値のためそのまま。 */}
+            構造・築年月などは棟「{meta.buildingName}」の値です。同じ棟の他の {meta.buildingUnitCount - 1}部屋 にも反映されます。
+          </p>
+        )}
         {error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
           <button
@@ -1119,10 +1486,10 @@ export function SalesSheetCreateDialog({
           <button
             type="button"
             onClick={create}
-            disabled={busy}
+            disabled={busy || gate.submitBlocked}
             className="rounded bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
           >
-            {busy ? "作成中…" : "作成してエディタを開く"}
+            {gate.submitBlocked ? "物件の情報を読み込み中…" : busy ? "作成中…" : "作成してエディタを開く"}
           </button>
         </div>
       </div>
@@ -1135,10 +1502,17 @@ export function SalesSheetCreateButton({
   propertyId,
   canWrite,
   kind,
+  property,
 }: {
   propertyId: string;
   canWrite: boolean;
   kind: SalesSheetTemplateKind;
+  /**
+   * [F3 Task5] 呼び出し元（物件詳細ページ等）が既に GET /api/properties/[id] 済みなら渡す
+   * （version の再取得を待たずにダイアログが「物件にも保存する」を送れる）。省略時はダイアログが
+   * 自前で取得する（SalesSheetCreateDialog の property prop と同じ・任意）。
+   */
+  property?: SalesSheetPropertyMeta;
 }) {
   const cfg = FIELD_SETS[kind];
   const [open, setOpen] = useState(false);
@@ -1161,6 +1535,7 @@ export function SalesSheetCreateButton({
         kind={kind}
         open={open}
         onClose={() => setOpen(false)}
+        property={property}
       />
     </div>
   );
