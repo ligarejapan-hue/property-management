@@ -70,6 +70,12 @@ const REGISTRY_TEXT = [
 const PROPERTY_ID = "11111111-1111-1111-1111-111111111111";
 const context = { params: Promise.resolve({ id: PROPERTY_ID }) };
 const request = new Request("http://localhost/x") as never;
+/** POST は下見で見せた添付IDを body で受け取る。 */
+const postRequest = (attachmentId: unknown = "att-1") =>
+  new Request("http://localhost/x", {
+    method: "POST",
+    body: JSON.stringify({ attachmentId }),
+  }) as never;
 
 function setProperty(ownerCount: number) {
   (prisma.property.findUnique as unknown as Mock).mockResolvedValue({
@@ -139,7 +145,7 @@ describe("GET（下見）", () => {
 
 describe("POST（反映）", () => {
   it("⚠添付を作らないよう pdfBuffer は null、種別は owner 固定", async () => {
-    const res = await POST(request, context);
+    const res = await POST(postRequest(), context);
     expect(res.status).toBe(200);
 
     const args = (processRegistryPdf as unknown as Mock).mock.calls[0][0];
@@ -151,29 +157,53 @@ describe("POST（反映）", () => {
 
   it("⚠すでに所有者がいる物件は 409 で止め、取込処理を呼ばない", async () => {
     setProperty(1);
-    const res = await POST(request, context);
+    const res = await POST(postRequest(), context);
     expect(res.status).toBe(409);
     expect(processRegistryPdf).not.toHaveBeenCalled();
   });
 
   it("⚠全部事項しか無い物件は対象外（404）", async () => {
     setAttachment("all");
-    const res = await POST(request, context);
+    const res = await POST(postRequest(), context);
     expect(res.status).toBe(404);
     expect(processRegistryPdf).not.toHaveBeenCalled();
   });
 
   it("謄本から文字が読めないときは登録せず 422", async () => {
     (extractTextFromPdf as unknown as Mock).mockResolvedValue("   ");
-    const res = await POST(request, context);
+    const res = await POST(postRequest(), context);
     expect(res.status).toBe(422);
     expect(processRegistryPdf).not.toHaveBeenCalled();
   });
 
   it("所有者が読み取れないときは登録せず 422", async () => {
     (extractTextFromPdf as unknown as Mock).mockResolvedValue("所有者の表が無いテキスト");
-    const res = await POST(request, context);
+    const res = await POST(postRequest(), context);
     expect(res.status).toBe(422);
+    expect(processRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("⚠監査記録には添付の生ファイル名を渡さない（氏名を含みうる）", async () => {
+    await POST(postRequest(), context);
+    const args = (processRegistryPdf as unknown as Mock).mock.calls[0][0];
+    expect(args.fileName).not.toContain("謄本(所有者事項)");
+    expect(args.fileName).toBe("添付済みの謄本から所有者を反映");
+  });
+
+  it("⚠確認した添付と違う謄本が最新になっていたら 409", async () => {
+    const res = await POST(postRequest("att-old"), context);
+    expect(res.status).toBe(409);
+    expect(processRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("⚠添付IDの指定が無ければ 400（どれを承認したか分からない）", async () => {
+    // ⚠postRequest(undefined) は既定値が入ってしまうので、field ごと落とした body を作る
+    const noField = new Request("http://localhost/x", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }) as never;
+    const res = await POST(noField, context);
+    expect(res.status).toBe(400);
     expect(processRegistryPdf).not.toHaveBeenCalled();
   });
 
@@ -181,7 +211,7 @@ describe("POST（反映）", () => {
     (hasPermission as unknown as Mock).mockImplementation(
       (_p: unknown, resource: string) => resource !== "import",
     );
-    const res = await POST(request, context);
+    const res = await POST(postRequest(), context);
     expect(res.status).toBe(403);
     expect(processRegistryPdf).not.toHaveBeenCalled();
   });

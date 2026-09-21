@@ -15,6 +15,15 @@
  * ⚠添付は作らない(既にある)。`processRegistryPdf` は pdfBuffer が null の
  *   ときだけ添付を作らないので、必ず null で渡すこと。
  *
+ * ⚠**監査記録に添付の生ファイル名を載せない**。手で取り込んだ謄本は
+ *   「山田太郎_謄本.pdf」のように氏名や住所を含みうる。`processRegistryPdf` は
+ *   受け取った fileName を ImportJob と AuditLog.detail に保存するため、
+ *   ここでは固定のラベルを渡す(画面の下見には本当のファイル名を出す)。
+ *
+ * ⚠**下見で見せた添付を、そのまま反映する**。POST が「最新の1件」を引き直すと、
+ *   確認画面を開いている間に別の謄本が添付された場合、利用者は A を見て承認し
+ *   B の所有者が入る。POST は下見で返した添付IDを受け取り、一致しなければ拒否する。
+ *
  * ⚠**所有者の表として読めたときだけ登録する**。`parseRegistryText` には
  *   「所有者」の語の後ろを拾う簡易フォールバックがあり、表が無いテキストでも
  *   それらしい文字列を氏名にしてしまう。所有者事項は必ず表なので、
@@ -39,6 +48,12 @@ import { processRegistryPdf } from "@/lib/registry-pdf/process";
 
 /** この機能が扱う謄本の種別。全部事項は対象外。 */
 const SUPPORTED_CERTIFICATE_TYPE = "owner";
+
+/**
+ * 取込ジョブ・監査記録に残す名前。**添付の生ファイル名は使わない**(PIIを含みうる)。
+ * 利用者が見る下見には、別途ほんとうのファイル名を返している。
+ */
+const AUDIT_LABEL = "添付済みの謄本から所有者を反映";
 
 interface LoadedRegistry {
   attachmentId: string;
@@ -85,9 +100,16 @@ async function loadProperty(propertyId: string, action: "preview" | "apply") {
   return { session, property };
 }
 
-/** 添付済みの所有者事項を1件取り出し、文字を抜き出す。 */
+/**
+ * 添付済みの所有者事項を1件取り出し、文字を抜き出す。
+ *
+ * @param expectedAttachmentId 下見で見せた添付のID。渡されたときは、いちばん新しい
+ *   添付がそれと同じであることを確かめる(違えば 409)。確認画面を開いている間に
+ *   別の謄本が添付された場合に、見ていない方の所有者を入れてしまわないため。
+ */
 async function loadLatestRegistryText(
   propertyId: string,
+  expectedAttachmentId?: string,
 ): Promise<LoadedRegistry> {
   const attachment = await prisma.attachment.findFirst({
     where: {
@@ -104,6 +126,13 @@ async function loadLatestRegistryText(
       404,
       "この物件には所有者事項の謄本が添付されていません",
       "REGISTRY_NOT_FOUND",
+    );
+  }
+  if (expectedAttachmentId && attachment.id !== expectedAttachmentId) {
+    throw new ApiError(
+      409,
+      "確認した謄本とは別の謄本が追加されています。開き直してもう一度確認してください",
+      "REGISTRY_ATTACHMENT_CHANGED",
     );
   }
 
@@ -174,12 +203,25 @@ export async function GET(
 
 /** 反映: 既存の取込処理で所有者を登録する。添付は作らない。 */
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await context.params;
     const { session, property } = await loadProperty(id, "apply");
+
+    // 下見で見せた添付のID。古い呼び出し元が無い新設APIなので必須にする。
+    const body = (await request.json().catch(() => null)) as
+      | { attachmentId?: unknown }
+      | null;
+    const attachmentId = body?.attachmentId;
+    if (typeof attachmentId !== "string" || !attachmentId) {
+      throw new ApiError(
+        400,
+        "確認した謄本が指定されていません",
+        "ATTACHMENT_ID_REQUIRED",
+      );
+    }
 
     // すでに所有者がいる物件は対象外(上書き・二重登録を避ける)
     if (property.propertyOwners.length > 0) {
@@ -190,7 +232,7 @@ export async function POST(
       );
     }
 
-    const registry = await loadLatestRegistryText(id);
+    const registry = await loadLatestRegistryText(id, attachmentId);
     const owners = parseRegistryOwnerTable(registry.text);
     if (!owners || owners.length === 0) {
       throw new ApiError(
@@ -204,7 +246,8 @@ export async function POST(
       session,
       text: registry.text,
       propertyId: id,
-      fileName: registry.fileName,
+      // ⚠生ファイル名ではなく固定ラベル(ImportJob と AuditLog に残るため)
+      fileName: AUDIT_LABEL,
       edited: undefined,
       // ⚠必ず null。非 null にすると同じ謄本がもう一度添付されてしまう。
       pdfBuffer: null,

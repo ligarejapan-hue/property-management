@@ -482,6 +482,7 @@ export default function PropertyDetailPage({
     canWriteProperty,
     canDeleteProperty,
     canWriteOwner,
+    canImportWrite,
     canReadOwner,
     canRemoveOwnerLink,
     canCreateOwnerMemo,
@@ -532,6 +533,12 @@ export default function PropertyDetailPage({
     const canReadOwner = effectivePermissions.some(
       (p) => p.resource === "owner" && p.action === "read" && p.granted,
     );
+    // 「謄本から所有者を反映」は server 側で import:write を必須にしている。
+    // owner:write と import:write は別々に設定できるため、ここで同じ条件に
+    // そろえないと「押せるのに必ず403」のボタンが出る。
+    const canImportWrite = effectivePermissions.some(
+      (p) => p.resource === "import" && p.action === "write" && p.granted,
+    );
     const hasFullPerm = (resource: string) =>
       effectivePermissions.some(
         (p) => p.resource === resource && p.action === "full" && p.granted,
@@ -577,6 +584,7 @@ export default function PropertyDetailPage({
       canDeleteProperty,
       canWriteOwner,
       canReadOwner,
+      canImportWrite,
       canRemoveOwnerLink,
       canCreateOwnerMemo,
       corporateLookupConfigured,
@@ -786,6 +794,7 @@ export default function PropertyDetailPage({
             registryOwnerAttachmentCount={
               property.registryAttachmentCounts?.owner ?? 0
             }
+            canApplyRegistryOwners={canImportWrite}
             canRead={canReadOwner}
             canWrite={canWriteOwner}
             canRemoveOwnerLink={canRemoveOwnerLink}
@@ -987,6 +996,7 @@ function OwnerTab({
   owners,
   propertyId,
   registryOwnerAttachmentCount,
+  canApplyRegistryOwners,
   canRead,
   canWrite,
   canRemoveOwnerLink,
@@ -1003,6 +1013,8 @@ function OwnerTab({
    * ⚠null(謄本の閲覧権限が無い人)は呼び出し側で 0 に畳んでいる。
    */
   registryOwnerAttachmentCount: number;
+  /** server 側と同じ import:write。無い人にはボタンを出さない(押しても403のため)。 */
+  canApplyRegistryOwners: boolean;
   canRead: boolean;
   canWrite: boolean;
   /** 「この物件から外す」を出してよいか(= 管理者)。server 側と同じ条件。 */
@@ -1038,12 +1050,14 @@ function OwnerTab({
             謄本はあるのに所有者が空の物件を、追加の費用なしで埋めるための導線。
             **所有者が0件のときだけ**出す(既にいる物件への二重登録を避ける。server 側も 409)。
           */}
-          {owners.length === 0 && registryOwnerAttachmentCount > 0 && (
-            <RegistryOwnerApplyButton
-              propertyId={propertyId}
-              onApplied={onRefresh}
-            />
-          )}
+          {owners.length === 0 &&
+            registryOwnerAttachmentCount > 0 &&
+            canApplyRegistryOwners && (
+              <RegistryOwnerApplyButton
+                propertyId={propertyId}
+                onApplied={onRefresh}
+              />
+            )}
           <button
             type="button"
             onClick={() => setLinkModalOpen(true)}

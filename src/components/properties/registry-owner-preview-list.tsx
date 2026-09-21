@@ -50,8 +50,15 @@ export default function RegistryOwnerPreviewList({
         ))}
       </ul>
       <p className="text-xs text-gray-500 dark:text-gray-400">
-        ここに出ている内容がそのまま登録されます。違っていれば「やめる」を押して、手入力してください。
+        氏名と住所がそのまま登録されます。違っていれば「やめる」を押して、手入力してください。
       </p>
+      {owners.some((o) => o.share) ? (
+        // ⚠持分の割合を保存する場所が無い(所有者の欄にも紐付けの欄にも無い)。
+        //   いまは「共有者」という区分になるだけなので、登録されると書かない。
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          持分の割合は保存されません。共有者として登録され、割合が必要な場合は備考などに手入力してください。
+        </p>
+      ) : null}
     </div>
   );
 }

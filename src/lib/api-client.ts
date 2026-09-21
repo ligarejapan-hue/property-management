@@ -4454,6 +4454,8 @@ export async function fetchRegistryOwnerPreview(
 /** 反映: 添付済みの所有者事項から所有者を登録する。 */
 export async function applyRegistryOwners(
   propertyId: string,
+  /** 下見で見せた添付のID。別の謄本が追加されていたらサーバーが拒否する。 */
+  attachmentId: string,
 ): Promise<Record<string, unknown>> {
   if (USE_MOCK) {
     await mockDelay();
@@ -4461,6 +4463,10 @@ export async function applyRegistryOwners(
   }
   return apiFetch<Record<string, unknown>>(
     `/api/properties/${propertyId}/registry-owners`,
-    { method: "POST" },
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ attachmentId }),
+    },
   );
 }

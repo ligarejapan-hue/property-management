@@ -180,6 +180,36 @@ describe("parseRegistryOwnerTable（サービスの定型文が混ざる実物�
   });
 });
 
+describe("parseRegistryOwnerTable（見出しが繰り返される表）", () => {
+  it("⚠2ページ目以降の見出しを所有者として拾わない", () => {
+    // 共有者が多い謄本は改ページで表が続き、見出しがもう一度出る。
+    // 見出しの行を中身として読むと「氏名」という名前の所有者ができる。
+    const twoPages = [
+      "┏━━━━━━━━━┓",
+      "┃ 所 有 者 ┃",
+      "┠─────┬────┨",
+      "┃ 住 所 │ 氏 名 ┃",
+      "┠─────┼────┨",
+      "┃東京都渋谷区神宮前三丁目1番1号 │山田太郎 ┃",
+      "┗━━━━━┷━━━━┛",
+      "-- 1 of 2 --",
+      "┏━━━━━━━━━┓",
+      "┃ 所 有 者 ┃",
+      "┠─────┬────┨",
+      "┃ 住 所 │ 氏 名 ┃",
+      "┠─────┼────┨",
+      "┃東京都渋谷区神宮前三丁目1番1号 │山田花子 ┃",
+      "┗━━━━━┷━━━━┛",
+      "-- 2 of 2 --",
+    ].join("\n");
+
+    const owners = parseRegistryOwnerTable(twoPages);
+    expect(owners?.map((o) => o.name)).toEqual(["山田太郎", "山田花子"]);
+    expect(owners?.some((o) => o.name === "氏名")).toBe(false);
+    expect(owners?.some((o) => o.address === "住所")).toBe(false);
+  });
+});
+
 describe("parseRegistryText（表がある謄本）", () => {
   it("表の見出しを氏名として登録しない", () => {
     const parsed = parseRegistryText(TWO_COLUMN);

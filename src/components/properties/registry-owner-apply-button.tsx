@@ -56,17 +56,21 @@ export default function RegistryOwnerApplyButton({
   }, [propertyId]);
 
   const apply = useCallback(async () => {
+    const attachmentId = preview?.attachment.id;
+    if (!attachmentId) return;
     setPhase("applying");
     setErrorMsg(null);
     try {
-      await applyRegistryOwners(propertyId);
+      // ⚠下見で見せた添付を明示して送る。開いている間に別の謄本が
+      //   添付されていたらサーバーが拒否する(見ていない所有者を入れない)。
+      await applyRegistryOwners(propertyId, attachmentId);
       close();
       await onApplied();
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "登録できませんでした");
       setPhase("confirm");
     }
-  }, [propertyId, onApplied, close]);
+  }, [propertyId, preview, onApplied, close]);
 
   const owners = preview?.owners ?? [];
   const canApply = owners.length > 0 && !preview?.alreadyHasOwners;

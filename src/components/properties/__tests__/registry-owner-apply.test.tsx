@@ -75,13 +75,29 @@ describe("下見の表示", () => {
     expect(html).toContain("読み取れませんでした");
     expect(html).toContain("手入力");
   });
+
+  it("⚠持分の割合は保存されないと明示する（登録されると誤解させない）", () => {
+    const html = renderToStaticMarkup(
+      <RegistryOwnerPreviewList
+        fileName="x.pdf"
+        owners={[{ name: "山田太郎", address: "東京都1-1", share: "3分の1" }]}
+      />,
+    );
+    expect(html).toContain("持分の割合は保存されません");
+  });
 });
 
 describe("ボタンを出す条件（物件ページ）", () => {
   const src = readSource(PAGE);
 
   it("⚠所有者が0件のときだけ出す（既にいる物件への二重登録を防ぐ）", () => {
-    expect(src).toContain("owners.length === 0 && registryOwnerAttachmentCount > 0");
+    expect(src).toContain("owners.length === 0 &&");
+    expect(src).toContain("registryOwnerAttachmentCount > 0 &&");
+  });
+
+  it("⚠server が必須にしている import:write が無い人には出さない", () => {
+    expect(src).toContain("canApplyRegistryOwners");
+    expect(src).toContain('p.resource === "import" && p.action === "write"');
   });
 
   it("⚠謄本の件数は所有者事項(owner)だけを数える", () => {

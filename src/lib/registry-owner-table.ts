@@ -118,10 +118,15 @@ export function parseRegistryOwnerTable(
   for (const line of cellLines) {
     const cells = splitCells(line);
 
-    if (!layout) {
-      layout = readHeader(cells);
-      continue; // 見出しが見つかるまでの行(表題など)は読み飛ばす
+    // ⚠見出しは**毎行**判定する。共有者が多い謄本は改ページで表が続き、
+    //   2ページ目以降にも同じ見出しが出る。最初の1回しか見ないと、
+    //   2回目の見出しを中身として読み「氏名」という名前の所有者ができる。
+    const header = readHeader(cells);
+    if (header) {
+      layout = layout ?? header;
+      continue; // 見出しの行(と、見出しが見つかるまでの表題など)は中身ではない
     }
+    if (!layout) continue; // まだ見出しに出会っていない
 
     // 表題など、列数が足りない行は中身ではない
     if (cells.length < layout.cellCount) continue;
