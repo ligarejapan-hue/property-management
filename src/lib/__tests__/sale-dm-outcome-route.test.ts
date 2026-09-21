@@ -198,6 +198,17 @@ describe("PATCH outcome", () => {
     expect(JSON.stringify(audit.detail)).not.toContain("本文");
   });
 
+  // Task 9: この物件連動(dmStatus:no_send)は version を進めていなかった。
+  // dmStatus は物件の編集画面(PropertyEditForm「DM判断」)で変えられる項目のため、
+  // 進めないと編集画面を開いていた人の保存が黙って上書きする(Task 7 が
+  // 謄本取込の法人番号で直したのと同じ穴)。
+  it("(Task 9) returned_undeliverable の物件連動は version: { increment: 1 } を伴う", async () => {
+    const res = await PATCH(req({ deliveryStatus: "returned_undeliverable" }) as never, ctx());
+    expect(res.status).toBe(200);
+    const propArg = pm.property.update.mock.calls[0][0];
+    expect(propArg.data.version).toEqual({ increment: 1 });
+  });
+
   it("returned_other は物件連動しない", async () => {
     const res = await PATCH(req({ deliveryStatus: "returned_other" }) as never, ctx());
     expect(res.status).toBe(200);

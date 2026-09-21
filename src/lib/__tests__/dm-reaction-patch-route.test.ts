@@ -368,6 +368,22 @@ describe("PATCH .../dm-logs/[logId]/reaction(手動反響)", () => {
     expect(body.undeliverableLinked).toBe(true);
   });
 
+  // Task 9: この物件連動(dmStatus:no_send)は version を進めていなかった。
+  // dmStatus は物件の編集画面(PropertyEditForm「DM判断」)で変えられる項目のため、
+  // 進めないと編集画面を開いていた人の保存が黙って上書きする(Task 7 が
+  // 謄本取込の法人番号で直したのと同じ穴)。
+  it("(Task 9) undeliverable 連動は version: { increment: 1 } を伴う", async () => {
+    pm.propertyDmLog.findUnique.mockResolvedValue({
+      reactionStatus: "undeliverable",
+      reactedAt: null,
+      reactionSource: "manual",
+    });
+    const res = await PATCH(patchRequest({ status: "undeliverable" }), ctx);
+    expect(res.status).toBe(200);
+    const upd = pm.property.update.mock.calls[0][0];
+    expect(upd.data.version).toEqual({ increment: 1 });
+  });
+
   it("undeliverable からの訂正: 残数ゼロなら dmUndeliverableAt=null(dmStatus は据え置き)", async () => {
     pm.propertyDmLog.findFirst.mockResolvedValue(
       baseLog({ reactionStatus: "undeliverable", reactionSource: "manual" }),

@@ -237,9 +237,13 @@ export async function PATCH(
 
       let cleared = false;
       if (becameUndeliverable) {
+        // ⚠**version は必ず進める**(Task 9): dmStatus は物件の編集画面
+        //   (PropertyEditForm「DM判断」)で変えられる項目のため、進めないと
+        //   編集画面を開いていた人の保存がこの連動を黙って上書きする
+        //   (Task 7 が謄本取込の法人番号で直したのと同じ穴)。
         await tx.property.update({
           where: { id: draft.propertyId },
-          data: { dmStatus: "no_send", dmUndeliverableAt: now },
+          data: { dmStatus: "no_send", dmUndeliverableAt: now, version: { increment: 1 } },
         });
       } else if (clearedUndeliverable) {
         // C2(レース): 物件行ロック(tx 冒頭で取得済み)下で兄弟を数える。同一物件への同時 outcome 更新を

@@ -18,8 +18,12 @@ import { canAccessPropertyRecord } from "@/lib/property-access";
  *   別名(currentZip→owner_zip、currentAddress→owner_address、
  *   companyRegistryNumber→owner_corporate_number)がある分は resource ベースで数えるので
  *   このリストには出てこない。
+ * ⚠この一致は手作業(Task 9 時点で走査テストなし)。ドリフト検出は
+ *   `src/lib/edit-lock/__tests__/owner-field-permission-drift-scan.test.ts` を参照
+ *   (fieldWriteChecks の resource 集合と自動比較する)。export しているのはそのテストが
+ *   実体を import して比較するため(型情報のためだけに文字列を二重に書かない)。
  */
-const OWNER_FIELD_RESOURCES = [
+export const OWNER_FIELD_RESOURCES = [
   "owner_name",
   "owner_name_kana",
   "owner_phone",

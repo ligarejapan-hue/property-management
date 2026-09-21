@@ -741,16 +741,23 @@ export async function POST(request: NextRequest) {
           // ⚠**謄本の自動取得(scheduled)中の物件は書き換えない**(@codex #394 R27 P1)。
           //   取得は所在・地番を鍵にサイトから書類を選ぶ。取得中にここが書き換わると、
           //   選んだ書類が**別の対象になった物件**へ添付され、所有者の紐付けまで変わる。
-          //   この経路は version を上げない(=楽観ロックに掛からない)ため、
-          //   updateMany の条件で弾き、行エラーとして報告する(取得後に再実行できる)。
+          //   scheduled との競合は version ではなく registryStatus を where の条件に
+          //   して弾き、行エラーとして報告する(取得後に再実行できる)。
+          // ⚠**version は必ず進める**(Task 9): finalUpdateData は編集画面で変えられる
+          //   項目(UPDATABLE_PROPERTY_FIELDS)を書くため、進めないと編集画面を開いていた
+          //   人の保存がこの取込の変更を黙って上書きする(Task 7 が謄本取込の法人番号で
+          //   直したのと同じ穴)。
           const guarded = await prisma.property.updateMany({
             where: {
               id: dupHit.matchedId,
               registryStatus: { not: "scheduled" },
             },
-            data: finalUpdateData as Parameters<
-              typeof prisma.property.update
-            >[0]["data"],
+            data: {
+              ...(finalUpdateData as Parameters<
+                typeof prisma.property.update
+              >[0]["data"]),
+              version: { increment: 1 },
+            },
           });
           if (guarded.count === 0) {
             // ⚠エラー行では建物の郵便番号も反映しない(@codex #394 R28 P2)。

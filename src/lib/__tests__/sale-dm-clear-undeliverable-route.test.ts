@@ -111,6 +111,17 @@ describe("POST clear-dm-undeliverable", () => {
     expect(arg.data.dmStatus).toBe("send");
   });
 
+  // Task 9: restoreDmStatus 指定時の dmStatus 書き戻しは version を進めていなかった。
+  // dmStatus は物件の編集画面(PropertyEditForm「DM判断」)で変えられる項目のため、
+  // 進めないと編集画面を開いていた人の保存が黙って上書きする(Task 7 が
+  // 謄本取込の法人番号で直したのと同じ穴)。
+  it("(Task 9) restoreDmStatus 指定時は version: { increment: 1 } を伴う", async () => {
+    const res = await POST(req({ restoreDmStatus: "send" }) as never, ctx());
+    expect(res.status).toBe(200);
+    const arg = pm.property.update.mock.calls[0][0];
+    expect(arg.data.version).toEqual({ increment: 1 });
+  });
+
   it("存在しない物件は 404", async () => {
     pm.property.findUnique.mockResolvedValue(null);
     const res = await POST(req() as never, ctx());

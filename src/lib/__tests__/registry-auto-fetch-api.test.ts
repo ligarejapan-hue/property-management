@@ -507,6 +507,10 @@ describe("PR4: runRegistryAutoFetch (mock provider 接続)", () => {
     expect(lock).toBeTruthy();
     expect(release).toBeTruthy();
     expect(release![0].where.registryStatus).toBe("scheduled");
+    // Task 9: このロック解除(release)も registryStatus(編集画面で変えられる項目)を
+    // 書くので version を進めていなかった穴があった(process.ts側の同種の書き込みは
+    // 既に進めている・Task 7 と同じ穴)。
+    expect(release![0].data.version).toEqual({ increment: 1 });
     // processRegistryPdf には進まない / obtained にもしない
     expect(pm.importJob.create).not.toHaveBeenCalled();
     expect(

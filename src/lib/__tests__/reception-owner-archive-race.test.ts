@@ -379,3 +379,97 @@ describe("POST /api/import/reception-owner: archive race-safety", () => {
     expect(text).not.toContain(OWNER_ADDRESS);
   });
 });
+
+// Task 9: 物件の空欄補完(地番/家屋番号/部屋番号)と DM判断の hold→send 昇格は、
+// どちらも編集画面(PropertyEditForm)で変えられる項目を書くのに version を
+// 進めていなかった。進めないと編集画面を開いていた人の保存が黙って上書きする
+// (Task 7 が謄本取込の法人番号で直したのと同じ穴)。
+describe("POST /api/import/reception-owner: version を進める(Task 9)", () => {
+  it("物件の空欄補完(lotNumber)は version: { increment: 1 } を伴う", async () => {
+    pm.owner.findMany.mockResolvedValue([]);
+    pm.owner.findFirst.mockResolvedValue(null);
+    vi.mocked(buildCombinedMatches).mockReturnValue([
+      {
+        reception: {
+          rowNumber: 1,
+          matchKey: "k",
+          fColumn: "",
+          kColumn: "",
+          lotNumber: "12番3",
+          buildingNumber: "",
+          coOwnersNote: "",
+          shinkiValue: "",
+          dlMarked: false,
+        },
+        propertyMatch: {
+          status: "matched",
+          property: { id: PROPERTY_ID },
+        },
+        owners: [
+          {
+            name: OWNER_NAME,
+            address: OWNER_ADDRESS,
+            zip: null,
+            dm: "",
+            propertyAddress: "",
+            roomNo: null,
+          },
+        ],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any,
+    ]);
+
+    const res = await POST(makeRequest());
+    expect([200, 201]).toContain(res.status);
+
+    expect(pm.property.update).toHaveBeenCalledTimes(1);
+    const call = pm.property.update.mock.calls[0][0] as { data: Record<string, unknown> };
+    expect(call.data.lotNumber).toBe("12番3");
+    expect(call.data.version).toEqual({ increment: 1 });
+  });
+
+  it("DM○による dmStatus: hold→send の昇格は version: { increment: 1 } を伴う", async () => {
+    pm.owner.findMany.mockResolvedValue([]);
+    pm.owner.findFirst.mockResolvedValue(null);
+    pm.property.updateMany.mockResolvedValue({ count: 1 });
+    vi.mocked(buildCombinedMatches).mockReturnValue([
+      {
+        reception: {
+          rowNumber: 1,
+          matchKey: "k",
+          fColumn: "",
+          kColumn: "",
+          lotNumber: "",
+          buildingNumber: "",
+          coOwnersNote: "",
+          shinkiValue: "",
+          dlMarked: false,
+        },
+        propertyMatch: {
+          status: "matched",
+          property: { id: PROPERTY_ID },
+        },
+        owners: [
+          {
+            name: OWNER_NAME,
+            address: OWNER_ADDRESS,
+            zip: null,
+            dm: "○",
+            propertyAddress: "",
+            roomNo: null,
+          },
+        ],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any,
+    ]);
+
+    const res = await POST(makeRequest());
+    expect([200, 201]).toContain(res.status);
+
+    const dmCall = pm.property.updateMany.mock.calls.find(
+      (c) => c[0]?.where?.dmStatus === "hold",
+    );
+    expect(dmCall).toBeDefined();
+    expect(dmCall![0].data).toEqual({ dmStatus: "send", version: { increment: 1 } });
+  });
+});

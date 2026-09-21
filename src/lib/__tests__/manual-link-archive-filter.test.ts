@@ -113,7 +113,7 @@ vi.mock("@/lib/prisma", () => {
 
 import prisma from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
-import { parseRecoveredOwners } from "@/lib/reception-owner-link";
+import { parseRecoveredOwners, calcPropertyUpdates } from "@/lib/reception-owner-link";
 import { POST } from "../../app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route";
 
 const JOB_ID = "11111111-1111-4111-8111-111111111111";
@@ -351,5 +351,28 @@ describe("POST manual-link-reception-owner: archived owner を再利用しない
     const serialized = JSON.stringify(call.detail);
     expect(serialized).not.toContain(OWNER_NAME);
     expect(serialized).not.toContain(OWNER_ADDRESS);
+  });
+});
+
+// Task 9: 物件の地番/家屋番号の空欄補完(calcPropertyUpdates の結果を書く経路)は
+// version を進めていなかった。lotNumber/buildingNumber は編集画面(PropertyEditForm)で
+// 変えられる項目のため、進めないと編集画面を開いていた人の保存がこの補完を
+// 黙って上書きする(Task 7 が謄本取込の法人番号で直したのと同じ穴)。
+describe("POST manual-link-reception-owner: 物件の空欄補完は version を進める", () => {
+  it("tx.property.update に渡る data は version: { increment: 1 } を含む", async () => {
+    pm._tx.owner.findMany.mockResolvedValue([]);
+    pm._tx.owner.findFirst.mockResolvedValue(null);
+    vi.mocked(calcPropertyUpdates).mockReturnValue({ lotNumber: "12番3" });
+
+    const res = await POST(makeRequest(), makeParams());
+    expect(res.status).toBe(200);
+
+    expect(pm._tx.property.update).toHaveBeenCalledTimes(1);
+    const call = pm._tx.property.update.mock.calls[0][0] as {
+      data: Record<string, unknown>;
+    };
+    expect(call.data.version).toEqual({ increment: 1 });
+    // 補完対象の項目自体は従来どおり書く(version 追加で消えていないことの確認)。
+    expect(call.data.lotNumber).toBe("12番3");
   });
 });

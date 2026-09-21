@@ -220,6 +220,12 @@ const PROVIDER_ERROR_STATUS: Readonly<Record<RegistryFetchErrorCode, number>> = 
  * registryStatus を scheduled から元の値へ best-effort で戻す（ロック解除）。
  * まだ scheduled のときだけ戻し、並行更新を踏まない。解除失敗は握りつぶす
  * （元のエラーを優先するため）。
+ *
+ * ⚠**version は必ず進める**(Task 9): registryStatus は物件の編集画面
+ *   (PropertyEditForm「登記状況」)で変えられる項目(scheduled への予約時の
+ *   update・process.ts の取得状況前進は既に進めている)。この解除だけ進めて
+ *   いなかったため、scheduled のまま編集画面を開いていた人の保存がこの解除を
+ *   黙って上書きし得た(Task 7 が謄本取込の法人番号で直したのと同じ穴)。
  */
 async function releaseSchedulingLock(
   propertyId: string,
@@ -228,7 +234,7 @@ async function releaseSchedulingLock(
   try {
     await prisma.property.updateMany({
       where: { id: propertyId, registryStatus: "scheduled" },
-      data: { registryStatus: previousStatus },
+      data: { registryStatus: previousStatus, version: { increment: 1 } },
     });
   } catch {
     // ロック解除失敗は記録のみ（元のエラーを優先）。

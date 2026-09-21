@@ -136,6 +136,19 @@ describe("reception-owner route Phase D 統合", () => {
       /select:\s*\{[\s\S]{0,200}corporateNumber:\s*true/,
     );
   });
+
+  // Task 9: この空欄埋めは version を進めていなかった。corporateNumber は
+  // 所有者の編集画面(properties/[id]/page.tsx の所有者カード)で変えられる項目
+  // なので、進めないと編集画面を開いていた人の保存が黙って上書きする
+  // (Task 7 が謄本取込の法人番号で直したのと同じ穴)。
+  it("(Task 9) reuse パスの空欄埋めは version: { increment: 1 } を必ず書く", () => {
+    expect(
+      receptionOwnerSrc,
+      "reception-owner の corporateNumber:null 空欄埋めから version:{increment:1} が消えている(Task 9のバグ修正が後退した可能性)",
+    ).toMatch(
+      /where:\s*\{\s*id:\s*candidateOwnerId!,\s*corporateNumber:\s*null\s*\}[\s\S]{0,100}data:\s*\{\s*corporateNumber:\s*cnDecision\.corporateNumber,\s*version:\s*\{\s*increment:\s*1\s*\}\s*\}/,
+    );
+  });
 });
 
 describe("registry-pdf route Phase D 統合", () => {

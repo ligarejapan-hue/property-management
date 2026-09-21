@@ -454,12 +454,16 @@ export async function POST(
         // 更新していた場合、新しい値を Job A の oldValue で上書きしてしまう競合があった。
         // 無条件 update ではなく updateMany + where に updatedAt=expectedUpdatedAt を積み、
         // count=0 (= 他リクエストの commit で updatedAt が変わった) のときは skip する。
+        // ⚠**version は必ず進める**(Task 9): restoreData は編集画面で変えられる項目
+        //   (RESTORABLE_PROPERTY_FIELDS)を書き戻すため、進めないと編集画面を開いていた
+        //   人の保存がこの復元を黙って上書きする(Task 7 が謄本取込の法人番号で
+        //   直したのと同じ穴)。
         const stalenessCheck = await tx.property.updateMany({
           where: {
             id: plan.propertyId,
             updatedAt: plan.expectedUpdatedAt,
           },
-          data: restoreData,
+          data: { ...restoreData, version: { increment: 1 } },
         });
         if (stalenessCheck.count === 0) {
           blockedDetails.push({
