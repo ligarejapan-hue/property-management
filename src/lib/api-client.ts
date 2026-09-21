@@ -29,6 +29,9 @@ import type { AddressLookupCandidate } from "./address-lookup/types";
 import type { CorporateLookupRecord } from "./corporate-lookup/types";
 // DM控えの冪等キー採番(本番はHTTPのため crypto.randomUUID は使えない)。
 import { safeRandomId } from "./random-id";
+// 編集中の鍵(仕様 4章)。ヘッダ組み立ては editLockHeaders() の1本だけを通す。
+import { editLockHeaders, getScreenToken } from "./edit-lock/screen-token-client";
+import type { AcquireResponse, HeartbeatResponse } from "./edit-lock/ui-state";
 
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 
@@ -4423,4 +4426,103 @@ export async function fetchRegistryPreflight(
       body: JSON.stringify({ propertyIds }),
     },
   );
+}
+
+// ---------- 編集中の鍵(第1段の窓口5本・仕様 4章) ----------
+//
+// ⚠この節の窓口は USE_MOCK を見ない(サーバ側5本は本番に既に live)。
+//   すべて editLockHeaders() 経由でヘッダを組み立てる(合言葉+鍵の世代)。
+
+/** 取得。423(他の人が持っている)は**エラーにせず**裸の応答をそのまま返す。 */
+export async function acquireEditLockApi(
+  resourceType: "property" | "owner",
+  resourceId: string,
+): Promise<AcquireResponse> {
+  const res = await fetch("/api/edit-locks/acquire", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...editLockHeaders() },
+    body: JSON.stringify({ resourceType, resourceId }),
+  });
+  if (res.status === 423) return (await res.json()) as AcquireResponse;
+  if (!res.ok) throw await toApiError(res);
+  return (await res.json()) as AcquireResponse;
+}
+
+/** 合図。404(資源が消えた)は `{notFound:true}` に畳んで返す(仕様 6.2・N5)。 */
+export async function heartbeatEditLockApi(
+  resourceType: "property" | "owner",
+  resourceId: string,
+  active: boolean,
+): Promise<HeartbeatResponse> {
+  const res = await fetch("/api/edit-locks/heartbeat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...editLockHeaders() },
+    body: JSON.stringify({ resourceType, resourceId, active }),
+  });
+  if (res.status === 404) return { notFound: true };
+  if (!res.ok) throw await toApiError(res);
+  return (await res.json()) as HeartbeatResponse;
+}
+
+/** 解除。常に 200 が返る契約なので、失敗しても画面は進める。 */
+export async function releaseEditLockApi(
+  resourceType: "property" | "owner",
+  resourceId: string,
+  lockId: string,
+): Promise<void> {
+  await fetch("/api/edit-locks/release", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...editLockHeaders() },
+    body: JSON.stringify({ resourceType, resourceId, lockId }),
+  }).catch(() => {});
+}
+
+/** 管理者の強制解除。409 `EDIT_LOCK_CHANGED` は封筒のエラーとして投げる。 */
+export async function forceReleaseEditLockApi(
+  resourceType: "property" | "owner",
+  resourceId: string,
+  lockId: string,
+): Promise<void> {
+  await apiFetch<{ ok: true }>("/api/edit-locks/force-release", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...editLockHeaders() },
+    body: JSON.stringify({ resourceType, resourceId, lockId }),
+  });
+}
+
+export interface EditLockStatusRow {
+  resourceType: "property" | "owner";
+  resourceId: string;
+  state: "mine" | "held_by_self_other_screen" | "held_by_other" | "free";
+  since?: string;
+  holderName?: string;
+  /** 管理者にだけ返る(強制解除に要る)。 */
+  lockId?: string;
+}
+
+/** 状態の一覧。⚠窓口は1回50件まで(仕様 4.5)なので呼び出し側で分割する。 */
+export async function fetchEditLockStatus(
+  resources: { resourceType: "property" | "owner"; resourceId: string }[],
+): Promise<EditLockStatusRow[]> {
+  if (resources.length === 0) return [];
+  const { locks } = await apiFetch<{ locks: EditLockStatusRow[] }>("/api/edit-locks/status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...editLockHeaders() },
+    body: JSON.stringify({ resources }),
+  });
+  return locks;
+}
+
+/** 画面を閉じるときの解除(beacon)。⚠ヘッダを付けられないので合言葉は本文に入れる(窓口が対応済)。 */
+export function releaseEditLockByBeacon(
+  resourceType: "property" | "owner",
+  resourceId: string,
+  lockId: string,
+): void {
+  try {
+    const body = JSON.stringify({ resourceType, resourceId, lockId, screenToken: getScreenToken() });
+    navigator.sendBeacon("/api/edit-locks/release", new Blob([body], { type: "text/plain" }));
+  } catch {
+    /* 閉じる処理は最善努力。失敗しても5分で期限切れになる */
+  }
 }
