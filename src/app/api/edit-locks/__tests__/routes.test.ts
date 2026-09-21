@@ -322,6 +322,23 @@ describe("POST /api/edit-locks/heartbeat", () => {
     expect(res.status).toBe(404);
     expect(heartbeatEditLock).not.toHaveBeenCalled();
   });
+
+  // review N5: 物件側だけでなく所有者側も同じ対称性を持つことを固定する
+  // (owner:write は資源に依存しないため権限漏れは無かったが、存在確認の窓口としての
+  // 対称性が欠けていた=物件は404で塞ぐのに所有者は素通りしていた)。
+  it("アーカイブ済みの所有者は 404(acquireと同じ)", async () => {
+    pm.owner.findUnique.mockResolvedValue({ id: PROP, isArchived: true });
+    const res = await hb({ resourceType: "owner", resourceId: PROP, active: true });
+    expect(res.status).toBe(404);
+    expect(heartbeatEditLock).not.toHaveBeenCalled();
+  });
+
+  it("存在しない所有者は 404", async () => {
+    pm.owner.findUnique.mockResolvedValue(null);
+    const res = await hb({ resourceType: "owner", resourceId: PROP, active: true });
+    expect(res.status).toBe(404);
+    expect(heartbeatEditLock).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/edit-locks/release", () => {

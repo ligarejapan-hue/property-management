@@ -32,11 +32,14 @@ export async function POST(request: Request) {
       throw new ApiError(400, "画面の識別子がありません。画面を再読み込みしてください", "EDIT_SCREEN_REQUIRED");
     }
 
-    // ⚠M2: 存在しない/アーカイブ済みの物件は acquire と同じく404で塞ぐ。
+    // ⚠M2/N5: 存在しない/アーカイブ済みの資源は acquire と同じく404で塞ぐ。
     //   以前は `if (property && !property.isArchived)` の中でだけ権限確認していたため、
     //   アーカイブ済みの物件に生きた鍵が(削除・後始末のごく短い競合window等で)残っていると、
     //   閲覧権限の無い利用者にまで `state: "taken", holderName` が届いてしまっていた。
     //   acquire(acquire/route.ts)と揃え、存在確認を権限確認より前に必ず行う。
+    //   ⚠N5: owner 側も物件と対称に存在・アーカイブを確認する(以前は物件だけ直していた=
+    //   権限漏れは無い(owner:writeは資源に依存しない)が、404を返す窓口としての対称性が
+    //   欠けていた)。
     if (resourceType === "property") {
       const property = await prisma.property.findUnique({
         where: { id: resourceId },
@@ -47,6 +50,13 @@ export async function POST(request: Request) {
       }
       assertCanLockProperty(session, perms, property);
     } else {
+      const owner = await prisma.owner.findUnique({
+        where: { id: resourceId },
+        select: { id: true, isArchived: true },
+      });
+      if (!owner || owner.isArchived) {
+        throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
+      }
       assertCanLockOwner(perms);
     }
 

@@ -10,16 +10,19 @@ import { join, relative } from "node:path";
  * (=この機能が持ってはいけない唯一の失敗)。
  *
  * `src/` 全体を**掃き出す**(`version-increment-scan.test.ts` と同じ `extractBalancedSpan`
- * 方式): `property.delete(` / `owner.delete(` の呼び出し行と、`.update(`/`.updateMany(`/
- * `.upsert(` の呼び出しのうち `data:` オブジェクトが `isArchived: true` を含むものを
- * 検出する。検出した箇所は1件残らず下の一覧(KNOWN_CLEANUP_SITES)に載っていること、
- * かつ一覧の各箇所が実際に `deleteEditLocksFor` を(同じファイル内で)呼んでいることを
- * 確認する。
+ * 方式): `property.delete(`/`property.deleteMany(`/`owner.delete(`/`owner.deleteMany(`
+ * の呼び出し行と、`.update(`/`.updateMany(`/`.upsert(` の呼び出しのうち `data:` オブジェクト
+ * が `isArchived: true` を含むものを検出する(review N1: 単数形の `delete(` だけでは
+ * `deleteMany(` を見落とす。この版番号スキャンの `updateMany` は最初から対象に
+ * 入っていたのに、こちらの `delete` 系は単数形しか見ていなかった)。検出した箇所は
+ * 1件残らず下の一覧(KNOWN_CLEANUP_SITES)に載っていること、かつ一覧の各箇所が実際に
+ * `deleteEditLocksFor` を(同じファイル内で)呼んでいることを確認する。
  *
  * 今日時点の正しい全体像(review本文で実測確認済み): `property.delete(` が2本
  * (物件の削除・取込の取り消し)、`isArchived: true` を書く箇所が2本(所有者の
- * アーカイブ・所有者の統合で消えるsource)の計4本。`owner.delete(` は無い(所有者は
- * 物理削除しない)。物件をアーカイブする書き込み経路も無い。
+ * アーカイブ・所有者の統合で消えるsource)の計4本。`property.deleteMany(`/
+ * `owner.delete(`/`owner.deleteMany(` はどれも無い(所有者は物理削除しない/
+ * 一括物理削除の経路が無い)。物件をアーカイブする書き込み経路も無い。
  */
 const KNOWN_CLEANUP_SITES: Record<string, string> = {
   "src/app/api/properties/[id]/route.ts:550": "property.delete(物件の削除)",
@@ -121,7 +124,9 @@ function inlineDataObjectSpan(callArgs: string): string | null {
   return extractBalancedSpan(callArgs, openBraceAbs, "{", "}");
 }
 
-const DELETE_PATTERN = /\b(?:property|owner)\.delete\(/;
+// review N1: `\(?:Many\)?` を足し、`property.deleteMany(`/`owner.deleteMany(`(一括物理削除)
+// も見落とさないようにする(`delete(` だけの単数形は片方の書き方しか捕まえない)。
+const DELETE_PATTERN = /\b(?:property|owner)\.delete(?:Many)?\(/;
 const WRITE_CALL_PATTERN = /\b(?:property|owner)\.(?:update|updateMany|upsert)\(/;
 const IS_ARCHIVED_TRUE_PATTERN = /\bisArchived\s*:\s*true\b/;
 

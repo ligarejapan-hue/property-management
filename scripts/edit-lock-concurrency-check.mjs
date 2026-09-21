@@ -68,7 +68,8 @@
  *        [9] heartbeatEditLock 相当: active=true/false の両分岐が1件ずつ更新でき、
  *            他人の合図は0件で弾かれる(boolean パラメータ推論 + timestamptz/timestamp
  *            の CASE 型解決が実DBで通ることの確認。CIでは絶対に踏めない)
- *        [10] forceReleaseEditLock 相当: 1回目は1件・二重解除は0件
+ *        [10] forceReleaseEditLock 相当: 1回目は1件・二重解除は0件・H7の墓標の意味論
+ *            (force_released=true/active=false が実際に返る)まで確認(review N2/N3)
  *        [11] isResourceEditLocked 相当: 墓標後は false・生きた鍵は true
  *
  * ── このスクリプトがカバーする項目(Task 8 レビュー観点との対応) ───────────
@@ -496,13 +497,44 @@ async function main() {
   if (hbTrue.length !== 1 || hbFalse.length !== 1 || hbWrongHolder.length !== 0) process.exitCode = 1;
 
   // [10] forceReleaseEditLock 相当: 世代+資源が一致した行にだけ墓標を立て、二重解除は0件。
-  const lockRowNow = (await assertNotLockedByOtherQuery())[0];
-  const frFirst = await forceReleaseQuery(lockRowNow.id, u2.id);
-  const frSecond = await forceReleaseQuery(lockRowNow.id, u2.id);
-  console.log(
-    `[10] forceReleaseEditLock 相当: 1回目 ${frFirst.length}件 / 2回目(二重解除) ${frSecond.length}件(1件・0件が正しい)`,
-  );
-  if (frFirst.length !== 1 || frSecond.length !== 0) process.exitCode = 1;
+  // review N2: [8]の前提([9]が[8]の鍵に依存しているのと同じ関係で[10]も[8]の鍵に依存する)
+  // が崩れていたら、ここで `undefined.id` の生の TypeError を出して[11]の診断まで
+  // 失わせるのではなく、期待(1件)と実際(件数)を出して非0で終わり、後続の[11]は
+  // スキップする(手動ゲートの目的=診断であって、落とすことそのものではない)。
+  const lockRowNowRows = await assertNotLockedByOtherQuery();
+  if (lockRowNowRows.length !== 1) {
+    console.error(
+      `[10] 前提の鍵の読み取りに失敗しました(想定外): 期待=1件 / 実際=${lockRowNowRows.length}件。` +
+        "[8][9]のどこかで鍵が失われている可能性がある。[10]の残りの手順(墓標を立てる/H7の意味論確認)は" +
+        "スキップする。[11]は([10]の結果に関わらず)引き続き実行する。",
+    );
+    process.exitCode = 1;
+  } else {
+    const lockRowNow = lockRowNowRows[0];
+    const frFirst = await forceReleaseQuery(lockRowNow.id, u2.id);
+    const frSecond = await forceReleaseQuery(lockRowNow.id, u2.id);
+    console.log(
+      `[10] forceReleaseEditLock 相当: 1回目 ${frFirst.length}件 / 2回目(二重解除) ${frSecond.length}件(1件・0件が正しい)`,
+    );
+    if (frFirst.length !== 1 || frSecond.length !== 0) process.exitCode = 1;
+
+    // review N3(H7): ここまでの評価はすべて force_released_at IS NULL の行に対して
+    // 行われており、新設した墓標の期限切れ式(force_released AS ... の計算)が
+    // **true を返すところ**を一度も見ていない(型が通ることの確認止まり)。
+    // force-release 直後(=墓標がまだ猶予=EDIT_LOCK_HEARTBEAT_GRACE_MS 以内)の行を
+    // 読み、force_released=true・active=false が実際に返ることを確認する。
+    const tombstoneRows = await assertNotLockedByOtherQuery();
+    const tombstoneOk =
+      tombstoneRows.length === 1 &&
+      tombstoneRows[0].force_released === true &&
+      tombstoneRows[0].active === false;
+    console.log(
+      `[10] H7 墓標の意味論(force_released式が実際にtrueを返すか): ` +
+        `force_released=${tombstoneRows[0]?.force_released} active=${tombstoneRows[0]?.active}` +
+        `(true/falseが正しい。猶予内=force_released=true)`,
+    );
+    if (!tombstoneOk) process.exitCode = 1;
+  }
 
   // [11] isResourceEditLocked 相当: 墓標(force_released_at)は「編集中」に数えない/
   //      生きた鍵は数える、の両方を確認する。
