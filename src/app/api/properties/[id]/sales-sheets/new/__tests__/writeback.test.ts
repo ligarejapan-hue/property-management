@@ -259,6 +259,9 @@ beforeEach(() => {
   designCreateMock.mockResolvedValue({ id: "sheet-1" });
   updateManyMock.mockResolvedValue({ count: 1 });
   buildingUpdateManyMock.mockResolvedValue({ count: 1 });
+  // 物件行のロック(lockPropertyRecordForWrite)は「ロックしつつ担当者スコープで絞る」SQL で、
+  // 0行なら 403。既定では該当あり(1行)を返す。棟ロックの戻り値は使われない。
+  queryRawMock.mockResolvedValue([{ id: "11111111-1111-1111-1111-111111111111" }]);
 });
 
 describe("POST /sales-sheets/new — 物件への保存", () => {
@@ -357,13 +360,67 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     expect((await res.json()).propertyWriteback.conflict).toBe(true);
   });
 
-  it("棟がある物件で buildingVersion を送らないと conflict 扱い(C2)", async () => {
+  it("棟へ書く区分で buildingVersion を送らないと conflict 扱い(C2)", async () => {
     propertyFindMock.mockResolvedValue({ ...baseMansion, building: testBuilding });
-    const res = await POST(req({ structure: "RC", propertyVersion: 1 }), ctx); // buildingVersion 省略
+    // basementFloors は棟へ入る項目。buildingVersion 省略。
+    const res = await POST(req({ basementFloors: "2", propertyVersion: 1 }), ctx);
     expect(res.status).toBe(201);
     expect(updateManyMock).not.toHaveBeenCalled();
     expect(buildingUpdateManyMock).not.toHaveBeenCalled();
     expect((await res.json()).propertyWriteback.conflict).toBe(true);
+  });
+
+  it("棟へ書く区分で buildingVersion が古いと conflict 扱い(C2)", async () => {
+    propertyFindMock.mockResolvedValue({ ...baseMansion, building: { ...testBuilding, version: 7 } });
+    const res = await POST(
+      req({ basementFloors: "2", propertyVersion: 1, buildingVersion: 6 }),
+      ctx,
+    );
+    expect(res.status).toBe(201);
+    expect(buildingUpdateManyMock).not.toHaveBeenCalled();
+    expect((await res.json()).propertyWriteback.conflict).toBe(true);
+  });
+
+  // @codex P2: 棟の version を要るのは**実際に棟へ書くときだけ**。棟に紐付いているだけで
+  // 要求すると、棟へ一切書かない種別(一棟=RULES.building は全て物件列)や、棟の項目を
+  // 触っていない区分で、「棟が別途更新された」だけで物件への保存がまるごと捨てられる。
+  it("棟へ書かないなら buildingVersion が無くても・古くても物件へは保存する(@codex P2)", async () => {
+    propertyFindMock.mockResolvedValue({
+      ...baseProperty,
+      propertyType: "apartment_building",
+      building: { ...testBuilding, version: 9 },
+    });
+    const res = await POST(req({ price: "3480", propertyVersion: 1 }), ctx); // buildingVersion 省略
+    expect(res.status).toBe(201);
+    expect(updateManyMock).toHaveBeenCalledTimes(1);
+    expect(buildingUpdateManyMock).not.toHaveBeenCalled();
+    expect((await res.json()).propertyWriteback).toEqual({
+      saved: ["価格"], unreadable: [], conflict: false,
+    });
+  });
+
+  it("区分でも棟の項目を触っていなければ棟の版は問わない(@codex P2)", async () => {
+    propertyFindMock.mockResolvedValue({ ...baseMansion, building: { ...testBuilding, version: 9 } });
+    const res = await POST(
+      req({ price: "3480", propertyVersion: 1, buildingVersion: 1 }), // 棟の版は食い違っている
+      ctx,
+    );
+    expect(res.status).toBe(201);
+    expect(updateManyMock).toHaveBeenCalledTimes(1);
+    expect(buildingUpdateManyMock).not.toHaveBeenCalled();
+    expect((await res.json()).propertyWriteback.conflict).toBe(false);
+  });
+
+  // @codex P1: トランザクション前の認可(canAccessPropertyRecord)と、ロックを取る瞬間の間に
+  // 担当が外れることがある。ロック下でも担当者スコープを見ないと、外れた本人が物件(区分なら
+  // 共有の棟まで)を書き換えられる。スコープから外れていれば図面の作成ごと 403 で止める。
+  it("ロックの時点で担当から外れていたら 403 で図面も作らない(@codex P1)", async () => {
+    (getApiSession as Mock).mockResolvedValue({ ...ADMIN_SESSION, role: "field_staff" });
+    queryRawMock.mockResolvedValue([]); // スコープ付きロックが0行＝もう担当ではない
+    const res = await POST(req({ price: "3480", propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(403);
+    expect(designCreateMock).not.toHaveBeenCalled();
+    expect(updateManyMock).not.toHaveBeenCalled();
   });
 
   // C1: version 判定・差分は「ロック前の最初の読み取り」ではなく「ロック後に読み直した値」

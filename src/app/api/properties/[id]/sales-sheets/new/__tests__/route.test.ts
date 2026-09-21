@@ -132,7 +132,9 @@ vi.mock("@/lib/prisma", () => {
     propertyPhoto: {
       findMany: vi.fn(async () => []),
     },
-    $queryRaw: vi.fn(async () => []),
+    // 物件行のロックは「ロックしつつ担当者スコープで絞る」SQL(lockPropertyRecordForWrite)。
+    // 0行なら 403 になるため、該当ありを返す。
+    $queryRaw: vi.fn(async () => [{ id: "11111111-1111-1111-1111-111111111111" }]),
     $transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb(mock)),
   };
   return { default: mock };

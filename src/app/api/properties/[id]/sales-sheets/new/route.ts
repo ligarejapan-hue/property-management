@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import { lockPropertyRecordForWrite } from "@/lib/property-record-guard";
 import { createDesign } from "@/lib/sales-sheet/design-service";
 import {
   buildSaleLandDocument,
@@ -566,7 +567,14 @@ export async function POST(
     // （原子性: 途中で失敗したら図面も作らない）。物件配下を書き換える前に親の行を
     // 先にロックする既存の決まりに合わせ、区分は棟の行も併せてロックする。
     const { design, writeback } = await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM properties WHERE id = ${id}::uuid FOR UPDATE`;
+      // @codex P1: 親行のロックと同時に、担当者スコープ（field_staff）をロック下でもう一度
+      // 確かめる。367行目の canAccessPropertyRecord はトランザクションに入る前の判定で、
+      // その後の写真取得・会社プロフィール読込・document 組み立ての間に担当が外れると、
+      // 外れた本人が物件（区分なら共有の棟まで）を書き換えられてしまう。共通の
+      // lockPropertyRecordForWrite は「ロックしつつスコープで絞る」1文なので、条件から
+      // 外れていれば 0 行＝403 になり、図面の作成ごと取り消される（＝権限を失った人の
+      // 作成は成立させない）。
+      await lockPropertyRecordForWrite(tx, id, session);
       // @codex P1: ロックする棟を「トランザクションに入る前に読んだ property.building.id」で
       // 決めてはいけない。最初の読み取りからここまでの間に別処理（CSV取込など）が
       // properties.building_id を張り替えると、古い棟をロックしたまま新しい棟を更新しうる
@@ -642,17 +650,10 @@ export async function POST(
         return { design: created, writeback: conflictWriteback };
       }
 
-      const hasBuilding = fresh.building !== null;
       // C2/I6: saveToProperty=true なのに version が無い/数値でない場合は無条件で
-      // 上書きせず conflict 扱いにする(現行クライアントは version を送らない=Task 5 まで
-      // 常にここを通る。図面自体は作る)。棟がある物件は buildingVersion も同様。
-      const versionMissing =
-        propertyVersion === null || (hasBuilding && buildingVersion === null);
-      const versionStale =
-        !versionMissing &&
-        (propertyVersion !== fresh.version ||
-          (hasBuilding && buildingVersion !== fresh.building!.version));
-      if (versionMissing || versionStale) {
+      // 上書きせず conflict 扱いにする(version を送らない呼び出しは物件へ書かない)。
+      // 図面自体は作る。
+      if (propertyVersion === null || propertyVersion !== fresh.version) {
         return { design: created, writeback: conflictWriteback };
       }
 
@@ -661,6 +662,17 @@ export async function POST(
         values: overrides,
         current: { property: fresh, building: fresh.building },
       });
+
+      // @codex P2: 棟の version を要るのは**実際に棟へ書くときだけ**。棟に紐付いている
+      // かどうかで要求すると、棟へ一切書かない種別(一棟=RULES.building は全て物件列)で
+      // 「棟が別途更新された」だけで物件への保存がまるごと捨てられる。
+      // buildWriteback は棟が無ければ棟向けの規則を飛ばすので、result.building が
+      // 空でないなら棟は必ず存在する。
+      if (Object.keys(result.building).length > 0) {
+        if (buildingVersion === null || buildingVersion !== fresh.building!.version) {
+          return { design: created, writeback: conflictWriteback };
+        }
+      }
       const applied = await applyWriteback(tx, {
         propertyId: id,
         buildingId: fresh.building?.id ?? null,
