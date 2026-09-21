@@ -141,9 +141,12 @@ export interface RunRegistryAutoFetchArgs {
   recoverExpectedIdentifier?: string | null;
   /**
    * 【回収・候補なし】画面が見せていた所在(@codex #394 R23 P1)。
-   * ⚠**版番号だけでは足りない**: CSV取込の重複更新は version を上げずに address を
-   *   書き換える経路がある。所在が変わると探す区域が変わり、**別の物件の書類**を
-   *   取り込みかねない。provider が使う値は全部この検査に含める。
+   * ⚠**版番号の一致だけでは足りない**(Task 9で「version を上げない書込経路」は
+   *   洗い出して閉じたが、それでもこの検査は要る): version の比較は取得を
+   *   開始した「その瞬間」しか見ない。取得には数分かかり得るため、開始後・
+   *   貼り付け前に別の書き込みが所在を書き換えると、探す区域が変わり
+   *   **別の物件の書類**を取り込みかねない(TOCTOU)。version 単独に頼らず、
+   *   provider が使う値そのものをこの検査に含める(defense-in-depth)。
    */
   recoverExpectedAddress?: string | null;
   /**
@@ -4410,8 +4413,12 @@ export async function runRegistryAutoFetch(
 
       // ⚠**貼る直前にもう一度、対象が同じ物件のままかを確かめる**(@codex #394 R26 P1)。
       //   ロックの一致条件は updateMany の**その瞬間**しか効かない。数分かかる取得の
-      //   最中に、scheduled を見ない・version を上げない経路(CSV取込の重複更新)で
-      //   所在や地番が変わると、**別の対象になった物件**にPDFと所有者情報を貼る。
+      //   最中に別の書き込みが所在や地番を書き換えると、**別の対象になった物件**に
+      //   PDFと所有者情報を貼る(TOCTOU)。version が上がる書込経路でも、version を
+      //   読み直すまでの間に値がさらに変わり得るため、version の一致だけでは
+      //   閉じない窓が残る。ここで実際の値そのものを直接比べるのはそのため
+      //   (version 単独に頼らない defense-in-depth。Task 9 で「version を上げない
+      //   書込経路」自体は洗い出して閉じたが、この検査は引き続き必要)。
       //   ⚠回収は課金していないので、ここで中止しても失うものは無い(やり直せる)。
       if (isRecover) {
         const fresh = await prisma.property.findUnique({

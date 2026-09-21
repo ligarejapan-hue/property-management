@@ -64,7 +64,8 @@ function extractFieldWriteCheckResources(): string[] {
     );
   }
   const block = src.slice(start, end);
-  const resources = [...block.matchAll(/resource:\s*"([a-zA-Z_]+)"/g)].map(
+  // review Minor 6: 数字を含む resource 名(例: owner_address2)を静かに落とさない。
+  const resources = [...block.matchAll(/resource:\s*"([a-zA-Z0-9_]+)"/g)].map(
     (m) => m[1],
   );
   if (resources.length === 0) {
@@ -100,10 +101,11 @@ describe("所有者フィールド権限リストのドリフト検出(edit-lock
   });
 
   it("抽出そのものが空振りしていないことの確認(正規表現の健全性)", () => {
-    // 現時点で8個(owner_name/owner_name_kana/owner_phone/owner_zip/owner_address/
-    // owner_email/owner_note/owner_corporate_number)+ companyRegistryNumber の
-    // 別名エントリ1件で計9件。将来増減してもよいが、0件は抽出ロジックが
-    // 壊れているサインとして扱う。
+    // 現時点で11件(8つの distinct resource: owner_name/owner_name_kana/owner_phone/
+    // owner_zip/owner_address/owner_email/owner_note/owner_corporate_number +
+    // currentZip→owner_zip・currentAddress→owner_address・
+    // companyRegistryNumber→owner_corporate_number の別名3件)。将来増減してもよいが、
+    // 0件は抽出ロジックが壊れているサインとして扱う。
     expect(extractFieldWriteCheckResources().length).toBeGreaterThanOrEqual(8);
   });
 });

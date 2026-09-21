@@ -30,9 +30,9 @@ const VERSIONED: Record<string, string> = {
     "owner.address(登記文字列除去)+version increment",
   "src/app/api/admin/owners/correction/corporate-number-bulk-apply/route.ts:124":
     "owner.corporateNumber(空欄埋め)+version increment",
-  "src/app/api/admin/owners/correction/corporate-restore-apply/route.ts:132":
+  "src/app/api/admin/owners/correction/corporate-restore-apply/route.ts:135":
     "owner.name(断片型の救出)+version increment",
-  "src/app/api/admin/owners/correction/corporate-restore-apply/route.ts:203":
+  "src/app/api/admin/owners/correction/corporate-restore-apply/route.ts:208":
     "owner.name/corporateNumber/companyRegistryNumber/address(分断型復元)+version increment",
   "src/app/api/admin/owners/correction/merge/route.ts:638":
     "owner.isArchived(統合で消えるsource)+version increment",
@@ -95,12 +95,12 @@ const VERSIONED: Record<string, string> = {
     "(Task 9で修正: 元は進めていなかった)",
   "src/lib/investigation/fetch-investigation.ts:646":
     "property.zoningDistrict/buildingCoverageRatio/floorAreaRatio(調査確定の書き戻し)+version increment",
-  "src/lib/registry-fetch/auto-fetch.ts:235":
+  "src/lib/registry-fetch/auto-fetch.ts:238":
     "property.registryStatus(scheduled解除=previousStatusへ戻す)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/lib/registry-fetch/auto-fetch.ts:4291":
+  "src/lib/registry-fetch/auto-fetch.ts:4294":
     "property.registryStatus=scheduled(有料取得の予約)+version increment",
-  "src/lib/registry-fetch/auto-fetch.ts:4502":
+  "src/lib/registry-fetch/auto-fetch.ts:4509":
     "property.registryStatus=obtained(有料取得の確定)+version increment",
   "src/lib/registry-pdf/process.ts:190":
     "owner.corporateNumber(空欄補完・fillOwnerCorporateNumberIfUnlocked)+version increment" +
@@ -111,43 +111,89 @@ const VERSIONED: Record<string, string> = {
 
 /**
  * 版番号を進めない書き込み。**編集画面で変えられない項目だけ**を書くものに限る。
- * 値は理由(書く項目 + なぜ編集画面から書けないと確認したか)。
+ * `reason` = 書く項目 + なぜ編集画面から書けないと確認したか。
+ * `keys` = 実際に `data:` へ許可する項目名(review Minor 4)。走査は「一覧にある」
+ *   だけでなく「その `data:` の中身が `keys` の部分集合か」も確認する。ここに
+ *   無いキーを書くよう変わったら、鍵を外すか version increment を足すかの
+ *   判断をやり直すべきサイン。
+ * `isComment: true` = 正規表現がコードコメントを誤検出したもの(実際の呼び出しが
+ *   存在しない)。この場合 `keys` による payload 確認はできない(対象が無いため)。
  */
-const ALLOWED_WITHOUT_VERSION: Record<string, string> = {
-  "src/app/api/admin/owners/correction/merge/route.ts:437":
-    "owner.updatedAt のみ(行ロック獲得のための touch。updatedAt は編集画面の送信項目に無い)",
-  "src/app/api/admin/owners/correction/merge/route.ts:445":
-    "owner.updatedAt のみ(同上・source側の行ロックtouch)",
-  "src/app/api/admin/owners/correction/mislink/route.ts:406":
-    "owner.updatedAt のみ(行ロック獲得のための touch)",
-  "src/app/api/admin/owners/correction/mislink/route.ts:435":
-    "property.updatedAt のみ(行ロック獲得のための touch)",
-  "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:262":
-    "owner.updatedAt のみ(行ロック獲得のための touch)",
-  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:180":
-    "owner.updatedAt のみ(行ロック獲得のための touch)",
-  "src/app/api/import/paste/commit/route.ts:406":
-    "owner.updatedAt のみ(既存所有者へのリンク可否確認のための touch)",
-  "src/app/api/import/reception-owner/route.ts:589":
-    "owner.updatedAt のみ(行ロック獲得のための touch)",
-  "src/app/api/owners/[id]/memos/route.ts:241":
-    "コメント内の記述(実際の呼び出しではない。owner.updateMany の使い方を説明する" +
-    "コードコメントが正規表現に引っかかっただけ)",
-  "src/app/api/owners/[id]/memos/route.ts:252":
-    "owner.updatedAt のみ(メモ作成のための行ロックtouch。owner本体は書かない)",
-  "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:303":
-    "property.dmUndeliverableAt=null のみ(残数ゼロでの自動解除。dmUndeliverableAtは" +
-    "PropertyEditForm の FORM_FIELDS に無く編集画面から書けない)",
-  "src/app/api/properties/[id]/dm-logs/[logId]/route.ts:102":
-    "property.dmUndeliverableAt=null のみ(送付記録削除に伴う自動解除。同上の理由で" +
-    "編集画面から書けない)",
-  "src/app/api/properties/[id]/owners/route.ts:58":
-    "owner.updatedAt のみ(所有者リンク時の行ロックtouch)",
-  "src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:267":
-    "property.dmUndeliverableAt=null のみ(訂正による自動解除。同上の理由で" +
-    "編集画面から書けない)",
-  "src/lib/registry-pdf/process.ts:361":
-    "owner.updatedAt のみ(既存所有者再利用時の行ロックtouch)",
+interface AllowedEntry {
+  reason: string;
+  keys?: readonly string[];
+  isComment?: true;
+}
+
+const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
+  "src/app/api/admin/owners/correction/merge/route.ts:437": {
+    reason: "owner.updatedAt のみ(行ロック獲得のための touch。updatedAt は編集画面の送信項目に無い)",
+    keys: ["updatedAt"],
+  },
+  "src/app/api/admin/owners/correction/merge/route.ts:445": {
+    reason: "owner.updatedAt のみ(同上・source側の行ロックtouch)",
+    keys: ["updatedAt"],
+  },
+  "src/app/api/admin/owners/correction/mislink/route.ts:406": {
+    reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
+    keys: ["updatedAt"],
+  },
+  "src/app/api/admin/owners/correction/mislink/route.ts:435": {
+    reason: "property.updatedAt のみ(行ロック獲得のための touch)",
+    keys: ["updatedAt"],
+  },
+  "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:262": {
+    reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
+    keys: ["updatedAt"],
+  },
+  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:180": {
+    reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
+    keys: ["updatedAt"],
+  },
+  "src/app/api/import/paste/commit/route.ts:406": {
+    reason: "owner.updatedAt のみ(既存所有者へのリンク可否確認のための touch)",
+    keys: ["updatedAt"],
+  },
+  "src/app/api/import/reception-owner/route.ts:589": {
+    reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
+    keys: ["updatedAt"],
+  },
+  "src/app/api/owners/[id]/memos/route.ts:241": {
+    reason:
+      "コメント内の記述(実際の呼び出しではない。owner.updateMany の使い方を説明する" +
+      "コードコメントが正規表現に引っかかっただけ)",
+    isComment: true,
+  },
+  "src/app/api/owners/[id]/memos/route.ts:252": {
+    reason: "owner.updatedAt のみ(メモ作成のための行ロックtouch。owner本体は書かない)",
+    keys: ["updatedAt"],
+  },
+  "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:303": {
+    reason:
+      "property.dmUndeliverableAt=null のみ(残数ゼロでの自動解除。dmUndeliverableAtは" +
+      "PropertyEditForm の FORM_FIELDS に無く編集画面から書けない)",
+    keys: ["dmUndeliverableAt"],
+  },
+  "src/app/api/properties/[id]/dm-logs/[logId]/route.ts:102": {
+    reason:
+      "property.dmUndeliverableAt=null のみ(送付記録削除に伴う自動解除。同上の理由で" +
+      "編集画面から書けない)",
+    keys: ["dmUndeliverableAt"],
+  },
+  "src/app/api/properties/[id]/owners/route.ts:58": {
+    reason: "owner.updatedAt のみ(所有者リンク時の行ロックtouch)",
+    keys: ["updatedAt"],
+  },
+  "src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:267": {
+    reason:
+      "property.dmUndeliverableAt=null のみ(訂正による自動解除。同上の理由で" +
+      "編集画面から書けない)",
+    keys: ["dmUndeliverableAt"],
+  },
+  "src/lib/registry-pdf/process.ts:361": {
+    reason: "owner.updatedAt のみ(既存所有者再利用時の行ロックtouch)",
+    keys: ["updatedAt"],
+  },
 };
 
 /**
@@ -166,15 +212,20 @@ const WRITE_PATTERN =
 
 const EXCLUDE_DIRS = new Set(["__tests__", "generated", "node_modules"]);
 
-function listTsFiles(dir: string): string[] {
+/** review Minor 5: `.tsx` も対象にする(サーバコンポーネント/action に書き込みが
+ *  生えても走査から隠れないように)。 */
+function listSourceFiles(dir: string): string[] {
   const entries = readdirSync(dir, { withFileTypes: true });
   const files: string[] = [];
   for (const entry of entries) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (EXCLUDE_DIRS.has(entry.name)) continue;
-      files.push(...listTsFiles(full));
-    } else if (entry.isFile() && entry.name.endsWith(".ts")) {
+      files.push(...listSourceFiles(full));
+    } else if (
+      entry.isFile() &&
+      (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx"))
+    ) {
       files.push(full);
     }
   }
@@ -185,7 +236,7 @@ function listTsFiles(dir: string): string[] {
 function writeSites(): string[] {
   const root = join(process.cwd(), "src");
   const sites: string[] = [];
-  for (const file of listTsFiles(root)) {
+  for (const file of listSourceFiles(root)) {
     const src = readFileSync(file, "utf8").replace(/\r\n/g, "\n");
     const rel = relative(process.cwd(), file).replace(/\\/g, "/");
     const lines = src.split("\n");
@@ -198,68 +249,281 @@ function writeSites(): string[] {
   return sites;
 }
 
+// ---------------------------------------------------------------------------
+// review Important 1: check 4 は「最も近い行」で increment を割り当てていたため、
+// 間隔の狭い**別の書き込み**(別モデル・別呼び出し)の increment を誤って
+// 自分のものとして拾えてしまい、fetch-investigation.ts:646 で実際に空振りした
+// (削除しても検出できない)。line距離ではなく、**その呼び出し自身の引数の
+// 括弧バランス**の中だけを見るように作り直す。
+// ---------------------------------------------------------------------------
+
+/**
+ * `startIdx`(既に1つ開いた括弧の直後の位置)から、対応する閉じ括弧までの
+ * 中身を返す。文字列リテラル・コメントの中の括弧は数えない。
+ */
+function extractBalancedSpan(
+  text: string,
+  startIdx: number,
+  openChar: string,
+  closeChar: string,
+): string {
+  let depth = 1;
+  let i = startIdx;
+  const n = text.length;
+  while (i < n && depth > 0) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      i++;
+      while (i < n && text[i] !== quote) {
+        if (text[i] === "\\") i++;
+        i++;
+      }
+      i++;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "/") {
+      while (i < n && text[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "*") {
+      i += 2;
+      while (i < n && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+    if (ch === openChar) depth++;
+    else if (ch === closeChar) depth--;
+    i++;
+  }
+  return text.slice(startIdx, Math.max(startIdx, i - 1));
+}
+
 /**
  * `version: { increment: 1 }`(オブジェクトリテラル形)と `x.version = { increment: 1 }`
  * (代入形。properties/[id]/clear-dm-undeliverable/route.ts のように条件つきで data を
  * 組み立てる経路がこの形を使う)の両方を1つの正規表現で拾う。
+ *
+ * review Important 1 後半: このパターン自体は型注釈(`version: { increment: 1 };` を
+ * 型として書いた場合も)に一致し得るが、下の `siteHasOwnVersionIncrement` は
+ * **呼び出し自身の引数の中**、または `data` 変数の**初期化式(型注釈より後ろ)**
+ * だけにこのパターンを適用するため、型注釈だけでは実行時の bump の証拠になれない
+ * (`corporate-restore-apply/route.ts:181` の型注釈はこの経路では見ない)。
  */
 const VERSION_INCREMENT_PATTERN = /version\s*[:=]\s*\{\s*increment:\s*1\s*\}/;
 
+/** ファイル内容から絶対文字位置 -> (行, その行内オフセット) を作るための行頭オフセット表。 */
+function lineStartOffsets(lines: string[]): number[] {
+  const offsets: number[] = [0];
+  for (let i = 0; i < lines.length; i++) {
+    offsets.push(offsets[i] + lines[i].length + 1); // +1 for the '\n' we split on
+  }
+  return offsets;
+}
+
 /**
- * VERSIONED の各箇所が、実際に自分自身の呼び出しの近くで version increment を
- * 書いているかを確認する(名前だけの一覧では「載せたのに中身を書き忘れる」を
- * 防げないため)。
- *
- * 同じファイル内に複数の VERSIONED 箇所がある場合(例: mislink.ts の3箇所・
- * reception-owner.ts の複数箇所)、見つけた version increment の行を**最も近い
- * 呼び出し行**へ割り当てる(最近傍割当)。ある箇所の increment を消しても、
- * 近くの**別の箇所**の increment が誤って「自分のもの」として拾われないように
- * するため(単純な固定windowでの近傍探索だと、間隔の狭い箇所同士で誤検出が起きる)。
- *
- * 戻り値: increment が1つも割り当たらなかった VERSIONED キーの配列(=空なら健全)。
+ * `siteLine1Based` の呼び出し(`....update(`/`updateMany(`/`upsert(`)自身の
+ * 引数括弧の中身を返す。呼び出し自体が見つからなければ null。
  */
+function callArgsSpanForSite(
+  fullSrc: string,
+  lines: string[],
+  offsets: number[],
+  siteLine1Based: number,
+): string | null {
+  const lineIdx = siteLine1Based - 1;
+  const lineText = lines[lineIdx];
+  const m = /\.(update|updateMany|upsert)\(/.exec(lineText);
+  if (!m) return null;
+  const openParenAbs = offsets[lineIdx] + m.index + m[0].length; // '(' の直後(既に depth=1)
+  return extractBalancedSpan(fullSrc, openParenAbs, "(", ")");
+}
+
+/**
+ * 呼び出し引数の中の `data:` が**その場のオブジェクトリテラル**なら、そのキー集合を
+ * 返す。`data` が裸の識別子(変数参照)なら null を返す(=このスパンだけでは判定
+ * できない、呼び出し元で別の解決を試みる)。
+ */
+function inlineDataObjectSpan(callArgs: string): string | null {
+  const m = /\bdata\s*:\s*\{/.exec(callArgs);
+  if (!m) return null;
+  const openBraceAbs = m.index + m[0].length;
+  return extractBalancedSpan(callArgs, openBraceAbs, "{", "}");
+}
+
+/** 裸の `data` 識別子(`data,` / `data }` / `data: data`)を引数が参照しているか。 */
+function referencesBareDataVariable(callArgs: string): boolean {
+  return /\bdata\s*[,}]/.test(callArgs) && !/\bdata\s*:\s*\{/.test(callArgs);
+}
+
+/**
+ * `const data`/`let data` 宣言から `siteLine1Based`(呼び出し行)までのテキストを
+ * 集め、**型注釈より後ろ**(`"} = {"` より後ろ)だけを対象に version increment
+ * (オブジェクトリテラル形・代入形どちらも)を探す。これにより型注釈
+ * (`version: { increment: 1 };` を型として書いた場合)は対象外になる
+ * (review Important 1 の「型注釈を証拠にしない」要求)。
+ */
+function resolveBareDataVariableHasIncrement(
+  lines: string[],
+  siteLine1Based: number,
+): boolean {
+  const siteIdx = siteLine1Based - 1;
+  for (let j = siteIdx; j >= Math.max(0, siteIdx - 80); j--) {
+    if (/\b(?:const|let)\s+data\b/.test(lines[j])) {
+      const block = lines.slice(j, siteIdx + 1).join("\n");
+      const splitIdx = block.indexOf("} = {");
+      // 型注釈(`const data: { ... }`)と初期化式(`= { ... }`)の境目を飛ばす。
+      // 境目が見つからない場合は(想定外の書き方)安全側でブロック全体を見る。
+      const runtimePart = splitIdx >= 0 ? block.slice(splitIdx + 1) : block;
+      return VERSION_INCREMENT_PATTERN.test(runtimePart);
+    }
+  }
+  return false;
+}
+
+/**
+ * VERSIONED の1箇所が、実際に**自分自身の呼び出し**(または自分が参照する
+ * `data` 変数の初期化式)の中で version increment を書いているかを確認する。
+ * 行距離での近傍割当はしない(review Important 1): 呼び出し自身の括弧バランスの
+ * 中だけを見るため、間隔の狭い別の書き込み(別モデル・別呼び出し)の increment を
+ * 誤って拾うことがない。
+ */
+function siteHasOwnVersionIncrement(
+  fullSrc: string,
+  lines: string[],
+  offsets: number[],
+  siteLine1Based: number,
+): boolean {
+  const callArgs = callArgsSpanForSite(fullSrc, lines, offsets, siteLine1Based);
+  if (callArgs === null) return false;
+  if (VERSION_INCREMENT_PATTERN.test(callArgs)) return true;
+  if (referencesBareDataVariable(callArgs)) {
+    return resolveBareDataVariableHasIncrement(lines, siteLine1Based);
+  }
+  return false;
+}
+
 function findVersionedSitesMissingIncrement(): string[] {
-  const byFile = new Map<string, number[]>();
+  const missing: string[] = [];
   for (const key of Object.keys(VERSIONED)) {
     const idx = key.lastIndexOf(":");
     const file = key.slice(0, idx);
     const line = Number(key.slice(idx + 1));
-    const arr = byFile.get(file) ?? [];
-    arr.push(line);
-    byFile.set(file, arr);
-  }
-
-  const missing: string[] = [];
-  for (const [file, siteLines] of byFile) {
     const full = join(process.cwd(), file);
-    const src = readFileSync(full, "utf8").replace(/\r\n/g, "\n");
-    const lines = src.split("\n");
-    const incrementLines: number[] = [];
-    for (let i = 0; i < lines.length; i++) {
-      if (VERSION_INCREMENT_PATTERN.test(lines[i])) incrementLines.push(i + 1);
-    }
-
-    const assignedCount = new Map<number, number>(siteLines.map((l) => [l, 0]));
-    for (const incLine of incrementLines) {
-      let best = siteLines[0];
-      let bestDist = Math.abs(incLine - best);
-      for (const s of siteLines) {
-        const d = Math.abs(incLine - s);
-        if (d < bestDist) {
-          bestDist = d;
-          best = s;
-        }
-      }
-      assignedCount.set(best, (assignedCount.get(best) ?? 0) + 1);
-    }
-
-    for (const s of siteLines) {
-      if ((assignedCount.get(s) ?? 0) === 0) {
-        missing.push(`${file}:${s}`);
-      }
+    const fullSrc = readFileSync(full, "utf8").replace(/\r\n/g, "\n");
+    const lines = fullSrc.split("\n");
+    const offsets = lineStartOffsets(lines);
+    if (!siteHasOwnVersionIncrement(fullSrc, lines, offsets, line)) {
+      missing.push(key);
     }
   }
   return missing;
+}
+
+// ---------------------------------------------------------------------------
+// review Minor 4: ALLOWED_WITHOUT_VERSION は「載っているか」しか見ておらず、
+// 後からそのサイトの `data:` が編集可能フィールドを書くように変わっても何も
+// 落ちない。サイト自身の `data:` オブジェクトのキーが、許可した `keys` の
+// 部分集合であることまで確認する。
+// ---------------------------------------------------------------------------
+
+/** オブジェクトリテラルの中身から、トップレベルのキー名一覧を返す。 */
+function extractTopLevelKeys(objInner: string): string[] {
+  const parts = splitTopLevel(objInner, ",");
+  const keys: string[] = [];
+  for (const rawPart of parts) {
+    const part = rawPart.trim();
+    if (!part || part.startsWith("...")) continue;
+    const keyed = /^(?:"([^"]+)"|'([^']+)'|(\w+))\s*:/.exec(part);
+    if (keyed) {
+      keys.push(keyed[1] ?? keyed[2] ?? keyed[3]);
+      continue;
+    }
+    const shorthand = /^(\w+)$/.exec(part);
+    if (shorthand) keys.push(shorthand[1]);
+  }
+  return keys;
+}
+
+/** 深さ0のカンマだけで分割する(文字列リテラル・入れ子の括弧の中は無視)。 */
+function splitTopLevel(text: string, sep: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const start = i;
+      const quote = ch;
+      i++;
+      while (i < n && text[i] !== quote) {
+        if (text[i] === "\\") i++;
+        i++;
+      }
+      i++;
+      current += text.slice(start, i);
+      continue;
+    }
+    if ("{([".includes(ch)) depth++;
+    else if ("})]".includes(ch)) depth--;
+    if (ch === sep && depth === 0) {
+      parts.push(current);
+      current = "";
+      i++;
+      continue;
+    }
+    current += ch;
+    i++;
+  }
+  if (current.trim()) parts.push(current);
+  return parts;
+}
+
+/**
+ * ALLOWED_WITHOUT_VERSION の各サイト(コメント誤検出を除く)について、実際の
+ * `data:` オブジェクトのキーが登録済み `keys` の部分集合かを確認する。
+ * 部分集合でなければ「サイト → 想定外に書いているキー」を返す。
+ */
+function findAllowlistedSitesWithUnexpectedKeys(): Array<{
+  site: string;
+  unexpected: string[];
+}> {
+  const offenders: Array<{ site: string; unexpected: string[] }> = [];
+  for (const [key, entry] of Object.entries(ALLOWED_WITHOUT_VERSION)) {
+    if (entry.isComment) continue;
+    const idx = key.lastIndexOf(":");
+    const file = key.slice(0, idx);
+    const line = Number(key.slice(idx + 1));
+    const full = join(process.cwd(), file);
+    const fullSrc = readFileSync(full, "utf8").replace(/\r\n/g, "\n");
+    const lines = fullSrc.split("\n");
+    const offsets = lineStartOffsets(lines);
+    const callArgs = callArgsSpanForSite(fullSrc, lines, offsets, line);
+    if (callArgs === null) {
+      offenders.push({ site: key, unexpected: ["<呼び出しを再抽出できない>"] });
+      continue;
+    }
+    const dataSpan = inlineDataObjectSpan(callArgs);
+    if (dataSpan === null) {
+      // data が裸の変数参照など、この単純な抽出では判定できない形。
+      // ALLOWED_WITHOUT_VERSION の現在の15件は全て `data: { ... }` の
+      // インラインリテラルなので、ここに来ること自体が形の変化のサイン。
+      offenders.push({
+        site: key,
+        unexpected: ["<data がインラインオブジェクトではない(形が変わった)>"],
+      });
+      continue;
+    }
+    const actualKeys = extractTopLevelKeys(dataSpan);
+    const allowed = new Set(entry.keys ?? []);
+    const unexpected = actualKeys.filter((k) => !allowed.has(k));
+    if (unexpected.length > 0) {
+      offenders.push({ site: key, unexpected });
+    }
+  }
+  return offenders;
 }
 
 describe("版番号の走査(仕様5.4 / Task 9)", () => {
@@ -312,6 +576,22 @@ describe("版番号の走査(仕様5.4 / Task 9)", () => {
         ? `VERSIONED に載っているのに version:{increment:1} が見つからない: ${missing.join(", ")}\n` +
             "一覧への記載だけでは足りない。実際のコードから version increment が消えている" +
             "(退行)か、一覧の記載が誤り。"
+        : undefined,
+    ).toEqual([]);
+  });
+
+  it("ALLOWED_WITHOUT_VERSION の各サイトは、許可したキー以外を data に書いていない(review Minor 4)", () => {
+    const offenders = findAllowlistedSitesWithUnexpectedKeys();
+    expect(
+      offenders,
+      offenders.length > 0
+        ? offenders
+            .map(
+              (o) =>
+                `${o.site} が想定外のキー(${o.unexpected.join(", ")})を書くようになった。` +
+                "version increment を足すか、inventory と ALLOWED_WITHOUT_VERSION.keys に理由つきで追記すること。",
+            )
+            .join("\n")
         : undefined,
     ).toEqual([]);
   });

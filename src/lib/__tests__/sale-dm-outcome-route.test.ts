@@ -318,6 +318,9 @@ describe("PATCH outcome", () => {
     expect(propArg.data.dmUndeliverableAt).toBeNull();
     // dmStatus は人の判断で戻す(clear-undeliverable と同じ方針)ため自動では触らない。
     expect(propArg.data.dmStatus).toBeUndefined();
+    // review Minor 3: この分岐は編集画面で変えられる項目を書かないので version を
+    // 進めてはいけない(dmUndeliverableAt のみのクリアは対象外[ALLOWED])。
+    expect("version" in propArg.data).toBe(false);
     const audit = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(audit.detail.undeliverableCleared).toBe(true);
   });
