@@ -48,7 +48,7 @@ vi.mock("@/lib/change-log", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   default: {
-    building: { findUnique: vi.fn(), update: vi.fn() },
+    building: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   },
 }));
 
@@ -56,10 +56,10 @@ import prisma from "@/lib/prisma";
 import { PATCH } from "../route";
 
 type PrismaMock = {
-  building: { findUnique: Mock; update: Mock };
+  building: { findUnique: Mock; update: Mock; updateMany: Mock };
 };
 const pm = prisma as unknown as PrismaMock;
-const buildingUpdateMock = pm.building.update;
+const buildingUpdateMock = pm.building.updateMany;
 
 const EXISTING_BUILDING = {
   id: "b1",
@@ -89,8 +89,9 @@ function patchRequest(body: Record<string, unknown>) {
   });
 }
 
+/** 版番号(必須)を既定で添えて PATCH する。省略・食い違いの確認は個別のテストで行う。 */
 async function callPatch(body: Record<string, unknown>) {
-  return PATCH(patchRequest(body) as never, {
+  return PATCH(patchRequest({ version: 1, ...body }) as never, {
     params: Promise.resolve({ id: "b1" }),
   });
 }
@@ -98,7 +99,7 @@ async function callPatch(body: Record<string, unknown>) {
 beforeEach(() => {
   vi.clearAllMocks();
   pm.building.findUnique.mockResolvedValue(EXISTING_BUILDING);
-  pm.building.update.mockResolvedValue({ ...EXISTING_BUILDING, id: "b1" });
+  pm.building.updateMany.mockResolvedValue({ count: 1 });
 });
 
 describe("PATCH /api/buildings/[id] — 築月・地下階(F3 Task8)", () => {
@@ -123,6 +124,46 @@ describe("PATCH /api/buildings/[id] — 築月・地下階(F3 Task8)", () => {
     const res = await callPatch({ basementFloors: -1 });
 
     expect(res.status).toBe(422);
+    expect(buildingUpdateMock).not.toHaveBeenCalled();
+  });
+});
+
+// @codex P1: 版番号の判定と書き込みの間に別の更新(販売図面からの書き戻しなど)が入ると、
+// 事前判定だけでは古いフォームの値をそのまま上書きしてしまう。棟の編集フォームは築月・
+// 地下階も毎回送るため、無関係な項目だけ直したつもりの保存が、図面から書き戻したばかりの
+// 値を黙って消し得る。条件は書き込み自体に付ける。
+describe("PATCH /api/buildings/[id] — 版番号の扱い(@codex P1)", () => {
+  it("書き込み自体に版番号の条件を付ける", async () => {
+    const res = await callPatch({ builtMonth: 3 });
+    expect(res.status).toBe(200);
+    expect(buildingUpdateMock).toHaveBeenCalledTimes(1);
+    expect(buildingUpdateMock.mock.calls[0][0].where).toEqual({ id: "b1", version: 1 });
+    expect(buildingUpdateMock.mock.calls[0][0].data).toMatchObject({
+      version: { increment: 1 },
+    });
+  });
+
+  it("条件に合う行が無ければ(間に他の更新が入った)409にする", async () => {
+    pm.building.updateMany.mockResolvedValue({ count: 0 });
+    const res = await callPatch({ builtMonth: 3 });
+    expect(res.status).toBe(409);
+  });
+
+  it("版番号を送らない呼び出しは受け付けない", async () => {
+    const res = await PATCH(
+      patchRequest({ builtMonth: 3 }) as never, // version 無し
+      { params: Promise.resolve({ id: "b1" }) },
+    );
+    expect(res.status).toBe(422);
+    expect(buildingUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it("読んだときと版番号が食い違えば書き込む前に409", async () => {
+    const res = await PATCH(
+      patchRequest({ builtMonth: 3, version: 99 }) as never,
+      { params: Promise.resolve({ id: "b1" }) },
+    );
+    expect(res.status).toBe(409);
     expect(buildingUpdateMock).not.toHaveBeenCalled();
   });
 });

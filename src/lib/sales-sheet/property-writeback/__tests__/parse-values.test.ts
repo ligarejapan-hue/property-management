@@ -55,6 +55,19 @@ describe("parseBuiltYearMonth", () => {
     expect(parseBuiltYearMonth("")).toBeNull();
     expect(parseBuiltYearMonth(undefined)).toBeNull();
   });
+  // [@codex P2] 前方一致だけだと、書き間違いから年月だけ拾って物件へ保存してしまう。
+  // 全体が年月(+任意の日)の形になっているものだけを受ける。
+  it("余計な文字が後ろに付いていたら読み取らない", () => {
+    expect(parseBuiltYearMonth("2020年foo")).toBeNull();
+    expect(parseBuiltYearMonth("2020年3月abc")).toBeNull();
+    expect(parseBuiltYearMonth("2020年3月ごろ")).toBeNull();
+    expect(parseBuiltYearMonth("平成20年3月頃")).toBeNull();
+    expect(parseBuiltYearMonth("2008年3月 新耐震")).toBeNull();
+  });
+  it("日付まで書かれていても年月として読む(従来どおり)", () => {
+    expect(parseBuiltYearMonth("2008年3月1日")).toEqual({ year: 2008, month: 3 });
+    expect(parseBuiltYearMonth("平成20年3月1日")).toEqual({ year: 2008, month: 3 });
+  });
 });
 
 describe("pickOption", () => {

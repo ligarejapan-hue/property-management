@@ -43,6 +43,7 @@ vi.mock("@/lib/prisma", () => ({
     building: {
       create: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       findUnique: vi.fn(),
     },
   },
@@ -54,7 +55,7 @@ import { POST } from "../../app/api/buildings/route";
 import { PATCH } from "../../app/api/buildings/[id]/route";
 
 const pm = prisma as unknown as {
-  building: { create: Mock; update: Mock; findUnique: Mock };
+  building: { create: Mock; update: Mock; updateMany: Mock; findUnique: Mock };
 };
 
 const PERMS_WRITE = [{ resource: "property", action: "write", granted: true }];
@@ -86,6 +87,8 @@ beforeEach(() => {
   vi.mocked(getUserPermissions).mockResolvedValue(PERMS_WRITE);
   pm.building.create.mockResolvedValue({ id: "b1", name: "棟", address: "東京" });
   pm.building.update.mockResolvedValue({ id: "b1" });
+  // @codex P1: PATCH は版番号を条件に付けた updateMany で書く(0件なら競合)。
+  pm.building.updateMany.mockResolvedValue({ count: 1 });
   pm.building.findUnique.mockResolvedValue({
     id: "b1",
     version: 1,
@@ -138,8 +141,8 @@ describe("PATCH /api/buildings/[id] — postalCode 受理（21-C PR-1）", () =>
       params: Promise.resolve({ id: "b1" }),
     });
     expect(res.status).toBe(200);
-    expect(pm.building.update).toHaveBeenCalledTimes(1);
-    expect(pm.building.update.mock.calls[0][0].data.postalCode).toBe("1050001");
+    expect(pm.building.updateMany).toHaveBeenCalledTimes(1);
+    expect(pm.building.updateMany.mock.calls[0][0].data.postalCode).toBe("1050001");
   });
 
   it("postalCode=null（クリア）を update の data に渡す", async () => {
@@ -147,7 +150,7 @@ describe("PATCH /api/buildings/[id] — postalCode 受理（21-C PR-1）", () =>
       params: Promise.resolve({ id: "b1" }),
     });
     expect(res.status).toBe(200);
-    expect(pm.building.update.mock.calls[0][0].data.postalCode).toBeNull();
+    expect(pm.building.updateMany.mock.calls[0][0].data.postalCode).toBeNull();
   });
 
   it("postalCode 未指定でも update 成功（既存挙動が壊れない）", async () => {
@@ -155,7 +158,7 @@ describe("PATCH /api/buildings/[id] — postalCode 受理（21-C PR-1）", () =>
       params: Promise.resolve({ id: "b1" }),
     });
     expect(res.status).toBe(200);
-    expect(pm.building.update.mock.calls[0][0].data).not.toHaveProperty(
+    expect(pm.building.updateMany.mock.calls[0][0].data).not.toHaveProperty(
       "postalCode",
     );
   });

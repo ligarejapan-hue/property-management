@@ -43,14 +43,17 @@ export function parseBuiltYearMonth(
   const s = toHalfWidth(raw).trim();
   if (!s) return null;
 
-  const era = /^(明治|大正|昭和|平成|令和)\s*(\d{1,2})年\s*(?:(\d{1,2})月)?/.exec(s);
+  // @codex P2: **全体**に一致させる(末尾に $ を置く)。前方一致だけだと「2020年foo」
+  // 「2020年3月abc」のような書き間違いから年月だけ拾って物件へ保存してしまう。
+  // 日付まで書かれた「2008年3月1日」は従来どおり受ける(日は使わない)。
+  const era = /^(明治|大正|昭和|平成|令和)\s*(\d{1,2})年\s*(?:(\d{1,2})月)?\s*(?:(\d{1,2})\s*日?)?$/.exec(s);
   if (era) {
     const year = ERA_BASE[era[1]] + Number(era[2]);
     return { year, month: monthOrNull(era[3]) };
   }
 
-  const ad = /^(\d{4})\s*(?:年|\/|-)?\s*(?:(\d{1,2})\s*(?:月|\/|-)?)?/.exec(s);
-  if (ad && /^\d{4}/.test(s)) {
+  const ad = /^(\d{4})\s*(?:年|\/|-)?\s*(?:(\d{1,2})\s*(?:月|\/|-)?)?\s*(?:(\d{1,2})\s*日?)?$/.exec(s);
+  if (ad) {
     return { year: Number(ad[1]), month: monthOrNull(ad[2]) };
   }
   return null;
