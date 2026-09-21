@@ -823,3 +823,99 @@ describe("sanitizeAuditDetail: 取込ガード(corporateRepair)のサマリ", ()
     expect(out.corporateRepair).toBe(REDACTED);
   });
 });
+
+describe("sanitizeAuditDetail: 編集中の鍵(edit_lock_*)", () => {
+  it("編集中の鍵の detail は伏せ字にならない(氏名・合言葉は載せない設計)", () => {
+    const safe = sanitizeAuditDetail("edit_lock_takeover_expired", {
+      resourceType: "property", resourceId: "r1", previousUserId: "u1", expiredBy: "idle",
+    });
+    expect(safe).toEqual({ resourceType: "property", resourceId: "r1", previousUserId: "u1", expiredBy: "idle" });
+  });
+  it("鍵の detail に紛れ込んだ氏名は伏せ字のまま", () => {
+    const safe = sanitizeAuditDetail("edit_lock_acquire", { resourceType: "property", holderName: "山田" }) as Record<string, unknown>;
+    expect(safe.holderName).toBe(REDACTED);
+  });
+});
+
+describe("sanitizeAuditDetail: 謄本自動取得の編集中の鍵スキップ(D10・registry_auto_fetch)", () => {
+  // ⚠ownerCorporateFillSkippedByEditLock は /owner/i denylist に当たるため、
+  //   allowlist(ACTION_EXTRA_KEYS)だけでは足りず ACTION_FORCE_SAFE_KEYS でも
+  //   保持している。propertyFillSkippedByEditLock は denylist に当たらないので
+  //   allowlist だけで足りる。
+  it("見送りの2フラグは伏せ字にならず、boolean のまま残る", () => {
+    const safe = sanitizeAuditDetail("registry_auto_fetch", {
+      propertyId: "p1",
+      status: "success",
+      propertyFillSkippedByEditLock: true,
+      ownerCorporateFillSkippedByEditLock: false,
+    }) as Record<string, unknown>;
+    expect(safe.propertyFillSkippedByEditLock).toBe(true);
+    expect(safe.ownerCorporateFillSkippedByEditLock).toBe(false);
+  });
+
+  it("2フラグ以外に紛れ込んだ本物のPII(ownerName等)は引き続き伏せ字", () => {
+    const safe = sanitizeAuditDetail("registry_auto_fetch", {
+      propertyId: "p1",
+      propertyFillSkippedByEditLock: true,
+      ownerCorporateFillSkippedByEditLock: true,
+      ownerName: "山田太郎",
+    }) as Record<string, unknown>;
+    expect(safe.propertyFillSkippedByEditLock).toBe(true);
+    expect(safe.ownerCorporateFillSkippedByEditLock).toBe(true);
+    expect(safe.ownerName).toBe(REDACTED);
+  });
+
+  // レビュー round1 #6: 発注者の巻き戻し指示。「2フラグだけに絞る」ではなく
+  // 「denylist の穴を広げない」が本来の意図だったため、brief(design line 183)が
+  // 求めていた既存キーもここで allowlist する。
+  it("既存の非PIIキー(mode/source/confirmed/providerRequestId/fetchedAt)も伏せ字にならない", () => {
+    const safe = sanitizeAuditDetail("registry_auto_fetch", {
+      propertyId: "p1",
+      jobId: "job-1",
+      status: "success",
+      mode: "purchase",
+      source: "mock",
+      confirmed: true,
+      providerRequestId: "req-1",
+      fetchedAt: "2026-09-20T00:00:00.000Z",
+    }) as Record<string, unknown>;
+    expect(safe.mode).toBe("purchase");
+    expect(safe.source).toBe("mock");
+    expect(safe.confirmed).toBe(true);
+    expect(safe.providerRequestId).toBe("req-1");
+    expect(safe.fetchedAt).toBe("2026-09-20T00:00:00.000Z");
+  });
+
+  it("owner反映件数(ownersMatched/Created/Linked)は有限数値のときだけ残る", () => {
+    const safe = sanitizeAuditDetail("registry_auto_fetch", {
+      ownersMatched: 1,
+      ownersCreated: 2,
+      ownersLinked: 3,
+    }) as Record<string, unknown>;
+    expect(safe.ownersMatched).toBe(1);
+    expect(safe.ownersCreated).toBe(2);
+    expect(safe.ownersLinked).toBe(3);
+  });
+
+  it("owner反映件数に非数値が来たら数値限定の force-safe を通さず伏せ字のまま", () => {
+    const safe = sanitizeAuditDetail("registry_auto_fetch", {
+      ownersMatched: "1件",
+    }) as Record<string, unknown>;
+    expect(safe.ownersMatched).toBe(REDACTED);
+  });
+
+  it("既存キーを広げても、本物のPII(ownerName/ownerAddress)は引き続き伏せ字", () => {
+    const safe = sanitizeAuditDetail("registry_auto_fetch", {
+      mode: "purchase",
+      source: "mock",
+      confirmed: true,
+      providerRequestId: "req-1",
+      fetchedAt: "2026-09-20T00:00:00.000Z",
+      ownersMatched: 1,
+      ownerName: "山田太郎",
+      ownerAddress: "東京都千代田区1-1",
+    }) as Record<string, unknown>;
+    expect(safe.ownerName).toBe(REDACTED);
+    expect(safe.ownerAddress).toBe(REDACTED);
+  });
+});

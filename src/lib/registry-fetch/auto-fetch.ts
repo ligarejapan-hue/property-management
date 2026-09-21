@@ -141,9 +141,12 @@ export interface RunRegistryAutoFetchArgs {
   recoverExpectedIdentifier?: string | null;
   /**
    * 【回収・候補なし】画面が見せていた所在(@codex #394 R23 P1)。
-   * ⚠**版番号だけでは足りない**: CSV取込の重複更新は version を上げずに address を
-   *   書き換える経路がある。所在が変わると探す区域が変わり、**別の物件の書類**を
-   *   取り込みかねない。provider が使う値は全部この検査に含める。
+   * ⚠**版番号の一致だけでは足りない**(Task 9で「version を上げない書込経路」は
+   *   洗い出して閉じたが、それでもこの検査は要る): version の比較は取得を
+   *   開始した「その瞬間」しか見ない。取得には数分かかり得るため、開始後・
+   *   貼り付け前に別の書き込みが所在を書き換えると、探す区域が変わり
+   *   **別の物件の書類**を取り込みかねない(TOCTOU)。version 単独に頼らず、
+   *   provider が使う値そのものをこの検査に含める(defense-in-depth)。
    */
   recoverExpectedAddress?: string | null;
   /**
@@ -220,6 +223,12 @@ const PROVIDER_ERROR_STATUS: Readonly<Record<RegistryFetchErrorCode, number>> = 
  * registryStatus を scheduled から元の値へ best-effort で戻す（ロック解除）。
  * まだ scheduled のときだけ戻し、並行更新を踏まない。解除失敗は握りつぶす
  * （元のエラーを優先するため）。
+ *
+ * ⚠**version は必ず進める**(Task 9): registryStatus は物件の編集画面
+ *   (PropertyEditForm「登記状況」)で変えられる項目(scheduled への予約時の
+ *   update・process.ts の取得状況前進は既に進めている)。この解除だけ進めて
+ *   いなかったため、scheduled のまま編集画面を開いていた人の保存がこの解除を
+ *   黙って上書きし得た(Task 7 が謄本取込の法人番号で直したのと同じ穴)。
  */
 async function releaseSchedulingLock(
   propertyId: string,
@@ -228,7 +237,7 @@ async function releaseSchedulingLock(
   try {
     await prisma.property.updateMany({
       where: { id: propertyId, registryStatus: "scheduled" },
-      data: { registryStatus: previousStatus },
+      data: { registryStatus: previousStatus, version: { increment: 1 } },
     });
   } catch {
     // ロック解除失敗は記録のみ（元のエラーを優先）。
@@ -4404,8 +4413,12 @@ export async function runRegistryAutoFetch(
 
       // ⚠**貼る直前にもう一度、対象が同じ物件のままかを確かめる**(@codex #394 R26 P1)。
       //   ロックの一致条件は updateMany の**その瞬間**しか効かない。数分かかる取得の
-      //   最中に、scheduled を見ない・version を上げない経路(CSV取込の重複更新)で
-      //   所在や地番が変わると、**別の対象になった物件**にPDFと所有者情報を貼る。
+      //   最中に別の書き込みが所在や地番を書き換えると、**別の対象になった物件**に
+      //   PDFと所有者情報を貼る(TOCTOU)。version が上がる書込経路でも、version を
+      //   読み直すまでの間に値がさらに変わり得るため、version の一致だけでは
+      //   閉じない窓が残る。ここで実際の値そのものを直接比べるのはそのため
+      //   (version 単独に頼らない defense-in-depth。Task 9 で「version を上げない
+      //   書込経路」自体は洗い出して閉じたが、この検査は引き続き必要)。
       //   ⚠回収は課金していないので、ここで中止しても失うものは無い(やり直せる)。
       if (isRecover) {
         const fresh = await prisma.property.findUnique({
@@ -4533,6 +4546,11 @@ export async function runRegistryAutoFetch(
         ownersCreated: result.ownersCreated ?? 0,
         ownersLinked: result.ownersLinked ?? 0,
         confirmed: true,
+        // D10: 編集中の鍵のため補完を見送ったこと(管理画面で読めるように・許可リストは
+        // audit-log-detail-safety.ts の ACTION_EXTRA_KEYS/ACTION_FORCE_SAFE_KEYS 側)。
+        propertyFillSkippedByEditLock: result.propertyFillSkippedByEditLock ?? false,
+        ownerCorporateFillSkippedByEditLock:
+          result.ownerCorporateFillSkippedByEditLock ?? false,
       },
     });
 

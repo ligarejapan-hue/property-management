@@ -518,11 +518,30 @@ describe("rollback: 査定申込がある物件は削除しない(has_dm_inquiri
       { rowNumber: 1, action: "delete", reason: "査定申込があるため削除できません (has_dm_inquiries)" },
       { rowNumber: 3, action: "delete", reason: "査定申込があるため削除できません (has_dm_inquiries)" },
     ]);
-    // 行ごとの往復をしない(対話 tx の既定 5 秒で大きなロールバックが落ちるため): ロック1文 → 申込の照会1回 → 削除
-    expect(rb.tx.$queryRaw).toHaveBeenCalledTimes(1);
+    // 行ごとの往復をしない(対話 tx の既定 5 秒で大きなロールバックが落ちるため): ロック1文 →
+    // 一括照会 → 削除。⚠2026-09-21 edit-lock 合流: 削除の直前に「鍵の後始末」
+    // (deleteEditLocksFor)が増え、これも一括 DELETE 文を1本 tx.$queryRaw に投げる
+    // (行ごとには回らない)。よって $queryRaw の呼び出しは合計2回になった:
+    //   1回目 = 物件の一括行ロック(lockPropertiesForUpdate, FOR UPDATE)
+    //   2回目 = 鍵の一括後始末(deleteEditLocksFor, DELETE FROM edit_locks)
+    // どちらも対象件数に関わらず1文でまとまっている、という main の意図(行ごとの
+    // 往復をしない)は変わらない。
+    //
+    // ⚠2026-09-21 外部レビュー(@codex P2)対応: 鍵の後始末は「申込の照会の後」に
+    // 移し、対象も「事前分類の deleteIds 全件」ではなく「実際に削除する id
+    // (= p-late を除いた p-ok だけ)」に絞った。申込の照会より前に全件の鍵を
+    // 消すと、tx の中で新たに申込が付いて生き残る p-late からも鍵を消してしまい、
+    // 物件は残ったまま編集中の人だけ鍵を失う事故になるため。
+    expect(rb.tx.$queryRaw).toHaveBeenCalledTimes(2);
     const lockSql = (rb.tx.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join("?");
     expect(lockSql).toMatch(/FROM properties WHERE id = ANY\(\?::uuid\[\]\) ORDER BY id FOR UPDATE/);
     expect(rb.tx.$queryRaw.mock.calls[0][1]).toEqual(["p-late", "p-ok"]);
+    const editLockDeleteSql = (rb.tx.$queryRaw.mock.calls[1][0] as TemplateStringsArray).join("?");
+    expect(editLockDeleteSql).toMatch(/DELETE FROM "edit_locks"/);
+    // ⚠核心: 鍵の後始末は実際に削除する p-ok だけを対象にする。生き残る p-late の
+    // 鍵は対象に含まれない。
+    expect(rb.tx.$queryRaw.mock.calls[1][1]).toEqual(["property"]);
+    expect(rb.tx.$queryRaw.mock.calls[1][2]).toEqual(["p-ok"]);
     expect(rb.tx.dmRecipientDraft.findMany).toHaveBeenCalledTimes(1);
     expect(rb.tx.dmRecipientDraft.findMany).toHaveBeenCalledWith({
       where: { propertyId: { in: ["p-ok", "p-late"] }, inquiries: { some: {} } },
@@ -530,7 +549,13 @@ describe("rollback: 査定申込がある物件は削除しない(has_dm_inquiri
     });
     expect(rb.tx.dmInquiry.count).not.toHaveBeenCalled();
     expect(rb.lockPropertyRow).not.toHaveBeenCalled();
-    expect(rb.order).toEqual(['lock:["p-late","p-ok"]', "inquiries", "delete:p-ok"]);
+    // 行ロック → 申込の一括照会 → 鍵の後始末(実削除対象のみ・2本目の $queryRaw)→ 削除。
+    expect(rb.order).toEqual([
+      'lock:["p-late","p-ok"]',
+      "inquiries",
+      'lock:["property"]',
+      "delete:p-ok",
+    ]);
     expect(rb.tx.importJob.update).toHaveBeenCalledWith({ where: { id: "j1" }, data: { status: "rolled_back" } });
   });
 

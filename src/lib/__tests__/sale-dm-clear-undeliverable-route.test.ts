@@ -90,6 +90,18 @@ describe("POST clear-dm-undeliverable", () => {
     expect(writeAuditLog).toHaveBeenCalled();
   });
 
+  // review Minor 3: restoreDmStatus 未指定(dmUndeliverableAtのみのクリア)は
+  // 編集画面で変えられる項目を書かないので version も進めてはいけない。
+  // 誰かが「簡潔にする」つもりで version を初期 data リテラルへ引き上げると、
+  // このテストが無いと全テストが通ったまま、宛先不明の自動クリアのたびに
+  // 編集画面を開いているだけの人の保存が409で弾かれるようになる。
+  it("(Task 9) restoreDmStatus 未指定時は version を書かない(dmUndeliverableAtのみの対象外分岐)", async () => {
+    const res = await POST(req() as never, ctx());
+    expect(res.status).toBe(200);
+    const arg = pm.property.update.mock.calls[0][0];
+    expect("version" in arg.data).toBe(false);
+  });
+
   it("空ボディ(解除のみの既定呼び出し)でも 200・dmUndeliverableAt を解除(request.json の 500 回避)", async () => {
     const res = await POST(new Request("http://x", { method: "POST" }) as never, ctx());
     expect(res.status).toBe(200);
@@ -109,6 +121,17 @@ describe("POST clear-dm-undeliverable", () => {
     expect(res.status).toBe(200);
     const arg = pm.property.update.mock.calls[0][0];
     expect(arg.data.dmStatus).toBe("send");
+  });
+
+  // Task 9: restoreDmStatus 指定時の dmStatus 書き戻しは version を進めていなかった。
+  // dmStatus は物件の編集画面(PropertyEditForm「DM判断」)で変えられる項目のため、
+  // 進めないと編集画面を開いていた人の保存が黙って上書きする(Task 7 が
+  // 謄本取込の法人番号で直したのと同じ穴)。
+  it("(Task 9) restoreDmStatus 指定時は version: { increment: 1 } を伴う", async () => {
+    const res = await POST(req({ restoreDmStatus: "send" }) as never, ctx());
+    expect(res.status).toBe(200);
+    const arg = pm.property.update.mock.calls[0][0];
+    expect(arg.data.version).toEqual({ increment: 1 });
   });
 
   it("存在しない物件は 404", async () => {

@@ -127,8 +127,11 @@ async function applyOne(
     if (!detection.cleanedName) return "not_eligible";
 
     // 楽観ロック: version に加えて読み取り時点の name をスナップショット条件にする。
-    // version を bump しない書込パスとのレースでも lost update しない(bulk-apply の
-    // corporateNumber:null 条件と同じ発想。count 0 = skip)。
+    // version の一致だけでなく実際の値も見ることで、version を読んでから書くまでの
+    // 間に name 自体が書き換わった場合も lost update しない(bulk-apply の
+    // corporateNumber:null 条件と同じ発想。count 0 = skip)。⚠現時点で name を
+    // version を進めずに書く経路は無い(Task 9 で洗い出し済み)。この二重の条件は
+    // 「今後もそうとは限らない」ことへの備え(defense-in-depth)として残す。
     const updated = await prisma.owner.updateMany({
       where: { id: ownerId, version, name: owner.name },
       data: { name: detection.cleanedName, version: { increment: 1 } },
@@ -197,9 +200,11 @@ async function applyOne(
   }
 
   // 楽観ロック: version に加えて読み取り時点の corporateNumber をスナップショット条件に
-  // する。国税庁 lookup(最大 ~8s)の待機中に「version を bump せず corporateNumber を
-  // 埋める」既存パス(import/reception-owner の reuse 等)が走っても lost update しない
-  // (bulk-apply の Codex P2 と同型のガード。count 0 = skip)。
+  // する。国税庁 lookup(最大 ~8s)の待機中に他の経路が corporateNumber を埋めても
+  // lost update しない(bulk-apply の Codex P2 と同型のガード。count 0 = skip)。
+  // ⚠現時点で corporateNumber を version を進めずに書く経路は無い(Task 9 で
+  // import/reception-owner の reuse 等も version increment を持つよう修正済み)。
+  // この二重の条件は、値そのものを見る defense-in-depth として残す。
   const updated = await prisma.owner.updateMany({
     where: { id: ownerId, version, corporateNumber: owner.corporateNumber },
     data,

@@ -15,6 +15,9 @@ import { resolveCurrentAddressWrite } from "@/lib/owner-current-address-write";
 import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { applyDisplayToOwner } from "@/lib/display-level";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import { assertNotEditLockedByOther } from "@/lib/edit-lock/service";
+import { readScreenTokenHash, readLockId } from "@/lib/edit-lock/screen-token";
+import { lockOwnerRow } from "@/lib/edit-lock/row-locks";
 
 /**
  * 所有者に紐づく物件を、物件一覧/詳細と同じ record スコープに絞る。
@@ -191,13 +194,29 @@ export async function PATCH(
       throw new ApiError(404, "所有者が見つかりません", "NOT_FOUND");
     }
 
+    // 編集の鍵(X-Edit-Lock)の形式チェックは readLockId 側で行う(不正なら 400)。
+    const lockIdHeader = readLockId(request);
+
     // Optimistic lock update
-    const result = await prisma.owner.updateMany({
-      where: { id, version },
-      data: {
-        ...updateFields,
-        version: { increment: 1 },
-      },
+    // ⚠**編集の鍵の確認は所有者行をロックした後・書き込みの前**に行う(Task 6)。
+    //   順序: トランザクション開始 → 所有者行ロック(ロック順序=所有者→物件の親行)
+    //   → 鍵の確認 → 条件つき更新。
+    const result = await prisma.$transaction(async (tx) => {
+      await lockOwnerRow(tx, id);
+      await assertNotEditLockedByOther(tx, {
+        resourceType: "owner",
+        resourceId: id,
+        userId: session.id,
+        screenTokenHash: readScreenTokenHash(request),
+        lockId: lockIdHeader,
+      });
+      return tx.owner.updateMany({
+        where: { id, version },
+        data: {
+          ...updateFields,
+          version: { increment: 1 },
+        },
+      });
     });
 
     if (result.count === 0) {

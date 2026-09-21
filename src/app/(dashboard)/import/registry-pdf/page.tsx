@@ -72,6 +72,29 @@ interface ImportResult {
    * 抽出時の警告（parsed.warnings）とは別物で、両方が同時に出ることがある。
    */
   warning?: string;
+  /** D10: 編集中の鍵のため、物件の地番・家屋番号・不動産番号の補完を見送った。 */
+  propertyFillSkippedByEditLock?: boolean;
+  /** D10: 編集中の鍵のため、所有者の法人番号の補完を見送った。 */
+  ownerCorporateFillSkippedByEditLock?: boolean;
+}
+
+/**
+ * D10: 編集中の鍵で自動取込の一部補完を見送ったときの案内文言。
+ * 物件側/所有者側を別々に判定する(@codex R12 P2)。画面から切り出した純粋関数。
+ * 表示を入れないと、取込は成功したのに欄が空のままであることに誰も気づけない。
+ */
+export function editLockSkipMessages(flags: {
+  propertyFillSkippedByEditLock?: boolean;
+  ownerCorporateFillSkippedByEditLock?: boolean;
+}): string[] {
+  const messages: string[] = [];
+  if (flags.propertyFillSkippedByEditLock) {
+    messages.push("編集中のため、地番・家屋番号・不動産番号の補完を見送りました");
+  }
+  if (flags.ownerCorporateFillSkippedByEditLock) {
+    messages.push("編集中のため、法人番号の補完を見送りました");
+  }
+  return messages;
 }
 
 type ExtractionSource = "embedded_text" | "likely_scanned";
@@ -550,6 +573,9 @@ export default function RegistryPdfPage() {
     setResult(null);
     setError(null);
   };
+
+  // レビュー round1 #7: レンダリングのたびに2回呼んでいたのを1回にまとめる。
+  const editLockSkipMsgs = result ? editLockSkipMessages(result) : [];
 
   // -------------------------------------------------------------------------
   // Render
@@ -1206,6 +1232,27 @@ export default function RegistryPdfPage() {
                   謄本PDFについてのご注意
                 </h4>
                 <p className="text-sm text-amber-700 dark:text-amber-300">{result.warning}</p>
+              </div>
+            )}
+
+            {/* D10: 編集中の鍵のため一部の補完を見送った場合の案内。
+                取込本体は成功しているが、地番・家屋番号・不動産番号 / 法人番号の
+                どちらか(または両方)が空のままの可能性があることを伝える。 */}
+            {editLockSkipMsgs.length > 0 && (
+              <div
+                role="alert"
+                data-testid="import-edit-lock-skip-warning"
+                className="mb-6 rounded-md border border-amber-300 dark:border-amber-400/20 bg-amber-50 dark:bg-amber-500/10 p-4"
+              >
+                <h4 className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-amber-800 dark:text-amber-300">
+                  <AlertTriangle className="h-4 w-4" />
+                  編集中のため見送った補完があります
+                </h4>
+                {editLockSkipMsgs.map((message, i) => (
+                  <p key={i} className="text-sm text-amber-700 dark:text-amber-300">
+                    {message}
+                  </p>
+                ))}
               </div>
             )}
 

@@ -337,9 +337,13 @@ export async function POST(
       //    count は今回 INSERT された行数 → ownerLinkedCount として反映。
       await lockPropertyRow(tx, propertyId);
       if (Object.keys(propertyUpdates).length > 0) {
+        // ⚠**version は必ず進める**(Task 9): lotNumber/buildingNumber は編集画面
+        //   (PropertyEditForm)で変えられる項目のため、進めないと編集画面を開いていた
+        //   人の保存がこの空欄補完を黙って上書きする(Task 7 が謄本取込の法人番号で
+        //   直したのと同じ穴)。
         await tx.property.update({
           where: { id: propertyId },
-          data: propertyUpdates,
+          data: { ...propertyUpdates, version: { increment: 1 } },
         });
       }
       if (ownerIds.length > 0) {

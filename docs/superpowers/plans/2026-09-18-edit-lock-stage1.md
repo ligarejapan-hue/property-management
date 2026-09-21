@@ -35,7 +35,7 @@
 | `src/lib/edit-lock/screen-token.ts`(新規) | 合言葉ヘッダ `X-Edit-Screen` の読み取りと sha256 |
 | `src/app/api/edit-locks/acquire/route.ts` ほか5本(新規) | 窓口 |
 | `prisma/schema.prisma`(変更) | `EditLock` モデルと `EditLockResource` enum |
-| `prisma/migrations/20260918100000_add_edit_locks/migration.sql`(新規) | 表の追加のみ |
+| `prisma/migrations/20260921100000_add_edit_locks/migration.sql`(新規) | 表の追加のみ |
 | `src/app/api/properties/[id]/route.ts`(変更) | PATCH をトランザクションで包み、鍵の確認を足す |
 | `src/app/api/owners/[id]/route.ts`(変更) | 同上 |
 | `src/app/api/owners/[id]/corporate-apply/route.ts`(変更) | 同上 |
@@ -261,7 +261,7 @@ git commit -m "feat(edit-lock): 鍵の判定ルールと定数(純関数)"
 
 **Files:**
 - Modify: `prisma/schema.prisma`(末尾に追加)
-- Create: `prisma/migrations/20260918100000_add_edit_locks/migration.sql`
+- Create: `prisma/migrations/20260921100000_add_edit_locks/migration.sql`
 - Test: `src/lib/edit-lock/__tests__/migration-shape.test.ts`
 
 **Interfaces:**
@@ -279,7 +279,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const sql = readFileSync(
-  join(process.cwd(), "prisma/migrations/20260918100000_add_edit_locks/migration.sql"),
+  join(process.cwd(), "prisma/migrations/20260921100000_add_edit_locks/migration.sql"),
   "utf8",
 ).replace(/\r\n/g, "\n");
 
@@ -351,7 +351,7 @@ migration を生成:
 npx prisma migrate dev --name add_edit_locks --create-only
 ```
 
-生成されたディレクトリ名が `20260918100000_add_edit_locks` でなければ、**ディレクトリ名をこの名前に変更**する(テストとdocsが参照するため)。生成SQLが上のテストの4条件を満たすことを目視で確認する。
+生成されたディレクトリ名が `20260921100000_add_edit_locks` でなければ、**ディレクトリ名をこの名前に変更**する(テストとdocsが参照するため)。生成SQLが上のテストの4条件を満たすことを目視で確認する。
 
 - [ ] **Step 4: テストが通ることを確認**
 
@@ -361,7 +361,7 @@ Expected: PASS(4 tests)・`The schema at prisma/schema.prisma is valid`・`Gener
 - [ ] **Step 5: コミット**
 
 ```bash
-git add prisma/schema.prisma prisma/migrations/20260918100000_add_edit_locks/migration.sql src/lib/edit-lock/__tests__/migration-shape.test.ts
+git add prisma/schema.prisma prisma/migrations/20260921100000_add_edit_locks/migration.sql src/lib/edit-lock/__tests__/migration-shape.test.ts
 git commit -m "feat(edit-lock): 台帳 edit_locks の追加(migration)"
 ```
 
@@ -2018,6 +2018,10 @@ git commit -m "test(edit-lock): 版番号を進めない書き込みが無いこ
   1. **謄本PDF取込・謄本の自動取得が、所有者の法人番号を埋めるときに版番号を進める**ようになる。取込の前から所有者の編集画面を開いていた人の保存が、これまで(黙って上書き)から**409(先に更新されています)**に変わる。これは修正であって退行ではない
   2. **鍵の窓口は動いている**ので、画面を介さず窓口を直接呼べば鍵を作れる。その状態では保存が423になりうる。通常の利用では起こらないが、「鍵は1本も生まれない」と断言はしない
 - [ ] PR を作成し、`@codex review` の指摘に対応
+
+## デプロイ手順(M5・全ブランチレビューで追記)
+
+進める順序は**表(migration)→ コード**。`vps-deploy` の既定手順(`npx prisma migrate deploy` → `npm run build` → `restart`)どおりなら自動的にこの順になり、問題は起きない。⚠**逆順(コードを先に反映)は禁止**: `assertNotEditLockedByOther`(`PATCH /api/properties/[id]`・`PATCH /api/owners/[id]`・`POST /api/owners/[id]/corporate-apply` の**全保存**で必ず走る)が `relation "edit_locks" does not exist` で失敗し、**物件の保存・所有者の保存・法人番号の反映・取込のすべてが500になる**(`deleteEditLocksFor` を呼ぶ4つの後始末経路だけの影響ではない。手動確認スクリプト `scripts/edit-lock-concurrency-check.mjs` のヘッダに以前「4経路」とだけ書かれていたのは過小表現だった)。戻すときの順序は仕様9.2を参照(画面→窓口→表、の逆順)。
 
 ## この計画に含めないもの(第2段)
 

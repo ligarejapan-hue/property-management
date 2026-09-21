@@ -297,6 +297,21 @@ describe("POST /api/import/csv — 郵便番号取込（update）", () => {
     expect("postalCode" in lastUpdateData()).toBe(false);
     expect(lastUpdateData().note).toBe("新メモ");
   });
+
+  // Task 9: この重複更新は version を進めていなかった(編集画面を開いていた人の
+  // 保存を黙って上書きするバグ)。Task 7 が謄本取込の法人番号で直した同じ穴。
+  it("13. update時に version を進める(編集画面の古い保存が409で弾かれるようにする)", async () => {
+    pm.property.findUnique.mockResolvedValue({
+      id: "p-existing",
+      address: "東京都千代田区1-1",
+      postalCode: null,
+      realEstateNumber: "RE-1",
+    });
+    const csv = "住所,不動産番号,郵便番号\n東京都千代田区1-1,RE-1,100-0005\n";
+    await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
+    expect(pm.property.updateMany).toHaveBeenCalledTimes(1);
+    expect(lastUpdateData().version).toEqual({ increment: 1 });
+  });
 });
 
 describe("POST /api/import/csv — XLSX 郵便番号 formatted-text 取込（タスク4）", () => {
