@@ -526,7 +526,13 @@ async function reflectParsedOwners(args: {
                   normalizeName(c.name) === normName &&
                   normalizeAddress(c.address!) === normAddr,
               );
-              if (raced) ownerId = raced.id;
+              // ⚠**既知の制限(発注者判断 2026-09-22 で許容)**: ここで拾った所有者は
+            //   行ロックを取り直していない。通常の再利用の経路は
+            //   所有者の行を「アーカイブされていないこと」を条件に押さえてから
+            //   紐づけるが、ここは「同時に走ったもう一方が今しがた作った」場合に
+            //   しか通らない。その所有者が**さらに同じ瞬間にアーカイブされる**と、
+            //   アーカイブ済みに紐づく可能性が残る。直すなら同じ行ロックを足す。
+            if (raced) ownerId = raced.id;
             }
 
             const isNew = ownerId === null;

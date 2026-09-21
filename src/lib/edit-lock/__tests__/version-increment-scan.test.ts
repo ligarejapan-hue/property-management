@@ -105,7 +105,7 @@ const VERSIONED: Record<string, string> = {
   "src/lib/registry-pdf/process.ts:198":
     "owner.corporateNumber(空欄補完・fillOwnerCorporateNumberIfUnlocked)+version increment" +
     "(Task 7で修正済)",
-  "src/lib/registry-pdf/process.ts:792":
+  "src/lib/registry-pdf/process.ts:798":
     "property.registryStatus/realEstateNumber/lotNumber/buildingNumber(取得状況前進+空欄補完)+version increment",
 };
 

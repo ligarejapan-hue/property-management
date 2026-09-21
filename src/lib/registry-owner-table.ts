@@ -107,60 +107,68 @@ function cleanValue(raw: string): string {
 export function parseRegistryOwnerTable(
   rawText: string,
 ): RegistryTableOwner[] | null {
-  const cellLines = rawText
-    .split(/\r?\n/)
-    .filter((line) => VERTICAL_RULE.test(line));
-  if (cellLines.length === 0) return null;
+  const lines = rawText.split(/\r?\n/);
+  if (!lines.some((line) => VERTICAL_RULE.test(line))) return null;
 
-  let layout: HeaderLayout | null = null;
+  // ⚠`let layout = null` のままだと、TSが flushGroup 内の代入を追えず
+  //   ループ側で never に狭まる。明示的に型を書く。
+  let layout: HeaderLayout | null = null as HeaderLayout | null;
   const owners: RegistryTableOwner[] = [];
 
-  for (const line of cellLines) {
-    const cells = splitCells(line);
+  /** いま読んでいる「1行のまとまり」に属するセルの行。 */
+  let group: string[][] = [];
 
-    // ⚠見出しは**毎行**判定する。共有者が多い謄本は改ページで表が続き、
-    //   2ページ目以降にも同じ見出しが出る。最初の1回しか見ないと、
-    //   2回目の見出しを中身として読み「氏名」という名前の所有者ができる。
-    const header = readHeader(cells);
-    if (header) {
-      layout = layout ?? header;
-      continue; // 見出しの行(と、見出しが見つかるまでの表題など)は中身ではない
+  /** まとまりを1人ぶんとして取り込む。 */
+  const flushGroup = () => {
+    if (group.length === 0) return;
+    const rows = group;
+    group = [];
+
+    // 見出しの行(2ページ目以降にも出る)は中身ではない
+    if (!layout) {
+      layout = readHeader(rows[0]);
+      return;
     }
-    if (!layout) continue; // まだ見出しに出会っていない
+    if (readHeader(rows[0])) return;
 
-    // 表題など、列数が足りない行は中身ではない
-    if (cells.length < layout.cellCount) continue;
+    /** 列ごとに、サービスの刷り込みを除いた断片をつなぐ。 */
+    const column = (index: number): string => {
+      const parts: string[] = [];
+      for (const cells of rows) {
+        const cell = (cells[index] ?? "").trim();
+        if (!cell || isServiceImprint(cell)) continue;
+        parts.push(cell);
+      }
+      return cleanValue(parts.join(""));
+    };
 
-    const name = cleanValue(cells[layout.name] ?? "");
-    const address = cleanValue(cells[layout.address] ?? "");
+    const name = column(layout.name);
+    if (!name) return; // 氏名が無ければ所有者として扱わない
+    const address = column(layout.address);
     const share =
       layout.share === null
         ? ""
-        : toHalfWidthDigits(stripSpaces(cells[layout.share] ?? ""));
+        : toHalfWidthDigits(stripSpaces(column(layout.share)));
 
-    const nameIsImprint = isServiceImprint(name);
+    owners.push({
+      name,
+      address: address || null,
+      share: share || null,
+    });
+  };
 
-    // 新しい所有者の行か? = 氏名があり、それが刷り込みでなく、
-    // その行に住所か持分が載っている(折り返しの行には載らない)
-    const startsOwner = Boolean(name) && !nameIsImprint && (Boolean(address) || Boolean(share));
-
-    if (startsOwner) {
-      owners.push({ name, address: address || null, share: share || null });
+  for (const line of lines) {
+    if (VERTICAL_RULE.test(line)) {
+      const cells = splitCells(line);
+      // 表題など、列が足りない行はまとまりに入れない
+      if (layout && cells.length < layout.cellCount) continue;
+      group.push(cells);
       continue;
     }
-
-    // ここから下は折り返しの行。直前の所有者に足す。
-    const previous = owners[owners.length - 1];
-    if (!previous) continue;
-
-    if (address) {
-      previous.address = previous.address ? previous.address + address : address;
-    }
-    if (name && !nameIsImprint) {
-      previous.name += name;
-    }
-    if (share && !previous.share) previous.share = share;
+    // 罫線(区切り・上枠・下枠)や空行は、まとまりの終わり
+    flushGroup();
   }
+  flushGroup();
 
   if (!layout) return null; // 罫線はあったが所有者の表ではなかった
   return owners;
