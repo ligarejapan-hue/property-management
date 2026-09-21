@@ -29,7 +29,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 
 **#6/#7 の補足**: `owner-corporate-import-integration.test.ts` / `corporate-import-guard-integration.test.ts` は、この2ファイル(reception-owner・registry-pdf・owner-csv の法人番号統合)を**最初から source-assertion(正規表現でコード片を固定)方式**で検証する既存方針を取っている(ファイル冒頭のコメントに明記)。他の9件は full prisma mock による振る舞いテストにしたが、#6/#7 はこの既存ファイル群の慣習(reception-owner の corporateNumber 書込は同ファイル内に既に同種の source-assertion が複数ある)に合わせ、同じ形式で「version increment を伴う」ことを固定した。
 
-**#11 の補足**: この行は当初、`registryStatus` を「編集画面では変えられない運用フラグ」の例としてブリーフに挙げられていたが、実際に調べたところ **`registryStatus` は `src/components/properties/property-edit-form.tsx:129`(FORM_FIELDS の「登記状況」select)で編集画面から変更できる**。同じ `registryStatus` を書く他の2箇所(`src/lib/registry-pdf/process.ts:674`・`src/lib/registry-fetch/auto-fetch.ts:4294`)は既に version increment を伴っており、この解除処理(`releaseSchedulingLock`)だけが漏れていた。同じ資源・同じフィールドへの書き込みで一貫性が無かったため、要修正と判断し修正した。
+**#11 の補足**: この行は当初、`registryStatus` を「編集画面では変えられない運用フラグ」の例としてブリーフに挙げられていたが、実際に調べたところ **`registryStatus` は `src/components/properties/property-edit-form.tsx:129`(FORM_FIELDS の「登記状況」select)で編集画面から変更できる**。同じ `registryStatus` を書く他の2箇所(`src/lib/registry-pdf/process.ts:681`・`src/lib/registry-fetch/auto-fetch.ts:4294`)は既に version increment を伴っており、この解除処理(`releaseSchedulingLock`)だけが漏れていた。同じ資源・同じフィールドへの書き込みで一貫性が無かったため、要修正と判断し修正した。
 
 ## 対象外(許可・15件)
 
@@ -84,7 +84,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/lib/registry-fetch/auto-fetch.ts:4294` | `property.registryStatus = scheduled`(有料取得の予約) |
 | `src/lib/registry-fetch/auto-fetch.ts:4509` | `property.registryStatus = obtained`(有料取得の確定) |
 | `src/lib/registry-pdf/process.ts:190` | `owner.corporateNumber`(Task 7 で修正済) |
-| `src/lib/registry-pdf/process.ts:674` | `property.registryStatus`/`realEstateNumber`/`lotNumber`/`buildingNumber` |
+| `src/lib/registry-pdf/process.ts:681` | `property.registryStatus`/`realEstateNumber`/`lotNumber`/`buildingNumber` |
 
 合計: 要修正11 + 対象外15 + 対応済28 = **54件**(全件解決・unresolved行なし)。
 
