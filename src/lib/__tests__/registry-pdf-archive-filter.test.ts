@@ -77,7 +77,9 @@ vi.mock("@/lib/pdf-extract", () => ({
 
 vi.mock("@/lib/prisma", () => {
   const tx = {
-    owner: { updateMany: vi.fn() },
+    // 新規 Owner の作成は**親の物件行をロックしたトランザクションの中**で行う
+    // (同時反映で同姓同住所の Owner が2件できるのを防ぐ)。そのため findMany/create も tx 側。
+    owner: { updateMany: vi.fn(), findMany: vi.fn(), create: vi.fn() },
     propertyOwner: { findFirst: vi.fn(), create: vi.fn() },
     $queryRaw: vi.fn(async () => [{ id: "p1" }]), // 親行ロック(#364 R10)
   };
@@ -112,7 +114,7 @@ const pm = prisma as unknown as {
   importJobRow: { create: Mock };
   $transaction: Mock;
   _tx: {
-    owner: { updateMany: Mock };
+    owner: { updateMany: Mock; findMany: Mock; create: Mock };
     propertyOwner: { findFirst: Mock; create: Mock };
   };
 };
@@ -168,6 +170,11 @@ beforeEach(() => {
     fn(pm._tx),
   );
   pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
+  // ロック取得後の再確認(既定は「まだ誰も作っていない」)
+  pm._tx.owner.findMany.mockResolvedValue([]);
+  pm._tx.owner.create.mockImplementation(({ data }: { data: { name: string } }) =>
+    Promise.resolve({ id: `owner-${data.name}` }),
+  );
   pm._tx.propertyOwner.findFirst.mockResolvedValue(null);
   pm._tx.propertyOwner.create.mockResolvedValue({});
 });
@@ -197,12 +204,14 @@ describe("POST /api/import/registry-pdf: archived owner を既存候補にしな
 
     await REGISTRY_PDF_POST(makeRequest());
 
-    // 新規 Owner 作成
-    expect(pm.owner.create).toHaveBeenCalledTimes(1);
-    expect(pm.owner.create).toHaveBeenCalledWith({
+    // 新規 Owner 作成(⚠親の物件行をロックした tx の中で作る)
+    expect(pm._tx.owner.create).toHaveBeenCalledTimes(1);
+    expect(pm._tx.owner.create).toHaveBeenCalledWith({
       data: { name: OWNER_NAME, address: OWNER_ADDRESS },
       select: { id: true },
     });
+    // tx の外で作っていないこと(同時反映で二重に作られる形に戻さないための歯止め)
+    expect(pm.owner.create).not.toHaveBeenCalled();
     // PropertyOwner 作成(新規 Owner と link・tx 内=親行ロック #364 R10)
     expect(pm._tx.propertyOwner.create).toHaveBeenCalledTimes(1);
     const linkArgs = pm._tx.propertyOwner.create.mock.calls[0][0];
@@ -243,8 +252,8 @@ describe("POST /api/import/registry-pdf: archived owner を既存候補にしな
 
     await REGISTRY_PDF_POST(makeRequest());
 
-    // fallback で新規 active Owner を作成
-    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    // fallback で新規 active Owner を作成(tx の中)
+    expect(pm._tx.owner.create).toHaveBeenCalledTimes(1);
     // PropertyOwner は新規 owner とだけ link(tx 内・親行ロック=#364 R10)。
     // archived の "owner-raced" には作らない。
     expect(pm._tx.propertyOwner.create).toHaveBeenCalledTimes(1);

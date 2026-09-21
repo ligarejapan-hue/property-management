@@ -4413,3 +4413,54 @@ export async function fetchRegistryPreflight(
     },
   );
 }
+
+// ---------- 添付済み謄本からの所有者反映 ----------
+
+export interface RegistryOwnerCandidate {
+  name: string;
+  address: string | null;
+  share: string | null;
+}
+
+export interface RegistryOwnerPreview {
+  alreadyHasOwners: boolean;
+  attachment: { id: string; fileName: string; createdAt: string };
+  owners: RegistryOwnerCandidate[];
+}
+
+/** 下見: 添付済みの所有者事項から、登録される予定の所有者を取得する(保存しない)。 */
+export async function fetchRegistryOwnerPreview(
+  propertyId: string,
+): Promise<RegistryOwnerPreview> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      alreadyHasOwners: false,
+      attachment: {
+        id: "mock",
+        fileName: "謄本(所有者事項)_2026-09-15.pdf",
+        createdAt: new Date().toISOString(),
+      },
+      owners: [
+        { name: "山田太郎", address: "東京都渋谷区神宮前三丁目12番3号", share: null },
+      ],
+    };
+  }
+  return apiFetch<RegistryOwnerPreview>(
+    `/api/properties/${propertyId}/registry-owners`,
+  );
+}
+
+/** 反映: 添付済みの所有者事項から所有者を登録する。 */
+export async function applyRegistryOwners(
+  propertyId: string,
+): Promise<Record<string, unknown>> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { ok: true };
+  }
+  return apiFetch<Record<string, unknown>>(
+    `/api/properties/${propertyId}/registry-owners`,
+    { method: "POST" },
+  );
+}

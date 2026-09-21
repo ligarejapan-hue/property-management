@@ -27,6 +27,7 @@ import PhotoTab from "@/components/properties/photo-tab";
 import CandidateList from "@/components/properties/candidate-list";
 import ActionBar from "@/components/properties/action-bar";
 import RegistryLocationSearchButton from "@/components/properties/registry-location-search-button";
+import RegistryOwnerApplyButton from "@/components/properties/registry-owner-apply-button";
 import { isLandPropertyType } from "@/lib/registry-fetch/registry-target";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
@@ -782,6 +783,9 @@ export default function PropertyDetailPage({
           <OwnerTab
             owners={property.propertyOwners}
             propertyId={property.id}
+            registryOwnerAttachmentCount={
+              property.registryAttachmentCounts?.owner ?? 0
+            }
             canRead={canReadOwner}
             canWrite={canWriteOwner}
             canRemoveOwnerLink={canRemoveOwnerLink}
@@ -982,6 +986,7 @@ function BasicTab({
 function OwnerTab({
   owners,
   propertyId,
+  registryOwnerAttachmentCount,
   canRead,
   canWrite,
   canRemoveOwnerLink,
@@ -992,6 +997,12 @@ function OwnerTab({
 }: {
   owners: ApiPropertyOwner[];
   propertyId: string;
+  /**
+   * 添付されている**所有者事項**の謄本の件数。
+   * 0 のときは「謄本から所有者を反映」を出さない(反映元が無いため)。
+   * ⚠null(謄本の閲覧権限が無い人)は呼び出し側で 0 に畳んでいる。
+   */
+  registryOwnerAttachmentCount: number;
   canRead: boolean;
   canWrite: boolean;
   /** 「この物件から外す」を出してよいか(= 管理者)。server 側と同じ条件。 */
@@ -1022,7 +1033,17 @@ function OwnerTab({
     <div className="space-y-4">
       {/* 追加導線: 0 件時も既存所有者がいる時も常設（共有名義の追加に対応） */}
       {showAdd && (
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          {/*
+            謄本はあるのに所有者が空の物件を、追加の費用なしで埋めるための導線。
+            **所有者が0件のときだけ**出す(既にいる物件への二重登録を避ける。server 側も 409)。
+          */}
+          {owners.length === 0 && registryOwnerAttachmentCount > 0 && (
+            <RegistryOwnerApplyButton
+              propertyId={propertyId}
+              onApplied={onRefresh}
+            />
+          )}
           <button
             type="button"
             onClick={() => setLinkModalOpen(true)}

@@ -400,20 +400,60 @@ async function reflectParsedOwners(args: {
               { name: ownerInfo.name, address: ownerInfo.address ?? null },
               null,
             );
-      const created = await prisma.owner.create({
-        data: {
-          name: ownerInfo.name,
-          ...(ownerInfo.address ? { address: ownerInfo.address } : {}),
-          // Phase D: 候補 1 件のみ採用、複数 / 競合は乗せない
-          ...(cnDecisionForCreate.action === "save" && cnDecisionForCreate.corporateNumber
-            ? { corporateNumber: cnDecisionForCreate.corporateNumber }
-            : {}),
-        },
-        select: { id: true },
+      // ⚠**親の物件行をロックしてから作る**(書き込み規約)。
+      // ここを素の create にすると、同じ物件に対する2つの反映が同時に走ったとき、
+      // どちらも「候補なし」と判定したまま進み、**同姓同住所の所有者が2件でき、
+      // 両方が同じ物件に紐づく**(PropertyOwner の一意制約は (物件, 所有者) なので
+      // 別idの2件は止められない / owners には氏名+住所の一意制約が無い)。
+      // ロックを取ったあとに**もう一度**探し、先に作られていればそれを使う。
+      const resolved = await prisma.$transaction(async (tx) => {
+        await lockPropertyRow(tx, propertyId);
+
+        if (ownerInfo.address) {
+          const normName = normalizeName(ownerInfo.name);
+          const normAddr = normalizeAddress(ownerInfo.address);
+          const rows = await tx.owner.findMany({
+            where: { address: { not: null }, isArchived: false },
+            select: { id: true, name: true, address: true, isArchived: true },
+          });
+          const raced = rows.find(
+            (c) =>
+              // ⚠**さっき使えないと判断した候補は拾い直さない**。
+              //   ここに来る経路のひとつが「候補は見つかったが、tx 内のロックで
+              //   isArchived=true と分かった(同時にアーカイブされた)」= 新規へ
+              //   フォールバックする流れ。再確認で同じ id を拾うと、
+              //   アーカイブ済みの所有者に紐づけ直してしまう。
+              c.id !== candidateOwnerId &&
+              // where でも除いているが、二重の守り(where を崩したときに気づけるように)
+              !c.isArchived &&
+              normalizeName(c.name) === normName &&
+              normalizeAddress(c.address!) === normAddr,
+          );
+          // 同時に走ったもう一方が先に作っていた → そちらを使う(新規扱いにしない)
+          if (raced) return { id: raced.id, created: false };
+        }
+
+        const row = await tx.owner.create({
+          data: {
+            name: ownerInfo.name,
+            ...(ownerInfo.address ? { address: ownerInfo.address } : {}),
+            // Phase D: 候補 1 件のみ採用、複数 / 競合は乗せない
+            ...(cnDecisionForCreate.action === "save" && cnDecisionForCreate.corporateNumber
+              ? { corporateNumber: cnDecisionForCreate.corporateNumber }
+              : {}),
+          },
+          select: { id: true },
+        });
+        return { id: row.id, created: true };
       });
-      resolvedOwnerId = created.id;
-      createdCount++;
-      recordCorporateDecision(cnDecisionForCreate);
+
+      resolvedOwnerId = resolved.id;
+      if (resolved.created) {
+        createdCount++;
+        recordCorporateDecision(cnDecisionForCreate);
+      } else {
+        matchedCount++;
+      }
 
       const existingLink = await prisma.propertyOwner.findFirst({
         where: { propertyId, ownerId: resolvedOwnerId },

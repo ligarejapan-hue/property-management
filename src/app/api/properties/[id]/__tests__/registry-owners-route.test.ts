@@ -1,0 +1,188 @@
+/**
+ * 添付済みの謄本から所有者を登録する API の振る舞いを固定する。
+ *
+ * ⚠ここで守りたい事故:
+ *  1. **同じ謄本がもう一度添付される**   → `pdfBuffer` は必ず null で渡す
+ *  2. **全部事項から所有者を登録する**   → 取り出すのは種別 "owner" だけ
+ *  3. **既に所有者がいる物件への二重登録** → 409 で止める(取込処理を呼ばない)
+ *  4. **下見が保存してしまう**           → GET では取込処理を呼ばない
+ */
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+
+vi.mock("@/lib/api-helpers", () => ({
+  ApiError: class extends Error {
+    status: number;
+    code: string;
+    constructor(status: number, message: string, code = "ERROR") {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
+  },
+  getApiSession: vi.fn(),
+  getUserPermissions: vi.fn(),
+  apiResponse: vi.fn((body: unknown, status = 200) =>
+    Response.json(body as object, { status }),
+  ),
+  handleApiError: vi.fn((e: { status?: number; message?: string; code?: string }) =>
+    Response.json(
+      { error: { message: e?.message, code: e?.code } },
+      { status: e?.status ?? 500 },
+    ),
+  ),
+}));
+vi.mock("@/lib/permissions", () => ({ hasPermission: vi.fn(() => true) }));
+vi.mock("@/lib/property-access", () => ({
+  canAccessPropertyRecord: vi.fn(() => true),
+}));
+vi.mock("@/lib/storage", () => ({ getStorage: vi.fn() }));
+vi.mock("@/lib/pdf-extract", () => ({ extractTextFromPdf: vi.fn() }));
+vi.mock("@/lib/registry-pdf/process", () => ({
+  processRegistryPdf: vi.fn(async () => ({ ok: true })),
+}));
+vi.mock("@/lib/prisma", () => ({
+  default: {
+    property: { findUnique: vi.fn() },
+    attachment: { findFirst: vi.fn() },
+  },
+}));
+
+import prisma from "@/lib/prisma";
+import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
+import { hasPermission } from "@/lib/permissions";
+import { getStorage } from "@/lib/storage";
+import { extractTextFromPdf } from "@/lib/pdf-extract";
+import { processRegistryPdf } from "@/lib/registry-pdf/process";
+import { GET, POST } from "@/app/api/properties/[id]/registry-owners/route";
+
+/** 実物の所有者事項の並びを写した見本(氏名・住所は架空)。 */
+const REGISTRY_TEXT = [
+  "東京都渋谷区神宮前三丁目123-4 所有者事項 （土地）",
+  "┏━━━━━━━━━━━━━┓",
+  "┃ 所 有 者 ┃",
+  "┠────────┬───────┨",
+  "┃ 住 所 │ 氏 名 ┃",
+  "┠────────┼───────┨",
+  "┃東京都渋谷区神宮前三丁目12番3号 │山田太郎 ┃",
+  "┗━━━━━━━━┷━━━━━━┛",
+].join("\n");
+
+const PROPERTY_ID = "11111111-1111-1111-1111-111111111111";
+const context = { params: Promise.resolve({ id: PROPERTY_ID }) };
+const request = new Request("http://localhost/x") as never;
+
+function setProperty(ownerCount: number) {
+  (prisma.property.findUnique as unknown as Mock).mockResolvedValue({
+    id: PROPERTY_ID,
+    assignedTo: null,
+    createdBy: "user-1",
+    propertyOwners: Array.from({ length: ownerCount }, (_, i) => ({ id: `o${i}` })),
+  });
+}
+
+function setAttachment(certificateType: string | null) {
+  (prisma.attachment.findFirst as unknown as Mock).mockImplementation(
+    async (args: { where: { registryCertificateType?: string } }) =>
+      args.where.registryCertificateType === certificateType
+        ? {
+            id: "att-1",
+            fileName: "謄本(所有者事項)_2026-09-15.pdf",
+            fileUrl: "/uploads/registry/att-1.pdf",
+            createdAt: new Date("2026-09-15T00:00:00Z"),
+          }
+        : null,
+  );
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  (getApiSession as unknown as Mock).mockResolvedValue({
+    id: "user-1",
+    role: "admin",
+  });
+  (getUserPermissions as unknown as Mock).mockResolvedValue([]);
+  (hasPermission as unknown as Mock).mockReturnValue(true);
+  (getStorage as unknown as Mock).mockReturnValue({
+    keyFromUrl: () => "registry/att-1.pdf",
+    read: async () => ({ body: Buffer.from("pdf"), contentType: "application/pdf", size: 3 }),
+  });
+  (extractTextFromPdf as unknown as Mock).mockResolvedValue(REGISTRY_TEXT);
+  setProperty(0);
+  setAttachment("owner");
+});
+
+describe("GET（下見）", () => {
+  it("読み取れた所有者を返し、何も保存しない", async () => {
+    const res = await GET(request, context);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.owners).toEqual([
+      {
+        name: "山田太郎",
+        address: "東京都渋谷区神宮前三丁目12番3号",
+        share: null,
+      },
+    ]);
+    expect(processRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("謄本の閲覧権限が無ければ 403", async () => {
+    (hasPermission as unknown as Mock).mockImplementation(
+      (_p: unknown, resource: string) => resource !== "registry_pdf",
+    );
+    const res = await GET(request, context);
+    expect(res.status).toBe(403);
+    expect(processRegistryPdf).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST（反映）", () => {
+  it("⚠添付を作らないよう pdfBuffer は null、種別は owner 固定", async () => {
+    const res = await POST(request, context);
+    expect(res.status).toBe(200);
+
+    const args = (processRegistryPdf as unknown as Mock).mock.calls[0][0];
+    expect(args.pdfBuffer).toBeNull();
+    expect(args.certificateType).toBe("owner");
+    expect(args.propertyId).toBe(PROPERTY_ID);
+    expect(args.edited).toBeUndefined();
+  });
+
+  it("⚠すでに所有者がいる物件は 409 で止め、取込処理を呼ばない", async () => {
+    setProperty(1);
+    const res = await POST(request, context);
+    expect(res.status).toBe(409);
+    expect(processRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("⚠全部事項しか無い物件は対象外（404）", async () => {
+    setAttachment("all");
+    const res = await POST(request, context);
+    expect(res.status).toBe(404);
+    expect(processRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("謄本から文字が読めないときは登録せず 422", async () => {
+    (extractTextFromPdf as unknown as Mock).mockResolvedValue("   ");
+    const res = await POST(request, context);
+    expect(res.status).toBe(422);
+    expect(processRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("所有者が読み取れないときは登録せず 422", async () => {
+    (extractTextFromPdf as unknown as Mock).mockResolvedValue("所有者の表が無いテキスト");
+    const res = await POST(request, context);
+    expect(res.status).toBe(422);
+    expect(processRegistryPdf).not.toHaveBeenCalled();
+  });
+
+  it("取込の権限が無ければ 403", async () => {
+    (hasPermission as unknown as Mock).mockImplementation(
+      (_p: unknown, resource: string) => resource !== "import",
+    );
+    const res = await POST(request, context);
+    expect(res.status).toBe(403);
+    expect(processRegistryPdf).not.toHaveBeenCalled();
+  });
+});

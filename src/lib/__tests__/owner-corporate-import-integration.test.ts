@@ -210,8 +210,11 @@ describe("registry-pdf route Phase D 統合", () => {
       /cnDecisionForCreate\s*=\s*\n?\s*candidateOwnerId\s*===\s*null\s*\?\s*cnDecision\s*:\s*decideCorporateImport\(\s*\{\s*name:\s*ownerInfo\.name,\s*address:\s*ownerInfo\.address\s*\?\?\s*null\s*\},\s*null/,
     );
     // create path で recordCorporateDecision は cnDecisionForCreate を使う（cnDecision ではない）
+    // ⚠新規作成は**親の物件行をロックした tx の中**へ移したため、変数名が created → resolved に
+    //   なり、「新規に作れたときだけ集計する」分岐が挟まる（同時反映で相手が先に作っていた
+    //   場合は再利用＝新規の集計をしない）。見るべき意図は変わっていない。
     expect(registryPdfSrc).toMatch(
-      /resolvedOwnerId\s*=\s*created\.id;[\s\S]{0,80}recordCorporateDecision\(cnDecisionForCreate\)/,
+      /resolvedOwnerId\s*=\s*resolved\.id;[\s\S]{0,200}recordCorporateDecision\(cnDecisionForCreate\)/,
     );
   });
 
