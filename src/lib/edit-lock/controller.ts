@@ -12,6 +12,11 @@
  *   必ず1つ進める。合図・取得を投げる直前に値を捕まえ、応答が返ったときに値が
  *   変わっていたら(=その間に鍵の持ち主が変わった/失われた/手放された)反映しない。
  *   `src/lib/address-lookup-ui-utils.ts` の `seq`(stale request 破棄)と同じ考え方。
+ * ⚠(review round2 n1) 上の discard だけだと、release/dispose が acquire を追い越した
+ *   ときに**サーバが実際に許可した鍵**が孤児になる(state には反映しない=正しいが、
+ *   lockId をどこにも渡さず deps.release も beacon も呼ばれない)。acquire の stale
+ *   分岐でだけ、応答が mine だったらその lockId を beacon 経由で手放す(dispose 後でも
+ *   ヘッダ不要で安全に呼べる)。
  */
 import {
   shouldReacquireOnInput,
@@ -24,6 +29,17 @@ import {
   type HeartbeatResponse,
 } from "./ui-state";
 import { EDIT_LOCK_HEARTBEAT_INTERVAL_MS } from "./rules";
+
+/**
+ * acquire の失敗が「資源が消えた」(404 NOT_FOUND)を意味するか。
+ * ⚠heartbeat は 404 を `{notFound:true}` に畳んで返す契約(api-client.ts)だが、
+ *   acquire は仕様どおり 423 だけをデータとして返し、それ以外の非2xxはエラーとして
+ *   投げる。ここでは api-client の実装には依存せず、deps 越しに届く Error が持つ
+ *   分類コード(NOT_FOUND)だけを見て判定する(controller は fetch/HTTP を知らない)。
+ */
+function isResourceNotFoundError(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { code?: unknown }).code === "NOT_FOUND";
+}
 
 export interface EditLockControllerDeps {
   acquire(): Promise<AcquireResponse>;
@@ -109,6 +125,9 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
     } catch {
       // ⚠(review round1 I1) 合図の失敗はネットワーク瞬断等の一過性として扱う。
       //   状態は変えず、間隔も止めない(サーバ側の鍵は無操作が続けば自然に期限切れになる)。
+      // ⚠(review round2 n3) この合図が拾うはずだった入力(active)を消したままにしない。
+      //   その後に立った true(=await中の新しい入力)を上書きしないよう OR で戻す。
+      activeSinceLastBeat = activeSinceLastBeat || active;
       return;
     }
     // ⚠(review round1 C1) 応答が届くまでの間に release/dispose/別の合図の喪失判定が
@@ -121,8 +140,17 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
     bumpGeneration();
     const gen = generation;
     const res = await deps.acquire();
-    if (disposed || gen !== generation) return;
-    apply(uiStateFromAcquire(res));
+    const next = uiStateFromAcquire(res);
+    if (disposed || gen !== generation) {
+      // ⚠(review round2 n1) release/dispose がこの取得を追い越していた。state には
+      //   今さら反映しない(discard は正しい)が、応答が mine ならサーバは実際に
+      //   鍵を許可している=孤児にせず beacon で手放す(deps.release はヘッダ付きの
+      //   fetch が要るが、dispose 後の画面ではもう安全に呼べない可能性がある。
+      //   beacon はヘッダ不要でどちらの状況でも安全)。
+      if (next.kind === "mine") deps.releaseByBeacon(next.lockId);
+      return;
+    }
+    apply(next);
     if (state.kind === "mine") startHeartbeat();
   }
 
@@ -138,12 +166,20 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
    * 入力・キー・ポインタのときに呼ぶ。期限切れならここで取り直す(管理者解除/削除はしない)。
    * ⚠(review round1 I1) 取り直しは fire-and-forget なので、失敗しても外へ投げない
    *   (次の入力でまた試みる。state は expired のまま留まる)。
+   * ⚠(review round2 n2) ただし404(資源が消えた)だけは例外。一過性として無視すると
+   *   「入力すれば自動で取り直す」と案内したまま、毎回404→黙殺を繰り返す無言の
+   *   行き止まりになる。deleted にして取り直しを止める(shouldReacquireOnInput は
+   *   deleted では true を返さない)のが正直な答え。
    */
   function noteActivity(): void {
     activeSinceLastBeat = true;
     if (shouldReacquireOnInput(state)) {
-      acquire().catch(() => {
-        /* 一過性として無視。次の noteActivity で再試行される。 */
+      acquire().catch((err: unknown) => {
+        if (isResourceNotFoundError(err)) {
+          apply({ kind: "deleted" });
+          return;
+        }
+        /* それ以外は一過性として無視。次の noteActivity で再試行される。 */
       });
     }
   }

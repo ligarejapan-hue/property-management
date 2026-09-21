@@ -414,4 +414,117 @@ describe("createEditLockController", () => {
     await h.registry.fire();
     expect(h.heartbeatMock.mock.calls.at(-1)?.[0]).toBe(true);
   });
+
+  // review round2 で指摘された残りの穴(n1/n2/n3)。
+
+  it("n1a) acquire中にrelease()が追い越しても、後から届いたmineの許可を孤児にせずbeaconで手放す", async () => {
+    const pendingAcquire = createDeferred<AcquireResponse>();
+    h.acquireMock.mockReturnValueOnce(pendingAcquire.promise);
+    const controller = createEditLockController(h.deps);
+
+    // acquire がまだ応答待ちの間に release() が先に走る(lockId はまだ null なので
+    // deps.release は呼ばれない=これが「discard するだけでは孤児になる」原因)。
+    const acquirePromise = controller.acquire();
+    await controller.release();
+    expect(h.releaseMock).not.toHaveBeenCalled();
+
+    // サーバが遅れて許可(mine)を返す。
+    pendingAcquire.resolve(MINE);
+    await acquirePromise;
+    await flush();
+
+    // state には今さら反映しない(discard は正しいまま)。
+    expect(h.lastState().kind).toBe("idle");
+    // しかしサーバが実際に許可した lockId は孤児にしない=beacon で手放す。
+    expect(h.releaseByBeaconMock).toHaveBeenCalledWith(LOCK_ID);
+    expect(h.registry.activeCount()).toBe(0);
+  });
+
+  it("n1b) unmountの後始末(onHidden→dispose)がacquireを追い越しても、後から届いたmineをbeaconで手放す", async () => {
+    const pendingAcquire = createDeferred<AcquireResponse>();
+    h.acquireMock.mockReturnValueOnce(pendingAcquire.promise);
+    const controller = createEditLockController(h.deps);
+
+    const acquirePromise = controller.acquire();
+    // use-edit-lock.ts のcleanupと同じ順序。lockIdがまだnullなのでonHiddenはこの時点では何もしない。
+    controller.onHidden();
+    controller.dispose();
+    expect(h.releaseByBeaconMock).not.toHaveBeenCalled();
+
+    pendingAcquire.resolve(MINE);
+    await acquirePromise;
+    await flush();
+
+    // dispose済みなのでonStateは呼ばれない(既存の契約)が、beaconでの解放は行う。
+    expect(h.onStateMock).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "mine" }), expect.anything());
+    expect(h.releaseByBeaconMock).toHaveBeenCalledWith(LOCK_ID);
+    expect(h.registry.activeCount()).toBe(0);
+  });
+
+  it("n2) 期限切れの取り直しが404(資源消失)で失敗したら deleted にし、以後は取り直さない", async () => {
+    h.acquireMock.mockResolvedValueOnce(MINE);
+    h.heartbeatMock.mockResolvedValueOnce(HEARTBEAT_EXPIRED);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+    await h.registry.fire();
+    expect(h.lastState().kind).toBe("expired");
+
+    h.acquireMock.mockRejectedValueOnce(Object.assign(new Error("物件が見つかりません"), { code: "NOT_FOUND" }));
+    controller.noteActivity();
+    await flush();
+    expect(h.lastState().kind).toBe("deleted");
+
+    // deleted になった後は、入力してももう取り直しを試みない(黙って何度も404を叩かない)。
+    h.acquireMock.mockClear();
+    controller.noteActivity();
+    await flush();
+    expect(h.acquireMock).not.toHaveBeenCalled();
+  });
+
+  it("n2b) 404以外の失敗(ネットワーク瞬断等)では従来どおり無視し、expiredのまま次の入力でまた試みる", async () => {
+    h.acquireMock.mockResolvedValueOnce(MINE);
+    h.heartbeatMock.mockResolvedValueOnce(HEARTBEAT_EXPIRED);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+    await h.registry.fire();
+    expect(h.lastState().kind).toBe("expired");
+
+    h.acquireMock.mockRejectedValueOnce(new Error("network down"));
+    controller.noteActivity();
+    await flush();
+    expect(h.lastState().kind).toBe("expired"); // deleted にはならない
+
+    h.acquireMock.mockResolvedValueOnce(MINE);
+    controller.noteActivity();
+    await flush();
+    expect(h.lastState().kind).toBe("mine"); // 次の入力でまた試みられる
+  });
+
+  it("n3) 合図が失敗しても、直前の入力(active)は次の合図まで持ち越す", async () => {
+    h.acquireMock.mockResolvedValue(MINE);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+
+    controller.noteActivity();
+    h.heartbeatMock.mockRejectedValueOnce(new Error("network down"));
+    await h.registry.fire();
+
+    h.heartbeatMock.mockResolvedValueOnce(HEARTBEAT_MINE);
+    await h.registry.fire();
+    expect(h.heartbeatMock.mock.calls.at(-1)?.[0]).toBe(true);
+  });
+
+  it("n3b) 失敗した合図の直後に新しい入力があっても、その入力を消さない", async () => {
+    h.acquireMock.mockResolvedValue(MINE);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+
+    h.heartbeatMock.mockRejectedValueOnce(new Error("network down"));
+    await h.registry.fire(); // active=false のまま失敗(入力なし)
+    controller.noteActivity(); // 失敗の直後に入力
+
+    h.heartbeatMock.mockResolvedValueOnce(HEARTBEAT_MINE);
+    await h.registry.fire();
+    expect(h.heartbeatMock.mock.calls.at(-1)?.[0]).toBe(true);
+  });
 });
