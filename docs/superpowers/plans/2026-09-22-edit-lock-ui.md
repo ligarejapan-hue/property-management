@@ -6,7 +6,7 @@
 
 **Architecture:** 難しい判断(応答→表示状態の写像・合図の間隔・失効の扱い)は**純関数の状態機械**に出し、React の hook は結線だけを持つ(既存の `src/hooks/use-address-lookup.ts` と同じ作り)。画面は「鍵を持つ側」(`useEditLock`)と「見ている側」(`useEditLockStatus`)の2本の hook に分け、6つの保存入口には共通のヘッダ関数を通す。
 
-**Tech Stack:** Next.js 16 App Router / React 19 / TypeScript / vitest(+jsdom) / Tailwind(既存クラスのみ)
+**Tech Stack:** Next.js 16 App Router / React 19 / TypeScript / vitest(**node 環境のみ・jsdom は使わない**) / `renderToStaticMarkup`(react-dom/server) / Tailwind(既存クラスのみ)
 
 **Spec:** `docs/superpowers/specs/2026-09-17-edit-lock-design.md`(6章=画面。2.2/4章=窓口の契約。第1段で**本番稼働済**)
 
@@ -20,6 +20,12 @@
 - 保存の拒否(423)は**エラー封筒** `{ error: { message, code } }` から読む。取得(acquire)の423は**裸** `{ code, state, holderName, since }`(仕様 4.7)。`apiErrorCode(e)` が封筒側のコードを取り出す。
 - 新しい色・形を作らない。帯は既存の amber クラス(`src/app/(dashboard)/properties/[id]/page.tsx:1414` と同じ組み)、確認は `src/components/ui/confirm-dialog.tsx` を使う。スマホ幅で1〜2行に収める。
 - テストは mock ベース(CIに実DBは無い)。**同一性の検査(`toBe`)を `expect.anything()` より優先**、順序は記録した配列で固定、走査テストはラチェットとして「守るものを外したら落ちる」ことを実演してから完了とする。
+- 🔴**テストの作り方はこのrepoの方針に従う(2026-09-22 実測で確定・計画の初版は誤っていた)**:
+  - **`jsdom` と `@testing-library/react` は使わない**。vitest の環境は `node` 固定で、既存の `.test.tsx` 43本のうち**39本が `renderToStaticMarkup`(react-dom/server)** で見た目を固定している(`@testing-library/react` は0本・`@vitest-environment jsdom` も0本・`renderHook` も0本)。方針は `src/app/(dashboard)/admin/attachments/__tests__/name-cell.test.tsx` の冒頭に明文で書かれている。
+  - **DOM・タイマー・イベントに触る部分は「差し替えられる形」に切り出して node で検査する**(例: 合言葉なら storage と channel を引数で受ける)。
+  - **部品の見た目・文言は `renderToStaticMarkup` の文字列で固定する**。クリック等の操作は、部品から切り出した**ハンドラ関数**を直接呼んで検査する(DOMイベントを起こさない)。
+  - **hook そのものは検査しない**。判断は純関数か controller に出し、そちらを総当たりで固定する(`src/hooks/use-address-lookup.ts` が既にこの形=判断は `createAddressLookupController` 側にあり、hook は結線だけ)。
+  - 配線(どの画面がどの関数を呼ぶか)は**走査テストのラチェット**と、計画末尾の**ローカル実機確認**で担保する。
 - 日本語のコミットメッセージ。`--amend` 禁止。commit の末尾に:
   `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>` と
   `Claude-Session: https://claude.ai/code/session_01LXJhM1iYknUdWRffjNpMFU`
@@ -68,11 +74,32 @@
 **Interfaces:**
 - Produces: `EDIT_SCREEN_HEADER` / `EDIT_LOCK_HEADER`(header-names)、`getScreenToken(): string`・`ensureUniqueScreenToken(): Promise<string>`・`resetScreenTokenForTest(): void`(screen-token-client)
 
+**🔴テストの作り方(確定・下のテストコードはこの形に読み替える)**: `jsdom` は使わない(Global Constraints)。`screen-token-client.ts` は **差し替えられる環境**を受け取る形にする:
+
+```ts
+/** 差し替え可能な環境。既定はブラウザの実物。 */
+export interface ScreenTokenEnv {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  /** 無い環境(BroadcastChannel 非対応)では null を返す。 */
+  openChannel(name: string): {
+    postMessage(data: unknown): void;
+    onMessage(handler: (data: unknown) => void): void;
+    close(): void;
+  } | null;
+  newId(): string;
+}
+export function setScreenTokenEnvForTest(env: ScreenTokenEnv | null): void;
+```
+
+ブラウザ既定の実装は `sessionStorage` と `BroadcastChannel` を try/catch で包んで上の形に合わせる(例外は「使えない」として扱う)。テストは **node 環境**で、記憶を Map で持つ偽の storage と、`postMessage` を相手に配る偽の channel を注入して、下のテストの**検査内容をそのまま**確かめる(`sessionStorage.getItem(...)` の代わりに偽 storage の中身を見る)。時間は `vi.useFakeTimers()` で進める。
+
 - [ ] **Step 1: 失敗するテストを書く**
 
 ```ts
 // src/lib/edit-lock/__tests__/screen-token-client.test.ts
-// @vitest-environment jsdom
+// ⚠この1行目(`@vitest-environment jsdom`)は**書かない**。上の「テストの作り方(確定)」の
+//   とおり、偽の storage / channel を注入して node で検査する。検査内容は下のまま。
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getScreenToken, ensureUniqueScreenToken, resetScreenTokenForTest } from "../screen-token-client";
 
@@ -522,7 +549,34 @@ git commit -m "feat(edit-lock): 応答から帯・保存可否を決める純関
 
 **Interfaces:**
 - Consumes: `editLockHeaders`・`getScreenToken`・`answerScreenTokenProbes`(Task 1)、`ui-state` の全関数(Task 2)、`EDIT_LOCK_HEARTBEAT_INTERVAL_MS`(`rules`)
-- Produces: api-client の `acquireEditLockApi`・`heartbeatEditLockApi`・`releaseEditLockApi`・`forceReleaseEditLockApi`・`fetchEditLockStatus`、hook の `useEditLock({resourceType, resourceId, enabled})` → `{ state, acquire, release, noteActivity, canSave, warnIdle, lockId }`
+- Produces: api-client の `acquireEditLockApi`・`heartbeatEditLockApi`・`releaseEditLockApi`・`forceReleaseEditLockApi`・`fetchEditLockStatus`、**`createEditLockController(deps)`**(`src/lib/edit-lock/controller.ts`)、hook の `useEditLock({resourceType, resourceId, enabled})` → `{ state, acquire, release, noteActivity, noteSaveError, canSave, warnIdle, lockId }`
+
+**🔴テストの作り方(確定・下の `renderHook` のテストはこの形に読み替える)**: `@testing-library/react` と `renderHook` は使わない(Global Constraints・repo全体で0件)。判断とタイマーは **`src/lib/edit-lock/controller.ts` の `createEditLockController`** に置き、**node でそれを検査する**(`use-address-lookup` が `createAddressLookupController` で既にこの形)。
+
+```ts
+export interface EditLockControllerDeps {
+  acquire(): Promise<AcquireResponse>;
+  heartbeat(active: boolean): Promise<HeartbeatResponse>;
+  release(lockId: string): Promise<void>;
+  releaseByBeacon(lockId: string): void;
+  /** 状態が変わったら呼ばれる(hook は setState を渡す)。 */
+  onState(state: EditLockUiState, warnIdle: boolean): void;
+  now(): number;
+  setInterval(fn: () => void, ms: number): unknown;
+  clearInterval(handle: unknown): void;
+}
+export function createEditLockController(deps: EditLockControllerDeps): {
+  acquire(): Promise<void>;
+  release(): Promise<void>;
+  noteActivity(): void;
+  noteSaveError(code: string | null, holderName?: string | null): void;
+  onHidden(): void;   // pagehide 相当
+  onVisible(): void;  // visibilitychange 相当
+  dispose(): void;
+};
+```
+
+下に書いた**8件の検査内容はそのまま**(取得→30秒ごとの合図/active の立ち下がり/管理者解除で取り直さない/期限切れは入力で1回取り直す/資源が消えたら合図を止める/release で止まる/pagehide は beacon/裏から戻ったら即1回)。`vi.useFakeTimers()` の代わりに **`deps.setInterval` に記録用の偽物を渡して手で発火**させ、`deps.now()` も固定値を返す。hook 本体(`src/hooks/use-edit-lock.ts`)は controller を React に繋ぐだけで、**テストは書かない**。
 
 - [ ] **Step 1: api-client に窓口の関数を足す**
 
@@ -631,9 +685,10 @@ export function releaseEditLockByBeacon(
 
 ```ts
 // src/hooks/__tests__/use-edit-lock.test.ts
-// @vitest-environment jsdom
+// ⚠この形(jsdom + renderHook)では**書かない**。上の「テストの作り方(確定)」のとおり
+//   `createEditLockController` を node で検査する。**8件の検査内容は下のまま**読み替える。
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
+// import { renderHook, act, waitFor } from "@testing-library/react"; ← 使わない
 import { useEditLock } from "../use-edit-lock";
 import * as api from "@/lib/api-client";
 import { EDIT_LOCK_HEARTBEAT_INTERVAL_MS } from "@/lib/edit-lock/rules";
@@ -919,7 +974,12 @@ git commit -m "feat(edit-lock): 窓口を叩く関数と、鍵を持つ側のhoo
 
 **Interfaces:**
 - Consumes: `EditLockUiState`(Task 2)、`ConfirmDialog`(`@/components/ui/confirm-dialog`)、`forceReleaseEditLockApi`・`apiErrorCode`(api-client)
-- Produces: `<EditLockBanner state={…} warnIdle={…} />`・`<EditLockHolderBanner row={…} isAdmin={…} onReleased={…} />`
+- Produces: `<EditLockBanner state={…} warnIdle={…} />`・`<EditLockHolderBanner row={…} isAdmin={…} onReleased={…} />`・`formatSince(since?)`・**`createForceReleaseHandler({row, onReleased, setNotice})`**(切り出したハンドラ)
+
+**🔴テストの作り方(確定・下の `render/fireEvent` のテストはこの形に読み替える)**: `@testing-library/react` は使わない(Global Constraints)。
+- **見た目・文言**は `renderToStaticMarkup(<EditLockBanner … />)` の文字列で固定する(既存の `name-cell.test.tsx` と同じ形)。「帯を出さない」は `html === ""`、文言は `toContain`、管理者だけに出るボタンは `toContain("鍵を外す")` / `not.toContain` で見る。
+- **押したときの動き**は、部品から切り出した **`createForceReleaseHandler`** を node で直接呼んで検査する(確認ダイアログの文言は `renderToStaticMarkup(<ConfirmDialog …>)` の文字列で固定)。`forceReleaseEditLockApi` をモックし、成功で `onReleased` が呼ばれること・`EDIT_LOCK_CHANGED` のときに `setNotice("状況が変わりました。表示を更新します")` と `onReleased` の**両方**が呼ばれることを確かめる。
+- 検査する**文言・氏名・時刻の書式・呼び出し先は下の表とテストのまま**。
 
 **文言(仕様 6.2・6.3・N6 で確定。1文字も変えない)**
 
@@ -938,9 +998,11 @@ git commit -m "feat(edit-lock): 窓口を叩く関数と、鍵を持つ側のhoo
 
 ```tsx
 // src/components/edit-lock/__tests__/edit-lock-banner.test.tsx
-// @vitest-environment jsdom
+// ⚠この形(jsdom + render/fireEvent)では**書かない**。上の「テストの作り方(確定)」のとおり
+//   文言は `renderToStaticMarkup` の文字列で、押したときの動きは `createForceReleaseHandler`
+//   を直接呼んで検査する。**検査する文言・呼び出し先は下のまま**読み替える。
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { EditLockBanner, EditLockHolderBanner } from "../edit-lock-banner";
 import * as api from "@/lib/api-client";
 
@@ -1106,14 +1168,24 @@ git commit -m "feat(edit-lock): 帯の部品と管理者の鍵を外す操作を
 - Consumes: `useEditLock`(Task 3)・`EditLockBanner`(Task 4)・`editLockHeaders`(Task 1)
 - Produces: なし(画面)
 
-- [ ] **Step 1: 失敗するテストを書く**(4件)
+- [ ] **Step 1: 失敗するテストを書く**
 
-1. 開いたら `acquireEditLockApi` が1回呼ばれる(`resourceType:"property"`・その物件のid)
-2. 保存の `fetch` に **`X-Edit-Screen` と `X-Edit-Lock`(取得した lockId)** が載る
-3. 取得が423(他の人)なら**帯が出て保存ボタンが `disabled`**
-4. 保存が423 `EDIT_LOCK_FORCE_RELEASED`(封筒)なら帯が「管理者が編集を終了しました…」に変わり、保存ボタンが `disabled`
+**🔴テストの作り方(確定)**: フォームを描画して操作するテストは書かない(`@testing-library/react` は使わない)。代わりに、保存の**ヘッダ組み立てとエラーの写像を関数に切り出して** node で検査し、配線は走査で固定する。
 
-テストは `global.fetch` を `vi.fn()` で差し替え、**呼ばれた `init.headers` を直接検査**する(`expect.anything()` を使わない)。
+切り出す関数(`src/components/properties/property-edit-form.tsx` から輸出する):
+
+```ts
+/** 保存の fetch に渡す init を作る。⚠ヘッダは必ず editLockHeaders を通す。 */
+export function buildPropertySaveInit(payload: unknown, lockId: string | null): RequestInit;
+```
+
+検査(4件):
+1. `buildPropertySaveInit({}, null)` の headers に `X-Edit-Screen` があり、**`X-Edit-Lock` は無い**
+2. `buildPropertySaveInit({}, "l1")` の headers に `X-Edit-Lock: "l1"` が載る
+3. `Content-Type: application/json` と `method: "PATCH"` が従来どおり
+4. 走査: このファイルが `useEditLock(`・`ensureUniqueScreenToken(`・`EditLockBanner`・`disabled={` を含む(配線のラチェット。Task 7 の走査に合流させてよい)
+
+⚠**「帯が出る」「保存ボタンが押せない」の判断自体は Task 2 の純関数と Task 4 の部品で既に検査済み**。ここで重複して検査しない(YAGNI)。画面が本当に繋がっているかは計画末尾の**ローカル実機確認**で見る。
 
 - [ ] **Step 2: 配線する**
 
@@ -1188,7 +1260,12 @@ export async function updateOwner(
 
 ⚠Task 5 と同じく、**複製タブの判定(`ensureUniqueScreenToken`)が付くまで編集を始めさせない**。判定は画面で1回で足りるので、**物件詳細の親(page.tsx)で1回だけ走らせて結果を配る**(カードごとに 300ms 待たせない)。
 
-テストは5件: 編集を開くと `acquire("owner", ownerId)`・保存のヘッダに世代が載る・423で帯とボタン無効・別の所有者カードの鍵は**そのカードだけ**を止める(他のカードは編集できる)・判定が付くまで編集ボタンが `disabled`。
+**🔴テストの作り方(確定)**: カードを描画して操作するテストは書かない。検査は3件に絞る:
+1. `updateOwner("o1", {version:1}, {lockId:"l1"})` が `X-Edit-Lock: "l1"` を載せる(`global.fetch` を差し替えて `init.headers` を直接見る)
+2. `updateOwner("o1", {version:1})`(第3引数なし)は `X-Edit-Screen` だけで **`X-Edit-Lock` を載せない**
+3. 走査: `page.tsx` が `useEditLock(`・`EditLockBanner`・`updateOwner(`… の第3引数に `lockId` を渡す形を含む
+
+⚠「そのカードだけ止まる」「判定が付くまで押せない」は**資源IDごとに hook を分けた結果**であり、Task 2の純関数(状態)とTask 3の controller(資源ID単位)で既に固定されている。ここでは重複して検査せず、**ローカル実機確認**(計画末尾)で見る。
 
 ```bash
 git commit -m "feat(edit-lock): 所有者カードで鍵を取り、カード単位で編集を止める"
@@ -1293,13 +1370,15 @@ git commit -m "feat(edit-lock): 鍵を持たない3入口にも合言葉を付�
 - Consumes: `fetchEditLockStatus`・`EditLockStatusRow`(Task 3)、`EDIT_LOCK_STATUS_POLL_MS`(rules)、`EditLockHolderBanner`(Task 4)
 - Produces: `useEditLockStatus(resources, { enabled })` → `{ rows, refresh, byKey(resourceType, resourceId) }`
 
-- [ ] **Step 1: hook のテストを書く**(5件)
+- [ ] **Step 1: controller のテストを書く**(5件)
 
-1. 開いたとき1回・以後 `EDIT_LOCK_STATUS_POLL_MS` ごとに1回だけ呼ぶ
-2. **画面が裏に回っている間は呼ばない**(`visibilityState === "hidden"`)→戻ったら再開
-3. 50件を超える資源は**分割して呼ぶ**(51件 → 2回)
+**🔴テストの作り方(確定)**: hook は検査しない。判断と周期は **`createEditLockStatusController(deps)`**(`src/lib/edit-lock/status-controller.ts`)に置き、`deps` に `fetchStatus`・`onRows`・`setInterval`/`clearInterval`・`isHidden()` を渡して node で検査する(Task 3 と同じ形)。
+
+1. 開いたとき1回・以後 `EDIT_LOCK_STATUS_POLL_MS` ごとに1回だけ呼ぶ(偽の `setInterval` を手で発火させる)
+2. **`isHidden()` が true の回は呼ばない**→false に戻った回で再開する
+3. 50件を超える資源は**分割して呼ぶ**(51件 → 2回。1回目50件・2回目1件であることを引数で確かめる)
 4. `refresh()` で即座に1回呼ぶ(管理者が鍵を外した直後に使う)
-5. 資源の一覧が変わったら古い応答で上書きしない(`seq` で stale を捨てる。`use-address-lookup` と同じ型)
+5. 資源の一覧が変わったら古い応答で `onRows` を呼ばない(`seq` で stale を捨てる。`use-address-lookup` の controller と同じ型)
 
 - [ ] **Step 2: 実装 → 画面に配線**
 
