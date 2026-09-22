@@ -502,3 +502,14 @@ Task 5(`src/components/properties/property-edit-form.tsx`)実装の review で�
 | 鍵の取得(複製タブ確認を含む)が失敗したときの通知 | 「編集中の表示を取得できませんでした。保存は通常どおり行えます」(round 1)。この間、保存ボタンは押せるまま、`X-Edit-Lock` は乗らない |
 | 上の通知を出す条件 | `lock.state` が `idle` の間だけ(round 2 N3)。鍵の帯(他の人が持っている等)が出る状態になったら通知は消す=両者が同時に出て矛盾しないようにする |
 | 複製タブ確認(`ensureUniqueScreenToken`)自体が失敗したとき | 取得を試みず fail open へ倒す(`onReady` は必ず呼ぶ=保存ボタンの「複製タブ確認待ち」だけは解除する)。`screen-token-client.ts` が `BroadcastChannel` 不在時に既に取っている fail open の姿勢と揃える(round 2 N1) |
+
+### Task 6(所有者カード)の設計判断(2026-09-22)
+
+Task 6(`src/app/(dashboard)/properties/[id]/page.tsx` の `OwnerCard`)は Task 5 と同じ fail open の文言・判断(`canSubmitSave`/`shouldShowLockUnavailableNotice`)をそのまま再利用した(新しい文言は追加していない)。所有者カード特有の判断として以下を決め、実装した。
+
+| 論点 | 決定 |
+|---|---|
+| 鍵の単位 | 所有者カード1枚=1つの鍵(`resourceType: "owner", resourceId: po.ownerId`)。共有名義で複数のカードが同時に開いていても、資源IDが違うので互いの鍵の状態には影響しない |
+| 鍵の有効期間(`enabled`) | そのカードが編集中(`editing`)である間だけ。カードを閉じる(キャンセル/保存成功)と `enabled` が外れ、`useEditLock` の後始末(beacon での解除)が走る |
+| 複製タブ確認(`ensureUniqueScreenToken`・最大300ms)の回数 | **画面(物件詳細ページ)につき1回**。所有者カードごとに行うと、共有名義で所有者が何名もいる物件ほど無駄な待ち・問い合わせが積み重なるため、親(`PropertyDetailPage`)で開いたときに1回だけ済ませ、結果(`tokenReady`)を `OwnerTab` 経由で各カードへ配る。カード側は自分では確認をやり直さない |
+| `updateOwner` の後方互換 | 第3引数 `opts.lockId` を追加。省略時(既存の呼び出し元)は `X-Edit-Screen` だけを送る=鍵を持たない入口として従来どおり動く |
