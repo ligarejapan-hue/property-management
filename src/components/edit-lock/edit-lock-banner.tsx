@@ -35,13 +35,16 @@ import { apiErrorCode, forceReleaseEditLockApi, type EditLockStatusRow } from "@
 import type { EditLockUiState } from "@/lib/edit-lock/ui-state";
 
 /**
- * ⚠export する(task5 review round1 Minor)。この帯が使われる画面はすべて、続く
- *   本文(エラー表示・最初のセクション等)との間に既存の `mb-4`(隣のエラー枠と同じ値)
- *   を空ける。呼び出し側(`property-edit-form.tsx`)が「鍵は取れなかったが保存は
- *   通常どおり行える」という**別の**通知を出すときも、同じ見た目を複製せずこれを使う。
+ * ⚠export する(task5 review round1 Minor)。呼び出し側(`property-edit-form.tsx`)が
+ *   「鍵は取れなかったが保存は通常どおり行える」という**別の**通知を出すときも、
+ *   同じ見た目を複製せずこれを使う。
+ * ⚠**外側の余白(`mb-4`等)はここに焼き込まない**(task5 review round2・点検者の指摘を
+ *   採用してround1の判断を反転)。この定数は今後、一覧の行・カードの中に置かれる
+ *   `EditLockHolderBanner` でも使われる想定で、そこでは16pxの下余白が誤りになる。
+ *   見た目(色・形)だけをここに置き、外側の余白は各呼び出し側が自分の文脈で決める。
  */
 export const BAND =
-  "flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300 mb-4";
+  "flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300";
 
 /** 開始時刻は現地時間の HH:mm(仕様の見本と同じ)。解釈できない値は空文字(review Minor #1)。 */
 export function formatSince(since?: string): string {
@@ -55,25 +58,36 @@ export function formatSince(since?: string): string {
  * いま画面を見ている本人向けの帯(自分が鍵を持っている/持っていない画面の両方で使う)。
  * `mine` は編集できている=既定では何も出さない(55分の予告があるときだけ出す)。
  */
+// ⚠外側の余白(task5 review round2)。この帯の呼び出し元(編集ウィンドウ)は続く
+//   本文(エラー表示・最初のセクション等)との間を空ける想定なので、ここで足す
+//   (BAND自体には焼き込まない=一覧の行・カード側の呼び出し元と余白の要否が違う)。
+const BANNER_MARGIN = "mb-4";
+
 export function EditLockBanner({ state, warnIdle }: { state: EditLockUiState; warnIdle: boolean }) {
   if (state.kind === "mine") {
-    return warnIdle ? <div className={BAND}>操作がないため、あと5分で編集を終了します</div> : null;
+    return warnIdle ? (
+      <div className={`${BAND} ${BANNER_MARGIN}`}>操作がないため、あと5分で編集を終了します</div>
+    ) : null;
   }
   if (state.kind === "idle") return null;
   if (state.kind === "expired") {
     return (
-      <div className={BAND}>
+      <div className={`${BAND} ${BANNER_MARGIN}`}>
         しばらく画面が止まっていたため、編集の鍵が外れました。入力すると自動で取り直します
       </div>
     );
   }
   if (state.kind === "force_released") {
-    return <div className={BAND}>管理者が編集を終了しました。この内容は保存できません</div>;
+    return (
+      <div className={`${BAND} ${BANNER_MARGIN}`}>管理者が編集を終了しました。この内容は保存できません</div>
+    );
   }
   if (state.kind === "deleted") {
-    return <div className={BAND}>この記録は削除されたため、編集を続けられません</div>;
+    return <div className={`${BAND} ${BANNER_MARGIN}`}>この記録は削除されたため、編集を続けられません</div>;
   }
-  return <div className={BAND}>{`🔒 ${state.holderName}さんが編集中です(${formatSince(state.since)}〜)`}</div>;
+  return (
+    <div className={`${BAND} ${BANNER_MARGIN}`}>{`🔒 ${state.holderName}さんが編集中です(${formatSince(state.since)}〜)`}</div>
+  );
 }
 
 /**
@@ -239,7 +253,7 @@ export function EditLockHolderBanner({
   const confirmRelease = createConfirmReleaseHandler({ release, setBusy, setConfirmOpen, setNotice });
 
   return (
-    <div className={BAND}>
+    <div className={`${BAND} ${BANNER_MARGIN}`}>
       <div className="flex flex-1 flex-col gap-1">
         {shownNotice && <span>{shownNotice}</span>}
         {isHeld && <span>{label}</span>}
