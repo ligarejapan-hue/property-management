@@ -3,16 +3,31 @@
  *
  * ⚠jsdom は使わない方針(`@testing-library/react` は依存に無い・vitest.config.ts は
  *   `environment: "node"`)。見た目・文言は `renderToStaticMarkup` の文字列で固定し、
- *   押したときの動きは部品から切り出した `createForceReleaseHandler` を node で直接呼ぶ
- *   (`src/app/(dashboard)/admin/attachments/__tests__/name-cell.test.tsx` と同じ形)。
+ *   押したときの動きは部品から切り出した `createForceReleaseHandler`/`createConfirmReleaseHandler`
+ *   を node で直接呼ぶ(`src/app/(dashboard)/admin/attachments/__tests__/name-cell.test.tsx` と同じ形)。
+ *
+ * review round 1(task-4-review.md)の反映:
+ * - Important #1: 配線(`createForceReleaseHandler`/`createConfirmReleaseHandler` への
+ *   引数)を source assertion で、通知の表示を `initialNotice` を使った render assertion で固定。
+ * - Important #2: `createConfirmReleaseHandler` を「component の onConfirm」相当として
+ *   `release`(= `createForceReleaseHandler` の戻り値)と組み合わせてテストする。
+ * - Important #3: `confirmReleaseMessage` の自分の別画面の文言を固定。
+ * - Important #4: `activeNotice` を直接テストし、古い行の通知が出ないことを固定。
+ * - Minor: `formatSince` の不正値・`held_by_self_other_screen` + admin のボタン表示を追加。
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "fs";
+import { resolve } from "path";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   EditLockBanner,
   EditLockHolderBanner,
   formatSince,
   createForceReleaseHandler,
+  createConfirmReleaseHandler,
+  confirmReleaseMessage,
+  activeNotice,
+  noticeRowKey,
 } from "../edit-lock-banner";
 import { forceReleaseEditLockApi, type EditLockStatusRow } from "@/lib/api-client";
 
@@ -47,6 +62,10 @@ describe("formatSince", () => {
 
   it("時刻が無いときは空文字", () => {
     expect(formatSince(undefined)).toBe("");
+  });
+
+  it("解釈できない値でも NaN:NaN を出さず空文字にする(review Minor #1)", () => {
+    expect(formatSince("garbage")).toBe("");
   });
 });
 
@@ -119,11 +138,67 @@ describe("EditLockHolderBanner(一覧向けの帯+管理者の鍵を外す)", ()
     expect(withAdmin).toContain("鍵を外す");
   });
 
+  it("自分の別画面でも管理者には「鍵を外す」が出る(review Minor #2)", () => {
+    const selfOtherScreen = row({ state: "held_by_self_other_screen", holderName: undefined });
+    const withoutAdmin = renderToStaticMarkup(
+      <EditLockHolderBanner row={selfOtherScreen} isAdmin={false} onReleased={() => {}} />,
+    );
+    expect(withoutAdmin).not.toContain("鍵を外す");
+
+    const withAdmin = renderToStaticMarkup(
+      <EditLockHolderBanner row={selfOtherScreen} isAdmin onReleased={() => {}} />,
+    );
+    expect(withAdmin).toContain("鍵を外す");
+  });
+
   it("lockId が無ければ管理者でもボタンを出さない(窓口が返さない=権限が無いのと同じ)", () => {
     const html = renderToStaticMarkup(
       <EditLockHolderBanner row={row({ lockId: undefined })} isAdmin onReleased={() => {}} />,
     );
     expect(html).not.toContain("鍵を外す");
+  });
+
+  it("通知(競合等)が立っているときは、それを帯として出す(review Important #1・render assertion)", () => {
+    const html = renderToStaticMarkup(
+      <EditLockHolderBanner
+        row={row()}
+        isAdmin={false}
+        onReleased={() => {}}
+        initialNotice="状況が変わりました。表示を更新します"
+      />,
+    );
+    expect(html).toContain("状況が変わりました。表示を更新します");
+    // 通知が出ているあいだは、通常の保持者帯(鍵を外すボタン含む)を二重に出さない。
+    expect(html).not.toContain("鍵を外す");
+    expect(html).not.toContain("編集中です");
+  });
+
+  it("通知が今と同じ行に対するものなら出す(review Important #4・省略時は今の row とみなす)", () => {
+    const html = renderToStaticMarkup(
+      <EditLockHolderBanner
+        row={row()}
+        isAdmin={false}
+        onReleased={() => {}}
+        initialNotice="状況が変わりました。表示を更新します"
+      />,
+    );
+    expect(html).toContain("状況が変わりました。表示を更新します");
+  });
+
+  it("通知が古い行に対するものなら、いま渡された行には出さない(review Important #4)", () => {
+    const staleKey = noticeRowKey({ resourceType: "property", resourceId: "old-id", state: "held_by_other" });
+    const html = renderToStaticMarkup(
+      <EditLockHolderBanner
+        row={row()}
+        isAdmin={false}
+        onReleased={() => {}}
+        initialNotice="状況が変わりました。表示を更新します"
+        initialNoticeRowKey={staleKey}
+      />,
+    );
+    expect(html).not.toContain("状況が変わりました");
+    // 古い通知は捨てられ、いまの行の状態(held_by_other)がそのまま出る。
+    expect(html).toContain("🔒 山田さんが編集中です(05:02〜)");
   });
 });
 
@@ -180,11 +255,134 @@ describe("createForceReleaseHandler(押したときの動き)", () => {
   });
 });
 
+describe("createConfirmReleaseHandler(承諾ボタンの後始末・review Important #2・#4前半)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // ⚠component の実際の配線(row → createForceReleaseHandler → release →
+  //   createConfirmReleaseHandler)をそのまま組み立てて呼ぶ。isolated handler だけでなく
+  //   「component の onConfirm 相当」を検査する、というレビュー指摘に応えるため。
+  const buildConfirm = (r: EditLockStatusRow, onReleased: () => void, setNotice: (m: string | null) => void) => {
+    const setBusy = vi.fn();
+    const setConfirmOpen = vi.fn();
+    const release = createForceReleaseHandler({ row: r, onReleased, setNotice });
+    const confirm = createConfirmReleaseHandler({ release, setBusy, setConfirmOpen, setNotice });
+    return { confirm, setBusy, setConfirmOpen };
+  };
+
+  it("成功: 開始時に通知を消し、busyを立てて→戻し、ダイアログを閉じる(新規の通知は出さない)", async () => {
+    vi.mocked(forceReleaseEditLockApi).mockResolvedValue(undefined);
+    const onReleased = vi.fn();
+    const setNotice = vi.fn();
+    const { confirm, setBusy, setConfirmOpen } = buildConfirm(row(), onReleased, setNotice);
+
+    await confirm();
+
+    expect(setNotice).toHaveBeenCalledTimes(1);
+    expect(setNotice).toHaveBeenNthCalledWith(1, null);
+    expect(setBusy).toHaveBeenNthCalledWith(1, true);
+    expect(setBusy).toHaveBeenLastCalledWith(false);
+    expect(setConfirmOpen).toHaveBeenCalledWith(false);
+    expect(onReleased).toHaveBeenCalledTimes(1);
+  });
+
+  it("EDIT_LOCK_CHANGED(競合): 通知を出し、onReleased も呼び、ダイアログを閉じてbusyを戻す", async () => {
+    vi.mocked(forceReleaseEditLockApi).mockRejectedValue(
+      Object.assign(new Error("changed"), { code: "EDIT_LOCK_CHANGED", status: 409 }),
+    );
+    const onReleased = vi.fn();
+    const setNotice = vi.fn();
+    const { confirm, setBusy, setConfirmOpen } = buildConfirm(row(), onReleased, setNotice);
+
+    await confirm();
+
+    expect(setNotice).toHaveBeenNthCalledWith(1, null);
+    expect(setNotice).toHaveBeenNthCalledWith(2, "状況が変わりました。表示を更新します");
+    expect(onReleased).toHaveBeenCalledTimes(1);
+    expect(setConfirmOpen).toHaveBeenCalledWith(false);
+    expect(setBusy).toHaveBeenLastCalledWith(false);
+  });
+
+  it("原因不明の失敗: 汎用の失敗通知を出し、onReleased は呼ばず、ダイアログは閉じてbusyも戻す(review Important #2)", async () => {
+    vi.mocked(forceReleaseEditLockApi).mockRejectedValue(new Error("network down"));
+    const onReleased = vi.fn();
+    const setNotice = vi.fn();
+    const { confirm, setBusy, setConfirmOpen } = buildConfirm(row(), onReleased, setNotice);
+
+    await confirm();
+
+    expect(setNotice).toHaveBeenNthCalledWith(1, null);
+    expect(setNotice).toHaveBeenNthCalledWith(2, "編集を終了できませんでした。もう一度お試しください");
+    expect(onReleased).not.toHaveBeenCalled();
+    expect(setConfirmOpen).toHaveBeenCalledWith(false);
+    expect(setBusy).toHaveBeenLastCalledWith(false);
+  });
+});
+
+describe("confirmReleaseMessage(確認ダイアログの本文・review Important #3)", () => {
+  it("他の人の編集は氏名入りの文言(従来どおり・一字一句固定)", () => {
+    expect(confirmReleaseMessage({ state: "held_by_other", holderName: "山田" })).toBe(
+      "山田さんの編集を終わらせます。山田さんが今入力している内容は失われ、保存されません。山田さんの画面は、この先5分間は保存できません(5分経つと、この記録はまた誰でも編集を始められる状態に戻ります)。",
+    );
+  });
+
+  it("自分の別画面は氏名を使わない自然な文言にする(発注者裁定・一字一句固定)", () => {
+    expect(confirmReleaseMessage({ state: "held_by_self_other_screen", holderName: undefined })).toBe(
+      "あなたの別の画面での編集を終わらせます。その画面で入力している内容は失われ、保存されません。その画面は、この先5分間は保存できません(5分経つと、この記録はまた誰でも編集を始められる状態に戻ります)。",
+    );
+  });
+});
+
+describe("activeNotice(通知の有効性を判定する純関数・review Important #4)", () => {
+  const r = row();
+
+  it("通知が無ければ出さない", () => {
+    expect(activeNotice(null, null, r)).toBeNull();
+  });
+
+  it("通知はあっても対応する行が無ければ出さない", () => {
+    expect(activeNotice("状況が変わりました。表示を更新します", null, r)).toBeNull();
+  });
+
+  it("行の識別子(対象+ID+状態)が一致すれば出す", () => {
+    expect(activeNotice("msg", noticeRowKey(r), r)).toBe("msg");
+  });
+
+  it("対象IDが違えば出さない(古い行の通知を引き継がない)", () => {
+    expect(activeNotice("msg", noticeRowKey({ ...r, resourceId: "other" }), r)).toBeNull();
+  });
+
+  it("状態だけ違っても出さない", () => {
+    expect(activeNotice("msg", noticeRowKey({ ...r, state: "free" }), r)).toBeNull();
+  });
+});
+
+describe("EditLockHolderBanner の配線(source assertion・node環境では実描画で確かめられないため)", () => {
+  const src = readFileSync(
+    resolve(process.cwd(), "src/components/edit-lock/edit-lock-banner.tsx"),
+    "utf8",
+  );
+
+  it("release は row・onReleased・setNotice をそのまま渡して作る", () => {
+    expect(src).toContain("createForceReleaseHandler({ row, onReleased, setNotice })");
+  });
+
+  it("承諾ボタンの後始末は release・setBusy・setConfirmOpen・setNotice をそのまま渡して作る", () => {
+    expect(src).toContain("createConfirmReleaseHandler({ release, setBusy, setConfirmOpen, setNotice })");
+  });
+
+  it("ConfirmDialog の onConfirm には配線した後始末をそのまま渡す(inline の即席処理にしない)", () => {
+    expect(src).toContain("onConfirm={confirmRelease}");
+  });
+
+  it("確認ダイアログの本文は confirmReleaseMessage(row) をそのまま使う(文言のコピーを二重に持たない)", () => {
+    expect(src).toContain("message={confirmReleaseMessage(row)}");
+  });
+});
+
 describe("解除の確認ダイアログの文言", () => {
   it("氏名入りの確認文を一字一句固定する", async () => {
     const { ConfirmDialog } = await import("@/components/ui/confirm-dialog");
-    const holderLabel = "山田";
-    const message = `${holderLabel}さんの編集を終わらせます。${holderLabel}さんが今入力している内容は失われ、保存されません。${holderLabel}さんの画面は、この先5分間は保存できません(5分経つと、この記録はまた誰でも編集を始められる状態に戻ります)。`;
+    const message = confirmReleaseMessage({ state: "held_by_other", holderName: "山田" });
     const html = renderToStaticMarkup(
       <ConfirmDialog
         title="編集の鍵を外しますか"
@@ -198,5 +396,22 @@ describe("解除の確認ダイアログの文言", () => {
       "山田さんの編集を終わらせます。山田さんが今入力している内容は失われ、保存されません。山田さんの画面は、この先5分間は保存できません(5分経つと、この記録はまた誰でも編集を始められる状態に戻ります)。",
     );
     expect(html).toContain("編集を終わらせる");
+  });
+
+  it("自分の別画面の確認文を一字一句固定する(review Important #3)", async () => {
+    const { ConfirmDialog } = await import("@/components/ui/confirm-dialog");
+    const message = confirmReleaseMessage({ state: "held_by_self_other_screen", holderName: undefined });
+    const html = renderToStaticMarkup(
+      <ConfirmDialog
+        title="編集の鍵を外しますか"
+        message={message}
+        confirmLabel="編集を終わらせる"
+        onCancel={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    expect(html).toContain(
+      "あなたの別の画面での編集を終わらせます。その画面で入力している内容は失われ、保存されません。その画面は、この先5分間は保存できません(5分経つと、この記録はまた誰でも編集を始められる状態に戻ります)。",
+    );
   });
 });

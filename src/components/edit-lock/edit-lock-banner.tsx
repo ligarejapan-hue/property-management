@@ -7,6 +7,17 @@
  * ⚠文言は仕様の表のまま、1文字も変えない(発注者確定・N6で無期限の約束を外した版)。
  * ⚠判断はしない。渡された `EditLockUiState` / `EditLockStatusRow` をそのまま文字にするだけ
  *   (状態を決めるのは Task 2 の純関数と、呼び出し側の hook/一覧)。
+ *
+ * review round 1(task-4-review.md)の反映:
+ * - Important #1: `createForceReleaseHandler`/`createConfirmReleaseHandler` への配線を
+ *   source assertion で、通知の表示を render assertion で固定できるよう `initialNotice`/
+ *   `initialNoticeRowKey`(テスト専用の初期値)を追加。
+ * - Important #2: 衝突以外の失敗(`release()` の re-throw)を `createConfirmReleaseHandler`
+ *   が捕まえ、汎用の失敗通知を出す。
+ * - Important #3: 自分の別画面(`held_by_self_other_screen`)の確認文を氏名を使わない
+ *   自然な文言に差し替え(`confirmReleaseMessage`)。
+ * - Important #4: 通知は「セットした時点の行(対象・状態)」に紐付け、新しい試行の開始時と
+ *   行が変わったときに古い通知を出し続けない(`activeNotice`)。
  */
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -17,10 +28,11 @@ import type { EditLockUiState } from "@/lib/edit-lock/ui-state";
 const BAND =
   "flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300";
 
-/** 開始時刻は現地時間の HH:mm(仕様の見本と同じ)。 */
+/** 開始時刻は現地時間の HH:mm(仕様の見本と同じ)。解釈できない値は空文字(review Minor #1)。 */
 export function formatSince(since?: string): string {
   if (!since) return "";
   const d = new Date(since);
+  if (Number.isNaN(d.getTime())) return "";
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
@@ -56,6 +68,8 @@ export function EditLockBanner({ state, warnIdle }: { state: EditLockUiState; wa
  * ⚠成功・`EDIT_LOCK_CHANGED`(競合)の**どちらの経路でも** `onReleased()` を呼ぶ。競合は
  * 「自分が呼ぶより前に誰かが鍵を変えた」という意味であり、手元の表示は既に古いので、
  * 作り直すのが正しい(成功したときと同じ後始末)。
+ * ⚠競合以外の失敗は投げ直す(黙って握りつぶさない)。呼び出し側(`createConfirmReleaseHandler`)
+ * がユーザーに見える通知に変える。
  */
 export function createForceReleaseHandler({
   row,
@@ -83,6 +97,71 @@ export function createForceReleaseHandler({
 }
 
 /**
+ * 確認ダイアログの本文(review Important #3)。他の人の編集は氏名入り(従来どおり)。
+ * 自分の別画面(`held_by_self_other_screen`)には氏名が届かないため、氏名を使わない
+ * 自然な文言にする(発注者裁定・そのまま1文字も変えない)。
+ */
+export function confirmReleaseMessage(row: Pick<EditLockStatusRow, "state" | "holderName">): string {
+  if (row.state === "held_by_self_other_screen") {
+    return "あなたの別の画面での編集を終わらせます。その画面で入力している内容は失われ、保存されません。その画面は、この先5分間は保存できません(5分経つと、この記録はまた誰でも編集を始められる状態に戻ります)。";
+  }
+  const holderLabel = row.holderName ?? "この利用者";
+  return `${holderLabel}さんの編集を終わらせます。${holderLabel}さんが今入力している内容は失われ、保存されません。${holderLabel}さんの画面は、この先5分間は保存できません(5分経つと、この記録はまた誰でも編集を始められる状態に戻ります)。`;
+}
+
+/** 通知(状況が変わりました等)が、どの行(対象+状態)に対して出たものかの識別子。 */
+export function noticeRowKey(row: Pick<EditLockStatusRow, "resourceType" | "resourceId" | "state">): string {
+  return `${row.resourceType}:${row.resourceId}:${row.state}`;
+}
+
+/**
+ * いま出してよい通知を決める純関数(review Important #4)。通知をセットした時点の
+ * 行の識別子と、いま渡されている行の識別子が一致するときだけ出す。親が remount せずに
+ * 別の行(対象・状態)を渡してきたら、古い「状況が変わりました」を出し続けない。
+ */
+export function activeNotice(
+  notice: string | null,
+  noticeForRowKey: string | null,
+  row: Pick<EditLockStatusRow, "resourceType" | "resourceId" | "state">,
+): string | null {
+  if (notice === null || noticeForRowKey === null) return null;
+  return noticeForRowKey === noticeRowKey(row) ? notice : null;
+}
+
+/**
+ * 「鍵を外す」承諾ボタンの後始末(review Important #2・#4前半)。
+ * - 新しい試行を始める前に、前回の通知を消す(#4前半: 新しい試行が始まったら古い通知を残さない)。
+ * - `release()` が投げ直す「衝突以外の失敗」だけをここで捕まえ、ユーザーに見える通知にする(#2)。
+ *   衝突(`EDIT_LOCK_CHANGED`)は `release()` の内側で既に通知をセットしていて投げ直さないので、
+ *   ここでは何もしない。
+ * - 成功・失敗どちらでもダイアログを閉じ、`busy` を戻す。
+ */
+export function createConfirmReleaseHandler({
+  release,
+  setBusy,
+  setConfirmOpen,
+  setNotice,
+}: {
+  release: () => Promise<void>;
+  setBusy: (busy: boolean) => void;
+  setConfirmOpen: (open: boolean) => void;
+  setNotice: (message: string | null) => void;
+}) {
+  return async () => {
+    setNotice(null);
+    setBusy(true);
+    try {
+      await release();
+    } catch {
+      setNotice("編集を終了できませんでした。もう一度お試しください");
+    } finally {
+      setBusy(false);
+      setConfirmOpen(false);
+    }
+  };
+}
+
+/**
  * 一覧・カードなど、資源を開かずに状態だけ見ている画面向けの帯。
  * 管理者にだけ「鍵を外す」を出す(`lockId` は窓口が管理者にしか返さないため、
  * それ自体が権限の境界になっている)。
@@ -91,25 +170,46 @@ export function EditLockHolderBanner({
   row,
   isAdmin,
   onReleased,
+  initialNotice = null,
+  initialNoticeRowKey = null,
 }: {
   row: EditLockStatusRow;
   isAdmin: boolean;
   onReleased: () => void;
+  /**
+   * テスト専用(review Important #1): 通知帯の初期値。node環境ではクリックを再現できず
+   * `setNotice` を経由した通知の表示を確かめられないため、render assertion 用に公開する。
+   */
+  initialNotice?: string | null;
+  /**
+   * テスト専用(review Important #4): 上の通知が「どの行に対して出たものか」を明示する。
+   * 省略時は今の `row` に対して出たものとみなす。
+   */
+  initialNoticeRowKey?: string | null;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNoticeState] = useState<string | null>(initialNotice);
+  // ⚠ref ではなく state で持つ(react-hooks/refs: render中の ref 読み取りを禁止するルールを踏むため)。
+  const [noticeRowKeyState, setNoticeRowKeyState] = useState<string | null>(
+    initialNotice !== null ? (initialNoticeRowKey ?? noticeRowKey(row)) : null,
+  );
+  const setNotice = (message: string | null) => {
+    setNoticeRowKeyState(message === null ? null : noticeRowKey(row));
+    setNoticeState(message);
+  };
 
-  if (notice) return <div className={BAND}>{notice}</div>;
+  const shownNotice = activeNotice(notice, noticeRowKeyState, row);
+  if (shownNotice) return <div className={BAND}>{shownNotice}</div>;
   if (row.state !== "held_by_other" && row.state !== "held_by_self_other_screen") return null;
 
   const label =
     row.state === "held_by_self_other_screen"
       ? `🔒 あなたが別の画面で編集中です(${formatSince(row.since)}〜)`
       : `🔒 ${row.holderName}さんが編集中です(${formatSince(row.since)}〜)`;
-  const holderLabel = row.holderName ?? "この利用者";
 
   const release = createForceReleaseHandler({ row, onReleased, setNotice });
+  const confirmRelease = createConfirmReleaseHandler({ release, setBusy, setConfirmOpen, setNotice });
 
   return (
     <div className={BAND}>
@@ -122,19 +222,11 @@ export function EditLockHolderBanner({
       {confirmOpen && (
         <ConfirmDialog
           title="編集の鍵を外しますか"
-          message={`${holderLabel}さんの編集を終わらせます。${holderLabel}さんが今入力している内容は失われ、保存されません。${holderLabel}さんの画面は、この先5分間は保存できません(5分経つと、この記録はまた誰でも編集を始められる状態に戻ります)。`}
+          message={confirmReleaseMessage(row)}
           confirmLabel="編集を終わらせる"
           busy={busy}
           onCancel={() => setConfirmOpen(false)}
-          onConfirm={async () => {
-            setBusy(true);
-            try {
-              await release();
-            } finally {
-              setBusy(false);
-              setConfirmOpen(false);
-            }
-          }}
+          onConfirm={confirmRelease}
         />
       )}
     </div>
