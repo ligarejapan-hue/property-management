@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Loader2, X, Save, AlertTriangle } from "lucide-react";
-import { USE_MOCK, fetchUsers, apiErrorCode } from "@/lib/api-client";
+import { USE_MOCK, fetchUsers, apiErrorCode, codeFromErrorBody } from "@/lib/api-client";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import {
   BUILDING_NAME_MAX_LENGTH,
@@ -13,7 +13,7 @@ import { formatBuiltYearMonth } from "@/lib/built-year-month";
 // 編集中の鍵(仕様 6.1・6.2)。この画面が最初に配線する画面(Task 5)。
 import { useEditLock } from "@/hooks/use-edit-lock";
 import { ensureUniqueScreenToken, editLockHeaders } from "@/lib/edit-lock/screen-token-client";
-import { EditLockBanner } from "@/components/edit-lock/edit-lock-banner";
+import { EditLockBanner, BAND as EDIT_LOCK_BAND } from "@/components/edit-lock/edit-lock-banner";
 
 interface AssigneeOption {
   id: string;
@@ -182,6 +182,56 @@ export async function initEditLockOnOpen(
 }
 
 /**
+ * `initEditLockOnOpen` を実行し、結果に応じて `lockUnavailable` を更新する
+ * (task5 review round1 Critical — fail open)。
+ *
+ * ⚠**取得(`acquire`)の失敗を握りつぶさない、が画面を詰まらせもしない**。
+ *   取得は401(未ログイン)・403(担当外)・404(削除済)・500・オフライン等、
+ *   正当な理由でいつでも失敗しうる。一方でサーバ側(`properties/[id]/route.ts`)は
+ *   「誰かが鍵を持っている」ときだけ保存を拒む契約なので、鍵を取れなかったこと
+ *   **自体**は保存を止める理由にならない。サーバが最終的な権威であり続けるよう、
+ *   ここでは新しい状態(`ui-state.ts` の kind)を増やさず、この画面ローカルの
+ *   `lockUnavailable` フラグだけで「保存は通常どおり行える」に倒す(fail open)。
+ * ⚠この関数自体は例外を投げない(呼び出し側の `void runEditLockInit(...)` が
+ *   unhandled rejection を残さない)。
+ */
+export async function runEditLockInit(
+  ensureUniqueScreenToken: () => Promise<string>,
+  onReady: () => void,
+  acquire: () => Promise<void>,
+  setLockUnavailable: (unavailable: boolean) => void,
+): Promise<void> {
+  try {
+    await initEditLockOnOpen(ensureUniqueScreenToken, onReady, acquire);
+    setLockUnavailable(false);
+  } catch {
+    setLockUnavailable(true);
+  }
+}
+
+/**
+ * 保存ボタンを押せるか(task5 review round1 Important #3)。
+ * ⚠この判断自体をテストで直接検査できるよう、JSX の `disabled={}` から切り出す
+ *   (`disabled={` という文字列はこのタスク以前から3箇所あり、走査だけでは
+ *   「決定が実行されているか」を固定できないため)。
+ * `lockUnavailable` が true のときは `canSave` が false でも押せる(fail open)。
+ */
+export function canSubmitSave({
+  tokenReady,
+  canSave,
+  saving,
+  lockUnavailable,
+}: {
+  tokenReady: boolean;
+  canSave: boolean;
+  saving: boolean;
+  lockUnavailable: boolean;
+}): boolean {
+  if (!tokenReady || saving) return false;
+  return canSave || lockUnavailable;
+}
+
+/**
  * 「販売」区分に出す欄(物件の種別ごと)。仕様書 §5.1。
  * ⚠区分マンションの構造・地上階・総戸数は含めない(棟の値が正・読み取り専用の
  *   別ブロックで表示する)。
@@ -335,14 +385,24 @@ export default function PropertyEditForm({
   // ⚠複製のタブでないことの確認(最大300ms)が終わるまで編集させない(D6)。
   //   判定が終わるまでは何も起きていないので、帯も出さない(lock.state は idle のまま)。
   const [tokenReady, setTokenReady] = useState(false);
+  // ⚠(task5 review round1 Critical — fail open) 取得(acquire)が失敗しても保存を
+  //   詰まらせない。サーバは鍵が無くても保存を受け付けるため、鍵を表示できないこと
+  //   自体を理由に保存ボタンを永久にdisabledのままにしてはいけない。
+  const [lockUnavailable, setLockUnavailable] = useState(false);
   useEffect(() => {
     let alive = true;
-    void initEditLockOnOpen(
+    void runEditLockInit(
       ensureUniqueScreenToken,
       () => {
         if (alive) setTokenReady(true);
       },
-      () => lock.acquire(),
+      // ⚠(review round1 minor) alive はここにも効かせる。300ms待ちの間に閉じられたら
+      //   取得自体を送らない(送ってもすぐbeaconで手放すだけになる=自己完結はする
+      //   ものの、不要な取得監査ログ・往復を避けられる)。
+      () => (alive ? lock.acquire() : Promise.resolve()),
+      (unavailable) => {
+        if (alive) setLockUnavailable(unavailable);
+      },
     );
     return () => {
       alive = false;
@@ -479,8 +539,11 @@ export default function PropertyEditForm({
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
+        // ⚠コードの抽出は codeFromErrorBody(api-client.ts) 経由(review round1
+        //   Important #4)。手組みで再現すると、封筒の形が変わったときここだけ
+        //   古いまま残り、noteSaveError が黙って null を受け取り続ける。
         throw Object.assign(new Error(body?.error?.message ?? `エラー: ${res.status}`), {
-          code: typeof body?.error?.code === "string" ? body.error.code : null,
+          code: codeFromErrorBody(body),
         });
       }
 
@@ -529,6 +592,14 @@ export default function PropertyEditForm({
 
         {/* Body */}
         <div className="max-h-[70vh] overflow-y-auto px-6 py-4">
+          {/* ⚠(task5 review round1 Critical — fail open) 鍵が取れなくても保存は
+              通常どおり行える、という別の通知。lock.state は idle のまま(新しい
+              state kindは増やさない)なので、EditLockBanner とは別に出す。 */}
+          {lockUnavailable && (
+            <div className={EDIT_LOCK_BAND}>
+              編集中の表示を取得できませんでした。保存は通常どおり行えます
+            </div>
+          )}
           <EditLockBanner state={lock.state} warnIdle={lock.warnIdle} />
           {error && (
             <div className="mb-4 flex items-center gap-2 rounded-md border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
@@ -715,8 +786,12 @@ export default function PropertyEditForm({
           </button>
           <button
             onClick={handleSave}
-            // ⚠複製タブ検知(tokenReady)が終わるまで・鍵を持っていない間は押せない(D6・仕様6.2)。
-            disabled={!tokenReady || !lock.canSave || saving}
+            // ⚠複製タブ検知(tokenReady)が終わるまでは押せない(D6・仕様6.2)。鍵を
+            //   持てていなくても、取得自体に失敗したとき(lockUnavailable)は
+            //   fail openで押せる(サーバが最終的な権威・review round1 Critical)。
+            disabled={
+              !canSubmitSave({ tokenReady, canSave: lock.canSave, saving, lockUnavailable })
+            }
             className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
           >
             {saving ? (

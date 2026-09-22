@@ -34,8 +34,14 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { apiErrorCode, forceReleaseEditLockApi, type EditLockStatusRow } from "@/lib/api-client";
 import type { EditLockUiState } from "@/lib/edit-lock/ui-state";
 
-const BAND =
-  "flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300";
+/**
+ * ⚠export する(task5 review round1 Minor)。この帯が使われる画面はすべて、続く
+ *   本文(エラー表示・最初のセクション等)との間に既存の `mb-4`(隣のエラー枠と同じ値)
+ *   を空ける。呼び出し側(`property-edit-form.tsx`)が「鍵は取れなかったが保存は
+ *   通常どおり行える」という**別の**通知を出すときも、同じ見た目を複製せずこれを使う。
+ */
+export const BAND =
+  "flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300 mb-4";
 
 /** 開始時刻は現地時間の HH:mm(仕様の見本と同じ)。解釈できない値は空文字(review Minor #1)。 */
 export function formatSince(since?: string): string {
