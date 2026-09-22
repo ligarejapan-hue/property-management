@@ -30,13 +30,19 @@ function flush(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-/** 手で解決タイミングを操るための Promise(応答の到着順を入れ替えるテスト用)。 */
-function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+/** 手で解決/拒否のタイミングを操る Promise(応答の到着順を入れ替えるテスト用)。 */
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (err: unknown) => void;
+} {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
+  let reject!: (err: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 /**
@@ -455,8 +461,8 @@ describe("createEditLockController", () => {
     await acquirePromise;
     await flush();
 
-    // dispose済みなのでonStateは呼ばれない(既存の契約)が、beaconでの解放は行う。
-    expect(h.onStateMock).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "mine" }), expect.anything());
+    // dispose済みなのでonStateは一度も呼ばれない(既存の契約)が、beaconでの解放は行う。
+    expect(h.onStateMock).not.toHaveBeenCalled();
     expect(h.releaseByBeaconMock).toHaveBeenCalledWith(LOCK_ID);
     expect(h.registry.activeCount()).toBe(0);
   });
@@ -526,5 +532,70 @@ describe("createEditLockController", () => {
     h.heartbeatMock.mockResolvedValueOnce(HEARTBEAT_MINE);
     await h.registry.fire();
     expect(h.heartbeatMock.mock.calls.at(-1)?.[0]).toBe(true);
+  });
+
+  // review round3 の残り(n7/n8)。
+
+  it("n7) 期限切れの間の連続入力(バースト)は、acquireを1回しか飛ばさない", async () => {
+    h.acquireMock.mockResolvedValueOnce(MINE);
+    h.heartbeatMock.mockResolvedValueOnce(HEARTBEAT_EXPIRED);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+    await h.registry.fire();
+    expect(h.lastState().kind).toBe("expired");
+
+    h.acquireMock.mockClear();
+    const pending = createDeferred<AcquireResponse>();
+    h.acquireMock.mockReturnValueOnce(pending.promise);
+
+    // 素早い3回の入力(バースト)。1回目の応答がまだ返っていない。
+    controller.noteActivity();
+    controller.noteActivity();
+    controller.noteActivity();
+    await flush();
+    expect(h.acquireMock).toHaveBeenCalledTimes(1);
+
+    // 1回目の応答が届く。
+    pending.resolve(MINE);
+    await flush();
+    expect(h.lastState().kind).toBe("mine");
+
+    // ガードは in-flight の間だけ(finally で必ず解除される)。次に期限切れになった
+    // ときにまた1回だけ取得できることを確かめる(永久に塞がらない)。
+    h.heartbeatMock.mockResolvedValueOnce(HEARTBEAT_EXPIRED);
+    await h.registry.fire();
+    expect(h.lastState().kind).toBe("expired");
+
+    h.acquireMock.mockClear();
+    h.acquireMock.mockResolvedValueOnce(MINE);
+    controller.noteActivity();
+    await flush();
+    expect(h.acquireMock).toHaveBeenCalledTimes(1);
+    expect(h.lastState().kind).toBe("mine");
+  });
+
+  it("n8) 取り直しの間に世代が動いていたら、遅れて届いた404(資源消失)は無視する(他の書き込み経路と同じ規約)", async () => {
+    h.acquireMock.mockResolvedValueOnce(MINE);
+    h.heartbeatMock.mockResolvedValueOnce(HEARTBEAT_EXPIRED);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+    await h.registry.fire();
+    expect(h.lastState().kind).toBe("expired");
+
+    const pendingAcquire = createDeferred<AcquireResponse>();
+    h.acquireMock.mockReturnValueOnce(pendingAcquire.promise);
+    controller.noteActivity(); // 404で失敗する取り直しを開始(まだ未解決)。
+
+    // 応答を待つ間に、別の出来事(release)が世代を進める。
+    await controller.release();
+    expect(h.lastState().kind).toBe("idle");
+    const onStateCallsAfterRelease = h.onStateMock.mock.calls.length;
+
+    // 遅れて404(資源消失)の応答が届く。世代がずれているので反映しない。
+    pendingAcquire.reject(Object.assign(new Error("物件が見つかりません"), { code: "NOT_FOUND" }));
+    await flush();
+
+    expect(h.lastState().kind).toBe("idle"); // deleted にはならない
+    expect(h.onStateMock.mock.calls.length).toBe(onStateCallsAfterRelease); // onStateは増えない
   });
 });

@@ -17,6 +17,14 @@
  *   lockId をどこにも渡さず deps.release も beacon も呼ばれない)。acquire の stale
  *   分岐でだけ、応答が mine だったらその lockId を beacon 経由で手放す(dispose 後でも
  *   ヘッダ不要で安全に呼べる)。
+ * ⚠(review round3 n7) 入力のたびに acquire() を呼ぶと、期限切れの間の連続入力
+ *   (バースト)が複数の取得を同時に飛ばす。通常は先着以外の応答が持つ lockId が
+ *   既に上書きされていて実害は無いが、行ロックの直列化順が逆転すると新しい応答が
+ *   生きている行を beacon で消す経路になる(n1の裏返し)。`acquireInFlight` で
+ *   1本しか同時に走らせない。
+ * ⚠(review round3 n8) 404(資源消失)の分岐だけ世代ガードが無かった。他の書き込み
+ *   経路と同じ規約にするため、取り直しを始めた直後の世代を控え、一致するときだけ
+ *   deleted を反映する。
  */
 import {
   shouldReacquireOnInput,
@@ -79,6 +87,8 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
    * 応答時に値がずれていたら(在任期が変わった)結果を捨てる。
    */
   let generation = 0;
+  /** ⚠(review round3 n7) 取得が既に飛んでいる間は、新しい取得を重ねて飛ばさない。 */
+  let acquireInFlight = false;
 
   function bumpGeneration(): void {
     generation += 1;
@@ -137,21 +147,29 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
   }
 
   async function acquire(): Promise<void> {
-    bumpGeneration();
-    const gen = generation;
-    const res = await deps.acquire();
-    const next = uiStateFromAcquire(res);
-    if (disposed || gen !== generation) {
-      // ⚠(review round2 n1) release/dispose がこの取得を追い越していた。state には
-      //   今さら反映しない(discard は正しい)が、応答が mine ならサーバは実際に
-      //   鍵を許可している=孤児にせず beacon で手放す(deps.release はヘッダ付きの
-      //   fetch が要るが、dispose 後の画面ではもう安全に呼べない可能性がある。
-      //   beacon はヘッダ不要でどちらの状況でも安全)。
-      if (next.kind === "mine") deps.releaseByBeacon(next.lockId);
-      return;
+    // ⚠(review round3 n7) 既に1本飛んでいるなら、この呼び出しは何もしない
+    //   (バーストの2本目以降を黙って捨てる。1本目の応答が全体の結果を決める)。
+    if (acquireInFlight) return;
+    acquireInFlight = true;
+    try {
+      bumpGeneration();
+      const gen = generation;
+      const res = await deps.acquire();
+      const next = uiStateFromAcquire(res);
+      if (disposed || gen !== generation) {
+        // ⚠(review round2 n1) release/dispose がこの取得を追い越していた。state には
+        //   今さら反映しない(discard は正しい)が、応答が mine ならサーバは実際に
+        //   鍵を許可している=孤児にせず beacon で手放す(deps.release はヘッダ付きの
+        //   fetch が要るが、dispose 後の画面ではもう安全に呼べない可能性がある。
+        //   beacon はヘッダ不要でどちらの状況でも安全)。
+        if (next.kind === "mine") deps.releaseByBeacon(next.lockId);
+        return;
+      }
+      apply(next);
+      if (state.kind === "mine") startHeartbeat();
+    } finally {
+      acquireInFlight = false;
     }
-    apply(next);
-    if (state.kind === "mine") startHeartbeat();
   }
 
   async function release(): Promise<void> {
@@ -170,16 +188,21 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
    *   「入力すれば自動で取り直す」と案内したまま、毎回404→黙殺を繰り返す無言の
    *   行き止まりになる。deleted にして取り直しを止める(shouldReacquireOnInput は
    *   deleted では true を返さない)のが正直な答え。
+   * ⚠(review round3 n8) ただしこの404も、他の書き込み経路と同じ世代ガードに従う。
+   *   取り直しを始める直前の世代を控え、acquire() 自身がその直後に1つ進める値
+   *   (=genAtAttempt+1)と一致するとき(=この取り直しの間に他の出来事が起きて
+   *   いない)だけ deleted を反映する。
    */
   function noteActivity(): void {
     activeSinceLastBeat = true;
     if (shouldReacquireOnInput(state)) {
+      const genAtAttempt = generation;
       acquire().catch((err: unknown) => {
-        if (isResourceNotFoundError(err)) {
+        if (isResourceNotFoundError(err) && generation === genAtAttempt + 1) {
           apply({ kind: "deleted" });
           return;
         }
-        /* それ以外は一過性として無視。次の noteActivity で再試行される。 */
+        /* それ以外、または世代がずれていれば無視する。次の noteActivity で再試行される。 */
       });
     }
   }
