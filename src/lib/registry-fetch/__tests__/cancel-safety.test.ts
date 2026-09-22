@@ -244,7 +244,11 @@ describe("配線", () => {
     // ⚠分類コードが画面まで届かないと区別しようがない（文言一致は脆い）
     const client = read("src/lib/api-client.ts");
     expect(client).toMatch(/export function apiErrorCode/);
-    expect(client).toMatch(/code: typeof body\?\.error\?\.code === "string"/);
+    // ⚠(task5 review round1 Important) コードの読み取りは codeFromErrorBody
+    //   (export済み・他画面もこれを通す)に集約されている。toApiError はそれを呼ぶだけ。
+    expect(client).toMatch(/export function codeFromErrorBody/);
+    expect(client).toMatch(/typeof code === "string" \? code : null/);
+    expect(client).toMatch(/code: codeFromErrorBody\(body\)/);
     // 非2xx を Error にする箇所が分散すると片方だけ直る → 1か所に集約する
     expect(client).not.toMatch(
       /throw new Error\(body\?\.error\?\.message \?\? `Error: \$\{res\.status\}`\)/,
