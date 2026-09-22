@@ -41,6 +41,21 @@ const mockDelay = () => new Promise((r) => setTimeout(r, 200));
 // ---------- Generic fetcher ----------
 
 /**
+ * 封筒(`{ error: { code } }`)からコードだけを取り出す。`toApiError` と、
+ * 画面側で自前にエラーを組み立てる入口(例: `property-edit-form.tsx` の保存)の
+ * どちらもこれを通す(task5 review round1 Important)。
+ *
+ * ⚠**手組みで再現しない**。この関数を経由しない複製を各画面が持つと、封筒の形
+ * (`error.code` → 別名など)が将来変わったときに、api-client.ts だけ直して
+ * 複製先はすべて黙って `null` を返すようになり、`apiErrorCode` が動かなくなる
+ * (=鍵の状態が二度と切り替わらない)まま気づけない。
+ */
+export function codeFromErrorBody(body: unknown): string | null {
+  const code = (body as { error?: { code?: unknown } } | null | undefined)?.error?.code;
+  return typeof code === "string" ? code : null;
+}
+
+/**
  * 非 2xx 応答を Error にする（分類コード付き）。
  *
  * ⚠**分類コードを画面まで届ける**(@codex #357 P2)。文言だけだと画面側は
@@ -52,7 +67,7 @@ async function toApiError(res: Response): Promise<Error> {
   const body = await res.json().catch(() => null);
   const err = new Error(body?.error?.message ?? `Error: ${res.status}`);
   return Object.assign(err, {
-    code: typeof body?.error?.code === "string" ? body.error.code : null,
+    code: codeFromErrorBody(body),
     status: res.status,
     // メール送信設定のテスト送信(502)だけが持つ、SMTP側の許可リスト一致コード(自由文なし)。
     // 他の応答には無い(undefined のまま)ので、既存の呼び出し元には影響しない。
