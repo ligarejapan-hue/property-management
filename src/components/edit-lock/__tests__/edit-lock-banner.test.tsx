@@ -12,8 +12,18 @@
  * - Important #2: `createConfirmReleaseHandler` を「component の onConfirm」相当として
  *   `release`(= `createForceReleaseHandler` の戻り値)と組み合わせてテストする。
  * - Important #3: `confirmReleaseMessage` の自分の別画面の文言を固定。
- * - Important #4: `activeNotice` を直接テストし、古い行の通知が出ないことを固定。
+ * - Important #4(round1時点): `activeNotice` を直接テストし、古い行の通知が出ないことを固定。
  * - Minor: `formatSince` の不正値・`held_by_self_other_screen` + admin のボタン表示を追加。
+ *
+ * review round 2(task-4-review.md「## 再点検」)の反映:
+ * - Important(round1の#4の鍵が甘かった続き): `noticeRowKey` に `lockId` を含めたので、
+ *   対象・状態が同じでも保持者(=`lockId`)が入れ替わっていれば古い通知を出さないことを
+ *   `activeNotice` の直接テストと `EditLockHolderBanner` の render assertion の両方で固定。
+ * - コントローラの裁定(round1の判断を反転): 「通知(競合等)が立っているときは、それを
+ *   帯として出す」テストは round1 では `not.toContain("鍵を外す")`/`not.toContain("編集中です")`
+ *   だったが、**この期待を反転**して「通知が立っていても held な行なら帯とボタンを併記する」
+ *   ことを固定する(round1の判断が誤りだったための反転であり、アサーションを弱めた
+ *   わけではない)。
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "fs";
@@ -158,7 +168,26 @@ describe("EditLockHolderBanner(一覧向けの帯+管理者の鍵を外す)", ()
     expect(html).not.toContain("鍵を外す");
   });
 
-  it("通知(競合等)が立っているときは、それを帯として出す(review Important #1・render assertion)", () => {
+  // ⚠round1では「通知が立っているあいだは帯を隠す」ことを固定していたが、コントローラの
+  //   裁定でround1の判断を反転した: 通知は帯を置き換えず、held な行なら常に併記する
+  //   (衝突直後に管理者が今の鍵を操作できなくなるのを防ぐため)。このテストは
+  //   `not.toContain` → `toContain` に反転しており、アサーションを弱めたわけではない。
+  it("通知(競合等)が立っていても、held な行なら帯とボタンを併記する(review round2・round1の判断を反転)", () => {
+    const html = renderToStaticMarkup(
+      <EditLockHolderBanner
+        row={row()}
+        isAdmin
+        onReleased={() => {}}
+        initialNotice="状況が変わりました。表示を更新します"
+      />,
+    );
+    expect(html).toContain("状況が変わりました。表示を更新します");
+    // 通知と同じ行(同じ lockId)がまだ held_by_other である限り、帯とボタンは消えない。
+    expect(html).toContain("🔒 山田さんが編集中です(05:02〜)");
+    expect(html).toContain("鍵を外す");
+  });
+
+  it("通知が今と同じ行(lockId含む)に対するものなら出す(省略時は今の row とみなす)", () => {
     const html = renderToStaticMarkup(
       <EditLockHolderBanner
         row={row()}
@@ -168,25 +197,15 @@ describe("EditLockHolderBanner(一覧向けの帯+管理者の鍵を外す)", ()
       />,
     );
     expect(html).toContain("状況が変わりました。表示を更新します");
-    // 通知が出ているあいだは、通常の保持者帯(鍵を外すボタン含む)を二重に出さない。
-    expect(html).not.toContain("鍵を外す");
-    expect(html).not.toContain("編集中です");
   });
 
-  it("通知が今と同じ行に対するものなら出す(review Important #4・省略時は今の row とみなす)", () => {
-    const html = renderToStaticMarkup(
-      <EditLockHolderBanner
-        row={row()}
-        isAdmin={false}
-        onReleased={() => {}}
-        initialNotice="状況が変わりました。表示を更新します"
-      />,
-    );
-    expect(html).toContain("状況が変わりました。表示を更新します");
-  });
-
-  it("通知が古い行に対するものなら、いま渡された行には出さない(review Important #4)", () => {
-    const staleKey = noticeRowKey({ resourceType: "property", resourceId: "old-id", state: "held_by_other" });
+  it("通知が古い行(別のresourceId)に対するものなら、いま渡された行には出さない(review Important #4)", () => {
+    const staleKey = noticeRowKey({
+      resourceType: "property",
+      resourceId: "old-id",
+      state: "held_by_other",
+      lockId: "l1",
+    });
     const html = renderToStaticMarkup(
       <EditLockHolderBanner
         row={row()}
@@ -199,6 +218,27 @@ describe("EditLockHolderBanner(一覧向けの帯+管理者の鍵を外す)", ()
     expect(html).not.toContain("状況が変わりました");
     // 古い通知は捨てられ、いまの行の状態(held_by_other)がそのまま出る。
     expect(html).toContain("🔒 山田さんが編集中です(05:02〜)");
+  });
+
+  it("対象・状態が同じでも lockId が違えば古い通知を出さない(別の保持者に切り替わった・review round2 Important)", () => {
+    const staleKey = noticeRowKey({
+      resourceType: "property",
+      resourceId: "p1",
+      state: "held_by_other",
+      lockId: "l1",
+    });
+    const html = renderToStaticMarkup(
+      <EditLockHolderBanner
+        row={row({ lockId: "l2", holderName: "佐藤" })}
+        isAdmin={false}
+        onReleased={() => {}}
+        initialNotice="状況が変わりました。表示を更新します"
+        initialNoticeRowKey={staleKey}
+      />,
+    );
+    expect(html).not.toContain("状況が変わりました");
+    // 新しい保持者(佐藤)の帯がそのまま出る。
+    expect(html).toContain("🔒 佐藤さんが編集中です(05:02〜)");
   });
 });
 
@@ -353,6 +393,14 @@ describe("activeNotice(通知の有効性を判定する純関数・review Impor
 
   it("状態だけ違っても出さない", () => {
     expect(activeNotice("msg", noticeRowKey({ ...r, state: "free" }), r)).toBeNull();
+  });
+
+  it("対象・状態が同じでも lockId が違えば出さない(別の保持者に入れ替わっている・review round2 Important)", () => {
+    expect(activeNotice("msg", noticeRowKey({ ...r, lockId: "l2" }), r)).toBeNull();
+  });
+
+  it("lockId まで一致すれば出す(取り違えていないこと自体も確認)", () => {
+    expect(activeNotice("msg", noticeRowKey({ ...r, lockId: r.lockId }), r)).toBe("msg");
   });
 });
 

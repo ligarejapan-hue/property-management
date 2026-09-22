@@ -16,8 +16,17 @@
  *   が捕まえ、汎用の失敗通知を出す。
  * - Important #3: 自分の別画面(`held_by_self_other_screen`)の確認文を氏名を使わない
  *   自然な文言に差し替え(`confirmReleaseMessage`)。
- * - Important #4: 通知は「セットした時点の行(対象・状態)」に紐付け、新しい試行の開始時と
- *   行が変わったときに古い通知を出し続けない(`activeNotice`)。
+ * - Important #4(round1時点): 通知は「セットした時点の行(対象・状態)」に紐付け、新しい
+ *   試行の開始時と行が変わったときに古い通知を出し続けない(`activeNotice`)。
+ *
+ * review round 2(task-4-review.md「## 再点検」)の反映:
+ * - Important(round1の#4の続き・鍵が甘かった): `noticeRowKey` に `lockId` を含める。
+ *   対象・状態が同じでも保持者(=`lockId`)が入れ替わっていれば別の行として扱い、
+ *   古い通知(競合・失敗)を新しい保持者の行に持ち越さない。
+ * - コントローラの裁定(round1の判断を反転): 通知は帯を**置き換えない**。通知が
+ *   立っていても、いま held な行であれば保持者の文言と管理者の「鍵を外す」を**併記**する
+ *   (round1では通知だけを出して帯を隠していたが、それだと衝突直後に管理者が
+ *   今の鍵に対して何も操作できなくなるため)。
  */
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -109,20 +118,29 @@ export function confirmReleaseMessage(row: Pick<EditLockStatusRow, "state" | "ho
   return `${holderLabel}さんの編集を終わらせます。${holderLabel}さんが今入力している内容は失われ、保存されません。${holderLabel}さんの画面は、この先5分間は保存できません(5分経つと、この記録はまた誰でも編集を始められる状態に戻ります)。`;
 }
 
-/** 通知(状況が変わりました等)が、どの行(対象+状態)に対して出たものかの識別子。 */
-export function noticeRowKey(row: Pick<EditLockStatusRow, "resourceType" | "resourceId" | "state">): string {
-  return `${row.resourceType}:${row.resourceId}:${row.state}`;
+/**
+ * 通知(状況が変わりました等)が、どの行(対象+状態+保持者)に対して出たものかの識別子。
+ *
+ * ⚠`lockId` を含める(review round2 Important)。対象+状態だけだと、同じ資源が同じ
+ * `state`(例: `held_by_other`)へ**別の保持者**で戻ってきたときに、古い通知が
+ * 新しい保持者の行にそのまま出てしまう(取得のたびに `lockId` は変わるため、
+ * それを鍵に含めれば別の行として扱われる)。
+ */
+export function noticeRowKey(
+  row: Pick<EditLockStatusRow, "resourceType" | "resourceId" | "state" | "lockId">,
+): string {
+  return `${row.resourceType}:${row.resourceId}:${row.state}:${row.lockId ?? ""}`;
 }
 
 /**
  * いま出してよい通知を決める純関数(review Important #4)。通知をセットした時点の
  * 行の識別子と、いま渡されている行の識別子が一致するときだけ出す。親が remount せずに
- * 別の行(対象・状態)を渡してきたら、古い「状況が変わりました」を出し続けない。
+ * 別の行(対象・状態・保持者)を渡してきたら、古い「状況が変わりました」を出し続けない。
  */
 export function activeNotice(
   notice: string | null,
   noticeForRowKey: string | null,
-  row: Pick<EditLockStatusRow, "resourceType" | "resourceId" | "state">,
+  row: Pick<EditLockStatusRow, "resourceType" | "resourceId" | "state" | "lockId">,
 ): string | null {
   if (notice === null || noticeForRowKey === null) return null;
   return noticeForRowKey === noticeRowKey(row) ? notice : null;
@@ -200,8 +218,11 @@ export function EditLockHolderBanner({
   };
 
   const shownNotice = activeNotice(notice, noticeRowKeyState, row);
-  if (shownNotice) return <div className={BAND}>{shownNotice}</div>;
-  if (row.state !== "held_by_other" && row.state !== "held_by_self_other_screen") return null;
+  const isHeld = row.state === "held_by_other" || row.state === "held_by_self_other_screen";
+  // ⚠通知は帯を置き換えない(review round2・コントローラの裁定でround1の判断を反転)。
+  //   通知が立っていても、いま held な行なら保持者の文言+管理者のボタンを併記する。
+  //   さもないと、衝突直後に管理者が「今まさにある鍵」に対して何も操作できなくなる。
+  if (!shownNotice && !isHeld) return null;
 
   const label =
     row.state === "held_by_self_other_screen"
@@ -213,8 +234,11 @@ export function EditLockHolderBanner({
 
   return (
     <div className={BAND}>
-      <span className="flex-1">{label}</span>
-      {isAdmin && row.lockId && (
+      <div className="flex flex-1 flex-col gap-1">
+        {shownNotice && <span>{shownNotice}</span>}
+        {isHeld && <span>{label}</span>}
+      </div>
+      {isHeld && isAdmin && row.lockId && (
         <Button variant="secondary" size="sm" onClick={() => setConfirmOpen(true)}>
           鍵を外す
         </Button>
