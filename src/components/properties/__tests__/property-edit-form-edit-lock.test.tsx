@@ -4,10 +4,10 @@
  * ⚠このリポジトリは jsdom を使わない方針(vitest.config.ts が environment: "node" を
  *   固定・既存の .test.tsx は renderToStaticMarkup 一本槍)。フォームを描画して
  *   クリックするテストは書けないので、保存の init 組み立て(buildPropertySaveInit)・
- *   開いたときの初期化順序(initEditLockOnOpen)・fail openの後始末(runEditLockInit)・
- *   保存ボタンを押せるかの判断(canSubmitSave)を関数として切り出して node で検査し、
- *   配線そのものは走査(source assertion)で固定する
- *   (`src/hooks/__tests__/use-address-lookup.test.ts` と同じやり方)。
+ *   開いたときの初期化とfail openの後始末(runEditLockInit)・保存ボタンを押せるかの
+ *   判断(canSubmitSave)・fail open通知を出してよいか(shouldShowLockUnavailableNotice)
+ *   を関数として切り出して node で検査し、配線そのものは走査(source assertion)で
+ *   固定する(`src/hooks/__tests__/use-address-lookup.test.ts` と同じやり方)。
  *
  * ⚠「帯が出る」の判断自体は Task 2 の純関数(ui-state.ts)と Task 4 の部品
  *   (EditLockBanner)で既に検査済み。ここでは重複して検査しない(YAGNI)。
@@ -21,15 +21,26 @@
  *   `disabled={` が本タスク以前から3箇所あり判断が実行されているかを固定できない)
  *   だった穴を、コンポーネント本体に絞った検査(`useEffect` の中で `runEditLockInit(`
  *   を呼ぶこと)と `canSubmitSave` の直接検査に差し替える。
+ *
+ * task5 review round2 の反映:
+ * - N1(Important): 複製タブ確認(`ensureUniqueScreenToken`)自体が失敗しても
+ *   `onReady` を呼ぶ(fail open)ことを検査(旧・内部専用関数の直接テストは廃止し、
+ *   `runEditLockInit` 経由で検査=N4)。
+ * - N3: fail openの通知は `lock.state.kind === "idle"` の間だけ出す
+ *   (`shouldShowLockUnavailableNotice` として切り出して検査)。
+ * - N4: 例外を投げる内部専用関数(旧 `initEditLockOnOpen`)は export しない。
+ *   `runEditLockInit` だけを画面からの唯一の入口として検査する。
+ * - N5: 配線の走査を書式(改行・空白)依存から、実際の引数(本物の
+ *   `ensureUniqueScreenToken`・本物の `lock.acquire()`)の検査へ差し替える。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import {
   buildPropertySaveInit,
-  initEditLockOnOpen,
   runEditLockInit,
   canSubmitSave,
+  shouldShowLockUnavailableNotice,
 } from "../property-edit-form";
 import { EDIT_SCREEN_HEADER, EDIT_LOCK_HEADER } from "@/lib/edit-lock/header-names";
 import {
@@ -44,9 +55,10 @@ const src = readFileSync(
 );
 /**
  * ⚠(review round1 Important) コンポーネント本体だけを見る。ヘルパー関数
- *   (`initEditLockOnOpen`・`runEditLockInit`・`canSubmitSave` の定義)はこの
- *   マーカーより前にあるため、ここから先だけを検査すれば「定義自体が自分の
- *   呼び出しを満たしてしまう」自己満足なテストにならない。
+ *   (内部専用の初期化・`runEditLockInit`・`canSubmitSave`・
+ *   `shouldShowLockUnavailableNotice` の定義)はこのマーカーより前にあるため、
+ *   ここから先だけを検査すれば「定義自体が自分の呼び出しを満たしてしまう」
+ *   自己満足なテストにならない。
  */
 const COMPONENT_MARKER = "export default function PropertyEditForm";
 const componentSrc = src.slice(src.indexOf(COMPONENT_MARKER));
@@ -116,12 +128,26 @@ describe("PropertyEditForm の配線(source assertion)", () => {
     expect(src).toContain("noteActivity()");
   });
 
-  it("5') コンポーネント本体がuseEffectの中でrunEditLockInitを呼ぶ(効果ごと削除したら落ちる・review round1 Important)", () => {
-    // ⚠ヘルパーの定義(`export async function runEditLockInit(`)はマーカーより前にあり、
-    //   このアサーションには影響しない。useEffect全体を削除する/呼び出しだけを
-    //   抜くと、このテストが落ちる(従来は`ensureUniqueScreenToken(`の存在だけを
-    //   見ており、ヘルパー自身の本体がそれを満たしてしまい何も保証していなかった)。
-    expect(componentSrc).toMatch(/useEffect\(\(\) => \{\s*let alive = true;\s*void runEditLockInit\(/);
+  it("旧・内部専用の初期化関数はexportしない(review round2 N4・後続画面が安全でない入口を写さないため)", () => {
+    expect(src).not.toContain("export async function initEditLockOnOpen");
+    expect(src).not.toContain("export function initEditLockOnOpen");
+  });
+
+  it("5) コンポーネント本体がuseEffectの中でrunEditLockInitを、本物の引数で呼ぶ(review round1 Important + round2 N5)", () => {
+    // ⚠(review round2 N5) 書式(改行・字下げ)に依存する正規表現は、リフォーマット
+    //   だけで空振りするため`\s+`で許容する。一方、引数は本物であることを固定する:
+    //   1本目が本物の`ensureUniqueScreenToken`(スタブに差し替えられていない)、
+    //   呼び出しの中に`lock.acquire()`が含まれる(`() => Promise.resolve()`のような
+    //   「何も取得しない」形に差し替えても検査が空振りしない)。
+    const match = componentSrc.match(
+      /useEffect\(\s*\(\)\s*=>\s*\{\s*let alive = true;\s*void runEditLockInit\(([\s\S]*?)\);\s*return \(\)\s*=>\s*\{\s*alive = false;\s*\};/,
+    );
+    expect(match).not.toBeNull();
+    const args = match![1];
+    // 1本目の引数(合言葉の確認)は本物の関数参照そのもの。
+    expect(args).toMatch(/^\s*ensureUniqueScreenToken,/);
+    // 3本目の引数(取得)は実際にlock.acquire()を呼ぶ。
+    expect(args).toContain("lock.acquire()");
   });
 
   it("保存ボタンのdisabledはcanSubmitSaveの戻り値をそのまま使う(コンポーネント本体で呼ぶ)", () => {
@@ -134,10 +160,14 @@ describe("PropertyEditForm の配線(source assertion)", () => {
   it("複製タブ検知(300ms)が終わるまで保存ボタンをdisabledにする(tokenReadyをcanSubmitSaveへ渡す)", () => {
     expect(componentSrc).toMatch(/canSubmitSave\(\{\s*tokenReady/);
   });
+
+  it("fail openの通知はshouldShowLockUnavailableNotice経由(idle以外では出さない・review round2 N3)", () => {
+    expect(componentSrc).toMatch(/shouldShowLockUnavailableNotice\(\s*lockUnavailable/);
+  });
 });
 
-describe("initEditLockOnOpen(開いたときの初期化順序)", () => {
-  it("5) ensureUniqueScreenTokenが解決するまでacquireを呼ばない。解決後に1回だけ呼ぶ", async () => {
+describe("runEditLockInit(開いたときの初期化・fail openの後始末・review round1 Critical/round2 N1)", () => {
+  it("6) ensureUniqueScreenTokenが解決するまでacquireを呼ばない。解決後にonReady→acquireの順で1回だけ呼ぶ", async () => {
     const calls: string[] = [];
     let resolveToken!: (value: string) => void;
     const ensureUniqueScreenToken = vi.fn(
@@ -150,8 +180,9 @@ describe("initEditLockOnOpen(開いたときの初期化順序)", () => {
     const acquire = vi.fn(async () => {
       calls.push("acquire");
     });
+    const setLockUnavailable = vi.fn();
 
-    const pending = initEditLockOnOpen(ensureUniqueScreenToken, onReady, acquire);
+    const pending = runEditLockInit(ensureUniqueScreenToken, onReady, acquire, setLockUnavailable);
 
     // マイクロタスクを何度掃いても、まだトークン確認が解決していない間は何も起きない。
     await Promise.resolve();
@@ -166,16 +197,40 @@ describe("initEditLockOnOpen(開いたときの初期化順序)", () => {
     expect(acquire).toHaveBeenCalledTimes(1);
     // ⚠順序も固定する: tokenReadyを立ててからacquireを呼ぶ(帯を出す/出さないの前提)。
     expect(calls).toEqual(["ready", "acquire"]);
+    expect(setLockUnavailable).toHaveBeenCalledWith(false);
   });
-});
 
-describe("runEditLockInit(取得の成否に応じてlockUnavailableを更新する・review round1 Critical)", () => {
-  it("6) acquireが失敗しても例外を投げず、lockUnavailableをtrueにする(fail open)", async () => {
+  it("7) ensureUniqueScreenToken自体が失敗しても例外を投げず、onReadyは呼ぶ(fail open・review round2 N1)", async () => {
     const setLockUnavailable = vi.fn();
     const onReady = vi.fn();
+    const acquire = vi.fn(async () => {});
 
     // ⚠ここでawaitがrejectしたら、この関数はfail openの契約を破っている
     //   (呼び出し側`void runEditLockInit(...)`がunhandled rejectionを残す)。
+    await expect(
+      runEditLockInit(
+        () => Promise.reject(new Error("BROADCAST_CHANNEL_FAILED")),
+        onReady,
+        acquire,
+        setLockUnavailable,
+      ),
+    ).resolves.toBeUndefined();
+
+    // ⚠複製タブ確認そのものが失敗しても、保存ボタンの「確認待ち」だけは解除する
+    //   (screen-token-client.tsがBroadcastChannel不在時に取っているfail openの
+    //   姿勢と揃える)。これが無いと、canSubmitSaveはtokenReady=falseのままなので
+    //   lockUnavailable=trueでも保存ボタンが永久に押せない=通知の文言と自己矛盾する。
+    expect(onReady).toHaveBeenCalledTimes(1);
+    // 合言葉すら確認できていないので、取得(acquire)は試みない。
+    expect(acquire).not.toHaveBeenCalled();
+    expect(setLockUnavailable).toHaveBeenCalledTimes(1);
+    expect(setLockUnavailable).toHaveBeenCalledWith(true);
+  });
+
+  it("8) acquireが失敗しても例外を投げず、lockUnavailableをtrueにする(fail open)", async () => {
+    const setLockUnavailable = vi.fn();
+    const onReady = vi.fn();
+
     await expect(
       runEditLockInit(
         () => Promise.resolve("t1"),
@@ -192,7 +247,7 @@ describe("runEditLockInit(取得の成否に応じてlockUnavailableを更新す
     expect(onReady).toHaveBeenCalledTimes(1);
   });
 
-  it("7) acquireが成功すればlockUnavailableをfalseにする(通知が消える側)", async () => {
+  it("9) acquireが成功すればlockUnavailableをfalseにする(通知が消える側)", async () => {
     const setLockUnavailable = vi.fn();
 
     await runEditLockInit(
@@ -242,5 +297,27 @@ describe("canSubmitSave(保存ボタンを押せるかの判断)", () => {
     expect(
       canSubmitSave({ tokenReady: true, canSave: true, saving: false, lockUnavailable: true }),
     ).toBe(true);
+  });
+});
+
+describe("shouldShowLockUnavailableNotice(fail open通知と実際の鍵の帯を矛盾させない・review round2 N3)", () => {
+  it("lockUnavailableかつidleなら出す", () => {
+    expect(shouldShowLockUnavailableNotice(true, "idle")).toBe(true);
+  });
+
+  it("lockUnavailableがfalseなら(状態に関わらず)出さない", () => {
+    expect(shouldShowLockUnavailableNotice(false, "idle")).toBe(false);
+  });
+
+  it("lockUnavailableでも、状態がtakenへ動いたら出さない(実際の鍵の帯と矛盾させない)", () => {
+    expect(shouldShowLockUnavailableNotice(true, "taken")).toBe(false);
+  });
+
+  it("lockUnavailableでも、状態がexpiredへ動いたら出さない", () => {
+    expect(shouldShowLockUnavailableNotice(true, "expired")).toBe(false);
+  });
+
+  it("lockUnavailableでも、状態がmineへ動いたら出さない(取得できた=通常の帯に任せる)", () => {
+    expect(shouldShowLockUnavailableNotice(true, "mine")).toBe(false);
   });
 });

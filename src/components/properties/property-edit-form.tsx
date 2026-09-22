@@ -14,6 +14,7 @@ import { formatBuiltYearMonth } from "@/lib/built-year-month";
 import { useEditLock } from "@/hooks/use-edit-lock";
 import { ensureUniqueScreenToken, editLockHeaders } from "@/lib/edit-lock/screen-token-client";
 import { EditLockBanner, BAND as EDIT_LOCK_BAND } from "@/components/edit-lock/edit-lock-banner";
+import type { EditLockUiState } from "@/lib/edit-lock/ui-state";
 
 interface AssigneeOption {
   id: string;
@@ -163,35 +164,50 @@ export function buildPropertySaveInit(payload: unknown, lockId: string | null): 
 }
 
 /**
- * 画面を開いたときに1回だけ呼ぶ初期化(仕様 6.1・D6)。
+ * 画面を開いたときに1回だけ行う試行(仕様 6.1・D6)。**内部専用・例外を投げる**。
+ * ⚠**export しない**(task5 review round2 N4)。呼べるのは同じファイルの
+ *   `runEditLockInit` だけにする。以前はこの関数自体を export していたため、
+ *   後続の画面がこれを直接コピー&呼び出すと fail open の後始末(catch)を素通りし、
+ *   round 1 の Critical(取得の失敗で保存ボタンが永久に押せなくなる)を再導入し
+ *   かねなかった。安全な入口は常に `runEditLockInit` の1つだけにする。
  * ⚠**複製のタブでないことの確認(`ensureUniqueScreenToken`・最大300ms)が終わるまで
  *   鍵を取りに行かない**。判定より先に取得すると、複製されたタブが元のタブと同じ
  *   保持者として鍵を取ってしまう(D6違反=自分の別タブも待つ、が成り立たなくなる)。
  * `onReady` は tokenReady を立てる(このタイミングまでは何も起きていないので帯も出さない)。
- * node のテスト(`initEditLockOnOpen`)から実行順序を直接検査できるよう、
- * `useEffect` の中身をこの関数に切り出している(jsdom を使わない方針のため)。
+ * ⚠(task5 review round2 N1) `ensureUniqueScreenToken` 自体が失敗しても(例:
+ *   `BroadcastChannel` の `postMessage`/`onMessage` が例外を投げる)`onReady` は
+ *   必ず呼ぶ(`finally`)。`screen-token-client.ts` が `BroadcastChannel` 不在時に
+ *   既に取っている fail open の姿勢と揃える。呼ばないと、複製タブ確認そのものの
+ *   失敗という更に狭い経路で round 1 の Critical(保存ボタンが永久に押せない)が
+ *   再発し、しかも `runEditLockInit` が出す「保存は通常どおり行えます」の通知と
+ *   自己矛盾する(通知は出るのに保存は実際には押せない)。
  */
-export async function initEditLockOnOpen(
+async function initEditLockAttempt(
   ensureUniqueScreenToken: () => Promise<string>,
   onReady: () => void,
   acquire: () => Promise<void>,
 ): Promise<void> {
-  await ensureUniqueScreenToken();
-  onReady();
+  try {
+    await ensureUniqueScreenToken();
+  } finally {
+    onReady();
+  }
   await acquire();
 }
 
 /**
- * `initEditLockOnOpen` を実行し、結果に応じて `lockUnavailable` を更新する
- * (task5 review round1 Critical — fail open)。
+ * `initEditLockAttempt` を実行し、結果に応じて `lockUnavailable` を更新する
+ * (task5 review round1 Critical — fail open)。**画面から呼んでよい唯一の入口**
+ * (task5 review round2 N4)。
  *
- * ⚠**取得(`acquire`)の失敗を握りつぶさない、が画面を詰まらせもしない**。
- *   取得は401(未ログイン)・403(担当外)・404(削除済)・500・オフライン等、
- *   正当な理由でいつでも失敗しうる。一方でサーバ側(`properties/[id]/route.ts`)は
- *   「誰かが鍵を持っている」ときだけ保存を拒む契約なので、鍵を取れなかったこと
- *   **自体**は保存を止める理由にならない。サーバが最終的な権威であり続けるよう、
- *   ここでは新しい状態(`ui-state.ts` の kind)を増やさず、この画面ローカルの
- *   `lockUnavailable` フラグだけで「保存は通常どおり行える」に倒す(fail open)。
+ * ⚠**取得(`acquire`。複製タブ確認自体の失敗も含む)を握りつぶさない、が画面を
+ *   詰まらせもしない**。取得は401(未ログイン)・403(担当外)・404(削除済)・500・
+ *   オフライン等、正当な理由でいつでも失敗しうる。一方でサーバ側
+ *   (`properties/[id]/route.ts`)は「誰かが鍵を持っている」ときだけ保存を拒む
+ *   契約なので、鍵を取れなかったこと**自体**は保存を止める理由にならない。
+ *   サーバが最終的な権威であり続けるよう、ここでは新しい状態(`ui-state.ts` の
+ *   kind)を増やさず、この画面ローカルの `lockUnavailable` フラグだけで
+ *   「保存は通常どおり行える」に倒す(fail open)。
  * ⚠この関数自体は例外を投げない(呼び出し側の `void runEditLockInit(...)` が
  *   unhandled rejection を残さない)。
  */
@@ -202,7 +218,7 @@ export async function runEditLockInit(
   setLockUnavailable: (unavailable: boolean) => void,
 ): Promise<void> {
   try {
-    await initEditLockOnOpen(ensureUniqueScreenToken, onReady, acquire);
+    await initEditLockAttempt(ensureUniqueScreenToken, onReady, acquire);
     setLockUnavailable(false);
   } catch {
     setLockUnavailable(true);
@@ -229,6 +245,22 @@ export function canSubmitSave({
 }): boolean {
   if (!tokenReady || saving) return false;
   return canSave || lockUnavailable;
+}
+
+/**
+ * fail openの通知(「編集中の表示を取得できませんでした。保存は通常どおり行えます」)を
+ * 出してよいか(task5 review round2 N3)。
+ * ⚠**`idle` の間だけ**。取得が失敗した後、保存が423等で断られて `lock.state` が
+ *   `idle` 以外(`taken`/`expired`/`force_released`/`deleted`)へ動いたら、実際の
+ *   鍵の帯(`EditLockBanner`)が表示を引き継ぐ。両方を同時に出すと、「保存は通常
+ *   どおり行えます」と実際の鍵の帯(保存できない旨)が矛盾したまま、利用者が
+ *   繰り返し423を踏むことになる。
+ */
+export function shouldShowLockUnavailableNotice(
+  lockUnavailable: boolean,
+  stateKind: EditLockUiState["kind"],
+): boolean {
+  return lockUnavailable && stateKind === "idle";
 }
 
 /**
@@ -594,9 +626,13 @@ export default function PropertyEditForm({
         <div className="max-h-[70vh] overflow-y-auto px-6 py-4">
           {/* ⚠(task5 review round1 Critical — fail open) 鍵が取れなくても保存は
               通常どおり行える、という別の通知。lock.state は idle のまま(新しい
-              state kindは増やさない)なので、EditLockBanner とは別に出す。 */}
-          {lockUnavailable && (
-            <div className={EDIT_LOCK_BAND}>
+              state kindは増やさない)なので、EditLockBanner とは別に出す。
+              ⚠(review round2 N3) idle の間だけ出す。取得は失敗した後、後から保存が
+              423等で断られて state が idle 以外(taken/expired等)に動いたら、
+              「保存は通常どおり行えます」と実際の鍵の帯が同時に出て矛盾しないよう
+              この通知を消す。 */}
+          {shouldShowLockUnavailableNotice(lockUnavailable, lock.state.kind) && (
+            <div className={`${EDIT_LOCK_BAND} mb-4`}>
               編集中の表示を取得できませんでした。保存は通常どおり行えます
             </div>
           )}
