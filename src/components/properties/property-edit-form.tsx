@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Loader2, X, Save, AlertTriangle } from "lucide-react";
-import { USE_MOCK, fetchUsers } from "@/lib/api-client";
+import { USE_MOCK, fetchUsers, apiErrorCode } from "@/lib/api-client";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import {
   BUILDING_NAME_MAX_LENGTH,
@@ -10,6 +10,10 @@ import {
 } from "@/lib/property-building-name";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
+// 編集中の鍵(仕様 6.1・6.2)。この画面が最初に配線する画面(Task 5)。
+import { useEditLock } from "@/hooks/use-edit-lock";
+import { ensureUniqueScreenToken, editLockHeaders } from "@/lib/edit-lock/screen-token-client";
+import { EditLockBanner } from "@/components/edit-lock/edit-lock-banner";
 
 interface AssigneeOption {
   id: string;
@@ -142,6 +146,39 @@ function isFieldVisible(
 /** 区分マンション(新値/旧値どちらも)か。棟の項目を読み取り専用にする判定に使う。 */
 function isMansionUnit(propertyType: string): boolean {
   return propertyType === "apartment_unit" || propertyType === "unit";
+}
+
+/**
+ * 保存の fetch に渡す init を作る(編集中の鍵・仕様 6.1)。
+ * ⚠ヘッダは必ず `editLockHeaders()` を通す(手組みしない・6つの入口すべてが通す契約)。
+ *   タブの合言葉(X-Edit-Screen)は常に載せ、X-Edit-Lock は鍵を持っているとき(lockId
+ *   があるとき)だけ載る。
+ */
+export function buildPropertySaveInit(payload: unknown, lockId: string | null): RequestInit {
+  return {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...editLockHeaders(lockId) },
+    body: JSON.stringify(payload),
+  };
+}
+
+/**
+ * 画面を開いたときに1回だけ呼ぶ初期化(仕様 6.1・D6)。
+ * ⚠**複製のタブでないことの確認(`ensureUniqueScreenToken`・最大300ms)が終わるまで
+ *   鍵を取りに行かない**。判定より先に取得すると、複製されたタブが元のタブと同じ
+ *   保持者として鍵を取ってしまう(D6違反=自分の別タブも待つ、が成り立たなくなる)。
+ * `onReady` は tokenReady を立てる(このタイミングまでは何も起きていないので帯も出さない)。
+ * node のテスト(`initEditLockOnOpen`)から実行順序を直接検査できるよう、
+ * `useEffect` の中身をこの関数に切り出している(jsdom を使わない方針のため)。
+ */
+export async function initEditLockOnOpen(
+  ensureUniqueScreenToken: () => Promise<string>,
+  onReady: () => void,
+  acquire: () => Promise<void>,
+): Promise<void> {
+  await ensureUniqueScreenToken();
+  onReady();
+  await acquire();
 }
 
 /**
@@ -293,6 +330,27 @@ export default function PropertyEditForm({
   const [users, setUsers] = useState<AssigneeOption[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
 
+  // 編集中の鍵(仕様 6.1・6.2)。この物件の編集ウィンドウが最初に配線する画面。
+  const lock = useEditLock({ resourceType: "property", resourceId: property.id });
+  // ⚠複製のタブでないことの確認(最大300ms)が終わるまで編集させない(D6)。
+  //   判定が終わるまでは何も起きていないので、帯も出さない(lock.state は idle のまま)。
+  const [tokenReady, setTokenReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void initEditLockOnOpen(
+      ensureUniqueScreenToken,
+      () => {
+        if (alive) setTokenReady(true);
+      },
+      () => lock.acquire(),
+    );
+    return () => {
+      alive = false;
+    };
+    // 開いたとき1回だけ(依存を足さない=再取得はlock/controller側の責務)。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ⚠「消すだけの欄」を出すかは**開いた時点の値**で決める(編集中に欄が
   //   消えて取り消せなくなるのを防ぐ)。property が差し替わった時だけ更新。
   const [clearableKeys, setClearableKeys] = useState<ReadonlySet<string>>(
@@ -407,29 +465,41 @@ export default function PropertyEditForm({
       if (USE_MOCK) {
         // Mock: just simulate delay
         await new Promise((r) => setTimeout(r, 300));
+        void lock.release();
         onSaved();
         return;
       }
 
-      const res = await fetch(`/api/properties/${property.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      // ⚠ヘッダは必ず buildPropertySaveInit(→ editLockHeaders) を通す(手組みしない)。
+      //   タブの合言葉は常に載り、鍵を持っているとき(lock.lockId)だけ世代も載る。
+      const res = await fetch(
+        `/api/properties/${property.id}`,
+        buildPropertySaveInit(payload, lock.lockId),
+      );
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        throw new Error(
-          body?.error?.message ?? `エラー: ${res.status}`,
-        );
+        throw Object.assign(new Error(body?.error?.message ?? `エラー: ${res.status}`), {
+          code: typeof body?.error?.code === "string" ? body.error.code : null,
+        });
       }
 
+      void lock.release();
       onSaved();
     } catch (err) {
+      // ⚠コードの写像(期限切れ・強制解除・他の人が取った 等)はTask2の純関数に任せる。
+      //   ここでは封筒から読んだコードをそのまま渡すだけ。
+      lock.noteSaveError(apiErrorCode(err), null);
       setError(err instanceof Error ? err.message : "保存に失敗しました");
     } finally {
       setSaving(false);
     }
+  };
+
+  /** 閉じる・キャンセルの共通後始末。⚠入力は消さず、鍵だけ返す。 */
+  const handleClose = () => {
+    void lock.release();
+    onClose();
   };
 
   const sections = [...new Set(allFields.map((f) => f.section))];
@@ -439,12 +509,18 @@ export default function PropertyEditForm({
       <div
         className="mx-4 w-full max-w-3xl rounded-lg bg-white dark:bg-gray-900 shadow-xl"
         onClick={(e) => e.stopPropagation()}
+        // ⚠入力・キー・ポインタの一番外側でnoteActivityを呼ぶ(期限切れの取り直しの
+        //   引き金・仕様6.2)。帯の文字の選択・コピー自体はブロックしない(bubbling
+        //   イベントを聞くだけで、pointerEventsやuserSelectには触れていない)。
+        onInput={() => lock.noteActivity()}
+        onKeyDown={() => lock.noteActivity()}
+        onPointerDown={() => lock.noteActivity()}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 px-6 py-4">
           <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">物件情報を編集</h3>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="rounded p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
           >
             <X className="h-5 w-5" />
@@ -453,6 +529,7 @@ export default function PropertyEditForm({
 
         {/* Body */}
         <div className="max-h-[70vh] overflow-y-auto px-6 py-4">
+          <EditLockBanner state={lock.state} warnIdle={lock.warnIdle} />
           {error && (
             <div className="mb-4 flex items-center gap-2 rounded-md border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
               <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -631,14 +708,15 @@ export default function PropertyEditForm({
             バージョン: {property.version}
           </span>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             キャンセル
           </button>
           <button
             onClick={handleSave}
-            disabled={saving}
+            // ⚠複製タブ検知(tokenReady)が終わるまで・鍵を持っていない間は押せない(D6・仕様6.2)。
+            disabled={!tokenReady || !lock.canSave || saving}
             className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
           >
             {saving ? (
