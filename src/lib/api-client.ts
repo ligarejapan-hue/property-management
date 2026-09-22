@@ -3161,9 +3161,16 @@ export async function searchProperties(query: string) {
   }>(`/api/properties/search?q=${encodeURIComponent(query)}`);
 }
 
+/**
+ * 所有者の更新(仕様 6.2)。⚠ヘッダは必ず `editLockHeaders()` を通す(手組みしない・
+ *   6つの入口すべてが通す契約)。`opts.lockId` を渡した呼び出しだけ `X-Edit-Lock` が乗る。
+ *   `opts` を省略した既存の呼び出し元(プルダウン等・鍵を持たない入口)は
+ *   合言葉(`X-Edit-Screen`)だけを送る=従来どおり動く(Task 6)。
+ */
 export async function updateOwner(
   id: string,
   data: { note?: string | null; version: number } & Record<string, unknown>,
+  opts: { lockId?: string | null } = {},
 ) {
   if (USE_MOCK) {
     await mockDelay();
@@ -3176,7 +3183,7 @@ export async function updateOwner(
     version: number;
   }>(`/api/owners/${id}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...editLockHeaders(opts.lockId) },
     body: JSON.stringify(data),
   });
 }
