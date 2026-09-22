@@ -409,6 +409,34 @@ describe("所有者が空の物件だけに入れる指定（requireNoExistingOw
     expect(pm.owner.create).toHaveBeenCalledTimes(2);
   });
 
+  it("⚠まとめない場合、後から現れた所有者を使うときも物件行より先に押さえる（ロック順）", async () => {
+    // 手動取込・自動取得(まとめない経路)では、最初の候補探索の後に別の処理が
+    // 同じ氏名・住所の所有者を作って確定することがある。それを**物件行を押さえた後**に
+    // 押さえると順序が「物件 → Owner」になり、その所有者を先に押さえて物件を待っている
+    // /owners と互いに待ち合って、正しい操作の片方が中断される。
+    const late = {
+      id: "owner-late",
+      name: OWNER.name,
+      address: OWNER.address,
+      corporateNumber: null,
+      isArchived: false,
+    };
+    // 1回目(候補探索)= まだ居ない / それ以降(再探索)= 現れている
+    pm.owner.findMany.mockResolvedValueOnce([]).mockResolvedValue([late]);
+
+    await run();
+
+    const lateLock = pm.owner.updateMany.mock.calls.findIndex(
+      (c: unknown[]) => (c[0] as { where: { id?: string } }).where.id === "owner-late",
+    );
+    expect(lateLock).toBeGreaterThanOrEqual(0);
+    expect(pm.owner.updateMany.mock.invocationCallOrder[lateLock]).toBeLessThan(
+      pm.$queryRaw.mock.invocationCallOrder[0],
+    );
+    // 押さえられたので使い回す(二重作成しない)
+    expect(pm.owner.create).not.toHaveBeenCalled();
+  });
+
   it("⚠まとめる場合でも、この処理の中で作った所有者は使い回す（同じ人が2回載っていても1人にする）", async () => {
     // 同じ氏名・住所が謄本に2回載っていて、既存の所有者が居ないとき:
     // 1人目で作った所有者は先押さえの集合に無いが、**自分が作った行**なので押さえても

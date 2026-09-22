@@ -609,9 +609,11 @@ async function reflectParsedOwners(args: {
         let resolved: { id: string; created: boolean; linked: boolean };
         try {
           resolved = await withTx(async (tx) => {
-            await lockProperty(tx);
-            await assertStillEmpty(tx);
-
+            // ⚠**再探索と所有者の行の押さえは、物件行を押さえる前に行う**(順序
+            //   「Owner → 物件」)。所有者を紐づける他の窓口(/api/properties/[id]/owners)も
+            //   この順で押さえるため、逆順にすると互いに待ち合って片方が中断される。
+            //   ⚠まとめる経路では物件行を先に押さえてしまっているので、ここで新たに
+            //     押さえてよいのは**既に自分が握っている行だけ**(canReuseOwner)。
             let ownerId: string | null = null;
             if (ownerInfo.address) {
               const normName = normalizeName(ownerInfo.name);
@@ -641,6 +643,9 @@ async function reflectParsedOwners(args: {
                 if (held.count > 0) ownerId = raced.id;
               }
             }
+
+            await lockProperty(tx);
+            await assertStillEmpty(tx);
 
             const isNew = ownerId === null;
             if (ownerId === null) {
