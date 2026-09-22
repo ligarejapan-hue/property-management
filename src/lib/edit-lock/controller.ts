@@ -25,6 +25,16 @@
  * ⚠(review round3 n8) 404(資源消失)の分岐だけ世代ガードが無かった。他の書き込み
  *   経路と同じ規約にするため、取り直しを始めた直後の世代を控え、一致するときだけ
  *   deleted を反映する。
+ * ⚠(task5 持ち越し#1) 取得が既に飛んでいる間の acquire() は、何も送らずに即座に解決
+ *   していた。呼び出し元(画面)がこれを await しても「送った」のか「何もせず終わった」
+ *   のか区別できない。既に飛んでいる Promise をそのまま返すよう改める(await すれば
+ *   必ずその試行の決着を待てる)。
+ * ⚠(task5 持ち越し#2) 上の変更だけでは、飛んでいる間に来た入力(noteActivity)はその
+ *   1本の応答をただ待つだけになり、応答が一過性の理由(ネットワーク瞬断等)で失敗すると
+ *   次の入力が来ない限りもう二度と取り直されない(「入力すると自動で取り直します」と
+ *   案内したまま何も起きない)。飛んでいる間に来た入力は
+ *   `reacquireRequestedWhileInFlight` に控え、その場の試行が決着した時点でまだ
+ *   期限切れなら、新しい入力を待たずにもう一度だけ取り直す。
  */
 import {
   shouldReacquireOnInput,
@@ -87,8 +97,15 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
    * 応答時に値がずれていたら(在任期が変わった)結果を捨てる。
    */
   let generation = 0;
-  /** ⚠(review round3 n7) 取得が既に飛んでいる間は、新しい取得を重ねて飛ばさない。 */
-  let acquireInFlight = false;
+  /**
+   * ⚠(review round3 n7 / task5 持ち越し#1) 取得が既に飛んでいる間は、新しい取得を
+   *   重ねて飛ばさない。以前は真偽値だけを持ち、飛んでいる間の呼び出しは即座に
+   *   (何もせず)解決していたが、いま飛んでいる Promise 自体を持つことで、
+   *   後から呼んだ acquire() もその決着を正しく待てるようにする。
+   */
+  let acquireInFlightPromise: Promise<void> | null = null;
+  /** ⚠(task5 持ち越し#2) 飛んでいる間に来た入力を、その決着後の取り直し予約として控える。 */
+  let reacquireRequestedWhileInFlight = false;
 
   function bumpGeneration(): void {
     generation += 1;
@@ -146,30 +163,34 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
     apply(uiStateFromHeartbeat(res, currentLockId));
   }
 
-  async function acquire(): Promise<void> {
-    // ⚠(review round3 n7) 既に1本飛んでいるなら、この呼び出しは何もしない
-    //   (バーストの2本目以降を黙って捨てる。1本目の応答が全体の結果を決める)。
-    if (acquireInFlight) return;
-    acquireInFlight = true;
-    try {
-      bumpGeneration();
-      const gen = generation;
-      const res = await deps.acquire();
-      const next = uiStateFromAcquire(res);
-      if (disposed || gen !== generation) {
-        // ⚠(review round2 n1) release/dispose がこの取得を追い越していた。state には
-        //   今さら反映しない(discard は正しい)が、応答が mine ならサーバは実際に
-        //   鍵を許可している=孤児にせず beacon で手放す(deps.release はヘッダ付きの
-        //   fetch が要るが、dispose 後の画面ではもう安全に呼べない可能性がある。
-        //   beacon はヘッダ不要でどちらの状況でも安全)。
-        if (next.kind === "mine") deps.releaseByBeacon(next.lockId);
-        return;
+  function acquire(): Promise<void> {
+    // ⚠(review round3 n7 / task5 持ち越し#1) 既に1本飛んでいるなら、新しく飛ばさず
+    //   その Promise をそのまま返す(バーストの2本目以降は1本目に合流させる。
+    //   1本目の応答が全体の結果を決める。かつ、呼び出し元は await すれば必ず
+    //   決着まで待てる=何もせず空で解決することはない)。
+    if (acquireInFlightPromise) return acquireInFlightPromise;
+    acquireInFlightPromise = (async () => {
+      try {
+        bumpGeneration();
+        const gen = generation;
+        const res = await deps.acquire();
+        const next = uiStateFromAcquire(res);
+        if (disposed || gen !== generation) {
+          // ⚠(review round2 n1) release/dispose がこの取得を追い越していた。state には
+          //   今さら反映しない(discard は正しい)が、応答が mine ならサーバは実際に
+          //   鍵を許可している=孤児にせず beacon で手放す(deps.release はヘッダ付きの
+          //   fetch が要るが、dispose 後の画面ではもう安全に呼べない可能性がある。
+          //   beacon はヘッダ不要でどちらの状況でも安全)。
+          if (next.kind === "mine") deps.releaseByBeacon(next.lockId);
+          return;
+        }
+        apply(next);
+        if (state.kind === "mine") startHeartbeat();
+      } finally {
+        acquireInFlightPromise = null;
       }
-      apply(next);
-      if (state.kind === "mine") startHeartbeat();
-    } finally {
-      acquireInFlight = false;
-    }
+    })();
+    return acquireInFlightPromise;
   }
 
   async function release(): Promise<void> {
@@ -195,16 +216,35 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
    */
   function noteActivity(): void {
     activeSinceLastBeat = true;
-    if (shouldReacquireOnInput(state)) {
-      const genAtAttempt = generation;
-      acquire().catch((err: unknown) => {
+    if (!shouldReacquireOnInput(state)) return;
+    if (acquireInFlightPromise) {
+      // ⚠(task5 持ち越し#2) 既に1本飛んでいる。この入力はその決着後の
+      //   取り直し予約として控えるだけにする(新しい取得は飛ばさない=n7の直列化を保つ)。
+      reacquireRequestedWhileInFlight = true;
+      return;
+    }
+    attemptReacquireOnce();
+  }
+
+  /** `noteActivity` から1回だけ取得を試みる(飛んでいる間の入力は合流させ、二重に飛ばさない)。 */
+  function attemptReacquireOnce(): void {
+    const genAtAttempt = generation;
+    acquire()
+      .catch((err: unknown) => {
         if (isResourceNotFoundError(err) && generation === genAtAttempt + 1) {
           apply({ kind: "deleted" });
           return;
         }
         /* それ以外、または世代がずれていれば無視する。次の noteActivity で再試行される。 */
+      })
+      .finally(() => {
+        // ⚠(task5 持ち越し#2) この試行が飛んでいる間に来た入力があり、決着した今も
+        //   まだ期限切れなら、新しい入力を待たずにもう一度だけ取り直す。
+        if (!disposed && reacquireRequestedWhileInFlight) {
+          reacquireRequestedWhileInFlight = false;
+          if (shouldReacquireOnInput(state)) attemptReacquireOnce();
+        }
       });
-    }
   }
 
   function noteSaveError(code: string | null, holderName: string | null = null): void {

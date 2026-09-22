@@ -598,4 +598,59 @@ describe("createEditLockController", () => {
     expect(h.lastState().kind).toBe("idle"); // deleted にはならない
     expect(h.onStateMock.mock.calls.length).toBe(onStateCallsAfterRelease); // onStateは増えない
   });
+
+  // task 5 に持ち越された2件(review of task 3)。
+
+  it("t5a) 取得が既に飛んでいる間の acquire() は同じ Promise を返す(何も送らず空で解決しない)", async () => {
+    const pending = createDeferred<AcquireResponse>();
+    h.acquireMock.mockReturnValueOnce(pending.promise);
+    const controller = createEditLockController(h.deps);
+
+    const first = controller.acquire();
+    const second = controller.acquire();
+    expect(h.acquireMock).toHaveBeenCalledTimes(1); // 新しい取得は飛ばさない(従来どおり)
+
+    let secondSettled = false;
+    void second.then(() => {
+      secondSettled = true;
+    });
+    await flush();
+    // ⚠修理前はここで true になっていた(何も送っていないのに完了したことになるバグ)。
+    expect(secondSettled).toBe(false);
+
+    pending.resolve(MINE);
+    await first;
+    await second;
+    expect(secondSettled).toBe(true);
+    expect(h.lastState().kind).toBe("mine");
+  });
+
+  it("t5b) 飛んでいる間に来た入力が一過性の理由で失敗しても、決着後に新しい入力を待たずもう一度だけ取り直す", async () => {
+    h.acquireMock.mockResolvedValueOnce(MINE);
+    h.heartbeatMock.mockResolvedValueOnce(HEARTBEAT_EXPIRED);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+    await h.registry.fire();
+    expect(h.lastState().kind).toBe("expired");
+
+    h.acquireMock.mockClear();
+    const pending = createDeferred<AcquireResponse>();
+    h.acquireMock.mockReturnValueOnce(pending.promise);
+    controller.noteActivity(); // 1回目の取り直しを開始(まだ未解決)
+    await flush();
+    expect(h.acquireMock).toHaveBeenCalledTimes(1);
+
+    controller.noteActivity(); // 飛んでいる間のもう1回の入力(修理前はここで黙って捨てられ、以後二度と取り直されなかった)
+    await flush();
+    expect(h.acquireMock).toHaveBeenCalledTimes(1); // まだ2本目は飛ばさない(n7の直列化を維持)
+
+    // 1回目の試行がネットワーク瞬断等の一過性の理由で失敗する(NOT_FOUNDではない)。
+    h.acquireMock.mockResolvedValueOnce(MINE);
+    pending.reject(new Error("network down"));
+    await flush();
+
+    // 新しい入力(3回目のnoteActivity)を待たずに、結着後に自動でもう一度だけ取り直している。
+    expect(h.acquireMock).toHaveBeenCalledTimes(2);
+    expect(h.lastState().kind).toBe("mine");
+  });
 });
