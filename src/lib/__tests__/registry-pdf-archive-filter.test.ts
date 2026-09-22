@@ -82,7 +82,14 @@ vi.mock("@/lib/prisma", () => {
     // ⚠findUnique はロック後の読み直し(レビュー round1 #2)で使う。
     property: { findUnique: vi.fn(), updateMany: vi.fn() },
     // ⚠findUnique はロック後の corporateNumber 読み直し(レビュー round1 #3)で使う。
-    owner: { findUnique: vi.fn(), updateMany: vi.fn() },
+    // ⚠新規 Owner の作成と紐付けは**同じトランザクションの中**で行う(分けると、
+    //   紐付けで中断したときに「どこにも紐付かない所有者」が残る)。
+    owner: {
+      findUnique: vi.fn(),
+      updateMany: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+    },
     propertyOwner: { findFirst: vi.fn(), create: vi.fn() },
     $queryRaw: vi.fn(async () => [{ id: "p1" }]), // 親行ロック(#364 R10)
   };
@@ -118,7 +125,12 @@ const pm = prisma as unknown as {
   $transaction: Mock;
   _tx: {
     property: { findUnique: Mock; updateMany: Mock };
-    owner: { findUnique: Mock; updateMany: Mock };
+    owner: {
+      findUnique: Mock;
+      updateMany: Mock;
+      findMany: Mock;
+      create: Mock;
+    };
     propertyOwner: { findFirst: Mock; create: Mock };
   };
 };
@@ -185,6 +197,12 @@ beforeEach(() => {
   pm._tx.owner.findUnique.mockResolvedValue({ corporateNumber: null });
   pm._tx.property.updateMany.mockResolvedValue({ count: 1 });
   pm._tx.owner.updateMany.mockResolvedValue({ count: 1 });
+  // ロック取得後の見直し(既定は「まだ誰も作っていない」)
+  pm._tx.owner.findMany.mockResolvedValue([]);
+  pm._tx.owner.create.mockImplementation(
+    ({ data }: { data: { name: string } }) =>
+      Promise.resolve({ id: `owner-${data.name}` }),
+  );
   pm._tx.propertyOwner.findFirst.mockResolvedValue(null);
   pm._tx.propertyOwner.create.mockResolvedValue({});
 });
@@ -214,9 +232,9 @@ describe("POST /api/import/registry-pdf: archived owner を既存候補にしな
 
     await REGISTRY_PDF_POST(makeRequest());
 
-    // 新規 Owner 作成
-    expect(pm.owner.create).toHaveBeenCalledTimes(1);
-    expect(pm.owner.create).toHaveBeenCalledWith({
+    // 新規 Owner 作成(⚠親の物件行をロックした tx の中で作る)
+    expect(pm._tx.owner.create).toHaveBeenCalledTimes(1);
+    expect(pm._tx.owner.create).toHaveBeenCalledWith({
       data: { name: OWNER_NAME, address: OWNER_ADDRESS },
       select: { id: true },
     });
@@ -260,8 +278,8 @@ describe("POST /api/import/registry-pdf: archived owner を既存候補にしな
 
     await REGISTRY_PDF_POST(makeRequest());
 
-    // fallback で新規 active Owner を作成
-    expect(pm.owner.create).toHaveBeenCalledTimes(1);
+    // fallback で新規 active Owner を作成(tx の中)
+    expect(pm._tx.owner.create).toHaveBeenCalledTimes(1);
     // PropertyOwner は新規 owner とだけ link(tx 内・親行ロック=#364 R10)。
     // archived の "owner-raced" には作らない。
     expect(pm._tx.propertyOwner.create).toHaveBeenCalledTimes(1);

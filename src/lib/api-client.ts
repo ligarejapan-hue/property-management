@@ -4424,3 +4424,71 @@ export async function fetchRegistryPreflight(
     },
   );
 }
+
+// ---------- 添付済み謄本からの所有者反映 ----------
+
+export interface RegistryOwnerCandidate {
+  name: string;
+  address: string | null;
+  share: string | null;
+}
+
+export interface RegistryOwnerPreview {
+  alreadyHasOwners: boolean;
+  /** ⚠生ファイル名は含めない(氏名や住所を含みうる)。label は固定の呼び名。 */
+  attachment: { id: string; label: string; createdAt: string };
+  owners: RegistryOwnerCandidate[];
+}
+
+/** 下見: 添付済みの所有者事項から、登録される予定の所有者を取得する(保存しない)。 */
+export async function fetchRegistryOwnerPreview(
+  propertyId: string,
+): Promise<RegistryOwnerPreview> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      alreadyHasOwners: false,
+      attachment: {
+        id: "mock",
+        label: "謄本(所有者事項)_2026-09-15.pdf",
+        createdAt: new Date().toISOString(),
+      },
+      owners: [
+        { name: "山田太郎", address: "東京都渋谷区神宮前三丁目12番3号", share: null },
+      ],
+    };
+  }
+  return apiFetch<RegistryOwnerPreview>(
+    `/api/properties/${propertyId}/registry-owners`,
+  );
+}
+
+/** 反映の結果(取込処理の応答のうち画面が使う分)。 */
+export interface RegistryOwnerApplyResult {
+  /** 既存の所有者を使い回した数 */
+  ownersMatched: number;
+  /** 新しく作った数 */
+  ownersCreated: number;
+  /** 物件に紐づけた数(⚠同じ人が謄本に2回載っていれば1人にまとまる=行数と違いうる) */
+  ownersLinked: number;
+}
+
+/** 反映: 添付済みの所有者事項から所有者を登録する。 */
+export async function applyRegistryOwners(
+  propertyId: string,
+  /** 下見で見せた添付のID。別の謄本が追加されていたらサーバーが拒否する。 */
+  attachmentId: string,
+): Promise<RegistryOwnerApplyResult> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { ownersMatched: 0, ownersCreated: 1, ownersLinked: 1 };
+  }
+  return apiFetch<RegistryOwnerApplyResult>(
+    `/api/properties/${propertyId}/registry-owners`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ attachmentId }),
+    },
+  );
+}

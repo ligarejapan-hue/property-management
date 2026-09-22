@@ -7,7 +7,13 @@
  *
  * 実際の謄本PDFには罫線文字 (│┃━ 等) が混入するため、
  * 前処理でクリーニングしてから正規表現で抽出する。
+ *
+ * ⚠ ただし「所有者事項」は罫線の表そのものが意味を持つ(見出しの行と中身の行を
+ *   見分ける手掛かりが罫線しかない)。所有者は罫線を潰す前に
+ *   `registry-owner-table.ts` で読む。
  */
+import { parseRegistryOwnerTable } from "./registry-owner-table";
+import { joinSpacedKanji } from "./registry-text-normalize";
 
 export interface RegistryParseResult {
   /** 不動産番号 */
@@ -67,20 +73,6 @@ function cleanRegistryText(raw: string): string {
       // 空行を除去
       .filter((l) => l.length > 0)
       .join("\n")
-  );
-}
-
-/**
- * 謄本でよくある「スペース区切り漢字」を結合する。
- * 例: "坂 本 周 守" → "坂本周守"
- *     "世 田 谷 区" → "世田谷区"
- * ただし住所に含まれる数字区切りは維持する。
- */
-function joinSpacedKanji(s: string): string {
-  // 漢字・ひらがな・カタカナが1文字スペース1文字のパターンを結合
-  return s.replace(
-    /([\u3000-\u9FFF\u30A0-\u30FF\u3040-\u309F]) ([\u3000-\u9FFF\u30A0-\u30FF\u3040-\u309F])/g,
-    "$1$2",
   );
 }
 
@@ -245,13 +237,18 @@ export function parseRegistryText(raw: string): RegistryParseResult {
   }
 
   // --- 所有者 ---
-  const owners: RegistryOwnerInfo[] = [];
+  // 所有者事項の表は罫線が残っている生テキストから読む(見出しを氏名と取り違えないため)。
+  const tableOwners = parseRegistryOwnerTable(raw);
+  const owners: RegistryOwnerInfo[] = tableOwners ?? [];
 
-  // 権利部の所有者セクションを探す
+  // 権利部の所有者セクションを探す(表として読めなかったときだけ)
   // 典型パターン: "所有者 住所 氏名" が改行区切りで現れる
-  const ownerSection = text.match(
+  const ownerSection =
+    tableOwners === null
+      ? text.match(
     /(?:所有権の登記|所有者|権利者)[^\n]*\n([\s\S]+?)(?:原因|受付年月日|附記|$)/,
-  );
+        )
+      : null;
 
   if (ownerSection) {
     const lines = ownerSection[1].split("\n").map((l) => l.trim()).filter(Boolean);
@@ -314,7 +311,8 @@ export function parseRegistryText(raw: string): RegistryParseResult {
   }
 
   // フォールバック: 単純な "所有者" 直後抽出
-  if (owners.length === 0) {
+  // 表として読めた場合(件数0を含む)は、ここで拾うと見出しを氏名にしてしまうので走らせない。
+  if (tableOwners === null && owners.length === 0) {
     const simpleOwnerMatch = text.matchAll(
       /所有者[：:\s]*([\u4E00-\u9FFF\u3040-\u309F\u30A0-\u30FF ]{2,20})/g,
     );

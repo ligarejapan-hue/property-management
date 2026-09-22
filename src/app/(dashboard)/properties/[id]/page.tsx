@@ -27,6 +27,7 @@ import PhotoTab from "@/components/properties/photo-tab";
 import CandidateList from "@/components/properties/candidate-list";
 import ActionBar from "@/components/properties/action-bar";
 import RegistryLocationSearchButton from "@/components/properties/registry-location-search-button";
+import RegistryOwnerApplyButton from "@/components/properties/registry-owner-apply-button";
 import { isLandPropertyType } from "@/lib/registry-fetch/registry-target";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
@@ -514,6 +515,9 @@ export default function PropertyDetailPage({
     canWriteProperty,
     canDeleteProperty,
     canWriteOwner,
+    canImportWrite,
+    canWriteOwnerName,
+    canWriteOwnerAddress,
     canReadOwner,
     canRemoveOwnerLink,
     canCreateOwnerMemo,
@@ -564,6 +568,12 @@ export default function PropertyDetailPage({
     const canReadOwner = effectivePermissions.some(
       (p) => p.resource === "owner" && p.action === "read" && p.granted,
     );
+    // 「謄本から所有者を反映」は server 側で import:write を必須にしている。
+    // owner:write と import:write は別々に設定できるため、ここで同じ条件に
+    // そろえないと「押せるのに必ず403」のボタンが出る。
+    const canImportWrite = effectivePermissions.some(
+      (p) => p.resource === "import" && p.action === "write" && p.granted,
+    );
     const hasFullPerm = (resource: string) =>
       effectivePermissions.some(
         (p) => p.resource === resource && p.action === "full" && p.granted,
@@ -572,6 +582,15 @@ export default function PropertyDetailPage({
       effectivePermissions.some(
         (p) => p.resource === resource && p.action === "edit" && p.granted,
       );
+    // 「謄本から所有者を反映」は氏名(必ず)と住所(載っていれば)を書く。server は
+    // 書く項目ごとの権限(owner_name / owner_address の full/edit)を確かめて 403 にする。
+    // 氏名はボタンの出し分けに入れる(下見して確認まで進めるのに必ず 403、を避ける)。
+    // ⚠住所はボタンで一律に閉じない。server は住所のある所有者にだけ求めるので、
+    //   住所の無い謄本は氏名の権限だけで反映できる。住所の権限は部品に渡し、
+    //   下見の結果に住所があるときだけ止める。
+    const canWriteOwnerName = hasFullPerm("owner_name") || hasEditPerm("owner_name");
+    const canWriteOwnerAddress =
+      hasFullPerm("owner_address") || hasEditPerm("owner_address");
     const ownerEditableFields: OwnerEditableFields = {
       name: hasFullPerm("owner_name"),
       nameKana: hasFullPerm("owner_name_kana"),
@@ -609,6 +628,9 @@ export default function PropertyDetailPage({
       canDeleteProperty,
       canWriteOwner,
       canReadOwner,
+      canImportWrite,
+    canWriteOwnerName,
+    canWriteOwnerAddress,
       canRemoveOwnerLink,
       canCreateOwnerMemo,
       corporateLookupConfigured,
@@ -824,6 +846,11 @@ export default function PropertyDetailPage({
           <OwnerTab
             owners={property.propertyOwners}
             propertyId={property.id}
+            registryOwnerAttachmentCount={
+              property.registryAttachmentCounts?.owner ?? 0
+            }
+            canApplyRegistryOwners={canImportWrite && canWriteOwnerName}
+            canWriteOwnerAddress={canWriteOwnerAddress}
             canRead={canReadOwner}
             canWrite={canWriteOwner}
             canRemoveOwnerLink={canRemoveOwnerLink}
@@ -1024,6 +1051,9 @@ function BasicTab({
 function OwnerTab({
   owners,
   propertyId,
+  registryOwnerAttachmentCount,
+  canApplyRegistryOwners,
+  canWriteOwnerAddress,
   canRead,
   canWrite,
   canRemoveOwnerLink,
@@ -1034,6 +1064,20 @@ function OwnerTab({
 }: {
   owners: ApiPropertyOwner[];
   propertyId: string;
+  /**
+   * 添付されている**所有者事項**の謄本の件数。
+   * 0 のときは「謄本から所有者を反映」を出さない(反映元が無いため)。
+   * ⚠null(謄本の閲覧権限が無い人)は呼び出し側で 0 に畳んでいる。
+   */
+  registryOwnerAttachmentCount: number;
+  /** server 側と同じ import:write + owner_name。無い人にはボタンを出さない(押しても403のため)。 */
+  canApplyRegistryOwners: boolean;
+  /**
+   * 所有者の住所を書く権限(owner_address の full/edit)。
+   * ⚠ボタンの出し分けには使わない。server は住所のある所有者にだけ求めるので、
+   *   下見の結果に住所があるときだけ確認画面で止める。
+   */
+  canWriteOwnerAddress: boolean;
   canRead: boolean;
   canWrite: boolean;
   /** 「この物件から外す」を出してよいか(= 管理者)。server 側と同じ条件。 */
@@ -1064,7 +1108,20 @@ function OwnerTab({
     <div className="space-y-4">
       {/* 追加導線: 0 件時も既存所有者がいる時も常設（共有名義の追加に対応） */}
       {showAdd && (
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          {/*
+            謄本はあるのに所有者が空の物件を、追加の費用なしで埋めるための導線。
+            **所有者が0件のときだけ**出す(既にいる物件への二重登録を避ける。server 側も 409)。
+          */}
+          {owners.length === 0 &&
+            registryOwnerAttachmentCount > 0 &&
+            canApplyRegistryOwners && (
+              <RegistryOwnerApplyButton
+                propertyId={propertyId}
+                canWriteOwnerAddress={canWriteOwnerAddress}
+                onApplied={onRefresh}
+              />
+            )}
           <button
             type="button"
             onClick={() => setLinkModalOpen(true)}
