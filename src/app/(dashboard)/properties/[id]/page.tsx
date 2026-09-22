@@ -30,7 +30,16 @@ import RegistryLocationSearchButton from "@/components/properties/registry-locat
 import { isLandPropertyType } from "@/lib/registry-fetch/registry-target";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
-import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, unlinkPropertyOwner, updateOwner, fetchQualityCheck } from "@/lib/api-client";
+import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, unlinkPropertyOwner, updateOwner, fetchQualityCheck, apiErrorCode } from "@/lib/api-client";
+// 編集中の鍵(仕様 6.1・6.2)。所有者カードは1枚ごとに別資源として鍵を持つ(Task 6)。
+// ⚠複製タブ確認(ensureUniqueScreenToken・最大300ms)はこの画面(親)で1回だけ済ませ、
+//   結果(tokenReady)を各カードへ配る——カードごとに待たせない(下の PropertyDetailPage 内)。
+import { useEditLock } from "@/hooks/use-edit-lock";
+import { ensureUniqueScreenToken } from "@/lib/edit-lock/screen-token-client";
+import { EditLockBanner, BAND as EDIT_LOCK_BAND } from "@/components/edit-lock/edit-lock-banner";
+// canSubmitSave・shouldShowLockUnavailableNotice は Task 5(物件の編集ウィンドウ)が
+// 切り出した純関数(判断)。同じ判断なので複製せずそのまま再利用する。
+import { canSubmitSave, shouldShowLockUnavailableNotice } from "@/components/properties/property-edit-form";
 import { OwnerEditableFields, buildOwnerUpdatePayload, canEditOwner } from "@/lib/owner-edit-utils";
 import { canShowAddOwner } from "@/lib/owner-link-utils";
 import {
@@ -458,6 +467,26 @@ export default function PropertyDetailPage({
     setQualityIssues([]);
   }, [id]);
 
+  // 編集中の鍵(仕様 6.1)。複製タブ確認(ensureUniqueScreenToken・最大300ms)は
+  // 所有者カード1枚ごとにではなく、この画面が開いたとき**1回だけ**行い、結果を
+  // 各所有者カードへ配る(Task 6)。カードごとに待たせると、共有名義で所有者が
+  // 何名もいる物件ほど無駄な待ち時間・問い合わせが積み重なる。
+  const [ownerLockTokenReady, setOwnerLockTokenReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    // ⚠複製タブ確認そのものが失敗しても(fail open・screen-token-client.ts と同じ姿勢)、
+    //   カード側の「確認待ち」だけは解除する(.catchで拾い、unhandled rejectionにしない)。
+    ensureUniqueScreenToken()
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setOwnerLockTokenReady(true);
+      });
+    return () => {
+      alive = false;
+    };
+    // 開いたとき1回だけ。
+  }, []);
+
   // F12 展開(19-A 第3実装): permissions / capabilities は ScreenProtectionProvider
   //（dashboard 全体を覆う）が mount 時に 1 回取得して context 配布するため、本ページ独自の
   // /api/me/permissions fetch は撤去し、provider 配布値（permissions / capabilities）から
@@ -831,6 +860,7 @@ export default function PropertyDetailPage({
             canCreateMemo={canCreateOwnerMemo}
             corporateLookupConfigured={corporateLookupConfigured}
             onRefresh={fetchProperty}
+            editLockTokenReady={ownerLockTokenReady}
           />
         )}
         {activeTab === "photos" && <PhotoTab propertyId={property.id} />}
@@ -1031,6 +1061,7 @@ function OwnerTab({
   canCreateMemo,
   corporateLookupConfigured,
   onRefresh,
+  editLockTokenReady,
 }: {
   owners: ApiPropertyOwner[];
   propertyId: string;
@@ -1042,6 +1073,8 @@ function OwnerTab({
   canCreateMemo: boolean;
   corporateLookupConfigured: boolean;
   onRefresh: () => Promise<void>;
+  /** 複製タブ確認(親=物件詳細画面で1回だけ実施)が済んだか(Task 6)。 */
+  editLockTokenReady: boolean;
 }) {
   const [linkModalOpen, setLinkModalOpen] = useState(false);
 
@@ -1118,6 +1151,7 @@ function OwnerTab({
               canCreateMemo={canCreateMemo}
               corporateLookupConfigured={corporateLookupConfigured}
               onRefresh={onRefresh}
+              editLockTokenReady={editLockTokenReady}
             />
           ))}
         </>
@@ -1138,6 +1172,32 @@ function OwnerTab({
 
 // ---------- Owner card (表示 + インライン編集) ----------
 
+/**
+ * 所有者カードの鍵取得(仕様 6.2・Task 6)。
+ *
+ * ⚠複製タブ確認(`ensureUniqueScreenToken`)はこの関数の外(物件詳細画面=親)で
+ *   画面ごとに1回だけ済ませてある。カードはその結果(`editLockTokenReady`)を
+ *   信じて、確認そのものはやり直さない(所有者が何名もいる物件でカードの数だけ
+ *   300ms待たせない・Task 6の要件)。
+ * ⚠(fail open・Task5と同じ判断) 取得(`acquire`)自体は401(未ログイン)・
+ *   403(担当外)・404(削除済)・500・オフライン等いつでも正当な理由で失敗しうる。
+ *   サーバ(`api/owners/[id]`)は「誰かが鍵を持っている」ときだけ保存を拒む契約
+ *   なので、鍵を**表示できない**こと自体は保存を止める理由にならない。この関数
+ *   自体は例外を投げない(呼び出し側の `void runOwnerLockAcquire(...)` が
+ *   unhandled rejection を残さない)。
+ */
+export async function runOwnerLockAcquire(
+  acquire: () => Promise<void>,
+  setLockUnavailable: (unavailable: boolean) => void,
+): Promise<void> {
+  try {
+    await acquire();
+    setLockUnavailable(false);
+  } catch {
+    setLockUnavailable(true);
+  }
+}
+
 function OwnerCard({
   po,
   propertyId,
@@ -1150,6 +1210,7 @@ function OwnerCard({
   canCreateMemo,
   corporateLookupConfigured,
   onRefresh,
+  editLockTokenReady,
 }: {
   po: ApiPropertyOwner;
   propertyId: string;
@@ -1163,10 +1224,47 @@ function OwnerCard({
   canCreateMemo: boolean;
   corporateLookupConfigured: boolean;
   onRefresh: () => Promise<void>;
+  /** 複製タブ確認(親=物件詳細画面で1回だけ実施)が済んだか(Task 6)。 */
+  editLockTokenReady: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // 編集中の鍵(仕様 6.1・6.2)。⚠**所有者ごとに1つ**(resourceId=po.ownerId)。
+  //   共有名義でカードが複数あっても、他の所有者の鍵の状態はこのカードに影響しない
+  //   (資源IDが違えば別の鍵=Task 2/3で既に固定済みの契約、ここでは資源IDを
+  //   混ぜない・カード間で使い回さないことだけを守る)。
+  // ⚠`enabled` は「このカードが編集中か」(editing)かつ「複製タブ確認が済んでいるか」
+  //   (editLockTokenReady・親から配られる)。確認が済むまでは意図してcontrollerを
+  //   作らない(useEditLockのenabled=falseは事故ではなく仕様)。
+  const lock = useEditLock({
+    resourceType: "owner",
+    resourceId: po.ownerId,
+    enabled: editing && editLockTokenReady,
+  });
+  // ⚠(fail open・Task5と同じ判断) 取得(acquire)が失敗しても保存を詰まらせない。
+  //   サーバは鍵が無くても保存を受け付けるため、鍵を表示できないこと自体を理由に
+  //   保存ボタンを永久にdisabledのままにしてはいけない。
+  const [lockUnavailable, setLockUnavailable] = useState(false);
+  useEffect(() => {
+    // 複製タブ確認は親で1回だけ済ませてあるので、ここでは待たない。編集を始めた
+    // (editing=true)かつ確認済み(editLockTokenReady=true)になった時点で取得する。
+    if (!editing || !editLockTokenReady) return;
+    let alive = true;
+    void runOwnerLockAcquire(
+      () => lock.acquire(),
+      (unavailable) => {
+        if (alive) setLockUnavailable(unavailable);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+    // lock.acquire は controller(=[editing, editLockTokenReady]で作り直す)経由の
+    // 安定した呼び出しなので依存に含めない(含めると controller 生成のたびに
+    // 二重に走る)。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, editLockTokenReady]);
   // 住所補完の user-edit signal（Codex P2-G）。住所 input をユーザーが直接編集した時だけ
   // true。編集開始（handleEdit）の保存値ロードや候補 apply では立てない＝開いただけで
   // provider へ住所 PII を送らない。
@@ -1256,6 +1354,7 @@ function OwnerCard({
   };
 
   const handleCancel = () => {
+    void lock.release();
     setEditing(false);
     setSaveError(null);
   };
@@ -1308,10 +1407,19 @@ function OwnerCard({
     try {
       // full 権限のある項目だけ payload に含める。masked/hidden 項目は送信しない。
       const payload = buildOwnerUpdatePayload(form, editableFields, version);
-      await updateOwner(po.ownerId, payload as Parameters<typeof updateOwner>[1]);
+      // ⚠鍵を持っているとき(lock.lockId)だけ X-Edit-Lock が乗る(editLockHeaders経由・
+      //   updateOwner側の契約)。持っていなければ合言葉だけ送る=fail openと矛盾しない。
+      await updateOwner(po.ownerId, payload as Parameters<typeof updateOwner>[1], {
+        lockId: lock.lockId,
+      });
+      void lock.release();
       setEditing(false);
       await onRefresh();
     } catch (err) {
+      // ⚠コードの写像(期限切れ・強制解除・他の人が取った 等)はTask2の純関数に任せる。
+      //   ここでは apiErrorCode で読んだコードをそのまま渡すだけ(updateOwnerは
+      //   apiFetch経由なのでcodeFromErrorBodyは既にtoApiErrorが内部で通している)。
+      lock.noteSaveError(apiErrorCode(err), null);
       const msg = err instanceof Error ? err.message : "保存に失敗しました";
       setSaveError(msg.includes("CONFLICT") ? "他のユーザーが先に更新しました。画面を再読み込みしてください。" : msg);
     } finally {
@@ -1409,7 +1517,25 @@ function OwnerCard({
 
       {editing ? (
         /* ── 編集フォーム（full 権限のある項目のみ input を表示） ── */
-        <div className="space-y-4">
+        <div
+          className="space-y-4"
+          // ⚠入力・キー・ポインタの一番外側でnoteActivityを呼ぶ(期限切れの取り直しの
+          //   引き金・仕様6.2)。文字の選択・コピー自体はブロックしない(bubblingイベントを
+          //   聞くだけ)。property-edit-form.tsx と同じ配線。
+          onInput={() => lock.noteActivity()}
+          onKeyDown={() => lock.noteActivity()}
+          onPointerDown={() => lock.noteActivity()}
+        >
+          {/* ⚠(fail open) 鍵が取れなくても保存は通常どおり行える、という別の通知。
+              lock.state は idle のまま(新しいstate kindは増やさない)なので、
+              EditLockBanner とは別に出す。idle の間だけ出す(実際の鍵の帯と矛盾させない・
+              shouldShowLockUnavailableNotice)。 */}
+          {shouldShowLockUnavailableNotice(lockUnavailable, lock.state.kind) && (
+            <div className={`${EDIT_LOCK_BAND} mb-4`}>
+              編集中の表示を取得できませんでした。保存は通常どおり行えます
+            </div>
+          )}
+          <EditLockBanner state={lock.state} warnIdle={lock.warnIdle} />
           {/* 複数物件紐づき警告 */}
           <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
@@ -1723,8 +1849,17 @@ function OwnerCard({
             <button
               type="button"
               onClick={handleSave}
+              // ⚠鍵の可否(canSubmitSave・複製タブ確認待ち/取得中の他ユーザー保持を含む・
+              //   fail openならlockUnavailableで押せる)と、この画面既存の入力検証を
+              //   両方満たさないと押せない。canSubmitSave が saving も見るため、
+              //   ここで別途 saving を足さない(二重管理にしない)。
               disabled={
-                saving ||
+                !canSubmitSave({
+                  tokenReady: editLockTokenReady,
+                  canSave: lock.canSave,
+                  saving,
+                  lockUnavailable,
+                }) ||
                 (editableFields.name && !form.name.trim()) ||
                 (editableFields.corporateNumber &&
                   form.corporateNumber.trim() !== "" &&
