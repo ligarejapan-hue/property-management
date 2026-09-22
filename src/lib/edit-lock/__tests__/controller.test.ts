@@ -653,4 +653,24 @@ describe("createEditLockController", () => {
     expect(h.acquireMock).toHaveBeenCalledTimes(2);
     expect(h.lastState().kind).toBe("mine");
   });
+
+  it("t5c) deps.acquire()が同期的に投げても、以後のacquire()が同じ失敗を返し続けて塞がらない", async () => {
+    // ⚠(task5 review round1 minor) 従来の実装は、この同期的な throw が
+    //   `acquireInFlightPromise = null` への代入(finally内)を、
+    //   `acquireInFlightPromise = (async () => {...})()` という外側の代入より
+    //   先に実行してしまい、その直後に外側の代入がそれを上書きして
+    //   `acquireInFlightPromise` を「決着済みの拒否済み Promise」に永久に固定していた。
+    h.acquireMock.mockImplementationOnce(() => {
+      throw new Error("sync boom");
+    });
+    const controller = createEditLockController(h.deps);
+
+    await expect(controller.acquire()).rejects.toThrow("sync boom");
+
+    // ⚠塞がっていたら、この2回目の acquire() も同じ古い拒否済み Promise を返すだけで
+    //   deps.acquire() が呼ばれず、MINE には決してならない。
+    h.acquireMock.mockResolvedValueOnce(MINE);
+    await controller.acquire();
+    expect(h.lastState().kind).toBe("mine");
+  });
 });

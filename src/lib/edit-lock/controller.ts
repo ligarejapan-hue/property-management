@@ -169,28 +169,42 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
     //   1本目の応答が全体の結果を決める。かつ、呼び出し元は await すれば必ず
     //   決着まで待てる=何もせず空で解決することはない)。
     if (acquireInFlightPromise) return acquireInFlightPromise;
-    acquireInFlightPromise = (async () => {
-      try {
-        bumpGeneration();
-        const gen = generation;
-        const res = await deps.acquire();
-        const next = uiStateFromAcquire(res);
-        if (disposed || gen !== generation) {
-          // ⚠(review round2 n1) release/dispose がこの取得を追い越していた。state には
-          //   今さら反映しない(discard は正しい)が、応答が mine ならサーバは実際に
-          //   鍵を許可している=孤児にせず beacon で手放す(deps.release はヘッダ付きの
-          //   fetch が要るが、dispose 後の画面ではもう安全に呼べない可能性がある。
-          //   beacon はヘッダ不要でどちらの状況でも安全)。
-          if (next.kind === "mine") deps.releaseByBeacon(next.lockId);
-          return;
-        }
-        apply(next);
-        if (state.kind === "mine") startHeartbeat();
-      } finally {
-        acquireInFlightPromise = null;
+    const attempt = (async () => {
+      bumpGeneration();
+      const gen = generation;
+      const res = await deps.acquire();
+      const next = uiStateFromAcquire(res);
+      if (disposed || gen !== generation) {
+        // ⚠(review round2 n1) release/dispose がこの取得を追い越していた。state には
+        //   今さら反映しない(discard は正しい)が、応答が mine ならサーバは実際に
+        //   鍵を許可している=孤児にせず beacon で手放す(deps.release はヘッダ付きの
+        //   fetch が要るが、dispose 後の画面ではもう安全に呼べない可能性がある。
+        //   beacon はヘッダ不要でどちらの状況でも安全)。
+        if (next.kind === "mine") deps.releaseByBeacon(next.lockId);
+        return;
       }
+      apply(next);
+      if (state.kind === "mine") startHeartbeat();
     })();
-    return acquireInFlightPromise;
+    acquireInFlightPromise = attempt;
+    // ⚠(task5 review round1 minor) この後始末は `attempt` の代入より**後**に登録する。
+    //   `deps.acquire()` が同期的に投げた場合、async関数の本体(finallyでのクリア)は
+    //   この代入より前にすべて実行されてしまい、その直後に代入が上書きして
+    //   `acquireInFlightPromise` を「決着済みの Promise」に永久に固定してしまう
+    //   (以後どの acquire() もその古い Promise を返すだけになり、二度と送られない)。
+    //   ここでの登録はマイクロタスクとして後で走るため、この代入より確実に後に実行される。
+    //   ⚠`.finally()` ではなく `.then(onFulfilled, onRejected)` を使う: `.finally()` が
+    //   作る派生 Promise はここで何とも繋がず捨てるため、`attempt` が reject すると
+    //   その派生 Promise 自身が「誰も拾わない reject」として unhandled rejection に
+    //   なる(`attempt` 自体は呼び出し元の `.catch` が拾っていても関係ない・別物)。
+    //   両方の分岐で例外を投げ直さない `.then` にすれば、この後始末専用の派生 Promise は
+    //   常に解決し、二重に報告されない。今も自分が担当している attempt と一致する
+    //   ときだけクリアする。
+    const clearIfCurrent = () => {
+      if (acquireInFlightPromise === attempt) acquireInFlightPromise = null;
+    };
+    attempt.then(clearIfCurrent, clearIfCurrent);
+    return attempt;
   }
 
   async function release(): Promise<void> {
