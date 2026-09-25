@@ -29,6 +29,7 @@ import {
   Download,
   RotateCcw,
   Clock,
+  ExternalLink,
 } from "lucide-react";
 import { Pagination } from "@/components/ui/pagination";
 import {
@@ -470,6 +471,10 @@ export default function ImportJobDetailPage() {
   // 相乗りしているため、表示名はサーバ確定の印で出し分ける(種別名だけだと
   // 「所有者事項PDF一括」と出て、何をした記録か分からない)。
   const isRegistryOwnerApplyJob = job?.isRegistryOwnerApplyJob ?? false;
+  // ⚠**PDFを上げた一括取込だけの導線**(「この物件に添付」)は、まとめて反映の行では
+  //   使えない(添付の実体が無いのでサーバ側で必ず弾かれる)。出すと「押しても必ず
+  //   失敗するボタン」になるので、要確認の行には手入力の案内を出す。
+  const isRegistryPdfUploadBulkJob = isRegistryPdfBulkJob && !isRegistryOwnerApplyJob;
   // 他人の取込を閲覧しているだけ(import:read_all のみ)のときは変更操作を出さない
   // (Codex #349 R9 P2: 押して入力してから 403 になるのを防ぐ)。
   const canMutate = job?.canMutate === true;
@@ -1544,12 +1549,28 @@ export default function ImportJobDetailPage() {
                       (row.status === "needs_review" ||
                         row.status === "error") && (
                       <div className="space-y-3">
+                        {/* まとめて反映の要確認の行: 手入力への案内(PDF添付の導線は出さない) */}
+                        {isRegistryOwnerApplyJob && rawData.propertyId && (
+                          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs dark:border-amber-800 dark:bg-amber-950/30">
+                            <p className="mb-2 text-amber-800 dark:text-amber-300">
+                              この物件は謄本から所有者を読み取れませんでした。物件を開いて、所有者を手入力で登録してください。
+                            </p>
+                            <Link
+                              href={`/properties/${rawData.propertyId}`}
+                              className="inline-flex items-center gap-1 font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              物件を開く
+                            </Link>
+                          </div>
+                        )}
+
                         {/* Search & link existing */}
-                        {row.status === "needs_review" && (
+                        {row.status === "needs_review" && !isRegistryOwnerApplyJob && (
                           <div className="rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/50">
                             <p className="mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
                               既存{isOwnerJob ? "所有者" : "物件"}を検索して
-                              {isRegistryPdfBulkJob ? "添付" : "紐付け"}
+                              {isRegistryPdfUploadBulkJob ? "添付" : "紐付け"}
                             </p>
                             <div className="relative">
                               <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
@@ -1651,7 +1672,7 @@ export default function ImportJobDetailPage() {
                                   ) : (
                                     <Link2 className="h-3 w-3" />
                                   )}
-                                  {isRegistryPdfBulkJob ? "この物件に添付" : "紐付け確定"}
+                                  {isRegistryPdfUploadBulkJob ? "この物件に添付" : "紐付け確定"}
                                 </button>
                               </div>
                             )}

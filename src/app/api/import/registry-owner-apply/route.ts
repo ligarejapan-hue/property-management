@@ -48,6 +48,17 @@ import {
 /** 取込記録に残す名前。⚠添付の生ファイル名は使わない(PIIを含みうる)。 */
 const JOB_LABEL = "謄本から所有者をまとめて反映";
 
+/**
+ * 受付を直列化するための**助言ロック**の鍵(この機能だけの固定値)。
+ *
+ * ⚠「終わっていないジョブが無いか」を読んでから作るまでの間に、もう1回押されると
+ *   両方とも通ってジョブが2本できる(2本目は全行「すでに所有者あり」で埋まる)。
+ *   読み取りと作成を1つのトランザクションに入れても、**読みは互いをブロックしない**
+ *   ので防げない。データベース側の助言ロックで「同時に1人だけ」にする。
+ *   トランザクションの終わりで自動的に解放される(明示的な解放は不要)。
+ */
+const ADMISSION_LOCK_KEY = 7314441;
+
 /** 対象の謄本の条件(所有者事項・削除されていない)。 */
 const OWNER_REGISTRY_ATTACHMENT = {
   type: "registry",
@@ -108,29 +119,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ⚠二重に走らせない。(a) 終わっていない反映のジョブがある (b) ワーカーが動いている
-    const unfinished = await prisma.importJob.findFirst({
-      where: {
-        jobType: REGISTRY_OWNER_APPLY_JOB_TYPE,
-        status: { in: ["pending", "processing"] },
-        rows: {
-          some: {
-            rawData: {
-              path: [REGISTRY_OWNER_APPLY_KIND_KEY],
-              equals: REGISTRY_OWNER_APPLY_KIND,
-            },
-          },
-        },
-      },
-      select: { id: true },
-    });
-    if (unfinished) {
-      throw new ApiError(
-        409,
-        "まだ終わっていない反映があります。取込の記録で進み具合を確認してください",
-        "REGISTRY_OWNER_APPLY_IN_PROGRESS",
-      );
-    }
+    // ワーカーが動いている間は受け付けない(サーバ負荷の平準化・同一プロセス前提)
     if (isRegistryPdfBulkWorkerBusy()) {
       throw new ApiError(
         409,
@@ -139,45 +128,94 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 対象を「謄本(添付)が古い順」に取り出す。⚠同じ物件の謄本が複数あっても
-    //   行は1つにまとめる(buildRegistryOwnerApplyRowSeeds が重複を落とす)。
-    const attachments = await prisma.attachment.findMany({
-      where: {
-        ...OWNER_REGISTRY_ATTACHMENT,
-        property: { propertyOwners: { none: {} } },
-      },
-      orderBy: { createdAt: "asc" },
-      take: limit,
-      select: { propertyId: true, property: { select: { address: true } } },
+    // ⚠**受付の判定と作成を1つのトランザクション+助言ロックで直列化する**。
+    //   同時に2回押されても、ロックを取れなかった側は待たずに断る。
+    const admitted = await prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<{ locked: boolean }[]>`
+        SELECT pg_try_advisory_xact_lock(${ADMISSION_LOCK_KEY}::bigint) AS locked
+      `;
+      if (!locked[0]?.locked) return { conflict: "busy" as const };
+
+      // 終わっていない反映のジョブがあれば受け付けない
+      const unfinished = await tx.importJob.findFirst({
+        where: {
+          jobType: REGISTRY_OWNER_APPLY_JOB_TYPE,
+          status: { in: ["pending", "processing"] },
+          rows: {
+            some: {
+              rawData: {
+                path: [REGISTRY_OWNER_APPLY_KIND_KEY],
+                equals: REGISTRY_OWNER_APPLY_KIND,
+              },
+            },
+          },
+        },
+        select: { id: true },
+      });
+      if (unfinished) return { conflict: "unfinished" as const };
+
+      // 対象を「謄本(添付)がいちばん古い順」に、**物件単位で**指定件数だけ取り出す。
+      // ⚠添付の行に対して件数を絞ると、同じ物件の謄本が複数あるときに処理できる
+      //   物件が指定件数より少なくなる(「全件」でも取りこぼす)。物件でまとめてから
+      //   絞るため、ここは生SQLで数える。
+      const targets = await tx.$queryRaw<{ id: string; address: string | null }[]>`
+        SELECT p.id::text AS id, p.address AS address
+        FROM properties p
+        JOIN attachments a
+          ON a.property_id = p.id
+         AND a.type = 'registry'
+         AND a.is_deleted = false
+         AND a.registry_certificate_type = 'owner'
+        WHERE NOT EXISTS (
+          SELECT 1 FROM property_owners po WHERE po.property_id = p.id
+        )
+        GROUP BY p.id, p.address
+        ORDER BY MIN(a.created_at) ASC
+        LIMIT ${limit}
+      `;
+      const seeds = buildRegistryOwnerApplyRowSeeds(
+        targets.map((t) => ({ id: t.id, address: t.address })),
+      );
+      if (seeds.length === 0) return { empty: true as const };
+
+      const job = await tx.importJob.create({
+        data: {
+          jobType: REGISTRY_OWNER_APPLY_JOB_TYPE,
+          // ⚠固定の名前。添付の生ファイル名は使わない。
+          fileName: JOB_LABEL,
+          status: "pending",
+          totalRows: seeds.length,
+          executedBy: session.id,
+        },
+        select: { id: true },
+      });
+      await tx.importJobRow.createMany({
+        data: seeds.map((seed) => ({
+          jobId: job.id,
+          rowNumber: seed.rowNumber,
+          status: seed.status,
+          rawData: seed.rawData,
+        })),
+      });
+      return { jobId: job.id, totalRows: seeds.length };
     });
-    const seeds = buildRegistryOwnerApplyRowSeeds(
-      attachments
-        .filter((a): a is typeof a & { propertyId: string } => !!a.propertyId)
-        .map((a) => ({ id: a.propertyId, address: a.property?.address ?? null })),
-    );
-    if (seeds.length === 0) {
+
+    if ("conflict" in admitted) {
+      throw new ApiError(
+        409,
+        admitted.conflict === "unfinished"
+          ? "まだ終わっていない反映があります。取込の記録で進み具合を確認してください"
+          : "ほかの人が同じ操作を始めたところです。少し待ってからもう一度お試しください",
+        admitted.conflict === "unfinished"
+          ? "REGISTRY_OWNER_APPLY_IN_PROGRESS"
+          : "IMPORT_BUSY",
+      );
+    }
+    if ("empty" in admitted) {
       return apiResponse({ jobId: null, totalRows: 0 });
     }
-
-    const job = await prisma.importJob.create({
-      data: {
-        jobType: REGISTRY_OWNER_APPLY_JOB_TYPE,
-        // ⚠固定の名前。添付の生ファイル名は使わない。
-        fileName: JOB_LABEL,
-        status: "pending",
-        totalRows: seeds.length,
-        executedBy: session.id,
-      },
-      select: { id: true },
-    });
-    await prisma.importJobRow.createMany({
-      data: seeds.map((seed) => ({
-        jobId: job.id,
-        rowNumber: seed.rowNumber,
-        status: seed.status,
-        rawData: seed.rawData,
-      })),
-    });
+    const job = { id: admitted.jobId };
+    const seeds = { length: admitted.totalRows };
 
     await writeAuditLog({
       userId: session.id,

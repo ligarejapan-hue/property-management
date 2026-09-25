@@ -3,9 +3,9 @@
  *
  * ⚠ここで守りたい事故:
  *  1. **権限の抜け**             → 管理者+取込+所有者の編集+氏名・住所の項目権限が必須
- *  2. **件数の取り違え**         → 既定100件・不正な件数は受け付けない
+ *  2. **件数の取り違え**         → 既定100件・不正な件数は受け付けない・**物件単位**で数える
  *  3. **所有者がいる物件に入れる** → 対象は「所有者が空」かつ「所有者事項の謄本あり」
- *  4. **二重に走らせる**         → 処理中の反映があるときは受け付けない
+ *  4. **二重に走らせる**         → 助言ロック+終わっていないジョブの確認を1つのtxで
  *  5. **取込記録にPIIを残す**     → 行に残すのは物件IDと物件の住所だけ
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
@@ -37,12 +37,21 @@ vi.mock("@/lib/registry-pdf-bulk/worker", () => ({
   enqueueRegistryPdfBulkJob: vi.fn(),
   isRegistryPdfBulkWorkerBusy: vi.fn(() => false),
 }));
+
+/** トランザクションの中で使われるクライアント(受付の判定と作成は全部ここを通る)。 */
+const tx = {
+  $queryRaw: vi.fn(),
+  importJob: { findFirst: vi.fn(), create: vi.fn() },
+  importJobRow: { createMany: vi.fn() },
+};
+
 vi.mock("@/lib/prisma", () => ({
   default: {
     property: { count: vi.fn() },
-    attachment: { findMany: vi.fn() },
-    importJob: { create: vi.fn(), findFirst: vi.fn() },
+    // ⚠受付の判定と作成は必ずトランザクションの中。素のクライアントで作らせない。
+    importJob: { findFirst: vi.fn(), create: vi.fn() },
     importJobRow: { createMany: vi.fn() },
+    $transaction: vi.fn(),
   },
 }));
 
@@ -57,9 +66,9 @@ import { GET, POST } from "@/app/api/import/registry-owner-apply/route";
 
 const pm = prisma as unknown as {
   property: { count: Mock };
-  attachment: { findMany: Mock };
-  importJob: { create: Mock; findFirst: Mock };
+  importJob: { findFirst: Mock; create: Mock };
   importJobRow: { createMany: Mock };
+  $transaction: Mock;
 };
 
 const ALL_PERMS = [
@@ -75,12 +84,26 @@ const postRequest = (body?: unknown) =>
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   }) as never;
 
-/** 添付(古い順)の取り出し結果。物件の住所は物件の情報として付いてくる。 */
-const attachmentRows = (count: number) =>
+/** 物件単位の対象(生SQLの戻り)。 */
+const targetRows = (count: number) =>
   Array.from({ length: count }, (_, i) => ({
-    propertyId: `1111111${i}-1111-4111-8111-11111111111${i}`,
-    property: { address: `東京都渋谷区神宮前三丁目${i + 1}-1` },
+    id: `1111111${i}-1111-4111-8111-11111111111${i}`,
+    address: `東京都渋谷区神宮前三丁目${i + 1}-1`,
   }));
+
+/** 生SQLの呼び出し: 1回目=助言ロック / 2回目=対象の取り出し。 */
+function setRawResults(options: { locked?: boolean; targets?: number } = {}) {
+  const locked = options.locked ?? true;
+  const targets = targetRows(options.targets ?? 2);
+  tx.$queryRaw.mockReset();
+  tx.$queryRaw
+    .mockResolvedValueOnce([{ locked }])
+    .mockResolvedValueOnce(targets);
+}
+
+/** 生SQLの文面(テンプレートの断片をつないだもの)。 */
+const rawSql = (callIndex: number) =>
+  ((tx.$queryRaw.mock.calls[callIndex] as unknown as [TemplateStringsArray])[0] ?? []).join("?");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -88,10 +111,11 @@ beforeEach(() => {
   (getUserPermissions as unknown as Mock).mockResolvedValue(ALL_PERMS);
   (isRegistryPdfBulkWorkerBusy as unknown as Mock).mockReturnValue(false);
   pm.property.count.mockResolvedValue(1821);
-  pm.attachment.findMany.mockResolvedValue(attachmentRows(2));
-  pm.importJob.create.mockResolvedValue({ id: "job-1" });
-  pm.importJob.findFirst.mockResolvedValue(null);
-  pm.importJobRow.createMany.mockResolvedValue({ count: 2 });
+  pm.$transaction.mockImplementation(async (fn: (c: typeof tx) => unknown) => fn(tx));
+  tx.importJob.findFirst.mockResolvedValue(null);
+  tx.importJob.create.mockResolvedValue({ id: "job-1" });
+  tx.importJobRow.createMany.mockResolvedValue({ count: 2 });
+  setRawResults();
 });
 
 describe("GET（対象件数）", () => {
@@ -133,9 +157,28 @@ describe("POST（実行）", () => {
     expect(enqueueRegistryPdfBulkJob).toHaveBeenCalledWith("job-1");
   });
 
+  it("⚠受付の判定と作成は1つのトランザクションの中で行う（素のクライアントで作らない）", async () => {
+    await POST(postRequest({ limit: 2 }));
+    expect(pm.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.importJob.create).toHaveBeenCalledTimes(1);
+    expect(tx.importJobRow.createMany).toHaveBeenCalledTimes(1);
+    expect(pm.importJob.create).not.toHaveBeenCalled();
+    expect(pm.importJobRow.createMany).not.toHaveBeenCalled();
+  });
+
+  it("⚠同時に押されても1本だけ通す（助言ロックを取れなければ 409）", async () => {
+    setRawResults({ locked: false });
+    const res = await POST(postRequest({ limit: 2 }));
+    expect(res.status).toBe(409);
+    expect(tx.importJob.create).not.toHaveBeenCalled();
+    expect(enqueueRegistryPdfBulkJob).not.toHaveBeenCalled();
+    // ⚠ロックは取れるまで待たない(待つと画面が固まる)
+    expect(rawSql(0)).toContain("pg_try_advisory_xact_lock");
+  });
+
   it("⚠既存の「所有者事項PDF一括」に相乗りし、生ファイル名ではない固定の名前で残す", async () => {
     await POST(postRequest({ limit: 2 }));
-    const data = pm.importJob.create.mock.calls[0][0].data;
+    const data = tx.importJob.create.mock.calls[0][0].data;
     expect(data.jobType).toBe("registry_pdf_bulk");
     expect(data.fileName).toBe("謄本から所有者をまとめて反映");
     expect(data.executedBy).toBe("user-1");
@@ -144,7 +187,7 @@ describe("POST（実行）", () => {
 
   it("⚠行に残すのは物件IDと物件の住所だけ（所有者の氏名・住所は残さない）", async () => {
     await POST(postRequest({ limit: 2 }));
-    const rows = pm.importJobRow.createMany.mock.calls[0][0].data as Array<
+    const rows = tx.importJobRow.createMany.mock.calls[0][0].data as Array<
       Record<string, unknown>
     >;
     expect(rows).toHaveLength(2);
@@ -157,28 +200,33 @@ describe("POST（実行）", () => {
     expect(rows.map((r) => r.rowNumber)).toEqual([1, 2]);
   });
 
-  it("⚠古い謄本から順に処理する（指定件数だけ取り出す）", async () => {
+  it("⚠件数は物件単位で数える（同じ物件の謄本が複数あっても取りこぼさない）", async () => {
     await POST(postRequest({ limit: 100 }));
-    const args = pm.attachment.findMany.mock.calls[0][0];
-    expect(args.orderBy).toEqual({ createdAt: "asc" });
-    expect(args.take).toBe(100);
-    expect(args.where).toMatchObject({
-      type: "registry",
-      isDeleted: false,
-      registryCertificateType: "owner",
-    });
-    expect(args.where.property).toEqual({ propertyOwners: { none: {} } });
+    const sql = rawSql(1);
+    // 物件でまとめてから件数を絞る
+    expect(sql).toContain("GROUP BY");
+    expect(sql).toContain("LIMIT");
+    // 謄本(添付)がいちばん古い順
+    expect(sql).toContain("MIN(a.created_at)");
+    expect(sql).toContain("ORDER BY");
+    // 所有者が空 + 所有者事項の謄本あり
+    expect(sql).toContain("property_owners");
+    expect(sql).toContain("registry_certificate_type");
+    expect(sql).toContain("is_deleted");
+    // 件数はパラメータとして渡す(文字列に混ぜない)
+    const params = (tx.$queryRaw.mock.calls[1] as unknown[]).slice(1);
+    expect(params).toContain(100);
   });
 
   it("件数の指定が無ければ既定（100件）", async () => {
     await POST(postRequest({}));
-    expect(pm.attachment.findMany.mock.calls[0][0].take).toBe(100);
+    expect((tx.$queryRaw.mock.calls[1] as unknown[]).slice(1)).toContain(100);
   });
 
   it("本文が無くても既定で動く", async () => {
     const res = await POST(postRequest());
     expect(res.status).toBe(202);
-    expect(pm.attachment.findMany.mock.calls[0][0].take).toBe(100);
+    expect((tx.$queryRaw.mock.calls[1] as unknown[]).slice(1)).toContain(100);
   });
 
   it("⚠不正な件数は 400（黙って直さない）", async () => {
@@ -186,9 +234,11 @@ describe("POST（実行）", () => {
       vi.clearAllMocks();
       (getApiSession as unknown as Mock).mockResolvedValue({ id: "user-1", role: "admin" });
       (getUserPermissions as unknown as Mock).mockResolvedValue(ALL_PERMS);
+      pm.$transaction.mockImplementation(async (fn: (c: typeof tx) => unknown) => fn(tx));
+      setRawResults();
       const res = await POST(postRequest({ limit: bad }));
       expect(res.status).toBe(400);
-      expect(pm.importJob.create).not.toHaveBeenCalled();
+      expect(pm.$transaction).not.toHaveBeenCalled();
     }
   });
 
@@ -204,35 +254,37 @@ describe("POST（実行）", () => {
       vi.clearAllMocks();
       (getApiSession as unknown as Mock).mockResolvedValue({ id: "user-1", role });
       (getUserPermissions as unknown as Mock).mockResolvedValue(perms);
+      pm.$transaction.mockImplementation(async (fn: (c: typeof tx) => unknown) => fn(tx));
+      setRawResults();
       const res = await POST(postRequest({ limit: 2 }));
       expect(res.status).toBe(403);
-      expect(pm.importJob.create).not.toHaveBeenCalled();
+      expect(pm.$transaction).not.toHaveBeenCalled();
       expect(enqueueRegistryPdfBulkJob).not.toHaveBeenCalled();
     }
   });
 
   it("⚠まだ終わっていない反映があるときは受け付けない（二重に走らせない）", async () => {
-    pm.importJob.findFirst.mockResolvedValue({ id: "job-old" });
+    tx.importJob.findFirst.mockResolvedValue({ id: "job-old" });
     const res = await POST(postRequest({ limit: 2 }));
     expect(res.status).toBe(409);
-    expect(pm.importJob.create).not.toHaveBeenCalled();
+    expect(tx.importJob.create).not.toHaveBeenCalled();
   });
 
   it("⚠ほかの取込が処理中のときは受け付けない（同時に走らせない）", async () => {
     (isRegistryPdfBulkWorkerBusy as unknown as Mock).mockReturnValue(true);
     const res = await POST(postRequest({ limit: 2 }));
     expect(res.status).toBe(409);
-    expect(pm.importJob.create).not.toHaveBeenCalled();
+    expect(pm.$transaction).not.toHaveBeenCalled();
   });
 
   it("対象が0件ならジョブを作らない", async () => {
-    pm.attachment.findMany.mockResolvedValue([]);
+    setRawResults({ targets: 0 });
     const res = await POST(postRequest({ limit: 2 }));
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.totalRows).toBe(0);
     expect(body.jobId).toBeNull();
-    expect(pm.importJob.create).not.toHaveBeenCalled();
+    expect(tx.importJob.create).not.toHaveBeenCalled();
     expect(enqueueRegistryPdfBulkJob).not.toHaveBeenCalled();
   });
 

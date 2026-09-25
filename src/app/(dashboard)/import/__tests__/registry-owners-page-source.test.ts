@@ -60,3 +60,21 @@ describe("入口", () => {
     expect(entry).toContain('minRole: "admin"');
   });
 });
+
+describe("取込の記録の画面（まとめて反映の行）", () => {
+  const JOB_PAGE = readSource("src/app/(dashboard)/import/jobs/[jobId]/page.tsx");
+
+  it("⚠PDFを添付する導線は出さない（添付の実体が無いので必ず失敗する）", () => {
+    // 「この物件に添付」などはPDFを上げた一括取込だけの導線。
+    expect(JOB_PAGE).toContain("isRegistryPdfUploadBulkJob");
+    expect(JOB_PAGE).toContain(
+      "const isRegistryPdfUploadBulkJob = isRegistryPdfBulkJob && !isRegistryOwnerApplyJob",
+    );
+    expect(JOB_PAGE).toMatch(/\{isRegistryPdfUploadBulkJob \? "この物件に添付"/);
+  });
+
+  it("⚠読み取れなかった物件は、手入力の案内と物件へのリンクを出す", () => {
+    expect(JOB_PAGE).toContain("所有者を手入力で登録してください");
+    expect(JOB_PAGE).toContain("/properties/${rawData.propertyId}");
+  });
+});
