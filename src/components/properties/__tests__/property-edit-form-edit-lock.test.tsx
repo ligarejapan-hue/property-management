@@ -4,14 +4,18 @@
  * ⚠このリポジトリは jsdom を使わない方針(vitest.config.ts が environment: "node" を
  *   固定・既存の .test.tsx は renderToStaticMarkup 一本槍)。フォームを描画して
  *   クリックするテストは書けないので、保存の init 組み立て(buildPropertySaveInit)・
- *   開いたときの初期化とfail openの後始末(runEditLockInit)・保存ボタンを押せるかの
- *   判断(canSubmitSave)・fail open通知を出してよいか(shouldShowLockUnavailableNotice)
- *   を関数として切り出して node で検査し、配線そのものは走査(source assertion)で
- *   固定する(`src/hooks/__tests__/use-address-lookup.test.ts` と同じやり方)。
+ *   開いたときの初期化とfail openの後始末(runEditLockInit)を関数として切り出して
+ *   node で検査し、配線そのものは走査(source assertion)で固定する
+ *   (`src/hooks/__tests__/use-address-lookup.test.ts` と同じやり方)。
  *
  * ⚠「帯が出る」の判断自体は Task 2 の純関数(ui-state.ts)と Task 4 の部品
  *   (EditLockBanner)で既に検査済み。ここでは重複して検査しない(YAGNI)。
  *   画面が本当に繋がっているかはローカル実機確認で見る。
+ *
+ * ⚠(Task 6 fix round 1 #3) 保存可否の判断そのもの(`canSubmitSave`・
+ *   `shouldShowLockUnavailableNotice`)は `src/lib/edit-lock/save-gate.ts` へ移した
+ *   (このファイルは配線=それらを正しい引数で呼んでいるかの走査だけを持つ)。
+ *   関数自体の振る舞いのテストは `src/lib/edit-lock/__tests__/save-gate.test.ts`。
  *
  * task5 review round1 の反映:
  * - Critical: 取得(acquire)が失敗しても保存を詰まらせない(fail open)。
@@ -36,12 +40,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import {
-  buildPropertySaveInit,
-  runEditLockInit,
-  canSubmitSave,
-  shouldShowLockUnavailableNotice,
-} from "../property-edit-form";
+import { buildPropertySaveInit, runEditLockInit } from "../property-edit-form";
 import { EDIT_SCREEN_HEADER, EDIT_LOCK_HEADER } from "@/lib/edit-lock/header-names";
 import {
   setScreenTokenEnvForTest,
@@ -262,62 +261,5 @@ describe("runEditLockInit(開いたときの初期化・fail openの後始末・
   });
 });
 
-describe("canSubmitSave(保存ボタンを押せるかの判断)", () => {
-  it("tokenReadyがfalseならcanSave/lockUnavailableに関わらず押せない", () => {
-    expect(
-      canSubmitSave({ tokenReady: false, canSave: true, saving: false, lockUnavailable: true }),
-    ).toBe(false);
-  });
-
-  it("saving中は押せない", () => {
-    expect(
-      canSubmitSave({ tokenReady: true, canSave: true, saving: true, lockUnavailable: false }),
-    ).toBe(false);
-  });
-
-  it("鍵を持っていれば押せる(通常経路)", () => {
-    expect(
-      canSubmitSave({ tokenReady: true, canSave: true, saving: false, lockUnavailable: false }),
-    ).toBe(true);
-  });
-
-  it("鍵を持っておらず取得も失敗していなければ押せない(他人が持っている等)", () => {
-    expect(
-      canSubmitSave({ tokenReady: true, canSave: false, saving: false, lockUnavailable: false }),
-    ).toBe(false);
-  });
-
-  it("鍵は持っていないが取得自体が失敗していればfail openで押せる(review round1 Critical)", () => {
-    expect(
-      canSubmitSave({ tokenReady: true, canSave: false, saving: false, lockUnavailable: true }),
-    ).toBe(true);
-  });
-
-  it("鍵を持っていて、かつlockUnavailableがtrueでも押せる(矛盾しない組み合わせ)", () => {
-    expect(
-      canSubmitSave({ tokenReady: true, canSave: true, saving: false, lockUnavailable: true }),
-    ).toBe(true);
-  });
-});
-
-describe("shouldShowLockUnavailableNotice(fail open通知と実際の鍵の帯を矛盾させない・review round2 N3)", () => {
-  it("lockUnavailableかつidleなら出す", () => {
-    expect(shouldShowLockUnavailableNotice(true, "idle")).toBe(true);
-  });
-
-  it("lockUnavailableがfalseなら(状態に関わらず)出さない", () => {
-    expect(shouldShowLockUnavailableNotice(false, "idle")).toBe(false);
-  });
-
-  it("lockUnavailableでも、状態がtakenへ動いたら出さない(実際の鍵の帯と矛盾させない)", () => {
-    expect(shouldShowLockUnavailableNotice(true, "taken")).toBe(false);
-  });
-
-  it("lockUnavailableでも、状態がexpiredへ動いたら出さない", () => {
-    expect(shouldShowLockUnavailableNotice(true, "expired")).toBe(false);
-  });
-
-  it("lockUnavailableでも、状態がmineへ動いたら出さない(取得できた=通常の帯に任せる)", () => {
-    expect(shouldShowLockUnavailableNotice(true, "mine")).toBe(false);
-  });
-});
+// canSubmitSave・shouldShowLockUnavailableNotice 自体の振る舞いのテストは
+// src/lib/edit-lock/__tests__/save-gate.test.ts へ移した(Task 6 fix round 1 #3)。

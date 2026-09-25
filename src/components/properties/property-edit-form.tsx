@@ -14,7 +14,9 @@ import { formatBuiltYearMonth } from "@/lib/built-year-month";
 import { useEditLock } from "@/hooks/use-edit-lock";
 import { ensureUniqueScreenToken, editLockHeaders } from "@/lib/edit-lock/screen-token-client";
 import { EditLockBanner, BAND as EDIT_LOCK_BAND } from "@/components/edit-lock/edit-lock-banner";
-import type { EditLockUiState } from "@/lib/edit-lock/ui-state";
+// 保存可否の判断(決定層)。Task 6 fix round 1 #3 で src/lib/edit-lock/save-gate.ts へ
+// 切り出した。ここでは呼ぶだけで、判断はコピーしない。
+import { canSubmitSave, shouldShowLockUnavailableNotice } from "@/lib/edit-lock/save-gate";
 
 interface AssigneeOption {
   id: string;
@@ -223,44 +225,6 @@ export async function runEditLockInit(
   } catch {
     setLockUnavailable(true);
   }
-}
-
-/**
- * 保存ボタンを押せるか(task5 review round1 Important #3)。
- * ⚠この判断自体をテストで直接検査できるよう、JSX の `disabled={}` から切り出す
- *   (`disabled={` という文字列はこのタスク以前から3箇所あり、走査だけでは
- *   「決定が実行されているか」を固定できないため)。
- * `lockUnavailable` が true のときは `canSave` が false でも押せる(fail open)。
- */
-export function canSubmitSave({
-  tokenReady,
-  canSave,
-  saving,
-  lockUnavailable,
-}: {
-  tokenReady: boolean;
-  canSave: boolean;
-  saving: boolean;
-  lockUnavailable: boolean;
-}): boolean {
-  if (!tokenReady || saving) return false;
-  return canSave || lockUnavailable;
-}
-
-/**
- * fail openの通知(「編集中の表示を取得できませんでした。保存は通常どおり行えます」)を
- * 出してよいか(task5 review round2 N3)。
- * ⚠**`idle` の間だけ**。取得が失敗した後、保存が423等で断られて `lock.state` が
- *   `idle` 以外(`taken`/`expired`/`force_released`/`deleted`)へ動いたら、実際の
- *   鍵の帯(`EditLockBanner`)が表示を引き継ぐ。両方を同時に出すと、「保存は通常
- *   どおり行えます」と実際の鍵の帯(保存できない旨)が矛盾したまま、利用者が
- *   繰り返し423を踏むことになる。
- */
-export function shouldShowLockUnavailableNotice(
-  lockUnavailable: boolean,
-  stateKind: EditLockUiState["kind"],
-): boolean {
-  return lockUnavailable && stateKind === "idle";
 }
 
 /**

@@ -37,9 +37,11 @@ import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, unlinkPropert
 import { useEditLock } from "@/hooks/use-edit-lock";
 import { ensureUniqueScreenToken } from "@/lib/edit-lock/screen-token-client";
 import { EditLockBanner, BAND as EDIT_LOCK_BAND } from "@/components/edit-lock/edit-lock-banner";
-// canSubmitSave・shouldShowLockUnavailableNotice は Task 5(物件の編集ウィンドウ)が
-// 切り出した純関数(判断)。同じ判断なので複製せずそのまま再利用する。
-import { canSubmitSave, shouldShowLockUnavailableNotice } from "@/components/properties/property-edit-form";
+// canSubmitSave・shouldShowLockUnavailableNotice は保存可否の判断(決定層)。
+// Task 5(物件の編集ウィンドウ)が切り出し、Task 6 fix round 1 #3 で
+// src/lib/edit-lock/save-gate.ts へ移した(component module一式を巻き込まずに
+// 2つの純関数だけを import できるようにするため)。同じ判断なので複製しない。
+import { canSubmitSave, shouldShowLockUnavailableNotice } from "@/lib/edit-lock/save-gate";
 import { OwnerEditableFields, buildOwnerUpdatePayload, canEditOwner } from "@/lib/owner-edit-utils";
 import { canShowAddOwner } from "@/lib/owner-link-utils";
 import {
