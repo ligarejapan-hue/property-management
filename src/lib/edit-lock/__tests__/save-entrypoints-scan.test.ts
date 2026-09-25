@@ -204,6 +204,19 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
     expect(handleApplyBody).toMatch(
       /catch \(err2\) \{[\s\S]*?handleCorporateApplyEditLockedError\(err2, ownerId, setApplyError, applySeqRef, mySeq\)[\s\S]*?reportCorporateApplyLockRefusal\(err2, lockId, onLockRefused\)/,
     );
+    // ⚠(review round3 New Important 7) 上のordering正規表現は「err/err2のcatch節の
+    //   どこかに1回でもこの順で現れれば」満たされてしまう。実際には各catch節の
+    //   中に呼び出し箇所が2箇所ずつ(計4箇所)ある——outer catchは
+    //   ①`if (handled) {...}`内(ほぼ死んでいる。lockIdを送ったこの入口では
+    //   EDIT_LOCKEDがほぼ届かないためhandled=trueに滅多にならない)と
+    //   ②msg.includesの分岐すべてを終えた直後・finallyの手前(EDIT_LOCK_STALE/
+    //   EDIT_LOCK_FORCE_RELEASEDが実際に通る=round1 Important #3の実体そのもの)。
+    //   後者だけを削除しても、上のordering正規表現は①の出現だけで満たされ続け、
+    //   全テストがgreenのままになる(mutationで確認済み)。4箇所すべてが揃って
+    //   いることを出現回数で固定し、どの1箇所が消えても検査が落ちるようにする。
+    expect(
+      (handleApplyBody.match(/reportCorporateApplyLockRefusal\(/g) ?? []).length,
+    ).toBe(4);
   });
 
   it("法人番号パネル(corporate-lookup-panel.tsx・handleApply)は反映の試行ごとに世代を1回だけ進める(review round2 New Important #1)", () => {
