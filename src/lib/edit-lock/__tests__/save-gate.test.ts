@@ -6,7 +6,8 @@
  *   できるようにするため)。テストの中身は移設のみで、内容は変えていない。
  */
 import { describe, it, expect } from "vitest";
-import { canSubmitSave, shouldShowLockUnavailableNotice } from "../save-gate";
+import { canSubmitSave, shouldShowLockUnavailableNotice, isEditLockHeldByOther } from "../save-gate";
+import type { EditLockStatusRow } from "@/lib/api-client";
 
 describe("canSubmitSave(保存ボタンを押せるかの判断)", () => {
   it("tokenReadyがfalseならcanSave/lockUnavailableに関わらず押せない", () => {
@@ -73,5 +74,33 @@ describe("shouldShowLockUnavailableNotice(fail open通知と実際の鍵の帯�
 
   it("lockUnavailableでも、状態がdeletedへ動いたら出さない(実際の鍵の帯と矛盾させない・task 7 fix)", () => {
     expect(shouldShowLockUnavailableNotice(true, "deleted")).toBe(false);
+  });
+});
+
+describe("isEditLockHeldByOther(見ている側・仕様6.3の表を1件ずつ固定)", () => {
+  const row = (state: EditLockStatusRow["state"]): EditLockStatusRow => ({
+    resourceType: "property",
+    resourceId: "p1",
+    state,
+  });
+
+  it("held_by_other は止める(物件が他の人の鍵)", () => {
+    expect(isEditLockHeldByOther(row("held_by_other"))).toBe(true);
+  });
+
+  it("held_by_self_other_screen も止める(物件が自分の別の画面の鍵・D6)", () => {
+    expect(isEditLockHeldByOther(row("held_by_self_other_screen"))).toBe(true);
+  });
+
+  it("mine は止めない(自分がこの画面で鍵を持っている)", () => {
+    expect(isEditLockHeldByOther(row("mine"))).toBe(false);
+  });
+
+  it("free は止めない(空いた)", () => {
+    expect(isEditLockHeldByOther(row("free"))).toBe(false);
+  });
+
+  it("行が届いていない(undefined)ときは止めない(fail open・未取得/権限なし)", () => {
+    expect(isEditLockHeldByOther(undefined)).toBe(false);
   });
 });

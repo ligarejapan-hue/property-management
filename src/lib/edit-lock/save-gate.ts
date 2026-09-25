@@ -15,6 +15,7 @@
  * Critical=Task5 round1 の再発になる)。
  */
 import type { EditLockUiState } from "./ui-state";
+import type { EditLockStatusRow } from "@/lib/api-client";
 
 /**
  * 保存ボタンを押せるか(task5 review round1 Important #3)。
@@ -52,4 +53,15 @@ export function shouldShowLockUnavailableNotice(
   stateKind: EditLockUiState["kind"],
 ): boolean {
   return lockUnavailable && stateKind === "idle";
+}
+
+/**
+ * 見ている側(仕様 6.3・Task 9)。`useEditLockStatus` から届く1件の行が、
+ * 「他の人(または自分の別画面)が持っている」= 操作を止める対象かどうか。
+ * ⚠`held_by_self_other_screen` も止める(D6=同じ利用者でも別画面の編集とは
+ *   衝突させない・帯の文言も6.3の表のとおり「あなたが別の画面で編集中です」)。
+ *   `mine`・`free`・行が届いていない(未取得・権限なし)は止めない(fail open)。
+ */
+export function isEditLockHeldByOther(row: EditLockStatusRow | undefined): boolean {
+  return row?.state === "held_by_other" || row?.state === "held_by_self_other_screen";
 }
