@@ -251,11 +251,8 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
   });
 
   it("client の部品は server 用の screen-token.ts を import しない", () => {
-    // ⚠`use-edit-lock-status.ts` はブリーフのStep1コードに載っていたが、このリポには
-    //   存在しない(`src/hooks/` には `use-edit-lock.ts` しか無い・全文検索でも0件)。
-    //   無いファイルを readFileSync すると ENOENT でこのテスト自体が落ちるため、
-    //   実在するものだけを対象にする。将来そのフックが増えたら追記すること。
-    for (const rel of [...ENTRYPOINTS, "src/hooks/use-edit-lock.ts"]) {
+    // ⚠`use-edit-lock-status.ts`(Task 9・見ている側の hook)を追記した。
+    for (const rel of [...ENTRYPOINTS, "src/hooks/use-edit-lock.ts", "src/hooks/use-edit-lock-status.ts"]) {
       const src = readFileSync(join(process.cwd(), rel), "utf8").replace(/\r\n/g, "\n");
       expect(src).not.toMatch(/from "@\/lib\/edit-lock\/screen-token"/);
     }
