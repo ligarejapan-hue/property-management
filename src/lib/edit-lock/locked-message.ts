@@ -33,6 +33,13 @@
  *   タイムアウト側が勝っても・負けても、`setTimeout` のハンドルは
  *   `clearTimeout` する(勝った側=問い合わせが先に終わったときに、タイマーだけ
  *   宙に浮いたまま残らないようにする)。
+ * ⚠**呼び出し元が既に持っている状態の行があれば、それを渡してもう1回問い合わせない**
+ *   (Task 9)。物件詳細(見ている側)は `useEditLockStatus` で30秒ごとに状態を
+ *   持っているため、案件ステータス・導入ルートのプルダウン(`page.tsx`)は
+ *   その場で持っている行を `preFetchedRows` に渡せば、この関数は
+ *   `fetchEditLockStatus` を呼ばずに済む(2回目の追加リクエストを避ける)。
+ *   省略時(地番ポップアップ・法人番号の反映のように、呼び出し側が状態の行を
+ *   持っていない入口)は従来どおり1回だけ問い合わせる。
  */
 import { fetchEditLockStatus, type EditLockStatusRow } from "@/lib/api-client";
 import { formatSince } from "@/lib/edit-lock/ui-state";
@@ -42,10 +49,11 @@ async function lookupComposedMessage(
   resourceType: EditLockStatusRow["resourceType"],
   resourceId: string,
   envelopeMessage: string,
+  preFetchedRows?: EditLockStatusRow[],
 ): Promise<string> {
   try {
-    const rows = await fetchEditLockStatus([{ resourceType, resourceId }]);
-    const row = rows[0];
+    const rows = preFetchedRows ?? (await fetchEditLockStatus([{ resourceType, resourceId }]));
+    const row = rows.find((r) => r.resourceType === resourceType && r.resourceId === resourceId);
     if (row && row.state === "held_by_other" && row.holderName) {
       return `${row.holderName}さんが編集中です(${formatSince(row.since)}〜)`;
     }
@@ -59,8 +67,10 @@ export async function composeEditLockedMessage(
   resourceType: EditLockStatusRow["resourceType"],
   resourceId: string,
   envelopeMessage: string,
+  /** 呼び出し元が既に持っている最新の状態行(Task 9)。渡せば問い合わせを省く。 */
+  preFetchedRows?: EditLockStatusRow[],
 ): Promise<string> {
-  const lookup = lookupComposedMessage(resourceType, resourceId, envelopeMessage);
+  const lookup = lookupComposedMessage(resourceType, resourceId, envelopeMessage, preFetchedRows);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<string>((resolve) => {
     timer = setTimeout(() => resolve(envelopeMessage), EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS);

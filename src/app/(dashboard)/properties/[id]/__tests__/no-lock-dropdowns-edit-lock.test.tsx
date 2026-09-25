@@ -286,6 +286,49 @@ describe("runNoLockPropertyPatch(鍵を持たない入口の保存)", () => {
     }
   });
 
+  it("Task 9: preFetchedRowsを渡すと状態窓口(/api/edit-locks/status)を呼ばずに組み立てる", async () => {
+    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    const fetchMock = stubFetchByUrl({
+      "/api/properties/p1": async () =>
+        jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+    });
+    const error = createStateSpy<string | null>(null);
+    await runNoLockPropertyPatch(
+      "p1",
+      1,
+      { caseStatus: "active" },
+      vi.fn(),
+      error.setState,
+      vi.fn(),
+      undefined,
+      [{ resourceType: "property", resourceId: "p1", state: "held_by_other", since, holderName: "太郎" }],
+    );
+    await flushAsync();
+    expect(error.value).toBe("太郎さんが編集中です(14:00〜)");
+    // ⚠状態窓口への呼び出しが1本も無いこと(呼ばれた実際のURLで確認する=
+    //   「回数が2回のまま」のような無意味な検査にしない)。
+    const calledUrls = fetchMock.mock.calls.map(([url]) => url);
+    expect(calledUrls).not.toContain("/api/edit-locks/status");
+  });
+
+  it("Task 9: preFetchedRowsを省略すると従来どおり状態窓口へ1回問い合わせる(呼び出し元がまだ行を持っていない経路の後方互換)", async () => {
+    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    const fetchMock = stubFetchByUrl({
+      "/api/properties/p1": async () =>
+        jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+      "/api/edit-locks/status": async () =>
+        jsonResponse({
+          locks: [{ resourceType: "property", resourceId: "p1", state: "held_by_other", since, holderName: "次郎" }],
+        }),
+    });
+    const error = createStateSpy<string | null>(null);
+    await runNoLockPropertyPatch("p1", 1, { caseStatus: "active" }, vi.fn(), error.setState, vi.fn());
+    await flushAsync();
+    expect(error.value).toBe("次郎さんが編集中です(14:00〜)");
+    const calledUrls = fetchMock.mock.calls.map(([url]) => url);
+    expect(calledUrls).toContain("/api/edit-locks/status");
+  });
+
   it("EDIT_LOCKED以外のエラーも従来どおり封筒のmessageを表示する(既存挙動を変えない)", async () => {
     stubFetch(async () =>
       jsonResponse({ error: { code: "VALIDATION_ERROR", message: "入力に誤りがあります" } }, 422),

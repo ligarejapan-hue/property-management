@@ -192,7 +192,16 @@ describe("入力の検査（設計 §4.3）", () => {
   });
 
   it("読めない形のあいだは保存ボタンを押せない", () => {
-    expect(src).toContain("const canSave = canWriteProperty && readable && !saving");
+    expect(src).toContain("const canSave = canWriteProperty && readable && !saving && !editLockHeld");
+  });
+});
+
+describe("見ている側(仕様6.3・Task 9)", () => {
+  it("物件が他の人の鍵のときは保存ボタンだけを止める(検索・ログイン導線は止めない)", () => {
+    expect(src).toContain("editLockHeld = false");
+    expect(src).toContain("!editLockHeld");
+    // 検索・ログインの導線(a href)自体には触れていない=止めるのは保存だけ。
+    expect(src).not.toMatch(/editLockHeld[\s\S]{0,80}loginHref/);
   });
 });
 

@@ -56,6 +56,12 @@ interface RegistryLocationSearchButtonProps {
   propertyVersion: number;
   /** property:write。無ければポップアップは入力欄を出さず案内だけにする。 */
   canWriteProperty: boolean;
+  /**
+   * 見ている側(仕様 6.3・Task 9)。この物件が他の人(または自分の別画面)の鍵なら、
+   * 地番ポップアップの「保存して確認へ」だけを止める(検索・ログイン導線は止めない)。
+   * 省略時はfalse扱い(既存の呼び出し元の挙動を変えない)。
+   */
+  editLockHeld?: boolean;
   /** 建物の道（家屋番号が要る案内）も見せるか。土地だと分かっている種別以外は true。 */
   offerBuildingPath: boolean;
   /** 地番を保存したので物件を取り直す（version と分類を新しくする）。 */
@@ -103,6 +109,7 @@ export default function RegistryLocationSearchButton({
   propertyBuildingNumber,
   propertyVersion,
   canWriteProperty,
+  editLockHeld = false,
   offerBuildingPath,
   onPropertyRefresh,
   onRegistryResultApplied,
@@ -623,6 +630,7 @@ export default function RegistryLocationSearchButton({
           propertyVersion={savedVersion ?? propertyVersion}
           registryLoginUrl={preflight.loginUrl}
           canWriteProperty={canWriteProperty}
+          editLockHeld={editLockHeld}
           offerBuildingPath={offerBuildingPath}
           onSaved={(nextVersion) => {
             // ⚠ここで検索を投げない。分類を取り直して、料金の確認へ進むだけ。

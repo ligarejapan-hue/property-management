@@ -156,6 +156,13 @@ interface RegistryChibanPopupProps {
   /** property:write。無ければ入力欄を出さず案内だけにする。 */
   canWriteProperty: boolean;
   /**
+   * 見ている側(仕様 6.3・Task 9)。この物件が他の人(または自分の別画面)の鍵なら
+   * 「保存して確認へ」だけを止める(検索・入力・ログイン導線は止めない)。
+   * ⚠省略時(未指定)はfalse扱い=既存の呼び出し元(このpropsを持たないテスト等)の
+   *   挙動を変えない。
+   */
+  editLockHeld?: boolean;
+  /**
    * 建物の道（家屋番号が要る案内）も見せるか。
    * ⚠土地だと分かっている種別以外はすべて true（@codex #373 R10 P2）。
    *   駐車場・その他・不明は土地とも建物とも決まっていないので、
@@ -177,6 +184,7 @@ export default function RegistryChibanPopup({
   propertyVersion,
   registryLoginUrl,
   canWriteProperty,
+  editLockHeld = false,
   offerBuildingPath,
   onSaved,
   onClose,
@@ -197,7 +205,7 @@ export default function RegistryChibanPopup({
   const saveSeqRef = useRef(0);
 
   const readable = isReadableChiban(value);
-  const canSave = canWriteProperty && readable && !saving;
+  const canSave = canWriteProperty && readable && !saving && !editLockHeld;
 
   // ⚠物件本体を更新する共通ラッパーはこのリポに無い（編集フォームも素の fetch）。
   //   実体は runChibanSave（このファイル上部で export）。node のテストから直接呼べる
