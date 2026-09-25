@@ -43,6 +43,8 @@ const pm = prisma as unknown as {
 };
 
 const ALL_PERMS = [
+  { resource: "property", action: "read", granted: true },
+  { resource: "registry_pdf", action: "preview", granted: true },
   { resource: "import", action: "write", granted: true },
   { resource: "owner", action: "write", granted: true },
   { resource: "owner_name", action: "edit", granted: true },
@@ -134,6 +136,20 @@ describe("まとめて反映の行の振り分け", () => {
       (c) => (c[0].data as { status?: string }).status,
     );
     expect(statuses).toContain("failed");
+  });
+
+  it("⚠謄本の閲覧を止められた実行者のジョブは、1行も処理しない", async () => {
+    (getUserPermissions as unknown as Mock).mockResolvedValue(
+      ALL_PERMS.filter((p) => p.resource !== "registry_pdf"),
+    );
+    pm.importJobRow.findMany
+      .mockResolvedValueOnce([ownerApplyRow("r1", 1)])
+      .mockResolvedValueOnce([{ status: "pending" }]);
+
+    enqueueRegistryPdfBulkJob("j1");
+    await waitForIdle();
+
+    expect(processRegistryOwnerApplyRow).not.toHaveBeenCalled();
   });
 
   it("⚠管理者でなくなった実行者のジョブも、1行も処理しない", async () => {

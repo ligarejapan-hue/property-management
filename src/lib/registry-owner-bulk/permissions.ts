@@ -4,6 +4,8 @@
  * 1件ずつのボタン(`/api/properties/[id]/registry-owners`)と同じ線に、
  * **管理者のみ**を足したもの:
  *   - 役割が管理者(他人の担当物件もまとめて触るため)
+ *   - 物件を見る権限 (property:read)
+ *   - 謄本を見る権限 (registry_pdf:preview)
  *   - 取込の権限 (import:write)
  *   - 所有者の編集権限 (owner:write)
  *   - 氏名・住所の**項目ごとの**書き込み権限 (owner_name / owner_address の full か edit)
@@ -20,6 +22,8 @@ import { hasExplicitWritePerm, hasPermission } from "@/lib/permissions";
 /** 足りない権限の名前。すべて揃っていれば null。 */
 export type MissingRegistryOwnerApplyPerm =
   | "role"
+  | "property"
+  | "registry_pdf"
   | "import"
   | "owner"
   | "owner_name"
@@ -30,6 +34,11 @@ export function findMissingRegistryOwnerApplyPerm(
   permissions: PermissionEntry[],
 ): MissingRegistryOwnerApplyPerm | null {
   if (role !== "admin") return "role";
+  // ⚠**閲覧側の権限も必須**。この処理は謄本PDFの中身(氏名・住所)を読む。
+  //   1件ずつのボタンは両方を必須にしているので、まとめて反映が抜け道にならないよう
+  //   同じ線にそろえる(謄本の閲覧を止められた管理者が、まとめて全部読めてしまう)。
+  if (!hasPermission(permissions, "property", "read")) return "property";
+  if (!hasPermission(permissions, "registry_pdf", "preview")) return "registry_pdf";
   if (!hasPermission(permissions, "import", "write")) return "import";
   if (!hasPermission(permissions, "owner", "write")) return "owner";
   if (!hasExplicitWritePerm(permissions, "owner_name")) return "owner_name";
@@ -43,6 +52,8 @@ export const REGISTRY_OWNER_APPLY_PERM_MESSAGES: Record<
   string
 > = {
   role: "この操作は管理者のみ実行できます",
+  property: "物件を見る権限がありません",
+  registry_pdf: "謄本を見る権限がありません",
   import: "取込の権限がありません",
   owner: "所有者を編集する権限がありません",
   owner_name: "所有者の氏名を書き込む権限がありません",

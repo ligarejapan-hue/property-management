@@ -72,6 +72,8 @@ const pm = prisma as unknown as {
 };
 
 const ALL_PERMS = [
+  { resource: "property", action: "read", granted: true },
+  { resource: "registry_pdf", action: "preview", granted: true },
   { resource: "import", action: "write", granted: true },
   { resource: "owner", action: "write", granted: true },
   { resource: "owner_name", action: "edit", granted: true },
@@ -245,6 +247,9 @@ describe("POST（実行）", () => {
   it("⚠管理者以外・権限が足りないときは 403（ジョブを作らない）", async () => {
     const cases: Array<[string, unknown]> = [
       ["office_staff", ALL_PERMS],
+      // ⚠閲覧側(物件を見る・謄本を見る)も必須。1件ずつのボタンと同じ線にそろえる。
+      ["admin", ALL_PERMS.filter((p) => p.resource !== "property")],
+      ["admin", ALL_PERMS.filter((p) => p.resource !== "registry_pdf")],
       ["admin", ALL_PERMS.filter((p) => p.resource !== "import")],
       ["admin", ALL_PERMS.filter((p) => p.resource !== "owner")],
       ["admin", ALL_PERMS.filter((p) => p.resource !== "owner_name")],

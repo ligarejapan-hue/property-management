@@ -12,6 +12,8 @@ import { describe, it, expect } from "vitest";
 import { findMissingRegistryOwnerApplyPerm } from "@/lib/registry-owner-bulk/permissions";
 
 const ALL = [
+  { resource: "property", action: "read", granted: true },
+  { resource: "registry_pdf", action: "preview", granted: true },
   { resource: "import", action: "write", granted: true },
   { resource: "owner", action: "write", granted: true },
   { resource: "owner_name", action: "edit", granted: true },
@@ -26,6 +28,24 @@ describe("まとめて反映の権限", () => {
   it("⚠管理者以外は通さない", () => {
     expect(findMissingRegistryOwnerApplyPerm("office_staff", ALL)).toBe("role");
     expect(findMissingRegistryOwnerApplyPerm("field_staff", ALL)).toBe("role");
+  });
+
+  it("⚠物件を見る権限が無ければ通さない（謄本の中身を読む操作なので閲覧側も要る）", () => {
+    expect(
+      findMissingRegistryOwnerApplyPerm(
+        "admin",
+        ALL.filter((p) => p.resource !== "property"),
+      ),
+    ).toBe("property");
+  });
+
+  it("⚠謄本を見る権限が無ければ通さない（止められた人がまとめて読めてしまう）", () => {
+    expect(
+      findMissingRegistryOwnerApplyPerm(
+        "admin",
+        ALL.filter((p) => p.resource !== "registry_pdf"),
+      ),
+    ).toBe("registry_pdf");
   });
 
   it("取込の権限が無ければ通さない", () => {
