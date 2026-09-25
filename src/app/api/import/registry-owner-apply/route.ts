@@ -136,11 +136,13 @@ export async function POST(request: NextRequest) {
       `;
       if (!locked[0]?.locked) return { conflict: "busy" as const };
 
-      // 終わっていない反映のジョブがあれば受け付けない
+      // 終わっていない反映のジョブがあれば受け付けない。
+      // ⚠**失敗(failed)でも未処理の行が残っているジョブは塞ぐ**。取込の記録の画面には
+      //   未処理の行がある間「再開」ボタンが出るため、新しく始めてしまうと同じ物件を
+      //   両方が拾い、片方が「すでに所有者あり」で埋まる。
       const unfinished = await tx.importJob.findFirst({
         where: {
           jobType: REGISTRY_OWNER_APPLY_JOB_TYPE,
-          status: { in: ["pending", "processing"] },
           rows: {
             some: {
               rawData: {
@@ -149,6 +151,10 @@ export async function POST(request: NextRequest) {
               },
             },
           },
+          OR: [
+            { status: { in: ["pending", "processing"] } },
+            { status: "failed", rows: { some: { status: "pending" } } },
+          ],
         },
         select: { id: true },
       });

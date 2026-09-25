@@ -10,6 +10,7 @@
 import prisma from "@/lib/prisma";
 import { ApiError, type PermissionEntry } from "@/lib/api-helpers";
 import { applyRegistryOwnersToProperty } from "@/lib/registry-owner-apply/apply";
+import { safeErrorSummary } from "@/lib/safe-error-summary";
 import {
   REGISTRY_OWNER_APPLY_JOB_TYPE,
   isRegistryOwnerApplyRow,
@@ -25,16 +26,10 @@ export type RegistryOwnerApplyRowOutcome =
 
 /**
  * 行に残すエラー文。
- * ⚠**生のエラー文は出さない**。データベースの検証エラーは、拒否した呼び出しの中身
- *   (登記由来の住所など)を文面に埋め込む。出してよいのは許可リストの
- *   「種類(クラス名)」と「コード(英数字)」だけ。
+ * ⚠**生のエラー文は出さない**(共通の要約を使う → safe-error-summary.ts)。
  */
 function safeErrorMessage(err: unknown): string {
-  const kind = err instanceof Error ? err.name : typeof err;
-  const rawCode = (err as { code?: unknown } | null)?.code;
-  const code =
-    typeof rawCode === "string" && /^[A-Za-z0-9_]{1,32}$/.test(rawCode) ? rawCode : "-";
-  return `想定外の失敗 (種類=${kind} コード=${code})。管理者に連絡してください`;
+  return `想定外の失敗 (${safeErrorSummary(err)})。管理者に連絡してください`;
 }
 
 export async function processRegistryOwnerApplyRow(args: {

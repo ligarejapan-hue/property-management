@@ -270,6 +270,19 @@ describe("POST（実行）", () => {
     expect(tx.importJob.create).not.toHaveBeenCalled();
   });
 
+  it("⚠失敗したまま未処理の行が残るジョブも塞ぐ（再開ボタンで動きうる）", async () => {
+    await POST(postRequest({ limit: 2 }));
+    const where = tx.importJob.findFirst.mock.calls[0][0].where;
+    // 印のある行を持つ「まとめて反映」のジョブだけを見る
+    expect(where.jobType).toBe("registry_pdf_bulk");
+    expect(where.rows.some.rawData).toMatchObject({ equals: "registry_owner_apply" });
+    // 進行中 + 「失敗だが未処理の行が残っている」の2通りを塞ぐ
+    expect(where.OR).toEqual([
+      { status: { in: ["pending", "processing"] } },
+      { status: "failed", rows: { some: { status: "pending" } } },
+    ]);
+  });
+
   it("⚠ほかの取込が処理中のときは受け付けない（同時に走らせない）", async () => {
     (isRegistryPdfBulkWorkerBusy as unknown as Mock).mockReturnValue(true);
     const res = await POST(postRequest({ limit: 2 }));

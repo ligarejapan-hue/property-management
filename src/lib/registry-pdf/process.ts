@@ -20,6 +20,7 @@ import { lockPropertyRecordForWrite, lockPropertyRow } from "@/lib/property-reco
 import { lockOwnerRow } from "@/lib/edit-lock/row-locks";
 import { isResourceEditLocked } from "@/lib/edit-lock/service";
 import { ApiError } from "@/lib/api-helpers";
+import { safeErrorSummary } from "@/lib/safe-error-summary";
 import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
@@ -104,6 +105,14 @@ export interface ProcessRegistryPdfArgs {
    * 既定 false = 従来どおり(空の項目を謄本の値で埋める)。
    */
   ownersOnly?: boolean;
+  /**
+   * ジョブ作成後の失敗を記録するとき、**生のエラー文を残さない**(種類とコードに丸める)。
+   * ⚠データベースや保管庫の例外は、拒否した呼び出しの中身(登記由来の住所など)を
+   *   文面に埋め込むことがある。「見せたものだけ書く」経路(添付済み謄本からの反映・
+   *   まとめて反映)では必ず指定する。既定 false = 従来どおり(手動取込・自動取得は
+   *   担当者の手がかりとして生の文面を残す)。
+   */
+  sanitizeFailureDetails?: boolean;
   /**
    * **書き込みのロックと同じ1文で担当者スコープを見直す**(添付済み謄本からの反映)。
    * ⚠担当者だけの権限(field_staff)は、route の事前確認を通ったあと書き込みまでの
@@ -1065,8 +1074,12 @@ export async function processRegistryPdf(
     // ジョブ作成後に発生したエラー (Mode A の NOT_FOUND / Prisma 例外 等)。
     // ImportJob を "failed" で finalize し、ImportJobRow も error で1件残す。
     // 失敗の詳細は元のエラーから取り出して errorMessage に格納する。
-    failureReason =
-      innerErr instanceof Error ? innerErr.message : "PDF取込中に不明なエラーが発生しました";
+    failureReason = args.sanitizeFailureDetails
+      ? // ⚠この経路は生のエラー文を残さない(登記由来の住所を含みうる)
+        `取込中にエラーが発生しました (${safeErrorSummary(innerErr)})`
+      : innerErr instanceof Error
+        ? innerErr.message
+        : "PDF取込中に不明なエラーが発生しました";
 
     // ベストエフォートで finalize。recovery 自体が失敗しても元のエラーを優先する。
     try {

@@ -239,6 +239,9 @@ export async function applyRegistryOwnersToProperty(
     // ⚠所有者だけを入れる。下見も確認画面も所有者しか見せていないので、
     //   物件の項目(不動産番号・地番・家屋番号・登記状況)は書き換えない。
     ownersOnly: true,
+    // ⚠この経路は「見せたものだけ書く」。取込処理が失敗を記録するときも、
+    //   生のエラー文(登記由来の住所を含みうる)を残さない。
+    sanitizeFailureDetails: true,
   });
 
   return {
