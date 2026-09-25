@@ -3333,9 +3333,16 @@ export interface CorporateApplyResponse {
   owner: { id: string; version: number };
 }
 
+/**
+ * ⚠ヘッダは必ず `editLockHeaders()` を通す(手組みしない・6つの入口すべてが通す契約・
+ *   Task 8)。`opts.lockId` を渡した呼び出し(物件詳細の所有者カード内)だけ
+ *   `X-Edit-Lock` が乗る。省略した呼び出し元(`admin/owners/[id]`・鍵を持たない入口)は
+ *   合言葉(`X-Edit-Screen`)だけを送る(`updateOwner` と同型)。
+ */
 export async function applyOwnerCorporate(
   ownerId: string,
   payload: CorporateApplyRequest,
+  opts: { lockId?: string | null } = {},
 ): Promise<CorporateApplyResponse> {
   if (USE_MOCK) {
     await mockDelay();
@@ -3348,7 +3355,7 @@ export async function applyOwnerCorporate(
     `/api/owners/${ownerId}/corporate-apply`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...editLockHeaders(opts.lockId) },
       body: JSON.stringify(payload),
     },
   );

@@ -6,20 +6,19 @@ import { join } from "node:path";
  * 保存窓口を呼ぶ入口すべてが合言葉のヘッダを付ける(仕様 5.1・6.1)。
  * 1つでも付け忘れると、その入口からの保存だけが鍵をすり抜ける。
  *
- * ⚠**corporate-lookup-panel.tsx は今はまだ含めない**(Task 7 の判断)。
- *   仕様上の6入口目だが、配線するのは Task 8。このタスク時点ではまだ
- *   `editLockHeaders(` を通していないため、ここに含めると走査が常に落ちた
- *   ままになり、「フル vitest run が green」というこのタスクのゲートを
- *   満たせない。Task 8 がその入口を配線するときに、下の
- *   `describe("corporate-lookup-panel.tsx(6入口目)")` を書き換えること
- *   (そのときにその「まだ配線していない」テストが赤くなり、書き換えを強制する
- *   =fix round1 Important #3)。
+ * ⚠**corporate-lookup-panel.tsx(6入口目)は Task 8 でここに合流した**。
+ *   ヘッダの組み立て自体は `updateOwner` と同型で `api-client.ts` の
+ *   `applyOwnerCorporate` が持つ(パネル自身は手組みしない)。下の
+ *   `ENTRYPOINT_CALL_SITES` に `applyOwnerCorporate` の呼び出し箇所を追加し、
+ *   パネル側は「受け取った lockId を取り違えずに渡しているか」を別の検査で固定する
+ *   (`updateOwner`/`page.tsx` の関係と同じ形)。
  */
 const ENTRYPOINTS = [
   "src/components/properties/property-edit-form.tsx",
   "src/app/(dashboard)/properties/[id]/page.tsx",
   "src/components/properties/registry-chiban-popup.tsx",
   "src/lib/api-client.ts",
+  "src/components/owners/corporate-lookup-panel.tsx",
 ];
 
 /**
@@ -101,6 +100,12 @@ const ENTRYPOINT_CALL_SITES: { label: string; file: string; nameOpenParen: RegEx
     nameOpenParen: /export async function updateOwner\(/,
     headerCall: /\.\.\.editLockHeaders\(opts\.lockId\)/,
   },
+  {
+    label: "法人番号の反映(api-client.ts・applyOwnerCorporate)",
+    file: "src/lib/api-client.ts",
+    nameOpenParen: /export async function applyOwnerCorporate\(/,
+    headerCall: /\.\.\.editLockHeaders\(opts\.lockId\)/,
+  },
 ];
 
 describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切り出して検査)", () => {
@@ -124,6 +129,36 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
       "utf8",
     ).replace(/\r\n/g, "\n");
     expect(src).toMatch(/updateOwner\(po\.ownerId,[\s\S]*?\{\s*lockId:\s*lock\.lockId,?\s*\}/);
+  });
+
+  it("法人番号パネルの呼び出し元(corporate-lookup-panel.tsx)は受け取った lockId を applyOwnerCorporate の第3引数に渡す", () => {
+    // ⚠これだけでは「ヘッダが付く」ことは固定できない(それは上の applyOwnerCorporate
+    //   側の検査の役目)。ここで固定するのは、パネルが受け取ったprops(lockId)を
+    //   取り違えずに渡していること(所有者カードの同種テストと同趣旨・二重の網)。
+    const src = readFileSync(
+      join(process.cwd(), "src/components/owners/corporate-lookup-panel.tsx"),
+      "utf8",
+    ).replace(/\r\n/g, "\n");
+    expect(src).toMatch(/applyOwnerCorporate\(\s*ownerId,[\s\S]*?\{\s*lockId,?\s*\}/);
+  });
+
+  it("物件詳細の所有者カード内は CorporateLookupPanel にカードの世代(lock.lockId)を渡す", () => {
+    // 案件ステータス・導入ルート等と同じく、鍵を持つ画面はカードの世代を渡す。
+    const src = readFileSync(
+      join(process.cwd(), "src/app/(dashboard)/properties/[id]/page.tsx"),
+      "utf8",
+    ).replace(/\r\n/g, "\n");
+    expect(src).toMatch(/<CorporateLookupPanel[\s\S]{0,900}?lockId=\{lock\.lockId\}/);
+  });
+
+  it("admin/owners/[id] は鍵を持たない入口なので CorporateLookupPanel に lockId を渡さない", () => {
+    const src = readFileSync(
+      join(process.cwd(), "src/app/(dashboard)/admin/owners/[id]/page.tsx"),
+      "utf8",
+    ).replace(/\r\n/g, "\n");
+    const block = src.match(/<CorporateLookupPanel[\s\S]*?\/>/)?.[0];
+    expect(block).toBeTruthy();
+    expect(block).not.toMatch(/lockId=/);
   });
 
   it("client 側の合言葉モジュールは server 専用の依存を引かない", () => {
@@ -150,24 +185,5 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
       const src = readFileSync(join(process.cwd(), rel), "utf8").replace(/\r\n/g, "\n");
       expect(src).not.toMatch(/from "@\/lib\/edit-lock\/screen-token"/);
     }
-  });
-});
-
-/**
- * 6入口目(fix round1 Important #3)。
- *
- * ⚠この入口だけは「まだ配線していないこと」を**今日**固定する。Task 8が
- *   `corporate-lookup-panel.tsx` を配線した瞬間、このテストが赤くなる
- *   (=下のコメントに従って `ENTRYPOINT_CALL_SITES` へ追記し、この
- *   describe を消すか「配線済み」の検査に差し替える、という強制力を持つ)。
- *   コメントだけで「追記すること」と書いても誰も気づけない、というレビュー指摘への対応。
- */
-describe("corporate-lookup-panel.tsx(6入口目・Task 8がまだ配線していない)", () => {
-  it("⚠まだ editLockHeaders を通していない(Task 8がここを配線したらこのテストは赤くなる→上のENTRYPOINT_CALL_SITESへ追記して差し替えること)", () => {
-    const src = readFileSync(
-      join(process.cwd(), "src/components/owners/corporate-lookup-panel.tsx"),
-      "utf8",
-    ).replace(/\r\n/g, "\n");
-    expect(src).not.toMatch(/\.\.\.editLockHeaders\(/);
   });
 });

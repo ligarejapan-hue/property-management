@@ -1799,6 +1799,10 @@ function OwnerCard({
                     zip: editableFields.zip,
                     corporateNumber: editableFields.corporateNumber,
                   }}
+                  // ⚠このカードが持つ鍵の世代を渡す(Task 8)。持っているとき
+                  //   (lock.lockId)だけ反映の保存にX-Edit-Lockが乗る(editLockHeaders経由・
+                  //   applyOwnerCorporate側の契約・updateOwnerと同型)。
+                  lockId={lock.lockId}
                   onApplied={async () => {
                     // 反映成功 → 親側で owner を再フェッチし、最新値・version を反映する
                     await onRefresh();
@@ -2068,6 +2072,16 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
  *   まだこの試行の封筒のmessageのままなら」だけ差し替える
  *   (`prev === envelopeMessage` の一致を条件にする)。既に別の値(成功でnull・
  *   別の試行のmessage)に変わっていれば何もしない。
+ * ⚠**呼び出し元が持つ世代(caller-owned sequence number・review round3 K)**。
+ *   上の一致条件だけでは、後着の refusal が**先着と同じ封筒文言**(この窓口の
+ *   423は氏名・時刻を返さない定数文言)を出したとき、先着の古い組み立てが
+ *   後着の`prev===envelopeMessage`を満たしたまま先に上書きしてしまい、
+ *   後着自身の組み立てが「もう封筒のままではない」と誤判定されて捨てられる
+ *   (older-wins)。呼び出し元(コンポーネント)が `useRef(0)` で持つ
+ *   `seqRef` をこの関数の**呼び出しごとに先頭でインクリメント**し、組み立てが
+ *   届いた時点で「自分の番号がまだ最新か」を先に確認する。呼び出し元が
+ *   `seqRef` を省略した場合(この関数を単発で呼ぶテスト等)は、呼び出しごとに
+ *   新しい `{ current: 0 }` を割り当てる=従来どおり常に「自分が最新」になる。
  */
 export async function runNoLockPropertyPatch(
   propertyId: string,
@@ -2076,7 +2090,9 @@ export async function runNoLockPropertyPatch(
   setSaving: (v: boolean) => void,
   setError: Dispatch<SetStateAction<string | null>>,
   onRefresh: () => void,
+  seqRef: { current: number } = { current: 0 },
 ): Promise<void> {
+  const mySeq = ++seqRef.current;
   setSaving(true);
   setError(null);
   try {
@@ -2099,9 +2115,10 @@ export async function runNoLockPropertyPatch(
       //   届いたら(または上限時間で諦めたら)差し替える。await しない=この
       //   catchはすぐ終わり、finallyがすぐ走って控えの disabled/spinner も解除される。
       setError(envelopeMessage);
-      void composeEditLockedMessage("property", propertyId, envelopeMessage).then((m) =>
-        setError((prev) => (prev === envelopeMessage ? m : prev)),
-      );
+      void composeEditLockedMessage("property", propertyId, envelopeMessage).then((m) => {
+        if (seqRef.current !== mySeq) return; // 後発の試行が既に始まっている＝この組み立ては古い
+        setError((prev) => (prev === envelopeMessage ? m : prev));
+      });
       return;
     }
     setError(err instanceof Error ? err.message : "保存に失敗しました");
@@ -2123,6 +2140,9 @@ function CaseStatusField({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 呼び出し元が持つ世代(review round3 K)。後着の refusal が先着の古い組み立てに
+  // 上書きされないようにするカウンタ。
+  const saveSeqRef = useRef(0);
 
   const handleChange = (value: string) =>
     runNoLockPropertyPatch(
@@ -2132,6 +2152,7 @@ function CaseStatusField({
       setSaving,
       setError,
       onRefresh,
+      saveSeqRef,
     );
 
   const label = CASE_STATUS_LABELS[property.caseStatus] ?? property.caseStatus;
@@ -2193,6 +2214,9 @@ function IntroductionRouteField({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 呼び出し元が持つ世代(review round3 K)。後着の refusal が先着の古い組み立てに
+  // 上書きされないようにするカウンタ。
+  const saveSeqRef = useRef(0);
 
   const handleChange = (value: string) =>
     runNoLockPropertyPatch(
@@ -2202,6 +2226,7 @@ function IntroductionRouteField({
       setSaving,
       setError,
       onRefresh,
+      saveSeqRef,
     );
 
   const label = property.introductionRoute

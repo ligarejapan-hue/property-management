@@ -13,11 +13,12 @@
 // raw XML / API レスポンス本文を画面外に持ち出すことはしない。
 // 検索結果は React state のみで保持し、自動保存・自動 lookup はしない。
 
-import { useState } from "react";
+import { useState, useRef, type Dispatch, type SetStateAction } from "react";
 import { AlertTriangle, Search, Loader2, CheckCircle2 } from "lucide-react";
 import {
   lookupOwnerCorporateNumber,
   applyOwnerCorporate,
+  apiErrorCode,
   type CorporateLookupApiResponse,
   type CorporateIdentifierKindDTO,
   type CorporateLookupConflictDTO,
@@ -27,6 +28,9 @@ import {
   normalizeCorporateIdentifier,
   calculateCorporateNumberFromCompanyNumber,
 } from "@/lib/corporate-number";
+// EDIT_LOCKEDの文言組み立て(仕様6.5・Task 7で先例のある鍵を持たない入口の型)。
+// 窓口の423は氏名・時刻を返さないため、状態窓口へ1回だけ問い合わせる。
+import { composeEditLockedMessage } from "@/lib/edit-lock/locked-message";
 
 interface CorporateLookupPanelProps {
   ownerId: string;
@@ -48,9 +52,58 @@ interface CorporateLookupPanelProps {
   };
   /** Phase C: 反映成功時に親側で owner を再フェッチさせる。 */
   onApplied?: () => void | Promise<void>;
+  /**
+   * 反映の保存に載せる鍵の世代(Task 8・仕様 6.1/6.5)。
+   *
+   * このパネルは**物件詳細の所有者カード内**と **`admin/owners/[id]`** の2画面に
+   * 置かれる。所有者カード内はカードが持つ鍵の世代(`useEditLock`の`lockId`)を
+   * ここへ渡す(=`applyOwnerCorporate`の保存にX-Edit-Lockが乗る)。管理画面は
+   * 鍵を持たない入口なので**渡さない**(=合言葉だけ・423のときはこのパネルが
+   * 文言を出す)。⚠取得はこのパネル自身ではしない(カードの鍵をそのまま使う)。
+   */
+  lockId?: string | null;
 }
 
 type ApplyTarget = "name" | "address" | "zip" | "corporateNumber";
+
+/**
+ * 反映(apply)の失敗が `EDIT_LOCKED` なら、氏名+時刻の文を組み立てて `applyError` へ
+ * 表示する(仕様6.5)。呼び出し側(`handleApply`)は、これが `true` を返したら
+ * 既存の `msg.includes` 分岐へ進まず即座に return する。
+ *
+ * ⚠node から直接呼べるよう extract する(`runChibanSave`/`runNoLockPropertyPatch` と
+ *   同型・review round1〜3 の教訓をそのまま踏襲)。
+ * ⚠**封筒の message は同期的に即座に表示し、組み立てた文は後から差し替える**
+ *   (review round2 Important A)。`composeEditLockedMessage` を await すると、
+ *   状態窓口が固まったとき反映ボタン等の控えが数十秒固まる。ここでは await しない。
+ * ⚠**古い組み立てが新しい状態を上書きしない世代の見張り**(review round2 Important G)。
+ *   `setApplyError` を React の更新関数の形で受け、「今出ている値がまだこの試行の
+ *   封筒のmessageのままなら」だけ差し替える(`prev === envelopeMessage`)。
+ * ⚠**呼び出し元が持つ世代(caller-owned sequence number・review round3 K)**。
+ *   窓口の423は氏名・時刻を返さない定数文言のため、上の一致条件だけでは
+ *   後着の refusal が先着の古い組み立てに older-wins で上書きされ得る。
+ *   呼び出し元(パネル)が `useRef(0)` で持つ `seqRef` を呼び出しごとに
+ *   インクリメントし、組み立てが届いた時点で「自分の番号がまだ最新か」を
+ *   先に確認する。省略時は呼び出しごとに新しい `{ current: 0 }` を割り当てる
+ *   (=常に自分が最新)。
+ */
+export function handleCorporateApplyEditLockedError(
+  err: unknown,
+  ownerId: string,
+  setApplyError: Dispatch<SetStateAction<string | null>>,
+  seqRef: { current: number } = { current: 0 },
+): boolean {
+  if (apiErrorCode(err) !== "EDIT_LOCKED" || !(err instanceof Error)) return false;
+  const envelopeMessage = err.message;
+  const mySeq = ++seqRef.current;
+  // ⚠即座に(状態窓口の応答を待たずに)封筒のmessageを出す。
+  setApplyError(envelopeMessage);
+  void composeEditLockedMessage("owner", ownerId, envelopeMessage).then((m) => {
+    if (seqRef.current !== mySeq) return; // 後発の試行が既に始まっている＝この組み立ては古い
+    setApplyError((prev) => (prev === envelopeMessage ? m : prev));
+  });
+  return true;
+}
 
 export default function CorporateLookupPanel({
   ownerId,
@@ -60,6 +113,7 @@ export default function CorporateLookupPanel({
   ownerVersion,
   fieldEditable,
   onApplied,
+  lockId,
 }: CorporateLookupPanelProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +139,9 @@ export default function CorporateLookupPanel({
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applied, setApplied] = useState(false);
+  // 呼び出し元が持つ世代(review round3 K)。反映の423が後着で同じ封筒文言を
+  // 返したとき、先着の古い組み立てに上書きされないようにするカウンタ。
+  const applySeqRef = useRef(0);
 
   // 12桁(会社法人等番号) / 13桁(法人番号・CD正) を受け付ける。invalid は検索不可。
   const kind = classifyCorporateIdentifier(rawCorporateNumber);
@@ -176,21 +233,25 @@ export default function CorporateLookupPanel({
         ? searchedFor ?? undefined
         : undefined;
     const submit = (acknowledgeConflict?: boolean) =>
-      applyOwnerCorporate(ownerId, {
-        corporateNumber: record.corporateNumber,
-        version: ownerVersion,
-        apply: applyTargets,
-        expectedRecord: {
+      applyOwnerCorporate(
+        ownerId,
+        {
           corporateNumber: record.corporateNumber,
-          name: record.name,
-          address: record.address,
-          postCode: record.postCode,
-          updateDate: record.updateDate,
+          version: ownerVersion,
+          apply: applyTargets,
+          expectedRecord: {
+            corporateNumber: record.corporateNumber,
+            name: record.name,
+            address: record.address,
+            postCode: record.postCode,
+            updateDate: record.updateDate,
+          },
+          allowClosed: closed ? true : undefined,
+          acknowledgeConflict,
+          companyRegistryNumber: companyRegistry12,
         },
-        allowClosed: closed ? true : undefined,
-        acknowledgeConflict,
-        companyRegistryNumber: companyRegistry12,
-      });
+        { lockId },
+      );
     setApplying(true);
     setApplyError(null);
     try {
@@ -200,6 +261,11 @@ export default function CorporateLookupPanel({
         await onApplied();
       }
     } catch (err) {
+      // ⚠鍵を持つ画面(所有者カード)・持たない画面(管理画面)のどちらでも、423は
+      //   ここで先に処理する(仕様6.5)。既存の msg.includes 分岐(下)は変えない。
+      if (handleCorporateApplyEditLockedError(err, ownerId, setApplyError, applySeqRef)) {
+        return;
+      }
       const msg = err instanceof Error ? err.message : "反映に失敗しました";
       // 「明らかな不一致(conflict)」は確認のうえ acknowledgeConflict=true で再送する
       // （allowClosed と同型）。generic CONFLICT(楽観ロック)より先に判定する
@@ -222,6 +288,9 @@ export default function CorporateLookupPanel({
             await onApplied();
           }
         } catch (err2) {
+          if (handleCorporateApplyEditLockedError(err2, ownerId, setApplyError, applySeqRef)) {
+            return;
+          }
           setApplyError(
             err2 instanceof Error ? err2.message : "反映に失敗しました",
           );
