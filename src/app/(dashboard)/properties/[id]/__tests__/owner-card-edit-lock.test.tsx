@@ -58,6 +58,23 @@ function stubFetch(handler: (url: string, init?: RequestInit) => Promise<Respons
   return fetchMock;
 }
 
+const OWNER_CARD_MARKER = "function OwnerCard({";
+
+/**
+ * `OwnerCard` **本体だけ**を切り出す(branch review Minor #4)。
+ * ⚠`src.slice(ownerCardIndex)` は末尾までそのまま返るため、実際には
+ *   `PropertyOwnerNoteEditor` 以降(12個のコンポーネント)も含んでしまい、
+ *   「OwnerCard本体だけ」という前提が崩れる。次の `\nfunction ` の手前で切る。
+ */
+function extractOwnerCardSource(source: string): string {
+  const start = source.indexOf(OWNER_CARD_MARKER);
+  if (start === -1) return "";
+  const bodyStart = start + OWNER_CARD_MARKER.length;
+  const nextFunction = source.slice(bodyStart).match(/\nfunction /);
+  const end = nextFunction ? bodyStart + nextFunction.index! : source.length;
+  return source.slice(start, end);
+}
+
 describe("updateOwner(所有者の更新)のヘッダ", () => {
   beforeEach(() => {
     resetScreenTokenForTest();
@@ -133,21 +150,31 @@ describe("runOwnerLockAcquire(所有者カードの取得・fail open)", () => {
 });
 
 describe("所有者カードの配線(source assertion)", () => {
-  it("4) useEditLock・EditLockBannerを含み、updateOwnerの第3引数にlock.lockIdを渡す", () => {
+  it("4) useEditLock・EditLockBanner(要素として)を含み、updateOwnerの第3引数にlock.lockIdを渡す", () => {
     expect(src).toContain("useEditLock(");
-    expect(src).toContain("EditLockBanner");
+    // ⚠(branch review Minor #5) import行だけでも "EditLockBanner" という文字列は
+    //   含まれてしまう(要素を削ってもこの検査は落ちない)。要素として描画している
+    //   ことをpropsごと固定する。
+    expect(src).toMatch(/<EditLockBanner state=\{lock\.state\}/);
     expect(src).toMatch(
       /updateOwner\(po\.ownerId,[\s\S]*?\{\s*lockId:\s*lock\.lockId,?\s*\}/,
     );
   });
 
-  it("保存の失敗はapiErrorCodeで読んだコードをnoteSaveErrorへ渡す(写像はTask2の純関数に任せる)", () => {
-    expect(src).toContain("apiErrorCode(");
-    expect(src).toContain("noteSaveError(");
+  it("保存の失敗はapiErrorCode(err)の戻り値をそのままnoteSaveErrorへ渡す(写像はTask2の純関数に任せる)", () => {
+    // ⚠(branch review Important #1) 文字列が「どこかに」あるかだけの検査だと、
+    //   `lock.noteSaveError(null, null)` のような書き換え(423の帯が二度と出なく
+    //   なる回帰)でも green のままになる。引数そのものを固定する。
+    expect(src).toMatch(/noteSaveError\(\s*apiErrorCode\(err\)/);
   });
 
-  it("入力・キー・ポインタでnoteActivityを呼ぶ(期限切れの取り直しの引き金)", () => {
-    expect(src).toContain("noteActivity()");
+  it("編集フォームはinput・keydown・pointerdownの3つでnoteActivityを呼ぶ(期限切れの取り直しの引き金)", () => {
+    // ⚠(branch review Important #2) 「入力・キー・ポインタ」と名乗るテストが
+    //   `noteActivity()` の出現を1回しか見ていないと、onInput/onKeyDownを消しても
+    //   onPointerDownの1個だけで green になる。3つとも個別に固定する。
+    expect(src).toMatch(/onInput=\{\(\) => lock\.noteActivity\(\)\}/);
+    expect(src).toMatch(/onKeyDown=\{\(\) => lock\.noteActivity\(\)\}/);
+    expect(src).toMatch(/onPointerDown=\{\(\) => lock\.noteActivity\(\)\}/);
   });
 
   it("保存ボタンのdisabledはcanSubmitSaveの戻り値を含む(Task5の判断をそのまま再利用)", () => {
@@ -155,15 +182,19 @@ describe("所有者カードの配線(source assertion)", () => {
   });
 
   it("fail openの通知はshouldShowLockUnavailableNotice経由(Task5の判断をそのまま再利用)", () => {
-    expect(src).toMatch(/shouldShowLockUnavailableNotice\(\s*lockUnavailable/);
+    // ⚠(branch review Minor #6) 第1引数(lockUnavailable)だけを固定すると、
+    //   idle以外で通知を消す第2引数(lock.state.kind)側が抜け落ちても green になる。
+    //   両方の引数を固定する。
+    expect(src).toMatch(
+      /shouldShowLockUnavailableNotice\(\s*lockUnavailable,\s*lock\.state\.kind\s*\)/,
+    );
   });
 });
 
 describe("所有者ごとに独立した鍵(per-owner independence・カードは資源IDを混ぜない)", () => {
   // OwnerCard 本体だけを見る(走査ヘルパーの定義や他のコンポーネントを含めない)。
-  const OWNER_CARD_MARKER = "function OwnerCard({";
   const ownerCardIndex = src.indexOf(OWNER_CARD_MARKER);
-  const ownerCardSrc = src.slice(ownerCardIndex);
+  const ownerCardSrc = extractOwnerCardSource(src);
 
   it("OwnerCardが実在する", () => {
     expect(ownerCardIndex).toBeGreaterThan(-1);
@@ -198,8 +229,6 @@ describe("複製タブ確認は画面につき1回だけ(once per page・Task 6�
   });
 
   it("9) OwnerCard自身のソースはensureUniqueScreenTokenを呼ばない(カードごとに300ms待たせない)", () => {
-    const ownerCardIndex = src.indexOf("function OwnerCard({");
-    const ownerCardSrc = src.slice(ownerCardIndex);
-    expect(ownerCardSrc).not.toContain("ensureUniqueScreenToken(");
+    expect(extractOwnerCardSource(src)).not.toContain("ensureUniqueScreenToken(");
   });
 });
