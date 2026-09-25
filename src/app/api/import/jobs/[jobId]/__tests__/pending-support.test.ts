@@ -32,7 +32,13 @@ vi.mock("@/lib/permissions", () => ({ hasPermission: () => true }));
 vi.mock("@/lib/prisma", () => ({
   default: {
     importJob: { findUnique: vi.fn() },
-    importJobRow: { findMany: vi.fn(), count: vi.fn(), groupBy: vi.fn() },
+    importJobRow: {
+      findMany: vi.fn(),
+      count: vi.fn(),
+      groupBy: vi.fn(),
+      // registry_pdf_bulk では「まとめて反映の印」の確認で先頭1行を読む
+      findFirst: vi.fn(),
+    },
   },
 }));
 
@@ -42,7 +48,7 @@ import { GET } from "../route";
 
 type PM = {
   importJob: { findUnique: Mock };
-  importJobRow: { findMany: Mock; count: Mock; groupBy: Mock };
+  importJobRow: { findMany: Mock; count: Mock; groupBy: Mock; findFirst: Mock };
 };
 const pm = prisma as unknown as PM;
 

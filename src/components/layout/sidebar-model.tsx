@@ -99,6 +99,9 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       { label: "所有者CSV取込", href: "/import#owner-match", icon: ic(Users), minRole: "office_staff" },
       // 社外から届いたメール・PDF・ブラウザ画面を貼って物件にする(2026-08 新設)。
       { label: "貼り付けて物件化", href: "/import/paste", icon: ic(ClipboardPaste), minRole: "office_staff" },
+      // ⚠**管理者のみ**。他人の担当物件もまとめて触るため(APIも管理者だけを通す)。
+      //   1件ずつの反映は物件ページの所有者タブにある(こちらは溜まった分の一括処理)。
+      { label: "謄本から所有者をまとめて反映", href: "/import/registry-owners", icon: ic(Users), minRole: "admin" },
     ],
   },
   {

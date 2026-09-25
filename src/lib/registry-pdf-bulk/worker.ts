@@ -1,6 +1,13 @@
 import prisma from "@/lib/prisma";
+import { getUserPermissions } from "@/lib/api-helpers";
 import { buildPropertyIndex } from "./match";
 import { processRegistryPdfBulkRow } from "./process-row";
+import {
+  REGISTRY_OWNER_APPLY_JOB_TYPE,
+  isRegistryOwnerApplyRow,
+} from "@/lib/registry-owner-bulk/marker";
+import { findMissingRegistryOwnerApplyPerm } from "@/lib/registry-owner-bulk/permissions";
+import { processRegistryOwnerApplyRow } from "@/lib/registry-owner-bulk/process-row";
 
 /**
  * 所有者事項PDF一括取込のインプロセス直列ワーカー。
@@ -113,22 +120,65 @@ async function processJob(jobId: string): Promise<void> {
     return;
   }
 
-  // 物件indexはジョブ開始時に1回だけ構築(行ごとの全件スキャンを避ける)
-  const properties = await prisma.property.findMany({
-    select: { id: true, address: true, realEstateNumber: true },
-  });
-  const index = buildPropertyIndex(properties);
-
   const pendingRows = await prisma.importJobRow.findMany({
     where: { jobId, status: "pending" },
     orderBy: { rowNumber: "asc" },
-    select: { id: true, rowNumber: true },
+    select: { id: true, rowNumber: true, rawData: true },
   });
+
+  // この取込記録には2種類の行が入りうる(→ registry-owner-bulk/marker.ts):
+  //   (a) PDFを上げた一括取込の行  (b)「謄本から所有者をまとめて反映」の行(印つき)
+  // ⚠待機列とワーカーは1本のまま(同時に走る処理を常に1つに保つ)。
+  const isOwnerApply = (rawData: unknown) =>
+    isRegistryOwnerApplyRow(REGISTRY_OWNER_APPLY_JOB_TYPE, rawData);
+  const ownerApplyRows = pendingRows.filter((row) => isOwnerApply(row.rawData));
+
+  // ⚠まとめて反映の行があるときは、**処理を始める前に実行者の権限を読み直す**。
+  //   受け付けたあとに権限を外された場合、行ごとに失敗を積むと1,821件ぶんの
+  //   「失敗」ができてしまう。ジョブごと失敗にして、原因を直してから再開させる。
+  let ownerApplyPerms: Awaited<ReturnType<typeof getUserPermissions>> | null = null;
+  if (ownerApplyRows.length > 0) {
+    ownerApplyPerms = await getUserPermissions(executor.id);
+    const missing = findMissingRegistryOwnerApplyPerm(executor.role, ownerApplyPerms);
+    if (missing) {
+      console.error(
+        `[registry-owner-bulk] 実行者の権限が足りないため中止 jobId=${jobId} 不足=${missing}`,
+      );
+      await prisma.importJob.update({
+        where: { id: jobId },
+        data: { status: "failed", completedAt: new Date() },
+      });
+      return;
+    }
+  }
+
+  // 物件indexは**PDFを上げた行があるときだけ**構築する(全件スキャンで重いため、
+  // まとめて反映だけのジョブでは作らない)。
+  let index: ReturnType<typeof buildPropertyIndex> | null = null;
+  const propertyIndex = async () => {
+    if (!index) {
+      const properties = await prisma.property.findMany({
+        select: { id: true, address: true, realEstateNumber: true },
+      });
+      index = buildPropertyIndex(properties);
+    }
+    return index;
+  };
+
   for (const row of pendingRows) {
+    if (isOwnerApply(row.rawData)) {
+      await processRegistryOwnerApplyRow({
+        jobId,
+        rowId: row.id,
+        executor,
+        perms: ownerApplyPerms ?? [],
+      });
+      continue;
+    }
     await processRegistryPdfBulkRow({
       jobId,
       rowId: row.id,
-      index,
+      index: await propertyIndex(),
       executor,
     });
   }

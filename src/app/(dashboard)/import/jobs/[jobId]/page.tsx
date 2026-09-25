@@ -96,6 +96,8 @@ interface ImportJob {
   summary?: ImportSummary;
   // B2: B1 で server が additive 返却する全体判定 / ページングメタ。
   isReceptionOwnerJob?: boolean;
+  /** 「謄本から所有者をまとめて反映」のジョブか(所有者事項PDF一括に相乗り)。 */
+  isRegistryOwnerApplyJob?: boolean;
   duplicateCount?: number;
   // B4(Codex P2): bulk-resolve scope="duplicate" の対象件数（needs_review のみ・「重複」始まり）。
   duplicateActionableCount?: number;
@@ -465,6 +467,9 @@ export default function ImportJobDetailPage() {
   const isReceptionOwnerJob = job?.isReceptionOwnerJob ?? false;
   // Task 11: 所有者事項PDF一括ジョブかどうか(再開ボタン・手動添付の分岐に使う)。
   const isRegistryPdfBulkJob = job?.jobType === "registry_pdf_bulk";
+  // 相乗りしているため、表示名はサーバ確定の印で出し分ける(種別名だけだと
+  // 「所有者事項PDF一括」と出て、何をした記録か分からない)。
+  const isRegistryOwnerApplyJob = job?.isRegistryOwnerApplyJob ?? false;
   // 他人の取込を閲覧しているだけ(import:read_all のみ)のときは変更操作を出さない
   // (Codex #349 R9 P2: 押して入力してから 403 になるのを防ぐ)。
   const canMutate = job?.canMutate === true;
@@ -706,7 +711,9 @@ export default function ImportJobDetailPage() {
         <div className="flex-1">
           <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">取込ジョブ詳細</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {getImportTypeLabel(job.jobType)} - {job.fileName}
+            {isRegistryOwnerApplyJob
+              ? job.fileName
+              : `${getImportTypeLabel(job.jobType)} - ${job.fileName}`}
           </p>
         </div>
         {/* ロールバックボタン: 物件CSV かつ完了状態のみ。ロールバック済みはバッジ表示のみ */}
