@@ -48,6 +48,34 @@ function fallbackUuid(): string {
   return `${Array.from({ length: 8 }, h).join("")}-${Array.from({ length: 4 }, h).join("")}-4${Array.from({ length: 3 }, h).join("")}-8${Array.from({ length: 3 }, h).join("")}-${Array.from({ length: 12 }, h).join("")}`;
 }
 
+function randomUuid(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return fallbackUuid();
+  }
+}
+
+/**
+ * この「文書」(タブ・ウィンドウ)の識別子(branch review・Task 6 fix round 1)。
+ *
+ * ⚠**モジュールを読み込んだときに1回だけ**採番する(`ScreenTokenEnv` 越しではない
+ *   =テストで差し替えない・複製タブは自分の JS モジュールインスタンスを別に読み込む
+ *   ため、この値も自然に変わる)。
+ * ⚠**なぜ要るか**: `answerScreenTokenProbes()` は「有効な間ずっと」問い合わせに答え続ける。
+ *   このリポジトリでは Task 6 が所有者カードごとに `useEditLock` を積むため、1つの
+ *   物件詳細タブの中に answerer が何本も立つ。`BroadcastChannel` は**同じ文書内の
+ *   別チャンネルにも配信する**ため、物件の編集ウィンドウが `ensureUniqueScreenToken()`
+ *   で「複製タブですか」と問い合わせると、同じタブの所有者カードが自分の answerer
+ *   から `i-have` を返してしまい、**自分自身を複製タブと誤認して合言葉を作り直す**
+ *   (そのカードが既に鍵を持っていれば、以後の合図・解放が古い合言葉のまま送られ、
+ *   猶予時間の分だけ自分の記録を編集できなくなる)。
+ * ⚠対策: `who-has`/`i-have` の両方にこの文書IDを載せ、**自分の文書IDと一致する
+ *   `i-have` は複製の証拠として扱わない**(本物の複製タブは別モジュールインスタンス
+ *   =別の文書IDで答えるので、そちらは従来どおり複製と判定される)。
+ */
+const DOCUMENT_ID = randomUuid();
+
 /** 本物のブラウザに向けた既定の env。 */
 const browserEnv: ScreenTokenEnv = {
   getItem(key) {
@@ -75,13 +103,7 @@ const browserEnv: ScreenTokenEnv = {
       close: () => channel.close(),
     };
   },
-  newId() {
-    try {
-      return crypto.randomUUID();
-    } catch {
-      return fallbackUuid();
-    }
-  },
+  newId: randomUuid,
 };
 
 let currentEnv: ScreenTokenEnv = browserEnv;
@@ -136,13 +158,17 @@ export async function ensureUniqueScreenToken(): Promise<string> {
   const duplicated = await new Promise<boolean>((resolve) => {
     const timer = setTimeout(() => resolve(false), SCREEN_TOKEN_PROBE_MS);
     channel.onMessage((data) => {
-      const msg = data as { type?: string; token?: string } | null;
-      if (msg?.type === "i-have" && msg.token === token) {
+      const msg = data as { type?: string; token?: string; docId?: string } | null;
+      // ⚠自分の文書からの返事(=同じタブの別の answerer。所有者カードが何枚も
+      //   answerScreenTokenProbes() を張っている・Task 6 fix round 1)は複製の
+      //   証拠として扱わない。本物の複製タブは別モジュールインスタンス=別の
+      //   docId で答えるので、そちらは従来どおり複製と判定する。
+      if (msg?.type === "i-have" && msg.token === token && msg.docId !== DOCUMENT_ID) {
         clearTimeout(timer);
         resolve(true);
       }
     });
-    channel.postMessage({ type: "who-has", token });
+    channel.postMessage({ type: "who-has", token, docId: DOCUMENT_ID });
   });
   channel.close();
 
@@ -158,9 +184,12 @@ export function answerScreenTokenProbes(): () => void {
   const channel = currentEnv.openChannel(CHANNEL);
   if (!channel) return () => {};
   channel.onMessage((data) => {
-    const msg = data as { type?: string; token?: string } | null;
+    const msg = data as { type?: string; token?: string; docId?: string } | null;
     if (msg?.type === "who-has" && msg.token === getScreenToken()) {
-      channel.postMessage({ type: "i-have", token: msg.token });
+      // ⚠自分の文書IDも載せる(Task 6 fix round 1)。受け取る側
+      //   (ensureUniqueScreenToken)が「これは自分自身からの返事だ」と
+      //   見分けられるようにするため。
+      channel.postMessage({ type: "i-have", token: msg.token, docId: DOCUMENT_ID });
     }
   });
   return () => channel.close();

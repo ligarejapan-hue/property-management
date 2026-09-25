@@ -153,6 +153,27 @@ describe("画面の合言葉(client)", () => {
     expect(token).toBe("no-channel-token");
   });
 
+  it("(branch review・Task6 fix round1) 同じ文書(document)からの返事は複製と数えない(自分のカードの答えを自分の複製と誤認しない)", async () => {
+    // ⚠answerScreenTokenProbes() と ensureUniqueScreenToken() は同じモジュール
+    //   インスタンス(=同じ「文書」)から呼ぶ。所有者カードがそれぞれ
+    //   answerScreenTokenProbes() を張ったまま、物件の編集ウィンドウが
+    //   ensureUniqueScreenToken() を呼ぶ状況を1つの env(=1つのタブ)の中で再現する。
+    const { env, storage } = createFakeEnv();
+    storage.set("edit-screen-token", "same-doc-token");
+    setScreenTokenEnvForTest(env);
+
+    const stopAnswering = answerScreenTokenProbes();
+    // ⚠自分の文書からの返事は無視されるので、複製の判定は(誰も答えなかったときと
+    //   同じく)300msの窓を待ち切って初めて確定する。
+    const promise = ensureUniqueScreenToken();
+    await vi.advanceTimersByTimeAsync(SCREEN_TOKEN_PROBE_MS);
+    const token = await promise;
+    stopAnswering();
+
+    expect(token).toBe("same-doc-token");
+    expect(storage.get("edit-screen-token")).toBe("same-doc-token");
+  });
+
   it("300msの窓を過ぎてから届いた返事は、複製と数えない", async () => {
     const { env, storage, hub } = createFakeEnv();
     storage.set("edit-screen-token", "late-answer-token");
@@ -213,14 +234,19 @@ describe("画面の合言葉(client)", () => {
 
       const stop = answerScreenTokenProbes();
       const asker = hub.openChannel("edit-screen");
-      let answer: { type?: string; token?: string } | null = null;
+      let answer: { type?: string; token?: string; docId?: string } | null = null;
       asker.onMessage((data) => {
-        answer = data as { type?: string; token?: string };
+        answer = data as { type?: string; token?: string; docId?: string };
       });
 
       asker.postMessage({ type: "who-has", token });
 
-      expect(answer).toEqual({ type: "i-have", token });
+      // ⚠(branch review・Task6 fix round1) 答えには自分の文書ID(docId)も載る。
+      //   値そのものは(モジュール読み込み時の乱数のため)固定できないので型だけ検査する。
+      const received = answer as { type?: string; token?: string; docId?: string } | null;
+      expect(received?.type).toBe("i-have");
+      expect(received?.token).toBe(token);
+      expect(typeof received?.docId).toBe("string");
       asker.close();
       stop();
     });
