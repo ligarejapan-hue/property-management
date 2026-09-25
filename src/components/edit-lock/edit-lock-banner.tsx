@@ -54,15 +54,18 @@ export function formatSince(since?: string): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+// ⚠外側の余白(task5 review round2)。この帯の呼び出し元(編集ウィンドウ)は続く
+//   本文(エラー表示・最初のセクション等)との間を空ける想定なので、ここで足す
+//   (BAND自体には焼き込まない=一覧の行・カード側の呼び出し元と余白の要否が違う)。
+// ⚠**この定数を使うのは `EditLockBanner` だけ**(task 7 fix・N6の続き)。
+//   `EditLockHolderBanner`(一覧・カード側)は自分の呼び出し元が既に行間を持つ
+//   前提のため、BANDのみで16pxの下余白は焼き込まない(BAND自体のコメントの前提どおり)。
+const BANNER_MARGIN = "mb-4";
+
 /**
  * いま画面を見ている本人向けの帯(自分が鍵を持っている/持っていない画面の両方で使う)。
  * `mine` は編集できている=既定では何も出さない(55分の予告があるときだけ出す)。
  */
-// ⚠外側の余白(task5 review round2)。この帯の呼び出し元(編集ウィンドウ)は続く
-//   本文(エラー表示・最初のセクション等)との間を空ける想定なので、ここで足す
-//   (BAND自体には焼き込まない=一覧の行・カード側の呼び出し元と余白の要否が違う)。
-const BANNER_MARGIN = "mb-4";
-
 export function EditLockBanner({ state, warnIdle }: { state: EditLockUiState; warnIdle: boolean }) {
   if (state.kind === "mine") {
     return warnIdle ? (
@@ -253,7 +256,9 @@ export function EditLockHolderBanner({
   const confirmRelease = createConfirmReleaseHandler({ release, setBusy, setConfirmOpen, setNotice });
 
   return (
-    <div className={`${BAND} ${BANNER_MARGIN}`}>
+    // ⚠BANNER_MARGIN(mb-4)は焼き込まない(task 7 fix)。この帯は一覧の行・カードの
+    //   中に置かれる想定で、その文脈の余白は呼び出し側が決める(BAND自体のコメントの前提どおり)。
+    <div className={BAND}>
       <div className="flex flex-1 flex-col gap-1">
         {shownNotice && <span>{shownNotice}</span>}
         {isHeld && <span>{label}</span>}

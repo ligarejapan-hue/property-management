@@ -127,9 +127,13 @@ describe("PropertyEditForm の配線(source assertion)", () => {
     expect(src).toContain("noteActivity()");
   });
 
-  it("旧・内部専用の初期化関数はexportしない(review round2 N4・後続画面が安全でない入口を写さないため)", () => {
-    expect(src).not.toContain("export async function initEditLockOnOpen");
-    expect(src).not.toContain("export function initEditLockOnOpen");
+  it("内部専用の初期化関数(initEditLockAttempt)はexportしない(review round2 N4・後続画面が安全でない入口を写さないため)", () => {
+    // ⚠(task 7 fix) 旧名 `initEditLockOnOpen` を固定していると、リネーム後の
+    //   現在の名前(`initEditLockAttempt`)で再exportされても検査をすり抜ける
+    //   (旧名の文字列はもうソースのどこにも無いので、この検査は常に通ってしまう)。
+    //   今の名前を直接固定する。
+    expect(src).not.toContain("export async function initEditLockAttempt");
+    expect(src).not.toContain("export function initEditLockAttempt");
   });
 
   it("5) コンポーネント本体がuseEffectの中でrunEditLockInitを、本物の引数で呼ぶ(review round1 Important + round2 N5)", () => {

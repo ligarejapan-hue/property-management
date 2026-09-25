@@ -66,4 +66,12 @@ describe("shouldShowLockUnavailableNotice(fail open通知と実際の鍵の帯�
   it("lockUnavailableでも、状態がmineへ動いたら出さない(取得できた=通常の帯に任せる)", () => {
     expect(shouldShowLockUnavailableNotice(true, "mine")).toBe(false);
   });
+
+  it("lockUnavailableでも、状態がforce_releasedへ動いたら出さない(実際の鍵の帯と矛盾させない・task 7 fix)", () => {
+    expect(shouldShowLockUnavailableNotice(true, "force_released")).toBe(false);
+  });
+
+  it("lockUnavailableでも、状態がdeletedへ動いたら出さない(実際の鍵の帯と矛盾させない・task 7 fix)", () => {
+    expect(shouldShowLockUnavailableNotice(true, "deleted")).toBe(false);
+  });
 });
