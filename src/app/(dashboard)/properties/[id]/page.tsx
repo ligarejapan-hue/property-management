@@ -30,18 +30,22 @@ import RegistryLocationSearchButton from "@/components/properties/registry-locat
 import { isLandPropertyType } from "@/lib/registry-fetch/registry-target";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
-import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, unlinkPropertyOwner, updateOwner, fetchQualityCheck, apiErrorCode, codeFromErrorBody } from "@/lib/api-client";
+import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, unlinkPropertyOwner, updateOwner, fetchQualityCheck, apiErrorCode, codeFromErrorBody, type EditLockStatusRow } from "@/lib/api-client";
 // 編集中の鍵(仕様 6.1・6.2)。所有者カードは1枚ごとに別資源として鍵を持つ(Task 6)。
 // ⚠複製タブ確認(ensureUniqueScreenToken・最大300ms)はこの画面(親)で1回だけ済ませ、
 //   結果(tokenReady)を各カードへ配る——カードごとに待たせない(下の PropertyDetailPage 内)。
 import { useEditLock } from "@/hooks/use-edit-lock";
+// 見ている側(仕様 6.3・Task 9)。物件+所有者すべての状態を1つの周期で問い合わせ、
+// 帯・disabledの判断はこの画面が row をそのまま見て決める(判断は状態を返すだけ)。
+import { useEditLockStatus } from "@/hooks/use-edit-lock-status";
+import type { EditLockStatusResource } from "@/lib/edit-lock/status-controller";
 import { ensureUniqueScreenToken, editLockHeaders } from "@/lib/edit-lock/screen-token-client";
-import { EditLockBanner, BAND as EDIT_LOCK_BAND } from "@/components/edit-lock/edit-lock-banner";
+import { EditLockBanner, EditLockHolderBanner, BAND as EDIT_LOCK_BAND } from "@/components/edit-lock/edit-lock-banner";
 // canSubmitSave・shouldShowLockUnavailableNotice は保存可否の判断(決定層)。
 // Task 5(物件の編集ウィンドウ)が切り出し、Task 6 fix round 1 #3 で
 // src/lib/edit-lock/save-gate.ts へ移した(component module一式を巻き込まずに
 // 2つの純関数だけを import できるようにするため)。同じ判断なので複製しない。
-import { canSubmitSave, shouldShowLockUnavailableNotice } from "@/lib/edit-lock/save-gate";
+import { canSubmitSave, shouldShowLockUnavailableNotice, isEditLockHeldByOther } from "@/lib/edit-lock/save-gate";
 // EDIT_LOCKEDの文言組み立て(仕様6.5・fix round1)。窓口の423は氏名・時刻を返さないため、
 // 状態の窓口へ1回だけ問い合わせて組み立てる(鍵を持たない入口専用)。
 import { composeEditLockedMessage } from "@/lib/edit-lock/locked-message";
@@ -492,6 +496,25 @@ export default function PropertyDetailPage({
     // 開いたとき1回だけ。
   }, []);
 
+  // 見ている側(仕様 6.3・Task 9)。物件+所有者すべての状態を1つの周期(30秒)で
+  // まとめて問い合わせ、帯・disabledの判断はrowをそのまま見て決める(判断は
+  // isEditLockHeldByOther/EditLockHolderBannerに任せる。ここでは配線だけ)。
+  // ⚠依存は`property`(オブジェクト参照)そのものにする。タブ切替・保存中フラグ等の
+  //   無関係な再描画では`property`自体は差し替わらない(fetchProperty/
+  //   refreshPropertyQuietlyが取り直したときだけ新しい参照になる)ため、
+  //   無関係な再描画のたびに新しい配列参照を作って直前のpollをstaleにしてしまう
+  //   ことがない。
+  const editLockStatusResources = useMemo<EditLockStatusResource[]>(() => {
+    if (!property) return [];
+    return [
+      { resourceType: "property", resourceId: property.id },
+      ...property.propertyOwners.map((po) => ({ resourceType: "owner" as const, resourceId: po.ownerId })),
+    ];
+  }, [property]);
+  const editLockStatus = useEditLockStatus(editLockStatusResources, {
+    enabled: property !== null,
+  });
+
   // F12 展開(19-A 第3実装): permissions / capabilities は ScreenProtectionProvider
   //（dashboard 全体を覆う）が mount 時に 1 回取得して context 配布するため、本ページ独自の
   // /api/me/permissions fetch は撤去し、provider 配布値（permissions / capabilities）から
@@ -677,6 +700,14 @@ export default function PropertyDetailPage({
   // 販売図面テンプレの対応種別（土地/区分マンション/戸建/一棟）。対応外は null。
   const salesSheetKind = salesSheetTemplateKindFor(property.propertyType);
 
+  // 見ている側(仕様 6.3・Task 9)。この物件の行が held_by_other/
+  // held_by_self_other_screen なら、編集ボタン・案件ステータス・導入ルート・
+  // 所在検索の地番保存を止める(6.3の表)。`lockId`は管理者にだけ届く
+  // (窓口の権限境界そのもの)ので、その有無で「鍵を外す」の表示可否を決める。
+  const propertyEditLockRow = editLockStatus.byKey("property", property.id);
+  const propertyEditLockHeld = isEditLockHeldByOther(propertyEditLockRow);
+  const propertyEditLockIsAdmin = propertyEditLockRow?.lockId !== undefined;
+
   return (
     <div data-pii-protected data-pii-surface="property">
       {/* Header */}
@@ -727,9 +758,10 @@ export default function PropertyDetailPage({
           )}
           <button
             onClick={() => setShowEditForm(true)}
+            disabled={propertyEditLockHeld}
             aria-label="物件を編集"
-            title="物件情報を編集"
-            className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+            title={propertyEditLockHeld ? "他の利用者が編集中のため編集できません" : "物件情報を編集"}
+            className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
           >
             <Edit className="h-4 w-4" />
             物件を編集
@@ -752,6 +784,19 @@ export default function PropertyDetailPage({
           )}
         </div>
       </div>
+
+      {/* 見ている側の帯(仕様 6.3)。物件が他の人(または自分の別画面)の鍵なら
+          上部に出す。管理者には「鍵を外す」(EditLockHolderBanner自身が
+          row.lockIdの有無で出し分ける)。 */}
+      {propertyEditLockHeld && propertyEditLockRow && (
+        <div className="mb-4">
+          <EditLockHolderBanner
+            row={propertyEditLockRow}
+            isAdmin={propertyEditLockIsAdmin}
+            onReleased={editLockStatus.refresh}
+          />
+        </div>
+      )}
 
       {/* 保存済み販売図面の一覧（再オープン導線・対応種別のみ・保存図面が無ければ非表示） */}
       {salesSheetKind && <SalesSheetList propertyId={property.id} />}
@@ -790,6 +835,9 @@ export default function PropertyDetailPage({
         offerBuildingPath={!isLandPropertyType(property.propertyType)}
         onPropertyRefresh={fetchProperty}
         onRegistryResultApplied={handleRegistryResultApplied}
+        // 見ている側(仕様 6.3・Task 9)。物件が他の人の鍵なら、地番ポップアップの
+        // 「保存して確認へ」だけを止める(検索・ログイン導線は止めない)。
+        editLockHeld={propertyEditLockHeld}
       />
 
       {/* Warning badge */}
@@ -853,7 +901,16 @@ export default function PropertyDetailPage({
 
       {/* Tab content */}
       <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
-        {activeTab === "basic" && <BasicTab property={property} onRefresh={fetchProperty} canWrite={canWriteProperty} onOpenAttachments={() => setActiveTab("attachments")} />}
+        {activeTab === "basic" && (
+          <BasicTab
+            property={property}
+            onRefresh={fetchProperty}
+            canWrite={canWriteProperty}
+            onOpenAttachments={() => setActiveTab("attachments")}
+            editLockHeld={propertyEditLockHeld}
+            editLockPropertyRow={propertyEditLockRow}
+          />
+        )}
         {activeTab === "owner" && (
           <OwnerTab
             owners={property.propertyOwners}
@@ -866,6 +923,8 @@ export default function PropertyDetailPage({
             corporateLookupConfigured={corporateLookupConfigured}
             onRefresh={fetchProperty}
             editLockTokenReady={ownerLockTokenReady}
+            editLockStatusByKey={editLockStatus.byKey}
+            onEditLockReleased={editLockStatus.refresh}
           />
         )}
         {activeTab === "photos" && <PhotoTab propertyId={property.id} />}
@@ -915,11 +974,17 @@ function BasicTab({
   onRefresh,
   canWrite,
   onOpenAttachments,
+  editLockHeld,
+  editLockPropertyRow,
 }: {
   property: ApiProperty;
   onRefresh: () => void;
   canWrite: boolean;
   onOpenAttachments: () => void;
+  /** 見ている側(仕様 6.3・Task 9)。物件が他の人の鍵なら案件ステータス・導入ルートを止める。 */
+  editLockHeld: boolean;
+  /** 呼び出し元(親)が既に持っている物件の状態行。EDIT_LOCKEDの文言組み立てに再利用する。 */
+  editLockPropertyRow: EditLockStatusRow | undefined;
 }) {
   // 旧値 "unit" と新値 "apartment_unit" の両方を区分扱いにする
   const isUnit =
@@ -1018,8 +1083,20 @@ function BasicTab({
         badgeStyle={dmBadgeStyles[property.dmStatus]}
         badgeLabel={DM_STATUS_LABELS[property.dmStatus]}
       />
-      <CaseStatusField property={property} onRefresh={onRefresh} canWrite={canWrite} />
-      <IntroductionRouteField property={property} onRefresh={onRefresh} canWrite={canWrite} />
+      <CaseStatusField
+        property={property}
+        onRefresh={onRefresh}
+        canWrite={canWrite}
+        editLockHeld={editLockHeld}
+        editLockPropertyRow={editLockPropertyRow}
+      />
+      <IntroductionRouteField
+        property={property}
+        onRefresh={onRefresh}
+        canWrite={canWrite}
+        editLockHeld={editLockHeld}
+        editLockPropertyRow={editLockPropertyRow}
+      />
       <Field label="担当者" value={property.assignee?.name ?? null} />
       <Field label="登録者" value={property.creator?.name ?? null} />
       <Field
@@ -1067,6 +1144,8 @@ function OwnerTab({
   corporateLookupConfigured,
   onRefresh,
   editLockTokenReady,
+  editLockStatusByKey,
+  onEditLockReleased,
 }: {
   owners: ApiPropertyOwner[];
   propertyId: string;
@@ -1080,6 +1159,10 @@ function OwnerTab({
   onRefresh: () => Promise<void>;
   /** 複製タブ確認(親=物件詳細画面で1回だけ実施)が済んだか(Task 6)。 */
   editLockTokenReady: boolean;
+  /** 見ている側(仕様 6.3・Task 9)。所有者ごとの状態行を引く(親のuseEditLockStatus)。 */
+  editLockStatusByKey: (resourceType: "property" | "owner", resourceId: string) => EditLockStatusRow | undefined;
+  /** 管理者がカードの帯で「鍵を外す」を押した直後に呼ぶ(仕様 6.3=即座に取り直す)。 */
+  onEditLockReleased: () => void;
 }) {
   const [linkModalOpen, setLinkModalOpen] = useState(false);
 
@@ -1157,6 +1240,8 @@ function OwnerTab({
               corporateLookupConfigured={corporateLookupConfigured}
               onRefresh={onRefresh}
               editLockTokenReady={editLockTokenReady}
+              editLockStatusRow={editLockStatusByKey("owner", po.ownerId)}
+              onEditLockReleased={onEditLockReleased}
             />
           ))}
         </>
@@ -1216,6 +1301,8 @@ function OwnerCard({
   corporateLookupConfigured,
   onRefresh,
   editLockTokenReady,
+  editLockStatusRow,
+  onEditLockReleased,
 }: {
   po: ApiPropertyOwner;
   propertyId: string;
@@ -1231,7 +1318,15 @@ function OwnerCard({
   onRefresh: () => Promise<void>;
   /** 複製タブ確認(親=物件詳細画面で1回だけ実施)が済んだか(Task 6)。 */
   editLockTokenReady: boolean;
+  /** 見ている側(仕様 6.3・Task 9)。この所有者の状態行(親のuseEditLockStatus)。 */
+  editLockStatusRow: EditLockStatusRow | undefined;
+  /** 管理者がこのカードの帯で「鍵を外す」を押した直後に呼ぶ。 */
+  onEditLockReleased: () => void;
 }) {
+  // 見ている側(仕様 6.3)。このカードの所有者が他の人(または自分の別画面)の鍵なら
+  // 「所有者情報を編集」だけを止める(帯もこのカードの中にだけ出す)。
+  const editLockHeld = isEditLockHeldByOther(editLockStatusRow);
+  const editLockIsAdmin = editLockStatusRow?.lockId !== undefined;
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -1441,6 +1536,17 @@ function OwnerCard({
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      {/* 見ている側の帯(仕様 6.3)。この所有者が他の人(または自分の別画面)の鍵なら
+          このカードの中にだけ出す(一覧全体には広げない)。 */}
+      {editLockHeld && editLockStatusRow && (
+        <div className="mb-3">
+          <EditLockHolderBanner
+            row={editLockStatusRow}
+            isAdmin={editLockIsAdmin}
+            onReleased={onEditLockReleased}
+          />
+        </div>
+      )}
       {/* 見出し: 番号 + 氏名 + バッジ */}
       <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-gray-100 pb-3 dark:border-gray-800">
         <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
@@ -1460,14 +1566,16 @@ function OwnerCard({
             {po.relationship}
           </span>
         )}
-        {/* 編集ボタンは canEditOwner (owner:read + owner:write + 編集可能項目あり + version 取得済み) のみ表示 */}
+        {/* 編集ボタンは canEditOwner (owner:read + owner:write + 編集可能項目あり + version 取得済み) のみ表示。
+            見ている側(仕様 6.3): この所有者が他の人の鍵なら押せなくする(先に取得を試みて失敗させない)。 */}
         {editAllowed && !editing && (
           <button
             type="button"
             onClick={handleEdit}
+            disabled={editLockHeld}
             aria-label={`所有者${idx + 1}/${total} ${po.owner.name ?? "（氏名未登録）"}の所有者情報を編集`}
-            title="所有者情報を編集"
-            className="ml-auto flex items-center gap-1 rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            title={editLockHeld ? "他の利用者が編集中のため編集できません" : "所有者情報を編集"}
+            className="ml-auto flex items-center gap-1 rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
           >
             <Edit className="h-3 w-3" />
             所有者情報を編集
@@ -2086,6 +2194,10 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
  *   届いた時点で「自分の番号がまだ最新か」を先に確認する。呼び出し元が
  *   `seqRef` を省略した場合(この関数を単発で呼ぶテスト等)は、呼び出しごとに
  *   新しい `{ current: 0 }` を割り当てる=従来どおり常に「自分が最新」になる。
+ * ⚠**呼び出し元が既に持っている状態の行があれば渡す**(Task 9)。この画面は
+ *   `useEditLockStatus` で物件の状態を30秒ごとに持っているため、そのとき
+ *   手元にある行を `preFetchedRows` に渡せば `composeEditLockedMessage` は
+ *   状態窓口へ2回目の問い合わせをせずに済む(未指定時は従来どおり1回だけ問い合わせる)。
  */
 export async function runNoLockPropertyPatch(
   propertyId: string,
@@ -2095,6 +2207,7 @@ export async function runNoLockPropertyPatch(
   setError: Dispatch<SetStateAction<string | null>>,
   onRefresh: () => void,
   seqRef: { current: number } = { current: 0 },
+  preFetchedRows?: EditLockStatusRow[],
 ): Promise<void> {
   const mySeq = ++seqRef.current;
   setSaving(true);
@@ -2119,7 +2232,7 @@ export async function runNoLockPropertyPatch(
       //   届いたら(または上限時間で諦めたら)差し替える。await しない=この
       //   catchはすぐ終わり、finallyがすぐ走って控えの disabled/spinner も解除される。
       setError(envelopeMessage);
-      void composeEditLockedMessage("property", propertyId, envelopeMessage).then((m) => {
+      void composeEditLockedMessage("property", propertyId, envelopeMessage, preFetchedRows).then((m) => {
         if (seqRef.current !== mySeq) return; // 後発の試行が既に始まっている＝この組み立ては古い
         setError((prev) => (prev === envelopeMessage ? m : prev));
       });
@@ -2137,10 +2250,16 @@ function CaseStatusField({
   property,
   onRefresh,
   canWrite,
+  editLockHeld,
+  editLockPropertyRow,
 }: {
   property: ApiProperty;
   onRefresh: () => void;
   canWrite: boolean;
+  /** 見ている側(仕様 6.3・Task 9)。物件が他の人の鍵ならプルダウンを止める。 */
+  editLockHeld: boolean;
+  /** 呼び出し元(親)が既に持っている物件の状態行。EDIT_LOCKEDの文言組み立てに再利用する。 */
+  editLockPropertyRow: EditLockStatusRow | undefined;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2157,6 +2276,10 @@ function CaseStatusField({
       setError,
       onRefresh,
       saveSeqRef,
+      // ⚠親(useEditLockStatus)が既に持っている物件の行を渡す(Task 9)。
+      //   状態窓口への2回目の問い合わせを避ける。まだ届いていなければ従来どおり
+      //   undefinedのまま=composeEditLockedMessage側が自分で1回問い合わせる。
+      editLockPropertyRow && [editLockPropertyRow],
     );
 
   const label = CASE_STATUS_LABELS[property.caseStatus] ?? property.caseStatus;
@@ -2189,7 +2312,7 @@ function CaseStatusField({
         <select
           value={property.caseStatus}
           onChange={(e) => handleChange(e.target.value)}
-          disabled={saving}
+          disabled={saving || editLockHeld}
           className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
           {options.map((o) => (
@@ -2211,10 +2334,16 @@ function IntroductionRouteField({
   property,
   onRefresh,
   canWrite,
+  editLockHeld,
+  editLockPropertyRow,
 }: {
   property: ApiProperty;
   onRefresh: () => void;
   canWrite: boolean;
+  /** 見ている側(仕様 6.3・Task 9)。物件が他の人の鍵ならプルダウンを止める。 */
+  editLockHeld: boolean;
+  /** 呼び出し元(親)が既に持っている物件の状態行。EDIT_LOCKEDの文言組み立てに再利用する。 */
+  editLockPropertyRow: EditLockStatusRow | undefined;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2231,6 +2360,9 @@ function IntroductionRouteField({
       setError,
       onRefresh,
       saveSeqRef,
+      // ⚠親(useEditLockStatus)が既に持っている物件の行を渡す(Task 9・
+      //   CaseStatusFieldと同じ理由)。
+      editLockPropertyRow && [editLockPropertyRow],
     );
 
   const label = property.introductionRoute
@@ -2257,7 +2389,7 @@ function IntroductionRouteField({
         <select
           value={property.introductionRoute ?? ""}
           onChange={(e) => handleChange(e.target.value)}
-          disabled={saving}
+          disabled={saving || editLockHeld}
           className="rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 focus:border-indigo-500 focus:outline-none disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
         >
           <option value="">未設定</option>
