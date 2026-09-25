@@ -10,48 +10,17 @@
  *   タブの合言葉(X-Edit-Screen)だけを載せる。`EDIT_LOCKED` は
  *   `composeEditLockedMessage` で氏名+時刻の文を組み立てて表示する
  *   (仕様6.5・fix round1)。窓口の423自体は氏名・時刻を返さない。
+ * ⚠(fix round2 Important A) 組み立ての問い合わせは `await` しない=封筒の
+ *   messageを即座に表示し、控え(disabled/spinner)も即座に解放する。組み立てが
+ *   届いたら `setError` を後から呼び直して差し替える。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runNoLockPropertyPatch } from "../page";
 import { EDIT_SCREEN_HEADER, EDIT_LOCK_HEADER } from "@/lib/edit-lock/header-names";
-import {
-  setScreenTokenEnvForTest,
-  resetScreenTokenForTest,
-  type ScreenTokenEnv,
-} from "@/lib/edit-lock/screen-token-client";
-
-function fakeScreenTokenEnv(token: string): ScreenTokenEnv {
-  return {
-    getItem: () => token,
-    setItem: () => {},
-    openChannel: () => null,
-    newId: () => token,
-  };
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
-
-function stubFetch(handler: (url: string, init?: RequestInit) => Promise<Response>) {
-  const fetchMock = vi.fn(handler);
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
-}
-
-/** URLで分岐するスタブ(状態窓口 `/api/edit-locks/status` を呼ぶテスト用)。 */
-function stubFetchByUrl(handlers: Record<string, (init?: RequestInit) => Promise<Response>>) {
-  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-    const handler = handlers[url];
-    if (!handler) throw new Error(`unexpected fetch: ${url}`);
-    return handler(init);
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
-}
+import { setScreenTokenEnvForTest, resetScreenTokenForTest } from "@/lib/edit-lock/screen-token-client";
+// review round2 Minor F: 重複していたテストヘルパー(fakeScreenTokenEnv・
+// jsonResponse・stubFetch・stubFetchByUrl)を共有モジュールへまとめた。
+import { fakeScreenTokenEnv, jsonResponse, stubFetch, stubFetchByUrl, flushAsync } from "@/lib/edit-lock/__tests__/test-helpers";
 
 describe("runNoLockPropertyPatch(鍵を持たない入口の保存)", () => {
   beforeEach(() => {
@@ -126,7 +95,12 @@ describe("runNoLockPropertyPatch(鍵を持たない入口の保存)", () => {
     });
     const setError = vi.fn();
     await runNoLockPropertyPatch("p1", 1, { caseStatus: "active" }, vi.fn(), setError, vi.fn());
-    expect(setError).toHaveBeenCalledWith("太郎さんが編集中です(14:00〜)");
+    // ⚠(review round2 Important A) 封筒のmessageを即座に表示する
+    //   (状態窓口の応答を待たない・1回目は関数冒頭の setError(null))。
+    expect(setError).toHaveBeenNthCalledWith(2, "他の画面で編集中です");
+    await flushAsync();
+    // 状態窓口が届いたら組み立てた文へ差し替える。
+    expect(setError).toHaveBeenLastCalledWith("太郎さんが編集中です(14:00〜)");
   });
 
   it("EDIT_LOCKED + 状態窓口への問い合わせが失敗すれば、封筒のmessageへフォールバックする(仕様6.5・fix round1)", async () => {
@@ -137,7 +111,32 @@ describe("runNoLockPropertyPatch(鍵を持たない入口の保存)", () => {
     });
     const setError = vi.fn();
     await runNoLockPropertyPatch("p1", 1, { caseStatus: "active" }, vi.fn(), setError, vi.fn());
-    expect(setError).toHaveBeenCalledWith("他の画面で編集中です");
+    await flushAsync();
+    expect(setError).toHaveBeenLastCalledWith("他の画面で編集中です");
+  });
+
+  it("状態窓口が固まっても、封筒のmessageを即座に表示し控えを即座に解放する(review round2 Important A)", async () => {
+    vi.useFakeTimers();
+    try {
+      stubFetchByUrl({
+        "/api/properties/p1": async () =>
+          jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+        // ⚠固まる(解決しない)。fetchEditLockStatus は AbortSignal を持たないため、
+        //   これが本番で「状態窓口が遅い/固まる」ときの再現。
+        "/api/edit-locks/status": () => new Promise<Response>(() => {}),
+      });
+      const setError = vi.fn();
+      const setSaving = vi.fn();
+      await runNoLockPropertyPatch("p1", 1, { caseStatus: "active" }, setSaving, setError, vi.fn());
+      // 状態窓口の応答を待たずに、封筒のmessageが即座に見える。
+      expect(setError).toHaveBeenCalledWith("他の画面で編集中です");
+      // 状態窓口の応答を待たずに、控え(disabled/spinner)が即座に解放される。
+      expect(setSaving).toHaveBeenLastCalledWith(false);
+      // 内部の上限時間タイマーを進めて後始末する(タイマーを残したままにしない)。
+      await vi.advanceTimersByTimeAsync(3000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("EDIT_LOCKED以外のエラーも従来どおり封筒のmessageを表示する(既存挙動を変えない)", async () => {
