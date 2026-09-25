@@ -15,12 +15,19 @@ export const EDIT_LOCK_IDLE_WARN_MS = 55 * 60_000;
 export const EDIT_LOCK_STATUS_POLL_MS = 30_000;
 /**
  * 鍵を持たない入口が `EDIT_LOCKED` を受けたときの、氏名+時刻の文を組み立てる
- * ための状態窓口への問い合わせに許す上限(review round2 Important A)。
- * ⚠この時間を超えたら封筒の message へフォールバックする(`composeEditLockedMessage`)。
- *   保存自体はもう終わっている(423で断られた後)ので、ここで待たせるのは
- *   「表示する文言をどちらにするか」だけ。控え(ボタン等)を塞いではいけない。
+ * ための状態窓口への問い合わせに許す上限(review round2 Important A・round3 Minor H)。
+ * ⚠**控え(ボタン等)を塞ぐのを防ぐための値ではない**(round3で訂正)。
+ *   `composeEditLockedMessage` はもう `await` されない(封筒の message を
+ *   同期的に即座に表示し、控えは即座に解放する側で対処済み・Important A/G)。
+ *   この上限の役目は2つだけ: ①組み立てが**いつまでも**宙に浮いた
+ *   `setTimeout` を残さないよう区切ること、②世代の見張り(Important G・
+ *   `prev === envelopeMessage` の一致条件)が有効な間に組み立てを届かせる
+ *   ための現実的な上限を与えること。短すぎると、応答に2秒以上かかる
+ *   (よくあるモバイル回線)だけで氏名+時刻の文が毎回捨てられ、仕様6.5の
+ *   機能そのものが実質死ぬ(round2で2秒に設定していたのはこの副作用に
+ *   気づく前の値)。長すぎると宙に浮く時間が伸びる。10秒に統一する。
  */
-export const EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS = 2_000;
+export const EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS = 10_000;
 
 export type EditLockResourceType = "property" | "owner";
 

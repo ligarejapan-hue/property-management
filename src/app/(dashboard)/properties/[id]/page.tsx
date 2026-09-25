@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef, use } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, use, type Dispatch, type SetStateAction } from "react";
 import { BackLink } from "@/components/ui/back-link";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -2053,18 +2053,28 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
  *   (review round2 Important A)。`await composeEditLockedMessage(...)` を
  *   `catch` の中に置くと、状態窓口が固まったとき `finally { setSaving(false) }`
  *   まで塞がれ、控え(disabled/spinner)もエラー表示も数十秒固まる。ここでは
- *   `await` せず `.then(setError)` で後から届いた結果だけ反映する
+ *   `await` せず `.then(...)` で後から届いた結果だけ反映する
  *   (`catch` は同期的に終わるので `finally` はすぐ走る。review round2
  *   Minor E: `catch` の中に `await` が無くなったので、compose が万一投げても
  *   unhandled rejection の経路にはならない=念のため `.catch` は要らない
  *   `composeEditLockedMessage` 自体が reject しない設計のため)。
+ * ⚠**古い組み立てが新しい状態を上書きしない世代の見張り**(review round2
+ *   Important G)。控えが即座に解放されるようになった副作用として、組み立てが
+ *   届く前(最大 `EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS`)に利用者が選び直して
+ *   保存を成功させ得る(`setError(null)` → 200 → `onRefresh()`)。そこへ古い
+ *   組み立てがそのまま `setError(m)` すると、保存が成功して消えたはずの
+ *   エラー欄に「{氏名}さんが編集中です」が後から生える。`setError` を React の
+ *   更新関数の形(`Dispatch<SetStateAction<...>>`)で受け、「今出ている値が
+ *   まだこの試行の封筒のmessageのままなら」だけ差し替える
+ *   (`prev === envelopeMessage` の一致を条件にする)。既に別の値(成功でnull・
+ *   別の試行のmessage)に変わっていれば何もしない。
  */
 export async function runNoLockPropertyPatch(
   propertyId: string,
   version: number,
   patch: Record<string, unknown>,
   setSaving: (v: boolean) => void,
-  setError: (v: string | null) => void,
+  setError: Dispatch<SetStateAction<string | null>>,
   onRefresh: () => void,
 ): Promise<void> {
   setSaving(true);
@@ -2089,7 +2099,9 @@ export async function runNoLockPropertyPatch(
       //   届いたら(または上限時間で諦めたら)差し替える。await しない=この
       //   catchはすぐ終わり、finallyがすぐ走って控えの disabled/spinner も解除される。
       setError(envelopeMessage);
-      void composeEditLockedMessage("property", propertyId, envelopeMessage).then(setError);
+      void composeEditLockedMessage("property", propertyId, envelopeMessage).then((m) =>
+        setError((prev) => (prev === envelopeMessage ? m : prev)),
+      );
       return;
     }
     setError(err instanceof Error ? err.message : "保存に失敗しました");

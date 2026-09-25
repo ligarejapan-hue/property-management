@@ -20,12 +20,19 @@
  *   `shouldShowLockUnavailableNotice` を同じ理由でコンポーネントモジュールの
  *   外へ出した判断と揃える(そちらを踏襲せず一度違反していたのを、この回で直す)。
  * ⚠**問い合わせには上限時間(`EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS`)を設ける**
- *   (review round2 Important A)。`fetchEditLockStatus` は `AbortSignal` を
- *   持たない素の `fetch` で、423 はもう保存が終わった後の応答なので、ここで
- *   何秒も待たせてよい理由が無い。上限を超えたら封筒の message にフォール
- *   バックする(`Promise.race`)。内部の問い合わせ自体は自前で catch して
+ *   (review round2 Important A・round3 Minor H)。上限を超えたら封筒の message
+ *   にフォールバックする(`Promise.race`)。⚠この上限は「控え(ボタン等)を
+ *   塞がないため」ではない(round2時点の誤り。round3で訂正=呼び出し側が
+ *   もう `await` しないため、控えは既に即座に解放されている)。役目は
+ *   ①`setTimeout` をいつまでも宙に浮かせないこと、②Important G の世代の
+ *   見張り(`prev === envelopeMessage`)が効く現実的な時間内に組み立てを
+ *   届かせること、の2つだけ。内部の問い合わせ自体は自前で catch して
  *   常に解決する(reject しない)ので、負けた側が後で reject しても
  *   unhandled rejection にはならない。
+ * ⚠**負けた側のタイマーは片付ける**(review round3 Minor I)。`Promise.race` で
+ *   タイムアウト側が勝っても・負けても、`setTimeout` のハンドルは
+ *   `clearTimeout` する(勝った側=問い合わせが先に終わったときに、タイマーだけ
+ *   宙に浮いたまま残らないようにする)。
  */
 import { fetchEditLockStatus, type EditLockStatusRow } from "@/lib/api-client";
 import { formatSince } from "@/lib/edit-lock/ui-state";
@@ -54,8 +61,15 @@ export async function composeEditLockedMessage(
   envelopeMessage: string,
 ): Promise<string> {
   const lookup = lookupComposedMessage(resourceType, resourceId, envelopeMessage);
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<string>((resolve) => {
-    setTimeout(() => resolve(envelopeMessage), EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS);
+    timer = setTimeout(() => resolve(envelopeMessage), EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS);
   });
-  return Promise.race([lookup, timeout]);
+  try {
+    return await Promise.race([lookup, timeout]);
+  } finally {
+    // ⚠review round3 Minor I: 問い合わせが先に終わって timeout 側が負けても、
+    //   宙に浮いた setTimeout をここで必ず片付ける。
+    clearTimeout(timer);
+  }
 }

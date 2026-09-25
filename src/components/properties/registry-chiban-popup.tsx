@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
 import { isReadableChiban } from "@/lib/registry-fetch/chiban-input";
 import { codeFromErrorBody } from "@/lib/api-client";
@@ -60,14 +60,23 @@ const REGISTRY_SERVICE_LOGIN_URL = "https://www.touki.or.jp/TeikyoUketsuke/";
  *   素の `fetch`)入力欄・ボタンが `disabled` のまま、エラー欄も空のまま数十秒
  *   固まる(round1で直した「即座に表示する」が壊れる)。ここでは
  *   `setSaving(false)` を待たせない(`finally` がすぐ走る)ようにし、
- *   組み立ての結果は `.then(setError)` で後から届いたときだけ上書きする。
+ *   組み立ての結果は `.then(...)` で後から届いたときだけ上書きする。
+ * ⚠**古い組み立てが新しい状態を上書きしない世代の見張り**(review round2
+ *   Important G)。控えが即座に解放されるようになった副作用として、組み立てが
+ *   届く前(最大 `EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS`)に利用者が再保存を
+ *   成功させ得る。そこへ古い組み立てがそのまま `setError(m)` すると、保存が
+ *   成功して消えたはずのエラー欄に「{氏名}さんが編集中です」が後から生える。
+ *   `setError` を React の更新関数の形(`Dispatch<SetStateAction<...>>`)で受け、
+ *   「今出ている値がまだこの試行の封筒のmessageのままなら」だけ差し替える
+ *   (`prev === envelopeMessage` の一致を条件にする)。既に別の値(成功でnull・
+ *   別の試行のmessage)に変わっていれば何もしない。
  */
 export async function runChibanSave(
   propertyId: string,
   version: number,
   lotNumber: string,
   setSaving: (v: boolean) => void,
-  setError: (v: string | null) => void,
+  setError: Dispatch<SetStateAction<string | null>>,
   onSaved: (nextVersion: number | null) => void,
 ): Promise<void> {
   setSaving(true);
@@ -102,7 +111,9 @@ export async function runChibanSave(
       //   届いたら(または上限時間で諦めたら)差し替える。ここは await しない
       //   =この関数はすぐ finally へ進み、控えの disabled/spinner も解除される。
       setError(envelopeMessage);
-      void composeEditLockedMessage("property", propertyId, envelopeMessage).then(setError);
+      void composeEditLockedMessage("property", propertyId, envelopeMessage).then((m) =>
+        setError((prev) => (prev === envelopeMessage ? m : prev)),
+      );
     } else if (code === "VERSION_CONFLICT") {
       setError(
         "他の担当者が先に更新しました。画面を開き直してからやり直してください。",

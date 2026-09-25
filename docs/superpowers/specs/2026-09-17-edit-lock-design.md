@@ -548,3 +548,14 @@ round 1 実装の review で3件の Important が見つかった(文言そのも
 | 組み立ての問い合わせが固まると控えごと固まる(Important A) | 封筒の `message` を**同期的に即座に**表示し、`composeEditLockedMessage` の結果は届いてから(`.then(setError)`)差し替える。`await` を `catch`/エラー分岐の中に置かず、`finally`/後始末を待たせない。あわせて `composeEditLockedMessage` 自体に上限時間(`EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS` = 2秒・`src/lib/edit-lock/rules.ts`)を設け、上限を超えたら封筒の message へフォールバックする(`Promise.race`) |
 | `src/lib/` のモジュールが component モジュールを import していた(Important B) | `formatSince` を `edit-lock-banner.tsx`("use client"・`ui/button`・`ui/confirm-dialog`・`api-client` を引き込む)から `src/lib/edit-lock/ui-state.ts`(純関数だけのモジュール)へ移した。`edit-lock-banner.tsx` はそこから re-export し、既存の呼び出し元はそのまま動く。Task 6 fix round 1 #3(`canSubmitSave`/`shouldShowLockUnavailableNotice` を同じ理由でコンポーネントモジュールの外へ出した判断)と揃える |
 | 走査の文字数窓に余裕が10〜21文字しか無かった(Important C) | `save-entrypoints-scan.test.ts` の入口ごとの検査を、固定の文字数窓(`[\s\S]{0,400}?`)から、関数の実際の本体(括弧・波括弧の対応を数えて切り出す)への検査に差し替えた。パラメータの増減やコメントの追加で正しいコードのまま赤くならない |
+
+### Task 7(鍵を持たない3入口)review round 3 の裁定(2026-09-26)
+
+round 2 の Important A(即座に表示・後から差し替え)自体が新しい穴(古い組み立てが新しい状態を上書きする)を開けたため、その穴を塞ぐ裁定と、round 2 で設けた上限時間の副作用を訂正する裁定。
+
+| 論点 | 決定 |
+|---|---|
+| 控えを即座に解放する副作用で、古い組み立てが新しい状態を上書きしうる(Important G) | `setError` を `Dispatch<SetStateAction<string \| null>>`(React の更新関数の形)で受け、`.then((m) => setError((prev) => (prev === envelopeMessage ? m : prev)))` で世代を見張る。今出ている値がその試行の封筒のmessageのままのときだけ差し替え、既に別の値(成功でnull・別の試行のmessage)に変わっていれば何もしない |
+| 2秒の上限が「控えを塞がないため」という当初の理由が消え、モバイル回線で氏名+時刻の機能を毎回捨てていた(Minor H) | `EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS` を2秒→**10秒**へ引き上げる。役目は「控えを塞がない」ではなく「宙に浮いた `setTimeout` をいつまでも残さないこと」「Important Gの世代の見張りが効く現実的な時間内に組み立てを届かせること」の2つだけ、と `rules.ts` のコメントを訂正 |
+| `Promise.race` の負けた側のタイマーが片付かない(Minor I) | `composeEditLockedMessage` で `setTimeout` のハンドルを保持し、`finally` で `clearTimeout` する(勝敗どちらでも) |
+| 走査の `expect(body).not.toBe("")` が常に真で何も検査していない(Minor J) | 削除(`extractFunctionBody` は例外を投げるか非空の本体を返すかのどちらかしか無いため) |
