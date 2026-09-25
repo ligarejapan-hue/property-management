@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
 import { isReadableChiban } from "@/lib/registry-fetch/chiban-input";
+import { codeFromErrorBody } from "@/lib/api-client";
+import { editLockHeaders } from "@/lib/edit-lock/screen-token-client";
 
 /**
  * 地番を人が地図で確認して入れるポップアップ。
@@ -40,6 +42,65 @@ import { isReadableChiban } from "@/lib/registry-fetch/chiban-input";
  *   ブラウザの保存パスワード等、利用者自身の手段で行ってもらう。
  */
 const REGISTRY_SERVICE_LOGIN_URL = "https://www.touki.or.jp/TeikyoUketsuke/";
+
+/**
+ * 地番の保存(鍵を持たない入口・仕様 6.5)。node から直接呼べるよう部品から切り出す
+ * (`registry-chiban-popup.test.ts` と同じ、走査に頼らず実際に呼んで検査するやり方)。
+ *
+ * ⚠合言葉は必ず `editLockHeaders()`(世代なし=このポップアップは鍵を取らない)を通す
+ *   (仕様 6.1・6入口すべてが通す契約)。
+ * ⚠`EDIT_LOCKED` は窓口の封筒の `message` をそのまま出す(自前で氏名・時刻を組み立てない)。
+ *   窓口(`assertNotEditLockedByOther`)がこの保存経路で返す文言をそのまま表示する。
+ */
+export async function runChibanSave(
+  propertyId: string,
+  version: number,
+  lotNumber: string,
+  setSaving: (v: boolean) => void,
+  setError: (v: string | null) => void,
+  onSaved: (nextVersion: number | null) => void,
+): Promise<void> {
+  setSaving(true);
+  setError(null);
+  try {
+    const res = await fetch(`/api/properties/${propertyId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...editLockHeaders() },
+      // ⚠version は更新スキーマの必須項目。地番だけ送るときも必ず入れる。
+      // ⚠保存するのは lotNumber だけ(家屋番号を保存する口を作らない)。
+      body: JSON.stringify({ version, lotNumber }),
+    });
+    if (res.ok) {
+      // ⚠保存後の版番号を持ち帰る。物件の取り直しを待たずに次の保存ができる
+      //   (取り直すと詳細ページが読み込み中に切り替わり、この画面ごと消える)。
+      const saved = (await res.json().catch(() => null)) as {
+        version?: unknown;
+      } | null;
+      const nextVersion =
+        typeof saved?.version === "number" ? saved.version : null;
+      // ⚠ここで検索を投げない。料金の確認(既存の確認パネル)を必ず経由する。
+      onSaved(nextVersion);
+      return;
+    }
+    const body = (await res.json().catch(() => null)) as {
+      error?: { code?: string; message?: string };
+    } | null;
+    const code = codeFromErrorBody(body);
+    if (code === "EDIT_LOCKED" && body?.error?.message) {
+      setError(body.error.message);
+    } else if (code === "VERSION_CONFLICT") {
+      setError(
+        "他の担当者が先に更新しました。画面を開き直してからやり直してください。",
+      );
+    } else {
+      setError("保存できませんでした。入力を確認してもう一度お試しください。");
+    }
+  } catch {
+    setError("保存できませんでした。通信の状態を確認してください。");
+  } finally {
+    setSaving(false);
+  }
+}
 
 interface RegistryChibanPopupProps {
   propertyId: string;
@@ -96,47 +157,12 @@ export default function RegistryChibanPopup({
   const readable = isReadableChiban(value);
   const canSave = canWriteProperty && readable && !saving;
 
+  // ⚠物件本体を更新する共通ラッパーはこのリポに無い（編集フォームも素の fetch）。
+  //   実体は runChibanSave（このファイル上部で export）。node のテストから直接呼べる
+  //   ようにそちらへ切り出し、ここは薄い呼び出しにする。
   async function save() {
-    setSaving(true);
-    setError(null);
-    try {
-      // ⚠物件本体を更新する共通ラッパーはこのリポに無い（編集フォームも素の fetch）。
-      //   1つだけラッパーを増やすと二重管理になるので、同じ形に揃える。
-      const res = await fetch(`/api/properties/${propertyId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        // ⚠version は更新スキーマの必須項目。地番だけ送るときも必ず入れる。
-        // ⚠保存するのは lotNumber だけ（家屋番号を保存する口を作らない）。
-        body: JSON.stringify({ version: propertyVersion, lotNumber: value.trim() }),
-      });
-      if (res.ok) {
-        // ⚠保存後の版番号を持ち帰る。物件の取り直しを待たずに次の保存ができる
-        //   （取り直すと詳細ページが読み込み中に切り替わり、この画面ごと消える）。
-        const saved = (await res.json().catch(() => null)) as {
-          version?: unknown;
-        } | null;
-        const nextVersion =
-          typeof saved?.version === "number" ? saved.version : null;
-        // ⚠ここで検索を投げない。料金の確認（既存の確認パネル）を必ず経由する。
-        onSaved(nextVersion);
-        return;
-      }
-      const body = (await res.json().catch(() => null)) as {
-        error?: { code?: string };
-      } | null;
-      setError(
-        body?.error?.code === "VERSION_CONFLICT"
-          ? "他の担当者が先に更新しました。画面を開き直してからやり直してください。"
-          : "保存できませんでした。入力を確認してもう一度お試しください。",
-      );
-    } catch {
-      setError("保存できませんでした。通信の状態を確認してください。");
-    } finally {
-      setSaving(false);
-    }
+    await runChibanSave(propertyId, propertyVersion, value.trim(), setSaving, setError, onSaved);
   }
-
-
 
   return (
     <div className="mt-2 space-y-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-400/30 dark:bg-amber-500/10">
