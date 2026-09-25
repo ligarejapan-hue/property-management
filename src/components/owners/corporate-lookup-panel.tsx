@@ -62,6 +62,18 @@ interface CorporateLookupPanelProps {
    * 文言を出す)。⚠取得はこのパネル自身ではしない(カードの鍵をそのまま使う)。
    */
   lockId?: string | null;
+  /**
+   * 反映の失敗をカードの鍵コントローラへ知らせる(review round1 Important #3)。
+   *
+   * 所有者カード内は `(code) => lock.noteSaveError(code, null)` を渡す
+   * (カード自身の`handleSave`と同型)。世代(`lockId`)を送るこの入口では
+   * `EDIT_LOCKED`自体がほぼ届かず(`service.ts`が世代切れ/強制解除を先に返す)、
+   * カードの帯・保存ボタンはこれで初めて最新化される——渡さなければ、管理者が
+   * カードの鍵を強制解除しても、このパネルは断りの文言を出す一方でカードの帯は
+   * 「保持中」のまま食い違う。管理画面(`admin/owners/[id]`)は鍵を持たないため
+   * 渡さない(undefined=何もしない)。
+   */
+  onLockRefused?: (code: string | null) => void;
 }
 
 type ApplyTarget = "name" | "address" | "zip" | "corporateNumber";
@@ -82,20 +94,30 @@ type ApplyTarget = "name" | "address" | "zip" | "corporateNumber";
  * ⚠**呼び出し元が持つ世代(caller-owned sequence number・review round3 K)**。
  *   窓口の423は氏名・時刻を返さない定数文言のため、上の一致条件だけでは
  *   後着の refusal が先着の古い組み立てに older-wins で上書きされ得る。
- *   呼び出し元(パネル)が `useRef(0)` で持つ `seqRef` を呼び出しごとに
- *   インクリメントし、組み立てが届いた時点で「自分の番号がまだ最新か」を
- *   先に確認する。省略時は呼び出しごとに新しい `{ current: 0 }` を割り当てる
- *   (=常に自分が最新)。
+ *   `seqRef`(呼び出し元=パネルが `useRef(0)` で持つ)と、その時点で呼び出し元が
+ *   採番した `mySeq` を受け取り、組み立てが届いた時点で「自分の番号がまだ
+ *   最新か」を先に確認する。
+ * ⚠**採番は呼び出し元の責務**(review round1 Important #3・Minor #7)。
+ *   `runChibanSave`/`runNoLockPropertyPatch` は関数の呼び出しそのものが
+ *   「1回の保存試行」なので内部で採番できるが、このパネルは同じ試行
+ *   (`handleApply` 1回)の中で `submit()` の catch と、conflict確認後の
+ *   `submit(true)` の catch の**2箇所**からこの関数を呼び得る。どちらも
+ *   同じ利用者操作(反映ボタン1回分)なので、`handleApply` 側が試行の頭で
+ *   1回だけ採番し(`const mySeq = ++applySeqRef.current`)、両方の呼び出しに
+ *   同じ `mySeq` を渡す。⚠**default 値は持たせない**(review round1 Minor #10)。
+ *   省略できる default は「古いテストが書き換えを要らずに残る」ための抜け道で、
+ *   実際に「2回呼んでも独立を装うテストが1回しか呼ばない」欠陥を覆い隠した
+ *   (round1 Important #2)。呼び出し元は必ず自分の採番を渡す。
  */
 export function handleCorporateApplyEditLockedError(
   err: unknown,
   ownerId: string,
   setApplyError: Dispatch<SetStateAction<string | null>>,
-  seqRef: { current: number } = { current: 0 },
+  seqRef: { current: number },
+  mySeq: number,
 ): boolean {
   if (apiErrorCode(err) !== "EDIT_LOCKED" || !(err instanceof Error)) return false;
   const envelopeMessage = err.message;
-  const mySeq = ++seqRef.current;
   // ⚠即座に(状態窓口の応答を待たずに)封筒のmessageを出す。
   setApplyError(envelopeMessage);
   void composeEditLockedMessage("owner", ownerId, envelopeMessage).then((m) => {
@@ -103,6 +125,25 @@ export function handleCorporateApplyEditLockedError(
     setApplyError((prev) => (prev === envelopeMessage ? m : prev));
   });
   return true;
+}
+
+/**
+ * 反映の失敗を、カードが持つ鍵のコントローラへも伝える(review round1 Important #3)。
+ *
+ * ⚠**カードの`handleSave`と同型**: `apiErrorCode(err)` をそのまま渡すだけ
+ *   (写像は`uiStateFromSaveError`に任せる)。鍵に無関係なコード(CONFLICT等)は
+ *   そちらが`null`を返して何もしないため、ここで分岐する必要はない。
+ * ⚠**カードの世代(lockId)を送るこの入口では、`EDIT_LOCKED`自体がほぼ届かない**
+ *   (`service.ts`が世代切れなら`EDIT_LOCK_STALE`・管理者の強制解除なら
+ *   `EDIT_LOCK_FORCE_RELEASED`を先に返す)。この関数はそれらのコードもそのまま
+ *   `onLockRefused`へ渡すことで、カードの帯・保存ボタンを最新化する。
+ * ⚠`onLockRefused`が無い(admin/owners/[id]・鍵を持たない画面)ときは何もしない。
+ */
+export function reportCorporateApplyLockRefusal(
+  err: unknown,
+  onLockRefused: ((code: string | null) => void) | undefined,
+): void {
+  onLockRefused?.(apiErrorCode(err));
 }
 
 export default function CorporateLookupPanel({
@@ -114,6 +155,7 @@ export default function CorporateLookupPanel({
   fieldEditable,
   onApplied,
   lockId,
+  onLockRefused,
 }: CorporateLookupPanelProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -252,6 +294,10 @@ export default function CorporateLookupPanel({
         },
         { lockId },
       );
+    // ⚠この反映試行(handleApply 1回)の世代を、頭で1回だけ採番する(review round1
+    //   Important #3・Minor #7)。下の catch 節が2箇所(submit()自体・conflict確認後
+    //   のsubmit(true))あっても同じ利用者操作なので、両方に同じmySeqを渡す。
+    const mySeq = ++applySeqRef.current;
     setApplying(true);
     setApplyError(null);
     try {
@@ -261,9 +307,14 @@ export default function CorporateLookupPanel({
         await onApplied();
       }
     } catch (err) {
-      // ⚠鍵を持つ画面(所有者カード)・持たない画面(管理画面)のどちらでも、423は
-      //   ここで先に処理する(仕様6.5)。既存の msg.includes 分岐(下)は変えない。
-      if (handleCorporateApplyEditLockedError(err, ownerId, setApplyError, applySeqRef)) {
+      // ⚠鍵を持つ画面(所有者カード)では、世代(lockId)を送っているため
+      //   EDIT_LOCKED自体がほぼ届かない(service.tsが世代切れ/強制解除を先に
+      //   返す)。ここでまずカードの鍵コントローラへ知らせる(渡されていなければ
+      //   何もしない=admin/owners/[id])。鍵を持たない画面だけが下のEDIT_LOCKED
+      //   処理で423の文言を組み立てて表示する(仕様6.5)。既存の msg.includes
+      //   分岐(下)は変えない。
+      reportCorporateApplyLockRefusal(err, onLockRefused);
+      if (handleCorporateApplyEditLockedError(err, ownerId, setApplyError, applySeqRef, mySeq)) {
         return;
       }
       const msg = err instanceof Error ? err.message : "反映に失敗しました";
@@ -288,7 +339,8 @@ export default function CorporateLookupPanel({
             await onApplied();
           }
         } catch (err2) {
-          if (handleCorporateApplyEditLockedError(err2, ownerId, setApplyError, applySeqRef)) {
+          reportCorporateApplyLockRefusal(err2, onLockRefused);
+          if (handleCorporateApplyEditLockedError(err2, ownerId, setApplyError, applySeqRef, mySeq)) {
             return;
           }
           setApplyError(

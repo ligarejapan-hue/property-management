@@ -1803,6 +1803,10 @@ function OwnerCard({
                   //   (lock.lockId)だけ反映の保存にX-Edit-Lockが乗る(editLockHeaders経由・
                   //   applyOwnerCorporate側の契約・updateOwnerと同型)。
                   lockId={lock.lockId}
+                  // ⚠反映の失敗をこのカードの鍵コントローラへも伝える(review round1
+                  //   Important #3)。カード自身のhandleSaveと同型
+                  //   (apiErrorCode(err)をそのままnoteSaveErrorへ渡すだけ)。
+                  onLockRefused={(code) => lock.noteSaveError(code, null)}
                   onApplied={async () => {
                     // 反映成功 → 親側で owner を再フェッチし、最新値・version を反映する
                     await onRefresh();
