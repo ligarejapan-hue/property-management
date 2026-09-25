@@ -107,8 +107,10 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
   for (const { label, file, nameOpenParen, headerCall } of ENTRYPOINT_CALL_SITES) {
     it(`${label} は呼び出し箇所自体で editLockHeaders を通している`, () => {
       const src = readFileSync(join(process.cwd(), file), "utf8").replace(/\r\n/g, "\n");
+      // ⚠(review round3 Minor J) `expect(body).not.toBe("")` は
+      //   extractFunctionBody が例外を投げるか非空の本体を返すかのどちらか
+      //   でしか無いため、常に真になり何も検査していなかった。削除。
       const body = extractFunctionBody(src, nameOpenParen);
-      expect(body).not.toBe("");
       expect(body).toMatch(headerCall);
     });
   }

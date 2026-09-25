@@ -9,6 +9,7 @@
  *   実行されない、ただのヘルパーモジュール。
  */
 import { vi } from "vitest";
+import type { Dispatch, SetStateAction } from "react";
 import type { ScreenTokenEnv } from "@/lib/edit-lock/screen-token-client";
 
 /** `getScreenToken()` が固定の合言葉を返すだけの、最小限のフェイク env。 */
@@ -54,4 +55,32 @@ export function stubFetchByUrl(handlers: Record<string, (init?: RequestInit) => 
  */
 export function flushAsync(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * React の `useState` の更新関数を模した、node で使えるフェイク(review round3
+ * Important G)。`runChibanSave`/`runNoLockPropertyPatch` は世代の見張りのため
+ * `setError` を値だけでなく更新関数(`(prev) => next`)の形でも呼ぶように
+ * なった。素の `vi.fn()` は渡された更新関数を**実行しない**ため、「最終的に
+ * 画面へ出る値」を検査するテストは更新関数を模擬的に適用するこのヘルパーを使う。
+ * `calls`(生の呼び出し引数)と `value`(適用後の現在値)の両方を見られる。
+ */
+export function createStateSpy<T>(initial: T): {
+  setState: Dispatch<SetStateAction<T>>;
+  calls: (T | ((prev: T) => T))[];
+  readonly value: T;
+} {
+  let current = initial;
+  const calls: (T | ((prev: T) => T))[] = [];
+  const setState = ((next: T | ((prev: T) => T)) => {
+    calls.push(next);
+    current = typeof next === "function" ? (next as (prev: T) => T)(current) : next;
+  }) as Dispatch<SetStateAction<T>>;
+  return {
+    setState,
+    calls,
+    get value() {
+      return current;
+    },
+  };
 }
