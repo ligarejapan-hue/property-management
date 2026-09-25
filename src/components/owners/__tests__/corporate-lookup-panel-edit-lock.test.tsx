@@ -5,23 +5,33 @@
  * このパネルは**物件詳細の所有者カード内**と **`admin/owners/[id]`** の2画面に
  * 置かれ、鍵の有無が画面ごとに変わる:
  * - 所有者カード内: カードが持つ鍵の世代(`lock.lockId`)を props で受け取り、
- *   反映の保存(`applyOwnerCorporate`)に `X-Edit-Lock` として載せる。
+ *   反映の保存(`applyOwnerCorporate`)に `X-Edit-Lock` として載せる。反映が
+ *   鍵の失効(`EDIT_LOCK_STALE`/`EDIT_LOCK_FORCE_RELEASED`)で断られたら、
+ *   `onLockRefused` 経由でカードの鍵コントローラ(`lock.noteSaveError`)へも
+ *   伝える(review round1 Important #3)。
  * - `admin/owners/[id]`: 鍵を持たない入口。合言葉(`X-Edit-Screen`)だけを送り、
  *   423 のときはこのパネル自身が氏名+時刻の文言を組み立てて表示する(仕様6.5)。
+ *   `onLockRefused` は渡らない(=何も起きない)。
  *
  * ⚠このリポジトリは jsdom を使わない方針(vitest.config.ts が environment: "node" を
  *   固定)。パネルを描画してクリックするテストは書けないので、
  *   - `applyOwnerCorporate` のヘッダ組み立て(第3引数 opts.lockId)
  *   - 423 の文言組み立て(`handleCorporateApplyEditLockedError`・node から直接呼ぶ)
- *   の2つは実際に関数を呼んで node で検証し、
- *   - 配線そのもの(2画面での lockId の受け渡し)
- *   は走査(source assertion)で固定する(`owner-card-edit-lock.test.tsx` と同じやり方)。
+ *   - 反映失敗のカードへの報告(`reportCorporateApplyLockRefusal`・node から直接呼ぶ)
+ *   の3つは実際に関数を呼んで node で検証し、
+ *   - 配線そのもの(2画面での lockId/onLockRefused の受け渡し・handleApply の
+ *     catch節がこれらを呼んでいること)
+ *   は `save-entrypoints-scan.test.ts` 側の走査(source assertion)で固定する。
+ *   ⚠(review round1 Important #4) この3つの source assertion をこのファイルにも
+ *     複製しない。1箇所(scan test=ratchet)だけに置き、正当なリファクタで
+ *     どちらかだけが赤くなる/どちらかを消して唯一の網を失う、を避ける。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { applyOwnerCorporate, apiErrorCode } from "@/lib/api-client";
-import { handleCorporateApplyEditLockedError } from "../corporate-lookup-panel";
+import {
+  handleCorporateApplyEditLockedError,
+  reportCorporateApplyLockRefusal,
+} from "../corporate-lookup-panel";
 import { EDIT_SCREEN_HEADER, EDIT_LOCK_HEADER } from "@/lib/edit-lock/header-names";
 import { setScreenTokenEnvForTest, resetScreenTokenForTest } from "@/lib/edit-lock/screen-token-client";
 import {
@@ -32,20 +42,6 @@ import {
   flushAsync,
   createStateSpy,
 } from "@/lib/edit-lock/__tests__/test-helpers";
-
-const PROPERTY_PAGE_PATH = join(
-  process.cwd(),
-  "src/app/(dashboard)/properties/[id]/page.tsx",
-);
-const ADMIN_OWNER_PAGE_PATH = join(
-  process.cwd(),
-  "src/app/(dashboard)/admin/owners/[id]/page.tsx",
-);
-const PANEL_PATH = join(process.cwd(), "src/components/owners/corporate-lookup-panel.tsx");
-
-const propertyPageSrc = readFileSync(PROPERTY_PAGE_PATH, "utf8").replace(/\r\n/g, "\n");
-const adminOwnerPageSrc = readFileSync(ADMIN_OWNER_PAGE_PATH, "utf8").replace(/\r\n/g, "\n");
-const panelSrc = readFileSync(PANEL_PATH, "utf8").replace(/\r\n/g, "\n");
 
 const BASE_PAYLOAD = {
   corporateNumber: "1234567890123",
@@ -59,22 +55,6 @@ const BASE_PAYLOAD = {
     updateDate: null,
   },
 };
-
-describe("画面ごとに世代の有無が変わる(source assertion)", () => {
-  it("カード内(物件詳細の所有者カード)ではCorporateLookupPanelにカードの世代(lock.lockId)を渡す", () => {
-    expect(propertyPageSrc).toMatch(/<CorporateLookupPanel[\s\S]{0,900}?lockId=\{lock\.lockId\}/);
-  });
-
-  it("管理画面(admin/owners/[id])ではlockIdを渡さない(合言葉だけの入口)", () => {
-    const block = adminOwnerPageSrc.match(/<CorporateLookupPanel[\s\S]*?\/>/)?.[0];
-    expect(block).toBeTruthy();
-    expect(block).not.toMatch(/lockId=/);
-  });
-
-  it("パネル自身は受け取ったlockIdをapplyOwnerCorporateの第3引数へそのまま渡す(手組みしない)", () => {
-    expect(panelSrc).toMatch(/applyOwnerCorporate\(\s*ownerId,[\s\S]*?\{\s*lockId,?\s*\}/);
-  });
-});
 
 describe("applyOwnerCorporate(法人番号の反映)のヘッダ", () => {
   beforeEach(() => {
@@ -133,12 +113,54 @@ describe("applyOwnerCorporate(法人番号の反映)のヘッダ", () => {
     const [, init] = fetchMock.mock.calls[0];
     expect(JSON.parse(init?.body as string)).toEqual(BASE_PAYLOAD);
   });
+
+  it("実際の423レスポンス(toApiError経由)がhandleCorporateApplyEditLockedErrorへ正しく渡り、氏名+時刻の文が組み立てられる(review round1 Minor #8)", async () => {
+    // ⚠他のテストは Object.assign(new Error(...), { code }) で手組みした err を
+    //   直接渡している。「423の封筒 → toApiError → code/message → 組み立て」の
+    //   実配線は登記ポップアップ側のテストにしか無かった(このパネルには無かった)。
+    //   ここで実際に fetch → apiFetch(toApiError) → 例外 という経路を1本通す。
+    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    stubFetchByUrl({
+      "/api/owners/o1/corporate-apply": async () =>
+        jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+      "/api/edit-locks/status": async () =>
+        jsonResponse({
+          locks: [
+            {
+              resourceType: "owner",
+              resourceId: "o1",
+              state: "held_by_other",
+              since,
+              holderName: "太郎",
+            },
+          ],
+        }),
+    });
+    let caught: unknown;
+    try {
+      await applyOwnerCorporate("o1", BASE_PAYLOAD);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(apiErrorCode(caught)).toBe("EDIT_LOCKED");
+    const error = createStateSpy<string | null>(null);
+    const seqRef = { current: 1 };
+    const handled = handleCorporateApplyEditLockedError(caught, "o1", error.setState, seqRef, 1);
+    expect(handled).toBe(true);
+    expect(error.value).toBe("他の画面で編集中です");
+    await flushAsync();
+    expect(error.value).toBe("太郎さんが編集中です(14:00〜)");
+  });
 });
 
 /**
  * handleCorporateApplyEditLockedError(423のとき既存のエラー位置に文言が出る・仕様6.5)。
  * ⚠registry-chiban-popup.tsx / page.tsx の同種テストと同じ構造(review round1〜3の
  *   教訓をそのまま踏襲)。
+ * ⚠(review round1 Minor #10) `seqRef`/`mySeq` に default は無い。呼び出し元
+ *   (`handleApply`)は必ず自分の採番を渡す契約なので、テストも常に明示的な
+ *   `{ current: n }` と数値を渡す。
  */
 describe("handleCorporateApplyEditLockedError(鍵を持たない入口としての反映エラー・node で直接呼ぶ)", () => {
   beforeEach(() => {
@@ -156,14 +178,14 @@ describe("handleCorporateApplyEditLockedError(鍵を持たない入口として�
     const error = createStateSpy<string | null>(null);
     const err = Object.assign(new Error("他のユーザーが先に更新しました"), { code: "CONFLICT" });
     expect(apiErrorCode(err)).toBe("CONFLICT");
-    const handled = handleCorporateApplyEditLockedError(err, "o1", error.setState);
+    const handled = handleCorporateApplyEditLockedError(err, "o1", error.setState, { current: 0 }, 1);
     expect(handled).toBe(false);
     expect(error.calls.length).toBe(0);
   });
 
   it("Errorインスタンスでない値が来てもfalseを返す(型ガード)", () => {
     const error = createStateSpy<string | null>(null);
-    const handled = handleCorporateApplyEditLockedError("boom", "o1", error.setState);
+    const handled = handleCorporateApplyEditLockedError("boom", "o1", error.setState, { current: 0 }, 1);
     expect(handled).toBe(false);
     expect(error.calls.length).toBe(0);
   });
@@ -186,7 +208,7 @@ describe("handleCorporateApplyEditLockedError(鍵を持たない入口として�
     });
     const error = createStateSpy<string | null>(null);
     const err = Object.assign(new Error("他の画面で編集中です"), { code: "EDIT_LOCKED" });
-    const handled = handleCorporateApplyEditLockedError(err, "o1", error.setState);
+    const handled = handleCorporateApplyEditLockedError(err, "o1", error.setState, { current: 1 }, 1);
     expect(handled).toBe(true);
     // ⚠(carried item 2) setApplyError(null)-at-save-startはhandleApply側が既に
     //   持つ責務であってこの関数の責務ではないため、ここでは封筒のmessageが
@@ -203,7 +225,7 @@ describe("handleCorporateApplyEditLockedError(鍵を持たない入口として�
     });
     const error = createStateSpy<string | null>(null);
     const err = Object.assign(new Error("他の画面で編集中です"), { code: "EDIT_LOCKED" });
-    handleCorporateApplyEditLockedError(err, "o1", error.setState);
+    handleCorporateApplyEditLockedError(err, "o1", error.setState, { current: 1 }, 1);
     await flushAsync();
     expect(error.value).toBe("他の画面で編集中です");
   });
@@ -218,7 +240,7 @@ describe("handleCorporateApplyEditLockedError(鍵を持たない入口として�
     });
     const error = createStateSpy<string | null>(null);
     const err = Object.assign(new Error("他の画面で編集中です"), { code: "EDIT_LOCKED" });
-    handleCorporateApplyEditLockedError(err, "o1", error.setState);
+    handleCorporateApplyEditLockedError(err, "o1", error.setState, { current: 1 }, 1);
     expect(error.value).toBe("他の画面で編集中です");
     // 控えは既に解放されているため、利用者が再反映を成功させ得る(round2 Important Aの副作用)。
     error.setState(null);
@@ -262,10 +284,15 @@ describe("handleCorporateApplyEditLockedError(鍵を持たない入口として�
         }),
     });
     const error = createStateSpy<string | null>(null);
-    const seqRef = { current: 0 };
+    // ⚠この2回は同じ試行(=呼び出し元が同じhandleApply呼び出し内で2回起きた
+    //   ケースを模す)。呼び出し元がhandleApplyの頭で1回だけ採番するのと同じく、
+    //   ここでも同じseqRefを共有しつつ、1回目はmySeq=1(古い)、2回目は
+    //   seqRef.currentを2へ進めてmySeq=2(新しい)を渡す。
+    const seqRef = { current: 1 };
     const err = Object.assign(new Error("他の画面で編集中です"), { code: "EDIT_LOCKED" });
-    handleCorporateApplyEditLockedError(err, "o1", error.setState, seqRef);
-    handleCorporateApplyEditLockedError(err, "o1", error.setState, seqRef);
+    handleCorporateApplyEditLockedError(err, "o1", error.setState, seqRef, 1);
+    seqRef.current = 2;
+    handleCorporateApplyEditLockedError(err, "o1", error.setState, seqRef, 2);
     expect(error.value).toBe("他の画面で編集中です");
     // 1回目(太郎)の組み立てが先に届く＝世代が古いので、封筒のままでも上書きしない。
     resolvers[0]?.(jsonResponse(holderRow("太郎")));
@@ -277,26 +304,101 @@ describe("handleCorporateApplyEditLockedError(鍵を持たない入口として�
     expect(error.value).toBe("次郎さんが編集中です(14:00〜)");
   });
 
-  it("seqRefを省略した2回の呼び出しはそれぞれ独立(常に自分が最新=従来どおり)", async () => {
+  it("異なるseqRef(=別のパネルインスタンス)は互いに干渉しない(review round1 Important #2の書き直し)", async () => {
+    // ⚠旧テストは「seqRefを省略した2回の呼び出しはそれぞれ独立」と名乗りながら
+    //   関数を1回しか呼んでおらず、seqRefをモジュール共有の{current:0}へ差し替える
+    //   mutationでも green のままだった(review round1 Important #2で指摘・
+    //   mutationで確認済み)。ここでは実際に2つの独立したパネルインスタンス
+    //   (別々のownerId・別々のseqRef)を模して2回呼び、片方の世代が進んでも
+    //   もう片方に影響しないことを検証する。
     const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    const resolversA: Array<(res: Response) => void> = [];
+    const resolversB: Array<(res: Response) => void> = [];
+    let callA = 0;
+    let callB = 0;
     stubFetchByUrl({
-      "/api/edit-locks/status": async () =>
-        jsonResponse({
-          locks: [
-            {
-              resourceType: "owner",
-              resourceId: "o1",
-              state: "held_by_other",
-              since,
-              holderName: "太郎",
-            },
-          ],
-        }),
+      "/api/edit-locks/status": (init) => {
+        const body = JSON.parse((init?.body as string) ?? "{}") as {
+          resources?: Array<{ resourceId: string }>;
+        };
+        const resourceId = body.resources?.[0]?.resourceId;
+        return new Promise<Response>((resolve) => {
+          if (resourceId === "o-a") resolversA[callA++] = resolve;
+          else resolversB[callB++] = resolve;
+        });
+      },
     });
-    const error = createStateSpy<string | null>(null);
-    const err = Object.assign(new Error("他の画面で編集中です"), { code: "EDIT_LOCKED" });
-    handleCorporateApplyEditLockedError(err, "o1", error.setState);
+    const errorA = createStateSpy<string | null>(null);
+    const errorB = createStateSpy<string | null>(null);
+    // 2つの独立したパネル。たまたま同じ番号(mySeq=1)から始まる。
+    const seqRefA = { current: 1 };
+    const seqRefB = { current: 1 };
+    const errA = Object.assign(new Error("他の画面で編集中です"), { code: "EDIT_LOCKED" });
+    const errB = Object.assign(new Error("他の画面で編集中です"), { code: "EDIT_LOCKED" });
+    handleCorporateApplyEditLockedError(errA, "o-a", errorA.setState, seqRefA, 1);
+    handleCorporateApplyEditLockedError(errB, "o-b", errorB.setState, seqRefB, 1);
+    // Aだけ後発の試行が始まった(=seqRefA.currentが進んだ)としても、
+    // Bのseq比較はBのseqRefBしか見ないため無関係。
+    seqRefA.current = 2;
+    resolversA[0]?.(
+      jsonResponse({
+        locks: [
+          { resourceType: "owner", resourceId: "o-a", state: "held_by_other", since, holderName: "太郎" },
+        ],
+      }),
+    );
     await flushAsync();
-    expect(error.value).toBe("太郎さんが編集中です(14:00〜)");
+    // Aは自分のseqRefが進んだので、mySeq=1の組み立ては古いとみなされ捨てられる。
+    expect(errorA.value).toBe("他の画面で編集中です");
+    resolversB[0]?.(
+      jsonResponse({
+        locks: [
+          { resourceType: "owner", resourceId: "o-b", state: "held_by_other", since, holderName: "次郎" },
+        ],
+      }),
+    );
+    await flushAsync();
+    // Bのseqrefは進んでいないので、mySeq=1の組み立てはそのまま反映される
+    // (=Aの世代の変化に一切引きずられない)。
+    expect(errorB.value).toBe("次郎さんが編集中です(14:00〜)");
+  });
+});
+
+/**
+ * reportCorporateApplyLockRefusal(反映の失敗をカードの鍵コントローラへ伝える・
+ * review round1 Important #3)。
+ */
+describe("reportCorporateApplyLockRefusal(反映の失敗をカードへ報告・node で直接呼ぶ)", () => {
+  it("onLockRefusedがあれば、apiErrorCode(err)をそのまま渡す(鍵の失効=カード側)", () => {
+    const onLockRefused = vi.fn();
+    const err = Object.assign(
+      new Error("編集の鍵が外れています。画面を開き直してください"),
+      { code: "EDIT_LOCK_STALE" },
+    );
+    reportCorporateApplyLockRefusal(err, onLockRefused);
+    expect(onLockRefused).toHaveBeenCalledTimes(1);
+    expect(onLockRefused).toHaveBeenCalledWith("EDIT_LOCK_STALE");
+  });
+
+  it("管理者に強制解除されたときのコードもそのまま渡す", () => {
+    const onLockRefused = vi.fn();
+    const err = Object.assign(
+      new Error("管理者が編集を終了しました。この内容は保存できません"),
+      { code: "EDIT_LOCK_FORCE_RELEASED" },
+    );
+    reportCorporateApplyLockRefusal(err, onLockRefused);
+    expect(onLockRefused).toHaveBeenCalledWith("EDIT_LOCK_FORCE_RELEASED");
+  });
+
+  it("鍵に無関係なコードもそのまま渡す(分岐しない・写像はuiStateFromSaveErrorへ任せる)", () => {
+    const onLockRefused = vi.fn();
+    const err = Object.assign(new Error("他のユーザーが先に更新しました"), { code: "CONFLICT" });
+    reportCorporateApplyLockRefusal(err, onLockRefused);
+    expect(onLockRefused).toHaveBeenCalledWith("CONFLICT");
+  });
+
+  it("onLockRefusedが無ければ何もしない(admin/owners/[id]・例外を投げない)", () => {
+    const err = Object.assign(new Error("他の画面で編集中です"), { code: "EDIT_LOCKED" });
+    expect(() => reportCorporateApplyLockRefusal(err, undefined)).not.toThrow();
   });
 });

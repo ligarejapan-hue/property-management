@@ -135,23 +135,45 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
     // ⚠これだけでは「ヘッダが付く」ことは固定できない(それは上の applyOwnerCorporate
     //   側の検査の役目)。ここで固定するのは、パネルが受け取ったprops(lockId)を
     //   取り違えずに渡していること(所有者カードの同種テストと同趣旨・二重の網)。
+    // ⚠(review round1 Minor #6) ファイル全体に対する unbounded な
+    //   `[\s\S]*?` は、第3引数が消えても後方の無関係な `{ lockId }` へ
+    //   マッチが飛んで空振りし得る。`handleApply` の本体だけに検査範囲を
+    //   絞る(=このファイルには他に `applyOwnerCorporate(` 呼び出しが無い)。
     const src = readFileSync(
       join(process.cwd(), "src/components/owners/corporate-lookup-panel.tsx"),
       "utf8",
     ).replace(/\r\n/g, "\n");
-    expect(src).toMatch(/applyOwnerCorporate\(\s*ownerId,[\s\S]*?\{\s*lockId,?\s*\}/);
+    const handleApplyBody = extractFunctionBody(src, /const handleApply = async \(/);
+    expect(handleApplyBody).toMatch(/applyOwnerCorporate\(\s*ownerId,[\s\S]*?\{\s*lockId,?\s*\}/);
   });
 
   it("物件詳細の所有者カード内は CorporateLookupPanel にカードの世代(lock.lockId)を渡す", () => {
     // 案件ステータス・導入ルート等と同じく、鍵を持つ画面はカードの世代を渡す。
+    // ⚠(review round1 Minor #5) 固定の文字数窓([\s\S]{0,900}?)は、この
+    //   ファイルの他の箇所が数行増えるだけで正しいコードのまま赤くなる
+    //   (実測691/900・四行の余裕しかない)。sibling の updateOwner 検査と
+    //   同じ unbounded `[\s\S]*?` に揃える(このファイルには
+    //   `<CorporateLookupPanel` が1箇所しか無いため、unboundedでも安全)。
     const src = readFileSync(
       join(process.cwd(), "src/app/(dashboard)/properties/[id]/page.tsx"),
       "utf8",
     ).replace(/\r\n/g, "\n");
-    expect(src).toMatch(/<CorporateLookupPanel[\s\S]{0,900}?lockId=\{lock\.lockId\}/);
+    expect(src).toMatch(/<CorporateLookupPanel[\s\S]*?lockId=\{lock\.lockId\}/);
   });
 
-  it("admin/owners/[id] は鍵を持たない入口なので CorporateLookupPanel に lockId を渡さない", () => {
+  it("物件詳細の所有者カード内は CorporateLookupPanel の反映失敗をカードの鍵コントローラへ伝える(onLockRefused・review round1 Important #3)", () => {
+    // ⚠これが無いと、管理者がカードの鍵を強制解除しても、パネルは断りの
+    //   文言を出す一方でカードの帯・保存ボタンは「保持中」のまま食い違う。
+    const src = readFileSync(
+      join(process.cwd(), "src/app/(dashboard)/properties/[id]/page.tsx"),
+      "utf8",
+    ).replace(/\r\n/g, "\n");
+    expect(src).toMatch(
+      /<CorporateLookupPanel[\s\S]*?onLockRefused=\{\(code\) => lock\.noteSaveError\(code, null\)\}/,
+    );
+  });
+
+  it("admin/owners/[id] は鍵を持たない入口なので CorporateLookupPanel に lockId も onLockRefused も渡さない", () => {
     const src = readFileSync(
       join(process.cwd(), "src/app/(dashboard)/admin/owners/[id]/page.tsx"),
       "utf8",
@@ -159,6 +181,27 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
     const block = src.match(/<CorporateLookupPanel[\s\S]*?\/>/)?.[0];
     expect(block).toBeTruthy();
     expect(block).not.toMatch(/lockId=/);
+    expect(block).not.toMatch(/onLockRefused=/);
+  });
+
+  it("法人番号パネル(corporate-lookup-panel.tsx・handleApply)は両方のcatch節で反映失敗をカードへ報告し、423の文言組み立てへ渡す(review round1 Important #1・#3)", () => {
+    // ⚠(review round1 Important #1) この配線を固定しないと、
+    //   `handleCorporateApplyEditLockedError(...)` 呼び出し自体を2箇所とも
+    //   削除しても全テストが green のままになる(mutation で確認済み)。
+    //   `handleApply` の本体全体を切り出して、両方の catch 節(submit()自体・
+    //   conflict確認後のsubmit(true))で reportCorporateApplyLockRefusal →
+    //   handleCorporateApplyEditLockedError の順に呼んでいることを固定する。
+    const src = readFileSync(
+      join(process.cwd(), "src/components/owners/corporate-lookup-panel.tsx"),
+      "utf8",
+    ).replace(/\r\n/g, "\n");
+    const handleApplyBody = extractFunctionBody(src, /const handleApply = async \(/);
+    expect(handleApplyBody).toMatch(
+      /catch \(err\) \{[\s\S]*?reportCorporateApplyLockRefusal\(err, onLockRefused\);[\s\S]*?handleCorporateApplyEditLockedError\(err, ownerId, setApplyError, applySeqRef, mySeq\)/,
+    );
+    expect(handleApplyBody).toMatch(
+      /catch \(err2\) \{[\s\S]*?reportCorporateApplyLockRefusal\(err2, onLockRefused\);[\s\S]*?handleCorporateApplyEditLockedError\(err2, ownerId, setApplyError, applySeqRef, mySeq\)/,
+    );
   });
 
   it("client 側の合言葉モジュールは server 専用の依存を引かない", () => {
