@@ -54,6 +54,13 @@ const REGISTRY_SERVICE_LOGIN_URL = "https://www.touki.or.jp/TeikyoUketsuke/";
  *   (仕様 6.5・fix round 1)。窓口(`assertNotEditLockedByOther`)の423自体は
  *   氏名・時刻を返さないため、状態の窓口へ1回だけ問い合わせる。失敗・該当なし・
  *   「他の人が持っている」以外は封筒の `message` にフォールバックする。
+ * ⚠**封筒の message は同期的に即座に表示し、組み立てた文は後から差し替える**
+ *   (review round2 Important A)。`composeEditLockedMessage` を `await` すると、
+ *   状態窓口が固まったとき(`fetchEditLockStatus` は `AbortSignal` を持たない
+ *   素の `fetch`)入力欄・ボタンが `disabled` のまま、エラー欄も空のまま数十秒
+ *   固まる(round1で直した「即座に表示する」が壊れる)。ここでは
+ *   `setSaving(false)` を待たせない(`finally` がすぐ走る)ようにし、
+ *   組み立ての結果は `.then(setError)` で後から届いたときだけ上書きする。
  */
 export async function runChibanSave(
   propertyId: string,
@@ -90,7 +97,12 @@ export async function runChibanSave(
     } | null;
     const code = codeFromErrorBody(body);
     if (code === "EDIT_LOCKED" && body?.error?.message) {
-      setError(await composeEditLockedMessage("property", propertyId, body.error.message));
+      const envelopeMessage = body.error.message;
+      // ⚠即座に(状態窓口の応答を待たずに)封筒のmessageを出す。組み立てが
+      //   届いたら(または上限時間で諦めたら)差し替える。ここは await しない
+      //   =この関数はすぐ finally へ進み、控えの disabled/spinner も解除される。
+      setError(envelopeMessage);
+      void composeEditLockedMessage("property", propertyId, envelopeMessage).then(setError);
     } else if (code === "VERSION_CONFLICT") {
       setError(
         "他の担当者が先に更新しました。画面を開き直してからやり直してください。",

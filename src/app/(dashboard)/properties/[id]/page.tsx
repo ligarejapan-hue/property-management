@@ -2049,6 +2049,15 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
  *   氏名・時刻を返さないため、状態の窓口へ1回だけ問い合わせる。失敗・該当なし・
  *   「他の人が持っている」以外は封筒の `message` にフォールバックする。
  *   他のコードの表示(`err.message`)は従来どおり変えない。
+ * ⚠**封筒の message は同期的に即座に表示し、組み立てた文は後から差し替える**
+ *   (review round2 Important A)。`await composeEditLockedMessage(...)` を
+ *   `catch` の中に置くと、状態窓口が固まったとき `finally { setSaving(false) }`
+ *   まで塞がれ、控え(disabled/spinner)もエラー表示も数十秒固まる。ここでは
+ *   `await` せず `.then(setError)` で後から届いた結果だけ反映する
+ *   (`catch` は同期的に終わるので `finally` はすぐ走る。review round2
+ *   Minor E: `catch` の中に `await` が無くなったので、compose が万一投げても
+ *   unhandled rejection の経路にはならない=念のため `.catch` は要らない
+ *   `composeEditLockedMessage` 自体が reject しない設計のため)。
  */
 export async function runNoLockPropertyPatch(
   propertyId: string,
@@ -2075,7 +2084,12 @@ export async function runNoLockPropertyPatch(
     onRefresh();
   } catch (err) {
     if (apiErrorCode(err) === "EDIT_LOCKED" && err instanceof Error) {
-      setError(await composeEditLockedMessage("property", propertyId, err.message));
+      const envelopeMessage = err.message;
+      // ⚠即座に(状態窓口の応答を待たずに)封筒のmessageを出す。組み立てが
+      //   届いたら(または上限時間で諦めたら)差し替える。await しない=この
+      //   catchはすぐ終わり、finallyがすぐ走って控えの disabled/spinner も解除される。
+      setError(envelopeMessage);
+      void composeEditLockedMessage("property", propertyId, envelopeMessage).then(setError);
       return;
     }
     setError(err instanceof Error ? err.message : "保存に失敗しました");

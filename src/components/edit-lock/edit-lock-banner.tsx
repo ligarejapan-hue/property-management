@@ -33,6 +33,17 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { apiErrorCode, forceReleaseEditLockApi, type EditLockStatusRow } from "@/lib/api-client";
 import type { EditLockUiState } from "@/lib/edit-lock/ui-state";
+// ⚠`formatSince` は src/lib/edit-lock/ui-state.ts(純関数だけ・`"use client"` を
+//   持たないモジュール)へ移した(review round2 Important B)。理由: このファイルは
+//   `ui/button`・`ui/confirm-dialog`・`api-client` を引き込む component モジュールで、
+//   `src/lib/edit-lock/locked-message.ts`(鍵を持たない入口が使う組み立て関数)が
+//   ここから import すると、地番ポップアップのように元々帯に依存していなかった
+//   画面までその一式を巻き込んでしまう(Task 6 fix round 1 #3 が
+//   `canSubmitSave`/`shouldShowLockUnavailableNotice` を同じ理由でコンポーネント
+//   モジュールの外へ出した判断と揃える)。このファイル自身もそちらから使い、
+//   かつ re-export して既存の呼び出し元(`edit-lock-banner.test.tsx`)もそのまま動く。
+import { formatSince } from "@/lib/edit-lock/ui-state";
+export { formatSince } from "@/lib/edit-lock/ui-state";
 
 /**
  * ⚠export する(task5 review round1 Minor)。呼び出し側(`property-edit-form.tsx`)が
@@ -45,14 +56,6 @@ import type { EditLockUiState } from "@/lib/edit-lock/ui-state";
  */
 export const BAND =
   "flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300";
-
-/** 開始時刻は現地時間の HH:mm(仕様の見本と同じ)。解釈できない値は空文字(review Minor #1)。 */
-export function formatSince(since?: string): string {
-  if (!since) return "";
-  const d = new Date(since);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
 
 // ⚠外側の余白(task5 review round2)。この帯の呼び出し元(編集ウィンドウ)は続く
 //   本文(エラー表示・最初のセクション等)との間を空ける想定なので、ここで足す

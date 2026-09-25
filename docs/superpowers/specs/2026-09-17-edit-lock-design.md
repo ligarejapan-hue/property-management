@@ -538,3 +538,13 @@ Task 7 の review で、6.5 の文言「{氏名}さんが編集中です({HH:mm}
 | フォールバック | 問い合わせの失敗・該当行なし・「他の人が持っている」以外(自分の別画面・free 等)は、封筒の `message`(今日は「他の画面で編集中です」)へフォールバックする。どの分岐でも画面を無言のままにしない |
 | 適用範囲 | 案件ステータス・導入ルートのプルダウン、地番ポップアップの3入口すべて |
 | 削除した文言 | 「編集中のため保存できませんでした」(`err instanceof Error` が常に真になる分岐にのみ存在した、到達しない旧フォールバック文言)。合成した文へ置き換えたため削除 |
+
+### Task 7(鍵を持たない3入口)review round 2 の裁定(2026-09-26)
+
+round 1 実装の review で3件の Important が見つかった(文言そのものは変わらない・実装の堅牢さの指摘)。
+
+| 論点 | 決定 |
+|---|---|
+| 組み立ての問い合わせが固まると控えごと固まる(Important A) | 封筒の `message` を**同期的に即座に**表示し、`composeEditLockedMessage` の結果は届いてから(`.then(setError)`)差し替える。`await` を `catch`/エラー分岐の中に置かず、`finally`/後始末を待たせない。あわせて `composeEditLockedMessage` 自体に上限時間(`EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS` = 2秒・`src/lib/edit-lock/rules.ts`)を設け、上限を超えたら封筒の message へフォールバックする(`Promise.race`) |
+| `src/lib/` のモジュールが component モジュールを import していた(Important B) | `formatSince` を `edit-lock-banner.tsx`("use client"・`ui/button`・`ui/confirm-dialog`・`api-client` を引き込む)から `src/lib/edit-lock/ui-state.ts`(純関数だけのモジュール)へ移した。`edit-lock-banner.tsx` はそこから re-export し、既存の呼び出し元はそのまま動く。Task 6 fix round 1 #3(`canSubmitSave`/`shouldShowLockUnavailableNotice` を同じ理由でコンポーネントモジュールの外へ出した判断)と揃える |
+| 走査の文字数窓に余裕が10〜21文字しか無かった(Important C) | `save-entrypoints-scan.test.ts` の入口ごとの検査を、固定の文字数窓(`[\s\S]{0,400}?`)から、関数の実際の本体(括弧・波括弧の対応を数えて切り出す)への検査に差し替えた。パラメータの増減やコメントの追加で正しいコードのまま赤くならない |

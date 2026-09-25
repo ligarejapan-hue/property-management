@@ -13,6 +13,14 @@ export const EDIT_LOCK_HEARTBEAT_GRACE_MS = 5 * 60_000;
 export const EDIT_LOCK_IDLE_LIMIT_MS = IDLE_TIMEOUT_MS;
 export const EDIT_LOCK_IDLE_WARN_MS = 55 * 60_000;
 export const EDIT_LOCK_STATUS_POLL_MS = 30_000;
+/**
+ * 鍵を持たない入口が `EDIT_LOCKED` を受けたときの、氏名+時刻の文を組み立てる
+ * ための状態窓口への問い合わせに許す上限(review round2 Important A)。
+ * ⚠この時間を超えたら封筒の message へフォールバックする(`composeEditLockedMessage`)。
+ *   保存自体はもう終わっている(423で断られた後)ので、ここで待たせるのは
+ *   「表示する文言をどちらにするか」だけ。控え(ボタン等)を塞いではいけない。
+ */
+export const EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS = 2_000;
 
 export type EditLockResourceType = "property" | "owner";
 

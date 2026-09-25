@@ -78,3 +78,23 @@ export function shouldWarnIdle(state: EditLockUiState, nowMs: number): boolean {
   if (state.kind !== "mine" || !state.idleSince) return false;
   return nowMs - new Date(state.idleSince).getTime() >= EDIT_LOCK_IDLE_WARN_MS;
 }
+
+/**
+ * 開始時刻は現地時間の HH:mm(仕様の見本と同じ)。解釈できない値は空文字(review Minor #1)。
+ *
+ * ⚠**このファイル(純関数だけ・`"use client"` を持たない)に置く**(review round2
+ *   Important B)。元は `edit-lock-banner.tsx`("use client"・`ui/button`・
+ *   `ui/confirm-dialog`・`api-client` を引き込む)にあり、`src/lib/edit-lock/
+ *   locked-message.ts`(鍵を持たない入口が使う純粋な組み立て関数)がそこから
+ *   importすると、地番ポップアップのようにこれまで帯に依存していなかった
+ *   画面までその一式を巻き込んでしまう。Task 6 fix round 1 #3 が
+ *   `canSubmitSave`/`shouldShowLockUnavailableNotice` を同じ理由で
+ *   component モジュールの外へ出した判断と揃える。`edit-lock-banner.tsx` は
+ *   ここから re-export し、既存の呼び出し元(テスト含む)はそのまま動く。
+ */
+export function formatSince(since?: string): string {
+  if (!since) return "";
+  const d = new Date(since);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
