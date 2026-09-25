@@ -1359,6 +1359,10 @@ function OwnerCard({
     void lock.release();
     setEditing(false);
     setSaveError(null);
+    // ⚠(branch review #4) カードを閉じたら消す。消さないと、前回の取得が失敗した
+    //   まま(lockUnavailable=true)再度「編集」を押したとき、新しい取得が終わる前の
+    //   一瞬だけ古いfail open通知が出て保存ボタンも押せてしまう。
+    setLockUnavailable(false);
   };
 
   /**
@@ -1416,6 +1420,9 @@ function OwnerCard({
       });
       void lock.release();
       setEditing(false);
+      // ⚠(branch review #4) 保存できた=鍵の可否と無関係に閉じるので、次に開いたときの
+      //   ためにフラグも戻しておく(handleCancelと同じ理由)。
+      setLockUnavailable(false);
       await onRefresh();
     } catch (err) {
       // ⚠コードの写像(期限切れ・強制解除・他の人が取った 等)はTask2の純関数に任せる。
@@ -1793,6 +1800,8 @@ function OwnerCard({
                     // 反映成功 → 親側で owner を再フェッチし、最新値・version を反映する
                     await onRefresh();
                     setEditing(false);
+                    // ⚠(branch review #4) ここもカードを閉じる経路なので同様に戻す。
+                    setLockUnavailable(false);
                   }}
                 />
               </div>
