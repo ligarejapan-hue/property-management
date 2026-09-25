@@ -100,12 +100,54 @@ describe("runNoLockPropertyPatch(鍵を持たない入口の保存)", () => {
     });
     const error = createStateSpy<string | null>(null);
     await runNoLockPropertyPatch("p1", 1, { caseStatus: "active" }, vi.fn(), error.setState, vi.fn());
+    // ⚠(carried item 2) setError(null) が保存開始時に必ず呼ばれることのピン。
+    //   `calls` はこれまで型として公開されているだけで、どのテストからも
+    //   読まれていなかった(=保存開始時のリセットを外しても検査は落ちなかった)。
+    expect(error.calls[0]).toBeNull();
     // ⚠(review round2 Important A) 封筒のmessageを即座に表示する
     //   (状態窓口の応答を待たない)。
     expect(error.value).toBe("他の画面で編集中です");
     await flushAsync();
     // 状態窓口が届き、かつエラーがまだこの試行の封筒のままなら組み立てた文へ差し替える。
     expect(error.value).toBe("太郎さんが編集中です(14:00〜)");
+  });
+
+  it("後着の同文言のrefusalは、先着の古い組み立てに上書きされない(caller-owned sequence number・review round3 K)", async () => {
+    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    const holderRow = (name: string) => ({
+      locks: [
+        {
+          resourceType: "property" as const,
+          resourceId: "p1",
+          state: "held_by_other" as const,
+          since,
+          holderName: name,
+        },
+      ],
+    });
+    const resolvers: Array<(res: Response) => void> = [];
+    let statusCall = 0;
+    stubFetchByUrl({
+      "/api/properties/p1": async () =>
+        jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+      "/api/edit-locks/status": () =>
+        new Promise<Response>((resolve) => {
+          resolvers[statusCall++] = resolve;
+        }),
+    });
+    const error = createStateSpy<string | null>(null);
+    const seqRef = { current: 0 };
+    await runNoLockPropertyPatch("p1", 1, { caseStatus: "active" }, vi.fn(), error.setState, vi.fn(), seqRef);
+    await runNoLockPropertyPatch("p1", 1, { caseStatus: "active" }, vi.fn(), error.setState, vi.fn(), seqRef);
+    expect(error.value).toBe("他の画面で編集中です");
+    // 1回目(太郎)の組み立てが先に届く＝世代が古いので、封筒のままでも上書きしない。
+    resolvers[0]?.(jsonResponse(holderRow("太郎")));
+    await flushAsync();
+    expect(error.value).toBe("他の画面で編集中です");
+    // 2回目(次郎)の組み立てが後から届く＝これが最新なので反映する。
+    resolvers[1]?.(jsonResponse(holderRow("次郎")));
+    await flushAsync();
+    expect(error.value).toBe("次郎さんが編集中です(14:00〜)");
   });
 
   it("EDIT_LOCKED + 状態窓口への問い合わせが失敗すれば、封筒のmessageへフォールバックする(仕様6.5・fix round1)", async () => {

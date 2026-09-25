@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useState, useRef, type Dispatch, type SetStateAction } from "react";
 import { AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
 import { isReadableChiban } from "@/lib/registry-fetch/chiban-input";
 import { codeFromErrorBody } from "@/lib/api-client";
@@ -70,6 +70,16 @@ const REGISTRY_SERVICE_LOGIN_URL = "https://www.touki.or.jp/TeikyoUketsuke/";
  *   「今出ている値がまだこの試行の封筒のmessageのままなら」だけ差し替える
  *   (`prev === envelopeMessage` の一致を条件にする)。既に別の値(成功でnull・
  *   別の試行のmessage)に変わっていれば何もしない。
+ * ⚠**呼び出し元が持つ世代(caller-owned sequence number・review round3 K)**。
+ *   上の一致条件だけでは、後着の refusal が**先着と同じ封筒文言**(この窓口の
+ *   423は氏名・時刻を返さない定数文言)を出したとき、先着の古い組み立てが
+ *   後着の`prev===envelopeMessage`を満たしたまま先に上書きしてしまい、
+ *   後着自身の組み立てが「もう封筒のままではない」と誤判定されて捨てられる
+ *   (older-wins)。呼び出し元(コンポーネント)が `useRef(0)` で持つ
+ *   `seqRef` をこの関数の**呼び出しごとに先頭でインクリメント**し、組み立てが
+ *   届いた時点で「自分の番号がまだ最新か」を先に確認する。呼び出し元が
+ *   `seqRef` を省略した場合(この関数を単発で呼ぶテスト等)は、呼び出しごとに
+ *   新しい `{ current: 0 }` を割り当てる=従来どおり常に「自分が最新」になる。
  */
 export async function runChibanSave(
   propertyId: string,
@@ -78,7 +88,9 @@ export async function runChibanSave(
   setSaving: (v: boolean) => void,
   setError: Dispatch<SetStateAction<string | null>>,
   onSaved: (nextVersion: number | null) => void,
+  seqRef: { current: number } = { current: 0 },
 ): Promise<void> {
+  const mySeq = ++seqRef.current;
   setSaving(true);
   setError(null);
   try {
@@ -111,9 +123,10 @@ export async function runChibanSave(
       //   届いたら(または上限時間で諦めたら)差し替える。ここは await しない
       //   =この関数はすぐ finally へ進み、控えの disabled/spinner も解除される。
       setError(envelopeMessage);
-      void composeEditLockedMessage("property", propertyId, envelopeMessage).then((m) =>
-        setError((prev) => (prev === envelopeMessage ? m : prev)),
-      );
+      void composeEditLockedMessage("property", propertyId, envelopeMessage).then((m) => {
+        if (seqRef.current !== mySeq) return; // 後発の試行が既に始まっている＝この組み立ては古い
+        setError((prev) => (prev === envelopeMessage ? m : prev));
+      });
     } else if (code === "VERSION_CONFLICT") {
       setError(
         "他の担当者が先に更新しました。画面を開き直してからやり直してください。",
@@ -179,6 +192,9 @@ export default function RegistryChibanPopup({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // 呼び出し元が持つ世代(review round3 K)。このポップアップの寿命の間だけ有効な
+  // カウンタで、後着の refusal が先着の古い組み立てに上書きされないようにする。
+  const saveSeqRef = useRef(0);
 
   const readable = isReadableChiban(value);
   const canSave = canWriteProperty && readable && !saving;
@@ -187,7 +203,15 @@ export default function RegistryChibanPopup({
   //   実体は runChibanSave（このファイル上部で export）。node のテストから直接呼べる
   //   ようにそちらへ切り出し、ここは薄い呼び出しにする。
   async function save() {
-    await runChibanSave(propertyId, propertyVersion, value.trim(), setSaving, setError, onSaved);
+    await runChibanSave(
+      propertyId,
+      propertyVersion,
+      value.trim(),
+      setSaving,
+      setError,
+      onSaved,
+      saveSeqRef,
+    );
   }
 
   return (
