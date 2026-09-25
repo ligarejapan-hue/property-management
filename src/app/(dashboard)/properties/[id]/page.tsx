@@ -42,6 +42,9 @@ import { EditLockBanner, BAND as EDIT_LOCK_BAND } from "@/components/edit-lock/e
 // src/lib/edit-lock/save-gate.ts へ移した(component module一式を巻き込まずに
 // 2つの純関数だけを import できるようにするため)。同じ判断なので複製しない。
 import { canSubmitSave, shouldShowLockUnavailableNotice } from "@/lib/edit-lock/save-gate";
+// EDIT_LOCKEDの文言組み立て(仕様6.5・fix round1)。窓口の423は氏名・時刻を返さないため、
+// 状態の窓口へ1回だけ問い合わせて組み立てる(鍵を持たない入口専用)。
+import { composeEditLockedMessage } from "@/lib/edit-lock/locked-message";
 import { OwnerEditableFields, buildOwnerUpdatePayload, canEditOwner } from "@/lib/owner-edit-utils";
 import { canShowAddOwner } from "@/lib/owner-link-utils";
 import {
@@ -2041,7 +2044,10 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
  * 鍵を持たない入口(案件ステータス・導入ルートのプルダウン)の保存(仕様 6.5)。
  * ⚠合言葉は必ず `editLockHeaders()`(世代なし=このプルダウンは鍵を取らない)を通す
  *   (仕様 6.1・6入口すべてが通す契約)。
- * ⚠`EDIT_LOCKED` は窓口の封筒の `message` をそのまま出す(自前で氏名・時刻を組み立てない)。
+ * ⚠`EDIT_LOCKED` は `composeEditLockedMessage` で氏名+時刻の文を組み立てて出す
+ *   (仕様 6.5・fix round 1)。窓口(`assertNotEditLockedByOther`)の423自体は
+ *   氏名・時刻を返さないため、状態の窓口へ1回だけ問い合わせる。失敗・該当なし・
+ *   「他の人が持っている」以外は封筒の `message` にフォールバックする。
  *   他のコードの表示(`err.message`)は従来どおり変えない。
  */
 export async function runNoLockPropertyPatch(
@@ -2068,8 +2074,8 @@ export async function runNoLockPropertyPatch(
     }
     onRefresh();
   } catch (err) {
-    if (apiErrorCode(err) === "EDIT_LOCKED") {
-      setError(err instanceof Error ? err.message : "編集中のため保存できませんでした");
+    if (apiErrorCode(err) === "EDIT_LOCKED" && err instanceof Error) {
+      setError(await composeEditLockedMessage("property", propertyId, err.message));
       return;
     }
     setError(err instanceof Error ? err.message : "保存に失敗しました");

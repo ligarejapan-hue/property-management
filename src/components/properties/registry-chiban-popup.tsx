@@ -5,6 +5,7 @@ import { AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
 import { isReadableChiban } from "@/lib/registry-fetch/chiban-input";
 import { codeFromErrorBody } from "@/lib/api-client";
 import { editLockHeaders } from "@/lib/edit-lock/screen-token-client";
+import { composeEditLockedMessage } from "@/lib/edit-lock/locked-message";
 
 /**
  * 地番を人が地図で確認して入れるポップアップ。
@@ -49,8 +50,10 @@ const REGISTRY_SERVICE_LOGIN_URL = "https://www.touki.or.jp/TeikyoUketsuke/";
  *
  * ⚠合言葉は必ず `editLockHeaders()`(世代なし=このポップアップは鍵を取らない)を通す
  *   (仕様 6.1・6入口すべてが通す契約)。
- * ⚠`EDIT_LOCKED` は窓口の封筒の `message` をそのまま出す(自前で氏名・時刻を組み立てない)。
- *   窓口(`assertNotEditLockedByOther`)がこの保存経路で返す文言をそのまま表示する。
+ * ⚠`EDIT_LOCKED` は `composeEditLockedMessage` で氏名+時刻の文を組み立てて出す
+ *   (仕様 6.5・fix round 1)。窓口(`assertNotEditLockedByOther`)の423自体は
+ *   氏名・時刻を返さないため、状態の窓口へ1回だけ問い合わせる。失敗・該当なし・
+ *   「他の人が持っている」以外は封筒の `message` にフォールバックする。
  */
 export async function runChibanSave(
   propertyId: string,
@@ -87,7 +90,7 @@ export async function runChibanSave(
     } | null;
     const code = codeFromErrorBody(body);
     if (code === "EDIT_LOCKED" && body?.error?.message) {
-      setError(body.error.message);
+      setError(await composeEditLockedMessage("property", propertyId, body.error.message));
     } else if (code === "VERSION_CONFLICT") {
       setError(
         "他の担当者が先に更新しました。画面を開き直してからやり直してください。",

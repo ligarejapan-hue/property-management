@@ -306,6 +306,19 @@ UPDATE edit_locks
 
 `EDIT_LOCKED` を受けたら「山田さんが編集中です(14:02〜)」を、その入口の既存のエラー表示位置に出す。入力は残す。
 
+⚠**この文言は client 側で組み立てる(fix round1)**。鍵を持たないこれらの入口が
+叩く保存窓口(`assertNotEditLockedByOther`)の423は氏名・時刻を返さない(「他の
+画面で編集中です」だけ)。そのデータを持つのは状態の窓口(`fetchEditLockStatus`
+= `/api/edit-locks/status`)なので、`EDIT_LOCKED` を受けた**そのときだけ**その
+資源1件を状態窓口へ問い合わせ、帯(`EditLockBanner`)と同じ `formatSince` を
+再利用して「{氏名}さんが編集中です({HH:mm}〜)」を組み立てる
+(`src/lib/edit-lock/locked-message.ts` の `composeEditLockedMessage`)。
+問い合わせが失敗した・該当行が無い・「他の人が持っている」以外(自分の別画面・
+free 等)なら、窓口の封筒の `message`(今日は「他の画面で編集中です」)へ
+フォールバックする。どの分岐でも画面を無言のままにはしない。まれな経路の
+1回きりの追加リクエストであり、先読み・ポーリングはしない。サーバ側の423は
+変えていない(段階1のまま)。
+
 ## 7. 変えないもの
 
 - **版番号(`version`)による楽観ロック**と、その409文言。鍵が効かなかったときの最後の砦として残す。
@@ -513,3 +526,15 @@ Task 6(`src/app/(dashboard)/properties/[id]/page.tsx` の `OwnerCard`)は Task 5
 | 鍵の有効期間(`enabled`) | そのカードが編集中(`editing`)である間だけ。カードを閉じる(キャンセル/保存成功)と `enabled` が外れ、`useEditLock` の後始末(beacon での解除)が走る |
 | 複製タブ確認(`ensureUniqueScreenToken`・最大300ms)の回数 | **画面(物件詳細ページ)につき1回**。所有者カードごとに行うと、共有名義で所有者が何名もいる物件ほど無駄な待ち・問い合わせが積み重なるため、親(`PropertyDetailPage`)で開いたときに1回だけ済ませ、結果(`tokenReady`)を `OwnerTab` 経由で各カードへ配る。カード側は自分では確認をやり直さない |
 | `updateOwner` の後方互換 | 第3引数 `opts.lockId` を追加。省略時(既存の呼び出し元)は `X-Edit-Screen` だけを送る=鍵を持たない入口として従来どおり動く |
+
+### Task 7(鍵を持たない3入口)review round 1 の裁定(2026-09-26)
+
+Task 7 の review で、6.5 の文言「{氏名}さんが編集中です({HH:mm}〜)」が実際には出せないことが判明した(実装は指摘どおり、封筒のmessageをそのまま出していた)。窓口(`assertNotEditLockedByOther`・`src/lib/edit-lock/service.ts`)の423は氏名・時刻を持たず、「他の画面で編集中です」しか返さない。コントローラの裁定:
+
+| 論点 | 決定 |
+|---|---|
+| 文言の出どころ | **client 側で組み立てる**。サーバ側(段階1・本番稼働中)は変えない。`EDIT_LOCKED` を受けたら `fetchEditLockStatus` でその資源1件を問い合わせ、帯と同じ `formatSince` で氏名+時刻の文を組み立てる(`src/lib/edit-lock/locked-message.ts` の `composeEditLockedMessage`) |
+| 問い合わせの頻度 | `EDIT_LOCKED` を受けたときだけの1回きりの追加リクエスト。先読み・ポーリングはしない(まれな経路のため) |
+| フォールバック | 問い合わせの失敗・該当行なし・「他の人が持っている」以外(自分の別画面・free 等)は、封筒の `message`(今日は「他の画面で編集中です」)へフォールバックする。どの分岐でも画面を無言のままにしない |
+| 適用範囲 | 案件ステータス・導入ルートのプルダウン、地番ポップアップの3入口すべて |
+| 削除した文言 | 「編集中のため保存できませんでした」(`err instanceof Error` が常に真になる分岐にのみ存在した、到達しない旧フォールバック文言)。合成した文へ置き換えたため削除 |
