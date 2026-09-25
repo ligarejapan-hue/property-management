@@ -133,16 +133,28 @@ export function handleCorporateApplyEditLockedError(
  * ⚠**カードの`handleSave`と同型**: `apiErrorCode(err)` をそのまま渡すだけ
  *   (写像は`uiStateFromSaveError`に任せる)。鍵に無関係なコード(CONFLICT等)は
  *   そちらが`null`を返して何もしないため、ここで分岐する必要はない。
- * ⚠**カードの世代(lockId)を送るこの入口では、`EDIT_LOCKED`自体がほぼ届かない**
- *   (`service.ts`が世代切れなら`EDIT_LOCK_STALE`・管理者の強制解除なら
- *   `EDIT_LOCK_FORCE_RELEASED`を先に返す)。この関数はそれらのコードもそのまま
- *   `onLockRefused`へ渡すことで、カードの帯・保存ボタンを最新化する。
- * ⚠`onLockRefused`が無い(admin/owners/[id]・鍵を持たない画面)ときは何もしない。
+ * ⚠**`lockId`があるときだけ報告する**(review round2 Important #2)。世代
+ *   (lockId)を送った試行では`EDIT_LOCKED`自体がほぼ届かない(`service.ts`が
+ *   世代切れなら`EDIT_LOCK_STALE`・管理者の強制解除なら`EDIT_LOCK_FORCE_RELEASED`
+ *   を先に返す)ため、その場合はそれらのコードをそのまま`onLockRefused`へ渡し、
+ *   カードの帯・保存ボタンを最新化する。**逆に世代を送っていない試行で
+ *   `EDIT_LOCKED`が届くのは「カードがそもそも鍵を持てていない」ケース**
+ *   (=誰かが既に持っている)であり、その`acquire`の帯は既に正しい保持者名・
+ *   時刻を表示している。そこへ`noteSaveError("EDIT_LOCKED", null)`を流すと、
+ *   `uiStateFromSaveError`が`{kind:"taken", holderName:"他の利用者"}`(時刻無し)
+ *   を返し、正しい表示を汎用の文言で上書きしてしまう(旧コードは`lockId`を
+ *   見ずに無条件で報告しており、これが実際に起きていた)。そのため`lockId`が
+ *   無いとき(=世代を送っていない試行)は`onLockRefused`を**呼ばない**。
+ *   ⚠この判定を呼び出し側の`if`ではなくこの関数の内側に置く(node から直接
+ *   呼んで「lockId無し→呼ばれない」を検査できるようにするため)。
+ * ⚠`onLockRefused`が無い(admin/owners/[id]・鍵を持たない画面)ときも何もしない。
  */
 export function reportCorporateApplyLockRefusal(
   err: unknown,
+  lockId: string | null | undefined,
   onLockRefused: ((code: string | null) => void) | undefined,
 ): void {
+  if (!lockId) return;
   onLockRefused?.(apiErrorCode(err));
 }
 
@@ -307,14 +319,17 @@ export default function CorporateLookupPanel({
         await onApplied();
       }
     } catch (err) {
-      // ⚠鍵を持つ画面(所有者カード)では、世代(lockId)を送っているため
-      //   EDIT_LOCKED自体がほぼ届かない(service.tsが世代切れ/強制解除を先に
-      //   返す)。ここでまずカードの鍵コントローラへ知らせる(渡されていなければ
-      //   何もしない=admin/owners/[id])。鍵を持たない画面だけが下のEDIT_LOCKED
-      //   処理で423の文言を組み立てて表示する(仕様6.5)。既存の msg.includes
-      //   分岐(下)は変えない。
-      reportCorporateApplyLockRefusal(err, onLockRefused);
-      if (handleCorporateApplyEditLockedError(err, ownerId, setApplyError, applySeqRef, mySeq)) {
+      // ⚠(review round2 Minor #4) このパネル自身の表示を先に確定させてから、
+      //   カードへ報告する。reportCorporateApplyLockRefusalは外部の
+      //   onLockRefusedコールバック(カードのlock.noteSaveError)を呼ぶため、
+      //   万一それが投げても、このパネル自身のエラー表示は既に確定していて
+      //   消えない(逆に先頭で呼んでいた旧コードは、親のコールバックが投げると
+      //   このパネル自身の表示が一切出ないまま例外が伝播し得た)。
+      const handled = handleCorporateApplyEditLockedError(err, ownerId, setApplyError, applySeqRef, mySeq);
+      if (handled) {
+        // ⚠reportCorporateApplyLockRefusal自身がlockId無しでは何もしない
+        //   (review round2 Important #2・関数側のJSDoc参照)。
+        reportCorporateApplyLockRefusal(err, lockId, onLockRefused);
         return;
       }
       const msg = err instanceof Error ? err.message : "反映に失敗しました";
@@ -330,6 +345,7 @@ export default function CorporateLookupPanel({
         );
         if (!ok) {
           setApplyError("情報の不一致を確認してください（反映を中止しました）。");
+          reportCorporateApplyLockRefusal(err, lockId, onLockRefused);
           return;
         }
         try {
@@ -339,13 +355,13 @@ export default function CorporateLookupPanel({
             await onApplied();
           }
         } catch (err2) {
-          reportCorporateApplyLockRefusal(err2, onLockRefused);
-          if (handleCorporateApplyEditLockedError(err2, ownerId, setApplyError, applySeqRef, mySeq)) {
-            return;
+          const handled2 = handleCorporateApplyEditLockedError(err2, ownerId, setApplyError, applySeqRef, mySeq);
+          if (!handled2) {
+            setApplyError(
+              err2 instanceof Error ? err2.message : "反映に失敗しました",
+            );
           }
-          setApplyError(
-            err2 instanceof Error ? err2.message : "反映に失敗しました",
-          );
+          reportCorporateApplyLockRefusal(err2, lockId, onLockRefused);
         }
         return;
       }
@@ -366,6 +382,7 @@ export default function CorporateLookupPanel({
       } else {
         setApplyError(msg);
       }
+      reportCorporateApplyLockRefusal(err, lockId, onLockRefused);
     } finally {
       setApplying(false);
     }

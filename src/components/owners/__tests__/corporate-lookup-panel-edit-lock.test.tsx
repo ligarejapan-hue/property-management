@@ -284,10 +284,14 @@ describe("handleCorporateApplyEditLockedError(鍵を持たない入口として�
         }),
     });
     const error = createStateSpy<string | null>(null);
-    // ⚠この2回は同じ試行(=呼び出し元が同じhandleApply呼び出し内で2回起きた
-    //   ケースを模す)。呼び出し元がhandleApplyの頭で1回だけ採番するのと同じく、
-    //   ここでも同じseqRefを共有しつつ、1回目はmySeq=1(古い)、2回目は
-    //   seqRef.currentを2へ進めてmySeq=2(新しい)を渡す。
+    // ⚠(review round2 Minor #5) この2回は「同じ試行」ではなく、呼び出し元が
+    //   同じseqRefを共有する**2回別々の反映試行**(=1回目のhandleApply呼び出しの
+    //   後、利用者が再度反映を押して2回目のhandleApply呼び出しが起きた)を模す。
+    //   実際の運用で同じ試行(1回のhandleApply呼び出し)が2回この関数を呼ぶのは
+    //   conflict確認の再送だけで、その場合は両方のcatch節に**同じmySeq**が渡る
+    //   (corporate-lookup-panel.tsxのhandleApply参照)。ここではあえて別のmySeq
+    //   (1→2)を渡すことで、呼び出し元がseqRef.currentを進めた後発の試行が
+    //   先着の古い組み立てに上書きされないことを検証する。
     const seqRef = { current: 1 };
     const err = Object.assign(new Error("他の画面で編集中です"), { code: "EDIT_LOCKED" });
     handleCorporateApplyEditLockedError(err, "o1", error.setState, seqRef, 1);
@@ -366,16 +370,16 @@ describe("handleCorporateApplyEditLockedError(鍵を持たない入口として�
 
 /**
  * reportCorporateApplyLockRefusal(反映の失敗をカードの鍵コントローラへ伝える・
- * review round1 Important #3)。
+ * review round1 Important #3・round2 Important #2)。
  */
 describe("reportCorporateApplyLockRefusal(反映の失敗をカードへ報告・node で直接呼ぶ)", () => {
-  it("onLockRefusedがあれば、apiErrorCode(err)をそのまま渡す(鍵の失効=カード側)", () => {
+  it("lockIdがあれば、apiErrorCode(err)をそのまま渡す(鍵の失効=カード側)", () => {
     const onLockRefused = vi.fn();
     const err = Object.assign(
       new Error("編集の鍵が外れています。画面を開き直してください"),
       { code: "EDIT_LOCK_STALE" },
     );
-    reportCorporateApplyLockRefusal(err, onLockRefused);
+    reportCorporateApplyLockRefusal(err, "l1", onLockRefused);
     expect(onLockRefused).toHaveBeenCalledTimes(1);
     expect(onLockRefused).toHaveBeenCalledWith("EDIT_LOCK_STALE");
   });
@@ -386,19 +390,39 @@ describe("reportCorporateApplyLockRefusal(反映の失敗をカードへ報告�
       new Error("管理者が編集を終了しました。この内容は保存できません"),
       { code: "EDIT_LOCK_FORCE_RELEASED" },
     );
-    reportCorporateApplyLockRefusal(err, onLockRefused);
+    reportCorporateApplyLockRefusal(err, "l1", onLockRefused);
     expect(onLockRefused).toHaveBeenCalledWith("EDIT_LOCK_FORCE_RELEASED");
   });
 
   it("鍵に無関係なコードもそのまま渡す(分岐しない・写像はuiStateFromSaveErrorへ任せる)", () => {
     const onLockRefused = vi.fn();
     const err = Object.assign(new Error("他のユーザーが先に更新しました"), { code: "CONFLICT" });
-    reportCorporateApplyLockRefusal(err, onLockRefused);
+    reportCorporateApplyLockRefusal(err, "l1", onLockRefused);
     expect(onLockRefused).toHaveBeenCalledWith("CONFLICT");
   });
 
   it("onLockRefusedが無ければ何もしない(admin/owners/[id]・例外を投げない)", () => {
     const err = Object.assign(new Error("他の画面で編集中です"), { code: "EDIT_LOCKED" });
-    expect(() => reportCorporateApplyLockRefusal(err, undefined)).not.toThrow();
+    expect(() => reportCorporateApplyLockRefusal(err, "l1", undefined)).not.toThrow();
+  });
+
+  it("⚠lockIdが無ければ、EDIT_LOCKEDでもonLockRefusedを呼ばない(review round2 Important #2)", () => {
+    // ⚠所有者カードが鍵を持てていない(他の人が既に持っている)まま反映を押すと、
+    //   世代(lockId)なしで423=EDIT_LOCKEDが返る。この状況では、acquireの帯が
+    //   既に正しい保持者名+時刻を表示しているため、ここでonLockRefusedを呼ぶと
+    //   noteSaveError("EDIT_LOCKED", null) → {kind:"taken", holderName:"他の
+    //   利用者"}(時刻無し)で正しい表示を上書きしてしまう。lockId無しでは
+    //   呼ばないことで、その上書きを防ぐ。
+    const onLockRefused = vi.fn();
+    const err = Object.assign(new Error("他の画面で編集中です"), { code: "EDIT_LOCKED" });
+    reportCorporateApplyLockRefusal(err, null, onLockRefused);
+    expect(onLockRefused).not.toHaveBeenCalled();
+  });
+
+  it("⚠lockIdがundefinedのときも呼ばない(admin/owners/[id]は props を渡さない=undefined)", () => {
+    const onLockRefused = vi.fn();
+    const err = Object.assign(new Error("他の画面で編集中です"), { code: "EDIT_LOCKED" });
+    reportCorporateApplyLockRefusal(err, undefined, onLockRefused);
+    expect(onLockRefused).not.toHaveBeenCalled();
   });
 });

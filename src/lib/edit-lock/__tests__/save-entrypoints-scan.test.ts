@@ -184,24 +184,42 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
     expect(block).not.toMatch(/onLockRefused=/);
   });
 
-  it("法人番号パネル(corporate-lookup-panel.tsx・handleApply)は両方のcatch節で反映失敗をカードへ報告し、423の文言組み立てへ渡す(review round1 Important #1・#3)", () => {
+  it("法人番号パネル(corporate-lookup-panel.tsx・handleApply)は両方のcatch節で423の文言組み立てを先に確定させてからカードへ報告する(review round1 Important #1・round2 Minor #4)", () => {
     // ⚠(review round1 Important #1) この配線を固定しないと、
     //   `handleCorporateApplyEditLockedError(...)` 呼び出し自体を2箇所とも
     //   削除しても全テストが green のままになる(mutation で確認済み)。
     //   `handleApply` の本体全体を切り出して、両方の catch 節(submit()自体・
-    //   conflict確認後のsubmit(true))で reportCorporateApplyLockRefusal →
-    //   handleCorporateApplyEditLockedError の順に呼んでいることを固定する。
+    //   conflict確認後のsubmit(true))で handleCorporateApplyEditLockedError →
+    //   reportCorporateApplyLockRefusal の順(round2 Minor #4=このパネル自身の
+    //   表示を先に確定させてから、外部のonLockRefusedコールバックへ報告する)に
+    //   呼んでいることを固定する。
     const src = readFileSync(
       join(process.cwd(), "src/components/owners/corporate-lookup-panel.tsx"),
       "utf8",
     ).replace(/\r\n/g, "\n");
     const handleApplyBody = extractFunctionBody(src, /const handleApply = async \(/);
     expect(handleApplyBody).toMatch(
-      /catch \(err\) \{[\s\S]*?reportCorporateApplyLockRefusal\(err, onLockRefused\);[\s\S]*?handleCorporateApplyEditLockedError\(err, ownerId, setApplyError, applySeqRef, mySeq\)/,
+      /catch \(err\) \{[\s\S]*?handleCorporateApplyEditLockedError\(err, ownerId, setApplyError, applySeqRef, mySeq\)[\s\S]*?reportCorporateApplyLockRefusal\(err, lockId, onLockRefused\)/,
     );
     expect(handleApplyBody).toMatch(
-      /catch \(err2\) \{[\s\S]*?reportCorporateApplyLockRefusal\(err2, onLockRefused\);[\s\S]*?handleCorporateApplyEditLockedError\(err2, ownerId, setApplyError, applySeqRef, mySeq\)/,
+      /catch \(err2\) \{[\s\S]*?handleCorporateApplyEditLockedError\(err2, ownerId, setApplyError, applySeqRef, mySeq\)[\s\S]*?reportCorporateApplyLockRefusal\(err2, lockId, onLockRefused\)/,
     );
+  });
+
+  it("法人番号パネル(corporate-lookup-panel.tsx・handleApply)は反映の試行ごとに世代を1回だけ進める(review round2 New Important #1)", () => {
+    // ⚠(review round2 New Important #1) Minor #7の直しでこの採番が
+    //   handleCorporateApplyEditLockedError(テスト対象)の外、handleApply
+    //   (未テストのコンポーネントコード)へ移った結果、`++applySeqRef.current`を
+    //   `applySeqRef.current`(採番しない)に変えても全29テストがgreenのまま
+    //   だった(mutationで確認済み・テスト側が呼び出し元の採番を自分で模して
+    //   いるため、production側の採番自体は検査されていなかった)。1行のsource
+    //   assertionで、この採番の呼び出し元における実装を固定する。
+    const src = readFileSync(
+      join(process.cwd(), "src/components/owners/corporate-lookup-panel.tsx"),
+      "utf8",
+    ).replace(/\r\n/g, "\n");
+    const handleApplyBody = extractFunctionBody(src, /const handleApply = async \(/);
+    expect(handleApplyBody).toMatch(/const mySeq = \+\+applySeqRef\.current;/);
   });
 
   it("client 側の合言葉モジュールは server 専用の依存を引かない", () => {
