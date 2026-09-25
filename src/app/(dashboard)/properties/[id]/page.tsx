@@ -30,12 +30,12 @@ import RegistryLocationSearchButton from "@/components/properties/registry-locat
 import { isLandPropertyType } from "@/lib/registry-fetch/registry-target";
 import PropertyEditForm from "@/components/properties/property-edit-form";
 import InvestigationTab from "@/components/properties/investigation-tab";
-import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, unlinkPropertyOwner, updateOwner, fetchQualityCheck, apiErrorCode } from "@/lib/api-client";
+import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, unlinkPropertyOwner, updateOwner, fetchQualityCheck, apiErrorCode, codeFromErrorBody } from "@/lib/api-client";
 // 編集中の鍵(仕様 6.1・6.2)。所有者カードは1枚ごとに別資源として鍵を持つ(Task 6)。
 // ⚠複製タブ確認(ensureUniqueScreenToken・最大300ms)はこの画面(親)で1回だけ済ませ、
 //   結果(tokenReady)を各カードへ配る——カードごとに待たせない(下の PropertyDetailPage 内)。
 import { useEditLock } from "@/hooks/use-edit-lock";
-import { ensureUniqueScreenToken } from "@/lib/edit-lock/screen-token-client";
+import { ensureUniqueScreenToken, editLockHeaders } from "@/lib/edit-lock/screen-token-client";
 import { EditLockBanner, BAND as EDIT_LOCK_BAND } from "@/components/edit-lock/edit-lock-banner";
 // canSubmitSave・shouldShowLockUnavailableNotice は保存可否の判断(決定層)。
 // Task 5(物件の編集ウィンドウ)が切り出し、Task 6 fix round 1 #3 で
@@ -2037,6 +2037,47 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
   );
 }
 
+/**
+ * 鍵を持たない入口(案件ステータス・導入ルートのプルダウン)の保存(仕様 6.5)。
+ * ⚠合言葉は必ず `editLockHeaders()`(世代なし=このプルダウンは鍵を取らない)を通す
+ *   (仕様 6.1・6入口すべてが通す契約)。
+ * ⚠`EDIT_LOCKED` は窓口の封筒の `message` をそのまま出す(自前で氏名・時刻を組み立てない)。
+ *   他のコードの表示(`err.message`)は従来どおり変えない。
+ */
+export async function runNoLockPropertyPatch(
+  propertyId: string,
+  version: number,
+  patch: Record<string, unknown>,
+  setSaving: (v: boolean) => void,
+  setError: (v: string | null) => void,
+  onRefresh: () => void,
+): Promise<void> {
+  setSaving(true);
+  setError(null);
+  try {
+    const res = await fetch(`/api/properties/${propertyId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...editLockHeaders() },
+      body: JSON.stringify({ ...patch, version }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw Object.assign(new Error(body?.error?.message ?? `エラー: ${res.status}`), {
+        code: codeFromErrorBody(body),
+      });
+    }
+    onRefresh();
+  } catch (err) {
+    if (apiErrorCode(err) === "EDIT_LOCKED") {
+      setError(err instanceof Error ? err.message : "編集中のため保存できませんでした");
+      return;
+    }
+    setError(err instanceof Error ? err.message : "保存に失敗しました");
+  } finally {
+    setSaving(false);
+  }
+}
+
 // ---------- Case status inline dropdown ----------
 
 function CaseStatusField({
@@ -2051,26 +2092,15 @@ function CaseStatusField({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleChange = async (value: string) => {
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/properties/${property.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ caseStatus: value, version: property.version }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error?.message ?? `エラー: ${res.status}`);
-      }
-      onRefresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "保存に失敗しました");
-    } finally {
-      setSaving(false);
-    }
-  };
+  const handleChange = (value: string) =>
+    runNoLockPropertyPatch(
+      property.id,
+      property.version,
+      { caseStatus: value },
+      setSaving,
+      setError,
+      onRefresh,
+    );
 
   const label = CASE_STATUS_LABELS[property.caseStatus] ?? property.caseStatus;
 
@@ -2132,26 +2162,15 @@ function IntroductionRouteField({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleChange = async (value: string) => {
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/properties/${property.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ introductionRoute: value || null, version: property.version }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error?.message ?? `エラー: ${res.status}`);
-      }
-      onRefresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "保存に失敗しました");
-    } finally {
-      setSaving(false);
-    }
-  };
+  const handleChange = (value: string) =>
+    runNoLockPropertyPatch(
+      property.id,
+      property.version,
+      { introductionRoute: value || null },
+      setSaving,
+      setError,
+      onRefresh,
+    );
 
   const label = property.introductionRoute
     ? (INTRODUCTION_ROUTE_LABELS[property.introductionRoute] ?? property.introductionRoute)
