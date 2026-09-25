@@ -1799,8 +1799,13 @@ function OwnerCard({
                   onApplied={async () => {
                     // 反映成功 → 親側で owner を再フェッチし、最新値・version を反映する
                     await onRefresh();
+                    // ⚠(branch review round2 N2) handleCancel・handleSaveと同じく
+                    //   明示的にrelease()する。beaconだけに頼ると(unmount/enabled=false
+                    //   切替時のonHidden())、sendBeaconが拒否される環境ではこの記録が
+                    //   猶予時間いっぱいこの画面に握られたままになる(api-client.tsの
+                    //   releaseEditLockByBeaconのコメントどおりbest-effort)。
+                    void lock.release();
                     setEditing(false);
-                    // ⚠(branch review #4) ここもカードを閉じる経路なので同様に戻す。
                     setLockUnavailable(false);
                   }}
                 />

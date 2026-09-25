@@ -117,11 +117,19 @@ describe("画面の合言葉(client)", () => {
     storage.set("edit-screen-token", "duplicated-token");
     setScreenTokenEnvForTest(env);
 
-    // 生きたタブの代役: 問い合わせに同じ合言葉で即答する
+    // 生きたタブの代役: 問い合わせに同じ合言葉で即答する。
+    // ⚠(branch review round2 N1) 本物の answerScreenTokenProbes() は必ず
+    //   自分の文書ID(docId)を答えに載せる(Task6 fix round1)。docId を省いた
+    //   答えは実際のプロトコルの形を再現できておらず、「docId が無ければ複製と
+    //   数える」という誤った条件(`&& !msg.docId`)に書き換えられても、この
+    //   テストは通り続けてしまう。別の文書(=本物の複製タブ)であることを、
+    //   自分のDOCUMENT_IDとは異なる文字列で明示する。
     const other = hub.openChannel("edit-screen");
     other.onMessage((data) => {
       const msg = data as { type: string; token: string };
-      if (msg.type === "who-has") other.postMessage({ type: "i-have", token: msg.token });
+      if (msg.type === "who-has") {
+        other.postMessage({ type: "i-have", token: msg.token, docId: "other-document" });
+      }
     });
 
     const token = await ensureUniqueScreenToken();
@@ -241,12 +249,11 @@ describe("画面の合言葉(client)", () => {
 
       asker.postMessage({ type: "who-has", token });
 
-      // ⚠(branch review・Task6 fix round1) 答えには自分の文書ID(docId)も載る。
-      //   値そのものは(モジュール読み込み時の乱数のため)固定できないので型だけ検査する。
-      const received = answer as { type?: string; token?: string; docId?: string } | null;
-      expect(received?.type).toBe("i-have");
-      expect(received?.token).toBe(token);
-      expect(typeof received?.docId).toBe("string");
+      // ⚠(branch review round2 N3) 答えには自分の文書ID(docId)も載る。値そのものは
+      //   (モジュール読み込み時の乱数のため)固定できないので expect.any(String) で
+      //   受けるが、`toEqual` の完全一致は保つ=想定外の余分なフィールドが
+      //   紛れ込んでもこのテストが検知できるようにする(型だけの検査に緩めない)。
+      expect(answer).toEqual({ type: "i-have", token, docId: expect.any(String) });
       asker.close();
       stop();
     });

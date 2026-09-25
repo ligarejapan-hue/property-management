@@ -161,7 +161,13 @@ describe("PropertyEditForm の配線(source assertion)", () => {
   });
 
   it("fail openの通知はshouldShowLockUnavailableNotice経由(idle以外では出さない・review round2 N3)", () => {
-    expect(componentSrc).toMatch(/shouldShowLockUnavailableNotice\(\s*lockUnavailable/);
+    // ⚠(branch review round2 N4) 第1引数(lockUnavailable)だけを固定すると、
+    //   idle以外で通知を消す第2引数(lock.state.kind)側が抜け落ちても green になる
+    //   (owner-card-edit-lock.test.tsxで round1 に指摘された穴と同じ形)。
+    //   両方の引数を固定する。
+    expect(componentSrc).toMatch(
+      /shouldShowLockUnavailableNotice\(\s*lockUnavailable,\s*lock\.state\.kind\s*\)/,
+    );
   });
 });
 
