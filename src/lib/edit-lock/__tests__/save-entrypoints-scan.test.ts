@@ -23,6 +23,46 @@ const ENTRYPOINTS = [
 ];
 
 /**
+ * 関数の**本体全体**を取り出す(review round2 Important C)。
+ *
+ * ⚠固定の文字数窓(`[\s\S]{0,400}?`)は、パラメータが1つ増える・コメントが1行
+ *   増えるだけで、正しいコードのまま検査が赤くなる(実測: `runNoLockPropertyPatch`
+ *   379/400・`runChibanSave` 390/400 しか余裕が無かった)。数を大きくする直しは
+ *   「どこかに書いてあればOK」への逆戻りで、この走査を強くした意味が無くなる。
+ *   代わりに、関数名の直後の `(` から**括弧の深さを数えて**引数リストの終わりを
+ *   求め、その後で最初に現れる本体の `{` から**波括弧の深さを数えて**対応する
+ *   `}` までを本体として切り出す(prettierの整形や引数の増減に左右されない)。
+ * ⚠`updateOwner` の引数(`data: { note?: ...} & Record<...>`)のように型注釈へ
+ *   `{}` が混じっていても、括弧(`()`)の対応だけで引数リストの終わりを決める
+ *   ため誤動作しない(型注釈の `{}` は引数リストの終わり判定に関与しない)。
+ */
+function extractFunctionBody(src: string, nameOpenParen: RegExp): string {
+  const nameMatch = nameOpenParen.exec(src);
+  if (!nameMatch || !nameMatch[0].endsWith("(")) {
+    throw new Error(`extractFunctionBody: nameOpenParen must match up to and including "(": ${nameOpenParen}`);
+  }
+  const start = nameMatch.index;
+  let i = start + nameMatch[0].length; // "(" の直後
+  let parenDepth = 1;
+  while (i < src.length && parenDepth > 0) {
+    if (src[i] === "(") parenDepth++;
+    else if (src[i] === ")") parenDepth--;
+    i++;
+  }
+  // ここで i は引数リストの閉じ ")" の直後。戻り値の型注釈を挟んで本体の "{" へ。
+  const braceStart = src.indexOf("{", i);
+  if (braceStart === -1) return src.slice(start);
+  let braceDepth = 1;
+  let j = braceStart + 1;
+  while (j < src.length && braceDepth > 0) {
+    if (src[j] === "{") braceDepth++;
+    else if (src[j] === "}") braceDepth--;
+    j++;
+  }
+  return src.slice(start, j);
+}
+
+/**
  * 入口ごとの**実際の呼び出し箇所**(ファイル丸ごとではない・fix round1 Important #2)。
  *
  * ⚠ファイル単位の「どこかに `...editLockHeaders(` があればOK」という検査だと、
@@ -36,34 +76,40 @@ const ENTRYPOINTS = [
  *   `src/lib/api-client.ts` を対象に含めない限りこの入口は検査されない。
  *   関数本体を切り出して、その中に `...editLockHeaders(` があることを固定する。
  */
-const ENTRYPOINT_CALL_SITES: { label: string; file: string; anchor: RegExp }[] = [
+const ENTRYPOINT_CALL_SITES: { label: string; file: string; nameOpenParen: RegExp; headerCall: RegExp }[] = [
   {
     label: "物件の編集ウィンドウ(property-edit-form.tsx・buildPropertySaveInit)",
     file: "src/components/properties/property-edit-form.tsx",
-    anchor: /export function buildPropertySaveInit\([^)]*\)[^{]*\{[\s\S]{0,400}?\.\.\.editLockHeaders\(/,
+    nameOpenParen: /export function buildPropertySaveInit\(/,
+    headerCall: /\.\.\.editLockHeaders\(/,
   },
   {
     label: "案件ステータス・導入ルートのプルダウン(page.tsx・runNoLockPropertyPatch)",
     file: "src/app/(dashboard)/properties/[id]/page.tsx",
-    anchor: /export async function runNoLockPropertyPatch\([\s\S]{0,400}?\.\.\.editLockHeaders\(/,
+    nameOpenParen: /export async function runNoLockPropertyPatch\(/,
+    headerCall: /\.\.\.editLockHeaders\(/,
   },
   {
     label: "地番ポップアップ(registry-chiban-popup.tsx・runChibanSave)",
     file: "src/components/properties/registry-chiban-popup.tsx",
-    anchor: /export async function runChibanSave\([\s\S]{0,400}?\.\.\.editLockHeaders\(/,
+    nameOpenParen: /export async function runChibanSave\(/,
+    headerCall: /\.\.\.editLockHeaders\(/,
   },
   {
     label: "所有者カード(api-client.ts・updateOwner)",
     file: "src/lib/api-client.ts",
-    anchor: /export async function updateOwner\([\s\S]{0,600}?\.\.\.editLockHeaders\(opts\.lockId\)/,
+    nameOpenParen: /export async function updateOwner\(/,
+    headerCall: /\.\.\.editLockHeaders\(opts\.lockId\)/,
   },
 ];
 
-describe("保存の入口(走査・呼び出し箇所ごと)", () => {
-  for (const { label, file, anchor } of ENTRYPOINT_CALL_SITES) {
+describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切り出して検査)", () => {
+  for (const { label, file, nameOpenParen, headerCall } of ENTRYPOINT_CALL_SITES) {
     it(`${label} は呼び出し箇所自体で editLockHeaders を通している`, () => {
       const src = readFileSync(join(process.cwd(), file), "utf8").replace(/\r\n/g, "\n");
-      expect(src).toMatch(anchor);
+      const body = extractFunctionBody(src, nameOpenParen);
+      expect(body).not.toBe("");
+      expect(body).toMatch(headerCall);
     });
   }
 
