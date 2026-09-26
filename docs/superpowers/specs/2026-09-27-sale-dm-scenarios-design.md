@@ -118,7 +118,7 @@
    - LP: `lp_tone`・`lp_length`・`lp_appeal`・`lp_strength`・`lp_prompt_text`・`lp_raw_template`・`lp_headline`・`lp_lead`・`lp_body_text`・`lp_faq_json`。`label`=種類名。
    - 写真と図: `dm_scenario_media` の全行(`slot`・`heading`・`sort_order`・`asset_id`/`figure_kind`)。
    - テスト: 台帳のすべての列に既定と違う値を入れて写し、写しの全列が一致すること(発送の既定値や空で埋まっていないこと)。
-3. **宛先に付けて差し込む** `attachAndExpand(宛先, 写し)`: 手紙の型と、**その種類の期待されるLP**(下の組の決まり)を付け、`expandLetterTags` の後に `hasUnresolvedTag`/`validateLetterBody` で検査。差し込めない宛先は本文を空のまま下書きにし、件数を返す(作成でも種類を変えるでも同じ報告)。
+3. **宛先に付けて差し込む** `attachAndExpand(宛先, 写し)`: 手紙の型と、**その種類の期待されるLP**(下の組の決まり)を付け、`expandLetterTags` の後に `hasUnresolvedTag`/`validateLetterBody` で検査。差し込めない宛先は本文を空のまま下書きにし、件数を返す(作成でも種類を変えるでも同じ報告)。**この件数と注意(LPなしの種類など)は、作成の応答だけに頼らない**: ①作成の結果は冪等性の控え(`filterSnapshot.__result`)にも保存し、同じ冪等性キーでの再送(応答が失われた後のやり直し)でも同じ注意が返る(再送のテストを加える)②発送の画面は開くたびに DB から「本文が空の下書き N件」「LPの無い種類」を数えて表示する(応答を見逃しても画面で気づける)。
 
 **組の決まり(正しい組の定義)**: 種類つきの発送の宛先は、手紙の型の `scenario_id`=S のとき、LP の型は「**その発送で S から写した LP の型**」でなければならない。**S に LP の写しが無ければ NULL** でなければならない(LPの文面が無い種類の正規の状態=§4)。単純な「両方の `scenario_id` が等しい」ではない(LP なしの正規の組を誤って拒否するため)。判定関数 `isValidScenarioPair(発送, 手紙の型, LPの型)` はこの定義で作り、組を書き換えうる全経路が使う。総当たりのテストに「LP なしの種類」を入れる。
 
