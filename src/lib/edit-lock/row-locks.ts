@@ -18,3 +18,12 @@ type TxLike = {
 export async function lockOwnerRow(tx: TxLike, ownerId: string): Promise<void> {
   await tx.$queryRaw`SELECT id FROM owners WHERE id = ${ownerId}::uuid FOR UPDATE`;
 }
+
+/**
+ * 棟の行のロック。棟配下の子(棟の写真)を書き換えるトランザクションの最初に呼び、
+ * 同じ棟への書き込みを直列にする(物件配下の `lockPropertyRow` と同じ「親 → 子」の順)。
+ * 棟が無ければ何もしない(存在確認は呼び出し側の責務)。
+ */
+export async function lockBuildingRow(tx: TxLike, buildingId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM buildings WHERE id = ${buildingId}::uuid FOR UPDATE`;
+}
