@@ -81,6 +81,23 @@ export interface EditLockController {
   /** visibilitychange(表示に戻った)相当。 */
   onVisible(): void;
   dispose(): void;
+  /**
+   * `dispose()` を取り消す(横断レビュー C1)。**`dispose()` は終端ではない**。
+   *
+   * ⚠React StrictMode は effect を mount→cleanup→mount と二重に呼ぶが、
+   *   `use-edit-lock.ts` が controller を持つ `useMemo` は effect の再実行では
+   *   作り直されない。つまり cleanup の `dispose()` を受けた**同じインスタンス**へ
+   *   2回目の mount が戻ってくる。戻す口が無いと、その後の `acquire()` は
+   *   サーバが許可した鍵を `disposed` 判定で捨てて beacon で返し、`apply()` を
+   *   通らないので `state` は `idle` のまま=帯も通知も出ないのに保存ボタンだけが
+   *   永久に無効になる。
+   * ⚠兄弟の `status-controller.ts` が `start()` の先頭で `stopped=false` に戻したのと
+   *   同型の修理([[fix-all-call-sites-not-one]])。こちらは「取得」と「復帰」を
+   *   混ぜないため、`start()` に相当する副作用は持たない専用の1手にした
+   *   (窓口の呼び出しも合図も増やさない=呼び出し側の effect の先頭で無条件に
+   *   呼んで安全)。
+   */
+  revive(): void;
 }
 
 export function createEditLockController(deps: EditLockControllerDeps): EditLockController {
@@ -280,5 +297,15 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
     stopHeartbeat();
   }
 
-  return { acquire, release, noteActivity, noteSaveError, onHidden, onVisible, dispose };
+  /**
+   * ⚠`disposed` を戻すだけ(横断レビュー C1)。世代は進めない——`dispose()` が既に
+   *   1つ進めており、ここで更に進めると、この復帰の**後**に呼ばれる `acquire()` が
+   *   自分で進める分と合わせて何も守らない空回りになる。合図も張り直さない
+   *   (鍵を持ち直すのは `acquire()` の仕事)。
+   */
+  function revive(): void {
+    disposed = false;
+  }
+
+  return { acquire, release, noteActivity, noteSaveError, onHidden, onVisible, dispose, revive };
 }

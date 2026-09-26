@@ -97,6 +97,22 @@ describe("useEditLock の配線", () => {
     expect(onHiddenIndex).toBeLessThan(disposeIndex);
   });
 
+  it("(横断レビューC1) 同じeffectの本体の先頭で revive() を呼ぶ(cleanupのdispose()を取り消す=StrictModeの二重effectで死なない)", () => {
+    // ⚠`useMemo` は effect の再実行では controller を作り直さないため、
+    //   mount→cleanup→mount の2回目は dispose 済みの同じインスタンスを掴む。
+    //   revive() を cleanup の**外**(effect本体の先頭)で呼ぶことが要件。
+    //   兄弟の `status-controller.ts` が `start()` の先頭で `stopped` を戻したのと同型。
+    const reviveIndex = src.indexOf("controller.revive();");
+    const disposeIndex = src.indexOf("controller.dispose();");
+    expect(reviveIndex).toBeGreaterThan(-1);
+    expect(disposeIndex).toBeGreaterThan(-1);
+    expect(reviveIndex).toBeLessThan(disposeIndex);
+    // dispose を含む cleanup(`return () => {`)より前=effect本体側にあること。
+    const cleanupStart = src.lastIndexOf("return () => {", disposeIndex);
+    expect(cleanupStart).toBeGreaterThan(-1);
+    expect(reviveIndex).toBeLessThan(cleanupStart);
+  });
+
   it("visibilitychange/pagehide のリスナーは、addしたのと同じ関数名でremoveする(unmount時に確実に外す)", () => {
     expect(src).toContain('addEventListener("visibilitychange", onVisible)');
     expect(src).toContain('removeEventListener("visibilitychange", onVisible)');

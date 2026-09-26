@@ -258,6 +258,60 @@ describe("createEditLockController", () => {
     expect(h.onStateMock).not.toHaveBeenCalled();
   });
 
+  /**
+   * 全ブランチ横断レビュー C1(兄弟 `status-controller.ts` の start-after-stop の鏡像)。
+   *
+   * `use-edit-lock.ts` の `[controller]` effect は cleanup で `onHidden(); dispose();` を
+   * 呼ぶが、React StrictMode は effect を mount→cleanup→mount と二重に呼び、
+   * **`useMemo` は effect の再実行では作り直されない**ため、2回目の mount は
+   * **すでに dispose 済みの同じインスタンス**を掴む。`revive()` が無いと、その後の
+   * `acquire()` はサーバが許可した鍵を捨てて beacon で返し、`state` は `idle` のまま
+   * =帯も通知も出ないのに保存ボタンだけが永久に無効になる(開発環境で必ず踏む)。
+   */
+  it("dispose() の後に revive() すれば、また鍵を取って合図も再開する(横断レビューC1・StrictModeのeffect二重呼び出し)", async () => {
+    h.acquireMock.mockResolvedValue(MINE);
+    h.heartbeatMock.mockResolvedValue(HEARTBEAT_MINE);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+
+    // hook の cleanup と同じ順序(beacon で手放してから破棄する)。
+    controller.onHidden();
+    controller.dispose();
+    expect(h.registry.activeCount()).toBe(0);
+
+    h.onStateMock.mockClear();
+    h.acquireMock.mockClear();
+    h.heartbeatMock.mockClear();
+    h.releaseByBeaconMock.mockClear();
+
+    // ⚠修理前はここで `disposed` が戻らず、取得の応答は捨てられて beacon で即返され、
+    //   `onState` は一度も呼ばれない(=保存ボタンが永久に押せない)。
+    controller.revive();
+    await controller.acquire();
+
+    expect(h.acquireMock).toHaveBeenCalledTimes(1);
+    expect(h.lastState()).toMatchObject({ kind: "mine", lockId: LOCK_ID });
+    // 許可された鍵を孤児として beacon で捨てていない(=本当に掴み直している)。
+    expect(h.releaseByBeaconMock).not.toHaveBeenCalled();
+    // 合図も1本だけ生きている。
+    expect(h.registry.activeCount()).toBe(1);
+    await h.registry.fire();
+    expect(h.heartbeatMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("revive() は dispose() を取り消すだけで、鍵を勝手に取り直さない(effectの先頭で呼んでも窓口の呼び出しを増やさない)", async () => {
+    const controller = createEditLockController(h.deps);
+    controller.dispose();
+    h.onStateMock.mockClear();
+
+    controller.revive();
+
+    expect(h.acquireMock).not.toHaveBeenCalled();
+    expect(h.heartbeatMock).not.toHaveBeenCalled();
+    expect(h.onStateMock).not.toHaveBeenCalled();
+    expect(h.registry.activeCount()).toBe(0);
+  });
+
   // review round1 で指摘された非同期の穴(C1/I1/I2/I4/m2/m3)。
 
   it("C1a) release中に届いた古い合図の mine 応答は反映しない(release後もidleのまま)", async () => {

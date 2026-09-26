@@ -81,6 +81,14 @@ export function useEditLock({ resourceType, resourceId, enabled = true }: UseEdi
   //   unmount 中でも安全に送れる。dispose だけでは鍵がサーバに5分残る)。
   useEffect(() => {
     if (!controller) return;
+    // ⚠(横断レビュー C1) **cleanup の dispose() を先頭で取り消す**。React StrictMode は
+    //   effect を mount→cleanup→mount と二重に呼ぶが、controller を持つ上の useMemo は
+    //   effect の再実行では作り直されないため、2回目の mount は dispose 済みの同じ
+    //   インスタンスを掴む。revive() が無いと、以後の acquire() はサーバが許可した鍵を
+    //   捨てて beacon で返し、state は idle のまま=帯も通知も出ないのに保存ボタンだけが
+    //   永久に押せない(開発環境で編集ウィンドウを開くたびに起きる)。
+    //   revive() は窓口も合図も触らないので、毎回無条件に呼んで安全。
+    controller.revive();
     return () => {
       controller.onHidden();
       controller.dispose();
