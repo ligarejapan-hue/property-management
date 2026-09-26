@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 vi.mock("@/lib/prisma", () => ({
   default: {
     importJob: { findUnique: vi.fn(), update: vi.fn() },
-    importJobRow: { findMany: vi.fn() },
+    importJobRow: { findMany: vi.fn(), updateMany: vi.fn() },
     property: { findMany: vi.fn() },
     user: { findUnique: vi.fn() },
   },
@@ -37,7 +37,7 @@ import {
 
 const pm = prisma as unknown as {
   importJob: { findUnique: Mock; update: Mock };
-  importJobRow: { findMany: Mock };
+  importJobRow: { findMany: Mock; updateMany: Mock };
   property: { findMany: Mock };
   user: { findUnique: Mock };
 };
@@ -129,7 +129,7 @@ describe("まとめて反映の行の振り分け", () => {
     );
     pm.importJobRow.findMany
       .mockResolvedValueOnce([ownerApplyRow("r1", 1)])
-      .mockResolvedValueOnce([{ status: "pending" }]);
+      .mockResolvedValueOnce([{ status: "error" }]);
 
     enqueueRegistryPdfBulkJob("j1");
     await waitForIdle();
@@ -147,7 +147,7 @@ describe("まとめて反映の行の振り分け", () => {
     );
     pm.importJobRow.findMany
       .mockResolvedValueOnce([ownerApplyRow("r1", 1)])
-      .mockResolvedValueOnce([{ status: "pending" }]);
+      .mockResolvedValueOnce([{ status: "error" }]);
 
     enqueueRegistryPdfBulkJob("j1");
     await waitForIdle();
@@ -159,7 +159,7 @@ describe("まとめて反映の行の振り分け", () => {
     pm.user.findUnique.mockResolvedValue({ id: "u1", role: "office_staff", isActive: true });
     pm.importJobRow.findMany
       .mockResolvedValueOnce([ownerApplyRow("r1", 1)])
-      .mockResolvedValueOnce([{ status: "pending" }]);
+      .mockResolvedValueOnce([{ status: "error" }]);
 
     enqueueRegistryPdfBulkJob("j1");
     await waitForIdle();
@@ -176,7 +176,7 @@ describe("まとめて反映の行の振り分け", () => {
     pm.user.findUnique.mockResolvedValue({ id: "u1", role: "admin", isActive: false });
     pm.importJobRow.findMany
       .mockResolvedValueOnce([ownerApplyRow("r1", 1)])
-      .mockResolvedValueOnce([{ status: "pending" }]);
+      .mockResolvedValueOnce([{ status: "error" }]);
 
     enqueueRegistryPdfBulkJob("j1");
     await waitForIdle();
@@ -188,6 +188,74 @@ describe("まとめて反映の行の振り分け", () => {
     expect(statuses).toContain("failed");
     // ⚠有効かどうかを実際に読みに行っている
     expect(pm.user.findUnique.mock.calls[0][0].select).toMatchObject({ isActive: true });
+  });
+
+  /**
+   * ⚠なぜ必要か(@codex 第6R P2): 権限切れで止めたジョブの行を「未処理」のまま残すと、
+   *   受付は「再開できる失敗ジョブがある」として新しい実行を断り、再開は同じ実行者で
+   *   また止まる。無効にした人を戻すかDBを直すまで、この機能が使えなくなる。
+   *   残りの行は「失敗(理由つき)」で閉じ、別の管理者が新しく実行できるようにする。
+   */
+  it("⚠権限切れで止めたときは、残りの行を理由つきの失敗で閉じる（未処理のまま塞がない）", async () => {
+    pm.user.findUnique.mockResolvedValue({ id: "u1", role: "admin", isActive: false });
+    pm.importJobRow.findMany
+      .mockResolvedValueOnce([ownerApplyRow("r1", 1), ownerApplyRow("r2", 2)])
+      .mockResolvedValueOnce([{ status: "error" }, { status: "error" }]);
+
+    enqueueRegistryPdfBulkJob("j1");
+    await waitForIdle();
+
+    expect(pm.importJobRow.updateMany).toHaveBeenCalledTimes(1);
+    const call = pm.importJobRow.updateMany.mock.calls[0][0];
+    expect(call.where).toEqual({ jobId: "j1", id: { in: ["r1", "r2"] }, status: "pending" });
+    expect(call.data.status).toBe("error");
+    expect(String(call.data.errorMessage)).toContain("もう一度実行");
+  });
+
+  /**
+   * ⚠なぜ必要か(@codex 第6R P1): 5,000件は長く走る。最初に一度だけ確かめて、以降は
+   *   同じ権限の控えで書き続けると、途中で無効にした・権限を外した後も書き込みが続く。
+   *   行ごとに読み直し、変わったらそこで止める。
+   */
+  it("⚠途中で無効にされたら、その時点で止めて残りを処理しない", async () => {
+    pm.user.findUnique
+      .mockResolvedValueOnce({ id: "u1", role: "admin", isActive: true }) // 開始時
+      .mockResolvedValueOnce({ id: "u1", role: "admin", isActive: true }) // r1 の前
+      .mockResolvedValue({ id: "u1", role: "admin", isActive: false }); // r2 の前〜
+    pm.importJobRow.findMany
+      .mockResolvedValueOnce([
+        ownerApplyRow("r1", 1),
+        ownerApplyRow("r2", 2),
+        ownerApplyRow("r3", 3),
+      ])
+      .mockResolvedValueOnce([{ status: "success" }, { status: "error" }, { status: "error" }]);
+
+    enqueueRegistryPdfBulkJob("j1");
+    await waitForIdle();
+
+    expect((processRegistryOwnerApplyRow as Mock).mock.calls.map((c) => c[0].rowId)).toEqual([
+      "r1",
+    ]);
+    const call = pm.importJobRow.updateMany.mock.calls[0][0];
+    expect(call.where.id).toEqual({ in: ["r2", "r3"] });
+  });
+
+  it("⚠行ごとに渡す権限は、その行の直前に読み直したもの", async () => {
+    const changed = [...ALL_PERMS, { resource: "owner_phone", action: "edit", granted: true }];
+    (getUserPermissions as unknown as Mock)
+      .mockResolvedValueOnce(ALL_PERMS)
+      .mockResolvedValue(changed);
+    pm.importJobRow.findMany
+      .mockResolvedValueOnce([ownerApplyRow("r1", 1), ownerApplyRow("r2", 2)])
+      .mockResolvedValueOnce([{ status: "success" }, { status: "success" }]);
+
+    enqueueRegistryPdfBulkJob("j1");
+    await waitForIdle();
+
+    const calls = (processRegistryOwnerApplyRow as Mock).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][0].perms).toEqual(ALL_PERMS);
+    expect(calls[1][0].perms).toEqual(changed);
   });
 
   it("PDFを上げた一括取込だけのジョブでは、権限の読み直しをしない（従来どおり）", async () => {

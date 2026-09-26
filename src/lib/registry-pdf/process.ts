@@ -765,6 +765,21 @@ export async function processRegistryPdf(
 
   // Parse the registry text（UI 編集値があれば再 parse より優先してマージ）
   const parsed = applyEditedToParsed(parseRegistryText(text), edited);
+  /**
+   * 取込の記録の行に残す、読み取った物件の項目。
+   * ⚠所有者だけを入れる経路(ownersOnly)では**残さない**。読み取りは物件の所在が
+   *   読めないと、最初に出てきた都道府県つきの行(=所有者の住所のことがある)を
+   *   「住所」として拾うため、取込の履歴から所有者の住所が見えてしまう
+   *   (@codex 第6R P1)。この経路は物件の項目を書かないので、記録にも要らない。
+   */
+  const recordedParsed = args.ownersOnly
+    ? { address: null, realEstateNumber: null, lotNumber: null, buildingNumber: null }
+    : {
+        address: parsed.address,
+        realEstateNumber: parsed.realEstateNumber,
+        lotNumber: parsed.lotNumber,
+        buildingNumber: parsed.buildingNumber,
+      };
 
   // Create import job record
   const job = await prisma.importJob.create({
@@ -1120,8 +1135,8 @@ export async function processRegistryPdf(
           rawData: {
             fileName,
             reason: failureReason,
-            extractedAddress: parsed.address ?? null,
-            extractedRealEstateNumber: parsed.realEstateNumber ?? null,
+            extractedAddress: recordedParsed.address ?? null,
+            extractedRealEstateNumber: recordedParsed.realEstateNumber ?? null,
             targetPropertyId,
             ...buildErrorRawDataExtras(failureReason, null),
           },
@@ -1158,8 +1173,8 @@ export async function processRegistryPdf(
         rawData: {
           fileName,
           reason: failureReason,
-          extractedAddress: parsed.address ?? null,
-          extractedRealEstateNumber: parsed.realEstateNumber ?? null,
+          extractedAddress: recordedParsed.address ?? null,
+          extractedRealEstateNumber: recordedParsed.realEstateNumber ?? null,
           targetPropertyId: null,
           ...buildErrorRawDataExtras(failureReason, null),
         },
@@ -1231,10 +1246,10 @@ export async function processRegistryPdf(
         rowNumber: 1,
         status: "success",
         rawData: {
-          realEstateNumber: parsed.realEstateNumber,
-          address: parsed.address,
-          lotNumber: parsed.lotNumber,
-          buildingNumber: parsed.buildingNumber,
+          realEstateNumber: recordedParsed.realEstateNumber,
+          address: recordedParsed.address,
+          lotNumber: recordedParsed.lotNumber,
+          buildingNumber: recordedParsed.buildingNumber,
           // PR#88: owner 名(PII)は rawData に残さない。件数のみ保持する。
           ownerCount: parsed.owners.length,
           // A-2c: owner 反映の非PII件数（名前・住所は載せない）。

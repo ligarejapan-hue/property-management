@@ -131,30 +131,55 @@ async function processJob(jobId: string): Promise<void> {
   // ⚠待機列とワーカーは1本のまま(同時に走る処理を常に1つに保つ)。
   const isOwnerApply = (rawData: unknown) =>
     isRegistryOwnerApplyRow(REGISTRY_OWNER_APPLY_JOB_TYPE, rawData);
-  const ownerApplyRows = pendingRows.filter((row) => isOwnerApply(row.rawData));
 
-  // ⚠まとめて反映の行があるときは、**処理を始める前に実行者の権限を読み直す**。
-  //   受け付けたあとに権限を外された場合、行ごとに失敗を積むと1,821件ぶんの
-  //   「失敗」ができてしまう。ジョブごと失敗にして、原因を直してから再開させる。
-  let ownerApplyPerms: Awaited<ReturnType<typeof getUserPermissions>> | null = null;
-  if (ownerApplyRows.length > 0) {
-    ownerApplyPerms = await getUserPermissions(executor.id);
-    // ⚠無効にされた人(isActive=false=ログインの取り消し)の名前では書かない。
-    //   権限の読み直しは役割の設定を見るだけで、有効かどうかは見ない(@codex 第5R P1)。
-    const missing = !executor.isActive
+  /**
+   * まとめて反映の行の**直前ごとに**、実行者が今も有効で権限があるかを読み直す。
+   * ⚠最初に一度だけでは足りない。5,000件は長く走るので、途中で無効にした・権限を
+   *   外した後も同じ控えで書き続けてしまう(@codex 第6R P1)。
+   * ⚠無効にされた人(isActive=false=ログインの取り消し)の名前では書かない。
+   *   権限の読み直しは役割の設定を見るだけで、有効かどうかは見ない(@codex 第5R P1)。
+   */
+  const loadOwnerApplyAuth = async () => {
+    const fresh = await prisma.user.findUnique({
+      where: { id: executor.id },
+      select: { id: true, role: true, isActive: true },
+    });
+    if (!fresh) return { missing: "ユーザーが見つからない", fresh: null, perms: [] };
+    const perms = await getUserPermissions(fresh.id);
+    const missing = !fresh.isActive
       ? "有効なユーザーではない"
-      : findMissingRegistryOwnerApplyPerm(executor.role, ownerApplyPerms);
-    if (missing) {
-      console.error(
-        `[registry-owner-bulk] 実行者の権限が足りないため中止 jobId=${jobId} 不足=${missing}`,
-      );
-      await prisma.importJob.update({
-        where: { id: jobId },
-        data: { status: "failed", completedAt: new Date() },
-      });
-      return;
-    }
-  }
+      : findMissingRegistryOwnerApplyPerm(fresh.role, perms);
+    return { missing, fresh, perms };
+  };
+
+  /**
+   * 権限切れで止めるとき、**残りのまとめて反映の行を理由つきの失敗で閉じる**。
+   * ⚠未処理のまま残すと、受付は「再開できる失敗ジョブがある」として新しい実行を断り、
+   *   再開は同じ実行者でまた止まる=無効にした人を戻すかDBを直すまで機能が塞がる
+   *   (@codex 第6R P2)。閉じた物件は所有者が空のままなので、権限のある管理者が
+   *   新しく実行すれば改めて拾われる。
+   * ⚠行ごとに失敗を積まない(1,821件ぶんの処理を走らせない)。ここで一度に閉じる。
+   */
+  let ownerApplyStopped = false;
+  const stopOwnerApply = async (missing: string, fromIndex: number) => {
+    ownerApplyStopped = true;
+    console.error(
+      `[registry-owner-bulk] 実行者の権限が足りないため中止 jobId=${jobId} 不足=${missing}`,
+    );
+    const remainingIds = pendingRows
+      .slice(fromIndex)
+      .filter((r) => isOwnerApply(r.rawData))
+      .map((r) => r.id);
+    await prisma.importJobRow.updateMany({
+      where: { jobId, id: { in: remainingIds }, status: "pending" },
+      data: {
+        status: "error",
+        errorMessage:
+          "実行した管理者が無効になったか、必要な権限が無くなったため中止しました。" +
+          "この物件は、権限のある管理者がもう一度実行すると改めて処理されます",
+      },
+    });
+  };
 
   // 物件indexは**PDFを上げた行があるときだけ**構築する(全件スキャンで重いため、
   // まとめて反映だけのジョブでは作らない)。
@@ -169,13 +194,19 @@ async function processJob(jobId: string): Promise<void> {
     return index;
   };
 
-  for (const row of pendingRows) {
+  for (const [i, row] of pendingRows.entries()) {
     if (isOwnerApply(row.rawData)) {
+      if (ownerApplyStopped) continue;
+      const auth = await loadOwnerApplyAuth();
+      if (auth.missing || !auth.fresh) {
+        await stopOwnerApply(auth.missing ?? "ユーザーが見つからない", i);
+        continue;
+      }
       await processRegistryOwnerApplyRow({
         jobId,
         rowId: row.id,
-        executor: { id: executor.id, role: executor.role },
-        perms: ownerApplyPerms ?? [],
+        executor: { id: auth.fresh.id, role: auth.fresh.role },
+        perms: auth.perms,
       });
       continue;
     }
