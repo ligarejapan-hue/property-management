@@ -448,6 +448,29 @@ describe("画面の合言葉(client)", () => {
     }
 
     /**
+     * (1)の前提そのものを固定する。`lockHeaderFunctionNames()` は
+     * `export (async )?function` 形だけを見るので、鍵のヘッダを運ぶ関数が
+     * **アロー形**(`export const saveFoo = async (…) => { … editLockHeaders(…) }`)で
+     * 書かれると、上の導出が黙って取り逃す=「新しい画面で一生を忘れる」型の
+     * 3回目を止められなくなる。
+     *
+     * ⚠窓は文字数で切らない(このリポジトリの明文規則)。**次の `export` まで**という
+     *   構造で区切って、その中に鍵のヘッダの呼び出しがあるかを見る。
+     */
+    function arrowStyleLockHeaderExports(): string[] {
+      const src = read(API_CLIENT);
+      const offenders: string[] = [];
+      const arrowRe = /^export\s+const\s+([A-Za-z0-9_]+)\s*(?::[^=\n]+)?=\s*(?:async\s*)?\(/gm;
+      let m: RegExpExecArray | null;
+      while ((m = arrowRe.exec(src))) {
+        const nextExport = src.indexOf("\nexport ", m.index + 1);
+        const body = src.slice(m.index, nextExport === -1 ? src.length : nextExport);
+        if (/editLockHeaders\(|getScreenToken\(/.test(body)) offenders.push(m[1]);
+      }
+      return offenders;
+    }
+
+    /**
      * 2. `src/` 配下(`__tests__`・`src/lib/edit-lock/**`・`src/lib/api-client.ts`・
      *    `src/hooks/use-edit-screen-token.ts` を除く)で、(1)の名前を import して
      *    いるファイル、または `editLockHeaders` を import しているファイルを
@@ -572,6 +595,16 @@ describe("画面の合言葉(client)", () => {
 
     it("導出は空振りではない(少なくとも1画面を検出する=検査が常に緑にしかならない状態ではない)", () => {
       expect(pagesReachingLockHeaderSites().length).toBeGreaterThan(0);
+    });
+
+    it("導出の前提: 鍵のヘッダを運ぶ api 関数は `export function` 形だけ(アロー形で書くと上の導出が取り逃す)", () => {
+      expect(
+        arrowStyleLockHeaderExports(),
+        "api-client.ts で鍵のヘッダ(editLockHeaders / getScreenToken)を使う輸出は " +
+          "`export async function name(...)` の形で書くこと。`export const name = async (...) => {}` は " +
+          "上の導出型ラチェットの収集対象外なので、その関数を使う新しい画面が " +
+          "useEditScreenToken() を呼び忘れても検査が緑のままになる。",
+      ).toEqual([]);
     });
 
     /**
