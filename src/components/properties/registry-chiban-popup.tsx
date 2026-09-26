@@ -1,8 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, type Dispatch, type SetStateAction } from "react";
 import { AlertTriangle, ExternalLink, Loader2 } from "lucide-react";
 import { isReadableChiban } from "@/lib/registry-fetch/chiban-input";
+import { codeFromErrorBody } from "@/lib/api-client";
+import { editLockHeaders } from "@/lib/edit-lock/screen-token-client";
+import { composeEditLockedMessage } from "@/lib/edit-lock/locked-message";
 
 /**
  * 地番を人が地図で確認して入れるポップアップ。
@@ -41,6 +44,103 @@ import { isReadableChiban } from "@/lib/registry-fetch/chiban-input";
  */
 const REGISTRY_SERVICE_LOGIN_URL = "https://www.touki.or.jp/TeikyoUketsuke/";
 
+/**
+ * 地番の保存(鍵を持たない入口・仕様 6.5)。node から直接呼べるよう部品から切り出す
+ * (`registry-chiban-popup.test.ts` と同じ、走査に頼らず実際に呼んで検査するやり方)。
+ *
+ * ⚠合言葉は必ず `editLockHeaders()`(世代なし=このポップアップは鍵を取らない)を通す
+ *   (仕様 6.1・6入口すべてが通す契約)。
+ * ⚠`EDIT_LOCKED` は `composeEditLockedMessage` で氏名+時刻の文を組み立てて出す
+ *   (仕様 6.5・fix round 1)。窓口(`assertNotEditLockedByOther`)の423自体は
+ *   氏名・時刻を返さないため、状態の窓口へ1回だけ問い合わせる。失敗・該当なし・
+ *   「他の人が持っている」以外は封筒の `message` にフォールバックする。
+ * ⚠**封筒の message は同期的に即座に表示し、組み立てた文は後から差し替える**
+ *   (review round2 Important A)。`composeEditLockedMessage` を `await` すると、
+ *   状態窓口が固まったとき(`fetchEditLockStatus` は `AbortSignal` を持たない
+ *   素の `fetch`)入力欄・ボタンが `disabled` のまま、エラー欄も空のまま数十秒
+ *   固まる(round1で直した「即座に表示する」が壊れる)。ここでは
+ *   `setSaving(false)` を待たせない(`finally` がすぐ走る)ようにし、
+ *   組み立ての結果は `.then(...)` で後から届いたときだけ上書きする。
+ * ⚠**古い組み立てが新しい状態を上書きしない世代の見張り**(review round2
+ *   Important G)。控えが即座に解放されるようになった副作用として、組み立てが
+ *   届く前(最大 `EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS`)に利用者が再保存を
+ *   成功させ得る。そこへ古い組み立てがそのまま `setError(m)` すると、保存が
+ *   成功して消えたはずのエラー欄に「{氏名}さんが編集中です」が後から生える。
+ *   `setError` を React の更新関数の形(`Dispatch<SetStateAction<...>>`)で受け、
+ *   「今出ている値がまだこの試行の封筒のmessageのままなら」だけ差し替える
+ *   (`prev === envelopeMessage` の一致を条件にする)。既に別の値(成功でnull・
+ *   別の試行のmessage)に変わっていれば何もしない。
+ * ⚠**呼び出し元が持つ世代(caller-owned sequence number・review round3 K)**。
+ *   上の一致条件だけでは、後着の refusal が**先着と同じ封筒文言**(この窓口の
+ *   423は氏名・時刻を返さない定数文言)を出したとき、先着の古い組み立てが
+ *   後着の`prev===envelopeMessage`を満たしたまま先に上書きしてしまい、
+ *   後着自身の組み立てが「もう封筒のままではない」と誤判定されて捨てられる
+ *   (older-wins)。呼び出し元(コンポーネント)が `useRef(0)` で持つ
+ *   `seqRef` をこの関数の**呼び出しごとに先頭でインクリメント**し、組み立てが
+ *   届いた時点で「自分の番号がまだ最新か」を先に確認する。呼び出し元が
+ *   `seqRef` を省略した場合(この関数を単発で呼ぶテスト等)は、呼び出しごとに
+ *   新しい `{ current: 0 }` を割り当てる=従来どおり常に「自分が最新」になる。
+ */
+export async function runChibanSave(
+  propertyId: string,
+  version: number,
+  lotNumber: string,
+  setSaving: (v: boolean) => void,
+  setError: Dispatch<SetStateAction<string | null>>,
+  onSaved: (nextVersion: number | null) => void,
+  seqRef: { current: number } = { current: 0 },
+): Promise<void> {
+  const mySeq = ++seqRef.current;
+  setSaving(true);
+  setError(null);
+  try {
+    const res = await fetch(`/api/properties/${propertyId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...editLockHeaders() },
+      // ⚠version は更新スキーマの必須項目。地番だけ送るときも必ず入れる。
+      // ⚠保存するのは lotNumber だけ(家屋番号を保存する口を作らない)。
+      body: JSON.stringify({ version, lotNumber }),
+    });
+    if (res.ok) {
+      // ⚠保存後の版番号を持ち帰る。物件の取り直しを待たずに次の保存ができる
+      //   (取り直すと詳細ページが読み込み中に切り替わり、この画面ごと消える)。
+      const saved = (await res.json().catch(() => null)) as {
+        version?: unknown;
+      } | null;
+      const nextVersion =
+        typeof saved?.version === "number" ? saved.version : null;
+      // ⚠ここで検索を投げない。料金の確認(既存の確認パネル)を必ず経由する。
+      onSaved(nextVersion);
+      return;
+    }
+    const body = (await res.json().catch(() => null)) as {
+      error?: { code?: string; message?: string };
+    } | null;
+    const code = codeFromErrorBody(body);
+    if (code === "EDIT_LOCKED" && body?.error?.message) {
+      const envelopeMessage = body.error.message;
+      // ⚠即座に(状態窓口の応答を待たずに)封筒のmessageを出す。組み立てが
+      //   届いたら(または上限時間で諦めたら)差し替える。ここは await しない
+      //   =この関数はすぐ finally へ進み、控えの disabled/spinner も解除される。
+      setError(envelopeMessage);
+      void composeEditLockedMessage("property", propertyId, envelopeMessage).then((m) => {
+        if (seqRef.current !== mySeq) return; // 後発の試行が既に始まっている＝この組み立ては古い
+        setError((prev) => (prev === envelopeMessage ? m : prev));
+      });
+    } else if (code === "VERSION_CONFLICT") {
+      setError(
+        "他の担当者が先に更新しました。画面を開き直してからやり直してください。",
+      );
+    } else {
+      setError("保存できませんでした。入力を確認してもう一度お試しください。");
+    }
+  } catch {
+    setError("保存できませんでした。通信の状態を確認してください。");
+  } finally {
+    setSaving(false);
+  }
+}
+
 interface RegistryChibanPopupProps {
   propertyId: string;
   /** 物件の所在（画面でコピーしてもらう。⚠外部へは渡さない）。 */
@@ -55,6 +155,13 @@ interface RegistryChibanPopupProps {
   registryLoginUrl: string | null;
   /** property:write。無ければ入力欄を出さず案内だけにする。 */
   canWriteProperty: boolean;
+  /**
+   * 見ている側(仕様 6.3・Task 9)。この物件が他の人(または自分の別画面)の鍵なら
+   * 「保存して確認へ」だけを止める(検索・入力・ログイン導線は止めない)。
+   * ⚠省略時(未指定)はfalse扱い=既存の呼び出し元(このpropsを持たないテスト等)の
+   *   挙動を変えない。
+   */
+  editLockHeld?: boolean;
   /**
    * 建物の道（家屋番号が要る案内）も見せるか。
    * ⚠土地だと分かっている種別以外はすべて true（@codex #373 R10 P2）。
@@ -77,6 +184,7 @@ export default function RegistryChibanPopup({
   propertyVersion,
   registryLoginUrl,
   canWriteProperty,
+  editLockHeld = false,
   offerBuildingPath,
   onSaved,
   onClose,
@@ -92,51 +200,27 @@ export default function RegistryChibanPopup({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // 呼び出し元が持つ世代(review round3 K)。このポップアップの寿命の間だけ有効な
+  // カウンタで、後着の refusal が先着の古い組み立てに上書きされないようにする。
+  const saveSeqRef = useRef(0);
 
   const readable = isReadableChiban(value);
-  const canSave = canWriteProperty && readable && !saving;
+  const canSave = canWriteProperty && readable && !saving && !editLockHeld;
 
+  // ⚠物件本体を更新する共通ラッパーはこのリポに無い（編集フォームも素の fetch）。
+  //   実体は runChibanSave（このファイル上部で export）。node のテストから直接呼べる
+  //   ようにそちらへ切り出し、ここは薄い呼び出しにする。
   async function save() {
-    setSaving(true);
-    setError(null);
-    try {
-      // ⚠物件本体を更新する共通ラッパーはこのリポに無い（編集フォームも素の fetch）。
-      //   1つだけラッパーを増やすと二重管理になるので、同じ形に揃える。
-      const res = await fetch(`/api/properties/${propertyId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        // ⚠version は更新スキーマの必須項目。地番だけ送るときも必ず入れる。
-        // ⚠保存するのは lotNumber だけ（家屋番号を保存する口を作らない）。
-        body: JSON.stringify({ version: propertyVersion, lotNumber: value.trim() }),
-      });
-      if (res.ok) {
-        // ⚠保存後の版番号を持ち帰る。物件の取り直しを待たずに次の保存ができる
-        //   （取り直すと詳細ページが読み込み中に切り替わり、この画面ごと消える）。
-        const saved = (await res.json().catch(() => null)) as {
-          version?: unknown;
-        } | null;
-        const nextVersion =
-          typeof saved?.version === "number" ? saved.version : null;
-        // ⚠ここで検索を投げない。料金の確認（既存の確認パネル）を必ず経由する。
-        onSaved(nextVersion);
-        return;
-      }
-      const body = (await res.json().catch(() => null)) as {
-        error?: { code?: string };
-      } | null;
-      setError(
-        body?.error?.code === "VERSION_CONFLICT"
-          ? "他の担当者が先に更新しました。画面を開き直してからやり直してください。"
-          : "保存できませんでした。入力を確認してもう一度お試しください。",
-      );
-    } catch {
-      setError("保存できませんでした。通信の状態を確認してください。");
-    } finally {
-      setSaving(false);
-    }
+    await runChibanSave(
+      propertyId,
+      propertyVersion,
+      value.trim(),
+      setSaving,
+      setError,
+      onSaved,
+      saveSeqRef,
+    );
   }
-
-
 
   return (
     <div className="mt-2 space-y-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-400/30 dark:bg-amber-500/10">

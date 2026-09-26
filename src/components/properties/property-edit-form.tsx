@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Loader2, X, Save, AlertTriangle } from "lucide-react";
-import { USE_MOCK, fetchUsers } from "@/lib/api-client";
+import { USE_MOCK, fetchUsers, apiErrorCode, codeFromErrorBody } from "@/lib/api-client";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import {
   BUILDING_NAME_MAX_LENGTH,
@@ -10,6 +10,17 @@ import {
 } from "@/lib/property-building-name";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
+// 編集中の鍵(仕様 6.1・6.2)。この画面が最初に配線する画面(Task 5)。
+import { useEditLock } from "@/hooks/use-edit-lock";
+import { ensureUniqueScreenToken, editLockHeaders } from "@/lib/edit-lock/screen-token-client";
+import { EditLockBanner, BAND as EDIT_LOCK_BAND } from "@/components/edit-lock/edit-lock-banner";
+// 保存可否の判断(決定層)。Task 6 fix round 1 #3 で src/lib/edit-lock/save-gate.ts へ
+// 切り出した。ここでは呼ぶだけで、判断はコピーしない。
+import { canSubmitSave, shouldShowLockUnavailableNotice } from "@/lib/edit-lock/save-gate";
+// 423 EDIT_LOCKED の文言(氏名+時刻)の組み立て。鍵を持たない3入口とまったく同じ
+// helper を通す(横断レビュー I2)。窓口の423は氏名・時刻を返さないため、状態の窓口へ
+// 1回だけ問い合わせて差し替える。
+import { showComposedEditLockedMessage } from "@/lib/edit-lock/locked-message";
 
 interface AssigneeOption {
   id: string;
@@ -142,6 +153,82 @@ function isFieldVisible(
 /** 区分マンション(新値/旧値どちらも)か。棟の項目を読み取り専用にする判定に使う。 */
 function isMansionUnit(propertyType: string): boolean {
   return propertyType === "apartment_unit" || propertyType === "unit";
+}
+
+/**
+ * 保存の fetch に渡す init を作る(編集中の鍵・仕様 6.1)。
+ * ⚠ヘッダは必ず `editLockHeaders()` を通す(手組みしない・6つの入口すべてが通す契約)。
+ *   タブの合言葉(X-Edit-Screen)は常に載せ、X-Edit-Lock は鍵を持っているとき(lockId
+ *   があるとき)だけ載る。
+ */
+export function buildPropertySaveInit(payload: unknown, lockId: string | null): RequestInit {
+  return {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...editLockHeaders(lockId) },
+    body: JSON.stringify(payload),
+  };
+}
+
+/**
+ * 画面を開いたときに1回だけ行う試行(仕様 6.1・D6)。**内部専用・例外を投げる**。
+ * ⚠**export しない**(task5 review round2 N4)。呼べるのは同じファイルの
+ *   `runEditLockInit` だけにする。以前はこの関数自体を export していたため、
+ *   後続の画面がこれを直接コピー&呼び出すと fail open の後始末(catch)を素通りし、
+ *   round 1 の Critical(取得の失敗で保存ボタンが永久に押せなくなる)を再導入し
+ *   かねなかった。安全な入口は常に `runEditLockInit` の1つだけにする。
+ * ⚠**複製のタブでないことの確認(`ensureUniqueScreenToken`・最大300ms)が終わるまで
+ *   鍵を取りに行かない**。判定より先に取得すると、複製されたタブが元のタブと同じ
+ *   保持者として鍵を取ってしまう(D6違反=自分の別タブも待つ、が成り立たなくなる)。
+ * `onReady` は tokenReady を立てる(このタイミングまでは何も起きていないので帯も出さない)。
+ * ⚠(task5 review round2 N1) `ensureUniqueScreenToken` 自体が失敗しても(例:
+ *   `BroadcastChannel` の `postMessage`/`onMessage` が例外を投げる)`onReady` は
+ *   必ず呼ぶ(`finally`)。`screen-token-client.ts` が `BroadcastChannel` 不在時に
+ *   既に取っている fail open の姿勢と揃える。呼ばないと、複製タブ確認そのものの
+ *   失敗という更に狭い経路で round 1 の Critical(保存ボタンが永久に押せない)が
+ *   再発し、しかも `runEditLockInit` が出す「保存は通常どおり行えます」の通知と
+ *   自己矛盾する(通知は出るのに保存は実際には押せない)。
+ */
+async function initEditLockAttempt(
+  ensureUniqueScreenToken: () => Promise<string>,
+  onReady: () => void,
+  acquire: () => Promise<void>,
+): Promise<void> {
+  try {
+    await ensureUniqueScreenToken();
+  } finally {
+    onReady();
+  }
+  await acquire();
+}
+
+/**
+ * `initEditLockAttempt` を実行し、結果に応じて `lockUnavailable` を更新する
+ * (task5 review round1 Critical — fail open)。**画面から呼んでよい唯一の入口**
+ * (task5 review round2 N4)。
+ *
+ * ⚠**取得(`acquire`。複製タブ確認自体の失敗も含む)を握りつぶさない、が画面を
+ *   詰まらせもしない**。取得は401(未ログイン)・403(担当外)・404(削除済)・500・
+ *   オフライン等、正当な理由でいつでも失敗しうる。一方でサーバ側
+ *   (`properties/[id]/route.ts`)は「誰かが鍵を持っている」ときだけ保存を拒む
+ *   契約なので、鍵を取れなかったこと**自体**は保存を止める理由にならない。
+ *   サーバが最終的な権威であり続けるよう、ここでは新しい状態(`ui-state.ts` の
+ *   kind)を増やさず、この画面ローカルの `lockUnavailable` フラグだけで
+ *   「保存は通常どおり行える」に倒す(fail open)。
+ * ⚠この関数自体は例外を投げない(呼び出し側の `void runEditLockInit(...)` が
+ *   unhandled rejection を残さない)。
+ */
+export async function runEditLockInit(
+  ensureUniqueScreenToken: () => Promise<string>,
+  onReady: () => void,
+  acquire: () => Promise<void>,
+  setLockUnavailable: (unavailable: boolean) => void,
+): Promise<void> {
+  try {
+    await initEditLockAttempt(ensureUniqueScreenToken, onReady, acquire);
+    setLockUnavailable(false);
+  } catch {
+    setLockUnavailable(true);
+  }
 }
 
 /**
@@ -293,6 +380,37 @@ export default function PropertyEditForm({
   const [users, setUsers] = useState<AssigneeOption[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
 
+  // 編集中の鍵(仕様 6.1・6.2)。この物件の編集ウィンドウが最初に配線する画面。
+  const lock = useEditLock({ resourceType: "property", resourceId: property.id });
+  // ⚠複製のタブでないことの確認(最大300ms)が終わるまで編集させない(D6)。
+  //   判定が終わるまでは何も起きていないので、帯も出さない(lock.state は idle のまま)。
+  const [tokenReady, setTokenReady] = useState(false);
+  // ⚠(task5 review round1 Critical — fail open) 取得(acquire)が失敗しても保存を
+  //   詰まらせない。サーバは鍵が無くても保存を受け付けるため、鍵を表示できないこと
+  //   自体を理由に保存ボタンを永久にdisabledのままにしてはいけない。
+  const [lockUnavailable, setLockUnavailable] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void runEditLockInit(
+      ensureUniqueScreenToken,
+      () => {
+        if (alive) setTokenReady(true);
+      },
+      // ⚠(review round1 minor) alive はここにも効かせる。300ms待ちの間に閉じられたら
+      //   取得自体を送らない(送ってもすぐbeaconで手放すだけになる=自己完結はする
+      //   ものの、不要な取得監査ログ・往復を避けられる)。
+      () => (alive ? lock.acquire() : Promise.resolve()),
+      (unavailable) => {
+        if (alive) setLockUnavailable(unavailable);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+    // 開いたとき1回だけ(依存を足さない=再取得はlock/controller側の責務)。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ⚠「消すだけの欄」を出すかは**開いた時点の値**で決める(編集中に欄が
   //   消えて取り消せなくなるのを防ぐ)。property が差し替わった時だけ更新。
   const [clearableKeys, setClearableKeys] = useState<ReadonlySet<string>>(
@@ -407,29 +525,58 @@ export default function PropertyEditForm({
       if (USE_MOCK) {
         // Mock: just simulate delay
         await new Promise((r) => setTimeout(r, 300));
+        void lock.release();
         onSaved();
         return;
       }
 
-      const res = await fetch(`/api/properties/${property.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      // ⚠ヘッダは必ず buildPropertySaveInit(→ editLockHeaders) を通す(手組みしない)。
+      //   タブの合言葉は常に載り、鍵を持っているとき(lock.lockId)だけ世代も載る。
+      const res = await fetch(
+        `/api/properties/${property.id}`,
+        buildPropertySaveInit(payload, lock.lockId),
+      );
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        throw new Error(
-          body?.error?.message ?? `エラー: ${res.status}`,
-        );
+        // ⚠コードの抽出は codeFromErrorBody(api-client.ts) 経由(review round1
+        //   Important #4)。手組みで再現すると、封筒の形が変わったときここだけ
+        //   古いまま残り、noteSaveError が黙って null を受け取り続ける。
+        throw Object.assign(new Error(body?.error?.message ?? `エラー: ${res.status}`), {
+          code: codeFromErrorBody(body),
+        });
       }
 
+      void lock.release();
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "保存に失敗しました");
+      // ⚠コードの写像(期限切れ・強制解除・他の人が取った 等)はTask2の純関数に任せる。
+      //   ここでは封筒から読んだコードをそのまま渡すだけ。
+      const code = apiErrorCode(err);
+      lock.noteSaveError(code, null);
+      const message = err instanceof Error ? err.message : "保存に失敗しました";
+      if (code === "EDIT_LOCKED") {
+        // ⚠(横断レビュー I2) 段階1の窓口の423は氏名も時刻も返さない(「他の画面で
+        //   編集中です」だけ)。鍵を持たない3入口とまったく同じ helper で状態窓口を
+        //   1回だけ引き、届いたら「{氏名}さんが編集中です({HH:mm}〜)」へ差し替える
+        //   (await しない=控えは即座に解放される)。
+        // ⚠(仕上げround2) その**同じ1回**の結果で帯の氏名も直す(帯が「他の利用者さん」と
+        //   言ったまま、すぐ下のエラー表示が実名を名乗る食い違いを出さない)。
+        showComposedEditLockedMessage("property", property.id, message, setError, (holder) =>
+          lock.noteSaveErrorHolder(holder.holderName, holder.since),
+        );
+        return;
+      }
+      setError(message);
     } finally {
       setSaving(false);
     }
+  };
+
+  /** 閉じる・キャンセルの共通後始末。⚠入力は消さず、鍵だけ返す。 */
+  const handleClose = () => {
+    void lock.release();
+    onClose();
   };
 
   const sections = [...new Set(allFields.map((f) => f.section))];
@@ -439,12 +586,18 @@ export default function PropertyEditForm({
       <div
         className="mx-4 w-full max-w-3xl rounded-lg bg-white dark:bg-gray-900 shadow-xl"
         onClick={(e) => e.stopPropagation()}
+        // ⚠入力・キー・ポインタの一番外側でnoteActivityを呼ぶ(期限切れの取り直しの
+        //   引き金・仕様6.2)。帯の文字の選択・コピー自体はブロックしない(bubbling
+        //   イベントを聞くだけで、pointerEventsやuserSelectには触れていない)。
+        onInput={() => lock.noteActivity()}
+        onKeyDown={() => lock.noteActivity()}
+        onPointerDown={() => lock.noteActivity()}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-800 px-6 py-4">
           <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">物件情報を編集</h3>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="rounded p-1 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
           >
             <X className="h-5 w-5" />
@@ -453,6 +606,19 @@ export default function PropertyEditForm({
 
         {/* Body */}
         <div className="max-h-[70vh] overflow-y-auto px-6 py-4">
+          {/* ⚠(task5 review round1 Critical — fail open) 鍵が取れなくても保存は
+              通常どおり行える、という別の通知。lock.state は idle のまま(新しい
+              state kindは増やさない)なので、EditLockBanner とは別に出す。
+              ⚠(review round2 N3) idle の間だけ出す。取得は失敗した後、後から保存が
+              423等で断られて state が idle 以外(taken/expired等)に動いたら、
+              「保存は通常どおり行えます」と実際の鍵の帯が同時に出て矛盾しないよう
+              この通知を消す。 */}
+          {shouldShowLockUnavailableNotice(lockUnavailable, lock.state.kind) && (
+            <div className={`${EDIT_LOCK_BAND} mb-4`}>
+              編集中の表示を取得できませんでした。保存は通常どおり行えます
+            </div>
+          )}
+          <EditLockBanner state={lock.state} warnIdle={lock.warnIdle} />
           {error && (
             <div className="mb-4 flex items-center gap-2 rounded-md border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
               <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -631,14 +797,28 @@ export default function PropertyEditForm({
             バージョン: {property.version}
           </span>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
           >
             キャンセル
           </button>
           <button
             onClick={handleSave}
-            disabled={saving}
+            // ⚠複製タブ検知(tokenReady)が終わるまでは押せない(D6・仕様6.2)。鍵を
+            //   持てていなくても、取得自体に失敗したとき(lockUnavailable)は
+            //   fail openで押せる(サーバが最終的な権威・review round1 Critical)。
+            // ⚠(横断レビュー I1) ただしfail openが効くのは鍵の状態が idle の間だけ。
+            //   状態(lock.state.kind)を必ず渡す=取得の失敗後に423で帯が出たら
+            //   ボタンも一緒に閉じる(帯と矛盾させない)。
+            disabled={
+              !canSubmitSave({
+                tokenReady,
+                canSave: lock.canSave,
+                saving,
+                lockUnavailable,
+                stateKind: lock.state.kind,
+              })
+            }
             className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
           >
             {saving ? (

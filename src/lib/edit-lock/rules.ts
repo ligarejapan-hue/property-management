@@ -13,6 +13,29 @@ export const EDIT_LOCK_HEARTBEAT_GRACE_MS = 5 * 60_000;
 export const EDIT_LOCK_IDLE_LIMIT_MS = IDLE_TIMEOUT_MS;
 export const EDIT_LOCK_IDLE_WARN_MS = 55 * 60_000;
 export const EDIT_LOCK_STATUS_POLL_MS = 30_000;
+/**
+ * 状態の窓口(`/api/edit-locks/status`)が1回に受け付ける資源の上限(仕様 4.5)。
+ * ⚠見ている側の分割(`status-controller.ts`)と窓口の zod スキーマ(`.max(50)`・
+ *   `src/app/api/edit-locks/status/route.ts`)の**両方**がこの定数を読む
+ *   (review round1 Minor 9)。別々に50を書いていると、片方だけ変えたときに
+ *   窓口が400を返し始め、見ている側は分割していると思い込んだまま気づかない。
+ */
+export const EDIT_LOCK_STATUS_CHUNK_SIZE = 50;
+/**
+ * 鍵を持たない入口が `EDIT_LOCKED` を受けたときの、氏名+時刻の文を組み立てる
+ * ための状態窓口への問い合わせに許す上限(review round2 Important A・round3 Minor H)。
+ * ⚠**控え(ボタン等)を塞ぐのを防ぐための値ではない**(round3で訂正)。
+ *   `composeEditLockedMessage` はもう `await` されない(封筒の message を
+ *   同期的に即座に表示し、控えは即座に解放する側で対処済み・Important A/G)。
+ *   この上限の役目は2つだけ: ①組み立てが**いつまでも**宙に浮いた
+ *   `setTimeout` を残さないよう区切ること、②世代の見張り(Important G・
+ *   `prev === envelopeMessage` の一致条件)が有効な間に組み立てを届かせる
+ *   ための現実的な上限を与えること。短すぎると、応答に2秒以上かかる
+ *   (よくあるモバイル回線)だけで氏名+時刻の文が毎回捨てられ、仕様6.5の
+ *   機能そのものが実質死ぬ(round2で2秒に設定していたのはこの副作用に
+ *   気づく前の値)。長すぎると宙に浮く時間が伸びる。10秒に統一する。
+ */
+export const EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS = 10_000;
 
 export type EditLockResourceType = "property" | "owner";
 

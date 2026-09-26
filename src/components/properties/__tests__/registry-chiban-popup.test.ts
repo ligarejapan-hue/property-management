@@ -4,9 +4,15 @@
  * jsdom が無いので、純関数は直接呼び、画面はソース走査で固定する
  * （このリポの UI テストの主流。registry-location-search-button.test.ts と同型）。
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { runChibanSave } from "../registry-chiban-popup";
+import { EDIT_SCREEN_HEADER, EDIT_LOCK_HEADER } from "@/lib/edit-lock/header-names";
+import { setScreenTokenEnvForTest, resetScreenTokenForTest } from "@/lib/edit-lock/screen-token-client";
+// review round2 Minor F: 重複していたテストヘルパー(fakeScreenTokenEnv・
+// jsonResponse・stubFetch・stubFetchByUrl)を共有モジュールへまとめた。
+import { fakeScreenTokenEnv, jsonResponse, stubFetch, stubFetchByUrl, flushAsync, createStateSpy } from "@/lib/edit-lock/__tests__/test-helpers";
 
 const src = readFileSync(
   join(process.cwd(), "src/components/properties/registry-chiban-popup.tsx"),
@@ -147,17 +153,19 @@ describe("費用の書き分け（設計 §3.2）", () => {
 });
 
 describe("保存（設計 §4.1）", () => {
-  it("保存するのは lotNumber だけ", () => {
-    expect(src).toContain("lotNumber: value.trim()");
-  });
+  // ⚠(task 7) 保存の実体は runChibanSave へ切り出した(node から直接呼べるよう
+  //   にするため)。呼び出し側はそれへ trim 済みの値・propertyVersion をそのまま
+  //   渡すだけであることを固定し、runChibanSave 自体の中身(bodyがversion・
+  //   lotNumberだけであること含む)は下の `runChibanSave(node呼び出し)` 節で
+  //   実際に呼んで検査する(review round2 Minor D・書式ではなく構造を見る)。
 
   it("⚠家屋番号を保存する口を作らない（地図が返すのは地番）", () => {
     expect(src).not.toMatch(/buildingNumber:\s*value/);
     expect(src).not.toMatch(/body:[\s\S]{0,200}buildingNumber/);
   });
 
-  it("version を必ず同梱する（更新スキーマの必須項目）", () => {
-    expect(src).toContain("version: propertyVersion");
+  it("version を必ず同梱する（更新スキーマの必須項目・呼び出し側はpropertyVersionをそのまま渡す）", () => {
+    expect(src).toMatch(/runChibanSave\(\s*propertyId,\s*propertyVersion,\s*value\.trim\(\),/);
   });
 
   it("⚠保存しただけでは検索APIを呼ばない（料金の確認を必ず経由する）", () => {
@@ -184,7 +192,16 @@ describe("入力の検査（設計 §4.3）", () => {
   });
 
   it("読めない形のあいだは保存ボタンを押せない", () => {
-    expect(src).toContain("const canSave = canWriteProperty && readable && !saving");
+    expect(src).toContain("const canSave = canWriteProperty && readable && !saving && !editLockHeld");
+  });
+});
+
+describe("見ている側(仕様6.3・Task 9)", () => {
+  it("物件が他の人の鍵のときは保存ボタンだけを止める(検索・ログイン導線は止めない)", () => {
+    expect(src).toContain("editLockHeld = false");
+    expect(src).toContain("!editLockHeld");
+    // 検索・ログインの導線(a href)自体には触れていない=止めるのは保存だけ。
+    expect(src).not.toMatch(/editLockHeld[\s\S]{0,80}loginHref/);
   });
 });
 
@@ -417,5 +434,285 @@ describe("⚠「番号を空にして」と案内する以上、空にする手�
     expect(EDIT_FORM).toMatch(/if \(field\.type === "clearOnly"\) return clearableKeys\.has\(field\.key\)/);
     // 判定は**開いた時点の値**で固定する (編集中に消した瞬間に欄が消えない)
     expect(EDIT_FORM).toMatch(/setClearableKeys\(/);
+  });
+});
+
+/**
+ * 鍵を持たない入口としての地番保存(Task 7・仕様 6.5)。
+ * ⚠このポップアップは編集の鍵を取らない。`editLockHeaders()` は世代(lockId)を
+ *   渡さず、タブの合言葉(X-Edit-Screen)だけを載せる。`EDIT_LOCKED` は窓口の
+ *   封筒の message をそのまま出す(氏名・時刻を自前で組み立てない)。
+ */
+describe("runChibanSave(鍵を持たない入口の保存・node で直接呼ぶ)", () => {
+  beforeEach(() => {
+    resetScreenTokenForTest();
+    setScreenTokenEnvForTest(fakeScreenTokenEnv("screen-1"));
+  });
+  afterEach(() => {
+    setScreenTokenEnvForTest(null);
+    resetScreenTokenForTest();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("X-Edit-Screenだけを載せ、X-Edit-Lockは載せない(世代=鍵を持たない)", async () => {
+    const fetchMock = stubFetch(async () => jsonResponse({ id: "p1", version: 2 }));
+    await runChibanSave("p1", 1, "69-2", vi.fn(), vi.fn(), vi.fn());
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/properties/p1");
+    expect(init?.method).toBe("PATCH");
+    const headers = init?.headers as Record<string, string>;
+    expect(headers[EDIT_SCREEN_HEADER]).toBe("screen-1");
+    expect(EDIT_LOCK_HEADER in headers).toBe(false);
+  });
+
+  it("成功したらonSavedへ保存後の版番号を渡す", async () => {
+    stubFetch(async () => jsonResponse({ id: "p1", version: 5 }));
+    const onSaved = vi.fn();
+    await runChibanSave("p1", 1, "69-2", vi.fn(), vi.fn(), onSaved);
+    expect(onSaved).toHaveBeenCalledWith(5);
+  });
+
+  it("bodyはversionとlotNumberだけを送る(review round2 Minor D・キー順ではなく構造を見る)", async () => {
+    const fetchMock = stubFetch(async () => jsonResponse({ id: "p1", version: 2 }));
+    await runChibanSave("p1", 1, "69-2", vi.fn(), vi.fn(), vi.fn());
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init?.body as string)).toEqual({ version: 1, lotNumber: "69-2" });
+  });
+
+  it("EDIT_LOCKED + 状態窓口が保持者行を返せば、氏名+時刻の文を組み立てて表示する(仕様6.5・fix round1・round3 Important Gの「まだ封筒のまま」の分岐)", async () => {
+    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    stubFetchByUrl({
+      "/api/properties/p1": async () =>
+        jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+      "/api/edit-locks/status": async () =>
+        jsonResponse({
+          locks: [
+            {
+              resourceType: "property",
+              resourceId: "p1",
+              state: "held_by_other",
+              since,
+              holderName: "太郎",
+            },
+          ],
+        }),
+    });
+    // ⚠(review round3 Important G) setError は更新関数の形でも呼ばれるため、
+    //   素の vi.fn() では「最終的にどの値になるか」を検査できない。
+    //   createStateSpy で useState 相当の適用を行う。
+    const error = createStateSpy<string | null>(null);
+    await runChibanSave("p1", 1, "69-2", vi.fn(), error.setState, vi.fn());
+    // ⚠(carried item 2) setError(null) が保存開始時に必ず呼ばれることのピン。
+    //   `calls` はこれまで型として公開されているだけで、どのテストからも
+    //   読まれていなかった(=保存開始時のリセットを外しても検査は落ちなかった)。
+    expect(error.calls[0]).toBeNull();
+    // ⚠(review round2 Important A) 封筒のmessageを即座に表示する
+    //   (状態窓口の応答を待たない)。
+    expect(error.value).toBe("他の画面で編集中です");
+    await flushAsync();
+    // 状態窓口が届き、かつエラーがまだこの試行の封筒のままなら組み立てた文へ差し替える。
+    expect(error.value).toBe("太郎さんが編集中です(14:00〜)");
+  });
+
+  it("後着の同文言のrefusalは、先着の古い組み立てに上書きされない(caller-owned sequence number・review round3 K)", async () => {
+    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    const holderRow = (name: string) => ({
+      locks: [
+        {
+          resourceType: "property" as const,
+          resourceId: "p1",
+          state: "held_by_other" as const,
+          since,
+          holderName: name,
+        },
+      ],
+    });
+    const resolvers: Array<(res: Response) => void> = [];
+    let statusCall = 0;
+    stubFetchByUrl({
+      "/api/properties/p1": async () =>
+        jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+      "/api/edit-locks/status": () =>
+        new Promise<Response>((resolve) => {
+          resolvers[statusCall++] = resolve;
+        }),
+    });
+    const error = createStateSpy<string | null>(null);
+    const seqRef = { current: 0 };
+    // 1回目の試行(この時点の保持者=太郎)。
+    await runChibanSave("p1", 1, "69-2", vi.fn(), error.setState, vi.fn(), seqRef);
+    // 2回目の試行(封筒の文言は定数のため1回目とバイト同一。保持者は次郎に変わった)。
+    await runChibanSave("p1", 1, "69-2", vi.fn(), error.setState, vi.fn(), seqRef);
+    expect(error.value).toBe("他の画面で編集中です");
+    // 1回目(太郎)の組み立てが先に届く＝世代が古いので、封筒のままでも上書きしない。
+    resolvers[0]?.(jsonResponse(holderRow("太郎")));
+    await flushAsync();
+    expect(error.value).toBe("他の画面で編集中です");
+    // 2回目(次郎)の組み立てが後から届く＝これが最新なので反映する。
+    resolvers[1]?.(jsonResponse(holderRow("次郎")));
+    await flushAsync();
+    expect(error.value).toBe("次郎さんが編集中です(14:00〜)");
+  });
+
+  it("EDIT_LOCKED + 状態窓口への問い合わせが失敗すれば、封筒のmessageへフォールバックする(仕様6.5・fix round1)", async () => {
+    stubFetchByUrl({
+      "/api/properties/p1": async () =>
+        jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+      "/api/edit-locks/status": async () => jsonResponse({ error: { message: "エラー" } }, 500),
+    });
+    const error = createStateSpy<string | null>(null);
+    await runChibanSave("p1", 1, "69-2", vi.fn(), error.setState, vi.fn());
+    await flushAsync();
+    expect(error.value).toBe("他の画面で編集中です");
+  });
+
+  it("EDIT_LOCKED + 状態窓口が該当行を返さなければ、封筒のmessageへフォールバックする", async () => {
+    stubFetchByUrl({
+      "/api/properties/p1": async () =>
+        jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+      "/api/edit-locks/status": async () => jsonResponse({ locks: [] }),
+    });
+    const error = createStateSpy<string | null>(null);
+    await runChibanSave("p1", 1, "69-2", vi.fn(), error.setState, vi.fn());
+    await flushAsync();
+    expect(error.value).toBe("他の画面で編集中です");
+  });
+
+  it("状態窓口が固まっても、封筒のmessageを即座に表示し控えを即座に解放する(review round2 Important A)", async () => {
+    vi.useFakeTimers();
+    try {
+      stubFetchByUrl({
+        "/api/properties/p1": async () =>
+          jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+        // ⚠固まる(解決しない)。apiFetch は AbortSignal を持たないため、これが
+        //   本番で「状態窓口が遅い/固まる」ときの再現。
+        "/api/edit-locks/status": () => new Promise<Response>(() => {}),
+      });
+      const error = createStateSpy<string | null>(null);
+      const setSaving = vi.fn();
+      await runChibanSave("p1", 1, "69-2", setSaving, error.setState, vi.fn());
+      // 状態窓口の応答を待たずに、封筒のmessageが即座に見える。
+      expect(error.value).toBe("他の画面で編集中です");
+      // 状態窓口の応答を待たずに、控え(disabled/spinner)が即座に解放される。
+      expect(setSaving).toHaveBeenLastCalledWith(false);
+      // 内部の上限時間タイマー(10秒・review round3 Minor H)を進めて後始末する
+      //   (タイマーを残したままにしない)。
+      await vi.advanceTimersByTimeAsync(11_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("成功で消えたエラーへ、遅れて届いた組み立てが後から生えない(review round3 Important G)", async () => {
+    // ⚠`let x: T | null = null` を Promise executor(ネストした関数)の中だけで
+    //   再代入すると、TypeScriptの制御フロー解析がこの後の読み取り位置で
+    //   `never` に絞り込んでしまう(TSの既知の挙動)。ミュータブルなオブジェクトの
+    //   プロパティに逃がして回避する。
+    const statusResolver: { resolve: ((res: Response) => void) | null } = { resolve: null };
+    stubFetchByUrl({
+      "/api/properties/p1": async () =>
+        jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+      "/api/edit-locks/status": () =>
+        new Promise<Response>((resolve) => {
+          statusResolver.resolve = resolve;
+        }),
+    });
+    const error = createStateSpy<string | null>(null);
+    await runChibanSave("p1", 1, "69-2", vi.fn(), error.setState, vi.fn());
+    expect(error.value).toBe("他の画面で編集中です");
+    // ⚠控えは既に解放されているため、利用者は状態窓口の応答を待たずに
+    //   再保存を成功させ得る(round2 Important Aの副作用)。ここでは
+    //   その結果として起きる「エラーが消える」ことだけを模す
+    //   (実際の再保存の詳細は無関係)。
+    error.setState(null);
+    expect(error.value).toBeNull();
+    // この試行(1回目)の組み立てが、ようやく(遅れて)届く。
+    statusResolver.resolve?.(
+      jsonResponse({
+        locks: [
+          {
+            resourceType: "property",
+            resourceId: "p1",
+            state: "held_by_other",
+            since: new Date(2026, 8, 22, 14, 0).toISOString(),
+            holderName: "太郎",
+          },
+        ],
+      }),
+    );
+    await flushAsync();
+    // 消えたエラーへ後から生えない(世代の見張りが弾く=既に envelopeMessage
+    //   ではないため、上書きしない)。
+    expect(error.value).toBeNull();
+  });
+
+  it("上限時間より遅い組み立ては捨て、速い組み立ては使う(review round3 Minor H)", async () => {
+    vi.useFakeTimers();
+    try {
+      const holderRow = (since: string) => ({
+        locks: [
+          {
+            resourceType: "property" as const,
+            resourceId: "p1",
+            state: "held_by_other" as const,
+            since,
+            holderName: "太郎",
+          },
+        ],
+      });
+      const since = new Date(2026, 8, 22, 14, 0).toISOString();
+
+      // 遅い方: 上限(10秒)ちょうどで既に諦めているので、後から届いても捨てる。
+      // ⚠`let` ではなくミュータブルなオブジェクトに逃がす(上のテストと同じ理由=
+      //   TSの制御フロー解析がこの後の読み取りを `never` に絞り込むのを避ける)。
+      const slowResolver: { resolve: ((res: Response) => void) | null } = { resolve: null };
+      stubFetchByUrl({
+        "/api/properties/p1": async () =>
+          jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+        "/api/edit-locks/status": () =>
+          new Promise<Response>((resolve) => {
+            slowResolver.resolve = resolve;
+          }),
+      });
+      const slow = createStateSpy<string | null>(null);
+      await runChibanSave("p1", 1, "69-2", vi.fn(), slow.setState, vi.fn());
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(slow.value).toBe("他の画面で編集中です");
+      slowResolver.resolve?.(jsonResponse(holderRow(since)));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(slow.value).toBe("他の画面で編集中です");
+
+      // 速い方: 上限より前(9秒後)に届けば、組み立てた文を使う。
+      const fastResolver: { resolve: ((res: Response) => void) | null } = { resolve: null };
+      stubFetchByUrl({
+        "/api/properties/p1": async () =>
+          jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+        "/api/edit-locks/status": () =>
+          new Promise<Response>((resolve) => {
+            fastResolver.resolve = resolve;
+          }),
+      });
+      const fast = createStateSpy<string | null>(null);
+      await runChibanSave("p1", 1, "69-2", vi.fn(), fast.setState, vi.fn());
+      await vi.advanceTimersByTimeAsync(9_000);
+      fastResolver.resolve?.(jsonResponse(holderRow(since)));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fast.value).toBe("太郎さんが編集中です(14:00〜)");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("VERSION_CONFLICTは従来どおりの案内文にする(EDIT_LOCKED以外の挙動を変えない)", async () => {
+    stubFetch(async () =>
+      jsonResponse({ error: { code: "VERSION_CONFLICT", message: "any" } }, 409),
+    );
+    const setError = vi.fn();
+    await runChibanSave("p1", 1, "69-2", vi.fn(), setError, vi.fn());
+    expect(setError).toHaveBeenCalledWith(
+      "他の担当者が先に更新しました。画面を開き直してからやり直してください。",
+    );
   });
 });

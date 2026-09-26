@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { extractJsxElement } from "@/lib/edit-lock/__tests__/test-helpers";
 
 // このコンポーネントは render 基盤（jsdom/RTL）未導入のため source-assertion で
 // 配色（dark 可読化）・配線（cond①①③ / 権限ゲート / PII 非ログ）を固定する。
@@ -127,4 +128,22 @@ describe("registry-location-search-button.tsx: dark 配色（暗面可読化）"
       expect(src).toContain(cls);
     });
   }
+});
+
+describe("見ている側(仕様6.3・Task 9・review round1 Important 3)", () => {
+  it("propsで受け取ったeditLockHeldを、そのままRegistryChibanPopupへ渡す(省略時はfalse=既存呼び出し元の挙動を変えない)", () => {
+    // ⚠(review round1 Important 3) この配線は元々テストが1本も無く、
+    //   `page.tsx→RegistryLocationSearchButton→RegistryChibanPopup`の
+    //   2つ目のリンク(このファイル自身の中継)が壊れても気づけなかった。
+    // ⚠(review round2 Minor N4) 「1箇所しか無いから安全」という理由でunbounded な
+    //   `[\s\S]*?` を使っていたのはround1で指摘されたのと同じ形の脆さ
+    //   (第二の子が同名propを取るようになった瞬間に静かに壊れる)。要素自身の
+    //   閉じ`/>`までに窓を絞るextractJsxElementへ差し替える
+    //   (edit-lock-status-view.test.tsxと共有するテストヘルパー)。
+    expect(src).toContain("editLockHeld?: boolean;");
+    expect(src).toContain("editLockHeld = false,");
+    const registryChibanPopupBlock = extractJsxElement(src, "<RegistryChibanPopup");
+    expect(registryChibanPopupBlock.length).toBeGreaterThan(0);
+    expect(registryChibanPopupBlock).toMatch(/editLockHeld=\{editLockHeld\}/);
+  });
 });

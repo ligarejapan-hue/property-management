@@ -39,7 +39,7 @@ import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { sendPlainMail } from "@/lib/mail/transport";
-import { encryptSecret } from "../sale-dm-letter/secret-crypto";
+import { encryptSecret, decryptSecret } from "../sale-dm-letter/secret-crypto";
 import { GET, PUT } from "../../app/api/admin/mail-settings/route";
 import { POST } from "../../app/api/admin/mail-settings/test/route";
 
@@ -121,10 +121,19 @@ describe("PUT /api/admin/mail-settings", () => {
     const res = await PUT(putReq({ smtpHost: "smtp.example.com", smtpPassword: "pw" }));
     expect(res.status).toBe(200);
     const update = pm.mailConfig.upsert.mock.calls[0][0].update;
-    expect(update.smtpPassEnc).toMatch(/^v1:/);
-    expect(update.smtpPassEnc).not.toContain("pw");
+    const stored = update.smtpPassEnc as string;
+    expect(stored).toMatch(/^v1:/);
+    // ⚠**暗号文の部分文字列検査はしない**(2026-09-26・乱数次第で落ちる揺らぎだった)。
+    //   `expect(stored).not.toContain("pw")` は、ランダムなIV/タグ/暗号文の base64 に
+    //   偶然 "pw" が現れるだけで赤くなる(実測 約1.3%)。このテストが本当に言いたい
+    //   ことは「平文では保存しない/保存された値は本当にこの平文の暗号文である」なので、
+    //   復号して突き合わせる(部分文字列より強い検査)。
+    expect(stored).not.toBe("pw");
+    expect(decryptSecret(stored)).toBe("pw");
     const json = await res.json();
     expect(JSON.stringify(json)).not.toContain("\"pw\"");
+    // 暗号文そのものも応答に出さない(「応答にも含めない」の実体)。
+    expect(JSON.stringify(json)).not.toContain(stored);
     expect(json.data.hasPassword).toBe(true);
   });
   it("パスワード空文字はクリア(smtpPassEnc: null)", async () => {

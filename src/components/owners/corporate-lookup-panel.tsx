@@ -13,11 +13,12 @@
 // raw XML / API レスポンス本文を画面外に持ち出すことはしない。
 // 検索結果は React state のみで保持し、自動保存・自動 lookup はしない。
 
-import { useState } from "react";
+import { useState, useRef, type Dispatch, type SetStateAction } from "react";
 import { AlertTriangle, Search, Loader2, CheckCircle2 } from "lucide-react";
 import {
   lookupOwnerCorporateNumber,
   applyOwnerCorporate,
+  apiErrorCode,
   type CorporateLookupApiResponse,
   type CorporateIdentifierKindDTO,
   type CorporateLookupConflictDTO,
@@ -27,6 +28,9 @@ import {
   normalizeCorporateIdentifier,
   calculateCorporateNumberFromCompanyNumber,
 } from "@/lib/corporate-number";
+// EDIT_LOCKEDの文言組み立て(仕様6.5・Task 7で先例のある鍵を持たない入口の型)。
+// 窓口の423は氏名・時刻を返さないため、状態窓口へ1回だけ問い合わせる。
+import { composeEditLockedMessage } from "@/lib/edit-lock/locked-message";
 
 interface CorporateLookupPanelProps {
   ownerId: string;
@@ -48,9 +52,118 @@ interface CorporateLookupPanelProps {
   };
   /** Phase C: 反映成功時に親側で owner を再フェッチさせる。 */
   onApplied?: () => void | Promise<void>;
+  /**
+   * 反映の保存に載せる鍵の世代(Task 8・仕様 6.1/6.5)。
+   *
+   * このパネルは**物件詳細の所有者カード内**と **`admin/owners/[id]`** の2画面に
+   * 置かれる。所有者カード内はカードが持つ鍵の世代(`useEditLock`の`lockId`)を
+   * ここへ渡す(=`applyOwnerCorporate`の保存にX-Edit-Lockが乗る)。管理画面は
+   * 鍵を持たない入口なので**渡さない**(=合言葉だけ・423のときはこのパネルが
+   * 文言を出す)。⚠取得はこのパネル自身ではしない(カードの鍵をそのまま使う)。
+   */
+  lockId?: string | null;
+  /**
+   * 反映の失敗をカードの鍵コントローラへ知らせる(review round1 Important #3)。
+   *
+   * 所有者カード内は `(code) => lock.noteSaveError(code, null)` を渡す
+   * (カード自身の`handleSave`と同型)。世代(`lockId`)を送るこの入口では
+   * `EDIT_LOCKED`自体がほぼ届かず(`service.ts`が世代切れ/強制解除を先に返す)、
+   * カードの帯・保存ボタンはこれで初めて最新化される——渡さなければ、管理者が
+   * カードの鍵を強制解除しても、このパネルは断りの文言を出す一方でカードの帯は
+   * 「保持中」のまま食い違う。管理画面(`admin/owners/[id]`)は鍵を持たないため
+   * 渡さない(undefined=何もしない)。
+   */
+  onLockRefused?: (code: string | null) => void;
+  /**
+   * 反映ボタンを止める(外部レビュー@codex P2 round6)。所有者カード内はカードの保存
+   * ボタンと同じ判断(`canSubmitSave`)の否定を渡す=鍵が期限切れ/管理者に外された間は
+   * 反映も押せない。管理画面(`admin/owners/[id]`)は鍵を持たない入口なので渡さない
+   * (既定 false=従来どおり)。
+   */
+  applyBlocked?: boolean;
 }
 
 type ApplyTarget = "name" | "address" | "zip" | "corporateNumber";
+
+/**
+ * 反映(apply)の失敗が `EDIT_LOCKED` なら、氏名+時刻の文を組み立てて `applyError` へ
+ * 表示する(仕様6.5)。呼び出し側(`handleApply`)は、これが `true` を返したら
+ * 既存の `msg.includes` 分岐へ進まず即座に return する。
+ *
+ * ⚠node から直接呼べるよう extract する(`runChibanSave`/`runNoLockPropertyPatch` と
+ *   同型・review round1〜3 の教訓をそのまま踏襲)。
+ * ⚠**封筒の message は同期的に即座に表示し、組み立てた文は後から差し替える**
+ *   (review round2 Important A)。`composeEditLockedMessage` を await すると、
+ *   状態窓口が固まったとき反映ボタン等の控えが数十秒固まる。ここでは await しない。
+ * ⚠**古い組み立てが新しい状態を上書きしない世代の見張り**(review round2 Important G)。
+ *   `setApplyError` を React の更新関数の形で受け、「今出ている値がまだこの試行の
+ *   封筒のmessageのままなら」だけ差し替える(`prev === envelopeMessage`)。
+ * ⚠**呼び出し元が持つ世代(caller-owned sequence number・review round3 K)**。
+ *   窓口の423は氏名・時刻を返さない定数文言のため、上の一致条件だけでは
+ *   後着の refusal が先着の古い組み立てに older-wins で上書きされ得る。
+ *   `seqRef`(呼び出し元=パネルが `useRef(0)` で持つ)と、その時点で呼び出し元が
+ *   採番した `mySeq` を受け取り、組み立てが届いた時点で「自分の番号がまだ
+ *   最新か」を先に確認する。
+ * ⚠**採番は呼び出し元の責務**(review round1 Important #3・Minor #7)。
+ *   `runChibanSave`/`runNoLockPropertyPatch` は関数の呼び出しそのものが
+ *   「1回の保存試行」なので内部で採番できるが、このパネルは同じ試行
+ *   (`handleApply` 1回)の中で `submit()` の catch と、conflict確認後の
+ *   `submit(true)` の catch の**2箇所**からこの関数を呼び得る。どちらも
+ *   同じ利用者操作(反映ボタン1回分)なので、`handleApply` 側が試行の頭で
+ *   1回だけ採番し(`const mySeq = ++applySeqRef.current`)、両方の呼び出しに
+ *   同じ `mySeq` を渡す。⚠**default 値は持たせない**(review round1 Minor #10)。
+ *   省略できる default は「古いテストが書き換えを要らずに残る」ための抜け道で、
+ *   実際に「2回呼んでも独立を装うテストが1回しか呼ばない」欠陥を覆い隠した
+ *   (round1 Important #2)。呼び出し元は必ず自分の採番を渡す。
+ */
+export function handleCorporateApplyEditLockedError(
+  err: unknown,
+  ownerId: string,
+  setApplyError: Dispatch<SetStateAction<string | null>>,
+  seqRef: { current: number },
+  mySeq: number,
+): boolean {
+  if (apiErrorCode(err) !== "EDIT_LOCKED" || !(err instanceof Error)) return false;
+  const envelopeMessage = err.message;
+  // ⚠即座に(状態窓口の応答を待たずに)封筒のmessageを出す。
+  setApplyError(envelopeMessage);
+  void composeEditLockedMessage("owner", ownerId, envelopeMessage).then((m) => {
+    if (seqRef.current !== mySeq) return; // 後発の試行が既に始まっている＝この組み立ては古い
+    setApplyError((prev) => (prev === envelopeMessage ? m : prev));
+  });
+  return true;
+}
+
+/**
+ * 反映の失敗を、カードが持つ鍵のコントローラへも伝える(review round1 Important #3)。
+ *
+ * ⚠**カードの`handleSave`と同型**: `apiErrorCode(err)` をそのまま渡すだけ
+ *   (写像は`uiStateFromSaveError`に任せる)。鍵に無関係なコード(CONFLICT等)は
+ *   そちらが`null`を返して何もしないため、ここで分岐する必要はない。
+ * ⚠**`lockId`があるときだけ報告する**(review round2 Important #2)。世代
+ *   (lockId)を送った試行では`EDIT_LOCKED`自体がほぼ届かない(`service.ts`が
+ *   世代切れなら`EDIT_LOCK_STALE`・管理者の強制解除なら`EDIT_LOCK_FORCE_RELEASED`
+ *   を先に返す)ため、その場合はそれらのコードをそのまま`onLockRefused`へ渡し、
+ *   カードの帯・保存ボタンを最新化する。**逆に世代を送っていない試行で
+ *   `EDIT_LOCKED`が届くのは「カードがそもそも鍵を持てていない」ケース**
+ *   (=誰かが既に持っている)であり、その`acquire`の帯は既に正しい保持者名・
+ *   時刻を表示している。そこへ`noteSaveError("EDIT_LOCKED", null)`を流すと、
+ *   `uiStateFromSaveError`が`{kind:"taken", holderName:"他の利用者"}`(時刻無し)
+ *   を返し、正しい表示を汎用の文言で上書きしてしまう(旧コードは`lockId`を
+ *   見ずに無条件で報告しており、これが実際に起きていた)。そのため`lockId`が
+ *   無いとき(=世代を送っていない試行)は`onLockRefused`を**呼ばない**。
+ *   ⚠この判定を呼び出し側の`if`ではなくこの関数の内側に置く(node から直接
+ *   呼んで「lockId無し→呼ばれない」を検査できるようにするため)。
+ * ⚠`onLockRefused`が無い(admin/owners/[id]・鍵を持たない画面)ときも何もしない。
+ */
+export function reportCorporateApplyLockRefusal(
+  err: unknown,
+  lockId: string | null | undefined,
+  onLockRefused: ((code: string | null) => void) | undefined,
+): void {
+  if (!lockId) return;
+  onLockRefused?.(apiErrorCode(err));
+}
 
 export default function CorporateLookupPanel({
   ownerId,
@@ -60,6 +173,9 @@ export default function CorporateLookupPanel({
   ownerVersion,
   fieldEditable,
   onApplied,
+  applyBlocked = false,
+  lockId,
+  onLockRefused,
 }: CorporateLookupPanelProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +201,9 @@ export default function CorporateLookupPanel({
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [applied, setApplied] = useState(false);
+  // 呼び出し元が持つ世代(review round3 K)。反映の423が後着で同じ封筒文言を
+  // 返したとき、先着の古い組み立てに上書きされないようにするカウンタ。
+  const applySeqRef = useRef(0);
 
   // 12桁(会社法人等番号) / 13桁(法人番号・CD正) を受け付ける。invalid は検索不可。
   const kind = classifyCorporateIdentifier(rawCorporateNumber);
@@ -176,21 +295,29 @@ export default function CorporateLookupPanel({
         ? searchedFor ?? undefined
         : undefined;
     const submit = (acknowledgeConflict?: boolean) =>
-      applyOwnerCorporate(ownerId, {
-        corporateNumber: record.corporateNumber,
-        version: ownerVersion,
-        apply: applyTargets,
-        expectedRecord: {
+      applyOwnerCorporate(
+        ownerId,
+        {
           corporateNumber: record.corporateNumber,
-          name: record.name,
-          address: record.address,
-          postCode: record.postCode,
-          updateDate: record.updateDate,
+          version: ownerVersion,
+          apply: applyTargets,
+          expectedRecord: {
+            corporateNumber: record.corporateNumber,
+            name: record.name,
+            address: record.address,
+            postCode: record.postCode,
+            updateDate: record.updateDate,
+          },
+          allowClosed: closed ? true : undefined,
+          acknowledgeConflict,
+          companyRegistryNumber: companyRegistry12,
         },
-        allowClosed: closed ? true : undefined,
-        acknowledgeConflict,
-        companyRegistryNumber: companyRegistry12,
-      });
+        { lockId },
+      );
+    // ⚠この反映試行(handleApply 1回)の世代を、頭で1回だけ採番する(review round1
+    //   Important #3・Minor #7)。下の catch 節が2箇所(submit()自体・conflict確認後
+    //   のsubmit(true))あっても同じ利用者操作なので、両方に同じmySeqを渡す。
+    const mySeq = ++applySeqRef.current;
     setApplying(true);
     setApplyError(null);
     try {
@@ -200,6 +327,19 @@ export default function CorporateLookupPanel({
         await onApplied();
       }
     } catch (err) {
+      // ⚠(review round2 Minor #4) このパネル自身の表示を先に確定させてから、
+      //   カードへ報告する。reportCorporateApplyLockRefusalは外部の
+      //   onLockRefusedコールバック(カードのlock.noteSaveError)を呼ぶため、
+      //   万一それが投げても、このパネル自身のエラー表示は既に確定していて
+      //   消えない(逆に先頭で呼んでいた旧コードは、親のコールバックが投げると
+      //   このパネル自身の表示が一切出ないまま例外が伝播し得た)。
+      const handled = handleCorporateApplyEditLockedError(err, ownerId, setApplyError, applySeqRef, mySeq);
+      if (handled) {
+        // ⚠reportCorporateApplyLockRefusal自身がlockId無しでは何もしない
+        //   (review round2 Important #2・関数側のJSDoc参照)。
+        reportCorporateApplyLockRefusal(err, lockId, onLockRefused);
+        return;
+      }
       const msg = err instanceof Error ? err.message : "反映に失敗しました";
       // 「明らかな不一致(conflict)」は確認のうえ acknowledgeConflict=true で再送する
       // （allowClosed と同型）。generic CONFLICT(楽観ロック)より先に判定する
@@ -213,6 +353,7 @@ export default function CorporateLookupPanel({
         );
         if (!ok) {
           setApplyError("情報の不一致を確認してください（反映を中止しました）。");
+          reportCorporateApplyLockRefusal(err, lockId, onLockRefused);
           return;
         }
         try {
@@ -222,9 +363,13 @@ export default function CorporateLookupPanel({
             await onApplied();
           }
         } catch (err2) {
-          setApplyError(
-            err2 instanceof Error ? err2.message : "反映に失敗しました",
-          );
+          const handled2 = handleCorporateApplyEditLockedError(err2, ownerId, setApplyError, applySeqRef, mySeq);
+          if (!handled2) {
+            setApplyError(
+              err2 instanceof Error ? err2.message : "反映に失敗しました",
+            );
+          }
+          reportCorporateApplyLockRefusal(err2, lockId, onLockRefused);
         }
         return;
       }
@@ -245,6 +390,7 @@ export default function CorporateLookupPanel({
       } else {
         setApplyError(msg);
       }
+      reportCorporateApplyLockRefusal(err, lockId, onLockRefused);
     } finally {
       setApplying(false);
     }
@@ -276,6 +422,7 @@ export default function CorporateLookupPanel({
     applyTargets.zip ||
     applyTargets.corporateNumber;
   const applyButtonEnabled =
+    !applyBlocked &&
     !applying &&
     !applied &&
     typeof ownerVersion === "number" &&

@@ -3,7 +3,7 @@ import prisma from "@/lib/prisma";
 import { apiResponse, getApiSession, getUserPermissions, handleApiError } from "@/lib/api-helpers";
 import { readEditLocks, type Target } from "@/lib/edit-lock/service";
 import { readScreenTokenHash } from "@/lib/edit-lock/screen-token";
-import { evaluateLock, type EditLockRow } from "@/lib/edit-lock/rules";
+import { evaluateLock, EDIT_LOCK_STATUS_CHUNK_SIZE, type EditLockRow } from "@/lib/edit-lock/rules";
 import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 
@@ -23,7 +23,14 @@ const schema = z.object({
           .transform((v) => v.toLowerCase()),
       }),
     )
-    .max(50),
+    // ⚠(Task 9 review round1 Minor 9・round2で維持を裁定) 見ている側の分割
+    //   (`src/lib/edit-lock/status-controller.ts`)が読む値と**共有の定数**にする。
+    //   別々に上限を書いていると、片方だけ変えたときに窓口が400を返し始め、
+    //   見ている側は分割していると思い込んだまま気づかない(この段階1の
+    //   route自体は凍結対象だが、値は変えていない・同じモジュールを
+    //   `evaluateLock` で既に import 済みのため、この1行だけの変更で
+    //   三重の重複を無くせる)。
+    .max(EDIT_LOCK_STATUS_CHUNK_SIZE),
 });
 
 /**

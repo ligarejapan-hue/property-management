@@ -4,11 +4,15 @@
  */
 import { createHash } from "node:crypto";
 import { ApiError } from "@/lib/api-helpers";
+// ⚠ヘッダ名は client からも使うため素のモジュールに分けた(Task 1)。ここは再輸出だけ。
+// ⚠この import を「重複」と見て消さないこと: `export { X } from "./y"` という
+//   バレルの書き方はこのファイルの中に X という束縛を作らない(re-export専用の
+//   構文で、モジュール内では未定義のまま)。下の readScreenTokenHash/readLockId は
+//   EDIT_SCREEN_HEADER/EDIT_LOCK_HEADER を直接参照するので、import で束縛してから
+//   export する2行が必要(import を外すと ReferenceError で全テストが落ちる)。
+import { EDIT_SCREEN_HEADER, EDIT_LOCK_HEADER } from "./header-names";
 
-/** ブラウザのタブごとの合言葉を送るヘッダ名。 */
-export const EDIT_SCREEN_HEADER = "X-Edit-Screen";
-/** 鍵の世代(取得の応答の lockId)を送るヘッダ名。鍵を持つ画面の保存だけが付ける。 */
-export const EDIT_LOCK_HEADER = "X-Edit-Lock";
+export { EDIT_SCREEN_HEADER, EDIT_LOCK_HEADER };
 
 export function hashScreenToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");

@@ -5,6 +5,8 @@ import {
   EDIT_LOCK_IDLE_LIMIT_MS,
   EDIT_LOCK_IDLE_WARN_MS,
   EDIT_LOCK_STATUS_POLL_MS,
+  EDIT_LOCK_STATUS_CHUNK_SIZE,
+  EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS,
   evaluateLock,
   expiryCause,
   isLockExpired,
@@ -45,6 +47,18 @@ describe("定数", () => {
   });
   it("状態の再確認間隔は30秒(2.3節)", () => {
     expect(EDIT_LOCK_STATUS_POLL_MS).toBe(30_000);
+  });
+  // 横断レビュー M3: 第2段が足した2定数にも値そのものを固定する assertion が
+  // 無かった(既存5定数は H4 で全部足した先例がある)。
+  // ⚠特に50は、`status-controller.test.ts` が `toHaveLength(EDIT_LOCK_STATUS_CHUNK_SIZE)`
+  //   =自分の定数を自分で照合しているため、仕様§4.5の「50」がどこにも固定されて
+  //   いなかった。窓口の zod スキーマ(`.max()`)もこの定数を読む=値を変えると
+  //   サーバの受付上限も一緒に動くので、値の固定はここが唯一の砦。
+  it("状態窓口の1回の上限は50件(仕様4.5・窓口のzodスキーマと共有)", () => {
+    expect(EDIT_LOCK_STATUS_CHUNK_SIZE).toBe(50);
+  });
+  it("423の文言組み立ての上限時間は10秒(round3 Minor H の裁定値)", () => {
+    expect(EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS).toBe(10_000);
   });
 });
 
