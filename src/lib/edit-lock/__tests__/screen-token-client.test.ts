@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { resolve, join, relative } from "node:path";
 import {
   getScreenToken,
   ensureUniqueScreenToken,
@@ -323,6 +323,106 @@ describe("画面の合言葉(client)", () => {
     it("react も component も import しない(純粋なモジュールであること)", () => {
       expect(moduleSrc()).not.toMatch(/from ["']react["']/);
       expect(moduleSrc()).not.toMatch(/from ["']@\/components\//);
+    });
+  });
+
+  /**
+   * 外部レビュー(@codex)P1・2026-09-26。
+   *
+   * 横断レビュー M1 で応答器(`answerScreenTokenProbes`)を「鍵を使っている間だけ」に
+   * 絞った結果、**編集していないタブから応答器そのものが消えた**。すると:
+   * 空いている物件詳細のタブを複製しても、元のタブが誰も答えないので複製タブは
+   * 写し取った合言葉を使い続け、あとで両方のタブが所有者を編集し始めても
+   * `held_by_self_other_screen` にならず**同じ画面**として扱われる
+   * (D6「自分の別の窓も待つ」が黙って成り立たなくなる)。
+   *
+   * 裁定: **画面につき1本・画面の寿命ぶん**張る。M1 の本当の不満は「本数」であって
+   * 「存在」ではなかった(所有者120人で120本開くのが問題だった)。画面(親)で1本
+   * だけ張れば、本数は1本になり、かつ編集前のタブでも複製を検出できる。
+   *
+   * ⚠この検査は**配線**を固定する(モジュール単体の振る舞いは上の
+   *   `answerScreenTokenProbes` の describe が既に固定している。P1 は
+   *   「どこに張るか」だけの穴だったので、単体テストでは捕まえられない)。
+   */
+  describe("応答器の設置箇所(外部レビューP1・画面につき1本・画面の寿命ぶん)", () => {
+    /** この画面(物件詳細)だけが応答器を張る。 */
+    const PAGE = "src/app/(dashboard)/properties/[id]/page.tsx";
+    /** 応答器を定義しているモジュール自身(コメント・定義がヒットするので除く)。 */
+    const MODULE = "src/lib/edit-lock/screen-token-client.ts";
+    const EXCLUDE_DIRS = new Set(["__tests__", "generated", "node_modules"]);
+
+    function listSourceFiles(dir: string): string[] {
+      const files: string[] = [];
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (EXCLUDE_DIRS.has(entry.name)) continue;
+          files.push(...listSourceFiles(full));
+        } else if (entry.isFile() && (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx"))) {
+          files.push(full);
+        }
+      }
+      return files;
+    }
+
+    const read = (rel: string) =>
+      readFileSync(resolve(process.cwd(), rel), "utf8").replace(/\r\n/g, "\n");
+
+    /**
+     * ⚠**import 文**で数える(呼び出しの文字列ではなく)。コメントの中で名前に触れている
+     *   だけのファイル(「応答器は画面側で張る」という申し送りなど)を設置箇所と
+     *   数えないため。
+     */
+    const IMPORTS_RESPONDER =
+      /import\s*\{[^}]*\banswerScreenTokenProbes\b[^}]*\}\s*from\s*["']@\/lib\/edit-lock\/screen-token-client["']/;
+
+    function responderInstallSites(): string[] {
+      const sites: string[] = [];
+      for (const file of listSourceFiles(join(process.cwd(), "src"))) {
+        const rel = relative(process.cwd(), file).replace(/\\/g, "/");
+        if (rel === MODULE) continue;
+        if (IMPORTS_RESPONDER.test(readFileSync(file, "utf8").replace(/\r\n/g, "\n"))) {
+          sites.push(rel);
+        }
+      }
+      return sites.sort();
+    }
+
+    it("設置箇所は物件詳細画面の1つだけ=文書につき1本(所有者カードが何枚あっても増えない)", () => {
+      const sites = responderInstallSites();
+      expect(
+        sites,
+        "応答器は『画面につき1本・画面の寿命ぶん』。新しく鍵を使う画面を作るときは、" +
+          "その画面(親)で1本だけ張り、この一覧に追記すること。部品・カード・hook 側で" +
+          "張ると文書あたりの本数が増え、編集中だけに絞ると複製タブを検出できなくなる(P1)。",
+      ).toEqual([PAGE]);
+    });
+
+    it("編集していない(idle)画面でも答える=編集中かどうかで絞らない(P1の再発防止)", () => {
+      // ⚠`useEffect(() => answerScreenTokenProbes(), [])` の1行であること。
+      //   `if (editing)` や `if (!controller) return;` のような条件が入った時点で、
+      //   複製した空きタブが自分を複製と気づけなくなる(=P1そのもの)。
+      expect(read(PAGE)).toMatch(/useEffect\(\(\) => answerScreenTokenProbes\(\), \[\]\)/);
+    });
+
+    it("unmount で片付ける(戻り値の停止関数をそのまま cleanup として返している)", () => {
+      // ⚠`useEffect(() => { answerScreenTokenProbes(); }, [])` と書くと停止関数を
+      //   捨ててしまい、画面を離れてもチャンネルが開いたまま残る。波括弧なしの
+      //   暗黙の return であることを固定する。
+      const pageSrc = read(PAGE);
+      expect(pageSrc).toMatch(/useEffect\(\(\) => answerScreenTokenProbes\(\), \[\]\)/);
+      expect(pageSrc).not.toMatch(/useEffect\(\(\) => \{\s*answerScreenTokenProbes\(\);/);
+    });
+
+    it("鍵の hook は応答器を張らない(カードごと・編集中だけの設置に戻さない)", () => {
+      expect(responderInstallSites()).not.toContain("src/hooks/use-edit-lock.ts");
+    });
+
+    it("編集ウィンドウも自分では張らない(同じ文書に2本目を作らない)", () => {
+      // ⚠この部品は物件詳細画面の中にしか描かれない(=画面側の1本で足りる)。
+      expect(responderInstallSites()).not.toContain(
+        "src/components/properties/property-edit-form.tsx",
+      );
     });
   });
 });

@@ -40,7 +40,13 @@ import { useEditLock } from "@/hooks/use-edit-lock";
 // 帯・disabledの判断はこの画面が row をそのまま見て決める(判断は状態を返すだけ)。
 import { useEditLockStatus } from "@/hooks/use-edit-lock-status";
 import type { EditLockStatusResource } from "@/lib/edit-lock/status-controller";
-import { ensureUniqueScreenToken, editLockHeaders } from "@/lib/edit-lock/screen-token-client";
+// ⚠`answerScreenTokenProbes` はこの画面が**1本だけ・画面の寿命ぶん**張る
+//   (外部レビュー@codex P1)。カード・編集ウィンドウ側では張らない。
+import {
+  ensureUniqueScreenToken,
+  answerScreenTokenProbes,
+  editLockHeaders,
+} from "@/lib/edit-lock/screen-token-client";
 import { EditLockBanner, EditLockHolderBanner, BAND as EDIT_LOCK_BAND } from "@/components/edit-lock/edit-lock-banner";
 // canSubmitSave・shouldShowLockUnavailableNotice は保存可否の判断(決定層)。
 // Task 5(物件の編集ウィンドウ)が切り出し、Task 6 fix round 1 #3 で
@@ -488,6 +494,17 @@ export default function PropertyDetailPage({
   // 所有者カード1枚ごとにではなく、この画面が開いたとき**1回だけ**行い、結果を
   // 各所有者カードへ配る(Task 6)。カードごとに待たせると、共有名義で所有者が
   // 何名もいる物件ほど無駄な待ち時間・問い合わせが積み重なる。
+  // 他のタブからの「その合言葉を使っていますか」に**この画面が開いている間ずっと**答える
+  // (仕様 6.1・外部レビュー@codex P1・2026-09-26)。
+  // ⚠**画面につき1本・画面の寿命ぶん**。編集中かどうかで絞ってはいけない:
+  //   空いている(まだ何も編集していない)タブを複製したとき、元のタブが答えないと
+  //   複製タブは写し取った合言葉を使い続け、あとで両方が所有者を編集し始めても
+  //   `held_by_self_other_screen` にならず同じ画面として扱われる(D6が黙って壊れる)。
+  // ⚠カード・編集ウィンドウ側では張らない(文書あたりの本数が所有者の数だけ増える)。
+  //   下の複製タブ確認より**前**に置き、確認が飛ぶ時点で既に答えられる状態にしておく
+  //   (自分自身の答えは `docId` が一致するので複製と数えない=Task 6 fix round 1)。
+  useEffect(() => answerScreenTokenProbes(), []);
+
   const [ownerLockTokenReady, setOwnerLockTokenReady] = useState(false);
   useEffect(() => {
     let alive = true;

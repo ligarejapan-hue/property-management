@@ -29,7 +29,6 @@ import {
   releaseEditLockApi,
   releaseEditLockByBeacon,
 } from "@/lib/api-client";
-import { answerScreenTokenProbes } from "@/lib/edit-lock/screen-token-client";
 import { createEditLockController, type EditLockController } from "@/lib/edit-lock/controller";
 import type { EditLockUiState } from "@/lib/edit-lock/ui-state";
 
@@ -73,15 +72,19 @@ export function useEditLock({ resourceType, resourceId, enabled = true }: UseEdi
     });
   }, [enabled, resourceType, resourceId]);
 
-  // 他のタブからの「その合言葉を使っていますか」に答え続ける(タブ複製の検知に要る)。
-  // ⚠(横断レビュー M1) **鍵を使う画面だけ**が答える。以前は `enabled` を無視して
-  //   無条件に張っていたため、編集していない所有者カード(enabled=false)も
-  //   `BroadcastChannel` を1本開き、所有者120人の物件では120本開いて1回の
-  //   `who-has` に120回答えていた(答えはすべて `docId` で捨てられる=完全な無駄)。
-  useEffect(() => {
-    if (!controller) return;
-    return answerScreenTokenProbes();
-  }, [controller]);
+  // ⚠**この hook は他タブからの問い合わせに答える応答器を張らない**
+  //   (外部レビュー@codex P1・2026-09-26。横断レビュー M1 の「鍵を使っている間だけ
+  //   張る」という裁定を取り消したもの)。理由2つ:
+  //   ① この hook はカードごと・編集ごとに立つので、ここで張ると文書あたりの本数が
+  //      所有者の数だけ増える(M1 の本当の不満はこの**本数**だった)。
+  //   ② 「編集している間だけ」に絞ると、**編集を始める前のタブには応答器が無い**。
+  //      空いている物件詳細のタブを複製すると元のタブが誰も答えないため、複製タブは
+  //      写し取った合言葉を使い続け、あとで両方が所有者を編集し始めても
+  //      `held_by_self_other_screen` にならず同じ画面として扱われる
+  //      (D6「自分の別の窓も待つ」が黙って成り立たなくなる)。
+  //   応答器は**画面(親)で1本だけ・画面の寿命ぶん**張る
+  //   (`src/app/(dashboard)/properties/[id]/page.tsx` の複製タブ確認の隣)。
+  //   設置箇所は `screen-token-client.test.ts` の走査で1箇所に固定している。
 
   // controller が変わる(=disable/別レコードへ切替/unmount)たびに、鍵を手放してから破棄する。
   // ⚠(review round1 I3) onHidden() を dispose() より先に呼ぶ(beacon はヘッダ不要=

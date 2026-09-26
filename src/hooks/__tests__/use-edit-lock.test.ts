@@ -78,23 +78,19 @@ describe("useEditLock の配線", () => {
     expect(src).not.toContain("EDIT_LOCK_HEARTBEAT_INTERVAL_MS");
   });
 
-  it("他タブの複製検知の問い合わせに応答し続ける(answerScreenTokenProbes)", () => {
-    expect(src).toMatch(/from\s+["']@\/lib\/edit-lock\/screen-token-client["']/);
-    expect(src).toContain("answerScreenTokenProbes");
-  });
-
-  it("(横断レビューM1) 問い合わせに答えるのは鍵を使う画面だけ(controllerが無い間はBroadcastChannelを開かない)", () => {
-    // ⚠修理前は `enabled` を無視して無条件に張っていた。所有者カードは編集中でない
-    //   間 `enabled=false`(controller=null)なので、所有者120人の物件では
-    //   BroadcastChannel を120本開き、1回の who-has に120回答えていた
-    //   (すべて docId で捨てられる=完全な無駄)。
-    const callIdx = src.indexOf("answerScreenTokenProbes()");
-    expect(callIdx).toBeGreaterThan(-1);
-    const effectStart = src.lastIndexOf("useEffect(", callIdx);
-    expect(effectStart).toBeGreaterThan(-1);
-    const effectBlock = src.slice(effectStart, callIdx + 200);
-    expect(effectBlock).toMatch(/if\s*\(!controller\)\s*return;/);
-    expect(effectBlock).toMatch(/\}, \[controller\]\)/);
+  /**
+   * 外部レビュー(@codex)P1・2026-09-26。横断レビュー M1 の「鍵を使っている間だけ
+   * 張る」を**取り消す**裁定。この hook はカードごと・編集ごとに立つので、ここで
+   * 張ると (a) 文書あたりの本数が所有者の数だけ増え、(b) 編集を始める前のタブには
+   * 応答器が無い=複製した空きタブが自分を複製と気づけない(D6が黙って壊れる)。
+   * 応答器は**画面(親)で1本だけ・画面の寿命ぶん**張る。設置箇所そのものの固定は
+   * `src/lib/edit-lock/__tests__/screen-token-client.test.ts`。
+   */
+  it("(外部レビューP1) この hook は応答器を張らない(設置は画面側で1本だけ)", () => {
+    expect(src).not.toMatch(
+      /import\s*\{[^}]*\banswerScreenTokenProbes\b[^}]*\}\s*from\s*["']@\/lib\/edit-lock\/screen-token-client["']/,
+    );
+    expect(src).not.toMatch(/answerScreenTokenProbes\(\)/);
   });
 
   it("resourceType/resourceId/enabled を受け取る", () => {
