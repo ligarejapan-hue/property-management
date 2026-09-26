@@ -63,8 +63,14 @@ describe("useEditLockStatus の配線", () => {
     expect(src).toContain("enabled");
   });
 
-  it("controllerが変わる(enabled切替・unmount)たびにstop()する(cleanup)", () => {
-    expect(src).toMatch(/return\s*\(\)\s*=>\s*\{\s*controller\.stop\(\);/);
+  it("controllerが変わる(enabled切替・unmount)たびにstop()する(cleanup)。この効果の依存配列は[controller]である(review round1 Minor 11)", () => {
+    const idx = src.indexOf("controller.stop();");
+    expect(idx).toBeGreaterThan(-1);
+    // ⚠修理前はこの効果の依存配列そのものを検査しておらず、`[controller]`を
+    //   `[]`に変えても(=enabledが変わってもcleanupが走らなくなり、間隔が
+    //   漏れる)全14件のテストがgreenのままだった。effect本体の直後を固定する。
+    const after = src.slice(idx, idx + 200);
+    expect(after).toMatch(/\},\s*\[controller\]\)/);
   });
 
   it("enabled=false(controller=null)の間はrowsを空にする(effectでsetStateし直さず、render中に導出する)", () => {
@@ -93,6 +99,17 @@ describe("useEditLockStatus の配線", () => {
 
   it("refresh()はcontrollerへそのまま委譲する", () => {
     expect(src).toMatch(/controller\?\.refresh\(\)/);
+  });
+
+  it("裏から戻ったら(visibilitychange)即座にrefresh()する(review round1 Minor 15)", () => {
+    expect(src).toMatch(/addEventListener\("visibilitychange", onVisible\)/);
+    expect(src).toMatch(/removeEventListener\("visibilitychange", onVisible\)/);
+    const idx = src.indexOf('const onVisible = () => {');
+    expect(idx).toBeGreaterThan(-1);
+    const block = src.slice(idx, idx + 150);
+    // ⚠隠れている間(visibilityState==="hidden")は呼ばない(isHiddenの意図と揃える)。
+    expect(block).toMatch(/document\.visibilityState !== "hidden"/);
+    expect(block).toContain("controller.refresh()");
   });
 
   it("byKey・refresh・rowsを公開する", () => {

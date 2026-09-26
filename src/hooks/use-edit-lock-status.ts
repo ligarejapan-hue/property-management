@@ -89,6 +89,20 @@ export function useEditLockStatus(
     }
   }, [controller, resources]);
 
+  // 裏から戻ったら即1回問い合わせる(review round1 Minor 15)。鍵を持つ側
+  // (use-edit-lock.ts の onVisible)と同じ体感にする——直さないと、隠れている
+  // 間にhold状態が変わっても、表に戻ってから最大30秒(次のtick)まで気づけない。
+  // ⚠(review round1 Critical) start()がstoppedを戻し冪等になったことで、
+  //   このリスナーが呼ぶ refresh() が固まる/漏れる心配が無くなった。
+  useEffect(() => {
+    if (!controller) return;
+    const onVisible = () => {
+      if (document.visibilityState !== "hidden") controller.refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [controller]);
+
   // ⚠react-hooks/refs: render中にrefへ書き込めない(use-edit-lock.tsと同様、
   //   controllerRef を持たず render スコープの `controller` をそのまま閉じ込める。
   //   `controller` はuseMemoの結果なので参照は安定している=[controller]依存で足りる)。
@@ -111,5 +125,3 @@ export function useEditLockStatus(
     byKey,
   };
 }
-
-export type UseEditLockStatusHookReturn = ReturnType<typeof useEditLockStatus>;
