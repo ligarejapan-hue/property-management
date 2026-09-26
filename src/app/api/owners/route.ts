@@ -14,6 +14,7 @@ import { resolveCurrentAddressWrite } from "@/lib/owner-current-address-write";
 import { hasPermission, maskValue, hasExplicitWritePerm } from "@/lib/permissions";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import { phoneSearchVariants } from "@/lib/phone-format-jp";
 
 // ---------- GET /api/owners ----------
 
@@ -53,7 +54,8 @@ export async function GET(request: NextRequest) {
         or.push({ nameKana: { contains: keyword, mode: "insensitive" } });
       }
       if (searchable(displayConfig.phone)) {
-        or.push({ phone: { contains: keyword } });
+        // ハイフンあり/なしの両方の書き方で探す(保存値はハイフンありへ統一中・既存はなしも残る)。
+        for (const v of phoneSearchVariants(keyword)) or.push({ phone: { contains: v } });
       }
       if (searchable(displayConfig.address)) {
         or.push({ address: { contains: keyword, mode: "insensitive" } });

@@ -13,6 +13,7 @@ import {
   Mail,
   Trash2,
   UserPlus,
+  X,
 } from "lucide-react";
 import {
   badgeIntentClass,
@@ -80,6 +81,7 @@ import { useScreenProtection } from "@/components/screen-protection/screen-prote
 import { SalesSheetCreateButton } from "@/components/sales-sheet/SalesSheetCreateButton";
 import { SalesSheetList } from "@/components/sales-sheet/SalesSheetList";
 import { salesSheetTemplateKindFor } from "@/lib/sales-sheet/template-kind";
+import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
 import {
   beginRefresh,
   createRefreshState,
@@ -1747,12 +1749,27 @@ function OwnerCard({
                 <label className="text-xs font-medium text-gray-700 dark:text-gray-200">
                   所有者名 <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    className="w-full rounded-md border border-gray-300 py-1.5 pl-3 pr-8 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
+                  />
+                  {/* 発注者指摘(2026-09-26)「名前が入っていて邪魔」=打ち直すときに1回で空にできる。
+                      空のまま保存しようとした場合は、これまでどおり必須の検査で止まる。 */}
+                  {form.name !== "" && (
+                    <button
+                      type="button"
+                      aria-label="所有者名を消す"
+                      title="所有者名を消す"
+                      onClick={() => setForm((f) => ({ ...f, name: "" }))}
+                      className="absolute inset-y-0 right-0 flex w-8 items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
             )}
             {editableFields.nameKana && (
@@ -1775,8 +1792,17 @@ function OwnerCard({
                   type="tel"
                   value={form.phone}
                   onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                  // 発注者決定(2026-09-26): ハイフンありで統一。ハイフンなしで入れたら欄を離れたときに入れる
+                  // (携帯と固定で区切る位置が違う=市外局番の表で判定)。正しくない番号は入力どおり残す。
+                  onBlur={() => setForm((f) => ({ ...f, phone: formatPhoneJp(f.phone).value }))}
+                  placeholder="例: 09012345678"
                   className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 />
+                {form.phone.trim() !== "" && !isValidPhoneJp(form.phone) && (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                    電話番号の桁をご確認ください(このままでも保存できます)
+                  </p>
+                )}
               </div>
             )}
             {editableFields.zip && (
@@ -1796,6 +1822,30 @@ function OwnerCard({
                   }
                   className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 />
+                {/* 発注者指定(2026-09-26): 「郵便番号から住所を自動入力」は郵便番号の欄のすぐ下に置く。
+                    zip と address の双方が編集可能なときだけ(候補確定で zip/address をペア反映するため)。
+                    ⚠分けているときは**現住所側にだけ**効かせる(登記の記載を書き換えない)。 */}
+                {editableFields.address && (
+                  <AddressLookupControls
+                    zip={splitActive ? form.currentZip : form.zip}
+                    address={splitActive ? form.currentAddress : form.address}
+                    onZipChange={(z) =>
+                      setForm((f) =>
+                        splitActive ? { ...f, currentZip: z } : { ...f, zip: z },
+                      )
+                    }
+                    onAddressChange={(a) =>
+                      setForm((f) =>
+                        splitActive
+                          ? { ...f, currentAddress: a }
+                          : { ...f, address: a },
+                      )
+                    }
+                    addressEdited={addressEdited}
+                    disabled={saving}
+                    mode="postal"
+                  />
+                )}
                 {splitActive && (
                   <div className="space-y-1">
                     <label className="text-xs text-gray-500 dark:text-gray-400">
@@ -1908,7 +1958,7 @@ function OwnerCard({
                     }
                     addressEdited={addressEdited}
                     disabled={saving}
-                    mode="both"
+                    mode="search"
                   />
                 )}
                 {/* 保存を妨げない注意（番号が分からないまま登録できないと運用が止まるため）。 */}

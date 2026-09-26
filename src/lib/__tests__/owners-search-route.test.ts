@@ -228,3 +228,28 @@ describe("PII-S1a: GET /api/owners/search PII guard", () => {
     ]);
   });
 });
+
+// 電話番号はハイフンありに統一していく(発注者決定 2026-09-26)。既存データのハイフンなしと
+// 新しいハイフンありのどちらでも見つかるよう、両方の書き方で探す。
+describe("電話番号はハイフンの有無を問わず見つかる", () => {
+  const phoneTerms = () =>
+    (pm.owner.findMany.mock.calls[0][0].where as { OR: Array<Record<string, { contains?: string }>> }).OR
+      .filter((c) => "phone" in c)
+      .map((c) => c.phone.contains);
+
+  it("ハイフンなしで打つと、ハイフンありの書き方でも探す", async () => {
+    await callRoute("09012345678");
+    expect(phoneTerms()).toEqual(["09012345678", "090-1234-5678"]);
+  });
+
+  it("ハイフンありで打つと、数字だけの書き方でも探す", async () => {
+    await callRoute("090-1234-5678");
+    expect(phoneTerms()).toEqual(["090-1234-5678", "09012345678"]);
+  });
+
+  it("電話が見えない権限では、どの書き方でも電話を検索対象にしない(検索オラクル封じ)", async () => {
+    (getOwnerDisplayConfig as Mock).mockResolvedValue({ ...FULL_CONFIG, phone: "masked" });
+    await callRoute("09012345678");
+    expect(phoneTerms()).toEqual([]);
+  });
+});

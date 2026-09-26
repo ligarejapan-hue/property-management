@@ -38,8 +38,8 @@ describe("AddressLookupControls の配線", () => {
     expect(src).toContain("searchByAddress");
   });
 
-  it("郵便番号→住所は明示ボタン「住所を自動入力」", () => {
-    expect(src).toContain("住所を自動入力");
+  it("郵便番号→住所は明示ボタン「郵便番号から住所を自動入力」", () => {
+    expect(src).toContain("郵便番号から住所を自動入力");
   });
 
   it("候補は formatCandidateLabel で表示し、複数なら選択 UI", () => {

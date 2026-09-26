@@ -11,6 +11,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission, maskValue } from "@/lib/permissions";
 import type { Prisma } from "@/generated/prisma";
+import { phoneSearchVariants } from "@/lib/phone-format-jp";
 
 // ---------- GET /api/owners/search?q=keyword ----------
 // Lightweight search for linking import rows to existing owners.
@@ -73,8 +74,12 @@ export async function GET(request: NextRequest) {
       orClauses.push({ name: { contains: q, mode: "insensitive" } });
     if (searchableFields.nameKana)
       orClauses.push({ nameKana: { contains: q, mode: "insensitive" } });
-    if (searchableFields.phone)
-      orClauses.push({ phone: { contains: q, mode: "insensitive" } });
+    if (searchableFields.phone) {
+      // ハイフンあり/なしの両方の書き方で探す(保存値はハイフンありへ統一中・既存はなしも残る)。
+      for (const v of phoneSearchVariants(q)) {
+        orClauses.push({ phone: { contains: v, mode: "insensitive" } });
+      }
+    }
     if (searchableFields.address) {
       orClauses.push({ address: { contains: q, mode: "insensitive" } });
       // ⚠現住所も同じ規則で検索対象にする(owner_address が生値のときだけ)。
