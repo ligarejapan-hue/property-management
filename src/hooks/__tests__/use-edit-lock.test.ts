@@ -143,10 +143,16 @@ describe("useEditLock の配線", () => {
     expect(occurrences.length).toBeGreaterThanOrEqual(3);
   });
 
-  it("acquire/release/noteActivity/noteSaveError を controller へそのまま委譲する", () => {
-    for (const k of ["acquire", "release", "noteActivity", "noteSaveError"]) {
+  it("acquire/release/noteActivity/noteSaveError/noteSaveErrorHolder を controller へそのまま委譲する", () => {
+    // ⚠`noteSaveErrorHolder`(仕上げround2)も hook では判断せず素通しする
+    //   (「takenの間だけ効かせる」判断は controller 側にある)。
+    for (const k of ["acquire", "release", "noteActivity", "noteSaveError", "noteSaveErrorHolder"]) {
       expect(src).toContain(`controller?.${k}`);
     }
+  });
+
+  it("(仕上げround2) noteSaveErrorHolder を返り値として公開する(画面から呼べる)", () => {
+    expect(returnsShorthandProperty(src, "noteSaveErrorHolder")).toBe(true);
   });
 
   it("canSave・lockId を公開する(整形の揺れに強い形で固定)", () => {

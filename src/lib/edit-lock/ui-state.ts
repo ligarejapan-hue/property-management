@@ -68,7 +68,11 @@ export function uiStateFromHeartbeat(res: HeartbeatResponse, lockId: string): Ed
  * 保存が断られたときの写像。**封筒のコード**で分かれる(仕様 4.7)。
  * 鍵と無関係なコードでは `null` を返し、呼び出し側は今の状態を保つ。
  */
-export function uiStateFromSaveError(code: string | null, holderName: string | null): EditLockUiState | null {
+export function uiStateFromSaveError(
+  code: string | null,
+  holderName: string | null,
+  since?: string,
+): EditLockUiState | null {
   switch (code) {
     case "EDIT_LOCK_STALE":
       // 世代が合わない=鍵は既に外れている。意味は期限切れと同じ(仕様 6.2)。
@@ -76,7 +80,12 @@ export function uiStateFromSaveError(code: string | null, holderName: string | n
     case "EDIT_LOCK_FORCE_RELEASED":
       return { kind: "force_released" };
     case "EDIT_LOCKED":
-      return { kind: "taken", holderName: holderName ?? "他の利用者" };
+      // ⚠(仕上げround2) 窓口の423は氏名も開始時刻も返さないので、まずは既定の呼び名で
+      //   帯を出す(帯を空にしない)。状態窓口の問い合わせが保持者を名乗れたら、
+      //   呼び出し側が実名+開始時刻でこの写像をもう一度通す
+      //   (`controller.noteSaveErrorHolder`)。`since` は取得・合図の taken と同じ
+      //   位置に入れる=この経路だけ状態の形を欠けさせない。
+      return { kind: "taken", holderName: holderName ?? "他の利用者", since };
     default:
       return null;
   }

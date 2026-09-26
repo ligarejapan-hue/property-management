@@ -62,6 +62,26 @@ describe("鍵の表示状態(純関数)", () => {
     expect(s).toEqual({ kind: "mine", lockId: "l1", idleSince: "2026-09-22T02:00:00.000Z" });
   });
 
+  /**
+   * 仕上げround2。保存の423は氏名も時刻も持たないので、まず既定の文言で帯を出し、
+   * 状態窓口の問い合わせが名乗れたら実名+開始時刻で作り直す。写像はその両方を運ぶ。
+   */
+  it("保存の 423 EDIT_LOCKED は、名乗れた氏名と開始時刻をそのまま運ぶ", () => {
+    expect(uiStateFromSaveError("EDIT_LOCKED", "佐藤", "2026-09-22T05:02:00.000Z")).toEqual({
+      kind: "taken",
+      holderName: "佐藤",
+      since: "2026-09-22T05:02:00.000Z",
+    });
+  });
+
+  it("保存の 423 EDIT_LOCKED で誰も名乗れないときは既定の呼び名に倒す(帯を空にしない)", () => {
+    expect(uiStateFromSaveError("EDIT_LOCKED", null)).toEqual({
+      kind: "taken",
+      holderName: "他の利用者",
+      since: undefined,
+    });
+  });
+
   it("保存の 423/400 は封筒のコードで分かれる", () => {
     expect(uiStateFromSaveError("EDIT_LOCK_STALE", null)!.kind).toBe("expired");
     expect(uiStateFromSaveError("EDIT_LOCK_FORCE_RELEASED", null)!.kind).toBe("force_released");

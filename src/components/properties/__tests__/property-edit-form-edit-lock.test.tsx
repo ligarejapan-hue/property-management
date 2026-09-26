@@ -137,6 +137,15 @@ describe("PropertyEditForm の配線(source assertion)", () => {
     expect(componentSrc).toMatch(/code === "EDIT_LOCKED"/);
   });
 
+  it("(仕上げround2) 同じ1回の問い合わせの結果を帯にも渡す(noteSaveErrorHolderへ配線する)", () => {
+    // ⚠この配線が無いと、エラー表示は「佐藤さんが編集中です(14:02〜)」と実名を
+    //   名乗るのに、すぐ上の帯は「他の利用者さんが編集を始めました」と言い続ける。
+    //   帯のためだけに2回目を引かないよう、同じ helper の第5引数で受け取る。
+    expect(componentSrc).toMatch(
+      /showComposedEditLockedMessage\([\s\S]*?lock\.noteSaveErrorHolder\(holder\.holderName, holder\.since\)/,
+    );
+  });
+
   it("入力・キー・ポインタでnoteActivityを呼ぶ(期限切れの取り直しの引き金)", () => {
     expect(src).toContain("noteActivity()");
   });

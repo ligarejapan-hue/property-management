@@ -52,21 +52,60 @@ import { fetchEditLockStatus, type EditLockStatusRow } from "@/lib/api-client";
 import { formatSince } from "@/lib/edit-lock/ui-state";
 import { EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS } from "@/lib/edit-lock/rules";
 
-async function lookupComposedMessage(
+/**
+ * 状態窓口が名乗れた保持者(仕上げround2の裁定)。
+ * ⚠**文言だけでなくこの生の値を呼び出し側へ渡す**。エラー表示(6.5の氏名+時刻)と
+ *   帯(6.2の一文・実名)が同じ1回の問い合わせ結果を共有するため=帯のためだけに
+ *   2回目を引かない。
+ */
+export type EditLockHolder = { holderName: string; since?: string };
+
+/**
+ * 状態窓口を**1回だけ**引いて、「他の人が持っている」行の氏名+開始時刻を返す。
+ * 名乗れない(問い合わせ失敗・該当行なし・free/mine/自分の別画面)なら `null`。
+ * ⚠`reject` しない(失敗は `null` に畳む)。呼び出し側の `Promise.race` の
+ *   負けた側が後で reject して unhandled rejection になるのを避ける。
+ */
+async function lookupEditLockHolder(
   resourceType: EditLockStatusRow["resourceType"],
   resourceId: string,
-  envelopeMessage: string,
-): Promise<string> {
+): Promise<EditLockHolder | null> {
   try {
     const rows = await fetchEditLockStatus([{ resourceType, resourceId }]);
     const row = rows.find((r) => r.resourceType === resourceType && r.resourceId === resourceId);
     if (row && row.state === "held_by_other" && row.holderName) {
-      return `${row.holderName}さんが編集中です(${formatSince(row.since)}〜)`;
+      return { holderName: row.holderName, since: row.since };
     }
   } catch {
-    // 問い合わせの失敗は無視してフォールバックへ落ちる(下の return)。
+    // 問い合わせの失敗は無視してフォールバック(null)へ落ちる。
   }
-  return envelopeMessage;
+  return null;
+}
+
+/** 仕様6.5の文言。名乗れなければ封筒の `message` へフォールバックする。 */
+function messageFromHolder(holder: EditLockHolder | null, envelopeMessage: string): string {
+  return holder ? `${holder.holderName}さんが編集中です(${formatSince(holder.since)}〜)` : envelopeMessage;
+}
+
+/**
+ * 上限時間つきで保持者を1回引く(`EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS`)。
+ * 上限を超えたら `null`(=名乗れなかった)として扱う。
+ * ⚠**負けた側のタイマーは片付ける**(review round3 Minor I)。
+ */
+async function lookupHolderWithTimeout(
+  resourceType: EditLockStatusRow["resourceType"],
+  resourceId: string,
+): Promise<EditLockHolder | null> {
+  const lookup = lookupEditLockHolder(resourceType, resourceId);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([lookup, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -98,28 +137,30 @@ export function showComposedEditLockedMessage(
   resourceId: string,
   envelopeMessage: string,
   setError: EditLockedMessageSetter,
+  onHolderIdentified: (holder: EditLockHolder) => void,
 ): void {
   setError(envelopeMessage);
-  void composeEditLockedMessage(resourceType, resourceId, envelopeMessage).then((composed) => {
+  void lookupHolderWithTimeout(resourceType, resourceId).then((holder) => {
+    // ⚠(仕上げround2) **帯が先**。同じ1回の問い合わせ結果で、帯の氏名も直す
+    //   (帯が「他の利用者さん」と言ったまま、すぐ下のエラー表示が実名を名乗る
+    //   食い違いを出さない=この機能の存在理由である「誰が編集しているか」に
+    //   画面が2つの違う答えを出さない)。名乗れなければ呼ばない=帯は既定の文言のまま。
+    if (holder) onHolderIdentified(holder);
+    const composed = messageFromHolder(holder, envelopeMessage);
     setError((prev) => (prev === envelopeMessage ? composed : prev));
   });
 }
 
+/**
+ * 鍵を**持たない**3入口(案件ステータス・導入ルートのプルダウン・地番ポップアップ)用。
+ * 文言だけを返す(帯を持たない入口なので保持者そのものは要らない)。
+ * ⚠`showComposedEditLockedMessage` と**同じ1本の問い合わせ**(`lookupHolderWithTimeout`)を
+ *   使う=組み立ての規則も上限時間も2つに分かれない。
+ */
 export async function composeEditLockedMessage(
   resourceType: EditLockStatusRow["resourceType"],
   resourceId: string,
   envelopeMessage: string,
 ): Promise<string> {
-  const lookup = lookupComposedMessage(resourceType, resourceId, envelopeMessage);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<string>((resolve) => {
-    timer = setTimeout(() => resolve(envelopeMessage), EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS);
-  });
-  try {
-    return await Promise.race([lookup, timeout]);
-  } finally {
-    // ⚠review round3 Minor I: 問い合わせが先に終わって timeout 側が負けても、
-    //   宙に浮いた setTimeout をここで必ず片付ける。
-    clearTimeout(timer);
-  }
+  return messageFromHolder(await lookupHolderWithTimeout(resourceType, resourceId), envelopeMessage);
 }

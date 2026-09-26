@@ -422,6 +422,48 @@ describe("createEditLockController", () => {
     expect(h.lastState()).toMatchObject({ kind: "taken", holderName: "山田" });
   });
 
+  /**
+   * 仕上げround2の裁定。保存の423は氏名を持たないので、まず既定の文言で帯を出し
+   * (即座)、状態窓口の問い合わせが保持者を名乗れたら**帯の氏名だけを差し替える**。
+   * これが無いと、エラー表示が「佐藤さんが編集中です(14:02〜)」と言っているすぐ上の
+   * 帯が「他の利用者さんが編集を始めました」と言い続ける(この機能の存在理由である
+   * 「誰が編集しているか」に画面が2つの違う答えを出す)。
+   */
+  it("R2a) noteSaveErrorHolder: takenの間は帯の氏名と開始時刻を実名へ差し替える", () => {
+    const since = "2026-09-22T05:02:00.000Z";
+    const controller = createEditLockController(h.deps);
+    controller.noteSaveError("EDIT_LOCKED", null);
+    expect(h.lastState()).toMatchObject({ kind: "taken", holderName: "他の利用者" });
+
+    controller.noteSaveErrorHolder("佐藤", since);
+    expect(h.lastState()).toMatchObject({ kind: "taken", holderName: "佐藤", since });
+  });
+
+  it("R2b) noteSaveErrorHolder: 状態が taken から動いていたら何もしない(古い組み立てで帯を戻さない)", async () => {
+    h.acquireMock.mockResolvedValue(MINE);
+    const controller = createEditLockController(h.deps);
+    controller.noteSaveError("EDIT_LOCKED", null);
+
+    // 問い合わせが届く前に取り直せた(または閉じた)=もう taken ではない。
+    await controller.acquire();
+    expect(h.lastState().kind).toBe("mine");
+    const callsBefore = h.onStateMock.mock.calls.length;
+
+    controller.noteSaveErrorHolder("佐藤", "2026-09-22T05:02:00.000Z");
+    expect(h.onStateMock.mock.calls.length).toBe(callsBefore);
+    expect(h.lastState().kind).toBe("mine");
+  });
+
+  it("R2c) noteSaveErrorHolder: dispose 後は onState を呼ばない(unmount後のsetState禁止)", () => {
+    const controller = createEditLockController(h.deps);
+    controller.noteSaveError("EDIT_LOCKED", null);
+    controller.dispose();
+    h.onStateMock.mockClear();
+
+    controller.noteSaveErrorHolder("佐藤", "2026-09-22T05:02:00.000Z");
+    expect(h.onStateMock).not.toHaveBeenCalled();
+  });
+
   it("I2d) noteSaveError: 鍵と無関係なコードは状態を変えない(onStateも呼ばない)", async () => {
     h.acquireMock.mockResolvedValue(MINE);
     const controller = createEditLockController(h.deps);

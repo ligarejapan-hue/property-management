@@ -42,6 +42,8 @@ import {
 // ⚠(横断レビュー I3) 帯の「held かどうか」は、見ている側の4つの無効化を決めている
 //   この純関数と**同じ1本**であることを総当たりで突き合わせる。
 import { isEditLockHeldByOther } from "@/lib/edit-lock/save-gate";
+// ⚠(仕上げround2) 「応答→状態」の写像(Task 2の純関数)から帯の文字までを通して固定する。
+import { uiStateFromAcquire, uiStateFromSaveError } from "@/lib/edit-lock/ui-state";
 import { forceReleaseEditLockApi, type EditLockStatusRow } from "@/lib/api-client";
 
 const bannerSrc = readFileSync(
@@ -143,6 +145,40 @@ describe("EditLockBanner(本人向けの帯)", () => {
     expect(html).toContain("あなたが別の画面で編集を始めました。この内容は保存できません");
     // ⚠自分の氏名を「◯◯さんが」と出してはいけない(D6・§11に3回書かれた規則)。
     expect(html).not.toContain("自分さんが");
+  });
+
+  /**
+   * 仕上げround2の裁定。保存の423は氏名を持たないため、帯はまず既定の文言で出て、
+   * 状態窓口の問い合わせが保持者を名乗れたら実名へ差し替わる。
+   * 「状態の写像(Task 2の純関数)→ 帯の文字」の2段をまとめて固定する
+   * (どちらか片方だけ直っていても落ちるように)。
+   */
+  describe("保存の423の後、帯が実名を名乗る(仕上げround2)", () => {
+    it("問い合わせが保持者を名乗れたら、帯は実名で仕様6.2の一文を出す", () => {
+      const refined = uiStateFromSaveError("EDIT_LOCKED", "佐藤", SINCE);
+      const html = renderToStaticMarkup(<EditLockBanner state={refined!} warnIdle={false} />);
+      expect(html).toContain("佐藤さんが編集を始めました。この内容は保存できません");
+      // ⚠帯に時刻は入らない(仕様6.2の一文のまま)。時刻はエラー表示側が名乗る。
+      expect(html).not.toContain("05:02");
+    });
+
+    it("誰も名乗れなかったときは既定の文言へ倒す(帯を空にしない・§6.2に記録)", () => {
+      const fallback = uiStateFromSaveError("EDIT_LOCKED", null);
+      const html = renderToStaticMarkup(<EditLockBanner state={fallback!} warnIdle={false} />);
+      expect(html).toContain("他の利用者さんが編集を始めました。この内容は保存できません");
+    });
+
+    it("取得の423が自分の別画面なら、氏名を使わない専用の文言のまま(写像から帯まで通して固定)", () => {
+      const state = uiStateFromAcquire({
+        code: "EDIT_LOCKED",
+        state: "held_by_self_other_screen",
+        holderName: "自分",
+        since: SINCE,
+      });
+      const html = renderToStaticMarkup(<EditLockBanner state={state} warnIdle={false} />);
+      expect(html).toContain("あなたが別の画面で編集を始めました。この内容は保存できません");
+      expect(html).not.toContain("自分さんが");
+    });
   });
 });
 

@@ -76,6 +76,19 @@ export interface EditLockController {
   release(): Promise<void>;
   noteActivity(): void;
   noteSaveError(code: string | null, holderName?: string | null): void;
+  /**
+   * 423 `EDIT_LOCKED` の後で状態窓口が保持者を名乗れたら、**帯の氏名と開始時刻だけ**を
+   * 実名へ差し替える(仕上げround2の裁定)。
+   *
+   * ⚠窓口の423は氏名も時刻も返さないため、`noteSaveError` は既定の呼び名
+   *   (「他の利用者」)で即座に帯を出す。そのままでは、すぐ下のエラー表示が
+   *   「佐藤さんが編集中です(14:02〜)」と実名を名乗るのに帯は「他の利用者さん」と
+   *   言い続ける=「誰が編集しているか」に画面が2つの違う答えを出してしまう。
+   * ⚠**`taken` の間だけ**効く(古い組み立てが新しい状態を上書きしない)。
+   *   問い合わせが届くまでに取り直せた/閉じた/管理者に外された場合は何もしない
+   *   (`locked-message.ts` の `prev === envelopeMessage` と同じ世代の見張りの考え方)。
+   */
+  noteSaveErrorHolder(holderName: string, since?: string): void;
   /** pagehide 相当。 */
   onHidden(): void;
   /** visibilitychange(表示に戻った)相当。 */
@@ -283,6 +296,20 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
     if (next) apply(next);
   }
 
+  /**
+   * ⚠(仕上げround2) 保持者が判明したときの**氏名の差し替えだけ**。写像は
+   *   `uiStateFromSaveError` を使い回す(帯の文言の決め方を2つに増やさない)。
+   * ⚠`taken` 以外へ動いていたら何もしない=届くのが遅れた組み立てが、
+   *   取り直せた(mine)・閉じた(idle)・管理者に外された(force_released)状態を
+   *   `taken` へ巻き戻さない。`bySelfOtherScreen` は引き継がない(この差し替えの
+   *   出どころは状態窓口の `held_by_other` 行だけ=名乗れた時点で保持者は他の人)。
+   */
+  function noteSaveErrorHolder(holderName: string, since?: string): void {
+    if (state.kind !== "taken") return;
+    const next = uiStateFromSaveError("EDIT_LOCKED", holderName, since);
+    if (next) apply(next);
+  }
+
   function onHidden(): void {
     if (lockId) deps.releaseByBeacon(lockId);
   }
@@ -307,5 +334,15 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
     disposed = false;
   }
 
-  return { acquire, release, noteActivity, noteSaveError, onHidden, onVisible, dispose, revive };
+  return {
+    acquire,
+    release,
+    noteActivity,
+    noteSaveError,
+    noteSaveErrorHolder,
+    onHidden,
+    onVisible,
+    dispose,
+    revive,
+  };
 }

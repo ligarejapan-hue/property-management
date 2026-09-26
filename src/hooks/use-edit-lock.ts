@@ -143,12 +143,24 @@ export function useEditLock({ resourceType, resourceId, enabled = true }: UseEdi
     [controller],
   );
 
+  /**
+   * 423 の後で状態窓口が保持者を名乗れたら、帯の氏名・開始時刻を実名へ差し替える
+   * (仕上げround2)。「`taken` の間だけ効かせる」判断は controller 側が持つ。
+   */
+  const noteSaveErrorHolder = useCallback(
+    (holderName: string, since?: string) => {
+      controller?.noteSaveErrorHolder(holderName, since);
+    },
+    [controller],
+  );
+
   return {
     state,
     acquire,
     release,
     noteActivity,
     noteSaveError,
+    noteSaveErrorHolder,
     /** 保存ボタンを押せるか。 */
     canSave: state.kind === "mine",
     /** 55分の予告を出すか(DBの時計基準)。 */

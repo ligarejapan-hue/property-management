@@ -560,7 +560,11 @@ export default function PropertyEditForm({
         //   編集中です」だけ)。鍵を持たない3入口とまったく同じ helper で状態窓口を
         //   1回だけ引き、届いたら「{氏名}さんが編集中です({HH:mm}〜)」へ差し替える
         //   (await しない=控えは即座に解放される)。
-        showComposedEditLockedMessage("property", property.id, message, setError);
+        // ⚠(仕上げround2) その**同じ1回**の結果で帯の氏名も直す(帯が「他の利用者さん」と
+        //   言ったまま、すぐ下のエラー表示が実名を名乗る食い違いを出さない)。
+        showComposedEditLockedMessage("property", property.id, message, setError, (holder) =>
+          lock.noteSaveErrorHolder(holder.holderName, holder.since),
+        );
         return;
       }
       setError(message);

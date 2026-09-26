@@ -178,6 +178,15 @@ describe("所有者カードの配線(source assertion)", () => {
     expect(src).toMatch(/showComposedEditLockedMessage\(\s*"owner",\s*po\.ownerId,/);
   });
 
+  it("(仕上げround2) 同じ1回の問い合わせの結果を帯にも渡す(noteSaveErrorHolderへ配線する)", () => {
+    // ⚠この配線が無いと、エラー表示は「佐藤さんが編集中です(14:02〜)」と実名を
+    //   名乗るのに、すぐ上の帯は「他の利用者さんが編集を始めました」と言い続ける。
+    //   帯のためだけに2回目を引かないよう、同じ helper の第5引数で受け取る。
+    expect(src).toMatch(
+      /showComposedEditLockedMessage\([\s\S]*?lock\.noteSaveErrorHolder\(holder\.holderName, holder\.since\)/,
+    );
+  });
+
   it("編集フォームはinput・keydown・pointerdownの3つでnoteActivityを呼ぶ(期限切れの取り直しの引き金)", () => {
     // ⚠(branch review Important #2) 「入力・キー・ポインタ」と名乗るテストが
     //   `noteActivity()` の出現を1回しか見ていないと、onInput/onKeyDownを消しても
