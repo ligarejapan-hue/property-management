@@ -49,13 +49,20 @@ export async function processRegistryOwnerApplyRow(args: {
   const parsed = readRegistryOwnerApplyRow(rawData);
   if (!parsed) return "noop";
 
-  const finish = async (
+  type RowDb = Pick<typeof prisma, "importJobRow">;
+
+  /**
+   * 行の状態を書く。⚠**未処理の行だけ**を書き換える(書けた件数を返す)。
+   *   確定済みの「成功」を、後から来た失敗で上書きしないため。
+   */
+  const writeRow = async (
+    db: RowDb,
     status: Exclude<RegistryOwnerApplyRowOutcome, "noop">,
     errorMessage: string | null,
     extraRawData?: Record<string, string>,
-  ): Promise<RegistryOwnerApplyRowOutcome> => {
-    await prisma.importJobRow.update({
-      where: { id: rowId },
+  ): Promise<number> => {
+    const { count } = await db.importJobRow.updateMany({
+      where: { id: rowId, jobId, status: "pending" },
       data: {
         status,
         errorMessage,
@@ -69,8 +76,24 @@ export async function processRegistryOwnerApplyRow(args: {
           : {}),
       },
     });
-    return status;
+    return count;
   };
+
+  const finish = async (
+    status: Exclude<RegistryOwnerApplyRowOutcome, "noop">,
+    errorMessage: string | null,
+    extraRawData?: Record<string, string>,
+  ): Promise<RegistryOwnerApplyRowOutcome> =>
+    (await writeRow(prisma, status, errorMessage, extraRawData)) > 0 ? status : "noop";
+
+  /**
+   * ⚠行の「成功」は、所有者の書き込みと**同じトランザクションの中**で書く。
+   *   確定のあとに別の書き込みで記録すると、その間で止まったとき「所有者は入ったのに
+   *   行は未処理」になり、再開で「すでに所有者あり=飛ばした」と誤って記録される
+   *   (件数がずれる)。
+   */
+  let committedSuccess = false;
+  const rowNoLongerPending = new Error("row is no longer pending");
 
   try {
     const outcome = await applyRegistryOwnersToProperty({
@@ -80,13 +103,27 @@ export async function processRegistryOwnerApplyRow(args: {
       // ⚠まとめて反映は人が中身を見ないので、実行時点の最新の謄本を使う
       //   (共通処理が書き込みのロックの中でも「最新のままか」を確かめる)。
       expectedAttachmentId: undefined,
+      beforeCommit: async (tx, summary) => {
+        const written = await writeRow(tx, "success", null, {
+          // 実際に物件へ紐づいた人数。⚠同じ人が謄本に2回載っていれば1人にまとまるので
+          //   読み取った行数とは違いうる。氏名・住所は残さない。
+          ownersLinked: String(summary.linked),
+        });
+        // 別の実行がこの行を先に確定させていた → 所有者の書き込みごと巻き戻す
+        if (written === 0) throw rowNoLongerPending;
+        committedSuccess = true;
+      },
     });
+    if (committedSuccess) return "success";
+    // 入口が呼ばれなかった場合(書き込みが無かった等)だけ、ここで記録する
     return await finish("success", null, {
-      // 実際に物件へ紐づいた人数。⚠同じ人が謄本に2回載っていれば1人にまとまるので
-      //   読み取った行数とは違いうる。氏名・住所は残さない。
       ownersLinked: String(outcome.result.ownersLinked ?? 0),
     });
   } catch (err) {
+    // ⚠所有者と行は確定済み。そのあとの後始末(取込ジョブの記録など)の失敗で
+    //   「成功」を失敗に書き換えない。
+    if (committedSuccess) return "success";
+    if (err === rowNoLongerPending) return "noop";
     if (err instanceof ApiError) {
       // すでに所有者がいた = この機能の対象外になっただけ(失敗ではない)
       if (err.status === 409 && err.code === "OWNERS_ALREADY_EXIST") {

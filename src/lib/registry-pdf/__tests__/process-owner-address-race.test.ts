@@ -614,6 +614,51 @@ describe("所有者が空の物件だけに入れる指定（requireNoExistingOw
     expect(pm.propertyOwner.create).not.toHaveBeenCalled();
   });
 
+  /**
+   * ⚠なぜ必要か(@codex 第4R P2): まとめて反映は、所有者の書き込みが確定したあとに
+   *   取込記録の行を「成功」にする。その間で止まると、所有者は入ったのに行は未処理の
+   *   まま残り、再開すると「すでに所有者あり」で「飛ばした」と記録されて件数がずれる。
+   *   呼び出し元の記録を、所有者と**同じトランザクションの中・確定の直前**に書かせる。
+   */
+  it("⚠まとめる場合、全員を紐づけ終えたあと・同じトランザクションの中で beforeCommit を呼ぶ", async () => {
+    let inTx = false;
+    pm.$transaction.mockImplementation(async (cb: (tx: typeof prisma) => unknown) => {
+      inTx = true;
+      try {
+        return await cb(prisma);
+      } finally {
+        inTx = false;
+      }
+    });
+    const seen: Array<{ inTx: boolean; tx: unknown; linked: number }> = [];
+    const hook = vi.fn(async (tx: unknown, summary: { linked: number }) => {
+      seen.push({ inTx, tx, linked: summary.linked });
+    });
+    await run({ requireNoExistingOwners: true, beforeCommit: hook });
+
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(seen[0].inTx).toBe(true);
+    expect(seen[0].tx).toBe(prisma);
+    expect(seen[0].linked).toBe(1);
+    const lastLink = pm.propertyOwner.create.mock.invocationCallOrder.at(-1)!;
+    expect(lastLink).toBeLessThan(hook.mock.invocationCallOrder[0]);
+  });
+
+  it("⚠beforeCommit が失敗したら、取込全体も失敗として返す（所有者だけ確定させない）", async () => {
+    const hook = vi.fn(async () => {
+      throw new Error("row update failed");
+    });
+    await expect(
+      run({ requireNoExistingOwners: true, beforeCommit: hook }),
+    ).rejects.toThrow("row update failed");
+  });
+
+  it("まとめない呼び出し元（手動取込など）では beforeCommit を呼ばない", async () => {
+    const hook = vi.fn(async () => {});
+    await run({ beforeCommit: hook });
+    expect(hook).not.toHaveBeenCalled();
+  });
+
   it("指定しない呼び出し元（手動取込など）では見直さない＝共有名義の追加を妨げない", async () => {
     pm.propertyOwner.count.mockResolvedValue(1);
     await run();

@@ -132,6 +132,15 @@ export interface ProcessRegistryPdfArgs {
    */
   beforeFirstWrite?: (tx: DbClient) => Promise<void>;
   /**
+   * **所有者を全員紐づけ終えたあと、同じトランザクションの確定の直前に呼ぶ**(まとめる経路向け)。
+   * 呼び出し元の記録(例: まとめて反映の取込記録の行を「成功」にする)を所有者の書き込みと
+   * 一緒に確定させるための入口。投げれば所有者の書き込みも巻き戻る。
+   * ⚠確定のあとに別の書き込みで記録すると、その間で止まったとき「所有者は入ったのに
+   *   記録は未処理」になり、再開で「すでに所有者あり=飛ばした」と誤って記録される。
+   * ⚠requireNoExistingOwners のときだけ呼ばれる(全員を1つのトランザクションで入れる場合)。
+   */
+  beforeCommit?: (tx: DbClient, summary: { linked: number }) => Promise<void>;
+  /**
    * 有料取得の請求種別（owner|all）。有料取得フローからのみ渡る（手動取込は undefined）。
    * ⚠**"all"(全部事項)のときは所有者を物件へ反映しない**。全部事項には抹消された
    * 旧所有者が載り、今の解析は現在/抹消を区別できないため、旧所有者を現在の所有者
@@ -272,6 +281,8 @@ async function reflectParsedOwners(args: {
   scopedSession?: RegistryPdfSession;
   /** → ProcessRegistryPdfArgs.beforeFirstWrite */
   beforeFirstWrite?: (tx: DbClient) => Promise<void>;
+  /** → ProcessRegistryPdfArgs.beforeCommit */
+  beforeCommit?: (tx: DbClient, summary: { linked: number }) => Promise<void>;
 }): Promise<{ matched: number; created: number; linked: number }> {
   const { propertyId, owners, recordCorporateDecision, markOwnerCorporateFillSkipped } = args;
 
@@ -720,10 +731,17 @@ async function reflectParsedOwners(args: {
     //
     // ロックの順序は applyAll の冒頭で候補の所有者を先に押さえることで
     // 「Owner → 物件」にそろえている(他の窓口と同じ順)。
-    await prisma.$transaction((tx) => applyAll(tx as DbClient), {
-      timeout: 30_000,
-      maxWait: 10_000,
-    });
+    await prisma.$transaction(
+      async (tx) => {
+        await applyAll(tx as DbClient);
+        // 呼び出し元の記録を、所有者と一緒に確定させる(→ ProcessRegistryPdfArgs.beforeCommit)
+        await args.beforeCommit?.(tx as DbClient, { linked: linkedCount });
+      },
+      {
+        timeout: 30_000,
+        maxWait: 10_000,
+      },
+    );
   } else {
     await applyAll(prisma as unknown as DbClient);
   }
@@ -954,6 +972,7 @@ export async function processRegistryPdf(
           skipCorporateNumber: args.ownersOnly,
           scopedSession: args.enforcePropertyScope ? session : undefined,
           beforeFirstWrite: args.beforeFirstWrite,
+          beforeCommit: args.beforeCommit,
           owners: parsed.owners,
           recordCorporateDecision,
           markOwnerCorporateFillSkipped,
@@ -1049,6 +1068,7 @@ export async function processRegistryPdf(
               skipCorporateNumber: args.ownersOnly,
               scopedSession: args.enforcePropertyScope ? session : undefined,
               beforeFirstWrite: args.beforeFirstWrite,
+              beforeCommit: args.beforeCommit,
               owners: parsed.owners,
               recordCorporateDecision,
               markOwnerCorporateFillSkipped,

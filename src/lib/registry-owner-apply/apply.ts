@@ -17,7 +17,10 @@ import { findMissingOwnerFieldWritePerm } from "@/lib/owner-create";
 import { getStorage } from "@/lib/storage";
 import { extractTextFromPdf } from "@/lib/pdf-extract";
 import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
-import { processRegistryPdf } from "@/lib/registry-pdf/process";
+import {
+  processRegistryPdf,
+  type ProcessRegistryPdfArgs,
+} from "@/lib/registry-pdf/process";
 
 /** この機能が扱う謄本の種別。全部事項は対象外。 */
 export const SUPPORTED_CERTIFICATE_TYPE = "owner";
@@ -151,6 +154,12 @@ export interface ApplyRegistryOwnersArgs {
    * まとめて反映は人が中身を見ないので渡さず、実行時点の最新を使う。
    */
   expectedAttachmentId?: string;
+  /**
+   * 所有者の書き込みと**同じトランザクションの確定直前**に呼ぶ(まとめて反映が取込記録の
+   * 行を「成功」にするため)。投げれば所有者の書き込みも巻き戻る。
+   * → ProcessRegistryPdfArgs.beforeCommit
+   */
+  beforeCommit?: ProcessRegistryPdfArgs["beforeCommit"];
 }
 
 export interface ApplyRegistryOwnersOutcome {
@@ -168,7 +177,7 @@ export interface ApplyRegistryOwnersOutcome {
 export async function applyRegistryOwnersToProperty(
   args: ApplyRegistryOwnersArgs,
 ): Promise<ApplyRegistryOwnersOutcome> {
-  const { session, perms, propertyId, expectedAttachmentId } = args;
+  const { session, perms, propertyId, expectedAttachmentId, beforeCommit } = args;
 
   const property = await prisma.property.findUnique({
     where: { id: propertyId },
@@ -239,6 +248,8 @@ export async function applyRegistryOwnersToProperty(
     // ⚠所有者だけを入れる。下見も確認画面も所有者しか見せていないので、
     //   物件の項目(不動産番号・地番・家屋番号・登記状況)は書き換えない。
     ownersOnly: true,
+    // 呼び出し元の記録を所有者と一緒に確定させる(まとめて反映のみ渡す)
+    beforeCommit,
     // ⚠この経路は「見せたものだけ書く」。取込処理が失敗を記録するときも、
     //   生のエラー文(登記由来の住所を含みうる)を残さない。
     sanitizeFailureDetails: true,

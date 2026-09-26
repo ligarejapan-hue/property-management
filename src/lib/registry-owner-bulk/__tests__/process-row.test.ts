@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
 vi.mock("@/lib/prisma", () => ({
   default: {
-    importJobRow: { findUnique: vi.fn(), update: vi.fn() },
+    importJobRow: { findUnique: vi.fn(), updateMany: vi.fn() },
   },
 }));
 vi.mock("@/lib/api-helpers", () => ({
@@ -35,7 +35,7 @@ import { processRegistryOwnerApplyRow } from "@/lib/registry-owner-bulk/process-
 
 const PROP_ID = "11111111-1111-4111-8111-111111111111";
 const db = prisma as unknown as {
-  importJobRow: { findUnique: Mock; update: Mock };
+  importJobRow: { findUnique: Mock; updateMany: Mock };
 };
 const apply = applyRegistryOwnersToProperty as unknown as Mock;
 
@@ -51,7 +51,7 @@ const run = () =>
   });
 
 /** 更新に渡された内容。 */
-const updated = () => db.importJobRow.update.mock.calls[0][0].data as Record<string, unknown>;
+const updated = () => db.importJobRow.updateMany.mock.calls[0][0].data as Record<string, unknown>;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -65,7 +65,7 @@ beforeEach(() => {
     }),
     job: { jobType: "registry_pdf_bulk" },
   });
-  db.importJobRow.update.mockResolvedValue({});
+  db.importJobRow.updateMany.mockResolvedValue({ count: 1 });
   apply.mockResolvedValue({
     attachmentId: "att-1",
     parsedOwners: 2,
@@ -83,6 +83,71 @@ describe("成功したとき", () => {
     // ⚠物件IDと物件の住所は残すが、所有者の氏名・住所は残さない
     expect(raw.propertyId).toBe(PROP_ID);
     expect(Object.keys(raw)).not.toContain("owners");
+  });
+
+  /**
+   * ⚠なぜ必要か(@codex 第4R P2): 所有者の書き込みが確定したあと、行を「成功」にする前に
+   *   止まると、再開時に「すでに所有者あり=飛ばした」と誤って記録され件数がずれる。
+   *   行の「成功」は所有者と同じトランザクションの中で書く。
+   */
+  type Hook = (t: unknown, s: { linked: number }) => Promise<void>;
+
+  it("⚠行の「成功」は、共通処理の確定前の入口(同じトランザクション)で書く", async () => {
+    const tx = { importJobRow: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) } };
+    apply.mockImplementation(async (args: { beforeCommit?: Hook }) => {
+      await args.beforeCommit?.(tx, { linked: 3 });
+      return { attachmentId: "att-1", parsedOwners: 3, result: { ownersLinked: 3 } };
+    });
+    await expect(run()).resolves.toBe("success");
+    expect(tx.importJobRow.updateMany).toHaveBeenCalledTimes(1);
+    const call = tx.importJobRow.updateMany.mock.calls[0][0];
+    // ⚠未処理の行だけを書き換える(二重に走っても上書きしない)
+    expect(call.where).toEqual({ id: "row-1", jobId: "job-1", status: "pending" });
+    expect(call.data.status).toBe("success");
+    expect(call.data.errorMessage).toBeNull();
+    const raw = call.data.rawData as Record<string, string>;
+    expect(raw.ownersLinked).toBe("3");
+    expect(raw.propertyId).toBe(PROP_ID);
+    // 確定済みなので、外側では書き直さない
+    expect(db.importJobRow.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("⚠行がもう未処理でなければ、入口で投げて所有者の書き込みも巻き戻す", async () => {
+    const tx = { importJobRow: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) } };
+    let thrown: unknown;
+    apply.mockImplementation(async (args: { beforeCommit?: Hook }) => {
+      try {
+        await args.beforeCommit?.(tx, { linked: 1 });
+      } catch (e) {
+        thrown = e;
+        throw e;
+      }
+      return { attachmentId: "att-1", parsedOwners: 1, result: { ownersLinked: 1 } };
+    });
+    await expect(run()).resolves.toBe("noop");
+    expect(thrown).toBeTruthy();
+    expect(db.importJobRow.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("⚠確定のあとに共通処理が失敗しても、「成功」を失敗で上書きしない", async () => {
+    const tx = { importJobRow: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) } };
+    apply.mockImplementation(async (args: { beforeCommit?: Hook }) => {
+      await args.beforeCommit?.(tx, { linked: 1 });
+      // 例: 所有者は確定したが、取込ジョブの後始末の書き込みで失敗した
+      throw new Error("job finalize failed");
+    });
+    await expect(run()).resolves.toBe("success");
+    expect(db.importJobRow.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("⚠外側で行を書くときも、未処理の行だけを書き換える", async () => {
+    apply.mockRejectedValue(new ApiError(403, "この物件を扱う権限がありません", "FORBIDDEN"));
+    await run();
+    expect(db.importJobRow.updateMany.mock.calls[0][0].where).toEqual({
+      id: "row-1",
+      jobId: "job-1",
+      status: "pending",
+    });
   });
 
   it("⚠1件ずつのボタンと同じ共通処理を、その物件について呼ぶ", async () => {
@@ -109,7 +174,7 @@ describe("処理しない行", () => {
     });
     await expect(run()).resolves.toBe("noop");
     expect(apply).not.toHaveBeenCalled();
-    expect(db.importJobRow.update).not.toHaveBeenCalled();
+    expect(db.importJobRow.updateMany).not.toHaveBeenCalled();
   });
 
   it("⚠別のジョブの行は何もしない", async () => {
@@ -134,7 +199,7 @@ describe("処理しない行", () => {
     });
     await expect(run()).resolves.toBe("noop");
     expect(apply).not.toHaveBeenCalled();
-    expect(db.importJobRow.update).not.toHaveBeenCalled();
+    expect(db.importJobRow.updateMany).not.toHaveBeenCalled();
   });
 });
 
