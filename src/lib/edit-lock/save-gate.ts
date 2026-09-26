@@ -65,3 +65,19 @@ export function shouldShowLockUnavailableNotice(
 export function isEditLockHeldByOther(row: EditLockStatusRow | undefined): boolean {
   return row?.state === "held_by_other" || row?.state === "held_by_self_other_screen";
 }
+
+/**
+ * 見ている側(仕様 6.3・Task 9 fix round1 Important 5)。無効化した編集ボタンに
+ * 添える理由の `title`。**状態で出し分ける**——`held_by_self_other_screen` は
+ * 自分自身の別画面での編集なので、帯の「あなたが別の画面で編集中です」と
+ * 矛盾しない主語にする(修理前は両方の held 状態で「他の利用者が…」に固定
+ * されており、タブを複製しただけの利用者に「他の人が編集中」と誤って伝えていた)。
+ * ⚠呼び出し側は `isEditLockHeldByOther(row)` が true のときだけこれを使う想定
+ *   (それ以外の状態でも呼べるように総ての分岐を持つが、free/mine/undefinedの
+ *   ときの戻り値は「使われない」前提の既定値でしかない)。
+ */
+export function editLockUnavailableTitle(row: EditLockStatusRow | undefined): string {
+  return row?.state === "held_by_self_other_screen"
+    ? "あなたが別の画面で編集中のため編集できません"
+    : "他の利用者が編集中のため編集できません";
+}

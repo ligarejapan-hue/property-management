@@ -6,7 +6,12 @@
  *   できるようにするため)。テストの中身は移設のみで、内容は変えていない。
  */
 import { describe, it, expect } from "vitest";
-import { canSubmitSave, shouldShowLockUnavailableNotice, isEditLockHeldByOther } from "../save-gate";
+import {
+  canSubmitSave,
+  shouldShowLockUnavailableNotice,
+  isEditLockHeldByOther,
+  editLockUnavailableTitle,
+} from "../save-gate";
 import type { EditLockStatusRow } from "@/lib/api-client";
 
 describe("canSubmitSave(保存ボタンを押せるかの判断)", () => {
@@ -102,5 +107,25 @@ describe("isEditLockHeldByOther(見ている側・仕様6.3の表を1件ずつ�
 
   it("行が届いていない(undefined)ときは止めない(fail open・未取得/権限なし)", () => {
     expect(isEditLockHeldByOther(undefined)).toBe(false);
+  });
+});
+
+describe("editLockUnavailableTitle(review round1 Important 5: 帯と矛盾しない主語の出し分け)", () => {
+  const row = (state: EditLockStatusRow["state"]): EditLockStatusRow => ({
+    resourceType: "property",
+    resourceId: "p1",
+    state,
+  });
+
+  it("held_by_other は「他の利用者が編集中のため編集できません」", () => {
+    expect(editLockUnavailableTitle(row("held_by_other"))).toBe(
+      "他の利用者が編集中のため編集できません",
+    );
+  });
+
+  it("held_by_self_other_screen は「あなたが別の画面で編集中のため編集できません」(帯の「あなたが別の画面で編集中です」と主語を揃える)", () => {
+    expect(editLockUnavailableTitle(row("held_by_self_other_screen"))).toBe(
+      "あなたが別の画面で編集中のため編集できません",
+    );
   });
 });

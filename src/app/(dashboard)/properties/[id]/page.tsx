@@ -45,7 +45,12 @@ import { EditLockBanner, EditLockHolderBanner, BAND as EDIT_LOCK_BAND } from "@/
 // Task 5(物件の編集ウィンドウ)が切り出し、Task 6 fix round 1 #3 で
 // src/lib/edit-lock/save-gate.ts へ移した(component module一式を巻き込まずに
 // 2つの純関数だけを import できるようにするため)。同じ判断なので複製しない。
-import { canSubmitSave, shouldShowLockUnavailableNotice, isEditLockHeldByOther } from "@/lib/edit-lock/save-gate";
+import {
+  canSubmitSave,
+  shouldShowLockUnavailableNotice,
+  isEditLockHeldByOther,
+  editLockUnavailableTitle,
+} from "@/lib/edit-lock/save-gate";
 // EDIT_LOCKEDの文言組み立て(仕様6.5・fix round1)。窓口の423は氏名・時刻を返さないため、
 // 状態の窓口へ1回だけ問い合わせて組み立てる(鍵を持たない入口専用)。
 import { composeEditLockedMessage } from "@/lib/edit-lock/locked-message";
@@ -760,7 +765,7 @@ export default function PropertyDetailPage({
             onClick={() => setShowEditForm(true)}
             disabled={propertyEditLockHeld}
             aria-label="物件を編集"
-            title={propertyEditLockHeld ? "他の利用者が編集中のため編集できません" : "物件情報を編集"}
+            title={propertyEditLockHeld ? editLockUnavailableTitle(propertyEditLockRow) : "物件情報を編集"}
             className="flex items-center gap-1.5 whitespace-nowrap rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
           >
             <Edit className="h-4 w-4" />
@@ -1574,7 +1579,7 @@ function OwnerCard({
             onClick={handleEdit}
             disabled={editLockHeld}
             aria-label={`所有者${idx + 1}/${total} ${po.owner.name ?? "（氏名未登録）"}の所有者情報を編集`}
-            title={editLockHeld ? "他の利用者が編集中のため編集できません" : "所有者情報を編集"}
+            title={editLockHeld ? editLockUnavailableTitle(editLockStatusRow) : "所有者情報を編集"}
             className="ml-auto flex items-center gap-1 rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
           >
             <Edit className="h-3 w-3" />
