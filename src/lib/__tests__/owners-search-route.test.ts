@@ -246,6 +246,12 @@ describe("電話番号はハイフンの有無を問わず見つかる", () => {
     expect(where().OR).toContainEqual({ id: { in: ["o-9"] } });
   });
 
+  it("件数上限の前に整理済み(archived)の所有者を外す(上限を食い潰して有効な所有者を取りこぼさない・@codex #447 R2)", async () => {
+    await callRoute("0901234");
+    const sql = (pm.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join("?");
+    expect(sql).toMatch(/is_archived = false[\s\S]*LIMIT/);
+  });
+
   it("ハイフンありで打っても数字だけで比べる", async () => {
     await callRoute("090-1234-5678");
     expect(rawDigits()).toContain("%09012345678%");
