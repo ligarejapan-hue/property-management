@@ -92,7 +92,10 @@ export async function processRegistryOwnerApplyRow(args: {
    *   行は未処理」になり、再開で「すでに所有者あり=飛ばした」と誤って記録される
    *   (件数がずれる)。
    */
-  let committedSuccess = false;
+  // ⚠入口が呼ばれた = トランザクションの中で書いただけ。確定(COMMIT)したとは限らない
+  //   (確定が失敗すれば所有者も行も巻き戻る)。確定したかは、共通処理が返ったか、
+  //   失敗したなら行を読み直して確かめる(@codex 第5R)。
+  let rowWrittenInTx = false;
   const rowNoLongerPending = new Error("row is no longer pending");
 
   try {
@@ -111,19 +114,29 @@ export async function processRegistryOwnerApplyRow(args: {
         });
         // 別の実行がこの行を先に確定させていた → 所有者の書き込みごと巻き戻す
         if (written === 0) throw rowNoLongerPending;
-        committedSuccess = true;
+        rowWrittenInTx = true;
       },
     });
-    if (committedSuccess) return "success";
+    // 共通処理が返った = トランザクションは確定済み
+    if (rowWrittenInTx) return "success";
     // 入口が呼ばれなかった場合(書き込みが無かった等)だけ、ここで記録する
     return await finish("success", null, {
       ownersLinked: String(outcome.result.ownersLinked ?? 0),
     });
   } catch (err) {
-    // ⚠所有者と行は確定済み。そのあとの後始末(取込ジョブの記録など)の失敗で
-    //   「成功」を失敗に書き換えない。
-    if (committedSuccess) return "success";
     if (err === rowNoLongerPending) return "noop";
+    if (rowWrittenInTx) {
+      // 確定のあとの後始末(取込ジョブの記録など)で失敗したのか、確定そのものが
+      // 失敗したのかを、行を読み直して見分ける。
+      // ⚠確定済みなら「成功」を失敗に書き換えない。巻き戻っていれば(未処理のまま)
+      //   下で通常どおり失敗として残す。
+      try {
+        const now = await prisma.importJobRow.findUnique({ where: { id: rowId } });
+        if (now?.status === "success") return "success";
+      } catch {
+        // 読み直せなくても、下の書き込みは未処理の行にしか効かないので安全
+      }
+    }
     if (err instanceof ApiError) {
       // すでに所有者がいた = この機能の対象外になっただけ(失敗ではない)
       if (err.status === 409 && err.code === "OWNERS_ALREADY_EXIST") {

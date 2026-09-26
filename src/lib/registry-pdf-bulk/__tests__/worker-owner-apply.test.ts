@@ -70,6 +70,9 @@ async function waitForIdle(): Promise<void> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // ⚠clearAllMocks は mockResolvedValueOnce の積み残しを消さない。途中で止まるテストの
+  //   残りが次のテストの1回目に流れ込み、「1行も処理しない」系が偶然通っていた。
+  pm.importJobRow.findMany.mockReset();
   __resetRegistryPdfBulkWorkerForTest();
   pm.importJob.findUnique.mockResolvedValue({
     id: "j1",
@@ -78,7 +81,7 @@ beforeEach(() => {
     executedBy: "u1",
   });
   pm.importJob.update.mockResolvedValue({});
-  pm.user.findUnique.mockResolvedValue({ id: "u1", role: "admin" });
+  pm.user.findUnique.mockResolvedValue({ id: "u1", role: "admin", isActive: true });
   pm.property.findMany.mockResolvedValue([]);
   (getUserPermissions as unknown as Mock).mockResolvedValue(ALL_PERMS);
   (processRegistryOwnerApplyRow as Mock).mockResolvedValue("success");
@@ -153,7 +156,7 @@ describe("まとめて反映の行の振り分け", () => {
   });
 
   it("⚠管理者でなくなった実行者のジョブも、1行も処理しない", async () => {
-    pm.user.findUnique.mockResolvedValue({ id: "u1", role: "office_staff" });
+    pm.user.findUnique.mockResolvedValue({ id: "u1", role: "office_staff", isActive: true });
     pm.importJobRow.findMany
       .mockResolvedValueOnce([ownerApplyRow("r1", 1)])
       .mockResolvedValueOnce([{ status: "pending" }]);
@@ -162,6 +165,29 @@ describe("まとめて反映の行の振り分け", () => {
     await waitForIdle();
 
     expect(processRegistryOwnerApplyRow).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ⚠なぜ必要か(@codex 第5R P1): 無効化(isActive=false)はこのアプリでは「ログインの取り消し」。
+   *   ところが権限の読み直しは役割の設定を読むだけで有効かを見ないので、無効にした人の
+   *   名前で最大5,000件ぶんの所有者が書き込まれてしまう。
+   */
+  it("⚠無効にされた実行者のジョブは、1行も処理せず失敗にする", async () => {
+    pm.user.findUnique.mockResolvedValue({ id: "u1", role: "admin", isActive: false });
+    pm.importJobRow.findMany
+      .mockResolvedValueOnce([ownerApplyRow("r1", 1)])
+      .mockResolvedValueOnce([{ status: "pending" }]);
+
+    enqueueRegistryPdfBulkJob("j1");
+    await waitForIdle();
+
+    expect(processRegistryOwnerApplyRow).not.toHaveBeenCalled();
+    const statuses = pm.importJob.update.mock.calls.map(
+      (c) => (c[0].data as { status?: string }).status,
+    );
+    expect(statuses).toContain("failed");
+    // ⚠有効かどうかを実際に読みに行っている
+    expect(pm.user.findUnique.mock.calls[0][0].select).toMatchObject({ isActive: true });
   });
 
   it("PDFを上げた一括取込だけのジョブでは、権限の読み直しをしない（従来どおり）", async () => {

@@ -19,6 +19,20 @@ export const REGISTRY_OWNER_APPLY_DEFAULT_LIMIT = 100;
 export const REGISTRY_OWNER_APPLY_MAX_LIMIT = 5000;
 
 /**
+ * 「全件」ボタンに入れる件数と表示。
+ * ⚠対象が上限を超えるときは、上限で止まること(`capped`)と残りの件数を返す。
+ *   「全件」と書いたまま黙って上限に丸めると、押した人は全部流れたと思い、
+ *   残りが手つかずで残る(@codex 第5R)。
+ */
+export function describeFillAllButton(
+  targetCount: number,
+  maxLimit: number,
+): { limit: number; capped: boolean; remaining: number } {
+  const limit = Math.min(targetCount, maxLimit);
+  return { limit, capped: targetCount > maxLimit, remaining: targetCount - limit };
+}
+
+/**
  * 受け取った件数を検査する。
  * 未指定 → 既定。1以上・上限以下の整数 → その値。それ以外 → `null`(不正=受け付けない)。
  * ⚠黙って直さない(丸めない)。人が入れた数と流れる件数が違う状態を作らない。

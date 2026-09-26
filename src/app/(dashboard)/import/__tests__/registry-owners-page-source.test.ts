@@ -48,6 +48,15 @@ describe("まとめて反映の画面", () => {
   it("全件を入れる操作がある", () => {
     expect(PAGE).toContain("全件");
   });
+
+  it("⚠上限で止まるときは「全件」と書かず、残りの件数を案内する（@codex 第5R）", () => {
+    expect(PAGE).toContain("describeFillAllButton");
+    expect(PAGE).toMatch(/fillAll\.capped\s*\?/);
+    expect(PAGE).toContain("fillAll.remaining");
+    // ⚠ボタンの値は判定と同じ関数から取る(画面側で計算し直さない)
+    expect(PAGE).toContain("setLimitText(String(fillAll.limit))");
+    expect(PAGE).not.toContain("Math.min(targetCount");
+  });
 });
 
 describe("入口", () => {

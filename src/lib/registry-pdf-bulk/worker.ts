@@ -110,7 +110,7 @@ async function processJob(jobId: string): Promise<void> {
 
   const executor = await prisma.user.findUnique({
     where: { id: job.executedBy },
-    select: { id: true, role: true },
+    select: { id: true, role: true, isActive: true },
   });
   if (!executor) {
     await prisma.importJob.update({
@@ -139,7 +139,11 @@ async function processJob(jobId: string): Promise<void> {
   let ownerApplyPerms: Awaited<ReturnType<typeof getUserPermissions>> | null = null;
   if (ownerApplyRows.length > 0) {
     ownerApplyPerms = await getUserPermissions(executor.id);
-    const missing = findMissingRegistryOwnerApplyPerm(executor.role, ownerApplyPerms);
+    // ⚠無効にされた人(isActive=false=ログインの取り消し)の名前では書かない。
+    //   権限の読み直しは役割の設定を見るだけで、有効かどうかは見ない(@codex 第5R P1)。
+    const missing = !executor.isActive
+      ? "有効なユーザーではない"
+      : findMissingRegistryOwnerApplyPerm(executor.role, ownerApplyPerms);
     if (missing) {
       console.error(
         `[registry-owner-bulk] 実行者の権限が足りないため中止 jobId=${jobId} 不足=${missing}`,
@@ -170,7 +174,7 @@ async function processJob(jobId: string): Promise<void> {
       await processRegistryOwnerApplyRow({
         jobId,
         rowId: row.id,
-        executor,
+        executor: { id: executor.id, role: executor.role },
         perms: ownerApplyPerms ?? [],
       });
       continue;

@@ -21,6 +21,7 @@ import {
   startRegistryOwnerApply,
   type RegistryOwnerApplyTarget,
 } from "@/lib/api-client";
+import { describeFillAllButton } from "@/lib/registry-owner-bulk/plan";
 
 export default function RegistryOwnersBulkPage() {
   const router = useRouter();
@@ -51,6 +52,8 @@ export default function RegistryOwnersBulkPage() {
 
   const busy = target?.busy ?? false;
   const targetCount = target?.targetCount ?? 0;
+  // ⚠上限を超えるときは「全件」と書かない(→ describeFillAllButton)
+  const fillAll = describeFillAllButton(targetCount, target?.maxLimit ?? targetCount);
   const limit = Number(limitText);
   const limitValid =
     Number.isInteger(limit) && limit >= 1 && limit <= (target?.maxLimit ?? 0);
@@ -125,12 +128,20 @@ export default function RegistryOwnersBulkPage() {
             <span className="text-sm text-gray-600 dark:text-gray-300">件</span>
             <Button
               variant="secondary"
-              onClick={() => setLimitText(String(Math.min(targetCount, target?.maxLimit ?? targetCount)))}
+              onClick={() => setLimitText(String(fillAll.limit))}
               disabled={loading || targetCount === 0}
             >
-              全件（{targetCount.toLocaleString()}件）
+              {fillAll.capped
+                ? `上限の${fillAll.limit.toLocaleString()}件`
+                : `全件（${targetCount.toLocaleString()}件）`}
             </Button>
           </div>
+          {fillAll.capped ? (
+            <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+              1回に流せるのは{fillAll.limit.toLocaleString()}件までです。残りの
+              {fillAll.remaining.toLocaleString()}件は、終わってからもう一度この画面で実行してください。
+            </p>
+          ) : null}
 
           {busy ? (
             <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">

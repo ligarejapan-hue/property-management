@@ -130,6 +130,15 @@ describe("成功したとき", () => {
   });
 
   it("⚠確定のあとに共通処理が失敗しても、「成功」を失敗で上書きしない", async () => {
+    // 確定済み = 読み直すと行は「成功」になっている
+    db.importJobRow.findUnique
+      .mockResolvedValueOnce({
+        id: "row-1",
+        jobId: "job-1",
+        status: "pending",
+        rawData: buildRegistryOwnerApplyRawData({ propertyId: PROP_ID, address: null }),
+      })
+      .mockResolvedValueOnce({ id: "row-1", jobId: "job-1", status: "success" });
     const tx = { importJobRow: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) } };
     apply.mockImplementation(async (args: { beforeCommit?: Hook }) => {
       await args.beforeCommit?.(tx, { linked: 1 });
@@ -138,6 +147,22 @@ describe("成功したとき", () => {
     });
     await expect(run()).resolves.toBe("success");
     expect(db.importJobRow.updateMany).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ⚠なぜ必要か(@codex 第5R P2): 入口が呼ばれても、確定(COMMIT)そのものが失敗すれば
+   *   所有者も行も巻き戻る。入口が呼ばれたことだけで「成功」とみなすと、行は未処理の
+   *   まま残り、失敗の記録も再試行もされない。確定したかは行を読み直して確かめる。
+   */
+  it("⚠入口のあと確定そのものが失敗したら、「成功」とみなさず失敗として残す", async () => {
+    const tx = { importJobRow: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) } };
+    apply.mockImplementation(async (args: { beforeCommit?: Hook }) => {
+      await args.beforeCommit?.(tx, { linked: 1 });
+      // 例: COMMIT が失敗 → 所有者も行の更新も巻き戻った(読み直すと未処理のまま)
+      throw new Error("commit failed");
+    });
+    await expect(run()).resolves.toBe("error");
+    expect(updated().status).toBe("error");
   });
 
   it("⚠外側で行を書くときも、未処理の行だけを書き換える", async () => {

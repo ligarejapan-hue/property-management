@@ -10,8 +10,36 @@ import {
   REGISTRY_OWNER_APPLY_DEFAULT_LIMIT,
   REGISTRY_OWNER_APPLY_MAX_LIMIT,
   buildRegistryOwnerApplyRowSeeds,
+  describeFillAllButton,
   parseRegistryOwnerApplyLimit,
 } from "@/lib/registry-owner-bulk/plan";
+
+/**
+ * ⚠なぜ必要か(@codex 第5R P2): 対象が上限を超えると、「全件」ボタンは黙って上限の件数を
+ *   入れるのに、表示は「全件(N件)」のままだった。押した人は全部流れたと思い、残りが
+ *   手つかずで残る。上限で止まるときは、そう書いて残りの件数を出す。
+ */
+describe("「全件」ボタンの表示", () => {
+  it("対象が上限以内なら「全件」で、全部を入れる", () => {
+    expect(describeFillAllButton(1821, 5000)).toEqual({
+      limit: 1821,
+      capped: false,
+      remaining: 0,
+    });
+  });
+
+  it("⚠対象が上限を超えたら、上限で止まることと残りの件数を返す", () => {
+    expect(describeFillAllButton(6200, 5000)).toEqual({
+      limit: 5000,
+      capped: true,
+      remaining: 1200,
+    });
+  });
+
+  it("ちょうど上限なら「全件」のまま", () => {
+    expect(describeFillAllButton(5000, 5000).capped).toBe(false);
+  });
+});
 
 describe("今回処理する件数", () => {
   it("指定が無ければ既定（100件）", () => {
