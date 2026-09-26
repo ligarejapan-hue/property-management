@@ -26,6 +26,8 @@ import {
 import CorporateLookupPanel from "@/components/owners/corporate-lookup-panel";
 import CorporateCleanupPanel from "@/components/owners/corporate-cleanup-panel";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
+// 鍵のヘッダを送るすべての画面が呼ぶ契約(外部レビュー@codex P1 round2)。
+import { useEditScreenToken } from "@/hooks/use-edit-screen-token";
 import { ownerFilteredPropertyListHref } from "@/lib/owner-property-link";
 
 type FieldEditable = {
@@ -58,6 +60,13 @@ const DETECTED_IN_LABEL: Record<string, string> = {
 export default function AdminOwnerDetailPage() {
   const params = useParams<{ id: string }>();
   const ownerId = params?.id ?? "";
+
+  // 編集中の鍵(仕様 6.1・外部レビュー@codex P1 round2)。この画面は鍵を持たない
+  // 入口だが、`CorporateLookupPanel`(下)が `applyOwnerCorporate` 経由で鍵の
+  // ヘッダ(合言葉)を送るため、鍵のヘッダを送る画面はすべてこの一生を持つ契約
+  // (`useEditScreenToken`)に従う。`tokenReady` が立つまでは Panel を描かない
+  // (300ms以内・その間に「反映」が飛んで古い合言葉を送るのを防ぐ)。
+  const { tokenReady: corporateLookupTokenReady } = useEditScreenToken();
 
   const [data, setData] =
     useState<AdminOwnerCorporateCandidateResponse | null>(null);
@@ -472,16 +481,21 @@ export default function AdminOwnerDetailPage() {
                   placeholder="例: 1234567890123"
                   className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 md:w-80 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700 dark:placeholder:text-gray-500"
                 />
-                <CorporateLookupPanel
-                  ownerId={owner.ownerId}
-                  rawCorporateNumber={corporateInput}
-                  configured={corporateLookupConfigured}
-                  ownerVersion={owner.version}
-                  fieldEditable={fieldEditable}
-                  onApplied={async () => {
-                    await load();
-                  }}
-                />
+                {/* ⚠tokenReady(複製タブ確認・最大300ms)が立つまで描かない
+                    (外部レビュー@codex P1 round2)。それまでに「反映」が飛ぶと、
+                    複製タブが写し取ったままの古い合言葉を送ってしまう。 */}
+                {corporateLookupTokenReady && (
+                  <CorporateLookupPanel
+                    ownerId={owner.ownerId}
+                    rawCorporateNumber={corporateInput}
+                    configured={corporateLookupConfigured}
+                    ownerVersion={owner.version}
+                    fieldEditable={fieldEditable}
+                    onApplied={async () => {
+                      await load();
+                    }}
+                  />
+                )}
                 <CorporateCleanupPanel
                   ownerId={owner.ownerId}
                   onApplied={async () => {

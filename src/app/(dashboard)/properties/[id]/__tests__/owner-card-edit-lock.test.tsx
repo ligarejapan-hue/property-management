@@ -241,20 +241,26 @@ describe("所有者ごとに独立した鍵(per-owner independence・カード�
 });
 
 describe("複製タブ確認は画面につき1回だけ(once per page・Task 6の要件)", () => {
-  it("7) ensureUniqueScreenTokenの呼び出しはpage.tsx全体でちょうど1回(カードごとに増えない)", () => {
-    const calls = src.match(/ensureUniqueScreenToken\(\)/g) ?? [];
+  // ⚠(外部レビュー@codex P1 round2) 応答器+複製タブ確認の一生は
+  //   useEditScreenToken() hook に括り出した(鍵のヘッダを送る画面はすべて呼ぶ契約。
+  //   詳細は screen-token-client.test.ts の導出型ラチェット)。ここでの関心は変わらず
+  //   「page.tsx全体でちょうど1回・OwnerCardより前・OwnerCard自身は呼ばない」。
+  it("7) useEditScreenTokenの呼び出しはpage.tsx全体でちょうど1回(カードごとに増えない)", () => {
+    const calls = src.match(/useEditScreenToken\(\)/g) ?? [];
     expect(calls.length).toBe(1);
   });
 
   it("8) その1回はOwnerCardより前(=親の物件詳細画面側)にある", () => {
     const ownerCardIndex = src.indexOf("function OwnerCard({");
-    const tokenCallIndex = src.indexOf("ensureUniqueScreenToken()");
+    const tokenCallIndex = src.indexOf("useEditScreenToken()");
     expect(ownerCardIndex).toBeGreaterThan(-1);
     expect(tokenCallIndex).toBeGreaterThan(-1);
     expect(tokenCallIndex).toBeLessThan(ownerCardIndex);
   });
 
-  it("9) OwnerCard自身のソースはensureUniqueScreenTokenを呼ばない(カードごとに300ms待たせない)", () => {
-    expect(extractOwnerCardSource(src)).not.toContain("ensureUniqueScreenToken(");
+  it("9) OwnerCard自身のソースはuseEditScreenToken/ensureUniqueScreenTokenを呼ばない(カードごとに300ms待たせない)", () => {
+    const ownerCardSrc = extractOwnerCardSource(src);
+    expect(ownerCardSrc).not.toContain("useEditScreenToken(");
+    expect(ownerCardSrc).not.toContain("ensureUniqueScreenToken(");
   });
 });
