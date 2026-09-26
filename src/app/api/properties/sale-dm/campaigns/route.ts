@@ -218,6 +218,16 @@ export async function POST(request: NextRequest) {
     const matchedProperties = new Set(meta.map((m) => m.propertyId)).size;
     // 物件単位で最大 MAX_GENERATE_ITEMS 通に抑える(物件を分断しない・R8/R9-P1)。切詰めは truncated で通知。
     const capped = capRecipientsByProperty(recipients, meta, MAX_GENERATE_ITEMS);
+    // 宛先が1件も作れないなら、キャンペーンをクレームする前に止める。以前は宛先0件の空キャンペーンを
+    // 作って画面を移しており、利用者は「均等に割り当て」を押しても何も起きない画面に取り残された
+    // (2026-09-26 発注者の実機テスト)。何が足りないかを文言で返す(UI はそのまま表示する)。
+    if (capped.recipients.length === 0) {
+      throw new ApiError(
+        400,
+        "売却DMを作れる物件がありません。DM状態が「送付可」で、住所の入った所有者がいる物件を選んでください",
+        "NO_ELIGIBLE_RECIPIENTS",
+      );
+    }
 
     // 差出人は env 既定(SALE_DM_SENDER_NAME/CONTACT)のみ。印刷・再生成も resolveSender(env)を使うため、
     // 生成も env 差出人で揃える(body 指定は非永続ゆえ使わない=印刷とのズレを防ぐ・Codex R33)。

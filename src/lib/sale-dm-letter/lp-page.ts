@@ -9,7 +9,7 @@ import { escapeHtml } from "./templates/index";
 import { renderFigureSvg } from "./lp-figures";
 import type { LpRenderInput, LpImage, LpFormInput } from "./lp-render-input";
 import { PUBLIC_PAGE_HEADERS } from "./unsubscribe-page";
-import { INQUIRY_LIMITS, HONEYPOT_FIELD } from "./inquiry-input";
+import { INQUIRY_LIMITS, HONEYPOT_FIELD, INQUIRY_ERROR_MESSAGES } from "./inquiry-input";
 export { PUBLIC_PAGE_HEADERS } from "./unsubscribe-page";
 
 export const LP_CTA_LABEL = "無料査定を申し込む";
@@ -71,6 +71,10 @@ const CSS = [
   ".inquiry .consent{display:flex;align-items:center;gap:8px;font-weight:700;min-height:44px}",
   ".inquiry button{margin-top:12px;width:100%;border:0;cursor:pointer;font:inherit;font-size:17px;font-weight:700}",
   ".inquiry fieldset:disabled button{background:#9fb3ae;cursor:not-allowed}",
+  ".inquiry .fld-err{color:#b42318;font-weight:700;font-size:14px;margin:-8px 0 14px}",
+  ".inquiry input.invalid,.inquiry textarea.invalid{border-color:#b42318;box-shadow:0 0 0 1px #b42318}",
+  ".inquiry .consent input.invalid,.inquiry .pref input.invalid{outline:2px solid #b42318;outline-offset:2px}",
+  ".inquiry .inq-note{color:#a85f1b;background:#f7ebdd;border-radius:8px;padding:10px 12px;margin:0 0 14px;font-weight:700;font-size:14px}",
   ".inq-msg{color:#a8481a;background:#fbeadf;border-radius:8px;padding:10px 12px;margin:8px 0;font-weight:700}",
   ".inq-msg ul{margin:0;padding-left:1.2em}",
   ".inq-done{color:#1f2a2d;background:#e8f1ee;border-radius:8px;padding:14px 12px;margin:0;font-weight:700}",
@@ -103,6 +107,27 @@ function paragraphs(ps: string[]): string {
   return ps.map((p) => `<p>${escapeHtml(p).replace(/\n/g, "<br />")}</p>`).join("");
 }
 
+/**
+ * 画面内の入力チェック(ES5 の関数式の文字列)。送信前にブラウザで走らせ、足りない欄を
+ * [{f: 欄の name, m: 文言}] で**画面の上から順に**返す(最初の欄へスクロールするため)。
+ * ⚠発注者の指定(2026-09-26)=「進めないときは入力欄のところに赤字で注意書きをして、そこまでスクロール」。
+ *   スマホのブラウザ任せの吹き出しは見えないことがあり、同意のチェック忘れで無言のまま止まっていた。
+ * 判定は inquiry-input.ts の parseInquiryForm と同じ規則(サーバー側の検証が正本・ここは先回りの案内)。
+ * 文言も同じ INQUIRY_ERROR_MESSAGES を埋める(二重管理にしない)。
+ */
+export const INQUIRY_CLIENT_CHECK_SOURCE = [
+  "function(v){var E=[];",
+  `var M=${jsString(JSON.stringify(INQUIRY_ERROR_MESSAGES))};M=JSON.parse(M);`,
+  'function n(s){s=String(s==null?"":s);try{s=s.normalize("NFKC")}catch(_){}return s.replace(/[\\u0000-\\u001f\\u007f]/g,"").trim()}',
+  'var nm=n(v.name);if(nm===""){E.push({f:"name",m:M.name_required})}else if(/[0-9@]/.test(nm)){E.push({f:"name",m:M.name_invalid})}',
+  'var ph=n(v.phone).replace(/[ー−–—―]/g,"-").replace(/\\s+/g,"");',
+  `if(ph===""){E.push({f:"phone",m:M.phone_required})}else if(ph.length>${INQUIRY_LIMITS.phone}||!/^[0-9+\\-]+$/.test(ph)||ph.replace(/[^0-9]/g,"").length<10){E.push({f:"phone",m:M.phone_invalid})}`,
+  'var em=n(v.email);if(em!==""&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(em)){E.push({f:"email",m:M.email_invalid})}',
+  'if(n(v.pref)==="email"&&em===""){E.push({f:"contactPref",m:M.email_required_for_pref})}',
+  'if(!v.consent){E.push({f:"consent",m:M.consent_required})}',
+  "return E}",
+].join("");
+
 /** 申込フォームの送信スクリプト(フォームが有効なときだけ出す・固定文字列)。
  *  - fetch/URLSearchParams/FormData があれば画面を離れずに送る(accept: application/json)。
  *    サーバーの指摘(422 等)は送信ボタンの上の .inq-msg に出し、入力はそのまま残す。
@@ -122,7 +147,22 @@ const INQUIRY_SUBMIT_SCRIPT = [
   'function box(){return f.querySelector(".inq-msg")}',
   "function show(lines,asList){var x=box();if(!x)return;while(x.firstChild){x.removeChild(x.firstChild)}" +
     'if(asList){var ul=document.createElement("ul");for(var i=0;i<lines.length;i++){var li=document.createElement("li");li.textContent=lines[i];ul.appendChild(li)}x.appendChild(ul)}' +
-    "else{x.textContent=lines[0]}x.hidden=false}",
+    "else{x.textContent=lines[0]}x.hidden=false;if(x.scrollIntoView){x.scrollIntoView({block:\"center\"})}}",
+  // ── 画面内の入力チェック(ブラウザ任せの吹き出しは止める=JS なしのときだけ required が効く) ──
+  `f.noValidate=true;var CK=${INQUIRY_CLIENT_CHECK_SOURCE};`,
+  "function errEl(k){return f.querySelector('[data-err-for=\"'+k+'\"]')}",
+  "function fieldOf(k){return f.querySelector('[name=\"'+k+'\"]')}",
+  'function clearErrs(){var ps=f.querySelectorAll(".fld-err");for(var i=0;i<ps.length;i++){ps[i].hidden=true;ps[i].textContent=""}var bad=f.querySelectorAll(".invalid");for(var j=0;j<bad.length;j++){bad[j].classList.remove("invalid");bad[j].removeAttribute("aria-invalid")}}',
+  "function vals(){var c=fieldOf(\"consent\");var p=f.querySelector('input[name=\"contactPref\"]:checked');" +
+    'function val(k){var el=fieldOf(k);return el?el.value:""}' +
+    'return{name:val("name"),phone:val("phone"),email:val("email"),pref:p?p.value:"",consent:!!(c&&c.checked)}}',
+  "function flag(errs){for(var i=0;i<errs.length;i++){var p=errEl(errs[i].f);if(p){p.textContent=errs[i].m;p.hidden=false}" +
+    'var el=fieldOf(errs[i].f);if(el){el.classList.add("invalid");el.setAttribute("aria-invalid","true")}}' +
+    'var first=errEl(errs[0].f)||fieldOf(errs[0].f);if(first&&first.scrollIntoView){first.scrollIntoView({block:"center"})}' +
+    "var fe=fieldOf(errs[0].f);if(fe&&fe.focus){try{fe.focus({preventScroll:true})}catch(_){fe.focus()}}}",
+  'function onEdit(e){var t=e.target;if(!t||!t.name)return;var p=errEl(t.name);if(p){p.hidden=true;p.textContent=""}' +
+    'var same=f.querySelectorAll(\'[name="\'+t.name+\'"]\');for(var i=0;i<same.length;i++){same[i].classList.remove("invalid");same[i].removeAttribute("aria-invalid")}}',
+  'f.addEventListener("input",onEdit);f.addEventListener("change",onEdit);',
   'function done(){while(f.firstChild){f.removeChild(f.firstChild)}var p=document.createElement("p");p.className="inq-done";p.setAttribute("role","status");p.textContent=M.done;f.appendChild(p)}',
   "function handle(d){var k=d&&d.result;" +
     'if(k==="done"){done();return}' +
@@ -133,6 +173,8 @@ const INQUIRY_SUBMIT_SCRIPT = [
     "show([M.fail]);enable()}",
   'f.addEventListener("submit",function(e){',
   "if(sending){e.preventDefault();return}",
+  // 足りない欄があれば送らず、その欄の下に赤字の注意+最初の欄までスクロール(発注者指定)。
+  "clearErrs();var errs=CK(vals());if(errs.length){e.preventDefault();flag(errs);return}",
   "var body=null;",
   // 古いブラウザの new URLSearchParams(formData) は黙って "[object FormData]" になるため、forEach で文字列欄だけ詰める。
   'if(!window.fetch||!window.URLSearchParams||!window.FormData){body=null}else{try{var fd=new FormData(f);if(typeof fd.forEach==="function"){var q=new URLSearchParams();fd.forEach(function(v,k){if(typeof v==="string"){q.append(k,v)}});body=q.toString()}}catch(_){body=null}}',
@@ -146,22 +188,29 @@ const INQUIRY_SUBMIT_SCRIPT = [
   "})();",
 ].join("");
 
+/** 入力欄の直下に出す赤字の注意書きの置き場(画面内チェックが textContent で埋める・初期は隠す)。 */
+function fieldError(name: string): string {
+  return `<p class="fld-err" data-err-for="${name}" role="alert" hidden></p>`;
+}
+
 function formSection(form: LpFormInput): string {
   const privacy = escapeHtml(form.privacyText).replace(/\n/g, "<br />");
   const pref = (value: string, label: string) =>
     `<label><input type="radio" name="contactPref" value="${value}" />${label}</label>`;
   return `<section class="inquiry" id="${INQUIRY_SECTION_ID}"><h2>${escapeHtml(LP_CTA_LABEL)}</h2>` +
     `<form method="post" action="${escapeHtml(form.action)}" data-inquiry="1">` +
+    // 送付前は欄がすべて入力できない。上部の帯だけでは気づかれない(2026-09-26 実機テスト)ので、フォームの中にも理由を書く。
+    (form.disabled ? `<p class="inq-note">この宛先はまだ送付前のため、入力とお申し込みはできません(社内確認用の表示です。「送付済み」にすると入力できます)。</p>` : "") +
     `<fieldset${form.disabled ? " disabled" : ""}>` +
-    `<label>お名前<span class="req">必須</span><input name="name" type="text" required maxlength="${INQUIRY_LIMITS.name}" autocomplete="name" /></label>` +
-    `<label>電話番号<span class="req">必須</span><input name="phone" type="tel" required maxlength="${INQUIRY_LIMITS.phone}" inputmode="tel" autocomplete="tel" placeholder="例: 090-1234-5678" /></label>` +
-    `<label>メールアドレス<span class="opt">任意</span><input name="email" type="email" maxlength="${INQUIRY_LIMITS.email}" autocomplete="email" /></label>` +
-    `<div><strong>ご希望の連絡方法</strong><span class="opt">任意</span><div class="pref">${pref("phone", "電話")}${pref("email", "メール")}${pref("either", "どちらでも")}</div></div>` +
+    `<label>お名前<span class="req">必須</span><input name="name" type="text" required maxlength="${INQUIRY_LIMITS.name}" autocomplete="name" /></label>${fieldError("name")}` +
+    `<label>電話番号<span class="req">必須</span><input name="phone" type="tel" required maxlength="${INQUIRY_LIMITS.phone}" inputmode="tel" autocomplete="tel" placeholder="例: 09012345678(ハイフンなしでも可)" /></label>${fieldError("phone")}` +
+    `<label>メールアドレス<span class="opt">任意</span><input name="email" type="email" maxlength="${INQUIRY_LIMITS.email}" autocomplete="email" /></label>${fieldError("email")}` +
+    `<div><strong>ご希望の連絡方法</strong><span class="opt">任意</span><div class="pref">${pref("phone", "電話")}${pref("email", "メール")}${pref("either", "どちらでも")}</div></div>${fieldError("contactPref")}` +
     `<label>連絡のつきやすい時間帯<span class="opt">任意</span><input name="contactTime" type="text" maxlength="${INQUIRY_LIMITS.contactTime}" placeholder="例: 平日18時以降" /></label>` +
     `<label>ご要望・ご質問<span class="opt">任意</span><textarea name="message" maxlength="${INQUIRY_LIMITS.message}" rows="4"></textarea></label>` +
     `<div class="hp" aria-hidden="true"><label>この欄は空のままにしてください<input name="${HONEYPOT_FIELD}" type="text" tabindex="-1" autocomplete="off" /></label></div>` +
     `<div class="privacy">${privacy}</div>` +
-    `<label class="consent"><input type="checkbox" name="consent" value="yes" required />個人情報の取り扱いに同意する</label>` +
+    `<label class="consent"><input type="checkbox" name="consent" value="yes" required />個人情報の取り扱いに同意する</label>${fieldError("consent")}` +
     `<div class="inq-msg" role="alert" aria-live="assertive" hidden></div>` +
     `<button type="submit" class="cta">${escapeHtml(LP_CTA_LABEL)}</button>` +
     `</fieldset></form></section>`;

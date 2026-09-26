@@ -35,7 +35,7 @@ export const INQUIRY_ERROR_MESSAGES: Readonly<Record<InquiryFieldError, string>>
   name_too_long: `お名前は${INQUIRY_LIMITS.name}文字以内でご入力ください。`,
   name_invalid: "お名前に数字や「@」は使えません。電話番号・メールアドレスはそれぞれの欄にご入力ください。",
   phone_required: "電話番号をご入力ください。",
-  phone_invalid: "電話番号は数字とハイフンで、10桁以上ご入力ください。",
+  phone_invalid: "電話番号は数字で10桁以上ご入力ください(ハイフンはあってもなくても構いません)。",
   email_invalid: "メールアドレスの形式をご確認ください。",
   email_required_for_pref: "メールでのご連絡をご希望の場合は、メールアドレスをご入力ください。",
   contact_pref_invalid: "ご希望の連絡方法をお選びください。",

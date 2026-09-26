@@ -188,6 +188,15 @@ describe("GET .../campaigns/[id]/print", () => {
     const html = await res.text();
     expect(html.startsWith("<!doctype html>")).toBe(true);
     expect(html).not.toContain("letter-page ");
+    // ⚠白紙だけだと理由が分からない(2026-09-26 発注者の実機テスト=送付済みにした後に
+    //   印刷を押して白紙)。何が印刷対象かと次の一手を画面に出す。
+    expect(html).toContain("印刷できる手紙がありません");
+    expect(html).toContain("送付済み");
+    expect(html).toContain("「確定」");
+  });
+  it("1通以上あるときは「印刷できる手紙がありません」を出さない", async () => {
+    const res = await GET(req() as never, ctx);
+    expect(await res.text()).not.toContain("印刷できる手紙がありません");
   });
 
   it("field_staff は担当外物件の宛先を印刷しない(record scope・GET campaign / CSV と統一)", async () => {

@@ -160,7 +160,7 @@ export function lpSplitIssueMessage(issue: LpSplitIssue): string {
     case "MISSING_SECTION": return `【${issue.section}】の見出しがありません。指示文どおりの見出しで区切ってください`;
     case "DUPLICATE_SECTION": return `【${issue.section}】の見出しが2回あります`;
     case "ORDER_MISMATCH": return `【${issue.section}】の順番が違います(見出し→リード文→本文→よくある質問)`;
-    case "UNKNOWN_SECTION": return `知らない見出し「${issue.section}」があります。使えるのは 見出し・リード文・本文・よくある質問 の4つです`;
+    case "UNKNOWN_SECTION": return `知らない見出し「${issue.section}」があります。使えるのは 見出し・リード文・本文・よくある質問 の4つです(【】で囲んだ言葉は見出しとして読まれます。文章の中では【】を使わず、「」などに置き換えてください)`;
     case "EMPTY_SECTION": return `【${issue.section}】の中身が空です`;
     case "HEADLINE_MULTILINE": return "【見出し】は1行にしてください";
     case "UNKNOWN_TAG": return `【${issue.section}】に使えない差し込み記号があります。使えるのは {{物件所在}} と {{物件種別}} だけです`;

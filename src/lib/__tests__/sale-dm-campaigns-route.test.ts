@@ -99,7 +99,9 @@ beforeEach(() => {
   process.env.SALE_DM_SENDER_CONTACT = "03-0000-0000";
   (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1" });
   (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue(plain);
-  (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([]);
+  // 既定は「宛先を作れる物件1件」。宛先0件は 400 NO_ELIGIBLE_RECIPIENTS になった(空キャンペーンを
+  // 作らない)ので、0件を試すテストは個別に [] を与える。
+  (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([property]);
 });
 
 describe("POST /api/properties/sale-dm/campaigns", () => {
@@ -111,13 +113,28 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
   });
 
-  it("0件対象でも 200・campaignId を返す", async () => {
+  // ⚠2026-09-26 発注者の実機テストで、対象外の物件を選ぶと宛先0件の空キャンペーンが
+  //   作られて画面が移り、「均等に割り当て」を押しても何も起きなかった。0件なら作らずに理由を返す。
+  it("宛先0件なら 400 NO_ELIGIBLE_RECIPIENTS・キャンペーンを作らない(空キャンペーンを残さない)", async () => {
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
-    const res = await POST(req(validBody) as never);
-    expect(res.status).toBe(200);
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([]);
+    const res = await POST(req({ ...validBody, propertyIds: ["00000000-0000-4000-8000-000000000001"] }) as never);
+    expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.campaignId).toBe("c1");
-    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(json.error.code).toBe("NO_ELIGIBLE_RECIPIENTS");
+    expect(json.error.message).toContain("送付可");
+    expect(json.error.message).toContain("住所");
+    const p = prismaMock as never as { dmCampaign: { create: ReturnType<typeof vi.fn> }; $transaction: ReturnType<typeof vi.fn> };
+    expect(p.dmCampaign.create).not.toHaveBeenCalled();
+    expect(p.$transaction).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+  it("絞り込み経路(propertyIds 無し)で0件でも同じく 400(空キャンペーンを作らない)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([]);
+    const res = await POST(req(validBody) as never);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("NO_ELIGIBLE_RECIPIENTS");
   });
 
   it("propertyIds を渡すと選択物件を対象にし dmStatus=send を強制しない・requested を返す", async () => {
@@ -142,7 +159,8 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     const findMany = (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany;
     findMany.mockResolvedValue([]);
     const res = await POST(req({ ...validBody, propertyIds: ["11111111-1111-4111-8111-111111111111"] }) as never);
-    expect(res.status).toBe(200);
+    // 担当範囲外で1件も残らない=宛先0件なので空キャンペーンは作らず 400。
+    expect(res.status).toBe(400);
     const whereArg = findMany.mock.calls[0][0].where;
     expect(whereArg.AND).toEqual([{ OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] }]);
     expect(whereArg.id).toEqual({ in: ["11111111-1111-4111-8111-111111111111"] });
