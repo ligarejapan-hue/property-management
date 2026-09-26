@@ -163,8 +163,11 @@ const INQUIRY_SUBMIT_SCRIPT = [
     'var el=fieldOf(errs[i].f);if(el){el.classList.add("invalid");el.setAttribute("aria-invalid","true")}}' +
     'var first=errEl(errs[0].f)||fieldOf(errs[0].f);if(first&&first.scrollIntoView){first.scrollIntoView({block:"center"})}' +
     "var fe=fieldOf(errs[0].f);if(fe&&fe.focus){try{fe.focus({preventScroll:true})}catch(_){fe.focus()}}}",
-  'function onEdit(e){var t=e.target;if(!t||!t.name)return;var p=errEl(t.name);if(p){p.hidden=true;p.textContent=""}' +
-    'var same=f.querySelectorAll(\'[name="\'+t.name+\'"]\');for(var i=0;i<same.length;i++){same[i].classList.remove("invalid");same[i].removeAttribute("aria-invalid")}}',
+  // 直した欄の注意を消す。連絡方法を変えたときは、それに連動する「メールが空」の注意(メール欄)も消す(@codex #446 R4)。
+  'var DEP={contactPref:"email"};' +
+  'function clearField(k){var p=errEl(k);if(p){p.hidden=true;p.textContent=""}' +
+    'var same=f.querySelectorAll(\'[name="\'+k+\'"]\');for(var i=0;i<same.length;i++){same[i].classList.remove("invalid");same[i].removeAttribute("aria-invalid")}}',
+  'function onEdit(e){var t=e.target;if(!t||!t.name)return;clearField(t.name);if(DEP[t.name]){clearField(DEP[t.name])}}',
   'f.addEventListener("input",onEdit);f.addEventListener("change",onEdit);',
   'function done(){while(f.firstChild){f.removeChild(f.firstChild)}var p=document.createElement("p");p.className="inq-done";p.setAttribute("role","status");p.textContent=M.done;f.appendChild(p)}',
   "function handle(d){var k=d&&d.result;" +

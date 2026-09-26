@@ -289,3 +289,11 @@ describe("全角→半角の変換が無い古いブラウザ(@codex #446 R2 P2)
     }
   });
 });
+
+describe("連絡方法を変えたら、連動する注意も消える(@codex #446 R4 P2)", () => {
+  it("連絡方法(contactPref)を変えると、メール欄の注意も消す配線がある", () => {
+    const html = renderLpPage(input({ mode: "live", form: { action: "/t/tok/inquiry", privacyText: "x", disabled: false } }));
+    expect(html).toContain('var DEP={contactPref:"email"}');
+    expect(html).toContain("if(DEP[t.name]){clearField(DEP[t.name])}");
+  });
+});
