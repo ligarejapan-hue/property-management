@@ -144,6 +144,11 @@ export function createEditLockStatusController(
     const issued = seq;
     const targets = resources;
     if (targets.length === 0) {
+      // ⚠(横断レビュー M9) この早期returnも「この poll の結論」を出している
+      //   (保持する行は無い)ので、連続失敗の数え上げも戻す。戻さないと、
+      //   一覧がいったん空になる経路を通ったあと、以前の失敗が持ち越されて
+      //   次の1回の失敗だけで fail open へ倒れる(数えも消しもしない不揃い)。
+      consecutiveTotalFailures = 0;
       deps.onRows([]);
       return;
     }

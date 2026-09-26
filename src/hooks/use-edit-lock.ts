@@ -74,7 +74,14 @@ export function useEditLock({ resourceType, resourceId, enabled = true }: UseEdi
   }, [enabled, resourceType, resourceId]);
 
   // 他のタブからの「その合言葉を使っていますか」に答え続ける(タブ複製の検知に要る)。
-  useEffect(() => answerScreenTokenProbes(), []);
+  // ⚠(横断レビュー M1) **鍵を使う画面だけ**が答える。以前は `enabled` を無視して
+  //   無条件に張っていたため、編集していない所有者カード(enabled=false)も
+  //   `BroadcastChannel` を1本開き、所有者120人の物件では120本開いて1回の
+  //   `who-has` に120回答えていた(答えはすべて `docId` で捨てられる=完全な無駄)。
+  useEffect(() => {
+    if (!controller) return;
+    return answerScreenTokenProbes();
+  }, [controller]);
 
   // controller が変わる(=disable/別レコードへ切替/unmount)たびに、鍵を手放してから破棄する。
   // ⚠(review round1 I3) onHidden() を dispose() より先に呼ぶ(beacon はヘッダ不要=

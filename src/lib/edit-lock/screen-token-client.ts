@@ -1,7 +1,14 @@
-"use client";
-
 /**
  * 画面の合言葉(仕様 6.1)。**タブ1枚 = 合言葉1つ**。
+ *
+ * ⚠**`"use client"` は付けない**(横断レビュー M2)。このモジュールは repo で唯一の
+ *   `src/lib` 配下の client 専用モジュールで、4,500行の共有 `api-client.ts` が
+ *   `editLockHeaders`/`getScreenToken` を**値として** import している。将来
+ *   route handler が api-client から何か1つ引いた瞬間に「Attempted to call … from
+ *   the server」で落ちる潜在の穴になる。ここには JSX も hook も無く、ブラウザAPIは
+ *   すべて `ScreenTokenEnv`+try/catch の向こう(`DOCUMENT_ID` の
+ *   `crypto.randomUUID()` は Node/Edge でも動く)なので、ディレクティブは不要。
+ *   ⚠実際に使うのは client component からだけ(呼び出し元が `"use client"`)。
  *
  * - `sessionStorage["edit-screen-token"]` に置く。読み書きは try/catch(プライベート
  *   モード等で例外になる)。使えない場合はこのページの間だけメモリに持つ

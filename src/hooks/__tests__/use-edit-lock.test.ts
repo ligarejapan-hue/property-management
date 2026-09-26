@@ -83,6 +83,20 @@ describe("useEditLock の配線", () => {
     expect(src).toContain("answerScreenTokenProbes");
   });
 
+  it("(横断レビューM1) 問い合わせに答えるのは鍵を使う画面だけ(controllerが無い間はBroadcastChannelを開かない)", () => {
+    // ⚠修理前は `enabled` を無視して無条件に張っていた。所有者カードは編集中でない
+    //   間 `enabled=false`(controller=null)なので、所有者120人の物件では
+    //   BroadcastChannel を120本開き、1回の who-has に120回答えていた
+    //   (すべて docId で捨てられる=完全な無駄)。
+    const callIdx = src.indexOf("answerScreenTokenProbes()");
+    expect(callIdx).toBeGreaterThan(-1);
+    const effectStart = src.lastIndexOf("useEffect(", callIdx);
+    expect(effectStart).toBeGreaterThan(-1);
+    const effectBlock = src.slice(effectStart, callIdx + 200);
+    expect(effectBlock).toMatch(/if\s*\(!controller\)\s*return;/);
+    expect(effectBlock).toMatch(/\}, \[controller\]\)/);
+  });
+
   it("resourceType/resourceId/enabled を受け取る", () => {
     expect(src).toContain("resourceType");
     expect(src).toContain("resourceId");

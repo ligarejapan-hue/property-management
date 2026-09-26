@@ -394,6 +394,41 @@ describe("createEditLockStatusController", () => {
     //   fail openへ倒れてしまう。リセットされていれば、まだ2回連続なので保持する。
     expect(h.onRowsMock).toHaveBeenCalledTimes(2); // まだ増えない=直前の行を保持
   });
+
+  /**
+   * 横断レビュー M9。資源0件の早期 return は `onRows([])`(=この poll の結論として
+   * 「保持する行は無い」)を出しているのに、連続失敗の数え上げを戻していなかった
+   * (数えも消しもしない)。物件詳細を開き直す前に一覧が空になる経路
+   * (`enabled` は残るが所有者も物件も無い)を通ると、以前の失敗が持ち越され、
+   * 次の1回の失敗だけで fail open へ倒れる。
+   */
+  it("M9) 資源0件のpollは連続失敗の数え上げを0へ戻す(以前の失敗を持ち越さない)", async () => {
+    const controller = createEditLockStatusController(h.deps);
+    h.fetchStatusMock.mockResolvedValueOnce([row("property", "p1", "held_by_other")]);
+    controller.start([P1]);
+    await flush();
+    expect(h.onRowsMock).toHaveBeenCalledTimes(1);
+
+    h.fetchStatusMock.mockRejectedValueOnce(new Error("500"));
+    await h.registry.fire(); // 1回目の失敗
+    h.fetchStatusMock.mockRejectedValueOnce(new Error("500"));
+    await h.registry.fire(); // 2回目の失敗
+    expect(h.onRowsMock).toHaveBeenCalledTimes(1); // まだ保持
+
+    // 資源の一覧が空になった → その場で onRows([]) を出す(既存の挙動)。
+    controller.setResources([]);
+    expect(h.onRowsMock).toHaveBeenCalledTimes(2);
+    expect(h.onRowsMock).toHaveBeenLastCalledWith([]);
+
+    // 一覧が戻ったら、また3回連続で失敗するまでは直前の行を保持する。
+    // ⚠`setResources` は中身が変わると**その場で**問い合わせるので、先に応答を仕込む。
+    h.fetchStatusMock.mockRejectedValueOnce(new Error("500"));
+    controller.setResources([P1]);
+    await flush(); // 一覧が変わったのでその場で1回問い合わせ、失敗する
+    // ⚠修理前は数え上げが2のまま持ち越され、この1回で3回連続に達して fail open へ
+    //   倒れていた(= onRows がもう1回呼ばれる)。
+    expect(h.onRowsMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("findEditLockStatusRow", () => {

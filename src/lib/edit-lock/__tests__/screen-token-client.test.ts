@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   getScreenToken,
   ensureUniqueScreenToken,
@@ -295,6 +297,32 @@ describe("画面の合言葉(client)", () => {
 
       expect(answered).toBe(false);
       asker.close();
+    });
+  });
+
+  /**
+   * 横断レビュー M2。このモジュールは repo で唯一の `src/lib` 配下の `"use client"`
+   * モジュールで、4,500行の共有 `api-client.ts` が **値として** import している
+   * (`editLockHeaders`/`getScreenToken`)。将来 route handler が api-client から
+   * 何か1つ引いた瞬間に「Attempted to call … from the server」になる潜在の穴。
+   * このファイルは JSX も hook も持たず、ブラウザAPIは全部 `ScreenTokenEnv`+try/catch
+   * の向こう(`DOCUMENT_ID` の `crypto.randomUUID()` は Node/Edge でも動く)なので、
+   * ディレクティブは不要。
+   */
+  describe("client/server の境界(横断レビュー M2)", () => {
+    const moduleSrc = () =>
+      readFileSync(
+        resolve(process.cwd(), "src/lib/edit-lock/screen-token-client.ts"),
+        "utf8",
+      ).replace(/\r\n/g, "\n");
+
+    it('"use client" を持たない(共有 api-client.ts が client 専用モジュールへ値依存しない)', () => {
+      expect(moduleSrc()).not.toMatch(/^\s*["']use client["']/m);
+    });
+
+    it("react も component も import しない(純粋なモジュールであること)", () => {
+      expect(moduleSrc()).not.toMatch(/from ["']react["']/);
+      expect(moduleSrc()).not.toMatch(/from ["']@\/components\//);
     });
   });
 });
