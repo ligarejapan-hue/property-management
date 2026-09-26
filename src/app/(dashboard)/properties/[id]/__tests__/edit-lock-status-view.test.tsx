@@ -61,7 +61,26 @@ describe("見ている側の下ごしらえ(useEditLockStatus・PropertyDetailPa
       /property\.propertyOwners\.map\(\(po\)\s*=>\s*\(\{\s*resourceType:\s*"owner"\s*as\s*const,\s*resourceId:\s*po\.ownerId\s*\}\)\)/,
     );
     expect(PROPERTY_DETAIL_PAGE_SRC).toMatch(
-      /useEditLockStatus\(editLockStatusResources,\s*\{\s*\n?\s*enabled:\s*property\s*!==\s*null,?\s*\n?\s*\}\)/,
+      /useEditLockStatus\(editLockStatusResources,\s*\{\s*\n?\s*enabled:\s*property\s*!==\s*null\s*&&\s*ownerLockTokenReady,?\s*\n?\s*\}\)/,
+    );
+  });
+
+  /**
+   * 外部レビュー(@codex)P2・round3。複製タブ確認(最大300ms)より先にこの周期が
+   * 走ると、写し取ったままの合言葉で状態を引いてしまい、**元のタブが持っている鍵が
+   * `mine` に見える**。すると帯が出ないまま編集ボタン・プルダウン・地番保存が有効の
+   * まま最大30秒(次の周期まで)残る(合言葉が入れ替わっても `resources` は変わらない
+   * ので取り直しも起きない)。裁定=`ownerLockTokenReady` で門を作る(300ms 待つ)。
+   */
+  it("見ている側の周期は複製タブ確認(ownerLockTokenReady)が済むまで走らせない(P2 round3)", () => {
+    // ⚠`enabled` の式そのものに入っていること(コメントでは守れない)。
+    expect(PROPERTY_DETAIL_PAGE_SRC).toMatch(
+      /enabled:\s*property\s*!==\s*null\s*&&\s*ownerLockTokenReady/,
+    );
+    // ⚠その旗は合言葉の一生(useEditScreenToken)から受け取っていること
+    //   =別物の準備フラグをあてがっていない。
+    expect(PROPERTY_DETAIL_PAGE_SRC).toMatch(
+      /const \{ tokenReady: ownerLockTokenReady \} = useEditScreenToken\(\);/,
     );
   });
 

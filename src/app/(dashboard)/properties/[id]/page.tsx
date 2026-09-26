@@ -513,8 +513,14 @@ export default function PropertyDetailPage({
       ...property.propertyOwners.map((po) => ({ resourceType: "owner" as const, resourceId: po.ownerId })),
     ];
   }, [property]);
+  // ⚠複製タブ確認(`ownerLockTokenReady`・最大300ms)が済むまで**問い合わせない**
+  //   (外部レビュー@codex P2・round3)。写し取ったままの合言葉で状態を引くと、
+  //   元のタブが持っている鍵が `mine` に見えてしまい、帯が出ないまま編集ボタン・
+  //   案件ステータス/紹介経路のプルダウン・地番保存が**有効のまま最大30秒**残る
+  //   (合言葉が入れ替わっても `resources` は変わらないので取り直しも起きない)。
+  //   300ms 待って正しい行を出すほうが、30秒まちがった行を見せるより良い。
   const editLockStatus = useEditLockStatus(editLockStatusResources, {
-    enabled: property !== null,
+    enabled: property !== null && ownerLockTokenReady,
   });
 
   // F12 展開(19-A 第3実装): permissions / capabilities は ScreenProtectionProvider
