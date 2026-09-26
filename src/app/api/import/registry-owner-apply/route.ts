@@ -180,19 +180,20 @@ export async function POST(request: NextRequest) {
       // ⚠添付の行に対して件数を絞ると、同じ物件の謄本が複数あるときに処理できる
       //   物件が指定件数より少なくなる(「全件」でも取りこぼす)。物件でまとめてから
       //   絞るため、ここは生SQLで数える。
-      // ⚠前に「要確認」(読み取れない・謄本が無い等)になった物件は**後ろに回す**。
+      // ⚠前に**試して**要確認・失敗になった物件は**後ろに回す**。
       //   所有者が空で謄本も残るので毎回また選ばれ、謄本の古い順だと未着手の物件より
-      //   先に並ぶ。読めない謄本が件数ぶんたまると、実行しても前に進まなくなる
-      //   (@codex 第7R)。除外はしない(未着手が尽きたら、また試す)。
-      //   失敗(error)の行は数えない: 権限切れの中止などで、試していないため。
+      //   先に並ぶ。同じように失敗する物件が件数ぶんたまると、実行しても前に進まなく
+      //   なる(@codex 第7R/第9R)。除外はしない(未着手が尽きたら、また試す)。
+      //   試したかは行の印(attempted)で見る。権限切れの中止で閉じた行は試していない
+      //   ので印が無く、未着手と同じ扱いになる。
       const targets = await tx.$queryRaw<{ id: string; address: string | null }[]>`
-        WITH reviewed AS (
+        WITH attempted AS (
           SELECT DISTINCT lower(jr.raw_data->>'propertyId') AS property_id
           FROM import_job_rows jr
           JOIN import_jobs j ON j.id = jr.job_id
           WHERE j.job_type::text = ${REGISTRY_OWNER_APPLY_JOB_TYPE}
             -- ⚠「スキップ」「エラー確定」で状態が変わっても消えない印でも見分ける(@codex 第8R)
-            AND (jr.status::text = 'needs_review' OR jr.raw_data->>'reviewed' = '1')
+            AND (jr.status::text = 'needs_review' OR jr.raw_data->>'attempted' = '1')
             AND jr.raw_data->>(${REGISTRY_OWNER_APPLY_KIND_KEY}::text) = ${REGISTRY_OWNER_APPLY_KIND}
         )
         SELECT p.id::text AS id, p.address AS address
@@ -202,7 +203,7 @@ export async function POST(request: NextRequest) {
          AND a.type = 'registry'
          AND a.is_deleted = false
          AND a.registry_certificate_type = 'owner'
-        LEFT JOIN reviewed r ON r.property_id = p.id::text
+        LEFT JOIN attempted r ON r.property_id = p.id::text
         WHERE NOT EXISTS (
           SELECT 1 FROM property_owners po WHERE po.property_id = p.id
         )

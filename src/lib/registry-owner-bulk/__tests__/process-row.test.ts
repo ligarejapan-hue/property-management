@@ -259,7 +259,7 @@ describe("うまくいかなかったとき", () => {
     );
     await run();
     const raw = updated().rawData as Record<string, string>;
-    expect(raw.reviewed).toBe("1");
+    expect(raw.attempted).toBe("1");
     // 印以外は元のまま(物件ID・物件の住所)
     expect(raw.propertyId).toBe(PROP_ID);
   });
@@ -276,6 +276,24 @@ describe("うまくいかなかったとき", () => {
       new ApiError(409, "確認した謄本とは別の謄本が追加されています。開き直してもう一度確認してください", "REGISTRY_ATTACHMENT_CHANGED"),
     );
     await expect(run()).resolves.toBe("needs_review");
+  });
+
+  /**
+   * ⚠なぜ必要か(@codex 第9R P2): 読み取り中の例外など、試して「失敗」になった物件も、
+   *   所有者が空のまま残って毎回また選ばれる。何度でも同じように失敗する物件が件数ぶん
+   *   たまると前に進まない。試した行には印を付けて、次回は後ろに回す。
+   *   (権限切れの中止で閉じた行は試していないので、ワーカー側で印を付けない)
+   */
+  it("⚠試して失敗した行にも、試した印を付ける", async () => {
+    apply.mockRejectedValue(new Error("parser exploded"));
+    await expect(run()).resolves.toBe("error");
+    expect((updated().rawData as Record<string, string>).attempted).toBe("1");
+  });
+
+  it("⚠権限・担当範囲で弾かれた行にも、試した印を付ける", async () => {
+    apply.mockRejectedValue(new ApiError(403, "この物件を扱う権限がありません", "FORBIDDEN"));
+    await run();
+    expect((updated().rawData as Record<string, string>).attempted).toBe("1");
   });
 
   it("権限・担当範囲で弾かれた物件は失敗にする", async () => {

@@ -139,6 +139,13 @@ export async function processRegistryOwnerApplyRow(args: {
         // 読み直せなくても、下の書き込みは未処理の行にしか効かないので安全
       }
     }
+    /**
+     * 「試した」印。次回の対象選びで、試して要確認・失敗になった物件を後ろに回すため
+     * (何度でも同じように失敗する物件がたまると前に進まない・@codex 第8R/第9R)。
+     * ⚠取込の記録の画面の「スキップ」「エラー確定」で状態が変わっても、この印は消えない。
+     * ⚠権限切れの中止で閉じた行(=試していない)はワーカー側で閉じるので付かない。
+     */
+    const attempted = { attempted: "1" };
     if (err instanceof ApiError) {
       // すでに所有者がいた = この機能の対象外になっただけ(失敗ではない)
       if (err.status === 409 && err.code === "OWNERS_ALREADY_EXIST") {
@@ -147,14 +154,12 @@ export async function processRegistryOwnerApplyRow(args: {
       // 読み取れない・謄本が無い・処理中に別の謄本が添付された
       //   → 人が確かめて手で入れる「要確認」に回す
       if (err.status === 404 || err.status === 422 || err.status === 409) {
-        // ⚠「要確認になった」印を残す。次回の対象選びで後ろに回すため。取込の記録の
-        //   画面の「スキップ」「エラー確定」で状態が変わっても、この印は消えない。
-        return finish("needs_review", err.message, { reviewed: "1" });
+        return finish("needs_review", err.message, attempted);
       }
       // 権限・担当範囲(403)や 400 は失敗として残す(全行同じ結果になるはずなので、
       // ワーカー側でジョブごと止める判定も別に置いている)
-      return finish("error", err.message);
+      return finish("error", err.message, attempted);
     }
-    return finish("error", safeErrorMessage(err));
+    return finish("error", safeErrorMessage(err), attempted);
   }
 }
