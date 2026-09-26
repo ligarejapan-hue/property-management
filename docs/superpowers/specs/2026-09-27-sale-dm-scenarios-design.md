@@ -66,7 +66,7 @@
 | `created_at` `updated_at` | |
 
 新しい表 `dm_scenario_media`(種類ごとの写真と図)
-- `DmLpVariantMedia` と同じ列(`slot` `heading` `sort_order` `asset_id` または `figure_kind`)で、親が `scenario_id`。`asset_id` は `dm_lp_assets` へ RESTRICT(使われている写真は消せない=今と同じ)。
+- `DmLpVariantMedia` と同じ列(`slot` `heading` `sort_order` `asset_id` または `figure_kind`)で、親が `scenario_id`(**`ON DELETE CASCADE`**=写真を割り付けただけの未使用の種類も消せる。台帳の行は §3.1 の RESTRICT で守られるので、消えてよいのは誰も参照していない種類の割り付けだけ)。`asset_id` は `dm_lp_assets` へ RESTRICT(使われている写真は消せない=今と同じ)。
 - ⚠写真の削除は DB の行を消さず `deleted_at` を立てる方式(論理削除)なので、RESTRICT だけでは守れない。「使われているか」を数えている次の**4か所すべて**(2026-09-27 に `_count.media` / `dmLpVariantMedia.count` / `referenced` を全文検索して洗い出した全件)で、**`dm_lp_variant_media` と `dm_scenario_media` の両方**を数える(判定は1つの関数に集約し、3か所がそれを呼ぶ):
   1. 写真の削除(`DELETE /api/properties/sale-dm/lp-assets/[assetId]`)=どちらかで使われていれば断る
   2. 公開口(`/lp-assets/[publicId]`)=どちらかで使われていれば返す(台帳のプレビューで写真が出るため。台帳の写真は発送に写せばいずれ公開される会社の写真で、公開範囲は実質変わらない)
@@ -154,6 +154,7 @@
 - 画面: `/admin/dm-scenarios`(一覧・並び替え・有効/使わない・追加)と `/admin/dm-scenarios/[id]`(手紙とLPの編集・写真と図・プレビュー)。管理者だけ。サイドバーは「LPの写真」の隣。
 - 手紙とLPの編集部品は、今の `variant-manager` / `lp-variant-manager` / `lp-media-panel` / `lp-preview-panel` を、親が「発送の型」でも「台帳」でも使えるように、保存先だけ差し替えられる形にする(見た目と操作を揃える)。
 - API: `/api/properties/sale-dm/scenarios`(GET 一覧・POST 追加)/`[id]`(GET・PATCH・DELETE)/`[id]/prompt`・`[id]/template`・`[id]/lp-prompt`・`[id]/lp-template`・`[id]/media`・`[id]/preview`・**`[id]/image-prompt`**(写真の「画像の指示文」ボタン用。発送版は宛先の物件種別の最多を `propertyKind` に使うが、台帳には宛先が無いので `propertyKind=null`=物件種別を入れない一般的な指示文にする。`buildImagePrompt` は null を受け付け済み)。
+- **種類の選択肢だけを返す口(管理者以外も使う)**: `GET /api/properties/sale-dm/scenarios/options`=有効な種類の `id`・`name`・`sort_order`・`auto_key` だけを返す(手紙やLPの文面・指示文は返さない)。使える人=物件を編集できる人(物件の欄)と売却DMを使える人(発送の既定の種類)。台帳の中身を返す `GET /scenarios`・`[id]` と書き込みは管理者だけのまま。物件の詳細の表示(「自動: 相続」)も、この口と同じ項目だけを使う。管理者以外の役割(`office_staff`・`field_staff`)で選択肢が出ることと、中身の口が 403 になることをテストする。
 - 共用する編集部品は、保存・読み込み・画像の指示文・プレビューの**呼び先をまとめて外から渡す**形にする(一部だけ差し替えると、台帳の画面で発送用の口を叩いて 404 になるボタンが残る)。部品の中に発送用の URL を直接書かないことを走査テストで固定する。指示文の組み立て・貼り戻しの検査・切り分けは今の関数をそのまま使う。
 - 物件の欄: 物件の更新 API の検証(`validators.ts`)に `dmScenarioId` を足す(形式だけ・NULL 可)。**存在と有効性はトランザクションの中で確かめる**: 物件の行をロックした後、選んだ台帳の行を `FOR SHARE` で読み、無い・使わない なら 409(「選んだDMの種類は使えなくなりました。選び直してください」)。画面を開いたまま消された種類・同時に「使わない」にされた種類のテストを加える。
 - **操作の記録(AuditLog)**: 台帳の追加・名前や設定の変更・手紙の貼り戻し・LPの貼り戻し・写真と図の置き換え・使わないにする/戻す・削除、物件の種類の変更、宛先(物件単位)の種類の変更を、今の売却DMの操作と同じく記録する。記録するのは**操作名・台帳の id・変わった項目の名前・件数・結果だけ**で、文面や指示文の中身は入れない(個人情報や長文を記録に残さない)。
