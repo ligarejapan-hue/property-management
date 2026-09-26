@@ -165,7 +165,17 @@ describe("所有者カードの配線(source assertion)", () => {
     // ⚠(branch review Important #1) 文字列が「どこかに」あるかだけの検査だと、
     //   `lock.noteSaveError(null, null)` のような書き換え(423の帯が二度と出なく
     //   なる回帰)でも green のままになる。引数そのものを固定する。
-    expect(src).toMatch(/noteSaveError\(\s*apiErrorCode\(err\)/);
+    // ⚠(横断レビューI2) 423の文言組み立てのために読んだコードを変数へ受けるように
+    //   なったので、その式ごと固定する(意味は同じ=読んだコードをそのまま渡す)。
+    expect(src).toMatch(/const code = apiErrorCode\(err\);/);
+    expect(src).toMatch(/lock\.noteSaveError\(code, null\)/);
+  });
+
+  it("(横断レビューI2) 保存が423 EDIT_LOCKED のときは showComposedEditLockedMessage で氏名+時刻へ差し替える", () => {
+    // ⚠封筒の423は氏名も時刻も返さない(段階1のサーバのまま)。鍵を持たない3入口と
+    //   同じ helper を通す。第1・第2引数がこのカードの資源(owner・po.ownerId)で
+    //   あることも固定する(物件の資源IDを渡す取り違えを落とす)。
+    expect(src).toMatch(/showComposedEditLockedMessage\(\s*"owner",\s*po\.ownerId,/);
   });
 
   it("編集フォームはinput・keydown・pointerdownの3つでnoteActivityを呼ぶ(期限切れの取り直しの引き金)", () => {

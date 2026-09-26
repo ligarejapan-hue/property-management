@@ -91,8 +91,19 @@ export function EditLockBanner({ state, warnIdle }: { state: EditLockUiState; wa
   if (state.kind === "deleted") {
     return <div className={`${BAND} ${BANNER_MARGIN}`}>この記録は削除されたため、編集を続けられません</div>;
   }
+  // ⚠(横断レビュー I2) ここは**編集する側**の帯なので、仕様6.2の文言を出す。
+  //   修理前は6.3の**見ている側**の文言(「🔒 {氏名}さんが編集中です(HH:mm〜)」)を
+  //   流用しており、「この内容は保存できません」=編集中の人にとって唯一重要な一文が
+  //   落ちていた(仕様にある文言がブランチのどこにも存在しなかった)。
+  // ⚠自分の別画面(`bySelfOtherScreen`)には自分の氏名を出さない(D6・§11の裁定)。
+  //   開始時刻は仕様6.2の一文に含まれない(氏名+時刻が要る423の表示は
+  //   `showComposedEditLockedMessage` が担う)。
   return (
-    <div className={`${BAND} ${BANNER_MARGIN}`}>{`🔒 ${state.holderName}さんが編集中です(${formatSince(state.since)}〜)`}</div>
+    <div className={`${BAND} ${BANNER_MARGIN}`}>
+      {state.bySelfOtherScreen
+        ? "あなたが別の画面で編集を始めました。この内容は保存できません"
+        : `${state.holderName}さんが編集を始めました。この内容は保存できません`}
+    </div>
   );
 }
 

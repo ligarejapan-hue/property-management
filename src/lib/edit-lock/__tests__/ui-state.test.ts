@@ -16,18 +16,34 @@ describe("鍵の表示状態(純関数)", () => {
     expect(s.kind).toBe("mine");
   });
 
-  it("他の人が持っていたら taken(氏名と開始時刻を持つ)", () => {
+  it("他の人が持っていたら taken(氏名と開始時刻を持つ・自分の別画面ではない)", () => {
     const s = uiStateFromAcquire({
       code: "EDIT_LOCKED", state: "held_by_other", holderName: "佐藤", since: "2026-09-22T01:00:00.000Z",
     });
-    expect(s).toMatchObject({ kind: "taken", holderName: "佐藤" });
+    expect(s).toEqual({
+      kind: "taken",
+      holderName: "佐藤",
+      since: "2026-09-22T01:00:00.000Z",
+      bySelfOtherScreen: false,
+    });
   });
 
-  it("自分の別画面が持っていても taken として扱う(D6)", () => {
+  /**
+   * 横断レビュー I2。どちらも「待つ」(D6)のは変わらないが、**誰が持っているかは違う**。
+   * 畳んでしまうと、編集ウィンドウの帯が自分自身の氏名を「◯◯さんが編集を始めました」と
+   * 出す(ページを開いた直後の競合の窓で現実に踏める。§11に3回「自分の別画面を他人扱い
+   * するな」と書かれているのに4回目)。
+   */
+  it("自分の別画面が持っていたら taken だが「自分の別画面」の印を付ける(氏名を他人として出さない・I2)", () => {
     const s = uiStateFromAcquire({
       code: "EDIT_LOCKED", state: "held_by_self_other_screen", holderName: "自分", since: "2026-09-22T01:00:00.000Z",
     });
-    expect(s.kind).toBe("taken");
+    expect(s).toEqual({
+      kind: "taken",
+      holderName: "自分",
+      since: "2026-09-22T01:00:00.000Z",
+      bySelfOtherScreen: true,
+    });
   });
 
   it("合図の lost は理由で分かれる", () => {

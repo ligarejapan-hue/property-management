@@ -17,6 +17,10 @@ import { EditLockBanner, BAND as EDIT_LOCK_BAND } from "@/components/edit-lock/e
 // 保存可否の判断(決定層)。Task 6 fix round 1 #3 で src/lib/edit-lock/save-gate.ts へ
 // 切り出した。ここでは呼ぶだけで、判断はコピーしない。
 import { canSubmitSave, shouldShowLockUnavailableNotice } from "@/lib/edit-lock/save-gate";
+// 423 EDIT_LOCKED の文言(氏名+時刻)の組み立て。鍵を持たない3入口とまったく同じ
+// helper を通す(横断レビュー I2)。窓口の423は氏名・時刻を返さないため、状態の窓口へ
+// 1回だけ問い合わせて差し替える。
+import { showComposedEditLockedMessage } from "@/lib/edit-lock/locked-message";
 
 interface AssigneeOption {
   id: string;
@@ -548,8 +552,18 @@ export default function PropertyEditForm({
     } catch (err) {
       // ⚠コードの写像(期限切れ・強制解除・他の人が取った 等)はTask2の純関数に任せる。
       //   ここでは封筒から読んだコードをそのまま渡すだけ。
-      lock.noteSaveError(apiErrorCode(err), null);
-      setError(err instanceof Error ? err.message : "保存に失敗しました");
+      const code = apiErrorCode(err);
+      lock.noteSaveError(code, null);
+      const message = err instanceof Error ? err.message : "保存に失敗しました";
+      if (code === "EDIT_LOCKED") {
+        // ⚠(横断レビュー I2) 段階1の窓口の423は氏名も時刻も返さない(「他の画面で
+        //   編集中です」だけ)。鍵を持たない3入口とまったく同じ helper で状態窓口を
+        //   1回だけ引き、届いたら「{氏名}さんが編集中です({HH:mm}〜)」へ差し替える
+        //   (await しない=控えは即座に解放される)。
+        showComposedEditLockedMessage("property", property.id, message, setError);
+        return;
+      }
+      setError(message);
     } finally {
       setSaving(false);
     }

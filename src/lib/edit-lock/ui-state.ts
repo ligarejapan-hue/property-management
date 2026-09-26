@@ -32,15 +32,29 @@ export type EditLockUiState =
   | { kind: "expired" }
   /** 管理者が外した。保存できない。**自動の取り直しはしない**。 */
   | { kind: "force_released" }
-  /** 他の人(または自分の別画面)が持っている。保存できない。 */
-  | { kind: "taken"; holderName: string; since?: string }
+  /**
+   * 他の人(または自分の別画面)が持っている。保存できない。
+   * ⚠`bySelfOtherScreen` = **自分自身の別画面**が持っている(取得の423が
+   *   `held_by_self_other_screen` だった)。待つ側になるのは同じ(D6)だが、
+   *   帯に自分の氏名を「◯◯さんが編集を始めました」と出してはいけないため、
+   *   状態として区別して運ぶ(横断レビュー I2)。合図の `taken` は窓口が
+   *   この区別を返さないので印は付かない(=他の人として扱う)。
+   */
+  | { kind: "taken"; holderName: string; since?: string; bySelfOtherScreen?: boolean }
   /** 資源そのものが消えた。保存できない・再試行もしない。 */
   | { kind: "deleted" };
 
 export function uiStateFromAcquire(res: AcquireResponse): EditLockUiState {
   if (res.state === "mine") return { kind: "mine", lockId: res.lockId, since: res.since };
   // held_by_other / held_by_self_other_screen はどちらも「他の画面が持っている」=待つ(D6)。
-  return { kind: "taken", holderName: res.holderName, since: res.since };
+  // ⚠ただし**どちらかは区別して運ぶ**(横断レビュー I2)。畳んでしまうと帯が
+  //   自分自身の氏名を他人として出す(ページを開いた直後の競合の窓で現実に踏める)。
+  return {
+    kind: "taken",
+    holderName: res.holderName,
+    since: res.since,
+    bySelfOtherScreen: res.state === "held_by_self_other_screen",
+  };
 }
 
 export function uiStateFromHeartbeat(res: HeartbeatResponse, lockId: string): EditLockUiState {

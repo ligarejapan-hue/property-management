@@ -119,8 +119,22 @@ describe("PropertyEditForm の配線(source assertion)", () => {
 
   it("保存の失敗はcodeFromErrorBodyで読んだコードをapiErrorCode経由でnoteSaveErrorへ渡す(写像はTask2に任せる)", () => {
     expect(src).toContain("codeFromErrorBody(");
-    expect(src).toContain("apiErrorCode(");
-    expect(src).toContain("noteSaveError(");
+    // ⚠(横断レビューI2の配線に合わせて強化) 「どこかに文字列がある」だけの検査は、
+    //   `noteSaveError(null, null)` のような退行(423の帯が二度と出なくなる)でも
+    //   green になる。読んだコードをそのまま渡していることを式で固定する。
+    expect(componentSrc).toMatch(/const code = apiErrorCode\(err\);/);
+    expect(componentSrc).toMatch(/lock\.noteSaveError\(code, null\)/);
+  });
+
+  it("(横断レビューI2) 保存が423 EDIT_LOCKED のときは showComposedEditLockedMessage で氏名+時刻へ差し替える", () => {
+    // ⚠封筒の423は氏名も時刻も返さない(段階1のサーバのまま)。鍵を持たない3入口と
+    //   同じ helper を通さないと、最も名前が要るこの画面が最も要らない3入口より
+    //   情報が少ないままになる。第2引数が物件のIDであることも固定する(所有者の
+    //   資源IDを渡す取り違えを落とす)。
+    expect(componentSrc).toMatch(
+      /showComposedEditLockedMessage\(\s*"property",\s*property\.id,/,
+    );
+    expect(componentSrc).toMatch(/code === "EDIT_LOCKED"/);
   });
 
   it("入力・キー・ポインタでnoteActivityを呼ぶ(期限切れの取り直しの引き金)", () => {

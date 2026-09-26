@@ -69,6 +69,42 @@ async function lookupComposedMessage(
   return envelopeMessage;
 }
 
+/**
+ * `useState` の更新関数と同じ形(`Dispatch<SetStateAction<string | null>>`)。
+ * ⚠react を import しないで書ける最小の形にする(このモジュールは純関数/非同期
+ *   関数だけの集まりで、component も react も引かない)。
+ */
+export type EditLockedMessageSetter = (
+  next: string | null | ((prev: string | null) => string | null),
+) => void;
+
+/**
+ * 鍵を**持つ**入口(編集ウィンドウ・所有者カード)が保存で 423 `EDIT_LOCKED` を
+ * 受けたときのエラー表示(横断レビュー I2)。
+ *
+ * ⚠修理前、この2画面は封筒の `message`(段階1のサーバは「他の画面で編集中です」しか
+ *   返さない)をそのまま出すだけで、**氏名も時刻も出なかった**。鍵を持たない3入口は
+ *   `composeEditLockedMessage` で状態窓口を1回引いて実名+時刻を出しており、
+ *   「最も名前が要る2画面が、最も要らない3入口より情報が少ない」状態だった。
+ *   同じ helper をこちらでも通す(組み立ての規則を2つ持たない)。
+ * ⚠`await` しない(round2 Important A): 封筒の message を**同期的に即座に**出し、
+ *   組み立ては届いてから差し替える。控え(保存ボタンの `saving`)を待たせない。
+ * ⚠差し替えは世代の見張りつき(round3 Important G): いま出ている値がその試行の
+ *   封筒の message のままのときだけ差し替える。保存が成功して表示が消えていたり、
+ *   別の試行の message に変わっていれば何もしない。
+ */
+export function showComposedEditLockedMessage(
+  resourceType: EditLockStatusRow["resourceType"],
+  resourceId: string,
+  envelopeMessage: string,
+  setError: EditLockedMessageSetter,
+): void {
+  setError(envelopeMessage);
+  void composeEditLockedMessage(resourceType, resourceId, envelopeMessage).then((composed) => {
+    setError((prev) => (prev === envelopeMessage ? composed : prev));
+  });
+}
+
 export async function composeEditLockedMessage(
   resourceType: EditLockStatusRow["resourceType"],
   resourceId: string,

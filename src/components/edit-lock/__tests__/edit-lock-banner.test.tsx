@@ -110,11 +110,31 @@ describe("EditLockBanner(本人向けの帯)", () => {
     expect(html).toContain("この記録は削除されたため、編集を続けられません");
   });
 
-  it("他の人が編集中のときは氏名と開始時刻(HH:mm)を出す", () => {
+  /**
+   * 横断レビュー I2。仕様 6.2 が指定した**編集する側**の文言はこれ
+   * (「この内容は保存できません」=編集中の人にとって唯一重要な一文)。
+   * 修理前は 6.3 の**見ている側**の文言(「🔒 {氏名}さんが編集中です(HH:mm〜)」)を
+   * 編集側でも流用しており、仕様にある文言がブランチのどこにも存在しなかった。
+   * ⚠この帯に開始時刻は入らない(仕様6.2の一文のまま)。氏名+時刻は保存が423で
+   *   断られたときのエラー表示(`showComposedEditLockedMessage`・6.5と同じ組み立て)が持つ。
+   */
+  it("他の人が編集を始めたときは仕様6.2の文言(保存できない旨)を出す", () => {
     const html = renderToStaticMarkup(
       <EditLockBanner state={{ kind: "taken", holderName: "山田", since: SINCE }} warnIdle={false} />,
     );
-    expect(html).toContain("🔒 山田さんが編集中です(05:02〜)");
+    expect(html).toContain("山田さんが編集を始めました。この内容は保存できません");
+  });
+
+  it("自分の別画面が始めたときは自分の氏名を出さない専用の文言にする(I2・§11の裁定)", () => {
+    const html = renderToStaticMarkup(
+      <EditLockBanner
+        state={{ kind: "taken", holderName: "自分", since: SINCE, bySelfOtherScreen: true }}
+        warnIdle={false}
+      />,
+    );
+    expect(html).toContain("あなたが別の画面で編集を始めました。この内容は保存できません");
+    // ⚠自分の氏名を「◯◯さんが」と出してはいけない(D6・§11に3回書かれた規則)。
+    expect(html).not.toContain("自分さんが");
   });
 });
 

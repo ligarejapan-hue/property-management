@@ -53,7 +53,9 @@ import {
 } from "@/lib/edit-lock/save-gate";
 // EDIT_LOCKEDの文言組み立て(仕様6.5・fix round1)。窓口の423は氏名・時刻を返さないため、
 // 状態の窓口へ1回だけ問い合わせて組み立てる(鍵を持たない入口専用)。
-import { composeEditLockedMessage } from "@/lib/edit-lock/locked-message";
+// ⚠`showComposedEditLockedMessage` は同じ組み立てを**鍵を持つ**入口(所有者カード)で
+//   使うための1本(横断レビュー I2)。封筒のmessageを即座に出し、届いたら差し替える。
+import { composeEditLockedMessage, showComposedEditLockedMessage } from "@/lib/edit-lock/locked-message";
 import { OwnerEditableFields, buildOwnerUpdatePayload, canEditOwner } from "@/lib/owner-edit-utils";
 import { canShowAddOwner } from "@/lib/owner-link-utils";
 import {
@@ -1525,8 +1527,17 @@ function OwnerCard({
       // ⚠コードの写像(期限切れ・強制解除・他の人が取った 等)はTask2の純関数に任せる。
       //   ここでは apiErrorCode で読んだコードをそのまま渡すだけ(updateOwnerは
       //   apiFetch経由なのでcodeFromErrorBodyは既にtoApiErrorが内部で通している)。
-      lock.noteSaveError(apiErrorCode(err), null);
+      const code = apiErrorCode(err);
+      lock.noteSaveError(code, null);
       const msg = err instanceof Error ? err.message : "保存に失敗しました";
+      if (code === "EDIT_LOCKED") {
+        // ⚠(横断レビュー I2) 段階1の窓口の423は氏名も時刻も返さない(「他の画面で
+        //   編集中です」だけ)。鍵を持たない3入口とまったく同じ helper で状態窓口を
+        //   1回だけ引き、届いたら「{氏名}さんが編集中です({HH:mm}〜)」へ差し替える
+        //   (await しない=控えは即座に解放される)。
+        showComposedEditLockedMessage("owner", po.ownerId, msg, setSaveError);
+        return;
+      }
       setSaveError(msg.includes("CONFLICT") ? "他のユーザーが先に更新しました。画面を再読み込みしてください。" : msg);
     } finally {
       setSaving(false);
