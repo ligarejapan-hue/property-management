@@ -286,32 +286,13 @@ describe("runNoLockPropertyPatch(鍵を持たない入口の保存)", () => {
     }
   });
 
-  it("Task 9: preFetchedRowsを渡すと状態窓口(/api/edit-locks/status)を呼ばずに組み立てる", async () => {
-    const since = new Date(2026, 8, 22, 14, 0).toISOString();
-    const fetchMock = stubFetchByUrl({
-      "/api/properties/p1": async () =>
-        jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
-    });
-    const error = createStateSpy<string | null>(null);
-    await runNoLockPropertyPatch(
-      "p1",
-      1,
-      { caseStatus: "active" },
-      vi.fn(),
-      error.setState,
-      vi.fn(),
-      undefined,
-      [{ resourceType: "property", resourceId: "p1", state: "held_by_other", since, holderName: "太郎" }],
-    );
-    await flushAsync();
-    expect(error.value).toBe("太郎さんが編集中です(14:00〜)");
-    // ⚠状態窓口への呼び出しが1本も無いこと(呼ばれた実際のURLで確認する=
-    //   「回数が2回のまま」のような無意味な検査にしない)。
-    const calledUrls = fetchMock.mock.calls.map(([url]) => url);
-    expect(calledUrls).not.toContain("/api/edit-locks/status");
-  });
-
-  it("Task 9: preFetchedRowsを省略すると従来どおり状態窓口へ1回問い合わせる(呼び出し元がまだ行を持っていない経路の後方互換)", async () => {
+  it("Task 9 review round2 N2: この入口はrunNoLockPropertyPatchに渡す行を持たない(状態窓口へ常に1回問い合わせる)", async () => {
+    // ⚠Task 9で「見ている側が持つ行を渡せば問い合わせを省ける」試みを入れたが、
+    //   渡す行はこの入口の保存ボタン自体を無効化した行と同じ(page.tsxの
+    //   `disabled={... || editLockHeld}`)ため、保存が実行できてこの関数に
+    //   届く時点で渡された行がheld_by_otherであることは構造的にあり得ない
+    //   (使えるときは呼ばれず、呼ばれるときは使えない死んだ最適化)。
+    //   review round2 N2でcomposeEditLockedMessageからpreFetchedRowsを撤去した。
     const since = new Date(2026, 8, 22, 14, 0).toISOString();
     const fetchMock = stubFetchByUrl({
       "/api/properties/p1": async () =>
@@ -325,66 +306,6 @@ describe("runNoLockPropertyPatch(鍵を持たない入口の保存)", () => {
     await runNoLockPropertyPatch("p1", 1, { caseStatus: "active" }, vi.fn(), error.setState, vi.fn());
     await flushAsync();
     expect(error.value).toBe("次郎さんが編集中です(14:00〜)");
-    const calledUrls = fetchMock.mock.calls.map(([url]) => url);
-    expect(calledUrls).toContain("/api/edit-locks/status");
-  });
-
-  it("Task 9 review round1 Important 2: preFetchedRowsの行が氏名を名乗っていなければ(free/mine等)、状態窓口へ問い合わせて氏名を取りに行く(封筒文言へ後退させない)", async () => {
-    const since = new Date(2026, 8, 22, 14, 0).toISOString();
-    const fetchMock = stubFetchByUrl({
-      "/api/properties/p1": async () =>
-        jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
-      "/api/edit-locks/status": async () =>
-        jsonResponse({
-          locks: [{ resourceType: "property", resourceId: "p1", state: "held_by_other", since, holderName: "花子" }],
-        }),
-    });
-    const error = createStateSpy<string | null>(null);
-    // ⚠この画面の実際の配線では、渡す行は保存ボタン自体を無効化した行と同じなので、
-    //   保存が実行できる(=このcatchに入る)時点では常にfree/mineになる
-    //   (レビュー指摘の再現)。ここではfreeを直接渡して固定する。
-    await runNoLockPropertyPatch(
-      "p1",
-      1,
-      { caseStatus: "active" },
-      vi.fn(),
-      error.setState,
-      vi.fn(),
-      undefined,
-      [{ resourceType: "property", resourceId: "p1", state: "free" }],
-    );
-    await flushAsync();
-    // ⚠修理前は`row.state === "held_by_other"`を満たさず`:57`が失敗し、封筒文言
-    //   (「他の画面で編集中です」)のまま止まっていた。氏名まで組み立てられている。
-    expect(error.value).toBe("花子さんが編集中です(14:00〜)");
-    const calledUrls = fetchMock.mock.calls.map(([url]) => url);
-    expect(calledUrls).toContain("/api/edit-locks/status");
-  });
-
-  it("Task 9 review round1 Important 2: preFetchedRowsに該当資源の行が無いときも、状態窓口へ問い合わせる(:56のフォールバック漏れの修理)", async () => {
-    const since = new Date(2026, 8, 22, 14, 0).toISOString();
-    const fetchMock = stubFetchByUrl({
-      "/api/properties/p1": async () =>
-        jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
-      "/api/edit-locks/status": async () =>
-        jsonResponse({
-          locks: [{ resourceType: "property", resourceId: "p1", state: "held_by_other", since, holderName: "三郎" }],
-        }),
-    });
-    const error = createStateSpy<string | null>(null);
-    await runNoLockPropertyPatch(
-      "p1",
-      1,
-      { caseStatus: "active" },
-      vi.fn(),
-      error.setState,
-      vi.fn(),
-      undefined,
-      // ⚠p1についての行が1件も無い配列(空配列)を渡す。
-      [],
-    );
-    await flushAsync();
-    expect(error.value).toBe("三郎さんが編集中です(14:00〜)");
     const calledUrls = fetchMock.mock.calls.map(([url]) => url);
     expect(calledUrls).toContain("/api/edit-locks/status");
   });

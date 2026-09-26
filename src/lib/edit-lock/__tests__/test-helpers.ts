@@ -84,3 +84,35 @@ export function createStateSpy<T>(initial: T): {
     },
   };
 }
+
+/**
+ * `openTag` から始まる JSX 要素を、その要素自身の閉じ(自己終了 `/>`)までで
+ * 切り出す(Task 9 review round1 Important 3・round2 Minor N4で共有化)。
+ * ⚠`[\s\S]*?prop=...` のように右側が無制限な正規表現は、同じ prop 名を持つ
+ *   **次の別要素**まで読み飛ばしてマッチしてしまい、対象要素からその prop を
+ *   消しても検査が green のままになる(round1で`<RegistryLocationSearchButton`
+ *   から4147文字先の`<BasicTab`へ誤マッチすることを実測で確認済み)。
+ * ⚠(review round2 Minor N5) この関数は対象要素が**自己終了**であることを
+ *   前提にしている。将来 `<X ...>...</X>`(非自己終了)の形に変わると、
+ *   最初の `/>` は X の外(ネストした子・後続の別要素の自己終了タグ)まで
+ *   窓が黙って広がってしまう——round1で塞いだのと同じ形の穴が別の入口から
+ *   戻ってくる。切り出した範囲の中に(対象自身の開始タグ以外の)**もう1つの
+ *   大文字コンポーネントタグ**が現れたら、自己終了の前提が崩れているサインと
+ *   みなし、黙って広い窓を返さず例外を投げて検査自体を落とす。
+ */
+export function extractJsxElement(source: string, openTag: string): string {
+  const start = source.indexOf(openTag);
+  if (start === -1) return "";
+  const closeIdx = source.indexOf("/>", start);
+  if (closeIdx === -1) return source.slice(start);
+  const block = source.slice(start, closeIdx + 2);
+  const secondUppercaseTag = block.slice(openTag.length).match(/<[A-Z]\w*/);
+  if (secondUppercaseTag) {
+    throw new Error(
+      `extractJsxElement: ${openTag} は自己終了(/>)ではなくなった可能性がある` +
+        `(切り出した範囲の中に別の大文字タグ ${secondUppercaseTag[0]} を検出)。` +
+        `走査の前提(この要素は自己終了である)が崩れていないか確認してください。`,
+    );
+  }
+  return block;
+}

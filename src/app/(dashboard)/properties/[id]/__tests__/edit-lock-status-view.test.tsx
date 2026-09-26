@@ -12,6 +12,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { extractJsxElement } from "@/lib/edit-lock/__tests__/test-helpers";
 
 const PAGE_PATH = resolve(
   process.cwd(),
@@ -33,20 +34,9 @@ function extractTopLevelFunction(source: string, marker: string): string {
   return source.slice(start, end);
 }
 
-/**
- * `openTag` から始まる JSX 要素を、その要素自身の閉じ(自己終了 `/>`)までで
- * 切り出す(review round1 Important 3)。`[\s\S]*?editLockHeld=...` のように
- * 右側が無制限だと、同じ prop 名を持つ**次の別要素**まで読み飛ばしてマッチして
- * しまい、対象要素からその prop を消しても検査が green のままになる
- * (実際に `<BasicTab` の同名propに飛んで誤検知することを確認済み)。
- */
-function extractJsxElement(source: string, openTag: string): string {
-  const start = source.indexOf(openTag);
-  if (start === -1) return "";
-  const closeIdx = source.indexOf("/>", start);
-  if (closeIdx === -1) return source.slice(start);
-  return source.slice(start, closeIdx + 2);
-}
+// ⚠(review round2 Minor N4) `extractJsxElement` はここでは定義せず
+//   `@/lib/edit-lock/__tests__/test-helpers` から共有する
+//   (`registry-location-search-button.test.ts` と同じ実装を使う)。
 
 const PROPERTY_DETAIL_PAGE_SRC = extractTopLevelFunction(
   src,
@@ -115,9 +105,9 @@ describe("仕様6.3の表: 物件が他の人の鍵のとき止まる4つ", () =
   });
 
   it("③ 案件ステータス・導入ルートのプルダウンを無効化する(BasicTab経由でeditLockHeldを渡す)", () => {
-    expect(PROPERTY_DETAIL_PAGE_SRC).toMatch(
-      /<BasicTab[\s\S]{0,400}editLockHeld=\{propertyEditLockHeld\}[\s\S]{0,400}editLockPropertyRow=\{propertyEditLockRow\}/,
-    );
+    const basicTabBlock = extractJsxElement(PROPERTY_DETAIL_PAGE_SRC, "<BasicTab");
+    expect(basicTabBlock.length).toBeGreaterThan(0);
+    expect(basicTabBlock).toMatch(/editLockHeld=\{propertyEditLockHeld\}/);
     expect(CASE_STATUS_FIELD_SRC).toMatch(/disabled=\{saving \|\| editLockHeld\}/);
     expect(INTRODUCTION_ROUTE_FIELD_SRC).toMatch(/disabled=\{saving \|\| editLockHeld\}/);
   });
@@ -193,19 +183,20 @@ describe("仕様6.3の表: 所有者Nが鍵のとき止まるのはそのカー�
   });
 });
 
-describe("Task 7の一発問い合わせをTask 9の状態行で置き換える(2回目の追加リクエストを避ける)", () => {
-  it("案件ステータス・導入ルートの保存は、親(useEditLockStatus)が持っている物件の行をrunNoLockPropertyPatchへ渡す", () => {
-    expect(CASE_STATUS_FIELD_SRC).toMatch(
-      /runNoLockPropertyPatch\([\s\S]*?saveSeqRef,[\s\S]*?editLockPropertyRow && \[editLockPropertyRow\],/,
-    );
-    expect(INTRODUCTION_ROUTE_FIELD_SRC).toMatch(
-      /runNoLockPropertyPatch\([\s\S]*?saveSeqRef,[\s\S]*?editLockPropertyRow && \[editLockPropertyRow\],/,
-    );
+describe("見ている側の行の再利用は撤去済み(review round2 N2: 構造的に発火しない死んだ最適化だった)", () => {
+  it("案件ステータス・導入ルートのプルダウンはeditLockPropertyRow(状態行)を持たない・runNoLockPropertyPatchへ追加引数を渡さない", () => {
+    expect(CASE_STATUS_FIELD_SRC).not.toContain("editLockPropertyRow");
+    expect(INTRODUCTION_ROUTE_FIELD_SRC).not.toContain("editLockPropertyRow");
+    // ⚠saveSeqRefの直後がrunNoLockPropertyPatch呼び出しの閉じ`)`であること
+    //   (=第7引数(seqRef)より後に何も渡していないこと)を固定する。
+    expect(CASE_STATUS_FIELD_SRC).toMatch(/runNoLockPropertyPatch\([\s\S]*?saveSeqRef,\s*\n\s*\);/);
+    expect(INTRODUCTION_ROUTE_FIELD_SRC).toMatch(/runNoLockPropertyPatch\([\s\S]*?saveSeqRef,\s*\n\s*\);/);
   });
 
-  it("runNoLockPropertyPatchはpreFetchedRowsを受け取り、composeEditLockedMessageへそのまま渡す", () => {
+  it("composeEditLockedMessageは3引数のまま呼ばれる(preFetchedRowsは撤去済み)", () => {
+    expect(src).not.toContain("preFetchedRows");
     expect(src).toMatch(
-      /composeEditLockedMessage\("property", propertyId, envelopeMessage, preFetchedRows\)/,
+      /composeEditLockedMessage\("property", propertyId, envelopeMessage\)\.then/,
     );
   });
 });

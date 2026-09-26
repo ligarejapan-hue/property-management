@@ -913,7 +913,6 @@ export default function PropertyDetailPage({
             canWrite={canWriteProperty}
             onOpenAttachments={() => setActiveTab("attachments")}
             editLockHeld={propertyEditLockHeld}
-            editLockPropertyRow={propertyEditLockRow}
           />
         )}
         {activeTab === "owner" && (
@@ -980,7 +979,6 @@ function BasicTab({
   canWrite,
   onOpenAttachments,
   editLockHeld,
-  editLockPropertyRow,
 }: {
   property: ApiProperty;
   onRefresh: () => void;
@@ -988,8 +986,6 @@ function BasicTab({
   onOpenAttachments: () => void;
   /** 見ている側(仕様 6.3・Task 9)。物件が他の人の鍵なら案件ステータス・導入ルートを止める。 */
   editLockHeld: boolean;
-  /** 呼び出し元(親)が既に持っている物件の状態行。EDIT_LOCKEDの文言組み立てに再利用する。 */
-  editLockPropertyRow: EditLockStatusRow | undefined;
 }) {
   // 旧値 "unit" と新値 "apartment_unit" の両方を区分扱いにする
   const isUnit =
@@ -1093,14 +1089,12 @@ function BasicTab({
         onRefresh={onRefresh}
         canWrite={canWrite}
         editLockHeld={editLockHeld}
-        editLockPropertyRow={editLockPropertyRow}
       />
       <IntroductionRouteField
         property={property}
         onRefresh={onRefresh}
         canWrite={canWrite}
         editLockHeld={editLockHeld}
-        editLockPropertyRow={editLockPropertyRow}
       />
       <Field label="担当者" value={property.assignee?.name ?? null} />
       <Field label="登録者" value={property.creator?.name ?? null} />
@@ -2199,10 +2193,12 @@ function PropertyOwnerNoteEditor({ po }: { po: ApiPropertyOwner }) {
  *   届いた時点で「自分の番号がまだ最新か」を先に確認する。呼び出し元が
  *   `seqRef` を省略した場合(この関数を単発で呼ぶテスト等)は、呼び出しごとに
  *   新しい `{ current: 0 }` を割り当てる=従来どおり常に「自分が最新」になる。
- * ⚠**呼び出し元が既に持っている状態の行があれば渡す**(Task 9)。この画面は
- *   `useEditLockStatus` で物件の状態を30秒ごとに持っているため、そのとき
- *   手元にある行を `preFetchedRows` に渡せば `composeEditLockedMessage` は
- *   状態窓口へ2回目の問い合わせをせずに済む(未指定時は従来どおり1回だけ問い合わせる)。
+ * ⚠**この画面が持っている状態の行は再利用しない(Task 9で試み、review round2
+ *   N2で撤去)**。この入口(プルダウン)が渡せる行は、その入口の保存ボタン
+ *   自体を無効化している行(`editLockHeld`)と同じであり、保存が実際に実行
+ *   できてこの関数に届く時点では、その行が「他の人が持っている」であることは
+ *   構造的にあり得ない(使えるときは呼ばれず、呼ばれるときは使えない死んだ
+ *   最適化だった)。`composeEditLockedMessage` は常に1回問い合わせる。
  */
 export async function runNoLockPropertyPatch(
   propertyId: string,
@@ -2212,7 +2208,6 @@ export async function runNoLockPropertyPatch(
   setError: Dispatch<SetStateAction<string | null>>,
   onRefresh: () => void,
   seqRef: { current: number } = { current: 0 },
-  preFetchedRows?: EditLockStatusRow[],
 ): Promise<void> {
   const mySeq = ++seqRef.current;
   setSaving(true);
@@ -2237,7 +2232,7 @@ export async function runNoLockPropertyPatch(
       //   届いたら(または上限時間で諦めたら)差し替える。await しない=この
       //   catchはすぐ終わり、finallyがすぐ走って控えの disabled/spinner も解除される。
       setError(envelopeMessage);
-      void composeEditLockedMessage("property", propertyId, envelopeMessage, preFetchedRows).then((m) => {
+      void composeEditLockedMessage("property", propertyId, envelopeMessage).then((m) => {
         if (seqRef.current !== mySeq) return; // 後発の試行が既に始まっている＝この組み立ては古い
         setError((prev) => (prev === envelopeMessage ? m : prev));
       });
@@ -2256,15 +2251,12 @@ function CaseStatusField({
   onRefresh,
   canWrite,
   editLockHeld,
-  editLockPropertyRow,
 }: {
   property: ApiProperty;
   onRefresh: () => void;
   canWrite: boolean;
   /** 見ている側(仕様 6.3・Task 9)。物件が他の人の鍵ならプルダウンを止める。 */
   editLockHeld: boolean;
-  /** 呼び出し元(親)が既に持っている物件の状態行。EDIT_LOCKEDの文言組み立てに再利用する。 */
-  editLockPropertyRow: EditLockStatusRow | undefined;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2281,10 +2273,6 @@ function CaseStatusField({
       setError,
       onRefresh,
       saveSeqRef,
-      // ⚠親(useEditLockStatus)が既に持っている物件の行を渡す(Task 9)。
-      //   状態窓口への2回目の問い合わせを避ける。まだ届いていなければ従来どおり
-      //   undefinedのまま=composeEditLockedMessage側が自分で1回問い合わせる。
-      editLockPropertyRow && [editLockPropertyRow],
     );
 
   const label = CASE_STATUS_LABELS[property.caseStatus] ?? property.caseStatus;
@@ -2340,15 +2328,12 @@ function IntroductionRouteField({
   onRefresh,
   canWrite,
   editLockHeld,
-  editLockPropertyRow,
 }: {
   property: ApiProperty;
   onRefresh: () => void;
   canWrite: boolean;
   /** 見ている側(仕様 6.3・Task 9)。物件が他の人の鍵ならプルダウンを止める。 */
   editLockHeld: boolean;
-  /** 呼び出し元(親)が既に持っている物件の状態行。EDIT_LOCKEDの文言組み立てに再利用する。 */
-  editLockPropertyRow: EditLockStatusRow | undefined;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2365,9 +2350,6 @@ function IntroductionRouteField({
       setError,
       onRefresh,
       saveSeqRef,
-      // ⚠親(useEditLockStatus)が既に持っている物件の行を渡す(Task 9・
-      //   CaseStatusFieldと同じ理由)。
-      editLockPropertyRow && [editLockPropertyRow],
     );
 
   const label = property.introductionRoute

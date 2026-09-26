@@ -33,53 +33,34 @@
  *   タイムアウト側が勝っても・負けても、`setTimeout` のハンドルは
  *   `clearTimeout` する(勝った側=問い合わせが先に終わったときに、タイマーだけ
  *   宙に浮いたまま残らないようにする)。
- * ⚠**呼び出し元が既に持っている状態の行は、それが氏名を名乗っているときだけ使う**
- *   (Task 9・review round1 Important 2で訂正)。物件詳細(見ている側)は
- *   `useEditLockStatus` で30秒ごとに状態を持っているため、案件ステータス・
- *   導入ルートのプルダウン(`page.tsx`)はその場で持っている行を `preFetchedRows`
- *   に渡せる。**しかし**この関数を呼ぶ入口(プルダウン)は、渡している行と
- *   **同じ行**で保存ボタン自体を無効化している(`disabled={... || editLockHeld}`)
- *   ため、保存が実際に実行できて423を受け取れる経路では、渡された行は
- *   ほぼ常に `free`/`mine`(=直前の30秒ポーリングと今の423の間に、たった今
- *   誰かが鍵を取った)であり、**保存を拒んだ本人の氏名を持っていない**。
- *   渡された行をそのまま「他の人が持っている」の根拠として使うと、氏名を
- *   名乗れる状態の窓口への問い合わせを飛ばしてしまい、仕様6.5の
- *   「{氏名}さんが編集中です({HH:mm}〜)」が汎用の封筒文言へ**後退**する
- *   (氏名を知る機会を自ら潰す退行)。そこで、渡された行が
- *   `held_by_other` かつ `holderName` を持つ(=氏名を名乗れる)ときだけ
- *   その場で使い、そうでなければ(free/mine/該当資源が無い/等)従来どおり
- *   状態窓口へ1回問い合わせる——「渡された行が使い物になる場合だけ節約する」
- *   契約にする(節約できない場合でも氏名を諦めない)。
+ * ⚠**呼び出し元が持っている状態行は再利用しない(Task 9で試み、review round2
+ *   N2で撤去)**。物件詳細(見ている側)は `useEditLockStatus` で30秒ごとに
+ *   状態を持っているため、案件ステータス・導入ルートのプルダウンが保存直後に
+ *   受け取る423のときも「その行を渡せば問い合わせを省けるのでは」と考えたが、
+ *   **その行はこの入口の保存ボタン自体を無効化している行と同じ**
+ *   (`page.tsx` の `disabled={... || editLockHeld}`)。保存が実際に実行できて
+ *   423を受け取れる時点では、ボタンが無効化されていない=その行は
+ *   `held_by_other`(氏名を名乗れる状態)では**あり得ない**(直前の30秒
+ *   ポーリングと今の423の間に、たった今誰かが鍵を取った場合に限られる)。
+ *   つまり再利用が効く条件と、この関数が呼ばれる条件は構造的に両立しない
+ *   ——「使えるときは呼ばれず、呼ばれるときは使えない」死んだ最適化だった
+ *   (round1 Important 2 で「氏名を名乗るときだけ使う」封じ込みを入れたが、
+ *   それでも到達しない分岐が残ることに変わりはなく、round2で除去した)。
+ *   1回きりの追加リクエストのまま素直に問い合わせる。
  */
 import { fetchEditLockStatus, type EditLockStatusRow } from "@/lib/api-client";
 import { formatSince } from "@/lib/edit-lock/ui-state";
 import { EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS } from "@/lib/edit-lock/rules";
 
-/** 「他の人が持っている」と氏名まで名乗っている行か(=そのまま使ってよい)。 */
-function namesHolder(row: EditLockStatusRow | undefined): row is EditLockStatusRow & { holderName: string } {
-  return row?.state === "held_by_other" && !!row.holderName;
-}
-
 async function lookupComposedMessage(
   resourceType: EditLockStatusRow["resourceType"],
   resourceId: string,
   envelopeMessage: string,
-  preFetchedRows?: EditLockStatusRow[],
 ): Promise<string> {
   try {
-    const preFetchedRow = preFetchedRows?.find(
-      (r) => r.resourceType === resourceType && r.resourceId === resourceId,
-    );
-    // ⚠(review round1 Important 2) 渡された行を使うのは、それが氏名を
-    //   名乗っているときだけ。該当資源が preFetchedRows に無い場合
-    //   (find が undefined を返す)も含め、それ以外は必ず1回問い合わせる
-    //   ——「渡されたから」というだけで氏名を諦めて封筒文言へ落とさない。
-    const row = namesHolder(preFetchedRow)
-      ? preFetchedRow
-      : (await fetchEditLockStatus([{ resourceType, resourceId }])).find(
-          (r) => r.resourceType === resourceType && r.resourceId === resourceId,
-        );
-    if (namesHolder(row)) {
+    const rows = await fetchEditLockStatus([{ resourceType, resourceId }]);
+    const row = rows.find((r) => r.resourceType === resourceType && r.resourceId === resourceId);
+    if (row && row.state === "held_by_other" && row.holderName) {
       return `${row.holderName}さんが編集中です(${formatSince(row.since)}〜)`;
     }
   } catch {
@@ -92,10 +73,8 @@ export async function composeEditLockedMessage(
   resourceType: EditLockStatusRow["resourceType"],
   resourceId: string,
   envelopeMessage: string,
-  /** 呼び出し元が既に持っている最新の状態行(Task 9)。渡せば問い合わせを省く。 */
-  preFetchedRows?: EditLockStatusRow[],
 ): Promise<string> {
-  const lookup = lookupComposedMessage(resourceType, resourceId, envelopeMessage, preFetchedRows);
+  const lookup = lookupComposedMessage(resourceType, resourceId, envelopeMessage);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<string>((resolve) => {
     timer = setTimeout(() => resolve(envelopeMessage), EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS);
