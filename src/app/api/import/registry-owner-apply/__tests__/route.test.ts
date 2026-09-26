@@ -231,6 +231,44 @@ describe("POST（実行）", () => {
     expect((tx.$queryRaw.mock.calls[1] as unknown[]).slice(1)).toContain(100);
   });
 
+  /**
+   * ⚠なぜ必要か(@codex 第7R P2): 読めない本文を「指定なし」と同じに扱うと、壊れた
+   *   リクエストで既定の100件ぶんの書き込みが始まってしまう(取り消せない)。
+   */
+  it("⚠本文が読めない(壊れたJSON)ときは 400（既定の件数で始めない）", async () => {
+    for (const bad of ['{"limit": 5', "not json", "[1,2]", "100", "null"]) {
+      vi.clearAllMocks();
+      (getApiSession as unknown as Mock).mockResolvedValue({ id: "user-1", role: "admin" });
+      (getUserPermissions as unknown as Mock).mockResolvedValue(ALL_PERMS);
+      pm.$transaction.mockImplementation(async (fn: (c: typeof tx) => unknown) => fn(tx));
+      setRawResults();
+      const res = await POST(
+        new Request("http://localhost/x", { method: "POST", body: bad }) as never,
+      );
+      expect(res.status).toBe(400);
+      expect(pm.$transaction).not.toHaveBeenCalled();
+    }
+  });
+
+  /**
+   * ⚠なぜ必要か(@codex 第7R P2): 読み取れず「要確認」になった物件は、所有者が空で謄本も
+   *   残るので毎回また選ばれ、謄本の古い順で未着手の物件より先に並ぶ。読めない謄本が
+   *   100件たまると、100件ずつの実行が前に進まなくなる。要確認になった物件は後ろに回す。
+   */
+  it("⚠前に「要確認」になった物件は、まだ手をつけていない物件より後ろに回す", async () => {
+    await POST(postRequest({ limit: 100 }));
+    const sql = rawSql(1);
+    expect(sql).toContain("import_job_rows");
+    expect(sql).toContain("needs_review");
+    // 並べ替えの先頭キーが「要確認になったことがあるか」
+    expect(sql).toMatch(/ORDER BY\s+\(r\.property_id IS NOT NULL\)\s+ASC,\s+MIN\(a\.created_at\)/);
+    // ⚠この機能の行だけを見る(印と種別で絞る・定数はパラメータで渡す)
+    const params = (tx.$queryRaw.mock.calls[1] as unknown[]).slice(1);
+    expect(params).toContain("__kind");
+    expect(params).toContain("registry_owner_apply");
+    expect(params).toContain("registry_pdf_bulk");
+  });
+
   it("⚠不正な件数は 400（黙って直さない）", async () => {
     for (const bad of [0, -5, 1.5, "100", 99999]) {
       vi.clearAllMocks();

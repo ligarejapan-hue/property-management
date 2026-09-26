@@ -86,4 +86,16 @@ describe("取込の記録の画面（まとめて反映の行）", () => {
     expect(JOB_PAGE).toContain("所有者を手入力で登録してください");
     expect(JOB_PAGE).toContain("/properties/${rawData.propertyId}");
   });
+
+  /**
+   * ⚠なぜ必要か(@codex 第7R P2): 権限切れで中止した行は「失敗」で閉じ、理由(権限のある
+   *   管理者がもう一度実行)を残している。そこに「読み取れなかったので手入力を」と出すと、
+   *   本当は再実行で済む物件を1件ずつ手入力させてしまう。手入力の案内は要確認の行だけ。
+   */
+  it("⚠手入力の案内は「要確認」の行だけに出す（失敗の行には出さない）", () => {
+    expect(JOB_PAGE).toContain(
+      'isRegistryOwnerApplyJob && row.status === "needs_review" && rawData.propertyId && (',
+    );
+    expect(JOB_PAGE).not.toContain("{isRegistryOwnerApplyJob && rawData.propertyId && (");
+  });
 });

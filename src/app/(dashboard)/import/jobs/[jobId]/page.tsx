@@ -1549,8 +1549,10 @@ export default function ImportJobDetailPage() {
                       (row.status === "needs_review" ||
                         row.status === "error") && (
                       <div className="space-y-3">
-                        {/* まとめて反映の要確認の行: 手入力への案内(PDF添付の導線は出さない) */}
-                        {isRegistryOwnerApplyJob && rawData.propertyId && (
+                        {/* まとめて反映の要確認の行: 手入力への案内(PDF添付の導線は出さない)
+                            ⚠失敗の行(例: 権限切れで中止)には出さない。理由は行のメッセージの
+                             とおり「権限のある管理者がもう一度実行」で、手入力ではない */}
+                        {isRegistryOwnerApplyJob && row.status === "needs_review" && rawData.propertyId && (
                           <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs dark:border-amber-800 dark:bg-amber-950/30">
                             <p className="mb-2 text-amber-800 dark:text-amber-300">
                               この物件は謄本から所有者を読み取れませんでした。物件を開いて、所有者を手入力で登録してください。
