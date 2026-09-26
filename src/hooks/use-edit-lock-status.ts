@@ -55,13 +55,19 @@ export function useEditLockStatus(
   }, [enabled]);
 
   // このcontrollerインスタンスに対して既に start() 済みか(下のeffectが
-  // start/setResourcesのどちらを呼ぶべきかを決める・review自己点検で追加)。
-  // ⚠2本のeffectを素朴に分けると([controller]で1本・[resources]で別の1本)、
-  //   mount時に両方が同じ commit 内で走り、start() の直後に setResources() が
-  //   即座に走って(まだ何も解決していない)最初の poll の seq を自ら古くして
-  //   しまう(開いたときの1回が必ず握りつぶされる)。1本のeffectにまとめ、
-  //   「このcontrollerに対して初めてか」で start/setResources を出し分ける
-  //   (`use-address-lookup.ts` の controllerRef と同じ、mount時1回だけ作る形)。
+  // start/setResourcesのどちらを呼ぶべきかを決める)。
+  // ⚠(review round2 N3で説明を書き直し) `start()`(review round1 Critical/Minor10で
+  //   冪等にした)と `setResources()` は**同じ仕事をしない**——start()は間隔を
+  //   張り直し(30秒周期の位相をリセット)て即座に1回問い合わせるのに対し、
+  //   setResources()は周期の位相を保ったまま一覧だけ差し替え、中身が実際に
+  //   変わったときだけその場で1回問い合わせる(review round1 Important 4)。
+  //   もしこのrefを外して資源の一覧が変わるたびに(冪等だからという理由で)
+  //   start()を呼んでしまうと、`fetchProperty` などで一覧が値としては同じ
+  //   配列に差し替わるたびに周期がリセットされ、かつ無駄な即時問い合わせが
+  //   1回増える(Important 4が塞いだはずの「参照だけ新しい配列」問題が
+  //   別の入口から戻ってくる)。「開いたときに1回だけ start()・以後は
+  //   setResources()」という区別を保つために、このcontrollerインスタンスに
+  //   対して初めてかどうかをこのrefで覚えておく。
   const startedControllerRef = useRef<EditLockStatusController | null>(null);
 
   // controller が変わる(=enabled のON/OFF・unmount)たびに後始末する。
