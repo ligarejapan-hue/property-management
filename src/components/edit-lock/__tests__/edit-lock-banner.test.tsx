@@ -39,7 +39,15 @@ import {
   activeNotice,
   noticeRowKey,
 } from "../edit-lock-banner";
+// ⚠(横断レビュー I3) 帯の「held かどうか」は、見ている側の4つの無効化を決めている
+//   この純関数と**同じ1本**であることを総当たりで突き合わせる。
+import { isEditLockHeldByOther } from "@/lib/edit-lock/save-gate";
 import { forceReleaseEditLockApi, type EditLockStatusRow } from "@/lib/api-client";
+
+const bannerSrc = readFileSync(
+  resolve(process.cwd(), "src/components/edit-lock/edit-lock-banner.tsx"),
+  "utf8",
+).replace(/\r\n/g, "\n");
 
 vi.mock("@/lib/api-client", () => ({
   forceReleaseEditLockApi: vi.fn(),
@@ -139,6 +147,37 @@ describe("EditLockBanner(本人向けの帯)", () => {
 });
 
 describe("EditLockHolderBanner(一覧向けの帯+管理者の鍵を外す)", () => {
+  /**
+   * 横断レビュー I3。この帯が「held かどうか」を自前で書き写していたため、7つ目の
+   * held 状態が増えた瞬間に、帯と**見ている側の4つの無効化**(`page.tsx` が
+   * `isEditLockHeldByOther` で決めている)が静かに食い違う作りだった。
+   * 判定が本当に同じ1本かを、状態を総当たりして帯の有無と突き合わせて固定する。
+   */
+  it("(I3) 帯を出すかどうかは save-gate の isEditLockHeldByOther と完全に一致する(判定を再実装しない)", () => {
+    const states: EditLockStatusRow["state"][] = [
+      "free",
+      "mine",
+      "held_by_other",
+      "held_by_self_other_screen",
+    ];
+    for (const state of states) {
+      const target = row({ state });
+      const html = renderToStaticMarkup(
+        <EditLockHolderBanner row={target} isAdmin={false} onReleased={() => {}} />,
+      );
+      expect(html !== "", `state=${state}`).toBe(isEditLockHeldByOther(target));
+    }
+  });
+
+  it("(I3) この部品は判定を自分で書かず save-gate から import する", () => {
+    // ⚠描画の一致だけでは、同じ式をここに書き写した実装でも green のままになる。
+    //   単一の出どころであること自体を固定する。
+    expect(bannerSrc).toMatch(
+      /import \{ isEditLockHeldByOther \} from "@\/lib\/edit-lock\/save-gate"/,
+    );
+    expect(bannerSrc).toContain("const isHeld = isEditLockHeldByOther(row);");
+  });
+
   it("他の人が編集中の帯を出す", () => {
     const html = renderToStaticMarkup(<EditLockHolderBanner row={row()} isAdmin={false} onReleased={() => {}} />);
     expect(html).toContain("🔒 山田さんが編集中です(05:02〜)");

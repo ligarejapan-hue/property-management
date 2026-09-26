@@ -44,6 +44,9 @@ import type { EditLockUiState } from "@/lib/edit-lock/ui-state";
 //   かつ re-export して既存の呼び出し元(`edit-lock-banner.test.tsx`)もそのまま動く。
 import { formatSince } from "@/lib/edit-lock/ui-state";
 export { formatSince } from "@/lib/edit-lock/ui-state";
+// ⚠(横断レビュー I3) 「held かどうか」は見ている側の4つの無効化を決めている
+//   `save-gate.ts` の純関数をそのまま使う(この部品で再実装しない)。
+import { isEditLockHeldByOther } from "@/lib/edit-lock/save-gate";
 
 /**
  * ⚠export する(task5 review round1 Minor)。呼び出し側(`property-edit-form.tsx`)が
@@ -255,7 +258,11 @@ export function EditLockHolderBanner({
   };
 
   const shownNotice = activeNotice(notice, noticeRowKeyState, row);
-  const isHeld = row.state === "held_by_other" || row.state === "held_by_self_other_screen";
+  // ⚠(横断レビュー I3) 判定は `save-gate.ts` の純関数**1本**を使う。ここに
+  //   `row.state === "held_by_other" || …` を書き写すと、見ている側の4つの
+  //   無効化(`page.tsx` が `isEditLockHeldByOther` で決めている)と帯が、
+  //   7つ目の held 状態が増えた瞬間に静かに食い違う。
+  const isHeld = isEditLockHeldByOther(row);
   // ⚠通知は帯を置き換えない(review round2・コントローラの裁定でround1の判断を反転)。
   //   通知が立っていても、いま held な行なら保持者の文言+管理者のボタンを併記する。
   //   さもないと、衝突直後に管理者が「今まさにある鍵」に対して何も操作できなくなる。

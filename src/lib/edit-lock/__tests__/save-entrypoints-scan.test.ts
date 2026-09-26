@@ -1,25 +1,238 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, relative } from "node:path";
 
 /**
- * 保存窓口を呼ぶ入口すべてが合言葉のヘッダを付ける(仕様 5.1・6.1)。
+ * 保存窓口を呼ぶ入口すべてが合言葉のヘッダを付ける(仕様 5.1・6.1・8.3)。
  * 1つでも付け忘れると、その入口からの保存だけが鍵をすり抜ける。
  *
- * ⚠**corporate-lookup-panel.tsx(6入口目)は Task 8 でここに合流した**。
- *   ヘッダの組み立て自体は `updateOwner` と同型で `api-client.ts` の
- *   `applyOwnerCorporate` が持つ(パネル自身は手組みしない)。下の
- *   `ENTRYPOINT_CALL_SITES` に `applyOwnerCorporate` の呼び出し箇所を追加し、
- *   パネル側は「受け取った lockId を取り違えずに渡しているか」を別の検査で固定する
- *   (`updateOwner`/`page.tsx` の関係と同じ形)。
+ * ⚠**ホワイトリストではなくスイープ**(横断レビュー I4)。修理前は既知5ファイル・
+ *   5箇所を列挙しているだけで、明日6つ目の画面が `PATCH /api/properties/[id]` を
+ *   素の fetch で叩いてもこのテストは緑のままだった=仕様8.3の「新しい入口が
+ *   増えたら落ちる」を満たしていなかった。第1段の横断レビューが
+ *   `cleanup-paths-scan.test.ts` に出した H5(「ホワイトリストではなくスイープに
+ *   書き直せ」)と同型の指摘であり、同じ形に揃える:
+ *   ① `src/` 全体を掃いて3つの窓口(method+URL)へ送る箇所を**全部**見つける
+ *   ② 見つかった保存の箇所が1件残らず下の一覧(`KNOWN_SAVE_SITES`)に載っている
+ *   ③ 一覧の各箇所が今も実在する(消えたら赤=行き場のない一覧を残さない)
+ *   ④ 各箇所が実際にヘッダを通している
+ *   ⑤ 検出パターン自体が空振りしていない(健全性)
+ *
+ * ⚠GET/DELETE は対象外(3つの窓口は method まで含めて定義される)。スイープが
+ *   method を読んで自分で落とすので、一覧に「理由つきの除外」を書き足す必要は無い
+ *   (= 除外が増えて形骸化する余地を作らない)。method が読めない呼び出し
+ *   (init を別の関数が組み立てている等)は**保存とみなして**一覧を要求する
+ *   (安全側に倒す)。
  */
-const ENTRYPOINTS = [
-  "src/components/properties/property-edit-form.tsx",
-  "src/app/(dashboard)/properties/[id]/page.tsx",
-  "src/components/properties/registry-chiban-popup.tsx",
-  "src/lib/api-client.ts",
-  "src/components/owners/corporate-lookup-panel.tsx",
+
+const EXCLUDE_DIRS = new Set(["__tests__", "generated", "node_modules"]);
+
+/** `cleanup-paths-scan.test.ts`/`version-increment-scan.test.ts` と同じ走査(.ts/.tsx)。 */
+function listSourceFiles(dir: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (EXCLUDE_DIRS.has(entry.name)) continue;
+      files.push(...listSourceFiles(full));
+    } else if (entry.isFile() && (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx"))) {
+      files.push(full);
+    }
+  }
+  return files;
+}
+
+/**
+ * 鍵を見る3つの保存窓口(仕様 5.1)。**method まで含めて**1つの窓口とする。
+ * ⚠URLの正規表現は末尾のバッククォートまで要求する=`/api/properties/${id}/photos`
+ *   のような別の窓口に一致しない。
+ */
+const SAVE_ENDPOINTS: { label: string; method: string; url: RegExp }[] = [
+  {
+    label: "PATCH /api/properties/[id]",
+    method: "PATCH",
+    url: /`\/api\/properties\/\$\{[^}`]+\}`/g,
+  },
+  { label: "PATCH /api/owners/[id]", method: "PATCH", url: /`\/api\/owners\/\$\{[^}`]+\}`/g },
+  {
+    label: "POST /api/owners/[id]/corporate-apply",
+    method: "POST",
+    url: /`\/api\/owners\/\$\{[^}`]+\}\/corporate-apply`/g,
+  },
 ];
+
+/**
+ * ヘッダの要求。
+ * - `inCall`: 呼び出しの引数の中で(その場で)ヘッダを組み立てている
+ * - `viaFunction`: init を別の関数が組み立てている(呼び出し側はその関数を通すだけ)。
+ *   その関数の**本体**にヘッダの組み立てがあることまで確かめる。
+ */
+type HeaderRequirement = {
+  inCall?: RegExp;
+  viaFunction?: { calledAs: RegExp; nameOpenParen: RegExp; pattern: RegExp };
+};
+
+/**
+ * 今日時点の保存の入口(**6入口=物件4+所有者カード1+法人番号の反映1**。
+ * ただし窓口を叩く箇所は5つで、案件ステータスと導入ルートの2入口は
+ * `runNoLockPropertyPatch` 1本を共有する)。
+ * 鍵は `相対パス::窓口`(行番号は使わない=巨大なファイルの無関係な編集で
+ * 赤くならないため)。同じファイル・同じ窓口へ2箇所目が増えたら、下の
+ * 「1箇所ずつ」の検査が落ちる。
+ */
+const KNOWN_SAVE_SITES: Record<string, { label: string; headers: HeaderRequirement }> = {
+  "src/components/properties/property-edit-form.tsx::PATCH /api/properties/[id]": {
+    label: "物件の編集ウィンドウ(init は buildPropertySaveInit が組み立てる)",
+    headers: {
+      viaFunction: {
+        calledAs: /buildPropertySaveInit\(/,
+        nameOpenParen: /export function buildPropertySaveInit\(/,
+        pattern: /\.\.\.editLockHeaders\(/,
+      },
+    },
+  },
+  "src/app/(dashboard)/properties/[id]/page.tsx::PATCH /api/properties/[id]": {
+    label: "案件ステータス・導入ルートのプルダウン(runNoLockPropertyPatch)",
+    headers: { inCall: /\.\.\.editLockHeaders\(/ },
+  },
+  "src/components/properties/registry-chiban-popup.tsx::PATCH /api/properties/[id]": {
+    label: "地番ポップアップ(runChibanSave)",
+    headers: { inCall: /\.\.\.editLockHeaders\(/ },
+  },
+  "src/lib/api-client.ts::PATCH /api/owners/[id]": {
+    label: "所有者カード(updateOwner)",
+    headers: { inCall: /\.\.\.editLockHeaders\(opts\.lockId\)/ },
+  },
+  "src/lib/api-client.ts::POST /api/owners/[id]/corporate-apply": {
+    label: "法人番号の反映(applyOwnerCorporate)",
+    headers: { inCall: /\.\.\.editLockHeaders\(opts\.lockId\)/ },
+  },
+};
+
+/**
+ * 文字列リテラル・コメントの中の括弧を数えない、対応の取れた範囲の切り出し
+ * (`cleanup-paths-scan.test.ts` の `extractBalancedSpan` と同じ実装。走査テストは
+ * 互いに独立したファイルとして意図的に重複させる)。
+ */
+function extractBalancedSpan(text: string, startIdx: number, openChar: string, closeChar: string): string {
+  let depth = 1;
+  let i = startIdx;
+  const n = text.length;
+  while (i < n && depth > 0) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      i++;
+      while (i < n && text[i] !== quote) {
+        if (text[i] === "\\") i++;
+        i++;
+      }
+      i++;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "/") {
+      while (i < n && text[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "*") {
+      i += 2;
+      while (i < n && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+    if (ch === openChar) depth++;
+    else if (ch === closeChar) depth--;
+    i++;
+  }
+  return text.slice(startIdx, Math.max(startIdx, i - 1));
+}
+
+/** `idx` を囲んでいる呼び出しの `(` の位置(見つからなければ -1)。 */
+function enclosingCallOpenParen(src: string, idx: number): number {
+  let depth = 0;
+  for (let i = idx - 1; i >= 0; i--) {
+    const ch = src[i];
+    if (ch === ")") depth++;
+    else if (ch === "(") {
+      if (depth === 0) return i;
+      depth--;
+    }
+  }
+  return -1;
+}
+
+/** 引数リストの、深さ0のカンマで区切った**中身のある**区画の数。 */
+function topLevelArgCount(span: string): number {
+  let depth = 0;
+  let current = "";
+  const segments: string[] = [];
+  for (let i = 0; i < span.length; i++) {
+    const ch = span[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      current += ch;
+      i++;
+      while (i < span.length && span[i] !== quote) {
+        if (span[i] === "\\") {
+          current += span[i];
+          i++;
+        }
+        current += span[i];
+        i++;
+      }
+      current += span[i] ?? "";
+      continue;
+    }
+    if ("([{".includes(ch)) depth++;
+    else if (")]}".includes(ch)) depth--;
+    if (ch === "," && depth === 0) {
+      segments.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  segments.push(current);
+  return segments.filter((s) => s.trim() !== "").length;
+}
+
+type SweptSite = { key: string; file: string; endpoint: string; method: string; callSpan: string };
+
+/**
+ * `src/` を掃き出して、3つの保存窓口へ送っている箇所を1件残らず返す
+ * (ホワイトリストではなく、実際のパターンマッチで見つける)。
+ * GET/DELETE は3つの窓口ではないので落とす。method が読めない呼び出しは
+ * 保存とみなして残す(安全側)。
+ */
+function findSaveCallSites(): SweptSite[] {
+  const root = join(process.cwd(), "src");
+  const sites: SweptSite[] = [];
+  for (const file of listSourceFiles(root)) {
+    const src = readFileSync(file, "utf8").replace(/\r\n/g, "\n");
+    const rel = relative(process.cwd(), file).replace(/\\/g, "/");
+    for (const endpoint of SAVE_ENDPOINTS) {
+      const re = new RegExp(endpoint.url.source, "g");
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(src)) !== null) {
+        const open = enclosingCallOpenParen(src, m.index);
+        if (open === -1) continue; // 呼び出しの外(型注釈・文字列の説明等)
+        const callSpan = extractBalancedSpan(src, open + 1, "(", ")");
+        const explicit = /\bmethod\s*:\s*"([A-Z]+)"/.exec(callSpan);
+        // 引数が1つだけ(= init を渡していない)なら GET。
+        const method = explicit ? explicit[1] : topLevelArgCount(callSpan) <= 1 ? "GET" : "UNKNOWN";
+        if (method !== endpoint.method && method !== "UNKNOWN") continue;
+        sites.push({
+          key: `${rel}::${endpoint.label}`,
+          file: rel,
+          endpoint: endpoint.label,
+          method,
+          callSpan,
+        });
+      }
+    }
+  }
+  return sites;
+}
 
 /**
  * 関数の**本体全体**を取り出す(review round2 Important C)。
@@ -61,62 +274,75 @@ function extractFunctionBody(src: string, nameOpenParen: RegExp): string {
   return src.slice(start, j);
 }
 
-/**
- * 入口ごとの**実際の呼び出し箇所**(ファイル丸ごとではない・fix round1 Important #2)。
- *
- * ⚠ファイル単位の「どこかに `...editLockHeaders(` があればOK」という検査だと、
- *   1つのファイルに複数の保存経路が同居しているとき(`page.tsx` は
- *   案件ステータス・導入ルート・所有者カードの3入口を持つが、実際に
- *   `...editLockHeaders(` を書く箇所は `runNoLockPropertyPatch` 1本だけ)、
- *   別の保存経路(例: 所有者カードが呼ぶ `updateOwner`)がヘッダを落としても
- *   ファイル内のどこかに別の入口の呼び出しさえ残っていれば green のままになる。
- *   実際、所有者カードのヘッダは `page.tsx` にはまったく現れない
- *   (`api-client.ts` の `updateOwner` の中でだけ組み立てられる)ため、
- *   `src/lib/api-client.ts` を対象に含めない限りこの入口は検査されない。
- *   関数本体を切り出して、その中に `...editLockHeaders(` があることを固定する。
- */
-const ENTRYPOINT_CALL_SITES: { label: string; file: string; nameOpenParen: RegExp; headerCall: RegExp }[] = [
-  {
-    label: "物件の編集ウィンドウ(property-edit-form.tsx・buildPropertySaveInit)",
-    file: "src/components/properties/property-edit-form.tsx",
-    nameOpenParen: /export function buildPropertySaveInit\(/,
-    headerCall: /\.\.\.editLockHeaders\(/,
-  },
-  {
-    label: "案件ステータス・導入ルートのプルダウン(page.tsx・runNoLockPropertyPatch)",
-    file: "src/app/(dashboard)/properties/[id]/page.tsx",
-    nameOpenParen: /export async function runNoLockPropertyPatch\(/,
-    headerCall: /\.\.\.editLockHeaders\(/,
-  },
-  {
-    label: "地番ポップアップ(registry-chiban-popup.tsx・runChibanSave)",
-    file: "src/components/properties/registry-chiban-popup.tsx",
-    nameOpenParen: /export async function runChibanSave\(/,
-    headerCall: /\.\.\.editLockHeaders\(/,
-  },
-  {
-    label: "所有者カード(api-client.ts・updateOwner)",
-    file: "src/lib/api-client.ts",
-    nameOpenParen: /export async function updateOwner\(/,
-    headerCall: /\.\.\.editLockHeaders\(opts\.lockId\)/,
-  },
-  {
-    label: "法人番号の反映(api-client.ts・applyOwnerCorporate)",
-    file: "src/lib/api-client.ts",
-    nameOpenParen: /export async function applyOwnerCorporate\(/,
-    headerCall: /\.\.\.editLockHeaders\(opts\.lockId\)/,
-  },
-];
+function readSource(rel: string): string {
+  return readFileSync(join(process.cwd(), rel), "utf8").replace(/\r\n/g, "\n");
+}
 
-describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切り出して検査)", () => {
-  for (const { label, file, nameOpenParen, headerCall } of ENTRYPOINT_CALL_SITES) {
-    it(`${label} は呼び出し箇所自体で editLockHeaders を通している`, () => {
-      const src = readFileSync(join(process.cwd(), file), "utf8").replace(/\r\n/g, "\n");
-      // ⚠(review round3 Minor J) `expect(body).not.toBe("")` は
-      //   extractFunctionBody が例外を投げるか非空の本体を返すかのどちらか
-      //   でしか無いため、常に真になり何も検査していなかった。削除。
-      const body = extractFunctionBody(src, nameOpenParen);
-      expect(body).toMatch(headerCall);
+describe("保存の入口(仕様8.3・スイープ)", () => {
+  it("3つの窓口へ送っている箇所は、1件残らず一覧に載っている(新しい入口が増えたら落ちる)", () => {
+    const known = new Set(Object.keys(KNOWN_SAVE_SITES));
+    const unknown = [...new Set(findSaveCallSites().filter((s) => !known.has(s.key)).map((s) => s.key))];
+    expect(
+      unknown,
+      unknown.length > 0
+        ? `新しい保存の入口が見つかった: ${unknown.join(", ")}\n` +
+            "この入口は editLockHeaders() を通してヘッダを付け、KNOWN_SAVE_SITES に追記すること" +
+            "(仕様5.1の入口の数も更新する)。"
+        : undefined,
+    ).toEqual([]);
+  });
+
+  it("一覧に載っている箇所は今も実在する(消えた入口の抜け殻を残さない)", () => {
+    const found = new Set(findSaveCallSites().map((s) => s.key));
+    const stale = Object.keys(KNOWN_SAVE_SITES).filter((k) => !found.has(k));
+    expect(
+      stale,
+      stale.length > 0
+        ? `一覧の入口が実際のコードに無い: ${stale.join(", ")}\n` +
+            "入口が消えた/URLの組み立て方が変わった。どちらか確かめて一覧を直すこと。"
+        : undefined,
+    ).toEqual([]);
+  });
+
+  it("同じファイル・同じ窓口への保存は1箇所ずつ(2箇所目が増えたら気づく)", () => {
+    // ⚠鍵に行番号を使わない代わりの網。同じファイルの中に2本目の保存が生えても、
+    //   上の「一覧に載っているか」だけでは新しい鍵が作られず素通りしてしまう。
+    const counts = new Map<string, number>();
+    for (const site of findSaveCallSites()) counts.set(site.key, (counts.get(site.key) ?? 0) + 1);
+    const duplicated = [...counts.entries()].filter(([, n]) => n > 1);
+    expect(
+      duplicated.map(([k, n]) => `${k}(${n}箇所)`),
+      duplicated.length > 0
+        ? "同じファイルに同じ窓口への保存が2箇所以上ある。それぞれがヘッダを通しているか個別に確かめ、" +
+            "この走査の鍵の付け方(ファイル::窓口)を見直すこと。"
+        : undefined,
+    ).toEqual([]);
+  });
+
+  it("検出パターン自体が空振りしていない(健全性の確認)", () => {
+    // 今日時点で5箇所(物件3+所有者1+法人番号1)。0件はパターンが壊れたサイン。
+    expect(findSaveCallSites().length).toBeGreaterThanOrEqual(5);
+  });
+
+  for (const [key, { label, headers }] of Object.entries(KNOWN_SAVE_SITES)) {
+    it(`${label} はヘッダを editLockHeaders 経由で付けている(${key})`, () => {
+      const sites = findSaveCallSites().filter((s) => s.key === key);
+      expect(sites.length, `${key} がスイープで見つからない`).toBeGreaterThan(0);
+      for (const site of sites) {
+        if (headers.inCall) {
+          expect(site.callSpan, `${key}: 呼び出しの中でヘッダを組み立てていない`).toMatch(
+            headers.inCall,
+          );
+        }
+        if (headers.viaFunction) {
+          const { calledAs, nameOpenParen, pattern } = headers.viaFunction;
+          // 呼び出し側が本当にその組み立て関数を通していること。
+          expect(site.callSpan, `${key}: init の組み立て関数を通していない`).toMatch(calledAs);
+          // その組み立て関数の本体が、実際にヘッダを組み立てていること。
+          const body = extractFunctionBody(readSource(site.file), nameOpenParen);
+          expect(body, `${key}: 組み立て関数の本体にヘッダの組み立てが無い`).toMatch(pattern);
+        }
+      }
     });
   }
 
@@ -124,10 +350,7 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
     // ⚠これだけでは「ヘッダが付く」ことは固定できない(それは上の updateOwner 側の
     //   検査の役目)。ここで固定するのは、呼び出し元が世代(lockId)を取り違えずに
     //   渡していること(owner-card-edit-lock.test.tsxの走査と同趣旨・二重の網)。
-    const src = readFileSync(
-      join(process.cwd(), "src/app/(dashboard)/properties/[id]/page.tsx"),
-      "utf8",
-    ).replace(/\r\n/g, "\n");
+    const src = readSource("src/app/(dashboard)/properties/[id]/page.tsx");
     expect(src).toMatch(/updateOwner\(po\.ownerId,[\s\S]*?\{\s*lockId:\s*lock\.lockId,?\s*\}/);
   });
 
@@ -139,10 +362,7 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
     //   `[\s\S]*?` は、第3引数が消えても後方の無関係な `{ lockId }` へ
     //   マッチが飛んで空振りし得る。`handleApply` の本体だけに検査範囲を
     //   絞る(=このファイルには他に `applyOwnerCorporate(` 呼び出しが無い)。
-    const src = readFileSync(
-      join(process.cwd(), "src/components/owners/corporate-lookup-panel.tsx"),
-      "utf8",
-    ).replace(/\r\n/g, "\n");
+    const src = readSource("src/components/owners/corporate-lookup-panel.tsx");
     const handleApplyBody = extractFunctionBody(src, /const handleApply = async \(/);
     expect(handleApplyBody).toMatch(/applyOwnerCorporate\(\s*ownerId,[\s\S]*?\{\s*lockId,?\s*\}/);
   });
@@ -154,30 +374,21 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
     //   (実測691/900・四行の余裕しかない)。sibling の updateOwner 検査と
     //   同じ unbounded `[\s\S]*?` に揃える(このファイルには
     //   `<CorporateLookupPanel` が1箇所しか無いため、unboundedでも安全)。
-    const src = readFileSync(
-      join(process.cwd(), "src/app/(dashboard)/properties/[id]/page.tsx"),
-      "utf8",
-    ).replace(/\r\n/g, "\n");
+    const src = readSource("src/app/(dashboard)/properties/[id]/page.tsx");
     expect(src).toMatch(/<CorporateLookupPanel[\s\S]*?lockId=\{lock\.lockId\}/);
   });
 
   it("物件詳細の所有者カード内は CorporateLookupPanel の反映失敗をカードの鍵コントローラへ伝える(onLockRefused・review round1 Important #3)", () => {
     // ⚠これが無いと、管理者がカードの鍵を強制解除しても、パネルは断りの
     //   文言を出す一方でカードの帯・保存ボタンは「保持中」のまま食い違う。
-    const src = readFileSync(
-      join(process.cwd(), "src/app/(dashboard)/properties/[id]/page.tsx"),
-      "utf8",
-    ).replace(/\r\n/g, "\n");
+    const src = readSource("src/app/(dashboard)/properties/[id]/page.tsx");
     expect(src).toMatch(
       /<CorporateLookupPanel[\s\S]*?onLockRefused=\{\(code\) => lock\.noteSaveError\(code, null\)\}/,
     );
   });
 
   it("admin/owners/[id] は鍵を持たない入口なので CorporateLookupPanel に lockId も onLockRefused も渡さない", () => {
-    const src = readFileSync(
-      join(process.cwd(), "src/app/(dashboard)/admin/owners/[id]/page.tsx"),
-      "utf8",
-    ).replace(/\r\n/g, "\n");
+    const src = readSource("src/app/(dashboard)/admin/owners/[id]/page.tsx");
     const block = src.match(/<CorporateLookupPanel[\s\S]*?\/>/)?.[0];
     expect(block).toBeTruthy();
     expect(block).not.toMatch(/lockId=/);
@@ -193,10 +404,7 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
     //   reportCorporateApplyLockRefusal の順(round2 Minor #4=このパネル自身の
     //   表示を先に確定させてから、外部のonLockRefusedコールバックへ報告する)に
     //   呼んでいることを固定する。
-    const src = readFileSync(
-      join(process.cwd(), "src/components/owners/corporate-lookup-panel.tsx"),
-      "utf8",
-    ).replace(/\r\n/g, "\n");
+    const src = readSource("src/components/owners/corporate-lookup-panel.tsx");
     const handleApplyBody = extractFunctionBody(src, /const handleApply = async \(/);
     expect(handleApplyBody).toMatch(
       /catch \(err\) \{[\s\S]*?handleCorporateApplyEditLockedError\(err, ownerId, setApplyError, applySeqRef, mySeq\)[\s\S]*?reportCorporateApplyLockRefusal\(err, lockId, onLockRefused\)/,
@@ -214,9 +422,7 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
     //   後者だけを削除しても、上のordering正規表現は①の出現だけで満たされ続け、
     //   全テストがgreenのままになる(mutationで確認済み)。4箇所すべてが揃って
     //   いることを出現回数で固定し、どの1箇所が消えても検査が落ちるようにする。
-    expect(
-      (handleApplyBody.match(/reportCorporateApplyLockRefusal\(/g) ?? []).length,
-    ).toBe(4);
+    expect((handleApplyBody.match(/reportCorporateApplyLockRefusal\(/g) ?? []).length).toBe(4);
   });
 
   it("法人番号パネル(corporate-lookup-panel.tsx・handleApply)は反映の試行ごとに世代を1回だけ進める(review round2 New Important #1)", () => {
@@ -227,10 +433,7 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
     //   だった(mutationで確認済み・テスト側が呼び出し元の採番を自分で模して
     //   いるため、production側の採番自体は検査されていなかった)。1行のsource
     //   assertionで、この採番の呼び出し元における実装を固定する。
-    const src = readFileSync(
-      join(process.cwd(), "src/components/owners/corporate-lookup-panel.tsx"),
-      "utf8",
-    ).replace(/\r\n/g, "\n");
+    const src = readSource("src/components/owners/corporate-lookup-panel.tsx");
     const handleApplyBody = extractFunctionBody(src, /const handleApply = async \(/);
     expect(handleApplyBody).toMatch(/const mySeq = \+\+applySeqRef\.current;/);
   });
@@ -245,16 +448,52 @@ describe("保存の入口(走査・呼び出し箇所ごと・本体全体を切
     //   specifier しか拾わず、将来 `from "@/lib/auth/options"` のようなサブパスが
     //   増えても見逃す。末尾に `/` か `"` のどちらかを許す。
     for (const rel of ["src/lib/edit-lock/header-names.ts", "src/lib/edit-lock/screen-token-client.ts"]) {
-      const src = readFileSync(join(process.cwd(), rel), "utf8").replace(/\r\n/g, "\n");
-      expect(src).not.toMatch(/from "@\/lib\/(api-helpers|prisma|auth)["/]/);
+      expect(readSource(rel)).not.toMatch(/from "@\/lib\/(api-helpers|prisma|auth)["/]/);
     }
   });
 
   it("client の部品は server 用の screen-token.ts を import しない", () => {
-    // ⚠`use-edit-lock-status.ts`(Task 9・見ている側の hook)を追記した。
-    for (const rel of [...ENTRYPOINTS, "src/hooks/use-edit-lock.ts", "src/hooks/use-edit-lock-status.ts"]) {
-      const src = readFileSync(join(process.cwd(), rel), "utf8").replace(/\r\n/g, "\n");
-      expect(src).not.toMatch(/from "@\/lib\/edit-lock\/screen-token"/);
+    // ⚠検査の対象は**スイープで見つかった入口のファイル**+鍵の2つの hook。
+    //   入口の一覧を手で書き写さない(増えたら自動で対象になる)。
+    const entrypointFiles = [...new Set(findSaveCallSites().map((s) => s.file))];
+    const targets = [
+      ...entrypointFiles,
+      "src/components/owners/corporate-lookup-panel.tsx",
+      "src/hooks/use-edit-lock.ts",
+      "src/hooks/use-edit-lock-status.ts",
+    ];
+    expect(targets.length).toBeGreaterThanOrEqual(7);
+    for (const rel of targets) {
+      expect(readSource(rel), rel).not.toMatch(/from "@\/lib\/edit-lock\/screen-token"/);
     }
+  });
+
+  /**
+   * 横断レビュー I5。このブランチは同じ規則を2回破って2回直している
+   * (Task 6 fix #3 = `canSubmitSave`/`shouldShowLockUnavailableNotice` を
+   * `property-edit-form.tsx` から外へ・Task 7 round2 B = `formatSince` を
+   * `edit-lock-banner.tsx` から外へ)。にもかかわらずラチェットが無かった。
+   *
+   * `src/lib/**` の判断層が component モジュール("use client"・`ui/button`・
+   * `api-client` 等を引き込む)を import すると、そのモジュールを使う無関係な
+   * 画面(例: 地番ポップアップ)まで一式を巻き込む。実測で今日時点の違反は
+   * ゼロなので、この5行が今日から効くラチェットになる。
+   */
+  it("(I5) src/lib の下のモジュールは @/components を import しない(判断層と部品の境界)", () => {
+    const offenders: string[] = [];
+    for (const file of listSourceFiles(join(process.cwd(), "src/lib"))) {
+      const src = readFileSync(file, "utf8").replace(/\r\n/g, "\n");
+      if (/from\s+["']@\/components\//.test(src)) {
+        offenders.push(relative(process.cwd(), file).replace(/\\/g, "/"));
+      }
+    }
+    expect(
+      offenders,
+      offenders.length > 0
+        ? `src/lib から @/components を import している: ${offenders.join(", ")}\n` +
+            "判断層(純関数)は component モジュールを引かない。必要な純関数は src/lib 側へ移し、" +
+            "component からは re-export すること(Task 6 fix #3・Task 7 round2 B と同じ直し方)。"
+        : undefined,
+    ).toEqual([]);
   });
 });
