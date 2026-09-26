@@ -4492,3 +4492,46 @@ export async function applyRegistryOwners(
     },
   );
 }
+
+// ---------- 添付済み謄本からの所有者反映（まとめて） ----------
+
+export interface RegistryOwnerApplyTarget {
+  /** 所有者が空で、所有者事項の謄本がある物件の件数 */
+  targetCount: number;
+  /** 今回処理する件数の既定 */
+  defaultLimit: number;
+  /** 一度に流せる上限 */
+  maxLimit: number;
+  /** ほかの取込を処理中か（処理中は実行できない） */
+  busy: boolean;
+}
+
+/** まとめて反映の対象件数を取得する（保存しない）。 */
+export async function fetchRegistryOwnerApplyTarget(): Promise<RegistryOwnerApplyTarget> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { targetCount: 1821, defaultLimit: 100, maxLimit: 5000, busy: false };
+  }
+  return apiFetch<RegistryOwnerApplyTarget>("/api/import/registry-owner-apply");
+}
+
+export interface RegistryOwnerApplyStartResult {
+  /** 作られた取込ジョブ。対象が0件なら null */
+  jobId: string | null;
+  totalRows: number;
+}
+
+/** まとめて反映を始める（裏で1件ずつ処理される）。 */
+export async function startRegistryOwnerApply(
+  limit: number,
+): Promise<RegistryOwnerApplyStartResult> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { jobId: "mock-job", totalRows: limit };
+  }
+  return apiFetch<RegistryOwnerApplyStartResult>("/api/import/registry-owner-apply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ limit }),
+  });
+}

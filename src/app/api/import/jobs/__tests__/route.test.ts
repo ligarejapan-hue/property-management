@@ -84,6 +84,24 @@ describe("GET /api/import/jobs jobTypeフィルタ", () => {
     );
   });
 
+  /**
+   * ⚠なぜ必要か(@codex 第8R P2): まとめて反映は1件ごとに共通処理を通すので、その内部で
+   *   1件分の取込記録ができる。100件で101本、5,000件で5,001本が履歴に並び、見るべき
+   *   まとめて反映のジョブが埋もれる。1件分の記録は履歴の一覧から外す。
+   */
+  it("⚠まとめて反映の1件分の記録は、取込の履歴に並べない", async () => {
+    await call("");
+    const arg = pm.importJob.findMany.mock.calls[0][0] as {
+      where: Record<string, unknown>;
+    };
+    expect(arg.where.NOT).toEqual({
+      jobType: "property_pdf",
+      fileName: "謄本から所有者をまとめて反映（1件分）",
+    });
+    const countArg = pm.importJob.count.mock.calls[0][0] as { where: Record<string, unknown> };
+    expect(countArg.where.NOT).toEqual(arg.where.NOT);
+  });
+
   it("不正な種別は黙って無視される(whereにjobTypeが入らない)", async () => {
     await call("?jobType=bogus_type");
     const arg = pm.importJob.findMany.mock.calls[0][0] as {

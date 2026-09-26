@@ -11,6 +11,13 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("../process-row", () => ({
   processRegistryPdfBulkRow: vi.fn(),
 }));
+// ⚠ワーカーは「まとめて反映」の行があるときだけ実行者の権限を読み直す。
+//   api-helpers は next-auth 経由で next/server を引くため、env=node の vitest では
+//   実体を読み込めない(mock が必要)。このテストの行はPDFを上げた行だけなので呼ばれない。
+vi.mock("@/lib/api-helpers", () => ({ getUserPermissions: vi.fn(async () => []) }));
+vi.mock("@/lib/registry-owner-bulk/process-row", () => ({
+  processRegistryOwnerApplyRow: vi.fn(),
+}));
 
 import prisma from "@/lib/prisma";
 import { processRegistryPdfBulkRow } from "../process-row";

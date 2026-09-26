@@ -18,6 +18,11 @@ import {
   type StatusCounts,
 } from "@/lib/import-summary";
 import { isReceptionOwnerJobRow } from "@/lib/reception-owner-link";
+import {
+  REGISTRY_OWNER_APPLY_JOB_TYPE,
+  isRegistryOwnerApplyRow,
+  redactRegistryOwnerApplyRow,
+} from "@/lib/registry-owner-bulk/marker";
 
 // ---------- GET /api/import/jobs/:jobId ----------
 //
@@ -258,6 +263,22 @@ export async function GET(
       );
     }
 
+    // 「謄本から所有者をまとめて反映」は既存の「所有者事項PDF一括」に相乗りしている
+    // (データベースの種別を増やさない)。画面の表示名を出し分けるため、行の印を
+    // サーバ側で確定して渡す。⚠取込時に全行へ印が付く規約なので先頭1行で足りる。
+    let isRegistryOwnerApplyJob = false;
+    if (job.jobType === REGISTRY_OWNER_APPLY_JOB_TYPE) {
+      const markerRow = await prisma.importJobRow.findFirst({
+        where: { jobId },
+        select: { rawData: true },
+        orderBy: { rowNumber: "asc" },
+      });
+      isRegistryOwnerApplyJob = isRegistryOwnerApplyRow(
+        job.jobType,
+        (markerRow?.rawData ?? null) as Record<string, unknown> | null,
+      );
+    }
+
     const totalPages =
       limit !== null ? Math.max(1, Math.ceil(filteredTotal / limit)) : 1;
     const pagination = {
@@ -280,9 +301,12 @@ export async function GET(
     });
     const isRegistryPdfBulkJob = job.jobType === "registry_pdf_bulk";
 
+    // ⚠物件を見られない人には、まとめて反映の行の物件住所を外す(@codex 第10R)
+    const canReadProperty = hasPermission(perms, "property", "read");
+
     return apiResponse({
       ...job,
-      rows,
+      rows: rows.map((r) => redactRegistryOwnerApplyRow(job.jobType, r, canReadProperty)),
       summary,
       isReceptionOwnerJob,
       duplicateCount,
@@ -290,6 +314,7 @@ export async function GET(
       pagination,
       pendingCount,
       isRegistryPdfBulkJob,
+      isRegistryOwnerApplyJob,
       // 画面がロールバック等の**変更操作の導線を出してよいか**（Codex #349 R9 P2）。
       // 判定を server 側の1箇所に置くことで、画面と route のズレ（押して入力してから
       // 403 になる）を構造的に防ぐ。閲覧のみ（import:read_all）の他人ジョブでは false。

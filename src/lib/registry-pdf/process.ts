@@ -20,6 +20,7 @@ import { lockPropertyRecordForWrite, lockPropertyRow } from "@/lib/property-reco
 import { lockOwnerRow } from "@/lib/edit-lock/row-locks";
 import { isResourceEditLocked } from "@/lib/edit-lock/service";
 import { ApiError } from "@/lib/api-helpers";
+import { safeErrorSummary } from "@/lib/safe-error-summary";
 import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 import { recordChanges, PROPERTY_TRACKED_FIELDS } from "@/lib/change-log";
@@ -105,6 +106,14 @@ export interface ProcessRegistryPdfArgs {
    */
   ownersOnly?: boolean;
   /**
+   * ジョブ作成後の失敗を記録するとき、**生のエラー文を残さない**(種類とコードに丸める)。
+   * ⚠データベースや保管庫の例外は、拒否した呼び出しの中身(登記由来の住所など)を
+   *   文面に埋め込むことがある。「見せたものだけ書く」経路(添付済み謄本からの反映・
+   *   まとめて反映)では必ず指定する。既定 false = 従来どおり(手動取込・自動取得は
+   *   担当者の手がかりとして生の文面を残す)。
+   */
+  sanitizeFailureDetails?: boolean;
+  /**
    * **書き込みのロックと同じ1文で担当者スコープを見直す**(添付済み謄本からの反映)。
    * ⚠担当者だけの権限(field_staff)は、route の事前確認を通ったあと書き込みまでの
    *   間に担当を外されうる。素のロックは担当を見直さないので、もう扱えない物件に
@@ -122,6 +131,15 @@ export interface ProcessRegistryPdfArgs {
    * ⚠requireNoExistingOwners のときだけ呼ばれる(0件の見直しと同じ場所)。
    */
   beforeFirstWrite?: (tx: DbClient) => Promise<void>;
+  /**
+   * **所有者を全員紐づけ終えたあと、同じトランザクションの確定の直前に呼ぶ**(まとめる経路向け)。
+   * 呼び出し元の記録(例: まとめて反映の取込記録の行を「成功」にする)を所有者の書き込みと
+   * 一緒に確定させるための入口。投げれば所有者の書き込みも巻き戻る。
+   * ⚠確定のあとに別の書き込みで記録すると、その間で止まったとき「所有者は入ったのに
+   *   記録は未処理」になり、再開で「すでに所有者あり=飛ばした」と誤って記録される。
+   * ⚠requireNoExistingOwners のときだけ呼ばれる(全員を1つのトランザクションで入れる場合)。
+   */
+  beforeCommit?: (tx: DbClient, summary: { linked: number }) => Promise<void>;
   /**
    * 有料取得の請求種別（owner|all）。有料取得フローからのみ渡る（手動取込は undefined）。
    * ⚠**"all"(全部事項)のときは所有者を物件へ反映しない**。全部事項には抹消された
@@ -263,6 +281,8 @@ async function reflectParsedOwners(args: {
   scopedSession?: RegistryPdfSession;
   /** → ProcessRegistryPdfArgs.beforeFirstWrite */
   beforeFirstWrite?: (tx: DbClient) => Promise<void>;
+  /** → ProcessRegistryPdfArgs.beforeCommit */
+  beforeCommit?: (tx: DbClient, summary: { linked: number }) => Promise<void>;
 }): Promise<{ matched: number; created: number; linked: number }> {
   const { propertyId, owners, recordCorporateDecision, markOwnerCorporateFillSkipped } = args;
 
@@ -711,10 +731,17 @@ async function reflectParsedOwners(args: {
     //
     // ロックの順序は applyAll の冒頭で候補の所有者を先に押さえることで
     // 「Owner → 物件」にそろえている(他の窓口と同じ順)。
-    await prisma.$transaction((tx) => applyAll(tx as DbClient), {
-      timeout: 30_000,
-      maxWait: 10_000,
-    });
+    await prisma.$transaction(
+      async (tx) => {
+        await applyAll(tx as DbClient);
+        // 呼び出し元の記録を、所有者と一緒に確定させる(→ ProcessRegistryPdfArgs.beforeCommit)
+        await args.beforeCommit?.(tx as DbClient, { linked: linkedCount });
+      },
+      {
+        timeout: 30_000,
+        maxWait: 10_000,
+      },
+    );
   } else {
     await applyAll(prisma as unknown as DbClient);
   }
@@ -738,6 +765,21 @@ export async function processRegistryPdf(
 
   // Parse the registry text（UI 編集値があれば再 parse より優先してマージ）
   const parsed = applyEditedToParsed(parseRegistryText(text), edited);
+  /**
+   * 取込の記録の行に残す、読み取った物件の項目。
+   * ⚠所有者だけを入れる経路(ownersOnly)では**残さない**。読み取りは物件の所在が
+   *   読めないと、最初に出てきた都道府県つきの行(=所有者の住所のことがある)を
+   *   「住所」として拾うため、取込の履歴から所有者の住所が見えてしまう
+   *   (@codex 第6R P1)。この経路は物件の項目を書かないので、記録にも要らない。
+   */
+  const recordedParsed = args.ownersOnly
+    ? { address: null, realEstateNumber: null, lotNumber: null, buildingNumber: null }
+    : {
+        address: parsed.address,
+        realEstateNumber: parsed.realEstateNumber,
+        lotNumber: parsed.lotNumber,
+        buildingNumber: parsed.buildingNumber,
+      };
 
   // Create import job record
   const job = await prisma.importJob.create({
@@ -945,6 +987,7 @@ export async function processRegistryPdf(
           skipCorporateNumber: args.ownersOnly,
           scopedSession: args.enforcePropertyScope ? session : undefined,
           beforeFirstWrite: args.beforeFirstWrite,
+          beforeCommit: args.beforeCommit,
           owners: parsed.owners,
           recordCorporateDecision,
           markOwnerCorporateFillSkipped,
@@ -1040,6 +1083,7 @@ export async function processRegistryPdf(
               skipCorporateNumber: args.ownersOnly,
               scopedSession: args.enforcePropertyScope ? session : undefined,
               beforeFirstWrite: args.beforeFirstWrite,
+              beforeCommit: args.beforeCommit,
               owners: parsed.owners,
               recordCorporateDecision,
               markOwnerCorporateFillSkipped,
@@ -1065,8 +1109,12 @@ export async function processRegistryPdf(
     // ジョブ作成後に発生したエラー (Mode A の NOT_FOUND / Prisma 例外 等)。
     // ImportJob を "failed" で finalize し、ImportJobRow も error で1件残す。
     // 失敗の詳細は元のエラーから取り出して errorMessage に格納する。
-    failureReason =
-      innerErr instanceof Error ? innerErr.message : "PDF取込中に不明なエラーが発生しました";
+    failureReason = args.sanitizeFailureDetails
+      ? // ⚠この経路は生のエラー文を残さない(登記由来の住所を含みうる)
+        `取込中にエラーが発生しました (${safeErrorSummary(innerErr)})`
+      : innerErr instanceof Error
+        ? innerErr.message
+        : "PDF取込中に不明なエラーが発生しました";
 
     // ベストエフォートで finalize。recovery 自体が失敗しても元のエラーを優先する。
     try {
@@ -1087,8 +1135,8 @@ export async function processRegistryPdf(
           rawData: {
             fileName,
             reason: failureReason,
-            extractedAddress: parsed.address ?? null,
-            extractedRealEstateNumber: parsed.realEstateNumber ?? null,
+            extractedAddress: recordedParsed.address ?? null,
+            extractedRealEstateNumber: recordedParsed.realEstateNumber ?? null,
             targetPropertyId,
             ...buildErrorRawDataExtras(failureReason, null),
           },
@@ -1125,8 +1173,8 @@ export async function processRegistryPdf(
         rawData: {
           fileName,
           reason: failureReason,
-          extractedAddress: parsed.address ?? null,
-          extractedRealEstateNumber: parsed.realEstateNumber ?? null,
+          extractedAddress: recordedParsed.address ?? null,
+          extractedRealEstateNumber: recordedParsed.realEstateNumber ?? null,
           targetPropertyId: null,
           ...buildErrorRawDataExtras(failureReason, null),
         },
@@ -1198,10 +1246,10 @@ export async function processRegistryPdf(
         rowNumber: 1,
         status: "success",
         rawData: {
-          realEstateNumber: parsed.realEstateNumber,
-          address: parsed.address,
-          lotNumber: parsed.lotNumber,
-          buildingNumber: parsed.buildingNumber,
+          realEstateNumber: recordedParsed.realEstateNumber,
+          address: recordedParsed.address,
+          lotNumber: recordedParsed.lotNumber,
+          buildingNumber: recordedParsed.buildingNumber,
           // PR#88: owner 名(PII)は rawData に残さない。件数のみ保持する。
           ownerCount: parsed.owners.length,
           // A-2c: owner 反映の非PII件数（名前・住所は載せない）。

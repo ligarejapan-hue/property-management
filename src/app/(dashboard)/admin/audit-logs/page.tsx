@@ -138,6 +138,7 @@ const ACTION_LABELS: Record<string, string> = {
   field_survey_track_view: "移動軌跡の閲覧",
   // --- 謄本・取込 ---
   registry_search: "謄本検索",
+  registry_owner_bulk_apply: "謄本から所有者をまとめて反映",
   registry_auto_fetch: "謄本自動取得",
   registry_location_purchase: "謄本の有料請求（台帳）",
   registry_settings_update: "謄本設定更新",

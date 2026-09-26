@@ -42,36 +42,23 @@ import {
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { canAccessPropertyRecord } from "@/lib/property-access";
-import { findMissingOwnerFieldWritePerm } from "@/lib/owner-create";
-import { getStorage } from "@/lib/storage";
-import { extractTextFromPdf } from "@/lib/pdf-extract";
 import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
-import { processRegistryPdf } from "@/lib/registry-pdf/process";
+// ⚠反映の検査と安全策は**共通処理に集約**している(まとめて反映の裏の処理も同じ関数を
+//   通る)。ここに条件を足さない・ここで条件を緩めない。
+import {
+  SUPPORTED_CERTIFICATE_TYPE,
+  applyRegistryOwnersToProperty,
+  loadLatestRegistryText,
+} from "@/lib/registry-owner-apply/apply";
 // ⚠表示名は共通ヘルパを使う(日本時間で日付を作る)。自前で toISOString すると
 //   深夜0〜9時の添付が添付タブと違う日付になる。
 import { registryDisplayName } from "@/lib/attachments/registry-display-name";
 
-/** この機能が扱う謄本の種別。全部事項は対象外。 */
-const SUPPORTED_CERTIFICATE_TYPE = "owner";
-
-/**
- * 取込ジョブ・監査記録に残す名前。**添付の生ファイル名は使わない**(PIIを含みうる)。
- * 利用者が見る下見には、別途ほんとうのファイル名を返している。
- */
-const AUDIT_LABEL = "添付済みの謄本から所有者を反映";
-
-
-
-interface LoadedRegistry {
-  attachmentId: string;
-  fileName: string;
-  createdAt: Date;
-  text: string;
-}
-
 /**
  * 物件を取り出し、権限と担当範囲を確認する。
  * 読み取り(下見)と書き込み(反映)で必要な権限が違うので action で切り替える。
+ * ⚠反映のときの「所有者が空か」「謄本が読めるか」「氏名・住所を書けるか」は
+ *   共通処理(applyRegistryOwnersToProperty)側で確かめる。
  */
 async function loadProperty(propertyId: string, action: "preview" | "apply") {
   const session = await getApiSession();
@@ -113,93 +100,6 @@ async function loadProperty(propertyId: string, action: "preview" | "apply") {
   }
 
   return { session, property, perms };
-}
-
-/**
- * 添付済みの所有者事項を1件取り出し、文字を抜き出す。
- *
- * @param expectedAttachmentId 下見で見せた添付のID。渡されたときは、いちばん新しい
- *   添付がそれと同じであることを確かめる(違えば 409)。確認画面を開いている間に
- *   別の謄本が添付された場合に、見ていない方の所有者を入れてしまわないため。
- */
-/**
- * いちばん新しい所有者事項の添付(削除済みを除く)。
- * ⚠下見・反映の受付・**書き込みのロックの中の見直し**で同じ条件を使う(条件が
- *   ずれると「見直しでは別の添付が最新」になり、正しい操作が 409 になる)。
- */
-function findLatestOwnerRegistryAttachment(
-  db: Pick<typeof prisma, "attachment">,
-  propertyId: string,
-) {
-  return db.attachment.findFirst({
-    where: {
-      propertyId,
-      type: "registry",
-      isDeleted: false,
-      registryCertificateType: SUPPORTED_CERTIFICATE_TYPE,
-    },
-    orderBy: { createdAt: "desc" },
-    select: { id: true, fileName: true, fileUrl: true, createdAt: true },
-  });
-}
-
-const attachmentChangedError = () =>
-  new ApiError(
-    409,
-    "確認した謄本とは別の謄本が追加されています。開き直してもう一度確認してください",
-    "REGISTRY_ATTACHMENT_CHANGED",
-  );
-
-async function loadLatestRegistryText(
-  propertyId: string,
-  expectedAttachmentId?: string,
-): Promise<LoadedRegistry> {
-  const attachment = await findLatestOwnerRegistryAttachment(prisma, propertyId);
-  if (!attachment) {
-    throw new ApiError(
-      404,
-      "この物件には所有者事項の謄本が添付されていません",
-      "REGISTRY_NOT_FOUND",
-    );
-  }
-  if (expectedAttachmentId && attachment.id !== expectedAttachmentId) {
-    throw attachmentChangedError();
-  }
-
-  const storage = getStorage();
-  const key = storage.keyFromUrl(attachment.fileUrl);
-  if (!key) {
-    throw new ApiError(404, "謄本の実体が見つかりません", "REGISTRY_FILE_MISSING");
-  }
-  const file = await storage.read(key);
-  if (!file) {
-    throw new ApiError(404, "謄本の実体が見つかりません", "REGISTRY_FILE_MISSING");
-  }
-
-  let text = "";
-  try {
-    text = await extractTextFromPdf(file.body);
-  } catch {
-    throw new ApiError(
-      422,
-      "謄本から文字を読み取れませんでした。手入力で登録してください",
-      "REGISTRY_TEXT_UNREADABLE",
-    );
-  }
-  if (!text.trim()) {
-    throw new ApiError(
-      422,
-      "謄本から文字を読み取れませんでした。手入力で登録してください",
-      "REGISTRY_TEXT_UNREADABLE",
-    );
-  }
-
-  return {
-    attachmentId: attachment.id,
-    fileName: attachment.fileName,
-    createdAt: attachment.createdAt,
-    text,
-  };
 }
 
 /** 下見: 登録される予定の所有者を返す。保存はしない。 */
@@ -254,7 +154,7 @@ export async function POST(
 ) {
   try {
     const { id } = await context.params;
-    const { session, property, perms } = await loadProperty(id, "apply");
+    const { session, perms } = await loadProperty(id, "apply");
 
     // 下見で見せた添付のID。古い呼び出し元が無い新設APIなので必須にする。
     const body = (await request.json().catch(() => null)) as
@@ -269,78 +169,17 @@ export async function POST(
       );
     }
 
-    // すでに所有者がいる物件は対象外(上書き・二重登録を避ける)
-    if (property.propertyOwners.length > 0) {
-      throw new ApiError(
-        409,
-        "この物件にはすでに所有者が登録されています",
-        "OWNERS_ALREADY_EXIST",
-      );
-    }
-
-    const registry = await loadLatestRegistryText(id, attachmentId);
-    const owners = parseRegistryOwnerTable(registry.text);
-    if (!owners || owners.length === 0) {
-      throw new ApiError(
-        422,
-        "謄本から所有者を読み取れませんでした。手入力で登録してください",
-        "REGISTRY_OWNERS_NOT_FOUND",
-      );
-    }
-
-    // ⚠書く項目ごとの権限(owner_name / owner_address)を、他の所有者の窓口
-    //   (/owners/create-and-link)と同じ純関数で確かめる。owner:write だけでは、
-    //   氏名や住所を書けない役割でも謄本の値を保存できてしまう。
-    //   取込処理(ImportJob・監査の書き込み)を呼ぶ前に止める。
-    for (const owner of owners) {
-      const missing = findMissingOwnerFieldWritePerm(perms, {
-        name: owner.name,
-        address: owner.address,
-      });
-      if (missing) {
-        throw new ApiError(
-          403,
-          `${missing.label} を書き込む権限がありません`,
-          "FORBIDDEN",
-        );
-      }
-    }
-
-    const result = await processRegistryPdf({
+    // ⚠ここから先(所有者が空か・謄本の読み取り・項目ごとの権限・書き込み)は
+    //   **共通処理**に集約している。まとめて反映の裏の処理も同じ関数を通るため、
+    //   守りを片方だけ直す事故が起きない。
+    const outcome = await applyRegistryOwnersToProperty({
       session,
-      text: registry.text,
+      perms,
       propertyId: id,
-      // ⚠生ファイル名ではなく固定ラベル(ImportJob と AuditLog に残るため)
-      fileName: AUDIT_LABEL,
-      edited: undefined,
-      // ⚠必ず null。非 null にすると同じ謄本がもう一度添付されてしまう。
-      pdfBuffer: null,
-      certificateType: SUPPORTED_CERTIFICATE_TYPE,
-      // ⚠上の 409 判定は PDF を読む前の値なので、読んでいる間に別タブが所有者を
-      //   紐づけると古くなる。書き込みと同じ物件行ロックの中で見直してもらう。
-      requireNoExistingOwners: true,
-      // ⚠上の担当者スコープ(canAccessPropertyRecord)の確認は受付時点の値。書き込みの
-      //   ロックまでの間に担当を外されても、ロックと同じ1文で見直して 403 にする。
-      enforcePropertyScope: true,
-      // ⚠「確認した添付が最新か」の上の判定は受付時点の値。書き込みのロックまでの間に
-      //   新しい謄本が添付されうる(添付の作成も同じ物件行を押さえるので、ロックの中で
-      //   見直せば取りこぼさない)。最初の書き込みの直前にもう一度確かめる。
-      beforeFirstWrite: async (tx) => {
-        // ⚠添付の**削除・復元**は物件行を押さえずに isDeleted を書く(添付の新規作成は
-        //   物件行で直列化されている)。この物件の謄本の添付行をここで押さえて、
-        //   削除・復元の書き込みをこの処理の確定まで待たせる。順序は 物件 → 添付。
-        await tx.$queryRaw`
-          SELECT id FROM attachments
-          WHERE property_id = ${id}::uuid AND type = 'registry'
-          FOR UPDATE
-        `;
-        const latest = await findLatestOwnerRegistryAttachment(tx, id);
-        if (!latest || latest.id !== attachmentId) throw attachmentChangedError();
-      },
-      // ⚠所有者だけを入れる。下見も確認画面も所有者しか見せていないので、
-      //   物件の項目(不動産番号・地番・家屋番号・登記状況)は書き換えない。
-      ownersOnly: true,
+      // 利用者が確認画面で見た添付。これと最新が違えば共通処理が 409 にする。
+      expectedAttachmentId: attachmentId,
     });
+    const result = outcome.result;
 
     return apiResponse(result);
   } catch (error) {

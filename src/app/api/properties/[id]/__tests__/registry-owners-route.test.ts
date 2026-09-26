@@ -180,6 +180,8 @@ describe("POST（反映）", () => {
     expect(args.certificateType).toBe("owner");
     expect(args.propertyId).toBe(PROPERTY_ID);
     expect(args.edited).toBeUndefined();
+    // 1件ずつのボタンの記録は、これまでどおり取込の履歴に並ぶ名前
+    expect(args.fileName).toBe("添付済みの謄本から所有者を反映");
   });
 
   it("⚠すでに所有者がいる物件は 409 で止め、取込処理を呼ばない", async () => {
@@ -269,6 +271,14 @@ describe("POST（反映）", () => {
       $queryRaw: vi.fn(async () => []),
     };
     await expect(args.beforeFirstWrite(txGone)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("⚠取込処理が失敗を記録するときも、生のエラー文を残さない指定を渡す", async () => {
+    await POST(postRequest(), context);
+    const args = (processRegistryPdf as unknown as Mock).mock.calls[0][0];
+    // これが外れると、データベースの例外の文面(登記由来の住所を含みうる)が
+    // 取込記録に残る。
+    expect(args.sanitizeFailureDetails).toBe(true);
   });
 
   it("⚠書き込みのロックの中で担当者スコープを見直す指定を渡す", async () => {

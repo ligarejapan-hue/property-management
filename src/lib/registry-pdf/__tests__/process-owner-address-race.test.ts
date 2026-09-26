@@ -614,6 +614,110 @@ describe("所有者が空の物件だけに入れる指定（requireNoExistingOw
     expect(pm.propertyOwner.create).not.toHaveBeenCalled();
   });
 
+  /**
+   * ⚠なぜ必要か(@codex 第4R P2): まとめて反映は、所有者の書き込みが確定したあとに
+   *   取込記録の行を「成功」にする。その間で止まると、所有者は入ったのに行は未処理の
+   *   まま残り、再開すると「すでに所有者あり」で「飛ばした」と記録されて件数がずれる。
+   *   呼び出し元の記録を、所有者と**同じトランザクションの中・確定の直前**に書かせる。
+   */
+  it("⚠まとめる場合、全員を紐づけ終えたあと・同じトランザクションの中で beforeCommit を呼ぶ", async () => {
+    let inTx = false;
+    pm.$transaction.mockImplementation(async (cb: (tx: typeof prisma) => unknown) => {
+      inTx = true;
+      try {
+        return await cb(prisma);
+      } finally {
+        inTx = false;
+      }
+    });
+    const seen: Array<{ inTx: boolean; tx: unknown; linked: number }> = [];
+    const hook = vi.fn(async (tx: unknown, summary: { linked: number }) => {
+      seen.push({ inTx, tx, linked: summary.linked });
+    });
+    await run({ requireNoExistingOwners: true, beforeCommit: hook });
+
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(seen[0].inTx).toBe(true);
+    expect(seen[0].tx).toBe(prisma);
+    expect(seen[0].linked).toBe(1);
+    const lastLink = pm.propertyOwner.create.mock.invocationCallOrder.at(-1)!;
+    expect(lastLink).toBeLessThan(hook.mock.invocationCallOrder[0]);
+  });
+
+  it("⚠beforeCommit が失敗したら、取込全体も失敗として返す（所有者だけ確定させない）", async () => {
+    const hook = vi.fn(async () => {
+      throw new Error("row update failed");
+    });
+    await expect(
+      run({ requireNoExistingOwners: true, beforeCommit: hook }),
+    ).rejects.toThrow("row update failed");
+  });
+
+  it("まとめない呼び出し元（手動取込など）では beforeCommit を呼ばない", async () => {
+    const hook = vi.fn(async () => {});
+    await run({ beforeCommit: hook });
+    expect(hook).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ⚠なぜ必要か(@codex 第6R P1): 謄本の読み取りは、物件の所在が読めないと最初に出てきた
+   *   都道府県つきの行(=所有者の住所のことがある)を「住所」として拾う。取込の記録の行に
+   *   それをそのまま残すと、取込の履歴から所有者の住所が見えてしまう。所有者だけを入れる
+   *   経路は物件の項目を書かないので、読み取った物件の項目も記録に残さない。
+   */
+  const OWNER_ADDRESS_AS_LOCATION = "東京都港区赤坂九丁目9番9号";
+  const parsedWithOwnerAddress = () =>
+    (parseRegistryText as Mock).mockReturnValue({
+      realEstateNumber: "1234567890123",
+      address: OWNER_ADDRESS_AS_LOCATION,
+      lotNumber: "9番9",
+      buildingNumber: null,
+      landCategory: null,
+      area: null,
+      owners: [OWNER],
+      warnings: [],
+      confidence: 0.9,
+    });
+  const recordedRows = () =>
+    JSON.stringify(pm.importJobRow.create.mock.calls.map((c) => c[0]));
+
+  it("⚠所有者だけを入れる経路は、成功の記録に読み取った住所などを残さない", async () => {
+    parsedWithOwnerAddress();
+    await run({ requireNoExistingOwners: true, ownersOnly: true });
+    expect(pm.importJobRow.create).toHaveBeenCalled();
+    expect(recordedRows()).not.toContain("赤坂");
+    expect(recordedRows()).not.toContain("1234567890123");
+    expect(recordedRows()).not.toContain("9番9");
+  });
+
+  it("⚠所有者だけを入れる経路は、失敗の記録にも読み取った住所などを残さない", async () => {
+    parsedWithOwnerAddress();
+    pm.owner.create.mockRejectedValue(new Error("boom"));
+    await expect(
+      run({ requireNoExistingOwners: true, ownersOnly: true, sanitizeFailureDetails: true }),
+    ).rejects.toThrow();
+    expect(pm.importJobRow.create).toHaveBeenCalled();
+    expect(recordedRows()).not.toContain("赤坂");
+    expect(recordedRows()).not.toContain("1234567890123");
+  });
+
+  it("手動取込などでは、従来どおり読み取った住所を記録に残す（担当者の手がかり）", async () => {
+    // (物件の項目を書く経路はこのテストの対象外なので、住所だけにする)
+    (parseRegistryText as Mock).mockReturnValue({
+      realEstateNumber: null,
+      address: OWNER_ADDRESS_AS_LOCATION,
+      lotNumber: null,
+      buildingNumber: null,
+      landCategory: null,
+      area: null,
+      owners: [OWNER],
+      warnings: [],
+      confidence: 0.9,
+    });
+    await run();
+    expect(recordedRows()).toContain("赤坂");
+  });
+
   it("指定しない呼び出し元（手動取込など）では見直さない＝共有名義の追加を妨げない", async () => {
     pm.propertyOwner.count.mockResolvedValue(1);
     await run();
