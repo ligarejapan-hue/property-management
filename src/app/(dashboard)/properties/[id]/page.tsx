@@ -1987,12 +1987,16 @@ function OwnerCard({
               //   fail openならlockUnavailableで押せる)と、この画面既存の入力検証を
               //   両方満たさないと押せない。canSubmitSave が saving も見るため、
               //   ここで別途 saving を足さない(二重管理にしない)。
+              // ⚠(横断レビュー I1) fail openが効くのは鍵の状態が idle の間だけ。
+              //   状態(lock.state.kind)を必ず渡す=取得の失敗後に423で帯が出たら
+              //   ボタンも一緒に閉じる(帯と矛盾させない)。
               disabled={
                 !canSubmitSave({
                   tokenReady: editLockTokenReady,
                   canSave: lock.canSave,
                   saving,
                   lockUnavailable,
+                  stateKind: lock.state.kind,
                 }) ||
                 (editableFields.name && !form.name.trim()) ||
                 (editableFields.corporateNumber &&

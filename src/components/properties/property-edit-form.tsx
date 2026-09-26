@@ -789,8 +789,17 @@ export default function PropertyEditForm({
             // ⚠複製タブ検知(tokenReady)が終わるまでは押せない(D6・仕様6.2)。鍵を
             //   持てていなくても、取得自体に失敗したとき(lockUnavailable)は
             //   fail openで押せる(サーバが最終的な権威・review round1 Critical)。
+            // ⚠(横断レビュー I1) ただしfail openが効くのは鍵の状態が idle の間だけ。
+            //   状態(lock.state.kind)を必ず渡す=取得の失敗後に423で帯が出たら
+            //   ボタンも一緒に閉じる(帯と矛盾させない)。
             disabled={
-              !canSubmitSave({ tokenReady, canSave: lock.canSave, saving, lockUnavailable })
+              !canSubmitSave({
+                tokenReady,
+                canSave: lock.canSave,
+                saving,
+                lockUnavailable,
+                stateKind: lock.state.kind,
+              })
             }
             className="flex items-center gap-1.5 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
           >

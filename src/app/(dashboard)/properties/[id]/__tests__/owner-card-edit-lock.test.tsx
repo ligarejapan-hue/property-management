@@ -181,6 +181,13 @@ describe("所有者カードの配線(source assertion)", () => {
     expect(src).toMatch(/!canSubmitSave\(\{\s*tokenReady:\s*editLockTokenReady/);
   });
 
+  it("(横断レビューI1) canSubmitSaveへ鍵の状態(lock.state.kind)も渡す=fail openの旗が帯を上書きしない", () => {
+    // ⚠これが抜けると、取得が失敗したあと423で帯が「この内容は保存できません」と
+    //   出ているのに保存ボタンだけ押せる自己矛盾に戻る。固定値を渡す退行も落とす
+    //   ため、`lock.state.kind` という式そのものを要求する。
+    expect(src).toMatch(/canSubmitSave\(\{[\s\S]*?stateKind:\s*lock\.state\.kind/);
+  });
+
   it("fail openの通知はshouldShowLockUnavailableNotice経由(Task5の判断をそのまま再利用)", () => {
     // ⚠(branch review Minor #6) 第1引数(lockUnavailable)だけを固定すると、
     //   idle以外で通知を消す第2引数(lock.state.kind)側が抜け落ちても green になる。

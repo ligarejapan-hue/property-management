@@ -18,25 +18,52 @@ import type { EditLockUiState } from "./ui-state";
 import type { EditLockStatusRow } from "@/lib/api-client";
 
 /**
+ * fail open の旗(`lockUnavailable`)が**今も効いているか**(横断レビュー I1)。
+ *
+ * この旗の意味は「鍵の取得自体が失敗した=鍵を**見られない**」でしかなく、
+ * 「鍵が無い」ではない。サーバが権威なので、見られないことを理由に画面が保存を
+ * 止めてはいけない(fail open・task5 review round1 Critical)。
+ * ⚠だが**`idle` の間だけ**。取得が失敗した後に保存が423で断られて状態が
+ *   `taken`/`expired`/`force_released`/`deleted` へ動いたら、鍵の実情は
+ *   もう「見られない」ではなく「見えていて、保存できない」。そこでこの旗を
+ *   効かせ続けると、帯が「この内容は保存できません」と出しているのに
+ *   保存ボタンだけ押せる自己矛盾になる(`lockUnavailable` は閉じる/キャンセル/
+ *   保存成功でしか戻らないため、一度立つと状態が動いても永久に true)。
+ * ⚠**帯の通知とボタンはこの1本の判定を共有する**。同じ条件を2か所に書くと、
+ *   片方だけ直した過去(通知は状態を見るのにボタンは見ていなかった=I1)を
+ *   繰り返す。
+ */
+function isLockUnavailableFailOpen(
+  lockUnavailable: boolean,
+  stateKind: EditLockUiState["kind"],
+): boolean {
+  return lockUnavailable && stateKind === "idle";
+}
+
+/**
  * 保存ボタンを押せるか(task5 review round1 Important #3)。
  * ⚠この判断自体をテストで直接検査できるよう、JSX の `disabled={}` から切り出す
  *   (`disabled={` という文字列は画面に複数箇所あり、走査だけでは
  *   「決定が実行されているか」を固定できないため)。
- * `lockUnavailable` が true のときは `canSave` が false でも押せる(fail open)。
+ * `lockUnavailable` が true でも押せるのは、鍵の状態が `idle` の間だけ
+ * (= fail open が効いている間だけ・横断レビュー I1。`stateKind` は必須にして、
+ * 呼び出し側が状態を渡し忘れられないようにする)。
  */
 export function canSubmitSave({
   tokenReady,
   canSave,
   saving,
   lockUnavailable,
+  stateKind,
 }: {
   tokenReady: boolean;
   canSave: boolean;
   saving: boolean;
   lockUnavailable: boolean;
+  stateKind: EditLockUiState["kind"];
 }): boolean {
   if (!tokenReady || saving) return false;
-  return canSave || lockUnavailable;
+  return canSave || isLockUnavailableFailOpen(lockUnavailable, stateKind);
 }
 
 /**
@@ -47,12 +74,13 @@ export function canSubmitSave({
  *   鍵の帯(`EditLockBanner`)が表示を引き継ぐ。両方を同時に出すと、「保存は通常
  *   どおり行えます」と実際の鍵の帯(保存できない旨)が矛盾したまま、利用者が
  *   繰り返し423を踏むことになる。
+ * ⚠判定そのものは `canSubmitSave` と**同じ1本**(`isLockUnavailableFailOpen`)。
  */
 export function shouldShowLockUnavailableNotice(
   lockUnavailable: boolean,
   stateKind: EditLockUiState["kind"],
 ): boolean {
-  return lockUnavailable && stateKind === "idle";
+  return isLockUnavailableFailOpen(lockUnavailable, stateKind);
 }
 
 /**

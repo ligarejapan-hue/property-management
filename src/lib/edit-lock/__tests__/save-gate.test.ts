@@ -13,42 +13,128 @@ import {
   editLockUnavailableTitle,
 } from "../save-gate";
 import type { EditLockStatusRow } from "@/lib/api-client";
+import type { EditLockUiState } from "../ui-state";
+
+const ALL_STATE_KINDS: EditLockUiState["kind"][] = [
+  "idle",
+  "mine",
+  "expired",
+  "force_released",
+  "taken",
+  "deleted",
+];
 
 describe("canSubmitSave(保存ボタンを押せるかの判断)", () => {
   it("tokenReadyがfalseならcanSave/lockUnavailableに関わらず押せない", () => {
     expect(
-      canSubmitSave({ tokenReady: false, canSave: true, saving: false, lockUnavailable: true }),
+      canSubmitSave({
+        tokenReady: false,
+        canSave: true,
+        saving: false,
+        lockUnavailable: true,
+        stateKind: "idle",
+      }),
     ).toBe(false);
   });
 
   it("saving中は押せない", () => {
     expect(
-      canSubmitSave({ tokenReady: true, canSave: true, saving: true, lockUnavailable: false }),
+      canSubmitSave({
+        tokenReady: true,
+        canSave: true,
+        saving: true,
+        lockUnavailable: false,
+        stateKind: "mine",
+      }),
     ).toBe(false);
   });
 
   it("鍵を持っていれば押せる(通常経路)", () => {
     expect(
-      canSubmitSave({ tokenReady: true, canSave: true, saving: false, lockUnavailable: false }),
+      canSubmitSave({
+        tokenReady: true,
+        canSave: true,
+        saving: false,
+        lockUnavailable: false,
+        stateKind: "mine",
+      }),
     ).toBe(true);
   });
 
   it("鍵を持っておらず取得も失敗していなければ押せない(他人が持っている等)", () => {
     expect(
-      canSubmitSave({ tokenReady: true, canSave: false, saving: false, lockUnavailable: false }),
+      canSubmitSave({
+        tokenReady: true,
+        canSave: false,
+        saving: false,
+        lockUnavailable: false,
+        stateKind: "taken",
+      }),
     ).toBe(false);
   });
 
-  it("鍵は持っていないが取得自体が失敗していればfail openで押せる(review round1 Critical)", () => {
+  it("取得自体が失敗し、まだ誰も鍵を持っていない(idle)間はfail openで押せる(review round1 Critical)", () => {
     expect(
-      canSubmitSave({ tokenReady: true, canSave: false, saving: false, lockUnavailable: true }),
+      canSubmitSave({
+        tokenReady: true,
+        canSave: false,
+        saving: false,
+        lockUnavailable: true,
+        stateKind: "idle",
+      }),
     ).toBe(true);
   });
 
   it("鍵を持っていて、かつlockUnavailableがtrueでも押せる(矛盾しない組み合わせ)", () => {
     expect(
-      canSubmitSave({ tokenReady: true, canSave: true, saving: false, lockUnavailable: true }),
+      canSubmitSave({
+        tokenReady: true,
+        canSave: true,
+        saving: false,
+        lockUnavailable: true,
+        stateKind: "mine",
+      }),
     ).toBe(true);
+  });
+
+  /**
+   * 横断レビュー I1。`lockUnavailable` は**取得が失敗して鍵が見られない**ことを表す旗
+   * でしかない。取得の失敗後に保存が423で断られて状態が動いたら、帯は
+   * 「この内容は保存できません」と出ているのに、この旗だけでボタンが押せたままに
+   * なっていた(=画面が「保存できる」と言っているのに実際はできない、このブランチが
+   * 2度潰した自己矛盾の3例目)。fail open が効くのは `idle` の間だけ。
+   */
+  describe("(I1) 取得が失敗した後に状態が動いたら、fail openの旗ではもう押せない", () => {
+    for (const stateKind of ["taken", "force_released", "deleted", "expired"] as const) {
+      it(`${stateKind} では押せない(帯が保存できない旨を出しているのと矛盾させない)`, () => {
+        expect(
+          canSubmitSave({
+            tokenReady: true,
+            canSave: false,
+            saving: false,
+            lockUnavailable: true,
+            stateKind,
+          }),
+        ).toBe(false);
+      });
+    }
+  });
+
+  it("(I1) fail openの旗が効く条件は、通知を出す条件(shouldShowLockUnavailableNotice)と6つのkind全部で一致する", () => {
+    // ⚠同じ条件を2か所に書かない。ボタンと通知が構造的に揃っていることを、
+    //   状態の種類を1つ増やしても自動で守られる形で固定する。
+    for (const stateKind of ALL_STATE_KINDS) {
+      expect(
+        canSubmitSave({
+          tokenReady: true,
+          canSave: false,
+          saving: false,
+          lockUnavailable: true,
+          stateKind,
+        }),
+        `stateKind=${stateKind}`,
+      ).toBe(shouldShowLockUnavailableNotice(true, stateKind));
+    }
   });
 });
 
