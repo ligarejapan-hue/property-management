@@ -221,6 +221,15 @@ export async function POST(request: NextRequest) {
     // 宛先が1件も作れないなら、キャンペーンをクレームする前に止める。以前は宛先0件の空キャンペーンを
     // 作って画面を移しており、利用者は「均等に割り当て」を押しても何も起きない画面に取り残された
     // (2026-09-26 発注者の実機テスト)。何が足りないかを文言で返す(UI はそのまま表示する)。
+    // ⚠宛先はあるのに上限で0件になった(1物件だけで住所の違う共有者が上限超)ときは別の理由で返す。
+    //   「送付可・住所」の案内は当てはまらず、直しようがない(@codex #446 R3 P2)。
+    if (capped.recipients.length === 0 && recipients.length > 0) {
+      throw new ApiError(
+        400,
+        `1つの物件だけで宛先(住所の違う共有者)が${MAX_GENERATE_ITEMS}通を超えるため、売却DMを作れません。宛名CSV(DM差込CSV出力)をお使いください`,
+        "TOO_MANY_RECIPIENTS_IN_PROPERTY",
+      );
+    }
     if (capped.recipients.length === 0) {
       throw new ApiError(
         400,

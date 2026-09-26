@@ -200,6 +200,26 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect(json.requested).toBe(1); // 空白住所は宛先を作れない
   });
 
+  // @codex #446 R3 P2: 1物件だけで50通を超えると cap が0件を返す。「送付可・住所」の案内は
+  // 当てはまらない(直しようがない)ので、上限による0件は別の理由で返す。
+  it("1物件だけで宛先が50通を超えて0件になったときは、上限の理由で 400(送付可・住所の案内にしない)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const owners = Array.from({ length: 51 }, (_, i) => ({
+      isPrimary: i === 0, relationship: null,
+      owner: { name: `o${i}`, nameKana: null, zip: "1000001", address: `東京都〇〇区X-${i}`, corporateNumber: null },
+    }));
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([
+      { id: "p1", address: "A", propertyType: "land", roomNo: null, propertyOwners: owners } as never,
+    ]);
+    const res = await POST(req({ ...validBody, propertyIds: ["11111111-1111-4111-8111-111111111111"] }) as never);
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error.code).toBe("TOO_MANY_RECIPIENTS_IN_PROPERTY");
+    expect(json.error.message).toContain("50");
+    expect(json.error.message).not.toContain("送付可");
+    expect((prismaMock as never as { dmCampaign: { create: ReturnType<typeof vi.fn> } }).dmCampaign.create).not.toHaveBeenCalled();
+  });
+
   it("propertyIds でも共有者多数で50通を超える分は物件単位で切り詰める(1物件を分断しない・Codex R9-P1)", async () => {
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
     // 各物件に「別住所の共有者」を n 人 = n 通に fan-out させる。max: undefined の無制限だと 60通課金になるところ。
