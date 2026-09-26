@@ -123,7 +123,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
         </button>
       </div>
       {campaign.lpVariants.length === 0 && (
-        <p className="text-xs text-gray-500">LP型がまだありません。この段階で作れるのは文章とA/Bの割当までで、QRの飛び先は当面これまでどおり外部LPです(アプリ内のご案内ページは次の段階で公開されます)。</p>
+        <p className="text-xs text-gray-500">LP型がまだありません。「LP型を追加」でラベルを入れて保存し、できた行の書類のアイコンから文章を貼り付けます。文章のあるLP型を割り当てた宛先は、お手紙のQRからこのご案内ページが開きます。</p>
       )}
       {error && <p className="text-xs text-red-600">{error}</p>}
 
@@ -150,8 +150,10 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
         <div className="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-xs">
           <label className="block">
             <span className="text-gray-600">ラベル</span>
-            <input value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} maxLength={40} className="mt-0.5 w-full rounded-md border border-gray-300 px-2 py-1 text-sm" />
+            <input value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} maxLength={40} placeholder="例: 相続向けA" className="mt-0.5 w-full rounded-md border border-gray-300 px-2 py-1 text-sm" />
           </label>
+          {/* ⚠ラベルが空だと保存が押せない。理由が無いと「押しても何も起きない」に見える(2026-09-26 実機テスト)。 */}
+          {form.label.trim().length === 0 && <p className="text-amber-700">ラベルを入れると保存できます</p>}
           {campaign.variants.length > 0 && (
             <label className="block">
               <span className="text-gray-600">DM型の設定を写す</span>

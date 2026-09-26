@@ -99,7 +99,9 @@ beforeEach(() => {
   process.env.SALE_DM_SENDER_CONTACT = "03-0000-0000";
   (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1" });
   (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue(plain);
-  (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([]);
+  // 既定は「宛先を作れる物件1件」。宛先0件は 400 NO_ELIGIBLE_RECIPIENTS になった(空キャンペーンを
+  // 作らない)ので、0件を試すテストは個別に [] を与える。
+  (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([property]);
 });
 
 describe("POST /api/properties/sale-dm/campaigns", () => {
@@ -111,13 +113,28 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
   });
 
-  it("0件対象でも 200・campaignId を返す", async () => {
+  // ⚠2026-09-26 発注者の実機テストで、対象外の物件を選ぶと宛先0件の空キャンペーンが
+  //   作られて画面が移り、「均等に割り当て」を押しても何も起きなかった。0件なら作らずに理由を返す。
+  it("宛先0件なら 400 NO_ELIGIBLE_RECIPIENTS・キャンペーンを作らない(空キャンペーンを残さない)", async () => {
     grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
-    const res = await POST(req(validBody) as never);
-    expect(res.status).toBe(200);
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([]);
+    const res = await POST(req({ ...validBody, propertyIds: ["00000000-0000-4000-8000-000000000001"] }) as never);
+    expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.campaignId).toBe("c1");
-    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(json.error.code).toBe("NO_ELIGIBLE_RECIPIENTS");
+    expect(json.error.message).toContain("送付可");
+    expect(json.error.message).toContain("住所");
+    const p = prismaMock as never as { dmCampaign: { create: ReturnType<typeof vi.fn> }; $transaction: ReturnType<typeof vi.fn> };
+    expect(p.dmCampaign.create).not.toHaveBeenCalled();
+    expect(p.$transaction).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+  it("絞り込み経路(propertyIds 無し)で0件でも同じく 400(空キャンペーンを作らない)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([]);
+    const res = await POST(req(validBody) as never);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("NO_ELIGIBLE_RECIPIENTS");
   });
 
   it("propertyIds を渡すと選択物件を対象にし dmStatus=send を強制しない・requested を返す", async () => {
@@ -142,7 +159,8 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     const findMany = (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany;
     findMany.mockResolvedValue([]);
     const res = await POST(req({ ...validBody, propertyIds: ["11111111-1111-4111-8111-111111111111"] }) as never);
-    expect(res.status).toBe(200);
+    // 担当範囲外で1件も残らない=宛先0件なので空キャンペーンは作らず 400。
+    expect(res.status).toBe(400);
     const whereArg = findMany.mock.calls[0][0].where;
     expect(whereArg.AND).toEqual([{ OR: [{ createdBy: "u1" }, { assignedTo: "u1" }] }]);
     expect(whereArg.id).toEqual({ in: ["11111111-1111-4111-8111-111111111111"] });
@@ -180,6 +198,26 @@ describe("POST /api/properties/sale-dm/campaigns", () => {
     const json = await res.json();
     expect(json.matchedProperties).toBe(1); // 宛先を作れた物件のみ(properties.length=2 ではない)
     expect(json.requested).toBe(1); // 空白住所は宛先を作れない
+  });
+
+  // @codex #446 R3 P2: 1物件だけで50通を超えると cap が0件を返す。「送付可・住所」の案内は
+  // 当てはまらない(直しようがない)ので、上限による0件は別の理由で返す。
+  it("1物件だけで宛先が50通を超えて0件になったときは、上限の理由で 400(送付可・住所の案内にしない)", async () => {
+    grant("property", "csv_export", "csv_export_personal", "owner", "sale_dm");
+    const owners = Array.from({ length: 51 }, (_, i) => ({
+      isPrimary: i === 0, relationship: null,
+      owner: { name: `o${i}`, nameKana: null, zip: "1000001", address: `東京都〇〇区X-${i}`, corporateNumber: null },
+    }));
+    (prismaMock as never as { property: { findMany: ReturnType<typeof vi.fn> } }).property.findMany.mockResolvedValue([
+      { id: "p1", address: "A", propertyType: "land", roomNo: null, propertyOwners: owners } as never,
+    ]);
+    const res = await POST(req({ ...validBody, propertyIds: ["11111111-1111-4111-8111-111111111111"] }) as never);
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error.code).toBe("TOO_MANY_RECIPIENTS_IN_PROPERTY");
+    expect(json.error.message).toContain("50");
+    expect(json.error.message).not.toContain("送付可");
+    expect((prismaMock as never as { dmCampaign: { create: ReturnType<typeof vi.fn> } }).dmCampaign.create).not.toHaveBeenCalled();
   });
 
   it("propertyIds でも共有者多数で50通を超える分は物件単位で切り詰める(1物件を分断しない・Codex R9-P1)", async () => {

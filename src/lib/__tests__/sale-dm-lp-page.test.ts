@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderLpPage, LP_CTA_LABEL, LP_PAGE_HEADERS } from "../sale-dm-letter/lp-page";
+import { renderLpPage, LP_CTA_LABEL, LP_PAGE_HEADERS, INQUIRY_CLIENT_CHECK_SOURCE } from "../sale-dm-letter/lp-page";
 import type { LpRenderInput } from "../sale-dm-letter/lp-render-input";
 import { HONEYPOT_FIELD } from "../sale-dm-letter/inquiry-input";
 
@@ -184,5 +184,116 @@ describe("申込フォーム(PR4)", () => {
     expect(html).toContain('<meta name="referrer" content="strict-origin" />');
     expect(html).not.toContain('content="same-origin"');
     expect(html).not.toContain("no-referrer");
+  });
+});
+
+// ⚠2026-09-26 発注者の実機テスト: 同意のチェックを入れ忘れると「無料査定を申し込む」を押しても
+//   何も起きなかった(スマホのブラウザの吹き出しが見えない)。発注者の指定=「進めないときは入力欄の
+//   ところに赤字で注意書きをして、そこまでスクロール」。
+describe("申込フォームの画面内の入力チェック(発注者指定 2026-09-26)", () => {
+  const FORM = { action: "/t/tok_live/inquiry", privacyText: "利用目的", disabled: false };
+  type Err = { f: string; m: string };
+  const check = new Function(`return (${INQUIRY_CLIENT_CHECK_SOURCE})`)() as (v: Record<string, unknown>) => Err[];
+  const OK = { name: "テスト太郎", phone: "09012345678", email: "", pref: "", consent: true };
+
+  it("各入力欄の下に赤字の注意書きを出す場所がある(お名前・電話・メール・同意)", () => {
+    const html = renderLpPage(input({ mode: "live", form: FORM }));
+    for (const f of ["name", "phone", "email", "consent"]) {
+      expect(html).toContain(`<p class="fld-err" data-err-for="${f}" role="alert" hidden></p>`);
+    }
+    expect(html).toMatch(/\.inquiry \.fld-err\{[^}]*color:#b42318/);
+  });
+
+  it("スクリプトはブラウザ任せの吹き出しを止め、最初の不足欄までスクロールしてフォーカスする", () => {
+    const html = renderLpPage(input({ mode: "live", form: FORM }));
+    expect(html).toContain("f.noValidate=true");
+    expect(html).toContain("scrollIntoView");
+    expect(html).toContain(".focus(");
+    // JS なしのブラウザではブラウザの必須チェックが残る(required 属性は消さない)
+    expect(html).toMatch(/name="name"[^>]*required/);
+    expect(html).toMatch(/type="checkbox" name="consent" value="yes" required/);
+  });
+
+  it("サーバーの指摘(一覧)が出たときも、その位置までスクロールする", () => {
+    const html = renderLpPage(input({ mode: "live", form: FORM }));
+    expect(html).toMatch(/function show\([^)]*\)\{[^]*?scrollIntoView/);
+  });
+
+  it("正しい入力なら注意なし", () => {
+    expect(check(OK)).toEqual([]);
+  });
+
+  it("同意なし → 同意の欄に注意", () => {
+    expect(check({ ...OK, consent: false })).toEqual([{ f: "consent", m: "個人情報の取り扱いへの同意が必要です。" }]);
+  });
+
+  it("お名前が空/数字や@入り → お名前の欄に注意", () => {
+    expect(check({ ...OK, name: "  " })[0]).toEqual({ f: "name", m: "お名前をご入力ください。" });
+    expect(check({ ...OK, name: "テスト1" })[0].f).toBe("name");
+    expect(check({ ...OK, name: "ｔｅｓｔ＠" })[0].f).toBe("name");
+  });
+
+  it("電話: ハイフンなし・ハイフンあり・全角はどれも通る/空・9桁以下・文字入りは注意", () => {
+    for (const phone of ["09012345678", "090-1234-5678", "０３ー１２３４ー５６７８"]) expect(check({ ...OK, phone })).toEqual([]);
+    expect(check({ ...OK, phone: "" })[0]).toEqual({ f: "phone", m: "電話番号をご入力ください。" });
+    expect(check({ ...OK, phone: "090123456" })[0].f).toBe("phone");
+    expect(check({ ...OK, phone: "090-abcd-5678" })[0].f).toBe("phone");
+  });
+
+  it("メール: 形式違いは注意/連絡方法=メールなのに空なら注意", () => {
+    expect(check({ ...OK, email: "a@b" })[0].f).toBe("email");
+    // 直すべきはメールの欄なので、注意もメールの欄に出す(@codex #446 R1 P2: 連絡方法のラジオへ飛ぶと
+    // 直す場所が分からず、メールを入れても注意が消えなかった)。
+    expect(check({ ...OK, pref: "email", email: "" })).toEqual([{ f: "email", m: "メールでのご連絡をご希望の場合は、メールアドレスをご入力ください。" }]);
+  });
+
+  it("複数あれば画面の上から順に並ぶ(最初の不足欄へスクロールするため)", () => {
+    expect(check({ name: "", phone: "", email: "", pref: "", consent: false }).map((e) => e.f)).toEqual(["name", "phone", "consent"]);
+  });
+
+  it("電話番号の見本は、ハイフンなしでもよいと分かる書き方", () => {
+    const html = renderLpPage(input({ mode: "live", form: FORM }));
+    expect(html).toContain('placeholder="例: 09012345678(ハイフンなしでも可)"');
+    expect(html).not.toContain('placeholder="例: 090-1234-5678"');
+  });
+
+  it("送付前(disabled)は、入力できない理由をフォームの中にも書く", () => {
+    const html = renderLpPage(input({ mode: "preview", form: { ...FORM, action: "#", disabled: true } }));
+    expect(html).toContain("この宛先はまだ送付前のため、入力とお申し込みはできません");
+    const live = renderLpPage(input({ mode: "live", form: FORM }));
+    expect(live).not.toContain("この宛先はまだ送付前のため");
+  });
+});
+
+describe("申込フォームのスクリプトは JavaScript として正しく読める", () => {
+  it("埋め込まれた <script> がすべて構文エラーなく解釈できる(壊れるとフォーム全体が無言で止まる)", () => {
+    const html = renderLpPage(input({ mode: "live", form: { action: "/t/tok/inquiry", privacyText: "x", disabled: false } }));
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    expect(scripts.length).toBeGreaterThanOrEqual(2);
+    for (const s of scripts) expect(() => new Function(s)).not.toThrow();
+  });
+});
+
+describe("全角→半角の変換が無い古いブラウザ(@codex #446 R2 P2)", () => {
+  type Err = { f: string; m: string };
+  it("形式のチェックはせず(サーバーに任せる)、空・同意なしだけ注意する=正しい全角の番号を弾かない", () => {
+    const check = new Function(`return (${INQUIRY_CLIENT_CHECK_SOURCE})`)() as (v: Record<string, unknown>) => Err[];
+    const orig = String.prototype.normalize;
+    // @ts-expect-error 古いブラウザの再現(normalize が無い)
+    delete String.prototype.normalize;
+    try {
+      expect(check({ name: "テスト", phone: "０９０１２３４５６７８", email: "", pref: "", consent: true })).toEqual([]);
+      expect(check({ name: "", phone: "", email: "", pref: "", consent: false }).map((e) => e.f)).toEqual(["name", "phone", "consent"]);
+    } finally {
+      String.prototype.normalize = orig;
+    }
+  });
+});
+
+describe("連絡方法を変えたら、連動する注意も消える(@codex #446 R4 P2)", () => {
+  it("連絡方法(contactPref)を変えると、メール欄の注意も消す配線がある", () => {
+    const html = renderLpPage(input({ mode: "live", form: { action: "/t/tok/inquiry", privacyText: "x", disabled: false } }));
+    expect(html).toContain('var DEP={contactPref:"email"}');
+    expect(html).toContain("if(DEP[t.name]){clearField(DEP[t.name])}");
   });
 });
