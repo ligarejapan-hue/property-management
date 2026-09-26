@@ -69,3 +69,22 @@ export function isRegistryOwnerApplyRow(jobType: string, rawData: unknown): bool
   if (row[REGISTRY_OWNER_APPLY_KIND_KEY] !== REGISTRY_OWNER_APPLY_KIND) return false;
   return readRegistryOwnerApplyRow(rawData) !== null;
 }
+
+/**
+ * まとめて反映の行を外へ返す前に、**物件を見られない人には物件の住所を外す**。
+ * ⚠取込の記録は「取込」の権限で見られるので、物件を見る権限が無い人にも最大5,000件の
+ *   住所が見えてしまう(@codex 第10R P1)。物件IDは残す(リンク先で改めて権限を確かめる)。
+ * ⚠まとめて反映以外の行には手を出さない(従来の取込の見え方を変えない)。
+ * 行を返す窓口はすべてここを通す(→ __tests__/redact-coverage.test.ts)。
+ */
+export function redactRegistryOwnerApplyRow<T extends { rawData?: unknown }>(
+  jobType: string,
+  row: T,
+  canReadProperty: boolean,
+): T {
+  if (canReadProperty) return row;
+  if (!isRegistryOwnerApplyRow(jobType, row.rawData)) return row;
+  const { address: _omitted, ...rest } = row.rawData as Record<string, unknown>;
+  void _omitted;
+  return { ...row, rawData: rest };
+}

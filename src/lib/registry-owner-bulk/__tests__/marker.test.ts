@@ -12,6 +12,7 @@ import {
   buildRegistryOwnerApplyRawData,
   isRegistryOwnerApplyRow,
   readRegistryOwnerApplyRow,
+  redactRegistryOwnerApplyRow,
 } from "@/lib/registry-owner-bulk/marker";
 
 const rawData = buildRegistryOwnerApplyRawData({
@@ -74,5 +75,35 @@ describe("行に書き込む内容", () => {
     );
     expect(readRegistryOwnerApplyRow({ propertyId: 123 })).toBeNull();
     expect(readRegistryOwnerApplyRow(null)).toBeNull();
+  });
+});
+
+/**
+ * ⚠なぜ必要か(@codex 第10R P1): まとめて反映の行には物件の住所を残す(結果の一覧で
+ *   どの物件かを示すため)。取込の記録は「取込」の権限で見られるので、物件を見る権限が
+ *   無い人にも最大5,000件の住所が見えてしまう。物件を見られない人には住所を外す。
+ */
+describe("物件を見られない人には、まとめて反映の行の住所を外す", () => {
+  const row = { id: "r1", rawData };
+
+  it("⚠物件を見られない人には address を外す（物件IDは残す）", () => {
+    const out = redactRegistryOwnerApplyRow("registry_pdf_bulk", row, false);
+    const raw = out.rawData as Record<string, unknown>;
+    expect(raw).not.toHaveProperty("address");
+    expect(raw.propertyId).toBe("11111111-1111-4111-8111-111111111111");
+    expect(out.id).toBe("r1");
+    // 元の行は書き換えない
+    expect((row.rawData as Record<string, unknown>).address).toBeDefined();
+  });
+
+  it("物件を見られる人には、そのまま返す", () => {
+    expect(redactRegistryOwnerApplyRow("registry_pdf_bulk", row, true)).toBe(row);
+  });
+
+  it("⚠まとめて反映以外の行（PDFを上げた一括取込など）には手を出さない", () => {
+    const other = { id: "r2", rawData: { fileName: "x.PDF", address: "東京都" } };
+    expect(redactRegistryOwnerApplyRow("registry_pdf_bulk", other, false)).toBe(other);
+    const csv = { id: "r3", rawData: { ...rawData } };
+    expect(redactRegistryOwnerApplyRow("property_csv", csv, false)).toBe(csv);
   });
 });

@@ -8,6 +8,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { assertImportJobVisible } from "@/lib/import-job-guard";
+import { redactRegistryOwnerApplyRow } from "@/lib/registry-owner-bulk/marker";
 import { writeAuditLog } from "@/lib/audit";
 import { encodeCsv } from "@/lib/csv-encode";
 import { classifyImportError } from "@/lib/import-error-display";
@@ -78,7 +79,7 @@ export async function GET(
     // ジョブ存在確認のみ。fileName 等は今のところ使わないが将来のヘッダ拡張用。
     const job = await prisma.importJob.findUnique({
       where: { id: jobId },
-      select: { id: true, executedBy: true },
+      select: { id: true, executedBy: true, jobType: true },
     });
 
     if (!job) {
@@ -87,10 +88,14 @@ export async function GET(
     // 他の担当者が実行した取込は見せない(2026-08-02 監査)。
     assertImportJobVisible(job, session.id, perms);
 
-    const rows = await prisma.importJobRow.findMany({
-      where: { jobId, status: { in: ["error", "needs_review"] } },
-      orderBy: { rowNumber: "asc" },
-    });
+    // ⚠物件を見られない人には、まとめて反映の行の物件住所を外す(@codex 第10R)
+    const canReadProperty = hasPermission(perms, "property", "read");
+    const rows = (
+      await prisma.importJobRow.findMany({
+        where: { jobId, status: { in: ["error", "needs_review"] } },
+        orderBy: { rowNumber: "asc" },
+      })
+    ).map((r) => redactRegistryOwnerApplyRow(job.jobType, r, canReadProperty));
 
     // rawData のキーを first-seen 順で union。`__` プレフィックスは
     // 内部用フィールド (例: __building_candidates) なので除外する。

@@ -21,6 +21,7 @@ import { isReceptionOwnerJobRow } from "@/lib/reception-owner-link";
 import {
   REGISTRY_OWNER_APPLY_JOB_TYPE,
   isRegistryOwnerApplyRow,
+  redactRegistryOwnerApplyRow,
 } from "@/lib/registry-owner-bulk/marker";
 
 // ---------- GET /api/import/jobs/:jobId ----------
@@ -300,9 +301,12 @@ export async function GET(
     });
     const isRegistryPdfBulkJob = job.jobType === "registry_pdf_bulk";
 
+    // ⚠物件を見られない人には、まとめて反映の行の物件住所を外す(@codex 第10R)
+    const canReadProperty = hasPermission(perms, "property", "read");
+
     return apiResponse({
       ...job,
-      rows,
+      rows: rows.map((r) => redactRegistryOwnerApplyRow(job.jobType, r, canReadProperty)),
       summary,
       isReceptionOwnerJob,
       duplicateCount,

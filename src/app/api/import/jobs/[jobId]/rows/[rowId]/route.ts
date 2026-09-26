@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { assertImportJobMutable } from "@/lib/import-job-guard";
+import { redactRegistryOwnerApplyRow } from "@/lib/registry-owner-bulk/marker";
 import { writeAuditLog } from "@/lib/audit";
 import { findDuplicateOwner } from "@/lib/owner-dedup";
 import { recalculateJobCounts } from "@/lib/import-job-counts";
@@ -295,7 +296,14 @@ export async function PATCH(
       },
     });
 
-    return apiResponse(updatedRow);
+    // ⚠物件を見られない人には、まとめて反映の行の物件住所を外す(@codex 第10R)
+    return apiResponse(
+      redactRegistryOwnerApplyRow(
+        row.job.jobType,
+        updatedRow,
+        hasPermission(perms, "property", "read"),
+      ),
+    );
   } catch (error) {
     return handleApiError(error);
   }

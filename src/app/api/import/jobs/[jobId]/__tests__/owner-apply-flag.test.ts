@@ -29,7 +29,7 @@ vi.mock("@/lib/api-helpers", () => ({
     ),
   ),
 }));
-vi.mock("@/lib/permissions", () => ({ hasPermission: () => true }));
+vi.mock("@/lib/permissions", () => ({ hasPermission: vi.fn(() => true) }));
 vi.mock("@/lib/prisma", () => ({
   default: {
     importJob: { findUnique: vi.fn() },
@@ -43,6 +43,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
+import { hasPermission } from "@/lib/permissions";
 import prisma from "@/lib/prisma";
 import { buildRegistryOwnerApplyRawData } from "@/lib/registry-owner-bulk/marker";
 import { GET } from "../route";
@@ -104,5 +105,36 @@ describe("まとめて反映の記録の見分け", () => {
     expect(pm.importJobRow.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ orderBy: { rowNumber: "asc" } }),
     );
+  });
+});
+
+/** ⚠@codex 第10R P1: 物件を見る権限が無い人には、まとめて反映の行の住所を返さない。 */
+describe("まとめて反映の行の物件住所", () => {
+  const ownerApplyRow = {
+    id: "r1",
+    rowNumber: 1,
+    status: "success",
+    rawData: buildRegistryOwnerApplyRawData({
+      propertyId: "11111111-1111-4111-8111-111111111111",
+      address: "東京都渋谷区神宮前三丁目12-3",
+    }),
+  };
+
+  it("⚠物件を見る権限が無い人には、行の住所を外して返す", async () => {
+    (hasPermission as unknown as Mock).mockImplementation(
+      (_p: unknown, resource: string, action: string) =>
+        !(resource === "property" && action === "read"),
+    );
+    pm.importJobRow.findMany.mockResolvedValue([ownerApplyRow]);
+    const body = await (await call()).json();
+    expect(JSON.stringify(body.rows)).not.toContain("神宮前");
+    expect(body.rows[0].rawData.propertyId).toBe("11111111-1111-4111-8111-111111111111");
+  });
+
+  it("物件を見られる人には、住所も返す", async () => {
+    (hasPermission as unknown as Mock).mockImplementation(() => true);
+    pm.importJobRow.findMany.mockResolvedValue([ownerApplyRow]);
+    const body = await (await call()).json();
+    expect(body.rows[0].rawData.address).toBe("東京都渋谷区神宮前三丁目12-3");
   });
 });

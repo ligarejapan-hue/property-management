@@ -55,7 +55,7 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:344":
     "property.lotNumber/buildingNumber(空欄補完)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:214":
+  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:215":
     "owner の住所ペア空欄補完(fieldPatch)+version increment",
   "src/app/api/import/reception-owner/route.ts:354":
     "property.lotNumber/buildingNumber/roomNo(空欄補完)+version increment" +
@@ -150,7 +150,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },
-  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:180": {
+  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:181": {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },
