@@ -196,9 +196,9 @@ describe("申込フォームの画面内の入力チェック(発注者指定 20
   const check = new Function(`return (${INQUIRY_CLIENT_CHECK_SOURCE})`)() as (v: Record<string, unknown>) => Err[];
   const OK = { name: "テスト太郎", phone: "09012345678", email: "", pref: "", consent: true };
 
-  it("各入力欄の下に赤字の注意書きを出す場所がある(お名前・電話・メール・連絡方法・同意)", () => {
+  it("各入力欄の下に赤字の注意書きを出す場所がある(お名前・電話・メール・同意)", () => {
     const html = renderLpPage(input({ mode: "live", form: FORM }));
-    for (const f of ["name", "phone", "email", "contactPref", "consent"]) {
+    for (const f of ["name", "phone", "email", "consent"]) {
       expect(html).toContain(`<p class="fld-err" data-err-for="${f}" role="alert" hidden></p>`);
     }
     expect(html).toMatch(/\.inquiry \.fld-err\{[^}]*color:#b42318/);
@@ -242,7 +242,9 @@ describe("申込フォームの画面内の入力チェック(発注者指定 20
 
   it("メール: 形式違いは注意/連絡方法=メールなのに空なら注意", () => {
     expect(check({ ...OK, email: "a@b" })[0].f).toBe("email");
-    expect(check({ ...OK, pref: "email", email: "" })[0].f).toBe("contactPref");
+    // 直すべきはメールの欄なので、注意もメールの欄に出す(@codex #446 R1 P2: 連絡方法のラジオへ飛ぶと
+    // 直す場所が分からず、メールを入れても注意が消えなかった)。
+    expect(check({ ...OK, pref: "email", email: "" })).toEqual([{ f: "email", m: "メールでのご連絡をご希望の場合は、メールアドレスをご入力ください。" }]);
   });
 
   it("複数あれば画面の上から順に並ぶ(最初の不足欄へスクロールするため)", () => {

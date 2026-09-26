@@ -123,7 +123,7 @@ export const INQUIRY_CLIENT_CHECK_SOURCE = [
   'var ph=n(v.phone).replace(/[ー−–—―]/g,"-").replace(/\\s+/g,"");',
   `if(ph===""){E.push({f:"phone",m:M.phone_required})}else if(ph.length>${INQUIRY_LIMITS.phone}||!/^[0-9+\\-]+$/.test(ph)||ph.replace(/[^0-9]/g,"").length<10){E.push({f:"phone",m:M.phone_invalid})}`,
   'var em=n(v.email);if(em!==""&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(em)){E.push({f:"email",m:M.email_invalid})}',
-  'if(n(v.pref)==="email"&&em===""){E.push({f:"contactPref",m:M.email_required_for_pref})}',
+  'if(n(v.pref)==="email"&&em===""){E.push({f:"email",m:M.email_required_for_pref})}',
   'if(!v.consent){E.push({f:"consent",m:M.consent_required})}',
   "return E}",
 ].join("");
@@ -205,7 +205,7 @@ function formSection(form: LpFormInput): string {
     `<label>お名前<span class="req">必須</span><input name="name" type="text" required maxlength="${INQUIRY_LIMITS.name}" autocomplete="name" /></label>${fieldError("name")}` +
     `<label>電話番号<span class="req">必須</span><input name="phone" type="tel" required maxlength="${INQUIRY_LIMITS.phone}" inputmode="tel" autocomplete="tel" placeholder="例: 09012345678(ハイフンなしでも可)" /></label>${fieldError("phone")}` +
     `<label>メールアドレス<span class="opt">任意</span><input name="email" type="email" maxlength="${INQUIRY_LIMITS.email}" autocomplete="email" /></label>${fieldError("email")}` +
-    `<div><strong>ご希望の連絡方法</strong><span class="opt">任意</span><div class="pref">${pref("phone", "電話")}${pref("email", "メール")}${pref("either", "どちらでも")}</div></div>${fieldError("contactPref")}` +
+    `<div><strong>ご希望の連絡方法</strong><span class="opt">任意</span><div class="pref">${pref("phone", "電話")}${pref("email", "メール")}${pref("either", "どちらでも")}</div></div>` +
     `<label>連絡のつきやすい時間帯<span class="opt">任意</span><input name="contactTime" type="text" maxlength="${INQUIRY_LIMITS.contactTime}" placeholder="例: 平日18時以降" /></label>` +
     `<label>ご要望・ご質問<span class="opt">任意</span><textarea name="message" maxlength="${INQUIRY_LIMITS.message}" rows="4"></textarea></label>` +
     `<div class="hp" aria-hidden="true"><label>この欄は空のままにしてください<input name="${HONEYPOT_FIELD}" type="text" tabindex="-1" autocomplete="off" /></label></div>` +
