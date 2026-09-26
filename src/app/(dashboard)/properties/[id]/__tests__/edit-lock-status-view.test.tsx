@@ -142,9 +142,11 @@ describe("仕様6.3の表: 物件が他の人の鍵のとき止まる4つ", () =
 
 describe("仕様6.3の表: 所有者Nが鍵のとき止まるのはそのカードだけ", () => {
   it("OwnerTabはeditLockStatusByKeyとonEditLockReleasedを親から受け取る", () => {
-    expect(PROPERTY_DETAIL_PAGE_SRC).toMatch(
-      /<OwnerTab[\s\S]{0,600}editLockStatusByKey=\{editLockStatus\.byKey\}[\s\S]{0,200}onEditLockReleased=\{editLockStatus\.refresh\}/,
-    );
+    // ⚠文字数の窓で判定しない(main 取り込みで `<OwnerTab>` に属性が2つ増え、
+    //   600文字の窓を超えて**正しいコードが赤になった**実例。要素の境界で切り出す)。
+    const ownerTabElement = extractJsxElement(PROPERTY_DETAIL_PAGE_SRC, "OwnerTab");
+    expect(ownerTabElement).toContain("editLockStatusByKey={editLockStatus.byKey}");
+    expect(ownerTabElement).toContain("onEditLockReleased={editLockStatus.refresh}");
   });
 
   it("OwnerTabは所有者ごとに editLockStatusByKey(\"owner\", po.ownerId) を引いてOwnerCardへ渡す(全カードで同じ行を使い回さない)", () => {

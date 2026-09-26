@@ -522,7 +522,11 @@ describe("A-2c/P2: PropertyOwner link 作成を unique 競合に対して冪等�
     expect(body.ownersLinked).toBe(0);
   });
 
-  it("新規 owner パスで link 作成が P2002 → job は失敗せず linkedCount 増えない", async () => {
+  // ⚠所有者の作成と紐付けを**同じトランザクション**にまとめたため(@codex 第4R:
+  //   分けると紐付け側で中断したとき「どこにも紐付かない所有者」が残る)、
+  //   紐付けが P2002 になると **作成ごと巻き戻る**。よって ownersCreated も 0。
+  //   job が失敗しない(201)点と、二重に紐付けない点は従来どおり。
+  it("新規 owner パスで link 作成が P2002 → job は失敗せず、作成ごと巻き戻る", async () => {
     setParsed([{ name: "佐藤花子", address: "大阪市北区2", share: null }]);
     pm.property.findFirst.mockResolvedValue(null); // 新規 Property
     pm.owner.findMany.mockResolvedValue([]); // 候補なし → 新規 owner
@@ -533,7 +537,7 @@ describe("A-2c/P2: PropertyOwner link 作成を unique 競合に対して冪等�
     const res = await REGISTRY_PDF_POST(jsonReq({ text: "x" }));
     expect(res.status).toBe(201);
     const body = await res.json();
-    expect(body.ownersCreated).toBe(1);
+    expect(body.ownersCreated).toBe(0); // tx ごと巻き戻る＝孤児を残さない
     expect(body.ownersLinked).toBe(0); // 重複で増やさない
   });
 

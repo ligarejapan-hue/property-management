@@ -16,7 +16,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { lockPropertyRow } from "@/lib/property-record-guard";
+import { lockPropertyRecordForWrite, lockPropertyRow } from "@/lib/property-record-guard";
 import { lockOwnerRow } from "@/lib/edit-lock/row-locks";
 import { isResourceEditLocked } from "@/lib/edit-lock/service";
 import { ApiError } from "@/lib/api-helpers";
@@ -27,11 +27,7 @@ import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { pickReusableAddresslessOwner } from "@/lib/registry-pdf/owner-reuse";
 import { parseRegistryText } from "@/lib/pdf-registry-parser";
 import { buildErrorRawDataExtras } from "@/lib/import-error-display";
-import {
-  getStorage,
-  validateFile,
-  ALLOWED_ATTACHMENT_MIMES,
-} from "@/lib/storage";
+import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES } from "@/lib/storage";
 import {
   decideCorporateImport,
   emptyCorporateImportSummary,
@@ -98,6 +94,35 @@ export interface ProcessRegistryPdfArgs {
   /** multipart(PDF binary) のときのみ非 null。Attachment(type="registry") 保存用。 */
   pdfBuffer: Buffer | null;
   /**
+   * 「所有者が空の物件だけに入れる」呼び出し元向け(添付済み謄本からの反映)。
+   * 書き込みと同じ物件行ロックの中で0件かを見直し、承認された所有者は
+   * 全員ぶんを1つのトランザクションで入れる。既定 false = 従来どおり。
+   */
+  requireNoExistingOwners?: boolean;
+  /**
+   * **所有者だけを入れ、物件の項目は書き換えない**(添付済み謄本からの反映)。
+   * 既定 false = 従来どおり(空の項目を謄本の値で埋める)。
+   */
+  ownersOnly?: boolean;
+  /**
+   * **書き込みのロックと同じ1文で担当者スコープを見直す**(添付済み謄本からの反映)。
+   * ⚠担当者だけの権限(field_staff)は、route の事前確認を通ったあと書き込みまでの
+   *   間に担当を外されうる。素のロックは担当を見直さないので、もう扱えない物件に
+   *   所有者が永久に残る。指定すると `lockPropertyRecordForWrite` を使い、ロック時点で
+   *   担当外なら 403 で何も書かない。
+   * 既定 false = 従来どおり素のロック。⚠有料取得の経路では指定しない
+   *   (「課金後は止めない」= 取得を頼んだ担当者がその間に外されても、買った謄本の
+   *   結果は保存する)。
+   */
+  enforcePropertyScope?: boolean;
+  /**
+   * **物件行のロックを握った状態で、最初の書き込みの直前に呼ぶ**(まとめる経路向け)。
+   * 呼び出し元が受付時点で確かめたこと(例: 下見で見せた添付が今も最新か)を、
+   * 書き込みと同じロックの中で見直すための入口。投げれば何も書かずに巻き戻る。
+   * ⚠requireNoExistingOwners のときだけ呼ばれる(0件の見直しと同じ場所)。
+   */
+  beforeFirstWrite?: (tx: DbClient) => Promise<void>;
+  /**
    * 有料取得の請求種別（owner|all）。有料取得フローからのみ渡る（手動取込は undefined）。
    * ⚠**"all"(全部事項)のときは所有者を物件へ反映しない**。全部事項には抹消された
    * 旧所有者が載り、今の解析は現在/抹消を区別できないため、旧所有者を現在の所有者
@@ -124,16 +149,12 @@ function applyEditedToParsed(
     // parser の元値を保持する（hasOwnProperty で送信有無を判定）。空文字を明示
     // 送信したキーは nz("") → null として既存方針どおり上書きする。
     const f = edited.fields;
-    const sent = (k: keyof typeof f) =>
-      Object.prototype.hasOwnProperty.call(f, k);
-    if (sent("realEstateNumber"))
-      parsed.realEstateNumber = nz(edited.fields.realEstateNumber);
+    const sent = (k: keyof typeof f) => Object.prototype.hasOwnProperty.call(f, k);
+    if (sent("realEstateNumber")) parsed.realEstateNumber = nz(edited.fields.realEstateNumber);
     if (sent("address")) parsed.address = nz(edited.fields.address);
     if (sent("lotNumber")) parsed.lotNumber = nz(edited.fields.lotNumber);
-    if (sent("buildingNumber"))
-      parsed.buildingNumber = nz(edited.fields.buildingNumber);
-    if (sent("landCategory"))
-      parsed.landCategory = nz(edited.fields.landCategory);
+    if (sent("buildingNumber")) parsed.buildingNumber = nz(edited.fields.buildingNumber);
+    if (sent("landCategory")) parsed.landCategory = nz(edited.fields.landCategory);
     if (sent("area")) parsed.area = nz(edited.fields.area);
   }
   if (edited.owners) {
@@ -152,11 +173,7 @@ function applyEditedToParsed(
 // import せずに判定）。@@unique([propertyId, ownerId]) への同時 insert 競合のみ握って
 // PropertyOwner link 作成を冪等化するために使う（Codex P2）。
 function isUniqueConstraintError(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    (err as { code?: unknown }).code === "P2002"
-  );
+  return typeof err === "object" && err !== null && (err as { code?: unknown }).code === "P2002";
 }
 
 // D10: 所有者の法人番号の空欄補完(既存が null のときだけ)を、所有者の行をロックした
@@ -166,8 +183,17 @@ function isUniqueConstraintError(err: unknown): boolean {
 async function fillOwnerCorporateNumberIfUnlocked(
   ownerId: string,
   corporateNumber: string,
+  /**
+   * すでに開いているトランザクション。渡されたときは**新しく開かない**。
+   *
+   * ⚠まとめて1txで処理する経路(添付済み謄本からの反映)では、外側のtxが
+   *   同じ所有者の行を既にロックしている。ここで別のトランザクションを開くと
+   *   外側が内側を待ち、内側は外側のロックを待つ=**同時実行が無くても固まる**
+   *   (待ち時間いっぱいで全部巻き戻る)。
+   */
+  outerTx?: DbClient,
 ): Promise<{ count: number; locked: boolean }> {
-  return prisma.$transaction(async (tx) => {
+  const run = async (tx: DbClient) => {
     await lockOwnerRow(tx, ownerId);
     // ⚠**ロックの後に corporateNumber を読み直す**(レビュー round1 #3)。
     // decideCorporateImport を呼んだ時点(=呼び出し側が existingCorporateNumber を
@@ -192,7 +218,8 @@ async function fillOwnerCorporateNumberIfUnlocked(
       data: { corporateNumber, version: { increment: 1 } },
     });
     return { count: updated.count, locked: false };
-  });
+  };
+  return outerTx ? run(outerTx) : prisma.$transaction((tx) => run(tx as DbClient));
 }
 
 // A-2c: 謄本PDF取込の所有者反映（Owner 突合/作成 + PropertyOwner link）を
@@ -202,296 +229,494 @@ async function fillOwnerCorporateNumberIfUnlocked(
 //   matched = 既存 active Owner を再利用した件数
 //   created = 新規 Owner を作成した件数
 //   linked  = 新規に作成した PropertyOwner link の件数
+/** 所有者の反映で使うDBの口。prisma そのものと、トランザクションの中の口の両方を指す。 */
+type DbClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
 async function reflectParsedOwners(args: {
   propertyId: string;
   owners: ReturnType<typeof parseRegistryText>["owners"];
   recordCorporateDecision: (decision: CorporateImportDecision) => void;
   /** D10: 所有者の鍵で法人番号の補完を見送ったときに呼ぶ。 */
   markOwnerCorporateFillSkipped: () => void;
+  /**
+   * 「所有者が空の物件だけに入れる」呼び出し元(添付済み謄本からの反映)向け。
+   * **最初の書き込みの直前に、物件行のロックの中で 0 件かを見直す**。
+   * route 側の事前確認と書き込みの間に別タブが所有者を紐づけると、古い判定の
+   * まま通ってしまうため。既定 false = 従来どおり(共有名義の追加を妨げない)。
+   *
+   * このとき、承認された所有者は**全員ぶんを1つのトランザクション**で入れる
+   * (途中で失敗して1人目だけ残り、やり直しもできない状態を作らない)。
+   */
+  requireNoExistingOwners?: boolean;
+  /**
+   * 法人番号の判定・書き込みを行わない(添付済み謄本からの反映=ownersOnly)。
+   * ⚠下見で見せていない項目を黙って書かないため。氏名や住所に13桁の数字が含まれると
+   *   法人番号として新規Ownerに保存・既存Ownerの空欄に補完される経路があるが、
+   *   確認画面は氏名・住所(・持分)しか出していない。
+   */
+  skipCorporateNumber?: boolean;
+  /**
+   * 渡されたときは、物件行のロックを `lockPropertyRecordForWrite`(ロック+担当者
+   * スコープの見直し)で取る。未指定 = 素の `lockPropertyRow`(従来どおり)。
+   * → ProcessRegistryPdfArgs.enforcePropertyScope を参照。
+   */
+  scopedSession?: RegistryPdfSession;
+  /** → ProcessRegistryPdfArgs.beforeFirstWrite */
+  beforeFirstWrite?: (tx: DbClient) => Promise<void>;
 }): Promise<{ matched: number; created: number; linked: number }> {
   const { propertyId, owners, recordCorporateDecision, markOwnerCorporateFillSkipped } = args;
+
+  /** 親の物件行をロックする。scopedSession があれば同じ1文で担当を見直す(0件=403)。 */
+  const lockProperty = (tx: DbClient): Promise<void> =>
+    args.scopedSession
+      ? lockPropertyRecordForWrite(tx, propertyId, args.scopedSession)
+      : lockPropertyRow(tx, propertyId);
   let matchedCount = 0;
   let createdCount = 0;
   let linkedCount = 0;
 
-  for (const ownerInfo of owners) {
-    if (!ownerInfo.name) continue;
+  /** この実行で自分が紐づけた所有者(見直しの対象から外すために覚えておく)。 */
+  const linkedByThisRun: string[] = [];
 
-    // ── 住所が無い所有者：**この物件に既に紐づいている**同名の所有者を再利用する ──
-    // なぜ要るか（@codex #394 R6 P2）: 謄本PDFの保存は取込処理の最後にあり、失敗しても
-    // 取込は成功扱い（警告のみ）。「PDFだけ入らなかったのでやり直す」が現実に起き、
-    // 再利用しないとそのたびに同じ人が物件に並ぶ。
-    // ⚠**グローバルな名前だけの統合は従来どおり禁止**（別の物件の同姓同名は別人であり得る）。
-    // ⚠**照会・作成・リンクを1つのトランザクションに閉じ、先に物件行をロックする**
-    //   （@codex #396）。ロックの外で照会すると、同じ物件への取込が同時に走ったときに
-    //   両方が「既存なし」と判定し、それぞれ別の Owner を作ってしまう。PropertyOwner の
-    //   一意制約は (propertyId, ownerId) なので、**別 id の2本は制約でも止められない**。
-    // ⚠**ループの外に出さない**: 1件の謄本に同名・住所なしが2回出てきたとき、
-    //   直前に作った所有者を2件目が再利用できる必要がある。
-    if (!ownerInfo.address) {
-      const outcome = await prisma.$transaction(async (tx) => {
-        await lockPropertyRow(tx, propertyId);
-        const linked = await tx.propertyOwner.findMany({
-          where: { propertyId },
-          select: {
-            owner: {
-              select: {
-                id: true,
-                name: true,
-                address: true,
-                isArchived: true,
-                corporateNumber: true,
+  /**
+   * 物件行のロックを握った状態で「まだ所有者が0件か」を確かめる。
+   *
+   * ⚠確かめるのは「**書き始める前に空だったか**」だけ。1人でも紐づけたあとに
+   *   数え直して中断すると、共有名義の謄本で「1人目だけ入ってエラー」という
+   *   中途半端な結果になる。以降に別の人が所有者を足した場合は、共有者が
+   *   増えただけ＝正当な操作として受け入れる。
+   */
+  const assertStillEmpty = async (tx: DbClient) => {
+    if (!args.requireNoExistingOwners) return;
+    if (linkedByThisRun.length > 0) return;
+    const existing = await tx.propertyOwner.count({ where: { propertyId } });
+    if (existing > 0) {
+      throw new ApiError(409, "この物件にはすでに所有者が登録されています", "OWNERS_ALREADY_EXIST");
+    }
+    // 呼び出し元が受付時点で確かめたことの見直し(同じロックの中・最初の書き込みの前)
+    await args.beforeFirstWrite?.(tx);
+  };
+
+  /** 1件のトランザクションでまとめるか(=呼び出し元が空の物件を前提にしているか)。 */
+  const asOneBatch = Boolean(args.requireNoExistingOwners);
+
+  /** 法人番号の判定。skipCorporateNumber のときは常に「何もしない」。 */
+  const decide: typeof decideCorporateImport = (owner, existing) =>
+    args.skipCorporateNumber
+      ? { action: "noop", corporateNumber: null }
+      : decideCorporateImport(owner, existing);
+
+  /**
+   * 所有者の反映本体。`db` は prisma か、まとめる場合は外側のトランザクション。
+   * ⚠まとめる場合、中で新しいトランザクションを開いてはいけない(入れ子にできない)。
+   */
+  const applyAll = async (db: DbClient) => {
+    const withTx = <T>(fn: (tx: DbClient) => Promise<T>): Promise<T> =>
+      asOneBatch ? fn(db) : prisma.$transaction((tx) => fn(tx as DbClient));
+
+    /**
+     * まとめる場合に、物件行より先に押さえた所有者の id。
+     * ⚠**物件行を押さえたあとは、ここに無い所有者の行を押さえに行かない**。
+     *   先押さえの後に別の処理が同じ氏名・住所の所有者を作って確定すると、以後の
+     *   探索で見えるようになるが、それを押さえると順序が「物件 → Owner」になり、
+     *   その所有者を押さえて物件を待っている /owners と互いに待ち合う。
+     *   まとめる場合は**先に押さえた所有者**と**この処理の中で作った/紐づけた所有者**
+     *   だけを使い回す(それ以外は見つけても押さえない=新規作成に回す)。
+     *   ⚠自分が作った行は自分のトランザクションが既に持っているので、押さえても
+     *     順序の問題は起きない。これを除くと、同じ人が謄本に2回載っているとき
+     *     同じ氏名・住所の所有者が2人でき、両方が物件に紐づく。
+     *   まとめない場合(従来の経路)は所有者ごとに Owner → 物件の順で押さえるので、
+     *   この制限は掛けない。
+     */
+    const prelockedOwnerIds = new Set<string>();
+    /** 使い回してよい候補か(まとめる場合は先押さえ済み or この処理で作った/紐づけた所有者だけ)。 */
+    const canReuseOwner = (id: string): boolean =>
+      !asOneBatch || prelockedOwnerIds.has(id) || linkedByThisRun.includes(id);
+
+    if (asOneBatch) {
+      // ⚠**ロックの順序を「Owner → 物件」にそろえる**。
+      //   まとめて1つのトランザクションで処理すると、1人目で物件行を押さえたあとに
+      //   2人目で既存の所有者の行を押さえることになり、順序が「物件 → Owner」に
+      //   なる。所有者を紐づける他の窓口(/api/properties/[id]/owners)は
+      //   「Owner → 物件」の順で押さえるため、同時に走ると互いに待ち合って
+      //   PostgreSQL がどちらかを中断する。
+      //   そこで、使い回す候補になりうる既存の所有者を**先に・id順で**押さえておく。
+      //   (id順=どの処理も同じ順で押さえれば、押さえ合いは起きない)
+      const activeWithAddress = await db.owner.findMany({
+        where: { address: { not: null }, isArchived: false },
+        select: { id: true, name: true, address: true },
+      });
+      const candidateIds = new Set<string>();
+      for (const info of owners) {
+        if (!info.name || !info.address) continue;
+        const normName = normalizeName(info.name);
+        const normAddr = normalizeAddress(info.address);
+        for (const c of activeWithAddress) {
+          if (normalizeName(c.name) === normName && normalizeAddress(c.address!) === normAddr) {
+            candidateIds.add(c.id);
+          }
+        }
+      }
+      for (const id of [...candidateIds].sort()) {
+        // 行を押さえるだけ(updatedAt を今の時刻にする=既存の再利用経路と同じ手)
+        await db.owner.updateMany({
+          where: { id, isArchived: false },
+          data: { updatedAt: new Date() },
+        });
+        prelockedOwnerIds.add(id);
+      }
+    }
+
+    for (const ownerInfo of owners) {
+      if (!ownerInfo.name) continue;
+
+      // ── 住所が無い所有者：**この物件に既に紐づいている**同名の所有者を再利用する ──
+      // なぜ要るか（@codex #394 R6 P2）: 謄本PDFの保存は取込処理の最後にあり、失敗しても
+      // 取込は成功扱い（警告のみ）。「PDFだけ入らなかったのでやり直す」が現実に起き、
+      // 再利用しないとそのたびに同じ人が物件に並ぶ。
+      // ⚠**グローバルな名前だけの統合は従来どおり禁止**（別の物件の同姓同名は別人であり得る）。
+      // ⚠**照会・作成・リンクを1つのトランザクションに閉じ、先に物件行をロックする**
+      //   （@codex #396）。ロックの外で照会すると、同じ物件への取込が同時に走ったときに
+      //   両方が「既存なし」と判定し、それぞれ別の Owner を作ってしまう。PropertyOwner の
+      //   一意制約は (propertyId, ownerId) なので、**別 id の2本は制約でも止められない**。
+      // ⚠**ループの外に出さない**: 1件の謄本に同名・住所なしが2回出てきたとき、
+      //   直前に作った所有者を2件目が再利用できる必要がある。
+      if (!ownerInfo.address) {
+        const outcome = await withTx(async (tx) => {
+          await lockProperty(tx);
+          await assertStillEmpty(tx);
+          const linked = await tx.propertyOwner.findMany({
+            where: { propertyId },
+            select: {
+              owner: {
+                select: {
+                  id: true,
+                  name: true,
+                  address: true,
+                  isArchived: true,
+                  corporateNumber: true,
+                },
               },
             },
-          },
-        });
-        const reusable = pickReusableAddresslessOwner(
-          linked
-            .map((l) => l.owner)
-            .filter((o): o is NonNullable<typeof o> => !!o),
-          ownerInfo.name,
-        );
-        if (reusable) {
-          // 既にこの物件に紐づいている＝リンクは作らない。
-          // ⚠**この tx で既存の Owner 行に触らない**（@codex #396 R2）。住所ありの経路は
-          //   「Owner → 物件」の順でロックするため、ここで物件を握ったまま Owner を
-          //   掴むと**ロック順序が逆**になり、同時実行で互いに待ち合って
-          //   PostgreSQL がどちらかを中断する（正常な取込が失敗する）。
-          //   法人番号の穴埋めは tx の外で行う（空のときだけ埋める条件付き更新なので
-          //   直列化は要らない）。
-          return {
-            reused: true as const,
-            ownerId: reusable.id,
-            existingCorporateNumber: reusable.corporateNumber,
-          };
-        }
-        const decision = decideCorporateImport(
-          { name: ownerInfo.name, address: null },
-          null,
-        );
-        const created = await tx.owner.create({
-          data: {
-            name: ownerInfo.name,
-            ...(decision.action === "save" && decision.corporateNumber
-              ? { corporateNumber: decision.corporateNumber }
-              : {}),
-          },
-          select: { id: true },
-        });
-        await tx.propertyOwner.create({
-          data: {
-            propertyId,
-            ownerId: created.id,
-            relationship: ownerInfo.share ? "共有者" : "所有者",
-          },
-        });
-        return { reused: false as const, decision };
-      });
-      if (outcome.reused) {
-        matchedCount++;
-        // tx の外で法人番号を穴埋めする（空のときだけ・既存値は自動で上書きしない）。
-        const decision = decideCorporateImport(
-          { name: ownerInfo.name, address: null },
-          outcome.existingCorporateNumber,
-        );
-        if (decision.action === "save" && decision.corporateNumber) {
-          const filled = await fillOwnerCorporateNumberIfUnlocked(
-            outcome.ownerId,
-            decision.corporateNumber,
+          });
+          const reusable = pickReusableAddresslessOwner(
+            linked.map((l) => l.owner).filter((o): o is NonNullable<typeof o> => !!o),
+            ownerInfo.name,
           );
-          if (filled.locked) {
-            markOwnerCorporateFillSkipped();
-            recordCorporateDecision({ action: "noop", corporateNumber: null });
-          } else {
-            recordCorporateDecision(
-              filled.count === 0
-                ? { action: "noop", corporateNumber: null }
-                : decision,
+          if (reusable) {
+            // 既にこの物件に紐づいている＝リンクは作らない。
+            // ⚠**この tx で既存の Owner 行に触らない**（@codex #396 R2）。住所ありの経路は
+            //   「Owner → 物件」の順でロックするため、ここで物件を握ったまま Owner を
+            //   掴むと**ロック順序が逆**になり、同時実行で互いに待ち合って
+            //   PostgreSQL がどちらかを中断する（正常な取込が失敗する）。
+            //   法人番号の穴埋めは tx の外で行う（空のときだけ埋める条件付き更新なので
+            //   直列化は要らない）。
+            return {
+              reused: true as const,
+              ownerId: reusable.id,
+              existingCorporateNumber: reusable.corporateNumber,
+            };
+          }
+          const decision = decide({ name: ownerInfo.name, address: null }, null);
+          const created = await tx.owner.create({
+            data: {
+              name: ownerInfo.name,
+              ...(decision.action === "save" && decision.corporateNumber
+                ? { corporateNumber: decision.corporateNumber }
+                : {}),
+            },
+            select: { id: true },
+          });
+          // ⚠自分が入れた分として記録する。これが漏れると、次の所有者の見直しで
+          //   **自分が今入れた紐付けを数えて 409** になり、承認した全員が巻き戻る。
+          linkedByThisRun.push(created.id);
+          await tx.propertyOwner.create({
+            data: {
+              propertyId,
+              ownerId: created.id,
+              relationship: ownerInfo.share ? "共有者" : "所有者",
+            },
+          });
+          return { reused: false as const, decision };
+        });
+        if (outcome.reused) {
+          matchedCount++;
+          // tx の外で法人番号を穴埋めする（空のときだけ・既存値は自動で上書きしない）。
+          const decision = decide(
+            { name: ownerInfo.name, address: null },
+            outcome.existingCorporateNumber,
+          );
+          if (decision.action === "save" && decision.corporateNumber) {
+            const filled = await fillOwnerCorporateNumberIfUnlocked(
+              outcome.ownerId,
+              decision.corporateNumber,
+              // まとめる場合は開いているtxで実行する(新しく開くと固まる)
+              asOneBatch ? db : undefined,
             );
+            if (filled.locked) {
+              markOwnerCorporateFillSkipped();
+              recordCorporateDecision({ action: "noop", corporateNumber: null });
+            } else {
+              recordCorporateDecision(
+                filled.count === 0 ? { action: "noop", corporateNumber: null } : decision,
+              );
+            }
+          } else {
+            recordCorporateDecision(decision);
           }
         } else {
-          recordCorporateDecision(decision);
-        }
-      } else {
-        createdCount++;
-        linkedCount++;
-        recordCorporateDecision(outcome.decision);
-      }
-      continue;
-    }
-
-    // address あり → normalizeName + normalizeAddress で既存 Owner 検索
-    // address なし → name のみでの自動統合はしない（同姓同名の別人を誤統合しないため）
-    // archived owner は通常の取込候補から除外（Phase 2-A）。
-    let candidateOwnerId: string | null = null;
-    // Phase D: 既存 Owner ヒット時の corporateNumber 競合判定に使う
-    let candidateCorporateNumber: string | null = null;
-
-    if (ownerInfo.address) {
-      const normName = normalizeName(ownerInfo.name);
-      const normAddr = normalizeAddress(ownerInfo.address);
-      const candidates = await prisma.owner.findMany({
-        where: { address: { not: null }, isArchived: false },
-        select: { id: true, name: true, address: true, corporateNumber: true },
-      });
-      const hit = candidates.find(
-        (c) =>
-          normalizeName(c.name) === normName &&
-          normalizeAddress(c.address!) === normAddr,
-      );
-      candidateOwnerId = hit?.id ?? null;
-      candidateCorporateNumber = hit?.corporateNumber ?? null;
-    }
-
-    // 既存 owner を使うパス: lookup と PropertyOwner.create の間に concurrent
-    // archive が走った場合に archived owner に link してしまうのを防ぐ。
-    // transaction 内で owner 行を updateMany でロック + isArchived=false 再確認 →
-    // PropertyOwner 作成までを 1 つの tx に閉じる。count=0 ならフォールバックで
-    // 新規 active Owner を作成する。
-    let resolvedOwnerId: string | null = null;
-    if (candidateOwnerId) {
-      // Codex P2: 同時実行で別 tx が先に同じ (propertyId, ownerId) を link 済みだと、
-      // tx 内 create が @@unique([propertyId, ownerId]) 違反(P2002)で reject する。
-      // その場合は「既にリンク済み」として扱い job 全体は失敗させない（reused 扱い・
-      // linkCreated=false で linkedCount を二重に増やさない）。P2002 以外のエラーは
-      // 従来どおり throw して失敗させる。
-      let reuseResult: { reused: boolean; linkCreated: boolean };
-      try {
-        reuseResult = await prisma.$transaction(async (tx) => {
-          const lock = await tx.owner.updateMany({
-            where: { id: candidateOwnerId!, isArchived: false },
-            data: { updatedAt: new Date() },
-          });
-          if (lock.count === 0) {
-            return { reused: false, linkCreated: false };
-          }
-          // 親の物件行をロック(Owner→親の順・書き込み規約+#364 R10)。
-          await lockPropertyRow(tx, propertyId);
-          const existingLink = await tx.propertyOwner.findFirst({
-            where: { propertyId, ownerId: candidateOwnerId! },
-            select: { propertyId: true },
-          });
-          let linkCreated = false;
-          if (!existingLink) {
-            await tx.propertyOwner.create({
-              data: {
-                propertyId,
-                ownerId: candidateOwnerId!,
-                relationship: ownerInfo.share ? "共有者" : "所有者",
-              },
-            });
-            linkCreated = true;
-          }
-          return { reused: true, linkCreated };
-        });
-      } catch (err) {
-        if (!isUniqueConstraintError(err)) throw err;
-        // 同時実行で相手が先に link 済み → 既にリンク済み扱い（linkedCount は増やさない）。
-        reuseResult = { reused: true, linkCreated: false };
-      }
-      if (reuseResult.reused) {
-        resolvedOwnerId = candidateOwnerId;
-        matchedCount++;
-        if (reuseResult.linkCreated) linkedCount++;
-      }
-      // 競合検出時は resolvedOwnerId=null のまま下のフォールバックへ
-    }
-
-    // Phase D: reuse 成功判定。
-    // `resolvedOwnerId === candidateOwnerId` だけだと両方 null のとき true になり、
-    // (a) updateMany が id:null で実行されてしまう
-    // (b) recordCorporateDecision が reuse 側と create 側の二重で呼ばれてしまう
-    // 上記 2 件の Codex P1/P2 を防ぐため、両方 non-null かつ等しいことを要求する。
-    const reusedExistingOwner =
-      resolvedOwnerId !== null &&
-      candidateOwnerId !== null &&
-      resolvedOwnerId === candidateOwnerId;
-
-    // reuse 成功時のみ既存 corporateNumber と比較、それ以外は existing=null として計算。
-    const cnDecision = decideCorporateImport(
-      { name: ownerInfo.name, address: ownerInfo.address ?? null },
-      reusedExistingOwner ? candidateCorporateNumber : null,
-    );
-
-    // reuse 成功時: 既存 owner が corporateNumber 空ならここで埋める。
-    // where 条件で corporateNumber: null を要求し、race 時は count=0 で自動上書きを防ぐ。
-    if (
-      reusedExistingOwner &&
-      cnDecision.action === "save" &&
-      cnDecision.corporateNumber
-    ) {
-      const cnFilled = await fillOwnerCorporateNumberIfUnlocked(
-        candidateOwnerId!,
-        cnDecision.corporateNumber,
-      );
-      if (cnFilled.locked) {
-        markOwnerCorporateFillSkipped();
-        recordCorporateDecision({ action: "noop", corporateNumber: null });
-      } else {
-        recordCorporateDecision(
-          cnFilled.count === 0
-            ? { action: "noop", corporateNumber: null }
-            : cnDecision,
-        );
-      }
-    } else if (reusedExistingOwner) {
-      // reuse 成功 + save 以外（noop / multi / conflict / none） → そのまま集計
-      recordCorporateDecision(cnDecision);
-    }
-
-    if (!resolvedOwnerId) {
-      // 新規 Owner 作成 + link（dedup ヒットなし、または archive race で fallback）。
-      // 新規 owner は他 tx から見えないため archive 競合はない。
-      // archive race fallback の場合も「新規 owner なので existing=null」で再評価する。
-      const cnDecisionForCreate =
-        candidateOwnerId === null
-          ? cnDecision
-          : decideCorporateImport(
-              { name: ownerInfo.name, address: ownerInfo.address ?? null },
-              null,
-            );
-      const created = await prisma.owner.create({
-        data: {
-          name: ownerInfo.name,
-          ...(ownerInfo.address ? { address: ownerInfo.address } : {}),
-          // Phase D: 候補 1 件のみ採用、複数 / 競合は乗せない
-          ...(cnDecisionForCreate.action === "save" && cnDecisionForCreate.corporateNumber
-            ? { corporateNumber: cnDecisionForCreate.corporateNumber }
-            : {}),
-        },
-        select: { id: true },
-      });
-      resolvedOwnerId = created.id;
-      createdCount++;
-      recordCorporateDecision(cnDecisionForCreate);
-
-      const existingLink = await prisma.propertyOwner.findFirst({
-        where: { propertyId, ownerId: resolvedOwnerId },
-      });
-      if (!existingLink) {
-        // Codex P2: 新規 owner は一意な ID のため通常 link 衝突しないが、防御的に
-        // P2002 を握って冪等化する（同時実行で相手が先に link 済みなら既存扱い・
-        // linkedCount は増やさない）。P2002 以外は従来どおり throw して失敗させる。
-        try {
-          // 親の物件行をロックしてから link(書き込み規約+#364 R10)。
-          // closure 内では narrowing が効かないため確定値を捕捉する。
-          const ownerIdForLink = resolvedOwnerId;
-          await prisma.$transaction(async (tx) => {
-            await lockPropertyRow(tx, propertyId);
-            await tx.propertyOwner.create({
-              data: {
-                propertyId,
-                ownerId: ownerIdForLink,
-                relationship: ownerInfo.share ? "共有者" : "所有者",
-              },
-            });
-          });
+          createdCount++;
           linkedCount++;
+          recordCorporateDecision(outcome.decision);
+        }
+        continue;
+      }
+
+      // address あり → normalizeName + normalizeAddress で既存 Owner 検索
+      // address なし → name のみでの自動統合はしない（同姓同名の別人を誤統合しないため）
+      // archived owner は通常の取込候補から除外（Phase 2-A）。
+      let candidateOwnerId: string | null = null;
+      // Phase D: 既存 Owner ヒット時の corporateNumber 競合判定に使う
+      let candidateCorporateNumber: string | null = null;
+
+      if (ownerInfo.address) {
+        const normName = normalizeName(ownerInfo.name);
+        const normAddr = normalizeAddress(ownerInfo.address);
+        const candidates = await db.owner.findMany({
+          where: { address: { not: null }, isArchived: false },
+          select: { id: true, name: true, address: true, corporateNumber: true },
+        });
+        const hit = candidates.find(
+          (c) =>
+            canReuseOwner(c.id) &&
+            normalizeName(c.name) === normName &&
+            normalizeAddress(c.address!) === normAddr,
+        );
+        candidateOwnerId = hit?.id ?? null;
+        candidateCorporateNumber = hit?.corporateNumber ?? null;
+      }
+
+      // 既存 owner を使うパス: lookup と PropertyOwner.create の間に concurrent
+      // archive が走った場合に archived owner に link してしまうのを防ぐ。
+      // transaction 内で owner 行を updateMany でロック + isArchived=false 再確認 →
+      // PropertyOwner 作成までを 1 つの tx に閉じる。count=0 ならフォールバックで
+      // 新規 active Owner を作成する。
+      let resolvedOwnerId: string | null = null;
+      if (candidateOwnerId) {
+        // Codex P2: 同時実行で別 tx が先に同じ (propertyId, ownerId) を link 済みだと、
+        // tx 内 create が @@unique([propertyId, ownerId]) 違反(P2002)で reject する。
+        // その場合は「既にリンク済み」として扱い job 全体は失敗させない（reused 扱い・
+        // linkCreated=false で linkedCount を二重に増やさない）。P2002 以外のエラーは
+        // 従来どおり throw して失敗させる。
+        let reuseResult: { reused: boolean; linkCreated: boolean };
+        try {
+          reuseResult = await withTx(async (tx) => {
+            const lock = await tx.owner.updateMany({
+              where: { id: candidateOwnerId!, isArchived: false },
+              data: { updatedAt: new Date() },
+            });
+            if (lock.count === 0) {
+              return { reused: false, linkCreated: false };
+            }
+            // 親の物件行をロック(Owner→親の順・書き込み規約+#364 R10)。
+            await lockProperty(tx);
+            await assertStillEmpty(tx);
+            const existingLink = await tx.propertyOwner.findFirst({
+              where: { propertyId, ownerId: candidateOwnerId! },
+              select: { propertyId: true },
+            });
+            let linkCreated = false;
+            if (!existingLink) {
+              linkedByThisRun.push(candidateOwnerId!);
+              await tx.propertyOwner.create({
+                data: {
+                  propertyId,
+                  ownerId: candidateOwnerId!,
+                  relationship: ownerInfo.share ? "共有者" : "所有者",
+                },
+              });
+              linkCreated = true;
+            }
+            return { reused: true, linkCreated };
+          });
         } catch (err) {
           if (!isUniqueConstraintError(err)) throw err;
+          // 同時実行で相手が先に link 済み → 既にリンク済み扱い（linkedCount は増やさない）。
+          reuseResult = { reused: true, linkCreated: false };
         }
+        if (reuseResult.reused) {
+          resolvedOwnerId = candidateOwnerId;
+          matchedCount++;
+          if (reuseResult.linkCreated) linkedCount++;
+        }
+        // 競合検出時は resolvedOwnerId=null のまま下のフォールバックへ
+      }
+
+      // Phase D: reuse 成功判定。
+      // `resolvedOwnerId === candidateOwnerId` だけだと両方 null のとき true になり、
+      // (a) updateMany が id:null で実行されてしまう
+      // (b) recordCorporateDecision が reuse 側と create 側の二重で呼ばれてしまう
+      // 上記 2 件の Codex P1/P2 を防ぐため、両方 non-null かつ等しいことを要求する。
+      const reusedExistingOwner =
+        resolvedOwnerId !== null &&
+        candidateOwnerId !== null &&
+        resolvedOwnerId === candidateOwnerId;
+
+      // reuse 成功時のみ既存 corporateNumber と比較、それ以外は existing=null として計算。
+      const cnDecision = decide(
+        { name: ownerInfo.name, address: ownerInfo.address ?? null },
+        reusedExistingOwner ? candidateCorporateNumber : null,
+      );
+
+      // reuse 成功時: 既存 owner が corporateNumber 空ならここで埋める。
+      // where 条件で corporateNumber: null を要求し、race 時は count=0 で自動上書きを防ぐ。
+      if (reusedExistingOwner && cnDecision.action === "save" && cnDecision.corporateNumber) {
+        const cnFilled = await fillOwnerCorporateNumberIfUnlocked(
+          candidateOwnerId!,
+          cnDecision.corporateNumber,
+          // まとめる場合は開いているtxで実行する(新しく開くと固まる)
+          asOneBatch ? db : undefined,
+        );
+        if (cnFilled.locked) {
+          markOwnerCorporateFillSkipped();
+          recordCorporateDecision({ action: "noop", corporateNumber: null });
+        } else {
+          recordCorporateDecision(
+            cnFilled.count === 0 ? { action: "noop", corporateNumber: null } : cnDecision,
+          );
+        }
+      } else if (reusedExistingOwner) {
+        // reuse 成功 + save 以外（noop / multi / conflict / none） → そのまま集計
+        recordCorporateDecision(cnDecision);
+      }
+
+      if (!resolvedOwnerId) {
+        // 新規 Owner 作成 + link（dedup ヒットなし、または archive race で fallback）。
+        // 新規 owner は他 tx から見えないため archive 競合はない。
+        // archive race fallback の場合も「新規 owner なので existing=null」で再評価する。
+        const cnDecisionForCreate =
+          candidateOwnerId === null
+            ? cnDecision
+            : decide(
+                { name: ownerInfo.name, address: ownerInfo.address ?? null },
+                null,
+              );
+        // ⚠**作成と紐付けを同じトランザクションで行う**。分けると、作成が確定した
+        //   あとに紐付け側の見直しで中断したとき、**どこにも紐付かない所有者**が残る。
+        //   あわせて、ロックを取ったあとに**もう一度**同じ人を探す(同時に走った
+        //   もう一方が先に作っていれば、それを使って二重作成を避ける)。
+        const ownerIdsBefore = [...linkedByThisRun];
+        let resolved: { id: string; created: boolean; linked: boolean };
+        try {
+          resolved = await withTx(async (tx) => {
+            // ⚠**再探索と所有者の行の押さえは、物件行を押さえる前に行う**(順序
+            //   「Owner → 物件」)。所有者を紐づける他の窓口(/api/properties/[id]/owners)も
+            //   この順で押さえるため、逆順にすると互いに待ち合って片方が中断される。
+            //   ⚠まとめる経路では物件行を先に押さえてしまっているので、ここで新たに
+            //     押さえてよいのは**既に自分が握っている行だけ**(canReuseOwner)。
+            let ownerId: string | null = null;
+            if (ownerInfo.address) {
+              const normName = normalizeName(ownerInfo.name);
+              const normAddr = normalizeAddress(ownerInfo.address);
+              const rows = await tx.owner.findMany({
+                where: { address: { not: null }, isArchived: false },
+                select: { id: true, name: true, address: true, isArchived: true },
+              });
+              const raced = rows.find(
+                (c) =>
+                  // ⚠さっき使えないと判断した候補は拾い直さない(同時にアーカイブ
+                  //   された候補に紐づけ直してしまうため)。
+                  c.id !== candidateOwnerId &&
+                  canReuseOwner(c.id) &&
+                  !c.isArchived &&
+                  normalizeName(c.name) === normName &&
+                  normalizeAddress(c.address!) === normAddr,
+              );
+              if (raced) {
+                // ⚠通常の再利用の経路と同じく、「アーカイブされていない」条件で
+                //   行を押さえてから使う。押さえられなければ(その瞬間にアーカイブ
+                //   された)、新規作成に回す。
+                const held = await tx.owner.updateMany({
+                  where: { id: raced.id, isArchived: false },
+                  data: { updatedAt: new Date() },
+                });
+                if (held.count > 0) ownerId = raced.id;
+              }
+            }
+
+            await lockProperty(tx);
+            await assertStillEmpty(tx);
+
+            const isNew = ownerId === null;
+            if (ownerId === null) {
+              const row = await tx.owner.create({
+                data: {
+                  name: ownerInfo.name,
+                  ...(ownerInfo.address ? { address: ownerInfo.address } : {}),
+                  // Phase D: 候補 1 件のみ採用、複数 / 競合は乗せない
+                  ...(cnDecisionForCreate.action === "save" && cnDecisionForCreate.corporateNumber
+                    ? { corporateNumber: cnDecisionForCreate.corporateNumber }
+                    : {}),
+                },
+                select: { id: true },
+              });
+              ownerId = row.id;
+            }
+
+            const existingLink = await tx.propertyOwner.findFirst({
+              where: { propertyId, ownerId },
+            });
+            let linked = false;
+            if (!existingLink) {
+              linkedByThisRun.push(ownerId);
+              await tx.propertyOwner.create({
+                data: {
+                  propertyId,
+                  ownerId,
+                  relationship: ownerInfo.share ? "共有者" : "所有者",
+                },
+              });
+              linked = true;
+            }
+            return { id: ownerId, created: isNew, linked };
+          });
+        } catch (err) {
+          // ⚠tx ごと巻き戻るので、この実行で積んだ ownerId も元に戻す。
+          linkedByThisRun.length = 0;
+          linkedByThisRun.push(...ownerIdsBefore);
+          // ⚠まとめる場合は握りつぶさない(1つのtxの中で失敗を握って続けられない)。
+          if (asOneBatch) throw err;
+          // Codex P2: 新規 owner は一意な ID のため通常 link 衝突しないが、防御的に
+          // P2002 を握って冪等化する(相手が先に link 済みなら既存扱い)。
+          if (!isUniqueConstraintError(err)) throw err;
+          continue;
+        }
+
+        resolvedOwnerId = resolved.id;
+        if (resolved.created) {
+          createdCount++;
+          recordCorporateDecision(cnDecisionForCreate);
+        } else {
+          matchedCount++;
+        }
+        if (resolved.linked) linkedCount++;
       }
     }
+  };
+
+  if (asOneBatch) {
+    // ⚠全員ぶんを1つのトランザクションで。途中で失敗したら全部取り消す
+    //   (1人目だけ入って、やり直しもできない状態を作らない)。
+    //   所有者ごとに全Ownerを走査するので、既定の5秒では足りないことがある。
+    //
+    // ロックの順序は applyAll の冒頭で候補の所有者を先に押さえることで
+    // 「Owner → 物件」にそろえている(他の窓口と同じ順)。
+    await prisma.$transaction((tx) => applyAll(tx as DbClient), {
+      timeout: 30_000,
+      maxWait: 10_000,
+    });
+  } else {
+    await applyAll(prisma as unknown as DbClient);
   }
 
   return { matched: matchedCount, created: createdCount, linked: linkedCount };
@@ -571,11 +796,7 @@ export async function processRegistryPdf(
       // field_staff スコープ: 担当外/未作成の物件を propertyId 直指定で更新させない。
       // admin / office_staff は全件可。UI だけでなく API 直アクセスもここで遮断する。
       if (!canAccessPropertyRecord(session, existing)) {
-        throw new ApiError(
-          403,
-          "この物件にアクセスする権限がありません",
-          "FORBIDDEN",
-        );
+        throw new ApiError(403, "この物件にアクセスする権限がありません", "FORBIDDEN");
       }
 
       // D10: 空欄補完(realEstateNumber/lotNumber/buildingNumber)は「編集中の鍵」が
@@ -583,12 +804,17 @@ export async function processRegistryPdf(
       // 進める**(@codex R6 P1)。PDFが添付されるのに未確認のまま残るほうが害が大きい
       // ためのD10の例外。確認(鍵の有無)と書き込みは同じトランザクション・同じ物件行
       // ロックの中で行う(順序: トランザクション開始→行ロック→鍵の確認→条件つき更新)。
+      // ⚠ownersOnly の呼び出し元(添付済み謄本からの反映)は、物件の項目に触らない。
+      //   下見でも確認画面でも所有者しか見せていないのに、見ていない項目が黙って
+      //   変わるのは筋が通らない。とくに**不動産番号が入るとその物件は謄本の
+      //   所在検索が使えなくなる**(「不動産番号は今後も作らない」という方針に反する)。
       const wouldFillProperty =
-        (!existing.realEstateNumber && !!parsed.realEstateNumber) ||
-        (!existing.lotNumber && !!parsed.lotNumber) ||
-        (!existing.buildingNumber && !!parsed.buildingNumber);
+        !args.ownersOnly &&
+        ((!existing.realEstateNumber && !!parsed.realEstateNumber) ||
+          (!existing.lotNumber && !!parsed.lotNumber) ||
+          (!existing.buildingNumber && !!parsed.buildingNumber));
       const wouldAdvanceStatus =
-        existing.registryStatus === "unconfirmed" && !!parsed.realEstateNumber;
+        !args.ownersOnly && existing.registryStatus === "unconfirmed" && !!parsed.realEstateNumber;
 
       // ⚠**何も書く見込みが無ければ、鍵の確認自体をしない**(行ロックを取らない)。
       // 埋める欄も進める状態も無ければ、鍵の有無に関わらず結果は変わらない。
@@ -646,8 +872,7 @@ export async function processRegistryPdf(
                 (!fresh.lotNumber && !!parsed.lotNumber) ||
                 (!fresh.buildingNumber && !!parsed.buildingNumber);
               const freshWouldAdvanceStatus =
-                fresh.registryStatus === "unconfirmed" &&
-                !!parsed.realEstateNumber;
+                fresh.registryStatus === "unconfirmed" && !!parsed.realEstateNumber;
 
               // (a) 取得状況の前進。鍵の有無に関わらず必ず実行する
               //     (@codex R6 P1・PDFが添付されるのに未確認のまま残るほうが害が大きい)。
@@ -698,10 +923,7 @@ export async function processRegistryPdf(
           // ⚠oldValues はトランザクション内で読み直した fresh を使う(上記コメント)。
           // updates が非空の時点で fresh は必ず non-null(空を返す全経路は
           // merged も空にしている)。
-          oldValues: (freshForChangeLog ?? existing) as unknown as Record<
-            string,
-            unknown
-          >,
+          oldValues: (freshForChangeLog ?? existing) as unknown as Record<string, unknown>,
           newValues: updates,
           trackedFields: PROPERTY_TRACKED_FIELDS,
           source: "pdf_import",
@@ -719,6 +941,10 @@ export async function processRegistryPdf(
       if (reflectOwners) {
         const modeAOwners = await reflectParsedOwners({
           propertyId,
+          requireNoExistingOwners: args.requireNoExistingOwners,
+          skipCorporateNumber: args.ownersOnly,
+          scopedSession: args.enforcePropertyScope ? session : undefined,
+          beforeFirstWrite: args.beforeFirstWrite,
           owners: parsed.owners,
           recordCorporateDecision,
           markOwnerCorporateFillSkipped,
@@ -760,8 +986,7 @@ export async function processRegistryPdf(
           // （完全一致でない）は弱い fallback なので owner 反映を許可しない。
           canReflectOwners =
             matchedProperty.address != null &&
-            normalizeAddress(matchedProperty.address) ===
-              normalizeAddress(parsed.address);
+            normalizeAddress(matchedProperty.address) === normalizeAddress(parsed.address);
         }
       }
 
@@ -777,9 +1002,7 @@ export async function processRegistryPdf(
             buildingNumber: parsed.buildingNumber,
             realEstateNumber: parsed.realEstateNumber,
             propertyType: parsed.buildingNumber ? "building" : "land",
-            registryStatus: parsed.realEstateNumber
-              ? "obtained"
-              : "unconfirmed",
+            registryStatus: parsed.realEstateNumber ? "obtained" : "unconfirmed",
             dmStatus: "hold",
             createdBy: session.id,
           },
@@ -813,6 +1036,10 @@ export async function processRegistryPdf(
           } else {
             const modeBOwners = await reflectParsedOwners({
               propertyId: targetPropertyId,
+              requireNoExistingOwners: args.requireNoExistingOwners,
+              skipCorporateNumber: args.ownersOnly,
+              scopedSession: args.enforcePropertyScope ? session : undefined,
+              beforeFirstWrite: args.beforeFirstWrite,
               owners: parsed.owners,
               recordCorporateDecision,
               markOwnerCorporateFillSkipped,
@@ -839,9 +1066,7 @@ export async function processRegistryPdf(
     // ImportJob を "failed" で finalize し、ImportJobRow も error で1件残す。
     // 失敗の詳細は元のエラーから取り出して errorMessage に格納する。
     failureReason =
-      innerErr instanceof Error
-        ? innerErr.message
-        : "PDF取込中に不明なエラーが発生しました";
+      innerErr instanceof Error ? innerErr.message : "PDF取込中に不明なエラーが発生しました";
 
     // ベストエフォートで finalize。recovery 自体が失敗しても元のエラーを優先する。
     try {
@@ -933,38 +1158,63 @@ export async function processRegistryPdf(
   }
 
   // 成功パス（既存動作）
-  await prisma.importJob.update({
-    where: { id: job.id },
-    data: {
-      status: "completed",
-      successCount: 1,
-      errorCount: 0,
-      completedAt: new Date(),
-    },
-  });
+  // ⚠ここから先は**所有者の登録が既に確定している**。取込ジョブの記録が
+  //   失敗しても、それをエラー応答にしてはいけない(実際には入っているのに
+  //   「失敗」と伝わり、やり直すと「既に所有者がいる」で弾かれる)。
+  //   記録の失敗はログに残して、応答は成功のまま返す。
+  const bookkeeping = async (label: string, fn: () => Promise<unknown>) => {
+    try {
+      await fn();
+    } catch (err) {
+      // ⚠**生のエラー文は出さない**。Prisma の検証エラーは拒否した呼び出しのデータ
+      //   (rawData の住所など)を message に埋め込む。出してよいのは許可リストの
+      //   「エラーの種類(クラス名)」と「コード(英数字)」だけ。ジョブIDと種別は非PII。
+      const kind = err instanceof Error ? err.name : typeof err;
+      const rawCode = (err as { code?: unknown } | null)?.code;
+      const code =
+        typeof rawCode === "string" && /^[A-Za-z0-9_]{1,32}$/.test(rawCode) ? rawCode : "-";
+      console.error(
+        `[registry-pdf] 取込ジョブの記録に失敗(${label}) jobId=${job.id} kind=${kind} code=${code}`,
+      );
+    }
+  };
 
-  await prisma.importJobRow.create({
-    data: {
-      jobId: job.id,
-      rowNumber: 1,
-      status: "success",
-      rawData: {
-        realEstateNumber: parsed.realEstateNumber,
-        address: parsed.address,
-        lotNumber: parsed.lotNumber,
-        buildingNumber: parsed.buildingNumber,
-        // PR#88: owner 名(PII)は rawData に残さない。件数のみ保持する。
-        ownerCount: parsed.owners.length,
-        // A-2c: owner 反映の非PII件数（名前・住所は載せない）。
-        ownersMatched,
-        ownersCreated,
-        ownersLinked,
+  await bookkeeping("job-completed", () =>
+    prisma.importJob.update({
+      where: { id: job.id },
+      data: {
+        status: "completed",
+        successCount: 1,
+        errorCount: 0,
+        completedAt: new Date(),
       },
-      // Phase D: 法人番号スキップ情報のみ追記（生値・会社名・住所は含めない）。
-      errorMessage: appendImportMessage(null, rowCorporateMessage),
-      createdId: targetPropertyId,
-    },
-  });
+    }),
+  );
+
+  await bookkeeping("job-row", () =>
+    prisma.importJobRow.create({
+      data: {
+        jobId: job.id,
+        rowNumber: 1,
+        status: "success",
+        rawData: {
+          realEstateNumber: parsed.realEstateNumber,
+          address: parsed.address,
+          lotNumber: parsed.lotNumber,
+          buildingNumber: parsed.buildingNumber,
+          // PR#88: owner 名(PII)は rawData に残さない。件数のみ保持する。
+          ownerCount: parsed.owners.length,
+          // A-2c: owner 反映の非PII件数（名前・住所は載せない）。
+          ownersMatched,
+          ownersCreated,
+          ownersLinked,
+        },
+        // Phase D: 法人番号スキップ情報のみ追記（生値・会社名・住所は含めない）。
+        errorMessage: appendImportMessage(null, rowCorporateMessage),
+        createdId: targetPropertyId,
+      },
+    }),
+  );
 
   // A-2b: 謄本PDF本体を Attachment(type="registry") として保存する。
   //  - multipart(PDF binary) のみ。text 貼り付けは pdfBuffer=null でスキップ。
@@ -987,8 +1237,7 @@ export async function processRegistryPdf(
     if (!target || !canAccessPropertyRecord(session, target)) {
       // 権限が無い対象には upload も attachment.create も実行しない（最優先要件）。
       // 取込本体（matched/created）は既存仕様どおり成功扱いのまま warning を返す。
-      attachmentWarning =
-        "対象物件へのアクセス権が無いため、謄本PDFは保存されませんでした。";
+      attachmentWarning = "対象物件へのアクセス権が無いため、謄本PDFは保存されませんでした。";
     } else {
       // upload 成功後に attachment.create が失敗した場合、storage 上に孤児 PDF が
       // 残らないよう uploaded.key を保持し、catch で best-effort 削除する。
@@ -1050,14 +1299,10 @@ export async function processRegistryPdf(
             await getStorage().delete(uploadedKey);
           } catch (delErr) {
             // 削除失敗でも取込本体は失敗させない（記録のみ）。
-            console.error(
-              "Failed to delete orphaned registry PDF after attachment error:",
-              delErr,
-            );
+            console.error("Failed to delete orphaned registry PDF after attachment error:", delErr);
           }
         }
-        attachmentWarning =
-          "謄本は取込されましたが、PDF本体の保存に失敗しました。";
+        attachmentWarning = "謄本は取込されましたが、PDF本体の保存に失敗しました。";
       }
     }
   }
@@ -1067,14 +1312,10 @@ export async function processRegistryPdf(
   // （両方発生し得るため。取込本体は成功扱いのまま）。
   const warningParts: string[] = [];
   if (ownerWeakMatchSkipped) {
-    warningParts.push(
-      "住所の部分一致で物件を特定したため、所有者情報は反映されませんでした。",
-    );
+    warningParts.push("住所の部分一致で物件を特定したため、所有者情報は反映されませんでした。");
   }
   if (ownerScopeSkipped) {
-    warningParts.push(
-      "対象物件へのアクセス権が無いため、所有者情報は反映されませんでした。",
-    );
+    warningParts.push("対象物件へのアクセス権が無いため、所有者情報は反映されませんでした。");
   }
   if (attachmentWarning) {
     warningParts.push(attachmentWarning);
