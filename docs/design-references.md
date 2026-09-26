@@ -27,6 +27,22 @@
 
 ## 2. リソース一覧（本システムでの使いどころ順）
 
+### 要素別の参考先（迷ったらここ）
+
+| 作りたいもの | まず見る | 次に見る |
+| --- | --- | --- |
+| テーブル・一覧・ページネーション | Component Gallery | shadcn/ui |
+| フォーム・入力・バリデーション表示 | shadcn/ui | CTA Gallery |
+| モーダル・確認ダイアログ | shadcn/ui | Component Gallery |
+| タブ・フィルタ・検索 | Component Gallery | shadcn/ui |
+| ナビ・サイドバー・ヘッダー | Navbar Gallery | Minimal Gallery |
+| 空状態・エラー表示 | 404s | Component Gallery |
+| ローディング | Circle Loaders | MicroKit UI |
+| スマホ画面（現地調査等） | AppShot Gallery | Component Gallery |
+| 地図のマーカー・ポップアップ | mapcn（見た目のみ） | — |
+| 配色・文字組み | Refero Styles | Minimal Gallery |
+| 小さな動き（ホバー・トグル） | MicroKit UI | Motion Primitives（見た目のみ） |
+
 ### A. 業務画面で参照しやすい（インスピレーション・パターン集）
 
 | # | リソース | URL | 使いどころ |
@@ -76,7 +92,20 @@
 | 12 | VibePrompt | https://vibeprompts.dev | ダッシュボード向けプロンプトの参考 |
 | 13 | 21st.dev | https://21st.dev | MCP 経由のコンポーネントレジストリ。**MCP 追加・API キー・課金の有無を確認し、事前承認を得てから**利用 |
 
-## 3. Claude Code への依頼テンプレート
+## 3. Claude Code での使い方
+
+### 最短（推奨）: `/ui-design` スキル
+
+```
+/ui-design 物件一覧のフィルタを見やすくしたい
+/ui-design 所有者詳細のモーダル 参考: <参考ページのURL>
+```
+
+- 対象と（あれば）参考URLを書くだけでよい。既存部品の確認・トーン合わせ・停止条件・報告は `.claude/skills/ui-design/SKILL.md` に定義済み
+- 参考URLが無い場合は、§2「要素別の参考先」から候補を挙げて進める
+- 通常の依頼文に「UI」「見た目」「画面」等が含まれる場合も自動で使われることがある
+
+### スキルを使わない場合のテンプレート
 
 ```
 <タスク名> の UI を改善してください。共通ルールは CLAUDE.md に従ってください。

@@ -255,7 +255,7 @@ docs-only 作業の最低限報告フォーマット:
 - AI開発ツール（ChatGPT / Claude Code / Codex / GitHub / GitHub Actions / VPS）を使った標準開発フローは `docs/ai-workflow.md` を参照する
 - このdocsは §4 作業フロー、§5 役割分担、§11 Codexレビュー、§13 VPS運用を運用観点で補足する索引である
 - 矛盾時は CLAUDE.md / AGENTS.md を正とし、`docs/ai-workflow.md` はそれを補足する
-- UI 実装時の外部デザイン参考リソースと利用ルールは `docs/design-references.md` を参照する（依存追加・MCP・課金は §17・§18.2 に従う）
+- UI 実装時の外部デザイン参考リソースと利用ルールは `docs/design-references.md` を参照する。UI タスクは `/ui-design` スキル（`.claude/skills/ui-design/SKILL.md`）で依頼できる（依存追加・MCP・課金は §17・§18.2 に従う）
 
 ## 17. 従量課金サービスの事前報告・承認ルール
 
