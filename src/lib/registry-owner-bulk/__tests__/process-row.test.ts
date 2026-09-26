@@ -185,6 +185,8 @@ describe("成功したとき", () => {
     // ⚠まとめて反映は人が中身を見ないので、添付は実行時点の最新を使う
     //   (共通処理が書き込みのロックの中でも最新かを確かめる)
     expect(args.expectedAttachmentId).toBeUndefined();
+    // ⚠まとめて反映の1件分であることを伝える(取込の履歴に1件ずつの記録を並べない)
+    expect(args.partOfBulk).toBe(true);
   });
 });
 
@@ -244,6 +246,22 @@ describe("うまくいかなかったとき", () => {
     );
     await expect(run()).resolves.toBe("needs_review");
     expect(updated().status).toBe("needs_review");
+  });
+
+  /**
+   * ⚠なぜ必要か(@codex 第8R P2): 次回の対象選びは「要確認になった物件を後ろに回す」。
+   *   ところが取込の記録の画面の「スキップ」「エラー確定」で行の状態が変わると、要確認
+   *   だった印が消えて、また先頭に並ぶ。状態とは別に、消えない印を行に残す。
+   */
+  it("⚠要確認にした行には、状態が変わっても残る印を付ける", async () => {
+    apply.mockRejectedValue(
+      new ApiError(422, "謄本から所有者を読み取れませんでした。手入力で登録してください", "REGISTRY_OWNERS_NOT_FOUND"),
+    );
+    await run();
+    const raw = updated().rawData as Record<string, string>;
+    expect(raw.reviewed).toBe("1");
+    // 印以外は元のまま(物件ID・物件の住所)
+    expect(raw.propertyId).toBe(PROP_ID);
   });
 
   it("謄本が見つからない物件も「要確認」にする", async () => {

@@ -260,6 +260,8 @@ describe("POST（実行）", () => {
     const sql = rawSql(1);
     expect(sql).toContain("import_job_rows");
     expect(sql).toContain("needs_review");
+    // ⚠「スキップ」「エラー確定」で状態が変わっても、残る印で見分ける(@codex 第8R)
+    expect(sql).toContain("jr.raw_data->>'reviewed' = '1'");
     // 並べ替えの先頭キーが「要確認になったことがあるか」
     expect(sql).toMatch(/ORDER BY\s+\(r\.property_id IS NOT NULL\)\s+ASC,\s+MIN\(a\.created_at\)/);
     // ⚠この機能の行だけを見る(印と種別で絞る・定数はパラメータで渡す)

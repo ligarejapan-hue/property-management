@@ -18,6 +18,13 @@ export const REGISTRY_OWNER_APPLY_KIND = "registry_owner_apply";
 export const REGISTRY_OWNER_APPLY_KIND_KEY = "__kind";
 
 /**
+ * まとめて反映の**1件分**として共通処理が作る取込記録の名前。
+ * ⚠取込の履歴の一覧からはこの名前の記録を外す(100件で101本並び、見るべきまとめて
+ *   反映のジョブが埋もれるため)。1件ずつのボタンの記録は別の名前で、従来どおり並ぶ。
+ */
+export const REGISTRY_OWNER_BULK_ROW_JOB_LABEL = "謄本から所有者をまとめて反映（1件分）";
+
+/**
  * 行に書き込む内容。
  * ⚠**所有者の氏名・住所は入れない**(謄本から読んだ個人の情報を取込記録に残さない)。
  *   `address` は**物件の**住所で、結果の一覧で「どの物件か」を示すためだけに持つ。

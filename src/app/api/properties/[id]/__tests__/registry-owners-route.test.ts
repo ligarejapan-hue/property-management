@@ -180,6 +180,8 @@ describe("POST（反映）", () => {
     expect(args.certificateType).toBe("owner");
     expect(args.propertyId).toBe(PROPERTY_ID);
     expect(args.edited).toBeUndefined();
+    // 1件ずつのボタンの記録は、これまでどおり取込の履歴に並ぶ名前
+    expect(args.fileName).toBe("添付済みの謄本から所有者を反映");
   });
 
   it("⚠すでに所有者がいる物件は 409 で止め、取込処理を呼ばない", async () => {

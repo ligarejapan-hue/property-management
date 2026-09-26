@@ -17,6 +17,7 @@ import { findMissingOwnerFieldWritePerm } from "@/lib/owner-create";
 import { getStorage } from "@/lib/storage";
 import { extractTextFromPdf } from "@/lib/pdf-extract";
 import { parseRegistryOwnerTable } from "@/lib/registry-owner-table";
+import { REGISTRY_OWNER_BULK_ROW_JOB_LABEL } from "@/lib/registry-owner-bulk/marker";
 import {
   processRegistryPdf,
   type ProcessRegistryPdfArgs,
@@ -160,6 +161,11 @@ export interface ApplyRegistryOwnersArgs {
    * → ProcessRegistryPdfArgs.beforeCommit
    */
   beforeCommit?: ProcessRegistryPdfArgs["beforeCommit"];
+  /**
+   * まとめて反映の1件分として呼ぶとき true。共通処理が作る取込記録を、履歴の一覧に
+   * 並べない名前で残す(→ REGISTRY_OWNER_BULK_ROW_JOB_LABEL)。
+   */
+  partOfBulk?: boolean;
 }
 
 export interface ApplyRegistryOwnersOutcome {
@@ -177,7 +183,7 @@ export interface ApplyRegistryOwnersOutcome {
 export async function applyRegistryOwnersToProperty(
   args: ApplyRegistryOwnersArgs,
 ): Promise<ApplyRegistryOwnersOutcome> {
-  const { session, perms, propertyId, expectedAttachmentId, beforeCommit } = args;
+  const { session, perms, propertyId, expectedAttachmentId, beforeCommit, partOfBulk } = args;
 
   const property = await prisma.property.findUnique({
     where: { id: propertyId },
@@ -221,7 +227,7 @@ export async function applyRegistryOwnersToProperty(
     text: registry.text,
     propertyId,
     // ⚠生ファイル名ではなく固定ラベル(ImportJob と AuditLog に残るため)
-    fileName: REGISTRY_OWNER_APPLY_AUDIT_LABEL,
+    fileName: partOfBulk ? REGISTRY_OWNER_BULK_ROW_JOB_LABEL : REGISTRY_OWNER_APPLY_AUDIT_LABEL,
     edited: undefined,
     // ⚠必ず null。非 null にすると同じ謄本がもう一度添付されてしまう。
     pdfBuffer: null,

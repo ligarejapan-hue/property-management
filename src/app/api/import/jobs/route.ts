@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { importJobScopeWhere } from "@/lib/import-job-guard";
+import { REGISTRY_OWNER_BULK_ROW_JOB_LABEL } from "@/lib/registry-owner-bulk/marker";
 import {
   summaryFromStatusCounts,
   type StatusCounts,
@@ -72,7 +73,11 @@ export async function GET(request: NextRequest) {
       Math.max(1, Number(limitParam ?? "50") || 50),
     );
 
-    const where: Prisma.ImportJobWhereInput = {};
+    // ⚠まとめて反映の**1件分**として共通処理が作る記録は並べない(100件で101本並び、
+    //   見るべきまとめて反映のジョブが埋もれる)。結果はまとめて反映のジョブの行にある。
+    const where: Prisma.ImportJobWhereInput = {
+      NOT: { jobType: "property_pdf", fileName: REGISTRY_OWNER_BULK_ROW_JOB_LABEL },
+    };
 
     if (jobTypeParam) {
       // 不正な enum 値は黙って弾く（型安全）。完全一致のみ許可。

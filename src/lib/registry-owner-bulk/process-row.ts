@@ -106,6 +106,8 @@ export async function processRegistryOwnerApplyRow(args: {
       // ⚠まとめて反映は人が中身を見ないので、実行時点の最新の謄本を使う
       //   (共通処理が書き込みのロックの中でも「最新のままか」を確かめる)。
       expectedAttachmentId: undefined,
+      // まとめて反映の1件分(共通処理が作る記録を取込の履歴に並べない)
+      partOfBulk: true,
       beforeCommit: async (tx, summary) => {
         const written = await writeRow(tx, "success", null, {
           // 実際に物件へ紐づいた人数。⚠同じ人が謄本に2回載っていれば1人にまとまるので
@@ -145,7 +147,9 @@ export async function processRegistryOwnerApplyRow(args: {
       // 読み取れない・謄本が無い・処理中に別の謄本が添付された
       //   → 人が確かめて手で入れる「要確認」に回す
       if (err.status === 404 || err.status === 422 || err.status === 409) {
-        return finish("needs_review", err.message);
+        // ⚠「要確認になった」印を残す。次回の対象選びで後ろに回すため。取込の記録の
+        //   画面の「スキップ」「エラー確定」で状態が変わっても、この印は消えない。
+        return finish("needs_review", err.message, { reviewed: "1" });
       }
       // 権限・担当範囲(403)や 400 は失敗として残す(全行同じ結果になるはずなので、
       // ワーカー側でジョブごと止める判定も別に置いている)

@@ -191,7 +191,8 @@ export async function POST(request: NextRequest) {
           FROM import_job_rows jr
           JOIN import_jobs j ON j.id = jr.job_id
           WHERE j.job_type::text = ${REGISTRY_OWNER_APPLY_JOB_TYPE}
-            AND jr.status::text = 'needs_review'
+            -- ⚠「スキップ」「エラー確定」で状態が変わっても消えない印でも見分ける(@codex 第8R)
+            AND (jr.status::text = 'needs_review' OR jr.raw_data->>'reviewed' = '1')
             AND jr.raw_data->>(${REGISTRY_OWNER_APPLY_KIND_KEY}::text) = ${REGISTRY_OWNER_APPLY_KIND}
         )
         SELECT p.id::text AS id, p.address AS address
