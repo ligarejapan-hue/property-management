@@ -861,4 +861,64 @@ describe("createEditLockController", () => {
     expect(h.acquireMock).toHaveBeenCalledTimes(2);
     expect(h.lastState()).toMatchObject({ kind: "mine", lockId: SECOND_LOCK_ID });
   });
+
+  /**
+   * 外部レビュー@codex P2(2026-09-26 round5)。bfcache(戻る/進むの保存)では pagehide が
+   * 来ても unmount されない。beacon で鍵を返したのに画面が `mine` のままだと、復元後に
+   * 保存ボタンが押せて返したはずの lockId を送り EDIT_LOCK_STALE、しかも `mine` の間は
+   * 入力しても取り直さない。
+   */
+  it("b1) onPageHide: 鍵を持っていれば beacon で返し、画面も expired に落として合図を止める", async () => {
+    h.acquireMock.mockResolvedValue(MINE);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+
+    controller.onPageHide();
+
+    expect(h.releaseByBeaconMock).toHaveBeenCalledWith(LOCK_ID);
+    expect(h.lastState()).toEqual({ kind: "expired" });
+    expect(h.registry.activeCount()).toBe(0);
+  });
+
+  it("b2) onPageHide の後に bfcache から戻ったら(persisted)、入力を待たずに取り直す", async () => {
+    h.acquireMock.mockResolvedValueOnce(MINE).mockResolvedValueOnce(SECOND_MINE);
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+    controller.onPageHide();
+
+    controller.onPageShow(true);
+    await flush();
+
+    expect(h.acquireMock).toHaveBeenCalledTimes(2);
+    expect(h.lastState()).toMatchObject({ kind: "mine", lockId: SECOND_LOCK_ID });
+    expect(h.registry.activeCount()).toBe(1);
+  });
+
+  it("b3) 通常の読み込み(persisted=false)や、鍵を持っていない間の pageshow では何もしない", async () => {
+    const controller = createEditLockController(h.deps);
+    controller.onPageShow(false);
+    controller.onPageShow(true);
+    controller.onPageHide();
+    await flush();
+
+    expect(h.acquireMock).not.toHaveBeenCalled();
+    expect(h.releaseByBeaconMock).not.toHaveBeenCalled();
+    expect(h.onStateMock).not.toHaveBeenCalled();
+  });
+
+  it("b4) 取り直しに失敗しても外へ投げず expired のまま(次の入力でまた試みる)", async () => {
+    h.acquireMock.mockResolvedValueOnce(MINE).mockRejectedValueOnce(new Error("network"));
+    const controller = createEditLockController(h.deps);
+    await controller.acquire();
+    controller.onPageHide();
+
+    controller.onPageShow(true);
+    await flush();
+
+    expect(h.lastState()).toEqual({ kind: "expired" });
+    h.acquireMock.mockResolvedValueOnce(SECOND_MINE);
+    controller.noteActivity();
+    await flush();
+    expect(h.lastState()).toMatchObject({ kind: "mine", lockId: SECOND_LOCK_ID });
+  });
 });

@@ -702,3 +702,9 @@ round1 は応答器+複製タブ確認の一生を「物件詳細の画面(親)�
 | 重さ | 指摘 | 裁定 |
 |---|---|---|
 | P2 | StrictMode の effect 二重呼び出し(setup→cleanup→setup)が**1回目の取得の応答待ちの最中**に起きると、cleanup の dispose で世代が進み、2回目の setup の取得は**古い試行へ合流**する。応答は古いので捨てて beacon で返されるが、約束は成功で終わる=`lockUnavailable=false` のまま状態は `idle` で、**所有者カードの保存ボタンが永久に押せない**(開発環境で編集を始めるたびに踏む) | controller 側で直す(画面側に同じ判断を散らさない)。飛んでいる試行に合流するのは**その試行が今の世代のときだけ**。古い試行なら決着(成否は問わない)を待ってから取り直す。待つ間に再び dispose されたら送らない。取り直しは `acquire()` の呼び直しなので、待っていた呼び出しが何本あっても2本目以降は新しい試行へ合流する(n7 の直列化を保つ)。`controller.test.ts` の s1〜s4 で固定 |
+
+### 外部レビュー(@codex)P2 round5 の反映(2026-09-26・bfcache から戻ったとき)
+
+| 重さ | 指摘 | 裁定 |
+|---|---|---|
+| P2 | bfcache(戻る/進むの保存)では pagehide の後も unmount されない。beacon で鍵を返したのに画面は `mine` のまま凍結・復元され、保存ボタンが押せて返した lockId を送り `EDIT_LOCK_STALE`、しかも `mine` の間は入力しても取り直さない(次の合図まで最大30秒) | pagehide を後始末(`onHidden`)から分け、`onPageHide` で鍵を返したら**画面も `expired` に落とす**(合図停止・世代を進める)。`pageshow` の `persisted` で `onPageShow` が `expired` なら**入力を待たずに取り直す**(失敗・404 は入力での取り直しと同じ扱い)。unmount の後始末は従来どおり `onHidden`。`controller.test.ts` b1〜b4・`use-edit-lock.test.ts` の結線で固定 |

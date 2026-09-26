@@ -118,11 +118,18 @@ export function useEditLock({ resourceType, resourceId, enabled = true }: UseEdi
   }, [controller]);
 
   // 画面を閉じるとき(pagehide)は beacon で解除する(ヘッダが付けられないため本文に合言葉を積む)。
+  // ⚠(外部レビューP2 round5) bfcache では pagehide の後も unmount されず復元されうる。
+  //   pagehide では画面も expired に落とし、pageshow(persisted)で取り直す(判断は controller)。
   useEffect(() => {
     if (!controller) return;
-    const onHide = () => controller.onHidden();
+    const onHide = () => controller.onPageHide();
+    const onShow = (e: PageTransitionEvent) => controller.onPageShow(e.persisted);
     window.addEventListener("pagehide", onHide);
-    return () => window.removeEventListener("pagehide", onHide);
+    window.addEventListener("pageshow", onShow);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      window.removeEventListener("pageshow", onShow);
+    };
   }, [controller]);
 
   const acquire = useCallback(async () => {

@@ -89,8 +89,12 @@ export interface EditLockController {
    *   (`locked-message.ts` の `prev === envelopeMessage` と同じ世代の見張りの考え方)。
    */
   noteSaveErrorHolder(holderName: string, since?: string): void;
-  /** pagehide 相当。 */
+  /** unmount の後始末(hook の cleanup)。beacon で鍵を返すだけ(状態は hook が idle に戻す)。 */
   onHidden(): void;
+  /** pagehide。beacon で鍵を返し、画面も expired に落とす(bfcache で凍結されても `mine` を残さない)。 */
+  onPageHide(): void;
+  /** pageshow。bfcache から戻った(persisted)ときに expired なら取り直す。 */
+  onPageShow(persisted: boolean): void;
   /** visibilitychange(表示に戻った)相当。 */
   onVisible(): void;
   dispose(): void;
@@ -332,6 +336,36 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
     if (lockId) deps.releaseByBeacon(lockId);
   }
 
+  /**
+   * ⚠(外部レビュー@codex P2・2026-09-26 round5) bfcache(戻る/進むの保存)では pagehide の
+   *   後も unmount されず、この controller と画面の状態がそのまま凍結・復元される。
+   *   beacon で鍵を返すだけで `mine` のまま残すと、復元後に保存ボタンが押せて返した
+   *   lockId を送り EDIT_LOCK_STALE になり、`mine` の間は入力しても取り直さない。
+   *   返したら画面も `expired` に落とす(`apply` が合図を止めて世代を進める=凍結前に
+   *   飛んでいた合図の応答も捨てる)。本当に閉じる場合は落としても誰も見ない。
+   *   unmount の後始末(hook の cleanup)は従来どおり `onHidden()` を使う。
+   */
+  function onPageHide(): void {
+    if (!lockId) return;
+    deps.releaseByBeacon(lockId);
+    apply({ kind: "expired" });
+  }
+
+  /**
+   * bfcache から戻った(persisted)とき、`expired` なら入力を待たずに取り直す
+   * (失敗・404 の扱いは入力での取り直しと同じ `attemptReacquireOnce`)。
+   * 通常の読み込み(persisted=false)では何もしない。
+   */
+  function onPageShow(persisted: boolean): void {
+    if (!persisted || disposed) return;
+    if (!shouldReacquireOnInput(state)) return;
+    if (acquireInFlightPromise) {
+      reacquireRequestedWhileInFlight = true;
+      return;
+    }
+    attemptReacquireOnce();
+  }
+
   function onVisible(): void {
     if (state.kind === "mine") void beat();
   }
@@ -359,6 +393,8 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
     noteSaveError,
     noteSaveErrorHolder,
     onHidden,
+    onPageHide,
+    onPageShow,
     onVisible,
     dispose,
     revive,

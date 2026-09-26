@@ -128,6 +128,13 @@ describe("useEditLock の配線", () => {
     expect(src).toContain('removeEventListener("visibilitychange", onVisible)');
     expect(src).toContain('addEventListener("pagehide", onHide)');
     expect(src).toContain('removeEventListener("pagehide", onHide)');
+    expect(src).toContain('addEventListener("pageshow", onShow)');
+    expect(src).toContain('removeEventListener("pageshow", onShow)');
+  });
+
+  it("(外部レビューP2 round5) pagehide は onPageHide(画面も expired に落とす)・pageshow は persisted を渡して onPageShow へ結線する(bfcache 復元で取り直す)", () => {
+    expect(src).toMatch(/const onHide = \(\) => controller\.onPageHide\(\);/);
+    expect(src).toMatch(/const onShow = \(e: PageTransitionEvent\) => controller\.onPageShow\(e\.persisted\);/);
   });
 
   it("visibilitychange/pagehide/破棄の配線は controller(useMemoの結果)の変化に追従する(依存配列を[enabled]だけに後退させない)", () => {
