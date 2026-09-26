@@ -118,11 +118,14 @@ function paragraphs(ps: string[]): string {
 export const INQUIRY_CLIENT_CHECK_SOURCE = [
   "function(v){var E=[];",
   `var M=${jsString(JSON.stringify(INQUIRY_ERROR_MESSAGES))};M=JSON.parse(M);`,
-  'function n(s){s=String(s==null?"":s);try{s=s.normalize("NFKC")}catch(_){}return s.replace(/[\\u0000-\\u001f\\u007f]/g,"").trim()}',
-  'var nm=n(v.name);if(nm===""){E.push({f:"name",m:M.name_required})}else if(/[0-9@]/.test(nm)){E.push({f:"name",m:M.name_invalid})}',
+  // 全角→半角(NFKC)が無い古いブラウザでは形式のチェックをしない(全角の正しい番号を弾かない・@codex #446 R2)。
+  // 空・同意なしだけ注意し、形式はサーバー(parseInquiryForm)に任せる。
+  'var canN=typeof "".normalize==="function";',
+  'function n(s){s=String(s==null?"":s);if(canN){try{s=s.normalize("NFKC")}catch(_){}}return s.replace(/[\\u0000-\\u001f\\u007f]/g,"").trim()}',
+  'var nm=n(v.name);if(nm===""){E.push({f:"name",m:M.name_required})}else if(canN&&/[0-9@]/.test(nm)){E.push({f:"name",m:M.name_invalid})}',
   'var ph=n(v.phone).replace(/[ー−–—―]/g,"-").replace(/\\s+/g,"");',
-  `if(ph===""){E.push({f:"phone",m:M.phone_required})}else if(ph.length>${INQUIRY_LIMITS.phone}||!/^[0-9+\\-]+$/.test(ph)||ph.replace(/[^0-9]/g,"").length<10){E.push({f:"phone",m:M.phone_invalid})}`,
-  'var em=n(v.email);if(em!==""&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(em)){E.push({f:"email",m:M.email_invalid})}',
+  `if(ph===""){E.push({f:"phone",m:M.phone_required})}else if(canN&&(ph.length>${INQUIRY_LIMITS.phone}||!/^[0-9+\\-]+$/.test(ph)||ph.replace(/[^0-9]/g,"").length<10)){E.push({f:"phone",m:M.phone_invalid})}`,
+  'var em=n(v.email);if(canN&&em!==""&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(em)){E.push({f:"email",m:M.email_invalid})}',
   'if(n(v.pref)==="email"&&em===""){E.push({f:"email",m:M.email_required_for_pref})}',
   'if(!v.consent){E.push({f:"consent",m:M.consent_required})}',
   "return E}",

@@ -273,3 +273,19 @@ describe("申込フォームのスクリプトは JavaScript として正しく�
     for (const s of scripts) expect(() => new Function(s)).not.toThrow();
   });
 });
+
+describe("全角→半角の変換が無い古いブラウザ(@codex #446 R2 P2)", () => {
+  type Err = { f: string; m: string };
+  it("形式のチェックはせず(サーバーに任せる)、空・同意なしだけ注意する=正しい全角の番号を弾かない", () => {
+    const check = new Function(`return (${INQUIRY_CLIENT_CHECK_SOURCE})`)() as (v: Record<string, unknown>) => Err[];
+    const orig = String.prototype.normalize;
+    // @ts-expect-error 古いブラウザの再現(normalize が無い)
+    delete String.prototype.normalize;
+    try {
+      expect(check({ name: "テスト", phone: "０９０１２３４５６７８", email: "", pref: "", consent: true })).toEqual([]);
+      expect(check({ name: "", phone: "", email: "", pref: "", consent: false }).map((e) => e.f)).toEqual(["name", "phone", "consent"]);
+    } finally {
+      String.prototype.normalize = orig;
+    }
+  });
+});
