@@ -23,6 +23,13 @@ const schema = z.object({
           .transform((v) => v.toLowerCase()),
       }),
     )
+    // ⚠(Task 9 review round1 Minor 9・round2で維持を裁定) 見ている側の分割
+    //   (`src/lib/edit-lock/status-controller.ts`)が読む値と**共有の定数**にする。
+    //   別々に上限を書いていると、片方だけ変えたときに窓口が400を返し始め、
+    //   見ている側は分割していると思い込んだまま気づかない(この段階1の
+    //   route自体は凍結対象だが、値は変えていない・同じモジュールを
+    //   `evaluateLock` で既に import 済みのため、この1行だけの変更で
+    //   三重の重複を無くせる)。
     .max(EDIT_LOCK_STATUS_CHUNK_SIZE),
 });
 
