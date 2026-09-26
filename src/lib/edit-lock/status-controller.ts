@@ -40,6 +40,17 @@
  *   `onRows([])` が今持っている行を消してしまう(一時的な500で帯が消え、
  *   4つの操作が30秒間だけ再度有効になる)。1件も取得できなかった poll は
  *   `onRows` を呼ばず、直前の行をそのまま残す(fail open のまま画面は変えない)。
+ *
+ * review round2 の反映:
+ * - N1: Minor 8 の「直前の行を保持する」は、状態窓口が**持続的に**失敗し続ける
+ *   場合(不具合のあるデプロイ・プロキシの不調・500ループ)を考えていなかった。
+ *   保持を無期限にすると、長時間開いたタブが「🔒 山田さんが編集中です」と
+ *   4つの操作の無効化を**タブの寿命いっぱい**保持し続け、しかも管理者の
+ *   「鍵を外す」(`refresh()`)でも消せない(refreshした問い合わせ自体も同じ理由で
+ *   失敗するため)——これはこの機能の fail open の立場(サーバが権威・見られない
+ *   ときは止めない)と正反対の方向に倒れる。**3回連続で全chunk失敗**したら、
+ *   保持していた行を諦めて空にする(fail open へ倒す)。1回・2回の失敗では
+ *   従来どおり直前の行を保持し、途中で1回でも成功すれば連続回数を0へ戻す。
  */
 import type { EditLockStatusRow } from "@/lib/api-client";
 import { EDIT_LOCK_STATUS_POLL_MS, EDIT_LOCK_STATUS_CHUNK_SIZE } from "./rules";
@@ -103,6 +114,12 @@ function resourceSetKey(resources: readonly EditLockStatusResource[]): string {
     .join("|");
 }
 
+/**
+ * 状態窓口が連続でこの回数だけ全chunk失敗したら、保持していた行を諦めて
+ * fail open へ倒す(review round2 N1)。1〜2回は一過性として直前の行を保持する。
+ */
+const MAX_CONSECUTIVE_TOTAL_FAILURES = 3;
+
 export function createEditLockStatusController(
   deps: EditLockStatusControllerDeps,
 ): EditLockStatusController {
@@ -111,6 +128,8 @@ export function createEditLockStatusController(
   let seq = 0;
   let timerHandle: unknown = null;
   let stopped = false;
+  /** 連続で全chunk失敗した回数(review round2 N1)。1回でも成功すれば0へ戻す。 */
+  let consecutiveTotalFailures = 0;
 
   function clearTimer(): void {
     if (timerHandle !== null) {
@@ -140,11 +159,22 @@ export function createEditLockStatusController(
       // ⚠(seq guard) 資源の一覧が差し替わった・stop() された後に届いた応答は、
       //   もう「今の一覧」の話ではない=反映しない。
       if (stopped || issued !== seq) return;
-      // ⚠(review round1 Minor 8) 1件も取得できなかった(=すべてのchunkが失敗した)
-      //   pollは、今持っている行をそのまま残す。一部でも成功していれば、
-      //   失敗したchunk分は([]に畳まれて)結果から抜け落ちるだけで反映する
-      //   (従来どおり=fail openなまま、成功した分は最新化する)。
-      if (results.every((r) => !r.ok)) return;
+      // ⚠(review round1 Minor 8 / round2 N1) 1件も取得できなかった(=すべての
+      //   chunkが失敗した)pollは、まず直前の行をそのまま残す(一過性の500等)。
+      //   ただし**連続で**MAX_CONSECUTIVE_TOTAL_FAILURES回失敗したら、もう
+      //   「一過性」とは呼べない——保持を諦めて空にし、fail open へ倒す
+      //   (帯・4つの無効化をタブの寿命いっぱい固定しない。管理者のrefresh()も
+      //   このpollを通るため、外した直後にまた失敗しても3回目でちゃんと戻る)。
+      //   一部でも成功していれば、失敗したchunk分は([]に畳まれて)結果から
+      //   抜け落ちるだけで反映し、連続失敗回数も0へ戻す。
+      if (results.every((r) => !r.ok)) {
+        consecutiveTotalFailures += 1;
+        if (consecutiveTotalFailures < MAX_CONSECUTIVE_TOTAL_FAILURES) return;
+        consecutiveTotalFailures = 0;
+        deps.onRows([]);
+        return;
+      }
+      consecutiveTotalFailures = 0;
       deps.onRows(results.flatMap((r) => r.rows));
     });
   }
@@ -163,6 +193,7 @@ export function createEditLockStatusController(
       //   直後にstart()が再度呼ばれる)。stoppedを戻さないと以後poll()が
       //   永久に早期returnし、rowsが空のまま固まる。
       stopped = false;
+      consecutiveTotalFailures = 0;
       resources = initial;
       // ⚠(review round1 Minor 10) 冪等にする: 既存の間隔があれば片付けてから
       //   新しく張り直す(呼び出し側が誤って2回start()しても間隔が漏れない)。

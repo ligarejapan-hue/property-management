@@ -338,6 +338,62 @@ describe("createEditLockStatusController", () => {
     // ⚠修理前は`onRows([])`が呼ばれ、帯が消えて4つの操作が30秒だけ再度有効になっていた。
     expect(h.onRowsMock).toHaveBeenCalledTimes(1); // 増えない=直前の行のまま
   });
+
+  it("N1) 連続して3回すべてのchunkが失敗したら、保持していた行を諦めてfail openへ倒す(1・2回目は保持する)", async () => {
+    h.fetchStatusMock.mockResolvedValueOnce([row("property", "p1", "held_by_other")]);
+    const controller = createEditLockStatusController(h.deps);
+    controller.start([P1]);
+    await flush();
+    expect(h.onRowsMock).toHaveBeenCalledTimes(1);
+    expect(h.onRowsMock).toHaveBeenLastCalledWith([row("property", "p1", "held_by_other")]);
+
+    h.fetchStatusMock.mockRejectedValueOnce(new Error("500"));
+    await h.registry.fire(); // 1回目の失敗
+    expect(h.onRowsMock).toHaveBeenCalledTimes(1); // まだ保持
+
+    h.fetchStatusMock.mockRejectedValueOnce(new Error("500"));
+    await h.registry.fire(); // 2回目の失敗
+    expect(h.onRowsMock).toHaveBeenCalledTimes(1); // まだ保持
+
+    h.fetchStatusMock.mockRejectedValueOnce(new Error("500"));
+    await h.registry.fire(); // 3回目の失敗
+    // ⚠修理前(round2以前)はここでも直前の行を無期限に保持し続け、長時間開いた
+    //   タブが管理者のrefresh()でも消せない帯・4つの無効化を抱え続けていた。
+    expect(h.onRowsMock).toHaveBeenCalledTimes(2);
+    expect(h.onRowsMock).toHaveBeenLastCalledWith([]); // fail openへ倒す
+
+    // その後成功すれば、通常どおり最新の行で復元する。
+    h.fetchStatusMock.mockResolvedValueOnce([row("property", "p1", "held_by_other")]);
+    await h.registry.fire();
+    expect(h.onRowsMock).toHaveBeenCalledTimes(3);
+    expect(h.onRowsMock).toHaveBeenLastCalledWith([row("property", "p1", "held_by_other")]);
+  });
+
+  it("N1b) 連続失敗の途中で1回でも成功すれば、カウントは0へ戻る(その後2回失敗してもfail openへ倒さない)", async () => {
+    h.fetchStatusMock.mockResolvedValueOnce([row("property", "p1", "held_by_other")]);
+    const controller = createEditLockStatusController(h.deps);
+    controller.start([P1]);
+    await flush();
+
+    h.fetchStatusMock.mockRejectedValueOnce(new Error("500"));
+    await h.registry.fire(); // 1回目の失敗
+    h.fetchStatusMock.mockRejectedValueOnce(new Error("500"));
+    await h.registry.fire(); // 2回目の失敗
+    expect(h.onRowsMock).toHaveBeenCalledTimes(1); // まだ保持(3回連続に達していない)
+
+    // ここで1回成功する(カウントが0へ戻るはず)。
+    h.fetchStatusMock.mockResolvedValueOnce([row("property", "p1", "held_by_other")]);
+    await h.registry.fire();
+    expect(h.onRowsMock).toHaveBeenCalledTimes(2);
+
+    h.fetchStatusMock.mockRejectedValueOnce(new Error("500"));
+    await h.registry.fire(); // 成功後の1回目の失敗
+    h.fetchStatusMock.mockRejectedValueOnce(new Error("500"));
+    await h.registry.fire(); // 成功後の2回目の失敗
+    // ⚠カウントがリセットされていなければ(1,2回目+この2回で連続4回)ここで
+    //   fail openへ倒れてしまう。リセットされていれば、まだ2回連続なので保持する。
+    expect(h.onRowsMock).toHaveBeenCalledTimes(2); // まだ増えない=直前の行を保持
+  });
 });
 
 describe("findEditLockStatusRow", () => {
