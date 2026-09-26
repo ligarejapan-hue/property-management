@@ -67,6 +67,11 @@
 
 新しい表 `dm_scenario_media`(種類ごとの写真と図)
 - `DmLpVariantMedia` と同じ列(`slot` `heading` `sort_order` `asset_id` または `figure_kind`)で、親が `scenario_id`。`asset_id` は `dm_lp_assets` へ RESTRICT(使われている写真は消せない=今と同じ)。
+- ⚠写真の削除は DB の行を消さず `deleted_at` を立てる方式(論理削除)なので、RESTRICT だけでは守れない。「使われているか」を数えている次の3か所すべてで、**`dm_lp_variant_media` と `dm_scenario_media` の両方**を数える(判定は1つの関数に集約し、3か所がそれを呼ぶ):
+  1. 写真の削除(`DELETE /api/properties/sale-dm/lp-assets/[assetId]`)=どちらかで使われていれば断る
+  2. 公開口(`/lp-assets/[publicId]`)=どちらかで使われていれば返す(台帳のプレビューで写真が出るため。台帳の写真は発送に写せばいずれ公開される会社の写真で、公開範囲は実質変わらない)
+  3. 写真ライブラリの「使用中」表示(`GET lp-assets`)
+- 回帰テスト: 台帳だけが使う写真が「消せない・公開口で返る・使用中と出る」こと。
 
 列の追加
 | 表 | 列 | 意味 |
