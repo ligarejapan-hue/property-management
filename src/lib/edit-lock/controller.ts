@@ -134,6 +134,8 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
    *   後から呼んだ acquire() もその決着を正しく待てるようにする。
    */
   let acquireInFlightPromise: Promise<void> | null = null;
+  /** いま飛んでいる取得が開始時に捕まえた世代。`generation` とずれていたらその試行は古い。 */
+  let acquireInFlightGen = -1;
   /** ⚠(task5 持ち越し#2) 飛んでいる間に来た入力を、その決着後の取り直し予約として控える。 */
   let reacquireRequestedWhileInFlight = false;
 
@@ -198,10 +200,26 @@ export function createEditLockController(deps: EditLockControllerDeps): EditLock
     //   その Promise をそのまま返す(バーストの2本目以降は1本目に合流させる。
     //   1本目の応答が全体の結果を決める。かつ、呼び出し元は await すれば必ず
     //   決着まで待てる=何もせず空で解決することはない)。
-    if (acquireInFlightPromise) return acquireInFlightPromise;
+    // ⚠(外部レビュー@codex P2・2026-09-26) 合流してよいのは、飛んでいる試行が**今の世代**の
+    //   ときだけ。dispose/release が追い越した古い試行は、応答が届いても捨てて beacon で
+    //   返すだけ=合流すると「約束は成功・state は idle」のまま終わり、保存ボタンが永久に
+    //   押せない(StrictMode の setup→cleanup→setup が応答待ちの最中に起きると必ず踏む)。
+    //   古い試行の決着(成否は問わない=その失敗はその試行の呼び出し元のもの)を待ってから
+    //   取り直す。待つ間に再び dispose されたら送らない(unmount 後に鍵を作らない)。
+    //   取り直しは acquire() を呼び直すので、待っていた呼び出しが何本あっても
+    //   2本目以降は新しい試行へ合流する(n7 の直列化を保つ)。
+    if (acquireInFlightPromise) {
+      if (acquireInFlightGen === generation) return acquireInFlightPromise;
+      const ignore = () => undefined;
+      return acquireInFlightPromise.then(ignore, ignore).then(() => {
+        if (disposed) return;
+        return acquire();
+      });
+    }
     const attempt = (async () => {
       bumpGeneration();
       const gen = generation;
+      acquireInFlightGen = gen;
       const res = await deps.acquire();
       const next = uiStateFromAcquire(res);
       if (disposed || gen !== generation) {

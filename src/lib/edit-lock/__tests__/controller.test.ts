@@ -769,4 +769,96 @@ describe("createEditLockController", () => {
     await controller.acquire();
     expect(h.lastState().kind).toBe("mine");
   });
+
+  /**
+   * 外部レビュー@codex P2(2026-09-26)。StrictMode の effect 二重呼び出し
+   * (setup→cleanup→setup)が、1回目の取得の**応答待ちの最中**に起きる場合。
+   * cleanup の dispose() で世代が進むので1回目の応答は「古い」として捨てられ
+   * beacon で返される。2回目の setup の acquire() がその古い試行へ**合流**すると、
+   * 約束は成功で終わるのに state は idle のまま=所有者カードの保存ボタンが永久に押せない。
+   */
+  const SECOND_LOCK_ID = "22222222-2222-4222-8222-222222222222";
+  const SECOND_MINE: AcquireResponse = { state: "mine", lockId: SECOND_LOCK_ID, since: SINCE };
+
+  it("s1) 取得の応答待ちの間に dispose→revive されたら、後の acquire() は古い試行に合流せず取り直す(StrictMode)", async () => {
+    const stale = createDeferred<AcquireResponse>();
+    h.acquireMock.mockReturnValueOnce(stale.promise).mockResolvedValueOnce(SECOND_MINE);
+    h.heartbeatMock.mockResolvedValue(HEARTBEAT_MINE);
+    const controller = createEditLockController(h.deps);
+
+    const first = controller.acquire();
+    // use-edit-lock.ts の cleanup → 2回目の setup と同じ順序。
+    controller.onHidden();
+    controller.dispose();
+    controller.revive();
+    const second = controller.acquire();
+
+    stale.resolve(MINE);
+    await first;
+    await second;
+    await flush();
+
+    // 古い試行の許可は孤児にせず beacon で返し、新しく取り直した鍵を持っている。
+    expect(h.releaseByBeaconMock).toHaveBeenCalledWith(LOCK_ID);
+    expect(h.acquireMock).toHaveBeenCalledTimes(2);
+    expect(h.lastState()).toMatchObject({ kind: "mine", lockId: SECOND_LOCK_ID });
+    expect(h.registry.activeCount()).toBe(1);
+  });
+
+  it("s2) 古い試行が失敗しても、後の acquire() は取り直した結果で決着する", async () => {
+    const stale = createDeferred<AcquireResponse>();
+    h.acquireMock.mockReturnValueOnce(stale.promise).mockResolvedValueOnce(SECOND_MINE);
+    const controller = createEditLockController(h.deps);
+
+    const first = controller.acquire();
+    controller.dispose();
+    controller.revive();
+    const second = controller.acquire();
+
+    stale.reject(new Error("network"));
+    await expect(first).rejects.toThrow("network");
+    await second;
+
+    expect(h.acquireMock).toHaveBeenCalledTimes(2);
+    expect(h.lastState()).toMatchObject({ kind: "mine", lockId: SECOND_LOCK_ID });
+  });
+
+  it("s3) 古い試行の決着を待つ間に再び dispose されたら、取り直しを送らない(unmount後に鍵を作らない)", async () => {
+    const stale = createDeferred<AcquireResponse>();
+    h.acquireMock.mockReturnValueOnce(stale.promise).mockResolvedValueOnce(SECOND_MINE);
+    const controller = createEditLockController(h.deps);
+
+    const first = controller.acquire();
+    controller.dispose();
+    controller.revive();
+    const second = controller.acquire();
+    controller.dispose();
+
+    stale.resolve(MINE);
+    await first;
+    await second;
+    await flush();
+
+    expect(h.acquireMock).toHaveBeenCalledTimes(1);
+    expect(h.onStateMock).not.toHaveBeenCalled();
+  });
+
+  it("s4) 古い試行を待つ間の acquire() が何本来ても、取り直しは1本だけ(n7の直列化を保つ)", async () => {
+    const stale = createDeferred<AcquireResponse>();
+    h.acquireMock.mockReturnValueOnce(stale.promise).mockResolvedValue(SECOND_MINE);
+    const controller = createEditLockController(h.deps);
+
+    const first = controller.acquire();
+    controller.dispose();
+    controller.revive();
+    const a = controller.acquire();
+    const b = controller.acquire();
+
+    stale.resolve(MINE);
+    await Promise.all([first, a, b]);
+    await flush();
+
+    expect(h.acquireMock).toHaveBeenCalledTimes(2);
+    expect(h.lastState()).toMatchObject({ kind: "mine", lockId: SECOND_LOCK_ID });
+  });
 });
