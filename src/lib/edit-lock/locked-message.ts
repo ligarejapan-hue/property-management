@@ -33,17 +33,32 @@
  *   タイムアウト側が勝っても・負けても、`setTimeout` のハンドルは
  *   `clearTimeout` する(勝った側=問い合わせが先に終わったときに、タイマーだけ
  *   宙に浮いたまま残らないようにする)。
- * ⚠**呼び出し元が既に持っている状態の行があれば、それを渡してもう1回問い合わせない**
- *   (Task 9)。物件詳細(見ている側)は `useEditLockStatus` で30秒ごとに状態を
- *   持っているため、案件ステータス・導入ルートのプルダウン(`page.tsx`)は
- *   その場で持っている行を `preFetchedRows` に渡せば、この関数は
- *   `fetchEditLockStatus` を呼ばずに済む(2回目の追加リクエストを避ける)。
- *   省略時(地番ポップアップ・法人番号の反映のように、呼び出し側が状態の行を
- *   持っていない入口)は従来どおり1回だけ問い合わせる。
+ * ⚠**呼び出し元が既に持っている状態の行は、それが氏名を名乗っているときだけ使う**
+ *   (Task 9・review round1 Important 2で訂正)。物件詳細(見ている側)は
+ *   `useEditLockStatus` で30秒ごとに状態を持っているため、案件ステータス・
+ *   導入ルートのプルダウン(`page.tsx`)はその場で持っている行を `preFetchedRows`
+ *   に渡せる。**しかし**この関数を呼ぶ入口(プルダウン)は、渡している行と
+ *   **同じ行**で保存ボタン自体を無効化している(`disabled={... || editLockHeld}`)
+ *   ため、保存が実際に実行できて423を受け取れる経路では、渡された行は
+ *   ほぼ常に `free`/`mine`(=直前の30秒ポーリングと今の423の間に、たった今
+ *   誰かが鍵を取った)であり、**保存を拒んだ本人の氏名を持っていない**。
+ *   渡された行をそのまま「他の人が持っている」の根拠として使うと、氏名を
+ *   名乗れる状態の窓口への問い合わせを飛ばしてしまい、仕様6.5の
+ *   「{氏名}さんが編集中です({HH:mm}〜)」が汎用の封筒文言へ**後退**する
+ *   (氏名を知る機会を自ら潰す退行)。そこで、渡された行が
+ *   `held_by_other` かつ `holderName` を持つ(=氏名を名乗れる)ときだけ
+ *   その場で使い、そうでなければ(free/mine/該当資源が無い/等)従来どおり
+ *   状態窓口へ1回問い合わせる——「渡された行が使い物になる場合だけ節約する」
+ *   契約にする(節約できない場合でも氏名を諦めない)。
  */
 import { fetchEditLockStatus, type EditLockStatusRow } from "@/lib/api-client";
 import { formatSince } from "@/lib/edit-lock/ui-state";
 import { EDIT_LOCK_MESSAGE_LOOKUP_TIMEOUT_MS } from "@/lib/edit-lock/rules";
+
+/** 「他の人が持っている」と氏名まで名乗っている行か(=そのまま使ってよい)。 */
+function namesHolder(row: EditLockStatusRow | undefined): row is EditLockStatusRow & { holderName: string } {
+  return row?.state === "held_by_other" && !!row.holderName;
+}
 
 async function lookupComposedMessage(
   resourceType: EditLockStatusRow["resourceType"],
@@ -52,9 +67,19 @@ async function lookupComposedMessage(
   preFetchedRows?: EditLockStatusRow[],
 ): Promise<string> {
   try {
-    const rows = preFetchedRows ?? (await fetchEditLockStatus([{ resourceType, resourceId }]));
-    const row = rows.find((r) => r.resourceType === resourceType && r.resourceId === resourceId);
-    if (row && row.state === "held_by_other" && row.holderName) {
+    const preFetchedRow = preFetchedRows?.find(
+      (r) => r.resourceType === resourceType && r.resourceId === resourceId,
+    );
+    // ⚠(review round1 Important 2) 渡された行を使うのは、それが氏名を
+    //   名乗っているときだけ。該当資源が preFetchedRows に無い場合
+    //   (find が undefined を返す)も含め、それ以外は必ず1回問い合わせる
+    //   ——「渡されたから」というだけで氏名を諦めて封筒文言へ落とさない。
+    const row = namesHolder(preFetchedRow)
+      ? preFetchedRow
+      : (await fetchEditLockStatus([{ resourceType, resourceId }])).find(
+          (r) => r.resourceType === resourceType && r.resourceId === resourceId,
+        );
+    if (namesHolder(row)) {
       return `${row.holderName}さんが編集中です(${formatSince(row.since)}〜)`;
     }
   } catch {

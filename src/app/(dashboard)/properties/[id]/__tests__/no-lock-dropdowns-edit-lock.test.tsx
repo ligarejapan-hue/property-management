@@ -329,6 +329,66 @@ describe("runNoLockPropertyPatch(鍵を持たない入口の保存)", () => {
     expect(calledUrls).toContain("/api/edit-locks/status");
   });
 
+  it("Task 9 review round1 Important 2: preFetchedRowsの行が氏名を名乗っていなければ(free/mine等)、状態窓口へ問い合わせて氏名を取りに行く(封筒文言へ後退させない)", async () => {
+    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    const fetchMock = stubFetchByUrl({
+      "/api/properties/p1": async () =>
+        jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+      "/api/edit-locks/status": async () =>
+        jsonResponse({
+          locks: [{ resourceType: "property", resourceId: "p1", state: "held_by_other", since, holderName: "花子" }],
+        }),
+    });
+    const error = createStateSpy<string | null>(null);
+    // ⚠この画面の実際の配線では、渡す行は保存ボタン自体を無効化した行と同じなので、
+    //   保存が実行できる(=このcatchに入る)時点では常にfree/mineになる
+    //   (レビュー指摘の再現)。ここではfreeを直接渡して固定する。
+    await runNoLockPropertyPatch(
+      "p1",
+      1,
+      { caseStatus: "active" },
+      vi.fn(),
+      error.setState,
+      vi.fn(),
+      undefined,
+      [{ resourceType: "property", resourceId: "p1", state: "free" }],
+    );
+    await flushAsync();
+    // ⚠修理前は`row.state === "held_by_other"`を満たさず`:57`が失敗し、封筒文言
+    //   (「他の画面で編集中です」)のまま止まっていた。氏名まで組み立てられている。
+    expect(error.value).toBe("花子さんが編集中です(14:00〜)");
+    const calledUrls = fetchMock.mock.calls.map(([url]) => url);
+    expect(calledUrls).toContain("/api/edit-locks/status");
+  });
+
+  it("Task 9 review round1 Important 2: preFetchedRowsに該当資源の行が無いときも、状態窓口へ問い合わせる(:56のフォールバック漏れの修理)", async () => {
+    const since = new Date(2026, 8, 22, 14, 0).toISOString();
+    const fetchMock = stubFetchByUrl({
+      "/api/properties/p1": async () =>
+        jsonResponse({ error: { code: "EDIT_LOCKED", message: "他の画面で編集中です" } }, 423),
+      "/api/edit-locks/status": async () =>
+        jsonResponse({
+          locks: [{ resourceType: "property", resourceId: "p1", state: "held_by_other", since, holderName: "三郎" }],
+        }),
+    });
+    const error = createStateSpy<string | null>(null);
+    await runNoLockPropertyPatch(
+      "p1",
+      1,
+      { caseStatus: "active" },
+      vi.fn(),
+      error.setState,
+      vi.fn(),
+      undefined,
+      // ⚠p1についての行が1件も無い配列(空配列)を渡す。
+      [],
+    );
+    await flushAsync();
+    expect(error.value).toBe("三郎さんが編集中です(14:00〜)");
+    const calledUrls = fetchMock.mock.calls.map(([url]) => url);
+    expect(calledUrls).toContain("/api/edit-locks/status");
+  });
+
   it("EDIT_LOCKED以外のエラーも従来どおり封筒のmessageを表示する(既存挙動を変えない)", async () => {
     stubFetch(async () =>
       jsonResponse({ error: { code: "VALIDATION_ERROR", message: "入力に誤りがあります" } }, 422),
