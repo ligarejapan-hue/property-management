@@ -128,3 +128,16 @@ describe("registry-location-search-button.tsx: dark 配色（暗面可読化）"
     });
   }
 });
+
+describe("見ている側(仕様6.3・Task 9・review round1 Important 3)", () => {
+  it("propsで受け取ったeditLockHeldを、そのままRegistryChibanPopupへ渡す(省略時はfalse=既存呼び出し元の挙動を変えない)", () => {
+    // ⚠(review round1 Important 3) この配線は元々テストが1本も無く、
+    //   `page.tsx→RegistryLocationSearchButton→RegistryChibanPopup`の
+    //   2つ目のリンク(このファイル自身の中継)が壊れても気づけなかった。
+    //   このファイルには<RegistryChibanPopupが1箇所しか無いためunboundedで安全
+    //   (registry-chiban-popup.test.tsの`canSave`側の検査と対になる)。
+    expect(src).toContain("editLockHeld?: boolean;");
+    expect(src).toContain("editLockHeld = false,");
+    expect(src).toMatch(/<RegistryChibanPopup[\s\S]*?editLockHeld=\{editLockHeld\}/);
+  });
+});
