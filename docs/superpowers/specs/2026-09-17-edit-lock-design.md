@@ -708,3 +708,10 @@ round1 は応答器+複製タブ確認の一生を「物件詳細の画面(親)�
 | 重さ | 指摘 | 裁定 |
 |---|---|---|
 | P2 | bfcache(戻る/進むの保存)では pagehide の後も unmount されない。beacon で鍵を返したのに画面は `mine` のまま凍結・復元され、保存ボタンが押せて返した lockId を送り `EDIT_LOCK_STALE`、しかも `mine` の間は入力しても取り直さない(次の合図まで最大30秒) | pagehide を後始末(`onHidden`)から分け、`onPageHide` で鍵を返したら**画面も `expired` に落とす**(合図停止・世代を進める)。`pageshow` の `persisted` で `onPageShow` が `expired` なら**入力を待たずに取り直す**(失敗・404 は入力での取り直しと同じ扱い)。unmount の後始末は従来どおり `onHidden`。`controller.test.ts` b1〜b4・`use-edit-lock.test.ts` の結線で固定 |
+
+### 外部レビュー(@codex)round6 の反映(2026-09-26・確認前の入口/反映ボタン)
+
+| 重さ | 指摘 | 裁定 |
+|---|---|---|
+| P1 | round3 で状態の周期を複製タブ確認まで止めたため、その間は行が空=`propertyEditLockHeld` が false。鍵を持たずに保存する入口(案件ステータス・導入ルート・地番保存)が押せると、**写し取った合言葉のまま送られ、元のタブの鍵が「同じ画面」として素通りする** | `propertyNoLockWritesBlocked = propertyEditLockHeld \|\| !ownerLockTokenReady` を作り、この3入口へ渡す。帯・編集ボタンは `propertyEditLockHeld` のまま(編集ウィンドウは自分で確認を待つ) |
+| P2 | 所有者カード内の法人番号パネルは `lockId` を受け取るだけで、反映ボタンは鍵の状態で止まらない。期限切れ/管理者に外された後も押せて `lockId=null` で送られる(期限切れの行は取り直さずに書け、外された行は423を繰り返す) | パネルに `applyBlocked`(既定 false)を足し、カードは**保存ボタンと同じ `canSubmitSave` の否定**を渡す。管理画面は鍵を持たない入口なので渡さない(従来どおり)。走査テストで両画面を固定 |

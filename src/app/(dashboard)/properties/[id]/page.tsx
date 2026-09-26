@@ -735,6 +735,12 @@ export default function PropertyDetailPage({
   // (窓口の権限境界そのもの)ので、その有無で「鍵を外す」の表示可否を決める。
   const propertyEditLockRow = editLockStatus.byKey("property", property.id);
   const propertyEditLockHeld = isEditLockHeldByOther(propertyEditLockRow);
+  // ⚠(外部レビュー@codex P1 round6) 鍵を持たずに保存する入口(案件ステータス・導入ルート・
+  //   地番保存)は、複製タブ確認(最大300ms)が済むまでも止める。その間は状態の周期を
+  //   止めている(P2 round3)ので行が空=`propertyEditLockHeld` は false になり、押せると
+  //   写し取った合言葉のまま送られて元のタブの鍵が「同じ画面」として素通りする。
+  //   帯・編集ボタンは `propertyEditLockHeld` のまま(編集ウィンドウは自分で確認を待つ)。
+  const propertyNoLockWritesBlocked = propertyEditLockHeld || !ownerLockTokenReady;
   const propertyEditLockIsAdmin = propertyEditLockRow?.lockId !== undefined;
 
   return (
@@ -866,7 +872,7 @@ export default function PropertyDetailPage({
         onRegistryResultApplied={handleRegistryResultApplied}
         // 見ている側(仕様 6.3・Task 9)。物件が他の人の鍵なら、地番ポップアップの
         // 「保存して確認へ」だけを止める(検索・ログイン導線は止めない)。
-        editLockHeld={propertyEditLockHeld}
+        editLockHeld={propertyNoLockWritesBlocked}
       />
 
       {/* Warning badge */}
@@ -936,7 +942,7 @@ export default function PropertyDetailPage({
             onRefresh={fetchProperty}
             canWrite={canWriteProperty}
             onOpenAttachments={() => setActiveTab("attachments")}
-            editLockHeld={propertyEditLockHeld}
+            editLockHeld={propertyNoLockWritesBlocked}
           />
         )}
         {activeTab === "owner" && (
@@ -1986,6 +1992,18 @@ function OwnerCard({
                   //   Important #3)。カード自身のhandleSaveと同型
                   //   (apiErrorCode(err)をそのままnoteSaveErrorへ渡すだけ)。
                   onLockRefused={(code) => lock.noteSaveError(code, null)}
+                  // ⚠(外部レビュー@codex P2 round6) 反映ボタンもカードの保存ボタンと同じ判断で止める。
+                  //   lockId を渡すだけだと、鍵が期限切れ/管理者に外された後も反映が押せて
+                  //   lockId=null で送られる(保存ボタンは閉じ、帯は「保存できません」なのに)。
+                  applyBlocked={
+                    !canSubmitSave({
+                      tokenReady: editLockTokenReady,
+                      canSave: lock.canSave,
+                      saving,
+                      lockUnavailable,
+                      stateKind: lock.state.kind,
+                    })
+                  }
                   onApplied={async () => {
                     // 反映成功 → 親側で owner を再フェッチし、最新値・version を反映する
                     await onRefresh();

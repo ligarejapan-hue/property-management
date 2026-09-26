@@ -387,12 +387,28 @@ describe("保存の入口(仕様8.3・スイープ)", () => {
     );
   });
 
+  it("物件詳細の所有者カード内は、カードの保存ボタンと同じ判断(canSubmitSave)で反映ボタンを止める(外部レビューP2 round6)", () => {
+    // ⚠lockId を渡すだけでは、鍵が期限切れ/管理者に外された後も反映ボタンが押せ、
+    //   lockId=null で送られてしまう(カードの保存ボタンは閉じ、帯は「保存できません」)。
+    const src = readSource("src/app/(dashboard)/properties/[id]/page.tsx");
+    expect(src).toMatch(
+      /<CorporateLookupPanel[\s\S]*?applyBlocked=\{\s*!canSubmitSave\(\{\s*tokenReady: editLockTokenReady,\s*canSave: lock\.canSave,\s*saving,\s*lockUnavailable,\s*stateKind: lock\.state\.kind,?\s*\}\)\s*\}/,
+    );
+  });
+
+  it("法人番号パネルは applyBlocked の間は反映ボタンを押せない(既定は false=管理画面は従来どおり)", () => {
+    const src = readSource("src/components/owners/corporate-lookup-panel.tsx");
+    expect(src).toMatch(/applyBlocked = false,/);
+    expect(src).toMatch(/const applyButtonEnabled =\s*!applyBlocked &&/);
+  });
+
   it("admin/owners/[id] は鍵を持たない入口なので CorporateLookupPanel に lockId も onLockRefused も渡さない", () => {
     const src = readSource("src/app/(dashboard)/admin/owners/[id]/page.tsx");
     const block = src.match(/<CorporateLookupPanel[\s\S]*?\/>/)?.[0];
     expect(block).toBeTruthy();
     expect(block).not.toMatch(/lockId=/);
     expect(block).not.toMatch(/onLockRefused=/);
+    expect(block).not.toMatch(/applyBlocked=/);
   });
 
   it("法人番号パネル(corporate-lookup-panel.tsx・handleApply)は両方のcatch節で423の文言組み立てを先に確定させてからカードへ報告する(review round1 Important #1・round2 Minor #4)", () => {

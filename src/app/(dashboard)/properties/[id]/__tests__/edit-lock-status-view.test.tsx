@@ -123,10 +123,22 @@ describe("仕様6.3の表: 物件が他の人の鍵のとき止まる4つ", () =
     );
   });
 
+  /**
+   * 外部レビュー@codex P1(round6)。複製タブ確認(最大300ms)が済むまでは状態の周期を
+   * 止めている(P2 round3)ため行が空=`propertyEditLockHeld` は false になる。鍵を持たずに
+   * 保存する入口(案件ステータス・導入ルート・地番保存)がその間押せると、写し取った
+   * 合言葉のまま送られ、元のタブの鍵が「同じ画面」として素通りする。
+   */
+  it("鍵を持たない入口は、複製タブ確認が済むまで止める(propertyNoLockWritesBlocked・P1 round6)", () => {
+    expect(PROPERTY_DETAIL_PAGE_SRC).toMatch(
+      /const propertyNoLockWritesBlocked = propertyEditLockHeld \|\| !ownerLockTokenReady;/,
+    );
+  });
+
   it("③ 案件ステータス・導入ルートのプルダウンを無効化する(BasicTab経由でeditLockHeldを渡す)", () => {
     const basicTabBlock = extractJsxElement(PROPERTY_DETAIL_PAGE_SRC, "<BasicTab");
     expect(basicTabBlock.length).toBeGreaterThan(0);
-    expect(basicTabBlock).toMatch(/editLockHeld=\{propertyEditLockHeld\}/);
+    expect(basicTabBlock).toMatch(/editLockHeld=\{propertyNoLockWritesBlocked\}/);
     expect(CASE_STATUS_FIELD_SRC).toMatch(/disabled=\{saving \|\| editLockHeld\}/);
     expect(INTRODUCTION_ROUTE_FIELD_SRC).toMatch(/disabled=\{saving \|\| editLockHeld\}/);
   });
@@ -141,7 +153,7 @@ describe("仕様6.3の表: 物件が他の人の鍵のとき止まる4つ", () =
       "<RegistryLocationSearchButton",
     );
     expect(registryButtonBlock.length).toBeGreaterThan(0);
-    expect(registryButtonBlock).toMatch(/editLockHeld=\{propertyEditLockHeld\}/);
+    expect(registryButtonBlock).toMatch(/editLockHeld=\{propertyNoLockWritesBlocked\}/);
   });
 
   it("空いた(free)なら帯を出さない(propertyEditLockHeldがfalseならバナーのJSXが評価されない)", () => {

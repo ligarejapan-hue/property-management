@@ -74,6 +74,13 @@ interface CorporateLookupPanelProps {
    * 渡さない(undefined=何もしない)。
    */
   onLockRefused?: (code: string | null) => void;
+  /**
+   * 反映ボタンを止める(外部レビュー@codex P2 round6)。所有者カード内はカードの保存
+   * ボタンと同じ判断(`canSubmitSave`)の否定を渡す=鍵が期限切れ/管理者に外された間は
+   * 反映も押せない。管理画面(`admin/owners/[id]`)は鍵を持たない入口なので渡さない
+   * (既定 false=従来どおり)。
+   */
+  applyBlocked?: boolean;
 }
 
 type ApplyTarget = "name" | "address" | "zip" | "corporateNumber";
@@ -166,6 +173,7 @@ export default function CorporateLookupPanel({
   ownerVersion,
   fieldEditable,
   onApplied,
+  applyBlocked = false,
   lockId,
   onLockRefused,
 }: CorporateLookupPanelProps) {
@@ -414,6 +422,7 @@ export default function CorporateLookupPanel({
     applyTargets.zip ||
     applyTargets.corporateNumber;
   const applyButtonEnabled =
+    !applyBlocked &&
     !applying &&
     !applied &&
     typeof ownerVersion === "number" &&
