@@ -1823,9 +1823,10 @@ function OwnerCard({
                   className="w-full rounded-md border border-gray-300 px-3 py-1.5 font-mono text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
                 />
                 {/* 発注者指定(2026-09-26): 「郵便番号から住所を自動入力」は郵便番号の欄のすぐ下に置く。
+                    ⚠部品は1つのまま(郵便番号→住所と住所→郵便番号候補で、取消と「自動入力は再検索しない」の見張りを共有するため・@codex #447 R1)。
                     zip と address の双方が編集可能なときだけ(候補確定で zip/address をペア反映するため)。
                     ⚠分けているときは**現住所側にだけ**効かせる(登記の記載を書き換えない)。 */}
-                {editableFields.address && (
+                {editableFields.zip && editableFields.address && (
                   <AddressLookupControls
                     zip={splitActive ? form.currentZip : form.zip}
                     address={splitActive ? form.currentAddress : form.address}
@@ -1843,7 +1844,7 @@ function OwnerCard({
                     }
                     addressEdited={addressEdited}
                     disabled={saving}
-                    mode="postal"
+                    mode="both"
                   />
                 )}
                 {splitActive && (
@@ -1934,32 +1935,6 @@ function OwnerCard({
                       登記上の住所は取込で入る値です（ここでは変更しません）。DMは現住所へ送ります。
                     </p>
                   </div>
-                )}
-                {/* 郵便番号⇄住所 補完。zip と address の双方が編集可能なときだけ表示
-                    （候補確定で zip/address をペア反映するため）。onZipChange/onAddressChange は
-                    form 更新のみ＝addressEdited は立てない（候補 apply で再検索しない）。
-                    ⚠分けているときは**現住所側にだけ**効かせる。登記上の欄に効かせると、
-                    郵便番号APIの正規化表記で登記の記載を書き換えてしまう。 */}
-                {editableFields.zip && editableFields.address && (
-                  <AddressLookupControls
-                    zip={splitActive ? form.currentZip : form.zip}
-                    address={splitActive ? form.currentAddress : form.address}
-                    onZipChange={(z) =>
-                      setForm((f) =>
-                        splitActive ? { ...f, currentZip: z } : { ...f, zip: z },
-                      )
-                    }
-                    onAddressChange={(a) =>
-                      setForm((f) =>
-                        splitActive
-                          ? { ...f, currentAddress: a }
-                          : { ...f, address: a },
-                      )
-                    }
-                    addressEdited={addressEdited}
-                    disabled={saving}
-                    mode="search"
-                  />
                 )}
                 {/* 保存を妨げない注意（番号が分からないまま登録できないと運用が止まるため）。 */}
                 {splitActive &&

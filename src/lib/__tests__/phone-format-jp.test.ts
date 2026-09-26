@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatPhoneJp, phoneSearchVariants, isValidPhoneJp } from "../phone-format-jp";
+import { formatPhoneJp, phoneSearchDigits, isValidPhoneJp } from "../phone-format-jp";
 
 // 発注者決定(2026-09-26): 電話番号はハイフンありで統一。ハイフンなしで入れたら自動で入れる。
 // 携帯と固定で区切る位置が違う(固定は市外局番が2〜5桁)ので、市外局番表を持つ既製部品で判定する。
@@ -43,23 +43,16 @@ describe("formatPhoneJp", () => {
 });
 
 
-// ハイフンありで保存した番号を、ハイフンなしで打っても見つける(逆も)。既存データには
-// ハイフンなしの番号も残っているので、両方の書き方で探す。
-describe("phoneSearchVariants", () => {
-  it("ハイフンなしの完全な番号 → そのまま+ハイフンあり", () => {
-    expect(phoneSearchVariants("09012345678")).toEqual(["09012345678", "090-1234-5678"]);
-  });
-  it("ハイフンありの番号 → そのまま+数字だけ", () => {
-    expect(phoneSearchVariants("090-1234-5678")).toEqual(["090-1234-5678", "09012345678"]);
-  });
-  it("番号の一部(数字だけ)はそのまま1つ", () => {
-    expect(phoneSearchVariants("5678")).toEqual(["5678"]);
-  });
-  it("数字でない語(氏名など)はそのまま1つ", () => {
-    expect(phoneSearchVariants("山田")).toEqual(["山田"]);
-  });
-  it("全角でも数字だけの形を足す", () => {
-    expect(phoneSearchVariants("０９０−１２３４")).toEqual(["０９０−１２３４", "0901234"]);
+// 検索語を数字だけにする(保存値側も数字だけにして比べる=ハイフンの有無・打ちかけでも当たる)。
+describe("phoneSearchDigits", () => {
+  it.each([
+    ["09012345678", "09012345678"],
+    ["090-1234-5678", "09012345678"],
+    ["0901234", "0901234"], // 打ちかけ(7桁)
+    ["０９０−１２３４", "0901234"], // 全角
+  ])("%s → %s", (q, d) => expect(phoneSearchDigits(q)).toBe(d));
+  it.each([["090123"], ["山田"], ["03-1234-5678 内線"], [""]])("6桁以下・数字以外の語は null(%s)", (q) => {
+    expect(phoneSearchDigits(q)).toBeNull();
   });
 });
 

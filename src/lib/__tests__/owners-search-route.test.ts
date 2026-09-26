@@ -43,7 +43,7 @@ vi.mock("@/lib/api-helpers", () => {
 });
 
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
-vi.mock("@/lib/prisma", () => ({ default: { owner: { findMany: vi.fn() } } }));
+vi.mock("@/lib/prisma", () => ({ default: { owner: { findMany: vi.fn() }, $queryRaw: vi.fn(async () => []) } }));
 
 import prisma from "@/lib/prisma";
 import {
@@ -54,7 +54,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { GET } from "@/app/api/owners/search/route";
 
-const pm = prisma as unknown as { owner: { findMany: Mock } };
+const pm = prisma as unknown as { owner: { findMany: Mock }; $queryRaw: Mock };
 
 const FULL_CONFIG = {
   name: "full",
@@ -230,26 +230,37 @@ describe("PII-S1a: GET /api/owners/search PII guard", () => {
 });
 
 // 電話番号はハイフンありに統一していく(発注者決定 2026-09-26)。既存データのハイフンなしと
-// 新しいハイフンありのどちらでも見つかるよう、両方の書き方で探す。
+// 新しいハイフンありのどちらでも、また**打っている途中の一部の番号でも**見つかるよう、数字だけにして
+// 比べる(properties/suggest と同じ方式・@codex #447 R1: 一部の番号がハイフンの境目で見つからなくなった)。
 describe("電話番号はハイフンの有無を問わず見つかる", () => {
-  const phoneTerms = () =>
-    (pm.owner.findMany.mock.calls[0][0].where as { OR: Array<Record<string, { contains?: string }>> }).OR
-      .filter((c) => "phone" in c)
-      .map((c) => c.phone.contains);
+  const where = () => pm.owner.findMany.mock.calls[0][0].where as { OR: Array<Record<string, unknown>> };
+  const rawDigits = () => {
+    const call = pm.$queryRaw.mock.calls[0];
+    return call ? (call.slice(1) as unknown[]) : null;
+  };
 
-  it("ハイフンなしで打つと、ハイフンありの書き方でも探す", async () => {
-    await callRoute("09012345678");
-    expect(phoneTerms()).toEqual(["09012345678", "090-1234-5678"]);
+  it("打っている途中の番号(7桁以上)は、数字だけにして探す=ハイフンありの保存値にも当たる", async () => {
+    pm.$queryRaw.mockResolvedValueOnce([{ id: "o-9" }]);
+    await callRoute("0901234");
+    expect(rawDigits()).toContain("%0901234%");
+    expect(where().OR).toContainEqual({ id: { in: ["o-9"] } });
   });
 
-  it("ハイフンありで打つと、数字だけの書き方でも探す", async () => {
+  it("ハイフンありで打っても数字だけで比べる", async () => {
     await callRoute("090-1234-5678");
-    expect(phoneTerms()).toEqual(["090-1234-5678", "09012345678"]);
+    expect(rawDigits()).toContain("%09012345678%");
   });
 
-  it("電話が見えない権限では、どの書き方でも電話を検索対象にしない(検索オラクル封じ)", async () => {
+  it("6桁以下や数字以外の語では、数字だけの検索をしない(重い照会を避ける)", async () => {
+    await callRoute("090123");
+    await callRoute("山田");
+    expect(pm.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("電話が見えない権限では、数字だけの検索もしない(検索オラクル封じ)", async () => {
     (getOwnerDisplayConfig as Mock).mockResolvedValue({ ...FULL_CONFIG, phone: "masked" });
     await callRoute("09012345678");
-    expect(phoneTerms()).toEqual([]);
+    expect(pm.$queryRaw).not.toHaveBeenCalled();
+    expect(where().OR.some((c) => "phone" in c || "id" in c)).toBe(false);
   });
 });

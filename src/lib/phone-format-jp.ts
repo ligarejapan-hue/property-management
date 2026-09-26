@@ -40,21 +40,19 @@ export function formatPhoneJp(input: string): PhoneFormatResult {
   return { value: out, formatted: out !== raw };
 }
 
+/** 電話番号の「数字だけで比べる」検索を行う最小の桁数(短いと重い照会になるため・properties/suggest と同じ)。 */
+export const MIN_PHONE_SEARCH_DIGITS = 7;
+
 /**
- * 電話番号の検索語を「ハイフンあり/なし」の両方の書き方に広げる(重複は除く・入力どおりの語が先頭)。
- * 保存値はハイフンありに統一していくが、既存データにはハイフンなしも残るため両方で探す。
- * 数字と区切り記号だけの語にだけ効かせる(氏名などの語はそのまま1つ)。
+ * 電話番号の検索語を数字だけにする(数字と区切り記号だけの語で、数字が7桁以上のときだけ・それ以外は null)。
+ * 保存値はハイフンありへ統一していくが、既存にはハイフンなしも残り、打っている途中の番号は
+ * ハイフンの境目をまたぐ。保存値側も数字だけにして比べれば、どの書き方でも当たる(@codex #447 R1)。
  */
-export function phoneSearchVariants(q: string): string[] {
-  const out = [q];
+export function phoneSearchDigits(q: string): string | null {
   const nfkc = q.normalize("NFKC").trim();
-  if (nfkc !== "" && PHONE_CHARS_ONLY.test(nfkc)) {
-    const digits = nfkc.replace(/[^0-9]/g, "");
-    if (digits !== "") out.push(digits);
-    const f = formatPhoneJp(nfkc);
-    if (f.value !== nfkc || f.formatted) out.push(f.value);
-  }
-  return [...new Set(out)];
+  if (nfkc === "" || !PHONE_CHARS_ONLY.test(nfkc)) return null;
+  const digits = nfkc.replace(/[^0-9]/g, "");
+  return digits.length >= MIN_PHONE_SEARCH_DIGITS ? digits : null;
 }
 
 /** 日本の電話番号として正しいか(ハイフンの有無・全角は問わない)。入力欄の「番号を確認してください」用。 */

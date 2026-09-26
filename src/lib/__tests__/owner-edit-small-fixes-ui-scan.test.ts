@@ -16,17 +16,15 @@ describe("郵便番号→住所のボタン(発注者指定: 名前を変え、�
     expect(src).not.toMatch(/>\s*住所を自動入力\s*</);
   });
 
-  it.each([[PROPERTY_PAGE], [LINK_MODAL]])("%s: 郵便番号の欄のすぐ下に postal、住所の欄の下に search を置く", (rel) => {
+  it.each([[PROPERTY_PAGE], [LINK_MODAL]])("%s: 住所補完の部品は1つだけで、郵便番号の欄のすぐ下(住所の欄より前)に置く", (rel) => {
     const src = read(rel);
-    expect(src).not.toContain('mode="both"');
-    const postal = src.indexOf('mode="postal"');
-    const search = src.indexOf('mode="search"');
+    // ⚠2つに分けると、取消と「自動入力は再検索しない」の見張りが別々になり、郵便番号から入れた住所で
+    //   住所→郵便番号の検索が走り直す(@codex #447 R1)。1つのまま置き場所だけ変える。
+    expect(src.split("<AddressLookupControls").length - 1).toBe(1);
+    const both = src.indexOf('mode="both"');
     const addressLabel = src.indexOf(">現住所</label>");
-    expect(postal).toBeGreaterThan(0);
-    expect(search).toBeGreaterThan(0);
-    // postal は住所の欄より前(=郵便番号の欄の中)、search は住所の欄より後。
-    expect(postal).toBeLessThan(addressLabel);
-    expect(search).toBeGreaterThan(addressLabel);
+    expect(both).toBeGreaterThan(0);
+    expect(both).toBeLessThan(addressLabel);
   });
 });
 
