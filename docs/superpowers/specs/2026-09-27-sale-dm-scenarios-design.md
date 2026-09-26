@@ -55,7 +55,8 @@
 | 列 | 意味 |
 |---|---|
 | `id` uuid | |
-| `name` 文字列・一意 | 種類の名前(「相続」「空き家」…) |
+| `name` 文字列 | 種類の名前(「相続」「空き家」…)。**削除されていない行の中で一意**(部分一意索引 `WHERE deleted_at IS NULL`) |
+| `deleted_at` 時刻・NULL可 | 削除の印(**論理削除**。下の「削除の決まり」) |
 | `auto_key` 文字列・NULL可・一意 | 自動の振り分け先の目印。`inheritance`=相続 / `vacant`=空き家。それ以外の種類は NULL |
 | `sort_order` 整数 | 並び順 |
 | `active` 真偽 | false=「使わない」(新しい発送・物件の欄では選べない) |
@@ -66,7 +67,7 @@
 | `created_at` `updated_at` | |
 
 新しい表 `dm_scenario_media`(種類ごとの写真と図)
-- `DmLpVariantMedia` と同じ列(`slot` `heading` `sort_order` `asset_id` または `figure_kind`)で、親が `scenario_id`(**`ON DELETE CASCADE`**=写真を割り付けただけの未使用の種類も消せる。台帳の行は §3.1 の RESTRICT で守られるので、消えてよいのは誰も参照していない種類の割り付けだけ)。`asset_id` は `dm_lp_assets` へ RESTRICT(使われている写真は消せない=今と同じ)。
+- `DmLpVariantMedia` と同じ列(`slot` `heading` `sort_order` `asset_id` または `figure_kind`)で、親が `scenario_id`(台帳の行は論理削除で物理的には消えないので、割り付けの行も残る。削除された種類の割り付けは写真の「使用中」の数に入れない)。`asset_id` は `dm_lp_assets` へ RESTRICT(使われている写真は消せない=今と同じ)。
 - ⚠写真の削除は DB の行を消さず `deleted_at` を立てる方式(論理削除)なので、RESTRICT だけでは守れない。「使われているか」を数えている次の**4か所すべて**(2026-09-27 に `_count.media` / `dmLpVariantMedia.count` / `referenced` を全文検索して洗い出した全件)で、**`dm_lp_variant_media` と `dm_scenario_media` の両方**を数える(判定は1つの関数に集約し、3か所がそれを呼ぶ):
   1. 写真の削除(`DELETE /api/properties/sale-dm/lp-assets/[assetId]`)=どちらかで使われていれば断る
   2. 公開口(`/lp-assets/[publicId]`)=どちらかで使われていれば返す(台帳のプレビューで写真が出るため。台帳の写真は発送に写せばいずれ公開される会社の写真で、公開範囲は実質変わらない)
@@ -86,7 +87,12 @@
 
 - 種類の入った発送=`default_scenario_id` が NULL でない発送。以下「種類つきの発送」と呼ぶ。
 - `dm_variants` と `dm_lp_variants` に、`(campaign_id, scenario_id)` の**一意索引**(`scenario_id IS NOT NULL` の行だけ)を張る。1つの発送に同じ種類の写しが2つできないことを DB で保証する(§3.4「種類を変える」の同時実行対策の最後の砦)。
-- **台帳を指す4つの列(`properties.dm_scenario_id`・`dm_campaigns.default_scenario_id`・`dm_variants.scenario_id`・`dm_lp_variants.scenario_id`)はすべて外部キー `ON DELETE RESTRICT`**(Prisma の既定=任意の関係は SET NULL を使わない)。1つでも参照があれば台帳の行は DB が消させない。SET NULL だと、発送から参照されている種類を消した瞬間に発送が「種類なし」に化け、§3.4 の守りが外れるため。削除の API も参照の有無を数えて 409 を返すが、最後の砦は DB。
+- **台帳を指す4つの列(`properties.dm_scenario_id`・`dm_campaigns.default_scenario_id`・`dm_variants.scenario_id`・`dm_lp_variants.scenario_id`)はすべて外部キー `ON DELETE RESTRICT`**(Prisma の既定=任意の関係は SET NULL を使わない)。1つでも参照があれば台帳の行は DB が消させない。SET NULL だと、発送から参照されている種類を消した瞬間に発送が「種類なし」に化け、§3.4 の守りが外れるため。- **削除の決まり=論理削除**(`deleted_at` を立てる。行は消さない)。物理的に DELETE すると、RESTRICT の参照検査が物件の行を読みに行き、同時に「物件の欄の保存」(物件 `FOR UPDATE` → 台帳 `FOR SHARE`)と逆向きに待ち合ってデッドロックしうるため。論理削除なら参照検査は走らない:
+  - 削除 = 台帳の行を `FOR UPDATE` → 参照(物件の欄・発送の既定・写した型)を数える → 1つでもあれば 409 → 無ければ `deleted_at` と `active=false` を立てる。
+  - 物件の欄の保存・種類を変える・作成は、台帳の行を `FOR SHARE` で押さえた後に「削除されていない・使う」を確かめる(§3.4)。削除が先に確定していれば保存側が 409、保存が先なら削除側が数えて 409 になり、どちらの順でも矛盾しない。
+  - 削除された種類は一覧・選択肢・自動の判定・写真の使用中の数のすべてから外す(「使わない」と同じ扱い+画面に出さない)。
+  - 同時実行のテスト: 削除と、それまで未使用だった種類を物件に選ぶ保存を競わせ、どちらかが 409 になりデッドロックしないこと。
+- DB の RESTRICT は、誤って物理 DELETE するコードが書かれたときの最後の砦として残す。
 - migration は1本・ADD のみ。最初の2件(相続・空き家)は migration で入れる(`auto_key` 付き)。
 
 ### 3.2 種類の決め方(純関数・`src/lib/sale-dm-letter/scenario-resolve.ts`)
