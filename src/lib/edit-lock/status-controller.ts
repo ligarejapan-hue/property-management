@@ -11,18 +11,45 @@
  * 薄い層になる(`use-edit-lock.ts`/`createEditLockController` の関係と同じ)。
  *
  * ⚠stale 応答の破棄は `src/lib/address-lookup-ui-utils.ts` の `seq` と同じ考え方
- *   (`isLatestRequest`)。ここでは「発行した poll の世代」と「資源の一覧を
- *   差し替えた」の両方が世代を進める——資源の一覧が変わった後に、差し替え前の
+ *   (`isLatestRequest`)。ここでは「発行した poll の世代」と「資源の一覧が実際に
+ *   変わった」の両方が世代を進める——資源の一覧が変わった後に、差し替え前の
  *   一覧に対する応答が遅れて届いても `onRows` を呼ばない(仕様 6.3 のテーブルが
  *   古い所有者一覧のままにならないため)。
+ *
+ * review round1 の反映:
+ * - Critical: `stop()` が `stopped=true` にした後、同じインスタンスへ `start()` が
+ *   再度呼ばれても(React StrictMode が effect を mount→cleanup→mount と二重に
+ *   呼ぶときに実際に起きる。`useMemo` は effect の再実行では作り直されないため、
+ *   `use-edit-lock-status.ts` の cleanup(`controller.stop()`)の直後に同じ
+ *   controller へ `start()` が戻ってくる)、`stopped` を戻していなかったため
+ *   `poll()` が永久に `:67` で早期returnし、以後一度も問い合わせない=`rows` が
+ *   空のまま固まる(帯が一生出ない)。`start()` の先頭で `stopped=false` に戻す。
+ * - Minor 10(round1で対応): `start()` を冪等にする——既存の `timerHandle` があれば
+ *   `stop()` と同じ手順で片付けてから新しい間隔を張る。2回連続で呼ばれても
+ *   間隔が2本になって漏れない。
+ * - Important 4: `setResources` は一覧の**中身**(集合)が変わっていなければ
+ *   `seq` を進めない(=飛んでいる古い poll をstaleにしない)。`fetchProperty` の
+ *   再取得のたびに参照だけ新しい配列が渡ってくる(page.tsx の `useMemo` が
+ *   `property` オブジェクトの再生成のたびに新しい配列を作る)ため、内容が同じなら
+ *   「変わっていない」として無視しないと、帯が最大30秒遅れて出る。逆に中身が
+ *   本当に変わったとき(所有者の追加・削除)は、待たずにその場で1回問い合わせる
+ *   (次のtickを待つと最大30秒、新しく増えた所有者の帯が出ない)。
+ * - Minor 8: chunkの一部(または全部)が失敗しても、届いた分だけを反映する。
+ *   従来は失敗したchunkを`[]`に畳んで結合するため実害は無かったが、**全chunkが
+ *   失敗した**とき(単一chunk=51件未満の一覧全体を含む)は結合結果が`[]`になり、
+ *   `onRows([])` が今持っている行を消してしまう(一時的な500で帯が消え、
+ *   4つの操作が30秒間だけ再度有効になる)。1件も取得できなかった poll は
+ *   `onRows` を呼ばず、直前の行をそのまま残す(fail open のまま画面は変えない)。
  */
 import type { EditLockStatusRow } from "@/lib/api-client";
-import { EDIT_LOCK_STATUS_POLL_MS } from "./rules";
+import { EDIT_LOCK_STATUS_POLL_MS, EDIT_LOCK_STATUS_CHUNK_SIZE } from "./rules";
 
 export type EditLockStatusResource = Pick<EditLockStatusRow, "resourceType" | "resourceId">;
 
-/** 窓口は1回50件まで(仕様 4.5)。呼び出し側で分割する。 */
-export const EDIT_LOCK_STATUS_CHUNK_SIZE = 50;
+// ⚠(review round1 Minor 9) 定数の在処は `rules.ts`(窓口の zod スキーマ
+//   `src/app/api/edit-locks/status/route.ts` と共有)。既存の呼び出し元がここから
+//   importしても壊れないよう re-export する。
+export { EDIT_LOCK_STATUS_CHUNK_SIZE };
 
 export interface EditLockStatusControllerDeps {
   fetchStatus(resources: EditLockStatusResource[]): Promise<EditLockStatusRow[]>;
@@ -35,9 +62,18 @@ export interface EditLockStatusControllerDeps {
 }
 
 export interface EditLockStatusController {
-  /** 開いたとき1回だけ呼ぶ。資源の一覧を設定し、即座に1回問い合わせ、以後の周期を始める。 */
+  /**
+   * 開いたとき1回だけ呼ぶ。資源の一覧を設定し、即座に1回問い合わせ、以後の周期を
+   * 始める。⚠冪等(review round1 Minor 10): 既に走っていても、既存の間隔を
+   * 片付けてから新しく張り直す(呼び出し側の事故で間隔が漏れない)。
+   */
   start(resources: EditLockStatusResource[]): void;
-  /** 資源の一覧が変わったとき(所有者が増減した等)に呼ぶ。飛んでいる古い応答を無効化する。 */
+  /**
+   * 資源の一覧が変わったとき(所有者が増減した等)に呼ぶ。一覧の**中身**が
+   * 実際に変わったときだけ、飛んでいる古い応答を無効化しその場で1回問い合わせる
+   * (review round1 Important 4)。中身が同じ(参照だけ新しい配列)なら何もしない
+   * =飛んでいる poll を無駄にstaleにしない。
+   */
   setResources(resources: EditLockStatusResource[]): void;
   /** 即座に1回問い合わせる(管理者が鍵を外した直後に使う・仕様 6.3)。isHiddenに関わらず呼ぶ。 */
   refresh(): void;
@@ -54,14 +90,34 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
   return chunks;
 }
 
+/**
+ * 資源の一覧の「中身」を順序に依存しない形で表す(review round1 Important 4)。
+ * ⚠並び順だけが変わった(同じ集合)場合も同一とみなす——Prismaの再取得で
+ *   `propertyOwners` の並びが安定している保証はなく、順序差だけで
+ *   「変わった」と誤判定すると、価値の無い即時再問い合わせを繰り返す。
+ */
+function resourceSetKey(resources: readonly EditLockStatusResource[]): string {
+  return resources
+    .map((r) => `${r.resourceType}:${r.resourceId}`)
+    .sort()
+    .join("|");
+}
+
 export function createEditLockStatusController(
   deps: EditLockStatusControllerDeps,
 ): EditLockStatusController {
   let resources: EditLockStatusResource[] = [];
-  /** 今の資源の一覧・今の poll 呼び出しの世代。差し替えのたびに進め、遅れた応答を捨てる。 */
+  /** 今の poll 呼び出しの世代。資源の一覧が実際に変わったときだけ進め、遅れた応答を捨てる。 */
   let seq = 0;
   let timerHandle: unknown = null;
   let stopped = false;
+
+  function clearTimer(): void {
+    if (timerHandle !== null) {
+      deps.clearInterval(timerHandle);
+      timerHandle = null;
+    }
+  }
 
   function poll(): void {
     if (stopped) return;
@@ -74,12 +130,22 @@ export function createEditLockStatusController(
     }
     const chunks = chunk(targets, EDIT_LOCK_STATUS_CHUNK_SIZE);
     void Promise.all(
-      chunks.map((c) => deps.fetchStatus(c).catch(() => [] as EditLockStatusRow[])),
+      chunks.map((c) =>
+        deps
+          .fetchStatus(c)
+          .then((rows) => ({ ok: true as const, rows }))
+          .catch(() => ({ ok: false as const, rows: [] as EditLockStatusRow[] })),
+      ),
     ).then((results) => {
       // ⚠(seq guard) 資源の一覧が差し替わった・stop() された後に届いた応答は、
       //   もう「今の一覧」の話ではない=反映しない。
       if (stopped || issued !== seq) return;
-      deps.onRows(results.flat());
+      // ⚠(review round1 Minor 8) 1件も取得できなかった(=すべてのchunkが失敗した)
+      //   pollは、今持っている行をそのまま残す。一部でも成功していれば、
+      //   失敗したchunk分は([]に畳まれて)結果から抜け落ちるだけで反映する
+      //   (従来どおり=fail openなまま、成功した分は最新化する)。
+      if (results.every((r) => !r.ok)) return;
+      deps.onRows(results.flatMap((r) => r.rows));
     });
   }
 
@@ -91,16 +157,31 @@ export function createEditLockStatusController(
 
   return {
     start(initial) {
+      // ⚠(review round1 Critical) stop()されたインスタンスへstart()が
+      //   戻ってくることがある(React StrictMode のeffect二重呼び出し=
+      //   mount→cleanup→mountで同じcontrollerインスタンスにcleanup(stop)の
+      //   直後にstart()が再度呼ばれる)。stoppedを戻さないと以後poll()が
+      //   永久に早期returnし、rowsが空のまま固まる。
+      stopped = false;
       resources = initial;
+      // ⚠(review round1 Minor 10) 冪等にする: 既存の間隔があれば片付けてから
+      //   新しく張り直す(呼び出し側が誤って2回start()しても間隔が漏れない)。
+      clearTimer();
       timerHandle = deps.setInterval(tick, EDIT_LOCK_STATUS_POLL_MS);
       tick();
     },
     setResources(next) {
+      // ⚠(review round1 Important 4) 一覧の中身が実際に変わっていなければ
+      //   何もしない(seqも進めない)。fetchProperty等の再取得のたびに
+      //   参照だけ新しい配列が渡ってくるが、その都度staleにすると飛んでいる
+      //   pollの結果を無駄に捨て、帯が最大30秒遅れる。
+      const unchanged = resourceSetKey(next) === resourceSetKey(resources);
       resources = next;
-      // ⚠差し替え前の一覧に対して既に飛んでいる poll があれば、その応答は
-      //   もう古い一覧の話なので捨てる(seq を進めるだけで足りる=次の tick/refresh
-      //   が新しい一覧で改めて poll する)。
-      seq += 1;
+      if (unchanged) return;
+      // 中身が本当に変わった: 古い一覧に対して飛んでいる応答を無効化し、
+      // 次のtickを待たずにその場で新しい一覧を問い合わせる(新しく増えた
+      // 所有者の帯を最大30秒待たせない)。poll()自体がseqを進める。
+      poll();
     },
     refresh() {
       poll();
@@ -108,10 +189,7 @@ export function createEditLockStatusController(
     stop() {
       stopped = true;
       seq += 1;
-      if (timerHandle !== null) {
-        deps.clearInterval(timerHandle);
-        timerHandle = null;
-      }
+      clearTimer();
     },
   };
 }

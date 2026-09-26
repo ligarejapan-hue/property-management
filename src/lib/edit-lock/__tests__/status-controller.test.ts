@@ -111,6 +111,39 @@ describe("createEditLockStatusController", () => {
     expect(h.fetchStatusMock).toHaveBeenCalledTimes(3);
   });
 
+  it("1b) stop()の後にstart()を呼び直すと、また周期的に問い合わせる(review round1 Critical: React StrictModeのeffect二重呼び出し=mount→cleanup→mountで同じインスタンスに起きる)", async () => {
+    h.fetchStatusMock.mockResolvedValue([row("property", "p1")]);
+    const controller = createEditLockStatusController(h.deps);
+    controller.start([P1]);
+    await flush();
+    expect(h.fetchStatusMock).toHaveBeenCalledTimes(1);
+
+    controller.stop();
+    expect(h.registry.activeCount()).toBe(0);
+
+    h.fetchStatusMock.mockClear();
+    h.onRowsMock.mockClear();
+    // ⚠修理前はここでstoppedが戻らず、以後poll()が永久に早期returnしていた。
+    controller.start([P1]);
+    await flush();
+    expect(h.fetchStatusMock).toHaveBeenCalledTimes(1);
+    expect(h.onRowsMock).toHaveBeenCalledWith([row("property", "p1")]);
+
+    // 周期も生きている(1本だけ)。
+    expect(h.registry.activeCount()).toBe(1);
+    await h.registry.fire();
+    expect(h.fetchStatusMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("1c) start()は冪等(2回連続で呼んでも間隔が1本のまま漏れない・review round1 Minor 10)", async () => {
+    h.fetchStatusMock.mockResolvedValue([]);
+    const controller = createEditLockStatusController(h.deps);
+    controller.start([P1]);
+    controller.start([P1]);
+    await flush();
+    expect(h.registry.activeCount()).toBe(1);
+  });
+
   it("2) isHidden() が true の回は呼ばない→false に戻った回で再開する", async () => {
     h.fetchStatusMock.mockResolvedValue([row("property", "p1")]);
     const controller = createEditLockStatusController(h.deps);
@@ -161,21 +194,68 @@ describe("createEditLockStatusController", () => {
     expect(h.fetchStatusMock).toHaveBeenCalledTimes(1);
   });
 
-  it("5) 資源の一覧が変わったら古い応答で onRows を呼ばない(seq で stale を捨てる)", async () => {
+  it("5) 資源の一覧が本当に変わったら、その場で問い合わせ、古い一覧への遅れた応答は捨てる(review round1 Important 4・6)", async () => {
+    const pendingOld = createDeferred<EditLockStatusRow[]>();
+    h.fetchStatusMock.mockReturnValueOnce(pendingOld.promise);
+    const controller = createEditLockStatusController(h.deps);
+    controller.start([P1]);
+    await flush();
+    expect(h.onRowsMock).not.toHaveBeenCalled();
+    expect(h.fetchStatusMock).toHaveBeenCalledTimes(1);
+
+    // 応答が届く前に資源の一覧が(中身として)変わる(所有者が増減した等)。
+    const pendingNew = createDeferred<EditLockStatusRow[]>();
+    h.fetchStatusMock.mockReturnValueOnce(pendingNew.promise);
+    controller.setResources([{ resourceType: "owner", resourceId: "o1" }]);
+    // ⚠(review round1 Important 6) `resources = next` 自体をここで固定する:
+    //   次のtickを待たず、その場で**新しい**一覧を問い合わせている。この代入を
+    //   消すと、poll()が古い一覧([P1])のままfetchStatusを呼び、この検査が落ちる。
+    expect(h.fetchStatusMock).toHaveBeenCalledTimes(2);
+    expect(h.fetchStatusMock.mock.calls[1][0]).toEqual([
+      { resourceType: "owner", resourceId: "o1" },
+    ]);
+
+    // 古い一覧([P1])に対する応答が遅れて届く→staleとして捨てる。
+    pendingOld.resolve([row("property", "p1", "held_by_other")]);
+    await flush();
+    expect(h.onRowsMock).not.toHaveBeenCalled();
+
+    // 新しい一覧の応答は(staleでないので)反映される。
+    pendingNew.resolve([row("owner", "o1", "held_by_other")]);
+    await flush();
+    expect(h.onRowsMock).toHaveBeenCalledWith([row("owner", "o1", "held_by_other")]);
+  });
+
+  it("5b) setResourcesは一覧の中身(集合)が変わっていなければ何もしない(参照だけ新しい配列で飛んでいるpollをstaleにしない・review round1 Important 4)", async () => {
     const pending = createDeferred<EditLockStatusRow[]>();
     h.fetchStatusMock.mockReturnValueOnce(pending.promise);
     const controller = createEditLockStatusController(h.deps);
     controller.start([P1]);
     await flush();
-    expect(h.onRowsMock).not.toHaveBeenCalled();
+    expect(h.fetchStatusMock).toHaveBeenCalledTimes(1);
 
-    // 応答が届く前に資源の一覧が変わる(所有者が増減した等)。
-    controller.setResources([{ resourceType: "owner", resourceId: "o1" }]);
+    // 中身は同じ(p1だけ)だが参照は新しい配列(fetchPropertyの再取得を模す)。
+    controller.setResources([{ resourceType: "property", resourceId: "p1" }]);
+    // 追加の問い合わせは発生しない(=飛んでいるpollを無駄にstaleにしない)。
+    expect(h.fetchStatusMock).toHaveBeenCalledTimes(1);
 
-    // 古い一覧([P1])に対する応答が遅れて届く。
     pending.resolve([row("property", "p1", "held_by_other")]);
     await flush();
-    expect(h.onRowsMock).not.toHaveBeenCalled();
+    // 飛んでいたpollの結果がそのまま反映される(帯が30秒遅れない)。
+    expect(h.onRowsMock).toHaveBeenCalledWith([row("property", "p1", "held_by_other")]);
+  });
+
+  it("5c) setResourcesは一覧の中身が並び順だけ変わっても同一とみなす(順序差で誤って再問い合わせしない)", async () => {
+    h.fetchStatusMock.mockResolvedValue([]);
+    const controller = createEditLockStatusController(h.deps);
+    const A = { resourceType: "owner" as const, resourceId: "a" };
+    const B = { resourceType: "owner" as const, resourceId: "b" };
+    controller.start([A, B]);
+    await flush();
+    h.fetchStatusMock.mockClear();
+
+    controller.setResources([B, A]); // 順序だけ入れ替え
+    expect(h.fetchStatusMock).not.toHaveBeenCalled();
   });
 
   it("stop() 後に届いた応答は onRows を呼ばない(unmount 後の setState 禁止と同じ考え方)", async () => {
@@ -243,6 +323,20 @@ describe("createEditLockStatusController", () => {
 
     expect(h.onRowsMock).toHaveBeenCalledTimes(1);
     expect(h.onRowsMock.mock.calls[0][0]).toHaveLength(1);
+  });
+
+  it("すべてのchunkが失敗したpollは、直前の行を保持したままonRowsを呼ばない(review round1 Minor 8: 一時的な500で帯を消さない)", async () => {
+    h.fetchStatusMock.mockResolvedValueOnce([row("property", "p1", "held_by_other")]);
+    const controller = createEditLockStatusController(h.deps);
+    controller.start([P1]);
+    await flush();
+    expect(h.onRowsMock).toHaveBeenCalledTimes(1);
+    expect(h.onRowsMock).toHaveBeenLastCalledWith([row("property", "p1", "held_by_other")]);
+
+    h.fetchStatusMock.mockRejectedValueOnce(new Error("500"));
+    await h.registry.fire();
+    // ⚠修理前は`onRows([])`が呼ばれ、帯が消えて4つの操作が30秒だけ再度有効になっていた。
+    expect(h.onRowsMock).toHaveBeenCalledTimes(1); // 増えない=直前の行のまま
   });
 });
 

@@ -14,6 +14,14 @@ export const EDIT_LOCK_IDLE_LIMIT_MS = IDLE_TIMEOUT_MS;
 export const EDIT_LOCK_IDLE_WARN_MS = 55 * 60_000;
 export const EDIT_LOCK_STATUS_POLL_MS = 30_000;
 /**
+ * 状態の窓口(`/api/edit-locks/status`)が1回に受け付ける資源の上限(仕様 4.5)。
+ * ⚠見ている側の分割(`status-controller.ts`)と窓口の zod スキーマ(`.max(50)`・
+ *   `src/app/api/edit-locks/status/route.ts`)の**両方**がこの定数を読む
+ *   (review round1 Minor 9)。別々に50を書いていると、片方だけ変えたときに
+ *   窓口が400を返し始め、見ている側は分割していると思い込んだまま気づかない。
+ */
+export const EDIT_LOCK_STATUS_CHUNK_SIZE = 50;
+/**
  * 鍵を持たない入口が `EDIT_LOCKED` を受けたときの、氏名+時刻の文を組み立てる
  * ための状態窓口への問い合わせに許す上限(review round2 Important A・round3 Minor H)。
  * ⚠**控え(ボタン等)を塞ぐのを防ぐための値ではない**(round3で訂正)。

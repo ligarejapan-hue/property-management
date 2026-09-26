@@ -3,7 +3,7 @@ import prisma from "@/lib/prisma";
 import { apiResponse, getApiSession, getUserPermissions, handleApiError } from "@/lib/api-helpers";
 import { readEditLocks, type Target } from "@/lib/edit-lock/service";
 import { readScreenTokenHash } from "@/lib/edit-lock/screen-token";
-import { evaluateLock, type EditLockRow } from "@/lib/edit-lock/rules";
+import { evaluateLock, EDIT_LOCK_STATUS_CHUNK_SIZE, type EditLockRow } from "@/lib/edit-lock/rules";
 import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
 
@@ -23,7 +23,7 @@ const schema = z.object({
           .transform((v) => v.toLowerCase()),
       }),
     )
-    .max(50),
+    .max(EDIT_LOCK_STATUS_CHUNK_SIZE),
 });
 
 /**
