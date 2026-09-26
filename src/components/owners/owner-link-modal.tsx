@@ -18,6 +18,7 @@ import {
   type OwnerCreateFormValues,
 } from "@/lib/owner-link-utils";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
+import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
 
 /** 検索 API（GET /api/owners/search）が返す 1 件。owner:read のマスク済み値が来る。 */
 interface OwnerSearchHit {
@@ -359,8 +360,16 @@ export function OwnerLinkModal({
                 type="tel"
                 value={form.phone}
                 onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                // 発注者決定(2026-09-26): ハイフンありで統一。欄を離れたときに自動で入れる(正しくない番号は入力どおり)。
+                onBlur={() => setForm((f) => ({ ...f, phone: formatPhoneJp(f.phone).value }))}
+                placeholder="例: 09012345678"
                 className={`${inputClass} font-mono`}
               />
+              {form.phone.trim() !== "" && !isValidPhoneJp(form.phone) && (
+                <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                  電話番号の桁をご確認ください(このままでも保存できます)
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-gray-700 dark:text-gray-200">
@@ -377,6 +386,26 @@ export function OwnerLinkModal({
                   )
                 }
                 className={`${inputClass} font-mono`}
+              />
+              {/* 発注者指定(2026-09-26): 「郵便番号から住所を自動入力」は郵便番号の欄のすぐ下に置く。
+                    ⚠部品は1つのまま(郵便番号→住所と住所→郵便番号候補で、取消と「自動入力は再検索しない」の見張りを共有するため・@codex #447 R1)。
+                  ⚠分けているときは**現住所側にだけ**効かせる(登記の記載を書き換えない)。 */}
+              <AddressLookupControls
+                zip={addressSplit ? form.currentZip : form.zip}
+                address={addressSplit ? form.currentAddress : form.address}
+                onZipChange={(z) =>
+                  setForm((f) =>
+                    addressSplit ? { ...f, currentZip: z } : { ...f, zip: z },
+                  )
+                }
+                onAddressChange={(a) =>
+                  setForm((f) =>
+                    addressSplit ? { ...f, currentAddress: a } : { ...f, address: a },
+                  )
+                }
+                addressEdited={addressEdited}
+                disabled={submitting}
+                mode="both"
               />
               {addressSplit && (
                 <div className="space-y-1">
@@ -445,26 +474,7 @@ export function OwnerLinkModal({
                   />
                 </div>
               )}
-              {/* 郵便番号⇄住所 補完（社内 route 経由）。候補確定で zip/address をペア反映。
-                  onZipChange/onAddressChange は form 更新のみ＝addressEdited は立てない。
-                  ⚠分けているときは**現住所側にだけ**効かせる（登記の記載を書き換えない）。 */}
-              <AddressLookupControls
-                zip={addressSplit ? form.currentZip : form.zip}
-                address={addressSplit ? form.currentAddress : form.address}
-                onZipChange={(z) =>
-                  setForm((f) =>
-                    addressSplit ? { ...f, currentZip: z } : { ...f, zip: z },
-                  )
-                }
-                onAddressChange={(a) =>
-                  setForm((f) =>
-                    addressSplit ? { ...f, currentAddress: a } : { ...f, address: a },
-                  )
-                }
-                addressEdited={addressEdited}
-                disabled={submitting}
-                mode="both"
-              />
+              
             </div>
             <div className="space-y-1 md:col-span-2">
               <label className="text-xs font-medium text-gray-700 dark:text-gray-200">
