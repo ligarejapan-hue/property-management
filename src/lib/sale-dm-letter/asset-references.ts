@@ -4,7 +4,7 @@
  * ⚠写真の削除は論理削除なので FK の RESTRICT では守れない。数える場所は必ずこのファイルを通す
  *   (削除・公開口・一覧・LPの写真画面の4か所。走査テストで固定)。
  */
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@/generated/prisma";
 
 export const ASSET_REFERENCE_COUNT_SELECT = {
   _count: { select: { media: true, scenarioMedia: { where: { scenario: { deletedAt: null } } } } },
