@@ -357,7 +357,8 @@ export default function SaleDmVariantManager({
                 type="button"
                 onClick={saveTemplate}
                 disabled={busy}
-                data-guide="dm_body_save"
+                // 開いている枠が、いま本文が要る型のときだけ目印を付ける(別の型の枠を光らせない・@codex #449 R2)。
+                data-guide={letterFor?.id === guideIds.dmVariantId ? "dm_body_save" : undefined}
                 className="rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-50"
               >
                 本文を保存
@@ -366,7 +367,7 @@ export default function SaleDmVariantManager({
                 type="button"
                 onClick={() => applyTemplate(false)}
                 disabled={busy}
-                data-guide="apply"
+                data-guide={letterFor?.id === guideIds.dmVariantId ? "apply" : undefined}
                 className="rounded border border-indigo-300 bg-white px-2.5 py-1 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
               >
                 この型の全宛先に適用

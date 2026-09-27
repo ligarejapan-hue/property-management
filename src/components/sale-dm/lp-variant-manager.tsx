@@ -204,7 +204,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
               </div>
               <textarea value={pasteBody} onChange={(e) => setPasteBody(e.target.value)} placeholder="ここに、お手元のAIで作った文章を貼り付けてください(【見出し】から始まります)" rows={10} className="mt-2 w-full rounded-md border border-gray-300 px-2 py-1 text-sm" />
               <div className="mt-1.5 flex justify-end gap-2">
-                <button type="button" onClick={saveTemplate} disabled={busy} data-guide="lp_text_save" className="rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-50">文章を保存</button>
+                <button type="button" onClick={saveTemplate} disabled={busy} data-guide={letterFor?.id === lpGuideId ? "lp_text_save" : undefined} className="rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-50">文章を保存</button>
               </div>
             </>
           )}

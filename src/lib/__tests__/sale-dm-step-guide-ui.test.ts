@@ -72,6 +72,13 @@ describe("光らせるボタンの目印(data-guide)が画面にそろってい�
     expect(DM).toContain('data-guide={v.id === guideIds.dmVariantId ? "dm_body" : undefined}');
     expect(LP).toContain('data-guide={v.id === lpGuideId ? "lp_text" : undefined}');
   });
+  it("開いている枠の保存・適用の目印は、その枠がいま要る型のときだけ(別の型の枠を光らせない・@codex #449 R2)", () => {
+    expect(DM).toContain('data-guide={letterFor?.id === guideIds.dmVariantId ? "dm_body_save" : undefined}');
+    expect(DM).toContain('data-guide={letterFor?.id === guideIds.dmVariantId ? "apply" : undefined}');
+    expect(LP).toContain('data-guide={letterFor?.id === lpGuideId ? "lp_text_save" : undefined}');
+    expect(DM).not.toContain('data-guide="dm_body_save"');
+    expect(DM).not.toContain('data-guide="apply"');
+  });
 });
 
 describe("AIで文章を作る手順(発注者決定: 案内に入れる)", () => {
