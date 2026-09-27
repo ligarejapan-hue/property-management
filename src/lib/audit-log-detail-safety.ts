@@ -489,6 +489,11 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "providerRequestId",
     "fetchedAt",
   ]),
+  // DMの種類(台帳)の追加・変更・削除(設計 §3.6/§4)。文面・指示文の中身は載せない。
+  // update の changedFields = 変わった列名の配列(値ではない・updatedFields と同型)。
+  sale_dm_scenario_create: new Set(["result"]),
+  sale_dm_scenario_update: new Set(["changedFields"]),
+  sale_dm_scenario_delete: new Set(["result"]),
 };
 
 /**

@@ -41,6 +41,16 @@ const WRITE_GATE_EXCEPTIONS: Record<string, { reason: string; mustContain?: stri
     reason: "通知の再送が書くのは通知状態の列だけで、業務データは書かない。requireSaleDmAccess(閲覧権限)で足りる(発注者判断 2026-09-18)",
     mustContain: "requireSaleDmAccess",
   },
+  // DMの種類(台帳)は property:write ではなく管理者(user_management:write)限定
+  // (設計 §3.6)。requireScenarioAdmin() がその門を通す。
+  "src/app/api/properties/sale-dm/scenarios/route.ts": {
+    reason: "DMの種類の台帳=管理者のみ(user_management:write)",
+    mustContain: "requireScenarioAdmin()",
+  },
+  "src/app/api/properties/sale-dm/scenarios/[id]/route.ts": {
+    reason: "DMの種類の台帳=管理者のみ(user_management:write)",
+    mustContain: "requireScenarioAdmin()",
+  },
 };
 
 const FILES = routeFiles(ROOT);
