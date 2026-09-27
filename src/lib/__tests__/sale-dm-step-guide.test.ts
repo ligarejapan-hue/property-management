@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeSaleDmGuideStep, SALE_DM_GUIDE_STEPS, guideStepIndex, guideTargetCandidates, isAheadOfGuide, type SaleDmGuideInput } from "../sale-dm-letter/step-guide";
+import { computeSaleDmGuideStep, SALE_DM_GUIDE_STEPS, guideStepIndex, guideTargetCandidates, isAheadOfGuide, guideTargetIds, type SaleDmGuideInput } from "../sale-dm-letter/step-guide";
 
 // 2026-09-27 発注者決定(おすすめで): 売却DMの画面で次に押すボタンを光らせ、一言のアドバイスを出す。
 // 手順は画面のデータ(宛先・型・LP型)から決める=どの端末で開いても同じ段にいる。印刷だけはデータに
@@ -129,5 +129,36 @@ describe("isAheadOfGuide(順番の違うボタンを押したとき)", () => {
   it("宛先0件・全部送付済みでは出さない", () => {
     expect(isAheadOfGuide("print", "done")).toBe(false);
     expect(isAheadOfGuide("print", "no_recipients")).toBe(false);
+  });
+});
+
+describe("guideTargetIds(光らせる型・LP型=先頭固定にしない・@codex #449 R1)", () => {
+  const lp = { lpVariants: [{ id: "l1", headline: "見出し" }] };
+  it("お手紙の本文: 原本の無い型Bの宛先が残っていれば型Bを光らせる(原本のある型Aではない)", () => {
+    const r = guideTargetIds({ ...lp, variants: [{ id: "vA", bodyTemplate: "本文" }, { id: "vB", bodyTemplate: null }],
+      recipients: [{ status: "draft", body: "", lpVariantId: "l1", variantId: "vB" }] });
+    expect(computeSaleDmGuideStep({ ...lp, variants: [{ id: "vA", bodyTemplate: "本文" }, { id: "vB", bodyTemplate: null }], recipients: [{ status: "draft", body: "", lpVariantId: "l1", variantId: "vB" }], printed: false })).toBe("dm_body");
+    expect(r.dmVariantId).toBe("vB");
+  });
+  it("本文を宛先へ: 原本があって本文の空いた宛先がいる型", () => {
+    const r = guideTargetIds({ ...lp, variants: [{ id: "vA", bodyTemplate: "本文" }, { id: "vB", bodyTemplate: "本文B" }],
+      recipients: [
+        { status: "draft", body: "x", lpVariantId: "l1", variantId: "vA" },
+        { status: "draft", body: "", lpVariantId: "l1", variantId: "vB" },
+      ] });
+    expect(r.dmVariantId).toBe("vB");
+  });
+  it("LP型の文章: 宛先に割り当たっている文章なしのLP型を優先(使われていない空のLP型ではない)", () => {
+    const r = guideTargetIds({
+      variants: [{ id: "v1", bodyTemplate: "本文" }],
+      lpVariants: [{ id: "l1", headline: "見出し" }, { id: "l2", headline: null }, { id: "l3", headline: null }],
+      recipients: [{ status: "draft", body: "x", lpVariantId: "l3", variantId: "v1" }],
+    });
+    expect(r.lpVariantId).toBe("l3");
+  });
+  it("割り当て前は、文章の無いLP型の先頭", () => {
+    const r = guideTargetIds({ variants: [{ id: "v1", bodyTemplate: null }], lpVariants: [{ id: "l1", headline: "x" }, { id: "l2", headline: null }],
+      recipients: [{ status: "draft", body: "", lpVariantId: null, variantId: "v1" }] });
+    expect(r.lpVariantId).toBe("l2");
   });
 });

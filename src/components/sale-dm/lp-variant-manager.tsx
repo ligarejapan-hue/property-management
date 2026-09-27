@@ -14,6 +14,7 @@ import { TONE_OPTIONS, LENGTH_OPTIONS, APPEAL_OPTIONS, STRENGTH_OPTIONS } from "
 import LpMediaPanel from "./lp-media-panel";
 import LpPreviewPanel from "./lp-preview-panel";
 import { AiTextSteps } from "@/components/sale-dm/ai-text-steps";
+import { guideTargetIds } from "@/lib/sale-dm-letter/step-guide";
 
 const DEFAULT_OPTIONS: SaleDmLpVariantOptions = { tone: "formal", length: "medium", appeal: "price", strength: "low" };
 type FormState = { label: string; options: SaleDmLpVariantOptions };
@@ -115,8 +116,8 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
       );
     }, true);
 
-  // 手順の案内が光らせる書類のアイコン: 文章がまだのLP型(無ければ先頭)。
-  const lpGuideIndex = Math.max(0, campaign.lpVariants.findIndex((v) => !v.headline));
+  // 手順の案内が光らせる書類のアイコン: 文章の無いLP型を割り当てた宛先がいればそのLP型(@codex #449 R1)。
+  const lpGuideId = guideTargetIds(campaign).lpVariantId;
 
   return (
     <div className="space-y-3">
@@ -132,7 +133,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
       {error && <p className="text-xs text-red-600">{error}</p>}
 
       <ul className="space-y-1">
-        {campaign.lpVariants.map((v, i) => (
+        {campaign.lpVariants.map((v) => (
           <li key={v.id} className="flex items-center justify-between rounded border border-gray-200 px-2 py-1.5 text-xs">
             <div>
               <span className="font-medium text-gray-700">{v.label}</span>
@@ -140,7 +141,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
               {v.headline ? <span className="ml-2 text-gray-500">「{v.headline}」</span> : <span className="ml-2 text-amber-700">文章なし</span>}
             </div>
             <div className="flex gap-1">
-              <button type="button" onClick={() => openLetter(v)} disabled={busy} data-guide={i === lpGuideIndex ? "lp_text" : undefined} aria-label={`LP型「${v.label}」の文章`} title="プロンプトを表示して、手元のAIで作った文章を貼り付けます" className="rounded p-1 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"><FileText className="h-3.5 w-3.5" /></button>
+              <button type="button" onClick={() => openLetter(v)} disabled={busy} data-guide={v.id === lpGuideId ? "lp_text" : undefined} aria-label={`LP型「${v.label}」の文章`} title="プロンプトを表示して、手元のAIで作った文章を貼り付けます" className="rounded p-1 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"><FileText className="h-3.5 w-3.5" /></button>
               <button type="button" onClick={() => openMedia(v)} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」の写真と図`} title={v.headline ? "写真と図" : "先に文章を保存してください"} className="rounded p-1 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><ImageIcon className="h-3.5 w-3.5" /></button>
               <button type="button" onClick={() => openPreview(v)} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」のプレビュー`} title={v.headline ? "プレビュー" : "先に文章を保存してください"} className="rounded p-1 text-sky-700 hover:bg-sky-50 disabled:opacity-50"><Eye className="h-3.5 w-3.5" /></button>
               <button type="button" onClick={() => startEdit(v)} disabled={busy} aria-label={`LP型「${v.label}」を編集`} className="rounded p-1 text-gray-600 hover:bg-gray-100 disabled:opacity-50"><Pencil className="h-3.5 w-3.5" /></button>

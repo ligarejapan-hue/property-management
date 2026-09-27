@@ -54,7 +54,14 @@ const STATE_MESSAGES: Partial<Record<SaleDmGuideState, string>> = {
   done: "すべて送付済みです。申込は「査定の申込」に届きます。",
 };
 
-export function SaleDmStepGuide({ state }: { state: SaleDmGuideState }) {
+export function SaleDmStepGuide({
+  state,
+  onPrintConfirmed,
+}: {
+  state: SaleDmGuideState;
+  /** 印刷を押したあとだけ渡る。帯の「印刷できた」で呼ぶ(押すまで次の段へ進めない)。 */
+  onPrintConfirmed?: () => void;
+}) {
   const off = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const on = !off;
   const bubbleRef = useRef<HTMLDivElement | null>(null);
@@ -183,6 +190,19 @@ export function SaleDmStepGuide({ state }: { state: SaleDmGuideState }) {
             </button>
           </span>
         </div>
+        {state === "print" && onPrintConfirmed && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-gray-700 dark:text-gray-200">
+            <span>別のタブで手紙とQR(申込用・配信停止用)が出たら、次へ進みます。</span>
+            <button
+              type="button"
+              onClick={onPrintConfirmed}
+              className="rounded-md bg-amber-500 px-2.5 py-1 font-medium text-white hover:bg-amber-600"
+            >
+              印刷できた
+            </button>
+            <span className="text-gray-500 dark:text-gray-400">(開かない・白いページのときは押さずに、もう一度「印刷」)</span>
+          </div>
+        )}
         {current && (
           <ol className="mt-1.5 flex flex-wrap gap-1.5" aria-label="手順">
             {SALE_DM_GUIDE_STEPS.map((s, i) => (

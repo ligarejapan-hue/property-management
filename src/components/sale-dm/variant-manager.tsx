@@ -20,6 +20,7 @@ import {
   STRENGTH_OPTIONS,
 } from "@/lib/sale-dm-letter/adjust-model";
 import { AiTextSteps } from "@/components/sale-dm/ai-text-steps";
+import { guideTargetIds } from "@/lib/sale-dm-letter/step-guide";
 
 const DEFAULT_OPTIONS: SaleDmVariantOptions = {
   designTemplate: "formal",
@@ -222,6 +223,9 @@ export default function SaleDmVariantManager({
     run(() => assignSaleDmVariants(campaign.id, { mode: "auto", order: assignOrder }));
   };
 
+  // 手順の案内が光らせる型(いま本文が要る型)。
+  const guideIds = guideTargetIds(campaign);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -239,7 +243,7 @@ export default function SaleDmVariantManager({
       {error && <p className="text-xs text-red-600">{error}</p>}
 
       <ul className="space-y-1">
-        {campaign.variants.map((v, i) => (
+        {campaign.variants.map((v) => (
           <li key={v.id} className="flex items-center justify-between rounded border border-gray-200 px-2 py-1.5 text-xs">
             <div>
               <span className="font-medium text-gray-700">{v.label}</span>
@@ -252,8 +256,8 @@ export default function SaleDmVariantManager({
                 type="button"
                 onClick={() => openLetter(v)}
                 disabled={busy}
-                // 手順の案内(step-guide)が光らせる目印。先頭の型に付ける。
-                data-guide={i === 0 ? "dm_body" : undefined}
+                // 手順の案内(step-guide)が光らせる目印。いま本文が要る型に付ける(先頭固定にしない・@codex #449 R1)。
+                data-guide={v.id === guideIds.dmVariantId ? "dm_body" : undefined}
                 aria-label={`型「${v.label}」の文面`}
                 title="プロンプトを表示して、手元のAIで作った本文を貼り付けます"
                 className="rounded p-1 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"

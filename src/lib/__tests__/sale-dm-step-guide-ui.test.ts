@@ -50,12 +50,27 @@ describe("光らせるボタンの目印(data-guide)が画面にそろってい�
     expect(all).toMatch(new RegExp(`data-guide(=\\{[^}]*)?[="]+${key}"`));
   });
   it("案内をページに組み込み、段は画面のデータから決める", () => {
-    expect(PAGE).toContain("<SaleDmStepGuide state={guideState} />");
+    expect(PAGE).toContain("<SaleDmStepGuide");
+    expect(PAGE).toContain("state={guideState}");
     expect(PAGE).toContain("computeSaleDmGuideStep(");
   });
-  it("印刷を押したときの確定済みの顔ぶれを覚え、新たに確定したら印刷の段に戻す", () => {
-    expect(PAGE).toContain("setPrintedFor(confirmedSig)");
+  it("印刷を押しただけでは進めず、「印刷できた」を押したときの確定済みの顔ぶれを覚える(@codex #449 R1 P1)", () => {
+    // 印刷ボタンは「押した」を覚えるだけ(printedFor は書かない)。
+    expect(PAGE).toContain("setPrintClickedFor(confirmedSig)");
+    expect(PAGE).toContain("() => setPrintedFor(confirmedSig)");
     expect(PAGE).toContain("printedFor === confirmedSig");
+    const printHandler = PAGE.slice(PAGE.indexOf("setPrintClickedFor(confirmedSig)") - 200, PAGE.indexOf("saleDmPrintUrl(campaignId)"));
+    expect(printHandler).not.toContain("setPrintedFor(");
+  });
+  it("「印刷できた」は印刷の段で、印刷を押したあとだけ出る", () => {
+    const withBtn = renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "print", onPrintConfirmed: () => {} }));
+    expect(withBtn).toContain("印刷できた");
+    expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "print" }))).not.toContain("印刷できた");
+    expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "confirm", onPrintConfirmed: () => {} }))).not.toContain("印刷できた");
+  });
+  it("光らせる型・LP型は guideTargetIds で決める(先頭固定にしない・@codex #449 R1)", () => {
+    expect(DM).toContain('data-guide={v.id === guideIds.dmVariantId ? "dm_body" : undefined}');
+    expect(LP).toContain('data-guide={v.id === lpGuideId ? "lp_text" : undefined}');
   });
 });
 

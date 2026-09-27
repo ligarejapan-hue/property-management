@@ -111,3 +111,37 @@ export function isAheadOfGuide(clicked: string, state: SaleDmGuideState): boolea
   const idx = guideStepIndex(base);
   return idx > cur;
 }
+
+/**
+ * 光らせる型・LP型を決める(先頭固定にしない・@codex #449 R1)。
+ *  - dmVariantId: 「お手紙の本文」の段では、原本が無く未確定の宛先がいる型(無ければ原本の無い型・先頭)。
+ *    「本文を宛先へ」の段では、原本があり本文の空いた宛先がいる型。
+ *  - lpVariantId: 「LP型の文章」の段では、文章の無いLP型を割り当てた宛先がいればそのLP型
+ *    (無ければ文章の無いLP型・先頭)。
+ */
+export function guideTargetIds(input: Omit<SaleDmGuideInput, "printed">): {
+  dmVariantId: string | null;
+  lpVariantId: string | null;
+} {
+  const state = computeSaleDmGuideStep({ ...input, printed: false });
+  const drafts = input.recipients.filter((r) => r.status === "draft");
+  const hasTemplate = (id: string) =>
+    (input.variants.find((v) => v.id === id)?.bodyTemplate ?? "").trim() !== "";
+  let dmVariantId: string | null = input.variants[0]?.id ?? null;
+  if (state === "dm_body") {
+    dmVariantId =
+      drafts.find((r) => !hasTemplate(r.variantId))?.variantId ??
+      input.variants.find((v) => !hasTemplate(v.id))?.id ??
+      dmVariantId;
+  } else if (state === "apply") {
+    dmVariantId = drafts.find((r) => r.body === "" && hasTemplate(r.variantId))?.variantId ?? dmVariantId;
+  }
+  const lpHasText = (id: string) =>
+    (input.lpVariants.find((l) => l.id === id)?.headline ?? "").trim() !== "";
+  const lpVariantId =
+    drafts.find((r) => r.lpVariantId !== null && !lpHasText(r.lpVariantId))?.lpVariantId ??
+    input.lpVariants.find((l) => !lpHasText(l.id))?.id ??
+    input.lpVariants[0]?.id ??
+    null;
+  return { dmVariantId, lpVariantId };
+}

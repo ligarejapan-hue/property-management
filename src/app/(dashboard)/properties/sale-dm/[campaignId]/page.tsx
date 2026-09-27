@@ -106,10 +106,13 @@ export default function SaleDmWorkspacePage() {
     [campaign],
   );
 
-  // 手順の案内: 「印刷」はデータに残らないので、この画面で印刷を押したときの確定済みの顔ぶれを覚える。
+  // 手順の案内: 「印刷」はデータに残らない。別タブの印刷が本当にできたかも画面からは分からない
+  // (設定不足の503・ポップアップの遮断など)。そこで印刷を押しただけでは進めず、帯の「印刷できた」を
+  // 押したときの確定済みの顔ぶれを覚える(@codex #449 R1 P1: 失敗した印刷のまま送付済みへ進ませない)。
   // 顔ぶれが変わった(新たに確定した)ら、もう一度印刷の段に戻す。
   const confirmedSig = confirmedIds.join(",");
   const [printedFor, setPrintedFor] = useState<string | null>(null);
+  const [printClickedFor, setPrintClickedFor] = useState<string | null>(null);
   const guideState = useMemo(
     () =>
       campaign
@@ -205,7 +208,12 @@ export default function SaleDmWorkspacePage() {
       )}
 
       {/* 手順の案内(次に押すボタンを光らせる・発注者決定 2026-09-27)。 */}
-      <SaleDmStepGuide state={guideState} />
+      <SaleDmStepGuide
+        state={guideState}
+        onPrintConfirmed={
+          printClickedFor !== null && printClickedFor === confirmedSig ? () => setPrintedFor(confirmedSig) : undefined
+        }
+      />
 
       {/* 送付フロー: 確定(draft→confirmed)→ 印刷/CSV → 送付済み(confirmed→sent・反響入力解禁) */}
       <div className="flex flex-wrap items-center gap-2">
@@ -225,7 +233,7 @@ export default function SaleDmWorkspacePage() {
         <button
           type="button"
           onClick={() => {
-            if (confirmedIds.length > 0) setPrintedFor(confirmedSig);
+            if (confirmedIds.length > 0) setPrintClickedFor(confirmedSig);
             window.open(saleDmPrintUrl(campaignId), "_blank", "noopener");
           }}
           disabled={actionBusy}
