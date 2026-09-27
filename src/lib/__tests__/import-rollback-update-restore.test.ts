@@ -15,6 +15,7 @@
  * csv_import 行も拾える。
  */
 import { describe, it, expect } from "vitest";
+import { UPDATABLE_PROPERTY_FIELDS } from "../import-dedupe";
 import {
   classifyUpdateFieldsForRestore as _classifyImpl,
   RESTORABLE_PROPERTY_FIELDS,
@@ -93,11 +94,23 @@ describe("RESTORABLE_PROPERTY_FIELDS", () => {
     );
   });
 
-  it("UPDATABLE にあるが PROPERTY_TRACKED にない field は含まない（区分マンション系）", () => {
-    expect(RESTORABLE_PROPERTY_FIELDS).not.toContain("floorNo");
-    expect(RESTORABLE_PROPERTY_FIELDS).not.toContain("exclusiveArea");
-    expect(RESTORABLE_PROPERTY_FIELDS).not.toContain("managementFee");
-    expect(RESTORABLE_PROPERTY_FIELDS).not.toContain("layoutType");
+  it("CSV が更新する列はすべて復元対象(区分マンションの8列も・以前は変更履歴から漏れていた)", () => {
+    // UPDATABLE_PROPERTY_FIELDS のうち復元できない列が残ると、取込の取り消しで
+    // その列だけ黙って戻らない。全列が交差に入っていることを固定する。
+    expect([...RESTORABLE_PROPERTY_FIELDS].sort()).toEqual([...UPDATABLE_PROPERTY_FIELDS].sort());
+  });
+
+  it("区分マンションの列は Prisma の型どおりに戻す", () => {
+    expect(RESTORABLE_PROPERTY_FIELD_TYPES).toMatchObject({
+      floorNo: "int",
+      exclusiveArea: "decimal",
+      balconyArea: "decimal",
+      layoutType: "string",
+      orientation: "string",
+      managementFee: "int",
+      repairReserveFee: "int",
+      ownershipShareNote: "string",
+    });
   });
 
   it("各 field に Prisma 型マップがある", () => {

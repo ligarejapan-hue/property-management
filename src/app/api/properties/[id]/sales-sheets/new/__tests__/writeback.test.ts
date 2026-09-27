@@ -269,7 +269,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     const res = await POST(req({ price: "3480", access: "○○線 徒歩8分", propertyVersion: 1 }), ctx);
     expect(res.status).toBe(201);
     const json = await res.json();
-    expect(json.propertyWriteback).toEqual({ saved: ["価格", "交通"], unreadable: [], noTarget: [], conflict: false });
+    expect(json.propertyWriteback).toEqual({ saved: ["価格", "交通"], unreadable: [], noTarget: [], tooLong: [], conflict: false });
     // C1: 書き込み条件に version を付ける(updateMany)。property.updateMany は1回・ChangeLog は2行。
     expect(updateManyMock).toHaveBeenCalledTimes(1);
     expect(updateManyMock.mock.calls[0][0]).toMatchObject({
@@ -303,7 +303,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     const res = await POST(req({ price: "3480", saveToProperty: false }), ctx);
     expect(res.status).toBe(201);
     expect(updateManyMock).not.toHaveBeenCalled();
-    expect((await res.json()).propertyWriteback).toEqual({ saved: [], unreadable: [], noTarget: [], conflict: false });
+    expect((await res.json()).propertyWriteback).toEqual({ saved: [], unreadable: [], noTarget: [], tooLong: [], conflict: false });
   });
 
   it("読み取れない値は保存せず知らせに出す", async () => {
@@ -332,6 +332,16 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     expect(designCreateMock).toHaveBeenCalledTimes(1); // 図面自体は作られる
   });
 
+  it("交通が物件の上限(200字)を超えると、その欄だけ保存せず「長すぎる」で知らせる", async () => {
+    const res = await POST(req({ access: "あ".repeat(201), price: "3480", propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    const json = await res.json();
+    expect(json.propertyWriteback).toEqual({
+      saved: ["価格"], unreadable: [], noTarget: [], tooLong: ["交通"], conflict: false,
+    });
+    expect(updateManyMock.mock.calls[0][0].data).not.toHaveProperty("access");
+  });
+
   it("階数が非整数(3.5)ならその欄だけ保存せず、図面の作成自体は成功する(500にならない)(戸建)", async () => {
     propertyFindMock.mockResolvedValue({ ...baseProperty, propertyType: "house" });
     const res = await POST(req({ aboveFloors: "3.5", propertyVersion: 1 }), ctx);
@@ -349,7 +359,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     const res = await POST(req({ price: "3480" }), ctx);
     expect(res.status).toBe(201);
     expect(updateManyMock).not.toHaveBeenCalled();
-    expect((await res.json()).propertyWriteback).toEqual({ saved: [], unreadable: [], noTarget: [], conflict: true });
+    expect((await res.json()).propertyWriteback).toEqual({ saved: [], unreadable: [], noTarget: [], tooLong: [], conflict: true, conflictReason: "missing_version" });
     expect(designCreateMock).toHaveBeenCalledTimes(1);
   });
 
@@ -357,7 +367,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     const res = await POST(req({ price: "3480", propertyVersion: "4" }), ctx);
     expect(res.status).toBe(201);
     expect(updateManyMock).not.toHaveBeenCalled();
-    expect((await res.json()).propertyWriteback.conflict).toBe(true);
+    expect((await res.json()).propertyWriteback).toMatchObject({ conflict: true, conflictReason: "missing_version" });
   });
 
   it("棟へ書く区分で buildingVersion を送らないと conflict 扱い(C2)", async () => {
@@ -367,7 +377,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     expect(res.status).toBe(201);
     expect(updateManyMock).not.toHaveBeenCalled();
     expect(buildingUpdateManyMock).not.toHaveBeenCalled();
-    expect((await res.json()).propertyWriteback.conflict).toBe(true);
+    expect((await res.json()).propertyWriteback).toMatchObject({ conflict: true, conflictReason: "missing_version" });
   });
 
   it("棟へ書く区分で buildingVersion が古いと conflict 扱い(C2)", async () => {
@@ -378,7 +388,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     );
     expect(res.status).toBe(201);
     expect(buildingUpdateManyMock).not.toHaveBeenCalled();
-    expect((await res.json()).propertyWriteback.conflict).toBe(true);
+    expect((await res.json()).propertyWriteback).toMatchObject({ conflict: true, conflictReason: "building_stale" });
   });
 
   // @codex P2: 棟の version を要るのは**実際に棟へ書くときだけ**。棟に紐付いているだけで
@@ -395,7 +405,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     expect(updateManyMock).toHaveBeenCalledTimes(1);
     expect(buildingUpdateManyMock).not.toHaveBeenCalled();
     expect((await res.json()).propertyWriteback).toEqual({
-      saved: ["価格"], unreadable: [], noTarget: [], conflict: false,
+      saved: ["価格"], unreadable: [], noTarget: [], tooLong: [], conflict: false,
     });
   });
 
@@ -433,7 +443,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     const res = await POST(req({ price: "3480", propertyVersion: 4 }), ctx);
     expect(res.status).toBe(201);
     expect(updateManyMock).not.toHaveBeenCalled();
-    expect((await res.json()).propertyWriteback.conflict).toBe(true);
+    expect((await res.json()).propertyWriteback).toMatchObject({ conflict: true, conflictReason: "stale" });
     expect(designCreateMock).toHaveBeenCalledTimes(1);
   });
 
@@ -578,7 +588,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     expect(res.status).toBe(201);
     expect(updateManyMock).not.toHaveBeenCalled();
     expect(buildingUpdateManyMock).not.toHaveBeenCalled();
-    expect((await res.json()).propertyWriteback).toEqual({ saved: [], unreadable: [], noTarget: [], conflict: false });
+    expect((await res.json()).propertyWriteback).toEqual({ saved: [], unreadable: [], noTarget: [], tooLong: [], conflict: false });
   });
 
   // R14: 区分マンションの物件側7項目(仕様書 §4.4)。mansionOverridesSchema に無かった
@@ -591,7 +601,7 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     );
     expect(res.status).toBe(201);
     const json = await res.json();
-    expect(json.propertyWriteback).toEqual({ saved: ["専有面積", "管理費"], unreadable: [], noTarget: [], conflict: false });
+    expect(json.propertyWriteback).toEqual({ saved: ["専有面積", "管理費"], unreadable: [], noTarget: [], tooLong: [], conflict: false });
     expect(updateManyMock).toHaveBeenCalledTimes(1);
     expect(updateManyMock.mock.calls[0][0]).toMatchObject({
       where: { id: baseProperty.id, version: 1 },
@@ -753,7 +763,7 @@ describe("POST /sales-sheets/new — 棟の取り違え防止(@codex P1)", () =>
     );
     expect(res.status).toBe(201);
     expect(buildingUpdateManyMock).not.toHaveBeenCalled();
-    expect((await res.json()).propertyWriteback.conflict).toBe(true);
+    expect((await res.json()).propertyWriteback).toMatchObject({ conflict: true, conflictReason: "building_changed" });
   });
 
   it("棟の id を送らない呼び出しは安全側で conflict(古いクライアント)", async () => {
@@ -764,7 +774,7 @@ describe("POST /sales-sheets/new — 棟の取り違え防止(@codex P1)", () =>
     );
     expect(res.status).toBe(201);
     expect(buildingUpdateManyMock).not.toHaveBeenCalled();
-    expect((await res.json()).propertyWriteback.conflict).toBe(true);
+    expect((await res.json()).propertyWriteback).toMatchObject({ conflict: true, conflictReason: "missing_version" });
   });
 
   it("棟へ書かないなら棟の id が食い違っていても物件へは保存する", async () => {
@@ -795,6 +805,7 @@ describe("POST /sales-sheets/new — 保存先が無い項目(@codex P2)", () =>
       saved: ["価格"],
       unreadable: [],
       noTarget: ["地下階", "築年月"],
+      tooLong: [],
       conflict: false,
     });
   });

@@ -242,13 +242,10 @@ describe("buildWriteback — 数値の範囲/整数制約(I-1)", () => {
 });
 
 describe("buildWriteback — 区分マンション", () => {
-  // ⚠structure/totalFloors/totalUnits(to: building)は mansionOverridesSchema
-  // (src/app/api/properties/[id]/sales-sheets/new/route.ts)に対応するキーが無いため、
-  // 本番の入力経路(作成ダイアログ→route.ts)からはこの3キーは到達しない(building.
-  // structureType/totalFloors/totalUnits は棟の値が正で図面からは変更できない・
-  // 意図的な設計)。このテストは buildWriteback 自体の仕分けロジックを直接固定する
-  // 目的で残す(到達不能であることは route レベルのテスト参照)。
-  it("部屋の欄は物件・棟の欄は棟へ", () => {
+  // 区分の構造・地上階・総戸数は棟の値が正で、図面からは変えない(作成画面でも表示だけ)。
+  // 以前は棟へ書き戻す規則が残っていた(入力経路から到達しない死んだ規則)。後で誰かが
+  // 入力経路にキーを足すと、同じ棟の全部屋へ黙って書き込むことになるため規則ごと消した。
+  it("部屋の欄は物件・棟の欄(地下階・築年月)は棟へ。構造・地上階・総戸数は書かない", () => {
     const r = buildWriteback({
       kind: "mansion",
       values: {
@@ -258,18 +255,14 @@ describe("buildWriteback — 区分マンション", () => {
         structure: "RC",
         totalFloors: "11",
         totalUnits: "48",
+        basementFloors: "1",
         builtYearMonth: "2008年3月",
       },
       current: { property: {}, building: {} },
     });
     expect(r.property).toEqual({ salePrice: 6590, exclusiveArea: 67.21, managementFee: 12800 });
-    expect(r.building).toEqual({
-      structureType: "RC",
-      totalFloors: 11,
-      totalUnits: 48,
-      builtYear: 2008,
-      builtMonth: 3,
-    });
+    expect(r.building).toEqual({ basementFloors: 1, builtYear: 2008, builtMonth: 3 });
+    expect(r.unreadable).toEqual([]);
   });
 
   it("棟が無い区分では棟の欄を捨てる", () => {
@@ -319,7 +312,9 @@ describe("buildWriteback — 文字数の上限(@codex P2)", () => {
       current: emptyCurrent,
     });
     expect(tooLong.property).toEqual({});
-    expect(tooLong.unreadable).toEqual(["交通"]);
+    // 読めなかったのではなく長すぎる=知らせの文を分けるため別の一覧に入れる。
+    expect(tooLong.unreadable).toEqual([]);
+    expect(tooLong.tooLong).toEqual(["交通"]);
   });
 
   it("勝手に切り詰めない(図面の文と物件の文が食い違わないように)", () => {
@@ -338,7 +333,8 @@ describe("buildWriteback — 文字数の上限(@codex P2)", () => {
       current: { property: {}, building: null },
     });
     expect(r.property).toEqual({ orientation: "南".repeat(50) });
-    expect(r.unreadable).toEqual(["間取り"]);
+    expect(r.unreadable).toEqual([]);
+    expect(r.tooLong).toEqual(["間取り"]);
   });
 });
 

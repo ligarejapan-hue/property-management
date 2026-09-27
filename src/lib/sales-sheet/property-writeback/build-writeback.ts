@@ -18,6 +18,11 @@ export type WritebackResult = {
    * 「保存した」とも「読めなかった」とも言わないまま値だけ消える。
    */
   noTarget: string[];
+  /**
+   * 物件の欄に入る文字数を超えた項目(交通・間取り・向き)。読めなかったのではなく
+   * 長すぎるだけなので、知らせの文を `unreadable` と分ける(図面にはそのまま載る)。
+   */
+  tooLong: string[];
 };
 
 /**
@@ -128,13 +133,10 @@ const RULES: Record<SalesSheetTemplateKind, Rule[]> = {
     { key: "floorNo", label: "所在階", to: "property", column: "floorNo", as: "number", range: INT_RANGES.floorNo },
     { key: "managementFee", label: "管理費", to: "property", column: "managementFee", as: "number", range: INT_RANGES.managementFee },
     { key: "repairFee", label: "修繕積立金", to: "property", column: "repairReserveFee", as: "number", range: INT_RANGES.repairReserveFee },
-    { key: "structure", label: "建物構造", to: "building", column: "structureType", as: { option: M.BUILDING_STRUCTURE } },
-    // ⚠totalFloors/totalUnits(to: building)は mansionOverridesSchema に対応するキーが
-    // 無く本番の入力経路からは到達しないが(下の build-writeback.test.ts のコメント参照)、
-    // 万一到達した場合に備え aboveFloors と同じ「地上◯階」相当の範囲を防御的に適用する。
-    { key: "totalFloors", label: "地上階", to: "building", column: "totalFloors", as: "number", range: INT_RANGES.aboveFloors },
+    // ⚠区分の構造・地上階・総戸数は**棟の値が正**で、図面からは変えない(作成画面でも表示だけ)。
+    //   棟へ書き戻す規則を置かない(以前は入力経路から到達しない規則が残っていた。後で
+    //   入力経路にキーを足すと同じ棟の全部屋へ黙って書き込むことになるため消した)。
     { key: "basementFloors", label: "地下階", to: "building", column: "basementFloors", as: "number", range: INT_RANGES.basementFloors },
-    { key: "totalUnits", label: "総戸数", to: "building", column: "totalUnits", as: "number", range: INT_RANGES.totalUnits },
   ],
   house: [
     ...PRICE(M.TAX),
@@ -181,7 +183,7 @@ export function buildWriteback(input: {
   current: WritebackCurrent;
 }): WritebackResult {
   const { kind, values, current } = input;
-  const out: WritebackResult = { property: {}, building: {}, unreadable: [], noTarget: [] };
+  const out: WritebackResult = { property: {}, building: {}, unreadable: [], noTarget: [], tooLong: [] };
   const hasBuilding = current.building !== null;
 
   for (const rule of RULES[kind]) {
@@ -198,9 +200,14 @@ export function buildWriteback(input: {
       next = n !== null && inRange(n, rule.range) ? n : null;
     } else if (rule.as === "text") {
       const t = raw.trim();
-      // 上限超過は切り詰めず null(=読めなかった欄)にする。勝手に短くすると、
-      // 図面に出ている文と物件に入った文が食い違ったまま気づけない。
-      next = rule.maxLength !== undefined && t.length > rule.maxLength ? null : t;
+      // 上限超過は切り詰めずに保存しない。勝手に短くすると、図面に出ている文と
+      // 物件に入った文が食い違ったまま気づけない。読めなかったのではないので
+      // 知らせは `tooLong` で分ける。
+      if (rule.maxLength !== undefined && t.length > rule.maxLength) {
+        out.tooLong.push(rule.label);
+        continue;
+      }
+      next = t;
     }
     else next = pickOption(raw, rule.as.option);
 
