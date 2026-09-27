@@ -45,6 +45,12 @@ describe("computeSaleDmGuideStep", () => {
   it("全部送付済みなら done", () => {
     expect(computeSaleDmGuideStep(base({ ...withLp, ...withDm, recipients: [{ status: "sent", body: "x", lpVariantId: "l1", variantId: "v1" }] }))).toBe("done");
   });
+  it("拒否・宛先不明の宛先は判定に入れない(印刷・送付を回り続けない・@codex #449 R3)", () => {
+    expect(computeSaleDmGuideStep(base({ ...withLp, ...withDm, printed: true, recipients: [
+      { status: "sent", body: "x", lpVariantId: "l1", variantId: "v1" },
+      { status: "confirmed", body: "x", lpVariantId: "l1", variantId: "v1", terminalExcluded: true },
+    ] }))).toBe("done");
+  });
   it("送付済みの宛先は割当・適用の判定に入れない(送った後に型を足しても前の段へ戻さない)", () => {
     expect(computeSaleDmGuideStep(base({ ...withLp, ...withDm, recipients: [
       { status: "sent", body: "x", lpVariantId: null, variantId: "v1" },

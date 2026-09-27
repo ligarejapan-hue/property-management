@@ -22,7 +22,7 @@ export type SaleDmGuideStepKey =
 export type SaleDmGuideState = SaleDmGuideStepKey | "no_recipients" | "done";
 
 export interface SaleDmGuideInput {
-  recipients: ReadonlyArray<{ status: string; body: string; lpVariantId: string | null; variantId: string }>;
+  recipients: ReadonlyArray<{ status: string; body: string; lpVariantId: string | null; variantId: string; terminalExcluded?: boolean }>;
   variants: ReadonlyArray<{ id: string; bodyTemplate?: string | null }>;
   lpVariants: ReadonlyArray<{ id: string; headline: string | null }>;
   /** この画面で「印刷」を押したか(確定の後・送付済みの前)。 */
@@ -56,7 +56,8 @@ export function computeSaleDmGuideStep(input: SaleDmGuideInput): SaleDmGuideStat
   const { recipients, variants, lpVariants, printed } = input;
   if (recipients.length === 0) return "no_recipients";
   // 送付済みの宛先はもう変えられない=それ以前の段の判定には入れない。
-  const unsent = recipients.filter((r) => r.status !== "sent");
+  // 拒否・宛先不明の宛先も、印刷から外れ送付済みにもできない=判定に入れない(@codex #449 R3)。
+  const unsent = recipients.filter((r) => r.status !== "sent" && !r.terminalExcluded);
   if (unsent.length === 0) return "done";
 
   const confirmed = unsent.filter((r) => r.status === "confirmed");
@@ -124,7 +125,7 @@ export function guideTargetIds(input: Omit<SaleDmGuideInput, "printed">): {
   lpVariantId: string | null;
 } {
   const state = computeSaleDmGuideStep({ ...input, printed: false });
-  const drafts = input.recipients.filter((r) => r.status === "draft");
+  const drafts = input.recipients.filter((r) => r.status === "draft" && !r.terminalExcluded);
   const hasTemplate = (id: string) =>
     (input.variants.find((v) => v.id === id)?.bodyTemplate ?? "").trim() !== "";
   let dmVariantId: string | null = input.variants[0]?.id ?? null;

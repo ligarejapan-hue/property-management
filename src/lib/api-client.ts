@@ -294,6 +294,8 @@ export interface SaleDmDraft {
   phoneTapFirstAt: string | null;
   // 公開LPの査定申込の回数と初回時刻(中身は fetchSaleDmInquiries)。
   formInquiryCount: number;
+  // 拒否・宛先不明の記録がある未送付の宛先(印刷から外れ、送付済みにもできない)。手順の案内が段の判定から外す。
+  terminalExcluded?: boolean;
   formInquiryFirstAt: string | null;
 }
 
