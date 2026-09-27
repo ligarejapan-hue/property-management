@@ -6,7 +6,7 @@
  * フォーム本体の zip / address 入力は親が所有し、本コンポーネントは「補助操作＋候補表示」だけを担う
  * （propsで現値と onChange を受け取る）。**本 PR ではどのフォームにも組み込まない**＝存在と配線のみ。
  *
- *  - mode="postal": 郵便番号 → 住所（明示ボタン「住所を自動入力」）。
+ *  - mode="postal": 郵便番号 → 住所（明示ボタン「郵便番号から住所を自動入力」＝2026-09-26 発注者指定の名前）。
  *  - mode="search": 住所 → 郵便番号候補（入力に応じて debounce 検索＝hook 内 300ms）。
  *  - mode="both":   両方。
  *
@@ -258,7 +258,7 @@ export function AddressLookupControls({
           disabled={disabled || loading || zip.trim() === ""}
           className={linkBtn}
         >
-          住所を自動入力
+          郵便番号から住所を自動入力
         </button>
       )}
 

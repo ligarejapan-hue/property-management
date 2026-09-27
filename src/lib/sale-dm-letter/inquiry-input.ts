@@ -2,6 +2,7 @@
  * 公開LPの査定申込フォームの入力検証(設計 §2.5)。純関数(env/DB 非依存)。
  * 受け口 route は FormData の get をそのまま渡す。戻り値の value だけを DB に保存する。
  */
+import { formatPhoneJp } from "@/lib/phone-format-jp";
 export const INQUIRY_LIMITS = { name: 50, phone: 20, email: 254, contactTime: 60, message: 1000 } as const;
 export const CONTACT_PREFS = ["phone", "email", "either"] as const;
 export type ContactPref = (typeof CONTACT_PREFS)[number];
@@ -115,5 +116,6 @@ export function parseInquiryForm(get: (key: string) => string | null): InquiryPa
   if (single(get("consent")) !== "yes") errors.push("consent_required");
 
   if (errors.length > 0) return { kind: "invalid", errors };
-  return { kind: "ok", value: { name, phone, email, contactPref, contactTime, message } };
+  // 保存はハイフンありにそろえる(発注者決定 2026-09-26)。正しい番号と判定できないものは入力どおり(検証は上で済み)。
+  return { kind: "ok", value: { name, phone: formatPhoneJp(phone).value, email, contactPref, contactTime, message } };
 }
