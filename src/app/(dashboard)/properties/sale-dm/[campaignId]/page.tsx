@@ -107,7 +107,12 @@ export default function SaleDmWorkspacePage() {
     [campaign],
   );
   const confirmedIds = useMemo(
-    () => (campaign?.recipients ?? []).filter((r) => r.status === "confirmed").map((r) => r.id),
+    // 拒否・宛先不明の宛先は送付済みにできない(サーバーが断る)=ボタンの対象と件数から外す(@codex #449 R7)。
+    // 取得後に記録された分は、これまでどおりサーバーが断り、画面が件数で知らせる。
+    () =>
+      (campaign?.recipients ?? [])
+        .filter((r) => r.status === "confirmed" && !r.terminalExcluded)
+        .map((r) => r.id),
     [campaign],
   );
 

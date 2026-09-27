@@ -81,6 +81,9 @@ describe("光らせるボタンの目印(data-guide)が画面にそろってい�
     expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "print" }))).not.toContain("印刷できた");
     expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "confirm", onPrintConfirmed: () => {} }))).not.toContain("印刷できた");
   });
+  it("「確定分を送付済みに」の対象と件数から拒否・宛先不明を外す(@codex #449 R7)", () => {
+    expect(PAGE.split('.filter((r) => r.status === "confirmed" && !r.terminalExcluded)').length - 1).toBe(2);
+  });
   it("印刷済みの顔ぶれは印刷に出る確定済み(拒否・宛先不明を除く)で作る(@codex #449 R6)", () => {
     expect(PAGE).toContain('.filter((r) => r.status === "confirmed" && !r.terminalExcluded)');
   });
