@@ -236,6 +236,9 @@ export const updatePropertySchema = z.object({
   dmStatus: z.enum(["send", "hold", "no_send"]).optional(),
   caseStatus: z.enum(CASE_STATUS_VALUES).optional(),
   introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional().nullable(),
+  // DMの種類(台帳を指す・設計 2026-09-27 §3.6)。null=自動判定に戻す。
+  // ⚠作成時(createPropertySchema)には足さない=作成時は自動で決める。
+  dmScenarioId: z.string().uuid().optional().nullable(),
   gpsLat: optionalLatitude,
   gpsLng: optionalLongitude,
   zoningDistrict: z.string().optional().nullable(),
