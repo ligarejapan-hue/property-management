@@ -154,23 +154,51 @@ beforeEach(() => {
 
 describe("PATCH /api/properties/[id] — DMの種類の保存", () => {
   it("有効な dmScenarioId → 200・updateMany の data に dmScenarioId と version increment・ChangeLog に dmScenarioId の行", async () => {
+    let capturedTx: ReturnType<typeof makeTxClient> | undefined;
+    (pm.$transaction as unknown as Mock).mockImplementation((fn: (tx: unknown) => unknown) => {
+      capturedTx = makeTxClient();
+      return fn(capturedTx);
+    });
+
     const res = await patch({ version: 1, dmScenarioId: SCENARIO_ID });
     expect(res.status).toBe(200);
 
     expect(lockScenarioForShare).toHaveBeenCalledWith(expect.anything(), SCENARIO_ID);
 
-    // updateMany の呼び出しは $transaction が渡す tx 側(base client 経由ではない)
-    const txCall = (pm.$transaction as unknown as Mock).mock.results[0]
-      .value as Promise<unknown>;
-    await txCall;
-    const txArg = (pm.$transaction as unknown as Mock).mock.calls[0][0];
-    void txArg;
+    // updateMany の呼び出しは $transaction が渡す tx 側(base client 経由ではない)。
+    expect(capturedTx!.property.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          dmScenarioId: SCENARIO_ID,
+          version: { increment: 1 },
+        }),
+      }),
+    );
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
 
     expect(pm.changeLog.createMany).toHaveBeenCalledWith({
       data: expect.arrayContaining([
         expect.objectContaining({ fieldName: "dmScenarioId", newValue: SCENARIO_ID }),
       ]),
     });
+  });
+
+  it("dmScenarioId が現在値と同じ(選び直していない) → 台帳をロックせずに他項目だけ保存できる(controller ruling)", async () => {
+    pm.property.findUnique.mockResolvedValue({ ...CURRENT_PROPERTY, dmScenarioId: SCENARIO_ID });
+    let capturedTx: ReturnType<typeof makeTxClient> | undefined;
+    (pm.$transaction as unknown as Mock).mockImplementation((fn: (tx: unknown) => unknown) => {
+      capturedTx = makeTxClient();
+      return fn(capturedTx);
+    });
+
+    const res = await patch({ version: 1, dmScenarioId: SCENARIO_ID, note: "他項目だけ変える" });
+    expect(res.status).toBe(200);
+    expect(lockScenarioForShare).not.toHaveBeenCalled();
+    expect(capturedTx!.property.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ dmScenarioId: SCENARIO_ID, note: "他項目だけ変える" }),
+      }),
+    );
   });
 
   it.each([
@@ -193,7 +221,9 @@ describe("PATCH /api/properties/[id] — DMの種類の保存", () => {
     expect(pm.changeLog.createMany).not.toHaveBeenCalled();
   });
 
-  it("呼び出し順: トランザクション開始 → 行ロック → 鍵の確認 → 台帳のロック(FOR SHARE) → 条件つき更新", async () => {
+  it("呼び出し順: トランザクション開始 → 行ロック → 鍵の確認 → 台帳のロック(FOR SHARE) → field_staffの担当再確認 → 条件つき更新", async () => {
+    // field_staff にして、ロック後の担当再確認(tx.property.findUnique)も順序に含める。
+    (getApiSession as Mock).mockResolvedValue({ id: "u1", role: "field_staff" });
     const order: string[] = [];
     (pm.$transaction as unknown as Mock).mockImplementation(async (fn: (tx: unknown) => unknown) => {
       order.push("tx");
@@ -203,7 +233,10 @@ describe("PATCH /api/properties/[id] — DMの種類の保存", () => {
             order.push("update");
             return { count: 1 };
           }),
-          findUnique: vi.fn(),
+          findUnique: vi.fn(async () => {
+            order.push("scope-recheck");
+            return { createdBy: "u1", assignedTo: null };
+          }),
         },
         $queryRaw: vi.fn(async () => []),
       };
@@ -222,7 +255,14 @@ describe("PATCH /api/properties/[id] — DMの種類の保存", () => {
 
     const res = await patch({ version: 1, dmScenarioId: SCENARIO_ID });
     expect(res.status).toBe(200);
-    expect(order).toEqual(["tx", "lock-property", "assert-lock", "lock-scenario", "update"]);
+    expect(order).toEqual([
+      "tx",
+      "lock-property",
+      "assert-lock",
+      "lock-scenario",
+      "scope-recheck",
+      "update",
+    ]);
   });
 
   it("dmScenarioId: null(自動に戻す) → 台帳のロックを取らずに保存できる", async () => {

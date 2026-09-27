@@ -402,7 +402,11 @@ export async function PATCH(
         lockId: lockIdHeader,
       });
       // DMの種類(設計 2026-09-27 §3.4・§3.6): 物件→台帳の順でロックし、ロック後に有効性を確かめる。
-      if (updateFields.dmScenarioId) {
+      // ⚠**値が変わっていなければロックしない**(controller ruling): 既に保存済みの
+      //   dmScenarioId をそのまま送り直しただけの更新(例: 別項目だけを変えた保存)まで
+      //   台帳をロックすると、その種類を後で「使わない」にした瞬間に**無関係な保存**まで
+      //   409 で止まってしまう。新しく選び直した値のときだけ確かめる。
+      if (updateFields.dmScenarioId && updateFields.dmScenarioId !== current.dmScenarioId) {
         const sc = await lockScenarioForShare(tx, updateFields.dmScenarioId);
         if (!sc || !sc.active || sc.deletedAt) {
           throw new ApiError(409, "選んだDMの種類は使えなくなりました。選び直してください", "SCENARIO_UNAVAILABLE");
