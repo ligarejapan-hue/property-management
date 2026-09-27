@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { fetchSaleDmScenarioOptions, type SaleDmScenarioOption } from "@/lib/api-client";
 import { runNoLockPropertyPatch } from "@/app/(dashboard)/properties/[id]/page";
-import { dmScenarioFieldView, DM_SCENARIO_UNAVAILABLE_LABEL } from "./dm-scenario-field-model";
+import { dmScenarioFieldView, DM_SCENARIO_UNAVAILABLE_LABEL, DM_SCENARIO_UNAVAILABLE_NEUTRAL_LABEL } from "./dm-scenario-field-model";
 
 /**
  * 物件の「DMの種類」欄(設計 2026-09-27 §3.6)。導入ルートの欄(IntroductionRouteField)と同じ形。
@@ -92,7 +92,7 @@ export default function DmScenarioField({
             >
               <option value="">{view!.autoLabel}</option>
               {view!.unavailable && property.dmScenarioId && (
-                <option value={property.dmScenarioId} disabled>(使えなくなった種類)</option>
+                <option value={property.dmScenarioId} disabled>{DM_SCENARIO_UNAVAILABLE_NEUTRAL_LABEL}</option>
               )}
               {options.map((o) => (
                 <option key={o.id} value={o.id}>{o.name}</option>

@@ -128,6 +128,12 @@ describe("GET /scenarios/[id]/prompt(台帳の手紙の指示文)", () => {
     expect(res.status).toBe(404);
     expect((await res.json()).error.code).toBe("SCENARIO_NOT_FOUND");
   });
+
+  it("管理者以外は 403(Task 5 で見送った安価なテスト・最終レビュー Minor 6)", async () => {
+    (getUserPermissions as Fn).mockResolvedValue([{ resource: "property", action: "write", granted: true }]);
+    const res = await GET(req("GET"), ctx);
+    expect(res.status).toBe(403);
+  });
 });
 
 describe("PUT /scenarios/[id]/template(台帳の手紙の原本の貼り戻し)", () => {
@@ -155,6 +161,14 @@ describe("PUT /scenarios/[id]/template(台帳の手紙の原本の貼り戻し)"
     );
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe("TEMPLATE_STALE");
+    expect(pm.dmScenario.update).not.toHaveBeenCalled();
+  });
+
+  it("書き方の設定のどれかが未設定・本文も変わっている → 400 SCENARIO_SETTINGS_INCOMPLETE(Task 5 で見送った安価なテスト・最終レビュー Minor 6)", async () => {
+    pm.dmScenario.findUniqueOrThrow.mockResolvedValue(scenarioRow({ tone: null }));
+    const res = await PUT(put({ body: "新しい本文", promptDigest: DIGEST }), ctx);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("SCENARIO_SETTINGS_INCOMPLETE");
     expect(pm.dmScenario.update).not.toHaveBeenCalled();
   });
 

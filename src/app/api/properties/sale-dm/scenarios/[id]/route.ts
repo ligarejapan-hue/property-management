@@ -9,7 +9,12 @@ import { saleDmScenarioPatchSchema } from "@/lib/validators-sale-dm";
 type Ctx = { params: Promise<{ id: string }> };
 
 // 手紙側の設定(プロンプトに載る項目)。変わったら古い指示文・原文を消す。
-const LETTER_KEYS = ["designTemplate", "tone", "length", "appeal", "strength", "extraInstruction"] as const;
+// ⚠designTemplate(印刷デザイン)と extraInstruction(追加の指示)は外部AI方式のプロンプト
+//   (buildExternalPrompt は tone/length/appeal/strength だけを見る)に含まれないので、
+//   変えても文面は変わらない。にもかかわらずここで無効化すると、得るもの無しに
+//   letterBodyTemplate/letterPromptText を消してしまう(campaign 側の variant PATCH は
+//   同じ理由でこの2つを無効化の契機にしていない。@codex #376 R3/R8、設計 §2.4)。
+const LETTER_KEYS = ["tone", "length", "appeal", "strength"] as const;
 // LP側の設定。変わったら原文・切り分け結果・写真と図の枠を消す。
 const LP_KEYS = ["lpTone", "lpLength", "lpAppeal", "lpStrength"] as const;
 

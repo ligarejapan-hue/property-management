@@ -227,6 +227,30 @@ describe("台帳 API(設計 §3.6・§4)", () => {
     expect(pm.dmScenarioMedia.deleteMany).toHaveBeenCalledWith({ where: { scenarioId: SID } });
   });
 
+  it("PATCH: designTemplate だけ変える → 文面は消さない(外部AIのプロンプトに含まれない項目)", async () => {
+    pm.dmScenario.findUniqueOrThrow.mockResolvedValue(scenarioRow({ designTemplate: "formal" }));
+    const res = await PATCH(req("PATCH", { designTemplate: "soft" }), ctx);
+    expect(res.status).toBe(200);
+    const data = pm.dmScenario.update.mock.calls[0][0].data;
+    expect(data.designTemplate).toBe("soft");
+    expect(data.letterBodyTemplate).toBeUndefined();
+    expect(data.letterPromptText).toBeUndefined();
+    const j = await res.json();
+    expect(j.changedFields).toEqual(["designTemplate"]);
+  });
+
+  it("PATCH: extraInstruction だけ変える → 文面は消さない(外部AIのプロンプトに含まれない項目)", async () => {
+    pm.dmScenario.findUniqueOrThrow.mockResolvedValue(scenarioRow({ extraInstruction: null }));
+    const res = await PATCH(req("PATCH", { extraInstruction: "季節のあいさつを入れる" }), ctx);
+    expect(res.status).toBe(200);
+    const data = pm.dmScenario.update.mock.calls[0][0].data;
+    expect(data.extraInstruction).toBe("季節のあいさつを入れる");
+    expect(data.letterBodyTemplate).toBeUndefined();
+    expect(data.letterPromptText).toBeUndefined();
+    const j = await res.json();
+    expect(j.changedFields).toEqual(["extraInstruction"]);
+  });
+
   it("PATCH: name だけ変える → 文面は消さない", async () => {
     pm.dmScenario.findUniqueOrThrow.mockResolvedValue(scenarioRow({ name: "旧名" }));
     const res = await PATCH(req("PATCH", { name: "新名" }), ctx);

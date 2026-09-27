@@ -233,9 +233,12 @@ describe("PUT /scenarios/[id]/lp-template(台帳のLPの貼り戻し)", () => {
     const j = await res.json();
     expect(j.changed).toBe(true);
     expect(j.bodyDigest).toBe(bodyTemplateDigest(template(NEW_BODY_DROPPED)));
+    // 見出し2に付いていた図(sale_flow)が落ちたので、mediaDropped は1(campaign の
+    // lp-variants/[lpId]/template と同じ名前・同じ数え方・最終レビュー Minor 3)。
+    expect(j.mediaDropped).toBe(1);
   });
 
-  it("見出しが1つも残らなければ createMany は呼ばない", async () => {
+  it("見出しが1つも残らなければ createMany は呼ばない・落ちた写真は mediaDropped に数える", async () => {
     pm.dmScenarioMedia.findMany.mockResolvedValue([
       { slot: "section", heading: "見出し1", assetId: "asset-1", figureKind: null, sortOrder: 1 },
     ]);
@@ -244,6 +247,16 @@ describe("PUT /scenarios/[id]/lp-template(台帳のLPの貼り戻し)", () => {
     expect(res.status).toBe(200);
     expect(pm.dmScenarioMedia.deleteMany).toHaveBeenCalledWith({ where: { scenarioId: SID, slot: "section" } });
     expect(pm.dmScenarioMedia.createMany).not.toHaveBeenCalled();
+    const j = await res.json();
+    expect(j.mediaDropped).toBe(1);
+  });
+
+  it("同じ原文(changed:false)のときは mediaDropped を 0 で返す", async () => {
+    const res = await PUT(put({ body: template(OLD_BODY), promptDigest: LP_DIGEST }), ctx);
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.changed).toBe(false);
+    expect(j.mediaDropped).toBe(0);
   });
 
   it("削除済み → 404 SCENARIO_NOT_FOUND・保存しない", async () => {

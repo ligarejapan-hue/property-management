@@ -28,9 +28,12 @@ describe("物件の「DMの種類」欄の表示(設計 §3.6)", () => {
     const opts = OPTIONS.filter((o) => o.autoKey !== "inheritance");
     expect(dmScenarioFieldView({ dmScenarioId: null, introductionRoute: "reception_csv" }, opts).label).toBe("自動(発送のときに選ぶ既定の種類)");
   });
-  it("物件の値が選択肢に無い(使わない/削除)ときは、自動に戻すよう促す", () => {
+  it("物件の値が選択肢に無い(使わない/削除)ときは unavailable:true・label は中立(指示文は含めない)", () => {
+    // 最終レビュー Minor 4: label は読み取り専用の人がそのまま見る欄の文字なので、
+    // 「自動に戻してください」という編集者向けの指示はここに含めない(その表示は
+    // canWrite=true の側で DM_SCENARIO_UNAVAILABLE_LABEL を別途使う)。
     const v = dmScenarioFieldView({ dmScenarioId: "gone", introductionRoute: "reception_csv" }, OPTIONS);
     expect(v.unavailable).toBe(true);
-    expect(v.label).toBe("(使えなくなった種類)自動に戻してください");
+    expect(v.label).toBe("(使えなくなった種類)");
   });
 });

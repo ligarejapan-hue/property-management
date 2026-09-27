@@ -16,7 +16,10 @@ export function dmScenarioHistoryLabel(value: string | null, all: SaleDmScenario
   return s.name;
 }
 
-export const DM_SCENARIO_UNAVAILABLE_LABEL = "(使えなくなった種類)自動に戻してください";
+// 中立な表示(読み取り専用の人向け・最終レビュー Minor 4)。「自動に戻してください」は
+// 編集できる人にだけ出す指示なので、閲覧だけの人の欄には含めない。
+export const DM_SCENARIO_UNAVAILABLE_NEUTRAL_LABEL = "(使えなくなった種類)";
+export const DM_SCENARIO_UNAVAILABLE_LABEL = `${DM_SCENARIO_UNAVAILABLE_NEUTRAL_LABEL}自動に戻してください`;
 export const DM_SCENARIO_AUTO_FALLBACK_LABEL = "自動(発送のときに選ぶ既定の種類)";
 
 /**
@@ -37,6 +40,8 @@ export function dmScenarioFieldView(
 
   if (!property.dmScenarioId) return { label: autoLabel, autoLabel, unavailable: false };
   const own = options.find((o) => o.id === property.dmScenarioId);
-  if (!own) return { label: DM_SCENARIO_UNAVAILABLE_LABEL, autoLabel, unavailable: true };
+  // label は読み取り専用の人にそのまま出す欄の文字なので中立にする(「自動に戻してください」の
+  // 指示は編集できる人にだけ、この欄の外で別途出す=DmScenarioField 参照)。
+  if (!own) return { label: DM_SCENARIO_UNAVAILABLE_NEUTRAL_LABEL, autoLabel, unavailable: true };
   return { label: own.name, autoLabel, unavailable: false };
 }

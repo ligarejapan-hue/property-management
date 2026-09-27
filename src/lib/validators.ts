@@ -238,7 +238,9 @@ export const updatePropertySchema = z.object({
   introductionRoute: z.enum(INTRODUCTION_ROUTE_VALUES).optional().nullable(),
   // DMの種類(台帳を指す・設計 2026-09-27 §3.6)。null=自動判定に戻す。
   // ⚠作成時(createPropertySchema)には足さない=作成時は自動で決める。
-  dmScenarioId: z.string().uuid().optional().nullable(),
+  // ⚠大文字混じりの UUID をそのまま保存すると、生SQL(::uuid 比較)や他経路が保存済みの
+  // 小文字 id と一致しない(最終レビュー Minor 5)。入口で小文字に揃える。
+  dmScenarioId: z.string().uuid().transform((s) => s.toLowerCase()).optional().nullable(),
   gpsLat: optionalLatitude,
   gpsLng: optionalLongitude,
   zoningDistrict: z.string().optional().nullable(),

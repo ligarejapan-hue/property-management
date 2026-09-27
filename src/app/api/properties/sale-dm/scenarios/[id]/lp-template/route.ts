@@ -32,7 +32,7 @@ export async function PUT(request: Request, { params }: Ctx) {
 
       // 中身が同じ保存は何もしない(呼び出し側は取り直さずこの応答の指紋を持てる)。
       if (s.lpRawTemplate === parsed.body) {
-        return { changed: false as const, sectionCount: 0 };
+        return { changed: false as const, sectionCount: 0, mediaDropped: 0 };
       }
 
       // 表示したときのLPの書き方の設定と、いまの設定が同じか。
@@ -69,7 +69,11 @@ export async function PUT(request: Request, { params }: Ctx) {
       });
       const oldHeadings = [...new Set(lpBodyHeadings(s.lpBodyText ?? ""))];
       const newHeadings = [...new Set(lpBodyHeadings(parts.body))];
-      const sections = reconcileSectionMedia(oldHeadings, newHeadings, rowsToPlan(oldRows).sections);
+      const oldSections = rowsToPlan(oldRows).sections;
+      const sections = reconcileSectionMedia(oldHeadings, newHeadings, oldSections);
+      // 小見出しが変わって落ちた節のうち、写真や図が付いていたものの数(campaign の
+      // lp-variants/[lpId]/template と同じ名前・同じ数え方)。UIの案内に使う。
+      const mediaDropped = oldSections.filter((sec) => sec.media && !newHeadings.includes(sec.heading)).length;
 
       await tx.dmScenario.update({
         where: { id },
@@ -89,7 +93,7 @@ export async function PUT(request: Request, { params }: Ctx) {
         await tx.dmScenarioMedia.createMany({ data: sectionRows });
       }
 
-      return { changed: true as const, sectionCount: newHeadings.length };
+      return { changed: true as const, sectionCount: newHeadings.length, mediaDropped };
     });
 
     if (result.changed) {
@@ -104,7 +108,7 @@ export async function PUT(request: Request, { params }: Ctx) {
     }
 
     return NextResponse.json(
-      { changed: result.changed, bodyDigest: bodyTemplateDigest(parsed.body) },
+      { changed: result.changed, bodyDigest: bodyTemplateDigest(parsed.body), mediaDropped: result.mediaDropped },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

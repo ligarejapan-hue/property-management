@@ -825,7 +825,7 @@ export async function saveSaleDmScenarioTemplate(
   id: string,
   kind: "letter" | "lp",
   input: { body: string; promptDigest: string; baseBodyDigest: string },
-): Promise<{ changed: boolean; bodyDigest: string }> {
+): Promise<{ changed: boolean; bodyDigest: string; mediaDropped?: number }> {
   if (USE_MOCK) { await mockDelay(); return { changed: true, bodyDigest: "mock" }; }
   return apiFetch(`${SCENARIO_BASE}/${id}/${kind === "letter" ? "template" : "lp-template"}`, {
     method: "PUT",

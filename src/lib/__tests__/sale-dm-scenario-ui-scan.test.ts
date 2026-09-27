@@ -26,6 +26,12 @@ describe("DMの種類の画面(設計 §3.6)", () => {
   it("追加の指示は前後の空白を落として送る(Task 9 review Minor 4)", () => {
     expect(read("src/components/sale-dm/scenario-text-editor.tsx")).toMatch(/extraInstruction: extra\.trim\(\)/);
   });
+  it("書き方の設定の確認・「作り直してください」案内は、実際に文面を消す項目だけに出す(designTemplate/extraInstructionは対象外・最終レビュー Important 1)", () => {
+    const src = read("src/components/sale-dm/scenario-text-editor.tsx");
+    expect(src).toMatch(/letter:\s*\["tone",\s*"length",\s*"appeal",\s*"strength"\]/);
+    expect(src).toMatch(/lp:\s*\["lpTone",\s*"lpLength",\s*"lpAppeal",\s*"lpStrength"\]/);
+    expect(src).toMatch(/willClear[\s\S]*window\.confirm/);
+  });
   it("サイドバーに「DMの種類」(管理者のみ)", () => {
     expect(read("src/components/layout/sidebar-model.tsx")).toMatch(/label:\s*"DMの種類",\s*href:\s*"\/admin\/dm-scenarios"[^}]*minRole:\s*"admin"/);
   });

@@ -36,6 +36,14 @@ const SETTINGS: Record<Kind, Setting[]> = {
 
 const TITLE: Record<Kind, string> = { letter: "手紙の文面", lp: "LP(ご案内ページ)の文章" };
 
+// 実際に文面(・LPは写真と図の枠も)を消す設定項目(サーバーの LETTER_KEYS/LP_KEYS と同じ・設計 §2.4)。
+// 手紙のデザイン(designTemplate)と追加の指示(extraInstruction)は外部AI方式のプロンプトに含まれず、
+// 変えても文面は消えないので、確認ダイアログ・「作り直してください」の案内の対象に含めない。
+const CLEARING_KEYS: Record<Kind, readonly SettingKey[]> = {
+  letter: ["tone", "length", "appeal", "strength"],
+  lp: ["lpTone", "lpLength", "lpAppeal", "lpStrength"],
+};
+
 /**
  * DMの種類(台帳)の文面づくり(設計 2026-09-27 §3.6)。手紙とLPを kind で切り替える1つの部品。
  * 流れは発送の画面の型と同じ「書き方を選ぶ → 指示文をコピー → お手元のAIで作った文面を貼り付けて保存」。
@@ -85,12 +93,18 @@ export default function ScenarioTextEditor({
 
   const saveSetting = (patch: SaleDmScenarioPatch) =>
     run(async () => {
-      if (currentBody && !window.confirm("書き方の設定を変えると、登録済みの文面が消えます(作り直しになります)。続けますか？")) return;
+      // 送る項目のうち、実際に文面を消す設定(CLEARING_KEYS)が含まれるときだけ確認・案内を出す。
+      // designTemplate/extraInstruction は外部AIのプロンプト(tone/length/appeal/strength だけ)に
+      // 含まれないので、変えても文面は消えない=確認も「作り直してください」も不要。
+      const willClear = Object.keys(patch).some((k) => (CLEARING_KEYS[kind] as readonly string[]).includes(k));
+      if (willClear && currentBody && !window.confirm("書き方の設定を変えると、登録済みの文面が消えます(作り直しになります)。続けますか？")) return;
       const r = await updateSaleDmScenario(scenario.id, patch);
       if (r.changedFields.length === 0) return;
-      // 指示文が変わったので、手元の指紋は使えない(コピーし直してもらう)。
-      setPrompt(null);
-      if (currentBody) setNotice("設定を変えたので、文面を作り直してください");
+      if (willClear) {
+        // 指示文が変わったので、手元の指紋は使えない(コピーし直してもらう)。
+        setPrompt(null);
+        if (currentBody) setNotice("設定を変えたので、文面を作り直してください");
+      }
       onChanged();
     });
 
@@ -121,7 +135,13 @@ export default function ScenarioTextEditor({
         // 書いた値の指紋に更新する(取り直すと、別の画面の保存を自分の指紋として持ってしまう)。
         setPrompt({ ...prompt, bodyDigest: r.bodyDigest });
         setPaste("");
-        setNotice(r.changed ? "文面を保存しました" : "同じ文面が保存済みです(変更はありません)");
+        // mediaDropped は LP のときだけ意味を持つ(campaign の lp-variants と同じ文言)。
+        const mediaDropped = r.mediaDropped ?? 0;
+        setNotice(
+          r.changed
+            ? `文面を保存しました${mediaDropped > 0 ? `・小見出しが変わったため写真や図を外した節 ${mediaDropped}` : ""}`
+            : "同じ文面が保存済みです(変更はありません)",
+        );
         onChanged();
       } catch (e) {
         if (apiErrorCode(e) === "PROMPT_STALE") {
