@@ -113,6 +113,16 @@ export default function SaleDmWorkspacePage() {
   const confirmedSig = confirmedIds.join(",");
   const [printedFor, setPrintedFor] = useState<string | null>(null);
   const [printClickedFor, setPrintClickedFor] = useState<string | null>(null);
+  // 「LP型を使わずに進む」(このキャンペーンについて・この端末に覚える)。LP型が1つも無いときだけ効く。
+  const skipLpKey = `pm-sale-dm-guide-skip-lp:${campaignId}`;
+  const [skipLp, setSkipLp] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(skipLpKey) === "1";
+    } catch {
+      return false;
+    }
+  });
   const guideState = useMemo(
     () =>
       campaign
@@ -121,9 +131,10 @@ export default function SaleDmWorkspacePage() {
             variants: campaign.variants,
             lpVariants: campaign.lpVariants,
             printed: printedFor !== null && printedFor === confirmedSig,
+            skipLp,
           })
         : "no_recipients",
-    [campaign, printedFor, confirmedSig],
+    [campaign, printedFor, confirmedSig, skipLp],
   );
 
   // 操作を実行 → 再取得(状態を最新化)。失敗はエラー表示。
@@ -210,6 +221,18 @@ export default function SaleDmWorkspacePage() {
       {/* 手順の案内(次に押すボタンを光らせる・発注者決定 2026-09-27)。 */}
       <SaleDmStepGuide
         state={guideState}
+        onSkipLp={
+          (campaign?.lpVariants.length ?? 0) === 0
+            ? () => {
+                setSkipLp(true);
+                try {
+                  window.localStorage.setItem(skipLpKey, "1");
+                } catch {
+                  // 保存できない端末では、この画面を開いているあいだだけ効く。
+                }
+              }
+            : undefined
+        }
         onPrintConfirmed={
           printClickedFor !== null && printClickedFor === confirmedSig ? () => setPrintedFor(confirmedSig) : undefined
         }

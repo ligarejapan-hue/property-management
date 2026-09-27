@@ -19,7 +19,7 @@ export type SaleDmGuideStepKey =
   | "print"
   | "sent";
 
-export type SaleDmGuideState = SaleDmGuideStepKey | "no_recipients" | "done";
+export type SaleDmGuideState = SaleDmGuideStepKey | "no_recipients" | "done" | "done_excluded";
 
 export interface SaleDmGuideInput {
   recipients: ReadonlyArray<{ status: string; body: string; lpVariantId: string | null; variantId: string; terminalExcluded?: boolean }>;
@@ -27,6 +27,11 @@ export interface SaleDmGuideInput {
   lpVariants: ReadonlyArray<{ id: string; headline: string | null }>;
   /** この画面で「印刷」を押したか(確定の後・送付済みの前)。 */
   printed: boolean;
+  /**
+   * LP型を使わずに進むと決めたか(QRは外部LPへ転送=これも正式な使い方・@codex #449 R4)。
+   * LP型が1つも無いときだけ効く(作ったLP型は使う)。
+   */
+  skipLp?: boolean;
 }
 
 export interface SaleDmGuideStep {
@@ -58,20 +63,26 @@ export function computeSaleDmGuideStep(input: SaleDmGuideInput): SaleDmGuideStat
   // 送付済みの宛先はもう変えられない=それ以前の段の判定には入れない。
   // 拒否・宛先不明の宛先も、印刷から外れ送付済みにもできない=判定に入れない(@codex #449 R3)。
   const unsent = recipients.filter((r) => r.status !== "sent" && !r.terminalExcluded);
-  if (unsent.length === 0) return "done";
+  if (unsent.length === 0) {
+    // 残りが拒否・宛先不明だけのときは「すべて送付済み」と言わない。
+    return recipients.some((r) => r.status !== "sent" && r.terminalExcluded) ? "done_excluded" : "done";
+  }
 
   const confirmed = unsent.filter((r) => r.status === "confirmed");
   const drafts = unsent.filter((r) => r.status === "draft");
 
   // 準備(LP型・本文)は、まだ確定していない宛先が残っているあいだだけ案内する。
   if (drafts.length > 0) {
-    if (lpVariants.length === 0) return "add_lp";
-    if (!lpVariants.some((l) => (l.headline ?? "").trim() !== "")) return "lp_text";
+    const noLp = lpVariants.length === 0 && input.skipLp === true;
+    if (!noLp) {
+      if (lpVariants.length === 0) return "add_lp";
+      if (!lpVariants.some((l) => (l.headline ?? "").trim() !== "")) return "lp_text";
+    }
     const withTemplate = new Set(
       variants.filter((v) => (v.bodyTemplate ?? "").trim() !== "").map((v) => v.id),
     );
     if (withTemplate.size === 0) return "dm_body";
-    if (drafts.some((r) => r.lpVariantId === null)) return "assign";
+    if (!noLp && drafts.some((r) => r.lpVariantId === null)) return "assign";
     // 割り当てた先のLP型に文章が無い下書きがあれば、そのLP型の文章を入れる段に戻す
     // (A/B でLP型を2つ以上作り、片方の文章がまだのとき。その宛先のQRはご案内ページにならない)。
     const lpWithText = new Set(
@@ -120,23 +131,23 @@ export function isAheadOfGuide(clicked: string, state: SaleDmGuideState): boolea
  *  - lpVariantId: 「LP型の文章」の段では、文章の無いLP型を割り当てた宛先がいればそのLP型
  *    (無ければ文章の無いLP型・先頭)。
  */
-export function guideTargetIds(input: Omit<SaleDmGuideInput, "printed">): {
+export function guideTargetIds(input: Omit<SaleDmGuideInput, "printed" | "skipLp">): {
   dmVariantId: string | null;
   lpVariantId: string | null;
 } {
-  const state = computeSaleDmGuideStep({ ...input, printed: false });
+  // 段に頼らず決める(LP型を使わずに進むときも同じ型を指す)。
   const drafts = input.recipients.filter((r) => r.status === "draft" && !r.terminalExcluded);
   const hasTemplate = (id: string) =>
     (input.variants.find((v) => v.id === id)?.bodyTemplate ?? "").trim() !== "";
-  let dmVariantId: string | null = input.variants[0]?.id ?? null;
-  if (state === "dm_body") {
-    dmVariantId =
-      drafts.find((r) => !hasTemplate(r.variantId))?.variantId ??
-      input.variants.find((v) => !hasTemplate(v.id))?.id ??
-      dmVariantId;
-  } else if (state === "apply") {
-    dmVariantId = drafts.find((r) => r.body === "" && hasTemplate(r.variantId))?.variantId ?? dmVariantId;
-  }
+  const dmVariantId =
+    // 原本が無く、未確定の宛先がいる型(=本文を入れる)
+    drafts.find((r) => !hasTemplate(r.variantId))?.variantId ??
+    // 原本があり、本文の空いた宛先がいる型(=本文を宛先へ)
+    drafts.find((r) => r.body === "" && hasTemplate(r.variantId))?.variantId ??
+    // 原本の無い型・先頭
+    input.variants.find((v) => !hasTemplate(v.id))?.id ??
+    input.variants[0]?.id ??
+    null;
   const lpHasText = (id: string) =>
     (input.lpVariants.find((l) => l.id === id)?.headline ?? "").trim() !== "";
   const lpVariantId =

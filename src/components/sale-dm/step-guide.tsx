@@ -52,13 +52,17 @@ const getServerSnapshot = () => false;
 const STATE_MESSAGES: Partial<Record<SaleDmGuideState, string>> = {
   no_recipients: "宛先がありません。物件一覧で、DM状態が「送付可」で住所のある所有者がいる物件を選び、売却DMを作り直してください。",
   done: "すべて送付済みです。申込は「査定の申込」に届きます。",
+  done_excluded: "送れる宛先はすべて送付済みです。残りの宛先は拒否・宛先不明の記録があるため、印刷にも送付にも使えません。",
 };
 
 export function SaleDmStepGuide({
   state,
   onPrintConfirmed,
+  onSkipLp,
 }: {
   state: SaleDmGuideState;
+  /** LP型が1つも無いときだけ渡る。「LP型を使わずに進む」(QRは外部LPへ転送=正式な使い方)。 */
+  onSkipLp?: () => void;
   /** 印刷を押したあとだけ渡る。帯の「印刷できた」で呼ぶ(押すまで次の段へ進めない)。 */
   onPrintConfirmed?: () => void;
 }) {
@@ -190,6 +194,14 @@ export function SaleDmStepGuide({
             </button>
           </span>
         </div>
+        {state === "add_lp" && onSkipLp && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-gray-700 dark:text-gray-200">
+            <span>ご案内ページを使わない場合は、お手紙のQRは外部LPへ転送されます。</span>
+            <button type="button" onClick={onSkipLp} className="text-indigo-700 underline hover:no-underline dark:text-indigo-300">
+              LP型を使わずに進む
+            </button>
+          </div>
+        )}
         {state === "print" && onPrintConfirmed && (
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-gray-700 dark:text-gray-200">
             <span>別のタブで手紙とQR(申込用・配信停止用)が出たら、次へ進みます。</span>

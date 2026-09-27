@@ -49,7 +49,7 @@ describe("computeSaleDmGuideStep", () => {
     expect(computeSaleDmGuideStep(base({ ...withLp, ...withDm, printed: true, recipients: [
       { status: "sent", body: "x", lpVariantId: "l1", variantId: "v1" },
       { status: "confirmed", body: "x", lpVariantId: "l1", variantId: "v1", terminalExcluded: true },
-    ] }))).toBe("done");
+    ] }))).toBe("done_excluded");
   });
   it("送付済みの宛先は割当・適用の判定に入れない(送った後に型を足しても前の段へ戻さない)", () => {
     expect(computeSaleDmGuideStep(base({ ...withLp, ...withDm, recipients: [
@@ -82,6 +82,25 @@ describe("LP型が2つ以上(A/B)で、片方に文章が無いとき", () => {
     expect(computeSaleDmGuideStep(base({ ...lp2, ...withDm, recipients: [
       { status: "draft", body: "x", lpVariantId: "l1", variantId: "v1" },
     ] }))).toBe("confirm");
+  });
+});
+
+describe("LP型を使わずに進む(@codex #449 R4: LP型なし=外部LPへ転送も正式な使い方)", () => {
+  it("skipLp なら LP型の2段を飛ばし、割当も要らない(LP型が無ければ lpVariantId=null のままでよい)", () => {
+    expect(computeSaleDmGuideStep(base({ skipLp: true }))).toBe("dm_body");
+    expect(computeSaleDmGuideStep(base({ skipLp: true, ...withDm }))).toBe("apply");
+  });
+  it("LP型を作ってあれば skipLp は効かない(作ったLP型は使う)", () => {
+    expect(computeSaleDmGuideStep(base({ skipLp: true, lpVariants: [{ id: "l1", headline: null }] }))).toBe("lp_text");
+  });
+});
+
+describe("残りが拒否・宛先不明だけのとき(@codex #449 R4)", () => {
+  it("「すべて送付済み」と言わず、done_excluded", () => {
+    expect(computeSaleDmGuideStep(base({ ...withLp, ...withDm, recipients: [
+      { status: "sent", body: "x", lpVariantId: "l1", variantId: "v1" },
+      { status: "confirmed", body: "x", lpVariantId: "l1", variantId: "v1", terminalExcluded: true },
+    ] }))).toBe("done_excluded");
   });
 });
 

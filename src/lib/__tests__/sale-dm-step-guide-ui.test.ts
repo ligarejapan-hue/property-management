@@ -27,6 +27,19 @@ describe("手順の案内の帯(サーバー描画=案内は既定で出る)", (
     expect(html).toMatch(/aria-current="step"[^>]*>4\. 均等に割り当て/);
   });
 
+  it("LP型を使わずに進む(@codex #449 R4): LP型を作る段で、渡されたときだけ出す", () => {
+    expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "add_lp", onSkipLp: () => {} }))).toContain("LP型を使わずに進む");
+    expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "add_lp" }))).not.toContain("LP型を使わずに進む");
+    expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "dm_body", onSkipLp: () => {} }))).not.toContain("LP型を使わずに進む");
+    expect(PAGE).toContain("skipLp,");
+    expect(PAGE).toContain("(campaign?.lpVariants.length ?? 0) === 0");
+  });
+  it("残りが拒否・宛先不明だけのときは「すべて送付済み」と言わない(@codex #449 R4)", () => {
+    const html = renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "done_excluded" }));
+    expect(html).toContain("拒否・宛先不明");
+    expect(html).toContain("送れる宛先は");
+    expect(html).not.toContain("申込は「査定の申込」に届きます");
+  });
   it("宛先0件・全部送付済みは、手順の並びの代わりに一文", () => {
     expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "no_recipients" }))).toContain("宛先がありません");
     expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "done" }))).toContain("すべて送付済みです");
