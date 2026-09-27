@@ -55,6 +55,7 @@ const FIELD_LABELS: Record<string, string> = {
   builtYear: "築年",
   structureType: "構造",
   managementCompany: "管理会社",
+  dmScenarioId: "DMの種類",
 };
 
 const SOURCE_LABELS: Record<string, string> = {

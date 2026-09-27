@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { Loader2, Copy, Image as ImageIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  fetchSaleDmLpMedia, saveSaleDmLpMedia, fetchSaleDmLpImagePrompt, fetchSaleDmLpAssets, LP_ASSET_URL,
-  type SaleDmLpAsset, type SaleDmLpMediaPlan, type SaleDmLpMediaResponse,
+  fetchSaleDmLpAssets, LP_ASSET_URL,
+  type LpMediaApi, type SaleDmLpAsset, type SaleDmLpMediaPlan, type SaleDmLpMediaResponse,
 } from "@/lib/api-client";
 import { FIGURE_KINDS, FIGURE_LABELS, isFigureKind } from "@/lib/sale-dm-letter/lp-figures";
 import { LP_MEDIA_MAX_ASSETS } from "@/lib/sale-dm-letter/lp-media";
@@ -15,8 +15,11 @@ import LpAssetLibrary from "./lp-asset-library";
 type Style = "photo" | "illustration" | "flat";
 type Slot = { kind: "hero" } | { kind: "section"; heading: string };
 
-/** LP型1件の「写真と図」(設計 §2.3)。ヒーロー1枠+小見出しごとの枠。凍結中は読むだけ。 */
-export default function LpMediaPanel({ campaignId, lpId, label, onClose }: { campaignId: string; lpId: string; label: string; onClose: () => void }) {
+/** LP型1件の「写真と図」(設計 §2.3)。ヒーロー1枠+小見出しごとの枠。凍結中は読むだけ。
+ *  発送のLP型とDMの種類(台帳)のLPで共用する(設計 2026-09-27 §3.6)。呼び先は api で受け取る
+ *  (発送=campaignLpMediaApi・台帳=scenarioLpMediaApi)。⚠api は呼び出し側で useMemo して渡す
+ *  (api が変わるたびに読み直すため、描画ごとに作ると読み込みが止まらない)。 */
+export default function LpMediaPanel({ api, label, onClose }: { api: LpMediaApi; label: string; onClose: () => void }) {
   const [data, setData] = useState<SaleDmLpMediaResponse | null>(null);
   const [plan, setPlan] = useState<SaleDmLpMediaPlan | null>(null);
   const [busy, setBusy] = useState(false);
@@ -32,14 +35,14 @@ export default function LpMediaPanel({ campaignId, lpId, label, onClose }: { cam
     setNotice(null);
     setError(null);
     setPicking(null);
-    fetchSaleDmLpMedia(campaignId, lpId)
+    api.load()
       .then((d) => { if (alive) { setData(d); setPlan(d.plan); } })
       .catch((e) => { if (alive) setError(e instanceof Error ? e.message : "読み込みに失敗しました"); });
     return () => { alive = false; };
-  }, [campaignId, lpId]);
+  }, [api]);
 
   const reload = async () => {
-    const d = await fetchSaleDmLpMedia(campaignId, lpId);
+    const d = await api.load();
     setData(d);
     setPlan(d.plan);
   };
@@ -63,7 +66,7 @@ export default function LpMediaPanel({ campaignId, lpId, label, onClose }: { cam
     if (!plan || busy) return;
     setBusy(true); setError(null); setNotice(null);
     try {
-      const r = await saveSaleDmLpMedia(campaignId, lpId, plan);
+      const r = await api.save(plan);
       setNotice(`保存しました(写真 ${r.assetCount} 枚・図 ${r.figureCount} 点)`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "保存に失敗しました");
@@ -81,7 +84,7 @@ export default function LpMediaPanel({ campaignId, lpId, label, onClose }: { cam
     if (busy) return;
     setBusy(true); setError(null); setNotice(null);
     try {
-      const r = await fetchSaleDmLpImagePrompt(campaignId, lpId, { slot: slot.kind, heading: slot.kind === "section" ? slot.heading : undefined, style });
+      const r = await api.imagePrompt({ slot: slot.kind, heading: slot.kind === "section" ? slot.heading : undefined, style });
       await navigator.clipboard.writeText(r.prompt);
       setNotice("画像の指示文をコピーしました。お手元の画像生成AIに貼り付け、できた画像をこの画面の「写真を選ぶ…」で貼り付け(Ctrl+V)てください");
     } catch (e) {

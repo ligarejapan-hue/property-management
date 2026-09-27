@@ -5,8 +5,10 @@ const read = (f: string) => readFileSync(path.resolve(process.cwd(), f), "utf8")
 describe("LPプレビュー画面", () => {
   const panel = read("src/components/sale-dm/lp-preview-panel.tsx");
   const manager = read("src/components/sale-dm/lp-variant-manager.tsx");
-  it("iframe は LP_PREVIEW_URL 経由・PC/スマホの切替が aria-pressed 付きである", () => {
-    expect(panel).toMatch(/<iframe[^>]*src=\{LP_PREVIEW_URL\(/);
+  it("iframe は注入された previewUrl 経由(発送の画面は LP_PREVIEW_URL を渡す)・PC/スマホの切替が aria-pressed 付きである", () => {
+    // 共用部品化(設計 2026-09-27 §3.6): 部品は呼び先を受け取り、発送の画面が LP_PREVIEW_URL を渡す。
+    expect(panel).toMatch(/<iframe[^>]*src=\{previewUrl\(/);
+    expect(manager).toMatch(/previewUrl=\{\(d\) => LP_PREVIEW_URL\(campaign\.id, previewFor\.id, d\)\}/);
     expect((panel.match(/aria-pressed/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(panel).toContain("390");
     expect(panel).toContain("1000");
