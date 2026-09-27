@@ -51,6 +51,10 @@ const WRITE_GATE_EXCEPTIONS: Record<string, { reason: string; mustContain?: stri
     reason: "DMの種類の台帳=管理者のみ(user_management:write)",
     mustContain: "requireScenarioAdmin()",
   },
+  "src/app/api/properties/sale-dm/scenarios/[id]/template/route.ts": {
+    reason: "台帳の手紙の原本(貼り戻し)=管理者のみ(user_management:write)",
+    mustContain: "requireScenarioAdmin()",
+  },
 };
 
 const FILES = routeFiles(ROOT);

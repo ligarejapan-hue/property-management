@@ -25,6 +25,33 @@ export async function requireScenarioOptionsAccess() {
 
 export const SCENARIO_OPTION_SELECT = { id: true, name: true, sortOrder: true, autoKey: true } as const;
 
+/** 手紙側の書き方の設定(§2.2のプロンプト組み立てに要る4項目)。未設定なら400。 */
+export function letterOptions(s: {
+  tone: string | null;
+  length: string | null;
+  appeal: string | null;
+  strength: string | null;
+  designTemplate: string | null;
+}) {
+  if (!s.tone || !s.length || !s.appeal || !s.strength || !s.designTemplate) {
+    throw new ApiError(400, "先に書き方の設定をすべて選んでください", "SCENARIO_SETTINGS_INCOMPLETE");
+  }
+  return { tone: s.tone, length: s.length, appeal: s.appeal, strength: s.strength };
+}
+
+/** LP側の書き方の設定。未設定なら400。 */
+export function lpOptions(s: {
+  lpTone: string | null;
+  lpLength: string | null;
+  lpAppeal: string | null;
+  lpStrength: string | null;
+}) {
+  if (!s.lpTone || !s.lpLength || !s.lpAppeal || !s.lpStrength) {
+    throw new ApiError(400, "先にLPの書き方の設定をすべて選んでください", "SCENARIO_SETTINGS_INCOMPLETE");
+  }
+  return { tone: s.lpTone, length: s.lpLength, appeal: s.lpAppeal, strength: s.lpStrength };
+}
+
 /** 台帳を書き換える経路は必ず最初にこれ(設計 §3.3.1)。削除済みは 404。 */
 export async function lockScenarioForUpdate(tx: Prisma.TransactionClient, id: string): Promise<void> {
   const rows = await tx.$queryRaw<Array<{ id: string; deleted_at: Date | null }>>`
