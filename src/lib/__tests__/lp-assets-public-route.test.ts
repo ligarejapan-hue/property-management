@@ -19,7 +19,7 @@ const req = (ip = "10.0.0.1") => new Request(`http://x/lp-assets/${PID}`, { head
 
 beforeEach(() => {
   vi.clearAllMocks();
-  pm.dmLpAsset.findUnique.mockResolvedValue({ storageKey: "lp-assets/k.jpg", mime: "image/jpeg", deletedAt: null, _count: { media: 1 } });
+  pm.dmLpAsset.findUnique.mockResolvedValue({ storageKey: "lp-assets/k.jpg", mime: "image/jpeg", deletedAt: null, _count: { media: 1, scenarioMedia: 0 } });
   storageStub.read.mockResolvedValue({ body: Buffer.from([1, 2, 3]), contentType: "application/octet-stream", size: 3 });
 });
 
@@ -33,10 +33,14 @@ describe("GET /lp-assets/[publicId]", () => {
     expect(res.headers.get("content-length")).toBe("3");
     expect(pm.dmLpAsset.findUnique.mock.calls[0][0].where).toEqual({ publicId: PID });
   });
+  it("台帳(削除されていない種類)だけから使われている写真も200(LP型の枠は無くてもよい)", async () => {
+    pm.dmLpAsset.findUnique.mockResolvedValue({ storageKey: "lp-assets/k.jpg", mime: "image/jpeg", deletedAt: null, _count: { media: 0, scenarioMedia: 1 } });
+    expect((await GET(req("10.0.0.7"), ctx(PID))).status).toBe(200);
+  });
   it("未参照・削除済み・未知・形式不正は 404(本文なし・no-store・DB/storage を叩かない場合も)", async () => {
-    pm.dmLpAsset.findUnique.mockResolvedValue({ storageKey: "k", mime: "image/jpeg", deletedAt: null, _count: { media: 0 } });
+    pm.dmLpAsset.findUnique.mockResolvedValue({ storageKey: "k", mime: "image/jpeg", deletedAt: null, _count: { media: 0, scenarioMedia: 0 } });
     expect((await GET(req("10.0.0.2"), ctx(PID))).status).toBe(404);
-    pm.dmLpAsset.findUnique.mockResolvedValue({ storageKey: "k", mime: "image/jpeg", deletedAt: new Date(), _count: { media: 1 } });
+    pm.dmLpAsset.findUnique.mockResolvedValue({ storageKey: "k", mime: "image/jpeg", deletedAt: new Date(), _count: { media: 1, scenarioMedia: 0 } });
     expect((await GET(req("10.0.0.3"), ctx(PID))).status).toBe(404);
     pm.dmLpAsset.findUnique.mockResolvedValue(null);
     expect((await GET(req("10.0.0.4"), ctx(PID))).status).toBe(404);

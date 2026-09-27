@@ -243,10 +243,11 @@ describe("写真ライブラリの削除(lp-assets/[assetId] DELETE)のロック
   const s = code("src/app/api/properties/sale-dm/lp-assets/[assetId]/route.ts");
 
   // ⚠この route は dm_lp_assets だけを掴む(media PUT のロック順序の末尾と同じ一段)。
-  //   ロックの後に参照カウントと論理削除を読み直すことで、media PUT との削除/添付の競合を閉じる。
+  //   ロックの後に参照カウント(countAssetReferences=LP型+台帳)と論理削除を読み直すことで、
+  //   media PUT との削除/添付の競合を閉じる。
   it("対象行を FOR UPDATE でロックしてから参照カウントを数える", () => {
     const a = s.search(/FROM dm_lp_assets[\s\S]{0,200}FOR UPDATE/);
-    const c = s.indexOf("tx.dmLpVariantMedia.count");
+    const c = s.indexOf("countAssetReferences(tx");
     expect(a).toBeGreaterThan(-1);
     expect(c).toBeGreaterThan(-1);
     expect(a).toBeLessThan(c);

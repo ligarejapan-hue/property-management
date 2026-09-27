@@ -9,11 +9,12 @@ import { lpBodyHeadings } from "@/lib/sale-dm-letter/lp-template";
 import { isFigureKind } from "@/lib/sale-dm-letter/lp-figures";
 import { validateMediaPlan, mediaPlanIssueMessage, referencedAssetIds, type MediaPlan } from "@/lib/sale-dm-letter/lp-media";
 import { saleDmLpMediaPutSchema } from "@/lib/validators-sale-dm";
+import { ASSET_REFERENCE_COUNT_SELECT, isAssetReferenced } from "@/lib/sale-dm-letter/asset-references";
 
 type Ctx = { params: Promise<{ id: string; lpId: string }> };
 type MediaRow = { slot: string; heading: string | null; assetId: string | null; figureKind: string | null; sortOrder: number };
 
-const ASSET_SELECT = { id: true, publicId: true, mime: true, width: true, height: true, bytes: true, label: true, createdAt: true, _count: { select: { media: true } } } as const;
+const ASSET_SELECT = { id: true, publicId: true, mime: true, width: true, height: true, bytes: true, label: true, createdAt: true, ...ASSET_REFERENCE_COUNT_SELECT } as const;
 
 /** DB行 → 枠。節は本文の小見出し順に並べ、行が無い節は media:null。 */
 export function rowsToPlan(rows: MediaRow[], headings: string[]): MediaPlan {
@@ -49,7 +50,7 @@ export function planToRows(lpVariantId: string, plan: MediaPlan): Prisma.DmLpVar
 
 async function listAssets() {
   const rows = await prisma.dmLpAsset.findMany({ where: { deletedAt: null }, orderBy: { createdAt: "desc" }, select: ASSET_SELECT });
-  return rows.map(({ _count, ...a }) => ({ ...a, referenced: _count.media > 0 }));
+  return rows.map(({ _count, ...a }) => ({ ...a, referenced: isAssetReferenced({ _count }) }));
 }
 
 export async function GET(_req: NextRequest, { params }: Ctx) {

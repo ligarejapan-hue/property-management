@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { getStorage } from "@/lib/storage";
 import { clientRateKey, createRateLimiter } from "@/lib/public-rate-limit";
+import { ASSET_REFERENCE_COUNT_SELECT, isAssetReferenced } from "@/lib/sale-dm-letter/asset-references";
 
 /**
  * LP用写真の公開口(設計 2026-09-08 §2.3)。認証なし。
@@ -21,9 +22,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ publ
   if (!PUBLIC_ID.test(publicId)) return NOT_FOUND();
   const asset = await prisma.dmLpAsset.findUnique({
     where: { publicId },
-    select: { storageKey: true, mime: true, deletedAt: true, _count: { select: { media: true } } },
+    select: { storageKey: true, mime: true, deletedAt: true, ...ASSET_REFERENCE_COUNT_SELECT },
   });
-  if (!asset || asset.deletedAt || asset._count.media === 0) return NOT_FOUND();
+  if (!asset || asset.deletedAt || !isAssetReferenced(asset)) return NOT_FOUND();
   const file = await getStorage().read(asset.storageKey);
   if (!file) return NOT_FOUND();
   return new NextResponse(file.body as unknown as BodyInit, {

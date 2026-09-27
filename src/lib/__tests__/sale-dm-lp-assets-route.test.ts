@@ -29,6 +29,7 @@ vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     dmLpAsset: { findMany: vi.fn(async () => []), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
     dmLpVariantMedia: { count: vi.fn(async () => 0) },
+    dmScenarioMedia: { count: vi.fn(async () => 0) },
     $queryRaw: vi.fn(async () => []),
   };
   db.$transaction = vi.fn(async (fn: (tx: typeof db) => unknown) => fn(db));
@@ -44,6 +45,7 @@ type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
   dmLpAsset: { findMany: Fn; findUnique: Fn; create: Fn; update: Fn };
   dmLpVariantMedia: { count: Fn };
+  dmScenarioMedia: { count: Fn };
   $queryRaw: Fn;
 };
 const READS = ["property", "csv_export", "csv_export_personal", "owner"];
@@ -93,6 +95,7 @@ beforeEach(() => {
   pm.dmLpAsset.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: "a1", createdAt: new Date(), deletedAt: null, ...data }));
   pm.dmLpAsset.findUnique.mockResolvedValue({ id: "a1", publicId: "p".repeat(32), storageKey: "lp-assets/x.jpg", deletedAt: null });
   pm.dmLpVariantMedia.count.mockResolvedValue(0);
+  pm.dmScenarioMedia.count.mockResolvedValue(0);
 });
 
 describe("POST lp-assets(アップロード)", () => {
@@ -147,13 +150,21 @@ describe("POST lp-assets(アップロード)", () => {
 describe("GET lp-assets(一覧)", () => {
   it("削除済みを除き新しい順、referenced を付ける、storageKey は返さない", async () => {
     pm.dmLpAsset.findMany.mockResolvedValue([
-      { id: "a1", publicId: "p1", mime: "image/jpeg", width: 1, height: 1, bytes: 10, label: null, createdAt: new Date(), storageKey: "k", _count: { media: 2 } },
+      { id: "a1", publicId: "p1", mime: "image/jpeg", width: 1, height: 1, bytes: 10, label: null, createdAt: new Date(), storageKey: "k", _count: { media: 2, scenarioMedia: 0 } },
     ]);
     const res = await GET(new Request("http://x") as never);
     const j = await res.json();
     expect(pm.dmLpAsset.findMany.mock.calls[0][0].where).toEqual({ deletedAt: null });
     expect(j.assets[0]).toMatchObject({ id: "a1", referenced: true });
     expect(JSON.stringify(j)).not.toContain("storageKey");
+  });
+  it("台帳(削除されていない種類)だけから使われている写真も referenced:true", async () => {
+    pm.dmLpAsset.findMany.mockResolvedValue([
+      { id: "a1", publicId: "p1", mime: "image/jpeg", width: 1, height: 1, bytes: 10, label: null, createdAt: new Date(), storageKey: "k", _count: { media: 0, scenarioMedia: 1 } },
+    ]);
+    const res = await GET(new Request("http://x") as never);
+    const j = await res.json();
+    expect(j.assets[0]).toMatchObject({ id: "a1", referenced: true });
   });
 });
 
@@ -168,6 +179,14 @@ describe("DELETE lp-assets/[assetId]", () => {
     expect(r.status).toBe(409);
     expect((await r.json()).error.code).toBe("REFERENCED");
     // 参照ありで 409 のときは論理削除まで進まない(削除/添付の競合を閉じるロックの後に判定している証拠)。
+    expect(pm.dmLpAsset.update).not.toHaveBeenCalled();
+  });
+  it("LP型の枠は無く台帳(削除されていない種類)だけから使われていても 409 REFERENCED", async () => {
+    pm.dmLpVariantMedia.count.mockResolvedValue(0);
+    pm.dmScenarioMedia.count.mockResolvedValue(1);
+    const r = await DELETE(new Request("http://x", { method: "DELETE" }) as never, ctx);
+    expect(r.status).toBe(409);
+    expect((await r.json()).error.code).toBe("REFERENCED");
     expect(pm.dmLpAsset.update).not.toHaveBeenCalled();
   });
   it("対象行を FOR UPDATE でロックしてから参照件数を数える(削除/添付の競合を閉じる)", async () => {

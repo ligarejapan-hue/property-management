@@ -78,13 +78,18 @@ describe("GET media", () => {
       { slot: "hero", heading: null, assetId: U1, figureKind: null, sortOrder: 0 },
       { slot: "section", heading: "費用について", assetId: null, figureKind: "cost_breakdown", sortOrder: 1 },
     ]);
-    pm.dmLpAsset.findMany.mockResolvedValue([{ id: U1, publicId: "p", mime: "image/jpeg", width: 1, height: 1, bytes: 1, label: null, createdAt: new Date(), _count: { media: 1 } }]);
+    pm.dmLpAsset.findMany.mockResolvedValue([{ id: U1, publicId: "p", mime: "image/jpeg", width: 1, height: 1, bytes: 1, label: null, createdAt: new Date(), _count: { media: 1, scenarioMedia: 0 } }]);
     const j = await (await GET(new Request("http://x") as never, ctx)).json();
     expect(j.plan).toEqual({ hero: { assetId: U1 }, sections: [{ heading: "売却の進め方", media: null }, { heading: "費用について", media: { kind: "figure", figureKind: "cost_breakdown" } }] });
     expect(j.headings).toEqual(["売却の進め方", "費用について"]);
     expect(j.frozen).toBe(false);
     expect(j.assets[0]).toMatchObject({ id: U1, referenced: true });
     expect(JSON.stringify(j)).not.toContain("storageKey");
+  });
+  it("台帳(削除されていない種類)だけから使われている写真も一覧で referenced:true", async () => {
+    pm.dmLpAsset.findMany.mockResolvedValue([{ id: U1, publicId: "p", mime: "image/jpeg", width: 1, height: 1, bytes: 1, label: null, createdAt: new Date(), _count: { media: 0, scenarioMedia: 1 } }]);
+    const j = await (await GET(new Request("http://x") as never, ctx)).json();
+    expect(j.assets[0]).toMatchObject({ id: U1, referenced: true });
   });
 });
 
