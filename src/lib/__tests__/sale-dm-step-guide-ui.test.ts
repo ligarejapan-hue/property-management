@@ -81,6 +81,9 @@ describe("光らせるボタンの目印(data-guide)が画面にそろってい�
     expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "print" }))).not.toContain("印刷できた");
     expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "confirm", onPrintConfirmed: () => {} }))).not.toContain("印刷できた");
   });
+  it("「確定」に拒否・宛先不明の宛先を入れない(1件でも含むとまとめて断られる・@codex #449 R5)", () => {
+    expect(PAGE).toContain('.filter((r) => r.status === "draft" && r.body !== "" && !r.terminalExcluded)');
+  });
   it("光らせる型・LP型は guideTargetIds で決める(先頭固定にしない・@codex #449 R1)", () => {
     expect(DM).toContain('data-guide={v.id === guideIds.dmVariantId ? "dm_body" : undefined}');
     expect(LP).toContain('data-guide={v.id === lpGuideId ? "lp_text" : undefined}');

@@ -140,10 +140,11 @@ export function guideTargetIds(input: Omit<SaleDmGuideInput, "printed" | "skipLp
   const hasTemplate = (id: string) =>
     (input.variants.find((v) => v.id === id)?.bodyTemplate ?? "").trim() !== "";
   const dmVariantId =
+    // 原本があり、本文の空いた宛先がいる型(=本文を宛先へ)。段の決め方と同じく「適用」を先に見る
+    // (原本の無い型Aが先にあっても、適用できる型Bを指す・@codex #449 R5)。
+    drafts.find((r) => r.body === "" && hasTemplate(r.variantId))?.variantId ??
     // 原本が無く、未確定の宛先がいる型(=本文を入れる)
     drafts.find((r) => !hasTemplate(r.variantId))?.variantId ??
-    // 原本があり、本文の空いた宛先がいる型(=本文を宛先へ)
-    drafts.find((r) => r.body === "" && hasTemplate(r.variantId))?.variantId ??
     // 原本の無い型・先頭
     input.variants.find((v) => !hasTemplate(v.id))?.id ??
     input.variants[0]?.id ??

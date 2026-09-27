@@ -173,6 +173,15 @@ describe("guideTargetIds(光らせる型・LP型=先頭固定にしない・@cod
       ] });
     expect(r.dmVariantId).toBe("vB");
   });
+  it("本文を宛先へ: 原本の無い型Aが先にあっても、適用できる型Bを指す(段の決め方と揃える・@codex #449 R5)", () => {
+    const input = { ...lp, variants: [{ id: "vA", bodyTemplate: null }, { id: "vB", bodyTemplate: "本文B" }],
+      recipients: [
+        { status: "draft", body: "", lpVariantId: "l1", variantId: "vA" },
+        { status: "draft", body: "", lpVariantId: "l1", variantId: "vB" },
+      ] };
+    expect(computeSaleDmGuideStep({ ...input, printed: false })).toBe("apply");
+    expect(guideTargetIds(input).dmVariantId).toBe("vB");
+  });
   it("LP型の文章: 宛先に割り当たっている文章なしのLP型を優先(使われていない空のLP型ではない)", () => {
     const r = guideTargetIds({
       variants: [{ id: "v1", bodyTemplate: "本文" }],
