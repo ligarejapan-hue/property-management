@@ -144,6 +144,17 @@ describe("台帳 API(設計 §3.6・§4)", () => {
     expect((await res.json()).error.code).toBe("FORBIDDEN");
   });
 
+  it("選択肢: property:write は無いが売却DMの権限(checkSaleDmAccessFor)があれば 200", async () => {
+    (getUserPermissions as Fn).mockResolvedValue([
+      { resource: "property", action: "read", granted: true },
+      { resource: "csv_export", action: "read", granted: true },
+      { resource: "csv_export_personal", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+    ]);
+    const res = await OPTIONS_LIST();
+    expect(res.status).toBe(200);
+  });
+
   it("追加: 同じ名前(削除されていない行)=P2002 → 409 NAME_TAKEN", async () => {
     pm.dmScenario.create.mockRejectedValue({ code: "P2002" });
     const res = await POST(req("POST", { name: "既存の種類" }));
@@ -155,6 +166,7 @@ describe("台帳 API(設計 §3.6・§4)", () => {
     pm.dmScenario.create.mockResolvedValue({ id: "new-id" });
     const res = await POST(req("POST", { name: "新しい種類" }));
     expect(res.status).toBe(201);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect((await res.json()).id).toBe("new-id");
     expect(writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({
       action: "sale_dm_scenario_create",
@@ -200,8 +212,74 @@ describe("台帳 API(設計 §3.6・§4)", () => {
     expect(pm.dmScenarioMedia.deleteMany).not.toHaveBeenCalled();
   });
 
-  it("DELETE: 参照があれば 409 SCENARIO_IN_USE", async () => {
+  it("PATCH: extraInstruction の空文字は保存済み null と同義(変化なし)扱いになり、手紙は消えない・空文字のまま保存しない", async () => {
+    pm.dmScenario.findUniqueOrThrow.mockResolvedValue(scenarioRow({ name: "旧名", extraInstruction: null }));
+    const res = await PATCH(req("PATCH", { name: "新名", extraInstruction: "" }), ctx);
+    expect(res.status).toBe(200);
+    const data = pm.dmScenario.update.mock.calls[0][0].data;
+    expect(data.name).toBe("新名");
+    expect(data.extraInstruction).toBeNull();
+    expect(data.letterBodyTemplate).toBeUndefined();
+    expect(data.letterPromptText).toBeUndefined();
+    const j = await res.json();
+    expect(j.changedFields).toEqual(["name"]);
+  });
+
+  it("PATCH: 空白のみの extraInstruction も null 扱い(trim 後に空文字判定)", async () => {
+    pm.dmScenario.findUniqueOrThrow.mockResolvedValue(scenarioRow({ extraInstruction: null }));
+    const res = await PATCH(req("PATCH", { extraInstruction: "   " }), ctx);
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.changedFields).toEqual([]);
+    expect(pm.dmScenario.update).not.toHaveBeenCalled();
+  });
+
+  it("PATCH: 送った値が保存値と同じ(no-op) → update を呼ばず、何も消さず、監査もしない", async () => {
+    pm.dmScenario.findUniqueOrThrow.mockResolvedValue(scenarioRow({ tone: "standard" }));
+    const res = await PATCH(req("PATCH", { tone: "standard" }), ctx);
+    expect(res.status).toBe(200);
+    const j = await res.json();
+    expect(j.changedFields).toEqual([]);
+    expect(pm.dmScenario.update).not.toHaveBeenCalled();
+    expect(pm.dmScenarioMedia.deleteMany).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("PATCH: 名前の変更で update が P2002 → 409 NAME_TAKEN(監査もしない)", async () => {
+    pm.dmScenario.findUniqueOrThrow.mockResolvedValue(scenarioRow({ name: "旧名" }));
+    pm.dmScenario.update.mockRejectedValue({ code: "P2002" });
+    const res = await PATCH(req("PATCH", { name: "重複している名前" }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("NAME_TAKEN");
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("DELETE: 物件(property.dmScenarioId)の参照があれば 409 SCENARIO_IN_USE", async () => {
     pm.property.count.mockResolvedValue(1);
+    const res = await DELETE(req("DELETE"), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("SCENARIO_IN_USE");
+    expect(pm.dmScenario.update).not.toHaveBeenCalled();
+  });
+
+  it("DELETE: 発送の既定(dmCampaign.defaultScenarioId)だけでも 409 SCENARIO_IN_USE", async () => {
+    pm.dmCampaign.count.mockResolvedValue(1);
+    const res = await DELETE(req("DELETE"), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("SCENARIO_IN_USE");
+    expect(pm.dmScenario.update).not.toHaveBeenCalled();
+  });
+
+  it("DELETE: DM型(dmVariant.scenarioId)だけでも 409 SCENARIO_IN_USE", async () => {
+    pm.dmVariant.count.mockResolvedValue(1);
+    const res = await DELETE(req("DELETE"), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("SCENARIO_IN_USE");
+    expect(pm.dmScenario.update).not.toHaveBeenCalled();
+  });
+
+  it("DELETE: LP型(dmLpVariant.scenarioId)だけでも 409 SCENARIO_IN_USE", async () => {
+    pm.dmLpVariant.count.mockResolvedValue(1);
     const res = await DELETE(req("DELETE"), ctx);
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe("SCENARIO_IN_USE");

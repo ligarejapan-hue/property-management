@@ -69,7 +69,7 @@ export async function POST(request: Request) {
       targetId: row.id,
       detail: { result: "created" },
     });
-    return NextResponse.json({ id: row.id }, { status: 201 });
+    return NextResponse.json({ id: row.id }, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return handleApiError(error);
   }

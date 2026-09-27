@@ -169,7 +169,16 @@ export const saleDmScenarioPatchSchema = z
     length: z.enum(scenarioOptionValues(LENGTH_OPTIONS)).optional(),
     appeal: z.enum(scenarioOptionValues(APPEAL_OPTIONS)).optional(),
     strength: z.enum(scenarioOptionValues(STRENGTH_OPTIONS)).optional(),
-    extraInstruction: z.string().trim().max(1000).nullable().optional(),
+    // 空文字("" や空白のみ)は DB の NULL と同義に正規化する(trim 後)。正規化しないと
+    // 保存済み null(初期値・DB seed 行)と送られてきた "" が「変わった」と誤判定され、
+    // 手紙の指示文・本文を不要に消してしまう(レビュー指摘)。
+    extraInstruction: z
+      .string()
+      .trim()
+      .max(1000)
+      .nullable()
+      .optional()
+      .transform((v) => (v === "" ? null : v)),
     lpTone: z.enum(scenarioOptionValues(TONE_OPTIONS)).optional(),
     lpLength: z.enum(scenarioOptionValues(LENGTH_OPTIONS)).optional(),
     lpAppeal: z.enum(scenarioOptionValues(APPEAL_OPTIONS)).optional(),
