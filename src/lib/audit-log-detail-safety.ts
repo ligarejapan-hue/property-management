@@ -496,6 +496,8 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   sale_dm_scenario_delete: new Set(["result"]),
   // 台帳の手紙の原本(貼り戻し)保存(Task 5)。文字数だけ・本文は載せない。
   sale_dm_scenario_letter_template: new Set(["length"]),
+  // 台帳のLPの原本(貼り戻し)保存(Task 6)。文字数と節数だけ・本文・見出しは載せない。
+  sale_dm_scenario_lp_template: new Set(["length", "sectionCount"]),
 };
 
 /**
