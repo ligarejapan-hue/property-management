@@ -438,7 +438,9 @@ function PropertiesPageInner() {
       router.push(`/properties/sale-dm/${res.campaignId}`);
     } catch (err) {
       // 失敗 → キーは保持(同キーで再試行すればサーバーが二重生成しない)。
-      setError(err instanceof Error ? err.message : "売却DMの作成に失敗しました");
+      // ⚠画面下の赤帯(setError)は「再試行=一覧の読み直し」付きで、押したボタンから離れた所に出て
+      //   見落とされる。対象外の物件だけを選んだとき(NO_ELIGIBLE_RECIPIENTS)などの理由をその場で見せる。
+      window.alert(err instanceof Error ? err.message : "売却DMの作成に失敗しました");
     } finally {
       setCreatingDm(false);
     }

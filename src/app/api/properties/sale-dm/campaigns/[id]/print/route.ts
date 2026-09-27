@@ -203,6 +203,14 @@ export async function GET(
     });
     const { excludedTerminalCount, printedCount } = materialized;
     let html = materialized.html;
+    if (printedCount === 0) {
+      // 白紙だけだと理由が分からない(2026-09-26 発注者の実機テスト=送付済みにした後に
+      // 「印刷」を押して白紙)。印刷の対象と次の一手を示す。刷る手紙が無いので print 用の隠しは不要。
+      html = html.replace(
+        /<body([^>]*)>/,
+        `<body$1><div style="padding:16px 20px;border:2px solid #b45309;border-radius:8px;margin:16px;font-size:15px;line-height:1.7;color:#1f2937;background:#fff">印刷できる手紙がありません。印刷の対象は、売却DMの画面で「確定」にした手紙だけです(送付済みにした手紙と、本文が空の手紙は出ません)。<br>手順は「確定」→「印刷」→「確定分を送付済みに」の順です。</div>`,
+      );
+    }
     if (excludedTerminalCount > 0) {
       // 黙って減らさない: 何通除外したかを**画面にだけ**示す(@codex #384 R2 P2)。
       // この文書は印刷用に開かれるため、素の div だと1通目の手紙の直前に

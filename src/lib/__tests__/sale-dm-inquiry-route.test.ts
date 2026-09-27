@@ -122,7 +122,7 @@ describe("POST /t/[token]/inquiry", () => {
     const res = await call({ name: "山田", phone: "abc" }, {}, "tok_back");
     expect(res.status).toBe(422);
     const html = await res.text();
-    expect(html).toContain("電話番号は数字とハイフンで");
+    expect(html).toContain("電話番号は数字で10桁以上");
     expect(html).toContain("個人情報の取り扱いへの同意が必要です");
     expect(html).toContain('href="/t/tok_back#inquiry"');
     expect(html).not.toContain("山田");
@@ -383,7 +383,7 @@ describe("POST /t/[token]/inquiry accept: application/json(画面を離れずに
       {
         result: "invalid",
         messages: expect.arrayContaining([
-          expect.stringContaining("電話番号は数字とハイフンで"),
+          expect.stringContaining("電話番号は数字で10桁以上"),
           "個人情報の取り扱いへの同意が必要です。",
         ]),
       },
