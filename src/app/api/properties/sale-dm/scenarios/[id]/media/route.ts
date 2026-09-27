@@ -73,7 +73,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
         // 競合させないため、実在確認の前に対象行を FOR UPDATE でロックする。
         await tx.$queryRaw`SELECT id FROM dm_lp_assets WHERE id = ANY(${assetIds}::uuid[]) ORDER BY id FOR UPDATE`;
         const found = await tx.dmLpAsset.findMany({ where: { id: { in: assetIds }, deletedAt: null }, select: { id: true } });
-        if (found.length !== assetIds.length) throw new ApiError(409, "選んだ写真の一部が削除されています。選び直してください", "ASSET_NOT_FOUND");
+        if (found.length !== assetIds.length) throw new ApiError(422, "選んだ写真の一部が削除されています。選び直してください", "ASSET_NOT_FOUND");
       }
       // planToRows は外部キー列を持たない汎用行を返すので、ここで scenarioId を足す。
       const rows = planToRows(plan).map((r) => ({ ...r, scenarioId: id }));

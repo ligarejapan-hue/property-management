@@ -500,6 +500,12 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   sale_dm_scenario_lp_template: new Set(["length", "sectionCount"]),
   // 台帳の写真と図の枠の保存(Task 7)。件数だけ・見出し・ラベルは載せない。
   sale_dm_scenario_media_update: new Set(["assetCount", "figureCount"]),
+  // 台帳のLP社内プレビュー閲覧(Task 7)。sale_dm_lp_preview_view と同じキー集合
+  // (campaignId は台帳に無いので載せない。device/viewedAt のみ)。
+  sale_dm_scenario_lp_preview_view: new Set(["device", "viewedAt"]),
+  // 台帳の画像の指示文の閲覧(Task 7)。sale_dm_lp_image_prompt_view と同じキー集合
+  // (campaignId は台帳に無いので載せない。slot/viewedAt のみ)。
+  sale_dm_scenario_lp_image_prompt_view: new Set(["slot", "viewedAt"]),
 };
 
 /**

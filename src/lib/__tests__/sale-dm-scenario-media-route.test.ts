@@ -145,10 +145,10 @@ describe("PUT /scenarios/[id]/media(台帳の写真と図の保存)", () => {
     expect(pm.dmScenarioMedia.deleteMany).not.toHaveBeenCalled();
   });
 
-  it("削除済みの写真は 409 ASSET_NOT_FOUND(発送版と同じコード名)", async () => {
+  it("削除済みの写真は 422 ASSET_NOT_FOUND(発送版のlp-variants/[lpId]/mediaと同じ状態・コード)", async () => {
     pm.dmLpAsset.findMany.mockResolvedValue([{ id: U1 }]);
     const res = await put(okPlan);
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(422);
     expect((await res.json()).error.code).toBe("ASSET_NOT_FOUND");
     expect(pm.dmScenarioMedia.deleteMany).not.toHaveBeenCalled();
   });
