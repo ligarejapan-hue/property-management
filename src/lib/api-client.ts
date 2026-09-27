@@ -764,6 +764,14 @@ export async function fetchSaleDmScenarioOptions(): Promise<SaleDmScenarioOption
   return (await apiFetch<{ scenarios: SaleDmScenarioOption[] }>(`${SCENARIO_BASE}/options`)).scenarios;
 }
 
+/** 「使わない」・削除済みも含めた見出し情報(変更履歴で過去の値を名前で出す用)。中身は含まない。 */
+export type SaleDmScenarioOptionAll = SaleDmScenarioOption & { active: boolean; deleted: boolean };
+
+export async function fetchSaleDmScenarioOptionsAll(): Promise<SaleDmScenarioOptionAll[]> {
+  if (USE_MOCK) { await mockDelay(); return []; }
+  return (await apiFetch<{ scenarios: SaleDmScenarioOptionAll[] }>(`${SCENARIO_BASE}/options?includeInactive=1`)).scenarios;
+}
+
 export async function fetchSaleDmScenarios(): Promise<SaleDmScenarioSummary[]> {
   if (USE_MOCK) { await mockDelay(); return []; }
   return (await apiFetch<{ scenarios: SaleDmScenarioSummary[] }>(SCENARIO_BASE)).scenarios;
@@ -827,15 +835,14 @@ export async function saveSaleDmScenarioTemplate(
 }
 
 /**
- * 「写真と図」「プレビュー」の共用部品(LpMediaPanel/LpPreviewPanel)の呼び先。
- * 発送のLP型と台帳のLPの両方を同じ部品で扱うため、部品は呼び先をこの形で受け取る。
+ * 「写真と図」の共用部品(LpMediaPanel)の呼び先。発送のLP型と台帳のLPの両方を同じ部品で
+ * 扱うため、部品は呼び先をこの形で受け取る(プレビューの URL は LpPreviewPanel へ別に渡す)。
  * ⚠呼び出し側は useMemo で固定して渡すこと(LpMediaPanel は api が変わるたびに読み直す)。
  */
 export type LpMediaApi = {
   load: () => Promise<SaleDmLpMediaResponse>;
   save: (plan: SaleDmLpMediaPlan) => Promise<{ assetCount: number; figureCount: number }>;
   imagePrompt: (q: { slot: "hero" | "section"; heading?: string; style: "photo" | "illustration" | "flat" }) => Promise<{ prompt: string }>;
-  previewUrl: (device: "sp" | "pc") => string;
 };
 
 export function campaignLpMediaApi(campaignId: string, lpId: string): LpMediaApi {
@@ -843,7 +850,6 @@ export function campaignLpMediaApi(campaignId: string, lpId: string): LpMediaApi
     load: () => fetchSaleDmLpMedia(campaignId, lpId),
     save: (plan) => saveSaleDmLpMedia(campaignId, lpId, plan),
     imagePrompt: (q) => fetchSaleDmLpImagePrompt(campaignId, lpId, q),
-    previewUrl: (device) => LP_PREVIEW_URL(campaignId, lpId, device),
   };
 }
 
@@ -872,7 +878,6 @@ export function scenarioLpMediaApi(scenarioId: string): LpMediaApi {
       if (q.heading) p.set("heading", q.heading);
       return apiFetch<{ prompt: string }>(`${SCENARIO_BASE}/${scenarioId}/image-prompt?${p.toString()}`);
     },
-    previewUrl: (device) => SCENARIO_PREVIEW_URL(scenarioId, device),
   };
 }
 

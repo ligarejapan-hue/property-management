@@ -13,11 +13,15 @@ export async function requireScenarioAdmin() {
   return { session };
 }
 
-/** 種類の選択肢=物件を編集できる人(物件の欄)か売却DMを使える人(発送の既定)。中身は返さない。 */
+/**
+ * 種類の選択肢=物件を見られる人/編集できる人(物件の欄・変更履歴)か売却DMを使える人(発送の既定)。中身は返さない。
+ * property:read も可(controller ruling・Task 9 review): 種類の名前は機微ではなく、物件詳細の
+ * 「DMの種類」欄や変更履歴で名前を出すのに、物件を見られる全員が要る。
+ */
 export async function requireScenarioOptionsAccess() {
   const session = await getApiSession();
   const perms = await getUserPermissions(session.id);
-  if (hasPermission(perms, "property", "write")) return { session };
+  if (hasPermission(perms, "property", "read") || hasPermission(perms, "property", "write")) return { session };
   const dm = await checkSaleDmAccessFor(session.id);
   if (dm.ok) return { session };
   throw new ApiError(403, "権限がありません", "FORBIDDEN");

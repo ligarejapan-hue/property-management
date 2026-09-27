@@ -1,5 +1,20 @@
 import { resolveScenario, type ScenarioRow } from "@/lib/sale-dm-letter/scenario-resolve";
-import type { SaleDmScenarioOption } from "@/lib/api-client";
+import type { SaleDmScenarioOption, SaleDmScenarioOptionAll } from "@/lib/api-client";
+
+/**
+ * 変更履歴の「DMの種類」の値(台帳の id か null)を名前にする(設計 §3.4・Task 9 review)。純関数。
+ * all は `?includeInactive=1` の一覧(使わない・削除済みも含む)。まだ読めていなければ null。
+ * id そのものは画面に出さない。
+ */
+export function dmScenarioHistoryLabel(value: string | null, all: SaleDmScenarioOptionAll[] | null): string {
+  if (!value) return "自動";
+  if (!all) return "(読み込み中)";
+  const s = all.find((x) => x.id === value);
+  if (!s) return "(削除された種類)";
+  if (s.deleted) return `${s.name}(削除された種類)`;
+  if (!s.active) return `${s.name}(使わない)`;
+  return s.name;
+}
 
 export const DM_SCENARIO_UNAVAILABLE_LABEL = "(使えなくなった種類)自動に戻してください";
 export const DM_SCENARIO_AUTO_FALLBACK_LABEL = "自動(発送のときに選ぶ既定の種類)";

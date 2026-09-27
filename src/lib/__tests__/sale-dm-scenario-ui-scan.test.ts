@@ -8,7 +8,23 @@ describe("DMの種類の画面(設計 §3.6)", () => {
     for (const f of ["src/components/sale-dm/lp-media-panel.tsx", "src/components/sale-dm/lp-preview-panel.tsx"]) {
       const src = read(f);
       expect(src, f).not.toMatch(/fetchSaleDmLpMedia|saveSaleDmLpMedia|fetchSaleDmLpImagePrompt|LP_PREVIEW_URL|campaignId/);
+      // 発送の口の URL を部品に直書きしない(Task 9 review Minor 5)。
+      expect(src, f).not.toContain("/campaigns/");
     }
+  });
+  it("LpMediaApi はプレビューの URL を持たない(プレビューは LpPreviewPanel へ別に渡す・Task 9 review Minor 3)", () => {
+    const src = read("src/lib/api-client.ts");
+    const m = src.match(/export type LpMediaApi = \{[\s\S]*?\n\};/);
+    expect(m).not.toBeNull();
+    expect(m![0]).not.toContain("previewUrl");
+  });
+  it("変更履歴の「DMの種類」は id を名前に直して出す(使わない・削除済みも含む一覧を使う・設計 §3.4)", () => {
+    const src = read("src/components/properties/history-tab.tsx");
+    expect(src).toMatch(/dmScenarioHistoryLabel\(/);
+    expect(src).toMatch(/fetchSaleDmScenarioOptionsAll\(/);
+  });
+  it("追加の指示は前後の空白を落として送る(Task 9 review Minor 4)", () => {
+    expect(read("src/components/sale-dm/scenario-text-editor.tsx")).toMatch(/extraInstruction: extra\.trim\(\)/);
   });
   it("サイドバーに「DMの種類」(管理者のみ)", () => {
     expect(read("src/components/layout/sidebar-model.tsx")).toMatch(/label:\s*"DMの種類",\s*href:\s*"\/admin\/dm-scenarios"[^}]*minRole:\s*"admin"/);

@@ -57,6 +57,13 @@ export default function ScenarioTextEditor({
   const [prompt, setPrompt] = useState<{ prompt: string; digest: string; bodyDigest: string } | null>(null);
   const [paste, setPaste] = useState("");
   const [extra, setExtra] = useState(scenario.extraInstruction ?? "");
+  // 台帳を読み直したら(保存・別の画面での変更)、欄を保存済みの値に揃える
+  // (描画中に前回の値と比べて更新する React の推奨形。effect で setState しない)。
+  const [syncedExtra, setSyncedExtra] = useState(scenario.extraInstruction);
+  if (syncedExtra !== scenario.extraInstruction) {
+    setSyncedExtra(scenario.extraInstruction);
+    setExtra(scenario.extraInstruction ?? "");
+  }
 
   const currentBody = kind === "letter" ? scenario.letterBodyTemplate : scenario.lpRawTemplate;
   const settings = SETTINGS[kind];
@@ -173,7 +180,7 @@ export default function ScenarioTextEditor({
               variant="secondary"
               size="sm"
               disabled={busy || extra.trim() === (scenario.extraInstruction ?? "")}
-              onClick={() => void saveSetting({ extraInstruction: extra })}
+              onClick={() => void saveSetting({ extraInstruction: extra.trim() })}
             >
               追加の指示を保存
             </Button>
