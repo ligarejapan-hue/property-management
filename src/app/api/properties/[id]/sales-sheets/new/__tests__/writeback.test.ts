@@ -659,6 +659,29 @@ describe("POST /sales-sheets/new — 物件への保存", () => {
     expect(updateManyMock.mock.calls[0][0].data).toMatchObject({ layoutType: "3LDK" });
     expect((await res.json()).propertyWriteback.saved).toEqual(["間取り"]);
   });
+
+  // @codex P2(#448): 窓口の入口(mansionOverridesSchema)が物件の上限(50字)で切っていると、
+  // 51字以上の間取り・向きは「長すぎる」の知らせに届く前に図面の作成ごと400になる。
+  // 図面は作り、物件への保存だけを見送って知らせる(交通と同じ扱い)。
+  it("区分の間取り・向きが物件の上限(50字)を超えても図面は作り、物件へは保存せず「長すぎる」で知らせる", async () => {
+    propertyFindMock.mockResolvedValue(baseMansion);
+    const res = await POST(
+      req({ layout: "あ".repeat(51), balconyDir: "南".repeat(51), price: "3480", propertyVersion: 1 }),
+      ctx,
+    );
+    expect(res.status).toBe(201);
+    expect(designCreateMock).toHaveBeenCalledTimes(1);
+    const json = await res.json();
+    expect(json.propertyWriteback).toMatchObject({
+      saved: ["価格"],
+      unreadable: [],
+      tooLong: ["間取り", "バルコニー向き"],
+      conflict: false,
+    });
+    const data = updateManyMock.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty("layoutType");
+    expect(data).not.toHaveProperty("orientation");
+  });
 });
 
 // [Task10 C-1] 最初の findUnique(document組み立て用)の select に F3 の16列(+棟の

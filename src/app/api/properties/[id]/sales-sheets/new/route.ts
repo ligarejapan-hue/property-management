@@ -127,8 +127,11 @@ const mansionOverridesSchema = z.object({
   // exclusiveArea/balconyArea/balconyDir/layout/floorNo も同様(上記コメント参照)。
   exclusiveArea: z.string().max(200).optional(),
   balconyArea: z.string().max(200).optional(),
-  balconyDir: z.string().max(50).optional(),
-  layout: z.string().max(50).optional(),
+  // ⚠物件の列の上限(50字)で切らない(@codex P2 #448)。ここで切ると、51字以上は
+  //   図面の作成ごと断られる。図面は作り、物件への保存だけを見送って知らせる
+  //   (buildWriteback の tooLong・交通と同じ扱い)。上限はほかの自由記述の欄にそろえる。
+  balconyDir: z.string().max(200).optional(),
+  layout: z.string().max(200).optional(),
   floorNo: z.string().max(50).optional(),
   basementFloors: z.string().max(50).optional(),
   builtYearMonth: z.string().max(100).optional(),
