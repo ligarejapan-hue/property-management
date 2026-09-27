@@ -13,6 +13,7 @@ import {
 import { TONE_OPTIONS, LENGTH_OPTIONS, APPEAL_OPTIONS, STRENGTH_OPTIONS } from "@/lib/sale-dm-letter/adjust-model";
 import LpMediaPanel from "./lp-media-panel";
 import LpPreviewPanel from "./lp-preview-panel";
+import { AiTextSteps } from "@/components/sale-dm/ai-text-steps";
 
 const DEFAULT_OPTIONS: SaleDmLpVariantOptions = { tone: "formal", length: "medium", appeal: "price", strength: "low" };
 type FormState = { label: string; options: SaleDmLpVariantOptions };
@@ -114,11 +115,14 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
       );
     }, true);
 
+  // 手順の案内が光らせる書類のアイコン: 文章がまだのLP型(無ければ先頭)。
+  const lpGuideIndex = Math.max(0, campaign.lpVariants.findIndex((v) => !v.headline));
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-gray-700">LP型(ご案内ページの A/B)</h3>
-        <button type="button" onClick={startNew} disabled={busy} className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+        <button type="button" onClick={startNew} disabled={busy} data-guide="add_lp" className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
           <Plus className="h-3.5 w-3.5" /> LP型を追加
         </button>
       </div>
@@ -128,7 +132,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
       {error && <p className="text-xs text-red-600">{error}</p>}
 
       <ul className="space-y-1">
-        {campaign.lpVariants.map((v) => (
+        {campaign.lpVariants.map((v, i) => (
           <li key={v.id} className="flex items-center justify-between rounded border border-gray-200 px-2 py-1.5 text-xs">
             <div>
               <span className="font-medium text-gray-700">{v.label}</span>
@@ -136,7 +140,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
               {v.headline ? <span className="ml-2 text-gray-500">「{v.headline}」</span> : <span className="ml-2 text-amber-700">文章なし</span>}
             </div>
             <div className="flex gap-1">
-              <button type="button" onClick={() => openLetter(v)} disabled={busy} aria-label={`LP型「${v.label}」の文章`} title="プロンプトを表示して、手元のAIで作った文章を貼り付けます" className="rounded p-1 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"><FileText className="h-3.5 w-3.5" /></button>
+              <button type="button" onClick={() => openLetter(v)} disabled={busy} data-guide={i === lpGuideIndex ? "lp_text" : undefined} aria-label={`LP型「${v.label}」の文章`} title="プロンプトを表示して、手元のAIで作った文章を貼り付けます" className="rounded p-1 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"><FileText className="h-3.5 w-3.5" /></button>
               <button type="button" onClick={() => openMedia(v)} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」の写真と図`} title={v.headline ? "写真と図" : "先に文章を保存してください"} className="rounded p-1 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><ImageIcon className="h-3.5 w-3.5" /></button>
               <button type="button" onClick={() => openPreview(v)} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」のプレビュー`} title={v.headline ? "プレビュー" : "先に文章を保存してください"} className="rounded p-1 text-sky-700 hover:bg-sky-50 disabled:opacity-50"><Eye className="h-3.5 w-3.5" /></button>
               <button type="button" onClick={() => startEdit(v)} disabled={busy} aria-label={`LP型「${v.label}」を編集`} className="rounded p-1 text-gray-600 hover:bg-gray-100 disabled:opacity-50"><Pencil className="h-3.5 w-3.5" /></button>
@@ -173,7 +177,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
           ))}
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setEditing(null)} disabled={busy} className="rounded border border-gray-300 bg-white px-2.5 py-1 text-gray-600 hover:bg-gray-50 disabled:opacity-50">キャンセル</button>
-            <button type="button" onClick={submit} disabled={busy || form.label.trim().length === 0} className="inline-flex items-center gap-1 rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-50">
+            <button type="button" onClick={submit} disabled={busy || form.label.trim().length === 0} data-guide={editing === "new" ? "add_lp_save" : undefined} className="inline-flex items-center gap-1 rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-50">
               {busy && <Loader2 className="h-3 w-3 animate-spin" />} 保存
             </button>
           </div>
@@ -191,14 +195,15 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
           ) : (
             <>
               {letter.frozen && <p className="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-800">このLP型には送付の実績がありますが、文章がまだ保存されていません。最初の1回だけ登録できます。</p>}
-              <p className="mt-2 text-gray-600">下の指示文をコピーして、お手元のAIに貼り付けてください。返ってきた文章(【見出し】〜【よくある質問】まで)をそのまま下の欄に貼り付けて保存します。</p>
+              <AiTextSteps saveLabel="文章を保存" />
+              <p className="mt-1 text-gray-500">返ってきた文章は【見出し】〜【よくある質問】までをそのまま貼ります。</p>
               <div className="mt-1.5 flex items-start gap-2">
                 <pre className="max-h-40 flex-1 overflow-auto whitespace-pre-wrap rounded border border-gray-200 bg-white p-2 text-[11px] leading-relaxed text-gray-700">{letter.prompt}</pre>
                 <button type="button" onClick={copyPrompt} disabled={busy} className="flex items-center gap-1 rounded border border-indigo-300 bg-white px-2 py-1 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"><Copy className="h-3.5 w-3.5" />コピー</button>
               </div>
               <textarea value={pasteBody} onChange={(e) => setPasteBody(e.target.value)} placeholder="ここに、お手元のAIで作った文章を貼り付けてください(【見出し】から始まります)" rows={10} className="mt-2 w-full rounded-md border border-gray-300 px-2 py-1 text-sm" />
               <div className="mt-1.5 flex justify-end gap-2">
-                <button type="button" onClick={saveTemplate} disabled={busy} className="rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-50">文章を保存</button>
+                <button type="button" onClick={saveTemplate} disabled={busy} data-guide="lp_text_save" className="rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-50">文章を保存</button>
               </div>
             </>
           )}

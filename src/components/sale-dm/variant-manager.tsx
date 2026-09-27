@@ -19,6 +19,7 @@ import {
   APPEAL_OPTIONS,
   STRENGTH_OPTIONS,
 } from "@/lib/sale-dm-letter/adjust-model";
+import { AiTextSteps } from "@/components/sale-dm/ai-text-steps";
 
 const DEFAULT_OPTIONS: SaleDmVariantOptions = {
   designTemplate: "formal",
@@ -238,7 +239,7 @@ export default function SaleDmVariantManager({
       {error && <p className="text-xs text-red-600">{error}</p>}
 
       <ul className="space-y-1">
-        {campaign.variants.map((v) => (
+        {campaign.variants.map((v, i) => (
           <li key={v.id} className="flex items-center justify-between rounded border border-gray-200 px-2 py-1.5 text-xs">
             <div>
               <span className="font-medium text-gray-700">{v.label}</span>
@@ -251,6 +252,8 @@ export default function SaleDmVariantManager({
                 type="button"
                 onClick={() => openLetter(v)}
                 disabled={busy}
+                // 手順の案内(step-guide)が光らせる目印。先頭の型に付ける。
+                data-guide={i === 0 ? "dm_body" : undefined}
                 aria-label={`型「${v.label}」の文面`}
                 title="プロンプトを表示して、手元のAIで作った本文を貼り付けます"
                 className="rounded p-1 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
@@ -315,9 +318,7 @@ export default function SaleDmVariantManager({
                   この型には送付の実績がありますが、文面がまだ保存されていません。最初の1回だけ登録できます（登録済みの宛先の文面は変わりません）。
                 </p>
               )}
-              <p className="mt-2 text-gray-600">
-                下の指示文をコピーして、お手元のAIに貼り付けてください。できた本文をこの下の欄に貼り付けて保存します。
-              </p>
+              <AiTextSteps saveLabel="本文を保存" />
               <div className="mt-1.5 flex items-start gap-2">
                 <pre className="max-h-40 flex-1 overflow-auto whitespace-pre-wrap rounded border border-gray-200 bg-white p-2 text-[11px] leading-relaxed text-gray-700">
                   {letter.prompt}
@@ -352,6 +353,7 @@ export default function SaleDmVariantManager({
                 type="button"
                 onClick={saveTemplate}
                 disabled={busy}
+                data-guide="dm_body_save"
                 className="rounded bg-indigo-600 px-2.5 py-1 text-white hover:bg-indigo-700 disabled:opacity-50"
               >
                 本文を保存
@@ -360,6 +362,7 @@ export default function SaleDmVariantManager({
                 type="button"
                 onClick={() => applyTemplate(false)}
                 disabled={busy}
+                data-guide="apply"
                 className="rounded border border-indigo-300 bg-white px-2.5 py-1 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
               >
                 この型の全宛先に適用
@@ -408,6 +411,7 @@ export default function SaleDmVariantManager({
           type="button"
           onClick={autoAssign}
           disabled={busy || campaign.variants.length === 0}
+          data-guide="assign"
           className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
         >
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}

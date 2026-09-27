@@ -22,6 +22,8 @@ import SaleDmLpVariantManager from "@/components/sale-dm/lp-variant-manager";
 import SaleDmRecipientList from "@/components/sale-dm/recipient-list";
 import SaleDmAggregateView from "@/components/sale-dm/aggregate-view";
 import SaleDmInquiryList from "@/components/sale-dm/inquiry-list";
+import { SaleDmStepGuide } from "@/components/sale-dm/step-guide";
+import { computeSaleDmGuideStep } from "@/lib/sale-dm-letter/step-guide";
 
 export default function SaleDmWorkspacePage() {
   const params = useParams<{ campaignId: string }>();
@@ -102,6 +104,23 @@ export default function SaleDmWorkspacePage() {
   const confirmedIds = useMemo(
     () => (campaign?.recipients ?? []).filter((r) => r.status === "confirmed").map((r) => r.id),
     [campaign],
+  );
+
+  // 手順の案内: 「印刷」はデータに残らないので、この画面で印刷を押したときの確定済みの顔ぶれを覚える。
+  // 顔ぶれが変わった(新たに確定した)ら、もう一度印刷の段に戻す。
+  const confirmedSig = confirmedIds.join(",");
+  const [printedFor, setPrintedFor] = useState<string | null>(null);
+  const guideState = useMemo(
+    () =>
+      campaign
+        ? computeSaleDmGuideStep({
+            recipients: campaign.recipients,
+            variants: campaign.variants,
+            lpVariants: campaign.lpVariants,
+            printed: printedFor !== null && printedFor === confirmedSig,
+          })
+        : "no_recipients",
+    [campaign, printedFor, confirmedSig],
   );
 
   // 操作を実行 → 再取得(状態を最新化)。失敗はエラー表示。
@@ -185,6 +204,9 @@ export default function SaleDmWorkspacePage() {
         </div>
       )}
 
+      {/* 手順の案内(次に押すボタンを光らせる・発注者決定 2026-09-27)。 */}
+      <SaleDmStepGuide state={guideState} />
+
       {/* 送付フロー: 確定(draft→confirmed)→ 印刷/CSV → 送付済み(confirmed→sent・反響入力解禁) */}
       <div className="flex flex-wrap items-center gap-2">
         {draftIds.length > 0 && (
@@ -192,6 +214,7 @@ export default function SaleDmWorkspacePage() {
             type="button"
             onClick={() => runAction(() => confirmSaleDmDrafts(draftIds))}
             disabled={actionBusy}
+            data-guide="confirm"
             className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             title="下書きを確定する(印刷対象は確定済みのみ)"
           >
@@ -201,8 +224,12 @@ export default function SaleDmWorkspacePage() {
         )}
         <button
           type="button"
-          onClick={() => window.open(saleDmPrintUrl(campaignId), "_blank", "noopener")}
+          onClick={() => {
+            if (confirmedIds.length > 0) setPrintedFor(confirmedSig);
+            window.open(saleDmPrintUrl(campaignId), "_blank", "noopener");
+          }}
           disabled={actionBusy}
+          data-guide="print"
           className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           title="確定済みの手紙を別タブで開いて印刷"
         >
@@ -224,6 +251,7 @@ export default function SaleDmWorkspacePage() {
             type="button"
             onClick={() => runAction(() => markConfirmedSentBulk(confirmedIds))}
             disabled={actionBusy}
+            data-guide="sent"
             className="inline-flex items-center gap-1.5 rounded-md border border-green-300 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
             title="確定済みを送付済みにする(配達結果・反響の入力が解禁)"
           >

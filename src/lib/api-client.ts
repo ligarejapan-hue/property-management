@@ -308,6 +308,8 @@ export interface SaleDmVariant {
   extraInstruction: string | null;
   // 型ごとのLP(印刷QRの遷移先)。null=既定 SALE_DM_LP_URL へ。
   lpUrl: string | null;
+  // 貼り付けて保存した本文の原本(宛先へ「適用」する元)。手順の案内が「本文を入れたか」を見る。
+  bodyTemplate?: string | null;
 }
 
 export interface SaleDmLpVariantOptions {

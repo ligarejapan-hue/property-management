@@ -1,0 +1,73 @@
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { SaleDmStepGuide } from "../../components/sale-dm/step-guide";
+import { AiTextSteps } from "../../components/sale-dm/ai-text-steps";
+import { SALE_DM_GUIDE_STEPS, guideTargetCandidates } from "../sale-dm-letter/step-guide";
+
+const dir = dirname(fileURLToPath(import.meta.url));
+const read = (rel: string) => readFileSync(join(dir, rel), "utf8").replace(/\r\n/g, "\n");
+const PAGE = read("../../app/(dashboard)/properties/sale-dm/[campaignId]/page.tsx");
+const DM = read("../../components/sale-dm/variant-manager.tsx");
+const LP = read("../../components/sale-dm/lp-variant-manager.tsx");
+const GUIDE = read("../../components/sale-dm/step-guide.tsx");
+
+describe("手順の案内の帯(サーバー描画=案内は既定で出る)", () => {
+  it("いまの段を「次にやること」として出し、手順の並びと「案内を消す」がある", () => {
+    const html = renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "assign" }));
+    expect(html).toContain("次にやること");
+    expect(html).toContain("均等に割り当て");
+    expect(html).toContain("案内を消す");
+    expect(html).toContain("光っているボタンへ移動");
+    // 済んだ段は ✓、いまの段は aria-current
+    expect(html).toContain("✓ LP型を作る");
+    expect(html).toMatch(/aria-current="step"[^>]*>4\. 均等に割り当て/);
+  });
+
+  it("宛先0件・全部送付済みは、手順の並びの代わりに一文", () => {
+    expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "no_recipients" }))).toContain("宛先がありません");
+    expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "done" }))).toContain("すべて送付済みです");
+  });
+
+  it("「案内を消す」はこの端末に覚える(localStorage・読み書きの失敗は握って画面を止めない)", () => {
+    expect(GUIDE).toContain('localStorage.setItem(STORAGE_KEY, "1")');
+    expect(GUIDE).toMatch(/try \{\s*return window\.localStorage\.getItem/);
+  });
+
+  it("順番の違うボタンは止めずに(preventDefault しない)、先にやることを一言出す", () => {
+    expect(GUIDE).toContain("isAheadOfGuide(key, state)");
+    expect(GUIDE).toContain("先に「");
+    expect(GUIDE).not.toContain("preventDefault");
+  });
+});
+
+describe("光らせるボタンの目印(data-guide)が画面にそろっている", () => {
+  const all = PAGE + DM + LP;
+  it.each(SALE_DM_GUIDE_STEPS.flatMap((s) => guideTargetCandidates(s.key)))("%s", (key) => {
+    expect(all).toMatch(new RegExp(`data-guide(=\\{[^}]*)?[="]+${key}"`));
+  });
+  it("案内をページに組み込み、段は画面のデータから決める", () => {
+    expect(PAGE).toContain("<SaleDmStepGuide state={guideState} />");
+    expect(PAGE).toContain("computeSaleDmGuideStep(");
+  });
+  it("印刷を押したときの確定済みの顔ぶれを覚え、新たに確定したら印刷の段に戻す", () => {
+    expect(PAGE).toContain("setPrintedFor(confirmedSig)");
+    expect(PAGE).toContain("printedFor === confirmedSig");
+  });
+});
+
+describe("AIで文章を作る手順(発注者決定: 案内に入れる)", () => {
+  it("3つの手順を、保存ボタンの名前つきで出す", () => {
+    const html = renderToStaticMarkup(createElement(AiTextSteps, { saveLabel: "本文を保存" }));
+    expect(html).toContain("① 下の指示文を「コピー」");
+    expect(html).toContain("② お手元のAI");
+    expect(html).toContain("「本文を保存」");
+  });
+  it("お手紙の本文とLP型の文章の両方の枠に出す", () => {
+    expect(DM).toContain('<AiTextSteps saveLabel="本文を保存" />');
+    expect(LP).toContain('<AiTextSteps saveLabel="文章を保存" />');
+  });
+});
