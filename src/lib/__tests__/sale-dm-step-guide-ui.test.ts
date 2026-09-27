@@ -81,6 +81,12 @@ describe("光らせるボタンの目印(data-guide)が画面にそろってい�
     expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "print" }))).not.toContain("印刷できた");
     expect(renderToStaticMarkup(createElement(SaleDmStepGuide, { state: "confirm", onPrintConfirmed: () => {} }))).not.toContain("印刷できた");
   });
+  it("印刷済みの顔ぶれは印刷に出る確定済み(拒否・宛先不明を除く)で作る(@codex #449 R6)", () => {
+    expect(PAGE).toContain('.filter((r) => r.status === "confirmed" && !r.terminalExcluded)');
+  });
+  it("目印(data-guide)が別のボタンへ移っても光りを付け直す(属性の変化も見る・@codex #449 R6)", () => {
+    expect(GUIDE).toContain('attributeFilter: ["data-guide"]');
+  });
   it("「確定」に拒否・宛先不明の宛先を入れない(1件でも含むとまとめて断られる・@codex #449 R5)", () => {
     expect(PAGE).toContain('.filter((r) => r.status === "draft" && r.body !== "" && !r.terminalExcluded)');
   });

@@ -115,7 +115,16 @@ export default function SaleDmWorkspacePage() {
   // (設定不足の503・ポップアップの遮断など)。そこで印刷を押しただけでは進めず、帯の「印刷できた」を
   // 押したときの確定済みの顔ぶれを覚える(@codex #449 R1 P1: 失敗した印刷のまま送付済みへ進ませない)。
   // 顔ぶれが変わった(新たに確定した)ら、もう一度印刷の段に戻す。
-  const confirmedSig = confirmedIds.join(",");
+  // 顔ぶれは「印刷に出る」確定済み(拒否・宛先不明を除く)で作る。印刷に出なかった宛先が後から出るように
+  // なったら、もう一度印刷の段に戻す(@codex #449 R6)。
+  const confirmedSig = useMemo(
+    () =>
+      (campaign?.recipients ?? [])
+        .filter((r) => r.status === "confirmed" && !r.terminalExcluded)
+        .map((r) => r.id)
+        .join(","),
+    [campaign],
+  );
   const [printedFor, setPrintedFor] = useState<string | null>(null);
   const [printClickedFor, setPrintClickedFor] = useState<string | null>(null);
   // 「LP型を使わずに進む」(このキャンペーンについて・この端末に覚える)。LP型が1つも無いときだけ効く。
@@ -261,7 +270,7 @@ export default function SaleDmWorkspacePage() {
         <button
           type="button"
           onClick={() => {
-            if (confirmedIds.length > 0) setPrintClickedFor(confirmedSig);
+            if (confirmedSig !== "") setPrintClickedFor(confirmedSig);
             window.open(saleDmPrintUrl(campaignId), "_blank", "noopener");
           }}
           disabled={actionBusy}

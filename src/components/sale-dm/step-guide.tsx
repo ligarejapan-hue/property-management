@@ -124,7 +124,9 @@ export function SaleDmStepGuide({
     };
     schedule();
     const mo = new MutationObserver(schedule);
-    mo.observe(document.body, { childList: true, subtree: true });
+    // 同じ段のまま目印(data-guide)だけが別の型のボタンへ移ることがある=属性の変化も見る(@codex #449 R6)。
+    // ⚠光らせる class の付け外しは見ない(attributeFilter で data-guide だけ)=自分の書き込みで回り続けない。
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-guide"] });
     window.addEventListener("resize", schedule);
     window.addEventListener("scroll", schedule, true);
     return () => {
