@@ -498,6 +498,8 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   sale_dm_scenario_letter_template: new Set(["length"]),
   // 台帳のLPの原本(貼り戻し)保存(Task 6)。文字数と節数だけ・本文・見出しは載せない。
   sale_dm_scenario_lp_template: new Set(["length", "sectionCount"]),
+  // 台帳の写真と図の枠の保存(Task 7)。件数だけ・見出し・ラベルは載せない。
+  sale_dm_scenario_media_update: new Set(["assetCount", "figureCount"]),
 };
 
 /**

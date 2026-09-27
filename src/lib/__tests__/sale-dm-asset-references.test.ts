@@ -26,8 +26,7 @@ describe("写真の使用中判定(設計 §3.1)", () => {
       "src/app/api/properties/sale-dm/scenarios/[id]/media/route.ts",
     ];
     for (const f of files) {
-      let src: string;
-      try { src = readFileSync(join(process.cwd(), f), "utf8"); } catch { continue; } // 台帳の media は Task 7 で作られる
+      const src = readFileSync(join(process.cwd(), f), "utf8");
       expect(src, f).not.toMatch(/_count\.media\b|_count:\s*\{\s*select:\s*\{\s*media:\s*true\s*\}\s*\}|dmLpVariantMedia\.count\(/);
     }
   });
