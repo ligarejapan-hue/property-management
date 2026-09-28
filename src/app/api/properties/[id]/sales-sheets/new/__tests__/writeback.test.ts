@@ -770,6 +770,29 @@ describe("POST /sales-sheets/new — 図面への読み戻し(C-1)", () => {
     expect(documentTableRow("うち消費税")).toBe("300万円");
   });
 
+  // @codex P1(#452): 棟が無くても物件名(buildingName)がある区分は多い。物件名を仮の棟として
+  // 包んで渡すと「棟あり」と判断され、物件の5項目が空の棟の値で上書きされていた。
+  it("区分マンション(棟なし・物件名あり): 物件に保存済みの5項目が図面に出る(物件名を棟と取り違えない)", async () => {
+    propertyFindMock.mockResolvedValue({
+      ...baseMansion,
+      building: null,
+      buildingName: "リガーレ西荻",
+      structureType: "RC",
+      aboveFloors: 11,
+      basementFloors: 1,
+      totalUnits: 48,
+      builtYear: 2008,
+      builtMonth: 3,
+    });
+    const res = await POST(req({ propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    expect(documentTableRow("建物構造")).toBe("RC");
+    expect(documentTableRow("地下階")).toBe("1階");
+    expect(documentTableRow("総戸数")).toBe("48戸");
+    expect(documentTableRow("築年月")).toBe("2008年3月");
+    expect(documentTableRow("所在階・階数")).toBe("地上11階");
+  });
+
   it("区分マンション(棟なし): 物件に保存済みの構造・地上階・地下階・総戸数・築年月が図面に出る", async () => {
     propertyFindMock.mockResolvedValue({
       ...baseMansion,

@@ -475,26 +475,28 @@ export async function POST(
           totalUnits: property.totalUnits,
           builtYear: property.builtYear,
           builtMonth: property.builtMonth,
+          // ⚠**建物マスタが無くても物件名だけは渡す** (@codex #354 P2)。
+          // 建物マスタを作らずに登録した区分マンションはこちらにしか名前が無い。
+          buildingName: property.buildingName,
         },
-        // ⚠**建物マスタが無くても物件名だけは渡す** (@codex #354 P2)。
-        // 建物マスタを作らずに登録した区分マンションは property.building が
-        // null で、ここを丸ごと null にすると**販売図面の建物名称が空**になる。
-        building:
-          property.building || property.buildingName
-            ? {
-                name: property.building?.name ?? property.buildingName,
-                totalFloors: property.building?.totalFloors ?? null,
-                builtYear: property.building?.builtYear ?? null,
-                // [Task10 C-1] builtYearMonth の月精度を読み戻すために追加。
-                builtMonth: property.building?.builtMonth ?? null,
-                structureType: property.building?.structureType ?? null,
-                managementCompany:
-                  property.building?.managementCompany ?? null,
-                totalUnits: property.building?.totalUnits ?? null,
-                // [Task10 C-1] 地下階(basementFloors)の既定値として読み戻すために追加。
-                basementFloors: property.building?.basementFloors ?? null,
-              }
-            : null,
+        // ⚠`building` は**本当に棟に紐づいているときだけ**渡す(@codex P1 #452)。
+        //   以前は物件名だけの区分も物件名を仮の棟として包んでいたため、「棟あり」と
+        //   判断され、物件の欄に入れた5項目(構造・地上階…)が空の棟の値で上書きされた。
+        //   物件名は上の property.buildingName で渡す。
+        building: property.building
+          ? {
+              name: property.building.name,
+              totalFloors: property.building.totalFloors ?? null,
+              builtYear: property.building.builtYear ?? null,
+              // [Task10 C-1] builtYearMonth の月精度を読み戻すために追加。
+              builtMonth: property.building.builtMonth ?? null,
+              structureType: property.building.structureType ?? null,
+              managementCompany: property.building.managementCompany ?? null,
+              totalUnits: property.building.totalUnits ?? null,
+              // [Task10 C-1] 地下階(basementFloors)の既定値として読み戻すために追加。
+              basementFloors: property.building.basementFloors ?? null,
+            }
+          : null,
         photos,
         overrides: o,
         company,

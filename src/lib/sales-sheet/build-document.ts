@@ -292,6 +292,13 @@ export interface SaleMansionInput {
     totalUnits?: number | null;
     builtYear?: number | null;
     builtMonth?: number | null;
+    /**
+     * 物件そのものに入れた物件名(建物マスタを作らずに登録した区分はこちらにしか名前が
+     * 無い・@codex #354 P2)。棟の名前が無ければこれを建物名称に使う。
+     * ⚠物件名があるだけで `building` を作らないこと(棟ありと判断され、棟の項目が
+     *   物件の欄から読まれなくなる・@codex P1 #452)。
+     */
+    buildingName?: string | null;
   };
   building?: {
     name?: string | null;
@@ -332,7 +339,8 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
     // 価格・費用（unitPriceは手入力のみ）
     // propertyType: 自動反映元なし（DB enum が語彙不一致のため常に手入力=override のみ）。
     propertyType: o.propertyType,
-    buildingName: b.name ?? undefined,
+    // 棟の名前が正。棟に紐づいていなければ物件そのものに入れた物件名(@codex #354 P2)。
+    buildingName: b.name ?? p.buildingName ?? undefined,
     // [Task10 C-1] price/tax/taxAmount/access/parking は override優先、無ければ物件の
     // 既定値(手入力 > 物件の値 > 空・house/land/building と同じ形)。
     price: pick(o.price, p.salePrice),
