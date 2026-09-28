@@ -16,7 +16,7 @@ vi.mock("@/lib/api-helpers", () => {
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
-    dmCampaign: { findFirst: vi.fn() },
+    dmCampaign: { findFirst: vi.fn(), findUnique: vi.fn() },
     dmVariant: { findMany: vi.fn(), updateMany: vi.fn(async () => ({ count: 0 })) },
     dmLpVariant: { findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({ count: 0 })) },
     dmRecipientDraft: { findMany: vi.fn(), updateMany: vi.fn(async () => ({ count: 1 })) },
@@ -35,7 +35,7 @@ import { POST as assign } from "../../app/api/properties/sale-dm/campaigns/[id]/
 
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
-  dmCampaign: { findFirst: Fn };
+  dmCampaign: { findFirst: Fn; findUnique: Fn };
   dmVariant: { findMany: Fn; updateMany: Fn };
   dmLpVariant: { findMany: Fn; updateMany: Fn };
   dmRecipientDraft: { findMany: Fn; updateMany: Fn };
@@ -60,6 +60,7 @@ beforeEach(() => {
   ]);
   (getOwnerDisplayConfig as Fn).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
   pm.dmCampaign.findFirst.mockResolvedValue({ id: "c1" });
+  pm.dmCampaign.findUnique.mockResolvedValue({ defaultScenarioId: null });
   pm.dmVariant.findMany.mockResolvedValue([{ id: "d0" }, { id: "d1" }]);
   pm.dmLpVariant.findMany.mockResolvedValue([{ id: "l0" }, { id: "l1" }]);
   // ⚠`Once` の並びで組まない。途中で 403/409 に落ちるテストが余りを残し、次のテストの

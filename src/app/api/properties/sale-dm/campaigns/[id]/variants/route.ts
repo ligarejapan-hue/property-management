@@ -4,6 +4,7 @@ import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmAccess, requireSaleDmWriteAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmVariantCreateSchema } from "@/lib/validators-sale-dm";
+import { assertNotScenarioCampaign } from "@/lib/sale-dm-letter/scenario-campaign-guard";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -26,9 +27,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { id } = await params;
     const { label, options, lpUrl } = saleDmVariantCreateSchema.parse(await parseJsonBody(request));
 
-    const campaign = await prisma.dmCampaign.findUnique({ where: { id }, select: { id: true, createdBy: true } });
+    const campaign = await prisma.dmCampaign.findUnique({ where: { id }, select: { id: true, createdBy: true, defaultScenarioId: true } });
     // 作成者本人のキャンペーンにのみ型を作成可(横断アクセス防止)。not-found/not-owned は 404。
     if (!campaign || campaign.createdBy !== session.id) throw new ApiError(404, "キャンペーンが見つかりません", "NOT_FOUND");
+    // 種類つきの発送では型の追加を断る(画面を通さず組を壊せてしまうため・設計§3.4)。
+    assertNotScenarioCampaign(campaign);
 
     const variant = await prisma.dmVariant.create({
       data: {

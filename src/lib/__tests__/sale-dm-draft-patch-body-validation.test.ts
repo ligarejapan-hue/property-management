@@ -93,7 +93,7 @@ beforeEach(() => {
     campaignId: "c1",
     status: "confirmed",
     variantId: "vA",
-    campaign: { createdBy: "u1" },
+    campaign: { createdBy: "u1", defaultScenarioId: null },
     property: { createdBy: "u1", assignedTo: null },
   });
   pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
