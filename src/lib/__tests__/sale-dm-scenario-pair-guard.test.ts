@@ -3,9 +3,12 @@
  * 個別APIを叩いて型の割当・追加・削除・写した型の変更をされると、手紙とLPの組が壊れる
  * (設計 2026-09-27 §3.4)。組を書き換えうる既存route 7本すべてで断ることを実測する。
  *
- * ⚠route 名を手で並べない走査を1本持つ(2つ目の describe)。sale-dm 配下で「宛先の
- * variantId/lpVariantId を書き換える」route を正規表現で拾い、一覧が増えたら落ちる
- * (controller ruling: 作成route(campaigns/route.ts) と Task 5 の新route は allow-list)。
+ * ⚠route 名を手で並べない走査を2本持つ(下の「組を書き換えうる7 route はすべて…」と
+ * 「宛先の型の組を書き換える route の機械的な洗い出し」の各 describe)。後者は sale-dm 配下で
+ * 「宛先の variantId/lpVariantId を書き換える」route を正規表現(data書込み・shorthand・生SQL・
+ * 型行そのものの create/delete)で拾い、一覧が増えたら落ちる(controller ruling: 作成route
+ * (campaigns/route.ts) と Task 5 の新route は allow-list)。この2本の正規表現自体の自己検査
+ * (拾いたい形/拾いたくない形)は「正規表現の自己検査」describe に持つ。
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -245,35 +248,112 @@ describe("campaigns/[id]/lp-variants/[lpId] DELETE: 種類つきの発送は型�
 });
 
 // ---- 走査1: 組を書き換えうる route 7本すべてに、いずれかのガード呼び出しがある ----
-describe("組を書き換えうる7 route はすべて共通ガードを呼ぶ", () => {
+// ⚠variants/[variantId] と lp-variants/[lpId] は PATCH/DELETE の2 handler を1ファイルに
+//   持つ(Minor 1)。ファイル全体に「どちらかの文字列がある」だけでは、片方の handler だけに
+//   ガードが残り、もう片方から削れても検査が気づかない。handler ごとに source を切り出し、
+//   PATCH には assertNotScenarioVariant(・DELETE には assertNotScenarioCampaign( を要求する。
+describe("組を書き換えうる7 route はすべて共通ガードを呼ぶ(handler単位)", () => {
   const ROOT = path.resolve(process.cwd(), "src/app/api/properties/sale-dm");
-  const GUARDED_ROUTES = [
-    "src/app/api/properties/sale-dm/drafts/[id]/route.ts",
-    "src/app/api/properties/sale-dm/campaigns/[id]/assign/route.ts",
-    "src/app/api/properties/sale-dm/campaigns/[id]/variants/route.ts",
-    "src/app/api/properties/sale-dm/campaigns/[id]/lp-variants/route.ts",
-    "src/app/api/properties/sale-dm/campaigns/[id]/variants/[variantId]/route.ts",
-    "src/app/api/properties/sale-dm/campaigns/[id]/lp-variants/[lpId]/route.ts",
+  const HANDLER_GUARDS: Array<{ file: string; handler: "PATCH" | "POST" | "DELETE"; guard: string }> = [
+    { file: "src/app/api/properties/sale-dm/drafts/[id]/route.ts", handler: "PATCH", guard: "assertNotScenarioCampaign(" },
+    { file: "src/app/api/properties/sale-dm/campaigns/[id]/assign/route.ts", handler: "POST", guard: "assertNotScenarioCampaign(" },
+    { file: "src/app/api/properties/sale-dm/campaigns/[id]/variants/route.ts", handler: "POST", guard: "assertNotScenarioCampaign(" },
+    { file: "src/app/api/properties/sale-dm/campaigns/[id]/lp-variants/route.ts", handler: "POST", guard: "assertNotScenarioCampaign(" },
+    { file: "src/app/api/properties/sale-dm/campaigns/[id]/variants/[variantId]/route.ts", handler: "PATCH", guard: "assertNotScenarioVariant(" },
+    { file: "src/app/api/properties/sale-dm/campaigns/[id]/variants/[variantId]/route.ts", handler: "DELETE", guard: "assertNotScenarioCampaign(" },
+    { file: "src/app/api/properties/sale-dm/campaigns/[id]/lp-variants/[lpId]/route.ts", handler: "PATCH", guard: "assertNotScenarioVariant(" },
+    { file: "src/app/api/properties/sale-dm/campaigns/[id]/lp-variants/[lpId]/route.ts", handler: "DELETE", guard: "assertNotScenarioCampaign(" },
   ];
+
+  // 指定 handler のソースだけを切り出す(次の export async function の手前まで、無ければ末尾まで)。
+  function handlerSlice(src: string, handler: string): string {
+    const start = src.indexOf(`export async function ${handler}`);
+    if (start === -1) return "";
+    const next = src.indexOf("export async function", start + 1);
+    return next === -1 ? src.slice(start) : src.slice(start, next);
+  }
+
   it("走査対象が実在する(0件なら検査が空振り)", () => {
     expect(readdirSync(ROOT).length).toBeGreaterThan(0);
   });
-  for (const rel of GUARDED_ROUTES) {
-    it(rel, () => {
-      const s = readFileSync(path.resolve(process.cwd(), rel), "utf-8");
-      expect(
-        s.includes("assertNotScenarioCampaign(") || s.includes("assertNotScenarioVariant("),
-        `${rel} が共通ガードを呼んでいない`,
-      ).toBe(true);
+
+  for (const { file, handler, guard } of HANDLER_GUARDS) {
+    it(`${file} ${handler}: ${guard} を呼ぶ`, () => {
+      const src = readFileSync(path.resolve(process.cwd(), file), "utf-8");
+      const slice = handlerSlice(src, handler);
+      expect(slice.length, `${file} に export async function ${handler} が見つからない`).toBeGreaterThan(0);
+      expect(slice.includes(guard), `${file} の ${handler} が ${guard} を呼んでいない`).toBe(true);
     });
   }
 });
 
-// ---- 走査2: 宛先の variantId/lpVariantId を data に書く route を正規表現で拾う ----
+// ---- 走査2で使う正規表現(自己検査でも production の走査でも同じ定数を参照する) ----
+// (a) 宛先の variantId/lpVariantId を data に書く形。明示key・shorthand・`data.xxx = `代入を拾う。
+//     ⚠前方一致のみ(`data` から後ろだけを見る)。`where: { variantId }` のような読み取り専用の
+//     フィルタは、その後ろに(同じ書込み呼び出しの)`data` が続いて初めて拾われる。単体の
+//     `where` だけの行を「書込み」と誤検出しない設計(後述の自己検査で固定)。
+const DATA_KEY_WRITE = /\bdata\s*[:.]\s*\{?[\s\S]{0,200}?\b(variantId|lpVariantId)\b\s*[:,}=]/;
+// (b) 生SQL(`$queryRaw`)で variant_id/lp_variant_id を UPDATE ... SET する形。
+const RAW_SQL_WRITE = /\bUPDATE\b[\s\S]{0,200}?\bSET\b[\s\S]{0,200}?\b(variant_id|lp_variant_id)\b/i;
+// (c) 型の行そのものの作成/削除(dmVariant/dmLpVariant の create・createMany・delete・deleteMany)。
+//     campaigns/** 配下限定(brief指定)。dmLpVariantMedia のような別モデルは拾わない
+//     (`Variant\.` で終端を固定するため `VariantMedia.` は一致しない)。
+const CREATE_DELETE_VARIANT_ROW = /\bdm(Lp)?Variant\.(create|createMany|delete|deleteMany)\b/;
+
+// ---- 正規表現の自己検査(拾いたい形/拾いたくない形を先に固定する) ----
+// レビュー指摘: 「拾わない正規表現」は常に緑になり検査が空振りする。まずサンプル文字列に対して
+// 期待どおり拾える/拾わないことを固定してから、実ファイルの走査に使う。
+describe("正規表現の自己検査(拾いたい形・拾いたくない形)", () => {
+  describe("DATA_KEY_WRITE", () => {
+    const positives = [
+      ["明示key", 'data: { variantId: v1, body: "" }'],
+      ["shorthand(カンマ区切り)", 'data: { variantId, body: "" }'],
+      ["shorthand(閉じ括弧の直前)", "data: { lpVariantId }"],
+      ["data.xxx = 代入", "data.variantId = parsed.variantId;"],
+      ["lpVariantId を null に戻す", "data: { lpVariantId: null }"],
+    ] as const;
+    for (const [name, sample] of positives) {
+      it(`拾う: ${name}`, () => expect(DATA_KEY_WRITE.test(sample)).toBe(true));
+    }
+    const negatives = [
+      ["where だけ(data が無い)", "where: { variantId: v1 }"],
+      ["select だけ(data が無い)", "select: { variantId: true, lpVariantId: true }"],
+      [
+        "where の variantId と無関係な data(where→data の順で、data 側にキーが無い)",
+        "where: { variantId: v1 }, data: { label: x }",
+      ],
+    ] as const;
+    for (const [name, sample] of negatives) {
+      it(`拾わない: ${name}`, () => expect(DATA_KEY_WRITE.test(sample)).toBe(false));
+    }
+  });
+
+  describe("RAW_SQL_WRITE", () => {
+    it("拾う: UPDATE ... SET variant_id", () =>
+      expect(RAW_SQL_WRITE.test("await tx.$queryRaw`UPDATE dm_recipient_drafts SET variant_id = ${v} WHERE id = ${id}`;")).toBe(true));
+    it("拾う: UPDATE ... SET lp_variant_id", () =>
+      expect(RAW_SQL_WRITE.test("UPDATE dm_recipient_drafts SET lp_variant_id = NULL WHERE id = $1")).toBe(true));
+    it("拾わない: 読み取りだけの SELECT", () =>
+      expect(RAW_SQL_WRITE.test("SELECT variant_id FROM dm_recipient_drafts WHERE id = ${id}")).toBe(false));
+  });
+
+  describe("CREATE_DELETE_VARIANT_ROW", () => {
+    it("拾う: dmVariant.create", () => expect(CREATE_DELETE_VARIANT_ROW.test("await tx.dmVariant.create({ data: {} })")).toBe(true));
+    it("拾う: dmLpVariant.deleteMany", () => expect(CREATE_DELETE_VARIANT_ROW.test("await tx.dmLpVariant.deleteMany({ where: {} })")).toBe(true));
+    it("拾わない: 別モデル dmLpVariantMedia", () =>
+      expect(CREATE_DELETE_VARIANT_ROW.test("await tx.dmLpVariantMedia.deleteMany({ where: {} })")).toBe(false));
+    it("拾わない: update(型の設定変更は対象外・create/delete のみ)", () =>
+      expect(CREATE_DELETE_VARIANT_ROW.test("await tx.dmVariant.update({ data: {} })")).toBe(false));
+  });
+});
+
+// ---- 走査2: 宛先の型の組を書き換える route を正規表現で拾う ----
 // ⚠route 名を手で並べない。将来route が増えて拾われたら、allow-list(作成route + Task 5)に
-//   無い限り、ガード漏れとして落ちる(controller ruling)。
+//   無い限り、ガード漏れとして落ちる(controller ruling)。DATA_KEY_WRITE/RAW_SQL_WRITE は
+//   sale-dm 配下全体、CREATE_DELETE_VARIANT_ROW は campaigns/** 配下限定(brief指定)。
 describe("宛先の型の組を書き換える route の機械的な洗い出し", () => {
   const ROOT = path.resolve(process.cwd(), "src/app/api/properties/sale-dm");
+  const CAMPAIGNS_ROOT = path.join(ROOT, "campaigns");
   function routeFiles(dir: string): string[] {
     return readdirSync(dir).flatMap((name) => {
       const p = path.join(dir, name);
@@ -281,8 +361,6 @@ describe("宛先の型の組を書き換える route の機械的な洗い出し
       return name === "route.ts" ? [p] : [];
     });
   }
-  // data:{...variantId...} / data:{...lpVariantId...} / data.variantId = / data.lpVariantId = の形を拾う。
-  const WRITES_PAIRING = /\bdata\s*[:.]\s*\{?[\s\S]{0,200}?\b(variantId|lpVariantId)\b\s*[:=]/;
 
   // 作成route(初めて組む・共通手順 attachScenario 経由=Task 3 走査が別途固定)と、
   // Task 5(種類を変える・まだ存在しないので path で許可)。
@@ -291,17 +369,41 @@ describe("宛先の型の組を書き換える route の機械的な洗い出し
     "src/app/api/properties/sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts",
   ]);
 
-  const FILES = routeFiles(ROOT);
+  const ALL_FILES = routeFiles(ROOT);
+  const CAMPAIGNS_FILES = new Set(routeFiles(CAMPAIGNS_ROOT));
 
   it("走査できている(0件なら検査が空振り)", () => {
-    expect(FILES.length).toBeGreaterThan(5);
+    expect(ALL_FILES.length).toBeGreaterThan(5);
   });
 
-  const writers = FILES.filter((f) => WRITES_PAIRING.test(readFileSync(f, "utf-8")))
-    .map((f) => path.relative(process.cwd(), f).replace(/\\/g, "/"));
+  function isWriter(f: string): boolean {
+    const s = readFileSync(f, "utf-8");
+    if (DATA_KEY_WRITE.test(s) || RAW_SQL_WRITE.test(s)) return true;
+    // 型行そのものの create/delete は campaigns/** 限定(brief指定)。
+    return CAMPAIGNS_FILES.has(f) && CREATE_DELETE_VARIANT_ROW.test(s);
+  }
+
+  const writers = ALL_FILES.filter(isWriter).map((f) => path.relative(process.cwd(), f).replace(/\\/g, "/"));
 
   it("拾えている(0件なら検査が空振り)", () => {
     expect(writers.length).toBeGreaterThan(0);
+  });
+
+  // レビュー指摘の再発防止: 旧正規表現(shorthand/生SQL/create-delete を見ない)では
+  // assign の主な書込み(:178 `data: { variantId, ... }`・:191 `data: { lpVariantId }`)や、
+  // 型の作成/削除ルート(variants・lp-variants の POST/DELETE)が拾われていなかった。
+  // 現行の3正規表現の和集合で、組を書き換えうる7 route + 作成route の**全8本**が拾えることを固定する。
+  it("組を書き換えうる7 route + 作成route の全8本が拾われている(regression固定)", () => {
+    const expected = [
+      "src/app/api/properties/sale-dm/campaigns/route.ts",
+      "src/app/api/properties/sale-dm/campaigns/[id]/assign/route.ts",
+      "src/app/api/properties/sale-dm/campaigns/[id]/variants/route.ts",
+      "src/app/api/properties/sale-dm/campaigns/[id]/lp-variants/route.ts",
+      "src/app/api/properties/sale-dm/campaigns/[id]/variants/[variantId]/route.ts",
+      "src/app/api/properties/sale-dm/campaigns/[id]/lp-variants/[lpId]/route.ts",
+      "src/app/api/properties/sale-dm/drafts/[id]/route.ts",
+    ];
+    for (const rel of expected) expect(writers, `${rel} が拾われていない`).toContain(rel);
   });
 
   it("拾った route はすべて allow-list かガード呼び出しを持つ", () => {
@@ -319,11 +421,57 @@ describe("宛先の型の組を書き換える route の機械的な洗い出し
     const known = new Set([
       "src/app/api/properties/sale-dm/campaigns/route.ts",
       "src/app/api/properties/sale-dm/campaigns/[id]/assign/route.ts",
+      "src/app/api/properties/sale-dm/campaigns/[id]/variants/route.ts",
+      "src/app/api/properties/sale-dm/campaigns/[id]/lp-variants/route.ts",
+      "src/app/api/properties/sale-dm/campaigns/[id]/variants/[variantId]/route.ts",
       "src/app/api/properties/sale-dm/campaigns/[id]/lp-variants/[lpId]/route.ts",
       "src/app/api/properties/sale-dm/drafts/[id]/route.ts",
     ]);
     for (const rel of writers) {
       expect(known.has(rel) || ALLOWED_WITHOUT_GUARD.has(rel), `未知の route: ${rel}`).toBe(true);
     }
+  });
+});
+
+// ---- Minor 4: 文面の貼り直し(template PUT)・LPの写真と図(media PUT)・適用(apply) は
+//      種類つきの発送でも断らない(走査で固定はしない=触らない・ここでは実測のみ)。
+//      「通ることを固定しない」と brief にあるため、200 までは求めず、少なくとも
+//      SCENARIO_CAMPAIGN_LOCKED / SCENARIO_VARIANT_LOCKED を返さないことだけを実測する。
+describe("template PUT / media PUT / apply は種類つきの発送でも断らない", () => {
+  const SCENARIO_CODES = new Set(["SCENARIO_CAMPAIGN_LOCKED", "SCENARIO_VARIANT_LOCKED"]);
+  async function codeOf(res: Response): Promise<string | undefined> {
+    const json = await res.json();
+    return json?.error?.code;
+  }
+
+  it("variants/[variantId]/template PUT: 写した型(scenarioId あり)でも SCENARIO_* を返さない", async () => {
+    const { PUT: putTemplate } = await import("../../app/api/properties/sale-dm/campaigns/[id]/variants/[variantId]/template/route");
+    pm.dmVariant.findFirst.mockResolvedValue({
+      id: "v1", ...optionFields, templateFrozenAt: null, bodyTemplate: "旧本文", scenarioId: "s1",
+    });
+    pm.dmRecipientDraft.count.mockResolvedValue(0);
+    const res = await putTemplate(
+      req("PUT", { body: "新本文", promptDigest: "a".repeat(64), baseBodyDigest: "b".repeat(64) }) as never,
+      ctxV,
+    );
+    const code = await codeOf(res);
+    expect(code === undefined || !SCENARIO_CODES.has(code)).toBe(true);
+  });
+
+  it("lp-variants/[lpId]/media PUT: 写した型(scenarioId あり)でも SCENARIO_* を返さない", async () => {
+    const { PUT: putMedia } = await import("../../app/api/properties/sale-dm/campaigns/[id]/lp-variants/[lpId]/media/route");
+    pm.dmLpVariant.findFirst.mockResolvedValue({ id: "l1", bodyText: "", templateFrozenAt: null, scenarioId: "s1" });
+    const res = await putMedia(req("PUT", { hero: null, sections: [] }) as never, ctxLp);
+    const code = await codeOf(res);
+    expect(code === undefined || !SCENARIO_CODES.has(code)).toBe(true);
+  });
+
+  it("variants/[variantId]/apply POST: 種類つきの発送(defaultScenarioId あり)でも SCENARIO_* を返さない", async () => {
+    const { POST: applyVariant } = await import("../../app/api/properties/sale-dm/campaigns/[id]/variants/[variantId]/apply/route");
+    pm.dmVariant.findFirst.mockResolvedValue({ id: "v1", bodyTemplate: "本文", scenarioId: "s1" });
+    pm.dmRecipientDraft.findMany.mockResolvedValue([]);
+    const res = await applyVariant(req("POST", { bodyDigest: "c".repeat(64) }) as never, ctxV);
+    const code = await codeOf(res);
+    expect(code === undefined || !SCENARIO_CODES.has(code)).toBe(true);
   });
 });

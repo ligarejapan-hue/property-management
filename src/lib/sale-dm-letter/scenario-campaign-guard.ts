@@ -19,6 +19,9 @@ export function assertNotScenarioCampaign(c: { defaultScenarioId: string | null 
 
 /** DMの種類から写した型(dm_variants/dm_lp_variants.scenario_id が入っている)は PATCH できない。 */
 export function assertNotScenarioVariant(v: { scenarioId: string | null }): void {
+  // ⚠`!== null` で判定する(`=== undefined` の穴を作らない)。呼び出し側の select に
+  //   scenarioId を足し忘れて値が undefined のまま渡っても、undefined !== null は true になり
+  //   ここで 409 として閉じる(fail-closed)。「わからなければ変更を許す」側に倒さない。
   if (v.scenarioId !== null) {
     throw new ApiError(
       409,
