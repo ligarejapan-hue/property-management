@@ -122,19 +122,27 @@ describe("台帳 API(設計 §3.6・§4)", () => {
     expect((await res.json()).error.code).toBe("FORBIDDEN");
   });
 
-  it("選択肢は office_staff(property:write)でも取れ、中身の列を返さない", async () => {
+  it("選択肢は office_staff(property:write)でも取れ、中身の列を返さない(ready は返す)", async () => {
     (getUserPermissions as Fn).mockResolvedValue([{ resource: "property", action: "write", granted: true }]);
-    pm.dmScenario.findMany.mockResolvedValue([{ id: SID, name: "相続", sortOrder: 10, autoKey: "inheritance" }]);
+    pm.dmScenario.findMany.mockResolvedValue([
+      { id: SID, name: "相続", sortOrder: 10, autoKey: "inheritance", letterBodyTemplate: "本文" },
+      { id: "s2", name: "空き家", sortOrder: 20, autoKey: null, letterBodyTemplate: null },
+    ]);
     const res = await OPTIONS_LIST(new Request("http://x/api/properties/sale-dm/scenarios/options"));
     expect(res.status).toBe(200);
     expect(pm.dmScenario.findMany).toHaveBeenCalledWith({
       where: { active: true, deletedAt: null },
-      select: { id: true, name: true, sortOrder: true, autoKey: true },
+      select: { id: true, name: true, sortOrder: true, autoKey: true, letterBodyTemplate: true },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     });
     const j = await res.json();
-    expect(j.scenarios).toHaveLength(1);
-    expect(Object.keys(j.scenarios[0]).sort()).toEqual(["autoKey", "id", "name", "sortOrder"]);
+    expect(j.scenarios).toHaveLength(2);
+    for (const s of j.scenarios) {
+      expect(Object.keys(s).sort()).toEqual(["autoKey", "id", "name", "ready", "sortOrder"]);
+      expect(s).not.toHaveProperty("letterBodyTemplate");
+    }
+    expect(j.scenarios[0].ready).toBe(true);
+    expect(j.scenarios[1].ready).toBe(false);
   });
 
   it("選択肢: 物件の閲覧・編集も売却DMの権限も無い → 403", async () => {
@@ -150,24 +158,27 @@ describe("台帳 API(設計 §3.6・§4)", () => {
     expect(res.status).toBe(200);
   });
 
-  it("選択肢 ?includeInactive=1: 使わない・削除済みも含め、名前などの見出し情報だけ(中身なし)を返す", async () => {
+  it("選択肢 ?includeInactive=1: 使わない・削除済みも含め、名前などの見出し情報だけ(中身なし・ready は含む)を返す", async () => {
     (getUserPermissions as Fn).mockResolvedValue([{ resource: "property", action: "read", granted: true }]);
     pm.dmScenario.findMany.mockResolvedValue([
-      { id: SID, name: "相続", sortOrder: 10, autoKey: "inheritance", active: true, deletedAt: null },
-      { id: "s2", name: "古い種類", sortOrder: 30, autoKey: null, active: false, deletedAt: new Date("2026-09-01") },
+      { id: SID, name: "相続", sortOrder: 10, autoKey: "inheritance", letterBodyTemplate: "本文", active: true, deletedAt: null },
+      { id: "s2", name: "古い種類", sortOrder: 30, autoKey: null, letterBodyTemplate: null, active: false, deletedAt: new Date("2026-09-01") },
     ]);
     const res = await OPTIONS_LIST(new Request("http://x/api/properties/sale-dm/scenarios/options?includeInactive=1"));
     expect(res.status).toBe(200);
     expect(pm.dmScenario.findMany).toHaveBeenCalledWith({
-      select: { id: true, name: true, sortOrder: true, autoKey: true, active: true, deletedAt: true },
+      select: { id: true, name: true, sortOrder: true, autoKey: true, letterBodyTemplate: true, active: true, deletedAt: true },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     });
     const j = await res.json();
     expect(j.scenarios).toEqual([
-      { id: SID, name: "相続", sortOrder: 10, autoKey: "inheritance", active: true, deleted: false },
-      { id: "s2", name: "古い種類", sortOrder: 30, autoKey: null, active: false, deleted: true },
+      { id: SID, name: "相続", sortOrder: 10, autoKey: "inheritance", ready: true, active: true, deleted: false },
+      { id: "s2", name: "古い種類", sortOrder: 30, autoKey: null, ready: false, active: false, deleted: true },
     ]);
-    for (const s of j.scenarios) expect(Object.keys(s).sort()).toEqual(["active", "autoKey", "deleted", "id", "name", "sortOrder"]);
+    for (const s of j.scenarios) {
+      expect(Object.keys(s).sort()).toEqual(["active", "autoKey", "deleted", "id", "name", "ready", "sortOrder"]);
+      expect(s).not.toHaveProperty("letterBodyTemplate");
+    }
   });
 
   it("選択肢: property:write は無いが売却DMの権限(checkSaleDmAccessFor)があれば 200", async () => {
