@@ -183,7 +183,12 @@
 - `push_subscriptions`: `id` / `user_id` / `endpoint`（一意）/ `p256dh` / `auth` / `device_scope`（`shared` か `personal`・§7.5）/ `expires_at` / `created_at` / `last_success_at` / `failure_count` / `revoked_at`
   - `endpoint` と鍵は**秘密情報として扱う**。API の応答・ログ・AuditLog に出さない。
 - `notification_deliveries`: `id` / `user_id` / `subscription_id` / `kind`（N4 など）/ `ref_key`（重複防止のキー。例 `next_action:<ID>:<回>` や `inquiry:<申込ID>`）/ `scheduled_for` / `attempts` / `sent_at` / `status`（`pending`・`sent`・`failed`・`gone`）/ `last_error_code`（定型コードのみ）
-  - **端末（登録）ごとに1行**（Codex #451 指摘）。一意制約 `(subscription_id, kind, ref_key)` で、同じ端末への二重送信を防ぐ（定期実行が重なっても1回だけ）。
+  - **端末（登録）ごとに1行**（Codex #451 指摘）。一意制約 `(subscription_id, kind, ref_key)` で、同じ端末・同じ回の行が2つできないようにする。
+  - ⚠一意制約だけでは、定期実行が2つ重なったとき両方が同じ `pending` の行を見て送ってしまう（Codex #451 指摘）。そこで**送る前に行を取り合う**。既存の査定申込メール通知（`notifyStatus` = `sending`・`notifyClaimedAt`・15分で残骸扱い）と同じ方式にする。
+    - 列 `claimed_at` を足し、状態に `sending` を加える。
+    - 1文の `UPDATE ... SET status = 'sending', claimed_at = now() WHERE id = ? AND (status IN ('pending','failed') OR (status = 'sending' AND claimed_at < now() - 15分)) RETURNING id` で取れた処理だけが送る。取れなかった処理は送らない。送り直し（`failed` の行）も同じく取り合う。
+    - 送信後に `sent`・`failed`・`gone` へ更新する。送信の直後に処理が落ちた場合は、15分後に取り直されて1回多く届くことがある（本文は種類と件数だけなので実害は小さい。メール通知と同じ割り切り）。
+  - あわせて、定期実行そのものも重ならないようにする（systemd の oneshot サービスは実行中に次を起動しない。cron を使う場合は `flock` で1本に絞る）。
   - PC は届いてスマホは一時的に失敗した、という場合も、**失敗した端末だけ**を次の実行で送り直せる（届いた端末には送り直さない）。送り直しはその回の次の予定時刻まで、最大3回。404/410 は `gone` にして登録を無効にする。
 - `edit_lock_loss_events`（§4.6）: `id` / `lock_id`（一意。外れた鍵の行の ID）/ `user_id`（外れた持ち主）/ `resource_type` / `resource_id` / `cause`（`heartbeat`・`idle`・`force_released`）/ `occurred_at` / `notified_at`
   - 鍵の規則（5分・60分）は変えない。記録を足すだけ。資源の中身（物件名・所有者名など）は入れない。
@@ -264,7 +269,7 @@
 - 段階1（追加2）: 画面を裏に回して戻ったとき、外れた・ログオフされた理由が画面内に出ること。
 - 段階2（権限）: field_staff で、次回対応の担当は自分でも親の物件の担当から外れている場合、件数にも `nextActionReminders` にも出ないこと。
 - 段階2（追加）: 「1件完了＋1件新着」でも新着のポップアップが出ること、同じ `(actionId, slot)` で2回出ないこと、`nextActionReminderSlot` の境界（T、＋24h、＋72h、＋168h）。
-- 段階4: 二重送信の防止（端末ごとの一意制約）、PC は成功・スマホは失敗のときスマホだけ送り直すこと、N2 のサーバー送信（合図切れ・操作切れ・管理者の解除のそれぞれで1回だけ。**期限切れの直後に別の人が取り直しても、前の持ち主に届くこと**）、端末の時計が5分以上ずれていても初回の新着を取りこぼさないこと、謄本の件数が項目ごとの見える範囲で数え直されること、同じミリ秒の申込2件をどちらも取りこぼさないこと、404/410 の登録の無効化、ログアウトでの登録解除、**`expires_at` を過ぎた `shared` の登録に送らないこと**、**ログイン時の付け替えで前の利用者に送られないこと**、本文に PII が入らないこと、送信直前の権限の再確認。
+- 段階4: 二重送信の防止（端末ごとの一意制約、**定期実行を2本同時に動かしても同じ行を1回しか送らないこと**、15分を過ぎた `sending` の取り直し）、PC は成功・スマホは失敗のときスマホだけ送り直すこと、N2 のサーバー送信（合図切れ・操作切れ・管理者の解除のそれぞれで1回だけ。**期限切れの直後に別の人が取り直しても、前の持ち主に届くこと**）、端末の時計が5分以上ずれていても初回の新着を取りこぼさないこと、謄本の件数が項目ごとの見える範囲で数え直されること、同じミリ秒の申込2件をどちらも取りこぼさないこと、404/410 の登録の無効化、ログアウトでの登録解除、**`expires_at` を過ぎた `shared` の登録に送らないこと**、**ログイン時の付け替えで前の利用者に送られないこと**、本文に PII が入らないこと、送信直前の権限の再確認。
 - 段階1（追加）: Service Worker 経由で通知が出ること（Android の Chrome・iPhone のホーム画面アプリを実機で確認）。
 
 ## 12. 未決事項と確認点
