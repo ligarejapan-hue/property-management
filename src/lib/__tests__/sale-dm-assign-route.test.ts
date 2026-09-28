@@ -16,7 +16,7 @@ vi.mock("@/lib/api-helpers", () => {
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
-    dmCampaign: { findFirst: vi.fn() },
+    dmCampaign: { findFirst: vi.fn(), findUnique: vi.fn() },
     dmVariant: { findMany: vi.fn(), updateMany: vi.fn(async () => ({ count: 0 })) },
     // LP型は0件(既存キャンペーンの挙動不変・両軸化は sale-dm-assign-cross-route.test.ts で検証)。
     dmLpVariant: { findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({ count: 0 })) },
@@ -38,7 +38,7 @@ import { getApiSession, getUserPermissions, getOwnerDisplayConfig } from "@/lib/
 import { POST as assign } from "../../app/api/properties/sale-dm/campaigns/[id]/assign/route";
 
 const pm = prismaMock as never as {
-  dmCampaign: { findFirst: ReturnType<typeof vi.fn> };
+  dmCampaign: { findFirst: ReturnType<typeof vi.fn>; findUnique: ReturnType<typeof vi.fn> };
   dmVariant: { findMany: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
   dmRecipientDraft: { findMany: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
   $queryRaw: ReturnType<typeof vi.fn>;
@@ -56,6 +56,8 @@ beforeEach(() => {
   grant(...ALL);
   // assertSaleDmCampaignOwned 用: 既定で作成者本人のキャンペーン(owned)。
   pm.dmCampaign.findFirst.mockResolvedValue({ id: "c1" });
+  // 種類つきの発送の判定用(既定=種類なしの発送=既存挙動)。
+  pm.dmCampaign.findUnique.mockResolvedValue({ defaultScenarioId: null });
   pm.dmVariant.findMany.mockResolvedValue([{ id: "vA" }, { id: "vB" }]);
   pm.dmRecipientDraft.findMany.mockResolvedValue([{ id: "r1" }, { id: "r2" }, { id: "r3" }, { id: "r4" }]);
   pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 2 });

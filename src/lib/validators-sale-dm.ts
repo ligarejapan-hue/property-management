@@ -44,9 +44,22 @@ export const saleDmCampaignBodySchema = z.object({
   // 二重作成(再送信/別タブ/連打)防止の冪等性キー。client が作成試行ごとに安定生成し、成功で更新する。
   // route は生成の前にこのキーで campaign をクレームし、同キーの再実行は既存を返す(有料生成を二重に走らせない)。
   idempotencyKey: z.string().min(1).max(100).optional(),
+  // DMの種類(台帳)を使う発送だけ指定する。作成時に一度だけ立ち、後から変わらない(設計 §3.3.0)。
+  // null/未指定=種類を使わない発送(今までの作り方)。
+  defaultScenarioId: z
+    .string()
+    .uuid()
+    .transform((s) => s.toLowerCase())
+    .nullable()
+    .optional(),
 });
 
 export type SaleDmCampaignBody = z.infer<typeof saleDmCampaignBodySchema>;
+
+// 「種類を変える」(物件単位・設計 §3.4)。id は小文字にそろえる(履歴・監査・比較で大小文字の食い違いを出さない)。
+export const saleDmScenarioChangeSchema = z.object({
+  scenarioId: z.string().uuid().transform((s) => s.toLowerCase()),
+});
 
 // 型(DmVariant)= 設定一式。sender は型に持たせない(差出人はキャンペーン/env 既定)。
 const variantOptionsSchema = saleDmOptionsSchema.omit({ senderName: true, senderContact: true });

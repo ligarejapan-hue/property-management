@@ -215,3 +215,18 @@ describe("DM 反響 writer のロック順序(PR-B・R47: terminal は Owner FOR
     assertOrder("inquiry-status", tx, ["lockPropertyRow", "tx.dmInquiry.findUnique", "tx.dmInquiry.update"]);
   });
 });
+
+describe("宛先生成(campaigns POST)の種類つきの分岐(設計 2026-09-27 §3.3.1: 物件 → 台帳 → 写す → 宛先)", () => {
+  it("所有者 → 物件 → 物件の読み直し → 台帳の全行 FOR SHARE → 台帳の読み込み → 写す → 宛先", () => {
+    const tx = firstTx(read("src/app/api/properties/sale-dm/campaigns/route.ts"));
+    assertOrder("campaigns(種類つき)", tx, [
+      "lockOwnersForShare",
+      "lockPropertiesForShare",
+      "tx.property.findMany", // ロック後の読み直し(種類・住所・担当範囲)
+      "lockAllScenariosForShare",
+      "loadScenariosForCopy",
+      "copyScenarioIntoCampaign",
+      "dmRecipientDraft.create",
+    ]);
+  });
+});

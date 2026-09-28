@@ -94,6 +94,9 @@ const VERSIONED: Record<string, string> = {
     "property の販売条件(販売図面の作成画面で入れた値の書き戻し)+version increment" +
     "(F3で追加。呼び出し側が FOR UPDATE と担当者スコープを取った上で、" +
     "where に version を付けて書く)",
+  "src/app/api/properties/sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts:212":
+    "property.dmScenarioId(売却DMの発送の画面から物件単位で「種類を変える」)+version increment" +
+    "(DMの種類 PR-S2 Task 5。物件行 FOR UPDATE・編集中の鍵の確認の後、where に読んだ version を付けて書く)",
   "src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:244":
     "property.dmStatus(宛先不明連動のno_send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",

@@ -57,7 +57,7 @@ beforeEach(() => {
   (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1" });
   (getOwnerDisplayConfig as ReturnType<typeof vi.fn>).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
   grant(...ALL);
-  pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", campaign: { createdBy: "u1" } });
+  pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", campaign: { createdBy: "u1", defaultScenarioId: null } });
   pm.dmRecipientDraft.update.mockResolvedValue({ id: "r1" });
   pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 1 });
 });
@@ -90,7 +90,7 @@ describe("PATCH draft (拡張)", () => {
   });
 
   it("variantId 付け替え(本文未指定)は当該 campaign の型のみ許可+本文クリア=要再生成", async () => {
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v-old", campaign: { createdBy: "u1" } });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v-old", campaign: { createdBy: "u1", defaultScenarioId: null } });
     pm.dmVariant.findFirst.mockResolvedValue({ id: "vB" });
     const res = await patchDraft(patch({ variantId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11" }) as never, ctx);
     expect(res.status).toBe(200);
@@ -104,7 +104,7 @@ describe("PATCH draft (拡張)", () => {
   });
 
   it("variantId 付け替えでも本文を同時指定すればその本文を保持(クリアしない)", async () => {
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", variantId: "v-old", campaign: { createdBy: "u1" } });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", variantId: "v-old", campaign: { createdBy: "u1", defaultScenarioId: null } });
     pm.dmVariant.findFirst.mockResolvedValue({ id: "vB" });
     const res = await patchDraft(patch({ variantId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", body: "新本文" }) as never, ctx);
     expect(res.status).toBe(200);
@@ -112,7 +112,7 @@ describe("PATCH draft (拡張)", () => {
   });
 
   it("同一 variantId への付け替え(実質変更なし)は本文をクリアしない", async () => {
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", campaign: { createdBy: "u1" } });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", campaign: { createdBy: "u1", defaultScenarioId: null } });
     pm.dmVariant.findFirst.mockResolvedValue({ id: "vB" });
     const res = await patchDraft(patch({ variantId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11" }) as never, ctx);
     expect(res.status).toBe(200);
@@ -128,7 +128,7 @@ describe("PATCH draft (拡張)", () => {
     //   先読み(campaign を select する)と tx 内の読み直しを select の形で見分ける。
     pm.dmRecipientDraft.findUnique.mockImplementation(async (args: { select?: Record<string, unknown> }) =>
       args?.select?.campaign
-        ? { id: "r1", campaignId: "c1", status: "confirmed", variantId: "v1", lpVariantId: "L1", campaign: { createdBy: "u1" } }
+        ? { id: "r1", campaignId: "c1", status: "confirmed", variantId: "v1", lpVariantId: "L1", campaign: { createdBy: "u1", defaultScenarioId: null } }
         : { variantId: "v1", lpVariantId: "L2", status: "confirmed" },
     );
     const res = await patchDraft(patch({ body: "編集後" }) as never, ctx);
@@ -141,7 +141,7 @@ describe("PATCH draft (拡張)", () => {
   });
 
   it("確定の解除は凍結印・読み直し・解除を同じ tx で行う(印の後に updateMany)", async () => {
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v1", lpVariantId: "L1", campaign: { createdBy: "u1" } });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v1", lpVariantId: "L1", campaign: { createdBy: "u1", defaultScenarioId: null } });
     const res = await patchDraft(patch({ body: "編集後" }) as never, ctx);
     expect(res.status).toBe(200);
     expect(pm.dmVariant.updateMany).toHaveBeenCalledWith({ where: { id: { in: ["v1"] }, templateFrozenAt: null }, data: { templateFrozenAt: expect.any(Date) } });
@@ -152,7 +152,7 @@ describe("PATCH draft (拡張)", () => {
   it("型を移すときは移動元と移動先の両方を1文で id 順に掴む(逆向きの付け替えと互い違いにしない)", async () => {
     // V1→V2 と V2→V1 が同時に走ると、片方ずつ掴む書き方では移動先で待たされて両者が止まる
     // (updateMany が参照先の型行へ KEY SHARE を後から取るため)。取得順を id 順にそろえる。
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v-old", campaign: { createdBy: "u1" } });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v-old", campaign: { createdBy: "u1", defaultScenarioId: null } });
     pm.dmVariant.findFirst.mockResolvedValue({ id: "vB" });
     const res = await patchDraft(patch({ variantId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11" }) as never, ctx);
     expect(res.status).toBe(200);
@@ -164,7 +164,7 @@ describe("PATCH draft (拡張)", () => {
   });
 
   it("型を移さないときは今の型だけを掴む(1件のまま)", async () => {
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v1", campaign: { createdBy: "u1" } });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v1", campaign: { createdBy: "u1", defaultScenarioId: null } });
     const res = await patchDraft(patch({ body: "編集後" }) as never, ctx);
     expect(res.status).toBe(200);
     const lockCall = pm.$queryRaw.mock.calls.find((c: unknown[]) =>
@@ -174,7 +174,7 @@ describe("PATCH draft (拡張)", () => {
   });
 
   it("確定解除の経路でも、並行して sent になっていれば(count=0)409 ALREADY_SENT", async () => {
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v1", campaign: { createdBy: "u1" } });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "confirmed", variantId: "v1", campaign: { createdBy: "u1", defaultScenarioId: null } });
     pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
     const res = await patchDraft(patch({ body: "編集後" }) as never, ctx);
     expect(res.status).toBe(409);
@@ -201,14 +201,14 @@ describe("PATCH draft (拡張)", () => {
   });
 
   it("他人のキャンペーン配下の draft は 404・更新しない(横断アクセス防止)", async () => {
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", campaign: { createdBy: "other-user" } });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", campaign: { createdBy: "other-user", defaultScenarioId: null } });
     const res = await patchDraft(patch({ body: "x" }) as never, ctx);
     expect(res.status).toBe(404);
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
   });
 
   it("送付済み(sent)の draft の編集は 409・更新しない", async () => {
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "sent", campaign: { createdBy: "u1" } });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "sent", campaign: { createdBy: "u1", defaultScenarioId: null } });
     const res = await patchDraft(patch({ body: "x" }) as never, ctx);
     expect(res.status).toBe(409);
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
@@ -216,7 +216,7 @@ describe("PATCH draft (拡張)", () => {
 
   it("field_staff は担当外物件の宛先(再割当で隠れた)を編集できない・403・更新しない(record scope)", async () => {
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", variantId: "v1", campaign: { createdBy: "u1" }, property: { createdBy: "other", assignedTo: "other" } });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", variantId: "v1", campaign: { createdBy: "u1", defaultScenarioId: null }, property: { createdBy: "other", assignedTo: "other" } });
     const res = await patchDraft(patch({ body: "x" }) as never, ctx);
     expect(res.status).toBe(403);
     expect(pm.dmRecipientDraft.updateMany).not.toHaveBeenCalled();
@@ -224,7 +224,7 @@ describe("PATCH draft (拡張)", () => {
 
   it("field_staff でも作成 or 担当の物件の宛先なら編集できる(200)", async () => {
     (getApiSession as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1", role: "field_staff" });
-    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", variantId: "v1", campaign: { createdBy: "u1" }, property: { createdBy: "other", assignedTo: "u1" } });
+    pm.dmRecipientDraft.findUnique.mockResolvedValue({ id: "r1", campaignId: "c1", status: "draft", variantId: "v1", campaign: { createdBy: "u1", defaultScenarioId: null }, property: { createdBy: "other", assignedTo: "u1" } });
     const res = await patchDraft(patch({ body: "x" }) as never, ctx);
     expect(res.status).toBe(200);
     expect(pm.dmRecipientDraft.updateMany.mock.calls[0][0].data.body).toBe("x");

@@ -6,12 +6,17 @@ import { requireSaleDmWriteAccess, assertSaleDmCampaignOwned, filterDraftsByFiel
 import { markVariantsFrozen, markLpVariantsFrozen, SETTLED_DRAFT_STATUSES } from "@/lib/sale-dm-letter/freeze";
 import { saleDmAssignSchema } from "@/lib/validators-sale-dm";
 import { assignCrossEvenly, applyManualAssignment } from "@/lib/sale-dm-letter/assign";
+import { assertNotScenarioCampaign } from "@/lib/sale-dm-letter/scenario-campaign-guard";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { session } = await requireSaleDmWriteAccess();
     const { id } = await params;
     await assertSaleDmCampaignOwned(id, session.id); // 作成者本人のキャンペーンのみ割当可。
+    // 種類つきの発送では型の割当(全面)を断る(画面を通さず組を壊せてしまうため・設計§3.4)。
+    const campaignForScenario = await prisma.dmCampaign.findUnique({ where: { id }, select: { defaultScenarioId: true } });
+    if (!campaignForScenario) throw new ApiError(404, "キャンペーンが見つかりません", "NOT_FOUND");
+    assertNotScenarioCampaign(campaignForScenario);
     const body = saleDmAssignSchema.parse(await parseJsonBody(request));
 
     const [variants, lpVariants, recipients] = await Promise.all([

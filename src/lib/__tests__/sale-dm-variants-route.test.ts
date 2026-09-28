@@ -67,7 +67,8 @@ beforeEach(() => {
   // assertSaleDmCampaignOwned 用: 既定で作成者本人のキャンペーン(owned)。
   pm.dmCampaign.findFirst.mockResolvedValue({ id: "c1" });
   // 既定で型は当該キャンペーンに存在する(存在チェック通過)。既存 option 値も返す(送信値との差分判定用)。
-  pm.dmVariant.findFirst.mockResolvedValue({ id: "v1", ...optionFields, extraInstruction: null });
+  // scenarioId: null / campaign.defaultScenarioId: null = 種類なしの発送(既存挙動)。
+  pm.dmVariant.findFirst.mockResolvedValue({ id: "v1", ...optionFields, extraInstruction: null, scenarioId: null, campaign: { defaultScenarioId: null } });
   pm.dmRecipientDraft.updateMany.mockResolvedValue({ count: 0 });
 });
 
@@ -89,7 +90,7 @@ describe("GET variants", () => {
 
 describe("POST variant (作成)", () => {
   it("label + options 一式で作成し 200", async () => {
-    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1", defaultScenarioId: null });
     pm.dmVariant.create.mockResolvedValue({ id: "v2", label: "B", ...optionFields });
     const res = await createVariant(new Request("http://x", { method: "POST", body: JSON.stringify({ label: "B", options: optionFields }) }) as never, ctxC);
     expect(res.status).toBe(200);
@@ -105,7 +106,7 @@ describe("POST variant (作成)", () => {
     expect(res.status).toBe(404);
   });
   it("作成の監査 detail に label(自由記述)を保存しない(PII混入防止・targetId で追跡)", async () => {
-    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1", defaultScenarioId: null });
     pm.dmVariant.create.mockResolvedValue({ id: "v2", label: "田中一郎", ...optionFields });
     await createVariant(new Request("http://x", { method: "POST", body: JSON.stringify({ label: "田中一郎", options: optionFields }) }) as never, ctxC);
     const detail = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0].detail;
@@ -113,25 +114,25 @@ describe("POST variant (作成)", () => {
     expect(detail.campaignId).toBe("c1");
   });
   it("不正な options で 422(zod)", async () => {
-    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1", defaultScenarioId: null });
     const res = await createVariant(new Request("http://x", { method: "POST", body: JSON.stringify({ label: "B", options: { ...optionFields, tone: "loud" } }) }) as never, ctxC);
     expect(res.status).toBe(422);
   });
   it("lpUrl(型ごとのLP)を指定して作成し保存する", async () => {
-    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1", defaultScenarioId: null });
     pm.dmVariant.create.mockResolvedValue({ id: "v2", label: "B", ...optionFields, lpUrl: "https://lp-b.example.com" });
     const res = await createVariant(new Request("http://x", { method: "POST", body: JSON.stringify({ label: "B", options: optionFields, lpUrl: "https://lp-b.example.com" }) }) as never, ctxC);
     expect(res.status).toBe(200);
     expect(pm.dmVariant.create.mock.calls[0][0].data.lpUrl).toBe("https://lp-b.example.com");
   });
   it("lpUrl 省略時は null で保存(既定LPへフォールバック)", async () => {
-    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1", defaultScenarioId: null });
     pm.dmVariant.create.mockResolvedValue({ id: "v2", label: "B", ...optionFields });
     await createVariant(new Request("http://x", { method: "POST", body: JSON.stringify({ label: "B", options: optionFields }) }) as never, ctxC);
     expect(pm.dmVariant.create.mock.calls[0][0].data.lpUrl).toBeNull();
   });
   it("非絶対の lpUrl(lp.example.com)は 422(郵送QRの遷移先に使えない値を弾く)", async () => {
-    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1", defaultScenarioId: null });
     const res = await createVariant(new Request("http://x", { method: "POST", body: JSON.stringify({ label: "B", options: optionFields, lpUrl: "lp.example.com" }) }) as never, ctxC);
     expect(res.status).toBe(422);
   });
