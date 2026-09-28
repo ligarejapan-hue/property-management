@@ -199,11 +199,11 @@ describe("PATCH …/rows/[rowId] create_new owner_csv dedup", () => {
     pm.importJobRow.findUnique.mockResolvedValue(
       ownerRow({ 氏名: "佐藤花子", 電話番号: "090-1111-2222" }),
     );
-    // address なしルートなので owner.findMany は呼ばれず、findFirst で phone 一致
-    pm.owner.findFirst.mockResolvedValue({
-      id: "owner-phone-match",
-      name: "佐藤花子",
-    });
+    // address なしルート: 同じ氏名の候補を取り出し、電話番号を数字だけで比べる(@codex P1 #455)。
+    // 保存済みがハイフンなしの書き方でも一致する。
+    pm.owner.findMany.mockResolvedValue([
+      { id: "owner-phone-match", name: "佐藤花子", phone: "09011112222" },
+    ]);
 
     const res = await PATCH(
       makePatchRequest({ action: "create_new" }),
@@ -214,9 +214,10 @@ describe("PATCH …/rows/[rowId] create_new owner_csv dedup", () => {
     expect(res.status).toBe(409);
     expect(body.error.code).toBe("DUPLICATE_OWNER");
     expect(body.error.existingOwnerId).toBe("owner-phone-match");
-    expect(pm.owner.findFirst).toHaveBeenCalledWith({
-      where: { name: "佐藤花子", phone: "090-1111-2222", isArchived: false },
-      select: { id: true, name: true },
+    expect(pm.owner.findMany).toHaveBeenCalledWith({
+      where: { name: "佐藤花子", isArchived: false, phone: { not: null } },
+      select: { id: true, name: true, phone: true },
+      orderBy: { createdAt: "asc" },
     });
     expect(pm.owner.create).not.toHaveBeenCalled();
   });
