@@ -173,10 +173,12 @@ export async function lockAllScenariosForShare(tx: {
 }): Promise<void> {
   // 宣言上の型は呼び出し側(モック含む)を素通りさせるための最小の形(never[])。
   // タグ付きテンプレート呼び出しには TemplateStringsArray を受け取れる形が要るのでここだけ広げる。
-  const run = tx.$queryRaw as unknown as (
+  // ⚠Prisma の $queryRaw はメソッド(this=client/tx が要る)。取り出して素で呼ぶと本物の DB で
+  //   「reading '_createPrismaPromise'」で必ず落ちる(モックでは通る)。tx に bind する。
+  const run = (tx.$queryRaw as unknown as (
     strings: TemplateStringsArray,
     ...values: unknown[]
-  ) => Promise<unknown>;
+  ) => Promise<unknown>).bind(tx);
   await run`SELECT id FROM dm_scenarios ORDER BY id FOR SHARE`;
 }
 

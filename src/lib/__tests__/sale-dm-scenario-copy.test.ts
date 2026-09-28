@@ -243,6 +243,19 @@ describe("lockAllScenariosForShare", () => {
     expect(sql).toContain("FOR SHARE");
     expect(sql).not.toMatch(/WHERE/);
   });
+
+  it("tx を this にして呼ぶ(Prisma の $queryRaw はメソッド=this が要る。外すと本物の DB で必ず落ちる)", async () => {
+    // 2026-09-28 Task 6 の実機確認で発見: `const run = tx.$queryRaw` の素呼びで
+    // 「Cannot read properties of undefined (reading '_createPrismaPromise')」=種類つきの作成が必ず 500。
+    const tx = {
+      marker: "tx",
+      async $queryRaw(this: { marker?: string }, ..._args: unknown[]) {
+        if (this?.marker !== "tx") throw new Error("unbound $queryRaw");
+        return [];
+      },
+    };
+    await expect(lockAllScenariosForShare(tx as never)).resolves.toBeUndefined();
+  });
 });
 
 describe("loadScenariosForCopy", () => {
