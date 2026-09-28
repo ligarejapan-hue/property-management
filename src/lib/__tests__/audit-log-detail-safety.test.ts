@@ -919,3 +919,19 @@ describe("sanitizeAuditDetail: 謄本自動取得の編集中の鍵スキップ(
     expect(safe.ownerAddress).toBe(REDACTED);
   });
 });
+
+describe("sanitizeAuditDetail: DMの種類(台帳・sale_dm_scenario_*)", () => {
+  it("update: changedFields(列名の配列)は残し、文面の中身(letterBodyTemplate)は [REDACTED]", () => {
+    const out = sanitizeAuditDetail("sale_dm_scenario_update", {
+      changedFields: ["tone"],
+      letterBodyTemplate: "本文",
+    }) as Record<string, unknown>;
+    expect(out.changedFields).toEqual(["tone"]);
+    expect(out.letterBodyTemplate).toBe(REDACTED);
+  });
+
+  it("create/delete: result のみ保持する", () => {
+    expect(sanitizeAuditDetail("sale_dm_scenario_create", { result: "created" })).toEqual({ result: "created" });
+    expect(sanitizeAuditDetail("sale_dm_scenario_delete", { result: "deleted" })).toEqual({ result: "deleted" });
+  });
+});

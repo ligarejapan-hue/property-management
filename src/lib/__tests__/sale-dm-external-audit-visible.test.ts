@@ -48,6 +48,16 @@ const CASES: Array<{ action: string; detail: Record<string, unknown> }> = [
     action: "sale_dm_lp_preview_view",
     detail: { campaignId: "c1", device: "sp", viewedAt: "2026-09-11T00:00:00.000Z" },
   },
+  // DMの種類(台帳)の写真と図(Task 7)。台帳には campaignId が無い(発送に紐付かない)。
+  { action: "sale_dm_scenario_media_update", detail: { assetCount: 2, figureCount: 1 } },
+  {
+    action: "sale_dm_scenario_lp_preview_view",
+    detail: { device: "sp", viewedAt: "2026-09-27T00:00:00.000Z" },
+  },
+  {
+    action: "sale_dm_scenario_lp_image_prompt_view",
+    detail: { slot: "hero", viewedAt: "2026-09-27T00:00:00.000Z" },
+  },
   { action: "sale_dm_inquiry_submit", detail: { first: true, at: "2026-09-20T00:00:00.000Z" } },
   { action: "sale_dm_inquiry_view", detail: { count: 3, viewedAt: "2026-09-20T00:00:00.000Z" } },
   { action: "sale_dm_inquiry_status_update", detail: { handleStatus: "done", updatedAt: "2026-09-20T00:00:00.000Z" } },

@@ -347,6 +347,7 @@ model Property {
   dmStatus                 DmStatus          @map("dm_status")
   caseStatus               CaseStatus        @default(new_case) @map("case_status")
   introductionRoute        String?           @map("introduction_route")
+  dmScenarioId             String?           @map("dm_scenario_id") @db.Uuid
   gpsLat                   Decimal?          @map("gps_lat") @db.Decimal(10, 7)
   gpsLng                   Decimal?          @map("gps_lng") @db.Decimal(10, 7)
 
@@ -389,6 +390,7 @@ model Property {
   creator            User                       @relation("PropertyCreatedBy", fields: [createdBy], references: [id])
   assignee           User?                      @relation("PropertyAssignedTo", fields: [assignedTo], references: [id])
   building           Building?                  @relation(fields: [buildingId], references: [id])
+  dmScenario         DmScenario?                @relation(fields: [dmScenarioId], references: [id], onDelete: Restrict)
   propertyOwners     PropertyOwner[]
   photos             PropertyPhoto[]
   matchCandidatesA   PropertyMatchCandidate[]    @relation("MatchCandidatePropertyA")
@@ -417,6 +419,7 @@ model Property {
   @@index([realEstateNumber])
   @@index([externalLinkKey])
   @@index([buildingId])
+  @@index([dmScenarioId])
   // 現地調査マップの bbox 検索 (Phase 1-D) 用の複合 index。
   // GET /api/field-survey/map/properties は通常 isArchived=false + gpsLat/gpsLng
   // の range 検索なので、equality (isArchived) を先頭に置く構成にする。
@@ -1161,14 +1164,16 @@ model DmCampaign {
   // 二重作成(再送信/別タブ/連打)防止の冪等性キー。client が作成試行ごとに安定生成し、生成(課金)の前に
   // この値で campaign をクレームする(一意制約で同キーの二重生成を弾く)。任意(未指定=従来通り)。
   idempotencyKey String?          @unique @map("idempotency_key")
+  defaultScenarioId String?       @map("default_scenario_id") @db.Uuid
   createdBy      String           @map("created_by") @db.Uuid
   createdAt      DateTime         @default(now()) @map("created_at")
   updatedAt      DateTime         @updatedAt @map("updated_at")
 
-  creator    User              @relation("DmCampaignCreator", fields: [createdBy], references: [id])
-  variants   DmVariant[]
-  lpVariants DmLpVariant[]
-  recipients DmRecipientDraft[]
+  creator         User              @relation("DmCampaignCreator", fields: [createdBy], references: [id])
+  defaultScenario DmScenario?       @relation(fields: [defaultScenarioId], references: [id], onDelete: Restrict)
+  variants        DmVariant[]
+  lpVariants      DmLpVariant[]
+  recipients      DmRecipientDraft[]
 
   @@map("dm_campaigns")
 }
@@ -1183,6 +1188,7 @@ model DmVariant {
   appeal           String
   strength         String
   extraInstruction String? @map("extra_instruction")
+  scenarioId       String?     @map("scenario_id") @db.Uuid
   // A/B 型ごとの LP(印刷QR /t/<token> の遷移先)。未設定の型は SALE_DM_LP_URL(既定)へ。
   // 型A→LP1 / 型B→LP2 のように LP の A/B 振り分けを可能にする。
   lpUrl            String? @map("lp_url")
@@ -1195,6 +1201,7 @@ model DmVariant {
   templateFrozenAt DateTime? @map("template_frozen_at")
 
   campaign   DmCampaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  scenario   DmScenario?       @relation(fields: [scenarioId], references: [id], onDelete: Restrict)
   recipients DmRecipientDraft[]
 
   @@map("dm_variants")
@@ -1275,10 +1282,12 @@ model DmLpVariant {
   bodyText         String?   @map("body_text")
   faqJson          Json?     @map("faq_json")
   templateFrozenAt DateTime? @map("template_frozen_at")
+  scenarioId       String?     @map("scenario_id") @db.Uuid
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
   campaign   DmCampaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  scenario   DmScenario?        @relation(fields: [scenarioId], references: [id], onDelete: Restrict)
   recipients DmRecipientDraft[]
   media      DmLpVariantMedia[]
 
@@ -1343,6 +1352,7 @@ model DmLpAsset {
 
   creator User               @relation("DmLpAssetCreator", fields: [createdBy], references: [id])
   media   DmLpVariantMedia[]
+  scenarioMedia DmScenarioMedia[]
 
   @@index([createdAt])
   @@map("dm_lp_assets")
@@ -1366,6 +1376,64 @@ model DmLpVariantMedia {
   @@index([lpVariantId])
   @@index([assetId])
   @@map("dm_lp_variant_media")
+}
+
+/// 売却DM「DMの種類」台帳(設計 2026-09-27)。手紙の文面+LPを種類ごとに1組持ち、発送作成時に写し取られる。
+/// 削除は論理削除(deletedAt)。⚠name の一意は「削除されていない行の中で」=部分一意索引は migration SQL のみで管理。
+model DmScenario {
+  id                 String    @id @default(uuid()) @db.Uuid
+  name               String
+  autoKey            String?   @unique @map("auto_key")
+  sortOrder          Int       @default(0) @map("sort_order")
+  active             Boolean   @default(true)
+  designTemplate     String?   @map("design_template")
+  tone               String?
+  length             String?
+  appeal             String?
+  strength           String?
+  extraInstruction   String?   @map("extra_instruction")
+  letterPromptText   String?   @map("letter_prompt_text")
+  letterBodyTemplate String?   @map("letter_body_template")
+  lpTone             String?   @map("lp_tone")
+  lpLength           String?   @map("lp_length")
+  lpAppeal           String?   @map("lp_appeal")
+  lpStrength         String?   @map("lp_strength")
+  lpPromptText       String?   @map("lp_prompt_text")
+  lpRawTemplate      String?   @map("lp_raw_template")
+  lpHeadline         String?   @map("lp_headline")
+  lpLead             String?   @map("lp_lead")
+  lpBodyText         String?   @map("lp_body_text")
+  lpFaqJson          Json?     @map("lp_faq_json")
+  deletedAt          DateTime? @map("deleted_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  media      DmScenarioMedia[]
+  properties Property[]
+  campaigns  DmCampaign[]
+  variants   DmVariant[]
+  lpVariants DmLpVariant[]
+
+  @@map("dm_scenarios")
+}
+
+/// 台帳の写真と図(DmLpVariantMedia と同じ形)。
+model DmScenarioMedia {
+  id         String   @id @default(uuid()) @db.Uuid
+  scenarioId String   @map("scenario_id") @db.Uuid
+  slot       String
+  heading    String?
+  assetId    String?  @map("asset_id") @db.Uuid
+  figureKind String?  @map("figure_kind")
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  scenario DmScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  asset    DmLpAsset? @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@index([scenarioId])
+  @@index([assetId])
+  @@map("dm_scenario_media")
 }
 
 enum DmCampaignStatus {

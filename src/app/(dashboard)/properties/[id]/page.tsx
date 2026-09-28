@@ -27,6 +27,7 @@ import HistoryTab from "@/components/properties/history-tab";
 import PhotoTab from "@/components/properties/photo-tab";
 import CandidateList from "@/components/properties/candidate-list";
 import ActionBar from "@/components/properties/action-bar";
+import DmScenarioField from "@/components/properties/dm-scenario-field";
 import RegistryLocationSearchButton from "@/components/properties/registry-location-search-button";
 import RegistryOwnerApplyButton from "@/components/properties/registry-owner-apply-button";
 import { isLandPropertyType } from "@/lib/registry-fetch/registry-target";
@@ -267,6 +268,8 @@ interface ApiProperty {
   occupancyStatus: string | null;
   ownershipShareNote: string | null;
   introductionRoute: string | null;
+  /** DMの種類(台帳の id)。null=自動(導入ルートから決まる・設計 2026-09-27 §3.6)。 */
+  dmScenarioId: string | null;
   importSource: string | null;
   version: number;
   // ── 「販売」区分(F3 Task7) ─────────────────────────────────────────────
@@ -1128,6 +1131,12 @@ function BasicTab({
         editLockHeld={editLockHeld}
       />
       <IntroductionRouteField
+        property={property}
+        onRefresh={onRefresh}
+        canWrite={canWrite}
+        editLockHeld={editLockHeld}
+      />
+      <DmScenarioField
         property={property}
         onRefresh={onRefresh}
         canWrite={canWrite}

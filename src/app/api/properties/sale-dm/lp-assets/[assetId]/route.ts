@@ -4,6 +4,7 @@ import { handleApiError, ApiError, getApiSession, getUserPermissions } from "@/l
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { getStorage } from "@/lib/storage";
+import { countAssetReferences } from "@/lib/sale-dm-letter/asset-references";
 
 /**
  * ライブラリからの削除は管理者のみ(設計 §2.7・sale-dm-settings と同じ門 user_management:write)。
@@ -27,9 +28,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
       await tx.$queryRaw`SELECT id FROM dm_lp_assets WHERE id = ${assetId}::uuid FOR UPDATE`;
       const asset = await tx.dmLpAsset.findUnique({ where: { id: assetId }, select: { id: true, storageKey: true, deletedAt: true } });
       if (!asset || asset.deletedAt) throw new ApiError(404, "写真が見つかりません", "ASSET_NOT_FOUND");
-      const referenced = await tx.dmLpVariantMedia.count({ where: { assetId } });
+      const referenced = await countAssetReferences(tx, assetId);
       if (referenced > 0) {
-        throw new ApiError(409, "この写真はLP型で使われています。先にLP型から外してください", "REFERENCED");
+        throw new ApiError(409, "この写真はLPまたはDMの種類で使われています。先にそこから外してください", "REFERENCED");
       }
       await tx.dmLpAsset.update({ where: { id: assetId }, data: { deletedAt: new Date() } });
       return asset.storageKey;

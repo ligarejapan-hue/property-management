@@ -239,14 +239,49 @@ describe("LP型の写真と図の枠(lp-variants/[lpId]/media PUT)のロック�
   });
 });
 
+describe("台帳(dm_scenarios)を書き換える経路のロック順序(設計 §3.3.1)", () => {
+  // 台帳を書き換える経路は必ず先に lockScenarioForUpdate(FOR UPDATE)を呼ぶ。写真の枠を保存する
+  // media route はさらに dm_lp_assets を FOR UPDATE するので、その手前に来ていること。
+  const MUTATING_ROUTES = [
+    "src/app/api/properties/sale-dm/scenarios/[id]/route.ts", // PATCH/DELETE
+    "src/app/api/properties/sale-dm/scenarios/[id]/template/route.ts", // PUT(手紙の貼り戻し)
+    "src/app/api/properties/sale-dm/scenarios/[id]/lp-template/route.ts", // PUT(LPの貼り戻し)
+    "src/app/api/properties/sale-dm/scenarios/[id]/media/route.ts", // PUT(写真と図の枠)
+  ];
+
+  it.each(MUTATING_ROUTES)("%s: lockScenarioForUpdate を呼ぶ", (f) => {
+    expect(code(f)).toMatch(/lockScenarioForUpdate\(/);
+  });
+
+  it.each(MUTATING_ROUTES)("%s: dm_lp_assets を FOR UPDATE するなら、lockScenarioForUpdate の後に来る", (f) => {
+    const s = code(f);
+    const lock = s.indexOf("lockScenarioForUpdate(");
+    const assets = s.search(/FROM dm_lp_assets[\s\S]{0,200}FOR UPDATE/);
+    expect(lock).toBeGreaterThan(-1);
+    if (assets > -1) expect(lock).toBeLessThan(assets);
+  });
+});
+
+describe("物件の「DMの種類」欄の保存(properties/[id] PATCH)のロック順序", () => {
+  const s = code("src/app/api/properties/[id]/route.ts");
+
+  it("物件親行(lockPropertyRow)を、台帳の読み取りロック(lockScenarioForShare)より先に取る", () => {
+    const p = s.indexOf("lockPropertyRow(");
+    const sc = s.indexOf("lockScenarioForShare(");
+    expect(p).toBeGreaterThan(-1);
+    expect(sc).toBeGreaterThan(p);
+  });
+});
+
 describe("写真ライブラリの削除(lp-assets/[assetId] DELETE)のロック順序", () => {
   const s = code("src/app/api/properties/sale-dm/lp-assets/[assetId]/route.ts");
 
   // ⚠この route は dm_lp_assets だけを掴む(media PUT のロック順序の末尾と同じ一段)。
-  //   ロックの後に参照カウントと論理削除を読み直すことで、media PUT との削除/添付の競合を閉じる。
+  //   ロックの後に参照カウント(countAssetReferences=LP型+台帳)と論理削除を読み直すことで、
+  //   media PUT との削除/添付の競合を閉じる。
   it("対象行を FOR UPDATE でロックしてから参照カウントを数える", () => {
     const a = s.search(/FROM dm_lp_assets[\s\S]{0,200}FOR UPDATE/);
-    const c = s.indexOf("tx.dmLpVariantMedia.count");
+    const c = s.indexOf("countAssetReferences(tx");
     expect(a).toBeGreaterThan(-1);
     expect(c).toBeGreaterThan(-1);
     expect(a).toBeLessThan(c);

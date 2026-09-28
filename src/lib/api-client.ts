@@ -726,6 +726,165 @@ export async function fetchSaleDmLpImagePrompt(campaignId: string, lpId: string,
   return apiFetch<{ prompt: string }>(`/api/properties/sale-dm/campaigns/${campaignId}/lp-variants/${lpId}/image-prompt?${p.toString()}`);
 }
 
+// ---------- DMの種類(台帳・設計 2026-09-27 §3.6) ----------
+
+/** 選択肢(物件の欄・発送の画面用)。中身(文面・設定)は含まない。 */
+export type SaleDmScenarioOption = { id: string; name: string; sortOrder: number; autoKey: string | null };
+/** 一覧(管理者)。文面は返さず「登録済みか」だけ。 */
+export type SaleDmScenarioSummary = SaleDmScenarioOption & { active: boolean; hasLetter: boolean; hasLp: boolean; updatedAt: string };
+export type SaleDmScenario = {
+  id: string;
+  name: string;
+  autoKey: string | null;
+  sortOrder: number;
+  active: boolean;
+  designTemplate: string | null;
+  tone: string | null;
+  length: string | null;
+  appeal: string | null;
+  strength: string | null;
+  extraInstruction: string | null;
+  letterBodyTemplate: string | null;
+  lpTone: string | null;
+  lpLength: string | null;
+  lpAppeal: string | null;
+  lpStrength: string | null;
+  lpRawTemplate: string | null;
+  lpHeadline: string | null;
+  lpBodyText: string | null;
+};
+/** PATCH で変えられる項目(サーバーの saleDmScenarioPatchSchema と同じ)。 */
+export type SaleDmScenarioPatch = Partial<
+  Pick<
+    SaleDmScenario,
+    "name" | "sortOrder" | "active" | "designTemplate" | "tone" | "length" | "appeal" | "strength" | "extraInstruction" | "lpTone" | "lpLength" | "lpAppeal" | "lpStrength"
+  >
+>;
+
+const SCENARIO_BASE = "/api/properties/sale-dm/scenarios";
+
+export async function fetchSaleDmScenarioOptions(): Promise<SaleDmScenarioOption[]> {
+  if (USE_MOCK) { await mockDelay(); return []; }
+  return (await apiFetch<{ scenarios: SaleDmScenarioOption[] }>(`${SCENARIO_BASE}/options`)).scenarios;
+}
+
+/** 「使わない」・削除済みも含めた見出し情報(変更履歴で過去の値を名前で出す用)。中身は含まない。 */
+export type SaleDmScenarioOptionAll = SaleDmScenarioOption & { active: boolean; deleted: boolean };
+
+export async function fetchSaleDmScenarioOptionsAll(): Promise<SaleDmScenarioOptionAll[]> {
+  if (USE_MOCK) { await mockDelay(); return []; }
+  return (await apiFetch<{ scenarios: SaleDmScenarioOptionAll[] }>(`${SCENARIO_BASE}/options?includeInactive=1`)).scenarios;
+}
+
+export async function fetchSaleDmScenarios(): Promise<SaleDmScenarioSummary[]> {
+  if (USE_MOCK) { await mockDelay(); return []; }
+  return (await apiFetch<{ scenarios: SaleDmScenarioSummary[] }>(SCENARIO_BASE)).scenarios;
+}
+
+export async function createSaleDmScenario(name: string): Promise<{ id: string }> {
+  if (USE_MOCK) { await mockDelay(); return { id: "mock-scenario" }; }
+  return apiFetch<{ id: string }>(SCENARIO_BASE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function fetchSaleDmScenario(id: string): Promise<SaleDmScenario> {
+  if (USE_MOCK) {
+    await mockDelay();
+    return {
+      id, name: "モックの種類", autoKey: null, sortOrder: 10, active: true,
+      designTemplate: null, tone: null, length: null, appeal: null, strength: null, extraInstruction: null, letterBodyTemplate: null,
+      lpTone: null, lpLength: null, lpAppeal: null, lpStrength: null, lpRawTemplate: null, lpHeadline: null, lpBodyText: null,
+    };
+  }
+  return (await apiFetch<{ scenario: SaleDmScenario }>(`${SCENARIO_BASE}/${id}`)).scenario;
+}
+
+export async function updateSaleDmScenario(id: string, patch: SaleDmScenarioPatch): Promise<{ changedFields: string[] }> {
+  if (USE_MOCK) { await mockDelay(); return { changedFields: Object.keys(patch) }; }
+  return apiFetch<{ changedFields: string[] }>(`${SCENARIO_BASE}/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteSaleDmScenario(id: string): Promise<void> {
+  if (USE_MOCK) { await mockDelay(); return; }
+  await apiFetch<{ ok: true }>(`${SCENARIO_BASE}/${id}`, { method: "DELETE" });
+}
+
+/** 手紙(kind="letter")/LP(kind="lp")の指示文。書き方の設定が揃っていなければ 400。 */
+export async function fetchSaleDmScenarioPrompt(
+  id: string,
+  kind: "letter" | "lp",
+): Promise<{ prompt: string; digest: string; bodyDigest: string; body: string | null }> {
+  if (USE_MOCK) { await mockDelay(); return { prompt: "（モック）指示文", digest: "mock", bodyDigest: "mock", body: null }; }
+  return apiFetch(`${SCENARIO_BASE}/${id}/${kind === "letter" ? "prompt" : "lp-prompt"}`);
+}
+
+export async function saveSaleDmScenarioTemplate(
+  id: string,
+  kind: "letter" | "lp",
+  input: { body: string; promptDigest: string; baseBodyDigest: string },
+): Promise<{ changed: boolean; bodyDigest: string; mediaDropped?: number }> {
+  if (USE_MOCK) { await mockDelay(); return { changed: true, bodyDigest: "mock" }; }
+  return apiFetch(`${SCENARIO_BASE}/${id}/${kind === "letter" ? "template" : "lp-template"}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+/**
+ * 「写真と図」の共用部品(LpMediaPanel)の呼び先。発送のLP型と台帳のLPの両方を同じ部品で
+ * 扱うため、部品は呼び先をこの形で受け取る(プレビューの URL は LpPreviewPanel へ別に渡す)。
+ * ⚠呼び出し側は useMemo で固定して渡すこと(LpMediaPanel は api が変わるたびに読み直す)。
+ */
+export type LpMediaApi = {
+  load: () => Promise<SaleDmLpMediaResponse>;
+  save: (plan: SaleDmLpMediaPlan) => Promise<{ assetCount: number; figureCount: number }>;
+  imagePrompt: (q: { slot: "hero" | "section"; heading?: string; style: "photo" | "illustration" | "flat" }) => Promise<{ prompt: string }>;
+};
+
+export function campaignLpMediaApi(campaignId: string, lpId: string): LpMediaApi {
+  return {
+    load: () => fetchSaleDmLpMedia(campaignId, lpId),
+    save: (plan) => saveSaleDmLpMedia(campaignId, lpId, plan),
+    imagePrompt: (q) => fetchSaleDmLpImagePrompt(campaignId, lpId, q),
+  };
+}
+
+export const SCENARIO_PREVIEW_URL = (scenarioId: string, device: "sp" | "pc") =>
+  `${SCENARIO_BASE}/${scenarioId}/preview?device=${device}`;
+
+export function scenarioLpMediaApi(scenarioId: string): LpMediaApi {
+  return {
+    load: async () => {
+      if (USE_MOCK) { await mockDelay(); return { plan: { hero: null, sections: [] }, headings: [], frozen: false, assets: [] }; }
+      // 台帳には送付の実績が無いので「凍結」は無い(応答にも frozen は含まれない)。
+      const r = await apiFetch<Omit<SaleDmLpMediaResponse, "frozen">>(`${SCENARIO_BASE}/${scenarioId}/media`);
+      return { ...r, frozen: false };
+    },
+    save: async (plan) => {
+      if (USE_MOCK) { await mockDelay(); return { assetCount: 0, figureCount: 0 }; }
+      return apiFetch<{ plan: SaleDmLpMediaPlan; assetCount: number; figureCount: number }>(`${SCENARIO_BASE}/${scenarioId}/media`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(plan),
+      });
+    },
+    imagePrompt: async (q) => {
+      if (USE_MOCK) { await mockDelay(); return { prompt: "（モック）画像プロンプト" }; }
+      const p = new URLSearchParams({ slot: q.slot, style: q.style });
+      if (q.heading) p.set("heading", q.heading);
+      return apiFetch<{ prompt: string }>(`${SCENARIO_BASE}/${scenarioId}/image-prompt?${p.toString()}`);
+    },
+  };
+}
+
 export async function assignSaleDmVariants(
   campaignId: string,
   body: {

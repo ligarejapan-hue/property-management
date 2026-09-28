@@ -25,6 +25,7 @@ import {
   MailX,
   Image as ImageIcon,
   Inbox,
+  Tags,
 } from "lucide-react";
 import { canSee, type AppRole } from "@/lib/nav/roles";
 
@@ -124,6 +125,8 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
       // 査定申込の通知メールを送る Xserver メールボックスの設定(2026-09 新設)。
       { label: "メール送信設定", href: "/admin/mail-settings", icon: ic(Mail), minRole: "admin" },
       { label: "LPの写真", href: "/admin/lp-assets", icon: ic(ImageIcon), minRole: "admin" },
+      // DMの種類(台帳・設計 2026-09-27 §3.6)。手紙とLPの文面を種類ごとに1回だけ作って使い回す。
+      { label: "DMの種類", href: "/admin/dm-scenarios", icon: ic(Tags), minRole: "admin" },
       // ⚠「データ品質」から移動(DM の道具がそこに紛れていた)。
       { label: "送付記録の訂正", href: "/admin/orphan-dm-logs", icon: ic(MailX), minRole: "admin" },
     ],

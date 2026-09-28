@@ -108,3 +108,21 @@ describe("updatePropertySchema: DECIMAL 列の上限いっぱい(@codex P2)", ()
     expect(() => updatePropertySchema.parse({ ...v, exclusiveArea: 1000000 })).toThrow();
   });
 });
+
+describe("updatePropertySchema: dmScenarioId は小文字に揃える(最終レビュー Minor 5)", () => {
+  const UUID_LOWER = "4a4a4a4a-4b4b-4a4a-8a4a-4a4a4a4a4a4a";
+  const UUID_UPPER = UUID_LOWER.toUpperCase();
+
+  it("大文字混じりの UUID を送っても、保存値は小文字になる", () => {
+    const parsed = updatePropertySchema.parse({ version: 1, dmScenarioId: UUID_UPPER });
+    expect(parsed.dmScenarioId).toBe(UUID_LOWER);
+  });
+  it("元から小文字ならそのまま", () => {
+    const parsed = updatePropertySchema.parse({ version: 1, dmScenarioId: UUID_LOWER });
+    expect(parsed.dmScenarioId).toBe(UUID_LOWER);
+  });
+  it("null(自動に戻す)・未指定は変換の対象外のまま通る", () => {
+    expect(updatePropertySchema.parse({ version: 1, dmScenarioId: null }).dmScenarioId).toBeNull();
+    expect(updatePropertySchema.parse({ version: 1 }).dmScenarioId).toBeUndefined();
+  });
+});

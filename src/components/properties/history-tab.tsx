@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Loader2, History, ChevronLeft, ChevronRight, Search } from "lucide-react";
-import { fetchChangeLogs as apiFetchChangeLogs } from "@/lib/api-client";
+import { fetchChangeLogs as apiFetchChangeLogs, fetchSaleDmScenarioOptionsAll, type SaleDmScenarioOptionAll } from "@/lib/api-client";
 import { formatJaDateTime } from "@/lib/format-datetime";
+import { dmScenarioHistoryLabel } from "./dm-scenario-field-model";
 
 interface ChangeLogData {
   id: string;
@@ -55,6 +56,7 @@ const FIELD_LABELS: Record<string, string> = {
   builtYear: "築年",
   structureType: "構造",
   managementCompany: "管理会社",
+  dmScenarioId: "DMの種類",
   // 販売図面から物件・棟へ保存する列(apply-writeback が変更履歴を直接書く)。
   salePrice: "価格",
   saleTaxType: "消費税",
@@ -137,6 +139,25 @@ export default function HistoryTab({
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
+
+  // 「DMの種類」の値は台帳の id なので、名前に直して出す(設計 §3.4)。使わない・削除済みも
+  // 名前が要るので includeInactive の一覧を、その行があるときだけ1回読む。
+  const hasDmScenarioRow = logs.some((l) => l.fieldName === "dmScenarioId");
+  const [scenarioAll, setScenarioAll] = useState<SaleDmScenarioOptionAll[] | "failed" | null>(null);
+  useEffect(() => {
+    if (!hasDmScenarioRow || scenarioAll !== null) return;
+    let alive = true;
+    fetchSaleDmScenarioOptionsAll()
+      .then((all) => { if (alive) setScenarioAll(all); })
+      .catch(() => { if (alive) setScenarioAll("failed"); });
+    return () => { alive = false; };
+  }, [hasDmScenarioRow, scenarioAll]);
+
+  const displayValue = (fieldName: string, value: string | null): string | null => {
+    if (fieldName !== "dmScenarioId") return value;
+    if (scenarioAll === "failed") return value ? "(名前を読み込めませんでした)" : "自動";
+    return dmScenarioHistoryLabel(value, scenarioAll);
+  };
 
   if (error) {
     return (
@@ -262,7 +283,9 @@ export default function HistoryTab({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {logs.map((log) => (
+                {logs.map((raw) => {
+                  const log = { ...raw, oldValue: displayValue(raw.fieldName, raw.oldValue), newValue: displayValue(raw.fieldName, raw.newValue) };
+                  return (
                   <tr key={log.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                     <td className="whitespace-nowrap px-3 py-2 text-gray-500 text-xs dark:text-gray-400">
                       {formatJaDateTime(log.changedAt)}
@@ -297,7 +320,8 @@ export default function HistoryTab({
                       )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

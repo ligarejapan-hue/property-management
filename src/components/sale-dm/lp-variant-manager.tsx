@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Loader2, Plus, Trash2, Pencil, FileText, Copy, Image as ImageIcon, Eye } from "lucide-react";
 import type { SaleDmCampaign, SaleDmLpVariant, SaleDmLpVariantOptions } from "@/lib/api-client";
 import {
@@ -9,6 +9,8 @@ import {
   deleteSaleDmLpVariant,
   fetchSaleDmLpVariantPrompt,
   saveSaleDmLpVariantTemplate,
+  campaignLpMediaApi,
+  LP_PREVIEW_URL,
 } from "@/lib/api-client";
 import { TONE_OPTIONS, LENGTH_OPTIONS, APPEAL_OPTIONS, STRENGTH_OPTIONS } from "@/lib/sale-dm-letter/adjust-model";
 import LpMediaPanel from "./lp-media-panel";
@@ -33,6 +35,9 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
   const [letterNotice, setLetterNotice] = useState<string | null>(null);
   const [mediaFor, setMediaFor] = useState<SaleDmLpVariant | null>(null);
   const [previewFor, setPreviewFor] = useState<SaleDmLpVariant | null>(null);
+  // 「写真と図」の呼び先(共用部品へ注入)。⚠useMemo で固定する(部品は api が変わるたびに読み直す)。
+  const mediaForId = mediaFor?.id ?? null;
+  const mediaApi = useMemo(() => (mediaForId ? campaignLpMediaApi(campaign.id, mediaForId) : null), [campaign.id, mediaForId]);
 
   const run = async (fn: () => Promise<unknown>, keepPanel = false) => {
     if (busy) return;
@@ -212,8 +217,8 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
         </div>
       )}
 
-      {mediaFor && <LpMediaPanel key={mediaFor.id} campaignId={campaign.id} lpId={mediaFor.id} label={mediaFor.label} onClose={() => setMediaFor(null)} />}
-      {previewFor && <LpPreviewPanel key={previewFor.id} campaignId={campaign.id} lpId={previewFor.id} label={previewFor.label} onClose={() => setPreviewFor(null)} />}
+      {mediaFor && mediaApi && <LpMediaPanel key={mediaFor.id} api={mediaApi} label={mediaFor.label} onClose={() => setMediaFor(null)} />}
+      {previewFor && <LpPreviewPanel key={previewFor.id} previewUrl={(d) => LP_PREVIEW_URL(campaign.id, previewFor.id, d)} label={previewFor.label} onClose={() => setPreviewFor(null)} />}
     </div>
   );
 }

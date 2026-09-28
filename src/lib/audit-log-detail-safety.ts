@@ -489,6 +489,23 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
     "providerRequestId",
     "fetchedAt",
   ]),
+  // DMの種類(台帳)の追加・変更・削除(設計 §3.6/§4)。文面・指示文の中身は載せない。
+  // update の changedFields = 変わった列名の配列(値ではない・updatedFields と同型)。
+  sale_dm_scenario_create: new Set(["result"]),
+  sale_dm_scenario_update: new Set(["changedFields"]),
+  sale_dm_scenario_delete: new Set(["result"]),
+  // 台帳の手紙の原本(貼り戻し)保存(Task 5)。文字数だけ・本文は載せない。
+  sale_dm_scenario_letter_template: new Set(["length"]),
+  // 台帳のLPの原本(貼り戻し)保存(Task 6)。文字数と節数だけ・本文・見出しは載せない。
+  sale_dm_scenario_lp_template: new Set(["length", "sectionCount"]),
+  // 台帳の写真と図の枠の保存(Task 7)。件数だけ・見出し・ラベルは載せない。
+  sale_dm_scenario_media_update: new Set(["assetCount", "figureCount"]),
+  // 台帳のLP社内プレビュー閲覧(Task 7)。sale_dm_lp_preview_view と同じキー集合
+  // (campaignId は台帳に無いので載せない。device/viewedAt のみ)。
+  sale_dm_scenario_lp_preview_view: new Set(["device", "viewedAt"]),
+  // 台帳の画像の指示文の閲覧(Task 7)。sale_dm_lp_image_prompt_view と同じキー集合
+  // (campaignId は台帳に無いので載せない。slot/viewedAt のみ)。
+  sale_dm_scenario_lp_image_prompt_view: new Set(["slot", "viewedAt"]),
 };
 
 /**

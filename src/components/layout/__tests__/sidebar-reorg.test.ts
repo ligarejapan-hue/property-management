@@ -184,6 +184,8 @@ describe("DM グループ(新設)", () => {
       "/admin/sale-dm-settings",
       "/admin/mail-settings",
       "/admin/lp-assets",
+      // DMの種類(台帳・設計 2026-09-27 §3.6)は「LPの写真」の次。
+      "/admin/dm-scenarios",
       "/admin/orphan-dm-logs",
     ]);
   });

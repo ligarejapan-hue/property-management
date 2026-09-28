@@ -1,55 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import type { Prisma } from "@/generated/prisma";
 import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmAccess, requireSaleDmWriteAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
 import { SETTLED_DRAFT_STATUSES, isVariantFrozen } from "@/lib/sale-dm-letter/freeze";
 import { lpBodyHeadings } from "@/lib/sale-dm-letter/lp-template";
-import { isFigureKind } from "@/lib/sale-dm-letter/lp-figures";
 import { validateMediaPlan, mediaPlanIssueMessage, referencedAssetIds, type MediaPlan } from "@/lib/sale-dm-letter/lp-media";
+import { rowsToPlan, planToRows } from "@/lib/sale-dm-letter/lp-media-rows";
 import { saleDmLpMediaPutSchema } from "@/lib/validators-sale-dm";
+import { ASSET_REFERENCE_COUNT_SELECT, isAssetReferenced } from "@/lib/sale-dm-letter/asset-references";
 
 type Ctx = { params: Promise<{ id: string; lpId: string }> };
-type MediaRow = { slot: string; heading: string | null; assetId: string | null; figureKind: string | null; sortOrder: number };
 
-const ASSET_SELECT = { id: true, publicId: true, mime: true, width: true, height: true, bytes: true, label: true, createdAt: true, _count: { select: { media: true } } } as const;
+// 台帳(DmScenario)の lp-template route と共有するため、DB行⇄枠(MediaPlan)の変換本体は
+// lib/sale-dm-letter/lp-media-rows へ移設した。既存のインポート元(この route から
+// rowsToPlan/planToRows を import していても)が壊れないよう、そのまま re-export する。
+export { rowsToPlan, planToRows } from "@/lib/sale-dm-letter/lp-media-rows";
 
-/** DB行 → 枠。節は本文の小見出し順に並べ、行が無い節は media:null。 */
-export function rowsToPlan(rows: MediaRow[], headings: string[]): MediaPlan {
-  const hero = rows.find((r) => r.slot === "hero" && r.assetId);
-  const byHeading = new Map(rows.filter((r) => r.slot === "section" && r.heading).map((r) => [r.heading as string, r] as const));
-  return {
-    hero: hero ? { assetId: hero.assetId as string } : null,
-    sections: headings.map((heading) => {
-      const r = byHeading.get(heading);
-      const media = !r ? null : r.assetId ? { kind: "asset" as const, assetId: r.assetId } : r.figureKind && isFigureKind(r.figureKind) ? { kind: "figure" as const, figureKind: r.figureKind } : null;
-      return { heading, media };
-    }),
-  };
-}
-
-/** 枠 → DB行(media:null の節は行を作らない)。 */
-export function planToRows(lpVariantId: string, plan: MediaPlan): Prisma.DmLpVariantMediaCreateManyInput[] {
-  const rows: Prisma.DmLpVariantMediaCreateManyInput[] = [];
-  if (plan.hero) rows.push({ lpVariantId, slot: "hero", heading: null, assetId: plan.hero.assetId, figureKind: null, sortOrder: 0 });
-  plan.sections.forEach((s, i) => {
-    if (!s.media) return;
-    rows.push({
-      lpVariantId,
-      slot: "section",
-      heading: s.heading,
-      assetId: s.media.kind === "asset" ? s.media.assetId : null,
-      figureKind: s.media.kind === "figure" ? s.media.figureKind : null,
-      sortOrder: i + 1,
-    });
-  });
-  return rows;
-}
+const ASSET_SELECT = { id: true, publicId: true, mime: true, width: true, height: true, bytes: true, label: true, createdAt: true, ...ASSET_REFERENCE_COUNT_SELECT } as const;
 
 async function listAssets() {
   const rows = await prisma.dmLpAsset.findMany({ where: { deletedAt: null }, orderBy: { createdAt: "desc" }, select: ASSET_SELECT });
-  return rows.map(({ _count, ...a }) => ({ ...a, referenced: _count.media > 0 }));
+  return rows.map(({ _count, ...a }) => ({ ...a, referenced: isAssetReferenced({ _count }) }));
 }
 
 export async function GET(_req: NextRequest, { params }: Ctx) {
@@ -66,8 +38,13 @@ export async function GET(_req: NextRequest, { params }: Ctx) {
     ]);
     // 同じ小見出しが本文に2回あると節が2件になり枠の保存が壊れるため、重複は1件にまとめる。
     const headings = [...new Set(lpBodyHeadings(v.bodyText ?? ""))];
+    // rowsToPlan は保存済みの行だけを返す(パディングしない)ので、本文の全小見出しへ
+    // 展開するのはここで行う(行が無い見出しは media:null)。
+    const rowPlan = rowsToPlan(rows);
+    const bySection = new Map(rowPlan.sections.map((s) => [s.heading, s.media] as const));
+    const plan: MediaPlan = { hero: rowPlan.hero, sections: headings.map((heading) => ({ heading, media: bySection.get(heading) ?? null })) };
     return NextResponse.json(
-      { plan: rowsToPlan(rows, headings), headings, frozen: isVariantFrozen({ templateFrozenAt: v.templateFrozenAt, settledCount }), assets },
+      { plan, headings, frozen: isVariantFrozen({ templateFrozenAt: v.templateFrozenAt, settledCount }), assets },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
@@ -123,7 +100,8 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
         const found = await tx.dmLpAsset.findMany({ where: { id: { in: assetIds }, deletedAt: null }, select: { id: true } });
         if (found.length !== assetIds.length) throw new ApiError(422, "選んだ写真の一部が削除されています。選び直してください", "ASSET_NOT_FOUND");
       }
-      const rows = planToRows(lpId, plan);
+      // planToRows は外部キー列を持たない汎用行を返すので、ここで lpVariantId を足す。
+      const rows = planToRows(plan).map((r) => ({ ...r, lpVariantId: lpId }));
       await tx.dmLpVariantMedia.deleteMany({ where: { lpVariantId: lpId } });
       if (rows.length > 0) await tx.dmLpVariantMedia.createMany({ data: rows });
       return { headings, assetCount: assetIds.length, figureCount: rows.filter((r) => r.figureKind).length };

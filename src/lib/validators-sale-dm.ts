@@ -1,5 +1,12 @@
 import { z } from "zod";
 import { LP_LIMITS, LP_MAX_SECTIONS } from "@/lib/sale-dm-letter/lp-template";
+import {
+  DESIGN_OPTIONS,
+  TONE_OPTIONS,
+  LENGTH_OPTIONS,
+  APPEAL_OPTIONS,
+  STRENGTH_OPTIONS,
+} from "@/lib/sale-dm-letter/adjust-model";
 
 export const saleDmOptionsSchema = z.object({
   designTemplate: z.enum(["formal", "soft", "impact"]),
@@ -139,3 +146,43 @@ export const saleDmLpImagePromptQuerySchema = z.object({
 });
 
 export const saleDmLpAssetLabelSchema = z.string().trim().max(80);
+
+// ---- DMの種類(台帳)。設計 §3.6/§4。中身(文面・指示文)の読み書きは管理者だけ。
+const scenarioOptionValues = <T extends readonly { value: string }[]>(o: T) =>
+  o.map((x) => x.value) as [T[number]["value"], ...T[number]["value"][]];
+
+export const saleDmScenarioCreateSchema = z.object({
+  name: z.string().trim().min(1).max(40),
+});
+export type SaleDmScenarioCreate = z.infer<typeof saleDmScenarioCreateSchema>;
+
+// 部分更新: 指定された項目だけを変える。手紙/LPそれぞれの設定(語調等)を変えたら、
+// route 側が古いプロンプトで作った文面・指示文を消す(設計 §3.3)。
+// extraInstruction の上限(1000)は既存の DmVariant/campaign options と同じ値に揃える。
+export const saleDmScenarioPatchSchema = z
+  .object({
+    name: z.string().trim().min(1).max(40).optional(),
+    sortOrder: z.number().int().min(0).max(9999).optional(),
+    active: z.boolean().optional(),
+    designTemplate: z.enum(scenarioOptionValues(DESIGN_OPTIONS)).optional(),
+    tone: z.enum(scenarioOptionValues(TONE_OPTIONS)).optional(),
+    length: z.enum(scenarioOptionValues(LENGTH_OPTIONS)).optional(),
+    appeal: z.enum(scenarioOptionValues(APPEAL_OPTIONS)).optional(),
+    strength: z.enum(scenarioOptionValues(STRENGTH_OPTIONS)).optional(),
+    // 空文字("" や空白のみ)は DB の NULL と同義に正規化する(trim 後)。正規化しないと
+    // 保存済み null(初期値・DB seed 行)と送られてきた "" が「変わった」と誤判定され、
+    // 手紙の指示文・本文を不要に消してしまう(レビュー指摘)。
+    extraInstruction: z
+      .string()
+      .trim()
+      .max(1000)
+      .nullable()
+      .optional()
+      .transform((v) => (v === "" ? null : v)),
+    lpTone: z.enum(scenarioOptionValues(TONE_OPTIONS)).optional(),
+    lpLength: z.enum(scenarioOptionValues(LENGTH_OPTIONS)).optional(),
+    lpAppeal: z.enum(scenarioOptionValues(APPEAL_OPTIONS)).optional(),
+    lpStrength: z.enum(scenarioOptionValues(STRENGTH_OPTIONS)).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "更新する項目がありません" });
+export type SaleDmScenarioPatch = z.infer<typeof saleDmScenarioPatchSchema>;

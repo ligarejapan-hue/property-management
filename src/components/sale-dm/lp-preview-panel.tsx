@@ -1,7 +1,6 @@
 "use client";
 import { useState } from "react";
 import { ExternalLink } from "lucide-react";
-import { LP_PREVIEW_URL } from "@/lib/api-client";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Button } from "@/components/ui/button";
 
@@ -12,10 +11,12 @@ const WIDTH: Record<Device, number> = { sp: 390, pc: 1000 };
  *  device は監査用の区別のみで HTML 自体は同じ(preview route 側の注記どおり)。
  *  ⚠実機確認(2026-09-11)で判明: LP型の欄は狭く(約260px)、この枠を欄の中に出すと
  *    1000px の枠が潰れて「実物と同じ見え方」にならない。そのため広いダイアログ
- *    (ModalShell size="xl" = 1080px)で開く(Ruling R7)。 */
-export default function LpPreviewPanel({ campaignId, lpId, label, onClose }: { campaignId: string; lpId: string; label: string; onClose: () => void }) {
+ *    (ModalShell size="xl" = 1080px)で開く(Ruling R7)。
+ *  発送のLP型とDMの種類(台帳)のLPで共用する(設計 2026-09-27 §3.6)。見本の URL は
+ *  previewUrl で受け取る(発送=LP型の見本の口・台帳=SCENARIO_PREVIEW_URL)。 */
+export default function LpPreviewPanel({ previewUrl, label, onClose }: { previewUrl: (device: Device) => string; label: string; onClose: () => void }) {
   const [device, setDevice] = useState<Device>("sp");
-  const src = LP_PREVIEW_URL(campaignId, lpId, device);
+  const src = previewUrl(device);
   return (
     <ModalShell
       title={`「${label}」のプレビュー(見本の差し込み・送付前の帯付き)`}
@@ -50,7 +51,7 @@ export default function LpPreviewPanel({ campaignId, lpId, label, onClose }: { c
               script・form 送信・別窓・親画面への遷移は禁じる(枠の中から画面を乗っ取らせない)。 */}
           <iframe
             key={device}
-            src={LP_PREVIEW_URL(campaignId, lpId, device)}
+            src={previewUrl(device)}
             sandbox="allow-same-origin"
             title={label}
             style={{ width: WIDTH[device], maxWidth: "100%", height: 720 }}

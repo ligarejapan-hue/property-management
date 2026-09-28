@@ -9,6 +9,7 @@ import { stripLpAssetMetadata } from "@/lib/lp-asset-metadata-strip";
 import { readImageDimensions } from "@/lib/image-dimensions";
 import { requireSaleDmAccess, requireSaleDmWriteAccess } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmLpAssetLabelSchema } from "@/lib/validators-sale-dm";
+import { ASSET_REFERENCE_COUNT_SELECT, isAssetReferenced } from "@/lib/sale-dm-letter/asset-references";
 
 /** LP用の写真ライブラリ(設計 2026-09-08 §2.3)。全キャンペーン共通。 */
 export const LP_ASSET_MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -50,9 +51,9 @@ export async function GET(_req: NextRequest) {
     const rows = await prisma.dmLpAsset.findMany({
       where: { deletedAt: null },
       orderBy: { createdAt: "desc" },
-      select: { ...SELECT, _count: { select: { media: true } } },
+      select: { ...SELECT, ...ASSET_REFERENCE_COUNT_SELECT },
     });
-    const assets = rows.map((r) => toPublicAsset(r, r._count.media > 0));
+    const assets = rows.map((r) => toPublicAsset(r, isAssetReferenced(r)));
     return NextResponse.json({ assets }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return handleApiError(error);

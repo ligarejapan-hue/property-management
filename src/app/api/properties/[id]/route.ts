@@ -14,6 +14,8 @@ import { lockPropertyRow } from "@/lib/property-record-guard";
 import { assertNotEditLockedByOther, deleteEditLocksFor } from "@/lib/edit-lock/service";
 import { readScreenTokenHash, readLockId } from "@/lib/edit-lock/screen-token";
 import { updatePropertySchema } from "@/lib/validators";
+import { lockScenarioForShare } from "@/lib/sale-dm-letter/scenario-guard";
+import { canAccessPropertyRecord, isPropertyScopedRole } from "@/lib/property-access";
 import {
   normalizeBuildingName,
   supportsBuildingName,
@@ -232,6 +234,9 @@ export async function PATCH(
         dmStatus: true,
         caseStatus: true,
         introductionRoute: true,
+        // DMの種類(変更履歴の「変更前」に使う。選ばないと自動→手動切替の履歴の
+        // oldValue が常に空になる)。
+        dmScenarioId: true,
         gpsLat: true,
         gpsLng: true,
         zoningDistrict: true,
@@ -396,6 +401,24 @@ export async function PATCH(
         screenTokenHash: readScreenTokenHash(request),
         lockId: lockIdHeader,
       });
+      // DMの種類(設計 2026-09-27 §3.4・§3.6): 物件→台帳の順でロックし、ロック後に有効性を確かめる。
+      // ⚠**値が変わっていなければロックしない**(controller ruling): 既に保存済みの
+      //   dmScenarioId をそのまま送り直しただけの更新(例: 別項目だけを変えた保存)まで
+      //   台帳をロックすると、その種類を後で「使わない」にした瞬間に**無関係な保存**まで
+      //   409 で止まってしまう。新しく選び直した値のときだけ確かめる。
+      if (updateFields.dmScenarioId && updateFields.dmScenarioId !== current.dmScenarioId) {
+        const sc = await lockScenarioForShare(tx, updateFields.dmScenarioId);
+        if (!sc || !sc.active || sc.deletedAt) {
+          throw new ApiError(409, "選んだDMの種類は使えなくなりました。選び直してください", "SCENARIO_UNAVAILABLE");
+        }
+      }
+      // 担当範囲はロック後に読み直して再確認(ロック前の確認の後に担当が付け替えられた場合に書かない・設計§3.3)。
+      if (isPropertyScopedRole(session.role)) {
+        const fresh = await tx.property.findUnique({ where: { id }, select: { createdBy: true, assignedTo: true } });
+        if (!fresh || !canAccessPropertyRecord(session, fresh)) {
+          throw new ApiError(403, "この物件を編集する権限がありません", "FORBIDDEN");
+        }
+      }
       return tx.property.updateMany({
         where: {
           id,

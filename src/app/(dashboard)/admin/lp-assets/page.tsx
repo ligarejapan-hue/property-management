@@ -53,7 +53,7 @@ export default function AdminLpAssetsPage() {
               )}
               <div className="flex items-center justify-between px-2 py-1.5 text-xs">
                 <span className="truncate text-gray-700">{a.label ?? "(ラベルなし)"} · {a.width}×{a.height} · {Math.round(a.bytes / 1024)}KB</span>
-                <button type="button" onClick={() => setTarget(a)} disabled={a.referenced} title={a.referenced ? "LP型で使われています" : "削除"} className="text-red-600 disabled:opacity-40"><Trash2 className="h-4 w-4" /></button>
+                <button type="button" onClick={() => setTarget(a)} disabled={a.referenced} title={a.referenced ? "LPまたはDMの種類で使われています" : "削除"} className="text-red-600 disabled:opacity-40"><Trash2 className="h-4 w-4" /></button>
               </div>
             </li>
           ))}
