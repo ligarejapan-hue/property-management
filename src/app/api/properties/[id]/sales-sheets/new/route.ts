@@ -467,6 +467,14 @@ export async function POST(
           saleTaxAmount: property.saleTaxAmount?.toString() ?? null,
           access: property.access,
           parking: property.parking,
+          // 棟に紐づいていない区分の「棟の項目」(unit-building-facts.ts)。棟があれば
+          // 棟の値が正なので、buildMansionValues はこちらを使わない。
+          structureType: property.structureType,
+          aboveFloors: property.aboveFloors,
+          basementFloors: property.basementFloors,
+          totalUnits: property.totalUnits,
+          builtYear: property.builtYear,
+          builtMonth: property.builtMonth,
         },
         // ⚠**建物マスタが無くても物件名だけは渡す** (@codex #354 P2)。
         // 建物マスタを作らずに登録した区分マンションは property.building が

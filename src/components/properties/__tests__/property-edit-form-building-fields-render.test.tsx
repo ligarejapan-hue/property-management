@@ -155,6 +155,30 @@ describe("PropertyEditForm レンダリング固定: 区分マンションの棟
     });
   });
 
+  // 本番の区分は全件が棟に紐づいていない(2026-09-27 実測)。棟が無い区分は、この5項目を
+  // 物件そのものの欄として入れる(unit-building-facts.ts)。以前はどこにも入れる場所が無かった。
+  describe("apartment_unit(区分マンション・棟に紐づかない)", () => {
+    const html = renderToStaticMarkup(
+      <PropertyEditForm
+        property={makeProperty("apartment_unit", null)}
+        onClose={() => {}}
+        onSaved={() => {}}
+      />,
+    );
+
+    it.each(BUILDING_FIELD_LABELS)(
+      "棟項目「%s」が編集できる入力欄(label→input)として出る",
+      (label) => {
+        expect(hasEditableInputFor(html, label)).toBe(true);
+      },
+    );
+
+    it("読み取り専用ブロックと「棟の画面で直す」リンクは出さない", () => {
+      expect(html).not.toContain("棟の項目(この画面では変更できません)");
+      expect(html).not.toContain("棟の画面で直す");
+    });
+  });
+
   describe("apartment_building(一棟)は比較対象: 同じ項目が編集可能な入力欄として出る", () => {
     const html = renderToStaticMarkup(
       <PropertyEditForm

@@ -233,10 +233,16 @@ export async function runEditLockInit(
 
 /**
  * 「販売」区分に出す欄(物件の種別ごと)。仕様書 §5.1。
- * ⚠区分マンションの構造・地上階・総戸数は含めない(棟の値が正・読み取り専用の
- *   別ブロックで表示する)。
+ * ⚠区分マンションの構造・地上階・地下階・総戸数・築年月は、**棟に紐づいていれば**
+ *   含めない(棟の値が正・読み取り専用の別ブロックで表示する)。棟に紐づいていなければ
+ *   物件そのものの欄として出す(unit-building-facts.ts・本番の区分は全件が棟なし)。
+ * `hasBuilding` を省くと従来どおり(棟あり)として扱う。
  */
-export function salesFieldsFor(propertyType: string): FormField[] {
+export function salesFieldsFor(
+  propertyType: string,
+  opts: { hasBuilding?: boolean } = {},
+): FormField[] {
+  const hasBuilding = opts.hasBuilding ?? true;
   const price: FormField[] = [
     { key: "salePrice", label: "価格(万円)", type: "number", section: "販売" },
   ];
@@ -283,6 +289,17 @@ export function salesFieldsFor(propertyType: string): FormField[] {
         { key: "managementFee", label: "管理費(円/月)", type: "number", section: "販売" },
         { key: "repairReserveFee", label: "修繕積立金(円/月)", type: "number", section: "販売" },
         { key: "parking", label: "駐車場", type: "text", section: "販売" },
+        // 棟に紐づいていない区分は、棟の項目を物件の欄として入れる。
+        ...(hasBuilding
+          ? []
+          : [
+              { key: "builtYear", label: "築年", type: "number", section: "販売" },
+              { key: "builtMonth", label: "築月", type: "number", section: "販売" },
+              { key: "structureType", label: "構造", type: "text", section: "販売" },
+              { key: "aboveFloors", label: "地上階", type: "number", section: "販売" },
+              { key: "basementFloors", label: "地下階", type: "number", section: "販売" },
+              { key: "totalUnits", label: "総戸数", type: "number", section: "販売" },
+            ] satisfies FormField[]),
       ];
     default:
       return [];
@@ -446,7 +463,9 @@ export default function PropertyEditForm({
   // 「販売」区分の欄は種別ごとに変わる(編集中の select 変更にも追従する)。
   // ⚠values.propertyType は上の effect が走るまで未設定なので property.propertyType へ
   //   フォールバックする(初回描画のちらつき防止)。
-  const salesFields = salesFieldsFor(values.propertyType ?? property.propertyType);
+  const salesFields = salesFieldsFor(values.propertyType ?? property.propertyType, {
+    hasBuilding: property.building != null,
+  });
   const allFields = [...FORM_FIELDS, ...salesFields];
   const isMansion = isMansionUnit(values.propertyType ?? property.propertyType);
 
