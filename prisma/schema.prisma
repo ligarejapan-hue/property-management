@@ -203,6 +203,11 @@ model User {
   dmExportBatches         DmExportBatch[]         @relation("DmExportBatchCreator")
   lpAssets                DmLpAsset[]             @relation("DmLpAssetCreator")
   editLocks               EditLock[]
+  agentsCreated           Agent[]                 @relation("AgentCreatedBy")
+  agentInquiriesAssigned  AgentInquiry[]          @relation("AgentInquiryAssignee")
+  agentInquiriesCreated   AgentInquiry[]          @relation("AgentInquiryCreatedBy")
+  agentViewingsAttended   AgentViewing[]          @relation("AgentViewingAttendant")
+  adPermissionsUpdated    PropertyAdPermission[]  @relation("PropertyAdPermissionUpdatedBy")
 
   @@map("users")
 }
@@ -408,6 +413,8 @@ model Property {
   dmRecipientDrafts  DmRecipientDraft[]
   registryFetchJobItems RegistryFetchJobItem[]  @relation("RegistryFetchJobItemProperty")
   dmExportBatchItems DmExportBatchItem[]
+  agentInquiries     AgentInquiry[]
+  adPermissions      PropertyAdPermission[]
 
   @@index([caseStatus])
   @@index([introductionRoute])
@@ -1662,4 +1669,138 @@ model EditLock {
   @@unique([resourceType, resourceId])
   @@index([userId])
   @@map("edit_locks")
+}
+
+// ============================================================
+// 業者からの反響の受付(設計 docs/superpowers/specs/2026-09-28-agent-inquiry-desk-design.md)
+// ============================================================
+
+enum AgentInquiryKind {
+  viewing
+  ad_permission
+  material_request
+}
+
+enum AgentInquiryChannel {
+  phone
+  email
+  fax
+}
+
+enum AgentInquiryStatus {
+  open
+  in_progress
+  done
+}
+
+enum ViewingType {
+  guided
+  preview
+}
+
+enum AdMedium {
+  own_site
+  athome
+  suumo
+  homes
+  other_portal
+  flyer
+}
+
+enum AdPermissionValue {
+  ok
+  ng
+  ask
+}
+
+/// 業者の名簿(設計 §1)。会社の情報だけ(電話=代表電話)。担当者個人は反響の側に持つ。
+model Agent {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyName String   @map("company_name")
+  companyKana String?  @map("company_kana")
+  branchName  String?  @map("branch_name")
+  licenseNo   String?  @map("license_no")
+  phone       String
+  fax         String?
+  email       String?
+  address     String?
+  note        String?
+  isArchived  Boolean  @default(false) @map("is_archived")
+  version     Int      @default(1)
+  createdById String   @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  createdBy User           @relation("AgentCreatedBy", fields: [createdById], references: [id])
+  inquiries AgentInquiry[]
+
+  @@index([companyName])
+  @@map("agents")
+}
+
+/// 業者からの反響(設計 §1)。所有者本人からの「査定の申込」(DmInquiry)とは別物。
+model AgentInquiry {
+  id            String              @id @default(uuid()) @db.Uuid
+  propertyId    String              @map("property_id") @db.Uuid
+  agentId       String              @map("agent_id") @db.Uuid
+  contactName   String?             @map("contact_name")
+  contactMobile String?             @map("contact_mobile")
+  contactEmail  String?             @map("contact_email")
+  kind          AgentInquiryKind
+  channel       AgentInquiryChannel @default(phone)
+  receivedAt    DateTime            @default(now()) @map("received_at")
+  status        AgentInquiryStatus  @default(open)
+  assigneeId    String?             @map("assignee_id") @db.Uuid
+  note          String?
+  version       Int                 @default(1)
+  createdById   String              @map("created_by_id") @db.Uuid
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  property  Property       @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  agent     Agent          @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  assignee  User?          @relation("AgentInquiryAssignee", fields: [assigneeId], references: [id])
+  createdBy User           @relation("AgentInquiryCreatedBy", fields: [createdById], references: [id])
+  viewings  AgentViewing[]
+
+  @@index([status, receivedAt])
+  @@index([propertyId, receivedAt])
+  @@index([agentId, receivedAt])
+  @@map("agent_inquiries")
+}
+
+/// 内見の予定(1反響に複数)。scheduledAt が空=日程調整中。
+model AgentViewing {
+  id          String      @id @default(uuid()) @db.Uuid
+  inquiryId   String      @map("inquiry_id") @db.Uuid
+  scheduledAt DateTime?   @map("scheduled_at")
+  viewingType ViewingType @map("viewing_type")
+  attendantId String?     @map("attendant_id") @db.Uuid
+  resultNote  String?     @map("result_note")
+  canceledAt  DateTime?   @map("canceled_at")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  inquiry   AgentInquiry @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  attendant User?        @relation("AgentViewingAttendant", fields: [attendantId], references: [id])
+
+  @@index([scheduledAt])
+  @@index([inquiryId])
+  @@map("agent_viewings")
+}
+
+/// 広告の可否(物件×媒体で1行・未設定=行なし)。区分は部屋=Property 行ごと。
+model PropertyAdPermission {
+  id          String            @id @default(uuid()) @db.Uuid
+  propertyId  String            @map("property_id") @db.Uuid
+  medium      AdMedium
+  value       AdPermissionValue
+  updatedById String            @map("updated_by_id") @db.Uuid
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  property  Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  updatedBy User     @relation("PropertyAdPermissionUpdatedBy", fields: [updatedById], references: [id])
+
+  @@unique([propertyId, medium])
+  @@map("property_ad_permissions")
 }

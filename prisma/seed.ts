@@ -266,6 +266,13 @@ async function main() {
     { templateId: fieldStaffTemplate.id, resource: "registry_pdf", action: "download", granted: true },
     { templateId: officeStaffTemplate.id, resource: "registry_pdf", action: "download", granted: true },
     { templateId: adminTemplate.id, resource: "registry_pdf", action: "download", granted: true },
+    // 反響の受付(設計 2026-09-28 §4)。全員が使う=3テンプレートすべてに付与。
+    { templateId: fieldStaffTemplate.id, resource: "agent_inquiry", action: "read", granted: true },
+    { templateId: officeStaffTemplate.id, resource: "agent_inquiry", action: "read", granted: true },
+    { templateId: adminTemplate.id, resource: "agent_inquiry", action: "read", granted: true },
+    { templateId: fieldStaffTemplate.id, resource: "agent_inquiry", action: "write", granted: true },
+    { templateId: officeStaffTemplate.id, resource: "agent_inquiry", action: "write", granted: true },
+    { templateId: adminTemplate.id, resource: "agent_inquiry", action: "write", granted: true },
   ];
 
   for (const entry of templateEntries) {
