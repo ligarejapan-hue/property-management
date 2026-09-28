@@ -14,6 +14,8 @@ import { resolveCurrentAddressWrite } from "@/lib/owner-current-address-write";
 import { hasPermission, maskValue, hasExplicitWritePerm } from "@/lib/permissions";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import { phoneSearchDigits } from "@/lib/phone-format-jp";
+import { findOwnerIdsByPhoneDigits } from "@/lib/owner-phone-search";
 
 // ---------- GET /api/owners ----------
 
@@ -54,6 +56,12 @@ export async function GET(request: NextRequest) {
       }
       if (searchable(displayConfig.phone)) {
         or.push({ phone: { contains: keyword } });
+        // ハイフンの有無・打ちかけの番号でも当たるよう、数字だけでも比べる(保存値はハイフンありへ統一中)。
+        const digits = phoneSearchDigits(keyword);
+        if (digits) {
+          const ids = await findOwnerIdsByPhoneDigits(digits);
+          if (ids.length > 0) or.push({ id: { in: ids } });
+        }
       }
       if (searchable(displayConfig.address)) {
         or.push({ address: { contains: keyword, mode: "insensitive" } });

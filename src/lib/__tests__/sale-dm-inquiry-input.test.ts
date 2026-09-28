@@ -34,7 +34,10 @@ describe("parseInquiryForm", () => {
       expect(parseInquiryForm(form({ ...OK, phone }))).toEqual({ kind: "invalid", errors: ["phone_invalid"] });
     }
     expect(parseInquiryForm(form({ ...OK, phone: "+81 90 1234 5678" }))).toMatchObject({ kind: "ok", value: { phone: "+819012345678" } });
-    expect(parseInquiryForm(form({ ...OK, phone: "090　1234　5678" }))).toMatchObject({ kind: "ok", value: { phone: "09012345678" } });
+    // 発注者決定(2026-09-26): 保存はハイフンありにそろえる(区切る位置は携帯/固定で違う=市外局番の表で判定)。
+    expect(parseInquiryForm(form({ ...OK, phone: "090　1234　5678" }))).toMatchObject({ kind: "ok", value: { phone: "090-1234-5678" } });
+    expect(parseInquiryForm(form({ ...OK, phone: "09012345678" }))).toMatchObject({ kind: "ok", value: { phone: "090-1234-5678" } });
+    expect(parseInquiryForm(form({ ...OK, phone: "0466123456" }))).toMatchObject({ kind: "ok", value: { phone: "0466-12-3456" } });
   });
   it("メール: 形式不正・254字超は不正。空は null", () => {
     expect(parseInquiryForm(form({ ...OK, email: "not-mail" }))).toEqual({ kind: "invalid", errors: ["email_invalid"] });

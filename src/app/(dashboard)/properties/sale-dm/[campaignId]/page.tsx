@@ -22,6 +22,8 @@ import SaleDmLpVariantManager from "@/components/sale-dm/lp-variant-manager";
 import SaleDmRecipientList from "@/components/sale-dm/recipient-list";
 import SaleDmAggregateView from "@/components/sale-dm/aggregate-view";
 import SaleDmInquiryList from "@/components/sale-dm/inquiry-list";
+import { SaleDmStepGuide } from "@/components/sale-dm/step-guide";
+import { computeSaleDmGuideStep } from "@/lib/sale-dm-letter/step-guide";
 
 export default function SaleDmWorkspacePage() {
   const params = useParams<{ campaignId: string }>();
@@ -96,12 +98,62 @@ export default function SaleDmWorkspacePage() {
   // 本文が空(生成失敗 or 型変更で要再生成)の下書きは confirm route が確定対象から除外するため、
   // 「確定(N)」の件数も本文ありに限定し、ボタン件数と実際に確定される件数を一致させる。
   const draftIds = useMemo(
-    () => (campaign?.recipients ?? []).filter((r) => r.status === "draft" && r.body !== "").map((r) => r.id),
+    // ⚠拒否・宛先不明の宛先は入れない。確定は1件でも含むとまとめて断られ、送れる宛先まで確定できない
+    //   (@codex #449 R5)。印刷・送付からも外れる宛先。
+    () =>
+      (campaign?.recipients ?? [])
+        .filter((r) => r.status === "draft" && r.body !== "" && !r.terminalExcluded)
+        .map((r) => r.id),
     [campaign],
   );
   const confirmedIds = useMemo(
-    () => (campaign?.recipients ?? []).filter((r) => r.status === "confirmed").map((r) => r.id),
+    // 拒否・宛先不明の宛先は送付済みにできない(サーバーが断る)=ボタンの対象と件数から外す(@codex #449 R7)。
+    // 取得後に記録された分は、これまでどおりサーバーが断り、画面が件数で知らせる。
+    () =>
+      (campaign?.recipients ?? [])
+        .filter((r) => r.status === "confirmed" && !r.terminalExcluded)
+        .map((r) => r.id),
     [campaign],
+  );
+
+  // 手順の案内: 「印刷」はデータに残らない。別タブの印刷が本当にできたかも画面からは分からない
+  // (設定不足の503・ポップアップの遮断など)。そこで印刷を押しただけでは進めず、帯の「印刷できた」を
+  // 押したときの確定済みの顔ぶれを覚える(@codex #449 R1 P1: 失敗した印刷のまま送付済みへ進ませない)。
+  // 顔ぶれが変わった(新たに確定した)ら、もう一度印刷の段に戻す。
+  // 顔ぶれは「印刷に出る」確定済み(拒否・宛先不明を除く)で作る。印刷に出なかった宛先が後から出るように
+  // なったら、もう一度印刷の段に戻す(@codex #449 R6)。
+  const confirmedSig = useMemo(
+    () =>
+      (campaign?.recipients ?? [])
+        .filter((r) => r.status === "confirmed" && !r.terminalExcluded)
+        .map((r) => r.id)
+        .join(","),
+    [campaign],
+  );
+  const [printedFor, setPrintedFor] = useState<string | null>(null);
+  const [printClickedFor, setPrintClickedFor] = useState<string | null>(null);
+  // 「LP型を使わずに進む」(このキャンペーンについて・この端末に覚える)。LP型が1つも無いときだけ効く。
+  const skipLpKey = `pm-sale-dm-guide-skip-lp:${campaignId}`;
+  const [skipLp, setSkipLp] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(skipLpKey) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const guideState = useMemo(
+    () =>
+      campaign
+        ? computeSaleDmGuideStep({
+            recipients: campaign.recipients,
+            variants: campaign.variants,
+            lpVariants: campaign.lpVariants,
+            printed: printedFor !== null && printedFor === confirmedSig,
+            skipLp,
+          })
+        : "no_recipients",
+    [campaign, printedFor, confirmedSig, skipLp],
   );
 
   // 操作を実行 → 再取得(状態を最新化)。失敗はエラー表示。
@@ -185,6 +237,26 @@ export default function SaleDmWorkspacePage() {
         </div>
       )}
 
+      {/* 手順の案内(次に押すボタンを光らせる・発注者決定 2026-09-27)。 */}
+      <SaleDmStepGuide
+        state={guideState}
+        onSkipLp={
+          (campaign?.lpVariants.length ?? 0) === 0
+            ? () => {
+                setSkipLp(true);
+                try {
+                  window.localStorage.setItem(skipLpKey, "1");
+                } catch {
+                  // 保存できない端末では、この画面を開いているあいだだけ効く。
+                }
+              }
+            : undefined
+        }
+        onPrintConfirmed={
+          printClickedFor !== null && printClickedFor === confirmedSig ? () => setPrintedFor(confirmedSig) : undefined
+        }
+      />
+
       {/* 送付フロー: 確定(draft→confirmed)→ 印刷/CSV → 送付済み(confirmed→sent・反響入力解禁) */}
       <div className="flex flex-wrap items-center gap-2">
         {draftIds.length > 0 && (
@@ -192,6 +264,7 @@ export default function SaleDmWorkspacePage() {
             type="button"
             onClick={() => runAction(() => confirmSaleDmDrafts(draftIds))}
             disabled={actionBusy}
+            data-guide="confirm"
             className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             title="下書きを確定する(印刷対象は確定済みのみ)"
           >
@@ -201,8 +274,12 @@ export default function SaleDmWorkspacePage() {
         )}
         <button
           type="button"
-          onClick={() => window.open(saleDmPrintUrl(campaignId), "_blank", "noopener")}
+          onClick={() => {
+            if (confirmedSig !== "") setPrintClickedFor(confirmedSig);
+            window.open(saleDmPrintUrl(campaignId), "_blank", "noopener");
+          }}
           disabled={actionBusy}
+          data-guide="print"
           className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           title="確定済みの手紙を別タブで開いて印刷"
         >
@@ -224,6 +301,7 @@ export default function SaleDmWorkspacePage() {
             type="button"
             onClick={() => runAction(() => markConfirmedSentBulk(confirmedIds))}
             disabled={actionBusy}
+            data-guide="sent"
             className="inline-flex items-center gap-1.5 rounded-md border border-green-300 bg-white px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 disabled:opacity-50"
             title="確定済みを送付済みにする(配達結果・反響の入力が解禁)"
           >

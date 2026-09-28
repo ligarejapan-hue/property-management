@@ -10,6 +10,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import { lockPropertyRecordForWrite } from "@/lib/property-record-guard";
 import { getStorage } from "@/lib/storage";
 import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
 
@@ -115,23 +116,30 @@ export async function PATCH(
       sortOrder?: number;
     };
 
-    if (body.isPrimary === true) {
-      await prisma.propertyPhoto.updateMany({
-        where: { propertyId: id, id: { not: photoId } },
-        data: { isPrimary: false },
+    // ⚠「他の代表を外す」と「この写真を代表にする」は同じトランザクションで、先に
+    //   親の物件行を押さえてから行う(物件配下の書き込み規約=親 → 子)。以前は tx 外の
+    //   2文だったため、2人が別々の写真を同時に代表にすると代表が2枚になりえた。
+    //   押さえた後は同じ物件の切り替えが直列になり、後から押した写真が代表になる。
+    //   ロックは担当者スコープつき=判定から書き込みまでの間に担当が外れたら403。
+    const updated = await prisma.$transaction(async (tx) => {
+      await lockPropertyRecordForWrite(tx, id, session);
+      if (body.isPrimary === true) {
+        await tx.propertyPhoto.updateMany({
+          where: { propertyId: id, id: { not: photoId }, isPrimary: true },
+          data: { isPrimary: false },
+        });
+      }
+      return tx.propertyPhoto.update({
+        where: { id: photoId },
+        data: {
+          ...(body.caption !== undefined && { caption: body.caption?.trim() || null }),
+          ...(body.isPrimary !== undefined && { isPrimary: body.isPrimary }),
+          ...(body.sortOrder !== undefined && { sortOrder: body.sortOrder }),
+        },
+        include: {
+          photographer: { select: { id: true, name: true } },
+        },
       });
-    }
-
-    const updated = await prisma.propertyPhoto.update({
-      where: { id: photoId },
-      data: {
-        ...(body.caption !== undefined && { caption: body.caption?.trim() || null }),
-        ...(body.isPrimary !== undefined && { isPrimary: body.isPrimary }),
-        ...(body.sortOrder !== undefined && { sortOrder: body.sortOrder }),
-      },
-      include: {
-        photographer: { select: { id: true, name: true } },
-      },
     });
 
     return apiResponse({ data: updated });

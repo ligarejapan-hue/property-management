@@ -65,10 +65,9 @@ export async function PATCH(
     if (data.actionType !== undefined) updateData.actionType = data.actionType;
     if (data.scheduledAt !== undefined)
       updateData.scheduledAt = new Date(data.scheduledAt);
-    if (data.isCompleted !== undefined) {
-      updateData.isCompleted = data.isCompleted;
-      updateData.completedAt = data.isCompleted ? new Date() : null;
-    }
+    // 完了時刻(completedAt)は下の tx の中で今の値を見て決める(完了済みなら触らない)。
+    if (data.isCompleted !== undefined) updateData.isCompleted = data.isCompleted;
+    if (data.isCompleted === false) updateData.completedAt = null;
 
     // ⚠**書き込みはスコープを where に畳み込んで原子化する**（@codex #338 P2）。
     // 上のガードは受付時点の判定なので、判定から更新までの間に担当が付け替わると
@@ -81,6 +80,17 @@ export async function PATCH(
     const updated = await prisma.$transaction(async (tx) => {
       // 親の物件行を先にロックする（@codex #338 R7・全書き込み共通）。
       await lockPropertyRecordForWrite(tx, propertyId, session);
+      // ⚠すでに完了している予定を再び「完了」にしても、最初の完了時刻は残す。
+      //   画面は目的の値を送るので、2人がほぼ同時に「完了」を押すと2人目も true を
+      //   送ってくる(以前はその時刻で上書きしていた)。親の物件行を押さえた後なので、
+      //   ここで読んだ値と下の更新の間に他の更新は割り込まない。
+      if (data.isCompleted === true) {
+        const current = await tx.nextAction.findUnique({
+          where: { id: actionId },
+          select: { isCompleted: true },
+        });
+        if (!current?.isCompleted) updateData.completedAt = new Date();
+      }
       const applied = await tx.nextAction.updateMany({
         where: { id: actionId, propertyId, ...(scope ? { property: scope } : {}) },
         data: updateData,

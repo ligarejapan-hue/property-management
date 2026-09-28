@@ -296,6 +296,8 @@ describe("書き込みの原子性（@codex #338 P2）", () => {
       "src/app/api/properties/[id]/next-actions/route.ts",
       "src/app/api/properties/[id]/next-actions/[actionId]/route.ts",
       "src/app/api/properties/[id]/candidates/[candidateId]/judge/route.ts",
+      // 代表写真の切り替え(他の代表を外す+この写真を代表にする)も親 → 子の順。
+      "src/app/api/properties/[id]/photos/[photoId]/route.ts",
     ]) {
       const src = read(p);
       const txs = src.match(/\$transaction\(async \(tx\) => \{[\s\S]*?\n {4}\}\);/g) ?? [];

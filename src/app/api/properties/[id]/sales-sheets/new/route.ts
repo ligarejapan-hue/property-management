@@ -127,8 +127,11 @@ const mansionOverridesSchema = z.object({
   // exclusiveArea/balconyArea/balconyDir/layout/floorNo も同様(上記コメント参照)。
   exclusiveArea: z.string().max(200).optional(),
   balconyArea: z.string().max(200).optional(),
-  balconyDir: z.string().max(50).optional(),
-  layout: z.string().max(50).optional(),
+  // ⚠物件の列の上限(50字)で切らない(@codex P2 #448)。ここで切ると、51字以上は
+  //   図面の作成ごと断られる。図面は作り、物件への保存だけを見送って知らせる
+  //   (buildWriteback の tooLong・交通と同じ扱い)。上限はほかの自由記述の欄にそろえる。
+  balconyDir: z.string().max(200).optional(),
+  layout: z.string().max(200).optional(),
   floorNo: z.string().max(50).optional(),
   basementFloors: z.string().max(50).optional(),
   builtYearMonth: z.string().max(100).optional(),
@@ -566,14 +569,24 @@ export async function POST(
       saved: [] as string[],
       unreadable: [] as string[],
       noTarget: [] as string[],
+      tooLong: [] as string[],
       conflict: false,
     };
-    const conflictWriteback = {
+    // 物件に保存できなかった理由を知らせに出す(いつも「他の人が先に更新」と言うと、
+    // 誰も触っていないのに利用者を不安にさせる)。文言は WritebackNotice が持つ。
+    //   stale            = 物件(または書き込み条件)の版が今と違う
+    //   missing_version  = 照合に要る版番号・棟の id が届いていない(古い画面など)
+    //   building_stale   = 棟の版が今と違う(他の人が先に棟を更新)
+    //   building_changed = 部屋の所属する棟が変わっていた
+    type ConflictReason = "stale" | "missing_version" | "building_stale" | "building_changed";
+    const conflictWriteback = (conflictReason: ConflictReason) => ({
       saved: [] as string[],
       unreadable: [] as string[],
       noTarget: [] as string[],
+      tooLong: [] as string[],
       conflict: true,
-    };
+      conflictReason,
+    });
 
     // 図面の作成 + 物件・棟への保存（読み取れた値のみ）を1トランザクションにまとめる
     // （原子性: 途中で失敗したら図面も作らない）。物件配下を書き換える前に親の行を
@@ -659,14 +672,17 @@ export async function POST(
       });
       if (!fresh) {
         // FOR UPDATE の直後に消えている(想定外)。writeback は諦め図面だけ作る。
-        return { design: created, writeback: conflictWriteback };
+        return { design: created, writeback: conflictWriteback("stale") };
       }
 
       // C2/I6: saveToProperty=true なのに version が無い/数値でない場合は無条件で
       // 上書きせず conflict 扱いにする(version を送らない呼び出しは物件へ書かない)。
       // 図面自体は作る。
-      if (propertyVersion === null || propertyVersion !== fresh.version) {
-        return { design: created, writeback: conflictWriteback };
+      if (propertyVersion === null) {
+        return { design: created, writeback: conflictWriteback("missing_version") };
+      }
+      if (propertyVersion !== fresh.version) {
+        return { design: created, writeback: conflictWriteback("stale") };
       }
 
       const result = buildWriteback({
@@ -685,13 +701,15 @@ export async function POST(
         // 別処理が部屋の所属棟を張り替えると(この経路は物件の版番号を進めない)、新旧の棟が
         // たまたま同じ版番号のときに「別の棟へ入れるはずだった値」が通ってしまう。
         // 古いクライアントは buildingId を送らない=照合できない=安全側で conflict。
-        if (
-          buildingVersion === null ||
-          buildingVersion !== fresh.building!.version ||
-          buildingId === null ||
-          buildingId !== fresh.building!.id
-        ) {
-          return { design: created, writeback: conflictWriteback };
+        if (buildingVersion === null || buildingId === null) {
+          return { design: created, writeback: conflictWriteback("missing_version") };
+        }
+        // 棟の取り違えを先に見る(別の棟なら版番号の比較に意味が無い)。
+        if (buildingId !== fresh.building!.id) {
+          return { design: created, writeback: conflictWriteback("building_changed") };
+        }
+        if (buildingVersion !== fresh.building!.version) {
+          return { design: created, writeback: conflictWriteback("building_stale") };
         }
       }
       const applied = await applyWriteback(tx, {
@@ -706,7 +724,7 @@ export async function POST(
       if (!applied.ok) {
         // FOR UPDATE 下では理論上起きないはずだが、書き込み自体にも条件を付ける
         // (@codex #394 R29 P1 と同じ考え方)防御として扱う。
-        return { design: created, writeback: conflictWriteback };
+        return { design: created, writeback: conflictWriteback("stale") };
       }
 
       return {
@@ -715,6 +733,7 @@ export async function POST(
           saved: labelsOf(kind, result),
           unreadable: result.unreadable,
           noTarget: result.noTarget,
+          tooLong: result.tooLong,
           conflict: false,
         },
       };

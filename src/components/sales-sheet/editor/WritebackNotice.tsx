@@ -8,6 +8,21 @@ export type WritebackSummary = {
   conflict: boolean;
   /** 入力されたが保存先が無かった項目([@codex P2]・棟に紐づいていない区分の棟項目)。 */
   noTarget?: string[];
+  /** 物件の欄に入る文字数を超えた項目(反映前に作られた知らせには無い)。 */
+  tooLong?: string[];
+  /**
+   * 物件に保存できなかった理由(`conflict: true` のとき)。無い(反映前の知らせ)・
+   * `stale` は「他の人が先に物件を更新」。
+   */
+  conflictReason?: "stale" | "missing_version" | "building_stale" | "building_changed";
+};
+
+const CONFLICT_MESSAGES: Record<NonNullable<WritebackSummary["conflictReason"]>, string> = {
+  stale: "他の人が先に物件を更新していたため、物件には保存していません(図面は作成済みです)",
+  missing_version:
+    "物件の最新の状態を確かめられなかったため、物件には保存していません(図面は作成済みです)。画面を開き直してから作ると保存できます",
+  building_stale: "他の人が先に棟を更新していたため、物件・棟には保存していません(図面は作成済みです)",
+  building_changed: "この部屋の所属する棟が変わっていたため、物件・棟には保存していません(図面は作成済みです)",
 };
 
 /** 知らせの文言(純関数・テストで固定する)。 */
@@ -15,10 +30,17 @@ export function writebackMessages(s: WritebackSummary): string[] {
   const out: string[] = [];
   if (s.saved.length > 0) out.push(`${s.saved.join("・")}を物件に保存しました`);
   if (s.conflict) {
-    out.push("他の人が先に物件を更新していたため、物件には保存していません(図面は作成済みです)");
+    // 知らない理由(将来の値)が来ても従来の文に倒す。
+    out.push(CONFLICT_MESSAGES[s.conflictReason ?? "stale"] ?? CONFLICT_MESSAGES.stale);
   }
   if (s.unreadable.length > 0) {
     out.push(`${s.unreadable.join("・")}は数値や年月として読み取れなかったため、物件には保存していません`);
+  }
+  const tooLong = s.tooLong ?? [];
+  if (tooLong.length > 0) {
+    out.push(
+      `${tooLong.join("・")}は物件の欄に入る文字数を超えているため、物件には保存していません(図面にはそのまま載っています)`,
+    );
   }
   // 反映前に作られた知らせ(noTarget が無い)でも壊れないように ?? [] で受ける。
   const noTarget = s.noTarget ?? [];

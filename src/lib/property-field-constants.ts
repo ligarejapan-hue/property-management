@@ -40,6 +40,16 @@ export const PROPERTY_TRACKED_FIELDS = [
   "architectureNote",
   "note",
   "assignedTo",
+  // 区分マンションの8列(CSV の「既存物件の更新」= UPDATABLE_PROPERTY_FIELDS が書く)。
+  // 以前は漏れていて、CSV で変えても変更履歴が残らず、取込の取り消しでも戻らなかった。
+  "floorNo",
+  "exclusiveArea",
+  "balconyArea",
+  "layoutType",
+  "orientation",
+  "managementFee",
+  "repairReserveFee",
+  "ownershipShareNote",
 ];
 
 /** Owner 編集時に ChangeLog に記録する追跡対象 field 名。 */

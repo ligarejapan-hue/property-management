@@ -57,6 +57,29 @@ const FIELD_LABELS: Record<string, string> = {
   structureType: "構造",
   managementCompany: "管理会社",
   dmScenarioId: "DMの種類",
+  // 販売図面から物件・棟へ保存する列(apply-writeback が変更履歴を直接書く)。
+  salePrice: "価格",
+  saleTaxType: "消費税",
+  saleTaxAmount: "うち消費税",
+  access: "交通",
+  landArea: "土地面積",
+  landAreaMethod: "面積計測方式",
+  totalFloorArea: "建物面積・延床面積",
+  builtMonth: "築月",
+  aboveFloors: "地上階",
+  basementFloors: "地下階",
+  parking: "駐車場",
+  grossYield: "想定利回り",
+  expectedIncome: "満室想定収入",
+  // 区分マンション(販売図面・CSV の「既存物件の更新」)。
+  floorNo: "所在階",
+  exclusiveArea: "専有面積",
+  balconyArea: "バルコニー面積",
+  layoutType: "間取り",
+  orientation: "バルコニー向き",
+  managementFee: "管理費",
+  repairReserveFee: "修繕積立金",
+  ownershipShareNote: "持分メモ",
 };
 
 const SOURCE_LABELS: Record<string, string> = {
