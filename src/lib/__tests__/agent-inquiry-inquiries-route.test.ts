@@ -17,8 +17,11 @@ vi.mock("@/lib/prisma", () => {
     property: { findUnique: vi.fn(async () => null) },
     user: { findUnique: vi.fn(async () => ({ isActive: true })) },
   };
+  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
   return { default: db };
 });
+const { lockPropertyRow } = vi.hoisted(() => ({ lockPropertyRow: vi.fn() }));
+vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRow }));
 
 import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
@@ -72,6 +75,14 @@ describe("反響 API", () => {
       propertyId: PID, agentId: AID, assigneeId: "u-field", createdById: "u-field", status: "open", contactMobile: "090-1234-5678",
       viewings: { create: [expect.objectContaining({ viewingType: "guided", scheduledAt: new Date("2026-10-02T05:00:00.000Z") })] },
     }) }));
+  });
+  it("登録は物件の行をロックしてから(物件の削除・取込の取り消しと食い違わない・@codex #454 R8)", async () => {
+    const order: string[] = [];
+    (lockPropertyRow as Fn).mockImplementationOnce(async () => { order.push("lock"); });
+    pm.property.findUnique.mockImplementationOnce(async () => { order.push("read"); return { id: PID, isArchived: false }; });
+    pm.agentInquiry.create.mockImplementationOnce(async () => { order.push("create"); return { id: IID }; });
+    await POST(json("POST", { propertyId: PID, agentId: AID, kind: "ad_permission" }));
+    expect(order).toEqual(["lock", "read", "create"]);
   });
   it("存在しない物件は 404・しまった業者は 409", async () => {
     pm.property.findUnique.mockResolvedValueOnce(null);

@@ -100,6 +100,8 @@ describe("DELETE /api/properties/[id] と鍵の後始末の順序", () => {
             return 0;
           }),
         },
+        // 業者からの反響(agent_inquiries.property_id は RESTRICT)も同じ位置で数える。0=削除継続。
+        agentInquiry: { count: vi.fn(async () => 0) },
         propertyPhoto: { findMany: vi.fn(async () => []) },
         attachment: { updateMany: vi.fn(async () => ({ count: 0 })) },
         propertyDmLog: { deleteMany: vi.fn(async () => ({ count: 0 })) },

@@ -574,6 +574,12 @@ export async function DELETE(
       if (inquiryCount > 0) {
         throw new ApiError(409, "査定申込がある物件は削除できません", "HAS_DM_INQUIRIES");
       }
+      // 業者からの反響(agent_inquiries.property_id も RESTRICT)も同じく 409 で止める(素の 500 にしない・
+      // @codex #454 R8)。反響の登録も親の物件行をロックしてから書くので、数えた後に増えない。
+      const agentInquiryCount = await tx.agentInquiry.count({ where: { propertyId: id } });
+      if (agentInquiryCount > 0) {
+        throw new ApiError(409, "業者からの反響がある物件は削除できません", "HAS_AGENT_INQUIRIES");
+      }
       const photos = await tx.propertyPhoto.findMany({
         where: { propertyId: id },
         select: { fileUrl: true },

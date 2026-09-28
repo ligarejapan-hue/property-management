@@ -393,6 +393,7 @@ const rb = vi.hoisted(() => {
     importJob: { findUnique: vi.fn(), update: vi.fn() },
     dmInquiry: { count: vi.fn() },
     dmRecipientDraft: { findMany: vi.fn() },
+    agentInquiry: { findMany: vi.fn() },
     $queryRaw: vi.fn(),
     property: { delete: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
   };
@@ -449,7 +450,7 @@ describe("rollback: 査定申込がある物件は削除しない(has_dm_inquiri
   const completedAt = new Date("2026-09-01T00:00:00Z");
   const zeroCounts = {
     photos: 0, attachments: 0, propertyOwners: 0, comments: 0, nextActions: 0, dmLogs: 0,
-    investigationLogs: 0, dmRecipientDrafts: 0,
+    investigationLogs: 0, dmRecipientDrafts: 0, agentInquiries: 0,
   };
   const row = (n: number, createdId: string) => ({
     id: `r${n}`, rowNumber: n, status: "success", createdId, errorMessage: null,
@@ -492,6 +493,37 @@ describe("rollback: 査定申込がある物件は削除しない(has_dm_inquiri
     rb.tx.property.delete.mockImplementation(async ({ where }: { where: { id: string } }) => {
       rb.order.push(`delete:${where.id}`);
     });
+    rb.tx.agentInquiry.findMany.mockResolvedValue([]);
+  });
+
+  const AGENT_REASON = "業者からの反響があるため削除できません (has_agent_inquiries)";
+  it("事前分類: 業者からの反響がある物件も blocked(has_agent_inquiries・@codex #454 R8)", async () => {
+    rb.propertyFindMany.mockResolvedValue([
+      { id: "p-inq", updatedAt: completedAt, _count: zeroCounts },
+      { id: "p-ok", updatedAt: completedAt, _count: { ...zeroCounts, agentInquiries: 1 } },
+      { id: "p-late", updatedAt: completedAt, _count: zeroCounts },
+    ]);
+    const json = await (await call(true)).json();
+    expect(json.blockedDetails).toEqual([{ rowNumber: 2, action: "delete", reason: AGENT_REASON }]);
+    expect(rb.propertyFindMany.mock.calls[0][0].select._count.select.agentInquiries).toBe(true);
+  });
+  it("実行: tx 内で反響が付いた物件も消さず blocked・他の行は続行・鍵の後始末も実削除分だけ", async () => {
+    rb.propertyFindMany.mockResolvedValue([
+      { id: "p-inq", updatedAt: completedAt, _count: zeroCounts },
+      { id: "p-ok", updatedAt: completedAt, _count: zeroCounts },
+      { id: "p-late", updatedAt: completedAt, _count: zeroCounts },
+    ]);
+    rb.tx.dmRecipientDraft.findMany.mockResolvedValue([]);
+    rb.tx.agentInquiry.findMany.mockResolvedValue([{ propertyId: "p-inq" }]);
+    const json = await (await call(false)).json();
+    expect(rb.tx.agentInquiry.findMany).toHaveBeenCalledWith({
+      where: { propertyId: { in: ["p-inq", "p-ok", "p-late"] } },
+      select: { propertyId: true },
+      distinct: ["propertyId"],
+    });
+    expect(rb.tx.property.delete.mock.calls.map((c) => c[0].where.id).sort()).toEqual(["p-late", "p-ok"]);
+    expect(json.blockedDetails).toEqual([{ rowNumber: 1, action: "delete", reason: AGENT_REASON }]);
+    expect(rb.tx.$queryRaw.mock.calls[1][2]).toEqual(["p-ok", "p-late"]);
   });
 
   it("事前分類: 申込のある物件は blocked(has_dm_inquiries)で、申込の有無は宛先の件数(申込あり)で数える", async () => {
