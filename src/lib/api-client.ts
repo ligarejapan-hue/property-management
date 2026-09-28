@@ -294,6 +294,8 @@ export interface SaleDmDraft {
   phoneTapFirstAt: string | null;
   // 公開LPの査定申込の回数と初回時刻(中身は fetchSaleDmInquiries)。
   formInquiryCount: number;
+  // 拒否・宛先不明の記録がある未送付の宛先(印刷から外れ、送付済みにもできない)。手順の案内が段の判定から外す。
+  terminalExcluded?: boolean;
   formInquiryFirstAt: string | null;
 }
 
@@ -308,6 +310,8 @@ export interface SaleDmVariant {
   extraInstruction: string | null;
   // 型ごとのLP(印刷QRの遷移先)。null=既定 SALE_DM_LP_URL へ。
   lpUrl: string | null;
+  // 貼り付けて保存した本文の原本(宛先へ「適用」する元)。手順の案内が「本文を入れたか」を見る。
+  bodyTemplate?: string | null;
 }
 
 export interface SaleDmLpVariantOptions {

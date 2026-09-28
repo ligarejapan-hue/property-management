@@ -40,6 +40,8 @@ vi.mock("@/lib/prisma", () => {
       dmCampaign: { findUnique: vi.fn() },
       dmRecipientDraft: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
       dmVariant: { findUnique: vi.fn() },
+      // 取得時の「拒否・宛先不明」の印(手順の案内が印刷・送付の段から外すため・@codex #449 R3)。既定=記録なし。
+      propertyDmLog: { findMany: vi.fn(async () => []) },
       $transaction: vi.fn(async (fn) => fn(tx)),
       _tx: tx,
     },
@@ -161,6 +163,23 @@ describe("GET campaign", () => {
     const json = await res.json();
     expect(json.campaign.recipients.map((r: { id: string }) => r.id)).toEqual(["r1", "r2"]);
     expect(json.campaign.recipients[0].property).toBeUndefined();
+  });
+  it("未送付の宛先に「拒否・宛先不明」の印(terminalExcluded)を付ける=手順の案内が印刷・送付の段から外す(@codex #449 R3)", async () => {
+    grant(...ALL);
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", name: "x", createdBy: "u1", variants: [], recipients: [
+      { id: "r1", body: "b", status: "confirmed", propertyId: "p1", representativeOwnerId: "o1", draftOwners: [{ ownerId: "o1" }] },
+      { id: "r2", body: "b", status: "confirmed", propertyId: "p2", representativeOwnerId: "o2", draftOwners: [{ ownerId: "o2" }] },
+      { id: "r3", body: "b", status: "sent", propertyId: "p3", representativeOwnerId: "o1", draftOwners: [{ ownerId: "o1" }] },
+    ] });
+    (pm as unknown as { propertyDmLog: { findMany: ReturnType<typeof vi.fn> } }).propertyDmLog.findMany.mockResolvedValueOnce([
+      { ownerId: "o1", propertyId: "px", logOwners: [] },
+    ]);
+    const res = await getCampaign(new Request("http://x") as never, { params: Promise.resolve({ id: "c1" }) });
+    const json = await res.json();
+    const byId = Object.fromEntries(json.campaign.recipients.map((r: { id: string; terminalExcluded: boolean }) => [r.id, r.terminalExcluded]));
+    expect(byId).toEqual({ r1: true, r2: false, r3: false });
+    // 共有者の id は応答に載せない(印の判定だけに使う)
+    expect(json.campaign.recipients[0].draftOwners).toBeUndefined();
   });
   it("権限不足で 403", async () => {
     grant("property");

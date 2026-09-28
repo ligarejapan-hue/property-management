@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { handleApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
 import { writeAuditLog } from "@/lib/audit";
+import { findTerminalExclusions, isTerminalExcluded, type TerminalExclusionTx } from "@/lib/dm-batch/terminal-exclusion";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -15,7 +16,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         lpVariants: { orderBy: { label: "asc" } },
         recipients: {
           orderBy: { createdAt: "asc" },
-          include: { property: { select: { createdBy: true, assignedTo: true } } },
+          include: {
+            property: { select: { createdBy: true, assignedTo: true } },
+            // 「拒否・宛先不明」の印の判定用(応答には載せない)。
+            draftOwners: { select: { ownerId: true } },
+          },
         },
       },
     });
@@ -30,6 +35,21 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     // 応答は client が使う列だけに絞る(whitelist)。特に trackingToken は返さない: 公開 /t/<token> を直接
     // 叩いて LP 反響(lpAccessCount / outcome=inquiry)を property:write ゲート無しに捏造でき、A/B 集計を
     // 改竄できるため。scope 判定用に引いた property も載せない。印刷 route は token をサーバー側で使う(非露出)。
+    // 未送付の宛先に「拒否・宛先不明」の印を付ける(印刷から外され、送付済みにもできない宛先)。
+    // 手順の案内が、これを印刷・送付の段の対象から外す(外さないと印刷⇄送付を回り続ける・@codex #449 R3)。
+    // 判定は印刷・送付と同じ findTerminalExclusions(所有者の別物件での記録も含む)。表示用なのでロックは取らない。
+    const ownersOf = (r: (typeof visible)[number]) => [
+      ...(r.representativeOwnerId ? [r.representativeOwnerId] : []),
+      ...((r as { draftOwners?: { ownerId: string }[] }).draftOwners ?? []).map((o) => o.ownerId),
+    ];
+    const unsent = visible.filter((r) => r.status !== "sent");
+    const exclusion = unsent.length === 0
+      ? null
+      : await findTerminalExclusions(
+          prisma as unknown as TerminalExclusionTx,
+          unsent.flatMap(ownersOf),
+          unsent.map((r) => r.propertyId),
+        );
     const recipients = visible.map((r) => ({
       id: r.id,
       variantId: r.variantId,
@@ -54,6 +74,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       // 公開LPの査定申込(§2.5)。宛先のバッジと LP型表の申込列が画面側で使う。中身は申込一覧 API から取る。
       formInquiryCount: r.formInquiryCount,
       formInquiryFirstAt: r.formInquiryFirstAt,
+      terminalExcluded:
+        r.status !== "sent" && exclusion !== null
+          ? isTerminalExcluded(exclusion, { propertyId: r.propertyId, ownerIds: ownersOf(r) })
+          : false,
     }));
     // ワークスペース閲覧は宛名・住所・本文(PII)を返す read。print/export と同様、PII アクセスを
     // 非PIIメタで監査する(AuditLog での PII アクセス追跡。閲覧しただけで痕跡が残らない穴を塞ぐ)。
