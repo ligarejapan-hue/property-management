@@ -12,7 +12,7 @@ import { hasPermission } from "@/lib/permissions";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { parseCsv, OWNER_CSV_COLUMN_MAP } from "@/lib/csv-parser";
 import { normalizeAddress as normalizeAddressForLink } from "@/lib/address-normalizer";
-import { buildOwnerDedupKey } from "@/lib/owner-dedup";
+import { buildOwnerDedupKey, findOwnerByNameAndPhone } from "@/lib/owner-dedup";
 import { relinkOwnersToProperties } from "@/lib/owner-property-linker";
 import {
   REIMPORT_IGNORED_HEADERS,
@@ -31,7 +31,7 @@ import {
   tallyCorporateRepair,
 } from "@/lib/corporate-number-restore";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
-import { phoneForStore, phoneMatchCandidates } from "@/lib/phone-format-jp";
+import { phoneForStore } from "@/lib/phone-format-jp";
 
 // Japanese field name → Owner model property mapping
 const JAPANESE_FIELD_TO_PROPERTY: Record<string, string> = {
@@ -234,11 +234,8 @@ export async function POST(request: NextRequest) {
         }
 
         if (!existing && mapped.phone) {
-          existing = await prisma.owner.findFirst({
-            // 保存済みの番号は書き方がまちまち(ハイフンあり・なし)。どの書き方でも同じ番号とみなす。
-            where: { name: mapped.name, phone: { in: phoneMatchCandidates(mapped.phone) }, isArchived: false },
-            select: { id: true, name: true },
-          });
+          // 保存済みの番号は書き方がまちまち(手の区切りも残す)=数字だけで比べる(@codex P1 #455)。
+          existing = await findOwnerByNameAndPhone(mapped.name, mapped.phone);
         }
 
         if (existing) {

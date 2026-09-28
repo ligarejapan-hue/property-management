@@ -85,17 +85,24 @@ export function phoneForStore(input: string | null | undefined): string | null {
 }
 
 /**
- * 重複の判定で「同じ番号」とみなす書き方の一覧(重複なし・入力の順)。
- * 保存済みの番号は書き方がまちまち(ハイフンあり・なし)なので、入ってきた番号の
- * そのまま/そろえた形/数字だけ のどれかに一致すれば同じとみなす。
- * ⚠数字と区切り以外の文字(内線など)を含む番号は、数字だけの形を作らない
- *   (「内線12」の数字まで混ぜて別の番号と取り違えないため)。
+ * 2つの電話番号が同じ番号か(重複の判定に使う)。
+ * 手で区切った番号を残すため、保存済みの書き方は決まった形にならない(0422-12-3456 も
+ * 042-212-3456 もありうる)。**両方を数字だけにして**比べる(@codex P1 #455)。
+ * ⚠数字と区切り以外の文字(内線など)を含む番号は数字だけにしない=書き方が完全に同じ
+ *   (前後の空白を除く)ときだけ同じとみなす(「内線12」の数字まで混ぜて別の番号と
+ *   取り違えないため)。空は比べない(false)。
  */
-export function phoneMatchCandidates(input: string | null | undefined): string[] {
+export function samePhoneNumber(a: string | null | undefined, b: string | null | undefined): boolean {
+  const ka = phoneCompareKey(a);
+  const kb = phoneCompareKey(b);
+  return ka !== null && ka === kb;
+}
+
+function phoneCompareKey(input: string | null | undefined): string | null {
   const raw = (input ?? "").trim();
-  if (raw === "") return [];
-  const out = [raw, formatPhoneJp(raw).value];
+  if (raw === "") return null;
   const nfkc = raw.normalize("NFKC");
-  if (PHONE_CHARS_ONLY.test(nfkc)) out.push(nfkc.replace(/[^0-9]/g, ""));
-  return [...new Set(out.filter((v) => v !== ""))];
+  if (!PHONE_CHARS_ONLY.test(nfkc)) return `raw:${raw}`;
+  const digits = nfkc.replace(/[^0-9]/g, "");
+  return digits === "" ? null : `digits:${digits}`;
 }

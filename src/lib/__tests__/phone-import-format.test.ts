@@ -44,10 +44,13 @@ describe("配線: 取り込み経路は phoneForStore で保存する", () => {
 describe("配線: 重複の判定は書き方の違いに左右されない", () => {
   it("所有者CSV取込の重複判定", () => {
     const src = read("src/app/api/import/owner-csv/route.ts");
-    expect(src).toContain("phone: { in: phoneMatchCandidates(mapped.phone) }");
+    expect(src).toContain("existing = await findOwnerByNameAndPhone(mapped.name, mapped.phone);");
+    expect(src).not.toMatch(/where: \{ name: mapped\.name, phone:/);
   });
   it("取込のやり直しの重複判定(findDuplicateOwner)", () => {
     const src = read("src/lib/owner-dedup.ts");
-    expect(src).toContain("phone: { in: phoneMatchCandidates(input.phone) }");
+    expect(src).toContain("const hit = await findOwnerByNameAndPhone(name, phone);");
+    // 保存済みの側も数字だけにして比べる(書き方を並べて照らさない)。
+    expect(src).toContain("candidates.find((c) => samePhoneNumber(c.phone, phone))");
   });
 });
