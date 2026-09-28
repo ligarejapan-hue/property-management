@@ -1,0 +1,252 @@
+/**
+ * 「DMの種類」作成と「種類を変える」が必ず通る共通手順(設計 2026-09-27-sale-dm-scenarios-design.md §3.3.0)。
+ * 準備の検査・写す対応表・差し込み検査・台帳の全行ロックをここに1か所だけ持つ
+ * (作成側と変更側の片方だけ守りが漏れる事故を防ぐ)。
+ */
+import { Prisma } from "@/generated/prisma";
+import {
+  expandLetterTags,
+  coarsePropertyLocation,
+  propertyTypeLabel,
+  hasUnresolvedTag,
+} from "@/lib/sale-dm-letter/tags";
+import { validateLetterBody } from "@/lib/sale-dm-letter/body-validation";
+
+type TxLike = Prisma.TransactionClient;
+
+/** 台帳(DmScenario)の全列。手紙・LP どちらも写す前提の値をここに集める。 */
+export type ScenarioFull = {
+  id: string;
+  name: string;
+  autoKey: string | null;
+  active: boolean;
+  deletedAt: Date | null;
+  designTemplate: string | null;
+  tone: string | null;
+  length: string | null;
+  appeal: string | null;
+  strength: string | null;
+  extraInstruction: string | null;
+  letterPromptText: string | null;
+  letterBodyTemplate: string | null;
+  lpTone: string | null;
+  lpLength: string | null;
+  lpAppeal: string | null;
+  lpStrength: string | null;
+  lpPromptText: string | null;
+  lpRawTemplate: string | null;
+  lpHeadline: string | null;
+  lpLead: string | null;
+  lpBodyText: string | null;
+  lpFaqJson: unknown;
+};
+
+export type ReadyResult =
+  | { ok: true; hasLp: boolean }
+  | { ok: false; reason: "unusable" | "letter_missing" };
+
+/** [台帳(DmScenario)の列, DmVariant の列]。 */
+export const LETTER_COPY_MAP: ReadonlyArray<readonly [keyof ScenarioFull, string]> = [
+  ["designTemplate", "designTemplate"],
+  ["tone", "tone"],
+  ["length", "length"],
+  ["appeal", "appeal"],
+  ["strength", "strength"],
+  ["extraInstruction", "extraInstruction"],
+  ["letterPromptText", "promptText"],
+  ["letterBodyTemplate", "bodyTemplate"],
+] as const;
+
+/** [台帳(DmScenario)の列, DmLpVariant の列]。 */
+export const LP_COPY_MAP: ReadonlyArray<readonly [keyof ScenarioFull, string]> = [
+  ["lpTone", "tone"],
+  ["lpLength", "length"],
+  ["lpAppeal", "appeal"],
+  ["lpStrength", "strength"],
+  ["lpPromptText", "promptText"],
+  ["lpRawTemplate", "rawTemplate"],
+  ["lpHeadline", "headline"],
+  ["lpLead", "lead"],
+  ["lpBodyText", "bodyText"],
+  ["lpFaqJson", "faqJson"],
+] as const;
+
+/**
+ * 手紙として写せる状態か。DmVariant の NOT NULL 列(designTemplate/tone/length/appeal/strength)を
+ * 埋められること、かつ本文(letterBodyTemplate)が空でないことが条件。
+ */
+function isLetterReady(s: ScenarioFull): boolean {
+  return (
+    !!s.letterBodyTemplate?.trim() &&
+    !!s.designTemplate &&
+    !!s.tone &&
+    !!s.length &&
+    !!s.appeal &&
+    !!s.strength
+  );
+}
+
+/**
+ * LPとして写せる状態か。DmLpVariant の NOT NULL 列(tone/length/appeal/strength)を埋められること、
+ * かつ本文(lpBodyText)・見出し(lpHeadline)が空でないことが条件。どれか1つでも欠ければ「LP無し」扱い。
+ */
+function isLpReady(s: ScenarioFull): boolean {
+  return (
+    !!s.lpBodyText?.trim() &&
+    !!s.lpHeadline?.trim() &&
+    !!s.lpTone &&
+    !!s.lpLength &&
+    !!s.lpAppeal &&
+    !!s.lpStrength
+  );
+}
+
+export function checkScenarioReady(s: ScenarioFull): ReadyResult {
+  if (!s.active || s.deletedAt) return { ok: false, reason: "unusable" };
+  if (!isLetterReady(s)) return { ok: false, reason: "letter_missing" };
+  return { ok: true, hasLp: isLpReady(s) };
+}
+
+/** DmVariant.create 用のデータ。scenarioId/label は写した型に必ず付く。lpUrl は含めない(=NULL)。 */
+export function letterVariantData(campaignId: string, s: ScenarioFull): Record<string, unknown> {
+  const data: Record<string, unknown> = { campaignId, label: s.name, scenarioId: s.id };
+  for (const [from, to] of LETTER_COPY_MAP) data[to] = s[from];
+  return data;
+}
+
+/**
+ * DmLpVariant.create 用のデータ。LPとして写せない(isLpReady=false)ときは null(=LP無しで作成しない)。
+ * faqJson は素の null を渡すと「JSON の null 値」になってしまうため、DB NULL は Prisma.DbNull で表す。
+ */
+export function lpVariantData(campaignId: string, s: ScenarioFull): Record<string, unknown> | null {
+  if (!isLpReady(s)) return null;
+  const data: Record<string, unknown> = { campaignId, label: s.name, scenarioId: s.id };
+  for (const [from, to] of LP_COPY_MAP) {
+    const value = s[from];
+    data[to] = from === "lpFaqJson" && value === null ? Prisma.DbNull : value;
+  }
+  return data;
+}
+
+export type ExpandResult = { body: string; blank: false } | { body: ""; blank: true };
+
+/**
+ * 下書きの本文を物件ごとに差し込む(適用時の展開と同じ手順・apply/route.ts と同じ検査)。
+ * 差し込めない(未解決タグが残る/展開後の本文が不正)ときは空のまま「下書き」を返す。
+ */
+export function expandDraftBody(
+  template: string,
+  property: { address: string | null; propertyType: string | null },
+): ExpandResult {
+  const expanded = expandLetterTags(template, {
+    location: coarsePropertyLocation(property.address),
+    propertyType: propertyTypeLabel(property.propertyType),
+  });
+  if (hasUnresolvedTag(expanded) || validateLetterBody(expanded) !== null) {
+    return { body: "", blank: true };
+  }
+  return { body: expanded, blank: false };
+}
+
+/**
+ * 台帳(dm_scenarios)の全行を1本の問い合わせで FOR SHARE する(設計 §3.3 のロック順の最後)。
+ * 候補を先に絞らない=WHERE無し。読む側どうしは待たない(FOR SHARE)。
+ */
+export async function lockAllScenariosForShare(tx: {
+  $queryRaw: (...args: never[]) => Promise<unknown>;
+}): Promise<void> {
+  // 宣言上の型は呼び出し側(モック含む)を素通りさせるための最小の形(never[])。
+  // タグ付きテンプレート呼び出しには TemplateStringsArray を受け取れる形が要るのでここだけ広げる。
+  const run = tx.$queryRaw as unknown as (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ) => Promise<unknown>;
+  await run`SELECT id FROM dm_scenarios ORDER BY id FOR SHARE`;
+}
+
+const SCENARIO_FULL_SELECT = {
+  id: true,
+  name: true,
+  autoKey: true,
+  active: true,
+  deletedAt: true,
+  designTemplate: true,
+  tone: true,
+  length: true,
+  appeal: true,
+  strength: true,
+  extraInstruction: true,
+  letterPromptText: true,
+  letterBodyTemplate: true,
+  lpTone: true,
+  lpLength: true,
+  lpAppeal: true,
+  lpStrength: true,
+  lpPromptText: true,
+  lpRawTemplate: true,
+  lpHeadline: true,
+  lpLead: true,
+  lpBodyText: true,
+  lpFaqJson: true,
+} as const;
+
+/** 台帳の全行(削除済み含む)を読む。ロック(lockAllScenariosForShare)の後に呼ぶこと。 */
+export async function loadScenariosForCopy(tx: TxLike): Promise<ScenarioFull[]> {
+  return tx.dmScenario.findMany({ select: SCENARIO_FULL_SELECT }) as unknown as Promise<ScenarioFull[]>;
+}
+
+/**
+ * 種類 s をキャンペーンへ写す。既に写し(campaignId+scenarioId)があればそれを返し、
+ * 二重に作らない(パーシャル一意索引が最後の砦・P2002 はここで飲み込まず呼び出し側へ伝播させる)。
+ * 写真の割り付け(assetId)が削除済みの写真を指していてもそのまま複製する
+ * (公開時の描画側 toImage が deletedAt を見て隠す)。
+ */
+export async function copyScenarioIntoCampaign(
+  tx: TxLike,
+  campaignId: string,
+  s: ScenarioFull,
+): Promise<{ letterVariantId: string; lpVariantId: string | null }> {
+  const existing = await tx.dmVariant.findFirst({
+    where: { campaignId, scenarioId: s.id },
+    select: { id: true },
+  });
+  if (existing) {
+    const lp = await tx.dmLpVariant.findFirst({
+      where: { campaignId, scenarioId: s.id },
+      select: { id: true },
+    });
+    return { letterVariantId: existing.id, lpVariantId: lp?.id ?? null };
+  }
+
+  const v = await tx.dmVariant.create({
+    data: letterVariantData(campaignId, s) as Prisma.DmVariantUncheckedCreateInput,
+    select: { id: true },
+  });
+
+  const lpData = lpVariantData(campaignId, s);
+  if (!lpData) return { letterVariantId: v.id, lpVariantId: null };
+
+  const lp = await tx.dmLpVariant.create({
+    data: lpData as Prisma.DmLpVariantUncheckedCreateInput,
+    select: { id: true },
+  });
+
+  const media = await tx.dmScenarioMedia.findMany({
+    where: { scenarioId: s.id },
+    orderBy: { sortOrder: "asc" },
+  });
+  if (media.length > 0) {
+    await tx.dmLpVariantMedia.createMany({
+      data: media.map((m) => ({
+        lpVariantId: lp.id,
+        slot: m.slot,
+        heading: m.heading,
+        assetId: m.assetId,
+        figureKind: m.figureKind,
+        sortOrder: m.sortOrder,
+      })),
+    });
+  }
+
+  return { letterVariantId: v.id, lpVariantId: lp.id };
+}
