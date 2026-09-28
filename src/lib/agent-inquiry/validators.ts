@@ -56,6 +56,11 @@ export const inquiryCreateSchema = z
   .refine((v) => !v.viewing || v.kind === "viewing", {
     message: "内見の予定は用件が内見のときだけ入れられます",
     path: ["viewing"],
+  })
+  // 内見の反響には案内/下見の区別が要る(無いと時系列・件数から漏れる・@codex #454 R2 P2)。日時は空でよい。
+  .refine((v) => v.kind !== "viewing" || !!v.viewing, {
+    message: "案内か下見かを選んでください",
+    path: ["viewing"],
   });
 
 export const inquiryUpdateSchema = z.object({

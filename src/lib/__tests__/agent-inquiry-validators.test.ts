@@ -24,16 +24,21 @@ describe("業者の入力", () => {
 });
 
 describe("反響の入力", () => {
-  const base = { propertyId: PID, agentId: AID, kind: "viewing" };
+  const base = { propertyId: PID, agentId: AID, kind: "viewing", viewing: { viewingType: "guided" } };
   it("物件と業者と用件は必須・入口の既定は電話", () => {
     expect(inquiryCreateSchema.safeParse({ agentId: AID, kind: "viewing" }).success).toBe(false);
     expect(inquiryCreateSchema.parse(base).channel).toBe("phone");
   });
   it("用件は3つだけ(空室確認は無い)", () => {
     expect(inquiryCreateSchema.safeParse({ ...base, kind: "vacancy" }).success).toBe(false);
-    for (const k of ["viewing", "ad_permission", "material_request"]) {
-      expect(inquiryCreateSchema.safeParse({ ...base, kind: k }).success).toBe(true);
+    expect(inquiryCreateSchema.safeParse(base).success).toBe(true);
+    for (const k of ["ad_permission", "material_request"]) {
+      expect(inquiryCreateSchema.safeParse({ propertyId: PID, agentId: AID, kind: k }).success).toBe(true);
     }
+  });
+  it("用件=内見なら案内/下見の指定が必須(日時は空でよい・@codex #454 R2 P2)", () => {
+    expect(inquiryCreateSchema.safeParse({ propertyId: PID, agentId: AID, kind: "viewing" }).success).toBe(false);
+    expect(inquiryCreateSchema.safeParse({ ...base, viewing: { viewingType: "preview", scheduledAt: null } }).success).toBe(true);
   });
   it("内見の予定は用件=内見のときだけ受け付ける", () => {
     const v = { viewingType: "guided", scheduledAt: "2026-10-02T05:00:00.000Z" };

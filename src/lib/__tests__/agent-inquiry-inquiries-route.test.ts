@@ -75,9 +75,9 @@ describe("反響 API", () => {
   });
   it("存在しない物件は 404・しまった業者は 409", async () => {
     pm.property.findUnique.mockResolvedValueOnce(null);
-    expect((await POST(json("POST", { propertyId: PID, agentId: AID, kind: "viewing" }))).status).toBe(404);
+    expect((await POST(json("POST", { propertyId: PID, agentId: AID, kind: "ad_permission" }))).status).toBe(404);
     pm.agent.findUnique.mockResolvedValueOnce({ id: AID, isArchived: true });
-    expect((await POST(json("POST", { propertyId: PID, agentId: AID, kind: "viewing" }))).status).toBe(409);
+    expect((await POST(json("POST", { propertyId: PID, agentId: AID, kind: "ad_permission" }))).status).toBe(409);
   });
   it("立ち会いに無効な利用者は 422", async () => {
     pm.user.findUnique.mockResolvedValueOnce({ isActive: false });

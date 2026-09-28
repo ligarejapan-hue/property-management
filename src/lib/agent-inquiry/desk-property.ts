@@ -1,24 +1,41 @@
 import { AD_MEDIA, type AdMediumKey, type AdValueKey } from "./constants";
 
 const KANJI_NUM = "〇一二三四五六七八九十百千零";
+const PREFECTURE = /^(東京都|北海道|(?:京都|大阪)府|.{2,3}?県)/;
 /**
- * 番地の始まり: 算用数字、または漢数字の後に「番(番町は町名なので除く)/号/区切り(ー・-)/の」が続くところ。
- * 漢数字だけの町名(十日町・八王子・三番町)は切らない。迷う形(一の宮 など)は短く切る側に倒す
- * =番地を見せるより町名が短くなる方がまし(レビュー Important 1: 漢数字の番地が現地スタッフへ漏れていた)。
+ * 市区町村より後ろで最初に出る数字(算用数字・漢数字)。数字の連なりは切れ目なく1つとして扱い、
+ * 「〇番町」(千代田区の番町は町名)だけは数字として扱わない。
  */
-// 後ろに何も付かない漢数字(「今寺一〇二」「今寺百二十 ハイツ」)も番地とみなす(@codex #454 P1)。
-const HOUSE_NUMBER_START = new RegExp(`[0-9]|[${KANJI_NUM}]+(?:番(?!町)|号|[ー\\-]|の|(?=\\s|$))`);
+const NUMBER_RUN = new RegExp(`[0-9]+|(?<![${KANJI_NUM}])[${KANJI_NUM}]+(?![${KANJI_NUM}]|番町)`);
+
+/** 市区町村名の終わり(都道府県の後で最初の「市」か「区」、無ければ「郡」の後の「町/村」)。 */
+function municipalityEnd(a: string): number {
+  const pref = a.match(PREFECTURE)?.[0].length ?? 0;
+  const body = a.slice(pref);
+  const shiku = body.search(/[市区]/);
+  if (shiku !== -1) return pref + shiku + 1;
+  const gun = body.indexOf("郡");
+  if (gun === -1) return pref;
+  const chouson = body.slice(gun + 1).search(/[町村]/);
+  return pref + gun + 1 + (chouson === -1 ? 0 : chouson + 1);
+}
 
 /**
  * 所在地を町名(丁目)までにする(設計 §4=受付の窓では番地以降を見せない)。
- * 「丁目」があればそこまで。無ければ番地の始まりの手前まで。
+ * 現地スタッフにも見せる値なので**安全側に倒す**: 市区町村より後ろは、最初に数字が出たところで切る
+ * (漢数字の番地・建物名が続けて付いた形も漏らさない・レビュー Important 1/@codex #454 P1×2)。
+ * その数字の直後が「丁目」ならそこまで残す。数字を含む町名(一条通 など)は町名が短くなるが、番地を
+ * 見せるよりまし。市区町村名の数字(四日市市・三鷹市・十日町市)は切らない。
  */
 export function townOnly(address: string): string {
   const a = address.normalize("NFKC").trim();
-  const chome = a.match(/^(.*?丁目)/);
-  if (chome) return chome[1];
-  const cut = a.search(HOUSE_NUMBER_START);
-  return (cut === -1 ? a : a.slice(0, cut)).trim();
+  const start = municipalityEnd(a);
+  const rest = a.slice(start);
+  const m = NUMBER_RUN.exec(rest);
+  if (!m) return a;
+  const afterRun = m.index + m[0].length;
+  if (rest.startsWith("丁目", afterRun)) return a.slice(0, start + afterRun + 2);
+  return a.slice(0, start + m.index).trim();
 }
 
 /**
