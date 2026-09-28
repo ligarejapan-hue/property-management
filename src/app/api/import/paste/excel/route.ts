@@ -33,6 +33,15 @@ import { detectFileFormat, MAX_IMPORT_DECODED_BYTES } from "@/lib/sheet-parser";
 const MAX_ROWS = 1000;
 
 /**
+ * 1シートの範囲(行・列)の上限。**中身を組み立てる前に**範囲だけで断る
+ * (@codex PR#456 2巡目 ③)。圧縮で10MBに収まる繰り返しの多いファイルでも、
+ * 全行を配列にしてから1,000行を数えたのでは上限が守りにならない。
+ * 実物は書式だけ下まで付いて1シート約1,000行(A1:AJ1015)なので、その5倍。
+ */
+const MAX_SHEET_ROWS = 5000;
+const MAX_SHEET_COLS = 200;
+
+/**
  * JSON body の上限。Excel 本体(デコード後10MBまで・取込共通の上限)を
  * base64 にすると約4/3倍になるので、その分と JSON の構造分を見込む。
  */
@@ -108,14 +117,35 @@ export async function POST(request: NextRequest) {
 
     let wb: XLSX.WorkBook;
     try {
-      wb = XLSX.read(Buffer.from(base64, "base64"), { type: "buffer" });
+      // ⚠sheetRows で**読み込む行そのもの**を上限で打ち切る(本来の範囲は !fullref に残る)。
+      wb = XLSX.read(Buffer.from(base64, "base64"), {
+        type: "buffer",
+        sheetRows: MAX_SHEET_ROWS + 1,
+      });
     } catch {
       throw new ApiError(400, "Excelファイルを読み取れませんでした", "BAD_REQUEST");
     }
 
-    const leadRows = wb.SheetNames.flatMap(
-      (name) => readLeadSheet(name, sheetToStrings(wb.Sheets[name])).rows,
-    );
+    for (const name of wb.SheetNames) {
+      const ws = wb.Sheets[name];
+      const ref = ws["!fullref"] ?? ws["!ref"];
+      if (!ref) continue;
+      const range = XLSX.utils.decode_range(ref);
+      if (range.e.r + 1 > MAX_SHEET_ROWS || range.e.c + 1 > MAX_SHEET_COLS) {
+        throw new ApiError(
+          400,
+          `シート「${name}」が大きすぎます（1シート${MAX_SHEET_ROWS.toLocaleString()}行・${MAX_SHEET_COLS}列まで）。不要な行や列を消してから取り込んでください`,
+          "BAD_REQUEST",
+        );
+      }
+    }
+
+    // ⚠上限を超えた時点で打ち切る(全シートを配列にしてから数えない)。
+    const leadRows: LeadRow[] = [];
+    for (const name of wb.SheetNames) {
+      leadRows.push(...readLeadSheet(name, sheetToStrings(wb.Sheets[name])).rows);
+      if (leadRows.length > MAX_ROWS) break;
+    }
     if (leadRows.length === 0) {
       throw new ApiError(
         400,

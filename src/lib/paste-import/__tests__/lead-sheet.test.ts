@@ -211,6 +211,23 @@ describe("leadRowStatus", () => {
     expect(leadRowStatus(ok, { ...none, ownerCandidatesTruncated: true }).status).toBe("review");
   });
 
+  it("★区分マンションの専有面積・現況が読めない行は要確認(登録すると専用の欄が空になる)", () => {
+    const d = buildPasteDraft(
+      ["お名前：山田", "物件所在地：東京都港区1-1", "物件種別：マンション", "建物面積：20坪（66.1㎡）", "現況：その他"].join("\n"),
+    );
+    expect(leadRowStatus(d, none)).toEqual({
+      status: "review",
+      reasons: ["専有面積を読み取れません", "現況を読み取れません"],
+    });
+  });
+
+  it("読めなくても専用の欄が無い項目(築年・土地面積)や区分以外の面積は止めない(原文は備考に残る)", () => {
+    const d = buildPasteDraft(
+      ["お名前：山田", "物件所在地：東京都港区1-1", "物件種別：戸建", "建物面積：20坪", "土地面積：30坪", "築年：わからない"].join("\n"),
+    );
+    expect(leadRowStatus(d, none).status).toBe("ready");
+  });
+
   it("氏名・住所・種別が読めない行は要確認", () => {
     const d = buildPasteDraft("物件種別：一棟\n電話番号：090-0000-0000");
     const r = leadRowStatus(d, none);

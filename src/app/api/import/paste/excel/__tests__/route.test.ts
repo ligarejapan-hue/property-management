@@ -216,6 +216,29 @@ describe("POST /api/import/paste/excel", () => {
     expect(body.rows[0].rowNumber).toBe(5);
   });
 
+  it("★シートの範囲が大きすぎるファイルは、中身を読む前に400(@codex PR#456 2巡目 ③)", async () => {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([HEADER, row({ 姓名: "一人目", "住所　物件名": "東京都港区1-1", 物件種別: "戸建" })]);
+    ws["!ref"] = "A1:N200000";
+    XLSX.utils.book_append_sheet(wb, ws, "S");
+    const b64 = Buffer.from(XLSX.write(wb, { type: "buffer", bookType: "xlsx" })).toString("base64");
+    const res = await POST(req({ fileName: "a.xlsx", xlsxBase64: b64 }));
+    expect(res.status).toBe(400);
+    expect(lookupCalls).toHaveLength(0);
+  });
+
+  it("書式だけ下まで付いた実物程度の範囲(1シート約1,000行×3枚)は通る", async () => {
+    const wb = XLSX.utils.book_new();
+    for (const name of ["A", "B", "C"]) {
+      const ws = XLSX.utils.aoa_to_sheet([HEADER, row({ 姓名: name, "住所　物件名": "東京都港区1-1", 物件種別: "戸建" })]);
+      ws["!ref"] = "A1:AJ1015";
+      XLSX.utils.book_append_sheet(wb, ws, name);
+    }
+    const b64 = Buffer.from(XLSX.write(wb, { type: "buffer", bookType: "xlsx" })).toString("base64");
+    const res = await POST(req({ fileName: "a.xlsx", xlsxBase64: b64 }));
+    expect(res.status).toBe(200);
+  });
+
   it("全シートを読む(見出しの無いシートは飛ばす)", async () => {
     const body = await (await POST(req({
       fileName: "a.xlsx",

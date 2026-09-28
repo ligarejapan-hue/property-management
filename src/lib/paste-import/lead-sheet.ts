@@ -17,6 +17,7 @@
  * ⚠ Prisma / next / node:fs を import しないこと(純関数を保つため)。
  */
 import type { PasteDraft } from "./types";
+import { supportsUnitFields } from "@/lib/property-building-name";
 
 export type LeadSheetFormat = "form_text" | "columns";
 
@@ -221,6 +222,12 @@ export function composeLeadOwnerNote(
 
 export type LeadRowStatus = "ready" | "review" | "registered";
 
+/** 区分マンションで専用の欄に入る項目(読めないと空のまま登録される)。 */
+const UNIT_FIELD_LABELS: Record<string, string> = {
+  exclusiveArea: "専有面積",
+  occupancyStatus: "現況",
+};
+
 /**
  * まとめて登録してよい行かを決める。
  * ⚠**迷う行は自動で登録しない**(人が1件ずつ確かめる)。既存の物件・所有者へ
@@ -242,6 +249,17 @@ export function leadRowStatus(
   if (!draft.owner?.name.value) reasons.push("氏名が読み取れません");
   if (!draft.property.propertyType.value || draft.property.propertyType.value === "unknown") {
     reasons.push("物件種別が分かりません");
+  }
+  // ⚠値を読めなかった項目は、登録すると**専用の欄が空のまま**になるものだけ止める
+  //   (@codex PR#456 2巡目 ②)。区分マンションの専有面積・現況がそれに当たる。
+  //   築年・土地面積(専用の欄が無い)や区分以外の面積・現況は、原文がそのまま
+  //   備考に残る＝貼り付けの確認画面で人が見ても同じ結果になるので止めない。
+  if (supportsUnitFields(draft.property.propertyType.value)) {
+    for (const w of draft.warnings) {
+      if (w.code !== "value_unreadable" || !w.field) continue;
+      const label = UNIT_FIELD_LABELS[w.field];
+      if (label) reasons.push(`${label}を読み取れません`);
+    }
   }
   if (dup.similarCount > 0) reasons.push("同じ住所の物件がすでにあります");
   if (dup.ownerCandidateCount > 0) reasons.push("同じ名前の所有者がすでにいます");

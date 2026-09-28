@@ -13,6 +13,32 @@ import {
 } from "./paste-import-review";
 import type { PasteDraft } from "@/lib/paste-import/types";
 import { leadRowStatus } from "@/lib/paste-import/lead-sheet";
+import { supportsUnitFields, supportsBuildingName } from "@/lib/property-building-name";
+import { OCCUPANCY_STATUS_LABELS } from "@/lib/property-types";
+
+/**
+ * 種別に合わず**登録で消える欄**(区分専用の欄・建物名)の値を、物件の備考の行にする
+ * (@codex PR#456 2巡目 ①)。
+ * ⚠登録APIは種別に合わない欄を null に落とす(normalizeUnitOnlyFields /
+ *   normalizeBuildingName)。読み取れた値は下書きの備考にも入っていないので、
+ *   このままでは戸建の建物面積・間取り・現況が**黙って消える**。
+ *   貼り付け画面では人が欄を見て直せるが、まとめ登録には人がいない。
+ */
+function droppedFieldLines(pv: ReturnType<typeof defaultPropertyValues>): string[] {
+  const lines: string[] = [];
+  if (!supportsBuildingName(pv.propertyType) && pv.buildingName) {
+    lines.push(`建物名: ${pv.buildingName}`);
+  }
+  if (!supportsUnitFields(pv.propertyType)) {
+    if (pv.roomNo) lines.push(`部屋番号: ${pv.roomNo}`);
+    if (pv.exclusiveArea) lines.push(`建物面積: ${pv.exclusiveArea}㎡`);
+    if (pv.layoutType) lines.push(`間取り: ${pv.layoutType}`);
+    if (pv.occupancyStatus) {
+      lines.push(`現況: ${OCCUPANCY_STATUS_LABELS[pv.occupancyStatus] ?? pv.occupancyStatus}`);
+    }
+  }
+  return lines;
+}
 
 export interface ExcelLeadCommitBody {
   property: {
@@ -41,10 +67,11 @@ export interface ExcelLeadCommitBody {
 export function excelLeadCommitBody(row: { draft: PasteDraft; ownerNote: string }): ExcelLeadCommitBody {
   const pv = defaultPropertyValues(row.draft);
   const ov = defaultOwnerValues(row.draft);
-  const note = foldNoColumnFieldsIntoNote(row.draft.noteFromUnmapped, {
+  const folded = foldNoColumnFieldsIntoNote(row.draft.noteFromUnmapped, {
     landArea: pv.landArea,
     builtYear: pv.builtYear,
   });
+  const note = [folded.trim(), ...droppedFieldLines(pv)].filter((l) => l !== "").join("\n");
   return {
     property: {
       address: pv.address,

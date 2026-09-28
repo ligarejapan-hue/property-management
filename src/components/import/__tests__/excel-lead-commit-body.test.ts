@@ -98,3 +98,28 @@ describe("登録直前の見直し(@codex PR#456 1巡目 ①)", () => {
     expect(recheckOutcome(draft, { ...clean, ownerCandidatesTruncated: true }).kind).toBe("review");
   });
 });
+
+describe("区分以外の種別で消える欄は備考に残す(@codex PR#456 2巡目 ①)", () => {
+  const houseText = [
+    "お名前：田中　次郎",
+    "物件所在地：東京都港区1-1",
+    "物件種別：一戸建て",
+    "建物面積：70 m2",
+    "間取り：3LDK",
+    "現況：自身・親族が居住中",
+  ].join("\n");
+
+  it("★戸建の建物面積・間取り・現況は、登録で消える欄なので物件の備考に行として残す", () => {
+    const body = excelLeadCommitBody({ draft: buildPasteDraft(houseText), ownerNote: "" });
+    expect(body.property.note).toContain("建物面積: 70㎡");
+    expect(body.property.note).toContain("間取り: 3LDK");
+    expect(body.property.note).toContain("現況: 入居中");
+  });
+
+  it("区分マンションは専用の欄にそのまま入る(備考に重ねて書かない)", () => {
+    const text = houseText.replace("一戸建て", "分譲マンション");
+    const body = excelLeadCommitBody({ draft: buildPasteDraft(text), ownerNote: "" });
+    expect(body.property).toMatchObject({ exclusiveArea: "70", layoutType: "3LDK", occupancyStatus: "occupied" });
+    expect(body.property.note ?? "").not.toContain("建物面積");
+  });
+});
