@@ -30,8 +30,8 @@ function droppedFieldLines(pv: ReturnType<typeof defaultPropertyValues>): string
     lines.push(`建物名: ${pv.buildingName}`);
   }
   if (!supportsUnitFields(pv.propertyType)) {
+    // ⚠建物面積は延床面積の欄へ入れる(excelLeadCommitBody)ので、ここでは足さない。
     if (pv.roomNo) lines.push(`部屋番号: ${pv.roomNo}`);
-    if (pv.exclusiveArea) lines.push(`建物面積: ${pv.exclusiveArea}㎡`);
     if (pv.layoutType) lines.push(`間取り: ${pv.layoutType}`);
     if (pv.occupancyStatus) {
       lines.push(`現況: ${OCCUPANCY_STATUS_LABELS[pv.occupancyStatus] ?? pv.occupancyStatus}`);
@@ -51,6 +51,9 @@ export interface ExcelLeadCommitBody {
     layoutType: string | null;
     occupancyStatus: string | null;
     note: string | null;
+    landArea: string | null;
+    totalFloorArea: string | null;
+    builtYear: number | null;
   };
   owner: {
     name: string;
@@ -67,9 +70,13 @@ export interface ExcelLeadCommitBody {
 export function excelLeadCommitBody(row: { draft: PasteDraft; ownerNote: string }): ExcelLeadCommitBody {
   const pv = defaultPropertyValues(row.draft);
   const ov = defaultOwnerValues(row.draft);
+  // ⚠土地面積・延床面積・築年は物件の正式な欄へ入れる(@codex PR#456 3巡目)。
+  //   区分マンションの築年は棟の値が正(登録APIも断る)なので、備考に残す。
+  const isUnit = supportsUnitFields(pv.propertyType);
+  const builtYear = pv.builtYear && !isUnit ? Number(pv.builtYear) : null;
   const folded = foldNoColumnFieldsIntoNote(row.draft.noteFromUnmapped, {
-    landArea: pv.landArea,
-    builtYear: pv.builtYear,
+    landArea: "",
+    builtYear: isUnit ? pv.builtYear : "",
   });
   const note = [folded.trim(), ...droppedFieldLines(pv)].filter((l) => l !== "").join("\n");
   return {
@@ -79,10 +86,15 @@ export function excelLeadCommitBody(row: { draft: PasteDraft; ownerNote: string 
       propertyType: pv.propertyType || "unknown",
       buildingName: pv.buildingName || null,
       roomNo: pv.roomNo || null,
-      exclusiveArea: pv.exclusiveArea || null,
+      // 専有面積は区分だけ(区分以外は延床面積として下で送る＝同じ値を二重に送らない)。
+      exclusiveArea: isUnit ? pv.exclusiveArea || null : null,
       layoutType: pv.layoutType || null,
       occupancyStatus: pv.occupancyStatus || null,
       note: note || null,
+      landArea: pv.landArea || null,
+      // 区分以外の「建物面積」は延床面積(下書きでは専有面積の欄に読まれている)。
+      totalFloorArea: !isUnit && pv.exclusiveArea ? pv.exclusiveArea : null,
+      builtYear,
     },
     owner:
       ov.name.trim() === ""

@@ -37,9 +37,10 @@ describe("excelLeadCommitBody — 1行を登録APIの形にする", () => {
     expect(body.linkExistingOwnerId).toBeNull();
   });
 
-  it("専用の列が無い土地面積・築年は、貼り付けと同じく物件の備考へ残す", () => {
-    expect(body.property.note).toContain("土地面積: 90");
-    expect(body.property.note).toContain("築年: 2018");
+  it("★土地面積・築年は物件の欄に入れる(備考に重ねて書かない・@codex PR#456 3巡目)", () => {
+    expect(body.property).toMatchObject({ landArea: "90", builtYear: 2018 });
+    expect(body.property.note ?? "").not.toContain("土地面積");
+    expect(body.property.note ?? "").not.toContain("築年");
   });
 
   it("★管理のメモは物件の備考に入れない(所有者の備考だけ)", () => {
@@ -109,9 +110,11 @@ describe("区分以外の種別で消える欄は備考に残す(@codex PR#456 2
     "現況：自身・親族が居住中",
   ].join("\n");
 
-  it("★戸建の建物面積・間取り・現況は、登録で消える欄なので物件の備考に行として残す", () => {
+  it("★戸建の建物面積は延床面積の欄へ。間取り・現況は登録で消える欄なので物件の備考に行として残す", () => {
     const body = excelLeadCommitBody({ draft: buildPasteDraft(houseText), ownerNote: "" });
-    expect(body.property.note).toContain("建物面積: 70㎡");
+    expect(body.property.totalFloorArea).toBe("70");
+    expect(body.property.exclusiveArea).toBeNull();
+    expect(body.property.note ?? "").not.toContain("建物面積");
     expect(body.property.note).toContain("間取り: 3LDK");
     expect(body.property.note).toContain("現況: 入居中");
   });
@@ -120,6 +123,14 @@ describe("区分以外の種別で消える欄は備考に残す(@codex PR#456 2
     const text = houseText.replace("一戸建て", "分譲マンション");
     const body = excelLeadCommitBody({ draft: buildPasteDraft(text), ownerNote: "" });
     expect(body.property).toMatchObject({ exclusiveArea: "70", layoutType: "3LDK", occupancyStatus: "occupied" });
+    expect(body.property.totalFloorArea).toBeNull();
     expect(body.property.note ?? "").not.toContain("建物面積");
+  });
+
+  it("★区分マンションの築年は棟の値が正なので物件の欄に入れず、備考に残す", () => {
+    const text = [houseText.replace("一戸建て", "分譲マンション"), "築年：2001年"].join("\n");
+    const body = excelLeadCommitBody({ draft: buildPasteDraft(text), ownerNote: "" });
+    expect(body.property.builtYear).toBeNull();
+    expect(body.property.note).toContain("築年: 2001");
   });
 });

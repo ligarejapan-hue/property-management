@@ -30,6 +30,7 @@ import {
 import {
   normalizeBuildingName,
   normalizeUnitOnlyFields,
+  supportsUnitFields,
   BUILDING_NAME_MAX_LENGTH,
   BUILDING_NAME_TOO_LONG_MESSAGE,
 } from "@/lib/property-building-name";
@@ -70,6 +71,35 @@ function parseAreaInput(raw: string | null | undefined, fieldLabel: string): str
   return v;
 }
 
+/**
+ * 土地面積・延床面積の検査。列は `Decimal(10, 2)`＝整数部8桁・小数部2桁が上限
+ * (専有面積の Decimal(8,2) とは桁が違うので別の型を使う)。
+ */
+const WIDE_AREA_PATTERN = /^\d{1,8}(\.\d{1,2})?$/;
+function parseWideAreaInput(raw: string | null | undefined, fieldLabel: string): string | null {
+  const v = (raw ?? "").trim();
+  if (v === "") return null;
+  if (!WIDE_AREA_PATTERN.test(v)) {
+    throw new ApiError(
+      400,
+      `${fieldLabel}は数字だけで入力してください（例: 90 または 90.5）。単位や「約」は入れず、整数8桁・小数2桁までにしてください`,
+      "BAD_REQUEST",
+    );
+  }
+  return v;
+}
+
+/** 築年の検査(西暦の整数)。範囲は通常の物件編集(updatePropertySchema)と同じ。 */
+function parseBuiltYearInput(raw: string | number | null | undefined): number | null {
+  const v = String(raw ?? "").trim();
+  if (v === "") return null;
+  const n = /^\d{4}$/.test(v) ? Number(v) : NaN;
+  if (!Number.isInteger(n) || n < 1800 || n > 2200) {
+    throw new ApiError(400, "築年は西暦の4桁で入力してください（例: 2018）", "BAD_REQUEST");
+  }
+  return n;
+}
+
 // ---------- POST /api/import/paste/commit ----------
 // 「貼り付けて物件化」の確認画面で人が直した最終値を受け取り、物件・所有者・
 // 紐付け・(あれば)添付を1つのトランザクションで確定する。
@@ -93,6 +123,14 @@ interface CommitBody {
     layoutType: string | null;
     occupancyStatus: string | null;
     note: string | null;
+    /**
+     * 土地面積・延床面積(㎡)・築年(西暦)。Excel まとめ取込が送る(省略可・
+     * 貼り付け画面は従来どおり備考へ畳んで送らない)。
+     * ⚠区分マンションの延床面積・築年は棟の値が正(通常の物件編集と同じ)なので受け付けない。
+     */
+    landArea?: string | null;
+    totalFloorArea?: string | null;
+    builtYear?: string | number | null;
   };
   owner: {
     name: string;
@@ -307,6 +345,22 @@ export async function POST(request: NextRequest) {
       occupancyStatus,
     });
 
+    // ---- 土地面積・延床面積・築年（@codex PR#456 3巡目） ----
+    // ⚠物件に正式な欄がある(販売図面 F3 で追加)。備考へ文字で落とすと、編集画面や
+    //   販売図面で「未入力」に見える。
+    // ⚠区分マンションの延床面積・築年は**棟の値が正**(updatePropertySchema の
+    //   注記と同じ)。黙って捨てず、送られてきたら断る(呼び出し側が備考に残す)。
+    const landArea = parseWideAreaInput(p.landArea, "土地面積");
+    const totalFloorArea = parseWideAreaInput(p.totalFloorArea, "延床面積");
+    const builtYear = parseBuiltYearInput(p.builtYear);
+    if (supportsUnitFields(propertyType) && (totalFloorArea !== null || builtYear !== null)) {
+      throw new ApiError(
+        400,
+        "区分マンションの延床面積・築年は棟に登録します。物件には入れられません",
+        "BAD_REQUEST",
+      );
+    }
+
     // 外部キー（査定ナンバー等）。
     // ⚠**ここで1回だけ正規化し、この先はすべてこの値を使う**
     //   （① 助言ロックの鍵 ② 重複ガードの findFirst ③ property.create に保存する値）。
@@ -437,6 +491,9 @@ export async function POST(request: NextRequest) {
             // (書くと正規化を上書きしてしまう)。
             ...unitOnly,
             externalLinkKey,
+            landArea,
+            totalFloorArea,
+            builtYear,
             note: p.note?.trim() || null,
             introductionRoute: "web_inquiry",
             caseStatus: "new_case",

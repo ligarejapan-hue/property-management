@@ -511,6 +511,48 @@ describe("取込系routeの共通ゲート(import:write)", () => {
   });
 });
 
+describe("土地面積・延床面積・築年を物件の欄に入れる(@codex PR#456 3巡目)", () => {
+  const withProp = (over: Record<string, unknown>) => ({
+    ...baseBody,
+    property: { ...baseBody.property, ...over },
+  });
+
+  it("★戸建は 土地面積・延床面積・築年 をそれぞれの欄に保存する", async () => {
+    const res = await POST(req(withProp({ landArea: "90", totalFloorArea: "70.5", builtYear: "2018" })));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ landArea: "90", totalFloorArea: "70.5", builtYear: 2018 });
+  });
+
+  it("送らなければ今までどおり(貼り付け画面は送らない)", async () => {
+    await POST(req(baseBody));
+    const p = created.property?.[0] as Record<string, unknown>;
+    expect(p.landArea ?? null).toBeNull();
+    expect(p.builtYear ?? null).toBeNull();
+  });
+
+  it("★面積に単位や桁あふれがあれば400で、どの欄かを伝える", async () => {
+    const r1 = await POST(req(withProp({ landArea: "90坪" })));
+    expect(r1.status).toBe(400);
+    expect((await r1.json()).error.message).toContain("土地面積");
+    const r2 = await POST(req(withProp({ totalFloorArea: "123456789" })));
+    expect(r2.status).toBe(400);
+    expect((await r2.json()).error.message).toContain("延床面積");
+  });
+
+  it("★築年は西暦の整数(1800〜2200)だけ", async () => {
+    expect((await POST(req(withProp({ builtYear: "平成30年" })))).status).toBe(400);
+    expect((await POST(req(withProp({ builtYear: "1700" })))).status).toBe(400);
+    expect(created.property).toBeUndefined();
+  });
+
+  it("★区分マンションの築年・延床面積は物件に書かない(棟の値が正)=400", async () => {
+    const unit = { propertyType: "apartment_unit" };
+    expect((await POST(req(withProp({ ...unit, builtYear: "2018" })))).status).toBe(400);
+    expect((await POST(req(withProp({ ...unit, totalFloorArea: "70" })))).status).toBe(400);
+    expect(created.property).toBeUndefined();
+  });
+});
+
 describe("入力の検査: 直せる形の400で断る(500に化けさせない・全体レビュー I-3)", () => {
   // ⚠専有面積は**区分マンション専用の欄**。種別が合わないと保存側で null に
   //   落ちる(10巡目 ①)ので、値そのものを見るテストでは種別を区分にする。
