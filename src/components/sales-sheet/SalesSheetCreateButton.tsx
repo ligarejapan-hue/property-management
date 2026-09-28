@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SalesSheetTemplateKind } from "@/lib/sales-sheet/template-kind";
+import type { WritebackSummary } from "@/components/sales-sheet/editor/WritebackNotice";
 import { fetchPropertyDetail } from "@/lib/api-client";
 import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS, BUILDING_FIELDS, type SheetField } from "@/lib/sales-sheet/field-model";
 import {
@@ -1365,7 +1366,7 @@ export function SalesSheetCreateDialog({
       }
       const { id, propertyWriteback } = (await res.json()) as {
         id: string;
-        propertyWriteback?: { saved: string[]; unreadable: string[]; conflict: boolean };
+        propertyWriteback?: WritebackSummary;
       };
       // エディタへ移る前に、物件への保存結果を残しておく（Task 6 がエディタ上部で読んで
       // 一度だけ知らせる）。sessionStorage が使えない環境（プライベートウィンドウ等）でも

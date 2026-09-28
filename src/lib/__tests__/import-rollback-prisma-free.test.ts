@@ -68,7 +68,7 @@ describe("property-field-constants.ts は Prisma-free (Codex P1)", () => {
     expect(constantsSrc).not.toMatch(/from\s+("|')next\//);
   });
 
-  it("PROPERTY_TRACKED_FIELDS の中身は既存と同一 (29 項目・21-C PR-3c で postalCode 追加)", () => {
+  it("PROPERTY_TRACKED_FIELDS の中身 (37 項目・21-C PR-3c で postalCode・2026-09 で区分マンションの8列を追加)", () => {
     expect(PROPERTY_TRACKED_FIELDS).toEqual([
       "propertyType",
       "address",
@@ -99,6 +99,16 @@ describe("property-field-constants.ts は Prisma-free (Codex P1)", () => {
       "architectureNote",
       "note",
       "assignedTo",
+      // CSV の「既存物件の更新」が書く区分マンションの8列。以前は漏れていて、
+      // 変更履歴が残らず、取込の取り消しでも戻らなかった。
+      "floorNo",
+      "exclusiveArea",
+      "balconyArea",
+      "layoutType",
+      "orientation",
+      "managementFee",
+      "repairReserveFee",
+      "ownershipShareNote",
     ]);
   });
 

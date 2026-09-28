@@ -86,6 +86,14 @@ export const RESTORABLE_PROPERTY_FIELD_TYPES: Record<string, FieldType> = {
   rosenkaValue: "int",
   gpsLat: "decimal",
   gpsLng: "decimal",
+  floorNo: "int",
+  exclusiveArea: "decimal",
+  balconyArea: "decimal",
+  layoutType: "string",
+  orientation: "string",
+  managementFee: "int",
+  repairReserveFee: "int",
+  ownershipShareNote: "string",
 };
 
 export type FieldRestoreStatus =
