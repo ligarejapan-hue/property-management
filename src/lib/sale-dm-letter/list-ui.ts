@@ -37,6 +37,9 @@ export function buildSaleDmPartialNotice(res: {
   skippedByUnlink?: number;
   // 拒否・宛先不明(terminal 反響)の記録があり自動で除外した宛先数(A=宛名CSVと同じ規則)。
   excludedTerminal?: number;
+  // 種類つきの発送: 本文を差し込めなかった宛先数(住所・種別が読めない物件)と、LPが未登録の種類名。
+  blankBodyCount?: number;
+  lpMissingScenarios?: string[];
 }): string | null {
   const lines: string[] = [];
   if ((res.skippedByUnlink ?? 0) > 0) {
@@ -62,6 +65,16 @@ export function buildSaleDmPartialNotice(res: {
   if ((res.failed ?? 0) > 0) {
     lines.push(
       `${res.failed} 件は生成に失敗し本文が空です(作業画面で再生成してください)。`,
+    );
+  }
+  if ((res.blankBodyCount ?? 0) > 0) {
+    lines.push(
+      `本文を差し込めなかった宛先 ${res.blankBodyCount}件(物件の住所・種別を補ってから『差し込み』で入れ直してください)`,
+    );
+  }
+  if ((res.lpMissingScenarios ?? []).length > 0) {
+    lines.push(
+      `LPが未登録の種類: ${(res.lpMissingScenarios ?? []).join("、")}(QRは会社のホームページへ転送されます)`,
     );
   }
   if (lines.length === 0) return null;

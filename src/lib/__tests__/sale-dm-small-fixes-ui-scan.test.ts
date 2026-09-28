@@ -39,7 +39,12 @@ describe("LP文章の「知らない見出し」の案内", () => {
 describe("物件一覧: 売却DMを作れなかった理由はその場で見せる", () => {
   it("作成の失敗は画面下の赤帯(再試行=一覧の読み直し)ではなく、その場の案内で出す", () => {
     const src = read("../../app/(dashboard)/properties/page.tsx");
-    expect(src).toContain('window.alert(err instanceof Error ? err.message : "売却DMの作成に失敗しました")');
     expect(src).not.toContain('setError(err instanceof Error ? err.message : "売却DMの作成に失敗しました")');
+    // DMの種類 PR-S2 以降: 作成は作成画面(小さな窓)から行い、失敗の理由はその窓の中にそのまま出す
+    // (物件一覧の handleCreateSaleDm は catch せずに投げ返す)。
+    expect(src).toContain("onSubmit={handleCreateSaleDm}");
+    const dialog = read("../../components/sale-dm/create-campaign-dialog.tsx");
+    expect(dialog).toContain('e instanceof Error ? e.message : "売却DMの作成に失敗しました"');
+    expect(dialog).toContain('role="alert"');
   });
 });

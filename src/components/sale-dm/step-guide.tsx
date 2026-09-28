@@ -16,6 +16,7 @@ import {
   guideStepIndex,
   guideTargetCandidates,
   isAheadOfGuide,
+  visibleGuideSteps,
   type SaleDmGuideState,
 } from "@/lib/sale-dm-letter/step-guide";
 
@@ -59,8 +60,11 @@ export function SaleDmStepGuide({
   state,
   onPrintConfirmed,
   onSkipLp,
+  scenarioCampaign = false,
 }: {
   state: SaleDmGuideState;
+  /** 種類つきの発送(DMの種類)。帯に「LP型を作る」「均等に割り当て」を並べない。 */
+  scenarioCampaign?: boolean;
   /** LP型が1つも無いときだけ渡る。「LP型を使わずに進む」(QRは外部LPへ転送=正式な使い方)。 */
   onSkipLp?: () => void;
   /** 印刷を押したあとだけ渡る。帯の「印刷できた」で呼ぶ(押すまで次の段へ進めない)。 */
@@ -219,19 +223,19 @@ export function SaleDmStepGuide({
         )}
         {current && (
           <ol className="mt-1.5 flex flex-wrap gap-1.5" aria-label="手順">
-            {SALE_DM_GUIDE_STEPS.map((s, i) => (
+            {visibleGuideSteps(scenarioCampaign).map((s, i) => ({ s, i, at: guideStepIndex(s.key) })).map(({ s, i, at }) => (
               <li
                 key={s.key}
-                aria-current={i === idx ? "step" : undefined}
+                aria-current={at === idx ? "step" : undefined}
                 className={
-                  i < idx
+                  at < idx
                     ? "rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"
-                    : i === idx
+                    : at === idx
                       ? "rounded-full border border-amber-400 bg-amber-100 px-2 py-0.5 font-bold text-amber-900 dark:bg-amber-900/50 dark:text-amber-100"
                       : "rounded-full border border-gray-200 bg-white px-2 py-0.5 text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400"
                 }
               >
-                {i < idx ? "✓ " : `${i + 1}. `}
+                {at < idx ? "✓ " : `${i + 1}. `}
                 {s.label}
               </li>
             ))}

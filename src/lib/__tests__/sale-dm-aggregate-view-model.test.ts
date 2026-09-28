@@ -13,9 +13,9 @@ function draft(over: Partial<SaleDmCampaign["recipients"][number]>): SaleDmCampa
 }
 
 const campaign: SaleDmCampaign = {
-  id: "c1", name: "x", status: "sent",
+  id: "c1", name: "x", status: "sent", defaultScenarioId: null,
   variants: [
-    { id: "v1", label: "A", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null, lpUrl: null },
+    { id: "v1", label: "A", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null, lpUrl: null, scenarioId: null },
   ],
   lpVariants: [],
   recipients: [
@@ -81,7 +81,7 @@ describe("二軸の表(設計 2026-09-08)", () => {
   const base = { propertyId: "p", recipientName: "", recipientZip: null, recipientAddress: null, honorific: "様", coOwnerCount: 1, body: "b", outcome: "none", phoneInquiryAt: null };
   const campaign = {
     id: "c", name: "n", status: "sent",
-    variants: [{ id: "v1", label: "A", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null, lpUrl: null }],
+    variants: [{ id: "v1", label: "A", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", extraInstruction: null, lpUrl: null, scenarioId: null }],
     lpVariants: [{ id: "l1", label: "X", tone: "formal", length: "medium", appeal: "price", strength: "low", headline: null, templateFrozenAt: null }],
     recipients: [
       { ...base, id: "r1", variantId: "v1", lpVariantId: "l1", status: "sent", deliveryStatus: "delivered", lpFirstAccessAt: "2026-09-09T00:00:00Z", lpPageFirstAt: "2026-09-09T00:00:00Z", phoneTapFirstAt: "2026-09-09T00:05:00Z" },

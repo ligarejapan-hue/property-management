@@ -32,6 +32,11 @@ export interface SaleDmGuideInput {
    * LP型が1つも無いときだけ効く(作ったLP型は使う)。
    */
   skipLp?: boolean;
+  /**
+   * 種類つきの発送(DMの種類 PR-S2)。手紙とLPは作成時に種類から組で付くので、「LP型を作る」
+   * 「均等に割り当て」の段は出さない(LPの無い種類の宛先がいても割り当てを促さない)。
+   */
+  scenarioCampaign?: boolean;
 }
 
 export interface SaleDmGuideStep {
@@ -53,6 +58,15 @@ export const SALE_DM_GUIDE_STEPS: readonly SaleDmGuideStep[] = [
   { key: "sent", label: "送付済みに", tip: "投函したら「確定分を送付済みに」を押します。これでQRからの申込を受け付けます。" },
 ];
 
+/**
+ * 帯に並べる段。種類つきの発送では「LP型を作る」「均等に割り当て」を出さない
+ * (手紙とLPは作成時に種類から組で付く。computeSaleDmGuideStep もこの2段を返さない)。
+ */
+export function visibleGuideSteps(scenarioCampaign: boolean): readonly SaleDmGuideStep[] {
+  if (!scenarioCampaign) return SALE_DM_GUIDE_STEPS;
+  return SALE_DM_GUIDE_STEPS.filter((s) => s.key !== "add_lp" && s.key !== "assign");
+}
+
 export function guideStepIndex(state: SaleDmGuideState): number {
   return SALE_DM_GUIDE_STEPS.findIndex((s) => s.key === state);
 }
@@ -73,7 +87,8 @@ export function computeSaleDmGuideStep(input: SaleDmGuideInput): SaleDmGuideStat
 
   // 準備(LP型・本文)は、まだ確定していない宛先が残っているあいだだけ案内する。
   if (drafts.length > 0) {
-    const noLp = lpVariants.length === 0 && input.skipLp === true;
+    // 種類つきの発送は LP を足したり割り当てたりしない(LPの無い種類は QR が外部LPへ転送=正式な使い方)。
+    const noLp = input.scenarioCampaign === true || (lpVariants.length === 0 && input.skipLp === true);
     if (!noLp) {
       if (lpVariants.length === 0) return "add_lp";
       if (!lpVariants.some((l) => (l.headline ?? "").trim() !== "")) return "lp_text";

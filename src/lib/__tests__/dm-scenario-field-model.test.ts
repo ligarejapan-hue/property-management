@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import { dmScenarioFieldView } from "@/components/properties/dm-scenario-field-model";
 
 const OPTIONS = [
-  { id: "s-inh", name: "相続", sortOrder: 10, autoKey: "inheritance" },
-  { id: "s-vac", name: "空き家", sortOrder: 20, autoKey: "vacant" },
-  { id: "s-x", name: "住み替え", sortOrder: 30, autoKey: null },
+  { id: "s-inh", name: "相続", sortOrder: 10, autoKey: "inheritance", ready: true },
+  { id: "s-vac", name: "空き家", sortOrder: 20, autoKey: "vacant", ready: true },
+  { id: "s-x", name: "住み替え", sortOrder: 30, autoKey: null, ready: true },
 ];
 
 describe("物件の「DMの種類」欄の表示(設計 §3.6)", () => {

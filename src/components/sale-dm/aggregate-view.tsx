@@ -2,6 +2,7 @@
 
 import type { SaleDmCampaign } from "@/lib/api-client";
 import { buildVariantRows, buildDmViewRows, buildLpVariantRows, buildPairRows } from "@/lib/sale-dm-letter/aggregate-view-model";
+import { isScenarioCampaignView } from "@/lib/sale-dm-letter/scenario-campaign-ui";
 
 const th = "px-3 py-2 font-medium text-gray-600";
 const td = "px-3 py-2";
@@ -45,6 +46,8 @@ export default function SaleDmAggregateView({ campaign, lpMetricsEnabled }: { ca
   const lpRows = buildLpVariantRows(campaign);
   const pairRows = buildPairRows(campaign);
   if (dmRows.length === 0) return null;
+  // 種類つきの発送では型の名前=DMの種類の名前なので「型 」を付けない。
+  const scenario = isScenarioCampaignView(campaign);
   return (
     <div className="space-y-3">
       <Table
@@ -52,7 +55,7 @@ export default function SaleDmAggregateView({ campaign, lpMetricsEnabled }: { ca
         head={["型", "送付", "到達", "宛先不明", "閲覧", "閲覧率", "反響", "反響率", "宛先不明率"]}
         rows={dmRows.map((r) => {
           const v = viewRows.get(r.variantId);
-          return { key: r.variantId, cells: [`型 ${r.label}`, r.sent, r.delivered, r.undeliverable, v?.viewed ?? 0, v?.viewRate ?? "—", r.inquiries, r.inquiryRate, r.undeliverableRate], strong: [5, 7], danger: [8] };
+          return { key: r.variantId, cells: [scenario ? r.label : `型 ${r.label}`, r.sent, r.delivered, r.undeliverable, v?.viewed ?? 0, v?.viewRate ?? "—", r.inquiries, r.inquiryRate, r.undeliverableRate], strong: [5, 7], danger: [8] };
         })}
       />
       {lpMetricsEnabled ? (

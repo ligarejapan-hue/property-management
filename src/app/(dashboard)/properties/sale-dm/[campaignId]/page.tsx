@@ -24,6 +24,8 @@ import SaleDmAggregateView from "@/components/sale-dm/aggregate-view";
 import SaleDmInquiryList from "@/components/sale-dm/inquiry-list";
 import { SaleDmStepGuide } from "@/components/sale-dm/step-guide";
 import { computeSaleDmGuideStep } from "@/lib/sale-dm-letter/step-guide";
+import { isScenarioCampaignView, scenarioCampaignNotices } from "@/lib/sale-dm-letter/scenario-campaign-ui";
+import { useEditScreenToken } from "@/hooks/use-edit-screen-token";
 
 export default function SaleDmWorkspacePage() {
   const params = useParams<{ campaignId: string }>();
@@ -39,6 +41,9 @@ export default function SaleDmWorkspacePage() {
   const [actionBusy, setActionBusy] = useState(false);
   // キャンペーンを取り直すたびに増える。査定申込パネルの再読込の合図。
   const [reloadKey, setReloadKey] = useState(0);
+  // 「種類を変える」は物件を書く=鍵のヘッダ(合言葉)を送る。合言葉の一生はこの画面が持つ
+  // (use-edit-screen-token の決まり)。複製タブ確認が済む(tokenReady)までは変える操作を出さない。
+  const { tokenReady } = useEditScreenToken();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -142,6 +147,13 @@ export default function SaleDmWorkspacePage() {
       return false;
     }
   });
+  // 種類つきの発送(DMの種類 PR-S2)。手紙とLPは作成時に種類から組で付く=LPの追加・割り当ての段は出さない。
+  const scenario = campaign ? isScenarioCampaignView(campaign) : false;
+  // 画面上部の注意(開くたびに取り直した発送=DB から数える)。種類つきの発送だけ。
+  const scenarioNotices = useMemo(
+    () => (campaign && scenario ? scenarioCampaignNotices(campaign) : null),
+    [campaign, scenario],
+  );
   const guideState = useMemo(
     () =>
       campaign
@@ -151,9 +163,10 @@ export default function SaleDmWorkspacePage() {
             lpVariants: campaign.lpVariants,
             printed: printedFor !== null && printedFor === confirmedSig,
             skipLp,
+            scenarioCampaign: scenario,
           })
         : "no_recipients",
-    [campaign, printedFor, confirmedSig, skipLp],
+    [campaign, printedFor, confirmedSig, skipLp, scenario],
   );
 
   // 操作を実行 → 再取得(状態を最新化)。失敗はエラー表示。
@@ -237,9 +250,26 @@ export default function SaleDmWorkspacePage() {
         </div>
       )}
 
+      {/* 種類つきの発送の注意(0件なら出さない)。 */}
+      {scenarioNotices && (scenarioNotices.blankDrafts > 0 || scenarioNotices.lpMissingNames.length > 0) && (
+        <div className="space-y-0.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200">
+          {scenarioNotices.blankDrafts > 0 && (
+            <p>
+              本文が空の下書き {scenarioNotices.blankDrafts}件(物件の住所・種別を補ってから『差し込み』で入れ直してください)
+            </p>
+          )}
+          {scenarioNotices.lpMissingNames.length > 0 && (
+            <p>
+              LPが未登録の種類: {scenarioNotices.lpMissingNames.join("、")}(QRは会社のホームページへ転送されます)
+            </p>
+          )}
+        </div>
+      )}
+
       {/* 手順の案内(次に押すボタンを光らせる・発注者決定 2026-09-27)。 */}
       <SaleDmStepGuide
         state={guideState}
+        scenarioCampaign={scenario}
         onSkipLp={
           (campaign?.lpVariants.length ?? 0) === 0
             ? () => {
@@ -320,7 +350,7 @@ export default function SaleDmWorkspacePage() {
         {/* 左: 調整パネル + A/B型管理 */}
         <div className="space-y-4">
           <div className="rounded-lg border border-gray-200 bg-white p-4">
-            <SaleDmAdjustPanel campaign={campaign} selected={selected} onChanged={load} />
+            <SaleDmAdjustPanel campaign={campaign} selected={selected} onChanged={load} scenarioChangeReady={tokenReady} />
           </div>
           <div className="rounded-lg border border-gray-200 bg-white p-4">
             <SaleDmVariantManager campaign={campaign} onChanged={load} />

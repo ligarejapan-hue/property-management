@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { SaleDmCampaign } from "@/lib/api-client";
 import { updateSaleDmOutcome } from "@/lib/api-client";
 import { variantLabel, isInquiry, buildOutcomePayload } from "@/lib/sale-dm-letter/recipient-actions";
+import { isScenarioCampaignView } from "@/lib/sale-dm-letter/scenario-campaign-ui";
 
 const DELIVERY_OPTIONS = [
   { value: "unknown", label: "未確認" },
@@ -25,6 +26,8 @@ export default function SaleDmRecipientList({
 }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 種類つきの発送では、宛先の手紙の型の名前=DMの種類の名前を「種類」として出す。
+  const scenario = isScenarioCampaignView(campaign);
 
   const patchOutcome = async (id: string, input: { deliveryStatus?: string; phoneInquiry?: boolean }) => {
     setBusyId(id);
@@ -60,7 +63,11 @@ export default function SaleDmRecipientList({
                   {r.recipientName} {r.honorific}
                 </span>
                 <span className="shrink-0 rounded-full bg-gray-200 px-1.5 py-0.5 text-[10px] font-semibold text-gray-700">
-                  型 {variantLabel(campaign.variants, r.variantId)}
+                  {scenario ? (
+                    <>種類 {variantLabel(campaign.variants, r.variantId)}</>
+                  ) : (
+                    <>型 {variantLabel(campaign.variants, r.variantId)}</>
+                  )}
                 </span>
                 {/* 型変更/均等割り当てで本文がクリアされた下書きは「要再生成」= 確定/印刷/送付の対象外。
                     一括クリア後に半分空の A/B バッチを完了と誤認しないよう、各宛先で明示する。 */}
