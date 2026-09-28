@@ -254,14 +254,19 @@ export interface CreateSaleDmCampaignBody {
   confirmed?: boolean;
   // 二重作成(再送信/別タブ/連打)防止の冪等性キー。作成試行ごとに安定生成し、成功で更新する。
   idempotencyKey?: string;
+  // 既定のDMの種類(台帳)。指定すると「種類つきの発送」になり、宛先ごとに種類の手紙とLPが組で付く。
+  // 未指定/null=種類を使わない発送(今までの作り方)。
+  defaultScenarioId?: string | null;
 }
 
 export async function createSaleDmCampaign(body: CreateSaleDmCampaignBody) {
   if (USE_MOCK) {
     await mockDelay();
-    return { campaignId: "mock-campaign", requested: 0, matchedProperties: 0, generated: 0, saved: 0, skippedByUnlink: 0, excludedTerminal: 0, failed: 0, truncated: false };
+    return { campaignId: "mock-campaign", requested: 0, matchedProperties: 0, generated: 0, saved: 0, skippedByUnlink: 0, excludedTerminal: 0, failed: 0, truncated: false, blankBodyCount: 0, lpMissingScenarios: [] as string[], scenarioCounts: {} as Record<string, number> };
   }
-  return apiFetch<{ campaignId: string; requested?: number; matchedProperties?: number; generated?: number; saved?: number; skippedByUnlink?: number; excludedTerminal?: number; failed?: number; truncated?: boolean; idempotent?: boolean }>(
+  // blankBodyCount=本文を差し込めなかった宛先数・lpMissingScenarios=LPの無い種類名・scenarioCounts=種類名→宛先数。
+  // 古い発送の冪等の再送では付かないことがあるので省略可。
+  return apiFetch<{ campaignId: string; requested?: number; matchedProperties?: number; generated?: number; saved?: number; skippedByUnlink?: number; excludedTerminal?: number; failed?: number; truncated?: boolean; idempotent?: boolean; blankBodyCount?: number; lpMissingScenarios?: string[]; scenarioCounts?: Record<string, number> }>(
     "/api/properties/sale-dm/campaigns",
     {
       method: "POST",
