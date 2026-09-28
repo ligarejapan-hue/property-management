@@ -18,6 +18,7 @@ export async function GET() {
         id: true,
         scheduledAt: true,
         viewingType: true,
+        version: true,
         attendant: { select: { id: true, name: true } },
         inquiry: {
           select: {

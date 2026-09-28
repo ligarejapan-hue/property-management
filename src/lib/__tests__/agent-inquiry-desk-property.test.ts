@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { townOnly, toDeskProperty, DESK_PROPERTY_KEYS, DESK_PROPERTY_SELECT } from "@/lib/agent-inquiry/desk-property";
-import { toInquiryView } from "@/lib/agent-inquiry/inquiry-view";
+import { toInquiryView, INQUIRY_LIST_SELECT } from "@/lib/agent-inquiry/inquiry-view";
 
 describe("町名までに切り落とす(設計 §4)", () => {
   it.each([
@@ -61,5 +61,12 @@ describe("受付の窓に返す物件は許可リストだけ", () => {
   it("反響の形でも物件は許可リストだけ", () => {
     const v = toInquiryView({ id: "i", property: { ...row, salePrice: 9, createdBy: "u" } } as never);
     expect(Object.keys(v.property).sort()).toEqual([...DESK_PROPERTY_KEYS].sort());
+  });
+});
+
+describe("画面が変更に使う版番号を返す(@codex #454 R4)", () => {
+  it("反響の一覧・詳細は反響と各内見の version を返す", () => {
+    expect(INQUIRY_LIST_SELECT.version).toBe(true);
+    expect(INQUIRY_LIST_SELECT.viewings.select.version).toBe(true);
   });
 });

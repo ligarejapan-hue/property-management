@@ -147,6 +147,10 @@ describe("反響 API", () => {
     expect(await (await COUNTS()).json()).toEqual({ open: 3, upcomingViewings: 2 });
     expect(pm.agentViewing.count).toHaveBeenCalledWith({ where: expect.objectContaining({ canceledAt: null }) });
   });
+  it("今日明日の内見も変更に使う version を返す", async () => {
+    await UPCOMING();
+    expect(pm.agentViewing.findMany.mock.calls[0][0].select.version).toBe(true);
+  });
   it("今日明日の内見の物件は許可リストだけ", async () => {
     pm.agentViewing.findMany.mockResolvedValue([{
       id: "v", scheduledAt: new Date(), viewingType: "guided", attendant: null,

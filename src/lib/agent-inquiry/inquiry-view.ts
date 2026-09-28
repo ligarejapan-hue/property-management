@@ -22,6 +22,8 @@ export const INQUIRY_LIST_SELECT = {
       viewingType: true,
       canceledAt: true,
       resultNote: true,
+      // 内見の変更は版番号が要る(PATCH の前提)。画面が読み直したときにも渡す(@codex #454 R4)。
+      version: true,
       attendant: { select: { id: true, name: true } },
     },
   },
