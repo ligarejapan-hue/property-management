@@ -12,8 +12,8 @@ export async function GET() {
     const { from, to } = todayTomorrowJst(new Date());
     const rows = await prisma.agentViewing.findMany({
       where: { canceledAt: null, scheduledAt: { gte: from, lt: to } },
+      // 今日と明日の2日分に限っているので件数では切らない(切ると件数表示と食い違う・@codex #454 R7)。
       orderBy: { scheduledAt: "asc" },
-      take: 100,
       select: {
         id: true,
         scheduledAt: true,

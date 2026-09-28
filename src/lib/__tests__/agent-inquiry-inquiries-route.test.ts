@@ -147,6 +147,10 @@ describe("反響 API", () => {
     expect(await (await COUNTS()).json()).toEqual({ open: 3, upcomingViewings: 2 });
     expect(pm.agentViewing.count).toHaveBeenCalledWith({ where: expect.objectContaining({ canceledAt: null }) });
   });
+  it("今日明日の内見は件数で切らない(2日分に限っているので全件・@codex #454 R7)", async () => {
+    await UPCOMING();
+    expect(pm.agentViewing.findMany.mock.calls[0][0].take).toBeUndefined();
+  });
   it("今日明日の内見も変更に使う version を返す", async () => {
     await UPCOMING();
     expect(pm.agentViewing.findMany.mock.calls[0][0].select.version).toBe(true);

@@ -12,17 +12,23 @@ type Ctx = { params: Promise<{ id: string }> };
 const NO_STORE = { "Cache-Control": "no-store" };
 const idOf = async (ctx: Ctx) => z.string().uuid().parse((await ctx.params).id);
 
-/** 業者の詳細+その業者からの反響(新しい順・物件は許可リストの形)。 */
-export async function GET(_req: Request, ctx: Ctx) {
+const HISTORY_PAGE = 50;
+
+/** 業者の詳細+その業者からの反響(新しい順・ページ送り・物件は許可リストの形)。 */
+export async function GET(request: Request, ctx: Ctx) {
   try {
     await requireAgentInquiry("read");
     const id = await idOf(ctx);
+    const cursorRaw = new URL(request.url).searchParams.get("cursor");
+    const cursor = cursorRaw ? z.string().uuid().parse(cursorRaw) : undefined;
     const agent = await prisma.agent.findUnique({ where: { id } });
     if (!agent) throw new ApiError(404, "業者が見つかりません", "NOT_FOUND");
     const inquiries = await prisma.agentInquiry.findMany({
       where: { agentId: id },
-      orderBy: { receivedAt: "desc" },
-      take: 200,
+      // 固定の上限で古い履歴を見えなくしない=カーソルで続きを取れる(@codex #454 R7)。
+      orderBy: [{ receivedAt: "desc" }, { id: "desc" }],
+      take: HISTORY_PAGE + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       select: {
         id: true,
         kind: true,
@@ -32,8 +38,9 @@ export async function GET(_req: Request, ctx: Ctx) {
         property: { select: DESK_PROPERTY_SELECT },
       },
     });
+    const page = inquiries.slice(0, HISTORY_PAGE).map(({ property, ...q }) => ({ ...q, property: toDeskProperty(property) }));
     return NextResponse.json(
-      { agent, inquiries: inquiries.map(({ property, ...q }) => ({ ...q, property: toDeskProperty(property) })) },
+      { agent, inquiries: page, nextCursor: inquiries.length > HISTORY_PAGE ? page[page.length - 1].id : null },
       { headers: NO_STORE },
     );
   } catch (error) {

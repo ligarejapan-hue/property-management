@@ -22,10 +22,14 @@ import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { jsonRequest as json } from "./agent-inquiry-route-mocks";
 import { GET as SEARCH, POST } from "../../app/api/agents/route";
-import { PATCH } from "../../app/api/agents/[id]/route";
+import { GET as DETAIL, PATCH } from "../../app/api/agents/[id]/route";
 
 type Fn = ReturnType<typeof vi.fn>;
-const pm = prismaMock as never as { agent: { findMany: Fn; findUnique: Fn; create: Fn; updateMany: Fn }; $queryRaw: Fn };
+const pm = prismaMock as never as {
+  agent: { findMany: Fn; findUnique: Fn; create: Fn; updateMany: Fn };
+  agentInquiry: { findMany: Fn };
+  $queryRaw: Fn;
+};
 const AID = "22222222-2222-4222-8222-222222222222";
 const ctx = { params: Promise.resolve({ id: AID }) };
 const grant = (...actions: string[]) =>
@@ -105,6 +109,25 @@ describe("業者 API", () => {
     const body = await (await SEARCH(new Request("http://x/api/agents?q=09012345678"))).json();
     expect(body.agents).toEqual([{ id: AID, companyName: "○○", branchName: null, phone: "03-1", matchedBy: "mobile",
       lastContact: { name: "田中", mobile: "090-1234-5678", email: "t@x.jp" } }]);
+  });
+  it("業者の反響の履歴はページ送り(続きがあれば nextCursor・@codex #454 R7)", async () => {
+    pm.agent.findUnique.mockResolvedValueOnce({ id: AID, companyName: "○○" });
+    const row = (n: number) => ({ id: `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`, kind: "viewing", status: "open",
+      receivedAt: new Date(), contactName: null,
+      property: { id: "p", propertyType: "land", buildingName: null, roomNo: null, address: "東京都中野区本町", building: null, adPermissions: [] } });
+    pm.agentInquiry.findMany.mockResolvedValueOnce(Array.from({ length: 51 }, (_, n) => row(n)));
+    const body = await (await DETAIL(new Request("http://x/api/agents/" + AID), ctx)).json();
+    expect(body.inquiries).toHaveLength(50);
+    expect(body.nextCursor).toBe(row(49).id);
+    const arg = pm.agentInquiry.findMany.mock.calls[0][0];
+    expect(arg.take).toBe(51);
+    expect(arg.orderBy).toEqual([{ receivedAt: "desc" }, { id: "desc" }]);
+  });
+  it("cursor を渡すと続きから", async () => {
+    pm.agent.findUnique.mockResolvedValueOnce({ id: AID, companyName: "○○" });
+    const C = "33333333-3333-4333-8333-333333333333";
+    await DETAIL(new Request("http://x/api/agents/" + AID + "?cursor=" + C), ctx);
+    expect(pm.agentInquiry.findMany.mock.calls[0][0]).toEqual(expect.objectContaining({ cursor: { id: C }, skip: 1 }));
   });
   it("古い版からの変更は 409 VERSION_CONFLICT", async () => {
     pm.agent.updateMany.mockResolvedValueOnce({ count: 0 });
