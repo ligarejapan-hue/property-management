@@ -9,7 +9,7 @@ import {
   isScenarioCampaignView,
 } from "@/lib/sale-dm-letter/scenario-campaign-ui";
 import { buildSaleDmPartialNotice } from "@/lib/sale-dm-letter/list-ui";
-import { computeSaleDmGuideStep, visibleGuideSteps, SALE_DM_GUIDE_STEPS } from "@/lib/sale-dm-letter/step-guide";
+import { computeSaleDmGuideStep, visibleGuideSteps, currentGuideStep, SALE_DM_GUIDE_STEPS } from "@/lib/sale-dm-letter/step-guide";
 
 /**
  * 売却DM「DMの種類」PR-S2 Task 6: 作成画面と、種類つきの発送の画面。
@@ -139,6 +139,23 @@ describe("手順の案内: 種類つきの発送", () => {
     expect(visibleGuideSteps(true).map((s) => s.key)).toEqual(["lp_text", "dm_body", "apply", "confirm", "print", "sent"]);
     expect(visibleGuideSteps(false)).toBe(SALE_DM_GUIDE_STEPS);
   });
+  it("本文を宛先への一言: 種類つきは呼び名を変えたボタン「差し込み(この種類の全宛先へ)」に合わせる", () => {
+    expect(currentGuideStep("apply", true)?.tip).toContain("「差し込み(この種類の全宛先へ)」");
+    expect(currentGuideStep("apply", true)?.tip).not.toContain("この型の全宛先に適用");
+    expect(visibleGuideSteps(true).find((s) => s.key === "apply")?.tip).toContain("差し込み(この種類の全宛先へ)");
+    // 種類なしは今までどおりの物そのもの
+    expect(currentGuideStep("apply", false)).toBe(SALE_DM_GUIDE_STEPS.find((s) => s.key === "apply"));
+    expect(currentGuideStep("apply", false)?.tip).toContain("「この型の全宛先に適用」");
+    // 毎回同じ物(画面の effect が同一性で動く)
+    expect(currentGuideStep("apply", true)).toBe(currentGuideStep("apply", true));
+    expect(currentGuideStep("done", true)).toBeNull();
+    // 画面は段を currentGuideStep から取る(SALE_DM_GUIDE_STEPS[idx] を直に使わない)
+    const guide = read("src/components/sale-dm/step-guide.tsx");
+    expect(guide).toContain("currentGuideStep(state, scenarioCampaign)");
+    expect(guide).not.toContain("SALE_DM_GUIDE_STEPS[idx]");
+    // 本文の保存後の案内も同じ呼び名
+    expect(read(VARIANT_MANAGER)).toContain("続けて「差し込み(この種類の全宛先へ)」を押してください");
+  });
   it("種類なしの発送は今までどおり", () => {
     expect(
       computeSaleDmGuideStep({ ...base, lpVariants: [], recipients: [{ status: "draft", body: "x", lpVariantId: null, variantId: "v1" }] }),
@@ -158,6 +175,18 @@ describe("走査: 作成画面", () => {
       "受付帳取込の物件は相続、現地調査の物件は空き家、それ以外はここで選んだ種類になります。物件の『DMの種類』欄で直した物件はそちらが優先です。",
     );
     expect(src).toContain("今までどおり、型Aで作ります");
+  });
+  it("手紙が未登録(ready でない)の種類は選べない(種類を変えると同じ)", () => {
+    const src = read(DIALOG);
+    expect(src).toMatch(/<option key=\{o\.id\} value=\{o\.id\} disabled=\{!o\.ready\}>/);
+  });
+  it("選択肢を読めないときは黙って種類なしで作らせない(「再読み込み」・読めるまで作成は押せない)", () => {
+    const src = read(DIALOG);
+    // 読めなかったら選択肢は「無い」(null)のまま=作成ボタンは options === null で止まる。
+    expect(src).not.toMatch(/setOptions\(\[\]\)/);
+    expect(src).toMatch(/disabled=\{busy \|\| options === null\}/);
+    expect(src).toContain("再読み込み");
+    expect(src).toMatch(/loadError \? \(/);
   });
   it("「DMの種類を開く」は管理者だけ(セッションの役割で判定)", () => {
     for (const rel of [DIALOG, ADJUST]) {
@@ -227,6 +256,19 @@ describe("走査: 種類つきの発送ではボタンを隠す/種類なしの�
     expect(src).toContain("fetchSaleDmScenarioOptions()");
     // ready でない種類は選べない
     expect(src).toMatch(/disabled=\{!o\.ready\}/);
+  });
+  it("種類を変えるに失敗しても発送を読み直す(画面が古いまま残らない)・選択肢を読めないときは短い案内", () => {
+    const src = read(ADJUST);
+    const start = src.indexOf("const changeScenario = async");
+    const end = src.indexOf("const fixLink", start);
+    const body = src.slice(start, end);
+    const catchIdx = body.indexOf("} catch (err) {");
+    const finallyIdx = body.indexOf("} finally {");
+    expect(catchIdx).toBeGreaterThan(0);
+    expect(body.slice(catchIdx, finallyIdx)).toContain("onChanged();");
+    expect(src).toContain("scenarioOptionsError");
+    expect(src).toContain("DMの種類を読み込めませんでした");
+    expect(src).not.toMatch(/setScenarioOptions\(\[\]\)/);
   });
   it("宛先一覧・集計: 種類つきは「種類」・種類なしは今までどおり「型 」", () => {
     const rl = read(RECIPIENTS);

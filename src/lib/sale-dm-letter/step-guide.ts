@@ -64,7 +64,29 @@ export const SALE_DM_GUIDE_STEPS: readonly SaleDmGuideStep[] = [
  */
 export function visibleGuideSteps(scenarioCampaign: boolean): readonly SaleDmGuideStep[] {
   if (!scenarioCampaign) return SALE_DM_GUIDE_STEPS;
-  return SALE_DM_GUIDE_STEPS.filter((s) => s.key !== "add_lp" && s.key !== "assign");
+  return SCENARIO_GUIDE_STEPS;
+}
+
+/**
+ * 種類つきの発送の段。「本文を宛先へ」の一言は、種類つきで呼び名を変えたボタン
+ * 「差し込み(この種類の全宛先へ)」(variant-manager)に合わせる。
+ * モジュールの定数にして毎回同じ物を返す(画面側の effect が段の物の同一性で動くため)。
+ */
+const SCENARIO_GUIDE_STEPS: readonly SaleDmGuideStep[] = SALE_DM_GUIDE_STEPS.filter(
+  (s) => s.key !== "add_lp" && s.key !== "assign",
+).map((s) =>
+  s.key === "apply"
+    ? { ...s, tip: "種類の手紙の書類のアイコンを開き、「差し込み(この種類の全宛先へ)」を押すと、その種類の宛先のお手紙に本文が入ります。" }
+    : s,
+);
+
+/** 今の段(帯と吹き出しに出す物)。種類つきの発送では種類つき用の一言を返す。段でない状態(done 等)は null。 */
+export function currentGuideStep(state: SaleDmGuideState, scenarioCampaign: boolean): SaleDmGuideStep | null {
+  return (
+    visibleGuideSteps(scenarioCampaign).find((s) => s.key === state) ??
+    SALE_DM_GUIDE_STEPS.find((s) => s.key === state) ??
+    null
+  );
 }
 
 export function guideStepIndex(state: SaleDmGuideState): number {

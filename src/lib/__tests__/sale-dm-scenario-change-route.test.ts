@@ -39,7 +39,7 @@ const m = vi.hoisted(() => {
     lps: [] as Array<Record<string, unknown>>,
     property: null as Record<string, unknown> | null,
     scenarios: [] as Array<Record<string, unknown>>,
-    variantFindFirst: vi.fn(async (_a?: unknown): Promise<{ id: string } | null> => null),
+    variantFindFirst: vi.fn(async (_a?: unknown): Promise<{ id: string; bodyTemplate?: string | null } | null> => null),
     lpFindFirst: vi.fn(async (_a?: unknown): Promise<{ id: string } | null> => null),
     variantCreate: vi.fn(async (_a?: unknown) => ({ id: "v-new" })),
     lpCreate: vi.fn(async (_a?: unknown) => ({ id: "lp-new" })),
@@ -342,6 +342,17 @@ describe("切り替え", () => {
     expect(m.variantCreate).not.toHaveBeenCalled();
     expect(m.calls).toContain("lock:dm_variants:v-inh,v-vac");
     expect((m.draftUpdateMany.mock.calls[0][0] as { data: { variantId: string } }).data.variantId).toBe("v-vac");
+  });
+
+  it("移り先の写しが既にある → 本文は台帳の今の本文ではなく、その写しの本文から差し込む", async () => {
+    m.letters = [{ id: "v-inh", scenarioId: S_INH }, { id: "v-vac", scenarioId: S_VAC }];
+    m.variantFindFirst.mockResolvedValue({ id: "v-vac", bodyTemplate: "{{物件所在}}の{{物件種別}}について(写しの本文)" });
+    // 台帳は凍結されないので、写した後に書き換わっている。
+    m.scenarios = [inheritance, { ...vacant, letterBodyTemplate: "{{物件所在}}の{{物件種別}}について(台帳で書き換えた本文)" }];
+    await call();
+    const body = (m.draftUpdateMany.mock.calls[0][0] as { data: { body: string } }).data.body;
+    expect(body).toContain("(写しの本文)");
+    expect(body).not.toContain("台帳で書き換えた本文");
   });
 
   it("同時に2件来ても写しは1つ(2件目は findFirst で既存を使う)", async () => {

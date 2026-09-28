@@ -305,26 +305,41 @@ describe("copyScenarioIntoCampaign", () => {
 
   it("既に写しがある→createを呼ばず既存のidを返す", async () => {
     const tx = txMock({
-      dmVariant: { findFirst: vi.fn(async () => ({ id: "letter-existing" })) },
+      dmVariant: { findFirst: vi.fn(async () => ({ id: "letter-existing", bodyTemplate: "写しの本文{{物件所在}}" })) },
       dmLpVariant: { findFirst: vi.fn(async () => ({ id: "lp-existing" })) },
     });
     const result = await copyScenarioIntoCampaign(tx as never, "campaign-1", scenario);
-    expect(result).toEqual({ letterVariantId: "letter-existing", lpVariantId: "lp-existing" });
+    expect(result).toEqual({ letterVariantId: "letter-existing", lpVariantId: "lp-existing", template: "写しの本文{{物件所在}}" });
     expect(tx.dmVariant.create).not.toHaveBeenCalled();
     expect(tx.dmLpVariant.create).not.toHaveBeenCalled();
     expect(tx.dmVariant.findFirst).toHaveBeenCalledWith({
       where: { campaignId: "campaign-1", scenarioId: scenario.id },
-      select: { id: true },
+      select: { id: true, bodyTemplate: true },
     });
+  });
+
+  it("既に写しがある→本文は台帳の今の本文ではなく写しの本文を返す(台帳は凍結されない)", async () => {
+    const tx = txMock({
+      dmVariant: { findFirst: vi.fn(async () => ({ id: "letter-existing", bodyTemplate: "写しの本文" })) },
+    });
+    const s = fullScenario({ letterBodyTemplate: "台帳で後から書き換えた本文" });
+    const result = await copyScenarioIntoCampaign(tx as never, "campaign-1", s);
+    expect(result.template).toBe("写しの本文");
+  });
+
+  it("既に写しがあり本文が NULL → 空の本文(差し込みで下書き扱いになる)", async () => {
+    const tx = txMock({ dmVariant: { findFirst: vi.fn(async () => ({ id: "letter-existing", bodyTemplate: null })) } });
+    const result = await copyScenarioIntoCampaign(tx as never, "campaign-1", scenario);
+    expect(result.template).toBe("");
   });
 
   it("既に写しがあるがLPは無い→lpVariantId:null", async () => {
     const tx = txMock({
-      dmVariant: { findFirst: vi.fn(async () => ({ id: "letter-existing" })) },
+      dmVariant: { findFirst: vi.fn(async () => ({ id: "letter-existing", bodyTemplate: "写し" })) },
       dmLpVariant: { findFirst: vi.fn(async () => null) },
     });
     const result = await copyScenarioIntoCampaign(tx as never, "campaign-1", scenario);
-    expect(result).toEqual({ letterVariantId: "letter-existing", lpVariantId: null });
+    expect(result).toEqual({ letterVariantId: "letter-existing", lpVariantId: null, template: "写し" });
     expect(tx.dmVariant.create).not.toHaveBeenCalled();
   });
 
@@ -350,7 +365,7 @@ describe("copyScenarioIntoCampaign", () => {
         { lpVariantId: "lp-new", slot: "section", heading: "見出しA", assetId: null, figureKind: "flow", sortOrder: 1 },
       ],
     });
-    expect(result).toEqual({ letterVariantId: "letter-new", lpVariantId: "lp-new" });
+    expect(result).toEqual({ letterVariantId: "letter-new", lpVariantId: "lp-new", template: scenario.letterBodyTemplate });
   });
 
   it("LP無し(本文が空)→letterのみ作成・LP create/写真複製/写真読み出しは呼ばない", async () => {
@@ -360,14 +375,14 @@ describe("copyScenarioIntoCampaign", () => {
     expect(tx.dmLpVariant.create).not.toHaveBeenCalled();
     expect(tx.dmScenarioMedia.findMany).not.toHaveBeenCalled();
     expect(tx.dmLpVariantMedia.createMany).not.toHaveBeenCalled();
-    expect(result).toEqual({ letterVariantId: "letter-new", lpVariantId: null });
+    expect(result).toEqual({ letterVariantId: "letter-new", lpVariantId: null, template: s.letterBodyTemplate });
   });
 
   it("LPありだが写真が無い→createManyは呼ばない", async () => {
     const tx = txMock({ dmScenarioMedia: { findMany: vi.fn(async () => []) } });
     const result = await copyScenarioIntoCampaign(tx as never, "campaign-1", scenario);
     expect(tx.dmLpVariantMedia.createMany).not.toHaveBeenCalled();
-    expect(result).toEqual({ letterVariantId: "letter-new", lpVariantId: "lp-new" });
+    expect(result).toEqual({ letterVariantId: "letter-new", lpVariantId: "lp-new", template: scenario.letterBodyTemplate });
   });
 });
 

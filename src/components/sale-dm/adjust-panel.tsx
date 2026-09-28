@@ -52,14 +52,19 @@ export default function SaleDmAdjustPanel({
   const { data: session } = useSession();
   const isAdmin = USE_MOCK || (session?.user as { role?: string } | undefined)?.role === "admin";
   const [scenarioOptions, setScenarioOptions] = useState<SaleDmScenarioOption[] | null>(null);
+  const [scenarioOptionsError, setScenarioOptionsError] = useState(false);
   const [errorCode, setErrorCode] = useState<string | null>(null);
 
   // 選択肢の口(有効な種類・ready だけ)。変える操作のあとは必ず取り直す(まだ使える前提にしない)。
   const loadScenarioOptions = useCallback(async () => {
     try {
-      setScenarioOptions(await fetchSaleDmScenarioOptions());
+      const opts = await fetchSaleDmScenarioOptions();
+      setScenarioOptions(opts);
+      setScenarioOptionsError(false);
     } catch {
-      setScenarioOptions([]);
+      // 選択肢は「無い」(null)のまま=選べない。黙って使えない選択肢にせず、短い案内を出す。
+      setScenarioOptions(null);
+      setScenarioOptionsError(true);
     }
   }, []);
   useEffect(() => {
@@ -127,6 +132,8 @@ export default function SaleDmAdjustPanel({
     } catch (err) {
       setError(err instanceof Error ? err.message : "種類の変更に失敗しました");
       setErrorCode(apiErrorCode(err));
+      // 失敗(409/423 等)でも発送を読み直す(他の人の変更・送付済みになった等を画面に映す)。
+      onChanged();
     } finally {
       setBusy(false);
       // 成功でも失敗でも選択肢を取り直す(選んだ種類が使えなくなっていても 200 のことがある)。
@@ -206,6 +213,14 @@ export default function SaleDmAdjustPanel({
                 ))}
               </select>
               {propertyHasSent && <span className="text-amber-700">送付済みの宛先がいる物件は、種類を変えられません。</span>}
+              {scenarioOptionsError && (
+                <span className="text-amber-700">
+                  DMの種類を読み込めませんでした。{" "}
+                  <button type="button" onClick={() => loadScenarioOptions()} className="underline underline-offset-2">
+                    再読み込み
+                  </button>
+                </span>
+              )}
             </label>
           )}
           {!scenario && campaign.variants.length > 1 && (

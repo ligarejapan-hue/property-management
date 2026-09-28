@@ -12,7 +12,7 @@
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
-  SALE_DM_GUIDE_STEPS,
+  currentGuideStep,
   guideStepIndex,
   guideTargetCandidates,
   isAheadOfGuide,
@@ -79,7 +79,8 @@ export function SaleDmStepGuide({
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const idx = guideStepIndex(state);
-  const current = idx >= 0 ? SALE_DM_GUIDE_STEPS[idx] : null;
+  // 種類つきの発送では一言を種類つき用に(「差し込み(この種類の全宛先へ)」)。帯の並びは visibleGuideSteps と同じ。
+  const current = currentGuideStep(state, scenarioCampaign);
 
   // 光らせる+吹き出しの位置合わせ。枠の開閉でボタンが出入りするので、DOM の変化でも付け直す。
   useEffect(() => {

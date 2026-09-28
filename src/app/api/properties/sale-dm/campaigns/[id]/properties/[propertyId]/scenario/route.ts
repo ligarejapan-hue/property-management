@@ -179,11 +179,9 @@ export async function POST(
         }
         // ⑨ 写す(既に写しがあればそれを使う=発送の行を押さえているので同時でも1つ)。
         const copy = await copyScenarioIntoCampaign(tx, id, scenario);
-        // ⑩ 付けて差し込む(共通手順)。差し込めない物件は本文を空のまま下書きにし、件数を返す。
-        const attached = attachScenario(
-          { letterVariantId: copy.letterVariantId, lpVariantId: copy.lpVariantId, template: scenario.letterBodyTemplate! },
-          property,
-        );
+        // ⑩ 付けて差し込む(共通手順)。本文は写しの本文(既に写しがあれば台帳の今の本文ではなくその写しの本文)。
+        //    差し込めない物件は本文を空のまま下書きにし、件数を返す。
+        const attached = attachScenario(copy, property);
         const lpVariants: PairVariant[] = [
           ...lps,
           ...(copy.lpVariantId !== null && !lps.some((l) => l.id === copy.lpVariantId)

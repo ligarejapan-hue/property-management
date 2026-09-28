@@ -41,7 +41,7 @@ const idempotentPayload = (id: string, snapshot: unknown): Record<string, unknow
       : undefined;
   return {
     campaignId: id,
-    idempotent: true,
+    idempotent: true, blankBodyCount: 0, lpMissingScenarios: [], scenarioCounts: {}, // 種類なし(メタに無い)も同じ形で返す
     ...(meta && typeof meta === "object" && !Array.isArray(meta)
       ? (meta as Record<string, unknown>)
       : {}),
@@ -409,7 +409,8 @@ export async function POST(request: NextRequest) {
           }
           const copied = new Map<string, { name: string; letterVariantId: string; lpVariantId: string | null; template: string }>();
           for (const s of used) {
-            copied.set(s.id, { name: s.name, ...(await copyScenarioIntoCampaign(tx, claimed.id, s)), template: s.letterBodyTemplate! });
+            // 本文は写しが返す本文(作成では必ず新しく写す=台帳の本文と同じ)。
+            copied.set(s.id, { name: s.name, ...(await copyScenarioIntoCampaign(tx, claimed.id, s)) });
           }
           lpMissingScenarios = used.filter((s) => copied.get(s.id)!.lpVariantId === null).map((s) => s.name);
           scenarioCount = used.length;
@@ -510,9 +511,9 @@ export async function POST(request: NextRequest) {
                 excludedTerminal: excludedTerminalCount,
                 failed: drafts.filter((d) => d.error).length,
                 truncated,
-                blankBodyCount,
-                lpMissingScenarios,
-                scenarioCounts,
+                // 種類つきの発送だけが持つ件数(種類なしには書かない=再返却は idempotentPayload の既定値で埋まる)。
+                ...(isScenarioCampaign({ defaultScenarioId })
+                  ? { blankBodyCount, lpMissingScenarios, scenarioCounts } : {}),
               },
             },
           },

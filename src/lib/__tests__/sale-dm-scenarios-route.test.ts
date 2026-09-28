@@ -125,24 +125,30 @@ describe("台帳 API(設計 §3.6・§4)", () => {
   it("選択肢は office_staff(property:write)でも取れ、中身の列を返さない(ready は返す)", async () => {
     (getUserPermissions as Fn).mockResolvedValue([{ resource: "property", action: "write", granted: true }]);
     pm.dmScenario.findMany.mockResolvedValue([
-      { id: SID, name: "相続", sortOrder: 10, autoKey: "inheritance", letterBodyTemplate: "本文" },
-      { id: "s2", name: "空き家", sortOrder: 20, autoKey: null, letterBodyTemplate: null },
+      { id: SID, name: "相続", sortOrder: 10, autoKey: "inheritance", letterBodyTemplate: "本文", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low" },
+      { id: "s2", name: "空き家", sortOrder: 20, autoKey: null, letterBodyTemplate: null, designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low" },
+      // 本文はあるが書き方(strength)が未設定=作成・種類を変えるで止まる(checkScenarioReady と同じ判定)。
+      { id: "s3", name: "設定なし", sortOrder: 25, autoKey: null, letterBodyTemplate: "本文", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: null },
     ]);
     const res = await OPTIONS_LIST(new Request("http://x/api/properties/sale-dm/scenarios/options"));
     expect(res.status).toBe(200);
     expect(pm.dmScenario.findMany).toHaveBeenCalledWith({
       where: { active: true, deletedAt: null },
-      select: { id: true, name: true, sortOrder: true, autoKey: true, letterBodyTemplate: true },
+      select: {
+        id: true, name: true, sortOrder: true, autoKey: true,
+        letterBodyTemplate: true, designTemplate: true, tone: true, length: true, appeal: true, strength: true,
+      },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     });
     const j = await res.json();
-    expect(j.scenarios).toHaveLength(2);
+    expect(j.scenarios).toHaveLength(3);
     for (const s of j.scenarios) {
       expect(Object.keys(s).sort()).toEqual(["autoKey", "id", "name", "ready", "sortOrder"]);
       expect(s).not.toHaveProperty("letterBodyTemplate");
     }
     expect(j.scenarios[0].ready).toBe(true);
     expect(j.scenarios[1].ready).toBe(false);
+    expect(j.scenarios[2].ready).toBe(false);
   });
 
   it("選択肢: 物件の閲覧・編集も売却DMの権限も無い → 403", async () => {
@@ -161,13 +167,17 @@ describe("台帳 API(設計 §3.6・§4)", () => {
   it("選択肢 ?includeInactive=1: 使わない・削除済みも含め、名前などの見出し情報だけ(中身なし・ready は含む)を返す", async () => {
     (getUserPermissions as Fn).mockResolvedValue([{ resource: "property", action: "read", granted: true }]);
     pm.dmScenario.findMany.mockResolvedValue([
-      { id: SID, name: "相続", sortOrder: 10, autoKey: "inheritance", letterBodyTemplate: "本文", active: true, deletedAt: null },
-      { id: "s2", name: "古い種類", sortOrder: 30, autoKey: null, letterBodyTemplate: null, active: false, deletedAt: new Date("2026-09-01") },
+      { id: SID, name: "相続", sortOrder: 10, autoKey: "inheritance", letterBodyTemplate: "本文", designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", active: true, deletedAt: null },
+      { id: "s2", name: "古い種類", sortOrder: 30, autoKey: null, letterBodyTemplate: null, designTemplate: "formal", tone: "formal", length: "medium", appeal: "price", strength: "low", active: false, deletedAt: new Date("2026-09-01") },
     ]);
     const res = await OPTIONS_LIST(new Request("http://x/api/properties/sale-dm/scenarios/options?includeInactive=1"));
     expect(res.status).toBe(200);
     expect(pm.dmScenario.findMany).toHaveBeenCalledWith({
-      select: { id: true, name: true, sortOrder: true, autoKey: true, letterBodyTemplate: true, active: true, deletedAt: true },
+      select: {
+        id: true, name: true, sortOrder: true, autoKey: true,
+        letterBodyTemplate: true, designTemplate: true, tone: true, length: true, appeal: true, strength: true,
+        active: true, deletedAt: true,
+      },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     });
     const j = await res.json();

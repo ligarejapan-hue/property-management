@@ -5,7 +5,8 @@
  *
  * 物件一覧の「売却DMを作成」で開く小さな窓。「DMの種類」の既定を選ぶか、「種類を使わない(今までどおり)」を選ぶ。
  * 選択肢は選択肢の口(fetchSaleDmScenarioOptions=有効な種類・文面は含まず ready だけ)から取る。
- * 初期選択 = 手紙が登録済み(ready)の最初の種類、無ければ「種類を使わない」。
+ * 初期選択 = 手紙が登録済み(ready)の最初の種類、無ければ「種類を使わない」。手紙が未登録の種類は選べない。
+ * 選択肢を読めなかったときは黙って「種類を使わない」で作らせない(理由と「再読み込み」を出し、読めるまで作成は押せない)。
  *
  * 作成そのもの(API 呼び出し・冪等キー・作成後の案内・画面遷移)は呼び出し側(物件一覧)が持つ。
  * ここは選んだ値を onSubmit へ渡し、失敗の文言(API のメッセージそのまま)と、種類の登録が足りない理由のときだけ
@@ -56,7 +57,9 @@ export function SaleDmCreateCampaignDialog({
           });
         },
         (e: unknown) => {
-          setOptions([]);
+          // 選択肢は「無い」(null)のまま=作成は押せない。空の一覧にすると「種類を使わない」だけが残り、
+          // 利用者が選んでいないのに種類なしの発送が作られてしまう。
+          setOptions(null);
           setLoadError(e instanceof Error ? e.message : "DMの種類を読み込めませんでした");
           setSelected(NONE);
         },
@@ -77,6 +80,11 @@ export function SaleDmCreateCampaignDialog({
       // 種類が使えなくなった・未登録になった等は、選択肢を取り直して今の状態を見せる(まだ使える前提にしない)。
       await load();
     }
+  };
+
+  const reload = () => {
+    setLoadError(null);
+    void load();
   };
 
   const fixLink = error ? scenarioFixLinkFor(error.code) : null;
@@ -102,21 +110,30 @@ export function SaleDmCreateCampaignDialog({
         <p>
           選択した {propertyCount} 件の物件で宛先の一覧を作ります。共有者が複数いる物件は宛先ごとに複数通になることがあります。
         </p>
-        <label className="block">
-          <span className="font-medium">DMの種類</span>
-          {options === null ? (
+        {/* label で包まない(読めなかったときの「再読み込み」ボタンが、見出しを押しただけで押されてしまうため)。 */}
+        <div className="block">
+          <span id="sale-dm-create-scenario-label" className="font-medium">DMの種類</span>
+          {loadError ? (
+            <span role="alert" className="mt-1 flex flex-wrap items-center gap-2 text-amber-700 dark:text-amber-300">
+              <span>{loadError}</span>
+              <Button variant="secondary" onClick={reload} disabled={busy}>
+                再読み込み
+              </Button>
+            </span>
+          ) : options === null ? (
             <span className="mt-1 flex items-center gap-2 text-gray-500 dark:text-gray-400">
               <Loader2 className="h-4 w-4 animate-spin" /> 読み込み中...
             </span>
           ) : (
             <select
+              aria-labelledby="sale-dm-create-scenario-label"
               value={selected}
               onChange={(e) => setSelected(e.target.value)}
               disabled={busy}
               className="mt-1 w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900"
             >
               {options.map((o) => (
-                <option key={o.id} value={o.id}>
+                <option key={o.id} value={o.id} disabled={!o.ready}>
                   {o.name}
                   {o.ready ? "" : "(手紙が未登録)"}
                 </option>
@@ -124,13 +141,14 @@ export function SaleDmCreateCampaignDialog({
               <option value={NONE}>種類を使わない(今までどおり)</option>
             </select>
           )}
-        </label>
-        {loadError && <p className="text-xs text-amber-700 dark:text-amber-300">{loadError}</p>}
-        <p className="text-xs text-gray-600 dark:text-gray-400">
-          {selected === NONE
-            ? "今までどおり、型Aで作ります"
-            : "受付帳取込の物件は相続、現地調査の物件は空き家、それ以外はここで選んだ種類になります。物件の『DMの種類』欄で直した物件はそちらが優先です。"}
-        </p>
+        </div>
+        {options !== null && (
+          <p className="text-xs text-gray-600 dark:text-gray-400">
+            {selected === NONE
+              ? "今までどおり、型Aで作ります"
+              : "受付帳取込の物件は相続、現地調査の物件は空き家、それ以外はここで選んだ種類になります。物件の『DMの種類』欄で直した物件はそちらが優先です。"}
+          </p>
+        )}
         {error && (
           <div
             role="alert"

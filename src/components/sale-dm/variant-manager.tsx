@@ -110,7 +110,9 @@ export default function SaleDmVariantManager({
       setLetter({ ...letter, bodyTemplate: pasteBody, bodyDigest: r.bodyDigest });
       setLetterNotice(
         r.changed
-          ? "本文を保存しました。続けて「この型の全宛先に適用」を押してください"
+          ? isScenarioCampaignView(campaign)
+            ? "本文を保存しました。続けて「差し込み(この種類の全宛先へ)」を押してください"
+            : "本文を保存しました。続けて「この型の全宛先に適用」を押してください"
           : "同じ本文が保存済みです（変更はありません）",
       );
       onChanged();

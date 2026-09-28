@@ -71,11 +71,24 @@ export const LP_COPY_MAP: ReadonlyArray<readonly [keyof ScenarioFull, string]> =
   ["lpFaqJson", "faqJson"],
 ] as const;
 
+/** isLetterReady の判定に要る台帳の列(選択肢の `ready` もこれだけ読んで同じ判定をする)。 */
+export const LETTER_READY_SELECT = {
+  letterBodyTemplate: true,
+  designTemplate: true,
+  tone: true,
+  length: true,
+  appeal: true,
+  strength: true,
+} as const;
+
+export type LetterReadyFields = Pick<ScenarioFull, keyof typeof LETTER_READY_SELECT>;
+
 /**
  * 手紙として写せる状態か。DmVariant の NOT NULL 列(designTemplate/tone/length/appeal/strength)を
  * 埋められること、かつ本文(letterBodyTemplate)が空でないことが条件。
+ * 作成・種類を変える(checkScenarioReady)と選択肢の `ready` が同じこの判定を使う。
  */
-function isLetterReady(s: ScenarioFull): boolean {
+export function isLetterReady(s: LetterReadyFields): boolean {
   return (
     !!s.letterBodyTemplate?.trim() &&
     !!s.designTemplate &&
@@ -215,7 +228,9 @@ export async function loadScenariosForCopy(tx: TxLike): Promise<ScenarioFull[]> 
 
 /**
  * 種類 s をキャンペーンへ写す。既に写し(campaignId+scenarioId)があればそれを返し、
- * 二重に作らない(パーシャル一意索引が最後の砦・P2002 はここで飲み込まず呼び出し側へ伝播させる)。
+ * 二重に作らない。返す template(差し込み前の本文)は、既に写しがあれば「その写しの本文」、
+ * 新しく写したときだけ台帳の本文(台帳は凍結されず後から書き換わるので、既存の写しに寄せる宛先の本文が
+ * 写し・承認済み・印刷済みのどれとも食い違わないようにする)(パーシャル一意索引が最後の砦・P2002 はここで飲み込まず呼び出し側へ伝播させる)。
  * 写真の割り付け(assetId)が削除済みの写真を指していてもそのまま複製する
  * (公開時の描画側 toImage が deletedAt を見て隠す)。
  */
@@ -223,17 +238,17 @@ export async function copyScenarioIntoCampaign(
   tx: TxLike,
   campaignId: string,
   s: ScenarioFull,
-): Promise<{ letterVariantId: string; lpVariantId: string | null }> {
+): Promise<ScenarioPair> {
   const existing = await tx.dmVariant.findFirst({
     where: { campaignId, scenarioId: s.id },
-    select: { id: true },
+    select: { id: true, bodyTemplate: true },
   });
   if (existing) {
     const lp = await tx.dmLpVariant.findFirst({
       where: { campaignId, scenarioId: s.id },
       select: { id: true },
     });
-    return { letterVariantId: existing.id, lpVariantId: lp?.id ?? null };
+    return { letterVariantId: existing.id, lpVariantId: lp?.id ?? null, template: existing.bodyTemplate ?? "" };
   }
 
   const v = await tx.dmVariant.create({
@@ -241,8 +256,10 @@ export async function copyScenarioIntoCampaign(
     select: { id: true },
   });
 
+  // 新しく写した=写しの本文は台帳の本文そのもの(letterVariantData が同じ値を書く)。
+  const template = s.letterBodyTemplate ?? "";
   const lpData = lpVariantData(campaignId, s);
-  if (!lpData) return { letterVariantId: v.id, lpVariantId: null };
+  if (!lpData) return { letterVariantId: v.id, lpVariantId: null, template };
 
   const lp = await tx.dmLpVariant.create({
     data: lpData as Prisma.DmLpVariantUncheckedCreateInput,
@@ -266,5 +283,5 @@ export async function copyScenarioIntoCampaign(
     });
   }
 
-  return { letterVariantId: v.id, lpVariantId: lp.id };
+  return { letterVariantId: v.id, lpVariantId: lp.id, template };
 }
