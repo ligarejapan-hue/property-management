@@ -25,8 +25,8 @@ import { join, relative } from "node:path";
  * 一括物理削除の経路が無い)。物件をアーカイブする書き込み経路も無い。
  */
 const KNOWN_CLEANUP_SITES: Record<string, string> = {
-  "src/app/api/properties/[id]/route.ts:613": "property.delete(物件の削除)",
-  "src/app/api/import/jobs/[jobId]/rollback/route.ts:460": "property.delete(取込の取り消し)",
+  "src/app/api/properties/[id]/route.ts:619": "property.delete(物件の削除)",
+  "src/app/api/import/jobs/[jobId]/rollback/route.ts:483": "property.delete(取込の取り消し)",
   "src/app/api/admin/owners/[id]/correction/archive/route.ts:247":
     "owner.updateMany({ isArchived: true })(所有者のアーカイブ)",
   "src/app/api/admin/owners/correction/merge/route.ts:638":
@@ -358,6 +358,8 @@ describe("取り消しは 行ロック → 後始末 → 削除 の順", () => {
             return [];
           }),
         },
+        // 業者からの反響(agent_inquiries)も同じ位置で照会する(0件=通常の削除継続・@codex #454 R8)。
+        agentInquiry: { findMany: vi.fn(async () => []) },
         $queryRaw: vi.fn((...args: unknown[]) => {
           order.push("lockRows");
           lockRowsCall = args;
@@ -439,6 +441,7 @@ describe("取り消しは 行ロック → 後始末 → 削除 の順", () => {
             return [{ propertyId: SURVIVE_ID }];
           }),
         },
+        agentInquiry: { findMany: vi.fn(async () => []) },
         $queryRaw: vi.fn(() => {
           order.push("lockRows");
           return Promise.resolve([]);

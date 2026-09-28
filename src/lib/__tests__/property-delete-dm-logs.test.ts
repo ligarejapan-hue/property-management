@@ -49,6 +49,7 @@ describe("削除確認ダイアログの注意書き", () => {
 const mocks = vi.hoisted(() => {
   const tx = {
     dmInquiry: { count: vi.fn() },
+    agentInquiry: { count: vi.fn(async () => 0) },
     propertyPhoto: { findMany: vi.fn() },
     attachment: { updateMany: vi.fn() },
     propertyDmLog: { deleteMany: vi.fn() },
@@ -135,5 +136,35 @@ describe("物件削除: 査定申込がある物件は 409(HAS_DM_INQUIRIES)", (
     const attachmentIdx = ROUTE.indexOf("tx.attachment.updateMany");
     expect(countIdx).toBeGreaterThan(lockIdx);
     expect(countIdx).toBeLessThan(attachmentIdx);
+  });
+});
+
+describe("物件削除: 業者からの反響がある物件は 409(HAS_AGENT_INQUIRIES・@codex #454 R8)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.order.length = 0;
+    mocks.findUnique.mockResolvedValue({ id: "p1", address: "東京都", createdBy: "user-1", assignedTo: null });
+    mocks.lockPropertyRow.mockImplementation(async () => {
+      mocks.order.push("lock");
+    });
+    mocks.tx.dmInquiry.count.mockResolvedValue(0);
+    mocks.tx.agentInquiry.count.mockImplementation(async () => {
+      mocks.order.push("agentCount");
+      return 2;
+    });
+    mocks.tx.propertyPhoto.findMany.mockResolvedValue([]);
+  });
+
+  it("反響が1件でもあれば 409・物件も子も消さない(件数は親行ロックの後に数える=素の 500 にしない)", async () => {
+    const res = await DELETE(new Request("http://localhost/api/properties/p1", { method: "DELETE" }) as never, {
+      params: Promise.resolve({ id: "p1" }),
+    });
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toEqual({ message: "業者からの反響がある物件は削除できません", code: "HAS_AGENT_INQUIRIES" });
+    expect(mocks.tx.agentInquiry.count).toHaveBeenCalledWith({ where: { propertyId: "p1" } });
+    expect(mocks.order).toEqual(["lock", "agentCount"]);
+    expect(mocks.tx.property.delete).not.toHaveBeenCalled();
+    expect(mocks.tx.attachment.updateMany).not.toHaveBeenCalled();
   });
 });
