@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SalesSheetTemplateKind } from "@/lib/sales-sheet/template-kind";
+import { unitBuildingFacts } from "@/lib/sales-sheet/unit-building-facts";
 import type { WritebackSummary } from "@/components/sales-sheet/editor/WritebackNotice";
 import { fetchPropertyDetail } from "@/lib/api-client";
 import { MANSION_FIELDS, LAND_FIELDS, HOUSE_FIELDS, BUILDING_FIELDS, type SheetField } from "@/lib/sales-sheet/field-model";
@@ -325,6 +326,15 @@ interface MansionAutoSource {
   saleTaxAmount?: number | string | null;
   access?: string | null;
   parking?: string | null;
+  /**
+   * 棟に紐づいていない区分の「棟の項目」(unit-building-facts.ts)。棟があれば使わない。
+   */
+  structureType?: string | null;
+  aboveFloors?: number | null;
+  basementFloors?: number | null;
+  totalUnits?: number | null;
+  builtYear?: number | null;
+  builtMonth?: number | null;
   building?: {
     name?: string | null;
     totalFloors?: number | null;
@@ -458,18 +468,20 @@ function savedValueHint(v: string | number): string {
 }
 
 /** 物件詳細フェッチ結果 → 自動反映専用プレビュー値・occupancy初期選択・テキスト系ヒント。 */
-function computeMansionAutoValues(data: MansionAutoSource): FieldModelAutoValues {
+export function computeMansionAutoValues(data: MansionAutoSource): FieldModelAutoValues {
   const b = data.building ?? undefined;
+  // 構造・地上階・地下階・総戸数・築年月は、棟があれば棟・無ければ物件の欄から出す。
+  const facts = unitBuildingFacts(data, data.building);
   const hints: Record<string, string> = {};
   if (data.zoningDistrict) {
     hints.useDistrict = `${data.zoningDistrict}（追加の用途地域があれば選択してください）`;
   }
   // [Task10 C-1] 棟に月まで保存済みなら「2008年3月」の形で見せる(document 側の
   // fmtBuiltYear と同じ表記)。月が無ければ年のみ+案内文言。
-  const mansionBuiltHint = builtYearMonthHint(b?.builtYear, b?.builtMonth);
+  const mansionBuiltHint = builtYearMonthHint(facts.builtYear, facts.builtMonth);
   if (mansionBuiltHint) hints.builtYearMonth = mansionBuiltHint;
-  if (b?.basementFloors != null) {
-    hints.basementFloors = savedValueHint(`${b.basementFloors}階`);
+  if (facts.basementFloors != null) {
+    hints.basementFloors = savedValueHint(`${facts.basementFloors}階`);
   }
   // [Task10 C-1] F3で物件へ保存した販売条件(build-document.ts の buildMansionValues と
   // 同じ既定値・house/land/building と同じ5項目)。
@@ -491,10 +503,10 @@ function computeMansionAutoValues(data: MansionAutoSource): FieldModelAutoValues
       balconyArea: toPreviewString(data.balconyArea),
       balconyDir: toPreviewString(data.orientation),
       layout: toPreviewString(data.layoutType),
-      structure: toPreviewString(b?.structureType),
+      structure: toPreviewString(facts.structureType),
       floorNo: toPreviewString(data.floorNo),
-      totalFloors: toPreviewString(b?.totalFloors),
-      totalUnits: toPreviewString(b?.totalUnits),
+      totalFloors: toPreviewString(facts.totalFloors),
+      totalUnits: toPreviewString(facts.totalUnits),
       managementCompany: toPreviewString(b?.managementCompany),
     },
     occupancySeed: mapOccupancyStatusToMansionOccupancy(data.occupancyStatus),

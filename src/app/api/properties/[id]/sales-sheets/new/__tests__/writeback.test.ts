@@ -769,6 +769,53 @@ describe("POST /sales-sheets/new — 図面への読み戻し(C-1)", () => {
     expect(documentTableRow("交通")).toBe("JR中央線 西荻窪駅 徒歩8分");
     expect(documentTableRow("うち消費税")).toBe("300万円");
   });
+
+  // @codex P1(#452): 棟が無くても物件名(buildingName)がある区分は多い。物件名を仮の棟として
+  // 包んで渡すと「棟あり」と判断され、物件の5項目が空の棟の値で上書きされていた。
+  it("区分マンション(棟なし・物件名あり): 物件に保存済みの5項目が図面に出る(物件名を棟と取り違えない)", async () => {
+    propertyFindMock.mockResolvedValue({
+      ...baseMansion,
+      building: null,
+      buildingName: "リガーレ西荻",
+      structureType: "RC",
+      aboveFloors: 11,
+      basementFloors: 1,
+      totalUnits: 48,
+      builtYear: 2008,
+      builtMonth: 3,
+    });
+    const res = await POST(req({ propertyVersion: 1 }), ctx);
+    expect(res.status).toBe(201);
+    expect(documentTableRow("建物構造")).toBe("RC");
+    expect(documentTableRow("地下階")).toBe("1階");
+    expect(documentTableRow("総戸数")).toBe("48戸");
+    expect(documentTableRow("築年月")).toBe("2008年3月");
+    expect(documentTableRow("所在階・階数")).toBe("地上11階");
+    // 見出しも物件名から作る(棟が無いので棟の名前は無い)。
+    const doc = (createDesign as Mock).mock.calls[0][0].document as {
+      elements: { id: string; content?: string }[];
+    };
+    expect(doc.elements.find((e) => e.id === "heading")?.content).toContain("リガーレ西荻");
+  });
+
+  it("区分マンション(棟なし): 物件に保存済みの構造・地上階・地下階・総戸数・築年月が図面に出る", async () => {
+    propertyFindMock.mockResolvedValue({
+      ...baseMansion,
+      building: null,
+      structureType: "RC",
+      aboveFloors: 11,
+      basementFloors: 1,
+      totalUnits: 48,
+      builtYear: 2008,
+      builtMonth: 3,
+    });
+    const res = await POST(req({ propertyVersion: 1 }), ctx); // override 無し
+    expect(res.status).toBe(201);
+    expect(documentTableRow("建物構造")).toBe("RC");
+    expect(documentTableRow("地下階")).toBe("1階");
+    expect(documentTableRow("総戸数")).toBe("48戸");
+    expect(documentTableRow("築年月")).toBe("2008年3月");
+  });
 });
 
 // @codex P1: 版番号だけで棟を照合すると、ダイアログを開いている間に別処理が部屋の所属棟を
@@ -812,11 +859,10 @@ describe("POST /sales-sheets/new — 棟の取り違え防止(@codex P1)", () =>
   });
 });
 
-// @codex P2: 棟に紐づいていない区分(物件名だけ持つ部屋)でも、作成画面は築年月・地下階を
-// 入力できる。黙って捨てると、作成後の知らせが「保存した」とも「読めなかった」とも言わない
-// まま値だけ消える。保存先が無いことを知らせる。
-describe("POST /sales-sheets/new — 保存先が無い項目(@codex P2)", () => {
-  it("棟に紐づいていない区分の築年月・地下階は noTarget で返す", async () => {
+describe("POST /sales-sheets/new — 棟が無い区分の棟の項目", () => {
+  // 本番の区分は全件が棟に紐づいていない(2026-09-27 実測)。以前は地下階・築年月を
+  // 「保存先が無い」として捨てていたが、物件の欄へ保存する(unit-building-facts.ts)。
+  it("棟に紐づいていない区分の築年月・地下階は物件の欄へ保存する(棟の版は問わない)", async () => {
     propertyFindMock.mockResolvedValue({ ...baseMansion, building: null });
     const res = await POST(
       req({ basementFloors: "2", builtYearMonth: "2015年3月", price: "3480", propertyVersion: 1 }),
@@ -824,10 +870,16 @@ describe("POST /sales-sheets/new — 保存先が無い項目(@codex P2)", () =>
     );
     expect(res.status).toBe(201);
     expect(buildingUpdateManyMock).not.toHaveBeenCalled();
+    expect(updateManyMock.mock.calls[0][0].data).toMatchObject({
+      salePrice: 3480,
+      basementFloors: 2,
+      builtYear: 2015,
+      builtMonth: 3,
+    });
     expect((await res.json()).propertyWriteback).toEqual({
-      saved: ["価格"],
+      saved: ["価格", "地下階", "築年月"],
       unreadable: [],
-      noTarget: ["地下階", "築年月"],
+      noTarget: [],
       tooLong: [],
       conflict: false,
     });

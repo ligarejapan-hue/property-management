@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, use, type Dispatch, 
 import { BackLink } from "@/components/ui/back-link";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { formatBuiltYearMonth } from "@/lib/built-year-month";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -1099,6 +1100,20 @@ function BasicTab({
             value={property.occupancyStatus ? OCCUPANCY_LABELS[property.occupancyStatus] ?? property.occupancyStatus : null}
           />
           <Field label="持分メモ" value={property.ownershipShareNote} />
+          {/* 棟に紐づいていない区分は、棟の項目を物件そのものの欄から出す
+              (unit-building-facts.ts・棟があれば棟の画面が正)。 */}
+          {!property.building && (
+            <>
+              <Field label="構造" value={property.structureType} />
+              <Field label="地上階" value={property.aboveFloors != null ? `${property.aboveFloors}階` : null} />
+              <Field label="地下階" value={property.basementFloors != null ? `${property.basementFloors}階` : null} />
+              <Field label="総戸数" value={property.totalUnits != null ? `${property.totalUnits}戸` : null} />
+              <Field
+                label="築年月"
+                value={formatBuiltYearMonth(property.builtYear, property.builtMonth) || null}
+              />
+            </>
+          )}
         </>
       )}
 

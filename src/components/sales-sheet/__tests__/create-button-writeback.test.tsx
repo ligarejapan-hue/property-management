@@ -187,7 +187,8 @@ describe("作成ダイアログ — 築年月ヒントの分岐が1か所にま�
     // `${...builtYear}年${...builtMonth}月` のような直書きが残っていないこと。
     expect(src).not.toMatch(/\$\{[^}]*builtYear\}年/);
     // ヒントは共通関数経由。
-    expect(src).toContain("builtYearMonthHint(b?.builtYear, b?.builtMonth)");
+    // 区分は棟(棟が無ければ物件の欄)の値を unit-building-facts 経由で読む。
+    expect(src).toContain("builtYearMonthHint(facts.builtYear, facts.builtMonth)");
     expect(src.match(/builtYearMonthHint\(data\.builtYear, data\.builtMonth\)/g)?.length).toBe(2);
   });
 });

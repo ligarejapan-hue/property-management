@@ -480,3 +480,80 @@ describe("buildSaleMansionDocument（自社マイソク様式）", () => {
     expect(findEl(doc, "footer-name-ja")).toMatchObject({ content: "株式会社ABC" });
   });
 });
+
+// 本番の区分マンションは全件が棟に紐づいていない(2026-09-27 実測・42,339件)。
+// 棟が無い区分は、構造・地上階・地下階・総戸数・築年月を**物件そのものの欄**から読む
+// (棟があれば従来どおり棟の値が正)。
+describe("buildSaleMansionDocument — 棟が無い区分は物件の欄から読む", () => {
+  const unitFacts = {
+    structureType: "RC",
+    aboveFloors: 11,
+    basementFloors: 1,
+    totalUnits: 48,
+    builtYear: 2008,
+    builtMonth: 3,
+  };
+
+  it("棟が無ければ、構造・地上階・地下階・総戸数・築年月を物件の欄から出す", () => {
+    const doc = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, ...unitFacts },
+      building: null,
+      overrides: {},
+    });
+    expect(tableRow(doc, "建物構造")).toBe("RC");
+    expect(tableRow(doc, "所在階・階数")).toBe("地上11階");
+    expect(tableRow(doc, "地下階")).toBe("1階");
+    expect(tableRow(doc, "総戸数")).toBe("48戸");
+    expect(tableRow(doc, "築年月")).toBe("2008年3月");
+  });
+
+  it("棟があれば、物件の欄に値があっても棟の値が正", () => {
+    const doc = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, ...unitFacts },
+      building: { name: "棟", totalFloors: 7, builtYear: 1972, structureType: "SRC", totalUnits: 20, basementFloors: 0 },
+      overrides: {},
+    });
+    expect(tableRow(doc, "建物構造")).toBe("SRC");
+    expect(tableRow(doc, "所在階・階数")).toBe("地上7階");
+    expect(tableRow(doc, "地下階")).toBe("0階");
+    expect(tableRow(doc, "総戸数")).toBe("20戸");
+    expect(tableRow(doc, "築年月")).toBe("1972年");
+  });
+
+  it("棟が無くても、手入力(地下階・築年月)が最優先", () => {
+    const doc = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, ...unitFacts },
+      building: null,
+      overrides: { basementFloors: "2", builtYearMonth: "令和2年1月" },
+    });
+    expect(tableRow(doc, "地下階")).toBe("2階");
+    expect(tableRow(doc, "築年月")).toBe("令和2年1月");
+  });
+});
+
+// @codex P1(#452): 物件名は仮の棟として包まず property.buildingName で渡すようになった。
+// 見出し(建物名＋部屋番号)も同じ順(棟の名前 → 物件名)で作らないと、物件名だけの区分で
+// 見出しから名前が消える。
+describe("buildSaleMansionDocument — 見出しの建物名", () => {
+  it("棟が無く物件名だけの区分は、見出しに物件名と部屋番号を出す", () => {
+    const doc = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, buildingName: "リガーレ西荻", roomNo: "302" },
+      building: null,
+      overrides: {},
+    });
+    expect(findEl(doc, "heading")).toMatchObject({ content: "リガーレ西荻　302号室" });
+  });
+
+  it("棟があれば棟の名前が正(物件名より優先)", () => {
+    const doc = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, buildingName: "物件側の名前", roomNo: "302" },
+      overrides: {},
+    });
+    expect(findEl(doc, "heading")).toMatchObject({ content: "西荻リリエンハイム　302号室" });
+  });
+});

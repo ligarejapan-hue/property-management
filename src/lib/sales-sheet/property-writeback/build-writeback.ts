@@ -78,6 +78,12 @@ type Rule = {
   to: "property" | "building";
   /** 列名 */
   column: string;
+  /**
+   * `to: "building"` の規則で、**棟に紐づいていないとき**に代わりに保存する物件の列。
+   * 本番の区分は全件が棟に紐づいていないため(2026-09-27 実測)、棟の項目を物件の欄に
+   * 持たせる(unit-building-facts.ts と同じ判断)。無ければ従来どおり noTarget。
+   */
+  propertyColumnWhenNoBuilding?: string;
   /** 読み取り方 */
   as: "number" | "text" | { option: readonly string[] };
   /** as:"number" のときの範囲/整数制約(無ければ制約なし)。 */
@@ -136,7 +142,7 @@ const RULES: Record<SalesSheetTemplateKind, Rule[]> = {
     // ⚠区分の構造・地上階・総戸数は**棟の値が正**で、図面からは変えない(作成画面でも表示だけ)。
     //   棟へ書き戻す規則を置かない(以前は入力経路から到達しない規則が残っていた。後で
     //   入力経路にキーを足すと同じ棟の全部屋へ黙って書き込むことになるため消した)。
-    { key: "basementFloors", label: "地下階", to: "building", column: "basementFloors", as: "number", range: INT_RANGES.basementFloors },
+    { key: "basementFloors", label: "地下階", to: "building", column: "basementFloors", propertyColumnWhenNoBuilding: "basementFloors", as: "number", range: INT_RANGES.basementFloors },
   ],
   house: [
     ...PRICE(M.TAX),
@@ -189,7 +195,12 @@ export function buildWriteback(input: {
   for (const rule of RULES[kind]) {
     const raw = values[rule.key];
     if (typeof raw !== "string" || raw.trim() === "") continue; // 空は変更なし
-    if (rule.to === "building" && !hasBuilding) {
+    // 棟に紐づいていない区分は、棟の項目を物件の欄へ(代わりの列があるときだけ)。
+    const to: "property" | "building" =
+      rule.to === "building" && !hasBuilding && rule.propertyColumnWhenNoBuilding ? "property" : rule.to;
+    const column =
+      to === "property" && rule.to === "building" ? rule.propertyColumnWhenNoBuilding! : rule.column;
+    if (to === "building" && !hasBuilding) {
       out.noTarget.push(rule.label); // 棟に紐づいていない＝入れても行き先が無い
       continue;
     }
@@ -215,35 +226,32 @@ export function buildWriteback(input: {
       out.unreadable.push(rule.label);
       continue;
     }
-    const currentBag = rule.to === "property" ? current.property : (current.building ?? {});
-    if (same(currentBag[rule.column], next)) continue;
-    const bag = rule.to === "property" ? out.property : out.building;
-    bag[rule.column] = next;
+    const currentBag = to === "property" ? current.property : (current.building ?? {});
+    if (same(currentBag[column], next)) continue;
+    const bag = to === "property" ? out.property : out.building;
+    bag[column] = next;
   }
 
   // 築年月(1項目 → 年・月の2列)
-  const builtTarget = BUILT_TARGET[kind];
+  // 区分の築年月は棟へ。ただし棟に紐づいていなければ物件の欄へ(地下階と同じ判断)。
+  const builtTarget =
+    BUILT_TARGET[kind] === "building" && !hasBuilding ? "property" : BUILT_TARGET[kind];
   const builtRaw = values.builtYearMonth;
   if (builtTarget && typeof builtRaw === "string" && builtRaw.trim() !== "") {
-    if (builtTarget === "building" && !hasBuilding) {
-      // 棟が無い区分は保存先が無い。黙って捨てず、知らせに出す([@codex P2])。
-      out.noTarget.push(BUILT_LABEL);
+    const parsed = parseBuiltYearMonth(builtRaw);
+    if (parsed === null || !inRange(parsed.year, BUILT_YEAR_RANGE)) {
+      out.unreadable.push(BUILT_LABEL);
     } else {
-      const parsed = parseBuiltYearMonth(builtRaw);
-      if (parsed === null || !inRange(parsed.year, BUILT_YEAR_RANGE)) {
-        out.unreadable.push(BUILT_LABEL);
-      } else {
-        const currentBag = builtTarget === "property" ? current.property : (current.building ?? {});
-        const bag = builtTarget === "property" ? out.property : out.building;
-        if (!same(currentBag.builtYear, parsed.year)) bag.builtYear = parsed.year;
-        if (parsed.month !== null) {
-          if (!same(currentBag.builtMonth, parsed.month)) bag.builtMonth = parsed.month;
-        } else if (currentBag.builtMonth !== null && currentBag.builtMonth !== undefined) {
-          // [@codex P2] 「2020年」と年だけ書き直したのに前の月が残ると、図面は「2020年」
-          // なのに物件は「2020年3月」になり、次に作る図面へ勝手に月が復活する。
-          // 入れ直した内容に合わせて月も消す。
-          bag.builtMonth = null;
-        }
+      const currentBag = builtTarget === "property" ? current.property : (current.building ?? {});
+      const bag = builtTarget === "property" ? out.property : out.building;
+      if (!same(currentBag.builtYear, parsed.year)) bag.builtYear = parsed.year;
+      if (parsed.month !== null) {
+        if (!same(currentBag.builtMonth, parsed.month)) bag.builtMonth = parsed.month;
+      } else if (currentBag.builtMonth !== null && currentBag.builtMonth !== undefined) {
+        // [@codex P2] 「2020年」と年だけ書き直したのに前の月が残ると、図面は「2020年」
+        // なのに物件は「2020年3月」になり、次に作る図面へ勝手に月が復活する。
+        // 入れ直した内容に合わせて月も消す。
+        bag.builtMonth = null;
       }
     }
   }
@@ -256,9 +264,12 @@ export function labelsOf(kind: SalesSheetTemplateKind, result: WritebackResult):
   const out: string[] = [];
   for (const rule of RULES[kind]) {
     const bag = rule.to === "property" ? result.property : result.building;
-    if (rule.column in bag) out.push(rule.label);
+    // 棟の項目を物件の欄へ保存した場合(棟に紐づいていない区分)も「保存した」に数える。
+    const inProperty =
+      rule.propertyColumnWhenNoBuilding !== undefined && rule.propertyColumnWhenNoBuilding in result.property;
+    if (rule.column in bag || inProperty) out.push(rule.label);
   }
-  const builtBag = BUILT_TARGET[kind] === "building" ? result.building : result.property;
-  if ("builtYear" in builtBag || "builtMonth" in builtBag) out.push(BUILT_LABEL);
+  const builtIn = (bag: WritebackResult["property"]) => "builtYear" in bag || "builtMonth" in bag;
+  if (builtIn(result.property) || builtIn(result.building)) out.push(BUILT_LABEL);
   return out;
 }

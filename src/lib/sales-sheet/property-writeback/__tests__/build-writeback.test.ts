@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Prisma } from "@/generated/prisma";
-import { buildWriteback } from "../build-writeback";
+import { buildWriteback, labelsOf } from "../build-writeback";
 
 const emptyCurrent = { property: {}, building: null };
 
@@ -387,19 +387,42 @@ describe("buildWriteback — 小数の桁(@codex P2)", () => {
   });
 });
 
-// [@codex P2] 棟に紐づいていない区分(物件名だけ持つ部屋)では、棟の列へ入る項目は行き先が
-// 無い。黙って捨てず「保存先が無い」として返す(知らせに出すため)。
-describe("buildWriteback — 保存先が無い項目(@codex P2)", () => {
-  it("棟が無い区分の地下階・築年月は noTarget に入る", () => {
+// 棟に紐づいていない区分(本番の区分は全件これ・2026-09-27 実測)では、棟の列へ入る項目
+// (地下階・築年月)を**物件の欄へ**保存する(unit-building-facts.ts と同じ判断)。
+// 以前は「保存先が無い(noTarget)」として捨てていた。
+describe("buildWriteback — 棟が無い区分の棟の項目", () => {
+  it("棟が無い区分の地下階・築年月は物件の欄へ保存する", () => {
     const r = buildWriteback({
       kind: "mansion",
       values: { basementFloors: "2", builtYearMonth: "2015年3月", price: "3480" },
       current: { property: {}, building: null },
     });
     expect(r.building).toEqual({});
-    expect(r.property).toEqual({ salePrice: 3480 });
+    expect(r.property).toEqual({ salePrice: 3480, basementFloors: 2, builtYear: 2015, builtMonth: 3 });
     expect(r.unreadable).toEqual([]);
-    expect(r.noTarget).toEqual(["地下階", "築年月"]);
+    expect(r.noTarget).toEqual([]);
+    expect(labelsOf("mansion", r)).toEqual(["価格", "地下階", "築年月"]);
+  });
+
+  it("棟が無い区分で、物件の今の値と同じなら保存しない", () => {
+    const r = buildWriteback({
+      kind: "mansion",
+      values: { basementFloors: "2", builtYearMonth: "2015年3月" },
+      current: { property: { basementFloors: 2, builtYear: 2015, builtMonth: 3 }, building: null },
+    });
+    expect(r.property).toEqual({});
+    expect(labelsOf("mansion", r)).toEqual([]);
+  });
+
+  it("棟があれば従来どおり棟へ(物件の欄には書かない)", () => {
+    const r = buildWriteback({
+      kind: "mansion",
+      values: { basementFloors: "2", builtYearMonth: "2015年3月" },
+      current: { property: {}, building: { id: "b1" } },
+    });
+    expect(r.property).toEqual({});
+    expect(r.building).toEqual({ basementFloors: 2, builtYear: 2015, builtMonth: 3 });
+    expect(labelsOf("mansion", r)).toEqual(["地下階", "築年月"]);
   });
 
   it("棟があれば noTarget は空(保存先がある)", () => {

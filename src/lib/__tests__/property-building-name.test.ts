@@ -234,11 +234,14 @@ describe("配線 — 同じ判定を UI と API の両方が通る", () => {
       "src/app/api/properties/[id]/sales-sheets/new/route.ts",
     );
     expect(route).toMatch(/buildingName: true,/);
-    // 建物マスタが無くても名前だけは渡す (丸ごと null にしない)
-    expect(route).toMatch(/property\.building \|\| property\.buildingName/);
-    expect(route).toMatch(
-      /name: property\.building\?\.name \?\? property\.buildingName/,
-    );
+    // 建物マスタが無くても名前だけは渡す。⚠物件名は**物件の欄として**渡し、仮の棟として
+    // 包まない(包むと「棟あり」と判断され、物件の欄の構造・地上階などが空の棟の値で
+    // 上書きされる・@codex P1 #452)。
+    expect(route).toMatch(/buildingName: property\.buildingName,/);
+    expect(route).not.toMatch(/property\.building \|\| property\.buildingName/);
+    expect(route).toMatch(/building: property\.building\r?\n\s*\? \{/);
+    const doc = read("src/lib/sales-sheet/build-document.ts");
+    expect(doc).toMatch(/buildingName: b\.name \?\? p\.buildingName \?\? undefined,/);
     // 作成前のプレビューも同じ優先順位
     const button = read("src/components/sales-sheet/SalesSheetCreateButton.tsx");
     expect(button).toMatch(/b\?\.name \?\? data\.buildingName/);

@@ -25,6 +25,21 @@ describe("salesFieldsFor — 種別ごとに出す欄", () => {
     expect(keys).not.toContain("structureType");
     expect(keys).not.toContain("totalUnits");
   });
+  it("棟に紐づかない区分は、棟の5項目(構造・地上階・地下階・総戸数・築年月)を物件の欄として出す", () => {
+    for (const t of ["apartment_unit", "unit"]) {
+      const keys = salesFieldsFor(t, { hasBuilding: false }).map((f) => f.key);
+      expect(keys).toEqual(
+        expect.arrayContaining([
+          "exclusiveArea", "structureType", "aboveFloors", "basementFloors", "totalUnits", "builtYear", "builtMonth",
+        ]),
+      );
+    }
+  });
+  it("棟に紐づく区分(既定)は従来どおり棟の欄を出さない", () => {
+    const keys = salesFieldsFor("apartment_unit", { hasBuilding: true }).map((f) => f.key);
+    expect(keys).not.toContain("structureType");
+    expect(keys).not.toContain("builtYear");
+  });
 });
 
 // [@codex P2] 保存は「開いた時点の値(property)との差分」を送る。初期値を開いた時点の種別

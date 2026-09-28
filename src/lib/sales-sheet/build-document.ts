@@ -30,6 +30,7 @@ import { CONSUMER_COLORS, CONSUMER_FONT_FAMILY } from "./consumer-theme";
 import { computeTsuboUnitPrice } from "./tsubo";
 import type { CompanyProfile } from "./company-profile-store";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
+import { unitBuildingFacts } from "./unit-building-facts";
 
 /**
  * 保存する画像 src を正規化する。`PropertyPhoto.fileUrl` は storage backend に
@@ -281,6 +282,23 @@ export interface SaleMansionInput {
     saleTaxAmount?: string | null;
     access?: string | null;
     parking?: string | null;
+    /**
+     * 棟に紐づいていない区分の「棟の項目」(unit-building-facts.ts)。棟があれば使わない
+     * (棟の値が正)。
+     */
+    structureType?: string | null;
+    aboveFloors?: number | null;
+    basementFloors?: number | null;
+    totalUnits?: number | null;
+    builtYear?: number | null;
+    builtMonth?: number | null;
+    /**
+     * 物件そのものに入れた物件名(建物マスタを作らずに登録した区分はこちらにしか名前が
+     * 無い・@codex #354 P2)。棟の名前が無ければこれを建物名称に使う。
+     * ⚠物件名があるだけで `building` を作らないこと(棟ありと判断され、棟の項目が
+     *   物件の欄から読まれなくなる・@codex P1 #452)。
+     */
+    buildingName?: string | null;
   };
   building?: {
     name?: string | null;
@@ -309,6 +327,8 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
   const o = input.overrides ?? {};
   const p = input.property;
   const b = input.building ?? {};
+  // 構造・地上階・地下階・総戸数・築年月は、棟があれば棟・無ければ物件の欄から読む。
+  const facts = unitBuildingFacts(p, input.building);
 
   // 用途地域: 自動反映(zoningDistrict) 1件 + overrides の追加選択（空は除外）。
   const useDistrict = [p.zoningDistrict, ...(o.useDistrict ?? [])].filter(
@@ -319,7 +339,8 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
     // 価格・費用（unitPriceは手入力のみ）
     // propertyType: 自動反映元なし（DB enum が語彙不一致のため常に手入力=override のみ）。
     propertyType: o.propertyType,
-    buildingName: b.name ?? undefined,
+    // 棟の名前が正。棟に紐づいていなければ物件そのものに入れた物件名(@codex #354 P2)。
+    buildingName: b.name ?? p.buildingName ?? undefined,
     // [Task10 C-1] price/tax/taxAmount/access/parking は override優先、無ければ物件の
     // 既定値(手入力 > 物件の値 > 空・house/land/building と同じ形)。
     price: pick(o.price, p.salePrice),
@@ -364,18 +385,18 @@ function buildMansionValues(input: SaleMansionInput): SheetValues {
     balconyDir:
       o.balconyDir && o.balconyDir.trim() !== "" ? o.balconyDir : (p.orientation ?? undefined),
     layout: o.layout && o.layout.trim() !== "" ? o.layout : (p.layoutType ?? undefined),
-    structure: b.structureType ?? undefined,
+    structure: facts.structureType ?? undefined,
     floorNo:
       o.floorNo && o.floorNo.trim() !== ""
         ? o.floorNo
         : p.floorNo != null
           ? String(p.floorNo)
           : undefined,
-    totalFloors: b.totalFloors != null ? String(b.totalFloors) : undefined,
-    // [Task10 C-1] override優先、無ければ棟のbasementFloorsを既定値とする(builtYearMonthと同じ扱い)。
-    basementFloors: pick(o.basementFloors, b.basementFloors),
-    builtYearMonth: fmtBuiltYear(o.builtYearMonth, b.builtYear, b.builtMonth),
-    totalUnits: b.totalUnits != null ? String(b.totalUnits) : undefined,
+    totalFloors: facts.totalFloors != null ? String(facts.totalFloors) : undefined,
+    // [Task10 C-1] override優先、無ければ棟(棟が無い区分は物件)の値を既定値とする。
+    basementFloors: pick(o.basementFloors, facts.basementFloors),
+    builtYearMonth: fmtBuiltYear(o.builtYearMonth, facts.builtYear, facts.builtMonth),
+    totalUnits: facts.totalUnits != null ? String(facts.totalUnits) : undefined,
     parking: pick(o.parking, p.parking),
     parkingFee: o.parkingFee,
     // 設備・現況・管理
@@ -512,7 +533,11 @@ export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDoc
   const values = buildMansionValues(input);
   const { main, detail } = splitMainDetailRows("mansion", MANSION_SPEC_FIELDS, values);
 
-  const heading = [b.name, p.roomNo ? `${p.roomNo}号室` : null].filter(Boolean).join("　");
+  // 建物名は 棟の名前 → 物件そのものの物件名 の順(buildMansionValues の buildingName と同じ)。
+  // 物件名は仮の棟として包まず property.buildingName で届く(@codex P1 #452)。
+  const heading = [b.name ?? p.buildingName, p.roomNo ? `${p.roomNo}号室` : null]
+    .filter(Boolean)
+    .join("　");
   const priceText = fmtManYen(asStr(values.price));
 
   return buildSpecSheetDocument({
