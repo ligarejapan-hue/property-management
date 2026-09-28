@@ -791,6 +791,11 @@ describe("POST /sales-sheets/new — 図面への読み戻し(C-1)", () => {
     expect(documentTableRow("総戸数")).toBe("48戸");
     expect(documentTableRow("築年月")).toBe("2008年3月");
     expect(documentTableRow("所在階・階数")).toBe("地上11階");
+    // 見出しも物件名から作る(棟が無いので棟の名前は無い)。
+    const doc = (createDesign as Mock).mock.calls[0][0].document as {
+      elements: { id: string; content?: string }[];
+    };
+    expect(doc.elements.find((e) => e.id === "heading")?.content).toContain("リガーレ西荻");
   });
 
   it("区分マンション(棟なし): 物件に保存済みの構造・地上階・地下階・総戸数・築年月が図面に出る", async () => {

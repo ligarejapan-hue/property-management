@@ -533,3 +533,27 @@ describe("buildSaleMansionDocument — 棟が無い区分は物件の欄から�
     expect(tableRow(doc, "築年月")).toBe("令和2年1月");
   });
 });
+
+// @codex P1(#452): 物件名は仮の棟として包まず property.buildingName で渡すようになった。
+// 見出し(建物名＋部屋番号)も同じ順(棟の名前 → 物件名)で作らないと、物件名だけの区分で
+// 見出しから名前が消える。
+describe("buildSaleMansionDocument — 見出しの建物名", () => {
+  it("棟が無く物件名だけの区分は、見出しに物件名と部屋番号を出す", () => {
+    const doc = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, buildingName: "リガーレ西荻", roomNo: "302" },
+      building: null,
+      overrides: {},
+    });
+    expect(findEl(doc, "heading")).toMatchObject({ content: "リガーレ西荻　302号室" });
+  });
+
+  it("棟があれば棟の名前が正(物件名より優先)", () => {
+    const doc = buildSaleMansionDocument({
+      ...base,
+      property: { ...base.property, buildingName: "物件側の名前", roomNo: "302" },
+      overrides: {},
+    });
+    expect(findEl(doc, "heading")).toMatchObject({ content: "西荻リリエンハイム　302号室" });
+  });
+});

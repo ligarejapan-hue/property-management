@@ -533,7 +533,11 @@ export function buildSaleMansionDocument(input: SaleMansionInput): SalesSheetDoc
   const values = buildMansionValues(input);
   const { main, detail } = splitMainDetailRows("mansion", MANSION_SPEC_FIELDS, values);
 
-  const heading = [b.name, p.roomNo ? `${p.roomNo}号室` : null].filter(Boolean).join("　");
+  // 建物名は 棟の名前 → 物件そのものの物件名 の順(buildMansionValues の buildingName と同じ)。
+  // 物件名は仮の棟として包まず property.buildingName で届く(@codex P1 #452)。
+  const heading = [b.name ?? p.buildingName, p.roomNo ? `${p.roomNo}号室` : null]
+    .filter(Boolean)
+    .join("　");
   const priceText = fmtManYen(asStr(values.price));
 
   return buildSpecSheetDocument({
