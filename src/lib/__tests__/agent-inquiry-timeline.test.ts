@@ -1,0 +1,47 @@
+import { describe, it, expect } from "vitest";
+import { buildPropertyTimeline, countInquiries } from "@/lib/agent-inquiry/timeline";
+
+const d = (s: string) => new Date(s);
+const inq = (over: Record<string, unknown>) => ({
+  id: "i", kind: "viewing", receivedAt: d("2026-09-20T00:00:00Z"), status: "open",
+  agent: { companyName: "○○不動産" }, contactName: "田中", viewings: [], ...over,
+}) as never;
+
+describe("物件の時系列(新しい順)", () => {
+  it("内見は予定日時で1行ずつ・それ以外は受けた日時・取り消しは印付き・日程未定は受けた日時", () => {
+    const t = buildPropertyTimeline([
+      inq({ id: "a", kind: "ad_permission", receivedAt: d("2026-09-20T00:40:00Z") }),
+      inq({ id: "v", receivedAt: d("2026-09-21T00:00:00Z"), viewings: [
+        { id: "v1", scheduledAt: d("2026-10-02T05:00:00Z"), viewingType: "guided", canceledAt: null, attendant: { name: "佐藤" }, resultNote: null },
+        { id: "v2", scheduledAt: d("2026-09-25T06:30:00Z"), viewingType: "preview", canceledAt: d("2026-09-24T00:00:00Z"), attendant: null, resultNote: null },
+        { id: "v3", scheduledAt: null, viewingType: "guided", canceledAt: null, attendant: null, resultNote: null },
+      ] }),
+    ]);
+    expect(t.map((e) => [e.key, e.at.toISOString(), e.canceled])).toEqual([
+      ["viewing:v1", "2026-10-02T05:00:00.000Z", false],
+      ["viewing:v2", "2026-09-25T06:30:00.000Z", true],
+      ["viewing:v3", "2026-09-21T00:00:00.000Z", false],
+      ["inquiry:a", "2026-09-20T00:40:00.000Z", false],
+    ]);
+    expect(t[2].unscheduled).toBe(true);
+    expect(t[0].attendantName).toBe("佐藤");
+  });
+  it("内見の予定が無い内見の反響は反響として1行", () => {
+    expect(buildPropertyTimeline([inq({ id: "x" })]).map((e) => e.key)).toEqual(["inquiry:x"]);
+  });
+});
+
+describe("件数", () => {
+  it("案内/下見は取り消しを数えない", () => {
+    const c = countInquiries([
+      inq({ viewings: [
+        { id: "1", scheduledAt: null, viewingType: "guided", canceledAt: null },
+        { id: "2", scheduledAt: null, viewingType: "preview", canceledAt: null },
+        { id: "3", scheduledAt: null, viewingType: "guided", canceledAt: d("2026-09-01T00:00:00Z") },
+      ] }),
+      inq({ kind: "material_request" }),
+      inq({ kind: "ad_permission" }),
+    ]);
+    expect(c).toEqual({ total: 3, guided: 1, preview: 1, materialRequest: 1, adPermission: 1 });
+  });
+});
