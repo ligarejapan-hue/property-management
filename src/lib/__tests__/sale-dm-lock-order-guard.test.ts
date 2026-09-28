@@ -273,6 +273,42 @@ describe("物件の「DMの種類」欄の保存(properties/[id] PATCH)のロッ
   });
 });
 
+describe("「種類を変える」(campaigns/[id]/properties/[propertyId]/scenario POST)のロック順序(設計 §3.3.1)", () => {
+  const s = code("src/app/api/properties/sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts");
+
+  it("発送 → 型 → LPの型 → 物件 → 宛先 → 台帳(FOR SHARE)の順に取る(宛先を物件より先に取らない)", () => {
+    const campaign = s.search(/FROM dm_campaigns[\s\S]{0,200}FOR UPDATE/);
+    const variants = s.search(/FROM dm_variants[\s\S]{0,200}FOR UPDATE/);
+    const lps = s.search(/FROM dm_lp_variants[\s\S]{0,200}FOR UPDATE/);
+    const property = s.indexOf("lockPropertyRow(");
+    const drafts = s.search(/FROM dm_recipient_drafts[\s\S]{0,200}FOR UPDATE/);
+    const scenario = s.indexOf("lockScenarioForShare(");
+    for (const i of [campaign, variants, lps, property, drafts, scenario]) expect(i).toBeGreaterThan(-1);
+    expect(campaign).toBeLessThan(variants);
+    expect(variants).toBeLessThan(lps);
+    expect(lps).toBeLessThan(property);
+    expect(property).toBeLessThan(drafts);
+    expect(drafts).toBeLessThan(scenario);
+  });
+
+  it("編集中の鍵の判定は物件のロックの後・宛先のロックの前", () => {
+    const property = s.indexOf("lockPropertyRow(");
+    const editLock = s.indexOf("assertNotEditLockedByOther(");
+    const drafts = s.search(/FROM dm_recipient_drafts[\s\S]{0,200}FOR UPDATE/);
+    expect(editLock).toBeGreaterThan(property);
+    expect(editLock).toBeLessThan(drafts);
+  });
+
+  it("移動元の凍結の印は、写す・宛先を書き換えるより前", () => {
+    const freeze = s.indexOf("markVariantsFrozen(");
+    const copy = s.indexOf("copyScenarioIntoCampaign(tx");
+    const update = s.indexOf("tx.dmRecipientDraft.updateMany(");
+    expect(freeze).toBeGreaterThan(-1);
+    expect(freeze).toBeLessThan(copy);
+    expect(copy).toBeLessThan(update);
+  });
+});
+
 describe("写真ライブラリの削除(lp-assets/[assetId] DELETE)のロック順序", () => {
   const s = code("src/app/api/properties/sale-dm/lp-assets/[assetId]/route.ts");
 

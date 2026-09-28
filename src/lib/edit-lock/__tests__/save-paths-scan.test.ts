@@ -14,6 +14,11 @@ const GUARDED: Array<{ path: string; rowLock: RegExp }> = [
   { path: "src/app/api/properties/[id]/route.ts", rowLock: /lockPropertyRow\(/ },
   { path: "src/app/api/owners/[id]/route.ts", rowLock: /lockOwnerRow\(/ },
   { path: "src/app/api/owners/[id]/corporate-apply/route.ts", rowLock: /lockOwnerRow\(/ },
+  // 売却DMの「種類を変える」(DMの種類 PR-S2 Task 5)。物件の dmScenarioId を書くので同じ鍵の確認を通す。
+  {
+    path: "src/app/api/properties/sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts",
+    rowLock: /lockPropertyRow\(/,
+  },
 ];
 
 describe("保存の窓口の鍵の確認", () => {

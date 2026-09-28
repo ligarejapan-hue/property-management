@@ -242,6 +242,9 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // scenarioCount=使ったDMの種類の数・blankBodyCount=本文を差し込めなかった宛先数(件数のみ・非PII)。
   sale_dm_campaign_create: new Set(["requested", "generated", "saved", "skippedByUnlink", "excludedTerminal", "truncated", "scenarioCount", "blankBodyCount", "createdAt"]),
   sale_dm_assign_variants: new Set(["mode", "order", "assigned", "assignedLp", "assignedAt"]),
+  // 「種類を変える」(物件単位・DMの種類 PR-S2 Task 5)。切り替えた宛先数と本文を差し込めなかった宛先数(件数のみ)。
+  // campaignId/propertyId は ALWAYS_SAFE。文面・種類名は detail に載せない。
+  sale_dm_scenario_change: new Set(["changedDrafts", "blankBodyCount"]),
   sale_dm_campaign_print: new Set(["printedAt", "excludedTerminal"]),
   sale_dm_variant_create: new Set(["createdAt"]),
   sale_dm_variant_update: new Set(["updatedAt"]),

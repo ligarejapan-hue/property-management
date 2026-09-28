@@ -521,6 +521,23 @@ export async function patchSaleDmDraft(id: string, patch: { body?: string; varia
   });
 }
 
+// 「種類を変える」(物件単位・DMの種類)。その発送のその物件の宛先を全員まとめて切り替え、物件の欄も書く。
+// 物件を書くので合言葉(X-Edit-Screen)を送る(他の画面で編集中なら 423)。鍵の世代は持たない入口=lockId なし。
+export async function changeSaleDmPropertyScenario(campaignId: string, propertyId: string, scenarioId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { changedDrafts: 0, blankBodyCount: 0, lpMissing: false };
+  }
+  return apiFetch<{ changedDrafts: number; blankBodyCount: number; lpMissing: boolean }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/properties/${propertyId}/scenario`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...editLockHeaders() },
+      body: JSON.stringify({ scenarioId }),
+    },
+  );
+}
+
 // 割当型 + 個別上書きで本文を AI 再生成する。
 export async function regenerateSaleDmDraft(id: string) {
   if (USE_MOCK) {

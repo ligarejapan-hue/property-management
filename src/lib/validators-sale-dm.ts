@@ -56,6 +56,11 @@ export const saleDmCampaignBodySchema = z.object({
 
 export type SaleDmCampaignBody = z.infer<typeof saleDmCampaignBodySchema>;
 
+// 「種類を変える」(物件単位・設計 §3.4)。id は小文字にそろえる(履歴・監査・比較で大小文字の食い違いを出さない)。
+export const saleDmScenarioChangeSchema = z.object({
+  scenarioId: z.string().uuid().transform((s) => s.toLowerCase()),
+});
+
 // 型(DmVariant)= 設定一式。sender は型に持たせない(差出人はキャンペーン/env 既定)。
 const variantOptionsSchema = saleDmOptionsSchema.omit({ senderName: true, senderContact: true });
 

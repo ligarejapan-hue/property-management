@@ -1,7 +1,7 @@
 /**
  * 「DMの種類」の共通手順(設計 2026-09-27 §3.3.0)を、宛先に種類を付ける全経路が必ず呼ぶことの走査。
  * 片方の経路だけ守り(準備の検査・写す・付けて差し込む・組の検査)が漏れる事故を防ぐ。
- * 「種類を変える」の route(Task 5)ができたら ROUTES に足す。
+ * 経路=発送の作成(Task 3)と「種類を変える」(Task 5)。
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
@@ -11,6 +11,7 @@ const read = (p: string) => readFileSync(path.join(process.cwd(), p), "utf8").re
 
 const ROUTES = [
   "src/app/api/properties/sale-dm/campaigns/route.ts", // 発送の作成(§3.3)
+  "src/app/api/properties/sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts", // 種類を変える(§3.4)
 ];
 
 const REQUIRED_CALLS = [

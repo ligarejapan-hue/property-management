@@ -363,7 +363,7 @@ describe("宛先の型の組を書き換える route の機械的な洗い出し
   }
 
   // 作成route(初めて組む・共通手順 attachScenario 経由=Task 3 走査が別途固定)と、
-  // Task 5(種類を変える・まだ存在しないので path で許可)。
+  // Task 5(種類を変える・共通手順 attachScenario+isValidScenarioPair 経由=shared-steps 走査が別途固定)。
   const ALLOWED_WITHOUT_GUARD = new Set([
     "src/app/api/properties/sale-dm/campaigns/route.ts",
     "src/app/api/properties/sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts",
@@ -396,6 +396,8 @@ describe("宛先の型の組を書き換える route の機械的な洗い出し
   it("組を書き換えうる7 route + 作成route の全8本が拾われている(regression固定)", () => {
     const expected = [
       "src/app/api/properties/sale-dm/campaigns/route.ts",
+      // 種類を変える(Task 5)も書き手として拾われる(allow-list で通す=拾えていないと allow-list が空振り)。
+      "src/app/api/properties/sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts",
       "src/app/api/properties/sale-dm/campaigns/[id]/assign/route.ts",
       "src/app/api/properties/sale-dm/campaigns/[id]/variants/route.ts",
       "src/app/api/properties/sale-dm/campaigns/[id]/lp-variants/route.ts",
