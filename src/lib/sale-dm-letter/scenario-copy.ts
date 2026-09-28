@@ -130,6 +130,22 @@ export function lpVariantData(campaignId: string, s: ScenarioFull): Record<strin
 
 export type ExpandResult = { body: string; blank: false } | { body: ""; blank: true };
 
+/** その発送で種類から写した手紙の型と LP の型の組(LP の無い種類は null)+差し込み前の本文。 */
+export type ScenarioPair = { letterVariantId: string; lpVariantId: string | null; template: string };
+
+/**
+ * 宛先に付けて差し込む(設計 §3.3.0-3)。作成と「種類を変える」の両方が通る共通手順。純関数。
+ * 組は写した組をそのまま付け(手紙と LP を別々に選ばない)、本文は expandDraftBody で差し込む。
+ * 差し込めない宛先は本文を空・blank=true(呼び出し側が件数を数える)。
+ */
+export function attachScenario(
+  pair: ScenarioPair,
+  property: { address: string | null; propertyType: string | null },
+): { variantId: string; lpVariantId: string | null; body: string; blank: boolean } {
+  const expanded = expandDraftBody(pair.template, property);
+  return { variantId: pair.letterVariantId, lpVariantId: pair.lpVariantId, body: expanded.body, blank: expanded.blank };
+}
+
 /**
  * 下書きの本文を物件ごとに差し込む(適用時の展開と同じ手順・apply/route.ts と同じ検査)。
  * 差し込めない(未解決タグが残る/展開後の本文が不正)ときは空のまま「下書き」を返す。

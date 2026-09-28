@@ -357,3 +357,32 @@ describe("copyScenarioIntoCampaign", () => {
     expect(result).toEqual({ letterVariantId: "letter-new", lpVariantId: "lp-new" });
   });
 });
+
+describe("attachScenario(宛先に付けて差し込む・§3.3.0-3)", () => {
+  it("手紙とLPの組をそのまま付け、本文を差し込む", async () => {
+    const { attachScenario } = await import("../sale-dm-letter/scenario-copy");
+    const r = attachScenario(
+      { letterVariantId: "v1", lpVariantId: "lp1", template: "{{物件所在}}の{{物件種別}}について" },
+      { address: "東京都杉並区西荻北3-19-4", propertyType: "land" },
+    );
+    expect(r).toEqual({ variantId: "v1", lpVariantId: "lp1", body: "東京都杉並区西荻北の土地について", blank: false });
+  });
+
+  it("LPの無い種類は lpVariantId=null のまま", async () => {
+    const { attachScenario } = await import("../sale-dm-letter/scenario-copy");
+    const r = attachScenario(
+      { letterVariantId: "v2", lpVariantId: null, template: "{{物件所在}}について" },
+      { address: "東京都杉並区西荻北3-19-4", propertyType: null },
+    );
+    expect(r).toEqual({ variantId: "v2", lpVariantId: null, body: "東京都杉並区西荻北について", blank: false });
+  });
+
+  it("差し込めない(住所 null)なら本文を空・blank=true・組は付ける", async () => {
+    const { attachScenario } = await import("../sale-dm-letter/scenario-copy");
+    const r = attachScenario(
+      { letterVariantId: "v1", lpVariantId: "lp1", template: "{{物件所在}}について" },
+      { address: null, propertyType: "land" },
+    );
+    expect(r).toEqual({ variantId: "v1", lpVariantId: "lp1", body: "", blank: true });
+  });
+});

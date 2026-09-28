@@ -123,9 +123,11 @@ const setupMixed = () => {
   m.propertyOwnerFindMany.mockResolvedValue([
     { propertyId: "p1", ownerId: "o1" }, { propertyId: "p2", ownerId: "o2" }, { propertyId: "p3", ownerId: "o3" },
   ]);
-  m.txPropertyFindMany.mockResolvedValue([
-    fresh("p1"), fresh("p2"), fresh("p3", { introductionRoute: "field_survey" }),
-  ]);
+  // 実物と同じく where.id.in で絞って返す。
+  m.txPropertyFindMany.mockImplementation(async (a: unknown) => {
+    const ids = (a as { where: { id: { in: string[] } } }).where.id.in;
+    return [fresh("p1"), fresh("p2"), fresh("p3", { introductionRoute: "field_survey" })].filter((p) => ids.includes(p.id));
+  });
   m.scenarioFindMany.mockResolvedValue([inheritance, vacant]);
 };
 
@@ -329,6 +331,59 @@ describe("既定の種類つき", () => {
     expect(json.blankBodyCount).toBe(1);
     expect(json.lpMissingScenarios).toEqual(["空き家"]);
     expect(json.scenarioCounts).toEqual({ 相続: 2, 空き家: 1 });
+  });
+});
+
+describe("修正ラウンド(レビュー指摘)", () => {
+  it("種類なしの作成では監査に scenarioCount/blankBodyCount を載せない(今までと同じ detail)", async () => {
+    setupMixed();
+    const res = await POST(req(baseBody) as never);
+    expect(res.status).toBe(200);
+    const audit = (writeAuditLog as ReturnType<typeof vi.fn>).mock.calls[0][0] as { detail: Record<string, unknown> };
+    expect("scenarioCount" in audit.detail).toBe(false);
+    expect("blankBodyCount" in audit.detail).toBe(false);
+  });
+
+  it("形式は正しいが存在しない既定の種類 → claim の P2003 を 409 SCENARIO_UNAVAILABLE に(何も書かない)", async () => {
+    setupMixed();
+    pm.dmCampaign.create.mockRejectedValueOnce(Object.assign(new Error("fk"), { code: "P2003" }));
+    const res = await POST(req({ ...baseBody, defaultScenarioId: S_INH }) as never);
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error.code).toBe("SCENARIO_UNAVAILABLE");
+    expect(json.error.message).toBe("選んだ既定の種類は使えなくなりました。選び直してください");
+    expect((prismaMock as never as { $transaction: ReturnType<typeof vi.fn> }).$transaction).not.toHaveBeenCalled();
+    expect(m.draftCreate).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it("所有者リンク切れで全宛先が外れる物件は、種類の判定・写し・数に入らない(未登録の種類でも作成を止めない)", async () => {
+    setupMixed();
+    // p3(現地調査=空き家)は o3 のリンクが外れた=宛先は全部スキップされる。
+    m.propertyOwnerFindMany.mockResolvedValue([{ propertyId: "p1", ownerId: "o1" }, { propertyId: "p2", ownerId: "o2" }]);
+    // 空き家は手紙の文面が未登録。p3 が判定に入れば SCENARIO_NOT_READY で止まってしまう。
+    m.scenarioFindMany.mockResolvedValue([inheritance, scenario({ id: S_VAC, name: "空き家", autoKey: "vacant", letterBodyTemplate: null })]);
+    const res = await POST(req({ ...baseBody, defaultScenarioId: S_INH }) as never);
+    expect(res.status).toBe(200);
+    const labels = m.variantCreate.mock.calls.map((c) => (c[0] as { data: { label: string } }).data.label);
+    expect(labels).toEqual(["相続"]);
+    const readIds = (m.txPropertyFindMany.mock.calls[0][0] as { where: { id: { in: string[] } } }).where.id.in;
+    expect([...readIds].sort()).toEqual(["p1", "p2"]);
+    const json = await res.json();
+    expect(json.scenarioCounts).toEqual({ 相続: 2 });
+    expect(json.lpMissingScenarios).toEqual([]);
+    expect(json.skippedByUnlink).toBe(1);
+  });
+
+  it("物件の欄が壊れていてもリンク切れで外れる物件なら PROPERTY_SCENARIO_MISSING にしない", async () => {
+    setupMixed();
+    m.propertyOwnerFindMany.mockResolvedValue([{ propertyId: "p1", ownerId: "o1" }, { propertyId: "p2", ownerId: "o2" }]);
+    m.txPropertyFindMany.mockImplementation(async (a: unknown) => {
+      const ids = (a as { where: { id: { in: string[] } } }).where.id.in;
+      return [fresh("p1"), fresh("p2"), fresh("p3", { dmScenarioId: "aaaaaaaa-0000-4000-8000-00000000dead" })].filter((p) => ids.includes(p.id));
+    });
+    const res = await POST(req({ ...baseBody, defaultScenarioId: S_INH }) as never);
+    expect(res.status).toBe(200);
   });
 });
 

@@ -21,9 +21,9 @@ import { MAX_GENERATE_ITEMS, resolveLetterModel } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
 import { SaleDmError } from "@/lib/sale-dm-letter/types";
-import { isScenarioCampaign } from "@/lib/sale-dm-letter/scenario-campaign";
+import { isScenarioCampaign, isValidScenarioPair } from "@/lib/sale-dm-letter/scenario-campaign";
 import {
-  checkScenarioReady, expandDraftBody, lockAllScenariosForShare, loadScenariosForCopy, copyScenarioIntoCampaign,
+  checkScenarioReady, attachScenario, lockAllScenariosForShare, loadScenariosForCopy, copyScenarioIntoCampaign,
 } from "@/lib/sale-dm-letter/scenario-copy";
 import { resolveScenario } from "@/lib/sale-dm-letter/scenario-resolve";
 import { isPropertyScopedRole, canAccessPropertyRecord } from "@/lib/property-access";
@@ -275,6 +275,11 @@ export async function POST(request: NextRequest) {
           throw new ApiError(409, "同じ作成キーの処理が進行中です。少し待って再試行してください", "CAMPAIGN_PROCESSING");
         }
       }
+      // 形式は正しいが台帳に無い既定の種類=外部キー違反(P2003)。500 にせず、tx 内の検査と同じ 409 で返す
+      // (クレームは作られていない=何も書いていない)。
+      if (body.defaultScenarioId && e && typeof e === "object" && (e as { code?: unknown }).code === "P2003") {
+        throw new ApiError(409, "選んだ既定の種類は使えなくなりました。選び直してください", "SCENARIO_UNAVAILABLE");
+      }
       throw e;
     }
 
@@ -322,6 +327,10 @@ export async function POST(request: NextRequest) {
         const linkSet = new Set(
           currentLinks.map((l) => `${l.propertyId}\u0000${l.ownerId}`),
         );
+        // ロック保持中の再検証: グループの誰かがこの物件の所有者でなくなっていたら生成しない(下の宛先作成で使う)。
+        const isStillLinked = (m: (typeof sliced)[number]) =>
+          m.groupOwnerIds.length === 0 ||
+          m.groupOwnerIds.every((oid) => linkSet.has(`${m.propertyId}\u0000${oid}`));
         // 拒否・宛先不明(terminal 反響)の宛先グループは**保存前に**除外する。
         // A(宛名CSV)には #366 R4 P1 で入った除外が B(売却DM)に無く、一度お断りを
         // いただいた方へ手紙が作られ得た(2026-08-16 発見・資料PR #382 の @codex 指摘)。
@@ -360,9 +369,12 @@ export async function POST(request: NextRequest) {
           freshById: Map<string, { address: string | null; propertyType: string | null }>;
           scenarioByProperty: Map<string, string>;
           copied: Map<string, { name: string; letterVariantId: string; lpVariantId: string | null; template: string }>;
+          lpVariants: Array<{ id: string; scenarioId: string }>;
         } | null = null;
         if (isScenarioCampaign({ defaultScenarioId })) {
-          const survivingPropertyIds = [...new Set(surviving.map(({ m }) => m.propertyId))];
+          // 所有者リンク切れで宛先が1件も作られない物件は、種類の判定・写し・件数に入れない
+          // (作られない宛先のために作成を止めたり、使われない型を写したりしない)。
+          const survivingPropertyIds = [...new Set(surviving.filter(({ m }) => isStillLinked(m)).map(({ m }) => m.propertyId))];
           const fresh = await tx.property.findMany({
             where: { id: { in: survivingPropertyIds } },
             select: { id: true, address: true, propertyType: true, dmScenarioId: true, introductionRoute: true, createdBy: true, assignedTo: true },
@@ -401,7 +413,10 @@ export async function POST(request: NextRequest) {
           }
           lpMissingScenarios = used.filter((s) => copied.get(s.id)!.lpVariantId === null).map((s) => s.name);
           scenarioCount = used.length;
-          scenarioPlan = { freshById: new Map(fresh.map((p) => [p.id, p])), scenarioByProperty, copied };
+          const lpVariants = [...copied.entries()]
+            .filter(([, c]) => c.lpVariantId !== null)
+            .map(([scenarioId, c]) => ({ id: c.lpVariantId!, scenarioId }));
+          scenarioPlan = { freshById: new Map(fresh.map((p) => [p.id, p])), scenarioByProperty, copied, lpVariants };
         }
         // 種類なし(今までどおり)=既定型 A を1つ。種類つきでは作らない(型は台帳から写したものだけ)。
         const variant = scenarioPlan !== null ? null : await tx.dmVariant.create({
@@ -414,22 +429,24 @@ export async function POST(request: NextRequest) {
         });
         for (const { m, d } of surviving) {
           // ロック保持中の再検証: グループの誰かがこの物件の所有者でなくなっていたら生成しない。
-          if (
-            m.groupOwnerIds.length > 0 &&
-            !m.groupOwnerIds.every((oid) => linkSet.has(`${m.propertyId}\u0000${oid}`))
-          ) {
+          if (!isStillLinked(m)) {
             skippedByUnlinkCount += 1;
             continue;
           }
-          // 種類つき: その物件の種類の手紙の型と LP の型を組で付け、本文を読み直した物件の値で差し込む。
-          // 差し込めない宛先は本文を空のまま下書きにし、件数を数える(§3.3.0)。
+          // 種類つき: 共通手順 attachScenario で、その物件の種類の手紙の型と LP の型を組で付け、
+          // 本文を読み直した物件の値で差し込む。差し込めない宛先は本文を空のまま下書きにし、件数を数える(§3.3.0)。
           let assigned: { variantId: string; lpVariantId?: string | null; body: string };
           if (scenarioPlan !== null) {
-            const c = scenarioPlan.copied.get(scenarioPlan.scenarioByProperty.get(m.propertyId)!)!;
-            const expanded = expandDraftBody(c.template, scenarioPlan.freshById.get(m.propertyId)!);
-            if (expanded.blank) blankBodyCount += 1;
+            const scenarioId = scenarioPlan.scenarioByProperty.get(m.propertyId)!;
+            const c = scenarioPlan.copied.get(scenarioId)!;
+            const attached = attachScenario(c, scenarioPlan.freshById.get(m.propertyId)!);
+            // 組の決まり(§3.3.0)。写した組をそのまま付けるので必ず成り立つ=外れたらバグ(500・何も書かない)。
+            if (!isValidScenarioPair({ defaultScenarioId }, { id: attached.variantId, scenarioId }, attached.lpVariantId, scenarioPlan.lpVariants)) {
+              throw new Error("invariant: 種類の手紙とLPの組が決まりに合わない");
+            }
+            if (attached.blank) blankBodyCount += 1;
             scenarioCounts[c.name] = (scenarioCounts[c.name] ?? 0) + 1;
-            assigned = { variantId: c.letterVariantId, lpVariantId: c.lpVariantId, body: expanded.body };
+            assigned = { variantId: attached.variantId, lpVariantId: attached.lpVariantId, body: attached.body };
           } else {
             assigned = { variantId: variant!.id, body: d.body ?? "" };
           }
@@ -510,7 +527,7 @@ export async function POST(request: NextRequest) {
     // AuditLog は非PIIメタのみ(本文・宛名・住所は残さない)。
     await writeAuditLog({
       userId: session.id, action: "sale_dm_campaign_create", targetTable: "dm_campaigns",
-      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, failed: drafts.filter((d) => d.error).length, truncated, scenarioCount, blankBodyCount, createdAt: new Date().toISOString() },
+      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, failed: drafts.filter((d) => d.error).length, truncated, ...(isScenarioCampaign({ defaultScenarioId }) ? { scenarioCount, blankBodyCount } : {}), createdAt: new Date().toISOString() },
     });
 
     return NextResponse.json(
