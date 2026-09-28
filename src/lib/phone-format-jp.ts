@@ -28,7 +28,18 @@ export function formatPhoneJp(input: string): PhoneFormatResult {
   if (raw === "") return { value: "", formatted: false };
   const nfkc = raw.normalize("NFKC");
   if (!PHONE_CHARS_ONLY.test(nfkc)) return { value: raw, formatted: false };
-  const digits = nfkc.replace(/[^0-9]/g, "");
+  // ⚠発注者決定(2026-09-28): 自動で区切るのは**数字だけで入れたとき**だけ。自分で区切った
+  //   番号は区切り位置を変えない(部品の割り当て表が実際と違うときに、人が直せる逃げ道。
+  //   例: 部品は 0422-12-3456 を 042-212-3456 に区切る)。区切りの文字(全角ハイフン・
+  //   長音・空白・括弧)だけを「-」にそろえ、続いた区切りは1つに・先頭末尾は落とす。
+  // ⚠端にだけ付いた区切り(「09012345678-」「(0312345678)」)は区切りを入れたことにならない。
+  //   先に落としてから判定しないと、自分で区切った扱いになってハイフンが1つも入らない。
+  const core = nfkc.replace(/^[^0-9]+|[^0-9]+$/g, "");
+  if (!/^[0-9]+$/.test(core)) {
+    const unified = core.replace(/[^0-9]+/g, "-");
+    return { value: unified, formatted: unified !== raw };
+  }
+  const digits = core;
   if (!digits.startsWith("0") || (digits.length !== 10 && digits.length !== 11)) {
     return { value: raw, formatted: false };
   }
@@ -61,4 +72,30 @@ export function isValidPhoneJp(input: string): boolean {
   if (nfkc === "" || !PHONE_CHARS_ONLY.test(nfkc)) return false;
   // 数字だけにして整形できれば正しい番号(正しい番号の数字だけの形は、必ずハイフン入りに整形される)。
   return formatPhoneJp(nfkc.replace(/[^0-9]/g, "")).formatted;
+}
+
+/**
+ * 保存する電話番号(取り込み経路で使う)。空・空白だけは null、それ以外は画面と同じ規則
+ * (formatPhoneJp)でそろえる。以前は画面で入れたときだけハイフンが入り、所有者CSV取込・
+ * 取込のやり直し・貼り付けて物件化はハイフンなしのまま保存していた。
+ */
+export function phoneForStore(input: string | null | undefined): string | null {
+  const v = formatPhoneJp(input ?? "").value;
+  return v === "" ? null : v;
+}
+
+/**
+ * 重複の判定で「同じ番号」とみなす書き方の一覧(重複なし・入力の順)。
+ * 保存済みの番号は書き方がまちまち(ハイフンあり・なし)なので、入ってきた番号の
+ * そのまま/そろえた形/数字だけ のどれかに一致すれば同じとみなす。
+ * ⚠数字と区切り以外の文字(内線など)を含む番号は、数字だけの形を作らない
+ *   (「内線12」の数字まで混ぜて別の番号と取り違えないため)。
+ */
+export function phoneMatchCandidates(input: string | null | undefined): string[] {
+  const raw = (input ?? "").trim();
+  if (raw === "") return [];
+  const out = [raw, formatPhoneJp(raw).value];
+  const nfkc = raw.normalize("NFKC");
+  if (PHONE_CHARS_ONLY.test(nfkc)) out.push(nfkc.replace(/[^0-9]/g, ""));
+  return [...new Set(out.filter((v) => v !== ""))];
 }

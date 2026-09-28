@@ -5,6 +5,7 @@
  *   事故（片方の画面からだけ値が入らない）を防ぐため、正本をここ1か所にする。
  */
 import { normalizeCaseStatusInput, normalizeIntroductionRouteInput } from "@/lib/property-types";
+import { phoneForStore } from "@/lib/phone-format-jp";
 
 /** Map Japanese CSV header names to property model field names. */
 export const JAPANESE_FIELD_MAP: Record<string, string> = {
@@ -149,7 +150,8 @@ export function buildOwnerCreateData(
     name: mapped.name.trim(),
   };
   if (mapped.nameKana) createData.nameKana = mapped.nameKana.trim();
-  if (mapped.phone) createData.phone = mapped.phone.trim();
+  // 画面と同じ規則でそろえる(数字だけならハイフンを入れる・手の区切りは残す)。
+  if (mapped.phone) createData.phone = phoneForStore(mapped.phone);
   if (mapped.zip) createData.zip = mapped.zip.trim();
   if (mapped.address) createData.address = mapped.address.trim();
   // ⚠現住所は住所があるときだけ・郵便番号とペアで入れる（設計 §6.1）。

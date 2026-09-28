@@ -31,6 +31,7 @@ import {
   tallyCorporateRepair,
 } from "@/lib/corporate-number-restore";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
+import { phoneForStore, phoneMatchCandidates } from "@/lib/phone-format-jp";
 
 // Japanese field name → Owner model property mapping
 const JAPANESE_FIELD_TO_PROPERTY: Record<string, string> = {
@@ -234,7 +235,8 @@ export async function POST(request: NextRequest) {
 
         if (!existing && mapped.phone) {
           existing = await prisma.owner.findFirst({
-            where: { name: mapped.name, phone: mapped.phone, isArchived: false },
+            // 保存済みの番号は書き方がまちまち(ハイフンあり・なし)。どの書き方でも同じ番号とみなす。
+            where: { name: mapped.name, phone: { in: phoneMatchCandidates(mapped.phone) }, isArchived: false },
             select: { id: true, name: true },
           });
         }
@@ -260,7 +262,8 @@ export async function POST(request: NextRequest) {
           name: mapped.name.trim(),
         };
         if (mapped.nameKana) createData.nameKana = mapped.nameKana.trim();
-        if (mapped.phone) createData.phone = mapped.phone.trim();
+        // 画面と同じ規則でそろえる(数字だけならハイフンを入れる・手の区切りは残す)。
+        if (mapped.phone) createData.phone = phoneForStore(mapped.phone);
         if (mapped.zip) createData.zip = mapped.zip.trim();
         if (mapped.address) createData.address = mapped.address.trim();
         // ⚠現住所は**ペアで**入れる。郵便番号だけが入ると

@@ -45,7 +45,7 @@ describe("owner-dedup: archived owner を重複候補に含めない", () => {
     const call = pm.owner.findFirst.mock.calls[0][0];
     expect(call.where).toMatchObject({
       name: "佐藤花子",
-      phone: "090-1111-2222",
+      phone: { in: ["090-1111-2222", "09011112222"] },
       isArchived: false,
     });
   });

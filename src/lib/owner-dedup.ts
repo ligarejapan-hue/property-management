@@ -1,5 +1,6 @@
 import prisma from "@/lib/prisma";
 import { normalizeName, normalizeAddress } from "@/lib/normalize";
+import { phoneMatchCandidates } from "@/lib/phone-format-jp";
 
 export function buildOwnerDedupKey(name: string, address: string): string {
   return `${normalizeName(name)}::${normalizeAddress(address)}`;
@@ -37,7 +38,8 @@ export async function findDuplicateOwner(input: {
 
   if (phone) {
     const hit = await prisma.owner.findFirst({
-      where: { name, phone, isArchived: false },
+      // 保存済みの番号は書き方がまちまち(ハイフンあり・なし)。どの書き方でも同じ番号とみなす。
+      where: { name, phone: { in: phoneMatchCandidates(input.phone) }, isArchived: false },
       select: { id: true, name: true },
     });
     if (hit) return hit;

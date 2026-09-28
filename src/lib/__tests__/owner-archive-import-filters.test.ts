@@ -228,7 +228,7 @@ describe("POST /api/import/owner-csv: archived owner を name+phone 重複候補
     expect(dedupCall).toBeDefined();
     expect(dedupCall![0].where).toMatchObject({
       name: "テスト次郎",
-      phone: "090-1111-2222",
+      phone: { in: ["090-1111-2222", "09011112222"] },
       isArchived: false,
     });
   });

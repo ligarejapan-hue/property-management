@@ -41,7 +41,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/admin/owners/correction/mislink/route.ts:435` | `property.updatedAt` のみ | 同上。`updatedAt` は `updatePropertySchema` にも `property-edit-form.tsx` の FORM_FIELDS にも無い |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:262` | `owner.updatedAt` のみ | 同上(所有者行ロックtouch) |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:180` | `owner.updatedAt` のみ | 同上 |
-| `src/app/api/import/paste/commit/route.ts:406` | `owner.updatedAt` のみ | 同上(既存所有者へのリンク可否確認のための行ロックtouch) |
+| `src/app/api/import/paste/commit/route.ts:407` | `owner.updatedAt` のみ | 同上(既存所有者へのリンク可否確認のための行ロックtouch) |
 | `src/app/api/import/reception-owner/route.ts:589` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/owners/[id]/memos/route.ts:241` | (コード本体ではない) | **正規表現の誤検出**。`owner.updateMany({ where: { id, isArchived: false } })` という文字列は、実際の呼び出しの使い方を説明する**コードコメント**であり、実行されるコードではない(実際の呼び出しは同ファイル252行目) |
 | `src/app/api/owners/[id]/memos/route.ts:252` | `owner.updatedAt` のみ | メモ作成時の行ロックtouch(archive/mergeとの直列化用)。owner本体のフィールドは一切書かない |
