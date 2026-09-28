@@ -1,6 +1,20 @@
 import { AD_MEDIA, type AdMediumKey, type AdValueKey } from "./constants";
 
-const KANJI_NUM = "〇一二三四五六七八九十百千零";
+// 漢数字(大字 壱弐参… と 廿・卅 も含む=NFKC では算用数字にならない・@codex #454 R10)。
+const KANJI_NUM = "〇一二三四五六七八九十百千零壱弐参肆伍陸漆捌玖拾佰阡萬万廿卅";
+/**
+ * 数字が読めない形(ローマ数字など)でも、番地の印(番地/番/号)があればその手前で切る(安全側)。
+ * 印の直前に続く英数字・漢数字もいっしょに落とす。「〇番町」は町名なので印として扱わない。
+ */
+const HOUSE_MARK = /番地|番(?!町)|号/;
+const NUMBER_LIKE = new RegExp(`[0-9A-Za-z${KANJI_NUM}]`);
+function houseMarkStart(rest: string): number {
+  const m = HOUSE_MARK.exec(rest);
+  if (!m) return -1;
+  let i = m.index;
+  while (i > 0 && NUMBER_LIKE.test(rest[i - 1])) i--;
+  return i;
+}
 const PREFECTURE = /^(東京都|北海道|(?:京都|大阪)府|.{2,3}?県)/;
 /**
  * 市区町村より後ろで最初に出る数字(算用数字・漢数字)。数字の連なりは切れ目なく1つとして扱い、
@@ -32,10 +46,14 @@ export function townOnly(address: string): string {
   const start = municipalityEnd(a);
   const rest = a.slice(start);
   const m = NUMBER_RUN.exec(rest);
-  if (!m) return a;
-  const afterRun = m.index + m[0].length;
-  if (rest.startsWith("丁目", afterRun)) return a.slice(0, start + afterRun + 2);
-  return a.slice(0, start + m.index).trim();
+  const mark = houseMarkStart(rest);
+  if (m && (mark === -1 || m.index <= mark)) {
+    const afterRun = m.index + m[0].length;
+    if (rest.startsWith("丁目", afterRun)) return a.slice(0, start + afterRun + 2);
+  }
+  const cuts = [m?.index ?? -1, mark].filter((i) => i >= 0);
+  if (cuts.length === 0) return a;
+  return a.slice(0, start + Math.min(...cuts)).trim();
 }
 
 /**
