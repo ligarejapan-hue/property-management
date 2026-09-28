@@ -3,7 +3,7 @@ import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions, handleApiError } from "@/lib/api-helpers";
 import { assertPropertyReadable } from "@/lib/agent-inquiry/property-access";
-import { buildPropertyTimeline, countInquiries } from "@/lib/agent-inquiry/timeline";
+import { buildPropertyTimeline, countsFromGroups } from "@/lib/agent-inquiry/timeline";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -14,7 +14,8 @@ export async function GET(_req: Request, ctx: Ctx) {
     const perms = await getUserPermissions(session.id);
     const id = z.string().uuid().parse((await ctx.params).id);
     await assertPropertyReadable(id, session, perms);
-    const [inquiries, ads] = await Promise.all([
+    // 時系列は新しい500件まで。件数はそれとは別に集計クエリで全件を数える(上限で数え漏らさない)。
+    const [inquiries, ads, kindGroups, viewingGroups] = await Promise.all([
       prisma.agentInquiry.findMany({
         where: { propertyId: id },
         orderBy: { receivedAt: "desc" },
@@ -39,10 +40,16 @@ export async function GET(_req: Request, ctx: Ctx) {
         },
       }),
       prisma.propertyAdPermission.findMany({ where: { propertyId: id }, select: { medium: true, value: true } }),
+      prisma.agentInquiry.groupBy({ by: ["kind"], where: { propertyId: id }, _count: { _all: true } }),
+      prisma.agentViewing.groupBy({
+        by: ["viewingType"],
+        where: { canceledAt: null, inquiry: { propertyId: id } },
+        _count: { _all: true },
+      }),
     ]);
     return NextResponse.json(
       {
-        counts: countInquiries(inquiries),
+        counts: countsFromGroups(kindGroups, viewingGroups),
         timeline: buildPropertyTimeline(inquiries),
         adPermissions: Object.fromEntries(ads.map((a) => [a.medium, a.value])),
       },

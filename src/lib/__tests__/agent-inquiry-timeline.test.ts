@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPropertyTimeline, countInquiries } from "@/lib/agent-inquiry/timeline";
+import { buildPropertyTimeline, countInquiries, countsFromGroups } from "@/lib/agent-inquiry/timeline";
 
 const d = (s: string) => new Date(s);
 const inq = (over: Record<string, unknown>) => ({
@@ -43,5 +43,17 @@ describe("件数", () => {
       inq({ kind: "ad_permission" }),
     ]);
     expect(c).toEqual({ total: 3, guided: 1, preview: 1, materialRequest: 1, adPermission: 1 });
+  });
+});
+
+describe("件数は集計クエリの結果から(500件の時系列の上限に左右されない・@codex #454 P2)", () => {
+  it("用件ごと・内見の種別ごとの件数をまとめる", () => {
+    expect(countsFromGroups(
+      [{ kind: "viewing", _count: { _all: 700 } }, { kind: "material_request", _count: { _all: 3 } }, { kind: "ad_permission", _count: { _all: 2 } }],
+      [{ viewingType: "guided", _count: { _all: 650 } }, { viewingType: "preview", _count: { _all: 40 } }],
+    )).toEqual({ total: 705, guided: 650, preview: 40, materialRequest: 3, adPermission: 2 });
+  });
+  it("何も無ければ 0", () => {
+    expect(countsFromGroups([], [])).toEqual({ total: 0, guided: 0, preview: 0, materialRequest: 0, adPermission: 0 });
   });
 });

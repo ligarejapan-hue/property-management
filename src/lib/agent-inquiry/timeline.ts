@@ -83,3 +83,24 @@ export function countInquiries(inquiries: Pick<TimelineInquiry, "kind" | "viewin
   }
   return { total: inquiries.length, guided, preview, materialRequest, adPermission };
 }
+
+/**
+ * 物件画面の件数を集計クエリ(groupBy)の結果から組み立てる。時系列は新しい500件までしか
+ * 読まないため、件数をそこから数えると古い分が抜ける(@codex #454 P2)。
+ * viewingGroups は取り消していない内見だけを数えた結果を渡す。
+ */
+export function countsFromGroups(
+  kindGroups: { kind: TimelineInquiry["kind"]; _count: { _all: number } }[],
+  viewingGroups: { viewingType: TimelineViewing["viewingType"]; _count: { _all: number } }[],
+) {
+  const byKind = (k: TimelineInquiry["kind"]) => kindGroups.find((g) => g.kind === k)?._count._all ?? 0;
+  const byType = (t: TimelineViewing["viewingType"]) =>
+    viewingGroups.find((g) => g.viewingType === t)?._count._all ?? 0;
+  return {
+    total: kindGroups.reduce((n, g) => n + g._count._all, 0),
+    guided: byType("guided"),
+    preview: byType("preview"),
+    materialRequest: byKind("material_request"),
+    adPermission: byKind("ad_permission"),
+  };
+}

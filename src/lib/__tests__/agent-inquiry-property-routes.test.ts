@@ -6,7 +6,8 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     property: { findUnique: vi.fn(async () => null) },
-    agentInquiry: { findMany: vi.fn(async () => []) },
+    agentInquiry: { findMany: vi.fn(async () => []), groupBy: vi.fn(async () => []) },
+    agentViewing: { groupBy: vi.fn(async () => []) },
     propertyAdPermission: { findMany: vi.fn(async () => []), upsert: vi.fn(async () => ({})), deleteMany: vi.fn(async () => ({ count: 0 })) },
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
@@ -22,7 +23,8 @@ import { PUT } from "../../app/api/properties/[id]/ad-permissions/route";
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
   property: { findUnique: Fn };
-  agentInquiry: { findMany: Fn };
+  agentInquiry: { findMany: Fn; groupBy: Fn };
+  agentViewing: { groupBy: Fn };
   propertyAdPermission: { findMany: Fn; upsert: Fn; deleteMany: Fn };
   $transaction: Fn;
 };
@@ -47,6 +49,16 @@ describe("物件画面の反響欄", () => {
   it("物件の閲覧権限が無ければ 403(反響の受付の権限だけでは見られない)", async () => {
     perms(["agent_inquiry", "read"]);
     expect((await TIMELINE(new Request("http://x"), ctx)).status).toBe(403);
+  });
+  it("件数は時系列(500件まで)ではなく集計クエリで数える・取り消した内見は除く", async () => {
+    perms(["property", "read"]);
+    pm.agentInquiry.groupBy.mockResolvedValueOnce([{ kind: "viewing", _count: { _all: 600 } }]);
+    pm.agentViewing.groupBy.mockResolvedValueOnce([{ viewingType: "guided", _count: { _all: 590 } }]);
+    const body = await (await TIMELINE(new Request("http://x"), ctx)).json();
+    expect(body.counts).toEqual({ total: 600, guided: 590, preview: 0, materialRequest: 0, adPermission: 0 });
+    expect(pm.agentViewing.groupBy).toHaveBeenCalledWith(expect.objectContaining({
+      where: { canceledAt: null, inquiry: { propertyId: PID } },
+    }));
   });
   it("時系列・件数・広告の可否を返す", async () => {
     perms(["property", "read"]);
