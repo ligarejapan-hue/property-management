@@ -75,7 +75,14 @@ export const inquiryUpdateSchema = z.object({
 export const adPermissionsPutSchema = z
   .object({
     items: z
-      .array(z.object({ medium: z.enum(AD_MEDIA), value: z.enum(AD_VALUES).nullable() }))
+      .array(
+        z.object({
+          medium: z.enum(AD_MEDIA),
+          value: z.enum(AD_VALUES).nullable(),
+          // 画面に出ていた値(null=未設定)。今の値と違えば古い画面からの保存として止める(@codex #454 R5)。
+          from: z.enum(AD_VALUES).nullable(),
+        }),
+      )
       .min(1)
       .max(AD_MEDIA.length),
   })

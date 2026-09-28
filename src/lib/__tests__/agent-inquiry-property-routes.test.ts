@@ -11,6 +11,7 @@ vi.mock("@/lib/prisma", () => {
     propertyAdPermission: { findMany: vi.fn(async () => []), upsert: vi.fn(async () => ({})), deleteMany: vi.fn(async () => ({ count: 0 })) },
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  db.$queryRaw = vi.fn(async () => [{ id: "locked" }]);
   return { default: db };
 });
 
@@ -27,6 +28,7 @@ const pm = prismaMock as never as {
   agentViewing: { groupBy: Fn };
   propertyAdPermission: { findMany: Fn; upsert: Fn; deleteMany: Fn };
   $transaction: Fn;
+  $queryRaw: Fn;
 };
 const PID = "11111111-1111-4111-8111-111111111111";
 const ctx = { params: Promise.resolve({ id: PID }) };
@@ -78,9 +80,20 @@ describe("物件画面の反響欄", () => {
 });
 
 describe("広告の可否の変更", () => {
+  it("画面に出ていた値と今の値が違えば 409(古い画面からの上書きを止める・@codex #454 R5)", async () => {
+    perms(["property", "read"], ["property", "write"]);
+    pm.propertyAdPermission.findMany.mockResolvedValueOnce([{ medium: "athome", value: "ng" }]);
+    const res = await PUT(json("PUT", { items: [{ medium: "athome", value: "ok", from: null }] }), ctx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("VERSION_CONFLICT");
+    expect(pm.propertyAdPermission.upsert).not.toHaveBeenCalled();
+    // 同時保存で比べる前に割り込まれないよう、物件の行を先にロックする
+    expect(String(pm.$queryRaw.mock.calls[0][0].join?.("?") ?? pm.$queryRaw.mock.calls[0][0])).toMatch(/FOR UPDATE/);
+  });
   it("物件の編集権限・null は行を消す・1トランザクション", async () => {
     perms(["property", "read"], ["property", "write"]);
-    const res = await PUT(json("PUT", { items: [{ medium: "athome", value: "ok" }, { medium: "flyer", value: null }] }), ctx);
+    pm.propertyAdPermission.findMany.mockResolvedValueOnce([{ medium: "flyer", value: "ng" }]);
+    const res = await PUT(json("PUT", { items: [{ medium: "athome", value: "ok", from: null }, { medium: "flyer", value: null, from: "ng" }] }), ctx);
     expect(res.status).toBe(200);
     expect(pm.$transaction).toHaveBeenCalled();
     expect(pm.propertyAdPermission.upsert).toHaveBeenCalledWith(expect.objectContaining({
@@ -92,13 +105,13 @@ describe("広告の可否の変更", () => {
   });
   it("反響の受付の権限だけでは変えられない(403)", async () => {
     perms(["property", "read"], ["agent_inquiry", "write"]);
-    expect((await PUT(json("PUT", { items: [{ medium: "athome", value: "ok" }] }), ctx)).status).toBe(403);
+    expect((await PUT(json("PUT", { items: [{ medium: "athome", value: "ok", from: null }] }), ctx)).status).toBe(403);
     expect(pm.propertyAdPermission.upsert).not.toHaveBeenCalled();
   });
   it("現地スタッフの担当外は変えられない(403)", async () => {
     (getApiSession as Fn).mockResolvedValue({ id: "u-field", role: "field_staff" });
     perms(["property", "read"], ["property", "write"]);
     pm.property.findUnique.mockResolvedValue({ id: PID, createdBy: "x", assignedTo: "y" });
-    expect((await PUT(json("PUT", { items: [{ medium: "athome", value: "ok" }] }), ctx)).status).toBe(403);
+    expect((await PUT(json("PUT", { items: [{ medium: "athome", value: "ok", from: null }] }), ctx)).status).toBe(403);
   });
 });

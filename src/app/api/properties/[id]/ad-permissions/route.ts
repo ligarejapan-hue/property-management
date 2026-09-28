@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { getApiSession, getUserPermissions, handleApiError, parseJsonBody } from "@/lib/api-helpers";
+import { ApiError, getApiSession, getUserPermissions, handleApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { assertPropertyWritable } from "@/lib/agent-inquiry/property-access";
 import { adPermissionsPutSchema } from "@/lib/agent-inquiry/validators";
+import { VERSION_CONFLICT_MESSAGE } from "@/lib/agent-inquiry/guard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -17,6 +18,17 @@ export async function PUT(request: Request, ctx: Ctx) {
     await assertPropertyWritable(id, session, perms);
     const { items } = adPermissionsPutSchema.parse(await parseJsonBody(request));
     await prisma.$transaction(async (tx) => {
+      // 同時に保存されたとき、比べてから書くまでの間に割り込まれないよう物件の行をロックする。
+      await tx.$queryRaw`SELECT id FROM "properties" WHERE id = ${id}::uuid FOR UPDATE`;
+      const current = await tx.propertyAdPermission.findMany({
+        where: { propertyId: id },
+        select: { medium: true, value: true },
+      });
+      const now = new Map(current.map((c) => [c.medium, c.value]));
+      // 画面に出ていた値と今の値が違う=誰かが先に変えた。黙って上書きしない(@codex #454 R5)。
+      if (items.some((it) => (now.get(it.medium) ?? null) !== it.from)) {
+        throw new ApiError(409, VERSION_CONFLICT_MESSAGE, "VERSION_CONFLICT");
+      }
       for (const it of items) {
         if (it.value === null) {
           await tx.propertyAdPermission.deleteMany({ where: { propertyId: id, medium: it.medium } });

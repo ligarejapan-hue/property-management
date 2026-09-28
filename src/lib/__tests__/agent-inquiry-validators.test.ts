@@ -63,11 +63,14 @@ describe("反響の入力", () => {
 
 describe("広告の可否", () => {
   it("6媒体×ok/ng/ask/null(null=未設定に戻す)", () => {
-    expect(adPermissionsPutSchema.safeParse({ items: [{ medium: "athome", value: "ok" }, { medium: "flyer", value: null }] }).success).toBe(true);
-    expect(adPermissionsPutSchema.safeParse({ items: [{ medium: "twitter", value: "ok" }] }).success).toBe(false);
-    expect(adPermissionsPutSchema.safeParse({ items: [{ medium: "athome", value: "maybe" }] }).success).toBe(false);
+    expect(adPermissionsPutSchema.safeParse({ items: [{ medium: "athome", value: "ok", from: null }, { medium: "flyer", value: null, from: "ng" }] }).success).toBe(true);
+    expect(adPermissionsPutSchema.safeParse({ items: [{ medium: "twitter", value: "ok", from: null }] }).success).toBe(false);
+    expect(adPermissionsPutSchema.safeParse({ items: [{ medium: "athome", value: "maybe", from: null }] }).success).toBe(false);
+  });
+  it("画面に出ていた値(from)は必須=古い画面からの上書きを止める前提(@codex #454 R5)", () => {
+    expect(adPermissionsPutSchema.safeParse({ items: [{ medium: "athome", value: "ok" }] }).success).toBe(false);
   });
   it("同じ媒体を2回送れない", () => {
-    expect(adPermissionsPutSchema.safeParse({ items: [{ medium: "athome", value: "ok" }, { medium: "athome", value: "ng" }] }).success).toBe(false);
+    expect(adPermissionsPutSchema.safeParse({ items: [{ medium: "athome", value: "ok", from: null }, { medium: "athome", value: "ng", from: null }] }).success).toBe(false);
   });
 });
