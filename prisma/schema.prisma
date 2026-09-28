@@ -1778,6 +1778,7 @@ model AgentViewing {
   attendantId String?     @map("attendant_id") @db.Uuid
   resultNote  String?     @map("result_note")
   canceledAt  DateTime?   @map("canceled_at")
+  version     Int         @default(1)
   createdAt   DateTime    @default(now()) @map("created_at")
   updatedAt   DateTime    @updatedAt @map("updated_at")
 

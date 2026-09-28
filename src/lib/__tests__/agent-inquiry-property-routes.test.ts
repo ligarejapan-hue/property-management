@@ -60,6 +60,11 @@ describe("物件画面の反響欄", () => {
       where: { canceledAt: null, inquiry: { propertyId: PID } },
     }));
   });
+  it("時系列は受けた日時で先に切らない(内見の予定日時で並べてから上限をかける・@codex #454 R3)", async () => {
+    perms(["property", "read"]);
+    await TIMELINE(new Request("http://x"), ctx);
+    expect(pm.agentInquiry.findMany.mock.calls[0][0].take).toBeUndefined();
+  });
   it("時系列・件数・広告の可否を返す", async () => {
     perms(["property", "read"]);
     pm.propertyAdPermission.findMany.mockResolvedValue([{ medium: "athome", value: "ok" }]);

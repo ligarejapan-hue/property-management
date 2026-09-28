@@ -50,10 +50,14 @@ export async function POST(request: Request) {
     const { session } = await requireAgentInquiry("write");
     const input = inquiryCreateSchema.parse(await parseJsonBody(request));
     const [property, agent] = await Promise.all([
-      prisma.property.findUnique({ where: { id: input.propertyId }, select: { id: true } }),
+      prisma.property.findUnique({ where: { id: input.propertyId }, select: { id: true, isArchived: true } }),
       prisma.agent.findUnique({ where: { id: input.agentId }, select: { id: true, isArchived: true } }),
     ]);
     if (!property) throw new ApiError(404, "物件が見つかりません", "PROPERTY_NOT_FOUND");
+    // 受付の窓の物件検索はしまった物件を出さない=登録でも受けない(@codex #454 R3)。
+    if (property.isArchived) {
+      throw new ApiError(409, "この物件はしまわれています。物件を戻してから登録してください", "PROPERTY_ARCHIVED");
+    }
     if (!agent) throw new ApiError(404, "業者が見つかりません", "AGENT_NOT_FOUND");
     if (agent.isArchived) {
       throw new ApiError(409, "この業者はしまわれています。名簿で戻してから選んでください", "AGENT_ARCHIVED");

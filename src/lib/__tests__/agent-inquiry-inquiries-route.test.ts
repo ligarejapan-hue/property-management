@@ -54,7 +54,7 @@ beforeEach(() => {
     { resource: "agent_inquiry", action: "read", granted: true },
     { resource: "agent_inquiry", action: "write", granted: true },
   ]);
-  pm.property.findUnique.mockResolvedValue({ id: PID });
+  pm.property.findUnique.mockResolvedValue({ id: PID, isArchived: false });
   pm.agent.findUnique.mockResolvedValue({ id: AID, isArchived: false });
   pm.agentInquiry.create.mockResolvedValue({ id: IID });
   pm.user.findUnique.mockResolvedValue({ isActive: true });
@@ -67,7 +67,7 @@ describe("反響 API", () => {
       viewing: { viewingType: "guided", scheduledAt: "2026-10-02T05:00:00.000Z" },
     }));
     expect(res.status).toBe(201);
-    expect(pm.property.findUnique).toHaveBeenCalledWith({ where: { id: PID }, select: { id: true } });
+    expect(pm.property.findUnique).toHaveBeenCalledWith({ where: { id: PID }, select: { id: true, isArchived: true } });
     expect(pm.agentInquiry.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
       propertyId: PID, agentId: AID, assigneeId: "u-field", createdById: "u-field", status: "open", contactMobile: "090-1234-5678",
       viewings: { create: [expect.objectContaining({ viewingType: "guided", scheduledAt: new Date("2026-10-02T05:00:00.000Z") })] },
@@ -78,6 +78,13 @@ describe("反響 API", () => {
     expect((await POST(json("POST", { propertyId: PID, agentId: AID, kind: "ad_permission" }))).status).toBe(404);
     pm.agent.findUnique.mockResolvedValueOnce({ id: AID, isArchived: true });
     expect((await POST(json("POST", { propertyId: PID, agentId: AID, kind: "ad_permission" }))).status).toBe(409);
+  });
+  it("しまった物件には登録できない(409・@codex #454 R3)", async () => {
+    pm.property.findUnique.mockResolvedValueOnce({ id: PID, isArchived: true });
+    const res = await POST(json("POST", { propertyId: PID, agentId: AID, kind: "ad_permission" }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("PROPERTY_ARCHIVED");
+    expect(pm.agentInquiry.create).not.toHaveBeenCalled();
   });
   it("立ち会いに無効な利用者は 422", async () => {
     pm.user.findUnique.mockResolvedValueOnce({ isActive: false });

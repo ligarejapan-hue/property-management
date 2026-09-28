@@ -17,6 +17,9 @@ describe("反響の受付 migration(設計 §1/§4)", () => {
     expect(sql).toMatch(/"agent_viewings_inquiry_id_fkey" FOREIGN KEY \("inquiry_id"\) REFERENCES "agent_inquiries"\("id"\) ON DELETE CASCADE/);
     expect(sql).toMatch(/"property_ad_permissions_property_id_fkey" FOREIGN KEY \("property_id"\) REFERENCES "properties"\("id"\) ON DELETE CASCADE/);
   });
+  it("内見の予定にも版番号(同時編集の上書き防止)", () => {
+    expect(sql).toMatch(/CREATE TABLE "agent_viewings" \([^;]*"version" INTEGER NOT NULL DEFAULT 1/);
+  });
   it("広告の可否は物件×媒体で一意", () => {
     expect(sql).toMatch(/CREATE UNIQUE INDEX "property_ad_permissions_property_id_medium_key" ON "property_ad_permissions"\("property_id", "medium"\);/);
   });

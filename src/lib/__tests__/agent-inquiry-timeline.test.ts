@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPropertyTimeline, countInquiries, countsFromGroups } from "@/lib/agent-inquiry/timeline";
+import { buildPropertyTimeline, countInquiries, countsFromGroups, TIMELINE_LIMIT } from "@/lib/agent-inquiry/timeline";
 
 const d = (s: string) => new Date(s);
 const inq = (over: Record<string, unknown>) => ({
@@ -25,6 +25,16 @@ describe("物件の時系列(新しい順)", () => {
     ]);
     expect(t[2].unscheduled).toBe(true);
     expect(t[0].attendantName).toBe("佐藤");
+  });
+  it("上限は並べた後にかける=古く受けた反響の新しい内見の予定も残る", () => {
+    const many = Array.from({ length: TIMELINE_LIMIT + 5 }, (_, n) =>
+      inq({ id: `r${n}`, kind: "ad_permission", receivedAt: new Date(Date.UTC(2026, 5, 1) + n * 60000) }));
+    const old = inq({ id: "old", receivedAt: d("2020-01-01T00:00:00Z"), viewings: [
+      { id: "future", scheduledAt: d("2027-01-01T00:00:00Z"), viewingType: "guided", canceledAt: null },
+    ] });
+    const t = buildPropertyTimeline([...many, old]);
+    expect(t).toHaveLength(TIMELINE_LIMIT);
+    expect(t[0].key).toBe("viewing:future");
   });
   it("内見の予定が無い内見の反響は反響として1行", () => {
     expect(buildPropertyTimeline([inq({ id: "x" })]).map((e) => e.key)).toEqual(["inquiry:x"]);

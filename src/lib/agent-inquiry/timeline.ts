@@ -29,6 +29,10 @@ export interface TimelineEntry {
   unscheduled: boolean;
 }
 
+/** 物件の時系列に出す最大行数。上限は並べた後にかける(受けた日時で先に切ると、古く受けた反響の
+ *  新しい内見の予定が落ちる・@codex #454 R3)。 */
+export const TIMELINE_LIMIT = 500;
+
 /**
  * 物件の時系列(設計 §2.3)。内見は予定1件=1行・予定日時で並べる。それ以外の用件と
  * 予定の無い内見の反響は受けた日時で。日程未定の内見は受けた日時の位置に置く。新しい順。
@@ -63,7 +67,9 @@ export function buildPropertyTimeline(inquiries: TimelineInquiry[]): TimelineEnt
       });
     }
   }
-  return out.sort((a, b) => b.at.getTime() - a.at.getTime() || a.key.localeCompare(b.key));
+  return out
+    .sort((a, b) => b.at.getTime() - a.at.getTime() || a.key.localeCompare(b.key))
+    .slice(0, TIMELINE_LIMIT);
 }
 
 /** 件数(案内/下見は取り消しを除く)。 */

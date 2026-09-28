@@ -35,6 +35,7 @@ export const viewingUpdateSchema = z.object({
   attendantId: uuid.optional().nullable(),
   resultNote: optText(2000),
   canceled: z.boolean().optional(),
+  version: z.number().int().positive(),
 });
 
 const contactFields = {

@@ -14,12 +14,12 @@ export async function GET(_req: Request, ctx: Ctx) {
     const perms = await getUserPermissions(session.id);
     const id = z.string().uuid().parse((await ctx.params).id);
     await assertPropertyReadable(id, session, perms);
-    // 時系列は新しい500件まで。件数はそれとは別に集計クエリで全件を数える(上限で数え漏らさない)。
+    // 時系列は全件を読んでから並べ、並べた後に上限をかける(物件ごとの反響は月数件の規模)。
+    // 件数はそれとは別に集計クエリで数える。
     const [inquiries, ads, kindGroups, viewingGroups] = await Promise.all([
       prisma.agentInquiry.findMany({
         where: { propertyId: id },
         orderBy: { receivedAt: "desc" },
-        take: 500,
         select: {
           id: true,
           kind: true,

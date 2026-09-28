@@ -6,7 +6,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     agentInquiry: { findUnique: vi.fn(async () => null) },
-    agentViewing: { create: vi.fn(), findFirst: vi.fn(async () => null), update: vi.fn(async () => ({})) },
+    agentViewing: { create: vi.fn(), findFirst: vi.fn(async () => null), updateMany: vi.fn(async () => ({ count: 1 })) },
     user: { findUnique: vi.fn(async () => ({ isActive: true })) },
   };
   return { default: db };
@@ -21,7 +21,7 @@ import { PATCH as EDIT } from "../../app/api/agent-inquiries/[id]/viewings/[vid]
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
   agentInquiry: { findUnique: Fn };
-  agentViewing: { create: Fn; findFirst: Fn; update: Fn };
+  agentViewing: { create: Fn; findFirst: Fn; updateMany: Fn };
   user: { findUnique: Fn };
 };
 const IID = "44444444-4444-4444-8444-444444444444";
@@ -60,25 +60,36 @@ describe("内見の予定 API", () => {
   });
   it("別の反響の内見 id は 404", async () => {
     pm.agentViewing.findFirst.mockResolvedValue(null);
-    const res = await EDIT(json("PATCH", { canceled: true }), editCtx);
+    const res = await EDIT(json("PATCH", { canceled: true, version: 1 }), editCtx);
     expect(res.status).toBe(404);
     expect(pm.agentViewing.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: VID, inquiryId: IID } }));
   });
   it("取り消しと結果・監査に結果の文面を書かない", async () => {
     pm.agentViewing.findFirst.mockResolvedValue({ id: VID });
-    await EDIT(json("PATCH", { canceled: true, resultNote: "駅距離で見送り" }), editCtx);
-    expect(pm.agentViewing.update).toHaveBeenCalledWith(expect.objectContaining({
+    await EDIT(json("PATCH", { canceled: true, resultNote: "駅距離で見送り", version: 1 }), editCtx);
+    expect(pm.agentViewing.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ canceledAt: expect.any(Date), resultNote: "駅距離で見送り" }),
     }));
     expect(JSON.stringify((writeAuditLog as Fn).mock.calls)).not.toContain("駅距離");
   });
   it("取り消しを戻す", async () => {
     pm.agentViewing.findFirst.mockResolvedValue({ id: VID });
-    await EDIT(json("PATCH", { canceled: false }), editCtx);
-    expect(pm.agentViewing.update).toHaveBeenCalledWith({ where: { id: VID }, data: { canceledAt: null } });
+    await EDIT(json("PATCH", { canceled: false, version: 3 }), editCtx);
+    expect(pm.agentViewing.updateMany).toHaveBeenCalledWith({
+      where: { id: VID, inquiryId: IID, version: 3 },
+      data: { canceledAt: null, version: { increment: 1 } },
+    });
+  });
+  it("古い版からの変更は 409・版番号は必須(@codex #454 R3)", async () => {
+    pm.agentViewing.findFirst.mockResolvedValue({ id: VID });
+    pm.agentViewing.updateMany.mockResolvedValueOnce({ count: 0 });
+    const res = await EDIT(json("PATCH", { resultNote: "x", version: 1 }), editCtx);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("VERSION_CONFLICT");
+    expect((await EDIT(json("PATCH", { resultNote: "x" }), editCtx)).status).toBe(422);
   });
   it("権限が無ければ 403", async () => {
     (getUserPermissions as Fn).mockResolvedValue([{ resource: "agent_inquiry", action: "read", granted: true }]);
-    expect((await EDIT(json("PATCH", { canceled: true }), editCtx)).status).toBe(403);
+    expect((await EDIT(json("PATCH", { canceled: true, version: 1 }), editCtx)).status).toBe(403);
   });
 });

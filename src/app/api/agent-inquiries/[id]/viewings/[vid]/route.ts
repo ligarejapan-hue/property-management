@@ -3,7 +3,7 @@ import { z } from "zod";
 import prisma from "@/lib/prisma";
 import { ApiError, handleApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
-import { requireAgentInquiry } from "@/lib/agent-inquiry/guard";
+import { requireAgentInquiry, VERSION_CONFLICT_MESSAGE } from "@/lib/agent-inquiry/guard";
 import { viewingUpdateSchema } from "@/lib/agent-inquiry/validators";
 import { inquiryAuditDetail } from "@/lib/agent-inquiry/audit-detail";
 import { assertActiveUser } from "@/lib/agent-inquiry/user-check";
@@ -17,7 +17,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
     const p = await ctx.params;
     const id = z.string().uuid().parse(p.id);
     const vid = z.string().uuid().parse(p.vid);
-    const input = viewingUpdateSchema.parse(await parseJsonBody(request));
+    const { version, ...input } = viewingUpdateSchema.parse(await parseJsonBody(request));
     // その反響の内見であることを確かめる(別の反響の内見 id を URL に混ぜても触れない)。
     const cur = await prisma.agentViewing.findFirst({ where: { id: vid, inquiryId: id }, select: { id: true } });
     if (!cur) throw new ApiError(404, "内見の予定が見つかりません", "NOT_FOUND");
@@ -31,7 +31,12 @@ export async function PATCH(request: Request, ctx: Ctx) {
       ...(input.resultNote !== undefined ? { resultNote: input.resultNote?.trim() || null } : {}),
       ...(input.canceled !== undefined ? { canceledAt: input.canceled ? new Date() : null } : {}),
     };
-    await prisma.agentViewing.update({ where: { id: vid }, data });
+    // 古い画面からの保存で黙って上書きしない(版番号・@codex #454 R3)。
+    const res = await prisma.agentViewing.updateMany({
+      where: { id: vid, inquiryId: id, version },
+      data: { ...data, version: { increment: 1 } },
+    });
+    if (res.count === 0) throw new ApiError(409, VERSION_CONFLICT_MESSAGE, "VERSION_CONFLICT");
     await writeAuditLog({
       userId: session.id,
       action: "agent_viewing_update",
@@ -39,7 +44,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
       targetId: vid,
       detail: inquiryAuditDetail(Object.keys(input)),
     });
-    return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ ok: true, version: version + 1 }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return handleApiError(error);
   }

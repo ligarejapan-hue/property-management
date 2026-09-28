@@ -72,6 +72,7 @@ CREATE TABLE "agent_viewings" (
     "attendant_id" UUID,
     "result_note" TEXT,
     "canceled_at" TIMESTAMP(3),
+    "version" INTEGER NOT NULL DEFAULT 1,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
