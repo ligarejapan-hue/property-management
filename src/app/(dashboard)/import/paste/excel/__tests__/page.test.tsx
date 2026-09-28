@@ -50,6 +50,17 @@ describe("Excel まとめ取込の画面", () => {
     expect(source).toContain('fetch("/api/import/paste/excel"');
   });
 
+  it("★登録の直前に見直しAPIを呼び、候補が出た行は登録しない(@codex PR#456 1巡目 ①)", () => {
+    const recheckAt = source.indexOf('fetch("/api/import/paste/recheck"');
+    const commitAt = source.indexOf('fetch("/api/import/paste/commit"');
+    expect(recheckAt).toBeGreaterThan(-1);
+    expect(recheckAt).toBeLessThan(commitAt);
+    expect(source).toContain("recheckOutcome(row.draft");
+    expect(source).toMatch(/if \(outcome\.kind !== "go"\) \{[\s\S]*?continue;/);
+    // 見直しに失敗したら登録へ進まない
+    expect(source).toMatch(/if \(!check\.ok\) throw/);
+  });
+
   it("まとめて登録するのは「登録できる」行だけ", () => {
     expect(source).toMatch(/r\.status === "ready" && results\[excelLeadRowKey\(r\)\] === undefined/);
   });
@@ -86,6 +97,17 @@ describe("ExcelLeadTable", () => {
     expect(html).toContain("お名前：山田　太郎");
     expect(html).toContain("見込度: C");
     expect(html).toContain('href="/import/paste"');
+  });
+
+  it("登録直前の見直しで止めた行は、要確認と理由・貼り付け用の文章を出す", () => {
+    const html = renderToStaticMarkup(createElement(ExcelLeadTable, {
+      rows: [mk({})],
+      results: { "HOME4U#3": { kind: "review", reasons: ["同じ名前の所有者がすでにいます"] } },
+    }));
+    expect(html).toContain("要確認");
+    expect(html).not.toContain("登録できる");
+    expect(html).toContain("同じ名前の所有者がすでにいます");
+    expect(html).toContain("「貼り付けて物件化」で確かめて登録する");
   });
 
   it("登録の結果を行に出す(成功は物件へのリンク・失敗は理由)", () => {

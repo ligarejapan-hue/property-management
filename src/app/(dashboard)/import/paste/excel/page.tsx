@@ -21,7 +21,12 @@ import {
   type ExcelLeadRow,
   type ExcelLeadResult,
 } from "@/components/import/excel-lead-table";
-import { excelLeadCommitBody } from "@/components/import/excel-lead-commit-body";
+import {
+  excelLeadCommitBody,
+  excelLeadRecheckBody,
+  recheckOutcome,
+  type ExcelLeadRecheckResponse,
+} from "@/components/import/excel-lead-commit-body";
 
 /** 非2xx応答からエラーメッセージを取り出す(貼り付け画面と同じ姿勢)。 */
 async function readApiErrorMessage(res: Response): Promise<string> {
@@ -101,6 +106,24 @@ export default function ExcelLeadImportPage() {
       const row = targets[i];
       let result: ExcelLeadResult;
       try {
+        // ⚠**登録の直前に必ず見直す**(@codex PR#456 1巡目 ①)。下見は取込前の
+        //   DBに対する判定なので、前の行で作った所有者・物件や、他の人が
+        //   その後に登録したものが映っていない。候補が出た行は登録せず要確認へ。
+        // ⚠見直しに失敗したら登録しない(確認したつもりで通さない)。
+        const check = await fetch("/api/import/paste/recheck", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(excelLeadRecheckBody(row)),
+        });
+        if (!check.ok) throw new Error(`重複の確認ができませんでした（${await readApiErrorMessage(check)}）`);
+        const outcome = recheckOutcome(row.draft, (await check.json()) as ExcelLeadRecheckResponse);
+        if (outcome.kind !== "go") {
+          result = outcome;
+          const key = excelLeadRowKey(row);
+          setResults((prev) => ({ ...prev, [key]: result }));
+          setProgress(i + 1);
+          continue;
+        }
         const res = await fetch("/api/import/paste/commit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

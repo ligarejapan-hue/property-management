@@ -8,7 +8,7 @@ import {
   handleApiError,
   apiResponse,
 } from "@/lib/api-helpers";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
 import {
   readLeadSheet,
@@ -77,6 +77,20 @@ export async function POST(request: NextRequest) {
     }
     if (!hasPermission(perms, "property", "write")) {
       throw new ApiError(403, "物件を作る権限がありません", "FORBIDDEN");
+    }
+    // ⚠登録では所有者を作り、**管理の列(見込度・担当者・メモ)を所有者の備考へ**入れる。
+    //   書けない人に下見を見せると、登録で全行403になる(@codex PR#456 1巡目 ②)。
+    //   既定の事務担当は owner_note が「読むだけ」なので、ここで分かる言葉で断る。
+    //   (備考を省いて登録する道は作らない＝管理の情報を黙って捨てない。)
+    if (!hasPermission(perms, "owner", "write")) {
+      throw new ApiError(403, "所有者を作る権限がありません", "FORBIDDEN");
+    }
+    if (!hasExplicitWritePerm(perms, "owner_note")) {
+      throw new ApiError(
+        403,
+        "この取込は、見込度・担当者・メモを所有者の備考に入れます。所有者の備考を書く権限が必要です（管理者に依頼してください）",
+        "FORBIDDEN",
+      );
     }
 
     assertImportJsonBodySize(request, MAX_EXCEL_JSON_BODY_BYTES);

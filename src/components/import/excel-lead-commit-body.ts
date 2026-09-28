@@ -12,6 +12,7 @@ import {
   foldNoColumnFieldsIntoNote,
 } from "./paste-import-review";
 import type { PasteDraft } from "@/lib/paste-import/types";
+import { leadRowStatus } from "@/lib/paste-import/lead-sheet";
 
 export interface ExcelLeadCommitBody {
   property: {
@@ -70,4 +71,60 @@ export function excelLeadCommitBody(row: { draft: PasteDraft; ownerNote: string 
     externalLinkKey: row.draft.externalLinkKey,
     linkExistingOwnerId: null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// 登録直前の見直し(@codex PR#456 1巡目 ①)
+//
+// ⚠下見の判定は**取込を始める前のDB**に対するもの。同じ人の物件が2行ある
+//   (反響番号は別)と、1行目で作った所有者が2行目の下見には映っておらず、
+//   そのまま登録すると**同じ人の所有者が2人**できる。登録APIは反響番号の一致
+//   しか止めない(住所・氏名の一致は人が判断する設計)ので、ここで止める。
+// ⚠貼り付け画面の「登録の直前にもう一度見直す」と同じ見直しAPIを使い、
+//   判定は下見と**同じ関数**(leadRowStatus)に通す。
+// ---------------------------------------------------------------------------
+
+export interface ExcelLeadRecheckBody {
+  address: string;
+  lotNumber: string;
+  externalLinkKey: string;
+  ownerName: string;
+  ownerCurrentAddress: string;
+}
+
+export function excelLeadRecheckBody(row: { draft: PasteDraft }): ExcelLeadRecheckBody {
+  const pv = defaultPropertyValues(row.draft);
+  const ov = defaultOwnerValues(row.draft);
+  return {
+    address: pv.address,
+    lotNumber: pv.lotNumber,
+    externalLinkKey: row.draft.externalLinkKey ?? "",
+    ownerName: ov.name,
+    ownerCurrentAddress: ov.currentAddress,
+  };
+}
+
+/** 見直しAPI(/api/import/paste/recheck)の応答のうち、判定に使う部分。 */
+export interface ExcelLeadRecheckResponse {
+  duplicates: { blocked: boolean; blockedByPropertyId?: string | null; similarPropertyIds?: string[] };
+  similar: unknown[];
+  ownerCandidates: unknown[];
+  ownerCandidatesTruncated: boolean;
+}
+
+export type RecheckOutcome =
+  | { kind: "go" }
+  | { kind: "duplicate" }
+  | { kind: "review"; reasons: string[] };
+
+export function recheckOutcome(draft: PasteDraft, res: ExcelLeadRecheckResponse): RecheckOutcome {
+  const { status, reasons } = leadRowStatus(draft, {
+    blocked: res.duplicates.blocked,
+    similarCount: res.similar.length,
+    ownerCandidateCount: res.ownerCandidates.length,
+    ownerCandidatesTruncated: res.ownerCandidatesTruncated,
+  });
+  if (status === "registered") return { kind: "duplicate" };
+  if (status === "review") return { kind: "review", reasons };
+  return { kind: "go" };
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
-import { excelLeadCommitBody } from "../excel-lead-commit-body";
+import { excelLeadCommitBody, excelLeadRecheckBody, recheckOutcome } from "../excel-lead-commit-body";
 
 describe("excelLeadCommitBody — 1行を登録APIの形にする", () => {
   const text = [
@@ -49,5 +49,52 @@ describe("excelLeadCommitBody — 1行を登録APIの形にする", () => {
   it("氏名が無ければ所有者は送らない", () => {
     const d = buildPasteDraft("物件所在地：東京都港区1-1\n物件種別：土地");
     expect(excelLeadCommitBody({ draft: d, ownerNote: "x" }).owner).toBeNull();
+  });
+});
+
+describe("登録直前の見直し(@codex PR#456 1巡目 ①)", () => {
+  const draft = buildPasteDraft(
+    "反響番号：lj-2\nお名前：渡辺　一\nご住所：東京都港区1-1\n物件所在地：東京都港区2-2\n物件種別：戸建",
+  );
+  const clean = {
+    duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: [] },
+    similar: [],
+    ownerCandidates: [],
+    ownerCandidatesTruncated: false,
+  };
+
+  it("見直しには下書きの値(鍵・住所・氏名・現住所)をそのまま送る", () => {
+    expect(excelLeadRecheckBody({ draft })).toEqual({
+      address: "東京都港区2-2",
+      lotNumber: "",
+      externalLinkKey: "lj-2",
+      ownerName: "渡辺　一",
+      ownerCurrentAddress: "東京都港区1-1",
+    });
+  });
+
+  it("何も見つからなければ登録へ進む", () => {
+    expect(recheckOutcome(draft, clean)).toEqual({ kind: "go" });
+  });
+
+  it("★同じ人の2行目: 1行目で作った所有者が候補に出たら、登録せず要確認へ回す", () => {
+    expect(recheckOutcome(draft, { ...clean, ownerCandidates: [{ id: "o-1" }] })).toEqual({
+      kind: "review",
+      reasons: ["同じ名前の所有者がすでにいます"],
+    });
+  });
+
+  it("★同じ物件の行: 似た物件が出たら要確認・同じ鍵なら登録済み", () => {
+    expect(recheckOutcome(draft, { ...clean, similar: [{ id: "p-1" }] }).kind).toBe("review");
+    expect(
+      recheckOutcome(draft, {
+        ...clean,
+        duplicates: { blocked: true, blockedByPropertyId: "p-2", similarPropertyIds: [] },
+      }),
+    ).toEqual({ kind: "duplicate" });
+  });
+
+  it("候補が多すぎて確認しきれないときも要確認", () => {
+    expect(recheckOutcome(draft, { ...clean, ownerCandidatesTruncated: true }).kind).toBe("review");
   });
 });

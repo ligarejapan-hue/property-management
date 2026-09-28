@@ -26,6 +26,8 @@ export interface ExcelLeadRow {
 export type ExcelLeadResult =
   | { kind: "created"; propertyId: string }
   | { kind: "duplicate" }
+  /** 登録直前の見直しで候補が見つかり、登録しなかった(人が確かめる)。 */
+  | { kind: "review"; reasons: string[] }
   | { kind: "failed"; message: string };
 
 export function excelLeadRowKey(r: Pick<ExcelLeadRow, "sheetName" | "rowNumber">): string {
@@ -58,12 +60,15 @@ function StatusCell({ row, result }: { row: ExcelLeadRow; result: ExcelLeadResul
       <StatusBadge intent="neutral">登録済み</StatusBadge>
     );
   }
-  if (row.status === "ready") return <StatusBadge intent="info">登録できる</StatusBadge>;
+  if (row.status === "ready" && result?.kind !== "review") {
+    return <StatusBadge intent="info">登録できる</StatusBadge>;
+  }
+  const reasons = result?.kind === "review" ? result.reasons : row.reasons;
   return (
     <div className="space-y-1">
       <StatusBadge intent="warning">要確認</StatusBadge>
       <ul className="list-disc pl-4 text-xs text-amber-800 dark:text-amber-300">
-        {row.reasons.map((r) => <li key={r}>{r}</li>)}
+        {reasons.map((r) => <li key={r}>{r}</li>)}
       </ul>
     </div>
   );
@@ -138,7 +143,9 @@ export function ExcelLeadTable({
                 </td>
                 <td className="px-3 py-2">
                   <StatusCell row={row} result={result} />
-                  {row.status === "review" && !result && <ReviewHelp row={row} />}
+                  {((row.status === "review" && !result) || result?.kind === "review") && (
+                    <ReviewHelp row={row} />
+                  )}
                 </td>
               </tr>
             );

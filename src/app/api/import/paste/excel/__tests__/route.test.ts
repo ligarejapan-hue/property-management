@@ -9,6 +9,8 @@ let mockPerms: unknown;
 const FULL_PERMS = [
   { resource: "import", action: "write", granted: true },
   { resource: "property", action: "write", granted: true },
+  { resource: "owner", action: "write", granted: true },
+  { resource: "owner_note", action: "edit", granted: true },
 ];
 const lookupCalls: unknown[] = [];
 let lookupResult: (input: { externalLinkKey: string | null }) => unknown = () => ({
@@ -99,6 +101,25 @@ describe("POST /api/import/paste/excel", () => {
     mockPerms = [{ resource: "import", action: "write", granted: true }];
     const res = await POST(req({ fileName: "a.xlsx", xlsxBase64: xlsxBase64(sheet([])) }));
     expect(res.status).toBe(403);
+  });
+
+  it("★owner:write が無ければ403(登録で所有者を作るため・下見の時点で断る)", async () => {
+    mockPerms = FULL_PERMS.filter((p) => p.resource !== "owner");
+    const res = await POST(req({ fileName: "a.xlsx", xlsxBase64: xlsxBase64(sheet([])) }));
+    expect(res.status).toBe(403);
+    expect(lookupCalls).toHaveLength(0);
+  });
+
+  it("★所有者の備考を書けない人(既定の事務担当=読むだけ)は403で、理由を伝える", async () => {
+    // 管理の列は所有者の備考へ入れる。書けない人が登録すると全行403になるか、
+    // 管理の情報を黙って捨てることになる。下見の時点で分かる言葉で断る。
+    mockPerms = [
+      ...FULL_PERMS.filter((p) => p.resource !== "owner_note"),
+      { resource: "owner_note", action: "read", granted: true },
+    ];
+    const res = await POST(req({ fileName: "a.xlsx", xlsxBase64: xlsxBase64(sheet([])) }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.message).toContain("所有者の備考");
   });
 
   it("Excel でなければ400", async () => {
