@@ -1,7 +1,47 @@
 import prisma from "@/lib/prisma";
 import { classifyAgentQuery } from "./agent-query";
+import { widthVariants } from "./desk-property";
 
 const LIMIT = 20;
+const LIST_PAGE = 50;
+
+export interface AgentListRow {
+  id: string;
+  companyName: string;
+  branchName: string | null;
+  phone: string;
+  isArchived: boolean;
+  inquiryCount: number;
+  lastReceivedAt: Date | null;
+}
+
+/**
+ * 業者の名簿の一覧(設計 §2.3 の名簿画面・名前順・カーソル式)。反響件数と最終日つき。
+ * archived=true でしまった業者だけを出す=しまった業者を見つけて戻せる(レビュー Important 3)。
+ */
+export async function listAgents(opts: { archived: boolean; cursor?: string }) {
+  const rows = await prisma.agent.findMany({
+    where: { isArchived: opts.archived },
+    orderBy: [{ companyName: "asc" }, { id: "asc" }],
+    take: LIST_PAGE + 1,
+    ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+    select: {
+      id: true,
+      companyName: true,
+      branchName: true,
+      phone: true,
+      isArchived: true,
+      _count: { select: { inquiries: true } },
+      inquiries: { orderBy: { receivedAt: "desc" }, take: 1, select: { receivedAt: true } },
+    },
+  });
+  const agents: AgentListRow[] = rows.slice(0, LIST_PAGE).map(({ _count, inquiries, ...r }) => ({
+    ...r,
+    inquiryCount: _count.inquiries,
+    lastReceivedAt: inquiries[0]?.receivedAt ?? null,
+  }));
+  return { agents, nextCursor: rows.length > LIST_PAGE ? agents[agents.length - 1].id : null };
+}
 
 export interface AgentHit {
   id: string;
@@ -37,11 +77,12 @@ export async function searchAgents(q: string): Promise<AgentHit[]> {
     const rows = await prisma.agent.findMany({
       where: {
         isArchived: false,
-        OR: [
-          { companyName: { contains: cq.text, mode: "insensitive" } },
-          { companyKana: { contains: cq.text, mode: "insensitive" } },
-          { branchName: { contains: cq.text, mode: "insensitive" } },
-        ],
+        // 全角/半角の候補ごとに OR(DB の商号は正規化していない=「ＡＢＣ不動産」も「ABC」で当てる)。
+        OR: widthVariants(cq.text).flatMap((v) => [
+          { companyName: { contains: v, mode: "insensitive" as const } },
+          { companyKana: { contains: v, mode: "insensitive" as const } },
+          { branchName: { contains: v, mode: "insensitive" as const } },
+        ]),
       },
       select: { id: true, companyName: true, branchName: true, phone: true },
       orderBy: { companyName: "asc" },

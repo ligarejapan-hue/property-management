@@ -2,18 +2,19 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { handleApiError } from "@/lib/api-helpers";
 import { requireAgentInquiry } from "@/lib/agent-inquiry/guard";
-import { DESK_PROPERTY_SELECT, toDeskProperty } from "@/lib/agent-inquiry/desk-property";
+import { DESK_PROPERTY_SELECT, toDeskProperty, widthVariants } from "@/lib/agent-inquiry/desk-property";
 
 const LIMIT = 20;
 const MAX_TERMS = 4;
 
+// 1語につき全角/半角の候補ごとに4項目を OR(DB の値は正規化していないため)。
 const termWhere = (t: string) => ({
-  OR: [
-    { buildingName: { contains: t, mode: "insensitive" as const } },
-    { building: { name: { contains: t, mode: "insensitive" as const } } },
-    { roomNo: { contains: t } },
-    { address: { contains: t, mode: "insensitive" as const } },
-  ],
+  OR: widthVariants(t).flatMap((v) => [
+    { buildingName: { contains: v, mode: "insensitive" as const } },
+    { building: { name: { contains: v, mode: "insensitive" as const } } },
+    { roomNo: { contains: v } },
+    { address: { contains: v, mode: "insensitive" as const } },
+  ]),
 });
 
 /**
@@ -25,7 +26,7 @@ const termWhere = (t: string) => ({
 export async function GET(request: Request) {
   try {
     await requireAgentInquiry("read");
-    const q = (new URL(request.url).searchParams.get("q") ?? "").normalize("NFKC").trim();
+    const q = (new URL(request.url).searchParams.get("q") ?? "").trim();
     if ([...q].length < 2) {
       return NextResponse.json({ properties: [] }, { headers: { "Cache-Control": "no-store" } });
     }

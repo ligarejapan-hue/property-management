@@ -1,15 +1,33 @@
 import { AD_MEDIA, type AdMediumKey, type AdValueKey } from "./constants";
 
+const KANJI_NUM = "〇一二三四五六七八九十百千零";
+/**
+ * 番地の始まり: 算用数字、または漢数字の後に「番(番町は町名なので除く)/号/区切り(ー・-)/の」が続くところ。
+ * 漢数字だけの町名(十日町・八王子・三番町)は切らない。迷う形(一の宮 など)は短く切る側に倒す
+ * =番地を見せるより町名が短くなる方がまし(レビュー Important 1: 漢数字の番地が現地スタッフへ漏れていた)。
+ */
+const HOUSE_NUMBER_START = new RegExp(`[0-9]|[${KANJI_NUM}]+(?:番(?!町)|号|[ー\\-]|の)`);
+
 /**
  * 所在地を町名(丁目)までにする(設計 §4=受付の窓では番地以降を見せない)。
- * 「丁目」があればそこまで。無ければ最初の数字か「〇番」の手前まで。
+ * 「丁目」があればそこまで。無ければ番地の始まりの手前まで。
  */
 export function townOnly(address: string): string {
   const a = address.normalize("NFKC").trim();
   const chome = a.match(/^(.*?丁目)/);
   if (chome) return chome[1];
-  const cut = a.search(/[0-9]|[一二三四五六七八九十百]+番/);
+  const cut = a.search(HOUSE_NUMBER_START);
   return (cut === -1 ? a : a.slice(0, cut)).trim();
+}
+
+/**
+ * 検索語の全角/半角のゆれを吸収する候補(レビュー Important 2)。DB の値は正規化していない
+ * (登記由来の住所は全角が多い)ので、入力そのまま・半角・全角の3通りで探す。
+ */
+export function widthVariants(term: string): string[] {
+  const half = term.normalize("NFKC");
+  const full = half.replace(/[!-~]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0));
+  return [...new Set([term, half, full])];
 }
 
 /** DB から読む列=許可リストに必要なものだけ。 */

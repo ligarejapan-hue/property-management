@@ -7,6 +7,7 @@ vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     agent: {
       findMany: vi.fn(async () => []),
+      count: vi.fn(async () => 0),
       findUnique: vi.fn(async () => null),
       create: vi.fn(async () => ({ id: "a-new" })),
       updateMany: vi.fn(async () => ({ count: 1 })),
@@ -71,6 +72,30 @@ describe("業者 API", () => {
       ] },
       take: 20,
     }));
+  });
+  it("全角の会社名(ＡＢＣ)も半角で打った語で当たる(レビュー Important 2)", async () => {
+    await SEARCH(new Request("http://x/api/agents?q=ABC"));
+    const or = pm.agent.findMany.mock.calls[0][0].where.OR as { companyName?: { contains: string } }[];
+    expect(or.filter((c) => c.companyName).map((c) => c.companyName!.contains).sort()).toEqual(["ABC", "ＡＢＣ"].sort());
+  });
+  it("名簿の一覧(list=1): 名前順・反響件数と最終日つき・しまった業者は archived=1 で見られる(レビュー Important 3)", async () => {
+    pm.agent.findMany.mockResolvedValueOnce([{
+      id: AID, companyName: "○○", branchName: null, phone: "03-1", isArchived: true,
+      _count: { inquiries: 12 }, inquiries: [{ receivedAt: new Date("2026-10-02T00:00:00Z") }],
+    }]);
+    const body = await (await SEARCH(new Request("http://x/api/agents?list=1&archived=1"))).json();
+    const arg = pm.agent.findMany.mock.calls[0][0];
+    expect(arg.where).toEqual({ isArchived: true });
+    expect(arg.orderBy).toEqual([{ companyName: "asc" }, { id: "asc" }]);
+    expect(body.agents).toEqual([{
+      id: AID, companyName: "○○", branchName: null, phone: "03-1", isArchived: true,
+      inquiryCount: 12, lastReceivedAt: "2026-10-02T00:00:00.000Z",
+    }]);
+    expect(body.nextCursor).toBeNull();
+  });
+  it("名簿の一覧の既定は使っている業者だけ", async () => {
+    await SEARCH(new Request("http://x/api/agents?list=1"));
+    expect(pm.agent.findMany.mock.calls[0][0].where).toEqual({ isArchived: false });
   });
   it("同じ業者が代表電話と携帯の両方で当たったら携帯側(問い合わせ者つき)を残す", async () => {
     pm.$queryRaw.mockResolvedValueOnce([

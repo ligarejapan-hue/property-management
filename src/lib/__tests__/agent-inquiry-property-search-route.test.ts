@@ -43,6 +43,12 @@ describe("受付の窓の物件検索", () => {
     expect(arg.select).toEqual(DESK_PROPERTY_SELECT);
     expect(arg.take).toBe(20);
   });
+  it("全角/半角のどちらで打っても、DB の全角/半角のどちらにも当たる(レビュー Important 2)", async () => {
+    await SEARCH(url("本町３"));
+    const or = whereOf().AND[0].OR as { address?: { contains: string } }[];
+    const addressVariants = or.filter((c) => c.address).map((c) => c.address!.contains).sort();
+    expect(addressVariants).toEqual(["本町3", "本町３"].sort());
+  });
   it("空白区切りは語ごとに AND", async () => {
     await SEARCH(url("サンライズ　305"));
     expect(whereOf().AND).toHaveLength(2);
