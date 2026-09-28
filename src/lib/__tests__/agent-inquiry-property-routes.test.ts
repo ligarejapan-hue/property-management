@@ -15,6 +15,9 @@ vi.mock("@/lib/prisma", () => {
   return { default: db };
 });
 
+const { lockPropertyRecordForWrite } = vi.hoisted(() => ({ lockPropertyRecordForWrite: vi.fn() }));
+vi.mock("@/lib/property-record-guard", () => ({ lockPropertyRecordForWrite }));
+
 import prismaMock from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { jsonRequest as json } from "./agent-inquiry-route-mocks";
@@ -87,8 +90,8 @@ describe("広告の可否の変更", () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error.code).toBe("VERSION_CONFLICT");
     expect(pm.propertyAdPermission.upsert).not.toHaveBeenCalled();
-    // 同時保存で比べる前に割り込まれないよう、物件の行を先にロックする
-    expect(String(pm.$queryRaw.mock.calls[0][0].join?.("?") ?? pm.$queryRaw.mock.calls[0][0])).toMatch(/FOR UPDATE/);
+    // 同時保存で比べる前に割り込まれないよう、物件の行を先にロックする(担当範囲つき)
+    expect(lockPropertyRecordForWrite).toHaveBeenCalledWith(expect.anything(), PID, expect.objectContaining({ id: "u1" }));
   });
   it("物件の編集権限・null は行を消す・1トランザクション", async () => {
     perms(["property", "read"], ["property", "write"]);
@@ -113,6 +116,14 @@ describe("広告の可否の変更", () => {
     expect((await res.json()).adPermissions).toEqual(want);
     expect((writeAuditLog as Fn).mock.calls.at(-1)![0].detail.values).toEqual(want);
     expect(pm.propertyAdPermission.findMany).toHaveBeenCalledTimes(1);
+  });
+  it("ロック後に担当範囲を外れていたら書かない(認可と書き込みを同じロックの中で・@codex #454 R9)", async () => {
+    perms(["property", "read"], ["property", "write"]);
+    const { ApiError } = await import("@/lib/api-helpers");
+    lockPropertyRecordForWrite.mockRejectedValueOnce(new (ApiError as never as new (s: number, m: string, c: string) => Error)(403, "x", "FORBIDDEN"));
+    const res = await PUT(json("PUT", { items: [{ medium: "athome", value: "ok", from: null }] }), ctx);
+    expect(res.status).toBe(403);
+    expect(pm.propertyAdPermission.upsert).not.toHaveBeenCalled();
   });
   it("反響の受付の権限だけでは変えられない(403)", async () => {
     perms(["property", "read"], ["agent_inquiry", "write"]);

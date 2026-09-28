@@ -6,6 +6,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { assertPropertyWritable } from "@/lib/agent-inquiry/property-access";
 import { adPermissionsPutSchema } from "@/lib/agent-inquiry/validators";
 import { VERSION_CONFLICT_MESSAGE } from "@/lib/agent-inquiry/guard";
+import { lockPropertyRecordForWrite } from "@/lib/property-record-guard";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -19,7 +20,9 @@ export async function PUT(request: Request, ctx: Ctx) {
     const { items } = adPermissionsPutSchema.parse(await parseJsonBody(request));
     const adPermissions = await prisma.$transaction(async (tx) => {
       // 同時に保存されたとき、比べてから書くまでの間に割り込まれないよう物件の行をロックする。
-      await tx.$queryRaw`SELECT id FROM "properties" WHERE id = ${id}::uuid FOR UPDATE`;
+      // 担当範囲つきのロック=ロックの時点で現地スタッフの担当外なら 403(先の確認の後に担当が
+      // 付け替えられていても書かない・@codex #454 R9)。
+      await lockPropertyRecordForWrite(tx, id, session);
       const current = await tx.propertyAdPermission.findMany({
         where: { propertyId: id },
         select: { medium: true, value: true },
