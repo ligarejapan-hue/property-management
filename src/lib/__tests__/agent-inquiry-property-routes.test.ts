@@ -103,6 +103,17 @@ describe("広告の可否の変更", () => {
     }));
     expect(pm.propertyAdPermission.deleteMany).toHaveBeenCalledWith({ where: { propertyId: PID, medium: "flyer" } });
   });
+  it("監査と応答はロック中に組み立てた値(ロックを外した後の他人の変更を混ぜない・@codex #454 R6)", async () => {
+    perms(["property", "read"], ["property", "write"]);
+    pm.propertyAdPermission.findMany
+      .mockResolvedValueOnce([{ medium: "suumo", value: "ask" }])
+      .mockResolvedValueOnce([{ medium: "athome", value: "ng" }, { medium: "suumo", value: "ng" }]);
+    const res = await PUT(json("PUT", { items: [{ medium: "athome", value: "ok", from: null }] }), ctx);
+    const want = { athome: "ok", suumo: "ask" };
+    expect((await res.json()).adPermissions).toEqual(want);
+    expect((writeAuditLog as Fn).mock.calls.at(-1)![0].detail.values).toEqual(want);
+    expect(pm.propertyAdPermission.findMany).toHaveBeenCalledTimes(1);
+  });
   it("反響の受付の権限だけでは変えられない(403)", async () => {
     perms(["property", "read"], ["agent_inquiry", "write"]);
     expect((await PUT(json("PUT", { items: [{ medium: "athome", value: "ok", from: null }] }), ctx)).status).toBe(403);

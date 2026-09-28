@@ -17,7 +17,7 @@ export async function PUT(request: Request, ctx: Ctx) {
     const id = z.string().uuid().parse((await ctx.params).id);
     await assertPropertyWritable(id, session, perms);
     const { items } = adPermissionsPutSchema.parse(await parseJsonBody(request));
-    await prisma.$transaction(async (tx) => {
+    const adPermissions = await prisma.$transaction(async (tx) => {
       // 同時に保存されたとき、比べてから書くまでの間に割り込まれないよう物件の行をロックする。
       await tx.$queryRaw`SELECT id FROM "properties" WHERE id = ${id}::uuid FOR UPDATE`;
       const current = await tx.propertyAdPermission.findMany({
@@ -39,13 +39,13 @@ export async function PUT(request: Request, ctx: Ctx) {
             update: { value: it.value, updatedById: session.id },
           });
         }
+        if (it.value === null) now.delete(it.medium);
+        else now.set(it.medium, it.value);
       }
+      // 変更後の値はロック中に組み立てる(ロックを外した後に読み直すと、直後の他人の変更を
+      // この人の操作として記録してしまう・@codex #454 R6)。
+      return Object.fromEntries(now);
     });
-    const ads = await prisma.propertyAdPermission.findMany({
-      where: { propertyId: id },
-      select: { medium: true, value: true },
-    });
-    const adPermissions = Object.fromEntries(ads.map((a) => [a.medium, a.value]));
     // 監査の values は媒体→ok/ng/ask の列挙値だけ(個人情報を含まない)。
     await writeAuditLog({
       userId: session.id,
