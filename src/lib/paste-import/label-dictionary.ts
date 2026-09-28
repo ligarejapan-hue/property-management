@@ -24,7 +24,8 @@ export type DraftFieldKey =
   | "ownerAddress";
 
 export const LABEL_DICTIONARY: Record<DraftFieldKey, readonly string[]> = {
-  address: ["物件所在地", "所在地", "物件住所", "物件の所在地"],
+  // 「査定物件の所在地」= タカウルの反響メール(顧客管理表 2026-09-28 で確認)。
+  address: ["物件所在地", "所在地", "物件住所", "物件の所在地", "査定物件の所在地"],
   lotNumber: ["地番"],
   buildingName: ["物件名称", "建物名", "マンション名", "物件名"],
   propertyTypeRaw: ["物件種別", "種別", "物件の種類"],

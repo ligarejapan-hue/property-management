@@ -657,6 +657,29 @@ describe("所有者の項目ごとの書き込み権限（P1-1）", () => {
     expect(res.status).toBe(403);
   });
 
+  it("★所有者の備考(note)は owner_note の権限で見る（Excelまとめ取込の管理メモ）", async () => {
+    mockPerms = FULL_PERMS.filter((p) => p.resource !== "owner_note");
+    const res = await POST(req(ownerWith({ note: "見込度: C" })));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.message).toContain("備考");
+    expect(created.owner).toBeUndefined();
+  });
+
+  it("所有者の備考は owner.note に保存される（空なら null）", async () => {
+    mockPerms = [...FULL_PERMS, { resource: "owner_note", action: "full", granted: true }];
+    await POST(req(ownerWith({ note: "  見込度: C\nメモ: 留守  " })));
+    expect(created.owner?.[0]).toMatchObject({ note: "見込度: C\nメモ: 留守" });
+    for (const k of Object.keys(created)) delete created[k];
+    await POST(req(ownerWith({ note: "   " })));
+    expect(created.owner?.[0]).toMatchObject({ note: null });
+  });
+
+  it("★所有者の備考も監査ログには入れない", async () => {
+    mockPerms = [...FULL_PERMS, { resource: "owner_note", action: "full", granted: true }];
+    await POST(req(ownerWith({ note: "見込度: C 秘密のメモ" })));
+    expect(JSON.stringify(auditCalls)).not.toContain("秘密のメモ");
+  });
+
   it("既存所有者への紐付けだけなら、項目ごとの権限は要らない（何も書かないため）", async () => {
     mockPerms = FULL_PERMS.filter((p) => p.resource !== "owner_phone");
     const res = await POST(req({ ...baseBody, linkExistingOwnerId: "existing-owner-1" }));

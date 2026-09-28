@@ -100,6 +100,12 @@ interface CommitBody {
     phone: string | null;
     email: string | null;
     currentAddress: string | null;
+    /**
+     * 所有者の備考。Excel の顧客管理表からのまとめ取込が、見込度・担当者・メモなど
+     * **物件の備考へ入れてはいけない管理の情報**を入れる(owner_note の権限で守られる欄)。
+     * 貼り付け画面は送らない(省略可)。
+     */
+    note?: string | null;
   } | null;
   externalLinkKey: string | null;
   /** 既存の所有者に紐付ける場合。指定があれば新規作成しない。 */
@@ -216,6 +222,9 @@ export async function POST(request: NextRequest) {
         { value: body.owner.email, resource: "owner_email", label: "メールアドレス" },
         // ⚠現住所は登記上の住所と同じ機微度＝同じ権限で扱う(owners/route.ts と同じ)。
         { value: body.owner.currentAddress, resource: "owner_address", label: "現住所" },
+        // ⚠備考も項目の1つ(owners/route.ts と同じ owner_note)。管理のメモには
+        //   個人の事情が書かれるので、書けない人の経路にしない。
+        { value: body.owner.note, resource: "owner_note", label: "備考" },
       ];
       for (const { value, resource, label } of ownerFieldWriteChecks) {
         if ((value ?? "").trim() !== "" && !hasExplicitWritePerm(perms, resource)) {
@@ -450,6 +459,7 @@ export async function POST(request: NextRequest) {
               //   限らない。address(登記上住所)は空のままにする(設計書 §7・
               //   発注者承認 2026-08-26)。address キー自体を書かない。
               currentAddress: body.owner.currentAddress?.trim() || null,
+              note: body.owner.note?.trim() || null,
             },
           });
           ownerId = owner.id;
