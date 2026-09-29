@@ -62,3 +62,9 @@ describe("担当者の一覧の読み込み失敗も知らせる(@codex #459 R3)
     expect(src).toMatch(/Promise\.all\(\[[\s\S]*fetchUsers\(\)/);
   });
 });
+
+describe("タブを替えたら前のタブの行を出さない(@codex #459 R4)", () => {
+  it("一覧は今の絞り込みで読んだ行だけ出す", () => {
+    expect(src).toMatch(/listKey === filterKey/);
+  });
+});

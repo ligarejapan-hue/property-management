@@ -59,7 +59,10 @@ export function InquiryListView({
               </span>
               <span className="block text-sm font-medium">
                 {q.property.roomNo ? `${q.property.name} ${q.property.roomNo}` : q.property.name} ― {q.agent.companyName}
-                {q.contactName ? `(${q.contactName}様)` : ""}
+                {/* 画面保護はボタンの中を外で見ないので、個人情報には自前の印を付ける(@codex #459 R4)。 */}
+                {q.contactName && (
+                  <span data-pii-protected="true" data-pii-surface="dashboard">{`(${q.contactName}様)`}</span>
+                )}
               </span>
               <span className="block text-xs text-gray-500">担当:{q.assignee?.name ?? "未定"}</span>
             </button>

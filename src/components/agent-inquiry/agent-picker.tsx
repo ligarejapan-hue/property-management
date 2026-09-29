@@ -20,7 +20,10 @@ export function AgentResults({ hits, onPick }: { hits: AgentHit[]; onPick: (a: A
             </span>
             <span className="block text-xs text-gray-500">
               代表 {h.phone}
-              {h.lastContact?.name ? ` ・ 前回 ${h.lastContact.name}様` : ""}
+              {/* 画面保護はボタンの中を外で見ないので、個人情報には自前の印を付ける(@codex #459 R4)。 */}
+              {h.lastContact?.name && (
+                <span data-pii-protected="true" data-pii-surface="dashboard">{` ・ 前回 ${h.lastContact.name}様`}</span>
+              )}
             </span>
           </button>
         </li>

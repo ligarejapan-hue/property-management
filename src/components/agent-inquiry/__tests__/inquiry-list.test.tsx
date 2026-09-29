@@ -113,3 +113,13 @@ describe("詳細: 打ちかけの入力を消さない(最終レビュー I-1/I-
     expect(pickDraft("", "サーバ")).toBe("");
   });
 });
+
+describe("ボタンの中の個人情報にも画面保護(@codex #459 R4)", () => {
+  it("一覧の行の問い合わせ者名は保護の印の中", () => {
+    const html = renderToStaticMarkup(
+      <InquiryListView tab="open" onTab={noop} mine={false} onMine={noop} items={[inquiry]} openCount={1}
+        onOpen={noop} hasMore={false} onMore={noop} />,
+    );
+    expect(html).toMatch(/<span data-pii-protected="true" data-pii-surface="dashboard">\(田中様\)<\/span>/);
+  });
+});

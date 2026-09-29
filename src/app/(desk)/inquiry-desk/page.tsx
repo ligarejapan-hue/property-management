@@ -27,6 +27,10 @@ export default function InquiryDeskPage() {
   const [tab, setTab] = useState<InquiryStatusKey>("open");
   const [mine, setMine] = useState(false);
   const [items, setItems] = useState<InquiryView[]>([]);
+  // items がどの絞り込みで読んだ行か。今の絞り込みと違う間は出さない(タブを替えた直後・読み込み失敗時に
+  // 別のタブの行を見せない・@codex #459 R4)。
+  const [listKey, setListKey] = useState<string | null>(null);
+  const filterKey = `${tab}|${mine}`;
   const [cursor, setCursor] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
@@ -64,6 +68,7 @@ export default function InquiryDeskPage() {
         setUsers(us.data.map((u) => ({ id: u.id, name: u.name })));
         setItems(list.items);
         setCursor(list.nextCursor);
+        setListKey(`${tab}|${mine}`);
         setUpcoming(up.viewings);
         setOpenCount(counts.open);
         window.dispatchEvent(new CustomEvent(DESK_OPEN_COUNT_EVENT, { detail: counts.open }));
@@ -122,10 +127,10 @@ export default function InquiryDeskPage() {
           onTab={setTab}
           mine={mine}
           onMine={setMine}
-          items={items}
+          items={listKey === filterKey ? items : []}
           openCount={openCount}
           onOpen={setOpenId}
-          hasMore={cursor != null}
+          hasMore={listKey === filterKey && cursor != null}
           onMore={loadMore}
         />
       </div>

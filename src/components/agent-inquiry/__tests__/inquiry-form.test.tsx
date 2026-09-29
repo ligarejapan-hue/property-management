@@ -90,3 +90,10 @@ describe("業者の候補", () => {
     expect(html).toContain("前回 田中様");
   });
 });
+
+describe("業者の候補の前回の問い合わせ者名にも画面保護(@codex #459 R4)", () => {
+  it("前回 ○○様 は保護の印の中", () => {
+    const html = renderToStaticMarkup(<AgentResults hits={[agent]} onPick={vi.fn()} />);
+    expect(html).toMatch(/<span data-pii-protected="true" data-pii-surface="dashboard">[^<]*前回 田中様<\/span>/);
+  });
+});
