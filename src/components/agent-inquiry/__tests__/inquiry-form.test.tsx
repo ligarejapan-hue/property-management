@@ -1,0 +1,86 @@
+import { describe, it, expect, vi } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import { EMPTY_DESK_FORM, deskFormReducer } from "@/lib/agent-inquiry/desk-form";
+import { InquiryFormView } from "../inquiry-form";
+import { AdPermissionChips } from "../ad-permission-chips";
+import { AgentResults } from "../agent-picker";
+
+const agent = {
+  id: "a1", companyName: "○○不動産", branchName: "新宿店", phone: "03-1234-5678", matchedBy: "mobile" as const,
+  lastContact: { name: "田中", mobile: "090-1234-5678", email: null },
+};
+const property = {
+  id: "p1", name: "サンライズ中野", roomNo: "305", town: "東京都中野区中野2丁目", propertyType: "apartment_unit",
+  adPermissions: { athome: "ok" as const, homes: "ng" as const, other_portal: "ask" as const },
+};
+type ViewProps = Parameters<typeof InquiryFormView>[0];
+const view = (over: Partial<ViewProps> = {}) =>
+  renderToStaticMarkup(
+    <InquiryFormView
+      state={EMPTY_DESK_FORM} dispatch={() => {}} users={[]} errors={{}} warning={null}
+      submitting={false} message={null} onSubmit={() => {}} onCreateAgent={() => {}} {...over}
+    />,
+  );
+
+describe("登録フォーム", () => {
+  it("並び順=業者→問い合わせ者→物件→用件→入口→保存(方針12)", () => {
+    const html = view();
+    const idx = ["業者(代表電話・携帯・会社名)", "問い合わせ者", "物件(物件名・部屋・所在地)", "用件", "入口", "保存する"]
+      .map((t) => html.indexOf(t));
+    expect(idx.every((i) => i >= 0)).toBe(true);
+    expect([...idx].sort((a, b) => a - b)).toEqual(idx);
+  });
+  it("内見のときだけ内見の予定が出て、案内/下見・日付・時刻・立ち会い", () => {
+    expect(view()).not.toContain("内見の予定");
+    const s = deskFormReducer(EMPTY_DESK_FORM, { type: "kind", value: "viewing" });
+    const html = view({ state: s, users: [{ id: "u1", name: "佐藤" }] });
+    for (const t of ["内見の予定", "案内(お客様連れ)", "下見(業者のみ)", 'type="date"', 'type="time"', "立ち会い", "佐藤"]) {
+      expect(html).toContain(t);
+    }
+  });
+  it("光る目印(data-guide)が各所にある", () => {
+    const s = deskFormReducer(EMPTY_DESK_FORM, { type: "kind", value: "viewing" });
+    const html = view({ state: s });
+    for (const k of ["agent", "property", "kind", "viewingType", "save"]) expect(html).toContain(`data-guide="${k}"`);
+  });
+  it("「その場で回答した」チェックは無い(方針12)", () => {
+    expect(view()).not.toContain("その場で回答");
+  });
+  it("保存中はボタンを押せない(二重登録を防ぐ)", () => {
+    const html = view({ submitting: true });
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*data-guide="save"|<button[^>]*data-guide="save"[^>]*disabled=""/);
+    expect(html).toContain("保存中…");
+  });
+  it("エラーと資料請求のメール空の知らせ", () => {
+    const html = view({ errors: { agent: "業者を選んでください" }, warning: "資料の送り先のメールが空です" });
+    expect(html).toContain("業者を選んでください");
+    expect(html).toContain("資料の送り先のメールが空です");
+  });
+  it("選んだ物件の名前・町名・広告の可否が出る", () => {
+    const s = deskFormReducer(EMPTY_DESK_FORM, { type: "propertySelected", property });
+    const html = view({ state: s });
+    expect(html).toContain("サンライズ中野 305");
+    expect(html).toContain("東京都中野区中野2丁目");
+    expect(html).toContain("この物件の広告の可否");
+  });
+  it("携帯の桁が合わなければ知らせる(保存は止めない)", () => {
+    const s = deskFormReducer(EMPTY_DESK_FORM, { type: "contact", field: "contactMobile", value: "0901" });
+    expect(view({ state: s })).toContain("電話番号の桁をご確認ください(このままでも保存できます)");
+  });
+});
+
+describe("広告の可否", () => {
+  it("6媒体を ○×△/— で出す", () => {
+    const html = renderToStaticMarkup(<AdPermissionChips value={property.adPermissions} />);
+    for (const t of ["自社HP", "at home", "SUUMO", "HOME&#x27;S", "その他", "チラシ", "○", "×", "△", "—"]) expect(html).toContain(t);
+  });
+});
+
+describe("業者の候補", () => {
+  it("携帯で当たったら前回の問い合わせ者を出す", () => {
+    const html = renderToStaticMarkup(<AgentResults hits={[agent]} onPick={vi.fn()} />);
+    expect(html).toContain("○○不動産 新宿店");
+    expect(html).toContain("代表 03-1234-5678");
+    expect(html).toContain("前回 田中様");
+  });
+});
