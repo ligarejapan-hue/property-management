@@ -1,4 +1,5 @@
 import type { InquiryStatusKey, InquiryView } from "@/lib/api-client";
+import { Tabs, tabPanelProps } from "@/components/ui/tabs";
 import { CHANNEL_LABEL, KIND_LABEL, STATUS_LABEL, formatJst } from "@/lib/agent-inquiry/desk-form";
 
 const TABS: InquiryStatusKey[] = ["open", "in_progress", "done"];
@@ -27,30 +28,22 @@ export function InquiryListView({
 }) {
   return (
     <section className="space-y-2">
-      <div className="flex items-end justify-between gap-2 border-b border-gray-200 dark:border-gray-800">
-        <div className="flex gap-1" role="tablist" aria-label="反響の状態">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              type="button"
-              role="tab"
-              aria-selected={t === tab}
-              onClick={() => onTab(t)}
-              className={`px-3 py-1.5 text-sm ${
-                t === tab ? "border-b-2 border-teal-700 font-bold text-teal-800 dark:text-teal-300" : "text-gray-500"
-              }`}
-            >
-              {STATUS_LABEL[t]}
-              {t === "open" && openCount != null ? ` ${openCount}` : ""}
-            </button>
-          ))}
-        </div>
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <Tabs
+          idBase="agent-inquiry-status"
+          tabs={TABS.map((t) => ({
+            key: t,
+            label: t === "open" && openCount != null ? `${STATUS_LABEL[t]} ${openCount}` : STATUS_LABEL[t],
+          }))}
+          active={tab}
+          onChange={onTab}
+        />
         <label className="mb-1 flex items-center gap-1 text-xs">
           <input type="checkbox" checked={mine} onChange={(e) => onMine(e.target.checked)} />
           自分の担当だけ
         </label>
       </div>
-      <ul className="space-y-1">
+      <ul className="space-y-1" {...tabPanelProps("agent-inquiry-status", tab)}>
         {items.map((q) => (
           <li key={q.id}>
             <button
