@@ -12,6 +12,7 @@
  */
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import ImportSwitcher from "@/components/import/import-switcher";
@@ -423,6 +424,14 @@ export default function PasteImportPage() {
         title="貼り付けて物件化"
         description="反響メール・査定依頼フォームの内容をコピーして貼り付ける（または PDF をアップロードする）と、住所や所有者を読み取って下書きを作ります。内容を確認してから登録してください。"
       />
+
+      {!draft && (
+        <p className="text-sm">
+          <Link href="/import/paste/excel" className="text-indigo-600 hover:underline dark:text-indigo-400">
+            査定サイトの顧客管理表（Excel）からまとめて取り込む →
+          </Link>
+        </p>
+      )}
 
       {!draft && (
         <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">

@@ -318,3 +318,39 @@ describe("owner rows: csv と xlsx で matchKey が同じ", () => {
     expect(xOwners[0].roomNo).toBe("301");
   });
 });
+
+describe("parseSheet — 展開すると大きすぎる Excel(ZIP爆弾)を読む前に止める(@codex PR#456 5巡目)", () => {
+  it("★圧縮後は小さくても、展開後が上限を超えれば INPUT_TOO_LARGE", async () => {
+    const { deflateRawSync } = await import("node:zlib");
+    const data = Buffer.alloc(80 * 1024 * 1024, 0x20);
+    const name = Buffer.from("xl/worksheets/sheet1.xml");
+    const comp = deflateRawSync(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(comp.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(comp.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(name.length, 28);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(1, 8);
+    eocd.writeUInt16LE(1, 10);
+    eocd.writeUInt32LE(46 + name.length, 12);
+    eocd.writeUInt32LE(30 + name.length + comp.length, 16);
+    const zip = Buffer.concat([local, name, comp, central, name, eocd]);
+    let err: unknown;
+    try {
+      parseSheet({ fileName: "a.xlsx", xlsxBase64: zip.toString("base64") });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(SheetParseError);
+    expect((err as SheetParseError).code).toBe("INPUT_TOO_LARGE");
+  });
+});

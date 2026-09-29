@@ -67,6 +67,19 @@ vi.mock("@/lib/api-helpers", async () => {
     getUserPermissions: vi.fn(async () => mockPerms),
   };
 });
+/** まとめ取込の「書き込みを止める」確認(countPasteDuplicatesUnscoped)の結果と呼び出し記録。 */
+let dupCount = { similarCount: 0, ownerCount: 0, truncated: false };
+const dupCountCalls: { db: unknown; input: unknown }[] = [];
+vi.mock("@/lib/paste-import-duplicates", () => ({
+  countPasteDuplicatesUnscoped: vi.fn(async (db: unknown, input: unknown) => {
+    callOrder.push("dupCount");
+    dupCountCalls.push({ db, input });
+    return dupCount;
+  }),
+  lookupPasteDuplicates: vi.fn(async () => {
+    throw new Error("画面向けの(権限で絞った)見立てを書き込みの判定に使ってはいけない");
+  }),
+}));
 vi.mock("@/lib/audit", () => ({
   writeAuditLog: vi.fn(async (input: unknown) => { auditCalls.push(input); }),
 }));
@@ -173,7 +186,10 @@ vi.mock("@/lib/prisma", () => {
     $executeRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const sql = Array.isArray(strings) ? strings.join(" ") : String(strings);
       sqlSeen.push(sql);
-      if (sql.includes("pg_advisory_xact_lock")) {
+      if (sql.includes("pg_advisory_xact_lock") && values[0] === "paste-excel-bulk-commit") {
+        // 取込の確定を直列化する共通のロック(外部キーのロックとは別に記録する)。
+        callOrder.push("bulkLock");
+      } else if (sql.includes("pg_advisory_xact_lock")) {
         callOrder.push("advisoryLock");
         advisoryLockValues.push(values);
       } else {
@@ -256,6 +272,8 @@ beforeEach(() => {
   sqlSeen.length = 0;
   advisoryLockValues.length = 0;
   findFirstArgs.length = 0;
+  dupCountCalls.length = 0;
+  dupCount = { similarCount: 0, ownerCount: 0, truncated: false };
 });
 
 describe("POST /api/import/paste/commit", () => {
@@ -511,6 +529,56 @@ describe("取込系routeの共通ゲート(import:write)", () => {
   });
 });
 
+describe("土地面積・延床面積・築年を物件の欄に入れる(@codex PR#456 3巡目)", () => {
+  const withProp = (over: Record<string, unknown>) => ({
+    ...baseBody,
+    property: { ...baseBody.property, ...over },
+  });
+
+  it("★戸建は 土地面積・延床面積・築年 をそれぞれの欄に保存する", async () => {
+    const res = await POST(req(withProp({ landArea: "90", totalFloorArea: "70.5", builtYear: "2018" })));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ landArea: "90", totalFloorArea: "70.5", builtYear: 2018 });
+  });
+
+  it("送らなければ今までどおり(貼り付け画面は送らない)", async () => {
+    await POST(req(baseBody));
+    const p = created.property?.[0] as Record<string, unknown>;
+    expect(p.landArea ?? null).toBeNull();
+    expect(p.builtYear ?? null).toBeNull();
+  });
+
+  it("★面積に単位や桁あふれがあれば400で、どの欄かを伝える", async () => {
+    const r1 = await POST(req(withProp({ landArea: "90坪" })));
+    expect(r1.status).toBe(400);
+    expect((await r1.json()).error.message).toContain("土地面積");
+    const r2 = await POST(req(withProp({ totalFloorArea: "123456789" })));
+    expect(r2.status).toBe(400);
+    expect((await r2.json()).error.message).toContain("延床面積");
+  });
+
+  it("★築年は西暦の整数(1800〜2200)だけ", async () => {
+    expect((await POST(req(withProp({ builtYear: "平成30年" })))).status).toBe(400);
+    expect((await POST(req(withProp({ builtYear: "1700" })))).status).toBe(400);
+    expect(created.property).toBeUndefined();
+  });
+
+  it("★種別の編集画面に出ない欄は物件に書かない=400(土地の延床面積・区分の延床面積と土地面積)", async () => {
+    expect((await POST(req(withProp({ propertyType: "land", totalFloorArea: "70" })))).status).toBe(400);
+    expect((await POST(req(withProp({ propertyType: "land", builtYear: "2018" })))).status).toBe(400);
+    expect((await POST(req(withProp({ propertyType: "apartment_unit", totalFloorArea: "70" })))).status).toBe(400);
+    expect((await POST(req(withProp({ propertyType: "apartment_unit", landArea: "30" })))).status).toBe(400);
+    expect((await POST(req(withProp({ propertyType: "unknown", landArea: "30" })))).status).toBe(400);
+    expect(created.property).toBeUndefined();
+  });
+
+  it("★棟なしの区分マンションの築年は物件の欄に入る(編集画面にも出る・@codex PR#456 4巡目)", async () => {
+    const res = await POST(req(withProp({ propertyType: "apartment_unit", builtYear: "2001" })));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ builtYear: 2001 });
+  });
+});
+
 describe("入力の検査: 直せる形の400で断る(500に化けさせない・全体レビュー I-3)", () => {
   // ⚠専有面積は**区分マンション専用の欄**。種別が合わないと保存側で null に
   //   落ちる(10巡目 ①)ので、値そのものを見るテストでは種別を区分にする。
@@ -655,6 +723,29 @@ describe("所有者の項目ごとの書き込み権限（P1-1）", () => {
     ];
     const res = await POST(req(ownerWith({ phone: "09000000000" })));
     expect(res.status).toBe(403);
+  });
+
+  it("★所有者の備考(note)は owner_note の権限で見る（Excelまとめ取込の管理メモ）", async () => {
+    mockPerms = FULL_PERMS.filter((p) => p.resource !== "owner_note");
+    const res = await POST(req(ownerWith({ note: "見込度: C" })));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.message).toContain("備考");
+    expect(created.owner).toBeUndefined();
+  });
+
+  it("所有者の備考は owner.note に保存される（空なら null）", async () => {
+    mockPerms = [...FULL_PERMS, { resource: "owner_note", action: "full", granted: true }];
+    await POST(req(ownerWith({ note: "  見込度: C\nメモ: 留守  " })));
+    expect(created.owner?.[0]).toMatchObject({ note: "見込度: C\nメモ: 留守" });
+    for (const k of Object.keys(created)) delete created[k];
+    await POST(req(ownerWith({ note: "   " })));
+    expect(created.owner?.[0]).toMatchObject({ note: null });
+  });
+
+  it("★所有者の備考も監査ログには入れない", async () => {
+    mockPerms = [...FULL_PERMS, { resource: "owner_note", action: "full", granted: true }];
+    await POST(req(ownerWith({ note: "見込度: C 秘密のメモ" })));
+    expect(JSON.stringify(auditCalls)).not.toContain("秘密のメモ");
   });
 
   it("既存所有者への紐付けだけなら、項目ごとの権限は要らない（何も書かないため）", async () => {
@@ -1192,5 +1283,95 @@ describe("反響PDFは referral として保存し、名前を定型化する（
     const createIdx = callOrder.indexOf("attachment.create");
     expect(lockIdx).toBeGreaterThanOrEqual(0);
     expect(createIdx).toBeGreaterThan(lockIdx);
+  });
+});
+
+describe("まとめ取込は重複確認と登録を1つのロックの中で行う(@codex PR#456 4巡目 ①・7巡目)", () => {
+  const bulk = {
+    ...baseBody,
+    owner: { name: "渡辺　一", nameKana: null, phone: null, email: null, currentAddress: "東京都港区1-1" },
+    externalLinkKey: "xlsx-0000000000000001",
+    requireNoDuplicates: true,
+  };
+
+  it("★まとめ取込用のロックを取ってから確認し、その後に作る(確認と作成の間に隙間を作らない)", async () => {
+    const res = await POST(req(bulk));
+    expect(res.status).toBe(200);
+    const lockAt = callOrder.indexOf("bulkLock");
+    expect(lockAt).toBeGreaterThan(-1);
+    expect(lockAt).toBeLessThan(callOrder.indexOf("dupCount"));
+    expect(callOrder.indexOf("dupCount")).toBeLessThan(callOrder.indexOf("property.create"));
+    expect(dupCountCalls[0].input).toEqual({
+      address: "東京都A区B1-2-3",
+      lotNumber: "552-2",
+      ownerName: "渡辺　一",
+    });
+  });
+
+  it("★確認は登録のトランザクションのクライアントで行う(別の接続を取りに行かない・7巡目 ②)", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    await POST(req(bulk));
+    const txArg = dupCountCalls[0].db as { property: unknown };
+    // $transaction のモックは同じ tx を渡す。グローバルの prisma はその tx を広げた別物。
+    expect(txArg).not.toBe(prisma);
+    expect(txArg.property).toBe((prisma as unknown as { property: unknown }).property);
+  });
+
+  it("★同名の所有者・似た物件・確認しきれない候補があれば409(NEEDS_REVIEW)で、何も作らない", async () => {
+    for (const over of [{ ownerCount: 1 }, { similarCount: 1 }, { truncated: true }]) {
+      dupCount = { similarCount: 0, ownerCount: 0, truncated: false, ...over };
+      const res = await POST(req(bulk));
+      expect(res.status).toBe(409);
+      expect((await res.json()).error.code).toBe("NEEDS_REVIEW");
+    }
+    expect(created.property).toBeUndefined();
+    expect(created.owner).toBeUndefined();
+  });
+
+  it("★見る権限の無い相手の存在は言い当てさせない(理由をぼかす)", async () => {
+    mockPerms = FULL_PERMS; // property:read / owner:read を含まない
+    dupCount = { similarCount: 1, ownerCount: 1, truncated: false };
+    const res = await POST(req(bulk));
+    const msg = (await res.json()).error.message;
+    expect(msg).not.toContain("同じ住所");
+    expect(msg).not.toContain("同じ名前");
+    expect(msg).toContain("既存のデータと重なる可能性があります");
+    expect(msg).not.toContain("管理者");
+  });
+
+  it("★見る権限があっても理由は常にぼかす(担当外・マスク項目の存在を言い当てさせない・8巡目)", async () => {
+    mockPerms = [
+      ...FULL_PERMS,
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+    ];
+    for (const over of [{ similarCount: 1 }, { ownerCount: 1 }, { truncated: true }]) {
+      dupCount = { similarCount: 0, ownerCount: 0, truncated: false, ...over };
+      const msg = (await (await POST(req(bulk))).json()).error.message;
+      expect(msg).toBe(
+        "既存のデータと重なる可能性があります。「貼り付けて物件化」で候補を確かめてから登録してください",
+      );
+    }
+  });
+
+  it("★貼り付け画面(指定なし)も同じロックを取る(まとめ取込の確認と作成の間に割り込ませない・13巡目)。確認はしない", async () => {
+    const { requireNoDuplicates: _omit, ...plain } = bulk;
+    void _omit;
+    const res = await POST(req(plain));
+    expect(res.status).toBe(200);
+    expect(callOrder).not.toContain("dupCount");
+    expect(callOrder.indexOf("bulkLock")).toBeGreaterThan(-1);
+    expect(callOrder.indexOf("bulkLock")).toBeLessThan(callOrder.indexOf("property.create"));
+  });
+
+  it("★外部キーの無い貼り付けでも同じロックを取る", async () => {
+    await POST(req(baseBody));
+    expect(callOrder.indexOf("bulkLock")).toBeGreaterThan(-1);
+    expect(callOrder.indexOf("bulkLock")).toBeLessThan(callOrder.indexOf("property.create"));
+  });
+
+  it("★ロックの順序は「共通のロック → 外部キーのロック」(どの経路も同じ順＝待ちの輪ができない)", async () => {
+    await POST(req(bulk));
+    expect(callOrder.indexOf("bulkLock")).toBeLessThan(callOrder.indexOf("advisoryLock"));
   });
 });

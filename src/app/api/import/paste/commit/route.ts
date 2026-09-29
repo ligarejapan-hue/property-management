@@ -33,6 +33,8 @@ import {
   BUILDING_NAME_MAX_LENGTH,
   BUILDING_NAME_TOO_LONG_MESSAGE,
 } from "@/lib/property-building-name";
+import { structuredFieldsFor } from "@/lib/paste-import/structured-fields";
+import { countPasteDuplicatesUnscoped } from "@/lib/paste-import-duplicates";
 import type { PropertyType, OccupancyStatus } from "@/generated/prisma";
 import { phoneForStore } from "@/lib/phone-format-jp";
 
@@ -71,6 +73,35 @@ function parseAreaInput(raw: string | null | undefined, fieldLabel: string): str
   return v;
 }
 
+/**
+ * 土地面積・延床面積の検査。列は `Decimal(10, 2)`＝整数部8桁・小数部2桁が上限
+ * (専有面積の Decimal(8,2) とは桁が違うので別の型を使う)。
+ */
+const WIDE_AREA_PATTERN = /^\d{1,8}(\.\d{1,2})?$/;
+function parseWideAreaInput(raw: string | null | undefined, fieldLabel: string): string | null {
+  const v = (raw ?? "").trim();
+  if (v === "") return null;
+  if (!WIDE_AREA_PATTERN.test(v)) {
+    throw new ApiError(
+      400,
+      `${fieldLabel}は数字だけで入力してください（例: 90 または 90.5）。単位や「約」は入れず、整数8桁・小数2桁までにしてください`,
+      "BAD_REQUEST",
+    );
+  }
+  return v;
+}
+
+/** 築年の検査(西暦の整数)。範囲は通常の物件編集(updatePropertySchema)と同じ。 */
+function parseBuiltYearInput(raw: string | number | null | undefined): number | null {
+  const v = String(raw ?? "").trim();
+  if (v === "") return null;
+  const n = /^\d{4}$/.test(v) ? Number(v) : NaN;
+  if (!Number.isInteger(n) || n < 1800 || n > 2200) {
+    throw new ApiError(400, "築年は西暦の4桁で入力してください（例: 2018）", "BAD_REQUEST");
+  }
+  return n;
+}
+
 // ---------- POST /api/import/paste/commit ----------
 // 「貼り付けて物件化」の確認画面で人が直した最終値を受け取り、物件・所有者・
 // 紐付け・(あれば)添付を1つのトランザクションで確定する。
@@ -94,6 +125,14 @@ interface CommitBody {
     layoutType: string | null;
     occupancyStatus: string | null;
     note: string | null;
+    /**
+     * 土地面積・延床面積(㎡)・築年(西暦)。Excel まとめ取込が送る(省略可・
+     * 貼り付け画面は従来どおり備考へ畳んで送らない)。
+     * ⚠区分マンションの延床面積・築年は棟の値が正(通常の物件編集と同じ)なので受け付けない。
+     */
+    landArea?: string | null;
+    totalFloorArea?: string | null;
+    builtYear?: string | number | null;
   };
   owner: {
     name: string;
@@ -101,11 +140,28 @@ interface CommitBody {
     phone: string | null;
     email: string | null;
     currentAddress: string | null;
+    /**
+     * 所有者の備考。Excel の顧客管理表からのまとめ取込が、見込度・担当者・メモなど
+     * **物件の備考へ入れてはいけない管理の情報**を入れる(owner_note の権限で守られる欄)。
+     * 貼り付け画面は送らない(省略可)。
+     */
+    note?: string | null;
   } | null;
   externalLinkKey: string | null;
   /** 既存の所有者に紐付ける場合。指定があれば新規作成しない。 */
   linkExistingOwnerId?: string | null;
+  /**
+   * Excel まとめ取込が送る。同じ住所の物件・同じ名前の所有者が**確定の時点で**
+   * 見つかったら作らずに 409(NEEDS_REVIEW)を返す(人が確かめる)。
+   */
+  requireNoDuplicates?: boolean;
 }
+
+/**
+ * この口(貼り付け・まとめ取込)の確定を直列化する助言ロックの鍵
+ * (外部キーの鍵と混ざらない固定文字列)。
+ */
+const COMMIT_LOCK_KEY = "paste-excel-bulk-commit";
 
 /**
  * JSON body の上限（この口専用）。
@@ -217,6 +273,9 @@ export async function POST(request: NextRequest) {
         { value: body.owner.email, resource: "owner_email", label: "メールアドレス" },
         // ⚠現住所は登記上の住所と同じ機微度＝同じ権限で扱う(owners/route.ts と同じ)。
         { value: body.owner.currentAddress, resource: "owner_address", label: "現住所" },
+        // ⚠備考も項目の1つ(owners/route.ts と同じ owner_note)。管理のメモには
+        //   個人の事情が書かれるので、書けない人の経路にしない。
+        { value: body.owner.note, resource: "owner_note", label: "備考" },
       ];
       for (const { value, resource, label } of ownerFieldWriteChecks) {
         if ((value ?? "").trim() !== "" && !hasExplicitWritePerm(perms, resource)) {
@@ -299,6 +358,27 @@ export async function POST(request: NextRequest) {
       occupancyStatus,
     });
 
+    // ---- 土地面積・延床面積・築年（@codex PR#456 3巡目） ----
+    // ⚠物件に正式な欄がある(販売図面 F3 で追加)。備考へ文字で落とすと、編集画面や
+    //   販売図面で「未入力」に見える。
+    // ⚠**その種別の編集画面に出る欄だけ**受け付ける(@codex PR#456 4巡目)。
+    //   土地の延床面積のように画面に出ない欄へ入れると、誰も見られず直せない。
+    //   黙って捨てず、送られてきたら断る(呼び出し側が備考に残す)。
+    //   規則は structuredFieldsFor(編集画面の salesFieldsFor と一致をテストで固定)。
+    const landArea = parseWideAreaInput(p.landArea, "土地面積");
+    const totalFloorArea = parseWideAreaInput(p.totalFloorArea, "延床面積");
+    const builtYear = parseBuiltYearInput(p.builtYear);
+    const allowedStructured = structuredFieldsFor(propertyType);
+    for (const [key, value, label] of [
+      ["landArea", landArea, "土地面積"],
+      ["totalFloorArea", totalFloorArea, "延床面積"],
+      ["builtYear", builtYear, "築年"],
+    ] as const) {
+      if (value !== null && !allowedStructured.has(key)) {
+        throw new ApiError(400, `この物件種別では${label}を物件の欄に入れられません`, "BAD_REQUEST");
+      }
+    }
+
     // 外部キー（査定ナンバー等）。
     // ⚠**ここで1回だけ正規化し、この先はすべてこの値を使う**
     //   （① 助言ロックの鍵 ② 重複ガードの findFirst ③ property.create に保存する値）。
@@ -359,6 +439,18 @@ export async function POST(request: NextRequest) {
     let result;
     try {
       result = await prisma.$transaction(async (tx) => {
+        // ---- この口の確定は**すべて1本のロックで直列化**する（@codex PR#456 4巡目 ①・13巡目） ----
+        // ⚠まとめ取込は、ロックを取った**あとに**同じ住所・同じ名前を確かめて作る
+        //   (先の確定はロックを放す前にコミット済み＝見える)。画面から「確認」と
+        //   「登録」を別々に呼ぶと、その間に同じ人・同じ物件が作られても止められない。
+        // ⚠**貼り付け画面の確定も同じロックを取る**(13巡目)。取らないと、まとめ取込の
+        //   確認と作成の間に貼り付けの確定が割り込み、所有者・物件が二重にできる。
+        //   (貼り付け画面は確認そのものはしない＝人が確認画面で候補を見て決めている。)
+        // ⚠ロックの順序はどの経路も「この共通のロック → 外部キーのロック」
+        //   (逆順で取る経路は無い＝待ちの輪ができない)。
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${COMMIT_LOCK_KEY})::bigint)`;
+        // まとめ取込の確認そのものは、同じ外部キーの確認(409 DUPLICATE)の後で行う(下)。
+
         // ---- 二重登録を**サーバー側で**止める（全体レビュー Critical 1） ----
         // ⚠これまで重複判定は下書き route (/api/import/paste) にしか無く、確定側は
         //   externalLinkKey を無検査で書いていた。Property.externalLinkKey は
@@ -389,6 +481,32 @@ export async function POST(request: NextRequest) {
           });
           if (already) {
             throw new ApiError(409, "この案件は登録済みです", "DUPLICATE");
+          }
+        }
+
+        // ---- まとめ取込: 同じ住所の物件・同じ名前の所有者(まとめ取込のロックの内側) ----
+        // ⚠**見る人の権限・担当で絞らない**確認で止める(@codex PR#456 7巡目 ①)。
+        //   画面向けの lookupPasteDuplicates は見えない相手を除くので、書き込みの
+        //   判定に使うと担当外の物件と重なる物件がそのまま作られる。
+        // ⚠**このトランザクションのクライアント(tx)で引く**(7巡目 ②)。ロックを
+        //   持ったまま別の接続を取りに行くと、ロック待ちの取引が接続を使い切った
+        //   ときに全員が止まる。
+        if (body.requireNoDuplicates === true) {
+          const dup = await countPasteDuplicatesUnscoped(tx, {
+            address: p.address.trim(),
+            lotNumber: p.lotNumber?.trim() || null,
+            ownerName: body.owner?.name?.trim() || null,
+          });
+          // ⚠理由は**常に1つの同じ文言**(@codex PR#456 8巡目)。絞らずに数えた結果なので、
+          //   「同じ住所の物件」「同じ名前の所有者」と言い分けると、担当外の物件や
+          //   マスクされた所有者の存在を言い当てられる(検索オラクル)。中身は
+          //   「貼り付けて物件化」の画面が、見る人の権限の範囲で見せる。
+          if (dup.similarCount > 0 || dup.ownerCount > 0 || dup.truncated) {
+            throw new ApiError(
+              409,
+              "既存のデータと重なる可能性があります。「貼り付けて物件化」で候補を確かめてから登録してください",
+              "NEEDS_REVIEW",
+            );
           }
         }
 
@@ -429,6 +547,9 @@ export async function POST(request: NextRequest) {
             // (書くと正規化を上書きしてしまう)。
             ...unitOnly,
             externalLinkKey,
+            landArea,
+            totalFloorArea,
+            builtYear,
             note: p.note?.trim() || null,
             introductionRoute: "web_inquiry",
             caseStatus: "new_case",
@@ -452,6 +573,7 @@ export async function POST(request: NextRequest) {
               //   限らない。address(登記上住所)は空のままにする(設計書 §7・
               //   発注者承認 2026-08-26)。address キー自体を書かない。
               currentAddress: body.owner.currentAddress?.trim() || null,
+              note: body.owner.note?.trim() || null,
             },
           });
           ownerId = owner.id;

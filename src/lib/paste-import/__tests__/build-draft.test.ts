@@ -467,3 +467,23 @@ describe("氏名だけ読めなかったときの扱い（21巡目 ①）", () =
     expect(d.withheldFromNote).toEqual([]);
   });
 });
+
+describe("メール欄の「持っていない」等はメールアドレスとして扱わない(実物 HOME4U 22件・@codex PR#456 11巡目で判明)", () => {
+  const text = ["お名前：山田　太郎", "物件所在地：東京都港区1-1", "E-mail：メールアドレスを持っていない"].join("\n");
+  const draft = buildPasteDraft(text);
+
+  it("★「@」の無い値はメールアドレスの欄に入れない(登録で形式エラーになる)", () => {
+    expect(draft.owner?.email.value).toBeNull();
+  });
+
+  it("★捨てずに、物件の備考へ入れない項目として残す(所有者の個人情報の見出し)", () => {
+    expect(draft.withheldFromNote).toContainEqual(
+      expect.objectContaining({ label: "E-mail", value: "メールアドレスを持っていない" }),
+    );
+    expect(draft.noteFromUnmapped).not.toContain("メールアドレスを持っていない");
+  });
+
+  it("ふつうのメールアドレスは今までどおり", () => {
+    expect(buildPasteDraft("お名前：山田\nE-mail：a@example.com").owner?.email.value).toBe("a@example.com");
+  });
+});
