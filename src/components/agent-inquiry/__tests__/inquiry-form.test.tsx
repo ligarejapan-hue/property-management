@@ -129,3 +129,11 @@ describe("保存できたか分からないときは一覧を確かめさせる(
     expect(s).toContain("保存できたか分かりません");
   });
 });
+
+describe("業者の登録ができたか分からないとき(@codex #459 R16)", () => {
+  it("分からない失敗は、名簿で探して確かめる文言を出す", () => {
+    const s = readFileSync(join(process.cwd(), "src/components/agent-inquiry/agent-create-modal.tsx"), "utf8");
+    expect(s).toContain("isAmbiguousSaveError(e)");
+    expect(s).toContain("登録できたか分かりません");
+  });
+});

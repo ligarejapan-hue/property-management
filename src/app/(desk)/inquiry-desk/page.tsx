@@ -35,7 +35,9 @@ export default function InquiryDeskPage() {
   const filterKey = `${tab}|${mine}`;
   const [cursor, setCursor] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [forbidden, setForbidden] = useState(false);
+  // API が 403 を返したときの権限の値。権限を読み直せば(別の配列になり)自然に解ける=外されて戻された
+  // 権限で窓が永久に止まらない(@codex #459 R16)。
+  const [forbiddenFor, setForbiddenFor] = useState<unknown>(undefined);
   // 開いたままの窓で閲覧権限を外されたら、画面保護が読み直す権限を見て中身を消す(@codex #459 R10)。
   const { permissions, permissionsLoading, permissionsError, refetchPermissions } = useScreenProtection();
   // 権限の鮮度の3点セット(permission-freshness-pattern.test.ts の規約・建物詳細と同じ形):
@@ -46,6 +48,11 @@ export default function InquiryDeskPage() {
     permissionsLoadingAtMountRef.current = permissionsLoading;
   }
   const [permissionsRefreshPending, setPermissionsRefreshPending] = useState(() => !permissionsLoading);
+  const forbidden = forbiddenFor !== undefined && forbiddenFor === permissions;
+  const permissionsRef = useRef(permissions);
+  useEffect(() => {
+    permissionsRef.current = permissions;
+  }, [permissions]);
   useEffect(() => {
     if (permissionsRefreshRequestedRef.current) return;
     // provider の取得が進行中なら完了を待つ(同時 2 本にしない)。
@@ -76,7 +83,7 @@ export default function InquiryDeskPage() {
   const [formState, setFormState] = useState<DeskFormState>(EMPTY_DESK_FORM);
 
   const onError = useCallback((e: unknown) => {
-    if (apiErrorCode(e) === "FORBIDDEN") setForbidden(true);
+    if (apiErrorCode(e) === "FORBIDDEN") setForbiddenFor(permissionsRef.current);
     else setLoadError(true);
   }, []);
 
@@ -160,9 +167,13 @@ export default function InquiryDeskPage() {
   }
   if (forbidden || revoked) {
     return (
-      <p className="rounded-md bg-white p-6 text-center text-sm dark:bg-gray-900">
-        反響の受付の権限がありません。管理者にお問い合わせください。
-      </p>
+      <div className="rounded-md bg-white p-6 text-center text-sm dark:bg-gray-900">
+        <p className="mb-2">反響の受付の権限がありません。管理者にお問い合わせください。</p>
+        {/* 権限を戻してもらったら、ここで確かめ直せる(読み直すと表示が戻る)。 */}
+        <button type="button" onClick={() => void refetchPermissions()} className="rounded border border-gray-300 px-3 py-1 text-xs dark:border-gray-700">
+          もう一度確かめる
+        </button>
+      </div>
     );
   }
   return (

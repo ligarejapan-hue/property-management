@@ -5,6 +5,7 @@ import { ModalShell } from "@/components/ui/modal-shell";
 import { Button } from "@/components/ui/button";
 import { createDeskAgent, type AgentHit } from "@/lib/api-client";
 import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
+import { isAmbiguousSaveError } from "@/lib/agent-inquiry/desk-form";
 
 const MLIT_SEARCH_URL = "https://etsuran2.mlit.go.jp/TAKKEN/";
 const FIELDS = [
@@ -73,7 +74,15 @@ export function AgentCreateModal({
         matchedBy: "text",
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "登録できませんでした");
+      // 通信が切れた・中継の時間切れは、登録が済んでいることがある=押し直すと同じ業者が二重にできる
+      // (@codex #459 R16)。名簿で探して確かめてもらう。
+      setError(
+        isAmbiguousSaveError(e)
+          ? "登録できたか分かりません(通信が切れました)。この小窓を閉じて業者の欄で会社名を探し、出てこなければもう一度登録してください。"
+          : e instanceof Error
+            ? e.message
+            : "登録できませんでした",
+      );
       setSaving(false);
     }
   };
