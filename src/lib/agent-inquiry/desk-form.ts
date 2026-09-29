@@ -294,7 +294,8 @@ export function splitNewAgentPhone(query: string): { agentPhone: string; callerM
   // 検索(agentQueryReady・サーバー)と同じ「電話番号らしい語」の判定=かっこ・いろいろなダッシュも受ける(@codex #459 R24)。
   if (!isPhoneCharsOnly(q)) return { agentPhone: "", callerMobile: null };
   const digits = q.normalize("NFKC").replace(/\D/g, "");
-  if (/^0[789]0/.test(digits)) return { agentPhone: "", callerMobile: q };
+  // 0800 はフリーダイヤル=会社の番号。080 の携帯と先頭3桁が同じなので除く(@codex #459 R25)。
+  if (/^0[789]0/.test(digits) && !digits.startsWith("0800")) return { agentPhone: "", callerMobile: q };
   return { agentPhone: q, callerMobile: null };
 }
 

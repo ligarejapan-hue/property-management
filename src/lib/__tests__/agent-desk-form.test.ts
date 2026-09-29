@@ -277,3 +277,11 @@ describe("内見の保存は変えた欄だけ送る(外れた立会者で関係
     expect(viewingPatchFrom(server, { ...server, result: "  " })).toBeNull();
   });
 });
+
+describe("0800(フリーダイヤル)は携帯ではなく会社の番号(@codex #459 R25)", () => {
+  it("0800 は代表電話へ・080 の携帯は問い合わせ者へ", () => {
+    expect(splitNewAgentPhone("0800-123-4567")).toEqual({ agentPhone: "0800-123-4567", callerMobile: null });
+    expect(splitNewAgentPhone("08001234567")).toEqual({ agentPhone: "08001234567", callerMobile: null });
+    expect(splitNewAgentPhone("080-1234-5678")).toEqual({ agentPhone: "", callerMobile: "080-1234-5678" });
+  });
+});
