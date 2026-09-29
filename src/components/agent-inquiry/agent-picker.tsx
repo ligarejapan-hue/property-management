@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { hitsForQuery, type SearchResult } from "@/lib/agent-inquiry/desk-form";
+import { useDeskAccess } from "./desk-access";
 import { searchDeskAgents, type AgentHit } from "@/lib/api-client";
 
 /** 業者の候補(見た目)。携帯で当たったときは前回の問い合わせ者の名前を添える。 */
@@ -48,6 +49,7 @@ export function AgentPicker({
 }) {
   const [res, setRes] = useState<SearchResult<AgentHit> | null>(null);
   const searching = !selected && query.trim().length >= 2;
+  const { readDenied } = useDeskAccess();
   useEffect(() => {
     if (!searching) return;
     let stale = false;
@@ -56,7 +58,9 @@ export function AgentPicker({
         .then((r) => {
           if (!stale) setRes({ query, hits: r.agents, failed: false });
         })
-        .catch(() => {
+        .catch((e) => {
+          // ログイン切れ・権限なしはただの検索失敗にせず、窓ごと隠す(@codex #459 R20)。
+          if (readDenied(e)) return;
           if (!stale) setRes({ query, hits: [], failed: true });
         });
     }, 250);
@@ -64,7 +68,7 @@ export function AgentPicker({
       stale = true;
       clearTimeout(t);
     };
-  }, [query, searching]);
+  }, [query, searching, readDenied]);
   // 今の検索語の結果だけ出す(打ち直し中に前の候補を押せないように)。
   const shown = hitsForQuery(res, query);
   return (

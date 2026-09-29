@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { hitsForQuery, type SearchResult } from "@/lib/agent-inquiry/desk-form";
+import { useDeskAccess } from "./desk-access";
 import { searchDeskProperties, type DeskProperty } from "@/lib/api-client";
 
 /** 物件の候補(見た目)。 */
@@ -38,6 +39,7 @@ export function PropertyPicker({
 }) {
   const [res, setRes] = useState<SearchResult<DeskProperty> | null>(null);
   const searching = !selected && query.trim().length >= 2;
+  const { readDenied } = useDeskAccess();
   useEffect(() => {
     if (!searching) return;
     let stale = false;
@@ -46,7 +48,9 @@ export function PropertyPicker({
         .then((r) => {
           if (!stale) setRes({ query, hits: r.properties, failed: false });
         })
-        .catch(() => {
+        .catch((e) => {
+          // ログイン切れ・権限なしはただの検索失敗にせず、窓ごと隠す(@codex #459 R20)。
+          if (readDenied(e)) return;
           if (!stale) setRes({ query, hits: [], failed: true });
         });
     }, 250);
@@ -54,7 +58,7 @@ export function PropertyPicker({
       stale = true;
       clearTimeout(t);
     };
-  }, [query, searching]);
+  }, [query, searching, readDenied]);
   // 今の検索語の結果だけ出す(打ち直し中に前の候補を押せないように)。
   const shown = hitsForQuery(res, query);
   return (

@@ -5,6 +5,7 @@ import { ModalShell } from "@/components/ui/modal-shell";
 import { Button } from "@/components/ui/button";
 import WatermarkOverlay from "@/components/screen-protection/watermark-overlay";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
+import { useDeskAccess } from "./desk-access";
 import {
   addAgentViewing,
   apiErrorCode,
@@ -364,6 +365,7 @@ export default function InquiryDetail({
   onAccessLost?: (e: unknown) => void;
 }) {
   const [data, setData] = useState<{ inquiry: InquiryView; canOpenProperty: boolean } | null>(null);
+  const { writeDenied } = useDeskAccess();
   const [busy, setBusy] = useState(false);
   // 保存はできたが最新を読み直せなかった。古い内容のまま押すと内見の二重登録や版の食い違いになるので、
   // 読み直すまで操作を止める(@codex #459 R5)。
@@ -420,6 +422,8 @@ export default function InquiryDetail({
         gone = true;
         return;
       }
+      // 書く権限だけ外された=権限を読み直して、書けない表示へ切り替える(@codex #459 R20)。
+      if (apiErrorCode(e) === "FORBIDDEN") writeDenied(e);
       conflict = apiErrorCode(e) === "VERSION_CONFLICT";
       if (opts?.addsViewing && isAmbiguousSaveError(e)) {
         setAddLocked(true);

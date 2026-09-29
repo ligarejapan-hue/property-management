@@ -20,6 +20,7 @@ import { AgentPicker } from "./agent-picker";
 import { PropertyPicker } from "./property-picker";
 import { AdPermissionChips } from "./ad-permission-chips";
 import { AgentCreateModal } from "./agent-create-modal";
+import { useDeskAccess } from "./desk-access";
 
 const inputCls = "w-full rounded-md border border-gray-300 px-3 py-2 text-base dark:border-gray-700 dark:bg-gray-900";
 const segCls = (on: boolean) =>
@@ -275,6 +276,7 @@ export default function InquiryForm({
   useEffect(() => {
     onStateChange?.(state);
   }, [state, onStateChange]);
+  const { writeDenied } = useDeskAccess();
   const submit = async () => {
     // 保存中の再押下は無視(二重登録を防ぐ)。
     if (submitting) return;
@@ -290,6 +292,7 @@ export default function InquiryForm({
       setMessage("登録しました");
       onSaved();
     } catch (err) {
+      if (writeDenied(err)) return;
       if (isAmbiguousSaveError(err)) {
         // 保存が済んでいることがある=そのまま押し直すと二重登録。一覧を読み直して確かめてもらう。
         setSaveError("保存できたか分かりません(通信が切れました)。右の一覧に出ていないか確かめてから、無ければもう一度保存してください。");

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { createDeskAgent, type AgentHit } from "@/lib/api-client";
 import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
 import { isAmbiguousSaveError } from "@/lib/agent-inquiry/desk-form";
+import { useDeskAccess } from "./desk-access";
 
 const MLIT_SEARCH_URL = "https://etsuran2.mlit.go.jp/TAKKEN/";
 const FIELDS = [
@@ -43,6 +44,7 @@ export function AgentCreateModal({
   });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const { writeDenied } = useDeskAccess();
   const set = (k: Key, val: string) => setV((p) => ({ ...p, [k]: val }));
   const submit = async () => {
     if (saving) return;
@@ -74,6 +76,7 @@ export function AgentCreateModal({
         matchedBy: "text",
       });
     } catch (e) {
+      if (writeDenied(e)) return;
       // 通信が切れた・中継の時間切れは、登録が済んでいることがある=押し直すと同じ業者が二重にできる
       // (@codex #459 R16)。名簿で探して確かめてもらう。
       setError(

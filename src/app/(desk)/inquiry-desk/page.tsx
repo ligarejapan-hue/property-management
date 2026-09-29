@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   apiErrorCode,
   fetchAgentInquiries,
@@ -18,6 +18,7 @@ import { InquiryListView } from "@/components/agent-inquiry/inquiry-list";
 import InquiryDetail from "@/components/agent-inquiry/inquiry-detail";
 import DeskStepGuide from "@/components/agent-inquiry/desk-step-guide";
 import { DESK_OPEN_COUNT_EVENT } from "@/components/agent-inquiry/desk-shell";
+import { DeskAccessContext, makeDeskAccess } from "@/components/agent-inquiry/desk-access";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { hasPermission } from "@/lib/permissions";
 
@@ -84,6 +85,17 @@ export default function InquiryDeskPage() {
   // 403 以外の読み込み失敗。「ありません」と見分けがつくよう知らせる(内見の見落としを防ぐ・@codex #459 R1)。
   const [loadError, setLoadError] = useState(false);
   const [formState, setFormState] = useState<DeskFormState>(EMPTY_DESK_FORM);
+
+  // 子(検索・登録・詳細)の 401/403 の扱い。読み込みは画面ごと隠し、書き込みの 403 は権限を読み直す(@codex #459 R20)。
+  const deskAccess = useMemo(
+    () =>
+      makeDeskAccess({
+        sessionLost: () => setSessionLost(true),
+        readForbidden: () => setForbiddenFor(permissionsRef.current),
+        writeForbidden: () => void refetchPermissions(),
+      }),
+    [refetchPermissions],
+  );
 
   const onError = useCallback((e: unknown) => {
     const code = apiErrorCode(e);
@@ -196,56 +208,58 @@ export default function InquiryDeskPage() {
   }
   return (
     // 問い合わせ者の名前・携帯・メール(PII)を出すので画面保護の対象にする。
-    <div data-pii-protected data-pii-surface="dashboard" className="grid gap-4 lg:grid-cols-2">
-      {loadError && (
-        <div role="alert" className="flex items-center justify-between gap-2 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700 lg:col-span-2 dark:bg-rose-950 dark:text-rose-200">
-          <span>読み込めませんでした。一覧と今日・明日の内見が最新ではありません。</span>
-          <button type="button" onClick={reloadAll} className="shrink-0 rounded border border-rose-300 px-2 py-0.5 text-xs">
-            もう一度読む
-          </button>
+    <DeskAccessContext.Provider value={deskAccess}>
+      <div data-pii-protected data-pii-surface="dashboard" className="grid gap-4 lg:grid-cols-2">
+        {loadError && (
+          <div role="alert" className="flex items-center justify-between gap-2 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700 lg:col-span-2 dark:bg-rose-950 dark:text-rose-200">
+            <span>読み込めませんでした。一覧と今日・明日の内見が最新ではありません。</span>
+            <button type="button" onClick={reloadAll} className="shrink-0 rounded border border-rose-300 px-2 py-0.5 text-xs">
+              もう一度読む
+            </button>
+          </div>
+        )}
+        <div className="space-y-3">
+          <UpcomingViewingsView viewings={upcoming} />
+          {canWrite ? (
+            <>
+              <DeskStepGuide step={nextDeskGuideStep(formState)} />
+              <InquiryForm users={users} onSaved={reloadAll} onStateChange={setFormState} />
+            </>
+          ) : (
+            <p className="rounded-md bg-white p-3 text-sm text-gray-500 dark:bg-gray-900">
+              反響を登録・変更する権限がありません(見ることはできます)。
+            </p>
+          )}
         </div>
-      )}
-      <div className="space-y-3">
-        <UpcomingViewingsView viewings={upcoming} />
-        {canWrite ? (
-          <>
-            <DeskStepGuide step={nextDeskGuideStep(formState)} />
-            <InquiryForm users={users} onSaved={reloadAll} onStateChange={setFormState} />
-          </>
-        ) : (
-          <p className="rounded-md bg-white p-3 text-sm text-gray-500 dark:bg-gray-900">
-            反響を登録・変更する権限がありません(見ることはできます)。
-          </p>
+        <div>
+          <InquiryListView
+            tab={tab}
+            onTab={setTab}
+            mine={mine}
+            onMine={setMine}
+            items={listKey === filterKey ? items : []}
+            openCount={openCount}
+            onOpen={setOpenId}
+            hasMore={listKey === filterKey && cursor != null}
+            onMore={loadMore}
+          />
+        </div>
+        {/* 反響の id で作り直す=前に押した反響の遅い応答で、別の反響の詳細が開かない(@codex #459 R11)。 */}
+        {openId && (
+          <InquiryDetail
+            key={openId}
+            inquiryId={openId}
+            users={users}
+            onClose={() => setOpenId(null)}
+            onChanged={reloadAll}
+            canWrite={canWrite}
+            onAccessLost={(e) => {
+              setOpenId(null);
+              onError(e);
+            }}
+          />
         )}
       </div>
-      <div>
-        <InquiryListView
-          tab={tab}
-          onTab={setTab}
-          mine={mine}
-          onMine={setMine}
-          items={listKey === filterKey ? items : []}
-          openCount={openCount}
-          onOpen={setOpenId}
-          hasMore={listKey === filterKey && cursor != null}
-          onMore={loadMore}
-        />
-      </div>
-      {/* 反響の id で作り直す=前に押した反響の遅い応答で、別の反響の詳細が開かない(@codex #459 R11)。 */}
-      {openId && (
-        <InquiryDetail
-          key={openId}
-          inquiryId={openId}
-          users={users}
-          onClose={() => setOpenId(null)}
-          onChanged={reloadAll}
-          canWrite={canWrite}
-          onAccessLost={(e) => {
-            setOpenId(null);
-            onError(e);
-          }}
-        />
-      )}
-    </div>
+    </DeskAccessContext.Provider>
   );
 }
