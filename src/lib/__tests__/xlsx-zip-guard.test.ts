@@ -105,3 +105,30 @@ describe("ZIP の見出し情報の食い違いで守りをすり抜けさせな
     expect(() => assertZipExpandsWithin(b, 50 * MB)).toThrow(ZipGuardError);
   });
 });
+
+describe("中央ディレクトリとローカル見出しの食い違いを断る(@codex PR#456 10巡目)", () => {
+  it("★中央では「無圧縮」、ローカルでは「deflate」と偽った中身は止める(読み手はローカルを信じて展開する)", () => {
+    const zip = makeZip([{ name: "xl/worksheets/sheet1.xml", data: Buffer.alloc(60 * MB, 0x20) }]);
+    const cd = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    zip.writeUInt16LE(0, cd + 10); // 中央ディレクトリの圧縮方式だけ「無圧縮」に
+    expect(() => assertZipExpandsWithin(zip, 50 * MB)).toThrow(ZipGuardError);
+  });
+
+  it("★ローカル見出しの圧縮後サイズが中央と違う中身は止める", () => {
+    const zip = makeZip([{ name: "a.xml", data: Buffer.from("hello") }]);
+    zip.writeUInt32LE(zip.readUInt32LE(18) + 100, 18);
+    expect(() => assertZipExpandsWithin(zip, 50 * MB)).toThrow(ZipGuardError);
+  });
+});
+
+describe("データ記述子(実物の Excel は全件これ)で圧縮後サイズを小さく偽っても通さない", () => {
+  it("★中央の圧縮後サイズを小さく偽ると、実際の圧縮データを読み切れず止まる(読み手は圧縮データの終わりまで展開する)", () => {
+    const zip = makeZip([{ name: "a.xml", data: Buffer.alloc(60 * MB, 0x20) }]);
+    const cd = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    zip.writeUInt16LE(0x08, cd + 8); // データ記述子あり
+    zip.writeUInt16LE(0x08, 6); // ローカル見出しも
+    zip.writeUInt32LE(0, 18); // ローカルの圧縮後サイズは0(記述子方式の書き方)
+    zip.writeUInt32LE(16, cd + 20); // 中央の圧縮後サイズを16バイトと偽る
+    expect(() => assertZipExpandsWithin(zip, 50 * MB)).toThrow(ZipGuardError);
+  });
+});

@@ -60,6 +60,7 @@ export function assertZipExpandsWithin(buf: Buffer, maxBytes: number): void {
     if (p + 46 > buf.length || buf.readUInt32LE(p) !== CENTRAL_SIG) {
       throw new ZipGuardError("broken central directory");
     }
+    const p0 = p;
     const method = buf.readUInt16LE(p + 10);
     const compSize = buf.readUInt32LE(p + 20);
     const nameLen = buf.readUInt16LE(p + 28);
@@ -70,6 +71,17 @@ export function assertZipExpandsWithin(buf: Buffer, maxBytes: number): void {
 
     if (localAt + 30 > buf.length || buf.readUInt32LE(localAt) !== LOCAL_SIG) {
       throw new ZipGuardError("broken local header");
+    }
+    // ⚠**中央ディレクトリとローカル見出しの食い違いは断る**(@codex PR#456 10巡目)。
+    //   読み手(SheetJS)はローカル見出しの圧縮方式を信じて展開する。中央で「無圧縮」、
+    //   ローカルで「deflate」と偽られると、こちらは圧縮後の長さしか数えずに通してしまう。
+    //   圧縮後サイズも、データ記述子を使わない中身(bit 3 が立っていない)では一致を求める。
+    const flags = buf.readUInt16LE(p0 + 8);
+    const localMethod = buf.readUInt16LE(localAt + 8);
+    const localCompSize = buf.readUInt32LE(localAt + 18);
+    if (localMethod !== method) throw new ZipGuardError("method mismatch");
+    if ((flags & 0x08) === 0 && localCompSize !== compSize) {
+      throw new ZipGuardError("size mismatch");
     }
     const dataAt = localAt + 30 + buf.readUInt16LE(localAt + 26) + buf.readUInt16LE(localAt + 28);
     if (dataAt + compSize > buf.length) throw new ZipGuardError("truncated entry");
