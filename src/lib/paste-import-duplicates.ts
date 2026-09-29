@@ -531,3 +531,64 @@ export async function lookupPasteDuplicates(
     ownerCandidatesTruncated: false,
   };
 }
+
+// ---------------------------------------------------------------------------
+// まとめ取込の「書き込みを止める」ための確認(@codex PR#456 7巡目)
+//
+// ⚠lookupPasteDuplicates は**画面に候補を見せる**ための関数で、見る人の権限・担当で
+//   絞る(担当外の物件・マスクされた所有者は出さない)。それを書き込みの可否に
+//   使うと、見えない相手と重なる物件・所有者がそのまま作られる。
+//   ここは**絞らずに数えるだけ**(住所・氏名・id は返さない＝何も覗けない)。
+// ⚠**渡されたクライアント(登録のトランザクション)だけで引く**。まとめ取込の
+//   ロックを持ったまま別の接続を取りに行くと、ロック待ちの取引が接続を
+//   使い切ったときに全員が止まる。
+// ⚠判定の芯は画面と同じ(住所=judgeDuplicates・氏名=normalizeName の完全一致)。
+// ---------------------------------------------------------------------------
+
+type EnforceDb = {
+  property: Pick<typeof prisma.property, "findMany">;
+  owner: Pick<typeof prisma.owner, "findMany">;
+};
+
+export async function countPasteDuplicatesUnscoped(
+  db: EnforceDb,
+  input: { address: string | null; lotNumber: string | null; ownerName: string | null },
+): Promise<{ similarCount: number; ownerCount: number; truncated: boolean }> {
+  let similarCount = 0;
+  let ownerCount = 0;
+  let truncated = false;
+
+  if (input.address) {
+    const prefix = addressSearchPrefix(input.address);
+    const rows = await db.property.findMany({
+      where: {
+        address: prefix === null ? { contains: input.address.slice(0, 20) } : { contains: prefix },
+        isArchived: false,
+      },
+      select: { id: true, address: true, lotNumber: true, externalLinkKey: true },
+      take: ADDRESS_CANDIDATE_FETCH_LIMIT,
+    });
+    if (rows.length >= ADDRESS_CANDIDATE_FETCH_LIMIT) truncated = true;
+    similarCount = judgeDuplicates(
+      { address: input.address, lotNumber: input.lotNumber, externalLinkKey: null },
+      rows,
+    ).similarPropertyIds.length;
+  }
+
+  const rawName = input.ownerName?.trim() ?? "";
+  const normalized = normalizeName(rawName);
+  if (normalized !== "") {
+    const rows = await db.owner.findMany({
+      where: {
+        OR: ownerSearchPrefixCandidates(rawName, normalized).map((seed) => ({ name: { contains: seed } })),
+        isArchived: false,
+      },
+      select: { id: true, name: true },
+      take: OWNER_CANDIDATE_FETCH_LIMIT,
+    });
+    if (rows.length >= OWNER_CANDIDATE_FETCH_LIMIT) truncated = true;
+    ownerCount = rows.filter((r) => normalizeName(r.name) === normalized).length;
+  }
+
+  return { similarCount, ownerCount, truncated };
+}

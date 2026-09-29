@@ -67,24 +67,17 @@ vi.mock("@/lib/api-helpers", async () => {
     getUserPermissions: vi.fn(async () => mockPerms),
   };
 });
-/** まとめ取込の「登録直前の重複確認」(lookupPasteDuplicates)の結果と呼び出し記録。 */
-let dupLookupResult: {
-  duplicates: { blocked: boolean; blockedByPropertyId: string | null; similarPropertyIds: string[] };
-  similar: unknown[];
-  ownerCandidates: unknown[];
-  ownerCandidatesTruncated: boolean;
-} = {
-  duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: [] },
-  similar: [],
-  ownerCandidates: [],
-  ownerCandidatesTruncated: false,
-};
-const dupLookupInputs: unknown[] = [];
+/** まとめ取込の「書き込みを止める」確認(countPasteDuplicatesUnscoped)の結果と呼び出し記録。 */
+let dupCount = { similarCount: 0, ownerCount: 0, truncated: false };
+const dupCountCalls: { db: unknown; input: unknown }[] = [];
 vi.mock("@/lib/paste-import-duplicates", () => ({
-  lookupPasteDuplicates: vi.fn(async (_s: unknown, _p: unknown, input: unknown) => {
-    callOrder.push("dupLookup");
-    dupLookupInputs.push(input);
-    return dupLookupResult;
+  countPasteDuplicatesUnscoped: vi.fn(async (db: unknown, input: unknown) => {
+    callOrder.push("dupCount");
+    dupCountCalls.push({ db, input });
+    return dupCount;
+  }),
+  lookupPasteDuplicates: vi.fn(async () => {
+    throw new Error("画面向けの(権限で絞った)見立てを書き込みの判定に使ってはいけない");
   }),
 }));
 vi.mock("@/lib/audit", () => ({
@@ -276,13 +269,8 @@ beforeEach(() => {
   sqlSeen.length = 0;
   advisoryLockValues.length = 0;
   findFirstArgs.length = 0;
-  dupLookupInputs.length = 0;
-  dupLookupResult = {
-    duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: [] },
-    similar: [],
-    ownerCandidates: [],
-    ownerCandidatesTruncated: false,
-  };
+  dupCountCalls.length = 0;
+  dupCount = { similarCount: 0, ownerCount: 0, truncated: false };
 });
 
 describe("POST /api/import/paste/commit", () => {
@@ -1295,7 +1283,7 @@ describe("反響PDFは referral として保存し、名前を定型化する（
   });
 });
 
-describe("まとめ取込は重複確認と登録を1つのロックの中で行う(@codex PR#456 4巡目 ①)", () => {
+describe("まとめ取込は重複確認と登録を1つのロックの中で行う(@codex PR#456 4巡目 ①・7巡目)", () => {
   const bulk = {
     ...baseBody,
     owner: { name: "渡辺　一", nameKana: null, phone: null, email: null, currentAddress: "東京都港区1-1" },
@@ -1309,23 +1297,27 @@ describe("まとめ取込は重複確認と登録を1つのロックの中で行
     const lockAt = callOrder.indexOf("advisoryLock");
     expect(lockAt).toBeGreaterThan(-1);
     expect(advisoryLockValues[0]).toEqual(["paste-excel-bulk-commit"]);
-    expect(lockAt).toBeLessThan(callOrder.indexOf("dupLookup"));
-    expect(callOrder.indexOf("dupLookup")).toBeLessThan(callOrder.indexOf("property.create"));
-    expect(dupLookupInputs[0]).toMatchObject({
+    expect(lockAt).toBeLessThan(callOrder.indexOf("dupCount"));
+    expect(callOrder.indexOf("dupCount")).toBeLessThan(callOrder.indexOf("property.create"));
+    expect(dupCountCalls[0].input).toEqual({
       address: "東京都A区B1-2-3",
-      externalLinkKey: "xlsx-0000000000000001",
+      lotNumber: "552-2",
       ownerName: "渡辺　一",
-      ownerCurrentAddress: "東京都港区1-1",
     });
   });
 
+  it("★確認は登録のトランザクションのクライアントで行う(別の接続を取りに行かない・7巡目 ②)", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    await POST(req(bulk));
+    const txArg = dupCountCalls[0].db as { property: unknown };
+    // $transaction のモックは同じ tx を渡す。グローバルの prisma はその tx を広げた別物。
+    expect(txArg).not.toBe(prisma);
+    expect(txArg.property).toBe((prisma as unknown as { property: unknown }).property);
+  });
+
   it("★同名の所有者・似た物件・確認しきれない候補があれば409(NEEDS_REVIEW)で、何も作らない", async () => {
-    for (const over of [
-      { ownerCandidates: [{ id: "o-1" }] },
-      { similar: [{ id: "p-1" }] },
-      { ownerCandidatesTruncated: true },
-    ]) {
-      dupLookupResult = { ...dupLookupResult, ownerCandidates: [], similar: [], ownerCandidatesTruncated: false, ...over };
+    for (const over of [{ ownerCount: 1 }, { similarCount: 1 }, { truncated: true }]) {
+      dupCount = { similarCount: 0, ownerCount: 0, truncated: false, ...over };
       const res = await POST(req(bulk));
       expect(res.status).toBe(409);
       expect((await res.json()).error.code).toBe("NEEDS_REVIEW");
@@ -1334,12 +1326,33 @@ describe("まとめ取込は重複確認と登録を1つのロックの中で行
     expect(created.owner).toBeUndefined();
   });
 
+  it("★見る権限の無い相手の存在は言い当てさせない(理由をぼかす)", async () => {
+    mockPerms = FULL_PERMS; // property:read / owner:read を含まない
+    dupCount = { similarCount: 1, ownerCount: 1, truncated: false };
+    const res = await POST(req(bulk));
+    const msg = (await res.json()).error.message;
+    expect(msg).not.toContain("同じ住所");
+    expect(msg).not.toContain("同じ名前");
+    expect(msg).toContain("既存のデータと重なる可能性があります");
+  });
+
+  it("見る権限があれば、理由をそのまま伝える", async () => {
+    mockPerms = [
+      ...FULL_PERMS,
+      { resource: "property", action: "read", granted: true },
+      { resource: "owner", action: "read", granted: true },
+    ];
+    dupCount = { similarCount: 1, ownerCount: 1, truncated: false };
+    const msg = (await (await POST(req(bulk))).json()).error.message;
+    expect(msg).toBe("同じ住所の物件がすでにあります／同じ名前の所有者がすでにいます");
+  });
+
   it("貼り付け画面(指定なし)は今までどおり: ロックも確認もしない(人が画面で判断済み)", async () => {
     const { requireNoDuplicates: _omit, ...plain } = bulk;
     void _omit;
     const res = await POST(req(plain));
     expect(res.status).toBe(200);
-    expect(callOrder).not.toContain("dupLookup");
+    expect(callOrder).not.toContain("dupCount");
     expect(advisoryLockValues.some((v) => v[0] === "paste-excel-bulk-commit")).toBe(false);
   });
 });

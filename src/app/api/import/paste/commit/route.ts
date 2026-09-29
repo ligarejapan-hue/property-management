@@ -34,7 +34,7 @@ import {
   BUILDING_NAME_TOO_LONG_MESSAGE,
 } from "@/lib/property-building-name";
 import { structuredFieldsFor } from "@/lib/paste-import/structured-fields";
-import { lookupPasteDuplicates } from "@/lib/paste-import-duplicates";
+import { countPasteDuplicatesUnscoped } from "@/lib/paste-import-duplicates";
 import type { PropertyType, OccupancyStatus } from "@/generated/prisma";
 
 // ---------------------------------------------------------------------------
@@ -445,21 +445,7 @@ export async function POST(request: NextRequest) {
         // ⚠貼り付け画面(指定なし)は対象外: 人が確認画面で候補を見て決めている。
         if (body.requireNoDuplicates === true) {
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${BULK_COMMIT_LOCK_KEY})::bigint)`;
-          const dup = await lookupPasteDuplicates(session, perms, {
-            address: p.address.trim(),
-            lotNumber: p.lotNumber?.trim() || null,
-            externalLinkKey,
-            ownerName: body.owner?.name?.trim() || null,
-            ownerCurrentAddress: body.owner?.currentAddress?.trim() || null,
-          });
-          const reasons: string[] = [];
-          if (dup.similar.length > 0) reasons.push("同じ住所の物件がすでにあります");
-          if (dup.ownerCandidates.length > 0) reasons.push("同じ名前の所有者がすでにいます");
-          if (dup.ownerCandidatesTruncated) reasons.push("同じ名前の所有者が多く、確認しきれません");
-          if (!dup.duplicates.blocked && reasons.length > 0) {
-            throw new ApiError(409, reasons.join("／"), "NEEDS_REVIEW");
-          }
-          // blocked(同じ外部キー)は、すぐ下の外部キーのロック+確認が 409 DUPLICATE で止める。
+          // 確認そのものは、同じ外部キーの確認(409 DUPLICATE)の後で行う(下)。
         }
 
         // ---- 二重登録を**サーバー側で**止める（全体レビュー Critical 1） ----
@@ -492,6 +478,34 @@ export async function POST(request: NextRequest) {
           });
           if (already) {
             throw new ApiError(409, "この案件は登録済みです", "DUPLICATE");
+          }
+        }
+
+        // ---- まとめ取込: 同じ住所の物件・同じ名前の所有者(まとめ取込のロックの内側) ----
+        // ⚠**見る人の権限・担当で絞らない**確認で止める(@codex PR#456 7巡目 ①)。
+        //   画面向けの lookupPasteDuplicates は見えない相手を除くので、書き込みの
+        //   判定に使うと担当外の物件と重なる物件がそのまま作られる。
+        // ⚠**このトランザクションのクライアント(tx)で引く**(7巡目 ②)。ロックを
+        //   持ったまま別の接続を取りに行くと、ロック待ちの取引が接続を使い切った
+        //   ときに全員が止まる。
+        // ⚠理由の文言で、見る権限の無い相手の存在を言い当てさせない(ぼかす)。
+        if (body.requireNoDuplicates === true) {
+          const dup = await countPasteDuplicatesUnscoped(tx, {
+            address: p.address.trim(),
+            lotNumber: p.lotNumber?.trim() || null,
+            ownerName: body.owner?.name?.trim() || null,
+          });
+          const reasons: string[] = [];
+          const vague = "既存のデータと重なる可能性があります（管理者に確認してください）";
+          if (dup.similarCount > 0) {
+            reasons.push(hasPermission(perms, "property", "read") ? "同じ住所の物件がすでにあります" : vague);
+          }
+          if (dup.ownerCount > 0) {
+            reasons.push(hasPermission(perms, "owner", "read") ? "同じ名前の所有者がすでにいます" : vague);
+          }
+          if (dup.truncated) reasons.push("似た候補が多く、確認しきれません");
+          if (reasons.length > 0) {
+            throw new ApiError(409, Array.from(new Set(reasons)).join("／"), "NEEDS_REVIEW");
           }
         }
 
