@@ -283,3 +283,15 @@ export function isAmbiguousSaveError(err: unknown): boolean {
   const status = (err as { status?: unknown } | null)?.status;
   return typeof status !== "number" || status >= 500;
 }
+
+/**
+ * 業者の欄に打った電話番号を、新しい業者の小窓へどう渡すか。携帯(070/080/090)は問い合わせ者本人の番号
+ * なので会社の代表電話には入れず、問い合わせ者の携帯へ回す(@codex #459 R19)。
+ */
+export function splitNewAgentPhone(query: string): { agentPhone: string; callerMobile: string | null } {
+  const q = query.trim();
+  if (!/^[0-9０-９\-‐ー－\s]+$/.test(q)) return { agentPhone: "", callerMobile: null };
+  const digits = q.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace(/\D/g, "");
+  if (/^0[789]0/.test(digits)) return { agentPhone: "", callerMobile: q };
+  return { agentPhone: q, callerMobile: null };
+}

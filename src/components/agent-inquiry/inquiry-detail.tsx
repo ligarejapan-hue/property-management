@@ -27,6 +27,7 @@ import {
   draftOf,
   draftStale,
   editDraft,
+  isAmbiguousSaveError,
   type Draft,
 } from "@/lib/agent-inquiry/desk-form";
 
@@ -168,6 +169,8 @@ export function InquiryDetailView({
   onReload,
   closeLocked = false,
   readOnlyText = false,
+  addLocked = false,
+  onConfirmAdd,
 }: {
   inquiry: InquiryView;
   canOpenProperty: boolean;
@@ -186,6 +189,9 @@ export function InquiryDetailView({
   closeLocked?: boolean;
   /** 書けない(書く権限なし・読み直し失敗)ときは、メモと結果を保護付きの文章で出す(@codex #459 R17)。 */
   readOnlyText?: boolean;
+  /** 内見を足せたか分からない(通信が切れた等)。確かめるまで足すボタンを止める(@codex #459 R19)。 */
+  addLocked?: boolean;
+  onConfirmAdd?: () => void;
 }) {
   // メモの下書き(null=まだ触っていない)。詳細は反響の id だけで作り直すので、状態や担当を変えて版が
   // 進んでも・読み直しても、打ちかけのメモは消えない(最終レビュー I-1/I-2)。
@@ -299,7 +305,7 @@ export function InquiryDetailView({
             <div className="flex gap-1">
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || addLocked}
                 onClick={() => onAddViewing("guided")}
                 className="rounded border border-gray-300 px-3 py-1 text-xs dark:border-gray-700"
               >
@@ -307,13 +313,21 @@ export function InquiryDetailView({
               </button>
               <button
                 type="button"
-                disabled={busy}
+                disabled={busy || addLocked}
                 onClick={() => onAddViewing("preview")}
                 className="rounded border border-gray-300 px-3 py-1 text-xs dark:border-gray-700"
               >
                 内見を足す(下見)
               </button>
             </div>
+            {addLocked && (
+              <div className="flex items-center gap-2 rounded bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                <p>上の一覧で内見が増えていないか確かめてから押してください(増えていれば足し直さない)。</p>
+                <button type="button" disabled={busy} onClick={onConfirmAdd} className="shrink-0 rounded border border-amber-300 px-2 py-0.5">
+                  確かめた
+                </button>
+              </div>
+            )}
           </div>
         )}
         {error && (
@@ -338,7 +352,7 @@ export default function InquiryDetail({
   onClose,
   onChanged,
   canWrite = true,
-  onForbidden,
+  onAccessLost,
 }: {
   inquiryId: string;
   users: { id: string; name: string }[];
@@ -346,8 +360,8 @@ export default function InquiryDetail({
   onChanged: () => void;
   /** 書く権限。無ければ変更のボタンを押せない(押してから 403 にしない・@codex #459 R12)。 */
   canWrite?: boolean;
-  /** 読む権限が外れていた(403)。画面ごと隠せるよう親へ渡す(@codex #459 R18)。 */
-  onForbidden?: (e: unknown) => void;
+  /** 読む権限が外れていた(403)・ログインが切れた(401)。画面ごと隠せるよう親へ渡す(@codex #459 R18/R19)。 */
+  onAccessLost?: (e: unknown) => void;
 }) {
   const [data, setData] = useState<{ inquiry: InquiryView; canOpenProperty: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -355,6 +369,8 @@ export default function InquiryDetail({
   // 読み直すまで操作を止める(@codex #459 R5)。
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 内見を足せたか分からない=足し直すと二重になりうる。確かめたと押すまで足すボタンを止める(@codex #459 R19)。
+  const [addLocked, setAddLocked] = useState(false);
   // 読み込みの番号。後から始めた読み込みがあれば、先の応答は捨てる=古い内容で新しい内容を上書きしない(@codex #459 R17)。
   const loadSeqRef = useRef(0);
   const load = useCallback(async () => {
@@ -368,41 +384,54 @@ export default function InquiryDetail({
       throw e;
     }
   }, [inquiryId]);
-  // 読み込みが権限なしで断られたら、小窓の中で知らせるだけにせず親に渡す=一覧ごと隠す(@codex #459 R18)。
-  const forbiddenLoad = useCallback(
+  // 読み込みが権限なし・ログイン切れで断られたら、小窓の中で知らせるだけにせず親に渡す=一覧ごと隠す
+  // (@codex #459 R18/R19)。
+  const lostAccess = useCallback(
     (e: unknown) => {
-      if (apiErrorCode(e) === "FORBIDDEN" && onForbidden) {
-        onForbidden(e);
+      const code = apiErrorCode(e);
+      if ((code === "FORBIDDEN" || code === "UNAUTHORIZED") && onAccessLost) {
+        onAccessLost(e);
         return true;
       }
       return false;
     },
-    [onForbidden],
+    [onAccessLost],
   );
   useEffect(() => {
     load().catch((e) => {
-      if (forbiddenLoad(e)) return;
+      if (lostAccess(e)) return;
       setError(e instanceof Error ? e.message : "読み込めませんでした");
     });
-  }, [load, forbiddenLoad]);
-  const run = async (fn: () => Promise<unknown>) => {
+  }, [load, lostAccess]);
+  const run = async (fn: () => Promise<unknown>, opts?: { addsViewing?: boolean }) => {
     if (busy) return;
     setBusy(true);
     setError(null);
     let conflict = false;
     let wrote = false;
+    let gone = false;
     try {
       await fn();
       wrote = true;
       onChanged();
     } catch (e) {
+      // 保存の途中でログインが切れたら、画面ごと隠す(@codex #459 R19)。
+      if (apiErrorCode(e) === "UNAUTHORIZED" && lostAccess(e)) {
+        gone = true;
+        return;
+      }
       conflict = apiErrorCode(e) === "VERSION_CONFLICT";
-      setError(conflict ? CONFLICT_MESSAGE : e instanceof Error ? e.message : "保存できませんでした");
+      if (opts?.addsViewing && isAmbiguousSaveError(e)) {
+        setAddLocked(true);
+        setError("内見を足せたか分かりません(通信が切れました)。内見の予定の欄の案内に沿って確かめてください。");
+      } else {
+        setError(conflict ? CONFLICT_MESSAGE : e instanceof Error ? e.message : "保存できませんでした");
+      }
     } finally {
       // 他の人が先に更新したときは自動で読み直さない=打ちかけの入力を消さない。「読み直す」で最新へ。
-      if (!conflict) {
+      if (!conflict && !gone) {
         await load().catch((e) => {
-          if (forbiddenLoad(e)) return;
+          if (lostAccess(e)) return;
           setRefreshFailed(true);
           // 「保存しましたが…」は書き込みが通ったときだけ。書き込みも失敗していたら、その失敗を残す。
           if (wrote) setError("保存しましたが、最新の内容を読み込めませんでした。「読み直す」を押してください。");
@@ -420,7 +449,7 @@ export default function InquiryDetail({
     load()
       .then(() => setRefreshFailed(false))
       .catch((e) => {
-        if (forbiddenLoad(e)) return;
+        if (lostAccess(e)) return;
         // 読み直しにも失敗したら、古い内容のまま押せる状態には戻さない。
         setRefreshFailed(true);
         setError(e instanceof Error ? e.message : "読み込めませんでした");
@@ -448,10 +477,12 @@ export default function InquiryDetail({
       onStatus={(status) => run(() => updateAgentInquiry(q.id, { version: q.version, status }))}
       onAssignee={(assigneeId) => run(() => updateAgentInquiry(q.id, { version: q.version, assigneeId }))}
       onSaveNote={(note) => run(() => updateAgentInquiry(q.id, { version: q.version, note }))}
-      onAddViewing={(viewingType) => run(() => addAgentViewing(q.id, { viewingType }))}
+      onAddViewing={(viewingType) => run(() => addAgentViewing(q.id, { viewingType }), { addsViewing: true })}
       onSaveViewing={(v, patch) => run(() => updateAgentViewing(q.id, v.id, { version: v.version, ...patch }))}
       onClose={onClose}
       onReload={reload}
+      addLocked={addLocked}
+      onConfirmAdd={() => setAddLocked(false)}
     />
   );
 }

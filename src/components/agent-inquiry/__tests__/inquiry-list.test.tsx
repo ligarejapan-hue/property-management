@@ -208,10 +208,37 @@ describe("書けないときの文字は保護付きの文章で出す・読み�
 describe("詳細の読み込みが権限なし(403)なら画面ごと隠す(@codex #459 R18)", () => {
   it("詳細は読み込み失敗の 403 を親へ渡し、親は権限なしの画面に切り替えて詳細を閉じる", () => {
     const d = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
-    expect(d).toMatch(/apiErrorCode\(e\) === "FORBIDDEN"[\s\S]{0,80}onForbidden\(e\)/);
-    // 初回・読み直し・保存後の読み込みの3か所すべて
-    expect(d.match(/forbiddenLoad\(e\)/g)?.length).toBe(3);
+    expect(d).toMatch(/code === "FORBIDDEN"[\s\S]{0,120}onAccessLost\(e\)/);
+    // 初回・読み直し・保存後の読み込み・保存中のログイン切れの4か所すべて
+    expect(d.match(/lostAccess\(e\)/g)?.length).toBe(4);
     const p = readFileSync(join(process.cwd(), "src/app/(desk)/inquiry-desk/page.tsx"), "utf8").replace(/\r\n/g, "\n");
-    expect(p).toMatch(/onForbidden=\{\(e\) => \{\s*setOpenId\(null\);\s*onError\(e\);/);
+    expect(p).toMatch(/onAccessLost=\{\(e\) => \{\s*setOpenId\(null\);\s*onError\(e\);/);
+  });
+});
+
+describe("ログイン切れ(401)も画面ごと隠す・内見の追加は結果が分からなければ確かめるまで止める(@codex #459 R19)", () => {
+  it("一覧・詳細とも 401 を権限なしと同じく扱い、ログインし直しの表示を出す", () => {
+    const p = readFileSync(join(process.cwd(), "src/app/(desk)/inquiry-desk/page.tsx"), "utf8").replace(/\r\n/g, "\n");
+    expect(p).toMatch(/code === "UNAUTHORIZED"\) setSessionLost\(true\)/);
+    expect(p).toMatch(/const bodyVisible = [^\n]*!sessionLost/);
+    expect(p).toContain("/login?callbackUrl=");
+    const d = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
+    expect(d).toMatch(/code === "FORBIDDEN" \|\| code === "UNAUTHORIZED"/);
+    // 保存の途中でログインが切れた場合も渡す
+    expect(d).toMatch(/apiErrorCode\(e\) === "UNAUTHORIZED" && lostAccess\(e\)/);
+  });
+  it("addLocked のときは内見を足すボタンを押せず、確かめたボタンを出す", () => {
+    const html = renderToStaticMarkup(
+      <InquiryDetailView inquiry={inquiry} canOpenProperty={false} users={[]} busy={false} error={null}
+        onStatus={noop} onAssignee={noop} onSaveNote={noop} onAddViewing={noop} onSaveViewing={noop} onClose={noop}
+        addLocked onConfirmAdd={noop} />,
+    );
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>内見を足す\(案内\)<\/button>/);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>内見を足す\(下見\)<\/button>/);
+    expect(html).toContain("確かめた");
+  });
+  it("内見の追加で結果が分からないときは addLocked にする", () => {
+    const d = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
+    expect(d).toMatch(/isAmbiguousSaveError\(e\)[\s\S]{0,120}setAddLocked\(true\)/);
   });
 });

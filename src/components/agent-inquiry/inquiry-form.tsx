@@ -13,6 +13,7 @@ import {
   CHANNEL_LABEL,
   type DeskFormAction,
   type DeskFormState,
+  splitNewAgentPhone,
 } from "@/lib/agent-inquiry/desk-form";
 import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
 import { AgentPicker } from "./agent-picker";
@@ -300,7 +301,7 @@ export default function InquiryForm({
       setSubmitting(false);
     }
   };
-  const phoneLike = /^[0-9０-９\-‐ー－\s]+$/.test(state.agentQuery.trim());
+  const newAgentPhone = splitNewAgentPhone(state.agentQuery);
   return (
     <>
       <InquiryFormView
@@ -317,10 +318,16 @@ export default function InquiryForm({
       />
       {creating && (
         <AgentCreateModal
-          initialPhone={phoneLike ? state.agentQuery.trim() : ""}
+          initialPhone={newAgentPhone.agentPhone}
           onClose={() => setCreating(false)}
           onCreated={(hit: AgentHit) => {
             act({ type: "agentSelected", agent: hit });
+            // 携帯で探していたときは、その携帯を問い合わせ者の欄へ(会社の代表電話にはしない・@codex #459 R19)。
+            // 自分で打った携帯は上書きしない(前の業者から自動で入れた値・空なら入れる)。
+            const typed = state.contactMobile.trim() !== "" && state.contactAutofill?.contactMobile !== state.contactMobile;
+            if (newAgentPhone.callerMobile && !typed) {
+              act({ type: "contact", field: "contactMobile", value: formatPhoneJp(newAgentPhone.callerMobile).value });
+            }
             setCreating(false);
           }}
         />

@@ -38,6 +38,9 @@ export default function InquiryDeskPage() {
   // API が 403 を返したときの権限の値。権限を読み直せば(別の配列になり)自然に解ける=外されて戻された
   // 権限で窓が永久に止まらない(@codex #459 R16)。
   const [forbiddenFor, setForbiddenFor] = useState<unknown>(undefined);
+  // API が 401 を返した(ログインが切れた・ユーザーが消された)。権限なしと同じく中身を隠し、ログインし直しへ
+  // 案内する(@codex #459 R19)。ログインし直すと窓ごと読み直すので、ここで戻す必要はない。
+  const [sessionLost, setSessionLost] = useState(false);
   // 開いたままの窓で閲覧権限を外されたら、画面保護が読み直す権限を見て中身を消す(@codex #459 R10)。
   const { permissions, permissionsLoading, permissionsError, refetchPermissions } = useScreenProtection();
   // 権限の鮮度の3点セット(permission-freshness-pattern.test.ts の規約・建物詳細と同じ形):
@@ -73,7 +76,7 @@ export default function InquiryDeskPage() {
   const revoked = permissionsSettled && permissions != null && !hasPermission(permissions, "agent_inquiry", "read");
   // 書く権限が無い人には登録・変更を出さない(押してから 403 にしない・@codex #459 R12)。
   const canWrite = permissionsSettled && permissions != null && hasPermission(permissions, "agent_inquiry", "write");
-  const bodyVisible = permissionsSettled && permissions != null && !revoked && !forbidden;
+  const bodyVisible = permissionsSettled && permissions != null && !revoked && !forbidden && !sessionLost;
   // 中身を出さない間は、見出しの未対応件数も消す(枠は画面の外にあるので知らせる)。
   useEffect(() => {
     if (!bodyVisible) window.dispatchEvent(new CustomEvent(DESK_OPEN_COUNT_EVENT, { detail: null }));
@@ -83,7 +86,9 @@ export default function InquiryDeskPage() {
   const [formState, setFormState] = useState<DeskFormState>(EMPTY_DESK_FORM);
 
   const onError = useCallback((e: unknown) => {
-    if (apiErrorCode(e) === "FORBIDDEN") setForbiddenFor(permissionsRef.current);
+    const code = apiErrorCode(e);
+    if (code === "FORBIDDEN") setForbiddenFor(permissionsRef.current);
+    else if (code === "UNAUTHORIZED") setSessionLost(true);
     else setLoadError(true);
   }, []);
 
@@ -149,6 +154,19 @@ export default function InquiryDeskPage() {
 
   // 権限がまだ分からない/読めなかった(null)間は中身を出さない=失敗した再検証で古い中身を残さない
   // (@codex #459 R11)。
+  if (sessionLost) {
+    return (
+      <div className="rounded-md bg-white p-6 text-center text-sm dark:bg-gray-900">
+        <p className="mb-2">ログインが切れました。ログインし直してください。</p>
+        <a
+          href={`/login?callbackUrl=${encodeURIComponent("/inquiry-desk")}`}
+          className="inline-block rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-600"
+        >
+          ログイン画面へ
+        </a>
+      </div>
+    );
+  }
   if (permissions == null || !permissionsSettled) {
     return (
       <div className="rounded-md bg-white p-6 text-center text-sm dark:bg-gray-900">
@@ -222,7 +240,7 @@ export default function InquiryDeskPage() {
           onClose={() => setOpenId(null)}
           onChanged={reloadAll}
           canWrite={canWrite}
-          onForbidden={(e) => {
+          onAccessLost={(e) => {
             setOpenId(null);
             onError(e);
           }}

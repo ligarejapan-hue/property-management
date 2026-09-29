@@ -202,3 +202,20 @@ describe("保存できたか分からない失敗(@codex #459 R15)", () => {
     expect(isAmbiguousSaveError(Object.assign(new Error("x"), { status: 422 }))).toBe(false);
   });
 });
+
+import { splitNewAgentPhone } from "@/lib/agent-inquiry/desk-form";
+
+describe("検索に打った携帯は業者の代表電話に入れない(@codex #459 R19)", () => {
+  it("070/080/090 は問い合わせ者の携帯へ回し、代表電話は空", () => {
+    expect(splitNewAgentPhone("090-1234-5678")).toEqual({ agentPhone: "", callerMobile: "090-1234-5678" });
+    expect(splitNewAgentPhone("０８０１２３４５６７８")).toEqual({ agentPhone: "", callerMobile: "０８０１２３４５６７８" });
+    expect(splitNewAgentPhone(" 07012345678 ")).toEqual({ agentPhone: "", callerMobile: "07012345678" });
+  });
+  it("固定電話は代表電話へ", () => {
+    expect(splitNewAgentPhone("03-1234-5678")).toEqual({ agentPhone: "03-1234-5678", callerMobile: null });
+  });
+  it("電話番号らしくない検索語はどちらにも入れない", () => {
+    expect(splitNewAgentPhone("中野不動産")).toEqual({ agentPhone: "", callerMobile: null });
+    expect(splitNewAgentPhone("")).toEqual({ agentPhone: "", callerMobile: null });
+  });
+});
