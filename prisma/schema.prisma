@@ -495,7 +495,7 @@ model PropertyOwner {
   /// 共有名義でも所有者ごと、同一Ownerが別物件にいてもメモが混ざらない。
   note         String?
   createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
 
   property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   owner    Owner    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
@@ -513,7 +513,7 @@ model PropertyOwner {
 ///   - 所有者単体から書いたメモ → null
 /// 物件が物理削除された場合は SetNull でメモ本体を残す（営業履歴を失わない）。
 model OwnerMemo {
-  id         String   @id @default(uuid()) @db.Uuid
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   ownerId    String   @map("owner_id") @db.Uuid
   propertyId String?  @map("property_id") @db.Uuid
   body       String
@@ -613,7 +613,7 @@ model PropertyInvestigationLog {
 }
 
 model PropertyInvestigation {
-  id                    String              @id @default(uuid()) @db.Uuid
+  id                    String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   propertyId            String              @unique @map("property_id") @db.Uuid
   status                InvestigationStatus @default(draft)
   sourceAddress         String?             @map("source_address")
@@ -656,7 +656,7 @@ model PropertyInvestigation {
   confirmedBy           String?             @map("confirmed_by") @db.Uuid
   version               Int                 @default(1)
   createdAt             DateTime            @default(now()) @map("created_at")
-  updatedAt             DateTime            @updatedAt @map("updated_at")
+  updatedAt             DateTime            @default(now()) @updatedAt @map("updated_at")
 
   property  Property                        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   confirmer User?                           @relation("InvestigationConfirmer", fields: [confirmedBy], references: [id])
@@ -666,7 +666,7 @@ model PropertyInvestigation {
 }
 
 model PropertyInvestigationAuditLog {
-  id              String   @id @default(uuid()) @db.Uuid
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   propertyId      String   @map("property_id") @db.Uuid
   investigationId String?  @map("investigation_id") @db.Uuid
   action          String
@@ -698,7 +698,7 @@ model PropertyDmLog {
   dmType     String?   @map("dm_type") // "owner_address"/"property_address"。旧行・sale_dmブリッジは null(TEXT+アプリ側allowlist)
   batchId    String?   @map("batch_id") @db.Uuid // 一括確定のトレース(FKは張らない=バッチ削除と独立)
   draftId    String?   @map("draft_id") @db.Uuid // 売却DMブリッジ→DmRecipientDraft(反響同期用・FKは張らない)
-  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at")
   // --- PR-B(反響)追加列 ---
   // 反響4種 "no_response"/"replied"/"refused"/"undeliverable"(TEXT+アプリ側allowlist・enum禁止)
   reactionStatus String    @default("no_response") @map("reaction_status")
@@ -1140,7 +1140,7 @@ model FieldSurveyPinPhoto {
 // ============================================================
 
 model SalesSheetDesign {
-  id           String   @id @default(uuid()) @db.Uuid
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   propertyId   String   @map("property_id") @db.Uuid
   title        String   @default("無題の販売図面")
   document     Json
@@ -1477,7 +1477,7 @@ enum EditLockResource {
 // APIキーは暗号化して保存(平文では持たない)。provider/model/各URL/差出人は平文(非秘匿)。
 // 値が未設定(null/空)の項目は env をフォールバックに使う(loadSaleDmConfig が「DB→env」で解決)。
 model SaleDmConfig {
-  id                 String   @id @default("singleton")
+  id                 String   @id
   provider           String?
   model              String?
   trackingBaseUrl    String?  @map("tracking_base_url")

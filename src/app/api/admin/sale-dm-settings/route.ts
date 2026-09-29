@@ -98,7 +98,8 @@ export async function PUT(request: NextRequest) {
     const norm = (v: string | undefined) => (v === undefined ? undefined : v.trim() === "" ? null : v.trim());
 
     // 非秘匿項目: 指定時のみ設定(空文字→null=クリア)。create にも update にも使える形(直値のみ)。
-    const data: Prisma.SaleDmConfigUncheckedCreateInput = {};
+    // id は作るとき(upsert の create)に必ず SALE_DM_CONFIG_ID を渡す(設計に初期値は持たない=実DBどおり)。
+    const data: Omit<Prisma.SaleDmConfigUncheckedCreateInput, "id"> = {};
     const changed: string[] = [];
     if (body.provider !== undefined) { data.provider = body.provider; changed.push("provider"); }
     if (body.model !== undefined) { data.model = norm(body.model) ?? null; changed.push("model"); }
