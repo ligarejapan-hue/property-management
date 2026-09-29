@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { hitsForQuery, type SearchResult } from "@/lib/agent-inquiry/desk-form";
 import { searchDeskProperties, type DeskProperty } from "@/lib/api-client";
 
 /** 物件の候補(見た目)。 */
@@ -35,7 +36,7 @@ export function PropertyPicker({
   onQuery: (v: string) => void;
   onPick: (p: DeskProperty) => void;
 }) {
-  const [hits, setHits] = useState<DeskProperty[] | null>(null);
+  const [res, setRes] = useState<SearchResult<DeskProperty> | null>(null);
   const searching = !selected && query.trim().length >= 2;
   useEffect(() => {
     if (!searching) return;
@@ -43,10 +44,10 @@ export function PropertyPicker({
     const t = setTimeout(() => {
       searchDeskProperties(query)
         .then((r) => {
-          if (!stale) setHits(r.properties);
+          if (!stale) setRes({ query, hits: r.properties, failed: false });
         })
         .catch(() => {
-          if (!stale) setHits([]);
+          if (!stale) setRes({ query, hits: [], failed: true });
         });
     }, 250);
     return () => {
@@ -54,6 +55,8 @@ export function PropertyPicker({
       clearTimeout(t);
     };
   }, [query, searching]);
+  // 今の検索語の結果だけ出す(打ち直し中に前の候補を押せないように)。
+  const shown = hitsForQuery(res, query);
   return (
     <div className="space-y-1">
       <input
@@ -64,10 +67,11 @@ export function PropertyPicker({
         aria-label="物件を探す"
         className="w-full rounded-md border border-gray-300 px-3 py-2 text-base dark:border-gray-700 dark:bg-gray-900"
       />
-      {searching && hits && hits.length > 0 && <PropertyResults hits={hits} onPick={onPick} />}
-      {searching && hits && hits.length === 0 && (
+      {searching && shown && shown.hits.length > 0 && <PropertyResults hits={shown.hits} onPick={onPick} />}
+      {searching && shown && !shown.failed && shown.hits.length === 0 && (
         <p className="text-xs text-gray-500">見つかりません(しまった物件は出ません)</p>
       )}
+      {searching && shown?.failed && <p className="text-xs text-rose-600">検索できませんでした(通信を確かめてください)</p>}
     </div>
   );
 }

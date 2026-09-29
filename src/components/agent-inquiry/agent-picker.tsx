@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { hitsForQuery, type SearchResult } from "@/lib/agent-inquiry/desk-form";
 import { searchDeskAgents, type AgentHit } from "@/lib/api-client";
 
 /** 業者の候補(見た目)。携帯で当たったときは前回の問い合わせ者の名前を添える。 */
@@ -42,7 +43,7 @@ export function AgentPicker({
   onPick: (a: AgentHit) => void;
   onCreateNew: () => void;
 }) {
-  const [hits, setHits] = useState<AgentHit[]>([]);
+  const [res, setRes] = useState<SearchResult<AgentHit> | null>(null);
   const searching = !selected && query.trim().length >= 2;
   useEffect(() => {
     if (!searching) return;
@@ -50,10 +51,10 @@ export function AgentPicker({
     const t = setTimeout(() => {
       searchDeskAgents(query)
         .then((r) => {
-          if (!stale) setHits(r.agents);
+          if (!stale) setRes({ query, hits: r.agents, failed: false });
         })
         .catch(() => {
-          if (!stale) setHits([]);
+          if (!stale) setRes({ query, hits: [], failed: true });
         });
     }, 250);
     return () => {
@@ -61,6 +62,8 @@ export function AgentPicker({
       clearTimeout(t);
     };
   }, [query, searching]);
+  // 今の検索語の結果だけ出す(打ち直し中に前の候補を押せないように)。
+  const shown = hitsForQuery(res, query);
   return (
     <div className="space-y-1">
       <input
@@ -71,7 +74,8 @@ export function AgentPicker({
         aria-label="業者を探す"
         className="w-full rounded-md border border-gray-300 px-3 py-2 text-base dark:border-gray-700 dark:bg-gray-900"
       />
-      {searching && hits.length > 0 && <AgentResults hits={hits} onPick={onPick} />}
+      {searching && shown && shown.hits.length > 0 && <AgentResults hits={shown.hits} onPick={onPick} />}
+      {searching && shown?.failed && <p className="text-xs text-rose-600">検索できませんでした(通信を確かめてください)</p>}
       {!selected && (
         <button type="button" onClick={onCreateNew} className="text-sm text-teal-700 underline dark:text-teal-300">
           ＋ 名簿にない業者を新しく登録

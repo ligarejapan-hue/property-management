@@ -97,3 +97,16 @@ describe("日時(JST)", () => {
     expect(formatJst(null)).toBe("日程調整中");
   });
 });
+
+import { hitsForQuery } from "@/lib/agent-inquiry/desk-form";
+
+describe("検索結果は今の検索語のものだけ出す(@codex #459 R1)", () => {
+  it("前の検索語の結果は出さない(打ち直し中に古い候補を選べない)", () => {
+    expect(hitsForQuery({ query: "新宿", hits: [1, 2], failed: false }, "新宿")).toEqual({ hits: [1, 2], failed: false });
+    expect(hitsForQuery({ query: "新宿", hits: [1, 2], failed: false }, "新宿区")).toBeNull();
+    expect(hitsForQuery(null, "新宿")).toBeNull();
+  });
+  it("失敗は「見つからない」と区別する", () => {
+    expect(hitsForQuery({ query: "新宿", hits: [], failed: true }, "新宿")).toEqual({ hits: [], failed: true });
+  });
+});

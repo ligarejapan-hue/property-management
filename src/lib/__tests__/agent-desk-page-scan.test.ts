@@ -24,3 +24,21 @@ describe("受付の窓の画面", () => {
     expect(src).toContain("DESK_OPEN_COUNT_EVENT");
   });
 });
+
+describe("読み込みの失敗を「ありません」に見せない(@codex #459 R1)", () => {
+  it("403 以外の失敗は知らせて、もう一度読める", () => {
+    expect(src).toContain("読み込めませんでした");
+    expect(src).toMatch(/setLoadError\(/);
+    expect(src).toContain("もう一度読む");
+  });
+});
+
+describe("候補は今の検索語のものだけ(@codex #459 R1)", () => {
+  it("業者・物件の候補欄は hitsForQuery で今の検索語の結果だけ出し、失敗を別に知らせる", () => {
+    for (const f of ["agent-picker.tsx", "property-picker.tsx"]) {
+      const s = readFileSync(join(process.cwd(), "src/components/agent-inquiry", f), "utf8");
+      expect(s, f).toContain("hitsForQuery(");
+      expect(s, f).toContain("検索できませんでした");
+    }
+  });
+});

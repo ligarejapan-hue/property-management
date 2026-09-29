@@ -207,3 +207,19 @@ export const CONFLICT_MESSAGE = "他の人が先に更新しました。開き�
 export function pickDraft(draft: string | null, server: string): string {
   return draft ?? server;
 }
+
+/** 検索の結果(どの検索語の結果か・失敗したか)。 */
+export interface SearchResult<T> {
+  query: string;
+  hits: T[];
+  failed: boolean;
+}
+
+/**
+ * 今の検索語の結果だけを返す(違う検索語の結果=null=出さない)。打ち直している間に前の検索語の
+ * 候補を押して、別の物件・業者に反響を付けてしまうのを防ぐ(付けた後に直せない・@codex #459 R1)。
+ */
+export function hitsForQuery<T>(res: SearchResult<T> | null, query: string): { hits: T[]; failed: boolean } | null {
+  if (!res || res.query !== query) return null;
+  return { hits: res.hits, failed: res.failed };
+}

@@ -30,10 +30,13 @@ export default function InquiryDeskPage() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  // 403 以外の読み込み失敗。「ありません」と見分けがつくよう知らせる(内見の見落としを防ぐ・@codex #459 R1)。
+  const [loadError, setLoadError] = useState(false);
   const [formState, setFormState] = useState<DeskFormState>(EMPTY_DESK_FORM);
 
   const onError = useCallback((e: unknown) => {
     if (apiErrorCode(e) === "FORBIDDEN") setForbidden(true);
+    else setLoadError(true);
   }, []);
 
   // 読み直しの合図(保存・変更のたびに1つ進める)。取得は下の effect がまとめて行う。
@@ -50,6 +53,7 @@ export default function InquiryDeskPage() {
           fetchAgentInquiryCounts(),
         ]);
         if (cancelled) return;
+        setLoadError(false);
         setItems(list.items);
         setCursor(list.nextCursor);
         setUpcoming(up.viewings);
@@ -90,6 +94,14 @@ export default function InquiryDeskPage() {
   }
   return (
     <div className="grid gap-4 lg:grid-cols-2">
+      {loadError && (
+        <div role="alert" className="flex items-center justify-between gap-2 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700 lg:col-span-2 dark:bg-rose-950 dark:text-rose-200">
+          <span>読み込めませんでした。一覧と今日・明日の内見が最新ではありません。</span>
+          <button type="button" onClick={reloadAll} className="shrink-0 rounded border border-rose-300 px-2 py-0.5 text-xs">
+            もう一度読む
+          </button>
+        </div>
+      )}
       <div className="space-y-3">
         <UpcomingViewingsView viewings={upcoming} />
         <DeskStepGuide step={nextDeskGuideStep(formState)} />
