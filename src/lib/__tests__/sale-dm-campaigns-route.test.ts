@@ -622,6 +622,11 @@ describe("POST /campaigns — 拒否・宛先不明の宛先を保存しない",
     expect(upd.data.status).toBe("ready");
     expect(upd.data.filterSnapshot.__result.excludedTerminal).toBe(1);
     expect(upd.data.filterSnapshot.__result.saved).toBe(1);
+    // 種類なしの発送には種類の件数を書かない(応答は既定値の形を保つ)。
+    expect(upd.data.filterSnapshot.__result).not.toHaveProperty("blankBodyCount");
+    expect(upd.data.filterSnapshot.__result).not.toHaveProperty("lpMissingScenarios");
+    expect(upd.data.filterSnapshot.__result).not.toHaveProperty("scenarioCounts");
+    expect(json).toMatchObject({ blankBodyCount: 0, lpMissingScenarios: [], scenarioCounts: {} });
   });
 
   it("共有者連関(logOwners)経由の terminal でも外れる=所有者横断(別物件での拒否を含む)", async () => {
@@ -704,6 +709,8 @@ describe("idempotent 再返却に結果メタを含める", () => {
     expect(json.campaignId).toBe("c9");
     expect(json.excludedTerminal).toBe(2);
     expect(json.saved).toBe(3);
+    // 種類なしの発送はメタに種類の件数を持たない → 再返却でも作成時と同じ形(0/[]/{})で返す。
+    expect(json).toMatchObject({ blankBodyCount: 0, lpMissingScenarios: [], scenarioCounts: {} });
   });
 
   it("結果メタが無い古いキャンペーンでも従来どおり {campaignId, idempotent} を返す(壊れない)", async () => {

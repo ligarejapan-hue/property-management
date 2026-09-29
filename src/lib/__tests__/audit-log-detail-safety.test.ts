@@ -934,4 +934,12 @@ describe("sanitizeAuditDetail: DMの種類(台帳・sale_dm_scenario_*)", () => 
     expect(sanitizeAuditDetail("sale_dm_scenario_create", { result: "created" })).toEqual({ result: "created" });
     expect(sanitizeAuditDetail("sale_dm_scenario_delete", { result: "deleted" })).toEqual({ result: "deleted" });
   });
+
+  it("種類を変える(sale_dm_scenario_change): id と件数は残し、本文は [REDACTED]", () => {
+    const out = sanitizeAuditDetail("sale_dm_scenario_change", {
+      campaignId: "c1", propertyId: "p1", changedDrafts: 2, blankBodyCount: 1, body: "本文",
+    }) as Record<string, unknown>;
+    expect(out).toMatchObject({ campaignId: "c1", propertyId: "p1", changedDrafts: 2, blankBodyCount: 1 });
+    expect(out.body).toBe(REDACTED);
+  });
 });

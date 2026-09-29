@@ -47,7 +47,7 @@ import { PhotoGalleryPanel } from "./PhotoGalleryPanel";
 import { TransactionInfoDialog } from "./TransactionInfoDialog";
 import { readFooterData } from "@/lib/sales-sheet/footer-band";
 import { safeRandomId } from "@/lib/random-id";
-import { overflowingTableIds } from "./table-overflow";
+import { overflowingTableIds, liveOverflowTableIds } from "./table-overflow";
 import { WritebackNotice } from "./WritebackNotice";
 
 // ---------------------------------------------------------------------------
@@ -464,7 +464,9 @@ export function SalesSheetEditor({ initial }: SalesSheetEditorProps) {
     }
     return () => observer.disconnect();
   }, [editorState.document]);
-  const tableOverflowCount = overflowTableIds.length;
+  // ⚠今の図面に実在する表だけで数える。表を全部消すと測る処理は何もせずに抜け、
+  //   最後に測った記録が残る=警告が消えなかった(実機確認 132 の既知の残り)。
+  const tableOverflowCount = liveOverflowTableIds(overflowTableIds, editorState.document).length;
   const layoutWarning =
     [
       textTableOverlapCount > 0

@@ -16,7 +16,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | # | ファイル:行 | 書く項目(編集画面で変えられるもの) | 修正内容 | 追加した振る舞いテスト |
 |---|---|---|---|---|
 | 1 | `src/app/api/import/csv/route.ts:750` | `finalUpdateData`(UPDATABLE_PROPERTY_FIELDS: address/postalCode/lotNumber/buildingNumber/note/…) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/properties-csv-import-postal-code.test.ts`「13. update時にversionを進める」 |
-| 2 | `src/app/api/import/jobs/[jobId]/rollback/route.ts:502`(2026-09-21 main合流で行番号ずれ・旧:461→493→外部レビュー対応で502) | `restoreData`(RESTORABLE_PROPERTY_FIELDS = UPDATABLE_PROPERTY_FIELDS ∩ PROPERTY_TRACKED_FIELDS) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/import-rollback-restore-version.test.ts`(新規) |
+| 2 | `src/app/api/import/jobs/[jobId]/rollback/route.ts:525`(2026-09-21 main合流で行番号ずれ・旧:461→493→外部レビュー対応で502→2026-09-28 業者からの反響の除外で525) | `restoreData`(RESTORABLE_PROPERTY_FIELDS = UPDATABLE_PROPERTY_FIELDS ∩ PROPERTY_TRACKED_FIELDS) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/import-rollback-restore-version.test.ts`(新規) |
 | 3 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:344` | `propertyUpdates`(lotNumber/buildingNumber。roomNoは対象外だが同じ更新に同居) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/manual-link-archive-filter.test.ts`「物件の空欄補完は version を進める」 |
 | 4 | `src/app/api/import/reception-owner/route.ts:354` | `updates`(lotNumber/buildingNumber/roomNo。同上) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/reception-owner-archive-race.test.ts`「物件の空欄補完(lotNumber)は…」 |
 | 5 | `src/app/api/import/reception-owner/route.ts:405` | `dmStatus`(hold→send昇格。PropertyEditForm「DM判断」で編集可能) | `data` に `version: { increment: 1 }` を追加 | 同上「DM○による dmStatus: hold→send の昇格は…」 |
@@ -41,7 +41,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/admin/owners/correction/mislink/route.ts:435` | `property.updatedAt` のみ | 同上。`updatedAt` は `updatePropertySchema` にも `property-edit-form.tsx` の FORM_FIELDS にも無い |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:262` | `owner.updatedAt` のみ | 同上(所有者行ロックtouch) |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:180` | `owner.updatedAt` のみ | 同上 |
-| `src/app/api/import/paste/commit/route.ts:406` | `owner.updatedAt` のみ | 同上(既存所有者へのリンク可否確認のための行ロックtouch) |
+| `src/app/api/import/paste/commit/route.ts:407` | `owner.updatedAt` のみ | 同上(既存所有者へのリンク可否確認のための行ロックtouch) |
 | `src/app/api/import/reception-owner/route.ts:589` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/owners/[id]/memos/route.ts:241` | (コード本体ではない) | **正規表現の誤検出**。`owner.updateMany({ where: { id, isArchived: false } })` という文字列は、実際の呼び出しの使い方を説明する**コードコメント**であり、実行されるコードではない(実際の呼び出しは同ファイル252行目) |
 | `src/app/api/owners/[id]/memos/route.ts:252` | `owner.updatedAt` のみ | メモ作成時の行ロックtouch(archive/mergeとの直列化用)。owner本体のフィールドは一切書かない |
@@ -80,6 +80,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/properties/[id]/actions/route.ts:157` | `property` のアクション実行結果フィールド |
 | `src/app/api/properties/[id]/route.ts:422` | `property` の編集画面フィールド一式(編集画面本体の保存窓口) |
 | `src/lib/sales-sheet/property-writeback/apply-writeback.ts:30` | `property` の販売条件(販売図面の作成画面で入れた値の書き戻し。F3で追加。呼び出し側が `FOR UPDATE`+担当者スコープを取った上で `where` に version を付けて書く) |
+| `src/app/api/properties/sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts:212` | `property.dmScenarioId`(売却DMの発送の画面から物件単位で「種類を変える」。DMの種類 PR-S2 Task 5。物件行 `FOR UPDATE`+編集中の鍵の確認の後、`where` に読んだ version を付けて書く・変更履歴1行) |
 | `src/app/api/properties/bulk-update/route.ts:87` | `property.caseStatus`/`registryStatus`/`dmStatus`/`assignedTo` |
 | `src/lib/investigation/fetch-investigation.ts:646` | `property.zoningDistrict`/`buildingCoverageRatio`/`floorAreaRatio` |
 | `src/lib/registry-fetch/auto-fetch.ts:4294` | `property.registryStatus = scheduled`(有料取得の予約) |
@@ -90,6 +91,8 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 合計: 要修正11 + 対象外15 + 対応済28 = **54件**(全件解決・unresolved行なし)。
 
 ⚠追記(F3・販売図面の書き戻し): `apply-writeback.ts:30` を1件足して **55件**。同ファイルの `building.updateMany`(50行目)は走査の対象表(物件・所有者)に入らないため一覧には載らない(版番号は同じく `where` で照合し `increment` している)。
+
+⚠追記(DMの種類 PR-S2 Task 5・「種類を変える」): `sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts:212` を1件足して **56件**。
 
 ## 判定の根拠にした資料
 

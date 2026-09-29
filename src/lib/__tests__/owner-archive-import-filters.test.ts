@@ -215,22 +215,16 @@ describe("POST /api/import/owner-csv: archived owner を name+address 重複候�
 // ── owner-csv: phone dedup ──────────────────────────────────────────────────
 
 describe("POST /api/import/owner-csv: archived owner を name+phone 重複候補にしない", () => {
-  it("dedup findFirst の where に isArchived=false が含まれる", async () => {
-    // address なし → findMany は走らず、phone 経路の findFirst のみ呼ばれる
+  it("dedup の候補取り出し(同じ氏名)に isArchived=false が含まれる", async () => {
+    // address なし → phone 経路で同じ氏名の候補を取り出し、数字だけで比べる(@codex P1 #455)
     const csv = "氏名,電話番号\nテスト次郎,090-1111-2222\n";
     await OWNER_CSV_POST(makeOwnerCsvRequest(csv));
 
-    expect(pm.owner.findFirst).toHaveBeenCalled();
-    const dedupCall = pm.owner.findFirst.mock.calls.find(
-      (c) =>
-        c[0]?.where?.name === "テスト次郎" && c[0]?.where?.phone !== undefined,
+    const dedupCall = pm.owner.findMany.mock.calls.find(
+      (c) => c[0]?.where?.name === "テスト次郎",
     );
     expect(dedupCall).toBeDefined();
-    expect(dedupCall![0].where).toMatchObject({
-      name: "テスト次郎",
-      phone: "090-1111-2222",
-      isArchived: false,
-    });
+    expect(dedupCall![0].where).toEqual({ name: "テスト次郎", isArchived: false, phone: { not: null } });
   });
 
   it("archived owner と name/phone が一致しても duplicate にならない", async () => {

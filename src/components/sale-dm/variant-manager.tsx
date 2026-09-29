@@ -21,6 +21,7 @@ import {
 } from "@/lib/sale-dm-letter/adjust-model";
 import { AiTextSteps } from "@/components/sale-dm/ai-text-steps";
 import { guideTargetIds } from "@/lib/sale-dm-letter/step-guide";
+import { isScenarioCampaignView } from "@/lib/sale-dm-letter/scenario-campaign-ui";
 
 const DEFAULT_OPTIONS: SaleDmVariantOptions = {
   designTemplate: "formal",
@@ -109,7 +110,9 @@ export default function SaleDmVariantManager({
       setLetter({ ...letter, bodyTemplate: pasteBody, bodyDigest: r.bodyDigest });
       setLetterNotice(
         r.changed
-          ? "本文を保存しました。続けて「この型の全宛先に適用」を押してください"
+          ? isScenarioCampaignView(campaign)
+            ? "本文を保存しました。続けて「差し込み(この種類の全宛先へ)」を押してください"
+            : "本文を保存しました。続けて「この型の全宛先に適用」を押してください"
           : "同じ本文が保存済みです（変更はありません）",
       );
       onChanged();
@@ -225,11 +228,15 @@ export default function SaleDmVariantManager({
 
   // 手順の案内が光らせる型(いま本文が要る型)。
   const guideIds = guideTargetIds(campaign);
+  // 種類つきの発送(DMの種類 PR-S2): 型は種類から写したもの。追加・編集・削除・均等に割り当ては出さない
+  // (サーバーも 409 で断る)。文面の貼り直し・差し込みは出す。種類なしの発送の画面は変えない。
+  const scenario = isScenarioCampaignView(campaign);
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-gray-700">A/Bの型</h3>
+        <h3 className="text-sm font-medium text-gray-700">{scenario ? "お手紙(DMの種類ごと)" : "A/Bの型"}</h3>
+        {!scenario && (
         <button
           type="button"
           onClick={startNew}
@@ -238,6 +245,7 @@ export default function SaleDmVariantManager({
         >
           <Plus className="h-3.5 w-3.5" /> 型を追加
         </button>
+        )}
       </div>
 
       {error && <p className="text-xs text-red-600">{error}</p>}
@@ -246,7 +254,7 @@ export default function SaleDmVariantManager({
         {campaign.variants.map((v) => (
           <li key={v.id} className="flex items-center justify-between rounded border border-gray-200 px-2 py-1.5 text-xs">
             <div>
-              <span className="font-medium text-gray-700">{v.label}</span>
+              <span className="font-medium text-gray-700">{scenario ? `DMの種類: ${v.label}` : v.label}</span>
               <span className="ml-2 text-gray-400">
                 割当 {countByVariant(v.id)} 件（送付済 {sentByVariant(v.id)}）
               </span>
@@ -264,6 +272,7 @@ export default function SaleDmVariantManager({
               >
                 <FileText className="h-3.5 w-3.5" />
               </button>
+              {!scenario && (
               <button
                 type="button"
                 onClick={() => startEdit(v)}
@@ -273,6 +282,8 @@ export default function SaleDmVariantManager({
               >
                 <Pencil className="h-3.5 w-3.5" />
               </button>
+              )}
+              {!scenario && (
               <button
                 type="button"
                 onClick={() => remove(v)}
@@ -282,6 +293,7 @@ export default function SaleDmVariantManager({
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
+              )}
             </div>
           </li>
         ))}
@@ -312,7 +324,9 @@ export default function SaleDmVariantManager({
               割当で移ってきた宛先（本文は空）に何も入れられない。 */}
           {letter.frozen && letter.bodyTemplate ? (
             <p className="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-800">
-              この型はすでに送付の実績があるため、文面は変更できません。文面を変えるときは新しい型を追加してください。
+              {scenario
+                ? "この種類の手紙はすでに送付の実績があるため、文面は変更できません。文面を変えるときは「DMの種類」の画面で直し、新しい発送を作ってください。"
+                : "この型はすでに送付の実績があるため、文面は変更できません。文面を変えるときは新しい型を追加してください。"}
               なお、保存済みの文面を「まだ本文が入っていない宛先」へ入れ直すことはできます（下のボタン）。
             </p>
           ) : (
@@ -370,7 +384,7 @@ export default function SaleDmVariantManager({
                 data-guide={letterFor?.id === guideIds.dmVariantId ? "apply" : undefined}
                 className="rounded border border-indigo-300 bg-white px-2.5 py-1 text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
               >
-                この型の全宛先に適用
+                {scenario ? "差し込み(この種類の全宛先へ)" : "この型の全宛先に適用"}
               </button>
               <button
                 type="button"
@@ -389,7 +403,7 @@ export default function SaleDmVariantManager({
         </div>
       )}
 
-      {editing && (
+      {!scenario && editing && (
         <VariantForm
           form={form}
           setForm={setForm}
@@ -400,6 +414,7 @@ export default function SaleDmVariantManager({
         />
       )}
 
+      {!scenario && (
       <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2">
         <span className="text-xs text-gray-500">未送付の宛先を</span>
         <select
@@ -423,6 +438,7 @@ export default function SaleDmVariantManager({
           均等に割り当て
         </button>
       </div>
+      )}
     </div>
   );
 }

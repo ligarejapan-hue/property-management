@@ -36,6 +36,7 @@ import {
 import { structuredFieldsFor } from "@/lib/paste-import/structured-fields";
 import { countPasteDuplicatesUnscoped } from "@/lib/paste-import-duplicates";
 import type { PropertyType, OccupancyStatus } from "@/generated/prisma";
+import { phoneForStore } from "@/lib/phone-format-jp";
 
 // ---------------------------------------------------------------------------
 // 入力の検査（全体レビュー I-3）
@@ -565,7 +566,8 @@ export async function POST(request: NextRequest) {
             data: {
               name: body.owner.name.trim(),
               nameKana: body.owner.nameKana?.trim() || null,
-              phone: body.owner.phone?.trim() || null,
+              // 画面と同じ規則でそろえる(数字だけならハイフンを入れる・手の区切りは残す)。
+              phone: phoneForStore(body.owner.phone),
               email: body.owner.email?.trim() || null,
               // ⚠反響フォームの住所は本人の連絡先住所であり、登記上の住所とは
               //   限らない。address(登記上住所)は空のままにする(設計書 §7・

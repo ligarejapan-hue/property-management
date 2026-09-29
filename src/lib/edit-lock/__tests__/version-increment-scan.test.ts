@@ -47,7 +47,7 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/import/csv/route.ts:750":
     "property の UPDATABLE_PROPERTY_FIELDS(CSV重複更新)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/import/jobs/[jobId]/rollback/route.ts:502":
+  "src/app/api/import/jobs/[jobId]/rollback/route.ts:525":
     "property の RESTORABLE_PROPERTY_FIELDS(ロールバック復元)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
   "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:302":
@@ -94,6 +94,9 @@ const VERSIONED: Record<string, string> = {
     "property の販売条件(販売図面の作成画面で入れた値の書き戻し)+version increment" +
     "(F3で追加。呼び出し側が FOR UPDATE と担当者スコープを取った上で、" +
     "where に version を付けて書く)",
+  "src/app/api/properties/sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts:212":
+    "property.dmScenarioId(売却DMの発送の画面から物件単位で「種類を変える」)+version increment" +
+    "(DMの種類 PR-S2 Task 5。物件行 FOR UPDATE・編集中の鍵の確認の後、where に読んだ version を付けて書く)",
   "src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:244":
     "property.dmStatus(宛先不明連動のno_send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
@@ -154,7 +157,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },
-  "src/app/api/import/paste/commit/route.ts:524": {
+  "src/app/api/import/paste/commit/route.ts:525": {
     reason: "owner.updatedAt のみ(既存所有者へのリンク可否確認のための touch)",
     keys: ["updatedAt"],
   },

@@ -60,8 +60,9 @@ beforeEach(() => {
   ]);
   (getOwnerDisplayConfig as Fn).mockResolvedValue({ name: "full", zip: "full", address: "full", nameKana: "full" });
   pm.dmCampaign.findFirst.mockResolvedValue({ id: "c1" });
-  pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1" });
-  pm.dmLpVariant.findFirst.mockResolvedValue({ id: "l1", campaignId: "c1", ...OPT, templateFrozenAt: null });
+  pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "u1", defaultScenarioId: null });
+  // scenarioId: null / campaign.defaultScenarioId: null = 種類なしの発送(既存挙動)。
+  pm.dmLpVariant.findFirst.mockResolvedValue({ id: "l1", campaignId: "c1", ...OPT, templateFrozenAt: null, scenarioId: null, campaign: { defaultScenarioId: null } });
   pm.dmLpVariant.create.mockResolvedValue({ id: "l1", label: "A" });
   pm.dmLpVariant.update.mockResolvedValue({ id: "l1", label: "A" });
   pm.dmLpVariant.deleteMany.mockResolvedValue({ count: 1 });
@@ -81,7 +82,7 @@ describe("GET/POST lp-variants", () => {
     expect((writeAuditLog as Fn).mock.calls[0][0].action).toBe("sale_dm_lp_variant_create");
   });
   it("作成は他人のキャンペーンだと 404", async () => {
-    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "someone" });
+    pm.dmCampaign.findUnique.mockResolvedValue({ id: "c1", createdBy: "someone", defaultScenarioId: null });
     expect((await POST(req("POST", { label: "A", options: OPT }), ctx)).status).toBe(404);
   });
 });
@@ -121,7 +122,7 @@ describe("PATCH lp-variants/[lpId]", () => {
     expect((await res.json()).error.code).toBe("VARIANT_LOCKED");
   });
   it("凍結印の列だけでも止まる(二重判定)", async () => {
-    pm.dmLpVariant.findFirst.mockResolvedValue({ id: "l1", campaignId: "c1", ...OPT, templateFrozenAt: new Date() });
+    pm.dmLpVariant.findFirst.mockResolvedValue({ id: "l1", campaignId: "c1", ...OPT, templateFrozenAt: new Date(), scenarioId: null, campaign: { defaultScenarioId: null } });
     expect((await PATCH(req("PATCH", { options: { appeal: "vacant" } }), ctxLp)).status).toBe(409);
   });
   it("dm_lp_variants 行 → この型の宛先行 の順に FOR UPDATE でロックしてから判定する", async () => {

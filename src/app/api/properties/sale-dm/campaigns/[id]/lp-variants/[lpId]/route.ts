@@ -6,6 +6,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmLpVariantUpdateSchema } from "@/lib/validators-sale-dm";
 import { SETTLED_DRAFT_STATUSES, isVariantFrozen } from "@/lib/sale-dm-letter/freeze";
+import { assertNotScenarioCampaign, assertNotScenarioVariant } from "@/lib/sale-dm-letter/scenario-campaign-guard";
 
 const OPTION_KEYS = ["tone", "length", "appeal", "strength"] as const;
 
@@ -28,9 +29,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       await tx.$queryRaw`SELECT id FROM dm_lp_variants WHERE id = ${lpId}::uuid AND campaign_id = ${id}::uuid FOR UPDATE`;
       const existing = await tx.dmLpVariant.findFirst({
         where: { id: lpId, campaignId: id },
-        select: { id: true, tone: true, length: true, appeal: true, strength: true, templateFrozenAt: true },
+        select: { id: true, tone: true, length: true, appeal: true, strength: true, templateFrozenAt: true, scenarioId: true },
       });
       if (!existing) throw new ApiError(404, "指定されたLP型が見つかりません", "LP_VARIANT_NOT_FOUND");
+      // DMの種類から写した型は(ラベル・文体いずれも)変更できない(設計§3.4)。
+      assertNotScenarioVariant(existing);
 
       const data: Prisma.DmLpVariantUpdateInput = {};
       if (parsed.label !== undefined) data.label = parsed.label;
@@ -157,8 +160,13 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
 
     const { deleted, detachedCount } = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM dm_lp_variants WHERE id = ${lpId}::uuid AND campaign_id = ${id}::uuid FOR UPDATE`;
-      const row = await tx.dmLpVariant.findFirst({ where: { id: lpId, campaignId: id }, select: { templateFrozenAt: true } });
+      const row = await tx.dmLpVariant.findFirst({
+        where: { id: lpId, campaignId: id },
+        select: { templateFrozenAt: true, campaign: { select: { defaultScenarioId: true } } },
+      });
       if (!row) throw new ApiError(404, "指定されたLP型が見つかりません", "LP_VARIANT_NOT_FOUND");
+      // 種類つきの発送では型の削除を断る(宛先を外す付け替えを伴うため・設計§3.4)。detach の前。
+      assertNotScenarioCampaign(row.campaign);
       const settledCount = await tx.dmRecipientDraft.count({
         where: { campaignId: id, lpVariantId: lpId, status: { in: [...SETTLED_DRAFT_STATUSES] } },
       });

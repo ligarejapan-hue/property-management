@@ -6,6 +6,7 @@ import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmVariantUpdateSchema } from "@/lib/validators-sale-dm";
 import { SETTLED_DRAFT_STATUSES, isVariantFrozen, markVariantsFrozen, markLpVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
+import { assertNotScenarioCampaign, assertNotScenarioVariant } from "@/lib/sale-dm-letter/scenario-campaign-guard";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string; variantId: string }> }) {
   try {
@@ -18,11 +19,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     // 既存の option 値も取得し、送信値と比較して「実際に変わった」ときだけ無効化する(下記)。
     const existing = await prisma.dmVariant.findFirst({
       where: { id: variantId, campaignId: id },
-      select: { id: true, designTemplate: true, tone: true, length: true, appeal: true, strength: true, extraInstruction: true, lpUrl: true },
+      select: { id: true, designTemplate: true, tone: true, length: true, appeal: true, strength: true, extraInstruction: true, lpUrl: true, scenarioId: true },
     });
     if (!existing) {
       throw new ApiError(404, "指定された型が見つかりません", "VARIANT_NOT_FOUND");
     }
+    // DMの種類から写した型は(ラベル・lpUrl・文体いずれも)変更できない(設計§3.4)。
+    assertNotScenarioVariant(existing);
 
     const data: Prisma.DmVariantUpdateInput = {};
     if (parsed.label !== undefined) data.label = parsed.label;
@@ -229,10 +232,15 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     await assertSaleDmCampaignOwned(id, session.id); // 作成者本人のキャンペーンの型のみ削除可。
 
     // 当該キャンペーンに存在する型のみ削除可。stale/削除済み id は Prisma P2025→500 でなく 404 に。
-    const exists = await prisma.dmVariant.findFirst({ where: { id: variantId, campaignId: id }, select: { id: true } });
+    const exists = await prisma.dmVariant.findFirst({
+      where: { id: variantId, campaignId: id },
+      select: { id: true, campaign: { select: { defaultScenarioId: true } } },
+    });
     if (!exists) {
       throw new ApiError(404, "指定された型が見つかりません", "VARIANT_NOT_FOUND");
     }
+    // 種類つきの発送では型の削除を断る(画面を通さず組を壊せてしまうため・設計§3.4)。
+    assertNotScenarioCampaign(exists.campaign);
 
     // A/B 純度: 割当済みの下書きがある型は削除できない(別型へ移してから)。count→delete の TOCTOU
     // (チェックと削除の間に assign が下書きをこの型へ割り当てると、削除済み variant を参照する孤児 draft が

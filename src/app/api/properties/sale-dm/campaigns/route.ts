@@ -21,6 +21,12 @@ import { MAX_GENERATE_ITEMS, resolveLetterModel } from "@/lib/sale-dm-letter";
 import { resolveTrackingBaseUrl, resolveLpUrl } from "@/lib/sale-dm-letter/tracking";
 import { loadSaleDmConfig } from "@/lib/sale-dm-letter/config-store";
 import { SaleDmError } from "@/lib/sale-dm-letter/types";
+import { isScenarioCampaign, isValidScenarioPair } from "@/lib/sale-dm-letter/scenario-campaign";
+import {
+  checkScenarioReady, attachScenario, lockAllScenariosForShare, loadScenariosForCopy, copyScenarioIntoCampaign,
+} from "@/lib/sale-dm-letter/scenario-copy";
+import { resolveScenario } from "@/lib/sale-dm-letter/scenario-resolve";
+import { isPropertyScopedRole, canAccessPropertyRecord } from "@/lib/property-access";
 import { randomBytes } from "crypto";
 
 // 冪等再返却でも作成時と同じ件数(excludedTerminal 等)を返すための結果メタの取り出し。
@@ -35,7 +41,7 @@ const idempotentPayload = (id: string, snapshot: unknown): Record<string, unknow
       : undefined;
   return {
     campaignId: id,
-    idempotent: true,
+    idempotent: true, blankBodyCount: 0, lpMissingScenarios: [], scenarioCounts: {}, // 種類なし(メタに無い)も同じ形で返す
     ...(meta && typeof meta === "object" && !Array.isArray(meta)
       ? (meta as Record<string, unknown>)
       : {}),
@@ -252,7 +258,8 @@ export async function POST(request: NextRequest) {
     let claimed: { id: string };
     try {
       claimed = await prisma.dmCampaign.create({
-        data: { name: body.name, createdBy: session.id, filterSnapshot: body.filters ?? {}, idempotencyKey: idempotencyKey ?? null },
+        // defaultScenarioId=「種類つきの発送」の印(作成時に一度だけ立ち、後から変わらない・設計 §3.3.0)。
+        data: { name: body.name, createdBy: session.id, filterSnapshot: body.filters ?? {}, idempotencyKey: idempotencyKey ?? null, defaultScenarioId: body.defaultScenarioId ?? null },
         select: { id: true },
       });
     } catch (e) {
@@ -268,6 +275,11 @@ export async function POST(request: NextRequest) {
           throw new ApiError(409, "同じ作成キーの処理が進行中です。少し待って再試行してください", "CAMPAIGN_PROCESSING");
         }
       }
+      // 形式は正しいが台帳に無い既定の種類=外部キー違反(P2003)。500 にせず、tx 内の検査と同じ 409 で返す
+      // (クレームは作られていない=何も書いていない)。
+      if (body.defaultScenarioId && e && typeof e === "object" && (e as { code?: unknown }).code === "P2003") {
+        throw new ApiError(409, "選んだ既定の種類は使えなくなりました。選び直してください", "SCENARIO_UNAVAILABLE");
+      }
       throw e;
     }
 
@@ -282,6 +294,12 @@ export async function POST(request: NextRequest) {
     let skippedByUnlinkCount = 0;
     // 拒否・宛先不明(terminal 反響)で除外した宛先数(応答・監査に載せる=黙って外さない)。
     let excludedTerminalCount = 0;
+    // 種類つきの発送の結果(設計 §3.3.0)。種類なしの作成では 0/[]/{} のまま。
+    let blankBodyCount = 0;
+    let lpMissingScenarios: string[] = [];
+    const scenarioCounts: Record<string, number> = {};
+    let scenarioCount = 0;
+    const defaultScenarioId = body.defaultScenarioId ?? null;
     try {
       // ⚠本文は**空のまま**作る(設計 §2.1)。文面は型ごとにプロンプトを表示 → 手元のAIで
       //   作成 → 貼り付け → その型の全宛先へ適用、の順で入れる。空本文の下書きは
@@ -309,6 +327,10 @@ export async function POST(request: NextRequest) {
         const linkSet = new Set(
           currentLinks.map((l) => `${l.propertyId}\u0000${l.ownerId}`),
         );
+        // ロック保持中の再検証: グループの誰かがこの物件の所有者でなくなっていたら生成しない(下の宛先作成で使う)。
+        const isStillLinked = (m: (typeof sliced)[number]) =>
+          m.groupOwnerIds.length === 0 ||
+          m.groupOwnerIds.every((oid) => linkSet.has(`${m.propertyId}\u0000${oid}`));
         // 拒否・宛先不明(terminal 反響)の宛先グループは**保存前に**除外する。
         // A(宛名CSV)には #366 R4 P1 で入った除外が B(売却DM)に無く、一度お断りを
         // いただいた方へ手紙が作られ得た(2026-08-16 発見・資料PR #382 の @codex 指摘)。
@@ -340,7 +362,65 @@ export async function POST(request: NextRequest) {
             "ALL_EXCLUDED_TERMINAL",
           );
         }
-        const variant = await tx.dmVariant.create({
+        // ── 種類つきの発送(設計 §3.3・§3.3.0・§3.3.1)。種類なしはこの分岐に入らない=台帳を読まない。
+        //   順: 所有者→物件(上で FOR SHARE 済み)→ 物件の読み直し → 台帳の全行 FOR SHARE → 台帳の読み込み。
+        //   判定・差し込み・担当範囲には、ロック後にここで読み直した物件の値と台帳だけを使う。
+        let scenarioPlan: {
+          freshById: Map<string, { address: string | null; propertyType: string | null }>;
+          scenarioByProperty: Map<string, string>;
+          copied: Map<string, { name: string; letterVariantId: string; lpVariantId: string | null; template: string }>;
+          lpVariants: Array<{ id: string; scenarioId: string }>;
+        } | null = null;
+        if (isScenarioCampaign({ defaultScenarioId })) {
+          // 所有者リンク切れで宛先が1件も作られない物件は、種類の判定・写し・件数に入れない
+          // (作られない宛先のために作成を止めたり、使われない型を写したりしない)。
+          const survivingPropertyIds = [...new Set(surviving.filter(({ m }) => isStillLinked(m)).map(({ m }) => m.propertyId))];
+          const fresh = await tx.property.findMany({
+            where: { id: { in: survivingPropertyIds } },
+            select: { id: true, address: true, propertyType: true, dmScenarioId: true, introductionRoute: true, createdBy: true, assignedTo: true },
+          });
+          // 読み直せない物件がある/現場担当の担当範囲から外れた=事前の確認と食い違う → 書かずに再試行させる。
+          if (
+            fresh.length !== survivingPropertyIds.length ||
+            (isPropertyScopedRole(session.role) && fresh.some((p) => !canAccessPropertyRecord(session, p)))
+          ) {
+            throw new ApiError(409, "対象の物件が変わりました。もう一度お試しください", "RECIPIENTS_CHANGED");
+          }
+          await lockAllScenariosForShare(tx);
+          const scenarios = await loadScenariosForCopy(tx);
+          const rows = scenarios.map((s) => ({ id: s.id, name: s.name, autoKey: s.autoKey, active: s.active, deletedAt: s.deletedAt }));
+          const def = scenarios.find((s) => s.id === defaultScenarioId);
+          if (!def || !def.active || def.deletedAt) {
+            throw new ApiError(409, "選んだ既定の種類は使えなくなりました。選び直してください", "SCENARIO_UNAVAILABLE");
+          }
+          const scenarioByProperty = new Map<string, string>();
+          for (const p of fresh) {
+            const r = resolveScenario({ propertyScenarioId: p.dmScenarioId, introductionRoute: p.introductionRoute, defaultScenarioId, scenarios: rows });
+            if (!r.ok) {
+              throw new ApiError(409, "物件のDMの種類を確かめてください(使えない種類が指定されています)", "PROPERTY_SCENARIO_MISSING");
+            }
+            scenarioByProperty.set(p.id, r.scenarioId);
+          }
+          const used = [...new Set(scenarioByProperty.values())].map((id) => scenarios.find((s) => s.id === id)!);
+          const notReady = used.filter((s) => !checkScenarioReady(s).ok).map((s) => s.name);
+          if (notReady.length > 0) {
+            // ApiError は詳細の引数を持たない(第4引数は providerCode)ので、種類名はメッセージにだけ入れる。
+            throw new ApiError(409, `手紙の文面がまだ登録されていないDMの種類があります: ${notReady.join("、")}`, "SCENARIO_NOT_READY");
+          }
+          const copied = new Map<string, { name: string; letterVariantId: string; lpVariantId: string | null; template: string }>();
+          for (const s of used) {
+            // 本文は写しが返す本文(作成では必ず新しく写す=台帳の本文と同じ)。
+            copied.set(s.id, { name: s.name, ...(await copyScenarioIntoCampaign(tx, claimed.id, s)) });
+          }
+          lpMissingScenarios = used.filter((s) => copied.get(s.id)!.lpVariantId === null).map((s) => s.name);
+          scenarioCount = used.length;
+          const lpVariants = [...copied.entries()]
+            .filter(([, c]) => c.lpVariantId !== null)
+            .map(([scenarioId, c]) => ({ id: c.lpVariantId!, scenarioId }));
+          scenarioPlan = { freshById: new Map(fresh.map((p) => [p.id, p])), scenarioByProperty, copied, lpVariants };
+        }
+        // 種類なし(今までどおり)=既定型 A を1つ。種類つきでは作らない(型は台帳から写したものだけ)。
+        const variant = scenarioPlan !== null ? null : await tx.dmVariant.create({
           data: {
             campaignId: claimed.id, label: "A",
             designTemplate: body.options.designTemplate, tone: body.options.tone,
@@ -350,21 +430,37 @@ export async function POST(request: NextRequest) {
         });
         for (const { m, d } of surviving) {
           // ロック保持中の再検証: グループの誰かがこの物件の所有者でなくなっていたら生成しない。
-          if (
-            m.groupOwnerIds.length > 0 &&
-            !m.groupOwnerIds.every((oid) => linkSet.has(`${m.propertyId}\u0000${oid}`))
-          ) {
+          if (!isStillLinked(m)) {
             skippedByUnlinkCount += 1;
             continue;
           }
+          // 種類つき: 共通手順 attachScenario で、その物件の種類の手紙の型と LP の型を組で付け、
+          // 本文を読み直した物件の値で差し込む。差し込めない宛先は本文を空のまま下書きにし、件数を数える(§3.3.0)。
+          let assigned: { variantId: string; lpVariantId?: string | null; body: string };
+          if (scenarioPlan !== null) {
+            const scenarioId = scenarioPlan.scenarioByProperty.get(m.propertyId)!;
+            const c = scenarioPlan.copied.get(scenarioId)!;
+            const attached = attachScenario(c, scenarioPlan.freshById.get(m.propertyId)!);
+            // 組の決まり(§3.3.0)。写した組をそのまま付けるので必ず成り立つ=外れたらバグ(500・何も書かない)。
+            if (!isValidScenarioPair({ defaultScenarioId }, { id: attached.variantId, scenarioId }, attached.lpVariantId, scenarioPlan.lpVariants)) {
+              throw new Error("invariant: 種類の手紙とLPの組が決まりに合わない");
+            }
+            if (attached.blank) blankBodyCount += 1;
+            scenarioCounts[c.name] = (scenarioCounts[c.name] ?? 0) + 1;
+            assigned = { variantId: attached.variantId, lpVariantId: attached.lpVariantId, body: attached.body };
+          } else {
+            assigned = { variantId: variant!.id, body: d.body ?? "" };
+          }
           const createdDraft = await tx.dmRecipientDraft.create({
             data: {
-              campaignId: claimed.id, variantId: variant.id, propertyId: m.propertyId,
+              campaignId: claimed.id, variantId: assigned.variantId,
+              ...(scenarioPlan !== null ? { lpVariantId: assigned.lpVariantId ?? null } : {}),
+              propertyId: m.propertyId,
               representativeOwnerId: m.representativeOwnerId,
               recipientName: m.recipientName, recipientZip: m.recipientZip,
               recipientAddress: m.recipientAddress, honorific: m.honorific,
               coOwnerCount: m.coOwnerCount,
-              body: d.body ?? "",
+              body: assigned.body,
               // ⚠AIを呼んでいないので**モデル名を記録しない**（@codex #376 R5）。
               //   ここで既定値を書くと、外部AI（ChatGPT/Gemini等）や手書きで入れた文面にも
               //   「このモデルが作った」という嘘の出所が残る。
@@ -415,6 +511,9 @@ export async function POST(request: NextRequest) {
                 excludedTerminal: excludedTerminalCount,
                 failed: drafts.filter((d) => d.error).length,
                 truncated,
+                // 種類つきの発送だけが持つ件数(種類なしには書かない=再返却は idempotentPayload の既定値で埋まる)。
+                ...(isScenarioCampaign({ defaultScenarioId })
+                  ? { blankBodyCount, lpMissingScenarios, scenarioCounts } : {}),
               },
             },
           },
@@ -429,13 +528,13 @@ export async function POST(request: NextRequest) {
     // AuditLog は非PIIメタのみ(本文・宛名・住所は残さない)。
     await writeAuditLog({
       userId: session.id, action: "sale_dm_campaign_create", targetTable: "dm_campaigns",
-      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, failed: drafts.filter((d) => d.error).length, truncated, createdAt: new Date().toISOString() },
+      detail: { campaignId: claimed.id, requested: recipients.length, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, failed: drafts.filter((d) => d.error).length, truncated, ...(isScenarioCampaign({ defaultScenarioId }) ? { scenarioCount, blankBodyCount } : {}), createdAt: new Date().toISOString() },
     });
 
     return NextResponse.json(
       // requested=生成する手紙数(共有者ぶんで物件数より多くなり得る)。matchedProperties=対象になった物件数
       // (=選択のうち住所ありで生成対象になった物件)。UI の「対象外」通知は物件単位で出すため両方返す。
-      { campaignId: claimed.id, requested: recipients.length, matchedProperties, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, failed: drafts.filter((d) => d.error).length, truncated },
+      { campaignId: claimed.id, requested: recipients.length, matchedProperties, generated: drafts.length, saved: persistedCount, skippedByUnlink: skippedByUnlinkCount, excludedTerminal: excludedTerminalCount, failed: drafts.filter((d) => d.error).length, truncated, blankBodyCount, lpMissingScenarios, scenarioCounts },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

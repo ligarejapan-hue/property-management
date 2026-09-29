@@ -43,6 +43,8 @@ const TOLERANCE_MS = 5000;
 // 査定申込(dm_inquiries)の個人情報は消さない(draft_id の FK は RESTRICT)。申込がある物件を消そうとすると
 // P2003 で tx 全体が落ち、無関係な行のロールバックまで巻き添えになるため、削除対象から外して blocked に載せる。
 const HAS_DM_INQUIRIES_REASON = "査定申込があるため削除できません (has_dm_inquiries)";
+// 業者からの反響(agent_inquiries.property_id も RESTRICT)も同じ理由で削除対象から外す(@codex #454 R8)。
+const HAS_AGENT_INQUIRIES_REASON = "業者からの反響があるため削除できません (has_agent_inquiries)";
 
 export async function POST(
   req: NextRequest,
@@ -131,6 +133,7 @@ export async function POST(
                   investigationLogs: true,
                   // 申込が1件でもある宛先の数(申込の中身は読まない)。
                   dmRecipientDrafts: { where: { inquiries: { some: {} } } },
+                  agentInquiries: true,
                 },
               },
             },
@@ -157,6 +160,14 @@ export async function POST(
           rowNumber: row.rowNumber,
           action: "delete",
           reason: HAS_DM_INQUIRIES_REASON,
+        });
+        continue;
+      }
+      if (c.agentInquiries > 0) {
+        blockedDetails.push({
+          rowNumber: row.rowNumber,
+          action: "delete",
+          reason: HAS_AGENT_INQUIRIES_REASON,
         });
         continue;
       }
@@ -428,14 +439,25 @@ export async function POST(
       //   消えて鍵が孤児になる。acquire 側は必ず物件行を FOR UPDATE してから鍵を書くので、
       //   同じ行をここで押さえてから後始末すれば、どちらが先に並んでも commit 済みの鍵を必ず拾える。
       const deleteIds = deletable.map((row) => row.createdId!);
-      const inquiryPropertyIds = new Set<string>();
+      // 削除できない物件 id → 理由(査定申込 or 業者からの反響)。
+      const inquiryPropertyIds = new Map<string, string>();
       if (deleteIds.length > 0) {
         await lockPropertiesForUpdate(tx, deleteIds);
         const draftsWithInquiries = await tx.dmRecipientDraft.findMany({
           where: { propertyId: { in: deleteIds }, inquiries: { some: {} } },
           select: { propertyId: true },
         });
-        for (const d of draftsWithInquiries) inquiryPropertyIds.add(d.propertyId);
+        for (const d of draftsWithInquiries) inquiryPropertyIds.set(d.propertyId, HAS_DM_INQUIRIES_REASON);
+        // 事前分類の後に業者からの反響が付いた物件も、行ロックの後に拾って外す(@codex #454 R8)。
+        // 反響の登録も物件の行ロックを取ってから書くので、ここで数えた後に増えない。
+        const withAgentInquiries = await tx.agentInquiry.findMany({
+          where: { propertyId: { in: deleteIds } },
+          select: { propertyId: true },
+          distinct: ["propertyId"],
+        });
+        for (const a of withAgentInquiries) {
+          if (!inquiryPropertyIds.has(a.propertyId)) inquiryPropertyIds.set(a.propertyId, HAS_AGENT_INQUIRIES_REASON);
+        }
         // 実際に削除する id(申込が付いて生き残る物件を除いたもの)だけ後始末する。
         const actualDeleteIds = deleteIds.filter((id) => !inquiryPropertyIds.has(id));
         if (actualDeleteIds.length > 0) {
@@ -449,11 +471,12 @@ export async function POST(
         }
       }
       for (const row of deletable) {
-        if (inquiryPropertyIds.has(row.createdId!)) {
+        const blockedReason = inquiryPropertyIds.get(row.createdId!);
+        if (blockedReason) {
           blockedDetails.push({
             rowNumber: row.rowNumber,
             action: "delete",
-            reason: HAS_DM_INQUIRIES_REASON,
+            reason: blockedReason,
           });
           continue;
         }

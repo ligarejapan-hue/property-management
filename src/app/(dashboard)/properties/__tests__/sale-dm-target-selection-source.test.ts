@@ -23,8 +23,11 @@ describe("properties page: 売却DM対象選択の配線", () => {
     expect(src).toContain("setPageState(updater)");
   });
 
-  it("確認ダイアログに(表示中の)選択件数を出す", () => {
-    expect(src).toContain("選択した ${ids.length} 件");
+  it("作成画面に(表示中の)選択件数を出す", () => {
+    // DMの種類 PR-S2 以降は確認ダイアログではなく作成画面(小さな窓)。件数は表示中の物件との intersect で数える。
+    expect(src).toContain("propertyCount={properties.filter((p) => selectedIds.has(p.id)).length}");
+    const dialog = readFileSync(path.resolve(process.cwd(), "src/components/sale-dm/create-campaign-dialog.tsx"), "utf-8");
+    expect(dialog).toContain("選択した {propertyCount} 件の物件で宛先の一覧を作ります");
   });
 
   it("送信回数の並べ替え(少ない順/多い順)がある", () => {

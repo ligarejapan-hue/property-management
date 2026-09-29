@@ -17,6 +17,7 @@ import LpMediaPanel from "./lp-media-panel";
 import LpPreviewPanel from "./lp-preview-panel";
 import { AiTextSteps } from "@/components/sale-dm/ai-text-steps";
 import { guideTargetIds } from "@/lib/sale-dm-letter/step-guide";
+import { isScenarioCampaignView } from "@/lib/sale-dm-letter/scenario-campaign-ui";
 
 const DEFAULT_OPTIONS: SaleDmLpVariantOptions = { tone: "formal", length: "medium", appeal: "price", strength: "low" };
 type FormState = { label: string; options: SaleDmLpVariantOptions };
@@ -123,16 +124,24 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
 
   // 手順の案内が光らせる書類のアイコン: 文章の無いLP型を割り当てた宛先がいればそのLP型(@codex #449 R1)。
   const lpGuideId = guideTargetIds(campaign).lpVariantId;
+  // 種類つきの発送(DMの種類 PR-S2): LPは種類から写したもの。追加・編集・削除は出さない(サーバーも 409)。
+  // 文章の貼り直し・写真と図・プレビューは出す。種類なしの発送の画面は変えない。
+  const scenario = isScenarioCampaignView(campaign);
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-gray-700">LP型(ご案内ページの A/B)</h3>
+        <h3 className="text-sm font-medium text-gray-700">{scenario ? "ご案内ページ(DMの種類ごと)" : "LP型(ご案内ページの A/B)"}</h3>
+        {!scenario && (
         <button type="button" onClick={startNew} disabled={busy} data-guide="add_lp" className="inline-flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
           <Plus className="h-3.5 w-3.5" /> LP型を追加
         </button>
+        )}
       </div>
-      {campaign.lpVariants.length === 0 && (
+      {scenario && campaign.lpVariants.length === 0 && (
+        <p className="text-xs text-gray-500">この発送の種類には、ご案内ページが登録されていません(お手紙のQRは会社のホームページへ転送されます)。</p>
+      )}
+      {!scenario && campaign.lpVariants.length === 0 && (
         <p className="text-xs text-gray-500">LP型がまだありません。「LP型を追加」でラベルを入れて保存し、できた行の書類のアイコンから文章を貼り付けます。文章のあるLP型を割り当てた宛先は、お手紙のQRからこのご案内ページが開きます。</p>
       )}
       {error && <p className="text-xs text-red-600">{error}</p>}
@@ -141,7 +150,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
         {campaign.lpVariants.map((v) => (
           <li key={v.id} className="flex items-center justify-between rounded border border-gray-200 px-2 py-1.5 text-xs">
             <div>
-              <span className="font-medium text-gray-700">{v.label}</span>
+              <span className="font-medium text-gray-700">{scenario ? `DMの種類: ${v.label}` : v.label}</span>
               <span className="ml-2 text-gray-400">割当 {countByLp(v.id)} 件(送付済 {sentByLp(v.id)})</span>
               {v.headline ? <span className="ml-2 text-gray-500">「{v.headline}」</span> : <span className="ml-2 text-amber-700">文章なし</span>}
             </div>
@@ -149,14 +158,18 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
               <button type="button" onClick={() => openLetter(v)} disabled={busy} data-guide={v.id === lpGuideId ? "lp_text" : undefined} aria-label={`LP型「${v.label}」の文章`} title="プロンプトを表示して、手元のAIで作った文章を貼り付けます" className="rounded p-1 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"><FileText className="h-3.5 w-3.5" /></button>
               <button type="button" onClick={() => openMedia(v)} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」の写真と図`} title={v.headline ? "写真と図" : "先に文章を保存してください"} className="rounded p-1 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><ImageIcon className="h-3.5 w-3.5" /></button>
               <button type="button" onClick={() => openPreview(v)} disabled={busy || !v.headline} aria-label={`LP型「${v.label}」のプレビュー`} title={v.headline ? "プレビュー" : "先に文章を保存してください"} className="rounded p-1 text-sky-700 hover:bg-sky-50 disabled:opacity-50"><Eye className="h-3.5 w-3.5" /></button>
+              {!scenario && (
               <button type="button" onClick={() => startEdit(v)} disabled={busy} aria-label={`LP型「${v.label}」を編集`} className="rounded p-1 text-gray-600 hover:bg-gray-100 disabled:opacity-50"><Pencil className="h-3.5 w-3.5" /></button>
+              )}
+              {!scenario && (
               <button type="button" onClick={() => remove(v)} disabled={busy} aria-label={`LP型「${v.label}」を削除`} className="rounded p-1 text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>
+              )}
             </div>
           </li>
         ))}
       </ul>
 
-      {editing && (
+      {!scenario && editing && (
         <div className="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3 text-xs">
           <label className="block">
             <span className="text-gray-600">ラベル</span>
@@ -197,7 +210,7 @@ export default function SaleDmLpVariantManager({ campaign, onChanged }: { campai
             <button type="button" onClick={() => { setLetterFor(null); setLetter(null); setLetterNotice(null); }} className="text-gray-500 hover:underline">閉じる</button>
           </div>
           {letter.frozen && letter.rawTemplate ? (
-            <p className="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-800">このLP型はすでに送付の実績があるため、文章は変更できません。文章を変えるときは新しいLP型を追加してください。</p>
+            <p className="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-800">{scenario ? "この種類のご案内ページはすでに送付の実績があるため、文章は変更できません。文章を変えるときは「DMの種類」の画面で直し、新しい発送を作ってください。" : "このLP型はすでに送付の実績があるため、文章は変更できません。文章を変えるときは新しいLP型を追加してください。"}</p>
           ) : (
             <>
               {letter.frozen && <p className="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-800">このLP型には送付の実績がありますが、文章がまだ保存されていません。最初の1回だけ登録できます。</p>}

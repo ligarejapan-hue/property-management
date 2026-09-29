@@ -4,6 +4,7 @@ import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmAccess, requireSaleDmWriteAccess, assertSaleDmCampaignOwned } from "@/lib/sale-dm-letter/route-guard";
 import { saleDmLpVariantCreateSchema } from "@/lib/validators-sale-dm";
+import { assertNotScenarioCampaign } from "@/lib/sale-dm-letter/scenario-campaign-guard";
 
 // LP型(設計 2026-09-08 §2.1)。DM型(variants route)と同じ骨組み。
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -23,8 +24,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { session } = await requireSaleDmWriteAccess();
     const { id } = await params;
     const { label, options } = saleDmLpVariantCreateSchema.parse(await parseJsonBody(request));
-    const campaign = await prisma.dmCampaign.findUnique({ where: { id }, select: { id: true, createdBy: true } });
+    const campaign = await prisma.dmCampaign.findUnique({ where: { id }, select: { id: true, createdBy: true, defaultScenarioId: true } });
     if (!campaign || campaign.createdBy !== session.id) throw new ApiError(404, "キャンペーンが見つかりません", "NOT_FOUND");
+    // 種類つきの発送では型の追加を断る(画面を通さず組を壊せてしまうため・設計§3.4)。
+    assertNotScenarioCampaign(campaign);
 
     const lpVariant = await prisma.dmLpVariant.create({
       data: { campaignId: id, label, tone: options.tone, length: options.length, appeal: options.appeal, strength: options.strength },

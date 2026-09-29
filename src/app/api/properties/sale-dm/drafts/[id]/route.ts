@@ -6,6 +6,7 @@ import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireSaleDmWriteAccess } from "@/lib/sale-dm-letter/route-guard";
 import { markVariantsFrozen, markLpVariantsFrozen } from "@/lib/sale-dm-letter/freeze";
+import { assertNotScenarioCampaign } from "@/lib/sale-dm-letter/scenario-campaign-guard";
 import { saleDmOptionsOverrideSchema } from "@/lib/validators-sale-dm";
 import {
   letterBodyIssueMessage,
@@ -38,7 +39,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         status: true,
         variantId: true,
         lpVariantId: true,
-        campaign: { select: { createdBy: true } },
+        campaign: { select: { createdBy: true, defaultScenarioId: true } },
         property: { select: { createdBy: true, assignedTo: true } },
       },
     });
@@ -77,6 +78,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
 
     if (parsed.variantId !== undefined) {
+      // 種類つきの発送では宛先1件の型の付け替えを断る(画面を通さず組を壊せてしまうため・設計§3.4)。
+      // 本文/override だけの編集(variantId 未指定)はここを通らず今までどおり許可する。
+      assertNotScenarioCampaign(draft.campaign);
       // 付け替え先は同一 campaign の型に限る(他キャンペーンの型を割り当てさせない)。
       const variant = await prisma.dmVariant.findFirst({
         where: { id: parsed.variantId, campaignId: draft.campaignId },

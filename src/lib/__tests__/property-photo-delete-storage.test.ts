@@ -30,7 +30,7 @@ describe("PropertyPhoto DELETE — storage cleanup", () => {
 
   it("DB 削除前に fileUrl を捕捉している", () => {
     const dbDeleteIdx = routeSrc.search(
-      /prisma\.propertyPhoto\.delete\(\{\s*where:\s*\{\s*id:\s*photoId/,
+      /prisma\.propertyPhoto\.deleteMany\(\{\s*where:\s*\{\s*id:\s*photoId/,
     );
     expect(dbDeleteIdx).toBeGreaterThan(0);
     const beforeDelete = routeSrc.slice(0, dbDeleteIdx);
@@ -39,7 +39,7 @@ describe("PropertyPhoto DELETE — storage cleanup", () => {
 
   it("DB 削除成功後に storage.delete を呼ぶ順序", () => {
     const dbDeleteIdx = routeSrc.search(
-      /prisma\.propertyPhoto\.delete\(/,
+      /prisma\.propertyPhoto\.deleteMany\(/,
     );
     const storageDeleteIdx = routeSrc.search(/getStorage\(\)\.delete\(/);
     expect(dbDeleteIdx).toBeGreaterThan(0);

@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import { dmScenarioHistoryLabel } from "@/components/properties/dm-scenario-field-model";
 
 const ALL = [
-  { id: "s-inh", name: "相続", sortOrder: 10, autoKey: "inheritance", active: true, deleted: false },
-  { id: "s-off", name: "住み替え", sortOrder: 30, autoKey: null, active: false, deleted: false },
-  { id: "s-del", name: "古い種類", sortOrder: 40, autoKey: null, active: false, deleted: true },
+  { id: "s-inh", name: "相続", sortOrder: 10, autoKey: "inheritance", ready: true, active: true, deleted: false },
+  { id: "s-off", name: "住み替え", sortOrder: 30, autoKey: null, ready: true, active: false, deleted: false },
+  { id: "s-del", name: "古い種類", sortOrder: 40, autoKey: null, ready: true, active: false, deleted: true },
 ];
 
 describe("変更履歴の「DMの種類」の値を名前で出す(設計 §3.4)", () => {

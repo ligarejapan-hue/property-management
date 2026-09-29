@@ -42,6 +42,9 @@ const RESOURCES = [
   { key: "import", label: "インポート", actions: ["write", "read_all", "manage"] },
   { key: "user_management", label: "ユーザー管理", actions: ["read", "write", "delete"] },
   { key: "audit_log", label: "監査ログ", actions: ["read"] },
+  // 反響の受付(業者からの内見・広告の許可・資料請求)。全員に既定付与。
+  // ⚠ もう一方の権限画面の RESOURCES と必ず同内容にすること。
+  { key: "agent_inquiry", label: "反響の受付", actions: ["read", "write"] },
   // 現地調査。quick_capture(巡回なしで撮影) は移動軌跡が残らないため既定 admin のみ。
   // ⚠ users 個別権限画面の RESOURCES と必ず同内容にすること(片方だけだと付与できず 403)。
   {

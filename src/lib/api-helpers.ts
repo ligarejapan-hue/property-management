@@ -117,6 +117,9 @@ export async function getUserPermissions(userId: string): Promise<PermissionEntr
       { resource: "screen_protection", action: "bypass", granted: true },
       { resource: "registry_pdf", action: "preview", granted: true },
       { resource: "registry_pdf", action: "download", granted: true },
+      // 反響の受付(agent_inquiry)。mock は admin 相当のため付与。
+      { resource: "agent_inquiry", action: "read", granted: true },
+      { resource: "agent_inquiry", action: "write", granted: true },
     ];
   }
 

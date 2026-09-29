@@ -254,14 +254,19 @@ export interface CreateSaleDmCampaignBody {
   confirmed?: boolean;
   // 二重作成(再送信/別タブ/連打)防止の冪等性キー。作成試行ごとに安定生成し、成功で更新する。
   idempotencyKey?: string;
+  // 既定のDMの種類(台帳)。指定すると「種類つきの発送」になり、宛先ごとに種類の手紙とLPが組で付く。
+  // 未指定/null=種類を使わない発送(今までの作り方)。
+  defaultScenarioId?: string | null;
 }
 
 export async function createSaleDmCampaign(body: CreateSaleDmCampaignBody) {
   if (USE_MOCK) {
     await mockDelay();
-    return { campaignId: "mock-campaign", requested: 0, matchedProperties: 0, generated: 0, saved: 0, skippedByUnlink: 0, excludedTerminal: 0, failed: 0, truncated: false };
+    return { campaignId: "mock-campaign", requested: 0, matchedProperties: 0, generated: 0, saved: 0, skippedByUnlink: 0, excludedTerminal: 0, failed: 0, truncated: false, blankBodyCount: 0, lpMissingScenarios: [] as string[], scenarioCounts: {} as Record<string, number> };
   }
-  return apiFetch<{ campaignId: string; requested?: number; matchedProperties?: number; generated?: number; saved?: number; skippedByUnlink?: number; excludedTerminal?: number; failed?: number; truncated?: boolean; idempotent?: boolean }>(
+  // blankBodyCount=本文を差し込めなかった宛先数・lpMissingScenarios=LPの無い種類名・scenarioCounts=種類名→宛先数。
+  // 古い発送の冪等の再送では付かないことがあるので省略可。
+  return apiFetch<{ campaignId: string; requested?: number; matchedProperties?: number; generated?: number; saved?: number; skippedByUnlink?: number; excludedTerminal?: number; failed?: number; truncated?: boolean; idempotent?: boolean; blankBodyCount?: number; lpMissingScenarios?: string[]; scenarioCounts?: Record<string, number> }>(
     "/api/properties/sale-dm/campaigns",
     {
       method: "POST",
@@ -312,6 +317,8 @@ export interface SaleDmVariant {
   lpUrl: string | null;
   // 貼り付けて保存した本文の原本(宛先へ「適用」する元)。手順の案内が「本文を入れたか」を見る。
   bodyTemplate?: string | null;
+  // どのDMの種類から写したか(種類つきの発送)。null=今までの型。
+  scenarioId: string | null;
 }
 
 export interface SaleDmLpVariantOptions {
@@ -330,6 +337,8 @@ export interface SaleDmLpVariant {
   strength: string;
   headline: string | null;
   templateFrozenAt: string | null;
+  // どのDMの種類から写したか(種類つきの発送)。null=今までのLP型。
+  scenarioId: string | null;
 }
 
 // LP用の写真(設計 2026-09-08 §2.3)。画面は /lp-assets/<publicId> だけを使う(/uploads/ は返さない)。
@@ -363,6 +372,8 @@ export interface SaleDmCampaign {
   id: string;
   name: string;
   status: string;
+  // 既定のDMの種類。入っていれば「種類つきの発送」(作成時に一度だけ決まる)。null=今までの発送。
+  defaultScenarioId: string | null;
   variants: SaleDmVariant[];
   lpVariants: SaleDmLpVariant[];
   recipients: SaleDmDraft[];
@@ -388,7 +399,7 @@ export async function fetchSaleDmAggregate(id: string) {
 export async function fetchSaleDmCampaign(id: string) {
   if (USE_MOCK) {
     await mockDelay();
-    return { campaign: { id, name: "モック売却DM", status: "draft", variants: [], lpVariants: [], recipients: [] } as SaleDmCampaign };
+    return { campaign: { id, name: "モック売却DM", status: "draft", defaultScenarioId: null, variants: [], lpVariants: [], recipients: [] } as SaleDmCampaign };
   }
   return apiFetch<{ campaign: SaleDmCampaign }>(`/api/properties/sale-dm/campaigns/${id}`);
 }
@@ -514,6 +525,23 @@ export async function patchSaleDmDraft(id: string, patch: { body?: string; varia
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
+}
+
+// 「種類を変える」(物件単位・DMの種類)。その発送のその物件の宛先を全員まとめて切り替え、物件の欄も書く。
+// 物件を書くので合言葉(X-Edit-Screen)を送る(他の画面で編集中なら 423)。鍵の世代は持たない入口=lockId なし。
+export async function changeSaleDmPropertyScenario(campaignId: string, propertyId: string, scenarioId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { changedDrafts: 0, blankBodyCount: 0, lpMissing: false };
+  }
+  return apiFetch<{ changedDrafts: number; blankBodyCount: number; lpMissing: boolean }>(
+    `/api/properties/sale-dm/campaigns/${campaignId}/properties/${propertyId}/scenario`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...editLockHeaders() },
+      body: JSON.stringify({ scenarioId }),
+    },
+  );
 }
 
 // 割当型 + 個別上書きで本文を AI 再生成する。
@@ -729,9 +757,11 @@ export async function fetchSaleDmLpImagePrompt(campaignId: string, lpId: string,
 // ---------- DMの種類(台帳・設計 2026-09-27 §3.6) ----------
 
 /** 選択肢(物件の欄・発送の画面用)。中身(文面・設定)は含まない。 */
-export type SaleDmScenarioOption = { id: string; name: string; sortOrder: number; autoKey: string | null };
+type SaleDmScenarioOptionBase = { id: string; name: string; sortOrder: number; autoKey: string | null };
+/** ready = 手紙の本文が登録済みか(文面そのものは返さない)。作成画面の初期選択・「種類を変える」で使う。 */
+export type SaleDmScenarioOption = SaleDmScenarioOptionBase & { ready: boolean };
 /** 一覧(管理者)。文面は返さず「登録済みか」だけ。 */
-export type SaleDmScenarioSummary = SaleDmScenarioOption & { active: boolean; hasLetter: boolean; hasLp: boolean; updatedAt: string };
+export type SaleDmScenarioSummary = SaleDmScenarioOptionBase & { active: boolean; hasLetter: boolean; hasLp: boolean; updatedAt: string };
 export type SaleDmScenario = {
   id: string;
   name: string;

@@ -14,6 +14,7 @@ import { EXPORT_COLUMNS } from "@/lib/property-export-columns";
 import NewPropertyModal from "@/components/properties/new-property-modal";
 import DmBatchConfirmModal from "@/components/properties/dm-batch-confirm-modal";
 import { RegistryBulkFetchButton } from "@/components/properties/registry-bulk-fetch-button";
+import { SaleDmCreateCampaignDialog } from "@/components/sale-dm/create-campaign-dialog";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import StatusBadge, {
   badgeIntentClass,
@@ -391,16 +392,27 @@ function PropertiesPageInner() {
   // 二重作成(再送信/別タブ/連打)防止の冪等性キー。1回の作成試行で1つ生成し、失敗時は再利用(同キーで
   // 再送=サーバーが二重生成しない)、成功で破棄して次の作成は新しいキーにする。
   const saleDmIdemKeyRef = useRef<string | null>(null);
-  const handleCreateSaleDm = async () => {
+  // 「売却DMを作成」は作成画面(DMの種類の既定を選ぶ小さな窓)を開く(設計 2026-09-27 §2.3・2026-09-28 発注者決定)。
+  const [saleDmDialogOpen, setSaleDmDialogOpen] = useState(false);
+  const openCreateSaleDm = () => {
+    if (creatingDm || searchPending) return;
+    if (properties.filter((p) => selectedIds.has(p.id)).length === 0) return;
+    setSaleDmDialogOpen(true);
+  };
+  // 作成画面の「作成」。defaultScenarioId=null は種類を使わない(今までどおり=型A)。
+  // 失敗は throw して作成画面にそのまま出す(API のメッセージ・管理者には「DMの種類を開く」)。
+  const handleCreateSaleDm = async (defaultScenarioId: string | null) => {
     if (creatingDm || searchPending) return;
     // 送信対象は「今読み込んでいる物件」に選択(チェック)を intersect して確定する。フィルタ/ページ変更の
     // 読み込み中に古いページのIDが混ざって送られる競合(Codex R7/R11)を、送信の瞬間にも断つ。
     const ids = properties.filter((p) => selectedIds.has(p.id)).map((p) => p.id);
     // ⚠AI直結は廃止した(設計 §2.1)ので、課金もオーナー情報の外部送信も起きない。
-    //   ここで作るのは**本文が空の宛先一覧**で、文面は型ごとにプロンプトを表示 → 手元のAIで
-    //   作成 → 貼り付け → 適用、の流れで入れる。誤った課金・PII の警告を出さない。
-    if (ids.length === 0) return;
-    if (!window.confirm(`選択した ${ids.length} 件の物件で宛先の一覧を作ります。\n共有者が複数いる物件は宛先ごとに複数通になることがあります。\n手紙の本文はこの時点では空で、次の画面で型ごとに作成して差し込みます。\n続けますか？`)) return;
+    //   種類を使わない発送は**本文が空の宛先一覧**を作り、文面は型ごとにプロンプトを表示 → 手元のAIで
+    //   作成 → 貼り付け → 適用、の流れで入れる。種類つきの発送は種類の手紙が作成時に差し込まれる。
+    if (ids.length === 0) {
+      setSaleDmDialogOpen(false);
+      return;
+    }
     // 作成試行ごとに安定したキーを用意(secure context 外では randomUUID 不在ゆえ簡易フォールバック)。
     if (!saleDmIdemKeyRef.current) {
       saleDmIdemKeyRef.current =
@@ -411,6 +423,7 @@ function PropertiesPageInner() {
     setCreatingDm(true);
     setError(null);
     try {
+      // 名前・options は今までの固定値のまま(種類つきの発送では options は使われない)。
       const res = await createSaleDmCampaign({
         name: `売却DM ${new Date().toLocaleDateString("ja-JP")}`,
         options: {
@@ -422,6 +435,7 @@ function PropertiesPageInner() {
         },
         propertyIds: ids,
         idempotencyKey: saleDmIdemKeyRef.current,
+        ...(defaultScenarioId ? { defaultScenarioId } : {}),
       });
       saleDmIdemKeyRef.current = null; // 成功 → 次の作成は新しいキー
       // 一部失敗(空本文=failed)や、選択したが対象外(住所なし等)で作成されなかった物件を遷移前に明示する。
@@ -433,15 +447,16 @@ function PropertiesPageInner() {
         skippedByUnlink: res.skippedByUnlink,
         // 拒否・宛先不明の自動除外(A=宛名CSVと同じ規則)。黙って外さない。
         excludedTerminal: res.excludedTerminal,
+        // 種類つきの発送: 本文を差し込めなかった宛先・LPが未登録の種類。
+        blankBodyCount: res.blankBodyCount,
+        lpMissingScenarios: res.lpMissingScenarios,
       });
+      setSaleDmDialogOpen(false);
       if (partialNotice) window.alert(partialNotice);
       router.push(`/properties/sale-dm/${res.campaignId}`);
-    } catch (err) {
-      // 失敗 → キーは保持(同キーで再試行すればサーバーが二重生成しない)。
-      // ⚠画面下の赤帯(setError)は「再試行=一覧の読み直し」付きで、押したボタンから離れた所に出て
-      //   見落とされる。対象外の物件だけを選んだとき(NO_ELIGIBLE_RECIPIENTS)などの理由をその場で見せる。
-      window.alert(err instanceof Error ? err.message : "売却DMの作成に失敗しました");
     } finally {
+      // 失敗 → キーは保持(同キーで再試行すればサーバーが二重生成しない)。理由は作成画面がその場で出す
+      // (対象外の物件だけを選んだとき=NO_ELIGIBLE_RECIPIENTS・種類の登録不足=SCENARIO_NOT_READY など)。
       setCreatingDm(false);
     }
   };
@@ -1105,7 +1120,7 @@ function PropertiesPageInner() {
         {canCreateDm && capabilities?.saleDmPrintReady && (
           <button
             type="button"
-            onClick={handleCreateSaleDm}
+            onClick={openCreateSaleDm}
             disabled={creatingDm || loading || selectedIds.size === 0 || searchPending}
             className="inline-flex items-center gap-2 whitespace-nowrap rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-400 dark:bg-gray-900 dark:text-indigo-400 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
             title={
@@ -1143,6 +1158,15 @@ function PropertiesPageInner() {
       )}
 
       <DmBatchConfirmModal open={dmConfirmOpen} onClose={() => setDmConfirmOpen(false)} />
+
+      {saleDmDialogOpen && (
+        <SaleDmCreateCampaignDialog
+          propertyCount={properties.filter((p) => selectedIds.has(p.id)).length}
+          busy={creatingDm}
+          onSubmit={handleCreateSaleDm}
+          onClose={() => setSaleDmDialogOpen(false)}
+        />
+      )}
 
       {/* Filter bar (UI一貫性 第1弾: 検索窓を1本に統合・詳細条件は折りたたみ) */}
       <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
