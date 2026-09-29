@@ -171,3 +171,33 @@ describe("申告された展開後サイズも上限と実際の大きさで確�
     expect(() => assertZipExpandsWithin(zip, 50 * MB)).not.toThrow();
   });
 });
+
+describe("データ記述子ありでも、ローカルの申告は0か中央と同じ値だけ(@codex PR#456 12巡目)", () => {
+  const descriptorZip = () => {
+    const zip = makeZip([{ name: "a.xml", data: Buffer.from("hello") }]);
+    const cd = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    zip.writeUInt16LE(0x08, cd + 8);
+    zip.writeUInt16LE(0x08, 6);
+    return zip;
+  };
+
+  it("★ローカルの圧縮後サイズが中央と違う(0でもない)なら止める(読み手はローカルの値で切り出す)", () => {
+    const zip = descriptorZip();
+    zip.writeUInt32LE(1024 * 1024, 18);
+    expect(() => assertZipExpandsWithin(zip, 50 * MB)).toThrow(ZipGuardError);
+  });
+
+  it("★ローカルの展開後サイズが中央と違う(0でもない)なら止める", () => {
+    const zip = descriptorZip();
+    zip.writeUInt32LE(1024 * 1024, 22);
+    expect(() => assertZipExpandsWithin(zip, 50 * MB)).toThrow(ZipGuardError);
+  });
+
+  it("ローカルが0(実物の Excel の書き方)、または中央と同じ値なら通る", () => {
+    const a = descriptorZip();
+    a.writeUInt32LE(0, 18);
+    a.writeUInt32LE(0, 22);
+    expect(() => assertZipExpandsWithin(a, 50 * MB)).not.toThrow();
+    expect(() => assertZipExpandsWithin(descriptorZip(), 50 * MB)).not.toThrow();
+  });
+});

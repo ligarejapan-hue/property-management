@@ -80,9 +80,10 @@ export function assertZipExpandsWithin(buf: Buffer, maxBytes: number): void {
     const localMethod = buf.readUInt16LE(localAt + 8);
     const localCompSize = buf.readUInt32LE(localAt + 18);
     if (localMethod !== method) throw new ZipGuardError("method mismatch");
-    if ((flags & 0x08) === 0 && localCompSize !== compSize) {
-      throw new ZipGuardError("size mismatch");
-    }
+    // データ記述子あり(bit 3)でも、ローカルの値は「0(記述子へ回す)」か「中央と同じ」だけ
+    // (@codex PR#456 12巡目)。読み手はローカルの値で切り出す・展開するので、
+    // 違う値を許すと中央の申告を小さくしたまま大きく読ませられる。
+    if (!sizeAgrees(localCompSize, compSize, flags)) throw new ZipGuardError("size mismatch");
     const localNameLen = buf.readUInt16LE(localAt + 26);
     const localExtraLen = buf.readUInt16LE(localAt + 28);
     const dataAt = localAt + 30 + localNameLen + localExtraLen;
@@ -108,7 +109,7 @@ export function assertZipExpandsWithin(buf: Buffer, maxBytes: number): void {
     if (declaredSize > remaining || localDeclaredSize > remaining) {
       throw new ZipGuardError("declared size too large");
     }
-    if ((flags & 0x08) === 0 && localDeclaredSize !== declaredSize) {
+    if (!sizeAgrees(localDeclaredSize, declaredSize, flags)) {
       throw new ZipGuardError("declared size mismatch");
     }
 
@@ -143,4 +144,10 @@ function hasZip64Extra(buf: Buffer, at: number, len: number): boolean {
     q += 4 + buf.readUInt16LE(q + 2);
   }
   return false;
+}
+
+/** ローカル見出しのサイズが中央と整合しているか(データ記述子ありなら 0 も可)。 */
+function sizeAgrees(local: number, central: number, flags: number): boolean {
+  if (local === central) return true;
+  return (flags & 0x08) !== 0 && local === 0;
 }
