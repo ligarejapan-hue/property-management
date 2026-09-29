@@ -83,25 +83,64 @@ export function assertZipExpandsWithin(buf: Buffer, maxBytes: number): void {
     if ((flags & 0x08) === 0 && localCompSize !== compSize) {
       throw new ZipGuardError("size mismatch");
     }
-    const dataAt = localAt + 30 + buf.readUInt16LE(localAt + 26) + buf.readUInt16LE(localAt + 28);
+    const localNameLen = buf.readUInt16LE(localAt + 26);
+    const localExtraLen = buf.readUInt16LE(localAt + 28);
+    const dataAt = localAt + 30 + localNameLen + localExtraLen;
     if (dataAt + compSize > buf.length) throw new ZipGuardError("truncated entry");
     const data = buf.subarray(dataAt, dataAt + compSize);
 
+    // ⚠**申告された展開後サイズも確かめる**(@codex PR#456 11巡目)。読み手(SheetJS)は
+    //   ローカル見出しの申告どおりに展開先の領域を確保するので、実際は数バイトでも
+    //   申告だけ巨大にされるとメモリを取られる。
+    //   ・ZIP64 の拡張フィールド(申告を別の場所で差し替えられる)は扱わずに断る
+    //   ・中央・ローカルの申告は残りの枠以内。データ記述子なし(bit 3 なし)なら両者一致
+    //     (実物の Excel はデータ記述子ありで、ローカルの申告は0)
+    //   ・実際に展開した大きさが中央の申告と一致すること
+    if (
+      hasZip64Extra(buf, p0 + 46 + nameLen, extraLen) ||
+      hasZip64Extra(buf, localAt + 30 + localNameLen, localExtraLen)
+    ) {
+      throw new ZipGuardError("zip64 not supported");
+    }
+    const declaredSize = buf.readUInt32LE(p0 + 24);
+    const localDeclaredSize = buf.readUInt32LE(localAt + 22);
     const remaining = maxBytes - total;
+    if (declaredSize > remaining || localDeclaredSize > remaining) {
+      throw new ZipGuardError("declared size too large");
+    }
+    if ((flags & 0x08) === 0 && localDeclaredSize !== declaredSize) {
+      throw new ZipGuardError("declared size mismatch");
+    }
+
+    let actual: number;
     if (method === 0) {
-      total += data.length; // 無圧縮
+      actual = data.length; // 無圧縮
     } else if (method === 8) {
       try {
         // ⚠残りの枠を超えたら zlib 自身が展開を打ち切る(メモリに載せきらない)。
-        total += inflateRawSync(data, { maxOutputLength: Math.max(1, remaining + 1) }).length;
+        actual = inflateRawSync(data, { maxOutputLength: Math.max(1, remaining + 1) }).length;
       } catch {
         throw new ZipGuardError("expands too large or broken");
       }
     } else {
       throw new ZipGuardError("unsupported compression");
     }
+    if (actual !== declaredSize) throw new ZipGuardError("declared size differs from actual");
+    total += actual;
     if (total > maxBytes) throw new ZipGuardError("expands too large");
   }
   // 数えた中身で中央ディレクトリをちょうど読み切っていること(件数の偽りの別の形)。
   if (p !== cdEnd) throw new ZipGuardError("central directory size mismatch");
+}
+
+/** 拡張フィールドの並び(id 2バイト・長さ2バイト・中身)に ZIP64(0x0001)があるか。 */
+function hasZip64Extra(buf: Buffer, at: number, len: number): boolean {
+  const end = at + len;
+  if (end > buf.length) throw new ZipGuardError("broken extra field");
+  let q = at;
+  while (q + 4 <= end) {
+    if (buf.readUInt16LE(q) === 0x0001) return true;
+    q += 4 + buf.readUInt16LE(q + 2);
+  }
+  return false;
 }

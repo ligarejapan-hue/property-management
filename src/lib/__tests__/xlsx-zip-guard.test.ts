@@ -132,3 +132,42 @@ describe("データ記述子(実物の Excel は全件これ)で圧縮後サイ�
     expect(() => assertZipExpandsWithin(zip, 50 * MB)).toThrow(ZipGuardError);
   });
 });
+
+describe("申告された展開後サイズも上限と実際の大きさで確かめる(@codex PR#456 11巡目)", () => {
+  it("★展開後サイズを巨大に申告した中身は止める(読み手は申告どおりに領域を確保する)", () => {
+    const zip = makeZip([{ name: "a.xml", data: Buffer.from("tiny"), declaredSize: 0x7fffffff }]);
+    expect(() => assertZipExpandsWithin(zip, 50 * MB)).toThrow(ZipGuardError);
+  });
+
+  it("★申告と実際の展開後サイズが違う中身は止める", () => {
+    const zip = makeZip([{ name: "a.xml", data: Buffer.from("hello world"), declaredSize: 5 }]);
+    expect(() => assertZipExpandsWithin(zip, 50 * MB)).toThrow(ZipGuardError);
+  });
+
+  it("★ZIP64 の拡張フィールドを持つ中身は扱わずに止める(申告サイズを別の場所で差し替えられる)", () => {
+    const base = makeZip([{ name: "a.xml", data: Buffer.from("x") }]);
+    // 中央ディレクトリの拡張フィールドに ZIP64(0x0001) を足した ZIP を組み直す
+    const cd = base.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    const eocd = base.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+    const extra = Buffer.alloc(12);
+    extra.writeUInt16LE(0x0001, 0);
+    extra.writeUInt16LE(8, 2);
+    const nameLen = base.readUInt16LE(cd + 28);
+    const central = Buffer.concat([base.subarray(cd, cd + 46 + nameLen), extra]);
+    central.writeUInt16LE(extra.length, 30);
+    const tail = Buffer.from(base.subarray(eocd));
+    tail.writeUInt32LE(central.length, 12);
+    const zip = Buffer.concat([base.subarray(0, cd), central, tail]);
+    expect(() => assertZipExpandsWithin(zip, 50 * MB)).toThrow(ZipGuardError);
+  });
+
+  it("実物の Excel と同じ書き方(データ記述子・ローカルの申告は0)は通る", () => {
+    const zip = makeZip([{ name: "a.xml", data: Buffer.from("hello") }]);
+    const cd = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    zip.writeUInt16LE(0x08, cd + 8);
+    zip.writeUInt16LE(0x08, 6);
+    zip.writeUInt32LE(0, 18);
+    zip.writeUInt32LE(0, 22);
+    expect(() => assertZipExpandsWithin(zip, 50 * MB)).not.toThrow();
+  });
+});

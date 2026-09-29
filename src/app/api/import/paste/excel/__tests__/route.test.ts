@@ -11,6 +11,11 @@ const FULL_PERMS = [
   { resource: "property", action: "write", granted: true },
   { resource: "owner", action: "write", granted: true },
   { resource: "owner_note", action: "edit", granted: true },
+  { resource: "owner_name", action: "full", granted: true },
+  { resource: "owner_name_kana", action: "full", granted: true },
+  { resource: "owner_phone", action: "full", granted: true },
+  { resource: "owner_email", action: "full", granted: true },
+  { resource: "owner_address", action: "full", granted: true },
 ];
 const lookupCalls: unknown[] = [];
 let lookupResult: (input: { externalLinkKey: string | null }) => unknown = () => ({
@@ -297,6 +302,27 @@ describe("POST /api/import/paste/excel", () => {
     const [a, b] = body.rows.map((r: { draft: { externalLinkKey: string } }) => r.draft.externalLinkKey);
     expect(a).toMatch(/^xlsx-/);
     expect(a).not.toBe(b);
+  });
+
+  it("★書き込み権限の無い所有者の項目(電話など)が入った行は、登録できるとは言わず要確認(11巡目 ②)", async () => {
+    mockPerms = FULL_PERMS.filter((p) => p.resource !== "owner_phone");
+    const body = await (await POST(req({ fileName: "a.xlsx", xlsxBase64: xlsxBase64(sheet([row({ URL: MAIL })])) }))).json();
+    expect(body.rows[0].status).toBe("review");
+    expect(body.rows[0].reasons).toContain("電話番号を書き込む権限がありません");
+  });
+
+  it("★メールアドレスの形式が正しくない行は要確認(登録で400になる行を「登録できる」と言わない・11巡目 ③)", async () => {
+    mockPerms = [
+      ...FULL_PERMS,
+      ...["owner_name", "owner_name_kana", "owner_phone", "owner_email", "owner_address"].map((resource) => ({
+        resource, action: "full", granted: true,
+      })),
+    ];
+    // 「@」はあるが形式が正しくない(「@」の無い値はそもそもメールとして扱わない)。
+    const bad = MAIL + "\nE-mail：taro yamada@example.com";
+    const body = await (await POST(req({ fileName: "a.xlsx", xlsxBase64: xlsxBase64(sheet([row({ URL: bad })])) }))).json();
+    expect(body.rows[0].status).toBe("review");
+    expect(body.rows[0].reasons).toContain("メールアドレスの形式が正しくありません");
   });
 
   it("全シートを読む(見出しの無いシートは飛ばす)", async () => {

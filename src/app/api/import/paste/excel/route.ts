@@ -7,7 +7,9 @@ import {
   ApiError,
   handleApiError,
   apiResponse,
+  type PermissionEntry,
 } from "@/lib/api-helpers";
+import { createOwnerSchema } from "@/lib/validators";
 import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
 import type { PasteDraft } from "@/lib/paste-import/types";
@@ -70,6 +72,33 @@ function fallbackLinkKey(row: LeadRow, draft: PasteDraft): string {
     draft.property.address.value ?? "",
   ].join("|");
   return `xlsx-${createHash("sha256").update(seed).digest("hex").slice(0, 16)}`;
+}
+
+/** 所有者の項目と、登録APIが書き込みに求める権限(commit/route.ts と同じ対応)。 */
+const OWNER_FIELD_PERMS = [
+  { key: "name", resource: "owner_name", label: "氏名" },
+  { key: "nameKana", resource: "owner_name_kana", label: "フリガナ" },
+  { key: "phone", resource: "owner_phone", label: "電話番号" },
+  { key: "email", resource: "owner_email", label: "メールアドレス" },
+  { key: "currentAddress", resource: "owner_address", label: "現住所" },
+] as const;
+
+/** この人がこの行を登録できない理由(所有者の項目の権限・メールの形式)。 */
+function ownerFieldReasons(draft: PasteDraft, perms: PermissionEntry[]): string[] {
+  const owner = draft.owner;
+  if (!owner) return [];
+  const reasons: string[] = [];
+  for (const f of OWNER_FIELD_PERMS) {
+    const value = owner[f.key].value;
+    if (value && value.trim() !== "" && !hasExplicitWritePerm(perms, f.resource)) {
+      reasons.push(`${f.label}を書き込む権限がありません`);
+    }
+  }
+  const email = owner.email.value?.trim() ?? "";
+  if (email !== "" && !createOwnerSchema.shape.email.safeParse(email).success) {
+    reasons.push("メールアドレスの形式が正しくありません");
+  }
+  return reasons;
 }
 
 /**
@@ -220,12 +249,17 @@ export async function POST(request: NextRequest) {
         ownerName: draft.owner?.name.value ?? null,
         ownerCurrentAddress: draft.owner?.currentAddress.value ?? null,
       });
-      const { status, reasons } = leadRowStatus(draft, {
+      const judged = leadRowStatus(draft, {
         blocked: dup.duplicates.blocked,
         similarCount: dup.similar.length,
         ownerCandidateCount: dup.ownerCandidates.length,
         ownerCandidatesTruncated: dup.ownerCandidatesTruncated,
       });
+      // ⚠登録で必ず断られる行を「登録できる」と言わない(@codex PR#456 11巡目 ②③)。
+      //   登録APIは所有者の項目ごとの書き込み権限とメールの形式を確かめる。
+      const extra = judged.status === "registered" ? [] : ownerFieldReasons(draft, perms);
+      const reasons = [...judged.reasons, ...extra];
+      const status = judged.status === "ready" && extra.length > 0 ? "review" : judged.status;
       rows.push({
         sheetName: row.sheetName,
         rowNumber: row.rowNumber,

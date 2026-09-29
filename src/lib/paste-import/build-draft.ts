@@ -49,7 +49,12 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
 
   for (const line of labeled) {
     if (isBlankValue(line.value)) continue; // 値なしは拾わない
-    const key = fieldKeyForLabel(line.label);
+    let key = fieldKeyForLabel(line.label);
+    // ⚠メール欄の「メールアドレスを持っていない」のような**「@」の無い値は
+    //   メールアドレスとして扱わない**(実物の HOME4U で22件・@codex PR#456 11巡目で判明)。
+    //   欄に入れると登録で形式エラーになる。捨てずに、辞書に無い見出しと同じ扱い
+    //   (見出しが「メール」なので下で所有者の個人情報として備考から外され、人に見せる)。
+    if (key === "ownerEmail" && !line.value.includes("@")) key = null;
     if (key === null) {
       // ⚠所有者の個人情報にあたる見出しは**備考へ入れない**(@codex PR#414 11巡目 ①)。
       //   Property.note は所有者の項目別マスクを通らずに表示されるため、
