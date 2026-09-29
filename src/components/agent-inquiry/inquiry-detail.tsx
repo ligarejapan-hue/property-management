@@ -303,8 +303,13 @@ export default function InquiryDetail({
   };
   const reload = () => {
     setError(null);
-    setRefreshFailed(false);
-    load().catch((e) => setError(e instanceof Error ? e.message : "読み込めませんでした"));
+    load()
+      .then(() => setRefreshFailed(false))
+      .catch((e) => {
+        // 読み直しにも失敗したら、古い内容のまま押せる状態には戻さない。
+        setRefreshFailed(true);
+        setError(e instanceof Error ? e.message : "読み込めませんでした");
+      });
   };
   if (!data) {
     return error ? (

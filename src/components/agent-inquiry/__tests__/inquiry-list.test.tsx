@@ -131,3 +131,10 @@ describe("保存できたが読み直せなかったとき(@codex #459 R5)", () 
     expect(detailSrc).toMatch(/busy=\{busy \|\| refreshFailed\}/);
   });
 });
+
+describe("読み直しにも失敗したら操作を止めたまま(@codex #459 R5 の続き)", () => {
+  it("読み直しが成功したときだけ操作を戻す", () => {
+    const s = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
+    expect(s).toMatch(/\.then\(\(\) => setRefreshFailed\(false\)\)/);
+  });
+});
