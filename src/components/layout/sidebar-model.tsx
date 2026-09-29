@@ -1,5 +1,6 @@
 import {
   Home,
+  PhoneIncoming,
   Link2,
   Building2,
   Building,
@@ -36,6 +37,8 @@ export interface NavLeaf {
   minRole: AppRole;
   /** true のとき Link ではなく別タブの <a>(静的HTML資料)。 */
   external?: boolean;
+  /** external のとき開く窓の名前(同じ名前の窓があればそこに開く)。無ければ新しいタブ。 */
+  windowName?: string;
 }
 export interface NavGroup {
   key: string;
@@ -59,7 +62,19 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
   {
     key: "home",
     label: null,
-    items: [{ label: "ホーム", href: "/home", icon: ic(Home), minRole: "field_staff" }],
+    items: [
+      { label: "ホーム", href: "/home", icon: ic(Home), minRole: "field_staff" },
+      // 業者からの反響の受付(設計 2026-09-28 §2.1)=メイン画面と分けて別窓で開きっぱなしにする。
+      // 全員が使う(方針10)。同じ名前の窓があればそこに開く(何枚も増やさない)。
+      {
+        label: "反響の受付",
+        href: "/inquiry-desk",
+        icon: ic(PhoneIncoming),
+        minRole: "field_staff",
+        external: true,
+        windowName: "pm-inquiry-desk",
+      },
+    ],
   },
   {
     key: "prop",

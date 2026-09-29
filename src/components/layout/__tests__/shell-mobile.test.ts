@@ -93,7 +93,10 @@ describe("sidebar — 最下部の資料リンク(ガイド/マニュアル)", (
     // nav-model 側で external: true、描画側(sidebar renderLeaf)が target=_blank + rel=noopener。
     expect(sidebarModel).toMatch(/href: "\/docs\/guide\.html"[\s\S]{0,80}external: true/);
     expect(sidebarModel).toMatch(/href: "\/docs\/manual\.html"[\s\S]{0,80}external: true/);
-    expect(sidebar).toContain('target="_blank"');
+    // 窓の名前(windowName)が無い外部項目=資料は新しいタブ(_blank)。受付の窓だけ名前付きの窓に開く
+    // (2026-09-29 反響の受付 PR2)。資料2件に windowName が付いていないことも固定する。
+    expect(sidebar).toContain('target={item.windowName ?? "_blank"}');
+    expect(sidebarModel).not.toMatch(/href: "\/docs\/(guide|manual)\.html"[^}]*windowName/);
     expect(sidebar).toContain('rel="noopener noreferrer"');
   });
   it("資料グループは管理系グループより後(最下部)に置かれる", () => {

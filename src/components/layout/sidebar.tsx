@@ -58,7 +58,7 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
       <a
         key={item.href}
         href={item.href}
-        target="_blank"
+        target={item.windowName ?? "_blank"}
         rel="noopener noreferrer"
         className={linkClasses(item.href)}
         onClick={() => setMobileOpen(false)}
