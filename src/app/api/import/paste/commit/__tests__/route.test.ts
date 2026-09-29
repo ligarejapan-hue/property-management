@@ -186,7 +186,10 @@ vi.mock("@/lib/prisma", () => {
     $executeRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const sql = Array.isArray(strings) ? strings.join(" ") : String(strings);
       sqlSeen.push(sql);
-      if (sql.includes("pg_advisory_xact_lock")) {
+      if (sql.includes("pg_advisory_xact_lock") && values[0] === "paste-excel-bulk-commit") {
+        // 取込の確定を直列化する共通のロック(外部キーのロックとは別に記録する)。
+        callOrder.push("bulkLock");
+      } else if (sql.includes("pg_advisory_xact_lock")) {
         callOrder.push("advisoryLock");
         advisoryLockValues.push(values);
       } else {
@@ -1294,9 +1297,8 @@ describe("まとめ取込は重複確認と登録を1つのロックの中で行
   it("★まとめ取込用のロックを取ってから確認し、その後に作る(確認と作成の間に隙間を作らない)", async () => {
     const res = await POST(req(bulk));
     expect(res.status).toBe(200);
-    const lockAt = callOrder.indexOf("advisoryLock");
+    const lockAt = callOrder.indexOf("bulkLock");
     expect(lockAt).toBeGreaterThan(-1);
-    expect(advisoryLockValues[0]).toEqual(["paste-excel-bulk-commit"]);
     expect(lockAt).toBeLessThan(callOrder.indexOf("dupCount"));
     expect(callOrder.indexOf("dupCount")).toBeLessThan(callOrder.indexOf("property.create"));
     expect(dupCountCalls[0].input).toEqual({
@@ -1352,12 +1354,24 @@ describe("まとめ取込は重複確認と登録を1つのロックの中で行
     }
   });
 
-  it("貼り付け画面(指定なし)は今までどおり: ロックも確認もしない(人が画面で判断済み)", async () => {
+  it("★貼り付け画面(指定なし)も同じロックを取る(まとめ取込の確認と作成の間に割り込ませない・13巡目)。確認はしない", async () => {
     const { requireNoDuplicates: _omit, ...plain } = bulk;
     void _omit;
     const res = await POST(req(plain));
     expect(res.status).toBe(200);
     expect(callOrder).not.toContain("dupCount");
-    expect(advisoryLockValues.some((v) => v[0] === "paste-excel-bulk-commit")).toBe(false);
+    expect(callOrder.indexOf("bulkLock")).toBeGreaterThan(-1);
+    expect(callOrder.indexOf("bulkLock")).toBeLessThan(callOrder.indexOf("property.create"));
+  });
+
+  it("★外部キーの無い貼り付けでも同じロックを取る", async () => {
+    await POST(req(baseBody));
+    expect(callOrder.indexOf("bulkLock")).toBeGreaterThan(-1);
+    expect(callOrder.indexOf("bulkLock")).toBeLessThan(callOrder.indexOf("property.create"));
+  });
+
+  it("★ロックの順序は「共通のロック → 外部キーのロック」(どの経路も同じ順＝待ちの輪ができない)", async () => {
+    await POST(req(bulk));
+    expect(callOrder.indexOf("bulkLock")).toBeLessThan(callOrder.indexOf("advisoryLock"));
   });
 });
