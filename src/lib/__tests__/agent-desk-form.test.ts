@@ -1,0 +1,99 @@
+import { describe, it, expect } from "vitest";
+import {
+  EMPTY_DESK_FORM, deskFormReducer, nextDeskGuideStep, validateDeskForm, materialEmailWarning,
+  buildCreateBody, jstInputsToIso, isoToJstInputs, formatJst, type DeskFormState, type DeskFormAction,
+} from "@/lib/agent-inquiry/desk-form";
+
+const agent = {
+  id: "a1", companyName: "○○不動産", branchName: null, phone: "03-1", matchedBy: "mobile" as const,
+  lastContact: { name: "田中", mobile: "090-1234-5678", email: "t@x.jp" },
+};
+const property = {
+  id: "p1", name: "サンライズ中野", roomNo: "305", town: "東京都中野区中野2丁目", propertyType: "apartment_unit", adPermissions: {},
+};
+const run = (...actions: DeskFormAction[]) => actions.reduce((s, a) => deskFormReducer(s, a), EMPTY_DESK_FORM);
+
+describe("フォームの状態", () => {
+  it("携帯で当たった業者を選ぶと問い合わせ者を前回の値で埋める", () => {
+    const s = run({ type: "agentSelected", agent });
+    expect(s.agent?.id).toBe("a1");
+    expect([s.contactName, s.contactMobile, s.contactEmail]).toEqual(["田中", "090-1234-5678", "t@x.jp"]);
+    expect(s.agentQuery).toBe("○○不動産");
+  });
+  it("選んだ後に検索欄を打ち直したら選択を外す(表示と中身の食い違いを防ぐ)", () => {
+    const s = run({ type: "agentSelected", agent }, { type: "agentQuery", value: "△△" });
+    expect(s.agent).toBeNull();
+    const p = run({ type: "propertySelected", property }, { type: "propertyQuery", value: "別" });
+    expect(p.property).toBeNull();
+  });
+  it("用件を内見以外にすると内見の入力を消す", () => {
+    const s = run(
+      { type: "kind", value: "viewing" },
+      { type: "viewing", field: "viewingType", value: "guided" },
+      { type: "kind", value: "ad_permission" },
+    );
+    expect(s.viewingType).toBeNull();
+  });
+  it("reset で空に戻る(入口は電話)", () => {
+    expect(run({ type: "channel", value: "fax" }, { type: "reset" })).toEqual(EMPTY_DESK_FORM);
+    expect(EMPTY_DESK_FORM.channel).toBe("phone");
+  });
+});
+
+describe("次に押す所", () => {
+  it.each<[string, DeskFormState, string]>([
+    ["最初は業者", EMPTY_DESK_FORM, "agent"],
+    ["業者の次は物件", run({ type: "agentSelected", agent }), "property"],
+    ["物件の次は用件", run({ type: "agentSelected", agent }, { type: "propertySelected", property }), "kind"],
+    ["内見なら案内/下見", run({ type: "agentSelected", agent }, { type: "propertySelected", property }, { type: "kind", value: "viewing" }), "viewingType"],
+    ["揃ったら保存", run({ type: "agentSelected", agent }, { type: "propertySelected", property }, { type: "kind", value: "ad_permission" }), "save"],
+  ])("%s", (_l, s, want) => expect(nextDeskGuideStep(s)).toBe(want));
+});
+
+describe("検証と送る形", () => {
+  it("業者・物件・用件は必須・内見なら案内/下見も必須", () => {
+    expect(Object.keys(validateDeskForm(EMPTY_DESK_FORM)).sort()).toEqual(["agent", "kind", "property"]);
+    const s = run({ type: "agentSelected", agent }, { type: "propertySelected", property }, { type: "kind", value: "viewing" });
+    expect(validateDeskForm(s)).toEqual({ viewingType: "案内か下見かを選んでください" });
+  });
+  it("資料請求でメールが空なら黄色の知らせ(保存は止めない)", () => {
+    const s = run(
+      { type: "agentSelected", agent: { ...agent, lastContact: null } },
+      { type: "propertySelected", property },
+      { type: "kind", value: "material_request" },
+    );
+    expect(materialEmailWarning(s)).toBe("資料の送り先のメールが空です");
+    expect(validateDeskForm(s)).toEqual({});
+  });
+  it("送る形: 内見は日時つき(JST→UTC)・空欄は送らない", () => {
+    const s = run(
+      { type: "agentSelected", agent }, { type: "propertySelected", property }, { type: "kind", value: "viewing" },
+      { type: "viewing", field: "viewingType", value: "guided" }, { type: "viewing", field: "date", value: "2026-10-02" },
+      { type: "viewing", field: "time", value: "14:00" }, { type: "note", value: "  " },
+    );
+    expect(buildCreateBody(s)).toEqual({
+      propertyId: "p1", agentId: "a1", kind: "viewing", channel: "phone",
+      contactName: "田中", contactMobile: "090-1234-5678", contactEmail: "t@x.jp", note: null,
+      viewing: { viewingType: "guided", scheduledAt: "2026-10-02T05:00:00.000Z", attendantId: null },
+    });
+  });
+  it("広告の許可は viewing を付けない", () => {
+    const s = run({ type: "agentSelected", agent }, { type: "propertySelected", property }, { type: "kind", value: "ad_permission" });
+    expect(buildCreateBody(s).viewing).toBeUndefined();
+  });
+});
+
+describe("日時(JST)", () => {
+  it("日付と時刻が揃ったときだけ UTC にする(片方だけ=日程調整中)", () => {
+    expect(jstInputsToIso("2026-10-02", "14:00")).toBe("2026-10-02T05:00:00.000Z");
+    expect(jstInputsToIso("2026-10-02", "")).toBeNull();
+    expect(jstInputsToIso("", "14:00")).toBeNull();
+    expect(jstInputsToIso("2026-13-40", "14:00")).toBeNull();
+  });
+  it("戻す・表示する", () => {
+    expect(isoToJstInputs("2026-10-02T05:00:00.000Z")).toEqual({ date: "2026-10-02", time: "14:00" });
+    expect(isoToJstInputs(null)).toEqual({ date: "", time: "" });
+    expect(formatJst("2026-10-01T15:30:00.000Z")).toBe("10/2(金) 0:30");
+    expect(formatJst(null)).toBe("日程調整中");
+  });
+});
