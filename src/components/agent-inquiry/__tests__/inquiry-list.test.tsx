@@ -138,3 +138,18 @@ describe("読み直しにも失敗したら操作を止めたまま(@codex #459 
     expect(s).toMatch(/\.then\(\(\) => setRefreshFailed\(false\)\)/);
   });
 });
+
+describe("読み直した後の上書きは確かめてから・書き込みの失敗を「保存しました」と言わない(@codex #459 R6)", () => {
+  const s = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
+  it("メモも内見の欄も、書き始めた後に他の人が変えていたら1回目の保存は止めて知らせる", () => {
+    expect(s).toContain("他の人が先に変えています");
+    expect(s.match(/draftStale\(/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+  it("保存に進んだら前の食い違いの知らせは消す", () => {
+    expect(s).toMatch(/setNoteWarn\(null\);\s*onSaveNote\(note\)/);
+    expect(s).toMatch(/setWarn\(null\);\s*onSave\(\{/);
+  });
+  it("「保存しましたが…」は書き込みが通ったときだけ", () => {
+    expect(s).toContain('if (wrote) setError("保存しましたが');
+  });
+});

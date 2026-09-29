@@ -22,7 +22,10 @@ import {
   formatJst,
   isoToJstInputs,
   jstInputsToIso,
-  pickDraft,
+  draftOf,
+  draftStale,
+  editDraft,
+  type Draft,
 } from "@/lib/agent-inquiry/desk-form";
 
 export const mainWindowPropertyHref = (id: string) => `/properties/${id}`;
@@ -47,31 +50,57 @@ function ViewingRow({
   busy: boolean;
   onSave: (patch: ViewingPatch) => void;
 }) {
-  // 下書き(null=まだ触っていない=最新の値を出す)。行は内見の id だけで作り直すので、保存で版が
-  // 進んでも・他の人に先を越されて読み直しても、打ちかけの入力は消えない(最終レビュー I-1/I-2)。
-  const server = isoToJstInputs(v.scheduledAt);
-  const [dateDraft, setDate] = useState<string | null>(null);
-  const [timeDraft, setTime] = useState<string | null>(null);
-  const [resultDraft, setResult] = useState<string | null>(null);
-  const [attendantDraft, setAttendant] = useState<string | null>(null);
-  const date = pickDraft(dateDraft, server.date);
-  const time = pickDraft(timeDraft, server.time);
-  const result = pickDraft(resultDraft, v.resultNote ?? "");
-  const attendant = pickDraft(attendantDraft, v.attendant?.id ?? "");
+  // 下書き(書き始めたときの最新の値も覚える)。行は内見の id だけで作り直すので、保存で版が進んでも・
+  // 読み直しても、打ちかけの入力は消えない(最終レビュー I-1/I-2)。ただし書き始めた後に他の人が同じ欄を
+  // 変えていたら、1回目の保存は止めて相手の値を見せる=黙って上書きしない(@codex #459 R6)。
+  const server = {
+    date: isoToJstInputs(v.scheduledAt).date,
+    time: isoToJstInputs(v.scheduledAt).time,
+    result: v.resultNote ?? "",
+    attendant: v.attendant?.id ?? "",
+  };
+  type Field = keyof typeof server;
+  const [drafts, setDrafts] = useState<Partial<Record<Field, Draft>>>({});
+  const [warn, setWarn] = useState<string | null>(null);
+  const val = (f: Field) => draftOf(drafts[f] ?? null, server[f]);
+  const edit = (f: Field, value: string) => {
+    setWarn(null);
+    setDrafts((d) => ({ ...d, [f]: editDraft(d[f] ?? null, value, server[f]) }));
+  };
+  const save = () => {
+    const stale = (Object.keys(server) as Field[]).filter((f) => draftStale(drafts[f] ?? null, server[f]));
+    if (stale.length > 0) {
+      // 相手の変更を見せ、今の値を基準にし直す(もう一度押せば自分の内容で保存)。
+      setWarn("他の人が先に変えています(上の表示が今の内容です)。自分の内容で上書きするなら、もう一度保存を押してください。");
+      setDrafts((d) => {
+        const next = { ...d };
+        for (const f of stale) next[f] = { value: d[f]!.value, base: server[f] };
+        return next;
+      });
+      return;
+    }
+    setWarn(null);
+    onSave({
+      scheduledAt: jstInputsToIso(val("date"), val("time")),
+      resultNote: val("result"),
+      attendantId: val("attendant") || null,
+    });
+  };
   const canceled = v.canceledAt != null;
   return (
     <li className={`space-y-1 rounded-md border border-gray-200 p-2 dark:border-gray-700 ${canceled ? "opacity-60" : ""}`}>
       <p className="text-sm font-medium tabular-nums">
         {formatJst(v.scheduledAt)} {VIEWING_TYPE_LABEL[v.viewingType]}
         {v.attendant ? ` ・ 立会 ${v.attendant.name}` : ""}
+        {v.resultNote ? ` ・ 結果「${v.resultNote}」` : ""}
         {canceled ? " ・ 取り消し済み" : ""}
       </p>
       <div className="grid grid-cols-2 gap-1">
-        <input type="date" value={date} aria-label="内見の日付" onChange={(e) => setDate(e.target.value)} className={inputCls} />
-        <input type="time" value={time} aria-label="内見の時刻" onChange={(e) => setTime(e.target.value)} className={inputCls} />
+        <input type="date" value={val("date")} aria-label="内見の日付" onChange={(e) => edit("date", e.target.value)} className={inputCls} />
+        <input type="time" value={val("time")} aria-label="内見の時刻" onChange={(e) => edit("time", e.target.value)} className={inputCls} />
       </div>
       {/* 立ち会いは選んだだけでは保存しない(保存で行の版が進み、打ちかけの結果が消えるのを防ぐ)。 */}
-      <select value={attendant} disabled={busy} aria-label="立ち会い" onChange={(e) => setAttendant(e.target.value)} className={inputCls}>
+      <select value={val("attendant")} disabled={busy} aria-label="立ち会い" onChange={(e) => edit("attendant", e.target.value)} className={inputCls}>
         <option value="">立ち会い なし・未定</option>
         {users.map((u) => (
           <option key={u.id} value={u.id}>
@@ -80,21 +109,15 @@ function ViewingRow({
         ))}
       </select>
       <textarea
-        value={result}
-        onChange={(e) => setResult(e.target.value)}
+        value={val("result")}
+        onChange={(e) => edit("result", e.target.value)}
         rows={2}
         placeholder="内見後の結果"
         className={inputCls}
       />
+      {warn && <p className="text-xs text-amber-700 dark:text-amber-300">{warn}</p>}
       <div className="flex flex-wrap gap-1">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() =>
-            onSave({ scheduledAt: jstInputsToIso(date, time), resultNote: result, attendantId: attendant || null })
-          }
-          className="rounded bg-teal-700 px-3 py-1 text-xs text-white disabled:opacity-60"
-        >
+        <button type="button" disabled={busy} onClick={save} className="rounded bg-teal-700 px-3 py-1 text-xs text-white disabled:opacity-60">
           日時・立ち会い・結果を保存
         </button>
         <button
@@ -141,8 +164,24 @@ export function InquiryDetailView({
 }) {
   // メモの下書き(null=まだ触っていない)。詳細は反響の id だけで作り直すので、状態や担当を変えて版が
   // 進んでも・読み直しても、打ちかけのメモは消えない(最終レビュー I-1/I-2)。
-  const [noteDraft, setNote] = useState<string | null>(null);
-  const note = pickDraft(noteDraft, q.note ?? "");
+  const [noteDraft, setNoteDraft] = useState<Draft | null>(null);
+  const [noteWarn, setNoteWarn] = useState<string | null>(null);
+  const serverNote = q.note ?? "";
+  const note = draftOf(noteDraft, serverNote);
+  const setNote = (value: string) => {
+    setNoteWarn(null);
+    setNoteDraft((d) => editDraft(d, value, serverNote));
+  };
+  const saveNote = () => {
+    // 書き始めた後に他の人がメモを変えていたら、1回目は止めて相手のメモを見せる(@codex #459 R6)。
+    if (noteDraft && draftStale(noteDraft, serverNote)) {
+      setNoteWarn(`他の人が先に変えています。今のメモ:「${serverNote || "(空)"}」。自分のメモで上書きするなら、もう一度「メモを保存」を押してください。`);
+      setNoteDraft({ value: noteDraft.value, base: serverNote });
+      return;
+    }
+    setNoteWarn(null);
+    onSaveNote(note);
+  };
   return (
     <ModalShell
       size="lg"
@@ -208,11 +247,12 @@ export function InquiryDetailView({
           <button
             type="button"
             disabled={busy}
-            onClick={() => onSaveNote(note)}
+            onClick={saveNote}
             className="mt-1 rounded bg-teal-700 px-3 py-1 text-xs text-white disabled:opacity-60"
           >
             メモを保存
           </button>
+          {noteWarn && <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{noteWarn}</p>}
         </label>
         {q.kind === "viewing" && (
           <div className="space-y-1">
@@ -284,8 +324,10 @@ export default function InquiryDetail({
     setBusy(true);
     setError(null);
     let conflict = false;
+    let wrote = false;
     try {
       await fn();
+      wrote = true;
       onChanged();
     } catch (e) {
       conflict = apiErrorCode(e) === "VERSION_CONFLICT";
@@ -295,7 +337,9 @@ export default function InquiryDetail({
       if (!conflict) {
         await load().catch(() => {
           setRefreshFailed(true);
-          setError("保存しましたが、最新の内容を読み込めませんでした。「読み直す」を押してください。");
+          // 「保存しましたが…」は書き込みが通ったときだけ。書き込みも失敗していたら、その失敗を残す。
+          if (wrote) setError("保存しましたが、最新の内容を読み込めませんでした。「読み直す」を押してください。");
+          else setError((prev) => `${prev ?? "保存できませんでした"}(最新の内容も読み込めませんでした。「読み直す」を押してください)`);
         });
       }
       setBusy(false);

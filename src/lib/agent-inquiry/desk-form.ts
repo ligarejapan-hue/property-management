@@ -240,3 +240,28 @@ export function hitsForQuery<T>(res: SearchResult<T> | null, query: string): { h
   if (!res || res.query !== query) return null;
   return { hits: res.hits, failed: res.failed };
 }
+
+/** 下書き=打ちかけの値と、書き始めたときの最新の値(base)。 */
+export interface Draft {
+  value: string;
+  base: string;
+}
+
+/** 入力を下書きへ。書き始めたときの最新の値(base)は最初の1回だけ覚える。 */
+export function editDraft(prev: Draft | null, value: string, server: string): Draft {
+  return { value, base: prev ? prev.base : server };
+}
+
+/** 表示する値(下書きがあれば下書き・無ければ最新の値)。 */
+export function draftOf(d: Draft | null, server: string): string {
+  return d ? d.value : server;
+}
+
+/**
+ * 書き始めた後に、他の人がその欄を変えたか。変えていたら黙って上書きせず、1回目の保存を止めて
+ * 相手の値を見せる(読み直しで版だけ新しくなり、古い下書きで上書きしてしまうのを防ぐ・@codex #459 R6)。
+ */
+export function draftStale(d: Draft | null, server: string): boolean {
+  // 自分の保存で最新の値が下書きと同じになった場合は食い違いではない。
+  return d != null && d.base !== server && d.value !== server;
+}

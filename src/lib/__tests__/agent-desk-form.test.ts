@@ -153,3 +153,22 @@ describe("自動で入れた値は欄ごとに見る(@codex #459 R3)", () => {
     expect([s.contactName, s.contactMobile, s.contactEmail]).toEqual(["", "", ""]);
   });
 });
+
+import { draftOf, draftStale, editDraft } from "@/lib/agent-inquiry/desk-form";
+
+describe("下書きは書き始めたときの値を覚え、その間に他の人が変えたら黙って上書きしない(@codex #459 R6)", () => {
+  it("書き始めたときの値(base)を覚える・2回目以降の入力では base を変えない", () => {
+    const d1 = editDraft(null, "打ち1", "サーバA");
+    expect(d1).toEqual({ value: "打ち1", base: "サーバA" });
+    expect(editDraft(d1, "打ち2", "サーバB")).toEqual({ value: "打ち2", base: "サーバA" });
+    expect(draftOf(d1, "サーバA")).toBe("打ち1");
+    expect(draftOf(null, "サーバA")).toBe("サーバA");
+  });
+  it("書き始めた後に最新の値が変わっていたら「食い違い」", () => {
+    expect(draftStale({ value: "打ち", base: "サーバA" }, "サーバA")).toBe(false);
+    expect(draftStale({ value: "打ち", base: "サーバA" }, "サーバB")).toBe(true);
+    expect(draftStale(null, "サーバB")).toBe(false);
+    // 自分の保存で最新の値が下書きと同じになった=食い違いではない
+    expect(draftStale({ value: "打ち", base: "サーバA" }, "打ち")).toBe(false);
+  });
+});
