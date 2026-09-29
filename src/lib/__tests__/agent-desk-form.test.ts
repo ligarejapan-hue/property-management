@@ -131,3 +131,25 @@ describe("業者を替えたら前の業者から自動で入れた問い合わ�
     expect(s.contactName).toBe("佐藤");
   });
 });
+
+describe("自動で入れた値は欄ごとに見る(@codex #459 R3)", () => {
+  const agentB = { id: "b1", companyName: "△△住宅", branchName: null, phone: "03-2", matchedBy: "text" as const, lastContact: null };
+  it("1つの欄だけ直したら、直していない欄(自動のまま)だけ消す", () => {
+    const s = run(
+      { type: "agentSelected", agent },
+      { type: "contact", field: "contactName", value: "田中(直した)" },
+      { type: "agentQuery", value: "△△" },
+      { type: "agentSelected", agent: agentB },
+    );
+    expect([s.contactName, s.contactMobile, s.contactEmail]).toEqual(["田中(直した)", "", ""]);
+  });
+  it("携帯の欄を抜けただけ(同じ値に整えただけ)なら自動のまま扱う", () => {
+    const s = run(
+      { type: "agentSelected", agent },
+      { type: "contact", field: "contactMobile", value: "090-1234-5678" },
+      { type: "agentQuery", value: "△△" },
+      { type: "agentSelected", agent: agentB },
+    );
+    expect([s.contactName, s.contactMobile, s.contactEmail]).toEqual(["", "", ""]);
+  });
+});

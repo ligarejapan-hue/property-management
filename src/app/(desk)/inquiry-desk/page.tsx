@@ -52,13 +52,16 @@ export default function InquiryDeskPage() {
     let cancelled = false;
     (async () => {
       try {
-        const [list, up, counts] = await Promise.all([
+        // 担当者の一覧も同じ読み込みに入れる(失敗を空の一覧に見せず、知らせて読み直せる・@codex #459 R3)。
+        const [list, up, counts, us] = await Promise.all([
           fetchAgentInquiries({ status: tab, assignee: mine ? "me" : undefined }),
           fetchUpcomingViewings(),
           fetchAgentInquiryCounts(),
+          fetchUsers(),
         ]);
         if (cancelled) return;
         setLoadError(false);
+        setUsers(us.data.map((u) => ({ id: u.id, name: u.name })));
         setItems(list.items);
         setCursor(list.nextCursor);
         setUpcoming(up.viewings);
@@ -89,12 +92,6 @@ export default function InquiryDeskPage() {
       loadingMoreRef.current = false;
     }
   };
-
-  useEffect(() => {
-    fetchUsers()
-      .then((r) => setUsers(r.data.map((u) => ({ id: u.id, name: u.name }))))
-      .catch(() => {});
-  }, []);
 
   if (forbidden) {
     return (

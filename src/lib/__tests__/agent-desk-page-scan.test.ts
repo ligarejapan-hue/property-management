@@ -55,3 +55,10 @@ describe("画面保護(設計 §4)と もっと見る(@codex #459 R2)", () => {
     expect(src).toMatch(/loadingMoreRef\.current/);
   });
 });
+
+describe("担当者の一覧の読み込み失敗も知らせる(@codex #459 R3)", () => {
+  it("fetchUsers も同じ読み込み(失敗なら知らせる・もう一度読むで読み直す)に入れる", () => {
+    expect(src).not.toMatch(/fetchUsers\(\)[\s\S]{0,200}\.catch\(\(\) => \{\}\)/);
+    expect(src).toMatch(/Promise\.all\(\[[\s\S]*fetchUsers\(\)/);
+  });
+});

@@ -10,8 +10,11 @@ export interface DeskFormState {
   contactName: string;
   contactMobile: string;
   contactEmail: string;
-  /** 問い合わせ者の欄が業者の「前回の問い合わせ者」から自動で入ったままか(自分で直したら false)。 */
-  contactAutofilled: boolean;
+  /**
+   * 業者の「前回の問い合わせ者」から自動で入れた値(欄ごと)。業者を替えたとき、今もこの値のままの欄だけ
+   * 消す=自分で直した欄は残す(@codex #459 R2/R3: 1つの印で全体を見ると、1欄直しただけで残りも残った)。
+   */
+  contactAutofill: { contactName: string; contactMobile: string; contactEmail: string } | null;
   propertyQuery: string;
   property: DeskProperty | null;
   kind: InquiryKindKey | null;
@@ -29,7 +32,7 @@ export const EMPTY_DESK_FORM: DeskFormState = {
   contactName: "",
   contactMobile: "",
   contactEmail: "",
-  contactAutofilled: false,
+  contactAutofill: null,
   propertyQuery: "",
   property: null,
   kind: null,
@@ -62,27 +65,25 @@ export function deskFormReducer(s: DeskFormState, a: DeskFormAction): DeskFormSt
       // 携帯で当たったときは、その携帯の人の前回の名前・携帯・メールで埋める(書き換え可)。
       const c = a.agent.lastContact;
       if (c) {
-        return {
-          ...s,
-          agent: a.agent,
-          agentQuery: a.agent.companyName,
-          contactName: c.name ?? "",
-          contactMobile: c.mobile ?? "",
-          contactEmail: c.email ?? "",
-          contactAutofilled: true,
-        };
+        const fill = { contactName: c.name ?? "", contactMobile: c.mobile ?? "", contactEmail: c.email ?? "" };
+        return { ...s, agent: a.agent, agentQuery: a.agent.companyName, ...fill, contactAutofill: fill };
       }
-      // 前の業者から自動で入れたままの問い合わせ者は消す(別の業者の担当者として保存しない・@codex #459 R2)。
-      // 自分で打った/直した値は残す。
+      // 前の業者から自動で入れたままの欄だけ消す(別の業者の担当者として保存しない)。自分で直した欄は残す。
+      const f = s.contactAutofill;
+      const keep = (field: "contactName" | "contactMobile" | "contactEmail") =>
+        f && s[field] === f[field] ? "" : s[field];
       return {
         ...s,
         agent: a.agent,
         agentQuery: a.agent.companyName,
-        ...(s.contactAutofilled ? { contactName: "", contactMobile: "", contactEmail: "", contactAutofilled: false } : {}),
+        contactName: keep("contactName"),
+        contactMobile: keep("contactMobile"),
+        contactEmail: keep("contactEmail"),
+        contactAutofill: null,
       };
     }
     case "contact":
-      return { ...s, [a.field]: a.value, contactAutofilled: false };
+      return { ...s, [a.field]: a.value };
     case "propertyQuery":
       return { ...s, propertyQuery: a.value, property: null };
     case "propertySelected":
