@@ -1,13 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod/v4";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, FileText } from "lucide-react";
+import { Clock, Eye, EyeOff, FileText } from "lucide-react";
 import { writeSharedLastActivity } from "@/lib/session-activity";
+import { clearNoticeStorage } from "@/lib/notifications/notice-store";
+import { cleanupNotifications } from "@/lib/notifications/sw-client";
+import { IDLE_LOGGED_OUT_MESSAGE } from "@/lib/notifications/idle-warning";
+
+/** 通知を閉じられなかったときの案内(共用 PC 対策・設計書 §4.5)。PII は出さない。 */
+const CLEANUP_FAILED_MESSAGE = "通知を消せませんでした。ブラウザを閉じて開き直してからログインしてください";
 
 const loginSchema = z.object({
   email: z.email("有効なメールアドレスを入力してください"),
@@ -33,11 +39,24 @@ function safeInternalDest(raw: string | null): string {
   return fallback;
 }
 
+const noopSubscribe = () => () => {};
+function readIdleReason(): boolean {
+  return new URLSearchParams(window.location.search).get("reason") === "idle";
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false); // C-1 UI総点検: パスワード表示切替
+  // 通知 段階1: 無操作でログオフされた場合に理由を出す(/login?reason=idle)。
+  const idleLoggedOut = useSyncExternalStore(noopSubscribe, readIdleReason, () => false);
+
+  // 通知 段階1(共用 PC 対策): ログイン画面を開いた時点で、前の人のお知らせと OS の通知を片付ける。
+  useEffect(() => {
+    clearNoticeStorage();
+    void cleanupNotifications();
+  }, []);
 
   const {
     register,
@@ -52,6 +71,12 @@ export default function LoginPage() {
     setError(null);
 
     try {
+      // 通知 段階1(共用 PC 対策): 前の人の通知を閉じられたと確認できるまでログインに進まない。
+      clearNoticeStorage();
+      if (!(await cleanupNotifications())) {
+        setError(CLEANUP_FAILED_MESSAGE);
+        return;
+      }
       const result = await signIn("credentials", {
         email: data.email,
         password: data.password,
@@ -87,6 +112,13 @@ export default function LoginPage() {
             アカウントにログインしてください
           </p>
         </div>
+
+        {idleLoggedOut && (
+          <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+            <Clock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <p>{IDLE_LOGGED_OUT_MESSAGE}</p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>

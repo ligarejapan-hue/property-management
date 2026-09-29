@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { signOut } from "next-auth/react";
+import { useEffect, useRef, useState } from "react";
 import {
   readSharedLastActivity,
   writeSharedLastActivity,
 } from "@/lib/session-activity";
 import { IDLE_TIMEOUT_MS } from "@/lib/idle-timeout";
+import {
+  IDLE_LOGOUT_CALLBACK_URL,
+  IDLE_WARN_OS_BODY,
+  IDLE_WARN_TITLE,
+  idlePhase,
+} from "@/lib/notifications/idle-warning";
+import { signOutWithNotificationCleanup } from "@/lib/notifications/logout";
+import { useNotices } from "@/components/notifications/notice-provider";
+import { IdleLogoutDialog } from "./idle-logout-dialog";
 
 // 値の定義は src/lib/idle-timeout.ts に一本化した(edit-lock の rules.ts がサーバ側から
 // 参照するため。このコンポーネントの公開面("use client" の外から見える名前)は変えない)。
@@ -29,6 +37,10 @@ export { IDLE_TIMEOUT_MS };
  *   - 直近に操作があり、前回更新から REFRESH_INTERVAL_MS 以上経過 → getSession() で
  *     セッションendpointを叩き、JWT を回転させて cookie の有効期限を延長(スライド)。
  * - これにより「操作している間は切れない」「無操作 1 時間でログアウト」を実現する。
+ * - 通知 段階1(設計書 §4.3): 55分で予告ダイアログ(N3)を出す。別の画面を見ているときは
+ *   ベルに残し、許可があれば OS の通知も出す。ログアウト前に端末の通知を片付け、
+ *   無操作でのログアウトはログイン画面に理由を出す(`/login?reason=idle`)。
+ *   60分の規則・延長の仕組みは変えない(予告中の操作は今までどおり活動として延長される)。
  *
  * auth.ts 側は maxAge=1h・updateAge=5min。updateAge < REFRESH_INTERVAL なので
  * 更新のたびに確実に回転する。
@@ -43,6 +55,14 @@ export function IdleSessionGuard() {
   const lastActivityRef = useRef<number>(0);
   const lastRefreshRef = useRef<number>(0);
   const lastStorageWriteRef = useRef<number>(0);
+  const [warnDeadline, setWarnDeadline] = useState<number | null>(null);
+  const warnedRef = useRef(false);
+  const activityHandlerRef = useRef<() => void>(() => {});
+  const { notify } = useNotices();
+  const notifyRef = useRef(notify);
+  useEffect(() => {
+    notifyRef.current = notify;
+  }, [notify]);
 
   useEffect(() => {
     // モック(NEXT_PUBLIC_USE_MOCK=true)は auth 自体をバイパスする(proxy.ts も同様)。
@@ -59,7 +79,7 @@ export function IdleSessionGuard() {
     const effectiveLast = storedLast > 0 ? storedLast : startNow;
     if (startNow - effectiveLast >= IDLE_TIMEOUT_MS) {
       // 既に無操作上限を超えている(バッファ窓でのリロード等)→ そのままログアウト。
-      void signOut({ callbackUrl: "/login" });
+      void signOutWithNotificationCleanup(IDLE_LOGOUT_CALLBACK_URL);
       return;
     }
     lastActivityRef.current = effectiveLast;
@@ -86,7 +106,7 @@ export function IdleSessionGuard() {
             // (管理者による無効化/削除・失効)。この確定時だけクライアントも即ログアウトして
             // 画面を揃える(@codex #290 R9)。JSON 解析失敗(data=undefined)は無視。
             if (data !== undefined && !hasSession) {
-              void signOut({ callbackUrl: "/login" });
+              void signOutWithNotificationCleanup("/login");
             }
           })
           .catch(() => {
@@ -106,10 +126,13 @@ export function IdleSessionGuard() {
         readSharedLastActivity(),
       );
       if (now - prevLastActivity >= IDLE_TIMEOUT_MS) {
-        void signOut({ callbackUrl: "/login" });
+        void signOutWithNotificationCleanup(IDLE_LOGOUT_CALLBACK_URL);
         return;
       }
       lastActivityRef.current = now;
+      // 操作があれば予告は取り下げる(延長された=5分後のログオフは起きない)。
+      warnedRef.current = false;
+      setWarnDeadline(null);
       // 全タブへ共有(書込は throttle。頻発する mousemove で localStorage を叩き続けない)。
       if (now - lastStorageWriteRef.current >= STORAGE_WRITE_THROTTLE_MS) {
         lastStorageWriteRef.current = now;
@@ -120,6 +143,7 @@ export function IdleSessionGuard() {
       // 操作検知の時点で(前回更新が古ければ)延長を発火する。
       maybeRefreshSession(now);
     };
+    activityHandlerRef.current = markActivity;
     // 空(新規)のときだけ seed。既存の直近値は保持する(上の effectiveLast 判定を壊さない)。
     if (storedLast <= 0) writeSharedLastActivity(startNow);
 
@@ -149,8 +173,30 @@ export function IdleSessionGuard() {
 
       // 全タブで無操作が上限を超えたらログアウト。
       if (idleFor >= IDLE_TIMEOUT_MS) {
-        void signOut({ callbackUrl: "/login" });
+        void signOutWithNotificationCleanup(IDLE_LOGOUT_CALLBACK_URL);
         return;
+      }
+
+      // 55分を過ぎたら予告(N3)。別の画面を見ているときはベルと OS の通知にも出す(1回だけ)。
+      if (idlePhase(idleFor) === "warn") {
+        setWarnDeadline(lastActivity + IDLE_TIMEOUT_MS);
+        if (!warnedRef.current) {
+          warnedRef.current = true;
+          const hidden = document.visibilityState === "hidden";
+          notifyRef.current({
+            kind: "idle_logout_warn",
+            tag: "idle-logout",
+            title: IDLE_WARN_TITLE,
+            body: IDLE_WARN_OS_BODY,
+            url: window.location.pathname,
+            bell: hidden,
+            osWhenHidden: true,
+          });
+        }
+      } else {
+        // 他のタブで操作があった等で予告の範囲を外れたら取り下げる。
+        warnedRef.current = false;
+        setWarnDeadline(null);
       }
 
       // backup: 直近に操作があれば延長(通常は markActivity 側で即延長済み)。
@@ -168,5 +214,12 @@ export function IdleSessionGuard() {
     };
   }, []);
 
-  return null;
+  if (warnDeadline === null) return null;
+  return (
+    <IdleLogoutDialog
+      deadline={warnDeadline}
+      onContinue={() => activityHandlerRef.current()}
+      onLogout={() => void signOutWithNotificationCleanup("/login")}
+    />
+  );
 }

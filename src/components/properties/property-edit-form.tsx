@@ -14,6 +14,7 @@ import { formatBuiltYearMonth } from "@/lib/built-year-month";
 import { useEditLock } from "@/hooks/use-edit-lock";
 import { ensureUniqueScreenToken, editLockHeaders } from "@/lib/edit-lock/screen-token-client";
 import { EditLockBanner, BAND as EDIT_LOCK_BAND } from "@/components/edit-lock/edit-lock-banner";
+import { EditLockNotices } from "@/components/notifications/edit-lock-notices";
 // 保存可否の判断(決定層)。Task 6 fix round 1 #3 で src/lib/edit-lock/save-gate.ts へ
 // 切り出した。ここでは呼ぶだけで、判断はコピーしない。
 import { canSubmitSave, shouldShowLockUnavailableNotice } from "@/lib/edit-lock/save-gate";
@@ -638,6 +639,8 @@ export default function PropertyEditForm({
             </div>
           )}
           <EditLockBanner state={lock.state} warnIdle={lock.warnIdle} />
+          {/* 通知 段階1(N1・N2): 別の画面を見ているときだけベル・OS の通知に出す。帯はそのまま */}
+          <EditLockNotices state={lock.state} warnIdle={lock.warnIdle} resourceType="property" resourceId={property.id} />
           {error && (
             <div className="mb-4 flex items-center gap-2 rounded-md border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
               <AlertTriangle className="h-4 w-4 shrink-0" />

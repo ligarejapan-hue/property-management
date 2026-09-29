@@ -104,3 +104,15 @@ body {
     font-size: 16px;
   }
 }
+
+/* 通知 段階1: 右下のポップアップが出るときに少し上がる(toast-stack.tsx。motion-reduce で止める)。 */
+@keyframes pm-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

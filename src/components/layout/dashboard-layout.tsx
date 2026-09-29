@@ -1,7 +1,8 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { signOut, useSession } from "next-auth/react";
+import { useSession } from "next-auth/react";
+import { signOutWithNotificationCleanup } from "@/lib/notifications/logout";
 import Sidebar from "./sidebar";
 import Header from "./header";
 import { USE_MOCK } from "@/lib/api-client";
@@ -50,7 +51,8 @@ export default function DashboardLayout({
 
   const handleLogout = () => {
     if (USE_MOCK) return;
-    signOut({ callbackUrl: "/login" });
+    // 通知 段階1: 共用 PC で前の人の通知が残らないよう、片付けてからログアウトする。
+    void signOutWithNotificationCleanup("/login");
   };
 
   return (
