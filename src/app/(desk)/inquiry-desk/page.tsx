@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   apiErrorCode,
   fetchAgentInquiries,
@@ -43,7 +43,12 @@ export default function InquiryDeskPage() {
   const [reloadKey, setReloadKey] = useState(0);
   const reloadAll = useCallback(() => setReloadKey((k) => k + 1), []);
 
+  // 一覧の世代(タブ・自分の担当だけ・読み直しで進む)。もっと見るの応答が古い世代なら捨てる。
+  const listGenRef = useRef(0);
+  const loadingMoreRef = useRef(false);
+
   useEffect(() => {
+    listGenRef.current += 1;
     let cancelled = false;
     (async () => {
       try {
@@ -69,13 +74,19 @@ export default function InquiryDeskPage() {
   }, [tab, mine, reloadKey, onError]);
 
   const loadMore = async () => {
-    if (!cursor) return;
+    if (!cursor || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    const gen = listGenRef.current;
     try {
       const r = await fetchAgentInquiries({ status: tab, assignee: mine ? "me" : undefined, cursor });
+      // 待っている間にタブ・絞り込みを替えた/読み直した=古い応答なので混ぜない(@codex #459 R2)。
+      if (listGenRef.current !== gen) return;
       setItems((prev) => [...prev, ...r.items]);
       setCursor(r.nextCursor);
     } catch (e) {
       onError(e);
+    } finally {
+      loadingMoreRef.current = false;
     }
   };
 
@@ -93,7 +104,8 @@ export default function InquiryDeskPage() {
     );
   }
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    // 問い合わせ者の名前・携帯・メール(PII)を出すので画面保護の対象にする。
+    <div data-pii-protected data-pii-surface="dashboard" className="grid gap-4 lg:grid-cols-2">
       {loadError && (
         <div role="alert" className="flex items-center justify-between gap-2 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700 lg:col-span-2 dark:bg-rose-950 dark:text-rose-200">
           <span>読み込めませんでした。一覧と今日・明日の内見が最新ではありません。</span>

@@ -10,6 +10,8 @@ export interface DeskFormState {
   contactName: string;
   contactMobile: string;
   contactEmail: string;
+  /** 問い合わせ者の欄が業者の「前回の問い合わせ者」から自動で入ったままか(自分で直したら false)。 */
+  contactAutofilled: boolean;
   propertyQuery: string;
   property: DeskProperty | null;
   kind: InquiryKindKey | null;
@@ -27,6 +29,7 @@ export const EMPTY_DESK_FORM: DeskFormState = {
   contactName: "",
   contactMobile: "",
   contactEmail: "",
+  contactAutofilled: false,
   propertyQuery: "",
   property: null,
   kind: null,
@@ -58,15 +61,28 @@ export function deskFormReducer(s: DeskFormState, a: DeskFormAction): DeskFormSt
     case "agentSelected": {
       // 携帯で当たったときは、その携帯の人の前回の名前・携帯・メールで埋める(書き換え可)。
       const c = a.agent.lastContact;
+      if (c) {
+        return {
+          ...s,
+          agent: a.agent,
+          agentQuery: a.agent.companyName,
+          contactName: c.name ?? "",
+          contactMobile: c.mobile ?? "",
+          contactEmail: c.email ?? "",
+          contactAutofilled: true,
+        };
+      }
+      // 前の業者から自動で入れたままの問い合わせ者は消す(別の業者の担当者として保存しない・@codex #459 R2)。
+      // 自分で打った/直した値は残す。
       return {
         ...s,
         agent: a.agent,
         agentQuery: a.agent.companyName,
-        ...(c ? { contactName: c.name ?? "", contactMobile: c.mobile ?? "", contactEmail: c.email ?? "" } : {}),
+        ...(s.contactAutofilled ? { contactName: "", contactMobile: "", contactEmail: "", contactAutofilled: false } : {}),
       };
     }
     case "contact":
-      return { ...s, [a.field]: a.value };
+      return { ...s, [a.field]: a.value, contactAutofilled: false };
     case "propertyQuery":
       return { ...s, propertyQuery: a.value, property: null };
     case "propertySelected":

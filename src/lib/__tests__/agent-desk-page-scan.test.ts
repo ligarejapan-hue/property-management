@@ -42,3 +42,16 @@ describe("候補は今の検索語のものだけ(@codex #459 R1)", () => {
     }
   });
 });
+
+describe("画面保護(設計 §4)と もっと見る(@codex #459 R2)", () => {
+  it("受付の窓も画面保護(透かし・コピー/印刷の抑止と記録)の対象", () => {
+    const layout = readFileSync(join(process.cwd(), "src/app/(desk)/layout.tsx"), "utf8");
+    expect(layout).toContain("<ScreenProtectionProvider>");
+    expect(src).toMatch(/data-pii-protected/);
+    expect(src).toMatch(/data-pii-surface="dashboard"/);
+  });
+  it("もっと見るは絞り込みを替えた後の古い応答を捨て、連打しない", () => {
+    expect(src).toMatch(/listGenRef\.current !== gen/);
+    expect(src).toMatch(/loadingMoreRef\.current/);
+  });
+});

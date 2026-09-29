@@ -110,3 +110,24 @@ describe("検索結果は今の検索語のものだけ出す(@codex #459 R1)", 
     expect(hitsForQuery({ query: "新宿", hits: [], failed: true }, "新宿")).toEqual({ hits: [], failed: true });
   });
 });
+
+describe("業者を替えたら前の業者から自動で入れた問い合わせ者を消す(@codex #459 R2)", () => {
+  const agentB = { id: "b1", companyName: "△△住宅", branchName: null, phone: "03-2", matchedBy: "text" as const, lastContact: null };
+  it("自動で入れた問い合わせ者は、前回の無い業者に替えたら消す", () => {
+    const s = run({ type: "agentSelected", agent }, { type: "agentQuery", value: "△△" }, { type: "agentSelected", agent: agentB });
+    expect([s.contactName, s.contactMobile, s.contactEmail]).toEqual(["", "", ""]);
+  });
+  it("自分で打った問い合わせ者は業者を替えても残す", () => {
+    const s = run(
+      { type: "agentSelected", agent },
+      { type: "contact", field: "contactName", value: "田中(直した)" },
+      { type: "agentQuery", value: "△△" },
+      { type: "agentSelected", agent: agentB },
+    );
+    expect(s.contactName).toBe("田中(直した)");
+  });
+  it("業者を選ぶ前に打った問い合わせ者は、前回の無い業者を選んでも残す", () => {
+    const s = run({ type: "contact", field: "contactName", value: "佐藤" }, { type: "agentSelected", agent: agentB });
+    expect(s.contactName).toBe("佐藤");
+  });
+});
