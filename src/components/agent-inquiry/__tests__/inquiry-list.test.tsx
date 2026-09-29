@@ -187,3 +187,20 @@ describe("書けないときは入力欄も打てない(@codex #459 R13)", () =>
     for (const i of html.match(/<input type="(?:date|time)"[^>]*>/g) ?? []) expect(i).toMatch(/readonly/i);
   });
 });
+
+describe("書けないときの文字は保護付きの文章で出す・読み直し中は操作を止める(@codex #459 R17)", () => {
+  it("readOnlyText=true ならメモと結果は textarea ではなく保護の印付きの文章", () => {
+    const html = renderToStaticMarkup(
+      <InquiryDetailView inquiry={{ ...inquiry, note: "メールの本文" }} canOpenProperty={false} users={[]} busy error={null}
+        onStatus={noop} onAssignee={noop} onSaveNote={noop} onAddViewing={noop} onSaveViewing={noop} onClose={noop} readOnlyText />,
+    );
+    expect(html).not.toContain("<textarea");
+    expect(html).toMatch(/<p data-pii-protected="true" data-pii-surface="dashboard"[^>]*>メールの本文<\/p>/);
+    expect(html).toMatch(/<p data-pii-protected="true" data-pii-surface="dashboard"[^>]*>見送り<\/p>/);
+  });
+  it("読み直しは古い応答で新しい内容を上書きしない・読み直し中は操作を止める", () => {
+    const s = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
+    expect(s).toMatch(/loadSeqRef\.current !== seq/);
+    expect(s).toMatch(/const reload = \(\) => \{[\s\S]{0,200}setBusy\(true\)/);
+  });
+});

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Button } from "@/components/ui/button";
 import WatermarkOverlay from "@/components/screen-protection/watermark-overlay";
@@ -33,6 +33,16 @@ import {
 export const mainWindowPropertyHref = (id: string) => `/properties/${id}`;
 const inputCls = "w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900";
 
+/**
+ * 書けないときの文字(メモ・結果)。画面保護はテキスト欄の中を見ないので、欄ではなく保護の印付きの
+ * 文章で出す=コピーの抑止と記録が効く(@codex #459 R17)。
+ */
+function ProtectedText({ text }: { text: string }) {
+  return (
+    <p data-pii-protected="true" data-pii-surface="dashboard" className="min-h-[2rem] whitespace-pre-wrap rounded-md border border-gray-200 px-2 py-1.5 text-sm dark:border-gray-700">{text}</p>
+  );
+}
+
 export type ViewingPatch = {
   scheduledAt?: string | null;
   viewingType?: ViewingTypeKey;
@@ -45,11 +55,13 @@ function ViewingRow({
   v,
   users,
   busy,
+  readOnlyText,
   onSave,
 }: {
   v: ViewingView;
   users: { id: string; name: string }[];
   busy: boolean;
+  readOnlyText: boolean;
   onSave: (patch: ViewingPatch) => void;
 }) {
   // 下書き(書き始めたときの最新の値も覚える)。行は内見の id だけで作り直すので、保存で版が進んでも・
@@ -110,14 +122,18 @@ function ViewingRow({
           </option>
         ))}
       </select>
-      <textarea
-        value={val("result")}
-        readOnly={busy}
-        onChange={(e) => edit("result", e.target.value)}
-        rows={2}
-        placeholder="内見後の結果"
-        className={inputCls}
-      />
+      {readOnlyText ? (
+        <ProtectedText text={val("result")} />
+      ) : (
+        <textarea
+          value={val("result")}
+          readOnly={busy}
+          onChange={(e) => edit("result", e.target.value)}
+          rows={2}
+          placeholder="内見後の結果"
+          className={inputCls}
+        />
+      )}
       {warn && <p className="text-xs text-amber-700 dark:text-amber-300">{warn}</p>}
       <div className="flex flex-wrap gap-1">
         <button type="button" disabled={busy} onClick={save} className="rounded bg-teal-700 px-3 py-1 text-xs text-white disabled:opacity-60">
@@ -151,6 +167,7 @@ export function InquiryDetailView({
   onClose,
   onReload,
   closeLocked = false,
+  readOnlyText = false,
 }: {
   inquiry: InquiryView;
   canOpenProperty: boolean;
@@ -167,6 +184,8 @@ export function InquiryDetailView({
   onReload?: () => void;
   /** 閉じられない(書き込み中だけ)。読み直しに失敗しているだけなら閉じられる=閉じ込めない(@codex #459 R9)。 */
   closeLocked?: boolean;
+  /** 書けない(書く権限なし・読み直し失敗)ときは、メモと結果を保護付きの文章で出す(@codex #459 R17)。 */
+  readOnlyText?: boolean;
 }) {
   // メモの下書き(null=まだ触っていない)。詳細は反響の id だけで作り直すので、状態や担当を変えて版が
   // 進んでも・読み直しても、打ちかけのメモは消えない(最終レビュー I-1/I-2)。
@@ -254,7 +273,11 @@ export function InquiryDetailView({
         <label className="block">
           <span className="text-xs text-gray-500">メモ</span>
           {/* 書けない間(保存中・書く権限なし・読み直し失敗)は打てない=保存できない入力を受け付けない(@codex #459 R13)。 */}
-          <textarea value={note} readOnly={busy} onChange={(e) => setNote(e.target.value)} rows={3} className={inputCls} />
+          {readOnlyText ? (
+            <ProtectedText text={note} />
+          ) : (
+            <textarea value={note} readOnly={busy} onChange={(e) => setNote(e.target.value)} rows={3} className={inputCls} />
+          )}
           <button
             type="button"
             disabled={busy}
@@ -270,7 +293,7 @@ export function InquiryDetailView({
             <p className="text-xs text-gray-500">内見の予定</p>
             <ul className="space-y-1">
               {q.viewings.map((v) => (
-                <ViewingRow key={v.id} v={v} users={users} busy={busy} onSave={(p) => onSaveViewing(v, p)} />
+                <ViewingRow key={v.id} v={v} users={users} busy={busy} readOnlyText={readOnlyText} onSave={(p) => onSaveViewing(v, p)} />
               ))}
             </ul>
             <div className="flex gap-1">
@@ -329,7 +352,19 @@ export default function InquiryDetail({
   // 読み直すまで操作を止める(@codex #459 R5)。
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const load = useCallback(() => fetchAgentInquiry(inquiryId).then(setData), [inquiryId]);
+  // 読み込みの番号。後から始めた読み込みがあれば、先の応答は捨てる=古い内容で新しい内容を上書きしない(@codex #459 R17)。
+  const loadSeqRef = useRef(0);
+  const load = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
+    try {
+      const next = await fetchAgentInquiry(inquiryId);
+      if (loadSeqRef.current !== seq) return;
+      setData(next);
+    } catch (e) {
+      if (loadSeqRef.current !== seq) return;
+      throw e;
+    }
+  }, [inquiryId]);
   useEffect(() => {
     load().catch((e) => setError(e instanceof Error ? e.message : "読み込めませんでした"));
   }, [load]);
@@ -360,6 +395,9 @@ export default function InquiryDetail({
     }
   };
   const reload = () => {
+    // 読み直し中は書き込みを止める(古い版のまま押せる・保存後の読み込みと食い違うのを防ぐ・@codex #459 R17)。
+    if (busy) return;
+    setBusy(true);
     setError(null);
     load()
       .then(() => setRefreshFailed(false))
@@ -367,7 +405,8 @@ export default function InquiryDetail({
         // 読み直しにも失敗したら、古い内容のまま押せる状態には戻さない。
         setRefreshFailed(true);
         setError(e instanceof Error ? e.message : "読み込めませんでした");
-      });
+      })
+      .finally(() => setBusy(false));
   };
   if (!data) {
     return error ? (
@@ -385,6 +424,7 @@ export default function InquiryDetail({
       users={users}
       busy={busy || refreshFailed || !canWrite}
       closeLocked={busy}
+      readOnlyText={refreshFailed || !canWrite}
       error={error}
       onStatus={(status) => run(() => updateAgentInquiry(q.id, { version: q.version, status }))}
       onAssignee={(assigneeId) => run(() => updateAgentInquiry(q.id, { version: q.version, assigneeId }))}
