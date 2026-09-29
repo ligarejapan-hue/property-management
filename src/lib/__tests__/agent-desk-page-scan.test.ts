@@ -68,3 +68,9 @@ describe("タブを替えたら前のタブの行を出さない(@codex #459 R4)
     expect(src).toMatch(/listKey === filterKey/);
   });
 });
+
+describe("もっと見るの古い失敗で今の一覧を「読み込めませんでした」にしない(@codex #459 R5)", () => {
+  it("失敗の知らせも世代を確かめてから", () => {
+    expect(src).toMatch(/catch \(e\) \{\s*if \(listGenRef\.current === gen\) onError\(e\);/);
+  });
+});

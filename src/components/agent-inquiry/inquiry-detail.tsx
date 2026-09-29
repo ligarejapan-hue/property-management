@@ -271,6 +271,9 @@ export default function InquiryDetail({
 }) {
   const [data, setData] = useState<{ inquiry: InquiryView; canOpenProperty: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 保存はできたが最新を読み直せなかった。古い内容のまま押すと内見の二重登録や版の食い違いになるので、
+  // 読み直すまで操作を止める(@codex #459 R5)。
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => fetchAgentInquiry(inquiryId).then(setData), [inquiryId]);
   useEffect(() => {
@@ -289,12 +292,18 @@ export default function InquiryDetail({
       setError(conflict ? CONFLICT_MESSAGE : e instanceof Error ? e.message : "保存できませんでした");
     } finally {
       // 他の人が先に更新したときは自動で読み直さない=打ちかけの入力を消さない。「読み直す」で最新へ。
-      if (!conflict) await load().catch(() => {});
+      if (!conflict) {
+        await load().catch(() => {
+          setRefreshFailed(true);
+          setError("保存しましたが、最新の内容を読み込めませんでした。「読み直す」を押してください。");
+        });
+      }
       setBusy(false);
     }
   };
   const reload = () => {
     setError(null);
+    setRefreshFailed(false);
     load().catch((e) => setError(e instanceof Error ? e.message : "読み込めませんでした"));
   };
   if (!data) {
@@ -311,7 +320,7 @@ export default function InquiryDetail({
       inquiry={q}
       canOpenProperty={data.canOpenProperty}
       users={users}
-      busy={busy}
+      busy={busy || refreshFailed}
       error={error}
       onStatus={(status) => run(() => updateAgentInquiry(q.id, { version: q.version, status }))}
       onAssignee={(assigneeId) => run(() => updateAgentInquiry(q.id, { version: q.version, assigneeId }))}

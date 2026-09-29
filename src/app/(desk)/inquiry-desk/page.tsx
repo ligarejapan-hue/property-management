@@ -92,7 +92,7 @@ export default function InquiryDeskPage() {
       setItems((prev) => [...prev, ...r.items]);
       setCursor(r.nextCursor);
     } catch (e) {
-      onError(e);
+      if (listGenRef.current === gen) onError(e);
     } finally {
       loadingMoreRef.current = false;
     }

@@ -123,3 +123,11 @@ describe("ボタンの中の個人情報にも画面保護(@codex #459 R4)", () 
     expect(html).toMatch(/<span data-pii-protected="true" data-pii-surface="dashboard">\(田中様\)<\/span>/);
   });
 });
+
+describe("保存できたが読み直せなかったとき(@codex #459 R5)", () => {
+  const detailSrc = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
+  it("知らせて、読み直すまで押せないようにする(内見の二重登録を防ぐ)", () => {
+    expect(detailSrc).toContain("保存しましたが、最新の内容を読み込めませんでした");
+    expect(detailSrc).toMatch(/busy=\{busy \|\| refreshFailed\}/);
+  });
+});
