@@ -149,6 +149,7 @@ export function InquiryDetailView({
   onSaveViewing,
   onClose,
   onReload,
+  closeLocked = false,
 }: {
   inquiry: InquiryView;
   canOpenProperty: boolean;
@@ -163,6 +164,8 @@ export function InquiryDetailView({
   onClose: () => void;
   /** 他の人が先に更新したとき、入力を残したまま最新を読み直す。 */
   onReload?: () => void;
+  /** 閉じられない(書き込み中だけ)。読み直しに失敗しているだけなら閉じられる=閉じ込めない(@codex #459 R9)。 */
+  closeLocked?: boolean;
 }) {
   // メモの下書き(null=まだ触っていない)。詳細は反響の id だけで作り直すので、状態や担当を変えて版が
   // 進んでも・読み直しても、打ちかけのメモは消えない(最終レビュー I-1/I-2)。
@@ -190,9 +193,9 @@ export function InquiryDetailView({
       size="lg"
       title={`${KIND_LABEL[q.kind]} ― ${q.agent.companyName}`}
       // 保存中は閉じない(閉じて開き直すと古い内容のまま「内見を足す」を押せて二重登録になる・@codex #459 R8)。
-      onClose={busy ? undefined : onClose}
+      onClose={closeLocked ? undefined : onClose}
       footer={
-        <Button variant="secondary" onClick={onClose} disabled={busy}>
+        <Button variant="secondary" onClick={onClose} disabled={closeLocked}>
           閉じる
         </Button>
       }
@@ -376,6 +379,7 @@ export default function InquiryDetail({
       canOpenProperty={data.canOpenProperty}
       users={users}
       busy={busy || refreshFailed}
+      closeLocked={busy}
       error={error}
       onStatus={(status) => run(() => updateAgentInquiry(q.id, { version: q.version, status }))}
       onAssignee={(assigneeId) => run(() => updateAgentInquiry(q.id, { version: q.version, assigneeId }))}

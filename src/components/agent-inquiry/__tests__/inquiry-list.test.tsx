@@ -160,8 +160,10 @@ describe("詳細の小窓(ネイティブの dialog)の中にも透かし・保�
     expect(s).toContain("useScreenProtection()");
     expect(s).toMatch(/!bypass && watermarkText && <WatermarkOverlay text=\{watermarkText\} \/>/);
   });
-  it("保存中は「閉じる」も Escape も効かない", () => {
-    expect(s).toMatch(/onClose=\{busy \? undefined : onClose\}/);
-    expect(s).toMatch(/<Button variant="secondary" onClick=\{onClose\} disabled=\{busy\}>/);
+  it("保存中は「閉じる」も Escape も効かない(書き込み中だけ・読み直しの失敗では閉じられる=閉じ込めない・@codex #459 R9)", () => {
+    expect(s).toMatch(/onClose=\{closeLocked \? undefined : onClose\}/);
+    expect(s).toMatch(/<Button variant="secondary" onClick=\{onClose\} disabled=\{closeLocked\}>/);
+    expect(s).toMatch(/closeLocked=\{busy\}/);
+    expect(s).toMatch(/busy=\{busy \|\| refreshFailed\}/);
   });
 });
