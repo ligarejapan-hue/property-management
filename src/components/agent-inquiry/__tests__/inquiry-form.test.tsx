@@ -121,3 +121,11 @@ describe("新しい業者の登録中は欄も打てない(@codex #459 R14)", ()
     expect(s).toMatch(/<fieldset disabled=\{saving\}/);
   });
 });
+
+describe("保存できたか分からないときは一覧を確かめさせる(@codex #459 R15)", () => {
+  it("分からない失敗は二重登録にならないよう、一覧を読み直して確かめる文言を出す", () => {
+    const s = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-form.tsx"), "utf8");
+    expect(s).toContain("isAmbiguousSaveError(err)");
+    expect(s).toContain("保存できたか分かりません");
+  });
+});

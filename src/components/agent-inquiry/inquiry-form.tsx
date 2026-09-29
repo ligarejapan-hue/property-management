@@ -8,6 +8,7 @@ import {
   validateDeskForm,
   materialEmailWarning,
   buildCreateBody,
+  isAmbiguousSaveError,
   KIND_LABEL,
   CHANNEL_LABEL,
   type DeskFormAction,
@@ -288,7 +289,13 @@ export default function InquiryForm({
       setMessage("登録しました");
       onSaved();
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "通信できませんでした");
+      if (isAmbiguousSaveError(err)) {
+        // 保存が済んでいることがある=そのまま押し直すと二重登録。一覧を読み直して確かめてもらう。
+        setSaveError("保存できたか分かりません(通信が切れました)。右の一覧に出ていないか確かめてから、無ければもう一度保存してください。");
+        onSaved();
+      } else {
+        setSaveError(err instanceof Error ? err.message : "保存できませんでした");
+      }
     } finally {
       setSubmitting(false);
     }

@@ -180,3 +180,25 @@ describe("自分の保存が通った後の下書きは最新の値を基準に�
     expect(draftStale(editDraft(saved, "C", "B"), "B")).toBe(false);
   });
 });
+
+import { isAmbiguousSaveError } from "@/lib/agent-inquiry/desk-form";
+
+describe("サーバが前後の空白を落として保存しても食い違い扱いにしない(@codex #459 R14 2件目)", () => {
+  it("下書きと最新の値の違いが前後の空白だけなら、自分の保存が通ったものとして基準にし直す", () => {
+    const saved = { value: "打ち ", base: "A" };
+    expect(editDraft(saved, "打ち2", "打ち")).toEqual({ value: "打ち2", base: "打ち" });
+    expect(draftStale(saved, "打ち")).toBe(false);
+  });
+});
+
+describe("保存できたか分からない失敗(@codex #459 R15)", () => {
+  it("通信が切れた(状態コード無し)・中継の時間切れ(5xx)は「分からない」", () => {
+    expect(isAmbiguousSaveError(new TypeError("Failed to fetch"))).toBe(true);
+    expect(isAmbiguousSaveError(Object.assign(new Error("x"), { status: 504 }))).toBe(true);
+    expect(isAmbiguousSaveError(Object.assign(new Error("x"), { status: 502 }))).toBe(true);
+  });
+  it("はっきり断られた(4xx)は「保存されていない」", () => {
+    expect(isAmbiguousSaveError(Object.assign(new Error("x"), { status: 409 }))).toBe(false);
+    expect(isAmbiguousSaveError(Object.assign(new Error("x"), { status: 422 }))).toBe(false);
+  });
+});

@@ -252,7 +252,12 @@ export interface Draft {
  * 下書きの値=最新の値になっていたら、最新の値を基準にし直す(@codex #459 R7)。
  */
 export function editDraft(prev: Draft | null, value: string, server: string): Draft {
-  return { value, base: prev && prev.value !== server ? prev.base : server };
+  return { value, base: prev && !sameSaved(prev.value, server) ? prev.base : server };
+}
+
+/** サーバは前後の空白を落として保存する。違いが前後の空白だけなら同じ値とみなす(@codex #459 R14)。 */
+function sameSaved(draftValue: string, server: string): boolean {
+  return draftValue.trim() === server.trim();
 }
 
 /** 表示する値(下書きがあれば下書き・無ければ最新の値)。 */
@@ -266,5 +271,15 @@ export function draftOf(d: Draft | null, server: string): string {
  */
 export function draftStale(d: Draft | null, server: string): boolean {
   // 自分の保存で最新の値が下書きと同じになった場合は食い違いではない。
-  return d != null && d.base !== server && d.value !== server;
+  return d != null && d.base !== server && !sameSaved(d.value, server);
+}
+
+/**
+ * 保存できたかどうか分からない失敗か。通信が切れた(状態コードが無い)・中継の時間切れ(5xx)は、
+ * サーバ側では保存が済んでいることがある。そのまま「もう一度保存」させると二重登録になるので、
+ * 一覧で確かめてもらう(@codex #459 R15)。はっきり断られた 4xx は「保存されていない」。
+ */
+export function isAmbiguousSaveError(err: unknown): boolean {
+  const status = (err as { status?: unknown } | null)?.status;
+  return typeof status !== "number" || status >= 500;
 }
