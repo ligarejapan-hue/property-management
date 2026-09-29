@@ -107,3 +107,10 @@ describe("新しい業者の登録中は閉じられない(@codex #459 R7)", () 
     expect(s).toMatch(/<Button variant="secondary" onClick=\{onClose\} disabled=\{saving\}>/);
   });
 });
+
+describe("保存中は入力できない(保存が終わって空に戻るときに消えないように・@codex #459 R11)", () => {
+  it("保存中はフォームの中身をまとめて使えなくする", () => {
+    expect(view({ submitting: true })).toMatch(/<fieldset[^>]*disabled=""/);
+    expect(view({ submitting: false })).not.toMatch(/<fieldset[^>]*disabled=""/);
+  });
+});

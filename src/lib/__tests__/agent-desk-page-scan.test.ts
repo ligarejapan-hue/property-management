@@ -85,3 +85,14 @@ describe("開いたままの窓で権限を外されたら表示を消す・も�
     expect(src).toMatch(/loadingMoreRef\.current === listGenRef\.current/);
   });
 });
+
+describe("権限が分からない間は中身を出さない・詳細は反響ごとに作り直す(@codex #459 R11)", () => {
+  it("権限が読めていない(null)なら出さない。読み込み中の表示と、失敗なら読み直すボタン", () => {
+    expect(src).toMatch(/if \(permissions == null \|\| !permissionsSettled\)/);
+    expect(src).toContain("権限を確かめています");
+    expect(src).toMatch(/refetchPermissions\(\)/);
+  });
+  it("詳細は開いた反響の id で作り直す(前の反響の遅い応答で別の反響を開かない)", () => {
+    expect(src).toMatch(/<InquiryDetail\s+key=\{openId\}/);
+  });
+});

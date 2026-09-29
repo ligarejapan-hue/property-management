@@ -37,8 +37,33 @@ export default function InquiryDeskPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
   // 開いたままの窓で閲覧権限を外されたら、画面保護が読み直す権限を見て中身を消す(@codex #459 R10)。
-  const { permissions } = useScreenProtection();
-  const revoked = permissions != null && !hasPermission(permissions, "agent_inquiry", "read");
+  const { permissions, permissionsLoading, permissionsError, refetchPermissions } = useScreenProtection();
+  // 権限の鮮度の3点セット(permission-freshness-pattern.test.ts の規約・建物詳細と同じ形):
+  // (1) 進入あたり最大1回だけ再確認 (2) 再確認が終わるまでは pending で開始 (3) pending/loading は出さない側へ。
+  const permissionsRefreshRequestedRef = useRef(false);
+  const permissionsLoadingAtMountRef = useRef<boolean | null>(null);
+  if (permissionsLoadingAtMountRef.current === null) {
+    permissionsLoadingAtMountRef.current = permissionsLoading;
+  }
+  const [permissionsRefreshPending, setPermissionsRefreshPending] = useState(() => !permissionsLoading);
+  useEffect(() => {
+    if (permissionsRefreshRequestedRef.current) return;
+    // provider の取得が進行中なら完了を待つ(同時 2 本にしない)。
+    if (permissionsLoading) return;
+    if (permissionsLoadingAtMountRef.current === true && permissions !== null) {
+      // mount 時に進行中だった取得が成功 → 見ている値は最新。
+      permissionsRefreshRequestedRef.current = true;
+      setPermissionsRefreshPending(false);
+      return;
+    }
+    permissionsRefreshRequestedRef.current = true;
+    setPermissionsRefreshPending(true);
+    refetchPermissions().finally(() => {
+      setPermissionsRefreshPending(false);
+    });
+  }, [permissionsLoading, permissions, refetchPermissions]);
+  const permissionsSettled = !permissionsLoading && !permissionsRefreshPending;
+  const revoked = permissionsSettled && permissions != null && !hasPermission(permissions, "agent_inquiry", "read");
   // 403 以外の読み込み失敗。「ありません」と見分けがつくよう知らせる(内見の見落としを防ぐ・@codex #459 R1)。
   const [loadError, setLoadError] = useState(false);
   const [formState, setFormState] = useState<DeskFormState>(EMPTY_DESK_FORM);
@@ -105,6 +130,24 @@ export default function InquiryDeskPage() {
     }
   };
 
+  // 権限がまだ分からない/読めなかった(null)間は中身を出さない=失敗した再検証で古い中身を残さない
+  // (@codex #459 R11)。
+  if (permissions == null || !permissionsSettled) {
+    return (
+      <div className="rounded-md bg-white p-6 text-center text-sm dark:bg-gray-900">
+        {permissionsSettled && permissionsError ? (
+          <>
+            <p className="mb-2">権限を確かめられませんでした。</p>
+            <button type="button" onClick={() => void refetchPermissions()} className="rounded border border-gray-300 px-3 py-1 text-xs dark:border-gray-700">
+              もう一度確かめる
+            </button>
+          </>
+        ) : (
+          <p>権限を確かめています…</p>
+        )}
+      </div>
+    );
+  }
   if (forbidden || revoked) {
     return (
       <p className="rounded-md bg-white p-6 text-center text-sm dark:bg-gray-900">
@@ -141,7 +184,16 @@ export default function InquiryDeskPage() {
           onMore={loadMore}
         />
       </div>
-      {openId && <InquiryDetail inquiryId={openId} users={users} onClose={() => setOpenId(null)} onChanged={reloadAll} />}
+      {/* 反響の id で作り直す=前に押した反響の遅い応答で、別の反響の詳細が開かない(@codex #459 R11)。 */}
+      {openId && (
+        <InquiryDetail
+          key={openId}
+          inquiryId={openId}
+          users={users}
+          onClose={() => setOpenId(null)}
+          onChanged={reloadAll}
+        />
+      )}
     </div>
   );
 }

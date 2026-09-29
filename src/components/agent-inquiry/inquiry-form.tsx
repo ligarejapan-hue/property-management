@@ -63,12 +63,14 @@ export function InquiryFormView({
 }) {
   return (
     <form
-      className="space-y-3 rounded-lg border-2 border-teal-700 bg-white p-3 dark:bg-gray-900"
+      className="rounded-lg border-2 border-teal-700 bg-white p-3 dark:bg-gray-900"
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit();
       }}
     >
+      {/* 保存中はまとめて使えなくする(保存が終わると空に戻るので、その間の入力が消えないように・@codex #459 R11)。 */}
+      <fieldset disabled={submitting} className="m-0 min-w-0 space-y-3 border-0 p-0">
       <section className="space-y-1">
         <Label>業者(代表電話・携帯・会社名)</Label>
         <AgentPicker
@@ -240,6 +242,7 @@ export function InquiryFormView({
       >
         {submitting ? "保存中…" : "保存する"}
       </button>
+      </fieldset>
     </form>
   );
 }
