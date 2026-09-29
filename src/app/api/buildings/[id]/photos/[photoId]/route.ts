@@ -37,7 +37,12 @@ export async function DELETE(
     }
 
     const fileUrlBeforeDelete = photo.fileUrl;
-    await prisma.buildingPhoto.delete({ where: { id: photoId } });
+    // ⚠2人がほぼ同時に削除すると、後の人の delete が「対象が無い」で 500 になっていた。
+    //   0件なら 404(ほかの操作で削除済み)で知らせ、実体ファイルの削除にも進まない。
+    const removed = await prisma.buildingPhoto.deleteMany({ where: { id: photoId, buildingId: id } });
+    if (removed.count === 0) {
+      throw new ApiError(404, "写真が見つかりません(ほかの操作で削除された可能性があります)", "NOT_FOUND");
+    }
 
     // best-effort: DB 削除成功後に実体ファイルも消す。失敗は orphan を残すだけで
     // ユーザ向け成功レスポンスは維持する（DB が source of truth）。
@@ -110,13 +115,21 @@ export async function PATCH(
           data: { isPrimary: false },
         });
       }
-      return tx.buildingPhoto.update({
-        where: { id: photoId },
+      const applied = await tx.buildingPhoto.updateMany({
+        where: { id: photoId, buildingId: id },
         data: {
           ...(body.caption !== undefined && { caption: body.caption?.trim() || null }),
           ...(body.isPrimary !== undefined && { isPrimary: body.isPrimary }),
           ...(body.sortOrder !== undefined && { sortOrder: body.sortOrder }),
         },
+      });
+      if (applied.count === 0) {
+        // ⚠この写真が途中で削除されていた(ほかの操作と競合)。以前は update が「対象が無い」で
+        //   失敗して 500 になっていた。404 で知らせる(tx の中で投げる=他の代表を外した分も巻き戻る)。
+        throw new ApiError(404, "写真が見つかりません(ほかの操作で削除された可能性があります)", "NOT_FOUND");
+      }
+      return tx.buildingPhoto.findUnique({
+        where: { id: photoId },
         include: {
           photographer: { select: { id: true, name: true } },
         },

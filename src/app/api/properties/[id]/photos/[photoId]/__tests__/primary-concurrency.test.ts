@@ -32,7 +32,7 @@ vi.mock("@/lib/storage", () => ({ getStorage: vi.fn() }));
 //   「呼ばれていない」の形で拾う。
 vi.mock("@/lib/prisma", () => ({
   default: {
-    propertyPhoto: { findUnique: vi.fn(), updateMany: vi.fn(), update: vi.fn() },
+    propertyPhoto: { findUnique: vi.fn(), updateMany: vi.fn(), update: vi.fn(), deleteMany: vi.fn(), delete: vi.fn() },
     $queryRaw: vi.fn(),
     $transaction: vi.fn(),
   },
@@ -40,10 +40,11 @@ vi.mock("@/lib/prisma", () => ({
 
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
-import { PATCH } from "../route";
+import { PATCH, DELETE } from "../route";
+import { getStorage } from "@/lib/storage";
 
 type PrismaMock = {
-  propertyPhoto: { findUnique: Mock; updateMany: Mock; update: Mock };
+  propertyPhoto: { findUnique: Mock; updateMany: Mock; update: Mock; deleteMany: Mock; delete: Mock };
   $queryRaw: Mock;
   $transaction: Mock;
 };
@@ -63,14 +64,16 @@ const patch = (body: unknown) =>
   );
 
 let calls: string[];
+let updateCount: number;
 let tx: {
   $queryRaw: Mock;
-  propertyPhoto: { updateMany: Mock; update: Mock };
+  propertyPhoto: { updateMany: Mock; findUnique: Mock };
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
   calls = [];
+  updateCount = 1;
   (getApiSession as Mock).mockResolvedValue({ id: "u1", role: "admin" });
   (getUserPermissions as Mock).mockResolvedValue({});
   pm.propertyPhoto.findUnique.mockResolvedValue({
@@ -84,12 +87,17 @@ beforeEach(() => {
       return [{ id: PROPERTY }];
     }),
     propertyPhoto: {
-      updateMany: vi.fn(async () => {
+      // 「他の代表を外す」(where.id が {not}) と「この写真の更新」(where.id が文字列) を分ける。
+      updateMany: vi.fn(async (args: { where: { id: unknown } }) => {
+        if (typeof args.where.id === "string") {
+          calls.push("update");
+          return { count: updateCount };
+        }
         calls.push("clearOthers");
         return { count: 1 };
       }),
-      update: vi.fn(async () => {
-        calls.push("update");
+      findUnique: vi.fn(async () => {
+        calls.push("read");
         return { id: PHOTO, isPrimary: true };
       }),
     },
@@ -103,7 +111,7 @@ describe("PATCH 代表にする(同時に押しても代表は1枚)", () => {
 
     expect(res.status).toBe(200);
     expect(pm.$transaction).toHaveBeenCalledTimes(1);
-    expect(calls).toEqual(["lock", "clearOthers", "update"]);
+    expect(calls).toEqual(["lock", "clearOthers", "update", "read"]);
     expect(tx.propertyPhoto.updateMany).toHaveBeenCalledWith({
       where: { propertyId: PROPERTY, id: { not: PHOTO }, isPrimary: true },
       data: { isPrimary: false },
@@ -113,12 +121,21 @@ describe("PATCH 代表にする(同時に押しても代表は1枚)", () => {
     expect(pm.propertyPhoto.update).not.toHaveBeenCalled();
   });
 
+  // 「代表にする」の途中で写真が削除されていた(ほかの操作と競合)。以前は最後の更新が
+  // 「対象が無い」で失敗して 500 になっていた。404 で知らせ、他の代表を外した分も巻き戻す
+  // (トランザクションの中で投げる=まとめて取り消される)。
+  it("途中で写真が削除されていたら 404(500 にしない)", async () => {
+    updateCount = 0;
+    const res = await patch({ isPrimary: true });
+    expect(res.status).toBe(404);
+    expect(calls).toEqual(["lock", "clearOthers", "update"]);
+  });
+
   it("キャプションだけの更新では他の写真に触らない(ロックは取る)", async () => {
     const res = await patch({ caption: "外観" });
 
     expect(res.status).toBe(200);
-    expect(calls).toEqual(["lock", "update"]);
-    expect(tx.propertyPhoto.updateMany).not.toHaveBeenCalled();
+    expect(calls).toEqual(["lock", "update", "read"]);
   });
 
   it("ロック時点で担当外になっていたら(0行)403で、何も書かない", async () => {
@@ -129,6 +146,25 @@ describe("PATCH 代表にする(同時に押しても代表は1枚)", () => {
 
     expect(res.status).toBe(403);
     expect(tx.propertyPhoto.updateMany).not.toHaveBeenCalled();
-    expect(tx.propertyPhoto.update).not.toHaveBeenCalled();
+    expect(tx.propertyPhoto.findUnique).not.toHaveBeenCalled();
   });
 });
+
+// 2人がほぼ同時に同じ写真を削除すると、後の人の delete が「対象が無い」で 500 になっていた。
+// 0件なら 404(ほかの操作で削除済み)で知らせ、実体ファイルの削除にも進まない。
+describe("DELETE 同じ写真をほぼ同時に削除", () => {
+  const del = () =>
+    DELETE(
+      new Request("http://localhost/x", { method: "DELETE" }) as unknown as Parameters<typeof DELETE>[0],
+      { params: Promise.resolve({ id: PROPERTY, photoId: PHOTO }) },
+    );
+
+  it("すでに消えていたら 404 で、実体ファイルの削除に進まない", async () => {
+    pm.propertyPhoto.findUnique.mockResolvedValue({ id: PHOTO, propertyId: PROPERTY, fileUrl: "/uploads/a.jpg", fileName: "a.jpg", property: { createdBy: "u1", assignedTo: null } });
+    pm.propertyPhoto.deleteMany.mockResolvedValue({ count: 0 });
+    const res = await del();
+    expect(res.status).toBe(404);
+    expect(getStorage).not.toHaveBeenCalled();
+  });
+});
+

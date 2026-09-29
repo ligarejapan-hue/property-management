@@ -23,3 +23,17 @@ export function overflowingTableIds(
   }
   return out;
 }
+
+/**
+ * 測った「入りきっていない表」のうち、**今の図面に実在する表**だけを返す。
+ * 表を全部消すと、測る処理(ResizeObserver)は観測する表が無いため何もせずに抜け、
+ * 最後に測った記録が残る=警告が消えなかった(実機確認 132 の既知の残り)。
+ * 状態を effect の中で直接消す代わりに、表示するときにここで絞り込む。
+ */
+export function liveOverflowTableIds(
+  overflowIds: readonly string[],
+  document: { elements: readonly { id: string; type: string }[] },
+): string[] {
+  const tables = new Set(document.elements.filter((e) => e.type === "table").map((e) => e.id));
+  return overflowIds.filter((id) => tables.has(id));
+}
