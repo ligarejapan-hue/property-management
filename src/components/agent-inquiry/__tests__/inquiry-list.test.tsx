@@ -204,3 +204,14 @@ describe("書けないときの文字は保護付きの文章で出す・読み�
     expect(s).toMatch(/const reload = \(\) => \{[\s\S]{0,200}setBusy\(true\)/);
   });
 });
+
+describe("詳細の読み込みが権限なし(403)なら画面ごと隠す(@codex #459 R18)", () => {
+  it("詳細は読み込み失敗の 403 を親へ渡し、親は権限なしの画面に切り替えて詳細を閉じる", () => {
+    const d = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
+    expect(d).toMatch(/apiErrorCode\(e\) === "FORBIDDEN"[\s\S]{0,80}onForbidden\(e\)/);
+    // 初回・読み直し・保存後の読み込みの3か所すべて
+    expect(d.match(/forbiddenLoad\(e\)/g)?.length).toBe(3);
+    const p = readFileSync(join(process.cwd(), "src/app/(desk)/inquiry-desk/page.tsx"), "utf8").replace(/\r\n/g, "\n");
+    expect(p).toMatch(/onForbidden=\{\(e\) => \{\s*setOpenId\(null\);\s*onError\(e\);/);
+  });
+});

@@ -338,6 +338,7 @@ export default function InquiryDetail({
   onClose,
   onChanged,
   canWrite = true,
+  onForbidden,
 }: {
   inquiryId: string;
   users: { id: string; name: string }[];
@@ -345,6 +346,8 @@ export default function InquiryDetail({
   onChanged: () => void;
   /** 書く権限。無ければ変更のボタンを押せない(押してから 403 にしない・@codex #459 R12)。 */
   canWrite?: boolean;
+  /** 読む権限が外れていた(403)。画面ごと隠せるよう親へ渡す(@codex #459 R18)。 */
+  onForbidden?: (e: unknown) => void;
 }) {
   const [data, setData] = useState<{ inquiry: InquiryView; canOpenProperty: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -365,9 +368,23 @@ export default function InquiryDetail({
       throw e;
     }
   }, [inquiryId]);
+  // 読み込みが権限なしで断られたら、小窓の中で知らせるだけにせず親に渡す=一覧ごと隠す(@codex #459 R18)。
+  const forbiddenLoad = useCallback(
+    (e: unknown) => {
+      if (apiErrorCode(e) === "FORBIDDEN" && onForbidden) {
+        onForbidden(e);
+        return true;
+      }
+      return false;
+    },
+    [onForbidden],
+  );
   useEffect(() => {
-    load().catch((e) => setError(e instanceof Error ? e.message : "読み込めませんでした"));
-  }, [load]);
+    load().catch((e) => {
+      if (forbiddenLoad(e)) return;
+      setError(e instanceof Error ? e.message : "読み込めませんでした");
+    });
+  }, [load, forbiddenLoad]);
   const run = async (fn: () => Promise<unknown>) => {
     if (busy) return;
     setBusy(true);
@@ -384,7 +401,8 @@ export default function InquiryDetail({
     } finally {
       // 他の人が先に更新したときは自動で読み直さない=打ちかけの入力を消さない。「読み直す」で最新へ。
       if (!conflict) {
-        await load().catch(() => {
+        await load().catch((e) => {
+          if (forbiddenLoad(e)) return;
           setRefreshFailed(true);
           // 「保存しましたが…」は書き込みが通ったときだけ。書き込みも失敗していたら、その失敗を残す。
           if (wrote) setError("保存しましたが、最新の内容を読み込めませんでした。「読み直す」を押してください。");
@@ -402,6 +420,7 @@ export default function InquiryDetail({
     load()
       .then(() => setRefreshFailed(false))
       .catch((e) => {
+        if (forbiddenLoad(e)) return;
         // 読み直しにも失敗したら、古い内容のまま押せる状態には戻さない。
         setRefreshFailed(true);
         setError(e instanceof Error ? e.message : "読み込めませんでした");

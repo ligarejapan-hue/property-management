@@ -222,6 +222,10 @@ export default function InquiryDeskPage() {
           onClose={() => setOpenId(null)}
           onChanged={reloadAll}
           canWrite={canWrite}
+          onForbidden={(e) => {
+            setOpenId(null);
+            onError(e);
+          }}
         />
       )}
     </div>
