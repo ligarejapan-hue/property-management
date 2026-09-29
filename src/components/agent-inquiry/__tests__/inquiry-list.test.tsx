@@ -239,7 +239,7 @@ describe("ログイン切れ(401)も画面ごと隠す・内見の追加は結�
   });
   it("内見の追加で結果が分からないときは addLocked にする", () => {
     const d = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
-    expect(d).toMatch(/isAmbiguousSaveError\(e\)[\s\S]{0,120}setAddLocked\(true\)/);
+    expect(d).toMatch(/isAmbiguousSaveError\(e\)[\s\S]{0,300}opts\?\.addsViewing\) \{\s*setAddLocked\(true\)/);
   });
 });
 
@@ -295,5 +295,13 @@ describe("外れた立会者も表示は残す(@codex #459 R24)", () => {
     expect(html).toContain(`<option value="${withAtt!.attendant!.id}" selected="">${withAtt!.attendant!.name}(今は選べない人)</option>`);
     const d = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8");
     expect(d).toMatch(/viewingPatchFrom\(/);
+  });
+});
+
+describe("詳細の保存で結果が分からないときは、失敗と言い切らず最新を見て確かめてもらう(@codex #459 R26)", () => {
+  it("内見の追加以外の変更(状態・担当・メモ・内見の取り消し/戻し・日時)も同じ扱い", () => {
+    const d = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
+    expect(d).toMatch(/if \(isAmbiguousSaveError\(e\)\) \{[\s\S]{0,300}setError\(AMBIGUOUS_DETAIL_SAVE\)/);
+    expect(d).toContain("保存できたか分かりません(通信が切れました)");
   });
 });

@@ -52,6 +52,9 @@ function InactiveUserOption({ user, users }: { user: { id: string; name: string 
   return <option value={user.id}>{`${user.name}(今は選べない人)`}</option>;
 }
 
+const AMBIGUOUS_DETAIL_SAVE =
+  "保存できたか分かりません(通信が切れました)。今の表示が最新の内容です。変わっていれば押し直さないでください。";
+
 export type ViewingPatch = {
   scheduledAt?: string | null;
   viewingType?: ViewingTypeKey;
@@ -436,9 +439,15 @@ export default function InquiryDetail({
       // 書く権限だけ外された=権限を読み直して、書けない表示へ切り替える(@codex #459 R20)。
       if (apiErrorCode(e) === "FORBIDDEN") writeDenied(e);
       conflict = apiErrorCode(e) === "VERSION_CONFLICT";
-      if (opts?.addsViewing && isAmbiguousSaveError(e)) {
-        setAddLocked(true);
-        setError("内見を足せたか分かりません(通信が切れました)。内見の予定の欄の案内に沿って確かめてください。");
+      if (isAmbiguousSaveError(e)) {
+        // 通信切れ・5xx は保存が済んでいることがある。失敗と言い切ると、読み直した後の表示(取り消し済み等)を
+        // 見て押し直し、済んだ変更を元に戻してしまう(@codex #459 R26)。内見の追加は確かめるまで止める。
+        if (opts?.addsViewing) {
+          setAddLocked(true);
+          setError("内見を足せたか分かりません(通信が切れました)。内見の予定の欄の案内に沿って確かめてください。");
+        } else {
+          setError(AMBIGUOUS_DETAIL_SAVE);
+        }
       } else {
         setError(conflict ? CONFLICT_MESSAGE : e instanceof Error ? e.message : "保存できませんでした");
       }
