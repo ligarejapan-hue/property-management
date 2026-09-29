@@ -67,7 +67,8 @@ export function DeskShellView({
 function useOpenCount() {
   const [n, setN] = useState<number | null>(null);
   useEffect(() => {
-    const on = (e: Event) => setN((e as CustomEvent<number>).detail);
+    // null=件数を消す(権限が外れた・中身を出していない)。
+    const on = (e: Event) => setN((e as CustomEvent<number | null>).detail);
     window.addEventListener(DESK_OPEN_COUNT_EVENT, on);
     return () => window.removeEventListener(DESK_OPEN_COUNT_EVENT, on);
   }, []);

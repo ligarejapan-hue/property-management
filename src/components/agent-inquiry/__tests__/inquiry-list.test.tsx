@@ -128,7 +128,7 @@ describe("保存できたが読み直せなかったとき(@codex #459 R5)", () 
   const detailSrc = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
   it("知らせて、読み直すまで押せないようにする(内見の二重登録を防ぐ)", () => {
     expect(detailSrc).toContain("保存しましたが、最新の内容を読み込めませんでした");
-    expect(detailSrc).toMatch(/busy=\{busy \|\| refreshFailed\}/);
+    expect(detailSrc).toMatch(/busy=\{busy \|\| refreshFailed(?: \|\| !canWrite)?\}/);
   });
 });
 
@@ -164,6 +164,13 @@ describe("詳細の小窓(ネイティブの dialog)の中にも透かし・保�
     expect(s).toMatch(/onClose=\{closeLocked \? undefined : onClose\}/);
     expect(s).toMatch(/<Button variant="secondary" onClick=\{onClose\} disabled=\{closeLocked\}>/);
     expect(s).toMatch(/closeLocked=\{busy\}/);
-    expect(s).toMatch(/busy=\{busy \|\| refreshFailed\}/);
+    expect(s).toMatch(/busy=\{busy \|\| refreshFailed(?: \|\| !canWrite)?\}/);
+  });
+});
+
+describe("書く権限が無いときの詳細(@codex #459 R12)", () => {
+  it("canWrite=false なら変更ボタンを押せない", () => {
+    const s = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
+    expect(s).toMatch(/busy=\{busy \|\| refreshFailed \|\| !canWrite\}/);
   });
 });

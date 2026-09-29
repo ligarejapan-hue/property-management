@@ -96,3 +96,14 @@ describe("権限が分からない間は中身を出さない・詳細は反響�
     expect(src).toMatch(/<InquiryDetail\s+key=\{openId\}/);
   });
 });
+
+describe("書く権限が無ければ登録・変更を出さない・見出しの件数も消す(@codex #459 R12)", () => {
+  it("書く権限(agent_inquiry:write)で登録フォームと詳細の変更を出し分ける", () => {
+    expect(src).toMatch(/hasPermission\(permissions, "agent_inquiry", "write"\)/);
+    expect(src).toMatch(/canWrite \?/);
+    expect(src).toMatch(/canWrite=\{canWrite\}/);
+  });
+  it("中身を出さないときは見出しの未対応件数も消す", () => {
+    expect(src).toMatch(/new CustomEvent\(DESK_OPEN_COUNT_EVENT, \{ detail: null \}\)/);
+  });
+});

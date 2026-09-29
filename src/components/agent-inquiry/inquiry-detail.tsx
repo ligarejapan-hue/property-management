@@ -312,11 +312,14 @@ export default function InquiryDetail({
   users,
   onClose,
   onChanged,
+  canWrite = true,
 }: {
   inquiryId: string;
   users: { id: string; name: string }[];
   onClose: () => void;
   onChanged: () => void;
+  /** 書く権限。無ければ変更のボタンを押せない(押してから 403 にしない・@codex #459 R12)。 */
+  canWrite?: boolean;
 }) {
   const [data, setData] = useState<{ inquiry: InquiryView; canOpenProperty: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -378,7 +381,7 @@ export default function InquiryDetail({
       inquiry={q}
       canOpenProperty={data.canOpenProperty}
       users={users}
-      busy={busy || refreshFailed}
+      busy={busy || refreshFailed || !canWrite}
       closeLocked={busy}
       error={error}
       onStatus={(status) => run(() => updateAgentInquiry(q.id, { version: q.version, status }))}

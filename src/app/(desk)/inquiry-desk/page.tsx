@@ -64,6 +64,13 @@ export default function InquiryDeskPage() {
   }, [permissionsLoading, permissions, refetchPermissions]);
   const permissionsSettled = !permissionsLoading && !permissionsRefreshPending;
   const revoked = permissionsSettled && permissions != null && !hasPermission(permissions, "agent_inquiry", "read");
+  // 書く権限が無い人には登録・変更を出さない(押してから 403 にしない・@codex #459 R12)。
+  const canWrite = permissionsSettled && permissions != null && hasPermission(permissions, "agent_inquiry", "write");
+  const bodyVisible = permissionsSettled && permissions != null && !revoked && !forbidden;
+  // 中身を出さない間は、見出しの未対応件数も消す(枠は画面の外にあるので知らせる)。
+  useEffect(() => {
+    if (!bodyVisible) window.dispatchEvent(new CustomEvent(DESK_OPEN_COUNT_EVENT, { detail: null }));
+  }, [bodyVisible]);
   // 403 以外の読み込み失敗。「ありません」と見分けがつくよう知らせる(内見の見落としを防ぐ・@codex #459 R1)。
   const [loadError, setLoadError] = useState(false);
   const [formState, setFormState] = useState<DeskFormState>(EMPTY_DESK_FORM);
@@ -168,8 +175,16 @@ export default function InquiryDeskPage() {
       )}
       <div className="space-y-3">
         <UpcomingViewingsView viewings={upcoming} />
-        <DeskStepGuide step={nextDeskGuideStep(formState)} />
-        <InquiryForm users={users} onSaved={reloadAll} onStateChange={setFormState} />
+        {canWrite ? (
+          <>
+            <DeskStepGuide step={nextDeskGuideStep(formState)} />
+            <InquiryForm users={users} onSaved={reloadAll} onStateChange={setFormState} />
+          </>
+        ) : (
+          <p className="rounded-md bg-white p-3 text-sm text-gray-500 dark:bg-gray-900">
+            反響を登録・変更する権限がありません(見ることはできます)。
+          </p>
+        )}
       </div>
       <div>
         <InquiryListView
@@ -192,6 +207,7 @@ export default function InquiryDeskPage() {
           users={users}
           onClose={() => setOpenId(null)}
           onChanged={reloadAll}
+          canWrite={canWrite}
         />
       )}
     </div>
