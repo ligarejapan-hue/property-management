@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { hasPermission, hasExplicitWritePerm } from "@/lib/permissions";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
+import type { PasteDraft } from "@/lib/paste-import/types";
 import {
   readLeadSheet,
   withFallbackLinkKey,
@@ -58,8 +59,17 @@ const MAX_EXCEL_JSON_BODY_BYTES = Math.ceil((MAX_IMPORT_DECODED_BYTES * 4) / 3) 
  * 反響番号の無い行の鍵。依頼日・氏名・物件の住所から作る**ハッシュ**
  * (個人情報そのものを物件の欄に残さない)。取り込み直しても同じ鍵になる。
  */
-function fallbackLinkKey(row: LeadRow): string {
-  return `xlsx-${createHash("sha256").update(row.keySeed).digest("hex").slice(0, 16)}`;
+function fallbackLinkKey(row: LeadRow, draft: PasteDraft): string {
+  // ⚠**本文から読んだ氏名・物件の住所も材料に入れる**(@codex PR#456 9巡目)。
+  //   補助の列(姓名・住所 物件名)が空や古いままだと、同じ日の別の反響が同じ鍵になり、
+  //   2件目が「登録済み」扱いで黙って飛ばされる。本文はメモや進み具合の書き足しでは
+  //   変わらないので、取り込み直しても同じ鍵になる性質は保つ。
+  const seed = [
+    row.keySeed,
+    draft.owner?.name.value ?? "",
+    draft.property.address.value ?? "",
+  ].join("|");
+  return `xlsx-${createHash("sha256").update(seed).digest("hex").slice(0, 16)}`;
 }
 
 /**
@@ -201,7 +211,7 @@ export async function POST(request: NextRequest) {
     //   同時に走り、接続を食い潰す。
     for (const row of leadRows) {
       const first = buildPasteDraft(row.text, { maxYear });
-      const text = withFallbackLinkKey(row.text, first, fallbackLinkKey(row));
+      const text = withFallbackLinkKey(row.text, first, fallbackLinkKey(row, first));
       const draft = text === row.text ? first : buildPasteDraft(text, { maxYear });
       const dup = await lookupPasteDuplicates(session, perms, {
         address: draft.property.address.value,

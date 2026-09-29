@@ -78,3 +78,30 @@ describe("assertZipExpandsWithin — 展開後の大きさを、展開しなが�
     expect(() => assertZipExpandsWithin(Buffer.from("not a zip"), 50 * MB)).toThrow(ZipGuardError);
   });
 });
+
+describe("ZIP の見出し情報の食い違いで守りをすり抜けさせない(@codex PR#456 9巡目)", () => {
+  const normal = () => {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["姓名"], ["山田"]]), "S");
+    return Buffer.from(XLSX.write(wb, { type: "buffer", bookType: "xlsx" }));
+  };
+  const eocdAt = (b: Buffer) => b.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+
+  it("★「全体の件数」だけを0に偽った ZIP は止める(読み手は別の件数欄を使って展開する)", () => {
+    const b = normal();
+    b.writeUInt16LE(0, eocdAt(b) + 10);
+    expect(() => assertZipExpandsWithin(b, 1)).toThrow(ZipGuardError);
+  });
+
+  it("★「このディスクの件数」だけを偽った ZIP も止める", () => {
+    const b = normal();
+    b.writeUInt16LE(0, eocdAt(b) + 8);
+    expect(() => assertZipExpandsWithin(b, 50 * MB)).toThrow(ZipGuardError);
+  });
+
+  it("★分割 ZIP(ディスク番号が0以外)は扱わずに止める", () => {
+    const b = normal();
+    b.writeUInt16LE(1, eocdAt(b) + 4);
+    expect(() => assertZipExpandsWithin(b, 50 * MB)).toThrow(ZipGuardError);
+  });
+});

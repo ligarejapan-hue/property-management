@@ -31,12 +31,29 @@ export function assertZipExpandsWithin(buf: Buffer, maxBytes: number): void {
   if (buf.length < 22) throw new ZipGuardError("not a zip");
   const eocd = findEocd(buf);
   if (eocd === -1) throw new ZipGuardError("not a zip");
+  const disk = buf.readUInt16LE(eocd + 4);
+  const cdDisk = buf.readUInt16LE(eocd + 6);
+  const countOnDisk = buf.readUInt16LE(eocd + 8);
   const count = buf.readUInt16LE(eocd + 10);
+  const cdSize = buf.readUInt32LE(eocd + 12);
   let p = buf.readUInt32LE(eocd + 16);
-  // ZIP64(0xFFFF / 0xFFFFFFFF)は Excel では出ない＝扱わずに断る。
-  if (count === 0xffff || p === 0xffffffff || count > MAX_ENTRIES) {
+  // ⚠**件数の欄は2つとも見て、食い違いは断る**(@codex PR#456 9巡目)。
+  //   xlsx の読み手(SheetJS parse_zip)は「このディスクの件数」(+8)で展開する。
+  //   こちらが「全体の件数」(+10)だけを見ると、+10 を0に偽った ZIP で
+  //   1件も数えずに通してしまい、読み手はすべて展開する。
+  //   分割 ZIP・中身ゼロ(正しい Excel ではありえない)・ZIP64 も扱わずに断る。
+  if (
+    disk !== 0 ||
+    cdDisk !== 0 ||
+    countOnDisk !== count ||
+    count === 0 ||
+    count === 0xffff ||
+    p === 0xffffffff ||
+    count > MAX_ENTRIES
+  ) {
     throw new ZipGuardError("unsupported zip");
   }
+  const cdEnd = p + cdSize;
 
   let total = 0;
   for (let n = 0; n < count; n++) {
@@ -73,4 +90,6 @@ export function assertZipExpandsWithin(buf: Buffer, maxBytes: number): void {
     }
     if (total > maxBytes) throw new ZipGuardError("expands too large");
   }
+  // 数えた中身で中央ディレクトリをちょうど読み切っていること(件数の偽りの別の形)。
+  if (p !== cdEnd) throw new ZipGuardError("central directory size mismatch");
 }

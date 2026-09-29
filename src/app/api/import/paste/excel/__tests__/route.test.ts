@@ -284,6 +284,21 @@ describe("POST /api/import/paste/excel", () => {
       .toEqual(["123456100000", "123456200000"]);
   });
 
+  it("★反響番号の無い行の鍵は、本文から読んだ氏名・住所で作る(補助の列が空でも同じ日の別の反響を区別する・9巡目)", async () => {
+    const mailA = "物件種別：戸建\n物件所在地：東京都港区1-1\nお名前：一人目";
+    const mailB = "物件種別：戸建\n物件所在地：東京都港区2-2\nお名前：二人目";
+    const body = await (await POST(req({
+      fileName: "a.xlsx",
+      xlsxBase64: xlsxBase64(sheet([
+        row({ 依頼日付: "2025/07/22", URL: mailA }),
+        row({ 依頼日付: "2025/07/22", URL: mailB }),
+      ])),
+    }))).json();
+    const [a, b] = body.rows.map((r: { draft: { externalLinkKey: string } }) => r.draft.externalLinkKey);
+    expect(a).toMatch(/^xlsx-/);
+    expect(a).not.toBe(b);
+  });
+
   it("全シートを読む(見出しの無いシートは飛ばす)", async () => {
     const body = await (await POST(req({
       fileName: "a.xlsx",
