@@ -59,6 +59,12 @@ export const MIN_PHONE_SEARCH_DIGITS = 7;
  * 保存値はハイフンありへ統一していくが、既存にはハイフンなしも残り、打っている途中の番号は
  * ハイフンの境目をまたぐ。保存値側も数字だけにして比べれば、どの書き方でも当たる(@codex #447 R1)。
  */
+/** 数字と区切り記号だけの語か(打ちかけの電話番号を含む)。 */
+export function isPhoneCharsOnly(q: string): boolean {
+  const nfkc = q.normalize("NFKC").trim();
+  return nfkc !== "" && PHONE_CHARS_ONLY.test(nfkc);
+}
+
 export function phoneSearchDigits(q: string): string | null {
   const nfkc = q.normalize("NFKC").trim();
   if (nfkc === "" || !PHONE_CHARS_ONLY.test(nfkc)) return null;

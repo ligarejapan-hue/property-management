@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { hitsForQuery, newAgentAction, type SearchResult } from "@/lib/agent-inquiry/desk-form";
 import { useDeskAccess } from "./desk-access";
+import { agentQueryReady } from "@/lib/agent-inquiry/agent-query";
+import { isPhoneCharsOnly } from "@/lib/phone-format-jp";
 import { searchDeskAgents, type AgentHit } from "@/lib/api-client";
 
 /** 業者の候補(見た目)。携帯で当たったときは前回の問い合わせ者の名前を添える。 */
@@ -48,7 +50,7 @@ export function AgentPicker({
   onCreateNew: () => void;
 }) {
   const [res, setRes] = useState<SearchResult<AgentHit> | null>(null);
-  const searching = !selected && query.trim().length >= 2;
+  const searching = !selected && agentQueryReady(query);
   const { readDenied } = useDeskAccess();
   useEffect(() => {
     if (!searching) return;
@@ -96,7 +98,11 @@ export function AgentPicker({
         </button>
       )}
       {!selected && !searching && (
-        <p className="text-xs text-gray-500">会社名か電話番号を2文字以上入れて探すと、名簿に無いときは新しく登録できます。</p>
+        <p className="text-xs text-gray-500">
+          {isPhoneCharsOnly(query)
+            ? "電話番号は7桁以上入れると探します。"
+            : "会社名(2文字以上)か電話番号(7桁以上)で探すと、名簿に無いときは新しく登録できます。"}
+        </p>
       )}
     </div>
   );
