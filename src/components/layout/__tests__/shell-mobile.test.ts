@@ -97,7 +97,7 @@ describe("sidebar — 最下部の資料リンク(ガイド/マニュアル)", (
     // (2026-09-29 反響の受付 PR2)。資料2件に windowName が付いていないことも固定する。
     expect(sidebar).toContain('target={item.windowName ?? "_blank"}');
     expect(sidebarModel).not.toMatch(/href: "\/docs\/(guide|manual)\.html"[^}]*windowName/);
-    expect(sidebar).toContain('rel="noopener noreferrer"');
+    expect(sidebar).toContain('rel={item.windowName ? undefined : "noopener noreferrer"}');
   });
   it("資料グループは管理系グループより後(最下部)に置かれる", () => {
     const admin = sidebarModel.indexOf('key: "admin"');

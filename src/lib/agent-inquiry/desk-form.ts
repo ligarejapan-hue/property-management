@@ -199,3 +199,11 @@ export const AD_MEDIUM_LABEL: Record<AdMediumKey, string> = {
 };
 export const AD_VALUE_MARK: Record<AdValueKey, string> = { ok: "○", ng: "×", ask: "△" };
 export const CONFLICT_MESSAGE = "他の人が先に更新しました。開き直してください。";
+
+/**
+ * 下書き(打ちかけ)を優先して表示する値。null=まだ触っていない=最新の値をそのまま出す。
+ * 詳細を読み直しても(版が進んでも)打ちかけの入力を消さないため(最終レビュー I-1/I-2)。
+ */
+export function pickDraft(draft: string | null, server: string): string {
+  return draft ?? server;
+}

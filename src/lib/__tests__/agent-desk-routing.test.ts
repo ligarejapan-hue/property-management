@@ -16,4 +16,8 @@ describe("受付の窓への入口", () => {
     const src = readFileSync(join(process.cwd(), "src/components/layout/sidebar.tsx"), "utf8");
     expect(src).toMatch(/target=\{item\.windowName \?\? "_blank"\}/);
   });
+  it("名前付きの窓には rel=noopener を付けない(付けると同じ窓を探せず毎回新しい窓になる・最終レビュー I-3)", () => {
+    const src = readFileSync(join(process.cwd(), "src/components/layout/sidebar.tsx"), "utf8");
+    expect(src).toMatch(/rel=\{item\.windowName \? undefined : "noopener noreferrer"\}/);
+  });
 });

@@ -45,6 +45,7 @@ export function InquiryFormView({
   warning,
   submitting,
   message,
+  saveError,
   onSubmit,
   onCreateAgent,
 }: {
@@ -55,6 +56,8 @@ export function InquiryFormView({
   warning: string | null;
   submitting: boolean;
   message: string | null;
+  /** 保存の失敗(成功の文言と見分けがつくよう赤・role=alert で出す・最終レビュー M-1)。 */
+  saveError: string | null;
   onSubmit: () => void;
   onCreateAgent: () => void;
 }) {
@@ -224,6 +227,11 @@ export function InquiryFormView({
         <p className="rounded bg-amber-50 px-2 py-1 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-200">{warning}</p>
       )}
       {message && <p className="text-sm text-teal-700 dark:text-teal-300">{message}</p>}
+      {saveError && (
+        <p role="alert" className="rounded bg-rose-50 px-2 py-1 text-sm font-medium text-rose-700 dark:bg-rose-950 dark:text-rose-200">
+          保存できませんでした:{saveError}
+        </p>
+      )}
       <button
         type="submit"
         disabled={submitting}
@@ -251,7 +259,14 @@ export default function InquiryForm({
   const [errors, setErrors] = useState<Errors>({});
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // 次の入力を始めたら「登録しました」「保存できませんでした」を消す(前の結果と取り違えない)。
+  const act: typeof dispatch = (a) => {
+    setMessage(null);
+    setSaveError(null);
+    dispatch(a);
+  };
   useEffect(() => {
     onStateChange?.(state);
   }, [state, onStateChange]);
@@ -263,13 +278,14 @@ export default function InquiryForm({
     if (Object.keys(e).length > 0) return;
     setSubmitting(true);
     setMessage(null);
+    setSaveError(null);
     try {
       await createAgentInquiry(buildCreateBody(state));
       dispatch({ type: "reset" });
       setMessage("登録しました");
       onSaved();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "登録できませんでした");
+      setSaveError(err instanceof Error ? err.message : "通信できませんでした");
     } finally {
       setSubmitting(false);
     }
@@ -279,12 +295,13 @@ export default function InquiryForm({
     <>
       <InquiryFormView
         state={state}
-        dispatch={dispatch}
+        dispatch={act}
         users={users}
         errors={errors}
         warning={materialEmailWarning(state)}
         submitting={submitting}
         message={message}
+        saveError={saveError}
         onSubmit={submit}
         onCreateAgent={() => setCreating(true)}
       />
@@ -293,7 +310,7 @@ export default function InquiryForm({
           initialPhone={phoneLike ? state.agentQuery.trim() : ""}
           onClose={() => setCreating(false)}
           onCreated={(hit: AgentHit) => {
-            dispatch({ type: "agentSelected", agent: hit });
+            act({ type: "agentSelected", agent: hit });
             setCreating(false);
           }}
         />

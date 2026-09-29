@@ -3,6 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { UpcomingViewingsView } from "../upcoming-viewings";
 import { InquiryListView } from "../inquiry-list";
 import { InquiryDetailView } from "../inquiry-detail";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { pickDraft } from "@/lib/agent-inquiry/desk-form";
 
 const property = {
   id: "p1", name: "サンライズ中野", roomNo: "305", town: "東京都中野区中野2丁目", propertyType: "apartment_unit", adPermissions: {},
@@ -88,5 +91,25 @@ describe("詳細", () => {
   });
   it("問い合わせ者の携帯を出す(折り返し用)", () => {
     expect(view()).toContain("090-1234-5678");
+  });
+});
+
+describe("詳細: 打ちかけの入力を消さない(最終レビュー I-1/I-2)", () => {
+  const src = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
+  it("詳細と内見の行は反響/内見の id だけで作り直す(版が進んでも打ちかけが消えない)", () => {
+    expect(src).not.toMatch(/key=\{`\$\{q\.id\}:\$\{q\.version\}`\}/);
+    expect(src).not.toMatch(/key=\{`\$\{v\.id\}:\$\{v\.version\}`\}/);
+    expect(src).toMatch(/<ViewingRow key=\{v\.id\}/);
+  });
+  it("立ち会いは選んだだけでは保存しない(日時・結果と同じ保存ボタンで)", () => {
+    expect(src).not.toMatch(/onChange=\{\(e\) => onSave\(\{ attendantId/);
+  });
+  it("担当は画面の値ではなく最新の値に合わせて表示する(controlled)", () => {
+    expect(src).not.toMatch(/defaultValue=\{q\.assignee/);
+  });
+  it("下書き: 触っていなければ最新の値・触っていれば下書き", () => {
+    expect(pickDraft(null, "サーバ")).toBe("サーバ");
+    expect(pickDraft("打ちかけ", "サーバ")).toBe("打ちかけ");
+    expect(pickDraft("", "サーバ")).toBe("");
   });
 });

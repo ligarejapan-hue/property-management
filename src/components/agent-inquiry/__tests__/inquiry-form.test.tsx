@@ -18,7 +18,7 @@ const view = (over: Partial<ViewProps> = {}) =>
   renderToStaticMarkup(
     <InquiryFormView
       state={EMPTY_DESK_FORM} dispatch={() => {}} users={[]} errors={{}} warning={null}
-      submitting={false} message={null} onSubmit={() => {}} onCreateAgent={() => {}} {...over}
+      submitting={false} message={null} saveError={null} onSubmit={() => {}} onCreateAgent={() => {}} {...over}
     />,
   );
 
@@ -50,6 +50,12 @@ describe("登録フォーム", () => {
     const html = view({ submitting: true });
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*data-guide="save"|<button[^>]*data-guide="save"[^>]*disabled=""/);
     expect(html).toContain("保存中…");
+  });
+  it("保存の失敗は成功と見分けがつく(赤・role=alert)(最終レビュー M-1)", () => {
+    const html = view({ saveError: "反響の受付の権限がありません" });
+    expect(html).toMatch(/role="alert"[^>]*>[^<]*反響の受付の権限がありません|<p[^>]*role="alert"/);
+    expect(html).toContain("text-rose");
+    expect(view({ message: "登録しました" })).not.toContain('role="alert"');
   });
   it("エラーと資料請求のメール空の知らせ", () => {
     const html = view({ errors: { agent: "業者を選んでください" }, warning: "資料の送り先のメールが空です" });

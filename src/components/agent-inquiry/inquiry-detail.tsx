@@ -22,6 +22,7 @@ import {
   formatJst,
   isoToJstInputs,
   jstInputsToIso,
+  pickDraft,
 } from "@/lib/agent-inquiry/desk-form";
 
 export const mainWindowPropertyHref = (id: string) => `/properties/${id}`;
@@ -46,10 +47,17 @@ function ViewingRow({
   busy: boolean;
   onSave: (patch: ViewingPatch) => void;
 }) {
-  const init = isoToJstInputs(v.scheduledAt);
-  const [date, setDate] = useState(init.date);
-  const [time, setTime] = useState(init.time);
-  const [result, setResult] = useState(v.resultNote ?? "");
+  // 下書き(null=まだ触っていない=最新の値を出す)。行は内見の id だけで作り直すので、保存で版が
+  // 進んでも・他の人に先を越されて読み直しても、打ちかけの入力は消えない(最終レビュー I-1/I-2)。
+  const server = isoToJstInputs(v.scheduledAt);
+  const [dateDraft, setDate] = useState<string | null>(null);
+  const [timeDraft, setTime] = useState<string | null>(null);
+  const [resultDraft, setResult] = useState<string | null>(null);
+  const [attendantDraft, setAttendant] = useState<string | null>(null);
+  const date = pickDraft(dateDraft, server.date);
+  const time = pickDraft(timeDraft, server.time);
+  const result = pickDraft(resultDraft, v.resultNote ?? "");
+  const attendant = pickDraft(attendantDraft, v.attendant?.id ?? "");
   const canceled = v.canceledAt != null;
   return (
     <li className={`space-y-1 rounded-md border border-gray-200 p-2 dark:border-gray-700 ${canceled ? "opacity-60" : ""}`}>
@@ -62,13 +70,8 @@ function ViewingRow({
         <input type="date" value={date} aria-label="内見の日付" onChange={(e) => setDate(e.target.value)} className={inputCls} />
         <input type="time" value={time} aria-label="内見の時刻" onChange={(e) => setTime(e.target.value)} className={inputCls} />
       </div>
-      <select
-        defaultValue={v.attendant?.id ?? ""}
-        disabled={busy}
-        aria-label="立ち会い"
-        onChange={(e) => onSave({ attendantId: e.target.value || null })}
-        className={inputCls}
-      >
+      {/* 立ち会いは選んだだけでは保存しない(保存で行の版が進み、打ちかけの結果が消えるのを防ぐ)。 */}
+      <select value={attendant} disabled={busy} aria-label="立ち会い" onChange={(e) => setAttendant(e.target.value)} className={inputCls}>
         <option value="">立ち会い なし・未定</option>
         {users.map((u) => (
           <option key={u.id} value={u.id}>
@@ -87,10 +90,12 @@ function ViewingRow({
         <button
           type="button"
           disabled={busy}
-          onClick={() => onSave({ scheduledAt: jstInputsToIso(date, time), resultNote: result })}
+          onClick={() =>
+            onSave({ scheduledAt: jstInputsToIso(date, time), resultNote: result, attendantId: attendant || null })
+          }
           className="rounded bg-teal-700 px-3 py-1 text-xs text-white disabled:opacity-60"
         >
-          日時と結果を保存
+          日時・立ち会い・結果を保存
         </button>
         <button
           type="button"
@@ -134,7 +139,10 @@ export function InquiryDetailView({
   /** 他の人が先に更新したとき、入力を残したまま最新を読み直す。 */
   onReload?: () => void;
 }) {
-  const [note, setNote] = useState(q.note ?? "");
+  // メモの下書き(null=まだ触っていない)。詳細は反響の id だけで作り直すので、状態や担当を変えて版が
+  // 進んでも・読み直しても、打ちかけのメモは消えない(最終レビュー I-1/I-2)。
+  const [noteDraft, setNote] = useState<string | null>(null);
+  const note = pickDraft(noteDraft, q.note ?? "");
   return (
     <ModalShell
       size="lg"
@@ -181,7 +189,7 @@ export function InquiryDetailView({
         <label className="block">
           <span className="text-xs text-gray-500">担当</span>
           <select
-            defaultValue={q.assignee?.id ?? ""}
+            value={q.assignee?.id ?? ""}
             disabled={busy}
             onChange={(e) => onAssignee(e.target.value || null)}
             className={inputCls}
@@ -211,7 +219,7 @@ export function InquiryDetailView({
             <p className="text-xs text-gray-500">内見の予定</p>
             <ul className="space-y-1">
               {q.viewings.map((v) => (
-                <ViewingRow key={`${v.id}:${v.version}`} v={v} users={users} busy={busy} onSave={(p) => onSaveViewing(v, p)} />
+                <ViewingRow key={v.id} v={v} users={users} busy={busy} onSave={(p) => onSaveViewing(v, p)} />
               ))}
             </ul>
             <div className="flex gap-1">
@@ -299,7 +307,7 @@ export default function InquiryDetail({
   const q = data.inquiry;
   return (
     <InquiryDetailView
-      key={`${q.id}:${q.version}`}
+      key={q.id}
       inquiry={q}
       canOpenProperty={data.canOpenProperty}
       users={users}
