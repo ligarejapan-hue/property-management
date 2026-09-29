@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { hitsForQuery, newAgentAction, type SearchResult } from "@/lib/agent-inquiry/desk-form";
+import { agentLabel, hitsForQuery, newAgentAction, type SearchResult } from "@/lib/agent-inquiry/desk-form";
 import { useDeskAccess } from "./desk-access";
 import { agentQueryReady } from "@/lib/agent-inquiry/agent-query";
 import { isPhoneCharsOnly } from "@/lib/phone-format-jp";
@@ -19,7 +19,7 @@ export function AgentResults({ hits, onPick }: { hits: AgentHit[]; onPick: (a: A
             className="block w-full px-3 py-2 text-left hover:bg-teal-50 dark:hover:bg-gray-800"
           >
             <span className="block text-sm font-medium">
-              {h.branchName ? `${h.companyName} ${h.branchName}` : h.companyName}
+              {agentLabel(h)}
             </span>
             <span className="block text-xs text-gray-500">
               代表 {h.phone}

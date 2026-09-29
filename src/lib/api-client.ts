@@ -4918,7 +4918,7 @@ export interface UpcomingViewing {
   viewingType: ViewingTypeKey;
   version: number;
   attendant: { id: string; name: string } | null;
-  inquiry: { id: string; contactName: string | null; agent: { companyName: string }; property: DeskProperty };
+  inquiry: { id: string; contactName: string | null; agent: { companyName: string; branchName: string | null }; property: DeskProperty };
 }
 export interface InquiryCounts {
   open: number;

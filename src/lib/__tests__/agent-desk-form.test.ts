@@ -236,3 +236,17 @@ describe("新しい業者の登録は、探し終えてから出す(@codex #459 
     expect(newAgentAction({ selected: true, searching: false, shown: { hits: [], failed: false } })).toBe("none");
   });
 });
+
+import { agentLabel } from "@/lib/agent-inquiry/desk-form";
+
+describe("業者は支店名まで出す(同じ会社の別の支店を見分ける・@codex #459 R23)", () => {
+  it("支店があれば会社名の後ろに付ける", () => {
+    expect(agentLabel({ companyName: "○○不動産", branchName: "渋谷支店" })).toBe("○○不動産 渋谷支店");
+    expect(agentLabel({ companyName: "○○不動産", branchName: null })).toBe("○○不動産");
+    expect(agentLabel({ companyName: "○○不動産" })).toBe("○○不動産");
+  });
+  it("業者を選んだ後の欄にも支店名を出す", () => {
+    const s = run({ type: "agentSelected", agent: { ...agent, branchName: "渋谷支店", lastContact: null } });
+    expect(s.agentQuery).toBe(`${agent.companyName} 渋谷支店`);
+  });
+});

@@ -66,7 +66,7 @@ export function deskFormReducer(s: DeskFormState, a: DeskFormAction): DeskFormSt
       const c = a.agent.lastContact;
       if (c) {
         const fill = { contactName: c.name ?? "", contactMobile: c.mobile ?? "", contactEmail: c.email ?? "" };
-        return { ...s, agent: a.agent, agentQuery: a.agent.companyName, ...fill, contactAutofill: fill };
+        return { ...s, agent: a.agent, agentQuery: agentLabel(a.agent), ...fill, contactAutofill: fill };
       }
       // 前の業者から自動で入れたままの欄だけ消す(別の業者の担当者として保存しない)。自分で直した欄は残す。
       const f = s.contactAutofill;
@@ -75,7 +75,7 @@ export function deskFormReducer(s: DeskFormState, a: DeskFormAction): DeskFormSt
       return {
         ...s,
         agent: a.agent,
-        agentQuery: a.agent.companyName,
+        agentQuery: agentLabel(a.agent),
         contactName: keep("contactName"),
         contactMobile: keep("contactMobile"),
         contactEmail: keep("contactEmail"),
@@ -307,4 +307,9 @@ export function newAgentAction(p: {
 }): "none" | "empty" | "hasHits" {
   if (p.selected || !p.searching || !p.shown || p.shown.failed) return "none";
   return p.shown.hits.length === 0 ? "empty" : "hasHits";
+}
+
+/** 業者の見出し。同じ会社の別の支店を見分けられるよう、支店名まで出す(@codex #459 R23)。 */
+export function agentLabel(a: { companyName: string; branchName?: string | null }): string {
+  return a.branchName ? `${a.companyName} ${a.branchName}` : a.companyName;
 }

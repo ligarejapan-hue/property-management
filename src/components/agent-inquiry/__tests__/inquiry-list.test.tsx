@@ -32,7 +32,7 @@ describe("今日・明日の内見", () => {
         viewings={[{
           id: "v1", scheduledAt: "2026-10-02T05:00:00.000Z", viewingType: "guided", version: 1,
           attendant: { id: "u1", name: "佐藤" },
-          inquiry: { id: "i1", contactName: "田中", agent: { companyName: "○○不動産" }, property },
+          inquiry: { id: "i1", contactName: "田中", agent: { companyName: "○○不動産", branchName: null }, property },
         }]}
       />,
     );
@@ -256,5 +256,30 @@ describe("業者の欄はサーバーと同じ基準で探す(@codex #459 R22)",
   it("2文字の固定判定ではなく agentQueryReady を使う", () => {
     const picker = readFileSync(join(process.cwd(), "src/components/agent-inquiry/agent-picker.tsx"), "utf8");
     expect(picker).toMatch(/const searching = !selected && agentQueryReady\(query\);/);
+  });
+});
+
+describe("一覧・詳細・今日明日の内見に支店名を出す(@codex #459 R23)", () => {
+  const branchAgent = { id: "a1", companyName: "○○不動産", branchName: "渋谷支店", phone: "03-1" };
+  it("一覧と詳細の見出し", () => {
+    const list = renderToStaticMarkup(
+      <InquiryListView tab="open" onTab={noop} mine={false} onMine={noop} items={[{ ...inquiry, agent: branchAgent }]}
+        openCount={1} onOpen={noop} hasMore={false} onMore={noop} />,
+    );
+    expect(list).toContain("○○不動産 渋谷支店");
+    const detail = renderToStaticMarkup(
+      <InquiryDetailView inquiry={{ ...inquiry, agent: branchAgent }} canOpenProperty={false} users={[]} busy={false} error={null}
+        onStatus={noop} onAssignee={noop} onSaveNote={noop} onAddViewing={noop} onSaveViewing={noop} onClose={noop} />,
+    );
+    expect(detail).toContain("○○不動産 渋谷支店");
+  });
+  it("今日明日の内見(API も支店名を返す)", () => {
+    const html = renderToStaticMarkup(
+      <UpcomingViewingsView viewings={[{ id: "v1", scheduledAt: "2026-10-02T05:00:00.000Z", viewingType: "guided", version: 1, attendant: null,
+        inquiry: { id: "i1", contactName: null, agent: { companyName: "○○不動産", branchName: "渋谷支店" }, property } }]} />,
+    );
+    expect(html).toContain("○○不動産 渋谷支店");
+    const route = readFileSync(join(process.cwd(), "src/app/api/agent-inquiries/upcoming/route.ts"), "utf8");
+    expect(route).toContain("agent: { select: { companyName: true, branchName: true } }");
   });
 });

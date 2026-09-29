@@ -20,6 +20,7 @@ import {
 import {
   CONFLICT_MESSAGE,
   KIND_LABEL,
+  agentLabel,
   STATUS_LABEL,
   VIEWING_TYPE_LABEL,
   formatJst,
@@ -218,7 +219,7 @@ export function InquiryDetailView({
   return (
     <ModalShell
       size="lg"
-      title={`${KIND_LABEL[q.kind]} ― ${q.agent.companyName}`}
+      title={`${KIND_LABEL[q.kind]} ― ${agentLabel(q.agent)}`}
       // 保存中は閉じない(閉じて開き直すと古い内容のまま「内見を足す」を押せて二重登録になる・@codex #459 R8)。
       onClose={closeLocked ? undefined : onClose}
       footer={

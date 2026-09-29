@@ -1,5 +1,5 @@
 import type { UpcomingViewing } from "@/lib/api-client";
-import { formatJst, VIEWING_TYPE_LABEL } from "@/lib/agent-inquiry/desk-form";
+import { agentLabel, formatJst, VIEWING_TYPE_LABEL } from "@/lib/agent-inquiry/desk-form";
 
 const propLabel = (p: { name: string; roomNo: string | null }) => (p.roomNo ? `${p.name} ${p.roomNo}` : p.name);
 
@@ -15,7 +15,7 @@ export function UpcomingViewingsView({ viewings }: { viewings: UpcomingViewing[]
           {viewings.map((v) => (
             <li key={v.id}>
               {formatJst(v.scheduledAt)} {VIEWING_TYPE_LABEL[v.viewingType]} {propLabel(v.inquiry.property)} ―{" "}
-              {v.inquiry.agent.companyName}
+              {agentLabel(v.inquiry.agent)}
               {v.inquiry.contactName ? `(${v.inquiry.contactName}様)` : ""}
               {v.attendant ? ` ・ 立会 ${v.attendant.name}` : ""}
             </li>
