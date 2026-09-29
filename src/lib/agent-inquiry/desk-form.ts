@@ -247,9 +247,12 @@ export interface Draft {
   base: string;
 }
 
-/** 入力を下書きへ。書き始めたときの最新の値(base)は最初の1回だけ覚える。 */
+/**
+ * 入力を下書きへ。書き始めたときの最新の値(base)は最初の1回だけ覚える。ただし自分の保存が通って
+ * 下書きの値=最新の値になっていたら、最新の値を基準にし直す(@codex #459 R7)。
+ */
 export function editDraft(prev: Draft | null, value: string, server: string): Draft {
-  return { value, base: prev ? prev.base : server };
+  return { value, base: prev && prev.value !== server ? prev.base : server };
 }
 
 /** 表示する値(下書きがあれば下書き・無ければ最新の値)。 */

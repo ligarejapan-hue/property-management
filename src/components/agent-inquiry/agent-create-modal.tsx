@@ -81,10 +81,11 @@ export function AgentCreateModal({
     <ModalShell
       size="md"
       title="新しい業者"
-      onClose={onClose}
+      // 登録中は閉じない(閉じても登録は止まらず、取り消したつもりの業者が登録・選択される)。
+      onClose={saving ? undefined : onClose}
       footer={
         <>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>
             やめる
           </Button>
           <Button onClick={submit} disabled={saving}>

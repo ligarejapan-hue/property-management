@@ -97,3 +97,13 @@ describe("業者の候補の前回の問い合わせ者名にも画面保護(@co
     expect(html).toMatch(/<span data-pii-protected="true" data-pii-surface="dashboard">[^<]*前回 田中様<\/span>/);
   });
 });
+
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+describe("新しい業者の登録中は閉じられない(@codex #459 R7)", () => {
+  it("登録中は「やめる」も Escape も効かない(取り消したつもりで登録・二重登録を防ぐ)", () => {
+    const s = readFileSync(join(process.cwd(), "src/components/agent-inquiry/agent-create-modal.tsx"), "utf8");
+    expect(s).toMatch(/onClose=\{saving \? undefined : onClose\}/);
+    expect(s).toMatch(/<Button variant="secondary" onClick=\{onClose\} disabled=\{saving\}>/);
+  });
+});

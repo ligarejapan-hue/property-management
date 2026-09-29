@@ -172,3 +172,11 @@ describe("下書きは書き始めたときの値を覚え、その間に他の�
     expect(draftStale({ value: "打ち", base: "サーバA" }, "打ち")).toBe(false);
   });
 });
+
+describe("自分の保存が通った後の下書きは最新の値を基準にし直す(@codex #459 R7)", () => {
+  it("下書きの値=最新の値になっていたら、次の入力の基準は最新の値", () => {
+    const saved = { value: "B", base: "A" }; // A から B に書き換えて保存が通った
+    expect(editDraft(saved, "C", "B")).toEqual({ value: "C", base: "B" });
+    expect(draftStale(editDraft(saved, "C", "B"), "B")).toBe(false);
+  });
+});
