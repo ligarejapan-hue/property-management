@@ -1334,17 +1334,22 @@ describe("まとめ取込は重複確認と登録を1つのロックの中で行
     expect(msg).not.toContain("同じ住所");
     expect(msg).not.toContain("同じ名前");
     expect(msg).toContain("既存のデータと重なる可能性があります");
+    expect(msg).not.toContain("管理者");
   });
 
-  it("見る権限があれば、理由をそのまま伝える", async () => {
+  it("★見る権限があっても理由は常にぼかす(担当外・マスク項目の存在を言い当てさせない・8巡目)", async () => {
     mockPerms = [
       ...FULL_PERMS,
       { resource: "property", action: "read", granted: true },
       { resource: "owner", action: "read", granted: true },
     ];
-    dupCount = { similarCount: 1, ownerCount: 1, truncated: false };
-    const msg = (await (await POST(req(bulk))).json()).error.message;
-    expect(msg).toBe("同じ住所の物件がすでにあります／同じ名前の所有者がすでにいます");
+    for (const over of [{ similarCount: 1 }, { ownerCount: 1 }, { truncated: true }]) {
+      dupCount = { similarCount: 0, ownerCount: 0, truncated: false, ...over };
+      const msg = (await (await POST(req(bulk))).json()).error.message;
+      expect(msg).toBe(
+        "既存のデータと重なる可能性があります。「貼り付けて物件化」で候補を確かめてから登録してください",
+      );
+    }
   });
 
   it("貼り付け画面(指定なし)は今までどおり: ロックも確認もしない(人が画面で判断済み)", async () => {

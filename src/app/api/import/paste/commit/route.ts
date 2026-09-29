@@ -488,24 +488,22 @@ export async function POST(request: NextRequest) {
         // ⚠**このトランザクションのクライアント(tx)で引く**(7巡目 ②)。ロックを
         //   持ったまま別の接続を取りに行くと、ロック待ちの取引が接続を使い切った
         //   ときに全員が止まる。
-        // ⚠理由の文言で、見る権限の無い相手の存在を言い当てさせない(ぼかす)。
         if (body.requireNoDuplicates === true) {
           const dup = await countPasteDuplicatesUnscoped(tx, {
             address: p.address.trim(),
             lotNumber: p.lotNumber?.trim() || null,
             ownerName: body.owner?.name?.trim() || null,
           });
-          const reasons: string[] = [];
-          const vague = "既存のデータと重なる可能性があります（管理者に確認してください）";
-          if (dup.similarCount > 0) {
-            reasons.push(hasPermission(perms, "property", "read") ? "同じ住所の物件がすでにあります" : vague);
-          }
-          if (dup.ownerCount > 0) {
-            reasons.push(hasPermission(perms, "owner", "read") ? "同じ名前の所有者がすでにいます" : vague);
-          }
-          if (dup.truncated) reasons.push("似た候補が多く、確認しきれません");
-          if (reasons.length > 0) {
-            throw new ApiError(409, Array.from(new Set(reasons)).join("／"), "NEEDS_REVIEW");
+          // ⚠理由は**常に1つの同じ文言**(@codex PR#456 8巡目)。絞らずに数えた結果なので、
+          //   「同じ住所の物件」「同じ名前の所有者」と言い分けると、担当外の物件や
+          //   マスクされた所有者の存在を言い当てられる(検索オラクル)。中身は
+          //   「貼り付けて物件化」の画面が、見る人の権限の範囲で見せる。
+          if (dup.similarCount > 0 || dup.ownerCount > 0 || dup.truncated) {
+            throw new ApiError(
+              409,
+              "既存のデータと重なる可能性があります。「貼り付けて物件化」で候補を確かめてから登録してください",
+              "NEEDS_REVIEW",
+            );
           }
         }
 
