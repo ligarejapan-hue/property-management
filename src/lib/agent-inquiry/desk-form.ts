@@ -295,3 +295,16 @@ export function splitNewAgentPhone(query: string): { agentPhone: string; callerM
   if (/^0[789]0/.test(digits)) return { agentPhone: "", callerMobile: q };
   return { agentPhone: q, callerMobile: null };
 }
+
+/**
+ * 「新しい業者を登録」を出すか。探し終える前に押すと、名簿にある業者を二重に作れてしまう(@codex #459 R21)。
+ * empty=探し終えて0件/hasHits=候補はあるが別の支店などのとき用/none=出さない(探している途中・失敗・選んだ後)。
+ */
+export function newAgentAction(p: {
+  selected: boolean;
+  searching: boolean;
+  shown: { hits: unknown[]; failed: boolean } | null;
+}): "none" | "empty" | "hasHits" {
+  if (p.selected || !p.searching || !p.shown || p.shown.failed) return "none";
+  return p.shown.hits.length === 0 ? "empty" : "hasHits";
+}

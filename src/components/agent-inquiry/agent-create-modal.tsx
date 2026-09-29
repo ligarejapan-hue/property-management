@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Button } from "@/components/ui/button";
+import WatermarkOverlay from "@/components/screen-protection/watermark-overlay";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { createDeskAgent, type AgentHit } from "@/lib/api-client";
 import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
 import { isAmbiguousSaveError } from "@/lib/agent-inquiry/desk-form";
@@ -45,6 +47,7 @@ export function AgentCreateModal({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const { writeDenied } = useDeskAccess();
+  const { bypass, watermarkText } = useScreenProtection();
   const set = (k: Key, val: string) => setV((p) => ({ ...p, [k]: val }));
   const submit = async () => {
     if (saving) return;
@@ -107,6 +110,8 @@ export function AgentCreateModal({
       }
     >
       {/* 登録中は欄も打てない(登録は押した時の値で進むので、その後の直しは届かず黙って消える・@codex #459 R14)。 */}
+      {/* 小窓はブラウザの最前面に出るので、外の透かしは隠れる。小窓の中にも透かしを描く(@codex #459 R21)。 */}
+      {!bypass && watermarkText && <WatermarkOverlay text={watermarkText} />}
       <fieldset disabled={saving} className="m-0 min-w-0 space-y-2 border-0 p-0">
         {FIELDS.map(([k, label]) => (
           <label key={k} className="block text-sm">

@@ -219,3 +219,20 @@ describe("検索に打った携帯は業者の代表電話に入れない(@codex
     expect(splitNewAgentPhone("")).toEqual({ agentPhone: "", callerMobile: null });
   });
 });
+
+import { newAgentAction } from "@/lib/agent-inquiry/desk-form";
+
+describe("新しい業者の登録は、探し終えてから出す(@codex #459 R21)", () => {
+  it("探し終えて0件なら登録を出す", () => {
+    expect(newAgentAction({ selected: false, searching: true, shown: { hits: [], failed: false } })).toBe("empty");
+  });
+  it("候補があるときは『候補に無いとき』の登録にする(別の支店など)", () => {
+    expect(newAgentAction({ selected: false, searching: true, shown: { hits: [1], failed: false } })).toBe("hasHits");
+  });
+  it("探している途中・失敗・2文字未満・選んだ後は出さない", () => {
+    expect(newAgentAction({ selected: false, searching: true, shown: null })).toBe("none");
+    expect(newAgentAction({ selected: false, searching: true, shown: { hits: [], failed: true } })).toBe("none");
+    expect(newAgentAction({ selected: false, searching: false, shown: null })).toBe("none");
+    expect(newAgentAction({ selected: true, searching: false, shown: { hits: [], failed: false } })).toBe("none");
+  });
+});

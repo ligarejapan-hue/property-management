@@ -242,3 +242,12 @@ describe("ログイン切れ(401)も画面ごと隠す・内見の追加は結�
     expect(d).toMatch(/isAmbiguousSaveError\(e\)[\s\S]{0,120}setAddLocked\(true\)/);
   });
 });
+
+describe("新しい業者の小窓にも透かしを描く(@codex #459 R21)", () => {
+  it("最前面に出る小窓は中に透かしを持つ", () => {
+    const s = readFileSync(join(process.cwd(), "src/components/agent-inquiry/agent-create-modal.tsx"), "utf8");
+    expect(s).toMatch(/!bypass && watermarkText && <WatermarkOverlay text=\{watermarkText\} \/>/);
+    const picker = readFileSync(join(process.cwd(), "src/components/agent-inquiry/agent-picker.tsx"), "utf8");
+    expect(picker).toMatch(/newAgentAction\(/);
+  });
+});

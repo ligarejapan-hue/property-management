@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { hitsForQuery, type SearchResult } from "@/lib/agent-inquiry/desk-form";
+import { hitsForQuery, newAgentAction, type SearchResult } from "@/lib/agent-inquiry/desk-form";
 import { useDeskAccess } from "./desk-access";
 import { searchDeskAgents, type AgentHit } from "@/lib/api-client";
 
@@ -71,6 +71,7 @@ export function AgentPicker({
   }, [query, searching, readDenied]);
   // 今の検索語の結果だけ出す(打ち直し中に前の候補を押せないように)。
   const shown = hitsForQuery(res, query);
+  const createAction = newAgentAction({ selected: selected != null, searching, shown });
   return (
     <div className="space-y-1">
       <input
@@ -83,10 +84,19 @@ export function AgentPicker({
       />
       {searching && shown && shown.hits.length > 0 && <AgentResults hits={shown.hits} onPick={onPick} />}
       {searching && shown?.failed && <p className="text-xs text-rose-600">検索できませんでした(通信を確かめてください)</p>}
-      {!selected && (
+      {/* 探し終えてから出す=候補を見ずに押して、名簿にある業者を二重に作らない(@codex #459 R21)。 */}
+      {createAction === "empty" && (
         <button type="button" onClick={onCreateNew} className="text-sm text-teal-700 underline dark:text-teal-300">
           ＋ 名簿にない業者を新しく登録
         </button>
+      )}
+      {createAction === "hasHits" && (
+        <button type="button" onClick={onCreateNew} className="text-xs text-gray-500 underline">
+          上の候補に無い(別の支店など)ときだけ、新しく登録
+        </button>
+      )}
+      {!selected && !searching && (
+        <p className="text-xs text-gray-500">会社名か電話番号を2文字以上入れて探すと、名簿に無いときは新しく登録できます。</p>
       )}
     </div>
   );
