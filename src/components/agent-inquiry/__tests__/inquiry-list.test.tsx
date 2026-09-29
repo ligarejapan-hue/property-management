@@ -153,3 +153,15 @@ describe("読み直した後の上書きは確かめてから・書き込みの�
     expect(s).toContain('if (wrote) setError("保存しましたが');
   });
 });
+
+describe("詳細の小窓(ネイティブの dialog)の中にも透かし・保存中は閉じない(@codex #459 R8)", () => {
+  const s = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
+  it("小窓の中に透かしを描く(小窓は最前面に出るので外の透かしが隠れる)", () => {
+    expect(s).toContain("useScreenProtection()");
+    expect(s).toMatch(/!bypass && watermarkText && <WatermarkOverlay text=\{watermarkText\} \/>/);
+  });
+  it("保存中は「閉じる」も Escape も効かない", () => {
+    expect(s).toMatch(/onClose=\{busy \? undefined : onClose\}/);
+    expect(s).toMatch(/<Button variant="secondary" onClick=\{onClose\} disabled=\{busy\}>/);
+  });
+});

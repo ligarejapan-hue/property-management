@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Button } from "@/components/ui/button";
+import WatermarkOverlay from "@/components/screen-protection/watermark-overlay";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import {
   addAgentViewing,
   apiErrorCode,
@@ -164,6 +166,7 @@ export function InquiryDetailView({
 }) {
   // メモの下書き(null=まだ触っていない)。詳細は反響の id だけで作り直すので、状態や担当を変えて版が
   // 進んでも・読み直しても、打ちかけのメモは消えない(最終レビュー I-1/I-2)。
+  const { bypass, watermarkText } = useScreenProtection();
   const [noteDraft, setNoteDraft] = useState<Draft | null>(null);
   const [noteWarn, setNoteWarn] = useState<string | null>(null);
   const serverNote = q.note ?? "";
@@ -186,14 +189,17 @@ export function InquiryDetailView({
     <ModalShell
       size="lg"
       title={`${KIND_LABEL[q.kind]} ― ${q.agent.companyName}`}
-      onClose={onClose}
+      // 保存中は閉じない(閉じて開き直すと古い内容のまま「内見を足す」を押せて二重登録になる・@codex #459 R8)。
+      onClose={busy ? undefined : onClose}
       footer={
-        <Button variant="secondary" onClick={onClose}>
+        <Button variant="secondary" onClick={onClose} disabled={busy}>
           閉じる
         </Button>
       }
     >
       <div className="space-y-3 text-sm">
+        {/* 小窓はブラウザの最前面に出るので、外の透かしは隠れる。小窓の中にも透かしを描く(@codex #459 R8)。 */}
+        {!bypass && watermarkText && <WatermarkOverlay text={watermarkText} />}
         <p className="font-medium">
           {q.property.roomNo ? `${q.property.name} ${q.property.roomNo}` : q.property.name}
           <span className="ml-2 text-xs text-gray-500">{q.property.town}</span>
