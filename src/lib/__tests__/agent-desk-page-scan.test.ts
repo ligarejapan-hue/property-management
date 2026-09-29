@@ -107,3 +107,10 @@ describe("書く権限が無ければ登録・変更を出さない・見出し�
     expect(src).toMatch(/new CustomEvent\(DESK_OPEN_COUNT_EVENT, \{ detail: null \}\)/);
   });
 });
+
+describe("見えなくなったら読み込みを取り消す(@codex #459 R13)", () => {
+  it("読み込みは中身を出しているときだけ・見えなくなったら途中の読み込みの結果(件数)を出さない", () => {
+    expect(src).toMatch(/if \(!bodyVisible\) return;/);
+    expect(src).toMatch(/\}, \[tab, mine, reloadKey, onError, bodyVisible\]\);/);
+  });
+});

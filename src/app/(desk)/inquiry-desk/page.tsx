@@ -91,6 +91,9 @@ export default function InquiryDeskPage() {
   const loadingMoreRef = useRef(-1);
 
   useEffect(() => {
+    // 中身を出していない間は読まない。見えなくなったら途中の読み込みは cancelled で結果(件数)を捨てる
+    // (@codex #459 R13: 権限を外された後に件数が見出しに出直さないように)。
+    if (!bodyVisible) return;
     listGenRef.current += 1;
     let cancelled = false;
     (async () => {
@@ -118,7 +121,7 @@ export default function InquiryDeskPage() {
     return () => {
       cancelled = true;
     };
-  }, [tab, mine, reloadKey, onError]);
+  }, [tab, mine, reloadKey, onError, bodyVisible]);
 
   const loadMore = async () => {
     if (!cursor || loadingMoreRef.current === listGenRef.current) return;

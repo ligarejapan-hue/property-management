@@ -174,3 +174,16 @@ describe("書く権限が無いときの詳細(@codex #459 R12)", () => {
     expect(s).toMatch(/busy=\{busy \|\| refreshFailed \|\| !canWrite\}/);
   });
 });
+
+describe("書けないときは入力欄も打てない(@codex #459 R13)", () => {
+  it("詳細のメモ・内見の日時・結果は busy のあいだ読み取り専用", () => {
+    const html = renderToStaticMarkup(
+      <InquiryDetailView inquiry={inquiry} canOpenProperty={false} users={[]} busy error={null}
+        onStatus={noop} onAssignee={noop} onSaveNote={noop} onAddViewing={noop} onSaveViewing={noop} onClose={noop} />,
+    );
+    const textareas = html.match(/<textarea[^>]*>/g) ?? [];
+    expect(textareas.length).toBeGreaterThan(0);
+    for (const t of textareas) expect(t).toMatch(/readonly/i);
+    for (const i of html.match(/<input type="(?:date|time)"[^>]*>/g) ?? []) expect(i).toMatch(/readonly/i);
+  });
+});

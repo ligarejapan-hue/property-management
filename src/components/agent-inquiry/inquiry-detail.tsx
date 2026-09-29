@@ -98,8 +98,8 @@ function ViewingRow({
         {canceled ? " ・ 取り消し済み" : ""}
       </p>
       <div className="grid grid-cols-2 gap-1">
-        <input type="date" value={val("date")} aria-label="内見の日付" onChange={(e) => edit("date", e.target.value)} className={inputCls} />
-        <input type="time" value={val("time")} aria-label="内見の時刻" onChange={(e) => edit("time", e.target.value)} className={inputCls} />
+        <input type="date" value={val("date")} readOnly={busy} aria-label="内見の日付" onChange={(e) => edit("date", e.target.value)} className={inputCls} />
+        <input type="time" value={val("time")} readOnly={busy} aria-label="内見の時刻" onChange={(e) => edit("time", e.target.value)} className={inputCls} />
       </div>
       {/* 立ち会いは選んだだけでは保存しない(保存で行の版が進み、打ちかけの結果が消えるのを防ぐ)。 */}
       <select value={val("attendant")} disabled={busy} aria-label="立ち会い" onChange={(e) => edit("attendant", e.target.value)} className={inputCls}>
@@ -112,6 +112,7 @@ function ViewingRow({
       </select>
       <textarea
         value={val("result")}
+        readOnly={busy}
         onChange={(e) => edit("result", e.target.value)}
         rows={2}
         placeholder="内見後の結果"
@@ -252,7 +253,8 @@ export function InquiryDetailView({
         </label>
         <label className="block">
           <span className="text-xs text-gray-500">メモ</span>
-          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} className={inputCls} />
+          {/* 書けない間(保存中・書く権限なし・読み直し失敗)は打てない=保存できない入力を受け付けない(@codex #459 R13)。 */}
+          <textarea value={note} readOnly={busy} onChange={(e) => setNote(e.target.value)} rows={3} className={inputCls} />
           <button
             type="button"
             disabled={busy}
