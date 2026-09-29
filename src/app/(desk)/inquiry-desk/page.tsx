@@ -18,6 +18,8 @@ import { InquiryListView } from "@/components/agent-inquiry/inquiry-list";
 import InquiryDetail from "@/components/agent-inquiry/inquiry-detail";
 import DeskStepGuide from "@/components/agent-inquiry/desk-step-guide";
 import { DESK_OPEN_COUNT_EVENT } from "@/components/agent-inquiry/desk-shell";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
+import { hasPermission } from "@/lib/permissions";
 
 /** 受付の窓(設計 2026-09-28 §2.1)。上から 今日・明日の内見 → 登録フォーム → 一覧(広い画面は右列)。 */
 export default function InquiryDeskPage() {
@@ -34,6 +36,9 @@ export default function InquiryDeskPage() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  // 開いたままの窓で閲覧権限を外されたら、画面保護が読み直す権限を見て中身を消す(@codex #459 R10)。
+  const { permissions } = useScreenProtection();
+  const revoked = permissions != null && !hasPermission(permissions, "agent_inquiry", "read");
   // 403 以外の読み込み失敗。「ありません」と見分けがつくよう知らせる(内見の見落としを防ぐ・@codex #459 R1)。
   const [loadError, setLoadError] = useState(false);
   const [formState, setFormState] = useState<DeskFormState>(EMPTY_DESK_FORM);
@@ -49,7 +54,9 @@ export default function InquiryDeskPage() {
 
   // 一覧の世代(タブ・自分の担当だけ・読み直しで進む)。もっと見るの応答が古い世代なら捨てる。
   const listGenRef = useRef(0);
-  const loadingMoreRef = useRef(false);
+  // もっと見るを読んでいる一覧の世代(-1=読んでいない)。世代ごとの鍵なので、タブを替えた後の
+  // もっと見るは古い読み込みに邪魔されない(@codex #459 R10)。
+  const loadingMoreRef = useRef(-1);
 
   useEffect(() => {
     listGenRef.current += 1;
@@ -82,9 +89,9 @@ export default function InquiryDeskPage() {
   }, [tab, mine, reloadKey, onError]);
 
   const loadMore = async () => {
-    if (!cursor || loadingMoreRef.current) return;
-    loadingMoreRef.current = true;
+    if (!cursor || loadingMoreRef.current === listGenRef.current) return;
     const gen = listGenRef.current;
+    loadingMoreRef.current = gen;
     try {
       const r = await fetchAgentInquiries({ status: tab, assignee: mine ? "me" : undefined, cursor });
       // 待っている間にタブ・絞り込みを替えた/読み直した=古い応答なので混ぜない(@codex #459 R2)。
@@ -94,11 +101,11 @@ export default function InquiryDeskPage() {
     } catch (e) {
       if (listGenRef.current === gen) onError(e);
     } finally {
-      loadingMoreRef.current = false;
+      if (loadingMoreRef.current === gen) loadingMoreRef.current = -1;
     }
   };
 
-  if (forbidden) {
+  if (forbidden || revoked) {
     return (
       <p className="rounded-md bg-white p-6 text-center text-sm dark:bg-gray-900">
         反響の受付の権限がありません。管理者にお問い合わせください。

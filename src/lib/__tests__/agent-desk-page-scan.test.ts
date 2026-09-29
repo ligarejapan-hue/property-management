@@ -74,3 +74,14 @@ describe("もっと見るの古い失敗で今の一覧を「読み込めませ�
     expect(src).toMatch(/catch \(e\) \{\s*if \(listGenRef\.current === gen\) onError\(e\);/);
   });
 });
+
+describe("開いたままの窓で権限を外されたら表示を消す・もっと見るの鍵は世代ごと(@codex #459 R10)", () => {
+  it("画面保護が読み直す権限を見て、閲覧権限が無ければ中身を出さない", () => {
+    expect(src).toContain("useScreenProtection()");
+    expect(src).toMatch(/hasPermission\(permissions, "agent_inquiry", "read"\)/);
+    expect(src).toMatch(/if \(forbidden \|\| revoked\)/);
+  });
+  it("もっと見るの鍵はその時の一覧の世代だけに効く", () => {
+    expect(src).toMatch(/loadingMoreRef\.current === listGenRef\.current/);
+  });
+});
