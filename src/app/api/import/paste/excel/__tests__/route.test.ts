@@ -269,6 +269,21 @@ describe("POST /api/import/paste/excel", () => {
     expect(lookupCalls).toHaveLength(0);
   });
 
+  it("★数値で入った長い案件IDが指数表記に丸められず、別々の反響番号になる(@codex PR#456 6巡目)", async () => {
+    const H = ["案件ID", "姓名", "物件所在地", "物件種別/経営プラン", "登録日時"];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      H,
+      [123456100000, "一人目", "東京都港区1-1", "一戸建て", "2024/6/22"],
+      [123456200000, "二人目", "東京都港区2-2", "一戸建て", "2024/6/23"],
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, "リビンマッチ");
+    const b64 = Buffer.from(XLSX.write(wb, { type: "buffer", bookType: "xlsx" })).toString("base64");
+    const body = await (await POST(req({ fileName: "a.xlsx", xlsxBase64: b64 }))).json();
+    expect(body.rows.map((r: { draft: { externalLinkKey: string } }) => r.draft.externalLinkKey))
+      .toEqual(["123456100000", "123456200000"]);
+  });
+
   it("全シートを読む(見出しの無いシートは飛ばす)", async () => {
     const body = await (await POST(req({
       fileName: "a.xlsx",

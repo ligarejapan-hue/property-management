@@ -23,6 +23,7 @@ import {
   detectFileFormat,
   MAX_IMPORT_DECODED_BYTES,
   MAX_XLSX_EXPANDED_BYTES,
+  cellToString,
 } from "@/lib/sheet-parser";
 import { assertZipExpandsWithin } from "@/lib/xlsx-zip-guard";
 
@@ -69,17 +70,29 @@ function fallbackLinkKey(row: LeadRow): string {
  *     (空行は readLeadSheet が読み飛ばす)。
  *   ・表が1行目から始まっていないときは、その分の空行を前に足す
  *     (sheet_to_json は使われている範囲の先頭行から返す)。
+ * ⚠**指数表記に丸められた数値は元の数値に戻す**(@codex PR#456 6巡目)。
+ *   12桁以上の案件IDが数値で入っていると、表示用の文字は `1.23456E+11` になり、
+ *   別々の反響が同じ反響番号になる(2件目は「登録済み」扱いで黙って飛ばされる)。
+ *   日付などは表示どおりの文字が正しいので、指数表記のセルだけを生の値で置き換える
+ *   (既存の取込と同じ cellToString で桁を落とさずに文字にする)。
  */
+const SCIENTIFIC = /^-?\d+(\.\d+)?E[+-]\d+$/i;
 function sheetToStrings(sheet: XLSX.WorkSheet): string[][] {
-  const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-    header: 1,
-    raw: false,
-    defval: "",
-    blankrows: true,
-  });
+  const opts = { header: 1 as const, defval: "", blankrows: true };
+  const shown = XLSX.utils.sheet_to_json<unknown[]>(sheet, { ...opts, raw: false });
+  const raw = XLSX.utils.sheet_to_json<unknown[]>(sheet, { ...opts, raw: true });
   const firstRow = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]).s.r : 0;
   const lead: string[][] = Array.from({ length: firstRow }, () => []);
-  return [...lead, ...aoa.map((r) => (r ?? []).map((c) => (c == null ? "" : String(c))))];
+  return [
+    ...lead,
+    ...shown.map((r, i) =>
+      (r ?? []).map((c, j) => {
+        const text = c == null ? "" : String(c);
+        const value = raw[i]?.[j];
+        return SCIENTIFIC.test(text.trim()) && typeof value === "number" ? cellToString(value) : text;
+      }),
+    ),
+  ];
 }
 
 export async function POST(request: NextRequest) {
