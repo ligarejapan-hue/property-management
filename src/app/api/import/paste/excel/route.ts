@@ -19,7 +19,12 @@ import {
 } from "@/lib/paste-import/lead-sheet";
 import { lookupPasteDuplicates } from "@/lib/paste-import-duplicates";
 import { assertImportJsonBodySize } from "@/lib/import-body-size";
-import { detectFileFormat, MAX_IMPORT_DECODED_BYTES } from "@/lib/sheet-parser";
+import {
+  detectFileFormat,
+  MAX_IMPORT_DECODED_BYTES,
+  MAX_XLSX_EXPANDED_BYTES,
+} from "@/lib/sheet-parser";
+import { assertZipExpandsWithin } from "@/lib/xlsx-zip-guard";
 
 // ---------- POST /api/import/paste/excel ----------
 // 査定サイトの反響を書き溜めた顧客管理表(Excel)を読み、行ごとに
@@ -40,6 +45,7 @@ const MAX_ROWS = 1000;
  */
 const MAX_SHEET_ROWS = 5000;
 const MAX_SHEET_COLS = 200;
+
 
 /**
  * JSON body の上限。Excel 本体(デコード後10MBまで・取込共通の上限)を
@@ -115,10 +121,24 @@ export async function POST(request: NextRequest) {
       throw new ApiError(400, "ファイルが大きすぎます", "BAD_REQUEST");
     }
 
+    const buf = Buffer.from(base64, "base64");
+    // ⚠**展開後の大きさ**を先に抑える(@codex PR#456 5巡目)。XLSX.read は中身を丸ごと
+    //   展開してから sheetRows を当てるので、小さく圧縮された巨大ファイルで
+    //   メモリを食い潰せる。申告サイズは信じず、実際に展開しながら上限で止める。
+    try {
+      assertZipExpandsWithin(buf, MAX_XLSX_EXPANDED_BYTES);
+    } catch {
+      throw new ApiError(
+        400,
+        "Excelファイルの中身が大きすぎるか、壊れています。不要なシートや書式を消してから取り込んでください",
+        "BAD_REQUEST",
+      );
+    }
+
     let wb: XLSX.WorkBook;
     try {
       // ⚠sheetRows で**読み込む行そのもの**を上限で打ち切る(本来の範囲は !fullref に残る)。
-      wb = XLSX.read(Buffer.from(base64, "base64"), {
+      wb = XLSX.read(buf, {
         type: "buffer",
         sheetRows: MAX_SHEET_ROWS + 1,
       });

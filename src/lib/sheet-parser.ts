@@ -10,6 +10,7 @@
 
 import * as XLSX from "xlsx";
 import { parseCsv, type CsvParseResult } from "./csv-parser";
+import { assertZipExpandsWithin } from "./xlsx-zip-guard";
 
 export type ImportFileFormat = "csv" | "xlsx" | "unknown";
 
@@ -35,6 +36,12 @@ export class SheetParseError extends Error {
  * 取込は物件/所有者リスト＝実運用では小さい。既定10MB（数万行相当）で十分。
  */
 export const MAX_IMPORT_DECODED_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Excel(ZIP)を展開したあとの合計の上限(圧縮後上限の5倍)。
+ * Excel まとめ取込(/api/import/paste/excel)も同じ値を使う。
+ */
+export const MAX_XLSX_EXPANDED_BYTES = 50 * 1024 * 1024;
 
 /**
  * プロトタイプ汚染を招くヘッダ名（列名）。正当な取込ファイルには存在しないため取込を拒否する
@@ -197,9 +204,19 @@ function parseXlsxFromBase64(
   base64: string,
   formattedTextHeaders?: ReadonlySet<string>,
 ): SheetParseResult {
+  const buf = Buffer.from(base64, "base64");
+  // ⚠展開後の大きさを先に抑える(ZIP爆弾・@codex PR#456 5巡目)。XLSX.read は
+  //   中身を丸ごと展開するので、圧縮後の上限(maxDecodedBytes)だけでは守れない。
+  try {
+    assertZipExpandsWithin(buf, MAX_XLSX_EXPANDED_BYTES);
+  } catch {
+    throw new SheetParseError(
+      "INPUT_TOO_LARGE",
+      "Excelファイルの中身が大きすぎるか、壊れています",
+    );
+  }
   let wb: XLSX.WorkBook;
   try {
-    const buf = Buffer.from(base64, "base64");
     wb = XLSX.read(buf, { type: "buffer" });
   } catch {
     throw new SheetParseError("INVALID_INPUT", "Excelファイルを解析できませんでした");

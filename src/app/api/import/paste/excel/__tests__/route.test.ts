@@ -239,6 +239,36 @@ describe("POST /api/import/paste/excel", () => {
     expect(res.status).toBe(200);
   });
 
+  it("★展開すると大きすぎるファイル(ZIP爆弾)は、Excelとして読む前に400(@codex PR#456 5巡目)", async () => {
+    const { deflateRawSync } = await import("node:zlib");
+    const data = Buffer.alloc(80 * 1024 * 1024, 0x20);
+    const name = Buffer.from("xl/worksheets/sheet1.xml");
+    const comp = deflateRawSync(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(comp.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(comp.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(name.length, 28);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(1, 8);
+    eocd.writeUInt16LE(1, 10);
+    eocd.writeUInt32LE(46 + name.length, 12);
+    eocd.writeUInt32LE(30 + name.length + comp.length, 16);
+    const zip = Buffer.concat([local, name, comp, central, name, eocd]);
+    const res = await POST(req({ fileName: "a.xlsx", xlsxBase64: zip.toString("base64") }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.message).toContain("大きすぎる");
+    expect(lookupCalls).toHaveLength(0);
+  });
+
   it("全シートを読む(見出しの無いシートは飛ばす)", async () => {
     const body = await (await POST(req({
       fileName: "a.xlsx",
