@@ -94,7 +94,8 @@ export function AgentCreateModal({
         </>
       }
     >
-      <div className="space-y-2">
+      {/* 登録中は欄も打てない(登録は押した時の値で進むので、その後の直しは届かず黙って消える・@codex #459 R14)。 */}
+      <fieldset disabled={saving} className="m-0 min-w-0 space-y-2 border-0 p-0">
         {FIELDS.map(([k, label]) => (
           <label key={k} className="block text-sm">
             <span className="text-xs text-gray-500">{label}</span>
@@ -121,7 +122,7 @@ export function AgentCreateModal({
           国の宅建業者検索を開いて確かめる ↗
         </a>
         {error && <p className="text-sm text-rose-600">{error}</p>}
-      </div>
+      </fieldset>
     </ModalShell>
   );
 }

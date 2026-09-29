@@ -114,3 +114,10 @@ describe("保存中は入力できない(保存が終わって空に戻るとき
     expect(view({ submitting: false })).not.toMatch(/<fieldset[^>]*disabled=""/);
   });
 });
+
+describe("新しい業者の登録中は欄も打てない(@codex #459 R14)", () => {
+  it("登録中は入力欄をまとめて使えなくする(登録後に消える直しを受け付けない)", () => {
+    const s = readFileSync(join(process.cwd(), "src/components/agent-inquiry/agent-create-modal.tsx"), "utf8");
+    expect(s).toMatch(/<fieldset disabled=\{saving\}/);
+  });
+});
