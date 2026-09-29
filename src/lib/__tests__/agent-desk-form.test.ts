@@ -250,3 +250,30 @@ describe("業者は支店名まで出す(同じ会社の別の支店を見分け
     expect(s.agentQuery).toBe(`${agent.companyName} 渋谷支店`);
   });
 });
+
+import { viewingPatchFrom } from "@/lib/agent-inquiry/desk-form";
+
+describe("新しい業者の電話の振り分けは検索と同じ書き方を受け付ける(@codex #459 R24)", () => {
+  it("かっこ・いろいろなダッシュの携帯も問い合わせ者へ", () => {
+    expect(splitNewAgentPhone("(090)12345678").callerMobile).toBe("(090)12345678");
+    expect(splitNewAgentPhone("090–1234–5678").callerMobile).toBe("090–1234–5678");
+    expect(splitNewAgentPhone("03−1234−5678").agentPhone).toBe("03−1234−5678");
+  });
+});
+
+describe("内見の保存は変えた欄だけ送る(外れた立会者で関係ない保存を止めない・@codex #459 R24)", () => {
+  const server = { date: "2026-10-02", time: "14:00", result: "", attendant: "old-user" };
+  it("結果だけ変えたら結果だけ", () => {
+    expect(viewingPatchFrom(server, { ...server, result: "申込" })).toEqual({ resultNote: "申込" });
+  });
+  it("日付か時刻を変えたら日時を送る", () => {
+    expect(viewingPatchFrom(server, { ...server, time: "15:00" })).toEqual({ scheduledAt: "2026-10-02T06:00:00.000Z" });
+  });
+  it("立ち会いを外したら null", () => {
+    expect(viewingPatchFrom(server, { ...server, attendant: "" })).toEqual({ attendantId: null });
+  });
+  it("何も変えていなければ null(送らない)", () => {
+    expect(viewingPatchFrom(server, { ...server })).toBeNull();
+    expect(viewingPatchFrom(server, { ...server, result: "  " })).toBeNull();
+  });
+});

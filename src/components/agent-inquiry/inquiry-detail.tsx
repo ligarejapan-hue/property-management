@@ -25,11 +25,11 @@ import {
   VIEWING_TYPE_LABEL,
   formatJst,
   isoToJstInputs,
-  jstInputsToIso,
   draftOf,
   draftStale,
   editDraft,
   isAmbiguousSaveError,
+  viewingPatchFrom,
   type Draft,
 } from "@/lib/agent-inquiry/desk-form";
 
@@ -44,6 +44,12 @@ function ProtectedText({ text }: { text: string }) {
   return (
     <p data-pii-protected="true" data-pii-surface="dashboard" className="min-h-[2rem] whitespace-pre-wrap rounded-md border border-gray-200 px-2 py-1.5 text-sm dark:border-gray-700">{text}</p>
   );
+}
+
+/** 今の担当・立会者が選べる人の一覧に無い(無効になった等)ときも、選択肢に足して今の値を正しく見せる(@codex #459 R24)。 */
+function InactiveUserOption({ user, users }: { user: { id: string; name: string } | null; users: { id: string }[] }) {
+  if (!user || users.some((u) => u.id === user.id)) return null;
+  return <option value={user.id}>{`${user.name}(今は選べない人)`}</option>;
 }
 
 export type ViewingPatch = {
@@ -96,12 +102,14 @@ function ViewingRow({
       });
       return;
     }
+    // 変えた欄だけ送る(立会者が後から無効になっても、日時や結果の保存が止まらない・@codex #459 R24)。
+    const patch = viewingPatchFrom(server, { date: val("date"), time: val("time"), result: val("result"), attendant: val("attendant") });
+    if (!patch) {
+      setWarn("変えた所がありません。");
+      return;
+    }
     setWarn(null);
-    onSave({
-      scheduledAt: jstInputsToIso(val("date"), val("time")),
-      resultNote: val("result"),
-      attendantId: val("attendant") || null,
-    });
+    onSave(patch);
   };
   const canceled = v.canceledAt != null;
   return (
@@ -119,6 +127,7 @@ function ViewingRow({
       {/* 立ち会いは選んだだけでは保存しない(保存で行の版が進み、打ちかけの結果が消えるのを防ぐ)。 */}
       <select value={val("attendant")} disabled={busy} aria-label="立ち会い" onChange={(e) => edit("attendant", e.target.value)} className={inputCls}>
         <option value="">立ち会い なし・未定</option>
+        <InactiveUserOption user={v.attendant} users={users} />
         {users.map((u) => (
           <option key={u.id} value={u.id}>
             {u.name}
@@ -271,6 +280,7 @@ export function InquiryDetailView({
             className={inputCls}
           >
             <option value="">未定</option>
+            <InactiveUserOption user={q.assignee} users={users} />
             {users.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.name}

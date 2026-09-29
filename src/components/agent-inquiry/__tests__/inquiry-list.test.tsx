@@ -147,7 +147,7 @@ describe("読み直した後の上書きは確かめてから・書き込みの�
   });
   it("保存に進んだら前の食い違いの知らせは消す", () => {
     expect(s).toMatch(/setNoteWarn\(null\);\s*onSaveNote\(note\)/);
-    expect(s).toMatch(/setWarn\(null\);\s*onSave\(\{/);
+    expect(s).toMatch(/setWarn\(null\);\s*onSave\(patch\)/);
   });
   it("「保存しましたが…」は書き込みが通ったときだけ", () => {
     expect(s).toContain('if (wrote) setError("保存しましたが');
@@ -281,5 +281,19 @@ describe("一覧・詳細・今日明日の内見に支店名を出す(@codex #4
     expect(html).toContain("○○不動産 渋谷支店");
     const route = readFileSync(join(process.cwd(), "src/app/api/agent-inquiries/upcoming/route.ts"), "utf8");
     expect(route).toContain("agent: { select: { companyName: true, branchName: true } }");
+  });
+});
+
+describe("外れた立会者も表示は残す(@codex #459 R24)", () => {
+  it("担当者一覧に無い立会者は選択肢に足して表示する", () => {
+    const html = renderToStaticMarkup(
+      <InquiryDetailView inquiry={inquiry} canOpenProperty={false} users={[]} busy={false} error={null}
+        onStatus={noop} onAssignee={noop} onSaveNote={noop} onAddViewing={noop} onSaveViewing={noop} onClose={noop} />,
+    );
+    const withAtt = inquiry.viewings.find((v) => v.attendant);
+    expect(withAtt).toBeTruthy();
+    expect(html).toContain(`<option value="${withAtt!.attendant!.id}" selected="">${withAtt!.attendant!.name}(今は選べない人)</option>`);
+    const d = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8");
+    expect(d).toMatch(/viewingPatchFrom\(/);
   });
 });

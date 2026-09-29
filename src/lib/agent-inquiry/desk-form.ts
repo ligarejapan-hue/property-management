@@ -2,6 +2,7 @@ import type {
   AgentHit, AgentInquiryCreateBody, AdMediumKey, AdValueKey, DeskProperty, InquiryChannelKey, InquiryKindKey,
   InquiryStatusKey, ViewingTypeKey,
 } from "@/lib/api-client";
+import { isPhoneCharsOnly } from "@/lib/phone-format-jp";
 
 /** 受付の窓の登録フォーム(設計 §2.2)。並び順=業者→問い合わせ者→物件→用件→内見→入口→保存。 */
 export interface DeskFormState {
@@ -290,10 +291,26 @@ export function isAmbiguousSaveError(err: unknown): boolean {
  */
 export function splitNewAgentPhone(query: string): { agentPhone: string; callerMobile: string | null } {
   const q = query.trim();
-  if (!/^[0-9０-９\-‐ー－\s]+$/.test(q)) return { agentPhone: "", callerMobile: null };
-  const digits = q.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace(/\D/g, "");
+  // 検索(agentQueryReady・サーバー)と同じ「電話番号らしい語」の判定=かっこ・いろいろなダッシュも受ける(@codex #459 R24)。
+  if (!isPhoneCharsOnly(q)) return { agentPhone: "", callerMobile: null };
+  const digits = q.normalize("NFKC").replace(/\D/g, "");
   if (/^0[789]0/.test(digits)) return { agentPhone: "", callerMobile: q };
   return { agentPhone: q, callerMobile: null };
+}
+
+export type ViewingInputs = { date: string; time: string; result: string; attendant: string };
+export type ViewingEditPatch = { scheduledAt?: string | null; resultNote?: string | null; attendantId?: string | null };
+
+/**
+ * 内見の保存で送る変更。変えた欄だけ送る=立会者が後から無効になっても、日時や結果の保存が 422 で止まらない
+ * (@codex #459 R24)。何も変えていなければ null(送らない)。
+ */
+export function viewingPatchFrom(server: ViewingInputs, next: ViewingInputs): ViewingEditPatch | null {
+  const patch: ViewingEditPatch = {};
+  if (next.date !== server.date || next.time !== server.time) patch.scheduledAt = jstInputsToIso(next.date, next.time);
+  if (next.result.trim() !== server.result.trim()) patch.resultNote = next.result;
+  if (next.attendant !== server.attendant) patch.attendantId = next.attendant || null;
+  return Object.keys(patch).length > 0 ? patch : null;
 }
 
 /**
