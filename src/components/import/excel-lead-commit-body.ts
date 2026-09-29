@@ -12,9 +12,9 @@ import {
   foldNoColumnFieldsIntoNote,
 } from "./paste-import-review";
 import type { PasteDraft } from "@/lib/paste-import/types";
-import { leadRowStatus } from "@/lib/paste-import/lead-sheet";
 import { supportsUnitFields, supportsBuildingName } from "@/lib/property-building-name";
 import { OCCUPANCY_STATUS_LABELS } from "@/lib/property-types";
+import { structuredFieldsFor } from "@/lib/paste-import/structured-fields";
 
 /**
  * 種別に合わず**登録で消える欄**(区分専用の欄・建物名)の値を、物件の備考の行にする
@@ -30,7 +30,7 @@ function droppedFieldLines(pv: ReturnType<typeof defaultPropertyValues>): string
     lines.push(`建物名: ${pv.buildingName}`);
   }
   if (!supportsUnitFields(pv.propertyType)) {
-    // ⚠建物面積は延床面積の欄へ入れる(excelLeadCommitBody)ので、ここでは足さない。
+    // ⚠建物面積は excelLeadCommitBody が延床面積の欄か備考かを決めるので、ここでは足さない。
     if (pv.roomNo) lines.push(`部屋番号: ${pv.roomNo}`);
     if (pv.layoutType) lines.push(`間取り: ${pv.layoutType}`);
     if (pv.occupancyStatus) {
@@ -65,20 +65,34 @@ export interface ExcelLeadCommitBody {
   } | null;
   externalLinkKey: string | null;
   linkExistingOwnerId: null;
+  /** 確定の時点で似た物件・同名の所有者が見つかったら作らずに 409 を返させる。 */
+  requireNoDuplicates: true;
 }
 
 export function excelLeadCommitBody(row: { draft: PasteDraft; ownerNote: string }): ExcelLeadCommitBody {
   const pv = defaultPropertyValues(row.draft);
   const ov = defaultOwnerValues(row.draft);
   // ⚠土地面積・延床面積・築年は物件の正式な欄へ入れる(@codex PR#456 3巡目)。
-  //   区分マンションの築年は棟の値が正(登録APIも断る)なので、備考に残す。
+  //   ただし**その種別の編集画面に出る欄だけ**(4巡目)。出ない欄の値は備考に残す
+  //   (登録APIも同じ規則 structuredFieldsFor で断る)。
   const isUnit = supportsUnitFields(pv.propertyType);
-  const builtYear = pv.builtYear && !isUnit ? Number(pv.builtYear) : null;
+  const allowed = structuredFieldsFor(pv.propertyType);
+  // 区分以外の「建物面積」は延床面積(下書きでは専有面積の欄に読まれている)。
+  const buildingArea = isUnit ? "" : pv.exclusiveArea;
+  const landArea = allowed.has("landArea") ? pv.landArea : "";
+  const totalFloorArea = allowed.has("totalFloorArea") ? buildingArea : "";
+  const builtYear = allowed.has("builtYear") && pv.builtYear ? Number(pv.builtYear) : null;
   const folded = foldNoColumnFieldsIntoNote(row.draft.noteFromUnmapped, {
-    landArea: "",
-    builtYear: isUnit ? pv.builtYear : "",
+    landArea: allowed.has("landArea") ? "" : pv.landArea,
+    builtYear: allowed.has("builtYear") ? "" : pv.builtYear,
   });
-  const note = [folded.trim(), ...droppedFieldLines(pv)].filter((l) => l !== "").join("\n");
+  const note = [
+    folded.trim(),
+    ...droppedFieldLines(pv),
+    ...(buildingArea && !allowed.has("totalFloorArea") ? [`建物面積: ${buildingArea}㎡`] : []),
+  ]
+    .filter((l) => l !== "")
+    .join("\n");
   return {
     property: {
       address: pv.address,
@@ -91,9 +105,8 @@ export function excelLeadCommitBody(row: { draft: PasteDraft; ownerNote: string 
       layoutType: pv.layoutType || null,
       occupancyStatus: pv.occupancyStatus || null,
       note: note || null,
-      landArea: pv.landArea || null,
-      // 区分以外の「建物面積」は延床面積(下書きでは専有面積の欄に読まれている)。
-      totalFloorArea: !isUnit && pv.exclusiveArea ? pv.exclusiveArea : null,
+      landArea: landArea || null,
+      totalFloorArea: totalFloorArea || null,
       builtYear,
     },
     owner:
@@ -109,61 +122,37 @@ export function excelLeadCommitBody(row: { draft: PasteDraft; ownerNote: string 
           },
     externalLinkKey: row.draft.externalLinkKey,
     linkExistingOwnerId: null,
+    requireNoDuplicates: true,
   };
 }
 
 // ---------------------------------------------------------------------------
-// 登録直前の見直し(@codex PR#456 1巡目 ①)
+// 登録APIの応答の読み分け(@codex PR#456 1巡目 ①・4巡目 ①)
 //
-// ⚠下見の判定は**取込を始める前のDB**に対するもの。同じ人の物件が2行ある
-//   (反響番号は別)と、1行目で作った所有者が2行目の下見には映っておらず、
-//   そのまま登録すると**同じ人の所有者が2人**できる。登録APIは反響番号の一致
-//   しか止めない(住所・氏名の一致は人が判断する設計)ので、ここで止める。
-// ⚠貼り付け画面の「登録の直前にもう一度見直す」と同じ見直しAPIを使い、
-//   判定は下見と**同じ関数**(leadRowStatus)に通す。
+// ⚠重複の確認は**登録APIの中で、作成と同じロックの内側で**行う
+//   (requireNoDuplicates)。画面から「確認」と「登録」を別々に呼ぶと、その間に
+//   同じ人・同じ物件が(前の行や他の人の取込で)作られても止められない。
+//   ここは返ってきた結果を行の状態に読み替えるだけ。
 // ---------------------------------------------------------------------------
 
-export interface ExcelLeadRecheckBody {
-  address: string;
-  lotNumber: string;
-  externalLinkKey: string;
-  ownerName: string;
-  ownerCurrentAddress: string;
-}
-
-export function excelLeadRecheckBody(row: { draft: PasteDraft }): ExcelLeadRecheckBody {
-  const pv = defaultPropertyValues(row.draft);
-  const ov = defaultOwnerValues(row.draft);
-  return {
-    address: pv.address,
-    lotNumber: pv.lotNumber,
-    externalLinkKey: row.draft.externalLinkKey ?? "",
-    ownerName: ov.name,
-    ownerCurrentAddress: ov.currentAddress,
-  };
-}
-
-/** 見直しAPI(/api/import/paste/recheck)の応答のうち、判定に使う部分。 */
-export interface ExcelLeadRecheckResponse {
-  duplicates: { blocked: boolean; blockedByPropertyId?: string | null; similarPropertyIds?: string[] };
-  similar: unknown[];
-  ownerCandidates: unknown[];
-  ownerCandidatesTruncated: boolean;
-}
-
-export type RecheckOutcome =
-  | { kind: "go" }
+export type CommitOutcome =
+  | { kind: "created"; propertyId: string }
   | { kind: "duplicate" }
-  | { kind: "review"; reasons: string[] };
+  | { kind: "review"; reasons: string[] }
+  | { kind: "failed"; message: string };
 
-export function recheckOutcome(draft: PasteDraft, res: ExcelLeadRecheckResponse): RecheckOutcome {
-  const { status, reasons } = leadRowStatus(draft, {
-    blocked: res.duplicates.blocked,
-    similarCount: res.similar.length,
-    ownerCandidateCount: res.ownerCandidates.length,
-    ownerCandidatesTruncated: res.ownerCandidatesTruncated,
-  });
-  if (status === "registered") return { kind: "duplicate" };
-  if (status === "review") return { kind: "review", reasons };
-  return { kind: "go" };
+export function commitOutcome(
+  status: number,
+  body: { propertyId?: string; error?: { code?: string; message?: string } } | null,
+): CommitOutcome {
+  if (status >= 200 && status < 300 && body?.propertyId) {
+    return { kind: "created", propertyId: body.propertyId };
+  }
+  const code = body?.error?.code;
+  const message = body?.error?.message ?? `処理に失敗しました（${status}）`;
+  if (status === 409 && code === "NEEDS_REVIEW") {
+    return { kind: "review", reasons: message.split("／").filter((r) => r !== "") };
+  }
+  if (status === 409 && code === "DUPLICATE") return { kind: "duplicate" };
+  return { kind: "failed", message };
 }

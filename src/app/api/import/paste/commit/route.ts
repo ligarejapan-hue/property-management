@@ -30,10 +30,11 @@ import {
 import {
   normalizeBuildingName,
   normalizeUnitOnlyFields,
-  supportsUnitFields,
   BUILDING_NAME_MAX_LENGTH,
   BUILDING_NAME_TOO_LONG_MESSAGE,
 } from "@/lib/property-building-name";
+import { structuredFieldsFor } from "@/lib/paste-import/structured-fields";
+import { lookupPasteDuplicates } from "@/lib/paste-import-duplicates";
 import type { PropertyType, OccupancyStatus } from "@/generated/prisma";
 
 // ---------------------------------------------------------------------------
@@ -148,7 +149,15 @@ interface CommitBody {
   externalLinkKey: string | null;
   /** 既存の所有者に紐付ける場合。指定があれば新規作成しない。 */
   linkExistingOwnerId?: string | null;
+  /**
+   * Excel まとめ取込が送る。同じ住所の物件・同じ名前の所有者が**確定の時点で**
+   * 見つかったら作らずに 409(NEEDS_REVIEW)を返す(人が確かめる)。
+   */
+  requireNoDuplicates?: boolean;
 }
+
+/** まとめ取込の確定を直列化する助言ロックの鍵(外部キーの鍵と混ざらない固定文字列)。 */
+const BULK_COMMIT_LOCK_KEY = "paste-excel-bulk-commit";
 
 /**
  * JSON body の上限（この口専用）。
@@ -348,17 +357,22 @@ export async function POST(request: NextRequest) {
     // ---- 土地面積・延床面積・築年（@codex PR#456 3巡目） ----
     // ⚠物件に正式な欄がある(販売図面 F3 で追加)。備考へ文字で落とすと、編集画面や
     //   販売図面で「未入力」に見える。
-    // ⚠区分マンションの延床面積・築年は**棟の値が正**(updatePropertySchema の
-    //   注記と同じ)。黙って捨てず、送られてきたら断る(呼び出し側が備考に残す)。
+    // ⚠**その種別の編集画面に出る欄だけ**受け付ける(@codex PR#456 4巡目)。
+    //   土地の延床面積のように画面に出ない欄へ入れると、誰も見られず直せない。
+    //   黙って捨てず、送られてきたら断る(呼び出し側が備考に残す)。
+    //   規則は structuredFieldsFor(編集画面の salesFieldsFor と一致をテストで固定)。
     const landArea = parseWideAreaInput(p.landArea, "土地面積");
     const totalFloorArea = parseWideAreaInput(p.totalFloorArea, "延床面積");
     const builtYear = parseBuiltYearInput(p.builtYear);
-    if (supportsUnitFields(propertyType) && (totalFloorArea !== null || builtYear !== null)) {
-      throw new ApiError(
-        400,
-        "区分マンションの延床面積・築年は棟に登録します。物件には入れられません",
-        "BAD_REQUEST",
-      );
+    const allowedStructured = structuredFieldsFor(propertyType);
+    for (const [key, value, label] of [
+      ["landArea", landArea, "土地面積"],
+      ["totalFloorArea", totalFloorArea, "延床面積"],
+      ["builtYear", builtYear, "築年"],
+    ] as const) {
+      if (value !== null && !allowedStructured.has(key)) {
+        throw new ApiError(400, `この物件種別では${label}を物件の欄に入れられません`, "BAD_REQUEST");
+      }
     }
 
     // 外部キー（査定ナンバー等）。
@@ -421,6 +435,33 @@ export async function POST(request: NextRequest) {
     let result;
     try {
       result = await prisma.$transaction(async (tx) => {
+        // ---- まとめ取込: 重複の確認と作成を**1つのロックの中で**行う（@codex PR#456 4巡目 ①） ----
+        // ⚠画面から「確認」と「登録」を別々に呼ぶと、2人が同じ人・同じ物件の行を
+        //   同時に流したとき、両方の確認が相手の作成より先に終わり、所有者・物件が
+        //   二重にできる。まとめ取込の確定を**1本のロックで直列化**し、ロックを
+        //   取った**あとに**確認する(先の確定はロックを放す前にコミット済み＝見える)。
+        // ⚠ロックの順序は「まとめ取込 → 外部キー」。貼り付け画面は外部キーの
+        //   ロックしか取らないので、逆順で取る経路は無い(待ちの輪ができない)。
+        // ⚠貼り付け画面(指定なし)は対象外: 人が確認画面で候補を見て決めている。
+        if (body.requireNoDuplicates === true) {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${BULK_COMMIT_LOCK_KEY})::bigint)`;
+          const dup = await lookupPasteDuplicates(session, perms, {
+            address: p.address.trim(),
+            lotNumber: p.lotNumber?.trim() || null,
+            externalLinkKey,
+            ownerName: body.owner?.name?.trim() || null,
+            ownerCurrentAddress: body.owner?.currentAddress?.trim() || null,
+          });
+          const reasons: string[] = [];
+          if (dup.similar.length > 0) reasons.push("同じ住所の物件がすでにあります");
+          if (dup.ownerCandidates.length > 0) reasons.push("同じ名前の所有者がすでにいます");
+          if (dup.ownerCandidatesTruncated) reasons.push("同じ名前の所有者が多く、確認しきれません");
+          if (!dup.duplicates.blocked && reasons.length > 0) {
+            throw new ApiError(409, reasons.join("／"), "NEEDS_REVIEW");
+          }
+          // blocked(同じ外部キー)は、すぐ下の外部キーのロック+確認が 409 DUPLICATE で止める。
+        }
+
         // ---- 二重登録を**サーバー側で**止める（全体レビュー Critical 1） ----
         // ⚠これまで重複判定は下書き route (/api/import/paste) にしか無く、確定側は
         //   externalLinkKey を無検査で書いていた。Property.externalLinkKey は

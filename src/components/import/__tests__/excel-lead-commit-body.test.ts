@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildPasteDraft } from "@/lib/paste-import/build-draft";
-import { excelLeadCommitBody, excelLeadRecheckBody, recheckOutcome } from "../excel-lead-commit-body";
+import { excelLeadCommitBody, commitOutcome } from "../excel-lead-commit-body";
 
 describe("excelLeadCommitBody — 1行を登録APIの形にする", () => {
   const text = [
@@ -53,50 +53,26 @@ describe("excelLeadCommitBody — 1行を登録APIの形にする", () => {
   });
 });
 
-describe("登録直前の見直し(@codex PR#456 1巡目 ①)", () => {
-  const draft = buildPasteDraft(
-    "反響番号：lj-2\nお名前：渡辺　一\nご住所：東京都港区1-1\n物件所在地：東京都港区2-2\n物件種別：戸建",
-  );
-  const clean = {
-    duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: [] },
-    similar: [],
-    ownerCandidates: [],
-    ownerCandidatesTruncated: false,
-  };
-
-  it("見直しには下書きの値(鍵・住所・氏名・現住所)をそのまま送る", () => {
-    expect(excelLeadRecheckBody({ draft })).toEqual({
-      address: "東京都港区2-2",
-      lotNumber: "",
-      externalLinkKey: "lj-2",
-      ownerName: "渡辺　一",
-      ownerCurrentAddress: "東京都港区1-1",
-    });
+describe("登録APIの応答の読み分け(@codex PR#456 1巡目 ①・4巡目 ①)", () => {
+  it("まとめ取込は、確定の時点での重複確認を登録APIに頼む", () => {
+    const d = buildPasteDraft("お名前：渡辺\n物件所在地：東京都港区2-2\n物件種別：戸建");
+    expect(excelLeadCommitBody({ draft: d, ownerNote: "" }).requireNoDuplicates).toBe(true);
   });
 
-  it("何も見つからなければ登録へ進む", () => {
-    expect(recheckOutcome(draft, clean)).toEqual({ kind: "go" });
+  it("成功は作った物件へ", () => {
+    expect(commitOutcome(200, { propertyId: "p-1" })).toEqual({ kind: "created", propertyId: "p-1" });
   });
 
-  it("★同じ人の2行目: 1行目で作った所有者が候補に出たら、登録せず要確認へ回す", () => {
-    expect(recheckOutcome(draft, { ...clean, ownerCandidates: [{ id: "o-1" }] })).toEqual({
-      kind: "review",
-      reasons: ["同じ名前の所有者がすでにいます"],
-    });
+  it("★確定の時点で候補が見つかった(NEEDS_REVIEW)ら要確認・理由は1つずつ", () => {
+    expect(commitOutcome(409, { error: { code: "NEEDS_REVIEW", message: "同じ住所の物件がすでにあります／同じ名前の所有者がすでにいます" } }))
+      .toEqual({ kind: "review", reasons: ["同じ住所の物件がすでにあります", "同じ名前の所有者がすでにいます"] });
   });
 
-  it("★同じ物件の行: 似た物件が出たら要確認・同じ鍵なら登録済み", () => {
-    expect(recheckOutcome(draft, { ...clean, similar: [{ id: "p-1" }] }).kind).toBe("review");
-    expect(
-      recheckOutcome(draft, {
-        ...clean,
-        duplicates: { blocked: true, blockedByPropertyId: "p-2", similarPropertyIds: [] },
-      }),
-    ).toEqual({ kind: "duplicate" });
-  });
-
-  it("候補が多すぎて確認しきれないときも要確認", () => {
-    expect(recheckOutcome(draft, { ...clean, ownerCandidatesTruncated: true }).kind).toBe("review");
+  it("同じ反響番号(DUPLICATE)は登録済み・それ以外の失敗は理由つき", () => {
+    expect(commitOutcome(409, { error: { code: "DUPLICATE", message: "この案件は登録済みです" } })).toEqual({ kind: "duplicate" });
+    expect(commitOutcome(400, { error: { code: "BAD_REQUEST", message: "メールアドレスの形式が正しくありません" } }))
+      .toEqual({ kind: "failed", message: "メールアドレスの形式が正しくありません" });
+    expect(commitOutcome(500, null)).toEqual({ kind: "failed", message: "処理に失敗しました（500）" });
   });
 });
 
@@ -127,10 +103,20 @@ describe("区分以外の種別で消える欄は備考に残す(@codex PR#456 2
     expect(body.property.note ?? "").not.toContain("建物面積");
   });
 
-  it("★区分マンションの築年は棟の値が正なので物件の欄に入れず、備考に残す", () => {
-    const text = [houseText.replace("一戸建て", "分譲マンション"), "築年：2001年"].join("\n");
+  it("★棟なしの区分マンションの築年は物件の欄へ(編集画面に出る)。土地面積は区分の欄に無いので備考へ", () => {
+    const text = [houseText.replace("一戸建て", "分譲マンション"), "築年：2001年", "土地面積：30 m2"].join("\n");
     const body = excelLeadCommitBody({ draft: buildPasteDraft(text), ownerNote: "" });
-    expect(body.property.builtYear).toBeNull();
-    expect(body.property.note).toContain("築年: 2001");
+    expect(body.property.builtYear).toBe(2001);
+    expect(body.property.landArea).toBeNull();
+    expect(body.property.note).toContain("土地面積: 30");
+    expect(body.property.note ?? "").not.toContain("築年");
+  });
+
+  it("★土地に建物面積・築年があっても延床面積・築年の欄には入れず、備考に残す(@codex PR#456 4巡目)", () => {
+    const text = [houseText.replace("一戸建て", "土地"), "築年：1980年", "土地面積：120 m2"].join("\n");
+    const body = excelLeadCommitBody({ draft: buildPasteDraft(text), ownerNote: "" });
+    expect(body.property).toMatchObject({ landArea: "120", totalFloorArea: null, builtYear: null });
+    expect(body.property.note).toContain("建物面積: 70㎡");
+    expect(body.property.note).toContain("築年: 1980");
   });
 });

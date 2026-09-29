@@ -67,6 +67,26 @@ vi.mock("@/lib/api-helpers", async () => {
     getUserPermissions: vi.fn(async () => mockPerms),
   };
 });
+/** まとめ取込の「登録直前の重複確認」(lookupPasteDuplicates)の結果と呼び出し記録。 */
+let dupLookupResult: {
+  duplicates: { blocked: boolean; blockedByPropertyId: string | null; similarPropertyIds: string[] };
+  similar: unknown[];
+  ownerCandidates: unknown[];
+  ownerCandidatesTruncated: boolean;
+} = {
+  duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: [] },
+  similar: [],
+  ownerCandidates: [],
+  ownerCandidatesTruncated: false,
+};
+const dupLookupInputs: unknown[] = [];
+vi.mock("@/lib/paste-import-duplicates", () => ({
+  lookupPasteDuplicates: vi.fn(async (_s: unknown, _p: unknown, input: unknown) => {
+    callOrder.push("dupLookup");
+    dupLookupInputs.push(input);
+    return dupLookupResult;
+  }),
+}));
 vi.mock("@/lib/audit", () => ({
   writeAuditLog: vi.fn(async (input: unknown) => { auditCalls.push(input); }),
 }));
@@ -256,6 +276,13 @@ beforeEach(() => {
   sqlSeen.length = 0;
   advisoryLockValues.length = 0;
   findFirstArgs.length = 0;
+  dupLookupInputs.length = 0;
+  dupLookupResult = {
+    duplicates: { blocked: false, blockedByPropertyId: null, similarPropertyIds: [] },
+    similar: [],
+    ownerCandidates: [],
+    ownerCandidatesTruncated: false,
+  };
 });
 
 describe("POST /api/import/paste/commit", () => {
@@ -545,11 +572,19 @@ describe("土地面積・延床面積・築年を物件の欄に入れる(@codex
     expect(created.property).toBeUndefined();
   });
 
-  it("★区分マンションの築年・延床面積は物件に書かない(棟の値が正)=400", async () => {
-    const unit = { propertyType: "apartment_unit" };
-    expect((await POST(req(withProp({ ...unit, builtYear: "2018" })))).status).toBe(400);
-    expect((await POST(req(withProp({ ...unit, totalFloorArea: "70" })))).status).toBe(400);
+  it("★種別の編集画面に出ない欄は物件に書かない=400(土地の延床面積・区分の延床面積と土地面積)", async () => {
+    expect((await POST(req(withProp({ propertyType: "land", totalFloorArea: "70" })))).status).toBe(400);
+    expect((await POST(req(withProp({ propertyType: "land", builtYear: "2018" })))).status).toBe(400);
+    expect((await POST(req(withProp({ propertyType: "apartment_unit", totalFloorArea: "70" })))).status).toBe(400);
+    expect((await POST(req(withProp({ propertyType: "apartment_unit", landArea: "30" })))).status).toBe(400);
+    expect((await POST(req(withProp({ propertyType: "unknown", landArea: "30" })))).status).toBe(400);
     expect(created.property).toBeUndefined();
+  });
+
+  it("★棟なしの区分マンションの築年は物件の欄に入る(編集画面にも出る・@codex PR#456 4巡目)", async () => {
+    const res = await POST(req(withProp({ propertyType: "apartment_unit", builtYear: "2001" })));
+    expect(res.status).toBe(200);
+    expect(created.property?.[0]).toMatchObject({ builtYear: 2001 });
   });
 });
 
@@ -1257,5 +1292,54 @@ describe("反響PDFは referral として保存し、名前を定型化する（
     const createIdx = callOrder.indexOf("attachment.create");
     expect(lockIdx).toBeGreaterThanOrEqual(0);
     expect(createIdx).toBeGreaterThan(lockIdx);
+  });
+});
+
+describe("まとめ取込は重複確認と登録を1つのロックの中で行う(@codex PR#456 4巡目 ①)", () => {
+  const bulk = {
+    ...baseBody,
+    owner: { name: "渡辺　一", nameKana: null, phone: null, email: null, currentAddress: "東京都港区1-1" },
+    externalLinkKey: "xlsx-0000000000000001",
+    requireNoDuplicates: true,
+  };
+
+  it("★まとめ取込用のロックを取ってから確認し、その後に作る(確認と作成の間に隙間を作らない)", async () => {
+    const res = await POST(req(bulk));
+    expect(res.status).toBe(200);
+    const lockAt = callOrder.indexOf("advisoryLock");
+    expect(lockAt).toBeGreaterThan(-1);
+    expect(advisoryLockValues[0]).toEqual(["paste-excel-bulk-commit"]);
+    expect(lockAt).toBeLessThan(callOrder.indexOf("dupLookup"));
+    expect(callOrder.indexOf("dupLookup")).toBeLessThan(callOrder.indexOf("property.create"));
+    expect(dupLookupInputs[0]).toMatchObject({
+      address: "東京都A区B1-2-3",
+      externalLinkKey: "xlsx-0000000000000001",
+      ownerName: "渡辺　一",
+      ownerCurrentAddress: "東京都港区1-1",
+    });
+  });
+
+  it("★同名の所有者・似た物件・確認しきれない候補があれば409(NEEDS_REVIEW)で、何も作らない", async () => {
+    for (const over of [
+      { ownerCandidates: [{ id: "o-1" }] },
+      { similar: [{ id: "p-1" }] },
+      { ownerCandidatesTruncated: true },
+    ]) {
+      dupLookupResult = { ...dupLookupResult, ownerCandidates: [], similar: [], ownerCandidatesTruncated: false, ...over };
+      const res = await POST(req(bulk));
+      expect(res.status).toBe(409);
+      expect((await res.json()).error.code).toBe("NEEDS_REVIEW");
+    }
+    expect(created.property).toBeUndefined();
+    expect(created.owner).toBeUndefined();
+  });
+
+  it("貼り付け画面(指定なし)は今までどおり: ロックも確認もしない(人が画面で判断済み)", async () => {
+    const { requireNoDuplicates: _omit, ...plain } = bulk;
+    void _omit;
+    const res = await POST(req(plain));
+    expect(res.status).toBe(200);
+    expect(callOrder).not.toContain("dupLookup");
+    expect(advisoryLockValues.some((v) => v[0] === "paste-excel-bulk-commit")).toBe(false);
   });
 });

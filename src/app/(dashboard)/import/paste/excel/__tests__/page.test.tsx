@@ -50,15 +50,12 @@ describe("Excel まとめ取込の画面", () => {
     expect(source).toContain('fetch("/api/import/paste/excel"');
   });
 
-  it("★登録の直前に見直しAPIを呼び、候補が出た行は登録しない(@codex PR#456 1巡目 ①)", () => {
-    const recheckAt = source.indexOf('fetch("/api/import/paste/recheck"');
-    const commitAt = source.indexOf('fetch("/api/import/paste/commit"');
-    expect(recheckAt).toBeGreaterThan(-1);
-    expect(recheckAt).toBeLessThan(commitAt);
-    expect(source).toContain("recheckOutcome(row.draft");
-    expect(source).toMatch(/if \(outcome\.kind !== "go"\) \{[\s\S]*?continue;/);
-    // 見直しに失敗したら登録へ進まない
-    expect(source).toMatch(/if \(!check\.ok\) throw/);
+  it("★重複の確認は登録APIの中に任せ(別の要求で確認→登録の隙間を作らない)、応答を読み分ける(@codex PR#456 4巡目 ①)", () => {
+    // 画面から別の要求で見直しを呼ばない(確認と作成の間に隙間ができる)。
+    expect(source).not.toContain('fetch("/api/import/paste/recheck"');
+    // 登録の本文は excelLeadCommitBody(requireNoDuplicates: true を含む)。
+    expect(source).toContain("excelLeadCommitBody(row)");
+    expect(source).toContain("commitOutcome(res.status");
   });
 
   it("まとめて登録するのは「登録できる」行だけ", () => {

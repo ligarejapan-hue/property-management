@@ -23,9 +23,7 @@ import {
 } from "@/components/import/excel-lead-table";
 import {
   excelLeadCommitBody,
-  excelLeadRecheckBody,
-  recheckOutcome,
-  type ExcelLeadRecheckResponse,
+  commitOutcome,
 } from "@/components/import/excel-lead-commit-body";
 
 /** 非2xx応答からエラーメッセージを取り出す(貼り付け画面と同じ姿勢)。 */
@@ -106,37 +104,17 @@ export default function ExcelLeadImportPage() {
       const row = targets[i];
       let result: ExcelLeadResult;
       try {
-        // ⚠**登録の直前に必ず見直す**(@codex PR#456 1巡目 ①)。下見は取込前の
-        //   DBに対する判定なので、前の行で作った所有者・物件や、他の人が
-        //   その後に登録したものが映っていない。候補が出た行は登録せず要確認へ。
-        // ⚠見直しに失敗したら登録しない(確認したつもりで通さない)。
-        const check = await fetch("/api/import/paste/recheck", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(excelLeadRecheckBody(row)),
-        });
-        if (!check.ok) throw new Error(`重複の確認ができませんでした（${await readApiErrorMessage(check)}）`);
-        const outcome = recheckOutcome(row.draft, (await check.json()) as ExcelLeadRecheckResponse);
-        if (outcome.kind !== "go") {
-          result = outcome;
-          const key = excelLeadRowKey(row);
-          setResults((prev) => ({ ...prev, [key]: result }));
-          setProgress(i + 1);
-          continue;
-        }
+        // ⚠重複の確認は**登録APIの中で作成と同じロックの内側**で行う
+        //   (requireNoDuplicates・@codex PR#456 1巡目 ①/4巡目 ①)。下見は取込前の
+        //   DBに対する判定なので、前の行や他の人の取込で作られた所有者・物件が
+        //   映っていない。確定の時点で候補が見つかった行は 409 NEEDS_REVIEW で
+        //   返り、要確認になる。
         const res = await fetch("/api/import/paste/commit", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(excelLeadCommitBody(row)),
         });
-        if (res.status === 409) {
-          result = { kind: "duplicate" };
-        } else if (!res.ok) {
-          result = { kind: "failed", message: await readApiErrorMessage(res) };
-        } else {
-          const data = (await res.json()) as { propertyId: string };
-          result = { kind: "created", propertyId: data.propertyId };
-        }
+        result = commitOutcome(res.status, await res.json().catch(() => null));
       } catch (e) {
         result = { kind: "failed", message: e instanceof Error ? e.message : "通信に失敗しました" };
       }
