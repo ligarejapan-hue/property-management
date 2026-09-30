@@ -81,6 +81,8 @@ describe("後片付けと書き込みが重なったとき", () => {
     const src = read("components/notifications/notice-provider.tsx");
     expect(src).toMatch(/switchMarkRef\.current = readSwitchMark\(\);/);
     expect(src).toMatch(/if \(readSwitchMark\(\) !== switchMarkRef\.current\) \{[\s\S]{0,80}return;\s*\}\s*if \(input\.bell !== false\)/);
+    // 順番を待ったあと、書く直前にも確かめる。
+    expect(src).toMatch(/withNoticeLock\(\(\) => \{\s*if \(switchedRef\.current \|\| readSwitchMark\(\) !== switchMarkRef\.current\) return;\s*saveNotices\(addNotice\(loadNotices\(/);
   });
 });
 
@@ -89,7 +91,7 @@ describe("後片付けと書き込みの間に割り込まれたとき(@codex #4
     const provider = read("components/notifications/notice-provider.tsx");
     expect(provider).toMatch(/mark: switchMarkRef\.current/);
     // 前の人のタブからは既読化でも書き換えない。
-    expect(provider).toMatch(/const markAllRead = useCallback\(\(\) => \{\s*[^\n]*\n\s*if \(switchedRef\.current \|\| readSwitchMark\(\) !== switchMarkRef\.current\) return;/);
+    expect(provider).toMatch(/const markAllRead = useCallback\(\(\) => \{\s*[^\n]*\n\s*withNoticeLock\(\(\) => \{\s*if \(switchedRef\.current \|\| readSwitchMark\(\) !== switchMarkRef\.current\) return;/);
     const store = read("lib/notifications/notice-store.ts");
     expect(store).toMatch(/noticesForMark\(memoryFallback, mark\)/);
     expect(store).toMatch(/const kept = noticesForMark\(source, mark\);/);

@@ -179,6 +179,26 @@ export function subscribeNotices(onChange: () => void): () => void {
   };
 }
 
+/**
+ * ベルの読み→足す→書くを、同じブラウザのほかのタブと1件ずつ順に行う(Web Locks)。
+ * 2つのタブがほぼ同時に知らせを足したとき、あとから書いた方が先の追加を上書きして
+ * 消さないため(@codex #462)。Web Locks が無い環境ではその場で行う。
+ */
+export const NOTICE_LOCK_NAME = "pm:notices";
+
+export function withNoticeLock(fn: () => void): void {
+  const locks = typeof navigator !== "undefined" ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
+  if (!locks || typeof locks.request !== "function") {
+    fn();
+    return;
+  }
+  try {
+    void locks.request(NOTICE_LOCK_NAME, async () => fn()).catch(() => {});
+  } catch {
+    fn();
+  }
+}
+
 /** 後片付けの合図(最後に片付けた時刻の文字列)。読めなければ null。 */
 export function readSwitchMark(): string | null {
   try {

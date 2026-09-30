@@ -21,6 +21,7 @@ import {
   saveNotices,
   serverNoticeSnapshot,
   subscribeNotices,
+  withNoticeLock,
   type Notice,
   type NoticeKind,
 } from "@/lib/notifications/notice-store";
@@ -149,24 +150,25 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (input.bell !== false) {
-      const next = addNotice(
-        loadNotices(now),
-        {
-          id: newId(),
-          kind: input.kind,
-          tag: input.tag,
-          message: input.body,
-          context: input.context,
-          url: input.url,
-          at: now,
-          read: false,
-          // 書いたときの合図を付ける。読む側は今の合図と違うものを出さないため、この確認と
-          // 書き込みの間にほかのタブが後片付けをしても、前の人のお知らせは見えない(@codex #462 P1)。
-          ...(switchMarkRef.current !== null ? { mark: switchMarkRef.current } : {}),
-        },
-        now,
-      );
-      saveNotices(next);
+      const notice: Notice = {
+        id: newId(),
+        kind: input.kind,
+        tag: input.tag,
+        message: input.body,
+        context: input.context,
+        url: input.url,
+        at: now,
+        read: false,
+        // 書いたときの合図を付ける。読む側は今の合図と違うものを出さないため、この確認と
+        // 書き込みの間にほかのタブが後片付けをしても、前の人のお知らせは見えない(@codex #462 P1)。
+        ...(switchMarkRef.current !== null ? { mark: switchMarkRef.current } : {}),
+      };
+      // ほかのタブと順番に読み→足す→書く(同時に足したとき片方が消えない・@codex #462)。
+      // 順番を待つ間に後片付けがあれば書かない。
+      withNoticeLock(() => {
+        if (switchedRef.current || readSwitchMark() !== switchMarkRef.current) return;
+        saveNotices(addNotice(loadNotices(Date.now()), notice, Date.now()));
+      });
     }
     if (input.osWhenHidden && document.visibilityState === "hidden") {
       const gen = genRef.current;
@@ -187,8 +189,10 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
 
   const markAllRead = useCallback(() => {
     // 後片付けを知らされたタブ(前の人のまま)からは、次の人のお知らせを書き換えない。
-    if (switchedRef.current || readSwitchMark() !== switchMarkRef.current) return;
-    saveNotices(markAllNoticesRead(loadNotices(Date.now())));
+    withNoticeLock(() => {
+      if (switchedRef.current || readSwitchMark() !== switchMarkRef.current) return;
+      saveNotices(markAllNoticesRead(loadNotices(Date.now())));
+    });
   }, []);
 
   const requestPermission = useCallback(async () => {

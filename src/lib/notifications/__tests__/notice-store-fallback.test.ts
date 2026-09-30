@@ -2,7 +2,15 @@
  * 保存できない環境(容量超過・保存の制限)でも、この画面の間はベルに出す(@codex #462)。
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { clearNoticeStorage, loadNotices, readNoticeSnapshot, saveNotices, type Notice } from "../notice-store";
+import {
+  addNotice,
+  clearNoticeStorage,
+  loadNotices,
+  readNoticeSnapshot,
+  saveNotices,
+  withNoticeLock,
+  type Notice,
+} from "../notice-store";
 
 const notice: Notice = { id: "a", kind: "edit_lock_lost", tag: "t", message: "m", at: 1, read: false };
 
@@ -87,5 +95,54 @@ describe("後片付けと重なった書き戻し(@codex #462 P1)", () => {
     saveNotices([{ ...notice, id: "b", at, mark: "200" }, { ...notice, id: "c", tag: "u", at, mark: "100" }]);
     expect(readNoticeSnapshot().map((n) => n.id)).toEqual(["b"]);
     expect(loadNotices(at).map((n) => n.id)).toEqual(["b"]);
+  });
+});
+
+describe("ほかのタブと同時に足したとき(@codex #462)", () => {
+  afterEach(() => {
+    delete (globalThis as { navigator?: unknown }).navigator;
+  });
+
+  it("Web Locks があれば読み→足す→書くを1件ずつ順に行う(先の追加を上書きしない)", async () => {
+    const stored = new Map<string, string>();
+    stubWindow({
+      getItem: (k: string) => stored.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        stored.set(k, v);
+      },
+      removeItem: (k: string) => {
+        stored.delete(k);
+      },
+    });
+    // 1本の列で順に処理する Web Locks の代わり。
+    let chain: Promise<unknown> = Promise.resolve();
+    const names: string[] = [];
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: {
+        locks: {
+          request: (name: string, cb: () => Promise<unknown>) => {
+            names.push(name);
+            const p = chain.then(cb);
+            chain = p.catch(() => {});
+            return p;
+          },
+        },
+      },
+    });
+    const at = Date.now();
+    withNoticeLock(() => saveNotices(addNotice(loadNotices(at), { ...notice, id: "x", tag: "x", at }, at)));
+    withNoticeLock(() => saveNotices(addNotice(loadNotices(at), { ...notice, id: "y", tag: "y", at }, at)));
+    await chain;
+    expect(names).toEqual(["pm:notices", "pm:notices"]);
+    expect(loadNotices(at).map((n) => n.id).sort()).toEqual(["x", "y"]);
+  });
+
+  it("Web Locks が無ければその場で行う", () => {
+    let ran = false;
+    withNoticeLock(() => {
+      ran = true;
+    });
+    expect(ran).toBe(true);
   });
 });
