@@ -50,6 +50,7 @@ import type { EditLockStatusResource } from "@/lib/edit-lock/status-controller";
 import { useEditScreenToken } from "@/hooks/use-edit-screen-token";
 import { editLockHeaders } from "@/lib/edit-lock/screen-token-client";
 import { EditLockBanner, EditLockHolderBanner, BAND as EDIT_LOCK_BAND } from "@/components/edit-lock/edit-lock-banner";
+import { EditLockNotices } from "@/components/notifications/edit-lock-notices";
 // canSubmitSave・shouldShowLockUnavailableNotice は保存可否の判断(決定層)。
 // Task 5(物件の編集ウィンドウ)が切り出し、Task 6 fix round 1 #3 で
 // src/lib/edit-lock/save-gate.ts へ移した(component module一式を巻き込まずに
@@ -1518,6 +1519,13 @@ function OwnerCard({
    * その人には**分ける導線だけ出さない**。
    */
   const canSplitCurrentAddress = editableFields.address && editableFields.zip;
+
+  // 通知 段階1(N2): 編集中に、開いた時点の値から変わった欄があるか(外れた知らせの一言だけに使う)。
+  const hasUnsavedOwnerInput =
+    editing &&
+    (Object.keys(form) as (keyof typeof form)[]).some(
+      (key) => form[key] !== ((po.owner as unknown as Record<string, unknown>)[key] ?? ""),
+    );
   const splitActive = addressSplit && canSplitCurrentAddress;
 
   const handleEdit = () => {
@@ -1759,6 +1767,14 @@ function OwnerCard({
             </div>
           )}
           <EditLockBanner state={lock.state} warnIdle={lock.warnIdle} />
+          {/* 通知 段階1(N1・N2): 別の画面を見ているときだけベル・OS の通知に出す。帯はそのまま */}
+          <EditLockNotices
+            state={lock.state}
+            warnIdle={lock.warnIdle}
+            resourceType="owner"
+            resourceId={po.ownerId}
+            hasUnsavedInput={hasUnsavedOwnerInput}
+          />
           {/* 複数物件紐づき警告 */}
           <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />

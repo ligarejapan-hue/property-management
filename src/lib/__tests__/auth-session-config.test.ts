@@ -91,8 +91,11 @@ describe("アイドルガード: 実際に効く延長/失効の配線(@codex #2
     // 直近操作あり時にセッション延長(素のfetchでendpointを叩く=ブロードキャストしない)。
     expect(guardSrc).toContain('fetch("/api/auth/session"');
     // getSession(broadcastする)は import しない=一時失敗でUIをログアウト化しない(@codex R4)。
+    // 通知 段階1: ログアウトは端末の通知を片付けてから signOut する窓口経由に一本化した
+    //   (中身は next-auth/react の signOut のみ・getSession は使わない)。
+    expect(guardSrc).not.toMatch(/import[^;]*\bgetSession\b/);
     expect(guardSrc).toMatch(
-      /import\s*\{\s*signOut\s*\}\s*from\s*"next-auth\/react"/,
+      /import\s*\{\s*signOutWithNotificationCleanup\s*\}\s*from\s*"@\/lib\/notifications\/logout"/,
     );
     // 操作検知イベントを購読している(内側スクロール対策で wheel/scroll も)。
     for (const ev of ["mousemove", "keydown", "scroll", "wheel", "touchstart"]) {

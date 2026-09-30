@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { signOut } from "next-auth/react";
+import { useEffect, useRef, useState } from "react";
 import {
   readSharedLastActivity,
   writeSharedLastActivity,
 } from "@/lib/session-activity";
 import { IDLE_TIMEOUT_MS } from "@/lib/idle-timeout";
+import {
+  IDLE_LOGOUT_CALLBACK_URL,
+  IDLE_WARN_OS_BODY,
+  IDLE_WARN_TITLE,
+  idlePhase,
+} from "@/lib/notifications/idle-warning";
+import { signOutWithNotificationCleanup } from "@/lib/notifications/logout";
+import { useNotices } from "@/components/notifications/notice-provider";
+import { IDLE_WARNING_DIALOG_CLASS, IdleLogoutDialog } from "./idle-logout-dialog";
 
 // 値の定義は src/lib/idle-timeout.ts に一本化した(edit-lock の rules.ts がサーバ側から
 // 参照するため。このコンポーネントの公開面("use client" の外から見える名前)は変えない)。
@@ -29,6 +37,10 @@ export { IDLE_TIMEOUT_MS };
  *   - 直近に操作があり、前回更新から REFRESH_INTERVAL_MS 以上経過 → getSession() で
  *     セッションendpointを叩き、JWT を回転させて cookie の有効期限を延長(スライド)。
  * - これにより「操作している間は切れない」「無操作 1 時間でログアウト」を実現する。
+ * - 通知 段階1(設計書 §4.3): 55分で予告ダイアログ(N3)を出す。別の画面を見ているときは
+ *   ベルに残し、許可があれば OS の通知も出す。ログアウト前に端末の通知を片付け、
+ *   無操作でのログアウトはログイン画面に理由を出す(`/login?reason=idle`)。
+ *   60分の規則・延長の仕組みは変えない(予告中の操作は今までどおり活動として延長される)。
  *
  * auth.ts 側は maxAge=1h・updateAge=5min。updateAge < REFRESH_INTERVAL なので
  * 更新のたびに確実に回転する。
@@ -36,6 +48,8 @@ export { IDLE_TIMEOUT_MS };
 export const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 操作中は最大5分ごとにセッションを延長
 const CHECK_INTERVAL_MS = 60 * 1000; // 1分ごとに判定
 const STORAGE_WRITE_THROTTLE_MS = 10 * 1000; // localStorage への書込は最大10秒に1回
+/** 予告(N3)の通知の印。取り下げるときも同じ印で閉じる。 */
+const IDLE_WARN_TAG = "idle-logout";
 // タブ間で最終操作時刻を共有する仕組みは @/lib/session-activity に集約(@codex #290 R2/R7)。
 
 export function IdleSessionGuard() {
@@ -43,6 +57,19 @@ export function IdleSessionGuard() {
   const lastActivityRef = useRef<number>(0);
   const lastRefreshRef = useRef<number>(0);
   const lastStorageWriteRef = useRef<number>(0);
+  const [warnDeadline, setWarnDeadline] = useState<number | null>(null);
+  /** 今回の予告で、別の画面向け(ベル・OS の通知)に知らせ済みか。 */
+  const warnedRef = useRef(false);
+  /** 予告中か(visibilitychange の処理から読む)。 */
+  const warnActiveRef = useRef(false);
+  const activityHandlerRef = useRef<() => void>(() => {});
+  const { notify, withdraw } = useNotices();
+  const notifyRef = useRef(notify);
+  const withdrawRef = useRef(withdraw);
+  useEffect(() => {
+    notifyRef.current = notify;
+    withdrawRef.current = withdraw;
+  }, [notify, withdraw]);
 
   useEffect(() => {
     // モック(NEXT_PUBLIC_USE_MOCK=true)は auth 自体をバイパスする(proxy.ts も同様)。
@@ -59,7 +86,7 @@ export function IdleSessionGuard() {
     const effectiveLast = storedLast > 0 ? storedLast : startNow;
     if (startNow - effectiveLast >= IDLE_TIMEOUT_MS) {
       // 既に無操作上限を超えている(バッファ窓でのリロード等)→ そのままログアウト。
-      void signOut({ callbackUrl: "/login" });
+      void signOutWithNotificationCleanup(IDLE_LOGOUT_CALLBACK_URL);
       return;
     }
     lastActivityRef.current = effectiveLast;
@@ -86,7 +113,7 @@ export function IdleSessionGuard() {
             // (管理者による無効化/削除・失効)。この確定時だけクライアントも即ログアウトして
             // 画面を揃える(@codex #290 R9)。JSON 解析失敗(data=undefined)は無視。
             if (data !== undefined && !hasSession) {
-              void signOut({ callbackUrl: "/login" });
+              void signOutWithNotificationCleanup("/login");
             }
           })
           .catch(() => {
@@ -95,7 +122,13 @@ export function IdleSessionGuard() {
       }
     };
 
-    const markActivity = () => {
+    const markActivity = (e?: Event) => {
+      // 予告ダイアログの中の操作(マウスの移動・「ログアウトする」へのタブ移動や押下)は
+      // 活動に数えない。数えるとボタンに届く前に予告が取り下げられてダイアログが消え、
+      // ログアウトを選べない(@codex #462)。延長は「続ける」・Esc の明示の操作だけ
+      // (IdleLogoutDialog の onContinue が activityHandlerRef を直接呼ぶ)。
+      const target = e?.target;
+      if (target instanceof Element && target.closest(`.${IDLE_WARNING_DIALOG_CLASS}`)) return;
       const now = Date.now();
       // @codex #290 R5(P1): スリープ/長時間の背景化で interval が境界(1時間)で発火しなかった
       // 場合、復帰後の最初の操作が古い最終操作時刻を上書きすると無操作の痕跡が消え、ログアウトが
@@ -106,10 +139,14 @@ export function IdleSessionGuard() {
         readSharedLastActivity(),
       );
       if (now - prevLastActivity >= IDLE_TIMEOUT_MS) {
-        void signOut({ callbackUrl: "/login" });
+        void signOutWithNotificationCleanup(IDLE_LOGOUT_CALLBACK_URL);
         return;
       }
       lastActivityRef.current = now;
+      // 操作があれば予告は取り下げる(延長された=5分後のログオフは起きない)。
+      // 共有の最終操作から見て予告の範囲だったなら、このタブの1分ごとの判定がまだ追いついて
+      // いなくても(裏のタブが先に OS の通知を出した)閉じる(@codex #462)。
+      withdrawWarning(idlePhase(now - prevLastActivity) === "warn");
       // 全タブへ共有(書込は throttle。頻発する mousemove で localStorage を叩き続けない)。
       if (now - lastStorageWriteRef.current >= STORAGE_WRITE_THROTTLE_MS) {
         lastStorageWriteRef.current = now;
@@ -120,6 +157,38 @@ export function IdleSessionGuard() {
       // 操作検知の時点で(前回更新が古ければ)延長を発火する。
       maybeRefreshSession(now);
     };
+    activityHandlerRef.current = markActivity;
+
+    // 予告を別の画面向け(ベル・OS の通知)に出す。画面を見ている間は出さず(ダイアログで足りる)、
+    // 予告中に別の画面へ移ったときにも出す(@codex #462)。1回の予告につき1回だけ。
+    // 予告を取り下げる。別の画面向けに出していた OS の通知も閉じる(延長されたのに
+    // 「5分後にログオフ」が残らないように・@codex #462)。ベルの記録は残す。
+    // OS の通知はほかのタブ(裏に回したタブ)が出したこともあるため、このタブで出したかに
+    // かかわらず、予告中だったら閉じる(予告はどのタブも同じ共有の最終操作から判定する)。
+    const withdrawWarning = (sharedWarn = false) => {
+      if (sharedWarn || warnedRef.current || warnActiveRef.current) withdrawRef.current(IDLE_WARN_TAG);
+      warnActiveRef.current = false;
+      warnedRef.current = false;
+      setWarnDeadline(null);
+    };
+
+    const notifyBackgroundWarning = () => {
+      if (warnedRef.current || !warnActiveRef.current) return;
+      if (document.visibilityState !== "hidden") return;
+      warnedRef.current = true;
+      notifyRef.current({
+        kind: "idle_logout_warn",
+        tag: IDLE_WARN_TAG,
+        title: IDLE_WARN_TITLE,
+        body: IDLE_WARN_OS_BODY,
+        url: window.location.pathname,
+        osWhenHidden: true,
+      });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") notifyBackgroundWarning();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     // 空(新規)のときだけ seed。既存の直近値は保持する(上の effectiveLast 判定を壊さない)。
     if (storedLast <= 0) writeSharedLastActivity(startNow);
 
@@ -138,7 +207,7 @@ export function IdleSessionGuard() {
       window.addEventListener(ev, markActivity, { passive: true, capture: true });
     }
 
-    const timer = window.setInterval(() => {
+    const check = () => {
       const now = Date.now();
       // 自タブと他タブ(localStorage)の最終操作のうち新しい方を採用=どのタブの操作も活動に数える。
       const lastActivity = Math.max(
@@ -149,8 +218,19 @@ export function IdleSessionGuard() {
 
       // 全タブで無操作が上限を超えたらログアウト。
       if (idleFor >= IDLE_TIMEOUT_MS) {
-        void signOut({ callbackUrl: "/login" });
+        void signOutWithNotificationCleanup(IDLE_LOGOUT_CALLBACK_URL);
         return;
+      }
+
+      // 55分を過ぎたら予告(N3)。画面ではダイアログ。別の画面を見ているとき(または予告中に
+      // 別の画面へ移ったとき・下の visibilitychange)は、ベルと OS の通知にも1回だけ出す。
+      if (idlePhase(idleFor) === "warn") {
+        warnActiveRef.current = true;
+        setWarnDeadline(lastActivity + IDLE_TIMEOUT_MS);
+        notifyBackgroundWarning();
+      } else {
+        // 他のタブで操作があった等で予告の範囲を外れたら取り下げる。
+        withdrawWarning();
       }
 
       // backup: 直近に操作があれば延長(通常は markActivity 側で即延長済み)。
@@ -158,15 +238,28 @@ export function IdleSessionGuard() {
       if (idleFor < REFRESH_INTERVAL_MS) {
         maybeRefreshSession(now);
       }
-    }, CHECK_INTERVAL_MS);
+    };
+    const timer = window.setInterval(check, CHECK_INTERVAL_MS);
+    // 開いた・戻った時点ですでに予告の範囲(55〜60分)なら、1分後の判定を待たずに予告を出す
+    // (残りが1分未満だと予告を見ないままログオフされるため・@codex #462)。
+    const firstCheck = window.setTimeout(check, 0);
 
     return () => {
       for (const ev of events) {
         window.removeEventListener(ev, markActivity, { capture: true });
       }
       window.clearInterval(timer);
+      window.clearTimeout(firstCheck);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
-  return null;
+  if (warnDeadline === null) return null;
+  return (
+    <IdleLogoutDialog
+      deadline={warnDeadline}
+      onContinue={() => activityHandlerRef.current()}
+      onLogout={() => void signOutWithNotificationCleanup("/login")}
+    />
+  );
 }

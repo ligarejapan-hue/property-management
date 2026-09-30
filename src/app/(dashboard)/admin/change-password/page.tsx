@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { PageHeader } from "@/components/ui/page-header";
-import { signOut } from "next-auth/react";
+import { signOutWithNotificationCleanup } from "@/lib/notifications/logout";
 import { Loader2 } from "lucide-react";
 
 export default function ChangePasswordPage() {
@@ -49,7 +49,8 @@ export default function ChangePasswordPage() {
       setSuccess(true);
       // Force re-login: destroy session and redirect to /login
       setTimeout(() => {
-        signOut({ callbackUrl: "/login" });
+        // 通知 段階1: 共用 PC で通知が残らないよう、片付けてからログアウトする。
+        void signOutWithNotificationCleanup("/login");
       }, 1500);
     } catch (err) {
       setError(err instanceof Error ? err.message : "エラーが発生しました");

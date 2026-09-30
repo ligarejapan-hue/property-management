@@ -9,7 +9,8 @@ import type { NextRequest } from "next/server";
 //   停止の書き込みは route 側の HMAC 署名検証+回数制限+Origin 検査で守る。
 // "/lp-assets/" = LP用写真の公開口(設計 2026-09-08 §2.3)。publicId(32hex乱数)だけで1枚を返し、
 // 一覧は取れない。どこかのLP型が参照している資産だけを返す(route 側で判定)。
-const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads", "/t/", "/u/", "/lp-assets/"];
+// "/icons/" = ホーム画面に追加したときのアイコン(通知 段階1)。静的な画像のみ・PII なし。
+const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads", "/t/", "/u/", "/lp-assets/", "/icons/"];
 
 // 完全一致で公開するパス。前方一致（startsWith）だと /api/health-xxx 等まで認証免除が
 // 広がってしまうため、必要最小の範囲（完全一致）でのみ公開する。
@@ -19,10 +20,15 @@ const PUBLIC_PATHS = ["/login", "/api/auth", "/_next", "/favicon.ico", "/uploads
 //   ここで素通しできないと、合言葉付きの cron 呼び出しも /login へ redirect され実行されない。
 // - /api/field-survey/sessions/auto-end-run: cron 駆動の巡回自動終了（無操作1時間）。
 //   同上（x-auto-end-secret で保護・未設定なら 503 dormant）。
+// - /sw.js・/manifest.webmanifest: 通知 段階1 の静的ファイル（下記）。
 const PUBLIC_EXACT_PATHS = [
   "/api/health",
   "/api/attachments/cleanup-run",
   "/api/field-survey/sessions/auto-end-run",
+  // 通知 段階1: Service Worker とホーム画面追加の設定。ログイン画面(未ログイン)でも
+  // 読む必要がある(共用 PC の通知の後片付け・iPhone のホーム画面追加)。中身は静的・PII なし。
+  "/sw.js",
+  "/manifest.webmanifest",
 ];
 
 export function isPublicPath(pathname: string): boolean {

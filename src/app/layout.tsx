@@ -36,6 +36,8 @@ export const metadata: Metadata = {
     template: "%s | 物件管理システム",
   },
   description: "不動産の物件・所有者・DM・現地調査を一元管理する社内システム",
+  // 通知 段階1: iPhone でホーム画面に追加したときのアイコン(manifest は src/app/manifest.ts)。
+  icons: { apple: "/icons/apple-touch-icon.png" },
 };
 
 export default function RootLayout({

@@ -3,6 +3,7 @@
 import { LogOut } from "lucide-react";
 import StatusBadge, { ROLE_INTENT } from "@/components/ui/status-badge";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { HeaderBell } from "@/components/notifications/header-bell";
 
 interface HeaderProps {
   userName: string;
@@ -31,6 +32,8 @@ export default function Header({ userName, userRole, onLogout }: HeaderProps) {
       </h1>
 
       <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+        {/* 通知 段階1: お知らせのベル(テーマ切替の左・スマホでは役職の左) */}
+        <HeaderBell />
         {/* モバイルではテーマ切替をメニュー(ドロワー)下部へ移し、ヘッダーを 1 行に保つ */}
         <div className="hidden sm:block">
           <ThemeToggle />
