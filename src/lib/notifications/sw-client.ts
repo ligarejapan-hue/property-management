@@ -113,10 +113,11 @@ export async function showOsNotification(input: {
 }
 
 /**
- * 取り下げた知らせの OS の通知を閉じる(同じ tag のもの)。Service Worker が無い・登録が無いときは
+ * 取り下げた知らせの OS の通知を閉じる(同じ tag・同じ世代のもの)。世代が今と違う依頼
+ * (前の人のまま開いていたタブ)は Service Worker が断る。Service Worker が無い・登録が無いときは
  * 初めから出ていないので何もしない。表示の依頼と同じ順番待ちで処理される。
  */
-export async function closeOsNotification(tag: string): Promise<boolean> {
+export async function closeOsNotification(tag: string, gen: number): Promise<boolean> {
   if (!hasServiceWorker() || !hasNotification()) return false;
   let reg: ServiceWorkerRegistration | undefined;
   try {
@@ -125,7 +126,7 @@ export async function closeOsNotification(tag: string): Promise<boolean> {
     return false;
   }
   if (!reg) return false;
-  const res = await ask(reg, { type: "close", tag });
+  const res = await ask(reg, { type: "close", tag, gen });
   return !!res?.ok;
 }
 

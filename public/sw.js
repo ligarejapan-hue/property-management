@@ -170,9 +170,15 @@ self.addEventListener("message", (event) => {
           reply({ ok: false });
           return;
         }
+        // 世代が今と違う(前の人のまま開いていたタブ)の依頼では、次の人の通知を閉じない。
+        const state = await readState();
+        if (data.gen !== state.gen) {
+          reply({ ok: false, stale: true });
+          return;
+        }
         const list = await self.registration.getNotifications({ tag: data.tag });
         for (const n of list) {
-          if (isOurs(n)) n.close();
+          if (isOurs(n) && n.data.gen === state.gen) n.close();
         }
         reply({ ok: true });
       }).catch(() => reply({ ok: false })),

@@ -100,7 +100,8 @@ describe("後片付けと書き込みの間に割り込まれたとき(@codex #4
 describe("予告を取り下げたとき(@codex #462)", () => {
   it("自動ログオフ: 延長されたら出していた OS の通知を閉じる", () => {
     const src = read("components/auth/idle-session-guard.tsx");
-    expect(src).toMatch(/const withdrawWarning = \(\) => \{\s*if \(warnedRef\.current\) withdrawRef\.current\(IDLE_WARN_TAG\);/);
+    // ほかのタブが出した通知も閉じるため、予告中なら(このタブで出していなくても)閉じる。
+    expect(src).toMatch(/const withdrawWarning = \(\) => \{\s*if \(warnedRef\.current \|\| warnActiveRef\.current\) withdrawRef\.current\(IDLE_WARN_TAG\);/);
     // 操作による延長と、ほかのタブの操作による取り下げの両方で通す。
     expect(src.match(/withdrawWarning\(\);/g)?.length).toBe(2);
   });
@@ -113,6 +114,15 @@ describe("予告を取り下げたとき(@codex #462)", () => {
   it("Service Worker は同じ順番待ちで、その印の通知だけを閉じる", () => {
     const sw = readFileSync(resolve(__dirname, "../../../../public/sw.js"), "utf-8");
     expect(sw).toMatch(/data\.type === "close"[\s\S]{0,200}enqueue\(/);
-    expect(sw).toMatch(/getNotifications\(\{ tag: data\.tag \}\)[\s\S]{0,80}if \(isOurs\(n\)\) n\.close\(\);/);
+    expect(sw).toMatch(/getNotifications\(\{ tag: data\.tag \}\)[\s\S]{0,80}if \(isOurs\(n\) && n\.data\.gen === state\.gen\) n\.close\(\);/);
+  });
+
+  it("前の人のまま開いていたタブからは閉じない(タブ側と Service Worker 側の両方で世代を確かめる)", () => {
+    const provider = read("components/notifications/notice-provider.tsx");
+    expect(provider).toMatch(
+      /const withdraw = useCallback\(\(tag: string\) => \{[\s\S]{0,200}if \(switchedRef\.current \|\| readSwitchMark\(\) !== switchMarkRef\.current\) return;\s*const gen = genRef\.current;\s*if \(gen === null\) return;\s*void closeOsNotification\(tag, gen\);/,
+    );
+    const sw = readFileSync(resolve(__dirname, "../../../../public/sw.js"), "utf-8");
+    expect(sw).toMatch(/data\.type === "close"[\s\S]{0,600}if \(data\.gen !== state\.gen\) \{\s*reply\(\{ ok: false, stale: true \}\);/);
   });
 });

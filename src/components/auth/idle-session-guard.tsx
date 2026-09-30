@@ -161,8 +161,10 @@ export function IdleSessionGuard() {
     // 予告中に別の画面へ移ったときにも出す(@codex #462)。1回の予告につき1回だけ。
     // 予告を取り下げる。別の画面向けに出していた OS の通知も閉じる(延長されたのに
     // 「5分後にログオフ」が残らないように・@codex #462)。ベルの記録は残す。
+    // OS の通知はほかのタブ(裏に回したタブ)が出したこともあるため、このタブで出したかに
+    // かかわらず、予告中だったら閉じる(予告はどのタブも同じ共有の最終操作から判定する)。
     const withdrawWarning = () => {
-      if (warnedRef.current) withdrawRef.current(IDLE_WARN_TAG);
+      if (warnedRef.current || warnActiveRef.current) withdrawRef.current(IDLE_WARN_TAG);
       warnActiveRef.current = false;
       warnedRef.current = false;
       setWarnDeadline(null);

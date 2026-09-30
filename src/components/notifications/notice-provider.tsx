@@ -177,7 +177,12 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const withdraw = useCallback((tag: string) => {
-    void closeOsNotification(tag);
+    // 後片付けを知らされたタブ(前の人のまま)からは閉じない。同じ tag の次の人の通知を
+    // 閉じないよう、世代も渡して Service Worker 側でも確かめる(@codex #462)。
+    if (switchedRef.current || readSwitchMark() !== switchMarkRef.current) return;
+    const gen = genRef.current;
+    if (gen === null) return;
+    void closeOsNotification(tag, gen);
   }, []);
 
   const markAllRead = useCallback(() => {
