@@ -48,6 +48,8 @@ export function EditLockNotices({
   const prevRef = useRef<EditLockSnapshot>({ kind: "idle", warnIdle: false });
   const pendingReturnRef = useRef<string | null>(null);
   const returnedAtRef = useRef(0);
+  /** 今回の予告(55分)を別の画面向け(ベル・OS の通知)に知らせ済みか。 */
+  const warnNotifiedRef = useRef(false);
   const unsavedRef = useRef(hasUnsavedInput);
   useEffect(() => {
     unsavedRef.current = hasUnsavedInput;
@@ -57,6 +59,7 @@ export function EditLockNotices({
     const next: EditLockSnapshot = { kind: state.kind, warnIdle };
     const event = editLockNoticeEvent(prevRef.current, next);
     prevRef.current = next;
+    if (!(next.kind === "mine" && next.warnIdle)) warnNotifiedRef.current = false;
     if (!event) return;
     const hidden = document.visibilityState === "hidden";
     const justReturned = !hidden && Date.now() - returnedAtRef.current < RETURN_WINDOW_MS;
@@ -65,6 +68,7 @@ export function EditLockNotices({
     const context = editLockContextLabel(resourceType);
     const url = window.location.pathname;
     if (event.type === "warn") {
+      warnNotifiedRef.current = true;
       notify({
         kind: "edit_lock_warn",
         tag: `edit-lock:warn:${resourceType}:${resourceId}`,
@@ -94,9 +98,25 @@ export function EditLockNotices({
   }, [state.kind, warnIdle, resourceType, resourceId, notify, toast]);
 
   // 画面に戻ったとき、見ていない間に外れていた理由をはっきり出す(§4.6 の 1)。
+  // 予告(帯)が出ている間に別の画面へ移ったときは、そのとき予告をベル・OS の通知に出す(@codex #462)。
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === "hidden") return;
+      if (document.visibilityState === "hidden") {
+        const snap = prevRef.current;
+        if (snap.kind === "mine" && snap.warnIdle && !warnNotifiedRef.current) {
+          warnNotifiedRef.current = true;
+          notify({
+            kind: "edit_lock_warn",
+            tag: `edit-lock:warn:${resourceType}:${resourceId}`,
+            title: EDIT_LOCK_WARN_TITLE,
+            body: EDIT_LOCK_WARN_BODY,
+            context: editLockContextLabel(resourceType),
+            url: window.location.pathname,
+            osWhenHidden: true,
+          });
+        }
+        return;
+      }
       returnedAtRef.current = Date.now();
       const body = pendingReturnRef.current;
       if (!body) return;
@@ -105,7 +125,7 @@ export function EditLockNotices({
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [toast]);
+  }, [toast, notify, resourceType, resourceId]);
 
   return null;
 }

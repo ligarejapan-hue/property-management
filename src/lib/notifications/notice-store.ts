@@ -89,7 +89,14 @@ export function unreadNoticeCount(list: Notice[]): number {
 
 // ---- ブラウザの保存領域(失敗しても画面は動かす) ----
 
+/**
+ * 保存できなかったとき(容量超過・保存の制限)の、この画面の間だけの控え。
+ * 保存できない環境でもベルには出す(@codex #462)。後片付けで消す。
+ */
+let memoryFallback: Notice[] | null = null;
+
 export function loadNotices(now: number): Notice[] {
+  if (memoryFallback) return memoryFallback;
   try {
     return parseNotices(window.localStorage.getItem(NOTICE_STORAGE_KEY), now);
   } catch {
@@ -100,8 +107,10 @@ export function loadNotices(now: number): Notice[] {
 export function saveNotices(list: Notice[]): void {
   try {
     window.localStorage.setItem(NOTICE_STORAGE_KEY, JSON.stringify(list));
+    memoryFallback = null;
   } catch {
-    /* private mode 等では保存しない(画面内の表示だけ) */
+    // private mode 等では保存しない(この画面の間だけ控えを持ってベルに出す)。
+    memoryFallback = list;
   }
   try {
     window.dispatchEvent(new Event(NOTICE_CHANGED_EVENT));
@@ -117,6 +126,7 @@ let cachedRaw: string | null = null;
 let cachedList: Notice[] = EMPTY;
 
 export function readNoticeSnapshot(): Notice[] {
+  if (memoryFallback) return memoryFallback;
   let raw: string | null = null;
   try {
     raw = window.localStorage.getItem(NOTICE_STORAGE_KEY);
@@ -148,6 +158,7 @@ export function subscribeNotices(onChange: () => void): () => void {
 
 /** 共用 PC 対策: ログアウト・ログイン画面で呼ぶ。 */
 export function clearNoticeStorage(): void {
+  memoryFallback = null;
   try {
     window.localStorage.removeItem(NOTICE_STORAGE_KEY);
     window.localStorage.setItem(NOTICE_SWITCH_KEY, String(Date.now()));

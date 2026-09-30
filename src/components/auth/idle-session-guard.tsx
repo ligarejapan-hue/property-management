@@ -56,7 +56,10 @@ export function IdleSessionGuard() {
   const lastRefreshRef = useRef<number>(0);
   const lastStorageWriteRef = useRef<number>(0);
   const [warnDeadline, setWarnDeadline] = useState<number | null>(null);
+  /** 今回の予告で、別の画面向け(ベル・OS の通知)に知らせ済みか。 */
   const warnedRef = useRef(false);
+  /** 予告中か(visibilitychange の処理から読む)。 */
+  const warnActiveRef = useRef(false);
   const activityHandlerRef = useRef<() => void>(() => {});
   const { notify } = useNotices();
   const notifyRef = useRef(notify);
@@ -137,6 +140,7 @@ export function IdleSessionGuard() {
       }
       lastActivityRef.current = now;
       // 操作があれば予告は取り下げる(延長された=5分後のログオフは起きない)。
+      warnActiveRef.current = false;
       warnedRef.current = false;
       setWarnDeadline(null);
       // 全タブへ共有(書込は throttle。頻発する mousemove で localStorage を叩き続けない)。
@@ -150,6 +154,26 @@ export function IdleSessionGuard() {
       maybeRefreshSession(now);
     };
     activityHandlerRef.current = markActivity;
+
+    // 予告を別の画面向け(ベル・OS の通知)に出す。画面を見ている間は出さず(ダイアログで足りる)、
+    // 予告中に別の画面へ移ったときにも出す(@codex #462)。1回の予告につき1回だけ。
+    const notifyBackgroundWarning = () => {
+      if (warnedRef.current || !warnActiveRef.current) return;
+      if (document.visibilityState !== "hidden") return;
+      warnedRef.current = true;
+      notifyRef.current({
+        kind: "idle_logout_warn",
+        tag: "idle-logout",
+        title: IDLE_WARN_TITLE,
+        body: IDLE_WARN_OS_BODY,
+        url: window.location.pathname,
+        osWhenHidden: true,
+      });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") notifyBackgroundWarning();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     // 空(新規)のときだけ seed。既存の直近値は保持する(上の effectiveLast 判定を壊さない)。
     if (storedLast <= 0) writeSharedLastActivity(startNow);
 
@@ -183,24 +207,15 @@ export function IdleSessionGuard() {
         return;
       }
 
-      // 55分を過ぎたら予告(N3)。別の画面を見ているときはベルと OS の通知にも出す(1回だけ)。
+      // 55分を過ぎたら予告(N3)。画面ではダイアログ。別の画面を見ているとき(または予告中に
+      // 別の画面へ移ったとき・下の visibilitychange)は、ベルと OS の通知にも1回だけ出す。
       if (idlePhase(idleFor) === "warn") {
+        warnActiveRef.current = true;
         setWarnDeadline(lastActivity + IDLE_TIMEOUT_MS);
-        if (!warnedRef.current) {
-          warnedRef.current = true;
-          const hidden = document.visibilityState === "hidden";
-          notifyRef.current({
-            kind: "idle_logout_warn",
-            tag: "idle-logout",
-            title: IDLE_WARN_TITLE,
-            body: IDLE_WARN_OS_BODY,
-            url: window.location.pathname,
-            bell: hidden,
-            osWhenHidden: true,
-          });
-        }
+        notifyBackgroundWarning();
       } else {
         // 他のタブで操作があった等で予告の範囲を外れたら取り下げる。
+        warnActiveRef.current = false;
         warnedRef.current = false;
         setWarnDeadline(null);
       }
@@ -217,6 +232,7 @@ export function IdleSessionGuard() {
         window.removeEventListener(ev, markActivity, { capture: true });
       }
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 

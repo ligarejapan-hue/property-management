@@ -62,3 +62,16 @@ describe("共用 PC で前の人のまま開いていたタブ", () => {
     expect(src).toMatch(/removeItem\(NOTICE_STORAGE_KEY\);\s*window\.localStorage\.setItem\(NOTICE_SWITCH_KEY/);
   });
 });
+
+describe("予告が出たあとで別の画面へ移ったとき", () => {
+  it("自動ログオフの予告: 別の画面へ移ったときにもベル・OS の通知に1回出す", () => {
+    const src = read("components/auth/idle-session-guard.tsx");
+    expect(src).toMatch(/const onVisibility = \(\) => \{\s*if \(document\.visibilityState === "hidden"\) notifyBackgroundWarning\(\);/);
+    expect(src).toMatch(/const notifyBackgroundWarning = \(\) => \{\s*if \(warnedRef\.current \|\| !warnActiveRef\.current\) return;\s*if \(document\.visibilityState !== "hidden"\) return;/);
+  });
+
+  it("編集権限の予告: 帯が出ている間に別の画面へ移ったらベル・OS の通知に出す", () => {
+    const src = read("components/notifications/edit-lock-notices.tsx");
+    expect(src).toMatch(/snap\.kind === "mine" && snap\.warnIdle && !warnNotifiedRef\.current/);
+  });
+});
