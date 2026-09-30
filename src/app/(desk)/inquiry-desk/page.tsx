@@ -21,6 +21,7 @@ import { DESK_OPEN_COUNT_EVENT } from "@/components/agent-inquiry/desk-shell";
 import { DeskAccessContext, makeDeskAccess } from "@/components/agent-inquiry/desk-access";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { hasPermission } from "@/lib/permissions";
+import { notifyInquiryChanged } from "@/lib/agent-inquiry/desk-sync";
 
 /** 受付の窓(設計 2026-09-28 §2.1)。上から 今日・明日の内見 → 登録フォーム → 一覧(広い画面は右列)。 */
 export default function InquiryDeskPage() {
@@ -105,8 +106,12 @@ export default function InquiryDeskPage() {
   }, []);
 
   // 読み直しの合図(保存・変更のたびに1つ進める)。取得は下の effect がまとめて行う。
+  // メイン画面(物件の反響欄・ホームの件数)にも「変わった」と知らせる。
   const [reloadKey, setReloadKey] = useState(0);
-  const reloadAll = useCallback(() => setReloadKey((k) => k + 1), []);
+  const reloadAll = useCallback(() => {
+    setReloadKey((k) => k + 1);
+    notifyInquiryChanged();
+  }, []);
 
   // 一覧の世代(タブ・自分の担当だけ・読み直しで進む)。もっと見るの応答が古い世代なら捨てる。
   const listGenRef = useRef(0);

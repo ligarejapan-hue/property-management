@@ -27,6 +27,7 @@ import {
   Image as ImageIcon,
   Inbox,
   Tags,
+  BookUser,
 } from "lucide-react";
 import { canSee, type AppRole } from "@/lib/nav/roles";
 
@@ -74,6 +75,8 @@ export const SIDEBAR_GROUPS: NavGroup[] = [
         external: true,
         windowName: "pm-inquiry-desk",
       },
+      // 業者の名簿(設計 2026-09-28 §2.3)。反響の受付と同じく全員が使う。こちらはメイン画面の中で開く。
+      { label: "業者の名簿", href: "/agents", icon: ic(BookUser), minRole: "field_staff" },
     ],
   },
   {

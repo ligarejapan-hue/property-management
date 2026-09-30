@@ -7,6 +7,7 @@ import { requireAgentInquiry } from "@/lib/agent-inquiry/guard";
 import { listAgents, searchAgents } from "@/lib/agent-inquiry/agent-search";
 import { agentCreateSchema, normalizeAgentInput } from "@/lib/agent-inquiry/validators";
 import { inquiryAuditDetail } from "@/lib/agent-inquiry/audit-detail";
+import { hasPermission } from "@/lib/permissions";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -16,14 +17,17 @@ const NO_STORE = { "Cache-Control": "no-store" };
  */
 export async function GET(request: Request) {
   try {
-    await requireAgentInquiry("read");
+    const { perms } = await requireAgentInquiry("read");
     const sp = new URL(request.url).searchParams;
     if (sp.get("list") === "1") {
       const cursorRaw = sp.get("cursor");
       const cursor = cursorRaw ? z.string().uuid().parse(cursorRaw) : undefined;
-      return NextResponse.json(await listAgents({ archived: sp.get("archived") === "1", cursor }), {
-        headers: NO_STORE,
-      });
+      const page = await listAgents({ archived: sp.get("archived") === "1", cursor });
+      // 名簿の画面は、編集・しまうを出すかどうかをこの値で決める(画面で権限表を読まない)。
+      return NextResponse.json(
+        { ...page, canWrite: hasPermission(perms, "agent_inquiry", "write") },
+        { headers: NO_STORE },
+      );
     }
     const q = sp.get("q") ?? "";
     return NextResponse.json({ agents: await searchAgents(q) }, { headers: NO_STORE });

@@ -145,4 +145,21 @@ describe("業者 API", () => {
     await PATCH(json("PATCH", { isArchived: true, version: 1 }), ctx);
     expect(pm.agent.updateMany).toHaveBeenCalledWith({ where: { id: AID, version: 1 }, data: { isArchived: true, version: { increment: 1 } } });
   });
+  it("名簿の一覧・詳細は、書ける人かどうか(canWrite)を返す", async () => {
+    grant("read");
+    const list = await (await SEARCH(new Request("http://x/api/agents?list=1"))).json();
+    expect(list.canWrite).toBe(false);
+    pm.agent.findUnique.mockResolvedValueOnce({ id: AID, companyName: "x", version: 1 });
+    const detail = await (await DETAIL(new Request("http://x/api/agents/" + AID), ctx)).json();
+    expect(detail.canWrite).toBe(false);
+
+    grant("read", "write");
+    expect((await (await SEARCH(new Request("http://x/api/agents?list=1"))).json()).canWrite).toBe(true);
+    pm.agent.findUnique.mockResolvedValueOnce({ id: AID, companyName: "x", version: 1 });
+    expect((await (await DETAIL(new Request("http://x/api/agents/" + AID), ctx)).json()).canWrite).toBe(true);
+  });
+  it("検索(q=)の応答の形は変えない(受付の窓が使っている)", async () => {
+    const body = await (await SEARCH(new Request("http://x/api/agents?q=" + encodeURIComponent("不動産")))).json();
+    expect(Object.keys(body)).toEqual(["agents"]);
+  });
 });

@@ -7,6 +7,7 @@ import { requireAgentInquiry, VERSION_CONFLICT_MESSAGE } from "@/lib/agent-inqui
 import { agentUpdateSchema, normalizeAgentInput } from "@/lib/agent-inquiry/validators";
 import { inquiryAuditDetail } from "@/lib/agent-inquiry/audit-detail";
 import { DESK_PROPERTY_SELECT, toDeskProperty } from "@/lib/agent-inquiry/desk-property";
+import { hasPermission } from "@/lib/permissions";
 
 type Ctx = { params: Promise<{ id: string }> };
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -17,7 +18,7 @@ const HISTORY_PAGE = 50;
 /** 業者の詳細+その業者からの反響(新しい順・ページ送り・物件は許可リストの形)。 */
 export async function GET(request: Request, ctx: Ctx) {
   try {
-    await requireAgentInquiry("read");
+    const { perms } = await requireAgentInquiry("read");
     const id = await idOf(ctx);
     const cursorRaw = new URL(request.url).searchParams.get("cursor");
     const cursor = cursorRaw ? z.string().uuid().parse(cursorRaw) : undefined;
@@ -40,7 +41,13 @@ export async function GET(request: Request, ctx: Ctx) {
     });
     const page = inquiries.slice(0, HISTORY_PAGE).map(({ property, ...q }) => ({ ...q, property: toDeskProperty(property) }));
     return NextResponse.json(
-      { agent, inquiries: page, nextCursor: inquiries.length > HISTORY_PAGE ? page[page.length - 1].id : null },
+      {
+        agent,
+        inquiries: page,
+        nextCursor: inquiries.length > HISTORY_PAGE ? page[page.length - 1].id : null,
+        // 詳細の画面は、編集・しまう/戻すを出すかどうかをこの値で決める。
+        canWrite: hasPermission(perms, "agent_inquiry", "write"),
+      },
       { headers: NO_STORE },
     );
   } catch (error) {

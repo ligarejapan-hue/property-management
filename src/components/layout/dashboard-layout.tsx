@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
 import { usePathname } from "next/navigation";
+import { MAIN_WINDOW_NAME, windowNameFor } from "@/lib/agent-inquiry/main-view";
 import { useSession } from "next-auth/react";
 import { signOutWithNotificationCleanup } from "@/lib/notifications/logout";
 import Sidebar from "./sidebar";
@@ -15,6 +17,13 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const { data: session, status } = useSession();
+
+  // 受付の窓の「メイン画面で物件を開く」(target="pm-main")が、この窓に開くようにする。
+  // 名前が空の窓だけ名乗る(受付の窓として開いた窓をメイン画面と呼ばない)。
+  useEffect(() => {
+    const name = windowNameFor(window.name, MAIN_WINDOW_NAME);
+    if (name) window.name = name;
+  }, []);
 
   // セッション取得が終わるまで/失敗して未認証になった時に、役割を "VIEWER" と誤決定しない。
   // 誤決定すると管理者が一瞬「閲覧者」に降格して管理メニューが消え、無限スピナーのようにも見える(A3 UI総点検)。
