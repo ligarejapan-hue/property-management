@@ -7,7 +7,11 @@
 -- 制約:
 --   - CONCURRENTLY は明示的な transaction block (BEGIN/COMMIT) 内で実行できない。
 --     このファイルには BEGIN/COMMIT を置かず、文はこの1つだけにする。
---   - 失敗すると INVALID 状態の index が残ることがある。その場合は手動で
---     `DROP INDEX CONCURRENTLY "dm_inquiries_submitted_at_idx";` を実行してから再適用する。
+--   - 失敗すると INVALID 状態の index が残ることがあり、Prisma はこの migration を「失敗」と
+--     記録する(そのままでは次の `prisma migrate deploy` も止まる)。戻し方は次の順:
+--       1. `DROP INDEX CONCURRENTLY IF EXISTS "dm_inquiries_submitted_at_idx";`
+--       2. `npx prisma migrate resolve --rolled-back 20260930110000_add_dm_inquiries_submitted_at_index`
+--       3. `npx prisma migrate deploy` をやり直す
+--     (索引が無くてもアプリは動く=確認が遅くなるだけ。急いで戻す必要はない。)
 
 CREATE INDEX CONCURRENTLY "dm_inquiries_submitted_at_idx" ON "dm_inquiries"("submitted_at");

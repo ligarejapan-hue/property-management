@@ -44,6 +44,9 @@ describe("申込者への受付メールのスキーマ", () => {
     const statements = indexSql.split("\n").filter((l) => l.trim() !== "" && !l.trim().startsWith("--"));
     expect(statements).toHaveLength(1);
     expect(indexSql).not.toMatch(/^\s*(BEGIN|COMMIT|DROP|UPDATE|DELETE|ALTER)\b/im);
+    // 失敗したときの戻し方(索引を消すだけでは Prisma の記録が「失敗」のまま残り、次の反映が止まる)。
+    expect(indexSql).toContain('DROP INDEX CONCURRENTLY IF EXISTS "dm_inquiries_submitted_at_idx"');
+    expect(indexSql).toContain("prisma migrate resolve --rolled-back 20260930110000_add_dm_inquiries_submitted_at_index");
   });
 
   it("重複の確認は受付日時の下限で絞っている(索引が効く形)", () => {
