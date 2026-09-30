@@ -34,7 +34,8 @@ export function IdleLogoutDialog({
       onClose={onContinue}
       footer={
         <>
-          <Button variant="secondary" onClick={onLogout}>
+          {/* data-idle-logout-action: この操作は IdleSessionGuard が活動(=延長)に数えない */}
+          <Button variant="secondary" onClick={onLogout} data-idle-logout-action="">
             ログアウトする
           </Button>
           <Button onClick={onContinue}>続ける</Button>

@@ -115,7 +115,11 @@ export function IdleSessionGuard() {
       }
     };
 
-    const markActivity = () => {
+    const markActivity = (e?: Event) => {
+      // 予告ダイアログの「ログアウトする」への操作は活動に数えない(数えると押した瞬間に
+      // 予告が取り下げられてダイアログが消え、ログアウトが実行されない・@codex #462)。
+      const target = e?.target;
+      if (target instanceof Element && target.closest("[data-idle-logout-action]")) return;
       const now = Date.now();
       // @codex #290 R5(P1): スリープ/長時間の背景化で interval が境界(1時間)で発火しなかった
       // 場合、復帰後の最初の操作が古い最終操作時刻を上書きすると無操作の痕跡が消え、ログアウトが

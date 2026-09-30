@@ -50,6 +50,11 @@ export function editLockLostBody(reason: EditLockLostReason): string {
   }
 }
 
+/** 保存前の入力があるとき「保存されていない入力があります」を足す(設計書 §2 N2)。 */
+export function withUnsavedInputNote(body: string, hasUnsavedInput: boolean): string {
+  return hasUnsavedInput ? `${body}。保存されていない入力があります` : body;
+}
+
 export function editLockContextLabel(resourceType: "property" | "owner"): string {
   return resourceType === "property" ? "物件の編集" : "所有者の編集";
 }

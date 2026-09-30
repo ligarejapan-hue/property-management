@@ -2,7 +2,7 @@
  * 編集ロックの変わり目 → N1・N2(通知 段階1・設計書 §4.2)。
  */
 import { describe, expect, it } from "vitest";
-import { editLockLostBody, editLockNoticeEvent } from "../edit-lock-notice";
+import { editLockLostBody, editLockNoticeEvent, withUnsavedInputNote } from "../edit-lock-notice";
 
 describe("editLockNoticeEvent", () => {
   it("55分の予告が立った瞬間だけ warn(続けて立っている間は出さない)", () => {
@@ -26,5 +26,12 @@ describe("editLockNoticeEvent", () => {
     for (const r of ["expired", "force_released", "taken", "deleted"] as const) {
       expect(editLockLostBody(r)).not.toMatch(/さん/);
     }
+  });
+});
+
+describe("withUnsavedInputNote", () => {
+  it("保存前の入力があるときだけ「保存されていない入力があります」を足す(設計書 §2 N2)", () => {
+    expect(withUnsavedInputNote("編集権限が外れました", true)).toBe("編集権限が外れました。保存されていない入力があります");
+    expect(withUnsavedInputNote("編集権限が外れました", false)).toBe("編集権限が外れました");
   });
 });

@@ -391,6 +391,11 @@ export default function PropertyEditForm({
   onSaved,
 }: PropertyEditFormProps) {
   const [values, setValues] = useState<Record<string, string>>({});
+  // 通知 段階1(N2): 開いた時点の値から変わった欄があるか(外れた知らせの一言だけに使う)。
+  const hasUnsavedInput = Object.entries(values).some(([key, v]) => {
+    const raw = (property as unknown as Record<string, unknown>)[key];
+    return v !== (raw != null ? String(raw) : "");
+  });
   // 住所補完の user-edit signal（Codex P2-G）。住所 input 直接編集時だけ true。
   const [addressEdited, setAddressEdited] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -640,7 +645,13 @@ export default function PropertyEditForm({
           )}
           <EditLockBanner state={lock.state} warnIdle={lock.warnIdle} />
           {/* 通知 段階1(N1・N2): 別の画面を見ているときだけベル・OS の通知に出す。帯はそのまま */}
-          <EditLockNotices state={lock.state} warnIdle={lock.warnIdle} resourceType="property" resourceId={property.id} />
+          <EditLockNotices
+            state={lock.state}
+            warnIdle={lock.warnIdle}
+            resourceType="property"
+            resourceId={property.id}
+            hasUnsavedInput={hasUnsavedInput}
+          />
           {error && (
             <div className="mb-4 flex items-center gap-2 rounded-md border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-300">
               <AlertTriangle className="h-4 w-4 shrink-0" />
