@@ -48,6 +48,8 @@ export { IDLE_TIMEOUT_MS };
 export const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 操作中は最大5分ごとにセッションを延長
 const CHECK_INTERVAL_MS = 60 * 1000; // 1分ごとに判定
 const STORAGE_WRITE_THROTTLE_MS = 10 * 1000; // localStorage への書込は最大10秒に1回
+/** 予告(N3)の通知の印。取り下げるときも同じ印で閉じる。 */
+const IDLE_WARN_TAG = "idle-logout";
 // タブ間で最終操作時刻を共有する仕組みは @/lib/session-activity に集約(@codex #290 R2/R7)。
 
 export function IdleSessionGuard() {
@@ -61,11 +63,13 @@ export function IdleSessionGuard() {
   /** 予告中か(visibilitychange の処理から読む)。 */
   const warnActiveRef = useRef(false);
   const activityHandlerRef = useRef<() => void>(() => {});
-  const { notify } = useNotices();
+  const { notify, withdraw } = useNotices();
   const notifyRef = useRef(notify);
+  const withdrawRef = useRef(withdraw);
   useEffect(() => {
     notifyRef.current = notify;
-  }, [notify]);
+    withdrawRef.current = withdraw;
+  }, [notify, withdraw]);
 
   useEffect(() => {
     // モック(NEXT_PUBLIC_USE_MOCK=true)は auth 自体をバイパスする(proxy.ts も同様)。
@@ -140,9 +144,7 @@ export function IdleSessionGuard() {
       }
       lastActivityRef.current = now;
       // 操作があれば予告は取り下げる(延長された=5分後のログオフは起きない)。
-      warnActiveRef.current = false;
-      warnedRef.current = false;
-      setWarnDeadline(null);
+      withdrawWarning();
       // 全タブへ共有(書込は throttle。頻発する mousemove で localStorage を叩き続けない)。
       if (now - lastStorageWriteRef.current >= STORAGE_WRITE_THROTTLE_MS) {
         lastStorageWriteRef.current = now;
@@ -157,13 +159,22 @@ export function IdleSessionGuard() {
 
     // 予告を別の画面向け(ベル・OS の通知)に出す。画面を見ている間は出さず(ダイアログで足りる)、
     // 予告中に別の画面へ移ったときにも出す(@codex #462)。1回の予告につき1回だけ。
+    // 予告を取り下げる。別の画面向けに出していた OS の通知も閉じる(延長されたのに
+    // 「5分後にログオフ」が残らないように・@codex #462)。ベルの記録は残す。
+    const withdrawWarning = () => {
+      if (warnedRef.current) withdrawRef.current(IDLE_WARN_TAG);
+      warnActiveRef.current = false;
+      warnedRef.current = false;
+      setWarnDeadline(null);
+    };
+
     const notifyBackgroundWarning = () => {
       if (warnedRef.current || !warnActiveRef.current) return;
       if (document.visibilityState !== "hidden") return;
       warnedRef.current = true;
       notifyRef.current({
         kind: "idle_logout_warn",
-        tag: "idle-logout",
+        tag: IDLE_WARN_TAG,
         title: IDLE_WARN_TITLE,
         body: IDLE_WARN_OS_BODY,
         url: window.location.pathname,
@@ -215,9 +226,7 @@ export function IdleSessionGuard() {
         notifyBackgroundWarning();
       } else {
         // 他のタブで操作があった等で予告の範囲を外れたら取り下げる。
-        warnActiveRef.current = false;
-        warnedRef.current = false;
-        setWarnDeadline(null);
+        withdrawWarning();
       }
 
       // backup: 直近に操作があれば延長(通常は markActivity 側で即延長済み)。

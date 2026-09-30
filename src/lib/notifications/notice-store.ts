@@ -25,6 +25,12 @@ export interface Notice {
   url?: string;
   at: number;
   read: boolean;
+  /**
+   * 書いたときの後片付けの合図(`NOTICE_SWITCH_KEY` の値。無ければ付けない)。
+   * 読むときに今の合図と違うものは出さない。後片付けと重なって前の人のタブが書き戻しても、
+   * 次の人には見えない(@codex #462 P1)。
+   */
+  mark?: string;
 }
 
 export const NOTICE_STORAGE_KEY = "pm:notices:v1";
@@ -51,6 +57,7 @@ function isNotice(v: unknown): v is Notice {
     typeof n.read === "boolean" &&
     KINDS.includes(n.kind as NoticeKind) &&
     (n.context === undefined || typeof n.context === "string") &&
+    (n.mark === undefined || typeof n.mark === "string") &&
     (n.url === undefined || (typeof n.url === "string" && n.url.startsWith("/") && !n.url.startsWith("//")))
   );
 }
@@ -79,6 +86,12 @@ export function addNotice(list: Notice[], notice: Notice, now: number): Notice[]
     .slice(0, NOTICE_MAX);
 }
 
+/** 今の後片付けの合図(`mark`)で書かれたものだけを残す。 */
+export function noticesForMark(list: Notice[], mark: string | null): Notice[] {
+  const kept = list.filter((n) => (n.mark ?? null) === mark);
+  return kept.length === list.length ? list : kept;
+}
+
 export function markAllNoticesRead(list: Notice[]): Notice[] {
   return list.map((n) => (n.read ? n : { ...n, read: true }));
 }
@@ -96,9 +109,10 @@ export function unreadNoticeCount(list: Notice[]): number {
 let memoryFallback: Notice[] | null = null;
 
 export function loadNotices(now: number): Notice[] {
-  if (memoryFallback) return memoryFallback;
+  const mark = readSwitchMark();
+  if (memoryFallback) return noticesForMark(memoryFallback, mark);
   try {
-    return parseNotices(window.localStorage.getItem(NOTICE_STORAGE_KEY), now);
+    return noticesForMark(parseNotices(window.localStorage.getItem(NOTICE_STORAGE_KEY), now), mark);
   } catch {
     return [];
   }
@@ -123,19 +137,28 @@ export function saveNotices(list: Notice[]): void {
 
 const EMPTY: Notice[] = [];
 let cachedRaw: string | null = null;
+let cachedMark: string | null = null;
+let cachedSource: Notice[] | null = null;
 let cachedList: Notice[] = EMPTY;
 
 export function readNoticeSnapshot(): Notice[] {
-  if (memoryFallback) return memoryFallback;
+  const mark = readSwitchMark();
+  let source: Notice[] | null = memoryFallback;
   let raw: string | null = null;
-  try {
-    raw = window.localStorage.getItem(NOTICE_STORAGE_KEY);
-  } catch {
-    return EMPTY;
+  if (!source) {
+    try {
+      raw = window.localStorage.getItem(NOTICE_STORAGE_KEY);
+    } catch {
+      return EMPTY;
+    }
   }
-  if (raw !== cachedRaw) {
+  if (source !== cachedSource || raw !== cachedRaw || mark !== cachedMark) {
+    cachedSource = source;
     cachedRaw = raw;
-    cachedList = raw ? parseNotices(raw, Date.now()) : EMPTY;
+    cachedMark = mark;
+    if (!source) source = raw ? parseNotices(raw, Date.now()) : EMPTY;
+    const kept = noticesForMark(source, mark);
+    cachedList = kept.length ? kept : EMPTY;
   }
   return cachedList;
 }
@@ -146,7 +169,7 @@ export function serverNoticeSnapshot(): Notice[] {
 
 export function subscribeNotices(onChange: () => void): () => void {
   const onStorage = (e: StorageEvent) => {
-    if (e.key === null || e.key === NOTICE_STORAGE_KEY) onChange();
+    if (e.key === null || e.key === NOTICE_STORAGE_KEY || e.key === NOTICE_SWITCH_KEY) onChange();
   };
   window.addEventListener(NOTICE_CHANGED_EVENT, onChange);
   window.addEventListener("storage", onStorage);

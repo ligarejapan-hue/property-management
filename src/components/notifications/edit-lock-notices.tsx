@@ -44,7 +44,7 @@ export function EditLockNotices({
   /** 保存前の入力があるか(外れた知らせに「保存されていない入力があります」を足す)。 */
   hasUnsavedInput?: boolean;
 }) {
-  const { notify, toast } = useNotices();
+  const { notify, toast, withdraw } = useNotices();
   const prevRef = useRef<EditLockSnapshot>({ kind: "idle", warnIdle: false });
   const pendingReturnRef = useRef<string | null>(null);
   const returnedAtRef = useRef(0);
@@ -59,7 +59,12 @@ export function EditLockNotices({
     const next: EditLockSnapshot = { kind: state.kind, warnIdle };
     const event = editLockNoticeEvent(prevRef.current, next);
     prevRef.current = next;
-    if (!(next.kind === "mine" && next.warnIdle)) warnNotifiedRef.current = false;
+    if (!(next.kind === "mine" && next.warnIdle) && warnNotifiedRef.current) {
+      // 予告が終わった(延長された・外れた)ので、別の画面向けに出した予告の OS の通知を閉じる
+      // (@codex #462)。外れたときは下で外れた知らせを出す。
+      warnNotifiedRef.current = false;
+      withdraw(`edit-lock:warn:${resourceType}:${resourceId}`);
+    }
     if (!event) return;
     const hidden = document.visibilityState === "hidden";
     const justReturned = !hidden && Date.now() - returnedAtRef.current < RETURN_WINDOW_MS;
@@ -95,7 +100,7 @@ export function EditLockNotices({
       return;
     }
     pendingReturnRef.current = body;
-  }, [state.kind, warnIdle, resourceType, resourceId, notify, toast]);
+  }, [state.kind, warnIdle, resourceType, resourceId, notify, toast, withdraw]);
 
   // 画面に戻ったとき、見ていない間に外れていた理由をはっきり出す(§4.6 の 1)。
   // 予告(帯)が出ている間に別の画面へ移ったときは、そのとき予告をベル・OS の通知に出す(@codex #462)。

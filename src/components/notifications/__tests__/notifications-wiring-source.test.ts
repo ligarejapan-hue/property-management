@@ -83,3 +83,36 @@ describe("後片付けと書き込みが重なったとき", () => {
     expect(src).toMatch(/if \(readSwitchMark\(\) !== switchMarkRef\.current\) \{[\s\S]{0,80}return;\s*\}\s*if \(input\.bell !== false\)/);
   });
 });
+
+describe("後片付けと書き込みの間に割り込まれたとき(@codex #462 P1)", () => {
+  it("お知らせに書いたときの合図を付け、読む側は今の合図と違うものを出さない", () => {
+    const provider = read("components/notifications/notice-provider.tsx");
+    expect(provider).toMatch(/mark: switchMarkRef\.current/);
+    // 前の人のタブからは既読化でも書き換えない。
+    expect(provider).toMatch(/const markAllRead = useCallback\(\(\) => \{\s*[^\n]*\n\s*if \(switchedRef\.current \|\| readSwitchMark\(\) !== switchMarkRef\.current\) return;/);
+    const store = read("lib/notifications/notice-store.ts");
+    expect(store).toMatch(/noticesForMark\(memoryFallback, mark\)/);
+    expect(store).toMatch(/const kept = noticesForMark\(source, mark\);/);
+    expect(store).toMatch(/e\.key === NOTICE_SWITCH_KEY\) onChange\(\)/);
+  });
+});
+
+describe("予告を取り下げたとき(@codex #462)", () => {
+  it("自動ログオフ: 延長されたら出していた OS の通知を閉じる", () => {
+    const src = read("components/auth/idle-session-guard.tsx");
+    expect(src).toMatch(/const withdrawWarning = \(\) => \{\s*if \(warnedRef\.current\) withdrawRef\.current\(IDLE_WARN_TAG\);/);
+    // 操作による延長と、ほかのタブの操作による取り下げの両方で通す。
+    expect(src.match(/withdrawWarning\(\);/g)?.length).toBe(2);
+  });
+
+  it("編集権限: 予告が終わったら出していた OS の通知を閉じる", () => {
+    const src = read("components/notifications/edit-lock-notices.tsx");
+    expect(src).toMatch(/withdraw\(`edit-lock:warn:\$\{resourceType\}:\$\{resourceId\}`\)/);
+  });
+
+  it("Service Worker は同じ順番待ちで、その印の通知だけを閉じる", () => {
+    const sw = readFileSync(resolve(__dirname, "../../../../public/sw.js"), "utf-8");
+    expect(sw).toMatch(/data\.type === "close"[\s\S]{0,200}enqueue\(/);
+    expect(sw).toMatch(/getNotifications\(\{ tag: data\.tag \}\)[\s\S]{0,80}if \(isOurs\(n\)\) n\.close\(\);/);
+  });
+});

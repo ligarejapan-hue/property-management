@@ -161,6 +161,25 @@ self.addEventListener("message", (event) => {
     return;
   }
 
+  // 取り下げた知らせ(例: 予告のあとに操作があって延長された)の OS の通知を閉じる。
+  // 表示の依頼と同じ順番待ちに入れ、先に出した依頼の後で閉じる(@codex #462)。
+  if (data.type === "close") {
+    event.waitUntil(
+      enqueue(async () => {
+        if (typeof data.tag !== "string" || !data.tag) {
+          reply({ ok: false });
+          return;
+        }
+        const list = await self.registration.getNotifications({ tag: data.tag });
+        for (const n of list) {
+          if (isOurs(n)) n.close();
+        }
+        reply({ ok: true });
+      }).catch(() => reply({ ok: false })),
+    );
+    return;
+  }
+
   if (data.type === "cleanup") {
     event.waitUntil(
       enqueue(async () => {

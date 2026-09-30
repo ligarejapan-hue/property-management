@@ -35,17 +35,57 @@ describe("保存できないとき", () => {
   });
 
   it("書き込めたら控えは使わない", () => {
-    let stored: string | null = null;
+    const stored = new Map<string, string>();
     stubWindow({
-      getItem: () => stored,
-      setItem: (_k: string, v: string) => {
-        stored = v;
+      getItem: (k: string) => stored.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        stored.set(k, v);
       },
-      removeItem: () => {
-        stored = null;
+      removeItem: (k: string) => {
+        stored.delete(k);
       },
     });
     saveNotices([notice]);
     expect(loadNotices(2).map((n) => n.id)).toEqual(["a"]);
+  });
+});
+
+describe("後片付けと重なった書き戻し(@codex #462 P1)", () => {
+  it("後片付けの後に前の合図で書かれたお知らせは読まない", () => {
+    const stored = new Map<string, string>();
+    stubWindow({
+      getItem: (k: string) => stored.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        stored.set(k, v);
+      },
+      removeItem: (k: string) => {
+        stored.delete(k);
+      },
+    });
+    stored.set("pm:notices:switched-at", "100");
+    // 前の人のタブが合図 "100" を確かめた直後に、ほかのタブが後片付けをした。
+    clearNoticeStorage();
+    // そのあと前の人のタブが書き込む(合図の確認と書き込みの間に割り込まれた)。
+    saveNotices([{ ...notice, at: Date.now(), mark: "100" }]);
+    expect(stored.get("pm:notices:v1")).toBeTruthy();
+    expect(readNoticeSnapshot()).toEqual([]);
+    expect(loadNotices(2)).toEqual([]);
+  });
+
+  it("今の合図で書いたものは出す", () => {
+    const stored = new Map<string, string>([["pm:notices:switched-at", "200"]]);
+    stubWindow({
+      getItem: (k: string) => stored.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        stored.set(k, v);
+      },
+      removeItem: (k: string) => {
+        stored.delete(k);
+      },
+    });
+    const at = Date.now();
+    saveNotices([{ ...notice, id: "b", at, mark: "200" }, { ...notice, id: "c", tag: "u", at, mark: "100" }]);
+    expect(readNoticeSnapshot().map((n) => n.id)).toEqual(["b"]);
+    expect(loadNotices(at).map((n) => n.id)).toEqual(["b"]);
   });
 });

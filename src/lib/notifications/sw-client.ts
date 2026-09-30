@@ -112,6 +112,23 @@ export async function showOsNotification(input: {
   return !!res?.ok;
 }
 
+/**
+ * 取り下げた知らせの OS の通知を閉じる(同じ tag のもの)。Service Worker が無い・登録が無いときは
+ * 初めから出ていないので何もしない。表示の依頼と同じ順番待ちで処理される。
+ */
+export async function closeOsNotification(tag: string): Promise<boolean> {
+  if (!hasServiceWorker() || !hasNotification()) return false;
+  let reg: ServiceWorkerRegistration | undefined;
+  try {
+    reg = await navigator.serviceWorker.getRegistration("/");
+  } catch {
+    return false;
+  }
+  if (!reg) return false;
+  const res = await ask(reg, { type: "close", tag });
+  return !!res?.ok;
+}
+
 // ---- 画面からの直接の後片付け(Service Worker の返事が無いとき) ----
 
 function openDb(): Promise<IDBDatabase> {

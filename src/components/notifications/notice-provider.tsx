@@ -25,6 +25,7 @@ import {
   type NoticeKind,
 } from "@/lib/notifications/notice-store";
 import {
+  closeOsNotification,
   fetchSwGeneration,
   notificationSupport,
   registerNotificationWorker,
@@ -57,6 +58,8 @@ export interface ToastInput {
 interface NoticeContextValue {
   notify: (input: NotifyInput) => void;
   toast: (input: ToastInput) => void;
+  /** 取り下げた知らせ(同じ tag)の OS の通知を閉じる。ベルの記録は残す。 */
+  withdraw: (tag: string) => void;
   notices: Notice[];
   markAllRead: () => void;
   permission: NotificationSupport;
@@ -67,6 +70,7 @@ const noop = () => {};
 const NoticeContext = createContext<NoticeContextValue>({
   notify: noop,
   toast: noop,
+  withdraw: noop,
   notices: [],
   markAllRead: noop,
   permission: "unsupported",
@@ -156,6 +160,9 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
           url: input.url,
           at: now,
           read: false,
+          // 書いたときの合図を付ける。読む側は今の合図と違うものを出さないため、この確認と
+          // 書き込みの間にほかのタブが後片付けをしても、前の人のお知らせは見えない(@codex #462 P1)。
+          ...(switchMarkRef.current !== null ? { mark: switchMarkRef.current } : {}),
         },
         now,
       );
@@ -169,7 +176,13 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const withdraw = useCallback((tag: string) => {
+    void closeOsNotification(tag);
+  }, []);
+
   const markAllRead = useCallback(() => {
+    // 後片付けを知らされたタブ(前の人のまま)からは、次の人のお知らせを書き換えない。
+    if (switchedRef.current || readSwitchMark() !== switchMarkRef.current) return;
     saveNotices(markAllNoticesRead(loadNotices(Date.now())));
   }, []);
 
@@ -188,8 +201,8 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ notify, toast, notices, markAllRead, permission, requestPermission }),
-    [notify, toast, notices, markAllRead, permission, requestPermission],
+    () => ({ notify, toast, withdraw, notices, markAllRead, permission, requestPermission }),
+    [notify, toast, withdraw, notices, markAllRead, permission, requestPermission],
   );
 
   return (
