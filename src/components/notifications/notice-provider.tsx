@@ -14,6 +14,7 @@ import { ToastStack, type ToastIcon, type ToastItem, type ToastTone } from "@/co
 import {
   NOTICE_SWITCH_KEY,
   addNotice,
+  readSwitchMark,
   loadNotices,
   markAllNoticesRead,
   readNoticeSnapshot,
@@ -91,8 +92,11 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
   );
   const genRef = useRef<number | null>(null);
   const switchedRef = useRef(false);
+  /** このタブを開いた時点の後片付けの合図。書き込む直前に読み直して比べる。 */
+  const switchMarkRef = useRef<string | null>(null);
 
   useEffect(() => {
+    switchMarkRef.current = readSwitchMark();
     let cancelled = false;
     const onSwMessage = (e: MessageEvent) => {
       const data = e.data as { type?: string } | null;
@@ -132,6 +136,14 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
     // 後片付けを知らされたタブ(前の人のまま開いていた)からは何も書かない・出さない。
     if (switchedRef.current) return;
     const now = Date.now();
+    // ⚠書き込む直前に後片付けの合図をその場で読み直す。storage イベントはあとから届くため、
+    //   ほかのタブの後片付けと重なったときに前の人のお知らせを書き戻さないよう、ここでも止める
+    //   (@codex #462 P1)。
+    if (readSwitchMark() !== switchMarkRef.current) {
+      switchedRef.current = true;
+      setToasts([]);
+      return;
+    }
     if (input.bell !== false) {
       const next = addNotice(
         loadNotices(now),

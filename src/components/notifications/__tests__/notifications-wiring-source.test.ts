@@ -75,3 +75,11 @@ describe("予告が出たあとで別の画面へ移ったとき", () => {
     expect(src).toMatch(/snap\.kind === "mine" && snap\.warnIdle && !warnNotifiedRef\.current/);
   });
 });
+
+describe("後片付けと書き込みが重なったとき", () => {
+  it("書き込む直前に後片付けの合図を読み直し、変わっていれば書かない", () => {
+    const src = read("components/notifications/notice-provider.tsx");
+    expect(src).toMatch(/switchMarkRef\.current = readSwitchMark\(\);/);
+    expect(src).toMatch(/if \(readSwitchMark\(\) !== switchMarkRef\.current\) \{[\s\S]{0,80}return;\s*\}\s*if \(input\.bell !== false\)/);
+  });
+});

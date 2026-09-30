@@ -156,6 +156,15 @@ export function subscribeNotices(onChange: () => void): () => void {
   };
 }
 
+/** 後片付けの合図(最後に片付けた時刻の文字列)。読めなければ null。 */
+export function readSwitchMark(): string | null {
+  try {
+    return window.localStorage.getItem(NOTICE_SWITCH_KEY);
+  } catch {
+    return null;
+  }
+}
+
 /** 共用 PC 対策: ログアウト・ログイン画面で呼ぶ。 */
 export function clearNoticeStorage(): void {
   memoryFallback = null;
