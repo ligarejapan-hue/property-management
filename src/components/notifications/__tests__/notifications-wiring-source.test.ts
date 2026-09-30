@@ -22,11 +22,16 @@ describe("ログアウトの経路", () => {
 });
 
 describe("自動ログオフの予告ダイアログ", () => {
-  it("「ログアウトする」への操作は活動(延長)に数えない(押した瞬間にダイアログが消えない)", () => {
-    expect(read("components/auth/idle-logout-dialog.tsx")).toMatch(/onClick=\{onLogout\}\s+data-idle-logout-action/);
-    expect(read("components/auth/idle-session-guard.tsx")).toMatch(
-      /const markActivity = \(e\?: Event\) => \{[\s\S]{0,300}closest\("\[data-idle-logout-action\]"\)\) return;/,
+  it("ダイアログの中の操作(ボタンへのマウス移動・タブ移動を含む)は活動(延長)に数えない", () => {
+    const dialog = read("components/auth/idle-logout-dialog.tsx");
+    expect(dialog).toMatch(/className=\{IDLE_WARNING_DIALOG_CLASS\}/);
+    const guard = read("components/auth/idle-session-guard.tsx");
+    expect(guard).toMatch(
+      /const markActivity = \(e\?: Event\) => \{[\s\S]{0,500}closest\(`\.\$\{IDLE_WARNING_DIALOG_CLASS\}`\)\) return;/,
     );
+    // 延長は「続ける」・Esc の明示の操作だけ(onContinue が活動の処理を直接呼ぶ)。
+    expect(guard).toMatch(/onContinue=\{\(\) => activityHandlerRef\.current\(\)\}/);
+    expect(dialog).toMatch(/onClose=\{onContinue\}/);
   });
 });
 

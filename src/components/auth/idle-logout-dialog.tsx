@@ -11,6 +11,12 @@ import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { IDLE_WARN_DIALOG_BODY, IDLE_WARN_TITLE, formatRemaining } from "@/lib/notifications/idle-warning";
 
+/**
+ * ダイアログ(<dialog> 本体。背景のクリックもここが対象になる)に付ける目印。
+ * この中の操作は IdleSessionGuard が活動(=延長)に数えない(@codex #462)。
+ */
+export const IDLE_WARNING_DIALOG_CLASS = "idle-warning-dialog";
+
 export function IdleLogoutDialog({
   deadline,
   onContinue,
@@ -30,12 +36,12 @@ export function IdleLogoutDialog({
   return (
     <ModalShell
       size="sm"
+      className={IDLE_WARNING_DIALOG_CLASS}
       title={IDLE_WARN_TITLE}
       onClose={onContinue}
       footer={
         <>
-          {/* data-idle-logout-action: この操作は IdleSessionGuard が活動(=延長)に数えない */}
-          <Button variant="secondary" onClick={onLogout} data-idle-logout-action="">
+          <Button variant="secondary" onClick={onLogout}>
             ログアウトする
           </Button>
           <Button onClick={onContinue}>続ける</Button>

@@ -14,7 +14,7 @@ import {
 } from "@/lib/notifications/idle-warning";
 import { signOutWithNotificationCleanup } from "@/lib/notifications/logout";
 import { useNotices } from "@/components/notifications/notice-provider";
-import { IdleLogoutDialog } from "./idle-logout-dialog";
+import { IDLE_WARNING_DIALOG_CLASS, IdleLogoutDialog } from "./idle-logout-dialog";
 
 // 値の定義は src/lib/idle-timeout.ts に一本化した(edit-lock の rules.ts がサーバ側から
 // 参照するため。このコンポーネントの公開面("use client" の外から見える名前)は変えない)。
@@ -116,10 +116,12 @@ export function IdleSessionGuard() {
     };
 
     const markActivity = (e?: Event) => {
-      // 予告ダイアログの「ログアウトする」への操作は活動に数えない(数えると押した瞬間に
-      // 予告が取り下げられてダイアログが消え、ログアウトが実行されない・@codex #462)。
+      // 予告ダイアログの中の操作(マウスの移動・「ログアウトする」へのタブ移動や押下)は
+      // 活動に数えない。数えるとボタンに届く前に予告が取り下げられてダイアログが消え、
+      // ログアウトを選べない(@codex #462)。延長は「続ける」・Esc の明示の操作だけ
+      // (IdleLogoutDialog の onContinue が activityHandlerRef を直接呼ぶ)。
       const target = e?.target;
-      if (target instanceof Element && target.closest("[data-idle-logout-action]")) return;
+      if (target instanceof Element && target.closest(`.${IDLE_WARNING_DIALOG_CLASS}`)) return;
       const now = Date.now();
       // @codex #290 R5(P1): スリープ/長時間の背景化で interval が境界(1時間)で発火しなかった
       // 場合、復帰後の最初の操作が古い最終操作時刻を上書きすると無操作の痕跡が消え、ログアウトが
