@@ -64,10 +64,16 @@ export function EditLockNotices({
   useEffect(() => {
     const next: EditLockSnapshot = { kind: state.kind, warnIdle };
     let event = editLockNoticeEvent(prevRef.current, next);
-    prevRef.current = next;
     if (next.kind === "mine") pageHiddenRef.current = false;
-    // pagehide で自分から鍵を返した(bfcache に備えた)ことによる `expired` は、外れた知らせにしない。
-    if (event?.type === "lost" && event.reason === "expired" && pageHiddenRef.current) event = null;
+    if (event?.type === "lost" && event.reason === "expired" && pageHiddenRef.current) {
+      // pagehide で自分から鍵を返した(bfcache に備えた)ことによる `expired` は、外れた知らせにしない。
+      // ただし「持っていた」ことは残す。戻ったときの取り直しで別の人に取られていた
+      // (`taken` など)ら、外れた知らせとして出すため(@codex #462)。
+      event = null;
+      prevRef.current = { kind: "mine", warnIdle: false };
+    } else {
+      prevRef.current = next;
+    }
     if (!(next.kind === "mine" && next.warnIdle) && warnNotifiedRef.current) {
       // 予告が終わった(延長された・外れた)ので、別の画面向けに出した予告の OS の通知を閉じる
       // (@codex #462)。外れたときは下で外れた知らせを出す。

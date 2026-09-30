@@ -207,7 +207,7 @@ export function IdleSessionGuard() {
       window.addEventListener(ev, markActivity, { passive: true, capture: true });
     }
 
-    const timer = window.setInterval(() => {
+    const check = () => {
       const now = Date.now();
       // 自タブと他タブ(localStorage)の最終操作のうち新しい方を採用=どのタブの操作も活動に数える。
       const lastActivity = Math.max(
@@ -238,13 +238,18 @@ export function IdleSessionGuard() {
       if (idleFor < REFRESH_INTERVAL_MS) {
         maybeRefreshSession(now);
       }
-    }, CHECK_INTERVAL_MS);
+    };
+    const timer = window.setInterval(check, CHECK_INTERVAL_MS);
+    // 開いた・戻った時点ですでに予告の範囲(55〜60分)なら、1分後の判定を待たずに予告を出す
+    // (残りが1分未満だと予告を見ないままログオフされるため・@codex #462)。
+    const firstCheck = window.setTimeout(check, 0);
 
     return () => {
       for (const ev of events) {
         window.removeEventListener(ev, markActivity, { capture: true });
       }
       window.clearInterval(timer);
+      window.clearTimeout(firstCheck);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);

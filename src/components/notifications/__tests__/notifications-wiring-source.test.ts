@@ -138,7 +138,25 @@ describe("戻る/進むの保存(bfcache)に備えた pagehide(@codex #462)", ()
     expect(src).toMatch(/const onPageHide = \(\) => \{\s*pageHiddenRef\.current = true;/);
     expect(src).toMatch(/if \(next\.kind === "mine"\) pageHiddenRef\.current = false;/);
     expect(src).toMatch(
-      /if \(event\?\.type === "lost" && event\.reason === "expired" && pageHiddenRef\.current\) event = null;/,
+      /if \(event\?\.type === "lost" && event\.reason === "expired" && pageHiddenRef\.current\) \{[\s\S]{0,300}event = null;\s*prevRef\.current = \{ kind: "mine", warnIdle: false \};\s*\} else \{\s*prevRef\.current = next;/,
     );
+  });
+
+  it("持っていたことは残し、戻ったときの取り直しで取られていたら(expired → taken)外れた知らせにする", async () => {
+    const { editLockNoticeEvent } = await import("@/lib/notifications/edit-lock-notice");
+    // pagehide の expired を知らせずに残した「持っていた」状態から、取り直しの結果 taken になった。
+    expect(editLockNoticeEvent({ kind: "mine", warnIdle: false }, { kind: "taken", warnIdle: false })).toEqual({
+      type: "lost",
+      reason: "taken",
+    });
+  });
+});
+
+describe("開いた・戻った時点ですでに予告の範囲のとき(@codex #462)", () => {
+  it("1分後の判定を待たずに、すぐ1回判定する", () => {
+    const src = read("components/auth/idle-session-guard.tsx");
+    expect(src).toMatch(/const timer = window\.setInterval\(check, CHECK_INTERVAL_MS\);/);
+    expect(src).toMatch(/const firstCheck = window\.setTimeout\(check, 0\);/);
+    expect(src).toMatch(/window\.clearTimeout\(firstCheck\);/);
   });
 });
