@@ -5055,3 +5055,120 @@ export async function fetchUpcomingViewings() {
   }
   return apiFetch<{ viewings: UpcomingViewing[] }>("/api/agent-inquiries/upcoming");
 }
+
+// ---- 業者からの反響の受付: メイン画面側(設計 §2.3) ----
+export interface PropertyInquiryCounts {
+  total: number;
+  guided: number;
+  preview: number;
+  materialRequest: number;
+  adPermission: number;
+}
+export interface PropertyTimelineEntry {
+  key: string;
+  at: string;
+  inquiryId: string;
+  kind: InquiryKindKey;
+  viewingType: ViewingTypeKey | null;
+  agentName: string;
+  contactName: string | null;
+  attendantName: string | null;
+  resultNote: string | null;
+  canceled: boolean;
+  unscheduled: boolean;
+}
+export interface PropertyAgentInquiries {
+  counts: PropertyInquiryCounts;
+  timeline: PropertyTimelineEntry[];
+  adPermissions: Partial<Record<AdMediumKey, AdValueKey>>;
+}
+/** 広告の可否の変更1件。from=画面に出ていた値(null=未設定)。今の値と違えば 409。 */
+export interface AdPermissionChange {
+  medium: AdMediumKey;
+  value: AdValueKey | null;
+  from: AdValueKey | null;
+}
+export interface AgentDirectoryRow {
+  id: string;
+  companyName: string;
+  branchName: string | null;
+  phone: string;
+  isArchived: boolean;
+  inquiryCount: number;
+  lastReceivedAt: string | null;
+}
+export interface AgentDetail {
+  id: string;
+  companyName: string;
+  companyKana: string | null;
+  branchName: string | null;
+  licenseNo: string | null;
+  phone: string;
+  fax: string | null;
+  email: string | null;
+  address: string | null;
+  note: string | null;
+  isArchived: boolean;
+  version: number;
+}
+export interface AgentHistoryItem {
+  id: string;
+  kind: InquiryKindKey;
+  status: InquiryStatusKey;
+  receivedAt: string;
+  contactName: string | null;
+  property: DeskProperty;
+}
+
+const EMPTY_PROPERTY_INQUIRIES: PropertyAgentInquiries = {
+  counts: { total: 0, guided: 0, preview: 0, materialRequest: 0, adPermission: 0 },
+  timeline: [],
+  adPermissions: {},
+};
+
+export async function fetchPropertyAgentInquiries(propertyId: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return EMPTY_PROPERTY_INQUIRIES;
+  }
+  return apiFetch<PropertyAgentInquiries>(`/api/properties/${propertyId}/agent-inquiries`);
+}
+export async function putPropertyAdPermission(propertyId: string, change: AdPermissionChange) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { adPermissions: (change.value ? { [change.medium]: change.value } : {}) as PropertyAgentInquiries["adPermissions"] };
+  }
+  return apiFetch<{ adPermissions: PropertyAgentInquiries["adPermissions"] }>(
+    `/api/properties/${propertyId}/ad-permissions`,
+    deskJsonInit("PUT", { items: [change] }),
+  );
+}
+export async function fetchAgentDirectory(p: { archived?: boolean; cursor?: string }) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { agents: [] as AgentDirectoryRow[], nextCursor: null as string | null, canWrite: true };
+  }
+  const sp = new URLSearchParams({ list: "1" });
+  if (p.archived) sp.set("archived", "1");
+  if (p.cursor) sp.set("cursor", p.cursor);
+  return apiFetch<{ agents: AgentDirectoryRow[]; nextCursor: string | null; canWrite: boolean }>(`/api/agents?${sp.toString()}`);
+}
+export async function fetchAgentDetail(id: string, cursor?: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    throw new Error("モックでは業者の詳細を読めません");
+  }
+  return apiFetch<{ agent: AgentDetail; inquiries: AgentHistoryItem[]; nextCursor: string | null; canWrite: boolean }>(
+    `/api/agents/${id}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+  );
+}
+export async function updateAgent(
+  id: string,
+  body: { version: number; isArchived?: boolean } & Partial<Record<keyof DeskAgentInput, string | null>>,
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { version: body.version + 1 };
+  }
+  return apiFetch<{ version: number }>(`/api/agents/${id}`, deskJsonInit("PATCH", body));
+}
