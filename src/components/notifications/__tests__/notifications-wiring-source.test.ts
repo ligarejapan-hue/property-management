@@ -101,9 +101,11 @@ describe("予告を取り下げたとき(@codex #462)", () => {
   it("自動ログオフ: 延長されたら出していた OS の通知を閉じる", () => {
     const src = read("components/auth/idle-session-guard.tsx");
     // ほかのタブが出した通知も閉じるため、予告中なら(このタブで出していなくても)閉じる。
-    expect(src).toMatch(/const withdrawWarning = \(\) => \{\s*if \(warnedRef\.current \|\| warnActiveRef\.current\) withdrawRef\.current\(IDLE_WARN_TAG\);/);
-    // 操作による延長と、ほかのタブの操作による取り下げの両方で通す。
-    expect(src.match(/withdrawWarning\(\);/g)?.length).toBe(2);
+    expect(src).toMatch(/const withdrawWarning = \(sharedWarn = false\) => \{\s*if \(sharedWarn \|\| warnedRef\.current \|\| warnActiveRef\.current\) withdrawRef\.current\(IDLE_WARN_TAG\);/);
+    // 操作による延長では、共有の最終操作から見て予告の範囲だったら(このタブの判定が
+    // 追いついていなくても)閉じる。ほかのタブの操作による取り下げでも通す。
+    expect(src).toMatch(/withdrawWarning\(idlePhase\(now - prevLastActivity\) === "warn"\);/);
+    expect(src.match(/withdrawWarning\(\);/g)?.length).toBe(1);
   });
 
   it("編集権限: 予告が終わったら出していた OS の通知を閉じる", () => {

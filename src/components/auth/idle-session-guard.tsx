@@ -144,7 +144,9 @@ export function IdleSessionGuard() {
       }
       lastActivityRef.current = now;
       // 操作があれば予告は取り下げる(延長された=5分後のログオフは起きない)。
-      withdrawWarning();
+      // 共有の最終操作から見て予告の範囲だったなら、このタブの1分ごとの判定がまだ追いついて
+      // いなくても(裏のタブが先に OS の通知を出した)閉じる(@codex #462)。
+      withdrawWarning(idlePhase(now - prevLastActivity) === "warn");
       // 全タブへ共有(書込は throttle。頻発する mousemove で localStorage を叩き続けない)。
       if (now - lastStorageWriteRef.current >= STORAGE_WRITE_THROTTLE_MS) {
         lastStorageWriteRef.current = now;
@@ -163,8 +165,8 @@ export function IdleSessionGuard() {
     // 「5分後にログオフ」が残らないように・@codex #462)。ベルの記録は残す。
     // OS の通知はほかのタブ(裏に回したタブ)が出したこともあるため、このタブで出したかに
     // かかわらず、予告中だったら閉じる(予告はどのタブも同じ共有の最終操作から判定する)。
-    const withdrawWarning = () => {
-      if (warnedRef.current || warnActiveRef.current) withdrawRef.current(IDLE_WARN_TAG);
+    const withdrawWarning = (sharedWarn = false) => {
+      if (sharedWarn || warnedRef.current || warnActiveRef.current) withdrawRef.current(IDLE_WARN_TAG);
       warnActiveRef.current = false;
       warnedRef.current = false;
       setWarnDeadline(null);
