@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/status-badge";
 import CommentTab from "@/components/properties/comment-tab";
 import NextActionTab from "@/components/properties/next-action-tab";
+import AgentInquiryTab from "@/components/properties/agent-inquiry-tab";
 import AttachmentTab from "@/components/properties/attachment-tab";
 import HistoryTab from "@/components/properties/history-tab";
 import PhotoTab from "@/components/properties/photo-tab";
@@ -139,6 +140,7 @@ const tabs = [
   { key: "photos", label: "写真" },
   { key: "investigation", label: "調査情報" },
   { key: "actions", label: "ネクストアクション" },
+  { key: "inquiries", label: "反響" },
   { key: "comments", label: "コメント" },
   { key: "attachments", label: "添付ファイル" },
   { key: "history", label: "変更履歴" },
@@ -979,6 +981,10 @@ export default function PropertyDetailPage({
         )}
         {activeTab === "actions" && (
           <NextActionTab propertyId={property.id} />
+        )}
+        {/* 業者からの反響(設計 2026-09-28 §2.3)。広告の可否を変えられるのは物件の編集権限がある人だけ。 */}
+        {activeTab === "inquiries" && (
+          <AgentInquiryTab key={property.id} propertyId={property.id} canWrite={canWriteProperty} />
         )}
         {activeTab === "comments" && (
           <CommentTab propertyId={property.id} />

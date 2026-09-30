@@ -1,7 +1,7 @@
 import type { DeskProperty } from "@/lib/api-client";
 import { AD_MEDIA_ORDER, AD_MEDIUM_LABEL, AD_VALUE_MARK } from "@/lib/agent-inquiry/desk-form";
 
-const TONE = {
+export const AD_TONE = {
   ok: "bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
   ng: "bg-rose-50 text-rose-800 dark:bg-rose-950 dark:text-rose-200",
   ask: "bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
@@ -15,7 +15,7 @@ export function AdPermissionChips({ value }: { value: DeskProperty["adPermission
       {AD_MEDIA_ORDER.map((m) => {
         const v = value[m];
         return (
-          <li key={m} className={`flex justify-between rounded px-2 py-1 ${TONE[v ?? "none"]}`}>
+          <li key={m} className={`flex justify-between rounded px-2 py-1 ${AD_TONE[v ?? "none"]}`}>
             <span>{AD_MEDIUM_LABEL[m]}</span>
             <b>{v ? AD_VALUE_MARK[v] : "—"}</b>
           </li>
