@@ -87,7 +87,10 @@ export function AgentHistoryList({ items }: { items: AgentHistoryItem[] }) {
           <span className="mr-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs dark:bg-gray-800">{KIND_LABEL[q.kind]}</span>
           <span className="mr-2 text-xs text-gray-500 dark:text-gray-400">{STATUS_LABEL[q.status]}</span>
           <span className="font-medium">{q.property.roomNo ? `${q.property.name} ${q.property.roomNo}` : q.property.name}</span>
-          <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">{q.property.town}</span>
+          {/* 物件名の無い戸建・土地は、名前がそのまま町名=同じ文字を2回出さない。 */}
+          {q.property.town !== q.property.name && (
+            <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">{q.property.town}</span>
+          )}
           {q.contactName && <span className="ml-2">{`${q.contactName}様`}</span>}
         </li>
       ))}

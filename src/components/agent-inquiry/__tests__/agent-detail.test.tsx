@@ -52,6 +52,11 @@ describe("その業者からの反響", () => {
     expect(out).toContain("新宿区西新宿");
     expect(out).toContain("田中様");
   });
+  it("物件名が無い物件(名前=町名)は、同じ文字を2回出さない", () => {
+    const land: AgentHistoryItem = { ...items[0], id: "q2", property: { id: "p2", name: "埼玉県さいたま市大宮区桜木町", roomNo: null, town: "埼玉県さいたま市大宮区桜木町", propertyType: "land", adPermissions: {} } };
+    const out = renderToStaticMarkup(<AgentHistoryList items={[land]} />);
+    expect(out.split("埼玉県さいたま市大宮区桜木町").length - 1).toBe(1);
+  });
   it("0件のとき", () => {
     expect(renderToStaticMarkup(<AgentHistoryList items={[]} />)).toContain("この業者からの反響はまだありません");
   });
@@ -76,6 +81,14 @@ describe("詳細の画面", () => {
     expect(page()).toContain("agentEditPatch(agent, edits)");
     expect(page()).toMatch(/send\(\{ version: agent\.version, \.\.\.patch \}/);
     expect(page()).toContain("updateAgent(agent.id, body)");
+  });
+  it("結果の知らせは、読み直しが済んでから出す(「保存しました」と古い表示・保存中が同時に出ない)", () => {
+    const src = page();
+    const at = src.indexOf("const send = async");
+    const body = src.slice(at, src.indexOf("const save = ", at));
+    expect(body.indexOf("await load()")).toBeGreaterThan(-1);
+    expect(body.lastIndexOf("setNotice(")).toBeGreaterThan(body.indexOf("await load()"));
+    expect(body.slice(0, body.indexOf("await load()"))).not.toMatch(/setNotice\(\{/);
   });
   it("しまう前に確かめ、戻すのは1回で", () => {
     expect(page()).toContain("<ConfirmDialog");

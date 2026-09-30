@@ -62,18 +62,21 @@ function AgentDetailBody({ id }: { id: string }) {
     savingRef.current = true;
     setSaving(true);
     setNotice(null);
+    let result: { tone: "ok" | "error"; text: string };
     try {
       await updateAgent(agent.id, body);
       onOk();
-      setNotice({ tone: "ok", text: okText });
+      result = { tone: "ok", text: okText };
       // 受付の窓の業者の検索(しまった業者は出ない・商号)が変わるので知らせる。
       notifyInquiryChanged();
     } catch (e) {
-      setNotice({ tone: "error", text: agentSaveErrorMessage(e) });
+      result = { tone: "error", text: agentSaveErrorMessage(e) };
     }
     // 読み直しを待ってから手を離す=古い版番号のまま次の保存を送らない(版番号・書けるかどうか・
     // 保存できたか分からないときの本当の値が揃う)。
     await load();
+    // 知らせは読み直しの後=「保存しました」と古い表示が同時に出ない。
+    setNotice(result);
     savingRef.current = false;
     setSaving(false);
   };
