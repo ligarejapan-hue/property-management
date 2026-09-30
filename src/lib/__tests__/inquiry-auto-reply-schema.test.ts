@@ -38,8 +38,12 @@ describe("申込者への受付メールのスキーマ", () => {
   it("受付日時の索引(schema と migration の名前が一致)", () => {
     expect(block("DmInquiry")).toMatch(/@@index\(\[submittedAt\]\)/);
     const indexSql = read("prisma/migrations/20260930110000_add_dm_inquiries_submitted_at_index/migration.sql");
-    expect(indexSql).toMatch(/CREATE INDEX "dm_inquiries_submitted_at_idx" ON "dm_inquiries"\("submitted_at"\);/);
-    expect(indexSql).not.toMatch(/^\s*(DROP|UPDATE|DELETE|ALTER)\b/im);
+    // 申込フォームが書き込み続ける表なので、構築中に書き込みを止めない CONCURRENTLY で作る。
+    expect(indexSql).toMatch(/^CREATE INDEX CONCURRENTLY "dm_inquiries_submitted_at_idx" ON "dm_inquiries"\("submitted_at"\);$/m);
+    // CONCURRENTLY は取引の中で実行できない=文は1つだけ・BEGIN/COMMIT を置かない。
+    const statements = indexSql.split("\n").filter((l) => l.trim() !== "" && !l.trim().startsWith("--"));
+    expect(statements).toHaveLength(1);
+    expect(indexSql).not.toMatch(/^\s*(BEGIN|COMMIT|DROP|UPDATE|DELETE|ALTER)\b/im);
   });
 
   it("重複の確認は受付日時の下限で絞っている(索引が効く形)", () => {
