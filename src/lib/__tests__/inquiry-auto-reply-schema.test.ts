@@ -32,4 +32,18 @@ describe("申込者への受付メールのスキーマ", () => {
     expect(sql).not.toMatch(/^\s*(DROP|UPDATE|DELETE|CREATE)\b/im);
     expect(sql).not.toMatch(/ALTER COLUMN/i);
   });
+
+  // 重複の確認は「直近24時間の申込」を受付日時で絞ってから見る。申込は消さずに残すので、
+  // 受付日時の索引が無いと確認のたびに全件を読む(鍵を持ったまま=同じアドレスの申込が待たされる)。
+  it("受付日時の索引(schema と migration の名前が一致)", () => {
+    expect(block("DmInquiry")).toMatch(/@@index\(\[submittedAt\]\)/);
+    const indexSql = read("prisma/migrations/20260930110000_add_dm_inquiries_submitted_at_index/migration.sql");
+    expect(indexSql).toMatch(/CREATE INDEX "dm_inquiries_submitted_at_idx" ON "dm_inquiries"\("submitted_at"\);/);
+    expect(indexSql).not.toMatch(/^\s*(DROP|UPDATE|DELETE|ALTER)\b/im);
+  });
+
+  it("重複の確認は受付日時の下限で絞っている(索引が効く形)", () => {
+    const src = read("src/lib/sale-dm-letter/inquiry-auto-reply.ts");
+    expect(src).toMatch(/submittedAt: \{ gte: new Date\(submittedAt\.getTime\(\) - AUTO_REPLY_DEDUPE_WINDOW_MS\) \}/);
+  });
 });

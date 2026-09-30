@@ -1342,6 +1342,8 @@ model DmInquiry {
 
   @@index([draftId])
   @@index([handleStatus])
+  // 受付メールの重複確認(直近24時間の申込だけを見る)と、一覧の新しい順の読み出しに使う。
+  @@index([submittedAt])
   @@map("dm_inquiries")
 }
 
