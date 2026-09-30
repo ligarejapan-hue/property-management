@@ -3,8 +3,10 @@ import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions, ApiError, handleApiError } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
-import { loadMailSendConfig } from "@/lib/mail/mail-config";
+import { loadInquiryAutoReplySettings, loadMailSendConfig } from "@/lib/mail/mail-config";
 import { sendPlainMail, safeErrorCode } from "@/lib/mail/transport";
+import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
+import { buildInquiryAutoReplyMail } from "@/lib/sale-dm-letter/inquiry-auto-reply-mail";
 
 // 設定は管理者(user_management:write)のみ。SMTPパスワードを含む高リスク設定のため admin 限定。
 async function requireMailAdmin() {
@@ -24,15 +26,30 @@ const TEST_MAIL_TEXT = [
   "受け取れていれば、査定申込の通知メールも届きます。",
 ].join("\n");
 
+// どのテストメールを送るか。本文が無い・壊れている・知らない値は従来どおり通知メールの確認。
+async function readTestKind(request?: Request): Promise<"notify" | "auto_reply"> {
+  if (!request) return "notify";
+  try {
+    const body: unknown = await request.json();
+    return (body as { kind?: unknown } | null)?.kind === "auto_reply" ? "auto_reply" : "notify";
+  } catch {
+    return "notify";
+  }
+}
+
 // POST: テストメール送信。宛先は操作者自身の通知先(inquiryNotifyEmail ?? email)。
 // 設定未完成なら送信せず 422、送信に失敗したら 502。
 // ⚠失敗時は管理者が原因(パスワード誤り/接続不可等)を切り分けられるよう、許可リスト一致の
 // SMTPコード(safeErrorCode 由来・/^[A-Z][A-Z0-9_]{1,40}$/・自由文なし)だけを smtpCode として
 // 応答・監査に含める(発注者判断)。生メッセージ・宛先・設定値は決して含めない。
 // ApiError は追加フィールドを運べないため、この失敗応答だけは直接 NextResponse.json を返す。
-export async function POST() {
+//
+// 本文 { kind: "auto_reply" } のときは、申込者への受付メール(いま保存されている件名・本文。未入力なら
+// 既定の文面)を操作者自身へ送る。スイッチが OFF でも送れる(ONにする前に文面を確かめるため)。
+export async function POST(request?: Request) {
   try {
     const session = await requireMailAdmin();
+    const kind = await readTestKind(request);
 
     const config = await loadMailSendConfig();
     if (!config) {
@@ -49,11 +66,12 @@ export async function POST() {
     });
     const to = me?.inquiryNotifyEmail ?? me?.email ?? session.email;
 
-    const result = await sendPlainMail(config, {
-      to,
-      subject: "【テスト】通知メールの送信確認",
-      text: TEST_MAIL_TEXT,
-    });
+    let mail = { subject: "【テスト】通知メールの送信確認", text: TEST_MAIL_TEXT };
+    if (kind === "auto_reply") {
+      const built = buildInquiryAutoReplyMail(await loadInquiryAutoReplySettings(), await loadSaleDmPublicPageConfig());
+      mail = { subject: `【テスト】${built.subject}`, text: built.text };
+    }
+    const result = await sendPlainMail(config, { to, subject: mail.subject, text: mail.text });
 
     if (!result.ok) {
       // sendPlainMail は既に safeErrorCode() を通した code を返すが、モック等で意図せず自由文が

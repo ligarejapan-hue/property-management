@@ -341,6 +341,21 @@ export default function SaleDmInquiryList(props: SaleDmInquiryListProps) {
               {resendErrors[i.id]}
             </p>
           )}
+          {/* 申込者への受付メール(自動返信)。送った・送れなかったのどちらかだけ出す
+              (OFF・メールなし・同じアドレスへ送ったばかり、は何も出さない)。送り直しはしない。 */}
+          {(i.autoReplyStatus === "sent" || i.autoReplyStatus === "failed") && (
+            <div className="mt-1">
+              {i.autoReplyStatus === "sent" ? (
+                <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                  受付メール 送信済み
+                </span>
+              ) : (
+                <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                  受付メールを送れませんでした(お電話などでご連絡ください)
+                </span>
+              )}
+            </div>
+          )}
           {i.contactHidden ? (
             <div className="mt-1 text-xs text-gray-700 dark:text-gray-300">
               <p className="text-gray-500">連絡先を表示する権限がありません</p>

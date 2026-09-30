@@ -13,6 +13,12 @@ import { hasPermission } from "@/lib/permissions";
 import { writeAuditLog } from "@/lib/audit";
 import { encryptSecret, isSecretCryptoConfigured } from "@/lib/sale-dm-letter/secret-crypto";
 import { MAIL_CONFIG_ID, isMailConfigComplete } from "@/lib/mail/mail-config";
+import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
+import {
+  AUTO_REPLY_LIMITS,
+  defaultAutoReplyBody,
+  defaultAutoReplySubject,
+} from "@/lib/sale-dm-letter/inquiry-auto-reply-mail";
 
 // 設定は管理者(user_management:write)のみ。SMTPパスワードを含む高リスク設定のため admin 限定。
 async function requireMailAdmin() {
@@ -53,6 +59,13 @@ const emailOrEmpty = z
     message: "メールアドレスの形式が正しくありません",
   });
 
+// 受付メールの本文。改行・タブ以外の制御文字は受け付けない(メールに目に見えない文字を混ぜない)。
+const isPlainMailText = (v: string) =>
+  [...v].every((c) => {
+    const n = c.charCodeAt(0);
+    return n >= 0x20 ? n !== 0x7f : n === 0x0a || n === 0x0d || n === 0x09;
+  });
+
 const putSchema = z.object({
   smtpHost: z.string().trim().max(255).optional(),
   smtpPort: z.number().int().min(1).max(65535).optional(),
@@ -63,6 +76,19 @@ const putSchema = z.object({
   fromAddress: emailOrEmpty.optional(),
   appBaseUrl: httpsUrlOrEmpty.optional(),
   inquiryMailDetail: z.enum(["minimal", "full"]).optional(),
+  // 申込者への受付メール(自動返信)。件名・本文は空文字で「既定の文面に戻す」(null で保存)。
+  inquiryAutoReplyEnabled: z.boolean().optional(),
+  inquiryAutoReplySubject: z
+    .string()
+    .trim()
+    .max(AUTO_REPLY_LIMITS.subject)
+    .refine((v) => !/[\r\n]/.test(v) && isPlainMailText(v), { message: "件名は1行で入力してください" })
+    .optional(),
+  inquiryAutoReplyBody: z
+    .string()
+    .max(AUTO_REPLY_LIMITS.body)
+    .refine(isPlainMailText, { message: "本文に使えない文字が含まれています" })
+    .optional(),
 });
 
 type MailConfigRow = {
@@ -74,6 +100,9 @@ type MailConfigRow = {
   fromAddress: string | null;
   appBaseUrl: string | null;
   inquiryMailDetail: string;
+  inquiryAutoReplyEnabled?: boolean;
+  inquiryAutoReplySubject?: string | null;
+  inquiryAutoReplyBody?: string | null;
 } | null;
 
 // 応答形式(GET/PUT共通)。パスワードそのものは絶対に返さず hasPassword(真偽値)だけ返す。
@@ -81,6 +110,8 @@ async function buildResponseData(row: MailConfigRow) {
   const notifyRecipientCount = await prisma.user.count({
     where: { isActive: true, inquiryNotifyEnabled: true },
   });
+  // 受付メールの既定の文面(件名・本文が未入力のときに送るもの)。差出人名・連絡先は売却DM設定から。
+  const sender = await loadSaleDmPublicPageConfig();
   return {
     smtpHost: row?.smtpHost ?? null,
     smtpPort: row?.smtpPort ?? null,
@@ -90,6 +121,11 @@ async function buildResponseData(row: MailConfigRow) {
     fromAddress: row?.fromAddress ?? null,
     appBaseUrl: row?.appBaseUrl ?? null,
     inquiryMailDetail: row?.inquiryMailDetail === "full" ? "full" : "minimal",
+    inquiryAutoReplyEnabled: row?.inquiryAutoReplyEnabled === true,
+    inquiryAutoReplySubject: row?.inquiryAutoReplySubject ?? null,
+    inquiryAutoReplyBody: row?.inquiryAutoReplyBody ?? null,
+    inquiryAutoReplyDefaultSubject: defaultAutoReplySubject(sender),
+    inquiryAutoReplyDefaultBody: defaultAutoReplyBody(sender),
     complete: isMailConfigComplete(row),
     cryptoConfigured: isSecretCryptoConfigured(),
     notifyRecipientCount,
@@ -126,6 +162,14 @@ export async function PUT(request: NextRequest) {
     if (body.fromAddress !== undefined) { data.fromAddress = norm(body.fromAddress) ?? null; fields.push("fromAddress"); }
     if (body.appBaseUrl !== undefined) { data.appBaseUrl = norm(body.appBaseUrl) ?? null; fields.push("appBaseUrl"); }
     if (body.inquiryMailDetail !== undefined) { data.inquiryMailDetail = body.inquiryMailDetail; fields.push("inquiryMailDetail"); }
+    if (body.inquiryAutoReplyEnabled !== undefined) { data.inquiryAutoReplyEnabled = body.inquiryAutoReplyEnabled; fields.push("inquiryAutoReplyEnabled"); }
+    if (body.inquiryAutoReplySubject !== undefined) { data.inquiryAutoReplySubject = norm(body.inquiryAutoReplySubject) ?? null; fields.push("inquiryAutoReplySubject"); }
+    if (body.inquiryAutoReplyBody !== undefined) {
+      // 本文は前後の空白を削らない(行頭の字下げ・末尾の署名を保つ)。空白だけなら既定の文面に戻す。
+      const text = body.inquiryAutoReplyBody.replace(/\r\n?/g, "\n");
+      data.inquiryAutoReplyBody = text.trim() === "" ? null : text;
+      fields.push("inquiryAutoReplyBody");
+    }
 
     // パスワード: 値があれば暗号化して保存(マスターキー必須)。空文字はクリア(null)。未指定は触らない。
     if (body.smtpPassword !== undefined) {

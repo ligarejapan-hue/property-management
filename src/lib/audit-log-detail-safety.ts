@@ -313,6 +313,12 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   // 通知メール送信の失敗(後続タスクで使用)。code=safeErrorCode() 由来の分類コードのみ(SMTP応答の生
   // メッセージ・宛先は載せない)。
   inquiry_notify_failed: new Set(["attempt", "code"]),
+  // 申込者への受付メール(自動返信)。宛先は申込者が書いた未確認のアドレスなので detail に載せない。
+  // code=定型の分類コードのみ(failed: mail_not_configured / send_failed / safeErrorCode() 一致の
+  // SMTPコード、skipped: disabled / duplicate / no_email)。sent は追加のキーなし。
+  inquiry_auto_reply_sent: new Set([]),
+  inquiry_auto_reply_failed: new Set(["code"]),
+  inquiry_auto_reply_skipped: new Set(["code"]),
   // 表示名監査（read-only レポート）の閲覧/CSV 出力監査。detail は操作事実の
   // 非PIIメタデータのみ（entity/format=enum・viewedAt=ISO日時・各種件数/真偽）。
   // owner-prefixed な件数/真偽（ownerGroupCount/ownerTruncated/ownerNameVisible）は

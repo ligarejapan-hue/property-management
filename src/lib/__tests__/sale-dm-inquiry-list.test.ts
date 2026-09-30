@@ -6,9 +6,20 @@ const row = (id: string, handleStatus: string, iso: string) => ({
   contactPref: "phone", contactTime: "夜", message: "要望", handleStatus, handledAt: null, handleNote: "対応メモ",
   notifyStatus: "pending",
   notifyLastError: null as string | null,
+  autoReplyStatus: "sent",
 });
 
 describe("toInquiryListRows", () => {
+  // 「受付メール 送信済み」が見えると、メールが書かれていたこと自体が分かる。メールを見られない
+  // 利用者には状態ごと伏せる(電話の可否とは独立)。
+  it("受付メールの状態はメールを見られる利用者にだけ返す", () => {
+    const rows = [row("a", "open", "2026-09-20T00:00:00Z")];
+    expect(toInquiryListRows(rows, { contact: true, email: true })[0].autoReplyStatus).toBe("sent");
+    expect(toInquiryListRows(rows, { contact: false, email: true })[0].autoReplyStatus).toBe("sent");
+    expect(toInquiryListRows(rows, { contact: true, email: false })[0].autoReplyStatus).toBeNull();
+    expect(toInquiryListRows(rows, { contact: false, email: false })[0].autoReplyStatus).toBeNull();
+  });
+
   it("並べ替えはしない(DB の submittedAt desc, id desc の順をそのまま保つ)", () => {
     const out = toInquiryListRows([
       row("a", "done", "2026-09-20T00:00:00Z"),

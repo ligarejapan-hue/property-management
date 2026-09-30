@@ -440,6 +440,8 @@ export interface SaleDmInquiry {
   notifyStatus: string;
   /** 通知失敗時の内部コード(no_recipients/mail_not_configured 等)。失敗していないときは null。 */
   notifyLastError: string | null;
+  /** 申込者への受付メールの状態(none/sending/sent/failed/skipped)。メールを見られない人には null。 */
+  autoReplyStatus: string | null;
 }
 
 // 申込一覧は状態で絞らない1本のカーソルでたどる(振り分けは画面側)。counts は状態別の件数(範囲全体)。
@@ -1092,6 +1094,12 @@ export interface MailSettings {
   fromAddress: string | null;
   appBaseUrl: string | null;
   inquiryMailDetail: "minimal" | "full";
+  // 申込者への受付メール(自動返信)。件名・本文が null のときは下の既定の文面を送る。
+  inquiryAutoReplyEnabled: boolean;
+  inquiryAutoReplySubject: string | null;
+  inquiryAutoReplyBody: string | null;
+  inquiryAutoReplyDefaultSubject: string;
+  inquiryAutoReplyDefaultBody: string;
   // この設定で通知メールが送れる状態かどうか(サーバー側 isMailConfigComplete と同じ判定)。
   complete: boolean;
   // false のとき、サーバーに暗号化キーが無くパスワードを保存できない。
@@ -1109,6 +1117,11 @@ const EMPTY_MAIL_SETTINGS: MailSettings = {
   fromAddress: null,
   appBaseUrl: null,
   inquiryMailDetail: "minimal",
+  inquiryAutoReplyEnabled: false,
+  inquiryAutoReplySubject: null,
+  inquiryAutoReplyBody: null,
+  inquiryAutoReplyDefaultSubject: "査定のお申し込みを受け付けました",
+  inquiryAutoReplyDefaultBody: "このたびは査定のお申し込みをいただき、ありがとうございます。\n内容を確認のうえ、担当者よりご連絡いたします。",
   complete: false,
   cryptoConfigured: true,
   notifyRecipientCount: 0,
@@ -1132,6 +1145,10 @@ export async function updateMailSettings(body: {
   fromAddress?: string;
   appBaseUrl?: string;
   inquiryMailDetail?: "minimal" | "full";
+  inquiryAutoReplyEnabled?: boolean;
+  // 空文字=既定の文面に戻す。
+  inquiryAutoReplySubject?: string;
+  inquiryAutoReplyBody?: string;
 }): Promise<{ data: MailSettings }> {
   if (USE_MOCK) {
     await mockDelay();
@@ -1146,13 +1163,16 @@ export async function updateMailSettings(body: {
 
 // テスト送信。保存済みの設定で送る(サーバー側は現在の DB 値を使う・未保存の変更は反映されない)。
 // 失敗(502)は toApiError が smtpCode を運ぶので、呼び出し元は apiErrorSmtpCode(e) で取り出す。
-export async function sendMailSettingsTest(): Promise<{ data: { result: string } }> {
+// kind="auto_reply" は、申込者への受付メール(保存済みの文面)を自分あてに送る。
+export async function sendMailSettingsTest(kind: "notify" | "auto_reply" = "notify"): Promise<{ data: { result: string } }> {
   if (USE_MOCK) {
     await mockDelay();
     return { data: { result: "sent" } };
   }
   return apiFetch<{ data: { result: string } }>("/api/admin/mail-settings/test", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind }),
   });
 }
 

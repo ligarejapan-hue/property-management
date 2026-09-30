@@ -176,6 +176,9 @@ const ACTION_LABELS: Record<string, string> = {
   mail_settings_test: "メール送信設定のテスト送信",
   inquiry_notify_sent: "査定申込の通知メール送信",
   inquiry_notify_failed: "査定申込の通知メール送信失敗",
+  inquiry_auto_reply_sent: "申込者への受付メール送信",
+  inquiry_auto_reply_failed: "申込者への受付メール送信失敗",
+  inquiry_auto_reply_skipped: "申込者への受付メールを送らなかった",
   // --- 販売図面・その他 ---
   sales_sheet_design_create: "販売図面作成",
   sales_sheet_design_update: "販売図面更新",

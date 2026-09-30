@@ -21,6 +21,26 @@ export function isMailConfigComplete(
   return !!row && !!row.smtpHost && !!row.smtpPort && !!row.smtpUser && !!row.smtpPassEnc && !!row.fromAddress;
 }
 
+export interface InquiryAutoReplySettings {
+  enabled: boolean;
+  subject: string | null;
+  body: string | null;
+}
+
+// 申込者への受付メール(自動返信)のスイッチと文面。行が無い・DB 例外は OFF(安全側=送らない)。
+export async function loadInquiryAutoReplySettings(): Promise<InquiryAutoReplySettings> {
+  try {
+    const row = await prisma.mailConfig.findUnique({
+      where: { id: MAIL_CONFIG_ID },
+      select: { inquiryAutoReplyEnabled: true, inquiryAutoReplySubject: true, inquiryAutoReplyBody: true },
+    });
+    if (!row) return { enabled: false, subject: null, body: null };
+    return { enabled: row.inquiryAutoReplyEnabled === true, subject: row.inquiryAutoReplySubject, body: row.inquiryAutoReplyBody };
+  } catch {
+    return { enabled: false, subject: null, body: null };
+  }
+}
+
 // 送信に使う設定(パスワード復号込み)。未完成・復号失敗・DB 例外は null(呼び出し側は mail_not_configured)。
 // ⚠この戻り値(pass)をログ・監査・API 応答に出さない。
 export async function loadMailSendConfig(): Promise<MailSendConfig | null> {

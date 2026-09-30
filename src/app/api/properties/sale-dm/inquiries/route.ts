@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
         select: {
           id: true, draftId: true, submittedAt: true, name: true, phone: true, email: true,
           contactPref: true, contactTime: true, message: true, handleStatus: true, handledAt: true, handleNote: true,
-          notifyStatus: true, notifyLastError: true,
+          notifyStatus: true, notifyLastError: true, autoReplyStatus: true,
           draft: {
             select: {
               campaign: { select: { id: true, name: true } },
@@ -79,6 +79,7 @@ export async function GET(req: NextRequest) {
       handleNote: r.handleNote,
       notifyStatus: r.notifyStatus,
       notifyLastError: r.notifyLastError,
+      autoReplyStatus: r.autoReplyStatus,
     }));
     const maskedRows = toInquiryListRows(sourceRows, {
       contact: isPlainOwnerLevel(ownerDisplayConfig.phone),
