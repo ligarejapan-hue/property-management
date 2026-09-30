@@ -29,6 +29,12 @@ export interface Notice {
 
 export const NOTICE_STORAGE_KEY = "pm:notices:v1";
 export const NOTICE_CHANGED_EVENT = "pm:notices-changed";
+/**
+ * 後片付け(ログアウト・ログイン画面)の合図。ほかのタブは storage イベントでこれを受け、
+ * 以後そのタブからはお知らせを書かない・出さない(前の人のまま開いていたタブが、片付けた後に
+ * 前の人のお知らせを書き戻さないため・@codex #462)。中身は時刻だけ。
+ */
+export const NOTICE_SWITCH_KEY = "pm:notices:switched-at";
 export const NOTICE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const NOTICE_MAX = 50;
 
@@ -144,6 +150,7 @@ export function subscribeNotices(onChange: () => void): () => void {
 export function clearNoticeStorage(): void {
   try {
     window.localStorage.removeItem(NOTICE_STORAGE_KEY);
+    window.localStorage.setItem(NOTICE_SWITCH_KEY, String(Date.now()));
   } catch {
     /* noop */
   }

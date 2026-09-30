@@ -12,6 +12,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ToastStack, type ToastIcon, type ToastItem, type ToastTone } from "@/components/ui/toast-stack";
 import {
+  NOTICE_SWITCH_KEY,
   addNotice,
   loadNotices,
   markAllNoticesRead,
@@ -95,9 +96,19 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const onSwMessage = (e: MessageEvent) => {
       const data = e.data as { type?: string } | null;
-      // 共用 PC で別の人がログインした=このタブは前の人のもの。以後 OS の通知を出さない。
-      if (data?.type === "pm-switched") switchedRef.current = true;
+      // 共用 PC で別の人がログインした=このタブは前の人のもの。以後このタブからは
+      // ベル・OS の通知・右下のポップアップのどれも出さない(書き戻さない)。
+      if (data?.type === "pm-switched") markSwitched();
     };
+    const markSwitched = () => {
+      switchedRef.current = true;
+      setToasts([]);
+    };
+    // ほかのタブの後片付け(Service Worker の返事が無いときの直接の後片付けを含む)の合図。
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === NOTICE_SWITCH_KEY) markSwitched();
+    };
+    window.addEventListener("storage", onStorage);
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.addEventListener("message", onSwMessage);
       void registerNotificationWorker().then(async () => {
@@ -107,15 +118,19 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
     }
     return () => {
       cancelled = true;
+      window.removeEventListener("storage", onStorage);
       if ("serviceWorker" in navigator) navigator.serviceWorker.removeEventListener("message", onSwMessage);
     };
   }, []);
 
   const toast = useCallback((input: ToastInput) => {
+    if (switchedRef.current) return;
     setToasts((prev) => [...prev.slice(-3), { id: newId(), ...input }]);
   }, []);
 
   const notify = useCallback((input: NotifyInput) => {
+    // 後片付けを知らされたタブ(前の人のまま開いていた)からは何も書かない・出さない。
+    if (switchedRef.current) return;
     const now = Date.now();
     if (input.bell !== false) {
       const next = addNotice(
@@ -134,7 +149,7 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
       );
       saveNotices(next);
     }
-    if (input.osWhenHidden && document.visibilityState === "hidden" && !switchedRef.current) {
+    if (input.osWhenHidden && document.visibilityState === "hidden") {
       const gen = genRef.current;
       if (gen !== null) {
         void showOsNotification({ gen, title: input.title, body: input.body, tag: input.tag, url: input.url });

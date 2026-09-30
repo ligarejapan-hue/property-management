@@ -47,3 +47,18 @@ describe("編集権限の知らせ", () => {
     expect(read("app/(dashboard)/properties/[id]/page.tsx")).toContain("hasUnsavedInput={hasUnsavedOwnerInput}");
   });
 });
+
+describe("共用 PC で前の人のまま開いていたタブ", () => {
+  it("後片付けの合図(Service Worker の知らせ・storage)を受けたら、ベル・OS の通知・ポップアップのどれも出さない", () => {
+    const src = read("components/notifications/notice-provider.tsx");
+    expect(src).toMatch(/pm-switched"\) markSwitched\(\)/);
+    expect(src).toMatch(/e\.key === NOTICE_SWITCH_KEY\) markSwitched\(\)/);
+    expect(src).toMatch(/const notify = useCallback\(\(input: NotifyInput\) => \{[\s\S]{0,200}if \(switchedRef\.current\) return;/);
+    expect(src).toMatch(/const toast = useCallback\(\(input: ToastInput\) => \{\s*if \(switchedRef\.current\) return;/);
+  });
+
+  it("後片付け(clearNoticeStorage)がほかのタブへの合図を書く", () => {
+    const src = read("lib/notifications/notice-store.ts");
+    expect(src).toMatch(/removeItem\(NOTICE_STORAGE_KEY\);\s*window\.localStorage\.setItem\(NOTICE_SWITCH_KEY/);
+  });
+});
