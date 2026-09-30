@@ -1,4 +1,4 @@
-import { phoneSearchDigits } from "@/lib/phone-format-jp";
+import { isPhoneCharsOnly, phoneSearchDigits } from "@/lib/phone-format-jp";
 
 export type AgentQuery = { type: "digits"; digits: string } | { type: "text"; text: string } | { type: "none" };
 
@@ -13,4 +13,13 @@ export function classifyAgentQuery(q: string): AgentQuery {
   const text = q.normalize("NFKC").trim();
   if ([...text].length < 2) return { type: "none" };
   return { type: "text", text };
+}
+
+/**
+ * 画面で「探した」とみなしてよい語か。数字と区切りだけの語は、サーバーが電話番号として照合できる7桁から。
+ * それより短いと会社名として探して0件になり、打ちかけの番号で「新しく登録」が出てしまう(@codex #459 R22)。
+ */
+export function agentQueryReady(q: string): boolean {
+  if (isPhoneCharsOnly(q)) return phoneSearchDigits(q) != null;
+  return classifyAgentQuery(q).type !== "none";
 }

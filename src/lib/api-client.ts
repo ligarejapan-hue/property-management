@@ -4859,3 +4859,199 @@ export async function startRegistryOwnerApply(
     body: JSON.stringify({ limit }),
   });
 }
+
+// ============================================================
+// 業者からの反響の受付(受付の窓)— 設計 docs/superpowers/specs/2026-09-28-agent-inquiry-desk-design.md
+// ============================================================
+export type AdMediumKey = "own_site" | "athome" | "suumo" | "homes" | "other_portal" | "flyer";
+export type AdValueKey = "ok" | "ng" | "ask";
+export type InquiryKindKey = "viewing" | "ad_permission" | "material_request";
+export type InquiryStatusKey = "open" | "in_progress" | "done";
+export type InquiryChannelKey = "phone" | "email" | "fax";
+export type ViewingTypeKey = "guided" | "preview";
+
+/** 受付の窓に出してよい物件の形(API の許可リストと同じ)。 */
+export interface DeskProperty {
+  id: string;
+  name: string;
+  roomNo: string | null;
+  town: string;
+  propertyType: string;
+  adPermissions: Partial<Record<AdMediumKey, AdValueKey>>;
+}
+export interface AgentHit {
+  id: string;
+  companyName: string;
+  branchName: string | null;
+  phone: string;
+  lastContact: { name: string | null; mobile: string | null; email: string | null } | null;
+  matchedBy: "phone" | "mobile" | "text";
+}
+export interface ViewingView {
+  id: string;
+  scheduledAt: string | null;
+  viewingType: ViewingTypeKey;
+  canceledAt: string | null;
+  resultNote: string | null;
+  version: number;
+  attendant: { id: string; name: string } | null;
+}
+export interface InquiryView {
+  id: string;
+  kind: InquiryKindKey;
+  status: InquiryStatusKey;
+  channel: InquiryChannelKey;
+  receivedAt: string;
+  version: number;
+  contactName: string | null;
+  contactMobile: string | null;
+  contactEmail: string | null;
+  note: string | null;
+  assignee: { id: string; name: string } | null;
+  agent: { id: string; companyName: string; branchName: string | null; phone: string };
+  viewings: ViewingView[];
+  property: DeskProperty;
+}
+export interface UpcomingViewing {
+  id: string;
+  scheduledAt: string;
+  viewingType: ViewingTypeKey;
+  version: number;
+  attendant: { id: string; name: string } | null;
+  inquiry: { id: string; contactName: string | null; agent: { companyName: string; branchName: string | null }; property: DeskProperty };
+}
+export interface InquiryCounts {
+  open: number;
+  upcomingViewings: number;
+}
+export interface DeskAgentInput {
+  companyName: string;
+  phone: string;
+  companyKana?: string | null;
+  branchName?: string | null;
+  licenseNo?: string | null;
+  fax?: string | null;
+  email?: string | null;
+  address?: string | null;
+  note?: string | null;
+}
+export interface AgentInquiryCreateBody {
+  propertyId: string;
+  agentId: string;
+  kind: InquiryKindKey;
+  channel: InquiryChannelKey;
+  contactName?: string | null;
+  contactMobile?: string | null;
+  contactEmail?: string | null;
+  note?: string | null;
+  viewing?: { viewingType: ViewingTypeKey; scheduledAt?: string | null; attendantId?: string | null };
+}
+
+const deskJsonInit = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+export async function searchDeskAgents(q: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { agents: [] as AgentHit[] };
+  }
+  return apiFetch<{ agents: AgentHit[] }>(`/api/agents?q=${encodeURIComponent(q)}`);
+}
+export async function createDeskAgent(body: DeskAgentInput) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id: "mock-agent" };
+  }
+  return apiFetch<{ id: string }>("/api/agents", deskJsonInit("POST", body));
+}
+export async function searchDeskProperties(q: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { properties: [] as DeskProperty[] };
+  }
+  return apiFetch<{ properties: DeskProperty[] }>(`/api/agent-inquiries/property-search?q=${encodeURIComponent(q)}`);
+}
+export async function createAgentInquiry(body: AgentInquiryCreateBody) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id: "mock-inquiry" };
+  }
+  return apiFetch<{ id: string }>("/api/agent-inquiries", deskJsonInit("POST", body));
+}
+export async function fetchAgentInquiries(p: { status?: string; assignee?: string; cursor?: string }) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { items: [] as InquiryView[], nextCursor: null as string | null };
+  }
+  const sp = new URLSearchParams();
+  if (p.status) sp.set("status", p.status);
+  if (p.assignee) sp.set("assignee", p.assignee);
+  if (p.cursor) sp.set("cursor", p.cursor);
+  const qs = sp.toString();
+  return apiFetch<{ items: InquiryView[]; nextCursor: string | null }>(`/api/agent-inquiries${qs ? `?${qs}` : ""}`);
+}
+export async function fetchAgentInquiry(id: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    throw new Error("モックでは反響の詳細を読めません");
+  }
+  return apiFetch<{ inquiry: InquiryView; canOpenProperty: boolean }>(`/api/agent-inquiries/${id}`);
+}
+export async function updateAgentInquiry(
+  id: string,
+  body: { version: number; status?: string; assigneeId?: string | null; note?: string | null },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { version: body.version + 1 };
+  }
+  return apiFetch<{ version: number }>(`/api/agent-inquiries/${id}`, deskJsonInit("PATCH", body));
+}
+export async function addAgentViewing(
+  inquiryId: string,
+  body: { viewingType: ViewingTypeKey; scheduledAt?: string | null; attendantId?: string | null },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { id: "mock-viewing" };
+  }
+  return apiFetch<{ id: string }>(`/api/agent-inquiries/${inquiryId}/viewings`, deskJsonInit("POST", body));
+}
+export async function updateAgentViewing(
+  inquiryId: string,
+  viewingId: string,
+  body: {
+    version: number;
+    scheduledAt?: string | null;
+    viewingType?: ViewingTypeKey;
+    attendantId?: string | null;
+    resultNote?: string | null;
+    canceled?: boolean;
+  },
+) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { ok: true as const, version: body.version + 1 };
+  }
+  return apiFetch<{ ok: true; version: number }>(
+    `/api/agent-inquiries/${inquiryId}/viewings/${viewingId}`,
+    deskJsonInit("PATCH", body),
+  );
+}
+export async function fetchAgentInquiryCounts() {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { open: 0, upcomingViewings: 0 };
+  }
+  return apiFetch<InquiryCounts>("/api/agent-inquiries/counts");
+}
+export async function fetchUpcomingViewings() {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { viewings: [] as UpcomingViewing[] };
+  }
+  return apiFetch<{ viewings: UpcomingViewing[] }>("/api/agent-inquiries/upcoming");
+}

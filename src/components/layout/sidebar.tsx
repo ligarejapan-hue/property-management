@@ -58,8 +58,10 @@ export default function Sidebar({ userRole, currentPath }: SidebarProps) {
       <a
         key={item.href}
         href={item.href}
-        target="_blank"
-        rel="noopener noreferrer"
+        target={item.windowName ?? "_blank"}
+        // 名前付きの窓(受付の窓)に noopener を付けると、ブラウザが同じ名前の窓を探せず毎回新しい窓になる。
+        // 同じサイトの画面なので付けなくてよい。資料(_blank)は従来どおり付ける。
+        rel={item.windowName ? undefined : "noopener noreferrer"}
         className={linkClasses(item.href)}
         onClick={() => setMobileOpen(false)}
       >

@@ -304,11 +304,13 @@ describe("謄本取得の資格情報は廃止", () => {
 
 describe("⚠変えないもの", () => {
   it("スマホの現場スタッフに出るメニューは、「査定の申込」が1件増える以外は従来どおり(fix wave Minor #4)", () => {
-    // 現地調査3項目 + 資料3項目 + ホーム + 査定の申込(通知メールのリンク先を自分でも開けるように)。
+    // 現地調査3項目 + 資料3項目 + ホーム + 査定の申込(通知メールのリンク先を自分でも開けるように)
+    // + 反響の受付(業者からの電話は誰が取るか分からない=全員が使う・2026-09-28 設計 方針10)。
     const staff = visibleSidebar("field_staff");
     expect(staff.map((g) => g.key)).toEqual(["home", "field", "dm", "doc"]);
     expect(staff.flatMap((g) => g.items).map((i) => i.href)).toEqual([
       "/home",
+      "/inquiry-desk",
       "/field-survey/map",
       "/field-survey/sessions",
       "/field-survey/candidates",

@@ -229,6 +229,7 @@ describe("画面の部品は自前の題名(h1)を持たない", () => {
     "src/components/ui/page-header.tsx", // 題名そのものを描く部品
     "src/components/layout/header.tsx", // 画面上端のアプリ名(ページ題名ではない)
     "src/components/properties/dm-logs-view.tsx", // 物件配下の別画面。左メニューからは行かない
+    "src/components/agent-inquiry/desk-shell.tsx", // 受付の窓の枠=メニューも共通ヘッダも無い別窓なので自前の題名を持つ
   ]);
 
   function walkComponents(dir: string, out: string[] = []): string[] {
