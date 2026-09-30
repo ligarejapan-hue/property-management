@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { visibleHomeCards } from "./home-model";
 import { PageHeader } from "@/components/ui/page-header";
+import HomeInquiryCounts from "./home-inquiry-counts";
 
 /** 役割別ホーム(ランチャー)。カードは既存ページへの Link。userRole は親(page)がセッションから渡す。 */
 export function HomeContent({ userRole }: { userRole: string }) {
@@ -8,6 +9,8 @@ export function HomeContent({ userRole }: { userRole: string }) {
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader title="ホーム" description="やりたいことを選んでください。" />
+      {/* 業者からの反響(設計 2026-09-28 方針9)。権限が無い人には出ない。 */}
+      <HomeInquiryCounts />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {cards.map((c) => (
           <Link
