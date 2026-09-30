@@ -130,3 +130,15 @@ describe("予告を取り下げたとき(@codex #462)", () => {
     expect(sw).toMatch(/data\.type === "close"[\s\S]{0,600}if \(data\.gen !== state\.gen\) \{\s*reply\(\{ ok: false, stale: true \}\);/);
   });
 });
+
+describe("戻る/進むの保存(bfcache)に備えた pagehide(@codex #462)", () => {
+  it("pagehide で自分から鍵を返した expired は、外れた知らせ(N2)にしない", () => {
+    const src = read("components/notifications/edit-lock-notices.tsx");
+    expect(src).toMatch(/window\.addEventListener\("pagehide", onPageHide\);/);
+    expect(src).toMatch(/const onPageHide = \(\) => \{\s*pageHiddenRef\.current = true;/);
+    expect(src).toMatch(/if \(next\.kind === "mine"\) pageHiddenRef\.current = false;/);
+    expect(src).toMatch(
+      /if \(event\?\.type === "lost" && event\.reason === "expired" && pageHiddenRef\.current\) event = null;/,
+    );
+  });
+});

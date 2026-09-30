@@ -50,6 +50,12 @@ export function EditLockNotices({
   const returnedAtRef = useRef(0);
   /** 今回の予告(55分)を別の画面向け(ベル・OS の通知)に知らせ済みか。 */
   const warnNotifiedRef = useRef(false);
+  /**
+   * 画面を離れた(pagehide)ときの印。戻る/進むの保存(bfcache)に備えて、編集ロックは pagehide で
+   * 鍵を返して画面を `expired` に落とす(戻ったら取り直す・`controller.onPageHide`)。これは
+   * 外れたのではないので N2 を出さない(@codex #462)。次に `mine` になったら戻す。
+   */
+  const pageHiddenRef = useRef(false);
   const unsavedRef = useRef(hasUnsavedInput);
   useEffect(() => {
     unsavedRef.current = hasUnsavedInput;
@@ -57,8 +63,11 @@ export function EditLockNotices({
 
   useEffect(() => {
     const next: EditLockSnapshot = { kind: state.kind, warnIdle };
-    const event = editLockNoticeEvent(prevRef.current, next);
+    let event = editLockNoticeEvent(prevRef.current, next);
     prevRef.current = next;
+    if (next.kind === "mine") pageHiddenRef.current = false;
+    // pagehide で自分から鍵を返した(bfcache に備えた)ことによる `expired` は、外れた知らせにしない。
+    if (event?.type === "lost" && event.reason === "expired" && pageHiddenRef.current) event = null;
     if (!(next.kind === "mine" && next.warnIdle) && warnNotifiedRef.current) {
       // 予告が終わった(延長された・外れた)ので、別の画面向けに出した予告の OS の通知を閉じる
       // (@codex #462)。外れたときは下で外れた知らせを出す。
@@ -101,6 +110,14 @@ export function EditLockNotices({
     }
     pendingReturnRef.current = body;
   }, [state.kind, warnIdle, resourceType, resourceId, notify, toast, withdraw]);
+
+  useEffect(() => {
+    const onPageHide = () => {
+      pageHiddenRef.current = true;
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
 
   // 画面に戻ったとき、見ていない間に外れていた理由をはっきり出す(§4.6 の 1)。
   // 予告(帯)が出ている間に別の画面へ移ったときは、そのとき予告をベル・OS の通知に出す(@codex #462)。
