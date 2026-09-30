@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { USE_MOCK } from "@/lib/api-client";
+import { DESK_WINDOW_NAME, windowNameFor } from "@/lib/agent-inquiry/main-view";
 
 type ShellStatus = "loading" | "authenticated" | "unauthenticated";
 
@@ -79,6 +80,11 @@ export default function DeskShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/inquiry-desk";
   const { data: session, status } = useSession();
   const openCount = useOpenCount();
+  // ブックマークから直接開いた窓は名前が空。メイン画面の「反響の受付」がこの窓に開くよう名乗る。
+  useEffect(() => {
+    const name = windowNameFor(window.name, DESK_WINDOW_NAME);
+    if (name) window.name = name;
+  }, []);
   return (
     <DeskShellView
       status={USE_MOCK ? "authenticated" : status}
