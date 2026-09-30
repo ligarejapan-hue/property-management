@@ -142,6 +142,9 @@ export default function AgentInquiryTab({ propertyId, canWrite }: { propertyId: 
   // 読み込みの世代。新しい読み込みを始めたら、古い読み込みの結果は捨てる(順番が入れ替わっても古い値で上書きしない)。
   const genRef = useRef(0);
   const savingRef = useRef(false);
+  // 変更を権限なしで断られた(開いている間に編集権限・担当を外された)。親の権限が更新されるのを待たず、
+  // このタブではボタンを出さない(開き直すと親の権限で決め直す)。
+  const [writeDenied, setWriteDenied] = useState(false);
 
   const load = useCallback(async () => {
     const gen = ++genRef.current;
@@ -184,6 +187,7 @@ export default function AgentInquiryTab({ propertyId, canWrite }: { propertyId: 
       setData((d) => (d ? { ...d, adPermissions: r.adPermissions } : d));
       notifyInquiryChanged();
     } catch (e) {
+      if (apiErrorCode(e) === "FORBIDDEN") setWriteDenied(true);
       setMessage(adSaveErrorMessage(e));
     }
     // 成功でも失敗でも、保存の後に始めた読み込みで今の値に揃える(保存中に始まった古い読み込みは世代で捨てる)。
@@ -212,7 +216,7 @@ export default function AgentInquiryTab({ propertyId, canWrite }: { propertyId: 
       )}
       <PropertyInquiryView
         data={data}
-        canEditAds={canWrite}
+        canEditAds={canWrite && !writeDenied}
         savingMedium={savingMedium}
         message={message}
         onToggleAd={(m) => void toggle(m)}

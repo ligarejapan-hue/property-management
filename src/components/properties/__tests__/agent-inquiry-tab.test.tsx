@@ -91,6 +91,11 @@ describe("物件画面への組み込み", () => {
   it("物件ごとに作り直し(key)、物件の編集権限を渡す", () => {
     expect(page).toMatch(/<AgentInquiryTab key=\{property\.id\} propertyId=\{property\.id\} canWrite=\{canWriteProperty\} \/>/);
   });
+  it("広告の可否の変更を権限なしで断られたら、その後はボタンを出さない", () => {
+    const src = read("src/components/properties/agent-inquiry-tab.tsx");
+    expect(src).toContain("canEditAds={canWrite && !writeDenied}");
+    expect(src).toMatch(/apiErrorCode\(e\) === "FORBIDDEN"\) setWriteDenied\(true\)/);
+  });
   it("反響タブは権限表を自分で読まない(3点セットの対象にしない)", () => {
     expect(read("src/components/properties/agent-inquiry-tab.tsx")).not.toContain("useScreenProtection");
   });

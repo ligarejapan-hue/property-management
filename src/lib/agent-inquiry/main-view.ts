@@ -1,5 +1,5 @@
 import type { AdValueKey, AgentDetail, InquiryCounts, PropertyTimelineEntry } from "@/lib/api-client";
-import { KIND_LABEL, VIEWING_TYPE_LABEL } from "./desk-form";
+import { KIND_LABEL, VIEWING_TYPE_LABEL, draftStale, editDraft, type Draft } from "./desk-form";
 
 /** メイン画面側(物件の反響欄・業者の名簿・ホーム)の判定と表示(設計 2026-09-28 §2.3)。純関数だけ。 */
 
@@ -52,12 +52,50 @@ export const AGENT_EDIT_FIELDS = [
   { key: "note", label: "メモ", multiline: true },
 ] as const satisfies readonly { key: keyof AgentDetail; label: string; phone?: true; multiline?: true }[];
 export type AgentEditKey = (typeof AGENT_EDIT_FIELDS)[number]["key"];
-/** 触った欄だけを持つ(触っていない欄は最新の値をそのまま出す)。 */
-export type AgentEdits = Partial<Record<AgentEditKey, string>>;
+/**
+ * 触った欄だけを持つ(触っていない欄は最新の値をそのまま出す)。欄ごとに、打った値と
+ * 書き始めたときの最新の値(base)を覚える=その後に他の人が同じ欄を変えたら気付ける。
+ */
+export type AgentEdits = Partial<Record<AgentEditKey, Draft>>;
 const REQUIRED: readonly AgentEditKey[] = ["companyName", "phone"];
 
 export function agentFieldValue(agent: AgentDetail, edits: AgentEdits, key: AgentEditKey): string {
-  return edits[key] ?? agent[key] ?? "";
+  return edits[key]?.value ?? agent[key] ?? "";
+}
+/** 欄に打った値を下書きへ(書き始めたときの値は最初の1回だけ覚える)。 */
+export function editAgentField(agent: AgentDetail, edits: AgentEdits, key: AgentEditKey, value: string): AgentEdits {
+  return { ...edits, [key]: editDraft(edits[key] ?? null, value, agent[key] ?? "") };
+}
+/**
+ * 自分が打っている欄のうち、書き始めた後に他の人が変えた欄(相手の今の値つき)。
+ * 「触った欄だけ送る」は別の欄しか守れない。同じ欄がぶつかったら、黙って上書きせず相手の値を見せる。
+ */
+export function agentStaleFields(agent: AgentDetail, edits: AgentEdits): { key: AgentEditKey; label: string; current: string }[] {
+  return AGENT_EDIT_FIELDS.filter((f) => draftStale(edits[f.key] ?? null, agent[f.key] ?? "")).map((f) => ({
+    key: f.key,
+    label: f.label.replace("(必須)", ""),
+    current: agent[f.key] || "(空)",
+  }));
+}
+/** 相手の値を見せた後、今の値を基準にし直す(もう一度保存を押せば自分の内容で保存する)。 */
+export function rebaseAgentEdits(agent: AgentDetail, edits: AgentEdits): AgentEdits {
+  const next: AgentEdits = {};
+  for (const { key } of AGENT_EDIT_FIELDS) {
+    const d = edits[key];
+    if (d) next[key] = { value: d.value, base: agent[key] ?? "" };
+  }
+  return next;
+}
+/**
+ * 保存が通った後の手元の値(送った値と新しい版番号を写す)。続く読み直しに失敗しても、
+ * 保存前の値を見せない・古い版番号で次の保存を送らない。
+ */
+export function agentAfterSave(
+  agent: AgentDetail,
+  sent: Partial<Record<AgentEditKey, string | null>> & { isArchived?: boolean },
+  version: number,
+): AgentDetail {
+  return { ...agent, ...(sent as Partial<AgentDetail>), version };
 }
 export function agentEditError(agent: AgentDetail, edits: AgentEdits): string | null {
   return REQUIRED.some((k) => agentFieldValue(agent, edits, k).trim() === "") ? "商号と代表電話を入れてください" : null;
@@ -71,7 +109,7 @@ export function agentEditPatch(agent: AgentDetail, edits: AgentEdits): Partial<R
   for (const { key } of AGENT_EDIT_FIELDS) {
     const typed = edits[key];
     if (typed === undefined) continue;
-    const next = typed.trim();
+    const next = typed.value.trim();
     if (next === (agent[key] ?? "").trim()) continue;
     patch[key] = next === "" && !REQUIRED.includes(key) ? null : next;
   }

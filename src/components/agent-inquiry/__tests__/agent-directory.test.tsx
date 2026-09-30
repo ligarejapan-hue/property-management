@@ -58,6 +58,10 @@ describe("名簿の画面", () => {
     expect(page()).toContain("newAgentAction(");
     expect(page()).toMatch(/canWrite && createAction !== "none"/);
   });
+  it("通信の失敗では書けるかどうかを変えない。権限なしのときだけ落とす", () => {
+    expect(page().match(/setCanWrite\(false\)/g)).toHaveLength(1);
+    expect(page()).toMatch(/if \(forbidden\) setCanWrite\(false\)/);
+  });
   it("候補は今の検索語のものだけ", () => {
     expect(page()).toContain("hitsForQuery(");
   });

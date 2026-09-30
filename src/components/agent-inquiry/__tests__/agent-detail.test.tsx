@@ -23,7 +23,7 @@ describe("業者の詳細の会社情報", () => {
     expect(out).toContain("午前は不在");
   });
   it("触った欄は打ちかけの値を出す(読み直しても消えない)", () => {
-    expect(fields({ edits: { branchName: "渋谷支店" } })).toContain('value="渋谷支店"');
+    expect(fields({ edits: { branchName: { value: "渋谷支店", base: "新宿支店" } } })).toContain('value="渋谷支店"');
   });
   it("★書けない人には入力欄を出さず、文字で見せる", () => {
     const out = fields({ canWrite: false });
@@ -35,7 +35,7 @@ describe("業者の詳細の会社情報", () => {
     expect(fields({ saving: true })).toMatch(/<fieldset[^>]*disabled=""/);
   });
   it("電話の桁がおかしければ黄色で知らせる(保存は止めない)", () => {
-    expect(fields({ edits: { phone: "03-12" } })).toContain("電話番号の桁をご確認ください(このままでも保存できます)");
+    expect(fields({ edits: { phone: { value: "03-12", base: "03-1234-5678" } } })).toContain("電話番号の桁をご確認ください(このままでも保存できます)");
   });
 });
 
@@ -89,6 +89,28 @@ describe("詳細の画面", () => {
     expect(body.indexOf("await load()")).toBeGreaterThan(-1);
     expect(body.lastIndexOf("setNotice(")).toBeGreaterThan(body.indexOf("await load()"));
     expect(body.slice(0, body.indexOf("await load()"))).not.toMatch(/setNotice\(\{/);
+  });
+  it("★保存の前に、自分が打っている欄を他の人が変えていたら1回止めて相手の値を見せる", () => {
+    const src = page();
+    const at = src.indexOf("const save = ");
+    const body = src.slice(at, src.indexOf("const loadMore", at));
+    expect(body.indexOf("agentStaleFields(agent, edits)")).toBeGreaterThan(-1);
+    expect(body.indexOf("agentStaleFields(agent, edits)")).toBeLessThan(body.indexOf("void send("));
+    expect(body).toContain("rebaseAgentEdits(agent, edits)");
+    expect(body).toContain("自分の内容で上書きするなら、もう一度保存を押してください");
+  });
+  it("★保存が通ったら、読み直しを待たずに送った値と版番号を手元へ写す", () => {
+    expect(page()).toContain("agentAfterSave(");
+  });
+  it("★通信の失敗では書けるかどうかを変えない(編集欄を消さない)。権限なしのときだけ落とす", () => {
+    const src = page();
+    const at = src.indexOf("const load = useCallback");
+    const body = src.slice(at, src.indexOf("useEffect(", at));
+    expect(body).toMatch(/if \(code === "FORBIDDEN"\) setCanWrite\(false\)/);
+    expect(body.match(/setCanWrite\(false\)/g)).toHaveLength(1);
+  });
+  it("読み直せなかったときに、その場でもう一度読める", () => {
+    expect(page().split("もう一度読む").length - 1).toBe(2);
   });
   it("しまう前に確かめ、戻すのは1回で", () => {
     expect(page()).toContain("<ConfirmDialog");

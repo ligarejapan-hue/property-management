@@ -3,7 +3,17 @@
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import { apiErrorCode, fetchAgentDetail, updateAgent, type AgentDetail, type AgentHistoryItem } from "@/lib/api-client";
 import { agentLabel } from "@/lib/agent-inquiry/desk-form";
-import { agentEditError, agentEditPatch, agentFieldValue, type AgentEditKey, type AgentEdits } from "@/lib/agent-inquiry/main-view";
+import {
+  agentAfterSave,
+  agentEditError,
+  agentEditPatch,
+  agentFieldValue,
+  agentStaleFields,
+  editAgentField,
+  rebaseAgentEdits,
+  type AgentEditKey,
+  type AgentEdits,
+} from "@/lib/agent-inquiry/main-view";
 import { notifyInquiryChanged } from "@/lib/agent-inquiry/desk-sync";
 import { formatPhoneJp } from "@/lib/phone-format-jp";
 import { PageHeader } from "@/components/ui/page-header";
@@ -43,7 +53,8 @@ function AgentDetailBody({ id }: { id: string }) {
     } catch (e) {
       if (genRef.current !== gen) return;
       const code = apiErrorCode(e);
-      setCanWrite(false);
+      // 通信の失敗では書けるかどうかを変えない(編集欄を消さない)。権限なしのときだけ落とす。
+      if (code === "FORBIDDEN") setCanWrite(false);
       setState(code === "FORBIDDEN" ? "forbidden" : code === "NOT_FOUND" ? "notfound" : "error");
     }
   }, [id]);
@@ -64,7 +75,10 @@ function AgentDetailBody({ id }: { id: string }) {
     setNotice(null);
     let result: { tone: "ok" | "error"; text: string };
     try {
-      await updateAgent(agent.id, body);
+      const r = await updateAgent(agent.id, body);
+      // 送った値と新しい版番号を手元へ写す=続く読み直しに失敗しても、保存前の値を見せない・
+      // 古い版番号で次の保存を送らない。
+      setAgent((a) => (a ? agentAfterSave(a, body, r.version) : a));
       onOk();
       result = { tone: "ok", text: okText };
       // 受付の窓の業者の検索(しまった業者は出ない・商号)が変わるので知らせる。
@@ -86,6 +100,16 @@ function AgentDetailBody({ id }: { id: string }) {
     const err = agentEditError(agent, edits);
     if (err) {
       setNotice({ tone: "error", text: err });
+      return;
+    }
+    // 自分が打っている欄を他の人が先に変えていたら、1回目は止めて相手の値を見せる(黙って上書きしない)。
+    const stale = agentStaleFields(agent, edits);
+    if (stale.length > 0) {
+      setNotice({
+        tone: "error",
+        text: `他の人が先に変えています(${stale.map((s) => `${s.label}=「${s.current}」`).join("・")})。自分の内容で上書きするなら、もう一度保存を押してください。`,
+      });
+      setEdits(rebaseAgentEdits(agent, edits));
       return;
     }
     const patch = agentEditPatch(agent, edits);
@@ -149,9 +173,12 @@ function AgentDetailBody({ id }: { id: string }) {
         back={{ href: "/agents", to: "業者の名簿" }}
       />
       {state === "error" && (
-        <p role="alert" className="mb-3 text-sm text-rose-600 dark:text-rose-400">
-          読み直せませんでした(下の表示は最新ではないかもしれません)。
-        </p>
+        <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-rose-600 dark:text-rose-400">
+          <span>読み直せませんでした(下の表示は最新ではないかもしれません)。</span>
+          <Button variant="secondary" size="sm" disabled={saving} onClick={() => void load()}>
+            もう一度読む
+          </Button>
+        </div>
       )}
       <section className="mb-4 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
         <h2 className="mb-3 text-sm font-semibold text-gray-900 dark:text-gray-100">会社の情報</h2>
@@ -160,9 +187,11 @@ function AgentDetailBody({ id }: { id: string }) {
           edits={edits}
           canWrite={canWrite}
           saving={saving}
-          onEdit={(key, value) => setEdits((p) => ({ ...p, [key]: value }))}
+          onEdit={(key, value) => setEdits((p) => editAgentField(agent, p, key, value))}
           onBlurPhone={(key: AgentEditKey) =>
-            setEdits((p) => (p[key] === undefined ? p : { ...p, [key]: formatPhoneJp(agentFieldValue(agent, p, key)).value }))
+            setEdits((p) =>
+              p[key] === undefined ? p : editAgentField(agent, p, key, formatPhoneJp(agentFieldValue(agent, p, key)).value),
+            )
           }
         />
         {notice && (

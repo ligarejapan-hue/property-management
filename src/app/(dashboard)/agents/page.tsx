@@ -51,8 +51,10 @@ export default function AgentsPage() {
         setState("ok");
       } catch (e) {
         if (cancelled) return;
-        setCanWrite(false);
-        setState(apiErrorCode(e) === "FORBIDDEN" ? "forbidden" : "error");
+        const forbidden = apiErrorCode(e) === "FORBIDDEN";
+        // 通信の失敗では書けるかどうかを変えない。権限なしのときだけ落とす。
+        if (forbidden) setCanWrite(false);
+        setState(forbidden ? "forbidden" : "error");
       }
     })();
     return () => {
