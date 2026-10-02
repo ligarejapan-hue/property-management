@@ -285,3 +285,22 @@ describe("0800(フリーダイヤル)は携帯ではなく会社の番号(@codex
     expect(splitNewAgentPhone("080-1234-5678")).toEqual({ agentPhone: "", callerMobile: "080-1234-5678" });
   });
 });
+
+import { shouldBlockEnterSubmit } from "@/lib/agent-inquiry/desk-form";
+describe("1行の入力欄の Enter では保存しない", () => {
+  const k = (o: Partial<{ key: string; isComposing: boolean; tagName: string; type: string | undefined }>) =>
+    shouldBlockEnterSubmit({ key: "Enter", isComposing: false, tagName: "INPUT", type: "text", ...o });
+  it("文字・電話・メール・日付の欄の Enter は止める", () => {
+    for (const type of ["text", "tel", "email", "date", "time", "search"]) expect(k({ type })).toBe(true);
+  });
+  it("★日本語の変換を確定する Enter は止めない(変換の確定を妨げない)", () => {
+    expect(k({ isComposing: true })).toBe(false);
+  });
+  it("メモ欄(複数行)の Enter は改行のまま・ボタンの Enter は押したことになる", () => {
+    expect(k({ tagName: "TEXTAREA", type: undefined })).toBe(false);
+    expect(k({ tagName: "BUTTON", type: "submit" })).toBe(false);
+  });
+  it("Enter 以外のキーは関係ない", () => {
+    expect(k({ key: "a" })).toBe(false);
+  });
+});

@@ -14,6 +14,7 @@ import {
   type DeskFormAction,
   type DeskFormState,
   splitNewAgentPhone,
+  shouldBlockEnterSubmit,
 } from "@/lib/agent-inquiry/desk-form";
 import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
 import { AgentPicker } from "./agent-picker";
@@ -70,6 +71,11 @@ export function InquiryFormView({
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit();
+      }}
+      onKeyDown={(e) => {
+        const t = e.target as HTMLInputElement;
+        // 1行の入力欄の Enter では保存しない(保存はボタンだけ)。メモ欄の改行・変換の確定はそのまま。
+        if (shouldBlockEnterSubmit({ key: e.key, isComposing: e.nativeEvent.isComposing, tagName: t.tagName, type: t.type })) e.preventDefault();
       }}
     >
       {/* 保存中はまとめて使えなくする(保存が終わると空に戻るので、その間の入力が消えないように・@codex #459 R11)。 */}

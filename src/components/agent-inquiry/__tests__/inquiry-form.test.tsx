@@ -137,3 +137,11 @@ describe("業者の登録ができたか分からないとき(@codex #459 R16)",
     expect(s).toContain("登録できたか分かりません");
   });
 });
+
+describe("Enter で勝手に保存しない", () => {
+  it("フォームが Enter を受けて shouldBlockEnterSubmit で止める", () => {
+    const src = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-form.tsx"), "utf8");
+    expect(src).toMatch(/onKeyDown=\{\(e\) => \{[\s\S]{0,300}shouldBlockEnterSubmit\(/);
+    expect(src).toMatch(/if \(shouldBlockEnterSubmit\([\s\S]{0,200}\)\) e\.preventDefault\(\);/);
+  });
+});
