@@ -1,12 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { safeRandomId } from "@/lib/random-id";
+import { safeUuidV4 } from "@/lib/random-id";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Button } from "@/components/ui/button";
 import { createDeskAgent, type AgentHit } from "@/lib/api-client";
 import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
-import { isAmbiguousSaveError, tokenForSubmit } from "@/lib/agent-inquiry/desk-form";
+import { isAmbiguousSaveError, setFieldIfChanged, tokenForSubmit } from "@/lib/agent-inquiry/desk-form";
 import { useDeskAccess } from "./desk-access";
 
 const MLIT_SEARCH_URL = "https://etsuran2.mlit.go.jp/TAKKEN/";
@@ -48,7 +48,8 @@ export function AgentCreateModal({
   // 押し直しの鍵。中身(v)を変えずに押し直したら同じ鍵=二重に登録されない。
   const tokenRef = useRef<{ snapshot: typeof v; token: string } | null>(null);
   const { writeDenied } = useDeskAccess();
-  const set = (k: Key, val: string) => setV((p) => ({ ...p, [k]: val }));
+  // 同じ値なら同じ状態のまま=欄を離れたときの電話の整形で押し直しの鍵が変わらない(二重登録を防ぐ)。
+  const set = (k: Key, val: string) => setV((p) => setFieldIfChanged(p, k, val));
   const submit = async () => {
     if (saving) return;
     if (!v.companyName.trim() || !v.phone.trim()) {
@@ -57,7 +58,7 @@ export function AgentCreateModal({
     }
     setSaving(true);
     setError(null);
-    const t = tokenForSubmit(tokenRef.current, v, safeRandomId);
+    const t = tokenForSubmit(tokenRef.current, v, safeUuidV4);
     tokenRef.current = t;
     try {
       const phone = formatPhoneJp(v.phone).value;

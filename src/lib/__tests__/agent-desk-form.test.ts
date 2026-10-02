@@ -359,3 +359,14 @@ describe("変わらない入力では同じ状態のまま(押し直しの鍵を
     expect(deskFormReducer(s, { type: "contact", field: "contactMobile", value: "090-1234-5679" })).not.toBe(s);
   });
 });
+
+import { setFieldIfChanged } from "@/lib/agent-inquiry/desk-form";
+describe("新しい業者の小窓の欄(押し直しの鍵を変えない)", () => {
+  it("★同じ値なら同じ参照を返す(欄を離れたときの整形で鍵が変わらない)・違えば新しい参照", () => {
+    const v = { phone: "03-1234-5678", fax: "" };
+    expect(setFieldIfChanged(v, "phone", "03-1234-5678")).toBe(v);
+    const next = setFieldIfChanged(v, "phone", "03-1234-5679");
+    expect(next).not.toBe(v);
+    expect(next).toEqual({ phone: "03-1234-5679", fax: "" });
+  });
+});

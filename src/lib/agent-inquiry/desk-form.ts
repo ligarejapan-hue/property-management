@@ -161,6 +161,11 @@ export function tokenForSubmit<T>(
   return prev && prev.snapshot === snapshot ? prev : { snapshot, token: gen() };
 }
 
+/** 欄の値を入れる。同じ値なら同じ参照を返す=欄を離れたときの整形などで押し直しの鍵が変わらない。 */
+export function setFieldIfChanged<T extends Record<string, string>, K extends keyof T>(prev: T, key: K, value: T[K]): T {
+  return prev[key] === value ? prev : { ...prev, [key]: value };
+}
+
 export type DonePeriodKey = "30" | "90" | "all";
 export const DONE_PERIODS: readonly { key: DonePeriodKey; label: string; days: number | null }[] = [
   { key: "30", label: "直近30日", days: 30 },

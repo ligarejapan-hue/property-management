@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useReducer, useRef, useState, type Dispatch } from "react";
-import { safeRandomId } from "@/lib/random-id";
+import { safeUuidV4 } from "@/lib/random-id";
 import { createAgentInquiry, type AgentHit } from "@/lib/api-client";
 import {
   EMPTY_DESK_FORM,
@@ -299,7 +299,7 @@ export default function InquiryForm({
     setSubmitting(true);
     setMessage(null);
     setSaveError(null);
-    const t = tokenForSubmit(tokenRef.current, state, safeRandomId);
+    const t = tokenForSubmit(tokenRef.current, state, safeUuidV4);
     tokenRef.current = t;
     try {
       await createAgentInquiry({ ...buildCreateBody(state), clientToken: t.token });

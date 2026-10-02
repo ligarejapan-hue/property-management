@@ -172,13 +172,23 @@ describe("押し直しの鍵(二重登録を防ぐ)", () => {
   const src = () => readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-form.tsx"), "utf8");
   const modal = () => readFileSync(join(process.cwd(), "src/components/agent-inquiry/agent-create-modal.tsx"), "utf8");
   it("反響の登録は鍵を付けて送り、分からないときはそのまま押してよいと伝える", () => {
-    expect(src()).toContain("tokenForSubmit(tokenRef.current, state, safeRandomId)");
+    expect(src()).toContain("tokenForSubmit(tokenRef.current, state, safeUuidV4)");
     expect(src()).toContain("clientToken: t.token");
     expect(src()).toContain("中身を変えずにそのまま「保存する」を押してください(二重には登録されません)");
   });
   it("業者の登録も同じ", () => {
-    expect(modal()).toContain("tokenForSubmit(tokenRef.current, v, safeRandomId)");
+    expect(modal()).toContain("tokenForSubmit(tokenRef.current, v, safeUuidV4)");
     expect(modal()).toContain("clientToken: t.token");
     expect(modal()).toContain("中身を変えずにそのまま「登録して戻る」を押してください(二重には登録されません)");
+  });
+});
+
+describe("鍵は UUID の形で作る・小窓の欄は同じ値なら同じ状態", () => {
+  it("反響・業者の登録の鍵は safeUuidV4(平文 HTTP でも UUID の形)", () => {
+    const form = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-form.tsx"), "utf8");
+    const modal = readFileSync(join(process.cwd(), "src/components/agent-inquiry/agent-create-modal.tsx"), "utf8");
+    expect(form).toContain("tokenForSubmit(tokenRef.current, state, safeUuidV4)");
+    expect(modal).toContain("tokenForSubmit(tokenRef.current, v, safeUuidV4)");
+    expect(modal).toContain("setV((p) => setFieldIfChanged(p, k, val))");
   });
 });
