@@ -25,6 +25,9 @@ export interface InquiryListRow {
    *  失敗していないときは null)。notifyStatus と同じく個人情報を含まないので伏せ対象にしない
    *  (whole-branch review Minor #5: 通知先0人・メール未設定を行ごとに案内するため)。 */
   notifyLastError: string | null;
+  /** 申込者への受付メール(自動返信)の状態(none/sending/sent/failed/skipped)。メールを見られない
+   *  利用者には null(「送信済み」の表示から、メールが書かれていたこと自体が分かってしまうため)。 */
+  autoReplyStatus: string | null;
   /** 電話・希望連絡方法(enum の contactPref。構造化された連絡先項目。email を除く)を
    *  権限不足で伏せたか。contactTime・message・handleNote はここには連動しない
    *  (自由記述なので下の freeTextHidden を見る)。 */
@@ -38,7 +41,10 @@ export interface InquiryListRow {
   freeTextHidden: boolean;
 }
 
-type SourceRow = Omit<InquiryListRow, "contactHidden" | "emailHidden" | "freeTextHidden" | "phone"> & { phone: string };
+type SourceRow = Omit<InquiryListRow, "contactHidden" | "emailHidden" | "freeTextHidden" | "phone" | "autoReplyStatus"> & {
+  phone: string;
+  autoReplyStatus: string;
+};
 
 /** 連絡先の表示可否。email は phone とは別の owner_email 表示レベルで決まる(@codex P1)。 */
 export interface InquiryVisibility {
@@ -65,6 +71,7 @@ export function toInquiryListRows(rows: SourceRow[], visibility: InquiryVisibili
     handleNote: freeTextVisible ? r.handleNote : null,
     contactHidden: !visibility.contact,
     email: visibility.email ? r.email : null,
+    autoReplyStatus: visibility.email ? r.autoReplyStatus : null,
     emailHidden: !visibility.email,
     freeTextHidden: !freeTextVisible,
   }));

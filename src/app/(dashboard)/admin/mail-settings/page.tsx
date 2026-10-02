@@ -43,6 +43,10 @@ export default function MailSettingsPage() {
   const [fromAddress, setFromAddress] = useState("");
   const [appBaseUrl, setAppBaseUrl] = useState("");
   const [inquiryMailDetail, setInquiryMailDetail] = useState<"minimal" | "full">("minimal");
+  // 申込者への受付メール(自動返信)。件名・本文は空欄=既定の文面。
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
+  const [autoReplySubject, setAutoReplySubject] = useState("");
+  const [autoReplyBody, setAutoReplyBody] = useState("");
 
   // 接続方式ごとの既定ポート(選択を変えたときだけポートを合わせる用)。
   const KNOWN_DEFAULT_PORTS = ["465", "587"];
@@ -71,6 +75,9 @@ export default function MailSettingsPage() {
     fromAddress: "",
     appBaseUrl: "",
     inquiryMailDetail: "minimal" as "minimal" | "full",
+    autoReplyEnabled: false,
+    autoReplySubject: "",
+    autoReplyBody: "",
   });
 
   const applySettings = (data: MailSettings) => {
@@ -83,6 +90,9 @@ export default function MailSettingsPage() {
     setFromAddress(data.fromAddress ?? "");
     setAppBaseUrl(data.appBaseUrl ?? "");
     setInquiryMailDetail(data.inquiryMailDetail);
+    setAutoReplyEnabled(data.inquiryAutoReplyEnabled);
+    setAutoReplySubject(data.inquiryAutoReplySubject ?? "");
+    setAutoReplyBody(data.inquiryAutoReplyBody ?? "");
     setSavedSnapshot({
       smtpHost: data.smtpHost ?? "",
       smtpPort: String(data.smtpPort ?? 465),
@@ -91,6 +101,9 @@ export default function MailSettingsPage() {
       fromAddress: data.fromAddress ?? "",
       appBaseUrl: data.appBaseUrl ?? "",
       inquiryMailDetail: data.inquiryMailDetail,
+      autoReplyEnabled: data.inquiryAutoReplyEnabled,
+      autoReplySubject: data.inquiryAutoReplySubject ?? "",
+      autoReplyBody: data.inquiryAutoReplyBody ?? "",
     });
   };
 
@@ -125,6 +138,9 @@ export default function MailSettingsPage() {
     fromAddress !== savedSnapshot.fromAddress ||
     appBaseUrl !== savedSnapshot.appBaseUrl ||
     inquiryMailDetail !== savedSnapshot.inquiryMailDetail ||
+    autoReplyEnabled !== savedSnapshot.autoReplyEnabled ||
+    autoReplySubject !== savedSnapshot.autoReplySubject ||
+    autoReplyBody !== savedSnapshot.autoReplyBody ||
     password.trim() !== "";
 
   const save = async () => {
@@ -145,6 +161,9 @@ export default function MailSettingsPage() {
         fromAddress,
         appBaseUrl,
         inquiryMailDetail,
+        inquiryAutoReplyEnabled: autoReplyEnabled,
+        inquiryAutoReplySubject: autoReplySubject,
+        inquiryAutoReplyBody: autoReplyBody,
       };
       // パスワードは入力があったときだけ送る(空欄=現状維持。サーバーは未指定キーを触らない)。
       if (password.trim() !== "") {
@@ -160,7 +179,8 @@ export default function MailSettingsPage() {
     }
   };
 
-  const runTest = async () => {
+  // kind="auto_reply" は、申込者への受付メール(保存済みの文面)を自分あてに送る。
+  const runTest = async (kind: "notify" | "auto_reply") => {
     if (testing) return;
     if (isDirty) {
       setTestMessage({ kind: "err", text: "先に保存してください" });
@@ -169,8 +189,14 @@ export default function MailSettingsPage() {
     setTesting(true);
     setTestMessage(null);
     try {
-      await sendMailSettingsTest();
-      setTestMessage({ kind: "ok", text: "テストメールを送信しました。届いているか確認してください" });
+      await sendMailSettingsTest(kind);
+      setTestMessage({
+        kind: "ok",
+        text:
+          kind === "auto_reply"
+            ? "受付メールを自分あてに送信しました。件名と本文を確認してください"
+            : "テストメールを送信しました。届いているか確認してください",
+      });
     } catch (e) {
       const smtpCode = apiErrorSmtpCode(e);
       setTestMessage({
@@ -328,6 +354,73 @@ export default function MailSettingsPage() {
         </Field>
       </div>
 
+      <section className="space-y-4 rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">申込者への受付メール</h2>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            申込フォームでメールアドレスを書いた方へ、「受け付けました」のメールを1通だけ送ります。お名前や入力内容はメールに載せません。
+          </p>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-gray-800 dark:text-gray-100">
+          <input
+            type="checkbox"
+            checked={autoReplyEnabled}
+            onChange={(e) => setAutoReplyEnabled(e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300"
+          />
+          申込者へ受付メールを送る
+        </label>
+        {autoReplyEnabled && !complete && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            上の送信サーバーの設定が揃うまでは送られません。
+          </p>
+        )}
+        <Field label="件名(空欄なら既定の件名)">
+          <input
+            value={autoReplySubject}
+            onChange={(e) => setAutoReplySubject(e.target.value)}
+            placeholder={meta?.inquiryAutoReplyDefaultSubject ?? ""}
+            maxLength={120}
+            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          />
+        </Field>
+        <Field label="本文(空欄なら既定の文面)">
+          <textarea
+            value={autoReplyBody}
+            onChange={(e) => setAutoReplyBody(e.target.value)}
+            placeholder={meta?.inquiryAutoReplyDefaultBody ?? ""}
+            maxLength={2000}
+            rows={9}
+            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+          />
+          <span className="mt-1 block text-xs text-gray-500">
+            薄い文字は、空欄のときに送る既定の文面です(差出人名・連絡先は「売却DM設定」の値)。会社名や連絡先も、ここに書いたとおりに送ります。
+          </span>
+        </Field>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              setAutoReplySubject(meta?.inquiryAutoReplyDefaultSubject ?? "");
+              setAutoReplyBody(meta?.inquiryAutoReplyDefaultBody ?? "");
+            }}
+            disabled={!loaded}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+          >
+            既定の文面を入れて書き直す
+          </button>
+          <button
+            type="button"
+            onClick={() => void runTest("auto_reply")}
+            disabled={testing || saving || !loaded}
+            className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+          >
+            {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+            この文面を自分あてに送ってみる
+          </button>
+        </div>
+      </section>
+
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
@@ -340,7 +433,7 @@ export default function MailSettingsPage() {
         </button>
         <button
           type="button"
-          onClick={runTest}
+          onClick={() => void runTest("notify")}
           disabled={testing || saving || !loaded}
           className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
         >

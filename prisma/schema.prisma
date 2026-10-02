@@ -1332,6 +1332,9 @@ model DmInquiry {
   // 同じ宛先に二重送信しないための唯一の正本(P2修正)。user id のみ=個人情報を含まない・
   // 内部メタデータなので申込一覧のAPI/画面には出さない。
   notifySentUserIds String[]  @default([]) @map("notify_sent_user_ids") @db.Uuid
+  // 申込者への受付メール(自動返信)の状態。none | sending | sent | failed | skipped。
+  // 送るのは申込の直後の1回だけ(none → sending の取り合いに勝った1回)。送り直しはしない。
+  autoReplyStatus   String    @default("none") @map("auto_reply_status")
   createdAt         DateTime  @default(now()) @map("created_at")
 
   draft     DmRecipientDraft @relation(fields: [draftId], references: [id], onDelete: Restrict)
@@ -1339,6 +1342,8 @@ model DmInquiry {
 
   @@index([draftId])
   @@index([handleStatus])
+  // 受付メールの重複確認(直近24時間の申込だけを見る)と、一覧の新しい順の読み出しに使う。
+  @@index([submittedAt])
   @@map("dm_inquiries")
 }
 
@@ -1508,6 +1513,11 @@ model MailConfig {
   appBaseUrl        String?  @map("app_base_url")
   // minimal | full
   inquiryMailDetail String   @default("minimal") @map("inquiry_mail_detail")
+  // 申込者への受付メール(自動返信)。初期OFF。件名・本文は未入力(null)なら既定の文面。
+  // ⚠文面に申込者の入力は差し込まない(他人のアドレスを書かれても入力内容が漏れないように)。
+  inquiryAutoReplyEnabled Boolean @default(false) @map("inquiry_auto_reply_enabled")
+  inquiryAutoReplySubject String? @map("inquiry_auto_reply_subject")
+  inquiryAutoReplyBody    String? @map("inquiry_auto_reply_body")
   updatedAt         DateTime @updatedAt @map("updated_at")
   updatedById       String?  @map("updated_by_id") @db.Uuid
 

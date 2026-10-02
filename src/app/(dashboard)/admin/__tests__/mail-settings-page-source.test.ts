@@ -60,7 +60,21 @@ describe("初回読み込み失敗時は保存・テスト送信を止める(rev
     expect(page).toMatch(/onClick=\{save\}\s*\n\s*disabled=\{saving \|\| !loaded\}/);
   });
   it("テスト送信ボタンは loaded=false のとき disabled", () => {
-    expect(page).toMatch(/onClick=\{runTest\}\s*\n\s*disabled=\{testing \|\| saving \|\| !loaded\}/);
+    // テスト送信は2種類(通知メールの確認/申込者への受付メールを自分あてに)。どちらも同じ条件で止める。
+    for (const kind of ["notify", "auto_reply"]) {
+      expect(page).toMatch(
+        new RegExp(`onClick=\\{\\(\\) => void runTest\\("${kind}"\\)\\}\\s*\\n\\s*disabled=\\{testing \\|\\| saving \\|\\| !loaded\\}`),
+      );
+    }
+  });
+  it("申込者への受付メール: スイッチ・件名・本文の欄があり、保存と未保存判定に入っている", () => {
+    expect(page).toContain("申込者へ受付メールを送る");
+    expect(page).toContain("inquiryAutoReplyEnabled: autoReplyEnabled");
+    expect(page).toContain("inquiryAutoReplySubject: autoReplySubject");
+    expect(page).toContain("inquiryAutoReplyBody: autoReplyBody");
+    for (const key of ["autoReplyEnabled", "autoReplySubject", "autoReplyBody"]) {
+      expect(page).toContain(`${key} !== savedSnapshot.${key}`);
+    }
   });
   it("読み込み失敗の案内文言と再読み込み導線がある", () => {
     expect(page).toContain("設定を読み込めませんでした。再読み込みしてください。");

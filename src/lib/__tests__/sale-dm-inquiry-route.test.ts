@@ -7,6 +7,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/sale-dm-letter/inquiry-record", () => ({ recordInquiry: vi.fn() }));
 vi.mock("@/lib/sale-dm-letter/inquiry-notify", () => ({ startInquiryNotify: vi.fn() }));
+vi.mock("@/lib/sale-dm-letter/inquiry-auto-reply", () => ({ startInquiryAutoReply: vi.fn() }));
 vi.mock("@/lib/sale-dm-letter/config-store", () => ({
   loadSaleDmPublicPageConfig: vi.fn(),
   loadSaleDmLpUrl: vi.fn(),
@@ -15,6 +16,7 @@ vi.mock("@/lib/sale-dm-letter/config-store", () => ({
 import { POST } from "@/app/t/[token]/inquiry/route";
 import { recordInquiry } from "@/lib/sale-dm-letter/inquiry-record";
 import { startInquiryNotify } from "@/lib/sale-dm-letter/inquiry-notify";
+import { startInquiryAutoReply } from "@/lib/sale-dm-letter/inquiry-auto-reply";
 import { writeAuditLog } from "@/lib/audit";
 import prisma from "@/lib/prisma";
 import { loadSaleDmLpUrl, loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
@@ -22,6 +24,7 @@ import { HONEYPOT_FIELD } from "@/lib/sale-dm-letter/inquiry-input";
 
 const rec = recordInquiry as unknown as ReturnType<typeof vi.fn>;
 const notify = startInquiryNotify as unknown as ReturnType<typeof vi.fn>;
+const autoReply = startInquiryAutoReply as unknown as ReturnType<typeof vi.fn>;
 const findUnique = (
   prisma as unknown as {
     dmRecipientDraft: { findUnique: ReturnType<typeof vi.fn> };
@@ -97,11 +100,38 @@ describe("POST /t/[token]/inquiry", () => {
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
+  it("申込者への受付メールも、記録の後に1回だけ起動する(送るかどうかは起動先が決める)", async () => {
+    const res = await call(VALID);
+    expect(res.status).toBe(200);
+    expect(autoReply).toHaveBeenCalledTimes(1);
+    expect(autoReply).toHaveBeenCalledWith("inq1");
+    const auditOrder = (writeAuditLog as unknown as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    expect(autoReply.mock.invocationCallOrder[0]).toBeGreaterThan(auditOrder);
+  });
+
+  it("startInquiryAutoReply が throw しても応答は変わらない(200)", async () => {
+    autoReply.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    const res = await call(VALID);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("受け付けました");
+  });
+
+  it("記録しなかった申込(送付前・機械送信・入力不備)では受付メールを起動しない", async () => {
+    rec.mockResolvedValueOnce({ kind: "not_sent" });
+    expect((await call(VALID)).status).toBe(409);
+    expect((await call({ ...VALID, [HONEYPOT_FIELD]: "x" })).status).toBe(200);
+    expect((await call({ ...VALID, name: "" })).status).toBe(422);
+    expect(autoReply).not.toHaveBeenCalled();
+  });
+
   it("よそのサイトからは 403(記録しない)", async () => {
     const res = await call(VALID, { origin: "https://evil.example" });
     expect(res.status).toBe(403);
     expect(rec).not.toHaveBeenCalled();
     expect(notify).not.toHaveBeenCalled();
+    expect(autoReply).not.toHaveBeenCalled();
   });
 
   it("Origin: null(実ブラウザ)は通す", async () => {

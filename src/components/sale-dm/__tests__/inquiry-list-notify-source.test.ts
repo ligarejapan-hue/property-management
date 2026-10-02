@@ -14,6 +14,13 @@ describe("査定の申込 画面", () => {
     expect(list).toContain("resendSaleDmInquiryNotify");
     expect(list).toContain("通知先が未設定です");
   });
+  it("申込者への受付メール: 送った・送れなかったのときだけ札を出す(送り直しのボタンは無い)", () => {
+    expect(list).toMatch(/\(i\.autoReplyStatus === "sent" \|\| i\.autoReplyStatus === "failed"\) &&/);
+    expect(list).toContain("受付メール 送信済み");
+    expect(list).toContain("受付メールを送れませんでした");
+    // none / sending / skipped / null(メールを見られない人)は条件に出てこない=何も出さない。
+    expect(list).not.toMatch(/autoReplyStatus === "(none|sending|skipped)"/);
+  });
   it("横断モードとリンクの focus", () => {
     expect(page).toContain('mode="all"');
     expect(page).toMatch(/searchParams|useSearchParams/);
