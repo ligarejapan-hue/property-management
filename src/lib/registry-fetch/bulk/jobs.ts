@@ -56,8 +56,8 @@ export interface BulkJobProgress {
   }>;
 }
 
-/** 可視項目集合から件数を数え直す(保存済み counts は使わない)。 */
-function recomputeCounts(
+/** 可視項目集合から件数を数え直す(保存済み counts は使わない)。通知の件数(段階2)も同じ関数を使う。 */
+export function recomputeCounts(
   items: Array<{ status: string }>,
 ): BulkJobCounts {
   const c: BulkJobCounts = {

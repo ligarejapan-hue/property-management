@@ -54,6 +54,8 @@ export interface ToastInput {
   icon: ToastIcon;
   title: string;
   body?: string;
+  /** 押すと該当の画面へ(段階2の「開く」)。 */
+  action?: ReactNode;
 }
 
 interface NoticeContextValue {

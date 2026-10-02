@@ -24,11 +24,19 @@ function formatMeta(n: Notice, now: Date): string {
   return n.context ? `${n.context} ・ ${day}` : day;
 }
 
+const PANEL_LOOK: Record<Notice["kind"], Pick<NotificationPanelItem, "icon" | "tone">> = {
+  edit_lock_warn: { icon: "clock", tone: "amber" },
+  edit_lock_lost: { icon: "unlock", tone: "red" },
+  idle_logout_warn: { icon: "logout", tone: "amber" },
+  next_action: { icon: "calendar", tone: "amber" },
+  inquiry_new: { icon: "inbox", tone: "indigo" },
+  registry_job_done: { icon: "file", tone: "green" },
+};
+
 export function toPanelItem(n: Notice, highlighted: boolean, now: Date): NotificationPanelItem {
   return {
     id: n.id,
-    icon: n.kind === "edit_lock_warn" ? "clock" : n.kind === "edit_lock_lost" ? "unlock" : "logout",
-    tone: n.kind === "edit_lock_lost" ? "red" : "amber",
+    ...PANEL_LOOK[n.kind],
     message: n.message,
     meta: formatMeta(n, now),
     unread: highlighted,
