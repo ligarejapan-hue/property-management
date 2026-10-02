@@ -2,6 +2,7 @@ import Link from "next/link";
 import { visibleHomeCards } from "./home-model";
 import { PageHeader } from "@/components/ui/page-header";
 import HomeInquiryCounts from "./home-inquiry-counts";
+import HomeNextActions from "./home-next-actions";
 
 /** 役割別ホーム(ランチャー)。カードは既存ページへの Link。userRole は親(page)がセッションから渡す。 */
 export function HomeContent({ userRole }: { userRole: string }) {
@@ -11,6 +12,8 @@ export function HomeContent({ userRole }: { userRole: string }) {
       <PageHeader title="ホーム" description="やりたいことを選んでください。" />
       {/* 業者からの反響(設計 2026-09-28 方針9)。権限が無い人には出ない。 */}
       <HomeInquiryCounts />
+      {/* 自分の次回対応(今日・期限切れ)。通知 段階2の「次回対応」を押したときの行き先。0件・権限なしは何も出さない。 */}
+      <HomeNextActions />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {cards.map((c) => (
           <Link

@@ -10,7 +10,14 @@
  * 判断(追加・重複の置き換え・期限切れの除去・既読化)は純関数にして node で試せるようにする。
  */
 
-export type NoticeKind = "edit_lock_warn" | "edit_lock_lost" | "idle_logout_warn";
+export type NoticeKind =
+  | "edit_lock_warn"
+  | "edit_lock_lost"
+  | "idle_logout_warn"
+  // 段階2(画面を開いている間に件数を取りに行って知らせる・設計書 §5)
+  | "next_action"
+  | "inquiry_new"
+  | "registry_job_done";
 
 export interface Notice {
   id: string;
@@ -44,7 +51,7 @@ export const NOTICE_SWITCH_KEY = "pm:notices:switched-at";
 export const NOTICE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const NOTICE_MAX = 50;
 
-const KINDS: readonly NoticeKind[] = ["edit_lock_warn", "edit_lock_lost", "idle_logout_warn"];
+const KINDS: readonly NoticeKind[] = ["edit_lock_warn", "edit_lock_lost", "idle_logout_warn", "next_action", "inquiry_new", "registry_job_done"];
 
 function isNotice(v: unknown): v is Notice {
   if (!v || typeof v !== "object") return false;
@@ -208,9 +215,52 @@ export function readSwitchMark(): string | null {
   }
 }
 
+/**
+ * 段階2の「どこまで読んだか・見たか」(カーソルと見た印)の保存先の頭(利用者 ID ごと)。
+ * 中身は不透明な値だけ(生の ID・期限を置かない・設計書 §5.2)。後片付けでどの利用者の分も消す。
+ */
+export const SUMMARY_STATE_PREFIX = "pm:notif-summary:";
+
+/**
+ * 保存できない環境(private mode・容量超過)での、この画面の間だけの控え。控えが無いと、見た印も
+ * カーソルも残らず、次回対応が毎分出直し、申込・謄本は毎回「初回」になって知らせが出ない
+ * (提出前レビュー)。後片付けで消す。
+ */
+let summaryFallback: Map<string, string> | null = null;
+
+export function readSummaryRaw(key: string): string | null {
+  if (summaryFallback?.has(key)) return summaryFallback.get(key) ?? null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+export function writeSummaryRaw(key: string, raw: string): void {
+  try {
+    window.localStorage.setItem(key, raw);
+    summaryFallback?.delete(key);
+  } catch {
+    (summaryFallback ??= new Map()).set(key, raw);
+  }
+}
+
 /** 共用 PC 対策: ログアウト・ログイン画面で呼ぶ。 */
 export function clearNoticeStorage(): void {
   memoryFallback = null;
+  summaryFallback = null;
+  try {
+    const ls = window.localStorage;
+    const summaryKeys: string[] = [];
+    for (let i = 0; i < ls.length; i++) {
+      const k = ls.key(i);
+      if (k && k.startsWith(SUMMARY_STATE_PREFIX)) summaryKeys.push(k);
+    }
+    for (const k of summaryKeys) ls.removeItem(k);
+  } catch {
+    /* noop */
+  }
   try {
     window.localStorage.removeItem(NOTICE_STORAGE_KEY);
     window.localStorage.setItem(NOTICE_SWITCH_KEY, String(Date.now()));

@@ -8,11 +8,11 @@
  * - 動きは出るときに少し上がるだけ。`motion-reduce` で止める。
  * - 判断はしない(何を出すかは呼び出し側)。
  */
-import { Check, Clock, Info, LockOpen, LogOut, X } from "lucide-react";
+import { CalendarClock, Check, Clock, FileCheck, Inbox, Info, LockOpen, LogOut, X } from "lucide-react";
 import type { ReactNode } from "react";
 
 export type ToastTone = "amber" | "red" | "green" | "indigo";
-export type ToastIcon = "clock" | "unlock" | "logout" | "check" | "info";
+export type ToastIcon = "clock" | "unlock" | "logout" | "check" | "info" | "calendar" | "inbox" | "file";
 
 export interface ToastItem {
   id: string;
@@ -36,6 +36,9 @@ const ICONS: Record<ToastIcon, typeof Clock> = {
   logout: LogOut,
   check: Check,
   info: Info,
+  calendar: CalendarClock,
+  inbox: Inbox,
+  file: FileCheck,
 };
 
 export function ToastStack({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: string) => void }) {

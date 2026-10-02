@@ -8,14 +8,14 @@
  * - 一番下に「PC・スマホにも通知する」(許可前 / 許可済み / 拒否 / 非対応 の4状態)。
  * - 判断・保存はしない(`components/notifications/header-bell.tsx` が結線する)。
  */
-import { Bell, BellOff, Check, Clock, LockOpen, LogOut, Smartphone } from "lucide-react";
+import { Bell, BellOff, CalendarClock, Check, Clock, FileCheck, Inbox, LockOpen, LogOut, Smartphone } from "lucide-react";
 
 export type NotificationPermissionView = "unsupported" | "default" | "granted" | "denied";
 
 export interface NotificationPanelItem {
   id: string;
-  icon: "clock" | "unlock" | "logout";
-  tone: "amber" | "red";
+  icon: "clock" | "unlock" | "logout" | "calendar" | "inbox" | "file";
+  tone: "amber" | "red" | "indigo" | "green";
   message: string;
   meta: string;
   unread: boolean;
@@ -56,10 +56,12 @@ export function BellButton({
   );
 }
 
-const ITEM_ICON = { clock: Clock, unlock: LockOpen, logout: LogOut } as const;
+const ITEM_ICON = { clock: Clock, unlock: LockOpen, logout: LogOut, calendar: CalendarClock, inbox: Inbox, file: FileCheck } as const;
 const ITEM_TONE = {
   amber: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
   red: "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400",
+  indigo: "bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400",
+  green: "bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400",
 } as const;
 
 export function NotificationPanel({
