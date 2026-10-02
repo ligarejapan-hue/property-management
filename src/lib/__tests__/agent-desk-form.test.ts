@@ -322,3 +322,14 @@ describe("日付だけ・時刻だけでは保存しない", () => {
     expect(validateDeskForm(s).viewingAt).toBeUndefined();
   });
 });
+
+import { donePeriodDays } from "@/lib/agent-inquiry/desk-form";
+describe("対応済みタブの期間", () => {
+  it("期間は対応済みタブだけに効く(未対応・対応中は絞らない=対応漏れを隠さない)", () => {
+    expect(donePeriodDays("done", "30")).toBe(30);
+    expect(donePeriodDays("done", "90")).toBe(90);
+    expect(donePeriodDays("done", "all")).toBeUndefined();
+    expect(donePeriodDays("open", "30")).toBeUndefined();
+    expect(donePeriodDays("in_progress", "90")).toBeUndefined();
+  });
+});

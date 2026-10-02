@@ -5001,7 +5001,7 @@ export async function createAgentInquiry(body: AgentInquiryCreateBody) {
   }
   return apiFetch<{ id: string }>("/api/agent-inquiries", deskJsonInit("POST", body));
 }
-export async function fetchAgentInquiries(p: { status?: string; assignee?: string; cursor?: string }) {
+export async function fetchAgentInquiries(p: { status?: string; assignee?: string; cursor?: string; days?: number }) {
   if (USE_MOCK) {
     await mockDelay();
     return { items: [] as InquiryView[], nextCursor: null as string | null };
@@ -5009,6 +5009,7 @@ export async function fetchAgentInquiries(p: { status?: string; assignee?: strin
   const sp = new URLSearchParams();
   if (p.status) sp.set("status", p.status);
   if (p.assignee) sp.set("assignee", p.assignee);
+  if (p.days) sp.set("days", String(p.days));
   if (p.cursor) sp.set("cursor", p.cursor);
   const qs = sp.toString();
   return apiFetch<{ items: InquiryView[]; nextCursor: string | null }>(`/api/agent-inquiries${qs ? `?${qs}` : ""}`);

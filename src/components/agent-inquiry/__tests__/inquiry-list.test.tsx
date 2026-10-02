@@ -48,7 +48,7 @@ describe("今日・明日の内見", () => {
 describe("一覧", () => {
   it("3つのタブ(未対応に件数)・自分の担当だけ・1件の中身", () => {
     const html = renderToStaticMarkup(
-      <InquiryListView tab="open" onTab={noop} mine={false} onMine={noop} items={[inquiry]} openCount={3}
+      <InquiryListView tab="open" onTab={noop} period="30" onPeriod={noop} mine={false} onMine={noop} items={[inquiry]} openCount={3}
         onOpen={noop} hasMore={false} onMore={noop} />,
     );
     for (const t of ["未対応 3", "対応中", "対応済み", "自分の担当だけ", "サンライズ中野 305", "○○不動産", "田中様", "内見", "担当:佐藤", "電話"]) {
@@ -59,7 +59,7 @@ describe("一覧", () => {
   it("続きがあれば「もっと見る」", () => {
     expect(
       renderToStaticMarkup(
-        <InquiryListView tab="done" onTab={noop} mine onMine={noop} items={[]} openCount={0} onOpen={noop} hasMore onMore={noop} />,
+        <InquiryListView tab="done" onTab={noop} period="30" onPeriod={noop} mine onMine={noop} items={[]} openCount={0} onOpen={noop} hasMore onMore={noop} />,
       ),
     ).toContain("もっと見る");
   });
@@ -117,7 +117,7 @@ describe("詳細: 打ちかけの入力を消さない(最終レビュー I-1/I-
 describe("ボタンの中の個人情報にも画面保護(@codex #459 R4)", () => {
   it("一覧の行の問い合わせ者名は保護の印の中", () => {
     const html = renderToStaticMarkup(
-      <InquiryListView tab="open" onTab={noop} mine={false} onMine={noop} items={[inquiry]} openCount={1}
+      <InquiryListView tab="open" onTab={noop} period="30" onPeriod={noop} mine={false} onMine={noop} items={[inquiry]} openCount={1}
         onOpen={noop} hasMore={false} onMore={noop} />,
     );
     expect(html).toMatch(/<span data-pii-protected="true" data-pii-surface="dashboard">\(田中様\)<\/span>/);
@@ -263,7 +263,7 @@ describe("一覧・詳細・今日明日の内見に支店名を出す(@codex #4
   const branchAgent = { id: "a1", companyName: "○○不動産", branchName: "渋谷支店", phone: "03-1" };
   it("一覧と詳細の見出し", () => {
     const list = renderToStaticMarkup(
-      <InquiryListView tab="open" onTab={noop} mine={false} onMine={noop} items={[{ ...inquiry, agent: branchAgent }]}
+      <InquiryListView tab="open" onTab={noop} period="30" onPeriod={noop} mine={false} onMine={noop} items={[{ ...inquiry, agent: branchAgent }]}
         openCount={1} onOpen={noop} hasMore={false} onMore={noop} />,
     );
     expect(list).toContain("○○不動産 渋谷支店");
@@ -322,5 +322,20 @@ describe("詳細の読み上げと読み込み中", () => {
   });
   it("詳細は読み込み中も小窓を出す(押しても何も起きないように見せない)", () => {
     expect(src()).toMatch(/if \(!data\) \{[\s\S]{0,600}読み込み中…/);
+  });
+});
+
+describe("対応済みタブの期間", () => {
+  const noop2 = () => {};
+  it("対応済みタブだけ期間を選べる(既定=直近30日)", () => {
+    const done = renderToStaticMarkup(<InquiryListView tab="done" onTab={noop2} period="30" onPeriod={noop2} mine={false} onMine={noop2} items={[]} openCount={0}
+      onOpen={noop2} hasMore={false} onMore={noop2} />);
+    expect(done).toContain('aria-label="対応済みの期間"');
+    expect(done).toMatch(/<option value="30" selected="">直近30日<\/option>/);
+    expect(done).toContain("直近90日");
+    expect(done).toContain("すべて");
+    const open = renderToStaticMarkup(<InquiryListView tab="open" onTab={noop2} period="30" onPeriod={noop2} mine={false} onMine={noop2} items={[]} openCount={0}
+      onOpen={noop2} hasMore={false} onMore={noop2} />);
+    expect(open).not.toContain("対応済みの期間");
   });
 });

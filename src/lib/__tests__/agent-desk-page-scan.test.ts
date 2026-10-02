@@ -111,7 +111,7 @@ describe("書く権限が無ければ登録・変更を出さない・見出し�
 describe("見えなくなったら読み込みを取り消す(@codex #459 R13)", () => {
   it("読み込みは中身を出しているときだけ・見えなくなったら途中の読み込みの結果(件数)を出さない", () => {
     expect(src).toMatch(/if \(!bodyVisible\) return;/);
-    expect(src).toMatch(/\}, \[tab, mine, reloadKey, onError, bodyVisible\]\);/);
+    expect(src).toMatch(/\}, \[tab, mine, period, reloadKey, onError, bodyVisible\]\);/);
   });
 });
 
@@ -119,5 +119,13 @@ describe("403 で止めた表示は権限を確かめ直せば戻る(@codex #459
   it("403 はその時の権限に結び付け、権限を読み直したら解ける・もう一度確かめるボタン", () => {
     expect(src).toMatch(/forbiddenFor === permissions/);
     expect(src).toMatch(/forbidden[\s\S]{0,600}もう一度確かめる/);
+  });
+});
+
+describe("対応済みタブの期間(設計 §2.1)", () => {
+  it("★期間も一覧の絞り込みの鍵に入る(期間を替えた直後のもっと見るに前の期間の続きを混ぜない)", () => {
+    expect(src).toMatch(/const filterKey = `\$\{tab\}\|\$\{mine\}\|\$\{period\}`;/);
+    expect(src.match(/days: donePeriodDays\(tab, period\)/g)).toHaveLength(2);
+    expect(src).toMatch(/\}, \[tab, mine, period, reloadKey, onError, bodyVisible\]\);/);
   });
 });

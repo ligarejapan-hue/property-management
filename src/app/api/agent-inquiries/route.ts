@@ -25,8 +25,16 @@ export async function GET(request: Request) {
       assigneeRaw === "me" ? session.id : assigneeRaw ? z.string().uuid().parse(assigneeRaw) : undefined;
     const cursorRaw = sp.get("cursor");
     const cursor = cursorRaw ? z.string().uuid().parse(cursorRaw) : undefined;
+    // 受けた日時が N 日以内(対応済みタブの期間・設計 §2.1 の「直近30日を既定表示」)。
+    const daysRaw = sp.get("days");
+    const days = daysRaw == null ? undefined : z.coerce.number().int().min(1).max(3650).parse(daysRaw);
+    const since = days ? new Date(Date.now() - days * 24 * 60 * 60 * 1000) : undefined;
     const rows = await prisma.agentInquiry.findMany({
-      where: { ...(status ? { status } : {}), ...(assigneeId ? { assigneeId } : {}) },
+      where: {
+        ...(status ? { status } : {}),
+        ...(assigneeId ? { assigneeId } : {}),
+        ...(since ? { receivedAt: { gte: since } } : {}),
+      },
       orderBy: [{ receivedAt: "desc" }, { id: "desc" }],
       take: PAGE + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),

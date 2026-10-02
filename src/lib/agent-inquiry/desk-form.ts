@@ -139,6 +139,18 @@ export function shouldBlockEnterSubmit(e: { key: string; isComposing: boolean; t
   return e.tagName === "INPUT" && e.type !== "submit" && e.type !== "button";
 }
 
+export type DonePeriodKey = "30" | "90" | "all";
+export const DONE_PERIODS: readonly { key: DonePeriodKey; label: string; days: number | null }[] = [
+  { key: "30", label: "直近30日", days: 30 },
+  { key: "90", label: "直近90日", days: 90 },
+  { key: "all", label: "すべて", days: null },
+];
+/** 一覧の API に渡す日数。対応済みタブだけ=未対応・対応中は期間で絞らない(対応漏れを隠さない)。 */
+export function donePeriodDays(tab: InquiryStatusKey, period: DonePeriodKey): number | undefined {
+  if (tab !== "done") return undefined;
+  return DONE_PERIODS.find((p) => p.key === period)?.days ?? undefined;
+}
+
 const PARTIAL_SCHEDULE = "日付と時刻の両方を入れてください(両方とも空なら日程調整中で保存できます)";
 /** 内見の日時が片方だけか。片方だけで保存すると黙って「日程調整中」になる(詳細では入っていた予定が消える)。 */
 export function partialScheduleError(date: string, time: string): string | null {
