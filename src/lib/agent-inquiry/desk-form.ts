@@ -130,6 +130,15 @@ export function nextDeskGuideStep(s: DeskFormState): DeskGuideStep {
   return "save";
 }
 
+/**
+ * フォームの Enter を止めるか。1行の入力欄で Enter を押すと、ブラウザの決まりでフォームが「保存」される
+ * (打ちかけのまま登録が走る)。保存はボタンだけにする。複数行のメモ欄・ボタン・日本語の変換確定は止めない。
+ */
+export function shouldBlockEnterSubmit(e: { key: string; isComposing: boolean; tagName: string; type?: string }): boolean {
+  if (e.key !== "Enter" || e.isComposing) return false;
+  return e.tagName === "INPUT" && e.type !== "submit" && e.type !== "button";
+}
+
 export function validateDeskForm(s: DeskFormState) {
   const e: Partial<Record<"agent" | "property" | "kind" | "viewingType", string>> = {};
   if (!s.agent) e.agent = "業者を選んでください";
