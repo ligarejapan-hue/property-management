@@ -153,7 +153,7 @@ export function InquiryFormView({
         <Label>用件</Label>
         <div className="grid grid-cols-3 gap-1" data-guide="kind">
           {(["viewing", "ad_permission", "material_request"] as const).map((k) => (
-            <button key={k} type="button" className={segCls(s.kind === k)} onClick={() => dispatch({ type: "kind", value: k })}>
+            <button key={k} type="button" aria-pressed={s.kind === k} className={segCls(s.kind === k)} onClick={() => dispatch({ type: "kind", value: k })}>
               {KIND_LABEL[k]}
             </button>
           ))}
@@ -167,6 +167,7 @@ export function InquiryFormView({
           <div className="grid grid-cols-2 gap-1" data-guide="viewingType">
             <button
               type="button"
+              aria-pressed={s.viewingType === "guided"}
               className={segCls(s.viewingType === "guided")}
               onClick={() => dispatch({ type: "viewing", field: "viewingType", value: "guided" })}
             >
@@ -174,6 +175,7 @@ export function InquiryFormView({
             </button>
             <button
               type="button"
+              aria-pressed={s.viewingType === "preview"}
               className={segCls(s.viewingType === "preview")}
               onClick={() => dispatch({ type: "viewing", field: "viewingType", value: "preview" })}
             >
@@ -221,7 +223,7 @@ export function InquiryFormView({
         <Label>入口</Label>
         <div className="grid grid-cols-3 gap-1">
           {(["phone", "email", "fax"] as const).map((c) => (
-            <button key={c} type="button" className={segCls(s.channel === c)} onClick={() => dispatch({ type: "channel", value: c })}>
+            <button key={c} type="button" aria-pressed={s.channel === c} className={segCls(s.channel === c)} onClick={() => dispatch({ type: "channel", value: c })}>
               {CHANNEL_LABEL[c]}
             </button>
           ))}

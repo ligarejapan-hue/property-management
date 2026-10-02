@@ -271,6 +271,7 @@ export function InquiryDetailView({
             <button
               key={s}
               type="button"
+              aria-pressed={q.status === s}
               disabled={busy}
               onClick={() => onStatus(s)}
               className={`rounded-md border px-2 py-2 ${
@@ -492,7 +493,12 @@ export default function InquiryDetail({
       <ModalShell size="sm" title="反響" onClose={onClose} footer={<Button onClick={onClose}>閉じる</Button>}>
         <p className="text-sm text-rose-600">{error}</p>
       </ModalShell>
-    ) : null;
+    ) : (
+      // 読み込み中も小窓を出す(押してから開くまでの間、何も起きないように見せない)。
+      <ModalShell size="sm" title="反響" onClose={onClose} footer={<Button variant="secondary" onClick={onClose}>閉じる</Button>}>
+        <p className="text-sm text-gray-500 dark:text-gray-400">読み込み中…</p>
+      </ModalShell>
+    );
   }
   const q = data.inquiry;
   return (

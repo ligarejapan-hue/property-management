@@ -154,3 +154,16 @@ describe("日時の片方だけ", () => {
       .toContain("日付と時刻の両方を入れてください");
   });
 });
+
+describe("切り替えボタンの読み上げ", () => {
+  it("用件・案内/下見・入口の切り替えは押している方を aria-pressed で伝える", () => {
+    let s = deskFormReducer(EMPTY_DESK_FORM, { type: "kind", value: "viewing" });
+    s = deskFormReducer(s, { type: "viewing", field: "viewingType", value: "guided" });
+    const html = view({ state: s });
+    expect(html).toMatch(/aria-pressed="true"[^>]*>内見</);
+    expect(html).toMatch(/aria-pressed="false"[^>]*>資料請求</);
+    expect(html).toMatch(/aria-pressed="true"[^>]*>案内\(お客様連れ\)</);
+    expect(html).toMatch(/aria-pressed="true"[^>]*>電話</);
+    expect((html.match(/aria-pressed=/g) ?? []).length).toBe(8);
+  });
+});

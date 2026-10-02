@@ -314,3 +314,13 @@ describe("詳細の日時の片方だけ", () => {
     expect(body).toMatch(/const partial = partialScheduleError\(val\("date"\), val\("time"\)\);\s*if \(partial\) \{\s*setWarn\(partial\);\s*return;/);
   });
 });
+
+describe("詳細の読み上げと読み込み中", () => {
+  const src = () => readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8");
+  it("詳細の状態の切り替えにも aria-pressed", () => {
+    expect(src()).toContain("aria-pressed={q.status === s}");
+  });
+  it("詳細は読み込み中も小窓を出す(押しても何も起きないように見せない)", () => {
+    expect(src()).toMatch(/if \(!data\) \{[\s\S]{0,600}読み込み中…/);
+  });
+});
