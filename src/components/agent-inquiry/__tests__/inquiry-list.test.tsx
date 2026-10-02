@@ -305,3 +305,12 @@ describe("詳細の保存で結果が分からないときは、失敗と言い�
     expect(d).toContain("保存できたか分かりません(通信が切れました)");
   });
 });
+
+describe("詳細の日時の片方だけ", () => {
+  it("★詳細で日付だけ・時刻だけにしたら保存せず理由を出す(予定を黙って消さない)", () => {
+    const src = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8");
+    const at = src.indexOf("const save = () => {");
+    const body = src.slice(at, src.indexOf("const canceled", at));
+    expect(body).toMatch(/const partial = partialScheduleError\(val\("date"\), val\("time"\)\);\s*if \(partial\) \{\s*setWarn\(partial\);\s*return;/);
+  });
+});

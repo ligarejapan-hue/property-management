@@ -30,6 +30,7 @@ import {
   editDraft,
   isAmbiguousSaveError,
   viewingPatchFrom,
+  partialScheduleError,
   type Draft,
 } from "@/lib/agent-inquiry/desk-form";
 
@@ -94,6 +95,12 @@ function ViewingRow({
     setDrafts((d) => ({ ...d, [f]: editDraft(d[f] ?? null, value, server[f]) }));
   };
   const save = () => {
+    // 日付だけ・時刻だけでは保存しない=入っていた予定を黙って「日程調整中」にしない。
+    const partial = partialScheduleError(val("date"), val("time"));
+    if (partial) {
+      setWarn(partial);
+      return;
+    }
     const stale = (Object.keys(server) as Field[]).filter((f) => draftStale(drafts[f] ?? null, server[f]));
     if (stale.length > 0) {
       // 相手の変更を見せ、今の値を基準にし直す(もう一度押せば自分の内容で保存)。

@@ -304,3 +304,21 @@ describe("1行の入力欄の Enter では保存しない", () => {
     expect(k({ key: "a" })).toBe(false);
   });
 });
+
+import { partialScheduleError } from "@/lib/agent-inquiry/desk-form";
+describe("日付だけ・時刻だけでは保存しない", () => {
+  const MSG = "日付と時刻の両方を入れてください(両方とも空なら日程調整中で保存できます)";
+  it("片方だけは止める・両方空/両方ありは通す", () => {
+    expect(partialScheduleError("2026-10-05", "")).toBe(MSG);
+    expect(partialScheduleError("", "14:00")).toBe(MSG);
+    expect(partialScheduleError("", "")).toBeNull();
+    expect(partialScheduleError("2026-10-05", "14:00")).toBeNull();
+  });
+  it("登録フォームの検証にも入る(内見のときだけ)", () => {
+    let s = deskFormReducer(EMPTY_DESK_FORM, { type: "kind", value: "viewing" });
+    s = deskFormReducer(s, { type: "viewing", field: "date", value: "2026-10-05" });
+    expect(validateDeskForm(s).viewingAt).toBe(MSG);
+    s = deskFormReducer(s, { type: "viewing", field: "time", value: "14:00" });
+    expect(validateDeskForm(s).viewingAt).toBeUndefined();
+  });
+});

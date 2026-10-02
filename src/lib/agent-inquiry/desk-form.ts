@@ -139,12 +139,22 @@ export function shouldBlockEnterSubmit(e: { key: string; isComposing: boolean; t
   return e.tagName === "INPUT" && e.type !== "submit" && e.type !== "button";
 }
 
+const PARTIAL_SCHEDULE = "日付と時刻の両方を入れてください(両方とも空なら日程調整中で保存できます)";
+/** 内見の日時が片方だけか。片方だけで保存すると黙って「日程調整中」になる(詳細では入っていた予定が消える)。 */
+export function partialScheduleError(date: string, time: string): string | null {
+  return (date.trim() === "") !== (time.trim() === "") ? PARTIAL_SCHEDULE : null;
+}
+
 export function validateDeskForm(s: DeskFormState) {
-  const e: Partial<Record<"agent" | "property" | "kind" | "viewingType", string>> = {};
+  const e: Partial<Record<"agent" | "property" | "kind" | "viewingType" | "viewingAt", string>> = {};
   if (!s.agent) e.agent = "業者を選んでください";
   if (!s.property) e.property = "物件を選んでください";
   if (!s.kind) e.kind = "用件を選んでください";
   if (s.kind === "viewing" && !s.viewingType) e.viewingType = "案内か下見かを選んでください";
+  if (s.kind === "viewing") {
+    const partial = partialScheduleError(s.viewingDate, s.viewingTime);
+    if (partial) e.viewingAt = partial;
+  }
   return e;
 }
 

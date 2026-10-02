@@ -197,6 +197,7 @@ export function InquiryFormView({
               className={inputCls}
             />
           </div>
+          <Err text={errors.viewingAt} />
           <p className="text-[11px] text-gray-500">日付と時刻の両方を入れると予定になります(空のままなら日程調整中)</p>
           <label className="block">
             <Label>立ち会い(こちら)</Label>

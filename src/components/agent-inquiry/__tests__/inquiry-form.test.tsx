@@ -145,3 +145,12 @@ describe("Enter で勝手に保存しない", () => {
     expect(src).toMatch(/if \(shouldBlockEnterSubmit\([\s\S]{0,200}\)\) e\.preventDefault\(\);/);
   });
 });
+
+describe("日時の片方だけ", () => {
+  it("日時の片方だけのエラーを日時の欄の下に出す", () => {
+    let s = deskFormReducer(EMPTY_DESK_FORM, { type: "kind", value: "viewing" });
+    s = deskFormReducer(s, { type: "viewing", field: "date", value: "2026-10-05" });
+    expect(view({ state: s, errors: { viewingAt: "日付と時刻の両方を入れてください(両方とも空なら日程調整中で保存できます)" } }))
+      .toContain("日付と時刻の両方を入れてください");
+  });
+});
