@@ -100,3 +100,9 @@ describe("物件画面への組み込み", () => {
     expect(read("src/components/properties/agent-inquiry-tab.tsx")).not.toContain("useScreenProtection");
   });
 });
+
+describe("暗い画面の色", () => {
+  it("「取り消し」に暗い画面の色", () => {
+    expect(read("src/components/properties/agent-inquiry-tab.tsx")).toContain('text-xs text-gray-500 dark:text-gray-400">取り消し');
+  });
+});

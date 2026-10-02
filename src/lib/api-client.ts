@@ -5185,7 +5185,10 @@ export async function fetchAgentDetail(id: string, cursor?: string) {
 }
 export async function updateAgent(
   id: string,
-  body: { version: number; isArchived?: boolean } & Partial<Record<keyof DeskAgentInput, string | null>>,
+  // 商号・代表電話は null にできない(API が 422 を返す)=型で先に止める。
+  body: { version: number; isArchived?: boolean; companyName?: string; phone?: string } & Partial<
+    Record<Exclude<keyof DeskAgentInput, "companyName" | "phone">, string | null>
+  >,
 ) {
   if (USE_MOCK) {
     await mockDelay();

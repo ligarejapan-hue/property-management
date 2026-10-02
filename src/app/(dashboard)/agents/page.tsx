@@ -36,6 +36,7 @@ export default function AgentsPage() {
   // 一覧の世代(絞り込み・読み直しで進む)。もっと見るの応答が古い世代なら捨てる。
   const genRef = useRef(0);
   const moreRef = useRef(-1);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     genRef.current += 1;
@@ -66,6 +67,7 @@ export default function AgentsPage() {
     if (!cursor || moreRef.current === genRef.current) return;
     const gen = genRef.current;
     moreRef.current = gen;
+    setLoadingMore(true);
     try {
       const r = await fetchAgentDirectory({ archived: filter === "archived", cursor });
       if (genRef.current !== gen) return;
@@ -74,6 +76,8 @@ export default function AgentsPage() {
     } catch (e) {
       if (genRef.current === gen) setState(apiErrorCode(e) === "FORBIDDEN" ? "forbidden" : "error");
     } finally {
+      // 世代が変わっていても「読み込み中」は戻す(押せないまま残さない)。
+      setLoadingMore(false);
       if (moreRef.current === gen) moreRef.current = -1;
     }
   };
@@ -154,8 +158,8 @@ export default function AgentsPage() {
                   <AgentDirectoryRows rows={rows} />
                 )}
                 {rowsFilter === filter && cursor != null && (
-                  <Button variant="secondary" className="w-full" onClick={() => void loadMore()}>
-                    もっと見る
+                  <Button variant="secondary" className="w-full" disabled={loadingMore} onClick={() => void loadMore()}>
+                    {loadingMore ? "読み込み中…" : "もっと見る"}
                   </Button>
                 )}
               </div>
