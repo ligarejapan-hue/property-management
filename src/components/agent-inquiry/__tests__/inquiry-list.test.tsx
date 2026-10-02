@@ -156,9 +156,9 @@ describe("読み直した後の上書きは確かめてから・書き込みの�
 
 describe("詳細の小窓(ネイティブの dialog)の中にも透かし・保存中は閉じない(@codex #459 R8)", () => {
   const s = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-detail.tsx"), "utf8").replace(/\r\n/g, "\n");
-  it("小窓の中に透かしを描く(小窓は最前面に出るので外の透かしが隠れる)", () => {
-    expect(s).toContain("useScreenProtection()");
-    expect(s).toMatch(/!bypass && watermarkText && <WatermarkOverlay text=\{watermarkText\} \/>/);
+  it("小窓の中に透かしを描く(小窓は最前面に出るので外の透かしが隠れる)=器(ModalShell)が描く・自前では描かない", () => {
+    expect(s).toContain("<ModalShell");
+    expect(s).not.toContain("<WatermarkOverlay");
   });
   it("保存中は「閉じる」も Escape も効かない(書き込み中だけ・読み直しの失敗では閉じられる=閉じ込めない・@codex #459 R9)", () => {
     expect(s).toMatch(/onClose=\{closeLocked \? undefined : onClose\}/);
@@ -246,7 +246,9 @@ describe("ログイン切れ(401)も画面ごと隠す・内見の追加は結�
 describe("新しい業者の小窓にも透かしを描く(@codex #459 R21)", () => {
   it("最前面に出る小窓は中に透かしを持つ", () => {
     const s = readFileSync(join(process.cwd(), "src/components/agent-inquiry/agent-create-modal.tsx"), "utf8");
-    expect(s).toMatch(/!bypass && watermarkText && <WatermarkOverlay text=\{watermarkText\} \/>/);
+    // 透かしは器(ModalShell)が描く(全部の小窓にそろえた)。自前では描かない=二重にしない。
+    expect(s).toContain("<ModalShell");
+    expect(s).not.toContain("<WatermarkOverlay");
     const picker = readFileSync(join(process.cwd(), "src/components/agent-inquiry/agent-picker.tsx"), "utf8");
     expect(picker).toMatch(/newAgentAction\(/);
   });

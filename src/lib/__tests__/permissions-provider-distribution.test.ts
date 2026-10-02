@@ -43,9 +43,12 @@ import * as path from "path";
 const read = (p: string) =>
   fs.readFileSync(path.resolve(process.cwd(), p), "utf8");
 
-const providerSrc = read(
-  "src/components/screen-protection/screen-protection-provider.tsx",
-);
+// context(状態の形・既定値・読み出し)は小さな部品に分けた(小窓の器が provider 本体を import せずに
+// 透かしを描くため・2026-10-02)。provider と context は1組として見る。
+const providerSrc =
+  read("src/components/screen-protection/screen-protection-provider.tsx") +
+  "\n" +
+  read("src/components/screen-protection/screen-protection-context.ts");
 const pageSrc = read("src/app/(dashboard)/properties/page.tsx");
 const buildingDetailSrc = read("src/app/(dashboard)/buildings/[id]/page.tsx");
 const guardSrc = read(

@@ -112,3 +112,33 @@ describe("ConfirmDialog", () => {
     expect(html).toContain("「A」を削除しますか？");
   });
 });
+
+import { vi } from "vitest";
+describe("小窓の中の透かし(画面保護)", () => {
+  it("★画面保護の中では、小窓の中にも透かしを描く(最前面の小窓は外の透かしを隠すため)", async () => {
+    vi.resetModules();
+    vi.doMock("@/components/screen-protection/screen-protection-context", () => ({
+      useScreenProtection: () => ({ bypass: false, watermarkText: "佐藤 2026-10-02" }),
+    }));
+    const { ModalShell: M } = await import("../modal-shell");
+    expect(renderToStaticMarkup(<M title="題" footer={<span>F</span>} />)).toContain('data-testid="screen-protection-watermark"');
+    vi.doUnmock("@/components/screen-protection/screen-protection-context");
+  });
+  it("bypass の人・画面保護の外では描かない", async () => {
+    vi.resetModules();
+    vi.doMock("@/components/screen-protection/screen-protection-context", () => ({
+      useScreenProtection: () => ({ bypass: true, watermarkText: "佐藤" }),
+    }));
+    const { ModalShell: M } = await import("../modal-shell");
+    expect(renderToStaticMarkup(<M title="題" footer={<span>F</span>} />)).not.toContain("screen-protection-watermark");
+    vi.doUnmock("@/components/screen-protection/screen-protection-context");
+    // provider の外(既定値=watermarkText null)でも描かない
+    expect(render(<ModalShell title="題" footer={<span>F</span>} />)).not.toContain("screen-protection-watermark");
+  });
+  it("★個別に描いていた2か所は外す(二重に描かない)", () => {
+    for (const f of ["agent-create-modal.tsx", "inquiry-detail.tsx"]) {
+      const src = readFileSync(join(process.cwd(), "src/components/agent-inquiry", f), "utf8");
+      expect(src, f).not.toContain("<WatermarkOverlay");
+    }
+  });
+});
