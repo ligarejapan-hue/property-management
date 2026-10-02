@@ -45,3 +45,9 @@ describe("メイン画面側の API 呼び出し(反響)", () => {
     expect(JSON.parse(String(call().init.body))).toEqual({ version: 3, fax: null });
   });
 });
+
+// 型の確かめ(tsc): 商号・代表電話は null にできない(API が 422 を返すので、型で先に止める)。
+// @ts-expect-error 商号は null にできない
+void (() => updateAgent("x", { version: 1, companyName: null }));
+// @ts-expect-error 代表電話は null にできない
+void (() => updateAgent("x", { version: 1, phone: null }));

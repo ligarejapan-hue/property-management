@@ -72,3 +72,14 @@ describe("名簿の画面", () => {
     expect(page()).toMatch(/data-pii-protected data-pii-surface="dashboard"/);
   });
 });
+
+describe("もっと見るの読み込み中", () => {
+  it("もっと見るは読み込み中に押せず「読み込み中…」(名簿の一覧・詳細)", () => {
+    for (const f of ["src/app/(dashboard)/agents/page.tsx", "src/app/(dashboard)/agents/[id]/page.tsx"]) {
+      const s = read(f);
+      expect(s, f).toMatch(/disabled=\{loadingMore\}/);
+      expect(s, f).toContain('{loadingMore ? "読み込み中…" : "もっと見る"}');
+      expect(s, f).toMatch(/finally \{[\s\S]{0,120}setLoadingMore\(false\)/);
+    }
+  });
+});

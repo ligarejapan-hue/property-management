@@ -4954,6 +4954,8 @@ export interface DeskAgentInput {
   email?: string | null;
   address?: string | null;
   note?: string | null;
+  /** 押し直しの鍵(二重登録を防ぐ)。 */
+  clientToken?: string;
 }
 export interface AgentInquiryCreateBody {
   propertyId: string;
@@ -4965,6 +4967,8 @@ export interface AgentInquiryCreateBody {
   contactEmail?: string | null;
   note?: string | null;
   viewing?: { viewingType: ViewingTypeKey; scheduledAt?: string | null; attendantId?: string | null };
+  /** 押し直しの鍵(二重登録を防ぐ)。 */
+  clientToken?: string;
 }
 
 const deskJsonInit = (method: string, body: unknown): RequestInit => ({
@@ -5001,7 +5005,7 @@ export async function createAgentInquiry(body: AgentInquiryCreateBody) {
   }
   return apiFetch<{ id: string }>("/api/agent-inquiries", deskJsonInit("POST", body));
 }
-export async function fetchAgentInquiries(p: { status?: string; assignee?: string; cursor?: string }) {
+export async function fetchAgentInquiries(p: { status?: string; assignee?: string; cursor?: string; days?: number }) {
   if (USE_MOCK) {
     await mockDelay();
     return { items: [] as InquiryView[], nextCursor: null as string | null };
@@ -5009,6 +5013,7 @@ export async function fetchAgentInquiries(p: { status?: string; assignee?: strin
   const sp = new URLSearchParams();
   if (p.status) sp.set("status", p.status);
   if (p.assignee) sp.set("assignee", p.assignee);
+  if (p.days) sp.set("days", String(p.days));
   if (p.cursor) sp.set("cursor", p.cursor);
   const qs = sp.toString();
   return apiFetch<{ items: InquiryView[]; nextCursor: string | null }>(`/api/agent-inquiries${qs ? `?${qs}` : ""}`);
@@ -5184,7 +5189,10 @@ export async function fetchAgentDetail(id: string, cursor?: string) {
 }
 export async function updateAgent(
   id: string,
-  body: { version: number; isArchived?: boolean } & Partial<Record<keyof DeskAgentInput, string | null>>,
+  // 商号・代表電話は null にできない(API が 422 を返す)=型で先に止める。
+  body: { version: number; isArchived?: boolean; companyName?: string; phone?: string } & Partial<
+    Record<Exclude<keyof DeskAgentInput, "companyName" | "phone" | "clientToken">, string | null>
+  >,
 ) {
   if (USE_MOCK) {
     await mockDelay();

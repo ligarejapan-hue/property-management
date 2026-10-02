@@ -116,7 +116,7 @@ export function PropertyInquiryView({
               <li key={e.key} className={`py-2 text-sm${e.canceled ? " opacity-50" : ""}`}>
                 <span className="mr-2 text-xs text-gray-500 dark:text-gray-400">{timelineWhen(e)}</span>
                 <span className="mr-2 rounded bg-gray-100 px-1.5 py-0.5 text-xs dark:bg-gray-800">{timelineKindLabel(e)}</span>
-                {e.canceled && <span className="mr-2 text-xs text-gray-500">取り消し</span>}
+                {e.canceled && <span className="mr-2 text-xs text-gray-500 dark:text-gray-400">取り消し</span>}
                 <span className="font-medium">{e.agentName}</span>
                 {e.contactName && <span>{`(${e.contactName}様)`}</span>}
                 {e.attendantName && <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">{`立ち会い:${e.attendantName}`}</span>}

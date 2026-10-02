@@ -56,3 +56,20 @@ describe("権限の一覧は2画面で同じ(片方だけだと付与できな�
     }
   });
 });
+
+describe("二重登録を防ぐ鍵の migration(2026-10-02)", () => {
+  const tok = read("prisma/migrations/20261002100000_add_agent_client_tokens/migration.sql");
+  it("反響と業者に鍵の列(NULL 可)と「登録者×鍵」の一意の索引を足す", () => {
+    expect(tok).toMatch(/ALTER TABLE "agent_inquiries" ADD COLUMN "client_token" UUID;/);
+    expect(tok).toMatch(/ALTER TABLE "agents" ADD COLUMN "client_token" UUID;/);
+    expect(tok).toMatch(/CREATE UNIQUE INDEX "agent_inquiries_created_by_id_client_token_key" ON "agent_inquiries"\("created_by_id", "client_token"\);/);
+    expect(tok).toMatch(/CREATE UNIQUE INDEX "agents_created_by_id_client_token_key" ON "agents"\("created_by_id", "client_token"\);/);
+  });
+  it("足すだけ(既存の行・列を変えない・NOT NULL にしない)", () => {
+    expect(tok).not.toMatch(/^\s*(UPDATE|DELETE|DROP)\b/im);
+    expect(tok).not.toMatch(/NOT NULL/);
+    for (const m of tok.matchAll(/ALTER TABLE "([a-z_]+)" ([A-Z ]+)/g)) {
+      expect(m[2], `${m[1]} ${m[2]}`).toMatch(/^ADD COLUMN/);
+    }
+  });
+});

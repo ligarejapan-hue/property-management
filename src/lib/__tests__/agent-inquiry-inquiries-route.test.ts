@@ -7,6 +7,7 @@ vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     agentInquiry: {
       create: vi.fn(),
+      findFirst: vi.fn(async () => null),
       findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => null),
       updateMany: vi.fn(async () => ({ count: 1 })),
@@ -33,7 +34,7 @@ import { GET as UPCOMING } from "../../app/api/agent-inquiries/upcoming/route";
 
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
-  agentInquiry: { create: Fn; findMany: Fn; findUnique: Fn; updateMany: Fn; count: Fn };
+  agentInquiry: { create: Fn; findFirst: Fn; findMany: Fn; findUnique: Fn; updateMany: Fn; count: Fn };
   agentViewing: { count: Fn; findMany: Fn };
   agent: { findUnique: Fn };
   property: { findUnique: Fn };
@@ -43,6 +44,7 @@ const PID = "11111111-1111-4111-8111-111111111111";
 const AID = "22222222-2222-4222-8222-222222222222";
 const IID = "44444444-4444-4444-8444-444444444444";
 const UID = "66666666-6666-4666-8666-666666666666";
+const TOKEN = "77777777-7777-4777-8777-777777777777";
 const ctx = { params: Promise.resolve({ id: IID }) };
 const deskRow = {
   id: PID, propertyType: "land", buildingName: null, roomNo: null,
@@ -121,6 +123,47 @@ describe("反響 API", () => {
     expect(Object.keys(body.items[0].property).sort()).toEqual(DESK_KEYS);
     expect(JSON.stringify(body)).not.toMatch(/lotNumber|salePrice/);
     expect(pm.agentInquiry.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { status: "open" }, take: 51 }));
+  });
+  it("days=N で受けた日時が N 日以内に絞る(対応済みタブの期間)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-02T00:00:00.000Z"));
+    try {
+      await LIST(new Request("http://x/api/agent-inquiries?status=done&days=30"));
+      expect(pm.agentInquiry.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { status: "done", receivedAt: { gte: new Date("2026-09-02T00:00:00.000Z") } },
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("days は 1〜3650 の整数だけ(それ以外は 422)", async () => {
+    for (const d of ["0", "-1", "3651", "1.5", "abc"]) {
+      expect((await LIST(new Request(`http://x/api/agent-inquiries?days=${d}`))).status).toBe(422);
+    }
+  });
+  it("★同じ鍵の2回目は作らずに1回目の id を返す(200・replayed)", async () => {
+    pm.agentInquiry.findFirst.mockResolvedValueOnce({ id: IID });
+    const res = await POST(json("POST", { propertyId: PID, agentId: AID, kind: "ad_permission", clientToken: TOKEN }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: IID, replayed: true });
+    expect(pm.agentInquiry.create).not.toHaveBeenCalled();
+    expect(writeAuditLog).not.toHaveBeenCalled();
+    expect(pm.agentInquiry.findFirst).toHaveBeenCalledWith({ where: { createdById: "u-field", clientToken: TOKEN }, select: { id: true } });
+  });
+  it("★同時に2回届いて一意の索引にぶつかったら、既存の id を返す", async () => {
+    pm.agentInquiry.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: IID });
+    pm.agentInquiry.create.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: "P2002" }));
+    const res = await POST(json("POST", { propertyId: PID, agentId: AID, kind: "ad_permission", clientToken: TOKEN }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).id).toBe(IID);
+  });
+  it("鍵は登録者ごと・作るときに保存する", async () => {
+    await POST(json("POST", { propertyId: PID, agentId: AID, kind: "ad_permission", clientToken: TOKEN }));
+    expect(pm.agentInquiry.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ clientToken: TOKEN, createdById: "u-field" }) }));
+  });
+  it("鍵は uuid だけ(それ以外は 422)・鍵なしはこれまでどおり 201", async () => {
+    expect((await POST(json("POST", { propertyId: PID, agentId: AID, kind: "ad_permission", clientToken: "abc" }))).status).toBe(422);
+    expect((await POST(json("POST", { propertyId: PID, agentId: AID, kind: "ad_permission" }))).status).toBe(201);
   });
   it("assignee=me は自分の id で絞る", async () => {
     await LIST(new Request("http://x/api/agent-inquiries?assignee=me"));

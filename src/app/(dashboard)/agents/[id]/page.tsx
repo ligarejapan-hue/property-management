@@ -39,6 +39,7 @@ function AgentDetailBody({ id }: { id: string }) {
   // 読み込みの世代。新しい読み込みを始めたら、古い読み込み(履歴の続きも)の結果は捨てる。
   const genRef = useRef(0);
   const moreRef = useRef(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const load = useCallback(async () => {
     const gen = ++genRef.current;
@@ -124,6 +125,7 @@ function AgentDetailBody({ id }: { id: string }) {
   const loadMore = async () => {
     if (!cursor || moreRef.current) return;
     moreRef.current = true;
+    setLoadingMore(true);
     const gen = genRef.current;
     try {
       const r = await fetchAgentDetail(id, cursor);
@@ -134,6 +136,7 @@ function AgentDetailBody({ id }: { id: string }) {
     } catch {
       if (genRef.current === gen) setNotice({ tone: "error", text: "反響の続きを読み込めませんでした。" });
     } finally {
+      setLoadingMore(false);
       moreRef.current = false;
     }
   };
@@ -228,8 +231,8 @@ function AgentDetailBody({ id }: { id: string }) {
         <h2 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">この業者からの反響(新しい順)</h2>
         <AgentHistoryList items={history} />
         {cursor != null && (
-          <Button variant="secondary" className="mt-2 w-full" onClick={() => void loadMore()}>
-            もっと見る
+          <Button variant="secondary" className="mt-2 w-full" disabled={loadingMore} onClick={() => void loadMore()}>
+            {loadingMore ? "読み込み中…" : "もっと見る"}
           </Button>
         )}
       </section>

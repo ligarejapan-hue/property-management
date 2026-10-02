@@ -137,3 +137,58 @@ describe("業者の登録ができたか分からないとき(@codex #459 R16)",
     expect(s).toContain("登録できたか分かりません");
   });
 });
+
+describe("Enter で勝手に保存しない", () => {
+  it("フォームが Enter を受けて shouldBlockEnterSubmit で止める", () => {
+    const src = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-form.tsx"), "utf8");
+    expect(src).toMatch(/onKeyDown=\{\(e\) => \{[\s\S]{0,300}shouldBlockEnterSubmit\(/);
+    expect(src).toMatch(/if \(shouldBlockEnterSubmit\([\s\S]{0,200}\)\) e\.preventDefault\(\);/);
+  });
+});
+
+describe("日時の片方だけ", () => {
+  it("日時の片方だけのエラーを日時の欄の下に出す", () => {
+    let s = deskFormReducer(EMPTY_DESK_FORM, { type: "kind", value: "viewing" });
+    s = deskFormReducer(s, { type: "viewing", field: "date", value: "2026-10-05" });
+    expect(view({ state: s, errors: { viewingAt: "日付と時刻の両方を入れてください(両方とも空なら日程調整中で保存できます)" } }))
+      .toContain("日付と時刻の両方を入れてください");
+  });
+});
+
+describe("切り替えボタンの読み上げ", () => {
+  it("用件・案内/下見・入口の切り替えは押している方を aria-pressed で伝える", () => {
+    let s = deskFormReducer(EMPTY_DESK_FORM, { type: "kind", value: "viewing" });
+    s = deskFormReducer(s, { type: "viewing", field: "viewingType", value: "guided" });
+    const html = view({ state: s });
+    expect(html).toMatch(/aria-pressed="true"[^>]*>内見</);
+    expect(html).toMatch(/aria-pressed="false"[^>]*>資料請求</);
+    expect(html).toMatch(/aria-pressed="true"[^>]*>案内\(お客様連れ\)</);
+    expect(html).toMatch(/aria-pressed="true"[^>]*>電話</);
+    expect((html.match(/aria-pressed=/g) ?? []).length).toBe(8);
+  });
+});
+
+describe("押し直しの鍵(二重登録を防ぐ)", () => {
+  const src = () => readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-form.tsx"), "utf8");
+  const modal = () => readFileSync(join(process.cwd(), "src/components/agent-inquiry/agent-create-modal.tsx"), "utf8");
+  it("反響の登録は鍵を付けて送り、分からないときはそのまま押してよいと伝える", () => {
+    expect(src()).toContain("tokenForSubmit(tokenRef.current, state, safeUuidV4)");
+    expect(src()).toContain("clientToken: t.token");
+    expect(src()).toContain("中身を変えずにそのまま「保存する」を押してください(二重には登録されません)");
+  });
+  it("業者の登録も同じ", () => {
+    expect(modal()).toContain("tokenForSubmit(tokenRef.current, v, safeUuidV4)");
+    expect(modal()).toContain("clientToken: t.token");
+    expect(modal()).toContain("中身を変えずにそのまま「登録して戻る」を押してください(二重には登録されません)");
+  });
+});
+
+describe("鍵は UUID の形で作る・小窓の欄は同じ値なら同じ状態", () => {
+  it("反響・業者の登録の鍵は safeUuidV4(平文 HTTP でも UUID の形)", () => {
+    const form = readFileSync(join(process.cwd(), "src/components/agent-inquiry/inquiry-form.tsx"), "utf8");
+    const modal = readFileSync(join(process.cwd(), "src/components/agent-inquiry/agent-create-modal.tsx"), "utf8");
+    expect(form).toContain("tokenForSubmit(tokenRef.current, state, safeUuidV4)");
+    expect(modal).toContain("tokenForSubmit(tokenRef.current, v, safeUuidV4)");
+    expect(modal).toContain("setV((p) => setFieldIfChanged(p, k, val))");
+  });
+});

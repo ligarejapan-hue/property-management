@@ -285,3 +285,88 @@ describe("0800(フリーダイヤル)は携帯ではなく会社の番号(@codex
     expect(splitNewAgentPhone("080-1234-5678")).toEqual({ agentPhone: "", callerMobile: "080-1234-5678" });
   });
 });
+
+import { shouldBlockEnterSubmit } from "@/lib/agent-inquiry/desk-form";
+describe("1行の入力欄の Enter では保存しない", () => {
+  const k = (o: Partial<{ key: string; isComposing: boolean; tagName: string; type: string | undefined }>) =>
+    shouldBlockEnterSubmit({ key: "Enter", isComposing: false, tagName: "INPUT", type: "text", ...o });
+  it("文字・電話・メール・日付の欄の Enter は止める", () => {
+    for (const type of ["text", "tel", "email", "date", "time", "search"]) expect(k({ type })).toBe(true);
+  });
+  it("★日本語の変換を確定する Enter は止めない(変換の確定を妨げない)", () => {
+    expect(k({ isComposing: true })).toBe(false);
+  });
+  it("メモ欄(複数行)の Enter は改行のまま・ボタンの Enter は押したことになる", () => {
+    expect(k({ tagName: "TEXTAREA", type: undefined })).toBe(false);
+    expect(k({ tagName: "BUTTON", type: "submit" })).toBe(false);
+  });
+  it("Enter 以外のキーは関係ない", () => {
+    expect(k({ key: "a" })).toBe(false);
+  });
+});
+
+import { partialScheduleError } from "@/lib/agent-inquiry/desk-form";
+describe("日付だけ・時刻だけでは保存しない", () => {
+  const MSG = "日付と時刻の両方を入れてください(両方とも空なら日程調整中で保存できます)";
+  it("片方だけは止める・両方空/両方ありは通す", () => {
+    expect(partialScheduleError("2026-10-05", "")).toBe(MSG);
+    expect(partialScheduleError("", "14:00")).toBe(MSG);
+    expect(partialScheduleError("", "")).toBeNull();
+    expect(partialScheduleError("2026-10-05", "14:00")).toBeNull();
+  });
+  it("登録フォームの検証にも入る(内見のときだけ)", () => {
+    let s = deskFormReducer(EMPTY_DESK_FORM, { type: "kind", value: "viewing" });
+    s = deskFormReducer(s, { type: "viewing", field: "date", value: "2026-10-05" });
+    expect(validateDeskForm(s).viewingAt).toBe(MSG);
+    s = deskFormReducer(s, { type: "viewing", field: "time", value: "14:00" });
+    expect(validateDeskForm(s).viewingAt).toBeUndefined();
+  });
+});
+
+import { donePeriodDays } from "@/lib/agent-inquiry/desk-form";
+describe("対応済みタブの期間", () => {
+  it("期間は対応済みタブだけに効く(未対応・対応中は絞らない=対応漏れを隠さない)", () => {
+    expect(donePeriodDays("done", "30")).toBe(30);
+    expect(donePeriodDays("done", "90")).toBe(90);
+    expect(donePeriodDays("done", "all")).toBeUndefined();
+    expect(donePeriodDays("open", "30")).toBeUndefined();
+    expect(donePeriodDays("in_progress", "90")).toBeUndefined();
+  });
+});
+
+import { tokenForSubmit } from "@/lib/agent-inquiry/desk-form";
+describe("押し直しの鍵", () => {
+  let n = 0;
+  const gen = () => `t${++n}`;
+  it("★中身を変えずに押し直したら同じ鍵(二重にならない)", () => {
+    const s = { a: 1 };
+    const first = tokenForSubmit(null, s, gen);
+    expect(tokenForSubmit(first, s, gen).token).toBe(first.token);
+  });
+  it("★中身を直してから押したら新しい鍵(直した内容を1回目の分で黙って捨てない)", () => {
+    const first = tokenForSubmit(null, { a: 1 }, gen);
+    expect(tokenForSubmit(first, { a: 2 }, gen).token).not.toBe(first.token);
+  });
+});
+
+describe("変わらない入力では同じ状態のまま(押し直しの鍵を変えない)", () => {
+  it("★同じ値を入れ直しても(欄を離れたときの整形など)状態は同じ参照=鍵が変わらない", () => {
+    const s = deskFormReducer(EMPTY_DESK_FORM, { type: "contact", field: "contactMobile", value: "090-1234-5678" });
+    expect(deskFormReducer(s, { type: "contact", field: "contactMobile", value: "090-1234-5678" })).toBe(s);
+    expect(deskFormReducer(s, { type: "note", value: "" })).toBe(s);
+    expect(deskFormReducer(s, { type: "channel", value: "phone" })).toBe(s);
+    expect(deskFormReducer(s, { type: "viewing", field: "date", value: "" })).toBe(s);
+    expect(deskFormReducer(s, { type: "contact", field: "contactMobile", value: "090-1234-5679" })).not.toBe(s);
+  });
+});
+
+import { setFieldIfChanged } from "@/lib/agent-inquiry/desk-form";
+describe("新しい業者の小窓の欄(押し直しの鍵を変えない)", () => {
+  it("★同じ値なら同じ参照を返す(欄を離れたときの整形で鍵が変わらない)・違えば新しい参照", () => {
+    const v = { phone: "03-1234-5678", fax: "" };
+    expect(setFieldIfChanged(v, "phone", "03-1234-5678")).toBe(v);
+    const next = setFieldIfChanged(v, "phone", "03-1234-5679");
+    expect(next).not.toBe(v);
+    expect(next).toEqual({ phone: "03-1234-5679", fax: "" });
+  });
+});

@@ -24,6 +24,8 @@
  *   ないため対象外(走査テストの allow-list 参照)。
  */
 import { useEffect, useId, useRef, type ReactNode } from "react";
+import WatermarkOverlay from "@/components/screen-protection/watermark-overlay";
+import { useScreenProtection } from "@/components/screen-protection/screen-protection-context";
 
 export interface ModalShellProps {
   title: ReactNode;
@@ -56,6 +58,8 @@ export function ModalShell({
 }: ModalShellProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  // 画面保護の透かし。provider の外(ログイン前など)では watermarkText が null=描かない。
+  const { bypass, watermarkText } = useScreenProtection();
   useEffect(() => {
     const dialog = ref.current;
     // ⚠開閉が「親の条件描画」なので、キャンセル→即アンマウントの経路では
@@ -80,6 +84,8 @@ export function ModalShell({
       }}
       className={`m-auto w-full ${SIZE_CLASSES[size]} rounded-lg bg-white p-6 shadow-xl backdrop:bg-black/50 dark:bg-gray-900${className ? ` ${className}` : ""}`}
     >
+      {/* 小窓はブラウザの最前面に出るので、外の透かしは隠れる。器で描けば全部の小窓にそろう(@codex #459 R8/R21 の一般化)。 */}
+      {!bypass && watermarkText && <WatermarkOverlay text={watermarkText} />}
       <h2
         id={titleId}
         className="text-lg font-semibold text-gray-900 dark:text-gray-100"

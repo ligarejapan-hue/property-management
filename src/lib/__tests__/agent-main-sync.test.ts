@@ -26,23 +26,32 @@ afterEach(() => {
 });
 
 describe("窓どうしの合図", () => {
-  it("変わったと知らせると、聞いている側が呼ばれる", () => {
+  it("別の窓が変わったと知らせると、聞いている側が呼ばれる・やめたら呼ばれない", () => {
     vi.stubGlobal("BroadcastChannel", FakeChannel);
     const cb = vi.fn();
     const off = onInquiryChanged(cb);
-    notifyInquiryChanged();
+    new FakeChannel(INQUIRY_SYNC_CHANNEL).postMessage({ type: "changed", from: "other-window" });
     expect(cb).toHaveBeenCalledTimes(1);
     off();
-    notifyInquiryChanged();
+    new FakeChannel(INQUIRY_SYNC_CHANNEL).postMessage({ type: "changed", from: "other-window" });
     expect(cb).toHaveBeenCalledTimes(1);
   });
-  it("合図の中身は「変わった」だけ(名前・電話・id を載せない)", () => {
+  it("合図の中身は「変わった」と窓ごとの印だけ(名前・電話・反響の id を載せない)", () => {
     vi.stubGlobal("BroadcastChannel", FakeChannel);
     const seen: unknown[] = [];
     const listener = new FakeChannel(INQUIRY_SYNC_CHANNEL);
     listener.onmessage = (e) => seen.push(e.data);
     notifyInquiryChanged();
-    expect(seen).toEqual([{ type: "changed" }]);
+    expect(seen).toHaveLength(1);
+    expect(Object.keys(seen[0] as object).sort()).toEqual(["from", "type"]);
+    expect((seen[0] as { type: string }).type).toBe("changed");
+  });
+  it("★同じ窓が出した合図は聞かない(自分の保存で2回読み直さない)", () => {
+    vi.stubGlobal("BroadcastChannel", FakeChannel);
+    const cb = vi.fn();
+    onInquiryChanged(cb);
+    notifyInquiryChanged();
+    expect(cb).not.toHaveBeenCalled();
   });
   it("知らない合図では呼ばない", () => {
     vi.stubGlobal("BroadcastChannel", FakeChannel);

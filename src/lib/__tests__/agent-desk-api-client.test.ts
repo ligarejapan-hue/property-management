@@ -28,6 +28,10 @@ describe("受付の窓の API 呼び出し", () => {
     expect(call(1).url).toBe("/api/agent-inquiries");
     expect(JSON.parse(String(call(1).init.body))).toMatchObject({ kind: "ad_permission" });
   });
+  it("一覧の days は指定したときだけ載せる", async () => {
+    await fetchAgentInquiries({ status: "done", days: 30 });
+    expect(call().url).toBe("/api/agent-inquiries?status=done&days=30");
+  });
   it("一覧は空の条件を URL に載せない", async () => {
     await fetchAgentInquiries({ status: "open" });
     expect(call().url).toBe("/api/agent-inquiries?status=open");

@@ -57,7 +57,17 @@ export type DeskFormAction =
   | { type: "note"; value: string }
   | { type: "reset" };
 
+/**
+ * フォームの状態の更新。中身が何も変わらない操作(同じ値の入れ直し・欄を離れたときの整形など)では
+ * 同じ状態をそのまま返す=押し直しの鍵(tokenForSubmit)が変わらない(二重登録を防ぐ)。
+ */
 export function deskFormReducer(s: DeskFormState, a: DeskFormAction): DeskFormState {
+  const next = reduceDeskForm(s, a);
+  const keys = Object.keys(next) as (keyof DeskFormState)[];
+  return keys.length === Object.keys(s).length && keys.every((k) => next[k] === s[k]) ? s : next;
+}
+
+function reduceDeskForm(s: DeskFormState, a: DeskFormAction): DeskFormState {
   switch (a.type) {
     case "agentQuery":
       // 選んだ後に打ち直したら選択を外す(画面の表示と保存される業者が食い違わないように)。
@@ -130,12 +140,60 @@ export function nextDeskGuideStep(s: DeskFormState): DeskGuideStep {
   return "save";
 }
 
+/**
+ * フォームの Enter を止めるか。1行の入力欄で Enter を押すと、ブラウザの決まりでフォームが「保存」される
+ * (打ちかけのまま登録が走る)。保存はボタンだけにする。複数行のメモ欄・ボタン・日本語の変換確定は止めない。
+ */
+export function shouldBlockEnterSubmit(e: { key: string; isComposing: boolean; tagName: string; type?: string }): boolean {
+  if (e.key !== "Enter" || e.isComposing) return false;
+  return e.tagName === "INPUT" && e.type !== "submit" && e.type !== "button";
+}
+
+/**
+ * 押し直しの鍵(二重登録を防ぐ)。前回と同じ中身(同じ参照)なら同じ鍵=通信が切れて押し直しても
+ * サーバーが1回目の分を返す。中身を直していたら新しい鍵=直した内容を1回目の分で黙って捨てない。
+ */
+export function tokenForSubmit<T>(
+  prev: { snapshot: T; token: string } | null,
+  snapshot: T,
+  gen: () => string,
+): { snapshot: T; token: string } {
+  return prev && prev.snapshot === snapshot ? prev : { snapshot, token: gen() };
+}
+
+/** 欄の値を入れる。同じ値なら同じ参照を返す=欄を離れたときの整形などで押し直しの鍵が変わらない。 */
+export function setFieldIfChanged<T extends Record<string, string>, K extends keyof T>(prev: T, key: K, value: T[K]): T {
+  return prev[key] === value ? prev : { ...prev, [key]: value };
+}
+
+export type DonePeriodKey = "30" | "90" | "all";
+export const DONE_PERIODS: readonly { key: DonePeriodKey; label: string; days: number | null }[] = [
+  { key: "30", label: "直近30日", days: 30 },
+  { key: "90", label: "直近90日", days: 90 },
+  { key: "all", label: "すべて", days: null },
+];
+/** 一覧の API に渡す日数。対応済みタブだけ=未対応・対応中は期間で絞らない(対応漏れを隠さない)。 */
+export function donePeriodDays(tab: InquiryStatusKey, period: DonePeriodKey): number | undefined {
+  if (tab !== "done") return undefined;
+  return DONE_PERIODS.find((p) => p.key === period)?.days ?? undefined;
+}
+
+const PARTIAL_SCHEDULE = "日付と時刻の両方を入れてください(両方とも空なら日程調整中で保存できます)";
+/** 内見の日時が片方だけか。片方だけで保存すると黙って「日程調整中」になる(詳細では入っていた予定が消える)。 */
+export function partialScheduleError(date: string, time: string): string | null {
+  return (date.trim() === "") !== (time.trim() === "") ? PARTIAL_SCHEDULE : null;
+}
+
 export function validateDeskForm(s: DeskFormState) {
-  const e: Partial<Record<"agent" | "property" | "kind" | "viewingType", string>> = {};
+  const e: Partial<Record<"agent" | "property" | "kind" | "viewingType" | "viewingAt", string>> = {};
   if (!s.agent) e.agent = "業者を選んでください";
   if (!s.property) e.property = "物件を選んでください";
   if (!s.kind) e.kind = "用件を選んでください";
   if (s.kind === "viewing" && !s.viewingType) e.viewingType = "案内か下見かを選んでください";
+  if (s.kind === "viewing") {
+    const partial = partialScheduleError(s.viewingDate, s.viewingTime);
+    if (partial) e.viewingAt = partial;
+  }
   return e;
 }
 

@@ -1,6 +1,14 @@
 import type { InquiryStatusKey, InquiryView } from "@/lib/api-client";
 import { Tabs, tabPanelProps } from "@/components/ui/tabs";
-import { CHANNEL_LABEL, KIND_LABEL, STATUS_LABEL, agentLabel, formatJst } from "@/lib/agent-inquiry/desk-form";
+import {
+  CHANNEL_LABEL,
+  DONE_PERIODS,
+  KIND_LABEL,
+  STATUS_LABEL,
+  agentLabel,
+  formatJst,
+  type DonePeriodKey,
+} from "@/lib/agent-inquiry/desk-form";
 
 const TABS: InquiryStatusKey[] = ["open", "in_progress", "done"];
 
@@ -8,6 +16,8 @@ const TABS: InquiryStatusKey[] = ["open", "in_progress", "done"];
 export function InquiryListView({
   tab,
   onTab,
+  period,
+  onPeriod,
   mine,
   onMine,
   items,
@@ -18,6 +28,9 @@ export function InquiryListView({
 }: {
   tab: InquiryStatusKey;
   onTab: (t: InquiryStatusKey) => void;
+  /** 対応済みタブの期間(設計 §2.1・既定=直近30日)。 */
+  period: DonePeriodKey;
+  onPeriod: (p: DonePeriodKey) => void;
   mine: boolean;
   onMine: (v: boolean) => void;
   items: InquiryView[];
@@ -38,6 +51,20 @@ export function InquiryListView({
           active={tab}
           onChange={onTab}
         />
+        {tab === "done" && (
+          <select
+            aria-label="対応済みの期間"
+            value={period}
+            onChange={(e) => onPeriod(e.target.value as DonePeriodKey)}
+            className="mb-1 rounded border border-gray-300 px-2 py-1 text-xs dark:border-gray-700 dark:bg-gray-900"
+          >
+            {DONE_PERIODS.map((p) => (
+              <option key={p.key} value={p.key}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        )}
         <label className="mb-1 flex items-center gap-1 text-xs">
           <input type="checkbox" checked={mine} onChange={(e) => onMine(e.target.checked)} />
           自分の担当だけ

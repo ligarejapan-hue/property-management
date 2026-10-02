@@ -42,15 +42,33 @@ export async function POST(request: Request) {
     const { session } = await requireAgentInquiry("write");
     const parsed = agentCreateSchema.parse(await parseJsonBody(request));
     const input = normalizeAgentInput(parsed);
-    const row = await prisma.agent.create({
-      data: {
-        ...input,
-        companyName: parsed.companyName,
-        phone: input.phone ?? parsed.phone,
-        createdById: session.id,
-      },
-      select: { id: true },
-    });
+    // 同じ人が同じ鍵で送り直した(通信が切れて押し直した)=作らずに1回目の分を返す。鍵は登録者ごと。
+    const replay = async () =>
+      parsed.clientToken
+        ? prisma.agent.findFirst({ where: { createdById: session.id, clientToken: parsed.clientToken }, select: { id: true } })
+        : null;
+    const prev = await replay();
+    if (prev) return NextResponse.json({ id: prev.id, replayed: true }, { headers: NO_STORE });
+    let row: { id: string };
+    try {
+      row = await prisma.agent.create({
+        data: {
+          ...input,
+          companyName: parsed.companyName,
+          phone: input.phone ?? parsed.phone,
+          createdById: session.id,
+          clientToken: parsed.clientToken ?? null,
+        },
+        select: { id: true },
+      });
+    } catch (e) {
+      // 同じ鍵が同時に2回届いて一意の索引にぶつかった=先に入った方を返す(二重に作らない)。
+      if ((e as { code?: string } | null)?.code === "P2002" && parsed.clientToken) {
+        const again = await replay();
+        if (again) return NextResponse.json({ id: again.id, replayed: true }, { headers: NO_STORE });
+      }
+      throw e;
+    }
     await writeAuditLog({
       userId: session.id,
       action: "agent_create",

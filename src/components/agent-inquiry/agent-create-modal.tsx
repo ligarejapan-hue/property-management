@@ -1,13 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { safeUuidV4 } from "@/lib/random-id";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Button } from "@/components/ui/button";
-import WatermarkOverlay from "@/components/screen-protection/watermark-overlay";
-import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { createDeskAgent, type AgentHit } from "@/lib/api-client";
 import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
-import { isAmbiguousSaveError } from "@/lib/agent-inquiry/desk-form";
+import { isAmbiguousSaveError, setFieldIfChanged, tokenForSubmit } from "@/lib/agent-inquiry/desk-form";
 import { useDeskAccess } from "./desk-access";
 
 const MLIT_SEARCH_URL = "https://etsuran2.mlit.go.jp/TAKKEN/";
@@ -46,9 +45,11 @@ export function AgentCreateModal({
   });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // 押し直しの鍵。中身(v)を変えずに押し直したら同じ鍵=二重に登録されない。
+  const tokenRef = useRef<{ snapshot: typeof v; token: string } | null>(null);
   const { writeDenied } = useDeskAccess();
-  const { bypass, watermarkText } = useScreenProtection();
-  const set = (k: Key, val: string) => setV((p) => ({ ...p, [k]: val }));
+  // 同じ値なら同じ状態のまま=欄を離れたときの電話の整形で押し直しの鍵が変わらない(二重登録を防ぐ)。
+  const set = (k: Key, val: string) => setV((p) => setFieldIfChanged(p, k, val));
   const submit = async () => {
     if (saving) return;
     if (!v.companyName.trim() || !v.phone.trim()) {
@@ -57,6 +58,8 @@ export function AgentCreateModal({
     }
     setSaving(true);
     setError(null);
+    const t = tokenForSubmit(tokenRef.current, v, safeUuidV4);
+    tokenRef.current = t;
     try {
       const phone = formatPhoneJp(v.phone).value;
       const blank = (s: string) => (s.trim() === "" ? null : s.trim());
@@ -69,6 +72,7 @@ export function AgentCreateModal({
         licenseNo: blank(v.licenseNo),
         address: blank(v.address),
         note: blank(v.note),
+        clientToken: t.token,
       });
       onCreated({
         id,
@@ -84,7 +88,7 @@ export function AgentCreateModal({
       // (@codex #459 R16)。名簿で探して確かめてもらう。
       setError(
         isAmbiguousSaveError(e)
-          ? "登録できたか分かりません(通信が切れました)。この小窓を閉じて業者の欄で会社名を探し、出てこなければもう一度登録してください。"
+          ? "登録できたか分かりません(通信が切れました)。中身を変えずにそのまま「登録して戻る」を押してください(二重には登録されません)。"
           : e instanceof Error
             ? e.message
             : "登録できませんでした",
@@ -110,8 +114,7 @@ export function AgentCreateModal({
       }
     >
       {/* 登録中は欄も打てない(登録は押した時の値で進むので、その後の直しは届かず黙って消える・@codex #459 R14)。 */}
-      {/* 小窓はブラウザの最前面に出るので、外の透かしは隠れる。小窓の中にも透かしを描く(@codex #459 R21)。 */}
-      {!bypass && watermarkText && <WatermarkOverlay text={watermarkText} />}
+      {/* 透かしは器(ModalShell)が描く(@codex #459 R21)。 */}
       <fieldset disabled={saving} className="m-0 min-w-0 space-y-2 border-0 p-0">
         {FIELDS.map(([k, label]) => (
           <label key={k} className="block text-sm">

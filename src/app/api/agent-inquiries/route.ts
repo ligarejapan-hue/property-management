@@ -25,8 +25,16 @@ export async function GET(request: Request) {
       assigneeRaw === "me" ? session.id : assigneeRaw ? z.string().uuid().parse(assigneeRaw) : undefined;
     const cursorRaw = sp.get("cursor");
     const cursor = cursorRaw ? z.string().uuid().parse(cursorRaw) : undefined;
+    // 受けた日時が N 日以内(対応済みタブの期間・設計 §2.1 の「直近30日を既定表示」)。
+    const daysRaw = sp.get("days");
+    const days = daysRaw == null ? undefined : z.coerce.number().int().min(1).max(3650).parse(daysRaw);
+    const since = days ? new Date(Date.now() - days * 24 * 60 * 60 * 1000) : undefined;
     const rows = await prisma.agentInquiry.findMany({
-      where: { ...(status ? { status } : {}), ...(assigneeId ? { assigneeId } : {}) },
+      where: {
+        ...(status ? { status } : {}),
+        ...(assigneeId ? { assigneeId } : {}),
+        ...(since ? { receivedAt: { gte: since } } : {}),
+      },
       orderBy: [{ receivedAt: "desc" }, { id: "desc" }],
       take: PAGE + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -50,6 +58,16 @@ export async function POST(request: Request) {
   try {
     const { session } = await requireAgentInquiry("write");
     const input = inquiryCreateSchema.parse(await parseJsonBody(request));
+    // 同じ人が同じ鍵で送り直した(通信が切れて押し直した)=作らずに1回目の分を返す。鍵は登録者ごと。
+    const replay = async () =>
+      input.clientToken
+        ? prisma.agentInquiry.findFirst({
+            where: { createdById: session.id, clientToken: input.clientToken },
+            select: { id: true },
+          })
+        : null;
+    const prev = await replay();
+    if (prev) return NextResponse.json({ id: prev.id, replayed: true }, { headers: NO_STORE });
     const agent = await prisma.agent.findUnique({ where: { id: input.agentId }, select: { id: true, isArchived: true } });
     if (!agent) throw new ApiError(404, "業者が見つかりません", "AGENT_NOT_FOUND");
     if (agent.isArchived) {
@@ -58,47 +76,58 @@ export async function POST(request: Request) {
     await assertActiveUser(input.viewing?.attendantId, "INVALID_ATTENDANT");
     const contact = normalizeInquiryContact(input);
     const note = input.note?.trim() || null;
-    const row = await prisma.$transaction(async (tx) => {
-      // 親の物件行をロックしてから確かめて書く(書き込み規約)。物件の削除・取込の取り消しも同じ行を
-      // ロックしてから反響を数えるので、数えた後に反響が増えて削除が外部キーで落ちることがない(@codex #454 R8)。
-      await lockPropertyRow(tx, input.propertyId);
-      const property = await tx.property.findUnique({
-        where: { id: input.propertyId },
-        select: { id: true, isArchived: true },
+    let row: { id: string };
+    try {
+      row = await prisma.$transaction(async (tx) => {
+        // 親の物件行をロックしてから確かめて書く(書き込み規約)。物件の削除・取込の取り消しも同じ行を
+        // ロックしてから反響を数えるので、数えた後に反響が増えて削除が外部キーで落ちることがない(@codex #454 R8)。
+        await lockPropertyRow(tx, input.propertyId);
+        const property = await tx.property.findUnique({
+          where: { id: input.propertyId },
+          select: { id: true, isArchived: true },
+        });
+        if (!property) throw new ApiError(404, "物件が見つかりません", "PROPERTY_NOT_FOUND");
+        // 受付の窓の物件検索はしまった物件を出さない=登録でも受けない(@codex #454 R3)。
+        if (property.isArchived) {
+          throw new ApiError(409, "この物件はしまわれています。物件を戻してから登録してください", "PROPERTY_ARCHIVED");
+        }
+        return tx.agentInquiry.create({
+          data: {
+            propertyId: input.propertyId,
+            agentId: input.agentId,
+            ...contact,
+            kind: input.kind,
+            channel: input.channel,
+            note,
+            status: "open",
+            assigneeId: session.id,
+            createdById: session.id,
+            clientToken: input.clientToken ?? null,
+            ...(input.viewing
+              ? {
+                  viewings: {
+                    create: [
+                      {
+                        viewingType: input.viewing.viewingType,
+                        scheduledAt: input.viewing.scheduledAt ? new Date(input.viewing.scheduledAt) : null,
+                        attendantId: input.viewing.attendantId ?? null,
+                      },
+                    ],
+                  },
+                }
+              : {}),
+          },
+          select: { id: true },
+        });
       });
-      if (!property) throw new ApiError(404, "物件が見つかりません", "PROPERTY_NOT_FOUND");
-      // 受付の窓の物件検索はしまった物件を出さない=登録でも受けない(@codex #454 R3)。
-      if (property.isArchived) {
-        throw new ApiError(409, "この物件はしまわれています。物件を戻してから登録してください", "PROPERTY_ARCHIVED");
+    } catch (e) {
+      // 同じ鍵が同時に2回届いて一意の索引にぶつかった=先に入った方を返す(二重に作らない)。
+      if ((e as { code?: string } | null)?.code === "P2002" && input.clientToken) {
+        const again = await replay();
+        if (again) return NextResponse.json({ id: again.id, replayed: true }, { headers: NO_STORE });
       }
-      return tx.agentInquiry.create({
-        data: {
-          propertyId: input.propertyId,
-          agentId: input.agentId,
-          ...contact,
-          kind: input.kind,
-          channel: input.channel,
-          note,
-          status: "open",
-          assigneeId: session.id,
-          createdById: session.id,
-          ...(input.viewing
-            ? {
-                viewings: {
-                  create: [
-                    {
-                      viewingType: input.viewing.viewingType,
-                      scheduledAt: input.viewing.scheduledAt ? new Date(input.viewing.scheduledAt) : null,
-                      attendantId: input.viewing.attendantId ?? null,
-                    },
-                  ],
-                },
-              }
-            : {}),
-        },
-        select: { id: true },
-      });
-    });
+      throw e;
+    }
     const filled = Object.entries(contact)
       .filter(([, v]) => v != null)
       .map(([k]) => k);

@@ -11,7 +11,13 @@ import {
   type InquiryView,
   type UpcomingViewing,
 } from "@/lib/api-client";
-import { EMPTY_DESK_FORM, nextDeskGuideStep, type DeskFormState } from "@/lib/agent-inquiry/desk-form";
+import {
+  EMPTY_DESK_FORM,
+  donePeriodDays,
+  nextDeskGuideStep,
+  type DeskFormState,
+  type DonePeriodKey,
+} from "@/lib/agent-inquiry/desk-form";
 import InquiryForm from "@/components/agent-inquiry/inquiry-form";
 import { UpcomingViewingsView } from "@/components/agent-inquiry/upcoming-viewings";
 import { InquiryListView } from "@/components/agent-inquiry/inquiry-list";
@@ -30,11 +36,13 @@ export default function InquiryDeskPage() {
   const [openCount, setOpenCount] = useState<number | null>(null);
   const [tab, setTab] = useState<InquiryStatusKey>("open");
   const [mine, setMine] = useState(false);
+  // 対応済みタブの期間(設計 §2.1 の「直近30日を既定表示」)。未対応・対応中には効かない。
+  const [period, setPeriod] = useState<DonePeriodKey>("30");
   const [items, setItems] = useState<InquiryView[]>([]);
   // items がどの絞り込みで読んだ行か。今の絞り込みと違う間は出さない(タブを替えた直後・読み込み失敗時に
   // 別のタブの行を見せない・@codex #459 R4)。
   const [listKey, setListKey] = useState<string | null>(null);
-  const filterKey = `${tab}|${mine}`;
+  const filterKey = `${tab}|${mine}|${period}`;
   const [cursor, setCursor] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   // API が 403 を返したときの権限の値。権限を読み直せば(別の配列になり)自然に解ける=外されて戻された
@@ -129,7 +137,7 @@ export default function InquiryDeskPage() {
       try {
         // 担当者の一覧も同じ読み込みに入れる(失敗を空の一覧に見せず、知らせて読み直せる・@codex #459 R3)。
         const [list, up, counts, us] = await Promise.all([
-          fetchAgentInquiries({ status: tab, assignee: mine ? "me" : undefined }),
+          fetchAgentInquiries({ status: tab, assignee: mine ? "me" : undefined, days: donePeriodDays(tab, period) }),
           fetchUpcomingViewings(),
           fetchAgentInquiryCounts(),
           fetchUsers(),
@@ -139,7 +147,7 @@ export default function InquiryDeskPage() {
         setUsers(us.data.map((u) => ({ id: u.id, name: u.name })));
         setItems(list.items);
         setCursor(list.nextCursor);
-        setListKey(`${tab}|${mine}`);
+        setListKey(`${tab}|${mine}|${period}`);
         setUpcoming(up.viewings);
         setOpenCount(counts.open);
         window.dispatchEvent(new CustomEvent(DESK_OPEN_COUNT_EVENT, { detail: counts.open }));
@@ -150,14 +158,14 @@ export default function InquiryDeskPage() {
     return () => {
       cancelled = true;
     };
-  }, [tab, mine, reloadKey, onError, bodyVisible]);
+  }, [tab, mine, period, reloadKey, onError, bodyVisible]);
 
   const loadMore = async () => {
     if (!cursor || loadingMoreRef.current === listGenRef.current) return;
     const gen = listGenRef.current;
     loadingMoreRef.current = gen;
     try {
-      const r = await fetchAgentInquiries({ status: tab, assignee: mine ? "me" : undefined, cursor });
+      const r = await fetchAgentInquiries({ status: tab, assignee: mine ? "me" : undefined, days: donePeriodDays(tab, period), cursor });
       // 待っている間にタブ・絞り込みを替えた/読み直した=古い応答なので混ぜない(@codex #459 R2)。
       if (listGenRef.current !== gen) return;
       setItems((prev) => [...prev, ...r.items]);
@@ -240,6 +248,8 @@ export default function InquiryDeskPage() {
           <InquiryListView
             tab={tab}
             onTab={setTab}
+            period={period}
+            onPeriod={setPeriod}
             mine={mine}
             onMine={setMine}
             items={listKey === filterKey ? items : []}

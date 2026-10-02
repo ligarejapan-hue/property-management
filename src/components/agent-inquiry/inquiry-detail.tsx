@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { Button } from "@/components/ui/button";
-import WatermarkOverlay from "@/components/screen-protection/watermark-overlay";
-import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { useDeskAccess } from "./desk-access";
 import {
   addAgentViewing,
@@ -30,6 +28,7 @@ import {
   editDraft,
   isAmbiguousSaveError,
   viewingPatchFrom,
+  partialScheduleError,
   type Draft,
 } from "@/lib/agent-inquiry/desk-form";
 
@@ -94,6 +93,12 @@ function ViewingRow({
     setDrafts((d) => ({ ...d, [f]: editDraft(d[f] ?? null, value, server[f]) }));
   };
   const save = () => {
+    // 日付だけ・時刻だけでは保存しない=入っていた予定を黙って「日程調整中」にしない。
+    const partial = partialScheduleError(val("date"), val("time"));
+    if (partial) {
+      setWarn(partial);
+      return;
+    }
     const stale = (Object.keys(server) as Field[]).filter((f) => draftStale(drafts[f] ?? null, server[f]));
     if (stale.length > 0) {
       // 相手の変更を見せ、今の値を基準にし直す(もう一度押せば自分の内容で保存)。
@@ -209,7 +214,6 @@ export function InquiryDetailView({
 }) {
   // メモの下書き(null=まだ触っていない)。詳細は反響の id だけで作り直すので、状態や担当を変えて版が
   // 進んでも・読み直しても、打ちかけのメモは消えない(最終レビュー I-1/I-2)。
-  const { bypass, watermarkText } = useScreenProtection();
   const [noteDraft, setNoteDraft] = useState<Draft | null>(null);
   const [noteWarn, setNoteWarn] = useState<string | null>(null);
   const serverNote = q.note ?? "";
@@ -241,8 +245,7 @@ export function InquiryDetailView({
       }
     >
       <div className="space-y-3 text-sm">
-        {/* 小窓はブラウザの最前面に出るので、外の透かしは隠れる。小窓の中にも透かしを描く(@codex #459 R8)。 */}
-        {!bypass && watermarkText && <WatermarkOverlay text={watermarkText} />}
+        {/* 透かしは器(ModalShell)が描く(@codex #459 R8)。 */}
         <p className="font-medium">
           {q.property.roomNo ? `${q.property.name} ${q.property.roomNo}` : q.property.name}
           <span className="ml-2 text-xs text-gray-500">{q.property.town}</span>
@@ -264,6 +267,7 @@ export function InquiryDetailView({
             <button
               key={s}
               type="button"
+              aria-pressed={q.status === s}
               disabled={busy}
               onClick={() => onStatus(s)}
               className={`rounded-md border px-2 py-2 ${
@@ -485,7 +489,12 @@ export default function InquiryDetail({
       <ModalShell size="sm" title="反響" onClose={onClose} footer={<Button onClick={onClose}>閉じる</Button>}>
         <p className="text-sm text-rose-600">{error}</p>
       </ModalShell>
-    ) : null;
+    ) : (
+      // 読み込み中も小窓を出す(押してから開くまでの間、何も起きないように見せない)。
+      <ModalShell size="sm" title="反響" onClose={onClose} footer={<Button variant="secondary" onClick={onClose}>閉じる</Button>}>
+        <p className="text-sm text-gray-500 dark:text-gray-400">読み込み中…</p>
+      </ModalShell>
+    );
   }
   const q = data.inquiry;
   return (

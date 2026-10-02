@@ -90,9 +90,14 @@ export function rebaseAgentEdits(agent: AgentDetail, edits: AgentEdits): AgentEd
  * 保存が通った後の手元の値(送った値と新しい版番号を写す)。続く読み直しに失敗しても、
  * 保存前の値を見せない・古い版番号で次の保存を送らない。
  */
+/** 保存で送る変更の形。商号・代表電話は空(null)にしない。 */
+export type AgentPatch = { companyName?: string; phone?: string } & Partial<
+  Record<Exclude<AgentEditKey, "companyName" | "phone">, string | null>
+>;
+
 export function agentAfterSave(
   agent: AgentDetail,
-  sent: Partial<Record<AgentEditKey, string | null>> & { isArchived?: boolean },
+  sent: AgentPatch & { isArchived?: boolean },
   version: number,
 ): AgentDetail {
   return { ...agent, ...(sent as Partial<AgentDetail>), version };
@@ -104,7 +109,7 @@ export function agentEditError(agent: AgentDetail, edits: AgentEdits): string | 
  * 保存で送る変更。**触った欄のうち、今の値と違うものだけ**=読み直した後に他の人が直した別の欄を、
  * 古い値で上書きしない。任意の欄を空にしたら null(消す)。何も無ければ null(送らない)。
  */
-export function agentEditPatch(agent: AgentDetail, edits: AgentEdits): Partial<Record<AgentEditKey, string | null>> | null {
+export function agentEditPatch(agent: AgentDetail, edits: AgentEdits): AgentPatch | null {
   const patch: Partial<Record<AgentEditKey, string | null>> = {};
   for (const { key } of AGENT_EDIT_FIELDS) {
     const typed = edits[key];
@@ -113,7 +118,8 @@ export function agentEditPatch(agent: AgentDetail, edits: AgentEdits): Partial<R
     if (next === (agent[key] ?? "").trim()) continue;
     patch[key] = next === "" && !REQUIRED.includes(key) ? null : next;
   }
-  return Object.keys(patch).length > 0 ? patch : null;
+  // 必須の欄(商号・代表電話)は上で空なら文字のまま=null にはならない(空は agentEditError が先に止める)。
+  return Object.keys(patch).length > 0 ? (patch as AgentPatch) : null;
 }
 
 /** ホームに出す2つの件数(設計 方針9)。0件でも出す=受付の窓の入口を兼ねる。 */
