@@ -63,7 +63,7 @@ export interface RegistryJobSummary {
 export interface NotificationSummary {
   nextActions: NextActionSummary | null;
   inquiries: InquirySummary | null;
-  registryJobs: RegistryJobSummary;
+  registryJobs: RegistryJobSummary | null;
 }
 
 export interface SummaryInput {
@@ -76,6 +76,12 @@ export interface SummaryInput {
 }
 
 const DAY = 24 * 60 * 60 * 1000;
+
+/** 読めないカーソルの区分ごとのエラーコード(画面はこれを見て、その区分だけ初回からやり直す)。 */
+export const BAD_CURSOR_CODE: Record<CursorKind, string> = {
+  inquiry: "BAD_INQUIRY_CURSOR",
+  registry_job: "BAD_REGISTRY_CURSOR",
+};
 
 export async function buildNotificationSummary(input: SummaryInput): Promise<NotificationSummary> {
   const [nextActions, inquiries, registryJobs] = await Promise.all([
@@ -165,7 +171,9 @@ async function readEvents(args: {
   }
   const c = decodeEventCursor(keys, session.id, kind, cursorRaw);
   // 読めないカーソルは初期化とみなさない(その間の新着を取りこぼすため)。
-  if (!c) throw new ApiError(400, "通知の位置が読めません", "BAD_CURSOR");
+  // どちらの区分のカーソルかをコードで返し、画面はその区分だけを捨てる(もう片方は正しい位置から
+  // 続ける=その間の新着を見た扱いにしない・@codex #466 P2)。
+  if (!c) throw new ApiError(400, "通知の位置が読めません", BAD_CURSOR_CODE[kind]);
   const [after, reread] = await Promise.all([
     fetchPage({ AND: [baseWhere, afterCursorWhere(field, c)] }, AFTER_CURSOR_LIMIT),
     readAll(fetchPage, field, { AND: [baseWhere, rereadWhere(field, c)] }),
@@ -219,7 +227,10 @@ async function inquirySummary({ session, inquiryCursor, now, keys }: SummaryInpu
 
 // ---------- 謄本の一括取得の完了(N7) ----------
 
-async function registryJobSummary({ session, registryCursor, now, keys }: SummaryInput): Promise<RegistryJobSummary> {
+async function registryJobSummary({ session, permissions, registryCursor, now, keys }: SummaryInput): Promise<RegistryJobSummary | null> {
+  // ジョブの画面・API と同じ権限(requireBulkSession: registry:auto_fetch + property:read)を今も
+  // 持っている人だけ。作成者でも権限を外されたら出さない(@codex #466 P1)。
+  if (!hasPermission(permissions, "registry", "auto_fetch") || !hasPermission(permissions, "property", "read")) return null;
   // ジョブは作成者本人だけ(getBulkJobProgress と同じ)。
   const baseWhere = { requestedById: session.id, status: "completed", completedAt: { not: null } };
   const fetchPage: FetchPage = async (where, take) => {

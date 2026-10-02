@@ -37,8 +37,8 @@ describe("件数の取りに行き方", () => {
   it("判断と保存はベルと同じ Web Locks の中で、後片付けの合図を読み直してから", () => {
     expect(poller).toMatch(/withNoticeLock\(\(\) => \{\s*\/\/[^\n]*\n\s*if \(stopped \|\| switched\(\)\) return;\s*const \{ state, notices \} = decideSummaryNotices/);
   });
-  it("400(カーソルが読めない)はカーソルを捨てて初回から取り直す", () => {
-    expect(poller).toMatch(/res\.status === 400[\s\S]{0,300}resetCursors\(loadState\(userId\)\)/);
+  it("400(カーソルが読めない)は、読めなかった区分のカーソルだけを捨てる(エラーコードを渡す)", () => {
+    expect(poller).toMatch(/res\.status === 400[\s\S]{0,500}resetCursors\(loadState\(userId\), code\)/);
   });
   it("知らせはベル・見えないときは OS の通知・見えているときは右下のポップアップ", () => {
     expect(poller).toContain("osWhenHidden: true");

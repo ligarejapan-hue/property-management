@@ -98,10 +98,12 @@ export function SummaryPoller() {
         const res = await fetch(`/api/notifications/summary${qs ? `?${qs}` : ""}`, { cache: "no-store" });
         if (stopped) return;
         if (res.status === 400) {
-          // カーソルが読めない(鍵が変わった等): 捨てて次から初回として取り直す。
+          // カーソルが読めない(鍵が変わった等): 読めなかった区分だけ捨てて、その区分を初回から取り直す。
+          const err = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+          const code = err?.error?.code ?? null;
           withNoticeLock(() => {
             if (stopped || switched()) return;
-            saveState(userId, resetCursors(loadState(userId)));
+            saveState(userId, resetCursors(loadState(userId), code));
           });
           return;
         }

@@ -107,6 +107,12 @@ describe("保存値", () => {
     expect(summaryQuery(s)).toBe("inquiryCursor=a%2Bb");
     expect(summaryQuery(resetCursors(s))).toBe("");
   });
+  it("400 のコードで、読めなかった区分のカーソルだけを捨てる(もう片方は続きから)", () => {
+    const s = { ...emptySummaryState(), inquiry: { cursor: "i", cursorAt: 1, seen: {} }, registry: { cursor: "r", cursorAt: 1, seen: {} } };
+    expect(summaryQuery(resetCursors(s, "BAD_INQUIRY_CURSOR"))).toBe("registryCursor=r");
+    expect(summaryQuery(resetCursors(s, "BAD_REGISTRY_CURSOR"))).toBe("inquiryCursor=i");
+    expect(summaryQuery(resetCursors(s, null))).toBe("");
+  });
   it("保存値に生の ID・期限を置かない(印とカーソルの不透明な値・時刻だけ)", () => {
     const a = decideSummaryNotices(
       emptySummaryState(),

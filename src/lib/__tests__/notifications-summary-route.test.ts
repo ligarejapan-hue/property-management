@@ -41,8 +41,11 @@ const U = "11111111-1111-4111-8111-111111111111";
 const ID1 = "00000000-0000-4000-8000-000000000001";
 const ID2 = "00000000-0000-4000-8000-000000000002";
 const KEYS = deriveNotificationKeys();
-const grantPropertyRead = (on: boolean) =>
-  (getUserPermissions as Fn).mockResolvedValue(on ? [{ resource: "property", action: "read", granted: true }] : []);
+const grantPropertyRead = (on: boolean, registry = true) =>
+  (getUserPermissions as Fn).mockResolvedValue([
+    ...(on ? [{ resource: "property", action: "read", granted: true }] : []),
+    ...(registry ? [{ resource: "registry", action: "auto_fetch", granted: true }] : []),
+  ]);
 const call = async (qs = "") => {
   const res = await GET(new Request(`http://x/api/notifications/summary${qs}`) as never);
   // 応答の形の細部を読むだけのテスト用(型は lib/notifications/summary.ts の NotificationSummary)。
@@ -153,8 +156,13 @@ describe("通知の件数の窓口(設計書 §5.1)", () => {
       const where = pm.dmInquiry.findMany.mock.calls[0][0].where;
       expect(JSON.stringify(where)).toContain("2026-10-02T02:55:00.000Z"); // 5分前から
     });
-    it("読めないカーソルは 400(黙って初期化しない)・別の利用者のカーソルも 400", async () => {
-      expect((await call("?inquiryCursor=broken")).status).toBe(400);
+    it("読めないカーソルは 400(黙って初期化しない)・どの区分かをコードで返す・別の利用者のカーソルも 400", async () => {
+      const bad = await call("?inquiryCursor=broken");
+      expect(bad.status).toBe(400);
+      expect(bad.body.error.code).toBe("BAD_INQUIRY_CURSOR");
+      const badReg = await call("?registryCursor=broken");
+      expect(badReg.status).toBe(400);
+      expect(badReg.body.error.code).toBe("BAD_REGISTRY_CURSOR");
       const other = encodeEventCursor(KEYS, "22222222-2222-4222-8222-222222222222", "inquiry", { t: new Date(), i: ID1 });
       expect((await call(`?inquiryCursor=${other}`)).status).toBe(400);
     });
@@ -198,6 +206,15 @@ describe("通知の件数の窓口(設計書 §5.1)", () => {
   });
 
   describe("謄本の一括取得", () => {
+    it("ジョブの画面と同じ権限(registry:auto_fetch + property:read)が無ければ null・読まない", async () => {
+      for (const [prop, reg] of [[true, false], [false, true]] as const) {
+        vi.clearAllMocks();
+        grantPropertyRead(prop, reg);
+        const r = await call();
+        expect(r.body.registryJobs).toBeNull();
+        expect(pm.registryFetchJob.findMany).not.toHaveBeenCalled();
+      }
+    });
     it("自分が作った完了ジョブだけ・件数は今見られる物件の項目で数え直す・見える項目0件のジョブは返さない", async () => {
       (getApiSession as Fn).mockResolvedValue({ id: U, role: "field_staff" });
       const cur = encodeEventCursor(KEYS, U, "registry_job", { t: new Date("2026-10-02T03:00:00Z"), i: ID1 });

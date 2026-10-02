@@ -109,12 +109,18 @@ export function summaryQuery(state: SummaryState): string {
   return p.toString();
 }
 
-/** 400(カーソルが読めない)を受けたとき: カーソルを捨てて次から初回として取り直す。 */
-export function resetCursors(state: SummaryState): SummaryState {
+/**
+ * 400(カーソルが読めない)を受けたとき: 読めなかった区分のカーソルだけを捨てて、その区分を
+ * 次から初回として取り直す。もう片方は捨てない(正しい位置から続けないと、その間の新着を
+ * 初回の「見た扱い」で落とすため・@codex #466 P2)。コードが分からないときだけ両方捨てる。
+ */
+export function resetCursors(state: SummaryState, errorCode?: string | null): SummaryState {
+  const inquiry = errorCode !== "BAD_REGISTRY_CURSOR";
+  const registry = errorCode !== "BAD_INQUIRY_CURSOR";
   return {
     ...state,
-    inquiry: { cursor: null, cursorAt: null, seen: state.inquiry.seen },
-    registry: { cursor: null, cursorAt: null, seen: state.registry.seen },
+    inquiry: inquiry ? { cursor: null, cursorAt: null, seen: state.inquiry.seen } : state.inquiry,
+    registry: registry ? { cursor: null, cursorAt: null, seen: state.registry.seen } : state.registry,
   };
 }
 
