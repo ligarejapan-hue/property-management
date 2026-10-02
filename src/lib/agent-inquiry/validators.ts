@@ -18,8 +18,10 @@ export const agentCreateSchema = z.object({
   email: optEmail,
   address: optText(200),
   note: optText(2000),
+  // 押し直しの鍵(二重登録を防ぐ)。登録のときだけ受ける。
+  clientToken: uuid.optional(),
 });
-export const agentUpdateSchema = agentCreateSchema.partial().extend({
+export const agentUpdateSchema = agentCreateSchema.omit({ clientToken: true }).partial().extend({
   isArchived: z.boolean().optional(),
   version: z.number().int().positive(),
 });
@@ -53,6 +55,8 @@ export const inquiryCreateSchema = z
     channel: z.enum(INQUIRY_CHANNELS).default("phone"),
     note: optText(10000),
     viewing: viewingCreateSchema.optional(),
+    // 押し直しの鍵(二重登録を防ぐ)。
+    clientToken: uuid.optional(),
   })
   .refine((v) => !v.viewing || v.kind === "viewing", {
     message: "内見の予定は用件が内見のときだけ入れられます",

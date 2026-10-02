@@ -9,6 +9,7 @@ vi.mock("@/lib/prisma", () => {
       findMany: vi.fn(async () => []),
       count: vi.fn(async () => 0),
       findUnique: vi.fn(async () => null),
+      findFirst: vi.fn(async () => null),
       create: vi.fn(async () => ({ id: "a-new" })),
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
@@ -26,7 +27,7 @@ import { GET as DETAIL, PATCH } from "../../app/api/agents/[id]/route";
 
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
-  agent: { findMany: Fn; findUnique: Fn; create: Fn; updateMany: Fn };
+  agent: { findMany: Fn; findUnique: Fn; findFirst: Fn; create: Fn; updateMany: Fn };
   agentInquiry: { findMany: Fn };
   $queryRaw: Fn;
 };
@@ -144,6 +145,28 @@ describe("業者 API", () => {
   it("触っていない列は更新しない(PATCH で null にしない)", async () => {
     await PATCH(json("PATCH", { isArchived: true, version: 1 }), ctx);
     expect(pm.agent.updateMany).toHaveBeenCalledWith({ where: { id: AID, version: 1 }, data: { isArchived: true, version: { increment: 1 } } });
+  });
+  it("★業者の登録も同じ鍵の2回目は作らずに1回目の id を返す", async () => {
+    const TOKEN = "77777777-7777-4777-8777-777777777777";
+    pm.agent.findFirst.mockResolvedValueOnce({ id: "a-old" });
+    const res = await POST(json("POST", { companyName: "x", phone: "0312345678", clientToken: TOKEN }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: "a-old", replayed: true });
+    expect(pm.agent.create).not.toHaveBeenCalled();
+    expect(pm.agent.findFirst).toHaveBeenCalledWith({ where: { createdById: "u1", clientToken: TOKEN }, select: { id: true } });
+  });
+  it("★業者の登録が同時に2回届いて一意の索引にぶつかったら、既存の id を返す・鍵を保存する", async () => {
+    const TOKEN = "77777777-7777-4777-8777-777777777777";
+    pm.agent.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "a-old" });
+    pm.agent.create.mockRejectedValueOnce(Object.assign(new Error("dup"), { code: "P2002" }));
+    const res = await POST(json("POST", { companyName: "x", phone: "0312345678", clientToken: TOKEN }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).id).toBe("a-old");
+    expect(pm.agent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ clientToken: TOKEN }) }));
+  });
+  it("業者の編集(PATCH)では鍵を受けない", async () => {
+    await PATCH(json("PATCH", { version: 1, clientToken: "77777777-7777-4777-8777-777777777777", note: "x" }), ctx);
+    expect(JSON.stringify(pm.agent.updateMany.mock.calls)).not.toContain("clientToken");
   });
   it("名簿の一覧・詳細は、書ける人かどうか(canWrite)を返す", async () => {
     grant("read");

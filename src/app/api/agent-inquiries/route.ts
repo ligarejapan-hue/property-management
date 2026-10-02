@@ -58,6 +58,16 @@ export async function POST(request: Request) {
   try {
     const { session } = await requireAgentInquiry("write");
     const input = inquiryCreateSchema.parse(await parseJsonBody(request));
+    // 同じ人が同じ鍵で送り直した(通信が切れて押し直した)=作らずに1回目の分を返す。鍵は登録者ごと。
+    const replay = async () =>
+      input.clientToken
+        ? prisma.agentInquiry.findFirst({
+            where: { createdById: session.id, clientToken: input.clientToken },
+            select: { id: true },
+          })
+        : null;
+    const prev = await replay();
+    if (prev) return NextResponse.json({ id: prev.id, replayed: true }, { headers: NO_STORE });
     const agent = await prisma.agent.findUnique({ where: { id: input.agentId }, select: { id: true, isArchived: true } });
     if (!agent) throw new ApiError(404, "業者が見つかりません", "AGENT_NOT_FOUND");
     if (agent.isArchived) {
@@ -66,47 +76,58 @@ export async function POST(request: Request) {
     await assertActiveUser(input.viewing?.attendantId, "INVALID_ATTENDANT");
     const contact = normalizeInquiryContact(input);
     const note = input.note?.trim() || null;
-    const row = await prisma.$transaction(async (tx) => {
-      // 親の物件行をロックしてから確かめて書く(書き込み規約)。物件の削除・取込の取り消しも同じ行を
-      // ロックしてから反響を数えるので、数えた後に反響が増えて削除が外部キーで落ちることがない(@codex #454 R8)。
-      await lockPropertyRow(tx, input.propertyId);
-      const property = await tx.property.findUnique({
-        where: { id: input.propertyId },
-        select: { id: true, isArchived: true },
+    let row: { id: string };
+    try {
+      row = await prisma.$transaction(async (tx) => {
+        // 親の物件行をロックしてから確かめて書く(書き込み規約)。物件の削除・取込の取り消しも同じ行を
+        // ロックしてから反響を数えるので、数えた後に反響が増えて削除が外部キーで落ちることがない(@codex #454 R8)。
+        await lockPropertyRow(tx, input.propertyId);
+        const property = await tx.property.findUnique({
+          where: { id: input.propertyId },
+          select: { id: true, isArchived: true },
+        });
+        if (!property) throw new ApiError(404, "物件が見つかりません", "PROPERTY_NOT_FOUND");
+        // 受付の窓の物件検索はしまった物件を出さない=登録でも受けない(@codex #454 R3)。
+        if (property.isArchived) {
+          throw new ApiError(409, "この物件はしまわれています。物件を戻してから登録してください", "PROPERTY_ARCHIVED");
+        }
+        return tx.agentInquiry.create({
+          data: {
+            propertyId: input.propertyId,
+            agentId: input.agentId,
+            ...contact,
+            kind: input.kind,
+            channel: input.channel,
+            note,
+            status: "open",
+            assigneeId: session.id,
+            createdById: session.id,
+            clientToken: input.clientToken ?? null,
+            ...(input.viewing
+              ? {
+                  viewings: {
+                    create: [
+                      {
+                        viewingType: input.viewing.viewingType,
+                        scheduledAt: input.viewing.scheduledAt ? new Date(input.viewing.scheduledAt) : null,
+                        attendantId: input.viewing.attendantId ?? null,
+                      },
+                    ],
+                  },
+                }
+              : {}),
+          },
+          select: { id: true },
+        });
       });
-      if (!property) throw new ApiError(404, "物件が見つかりません", "PROPERTY_NOT_FOUND");
-      // 受付の窓の物件検索はしまった物件を出さない=登録でも受けない(@codex #454 R3)。
-      if (property.isArchived) {
-        throw new ApiError(409, "この物件はしまわれています。物件を戻してから登録してください", "PROPERTY_ARCHIVED");
+    } catch (e) {
+      // 同じ鍵が同時に2回届いて一意の索引にぶつかった=先に入った方を返す(二重に作らない)。
+      if ((e as { code?: string } | null)?.code === "P2002" && input.clientToken) {
+        const again = await replay();
+        if (again) return NextResponse.json({ id: again.id, replayed: true }, { headers: NO_STORE });
       }
-      return tx.agentInquiry.create({
-        data: {
-          propertyId: input.propertyId,
-          agentId: input.agentId,
-          ...contact,
-          kind: input.kind,
-          channel: input.channel,
-          note,
-          status: "open",
-          assigneeId: session.id,
-          createdById: session.id,
-          ...(input.viewing
-            ? {
-                viewings: {
-                  create: [
-                    {
-                      viewingType: input.viewing.viewingType,
-                      scheduledAt: input.viewing.scheduledAt ? new Date(input.viewing.scheduledAt) : null,
-                      attendantId: input.viewing.attendantId ?? null,
-                    },
-                  ],
-                },
-              }
-            : {}),
-        },
-        select: { id: true },
-      });
-    });
+      throw e;
+    }
     const filled = Object.entries(contact)
       .filter(([, v]) => v != null)
       .map(([k]) => k);

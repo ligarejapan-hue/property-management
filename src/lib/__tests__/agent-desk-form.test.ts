@@ -333,3 +333,29 @@ describe("対応済みタブの期間", () => {
     expect(donePeriodDays("in_progress", "90")).toBeUndefined();
   });
 });
+
+import { tokenForSubmit } from "@/lib/agent-inquiry/desk-form";
+describe("押し直しの鍵", () => {
+  let n = 0;
+  const gen = () => `t${++n}`;
+  it("★中身を変えずに押し直したら同じ鍵(二重にならない)", () => {
+    const s = { a: 1 };
+    const first = tokenForSubmit(null, s, gen);
+    expect(tokenForSubmit(first, s, gen).token).toBe(first.token);
+  });
+  it("★中身を直してから押したら新しい鍵(直した内容を1回目の分で黙って捨てない)", () => {
+    const first = tokenForSubmit(null, { a: 1 }, gen);
+    expect(tokenForSubmit(first, { a: 2 }, gen).token).not.toBe(first.token);
+  });
+});
+
+describe("変わらない入力では同じ状態のまま(押し直しの鍵を変えない)", () => {
+  it("★同じ値を入れ直しても(欄を離れたときの整形など)状態は同じ参照=鍵が変わらない", () => {
+    const s = deskFormReducer(EMPTY_DESK_FORM, { type: "contact", field: "contactMobile", value: "090-1234-5678" });
+    expect(deskFormReducer(s, { type: "contact", field: "contactMobile", value: "090-1234-5678" })).toBe(s);
+    expect(deskFormReducer(s, { type: "note", value: "" })).toBe(s);
+    expect(deskFormReducer(s, { type: "channel", value: "phone" })).toBe(s);
+    expect(deskFormReducer(s, { type: "viewing", field: "date", value: "" })).toBe(s);
+    expect(deskFormReducer(s, { type: "contact", field: "contactMobile", value: "090-1234-5679" })).not.toBe(s);
+  });
+});

@@ -57,7 +57,17 @@ export type DeskFormAction =
   | { type: "note"; value: string }
   | { type: "reset" };
 
+/**
+ * フォームの状態の更新。中身が何も変わらない操作(同じ値の入れ直し・欄を離れたときの整形など)では
+ * 同じ状態をそのまま返す=押し直しの鍵(tokenForSubmit)が変わらない(二重登録を防ぐ)。
+ */
 export function deskFormReducer(s: DeskFormState, a: DeskFormAction): DeskFormState {
+  const next = reduceDeskForm(s, a);
+  const keys = Object.keys(next) as (keyof DeskFormState)[];
+  return keys.length === Object.keys(s).length && keys.every((k) => next[k] === s[k]) ? s : next;
+}
+
+function reduceDeskForm(s: DeskFormState, a: DeskFormAction): DeskFormState {
   switch (a.type) {
     case "agentQuery":
       // 選んだ後に打ち直したら選択を外す(画面の表示と保存される業者が食い違わないように)。
@@ -137,6 +147,18 @@ export function nextDeskGuideStep(s: DeskFormState): DeskGuideStep {
 export function shouldBlockEnterSubmit(e: { key: string; isComposing: boolean; tagName: string; type?: string }): boolean {
   if (e.key !== "Enter" || e.isComposing) return false;
   return e.tagName === "INPUT" && e.type !== "submit" && e.type !== "button";
+}
+
+/**
+ * 押し直しの鍵(二重登録を防ぐ)。前回と同じ中身(同じ参照)なら同じ鍵=通信が切れて押し直しても
+ * サーバーが1回目の分を返す。中身を直していたら新しい鍵=直した内容を1回目の分で黙って捨てない。
+ */
+export function tokenForSubmit<T>(
+  prev: { snapshot: T; token: string } | null,
+  snapshot: T,
+  gen: () => string,
+): { snapshot: T; token: string } {
+  return prev && prev.snapshot === snapshot ? prev : { snapshot, token: gen() };
 }
 
 export type DonePeriodKey = "30" | "90" | "all";

@@ -4954,6 +4954,8 @@ export interface DeskAgentInput {
   email?: string | null;
   address?: string | null;
   note?: string | null;
+  /** 押し直しの鍵(二重登録を防ぐ)。 */
+  clientToken?: string;
 }
 export interface AgentInquiryCreateBody {
   propertyId: string;
@@ -4965,6 +4967,8 @@ export interface AgentInquiryCreateBody {
   contactEmail?: string | null;
   note?: string | null;
   viewing?: { viewingType: ViewingTypeKey; scheduledAt?: string | null; attendantId?: string | null };
+  /** 押し直しの鍵(二重登録を防ぐ)。 */
+  clientToken?: string;
 }
 
 const deskJsonInit = (method: string, body: unknown): RequestInit => ({
@@ -5187,7 +5191,7 @@ export async function updateAgent(
   id: string,
   // 商号・代表電話は null にできない(API が 422 を返す)=型で先に止める。
   body: { version: number; isArchived?: boolean; companyName?: string; phone?: string } & Partial<
-    Record<Exclude<keyof DeskAgentInput, "companyName" | "phone">, string | null>
+    Record<Exclude<keyof DeskAgentInput, "companyName" | "phone" | "clientToken">, string | null>
   >,
 ) {
   if (USE_MOCK) {

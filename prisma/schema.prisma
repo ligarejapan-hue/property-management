@@ -1738,12 +1738,15 @@ model Agent {
   isArchived  Boolean  @default(false) @map("is_archived")
   version     Int      @default(1)
   createdById String   @map("created_by_id") @db.Uuid
+  /// 押し直しの鍵(二重登録を防ぐ・2026-10-02)。同じ登録者×同じ鍵の2回目は1回目の分を返す。
+  clientToken String?  @map("client_token") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   createdBy User           @relation("AgentCreatedBy", fields: [createdById], references: [id])
   inquiries AgentInquiry[]
 
+  @@unique([createdById, clientToken])
   @@index([companyName])
   @@map("agents")
 }
@@ -1764,6 +1767,8 @@ model AgentInquiry {
   note          String?
   version       Int                 @default(1)
   createdById   String              @map("created_by_id") @db.Uuid
+  /// 押し直しの鍵(二重登録を防ぐ・2026-10-02)。同じ登録者×同じ鍵の2回目は1回目の分を返す。
+  clientToken   String?             @map("client_token") @db.Uuid
   createdAt     DateTime            @default(now()) @map("created_at")
   updatedAt     DateTime            @updatedAt @map("updated_at")
 
@@ -1773,6 +1778,7 @@ model AgentInquiry {
   createdBy User           @relation("AgentInquiryCreatedBy", fields: [createdById], references: [id])
   viewings  AgentViewing[]
 
+  @@unique([createdById, clientToken])
   @@index([status, receivedAt])
   @@index([propertyId, receivedAt])
   @@index([agentId, receivedAt])

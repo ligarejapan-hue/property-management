@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useReducer, useState, type Dispatch } from "react";
+import { useEffect, useReducer, useRef, useState, type Dispatch } from "react";
+import { safeRandomId } from "@/lib/random-id";
 import { createAgentInquiry, type AgentHit } from "@/lib/api-client";
 import {
   EMPTY_DESK_FORM,
@@ -15,6 +16,7 @@ import {
   type DeskFormState,
   splitNewAgentPhone,
   shouldBlockEnterSubmit,
+  tokenForSubmit,
 } from "@/lib/agent-inquiry/desk-form";
 import { formatPhoneJp, isValidPhoneJp } from "@/lib/phone-format-jp";
 import { AgentPicker } from "./agent-picker";
@@ -276,6 +278,8 @@ export default function InquiryForm({
   const [message, setMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // 押し直しの鍵。中身を変えずに押し直したら同じ鍵(サーバーが1回目の分を返す=二重にならない)。
+  const tokenRef = useRef<{ snapshot: DeskFormState; token: string } | null>(null);
   // 次の入力を始めたら「登録しました」「保存できませんでした」を消す(前の結果と取り違えない)。
   const act: typeof dispatch = (a) => {
     setMessage(null);
@@ -295,8 +299,11 @@ export default function InquiryForm({
     setSubmitting(true);
     setMessage(null);
     setSaveError(null);
+    const t = tokenForSubmit(tokenRef.current, state, safeRandomId);
+    tokenRef.current = t;
     try {
-      await createAgentInquiry(buildCreateBody(state));
+      await createAgentInquiry({ ...buildCreateBody(state), clientToken: t.token });
+      tokenRef.current = null;
       dispatch({ type: "reset" });
       setMessage("登録しました");
       onSaved();
@@ -304,7 +311,9 @@ export default function InquiryForm({
       if (writeDenied(err)) return;
       if (isAmbiguousSaveError(err)) {
         // 保存が済んでいることがある=そのまま押し直すと二重登録。一覧を読み直して確かめてもらう。
-        setSaveError("保存できたか分かりません(通信が切れました)。右の一覧に出ていないか確かめてから、無ければもう一度保存してください。");
+        setSaveError(
+          "保存できたか分かりません(通信が切れました)。中身を変えずにそのまま「保存する」を押してください(二重には登録されません)。直してから押す場合は、右の一覧に出ていないか先に確かめてください。",
+        );
         onSaved();
       } else {
         setSaveError(err instanceof Error ? err.message : "保存できませんでした");
