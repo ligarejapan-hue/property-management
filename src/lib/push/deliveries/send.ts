@@ -22,8 +22,10 @@ import {
   nextActionCounts,
   registryJobVisibleCounts,
   visibleInquiryIds,
+  type Recipient,
 } from "./eligibility";
 import { lockSubscription } from "./plan";
+import { assertCanLockOwner, assertCanLockProperty } from "@/lib/edit-lock/permissions";
 import { deriveNotificationKeys, seenKey } from "@/lib/notifications/opaque";
 import {
   CLAIM_STALE_MS,
@@ -233,6 +235,26 @@ export async function sendOne(
   return result;
 }
 
+/** 鍵を取る窓口(`/api/edit-locks/acquire`)と同じ条件で、今その資源を編集できるか。 */
+async function canStillEdit(tx: Tx, r: Recipient, resourceType: "property" | "owner", resourceId: string): Promise<boolean> {
+  try {
+    if (resourceType === "property") {
+      const p = await tx.property.findUnique({ where: { id: resourceId }, select: { createdBy: true, assignedTo: true, isArchived: true } });
+      if (!p || p.isArchived) return false;
+      assertCanLockProperty(r, r.permissions, p);
+      return true;
+    }
+    const o = await tx.owner.findUnique({ where: { id: resourceId }, select: { isArchived: true } });
+    if (!o || o.isArchived) return false;
+    assertCanLockOwner(r.permissions);
+    return true;
+  } catch (e) {
+    // 権限の判定で「できない」と決まったときだけ false。それ以外(DB の失敗など)は投げてやり直させる。
+    if ((e as { status?: unknown } | null)?.status === 403) return false;
+    throw e;
+  }
+}
+
 interface Recheck {
   /** 外した件(記録を消す)。 */
   drop: string[];
@@ -298,6 +320,9 @@ export async function recheck(
       return { drop: all, payload: null };
     }
     if (e.cause !== "heartbeat" && e.cause !== "idle" && e.cause !== "force_released") return { drop: all, payload: null };
+    // 今もその資源を編集できる人か(鍵を取る窓口と同じ判定・@codex #473 P2)。権限が外れた・担当から外れた・
+    // アーカイブされた資源について、その画面へのリンク付きの知らせを送らない。
+    if (!(await canStillEdit(tx, r, e.resourceType, e.resourceId))) return { drop: all, payload: null };
     return { drop: [], payload: editLockLostPayload(bindingId, { resourceType: e.resourceType, resourceId: e.resourceId, cause: e.cause }) };
   }
   return { drop: all, payload: null };

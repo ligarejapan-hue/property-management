@@ -20,6 +20,9 @@ export async function runPushNotifications(now: Date, sender: PushSender): Promi
   // 1回分の持ち時間。記録づくりも送信も、過ぎたら新しく始めない(curl の時間制限より先に終わる)。
   const deadlineMs = startedAtMs + SEND_RUN_BUDGET_MS;
   const pastDeadline = () => Date.now() >= deadlineMs;
+  // 編集権限が外れた知らせは1時間で送れなくなるので最初に分ける(ほかの溜まった分に持ち時間を
+  // 使い切られて、時間切れで捨てることにならないように・@codex #473 P2)。件数は上限200で小さい。
+  const editLockLost = await planEditLockLossDeliveries(now);
   // 申込・謄本ジョブはカーソルの行が無ければ(migration 前)例外=送らずに失敗で終わる(§7.6)。
   // 持ち時間を過ぎて飛ばしてもカーソルは進まないので、次の実行で同じ所から読む(取りこぼさない)。
   const [inquiry, registryJob] = await (async () => {
@@ -38,8 +41,6 @@ export async function runPushNotifications(now: Date, sender: PushSender): Promi
     return out;
   })();
   const nextAction = pastDeadline() ? 0 : await planNextActionDeliveries(now, { deadlineMs });
-  // 飛ばした記録は pending のまま残るので、次の実行で分ける。
-  const editLockLost = pastDeadline() ? 0 : await planEditLockLossDeliveries(now);
   const sent = await sendDueDeliveries(now, sender, { startedAtMs });
   // 古い記録の片付けは持ち時間の内側で、1回に1,000件まで(残りは次の実行で・@codex #472 P2)。
   const purged = pastDeadline() ? { deliveries: 0, events: 0, editLockLosses: 0 } : await purgeOldRecords(now);
