@@ -91,9 +91,13 @@ CREATE TABLE "notification_source_cursors" (
 );
 
 -- 反映した時点(UTC の時刻で保存する=アプリの時刻列と同じ)と境界値 UUID。これより前の出来事は送らない。
-INSERT INTO "notification_source_cursors" ("source", "cursor_t", "cursor_id", "updated_at") VALUES
-  ('inquiry', (now() AT TIME ZONE 'UTC'), '00000000-0000-0000-0000-000000000000', (now() AT TIME ZONE 'UTC')),
-  ('registry_job', (now() AT TIME ZONE 'UTC'), '00000000-0000-0000-0000-000000000000', (now() AT TIME ZONE 'UTC'));
+-- ⚠時刻は now()(BEGIN の時刻)ではなく、この文を流す時刻(clock_timestamp())にする。この時点では上の
+--   CREATE TABLE で見え方(REPEATABLE READ の snapshot)がすでに決まっているので、カーソルの時刻は必ず
+--   見え方より後になる=見え方に入っている(すでに確定した)出来事だけが「カーソルより前」になる(@codex #472 P2)。
+INSERT INTO "notification_source_cursors" ("source", "cursor_t", "cursor_id", "updated_at")
+  SELECT v.source, t.ts, '00000000-0000-0000-0000-000000000000', t.ts
+  FROM (VALUES ('inquiry'), ('registry_job')) AS v(source)
+  CROSS JOIN (SELECT (clock_timestamp() AT TIME ZONE 'UTC') AS ts) AS t;
 
 CREATE TABLE "notification_source_events" (
     "source" TEXT NOT NULL,
@@ -108,15 +112,17 @@ CREATE INDEX "notification_source_events_first_seen_at_idx" ON "notification_sou
 
 -- 定期実行はカーソルの5分前から読み直すので、反映の直前(10分以内)に届いた申込・完了したジョブは
 -- 「見つけ済み」にしておく(反映前の出来事は送らない・§7.3)。
--- ⚠上限はカーソルと同じ時刻(now() はこのトランザクションの始めの時刻で固定)。この文を流す間に
---   確定した、カーソルより後の出来事まで見つけ済みにして知らせを落とさない(@codex #472 P2)。
+-- ⚠見え方(snapshot)に入っている行だけが対象(あとで確定した行は見えない=見つけ済みにならず、定期実行の
+--   読み直しで拾われる)。上限・下限は保存したカーソルの時刻から取る(@codex #472 P2)。
 INSERT INTO "notification_source_events" ("source", "event_id", "first_seen_at")
-  SELECT 'inquiry', "id", (now() AT TIME ZONE 'UTC') FROM "dm_inquiries"
-  WHERE "submitted_at" >= (now() AT TIME ZONE 'UTC') - INTERVAL '10 minutes'
-    AND "submitted_at" <= (now() AT TIME ZONE 'UTC');
+  SELECT 'inquiry', q."id", c."cursor_t" FROM "dm_inquiries" q
+  JOIN "notification_source_cursors" c ON c."source" = 'inquiry'
+  WHERE q."submitted_at" >= c."cursor_t" - INTERVAL '10 minutes'
+    AND q."submitted_at" <= c."cursor_t";
 INSERT INTO "notification_source_events" ("source", "event_id", "first_seen_at")
-  SELECT 'registry_job', "id", (now() AT TIME ZONE 'UTC') FROM "registry_fetch_jobs"
-  WHERE "completed_at" >= (now() AT TIME ZONE 'UTC') - INTERVAL '10 minutes'
-    AND "completed_at" <= (now() AT TIME ZONE 'UTC');
+  SELECT 'registry_job', j."id", c."cursor_t" FROM "registry_fetch_jobs" j
+  JOIN "notification_source_cursors" c ON c."source" = 'registry_job'
+  WHERE j."completed_at" >= c."cursor_t" - INTERVAL '10 minutes'
+    AND j."completed_at" <= c."cursor_t";
 
 COMMIT;

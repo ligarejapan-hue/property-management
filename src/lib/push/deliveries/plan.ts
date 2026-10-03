@@ -104,6 +104,12 @@ async function createDeliveries(
   for (let i = 0; i < deliveries.length; i += BULK_CHUNK) {
     await tx.notificationDelivery.createMany({ data: deliveries.slice(i, i + BULK_CHUNK) });
   }
+  // 足した先の1通は、送り直しの期間の起点を今に更新する(古い1通に足した新しい件が、送り直しの
+  // 期間切れで二度と送られなくなる、を防ぐ・@codex #472 P2)。
+  const reusedIds = [...new Set(refs.map((r) => r.deliveryId))].filter((id) => !deliveries.some((d) => d.id === id));
+  if (reusedIds.length) {
+    await tx.notificationDelivery.updateMany({ where: { id: { in: reusedIds }, status: "pending" }, data: { scheduledFor: now } });
+  }
   for (let i = 0; i < refs.length; i += BULK_CHUNK) {
     await tx.notificationDeliveryRef.createMany({ data: refs.slice(i, i + BULK_CHUNK), skipDuplicates: true });
   }
