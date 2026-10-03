@@ -75,13 +75,30 @@ async function createDeliveries(
     });
     for (const r of rows) existing.add(`${r.bindingId}|${r.refKey}`);
   }
+  // 査定申込は、その端末のまだ送っていない1通(pending)があれば、そこへ足す(溜まった申込を何回かに分けて
+  // 記録しても、端末ごとに1通にまとめる・@codex #472 P2)。行を押さえて足すので、送信の取り合いはこの
+  // トランザクションが終わるまで待つ(足した件も一緒に送られる)。送信中・押さえられない行には足さない。
+  const reuse = new Map<string, string>();
+  if (kind === "inquiry_new") {
+    const subIds = [...new Set(wanted.map((x) => x.sub.id))];
+    for (let i = 0; i < subIds.length; i += BULK_CHUNK) {
+      const rows = await tx.$queryRaw<Array<{ id: string; subscription_id: string; binding_id: string }>>`
+        SELECT "id", "subscription_id", "binding_id" FROM "notification_deliveries"
+        WHERE "kind" = 'inquiry_new' AND "status" = 'pending' AND "subscription_id" = ANY(${subIds.slice(i, i + BULK_CHUNK)}::uuid[])
+        FOR UPDATE SKIP LOCKED`;
+      for (const r of rows) reuse.set(`${r.subscription_id}|${r.binding_id}`, r.id);
+    }
+  }
   const deliveries: Array<{ id: string; userId: string; subscriptionId: string; bindingId: string; kind: string; scheduledFor: Date }> = [];
   const refs: Array<{ deliveryId: string; subscriptionId: string; bindingId: string; kind: string; refKey: string }> = [];
   for (const { sub, refKeys } of wanted) {
     const fresh = [...new Set(refKeys)].filter((k) => !existing.has(`${sub.bindingId}|${k}`));
     if (fresh.length === 0) continue;
-    const id = randomUUID();
-    deliveries.push({ id, userId: sub.userId, subscriptionId: sub.id, bindingId: sub.bindingId, kind, scheduledFor: now });
+    let id = reuse.get(`${sub.id}|${sub.bindingId}`);
+    if (!id) {
+      id = randomUUID();
+      deliveries.push({ id, userId: sub.userId, subscriptionId: sub.id, bindingId: sub.bindingId, kind, scheduledFor: now });
+    }
     for (const refKey of fresh) refs.push({ deliveryId: id, subscriptionId: sub.id, bindingId: sub.bindingId, kind, refKey });
   }
   for (let i = 0; i < deliveries.length; i += BULK_CHUNK) {
