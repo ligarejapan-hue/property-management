@@ -222,6 +222,14 @@ describe("反映済みの機能を「無い・これから」と書いていな�
     expect(manualSrc).toContain("右下には出ず 🔔 に残ります");
   });
 
+  // @codex R4: 自動ログオフの予告(小窓)・編集権限(帯/戻ったときの右下)は別の出方なので、
+  // 右下の説明は下の3つ(件数の知らせ)に限る。
+  it("manual.html の右下の説明は件数の知らせ3つに限っている", () => {
+    const line = manualSrc.split("\n").find((l) => l.includes("いまお知らせに出るのは次の6つです。")) ?? "";
+    expect(line).toContain("<b>下の3つ</b>（次回対応・査定の申込・謄本の一括取得の完了）");
+    expect(line).not.toContain("6つです。このシステムの画面を見ているときは画面の右下にも出ます");
+  });
+
   it("manual.html のお知らせの表は6つ", () => {
     expect(manualSrc).toContain("いまお知らせに出るのは次の6つです。");
   });
