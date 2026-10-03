@@ -12,6 +12,9 @@ import prisma from "@/lib/prisma";
 import { checkPushEndpoint } from "./endpoint";
 import { SHARED_TTL_MS, decideBinding, type DeviceScope, type ExistingSubscription } from "./binding";
 
+/** 付け替えのトランザクションの時間制限(送信のトランザクション 20秒を待てる長さ)。 */
+export const UPSERT_TX_TIMEOUT_MS = 30_000;
+
 /** 鍵は base64url(p256dh は公開鍵 65バイト=87文字・auth は 16バイト=22文字。余裕を見て上限を置く)。 */
 const KEY_RE = /^[A-Za-z0-9_-]{16,200}$/;
 
@@ -99,11 +102,21 @@ export async function upsertPushSubscription(userId: string, input: Subscription
         if (d.kind === "create") {
           await tx.pushSubscription.create({ data: { ...data, endpoint } });
         } else {
-          // 4b: d.cancelPrevious のとき、ここで前の結び付けの送り待ちを取り消す(設計書 §7.5)。
-          await tx.pushSubscription.update({ where: { endpoint }, data });
+          const updated = await tx.pushSubscription.update({ where: { endpoint }, data, select: { id: true } });
+          if (d.cancelPrevious) {
+            // 前の結び付けの送り待ち(送り直し待ち・送信中を含む)を同じトランザクションで取り消す
+            // (付け替えのあとで前の人宛てが次の人の端末に届かないように・設計書 §7.5)。送信中の処理は
+            // この端末の行を押さえているので、ここに来るのはその送信が終わったあと。
+            await tx.notificationDelivery.updateMany({
+              where: { subscriptionId: updated.id, bindingId: { not: d.bindingId }, status: { in: ["pending", "failed", "sending"] } },
+              data: { status: "cancelled", lastErrorCode: "rebound" },
+            });
+          }
         }
         return { bindingId: d.bindingId, deviceScope: d.deviceScope, expiresAt: d.expiresAt, rebound: d.kind !== "keep" };
-      });
+        // 送信(4b)がこの端末の行を押さえている間(送信の時間制限10秒＋前後の DB 処理)は待つので、
+        // Prisma の既定(5秒)より長くする。送信のトランザクションの時間制限より長いこと(テストで固定)。
+      }, { timeout: UPSERT_TX_TIMEOUT_MS, maxWait: 5_000 });
     } catch (e) {
       if (attempt === 0 && isUniqueViolation(e)) continue;
       throw e;

@@ -823,6 +823,33 @@ sudo vim /etc/property-management/app.env
 
 ---
 
+### 画面を閉じていても届く通知（Web プッシュ・通知 段階4）
+
+設計書 `docs/superpowers/specs/2026-09-27-notifications-design.md` §7.6。**timer は最後に有効にし、戻すときは最初に止める**。
+
+反映の順番:
+
+1. `app.env` に `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT`（`npx web-push generate-vapid-keys` で作る・値は画面やログに出さない）と `NOTIFICATIONS_PUSH_RUN_SECRET`（`openssl rand -base64 32`）を追記する（追記前に `app.env.bak-<日付>` を退避・600 のまま）。まだ timer は置かない。
+2. 通常の更新手順（§6 の差分適用・`prisma migrate deploy` を含む）で反映して再起動する。migration は表の追加だけで、前の版のアプリとも両立する。送信の基準のカーソルは **migration を流した時刻** で初期化される（それより前の査定申込・謄本ジョブは送らない）。
+3. 送信を手で1回だけ動かし、エラーなく終わることを確かめる:
+   ```bash
+   sudo cp deploy/systemd/pm-push-notify.service.example /etc/systemd/system/pm-push-notify.service
+   sudo cp deploy/systemd/pm-push-notify.timer.example   /etc/systemd/system/pm-push-notify.timer
+   sudo systemctl daemon-reload
+   sudo systemctl start pm-push-notify.service
+   journalctl -u pm-push-notify -n 20 --no-pager   # 件数の JSON が1行出れば成功（宛先・中身は出ない）
+   ```
+   鍵や合言葉が欠けている・表が無いときは送らずに失敗（503/500）で終わる。
+4. timer を有効にする: `sudo systemctl enable --now pm-push-notify.timer`（確認: `systemctl list-timers pm-push-notify.timer`）。
+
+元に戻す順番:
+
+1. **timer を止める**: `sudo systemctl disable --now pm-push-notify.timer`（止めないまま戻すと定期実行が失敗し続ける）。
+2. アプリを前の版に戻して再起動する。
+3. 追加した表（`notification_deliveries` など）は前の版に影響しないので残す。消すと送信の記録と基準のカーソルが失われ、再び反映したときはカーソルの初期化からやり直しになる。
+
+⚠送信の口（`/api/notifications/push-run`）は合言葉で守っている。公開ドメインの nginx はこのパスを通さない（`/t/`・`/u/`・`/lp-assets/` だけ）。
+
 ## 10. 定期メンテナンス
 
 | タスク | 頻度 | コマンド |

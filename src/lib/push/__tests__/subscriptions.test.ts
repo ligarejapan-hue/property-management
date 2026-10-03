@@ -3,7 +3,8 @@ vi.mock("@/lib/api-helpers", async () => (await import("../../__tests__/agent-in
 vi.mock("@/lib/prisma", () => {
   const tx = {
     $queryRaw: vi.fn(async () => []),
-    pushSubscription: { create: vi.fn(async () => ({})), update: vi.fn(async () => ({})) },
+    pushSubscription: { create: vi.fn(async () => ({})), update: vi.fn(async () => ({ id: "sub-1" })) },
+    notificationDelivery: { updateMany: vi.fn(async () => ({ count: 0 })) },
   };
   return {
     default: {
@@ -20,7 +21,7 @@ import { SHARED_TTL_MS } from "../binding";
 
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
-  __tx: { $queryRaw: Fn; pushSubscription: { create: Fn; update: Fn } };
+  __tx: { $queryRaw: Fn; pushSubscription: { create: Fn; update: Fn }; notificationDelivery: { updateMany: Fn } };
   $transaction: Fn;
   pushSubscription: { updateMany: Fn; count: Fn };
 };
@@ -66,6 +67,22 @@ describe("端末の登録・付け替え", () => {
     expect(data).toMatchObject({ userId: A, deviceScope: "shared", boundAt: NOW, revokedAt: null, revokedReason: null });
     expect(data.bindingId).not.toBe("11111111-1111-4111-8111-111111111111");
     expect(r.rebound).toBe(true);
+    // 前の結び付けの送り待ち(pending・failed・sending)を同じトランザクションで取り消す(4b・§7.5)
+    expect(pm.__tx.notificationDelivery.updateMany).toHaveBeenCalledWith({
+      where: { subscriptionId: "sub-1", bindingId: { not: data.bindingId }, status: { in: ["pending", "failed", "sending"] } },
+      data: { status: "cancelled", lastErrorCode: "rebound" },
+    });
+  });
+  it("有効なままの再登録(同じ利用者・期限内)は送り待ちを取り消さない", async () => {
+    pm.__tx.$queryRaw.mockResolvedValue([
+      { user_id: A, device_scope: "shared", binding_id: "11111111-1111-4111-8111-111111111111", bound_at: NOW, expires_at: new Date(NOW.getTime() + 60_000), revoked_at: null, revoked_reason: null },
+    ]);
+    await upsertPushSubscription(A, { endpoint: EP, ...KEYS }, NOW);
+    expect(pm.__tx.notificationDelivery.updateMany).not.toHaveBeenCalled();
+  });
+  it("付け替えのトランザクションは送信が終わるのを待てる長さ", async () => {
+    await upsertPushSubscription(A, { endpoint: EP, ...KEYS }, NOW);
+    expect(pm.$transaction.mock.calls[0][1]).toMatchObject({ timeout: 30_000 });
   });
   it("中継サービスが無効と返した端末(gone)は 409 endpoint_gone", async () => {
     pm.__tx.$queryRaw.mockResolvedValue([

@@ -1,0 +1,15 @@
+# 画面を閉じていても届く通知(Web プッシュ)の送信 — 2分ごと(通知 段階4b)。
+# 時刻ありの次回対応は「5分前」に送るので、間隔は5分より十分短くする。
+# ⚠有効にするのは反映の**最後**、戻すときは**最初に**止める(docs/deploy.md)。
+[Unit]
+Description=Run web push notifications every 2 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Persistent=true
+Unit=pm-push-notify.service
+
+[Install]
+WantedBy=timers.target
