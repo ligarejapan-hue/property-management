@@ -40,6 +40,23 @@ export const SEND_PRESEND_LIMIT_MS = SEND_TX_TIMEOUT_MS - SEND_TIMEOUT_MS - SEND
  */
 export const SOURCE_EVENTS_PER_TX = 100;
 /**
+ * 1トランザクションで作る「件×端末」の上限。送り先の端末が多いときは1回分の出来事の件数を減らす
+ * (端末ごとの記録づくりでトランザクションが時間切れになり、同じ所でやり直し続けない・@codex #472 P2)。
+ */
+export const SOURCE_REFS_PER_TX = 2000;
+
+/** 1トランザクションで扱う出来事の件数(送り先の端末の数に合わせて1〜100件)。 */
+export function sourceEventsPerTx(subscriptionCount: number): number {
+  return Math.max(1, Math.min(SOURCE_EVENTS_PER_TX, Math.floor(SOURCE_REFS_PER_TX / Math.max(1, subscriptionCount))));
+}
+
+/** 実行ごとに始める位置をずらす(timer は2分ごと)。毎回同じ先頭からで後ろが溢れ続けない。 */
+export function rotateStart<T>(items: T[], startedAtMs: number): T[] {
+  if (items.length === 0) return items;
+  const k = Math.floor(startedAtMs / 120_000) % items.length;
+  return [...items.slice(k), ...items.slice(0, k)];
+}
+/**
  * 申込・謄本ジョブの記録づくりに使ってよいのは、1回分の持ち時間のうち始めから90秒まで
  * (2つを交互に1回分ずつ進める=片方の溜まりでもう片方や次回対応を止めない・@codex #472 P2)。
  */

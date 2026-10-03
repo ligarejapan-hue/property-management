@@ -27,8 +27,9 @@ import {
   nextActionRefKey,
   SEND_TX_MAX_WAIT_MS,
   SEND_TX_TIMEOUT_MS,
-  SOURCE_EVENTS_PER_TX,
   SOURCE_PLAN_TX_TIMEOUT_MS,
+  rotateStart,
+  sourceEventsPerTx,
   type Source,
 } from "./rules";
 
@@ -91,7 +92,8 @@ export async function planNextActionDeliveries(now: Date, opts: { deadlineMs?: n
   const byUser = new Map<string, string[]>();
   for (const s of subs) byUser.set(s.userId, [...(byUser.get(s.userId) ?? []), s.id]);
   let created = 0;
-  for (const [userId, subIds] of byUser) {
+  // 始める利用者は実行ごとにずらす(持ち時間で打ち切っても、毎回同じ後ろの人が漏れ続けない・@codex #472 P2)。
+  for (const [userId, subIds] of rotateStart([...byUser.entries()], Date.now())) {
     // 持ち時間を過ぎたら新しく始めない(残りは次の実行で。回は今の1回だけなので取りこぼしにはならない)。
     if (pastDeadline()) break;
     const r = await loadRecipient(prisma, userId);
@@ -165,7 +167,7 @@ export class MissingSourceCursorError extends Error {
 }
 
 /**
- * 1回分(1トランザクション)の記録づくり。新しく見つけた出来事は `SOURCE_EVENTS_PER_TX` 件までにし、
+ * 1回分(1トランザクション)の記録づくり。新しく見つけた出来事は `sourceEventsPerTx`(送り先の端末の数で1〜100件)までにし、
  * 残りがあれば `more: true`(呼び出し側が続けて呼ぶ)。
  * 処理する順は「読み直し範囲(カーソルより前=古い)→ カーソルより後」。カーソルは、処理し終えた
  * 「カーソルより後」の行までしか進めない(途中で打ち切っても、まだの出来事が読み直し範囲から外れない)。
@@ -205,6 +207,12 @@ export async function planSourceDeliveries(
 ): Promise<{ created: number; more: boolean }> {
   const who = recipients ?? (await loadSourceRecipients());
   if (!who) return { created: 0, more: true };
+  // 送り先の端末の数(トランザクションの外で数える)に合わせて、1回分で扱う出来事の件数を決める。
+  const recipientIds = source === "inquiry" ? who.inquiry.map((r) => r.id) : [...who.registry.keys()];
+  const subscriptionCount = recipientIds.length
+    ? await prisma.pushSubscription.count({ where: { ...activeSubscriptionWhere(now), userId: { in: recipientIds } } })
+    : 0;
+  const perTx = sourceEventsPerTx(subscriptionCount);
   return prisma.$transaction(async (tx) => {
     // カーソルの行を押さえる(同時に2つの実行が同じ出来事を数えない)。
     const locked = await tx.$queryRaw<Array<{ source: string }>>`
@@ -234,7 +242,7 @@ export async function planSourceDeliveries(
       : [];
     const knownSet = new Set(known.map((k) => k.eventId));
     const freshRows = ordered.filter((r) => !knownSet.has(r.id));
-    const take = freshRows.slice(0, SOURCE_EVENTS_PER_TX);
+    const take = freshRows.slice(0, perTx);
     const more = freshRows.length > take.length;
 
     let created = 0;
