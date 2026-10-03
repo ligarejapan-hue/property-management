@@ -12,6 +12,7 @@ import {
   RECORD_RETENTION_MS,
   SEND_RUN_BUDGET_MS,
   SOURCE_PLAN_BUDGET_MS,
+  SOURCE_PLAN_TX_TIMEOUT_MS,
   SOURCES,
   type Source,
 } from "./rules";
@@ -40,10 +41,12 @@ export async function runPushNotifications(now: Date, sender: PushSender): Promi
   const cursorRows = await prisma.notificationSourceCursor.findMany({ select: { source: true, updatedAt: true } });
   const touched = new Map(cursorRows.map((c) => [c.source, c.updatedAt.getTime()]));
   let pending: Source[] = [...SOURCES].sort((a, b) => (touched.get(a) ?? 0) - (touched.get(b) ?? 0));
-  while (pending.length > 0 && Date.now() < sourceDeadlineMs) {
+  // 1回分(1トランザクション)は最大 SOURCE_PLAN_TX_TIMEOUT_MS かかるので、その分を残して始める。
+  const canStartSource = () => Date.now() + SOURCE_PLAN_TX_TIMEOUT_MS < sourceDeadlineMs;
+  while (pending.length > 0 && canStartSource()) {
     const next: Source[] = [];
     for (const s of pending) {
-      if (Date.now() >= sourceDeadlineMs) break;
+      if (!canStartSource()) break;
       const recipients = await loadSourceRecipients(sourceDeadlineMs);
       if (!recipients) break;
       const r = await planSourceDeliveries(s, now, recipients);

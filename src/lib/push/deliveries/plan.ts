@@ -124,7 +124,9 @@ function createDelivery(tx: Tx, sub: SubRef, kind: "next_action" | "inquiry_new"
 // ---------- 次回対応(N4・N5) ----------
 
 export async function planNextActionDeliveries(now: Date, opts: { deadlineMs?: number } = {}): Promise<number> {
-  const pastDeadline = () => opts.deadlineMs !== undefined && Date.now() >= opts.deadlineMs;
+  // 1つのトランザクションは最大 SEND_TX_TIMEOUT_MS かかるので、その分を残して打ち切る(締め切りを
+  // 越えて送信の時間を食わない・@codex #472 P2)。
+  const pastDeadline = () => opts.deadlineMs !== undefined && Date.now() + SEND_TX_TIMEOUT_MS >= opts.deadlineMs;
   const subs = await prisma.pushSubscription.findMany({
     where: activeSubscriptionWhere(now),
     select: { id: true, userId: true },
@@ -229,7 +231,12 @@ export interface SourceRecipients {
  * 一部の人だけで出来事を「見つけ済み」にしない)。
  */
 export async function loadSourceRecipients(deadlineMs?: number): Promise<SourceRecipients | null> {
-  const users = await prisma.user.findMany({ where: { isActive: true }, select: { id: true }, orderBy: { id: "asc" } });
+  // 送ってよい端末を持つ人だけを見る(端末の無い人は送り先にならない=全員を確かめない・@codex #472 P2)。
+  const users = await prisma.user.findMany({
+    where: { isActive: true, pushSubscriptions: { some: { revokedAt: null, expiresAt: { gt: new Date() } } } },
+    select: { id: true },
+    orderBy: { id: "asc" },
+  });
   const inquiry: Recipient[] = [];
   const registry = new Map<string, Recipient>();
   for (const u of users) {
