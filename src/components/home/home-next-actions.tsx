@@ -13,6 +13,8 @@ export interface MyNextAction {
   scheduledTime?: string | null;
   actionType: string | null;
   overdue: boolean;
+  /** 明日の予定(時刻 0:00〜0:04 で、5分前の知らせがもう出たもの)。 */
+  tomorrow?: boolean;
   address: string | null;
 }
 
@@ -47,7 +49,7 @@ export function HomeNextActionsView({ items, hasMore }: { items: MyNextAction[];
                     : "bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300"
                 }`}
               >
-                {a.overdue ? `期限切れ ${formatDate(a.scheduledAt)}` : "今日"}
+                {a.overdue ? `期限切れ ${formatDate(a.scheduledAt)}` : a.tomorrow ? "明日" : "今日"}
                 {a.scheduledTime ? ` ${a.scheduledTime}` : ""}
               </span>
               <span className="min-w-0 flex-1 truncate text-gray-900 dark:text-gray-100">{a.address ?? "（所在なし）"}</span>

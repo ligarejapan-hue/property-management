@@ -42,14 +42,23 @@ describe("自分の次回対応(ホームの一覧)", () => {
     expect(values[0]).toBe(U);
     expect(values[1]).toEqual(new Date("2026-10-03T00:00:00.000Z"));
   });
+  it("明日 0:00〜0:04 の時刻ありの予定は、5分前を過ぎていれば含める(知らせを押した先に出す・@codex #470 P2)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-02T14:58:00Z")); // 日本時間 10/2 23:58
+    await GET();
+    const { sql, values } = lastQuery();
+    expect(sql).toMatch(/na\."scheduled_at" = \?::date\s+AND na\."scheduled_time" IS NOT NULL\s+AND \(\(na\."scheduled_at" \+ na\."scheduled_time"::time\) AT TIME ZONE 'Asia\/Tokyo'\) - INTERVAL '5 minutes' <= \?::timestamptz/);
+    expect(values[2]).toEqual(new Date("2026-10-03T00:00:00.000Z"));
+    expect(values[3]).toEqual(new Date("2026-10-02T14:58:00Z"));
+  });
   it("field_staff だけ物件の担当範囲で絞る(それ以外は絞らない)", async () => {
     await GET();
-    expect(lastQuery().values[2]).toBeNull();
+    expect(lastQuery().values[4]).toBeNull();
     (getApiSession as Fn).mockResolvedValue({ id: U, role: "field_staff" });
     await GET();
     const { sql, values } = lastQuery();
     expect(sql).toMatch(/\(\?::uuid IS NULL OR p\."created_by" = \?::uuid OR p\."assigned_to" = \?::uuid\)/);
-    expect(values.slice(2, 5)).toEqual([U, U, U]);
+    expect(values.slice(4, 7)).toEqual([U, U, U]);
   });
   it("並びは予定日 → 時刻(時刻なしは 9:00) → id(@codex #470 P2)", async () => {
     await GET();
@@ -66,8 +75,8 @@ describe("自分の次回対応(ホームの一覧)", () => {
     const body = (await res.json()) as { items: Array<Record<string, unknown>> };
     expect(lastQuery().sql).not.toContain("content");
     expect(body.items).toEqual([
-      { id: "a1", propertyId: "p1", scheduledAt: "2026-10-01", scheduledTime: null, actionType: "電話", overdue: true, address: "東京都○○区1-2-3" },
-      { id: "a2", propertyId: "p2", scheduledAt: "2026-10-02", scheduledTime: "15:00", actionType: null, overdue: false, address: "東京都△△区4-5-6" },
+      { id: "a1", propertyId: "p1", scheduledAt: "2026-10-01", scheduledTime: null, actionType: "電話", overdue: true, tomorrow: false, address: "東京都○○区1-2-3" },
+      { id: "a2", propertyId: "p2", scheduledAt: "2026-10-02", scheduledTime: "15:00", actionType: null, overdue: false, tomorrow: false, address: "東京都△△区4-5-6" },
     ]);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
