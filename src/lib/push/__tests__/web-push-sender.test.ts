@@ -71,6 +71,16 @@ describe("VAPID の鍵", () => {
     expect(vapidConfig({ ...env, VAPID_SUBJECT: "info@example.com" })).toBeNull();
     expect(vapidConfig({ ...env, VAPID_PRIVATE_KEY: "short" })).toBeNull();
   });
+  it("長さだけ合っている鍵・組になっていない鍵は使わない(記録を作る前に 503)", () => {
+    const env = { VAPID_PUBLIC_KEY: VAPID.publicKey, VAPID_PRIVATE_KEY: VAPID.privateKey, VAPID_SUBJECT: VAPID.subject } as unknown as NodeJS.ProcessEnv;
+    // 文字数は同じだが P-256 の公開鍵ではない(先頭が 0x04 でない)
+    expect(vapidConfig({ ...env, VAPID_PUBLIC_KEY: "A" + VAPID.publicKey.slice(1) })).toBeNull();
+    // 形は正しいが別の秘密鍵(公開鍵と組にならない)
+    const other = Buffer.alloc(32, 7).toString("base64url");
+    expect(vapidConfig({ ...env, VAPID_PRIVATE_KEY: other })).toBeNull();
+    // 32バイトでない秘密鍵
+    expect(vapidConfig({ ...env, VAPID_PRIVATE_KEY: VAPID.privateKey + "AA" })).toBeNull();
+  });
 });
 
 describe("1回の HTTP 要求(sendRequest)", () => {
