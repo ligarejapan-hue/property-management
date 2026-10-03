@@ -15,6 +15,11 @@
 --   (消すと送信の記録と基準のカーソルが失われ、再び反映したときはカーソルの初期化からやり直しになる)
 
 BEGIN;
+-- ⚠カーソルの初期化と「見つけ済み」の下ごしらえを**同じ時点の見え方**でそろえる(@codex #472 P2)。
+--   既定(READ COMMITTED)だと文ごとに見え方が変わり、反映の途中に確定した申込まで下ごしらえで
+--   見つけ済みにして知らせを落とす。REPEATABLE READ なら、このトランザクションの最初の見え方に
+--   入っていない(あとで確定した)行は見つけ済みにならず、定期実行の読み直しで拾われる。
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
 
 CREATE TABLE "notification_deliveries" (
     "id" UUID NOT NULL,

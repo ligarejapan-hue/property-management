@@ -35,10 +35,11 @@ export async function runPushNotifications(now: Date, sender: PushSender): Promi
   // 求め直す(権限の確かめを外に出しつつ、見つけた時点に近い顔ぶれで送り先を決める)。
   const sourceDeadlineMs = Math.min(deadlineMs, startedAtMs + SOURCE_PLAN_BUDGET_MS);
   const created: Record<Source, number> = { inquiry: 0, registry_job: 0 };
-  // どちらから始めるかは実行ごとに入れ替える(timer は2分ごと=始めた時刻の2分刻みの偶奇で決める)。
-  // 片方の溜まりで毎回もう片方の番が来ない、を防ぐ(@codex #472 P2)。
-  const first = Math.floor(startedAtMs / 120_000) % SOURCES.length;
-  let pending: Source[] = [...SOURCES.slice(first), ...SOURCES.slice(0, first)];
+  // どちらから始めるかは、カーソルを最後に進めたのが古い方から(進めるたびに更新される=DB に残る順番)。
+  // 片方の溜まりで毎回もう片方の番が来ない、を防ぐ(実行の間隔によらない・@codex #472 P2)。
+  const cursorRows = await prisma.notificationSourceCursor.findMany({ select: { source: true, updatedAt: true } });
+  const touched = new Map(cursorRows.map((c) => [c.source, c.updatedAt.getTime()]));
+  let pending: Source[] = [...SOURCES].sort((a, b) => (touched.get(a) ?? 0) - (touched.get(b) ?? 0));
   while (pending.length > 0 && Date.now() < sourceDeadlineMs) {
     const next: Source[] = [];
     for (const s of pending) {

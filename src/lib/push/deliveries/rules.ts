@@ -50,11 +50,14 @@ export function sourceEventsPerTx(subscriptionCount: number): number {
   return Math.max(1, Math.min(SOURCE_EVENTS_PER_TX, Math.floor(SOURCE_REFS_PER_TX / Math.max(1, subscriptionCount))));
 }
 
-/** 実行ごとに始める位置をずらす(timer は2分ごと)。毎回同じ先頭からで後ろが溢れ続けない。 */
-export function rotateStart<T>(items: T[], startedAtMs: number): T[] {
+/**
+ * 始める位置を k だけずらす。呼び出し側は実行ごとに乱数で k を決める(実行の間隔や時刻の刻みに
+ * よらず、毎回同じ先頭からで後ろが溢れ続けることがない・@codex #472 P2)。
+ */
+export function rotateStart<T>(items: T[], k: number): T[] {
   if (items.length === 0) return items;
-  const k = Math.floor(startedAtMs / 120_000) % items.length;
-  return [...items.slice(k), ...items.slice(0, k)];
+  const i = ((k % items.length) + items.length) % items.length;
+  return [...items.slice(i), ...items.slice(0, i)];
 }
 /**
  * 申込・謄本ジョブの記録づくりに使ってよいのは、1回分の持ち時間のうち始めから90秒まで
