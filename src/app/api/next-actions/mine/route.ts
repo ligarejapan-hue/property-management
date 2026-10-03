@@ -22,6 +22,11 @@ export async function GET() {
     const now = new Date();
     const todayDb = jstDateToDbDate(jstToday(now));
     const tomorrowDb = new Date(todayDb.getTime() + 24 * 60 * 60 * 1000);
+    // ⚠SQL には Date ではなく文字列で束縛する(Prisma は Date をオフセット無しの UTC 壁時計で送るため、
+    //   ::timestamptz だと DB のタイムゾーンで解釈されてずれる・@codex #470 P2。前例=coverage/cells)。
+    const todayYmd = todayDb.toISOString().slice(0, 10);
+    const tomorrowYmd = tomorrowDb.toISOString().slice(0, 10);
+    const nowIso = now.toISOString();
     // 並びは「予定日 → その日の期限の時刻(時刻なしは 9:00=知らせを出す時刻と同じ) → id」。
     // Prisma の orderBy では「時刻なし=9:00」と並べられないため SQL で並べる(@codex #470 P2:
     // 時刻なしを先頭に置くと、0:30・8:00 の予定が後ろに回り、50件で切ると落ちることがあった)。
@@ -34,13 +39,13 @@ export async function GET() {
       WHERE na."assigned_to" = ${session.id}::uuid
         AND na."is_completed" = false
         AND (
-          na."scheduled_at" <= ${todayDb}::date
+          na."scheduled_at" <= ${todayYmd}::date
           -- 明日 0:00〜0:04 の予定は、5分前の知らせが今日の夜に出る。押して開いたこの一覧に
           -- その予定が無いと困るので、知らせの時刻(期限の5分前)を過ぎていれば含める(@codex #470 P2)。
           OR (
-            na."scheduled_at" = ${tomorrowDb}::date
+            na."scheduled_at" = ${tomorrowYmd}::date
             AND na."scheduled_time" IS NOT NULL
-            AND ((na."scheduled_at" + na."scheduled_time"::time) AT TIME ZONE 'Asia/Tokyo') - INTERVAL '5 minutes' <= ${now}::timestamptz
+            AND ((na."scheduled_at" + na."scheduled_time"::time) AT TIME ZONE 'Asia/Tokyo') - INTERVAL '5 minutes' <= ${nowIso}::timestamptz
           )
         )
         AND (${scopeUserId}::uuid IS NULL OR p."created_by" = ${scopeUserId}::uuid OR p."assigned_to" = ${scopeUserId}::uuid)

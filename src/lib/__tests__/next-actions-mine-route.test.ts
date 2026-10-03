@@ -40,7 +40,7 @@ describe("自分の次回対応(ホームの一覧)", () => {
     expect(sql).toMatch(/na\."is_completed" = false/);
     expect(sql).toMatch(/na\."scheduled_at" <= \?::date/);
     expect(values[0]).toBe(U);
-    expect(values[1]).toEqual(new Date("2026-10-03T00:00:00.000Z"));
+    expect(values[1]).toBe("2026-10-03");
   });
   it("明日 0:00〜0:04 の時刻ありの予定は、5分前を過ぎていれば含める(知らせを押した先に出す・@codex #470 P2)", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -48,8 +48,9 @@ describe("自分の次回対応(ホームの一覧)", () => {
     await GET();
     const { sql, values } = lastQuery();
     expect(sql).toMatch(/na\."scheduled_at" = \?::date\s+AND na\."scheduled_time" IS NOT NULL\s+AND \(\(na\."scheduled_at" \+ na\."scheduled_time"::time\) AT TIME ZONE 'Asia\/Tokyo'\) - INTERVAL '5 minutes' <= \?::timestamptz/);
-    expect(values[2]).toEqual(new Date("2026-10-03T00:00:00.000Z"));
-    expect(values[3]).toEqual(new Date("2026-10-02T14:58:00Z"));
+    expect(values[2]).toBe("2026-10-03");
+    // 今は「Z 付きの ISO 文字列」で渡す(DB のタイムゾーンに左右されない・@codex #470 P2)
+    expect(values[3]).toBe("2026-10-02T14:58:00.000Z");
   });
   it("field_staff だけ物件の担当範囲で絞る(それ以外は絞らない)", async () => {
     await GET();
