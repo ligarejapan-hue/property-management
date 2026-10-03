@@ -833,6 +833,7 @@ sudo vim /etc/property-management/app.env
 2. 通常の更新手順（§6 の差分適用・`prisma migrate deploy` を含む）で反映して再起動する。送信の基準のカーソルは **migration を流した時刻** で初期化される（それより前の査定申込・謄本ジョブは送らない）。migration の中身と止まるもの:
    - `20261003120000_add_next_action_time`（段階3・次回対応の時刻の欄）: **`next_actions` を書き込み止め（読み取りは止めない）にして**列を足し、既存の全行に `reminder_rev_at` を埋めてからトリガーを作る。表を押さえている間（列の追加＋全行の書き換え）は、次回対応の追加・編集・完了が待たされる。押さえるのを10秒待っても取れなければ失敗して何も変わらない（やり直しの手順は migration の先頭のコメント）。本番の件数なら数秒の見込みだが、**反映前に件数を確かめ**（`SELECT count(*) FROM next_actions;`）、利用の少ない時間に流す。戻すときはアプリだけを前の版に戻し、列とトリガーは残す（前の版は列を知らないだけで動く）。
    - `20261003130000_add_push_subscriptions` と `20261004100000_add_notification_deliveries`: 表の追加だけ（既存の表は止めない）。前の版のアプリとも両立する。
+   - `20261004110000_add_edit_lock_loss_events`（段階4c）: 表の追加と、`notification_deliveries` の種類の CHECK の付け替え（行は変えない）。⚠この版から**編集の鍵の取り直し・管理者の解除がこの表に書く**ので、必ず migration を先に流してから再起動する（通常の手順どおり。逆にすると鍵の取得・解除が失敗する）。
 3. 送信を手で1回だけ動かし、エラーなく終わることを確かめる:
    ```bash
    sudo cp deploy/systemd/pm-push-notify.service.example /etc/systemd/system/pm-push-notify.service
