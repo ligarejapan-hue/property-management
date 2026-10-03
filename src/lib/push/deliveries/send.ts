@@ -31,6 +31,7 @@ import {
   RETRY_BACKOFF_MS,
   RETRY_WINDOW_MS,
   SEND_BATCH_LIMIT,
+  SEND_PRESEND_LIMIT_MS,
   SEND_RUN_BUDGET_MS,
   SEND_TX_MAX_WAIT_MS,
   SEND_TX_TIMEOUT_MS,
@@ -50,20 +51,40 @@ type Tx = Prisma.TransactionClient;
 
 export type SendResult = "sent" | "failed" | "gone" | "cancelled" | "busy" | "skipped";
 
-/** 送ってよい状態の送信記録(初回・送り直し・15分を過ぎた送信中の残骸)。 */
+/**
+ * 送ってよい状態の送信記録(初回・送り直し・15分を過ぎた送信中の残骸)。
+ * 送信中の残骸の取り直しも送り直しと同じく「最大3回・作ってから2時間まで」(処理が落ち続けても
+ * 何度も送らない・@codex #472 P2)。
+ */
 export function claimableWhere(now: Date): Prisma.NotificationDeliveryWhereInput {
+  const retryable = { attempts: { lt: MAX_ATTEMPTS }, scheduledFor: { gt: new Date(now.getTime() - RETRY_WINDOW_MS) } };
   return {
     OR: [
       { status: "pending" },
-      {
-        status: "failed",
-        attempts: { lt: MAX_ATTEMPTS },
-        scheduledFor: { gt: new Date(now.getTime() - RETRY_WINDOW_MS) },
-        claimedAt: { lt: new Date(now.getTime() - RETRY_BACKOFF_MS) },
-      },
-      { status: "sending", claimedAt: { lt: new Date(now.getTime() - CLAIM_STALE_MS) } },
+      { status: "failed", ...retryable, claimedAt: { lt: new Date(now.getTime() - RETRY_BACKOFF_MS) } },
+      { status: "sending", ...retryable, claimedAt: { lt: new Date(now.getTime() - CLAIM_STALE_MS) } },
     ],
   };
+}
+
+/** 回数・期間を使い切った送信中の残骸は failed で締める(もう取り直さない)。 */
+export async function closeAbandonedClaims(now: Date): Promise<number> {
+  const r = await prisma.notificationDelivery.updateMany({
+    where: {
+      status: "sending",
+      claimedAt: { lt: new Date(now.getTime() - CLAIM_STALE_MS) },
+      OR: [{ attempts: { gte: MAX_ATTEMPTS } }, { scheduledFor: { lte: new Date(now.getTime() - RETRY_WINDOW_MS) } }],
+    },
+    data: { status: "failed", lastErrorCode: "abandoned" },
+  });
+  return r.count;
+}
+
+/** 送る前の処理が長引いた(送り始めると結果を書く時間が残らない)。送らずに巻き戻す。 */
+class PreSendTooSlow extends Error {
+  constructor() {
+    super("presend_too_slow");
+  }
 }
 
 export async function sendDueDeliveries(
@@ -74,6 +95,7 @@ export async function sendDueDeliveries(
   const stats: Record<SendResult, number> = { sent: 0, failed: 0, gone: 0, cancelled: 0, busy: 0, skipped: 0 };
   const startedAtMs = opts.startedAtMs ?? Date.now();
   const budgetMs = opts.budgetMs ?? SEND_RUN_BUDGET_MS;
+  await closeAbandonedClaims(now);
   const due = await prisma.notificationDelivery.findMany({
     where: claimableWhere(now),
     select: { id: true },
@@ -86,7 +108,11 @@ export async function sendDueDeliveries(
     let result: SendResult;
     try {
       result = await sendOne(d.id, now, sender);
-    } catch {
+    } catch (e) {
+      if (e instanceof PreSendTooSlow) {
+        stats.busy += 1;
+        continue;
+      }
       // 1通の DB の失敗で全体を止めない(記録は残り、次の実行で送る)。中身はログに出さない。
       result = "skipped";
     }
@@ -95,8 +121,15 @@ export async function sendDueDeliveries(
   return stats;
 }
 
-export function sendOne(deliveryId: string, now: Date, sender: PushSender): Promise<SendResult> {
+export function sendOne(
+  deliveryId: string,
+  now: Date,
+  sender: PushSender,
+  opts: { presendLimitMs?: number } = {},
+): Promise<SendResult> {
+  const presendLimitMs = opts.presendLimitMs ?? SEND_PRESEND_LIMIT_MS;
   return prisma.$transaction(async (tx) => {
+    const txStartedMs = Date.now();
     const d = await tx.notificationDelivery.findUnique({
       where: { id: deliveryId },
       select: { id: true, userId: true, subscriptionId: true, bindingId: true, kind: true, refs: { select: { id: true, refKey: true } } },
@@ -137,6 +170,8 @@ export function sendOne(deliveryId: string, now: Date, sender: PushSender): Prom
       return "cancelled";
     }
 
+    // ここまでに時間を使いすぎていたら送らずに巻き戻す(取り合いも消える=次の実行でやり直す)。
+    if (Date.now() - txStartedMs > presendLimitMs) throw new PreSendTooSlow();
     const outcome = await sender({ endpoint: s.endpoint, p256dh: s.p256dh, auth: s.auth }, checked.payload);
     if (outcome.ok) {
       await tx.notificationDelivery.updateMany({ where: mine, data: { status: "sent", sentAt: new Date(), lastErrorCode: null } });

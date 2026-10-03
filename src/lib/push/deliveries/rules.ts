@@ -28,6 +28,15 @@ export const SEND_TIMEOUT_MS = 10_000;
  * Prisma の既定5秒のままだと、送れたのに sent への更新が巻き戻って15分後にもう一度送るため)。
  */
 export const SEND_TX_TIMEOUT_MS = 20_000;
+/**
+ * 送信のあとの書き込み(sent 等)に残しておく時間。送る前の処理(取り合い・確かめ直し)が
+ * 「トランザクションの時間 − 送信の時間 − これ」を超えていたら、その回は送らずに巻き戻す
+ * (遅く送り始めて、届いたのに結果が書けず巻き戻る=次の実行でもう一度送る、を防ぐ・@codex #472 P2)。
+ */
+export const SEND_FINALIZE_RESERVE_MS = 4_000;
+export const SEND_PRESEND_LIMIT_MS = SEND_TX_TIMEOUT_MS - SEND_TIMEOUT_MS - SEND_FINALIZE_RESERVE_MS;
+/** 古い記録の片付けは1回に1,000件まで(残りは次の実行で)。 */
+export const PURGE_BATCH = 1000;
 export const SEND_TX_MAX_WAIT_MS = 5_000;
 /** 中継サービスに預ける時間(端末がつながっていない間)。古い件数を翌日に出さないよう短めにする。 */
 export const PUSH_TTL_SECONDS = 2 * 60 * 60;

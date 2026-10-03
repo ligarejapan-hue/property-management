@@ -7,6 +7,8 @@ vi.mock("@/lib/prisma", () => ({ default: {} }));
 import {
   CLAIM_STALE_MS,
   MAX_ATTEMPTS,
+  SEND_FINALIZE_RESERVE_MS,
+  SEND_PRESEND_LIMIT_MS,
   SEND_TIMEOUT_MS,
   SEND_TX_TIMEOUT_MS,
   classifySendError,
@@ -33,6 +35,10 @@ describe("時間の関係(設計書 §7.5)", () => {
   });
   it("付け替えは送信のトランザクションが終わるのを待てる", () => {
     expect(UPSERT_TX_TIMEOUT_MS).toBeGreaterThan(SEND_TX_TIMEOUT_MS);
+  });
+  it("送る前の処理の上限+送信+結果の書き込みの余裕=トランザクションの時間制限", () => {
+    expect(SEND_PRESEND_LIMIT_MS).toBeGreaterThan(0);
+    expect(SEND_PRESEND_LIMIT_MS + SEND_TIMEOUT_MS + SEND_FINALIZE_RESERVE_MS).toBe(SEND_TX_TIMEOUT_MS);
   });
   it("取り直しは15分・送り直しは最大3回", () => {
     expect(CLAIM_STALE_MS).toBe(15 * 60 * 1000);
