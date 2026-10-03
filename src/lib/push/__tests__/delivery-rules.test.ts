@@ -1,0 +1,132 @@
+/**
+ * 通知 段階4b の決まりごと(rules.ts)。純関数と時間の関係を固定する。
+ */
+import { describe, expect, it, vi } from "vitest";
+vi.mock("@/lib/api-helpers", async () => (await import("../../__tests__/agent-inquiry-route-mocks")).apiHelpersMock());
+vi.mock("@/lib/prisma", () => ({ default: {} }));
+import {
+  CLAIM_STALE_MS,
+  MAX_ATTEMPTS,
+  RETRY_WINDOW_MS,
+  NEXT_ACTION_PLAN_BUDGET_MS,
+  SEND_FINALIZE_RESERVE_MS,
+  SEND_RUN_BUDGET_MS,
+  SOURCE_PLAN_BUDGET_MS,
+  SEND_PRESEND_LIMIT_MS,
+  SEND_TIMEOUT_MS,
+  SEND_TX_TIMEOUT_MS,
+  classifySendError,
+  rotateStart,
+  sourceEventsPerTx,
+  eventRefKey,
+  inquiryPayload,
+  nextActionPayload,
+  nextActionRefKey,
+  parseEventRefKey,
+  parseNextActionRefKey,
+  registryJobPayload,
+} from "../deliveries/rules";
+import { UPSERT_TX_TIMEOUT_MS } from "../subscriptions";
+import { reminderSendOffsets } from "@/lib/notifications/reminder-schedule";
+import { nextActionKeysFor } from "../deliveries/plan";
+
+const ID = "11111111-1111-4111-8111-111111111111";
+const B = "22222222-2222-4222-8222-222222222222";
+
+describe("時間の関係(設計書 §7.5)", () => {
+  it("送信のトランザクションの時間制限は送信の時間制限より長い(送れたのに sent が巻き戻らない)", () => {
+    expect(SEND_TX_TIMEOUT_MS).toBeGreaterThan(SEND_TIMEOUT_MS);
+  });
+  it("付け替えは送信のトランザクションが終わるのを待てる", () => {
+    expect(UPSERT_TX_TIMEOUT_MS).toBeGreaterThan(SEND_TX_TIMEOUT_MS);
+  });
+  it("送る前の処理の上限+送信+結果の書き込みの余裕=トランザクションの時間制限", () => {
+    expect(SEND_PRESEND_LIMIT_MS).toBeGreaterThan(0);
+    expect(SEND_PRESEND_LIMIT_MS + SEND_TIMEOUT_MS + SEND_FINALIZE_RESERVE_MS).toBe(SEND_TX_TIMEOUT_MS);
+  });
+  it("1回分の持ち時間の配分: 出来事の記録づくり < 次回対応の記録づくり < 送信の締め切り < curl の240秒", () => {
+    expect(SOURCE_PLAN_BUDGET_MS).toBeLessThan(NEXT_ACTION_PLAN_BUDGET_MS);
+    expect(NEXT_ACTION_PLAN_BUDGET_MS).toBeLessThan(SEND_RUN_BUDGET_MS);
+    // 締め切りの直前に始めた1回分(最大30秒のトランザクション)が終わっても curl の240秒に届かない
+    expect(SEND_RUN_BUDGET_MS + 30_000).toBeLessThan(240_000);
+  });
+  it("送り直しの期間は次回対応の回の間隔の最大(12時間)以上", () => {
+    const offsets = reminderSendOffsets(false);
+    const maxGap = Math.max(...offsets.slice(1).map((o, i) => o - offsets[i]));
+    expect(RETRY_WINDOW_MS).toBeGreaterThanOrEqual(maxGap);
+  });
+  it("取り直しは15分・送り直しは最大3回", () => {
+    expect(CLAIM_STALE_MS).toBe(15 * 60 * 1000);
+    expect(MAX_ATTEMPTS).toBe(3);
+  });
+});
+
+describe("1回分の大きさ・始める位置", () => {
+  it("送り先の端末が多いほど1トランザクションの出来事を減らす(1〜100件)", () => {
+    expect(sourceEventsPerTx(0)).toBe(100);
+    expect(sourceEventsPerTx(10)).toBe(100);
+    expect(sourceEventsPerTx(40)).toBe(50);
+    expect(sourceEventsPerTx(5000)).toBe(1);
+  });
+  it("始める位置を k だけずらす(順番は保つ・全員を1回ずつ)", () => {
+    const xs = ["a", "b", "c"];
+    expect([0, 1, 2, 3, -1].map((k) => rotateStart(xs, k).join(""))).toEqual(["abc", "bca", "cab", "abc", "cab"]);
+    expect(rotateStart([], 5)).toEqual([]);
+  });
+});
+
+describe("ref_key", () => {
+  it("次回対応は ID・期限(秒)・版(ミリ秒)・回だけで、読み戻せる", () => {
+    const t = Date.parse("2026-10-03T00:00:00.123Z");
+    const k = nextActionRefKey(ID, t, t + 5, 4);
+    expect(k).toBe(`next_action:${ID}:${Math.floor(t / 1000)}:${t + 5}:4`);
+    expect(parseNextActionRefKey(k)).toEqual({ id: ID, deadlineSec: Math.floor(t / 1000), revMs: t + 5, slot: 4 });
+    expect(parseNextActionRefKey("next_action:x:1:2:3")).toBeNull();
+  });
+  it("申込・ジョブは種類と ID だけ", () => {
+    expect(eventRefKey("inquiry", ID)).toBe(`inquiry:${ID}`);
+    expect(parseEventRefKey("inquiry", `inquiry:${ID}`)).toBe(ID);
+    expect(parseEventRefKey("inquiry", `registry_job:${ID}`)).toBeNull();
+  });
+  it("端末が結び付く前の回は含めない(§7.3)", () => {
+    const bound = new Date("2026-10-03T01:00:00Z");
+    const due = [
+      { id: ID, deadline: 0, revMs: 1, slot: 0, slotTime: bound.getTime() - 1 },
+      { id: B, deadline: 0, revMs: 1, slot: 1, slotTime: bound.getTime() },
+    ];
+    expect(nextActionKeysFor(due, bound)).toEqual([nextActionRefKey(B, 0, 1, 1)]);
+  });
+});
+
+describe("本文(種類と件数・時刻だけ)", () => {
+  it("次回対応は時刻の回と件数・結び付けを載せる", () => {
+    const p = nextActionPayload(B, [{ dueTime: "15:00" }, {}], 3, 1);
+    expect(p).toEqual({
+      b: B,
+      title: "次回対応",
+      body: "15:00 の次回対応が1件あります。今日の次回対応が3件、期限切れが1件あります",
+      url: "/home",
+      tag: "next-action:reminder",
+    });
+  });
+  it("申込は件数だけ・謄本は要確認を必ず出す", () => {
+    expect(inquiryPayload(B, 2).body).toBe("新しい査定の申込が2件あります");
+    const r = registryJobPayload(B, ID, "opaque-key", { done: 12, failed: 0, skipped: 2, chargedButFailed: 1 });
+    expect(r.tag).toBe("registry-job:opaque-key");
+    expect(r.body).toBe("謄本の一括取得が完了しました（成功12件・要手動2件・要確認1件）");
+    expect(r.url).toBe(`/properties/registry-fetch/${ID}`);
+  });
+});
+
+describe("送信結果の分け方(定型コードだけ)", () => {
+  it("404/410 は宛先が無効(gone)", () => {
+    expect(classifySendError({ statusCode: 410, body: "secret", endpoint: "https://x" })).toEqual({ gone: true, code: "http_410" });
+    expect(classifySendError({ statusCode: 404 })).toEqual({ gone: true, code: "http_404" });
+  });
+  it("それ以外の HTTP・時間切れ・通信の失敗は送り直し(本文・URL は残さない)", () => {
+    expect(classifySendError({ statusCode: 429 })).toEqual({ gone: false, code: "http_429" });
+    expect(classifySendError(new Error("Socket timeout"))).toEqual({ gone: false, code: "timeout" });
+    expect(classifySendError(new Error("push_timeout"))).toEqual({ gone: false, code: "timeout" });
+    expect(classifySendError(new Error("getaddrinfo ENOTFOUND https://fcm.googleapis.com/x"))).toEqual({ gone: false, code: "network" });
+  });
+});

@@ -29,7 +29,7 @@ export interface SummaryState {
 
 /** 窓口の応答(`lib/notifications/summary.ts` の NotificationSummary と同じ形)。 */
 export interface SummaryResponse {
-  nextActions: { today: number; overdue: number; reminders: Array<{ key: string; slot: number }> } | null;
+  nextActions: { today: number; overdue: number; reminders: Array<{ key: string; slot: number; dueTime?: string }> } | null;
   inquiries: {
     open: number;
     newKeys: string[] | null;
@@ -146,6 +146,29 @@ export function nextActionBody(today: number, overdue: number): string {
   return parts.length ? `${parts.join("、")}あります` : "次回対応があります";
 }
 
+/**
+ * 新しく知らせる回の文言。時刻ありの「5分前」の回は「15:00 の次回対応が1件あります」(設計書 §2 N5・
+ * 時刻ごとに件数)。それ以外(朝9時・繰り返し)は今日・期限切れの件数(N4)。両方あれば両方を出す。
+ */
+export function nextActionReminderBody(
+  fresh: Array<{ dueTime?: string }>,
+  today: number,
+  overdue: number,
+): string {
+  const byTime = new Map<string, number>();
+  let untimed = 0;
+  for (const r of fresh) {
+    if (r.dueTime) byTime.set(r.dueTime, (byTime.get(r.dueTime) ?? 0) + 1);
+    else untimed += 1;
+  }
+  const timedText = [...byTime.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([t, n]) => `${t} の次回対応が${n}件`)
+    .join("、");
+  if (!timedText) return nextActionBody(today, overdue);
+  return untimed > 0 ? `${timedText}あります。${nextActionBody(today, overdue)}` : `${timedText}あります`;
+}
+
 /** カーソルは新しい方を残す(ほかのタブが先に進めていたら戻さない)。 */
 function mergeCursor(sec: CursorSection, cursor: string, cursorAt: number): CursorSection {
   if (sec.cursor !== null && sec.cursorAt !== null && sec.cursorAt > cursorAt) return sec;
@@ -174,7 +197,7 @@ export function decideSummaryNotices(
         kind: "next_action",
         tag: "next-action:reminder",
         title: "次回対応",
-        body: nextActionBody(res.nextActions.today, res.nextActions.overdue),
+        body: nextActionReminderBody(fresh, res.nextActions.today, res.nextActions.overdue),
         url: NEXT_ACTION_URL,
       });
     }
