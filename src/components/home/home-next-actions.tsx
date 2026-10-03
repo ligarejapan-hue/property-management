@@ -9,6 +9,8 @@ export interface MyNextAction {
   propertyId: string;
   /** YYYY-MM-DD */
   scheduledAt: string;
+  /** "HH:MM"(任意・段階3) */
+  scheduledTime?: string | null;
   actionType: string | null;
   overdue: boolean;
   address: string | null;
@@ -46,6 +48,7 @@ export function HomeNextActionsView({ items, hasMore }: { items: MyNextAction[];
                 }`}
               >
                 {a.overdue ? `期限切れ ${formatDate(a.scheduledAt)}` : "今日"}
+                {a.scheduledTime ? ` ${a.scheduledTime}` : ""}
               </span>
               <span className="min-w-0 flex-1 truncate text-gray-900 dark:text-gray-100">{a.address ?? "（所在なし）"}</span>
               {a.actionType && <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">{a.actionType}</span>}

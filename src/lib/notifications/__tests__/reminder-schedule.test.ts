@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   REMINDER_STOP_MS,
+  isTimedNextAction,
   jstToday,
   nextActionDeadline,
   nextActionReminderSlot,
@@ -70,5 +71,22 @@ describe("日本時間の今日と期限", () => {
   it("時刻なしの期限は予定日の 9:00(日本時間)", () => {
     // DB の date 列は UTC 0時の Date で返る
     expect(nextActionDeadline(new Date("2026-10-02T00:00:00.000Z"))).toBe(T);
+  });
+});
+
+describe("時刻ありの期限(段階3)", () => {
+  it("予定日＋時刻(日本時間)", () => {
+    expect(nextActionDeadline(new Date("2026-10-02T00:00:00.000Z"), "15:00")).toBe(Date.parse("2026-10-02T15:00:00+09:00"));
+    expect(nextActionDeadline(new Date("2026-10-02T00:00:00.000Z"), "00:05")).toBe(Date.parse("2026-10-02T00:05:00+09:00"));
+  });
+  it("時刻なし・形の崩れた時刻は 9:00", () => {
+    for (const t of [null, undefined, "", "9:00", "24:00"]) {
+      expect(nextActionDeadline(new Date("2026-10-02T00:00:00.000Z"), t)).toBe(T);
+    }
+  });
+  it("時刻ありかどうか", () => {
+    expect(isTimedNextAction("15:00")).toBe(true);
+    expect(isTimedNextAction(null)).toBe(false);
+    expect(isTimedNextAction("9:00")).toBe(false);
   });
 });
