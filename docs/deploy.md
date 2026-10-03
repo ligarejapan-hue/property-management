@@ -850,7 +850,7 @@ sudo vim /etc/property-management/app.env
 2. アプリを前の版に戻して再起動する。
 3. 追加した表（`notification_deliveries` など）は前の版に影響しないので残す。消すと送信の記録と基準のカーソルが失われ、再び反映したときはカーソルの初期化からやり直しになる。
 
-⚠送信の口（`/api/notifications/push-run`）は合言葉で守っている。公開ドメインの nginx はこのパスを通さない（`/t/`・`/u/`・`/lp-assets/` だけ）。
+⚠送信の口（`/api/notifications/push-run`）は合言葉で守っている。さらに nginx で外からは 404 にする（`deploy/nginx/property-management.conf.example` の `location = /api/notifications/push-run`。timer は `127.0.0.1:3000` を直接呼ぶので影響しない）。本番の nginx に足すときは `nginx -t` → `systemctl reload nginx`。
 
 ## 10. 定期メンテナンス
 
