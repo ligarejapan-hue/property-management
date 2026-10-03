@@ -29,11 +29,23 @@ import {
   closeOsNotification,
   fetchSwGeneration,
   notificationSupport,
+  extendPushDevice,
   registerNotificationWorker,
   requestNotificationPermission,
+  setupPushDevice,
   showOsNotification,
+  type DeviceScope,
   type NotificationSupport,
 } from "@/lib/notifications/sw-client";
+
+/**
+ * 画面を閉じていても届く通知(段階4a)の状態。
+ * on = この端末を登録済み / not_configured = サーバーの準備がまだ(VAPID 未設定) /
+ * reload_required = 古い Service Worker が動いている(再読み込みが要る) / failed・unsupported = 使えない。
+ */
+export type PushState =
+  | { status: "on"; deviceScope: DeviceScope }
+  | { status: "off" | "not_configured" | "reload_required" | "failed" | "unsupported" | "working" };
 
 export interface NotifyInput {
   kind: NoticeKind;
@@ -67,6 +79,11 @@ interface NoticeContextValue {
   markAllRead: () => void;
   permission: NotificationSupport;
   requestPermission: () => Promise<void>;
+  push: PushState;
+  /** 「この端末は自分専用」の切り替え(今の利用者が自分で選ぶ)。 */
+  setDeviceScope: (scope: DeviceScope) => Promise<void>;
+  /** 自動ログオフの延長(5分ごと)に合わせて、shared の端末の期限を延ばす。 */
+  extendPush: () => void;
 }
 
 const noop = () => {};
@@ -78,10 +95,18 @@ const NoticeContext = createContext<NoticeContextValue>({
   markAllRead: noop,
   permission: "unsupported",
   requestPermission: async () => {},
+  push: { status: "off" },
+  setDeviceScope: async () => {},
+  extendPush: noop,
 });
 
 export function useNotices(): NoticeContextValue {
   return useContext(NoticeContext);
+}
+
+function toPushState(r: Awaited<ReturnType<typeof setupPushDevice>>): PushState {
+  if (r.ok) return { status: "on", deviceScope: r.deviceScope };
+  return { status: r.reason === "denied" ? "off" : r.reason };
 }
 
 function newId(): string {
@@ -98,6 +123,10 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
     typeof window === "undefined" ? "unsupported" : notificationSupport(),
   );
   const genRef = useRef<number | null>(null);
+  const [push, setPush] = useState<PushState>({ status: "off" });
+  // 登録の結果は「最後に始めた操作」のものだけを画面に映す(自動の付け替えが、あとから押した
+  // 「自分専用」の結果を上書きしないため)。
+  const pushSeqRef = useRef(0);
   const switchedRef = useRef(false);
   /** このタブを開いた時点の後片付けの合図。書き込む直前に読み直して比べる。 */
   const switchMarkRef = useRef<string | null>(null);
@@ -125,6 +154,17 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
       void registerNotificationWorker().then(async () => {
         const gen = await fetchSwGeneration();
         if (!cancelled && gen !== null && genRef.current === null) genRef.current = gen;
+        // 段階4a: 許可済みの端末は、ログインのたびに今の利用者へ付け替える(前の人の
+        // 「自分専用」を引き継がない=範囲は渡さない・設計書 §7.5 の 2)。
+        if (!cancelled && genRef.current !== null && notificationSupport() === "granted" && !switchedRef.current) {
+          const seq = ++pushSeqRef.current;
+          const r = await setupPushDevice({
+            gen: genRef.current,
+            subscribeIfMissing: true,
+            isCancelled: () => cancelled || switchedRef.current || readSwitchMark() !== switchMarkRef.current,
+          });
+          if (!cancelled && seq === pushSeqRef.current) setPush(toPushState(r));
+        }
       });
     }
     return () => {
@@ -197,6 +237,18 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // ⚠後片付け(ログアウト・ログイン画面)が起きていたら登録し直さない(解除のあとに配信を再開させない)。
+  //   ref を読む関数は、ref を書き換える処理(上の useEffect・notify)より後ろで作る(react-hooks/immutability)。
+  const isCancelled = useCallback(() => switchedRef.current || readSwitchMark() !== switchMarkRef.current, []);
+  const runPushSetup = useCallback(
+    async (opts: { gen: number; deviceScope?: DeviceScope }) => {
+      const seq = ++pushSeqRef.current;
+      const r = await setupPushDevice({ ...opts, subscribeIfMissing: true, isCancelled });
+      if (seq === pushSeqRef.current) setPush(toPushState(r));
+    },
+    [isCancelled],
+  );
+
   const requestPermission = useCallback(async () => {
     const result = await requestNotificationPermission();
     setPermission(result);
@@ -204,16 +256,33 @@ export function NoticeProvider({ children }: { children: ReactNode }) {
       const gen = await fetchSwGeneration();
       if (gen !== null) genRef.current = gen;
       toast({ tone: "green", icon: "check", title: "通知を許可しました", body: "別の画面を見ているときも、この端末に知らせます" });
+      if (gen !== null && !switchedRef.current) {
+        setPush({ status: "working" });
+        await runPushSetup({ gen });
+      }
     }
-  }, [toast]);
+  }, [toast, runPushSetup]);
+
+  const setDeviceScope = useCallback(async (scope: DeviceScope) => {
+    const gen = genRef.current;
+    if (gen === null || switchedRef.current) return;
+    setPush({ status: "working" });
+    await runPushSetup({ gen, deviceScope: scope });
+  }, [runPushSetup]);
+
+  const extendPush = useCallback(() => {
+    const gen = genRef.current;
+    if (gen === null || switchedRef.current) return;
+    void extendPushDevice(gen, isCancelled);
+  }, [isCancelled]);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
   const value = useMemo(
-    () => ({ notify, toast, withdraw, notices, markAllRead, permission, requestPermission }),
-    [notify, toast, withdraw, notices, markAllRead, permission, requestPermission],
+    () => ({ notify, toast, withdraw, notices, markAllRead, permission, requestPermission, push, setDeviceScope, extendPush }),
+    [notify, toast, withdraw, notices, markAllRead, permission, requestPermission, push, setDeviceScope, extendPush],
   );
 
   return (

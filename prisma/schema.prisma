@@ -170,6 +170,7 @@ model User {
 
   // Relations
   userPermissions         UserPermission[]
+  pushSubscriptions       PushSubscription[]
   passwordResetTokens     PasswordResetToken[]
   createdProperties       Property[]              @relation("PropertyCreatedBy")
   assignedProperties      Property[]              @relation("PropertyAssignedTo")
@@ -1828,4 +1829,32 @@ model PropertyAdPermission {
 
   @@unique([propertyId, medium])
   @@map("property_ad_permissions")
+}
+
+/// 通知 段階4a: Web プッシュの登録先(端末)。設計書 §7.2・§7.5。
+/// ⚠endpoint・p256dh・auth は秘密情報(API の応答・ログ・監査ログに出さない)。
+model PushSubscription {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  endpoint      String    @unique
+  p256dh        String
+  auth          String
+  /// shared(既定・画面を閉じて65分)| personal(本人が選んだときだけ・最後のログインから30日)
+  deviceScope   String    @default("shared") @map("device_scope")
+  boundAt       DateTime  @map("bound_at")
+  bindingId     String    @map("binding_id") @db.Uuid
+  expiresAt     DateTime  @map("expires_at")
+  lastSuccessAt DateTime? @map("last_success_at")
+  failureCount  Int       @default(0) @map("failure_count")
+  revokedAt     DateTime? @map("revoked_at")
+  /// gone | logout | admin などの定型値
+  revokedReason String?   @map("revoked_reason")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("push_subscriptions")
 }

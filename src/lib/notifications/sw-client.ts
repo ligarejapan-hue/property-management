@@ -16,6 +16,8 @@ const DB_NAME = "pm-notify";
 const STORE = "state";
 const STATE_KEY = "main";
 const APP_TAG = "pm";
+/** 端末の結び付け(段階4a)。Service Worker(public/sw.js)の BINDING_KEY と同じ。 */
+export const BINDING_KEY = "binding";
 
 export type NotificationSupport = "unsupported" | "default" | "granted" | "denied";
 
@@ -151,7 +153,11 @@ async function applyCleanupDirect(cleanupId: string): Promise<number> {
       const req = store.get(STATE_KEY);
       req.onsuccess = () => {
         const { state, changed } = applyCleanup(normalizeCleanupState(req.result), cleanupId, Date.now());
-        if (changed) store.put(state, STATE_KEY);
+        if (changed) {
+          store.put(state, STATE_KEY);
+          // Service Worker と同じく、結び付け(段階4a)も消す。
+          store.delete(BINDING_KEY);
+        }
         gen = state.gen;
       };
       req.onerror = () => reject(req.error);
@@ -195,5 +201,208 @@ export async function cleanupNotifications(): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+// ---- Web プッシュ(段階4a・設計書 §7.1・§7.5) ----
+
+export type DeviceScope = "shared" | "personal";
+export type PushSetupResult =
+  | { ok: true; deviceScope: DeviceScope }
+  | { ok: false; reason: "unsupported" | "not_configured" | "reload_required" | "denied" | "failed" };
+
+function hasPushManager(): boolean {
+  return typeof window !== "undefined" && "PushManager" in window;
+}
+
+/**
+ * push を受けられる Service Worker(版2以上)が動いているか確かめて、その登録を返す。
+ * 古い版(段階1)が動いていれば `update()` で新しい版を取りに行き、入れ替わってから確かめ直す
+ * (古い版のまま購読すると、届いた通知が黙って捨てられるため・設計書 §7.1)。
+ */
+export async function pushReadyRegistration(): Promise<ServiceWorkerRegistration | "reload_required" | null> {
+  if (!hasServiceWorker() || !hasNotification() || !hasPushManager()) return null;
+  const reg = (await registerNotificationWorker()) ?? (await readyRegistration());
+  if (!reg) return null;
+  const supportsPush = async () => {
+    const r = await readyRegistration();
+    if (!r) return false;
+    const res = await ask(r, { type: "version" });
+    return !!res?.ok && res.push === true;
+  };
+  if (await supportsPush()) return reg;
+  try {
+    await reg.update();
+  } catch {
+    /* 下で確かめ直す */
+  }
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 300));
+    if (await supportsPush()) return reg;
+  }
+  return "reload_required";
+}
+
+function base64UrlToUint8Array(base64Url: string): Uint8Array<ArrayBuffer> {
+  const padded = base64Url + "=".repeat((4 - (base64Url.length % 4)) % 4);
+  const raw = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
+  const out = new Uint8Array(new ArrayBuffer(raw.length));
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+async function putSubscription(
+  sub: PushSubscription,
+  deviceScope?: DeviceScope,
+): Promise<{ status: number; body: { bindingId?: string; deviceScope?: DeviceScope; error?: { code?: string } } | null }> {
+  const json = sub.toJSON();
+  const res = await fetch("/api/push/subscription", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys, ...(deviceScope ? { deviceScope } : {}) }),
+  });
+  const body = await res.json().catch(() => null);
+  return { status: res.status, body };
+}
+
+function writeBindingDirect(binding: string, gen: number): Promise<boolean> {
+  return openDb().then(
+    (db) =>
+      new Promise<boolean>((resolve, reject) => {
+        const tx = db.transaction(STORE, "readwrite");
+        const store = tx.objectStore(STORE);
+        let ok = false;
+        const req = store.get(STATE_KEY);
+        req.onsuccess = () => {
+          if (normalizeCleanupState(req.result).gen !== gen) return;
+          store.put(binding, BINDING_KEY);
+          ok = true;
+        };
+        req.onerror = () => reject(req.error);
+        tx.oncomplete = () => {
+          db.close();
+          resolve(ok);
+        };
+        tx.onerror = () => {
+          db.close();
+          reject(tx.error);
+        };
+      }),
+  );
+}
+
+/**
+ * 付け替えに成功した結び付けを Service Worker に保存する(設計書 §7.5)。`gen` は画面がこのタブを
+ * 開いたときの「切り替えの世代」。世代が変わっていれば(前の人のまま開いていたタブ)保存しない。
+ */
+async function storeBinding(reg: ServiceWorkerRegistration, binding: string, gen: number): Promise<boolean> {
+  const res = await ask(reg, { type: "binding", binding, gen });
+  if (res?.ok) return true;
+  if (res?.stale) return false;
+  try {
+    return await writeBindingDirect(binding.toLowerCase(), gen);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * この端末を登録(または付け替え)して、画面を閉じていても届くようにする。
+ * `deviceScope` は今の利用者がこの操作で選んだときだけ渡す(ログイン後の自動の付け替えでは渡さない)。
+ * `subscribeIfMissing` = 購読が無ければ作る(「通知を許可する」を押したとき)。false なら、既にある購読の
+ * 付け替えだけを行う(ログイン後・期限切れからの戻り)。
+ */
+export async function setupPushDevice(opts: {
+  gen: number;
+  deviceScope?: DeviceScope;
+  subscribeIfMissing: boolean;
+  /**
+   * 後片付け(ログアウト・ほかのタブのログイン画面)が起きたか。登録の直前と、結び付けを保存する直前に
+   * 確かめ、起きていれば何もしない(ログアウトの解除のあとに登録し直して、配信を再開させないため)。
+   */
+  isCancelled?: () => boolean;
+}): Promise<PushSetupResult> {
+  if (notificationSupport() === "unsupported" || !hasPushManager()) return { ok: false, reason: "unsupported" };
+  if (Notification.permission !== "granted") return { ok: false, reason: "denied" };
+  let config: { enabled?: boolean; publicKey?: string | null } | null = null;
+  try {
+    const res = await fetch("/api/push/config", { cache: "no-store", credentials: "same-origin" });
+    config = res.ok ? await res.json() : null;
+  } catch {
+    config = null;
+  }
+  if (!config?.enabled || !config.publicKey) return { ok: false, reason: "not_configured" };
+  const reg = await pushReadyRegistration();
+  if (reg === "reload_required") return { ok: false, reason: "reload_required" };
+  if (!reg) return { ok: false, reason: "unsupported" };
+  try {
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      if (!opts.subscribeIfMissing) return { ok: false, reason: "failed" };
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToUint8Array(config.publicKey) });
+    }
+    if (opts.isCancelled?.()) return { ok: false, reason: "failed" };
+    let r = await putSubscription(sub, opts.deviceScope);
+    if (r.status === 409 && r.body?.error?.code === "endpoint_gone") {
+      // 中継サービスが無効と返した宛先は捨てて、新しい宛先で登録し直す(設計書 §7.5)。
+      await sub.unsubscribe().catch(() => false);
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToUint8Array(config.publicKey) });
+      r = await putSubscription(sub, opts.deviceScope);
+    }
+    if (r.status === 501) return { ok: false, reason: "not_configured" };
+    if (r.status !== 200 || !r.body?.bindingId || !r.body.deviceScope) return { ok: false, reason: "failed" };
+    if (opts.isCancelled?.()) return { ok: false, reason: "failed" };
+    const stored = await storeBinding(reg, r.body.bindingId, opts.gen);
+    return stored ? { ok: true, deviceScope: r.body.deviceScope } : { ok: false, reason: "failed" };
+  } catch {
+    return { ok: false, reason: "failed" };
+  }
+}
+
+/** shared の端末の期限を延ばす(自動ログオフの延長と同じ5分ごと)。期限切れなら付け替え直す。 */
+export async function extendPushDevice(gen: number, isCancelled?: () => boolean): Promise<void> {
+  if (notificationSupport() !== "granted" || !hasPushManager() || !hasServiceWorker()) return;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration("/");
+    const sub = await reg?.pushManager.getSubscription();
+    if (!sub) return;
+    const res = await fetch("/api/push/subscription/extend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ endpoint: sub.endpoint }),
+    });
+    const body = (await res.json().catch(() => null)) as { active?: boolean } | null;
+    if (res.ok && body?.active === false && !isCancelled?.()) await setupPushDevice({ gen, subscribeIfMissing: false, isCancelled });
+  } catch {
+    /* 次の機会に */
+  }
+}
+
+/**
+ * ログアウトでの解除(設計書 §7.5 の 3)。サーバー側で無効にする(以後この端末には送らない)。
+ * ⚠購読そのもの(pushManager)は捨てない。サーバーで無効にした時点で送られず、結び付けも後片付けで
+ * 消えるので、届いても中身は出ない(§7.5 の 1・2 が主・これは補助)。捨てると、次に同じ人が
+ * ログインしたとき「この端末は自分専用」の選択が新しい宛先に引き継がれず、毎回選び直しになるため。
+ * 失敗してもログアウトは止めない。
+ */
+export async function unregisterPushDevice(): Promise<void> {
+  if (!hasServiceWorker() || !hasPushManager()) return;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration("/");
+    const sub = await reg?.pushManager.getSubscription();
+    if (!sub) return;
+    await withTimeout(
+      fetch("/api/push/subscription", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ endpoint: sub.endpoint }),
+      }),
+      SW_REPLY_TIMEOUT_MS,
+    );
+  } catch {
+    /* ログアウトは続ける */
   }
 }

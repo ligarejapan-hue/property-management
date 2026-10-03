@@ -63,7 +63,11 @@ export function IdleSessionGuard() {
   /** 予告中か(visibilitychange の処理から読む)。 */
   const warnActiveRef = useRef(false);
   const activityHandlerRef = useRef<() => void>(() => {});
-  const { notify, withdraw } = useNotices();
+  const { notify, withdraw, extendPush } = useNotices();
+  const extendPushRef = useRef(extendPush);
+  useEffect(() => {
+    extendPushRef.current = extendPush;
+  }, [extendPush]);
   const notifyRef = useRef(notify);
   const withdrawRef = useRef(withdraw);
   useEffect(() => {
@@ -96,6 +100,8 @@ export function IdleSessionGuard() {
     const maybeRefreshSession = (now: number) => {
       if (now - lastRefreshRef.current >= REFRESH_INTERVAL_MS) {
         lastRefreshRef.current = now;
+        // 段階4a: 同じ5分ごとに、共用(shared)の端末の通知の期限も延ばす(画面を閉じてから65分で止まる)。
+        extendPushRef.current();
         // セッションendpointを直接叩くと updateAge に従い JWT が回転し cookie が延長される。
         // getSession(next-auth/react)は既定で結果をブロードキャストし、一時失敗(null)が
         // SessionProvider 経由で UI をログアウト状態に切り替えかねないため、素の fetch にする

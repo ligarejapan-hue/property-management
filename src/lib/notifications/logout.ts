@@ -6,10 +6,12 @@
  */
 import { signOut } from "next-auth/react";
 import { clearNoticeStorage } from "./notice-store";
-import { cleanupNotifications } from "./sw-client";
+import { cleanupNotifications, unregisterPushDevice } from "./sw-client";
 
 export async function signOutWithNotificationCleanup(callbackUrl = "/login"): Promise<void> {
   clearNoticeStorage();
+  // 段階4a: この端末への送信をサーバー側で止める(ログインしている間に呼ぶ必要がある)。
+  await unregisterPushDevice();
   try {
     await cleanupNotifications();
   } catch {
