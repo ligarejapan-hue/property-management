@@ -191,7 +191,10 @@ describe("反映済みの機能を「無い・これから」と書いていな�
     ["guide", () => guideSrc],
     ["manual", () => manualSrc],
   ])("%s.html は次回対応の再通知が1週間で止まることと、一括取得の完了の知らせを書いている", (_name, src) => {
-    expect(src()).toContain("期限から1週間たつと出なくなります");
+    // @codex R6: 止まるのは単独の知らせだけ。期限切れの件数には完了まで残る(summary.ts overdueCount)。
+    expect(src()).not.toContain("期限から1週間たつと出なくなります");
+    expect(src()).toContain("期限から1週間たった次回対応は、それだけでは知らせを出さなくなります");
+    expect(src()).toContain("「期限切れが◯件」には、完了にするまで数えられます");
     expect(src()).toContain("謄本の一括取得が完了しました");
   });
 
