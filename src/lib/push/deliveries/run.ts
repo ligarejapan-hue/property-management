@@ -6,7 +6,15 @@
 import prisma from "@/lib/prisma";
 import { loadSourceRecipients, planNextActionDeliveries, planSourceDeliveries } from "./plan";
 import { sendDueDeliveries, type SendResult } from "./send";
-import { PURGE_BATCH, RECORD_RETENTION_MS, SEND_RUN_BUDGET_MS, SOURCE_PLAN_BUDGET_MS, SOURCES, type Source } from "./rules";
+import {
+  NEXT_ACTION_PLAN_BUDGET_MS,
+  PURGE_BATCH,
+  RECORD_RETENTION_MS,
+  SEND_RUN_BUDGET_MS,
+  SOURCE_PLAN_BUDGET_MS,
+  SOURCES,
+  type Source,
+} from "./rules";
 import type { PushSender } from "./web-push-sender";
 
 export interface PushRunResult {
@@ -27,7 +35,10 @@ export async function runPushNotifications(now: Date, sender: PushSender): Promi
   // 求め直す(権限の確かめを外に出しつつ、見つけた時点に近い顔ぶれで送り先を決める)。
   const sourceDeadlineMs = Math.min(deadlineMs, startedAtMs + SOURCE_PLAN_BUDGET_MS);
   const created: Record<Source, number> = { inquiry: 0, registry_job: 0 };
-  let pending: Source[] = [...SOURCES];
+  // どちらから始めるかは実行ごとに入れ替える(timer は2分ごと=始めた時刻の2分刻みの偶奇で決める)。
+  // 片方の溜まりで毎回もう片方の番が来ない、を防ぐ(@codex #472 P2)。
+  const first = Math.floor(startedAtMs / 120_000) % SOURCES.length;
+  let pending: Source[] = [...SOURCES.slice(first), ...SOURCES.slice(0, first)];
   while (pending.length > 0 && Date.now() < sourceDeadlineMs) {
     const next: Source[] = [];
     for (const s of pending) {
@@ -42,7 +53,9 @@ export async function runPushNotifications(now: Date, sender: PushSender): Promi
   }
   const inquiry = created.inquiry;
   const registryJob = created.registry_job;
-  const nextAction = pastDeadline() ? 0 : await planNextActionDeliveries(now, { deadlineMs });
+  // 次回対応の記録づくりは始めから120秒まで(送信に30秒以上を残す)。
+  const nextActionDeadlineMs = Math.min(deadlineMs, startedAtMs + NEXT_ACTION_PLAN_BUDGET_MS);
+  const nextAction = Date.now() >= nextActionDeadlineMs ? 0 : await planNextActionDeliveries(now, { deadlineMs: nextActionDeadlineMs });
   const sent = await sendDueDeliveries(now, sender, { startedAtMs });
   // 古い記録の片付けは持ち時間の内側で、1回に1,000件まで(残りは次の実行で・@codex #472 P2)。
   const purged = pastDeadline() ? { deliveries: 0, events: 0 } : await purgeOldRecords(now);
