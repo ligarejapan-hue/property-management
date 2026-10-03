@@ -24,6 +24,8 @@ export interface BatchCsvSource {
   properties: Map<string, PropertyStateForCheck & { address?: string | null; propertyType?: string }>;
   importSourceMap: Map<string, string>;
   ownerDisplayConfig: OwnerDisplayConfig;
+  /** 1通ごとの配信停止URL。省略(追跡URL未設定)なら列は空。 */
+  unsubscribeUrlFor?: (itemId: string) => string;
 }
 
 type OwnerWithId = DmRowPropertyOwner & { owner: { id: string } };
@@ -39,17 +41,17 @@ export function buildBatchCsv(src: BatchCsvSource): string {
       saved.has(po.owner.id),
     );
     if (group.length === 0) continue;
-    rows.push(
-      buildDmRow(
-        {
-          address: property.address ?? "",
-          propertyType: property.propertyType ?? "unknown",
-        },
-        group,
-        src.ownerDisplayConfig,
-        src.importSourceMap.get(it.propertyId) ?? "",
-      ),
+    const row: Record<string, string> = buildDmRow(
+      {
+        address: property.address ?? "",
+        propertyType: property.propertyType ?? "unknown",
+      },
+      group,
+      src.ownerDisplayConfig,
+      src.importSourceMap.get(it.propertyId) ?? "",
     );
+    row["配信停止URL"] = src.unsubscribeUrlFor ? src.unsubscribeUrlFor(it.id) : "";
+    rows.push(row);
   }
   const sanitizedRows = rows.map((row) =>
     Object.fromEntries(

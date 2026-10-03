@@ -23,6 +23,9 @@ import {
   type PropertyStateForCheck,
 } from "@/lib/dm-batch/eligibility";
 import { buildBatchCsv, sha256Hex } from "@/lib/dm-batch/csv";
+import { buildBatchItemUnsubscribeUrl } from "@/lib/dm-batch/unsubscribe-token";
+import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
+import { deriveUnsubscribeKey } from "@/lib/sale-dm-letter/unsubscribe-token";
 import {
   SELF_EXCLUDING_REACTION_VALUES,
   getResendCooldownDays,
@@ -166,8 +169,9 @@ export async function GET(
           downloaded_at: Date | null;
           csv_digest: string | null;
           resend_filter_applied: boolean;
+          unsubscribe_base_url?: string | null;
         }>
-      >`SELECT id, downloaded_at, csv_digest, resend_filter_applied FROM dm_export_batches WHERE id = ${batchId}::uuid FOR UPDATE`;
+      >`SELECT id, downloaded_at, csv_digest, resend_filter_applied, unsubscribe_base_url FROM dm_export_batches WHERE id = ${batchId}::uuid FOR UPDATE`;
       if (batchRows.length === 0) {
         throw new ApiError(404, "出力の控えが見つかりません", "NOT_FOUND");
       }
@@ -294,6 +298,28 @@ export async function GET(
       }
 
       const isFirst = batchRow.downloaded_at == null;
+
+      // 配信停止URLの頭は初回で固定する(設計 2026-10-03 §4)。初回は今の追跡URL、再DLは固定値
+      // (設定画面で追跡URLを変えても、配ったCSVと同じ内容を出す=digest 一致を守る)。
+      let unsubscribeBaseUrl: string | null = batchRow.unsubscribe_base_url ?? null;
+      if (isFirst) {
+        try {
+          unsubscribeBaseUrl = (await loadSaleDmPublicPageConfig()).trackingBaseUrl ?? null;
+        } catch {
+          unsubscribeBaseUrl = null;
+        }
+      }
+      let unsubscribeKey: Buffer | null = null;
+      try {
+        unsubscribeKey = deriveUnsubscribeKey();
+      } catch {
+        unsubscribeKey = null; // NEXTAUTH_SECRET 不在=アプリ自体が動かない。列は空(安全側)。
+      }
+      const unsubscribeUrlFor =
+        unsubscribeBaseUrl && unsubscribeKey
+          ? (itemId: string) =>
+              buildBatchItemUnsubscribeUrl(itemId, unsubscribeBaseUrl as string, unsubscribeKey as Buffer)
+          : undefined;
       if (elig.prunedItemIds.length > 0) {
         if (!isFirst) {
           // DL後に owner/物件が消えた=同一CSVを再生成できない(凍結済み集合の変質)。
@@ -327,6 +353,7 @@ export async function GET(
         properties,
         importSourceMap,
         ownerDisplayConfig,
+        unsubscribeUrlFor,
       });
       const digest = sha256Hex(csv);
 
@@ -337,6 +364,7 @@ export async function GET(
             downloadedAt: new Date(),
             csvDigest: digest,
             rowCount: survive.length,
+            unsubscribeBaseUrl,
           },
         });
       } else if (digest !== batchRow.csv_digest) {

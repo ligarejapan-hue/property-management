@@ -8,7 +8,7 @@
  *  - 再試行GET: digest 一致のみ配信・不一致 409・資格検査は毎回
  *  - 監査 property_dm_csv_export(成功時のみ・非PII)
  */
-import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 
 vi.mock("next/server", () => {
   class MockNextRequest extends Request {}
@@ -49,6 +49,16 @@ vi.mock("@/lib/api-helpers", () => {
 });
 
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+// 配信停止URLの頭(追跡URL)。既定は未設定=列は空(既存のテストの期待を変えない)。
+vi.mock("@/lib/sale-dm-letter/config-store", () => ({
+  loadSaleDmPublicPageConfig: vi.fn(async () => ({
+    senderName: null,
+    senderContact: null,
+    trackingBaseUrl: undefined,
+    lpPublicEnabled: true,
+    privacyText: null,
+  })),
+}));
 
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
@@ -70,6 +80,8 @@ import {
   getOwnerDisplayConfig,
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
+import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
+import { sha256Hex } from "@/lib/dm-batch/csv";
 import { GET } from "../../app/api/properties/dm-batches/[id]/csv/route";
 
 const pm = prisma as unknown as {
@@ -434,6 +446,65 @@ describe("GET /api/properties/dm-batches/[id]/csv", () => {
     const res = await GET(makeRequest(), ctx);
     expect(res.status).toBe(409);
     expect(pm.dmExportBatchItem.deleteMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/properties/dm-batches/[id]/csv: 配信停止URLの列", () => {
+  const ITEM_UUID = "0b7e3c1a-5d2f-4a6b-9c8d-1e2f3a4b5c6d";
+  const loadPublicCfg = vi.mocked(loadSaleDmPublicPageConfig);
+  const cfg = (trackingBaseUrl: string | undefined) => ({
+    senderName: null,
+    senderContact: null,
+    trackingBaseUrl,
+    lpPublicEnabled: true,
+    privacyText: null,
+  });
+  let savedSecret: string | undefined;
+
+  beforeEach(() => {
+    savedSecret = process.env.NEXTAUTH_SECRET;
+    process.env.NEXTAUTH_SECRET = "test-secret-batch-csv";
+    pm.dmExportBatchItem.findMany.mockResolvedValue([makeItemRow({ id: ITEM_UUID })]);
+  });
+  afterEach(() => {
+    if (savedSecret === undefined) delete process.env.NEXTAUTH_SECRET;
+    else process.env.NEXTAUTH_SECRET = savedSecret;
+  });
+
+  it("初回ダウンロードで追跡URLを控えに固定し、CSV末尾に配信停止URLが入る", async () => {
+    loadPublicCfg.mockResolvedValue(cfg("https://app.example.com"));
+    const res = await GET(makeRequest(), ctx);
+    expect(res.status).toBe(200);
+    const lines = (await readCsv(res)).split("\r\n");
+    expect(lines[0].endsWith("配信停止URL")).toBe(true);
+    expect(lines[1]).toMatch(/,https:\/\/app\.example\.com\/u\/c[0-9a-f]{32}\.[A-Za-z0-9_-]{22}$/);
+    expect(pm.dmExportBatch.update.mock.calls[0][0].data.unsubscribeBaseUrl).toBe("https://app.example.com");
+  });
+
+  it("再ダウンロードは控えに固定した追跡URLで組む(設定が変わっても同じCSV=digest一致で200)", async () => {
+    loadPublicCfg.mockResolvedValue(cfg("https://app.example.com"));
+    const first = await readCsv(await GET(makeRequest(), ctx));
+    armQueryRaw({
+      id: BATCH_ID,
+      downloaded_at: new Date(),
+      csv_digest: sha256Hex(first),
+      resend_filter_applied: false,
+      unsubscribe_base_url: "https://app.example.com",
+    });
+    loadPublicCfg.mockResolvedValue(cfg("https://changed.example.com"));
+    const res = await GET(makeRequest(), ctx);
+    expect(res.status).toBe(200);
+    const again = await readCsv(res);
+    expect(again).toBe(first);
+    expect(again).not.toContain("changed.example.com");
+  });
+
+  it("初回に追跡URLが未設定なら列は空・固定値も null", async () => {
+    loadPublicCfg.mockResolvedValue(cfg(undefined));
+    const res = await GET(makeRequest(), ctx);
+    const lines = (await readCsv(res)).split("\r\n");
+    expect(lines[1].endsWith(",")).toBe(true);
+    expect(pm.dmExportBatch.update.mock.calls[0][0].data.unsubscribeBaseUrl).toBeNull();
   });
 });
 

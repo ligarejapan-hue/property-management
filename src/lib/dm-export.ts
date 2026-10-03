@@ -47,6 +47,9 @@ export const DM_EXPORT_HEADERS = [
   "DM判断",
   "送付先所有者名一覧",
   "共有者数",
+  // 1通ごとの配信停止URL(設計 2026-10-03)。宛名CSVの控えの行ごとに buildBatchCsv が入れる
+  // (buildDmRow は物件と所有者しか知らないので空で返す)。差し込みは列名なので末尾に足しても雛形は壊れない。
+  "配信停止URL",
 ] as const;
 
 // 安全上限（最終 CSV 行数 = グループ（送付先）行数で判定する）。超過時は切り捨てず 400 にする。
@@ -250,5 +253,6 @@ export function buildDmRow(
     DM判断: DM_STATUS_LABELS["send"] ?? "送付可",
     送付先所有者名一覧: names.join("、"),
     共有者数: String(group.length),
+    配信停止URL: "",
   };
 }

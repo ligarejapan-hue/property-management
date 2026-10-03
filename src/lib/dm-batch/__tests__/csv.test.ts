@@ -84,6 +84,26 @@ describe("buildBatchCsv / sha256Hex", () => {
   });
 });
 
+describe("配信停止URLの列", () => {
+  it("見出しの末尾が「配信停止URL」で、既存の見出しの並びは変わらない", async () => {
+    const { DM_EXPORT_HEADERS } = await import("@/lib/dm-export");
+    expect(DM_EXPORT_HEADERS[DM_EXPORT_HEADERS.length - 1]).toBe("配信停止URL");
+    expect(DM_EXPORT_HEADERS.slice(0, 13)).toEqual([
+      "管理ID", "物件住所", "所有者名", "敬称", "郵便番号", "所有者住所", "物件種別",
+      "所有者名カナ", "代表者", "続柄", "DM判断", "送付先所有者名一覧", "共有者数",
+    ]);
+  });
+
+  it("unsubscribeUrlFor を渡すと行ごとのURL、渡さなければ空", () => {
+    const withUrl = buildBatchCsv(source({ unsubscribeUrlFor: (id) => `https://x.example/u/${id}` }));
+    const rows = withUrl.trim().split("\r\n");
+    expect(rows[0].endsWith("配信停止URL")).toBe(true);
+    expect(rows[1].endsWith(",https://x.example/u/i1")).toBe(true);
+    const without = buildBatchCsv(source());
+    expect(without.trim().split("\r\n")[1].endsWith(",")).toBe(true);
+  });
+});
+
 describe("sortUniqueIds", () => {
   it("重複排除+昇順", () => {
     expect(sortUniqueIds(["b", "a", "b", "c"])).toEqual(["a", "b", "c"]);
