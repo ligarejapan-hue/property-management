@@ -29,6 +29,8 @@ import {
   nextActionRefKey,
   SEND_TX_MAX_WAIT_MS,
   SEND_TX_TIMEOUT_MS,
+  SOURCE_EVENTS_PER_TX,
+  SOURCE_PLAN_TX_TIMEOUT_MS,
   type DeliveryKind,
   type Source,
 } from "./rules";
@@ -201,7 +203,13 @@ export class MissingSourceCursorError extends Error {
   }
 }
 
-export async function planSourceDeliveries(source: Source, now: Date): Promise<number> {
+/**
+ * 1回分(1トランザクション)の記録づくり。新しく見つけた出来事は `SOURCE_EVENTS_PER_TX` 件までにし、
+ * 残りがあれば `more: true`(呼び出し側が続けて呼ぶ)。
+ * 処理する順は「読み直し範囲(カーソルより前=古い)→ カーソルより後」。カーソルは、処理し終えた
+ * 「カーソルより後」の行までしか進めない(途中で打ち切っても、まだの出来事が読み直し範囲から外れない)。
+ */
+export async function planSourceDeliveries(source: Source, now: Date): Promise<{ created: number; more: boolean }> {
   return prisma.$transaction(async (tx) => {
     // カーソルの行を押さえる(同時に2つの実行が同じ出来事を数えない)。
     const locked = await tx.$queryRaw<Array<{ source: string }>>`
@@ -217,26 +225,41 @@ export async function planSourceDeliveries(source: Source, now: Date): Promise<n
     const fetchPage = fetcher(tx, source);
     const after = await fetchPage(afterCursorWhere(field, c), AFTER_CURSOR_LIMIT);
     const reread = await readAll(fetchPage, field, rereadWhere(field, c));
-    const ids = [...new Set([...after, ...reread].map((r) => r.id))];
+    // 読み直し範囲(古い)を先に、カーソルより後をあとに(どちらも時刻と ID の昇順)。
+    const ordered: EventRow[] = [];
+    const seenIds = new Set<string>();
+    for (const r of [...reread, ...after]) {
+      if (seenIds.has(r.id)) continue;
+      seenIds.add(r.id);
+      ordered.push(r);
+    }
+    // 初めて見つけた出来事だけ(すでに見つけた出来事は、あとから結び付いた端末へ送らない・§7.3)。
+    const known = ordered.length
+      ? await tx.notificationSourceEvent.findMany({ where: { source, eventId: { in: ordered.map((r) => r.id) } }, select: { eventId: true } })
+      : [];
+    const knownSet = new Set(known.map((k) => k.eventId));
+    const freshRows = ordered.filter((r) => !knownSet.has(r.id));
+    const take = freshRows.slice(0, SOURCE_EVENTS_PER_TX);
+    const more = freshRows.length > take.length;
 
     let created = 0;
-    if (ids.length > 0) {
-      // 初めて見つけた出来事だけ(すでに見つけた出来事は、あとから結び付いた端末へ送らない・§7.3)。
-      const known = await tx.notificationSourceEvent.findMany({ where: { source, eventId: { in: ids } }, select: { eventId: true } });
-      const knownSet = new Set(known.map((k) => k.eventId));
-      const fresh = ids.filter((id) => !knownSet.has(id));
-      if (fresh.length > 0) {
-        await tx.notificationSourceEvent.createMany({
-          data: fresh.map((eventId) => ({ source, eventId, firstSeenAt: seenAt })),
-          skipDuplicates: true,
-        });
-        created = source === "inquiry" ? await planInquiries(tx, fresh, seenAt) : await planRegistryJobs(tx, fresh, seenAt);
-      }
+    if (take.length > 0) {
+      const fresh = take.map((r) => r.id);
+      await tx.notificationSourceEvent.createMany({
+        data: fresh.map((eventId) => ({ source, eventId, firstSeenAt: seenAt })),
+        skipDuplicates: true,
+      });
+      created = source === "inquiry" ? await planInquiries(tx, fresh, seenAt) : await planRegistryJobs(tx, fresh, seenAt);
     }
-    const next = advanceCursor(c, after.map((r) => ({ t: r.t, i: r.id })));
+    // カーソルは「カーソルより後」のうち、まだ処理していない新しい出来事の手前までだけ進める。
+    const firstPending = more ? freshRows[take.length] : null;
+    const pendingIdx = firstPending ? after.findIndex((r) => r.id === firstPending.id) : -1;
+    const done = firstPending ? (pendingIdx < 0 ? [] : after.slice(0, pendingIdx)) : after;
+    const next = advanceCursor(c, done.map((r) => ({ t: r.t, i: r.id })));
     await tx.notificationSourceCursor.update({ where: { source }, data: { cursorT: next.t, cursorId: next.i, updatedAt: now } });
-    return created;
-  }, TX_OPTS);
+    // カーソルより後が上限まで埋まっていたら、その先にもまだある(続けて読む)。
+    return { created, more: more || after.length >= AFTER_CURSOR_LIMIT };
+  }, { timeout: SOURCE_PLAN_TX_TIMEOUT_MS, maxWait: SEND_TX_MAX_WAIT_MS });
 }
 
 /** 今の時点で結び付いている端末(結び付けが今以前)。 */

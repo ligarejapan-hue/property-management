@@ -108,11 +108,7 @@ export async function sendDueDeliveries(
     let result: SendResult;
     try {
       result = await sendOne(d.id, now, sender);
-    } catch (e) {
-      if (e instanceof PreSendTooSlow) {
-        stats.busy += 1;
-        continue;
-      }
+    } catch {
       // 1通の DB の失敗で全体を止めない(記録は残り、次の実行で送る)。中身はログに出さない。
       result = "skipped";
     }
@@ -121,73 +117,120 @@ export async function sendDueDeliveries(
   return stats;
 }
 
-export function sendOne(
+/**
+ * 1通を送る。2つのトランザクションに分ける(@codex #472 P2):
+ *  1. 取り合い(sending・回数+1)を**先に確定**させる。送ったあとに処理が落ちても、取り合いと回数が
+ *     巻き戻らない(=15分の残骸扱い・最大3回が効く。すぐにもう一度送らない)。
+ *  2. 端末の行を SKIP LOCKED で押さえ、利用者・結び付け・期限を**もう一度**確かめてから送る
+ *     (1 と 2 の間に付け替えが起きても前の人宛てを送らない)。送信は行を押さえたまま行う。
+ * 2 で端末を押さえられなかった・送る前が長引いたときは送っていないので、取り合いを戻す
+ * (failed・回数を戻す=10分あけて次の実行で)。
+ */
+export async function sendOne(
   deliveryId: string,
   now: Date,
   sender: PushSender,
   opts: { presendLimitMs?: number } = {},
 ): Promise<SendResult> {
   const presendLimitMs = opts.presendLimitMs ?? SEND_PRESEND_LIMIT_MS;
-  return prisma.$transaction(async (tx) => {
-    const txStartedMs = Date.now();
+  // 期限の確かめは、実行の始めの時刻ではなく今の時刻で(送信が続いて実行が長引いても遅れない)。
+  const checkAt = new Date(Math.max(now.getTime(), Date.now()));
+
+  // ---- 1. 取り合いを確定させる ----
+  const claim = await prisma.$transaction(async (tx) => {
     const d = await tx.notificationDelivery.findUnique({
       where: { id: deliveryId },
-      select: { id: true, userId: true, subscriptionId: true, bindingId: true, kind: true, refs: { select: { id: true, refKey: true } } },
+      select: { id: true, userId: true, subscriptionId: true, bindingId: true, status: true, claimedAt: true },
     });
-    if (!d) return "skipped";
-    const s = await lockSubscription(tx, d.subscriptionId);
-    if (!s) return "busy";
+    if (!d) return { result: "skipped" as const };
+    const s = await tx.pushSubscription.findUnique({ where: { id: d.subscriptionId } });
     const claimable = { AND: [{ id: d.id }, claimableWhere(now)] };
-    // 期限の確かめは、実行の始めの時刻ではなく今の時刻で(送信が続いて実行が長引いても遅れない)。
-    const checkAt = new Date(Math.max(now.getTime(), Date.now()));
-
     // 結び付けが変わった・無効化・期限切れの端末には送らない(前の人宛てを次の人に送らない・§7.5)。
-    if (s.userId !== d.userId || s.bindingId !== d.bindingId || s.revokedAt !== null || s.expiresAt <= checkAt) {
+    if (!s || s.userId !== d.userId || s.bindingId !== d.bindingId || s.revokedAt !== null || s.expiresAt <= checkAt) {
       const c = await tx.notificationDelivery.updateMany({ where: claimable, data: { status: "cancelled", lastErrorCode: "binding_changed" } });
-      return c.count > 0 ? "cancelled" : "skipped";
+      return { result: c.count > 0 ? ("cancelled" as const) : ("skipped" as const) };
     }
     // 許可リストを後から狭めた場合や、確認の導入前の行に備えて送信時にも確かめる(§7.2)。
     if (!checkPushEndpoint(s.endpoint).ok) {
       await tx.pushSubscription.update({ where: { id: s.id }, data: { revokedAt: now, revokedReason: "endpoint_not_allowed" } });
       const c = await tx.notificationDelivery.updateMany({ where: claimable, data: { status: "cancelled", lastErrorCode: "endpoint_not_allowed" } });
-      return c.count > 0 ? "cancelled" : "skipped";
+      return { result: c.count > 0 ? ("cancelled" as const) : ("skipped" as const) };
     }
-
     // 取り合い: 取れた処理だけが送る。取ったときの値を覚えて、結果の書き込みの条件にする。
-    const claimedAt = checkAt;
+    // 読んだときの状態のままのときだけ取る(戻すときに元の状態へ正しく戻せるように)。
     const claimed = await tx.notificationDelivery.updateMany({
-      where: claimable,
-      data: { status: "sending", claimedAt, attempts: { increment: 1 } },
+      where: { AND: [claimable, { status: d.status, claimedAt: d.claimedAt }] },
+      data: { status: "sending", claimedAt: checkAt, attempts: { increment: 1 } },
     });
-    if (claimed.count === 0) return "skipped";
-    const mine = { id: d.id, status: "sending", claimedAt };
-
-    // 確かめ直しも送る時刻で(実行が長引いて回の境目や日付をまたいでも、古い回・古い件数を送らない・@codex #472 P2)。
-    const checked = await recheck(tx, d, s.bindingId, checkAt);
-    if (checked.drop.length > 0) await tx.notificationDeliveryRef.deleteMany({ where: { id: { in: checked.drop } } });
-    if (!checked.payload) {
-      await tx.notificationDelivery.updateMany({ where: mine, data: { status: "cancelled", lastErrorCode: "nothing_to_send" } });
-      return "cancelled";
-    }
-
-    // ここまでに時間を使いすぎていたら送らずに巻き戻す(取り合いも消える=次の実行でやり直す)。
-    if (Date.now() - txStartedMs > presendLimitMs) throw new PreSendTooSlow();
-    const outcome = await sender({ endpoint: s.endpoint, p256dh: s.p256dh, auth: s.auth }, checked.payload);
-    if (outcome.ok) {
-      await tx.notificationDelivery.updateMany({ where: mine, data: { status: "sent", sentAt: new Date(), lastErrorCode: null } });
-      await tx.pushSubscription.update({ where: { id: s.id }, data: { lastSuccessAt: new Date(), failureCount: 0 } });
-      return "sent";
-    }
-    if (outcome.gone) {
-      // 中継サービスが宛先は無効と返した(404/410)。登録を無効にし、同じ宛先での再有効化は断る(4a)。
-      await tx.notificationDelivery.updateMany({ where: mine, data: { status: "gone", lastErrorCode: outcome.code } });
-      await tx.pushSubscription.update({ where: { id: s.id }, data: { revokedAt: new Date(), revokedReason: "gone" } });
-      return "gone";
-    }
-    await tx.notificationDelivery.updateMany({ where: mine, data: { status: "failed", lastErrorCode: outcome.code } });
-    await tx.pushSubscription.update({ where: { id: s.id }, data: { failureCount: { increment: 1 } } });
-    return "failed";
+    return claimed.count === 0
+      ? { result: "skipped" as const }
+      : { result: "claimed" as const, prev: { status: d.status, claimedAt: d.claimedAt } };
   }, { timeout: SEND_TX_TIMEOUT_MS, maxWait: SEND_TX_MAX_WAIT_MS });
+  if (claim.result !== "claimed") return claim.result;
+  const mine = { id: deliveryId, status: "sending", claimedAt: checkAt };
+
+  // 送っていない(端末を押さえられない・送る前が長引いた)ときは取り合いを元の状態に戻す(回数も戻す)。
+  const prev = claim.prev;
+  const releaseClaim = () =>
+    prisma.notificationDelivery.updateMany({ where: mine, data: { status: prev.status, claimedAt: prev.claimedAt, attempts: { decrement: 1 } } });
+
+  // ---- 2. 端末を押さえて、確かめ直してから送る ----
+  let result: SendResult | "busy_release" | "slow_release";
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      const txStartedMs = Date.now();
+      const d = await tx.notificationDelivery.findUnique({
+        where: { id: deliveryId },
+        select: { id: true, userId: true, subscriptionId: true, bindingId: true, kind: true, status: true, claimedAt: true, refs: { select: { id: true, refKey: true } } },
+      });
+      // 取り直された(自分の取り合いでなくなった)なら何もしない。
+      if (!d || d.status !== "sending" || d.claimedAt?.getTime() !== checkAt.getTime()) return "skipped" as const;
+      const s = await lockSubscription(tx, d.subscriptionId);
+      if (!s) return "busy_release" as const;
+      const at = new Date(Math.max(checkAt.getTime(), Date.now()));
+      if (s.userId !== d.userId || s.bindingId !== d.bindingId || s.revokedAt !== null || s.expiresAt <= at || !checkPushEndpoint(s.endpoint).ok) {
+        await tx.notificationDelivery.updateMany({ where: mine, data: { status: "cancelled", lastErrorCode: "binding_changed" } });
+        return "cancelled" as const;
+      }
+      // 確かめ直しも送る時刻で(実行が長引いて回の境目や日付をまたいでも、古い回・古い件数を送らない)。
+      const checked = await recheck(tx, d, s.bindingId, at);
+      if (checked.drop.length > 0) await tx.notificationDeliveryRef.deleteMany({ where: { id: { in: checked.drop } } });
+      if (!checked.payload) {
+        await tx.notificationDelivery.updateMany({ where: mine, data: { status: "cancelled", lastErrorCode: "nothing_to_send" } });
+        return "cancelled" as const;
+      }
+      // ここまでに時間を使いすぎていたら送らずに巻き戻す(結果を書く時間を残す)。
+      if (Date.now() - txStartedMs > presendLimitMs) throw new PreSendTooSlow();
+      const outcome = await sender({ endpoint: s.endpoint, p256dh: s.p256dh, auth: s.auth }, checked.payload);
+      if (outcome.ok) {
+        await tx.notificationDelivery.updateMany({ where: mine, data: { status: "sent", sentAt: new Date(), lastErrorCode: null } });
+        await tx.pushSubscription.update({ where: { id: s.id }, data: { lastSuccessAt: new Date(), failureCount: 0 } });
+        return "sent" as const;
+      }
+      if (outcome.gone) {
+        // 中継サービスが宛先は無効と返した(404/410)。登録を無効にし、同じ宛先での再有効化は断る(4a)。
+        await tx.notificationDelivery.updateMany({ where: mine, data: { status: "gone", lastErrorCode: outcome.code } });
+        await tx.pushSubscription.update({ where: { id: s.id }, data: { revokedAt: new Date(), revokedReason: "gone" } });
+        return "gone" as const;
+      }
+      await tx.notificationDelivery.updateMany({ where: mine, data: { status: "failed", lastErrorCode: outcome.code } });
+      await tx.pushSubscription.update({ where: { id: s.id }, data: { failureCount: { increment: 1 } } });
+      return "failed" as const;
+    }, { timeout: SEND_TX_TIMEOUT_MS, maxWait: SEND_TX_MAX_WAIT_MS });
+  } catch (e) {
+    if (e instanceof PreSendTooSlow) result = "slow_release";
+    // それ以外(DB の失敗など)は送ったかどうか分からないので、取り合いは残す(15分の残骸扱い・回数は数えたまま)。
+    else throw e;
+  }
+  if (result === "busy_release") {
+    await releaseClaim();
+    return "busy";
+  }
+  if (result === "slow_release") {
+    await releaseClaim();
+    return "busy";
+  }
+  return result;
 }
 
 interface Recheck {
