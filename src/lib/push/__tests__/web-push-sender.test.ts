@@ -148,6 +148,14 @@ describe("送信(createWebPushSender)", () => {
     expect(JSON.stringify(r)).not.toContain("secret-response-body");
     expect(JSON.stringify(r)).not.toContain("fcm.googleapis.com");
   });
+  it("組み立て(暗号化)で失敗したら送らず、端末の登録が壊れている扱い(gone)にする", async () => {
+    generateRequestDetails.mockImplementation(() => {
+      throw new Error("bad key");
+    });
+    const r = await createWebPushSender(VAPID, localRequest)(TARGET, PAYLOAD);
+    expect(r).toEqual({ ok: false, gone: true, code: "invalid_subscription" });
+    expect(received).toHaveLength(0);
+  });
   it("500 は送り直し(gone にしない)", async () => {
     generateRequestDetails.mockReturnValue(details());
     mode.status = 500;

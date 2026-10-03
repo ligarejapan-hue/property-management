@@ -6,9 +6,10 @@ Description=Run web push notifications every 2 minutes
 
 [Timer]
 OnBootSec=3min
-OnUnitActiveSec=2min
+# ⚠前回が**終わってから**2分(OnUnitInactiveSec)。OnUnitActiveSec(始まりから)だと、1回が2分を超えたとき
+#   次の起動が「実行中なので見送り」になり、その後 timer が二度と動かなくなる(@codex #472 P1)。
+OnUnitInactiveSec=2min
 AccuracySec=15s
-Persistent=true
 Unit=pm-push-notify.service
 
 [Install]

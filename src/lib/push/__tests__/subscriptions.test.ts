@@ -16,7 +16,7 @@ vi.mock("@/lib/prisma", () => {
 });
 
 import prismaMock from "@/lib/prisma";
-import { extendPushSubscription, revokePushSubscription, upsertPushSubscription, vapidPublicKey } from "../subscriptions";
+import { extendPushSubscription, isValidSubscriptionKeys, revokePushSubscription, upsertPushSubscription, vapidPublicKey } from "../subscriptions";
 import { SHARED_TTL_MS } from "../binding";
 
 type Fn = ReturnType<typeof vi.fn>;
@@ -28,13 +28,25 @@ const pm = prismaMock as never as {
 const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const EP = "https://fcm.googleapis.com/fcm/send/token-xyz";
-const KEYS = { p256dh: "B".repeat(87), auth: "a".repeat(22) };
+const KEYS = { p256dh: "BOKP86iRrT4RDIC4MTCWRE1ILIQ5FhmBF1SAklaX0SRrzNrt9KdHvCuq-YF-slJ0UJn1Koqh0bjqPtO9mUWxjms", auth: "eh3yijm3LYC3dTqUVPZFbw" };
 const NOW = new Date("2026-10-03T03:00:00Z");
 
 beforeEach(() => {
   vi.clearAllMocks();
   pm.__tx.$queryRaw.mockResolvedValue([]);
   pm.$transaction.mockImplementation(async (fn: (t: unknown) => unknown) => fn(pm.__tx));
+});
+
+describe("端末の鍵の形", () => {
+  it("P-256 の曲線上の点(65バイト)と16バイトの auth だけ受け付ける", () => {
+    expect(isValidSubscriptionKeys(KEYS.p256dh, KEYS.auth)).toBe(true);
+    // 長さと先頭は合っているが曲線上にない点
+    const offCurve = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString("base64url");
+    expect(isValidSubscriptionKeys(offCurve, KEYS.auth)).toBe(false);
+    expect(isValidSubscriptionKeys("B".repeat(87), KEYS.auth)).toBe(false);
+    expect(isValidSubscriptionKeys(KEYS.p256dh, Buffer.alloc(15).toString("base64url"))).toBe(false);
+    expect(isValidSubscriptionKeys(KEYS.p256dh, 1)).toBe(false);
+  });
 });
 
 describe("端末の登録・付け替え", () => {

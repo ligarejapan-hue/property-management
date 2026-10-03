@@ -111,8 +111,9 @@ export function sendRequest(details: RequestDetails, timeoutMs: number, request:
 export function createWebPushSender(vapid: VapidConfig, request: RequestFn = https.request): PushSender {
   return async (target, payload) => {
     if (!checkPushEndpoint(target.endpoint).ok) return { ok: false, gone: false, code: "endpoint_not_allowed" };
+    let details: RequestDetails;
     try {
-      const details = webpush.generateRequestDetails(
+      details = webpush.generateRequestDetails(
         { endpoint: target.endpoint, keys: { p256dh: target.p256dh, auth: target.auth } },
         JSON.stringify(payload),
         {
@@ -121,6 +122,12 @@ export function createWebPushSender(vapid: VapidConfig, request: RequestFn = htt
           urgency: "normal",
         },
       ) as unknown as RequestDetails;
+    } catch {
+      // 送る前の組み立て(暗号化)で失敗=端末の鍵が壊れている。送り直しても直らないので、宛先が無効と
+      // 同じ扱いにする(登録を無効にし、画面は次に開いたとき購読を作り直す・@codex #472 P2)。
+      return { ok: false, gone: true, code: "invalid_subscription" };
+    }
+    try {
       // 送る先は web-push が組み立てた URL。念のためもう一度許可リストで確かめる。
       if (!checkPushEndpoint(details.endpoint).ok) return { ok: false, gone: false, code: "endpoint_not_allowed" };
       await sendRequest(details, SEND_TIMEOUT_MS, request);

@@ -6,7 +6,7 @@
  *   順に処理されるよう、行を FOR UPDATE で押さえてから判断する。
  * - ⚠endpoint・鍵は戻り値・ログ・監査ログに出さない。戻すのは結び付け(binding_id)と範囲・期限だけ。
  */
-import { randomUUID } from "crypto";
+import { ECDH, randomUUID } from "crypto";
 import { ApiError } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
 import { checkPushEndpoint } from "./endpoint";
@@ -34,8 +34,24 @@ export interface SubscriptionResult {
   rebound: boolean;
 }
 
+/**
+ * 端末の鍵の形を確かめる: p256dh = P-256 の曲線上の点(非圧縮65バイト)・auth = 16バイト。
+ * 形だけ合っていて中身が壊れた鍵を受け付けると、送るたびに暗号化で失敗して送り直しを使い切る(@codex #472 P2)。
+ */
+export function isValidSubscriptionKeys(p256dh: unknown, auth: unknown): boolean {
+  if (typeof p256dh !== "string" || !KEY_RE.test(p256dh) || typeof auth !== "string" || !KEY_RE.test(auth)) return false;
+  const pub = Buffer.from(p256dh, "base64url");
+  if (pub.length !== 65 || pub[0] !== 0x04 || Buffer.from(auth, "base64url").length !== 16) return false;
+  try {
+    ECDH.convertKey(pub, "prime256v1", undefined, undefined, "uncompressed");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function assertKeys(p256dh: unknown, auth: unknown): asserts p256dh is string {
-  if (typeof p256dh !== "string" || !KEY_RE.test(p256dh) || typeof auth !== "string" || !KEY_RE.test(auth)) {
+  if (!isValidSubscriptionKeys(p256dh, auth)) {
     throw new ApiError(422, "通知の登録情報が正しくありません", "subscription_invalid");
   }
 }
