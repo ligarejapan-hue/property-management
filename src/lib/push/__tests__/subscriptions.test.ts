@@ -147,10 +147,13 @@ describe("延長・解除", () => {
 });
 
 describe("VAPID の鍵", () => {
-  it("3つそろわなければ使えない", () => {
-    const pub = "B" + "x".repeat(86);
-    expect(vapidPublicKey({ VAPID_PUBLIC_KEY: pub, VAPID_PRIVATE_KEY: "p", VAPID_SUBJECT: "mailto:a@b" } as never)).toBe(pub);
-    expect(vapidPublicKey({ VAPID_PUBLIC_KEY: pub, VAPID_PRIVATE_KEY: "p" } as never)).toBeNull();
+  it("送信と同じ確かめを通る鍵だけ(3つそろう・組になる・連絡先の形)", () => {
+    const pub = "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U";
+    const priv = "UUxI4O8-FbRouAevSmBQ6o18hgE4nSG3qwvJTfKc-ls";
+    expect(vapidPublicKey({ VAPID_PUBLIC_KEY: pub, VAPID_PRIVATE_KEY: priv, VAPID_SUBJECT: "mailto:a@b.co" } as never)).toBe(pub);
+    expect(vapidPublicKey({ VAPID_PUBLIC_KEY: pub, VAPID_PRIVATE_KEY: priv } as never)).toBeNull();
+    expect(vapidPublicKey({ VAPID_PUBLIC_KEY: pub, VAPID_PRIVATE_KEY: priv, VAPID_SUBJECT: "https://" } as never)).toBeNull();
+    expect(vapidPublicKey({ VAPID_PUBLIC_KEY: pub, VAPID_PRIVATE_KEY: Buffer.alloc(32, 7).toString("base64url"), VAPID_SUBJECT: "mailto:a@b.co" } as never)).toBeNull();
     expect(vapidPublicKey({} as never)).toBeNull();
   });
 });

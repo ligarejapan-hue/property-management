@@ -10,6 +10,7 @@ import { ECDH, randomUUID } from "crypto";
 import { ApiError } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
 import { checkPushEndpoint } from "./endpoint";
+import { vapidConfig } from "./deliveries/web-push-sender";
 import { SHARED_TTL_MS, decideBinding, type DeviceScope, type ExistingSubscription } from "./binding";
 
 /** 付け替えのトランザクションの時間制限(送信のトランザクション 20秒を待てる長さ)。 */
@@ -181,12 +182,10 @@ export async function revokePushSubscription(
   return res.count > 0;
 }
 
-/** VAPID の公開鍵。3つそろっていなければ null(プッシュは使えない=画面内のお知らせだけ)。 */
+/**
+ * VAPID の公開鍵。送信(4b)と**同じ確かめ**(3つそろう・鍵の形・組・連絡先)を通らなければ null
+ * (プッシュは使えない=画面内のお知らせだけ)。送れない設定のまま登録だけ受け付けない(@codex #472 P2)。
+ */
 export function vapidPublicKey(env: NodeJS.ProcessEnv = process.env): string | null {
-  const pub = env.VAPID_PUBLIC_KEY?.trim();
-  const priv = env.VAPID_PRIVATE_KEY?.trim();
-  const subject = env.VAPID_SUBJECT?.trim();
-  if (!pub || !priv || !subject) return null;
-  if (!/^[A-Za-z0-9_-]{40,200}$/.test(pub)) return null;
-  return pub;
+  return vapidConfig(env)?.publicKey ?? null;
 }

@@ -21,7 +21,7 @@ import { POST as EXTEND } from "../../app/api/push/subscription/extend/route";
 type Fn = ReturnType<typeof vi.fn>;
 const U = "11111111-1111-4111-8111-111111111111";
 const EP = "https://fcm.googleapis.com/fcm/send/secret-token";
-const PUB = "B" + "x".repeat(86);
+const PUB = "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U";
 const req = (method: string, body: unknown) =>
   new Request("http://x/api/push/subscription", { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) as never;
 const saved = { ...process.env };
@@ -30,7 +30,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   (getApiSession as Fn).mockResolvedValue({ id: U, role: "office_staff" });
   process.env.VAPID_PUBLIC_KEY = PUB;
-  process.env.VAPID_PRIVATE_KEY = "priv";
+  process.env.VAPID_PRIVATE_KEY = "UUxI4O8-FbRouAevSmBQ6o18hgE4nSG3qwvJTfKc-ls";
   process.env.VAPID_SUBJECT = "mailto:info@example.com";
   svc.upsertPushSubscription.mockResolvedValue({ bindingId: "b-1", deviceScope: "shared", expiresAt: new Date("2026-10-03T04:05:00Z"), rebound: true });
 });
