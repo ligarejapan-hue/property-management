@@ -56,7 +56,10 @@ export async function runPushNotifications(now: Date, sender: PushSender): Promi
   const registryJob = created.registry_job;
   // 次回対応の記録づくりは始めから120秒まで(送信に30秒以上を残す)。
   const nextActionDeadlineMs = Math.min(deadlineMs, startedAtMs + NEXT_ACTION_PLAN_BUDGET_MS);
-  const nextAction = Date.now() >= nextActionDeadlineMs ? 0 : await planNextActionDeliveries(now, { deadlineMs: nextActionDeadlineMs });
+  // 回の判定は記録づくりを始める今の時刻で(出来事の記録づくりの間に来た 9:00・5分前の回を落とさない・@codex #472 P2)。
+  const nextActionNow = new Date(Math.max(now.getTime(), Date.now()));
+  const nextAction =
+    Date.now() >= nextActionDeadlineMs ? 0 : await planNextActionDeliveries(nextActionNow, { deadlineMs: nextActionDeadlineMs });
   const sent = await sendDueDeliveries(now, sender, { startedAtMs });
   // 古い記録の片付けは持ち時間の内側で、1回に1,000件まで(残りは次の実行で・@codex #472 P2)。
   const purged = pastDeadline() ? { deliveries: 0, events: 0 } : await purgeOldRecords(now);

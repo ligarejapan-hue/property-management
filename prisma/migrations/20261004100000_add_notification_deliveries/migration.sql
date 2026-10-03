@@ -20,6 +20,12 @@ BEGIN;
 --   見つけ済みにして知らせを落とす。REPEATABLE READ なら、このトランザクションの最初の見え方に
 --   入っていない(あとで確定した)行は見つけ済みにならず、定期実行の読み直しで拾われる。
 SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+-- 外部キーを張るとき users・push_subscriptions を短く書き込み止めにする(読み取りは止めない)。
+-- 長く開いたトランザクションの後ろで10秒以上待つなら諦める(書き込みを待たせ続けない)。失敗したら
+-- この中の変更はすべて取り消されるので、時間を置いて
+--   `npx prisma migrate resolve --rolled-back 20261004100000_add_notification_deliveries` → `npx prisma migrate deploy`
+-- の順でやり直す(アプリは前の版のまま動き続ける)。
+SET LOCAL lock_timeout = '10s';
 
 CREATE TABLE "notification_deliveries" (
     "id" UUID NOT NULL,
