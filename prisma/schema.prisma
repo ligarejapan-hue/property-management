@@ -1589,6 +1589,7 @@ model RegistryFetchJob {
   @@unique([requestedById, idempotencyKey])
   @@index([requestedById])
   @@index([status])
+  @@index([status, completedAt, id])
   @@map("registry_fetch_jobs")
 }
 

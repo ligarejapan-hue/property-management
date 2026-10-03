@@ -7,6 +7,7 @@ vi.mock("@/lib/prisma", () => ({ default: {} }));
 import {
   CLAIM_STALE_MS,
   MAX_ATTEMPTS,
+  RETRY_WINDOW_MS,
   NEXT_ACTION_PLAN_BUDGET_MS,
   SEND_FINALIZE_RESERVE_MS,
   SEND_RUN_BUDGET_MS,
@@ -29,6 +30,7 @@ import {
   registryJobPayload,
 } from "../deliveries/rules";
 import { UPSERT_TX_TIMEOUT_MS } from "../subscriptions";
+import { reminderSendOffsets } from "@/lib/notifications/reminder-schedule";
 import { nextActionKeysFor } from "../deliveries/plan";
 
 const ID = "11111111-1111-4111-8111-111111111111";
@@ -50,6 +52,11 @@ describe("時間の関係(設計書 §7.5)", () => {
     expect(NEXT_ACTION_PLAN_BUDGET_MS).toBeLessThan(SEND_RUN_BUDGET_MS);
     // 締め切りの直前に始めた1回分(最大30秒のトランザクション)が終わっても curl の240秒に届かない
     expect(SEND_RUN_BUDGET_MS + 30_000).toBeLessThan(240_000);
+  });
+  it("送り直しの期間は次回対応の回の間隔の最大(12時間)以上", () => {
+    const offsets = reminderSendOffsets(false);
+    const maxGap = Math.max(...offsets.slice(1).map((o, i) => o - offsets[i]));
+    expect(RETRY_WINDOW_MS).toBeGreaterThanOrEqual(maxGap);
   });
   it("取り直しは15分・送り直しは最大3回", () => {
     expect(CLAIM_STALE_MS).toBe(15 * 60 * 1000);

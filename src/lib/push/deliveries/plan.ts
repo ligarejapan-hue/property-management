@@ -56,6 +56,7 @@ export async function lockSubscription(tx: Tx, id: string) {
 
 type SubRef = { id: string; userId: string; bindingId: string };
 const BULK_CHUNK = 1000;
+const NEXT_ACTION_SCAN_LIMIT = 5000;
 
 /**
  * 端末(結び付け)ごとに、まだ含めていない ref_key だけを1通にまとめて記録する。作った通数を返す。
@@ -79,17 +80,40 @@ async function createDeliveries(
     });
     for (const r of rows) existing.add(`${r.bindingId}|${r.refKey}`);
   }
+  // 査定申込は、その端末のまだ送っていない1通(pending)があれば、そこへ足す(溜まった申込を何回かに分けて
+  // 記録しても、端末ごとに1通にまとめる・@codex #472 P2)。行を押さえて足すので、送信の取り合いはこの
+  // トランザクションが終わるまで待つ(足した件も一緒に送られる)。送信中・押さえられない行には足さない。
+  const reuse = new Map<string, string>();
+  if (kind === "inquiry_new") {
+    const subIds = [...new Set(wanted.map((x) => x.sub.id))];
+    for (let i = 0; i < subIds.length; i += BULK_CHUNK) {
+      const rows = await tx.$queryRaw<Array<{ id: string; subscription_id: string; binding_id: string }>>`
+        SELECT "id", "subscription_id", "binding_id" FROM "notification_deliveries"
+        WHERE "kind" = 'inquiry_new' AND "status" = 'pending' AND "subscription_id" = ANY(${subIds.slice(i, i + BULK_CHUNK)}::uuid[])
+        FOR UPDATE SKIP LOCKED`;
+      for (const r of rows) reuse.set(`${r.subscription_id}|${r.binding_id}`, r.id);
+    }
+  }
   const deliveries: Array<{ id: string; userId: string; subscriptionId: string; bindingId: string; kind: string; scheduledFor: Date }> = [];
   const refs: Array<{ deliveryId: string; subscriptionId: string; bindingId: string; kind: string; refKey: string }> = [];
   for (const { sub, refKeys } of wanted) {
     const fresh = [...new Set(refKeys)].filter((k) => !existing.has(`${sub.bindingId}|${k}`));
     if (fresh.length === 0) continue;
-    const id = randomUUID();
-    deliveries.push({ id, userId: sub.userId, subscriptionId: sub.id, bindingId: sub.bindingId, kind, scheduledFor: now });
+    let id = reuse.get(`${sub.id}|${sub.bindingId}`);
+    if (!id) {
+      id = randomUUID();
+      deliveries.push({ id, userId: sub.userId, subscriptionId: sub.id, bindingId: sub.bindingId, kind, scheduledFor: now });
+    }
     for (const refKey of fresh) refs.push({ deliveryId: id, subscriptionId: sub.id, bindingId: sub.bindingId, kind, refKey });
   }
   for (let i = 0; i < deliveries.length; i += BULK_CHUNK) {
     await tx.notificationDelivery.createMany({ data: deliveries.slice(i, i + BULK_CHUNK) });
+  }
+  // 足した先の1通は、送り直しの期間の起点を今に更新する(古い1通に足した新しい件が、送り直しの
+  // 期間切れで二度と送られなくなる、を防ぐ・@codex #472 P2)。
+  const reusedIds = [...new Set(refs.map((r) => r.deliveryId))].filter((id) => !deliveries.some((d) => d.id === id));
+  if (reusedIds.length) {
+    await tx.notificationDelivery.updateMany({ where: { id: { in: reusedIds }, status: "pending" }, data: { scheduledFor: now } });
   }
   for (let i = 0; i < refs.length; i += BULK_CHUNK) {
     await tx.notificationDeliveryRef.createMany({ data: refs.slice(i, i + BULK_CHUNK), skipDuplicates: true });
@@ -105,12 +129,29 @@ function createDelivery(tx: Tx, sub: SubRef, kind: DeliveryKind, refKeys: string
 // ---------- 次回対応(N4・N5) ----------
 
 export async function planNextActionDeliveries(now: Date, opts: { deadlineMs?: number } = {}): Promise<number> {
-  const pastDeadline = () => opts.deadlineMs !== undefined && Date.now() >= opts.deadlineMs;
-  const subs = await prisma.pushSubscription.findMany({
-    where: activeSubscriptionWhere(now),
-    select: { id: true, userId: true },
-    orderBy: { id: "asc" },
-  });
+  // 1つのトランザクションは最大 SEND_TX_TIMEOUT_MS かかるので、その分を残して打ち切る(締め切りを
+  // 越えて送信の時間を食わない・@codex #472 P2)。
+  const pastDeadline = () => opts.deadlineMs !== undefined && Date.now() + SEND_TX_TIMEOUT_MS >= opts.deadlineMs;
+  if (pastDeadline()) return 0;
+  // 1回に見る端末は5,000台まで。多いときは始める位置を乱数でずらし、毎回同じ所だけを見ない(@codex #472 P2)。
+  //   窓は輪にする(終わりまで来たら先頭から続ける=端の端末も同じ確率で選ばれる・@codex #472 P2)。
+  const total = await prisma.pushSubscription.count({ where: activeSubscriptionWhere(now) });
+  const page = (skip: number, take: number) =>
+    prisma.pushSubscription.findMany({
+      where: activeSubscriptionWhere(now),
+      select: { id: true, userId: true },
+      orderBy: { id: "asc" },
+      skip,
+      take,
+    });
+  let subs: Array<{ id: string; userId: string }>;
+  if (total <= NEXT_ACTION_SCAN_LIMIT) {
+    subs = await page(0, NEXT_ACTION_SCAN_LIMIT);
+  } else {
+    const start = randomInt(total);
+    const head = await page(start, NEXT_ACTION_SCAN_LIMIT);
+    subs = head.length < NEXT_ACTION_SCAN_LIMIT ? [...head, ...(await page(0, NEXT_ACTION_SCAN_LIMIT - head.length))] : head;
+  }
   const byUser = new Map<string, string[]>();
   for (const s of subs) byUser.set(s.userId, [...(byUser.get(s.userId) ?? []), s.id]);
   let created = 0;
@@ -254,16 +295,29 @@ export interface SourceRecipients {
  * `deadlineMs` を過ぎたら途中でやめて null を返す(呼び出し側はその回の記録づくりをしない=
  * 一部の人だけで出来事を「見つけ済み」にしない)。
  */
-export async function loadSourceRecipients(deadlineMs?: number): Promise<SourceRecipients | null> {
-  const users = await prisma.user.findMany({ where: { isActive: true }, select: { id: true }, orderBy: { id: "asc" } });
+export async function loadSourceRecipients(source: Source, deadlineMs?: number): Promise<SourceRecipients | null> {
+  // 送ってよい端末を持つ人だけを見る(端末の無い人は送り先にならない=全員を確かめない・@codex #472 P2)。
+  // 申込は通知 ON の人だけが対象(先に絞る)。確かめるのは処理する出来事に要る区分だけ(@codex #472 P2)。
+  const users = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      ...(source === "inquiry" ? { inquiryNotifyEnabled: true } : {}),
+      pushSubscriptions: { some: { revokedAt: null, expiresAt: { gt: new Date() } } },
+    },
+    select: { id: true },
+    orderBy: { id: "asc" },
+  });
   const inquiry: Recipient[] = [];
   const registry = new Map<string, Recipient>();
   for (const u of users) {
     if (deadlineMs !== undefined && Date.now() >= deadlineMs) return null;
     const r = await loadRecipient(prisma, u.id);
     if (!r) continue;
-    if (await canReceiveInquiryNotice(r)) inquiry.push(r);
-    if (canReceiveRegistryNotice(r)) registry.set(r.id, r);
+    if (source === "inquiry") {
+      if (await canReceiveInquiryNotice(r)) inquiry.push(r);
+    } else if (canReceiveRegistryNotice(r)) {
+      registry.set(r.id, r);
+    }
   }
   return { inquiry, registry };
 }
@@ -273,7 +327,7 @@ export async function planSourceDeliveries(
   now: Date,
   recipients?: SourceRecipients,
 ): Promise<{ created: number; more: boolean }> {
-  const who = recipients ?? (await loadSourceRecipients());
+  const who = recipients ?? (await loadSourceRecipients(source));
   if (!who) return { created: 0, more: true };
   // 送り先の端末の数(トランザクションの外で数える)に合わせて、1回分で扱う出来事の件数を決める。
   const recipientIds = source === "inquiry" ? who.inquiry.map((r) => r.id) : [...who.registry.keys()];
