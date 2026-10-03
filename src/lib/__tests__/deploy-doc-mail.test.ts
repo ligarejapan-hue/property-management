@@ -212,6 +212,16 @@ describe("反映済みの機能を「無い・これから」と書いていな�
     }
   });
 
+  // @codex R3: 右下の知らせは画面を見ているときだけ(summary-poller.tsx show())。
+  it("guide.html は「右下に出る」を画面を見ているときに限っている", () => {
+    expect(guideSrc).not.toContain("と、ベルと画面の右下に出ます");
+    expect(guideSrc).toContain("画面に戻っても右下には出ません");
+  });
+
+  it("manual.html は別のタブを見ている間の分は右下に出ないと書いている", () => {
+    expect(manualSrc).toContain("右下には出ず 🔔 に残ります");
+  });
+
   it("manual.html のお知らせの表は6つ", () => {
     expect(manualSrc).toContain("いまお知らせに出るのは次の6つです。");
   });
