@@ -180,11 +180,16 @@ export interface SourceRecipients {
   registry: Map<string, Recipient>;
 }
 
-export async function loadSourceRecipients(): Promise<SourceRecipients> {
+/**
+ * `deadlineMs` を過ぎたら途中でやめて null を返す(呼び出し側はその回の記録づくりをしない=
+ * 一部の人だけで出来事を「見つけ済み」にしない)。
+ */
+export async function loadSourceRecipients(deadlineMs?: number): Promise<SourceRecipients | null> {
   const users = await prisma.user.findMany({ where: { isActive: true }, select: { id: true }, orderBy: { id: "asc" } });
   const inquiry: Recipient[] = [];
   const registry = new Map<string, Recipient>();
   for (const u of users) {
+    if (deadlineMs !== undefined && Date.now() >= deadlineMs) return null;
     const r = await loadRecipient(prisma, u.id);
     if (!r) continue;
     if (await canReceiveInquiryNotice(r)) inquiry.push(r);
@@ -199,6 +204,7 @@ export async function planSourceDeliveries(
   recipients?: SourceRecipients,
 ): Promise<{ created: number; more: boolean }> {
   const who = recipients ?? (await loadSourceRecipients());
+  if (!who) return { created: 0, more: true };
   return prisma.$transaction(async (tx) => {
     // カーソルの行を押さえる(同時に2つの実行が同じ出来事を数えない)。
     const locked = await tx.$queryRaw<Array<{ source: string }>>`
