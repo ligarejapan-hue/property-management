@@ -124,7 +124,7 @@ describe("通知の件数の窓口(設計書 §5.1)", () => {
       const r = await call();
       const T = Date.parse("2026-10-02T15:00:00+09:00");
       expect(r.body.nextActions.reminders).toEqual([
-        { key: seenKey(KEYS, U, "next_action", [ID1, String(T), reminderRevAt.toISOString(), "0"]), slot: 0 },
+        { key: seenKey(KEYS, U, "next_action", [ID1, String(T), reminderRevAt.toISOString(), "0"]), slot: 0, dueTime: "15:00" },
       ]);
     });
     it("時刻 00:03 の明日の予定も、今日 23:58 に5分前の回を出す(回の計算の対象は明日の予定まで)", async () => {

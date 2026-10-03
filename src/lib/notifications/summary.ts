@@ -41,7 +41,11 @@ export interface SummarySession {
 export interface NextActionSummary {
   today: number;
   overdue: number;
-  reminders: Array<{ key: string; slot: number }>;
+  /**
+   * dueTime = 時刻ありで「期限の5分前」の回(slot 0)のときだけ、その時刻("HH:MM")。
+   * 画面は「15:00 の次回対応が1件あります」と出す(設計書 §2 N5)。時刻は PII ではない。
+   */
+  reminders: Array<{ key: string; slot: number; dueTime?: string }>;
 }
 
 export interface InquirySummary {
@@ -124,9 +128,11 @@ async function nextActionSummary({ session, permissions, now, keys }: SummaryInp
     // rev(担当と期限の版)は段階3から DB のトリガーが進める reminderRevAt(設計書 §5.2・§6)。
     // 既存行は updatedAt で埋めてあるので、段階2の値と一致する(反映の前後で同じ回が出直さない)。
     const rev = (r.reminderRevAt ?? r.updatedAt).toISOString();
+    const timed = isTimedNextAction(r.scheduledTime);
     reminders.push({
       key: seenKey(keys, session.id, "next_action", [r.id, String(deadline), rev, String(slot)]),
       slot,
+      ...(timed && slot === 0 ? { dueTime: r.scheduledTime as string } : {}),
     });
   }
   return { today: todayCount, overdue: overdueCount, reminders };
