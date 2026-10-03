@@ -67,6 +67,16 @@ vi.mock("@/lib/api-helpers", () => {
 });
 
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+// 配信停止URLの頭(追跡URL)の有無。既定は設定済み。
+vi.mock("@/lib/sale-dm-letter/config-store", () => ({
+  loadSaleDmPublicPageConfig: vi.fn(async () => ({
+    senderName: null,
+    senderContact: null,
+    trackingBaseUrl: "https://app.example.com",
+    lpPublicEnabled: true,
+    privacyText: null,
+  })),
+}));
 
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
@@ -96,6 +106,7 @@ import {
   getOwnerDisplayConfig,
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
+import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
 import { POST } from "../../app/api/properties/dm-batches/route";
 
 const pm = prisma as unknown as {
@@ -273,6 +284,23 @@ describe("POST /api/properties/dm-batches", () => {
     expect(pm.propertyDmLog.create).not.toHaveBeenCalled();
     expect(pm.propertyDmLog.createMany).not.toHaveBeenCalled();
     expect(pm.propertyDmLog.update).not.toHaveBeenCalled();
+  });
+
+  it("応答に unsubscribeUrlAvailable(追跡URLの有無)を返す", async () => {
+    pm.property.findMany.mockResolvedValue([makeProp()]);
+    const ok = (await (await POST(makeRequest(BODY))).json()) as { unsubscribeUrlAvailable: boolean };
+    expect(ok.unsubscribeUrlAvailable).toBe(true);
+    vi.mocked(loadSaleDmPublicPageConfig).mockResolvedValueOnce({
+      senderName: null,
+      senderContact: null,
+      trackingBaseUrl: undefined,
+      lpPublicEnabled: true,
+      privacyText: null,
+    });
+    const ng = (await (await POST(makeRequest({ ...BODY, attemptKey: `${BODY.attemptKey}-2` }))).json()) as {
+      unsubscribeUrlAvailable: boolean;
+    };
+    expect(ng.unsubscribeUrlAvailable).toBe(false);
   });
 
   it("別住所の共有者は別 item(rowCount=2)", async () => {

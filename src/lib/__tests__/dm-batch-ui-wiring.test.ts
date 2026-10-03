@@ -37,6 +37,23 @@ describe("出力ボタンの2段階化", () => {
   });
 });
 
+describe("配信停止URLの案内", () => {
+  it("追跡URLが未設定なら、配信停止URLの列が空になることを知らせる", () => {
+    expect(PAGE).toContain("res.unsubscribeUrlAvailable === false");
+    expect(PAGE).toContain("配信停止URLの列は空になります");
+    expect(PAGE).toContain("最後の列に1通ごとの配信停止URL");
+  });
+
+  it("使い方ガイドとマニュアルに Word の DISPLAYBARCODE と業者への頼み方", () => {
+    for (const f of ["public/docs/guide.html", "public/docs/manual.html"]) {
+      const html = read(f);
+      expect(html).toContain("DISPLAYBARCODE");
+      expect(html).toContain("MERGEFIELD 配信停止URL");
+      expect(html).toContain("配信停止URL の列を QR コードにして");
+    }
+  });
+});
+
 describe("送付の確定モーダル", () => {
   it("一覧は fetchUnconfirmedDmBatches・確定は confirmDmBatch を使う", () => {
     expect(MODAL).toMatch(/fetchUnconfirmedDmBatches\(targetPage\)/);

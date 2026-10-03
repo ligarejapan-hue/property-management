@@ -577,6 +577,12 @@ function PropertiesPageInner() {
           `拒否・宛先不明の反響が付いた ${excluded} 件の宛先は自動で除外しました`,
         );
       }
+      if (res.unsubscribeUrlAvailable === false) {
+        // 配信停止URLの頭(追跡URL)が無いと、列を空のまま配ることになる。黙って配らない。
+        window.alert(
+          "売却DM設定の追跡URLが未設定のため、配信停止URLの列は空になります(手紙に配信停止のQRを刷れません)",
+        );
+      }
       window.location.href = `/api/properties/dm-batches/${res.batchId}/csv`;
     } catch (err) {
       setError(err instanceof Error ? err.message : "DM差込CSVの出力に失敗しました");
@@ -1096,7 +1102,7 @@ function PropertiesPageInner() {
             title={
               searchPending
                 ? "検索語が入力途中です(管理IDを最後まで入力するか、消してください)"
-                : "現在の検索条件で送付可の物件をDM差込CSV出力(控えが作られ、投函後に送付を確定できます)"
+                : "現在の検索条件で送付可の物件をDM差込CSV出力(控えが作られ、投函後に送付を確定できます)。最後の列に1通ごとの配信停止URLが入ります(QRの作り方は使い方ガイド)"
             }
           >
             {exportingDm ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
