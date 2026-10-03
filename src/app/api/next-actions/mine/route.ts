@@ -3,7 +3,7 @@ import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions, handleApiError, ApiError } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { propertyRecordScopeFilter } from "@/lib/property-record-guard";
-import { jstDateToDbDate, jstToday } from "@/lib/notifications/reminder-schedule";
+import { isTimedNextAction, jstDateToDbDate, jstToday, nextActionDeadline } from "@/lib/notifications/reminder-schedule";
 
 const LIMIT = 50;
 
@@ -58,7 +58,11 @@ export async function GET() {
       scheduledAt: r.scheduled_at.toISOString().slice(0, 10),
       scheduledTime: r.scheduled_time,
       actionType: r.action_type,
-      overdue: r.scheduled_at.getTime() < todayDb.getTime(),
+      // 時刻ありはその時刻(日本時間)を過ぎたら、時刻なしは予定日が今日より前なら期限切れ
+      // (物件の次回対応タブと同じ判定・@codex #470 P2)。
+      overdue: isTimedNextAction(r.scheduled_time)
+        ? nextActionDeadline(r.scheduled_at, r.scheduled_time) < now.getTime()
+        : r.scheduled_at.getTime() < todayDb.getTime(),
       tomorrow: r.scheduled_at.getTime() > todayDb.getTime(),
       address: r.address,
     }));

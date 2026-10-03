@@ -65,6 +65,17 @@ describe("自分の次回対応(ホームの一覧)", () => {
     await GET();
     expect(lastQuery().sql).toMatch(/ORDER BY na\."scheduled_at" ASC, COALESCE\(na\."scheduled_time", '09:00'\) ASC, na\."id" ASC/);
   });
+  it("時刻ありはその時刻を過ぎたら期限切れ(今日 15:00 を 17:00 に見ると期限切れ・@codex #470 P2)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-02T08:00:00Z")); // 日本時間 17:00
+    pm.$queryRaw.mockResolvedValue([
+      { id: "a1", property_id: "p1", scheduled_at: new Date("2026-10-02T00:00:00Z"), scheduled_time: "15:00", action_type: null, address: "x" },
+      { id: "a2", property_id: "p2", scheduled_at: new Date("2026-10-02T00:00:00Z"), scheduled_time: "18:00", action_type: null, address: "y" },
+      { id: "a3", property_id: "p3", scheduled_at: new Date("2026-10-02T00:00:00Z"), scheduled_time: null, action_type: null, address: "z" },
+    ]);
+    const body = (await (await GET()).json()) as { items: Array<{ id: string; overdue: boolean }> };
+    expect(body.items.map((i) => [i.id, i.overdue])).toEqual([["a1", true], ["a2", false], ["a3", false]]);
+  });
   it("自由記述の content は読まない・返さない。期限切れの印・時刻・物件の所在を返す", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-02T03:00:00Z"));
