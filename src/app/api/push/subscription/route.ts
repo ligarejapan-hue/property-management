@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getApiSession, handleApiError, ApiError } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { DEVICE_SCOPES } from "@/lib/push/binding";
-import { revokePushSubscription, upsertPushSubscription, vapidPublicKey } from "@/lib/push/subscriptions";
+import { REVOKE_REASONS, revokePushSubscription, upsertPushSubscription, vapidPublicKey, type RevokeReason } from "@/lib/push/subscriptions";
 
 // 通知 段階4a(設計書 §7.2・§7.5): 端末の登録・付け替え(PUT)と解除(DELETE)。
 // ⚠endpoint・鍵は応答・ログ・監査ログに出さない。応答は結び付け(binding_id)・範囲・期限だけ。
@@ -12,7 +12,12 @@ const putSchema = z.object({
   keys: z.object({ p256dh: z.string(), auth: z.string() }),
   deviceScope: z.enum(DEVICE_SCOPES as [string, ...string[]]).optional(),
 });
-const deleteSchema = z.object({ endpoint: z.string() });
+const deleteSchema = z.object({
+  endpoint: z.string(),
+  // 登録の途中で後片付けが起きたときの取り消し: この結び付けのままのときだけ無効にする。
+  bindingId: z.string().uuid().optional(),
+  reason: z.enum(REVOKE_REASONS as [string, ...string[]]).optional(),
+});
 
 export async function PUT(req: NextRequest) {
   try {
@@ -46,9 +51,13 @@ export async function DELETE(req: NextRequest) {
   try {
     const session = await getApiSession();
     const body = deleteSchema.parse(await req.json());
-    const revoked = await revokePushSubscription(session.id, body.endpoint);
+    const reason = (body.reason ?? "logout") as RevokeReason;
+    const revoked = await revokePushSubscription(session.id, body.endpoint, new Date(), {
+      bindingId: body.bindingId?.toLowerCase(),
+      reason,
+    });
     if (revoked) {
-      await writeAuditLog({ userId: session.id, action: "push_subscription_revoke", targetTable: "push_subscriptions", detail: { reason: "logout" } });
+      await writeAuditLog({ userId: session.id, action: "push_subscription_revoke", targetTable: "push_subscriptions", detail: { reason } });
     }
     return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

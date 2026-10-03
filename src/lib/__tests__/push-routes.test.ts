@@ -66,9 +66,18 @@ describe("プッシュの登録 API(段階4a)", () => {
   it("範囲は shared / personal だけ", async () => {
     expect((await PUT(req("PUT", { endpoint: EP, keys: { p256dh: "pk", auth: "au" }, deviceScope: "admin" }))).status).toBe(422);
   });
+  it("登録の途中の取り消しは、結び付けを添えて「その結び付けのときだけ」解除する", async () => {
+    await DELETE(req("DELETE", { endpoint: EP, bindingId: "11111111-1111-4111-8111-11111111111A", reason: "cancelled" }));
+    expect(svc.revokePushSubscription).toHaveBeenLastCalledWith(U, EP, expect.any(Date), {
+      bindingId: "11111111-1111-4111-8111-11111111111a",
+      reason: "cancelled",
+    });
+    expect((await DELETE(req("DELETE", { endpoint: EP, bindingId: "x" }))).status).toBe(422);
+    expect((await DELETE(req("DELETE", { endpoint: EP, reason: "gone" }))).status).toBe(422);
+  });
   it("解除・延長は自分の登録に対して行う(サービスに利用者 ID を渡す)", async () => {
     await DELETE(req("DELETE", { endpoint: EP }));
-    expect(svc.revokePushSubscription).toHaveBeenCalledWith(U, EP);
+    expect(svc.revokePushSubscription).toHaveBeenCalledWith(U, EP, expect.any(Date), { bindingId: undefined, reason: "logout" });
     const res = await EXTEND(req("POST", { endpoint: EP }));
     expect(await res.json()).toEqual({ active: true });
     expect(svc.extendPushSubscription).toHaveBeenCalledWith(U, EP);

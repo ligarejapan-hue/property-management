@@ -130,12 +130,24 @@ export async function extendPushSubscription(userId: string, endpoint: unknown, 
   return personal > 0;
 }
 
-/** ログアウトでの解除(自分の登録だけ)。 */
-export async function revokePushSubscription(userId: string, endpoint: unknown, now = new Date()): Promise<boolean> {
+export type RevokeReason = "logout" | "cancelled" | "key_changed";
+export const REVOKE_REASONS: readonly RevokeReason[] = ["logout", "cancelled", "key_changed"];
+
+/**
+ * 解除(自分の登録だけ)。`bindingId` を渡したときは、その結び付けのままのときだけ無効にする
+ * (登録の途中で後片付けが起きたときの取り消し用。あとから別の利用者・別の操作が付け替えていれば
+ * 何もしない=次の人の登録を消さない)。
+ */
+export async function revokePushSubscription(
+  userId: string,
+  endpoint: unknown,
+  now = new Date(),
+  opts: { bindingId?: string; reason?: RevokeReason } = {},
+): Promise<boolean> {
   if (!checkPushEndpoint(endpoint).ok) return false;
   const res = await prisma.pushSubscription.updateMany({
-    where: { endpoint: endpoint as string, userId, revokedAt: null },
-    data: { revokedAt: now, revokedReason: "logout" },
+    where: { endpoint: endpoint as string, userId, revokedAt: null, ...(opts.bindingId ? { bindingId: opts.bindingId } : {}) },
+    data: { revokedAt: now, revokedReason: opts.reason ?? "logout" },
   });
   return res.count > 0;
 }

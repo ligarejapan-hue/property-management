@@ -108,6 +108,13 @@ describe("延長・解除", () => {
       data: { revokedAt: NOW, revokedReason: "logout" },
     });
   });
+  it("結び付けを添えた取り消しは、その結び付けのままの行だけを無効にする(次の人の登録を消さない)", async () => {
+    await revokePushSubscription(A, EP, NOW, { bindingId: "11111111-1111-4111-8111-111111111111", reason: "cancelled" });
+    expect(pm.pushSubscription.updateMany).toHaveBeenCalledWith({
+      where: { endpoint: EP, userId: A, revokedAt: null, bindingId: "11111111-1111-4111-8111-111111111111" },
+      data: { revokedAt: NOW, revokedReason: "cancelled" },
+    });
+  });
 });
 
 describe("VAPID の鍵", () => {

@@ -251,6 +251,68 @@ function base64UrlToUint8Array(base64Url: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+/**
+ * 端末の登録・付け替え・延長・解除を、タブをまたいで1本ずつ通す(Web Locks。無い環境はこのタブの中だけ)。
+ * - 「自分専用」を素早く切り替えても、最後に押した方が最後に保存される(@codex #471 P2)。
+ * - ログアウトの解除は、走っている登録が終わってから行う(登録があとから届いて、解除を上書きしない)。
+ * `waitMs` を渡すと、その時間で待つのをやめて(順番を無視して)実行する(ログアウトを止めないため)。
+ */
+const PUSH_LOCK = "pm-push-device";
+let localPushChain: Promise<unknown> = Promise.resolve();
+function withPushLock<T>(fn: () => Promise<T>, waitMs?: number): Promise<T> {
+  const locks = typeof navigator !== "undefined" ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
+  let run: Promise<T>;
+  if (locks?.request) {
+    if (waitMs === undefined) {
+      run = locks.request(PUSH_LOCK, () => fn()) as Promise<T>;
+    } else {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), waitMs);
+      run = locks
+        .request(PUSH_LOCK, { signal: ctrl.signal }, () => {
+          clearTimeout(t);
+          return fn();
+        })
+        .catch((e: unknown) => {
+          if (ctrl.signal.aborted && (e as { name?: string } | null)?.name === "AbortError") return fn();
+          throw e;
+        }) as Promise<T>;
+    }
+    return run;
+  }
+  const prev = localPushChain;
+  const waitPrev = waitMs === undefined ? prev : withTimeout(prev, waitMs);
+  run = waitPrev.then(
+    () => fn(),
+    () => fn(),
+  );
+  localPushChain = run.catch(() => undefined);
+  return run;
+}
+
+async function deleteSubscription(endpoint: string, extra: { bindingId?: string; reason?: "logout" | "cancelled" | "key_changed" } = {}): Promise<void> {
+  await withTimeout(
+    fetch("/api/push/subscription", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ endpoint, ...extra }),
+    }),
+    SW_REPLY_TIMEOUT_MS,
+  );
+}
+
+/** 購読を作ったときの公開鍵が、今の鍵と同じか。読めない(古いブラウザ)ときは同じとみなす。 */
+export function subscriptionKeyMatches(sub: PushSubscription, publicKey: string): boolean {
+  const raw = (sub as PushSubscription & { options?: { applicationServerKey?: ArrayBuffer | null } }).options?.applicationServerKey;
+  if (!raw) return true;
+  const a = new Uint8Array(raw);
+  const b = base64UrlToUint8Array(publicKey);
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 async function putSubscription(
   sub: PushSubscription,
   deviceScope?: DeviceScope,
@@ -313,16 +375,23 @@ async function storeBinding(reg: ServiceWorkerRegistration, binding: string, gen
  * `subscribeIfMissing` = 購読が無ければ作る(「通知を許可する」を押したとき)。false なら、既にある購読の
  * 付け替えだけを行う(ログイン後・期限切れからの戻り)。
  */
-export async function setupPushDevice(opts: {
+type SetupOpts = {
   gen: number;
   deviceScope?: DeviceScope;
   subscribeIfMissing: boolean;
   /**
    * 後片付け(ログアウト・ほかのタブのログイン画面)が起きたか。登録の直前と、結び付けを保存する直前に
    * 確かめ、起きていれば何もしない(ログアウトの解除のあとに登録し直して、配信を再開させないため)。
+   * 登録のあとで起きていたと分かったら、その登録を取り消す(@codex #471 P2)。
    */
   isCancelled?: () => boolean;
-}): Promise<PushSetupResult> {
+};
+
+export function setupPushDevice(opts: SetupOpts): Promise<PushSetupResult> {
+  return withPushLock(() => setupPushDeviceLocked(opts));
+}
+
+async function setupPushDeviceLocked(opts: SetupOpts): Promise<PushSetupResult> {
   if (notificationSupport() === "unsupported" || !hasPushManager()) return { ok: false, reason: "unsupported" };
   if (Notification.permission !== "granted") return { ok: false, reason: "denied" };
   let config: { enabled?: boolean; publicKey?: string | null } | null = null;
@@ -338,6 +407,14 @@ export async function setupPushDevice(opts: {
   if (!reg) return { ok: false, reason: "unsupported" };
   try {
     let sub = await reg.pushManager.getSubscription();
+    if (sub && !subscriptionKeyMatches(sub, config.publicKey)) {
+      // 鍵が入れ替わった(VAPID の鍵の更新)。古い鍵で作った購読には送れないので、作り直す
+      // (@codex #471 P2)。サーバー側の古い宛先も無効にしておく。
+      if (opts.isCancelled?.()) return { ok: false, reason: "failed" };
+      await deleteSubscription(sub.endpoint, { reason: "key_changed" }).catch(() => undefined);
+      await sub.unsubscribe().catch(() => false);
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToUint8Array(config.publicKey) });
+    }
     if (!sub) {
       if (!opts.subscribeIfMissing) return { ok: false, reason: "failed" };
       sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToUint8Array(config.publicKey) });
@@ -352,7 +429,12 @@ export async function setupPushDevice(opts: {
     }
     if (r.status === 501) return { ok: false, reason: "not_configured" };
     if (r.status !== 200 || !r.body?.bindingId || !r.body.deviceScope) return { ok: false, reason: "failed" };
-    if (opts.isCancelled?.()) return { ok: false, reason: "failed" };
+    if (opts.isCancelled?.()) {
+      // 登録の最中に後片付けが起きた=ログアウトの解除より後に届いて、有効に戻したかもしれない。
+      // この結び付けのままなら取り消す(あとから別の人が付け替えていれば、サーバーは何もしない)。
+      await deleteSubscription(sub.endpoint, { bindingId: r.body.bindingId, reason: "cancelled" }).catch(() => undefined);
+      return { ok: false, reason: "failed" };
+    }
     const stored = await storeBinding(reg, r.body.bindingId, opts.gen);
     return stored ? { ok: true, deviceScope: r.body.deviceScope } : { ok: false, reason: "failed" };
   } catch {
@@ -361,8 +443,12 @@ export async function setupPushDevice(opts: {
 }
 
 /** shared の端末の期限を延ばす(自動ログオフの延長と同じ5分ごと)。期限切れなら付け替え直す。 */
-export async function extendPushDevice(gen: number, isCancelled?: () => boolean): Promise<void> {
-  if (notificationSupport() !== "granted" || !hasPushManager() || !hasServiceWorker()) return;
+export function extendPushDevice(gen: number, isCancelled?: () => boolean): Promise<void> {
+  if (notificationSupport() !== "granted" || !hasPushManager() || !hasServiceWorker()) return Promise.resolve();
+  return withPushLock(() => extendPushDeviceLocked(gen, isCancelled));
+}
+
+async function extendPushDeviceLocked(gen: number, isCancelled?: () => boolean): Promise<void> {
   try {
     const reg = await navigator.serviceWorker.getRegistration("/");
     const sub = await reg?.pushManager.getSubscription();
@@ -374,7 +460,7 @@ export async function extendPushDevice(gen: number, isCancelled?: () => boolean)
       body: JSON.stringify({ endpoint: sub.endpoint }),
     });
     const body = (await res.json().catch(() => null)) as { active?: boolean } | null;
-    if (res.ok && body?.active === false && !isCancelled?.()) await setupPushDevice({ gen, subscribeIfMissing: false, isCancelled });
+    if (res.ok && body?.active === false && !isCancelled?.()) await setupPushDeviceLocked({ gen, subscribeIfMissing: false, isCancelled });
   } catch {
     /* 次の機会に */
   }
@@ -390,18 +476,13 @@ export async function extendPushDevice(gen: number, isCancelled?: () => boolean)
 export async function unregisterPushDevice(): Promise<void> {
   if (!hasServiceWorker() || !hasPushManager()) return;
   try {
-    const reg = await navigator.serviceWorker.getRegistration("/");
-    const sub = await reg?.pushManager.getSubscription();
-    if (!sub) return;
-    await withTimeout(
-      fetch("/api/push/subscription", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ endpoint: sub.endpoint }),
-      }),
-      SW_REPLY_TIMEOUT_MS,
-    );
+    // 走っている登録(ほかのタブを含む)が終わるのを待ってから解除する。待つのは最大3秒(ログアウトを止めない)。
+    await withPushLock(async () => {
+      const reg = await navigator.serviceWorker.getRegistration("/");
+      const sub = await reg?.pushManager.getSubscription();
+      if (!sub) return;
+      await deleteSubscription(sub.endpoint);
+    }, SW_REPLY_TIMEOUT_MS);
   } catch {
     /* ログアウトは続ける */
   }
