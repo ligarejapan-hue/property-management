@@ -26,6 +26,7 @@ import {
 } from "./eligibility";
 import { lockSubscription } from "./plan";
 import { assertCanLockOwner, assertCanLockProperty } from "@/lib/edit-lock/permissions";
+import { EDIT_LOCK_HEARTBEAT_GRACE_MS, EDIT_LOCK_IDLE_LIMIT_MS } from "@/lib/edit-lock/rules";
 import { deriveNotificationKeys, seenKey } from "@/lib/notifications/opaque";
 import {
   CLAIM_STALE_MS,
@@ -106,12 +107,20 @@ export async function sendDueDeliveries(
   // 持ち時間を過ぎていたら片付けも送信も始めない(@codex #472 P2)。
   if (Date.now() - startedAtMs >= budgetMs) return stats;
   await closeAbandonedClaims(now);
-  const due = await prisma.notificationDelivery.findMany({
-    where: claimableWhere(now),
+  // 1時間で送れなくなる編集権限の知らせを先に送る(ほかの溜まった分の後ろで時間切れにならない・@codex #473 P2)。
+  const urgent = await prisma.notificationDelivery.findMany({
+    where: { AND: [claimableWhere(now), { kind: "edit_lock_lost" }] },
     select: { id: true },
     orderBy: [{ scheduledFor: "asc" }, { id: "asc" }],
     take: SEND_BATCH_LIMIT,
   });
+  const rest = await prisma.notificationDelivery.findMany({
+    where: { AND: [claimableWhere(now), { kind: { not: "edit_lock_lost" } }] },
+    select: { id: true },
+    orderBy: [{ scheduledFor: "asc" }, { id: "asc" }],
+    take: Math.max(0, SEND_BATCH_LIMIT - urgent.length),
+  });
+  const due = [...urgent, ...rest];
   for (const d of due) {
     // 持ち時間を過ぎたら新しい送信は始めない(残りは次の実行で・timer の起動と重ならないように)。
     if (Date.now() - startedAtMs >= budgetMs) break;
@@ -331,6 +340,15 @@ export async function recheck(
     // 今もその資源を編集できる人か(鍵を取る窓口と同じ判定・@codex #473 P2)。権限が外れた・担当から外れた・
     // アーカイブされた資源について、その画面へのリンク付きの知らせを送らない。
     if (!(await canStillEdit(tx, r, e.resourceType, e.resourceId))) return { drop: all, payload: null };
+    // 本人がすでに同じ記録の鍵を取り直して編集を続けている(期限内の鍵を持っている)なら送らない
+    // (同じ画面の取り直しは知らせない、と同じ考え方・@codex #473 P2)。
+    const back = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "edit_locks"
+      WHERE "resource_type" = ${e.resourceType}::"EditLockResource" AND "resource_id" = ${e.resourceId}::uuid
+        AND "user_id" = ${r.id}::uuid AND "id" <> ${e.lockId}::uuid AND "force_released_at" IS NULL
+        AND "heartbeat_at" >= clock_timestamp() - make_interval(secs => ${EDIT_LOCK_HEARTBEAT_GRACE_MS / 1000}::double precision)
+        AND "activity_at" >= clock_timestamp() - make_interval(secs => ${EDIT_LOCK_IDLE_LIMIT_MS / 1000}::double precision)`;
+    if (back.length > 0) return { drop: all, payload: null };
     return { drop: [], payload: editLockLostPayload(bindingId, { resourceType: e.resourceType, resourceId: e.resourceId, cause: e.cause }) };
   }
   return { drop: all, payload: null };

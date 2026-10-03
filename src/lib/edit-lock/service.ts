@@ -295,30 +295,38 @@ export async function recordEditLockLoss(
  * 設計書 §4.6 の 3)。判定は取得の SQL と同じ(DB の時刻・合図の期限を先に見る)。記録した件数を返す。
  */
 export async function recordExpiredEditLockLosses(db: Db): Promise<number> {
+  // ⚠対象の鍵の行を FOR UPDATE SKIP LOCKED で押さえてから記録する(@codex #473 P2)。同じ画面の取り直し
+  //   (UPSERT)と重なっても、取り直しが先なら新しい行(期限内)は条件に合わず記録しない・こちらが先なら
+  //   取り直しはこの文が終わるのを待つ。取り直し中で押さえられている行は飛ばす(次の実行で見る)。
   const rows = await db.$queryRaw<{ id: string }[]>`
-    WITH now_ts AS (SELECT clock_timestamp() AS db_now)
+    WITH now_ts AS (SELECT clock_timestamp() AS db_now),
+    locked AS (
+      SELECT l."id", l."user_id", l."resource_type", l."resource_id", l."force_released_at", l."heartbeat_at", l."activity_at", now_ts.db_now
+      FROM "edit_locks" l CROSS JOIN now_ts
+      WHERE (l."force_released_at" IS NOT NULL
+         OR l."heartbeat_at" < now_ts.db_now - make_interval(secs => ${GRACE_SEC}::double precision)
+         OR l."activity_at" < now_ts.db_now - make_interval(secs => ${IDLE_SEC}::double precision))
+        -- 2時間より前に止まった鍵は見ない(1時間を過ぎた記録は送らないので不要。30日で記録を消したあとに
+        -- 置き去りの古い鍵を何度も記録し直さない)。合図は操作より古くならないので合図の時刻で切る。
+        AND l."heartbeat_at" >= now_ts.db_now - INTERVAL '2 hours'
+      FOR UPDATE OF l SKIP LOCKED
+    )
     INSERT INTO "edit_lock_loss_events" ("id", "lock_id", "user_id", "resource_type", "resource_id", "cause", "occurred_at", "status", "created_at")
     SELECT gen_random_uuid(), l."id", l."user_id", l."resource_type", l."resource_id",
            CASE
              WHEN l."force_released_at" IS NOT NULL THEN 'force_released'
-             WHEN l."heartbeat_at" < now_ts.db_now - make_interval(secs => ${GRACE_SEC}::double precision) THEN 'heartbeat'
+             WHEN l."heartbeat_at" < l.db_now - make_interval(secs => ${GRACE_SEC}::double precision) THEN 'heartbeat'
              ELSE 'idle'
            END,
            (CASE
              WHEN l."force_released_at" IS NOT NULL THEN l."force_released_at"::timestamptz
-             WHEN l."heartbeat_at" < now_ts.db_now - make_interval(secs => ${GRACE_SEC}::double precision)
+             WHEN l."heartbeat_at" < l.db_now - make_interval(secs => ${GRACE_SEC}::double precision)
                THEN (l."heartbeat_at" + make_interval(secs => ${GRACE_SEC}::double precision))::timestamptz
              ELSE (l."activity_at" + make_interval(secs => ${IDLE_SEC}::double precision))::timestamptz
            END) AT TIME ZONE 'UTC',
            'pending',
-           now_ts.db_now AT TIME ZONE 'UTC'
-    FROM "edit_locks" l CROSS JOIN now_ts
-    WHERE (l."force_released_at" IS NOT NULL
-       OR l."heartbeat_at" < now_ts.db_now - make_interval(secs => ${GRACE_SEC}::double precision)
-       OR l."activity_at" < now_ts.db_now - make_interval(secs => ${IDLE_SEC}::double precision))
-      -- 2時間より前に止まった鍵は見ない(1時間を過ぎた記録は送らないので不要。30日で記録を消したあとに
-      -- 置き去りの古い鍵を何度も記録し直さない)。合図は操作より古くならないので合図の時刻で切る。
-      AND l."heartbeat_at" >= now_ts.db_now - INTERVAL '2 hours'
+           l.db_now AT TIME ZONE 'UTC'
+    FROM locked l
     ON CONFLICT ("lock_id") DO NOTHING
     RETURNING "id"
   `;
