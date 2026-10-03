@@ -48,7 +48,8 @@ export async function runPushNotifications(now: Date, sender: PushSender): Promi
     for (const s of pending) {
       if (!canStartSource()) break;
       const recipients = await loadSourceRecipients(sourceDeadlineMs);
-      if (!recipients) break;
+      // 顔ぶれを求めている間に残り時間が減っていたら、トランザクションは始めない(@codex #472 P2)。
+      if (!recipients || !canStartSource()) break;
       const r = await planSourceDeliveries(s, now, recipients);
       created[s] += r.created;
       if (r.more) next.push(s);

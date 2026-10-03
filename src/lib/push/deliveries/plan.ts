@@ -52,6 +52,7 @@ export async function lockSubscription(tx: Tx, id: string) {
 
 type SubRef = { id: string; userId: string; bindingId: string };
 const BULK_CHUNK = 1000;
+const NEXT_ACTION_SCAN_LIMIT = 5000;
 
 /**
  * 端末(結び付け)ごとに、まだ含めていない ref_key だけを1通にまとめて記録する。作った通数を返す。
@@ -127,10 +128,16 @@ export async function planNextActionDeliveries(now: Date, opts: { deadlineMs?: n
   // 1つのトランザクションは最大 SEND_TX_TIMEOUT_MS かかるので、その分を残して打ち切る(締め切りを
   // 越えて送信の時間を食わない・@codex #472 P2)。
   const pastDeadline = () => opts.deadlineMs !== undefined && Date.now() + SEND_TX_TIMEOUT_MS >= opts.deadlineMs;
+  if (pastDeadline()) return 0;
+  // 1回に見る端末は5,000台まで。多いときは始める位置を乱数でずらし、毎回同じ所だけを見ない(@codex #472 P2)。
+  const total = await prisma.pushSubscription.count({ where: activeSubscriptionWhere(now) });
+  const skip = total > NEXT_ACTION_SCAN_LIMIT ? randomInt(total - NEXT_ACTION_SCAN_LIMIT + 1) : 0;
   const subs = await prisma.pushSubscription.findMany({
     where: activeSubscriptionWhere(now),
     select: { id: true, userId: true },
     orderBy: { id: "asc" },
+    skip,
+    take: NEXT_ACTION_SCAN_LIMIT,
   });
   const byUser = new Map<string, string[]>();
   for (const s of subs) byUser.set(s.userId, [...(byUser.get(s.userId) ?? []), s.id]);
