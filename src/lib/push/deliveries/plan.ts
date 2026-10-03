@@ -160,6 +160,9 @@ export async function planSourceDeliveries(source: Source, now: Date): Promise<n
     const row = await tx.notificationSourceCursor.findUnique({ where: { source } });
     if (!row) throw new MissingSourceCursorError();
     const c: EventCursor = { t: row.cursorT, i: row.cursorId };
+    // 見つけた時刻=カーソルを押さえて読んだ今(実行の始めの時刻ではない)。この時点で結び付いている
+    // 端末に送る(実行の途中で結び付いた端末を、見つけ済みにしたまま取りこぼさない・@codex #472 P2)。
+    const seenAt = new Date(Math.max(now.getTime(), Date.now()));
     const field = FIELD[source];
     const fetchPage = fetcher(tx, source);
     const after = await fetchPage(afterCursorWhere(field, c), AFTER_CURSOR_LIMIT);
@@ -174,10 +177,10 @@ export async function planSourceDeliveries(source: Source, now: Date): Promise<n
       const fresh = ids.filter((id) => !knownSet.has(id));
       if (fresh.length > 0) {
         await tx.notificationSourceEvent.createMany({
-          data: fresh.map((eventId) => ({ source, eventId, firstSeenAt: now })),
+          data: fresh.map((eventId) => ({ source, eventId, firstSeenAt: seenAt })),
           skipDuplicates: true,
         });
-        created = source === "inquiry" ? await planInquiries(tx, fresh, now) : await planRegistryJobs(tx, fresh, now);
+        created = source === "inquiry" ? await planInquiries(tx, fresh, seenAt) : await planRegistryJobs(tx, fresh, seenAt);
       }
     }
     const next = advanceCursor(c, after.map((r) => ({ t: r.t, i: r.id })));

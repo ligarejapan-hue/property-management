@@ -32,6 +32,12 @@ export const SEND_TX_MAX_WAIT_MS = 5_000;
 export const PUSH_TTL_SECONDS = 2 * 60 * 60;
 /** 送信の記録・見つけた出来事は30日で消す。 */
 export const RECORD_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * 1回の実行で新しい送信を始めてよい時間(実行の始めから)。残りは次の実行で送る。
+ * 中継サービスが遅いと1通に最大20秒(送信のトランザクション)かかるので、timer の curl の
+ * 時間制限(240秒)より十分短くし、実行が次の起動と重ならないようにする(@codex #472 P2)。
+ */
+export const SEND_RUN_BUDGET_MS = 150_000;
 /** 1回の実行で送る上限(残りは次の実行で送る)。 */
 export const SEND_BATCH_LIMIT = 200;
 

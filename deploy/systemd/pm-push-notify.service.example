@@ -31,5 +31,7 @@ EnvironmentFile=/etc/property-management/app.env
 #   値はシェル変数のまま標準入力へ流し、curl には `-H @-` で読ませる。
 # ⚠`%` は必ず `%%` と書く(systemd が `%s` 等を先に置き換えるため・巡回の自動終了と同じ)。
 # 応答は件数だけ(宛先・中身は無い)なので、そのまま journal に残してよい。
+# ⚠curl の時間制限(240秒)は、サーバー側の1回分の持ち時間(新しい送信を始めるのは150秒まで・1通は
+#   最大20秒)より長い。中継サービスが遅くても、curl が先に切れて次の起動と処理が重なることはない。
 ExecStart=/bin/sh -c 'printf "%%s" "x-push-run-secret: $NOTIFICATIONS_PUSH_RUN_SECRET" | /usr/bin/curl --fail --silent --show-error --max-time 240 -X POST http://127.0.0.1:3000/api/notifications/push-run -H @-'
 # 失敗しても次回の tick で拾えるので再起動はしない。

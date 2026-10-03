@@ -16,6 +16,7 @@ export interface PushRunResult {
 }
 
 export async function runPushNotifications(now: Date, sender: PushSender): Promise<PushRunResult> {
+  const startedAtMs = Date.now();
   // 申込・謄本ジョブはカーソルの行が無ければ(migration 前)例外=送らずに失敗で終わる(§7.6)。
   const [inquiry, registryJob] = await (async () => {
     const out: number[] = [];
@@ -23,7 +24,7 @@ export async function runPushNotifications(now: Date, sender: PushSender): Promi
     return out;
   })();
   const nextAction = await planNextActionDeliveries(now);
-  const sent = await sendDueDeliveries(now, sender);
+  const sent = await sendDueDeliveries(now, sender, { startedAtMs });
   const before = new Date(now.getTime() - RECORD_RETENTION_MS);
   const [deliveries, events] = await Promise.all([
     prisma.notificationDelivery.deleteMany({

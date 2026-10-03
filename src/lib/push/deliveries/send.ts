@@ -31,6 +31,7 @@ import {
   RETRY_BACKOFF_MS,
   RETRY_WINDOW_MS,
   SEND_BATCH_LIMIT,
+  SEND_RUN_BUDGET_MS,
   SEND_TX_MAX_WAIT_MS,
   SEND_TX_TIMEOUT_MS,
   inquiryPayload,
@@ -62,8 +63,14 @@ export function claimableWhere(now: Date): Prisma.NotificationDeliveryWhereInput
   };
 }
 
-export async function sendDueDeliveries(now: Date, sender: PushSender): Promise<Record<SendResult, number>> {
+export async function sendDueDeliveries(
+  now: Date,
+  sender: PushSender,
+  opts: { startedAtMs?: number; budgetMs?: number } = {},
+): Promise<Record<SendResult, number>> {
   const stats: Record<SendResult, number> = { sent: 0, failed: 0, gone: 0, cancelled: 0, busy: 0, skipped: 0 };
+  const startedAtMs = opts.startedAtMs ?? Date.now();
+  const budgetMs = opts.budgetMs ?? SEND_RUN_BUDGET_MS;
   const due = await prisma.notificationDelivery.findMany({
     where: claimableWhere(now),
     select: { id: true },
@@ -71,6 +78,8 @@ export async function sendDueDeliveries(now: Date, sender: PushSender): Promise<
     take: SEND_BATCH_LIMIT,
   });
   for (const d of due) {
+    // 持ち時間を過ぎたら新しい送信は始めない(残りは次の実行で・timer の起動と重ならないように)。
+    if (Date.now() - startedAtMs >= budgetMs) break;
     let result: SendResult;
     try {
       result = await sendOne(d.id, now, sender);
@@ -117,7 +126,8 @@ export function sendOne(deliveryId: string, now: Date, sender: PushSender): Prom
     if (claimed.count === 0) return "skipped";
     const mine = { id: d.id, status: "sending", claimedAt };
 
-    const checked = await recheck(tx, d, s.bindingId, now);
+    // 確かめ直しも送る時刻で(実行が長引いて回の境目や日付をまたいでも、古い回・古い件数を送らない・@codex #472 P2)。
+    const checked = await recheck(tx, d, s.bindingId, checkAt);
     if (checked.drop.length > 0) await tx.notificationDeliveryRef.deleteMany({ where: { id: { in: checked.drop } } });
     if (!checked.payload) {
       await tx.notificationDelivery.updateMany({ where: mine, data: { status: "cancelled", lastErrorCode: "nothing_to_send" } });
