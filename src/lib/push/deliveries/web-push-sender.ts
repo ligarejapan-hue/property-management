@@ -38,7 +38,7 @@ export function vapidConfig(env: NodeJS.ProcessEnv = process.env): VapidConfig |
   const subject = env.VAPID_SUBJECT?.trim();
   if (!publicKey || !privateKey || !subject) return null;
   if (!/^[A-Za-z0-9_-]+$/.test(publicKey) || !/^[A-Za-z0-9_-]+$/.test(privateKey)) return null;
-  if (!/^(mailto:|https:\/\/)/.test(subject)) return null;
+  if (!isValidVapidSubject(subject)) return null;
   const pub = Buffer.from(publicKey, "base64url");
   const priv = Buffer.from(privateKey, "base64url");
   // P-256: 公開鍵は非圧縮の65バイト(先頭 0x04)・秘密鍵は32バイト。秘密鍵から求めた公開鍵と一致すること。
@@ -47,10 +47,25 @@ export function vapidConfig(env: NodeJS.ProcessEnv = process.env): VapidConfig |
     const ecdh = createECDH("prime256v1");
     ecdh.setPrivateKey(priv);
     if (!ecdh.getPublicKey().equals(pub)) return null;
+    // web-push 自身の確かめも1度通す(送るときに初めて断られて、送り直しを使い切らないように)。
+    webpush.getVapidHeaders("https://fcm.googleapis.com", subject, publicKey, privateKey, "aes128gcm");
   } catch {
     return null;
   }
   return { publicKey, privateKey, subject };
+}
+
+/** 連絡先(VAPID の subject): `mailto:名前@ドメイン` か、ホスト名のある `https://` の URL(@codex #472 P2)。 */
+export function isValidVapidSubject(subject: string): boolean {
+  if (subject.startsWith("mailto:")) return /^mailto:[^@\s]+@[^@\s]+\.[^@\s]+$/.test(subject);
+  // URL の解釈は `https:///x` を `https://x/` に直してしまうので、書かれたままの形でもホスト名を確かめる。
+  if (!/^https:\/\/[^/\s?#@]+(?:[/?#]\S*)?$/.test(subject)) return false;
+  try {
+    const u = new URL(subject);
+    return u.protocol === "https:" && u.hostname.length > 0 && !u.username && !u.password;
+  } catch {
+    return false;
+  }
 }
 
 export interface RequestDetails {
