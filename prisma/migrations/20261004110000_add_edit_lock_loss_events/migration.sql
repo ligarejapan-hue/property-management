@@ -40,8 +40,12 @@ CREATE INDEX "edit_lock_loss_events_created_at_idx" ON "edit_lock_loss_events"("
 ALTER TABLE "edit_lock_loss_events" ADD CONSTRAINT "edit_lock_loss_events_user_id_fkey"
   FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- ⚠新しい CHECK は NOT VALID で付け(既存の行を読まない=表を押さえるのは一瞬)、確かめは COMMIT の後に
+--   別に行う(VALIDATE は読み書きを止めない・@codex #473 P2)。広げるだけなので既存の行は必ず合う。
 ALTER TABLE "notification_deliveries" DROP CONSTRAINT "notification_deliveries_kind_check";
 ALTER TABLE "notification_deliveries" ADD CONSTRAINT "notification_deliveries_kind_check"
-  CHECK ("kind" IN ('next_action', 'inquiry_new', 'registry_job_done', 'edit_lock_lost'));
+  CHECK ("kind" IN ('next_action', 'inquiry_new', 'registry_job_done', 'edit_lock_lost')) NOT VALID;
 
 COMMIT;
+
+ALTER TABLE "notification_deliveries" VALIDATE CONSTRAINT "notification_deliveries_kind_check";
