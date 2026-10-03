@@ -83,7 +83,8 @@ async function createDelivery(
 
 // ---------- 次回対応(N4・N5) ----------
 
-export async function planNextActionDeliveries(now: Date): Promise<number> {
+export async function planNextActionDeliveries(now: Date, opts: { deadlineMs?: number } = {}): Promise<number> {
+  const pastDeadline = () => opts.deadlineMs !== undefined && Date.now() >= opts.deadlineMs;
   const subs = await prisma.pushSubscription.findMany({
     where: activeSubscriptionWhere(now),
     select: { id: true, userId: true },
@@ -93,11 +94,14 @@ export async function planNextActionDeliveries(now: Date): Promise<number> {
   for (const s of subs) byUser.set(s.userId, [...(byUser.get(s.userId) ?? []), s.id]);
   let created = 0;
   for (const [userId, subIds] of byUser) {
+    // 持ち時間を過ぎたら新しく始めない(残りは次の実行で。回は今の1回だけなので取りこぼしにはならない)。
+    if (pastDeadline()) break;
     const r = await loadRecipient(prisma, userId);
     if (!r) continue;
     const due = await dueNextActions(prisma, r, now);
     if (due.length === 0) continue;
     for (const subId of subIds) {
+      if (pastDeadline()) break;
       created += await prisma.$transaction(async (tx) => {
         const s = await lockSubscription(tx, subId);
         if (!s || s.userId !== userId || s.revokedAt || s.expiresAt <= now) return 0;
