@@ -3,7 +3,7 @@ import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions, handleApiError, ApiError } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { propertyRecordScopeFilter } from "@/lib/property-record-guard";
-import { jstDateToDbDate, jstToday } from "@/lib/notifications/reminder-schedule";
+import { isTimedNextAction, jstDateToDbDate, jstToday, nextActionDeadline } from "@/lib/notifications/reminder-schedule";
 
 const LIMIT = 50;
 
@@ -17,32 +17,62 @@ export async function GET() {
     if (!hasPermission(permissions, "property", "read")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
-    const scope = propertyRecordScopeFilter(session);
-    const todayDb = jstDateToDbDate(jstToday(new Date()));
-    const rows = await prisma.nextAction.findMany({
-      where: {
-        assignedTo: session.id,
-        isCompleted: false,
-        scheduledAt: { lte: todayDb },
-        ...(scope ? { property: scope } : {}),
-      },
-      orderBy: [{ scheduledAt: "asc" }, { id: "asc" }],
-      take: LIMIT + 1,
-      select: {
-        id: true,
-        propertyId: true,
-        scheduledAt: true,
-        actionType: true,
-        property: { select: { address: true } },
-      },
-    });
+    // field_staff は物件の担当範囲(作成 or 担当)だけ。propertyRecordScopeFilter と同じ定義。
+    const scopeUserId = propertyRecordScopeFilter(session) ? session.id : null;
+    const now = new Date();
+    const todayDb = jstDateToDbDate(jstToday(now));
+    const tomorrowDb = new Date(todayDb.getTime() + 24 * 60 * 60 * 1000);
+    // ⚠SQL には Date ではなく文字列で束縛する(Prisma は Date をオフセット無しの UTC 壁時計で送るため、
+    //   ::timestamptz だと DB のタイムゾーンで解釈されてずれる・@codex #470 P2。前例=coverage/cells)。
+    const todayYmd = todayDb.toISOString().slice(0, 10);
+    const tomorrowYmd = tomorrowDb.toISOString().slice(0, 10);
+    const nowIso = now.toISOString();
+    // 並びは「予定日 → その日の期限の時刻(時刻なしは 9:00=知らせを出す時刻と同じ) → id」。
+    // Prisma の orderBy では「時刻なし=9:00」と並べられないため SQL で並べる(@codex #470 P2:
+    // 時刻なしを先頭に置くと、0:30・8:00 の予定が後ろに回り、50件で切ると落ちることがあった)。
+    const rows = await prisma.$queryRaw<
+      Array<{ id: string; property_id: string; scheduled_at: Date; scheduled_time: string | null; action_type: string | null; address: string | null }>
+    >`
+      SELECT na."id", na."property_id", na."scheduled_at", na."scheduled_time", na."action_type", p."address"
+      FROM "next_actions" na
+      JOIN "properties" p ON p."id" = na."property_id"
+      WHERE na."assigned_to" = ${session.id}::uuid
+        AND na."is_completed" = false
+        AND (
+          na."scheduled_at" <= ${todayYmd}::date
+          -- 明日 0:00〜0:04 の予定は、5分前の知らせが今日の夜に出る。押して開いたこの一覧に
+          -- その予定が無いと困るので、知らせの時刻(期限の5分前)を過ぎていれば含める(@codex #470 P2)。
+          OR (
+            na."scheduled_at" = ${tomorrowYmd}::date
+            AND na."scheduled_time" IS NOT NULL
+            AND ((na."scheduled_at" + na."scheduled_time"::time) AT TIME ZONE 'Asia/Tokyo') - INTERVAL '5 minutes' <= ${nowIso}::timestamptz
+          )
+        )
+        AND (${scopeUserId}::uuid IS NULL OR p."created_by" = ${scopeUserId}::uuid OR p."assigned_to" = ${scopeUserId}::uuid)
+      -- 並び: ① 明日の(知らせ済みの)予定 → ② 今日の予定 → ③ 期限切れ(新しい日付から)。
+      -- 知らせを押して開いたとき、いま知らせた予定が50件の外に落ちないように、知らせが出る順に近い
+      -- 予定を先に置く(@codex #470 P2)。同じ日の中は時刻順(時刻なしは 9:00 扱い)。
+      ORDER BY
+        CASE WHEN na."scheduled_at" > ${todayYmd}::date THEN 0 WHEN na."scheduled_at" = ${todayYmd}::date THEN 1 ELSE 2 END ASC,
+        CASE WHEN na."scheduled_at" < ${todayYmd}::date THEN na."scheduled_at" END DESC,
+        na."scheduled_at" ASC,
+        COALESCE(na."scheduled_time", '09:00') ASC,
+        na."id" ASC
+      LIMIT ${LIMIT + 1}
+    `;
     const items = rows.slice(0, LIMIT).map((r) => ({
       id: r.id,
-      propertyId: r.propertyId,
-      scheduledAt: r.scheduledAt.toISOString().slice(0, 10),
-      actionType: r.actionType,
-      overdue: r.scheduledAt.getTime() < todayDb.getTime(),
-      address: r.property.address,
+      propertyId: r.property_id,
+      scheduledAt: r.scheduled_at.toISOString().slice(0, 10),
+      scheduledTime: r.scheduled_time,
+      actionType: r.action_type,
+      // 時刻ありはその時刻(日本時間)を過ぎたら、時刻なしは予定日が今日より前なら期限切れ
+      // (物件の次回対応タブと同じ判定・@codex #470 P2)。
+      overdue: isTimedNextAction(r.scheduled_time)
+        ? nextActionDeadline(r.scheduled_at, r.scheduled_time) < now.getTime()
+        : r.scheduled_at.getTime() < todayDb.getTime(),
+      tomorrow: r.scheduled_at.getTime() > todayDb.getTime(),
+      address: r.address,
     }));
     return NextResponse.json({ items, hasMore: rows.length > LIMIT }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

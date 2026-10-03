@@ -5,6 +5,7 @@ import {
   decideSummaryNotices,
   emptySummaryState,
   nextActionBody,
+  nextActionReminderBody,
   parseSummaryState,
   registryJobBody,
   resetCursors,
@@ -33,6 +34,19 @@ describe("次回対応の知らせ", () => {
     const first = decideSummaryNotices(emptySummaryState(), res({ nextActions: { today: 1, overdue: 0, reminders: [{ key: "k1", slot: 0 }] } }), NOW);
     const next = decideSummaryNotices(first.state, res({ nextActions: { today: 1, overdue: 0, reminders: [{ key: "k1b", slot: 1 }] } }), NOW);
     expect(next.notices).toHaveLength(1);
+  });
+  it("時刻ありの5分前の回は「15:00 の次回対応が1件あります」(時刻ごとに件数・N5)", () => {
+    const r = res({ nextActions: { today: 3, overdue: 0, reminders: [{ key: "t1", slot: 0, dueTime: "15:00" }, { key: "t2", slot: 0, dueTime: "15:00" }, { key: "t3", slot: 0, dueTime: "00:03" }] } });
+    expect(decideSummaryNotices(emptySummaryState(), r, NOW).notices[0].body).toBe("00:03 の次回対応が1件、15:00 の次回対応が2件あります");
+  });
+  it("時刻ありの5分前と、ほかの回が同時に新しいときは両方を出す", () => {
+    expect(nextActionReminderBody([{ dueTime: "15:00" }, {}], 2, 1)).toBe("15:00 の次回対応が1件あります。今日の次回対応が2件、期限切れが1件あります");
+    expect(nextActionReminderBody([{}], 2, 0)).toBe("今日の次回対応が2件あります");
+  });
+  it("見た回は文言に入れない(新しい回だけで数える)", () => {
+    const first = decideSummaryNotices(emptySummaryState(), res({ nextActions: { today: 1, overdue: 0, reminders: [{ key: "t1", slot: 0, dueTime: "15:00" }] } }), NOW);
+    const next = decideSummaryNotices(first.state, res({ nextActions: { today: 2, overdue: 0, reminders: [{ key: "t1", slot: 0, dueTime: "15:00" }, { key: "t2", slot: 0, dueTime: "16:00" }] } }), NOW);
+    expect(next.notices[0].body).toBe("16:00 の次回対応が1件あります");
   });
   it("文言は0件の側を省く", () => {
     expect(nextActionBody(2, 0)).toBe("今日の次回対応が2件あります");
