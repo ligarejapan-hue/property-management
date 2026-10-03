@@ -9,6 +9,10 @@
 --   消すときは DROP TABLE "edit_lock_loss_events"; と CHECK を元の3種類に戻す(その前に edit_lock_lost の行を消す)。
 
 BEGIN;
+-- 外部キー(users)と CHECK の付け替え(notification_deliveries)で表を短く書き込み止めにする。10秒待っても
+-- 取れなければ諦める(失敗したら全部取り消し。やり直しは
+--   `npx prisma migrate resolve --rolled-back 20261004110000_add_edit_lock_loss_events` → `npx prisma migrate deploy`)。
+SET LOCAL lock_timeout = '10s';
 
 CREATE TABLE "edit_lock_loss_events" (
     "id" UUID NOT NULL,
