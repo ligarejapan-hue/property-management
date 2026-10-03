@@ -17,34 +17,33 @@ export async function GET() {
     if (!hasPermission(permissions, "property", "read")) {
       throw new ApiError(403, "権限がありません", "FORBIDDEN");
     }
-    const scope = propertyRecordScopeFilter(session);
+    // field_staff は物件の担当範囲(作成 or 担当)だけ。propertyRecordScopeFilter と同じ定義。
+    const scopeUserId = propertyRecordScopeFilter(session) ? session.id : null;
     const todayDb = jstDateToDbDate(jstToday(new Date()));
-    const rows = await prisma.nextAction.findMany({
-      where: {
-        assignedTo: session.id,
-        isCompleted: false,
-        scheduledAt: { lte: todayDb },
-        ...(scope ? { property: scope } : {}),
-      },
-      orderBy: [{ scheduledAt: "asc" }, { scheduledTime: { sort: "asc", nulls: "first" } }, { id: "asc" }],
-      take: LIMIT + 1,
-      select: {
-        id: true,
-        propertyId: true,
-        scheduledAt: true,
-        scheduledTime: true,
-        actionType: true,
-        property: { select: { address: true } },
-      },
-    });
+    // 並びは「予定日 → その日の期限の時刻(時刻なしは 9:00=知らせを出す時刻と同じ) → id」。
+    // Prisma の orderBy では「時刻なし=9:00」と並べられないため SQL で並べる(@codex #470 P2:
+    // 時刻なしを先頭に置くと、0:30・8:00 の予定が後ろに回り、50件で切ると落ちることがあった)。
+    const rows = await prisma.$queryRaw<
+      Array<{ id: string; property_id: string; scheduled_at: Date; scheduled_time: string | null; action_type: string | null; address: string | null }>
+    >`
+      SELECT na."id", na."property_id", na."scheduled_at", na."scheduled_time", na."action_type", p."address"
+      FROM "next_actions" na
+      JOIN "properties" p ON p."id" = na."property_id"
+      WHERE na."assigned_to" = ${session.id}::uuid
+        AND na."is_completed" = false
+        AND na."scheduled_at" <= ${todayDb}::date
+        AND (${scopeUserId}::uuid IS NULL OR p."created_by" = ${scopeUserId}::uuid OR p."assigned_to" = ${scopeUserId}::uuid)
+      ORDER BY na."scheduled_at" ASC, COALESCE(na."scheduled_time", '09:00') ASC, na."id" ASC
+      LIMIT ${LIMIT + 1}
+    `;
     const items = rows.slice(0, LIMIT).map((r) => ({
       id: r.id,
-      propertyId: r.propertyId,
-      scheduledAt: r.scheduledAt.toISOString().slice(0, 10),
-      scheduledTime: r.scheduledTime,
-      actionType: r.actionType,
-      overdue: r.scheduledAt.getTime() < todayDb.getTime(),
-      address: r.property.address,
+      propertyId: r.property_id,
+      scheduledAt: r.scheduled_at.toISOString().slice(0, 10),
+      scheduledTime: r.scheduled_time,
+      actionType: r.action_type,
+      overdue: r.scheduled_at.getTime() < todayDb.getTime(),
+      address: r.address,
     }));
     return NextResponse.json({ items, hasMore: rows.length > LIMIT }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
