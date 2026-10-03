@@ -40,6 +40,13 @@ export const SEND_PRESEND_LIMIT_MS = SEND_TX_TIMEOUT_MS - SEND_TIMEOUT_MS - SEND
  * (残りは続けて次のトランザクションで・@codex #472 P2)。トランザクションの時間制限は30秒。
  */
 export const SOURCE_EVENTS_PER_TX = 100;
+/**
+ * 申込・謄本ジョブの記録づくりに使ってよいのは、1回分の持ち時間のうち始めから90秒まで
+ * (2つを交互に1回分ずつ進める=片方の溜まりでもう片方や次回対応を止めない・@codex #472 P2)。
+ */
+export const SOURCE_PLAN_BUDGET_MS = 90_000;
+/** 次回対応の記録づくりは始めから120秒まで(残りの30秒以上を送信に残す・@codex #472 P2)。 */
+export const NEXT_ACTION_PLAN_BUDGET_MS = 120_000;
 export const SOURCE_PLAN_TX_TIMEOUT_MS = 30_000;
 /** 古い記録の片付けは1回に1,000件まで(残りは次の実行で)。 */
 export const PURGE_BATCH = 1000;

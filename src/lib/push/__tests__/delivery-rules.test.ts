@@ -7,7 +7,10 @@ vi.mock("@/lib/prisma", () => ({ default: {} }));
 import {
   CLAIM_STALE_MS,
   MAX_ATTEMPTS,
+  NEXT_ACTION_PLAN_BUDGET_MS,
   SEND_FINALIZE_RESERVE_MS,
+  SEND_RUN_BUDGET_MS,
+  SOURCE_PLAN_BUDGET_MS,
   SEND_PRESEND_LIMIT_MS,
   SEND_TIMEOUT_MS,
   SEND_TX_TIMEOUT_MS,
@@ -39,6 +42,12 @@ describe("時間の関係(設計書 §7.5)", () => {
   it("送る前の処理の上限+送信+結果の書き込みの余裕=トランザクションの時間制限", () => {
     expect(SEND_PRESEND_LIMIT_MS).toBeGreaterThan(0);
     expect(SEND_PRESEND_LIMIT_MS + SEND_TIMEOUT_MS + SEND_FINALIZE_RESERVE_MS).toBe(SEND_TX_TIMEOUT_MS);
+  });
+  it("1回分の持ち時間の配分: 出来事の記録づくり < 次回対応の記録づくり < 送信の締め切り < curl の240秒", () => {
+    expect(SOURCE_PLAN_BUDGET_MS).toBeLessThan(NEXT_ACTION_PLAN_BUDGET_MS);
+    expect(NEXT_ACTION_PLAN_BUDGET_MS).toBeLessThan(SEND_RUN_BUDGET_MS);
+    // 締め切りの直前に始めた1回分(最大30秒のトランザクション)が終わっても curl の240秒に届かない
+    expect(SEND_RUN_BUDGET_MS + 30_000).toBeLessThan(240_000);
   });
   it("取り直しは15分・送り直しは最大3回", () => {
     expect(CLAIM_STALE_MS).toBe(15 * 60 * 1000);

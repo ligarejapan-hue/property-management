@@ -6,7 +6,15 @@
 import prisma from "@/lib/prisma";
 import { loadSourceRecipients, planEditLockLossDeliveries, planNextActionDeliveries, planSourceDeliveries } from "./plan";
 import { sendDueDeliveries, type SendResult } from "./send";
-import { PURGE_BATCH, RECORD_RETENTION_MS, SEND_RUN_BUDGET_MS, SOURCES } from "./rules";
+import {
+  NEXT_ACTION_PLAN_BUDGET_MS,
+  PURGE_BATCH,
+  RECORD_RETENTION_MS,
+  SEND_RUN_BUDGET_MS,
+  SOURCE_PLAN_BUDGET_MS,
+  SOURCES,
+  type Source,
+} from "./rules";
 import type { PushSender } from "./web-push-sender";
 
 export interface PushRunResult {
@@ -25,24 +33,32 @@ export async function runPushNotifications(now: Date, sender: PushSender): Promi
   const editLockLost = await planEditLockLossDeliveries(now);
   // 申込・謄本ジョブはカーソルの行が無ければ(migration 前)例外=送らずに失敗で終わる(§7.6)。
   // 持ち時間を過ぎて飛ばしてもカーソルは進まないので、次の実行で同じ所から読む(取りこぼさない)。
-  const [inquiry, registryJob] = await (async () => {
-    const out: number[] = [];
-    // 送り先になれる人は、カーソルを押さえる前に1度だけ求める(権限の確かめをトランザクションの外へ)。
-    const recipients = await loadSourceRecipients();
-    for (const s of SOURCES) {
-      // 1トランザクションずつ進める(1回が大きくなりすぎて時間切れで全部巻き戻る、を繰り返さない)。
-      let created = 0;
-      for (;;) {
-        if (pastDeadline()) break;
-        const r = await planSourceDeliveries(s, now, recipients);
-        created += r.created;
-        if (!r.more) break;
-      }
-      out.push(created);
+  // 2つの出来事を交互に1回分(1トランザクション)ずつ進め、使ってよいのは始めから90秒まで(片方の
+  // 溜まりでもう片方や次回対応を止めない)。送り先になれる人は1回分ごとに、トランザクションの外で
+  // 求め直す(権限の確かめを外に出しつつ、見つけた時点に近い顔ぶれで送り先を決める)。
+  const sourceDeadlineMs = Math.min(deadlineMs, startedAtMs + SOURCE_PLAN_BUDGET_MS);
+  const created: Record<Source, number> = { inquiry: 0, registry_job: 0 };
+  // どちらから始めるかは実行ごとに入れ替える(timer は2分ごと=始めた時刻の2分刻みの偶奇で決める)。
+  // 片方の溜まりで毎回もう片方の番が来ない、を防ぐ(@codex #472 P2)。
+  const first = Math.floor(startedAtMs / 120_000) % SOURCES.length;
+  let pending: Source[] = [...SOURCES.slice(first), ...SOURCES.slice(0, first)];
+  while (pending.length > 0 && Date.now() < sourceDeadlineMs) {
+    const next: Source[] = [];
+    for (const s of pending) {
+      if (Date.now() >= sourceDeadlineMs) break;
+      const recipients = await loadSourceRecipients(sourceDeadlineMs);
+      if (!recipients) break;
+      const r = await planSourceDeliveries(s, now, recipients);
+      created[s] += r.created;
+      if (r.more) next.push(s);
     }
-    return out;
-  })();
-  const nextAction = pastDeadline() ? 0 : await planNextActionDeliveries(now, { deadlineMs });
+    pending = next;
+  }
+  const inquiry = created.inquiry;
+  const registryJob = created.registry_job;
+  // 次回対応の記録づくりは始めから120秒まで(送信に30秒以上を残す)。
+  const nextActionDeadlineMs = Math.min(deadlineMs, startedAtMs + NEXT_ACTION_PLAN_BUDGET_MS);
+  const nextAction = Date.now() >= nextActionDeadlineMs ? 0 : await planNextActionDeliveries(now, { deadlineMs: nextActionDeadlineMs });
   const sent = await sendDueDeliveries(now, sender, { startedAtMs });
   // 古い記録の片付けは持ち時間の内側で、1回に1,000件まで(残りは次の実行で・@codex #472 P2)。
   const purged = pastDeadline() ? { deliveries: 0, events: 0, editLockLosses: 0 } : await purgeOldRecords(now);
