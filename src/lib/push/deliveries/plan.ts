@@ -209,7 +209,35 @@ export class MissingSourceCursorError extends Error {
  * 処理する順は「読み直し範囲(カーソルより前=古い)→ カーソルより後」。カーソルは、処理し終えた
  * 「カーソルより後」の行までしか進めない(途中で打ち切っても、まだの出来事が読み直し範囲から外れない)。
  */
-export async function planSourceDeliveries(source: Source, now: Date): Promise<{ created: number; more: boolean }> {
+/**
+ * 申込・謄本ジョブの送り先になれる人(在籍・権限・通知 ON)。権限の確かめは時間がかかりうるので、
+ * **カーソルを押さえるトランザクションの外で**1回の実行に1度だけ求める(@codex #472 P2)。
+ * 送る直前にも確かめ直すので、この間に権限が外れた人には送らない。
+ */
+export interface SourceRecipients {
+  inquiry: Recipient[];
+  registry: Map<string, Recipient>;
+}
+
+export async function loadSourceRecipients(): Promise<SourceRecipients> {
+  const users = await prisma.user.findMany({ where: { isActive: true }, select: { id: true }, orderBy: { id: "asc" } });
+  const inquiry: Recipient[] = [];
+  const registry = new Map<string, Recipient>();
+  for (const u of users) {
+    const r = await loadRecipient(prisma, u.id);
+    if (!r) continue;
+    if (await canReceiveInquiryNotice(r)) inquiry.push(r);
+    if (canReceiveRegistryNotice(r)) registry.set(r.id, r);
+  }
+  return { inquiry, registry };
+}
+
+export async function planSourceDeliveries(
+  source: Source,
+  now: Date,
+  recipients?: SourceRecipients,
+): Promise<{ created: number; more: boolean }> {
+  const who = recipients ?? (await loadSourceRecipients());
   return prisma.$transaction(async (tx) => {
     // カーソルの行を押さえる(同時に2つの実行が同じ出来事を数えない)。
     const locked = await tx.$queryRaw<Array<{ source: string }>>`
@@ -249,7 +277,8 @@ export async function planSourceDeliveries(source: Source, now: Date): Promise<{
         data: fresh.map((eventId) => ({ source, eventId, firstSeenAt: seenAt })),
         skipDuplicates: true,
       });
-      created = source === "inquiry" ? await planInquiries(tx, fresh, seenAt) : await planRegistryJobs(tx, fresh, seenAt);
+      created =
+        source === "inquiry" ? await planInquiries(tx, fresh, seenAt, who.inquiry) : await planRegistryJobs(tx, fresh, seenAt, who.registry);
     }
     // カーソルは「カーソルより後」のうち、まだ処理していない新しい出来事の手前までだけ進める。
     const firstPending = more ? freshRows[take.length] : null;
@@ -272,17 +301,11 @@ async function boundSubscriptions(tx: Tx, userIds: string[], now: Date) {
   });
 }
 
-async function planInquiries(tx: Tx, inquiryIds: string[], now: Date): Promise<number> {
+async function planInquiries(tx: Tx, inquiryIds: string[], now: Date, recipients: Recipient[]): Promise<number> {
   const inquiries = await tx.dmInquiry.findMany({
     where: { id: { in: inquiryIds } },
     select: { id: true, draft: { select: { property: { select: { createdBy: true, assignedTo: true } } } } },
   });
-  const users = await tx.user.findMany({ where: { isActive: true, inquiryNotifyEnabled: true }, select: { id: true }, orderBy: { id: "asc" } });
-  const recipients: Recipient[] = [];
-  for (const u of users) {
-    const r = await loadRecipient(tx, u.id);
-    if (r && (await canReceiveInquiryNotice(r))) recipients.push(r);
-  }
   const subs = await boundSubscriptions(tx, recipients.map((r) => r.id), now);
   let created = 0;
   for (const s of subs) {
@@ -294,13 +317,13 @@ async function planInquiries(tx: Tx, inquiryIds: string[], now: Date): Promise<n
   return created;
 }
 
-async function planRegistryJobs(tx: Tx, jobIds: string[], now: Date): Promise<number> {
+async function planRegistryJobs(tx: Tx, jobIds: string[], now: Date, recipients: Map<string, Recipient>): Promise<number> {
   const jobs = await tx.registryFetchJob.findMany({ where: { id: { in: jobIds } }, select: { id: true, requestedById: true } });
   let created = 0;
   for (const job of jobs) {
     if (!job.requestedById) continue;
-    const r = await loadRecipient(tx, job.requestedById);
-    if (!r || !canReceiveRegistryNotice(r)) continue;
+    const r = recipients.get(job.requestedById);
+    if (!r) continue;
     // 件数(今見られる物件だけで数え直す)は送る直前に確かめる。ジョブごとに1通。
     for (const s of await boundSubscriptions(tx, [r.id], now)) {
       created += await createDelivery(tx, s, kindOfSource("registry_job"), [eventRefKey("registry_job", job.id)], now);

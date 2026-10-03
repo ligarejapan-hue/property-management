@@ -7,6 +7,7 @@
  * 送り直しで2通になるため。ここでは時間切れで**要求そのものを壊し、終わるのを待ってから**返す。
  * HTTP のリダイレクトは追わない(https.request をそのまま使う)。
  */
+import { createECDH } from "node:crypto";
 import https from "node:https";
 import webpush from "web-push";
 import { checkPushEndpoint } from "@/lib/push/endpoint";
@@ -26,14 +27,29 @@ export interface VapidConfig {
   subject: string;
 }
 
-/** VAPID の鍵3つ。そろっていなければ null(送らない)。 */
+/**
+ * VAPID の鍵3つ。そろっていない・形が正しくない・公開鍵と秘密鍵が組になっていないときは null
+ * (送信の口は 503 で何も記録しない・@codex #472 P2)。書き間違えた鍵で記録を作り、送り直しを
+ * 使い切ってしまわないように、記録づくりの前に確かめる。
+ */
 export function vapidConfig(env: NodeJS.ProcessEnv = process.env): VapidConfig | null {
   const publicKey = env.VAPID_PUBLIC_KEY?.trim();
   const privateKey = env.VAPID_PRIVATE_KEY?.trim();
   const subject = env.VAPID_SUBJECT?.trim();
   if (!publicKey || !privateKey || !subject) return null;
-  if (!/^[A-Za-z0-9_-]{40,200}$/.test(publicKey) || !/^[A-Za-z0-9_-]{20,100}$/.test(privateKey)) return null;
+  if (!/^[A-Za-z0-9_-]+$/.test(publicKey) || !/^[A-Za-z0-9_-]+$/.test(privateKey)) return null;
   if (!/^(mailto:|https:\/\/)/.test(subject)) return null;
+  const pub = Buffer.from(publicKey, "base64url");
+  const priv = Buffer.from(privateKey, "base64url");
+  // P-256: 公開鍵は非圧縮の65バイト(先頭 0x04)・秘密鍵は32バイト。秘密鍵から求めた公開鍵と一致すること。
+  if (pub.length !== 65 || pub[0] !== 0x04 || priv.length !== 32) return null;
+  try {
+    const ecdh = createECDH("prime256v1");
+    ecdh.setPrivateKey(priv);
+    if (!ecdh.getPublicKey().equals(pub)) return null;
+  } catch {
+    return null;
+  }
   return { publicKey, privateKey, subject };
 }
 
