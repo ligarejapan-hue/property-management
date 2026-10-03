@@ -165,3 +165,28 @@ describe("Task 12 fix round 1: guide.html の現場担当者の通知範囲", ()
     expect(guideSrc).not.toContain("担当外の物件について現場担当者が受け取る通知には、町名までの所在など最小限だけが載ります");
   });
 });
+
+// 2026-10-03: 申込者への受付メール(スイッチ既定OFF)と通知 段階2(次回対応・査定の申込のお知らせ)が
+// 本番に入ったあとも、資料に「自動返信は無い」「次回対応の知らせはこれから」が残っていた。
+describe("反映済みの機能を「無い・これから」と書いていない", () => {
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html は申込者への受付メールを「無い」と書かず、ONにしたときだけ送ると書く", (_name, src) => {
+    expect(src()).not.toContain("自動返信メールはありません");
+    expect(src()).toContain("でONにしたときだけ送ります");
+  });
+
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html は次回対応と査定の申込のお知らせを説明している", (_name, src) => {
+    expect(src()).toContain("新しい査定の申込が◯件あります");
+    expect(src()).toContain("自分の次回対応（今日・期限切れ）");
+  });
+
+  it("guide.html は次回対応・査定の申込のお知らせを「これから」に置いていない", () => {
+    expect(guideSrc).not.toContain("次回対応（当日・期限切れ）、新しい査定の申込、謄本の一括取得の完了をベルでお知らせする段");
+    expect(guideSrc).not.toContain("次回対応・査定の申込・謄本の一括取得の完了のお知らせと、画面を閉じていても届く通知は、これから作ります");
+  });
+});
