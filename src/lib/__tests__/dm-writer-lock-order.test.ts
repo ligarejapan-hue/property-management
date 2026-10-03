@@ -214,6 +214,21 @@ describe("DM 反響 writer のロック順序(PR-B・R47: terminal は Owner FOR
     const tx = firstTx(read("src/app/api/properties/sale-dm/inquiries/[inquiryId]/route.ts"));
     assertOrder("inquiry-status", tx, ["lockPropertyRow", "tx.dmInquiry.findUnique", "tx.dmInquiry.update"]);
   });
+
+  it("宛名CSVの1通の配信停止: 先読み→Owner FOR UPDATE→物件親行→控え行→控えの行→読み直し→記録→拒否(確定と同じ並び)", () => {
+    const tx = firstTx(read("src/lib/dm-batch/qr-unsubscribe.ts"));
+    assertOrder("batch-unsubscribe", tx, [
+      "tx.dmExportBatchItem.findUnique", // 先読み(ロックなし)
+      "lockOwnersForUpdate",
+      "lockPropertyRow",
+      "FROM dm_export_batches WHERE id",
+      "FROM dm_export_batch_items WHERE id",
+      "tx.dmExportBatchItem.findUnique", // ロック下の読み直し
+      "tx.propertyDmLog.create",
+      "applyManualReaction",
+      "tx.propertyDmLog.update",
+    ]);
+  });
 });
 
 describe("宛先生成(campaigns POST)の種類つきの分岐(設計 2026-09-27 §3.3.1: 物件 → 台帳 → 写す → 宛先)", () => {

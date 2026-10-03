@@ -179,6 +179,7 @@ const ACTION_LABELS: Record<string, string> = {
   inquiry_auto_reply_sent: "申込者への受付メール送信",
   inquiry_auto_reply_failed: "申込者への受付メール送信失敗",
   inquiry_auto_reply_skipped: "申込者への受付メールを送らなかった",
+  dm_batch_qr_unsubscribe: "宛名CSVの手紙 配信停止(QR)",
   // --- 販売図面・その他 ---
   sales_sheet_design_create: "販売図面作成",
   sales_sheet_design_update: "販売図面更新",

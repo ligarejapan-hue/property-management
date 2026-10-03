@@ -25,6 +25,7 @@ import {
   collectPropertyIds,
   type BatchItemTxLike,
 } from "@/lib/dm-batch/items";
+import { planConfirmLogs } from "@/lib/dm-batch/confirm-plan";
 
 // ---------- POST /api/properties/dm-batches/[id]/confirm ----------
 //
@@ -195,7 +196,51 @@ export async function POST(
       // 記録の生成。DL後に owner/物件が消えた item も「手紙は出ている」ので
       // null のまま記録する(R42/R49。連関は残っている分をコピー=所有者横断の除外が効く)。
       const sentAtDate = new Date(`${body.sentOn}T00:00:00Z`);
-      const logs = items.map((it) => ({
+      // 確定前の配信停止で先に作った記録があれば再利用する(設計 2026-10-03 §5.2)。
+      // items は上で FOR UPDATE 済み=停止の取引と直列化されている。
+      const linkRowsNow = await tx.dmExportBatchItem.findMany({
+        where: { batchId },
+        select: { id: true, logId: true },
+      });
+      const linkedIds = linkRowsNow
+        .map((r) => r.logId)
+        .filter((v): v is string => v != null);
+      const existingLogs =
+        linkedIds.length > 0
+          ? await tx.propertyDmLog.findMany({
+              where: { id: { in: linkedIds } },
+              select: { id: true, sentAt: true },
+            })
+          : [];
+      // 確定前の停止で作った記録の sentAt = 停止を受けた日。停止は手紙が届いた後にしか来ないので、
+      // それより後の投函日は入力の誤り(記録が「送る前に断られた」形になる)。
+      const earliestStopDay = existingLogs
+        .map((l) => l.sentAt.toISOString().slice(0, 10))
+        .sort()[0];
+      if (earliestStopDay && body.sentOn > earliestStopDay) {
+        throw new ApiError(
+          400,
+          `この控えには ${earliestStopDay} に配信停止の申込が届いています。投函日はその日以前を指定してください`,
+          "SENT_ON_AFTER_UNSUBSCRIBE",
+        );
+      }
+      const existing = new Set(existingLogs.map((l) => l.id));
+      const logIdByItem = new Map(linkRowsNow.map((r) => [r.id, r.logId]));
+      const plan = planConfirmLogs(
+        items.map((it) => {
+          const logId = logIdByItem.get(it.id) ?? null;
+          return { id: it.id, logId, logExists: logId != null && existing.has(logId) };
+        }),
+      );
+      if (plan.reuse.length > 0) {
+        await tx.propertyDmLog.updateMany({
+          where: { id: { in: plan.reuse.map((r) => r.logId) } },
+          data: { sentAt: sentAtDate },
+        });
+      }
+      const createSet = new Set(plan.create);
+      const toCreate = items.filter((it) => createSet.has(it.id));
+      const logs = toCreate.map((it) => ({
         id: randomUUID(),
         propertyId: it.propertyId,
         ownerId: it.ownerId,
@@ -208,7 +253,7 @@ export async function POST(
       }));
       if (logs.length > 0) {
         await tx.propertyDmLog.createMany({ data: logs });
-        const linkRows = items.flatMap((it, i) =>
+        const linkRows = toCreate.flatMap((it, i) =>
           it.groupOwnerIds.map((ownerId) => ({ logId: logs[i].id, ownerId })),
         );
         if (linkRows.length > 0) {
@@ -217,8 +262,13 @@ export async function POST(
             skipDuplicates: true,
           });
         }
+        // 控えの行 → 送付記録(以後の配信停止がこの記録に拒否を付ける)。1文でまとめて書く。
+        // ⚠tx.$executeRaw はメソッドとして呼ぶ(取り出して渡すと this が外れ実DBでだけ失敗する)。
+        const itemIds = toCreate.map((it) => it.id);
+        const logIds = logs.map((l) => l.id);
+        await tx.$executeRaw`UPDATE dm_export_batch_items AS i SET log_id = v.log_id FROM (SELECT unnest(${itemIds}::uuid[]) AS id, unnest(${logIds}::uuid[]) AS log_id) AS v WHERE i.id = v.id`;
       }
-      return logs.length;
+      return logs.length + plan.reuse.length;
     });
 
     await writeAuditLog({

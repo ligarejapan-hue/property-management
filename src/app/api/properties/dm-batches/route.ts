@@ -34,6 +34,19 @@ import {
   isTerminalExcluded,
   type TerminalExclusionTx,
 } from "@/lib/dm-batch/terminal-exclusion";
+import { loadSaleDmPublicPageConfig } from "@/lib/sale-dm-letter/config-store";
+
+/**
+ * CSVの「配信停止URL」の頭(売却DM設定の追跡URL)があるか(設計 2026-10-03 §2-6)。
+ * 無ければ列は空で配られる=画面で黙って配らないよう、応答で知らせる。読めなければ「無い」扱い。
+ */
+async function isUnsubscribeUrlAvailable(): Promise<boolean> {
+  try {
+    return !!(await loadSaleDmPublicPageConfig()).trackingBaseUrl;
+  } catch {
+    return false;
+  }
+}
 
 // ---------- POST /api/properties/dm-batches ----------
 //
@@ -191,6 +204,7 @@ export async function POST(request: NextRequest) {
         skippedCount: 0,
         skippedAddressMissingCount: 0,
         reused: true,
+        unsubscribeUrlAvailable: await isUnsubscribeUrlAvailable(),
       });
     }
 
@@ -454,6 +468,7 @@ export async function POST(request: NextRequest) {
             skippedCount: 0,
             skippedAddressMissingCount: 0,
             reused: true,
+            unsubscribeUrlAvailable: await isUnsubscribeUrlAvailable(),
           });
         }
       }
@@ -512,6 +527,7 @@ export async function POST(request: NextRequest) {
       excludedTerminalCount,
       reused: false,
       mailablePropertyCount,
+      unsubscribeUrlAvailable: await isUnsubscribeUrlAvailable(),
     });
   } catch (error) {
     return handleApiError(error);

@@ -37,6 +37,26 @@ describe("出力ボタンの2段階化", () => {
   });
 });
 
+describe("配信停止URLの案内", () => {
+  it("追跡URLが未設定なら、ダウンロードの前に確かめる(この控えは後から設定しても空のまま=やめられる)", () => {
+    expect(PAGE).toContain("最後の列に1通ごとの配信停止URL");
+    // 知らせるだけ(alert)だと、読んだ時点で既にダウンロード=空のまま固定されている。
+    expect(PAGE).toMatch(
+      /res\.unsubscribeUrlAvailable === false[\s\S]{0,200}?window\.confirm\([\s\S]{0,300}?配信停止URLの列は空になります[\s\S]{0,300}?\)\s*\)\s*\{?\s*return;/,
+    );
+    expect(PAGE).toContain("あとで設定しても、この出力のURLは空のまま");
+  });
+
+  it("使い方ガイドとマニュアルに Word の DISPLAYBARCODE と業者への頼み方", () => {
+    for (const f of ["public/docs/guide.html", "public/docs/manual.html"]) {
+      const html = read(f);
+      expect(html).toContain("DISPLAYBARCODE");
+      expect(html).toContain("MERGEFIELD 配信停止URL");
+      expect(html).toContain("配信停止URL の列を QR コードにして");
+    }
+  });
+});
+
 describe("送付の確定モーダル", () => {
   it("一覧は fetchUnconfirmedDmBatches・確定は confirmDmBatch を使う", () => {
     expect(MODAL).toMatch(/fetchUnconfirmedDmBatches\(targetPage\)/);

@@ -4478,6 +4478,8 @@ export async function createDmBatch(filters: Record<string, string>): Promise<{
   reused: boolean;
   /** 拒否・宛先不明の反響で自動除外した宛先数(再利用時は undefined)。 */
   excludedTerminalCount?: number;
+  /** CSVの「配信停止URL」の頭(売却DM設定の追跡URL)があるか。false なら列は空になる。 */
+  unsubscribeUrlAvailable?: boolean;
 }> {
   if (USE_MOCK) {
     await mockDelay();
@@ -4486,6 +4488,7 @@ export async function createDmBatch(filters: Record<string, string>): Promise<{
       rowCount: 3,
       reused: false,
       excludedTerminalCount: 0,
+      unsubscribeUrlAvailable: true,
     };
   }
   return apiFetch("/api/properties/dm-batches", {

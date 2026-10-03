@@ -712,6 +712,7 @@ model PropertyDmLog {
   owner     Owner?    @relation(fields: [ownerId], references: [id], onDelete: SetNull)
   sender    User      @relation(fields: [sentBy], references: [id])
   logOwners PropertyDmLogOwner[]
+  batchItems DmExportBatchItem[]
 
   // 送信回数の集計(_count / groupBy / リレーション件数ソート)を効率化する(Codex R3)。
   @@index([propertyId])
@@ -739,6 +740,9 @@ model DmExportBatch {
   confirmedAt         DateTime? @map("confirmed_at") // null=未確定
   confirmedBy         String?   @map("confirmed_by") @db.Uuid
   sentOn              DateTime? @map("sent_on") @db.Date // 投函日(確定時に入力)
+  // 初回ダウンロードで固定した追跡URL(CSVの「配信停止URL」の頭)。再ダウンロードはこの値で組む
+  // (設定画面で追跡URLを変えても、配ったCSVと同じ内容を出す)。未設定のまま初回なら null=列は空。
+  unsubscribeBaseUrl  String?   @map("unsubscribe_base_url")
 
   items   DmExportBatchItem[]
   creator User                @relation("DmExportBatchCreator", fields: [createdBy], references: [id])
@@ -757,13 +761,17 @@ model DmExportBatchItem {
   position   Int     @default(0)
   propertyId String? @map("property_id") @db.Uuid // 物件削除で null 化(R49・DL後の郵送済み記録を守る)
   ownerId    String? @map("owner_id") @db.Uuid // 代表所有者。削除で null 化(確定を巻き戻さない)
+  // この1通の送付記録。確定時、または確定前の配信停止で記録を作ったときに書く(設計 2026-10-03 §5)。
+  logId      String? @map("log_id") @db.Uuid
 
   batch      DmExportBatch            @relation(fields: [batchId], references: [id], onDelete: Cascade)
   property   Property?                @relation(fields: [propertyId], references: [id], onDelete: SetNull)
   owner      Owner?                   @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  log        PropertyDmLog?           @relation(fields: [logId], references: [id], onDelete: SetNull)
   itemOwners DmExportBatchItemOwner[]
 
   @@index([batchId])
+  @@index([logId])
   @@map("dm_export_batch_items")
 }
 

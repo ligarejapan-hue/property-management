@@ -65,11 +65,12 @@ vi.mock("@/lib/prisma", () => {
     dmExportBatch: { findUnique: vi.fn(), findMany: vi.fn(), updateMany: vi.fn() },
     dmExportBatchItem: { findMany: vi.fn() },
     property: { findMany: vi.fn() },
-    propertyDmLog: { createMany: vi.fn() },
+    propertyDmLog: { createMany: vi.fn(), findMany: vi.fn(async () => []), updateMany: vi.fn() },
     propertyDmLogOwner: { createMany: vi.fn() },
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
   db.$queryRaw = vi.fn(async () => []);
+  db.$executeRaw = vi.fn(async () => 1);
   return { default: db };
 });
 
@@ -83,10 +84,11 @@ const pm = prisma as unknown as {
   dmExportBatch: { findUnique: Mock; findMany: Mock; updateMany: Mock };
   dmExportBatchItem: { findMany: Mock };
   property: { findMany: Mock };
-  propertyDmLog: { createMany: Mock };
+  propertyDmLog: { createMany: Mock; findMany: Mock; updateMany: Mock };
   propertyDmLogOwner: { createMany: Mock };
   $transaction: Mock;
   $queryRaw: Mock;
+  $executeRaw: Mock;
 };
 
 const PERMS_FULL = [
@@ -287,6 +289,66 @@ describe("POST /api/properties/dm-batches/[id]/confirm", () => {
     };
     expect(audit.action).toBe("dm_sent_confirm");
     expect(audit.detail).toMatchObject({ batchId: BATCH_ID, count: 1, sentOn });
+  });
+
+  it("確定前の停止で作った記録は作り直さず、sentAt を投函日に直す。新しく作った記録は logId で結ぶ", async () => {
+    const itemA = makeItemRow({ id: "iA", propertyId: "p1" });
+    const itemB = makeItemRow({ id: "iB", propertyId: "p1", ownerId: "o3", itemOwners: [{ ownerId: "o3" }] });
+    pm.dmExportBatchItem.findMany.mockImplementation(async (args: { select?: Record<string, unknown> }) =>
+      args.select && "logId" in args.select
+        ? [{ id: "iA", logId: null }, { id: "iB", logId: "L-B" }]
+        : [itemA, itemB],
+    );
+    const sentOn = jstDateString();
+    // 停止で作った記録(sentAt=停止の日=今日)。投函日も今日=矛盾なし。
+    pm.propertyDmLog.findMany.mockResolvedValue([{ id: "L-B", sentAt: new Date(`${sentOn}T00:00:00Z`) }]);
+    const res = await POST(makeRequest({ sentOn }), ctx);
+    expect(res.status).toBe(200);
+    const created = pm.propertyDmLog.createMany.mock.calls[0][0].data;
+    expect(created).toHaveLength(1);
+    expect(created[0].ownerId).toBe("o1");
+    expect(pm.propertyDmLog.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["L-B"] } },
+      data: { sentAt: new Date(`${sentOn}T00:00:00Z`) },
+    });
+    // 作った記録の id を控えの行へ書く(1文の UPDATE ... FROM unnest)。
+    const exec = pm.$executeRaw.mock.calls[0];
+    expect((exec[0] as string[]).join("?")).toContain("UPDATE dm_export_batch_items");
+    expect(exec[1]).toEqual(["iA"]);
+    expect(exec[2]).toEqual([created[0].id]);
+    expect(((await res.json()) as { confirmed: number }).confirmed).toBe(2);
+  });
+
+  it("確定前の停止の日より後の投函日は 400(停止は手紙が届いた後にしか来ない)・何も書かない", async () => {
+    // DL は2日前、停止は昨日(停止で作った記録の sentAt=昨日)、投函日=今日 → 矛盾
+    pm.dmExportBatch.findUnique.mockResolvedValue({
+      id: BATCH_ID,
+      createdBy: "user-admin",
+      downloadedAt: new Date(Date.now() - 2 * 86400 * 1000),
+      confirmedAt: null,
+    });
+    pm.dmExportBatchItem.findMany.mockImplementation(async (args: { select?: Record<string, unknown> }) =>
+      args.select && "logId" in args.select ? [{ id: "i1", logId: "L-1" }] : [makeItemRow()],
+    );
+    pm.propertyDmLog.findMany.mockResolvedValue([{ id: "L-1", sentAt: new Date(`${jstDateString(-1)}T00:00:00Z`) }]);
+    const res = await POST(makeRequest({ sentOn: jstDateString() }), ctx);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string; code: string } };
+    expect(body.error.code).toBe("SENT_ON_AFTER_UNSUBSCRIBE");
+    expect(body.error.message).toContain(jstDateString(-1));
+    expect(pm.propertyDmLog.updateMany).not.toHaveBeenCalled();
+    expect(pm.propertyDmLog.createMany).not.toHaveBeenCalled();
+    // 停止の日と同じ投函日なら通る
+    const ok = await POST(makeRequest({ sentOn: jstDateString(-1) }), ctx);
+    expect(ok.status).toBe(200);
+  });
+
+  it("停止が無い控えは全部作り、全部を logId で結ぶ(再利用なし)", async () => {
+    const res = await POST(makeRequest({ sentOn: jstDateString() }), ctx);
+    expect(res.status).toBe(200);
+    expect(pm.propertyDmLog.updateMany).not.toHaveBeenCalled();
+    const created = pm.propertyDmLog.createMany.mock.calls[0][0].data;
+    expect(pm.$executeRaw.mock.calls[0][2]).toEqual(created.map((l: { id: string }) => l.id));
   });
 
   it("DL後に owner が消えた item は ownerId=null で記録する(R42)", async () => {
