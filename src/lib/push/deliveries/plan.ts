@@ -246,10 +246,15 @@ export interface SourceRecipients {
  * `deadlineMs` を過ぎたら途中でやめて null を返す(呼び出し側はその回の記録づくりをしない=
  * 一部の人だけで出来事を「見つけ済み」にしない)。
  */
-export async function loadSourceRecipients(deadlineMs?: number): Promise<SourceRecipients | null> {
+export async function loadSourceRecipients(source: Source, deadlineMs?: number): Promise<SourceRecipients | null> {
   // 送ってよい端末を持つ人だけを見る(端末の無い人は送り先にならない=全員を確かめない・@codex #472 P2)。
+  // 申込は通知 ON の人だけが対象(先に絞る)。確かめるのは処理する出来事に要る区分だけ(@codex #472 P2)。
   const users = await prisma.user.findMany({
-    where: { isActive: true, pushSubscriptions: { some: { revokedAt: null, expiresAt: { gt: new Date() } } } },
+    where: {
+      isActive: true,
+      ...(source === "inquiry" ? { inquiryNotifyEnabled: true } : {}),
+      pushSubscriptions: { some: { revokedAt: null, expiresAt: { gt: new Date() } } },
+    },
     select: { id: true },
     orderBy: { id: "asc" },
   });
@@ -259,8 +264,11 @@ export async function loadSourceRecipients(deadlineMs?: number): Promise<SourceR
     if (deadlineMs !== undefined && Date.now() >= deadlineMs) return null;
     const r = await loadRecipient(prisma, u.id);
     if (!r) continue;
-    if (await canReceiveInquiryNotice(r)) inquiry.push(r);
-    if (canReceiveRegistryNotice(r)) registry.set(r.id, r);
+    if (source === "inquiry") {
+      if (await canReceiveInquiryNotice(r)) inquiry.push(r);
+    } else if (canReceiveRegistryNotice(r)) {
+      registry.set(r.id, r);
+    }
   }
   return { inquiry, registry };
 }
@@ -270,7 +278,7 @@ export async function planSourceDeliveries(
   now: Date,
   recipients?: SourceRecipients,
 ): Promise<{ created: number; more: boolean }> {
-  const who = recipients ?? (await loadSourceRecipients());
+  const who = recipients ?? (await loadSourceRecipients(source));
   if (!who) return { created: 0, more: true };
   // 送り先の端末の数(トランザクションの外で数える)に合わせて、1回分で扱う出来事の件数を決める。
   const recipientIds = source === "inquiry" ? who.inquiry.map((r) => r.id) : [...who.registry.keys()];
