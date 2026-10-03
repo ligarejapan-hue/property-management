@@ -299,8 +299,9 @@ describe("POST /api/properties/dm-batches/[id]/confirm", () => {
         ? [{ id: "iA", logId: null }, { id: "iB", logId: "L-B" }]
         : [itemA, itemB],
     );
-    pm.propertyDmLog.findMany.mockResolvedValue([{ id: "L-B" }]);
     const sentOn = jstDateString();
+    // 停止で作った記録(sentAt=停止の日=今日)。投函日も今日=矛盾なし。
+    pm.propertyDmLog.findMany.mockResolvedValue([{ id: "L-B", sentAt: new Date(`${sentOn}T00:00:00Z`) }]);
     const res = await POST(makeRequest({ sentOn }), ctx);
     expect(res.status).toBe(200);
     const created = pm.propertyDmLog.createMany.mock.calls[0][0].data;
@@ -316,6 +317,30 @@ describe("POST /api/properties/dm-batches/[id]/confirm", () => {
     expect(exec[1]).toEqual(["iA"]);
     expect(exec[2]).toEqual([created[0].id]);
     expect(((await res.json()) as { confirmed: number }).confirmed).toBe(2);
+  });
+
+  it("確定前の停止の日より後の投函日は 400(停止は手紙が届いた後にしか来ない)・何も書かない", async () => {
+    // DL は2日前、停止は昨日(停止で作った記録の sentAt=昨日)、投函日=今日 → 矛盾
+    pm.dmExportBatch.findUnique.mockResolvedValue({
+      id: BATCH_ID,
+      createdBy: "user-admin",
+      downloadedAt: new Date(Date.now() - 2 * 86400 * 1000),
+      confirmedAt: null,
+    });
+    pm.dmExportBatchItem.findMany.mockImplementation(async (args: { select?: Record<string, unknown> }) =>
+      args.select && "logId" in args.select ? [{ id: "i1", logId: "L-1" }] : [makeItemRow()],
+    );
+    pm.propertyDmLog.findMany.mockResolvedValue([{ id: "L-1", sentAt: new Date(`${jstDateString(-1)}T00:00:00Z`) }]);
+    const res = await POST(makeRequest({ sentOn: jstDateString() }), ctx);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string; code: string } };
+    expect(body.error.code).toBe("SENT_ON_AFTER_UNSUBSCRIBE");
+    expect(body.error.message).toContain(jstDateString(-1));
+    expect(pm.propertyDmLog.updateMany).not.toHaveBeenCalled();
+    expect(pm.propertyDmLog.createMany).not.toHaveBeenCalled();
+    // 停止の日と同じ投函日なら通る
+    const ok = await POST(makeRequest({ sentOn: jstDateString(-1) }), ctx);
+    expect(ok.status).toBe(200);
   });
 
   it("停止が無い控えは全部作り、全部を logId で結ぶ(再利用なし)", async () => {

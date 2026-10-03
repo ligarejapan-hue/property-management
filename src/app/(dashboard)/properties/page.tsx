@@ -578,10 +578,15 @@ function PropertiesPageInner() {
         );
       }
       if (res.unsubscribeUrlAvailable === false) {
-        // 配信停止URLの頭(追跡URL)が無いと、列を空のまま配ることになる。黙って配らない。
-        window.alert(
-          "売却DM設定の追跡URLが未設定のため、配信停止URLの列は空になります(手紙に配信停止のQRを刷れません)",
-        );
+        // 配信停止URLの頭(追跡URL)が無いと、列を空のまま配ることになる。初回ダウンロードで
+        // 控えに固定されるので、知らせるだけでは遅い=ダウンロードの前にやめられるようにする。
+        if (
+          !window.confirm(
+            "売却DM設定の追跡URLが未設定のため、配信停止URLの列は空になります(手紙に配信停止のQRを刷れません)。あとで設定しても、この出力のURLは空のままです。このまま出力しますか?(やめる場合は、追跡URLを設定してから出力し直してください)",
+          )
+        ) {
+          return;
+        }
       }
       window.location.href = `/api/properties/dm-batches/${res.batchId}/csv`;
     } catch (err) {

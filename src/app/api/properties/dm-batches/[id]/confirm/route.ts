@@ -209,9 +209,21 @@ export async function POST(
         linkedIds.length > 0
           ? await tx.propertyDmLog.findMany({
               where: { id: { in: linkedIds } },
-              select: { id: true },
+              select: { id: true, sentAt: true },
             })
           : [];
+      // 確定前の停止で作った記録の sentAt = 停止を受けた日。停止は手紙が届いた後にしか来ないので、
+      // それより後の投函日は入力の誤り(記録が「送る前に断られた」形になる)。
+      const earliestStopDay = existingLogs
+        .map((l) => l.sentAt.toISOString().slice(0, 10))
+        .sort()[0];
+      if (earliestStopDay && body.sentOn > earliestStopDay) {
+        throw new ApiError(
+          400,
+          `この控えには ${earliestStopDay} に配信停止の申込が届いています。投函日はその日以前を指定してください`,
+          "SENT_ON_AFTER_UNSUBSCRIBE",
+        );
+      }
       const existing = new Set(existingLogs.map((l) => l.id));
       const logIdByItem = new Map(linkRowsNow.map((r) => [r.id, r.logId]));
       const plan = planConfirmLogs(
