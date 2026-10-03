@@ -6,7 +6,7 @@
 import prisma from "@/lib/prisma";
 import { planNextActionDeliveries, planSourceDeliveries } from "./plan";
 import { sendDueDeliveries, type SendResult } from "./send";
-import { RECORD_RETENTION_MS, SEND_RUN_BUDGET_MS, SOURCES } from "./rules";
+import { PURGE_BATCH, RECORD_RETENTION_MS, SEND_RUN_BUDGET_MS, SOURCES } from "./rules";
 import type { PushSender } from "./web-push-sender";
 
 export interface PushRunResult {
@@ -29,12 +29,28 @@ export async function runPushNotifications(now: Date, sender: PushSender): Promi
   })();
   const nextAction = pastDeadline() ? 0 : await planNextActionDeliveries(now, { deadlineMs });
   const sent = await sendDueDeliveries(now, sender, { startedAtMs });
+  // 古い記録の片付けは持ち時間の内側で、1回に1,000件まで(残りは次の実行で・@codex #472 P2)。
+  const purged = pastDeadline() ? { deliveries: 0, events: 0 } : await purgeOldRecords(now);
+  return { planned: { nextAction, inquiry, registryJob }, sent, purged };
+}
+
+async function purgeOldRecords(now: Date): Promise<{ deliveries: number; events: number }> {
   const before = new Date(now.getTime() - RECORD_RETENTION_MS);
-  const [deliveries, events] = await Promise.all([
-    prisma.notificationDelivery.deleteMany({
-      where: { createdAt: { lt: before }, status: { in: ["sent", "failed", "gone", "cancelled"] } },
-    }),
-    prisma.notificationSourceEvent.deleteMany({ where: { firstSeenAt: { lt: before } } }),
-  ]);
-  return { planned: { nextAction, inquiry, registryJob }, sent, purged: { deliveries: deliveries.count, events: events.count } };
+  const oldDeliveries = await prisma.notificationDelivery.findMany({
+    where: { createdAt: { lt: before }, status: { in: ["sent", "failed", "gone", "cancelled"] } },
+    select: { id: true },
+    take: PURGE_BATCH,
+  });
+  const oldEvents = await prisma.notificationSourceEvent.findMany({
+    where: { firstSeenAt: { lt: before } },
+    select: { source: true, eventId: true },
+    take: PURGE_BATCH,
+  });
+  const deliveries = oldDeliveries.length
+    ? await prisma.notificationDelivery.deleteMany({ where: { id: { in: oldDeliveries.map((d) => d.id) } } })
+    : { count: 0 };
+  const events = oldEvents.length
+    ? await prisma.notificationSourceEvent.deleteMany({ where: { OR: oldEvents.map((e) => ({ source: e.source, eventId: e.eventId })) } })
+    : { count: 0 };
+  return { deliveries: deliveries.count, events: events.count };
 }
