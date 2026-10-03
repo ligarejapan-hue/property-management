@@ -8,6 +8,7 @@
  *   カーソルを進める(途中で失敗したらカーソルも巻き戻る=次の実行でやり直す)。
  * - ref_key に中身(物件名など)は入れない。
  */
+import { randomUUID } from "crypto";
 import prisma from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { advanceCursor, afterCursorWhere, pageAfterWhere, REREAD_PAGE, AFTER_CURSOR_LIMIT, rereadWhere } from "@/lib/notifications/event-cursor";
@@ -49,35 +50,52 @@ export async function lockSubscription(tx: Tx, id: string) {
   return tx.pushSubscription.findUnique({ where: { id } });
 }
 
-/** その端末(結び付け)にまだ含めていない ref_key だけを1通にまとめて記録する。作った通数(0か1)を返す。 */
-async function createDelivery(
+type SubRef = { id: string; userId: string; bindingId: string };
+const BULK_CHUNK = 1000;
+
+/**
+ * 端末(結び付け)ごとに、まだ含めていない ref_key だけを1通にまとめて記録する。作った通数を返す。
+ * 端末の数によらず問い合わせの回数が一定になるよう、まとめて読み・まとめて書く(@codex #472 P2)。
+ */
+async function createDeliveries(
   tx: Tx,
-  sub: { id: string; userId: string; bindingId: string },
+  items: Array<{ sub: SubRef; refKeys: string[] }>,
   kind: "next_action" | "inquiry_new" | "registry_job_done",
-  refKeys: string[],
   now: Date,
 ): Promise<number> {
-  if (refKeys.length === 0) return 0;
-  const existing = await tx.notificationDeliveryRef.findMany({
-    where: { bindingId: sub.bindingId, kind, refKey: { in: refKeys } },
-    select: { refKey: true },
-  });
-  const seen = new Set(existing.map((e) => e.refKey));
-  const fresh = [...new Set(refKeys)].filter((k) => !seen.has(k));
-  if (fresh.length === 0) return 0;
-  const d = await tx.notificationDelivery.create({
-    data: { userId: sub.userId, subscriptionId: sub.id, bindingId: sub.bindingId, kind, scheduledFor: now },
-    select: { id: true },
-  });
-  const r = await tx.notificationDeliveryRef.createMany({
-    data: fresh.map((refKey) => ({ deliveryId: d.id, subscriptionId: sub.id, bindingId: sub.bindingId, kind, refKey })),
-    skipDuplicates: true,
-  });
-  if (r.count === 0) {
-    await tx.notificationDelivery.delete({ where: { id: d.id } });
-    return 0;
+  const wanted = items.filter((x) => x.refKeys.length > 0);
+  if (wanted.length === 0) return 0;
+  const allKeys = [...new Set(wanted.flatMap((x) => x.refKeys))];
+  const bindings = [...new Set(wanted.map((x) => x.sub.bindingId))];
+  const existing = new Set<string>();
+  for (let i = 0; i < bindings.length; i += BULK_CHUNK) {
+    const rows = await tx.notificationDeliveryRef.findMany({
+      where: { kind, bindingId: { in: bindings.slice(i, i + BULK_CHUNK) }, refKey: { in: allKeys } },
+      select: { bindingId: true, refKey: true },
+    });
+    for (const r of rows) existing.add(`${r.bindingId}|${r.refKey}`);
   }
-  return 1;
+  const deliveries: Array<{ id: string; userId: string; subscriptionId: string; bindingId: string; kind: string; scheduledFor: Date }> = [];
+  const refs: Array<{ deliveryId: string; subscriptionId: string; bindingId: string; kind: string; refKey: string }> = [];
+  for (const { sub, refKeys } of wanted) {
+    const fresh = [...new Set(refKeys)].filter((k) => !existing.has(`${sub.bindingId}|${k}`));
+    if (fresh.length === 0) continue;
+    const id = randomUUID();
+    deliveries.push({ id, userId: sub.userId, subscriptionId: sub.id, bindingId: sub.bindingId, kind, scheduledFor: now });
+    for (const refKey of fresh) refs.push({ deliveryId: id, subscriptionId: sub.id, bindingId: sub.bindingId, kind, refKey });
+  }
+  for (let i = 0; i < deliveries.length; i += BULK_CHUNK) {
+    await tx.notificationDelivery.createMany({ data: deliveries.slice(i, i + BULK_CHUNK) });
+  }
+  for (let i = 0; i < refs.length; i += BULK_CHUNK) {
+    await tx.notificationDeliveryRef.createMany({ data: refs.slice(i, i + BULK_CHUNK), skipDuplicates: true });
+  }
+  return deliveries.length;
+}
+
+/** 1つの端末の分(次回対応)。 */
+function createDelivery(tx: Tx, sub: SubRef, kind: "next_action" | "inquiry_new" | "registry_job_done", refKeys: string[], now: Date): Promise<number> {
+  return createDeliveries(tx, [{ sub, refKeys }], kind, now);
 }
 
 // ---------- 次回対応(N4・N5) ----------
@@ -282,27 +300,25 @@ async function planInquiries(tx: Tx, inquiryIds: string[], now: Date, recipients
     select: { id: true, draft: { select: { property: { select: { createdBy: true, assignedTo: true } } } } },
   });
   const subs = await boundSubscriptions(tx, recipients.map((r) => r.id), now);
-  let created = 0;
+  const byId = new Map(recipients.map((r) => [r.id, r]));
+  const items: Array<{ sub: SubRef; refKeys: string[] }> = [];
   for (const s of subs) {
-    const r = recipients.find((x) => x.id === s.userId);
+    const r = byId.get(s.userId);
     if (!r) continue;
-    const keys = inquiries.filter((q) => inquiryInScope(r, q.draft?.property ?? null)).map((q) => eventRefKey("inquiry", q.id));
-    created += await createDelivery(tx, s, kindOfSource("inquiry"), keys, now);
+    items.push({ sub: s, refKeys: inquiries.filter((q) => inquiryInScope(r, q.draft?.property ?? null)).map((q) => eventRefKey("inquiry", q.id)) });
   }
-  return created;
+  return createDeliveries(tx, items, kindOfSource("inquiry"), now);
 }
 
 async function planRegistryJobs(tx: Tx, jobIds: string[], now: Date, recipients: Map<string, Recipient>): Promise<number> {
   const jobs = await tx.registryFetchJob.findMany({ where: { id: { in: jobIds } }, select: { id: true, requestedById: true } });
-  let created = 0;
+  const owners = [...new Set(jobs.flatMap((j) => (j.requestedById && recipients.has(j.requestedById) ? [j.requestedById] : [])))];
+  const subs = await boundSubscriptions(tx, owners, now);
+  // 件数(今見られる物件だけで数え直す)は送る直前に確かめる。ジョブごと・端末ごとに1通。
+  const items: Array<{ sub: SubRef; refKeys: string[] }> = [];
   for (const job of jobs) {
-    if (!job.requestedById) continue;
-    const r = recipients.get(job.requestedById);
-    if (!r) continue;
-    // 件数(今見られる物件だけで数え直す)は送る直前に確かめる。ジョブごとに1通。
-    for (const s of await boundSubscriptions(tx, [r.id], now)) {
-      created += await createDelivery(tx, s, kindOfSource("registry_job"), [eventRefKey("registry_job", job.id)], now);
-    }
+    if (!job.requestedById || !recipients.has(job.requestedById)) continue;
+    for (const s of subs) if (s.userId === job.requestedById) items.push({ sub: s, refKeys: [eventRefKey("registry_job", job.id)] });
   }
-  return created;
+  return createDeliveries(tx, items, kindOfSource("registry_job"), now);
 }
