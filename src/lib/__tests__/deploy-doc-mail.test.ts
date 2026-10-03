@@ -185,6 +185,20 @@ describe("反映済みの機能を「無い・これから」と書いていな�
     expect(src()).toContain("自分の次回対応（今日・期限切れ）");
   });
 
+  // @codex R1: 再通知は期限から1週間で止まる(reminder-schedule.ts REMINDER_STOP_MS)・
+  // 謄本の一括取得の完了も知らせる(summary-state.ts registry_job_done)。
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html は次回対応の再通知が1週間で止まることと、一括取得の完了の知らせを書いている", (_name, src) => {
+    expect(src()).toContain("期限から1週間たつと出なくなります");
+    expect(src()).toContain("謄本の一括取得が完了しました");
+  });
+
+  it("manual.html のお知らせの表は6つ", () => {
+    expect(manualSrc).toContain("いまお知らせに出るのは次の6つです。");
+  });
+
   it("guide.html は次回対応・査定の申込のお知らせを「これから」に置いていない", () => {
     expect(guideSrc).not.toContain("次回対応（当日・期限切れ）、新しい査定の申込、謄本の一括取得の完了をベルでお知らせする段");
     expect(guideSrc).not.toContain("次回対応・査定の申込・謄本の一括取得の完了のお知らせと、画面を閉じていても届く通知は、これから作ります");
