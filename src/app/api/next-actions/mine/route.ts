@@ -49,7 +49,15 @@ export async function GET() {
           )
         )
         AND (${scopeUserId}::uuid IS NULL OR p."created_by" = ${scopeUserId}::uuid OR p."assigned_to" = ${scopeUserId}::uuid)
-      ORDER BY na."scheduled_at" ASC, COALESCE(na."scheduled_time", '09:00') ASC, na."id" ASC
+      -- 並び: ① 明日の(知らせ済みの)予定 → ② 今日の予定 → ③ 期限切れ(新しい日付から)。
+      -- 知らせを押して開いたとき、いま知らせた予定が50件の外に落ちないように、知らせが出る順に近い
+      -- 予定を先に置く(@codex #470 P2)。同じ日の中は時刻順(時刻なしは 9:00 扱い)。
+      ORDER BY
+        CASE WHEN na."scheduled_at" > ${todayYmd}::date THEN 0 WHEN na."scheduled_at" = ${todayYmd}::date THEN 1 ELSE 2 END ASC,
+        CASE WHEN na."scheduled_at" < ${todayYmd}::date THEN na."scheduled_at" END DESC,
+        na."scheduled_at" ASC,
+        COALESCE(na."scheduled_time", '09:00') ASC,
+        na."id" ASC
       LIMIT ${LIMIT + 1}
     `;
     const items = rows.slice(0, LIMIT).map((r) => ({

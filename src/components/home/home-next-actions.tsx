@@ -58,7 +58,7 @@ export function HomeNextActionsView({ items, hasMore }: { items: MyNextAction[];
           </li>
         ))}
       </ul>
-      {hasMore && <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">古いものから50件まで表示しています。</p>}
+      {hasMore && <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">今日・明日の予定と、新しい期限切れから50件まで表示しています。</p>}
     </section>
   );
 }

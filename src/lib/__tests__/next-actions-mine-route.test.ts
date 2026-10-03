@@ -63,7 +63,9 @@ describe("自分の次回対応(ホームの一覧)", () => {
   });
   it("並びは予定日 → 時刻(時刻なしは 9:00) → id(@codex #470 P2)", async () => {
     await GET();
-    expect(lastQuery().sql).toMatch(/ORDER BY na\."scheduled_at" ASC, COALESCE\(na\."scheduled_time", '09:00'\) ASC, na\."id" ASC/);
+    const sql = lastQuery().sql.replace(/\s+/g, " ");
+    // 明日(知らせ済み) → 今日 → 期限切れ(新しい日付から)。同じ日の中は時刻順(時刻なし=9:00)
+    expect(sql).toMatch(/ORDER BY CASE WHEN na\."scheduled_at" > \?::date THEN 0 WHEN na\."scheduled_at" = \?::date THEN 1 ELSE 2 END ASC, CASE WHEN na\."scheduled_at" < \?::date THEN na\."scheduled_at" END DESC, na\."scheduled_at" ASC, COALESCE\(na\."scheduled_time", '09:00'\) ASC, na\."id" ASC/);
   });
   it("時刻ありはその時刻を過ぎたら期限切れ(今日 15:00 を 17:00 に見ると期限切れ・@codex #470 P2)", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
