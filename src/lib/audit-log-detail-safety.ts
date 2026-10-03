@@ -319,6 +319,9 @@ const ACTION_EXTRA_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   inquiry_auto_reply_sent: new Set([]),
   inquiry_auto_reply_failed: new Set(["code"]),
   inquiry_auto_reply_skipped: new Set(["code"]),
+  // 宛名CSVの手紙の配信停止(QR)。result=recorded/already/unsent/missing/conflict/throttled・
+  // batchId/itemId=UUID・createdLog=確定前の停止で送付記録を作ったか。氏名・住所・URL・トークンは載せない。
+  dm_batch_qr_unsubscribe: new Set(["result", "batchId", "itemId", "createdLog", "at"]),
   // 表示名監査（read-only レポート）の閲覧/CSV 出力監査。detail は操作事実の
   // 非PIIメタデータのみ（entity/format=enum・viewedAt=ISO日時・各種件数/真偽）。
   // owner-prefixed な件数/真偽（ownerGroupCount/ownerTruncated/ownerNameVisible）は

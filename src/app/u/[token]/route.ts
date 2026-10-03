@@ -31,6 +31,11 @@ import {
   renderUnsubscribeThrottledPage,
 } from "@/lib/sale-dm-letter/unsubscribe-page";
 import { clientRateKey, createRateLimiter } from "@/lib/public-rate-limit";
+import {
+  isBatchItemUnsubscribeToken,
+  verifyBatchItemUnsubscribeToken,
+} from "@/lib/dm-batch/unsubscribe-token";
+import { recordBatchItemUnsubscribe } from "@/lib/dm-batch/qr-unsubscribe";
 
 /**
  * 認証不要の公開エンドポイント(proxy.ts の PUBLIC_PATHS に "/u/" を追加済み)。
@@ -45,6 +50,8 @@ import { clientRateKey, createRateLimiter } from "@/lib/public-rate-limit";
  *  6. 在否を答えない — 宛先が見つからなくても同じ「受け付けました」(列挙耐性)。
  *  7. 書き込みは手動反響と同じ applyManualReaction + R47 ロック順序(Owner→物件→子)。
  *  8. すべての結果を監査ログへ(出所 result 付き) — 異常な停止の集中を後から追える。
+ *  9. 宛名CSVの1通(c形式のトークン)は署名の用途ラベルを分けて同じ入口で受ける
+ *     (記録は src/lib/dm-batch/qr-unsubscribe.ts・設計 2026-10-03)。
  */
 
 // 回数制限(プロセス内保持=単一インスタンス運用前提。詳細は public-rate-limit.ts)。
@@ -122,6 +129,44 @@ export async function POST(
   if (!key) return html(renderUnsubscribeInvalidPage(), 503);
 
   const { token } = await params;
+
+  // 宛名CSVの1通(`c<32桁16進>.<署名>`)。入口の守り(per-IP・Origin・鍵)は共通、
+  // 署名検証・回数制限・記録・監査をこの分岐で行う(売却DMの処理には入らない)。
+  if (isBatchItemUnsubscribeToken(token)) {
+    const itemId = verifyBatchItemUnsubscribeToken(token, key);
+    if (!itemId) return html(renderUnsubscribeInvalidPage(), 400);
+    if (!tokenLimiter.hit(`u-token:${itemId}`)) {
+      return html(renderUnsubscribeThrottledPage(), 429);
+    }
+    if (!postGlobalLimiter.hit("global")) {
+      if (throttleAuditLimiter.hit("audit")) {
+        await writeAuditLog({
+          action: "dm_batch_qr_unsubscribe",
+          targetTable: "dm_export_batch_items",
+          detail: { result: "throttled", at: new Date().toISOString() },
+        });
+      }
+      return html(renderUnsubscribeThrottledPage(), 429);
+    }
+    const r = await recordBatchItemUnsubscribe(itemId);
+    await writeAuditLog({
+      action: "dm_batch_qr_unsubscribe",
+      targetTable: "dm_export_batch_items",
+      targetId: itemId,
+      detail: {
+        result: r.kind,
+        batchId: "batchId" in r ? r.batchId : null,
+        itemId,
+        createdLog: r.kind === "recorded" ? r.createdLog : false,
+        at: new Date().toISOString(),
+      },
+    });
+    if (r.kind === "conflict") return html(renderUnsubscribeBusyPage(), 409);
+    // 手紙が確認できない(未ダウンロード・旧控えの引き当て不能)。成功と言わない。
+    if (r.kind === "unsent") return html(renderUnsubscribeInvalidPage(), 200);
+    return html(renderUnsubscribeDonePage(), 200);
+  }
+
   const trackingToken = verifyUnsubscribeToken(token, key);
   if (!trackingToken) {
     // 形式外/署名不一致。404/400 の出し分けで情報を増やさないよう、どちらも同じ画面。
