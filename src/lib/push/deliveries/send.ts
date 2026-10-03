@@ -64,14 +64,20 @@ export function claimableWhere(now: Date): Prisma.NotificationDeliveryWhereInput
   };
 }
 
-/** 回数・期間を使い切った送信中の残骸は failed で締める(もう取り直さない)。 */
+/** 回数・期間を使い切った送信中の残骸は failed で締める(もう取り直さない)。1回に1,000件まで。 */
 export async function closeAbandonedClaims(now: Date): Promise<number> {
-  const r = await prisma.notificationDelivery.updateMany({
+  const ids = await prisma.notificationDelivery.findMany({
     where: {
       status: "sending",
       claimedAt: { lt: new Date(now.getTime() - CLAIM_STALE_MS) },
       OR: [{ attempts: { gte: MAX_ATTEMPTS } }, { scheduledFor: { lte: new Date(now.getTime() - RETRY_WINDOW_MS) } }],
     },
+    select: { id: true },
+    take: 1000,
+  });
+  if (ids.length === 0) return 0;
+  const r = await prisma.notificationDelivery.updateMany({
+    where: { id: { in: ids.map((x) => x.id) }, status: "sending" },
     data: { status: "failed", lastErrorCode: "abandoned" },
   });
   return r.count;
@@ -92,6 +98,8 @@ export async function sendDueDeliveries(
   const stats: Record<SendResult, number> = { sent: 0, failed: 0, gone: 0, cancelled: 0, busy: 0, skipped: 0 };
   const startedAtMs = opts.startedAtMs ?? Date.now();
   const budgetMs = opts.budgetMs ?? SEND_RUN_BUDGET_MS;
+  // 持ち時間を過ぎていたら片付けも送信も始めない(@codex #472 P2)。
+  if (Date.now() - startedAtMs >= budgetMs) return stats;
   await closeAbandonedClaims(now);
   const due = await prisma.notificationDelivery.findMany({
     where: claimableWhere(now),
