@@ -97,6 +97,17 @@ describe("POST /api/notifications/push-run", () => {
     expect(isPublicPath("/api/notifications/push-run-x")).toBe(false);
     expect(isPublicPath("/api/notifications/summary")).toBe(false);
   });
+  it("nginx の雛形で、外からは送信の口を 404 にする(timer は 127.0.0.1 を直接呼ぶ)", () => {
+    const conf = readFileSync(resolve(__dirname, "../../../../../../deploy/nginx/property-management.conf.example"), "utf-8");
+    expect(conf).toMatch(/location = \/api\/notifications\/push-run \{\s*return 404;\s*\}/);
+    const unit = readFileSync(resolve(__dirname, "../../../../../../deploy/systemd/pm-push-notify.service.example"), "utf-8");
+    expect(unit).toContain("http://127.0.0.1:3000/api/notifications/push-run");
+  });
+  it("timer は前回が終わってから2分(始まりからだと、長引いた回のあと二度と動かなくなる)", () => {
+    const timer = readFileSync(resolve(__dirname, "../../../../../../deploy/systemd/pm-push-notify.timer.example"), "utf-8");
+    expect(timer).toMatch(/^OnUnitInactiveSec=2min$/m);
+    expect(timer).not.toMatch(/^OnUnitActiveSec=/m);
+  });
   it("アプリのプロセスの中に常駐のタイマーを置かない(設計書 §7.3)", () => {
     for (const f of ["run.ts", "plan.ts", "send.ts", "web-push-sender.ts", "eligibility.ts", "rules.ts"]) {
       const src = readFileSync(resolve(__dirname, "../../../../../lib/push/deliveries", f), "utf-8");

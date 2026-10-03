@@ -6,10 +6,11 @@
  *   順に処理されるよう、行を FOR UPDATE で押さえてから判断する。
  * - ⚠endpoint・鍵は戻り値・ログ・監査ログに出さない。戻すのは結び付け(binding_id)と範囲・期限だけ。
  */
-import { randomUUID } from "crypto";
+import { ECDH, randomUUID } from "crypto";
 import { ApiError } from "@/lib/api-helpers";
 import prisma from "@/lib/prisma";
 import { checkPushEndpoint } from "./endpoint";
+import { vapidConfig } from "./deliveries/web-push-sender";
 import { SHARED_TTL_MS, decideBinding, type DeviceScope, type ExistingSubscription } from "./binding";
 
 /** 付け替えのトランザクションの時間制限(送信のトランザクション 20秒を待てる長さ)。 */
@@ -34,8 +35,24 @@ export interface SubscriptionResult {
   rebound: boolean;
 }
 
+/**
+ * 端末の鍵の形を確かめる: p256dh = P-256 の曲線上の点(非圧縮65バイト)・auth = 16バイト。
+ * 形だけ合っていて中身が壊れた鍵を受け付けると、送るたびに暗号化で失敗して送り直しを使い切る(@codex #472 P2)。
+ */
+export function isValidSubscriptionKeys(p256dh: unknown, auth: unknown): boolean {
+  if (typeof p256dh !== "string" || !KEY_RE.test(p256dh) || typeof auth !== "string" || !KEY_RE.test(auth)) return false;
+  const pub = Buffer.from(p256dh, "base64url");
+  if (pub.length !== 65 || pub[0] !== 0x04 || Buffer.from(auth, "base64url").length !== 16) return false;
+  try {
+    ECDH.convertKey(pub, "prime256v1", undefined, undefined, "uncompressed");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function assertKeys(p256dh: unknown, auth: unknown): asserts p256dh is string {
-  if (typeof p256dh !== "string" || !KEY_RE.test(p256dh) || typeof auth !== "string" || !KEY_RE.test(auth)) {
+  if (!isValidSubscriptionKeys(p256dh, auth)) {
     throw new ApiError(422, "通知の登録情報が正しくありません", "subscription_invalid");
   }
 }
@@ -165,12 +182,10 @@ export async function revokePushSubscription(
   return res.count > 0;
 }
 
-/** VAPID の公開鍵。3つそろっていなければ null(プッシュは使えない=画面内のお知らせだけ)。 */
+/**
+ * VAPID の公開鍵。送信(4b)と**同じ確かめ**(3つそろう・鍵の形・組・連絡先)を通らなければ null
+ * (プッシュは使えない=画面内のお知らせだけ)。送れない設定のまま登録だけ受け付けない(@codex #472 P2)。
+ */
 export function vapidPublicKey(env: NodeJS.ProcessEnv = process.env): string | null {
-  const pub = env.VAPID_PUBLIC_KEY?.trim();
-  const priv = env.VAPID_PRIVATE_KEY?.trim();
-  const subject = env.VAPID_SUBJECT?.trim();
-  if (!pub || !priv || !subject) return null;
-  if (!/^[A-Za-z0-9_-]{40,200}$/.test(pub)) return null;
-  return pub;
+  return vapidConfig(env)?.publicKey ?? null;
 }

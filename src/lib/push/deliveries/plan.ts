@@ -8,7 +8,7 @@
  *   カーソルを進める(途中で失敗したらカーソルも巻き戻る=次の実行でやり直す)。
  * - ref_key に中身(物件名など)は入れない。
  */
-import { randomUUID } from "crypto";
+import { randomInt, randomUUID } from "crypto";
 import prisma from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { advanceCursor, afterCursorWhere, pageAfterWhere, REREAD_PAGE, AFTER_CURSOR_LIMIT, rereadWhere } from "@/lib/notifications/event-cursor";
@@ -115,7 +115,8 @@ export async function planNextActionDeliveries(now: Date, opts: { deadlineMs?: n
   for (const s of subs) byUser.set(s.userId, [...(byUser.get(s.userId) ?? []), s.id]);
   let created = 0;
   // 始める利用者は実行ごとにずらす(持ち時間で打ち切っても、毎回同じ後ろの人が漏れ続けない・@codex #472 P2)。
-  for (const [userId, subIds] of rotateStart([...byUser.entries()], Date.now())) {
+  const entries = [...byUser.entries()];
+  for (const [userId, subIds] of rotateStart(entries, entries.length ? randomInt(entries.length) : 0)) {
     // 持ち時間を過ぎたら新しく始めない(残りは次の実行で。回は今の1回だけなので取りこぼしにはならない)。
     if (pastDeadline()) break;
     const r = await loadRecipient(prisma, userId);

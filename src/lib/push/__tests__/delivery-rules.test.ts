@@ -64,10 +64,9 @@ describe("1回分の大きさ・始める位置", () => {
     expect(sourceEventsPerTx(40)).toBe(50);
     expect(sourceEventsPerTx(5000)).toBe(1);
   });
-  it("始める位置は2分ごとにずれ、全員に番が回る", () => {
+  it("始める位置を k だけずらす(順番は保つ・全員を1回ずつ)", () => {
     const xs = ["a", "b", "c"];
-    const starts = [0, 1, 2, 3].map((i) => rotateStart(xs, i * 120_000)[0]);
-    expect(starts).toEqual(["a", "b", "c", "a"]);
+    expect([0, 1, 2, 3, -1].map((k) => rotateStart(xs, k).join(""))).toEqual(["abc", "bca", "cab", "abc", "cab"]);
     expect(rotateStart([], 5)).toEqual([]);
   });
 });

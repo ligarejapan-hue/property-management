@@ -7,9 +7,12 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 
 const generateRequestDetails = vi.fn();
-vi.mock("web-push", () => ({ default: { generateRequestDetails: (...a: unknown[]) => generateRequestDetails(...a) } }));
+vi.mock("web-push", async () => {
+  const real = (await vi.importActual<{ default: { getVapidHeaders: unknown } }>("web-push")).default;
+  return { default: { generateRequestDetails: (...a: unknown[]) => generateRequestDetails(...a), getVapidHeaders: real.getVapidHeaders } };
+});
 
-import { createWebPushSender, sendRequest, vapidConfig, type RequestDetails } from "../deliveries/web-push-sender";
+import { createWebPushSender, isValidVapidSubject, sendRequest, vapidConfig, type RequestDetails } from "../deliveries/web-push-sender";
 
 const VAPID = {
   publicKey: "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U",
@@ -81,6 +84,14 @@ describe("VAPID の鍵", () => {
     // 32バイトでない秘密鍵
     expect(vapidConfig({ ...env, VAPID_PRIVATE_KEY: VAPID.privateKey + "AA" })).toBeNull();
   });
+  it("連絡先は mailto のアドレスか、ホスト名のある https の URL だけ", () => {
+    const env = { VAPID_PUBLIC_KEY: VAPID.publicKey, VAPID_PRIVATE_KEY: VAPID.privateKey, VAPID_SUBJECT: VAPID.subject } as unknown as NodeJS.ProcessEnv;
+    for (const bad of ["https://", "https:///x", "mailto:", "mailto:info", "http://example.com", "https://u:p@example.com"]) {
+      expect(vapidConfig({ ...env, VAPID_SUBJECT: bad }), bad).toBeNull();
+    }
+    expect(vapidConfig({ ...env, VAPID_SUBJECT: "https://app.example.com" })).not.toBeNull();
+    expect(isValidVapidSubject("mailto:info@example.com")).toBe(true);
+  });
 });
 
 describe("1回の HTTP 要求(sendRequest)", () => {
@@ -136,6 +147,14 @@ describe("送信(createWebPushSender)", () => {
     expect(r).toEqual({ ok: false, gone: true, code: "http_410" });
     expect(JSON.stringify(r)).not.toContain("secret-response-body");
     expect(JSON.stringify(r)).not.toContain("fcm.googleapis.com");
+  });
+  it("組み立て(暗号化)で失敗したら送らず、端末の登録が壊れている扱い(gone)にする", async () => {
+    generateRequestDetails.mockImplementation(() => {
+      throw new Error("bad key");
+    });
+    const r = await createWebPushSender(VAPID, localRequest)(TARGET, PAYLOAD);
+    expect(r).toEqual({ ok: false, gone: true, code: "invalid_subscription" });
+    expect(received).toHaveLength(0);
   });
   it("500 は送り直し(gone にしない)", async () => {
     generateRequestDetails.mockReturnValue(details());
