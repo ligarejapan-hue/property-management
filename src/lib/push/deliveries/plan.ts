@@ -21,7 +21,18 @@ import {
   type DueNextAction,
   type Recipient,
 } from "./eligibility";
-import { eventRefKey, kindOfSource, nextActionRefKey, SEND_TX_MAX_WAIT_MS, SEND_TX_TIMEOUT_MS, type Source } from "./rules";
+import {
+  EDIT_LOCK_LOSS_NOTIFY_WINDOW_MS,
+  editLockLossRefKey,
+  eventRefKey,
+  kindOfSource,
+  nextActionRefKey,
+  SEND_TX_MAX_WAIT_MS,
+  SEND_TX_TIMEOUT_MS,
+  type DeliveryKind,
+  type Source,
+} from "./rules";
+import { recordExpiredEditLockLosses } from "@/lib/edit-lock/service";
 
 type Tx = Prisma.TransactionClient;
 const TX_OPTS = { timeout: SEND_TX_TIMEOUT_MS, maxWait: SEND_TX_MAX_WAIT_MS };
@@ -43,7 +54,7 @@ export async function lockSubscription(tx: Tx, id: string) {
 async function createDelivery(
   tx: Tx,
   sub: { id: string; userId: string; bindingId: string },
-  kind: "next_action" | "inquiry_new" | "registry_job_done",
+  kind: DeliveryKind,
   refKeys: string[],
   now: Date,
 ): Promise<number> {
@@ -100,6 +111,41 @@ export async function planNextActionDeliveries(now: Date): Promise<number> {
 /** 端末が今の利用者に結び付く前の回は送らない(§7.3)。 */
 export function nextActionKeysFor(due: DueNextAction[], boundAt: Date): string[] {
   return due.filter((d) => d.slotTime >= boundAt.getTime()).map((d) => nextActionRefKey(d.id, d.deadline, d.revMs, d.slot));
+}
+
+// ---------- 編集権限が外れた(N2・段階4c) ----------
+
+/**
+ * 外れた記録を端末ごとの送信記録に分けてから締める(設計書 §7.2・§7.3)。
+ * - 取り直されないまま期限が過ぎた鍵を先に記録する(取り直し・管理者の解除は、その場で記録済み)。
+ * - 1時間を過ぎた記録は送らずに締める(expired)。
+ * - 外れた時刻より後に結び付いた端末には送らない(端末を持っていない間の古い記録を送らない)。
+ * - 送ってよい端末が無くても締める(queued)。記録は SKIP LOCKED で押さえる=同時に2つの実行が同じ記録を分けない。
+ */
+export async function planEditLockLossDeliveries(now: Date): Promise<number> {
+  await recordExpiredEditLockLosses(prisma);
+  return prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "edit_lock_loss_events" WHERE "status" = 'pending' ORDER BY "occurred_at" ASC LIMIT 200 FOR UPDATE SKIP LOCKED`;
+    if (locked.length === 0) return 0;
+    const events = await tx.editLockLossEvent.findMany({ where: { id: { in: locked.map((l) => l.id) } } });
+    const at = new Date(Math.max(now.getTime(), Date.now()));
+    let created = 0;
+    for (const e of events) {
+      if (e.occurredAt.getTime() < at.getTime() - EDIT_LOCK_LOSS_NOTIFY_WINDOW_MS) {
+        await tx.editLockLossEvent.update({ where: { id: e.id }, data: { status: "expired", notifiedAt: at } });
+        continue;
+      }
+      const subs = await tx.pushSubscription.findMany({
+        where: { ...activeSubscriptionWhere(at), userId: e.userId, boundAt: { lte: e.occurredAt } },
+        select: { id: true, userId: true, bindingId: true },
+        orderBy: { id: "asc" },
+      });
+      for (const s of subs) created += await createDelivery(tx, s, "edit_lock_lost", [editLockLossRefKey(e.id)], at);
+      await tx.editLockLossEvent.update({ where: { id: e.id }, data: { status: "queued", notifiedAt: at } });
+    }
+    return created;
+  }, TX_OPTS);
 }
 
 // ---------- 査定申込(N6)・謄本ジョブ(N7) ----------

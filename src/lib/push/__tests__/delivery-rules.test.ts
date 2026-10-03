@@ -10,6 +10,9 @@ import {
   SEND_TIMEOUT_MS,
   SEND_TX_TIMEOUT_MS,
   classifySendError,
+  editLockLossRefKey,
+  editLockLostPayload,
+  parseEditLockLossRefKey,
   eventRefKey,
   inquiryPayload,
   nextActionPayload,
@@ -77,6 +80,30 @@ describe("本文(種類と件数・時刻だけ)", () => {
     expect(r.tag).toBe("registry-job:opaque-key");
     expect(r.body).toBe("謄本の一括取得が完了しました（成功12件・要手動2件・要確認1件）");
     expect(r.url).toBe(`/properties/registry-fetch/${ID}`);
+  });
+});
+
+describe("編集権限が外れた(N2・段階4c)", () => {
+  it("物件は物件の画面へ・tag は画面からの知らせと同じ・理由ごとの文言", () => {
+    const p = editLockLostPayload(B, { resourceType: "property", resourceId: ID, cause: "heartbeat" });
+    expect(p).toEqual({
+      b: B,
+      title: "編集権限が外れました",
+      body: "しばらく操作がなかった、または画面が止まっていたため、編集権限が外れました",
+      url: `/properties/${ID}`,
+      tag: `edit-lock:lost:property:${ID}`,
+    });
+    expect(editLockLostPayload(B, { resourceType: "property", resourceId: ID, cause: "force_released" }).body).toBe(
+      "管理者が編集を終了したため、編集権限が外れました",
+    );
+  });
+  it("所有者はどの物件の画面かサーバーで決めないのでホームへ", () => {
+    expect(editLockLostPayload(B, { resourceType: "owner", resourceId: ID, cause: "idle" }).url).toBe("/home");
+  });
+  it("ref_key は記録の ID だけ", () => {
+    expect(editLockLossRefKey(ID)).toBe(`edit_lock_loss:${ID}`);
+    expect(parseEditLockLossRefKey(`edit_lock_loss:${ID}`)).toBe(ID);
+    expect(parseEditLockLossRefKey(`inquiry:${ID}`)).toBeNull();
   });
 });
 

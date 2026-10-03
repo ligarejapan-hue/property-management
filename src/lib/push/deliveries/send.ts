@@ -34,8 +34,11 @@ import {
   SEND_RUN_BUDGET_MS,
   SEND_TX_MAX_WAIT_MS,
   SEND_TX_TIMEOUT_MS,
+  EDIT_LOCK_LOSS_NOTIFY_WINDOW_MS,
+  editLockLostPayload,
   inquiryPayload,
   nextActionPayload,
+  parseEditLockLossRefKey,
   parseEventRefKey,
   parseNextActionRefKey,
   registryJobPayload,
@@ -208,6 +211,16 @@ export async function recheck(
     if (!jobId || !counts) return { drop: all, payload: null };
     const tagKey = seenKey(deriveNotificationKeys(), r.id, "registry_job", [jobId]);
     return { drop: [], payload: registryJobPayload(bindingId, jobId, tagKey, counts) };
+  }
+  if (d.kind === "edit_lock_lost") {
+    // 外れた持ち主本人の記録で、外れてから1時間以内のものだけ(在籍の確認は上の loadRecipient)。
+    const eventId = d.refs.length === 1 ? parseEditLockLossRefKey(d.refs[0].refKey) : null;
+    const e = eventId ? await tx.editLockLossEvent.findUnique({ where: { id: eventId } }) : null;
+    if (!e || e.userId !== r.id || e.occurredAt.getTime() < now.getTime() - EDIT_LOCK_LOSS_NOTIFY_WINDOW_MS) {
+      return { drop: all, payload: null };
+    }
+    if (e.cause !== "heartbeat" && e.cause !== "idle" && e.cause !== "force_released") return { drop: all, payload: null };
+    return { drop: [], payload: editLockLostPayload(bindingId, { resourceType: e.resourceType, resourceId: e.resourceId, cause: e.cause }) };
   }
   return { drop: all, payload: null };
 }

@@ -5,8 +5,9 @@
  * - 通知の本文は種類と件数・時刻だけ(D4)。文言は段階2の画面内のポップアップと同じ関数を使う。
  */
 import { nextActionReminderBody, registryJobBody, INQUIRY_URL, NEXT_ACTION_URL } from "@/lib/notifications/summary-state";
+import { EDIT_LOCK_LOST_TITLE, editLockLostBody } from "@/lib/notifications/edit-lock-notice";
 
-export const DELIVERY_KINDS = ["next_action", "inquiry_new", "registry_job_done"] as const;
+export const DELIVERY_KINDS = ["next_action", "inquiry_new", "registry_job_done", "edit_lock_lost"] as const;
 export type DeliveryKind = (typeof DELIVERY_KINDS)[number];
 
 export const SOURCES = ["inquiry", "registry_job"] as const;
@@ -63,6 +64,19 @@ export function parseEventRefKey(source: Source, key: string): string | null {
   return m ? m[1] : null;
 }
 
+/** 編集権限が外れた記録: edit_lock_loss:<記録ID>(段階4c・設計書 §7.2)。 */
+export function editLockLossRefKey(eventId: string): string {
+  return `edit_lock_loss:${eventId}`;
+}
+
+export function parseEditLockLossRefKey(key: string): string | null {
+  const m = /^edit_lock_loss:([0-9a-f-]{36})$/.exec(key);
+  return m ? m[1] : null;
+}
+
+/** 外れてから1時間を過ぎた記録は送らない(戻ったときに画面でも知らせる・設計書 §7.3)。 */
+export const EDIT_LOCK_LOSS_NOTIFY_WINDOW_MS = 60 * 60 * 1000;
+
 export function kindOfSource(source: Source): DeliveryKind {
   return source === "inquiry" ? "inquiry_new" : "registry_job_done";
 }
@@ -113,6 +127,24 @@ export function registryJobPayload(
     body: registryJobBody(counts),
     url: `/properties/registry-fetch/${jobId}`,
     tag: `registry-job:${tagKey}`,
+  };
+}
+
+/**
+ * 編集権限が外れた(N2)。tag は段階1の画面からの知らせと同じ(両方から届いても通知欄で1つに置き換わる)。
+ * 開く画面: 物件はその物件の画面。所有者は物件の画面の中で編集するので、どの物件かはサーバーで決めず
+ * ホームへ(URL に入れるのは ID だけ)。「保存されていない入力があります」は画面にしか分からないので付けない。
+ */
+export function editLockLostPayload(
+  bindingId: string,
+  e: { resourceType: "property" | "owner"; resourceId: string; cause: "heartbeat" | "idle" | "force_released" },
+): PushPayload {
+  return {
+    b: bindingId,
+    title: EDIT_LOCK_LOST_TITLE,
+    body: editLockLostBody(e.cause === "force_released" ? "force_released" : "expired"),
+    url: e.resourceType === "property" ? `/properties/${e.resourceId}` : NEXT_ACTION_URL,
+    tag: `edit-lock:lost:${e.resourceType}:${e.resourceId}`,
   };
 }
 
