@@ -213,13 +213,16 @@ describe("反映済みの機能を「無い・これから」と書いていな�
   });
 
   // @codex R3: 右下の知らせは画面を見ているときだけ(summary-poller.tsx show())。
-  it("guide.html は「右下に出る」を画面を見ているときに限っている", () => {
-    expect(guideSrc).not.toContain("と、ベルと画面の右下に出ます");
-    expect(guideSrc).toContain("画面に戻っても右下には出ません");
-  });
-
-  it("manual.html は別のタブを見ている間の分は右下に出ないと書いている", () => {
-    expect(manualSrc).toContain("右下には出ず 🔔 に残ります");
+  // @codex R5: 右下に出るかは「届いた時」ではなく「システムが見つけた時」に画面を見ているかで決まる
+  // (戻った直後にすぐ確かめ直す=summary-poller.tsx の visibilitychange)。
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html は右下に出る条件を「見つけた時点」で書き、戻った直後の分にも触れている", (_name, src) => {
+    expect(src()).not.toContain("と、ベルと画面の右下に出ます");
+    expect(src()).not.toContain("別のタブを見ている間に届いた分は");
+    expect(src()).toContain("別のタブを見ている間にシステムが見つけた分は");
+    expect(src()).toContain("画面に戻るとすぐに確かめ直");
   });
 
   // @codex R4: 自動ログオフの予告(小窓)・編集権限(帯/戻ったときの右下)は別の出方なので、
