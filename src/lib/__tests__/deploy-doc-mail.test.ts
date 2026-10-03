@@ -195,6 +195,23 @@ describe("反映済みの機能を「無い・これから」と書いていな�
     expect(src()).toContain("謄本の一括取得が完了しました");
   });
 
+  // @codex R2: ベルの知らせを列挙する行(用語・稼働中)ごとに、6種類の知らせが揃っているかを見る。
+  const lineWith = (src: string, marker: string) => {
+    const lines = src.split("\n").filter((l) => l.includes(marker));
+    expect(lines).toHaveLength(1);
+    return lines[0];
+  };
+  it.each([
+    ["guide 用語", () => lineWith(guideSrc, "<tr><td>お知らせ（ベル）</td>")],
+    ["guide 稼働中", () => lineWith(guideSrc, "<li><b>お知らせ（ベル）と通知</b>")],
+    ["manual 用語", () => lineWith(manualSrc, "<tr><td>お知らせ（ベル）</td>")],
+  ])("%s の行はベルの知らせを全部挙げている", (_name, line) => {
+    const row = line();
+    for (const word of ["自動ログオフ", "編集権限", "次回対応", "査定の申込", "謄本の一括取得の完了"]) {
+      expect(row).toContain(word);
+    }
+  });
+
   it("manual.html のお知らせの表は6つ", () => {
     expect(manualSrc).toContain("いまお知らせに出るのは次の6つです。");
   });
