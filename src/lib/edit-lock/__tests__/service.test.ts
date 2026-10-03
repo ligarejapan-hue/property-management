@@ -404,6 +404,8 @@ describe("通知 段階4c: 取り直されないまま期限が過ぎた鍵の�
     expectColumnThresholds(sql);
     expect(sql).toMatch(/AT TIME ZONE 'UTC'/);
     expect(sql).toMatch(/ON CONFLICT \("lock_id"\) DO NOTHING/);
+    // 2時間より前に止まった鍵は見ない(古い置き去りの鍵を記録し直さない)
+    expect(sql).toMatch(/AND l\."heartbeat_at" >= now_ts\.db_now - INTERVAL '2 hours'/);
   });
 });
 

@@ -313,9 +313,12 @@ export async function recordExpiredEditLockLosses(db: Db): Promise<number> {
            'pending',
            now_ts.db_now AT TIME ZONE 'UTC'
     FROM "edit_locks" l CROSS JOIN now_ts
-    WHERE l."force_released_at" IS NOT NULL
+    WHERE (l."force_released_at" IS NOT NULL
        OR l."heartbeat_at" < now_ts.db_now - make_interval(secs => ${GRACE_SEC}::double precision)
-       OR l."activity_at" < now_ts.db_now - make_interval(secs => ${IDLE_SEC}::double precision)
+       OR l."activity_at" < now_ts.db_now - make_interval(secs => ${IDLE_SEC}::double precision))
+      -- 2時間より前に止まった鍵は見ない(1時間を過ぎた記録は送らないので不要。30日で記録を消したあとに
+      -- 置き去りの古い鍵を何度も記録し直さない)。合図は操作より古くならないので合図の時刻で切る。
+      AND l."heartbeat_at" >= now_ts.db_now - INTERVAL '2 hours'
     ON CONFLICT ("lock_id") DO NOTHING
     RETURNING "id"
   `;
