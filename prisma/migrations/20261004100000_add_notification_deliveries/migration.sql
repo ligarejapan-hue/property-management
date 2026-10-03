@@ -97,11 +97,15 @@ CREATE INDEX "notification_source_events_first_seen_at_idx" ON "notification_sou
 
 -- 定期実行はカーソルの5分前から読み直すので、反映の直前(10分以内)に届いた申込・完了したジョブは
 -- 「見つけ済み」にしておく(反映前の出来事は送らない・§7.3)。
+-- ⚠上限はカーソルと同じ時刻(now() はこのトランザクションの始めの時刻で固定)。この文を流す間に
+--   確定した、カーソルより後の出来事まで見つけ済みにして知らせを落とさない(@codex #472 P2)。
 INSERT INTO "notification_source_events" ("source", "event_id", "first_seen_at")
   SELECT 'inquiry', "id", (now() AT TIME ZONE 'UTC') FROM "dm_inquiries"
-  WHERE "submitted_at" >= (now() AT TIME ZONE 'UTC') - INTERVAL '10 minutes';
+  WHERE "submitted_at" >= (now() AT TIME ZONE 'UTC') - INTERVAL '10 minutes'
+    AND "submitted_at" <= (now() AT TIME ZONE 'UTC');
 INSERT INTO "notification_source_events" ("source", "event_id", "first_seen_at")
   SELECT 'registry_job', "id", (now() AT TIME ZONE 'UTC') FROM "registry_fetch_jobs"
-  WHERE "completed_at" >= (now() AT TIME ZONE 'UTC') - INTERVAL '10 minutes';
+  WHERE "completed_at" >= (now() AT TIME ZONE 'UTC') - INTERVAL '10 minutes'
+    AND "completed_at" <= (now() AT TIME ZONE 'UTC');
 
 COMMIT;

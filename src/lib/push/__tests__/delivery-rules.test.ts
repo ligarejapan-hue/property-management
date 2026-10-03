@@ -18,6 +18,8 @@ import {
   editLockLossRefKey,
   editLockLostPayload,
   parseEditLockLossRefKey,
+  rotateStart,
+  sourceEventsPerTx,
   eventRefKey,
   inquiryPayload,
   nextActionPayload,
@@ -52,6 +54,21 @@ describe("時間の関係(設計書 §7.5)", () => {
   it("取り直しは15分・送り直しは最大3回", () => {
     expect(CLAIM_STALE_MS).toBe(15 * 60 * 1000);
     expect(MAX_ATTEMPTS).toBe(3);
+  });
+});
+
+describe("1回分の大きさ・始める位置", () => {
+  it("送り先の端末が多いほど1トランザクションの出来事を減らす(1〜100件)", () => {
+    expect(sourceEventsPerTx(0)).toBe(100);
+    expect(sourceEventsPerTx(10)).toBe(100);
+    expect(sourceEventsPerTx(40)).toBe(50);
+    expect(sourceEventsPerTx(5000)).toBe(1);
+  });
+  it("始める位置は2分ごとにずれ、全員に番が回る", () => {
+    const xs = ["a", "b", "c"];
+    const starts = [0, 1, 2, 3].map((i) => rotateStart(xs, i * 120_000)[0]);
+    expect(starts).toEqual(["a", "b", "c", "a"]);
+    expect(rotateStart([], 5)).toEqual([]);
   });
 });
 
