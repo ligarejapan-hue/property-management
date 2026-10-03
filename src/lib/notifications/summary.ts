@@ -29,7 +29,7 @@ import {
   pageAfterWhere,
   rereadWhere,
 } from "./event-cursor";
-import { jstDateToDbDate, jstToday, nextActionDeadline, nextActionReminderSlot } from "./reminder-schedule";
+import { isTimedNextAction, jstDateToDbDate, jstToday, nextActionDeadline, nextActionReminderSlot } from "./reminder-schedule";
 
 type PermissionList = Parameters<typeof hasPermission>[0];
 
@@ -41,7 +41,11 @@ export interface SummarySession {
 export interface NextActionSummary {
   today: number;
   overdue: number;
-  reminders: Array<{ key: string; slot: number }>;
+  /**
+   * dueTime = 時刻ありで「期限の5分前」の回(slot 0)のときだけ、その時刻("HH:MM")。
+   * 画面は「15:00 の次回対応が1件あります」と出す(設計書 §2 N5)。時刻は PII ではない。
+   */
+  reminders: Array<{ key: string; slot: number; dueTime?: string }>;
 }
 
 export interface InquirySummary {
@@ -107,20 +111,28 @@ async function nextActionSummary({ session, permissions, now, keys }: SummaryInp
     prisma.nextAction.count({ where: { ...base, scheduledAt: todayDb } }),
     prisma.nextAction.count({ where: { ...base, scheduledAt: { lt: todayDb } } }),
     prisma.nextAction.findMany({
-      where: { ...base, scheduledAt: { gte: oldest, lte: todayDb } },
-      select: { id: true, scheduledAt: true, updatedAt: true },
+      // 上限は明日まで: 時刻ありで 0:00〜0:04 の予定は、最初の回(5分前)が前日の夜に来るため
+      // (今日までだと日付が変わるまで読まれず、5分前の知らせを落とす・提出前レビュー)。
+      // まだ回が来ていない行は nextActionReminderSlot が null を返すので、広げても出過ぎない。
+      where: { ...base, scheduledAt: { gte: oldest, lte: new Date(todayDb.getTime() + DAY) } },
+      select: { id: true, scheduledAt: true, scheduledTime: true, updatedAt: true, reminderRevAt: true },
       orderBy: [{ scheduledAt: "asc" }, { id: "asc" }],
     }),
   ]);
   const reminders: NextActionSummary["reminders"] = [];
   for (const r of recent) {
-    const deadline = nextActionDeadline(r.scheduledAt);
-    const slot = nextActionReminderSlot(deadline, now.getTime());
+    // 期限 T: 時刻ありは予定日＋時刻、時刻なしは予定日の 9:00(段階3・設計書 §7.4)。
+    const deadline = nextActionDeadline(r.scheduledAt, r.scheduledTime);
+    const slot = nextActionReminderSlot(deadline, now.getTime(), { timed: isTimedNextAction(r.scheduledTime) });
     if (slot === null) continue;
-    // rev(担当と期限の版)は段階2では updatedAt のミリ秒までの ISO(設計書 §5.2)。
+    // rev(担当と期限の版)は段階3から DB のトリガーが進める reminderRevAt(設計書 §5.2・§6)。
+    // 既存行は updatedAt で埋めてあるので、段階2の値と一致する(反映の前後で同じ回が出直さない)。
+    const rev = (r.reminderRevAt ?? r.updatedAt).toISOString();
+    const timed = isTimedNextAction(r.scheduledTime);
     reminders.push({
-      key: seenKey(keys, session.id, "next_action", [r.id, String(deadline), r.updatedAt.toISOString(), String(slot)]),
+      key: seenKey(keys, session.id, "next_action", [r.id, String(deadline), rev, String(slot)]),
       slot,
+      ...(timed && slot === 0 ? { dueTime: r.scheduledTime as string } : {}),
     });
   }
   return { today: todayCount, overdue: overdueCount, reminders };

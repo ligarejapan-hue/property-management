@@ -14,6 +14,7 @@ describe("ホームの「自分の次回対応」(通知 段階2の行き先)", 
         items={[
           { id: "a1", propertyId: "p1", scheduledAt: "2026-09-30", actionType: "電話", overdue: true, address: "東京都○○区1-2-3" },
           { id: "a2", propertyId: "p2", scheduledAt: "2026-10-02", actionType: null, overdue: false, address: "東京都△△区4-5-6" },
+          { id: "a3", propertyId: "p3", scheduledAt: "2026-10-03", scheduledTime: "00:03", actionType: null, overdue: false, tomorrow: true, address: "東京都□□区7-8-9" },
         ]}
       />,
     );
@@ -23,6 +24,7 @@ describe("ホームの「自分の次回対応」(通知 段階2の行き先)", 
     expect(out).toContain('href="/properties/p1"');
     expect(out).toContain('href="/properties/p2"');
     expect(out).toContain("電話");
+    expect(out).toContain("明日 00:03");
   });
   it("0件なら何も出さない・読めるまで(権限なし・失敗)も何も出さない", () => {
     expect(renderToStaticMarkup(<HomeNextActionsView items={[]} hasMore={false} />)).toBe("");

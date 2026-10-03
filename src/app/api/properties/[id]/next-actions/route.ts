@@ -14,10 +14,13 @@ import {
   assertPropertyRecordAccess,
   lockPropertyRecordForWrite,
 } from "@/lib/property-record-guard";
+import { NEXT_ACTION_TIME_RE } from "@/lib/notifications/reminder-schedule";
 
 const createNextActionSchema = z.object({
   assignedTo: z.string().uuid("担当者IDが不正です"),
   scheduledAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "日付はYYYY-MM-DD形式で指定してください"),
+  // 時刻(任意・"HH:MM"・日本時間)。通知 段階3。DB の CHECK 制約と同じ形だけ受け付ける。
+  scheduledTime: z.string().regex(NEXT_ACTION_TIME_RE, "時刻はHH:MM形式で指定してください").optional().nullable(),
   actionType: z.string().max(50).optional().nullable(),
   content: z.string().min(1, "内容は必須です").max(1000),
 });
@@ -97,6 +100,7 @@ export async function POST(
           propertyId,
           assignedTo: data.assignedTo,
           scheduledAt: new Date(data.scheduledAt),
+          scheduledTime: data.scheduledTime ?? null,
           actionType: data.actionType ?? null,
           content: data.content,
           createdBy: session.id,

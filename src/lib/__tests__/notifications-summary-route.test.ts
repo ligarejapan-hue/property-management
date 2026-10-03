@@ -113,6 +113,48 @@ describe("通知の件数の窓口(設計書 §5.1)", () => {
       ]);
       expect(JSON.stringify(r.body)).not.toContain(ID1);
     });
+    it("時刻ありは予定日＋時刻が期限で、5分前が最初の回・版は reminderRevAt を使う(段階3)", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-02T05:56:00Z")); // 日本時間 14:56 = 15:00 の4分前
+      const updatedAt = new Date("2026-10-01T05:06:07.089Z");
+      const reminderRevAt = new Date("2026-09-30T01:02:03.004Z");
+      pm.nextAction.findMany.mockResolvedValue([
+        { id: ID1, scheduledAt: new Date("2026-10-02T00:00:00Z"), scheduledTime: "15:00", updatedAt, reminderRevAt },
+      ]);
+      const r = await call();
+      const T = Date.parse("2026-10-02T15:00:00+09:00");
+      expect(r.body.nextActions.reminders).toEqual([
+        { key: seenKey(KEYS, U, "next_action", [ID1, String(T), reminderRevAt.toISOString(), "0"]), slot: 0, dueTime: "15:00" },
+      ]);
+    });
+    it("時刻 00:03 の明日の予定も、今日 23:58 に5分前の回を出す(回の計算の対象は明日の予定まで)", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-02T14:58:00Z")); // 日本時間 10/2 23:58
+      pm.nextAction.findMany.mockImplementation(async (args: { where: { scheduledAt: { lte: Date } } }) => {
+        // 上限が明日(10/3)まで広がっていること
+        expect(args.where.scheduledAt.lte).toEqual(new Date("2026-10-03T00:00:00.000Z"));
+        return [{ id: ID1, scheduledAt: new Date("2026-10-03T00:00:00Z"), scheduledTime: "00:03", updatedAt: new Date(), reminderRevAt: new Date("2026-10-01T00:00:00Z") }];
+      });
+      const r = await call();
+      expect(r.body.nextActions.reminders).toHaveLength(1);
+      expect(r.body.nextActions.reminders[0].slot).toBe(0);
+    });
+    it("明日の時刻なしの予定は、まだ回が無い(広げても出過ぎない)", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-02T14:58:00Z"));
+      pm.nextAction.findMany.mockResolvedValue([
+        { id: ID1, scheduledAt: new Date("2026-10-03T00:00:00Z"), scheduledTime: null, updatedAt: new Date(), reminderRevAt: new Date() },
+      ]);
+      expect((await call()).body.nextActions.reminders).toEqual([]);
+    });
+    it("時刻ありの5分前より前は回が無い", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-02T05:54:00Z")); // 14:54
+      pm.nextAction.findMany.mockResolvedValue([
+        { id: ID1, scheduledAt: new Date("2026-10-02T00:00:00Z"), scheduledTime: "15:00", updatedAt: new Date(), reminderRevAt: new Date() },
+      ]);
+      expect((await call()).body.nextActions.reminders).toEqual([]);
+    });
     it("期限・版(updatedAt)が変われば別の印(期限の変更・担当 A→B→A で出直す)", () => {
       const T = "1";
       const a = seenKey(KEYS, U, "next_action", [ID1, T, "2026-10-01T00:00:00.000Z", "1"]);

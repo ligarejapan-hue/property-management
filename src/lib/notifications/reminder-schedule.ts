@@ -51,11 +51,22 @@ export function jstDateToDbDate(ymd: string): Date {
   return new Date(`${ymd}T00:00:00.000Z`);
 }
 
+/** 次回対応の時刻("HH:MM"・24時間・日本時間)。DB の CHECK 制約と同じ形。 */
+export const NEXT_ACTION_TIME_RE = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
+
 /**
- * 時刻なしの次回対応の期限 T(D16: 予定日の 9:00 日本時間)。
- * `scheduledAt` は DB の date 列(UTC 0時の Date で返る)。
+ * 次回対応の期限 T。`scheduledAt` は DB の date 列(UTC 0時の Date で返る)。
+ * - 時刻あり(段階3): 予定日＋時刻(日本時間)。
+ * - 時刻なし(D16): 予定日の 9:00(日本時間)。
+ * 形の崩れた時刻は時刻なしとして扱う(DB の CHECK 制約があるので通常は来ない)。
  */
-export function nextActionDeadline(scheduledAt: Date): number {
+export function nextActionDeadline(scheduledAt: Date, scheduledTime?: string | null): number {
   const ymd = scheduledAt.toISOString().slice(0, 10);
-  return Date.parse(`${ymd}T09:00:00.000+09:00`);
+  const time = scheduledTime && NEXT_ACTION_TIME_RE.test(scheduledTime) ? scheduledTime : null;
+  return Date.parse(`${ymd}T${time ?? "09:00"}:00.000+09:00`);
+}
+
+/** 時刻ありか(送信予定の最初の回が期限の5分前になる・設計書 §7.4)。 */
+export function isTimedNextAction(scheduledTime?: string | null): boolean {
+  return !!scheduledTime && NEXT_ACTION_TIME_RE.test(scheduledTime);
 }
