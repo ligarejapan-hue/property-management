@@ -106,15 +106,16 @@ export async function nextActionCounts(db: Db, r: Recipient, now: Date): Promise
 
 // ---------- 査定申込(N6) ----------
 
-/** 新着の申込を知らせてよい人か(在籍・通知 ON・申込一覧を見られる)。 */
+/**
+ * 新着の申込を知らせてよい人か(在籍・通知 ON・申込一覧を見られる)。
+ * ⚠判定そのものの失敗(DB の一時的な失敗など)は「見られない」にせず投げる(@codex #472 P2)。
+ *   記録づくりはトランザクションごと巻き戻ってカーソルも進まず、送る直前なら取り合いが残骸として
+ *   残り、どちらも次の実行でやり直す(一時的な失敗で知らせが永久に落ちない)。
+ */
 export async function canReceiveInquiryNotice(r: Recipient): Promise<boolean> {
   if (!r.inquiryNotifyEnabled) return false;
-  try {
-    const access = await checkSaleDmAccessFor(r.id);
-    return access.ok;
-  } catch {
-    return false;
-  }
+  const access = await checkSaleDmAccessFor(r.id);
+  return access.ok;
 }
 
 /** その申込が本人の見える範囲にあるか(field_staff は申込の物件の作成か担当)。 */

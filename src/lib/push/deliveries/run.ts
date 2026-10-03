@@ -24,7 +24,17 @@ export async function runPushNotifications(now: Date, sender: PushSender): Promi
   // 持ち時間を過ぎて飛ばしてもカーソルは進まないので、次の実行で同じ所から読む(取りこぼさない)。
   const [inquiry, registryJob] = await (async () => {
     const out: number[] = [];
-    for (const s of SOURCES) out.push(pastDeadline() ? 0 : await planSourceDeliveries(s, now));
+    for (const s of SOURCES) {
+      // 1トランザクションずつ進める(1回が大きくなりすぎて時間切れで全部巻き戻る、を繰り返さない)。
+      let created = 0;
+      for (;;) {
+        if (pastDeadline()) break;
+        const r = await planSourceDeliveries(s, now);
+        created += r.created;
+        if (!r.more) break;
+      }
+      out.push(created);
+    }
     return out;
   })();
   const nextAction = pastDeadline() ? 0 : await planNextActionDeliveries(now, { deadlineMs });

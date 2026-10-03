@@ -34,6 +34,12 @@ export const SEND_TX_TIMEOUT_MS = 20_000;
  */
 export const SEND_FINALIZE_RESERVE_MS = 4_000;
 export const SEND_PRESEND_LIMIT_MS = SEND_TX_TIMEOUT_MS - SEND_TIMEOUT_MS - SEND_FINALIZE_RESERVE_MS;
+/**
+ * 申込・謄本ジョブの記録づくりは、1つのトランザクションで新しく見つけた出来事を100件まで
+ * (残りは続けて次のトランザクションで・@codex #472 P2)。トランザクションの時間制限は30秒。
+ */
+export const SOURCE_EVENTS_PER_TX = 100;
+export const SOURCE_PLAN_TX_TIMEOUT_MS = 30_000;
 /** 古い記録の片付けは1回に1,000件まで(残りは次の実行で)。 */
 export const PURGE_BATCH = 1000;
 export const SEND_TX_MAX_WAIT_MS = 5_000;
