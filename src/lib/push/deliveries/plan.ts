@@ -130,15 +130,24 @@ export async function planNextActionDeliveries(now: Date, opts: { deadlineMs?: n
   const pastDeadline = () => opts.deadlineMs !== undefined && Date.now() + SEND_TX_TIMEOUT_MS >= opts.deadlineMs;
   if (pastDeadline()) return 0;
   // 1回に見る端末は5,000台まで。多いときは始める位置を乱数でずらし、毎回同じ所だけを見ない(@codex #472 P2)。
+  //   窓は輪にする(終わりまで来たら先頭から続ける=端の端末も同じ確率で選ばれる・@codex #472 P2)。
   const total = await prisma.pushSubscription.count({ where: activeSubscriptionWhere(now) });
-  const skip = total > NEXT_ACTION_SCAN_LIMIT ? randomInt(total - NEXT_ACTION_SCAN_LIMIT + 1) : 0;
-  const subs = await prisma.pushSubscription.findMany({
-    where: activeSubscriptionWhere(now),
-    select: { id: true, userId: true },
-    orderBy: { id: "asc" },
-    skip,
-    take: NEXT_ACTION_SCAN_LIMIT,
-  });
+  const page = (skip: number, take: number) =>
+    prisma.pushSubscription.findMany({
+      where: activeSubscriptionWhere(now),
+      select: { id: true, userId: true },
+      orderBy: { id: "asc" },
+      skip,
+      take,
+    });
+  let subs: Array<{ id: string; userId: string }>;
+  if (total <= NEXT_ACTION_SCAN_LIMIT) {
+    subs = await page(0, NEXT_ACTION_SCAN_LIMIT);
+  } else {
+    const start = randomInt(total);
+    const head = await page(start, NEXT_ACTION_SCAN_LIMIT);
+    subs = head.length < NEXT_ACTION_SCAN_LIMIT ? [...head, ...(await page(0, NEXT_ACTION_SCAN_LIMIT - head.length))] : head;
+  }
   const byUser = new Map<string, string[]>();
   for (const s of subs) byUser.set(s.userId, [...(byUser.get(s.userId) ?? []), s.id]);
   let created = 0;
