@@ -244,4 +244,30 @@ describe("反映済みの機能を「無い・これから」と書いていな�
     expect(guideSrc).not.toContain("次回対応（当日・期限切れ）、新しい査定の申込、謄本の一括取得の完了をベルでお知らせする段");
     expect(guideSrc).not.toContain("次回対応・査定の申込・謄本の一括取得の完了のお知らせと、画面を閉じていても届く通知は、これから作ります");
   });
+
+  // 2026-10-04: 通知 段階3(次回対応の時刻)・段階4(画面を閉じていても届く通知)が本番に入った。
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html は画面を閉じていても届く通知を「これから・開いている間だけ」と書かず、自分専用の選択と時刻の知らせを書く", (_name, src) => {
+    expect(src()).not.toContain("画面を閉じていても届く通知は、これから作ります");
+    expect(src()).not.toContain("いまの通知は、このシステムの画面を開いている間だけ出ます");
+    expect(src()).not.toContain("<b>このシステムの画面を開いている間だけ</b>出ます。スマホでアプリを裏に回した");
+    expect(src()).toContain("この端末は自分専用");
+    expect(src()).toContain("画面を閉じていても届きます（閉じてから65分まで）。");
+    expect(src()).toContain("5分前");
+  });
+
+  // @codex #476 R1: 閉じていても届くのは4つだけ(自動ログオフの予告・「まもなく外れます」は画面を開いている間だけ)。
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html の用語は閉じていても届く通知を4つに限っている", (_name, src) => {
+    expect(src()).not.toMatch(/通知を許可した端末には、画面を閉じていても通知欄に届/);
+    expect(src()).toContain("編集権限が外れたことの4つ");
+  });
+
+  it("guide.html は画面を閉じていても届く通知を「これから」に置いていない", () => {
+    expect(guideSrc).not.toContain("画面を閉じていてもPC・スマホに届く通知を作ります");
+  });
 });
