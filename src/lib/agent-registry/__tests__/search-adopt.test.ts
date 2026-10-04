@@ -4,7 +4,7 @@ const { db, tx } = vi.hoisted(() => {
   const tx = {
     $queryRaw: vi.fn(),
     mlitAgent: { findUnique: vi.fn() },
-    agent: { findFirst: vi.fn(), update: vi.fn(), create: vi.fn() },
+    agent: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn(), create: vi.fn() },
   };
   const db = {
     $queryRaw: vi.fn(async () => []),
@@ -83,7 +83,7 @@ describe("一覧の会社を名簿へ写す", () => {
     tx.agent.findFirst.mockResolvedValue(null);
   });
 
-  it("★一覧の行を先にロックしてから名簿を見る(同時に2回押されても1件)", async () => {
+  it("★一覧の行を先にロックしてから名簿を見る(同時2回で1件になる前提=実DBの確認は計画の Task 7)", async () => {
     tx.agent.create.mockResolvedValue({ id: "a-new", companyName: reg.companyName, branchName: null, phone: reg.phone });
     await adoptRegistryAgent(MID, "u1");
     const { text } = sqlText(tx.$queryRaw.mock.calls[0]);
@@ -109,6 +109,16 @@ describe("一覧の会社を名簿へ写す", () => {
     const r = await adoptRegistryAgent(MID, "u1");
     expect(r.ok && r.created).toBe(false);
     expect(tx.agent.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "a2" }, data: { mlitAgentId: MID } }));
+    expect(tx.agent.create).not.toHaveBeenCalled();
+  });
+
+  it("★同じ代表電話の名簿の業者が、すでに別の一覧の会社と結び付いていたら書き換えない(それを返すだけ)", async () => {
+    tx.agent.findFirst.mockResolvedValueOnce(null);
+    tx.$queryRaw.mockResolvedValueOnce([{ id: MID }]).mockResolvedValueOnce([{ id: "a3", mlit_agent_id: "other-registry-row" }]);
+    tx.agent.findUnique.mockResolvedValueOnce({ id: "a3", companyName: "グループ会社", branchName: null, phone: "03-0000-1212" });
+    const r = await adoptRegistryAgent(MID, "u1");
+    expect(r).toMatchObject({ ok: true, created: false, agent: { id: "a3" } });
+    expect(tx.agent.update).not.toHaveBeenCalled();
     expect(tx.agent.create).not.toHaveBeenCalled();
   });
 

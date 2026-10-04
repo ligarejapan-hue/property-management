@@ -100,8 +100,8 @@ export function createRegistryClient(opts: RegistryClientOptions = {}): Registry
   let sessionReady = false;
   let lastStart: number | null = null;
   let count = 0;
-  /** 直前の一覧の隠し項目(ページ送りで送り返す)。 */
-  let lastList: { authority: string; hidden: Record<string, string> } | null = null;
+  /** 直前の一覧の隠し項目(ページ送りで送り返す)と、そのときの件数・ページ数。 */
+  let lastList: { authority: string; hidden: Record<string, string>; total: number; pages: number } | null = null;
   let queue: Promise<unknown> = Promise.resolve();
 
   async function request(path: string, form?: Record<string, string>): Promise<string> {
@@ -162,7 +162,7 @@ export function createRegistryClient(opts: RegistryClientOptions = {}): Registry
 
   function readList(html: string, authority: string): ListPage {
     const page = readOrExpire(html, parseListPage);
-    lastList = { authority, hidden: hiddenInputs(html) };
+    lastList = { authority, hidden: hiddenInputs(html), total: page.total, pages: page.pages };
     return page;
   }
 
@@ -173,6 +173,8 @@ export function createRegistryClient(opts: RegistryClientOptions = {}): Registry
 
   async function selectPage(authority: string, page: number): Promise<ListPage> {
     if (!lastList || lastList.authority !== authority) await search(authority);
+    // 止まっている間に件数が減り、続きのページがもう無い=頼まずに空の結果を返す(進め方が一覧の終わりとして扱う)。
+    if (lastList && page > lastList.pages) return { total: lastList.total, pages: lastList.pages, page, rows: [] };
     const html = await request("takkenKensaku.do", {
       ...baseForm(authority),
       ...(lastList?.hidden ?? {}),

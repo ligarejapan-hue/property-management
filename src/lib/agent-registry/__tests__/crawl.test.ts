@@ -16,7 +16,7 @@ import type { Detail, ListPage, ListRow } from "@/lib/agent-registry/parse";
 type Site = Record<string, ListRow[][]>;
 
 function row(key: string, name = `会社${key}`, address = `住所${key}`): ListRow {
-  return { licenseKey: key, authority: key.slice(0, 2), licenseLabel: `L${key}`, companyName: name, address };
+  return { licenseKey: key, authority: key.slice(0, 2), licenseLabel: `L${key}`, companyName: name, address, isMain: true };
 }
 
 /** 5行政庁×2ページ×1社の小さな先方。 */
@@ -26,14 +26,19 @@ function smallSite(): Site {
   return s;
 }
 
-function fakeClient(site: Site, opts: { failAt?: Set<number>; failKind?: FetchError["kind"] } = {}) {
+function fakeClient(
+  site: Site,
+  opts: { failAt?: Set<number>; failKind?: FetchError["kind"]; brokenDetail?: string } = {},
+) {
   let n = 0;
   const log: string[] = [];
   const hit = (what: string) => {
     n++;
     log.push(what);
     if (opts.failAt?.has(n)) throw new FetchError(opts.failKind ?? "http_5xx");
+    if (opts.brokenDetail && what === `detail ${opts.brokenDetail}`) throw new FetchError("layout");
   };
+  // 本物の client と同じく、ページ数より先のページは空の結果を返す。
   const page = (a: string, p: number): ListPage => {
     const pages = site[a] ?? [];
     return { total: pages.flat().length, pages: pages.length, page: pages.length ? p : 0, rows: pages[p - 1] ?? [] };
@@ -64,6 +69,7 @@ type Rec = ListRow & {
   seenCycle: string | null;
   needsDetail: boolean;
   detailAt: Date | null;
+  detailFailCount: number;
   phone: string | null;
   companyKana: string | null;
 };
@@ -84,25 +90,30 @@ function memoryStore() {
         const changed =
           !prev || prev.companyName !== r.companyName || prev.address !== r.address || prev.licenseLabel !== r.licenseLabel;
         recs.set(r.licenseKey, {
-          ...(prev ?? { phone: null, companyKana: null, detailAt: null }),
+          ...(prev ?? { phone: null, companyKana: null, detailAt: null, detailFailCount: 0 }),
           ...r,
           listed: true,
           seenCycle: cycle,
           needsDetail: changed ? true : prev!.needsDetail,
+          detailFailCount: prev && prev.seenCycle === cycle ? prev.detailFailCount : 0,
         } as Rec);
       }
       return rows.length;
     },
     async nextNeedingDetail(cycle, limit) {
       return [...recs.values()]
-        .filter((r) => r.needsDetail && r.listed && r.seenCycle === cycle)
+        .filter((r) => r.needsDetail && r.listed && r.seenCycle === cycle && r.detailFailCount < 3)
+        .sort((a, b) => a.detailFailCount - b.detailFailCount || a.licenseKey.localeCompare(b.licenseKey))
         .map((r) => r.licenseKey)
-        .sort()
         .slice(0, limit);
+    },
+    async markDetailFailed(key) {
+      const r = recs.get(key)!;
+      recs.set(key, { ...r, detailFailCount: r.detailFailCount + 1 });
     },
     async saveDetail(d, at) {
       const r = recs.get(d.licenseKey)!;
-      recs.set(d.licenseKey, { ...r, phone: d.phone, companyKana: d.companyKana, needsDetail: false, detailAt: at });
+      recs.set(d.licenseKey, { ...r, phone: d.phone, companyKana: d.companyKana, needsDetail: false, detailAt: at, detailFailCount: 0 });
     },
     async closeCycle(cycle) {
       let n = 0;
@@ -285,6 +296,44 @@ describe("進め方", () => {
     const { store } = memoryStore();
     const r = await crawlStep({ client: wrong, store, now: () => NIGHT, budget: BIG });
     expect(r.stopped).toBe("layout");
+  });
+
+  it("★詳細がいつも読めない会社が1社あっても、ほかの会社は進み、一巡は終わる(その会社だけ3回で諦める)", async () => {
+    const { client, log } = fakeClient(smallSite(), { brokenDetail: "13000001" });
+    const { store, recs, getStates } = memoryStore();
+    for (let night = 0; night < 3; night++) {
+      const at = new Date(NIGHT.getTime() + night * 24 * 60 * 60 * 1000);
+      for (let i = 0; i < 6; i++) await crawlStep({ client, store, now: () => at, budget: BIG });
+    }
+    expect(getStates().every((s) => s.phase === "done")).toBe(true);
+    expect(recs.get("13000001")!.needsDetail).toBe(true);
+    expect([...recs.values()].filter((r) => r.phone !== null)).toHaveLength(9);
+    expect(log.filter((l) => l === "detail 13000001")).toHaveLength(3);
+  });
+
+  it("★止まっている間にページ数が減った(続きのページがもう無い)→ その行政庁の一覧は終わりとして進む", async () => {
+    const site = smallSite();
+    site["13"] = [[row("13000001")], [row("13000002")], [row("13000003")]];
+    const { client } = fakeClient(site);
+    const { store, getStates } = memoryStore();
+    await crawlStep({ client, store, now: () => NIGHT, budget: { ...BIG, maxRequests: 4 } }); // 00 の2ページ+13 の2ページ
+    expect(getStates().find((s) => s.authority === "13")!.nextPage).toBe(3);
+    site["13"] = [[row("13000001")], [row("13000002")]];
+    const r = await crawlStep({ client, store, now: () => NIGHT, budget: BIG });
+    expect(r.stopped).toBeNull();
+    expect(getStates().every((s) => s.phase === "done")).toBe(true);
+  });
+
+  it("★行政庁の件数が0(メンテナンス画面など)→ 推測せず layout で止め、だれも「一覧に無い」にしない", async () => {
+    const site = smallSite();
+    const { client } = fakeClient(site);
+    const { store, recs } = memoryStore();
+    await crawlStep({ client, store, now: () => NIGHT, budget: BIG });
+    site["13"] = [];
+    const nov = new Date("2026-11-05T14:00:00Z");
+    const r = await crawlStep({ client: fakeClient(site).client, store, now: () => nov, budget: BIG });
+    expect(r.stopped).toBe("layout");
+    expect([...recs.values()].every((x) => x.listed)).toBe(true);
   });
 
   it("★失敗する位置を総当たり: どこで止まっても、続けて回せば失敗なしと同じ結果・詳細の二重取得なし", async () => {

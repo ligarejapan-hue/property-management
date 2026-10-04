@@ -37,13 +37,18 @@ export async function adoptRegistryAgent(mlitAgentId: string, userId: string): P
     });
     if (linked) return { ok: true, created: false, agent: toHit(linked) } as const;
 
-    const samePhone = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
-      SELECT id FROM "agents"
+    const samePhone = await tx.$queryRaw<{ id: string; mlit_agent_id: string | null }[]>(Prisma.sql`
+      SELECT id, mlit_agent_id FROM "agents"
       WHERE is_archived = false AND regexp_replace(phone, '[^0-9]', '', 'g') = ${reg.phoneDigits}
       ORDER BY created_at ASC
       LIMIT 1
     `);
     if (samePhone[0]) {
+      // すでに別の一覧の会社と結び付いている(グループ会社で代表電話が同じ等)なら書き換えず、その業者を返すだけ。
+      if (samePhone[0].mlit_agent_id) {
+        const a = await tx.agent.findUnique({ where: { id: samePhone[0].id }, select: HIT_SELECT });
+        if (a) return { ok: true, created: false, agent: toHit(a) } as const;
+      }
       const a = await tx.agent.update({
         where: { id: samePhone[0].id },
         data: { mlitAgentId },

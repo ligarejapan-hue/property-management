@@ -14,6 +14,8 @@ export interface ListRow {
   licenseLabel: string;
   companyName: string;
   address: string | null;
+  /** このページに本店の行があった(所在地は本店のもの)。false なら所在地は支店のもの=本店の所在地を上書きしない */
+  isMain: boolean;
 }
 
 export interface ListPage {
@@ -79,11 +81,13 @@ export function parseListPage(html: string): ListPage {
   const headers = [...table.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map((m) => cleanText(m[1]));
   if (headers.join("|") !== LIST_HEADERS.join("|")) throw new LayoutChanged("一覧の見出し");
 
-  const byKey = new Map<string, ListRow & { isMain: boolean }>();
+  const byKey = new Map<string, ListRow>();
+  let dataRows = 0;
   for (const tr of table.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
     const cells = [...tr[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => m[1]);
     if (cells.length === 0) continue; // 見出しの行
     if (cells.length !== LIST_HEADERS.length) throw new LayoutChanged("一覧の行の列数");
+    dataRows++;
     const keyM = cells[3].match(/js_ShowDetail\('(\d{8})'\)/);
     if (!keyM) throw new LayoutChanged("詳細を開く引数");
     const licenseKey = keyM[1];
@@ -103,14 +107,9 @@ export function parseListPage(html: string): ListPage {
       isMain,
     });
   }
-  const rows = [...byKey.values()].map((r) => ({
-    licenseKey: r.licenseKey,
-    authority: r.authority,
-    licenseLabel: r.licenseLabel,
-    companyName: r.companyName,
-    address: r.address,
-  }));
-  return { total, pages: Number(pagesM[1]), page: Number(pageM[1]), rows };
+  // 読めた行の数=詳細を開く引数の数。違えば読めなかった行がある=黙って落とさず止める(計画 G3)。
+  if (dataRows !== (table.match(/js_ShowDetail\(/g) ?? []).length) throw new LayoutChanged("読めなかった行");
+  return { total, pages: Number(pagesM[1]), page: Number(pageM[1]), rows: [...byKey.values()] };
 }
 
 /** 詳細(tkGaiyo.do)を読む。開いた会社と違う免許番号なら取り違えとして止める。 */

@@ -24,7 +24,23 @@ describe("一覧のページを読む", () => {
       licenseLabel: "東京都知事(17)第000001号",
       companyName: "株式会社 見本不動産",
       address: "東京都世田谷区見本町４－１１－２４",
+      isMain: true,
     });
+  });
+
+  it("★本店の行がそのページに無い会社は isMain=false(支店の所在地で本店を上書きしないため)", () => {
+    const html = listHtml.replace(
+      /<td style="text-align:left; ">本店<\/td>\s*<td style="text-align:left; ">東京都渋谷区試験町１－１２－１８<\/td>/,
+      '<td style="text-align:left; ">渋谷支店</td>\n<td style="text-align:left; ">東京都渋谷区試験町１－１２－１８</td>',
+    );
+    const r = parseListPage(html).rows.find((x) => x.licenseKey === "13000044")!;
+    expect(r.isMain).toBe(false);
+  });
+
+  it("★読めなかった行がある(詳細を開く引数の数と読めた行の数が違う)→ LayoutChanged(黙って落とさない)", () => {
+    const html = listHtml.replace(/<tr>(\s*<td style="text-align:right;">4<\/td>)/, '<tr class="odd">$1');
+    expect(html).not.toBe(listHtml);
+    expect(() => parseListPage(html)).toThrow(LayoutChanged);
   });
 
   it("同じ会社の事務所ごとの行は1社にまとめ、本店の所在地を使う・文字参照を戻す", () => {

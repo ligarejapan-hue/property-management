@@ -117,6 +117,13 @@ describe("先方への取得", () => {
     expect(form(calls[3])).toMatchObject({ CMD: "selectPage", pageListNo1: "5" });
   });
 
+  it("★ページ数より先のページは頼まない(止まっている間に件数が減った)→ 空の結果を返す", async () => {
+    const { client, calls } = setup([() => html(searchPageHtml), () => html(listHtml)]);
+    const page = await client.selectPage("13", 600); // 見本は 539 ページ
+    expect(page).toEqual({ total: 26906, pages: 539, page: 600, rows: [] });
+    expect(calls).toHaveLength(2); // 検索画面+1ページ目の検索だけ(600ページ目は頼まない)
+  });
+
   it("詳細: 免許の鍵を送る・読んだ値を返す", async () => {
     const { client, calls } = setup([() => html(searchPageHtml), () => html(detailHtml)]);
     const d = await client.detail("13000001");

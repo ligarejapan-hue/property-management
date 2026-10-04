@@ -26,6 +26,18 @@ const row = (key: string, over: Partial<ListRow> = {}): ListRow => ({
   licenseLabel: `東京都知事(17)第${key.slice(2)}号`,
   companyName: `会社${key}`,
   address: `住所${key}`,
+  isMain: true,
+  ...over,
+});
+type UpsertArg = { where: { licenseKey: string }; update: Record<string, unknown>; create: Record<string, unknown> };
+const upserts = () => Object.fromEntries(agent.upsert.mock.calls.map(([a]) => [(a as UpsertArg).where.licenseKey, a as UpsertArg]));
+const prevRow = (key: string, over: Record<string, unknown> = {}) => ({
+  licenseKey: key,
+  companyName: `会社${key}`,
+  address: `住所${key}`,
+  licenseLabel: `東京都知事(17)第${key.slice(2)}号`,
+  seenCycle: "2026-10",
+  detailAt: new Date("2026-10-01T00:00:00Z"),
   ...over,
 });
 
@@ -57,6 +69,61 @@ describe("保存(prisma 版)", () => {
     expect($transaction).toHaveBeenCalledTimes(1);
   });
 
+  it("★本店の行が無いページ(支店だけ)では所在地を上書きしない・所在地の違いで取り直さない", async () => {
+    agent.findMany.mockResolvedValue([prevRow("00000201", { address: "本店の住所" })]);
+    const store = createPrismaCrawlStore();
+    await store.upsertListRows([row("00000201", { address: "大阪支店の住所", isMain: false })], "2026-10");
+    const u = upserts()["00000201"];
+    expect(u.update).not.toHaveProperty("address");
+    expect(u.update).not.toHaveProperty("needsDetail");
+  });
+
+  it("本店の行なら所在地を更新し、変わっていれば取り直す", async () => {
+    agent.findMany.mockResolvedValue([prevRow("00000201", { address: "旧本店の住所" })]);
+    const store = createPrismaCrawlStore();
+    await store.upsertListRows([row("00000201", { address: "新本店の住所" })], "2026-10");
+    const u = upserts()["00000201"];
+    expect(u.update.address).toBe("新本店の住所");
+    expect(u.update.needsDetail).toBe(true);
+  });
+
+  it("★詳細を取ってから1年たった会社は取り直す(電話番号だけの変更を拾う)", async () => {
+    agent.findMany.mockResolvedValue([
+      prevRow("13000001", { detailAt: new Date("2025-09-01T00:00:00Z") }),
+      prevRow("13000002", { detailAt: new Date("2026-09-01T00:00:00Z") }),
+    ]);
+    const store = createPrismaCrawlStore(() => new Date("2026-10-05T14:00:00Z"));
+    await store.upsertListRows([row("13000001"), row("13000002")], "2026-10");
+    expect(upserts()["13000001"].update.needsDetail).toBe(true);
+    expect(upserts()["13000002"].update).not.toHaveProperty("needsDetail");
+  });
+
+  it("★新しい一巡で初めて見た行は、詳細の失敗回数を0に戻す(前の一巡で諦めた会社をもう一度試す)", async () => {
+    agent.findMany.mockResolvedValue([prevRow("13000001", { seenCycle: "2026-10" }), prevRow("13000002", { seenCycle: "2026-11" })]);
+    const store = createPrismaCrawlStore();
+    await store.upsertListRows([row("13000001"), row("13000002")], "2026-11");
+    expect(upserts()["13000001"].update.detailFailCount).toBe(0);
+    expect(upserts()["13000002"].update).not.toHaveProperty("detailFailCount");
+  });
+
+  it("詳細の失敗を数える・3回失敗した会社はその一巡では取りに行かない・失敗の少ない順", async () => {
+    agent.findMany.mockResolvedValue([]);
+    agent.updateMany.mockResolvedValue({ count: 1 });
+    const store = createPrismaCrawlStore();
+    await store.markDetailFailed("13000001");
+    expect(agent.updateMany).toHaveBeenCalledWith({
+      where: { licenseKey: "13000001" },
+      data: { detailFailCount: { increment: 1 } },
+    });
+    await store.nextNeedingDetail("2026-10", 1);
+    expect(agent.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { needsDetail: true, listed: true, seenCycle: "2026-10", detailFailCount: { lt: 3 } },
+        orderBy: [{ detailFailCount: "asc" }, { licenseKey: "asc" }],
+      }),
+    );
+  });
+
   it("空のページは何もしない", async () => {
     const store = createPrismaCrawlStore();
     expect(await store.upsertListRows([], "2026-10")).toBe(0);
@@ -69,8 +136,7 @@ describe("保存(prisma 版)", () => {
     expect(await store.nextNeedingDetail("2026-10", 5)).toEqual(["13000001"]);
     expect(agent.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { needsDetail: true, listed: true, seenCycle: "2026-10" },
-        orderBy: { licenseKey: "asc" },
+        where: { needsDetail: true, listed: true, seenCycle: "2026-10", detailFailCount: { lt: 3 } },
         take: 5,
       }),
     );
@@ -93,6 +159,7 @@ describe("保存(prisma 版)", () => {
         validUntil: "R10年04月26日",
         needsDetail: false,
         detailAt: at,
+        detailFailCount: 0,
       },
     });
     expect(agent.updateMany).toHaveBeenCalledWith({

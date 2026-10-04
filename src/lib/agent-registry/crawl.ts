@@ -32,8 +32,10 @@ export interface CrawlStore {
   saveStates(states: CrawlState[]): Promise<void>;
   /** 一覧の行を入れる。新しい会社・商号/所在地/免許の表示が変わった会社は詳細を取り直す印を付ける。 */
   upsertListRows(rows: ListRow[], cycle: string): Promise<number>;
-  /** 今の一巡で一覧に出た会社のうち、詳細が要るものを免許の鍵の順に。 */
+  /** 今の一巡で一覧に出た会社のうち、詳細が要るもの(3回失敗した会社を除く)を失敗の少ない順・免許の鍵の順に。 */
   nextNeedingDetail(cycle: string, limit: number): Promise<string[]>;
+  /** その会社の詳細が読めなかった回数を1つ増やす(3回でその一巡は諦める=1社のせいで全体を止めない)。 */
+  markDetailFailed(licenseKey: string): Promise<void>;
   saveDetail(d: Detail, at: Date): Promise<void>;
   /** その一巡で一度も一覧に出なかった会社を「一覧に無い」にする。 */
   closeCycle(cycle: string): Promise<number>;
@@ -154,11 +156,15 @@ export async function crawlStep(deps: {
         const p = s.nextPage;
         const page = p === 1 ? await client.searchFirst(s.authority) : await client.selectPage(s.authority, p);
         succeeded = true;
+        // 対象の5つの行政庁はどれも数千社以上ある。0件=メンテナンス画面など。そのまま進めると
+        // 一巡の締めで全社を「一覧に無い」にしてしまうので、推測せず止める(計画 G3)。
+        if (page.total === 0) throw new FetchError("layout");
         // 頼んだページと違うページが返った=先方の画面の変化。推測で進めない(計画 G3)。
-        if (page.pages > 0 && page.page !== p) throw new FetchError("layout");
+        // 件数が減って続きのページが無いときは、client が page=p・rows=[] で返す=下で一覧の終わりになる。
+        if (page.page !== p) throw new FetchError("layout");
         result.listed += await store.upsertListRows(page.rows, cycle);
         s.totalPages = page.pages;
-        if (page.pages === 0 || p >= page.pages) s.phase = "detail";
+        if (p >= page.pages) s.phase = "detail";
         else s.nextPage = p + 1;
         await store.saveStates(states);
         continue;
@@ -170,7 +176,17 @@ export async function crawlStep(deps: {
           result.stopped = stop;
           break;
         }
-        const d = await client.detail(key);
+        let d: Detail;
+        try {
+          d = await client.detail(key);
+        } catch (e) {
+          // 読めない画面・200 以外(429/5xx を除く)はその会社のせいの可能性が高い=その会社に数える。
+          // 混雑(429/5xx)・時間切れ・つながらないは先方全体の都合なので数えない。どちらもこの回は止める。
+          if (e instanceof FetchError && (e.kind === "layout" || e.kind === "http_other")) {
+            await store.markDetailFailed(key);
+          }
+          throw e;
+        }
         succeeded = true;
         await store.saveDetail(d, now());
         result.detailed++;

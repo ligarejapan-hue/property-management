@@ -19,6 +19,7 @@ CREATE TABLE "mlit_agents" (
     "seen_cycle" TEXT,
     "needs_detail" BOOLEAN NOT NULL DEFAULT true,
     "detail_at" TIMESTAMP(3),
+    "detail_fail_count" INTEGER NOT NULL DEFAULT 0,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 

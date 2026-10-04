@@ -1786,6 +1786,8 @@ model MlitAgent {
   /// 詳細(電話・ふりがな)を取る/取り直す必要がある
   needsDetail  Boolean   @default(true) @map("needs_detail")
   detailAt     DateTime? @map("detail_at")
+  /// 詳細が読めなかった回数(一巡ごとに0から)。3回でその一巡は諦める=1社のせいで全体を止めない
+  detailFailCount Int    @default(0) @map("detail_fail_count")
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
