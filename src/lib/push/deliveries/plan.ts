@@ -406,23 +406,32 @@ export async function planSourceDeliveries(
     const more = freshRows.length > take.length;
 
     let created = 0;
+    let completed = new Set<string>();
     if (take.length > 0) {
       const fresh = take.map((r) => r.id);
-      await tx.notificationSourceEvent.createMany({
-        data: fresh.map((eventId) => ({ source, eventId, firstSeenAt: seenAt })),
-        skipDuplicates: true,
-      });
-      created =
+      // 1回で作る記録は「件×端末」で SOURCE_REFS_PER_TX まで。送り先の全員分を作り終えた出来事だけを
+      // 見つけ済みにする(途中の出来事は見つけ済みにせず、次の回で残りの端末の分を作る・@codex #472 P2)。
+      const r =
         source === "inquiry" ? await planInquiries(tx, fresh, seenAt, who.inquiry) : await planRegistryJobs(tx, fresh, seenAt, who.registry);
+      created = r.created;
+      completed = r.completed;
+      const sealed = fresh.filter((id) => completed.has(id));
+      if (sealed.length) {
+        await tx.notificationSourceEvent.createMany({
+          data: sealed.map((eventId) => ({ source, eventId, firstSeenAt: seenAt })),
+          skipDuplicates: true,
+        });
+      }
     }
-    // カーソルは「カーソルより後」のうち、まだ処理していない新しい出来事の手前までだけ進める。
-    const firstPending = more ? freshRows[take.length] : null;
+    // カーソルは「カーソルより後」のうち、まだ処理し終えていない新しい出来事の手前までだけ進める。
+    const unfinished = take.find((r) => !completed.has(r.id)) ?? null;
+    const firstPending = unfinished ?? (more ? freshRows[take.length] : null);
     const pendingIdx = firstPending ? after.findIndex((r) => r.id === firstPending.id) : -1;
     const done = firstPending ? (pendingIdx < 0 ? [] : after.slice(0, pendingIdx)) : after;
     const next = advanceCursor(c, done.map((r) => ({ t: r.t, i: r.id })));
     await tx.notificationSourceCursor.update({ where: { source }, data: { cursorT: next.t, cursorId: next.i, updatedAt: now } });
     // カーソルより後が上限まで埋まっていたら、その先にもまだある(続けて読む)。
-    return { created, more: more || after.length >= AFTER_CURSOR_LIMIT };
+    return { created, more: more || unfinished !== null || after.length >= AFTER_CURSOR_LIMIT };
   }, { timeout: SOURCE_PLAN_TX_TIMEOUT_MS, maxWait: SEND_TX_MAX_WAIT_MS });
 }
 
@@ -436,31 +445,85 @@ async function boundSubscriptions(tx: Tx, userIds: string[], now: Date) {
   });
 }
 
-async function planInquiries(tx: Tx, inquiryIds: string[], now: Date, recipients: Recipient[]): Promise<number> {
+/**
+ * 出来事ごとの送り先(端末)を、まだ作っていない分だけ、出来事の順に「件×端末」で maxRefs まで選ぶ。
+ * 全員分を選び終えた出来事を completed に入れる(上限で途中までになった出来事と、その後の出来事は入らない)。
+ */
+async function boundedFanOut(
+  tx: Tx,
+  kind: DeliveryKind,
+  perEvent: Array<{ eventId: string; key: string; subs: SubRef[] }>,
+  maxRefs: number,
+): Promise<{ pairs: Array<{ eventId: string; key: string; sub: SubRef }>; completed: Set<string> }> {
+  const keys = perEvent.map((e) => e.key);
+  const made = new Set<string>();
+  for (let i = 0; i < keys.length; i += BULK_CHUNK) {
+    const rows = await tx.notificationDeliveryRef.findMany({ where: { kind, refKey: { in: keys.slice(i, i + BULK_CHUNK) } }, select: { refKey: true, bindingId: true } });
+    for (const r of rows) made.add(`${r.refKey}|${r.bindingId}`);
+  }
+  const pairs: Array<{ eventId: string; key: string; sub: SubRef }> = [];
+  const completed = new Set<string>();
+  for (const e of perEvent) {
+    const todo = e.subs.filter((s) => !made.has(`${e.key}|${s.bindingId}`));
+    const room = maxRefs - pairs.length;
+    for (const sub of todo.slice(0, Math.max(0, room))) pairs.push({ eventId: e.eventId, key: e.key, sub });
+    if (todo.length > room) break;
+    completed.add(e.eventId);
+  }
+  return { pairs, completed };
+}
+
+async function planInquiries(
+  tx: Tx,
+  inquiryIds: string[],
+  now: Date,
+  recipients: Recipient[],
+): Promise<{ created: number; completed: Set<string> }> {
   const inquiries = await tx.dmInquiry.findMany({
     where: { id: { in: inquiryIds } },
     select: { id: true, draft: { select: { property: { select: { createdBy: true, assignedTo: true } } } } },
   });
+  const byInquiry = new Map(inquiries.map((q) => [q.id, q]));
   const subs = await boundSubscriptions(tx, recipients.map((r) => r.id), now);
   const byId = new Map(recipients.map((r) => [r.id, r]));
-  const items: Array<{ sub: SubRef; refKeys: string[] }> = [];
-  for (const s of subs) {
-    const r = byId.get(s.userId);
-    if (!r) continue;
-    items.push({ sub: s, refKeys: inquiries.filter((q) => inquiryInScope(r, q.draft?.property ?? null)).map((q) => eventRefKey("inquiry", q.id)) });
+  // 申込が消えていた(見つけた直後に削除された)ときは、送り先なし=処理済み。
+  const perEvent = inquiryIds.map((id) => {
+    const q = byInquiry.get(id);
+    return {
+      eventId: id,
+      key: eventRefKey("inquiry", id),
+      subs: q ? subs.filter((s) => { const r = byId.get(s.userId); return !!r && inquiryInScope(r, q.draft?.property ?? null); }) : [],
+    };
+  });
+  const { pairs, completed } = await boundedFanOut(tx, kindOfSource("inquiry"), perEvent, SOURCE_REFS_PER_TX);
+  // 端末ごとに1通にまとめる(同じ端末の件を1つの記録へ)。
+  const bySub = new Map<string, { sub: SubRef; refKeys: string[] }>();
+  for (const p of pairs) {
+    const cur = bySub.get(p.sub.id) ?? { sub: p.sub, refKeys: [] };
+    cur.refKeys.push(p.key);
+    bySub.set(p.sub.id, cur);
   }
-  return createDeliveries(tx, items, kindOfSource("inquiry"), now);
+  const created = await createDeliveries(tx, [...bySub.values()], kindOfSource("inquiry"), now);
+  return { created, completed };
 }
 
-async function planRegistryJobs(tx: Tx, jobIds: string[], now: Date, recipients: Map<string, Recipient>): Promise<number> {
+async function planRegistryJobs(
+  tx: Tx,
+  jobIds: string[],
+  now: Date,
+  recipients: Map<string, Recipient>,
+): Promise<{ created: number; completed: Set<string> }> {
   const jobs = await tx.registryFetchJob.findMany({ where: { id: { in: jobIds } }, select: { id: true, requestedById: true } });
+  const byJob = new Map(jobs.map((j) => [j.id, j]));
   const owners = [...new Set(jobs.flatMap((j) => (j.requestedById && recipients.has(j.requestedById) ? [j.requestedById] : [])))];
   const subs = await boundSubscriptions(tx, owners, now);
   // 件数(今見られる物件だけで数え直す)は送る直前に確かめる。ジョブごと・端末ごとに1通。
-  const items: Array<{ sub: SubRef; refKeys: string[] }> = [];
-  for (const job of jobs) {
-    if (!job.requestedById || !recipients.has(job.requestedById)) continue;
-    for (const s of subs) if (s.userId === job.requestedById) items.push({ sub: s, refKeys: [eventRefKey("registry_job", job.id)] });
-  }
-  return createDeliveries(tx, items, kindOfSource("registry_job"), now);
+  const perEvent = jobIds.map((id) => {
+    const j = byJob.get(id);
+    const owner = j?.requestedById && recipients.has(j.requestedById) ? j.requestedById : null;
+    return { eventId: id, key: eventRefKey("registry_job", id), subs: owner ? subs.filter((s) => s.userId === owner) : [] };
+  });
+  const { pairs, completed } = await boundedFanOut(tx, kindOfSource("registry_job"), perEvent, SOURCE_REFS_PER_TX);
+  const created = await createDeliveries(tx, pairs.map((p) => ({ sub: p.sub, refKeys: [p.key] })), kindOfSource("registry_job"), now);
+  return { created, completed };
 }
