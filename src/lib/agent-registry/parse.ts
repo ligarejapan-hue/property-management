@@ -103,7 +103,13 @@ export function parseListPage(html: string): ListPage {
       isMain,
     });
   }
-  const rows = [...byKey.values()].map(({ isMain: _isMain, ...r }) => r);
+  const rows = [...byKey.values()].map((r) => ({
+    licenseKey: r.licenseKey,
+    authority: r.authority,
+    licenseLabel: r.licenseLabel,
+    companyName: r.companyName,
+    address: r.address,
+  }));
   return { total, pages: Number(pagesM[1]), page: Number(pageM[1]), rows };
 }
 
