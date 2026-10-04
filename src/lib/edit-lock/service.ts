@@ -309,6 +309,10 @@ export async function recordExpiredEditLockLosses(db: Db): Promise<number> {
         -- 2時間より前に止まった鍵は見ない(1時間を過ぎた記録は送らないので不要。30日で記録を消したあとに
         -- 置き去りの古い鍵を何度も記録し直さない)。合図は操作より古くならないので合図の時刻で切る。
         AND l."heartbeat_at" >= now_ts.db_now - INTERVAL '2 hours'
+        -- すでに記録した鍵は見ない・1回500件まで(残りは次の実行で・@codex #472 P2)。
+        AND NOT EXISTS (SELECT 1 FROM "edit_lock_loss_events" e WHERE e."lock_id" = l."id")
+      ORDER BY l."heartbeat_at" ASC
+      LIMIT 500
       FOR UPDATE OF l SKIP LOCKED
     )
     INSERT INTO "edit_lock_loss_events" ("id", "lock_id", "user_id", "resource_type", "resource_id", "cause", "occurred_at", "status", "created_at")

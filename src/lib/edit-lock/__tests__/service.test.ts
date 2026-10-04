@@ -399,6 +399,8 @@ describe("通知 段階4c: 取り直されないまま期限が過ぎた鍵の�
     const sql = sqlOf(queryRaw.mock.calls[0]);
     expect(sql).toMatch(/clock_timestamp\(\) AS db_now/);
     expect(sql).toMatch(/FROM "edit_locks" l CROSS JOIN now_ts[\s\S]*FOR UPDATE OF l SKIP LOCKED[\s\S]*INSERT INTO "edit_lock_loss_events"[\s\S]*FROM locked l/);
+    // すでに記録した鍵は除き、1回500件まで
+    expect(sql).toMatch(/NOT EXISTS \(SELECT 1 FROM "edit_lock_loss_events" e WHERE e\."lock_id" = l\."id"\)[\s\S]*LIMIT 500[\s\S]*FOR UPDATE OF l SKIP LOCKED/);
     expect(sql.indexOf("'force_released'")).toBeLessThan(sql.indexOf("'heartbeat'"));
     expect(sql.indexOf("'heartbeat'")).toBeLessThan(sql.indexOf("'idle'"));
     expectColumnThresholds(sql);
