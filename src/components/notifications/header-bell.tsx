@@ -49,7 +49,7 @@ function isSmartphone(): boolean {
 }
 
 export function HeaderBell() {
-  const { notices, markAllRead, permission, requestPermission } = useNotices();
+  const { notices, markAllRead, permission, requestPermission, push, setDeviceScope } = useNotices();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState<Set<string>>(new Set());
@@ -92,6 +92,8 @@ export function HeaderBell() {
         <NotificationPanel
           items={items}
           permission={permission}
+          push={push}
+          onDeviceScopeChange={(scope) => void setDeviceScope(scope)}
           deviceLabel={isSmartphone() ? "このスマホ" : "この PC"}
           requesting={requesting}
           onMarkAllRead={() => {

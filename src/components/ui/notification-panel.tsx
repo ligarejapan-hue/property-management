@@ -12,6 +12,11 @@ import { Bell, BellOff, CalendarClock, Check, Clock, FileCheck, Inbox, LockOpen,
 
 export type NotificationPermissionView = "unsupported" | "default" | "granted" | "denied";
 
+/** 画面を閉じていても届く通知(段階4a)の見え方。 */
+export type PushView =
+  | { status: "on"; deviceScope: "shared" | "personal" }
+  | { status: "off" | "not_configured" | "reload_required" | "failed" | "unsupported" | "working" };
+
 export interface NotificationPanelItem {
   id: string;
   icon: "clock" | "unlock" | "logout" | "calendar" | "inbox" | "file";
@@ -64,6 +69,34 @@ const ITEM_TONE = {
   green: "bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400",
 } as const;
 
+/** 許可済みのときの「画面を閉じていても届くか」の一言と「この端末は自分専用」の選択(段階4a・D18)。 */
+function PushStatusLine({ push, onDeviceScopeChange }: { push: PushView; onDeviceScopeChange?: (scope: "shared" | "personal") => void }) {
+  if (push.status === "on") {
+    return (
+      <div className="mt-2">
+        <p>
+          {push.deviceScope === "personal"
+            ? "画面を閉じていても届きます（最後のログインから30日）。"
+            : "画面を閉じていても届きます（閉じてから65分まで）。"}
+        </p>
+        <label className="mt-1.5 flex items-start gap-1.5">
+          <input
+            type="checkbox"
+            checked={push.deviceScope === "personal"}
+            onChange={(e) => onDeviceScopeChange?.(e.target.checked ? "personal" : "shared")}
+            className="mt-0.5"
+          />
+          <span>この端末は自分専用（自分のスマホ・PC）。閉じていても30日間届けます。共用のPCでは選ばないでください。</span>
+        </label>
+      </div>
+    );
+  }
+  if (push.status === "working") return <p className="mt-2 text-gray-500 dark:text-gray-400">画面を閉じていても届くように設定しています…</p>;
+  if (push.status === "reload_required") return <p className="mt-2">画面を再読み込みすると、画面を閉じていても届くようになります。</p>;
+  if (push.status === "failed") return <p className="mt-2">画面を閉じているときの通知は、いま設定できませんでした（画面を開いている間は届きます）。</p>;
+  return null;
+}
+
 export function NotificationPanel({
   items,
   permission,
@@ -72,9 +105,13 @@ export function NotificationPanel({
   onItemClick,
   onRequestPermission,
   requesting = false,
+  push = { status: "off" },
+  onDeviceScopeChange,
 }: {
   items: NotificationPanelItem[];
   permission: NotificationPermissionView;
+  push?: PushView;
+  onDeviceScopeChange?: (scope: "shared" | "personal") => void;
   /** 「この PC」「このスマホ」 */
   deviceLabel: string;
   onMarkAllRead: () => void;
@@ -161,6 +198,7 @@ export function NotificationPanel({
             止めるときはブラウザの設定から変更してください。
           </p>
         )}
+        {permission === "granted" && <PushStatusLine push={push} onDeviceScopeChange={onDeviceScopeChange} />}
         {permission === "denied" && (
           <p>
             <span className="inline-flex items-center gap-1 font-bold text-gray-900 dark:text-gray-100">
