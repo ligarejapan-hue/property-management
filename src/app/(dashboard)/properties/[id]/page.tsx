@@ -975,7 +975,16 @@ export default function PropertyDetailPage({
             onEditLockReleased={editLockStatus.refresh}
           />
         )}
-        {activeTab === "photos" && <PhotoTab propertyId={property.id} />}
+        {activeTab === "photos" && (
+          <PhotoTab
+            propertyId={property.id}
+            building={
+              property.building
+                ? { id: property.building.id, name: property.building.name }
+                : null
+            }
+          />
+        )}
         {activeTab === "investigation" && (
           <InvestigationTab propertyId={property.id} />
         )}
