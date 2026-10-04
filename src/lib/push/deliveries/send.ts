@@ -108,24 +108,23 @@ export async function sendDueDeliveries(
   if (Date.now() - startedAtMs >= budgetMs) return stats;
   await closeAbandonedClaims(now);
   // 1時間で送れなくなる編集権限の知らせを先に送る(ほかの溜まった分の後ろで時間切れにならない・@codex #473 P2)。
-  // ただし枠の半分まで(ほかの知らせも毎回送れるように・@codex #472 P2)。余った枠はほかへ回す。
-  const urgent = await prisma.notificationDelivery.findMany({
-    where: { AND: [claimableWhere(now), { kind: "edit_lock_lost" }] },
-    select: { id: true },
-    orderBy: [{ scheduledFor: "asc" }, { id: "asc" }],
-    take: Math.floor(SEND_BATCH_LIMIT / 2),
-  });
-  const rest = await prisma.notificationDelivery.findMany({
-    where: { AND: [claimableWhere(now), { kind: { not: "edit_lock_lost" } }] },
-    select: { id: true },
-    orderBy: [{ scheduledFor: "asc" }, { id: "asc" }],
-    take: Math.max(0, SEND_BATCH_LIMIT - urgent.length),
-  });
-  // 急ぎとほかを1件ずつ交互に並べる(持ち時間で打ち切られても、ほかの知らせにも毎回番が回る・@codex #472 P2)。
+  // 種類ごとに取り出し、1件ずつ順番に並べる(どの種類も毎回番が回る=古い溜まりで時刻の決まった知らせが
+  // 回の境目を過ぎて取り消される、を防ぐ・@codex #472 P2)。並べる順は編集権限(1時間で締まる)→次回対応→
+  // 申込→謄本。各種類の取り出しは枠の数まで(合計で枠を超えた分は次の実行で)。
+  const KIND_ORDER = ["edit_lock_lost", "next_action", "inquiry_new", "registry_job_done"] as const;
+  const perKind = await Promise.all(
+    KIND_ORDER.map((kind) =>
+      prisma.notificationDelivery.findMany({
+        where: { AND: [claimableWhere(now), { kind }] },
+        select: { id: true },
+        orderBy: [{ scheduledFor: "asc" }, { id: "asc" }],
+        take: SEND_BATCH_LIMIT,
+      }),
+    ),
+  );
   const due: Array<{ id: string }> = [];
-  for (let i = 0; i < Math.max(urgent.length, rest.length); i++) {
-    if (i < urgent.length) due.push(urgent[i]);
-    if (i < rest.length) due.push(rest[i]);
+  for (let i = 0; due.length < SEND_BATCH_LIMIT && perKind.some((rows) => i < rows.length); i++) {
+    for (const rows of perKind) if (i < rows.length && due.length < SEND_BATCH_LIMIT) due.push(rows[i]);
   }
   for (const d of due) {
     // 持ち時間を過ぎたら新しい送信は始めない(残りは次の実行で・timer の起動と重ならないように)。

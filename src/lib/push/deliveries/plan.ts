@@ -68,6 +68,7 @@ async function createDeliveries(
   items: Array<{ sub: SubRef; refKeys: string[] }>,
   kind: DeliveryKind,
   now: Date,
+  maxRefs = Number.POSITIVE_INFINITY,
 ): Promise<number> {
   const wanted = items.filter((x) => x.refKeys.length > 0);
   if (wanted.length === 0) return 0;
@@ -98,7 +99,8 @@ async function createDeliveries(
   const deliveries: Array<{ id: string; userId: string; subscriptionId: string; bindingId: string; kind: string; scheduledFor: Date }> = [];
   const refs: Array<{ deliveryId: string; subscriptionId: string; bindingId: string; kind: string; refKey: string }> = [];
   for (const { sub, refKeys } of wanted) {
-    const fresh = [...new Set(refKeys)].filter((k) => !existing.has(`${sub.bindingId}|${k}`));
+    if (refs.length >= maxRefs) break;
+    const fresh = [...new Set(refKeys)].filter((k) => !existing.has(`${sub.bindingId}|${k}`)).slice(0, maxRefs - refs.length);
     if (fresh.length === 0) continue;
     let id = reuse.get(`${sub.id}|${sub.bindingId}`);
     if (!id) {
@@ -123,8 +125,8 @@ async function createDeliveries(
 }
 
 /** 1つの端末の分(次回対応)。 */
-function createDelivery(tx: Tx, sub: SubRef, kind: DeliveryKind, refKeys: string[], now: Date): Promise<number> {
-  return createDeliveries(tx, [{ sub, refKeys }], kind, now);
+function createDelivery(tx: Tx, sub: SubRef, kind: DeliveryKind, refKeys: string[], now: Date, maxRefs?: number): Promise<number> {
+  return createDeliveries(tx, [{ sub, refKeys }], kind, now, maxRefs);
 }
 
 // ---------- 次回対応(N4・N5) ----------
@@ -170,7 +172,8 @@ export async function planNextActionDeliveries(now: Date, opts: { deadlineMs?: n
       created += await prisma.$transaction(async (tx) => {
         const s = await lockSubscription(tx, subId);
         if (!s || s.userId !== userId || s.revokedAt || s.expiresAt <= now) return 0;
-        return createDelivery(tx, s, "next_action", nextActionKeysFor(due, s.boundAt), now);
+        // 1回で新しく作るのは2,000件まで(作り済みを除いて古い予定から・残りは次の実行で・@codex #472 P2)。
+        return createDelivery(tx, s, "next_action", nextActionKeysFor(due, s.boundAt), now, SOURCE_REFS_PER_TX);
       }, TX_OPTS);
     }
   }
