@@ -1,0 +1,83 @@
+<!-- 2026-10-03 に取った実物の一覧(東京都知事免許・1ページ目)の並びを写した見本。会社名・人名・住所は架空。 -->
+<html>
+<body>
+<form id="tkModel" name="tkModel" action="takkenKensaku.do" method="post">
+  <input id="CMD" name="CMD" type="hidden" value=""/>
+  <input id="sv_rdoSelect" name="sv_rdoSelect" type="hidden" value="1"/>
+  <input id="sv_licenseNoKbn" name="sv_licenseNoKbn" type="hidden" value="13"/>
+  <input id="sv_pageListNo1" name="sv_pageListNo1" type="hidden" value="1"/>
+  <input id="sv_dispCount" name="sv_dispCount" type="hidden" value="50"/>
+<!-- result -->
+
+			<div class="result clr">
+				<p style="float : left ; line-height : 1 ; width : 192px ;">検索結果：26906件
+					<br />
+					1件目～50件目までを表示
+                </p>
+<!-- 検索結果件数（nnnn/nnnn） -->
+				<div style="float :left">
+					<select id="pageListNo1" name="pageListNo1" tabindex="16" style="margin : 0 0 4px 0 ; padding : 0px ; height : 21px ; width: 80px ;" class="select" onchange="js_PageSearch(&#39;1&#39;)">
+
+						<option value="1" selected="selected">1/539</option><option value="2">2/539</option><option value="3">3/539</option><option value="539">539/539</option>
+
+					</select>
+				</div>
+			</div>
+
+<!-- result display -->
+			<table class="re_disp" >
+				<tr>
+					<th>No.</th>
+					<th>免許行政庁</th>
+					<th>免許証番号</th>
+					<th>商号又は名称</th>
+					<th>代表者名</th>
+					<th>事務所名</th>
+					<th>所在地</th>
+				</tr>
+				<tr class="trev">
+
+           				<tr>
+							<td style="text-align:right;">1</td>
+							<td style="text-align:left; white-space : nowrap;">東京都</td>
+		     				<td style="text-align:left; white-space : nowrap;" title="licenseNo">(17)第000001号</td>
+		     				<td style="text-align:left;"><a href="javascript:void(0);" onclick="js_ShowDetail('13000001')">株式会社　見本不動産</a></td>
+		     				<td style="text-align:left; white-space : nowrap;">見本　太郎</td>
+		      				<td style="text-align:left; ">本店</td>
+		     				<td style="text-align:left; ">東京都世田谷区見本町４－１１－２４</td>
+		   				</tr>
+
+           				<tr>
+							<td style="text-align:right;">2</td>
+							<td style="text-align:left; white-space : nowrap;">東京都</td>
+		     				<td style="text-align:left; white-space : nowrap;" title="licenseNo">(17)第000044号</td>
+		     				<td style="text-align:left;"><a href="javascript:void(0);" onclick="js_ShowDetail('13000044')">試験建設&amp;興業　株式会社</a></td>
+		     				<td style="text-align:left; white-space : nowrap;">試験　花子</td>
+		      				<td style="text-align:left; ">新宿支店</td>
+		     				<td style="text-align:left; ">東京都新宿区試験１－２－３</td>
+		   				</tr>
+
+           				<tr>
+							<td style="text-align:right;">3</td>
+							<td style="text-align:left; white-space : nowrap;">東京都</td>
+		     				<td style="text-align:left; white-space : nowrap;" title="licenseNo">(17)第000044号</td>
+		     				<td style="text-align:left;"><a href="javascript:void(0);" onclick="js_ShowDetail('13000044')">試験建設&amp;興業　株式会社</a></td>
+		     				<td style="text-align:left; white-space : nowrap;">試験　花子</td>
+		      				<td style="text-align:left; ">本店</td>
+		     				<td style="text-align:left; ">東京都渋谷区試験町１－１２－１８</td>
+		   				</tr>
+
+           				<tr>
+							<td style="text-align:right;">4</td>
+							<td style="text-align:left; white-space : nowrap;">東京都</td>
+		     				<td style="text-align:left; white-space : nowrap;" title="licenseNo">(3)第104567号</td>
+		     				<td style="text-align:left;"><a href="javascript:void(0);" onclick="js_ShowDetail('13104567')">有限会社　架空ホーム</a></td>
+		     				<td style="text-align:left; white-space : nowrap;">架空　次郎</td>
+		      				<td style="text-align:left; ">本店</td>
+		     				<td style="text-align:left; "></td>
+		   				</tr>
+
+			</table>
+</form>
+</body>
+</html>
