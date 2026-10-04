@@ -31,6 +31,7 @@ import {
   SEND_TX_MAX_WAIT_MS,
   SEND_TX_TIMEOUT_MS,
   SOURCE_PLAN_TX_TIMEOUT_MS,
+  SOURCE_REFS_PER_TX,
   rotateStart,
   sourceEventsPerTx,
   type DeliveryKind,
@@ -209,18 +210,22 @@ export async function planEditLockLossDeliveries(now: Date): Promise<number> {
           orderBy: { id: "asc" },
         })
       : [];
+    // 1回で作るのは「件×端末」で SOURCE_REFS_PER_TX まで(古い記録から・最低1件)。残りは pending のまま
+    // 次の実行で分ける(端末の多い人が並んでもトランザクションが時間切れにならない・@codex #472 P2)。
     const items: Array<{ sub: SubRef; refKeys: string[] }> = [];
+    const done: string[] = [];
     for (const e of live) {
-      for (const s of subs) {
-        if (s.userId === e.userId && s.boundAt.getTime() <= e.occurredAt.getTime()) items.push({ sub: s, refKeys: [editLockLossRefKey(e.id)] });
-      }
+      const mine = subs.filter((s) => s.userId === e.userId && s.boundAt.getTime() <= e.occurredAt.getTime());
+      if (done.length > 0 && items.length + mine.length > SOURCE_REFS_PER_TX) break;
+      for (const s of mine) items.push({ sub: s, refKeys: [editLockLossRefKey(e.id)] });
+      done.push(e.id);
     }
     const created = await createDeliveries(tx, items, "edit_lock_lost", at);
     if (stale.length) {
       await tx.editLockLossEvent.updateMany({ where: { id: { in: stale.map((e) => e.id) } }, data: { status: "expired", notifiedAt: at } });
     }
-    if (live.length) {
-      await tx.editLockLossEvent.updateMany({ where: { id: { in: live.map((e) => e.id) } }, data: { status: "queued", notifiedAt: at } });
+    if (done.length) {
+      await tx.editLockLossEvent.updateMany({ where: { id: { in: done } }, data: { status: "queued", notifiedAt: at } });
     }
     return created;
   }, TX_OPTS);
