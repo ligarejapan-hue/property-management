@@ -292,6 +292,17 @@ describe("進め方", () => {
     expect(getStates().every((s) => s.dayOffUntil === null)).toBe(true);
   });
 
+  it("★おかしな一覧(件数0)が続けて返ると3回で失敗に数え、その晩は止まる(成功と数えない・@codex #477)", async () => {
+    const site = smallSite();
+    site["00"] = [];
+    const { client, log } = fakeClient(site);
+    const { store } = memoryStore();
+    for (let i = 0; i < 3; i++) await crawlStep({ client, store, now: () => NIGHT, budget: BIG });
+    const r = await crawlStep({ client, store, now: () => NIGHT, budget: BIG });
+    expect(r.stopped).toBe("day_off");
+    expect(log).toHaveLength(3);
+  });
+
   it("先方が別のページを返した(ページ番号が合わない)→ 推測せず layout で止める", async () => {
     const { client } = fakeClient(smallSite());
     const wrong: RegistryClient = {

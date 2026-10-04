@@ -143,6 +143,11 @@ export function parseDetail(html: string, licenseKey: string): Detail {
     throw new LayoutChanged("開いた会社と免許番号が違う");
   }
 
+  // 見出しそのものが無い=画面の作りが変わった。空欄(値が無い)と区別しないと、電話を消して
+  // 1年取り直さなくなる(@codex #477)。
+  for (const heading of ["商号又は名称", "主たる事務所の所在地", "電話番号"]) {
+    if (!fields.has(heading)) throw new LayoutChanged(`詳細の「${heading}」の欄`);
+  }
   const nameCell = fields.get("商号又は名称") ?? "";
   const kanaRaw = nameCell.match(/<p class="phonetic">([\s\S]*?)<\/p>/)?.[1];
   const companyKana = kanaRaw ? cleanText(cleanText(kanaRaw).normalize("NFKC")) || null : null;

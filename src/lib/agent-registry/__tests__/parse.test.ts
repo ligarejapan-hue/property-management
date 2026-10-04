@@ -131,6 +131,12 @@ describe("詳細のページを読む", () => {
     expect(parseDetail(detailHtml.replace("03-0000-1212", ""), "13000001").phone).toBeNull();
   });
 
+  it("★電話番号・所在地・商号の見出しそのものが無い詳細は、空欄と区別して LayoutChanged(@codex #477)", () => {
+    expect(() => parseDetail(detailHtml.replace('<th style="width : 100px;">電話番号</th>', "<th>連絡先</th>"), "13000001")).toThrow(LayoutChanged);
+    expect(() => parseDetail(detailHtml.replace("<th>主たる事務所の<br />所在地</th>", "<th>所在</th>"), "13000001")).toThrow(LayoutChanged);
+    expect(() => parseDetail(detailHtml.replace("<th>商号又は名称</th>", "<th>名称</th>"), "13000001")).toThrow(LayoutChanged);
+  });
+
   it("免許証番号の欄が無い(別の画面に戻された)→ LayoutChanged", () => {
     expect(() => parseDetail(detailHtml.replace("<th>免許証番号</th>", ""), "13000001")).toThrow(LayoutChanged);
   });
