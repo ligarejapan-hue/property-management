@@ -4,6 +4,7 @@
  * 戻り値は件数だけ(中身・宛先は出さない)。
  */
 import prisma from "@/lib/prisma";
+import { REREAD_WINDOW_MS } from "@/lib/notifications/event-cursor";
 import { loadSourceRecipients, planEditLockLossDeliveries, planNextActionDeliveries, planSourceDeliveries } from "./plan";
 import { sendDueDeliveries, type SendResult } from "./send";
 import {
@@ -80,11 +81,21 @@ async function purgeOldRecords(now: Date): Promise<{ deliveries: number; events:
     select: { id: true },
     take: PURGE_BATCH,
   });
-  const oldEvents = await prisma.notificationSourceEvent.findMany({
-    where: { firstSeenAt: { lt: before } },
-    select: { source: true, eventId: true },
-    take: PURGE_BATCH,
-  });
+  // 「見つけ済み」の印は、その出来事がもう読み直しの範囲(カーソルの5分前から)に入らないときだけ消す
+  // (申込などが長く来ずカーソルが進まないと、30日たっても範囲に残り、消すと二重に知らせるため・@codex #472 P2)。
+  // 出来事そのものが消えている印も消してよい。
+  const oldEvents = await prisma.$queryRaw<Array<{ source: string; eventId: string }>>`
+    SELECT ev."source", ev."event_id" AS "eventId"
+    FROM "notification_source_events" ev
+    JOIN "notification_source_cursors" c ON c."source" = ev."source"
+    LEFT JOIN "dm_inquiries" q ON ev."source" = 'inquiry' AND q."id" = ev."event_id"
+    LEFT JOIN "registry_fetch_jobs" j ON ev."source" = 'registry_job' AND j."id" = ev."event_id"
+    WHERE ev."first_seen_at" < ${before.toISOString()}::timestamptz AT TIME ZONE 'UTC'
+      AND (
+        (ev."source" = 'inquiry' AND (q."id" IS NULL OR q."submitted_at" < c."cursor_t" - make_interval(secs => ${REREAD_WINDOW_MS / 1000}::double precision)))
+        OR (ev."source" = 'registry_job' AND (j."id" IS NULL OR j."completed_at" IS NULL OR j."completed_at" < c."cursor_t" - make_interval(secs => ${REREAD_WINDOW_MS / 1000}::double precision)))
+      )
+    LIMIT ${PURGE_BATCH}`;
   // 知らせ終わった外れた記録も30日で消す(設計書 §7.2)。
   const oldLosses = await prisma.editLockLossEvent.findMany({
     where: { createdAt: { lt: before }, status: { in: ["queued", "expired"] } },
