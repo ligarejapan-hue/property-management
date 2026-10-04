@@ -82,7 +82,7 @@ const JST = (s: string) => new Date(`${s}+09:00`);
 
 async function reset() {
   await prisma.$executeRawUnsafe(
-    `TRUNCATE notification_delivery_refs, notification_deliveries, notification_source_events, push_subscriptions, next_actions, dm_inquiries, registry_fetch_job_items, registry_fetch_jobs, properties, users CASCADE`,
+    `TRUNCATE notification_delivery_refs, notification_deliveries, notification_fanout_queue, notification_source_events, push_subscriptions, next_actions, dm_inquiries, registry_fetch_job_items, registry_fetch_jobs, properties, users CASCADE`,
   );
   for (const source of ["inquiry", "registry_job"]) {
     await prisma.notificationSourceCursor.upsert({
@@ -650,7 +650,47 @@ async function main() {
     const r2 = await planSourceDeliveries("inquiry", new Date());
     const refs2 = await prisma.notificationDeliveryRef.count();
     const sealed2 = await prisma.notificationSourceEvent.count();
-    check("33 1件で2,500台でも1回目2,000台(見つけ済みにしない)・2回目で残り500台(見つけ済みに)", refs1 === 2000 && sealed1 === 0 && r1.more && refs2 === 2500 && sealed2 === 1, { r1, refs1, sealed1, r2, refs2, sealed2 });
+    check("33 1件で2,500台でも1回目2,000台・2回目で残り500台(見つけ済みは最初に・控えから続ける)", refs1 === 2000 && sealed1 === 1 && r1.more && refs2 === 2500 && sealed2 === 1, { r1, refs1, sealed1, r2, refs2, sealed2 });
+  }
+
+  // ---- 34. 見つけた時点の顔ぶれのまま続ける(途中で結び付いた端末には、その出来事を送らない) ----
+  await reset();
+  {
+    const on = await user({ notify: true });
+    await prisma.pushSubscription.createMany({
+      data: Array.from({ length: 2100 }, (_, i) => ({
+        userId: on, endpoint: EP(`cohort-${i}`), ...KEYS, deviceScope: "personal", boundAt: new Date(Date.now() - 3600_000),
+        bindingId: randomUUID(), expiresAt: new Date(Date.now() + 86400_000),
+      })),
+    });
+    await prisma.notificationSourceCursor.update({ where: { source: "inquiry" }, data: { cursorT: new Date(Date.now() - 60_000), cursorId: "00000000-0000-0000-0000-000000000000" } });
+    await prisma.$executeRawUnsafe(`INSERT INTO dm_inquiries (id, draft_id, name, phone, submitted_at) VALUES ($1::uuid, $2::uuid, 'x', 'x', $3::timestamptz AT TIME ZONE 'UTC')`, randomUUID(), randomUUID(), new Date(Date.now() - 30_000).toISOString());
+    await planSourceDeliveries("inquiry", new Date());
+    const lateSub = await sub(on, EP("cohort-late"), new Date());
+    await planSourceDeliveries("inquiry", new Date(Date.now() + 1000));
+    const refs = await prisma.notificationDeliveryRef.count();
+    const toLate = await prisma.notificationDeliveryRef.count({ where: { subscriptionId: lateSub.id } });
+    check("34 途中で結び付いた端末には、見つけた後の出来事を送らない(2,100台だけ)", refs === 2100 && toLate === 0, { refs, toLate });
+  }
+
+  // ---- 35. まだ送っていない1通に足すのは500件まで(超えたら新しい1通) ----
+  await reset();
+  {
+    const on = await user({ notify: true });
+    await sub(on, EP("cap"), new Date(Date.now() - 3600_000));
+    await prisma.notificationSourceCursor.update({ where: { source: "inquiry" }, data: { cursorT: new Date(Date.now() - 120_000), cursorId: "00000000-0000-0000-0000-000000000000" } });
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO dm_inquiries (id, draft_id, name, phone, submitted_at)
+       SELECT gen_random_uuid(), gen_random_uuid(), 'x', 'x', ((now() - interval '60 seconds') AT TIME ZONE 'UTC') + (g * interval '1 millisecond') FROM generate_series(1, 60) g`,
+    );
+    for (let i = 0; i < 12; i++) await planSourceDeliveries("inquiry", new Date());
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO dm_inquiries (id, draft_id, name, phone, submitted_at)
+       SELECT gen_random_uuid(), gen_random_uuid(), 'x', 'x', ((now() - interval '50 seconds') AT TIME ZONE 'UTC') + (g * interval '1 millisecond') FROM generate_series(1, 540) g`,
+    );
+    for (let i = 0; i < 12; i++) await planSourceDeliveries("inquiry", new Date());
+    const sizes = (await prisma.notificationDelivery.findMany({ where: { kind: "inquiry_new" }, select: { _count: { select: { refs: true } } } })).map((d) => d._count.refs).sort((a, b) => b - a);
+    check("35 1通は500件まで・超えた分は新しい1通(600件→500+100)", JSON.stringify(sizes) === JSON.stringify([500, 100]), sizes);
   }
 
   // ---- 17. カーソルの行が無い(migration 前)なら失敗で終わり、送らない ----

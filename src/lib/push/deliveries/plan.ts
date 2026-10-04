@@ -32,6 +32,7 @@ import {
   SEND_TX_TIMEOUT_MS,
   SOURCE_PLAN_TX_TIMEOUT_MS,
   SOURCE_REFS_PER_TX,
+  DELIVERY_REFS_MAX,
   rotateStart,
   sourceEventsPerTx,
   type DeliveryKind,
@@ -85,29 +86,43 @@ async function createDeliveries(
   // 査定申込は、その端末のまだ送っていない1通(pending)があれば、そこへ足す(溜まった申込を何回かに分けて
   // 記録しても、端末ごとに1通にまとめる・@codex #472 P2)。行を押さえて足すので、送信の取り合いはこの
   // トランザクションが終わるまで待つ(足した件も一緒に送られる)。送信中・押さえられない行には足さない。
-  const reuse = new Map<string, string>();
+  //   ⚠1通に含める件は DELIVERY_REFS_MAX まで(それを超える1通には足さず、新しい1通にする・@codex #472 P2)。
+  const reuse = new Map<string, { id: string; n: number }>();
   if (kind === "inquiry_new") {
     const subIds = [...new Set(wanted.map((x) => x.sub.id))];
     for (let i = 0; i < subIds.length; i += BULK_CHUNK) {
-      const rows = await tx.$queryRaw<Array<{ id: string; subscription_id: string; binding_id: string }>>`
-        SELECT "id", "subscription_id", "binding_id" FROM "notification_deliveries"
-        WHERE "kind" = 'inquiry_new' AND "status" = 'pending' AND "subscription_id" = ANY(${subIds.slice(i, i + BULK_CHUNK)}::uuid[])
-        FOR UPDATE SKIP LOCKED`;
-      for (const r of rows) reuse.set(`${r.subscription_id}|${r.binding_id}`, r.id);
+      const rows = await tx.$queryRaw<Array<{ id: string; subscription_id: string; binding_id: string; n: number }>>`
+        SELECT d."id", d."subscription_id", d."binding_id",
+               (SELECT count(*)::int FROM "notification_delivery_refs" r WHERE r."delivery_id" = d."id") AS n
+        FROM "notification_deliveries" d
+        WHERE d."kind" = 'inquiry_new' AND d."status" = 'pending' AND d."subscription_id" = ANY(${subIds.slice(i, i + BULK_CHUNK)}::uuid[])
+        FOR UPDATE OF d SKIP LOCKED`;
+      for (const r of rows) {
+        const k = `${r.subscription_id}|${r.binding_id}`;
+        const cur = reuse.get(k);
+        if (r.n < DELIVERY_REFS_MAX && (!cur || r.n < cur.n)) reuse.set(k, { id: r.id, n: r.n });
+      }
     }
   }
   const deliveries: Array<{ id: string; userId: string; subscriptionId: string; bindingId: string; kind: string; scheduledFor: Date }> = [];
   const refs: Array<{ deliveryId: string; subscriptionId: string; bindingId: string; kind: string; refKey: string }> = [];
+  const filling = new Map<string, { id: string; n: number }>();
   for (const { sub, refKeys } of wanted) {
     if (refs.length >= maxRefs) break;
     const fresh = [...new Set(refKeys)].filter((k) => !existing.has(`${sub.bindingId}|${k}`)).slice(0, maxRefs - refs.length);
     if (fresh.length === 0) continue;
-    let id = reuse.get(`${sub.id}|${sub.bindingId}`);
-    if (!id) {
-      id = randomUUID();
-      deliveries.push({ id, userId: sub.userId, subscriptionId: sub.id, bindingId: sub.bindingId, kind, scheduledFor: now });
+    // 同じ端末の件を1通へまとめるのは申込だけ(謄本ジョブ・編集権限は1件=1通・次回対応は端末ごとに1回で渡される)。
+    const slot = `${sub.id}|${sub.bindingId}`;
+    let cur = kind === "inquiry_new" ? (filling.get(slot) ?? reuse.get(slot)) : undefined;
+    for (const refKey of fresh) {
+      if (!cur || cur.n >= DELIVERY_REFS_MAX) {
+        cur = { id: randomUUID(), n: 0 };
+        deliveries.push({ id: cur.id, userId: sub.userId, subscriptionId: sub.id, bindingId: sub.bindingId, kind, scheduledFor: now });
+      }
+      refs.push({ deliveryId: cur.id, subscriptionId: sub.id, bindingId: sub.bindingId, kind, refKey });
+      cur.n += 1;
     }
-    for (const refKey of fresh) refs.push({ deliveryId: id, subscriptionId: sub.id, bindingId: sub.bindingId, kind, refKey });
+    filling.set(slot, cur as { id: string; n: number });
   }
   for (let i = 0; i < deliveries.length; i += BULK_CHUNK) {
     await tx.notificationDelivery.createMany({ data: deliveries.slice(i, i + BULK_CHUNK) });
@@ -405,125 +420,88 @@ export async function planSourceDeliveries(
     const take = freshRows.slice(0, perTx);
     const more = freshRows.length > take.length;
 
-    let created = 0;
-    let completed = new Set<string>();
     if (take.length > 0) {
       const fresh = take.map((r) => r.id);
-      // 1回で作る記録は「件×端末」で SOURCE_REFS_PER_TX まで。送り先の全員分を作り終えた出来事だけを
-      // 見つけ済みにする(途中の出来事は見つけ済みにせず、次の回で残りの端末の分を作る・@codex #472 P2)。
-      const r =
-        source === "inquiry" ? await planInquiries(tx, fresh, seenAt, who.inquiry) : await planRegistryJobs(tx, fresh, seenAt, who.registry);
-      created = r.created;
-      completed = r.completed;
-      const sealed = fresh.filter((id) => completed.has(id));
-      if (sealed.length) {
-        await tx.notificationSourceEvent.createMany({
-          data: sealed.map((eventId) => ({ source, eventId, firstSeenAt: seenAt })),
-          skipDuplicates: true,
-        });
-      }
+      await tx.notificationSourceEvent.createMany({
+        data: fresh.map((eventId) => ({ source, eventId, firstSeenAt: seenAt })),
+        skipDuplicates: true,
+      });
+      // 見つけた時点の送り先(端末)を控えに書き出す(以後はこの顔ぶれのまま少しずつ記録を作る=途中で
+      // 結び付いた端末や、あとから送り先になった人は加えない・@codex #472 P2)。
+      if (source === "inquiry") await enqueueInquiries(tx, fresh, seenAt, who.inquiry);
+      else await enqueueRegistryJobs(tx, fresh, seenAt, who.registry);
     }
-    // カーソルは「カーソルより後」のうち、まだ処理し終えていない新しい出来事の手前までだけ進める。
-    const unfinished = take.find((r) => !completed.has(r.id)) ?? null;
-    const firstPending = unfinished ?? (more ? freshRows[take.length] : null);
+    // 控えから、1回「件×端末」で SOURCE_REFS_PER_TX まで送信記録を作る(残りは次の回で)。
+    const drained = await drainFanout(tx, source, seenAt);
+    const created = drained.created;
+    // カーソルは「カーソルより後」のうち、まだ処理していない新しい出来事の手前までだけ進める。
+    const firstPending = more ? freshRows[take.length] : null;
     const pendingIdx = firstPending ? after.findIndex((r) => r.id === firstPending.id) : -1;
     const done = firstPending ? (pendingIdx < 0 ? [] : after.slice(0, pendingIdx)) : after;
     const next = advanceCursor(c, done.map((r) => ({ t: r.t, i: r.id })));
     await tx.notificationSourceCursor.update({ where: { source }, data: { cursorT: next.t, cursorId: next.i, updatedAt: now } });
     // カーソルより後が上限まで埋まっていたら、その先にもまだある(続けて読む)。
-    return { created, more: more || unfinished !== null || after.length >= AFTER_CURSOR_LIMIT };
+    return { created, more: more || drained.more || after.length >= AFTER_CURSOR_LIMIT };
   }, { timeout: SOURCE_PLAN_TX_TIMEOUT_MS, maxWait: SEND_TX_MAX_WAIT_MS });
 }
 
-/** 今の時点で結び付いている端末(結び付けが今以前)。 */
-async function boundSubscriptions(tx: Tx, userIds: string[], now: Date) {
-  if (userIds.length === 0) return [];
-  return tx.pushSubscription.findMany({
-    where: { ...activeSubscriptionWhere(now), userId: { in: userIds }, boundAt: { lte: now } },
-    select: { id: true, userId: true, bindingId: true },
-    orderBy: { id: "asc" },
-  });
+/** 出来事1件の送り先(端末)を控えに書き出す。見つけた時点で結び付いている端末だけ(1文でまとめて)。 */
+async function enqueue(tx: Tx, source: Source, eventId: string, userIds: string[], seenAt: Date): Promise<void> {
+  if (userIds.length === 0) return;
+  const at = seenAt.toISOString();
+  await tx.$executeRaw`
+    INSERT INTO "notification_fanout_queue" ("id", "source", "event_id", "subscription_id", "binding_id", "user_id", "created_at")
+    SELECT gen_random_uuid(), ${source}, ${eventId}::uuid, s."id", s."binding_id", s."user_id", (${at}::timestamptz AT TIME ZONE 'UTC')
+    FROM "push_subscriptions" s JOIN "users" u ON u."id" = s."user_id" AND u."is_active"
+    WHERE s."user_id" = ANY(${userIds}::uuid[]) AND s."revoked_at" IS NULL
+      AND s."expires_at" > (${at}::timestamptz AT TIME ZONE 'UTC') AND s."bound_at" <= (${at}::timestamptz AT TIME ZONE 'UTC')
+    ON CONFLICT DO NOTHING`;
 }
 
-/**
- * 出来事ごとの送り先(端末)を、まだ作っていない分だけ、出来事の順に「件×端末」で maxRefs まで選ぶ。
- * 全員分を選び終えた出来事を completed に入れる(上限で途中までになった出来事と、その後の出来事は入らない)。
- */
-async function boundedFanOut(
-  tx: Tx,
-  kind: DeliveryKind,
-  perEvent: Array<{ eventId: string; key: string; subs: SubRef[] }>,
-  maxRefs: number,
-): Promise<{ pairs: Array<{ eventId: string; key: string; sub: SubRef }>; completed: Set<string> }> {
-  const keys = perEvent.map((e) => e.key);
-  const made = new Set<string>();
-  for (let i = 0; i < keys.length; i += BULK_CHUNK) {
-    const rows = await tx.notificationDeliveryRef.findMany({ where: { kind, refKey: { in: keys.slice(i, i + BULK_CHUNK) } }, select: { refKey: true, bindingId: true } });
-    for (const r of rows) made.add(`${r.refKey}|${r.bindingId}`);
-  }
-  const pairs: Array<{ eventId: string; key: string; sub: SubRef }> = [];
-  const completed = new Set<string>();
-  for (const e of perEvent) {
-    const todo = e.subs.filter((s) => !made.has(`${e.key}|${s.bindingId}`));
-    const room = maxRefs - pairs.length;
-    for (const sub of todo.slice(0, Math.max(0, room))) pairs.push({ eventId: e.eventId, key: e.key, sub });
-    if (todo.length > room) break;
-    completed.add(e.eventId);
-  }
-  return { pairs, completed };
-}
-
-async function planInquiries(
-  tx: Tx,
-  inquiryIds: string[],
-  now: Date,
-  recipients: Recipient[],
-): Promise<{ created: number; completed: Set<string> }> {
+async function enqueueInquiries(tx: Tx, inquiryIds: string[], seenAt: Date, recipients: Recipient[]): Promise<void> {
   const inquiries = await tx.dmInquiry.findMany({
     where: { id: { in: inquiryIds } },
     select: { id: true, draft: { select: { property: { select: { createdBy: true, assignedTo: true } } } } },
   });
-  const byInquiry = new Map(inquiries.map((q) => [q.id, q]));
-  const subs = await boundSubscriptions(tx, recipients.map((r) => r.id), now);
-  const byId = new Map(recipients.map((r) => [r.id, r]));
-  // 申込が消えていた(見つけた直後に削除された)ときは、送り先なし=処理済み。
-  const perEvent = inquiryIds.map((id) => {
-    const q = byInquiry.get(id);
-    return {
-      eventId: id,
-      key: eventRefKey("inquiry", id),
-      subs: q ? subs.filter((s) => { const r = byId.get(s.userId); return !!r && inquiryInScope(r, q.draft?.property ?? null); }) : [],
-    };
-  });
-  const { pairs, completed } = await boundedFanOut(tx, kindOfSource("inquiry"), perEvent, SOURCE_REFS_PER_TX);
-  // 端末ごとに1通にまとめる(同じ端末の件を1つの記録へ)。
-  const bySub = new Map<string, { sub: SubRef; refKeys: string[] }>();
-  for (const p of pairs) {
-    const cur = bySub.get(p.sub.id) ?? { sub: p.sub, refKeys: [] };
-    cur.refKeys.push(p.key);
-    bySub.set(p.sub.id, cur);
+  for (const q of inquiries) {
+    const users = recipients.filter((r) => inquiryInScope(r, q.draft?.property ?? null)).map((r) => r.id);
+    await enqueue(tx, "inquiry", q.id, users, seenAt);
   }
-  const created = await createDeliveries(tx, [...bySub.values()], kindOfSource("inquiry"), now);
-  return { created, completed };
 }
 
-async function planRegistryJobs(
-  tx: Tx,
-  jobIds: string[],
-  now: Date,
-  recipients: Map<string, Recipient>,
-): Promise<{ created: number; completed: Set<string> }> {
+async function enqueueRegistryJobs(tx: Tx, jobIds: string[], seenAt: Date, recipients: Map<string, Recipient>): Promise<void> {
   const jobs = await tx.registryFetchJob.findMany({ where: { id: { in: jobIds } }, select: { id: true, requestedById: true } });
-  const byJob = new Map(jobs.map((j) => [j.id, j]));
-  const owners = [...new Set(jobs.flatMap((j) => (j.requestedById && recipients.has(j.requestedById) ? [j.requestedById] : [])))];
-  const subs = await boundSubscriptions(tx, owners, now);
-  // 件数(今見られる物件だけで数え直す)は送る直前に確かめる。ジョブごと・端末ごとに1通。
-  const perEvent = jobIds.map((id) => {
-    const j = byJob.get(id);
-    const owner = j?.requestedById && recipients.has(j.requestedById) ? j.requestedById : null;
-    return { eventId: id, key: eventRefKey("registry_job", id), subs: owner ? subs.filter((s) => s.userId === owner) : [] };
-  });
-  const { pairs, completed } = await boundedFanOut(tx, kindOfSource("registry_job"), perEvent, SOURCE_REFS_PER_TX);
-  const created = await createDeliveries(tx, pairs.map((p) => ({ sub: p.sub, refKeys: [p.key] })), kindOfSource("registry_job"), now);
-  return { created, completed };
+  for (const j of jobs) {
+    if (j.requestedById && recipients.has(j.requestedById)) await enqueue(tx, "registry_job", j.id, [j.requestedById], seenAt);
+  }
+}
+
+/**
+ * 控えから、古い順に SOURCE_REFS_PER_TX 件まで送信記録を作り、作った分の控えを消す。
+ * 申込は端末ごとに1通へまとめ(1通は DELIVERY_REFS_MAX 件まで)、謄本ジョブはジョブごとに1通。
+ */
+async function drainFanout(tx: Tx, source: Source, now: Date): Promise<{ created: number; more: boolean }> {
+  const rows = await tx.$queryRaw<Array<{ id: string; event_id: string; subscription_id: string; binding_id: string; user_id: string }>>`
+    SELECT "id", "event_id", "subscription_id", "binding_id", "user_id" FROM "notification_fanout_queue"
+    WHERE "source" = ${source}
+    ORDER BY "created_at" ASC, "id" ASC
+    LIMIT ${SOURCE_REFS_PER_TX}
+    FOR UPDATE SKIP LOCKED`;
+  if (rows.length === 0) return { created: 0, more: false };
+  const kind = kindOfSource(source);
+  let items: Array<{ sub: SubRef; refKeys: string[] }>;
+  if (source === "inquiry") {
+    const bySub = new Map<string, { sub: SubRef; refKeys: string[] }>();
+    for (const r of rows) {
+      const cur = bySub.get(r.subscription_id) ?? { sub: { id: r.subscription_id, userId: r.user_id, bindingId: r.binding_id }, refKeys: [] };
+      cur.refKeys.push(eventRefKey("inquiry", r.event_id));
+      bySub.set(r.subscription_id, cur);
+    }
+    items = [...bySub.values()];
+  } else {
+    items = rows.map((r) => ({ sub: { id: r.subscription_id, userId: r.user_id, bindingId: r.binding_id }, refKeys: [eventRefKey("registry_job", r.event_id)] }));
+  }
+  const created = await createDeliveries(tx, items, kind, now);
+  await tx.notificationFanoutQueue.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
+  return { created, more: rows.length >= SOURCE_REFS_PER_TX };
 }

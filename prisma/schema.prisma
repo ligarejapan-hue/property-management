@@ -1863,6 +1863,7 @@ model PushSubscription {
   user       User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
   deliveries NotificationDelivery[]
   refs       NotificationDeliveryRef[]
+  fanout     NotificationFanoutQueue[]
 
   @@index([userId])
   @@index([expiresAt])
@@ -1916,6 +1917,24 @@ model NotificationDeliveryRef {
   @@index([deliveryId])
   @@index([kind, refKey])
   @@map("notification_delivery_refs")
+}
+
+/// 通知 段階4b: 出来事を見つけた時点の送り先(端末)の控え。ここから少しずつ送信記録を作る。
+model NotificationFanoutQueue {
+  id             String   @id @db.Uuid
+  /// inquiry | registry_job
+  source         String
+  eventId        String   @map("event_id") @db.Uuid
+  subscriptionId String   @map("subscription_id") @db.Uuid
+  bindingId      String   @map("binding_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  createdAt      DateTime @map("created_at")
+
+  subscription PushSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([source, eventId, subscriptionId])
+  @@index([source, createdAt])
+  @@map("notification_fanout_queue")
 }
 
 /// 通知 段階4b: 査定申込・謄本ジョブを定期実行が読んだ位置(inquiry | registry_job)。

@@ -82,6 +82,28 @@ ALTER TABLE "notification_delivery_refs" ADD CONSTRAINT "notification_delivery_r
 ALTER TABLE "notification_delivery_refs" ADD CONSTRAINT "notification_delivery_refs_subscription_id_fkey"
   FOREIGN KEY ("subscription_id") REFERENCES "push_subscriptions"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- 出来事(申込・謄本ジョブ)を見つけた時点の送り先(端末)の控え。見つけたときに一度に書き出し、
+-- そこから少しずつ送信記録を作る(送り先が多くても、見つけた時点の顔ぶれのまま・@codex #472 P2)。
+CREATE TABLE "notification_fanout_queue" (
+    "id" UUID NOT NULL,
+    "source" TEXT NOT NULL,
+    "event_id" UUID NOT NULL,
+    "subscription_id" UUID NOT NULL,
+    "binding_id" UUID NOT NULL,
+    "user_id" UUID NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "notification_fanout_queue_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "notification_fanout_queue_source_check" CHECK ("source" IN ('inquiry', 'registry_job'))
+);
+
+CREATE UNIQUE INDEX "notification_fanout_queue_source_event_id_subscription_id_key"
+  ON "notification_fanout_queue"("source", "event_id", "subscription_id");
+CREATE INDEX "notification_fanout_queue_source_created_at_idx" ON "notification_fanout_queue"("source", "created_at");
+
+ALTER TABLE "notification_fanout_queue" ADD CONSTRAINT "notification_fanout_queue_subscription_id_fkey"
+  FOREIGN KEY ("subscription_id") REFERENCES "push_subscriptions"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
 CREATE TABLE "notification_source_cursors" (
     "source" TEXT NOT NULL,
     "cursor_t" TIMESTAMP(3) NOT NULL,

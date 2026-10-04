@@ -49,6 +49,11 @@ export const SOURCE_EVENTS_PER_TX = 100;
  * (端末ごとの記録づくりでトランザクションが時間切れになり、同じ所でやり直し続けない・@codex #472 P2)。
  */
 export const SOURCE_REFS_PER_TX = 2000;
+/**
+ * 1通(1行)に含める件の上限。まだ送っていない1通に足していくとき、これを超えたら新しい1通にする
+ * (送る直前の確かめ直しが1通ぶんで大きくなりすぎない・@codex #472 P2)。
+ */
+export const DELIVERY_REFS_MAX = 500;
 
 /** 1トランザクションで扱う出来事の件数(送り先の端末の数に合わせて1〜100件)。 */
 export function sourceEventsPerTx(subscriptionCount: number): number {
