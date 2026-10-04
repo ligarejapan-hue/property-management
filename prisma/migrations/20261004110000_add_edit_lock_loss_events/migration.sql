@@ -48,4 +48,13 @@ ALTER TABLE "notification_deliveries" ADD CONSTRAINT "notification_deliveries_ki
 
 COMMIT;
 
+-- 確かめ(VALIDATE)は別のトランザクションで、押さえを待つのは10秒まで(上の SET LOCAL は COMMIT で消えるため
+-- ここでも付ける・@codex #472 P2)。種類を広げるだけなので既存の行は必ず合い、失敗するのは押さえを待ち切れ
+-- なかったときだけ。⚠この段だけが失敗したときは、表と制約はすでに入っている(上は COMMIT 済み)ので
+-- `migrate resolve --rolled-back` は使わない。時間を置いて次の2つを順に流す:
+--   1. psql で: BEGIN; SET LOCAL lock_timeout = '10s'; ALTER TABLE "notification_deliveries" VALIDATE CONSTRAINT "notification_deliveries_kind_check"; COMMIT;
+--   2. `npx prisma migrate resolve --applied 20261004110000_add_edit_lock_loss_events`
+BEGIN;
+SET LOCAL lock_timeout = '10s';
 ALTER TABLE "notification_deliveries" VALIDATE CONSTRAINT "notification_deliveries_kind_check";
+COMMIT;
