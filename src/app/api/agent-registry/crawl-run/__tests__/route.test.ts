@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const crawlStep = vi.fn();
-const createRegistryClient = vi.fn(() => ({ fake: true }));
+const createRegistryClient = vi.fn((_opts?: { allowRequest?: () => boolean }) => ({ fake: true }));
 const loadStates = vi.fn();
 const count = vi.fn();
 
@@ -17,7 +17,10 @@ vi.mock("@/lib/agent-registry/crawl", async () => {
 });
 vi.mock("@/lib/agent-registry/client", async () => {
   const actual = await vi.importActual<typeof import("@/lib/agent-registry/client")>("@/lib/agent-registry/client");
-  return { ...actual, createRegistryClient: () => createRegistryClient() };
+  return {
+    ...actual,
+    createRegistryClient: (opts?: { allowRequest?: () => boolean }) => createRegistryClient(opts),
+  };
 });
 vi.mock("@/lib/agent-registry/store", () => ({
   createPrismaCrawlStore: () => ({ loadStates: (...a: unknown[]) => loadStates(...a) }),
@@ -101,6 +104,21 @@ describe("POST /api/agent-registry/crawl-run", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ requests: 3, listed: 50, detailed: 2, stopped: null });
     expect(crawlStep).toHaveBeenCalledTimes(1);
+  });
+
+  it("★client には「夜間の内か」を毎回確かめる関数を渡す(取り直しでも 7 時を越えない・@codex #477)", async () => {
+    await POST(req({ secret: SECRET }));
+    const allow = createRegistryClient.mock.calls[0][0]?.allowRequest;
+    expect(typeof allow).toBe("function");
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-05T14:00:00Z")); // JST 23:00
+      expect(allow!()).toBe(true);
+      vi.setSystemTime(new Date("2026-10-05T22:00:00Z")); // JST 07:00
+      expect(allow!()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("★前の回がまだ走っていたら 409 で何もしない(先方へ2本同時にアクセスしない)", async () => {

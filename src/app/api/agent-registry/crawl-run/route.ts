@@ -2,7 +2,7 @@ import { timingSafeEqual } from "crypto";
 import prisma from "@/lib/prisma";
 import { ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
 import { createRegistryClient } from "@/lib/agent-registry/client";
-import { crawlStep, DEFAULT_BUDGET } from "@/lib/agent-registry/crawl";
+import { crawlStep, DEFAULT_BUDGET, inNightWindow } from "@/lib/agent-registry/crawl";
 import { createPrismaCrawlStore } from "@/lib/agent-registry/store";
 
 /**
@@ -43,7 +43,8 @@ export async function POST(request: Request) {
     running = true;
     try {
       const result = await crawlStep({
-        client: createRegistryClient(),
+        // 取り直しを含むすべての呼び出しの直前に夜間かを確かめる(7時を越えて頼まない・@codex #477)。
+        client: createRegistryClient({ allowRequest: () => inNightWindow(new Date()) }),
         store,
         now: () => new Date(),
         budget: DEFAULT_BUDGET,

@@ -59,6 +59,15 @@ export function cleanText(html: string): string {
     .trim();
 }
 
+/** 詳細の「免許証番号」の欄に出る免許行政庁の名前(対象の5つ)。 */
+const AUTHORITY_NAMES: Record<string, string> = {
+  "00": "国土交通大臣",
+  "11": "埼玉県知事",
+  "12": "千葉県知事",
+  "13": "東京都知事",
+  "14": "神奈川県知事",
+};
+
 function authorityLabel(code: string, authorityText: string): string {
   return code === "00" ? "国土交通大臣" : `${authorityText}知事`;
 }
@@ -123,7 +132,11 @@ export function parseDetail(html: string, licenseKey: string): Detail {
   const licenseText = cleanText(license);
   const numberM = licenseText.match(/第(\d{6})号/);
   const authority = licenseKey.slice(0, 2);
-  const authorityOk = authority === "00" ? licenseText.includes("国土交通大臣") : licenseText.includes("知事");
+  // 番号が同じでも都県が違えば別の会社。頼んだ行政庁の名前まで一致を確かめる(@codex #477)。
+  const expectedName = AUTHORITY_NAMES[authority];
+  const authorityOk = expectedName
+    ? licenseText.startsWith(expectedName)
+    : !licenseText.includes("国土交通大臣") && licenseText.includes("知事");
   if (!numberM || numberM[1] !== licenseKey.slice(2) || !authorityOk) {
     throw new LayoutChanged("開いた会社と免許番号が違う");
   }

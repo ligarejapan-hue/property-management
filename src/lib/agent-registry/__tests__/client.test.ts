@@ -176,6 +176,26 @@ describe("先方への取得", () => {
     expect(err.kind).toBe("layout");
   });
 
+  it("★取り直しを含め、どの呼び出しの前にも夜間かを確かめ、外なら先方に頼まず止める(@codex #477)", async () => {
+    const calls: string[] = [];
+    let allowed = 2;
+    const client = createRegistryClient({
+      fetchImpl: (async (url: string | URL) => {
+        calls.push(String(url));
+        // 2回目(検索)はセッション切れで検索画面に戻される=取り直しが走る
+        return html(calls.length === 2 ? searchPageHtml : searchPageHtml);
+      }) as typeof fetch,
+      sleep: async () => {},
+      now: () => 0,
+      decode: (buf) => new TextDecoder("utf-8").decode(buf),
+      allowRequest: () => allowed-- > 0,
+    });
+    const err = await client.searchFirst("13").catch((e) => e);
+    expect(err).toBeInstanceOf(FetchError);
+    expect(err.kind).toBe("outside_window");
+    expect(calls).toHaveLength(2); // 取り直しの GET は頼んでいない
+  });
+
   it("既定の読み方は Shift_JIS(先方の文字コード)", () => {
     expect(new TextDecoder("shift_jis").decode(new Uint8Array([0x82, 0xa0]))).toBe("あ");
   });

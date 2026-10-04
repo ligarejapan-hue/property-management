@@ -133,4 +133,14 @@ describe("詳細のページを読む", () => {
   it("開いた会社と違う免許番号の詳細 → LayoutChanged(取り違えない)", () => {
     expect(() => parseDetail(detailHtml, "13000044")).toThrow(LayoutChanged);
   });
+
+  it("★番号が同じでも、違う都県の知事免許の詳細は取り違えとして止める(@codex #477)", () => {
+    expect(() => parseDetail(detailHtml, "14000001")).toThrow(LayoutChanged); // 神奈川を頼んで東京が返った
+    expect(() => parseDetail(detailHtml, "11000001")).toThrow(LayoutChanged);
+    expect(() => parseDetail(detailHtml, "00000001")).toThrow(LayoutChanged);
+    const kanagawa = detailHtml.replace("東京都知事免許", "神奈川県知事免許");
+    expect(parseDetail(kanagawa, "14000001").phone).toBe("03-0000-1212");
+    const minister = detailHtml.replace("東京都知事免許", "国土交通大臣免許");
+    expect(parseDetail(minister, "00000001").phone).toBe("03-0000-1212");
+  });
 });
