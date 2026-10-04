@@ -16,6 +16,7 @@ import {
   heartbeatEditLock,
   isResourceEditLocked,
   readEditLocks,
+  recordExpiredEditLockLosses,
   releaseEditLock,
 } from "../service";
 import { EDIT_LOCK_HEARTBEAT_GRACE_MS, EDIT_LOCK_IDLE_LIMIT_MS, expiryCause, type EditLockRow } from "../rules";
@@ -317,7 +318,7 @@ describe("releaseEditLock", () => {
 
 describe("forceReleaseEditLock", () => {
   it("世代と資源の両方が一致した行にだけ墓標を立てる", async () => {
-    const { db, queryRaw } = fakeDb([{ user_id: "victim" }]);
+    const { db, queryRaw } = fakeDb([{ user_id: "victim", lost_at: "2026-10-03T01:00:00.123Z" }]);
     const res = await forceReleaseEditLock(db, { resourceType: "property", resourceId: BASE.resourceId, lockId: "l1", adminUserId: "admin" });
     const sql = sqlOf(queryRaw.mock.calls[0]);
     expect(sql).toMatch(/UPDATE "edit_locks"/);
@@ -327,6 +328,84 @@ describe("forceReleaseEditLock", () => {
     expect(sql).toMatch(/"resource_type" = /);
     expect(sql).toMatch(/"resource_id" = /);
     expect(res).toEqual({ previousUserId: "victim" });
+  });
+  it("通知 段階4c: 外すのと同じトランザクション(同じ db)で、外れた事実を鍵の ID ごとに1件だけ記録する", async () => {
+    const { db, queryRaw } = fakeDb([{ user_id: "victim", lost_at: "2026-10-03T01:00:00.123Z" }]);
+    await forceReleaseEditLock(db, { resourceType: "owner", resourceId: BASE.resourceId, lockId: "l1", adminUserId: "admin" });
+    expect(queryRaw).toHaveBeenCalledTimes(2);
+    const sql = sqlOf(queryRaw.mock.calls[1]);
+    expect(sql).toMatch(/INSERT INTO "edit_lock_loss_events"/);
+    expect(sql).toMatch(/\{l1\}::uuid, \{victim\}::uuid, \{owner\}::"EditLockResource"/);
+    expect(sql).toContain("{force_released}");
+    // 時刻は SQL で作った UTC の文字列のまま束縛し UTC で保存する(Date で往復させない)
+    expect(sql).toContain("({2026-10-03T01:00:00.123Z}::timestamptz AT TIME ZONE 'UTC')");
+    expect(sql).toMatch(/ON CONFLICT \("lock_id"\) DO NOTHING/);
+  });
+  it("外せなかった(すでに外れていた・別の世代)ときは記録しない", async () => {
+    const { db, queryRaw } = fakeDb([]);
+    const res = await forceReleaseEditLock(db, { resourceType: "property", resourceId: BASE.resourceId, lockId: "l1", adminUserId: "admin" });
+    expect(res).toBeNull();
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("通知 段階4c: 期限切れの鍵の上書きで外れた事実を記録する", () => {
+  const dbNow = new Date("2026-10-03T02:00:00Z");
+  const lostAt = "2026-10-03T01:55:00.000Z";
+  it("別の人が期限切れの鍵を取り直したら、前の持ち主・前の鍵の ID・原因・外れた時刻を記録する", async () => {
+    const { db, queryRaw } = fakeDb();
+    queryRaw
+      .mockResolvedValueOnce([{ db_now: dbNow, lock_id: "old-lock", user_id: "other", screen_token_hash: "h-other", expired_by: "heartbeat", lost_at: lostAt }])
+      .mockResolvedValueOnce([{ id: "new-lock", acquired_at: dbNow }])
+      .mockResolvedValueOnce([{ id: "ev" }]);
+    await acquireEditLock(db, BASE);
+    expect(queryRaw).toHaveBeenCalledTimes(3);
+    const sql = sqlOf(queryRaw.mock.calls[2]);
+    expect(sql).toMatch(/INSERT INTO "edit_lock_loss_events"/);
+    expect(sql).toContain("{old-lock}::uuid, {other}::uuid");
+    expect(sql).toContain("{heartbeat}");
+    expect(sql).toContain("({2026-10-03T01:55:00.000Z}::timestamptz AT TIME ZONE 'UTC')");
+  });
+  it("同じ画面の取り直し・期限切れでない鍵・取れなかったときは記録しない", async () => {
+    const same = fakeDb();
+    same.queryRaw
+      .mockResolvedValueOnce([{ db_now: dbNow, lock_id: "old", user_id: BASE.userId, screen_token_hash: BASE.screenTokenHash, expired_by: "heartbeat", lost_at: lostAt }])
+      .mockResolvedValueOnce([{ id: "new", acquired_at: dbNow }]);
+    await acquireEditLock(same.db, BASE);
+    expect(same.queryRaw).toHaveBeenCalledTimes(2);
+
+    const free = fakeDb();
+    free.queryRaw.mockResolvedValueOnce(noPrevLockRow()).mockResolvedValueOnce([{ id: "new", acquired_at: dbNow }]);
+    await acquireEditLock(free.db, BASE);
+    expect(free.queryRaw).toHaveBeenCalledTimes(2);
+  });
+  it("前の行の読み取りは鍵の ID と外れた時刻も返す(原因と同じ順・同じしきい値)", async () => {
+    const { db, queryRaw } = fakeDb();
+    queryRaw.mockResolvedValueOnce(noPrevLockRow()).mockResolvedValueOnce([{ id: "x", acquired_at: new Date() }]);
+    await acquireEditLock(db, BASE);
+    const sql = sqlOf(queryRaw.mock.calls[0]);
+    expect(sql).toContain('"edit_locks"."id" AS lock_id');
+    // 外れた時刻は UTC の文字列で返す(Date で往復させない)
+    expect(sql).toMatch(/to_char\(CASE[\s\S]*AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS\.MS"Z"'\) AS lost_at/);
+    expectColumnThresholds(sql.slice(sql.indexOf("AS expired_by")));
+  });
+});
+
+describe("通知 段階4c: 取り直されないまま期限が過ぎた鍵の記録(定期実行)", () => {
+  it("DB の時刻で、管理者の解除・合図切れ・操作切れの順に原因を決め、鍵の ID ごとに1件だけ記録する", async () => {
+    const { db, queryRaw } = fakeDb([{ id: "a" }, { id: "b" }]);
+    const n = await recordExpiredEditLockLosses(db);
+    expect(n).toBe(2);
+    const sql = sqlOf(queryRaw.mock.calls[0]);
+    expect(sql).toMatch(/clock_timestamp\(\) AS db_now/);
+    expect(sql).toMatch(/FROM "edit_locks" l CROSS JOIN now_ts[\s\S]*FOR UPDATE OF l SKIP LOCKED[\s\S]*INSERT INTO "edit_lock_loss_events"[\s\S]*FROM locked l/);
+    expect(sql.indexOf("'force_released'")).toBeLessThan(sql.indexOf("'heartbeat'"));
+    expect(sql.indexOf("'heartbeat'")).toBeLessThan(sql.indexOf("'idle'"));
+    expectColumnThresholds(sql);
+    expect(sql).toMatch(/AT TIME ZONE 'UTC'/);
+    expect(sql).toMatch(/ON CONFLICT \("lock_id"\) DO NOTHING/);
+    // 2時間より前に止まった鍵は見ない(古い置き去りの鍵を記録し直さない)
+    expect(sql).toMatch(/AND l\."heartbeat_at" >= now_ts\.db_now - INTERVAL '2 hours'/);
   });
 });
 

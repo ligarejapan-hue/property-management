@@ -172,6 +172,7 @@ model User {
   userPermissions         UserPermission[]
   pushSubscriptions       PushSubscription[]
   notificationDeliveries  NotificationDelivery[]
+  editLockLossEvents      EditLockLossEvent[]
   passwordResetTokens     PasswordResetToken[]
   createdProperties       Property[]              @relation("PropertyCreatedBy")
   assignedProperties      Property[]              @relation("PropertyAssignedTo")
@@ -1875,7 +1876,7 @@ model NotificationDelivery {
   subscriptionId String    @map("subscription_id") @db.Uuid
   /// 作ったときの端末の結び付け(付け替え・再有効化のあとは送らない)
   bindingId      String    @map("binding_id") @db.Uuid
-  /// next_action | inquiry_new | registry_job_done
+  /// next_action | inquiry_new | registry_job_done | edit_lock_lost
   kind           String
   scheduledFor   DateTime  @map("scheduled_for")
   /// pending | sending | sent | failed | gone | cancelled
@@ -1924,6 +1925,28 @@ model NotificationSourceCursor {
   updatedAt DateTime @map("updated_at")
 
   @@map("notification_source_cursors")
+}
+
+/// 通知 段階4c: 編集の鍵が外れた事実(N2 をサーバーから送る・設計書 §4.6)。鍵の行の ID ごとに1件。
+model EditLockLossEvent {
+  id           String           @id @default(uuid()) @db.Uuid
+  lockId       String           @unique @map("lock_id") @db.Uuid
+  userId       String           @map("user_id") @db.Uuid
+  resourceType EditLockResource @map("resource_type")
+  resourceId   String           @map("resource_id") @db.Uuid
+  /// heartbeat | idle | force_released
+  cause        String
+  occurredAt   DateTime         @map("occurred_at")
+  notifiedAt   DateTime?        @map("notified_at")
+  /// pending | queued | expired
+  status       String           @default("pending")
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, occurredAt])
+  @@index([createdAt])
+  @@map("edit_lock_loss_events")
 }
 
 /// 通知 段階4b: 定期実行が初めて見つけた申込・謄本ジョブ(30日で消す)。
