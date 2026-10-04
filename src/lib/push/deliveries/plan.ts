@@ -215,7 +215,11 @@ export async function planEditLockLossDeliveries(now: Date): Promise<number> {
     const locked = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT "id" FROM "edit_lock_loss_events" WHERE "status" = 'pending' ORDER BY "occurred_at" ASC LIMIT 200 FOR UPDATE SKIP LOCKED`;
     if (locked.length === 0) return 0;
-    const events = await tx.editLockLossEvent.findMany({ where: { id: { in: locked.map((l) => l.id) } } });
+    // 押さえたときの古い順を保つ(上限で打ち切るとき、古い記録から作る=1時間で締まる前に送る・@codex #472 P2)。
+    const events = await tx.editLockLossEvent.findMany({
+      where: { id: { in: locked.map((l) => l.id) } },
+      orderBy: [{ occurredAt: "asc" }, { id: "asc" }],
+    });
     const at = new Date(Math.max(now.getTime(), Date.now()));
     const cutoff = at.getTime() - EDIT_LOCK_LOSS_NOTIFY_WINDOW_MS;
     const live = events.filter((e) => e.occurredAt.getTime() >= cutoff);

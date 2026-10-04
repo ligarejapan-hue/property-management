@@ -850,7 +850,7 @@ sudo vim /etc/property-management/app.env
 
 1. **timer を止める**: `sudo systemctl disable --now pm-push-notify.timer`（止めないまま戻すと定期実行が失敗し続ける）。
 2. アプリを前の版に戻して再起動する。
-3. 追加した表（`notification_deliveries` など）は前の版に影響しないので残す。消すと送信の記録と基準のカーソルが失われ、再び反映したときはカーソルの初期化からやり直しになる。
+3. 追加した表（`notification_deliveries`・`notification_delivery_refs`・`notification_fanout_queue`・`notification_source_events`・`notification_source_cursors`・`edit_lock_loss_events`）は前の版に影響しないので残す。消す場合はこの全部を消す（一部だけ残すと、反映し直したとき migration が「表がもうある」で失敗する。消す手順は各 migration の先頭のコメント。消したあとで反映し直すときは、消した migration ごとに `npx prisma migrate resolve --rolled-back <名前>` で適用済みの印を戻してから `migrate deploy`）。消すと送信の記録と基準のカーソルが失われ、再び反映したときはカーソルの初期化からやり直しになる。
 
 ⚠送信の口（`/api/notifications/push-run`）は合言葉で守っている。さらに nginx で外からは 404 にする（`deploy/nginx/property-management.conf.example` の `location = /api/notifications/push-run`。timer は `127.0.0.1:3000` を直接呼ぶので影響しない）。本番の nginx に足すときは `nginx -t` → `systemctl reload nginx`。
 

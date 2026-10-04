@@ -11,7 +11,10 @@
 -- ⚠Prisma の migrate deploy は1ファイルを1トランザクションで流さないため、明示する。
 -- 戻し方: 定期実行(timer)を先に止めてから、アプリを前の版に戻す(表は残してよい)。消すときは
 --   DROP TABLE "notification_delivery_refs"; DROP TABLE "notification_deliveries";
+--   DROP TABLE "notification_fanout_queue";
 --   DROP TABLE "notification_source_events"; DROP TABLE "notification_source_cursors";
+--   消したあとで反映し直すときは、先に `npx prisma migrate resolve --rolled-back 20261004100000_add_notification_deliveries`
+--   (適用済みの印を戻す)をしてから `npx prisma migrate deploy`。
 --   (消すと送信の記録と基準のカーソルが失われ、再び反映したときはカーソルの初期化からやり直しになる)
 
 BEGIN;
