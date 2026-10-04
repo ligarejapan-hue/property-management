@@ -1914,6 +1914,7 @@ model NotificationDeliveryRef {
 
   @@unique([bindingId, kind, refKey])
   @@index([deliveryId])
+  @@index([kind, refKey])
   @@map("notification_delivery_refs")
 }
 

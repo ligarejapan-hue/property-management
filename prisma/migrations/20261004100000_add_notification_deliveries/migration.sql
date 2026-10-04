@@ -74,6 +74,8 @@ CREATE TABLE "notification_delivery_refs" (
 CREATE UNIQUE INDEX "notification_delivery_refs_binding_id_kind_ref_key_key"
   ON "notification_delivery_refs"("binding_id", "kind", "ref_key");
 CREATE INDEX "notification_delivery_refs_delivery_id_idx" ON "notification_delivery_refs"("delivery_id");
+-- 「この件をもう作ったか」を種類と ref_key で引く(記録づくりのたび・@codex #472 P2)。
+CREATE INDEX "notification_delivery_refs_kind_ref_key_idx" ON "notification_delivery_refs"("kind", "ref_key");
 
 ALTER TABLE "notification_delivery_refs" ADD CONSTRAINT "notification_delivery_refs_delivery_id_fkey"
   FOREIGN KEY ("delivery_id") REFERENCES "notification_deliveries"("id") ON DELETE CASCADE ON UPDATE CASCADE;
