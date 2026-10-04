@@ -908,6 +908,11 @@ model NextAction {
   propertyId  String    @map("property_id") @db.Uuid
   assignedTo  String    @map("assigned_to") @db.Uuid
   scheduledAt DateTime  @map("scheduled_at") @db.Date
+  /// 時刻(任意・"HH:MM"・日本時間)。通知 段階3。形式は DB の CHECK 制約でも縛る。
+  scheduledTime String? @map("scheduled_time")
+  /// 知らせの版(担当・予定日・時刻を変えた/完了を取り消したときに進む)。**DB のトリガーだけが書く**
+  /// (アプリから書かない・migration 20261003120000_add_next_action_time)。
+  reminderRevAt DateTime? @map("reminder_rev_at")
   actionType  String?   @map("action_type")
   content     String
   isCompleted Boolean   @default(false) @map("is_completed")

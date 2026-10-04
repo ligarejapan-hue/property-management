@@ -1206,7 +1206,7 @@ export async function fetchNextActions(
 
 export async function createNextAction(
   propertyId: string,
-  data: { content: string; actionType?: string | null; scheduledAt: string; assignedTo: string },
+  data: { content: string; actionType?: string | null; scheduledAt: string; scheduledTime?: string | null; assignedTo: string },
 ) {
   if (USE_MOCK) {
     await mockDelay();
