@@ -8,6 +8,7 @@ import { listAgents, searchAgents } from "@/lib/agent-inquiry/agent-search";
 import { agentCreateSchema, normalizeAgentInput } from "@/lib/agent-inquiry/validators";
 import { inquiryAuditDetail } from "@/lib/agent-inquiry/audit-detail";
 import { hasPermission } from "@/lib/permissions";
+import { searchRegistry } from "@/lib/agent-registry/search";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -30,7 +31,14 @@ export async function GET(request: Request) {
       );
     }
     const q = sp.get("q") ?? "";
-    return NextResponse.json({ agents: await searchAgents(q) }, { headers: NO_STORE });
+    const agents = await searchAgents(q);
+    // 国交省の一覧の候補は、受付の窓が頼んだとき(registry=1)だけ。選ぶと名簿へ写すので、
+    // 登録できる人にだけ出す(名簿の画面は頼まない=名簿は関わった業者だけ)。
+    if (sp.get("registry") === "1") {
+      const registry = hasPermission(perms, "agent_inquiry", "write") ? await searchRegistry(q) : [];
+      return NextResponse.json({ agents, registry }, { headers: NO_STORE });
+    }
+    return NextResponse.json({ agents }, { headers: NO_STORE });
   } catch (error) {
     return handleApiError(error);
   }
