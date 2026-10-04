@@ -21,6 +21,7 @@ import {
   uploadFile,
 } from "@/lib/api-client";
 import { normalizeFileUrl } from "@/lib/url-normalize";
+import { PhotoTabBuildingHint } from "./photo-tab-building-hint";
 
 interface Photo {
   id: string;
@@ -78,7 +79,14 @@ const ACCEPTED_PHOTO_TYPES =
   "image/jpeg,image/png,image/webp,image/heic,image/heif";
 const MAX_PHOTO_SIZE_MB = 8;
 
-export default function PhotoTab({ propertyId }: { propertyId: string }) {
+export default function PhotoTab({
+  propertyId,
+  building,
+}: {
+  propertyId: string;
+  /** 物件が属する棟。案内文から棟写真へ飛ぶリンクに使う（棟が無ければ null） */
+  building?: { id: string; name: string } | null;
+}) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -291,9 +299,7 @@ export default function PhotoTab({ propertyId }: { propertyId: string }) {
               </span>
             )}
           </h3>
-          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-            この物件単体の写真です。共用部・外観などの棟全体写真は棟詳細「棟写真」をご利用ください。
-          </p>
+          <PhotoTabBuildingHint building={building ?? null} />
         </div>
         <div className="flex items-center gap-2">
           {photos.length > 1 && (

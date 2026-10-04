@@ -25,6 +25,7 @@ import {
   createBuildingUnit,
 } from "@/lib/api-client";
 import BuildingPhotoTab from "@/components/buildings/building-photo-tab";
+import { BUILDING_PHOTOS_ANCHOR } from "@/components/properties/photo-tab-building-hint";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import { CASE_STATUS_LABELS as CASE_LABELS, OCCUPANCY_STATUS_LABELS } from "@/lib/property-types";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
@@ -169,6 +170,17 @@ export default function BuildingDetailPage({
   useEffect(() => {
     load();
   }, [load]);
+
+  // 物件写真タブの案内リンク（#building-photos）から来たとき、棟写真の枠へ移動する。
+  // 中身は読み込み後に描画されるため、ブラウザ標準のアンカー移動は効かない。
+  // 編集の保存などで読み直しても再び飛ばないよう、移動は最初の1回だけ。
+  const anchorScrolledRef = useRef(false);
+  useEffect(() => {
+    if (anchorScrolledRef.current || loading || !building) return;
+    if (window.location.hash !== `#${BUILDING_PHOTOS_ANCHOR}`) return;
+    anchorScrolledRef.current = true;
+    document.getElementById(BUILDING_PHOTOS_ANCHOR)?.scrollIntoView();
+  }, [loading, building]);
 
   const startEdit = () => {
     if (!building) return;
@@ -427,7 +439,10 @@ export default function BuildingDetailPage({
       </div>
 
       {/* Building photos */}
-      <div className="mb-6 rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
+      <div
+        id={BUILDING_PHOTOS_ANCHOR}
+        className="mb-6 scroll-mt-4 rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900"
+      >
         <BuildingPhotoTab buildingId={building.id} />
       </div>
 
