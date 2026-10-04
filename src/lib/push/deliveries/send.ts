@@ -121,7 +121,12 @@ export async function sendDueDeliveries(
     orderBy: [{ scheduledFor: "asc" }, { id: "asc" }],
     take: Math.max(0, SEND_BATCH_LIMIT - urgent.length),
   });
-  const due = [...urgent, ...rest];
+  // 急ぎとほかを1件ずつ交互に並べる(持ち時間で打ち切られても、ほかの知らせにも毎回番が回る・@codex #472 P2)。
+  const due: Array<{ id: string }> = [];
+  for (let i = 0; i < Math.max(urgent.length, rest.length); i++) {
+    if (i < urgent.length) due.push(urgent[i]);
+    if (i < rest.length) due.push(rest[i]);
+  }
   for (const d of due) {
     // 持ち時間を過ぎたら新しい送信は始めない(残りは次の実行で・timer の起動と重ならないように)。
     if (Date.now() - startedAtMs >= budgetMs) break;

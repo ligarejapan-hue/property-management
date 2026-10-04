@@ -212,12 +212,26 @@ export async function planEditLockLossDeliveries(now: Date): Promise<number> {
       : [];
     // 1回で作るのは「件×端末」で SOURCE_REFS_PER_TX まで(古い記録から・最低1件)。残りは pending のまま
     // 次の実行で分ける(端末の多い人が並んでもトランザクションが時間切れにならない・@codex #472 P2)。
+    //   すでに作った端末は除いて数える。1件の端末が上限を超えるときは上限ぶんだけ作り、その記録は pending の
+    //   まま次の実行で続ける(どの1件でも1回の量は上限まで・@codex #472 P2)。
+    const already = live.length
+      ? await tx.notificationDeliveryRef.findMany({
+          where: { kind: "edit_lock_lost", refKey: { in: live.map((e) => editLockLossRefKey(e.id)) } },
+          select: { refKey: true, bindingId: true },
+        })
+      : [];
+    const made = new Set(already.map((r) => `${r.refKey}|${r.bindingId}`));
     const items: Array<{ sub: SubRef; refKeys: string[] }> = [];
     const done: string[] = [];
     for (const e of live) {
-      const mine = subs.filter((s) => s.userId === e.userId && s.boundAt.getTime() <= e.occurredAt.getTime());
-      if (done.length > 0 && items.length + mine.length > SOURCE_REFS_PER_TX) break;
-      for (const s of mine) items.push({ sub: s, refKeys: [editLockLossRefKey(e.id)] });
+      const key = editLockLossRefKey(e.id);
+      const mine = subs.filter(
+        (s) => s.userId === e.userId && s.boundAt.getTime() <= e.occurredAt.getTime() && !made.has(`${key}|${s.bindingId}`),
+      );
+      const room = SOURCE_REFS_PER_TX - items.length;
+      if (room <= 0) break;
+      for (const s of mine.slice(0, room)) items.push({ sub: s, refKeys: [key] });
+      if (mine.length > room) break;
       done.push(e.id);
     }
     const created = await createDeliveries(tx, items, "edit_lock_lost", at);
