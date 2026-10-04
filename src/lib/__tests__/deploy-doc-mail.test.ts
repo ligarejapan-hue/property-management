@@ -258,6 +258,15 @@ describe("反映済みの機能を「無い・これから」と書いていな�
     expect(src()).toContain("5分前");
   });
 
+  // @codex #476 R1: 閉じていても届くのは4つだけ(自動ログオフの予告・「まもなく外れます」は画面を開いている間だけ)。
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html の用語は閉じていても届く通知を4つに限っている", (_name, src) => {
+    expect(src()).not.toMatch(/通知を許可した端末には、画面を閉じていても通知欄に届/);
+    expect(src()).toContain("編集権限が外れたことの4つ");
+  });
+
   it("guide.html は画面を閉じていても届く通知を「これから」に置いていない", () => {
     expect(guideSrc).not.toContain("画面を閉じていてもPC・スマホに届く通知を作ります");
   });
