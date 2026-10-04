@@ -170,7 +170,14 @@ export function createRegistryClient(opts: RegistryClientOptions = {}): Registry
 
   function readList(html: string, authority: string): ListPage {
     const page = readOrExpire(html, parseListPage);
-    lastList = { authority, hidden: hiddenInputs(html), total: page.total, pages: page.pages };
+    const hidden = hiddenInputs(html);
+    // 頼んだ行政庁と違う一覧(古い・取り違えた画面)を受け入れると、その行政庁の進み具合が進み、
+    // 締めで本物の会社を「一覧に無い」にしてしまう。行の免許と隠し項目の行政庁の両方を確かめる(@codex #477)。
+    const kbn = hidden.sv_licenseNoKbn;
+    if ((kbn !== undefined && kbn !== authority) || page.rows.some((r) => r.authority !== authority)) {
+      throw new LayoutChanged("頼んだ行政庁と違う一覧");
+    }
+    lastList = { authority, hidden, total: page.total, pages: page.pages };
     return page;
   }
 

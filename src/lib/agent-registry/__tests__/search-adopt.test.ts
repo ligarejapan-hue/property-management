@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const { db, tx } = vi.hoisted(() => {
   const tx = {
     $queryRaw: vi.fn(),
+    $executeRaw: vi.fn(async () => 1),
     mlitAgent: { findUnique: vi.fn() },
     agent: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn(), create: vi.fn() },
   };
@@ -89,6 +90,17 @@ describe("一覧の会社を名簿へ写す", () => {
     const { text } = sqlText(tx.$queryRaw.mock.calls[0]);
     expect(text).toMatch(/FROM "mlit_agents"[\s\S]*FOR UPDATE/);
     expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.agent.findFirst.mock.invocationCallOrder[0]);
+  });
+
+  it("★同じ代表電話の会社どうしの写しも1本ずつ(電話の数字で鍵をかけてから名簿を見る・@codex #477)", async () => {
+    tx.$queryRaw.mockResolvedValueOnce([{ id: MID }]).mockResolvedValueOnce([]);
+    tx.agent.create.mockResolvedValue({ id: "a-new", companyName: reg.companyName, branchName: null, phone: reg.phone });
+    await adoptRegistryAgent(MID, "u1");
+    const { text, values } = sqlText(tx.$executeRaw.mock.calls[0]);
+    expect(text).toContain("pg_advisory_xact_lock");
+    expect(values.join(" ")).toContain("0300001212");
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.$executeRaw.mock.invocationCallOrder[0]);
+    expect(tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.agent.findFirst.mock.invocationCallOrder[0]);
   });
 
   it("名簿に写し済み(しまっていない)→ それを返す・作らない", async () => {

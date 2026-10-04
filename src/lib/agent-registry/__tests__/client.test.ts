@@ -6,6 +6,9 @@ import { createRegistryClient, FetchError, REGISTRY_USER_AGENT } from "@/lib/age
 const fixture = (name: string) =>
   readFileSync(join(process.cwd(), "src/lib/agent-registry/__tests__/fixtures", name), "utf8");
 const listHtml = fixture("list.html");
+/** 見本の一覧(東京都=13)を別の行政庁のページに書き換える。 */
+const listFor = (a: string) =>
+  listHtml.replaceAll("js_ShowDetail('13", `js_ShowDetail('${a}`).replaceAll('value="13"', `value="${a}"`);
 const detailHtml = fixture("detail.html");
 const searchPageHtml = '<form id="tkModel" name="tkModel" action="takkenKensaku.do" method="post"></form>';
 
@@ -57,7 +60,7 @@ describe("先方への取得", () => {
   });
 
   it("検索で送る項目: 免許行政庁・50件ずつ・免許証番号順", async () => {
-    const { client, calls } = setup([() => html(searchPageHtml), () => html(listHtml)]);
+    const { client, calls } = setup([() => html(searchPageHtml), () => html(listFor("00"))]);
     await client.searchFirst("00");
     expect(form(calls[1])).toMatchObject({
       CMD: "search",
@@ -108,8 +111,8 @@ describe("先方への取得", () => {
     const { client, calls } = setup([
       () => html(searchPageHtml),
       () => html(listHtml),
-      () => html(listHtml.replaceAll('value="13"', 'value="14"')),
-      () => html(listHtml),
+      () => html(listFor("14")),
+      () => html(listFor("14")),
     ]);
     await client.searchFirst("13");
     await client.selectPage("14", 5);
@@ -122,6 +125,14 @@ describe("先方への取得", () => {
     const page = await client.selectPage("13", 600); // 見本は 539 ページ
     expect(page).toEqual({ total: 26906, pages: 539, page: 600, rows: [] });
     expect(calls).toHaveLength(2); // 検索画面+1ページ目の検索だけ(600ページ目は頼まない)
+  });
+
+  it("★頼んだ行政庁と違う一覧(行の免許・隠し項目の行政庁)が返ったら layout で止める(@codex #477)", async () => {
+    const a = setup([() => html(searchPageHtml), () => html(listFor("14"))]);
+    expect(await a.client.searchFirst("13").catch((e) => e.kind)).toBe("layout");
+    // 行は東京でも、隠し項目の行政庁が神奈川(次のページ送りが神奈川へ行ってしまう)
+    const b = setup([() => html(searchPageHtml), () => html(listHtml.replace('id="sv_licenseNoKbn" name="sv_licenseNoKbn" type="hidden" value="13"', 'id="sv_licenseNoKbn" name="sv_licenseNoKbn" type="hidden" value="14"'))]);
+    expect(await b.client.searchFirst("13").catch((e) => e.kind)).toBe("layout");
   });
 
   it("詳細: 免許の鍵を送る・読んだ値を返す", async () => {
