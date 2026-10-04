@@ -116,6 +116,8 @@ export function parseListPage(html: string): ListPage {
       isMain,
     });
   }
+  // 件数が0でないのに行が無い=想定外の画面。空のページとして進めると締めで会社を消してしまう(@codex #477)。
+  if (dataRows === 0) throw new LayoutChanged("件数があるのに行が無い");
   // 読めた行の数=詳細を開く引数の数。違えば読めなかった行がある=黙って落とさず止める(計画 G3)。
   if (dataRows !== (table.match(/js_ShowDetail\(/g) ?? []).length) throw new LayoutChanged("読めなかった行");
   return { total, pages: Number(pagesM[1]), page: Number(pageM[1]), rows: [...byKey.values()] };

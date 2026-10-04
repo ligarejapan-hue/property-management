@@ -207,6 +207,30 @@ describe("先方への取得", () => {
     expect(calls).toHaveLength(2); // 取り直しの GET は頼んでいない
   });
 
+  it("★見出しのあと本文が止まっても、時間切れで止める(本文を読み終えるまで時間を測る・@codex #477)", async () => {
+    let n = 0;
+    const client = createRegistryClient({
+      fetchImpl: (async (_url: string | URL, init?: RequestInit) => {
+        n++;
+        if (n === 1) return html(searchPageHtml);
+        const signal = init!.signal!;
+        return {
+          status: 200,
+          headers: new Headers(),
+          arrayBuffer: () =>
+            new Promise<ArrayBuffer>((_, reject) =>
+              signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }))),
+            ),
+        } as unknown as Response;
+      }) as typeof fetch,
+      sleep: async () => {},
+      now: () => 0,
+      timeoutMs: 20,
+      decode: (buf) => new TextDecoder("utf-8").decode(buf),
+    });
+    expect(await client.searchFirst("13").catch((e) => e.kind)).toBe("timeout");
+  });
+
   it("既定の読み方は Shift_JIS(先方の文字コード)", () => {
     expect(new TextDecoder("shift_jis").decode(new Uint8Array([0x82, 0xa0]))).toBe("あ");
   });

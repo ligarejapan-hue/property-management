@@ -128,27 +128,28 @@ export function createRegistryClient(opts: RegistryClientOptions = {}): Registry
     }
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
-    let res: Response;
+    // 時間切れは本文を読み終えるまで測る(見出しのあと本文が止まっても止める・@codex #477)。
     try {
-      res = await fetchImpl(BASE + path, { method: form ? "POST" : "GET", headers, body, signal: ac.signal });
+      const res = await fetchImpl(BASE + path, { method: form ? "POST" : "GET", headers, body, signal: ac.signal });
+      const setCookies =
+        typeof res.headers.getSetCookie === "function"
+          ? res.headers.getSetCookie()
+          : [res.headers.get("set-cookie")].filter((v): v is string => !!v);
+      for (const sc of setCookies) {
+        const pair = sc.split(";")[0];
+        const eq = pair.indexOf("=");
+        if (eq > 0) cookies.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+      }
+      if (res.status === 429) throw new FetchError("http_429");
+      if (res.status >= 500) throw new FetchError("http_5xx");
+      if (res.status !== 200) throw new FetchError("http_other");
+      return decode(await res.arrayBuffer());
     } catch (e) {
+      if (e instanceof FetchError) throw e;
       throw new FetchError((e as { name?: string })?.name === "AbortError" ? "timeout" : "network");
     } finally {
       clearTimeout(timer);
     }
-    const setCookies =
-      typeof res.headers.getSetCookie === "function"
-        ? res.headers.getSetCookie()
-        : [res.headers.get("set-cookie")].filter((v): v is string => !!v);
-    for (const sc of setCookies) {
-      const pair = sc.split(";")[0];
-      const eq = pair.indexOf("=");
-      if (eq > 0) cookies.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
-    }
-    if (res.status === 429) throw new FetchError("http_429");
-    if (res.status >= 500) throw new FetchError("http_5xx");
-    if (res.status !== 200) throw new FetchError("http_other");
-    return decode(await res.arrayBuffer());
   }
 
   async function ensureSession(): Promise<void> {

@@ -159,8 +159,16 @@ export async function crawlStep(deps: {
         // 対象の5つの行政庁はどれも数千社以上ある。0件=メンテナンス画面など。そのまま進めると
         // 一巡の締めで全社を「一覧に無い」にしてしまうので、推測せず止める(計画 G3)。
         if (page.total === 0) throw new FetchError("layout");
+        // 止まっている間に件数が減り、続きのページがもう無い(client が page=p・rows=[] で返す)。
+        // 前の会社が消えると後ろの会社が読み終えたページへずれるので、ここで終わりにすると締めで
+        // まだ免許のある会社を消してしまう。その行政庁を1ページ目から読み直す(@codex #477)。
+        if (p > page.pages) {
+          s.nextPage = 1;
+          s.totalPages = page.pages;
+          await store.saveStates(states);
+          continue;
+        }
         // 頼んだページと違うページが返った=先方の画面の変化。推測で進めない(計画 G3)。
-        // 件数が減って続きのページが無いときは、client が page=p・rows=[] で返す=下で一覧の終わりになる。
         if (page.page !== p) throw new FetchError("layout");
         result.listed += await store.upsertListRows(page.rows, cycle);
         s.totalPages = page.pages;

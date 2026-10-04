@@ -321,17 +321,24 @@ describe("進め方", () => {
     expect(log.filter((l) => l === "detail 13000001")).toHaveLength(3);
   });
 
-  it("★止まっている間にページ数が減った(続きのページがもう無い)→ その行政庁の一覧は終わりとして進む", async () => {
+  it("★止まっている間にページ数が減った → その行政庁を1ページ目から読み直す(前のページへずれた会社を消さない・@codex #477)", async () => {
     const site = smallSite();
     site["13"] = [[row("13000001")], [row("13000002")], [row("13000003")]];
-    const { client } = fakeClient(site);
-    const { store, getStates } = memoryStore();
-    await crawlStep({ client, store, now: () => NIGHT, budget: { ...BIG, maxRequests: 4 } }); // 00 の2ページ+13 の2ページ
+    const { client, log } = fakeClient(site);
+    const { store, recs, getStates } = memoryStore();
+    await crawlStep({ client, store, now: () => NIGHT, budget: BIG }); // 10月の一巡を終える
+    const nov = new Date("2026-11-05T14:00:00Z");
+    await crawlStep({ client, store, now: () => nov, budget: { ...BIG, maxRequests: 4 } }); // 00 の2ページ+13 の2ページ
     expect(getStates().find((s) => s.authority === "13")!.nextPage).toBe(3);
-    site["13"] = [[row("13000001")], [row("13000002")]];
-    const r = await crawlStep({ client, store, now: () => NIGHT, budget: BIG });
+    // 13000001 が廃業 → 残りが前へずれ、13000003 は(読み終えた)2ページ目へ移った
+    site["13"] = [[row("13000002")], [row("13000003")]];
+    const before = log.length;
+    const r = await crawlStep({ client, store, now: () => nov, budget: BIG });
     expect(r.stopped).toBeNull();
+    expect(log.slice(before, before + 3)).toEqual(["list 13 3", "list 13 1", "list 13 2"]);
     expect(getStates().every((s) => s.phase === "done")).toBe(true);
+    expect(recs.get("13000003")!.listed).toBe(true); // ずれた会社は消さない(読み直さなければ消えていた)
+    // 廃業した 13000001 は、この一巡の前半(1ページ目)で読んでいるので、消えるのは次の一巡の締め。
   });
 
   it("★行政庁の件数が0(メンテナンス画面など)→ 推測せず layout で止め、だれも「一覧に無い」にしない", async () => {

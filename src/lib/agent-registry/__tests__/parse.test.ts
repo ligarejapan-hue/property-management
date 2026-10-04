@@ -95,6 +95,11 @@ describe("一覧のページを読む", () => {
     );
   });
 
+  it("★件数は0でないのに行が1つも無い一覧 → LayoutChanged(空のページとして進めない・@codex #477)", () => {
+    const empty = listHtml.replace(/<tr>\s*<td[\s\S]*<\/tr>\s*<\/table>/, "</table>");
+    expect(() => parseListPage(empty)).toThrow(LayoutChanged);
+  });
+
   it("詳細を開く引数の形が違う行は LayoutChanged", () => {
     expect(() => parseListPage(listHtml.replace("js_ShowDetail('13000001')", "js_ShowDetail('X')"))).toThrow(
       LayoutChanged,
