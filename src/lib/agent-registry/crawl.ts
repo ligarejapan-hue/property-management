@@ -125,6 +125,10 @@ export async function crawlStep(deps: {
   if (states.some((s) => s.dayOffUntil && s.dayOffUntil.getTime() > t0.getTime())) {
     return { ...result, stopped: "day_off" };
   }
+  // 止めていた晩が明けた=失敗の回数を数え直す(次の晩も3回まで試せる・@codex #477)。
+  if (states.some((s) => s.dayOffUntil)) {
+    states = states.map((s) => ({ ...s, failStreak: 0, dayOffUntil: null }));
+  }
   // 前の一巡が終わっていて月が変わったら、次の一巡を一覧の1ページ目から。
   // 前の一巡が途中なら、月が変わってもまずそれを終わらせる(締めを飛ばさない)。
   const current = cycleOf(t0);

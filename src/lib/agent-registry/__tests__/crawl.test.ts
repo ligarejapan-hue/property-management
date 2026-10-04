@@ -285,6 +285,20 @@ describe("進め方", () => {
     expect(log[3]).toBe("list 13 1");
   });
 
+  it("★止めていた晩が明けたら失敗の回数を0に戻す(次の晩も3回まで試せる・@codex #477)", async () => {
+    // 1〜3回目で止まり、翌晩の1回目(4回目)も失敗。5回目以降は成功。
+    const { client } = fakeClient(smallSite(), { failAt: new Set([1, 2, 3, 4]) });
+    const { store, getStates } = memoryStore();
+    for (let i = 0; i < 3; i++) await crawlStep({ client, store, now: () => NIGHT, budget: BIG });
+    const tomorrow = new Date("2026-10-06T13:10:00Z");
+    const r1 = await crawlStep({ client, store, now: () => tomorrow, budget: BIG });
+    expect(r1.stopped).toBe("http_5xx");
+    expect(getStates()[0].failStreak).toBe(1);
+    expect(getStates()[0].dayOffUntil).toBeNull();
+    const r2 = await crawlStep({ client, store, now: () => tomorrow, budget: BIG });
+    expect(r2.stopped).toBeNull();
+  });
+
   it("成功すると失敗の回数は0に戻る(とびとびの失敗では止まらない)", async () => {
     const { client } = fakeClient(smallSite(), { failAt: new Set([1, 3, 5]) });
     const { store, getStates } = memoryStore();
