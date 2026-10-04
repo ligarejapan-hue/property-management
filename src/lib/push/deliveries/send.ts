@@ -108,11 +108,12 @@ export async function sendDueDeliveries(
   if (Date.now() - startedAtMs >= budgetMs) return stats;
   await closeAbandonedClaims(now);
   // 1時間で送れなくなる編集権限の知らせを先に送る(ほかの溜まった分の後ろで時間切れにならない・@codex #473 P2)。
+  // ただし枠の半分まで(ほかの知らせも毎回送れるように・@codex #472 P2)。余った枠はほかへ回す。
   const urgent = await prisma.notificationDelivery.findMany({
     where: { AND: [claimableWhere(now), { kind: "edit_lock_lost" }] },
     select: { id: true },
     orderBy: [{ scheduledFor: "asc" }, { id: "asc" }],
-    take: SEND_BATCH_LIMIT,
+    take: Math.floor(SEND_BATCH_LIMIT / 2),
   });
   const rest = await prisma.notificationDelivery.findMany({
     where: { AND: [claimableWhere(now), { kind: { not: "edit_lock_lost" } }] },

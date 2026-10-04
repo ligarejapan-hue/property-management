@@ -289,6 +289,8 @@ export class MissingSourceCursorError extends Error {
 export interface SourceRecipients {
   inquiry: Recipient[];
   registry: Map<string, Recipient>;
+  /** 確かめた人(送り先になれたかどうかによらない)。見つけた時点でこれ以外の人の端末があれば、記録しない。 */
+  considered: Set<string>;
 }
 
 /**
@@ -309,6 +311,7 @@ export async function loadSourceRecipients(source: Source, deadlineMs?: number):
   });
   const inquiry: Recipient[] = [];
   const registry = new Map<string, Recipient>();
+  const considered = new Set(users.map((u) => u.id));
   for (const u of users) {
     if (deadlineMs !== undefined && Date.now() >= deadlineMs) return null;
     const r = await loadRecipient(prisma, u.id);
@@ -319,7 +322,7 @@ export async function loadSourceRecipients(source: Source, deadlineMs?: number):
       registry.set(r.id, r);
     }
   }
-  return { inquiry, registry };
+  return { inquiry, registry, considered };
 }
 
 export async function planSourceDeliveries(
@@ -346,6 +349,19 @@ export async function planSourceDeliveries(
     // 見つけた時刻=カーソルを押さえて読んだ今(実行の始めの時刻ではない)。この時点で結び付いている
     // 端末に送る(実行の途中で結び付いた端末を、見つけ済みにしたまま取りこぼさない・@codex #472 P2)。
     const seenAt = new Date(Math.max(now.getTime(), Date.now()));
+    // 顔ぶれを求めたあと、見つけた時点までに初めて端末を結び付けた人がいれば、その人を確かめていない。
+    // このまま見つけ済みにすると、その人の端末には永久に届かないので、今回は何も書かずに求め直させる
+    // (@codex #472 P2)。
+    const newcomer = await tx.pushSubscription.findFirst({
+      where: {
+        ...activeSubscriptionWhere(seenAt),
+        boundAt: { lte: seenAt },
+        userId: { notIn: [...who.considered] },
+        ...(source === "inquiry" ? { user: { isActive: true, inquiryNotifyEnabled: true } } : {}),
+      },
+      select: { id: true },
+    });
+    if (newcomer) return { created: 0, more: true };
     const field = FIELD[source];
     const fetchPage = fetcher(tx, source);
     const after = await fetchPage(afterCursorWhere(field, c), AFTER_CURSOR_LIMIT);
