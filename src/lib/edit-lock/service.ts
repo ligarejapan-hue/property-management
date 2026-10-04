@@ -105,15 +105,31 @@ export async function acquireEditLock(
   //   `now_ts` は SELECT 内で1回だけ参照する構成にしているため、Postgres が
   //   clock_timestamp() を複数回評価する(自動インライン化される)心配はない。
   const prevRows = await db.$queryRaw<
-    { db_now: Date; user_id: string | null; screen_token_hash: string | null; expired_by: "heartbeat" | "idle" | null }[]
+    {
+      db_now: Date;
+      lock_id: string | null;
+      user_id: string | null;
+      screen_token_hash: string | null;
+      expired_by: "heartbeat" | "idle" | null;
+      lost_at: string | null;
+    }[]
   >`
     WITH now_ts AS (SELECT clock_timestamp() AS db_now)
-    SELECT now_ts.db_now, "edit_locks"."user_id", "edit_locks"."screen_token_hash",
+    SELECT now_ts.db_now, "edit_locks"."id" AS lock_id, "edit_locks"."user_id", "edit_locks"."screen_token_hash",
            CASE
              WHEN "edit_locks"."heartbeat_at" < now_ts.db_now - make_interval(secs => ${GRACE_SEC}::double precision) THEN 'heartbeat'
              WHEN "edit_locks"."activity_at" < now_ts.db_now - make_interval(secs => ${IDLE_SEC}::double precision) THEN 'idle'
              ELSE NULL
-           END AS expired_by
+           END AS expired_by,
+           -- 外れた時刻(通知 段階4c の記録用)。期限切れの原因と同じ順で決める。
+           -- ⚠UTC の文字列で返す(時刻を JS の Date で往復させると DB の時間帯でずれる=実測で9時間)。
+           to_char(CASE
+             WHEN "edit_locks"."heartbeat_at" < now_ts.db_now - make_interval(secs => ${GRACE_SEC}::double precision)
+               THEN ("edit_locks"."heartbeat_at" + make_interval(secs => ${GRACE_SEC}::double precision))::timestamptz
+             WHEN "edit_locks"."activity_at" < now_ts.db_now - make_interval(secs => ${IDLE_SEC}::double precision)
+               THEN ("edit_locks"."activity_at" + make_interval(secs => ${IDLE_SEC}::double precision))::timestamptz
+             ELSE NULL
+           END AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS lost_at
     FROM now_ts
     LEFT JOIN "edit_locks"
       ON "edit_locks"."resource_type" = ${input.resourceType}::"EditLockResource"
@@ -124,9 +140,11 @@ export async function acquireEditLock(
   const prev =
     prevRows[0].user_id != null
       ? {
+          lock_id: prevRows[0].lock_id as string,
           user_id: prevRows[0].user_id,
           screen_token_hash: prevRows[0].screen_token_hash as string,
           expired_by: prevRows[0].expired_by,
+          lost_at: prevRows[0].lost_at,
         }
       : null;
   const got = await db.$queryRaw<{ id: string; acquired_at: Date }[]>`
@@ -157,6 +175,18 @@ export async function acquireEditLock(
       prev && prev.expired_by && !sameScreen
         ? { previousUserId: prev.user_id, expiredBy: prev.expired_by }
         : null;
+    // 通知 段階4c: 期限切れの鍵を上書きした=前の持ち主の鍵が外れた。上書きと同じトランザクションで記録する
+    // (鍵の行は ID・持ち主ごと書き換わるので、あとから定期実行が見ても前の持ち主が分からない・設計書 §4.6)。
+    if (takeover && prev && prev.lost_at) {
+      await recordEditLockLoss(db, {
+        lockId: prev.lock_id,
+        userId: prev.user_id,
+        resourceType: input.resourceType,
+        resourceId: input.resourceId,
+        cause: takeover.expiredBy,
+        lostAtUtc: prev.lost_at,
+      });
+    }
     return { state: "mine", lockId: got[0].id, since: got[0].acquired_at, takeover };
   }
   const current = await readOne(db, input);
@@ -218,16 +248,93 @@ export async function forceReleaseEditLock(
   db: Db,
   input: Target & { lockId: string; adminUserId: string },
 ): Promise<{ previousUserId: string } | null> {
-  const rows = await db.$queryRaw<{ user_id: string }[]>`
+  const rows = await db.$queryRaw<{ user_id: string; lost_at: string }[]>`
     UPDATE "edit_locks"
     SET "force_released_at" = clock_timestamp(), "force_released_by" = ${input.adminUserId}::uuid
     WHERE "id" = ${input.lockId}::uuid
       AND "resource_type" = ${input.resourceType}::"EditLockResource"
       AND "resource_id" = ${input.resourceId}::uuid
       AND "force_released_at" IS NULL
-    RETURNING "user_id"
+    RETURNING "user_id", to_char("force_released_at"::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS lost_at
   `;
-  return rows[0] ? { previousUserId: rows[0].user_id } : null;
+  if (!rows[0]) return null;
+  // 通知 段階4c: 管理者が外した=外すのと同じトランザクションで記録する(設計書 §4.6)。
+  await recordEditLockLoss(db, {
+    lockId: input.lockId,
+    userId: rows[0].user_id,
+    resourceType: input.resourceType,
+    resourceId: input.resourceId,
+    cause: "force_released",
+    lostAtUtc: rows[0].lost_at,
+  });
+  return { previousUserId: rows[0].user_id };
+}
+
+export type EditLockLossCause = "heartbeat" | "idle" | "force_released";
+
+/**
+ * 編集の鍵が外れた事実を残す(通知 段階4c・設計書 §4.6)。鍵の行の ID ごとに1件だけ(二重に記録しない)。
+ * ⚠時刻は SQL で作った UTC の文字列のまま受け渡す(JS の Date で往復させると DB の時間帯でずれる)。
+ *   保存は UTC(アプリの時刻列と同じ)。
+ */
+export async function recordEditLockLoss(
+  db: Db,
+  e: Target & { lockId: string; userId: string; cause: EditLockLossCause; lostAtUtc: string },
+): Promise<void> {
+  await db.$queryRaw<{ id: string }[]>`
+    INSERT INTO "edit_lock_loss_events" ("id", "lock_id", "user_id", "resource_type", "resource_id", "cause", "occurred_at", "status", "created_at")
+    VALUES (gen_random_uuid(), ${e.lockId}::uuid, ${e.userId}::uuid, ${e.resourceType}::"EditLockResource", ${e.resourceId}::uuid,
+            ${e.cause}, (${e.lostAtUtc}::timestamptz AT TIME ZONE 'UTC'), 'pending', (clock_timestamp() AT TIME ZONE 'UTC'))
+    ON CONFLICT ("lock_id") DO NOTHING
+    RETURNING "id"
+  `;
+}
+
+/**
+ * 期限を過ぎたまま誰にも取り直されていない鍵(と、管理者が外したまま残っている鍵)を記録する(定期実行用・
+ * 設計書 §4.6 の 3)。判定は取得の SQL と同じ(DB の時刻・合図の期限を先に見る)。記録した件数を返す。
+ */
+export async function recordExpiredEditLockLosses(db: Db): Promise<number> {
+  // ⚠対象の鍵の行を FOR UPDATE SKIP LOCKED で押さえてから記録する(@codex #473 P2)。同じ画面の取り直し
+  //   (UPSERT)と重なっても、取り直しが先なら新しい行(期限内)は条件に合わず記録しない・こちらが先なら
+  //   取り直しはこの文が終わるのを待つ。取り直し中で押さえられている行は飛ばす(次の実行で見る)。
+  const rows = await db.$queryRaw<{ id: string }[]>`
+    WITH now_ts AS (SELECT clock_timestamp() AS db_now),
+    locked AS (
+      SELECT l."id", l."user_id", l."resource_type", l."resource_id", l."force_released_at", l."heartbeat_at", l."activity_at", now_ts.db_now
+      FROM "edit_locks" l CROSS JOIN now_ts
+      WHERE (l."force_released_at" IS NOT NULL
+         OR l."heartbeat_at" < now_ts.db_now - make_interval(secs => ${GRACE_SEC}::double precision)
+         OR l."activity_at" < now_ts.db_now - make_interval(secs => ${IDLE_SEC}::double precision))
+        -- 2時間より前に止まった鍵は見ない(1時間を過ぎた記録は送らないので不要。30日で記録を消したあとに
+        -- 置き去りの古い鍵を何度も記録し直さない)。合図は操作より古くならないので合図の時刻で切る。
+        AND l."heartbeat_at" >= now_ts.db_now - INTERVAL '2 hours'
+        -- すでに記録した鍵は見ない・1回500件まで(残りは次の実行で・@codex #472 P2)。
+        AND NOT EXISTS (SELECT 1 FROM "edit_lock_loss_events" e WHERE e."lock_id" = l."id")
+      ORDER BY l."heartbeat_at" ASC
+      LIMIT 500
+      FOR UPDATE OF l SKIP LOCKED
+    )
+    INSERT INTO "edit_lock_loss_events" ("id", "lock_id", "user_id", "resource_type", "resource_id", "cause", "occurred_at", "status", "created_at")
+    SELECT gen_random_uuid(), l."id", l."user_id", l."resource_type", l."resource_id",
+           CASE
+             WHEN l."force_released_at" IS NOT NULL THEN 'force_released'
+             WHEN l."heartbeat_at" < l.db_now - make_interval(secs => ${GRACE_SEC}::double precision) THEN 'heartbeat'
+             ELSE 'idle'
+           END,
+           (CASE
+             WHEN l."force_released_at" IS NOT NULL THEN l."force_released_at"::timestamptz
+             WHEN l."heartbeat_at" < l.db_now - make_interval(secs => ${GRACE_SEC}::double precision)
+               THEN (l."heartbeat_at" + make_interval(secs => ${GRACE_SEC}::double precision))::timestamptz
+             ELSE (l."activity_at" + make_interval(secs => ${IDLE_SEC}::double precision))::timestamptz
+           END) AT TIME ZONE 'UTC',
+           'pending',
+           l.db_now AT TIME ZONE 'UTC'
+    FROM locked l
+    ON CONFLICT ("lock_id") DO NOTHING
+    RETURNING "id"
+  `;
+  return rows.length;
 }
 
 /**

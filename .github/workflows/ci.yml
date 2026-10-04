@@ -31,3 +31,45 @@ jobs:
       - run: npm run build
 
       - run: npm test
+
+  # 通知の送信(段階4)の記録づくり・送信を、本物の Postgres に対して確かめる。
+  # (取り合い・同時実行・カーソル・時間帯など、モックでは確かめられない所。使い捨ての DB を立てて流す)
+  db-integration:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: push_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d push_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/push_test
+      PUSH_DB_TEST_URL: postgresql://ci:ci@localhost:5432/push_test
+      NEXTAUTH_SECRET: ci-secret-for-build-only
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npx prisma generate
+
+      - run: npx prisma migrate deploy
+
+      # 2つのファイルは同じ DB を空にして使うので、順番に流す。
+      - run: npx vitest run --no-file-parallelism src/lib/push/__tests__/deliveries-db.test.ts src/lib/push/__tests__/edit-lock-loss-db.test.ts

@@ -171,6 +171,8 @@ model User {
   // Relations
   userPermissions         UserPermission[]
   pushSubscriptions       PushSubscription[]
+  notificationDeliveries  NotificationDelivery[]
+  editLockLossEvents      EditLockLossEvent[]
   passwordResetTokens     PasswordResetToken[]
   createdProperties       Property[]              @relation("PropertyCreatedBy")
   assignedProperties      Property[]              @relation("PropertyAssignedTo")
@@ -1587,6 +1589,7 @@ model RegistryFetchJob {
   @@unique([requestedById, idempotencyKey])
   @@index([requestedById])
   @@index([status])
+  @@index([status, completedAt, id])
   @@map("registry_fetch_jobs")
 }
 
@@ -1857,9 +1860,122 @@ model PushSubscription {
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+  refs       NotificationDeliveryRef[]
+  fanout     NotificationFanoutQueue[]
 
   @@index([userId])
   @@index([expiresAt])
   @@map("push_subscriptions")
+}
+
+/// 通知 段階4b: 端末に送る1通(まとめた1通=1行・設計書 §7.2・§7.4)。
+model NotificationDelivery {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  subscriptionId String    @map("subscription_id") @db.Uuid
+  /// 作ったときの端末の結び付け(付け替え・再有効化のあとは送らない)
+  bindingId      String    @map("binding_id") @db.Uuid
+  /// next_action | inquiry_new | registry_job_done | edit_lock_lost
+  kind           String
+  scheduledFor   DateTime  @map("scheduled_for")
+  /// pending | sending | sent | failed | gone | cancelled
+  status         String    @default("pending")
+  attempts       Int       @default(0)
+  claimedAt      DateTime? @map("claimed_at")
+  sentAt         DateTime? @map("sent_at")
+  /// 定型コードだけ
+  lastErrorCode  String?   @map("last_error_code")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  user         User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription PushSubscription          @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  refs         NotificationDeliveryRef[]
+
+  @@index([status, scheduledFor])
+  @@index([subscriptionId, status])
+  @@index([createdAt])
+  @@map("notification_deliveries")
+}
+
+/// 通知 段階4b: 1通に含めた件。同じ結び付けに同じ件を2回含めない。
+model NotificationDeliveryRef {
+  id             String   @id @default(uuid()) @db.Uuid
+  deliveryId     String   @map("delivery_id") @db.Uuid
+  subscriptionId String   @map("subscription_id") @db.Uuid
+  bindingId      String   @map("binding_id") @db.Uuid
+  kind           String
+  refKey         String   @map("ref_key")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  delivery     NotificationDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  subscription PushSubscription     @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([bindingId, kind, refKey])
+  @@index([deliveryId])
+  @@index([kind, refKey])
+  @@map("notification_delivery_refs")
+}
+
+/// 通知 段階4b: 出来事を見つけた時点の送り先(端末)の控え。ここから少しずつ送信記録を作る。
+model NotificationFanoutQueue {
+  id             String   @id @db.Uuid
+  /// inquiry | registry_job
+  source         String
+  eventId        String   @map("event_id") @db.Uuid
+  subscriptionId String   @map("subscription_id") @db.Uuid
+  bindingId      String   @map("binding_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  createdAt      DateTime @map("created_at")
+
+  subscription PushSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([source, eventId, subscriptionId])
+  @@index([source, createdAt])
+  @@map("notification_fanout_queue")
+}
+
+/// 通知 段階4b: 査定申込・謄本ジョブを定期実行が読んだ位置(inquiry | registry_job)。
+model NotificationSourceCursor {
+  source    String   @id
+  cursorT   DateTime @map("cursor_t")
+  cursorId  String   @map("cursor_id") @db.Uuid
+  updatedAt DateTime @map("updated_at")
+
+  @@map("notification_source_cursors")
+}
+
+/// 通知 段階4c: 編集の鍵が外れた事実(N2 をサーバーから送る・設計書 §4.6)。鍵の行の ID ごとに1件。
+model EditLockLossEvent {
+  id           String           @id @default(uuid()) @db.Uuid
+  lockId       String           @unique @map("lock_id") @db.Uuid
+  userId       String           @map("user_id") @db.Uuid
+  resourceType EditLockResource @map("resource_type")
+  resourceId   String           @map("resource_id") @db.Uuid
+  /// heartbeat | idle | force_released
+  cause        String
+  occurredAt   DateTime         @map("occurred_at")
+  notifiedAt   DateTime?        @map("notified_at")
+  /// pending | queued | expired
+  status       String           @default("pending")
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, occurredAt])
+  @@index([createdAt])
+  @@map("edit_lock_loss_events")
+}
+
+/// 通知 段階4b: 定期実行が初めて見つけた申込・謄本ジョブ(30日で消す)。
+model NotificationSourceEvent {
+  source      String
+  eventId     String   @map("event_id") @db.Uuid
+  firstSeenAt DateTime @map("first_seen_at")
+
+  @@id([source, eventId])
+  @@index([firstSeenAt])
+  @@map("notification_source_events")
 }

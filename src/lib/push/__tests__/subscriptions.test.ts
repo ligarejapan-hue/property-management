@@ -3,7 +3,8 @@ vi.mock("@/lib/api-helpers", async () => (await import("../../__tests__/agent-in
 vi.mock("@/lib/prisma", () => {
   const tx = {
     $queryRaw: vi.fn(async () => []),
-    pushSubscription: { create: vi.fn(async () => ({})), update: vi.fn(async () => ({})) },
+    pushSubscription: { create: vi.fn(async () => ({})), update: vi.fn(async () => ({ id: "sub-1" })) },
+    notificationDelivery: { updateMany: vi.fn(async () => ({ count: 0 })) },
   };
   return {
     default: {
@@ -15,25 +16,37 @@ vi.mock("@/lib/prisma", () => {
 });
 
 import prismaMock from "@/lib/prisma";
-import { extendPushSubscription, revokePushSubscription, upsertPushSubscription, vapidPublicKey } from "../subscriptions";
+import { extendPushSubscription, isValidSubscriptionKeys, revokePushSubscription, upsertPushSubscription, vapidPublicKey } from "../subscriptions";
 import { SHARED_TTL_MS } from "../binding";
 
 type Fn = ReturnType<typeof vi.fn>;
 const pm = prismaMock as never as {
-  __tx: { $queryRaw: Fn; pushSubscription: { create: Fn; update: Fn } };
+  __tx: { $queryRaw: Fn; pushSubscription: { create: Fn; update: Fn }; notificationDelivery: { updateMany: Fn } };
   $transaction: Fn;
   pushSubscription: { updateMany: Fn; count: Fn };
 };
 const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const EP = "https://fcm.googleapis.com/fcm/send/token-xyz";
-const KEYS = { p256dh: "B".repeat(87), auth: "a".repeat(22) };
+const KEYS = { p256dh: "BOKP86iRrT4RDIC4MTCWRE1ILIQ5FhmBF1SAklaX0SRrzNrt9KdHvCuq-YF-slJ0UJn1Koqh0bjqPtO9mUWxjms", auth: "eh3yijm3LYC3dTqUVPZFbw" };
 const NOW = new Date("2026-10-03T03:00:00Z");
 
 beforeEach(() => {
   vi.clearAllMocks();
   pm.__tx.$queryRaw.mockResolvedValue([]);
   pm.$transaction.mockImplementation(async (fn: (t: unknown) => unknown) => fn(pm.__tx));
+});
+
+describe("端末の鍵の形", () => {
+  it("P-256 の曲線上の点(65バイト)と16バイトの auth だけ受け付ける", () => {
+    expect(isValidSubscriptionKeys(KEYS.p256dh, KEYS.auth)).toBe(true);
+    // 長さと先頭は合っているが曲線上にない点
+    const offCurve = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString("base64url");
+    expect(isValidSubscriptionKeys(offCurve, KEYS.auth)).toBe(false);
+    expect(isValidSubscriptionKeys("B".repeat(87), KEYS.auth)).toBe(false);
+    expect(isValidSubscriptionKeys(KEYS.p256dh, Buffer.alloc(15).toString("base64url"))).toBe(false);
+    expect(isValidSubscriptionKeys(KEYS.p256dh, 1)).toBe(false);
+  });
 });
 
 describe("端末の登録・付け替え", () => {
@@ -66,6 +79,22 @@ describe("端末の登録・付け替え", () => {
     expect(data).toMatchObject({ userId: A, deviceScope: "shared", boundAt: NOW, revokedAt: null, revokedReason: null });
     expect(data.bindingId).not.toBe("11111111-1111-4111-8111-111111111111");
     expect(r.rebound).toBe(true);
+    // 前の結び付けの送り待ち(pending・failed・sending)を同じトランザクションで取り消す(4b・§7.5)
+    expect(pm.__tx.notificationDelivery.updateMany).toHaveBeenCalledWith({
+      where: { subscriptionId: "sub-1", bindingId: { not: data.bindingId }, status: { in: ["pending", "failed", "sending"] } },
+      data: { status: "cancelled", lastErrorCode: "rebound" },
+    });
+  });
+  it("有効なままの再登録(同じ利用者・期限内)は送り待ちを取り消さない", async () => {
+    pm.__tx.$queryRaw.mockResolvedValue([
+      { user_id: A, device_scope: "shared", binding_id: "11111111-1111-4111-8111-111111111111", bound_at: NOW, expires_at: new Date(NOW.getTime() + 60_000), revoked_at: null, revoked_reason: null },
+    ]);
+    await upsertPushSubscription(A, { endpoint: EP, ...KEYS }, NOW);
+    expect(pm.__tx.notificationDelivery.updateMany).not.toHaveBeenCalled();
+  });
+  it("付け替えのトランザクションは送信が終わるのを待てる長さ", async () => {
+    await upsertPushSubscription(A, { endpoint: EP, ...KEYS }, NOW);
+    expect(pm.$transaction.mock.calls[0][1]).toMatchObject({ timeout: 30_000 });
   });
   it("中継サービスが無効と返した端末(gone)は 409 endpoint_gone", async () => {
     pm.__tx.$queryRaw.mockResolvedValue([
@@ -118,10 +147,13 @@ describe("延長・解除", () => {
 });
 
 describe("VAPID の鍵", () => {
-  it("3つそろわなければ使えない", () => {
-    const pub = "B" + "x".repeat(86);
-    expect(vapidPublicKey({ VAPID_PUBLIC_KEY: pub, VAPID_PRIVATE_KEY: "p", VAPID_SUBJECT: "mailto:a@b" } as never)).toBe(pub);
-    expect(vapidPublicKey({ VAPID_PUBLIC_KEY: pub, VAPID_PRIVATE_KEY: "p" } as never)).toBeNull();
+  it("送信と同じ確かめを通る鍵だけ(3つそろう・組になる・連絡先の形)", () => {
+    const pub = "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U";
+    const priv = "UUxI4O8-FbRouAevSmBQ6o18hgE4nSG3qwvJTfKc-ls";
+    expect(vapidPublicKey({ VAPID_PUBLIC_KEY: pub, VAPID_PRIVATE_KEY: priv, VAPID_SUBJECT: "mailto:a@b.co" } as never)).toBe(pub);
+    expect(vapidPublicKey({ VAPID_PUBLIC_KEY: pub, VAPID_PRIVATE_KEY: priv } as never)).toBeNull();
+    expect(vapidPublicKey({ VAPID_PUBLIC_KEY: pub, VAPID_PRIVATE_KEY: priv, VAPID_SUBJECT: "https://" } as never)).toBeNull();
+    expect(vapidPublicKey({ VAPID_PUBLIC_KEY: pub, VAPID_PRIVATE_KEY: Buffer.alloc(32, 7).toString("base64url"), VAPID_SUBJECT: "mailto:a@b.co" } as never)).toBeNull();
     expect(vapidPublicKey({} as never)).toBeNull();
   });
 });

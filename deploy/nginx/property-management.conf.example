@@ -139,6 +139,12 @@ server {
         proxy_send_timeout  60s;
     }
 
+    # 画面を閉じていても届く通知の送信の口(timer 専用・通知 段階4b)は外から呼ばせない。
+    # timer は 127.0.0.1:3000 を直接呼ぶので、ここで 404 にしても影響しない(@codex #472 P2)。
+    location = /api/notifications/push-run {
+        return 404;
+    }
+
     # Next.js アプリへリバースプロキシ
     location / {
         proxy_pass         http://127.0.0.1:3000;
