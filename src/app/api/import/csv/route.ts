@@ -745,7 +745,7 @@ export async function POST(request: NextRequest) {
         });
         if (buildingLink) {
           await writeBuildingLinkAudit(session.id, property.id, buildingLink);
-          resolvedBuildingId = buildingLink.building?.id ?? resolvedBuildingId;
+          resolvedBuildingId = buildingLink.building?.id ?? null;
         }
 
         // Reflect newly-created row into dedupe index so later CSV rows catch it

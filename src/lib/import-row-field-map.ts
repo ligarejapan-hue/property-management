@@ -7,6 +7,7 @@
 import { normalizeCaseStatusInput, normalizeIntroductionRouteInput } from "@/lib/property-types";
 import { phoneForStore } from "@/lib/phone-format-jp";
 import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
+import { normalizeBuildingName } from "@/lib/property-building-name";
 
 /** Map Japanese CSV header names to property model field names. */
 export const JAPANESE_FIELD_MAP: Record<string, string> = {
@@ -131,9 +132,11 @@ export function buildPropertyCreateData(
   if (mapped.buildingNumber) createData.buildingNumber = mapped.buildingNumber;
   // ⚠CSV 取込と同じ規則: 物件名がある行は区分マンションとして作る
   //   (以前は物件名を読まず、要確認から確定すると物件名も棟も落ちていた)。
-  if (mapped.buildingName?.trim()) {
+  //   物件名の整え方も CSV 取込と同じ normalizeBuildingName を通す。
+  const buildingNameForCreate = normalizeBuildingName("apartment_unit", mapped.buildingName);
+  if (buildingNameForCreate) {
     createData.propertyType = "apartment_unit";
-    createData.buildingName = mapped.buildingName.trim();
+    createData.buildingName = buildingNameForCreate;
   }
   if (mapped.realEstateNumber) createData.realEstateNumber = mapped.realEstateNumber;
   if (mapped.externalLinkKey) createData.externalLinkKey = mapped.externalLinkKey;

@@ -198,4 +198,19 @@ describe("POST /api/import/csv — 区分の棟", () => {
     expect(pm.property.create).toHaveBeenCalledTimes(1);
     expect(applyBuildingLinkMock).not.toHaveBeenCalled();
   });
+
+  it("下見でつながる棟があっても、apply が棟に入れなかったら棟郵便番号を書かない(実際に入れた棟だけ)", async () => {
+    buildings.push({
+      id: "bz", name: "新ビル", address: "東京都大田区南雪谷1丁目1",
+      nameKey: buildingNameKey("新ビル"), areaKey: areaKey("東京都大田区南雪谷1丁目1"), createdAt: new Date("2026-01-01"), units: 2,
+    });
+    applyBuildingLinkMock.mockResolvedValueOnce({
+      action: "none", building: null, previousBuildingId: null, renamedFrom: null, warnings: [],
+    });
+    const csv = "住所,マンション名,部屋番号,棟郵便番号\n東京都大田区南雪谷1丁目1-1,新ビル,101,145-0066\n";
+    const res = await POST(makeRequest({ fileName: "a.csv", csvText: csv }));
+    expect(res.status).toBe(201);
+    expect(applyBuildingLinkMock.mock.calls[0][1]).toMatchObject({ choice: { kind: "existing", buildingId: "bz" } });
+    expect(pm.building.findUnique).not.toHaveBeenCalled();
+  });
 });

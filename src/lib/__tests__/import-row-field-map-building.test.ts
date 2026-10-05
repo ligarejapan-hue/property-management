@@ -13,6 +13,9 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 
 import { buildPropertyCreateData, buildingChoiceFromRow } from "@/lib/import-row-field-map";
 import { applyBuildingLink } from "@/lib/building-link/apply";
+import { normalizeBuildingName } from "@/lib/property-building-name";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 describe("取込行の確定で棟を落とさない", () => {
   it("マンション名の列を物件名にし、区分マンションで作る", () => {
@@ -22,6 +25,19 @@ describe("取込行の確定で棟を落とさない", () => {
   it("棟名の列も物件名にし、区分マンションで作る", () => {
     const d = buildPropertyCreateData({ "住所": "東京都大田区南雪谷1丁目1", "棟名": "パーク第一" }, "u");
     expect(d).toMatchObject({ propertyType: "apartment_unit", buildingName: "パーク第一" });
+  });
+  it("物件名は CSV 取込と同じ normalizeBuildingName で整える(前後の空白を落とす)", () => {
+    const d = buildPropertyCreateData({ "住所": "東京都大田区南雪谷1丁目1", "マンション名": " 　パーク第一　 " }, "u");
+    expect(d.buildingName).toBe(normalizeBuildingName("apartment_unit", " 　パーク第一　 "));
+    expect(d.buildingName).toBe("パーク第一");
+    // 正本をそろえる(CSV 取込の route と同じ関数を通す)。
+    const src = readFileSync(resolve(process.cwd(), "src/lib/import-row-field-map.ts"), "utf8");
+    expect(src).toMatch(/normalizeBuildingName\(\s*"apartment_unit"/);
+  });
+  it("空白だけの物件名は区分にしない", () => {
+    const d = buildPropertyCreateData({ "住所": "東京都大田区南雪谷1丁目1", "マンション名": "　 ", "種別": "house" }, "u");
+    expect(d.propertyType).toBe("house");
+    expect(d).not.toHaveProperty("buildingName");
   });
   it("選んだ棟は existing(小文字)", () => {
     expect(buildingChoiceFromRow({ __resolved_building_id: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA" }))

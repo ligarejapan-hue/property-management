@@ -197,7 +197,9 @@ describe("POST /api/import/csv — 棟郵便番号取込（タスク5）", () =>
     pm.building.findUnique.mockResolvedValue({ id: "b1", name: "パークタワー", postalCode: null });
     pm.building.update.mockImplementation(({ data }: { data: Record<string, unknown> }) =>
       Promise.resolve({ id: "b1", ...data }));
-    pm.property.create.mockResolvedValue({ id: "p", address: "x", roomNo: null, buildingId: "b1", realEstateNumber: null, externalLinkKey: null });
+    // 作った物件は保存した値(種別・物件名)を返す=本物の create と同じ形(apply が実際に棟へ入れる)。
+    pm.property.create.mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+      Promise.resolve({ id: "p", roomNo: null, buildingId: null, buildingNumber: null, realEstateNumber: null, externalLinkKey: null, ...data }));
     vi.mocked(getApiSession).mockResolvedValue({ id: "user-1", email: "a", name: "A", role: "admin" } as never);
     vi.mocked(getUserPermissions).mockResolvedValue(PERMS as never);
     await POST(makeRequest({ fileName: "b.csv", csvText: unitCsv("棟郵便番号", "０１０−０４９２") }));
