@@ -5,7 +5,7 @@
  */
 import type { Prisma } from "@/generated/prisma";
 import { areaKey, buildingNameKey } from "@/lib/building-identity";
-import { decideBuildingLink, AUTO_CHOICE } from "./resolve";
+import { decideBuildingLink, AUTO_CHOICE, BUILDING_LINK_TARGET_TYPE, type BuildingChoice } from "./resolve";
 
 export type CsvBuildingResolution =
   | { kind: "link"; buildingId: string }
@@ -80,6 +80,29 @@ type Row = {
   createdAt: Date;
   _count: { properties: number };
 };
+
+/**
+ * CSV の行が既存の物件に重なった(重複=既存物件の更新)ときに、棟をどうするか(@codex P2・2026-10-05)。
+ * 返り値の choice で applyBuildingLink を呼ぶ。null は「棟に触らない」。
+ *
+ * - 既存物件が区分(apartment_unit)でなければ触らない(CSV の重複更新は種別を変えない。旧値 unit は
+ *   今の棟を残す/ほかの種別で apply を呼ぶと棟から外してしまう)。
+ * - 棟の解決が無い行(棟名なし)・棟名が空は触らない。要確認(review)の行はここへ来ない。
+ * - つながった部屋は、CSV の棟名が今の物件名と**比べる形で同じ**なら付け替えない
+ *   (物件の編集の keepsLinkedRoom と同じ考え=棟の名前を変えた後の旧名で別の棟へ移さない)。
+ */
+export function planDuplicateBuildingLink(input: {
+  existing: { propertyType: string; buildingId: string | null; buildingName: string | null };
+  choice: BuildingChoice | null;
+  buildingName: string;
+}): BuildingChoice | null {
+  if (input.choice === null) return null;
+  if (input.existing.propertyType !== BUILDING_LINK_TARGET_TYPE) return null;
+  const key = buildingNameKey(input.buildingName);
+  if (key === null) return null;
+  if (input.existing.buildingId !== null && buildingNameKey(input.existing.buildingName) === key) return null;
+  return input.choice;
+}
 
 /** prisma 本体も tx も渡せる(テストは `as never` で偽物を渡す)。 */
 export type CsvResolveDb = { building: Pick<Prisma.TransactionClient["building"], "findMany"> };

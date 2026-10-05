@@ -36,9 +36,17 @@ import {
   type UpdatablePropertyField,
 } from "@/lib/import-dedupe";
 import { normalizeBuildingName } from "@/lib/property-building-name";
-import { resolveCsvBuilding, type CsvBuildingResolution } from "@/lib/building-link/csv-resolve";
-import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
-import { applyBuildingLink, writeBuildingLinkAudit } from "@/lib/building-link/apply";
+import {
+  planDuplicateBuildingLink,
+  resolveCsvBuilding,
+  type CsvBuildingResolution,
+} from "@/lib/building-link/csv-resolve";
+import { AUTO_CHOICE, BUILDING_LINK_TARGET_TYPE, type BuildingChoice } from "@/lib/building-link/resolve";
+import {
+  applyBuildingLink,
+  writeBuildingLinkAudit,
+  type BuildingLinkOutcome,
+} from "@/lib/building-link/apply";
 import {
   normalizePostalCode,
   isValidPostalCode,
@@ -560,7 +568,19 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          if (!existing || changedFields.length === 0) {
+          // 区分の棟: 重複(既存物件の更新)でも CSV の棟の解決を捨てない(@codex P2・2026-10-05)。
+          //   棟の無い部屋はつなぎ、つながった部屋は棟名が比べる形で変わったときだけ解決どおりにする
+          //   (planDuplicateBuildingLink)。要確認の行は上で needs_review に回っていてここへ来ない。
+          const csvBuildingName = buildingChoiceForRow
+            ? normalizeBuildingName(BUILDING_LINK_TARGET_TYPE, mapped.buildingName)
+            : null;
+          const planLink = (cur: { propertyType: string; buildingId: string | null; buildingName: string | null }) =>
+            csvBuildingName
+              ? planDuplicateBuildingLink({ existing: cur, choice: buildingChoiceForRow, buildingName: csvBuildingName })
+              : null;
+          const linkChoice = existing ? planLink(existing) : null;
+
+          if (!existing || (changedFields.length === 0 && linkChoice === null)) {
             // 既存値と完全一致 → 変更なし。success 扱いで「更新なし」を伝える
             await commitBuildingPostalCode();
             jobRows.push({
@@ -584,20 +604,43 @@ export async function POST(request: NextRequest) {
           // ⚠**version は必ず進める**(Task 9): finalUpdateData は編集画面で変えられる
           //   項目(UPDATABLE_PROPERTY_FIELDS)を書くため、進めないと編集画面を開いていた
           //   人の保存がこの取込の変更を黙って上書きする(Task 7 が謄本取込の法人番号で
-          //   直したのと同じ穴)。
-          const guarded = await prisma.property.updateMany({
-            where: {
-              id: dupHit.matchedId,
-              registryStatus: { not: "scheduled" },
-            },
-            data: {
-              ...(finalUpdateData as Parameters<
-                typeof prisma.property.update
-              >[0]["data"]),
-              version: { increment: 1 },
-            },
+          //   直したのと同じ穴)。棟だけをつなぐ行(他の項目は変わらない)もこの更新で版番号を進める
+          //   (既存物件の buildingId/buildingName を書くときは必ず同じトランザクションで版番号を進める)。
+          // ⚠ロック順: 物件の行(この更新)→ applyBuildingLink のアドバイザリロック(他の保存と同じ)。
+          const txResult = await prisma.$transaction(async (tx) => {
+            const guarded = await tx.property.updateMany({
+              where: {
+                id: dupHit.matchedId,
+                registryStatus: { not: "scheduled" },
+              },
+              data: {
+                ...(finalUpdateData as Parameters<
+                  typeof prisma.property.update
+                >[0]["data"]),
+                version: { increment: 1 },
+              },
+            });
+            if (guarded.count === 0) return null;
+            // 行を押さえた後の値で決め直す(取込の外で棟が変わっていればそれに従う)。
+            const before = await tx.property.findUniqueOrThrow({ where: { id: dupHit.matchedId } });
+            const choice = planLink(before);
+            const buildingLink: BuildingLinkOutcome | null =
+              choice && csvBuildingName
+                ? await applyBuildingLink(tx, {
+                    propertyId: before.id,
+                    propertyType: before.propertyType,
+                    buildingName: csvBuildingName,
+                    address: before.address,
+                    buildingNumber: before.buildingNumber,
+                    choice,
+                    currentBuildingId: before.buildingId,
+                    userId: session.id,
+                  })
+                : null;
+            const updated = await tx.property.findUniqueOrThrow({ where: { id: dupHit.matchedId } });
+            return { before, updated, buildingLink };
           });
-          if (guarded.count === 0) {
+          if (txResult === null) {
             // ⚠エラー行では建物の郵便番号も反映しない(@codex #394 R28 P2)。
             //   「成功した行だけがマスタを更新する」という近くの契約に合わせる
             //   (失敗と報告した行が裏で建物を書き換えるのは不意打ち)。
@@ -612,9 +655,15 @@ export async function POST(request: NextRequest) {
             errorCount++;
             continue;
           }
-          const updated = await prisma.property.findUniqueOrThrow({
-            where: { id: dupHit.matchedId },
-          });
+          const { before, updated, buildingLink } = txResult;
+          if (buildingLink) {
+            await writeBuildingLinkAudit(session.id, updated.id, buildingLink, { importJobId: job.id });
+            // 棟郵便番号は実際に入れた棟へ(作成の経路と同じ)。
+            resolvedBuildingId = buildingLink.building?.id ?? null;
+          }
+          // 棟が変わった/物件名を棟の表記にそろえたことも「更新項目」に出す(id とフィールド名だけ)。
+          if ((updated.buildingId ?? null) !== (before.buildingId ?? null)) changedFields.push("buildingId");
+          if ((updated.buildingName ?? null) !== (before.buildingName ?? null)) changedFields.push("buildingName");
 
           await recordChanges({
             targetTable: "properties",

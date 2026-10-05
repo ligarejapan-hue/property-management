@@ -60,7 +60,9 @@ vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
-    property: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+    property: {
+      findMany: vi.fn(), findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn(),
+    },
     building: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
     $executeRaw: vi.fn(),
   };
@@ -84,7 +86,7 @@ const pm = prisma as unknown as {
   $transaction: Mock;
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
-  property: { findMany: Mock; findUnique: Mock; create: Mock; update: Mock };
+  property: { findMany: Mock; findUnique: Mock; findUniqueOrThrow: Mock; create: Mock; update: Mock; updateMany: Mock };
   building: { findMany: Mock; findUnique: Mock; create: Mock };
 };
 
@@ -212,5 +214,98 @@ describe("POST /api/import/csv — 区分の棟", () => {
     expect(res.status).toBe(201);
     expect(applyBuildingLinkMock.mock.calls[0][1]).toMatchObject({ choice: { kind: "existing", buildingId: "bz" } });
     expect(pm.building.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+// 重複(不動産番号一致)=既存物件の更新でも、棟の解決を捨てない(@codex P2・2026-10-05)。
+describe("POST /api/import/csv — 重複更新の区分の棟", () => {
+  const ADDR = "東京都大田区南雪谷1丁目164-2-45";
+  const base = {
+    id: "px", address: ADDR, propertyType: "apartment_unit", roomNo: "101", buildingNumber: null,
+    buildingId: null as string | null, buildingName: null as string | null,
+    realEstateNumber: "RE-1", externalLinkKey: null, note: "old", registryStatus: "unconfirmed",
+  };
+  const setExisting = (over: Partial<typeof base> = {}) => {
+    const existing = { ...base, ...over };
+    pm.property.findMany.mockResolvedValue([
+      { id: "px", address: ADDR, roomNo: "101", buildingId: existing.buildingId, realEstateNumber: "RE-1", externalLinkKey: null },
+    ]);
+    pm.property.findUnique.mockResolvedValue(existing);
+    return existing;
+  };
+  const savedRow = () =>
+    pm.importJobRow.create.mock.calls[0][0].data as { status: string; errorMessage: string | null; createdId: string | null };
+
+  beforeEach(() => {
+    pm.property.updateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("棟の無い区分の部屋は、更新と同じトランザクションで版番号を進めてから棟へつなぐ", async () => {
+    const existing = setExisting();
+    pm.property.findUniqueOrThrow
+      .mockResolvedValueOnce({ ...existing, note: "新メモ" })
+      .mockResolvedValue({ ...existing, note: "新メモ", buildingId: "b1", buildingName: "新ビル" });
+    const csv = `住所,不動産番号,マンション名,部屋番号,備考\n${ADDR},RE-1,新ビル,101,新メモ\n`;
+    const res = await POST(makeRequest({ fileName: "a.csv", csvText: csv }));
+    expect(res.status).toBe(201);
+    expect(pm.property.create).not.toHaveBeenCalled();
+    expect(pm.$transaction).toHaveBeenCalledTimes(1);
+    const upd = pm.property.updateMany.mock.calls[0][0] as { where: Record<string, unknown>; data: Record<string, unknown> };
+    expect(upd.where).toMatchObject({ id: "px" });
+    expect(upd.data).toMatchObject({ note: "新メモ", version: { increment: 1 } });
+    expect(applyBuildingLinkMock).toHaveBeenCalledTimes(1);
+    expect(applyBuildingLinkMock.mock.calls[0][1]).toMatchObject({
+      propertyId: "px", propertyType: "apartment_unit", buildingName: "新ビル", choice: { kind: "auto" }, currentBuildingId: null,
+    });
+    // ロック順: 物件の行(版番号を進める更新)→ apply(アドバイザリロック)
+    expect(pm.property.updateMany.mock.invocationCallOrder[0]).toBeLessThan(applyBuildingLinkMock.mock.invocationCallOrder[0]);
+    expect(writeBuildingLinkAuditMock).toHaveBeenCalledWith("user-1", "px", expect.objectContaining({ action: "created" }), { importJobId: "job-1" });
+    expect(savedRow()).toMatchObject({ status: "success", createdId: "px" });
+    expect(savedRow().errorMessage).toContain("buildingId");
+  });
+
+  it("他の項目が変わらなくても、棟の無い部屋は版番号を進める更新を通してつなぐ", async () => {
+    const existing = setExisting({ note: "同じ" });
+    pm.property.findUniqueOrThrow
+      .mockResolvedValueOnce(existing)
+      .mockResolvedValue({ ...existing, buildingId: "b1", buildingName: "新ビル" });
+    const csv = `住所,不動産番号,マンション名,部屋番号,備考\n${ADDR},RE-1,新ビル,101,同じ\n`;
+    await POST(makeRequest({ fileName: "a.csv", csvText: csv }));
+    expect(pm.property.updateMany).toHaveBeenCalledTimes(1);
+    const upd = pm.property.updateMany.mock.calls[0][0] as { where: Record<string, unknown>; data: Record<string, unknown> };
+    expect(upd.data).toEqual({ version: { increment: 1 } });
+    expect(upd.where).toMatchObject({ id: "px", registryStatus: { not: "scheduled" } });
+    expect(applyBuildingLinkMock).toHaveBeenCalledTimes(1);
+    expect(savedRow()).toMatchObject({ status: "success", createdId: "px" });
+    expect(savedRow().errorMessage).toContain("buildingId");
+  });
+
+  it("つながった部屋で CSV の棟名が比べる形で同じなら、棟も版番号もそのまま", async () => {
+    buildings.push({
+      id: "b9", name: "パークハウス第１", address: "東京都大田区南雪谷1丁目164",
+      nameKey: buildingNameKey("パークハウス第１"), areaKey: areaKey(ADDR), createdAt: new Date("2026-01-01"), units: 1,
+    });
+    setExisting({ buildingId: "b0", buildingName: "パークハウス第一", note: "同じ" });
+    const csv = `住所,不動産番号,マンション名,部屋番号,備考\n${ADDR},RE-1,パークハウス第１,101,同じ\n`;
+    await POST(makeRequest({ fileName: "a.csv", csvText: csv }));
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+    expect(applyBuildingLinkMock).not.toHaveBeenCalled();
+    expect(savedRow()).toMatchObject({ status: "success", createdId: "px" });
+    expect(savedRow().errorMessage).toContain("更新項目: なし");
+  });
+
+  it("棟の解決が要確認なら、重複更新でも従来どおり要確認(つながない・書かない)", async () => {
+    buildings.push({
+      id: "bx", name: "パークハイツ", address: "東京都港区六本木1丁目1",
+      nameKey: buildingNameKey("パークハイツ"), areaKey: areaKey("東京都港区六本木1丁目1"), createdAt: new Date("2026-01-01"), units: 3,
+    });
+    setExisting();
+    const csv = `住所,不動産番号,マンション名,部屋番号\n${ADDR},RE-1,パーク,101\n`;
+    const res = await POST(makeRequest({ fileName: "a.csv", csvText: csv }));
+    const json = (await res.json()) as { needsReviewCount: number };
+    expect(json.needsReviewCount).toBe(1);
+    expect(pm.property.updateMany).not.toHaveBeenCalled();
+    expect(applyBuildingLinkMock).not.toHaveBeenCalled();
+    expect(savedRow().status).toBe("needs_review");
   });
 });

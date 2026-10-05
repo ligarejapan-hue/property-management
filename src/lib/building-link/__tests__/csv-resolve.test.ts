@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  containedNameKeys, decideCsvBuilding, resolveCsvBuilding, type CsvBuildingRow,
+  containedNameKeys, decideCsvBuilding, planDuplicateBuildingLink, resolveCsvBuilding, type CsvBuildingRow,
 } from "@/lib/building-link/csv-resolve";
 import { areaKey, buildingNameKey } from "@/lib/building-identity";
 
@@ -153,5 +153,35 @@ describe("resolveCsvBuilding の部分一致(両方向)", () => {
   it("同じ町丁目・同じ比べる形があれば、逆方向の候補があっても link", async () => {
     const { db } = fakeDb([keyed("same", "パークハイツ本館", `${AREA}9`), keyed("short", "パークハイツ", `${AREA}1`)]);
     expect(await resolveCsvBuilding(db as never, "パークハイツ本館", ADDR, new Map())).toEqual({ kind: "link", buildingId: "same" });
+  });
+});
+
+describe("planDuplicateBuildingLink(CSV の重複=既存物件の更新で棟をどうするか)", () => {
+  const AUTO = { kind: "auto" } as const;
+  const unit = (over: Partial<{ propertyType: string; buildingId: string | null; buildingName: string | null }> = {}) => ({
+    propertyType: "apartment_unit", buildingId: null, buildingName: null, ...over,
+  });
+  it("棟の無い区分の部屋は、CSV の棟の解決どおりにつなぐ", () => {
+    expect(planDuplicateBuildingLink({ existing: unit(), choice: AUTO, buildingName: "新ビル" })).toEqual(AUTO);
+    const ex = { kind: "existing", buildingId: "b1" } as const;
+    expect(planDuplicateBuildingLink({ existing: unit({ buildingName: "新ビル" }), choice: ex, buildingName: "新ビル" })).toEqual(ex);
+  });
+  it("つながった部屋は、CSV の棟名が比べる形で同じならそのまま(付け替えない)", () => {
+    expect(planDuplicateBuildingLink({
+      existing: unit({ buildingId: "b0", buildingName: "パークハウス第一" }),
+      choice: { kind: "existing", buildingId: "b9" },
+      buildingName: "パークハウス第１",
+    })).toBeNull();
+  });
+  it("つながった部屋でも、CSV の棟名が比べる形で違えば解決どおりにする(名前を変えた=D4)", () => {
+    expect(planDuplicateBuildingLink({
+      existing: unit({ buildingId: "b0", buildingName: "旧ビル" }), choice: AUTO, buildingName: "新ビル",
+    })).toEqual(AUTO);
+  });
+  it("区分(apartment_unit)でない既存物件・棟の解決が無い行・棟名が空は触らない", () => {
+    expect(planDuplicateBuildingLink({ existing: unit({ propertyType: "unit" }), choice: AUTO, buildingName: "新ビル" })).toBeNull();
+    expect(planDuplicateBuildingLink({ existing: unit({ propertyType: "land" }), choice: AUTO, buildingName: "新ビル" })).toBeNull();
+    expect(planDuplicateBuildingLink({ existing: unit(), choice: null, buildingName: "新ビル" })).toBeNull();
+    expect(planDuplicateBuildingLink({ existing: unit(), choice: AUTO, buildingName: "  " })).toBeNull();
   });
 });
