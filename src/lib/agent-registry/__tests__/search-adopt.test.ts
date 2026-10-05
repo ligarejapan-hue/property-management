@@ -50,6 +50,7 @@ describe("国交省の一覧から探す", () => {
     const { text, values } = sqlText(db.$queryRaw.mock.calls[0]);
     expect(text).toContain("m.listed = true");
     expect(text).toContain("m.phone_digits IS NOT NULL");
+    expect(text).toContain("m.needs_detail = false"); // ★詳細の取り直し待ちは出さない(古い電話を写さない・@codex #477)
     expect(text).toMatch(/NOT EXISTS[\s\S]*a\.is_archived = false[\s\S]*a\.mlit_agent_id = m\.id[\s\S]*regexp_replace\(a\.phone, '\[\^0-9\]', '', 'g'\) = m\.phone_digits/);
     expect(text).toMatch(/LIMIT/);
     expect(values).toContain(REGISTRY_LIMIT);
@@ -188,6 +189,10 @@ describe("一覧の会社を名簿へ写す", () => {
     expect(await adoptRegistryAgent(MID, "u1")).toEqual({ ok: false, reason: "unavailable" });
     tx.$queryRaw.mockResolvedValueOnce([{ id: MID }]);
     tx.mlitAgent.findUnique.mockResolvedValueOnce({ ...reg, phone: null, phoneDigits: null });
+    expect(await adoptRegistryAgent(MID, "u1")).toEqual({ ok: false, reason: "unavailable" });
+    // ★詳細の取り直し待ち(古い電話のまま)も写さない(@codex #477)
+    tx.$queryRaw.mockResolvedValueOnce([{ id: MID }]);
+    tx.mlitAgent.findUnique.mockResolvedValueOnce({ ...reg, needsDetail: true });
     expect(await adoptRegistryAgent(MID, "u1")).toEqual({ ok: false, reason: "unavailable" });
     expect(tx.agent.create).not.toHaveBeenCalled();
   });

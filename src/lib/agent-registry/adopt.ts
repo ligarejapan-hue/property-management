@@ -30,7 +30,10 @@ export async function adoptRegistryAgent(mlitAgentId: string, userId: string): P
     );
     if (locked.length === 0) return { ok: false, reason: "not_found" } as const;
     const reg = await tx.mlitAgent.findUnique({ where: { id: mlitAgentId } });
-    if (!reg || !reg.listed || !reg.phone || !reg.phoneDigits) return { ok: false, reason: "unavailable" } as const;
+    // 一覧から外れた・電話が無い・詳細の取り直し待ち(古い電話のままかもしれない)は写さない(@codex #477)。
+    if (!reg || !reg.listed || !reg.phone || !reg.phoneDigits || reg.needsDetail) {
+      return { ok: false, reason: "unavailable" } as const;
+    }
     // 一覧の行のロックは同じ行どうしだけ。代表電話が同じ別の会社(グループ会社)の写しも1本ずつにするため、
     // 電話の数字で取引の終わりまで続く鍵をかけてから名簿を見る(@codex #477)。
     await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`agent-phone:${reg.phoneDigits}`}))`);

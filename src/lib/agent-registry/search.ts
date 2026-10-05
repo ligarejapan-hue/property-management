@@ -5,7 +5,7 @@ import { widthVariants } from "@/lib/agent-inquiry/desk-property";
 
 /**
  * 受付の窓で、名簿に無い会社を国交省の一覧から探す(計画 Task 6)。
- * - 一覧に載っている(listed)・電話がある会社だけ。
+ * - 一覧に載っている(listed)・電話がある・詳細を取り終えた(needs_detail=false)会社だけ。
  * - 名簿に写し済み(agents.mlit_agent_id)・名簿に同じ代表電話の業者がある会社は出さない(二重の候補にしない)。
  * - 返すのは会社名・代表電話・免許の表示だけ。
  */
@@ -46,6 +46,8 @@ export async function searchRegistry(q: string): Promise<RegistryHit[]> {
     FROM "mlit_agents" m
     WHERE m.listed = true
       AND m.phone_digits IS NOT NULL
+      -- 詳細の取り直し待ち(電話・ふりがなが古いかもしれない)は出さない=古い連絡先を名簿へ写さない(@codex #477)
+      AND m.needs_detail = false
       AND ${match}
       AND NOT EXISTS (
         SELECT 1 FROM "agents" a
