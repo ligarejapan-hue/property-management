@@ -82,6 +82,8 @@ vi.mock("@/lib/prisma", () => {
       updateMany: vi.fn(),
     },
     building: { findMany: vi.fn(), create: vi.fn() },
+    // 重複更新の変更ログは更新と同じトランザクションで書く(@codex P2・取り消しの根拠)。
+    changeLog: { createMany: vi.fn() },
     $executeRaw: vi.fn(),
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
@@ -106,6 +108,7 @@ const pm = prisma as unknown as {
     updateMany: Mock;
   };
   building: { findMany: Mock; create: Mock };
+  changeLog: { createMany: Mock };
 };
 
 const PERMS = [{ resource: "import", action: "write", granted: true }];
@@ -279,11 +282,16 @@ describe("POST /api/import/csv — 郵便番号取込（update）", () => {
     expect(pm.property.updateMany).toHaveBeenCalledTimes(1);
     expect(lastUpdateData().postalCode).toBe("1000005");
 
-    expect(recordChanges).toHaveBeenCalledTimes(1);
-    const arg = vi.mocked(recordChanges).mock.calls[0][0];
-    expect((arg.newValues as Record<string, unknown>).postalCode).toBe("1000005");
-    expect(arg.trackedFields).toContain("postalCode");
-    expect(arg.source).toBe("csv_import");
+    // 重複更新の変更ログは更新と同じトランザクションで書く(握りつぶし型の recordChanges は使わない)。
+    expect(recordChanges).not.toHaveBeenCalled();
+    expect(pm.changeLog.createMany).toHaveBeenCalledTimes(1);
+    const rows = pm.changeLog.createMany.mock.calls[0][0].data as Array<Record<string, unknown>>;
+    expect(rows).toEqual([
+      expect.objectContaining({
+        targetTable: "properties", targetId: "p-existing", fieldName: "postalCode",
+        oldValue: null, newValue: "1000005", source: "csv_import", changedBy: "user-1",
+      }),
+    ]);
   });
 
   it("6. 空欄 update時は既存 postalCode を維持する（update データに postalCode を含めない）", async () => {

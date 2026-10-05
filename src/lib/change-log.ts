@@ -20,18 +20,19 @@ interface RecordChangesInput {
   source?: "manual" | "api" | "csv_import" | "pdf_import";
 }
 
-export async function recordChanges(input: RecordChangesInput): Promise<void> {
-  if (process.env.NEXT_PUBLIC_USE_MOCK === "true") return;
+export interface ChangeLogEntry {
+  targetTable: string;
+  targetId: string;
+  fieldName: string;
+  oldValue: string | null;
+  newValue: string | null;
+  source: "manual" | "api" | "csv_import" | "pdf_import";
+  changedBy: string;
+}
 
-  const entries: Array<{
-    targetTable: string;
-    targetId: string;
-    fieldName: string;
-    oldValue: string | null;
-    newValue: string | null;
-    source: "manual" | "api" | "csv_import" | "pdf_import";
-    changedBy: string;
-  }> = [];
+/** recordChanges / recordChangesInTx が書く行(値が変わった追跡項目だけ)。純関数。 */
+export function buildChangeLogEntries(input: RecordChangesInput): ChangeLogEntry[] {
+  const entries: ChangeLogEntry[] = [];
 
   for (const field of input.trackedFields) {
     if (!(field in input.newValues)) continue;
@@ -53,7 +54,28 @@ export async function recordChanges(input: RecordChangesInput): Promise<void> {
       });
     }
   }
+  return entries;
+}
 
+/**
+ * 変更ログを**呼び出し側のトランザクションで**書く。失敗は握りつぶさずに投げる
+ * (=tx ごと巻き戻る)。取込の取り消しが頼る行(CSV 重複更新の前の値)はこちらで書く。
+ * 行の形は recordChanges と同じ。
+ */
+export async function recordChangesInTx(
+  tx: { changeLog: { createMany: (args: { data: ChangeLogEntry[] }) => Promise<unknown> } },
+  input: RecordChangesInput,
+): Promise<void> {
+  const entries = buildChangeLogEntries(input);
+  if (entries.length > 0) {
+    await tx.changeLog.createMany({ data: entries });
+  }
+}
+
+export async function recordChanges(input: RecordChangesInput): Promise<void> {
+  if (process.env.NEXT_PUBLIC_USE_MOCK === "true") return;
+
+  const entries = buildChangeLogEntries(input);
   if (entries.length > 0) {
     try {
       await prisma.changeLog.createMany({ data: entries });

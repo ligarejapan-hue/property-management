@@ -64,9 +64,19 @@ vi.mock("@/lib/prisma", () => {
       findMany: vi.fn(), findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn(),
     },
     building: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+    changeLog: { createMany: vi.fn() },
     $executeRaw: vi.fn(),
+    __inTx: false,
   };
-  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  // トランザクションの中かどうかを覚える(変更ログが tx の中で書かれたかを確かめるため)。
+  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => {
+    db.__inTx = true;
+    try {
+      return await fn(db);
+    } finally {
+      db.__inTx = false;
+    }
+  });
   return { default: db };
 });
 
@@ -82,6 +92,7 @@ import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { recordChanges } from "@/lib/change-log";
 import { POST } from "../../app/api/import/csv/route";
 import { areaKey, buildingNameKey } from "@/lib/building-identity";
+import { classifyUpdateFieldsForRestore } from "@/lib/import-rollback";
 
 const pm = prisma as unknown as {
   $transaction: Mock;
@@ -89,6 +100,8 @@ const pm = prisma as unknown as {
   importJobRow: { create: Mock };
   property: { findMany: Mock; findUnique: Mock; findUniqueOrThrow: Mock; create: Mock; update: Mock; updateMany: Mock };
   building: { findMany: Mock; findUnique: Mock; create: Mock; update: Mock };
+  changeLog: { createMany: Mock };
+  __inTx: boolean;
 };
 
 const PERMS = [{ resource: "import", action: "write", granted: true }];
@@ -238,20 +251,97 @@ describe("POST /api/import/csv — 重複更新の区分の棟", () => {
   const savedRow = () =>
     pm.importJobRow.create.mock.calls[0][0].data as { status: string; errorMessage: string | null; createdId: string | null };
 
-  /** 取り消しが棟と物件名を戻せるよう、前の値を変更ログ(csv_import)に残す。 */
+  type LogRow = {
+    targetTable: string; targetId: string; fieldName: string;
+    oldValue: string | null; newValue: string | null; source: string; changedBy: string;
+  };
+  /** tx の中で書いた変更ログ(物件)の行を全部。 */
+  const txLogRows = (): LogRow[] =>
+    pm.changeLog.createMany.mock.calls.flatMap((c) => (c[0] as { data: LogRow[] }).data);
+  let changeLogWrittenInTx: boolean[] = [];
+
+  /**
+   * 取り消しが棟と物件名を戻せるよう、前の値を変更ログ(csv_import)に残す。
+   * ⚠物件の更新・棟のつなぎと**同じトランザクション**で書く(握りつぶし型の recordChanges を tx の後で呼ばない)。
+   */
   const expectBuildingChangeLog = (
     oldV: { buildingId: string | null; buildingName: string | null },
     newV: { buildingId: string | null; buildingName: string | null },
   ) => {
-    const arg = vi.mocked(recordChanges).mock.calls.at(-1)![0];
-    expect(arg.source).toBe("csv_import");
-    expect(arg.trackedFields).toEqual(expect.arrayContaining(["buildingId", "buildingName"]));
-    expect(arg.oldValues).toMatchObject(oldV);
-    expect(arg.newValues).toMatchObject(newV);
+    expect(pm.changeLog.createMany).toHaveBeenCalledTimes(1);
+    expect(changeLogWrittenInTx).toEqual([true]);
+    const rows = txLogRows();
+    for (const r of rows) {
+      expect(r).toMatchObject({ targetTable: "properties", targetId: "px", source: "csv_import", changedBy: "user-1" });
+    }
+    expect(rows.find((r) => r.fieldName === "buildingId")).toMatchObject({ oldValue: oldV.buildingId, newValue: newV.buildingId });
+    expect(rows.find((r) => r.fieldName === "buildingName")).toMatchObject({ oldValue: oldV.buildingName, newValue: newV.buildingName });
+    // 物件の変更ログを握りつぶし型(tx の外)で書かない。
+    const outside = vi.mocked(recordChanges).mock.calls.filter((c) => c[0].targetTable === "properties");
+    expect(outside).toEqual([]);
   };
 
   beforeEach(() => {
     pm.property.updateMany.mockResolvedValue({ count: 1 });
+    changeLogWrittenInTx = [];
+    pm.changeLog.createMany.mockImplementation(async ({ data }: { data: unknown[] }) => {
+      changeLogWrittenInTx.push(pm.__inTx);
+      return { count: data.length };
+    });
+  });
+
+  describe("変更ログは物件の更新と同じトランザクションで書く(@codex P2・取り消しの根拠)", () => {
+    const relinkSetup = () => {
+      const existing = setExisting({ buildingId: "b0", buildingName: "旧ビル", note: "old" });
+      pm.property.findUniqueOrThrow
+        .mockResolvedValueOnce({ ...existing, note: "新メモ" })
+        .mockResolvedValue({ ...existing, note: "新メモ", buildingId: "b1", buildingName: "新ビル" });
+      return `住所,不動産番号,マンション名,部屋番号,備考\n${ADDR},RE-1,新ビル,101,新メモ\n`;
+    };
+
+    it("付け替えた行: 棟・物件名・他の項目の前の値を、tx の中で csv_import として書く", async () => {
+      const csv = relinkSetup();
+      await POST(makeRequest({ fileName: "a.csv", csvText: csv }));
+      expect(savedRow()).toMatchObject({ status: "success", createdId: "px" });
+      expectBuildingChangeLog({ buildingId: "b0", buildingName: "旧ビル" }, { buildingId: "b1", buildingName: "新ビル" });
+      expect(txLogRows().find((r) => r.fieldName === "note")).toMatchObject({ oldValue: "old", newValue: "新メモ" });
+    });
+
+    it("変更ログが書けなければ tx ごと失敗し、行はエラー(棟のつなぎの記録・棟郵便番号も書かない)", async () => {
+      const csv = relinkSetup();
+      pm.changeLog.createMany.mockRejectedValue(new Error("changeLog insert failed"));
+      const res = await POST(makeRequest({ fileName: "a.csv", csvText: csv }));
+      const json = (await res.json()) as { successCount: number; errorCount: number };
+      expect(json).toMatchObject({ successCount: 0, errorCount: 1 });
+      // 変更ログは tx の中で書こうとした=失敗は tx の callback から投げられ、更新とつなぎは巻き戻る。
+      expect(pm.changeLog.createMany).toHaveBeenCalledTimes(1);
+      expect(changeLogWrittenInTx).toEqual([]);
+      expect(applyBuildingLinkMock.mock.invocationCallOrder[0]).toBeLessThan(pm.changeLog.createMany.mock.invocationCallOrder[0]);
+      await expect(pm.$transaction.mock.results[0].value).rejects.toThrow("changeLog insert failed");
+      expect(writeBuildingLinkAuditMock).not.toHaveBeenCalled();
+      expect(pm.building.update).not.toHaveBeenCalled();
+      expect(savedRow().status).toBe("error");
+    });
+
+    it("取り消しは、書いた変更ログから前の棟と物件名へ戻せる(restorable)", async () => {
+      const csv = relinkSetup();
+      await POST(makeRequest({ fileName: "a.csv", csvText: csv }));
+      const at = Date.now();
+      const logs = txLogRows().map((r) => ({
+        fieldName: r.fieldName, oldValue: r.oldValue, newValue: r.newValue,
+        source: r.source as "csv_import", changedBy: r.changedBy, changedAt: new Date(at),
+      }));
+      const decisions = classifyUpdateFieldsForRestore(
+        logs,
+        { startMs: at - 1000, endMs: at + 1000, executedBy: "user-1" },
+        new Set(["buildingId", "buildingName", "note"]),
+      );
+      expect(decisions).toEqual(expect.arrayContaining([
+        { fieldName: "buildingId", status: "restorable", restoreValue: "b0" },
+        { fieldName: "buildingName", status: "restorable", restoreValue: "旧ビル" },
+        { fieldName: "note", status: "restorable", restoreValue: "old" },
+      ]));
+    });
   });
 
   it("棟の無い区分の部屋は、更新と同じトランザクションで版番号を進めてから棟へつなぐ", async () => {

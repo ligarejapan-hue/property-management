@@ -17,6 +17,7 @@ import {
 import { parseSheet, SheetParseError } from "@/lib/sheet-parser";
 import {
   recordChanges,
+  recordChangesInTx,
   PROPERTY_TRACKED_FIELDS,
   BUILDING_TRACKED_FIELDS,
 } from "@/lib/change-log";
@@ -643,7 +644,32 @@ export async function POST(request: NextRequest) {
                   })
                 : null;
             const updated = await tx.property.findUniqueOrThrow({ where: { id: dupHit.matchedId } });
-            return { before, updated, buildingLink };
+            // 棟が変わった/物件名を棟の表記にそろえたことも変更ログに残す(前の値は行を押さえた後に読んだもの)。
+            const buildingNewValues: Record<string, unknown> = {};
+            if ((updated.buildingId ?? null) !== (before.buildingId ?? null)) {
+              buildingNewValues.buildingId = updated.buildingId ?? null;
+            }
+            if ((updated.buildingName ?? null) !== (before.buildingName ?? null)) {
+              buildingNewValues.buildingName = updated.buildingName ?? null;
+            }
+            // ⚠変更ログ(csv_import)は**この tx の中で**書く(@codex P2・2026-10-06)。取込の取り消しは
+            //   これを見て項目・棟・物件名を前の値へ戻す(import-rollback.ts の RESTORABLE_BUILDING_LINK_FIELDS)。
+            //   握りつぶし型の recordChanges を tx の後で呼ぶと、書けなくても取込は成功し、取り消しが
+            //   skip_no_changelog で戻せなくなる。書けなければ更新もつなぎも巻き戻り、行はエラーになる。
+            await recordChangesInTx(tx, {
+              targetTable: "properties",
+              targetId: updated.id,
+              changedBy: session.id,
+              oldValues: {
+                ...(existing as unknown as Record<string, unknown>),
+                buildingId: before.buildingId ?? null,
+                buildingName: before.buildingName ?? null,
+              },
+              newValues: { ...finalUpdateData, ...buildingNewValues },
+              trackedFields: [...PROPERTY_TRACKED_FIELDS, ...RESTORABLE_BUILDING_LINK_FIELDS],
+              source: "csv_import",
+            });
+            return { updated, buildingLink, buildingChangedFields: Object.keys(buildingNewValues) };
           });
           if (txResult === null) {
             // ⚠エラー行では建物の郵便番号も反映しない(@codex #394 R28 P2)。
@@ -660,36 +686,13 @@ export async function POST(request: NextRequest) {
             errorCount++;
             continue;
           }
-          const { before, updated, buildingLink } = txResult;
+          const { updated, buildingLink, buildingChangedFields } = txResult;
           if (buildingLink) {
             await writeBuildingLinkAudit(session.id, updated.id, buildingLink, { importJobId: job.id });
           }
           // 棟が変わった/物件名を棟の表記にそろえたことも「更新項目」に出す(id とフィールド名だけ)。
-          // ⚠前の値は変更ログ(csv_import)に残す。取込の取り消しはこれを見て棟と物件名を戻す
-          //   (import-rollback.ts の RESTORABLE_BUILDING_LINK_FIELDS)。前の値は tx の中で行を押さえた後に読んだもの。
-          const buildingNewValues: Record<string, unknown> = {};
-          if ((updated.buildingId ?? null) !== (before.buildingId ?? null)) {
-            changedFields.push("buildingId");
-            buildingNewValues.buildingId = updated.buildingId ?? null;
-          }
-          if ((updated.buildingName ?? null) !== (before.buildingName ?? null)) {
-            changedFields.push("buildingName");
-            buildingNewValues.buildingName = updated.buildingName ?? null;
-          }
-
-          await recordChanges({
-            targetTable: "properties",
-            targetId: updated.id,
-            changedBy: session.id,
-            oldValues: {
-              ...(existing as unknown as Record<string, unknown>),
-              buildingId: before.buildingId ?? null,
-              buildingName: before.buildingName ?? null,
-            },
-            newValues: { ...finalUpdateData, ...buildingNewValues },
-            trackedFields: [...PROPERTY_TRACKED_FIELDS, ...RESTORABLE_BUILDING_LINK_FIELDS],
-            source: "csv_import",
-          });
+          //   変更ログは上の tx の中で書き済み。
+          changedFields.push(...buildingChangedFields);
 
           // dedupe index も住所変更などに備えて反映
           const updatedRecord = {
