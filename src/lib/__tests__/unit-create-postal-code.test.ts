@@ -32,12 +32,20 @@ vi.mock("@/lib/api-helpers", () => {
   };
 });
 
+const { txCreate } = vi.hoisted(() => ({ txCreate: vi.fn() }));
+
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
+// 棟へのつなぎは別テスト(add-unit-building-link)で見る。ここでは postalCode の受け渡しだけ。
+vi.mock("@/lib/building-link/apply", () => ({
+  applyBuildingLink: vi.fn(async () => ({ action: "linked", building: null, previousBuildingId: null, renamedFrom: null, warnings: [] })),
+  writeBuildingLinkAudit: vi.fn(),
+}));
 
 vi.mock("@/lib/prisma", () => ({
   default: {
     building: { findUnique: vi.fn() },
     property: { create: vi.fn() },
+    $transaction: vi.fn(async (fn: (t: unknown) => unknown) => fn({ property: { create: txCreate } })),
   },
 }));
 
@@ -47,7 +55,6 @@ import { POST } from "../../app/api/buildings/[id]/properties/route";
 
 const pm = prisma as unknown as {
   building: { findUnique: Mock };
-  property: { create: Mock };
 };
 
 const PERMS_WRITE = [{ resource: "property", action: "write", granted: true }];
@@ -70,7 +77,7 @@ beforeEach(() => {
   } as never);
   vi.mocked(getUserPermissions).mockResolvedValue(PERMS_WRITE);
   pm.building.findUnique.mockResolvedValue({ id: "b1", name: "棟" });
-  pm.property.create.mockResolvedValue({ id: "p1", propertyType: "unit" });
+  txCreate.mockResolvedValue({ id: "p1", propertyType: "apartment_unit" });
 });
 
 describe("POST /api/buildings/[id]/properties — unit postalCode 受理（21-C PR-1 Codex P2）", () => {
@@ -80,9 +87,9 @@ describe("POST /api/buildings/[id]/properties — unit postalCode 受理（21-C 
       { params: Promise.resolve({ id: "b1" }) },
     );
     expect(res.status).toBe(201);
-    expect(pm.property.create).toHaveBeenCalledTimes(1);
-    expect(pm.property.create.mock.calls[0][0].data.postalCode).toBe("1050001");
-    expect(pm.property.create.mock.calls[0][0].data.propertyType).toBe("unit");
+    expect(txCreate).toHaveBeenCalledTimes(1);
+    expect(txCreate.mock.calls[0][0].data.postalCode).toBe("1050001");
+    expect(txCreate.mock.calls[0][0].data.propertyType).toBe("apartment_unit");
   });
 
   it("postalCode=null を data に渡す", async () => {
@@ -91,7 +98,7 @@ describe("POST /api/buildings/[id]/properties — unit postalCode 受理（21-C 
       { params: Promise.resolve({ id: "b1" }) },
     );
     expect(res.status).toBe(201);
-    expect(pm.property.create.mock.calls[0][0].data.postalCode).toBeNull();
+    expect(txCreate.mock.calls[0][0].data.postalCode).toBeNull();
   });
 
   it("postalCode 未指定でも create 成功（既存挙動が壊れない）", async () => {
@@ -100,8 +107,8 @@ describe("POST /api/buildings/[id]/properties — unit postalCode 受理（21-C 
       { params: Promise.resolve({ id: "b1" }) },
     );
     expect(res.status).toBe(201);
-    expect(pm.property.create).toHaveBeenCalledTimes(1);
-    expect(pm.property.create.mock.calls[0][0].data.address).toBe(
+    expect(txCreate).toHaveBeenCalledTimes(1);
+    expect(txCreate.mock.calls[0][0].data.address).toBe(
       "東京都港区1-1 103号室",
     );
   });
