@@ -94,7 +94,7 @@ export async function POST(
           });
           return { property, buildingLink };
         });
-        await writeBuildingLinkAudit(session.id, property.id, buildingLink);
+        await writeBuildingLinkAudit(session.id, property.id, buildingLink, { importJobId: jobId });
         createdRecord = property;
       } else if (row.job.jobType === "owner_csv") {
         const createData = buildOwnerCreateData(mergedData);

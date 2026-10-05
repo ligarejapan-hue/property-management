@@ -412,6 +412,7 @@ vi.mock("@/lib/prisma", () => ({
     importJob: { findUnique: rb.jobFindUnique },
     property: { findMany: rb.propertyFindMany },
     changeLog: { findMany: vi.fn().mockResolvedValue([]) },
+    auditLog: { findMany: vi.fn(async () => []) },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(rb.tx)),
   },
 }));

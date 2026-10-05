@@ -744,7 +744,7 @@ export async function POST(request: NextRequest) {
           return { property, buildingLink };
         });
         if (buildingLink) {
-          await writeBuildingLinkAudit(session.id, property.id, buildingLink);
+          await writeBuildingLinkAudit(session.id, property.id, buildingLink, { importJobId: job.id });
           resolvedBuildingId = buildingLink.building?.id ?? null;
         }
 

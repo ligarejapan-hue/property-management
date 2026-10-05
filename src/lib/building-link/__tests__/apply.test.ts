@@ -112,6 +112,23 @@ describe("writeBuildingLinkAudit", () => {
     ]);
     expect(JSON.stringify(auditMock.mock.calls)).not.toContain("南雪谷");
   });
+  it("取込から作ったときは棟の作成に取込の id を入れる(取り消しで消す目印。id だけ・住所なし)", async () => {
+    await writeBuildingLinkAudit(
+      "u1", "p1",
+      { action: "created", building: { id: "b1", name: "n" }, previousBuildingId: null, renamedFrom: null, warnings: [] },
+      { importJobId: "job-9" },
+    );
+    expect(auditMock.mock.calls[0][0]).toMatchObject({
+      action: "building.auto_create", targetId: "b1", detail: { propertyId: "p1", importJobId: "job-9" },
+    });
+    expect(Object.keys((auditMock.mock.calls[0][0] as { detail: object }).detail).sort()).toEqual(["importJobId", "propertyId"]);
+  });
+  it("取込でないときは importJobId を入れない", async () => {
+    await writeBuildingLinkAudit("u1", "p1", {
+      action: "created", building: { id: "b1", name: "n" }, previousBuildingId: null, renamedFrom: null, warnings: [],
+    });
+    expect((auditMock.mock.calls[0][0] as { detail: object }).detail).toEqual({ propertyId: "p1" });
+  });
   it("前の棟があれば relink", async () => {
     await writeBuildingLinkAudit("u1", "p1", {
       action: "linked", building: { id: "b2", name: "n" }, previousBuildingId: "b1", renamedFrom: null, warnings: [],

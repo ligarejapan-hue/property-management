@@ -228,7 +228,7 @@ describe("PATCH .../rows/[rowId] (汎用行解決)", () => {
         userId: "u1",
       }),
     );
-    expect(writeBuildingLinkAuditMock).toHaveBeenCalledWith("u1", "p1", outcome);
+    expect(writeBuildingLinkAuditMock).toHaveBeenCalledWith("u1", "p1", outcome, { importJobId: "j1" });
     expect(pm.importJobRow.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: "success", createdId: "p1" }) }),
     );

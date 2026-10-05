@@ -26,7 +26,7 @@ import { join, relative } from "node:path";
  */
 const KNOWN_CLEANUP_SITES: Record<string, string> = {
   "src/app/api/properties/[id]/route.ts:698": "property.delete(物件の削除)",
-  "src/app/api/import/jobs/[jobId]/rollback/route.ts:483": "property.delete(取込の取り消し)",
+  "src/app/api/import/jobs/[jobId]/rollback/route.ts:494": "property.delete(取込の取り消し)",
   "src/app/api/admin/owners/[id]/correction/archive/route.ts:247":
     "owner.updateMany({ isArchived: true })(所有者のアーカイブ)",
   "src/app/api/admin/owners/correction/merge/route.ts:638":
@@ -258,6 +258,8 @@ vi.mock("@/lib/prisma", () => ({
     importJob: { findUnique: vi.fn() },
     property: { findMany: vi.fn(), delete: vi.fn() },
     changeLog: { findMany: vi.fn() },
+    // 取込が自動で作った棟の目印(監査ログ)。0件=棟に触らない。
+    auditLog: { findMany: vi.fn(async () => []) },
     $transaction: vi.fn(),
   },
 }));

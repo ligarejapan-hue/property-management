@@ -182,11 +182,16 @@ export function finalBuildingFields(
   return { buildingId: outcome.building?.id ?? null, buildingName: outcome.building?.name ?? savedName };
 }
 
-/** 監査ログ(トランザクションの外で呼ぶ)。⚠detail に住所を入れない。 */
+/**
+ * 監査ログ(トランザクションの外で呼ぶ)。⚠detail に住所を入れない。
+ * 取込の経路(CSV・要確認の確定・再試行)は context.importJobId を渡す。棟の作成の記録に入り、
+ * 取込の取り消しが「その取込が作った棟」を見つける目印になる(building-link/rollback.ts)。
+ */
 export async function writeBuildingLinkAudit(
   userId: string,
   propertyId: string,
   outcome: BuildingLinkOutcome,
+  context: { importJobId?: string } = {},
 ): Promise<void> {
   if (outcome.action === "none" || outcome.action === "kept") return;
   if (outcome.action === "unlinked") {
@@ -200,7 +205,7 @@ export async function writeBuildingLinkAudit(
   if (outcome.action === "created" && buildingId) {
     await writeAuditLog({
       userId, action: "building.auto_create", targetTable: "buildings", targetId: buildingId,
-      detail: { propertyId },
+      detail: context.importJobId ? { propertyId, importJobId: context.importJobId } : { propertyId },
     });
   }
   await writeAuditLog({
