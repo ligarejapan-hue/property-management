@@ -75,7 +75,7 @@ Prisma:
      - 写真の削除経路も写真行を FOR UPDATE してから数えるので、「選ぶ」と「消す」がすれ違わない。
   3. 値が同じなら何もせず 200
   4. 更新
-  5. `writeAuditLog`(media PUT と同じ形。detail は台帳ID・旧/新の写真ID のみ)
+  5. `writeAuditLog`(action `sale_dm_scenario_letter_illustration_update`・detail は `{ hasIllustration: boolean }` だけ。`audit-log-detail-safety.ts` の allowlist に登録)
 - 返す値: `{ assetId, publicId, width, height } | { assetId: null }`
 
 ### 取得
@@ -110,8 +110,8 @@ Prisma:
 
 ## 7. 発送を作るときの写し取り(scenario-copy.ts)
 
-- `SCENARIO_FULL_SELECT` / `ScenarioFull` に `letterIllustrationAssetId` と、その写真の `deletedAt` を足す。
-- `copyScenarioIntoCampaign` で `DmVariant.illustrationAssetId` に写す。写真が削除済みなら NULL。
+- `SCENARIO_FULL_SELECT` / `ScenarioFull` / `LETTER_COPY_MAP` に `letterIllustrationAssetId` → `illustrationAssetId` を足す。
+- 写真の ID はそのまま写す(LPの写真と図の写しと同じ扱い)。台帳が参照している間は写真を消せないので通常は起きないが、削除済みなら描画側(§8 の `letterIllustrationFromAsset`)が隠す。
 - 「種類を変える」(発送の画面で物件の種類を切り替え)も同じ写し取り関数を通る=新しい種類のイラストになる。既存の経路が `copyScenarioIntoCampaign` / variant の作り直しを使っていることを実装時に確かめ、別経路なら同じ列を足す。
 - 作成後に台帳を替えても、variant の値は変わらない。
 
