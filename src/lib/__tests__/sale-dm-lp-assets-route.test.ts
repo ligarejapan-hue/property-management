@@ -30,6 +30,9 @@ vi.mock("@/lib/prisma", () => {
     dmLpAsset: { findMany: vi.fn(async () => []), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
     dmLpVariantMedia: { count: vi.fn(async () => 0) },
     dmScenarioMedia: { count: vi.fn(async () => 0) },
+    // 手紙のイラストの参照(設計 2026-10-05)。countAssetReferences が数える。
+    dmScenario: { count: vi.fn(async () => 0) },
+    dmVariant: { count: vi.fn(async () => 0) },
     $queryRaw: vi.fn(async () => []),
   };
   db.$transaction = vi.fn(async (fn: (tx: typeof db) => unknown) => fn(db));
