@@ -80,6 +80,21 @@ const EP = (n: string) => `https://fcm.googleapis.com/fcm/send/${n}`;
 const KEYS = { p256dh: "BOKP86iRrT4RDIC4MTCWRE1ILIQ5FhmBF1SAklaX0SRrzNrt9KdHvCuq-YF-slJ0UJn1Koqh0bjqPtO9mUWxjms", auth: "eh3yijm3LYC3dTqUVPZFbw" };
 const JST = (s: string) => new Date(`${s}+09:00`);
 
+// ---- 試験の「今日」(日本時間)は実行した日の翌日にする(実際の日付に依存させない) ----
+// ⚠本番のコードは「渡された時刻」と「今の時刻」の遅い方で判定する所がある(送る直前の確かめ直し・
+//   取り合いの時刻=max(now, Date.now()))。試験の時刻 NOW(今日の 10:00)が実際の時刻より過去になると、
+//   回の判定が実際の時刻で行われて結果が変わる。翌日にすれば NOW は常に実際の時刻より 10〜34 時間先で、
+//   渡した時刻どおりに判定される。時・分(9:00 の回・+2h=11:00・15:00 の5分前など)は日付によらないので固定のまま。
+const DAY_MS = 24 * 60 * 60 * 1000;
+const jstYmd = (ms: number) => new Date(ms + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const jstDayOffset = (ymd: string, days: number) => jstYmd(Date.parse(`${ymd}T00:00:00Z`) + days * DAY_MS);
+/** 試験の「今日」(次回対応の予定日)。 */
+const D_TODAY = jstYmd(Date.now() + DAY_MS);
+/** 前日(期限切れの次回対応)。 */
+const D_PREV = jstDayOffset(D_TODAY, -1);
+/** 端末を結び付けた日(今日の4日前=どの回よりも前)。 */
+const D_BOUND = jstDayOffset(D_TODAY, -4);
+
 async function reset() {
   await prisma.$executeRawUnsafe(
     `TRUNCATE notification_delivery_refs, notification_deliveries, notification_fanout_queue, notification_source_events, push_subscriptions, next_actions, dm_inquiries, registry_fetch_job_items, registry_fetch_jobs, properties, users CASCADE`,
@@ -132,11 +147,11 @@ async function main() {
 
   // ---- 1. 次回対応: 9:00 の回を1通・同じ回は2回送らない ----
   await reset();
-  const NOW = JST("2026-10-05T10:00:00");
+  const NOW = JST(`${D_TODAY}T10:00:00`);
   const u1 = await user();
   const p1 = await property(u1);
-  await action(p1, u1, "2026-10-05");
-  const s1 = await sub(u1, EP("a"), JST("2026-10-01T00:00:00"));
+  await action(p1, u1, D_TODAY);
+  const s1 = await sub(u1, EP("a"), JST(`${D_BOUND}T00:00:00`));
   let f = fakeSender();
   const r = await runPushNotifications(NOW, f.sender);
   check("1a 9:00 の回を1通送る", f.sent.length === 1 && f.sent[0].payload.body === "今日の次回対応が1件あります" && f.sent[0].payload.b === s1.bindingId, { r, sent: f.sent });
@@ -144,7 +159,7 @@ async function main() {
   await runPushNotifications(new Date(NOW.getTime() + 60_000), f.sender);
   check("1b 同じ回はもう送らない", f.sent.length === 0, f.sent);
   f = fakeSender();
-  await runPushNotifications(JST("2026-10-05T11:00:00"), f.sender);
+  await runPushNotifications(JST(`${D_TODAY}T11:00:00`), f.sender);
   check("1c 次の回(+2h=11:00)を送る", f.sent.length === 1, f.sent);
 
   // ---- 2. 定期実行を2本同時に動かしても1通 ----
@@ -152,9 +167,9 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05");
-    await action(p, u, "2026-10-04");
-    await sub(u, EP("b"), JST("2026-10-01T00:00:00"));
+    await action(p, u, D_TODAY);
+    await action(p, u, D_PREV);
+    await sub(u, EP("b"), JST(`${D_BOUND}T00:00:00`));
     f = fakeSender(undefined, 300);
     await Promise.all([runPushNotifications(NOW, f.sender), runPushNotifications(NOW, f.sender)]);
     check("2 二重に動かしても端末ごとに1通(2件を1通にまとめる)", f.sent.length === 1 && f.sent[0].payload.body === "今日の次回対応が1件、期限切れが1件あります", f.sent);
@@ -165,9 +180,9 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05");
-    await sub(u, EP("pc"), JST("2026-10-01T00:00:00"));
-    await sub(u, EP("phone"), JST("2026-10-01T00:00:00"));
+    await action(p, u, D_TODAY);
+    await sub(u, EP("pc"), JST(`${D_BOUND}T00:00:00`));
+    await sub(u, EP("phone"), JST(`${D_BOUND}T00:00:00`));
     f = fakeSender((t) => (t.endpoint === EP("phone") ? { ok: false, gone: false, code: "http_500" } : { ok: true }));
     await runPushNotifications(NOW, f.sender);
     f = fakeSender();
@@ -183,8 +198,8 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05");
-    const s = await sub(u, EP("g"), JST("2026-10-01T00:00:00"));
+    await action(p, u, D_TODAY);
+    const s = await sub(u, EP("g"), JST(`${D_BOUND}T00:00:00`));
     f = fakeSender(() => ({ ok: false, gone: true, code: "http_410" }));
     await runPushNotifications(NOW, f.sender);
     const row = await prisma.pushSubscription.findUnique({ where: { id: s.id } });
@@ -197,8 +212,8 @@ async function main() {
     const a = await user();
     const b = await user();
     const p = await property(a);
-    await action(p, a, "2026-10-05");
-    await sub(a, EP("shared"), JST("2026-10-01T00:00:00"));
+    await action(p, a, D_TODAY);
+    await sub(a, EP("shared"), JST(`${D_BOUND}T00:00:00`));
     await planNextActionDeliveries(NOW);
     const pend = await prisma.notificationDelivery.count({ where: { status: "pending" } });
     await upsertPushSubscription(b, { endpoint: EP("shared"), ...KEYS }, NOW);
@@ -213,8 +228,8 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    const id = await action(p, u, "2026-10-05");
-    await sub(u, EP("c"), JST("2026-10-01T00:00:00"));
+    const id = await action(p, u, D_TODAY);
+    await sub(u, EP("c"), JST(`${D_BOUND}T00:00:00`));
     await planNextActionDeliveries(NOW);
     await prisma.nextAction.update({ where: { id }, data: { isCompleted: true } });
     f = fakeSender();
@@ -230,8 +245,8 @@ async function main() {
     const a = await user();
     const b = await user();
     const p = await property(a);
-    const id = await action(p, a, "2026-10-05");
-    await sub(a, EP("d"), JST("2026-10-01T00:00:00"));
+    const id = await action(p, a, D_TODAY);
+    await sub(a, EP("d"), JST(`${D_BOUND}T00:00:00`));
     await planNextActionDeliveries(NOW);
     await prisma.nextAction.update({ where: { id }, data: { assignedTo: b } });
     f = fakeSender();
@@ -244,8 +259,8 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05");
-    await sub(u, EP("e"), JST("2026-10-01T00:00:00"), "shared", new Date(NOW.getTime() - 1));
+    await action(p, u, D_TODAY);
+    await sub(u, EP("e"), JST(`${D_BOUND}T00:00:00`), "shared", new Date(NOW.getTime() - 1));
     f = fakeSender();
     await runPushNotifications(NOW, f.sender);
     check("8 期限切れの shared 端末には送らない", f.sent.length === 0 && (await prisma.notificationDelivery.count()) === 0, f.sent);
@@ -256,12 +271,12 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05", "15:00");
-    await sub(u, EP("t"), JST("2026-10-01T00:00:00"));
+    await action(p, u, D_TODAY, "15:00");
+    await sub(u, EP("t"), JST(`${D_BOUND}T00:00:00`));
     f = fakeSender();
-    await runPushNotifications(JST("2026-10-05T14:54:00"), f.sender);
+    await runPushNotifications(JST(`${D_TODAY}T14:54:00`), f.sender);
     const early = f.sent.length;
-    await runPushNotifications(JST("2026-10-05T14:56:00"), f.sender);
+    await runPushNotifications(JST(`${D_TODAY}T14:56:00`), f.sender);
     check("9 時刻ありは5分前に時刻つきの文言で送る", early === 0 && f.sent.length === 1 && f.sent[0].payload.body === "15:00 の次回対応が1件あります", f.sent);
   }
 
@@ -270,8 +285,8 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05");
-    await sub(u, EP("late"), JST("2026-10-05T09:30:00"));
+    await action(p, u, D_TODAY);
+    await sub(u, EP("late"), JST(`${D_TODAY}T09:30:00`));
     f = fakeSender();
     await runPushNotifications(NOW, f.sender);
     check("10 結び付けより前の回(9:00)は送らない", f.sent.length === 0, f.sent);
@@ -282,8 +297,8 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05");
-    const s = await sub(u, EP("lock"), JST("2026-10-01T00:00:00"));
+    await action(p, u, D_TODAY);
+    const s = await sub(u, EP("lock"), JST(`${D_BOUND}T00:00:00`));
     await planNextActionDeliveries(NOW);
     const c = new Client({ connectionString: URL_ });
     await c.connect();
@@ -306,8 +321,8 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05");
-    await sub(u, EP("stale"), JST("2026-10-01T00:00:00"));
+    await action(p, u, D_TODAY);
+    await sub(u, EP("stale"), JST(`${D_BOUND}T00:00:00`));
     await planNextActionDeliveries(NOW);
     const d = await prisma.notificationDelivery.findFirstOrThrow();
     const oldClaim = new Date(NOW.getTime() - 16 * 60_000);
@@ -389,8 +404,8 @@ async function main() {
     const boss = await user();
     const fs = await user({ role: "field_staff" });
     const pOther = await property(boss, boss);
-    await action(pOther, fs, "2026-10-05");
-    await sub(fs, EP("fs"), JST("2026-10-01T00:00:00"));
+    await action(pOther, fs, D_TODAY);
+    await sub(fs, EP("fs"), JST(`${D_BOUND}T00:00:00`));
     f = fakeSender();
     await runPushNotifications(NOW, f.sender);
     check("16 field_staff は担当範囲外の物件の次回対応を受け取らない", f.sent.length === 0, f.sent);
@@ -401,12 +416,12 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05");
-    await sub(u, EP("slot"), JST("2026-10-01T00:00:00"));
+    await action(p, u, D_TODAY);
+    await sub(u, EP("slot"), JST(`${D_BOUND}T00:00:00`));
     f = fakeSender(() => ({ ok: false, gone: false, code: "http_500" }));
-    await runPushNotifications(JST("2026-10-05T10:50:00"), f.sender); // 9:00 の回で失敗
+    await runPushNotifications(JST(`${D_TODAY}T10:50:00`), f.sender); // 9:00 の回で失敗
     f = fakeSender();
-    await runPushNotifications(JST("2026-10-05T11:01:00"), f.sender); // 11:00 の回
+    await runPushNotifications(JST(`${D_TODAY}T11:01:00`), f.sender); // 11:00 の回
     check("18 回が進んだら古い回は送り直さず新しい回の1通だけ", f.sent.length === 1, f.sent);
   }
 
@@ -415,11 +430,11 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05");
-    await sub(u, EP("late-send"), JST("2026-10-01T00:00:00"));
-    await planNextActionDeliveries(JST("2026-10-05T10:59:00"));
+    await action(p, u, D_TODAY);
+    await sub(u, EP("late-send"), JST(`${D_BOUND}T00:00:00`));
+    await planNextActionDeliveries(JST(`${D_TODAY}T10:59:00`));
     f = fakeSender();
-    const st = await sendDueDeliveries(JST("2026-10-05T11:01:00"), f.sender);
+    const st = await sendDueDeliveries(JST(`${D_TODAY}T11:01:00`), f.sender);
     check("19 作った後に回が進んだら古い回は送らない", f.sent.length === 0 && st.cancelled === 1, { st, sent: f.sent });
   }
 
@@ -428,8 +443,8 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05");
-    await sub(u, EP("budget"), JST("2026-10-01T00:00:00"));
+    await action(p, u, D_TODAY);
+    await sub(u, EP("budget"), JST(`${D_BOUND}T00:00:00`));
     await planNextActionDeliveries(NOW);
     f = fakeSender();
     await sendDueDeliveries(NOW, f.sender, { budgetMs: 0 });
@@ -455,8 +470,8 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05");
-    await sub(u, EP("plan-budget"), JST("2026-10-01T00:00:00"));
+    await action(p, u, D_TODAY);
+    await sub(u, EP("plan-budget"), JST(`${D_BOUND}T00:00:00`));
     const n0 = await planNextActionDeliveries(NOW, { deadlineMs: Date.now() - 1 });
     const n1 = await planNextActionDeliveries(NOW, { deadlineMs: Date.now() + 60_000 });
     check("22 持ち時間を過ぎたら記録を作らず、次の実行で作る", n0 === 0 && n1 === 1, { n0, n1 });
@@ -467,8 +482,8 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05");
-    await sub(u, EP("abandon"), JST("2026-10-01T00:00:00"));
+    await action(p, u, D_TODAY);
+    await sub(u, EP("abandon"), JST(`${D_BOUND}T00:00:00`));
     await planNextActionDeliveries(NOW);
     const d = await prisma.notificationDelivery.findFirstOrThrow();
     await prisma.notificationDelivery.update({ where: { id: d.id }, data: { status: "sending", claimedAt: new Date(NOW.getTime() - 16 * 60_000), attempts: 3 } });
@@ -483,8 +498,8 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05");
-    await sub(u, EP("slow"), JST("2026-10-01T00:00:00"));
+    await action(p, u, D_TODAY);
+    await sub(u, EP("slow"), JST(`${D_BOUND}T00:00:00`));
     await planNextActionDeliveries(NOW);
     const d = await prisma.notificationDelivery.findFirstOrThrow();
     f = fakeSender();
@@ -497,7 +512,7 @@ async function main() {
   await reset();
   {
     const u = await user();
-    const s = await sub(u, EP("purge"), JST("2026-10-01T00:00:00"));
+    const s = await sub(u, EP("purge"), JST(`${D_BOUND}T00:00:00`));
     await prisma.notificationDelivery.create({ data: { userId: u, subscriptionId: s.id, bindingId: s.bindingId, kind: "next_action", scheduledFor: NOW, status: "sent", createdAt: new Date(Date.now() - 31 * 86400_000) } });
     await prisma.notificationDelivery.create({ data: { userId: u, subscriptionId: s.id, bindingId: s.bindingId, kind: "next_action", scheduledFor: NOW, status: "sent" } });
     const r = await runPushNotifications(new Date(), fakeSender().sender);
@@ -527,8 +542,8 @@ async function main() {
   {
     const u = await user();
     const p = await property(u);
-    await action(p, u, "2026-10-05");
-    await sub(u, EP("durable"), JST("2026-10-01T00:00:00"));
+    await action(p, u, D_TODAY);
+    await sub(u, EP("durable"), JST(`${D_BOUND}T00:00:00`));
     await planNextActionDeliveries(NOW);
     const c = new Client({ connectionString: URL_ });
     await c.connect();
@@ -601,10 +616,10 @@ async function main() {
     const p = await property(u);
     await prisma.$executeRawUnsafe(
       `INSERT INTO next_actions (id, property_id, assigned_to, scheduled_at, content, created_by, updated_at)
-       SELECT gen_random_uuid(), $1::uuid, $2::uuid, '2026-10-05'::date, 'x', $2::uuid, now() FROM generate_series(1, 2500)`,
-      p, u,
+       SELECT gen_random_uuid(), $1::uuid, $2::uuid, $3::date, 'x', $2::uuid, now() FROM generate_series(1, 2500)`,
+      p, u, D_TODAY,
     );
-    await sub(u, EP("many-na"), JST("2026-10-01T00:00:00"));
+    await sub(u, EP("many-na"), JST(`${D_BOUND}T00:00:00`));
     await planNextActionDeliveries(NOW);
     const r1 = await prisma.notificationDeliveryRef.count();
     await planNextActionDeliveries(NOW);
@@ -619,8 +634,8 @@ async function main() {
   {
     const on = await user({ notify: true });
     const p = await property(on);
-    await action(p, on, "2026-10-05");
-    await sub(on, EP("mix"), JST("2026-10-01T00:00:00"));
+    await action(p, on, D_TODAY);
+    await sub(on, EP("mix"), JST(`${D_BOUND}T00:00:00`));
     const s2 = await prisma.pushSubscription.findFirstOrThrow({ where: { userId: on } });
     await prisma.notificationDelivery.createMany({
       data: Array.from({ length: 250 }, () => ({ id: randomUUID(), userId: on, subscriptionId: s2.id, bindingId: s2.bindingId, kind: "inquiry_new", scheduledFor: new Date(NOW.getTime() - 3600_000) })),
