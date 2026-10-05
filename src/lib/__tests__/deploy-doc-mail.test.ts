@@ -271,3 +271,14 @@ describe("反映済みの機能を「無い・これから」と書いていな�
     expect(guideSrc).not.toContain("画面を閉じていてもPC・スマホに届く通知を作ります");
   });
 });
+
+describe("手紙のイラスト(2026-10)の説明", () => {
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html に手紙のイラストと【イラスト】の行の説明がある", (_n, src) => {
+    expect(src()).toContain("手紙のイラスト");
+    expect(src()).toContain("最初の【イラスト】の行");
+    expect(src()).toContain("本文の上");
+  });
+});

@@ -3,6 +3,8 @@
  * 準備の検査・写す対応表・差し込み・台帳の全行ロックを1か所にまとめたモジュールを検証する。
  */
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 vi.mock("@/generated/prisma", () => ({ Prisma: { DbNull: Symbol("DbNull") } }));
 
@@ -23,6 +25,8 @@ import {
 const LETTER_COLS = [
   "designTemplate", "tone", "length", "appeal", "strength",
   "extraInstruction", "letterPromptText", "letterBodyTemplate",
+  // 手紙のイラスト(設計 2026-10-05 §7)
+  "letterIllustrationAssetId",
 ];
 const LP_COLS = [
   "lpTone", "lpLength", "lpAppeal", "lpStrength", "lpPromptText",
@@ -44,6 +48,7 @@ function fullScenario(overrides: Partial<ScenarioFull> = {}): ScenarioFull {
     extraInstruction: "追加指示",
     letterPromptText: "letter prompt",
     letterBodyTemplate: "手紙の本文 {{物件所在}}",
+    letterIllustrationAssetId: null,
     lpTone: "friendly",
     lpLength: "short",
     lpAppeal: "price",
@@ -143,6 +148,7 @@ describe("letterVariantData", () => {
       extraInstruction: s.extraInstruction,
       promptText: s.letterPromptText,
       bodyTemplate: s.letterBodyTemplate,
+      illustrationAssetId: s.letterIllustrationAssetId,
     });
     expect(Object.keys(data)).not.toContain("lpUrl");
   });
@@ -412,5 +418,31 @@ describe("attachScenario(宛先に付けて差し込む・§3.3.0-3)", () => {
       { address: null, propertyType: "land" },
     );
     expect(r).toEqual({ variantId: "v1", lpVariantId: "lp1", body: "", blank: true });
+  });
+});
+
+describe("手紙のイラストの写し取り(設計 2026-10-05 §7)", () => {
+  const S = {
+    id: "s1", name: "相続", autoKey: "inheritance", active: true, deletedAt: null,
+    designTemplate: "formal", tone: "polite", length: "standard", appeal: "inheritance", strength: "soft",
+    extraInstruction: null, letterPromptText: "p", letterBodyTemplate: "本文",
+    lpTone: null, lpLength: null, lpAppeal: null, lpStrength: null, lpPromptText: null, lpRawTemplate: null,
+    lpHeadline: null, lpLead: null, lpBodyText: null, lpFaqJson: null,
+    letterIllustrationAssetId: "11111111-1111-4111-8111-111111111111",
+  };
+  it("台帳のイラストを型の illustrationAssetId へ写す", () => {
+    expect(letterVariantData("c1", S as never)).toMatchObject({ illustrationAssetId: "11111111-1111-4111-8111-111111111111" });
+  });
+  it("未登録なら null のまま写す", () => {
+    expect(letterVariantData("c1", { ...S, letterIllustrationAssetId: null } as never)).toMatchObject({ illustrationAssetId: null });
+  });
+  it("対応表に載っている(作成と種類を変えるの両方が同じ表を通る)", () => {
+    expect(LETTER_COPY_MAP).toContainEqual(["letterIllustrationAssetId", "illustrationAssetId"]);
+  });
+  it("走査: 写す前の読み出しにもイラストの列が入っている", () => {
+    const src = readFileSync(join(process.cwd(), "src/lib/sale-dm-letter/scenario-copy.ts"), "utf8");
+    const start = src.indexOf("const SCENARIO_FULL_SELECT");
+    const sel = src.slice(start, src.indexOf("} as const;", start));
+    expect(sel).toContain("letterIllustrationAssetId: true");
   });
 });

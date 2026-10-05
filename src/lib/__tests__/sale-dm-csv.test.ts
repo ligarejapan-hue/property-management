@@ -54,3 +54,14 @@ describe("buildSaleDmCsvRow", () => {
     }
   });
 });
+
+describe("最終レビュー: 【イラスト】の行は CSV(差し込み用)にも出さない(設計 2026-10-05 §1-3)", () => {
+  it("本文の【イラスト】の行を消して1セルにする", () => {
+    const row = buildSaleDmCsvRow({ ...record, body: "書き出し\n【イラスト】\n続き" });
+    expect(row["本文"]).toBe("書き出し\n続き");
+  });
+  it("行の途中の【イラスト】は文字のまま", () => {
+    const row = buildSaleDmCsvRow({ ...record, body: "一\n【イラスト】ここに\n二" });
+    expect(row["本文"]).toBe("一\n【イラスト】ここに\n二");
+  });
+});

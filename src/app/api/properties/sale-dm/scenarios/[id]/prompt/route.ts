@@ -3,7 +3,7 @@ import prisma from "@/lib/prisma";
 import { handleApiError, ApiError } from "@/lib/api-helpers";
 import { requireScenarioAdmin, letterOptions } from "@/lib/sale-dm-letter/scenario-guard";
 import {
-  buildExternalPrompt,
+  scenarioLetterPrompt,
   promptDigest,
   bodyTemplateDigest,
 } from "@/lib/sale-dm-letter/external-prompt";
@@ -22,7 +22,7 @@ export async function GET(_req: Request, { params }: Ctx) {
     const s = await prisma.dmScenario.findFirst({ where: { id, deletedAt: null } });
     if (!s) throw new ApiError(404, "DMの種類が見つかりません", "SCENARIO_NOT_FOUND");
     const opts = letterOptions(s);
-    const prompt = buildExternalPrompt(opts);
+    const prompt = scenarioLetterPrompt(opts);
     return NextResponse.json(
       {
         prompt,

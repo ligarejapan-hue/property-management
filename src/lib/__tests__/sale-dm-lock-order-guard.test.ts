@@ -247,6 +247,7 @@ describe("台帳(dm_scenarios)を書き換える経路のロック順序(設計 
     "src/app/api/properties/sale-dm/scenarios/[id]/template/route.ts", // PUT(手紙の貼り戻し)
     "src/app/api/properties/sale-dm/scenarios/[id]/lp-template/route.ts", // PUT(LPの貼り戻し)
     "src/app/api/properties/sale-dm/scenarios/[id]/media/route.ts", // PUT(写真と図の枠)
+    "src/app/api/properties/sale-dm/scenarios/[id]/letter-illustration/route.ts", // PUT(手紙のイラスト)
   ];
 
   it.each(MUTATING_ROUTES)("%s: lockScenarioForUpdate を呼ぶ", (f) => {

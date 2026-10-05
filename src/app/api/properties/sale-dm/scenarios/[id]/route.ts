@@ -5,6 +5,7 @@ import { handleApiError, ApiError, parseJsonBody } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { requireScenarioAdmin, lockScenarioForUpdate } from "@/lib/sale-dm-letter/scenario-guard";
 import { saleDmScenarioPatchSchema } from "@/lib/validators-sale-dm";
+import { letterIllustrationFromAsset } from "@/lib/sale-dm-letter/letter-illustration";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -23,9 +24,17 @@ export async function GET(_req: Request, { params }: Ctx) {
   try {
     await requireScenarioAdmin();
     const { id } = await params;
-    const row = await prisma.dmScenario.findFirst({ where: { id, deletedAt: null } });
+    const row = await prisma.dmScenario.findFirst({
+      where: { id, deletedAt: null },
+      include: { letterIllustrationAsset: { select: { publicId: true, width: true, height: true, deletedAt: true } } },
+    });
     if (!row) throw new ApiError(404, "DMの種類が見つかりません", "SCENARIO_NOT_FOUND");
-    return NextResponse.json({ scenario: row }, { headers: { "Cache-Control": "no-store" } });
+    // 写真の行そのものは返さず、描画用の形(src・寸法)にして付ける(削除済みは null)。
+    const { letterIllustrationAsset, ...scenario } = row;
+    return NextResponse.json(
+      { scenario: { ...scenario, letterIllustration: letterIllustrationFromAsset(letterIllustrationAsset) } },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     return handleApiError(error);
   }

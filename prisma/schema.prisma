@@ -1222,11 +1222,15 @@ model DmVariant {
   /// 型の凍結印。null=未凍結・一度立てたら解除しない。判定は「この列 OR 配下に confirmed/sent」の
   /// 二重判定(設計 §2.4)。⚠立てるのは PR-D2。この PR では常に null のまま。
   templateFrozenAt DateTime? @map("template_frozen_at")
+  /// 手紙のイラスト(設計 2026-10-05)。種類から写した型だけが持つ。作成時に台帳から写し取る。
+  illustrationAssetId String? @map("illustration_asset_id") @db.Uuid
 
   campaign   DmCampaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   scenario   DmScenario?       @relation(fields: [scenarioId], references: [id], onDelete: Restrict)
+  illustrationAsset DmLpAsset? @relation("VariantIllustration", fields: [illustrationAssetId], references: [id], onDelete: Restrict)
   recipients DmRecipientDraft[]
 
+  @@index([illustrationAssetId])
   @@map("dm_variants")
 }
 
@@ -1381,6 +1385,8 @@ model DmLpAsset {
   creator User               @relation("DmLpAssetCreator", fields: [createdBy], references: [id])
   media   DmLpVariantMedia[]
   scenarioMedia DmScenarioMedia[]
+  scenarioLetterIllustrations DmScenario[] @relation("ScenarioLetterIllustration")
+  variantIllustrations        DmVariant[]  @relation("VariantIllustration")
 
   @@index([createdAt])
   @@map("dm_lp_assets")
@@ -1432,6 +1438,8 @@ model DmScenario {
   lpLead             String?   @map("lp_lead")
   lpBodyText         String?   @map("lp_body_text")
   lpFaqJson          Json?     @map("lp_faq_json")
+  /// 手紙のイラスト(設計 2026-10-05)。本文の【イラスト】の行(無ければ本文の上)に入る。
+  letterIllustrationAssetId String? @map("letter_illustration_asset_id") @db.Uuid
   deletedAt          DateTime? @map("deleted_at")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
@@ -1441,7 +1449,9 @@ model DmScenario {
   campaigns  DmCampaign[]
   variants   DmVariant[]
   lpVariants DmLpVariant[]
+  letterIllustrationAsset DmLpAsset? @relation("ScenarioLetterIllustration", fields: [letterIllustrationAssetId], references: [id], onDelete: Restrict)
 
+  @@index([letterIllustrationAssetId])
   @@map("dm_scenarios")
 }
 

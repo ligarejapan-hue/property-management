@@ -14,4 +14,7 @@ export interface LetterRenderInput {
   // 追跡枠に差し込む HTML 断片(renderTrackingSlotHtml の出力=QR+短縮URL)。
   // 呼び出し側(印刷route)が確定済み draft から生成して渡す。未指定なら枠は空。
   trackingSlotHtml?: string;
+  // 手紙のイラスト(設計 2026-10-05)。本文の【イラスト】の行(無ければ本文の上)に入る。
+  // null/未指定=イラスト無し(【イラスト】の行は消して描く)。src は /lp-assets/<publicId> だけ受け付ける。
+  illustration?: import("../letter-illustration").LetterIllustration | null;
 }
