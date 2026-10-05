@@ -7,8 +7,12 @@ const fixture = (name: string) =>
   readFileSync(join(process.cwd(), "src/lib/agent-registry/__tests__/fixtures", name), "utf8");
 const listHtml = fixture("list.html");
 /** 見本の一覧(東京都=13)を別の行政庁のページに書き換える。 */
+const VISIBLE: Record<string, string> = { "00": "国土交通大臣", "11": "埼玉県", "12": "千葉県", "13": "東京都", "14": "神奈川県" };
 const listFor = (a: string) =>
-  listHtml.replaceAll("js_ShowDetail('13", `js_ShowDetail('${a}`).replaceAll('value="13"', `value="${a}"`);
+  listHtml
+    .replaceAll("js_ShowDetail('13", `js_ShowDetail('${a}`)
+    .replaceAll('value="13"', `value="${a}"`)
+    .replaceAll(">東京都<", `>${VISIBLE[a]}<`);
 const detailHtml = fixture("detail.html");
 const searchPageHtml = '<form id="tkModel" name="tkModel" action="takkenKensaku.do" method="post"></form>';
 

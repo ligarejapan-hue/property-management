@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { LayoutChanged, parseDetail, parseListPage } from "@/lib/agent-registry/parse";
+import { LayoutChanged, licenseKeyFromText, parseDetail, parseListPage } from "@/lib/agent-registry/parse";
 
 const fixture = (name: string) =>
   readFileSync(join(process.cwd(), "src/lib/agent-registry/__tests__/fixtures", name), "utf8");
@@ -70,8 +70,8 @@ describe("一覧のページを読む", () => {
 
   it("大臣免許の表示", () => {
     const html = listHtml
-      .replaceAll("js_ShowDetail('13000001')", "js_ShowDetail('00009876')")
-      .replace(">東京都<", ">国土交通大臣<");
+      .replaceAll("js_ShowDetail('13", "js_ShowDetail('00")
+      .replaceAll(">東京都<", ">国土交通大臣<");
     expect(parseListPage(html).rows[0].licenseLabel).toBe("国土交通大臣(17)第000001号");
   });
 
@@ -98,6 +98,25 @@ describe("一覧のページを読む", () => {
   it("★件数は0でないのに行が1つも無い一覧 → LayoutChanged(空のページとして進めない・@codex #477)", () => {
     const empty = listHtml.replace(/<tr>\s*<td[\s\S]*<\/tr>\s*<\/table>/, "</table>");
     expect(() => parseListPage(empty)).toThrow(LayoutChanged);
+  });
+
+  it("★見えている「免許行政庁」の欄が、免許の鍵の行政庁と食い違う行は LayoutChanged(@codex #477)", () => {
+    const html = listHtml.replace(
+      /(<td style="text-align:left; white-space : nowrap;">)東京都(<\/td>\s*<td[^>]*title="licenseNo">\(17\)第000001号)/,
+      "$1神奈川県$2",
+    );
+    expect(html).not.toBe(listHtml);
+    expect(() => parseListPage(html)).toThrow(LayoutChanged);
+  });
+
+  it("免許番号の文字から免許の鍵を作る(手入力の名簿の免許番号と照らす)", () => {
+    expect(licenseKeyFromText("東京都知事(17)第000001号")).toBe("13000001");
+    expect(licenseKeyFromText("東京都知事（３）第１２３４５号")).toBe("13012345");
+    expect(licenseKeyFromText("神奈川県知事(2) 第 4567 号")).toBe("14004567");
+    expect(licenseKeyFromText("国土交通大臣(9)第001234号")).toBe("00001234");
+    expect(licenseKeyFromText("大阪府知事(3)第1号")).toBeNull();
+    expect(licenseKeyFromText("12345")).toBeNull();
+    expect(licenseKeyFromText("")).toBeNull();
   });
 
   it("詳細を開く引数の形が違う行は LayoutChanged", () => {

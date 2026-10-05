@@ -366,6 +366,22 @@ describe("進め方", () => {
     // 廃業した 13000001 は、この一巡の前半(1ページ目)で読んでいるので、消えるのは次の一巡の締め。
   });
 
+  it("★ページ数は同じでも件数が減っていたら1ページ目から読み直す(読み終えたページへずれた会社を消さない・@codex #477)", async () => {
+    const site = smallSite();
+    site["13"] = [[row("13000001"), row("13000002")], [row("13000003"), row("13000004")]];
+    const { client, log } = fakeClient(site);
+    const { store, recs } = memoryStore();
+    await crawlStep({ client, store, now: () => NIGHT, budget: BIG }); // 10月の一巡を終える
+    const nov = new Date("2026-11-05T14:00:00Z");
+    await crawlStep({ client, store, now: () => nov, budget: { ...BIG, maxRequests: 3 } }); // 00 の2ページ+13 の1ページ目
+    // 13000001 が廃業 → 13000003 が読み終えた1ページ目へずれた(ページ数は2のまま)
+    site["13"] = [[row("13000002"), row("13000003")], [row("13000004")]];
+    const before = log.length;
+    await crawlStep({ client, store, now: () => nov, budget: BIG });
+    expect(log.slice(before, before + 3)).toEqual(["list 13 2", "list 13 1", "list 13 2"]);
+    expect(recs.get("13000003")!.listed).toBe(true);
+  });
+
   it("★行政庁の件数が0(メンテナンス画面など)→ 推測せず layout で止め、だれも「一覧に無い」にしない", async () => {
     const site = smallSite();
     const { client } = fakeClient(site);

@@ -68,6 +68,32 @@ const AUTHORITY_NAMES: Record<string, string> = {
   "14": "神奈川県知事",
 };
 
+/** 一覧の「免許行政庁」の欄が、免許の鍵の行政庁と合っているか(対象の5つ以外は確かめない)。 */
+function visibleAuthorityOk(code: string, cellText: string): boolean {
+  if (code === "00") return cellText.includes("大臣");
+  const name = AUTHORITY_NAMES[code];
+  return name ? cellText === name.replace(/知事$/, "") : true;
+}
+
+const TEXT_TO_CODE: [string, string][] = [
+  ["国土交通大臣", "00"],
+  ["埼玉県", "11"],
+  ["千葉県", "12"],
+  ["東京都", "13"],
+  ["神奈川県", "14"],
+];
+
+/**
+ * 免許番号の文字(手入力の名簿の「東京都知事（３）第１２３４５号」など)から免許の鍵("13012345")を作る。
+ * 全角・空白・回次の書き方の違いを吸収する。対象の5つの行政庁でなければ null。
+ */
+export function licenseKeyFromText(text: string): string | null {
+  const s = text.normalize("NFKC");
+  const code = TEXT_TO_CODE.find(([name]) => s.includes(name))?.[1];
+  const num = s.match(/第\s*0*(\d{1,6})\s*号/)?.[1];
+  return code && num ? `${code}${num.padStart(6, "0")}` : null;
+}
+
 function authorityLabel(code: string, authorityText: string): string {
   return code === "00" ? "国土交通大臣" : `${authorityText}知事`;
 }
@@ -101,6 +127,8 @@ export function parseListPage(html: string): ListPage {
     if (!keyM) throw new LayoutChanged("詳細を開く引数");
     const licenseKey = keyM[1];
     const authority = licenseKey.slice(0, 2);
+    // 見えている「免許行政庁」と免許の鍵が食い違う行=想定外の画面。推測で読まない(@codex #477)。
+    if (!visibleAuthorityOk(authority, cleanText(cells[1]))) throw new LayoutChanged("免許行政庁の欄と免許番号が食い違う");
     // cells[4]=代表者名は読まない(個人名を持たない)。
     const office = cleanText(cells[5]);
     const address = cleanText(cells[6]) || null;

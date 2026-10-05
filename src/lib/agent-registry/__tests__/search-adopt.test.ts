@@ -5,7 +5,13 @@ const { db, tx } = vi.hoisted(() => {
     $queryRaw: vi.fn(),
     $executeRaw: vi.fn(async () => 1),
     mlitAgent: { findUnique: vi.fn() },
-    agent: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn(), create: vi.fn() },
+    agent: {
+      findFirst: vi.fn(),
+      findUnique: vi.fn(),
+      findMany: vi.fn(async (): Promise<{ id: string; licenseNo: string | null; mlitAgentId: string | null }[]> => []),
+      update: vi.fn(),
+      create: vi.fn(),
+    },
   };
   const db = {
     $queryRaw: vi.fn(async () => []),
@@ -70,6 +76,7 @@ describe("一覧の会社を名簿へ写す", () => {
   const MID = "33333333-3333-4333-8333-333333333333";
   const reg = {
     id: MID,
+    licenseKey: "13000001",
     listed: true,
     companyName: "株式会社 見本不動産",
     companyKana: "カブシキガイシヤ ミホンフドウサン",
@@ -101,6 +108,23 @@ describe("一覧の会社を名簿へ写す", () => {
     expect(values.join(" ")).toContain("0300001212");
     expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.$executeRaw.mock.invocationCallOrder[0]);
     expect(tx.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(tx.agent.findFirst.mock.invocationCallOrder[0]);
+  });
+
+  it("★名簿に同じ免許番号の業者(手入力・電話は古い)→ それを使う・作らない(@codex #477)", async () => {
+    tx.agent.findFirst.mockResolvedValueOnce(null);
+    tx.agent.findMany.mockResolvedValueOnce([
+      { id: "a9", licenseNo: "神奈川県知事(2)第1号", mlitAgentId: null }, // 番号は同じでも別の免許
+      { id: "a8", licenseNo: "東京都知事（１７）第１号", mlitAgentId: null }, // 書き方が違っても同じ免許
+    ]);
+    tx.agent.update.mockResolvedValue({ id: "a8", companyName: "見本(手入力)", branchName: null, phone: "03-9999-9999" });
+    const r = await adoptRegistryAgent(MID, "u1");
+    expect(r).toMatchObject({ ok: true, created: false, agent: { id: "a8" } });
+    expect(tx.agent.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "a8" }, data: { mlitAgentId: MID } }));
+    expect(tx.agent.create).not.toHaveBeenCalled();
+    // 番号の半角・全角どちらの書き方でも候補に拾う(しまった業者は除く)
+    const where = (tx.agent.findMany.mock.calls[0] as unknown as [{ where: { isArchived: boolean; OR: { licenseNo: { contains: string } }[] } }])[0].where;
+    expect(where.isArchived).toBe(false);
+    expect(where.OR.map((c) => c.licenseNo.contains)).toEqual(expect.arrayContaining(["1", "１"]));
   });
 
   it("名簿に写し済み(しまっていない)→ それを返す・作らない", async () => {

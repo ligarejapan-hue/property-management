@@ -1808,6 +1808,8 @@ model MlitCrawlState {
   phase       String
   nextPage    Int       @default(1) @map("next_page")
   totalPages  Int?      @map("total_pages")
+  /// この一巡で前に読んだときの件数(減っていたら1ページ目から読み直す)
+  totalRows   Int?      @map("total_rows")
   failStreak  Int       @default(0) @map("fail_streak")
   dayOffUntil DateTime? @map("day_off_until")
   /// 失敗の分類コードだけ(先方の本文は残さない)

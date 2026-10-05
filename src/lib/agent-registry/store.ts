@@ -31,6 +31,7 @@ export function createPrismaCrawlStore(now: () => Date = () => new Date()): Craw
             phase: s.phase,
             nextPage: s.nextPage,
             totalPages: s.totalPages,
+            totalRows: s.totalRows,
             failStreak: s.failStreak,
             dayOffUntil: s.dayOffUntil,
             lastError: s.lastError,

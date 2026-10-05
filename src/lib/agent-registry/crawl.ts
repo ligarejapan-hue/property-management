@@ -21,6 +21,8 @@ export interface CrawlState {
   phase: CrawlPhase;
   nextPage: number;
   totalPages: number | null;
+  /** この一巡で前に読んだときの件数。減っていたら1ページ目から読み直す(前のページへずれた会社を拾う)。 */
+  totalRows: number | null;
   failStreak: number;
   dayOffUntil: Date | null;
   lastError: string | null;
@@ -88,6 +90,7 @@ function freshState(authority: string, cycle: string): CrawlState {
     phase: "list",
     nextPage: 1,
     totalPages: null,
+    totalRows: null,
     failStreak: 0,
     dayOffUntil: null,
     lastError: null,
@@ -164,13 +167,16 @@ export async function crawlStep(deps: {
         // 対象の5つの行政庁はどれも数千社以上ある。0件=メンテナンス画面など。そのまま進めると
         // 一巡の締めで全社を「一覧に無い」にしてしまうので、推測せず止める(計画 G3)。
         if (page.total === 0) throw new FetchError("layout");
-        // 止まっている間に件数が減り、続きのページがもう無い(client が page=p・rows=[] で返す)。
-        // 前の会社が消えると後ろの会社が読み終えたページへずれるので、ここで終わりにすると締めで
-        // まだ免許のある会社を消してしまう。その行政庁を1ページ目から読み直す(@codex #477)。
-        if (p > page.pages) {
+        // 前に読んだときより件数が減った(ページ数が同じでも)、または続きのページがもう無い
+        // (client が page=p・rows=[] で返す)。前の会社が消えると後ろの会社が読み終えたページへずれる
+        // ので、そのまま進むと締めでまだ免許のある会社を消してしまう。1ページ目から読み直す(@codex #477)。
+        // 先方のデータの更新は月2回ほど=読み直しはまれ。件数が増えたときはずれても読み直しにはならない(二度読むだけ)。
+        const shrank = p > 1 && s.totalRows !== null && page.total < s.totalRows;
+        if (shrank || p > page.pages) {
           succeeded = true;
           s.nextPage = 1;
           s.totalPages = page.pages;
+          s.totalRows = page.total;
           await store.saveStates(states);
           continue;
         }
@@ -179,6 +185,7 @@ export async function crawlStep(deps: {
         succeeded = true;
         result.listed += await store.upsertListRows(page.rows, cycle);
         s.totalPages = page.pages;
+        s.totalRows = page.total;
         if (p >= page.pages) s.phase = "detail";
         else s.nextPage = p + 1;
         await store.saveStates(states);

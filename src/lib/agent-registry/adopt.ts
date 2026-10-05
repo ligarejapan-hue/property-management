@@ -1,6 +1,8 @@
 import { Prisma } from "@/generated/prisma";
 import prisma from "@/lib/prisma";
 import type { AgentHit } from "@/lib/agent-inquiry/agent-search";
+import { widthVariants } from "@/lib/agent-inquiry/desk-property";
+import { licenseKeyFromText } from "./parse";
 
 /**
  * 国交省の一覧の会社を名簿へ写す(計画 Task 6)。受付の窓で一覧の候補を選んだときだけ呼ぶ。
@@ -39,6 +41,25 @@ export async function adoptRegistryAgent(mlitAgentId: string, userId: string): P
       select: HIT_SELECT,
     });
     if (linked) return { ok: true, created: false, agent: toHit(linked) } as const;
+
+    // 名簿に同じ免許番号の業者(手入力で電話が古い等)があればそれを使う(@codex #477)。
+    // 手入力の免許番号は書き方がまちまち=番号の数字(半角・全角)で候補を拾い、文字から鍵を作って照らす。
+    const num = String(Number(reg.licenseKey.slice(2)));
+    const byLicense = await tx.agent.findMany({
+      where: { isArchived: false, OR: widthVariants(num).map((v) => ({ licenseNo: { contains: v } })) },
+      orderBy: { createdAt: "asc" },
+      take: 50,
+      select: { id: true, licenseNo: true, mlitAgentId: true },
+    });
+    const sameLicense = byLicense.find((c) => c.licenseNo && licenseKeyFromText(c.licenseNo) === reg.licenseKey);
+    if (sameLicense) {
+      if (sameLicense.mlitAgentId && sameLicense.mlitAgentId !== mlitAgentId) {
+        const a = await tx.agent.findUnique({ where: { id: sameLicense.id }, select: HIT_SELECT });
+        if (a) return { ok: true, created: false, agent: toHit(a) } as const;
+      }
+      const a = await tx.agent.update({ where: { id: sameLicense.id }, data: { mlitAgentId }, select: HIT_SELECT });
+      return { ok: true, created: false, agent: toHit(a) } as const;
+    }
 
     const samePhone = await tx.$queryRaw<{ id: string; mlit_agent_id: string | null }[]>(Prisma.sql`
       SELECT id, mlit_agent_id FROM "agents"
