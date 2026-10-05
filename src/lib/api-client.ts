@@ -319,6 +319,8 @@ export interface SaleDmVariant {
   bodyTemplate?: string | null;
   // どのDMの種類から写したか(種類つきの発送)。null=今までの型。
   scenarioId: string | null;
+  // 手紙のイラスト(種類から写した型だけ・見本用)。src は /lp-assets/<publicId>。
+  illustration?: { src: string; width: number; height: number } | null;
 }
 
 export interface SaleDmLpVariantOptions {

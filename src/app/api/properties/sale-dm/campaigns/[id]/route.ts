@@ -4,6 +4,7 @@ import { handleApiError } from "@/lib/api-helpers";
 import { requireSaleDmAccess, filterDraftsByFieldStaffScope } from "@/lib/sale-dm-letter/route-guard";
 import { writeAuditLog } from "@/lib/audit";
 import { findTerminalExclusions, isTerminalExcluded, type TerminalExclusionTx } from "@/lib/dm-batch/terminal-exclusion";
+import { letterIllustrationFromAsset } from "@/lib/sale-dm-letter/letter-illustration";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -12,7 +13,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const campaign = await prisma.dmCampaign.findUnique({
       where: { id },
       include: {
-        variants: true,
+        variants: { include: { illustrationAsset: { select: { publicId: true, width: true, height: true, deletedAt: true } } } },
         lpVariants: { orderBy: { label: "asc" } },
         recipients: {
           orderBy: { createdAt: "asc" },
@@ -89,8 +90,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       targetId: id,
       detail: { campaignId: id, count: recipients.length, viewedAt: new Date().toISOString() },
     });
+    // 型ごとの手紙のイラスト(見本用)。写真の行そのものは返さず、描画用の形だけ付ける。
+    const variants = campaign.variants.map(({ illustrationAsset, ...v }) => ({
+      ...v,
+      illustration: letterIllustrationFromAsset(illustrationAsset),
+    }));
     return NextResponse.json(
-      { campaign: { ...campaign, recipients } },
+      { campaign: { ...campaign, variants, recipients } },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) { return handleApiError(error); }
