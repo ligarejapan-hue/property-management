@@ -91,6 +91,8 @@ export async function POST(
             choice: buildingChoiceFromRow(mergedData),
             currentBuildingId: null,
             userId: session.id,
+            // 棟を作ったら同じ tx で取込の目印を書く(取り消しが空の棟を消すとき確実に見つける)。
+            importJobId: jobId,
           });
           return { property, buildingLink };
         });

@@ -7,7 +7,11 @@ export interface FakeBuilding {
   createdAt: Date; createdBy: string;
 }
 export interface FakeProperty { id: string; buildingId: string | null; buildingName: string | null }
-export interface FakeDb { buildings: FakeBuilding[]; properties: FakeProperty[]; executed: string[] }
+export interface FakeAuditLog {
+  userId: string | null; action: string; targetTable: string | null; targetId: string | null; detail: unknown;
+}
+/** auditLogs: tx の中で書いた監査ログ(取込の目印。tx が巻き戻れば一緒に消える前提の行)。 */
+export interface FakeDb { buildings: FakeBuilding[]; properties: FakeProperty[]; executed: string[]; auditLogs?: FakeAuditLog[] }
 
 /** テンプレート文字列の SQL を、値を埋めた1本の文字列にする(検査用)。 */
 function sqlText(strings: TemplateStringsArray, values: unknown[]): string {
@@ -63,6 +67,12 @@ function buildFake(db: FakeDb, lock?: (key: string) => Promise<void>) {
         const b: FakeBuilding = { id: `new-${seq}`, createdAt: new Date(2026, 9, 5, 0, 0, seq), ...data };
         db.buildings.push(b);
         return { id: b.id, name: b.name };
+      }),
+    },
+    auditLog: {
+      create: vi.fn(async ({ data }: { data: FakeAuditLog }) => {
+        (db.auditLogs ??= []).push(data);
+        return { id: `log-${db.auditLogs.length}` };
       }),
     },
     property: {

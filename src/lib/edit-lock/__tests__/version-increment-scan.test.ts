@@ -44,7 +44,7 @@ const VERSIONED: Record<string, string> = {
     "owner(target) の version のみ進める(付け替え先のinvalidation)",
   "src/app/api/admin/owners/correction/mislink/route.ts:545":
     "property の version のみ進める(付け替えのinvalidation)",
-  "src/app/api/import/csv/route.ts:612":
+  "src/app/api/import/csv/route.ts:615":
     "property の UPDATABLE_PROPERTY_FIELDS(CSV重複更新。棟だけつなぐ行も同じ更新で進める)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
   "src/app/api/import/jobs/[jobId]/rollback/route.ts:559":
@@ -55,7 +55,7 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:344":
     "property.lotNumber/buildingNumber(空欄補完)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:234":
+  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:236":
     "owner の住所ペア空欄補完(fieldPatch)+version increment",
   "src/app/api/import/reception-owner/route.ts:354":
     "property.lotNumber/buildingNumber/roomNo(空欄補完)+version increment" +
@@ -153,7 +153,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },
-  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:200": {
+  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:202": {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },
@@ -216,13 +216,13 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
   // ⚠下の2件は「編集画面で書けない項目」ではない(buildingName は書ける)。例外の理由は別:
   //   applyBuildingLink は必ず物件の保存と同じトランザクションで、物件を作った直後(新しい行)
   //   か version を進める更新の直後に呼ばれる。版番号はその保存で1回だけ進む(2回進めない)。
-  "src/lib/building-link/apply.ts:110": {
+  "src/lib/building-link/apply.ts:113": {
     reason:
       "property.buildingId=null のみ(棟から外す。棟の自動づけ。呼び出し側が同じトランザクションで" +
       "物件を作る/version を進める更新をした後に呼ぶ=版番号はその保存で進む)",
     keys: ["buildingId"],
   },
-  "src/lib/building-link/apply.ts:161": {
+  "src/lib/building-link/apply.ts:179": {
     reason:
       "property.buildingId/buildingName(棟へつなぎ、物件名を棟の正式な表記にそろえる。" +
       "理由は上と同じ=同じトランザクションの保存が版番号を進める)",

@@ -226,6 +226,8 @@ describe("PATCH .../rows/[rowId] (汎用行解決)", () => {
         choice: { kind: "existing", buildingId: BID },
         currentBuildingId: null,
         userId: "u1",
+        // 取込が作った棟の目印を同じ tx で書くため(取り消しで空の棟を消す)。
+        importJobId: "j1",
       }),
     );
     expect(writeBuildingLinkAuditMock).toHaveBeenCalledWith("u1", "p1", outcome, { importJobId: "j1" });
@@ -258,7 +260,7 @@ describe("PATCH .../rows/[rowId] (汎用行解決)", () => {
     expect(pm.$transaction).toHaveBeenCalledTimes(1);
     expect(applyBuildingLinkMock).toHaveBeenCalledWith(
       pm,
-      expect.objectContaining({ propertyId: "p2", choice: { kind: "existing", buildingId: BID } }),
+      expect.objectContaining({ propertyId: "p2", choice: { kind: "existing", buildingId: BID }, importJobId: "j1" }),
     );
     expect(writeBuildingLinkAuditMock).toHaveBeenCalledTimes(1);
   });

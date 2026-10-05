@@ -14,6 +14,7 @@ vi.mock("@/lib/audit", () => ({ writeAuditLog: (...a: unknown[]) => auditMock(..
 import { applyBuildingLink, writeBuildingLinkAudit, finalBuildingFields } from "@/lib/building-link/apply";
 import { AUTO_CHOICE } from "@/lib/building-link/resolve";
 import { buildingNameKey } from "@/lib/building-identity";
+import { findImportAutoCreatedBuildingIds, removeEmptyAutoCreatedBuildings } from "@/lib/building-link/rollback";
 import { createFakeBuildingTx, type FakeDb } from "./fake-building-tx";
 
 const ADDR = "東京都大田区南雪谷１丁目１６４－２－４５";
@@ -99,6 +100,68 @@ describe("applyBuildingLink", () => {
     expect(out).toMatchObject({ action: "kept", renamedFrom: null });
     expect(tx.property.update).not.toHaveBeenCalled();
   });
+
+  // 取込が作った棟の目印は、棟を作ったのと**同じ tx** で書く(@codex P2・2026-10-05)。
+  //   writeAuditLog は失敗を握りつぶすので、tx の外で書くと取り消しが棟を見つけられないことがある。
+  it("取込の経路(importJobId)で棟を作ると、同じ tx で目印(building.auto_create)を書く。id だけ・住所なし", async () => {
+    const tx = createFakeBuildingTx(db);
+    const out = await applyBuildingLink(tx, input({ importJobId: "job-9" }));
+    expect(out.action).toBe("created");
+    expect(db.auditLogs).toEqual([{
+      userId: "u1", action: "building.auto_create", targetTable: "buildings", targetId: db.buildings[0].id,
+      detail: { propertyId: "p1", importJobId: "job-9" },
+    }]);
+    expect(JSON.stringify(db.auditLogs)).not.toContain("南雪谷");
+    // tx の外の監査ログ(握りつぶし型)には頼らない
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+  it("目印の書き込みが失敗したら apply ごと失敗する(tx が巻き戻り、目印の無い棟は残らない)", async () => {
+    const tx = createFakeBuildingTx(db);
+    tx.auditLog.create.mockRejectedValueOnce(new Error("insert failed"));
+    await expect(applyBuildingLink(tx, input({ importJobId: "job-9" }))).rejects.toThrow("insert failed");
+  });
+  it("取込でない経路・既存の棟へつなぐだけのときは tx に目印を書かない", async () => {
+    const tx = createFakeBuildingTx(db);
+    await applyBuildingLink(tx, input());
+    db.properties.push({ id: "p2", buildingId: null, buildingName: "パークハウス第１" });
+    await applyBuildingLink(tx, input({ propertyId: "p2", importJobId: "job-9" }));
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("取込が作った棟は、tx の外の監査ログが落ちても取り消しで消える", () => {
+  it("writeAuditLog が何も書かなくても、tx の中の目印から見つけて空の棟を消す", async () => {
+    const tx = createFakeBuildingTx(db);
+    const out = await applyBuildingLink(tx, input({ importJobId: "job-9" }));
+    // tx の後の監査ログ(握りつぶし型)は失敗した=何も残らない
+    auditMock.mockImplementation(async () => undefined);
+    await writeBuildingLinkAudit("u1", "p1", out, { importJobId: "job-9" });
+    const created = db.buildings[0].id;
+
+    const reader = {
+      auditLog: {
+        findMany: vi.fn(async ({ where }: { where: { action: string; targetTable: string; detail: { path: string[]; equals: string } } }) =>
+          (db.auditLogs ?? [])
+            .filter((l) => l.action === where.action && l.targetTable === where.targetTable
+              && (l.detail as Record<string, unknown>)[where.detail.path[0]] === where.detail.equals)
+            .map((l) => ({ targetId: l.targetId })),
+        ),
+      },
+    };
+    const ids = await findImportAutoCreatedBuildingIds(reader, "job-9");
+    expect(ids).toEqual([created]);
+
+    // 取り消しが部屋を消した後: 棟は空
+    const rollbackTx = {
+      $queryRaw: vi.fn(async () => ids.map((id) => ({ id }))),
+      building: {
+        findMany: vi.fn(async () => ids.map((id) => ({ id, _count: { properties: 0, photos: 0 } }))),
+        deleteMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) => ({ count: where.id.in.length })),
+      },
+    };
+    const r = await removeEmptyAutoCreatedBuildings(rollbackTx as never, ids);
+    expect(r.deletedBuildingIds).toEqual([created]);
+  });
 });
 
 describe("writeBuildingLinkAudit", () => {
@@ -112,16 +175,13 @@ describe("writeBuildingLinkAudit", () => {
     ]);
     expect(JSON.stringify(auditMock.mock.calls)).not.toContain("南雪谷");
   });
-  it("取込から作ったときは棟の作成に取込の id を入れる(取り消しで消す目印。id だけ・住所なし)", async () => {
+  it("取込から作ったときは、棟の作成の記録を tx の外では書かない(apply が tx の中で書いた=二重にしない)", async () => {
     await writeBuildingLinkAudit(
       "u1", "p1",
       { action: "created", building: { id: "b1", name: "n" }, previousBuildingId: null, renamedFrom: null, warnings: [] },
       { importJobId: "job-9" },
     );
-    expect(auditMock.mock.calls[0][0]).toMatchObject({
-      action: "building.auto_create", targetId: "b1", detail: { propertyId: "p1", importJobId: "job-9" },
-    });
-    expect(Object.keys((auditMock.mock.calls[0][0] as { detail: object }).detail).sort()).toEqual(["importJobId", "propertyId"]);
+    expect(auditMock.mock.calls.map((c) => (c[0] as { action: string }).action)).toEqual(["property.building_link"]);
   });
   it("取込でないときは importJobId を入れない", async () => {
     await writeBuildingLinkAudit("u1", "p1", {

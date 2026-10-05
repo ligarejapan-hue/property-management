@@ -2,8 +2,10 @@
  * 取込の取り消しで、その取込が自動で作った棟のうち空になったものを消す(@codex P1・2026-10-05)。
  * 残すと中身の無い棟が、後の自動づけ(同じ町丁目・同じ比べる形)を引き寄せる。
  *
- * 目印: 監査ログ `building.auto_create` の detail.importJobId(writeBuildingLinkAudit が取込の
- *   経路=CSV・要確認の確定・再試行で入れる)。migration を足さずに棟と取込を結ぶ。
+ * 目印: 監査ログ `building.auto_create` の detail.importJobId。migration を足さずに棟と取込を結ぶ。
+ *   ⚠取込の経路(CSV・要確認の確定・再試行)では applyBuildingLink が**棟を作ったのと同じ tx** で書く
+ *   (@codex P2・2026-10-05)。握りつぶし型の writeAuditLog(tx の後)には頼らないので、棟があれば
+ *   目印も必ずある(書けなければ棟ごと巻き戻る)。この修正より前の取込は tx の後に書いた行で、同じ形で読める。
  *
  * ⚠必ず**物件を消したのと同じトランザクション**で、物件を消した**後**に呼ぶ。
  * ⚠棟の行は FOR UPDATE **SKIP LOCKED**(id 昇順)。誰かがその棟を使っている最中(部屋を

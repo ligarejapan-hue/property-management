@@ -28,6 +28,7 @@ const NULL_KEY_SCAN_LIMIT = 500;
 export type BuildingLinkTx = Pick<Prisma.TransactionClient, "$executeRaw"> & {
   building: Pick<Prisma.TransactionClient["building"], "findUnique" | "findMany" | "create">;
   property: Pick<Prisma.TransactionClient["property"], "update">;
+  auditLog: Pick<Prisma.TransactionClient["auditLog"], "create">;
 };
 
 export interface ApplyBuildingLinkInput {
@@ -39,6 +40,8 @@ export interface ApplyBuildingLinkInput {
   choice: BuildingChoice;
   currentBuildingId: string | null;
   userId: string;
+  /** 取込の経路(CSV・要確認の確定・再試行)だけ渡す。棟を作ったら同じ tx で目印を書く(下)。 */
+  importJobId?: string | null;
 }
 
 export interface BuildingLinkOutcome {
@@ -152,6 +155,21 @@ export async function applyBuildingLink(
       select: { id: true, name: true },
     });
     created = true;
+    // 取込が作った棟の目印(取り消しが空の棟を消すときに引く=building-link/rollback.ts)。
+    // ⚠**棟を作ったのと同じ tx で書く**(@codex P2・2026-10-05): writeAuditLog は失敗を握りつぶすので、
+    //   tx の後に書くと、書けなかった棟は取り消しで見つからず空のまま残る。ここなら書けなければ
+    //   棟も物件も一緒に巻き戻る。migration を足さずに、既存の監査ログの表を同じ形で使う。id だけ・住所なし。
+    if (input.importJobId) {
+      await tx.auditLog.create({
+        data: {
+          userId: input.userId,
+          action: "building.auto_create",
+          targetTable: "buildings",
+          targetId: building.id,
+          detail: { propertyId: input.propertyId, importJobId: input.importJobId },
+        },
+      });
+    }
   } else {
     building = { id: d.buildingId, name: d.buildingName };
   }
@@ -184,8 +202,8 @@ export function finalBuildingFields(
 
 /**
  * 監査ログ(トランザクションの外で呼ぶ)。⚠detail に住所を入れない。
- * 取込の経路(CSV・要確認の確定・再試行)は context.importJobId を渡す。棟の作成の記録に入り、
- * 取込の取り消しが「その取込が作った棟」を見つける目印になる(building-link/rollback.ts)。
+ * 取込の経路(CSV・要確認の確定・再試行)は context.importJobId を渡す。そのときの棟の作成の記録は
+ * applyBuildingLink が tx の中で書き済み(取り消しの目印)なので、ここでは二重に書かない。
  */
 export async function writeBuildingLinkAudit(
   userId: string,
@@ -202,10 +220,10 @@ export async function writeBuildingLinkAudit(
     return;
   }
   const buildingId = outcome.building?.id ?? null;
-  if (outcome.action === "created" && buildingId) {
+  if (outcome.action === "created" && buildingId && !context.importJobId) {
     await writeAuditLog({
       userId, action: "building.auto_create", targetTable: "buildings", targetId: buildingId,
-      detail: context.importJobId ? { propertyId, importJobId: context.importJobId } : { propertyId },
+      detail: { propertyId },
     });
   }
   await writeAuditLog({

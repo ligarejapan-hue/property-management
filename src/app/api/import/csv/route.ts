@@ -427,7 +427,7 @@ export async function POST(request: NextRequest) {
           }
         }
         // 棟郵便番号（Building.postalCode 用・Property.postalCode とは別ヘッダ）も同方針で
-        // 正規化/不正値 drop。適用は棟解決後（resolvedBuildingId != null）のみ。
+        // 正規化/不正値 drop。適用は物件が実際につながった棟へ（commitBuildingPostalCode）のみ。
         if (mapped.buildingPostalCode !== undefined) {
           if (isValidPostalCode(mapped.buildingPostalCode)) {
             mapped.buildingPostalCode = normalizePostalCode(mapped.buildingPostalCode);
@@ -471,11 +471,13 @@ export async function POST(request: NextRequest) {
 
         // 棟郵便番号は「行が物件 create/update として成功した時のみ」棟へ適用する
         // （needs_review や create/update 失敗の行ではマスター Building を変更しない）。
-        // 棟が無い行（非ユニット/未解決）は resolvedBuildingId が null のため何もしない。
-        const commitBuildingPostalCode = async () => {
-          if (resolvedBuildingId && mapped.buildingPostalCode) {
+        // ⚠書く先は**この行の後に物件が実際につながっている棟**(@codex P2・2026-10-05)。解決した棟
+        //   (resolvedBuildingId)ではない: 同じ名前・同じ町丁目の棟が2つあると、解決は B1 を選んでも
+        //   部屋は B2 につながったまま(付け替えない)ことがある。棟の解決が無い行(非ユニット/棟名なし)は書かない。
+        const commitBuildingPostalCode = async (finalBuildingId: string | null) => {
+          if (buildingChoiceForRow && finalBuildingId && mapped.buildingPostalCode) {
             await applyBuildingPostalCode(
-              resolvedBuildingId,
+              finalBuildingId,
               mapped.buildingPostalCode,
               session.id,
               buildingPostalApplied,
@@ -583,7 +585,8 @@ export async function POST(request: NextRequest) {
 
           if (!existing || (changedFields.length === 0 && linkChoice === null)) {
             // 既存値と完全一致 → 変更なし。success 扱いで「更新なし」を伝える
-            await commitBuildingPostalCode();
+            // 棟は付け替えないので、今つながっている棟へ。
+            await commitBuildingPostalCode(existing?.buildingId ?? null);
             jobRows.push({
               jobId: job.id,
               rowNumber,
@@ -636,6 +639,7 @@ export async function POST(request: NextRequest) {
                     choice,
                     currentBuildingId: before.buildingId,
                     userId: session.id,
+                    importJobId: job.id,
                   })
                 : null;
             const updated = await tx.property.findUniqueOrThrow({ where: { id: dupHit.matchedId } });
@@ -659,8 +663,6 @@ export async function POST(request: NextRequest) {
           const { before, updated, buildingLink } = txResult;
           if (buildingLink) {
             await writeBuildingLinkAudit(session.id, updated.id, buildingLink, { importJobId: job.id });
-            // 棟郵便番号は実際に入れた棟へ(作成の経路と同じ)。
-            resolvedBuildingId = buildingLink.building?.id ?? null;
           }
           // 棟が変わった/物件名を棟の表記にそろえたことも「更新項目」に出す(id とフィールド名だけ)。
           // ⚠前の値は変更ログ(csv_import)に残す。取込の取り消しはこれを見て棟と物件名を戻す
@@ -704,7 +706,8 @@ export async function POST(request: NextRequest) {
           );
           if (idxInAll >= 0) existingPropsForDedupe[idxInAll] = updatedRecord;
 
-          await commitBuildingPostalCode();
+          // 棟郵便番号は、行を押さえた後に読み直した物件が実際につながっている棟へ(付け替えた/しなかった両方)。
+          await commitBuildingPostalCode(updated.buildingId ?? null);
           jobRows.push({
             jobId: job.id,
             rowNumber,
@@ -802,6 +805,8 @@ export async function POST(request: NextRequest) {
                 choice: buildingChoiceForRow,
                 currentBuildingId: null,
                 userId: session.id,
+                // 棟を作ったら同じ tx で取込の目印を書く(取り消しが空の棟を消すとき確実に見つける)。
+                importJobId: job.id,
               })
             : null;
           return { property, buildingLink };
@@ -824,7 +829,8 @@ export async function POST(request: NextRequest) {
         addToDedupeIndex(dedupeIndex, newRecord);
         existingPropsForDedupe.push(newRecord);
 
-        await commitBuildingPostalCode();
+        // 作成: apply が実際に入れた棟へ(つながなかったら書かない)。
+        await commitBuildingPostalCode(buildingLink?.building?.id ?? null);
         jobRows.push({
           jobId: job.id,
           rowNumber,

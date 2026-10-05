@@ -63,7 +63,7 @@ vi.mock("@/lib/prisma", () => {
     property: {
       findMany: vi.fn(), findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn(),
     },
-    building: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
+    building: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
     $executeRaw: vi.fn(),
   };
   db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
@@ -88,7 +88,7 @@ const pm = prisma as unknown as {
   importJob: { create: Mock; update: Mock };
   importJobRow: { create: Mock };
   property: { findMany: Mock; findUnique: Mock; findUniqueOrThrow: Mock; create: Mock; update: Mock; updateMany: Mock };
-  building: { findMany: Mock; findUnique: Mock; create: Mock };
+  building: { findMany: Mock; findUnique: Mock; create: Mock; update: Mock };
 };
 
 const PERMS = [{ resource: "import", action: "write", granted: true }];
@@ -163,8 +163,9 @@ describe("POST /api/import/csv — 区分の棟", () => {
     expect(json).toMatchObject({ successCount: 2, needsReviewCount: 0 });
     expect(buildings).toHaveLength(1);
     expect(applyBuildingLinkMock).toHaveBeenCalledTimes(2);
-    expect(applyBuildingLinkMock.mock.calls[0][1]).toMatchObject({ propertyId: "p1", choice: { kind: "auto" }, currentBuildingId: null });
-    expect(applyBuildingLinkMock.mock.calls[1][1]).toMatchObject({ propertyId: "p2", choice: { kind: "existing", buildingId: "b1" } });
+    // importJobId: 取込が作った棟の目印を同じ tx で書くため(取り消しで空の棟を消す)。
+    expect(applyBuildingLinkMock.mock.calls[0][1]).toMatchObject({ propertyId: "p1", choice: { kind: "auto" }, currentBuildingId: null, importJobId: "job-1" });
+    expect(applyBuildingLinkMock.mock.calls[1][1]).toMatchObject({ propertyId: "p2", choice: { kind: "existing", buildingId: "b1" }, importJobId: "job-1" });
     // 物件は区分で、物件名を入れて作る。棟は apply がトランザクション内で入れる(create では入れない)。
     const first = pm.property.create.mock.calls[0][0].data as Record<string, unknown>;
     expect(first).toMatchObject({ propertyType: "apartment_unit", buildingName: "新ビル" });
@@ -269,6 +270,7 @@ describe("POST /api/import/csv — 重複更新の区分の棟", () => {
     expect(applyBuildingLinkMock).toHaveBeenCalledTimes(1);
     expect(applyBuildingLinkMock.mock.calls[0][1]).toMatchObject({
       propertyId: "px", propertyType: "apartment_unit", buildingName: "新ビル", choice: { kind: "auto" }, currentBuildingId: null,
+      importJobId: "job-1",
     });
     // ロック順: 物件の行(版番号を進める更新)→ apply(アドバイザリロック)
     expect(pm.property.updateMany.mock.invocationCallOrder[0]).toBeLessThan(applyBuildingLinkMock.mock.invocationCallOrder[0]);
@@ -322,5 +324,53 @@ describe("POST /api/import/csv — 重複更新の区分の棟", () => {
     expect(pm.property.updateMany).not.toHaveBeenCalled();
     expect(applyBuildingLinkMock).not.toHaveBeenCalled();
     expect(savedRow().status).toBe("needs_review");
+  });
+
+  // 棟郵便番号は「この行の後に物件が実際につながっている棟」へ(@codex P2・2026-10-05)。
+  //   同じ名前・同じ町丁目の棟が2つあり、解決は部屋数の多い B1 を選ぶが、部屋は B2 につながっていて
+  //   付け替えない(planDuplicateBuildingLink=null)とき、B1 に書いてはいけない。
+  describe("同名の棟が2つあるときの棟郵便番号", () => {
+    const pushDupMasters = () => {
+      for (const [id, units] of [["b1", 5], ["b2", 1]] as const) {
+        buildings.push({
+          id, name: "新ビル", address: "東京都大田区南雪谷1丁目164",
+          nameKey: buildingNameKey("新ビル"), areaKey: areaKey(ADDR), createdAt: new Date("2026-01-01"), units,
+        });
+      }
+      pm.building.findUnique.mockResolvedValue({ postalCode: null });
+      pm.building.update.mockResolvedValue({});
+    };
+
+    it("項目の変更が無い行: 解決の B1 ではなく、部屋がつながっている B2 に書く", async () => {
+      pushDupMasters();
+      setExisting({ buildingId: "b2", buildingName: "新ビル", note: "同じ" });
+      const csv = `住所,不動産番号,マンション名,部屋番号,備考,棟郵便番号\n${ADDR},RE-1,新ビル,101,同じ,145-0066\n`;
+      await POST(makeRequest({ fileName: "a.csv", csvText: csv }));
+      expect(applyBuildingLinkMock).not.toHaveBeenCalled();
+      expect(savedRow().errorMessage).toContain("更新項目: なし");
+      expect(pm.building.update).toHaveBeenCalledTimes(1);
+      expect(pm.building.update.mock.calls[0][0]).toMatchObject({ where: { id: "b2" }, data: { postalCode: "1450066" } });
+    });
+
+    it("項目が変わる行(トランザクションを通る): 付け替えないなら B2 に書く", async () => {
+      pushDupMasters();
+      const existing = setExisting({ buildingId: "b2", buildingName: "新ビル", note: "old" });
+      pm.property.findUniqueOrThrow.mockResolvedValue({ ...existing, note: "新メモ" });
+      const csv = `住所,不動産番号,マンション名,部屋番号,備考,棟郵便番号\n${ADDR},RE-1,新ビル,101,新メモ,145-0066\n`;
+      await POST(makeRequest({ fileName: "a.csv", csvText: csv }));
+      expect(pm.property.updateMany).toHaveBeenCalledTimes(1);
+      expect(applyBuildingLinkMock).not.toHaveBeenCalled();
+      expect(pm.building.update).toHaveBeenCalledTimes(1);
+      expect(pm.building.update.mock.calls[0][0]).toMatchObject({ where: { id: "b2" } });
+    });
+
+    it("区分でない既存物件(棟につながず・つながってもいない)なら、どの棟にも書かない", async () => {
+      pushDupMasters();
+      setExisting({ propertyType: "land", buildingId: null, buildingName: null, note: "同じ" });
+      const csv = `住所,不動産番号,マンション名,部屋番号,備考,棟郵便番号\n${ADDR},RE-1,新ビル,101,同じ,145-0066\n`;
+      await POST(makeRequest({ fileName: "a.csv", csvText: csv }));
+      expect(applyBuildingLinkMock).not.toHaveBeenCalled();
+      expect(pm.building.update).not.toHaveBeenCalled();
+    });
   });
 });
