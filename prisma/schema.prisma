@@ -291,6 +291,10 @@ model Building {
   note                String?
   gpsLat              Decimal?  @map("gps_lat") @db.Decimal(10, 7)
   gpsLng              Decimal?  @map("gps_lng") @db.Decimal(10, 7)
+  // 比べる形(名前)と町丁目。棟を作る・名前や住所を変えるたびにアプリが計算して入れる
+  // (src/lib/building-identity.ts)。null の古い行は、比べるときにその場で計算して埋める。
+  nameKey             String?   @map("name_key")
+  areaKey             String?   @map("area_key")
   version             Int       @default(1)
   createdBy           String    @map("created_by") @db.Uuid
   createdAt           DateTime  @default(now()) @map("created_at")
@@ -302,6 +306,7 @@ model Building {
 
   @@index([name])
   @@index([address])
+  @@index([areaKey, nameKey])
   @@map("buildings")
 }
 
