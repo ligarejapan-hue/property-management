@@ -786,6 +786,9 @@ export type SaleDmScenario = {
   lpRawTemplate: string | null;
   lpHeadline: string | null;
   lpBodyText: string | null;
+  // 手紙のイラスト(設計 2026-10-05)。描画用(src は /lp-assets/<publicId>)。
+  letterIllustrationAssetId: string | null;
+  letterIllustration: { src: string; width: number; height: number } | null;
 };
 /** PATCH で変えられる項目(サーバーの saleDmScenarioPatchSchema と同じ)。 */
 export type SaleDmScenarioPatch = Partial<
@@ -831,6 +834,7 @@ export async function fetchSaleDmScenario(id: string): Promise<SaleDmScenario> {
       id, name: "モックの種類", autoKey: null, sortOrder: 10, active: true,
       designTemplate: null, tone: null, length: null, appeal: null, strength: null, extraInstruction: null, letterBodyTemplate: null,
       lpTone: null, lpLength: null, lpAppeal: null, lpStrength: null, lpRawTemplate: null, lpHeadline: null, lpBodyText: null,
+      letterIllustrationAssetId: null, letterIllustration: null,
     };
   }
   return (await apiFetch<{ scenario: SaleDmScenario }>(`${SCENARIO_BASE}/${id}`)).scenario;
@@ -857,6 +861,19 @@ export async function fetchSaleDmScenarioPrompt(
 ): Promise<{ prompt: string; digest: string; bodyDigest: string; body: string | null }> {
   if (USE_MOCK) { await mockDelay(); return { prompt: "（モック）指示文", digest: "mock", bodyDigest: "mock", body: null }; }
   return apiFetch(`${SCENARIO_BASE}/${id}/${kind === "letter" ? "prompt" : "lp-prompt"}`);
+}
+
+/** 台帳の手紙のイラストを選ぶ(assetId)/外す(null)。管理者だけ。 */
+export async function saveSaleDmScenarioLetterIllustration(
+  id: string,
+  assetId: string | null,
+): Promise<{ letterIllustrationAssetId: string | null; letterIllustration: { src: string; width: number; height: number } | null }> {
+  if (USE_MOCK) { await mockDelay(); return { letterIllustrationAssetId: assetId, letterIllustration: null }; }
+  return apiFetch(`${SCENARIO_BASE}/${id}/letter-illustration`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ assetId }),
+  });
 }
 
 export async function saveSaleDmScenarioTemplate(
