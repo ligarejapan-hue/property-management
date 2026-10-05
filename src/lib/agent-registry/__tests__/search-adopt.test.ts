@@ -125,6 +125,8 @@ describe("一覧の会社を名簿へ写す", () => {
     const where = (tx.agent.findMany.mock.calls[0] as unknown as [{ where: { isArchived: boolean; OR: { licenseNo: { contains: string } }[] } }])[0].where;
     expect(where.isArchived).toBe(false);
     expect(where.OR.map((c) => c.licenseNo.contains)).toEqual(expect.arrayContaining(["1", "１"]));
+    // ★候補を件数で切らない(第1号のような小さい番号は「1」を含む業者が多い=切ると本物を取りこぼす・@codex #477)
+    expect((tx.agent.findMany.mock.calls[0] as unknown as [Record<string, unknown>])[0]).not.toHaveProperty("take");
   });
 
   it("名簿に写し済み(しまっていない)→ それを返す・作らない", async () => {

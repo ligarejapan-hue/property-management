@@ -44,11 +44,12 @@ export async function adoptRegistryAgent(mlitAgentId: string, userId: string): P
 
     // 名簿に同じ免許番号の業者(手入力で電話が古い等)があればそれを使う(@codex #477)。
     // 手入力の免許番号は書き方がまちまち=番号の数字(半角・全角)で候補を拾い、文字から鍵を作って照らす。
+    // ⚠件数で切らない(第1号のような小さい番号は「1」を含む業者が多い=切ると本物を取りこぼして二重に作る・
+    // @codex #477)。名簿は実際に関わった業者だけなので、全部見ても軽い。
     const num = String(Number(reg.licenseKey.slice(2)));
     const byLicense = await tx.agent.findMany({
       where: { isArchived: false, OR: widthVariants(num).map((v) => ({ licenseNo: { contains: v } })) },
       orderBy: { createdAt: "asc" },
-      take: 50,
       select: { id: true, licenseNo: true, mlitAgentId: true },
     });
     const sameLicense = byLicense.find((c) => c.licenseNo && licenseKeyFromText(c.licenseNo) === reg.licenseKey);
