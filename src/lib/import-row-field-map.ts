@@ -32,10 +32,11 @@ export const JAPANESE_FIELD_MAP: Record<string, string> = {
   "経度": "gpsLng",
   "備考": "note",
   "リンクキー": "externalLinkKey",
-  // 区分マンションの物件名(CSV 取込 api/import/csv と同じ列名)。
+  // 区分マンションの物件名(CSV 取込 api/import/csv の JAPANESE_FIELD_MAP と同じ2列だけ)。
+  // ⚠「物件名」は足さない: 不動産業者形式のひな形の汎用列で戸建・土地も入る。物件名があると
+  //   区分マンションとして作る規則なので、戸建が黙って区分になり棟まで作られてしまう。
   "棟名": "buildingName",
   "マンション名": "buildingName",
-  "物件名": "buildingName",
 };
 
 /** Map Japanese CSV header names to owner model field names. */
