@@ -66,8 +66,9 @@ describe("resolveCsvBuilding の部分一致(両方向)", () => {
     const matches = (b: CsvBuildingRow, where: Record<string, unknown>): boolean => {
       if ("areaKey" in where) return b.areaKey === where.areaKey && b.nameKey === where.nameKey;
       if ("nameKey" in where) {
-        const nk = where.nameKey as string | null | { in: string[] };
-        if (nk !== null && typeof nk === "object") return b.nameKey !== null && nk.in.includes(b.nameKey);
+        const nk = where.nameKey as string | null | { in: string[] } | { contains: string };
+        if (nk !== null && typeof nk === "object" && "in" in nk) return b.nameKey !== null && nk.in.includes(b.nameKey);
+        if (nk !== null && typeof nk === "object") return b.nameKey !== null && b.nameKey.includes(nk.contains);
         return b.nameKey === nk;
       }
       const name = where.name as { contains?: string } | undefined;
@@ -94,6 +95,23 @@ describe("resolveCsvBuilding の部分一致(両方向)", () => {
     const { db } = fakeDb([keyed("e1", "パークハイツ本館", `${AREA}1`)]);
     const r = await resolveCsvBuilding(db as never, "パークハイツ", ADDR, new Map());
     expect(r).toMatchObject({ kind: "review", candidates: [{ id: "e1", name: "パークハイツ本館" }] });
+  });
+
+  it("前方向も比べる形で見る(既存「パークハイツ第一本館」・取込「パークハイツ第1」)→ review", async () => {
+    const { db } = fakeDb([keyed("e1", "パークハイツ第一本館", "東京都港区六本木1丁目1")]);
+    const r = await resolveCsvBuilding(db as never, "パークハイツ第1", ADDR, new Map());
+    expect(r).toMatchObject({ kind: "review", candidates: [{ id: "e1", name: "パークハイツ第一本館" }] });
+  });
+
+  it("前方向の比べる形は key が null の古い棟も見る", async () => {
+    const { db } = fakeDb([row("old", "パークハイツ第一本館", `${AREA}1`)]);
+    const r = await resolveCsvBuilding(db as never, "パークハイツ第1", ADDR, new Map());
+    expect(r).toMatchObject({ kind: "review", candidates: [{ id: "old" }] });
+  });
+
+  it("前方向の比べる形も短すぎる取込名(2文字)では候補にしない", async () => {
+    const { db } = fakeDb([keyed("k1", "第一ハイツ", `${AREA}1`), row("n1", "第一コーポ", `${AREA}2`)]);
+    expect(await resolveCsvBuilding(db as never, "第1", ADDR, new Map())).toEqual({ kind: "create" });
   });
 
   it("取込の名前が既存の棟名を含む(逆方向)→ 作らずに review(候補に既存の棟)", async () => {

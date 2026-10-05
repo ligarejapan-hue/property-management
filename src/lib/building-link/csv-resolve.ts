@@ -29,7 +29,8 @@ const NULL_KEY_SCAN_LIMIT = 500;
 /**
  * - 同じ町丁目・同じ比べる形の棟がある → link(複数なら decideBuildingLink と同じ選び方)
  * - 無いが、比べる形が同じ別の町丁目の棟か、名前が部分一致する棟がある → review
- *   (部分一致は両方向=既存が取込の名前を含む/取込の名前が既存の棟名(比べる形・3文字以上)を含む)
+ *   (部分一致は両方向=既存が取込の名前を含む(生の名前、または比べる形で取込が3文字以上)
+ *    /取込の名前が既存の棟名(比べる形・3文字以上)を含む)
  *   (⚠以前の「部分一致1件なら黙ってつなぐ」は D2 に反するのでやめた=発注者承認 2026-10-04)
  * - どれも無い → create
  */
@@ -124,6 +125,16 @@ function isReverseMatch(k: string | null, nameKey: string | null): boolean {
     && Array.from(k).length >= REVERSE_MATCH_MIN_LENGTH && nameKey.includes(k);
 }
 
+/** 取込の比べる形が十分長く、比べる形での前方向の部分一致(既存が取込を含む)に使えるか。 */
+function isForwardKeyUsable(nameKey: string | null): nameKey is string {
+  return nameKey !== null && Array.from(nameKey).length >= REVERSE_MATCH_MIN_LENGTH;
+}
+
+/** 既存の棟の比べる形 k が、取込の比べる形を(全体ではなく)含むか(前方向・比べる形で)。 */
+function isForwardKeyMatch(k: string | null, nameKey: string | null): boolean {
+  return k !== null && isForwardKeyUsable(nameKey) && k !== nameKey && k.includes(nameKey);
+}
+
 export async function resolveCsvBuilding(
   db: CsvResolveDb,
   buildingName: string,
@@ -160,6 +171,7 @@ export async function resolveCsvBuilding(
     else if (
       (nameKey !== null && k === nameKey)
       || (trimmed !== "" && b.name.includes(trimmed))
+      || isForwardKeyMatch(k, nameKey)
       || isReverseMatch(k, nameKey)
     ) pushUnique(others, b);
   }
@@ -168,12 +180,16 @@ export async function resolveCsvBuilding(
     const partial = await db.building.findMany({
       where: { name: { contains: trimmed } }, select, take: REVIEW_CANDIDATE_LIMIT,
     });
+    // 前方向の比べる形: 生の名前では含まないが比べる形では含む(既存「パークハイツ第一本館」・取込「パークハイツ第1」)。
+    const forwardKey = !isForwardKeyUsable(nameKey) ? [] : await db.building.findMany({
+      where: { nameKey: { contains: nameKey } }, select, take: REVIEW_CANDIDATE_LIMIT,
+    });
     // 逆方向: 既存「パークハイツ」に取込「パークハイツ本館」=黙って別の棟を作らず要確認へ(範囲は前方向と同じ=全域)。
     const contained = containedNameKeys(nameKey);
     const reverse = contained.length === 0 ? [] : await db.building.findMany({
       where: { nameKey: { in: contained } }, select, take: REVIEW_CANDIDATE_LIMIT,
     });
-    for (const b of [...sameNameOtherArea, ...partial, ...reverse]) pushUnique(others, toRow(b));
+    for (const b of [...sameNameOtherArea, ...partial, ...forwardKey, ...reverse]) pushUnique(others, toRow(b));
   }
   const result = decideCsvBuilding({ buildingName: trimmed, address, sameKey, others });
   // ⚠create は覚えない(同じ取込の次の行は、前の行が作った棟を link で見つける=Review Focus 4)。
