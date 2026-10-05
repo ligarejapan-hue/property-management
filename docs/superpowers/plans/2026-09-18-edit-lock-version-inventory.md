@@ -80,7 +80,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/owners/[id]/corporate-cleanup/route.ts:248` | `owner.name`/`address`/`note`/`corporateNumber` |
 | `src/app/api/owners/[id]/route.ts:213` | `owner` の編集画面フィールド一式(編集画面本体の保存窓口) |
 | `src/app/api/properties/[id]/actions/route.ts:157` | `property` のアクション実行結果フィールド |
-| `src/app/api/properties/[id]/route.ts:442` | `property` の編集画面フィールド一式(編集画面本体の保存窓口) |
+| `src/app/api/properties/[id]/route.ts:448` | `property` の編集画面フィールド一式(編集画面本体の保存窓口) |
 | `src/lib/sales-sheet/property-writeback/apply-writeback.ts:30` | `property` の販売条件(販売図面の作成画面で入れた値の書き戻し。F3で追加。呼び出し側が `FOR UPDATE`+担当者スコープを取った上で `where` に version を付けて書く) |
 | `src/app/api/properties/sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts:212` | `property.dmScenarioId`(売却DMの発送の画面から物件単位で「種類を変える」。DMの種類 PR-S2 Task 5。物件行 `FOR UPDATE`+編集中の鍵の確認の後、`where` に読んだ version を付けて書く・変更履歴1行) |
 | `src/app/api/properties/bulk-update/route.ts:87` | `property.caseStatus`/`registryStatus`/`dmStatus`/`assignedTo` |

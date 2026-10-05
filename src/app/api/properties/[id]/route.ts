@@ -367,11 +367,17 @@ export async function PATCH(
     const savedBuildingName =
       "buildingName" in persistedFields ? (persistedFields.buildingName ?? null) : current.buildingName;
     const effectiveAddress = updateFields.address ?? current.address;
+    // ⚠つながった区分の部屋で物件名も種別も変えず、棟も選んでいない保存(住所だけ等)は apply を呼ばない(D4)。
+    //   棟の名前を変えた後は部屋の物件名が旧名のまま=比べ直すと別の棟を作って付け替えてしまう。
+    const keepsLinkedRoom =
+      buildingChoice === undefined && savedBuildingName === current.buildingName &&
+      current.buildingId != null && effectiveType === "apartment_unit" && current.propertyType === "apartment_unit";
     const touchesBuildingLink =
-      buildingChoice !== undefined ||
-      savedBuildingName !== current.buildingName ||
-      effectiveType !== current.propertyType ||
-      effectiveAddress !== current.address;
+      !keepsLinkedRoom &&
+      (buildingChoice !== undefined ||
+        savedBuildingName !== current.buildingName ||
+        effectiveType !== current.propertyType ||
+        effectiveAddress !== current.address);
 
     // Build change log entries
     const changeLogs: Array<{

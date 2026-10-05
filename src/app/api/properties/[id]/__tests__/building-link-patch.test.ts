@@ -152,14 +152,29 @@ describe("PATCH /api/properties/[id] — 棟へのつなぎ直し", () => {
     expect(auditLinkMock).toHaveBeenCalledWith("user-1", "p1", expect.objectContaining({ action: "linked" }));
   });
 
-  it("住所だけ変えても apply を呼ぶ(家屋番号は今の値を渡す)", async () => {
+  it("棟につながっていない区分なら、住所だけ変えても apply を呼ぶ(家屋番号は今の値を渡す)", async () => {
+    prismaMock.property.findUnique.mockResolvedValue({ ...CURRENT, buildingId: null });
     applyMock.mockResolvedValue({
-      action: "kept", building: { id: "b1", name: "パークハウス第一" }, previousBuildingId: "b1", renamedFrom: null, warnings: [],
+      action: "linked", building: { id: "b1", name: "パークハウス第一" }, previousBuildingId: null, renamedFrom: null, warnings: [],
     });
     await PATCH(req({ version: 1, address: "東京都大田区南雪谷2丁目1" }), ctx);
     expect(applyMock).toHaveBeenCalledWith(txMock, expect.objectContaining({
-      address: "東京都大田区南雪谷2丁目1", buildingName: "パークハウス第一", buildingNumber: null, propertyType: "apartment_unit",
+      address: "東京都大田区南雪谷2丁目1", buildingName: "パークハウス第一", buildingNumber: null,
+      propertyType: "apartment_unit", currentBuildingId: null,
     }));
+  });
+
+  it("棟の名前が変わった後でも、つながった部屋の住所だけの編集では apply を呼ばず棟は変わらない(D4)", async () => {
+    // 棟 b1 は「パークハウス雪谷」へ改名済み。部屋の物件名は旧名のまま(反映は段3)。
+    prismaMock.property.findUnique.mockResolvedValue({ ...CURRENT, buildingName: "パークハウス第一", buildingId: "b1" });
+    const res = await PATCH(req({ version: 1, address: "東京都大田区南雪谷1丁目2" }), ctx);
+    expect(res.status).toBe(200);
+    expect(applyMock).not.toHaveBeenCalled();
+    expect(auditLinkMock).not.toHaveBeenCalled();
+    expect(txMock.property.updateMany.mock.calls[0][0].data).not.toHaveProperty("buildingId");
+    const logs = prismaMock.changeLog.createMany.mock.calls[0][0].data;
+    expect(logs.some((l: { fieldName: string }) => l.fieldName === "buildingId")).toBe(false);
+    expect((await res.json()).buildingLink).toBeNull();
   });
 
   it("種別を対象外へ変えたら、消した物件名(null)で apply を呼ぶ", async () => {
