@@ -7,7 +7,7 @@ import {
   assertSaleDmCampaignOwned,
 } from "@/lib/sale-dm-letter/route-guard";
 import {
-  buildExternalPrompt,
+  variantLetterPrompt,
   promptDigest,
   bodyTemplateDigest,
 } from "@/lib/sale-dm-letter/external-prompt";
@@ -46,6 +46,7 @@ export async function GET(
         length: true,
         appeal: true,
         strength: true,
+        scenarioId: true,
         templateFrozenAt: true,
         bodyTemplate: true,
       },
@@ -64,7 +65,7 @@ export async function GET(
       },
     });
 
-    const prompt = buildExternalPrompt(variant);
+    const prompt = variantLetterPrompt(variant);
 
     await writeAuditLog({
       userId: session.id,

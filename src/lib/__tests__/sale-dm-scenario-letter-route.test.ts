@@ -51,7 +51,8 @@ import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
 import { GET } from "../../app/api/properties/sale-dm/scenarios/[id]/prompt/route";
 import { PUT } from "../../app/api/properties/sale-dm/scenarios/[id]/template/route";
 import {
-  buildExternalPrompt,
+  // 台帳の手紙は【イラスト】の一文入り(設計 2026-10-05 §6)。表示・保存とも scenarioLetterPrompt を通る。
+  scenarioLetterPrompt,
   promptDigest,
   bodyTemplateDigest,
 } from "../sale-dm-letter/external-prompt";
@@ -66,7 +67,7 @@ const SID = "33333333-3333-4333-8333-333333333333";
 const ctx = { params: Promise.resolve({ id: SID }) };
 
 const SETTINGS = { tone: "formal", length: "medium", appeal: "price", strength: "medium" };
-const DIGEST = promptDigest(buildExternalPrompt(SETTINGS));
+const DIGEST = promptDigest(scenarioLetterPrompt(SETTINGS));
 
 const scenarioRow = (over: Record<string, unknown> = {}) => ({
   id: SID,
@@ -116,7 +117,7 @@ describe("GET /scenarios/[id]/prompt(台帳の手紙の指示文)", () => {
     const res = await GET(req("GET"), ctx);
     expect(res.status).toBe(200);
     const j = await res.json();
-    expect(j.prompt).toBe(buildExternalPrompt(SETTINGS));
+    expect(j.prompt).toBe(scenarioLetterPrompt(SETTINGS));
     expect(j.digest).toBe(DIGEST);
     expect(j.bodyDigest).toBe(bodyTemplateDigest(null));
     expect(j.body).toBeNull();
@@ -185,7 +186,7 @@ describe("PUT /scenarios/[id]/template(台帳の手紙の原本の貼り戻し)"
     expect(String(pm.$queryRaw.mock.calls[0][0])).toContain("FOR UPDATE");
     expect(pm.dmScenario.update).toHaveBeenCalledWith({
       where: { id: SID },
-      data: { letterBodyTemplate: "拝啓 新しい本文", letterPromptText: buildExternalPrompt(SETTINGS) },
+      data: { letterBodyTemplate: "拝啓 新しい本文", letterPromptText: scenarioLetterPrompt(SETTINGS) },
     });
     expect(writeAuditLog).toHaveBeenCalledWith({
       userId: "u1",
