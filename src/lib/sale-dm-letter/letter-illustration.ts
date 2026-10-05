@@ -5,7 +5,9 @@
  */
 export type LetterIllustration = { src: string; width: number; height: number };
 
-const MARKER_LINE = /^[ \t　]*【イラスト】[ \t　]*$/;
+// \s は全角空白(U+3000)・ノーブレークスペース(U+00A0)・BOM(U+FEFF)も含む
+// (ブラウザや Word から貼った文面の「見た目は空白」を取りこぼして紙に【イラスト】を出さない)。
+const MARKER_LINE = /^\s*【イラスト】\s*$/;
 const PUBLIC_ID = /^[0-9a-f]{32}$/;
 const SAFE_SRC = /^\/lp-assets\/[0-9a-f]{32}$/;
 

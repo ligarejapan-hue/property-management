@@ -112,3 +112,10 @@ describe("renderLetterHtml とイラスト", () => {
     expect(count(html, "<img")).toBe(1);
   });
 });
+
+describe("最終レビュー: ブラウザ・Word から貼った空白でも印とみなす", () => {
+  it("ノーブレークスペース(U+00A0)・BOM(U+FEFF)付きの行も印", () => {
+    expect(placeIllustration("一\n\u00a0【イラスト】\u00a0\n二").hasMarker).toBe(true);
+    expect(placeIllustration("\ufeff【イラスト】\n一")).toEqual({ before: "", after: "一", stripped: "一", hasMarker: true });
+  });
+});

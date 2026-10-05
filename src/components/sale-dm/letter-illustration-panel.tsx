@@ -34,11 +34,12 @@ export default function LetterIllustrationPanel({ scenarioId, illustration, onCh
   };
   const save = async (assetId: string | null) => {
     if (busy) return;
+    // 先に選択の窓を閉じる(失敗したときの赤字が窓の裏に隠れないように)。
+    setOpen(false);
     setBusy(true);
     setError(null);
     try {
       await saveSaleDmScenarioLetterIllustration(scenarioId, assetId);
-      setOpen(false);
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : "保存できませんでした");

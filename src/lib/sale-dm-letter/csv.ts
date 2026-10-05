@@ -1,6 +1,8 @@
 // 売却DM 補助 CSV(外部分析・差し込み用)の列定義と行ビルダ(純関数)。
 // route 側で sanitizeCsvCellForExcel + encodeCsv(BOM+CRLF) に通す前提のため、
 // ここでは formula injection 対策・quoting は行わない(セル値を素直に組むだけ)。
+import { placeIllustration } from "./letter-illustration";
+
 export const SALE_DM_CSV_HEADERS = [
   "型",
   "デザイン",
@@ -53,6 +55,7 @@ export function buildSaleDmCsvRow(
     郵便番号: s(record.recipientZip),
     送付先住所: s(record.recipientAddress),
     状態: s(record.status),
-    本文: s(record.body),
+    // 【イラスト】の行(手紙のイラストの位置の印)は差し込み先で紙に出るので消す(設計 2026-10-05 §1-3)。
+    本文: placeIllustration(s(record.body)).stripped,
   };
 }

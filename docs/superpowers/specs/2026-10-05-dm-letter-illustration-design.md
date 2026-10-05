@@ -76,11 +76,11 @@ Prisma:
   3. 値が同じなら何もせず 200
   4. 更新
   5. `writeAuditLog`(action `sale_dm_scenario_letter_illustration_update`・detail は `{ hasIllustration: boolean }` だけ。`audit-log-detail-safety.ts` の allowlist に登録)
-- 返す値: `{ assetId, publicId, width, height } | { assetId: null }`
+- 返す値: `{ letterIllustrationAssetId: string | null; letterIllustration: { src, width, height } | null }`(src は `/lp-assets/<publicId>`=描画にそのまま使える形)
 
 ### 取得
 
-台帳の詳細(`GET scenarios/[id]` か、詳細画面が使っている読み出し)に `letterIllustration: { assetId, publicId, width, height } | null` を足す。削除済みの写真は null として返す。
+台帳の詳細(`GET scenarios/[id]`)に `letterIllustration: { src, width, height } | null` を足す(`letterIllustrationAssetId` は列のまま返る)。削除済みの写真は null として返す。
 
 ### 画面: `admin/dm-scenarios/[id]`
 
@@ -193,8 +193,7 @@ Prisma:
   - variant(scenarioId あり/なし)で prompt と template の digest が一致する
   - 型A/B の指示文が変わらない
 - `sale-dm-scenario-copy.test.ts`
-  - イラストが写る
-  - 削除済みは NULL
+  - イラストが写る(未登録は NULL のまま。削除済みの写真の ID もそのまま写し、描画側が隠す=§7)
   - 作成後に台帳を替えても variant は変わらない
 - `sale-dm-print-route.test.ts`
   - variant のイラストが letters に渡る

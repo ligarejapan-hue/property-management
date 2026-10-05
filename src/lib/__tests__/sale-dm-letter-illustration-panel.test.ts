@@ -38,3 +38,14 @@ describe("手紙のイラストの枠(台帳の画面)", () => {
     expect(api).toContain("/letter-illustration`");
   });
 });
+
+describe("最終レビュー: 保存の失敗が選択の窓の裏に隠れない", () => {
+  it("走査: 選んだら窓を閉じてから保存する(エラーは枠に見える)", () => {
+    const src = code("src/components/sale-dm/letter-illustration-panel.tsx");
+    const save = src.slice(src.indexOf("const save = async"), src.indexOf("return (", src.indexOf("const save = async")));
+    const close = save.indexOf("setOpen(false)");
+    const call = save.indexOf("saveSaleDmScenarioLetterIllustration(");
+    expect(close).toBeGreaterThan(-1);
+    expect(close).toBeLessThan(call);
+  });
+});
