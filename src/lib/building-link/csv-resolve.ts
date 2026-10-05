@@ -29,6 +29,7 @@ const NULL_KEY_SCAN_LIMIT = 500;
 /**
  * - 同じ町丁目・同じ比べる形の棟がある → link(複数なら decideBuildingLink と同じ選び方)
  * - 無いが、比べる形が同じ別の町丁目の棟か、名前が部分一致する棟がある → review
+ *   (部分一致は両方向=既存が取込の名前を含む/取込の名前が既存の棟名(比べる形・3文字以上)を含む)
  *   (⚠以前の「部分一致1件なら黙ってつなぐ」は D2 に反するのでやめた=発注者承認 2026-10-04)
  * - どれも無い → create
  */
@@ -96,6 +97,33 @@ function pushUnique(list: CsvBuildingRow[], b: CsvBuildingRow): void {
   if (!list.some((x) => x.id === b.id)) list.push(b);
 }
 
+/**
+ * 逆方向の部分一致(取込の名前が既存の棟名を含む)で見る既存の棟名の最短の長さ(比べる形の文字数)。
+ * 1〜2文字の棟名(「ハイ」など)が、それを含むだけの別の建物を片端から要確認に回さないため。
+ */
+export const REVERSE_MATCH_MIN_LENGTH = 3;
+/** 逆方向で DB に渡す部分文字列の上限(極端に長い名前で IN 句が膨らまないように)。 */
+const REVERSE_MATCH_MAX_KEYS = 2000;
+
+/** 比べる形の部分文字列のうち、短すぎず・全体ではないもの(=既存の棟名がこれなら逆方向の候補)。 */
+export function containedNameKeys(nameKey: string): string[] {
+  const chars = Array.from(nameKey);
+  const out = new Set<string>();
+  for (let len = chars.length - 1; len >= REVERSE_MATCH_MIN_LENGTH; len--) {
+    for (let i = 0; i + len <= chars.length; i++) {
+      out.add(chars.slice(i, i + len).join(""));
+      if (out.size >= REVERSE_MATCH_MAX_KEYS) return [...out];
+    }
+  }
+  return [...out];
+}
+
+/** 既存の棟の比べる形 k が、取込の比べる形に(全体ではなく)含まれ、十分長いか。 */
+function isReverseMatch(k: string | null, nameKey: string | null): boolean {
+  return k !== null && nameKey !== null && k !== nameKey
+    && Array.from(k).length >= REVERSE_MATCH_MIN_LENGTH && nameKey.includes(k);
+}
+
 export async function resolveCsvBuilding(
   db: CsvResolveDb,
   buildingName: string,
@@ -129,14 +157,23 @@ export async function resolveCsvBuilding(
     const k = buildingNameKey(b.name);
     const a = areaKey(b.address);
     if (nameKey !== null && k === nameKey && area !== null && a === area) pushUnique(sameKey, b);
-    else if ((nameKey !== null && k === nameKey) || (trimmed !== "" && b.name.includes(trimmed))) pushUnique(others, b);
+    else if (
+      (nameKey !== null && k === nameKey)
+      || (trimmed !== "" && b.name.includes(trimmed))
+      || isReverseMatch(k, nameKey)
+    ) pushUnique(others, b);
   }
   if (nameKey) {
     const sameNameOtherArea = await db.building.findMany({ where: { nameKey }, select, take: REVIEW_CANDIDATE_LIMIT });
     const partial = await db.building.findMany({
       where: { name: { contains: trimmed } }, select, take: REVIEW_CANDIDATE_LIMIT,
     });
-    for (const b of [...sameNameOtherArea, ...partial]) pushUnique(others, toRow(b));
+    // 逆方向: 既存「パークハイツ」に取込「パークハイツ本館」=黙って別の棟を作らず要確認へ(範囲は前方向と同じ=全域)。
+    const contained = containedNameKeys(nameKey);
+    const reverse = contained.length === 0 ? [] : await db.building.findMany({
+      where: { nameKey: { in: contained } }, select, take: REVIEW_CANDIDATE_LIMIT,
+    });
+    for (const b of [...sameNameOtherArea, ...partial, ...reverse]) pushUnique(others, toRow(b));
   }
   const result = decideCsvBuilding({ buildingName: trimmed, address, sameKey, others });
   // ⚠create は覚えない(同じ取込の次の行は、前の行が作った棟を link で見つける=Review Focus 4)。
