@@ -96,10 +96,11 @@ export function AgentPicker({
   const [res, setRes] = useState<(SearchResult<AgentHit> & { registry: RegistryHit[] }) | null>(null);
   const [adoptingId, setAdoptingId] = useState<string | null>(null);
   const [adoptError, setAdoptError] = useState<string | null>(null);
-  // 今の検索語(写す返事が届いたときに、押したときと同じかを確かめる)。
-  const queryRef = useRef(query);
+  // 検索語が変わるたびに増える番号(写す返事が届いたときに、押してから一度も変わっていないかを確かめる)。
+  // 語そのものの比較だと、打ってから消して元の語に戻したときに古い返事で選んでしまう(@codex #477)。
+  const queryGen = useRef(0);
   useEffect(() => {
-    queryRef.current = query;
+    queryGen.current += 1;
   }, [query]);
   const searching = !selected && agentQueryReady(query);
   const { readDenied } = useDeskAccess();
@@ -132,14 +133,14 @@ export function AgentPicker({
     shown: shown ? { hits: [...shown.hits, ...registryShown], failed: shown.failed } : null,
   });
   const pickRegistry = (h: RegistryHit) => {
-    const asked = query;
+    const asked = queryGen.current;
     setAdoptingId(h.id);
     setAdoptError(null);
     adoptRegistryAgent(h.id)
       .then((r) => {
         // 写している間に検索語を打ち直していたら、古い返事で選ばない(別の業者に反響を付けない・@codex #477)。
         // 名簿へは写っているので、もう一度探せば名簿の候補として出る。
-        if (queryRef.current !== asked) return;
+        if (queryGen.current !== asked) return;
         onPick(r.agent);
       })
       .catch((e) => {

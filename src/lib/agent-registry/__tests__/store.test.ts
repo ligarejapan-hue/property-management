@@ -175,6 +175,9 @@ describe("保存(prisma 版)", () => {
       where: { licenseKey: "13000001", address: null },
       data: { address: "詳細の住所" },
     });
+    // ★所在地と「取り終えた」の印は1つの取引でまとめて書く(間に所在地の無いまま写されない・@codex #477)
+    expect($transaction).toHaveBeenCalledTimes(1);
+    expect(($transaction.mock.calls[0] as unknown as [unknown[]])[0]).toHaveLength(2);
   });
 
   it("一巡の締め: その一巡で見なかった会社(と一度も見ていない会社)だけ「一覧に無い」に", async () => {

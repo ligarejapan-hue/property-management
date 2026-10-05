@@ -39,7 +39,8 @@ describe("国交省の一覧から来た候補", () => {
 
   it("★写している間に検索語が変わったら、古い返事で選ばない(別の業者に反響を付けない・@codex #477)", () => {
     const src = read("src/components/agent-inquiry/agent-picker.tsx");
-    expect(src).toMatch(/const asked = query;[\s\S]*adoptRegistryAgent\(h\.id\)[\s\S]*if \(queryRef\.current !== asked\) return;[\s\S]*onPick\(r\.agent\)/);
-    expect(src).toMatch(/useEffect\(\(\) => \{\s*queryRef\.current = query;\s*\}, \[query\]\)/);
+    // 打ち直して元の語に戻した場合も古い返事で選ばない=語の比較ではなく、変わるたびに増える番号で見る
+    expect(src).toMatch(/const asked = queryGen\.current;[\s\S]*adoptRegistryAgent\(h\.id\)[\s\S]*if \(queryGen\.current !== asked\) return;[\s\S]*onPick\(r\.agent\)/);
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*queryGen\.current \+= 1;\s*\}, \[query\]\)/);
   });
 });

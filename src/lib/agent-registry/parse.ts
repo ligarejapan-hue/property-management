@@ -104,6 +104,10 @@ export function parseListPage(html: string): ListPage {
   if (!totalM) throw new LayoutChanged("件数の文言");
   const total = Number(totalM[1].replace(/,/g, ""));
   if (total === 0) return { total: 0, pages: 0, page: 0, rows: [] };
+  // 「1件目～50件目までを表示」=このページにあるはずの行の数(1件=1行・2026-10-03 の実物で確認)。
+  const rangeM = html.match(/(\d+)件目～(\d+)件目/);
+  if (!rangeM) throw new LayoutChanged("表示している範囲の文言");
+  const expectedRows = Number(rangeM[2]) - Number(rangeM[1]) + 1;
 
   const select = html.match(/<select id="pageListNo1"[\s\S]*?<\/select>/)?.[0];
   if (!select) throw new LayoutChanged("ページの選択");
@@ -148,6 +152,8 @@ export function parseListPage(html: string): ListPage {
   if (dataRows === 0) throw new LayoutChanged("件数があるのに行が無い");
   // 読めた行の数=詳細を開く引数の数。違えば読めなかった行がある=黙って落とさず止める(計画 G3)。
   if (dataRows !== (table.match(/js_ShowDetail\(/g) ?? []).length) throw new LayoutChanged("読めなかった行");
+  // 表示している範囲の行の数と違う=行が欠けた画面。そのまま進めると締めで欠けた会社を消してしまう(@codex #477)。
+  if (dataRows !== expectedRows) throw new LayoutChanged("表示している範囲と行の数が違う");
   return { total, pages: Number(pagesM[1]), page: Number(pageM[1]), rows: [...byKey.values()] };
 }
 

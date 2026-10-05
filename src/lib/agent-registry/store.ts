@@ -123,24 +123,25 @@ export function createPrismaCrawlStore(now: () => Date = () => new Date()): Craw
 
     async saveDetail(d: Detail, at: Date) {
       const digits = d.phone?.replace(/\D/g, "") ?? "";
-      await prisma.mlitAgent.updateMany({
-        where: { licenseKey: d.licenseKey },
-        data: {
-          companyKana: d.companyKana,
-          phone: d.phone,
-          phoneDigits: digits || null,
-          validUntil: d.validUntil,
-          needsDetail: false,
-          detailAt: at,
-          detailFailCount: 0,
-        },
-      });
-      if (d.address) {
-        await prisma.mlitAgent.updateMany({
-          where: { licenseKey: d.licenseKey, address: null },
-          data: { address: d.address },
-        });
-      }
+      // 所在地(一覧に無いときだけ詳細の値で埋める)と「取り終えた」の印は1つの取引で書く=
+      // 間に所在地の無いまま候補に出て写される・途中で落ちて所在地が欠けたまま「取り終えた」になる、を防ぐ(@codex #477)。
+      await prisma.$transaction([
+        ...(d.address
+          ? [prisma.mlitAgent.updateMany({ where: { licenseKey: d.licenseKey, address: null }, data: { address: d.address } })]
+          : []),
+        prisma.mlitAgent.updateMany({
+          where: { licenseKey: d.licenseKey },
+          data: {
+            companyKana: d.companyKana,
+            phone: d.phone,
+            phoneDigits: digits || null,
+            validUntil: d.validUntil,
+            needsDetail: false,
+            detailAt: at,
+            detailFailCount: 0,
+          },
+        }),
+      ]);
     },
 
     async closeCycle(cycle: string) {

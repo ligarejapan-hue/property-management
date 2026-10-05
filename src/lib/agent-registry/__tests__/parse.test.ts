@@ -95,6 +95,15 @@ describe("一覧のページを読む", () => {
     );
   });
 
+  it("★「1件目～N件目」の表示と読めた行の数が違う(行が欠けた)一覧 → LayoutChanged(@codex #477)", () => {
+    // 見本は4行=「1件目～4件目」。1行欠けた画面
+    const missing = listHtml.replace(/<tr>(\s*<td style="text-align:right;">4<\/td>[\s\S]*?<\/tr>)/, "");
+    expect(missing).not.toBe(listHtml);
+    expect(() => parseListPage(missing)).toThrow(LayoutChanged);
+    // 範囲の表示そのものが無い
+    expect(() => parseListPage(listHtml.replace("1件目～4件目までを表示", ""))).toThrow(LayoutChanged);
+  });
+
   it("★件数は0でないのに行が1つも無い一覧 → LayoutChanged(空のページとして進めない・@codex #477)", () => {
     const empty = listHtml.replace(/<tr>\s*<td[\s\S]*<\/tr>\s*<\/table>/, "</table>");
     expect(() => parseListPage(empty)).toThrow(LayoutChanged);
