@@ -29,6 +29,7 @@ export type ScenarioFull = {
   extraInstruction: string | null;
   letterPromptText: string | null;
   letterBodyTemplate: string | null;
+  letterIllustrationAssetId: string | null;
   lpTone: string | null;
   lpLength: string | null;
   lpAppeal: string | null;
@@ -55,6 +56,8 @@ export const LETTER_COPY_MAP: ReadonlyArray<readonly [keyof ScenarioFull, string
   ["extraInstruction", "extraInstruction"],
   ["letterPromptText", "promptText"],
   ["letterBodyTemplate", "bodyTemplate"],
+  // 手紙のイラスト(設計 2026-10-05 §7)。写真の ID をそのまま写す(削除済みは描画側が隠す)。
+  ["letterIllustrationAssetId", "illustrationAssetId"],
 ] as const;
 
 /** [台帳(DmScenario)の列, DmLpVariant の列]。 */
@@ -209,6 +212,7 @@ const SCENARIO_FULL_SELECT = {
   extraInstruction: true,
   letterPromptText: true,
   letterBodyTemplate: true,
+  letterIllustrationAssetId: true,
   lpTone: true,
   lpLength: true,
   lpAppeal: true,
