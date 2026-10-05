@@ -72,6 +72,17 @@ export const RESTORABLE_PROPERTY_FIELDS = UPDATABLE_PROPERTY_FIELDS.filter(
   (f) => (PROPERTY_TRACKED_FIELDS as readonly string[]).includes(f),
 ) as readonly string[];
 
+/**
+ * CSV の重複更新が区分の部屋を棟へつないだ分(2026-10-05)。取込は変更ログ(csv_import)に
+ * 前の値を残すので、他の項目と同じ規則で戻せる。⚠2つは**組で**扱う(片方だけ戻せないときは
+ * もう片方も戻さない=棟と物件名を食い違わせない)。
+ */
+export const RESTORABLE_BUILDING_LINK_FIELDS = ["buildingId", "buildingName"] as const;
+
+function isRestorableField(f: string): boolean {
+  return RESTORABLE_PROPERTY_FIELDS.includes(f) || (RESTORABLE_BUILDING_LINK_FIELDS as readonly string[]).includes(f);
+}
+
 type FieldType = "string" | "int" | "decimal";
 
 /** 復元対象 field の Prisma 型マップ（型変換に利用）。schema.prisma 準拠。 */
@@ -94,6 +105,8 @@ export const RESTORABLE_PROPERTY_FIELD_TYPES: Record<string, FieldType> = {
   managementFee: "int",
   repairReserveFee: "int",
   ownershipShareNote: "string",
+  buildingId: "string",
+  buildingName: "string",
 };
 
 export type FieldRestoreStatus =
@@ -209,7 +222,7 @@ export function classifyUpdateFieldsForRestore(
   for (const fieldName of byField.keys()) {
     const logs = byField.get(fieldName)!;
 
-    if (!RESTORABLE_PROPERTY_FIELDS.includes(fieldName)) {
+    if (!isRestorableField(fieldName)) {
       decisions.push({
         fieldName,
         status: "skip_not_restorable_field",
@@ -301,6 +314,20 @@ export function classifyUpdateFieldsForRestore(
         restoreValue: null,
         reason: "値の型変換に失敗したため復元できません",
       });
+    }
+  }
+
+  // 棟と物件名は組で戻す: 片方に記録があって戻せないなら、もう片方も同じ理由で戻さない。
+  const linkDecisions = decisions.filter((d) =>
+    (RESTORABLE_BUILDING_LINK_FIELDS as readonly string[]).includes(d.fieldName),
+  );
+  const blockedLink = linkDecisions.find((d) => d.status !== "restorable");
+  if (blockedLink) {
+    for (const d of linkDecisions) {
+      if (d.status !== "restorable") continue;
+      d.status = blockedLink.status;
+      d.restoreValue = null;
+      d.reason = blockedLink.reason;
     }
   }
 

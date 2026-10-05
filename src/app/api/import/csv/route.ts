@@ -36,6 +36,7 @@ import {
   type UpdatablePropertyField,
 } from "@/lib/import-dedupe";
 import { normalizeBuildingName } from "@/lib/property-building-name";
+import { RESTORABLE_BUILDING_LINK_FIELDS } from "@/lib/import-rollback";
 import {
   planDuplicateBuildingLink,
   resolveCsvBuilding,
@@ -662,16 +663,29 @@ export async function POST(request: NextRequest) {
             resolvedBuildingId = buildingLink.building?.id ?? null;
           }
           // 棟が変わった/物件名を棟の表記にそろえたことも「更新項目」に出す(id とフィールド名だけ)。
-          if ((updated.buildingId ?? null) !== (before.buildingId ?? null)) changedFields.push("buildingId");
-          if ((updated.buildingName ?? null) !== (before.buildingName ?? null)) changedFields.push("buildingName");
+          // ⚠前の値は変更ログ(csv_import)に残す。取込の取り消しはこれを見て棟と物件名を戻す
+          //   (import-rollback.ts の RESTORABLE_BUILDING_LINK_FIELDS)。前の値は tx の中で行を押さえた後に読んだもの。
+          const buildingNewValues: Record<string, unknown> = {};
+          if ((updated.buildingId ?? null) !== (before.buildingId ?? null)) {
+            changedFields.push("buildingId");
+            buildingNewValues.buildingId = updated.buildingId ?? null;
+          }
+          if ((updated.buildingName ?? null) !== (before.buildingName ?? null)) {
+            changedFields.push("buildingName");
+            buildingNewValues.buildingName = updated.buildingName ?? null;
+          }
 
           await recordChanges({
             targetTable: "properties",
             targetId: updated.id,
             changedBy: session.id,
-            oldValues: existing as unknown as Record<string, unknown>,
-            newValues: finalUpdateData,
-            trackedFields: PROPERTY_TRACKED_FIELDS,
+            oldValues: {
+              ...(existing as unknown as Record<string, unknown>),
+              buildingId: before.buildingId ?? null,
+              buildingName: before.buildingName ?? null,
+            },
+            newValues: { ...finalUpdateData, ...buildingNewValues },
+            trackedFields: [...PROPERTY_TRACKED_FIELDS, ...RESTORABLE_BUILDING_LINK_FIELDS],
             source: "csv_import",
           });
 

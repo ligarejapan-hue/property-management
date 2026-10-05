@@ -499,6 +499,29 @@ export async function POST(
         for (const d of plan.restorableFields) {
           restoreData[d.fieldName] = d.restoreValue;
         }
+        // CSV の重複更新がつないだ棟を前の棟へ戻すとき、前の棟がもう無ければ棟と物件名は戻さない
+        // (外部キーで tx 全体が落ちて、他の行の取り消しまで巻き添えにしないため。2026-10-05)。
+        if (typeof restoreData.buildingId === "string") {
+          const target = await tx.building.findUnique({
+            where: { id: restoreData.buildingId },
+            select: { id: true },
+          });
+          if (!target) {
+            delete restoreData.buildingId;
+            delete restoreData.buildingName;
+            plan.restorableFields = plan.restorableFields.filter(
+              (d) => d.fieldName !== "buildingId" && d.fieldName !== "buildingName",
+            );
+            if (plan.restorableFields.length === 0) {
+              blockedDetails.push({
+                rowNumber: plan.rowNumbers[0],
+                action: "restore",
+                reason: "前の棟が既に無いため棟と物件名を復元しません (restore_building_missing)",
+              });
+              continue;
+            }
+          }
+        }
         // 現在値（後続編集なしを classify で保証済みのため csv_import 前の値とは別の新規値）
         // を ChangeLog 用に取得する。restoreData を newValues、現在値を oldValues として
         // recordChanges に渡すと "復元前 → 復元後" の正しい diff になる。

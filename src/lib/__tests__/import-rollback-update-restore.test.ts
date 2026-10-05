@@ -20,6 +20,7 @@ import {
   classifyUpdateFieldsForRestore as _classifyImpl,
   RESTORABLE_PROPERTY_FIELDS,
   RESTORABLE_PROPERTY_FIELD_TYPES,
+  RESTORABLE_BUILDING_LINK_FIELDS,
   ROLLBACK_WINDOW_UPPER_TOLERANCE_MS,
   type JobWindow,
 } from "@/lib/import-rollback";
@@ -433,5 +434,34 @@ describe("classifyUpdateFieldsForRestore — allowedFields (P1 round 4)", () => 
     );
     expect(out[0].reason).toBeDefined();
     expect(out[0].reason!).not.toContain("極秘メモ");
+  });
+});
+
+// CSV の重複更新が区分の部屋を棟へつないだ分(buildingId/buildingName)も戻す(2026-10-05)。
+describe("classifyUpdateFieldsForRestore — 棟のつなぎ(buildingId/buildingName)", () => {
+  const LINK = new Set(["buildingId", "buildingName"]);
+  const at = T0 + 1000;
+  it("取込が書いた棟と物件名は、前の値(棟なし=null を含む)へ戻せる", () => {
+    expect(RESTORABLE_BUILDING_LINK_FIELDS).toEqual(["buildingId", "buildingName"]);
+    const out = _classifyImpl([csvLog("buildingId", null, at), csvLog("buildingName", "旧ビル", at)], WINDOW, LINK);
+    expect(out).toEqual([
+      { fieldName: "buildingId", status: "restorable", restoreValue: null },
+      { fieldName: "buildingName", status: "restorable", restoreValue: "旧ビル" },
+    ]);
+  });
+  it("片方だけ後から変わっていたら、もう片方も戻さない(棟と物件名を食い違わせない)", () => {
+    const out = _classifyImpl(
+      [csvLog("buildingId", "b0", at), csvLog("buildingName", "旧ビル", at), nonCsvLog("buildingName", "manual", at + 1000)],
+      WINDOW,
+      LINK,
+    );
+    expect(out.map((d) => [d.fieldName, d.status])).toEqual([
+      ["buildingId", "skip_subsequent_edit"],
+      ["buildingName", "skip_subsequent_edit"],
+    ]);
+  });
+  it("棟だけ変わった行(物件名は同じ)は棟だけ戻す", () => {
+    const out = _classifyImpl([csvLog("buildingId", "b0", at)], WINDOW, LINK);
+    expect(out).toEqual([{ fieldName: "buildingId", status: "restorable", restoreValue: "b0" }]);
   });
 });

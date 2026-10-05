@@ -97,6 +97,16 @@ function makeTx() {
         for (const b of buildings) b.propertyIds = b.propertyIds.filter((p) => p !== where.id);
         return {};
       }),
+      findUnique: vi.fn(async () => ({ buildingId: "linked-now", buildingName: "今の名前" })),
+      // 復元: buildingId を書き戻したら、棟の偽物の部屋のつながりも付け替える。
+      updateMany: vi.fn(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+        if ("buildingId" in data) {
+          for (const b of buildings) b.propertyIds = b.propertyIds.filter((p) => p !== where.id);
+          const to = buildings.find((b) => b.id === data.buildingId);
+          if (to) to.propertyIds.push(where.id);
+        }
+        return { count: 1 };
+      }),
     },
     $queryRaw: vi.fn(async (q: TemplateStringsArray, ...v: unknown[]) => {
       const sql = q.join("?");
@@ -107,6 +117,9 @@ function makeTx() {
       return [];
     }),
     building: {
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+        buildings.some((b) => b.id === where.id) ? { id: where.id } : null,
+      ),
       findMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) =>
         buildings
           .filter((b) => where.id.in.includes(b.id))
@@ -203,5 +216,68 @@ describe("取込の取り消しで、取込が作った空の棟を消す", () =
     expect(res.status).toBe(200);
     expect(tx.building.findMany).not.toHaveBeenCalled();
     expect(tx.building.deleteMany).not.toHaveBeenCalled();
+  });
+});
+
+// CSV の重複更新が既存の部屋を、取込で作った棟へつないだ場合: 取り消しは部屋の棟と物件名を
+// 前の値へ戻し(版番号を進める)、空になった棟を消す。
+describe("取込の取り消しで、重複更新がつないだ棟と物件名も戻す", () => {
+  const PU = "22222222-2222-4222-8222-0000000000aa";
+  const B_AUTO = "33333333-3333-4333-8333-0000000000aa";
+  const B_OLD = "33333333-3333-4333-8333-0000000000bb";
+  const LOG_AT = new Date("2026-01-01T00:01:00Z");
+  const log = (fieldName: string, oldValue: string | null, newValue: string | null) => ({
+    targetId: PU, fieldName, oldValue, newValue, source: "csv_import", changedAt: LOG_AT, changedBy: "u1",
+  });
+  const setup = (oldBuildingId: string | null, oldName: string | null) => {
+    pm.importJob.findUnique.mockResolvedValue({
+      ...JOB,
+      rows: [{
+        id: "row-u", rowNumber: 1, status: "success" as const, createdId: PU,
+        errorMessage: `更新[realEstateNumber一致]: 既存物件ID=${PU} (更新項目: buildingId, buildingName)`,
+      }],
+    });
+    pm.property.findMany.mockResolvedValue([{ id: PU, updatedAt: COMPLETED_AT, _count: noChildren }]);
+    pm.changeLog.findMany.mockResolvedValue([
+      log("buildingId", oldBuildingId, B_AUTO),
+      log("buildingName", oldName, "新ビル"),
+    ]);
+    pm.auditLog.findMany.mockResolvedValue([{ targetId: B_AUTO }]);
+    buildings = [{ id: B_AUTO, address: ADDRESS, propertyIds: [PU], photos: 0 }];
+    if (oldBuildingId) buildings.push({ id: oldBuildingId, address: ADDRESS, propertyIds: [], photos: 0 });
+  };
+
+  it("前の棟と物件名へ戻し(版番号を進める)、空になった取込の棟を消す", async () => {
+    setup(B_OLD, "旧ビル");
+    const res = await rollbackPOST(rollbackRequest({ dryRun: false }), { params: Promise.resolve({ jobId: JOB_ID }) });
+    expect(res.status).toBe(200);
+    const upd = tx.property.updateMany.mock.calls[0][0] as { data: Record<string, unknown> };
+    expect(upd.data).toEqual({ buildingId: B_OLD, buildingName: "旧ビル", version: { increment: 1 } });
+    expect(deletedBuildings).toEqual([B_AUTO]);
+    expect(buildings.find((b) => b.id === B_OLD)?.propertyIds).toEqual([PU]);
+    // 戻した後に数える
+    expect(tx.building.findMany.mock.invocationCallOrder[0]).toBeGreaterThan(tx.property.updateMany.mock.invocationCallOrder[0]);
+  });
+
+  it("前は棟が無かった部屋は棟なしへ戻り、取込の棟は消える", async () => {
+    setup(null, null);
+    await rollbackPOST(rollbackRequest({ dryRun: false }), { params: Promise.resolve({ jobId: JOB_ID }) });
+    const upd = tx.property.updateMany.mock.calls[0][0] as { data: Record<string, unknown> };
+    expect(upd.data).toEqual({ buildingId: null, buildingName: null, version: { increment: 1 } });
+    expect(deletedBuildings).toEqual([B_AUTO]);
+  });
+
+  it("前の棟がもう無いときは、棟と物件名を戻さず(外部キーで全体を落とさない)理由を出し、取込の棟は残す", async () => {
+    setup(B_OLD, "旧ビル");
+    buildings = buildings.filter((b) => b.id !== B_OLD);
+    const res = await rollbackPOST(rollbackRequest({ dryRun: false }), { params: Promise.resolve({ jobId: JOB_ID }) });
+    expect(res.status).toBe(200);
+    expect(tx.property.updateMany).not.toHaveBeenCalled();
+    const json = (await res.json()) as {
+      blockedDetails: { reason: string }[];
+      buildingCleanup: { keptBuildings: { buildingId: string; reason: string }[] };
+    };
+    expect(json.blockedDetails.map((b) => b.reason).join()).toContain("restore_building_missing");
+    expect(json.buildingCleanup.keptBuildings).toEqual([{ buildingId: B_AUTO, reason: "has_properties" }]);
   });
 });

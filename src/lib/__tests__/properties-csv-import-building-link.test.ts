@@ -79,6 +79,7 @@ vi.mock("@/lib/building-link/apply", () => ({
 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
+import { recordChanges } from "@/lib/change-log";
 import { POST } from "../../app/api/import/csv/route";
 import { areaKey, buildingNameKey } from "@/lib/building-identity";
 
@@ -236,6 +237,18 @@ describe("POST /api/import/csv — 重複更新の区分の棟", () => {
   const savedRow = () =>
     pm.importJobRow.create.mock.calls[0][0].data as { status: string; errorMessage: string | null; createdId: string | null };
 
+  /** 取り消しが棟と物件名を戻せるよう、前の値を変更ログ(csv_import)に残す。 */
+  const expectBuildingChangeLog = (
+    oldV: { buildingId: string | null; buildingName: string | null },
+    newV: { buildingId: string | null; buildingName: string | null },
+  ) => {
+    const arg = vi.mocked(recordChanges).mock.calls.at(-1)![0];
+    expect(arg.source).toBe("csv_import");
+    expect(arg.trackedFields).toEqual(expect.arrayContaining(["buildingId", "buildingName"]));
+    expect(arg.oldValues).toMatchObject(oldV);
+    expect(arg.newValues).toMatchObject(newV);
+  };
+
   beforeEach(() => {
     pm.property.updateMany.mockResolvedValue({ count: 1 });
   });
@@ -262,6 +275,7 @@ describe("POST /api/import/csv — 重複更新の区分の棟", () => {
     expect(writeBuildingLinkAuditMock).toHaveBeenCalledWith("user-1", "px", expect.objectContaining({ action: "created" }), { importJobId: "job-1" });
     expect(savedRow()).toMatchObject({ status: "success", createdId: "px" });
     expect(savedRow().errorMessage).toContain("buildingId");
+    expectBuildingChangeLog({ buildingId: null, buildingName: null }, { buildingId: "b1", buildingName: "新ビル" });
   });
 
   it("他の項目が変わらなくても、棟の無い部屋は版番号を進める更新を通してつなぐ", async () => {
@@ -278,6 +292,7 @@ describe("POST /api/import/csv — 重複更新の区分の棟", () => {
     expect(applyBuildingLinkMock).toHaveBeenCalledTimes(1);
     expect(savedRow()).toMatchObject({ status: "success", createdId: "px" });
     expect(savedRow().errorMessage).toContain("buildingId");
+    expectBuildingChangeLog({ buildingId: null, buildingName: null }, { buildingId: "b1", buildingName: "新ビル" });
   });
 
   it("つながった部屋で CSV の棟名が比べる形で同じなら、棟も版番号もそのまま", async () => {
