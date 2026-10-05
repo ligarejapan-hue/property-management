@@ -135,6 +135,15 @@ describe("POST /api/buildings — postalCode 受理（21-C PR-1）", () => {
   });
 });
 
+describe("POST /api/buildings — 比べる形と町丁目(Task 5)", () => {
+  it("create の data に nameKey・areaKey が入る", async () => {
+    await POST(postReq({ name: "パークハウス第二", address: "東京都港区芝1-2-3" }));
+    const data = pm.building.create.mock.calls[0][0].data;
+    expect(data.nameKey).toBe("パ-クハウス第2");
+    expect(typeof data.areaKey).toBe("string");
+  });
+});
+
 describe("PATCH /api/buildings/[id] — postalCode 受理（21-C PR-1）", () => {
   it("postalCode を prisma.building.update の data に渡す", async () => {
     const res = await PATCH(patchReq({ postalCode: "1050001", version: 1 }), {

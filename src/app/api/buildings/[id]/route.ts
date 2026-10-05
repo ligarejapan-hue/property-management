@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { buildingIdentityKeys } from "@/lib/building-link/apply";
 import { recordChanges, BUILDING_TRACKED_FIELDS } from "@/lib/change-log";
 
 const updateBuildingSchema = z.object({
@@ -126,6 +127,16 @@ export async function PATCH(
     const updateData: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(updateFields)) {
       if (val !== undefined) updateData[key] = val;
+    }
+    // 名前か住所が変わったら、比べる形と町丁目を入れ直す(設計 §7)。
+    if (updateData.name !== undefined || updateData.address !== undefined) {
+      Object.assign(
+        updateData,
+        buildingIdentityKeys(
+          String(updateData.name ?? existing.name),
+          String(updateData.address ?? existing.address),
+        ),
+      );
     }
     updateData.version = { increment: 1 };
 
