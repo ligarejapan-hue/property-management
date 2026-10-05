@@ -2842,6 +2842,7 @@ Task 8 と同じ手順。レビューの観点: 候補 API の認可(property:re
 - Test: `src/app/api/buildings/[id]/__tests__/route-sales-fields.test.ts`(既存・`$transaction` の mock を足す)
 
 **Interfaces:**
+- ⚠**段1の最終レビューで判明(2026-10-05)**: 物件の保存が `buildingId` を書くと、外部キーの確認で棟の行に `FOR KEY SHARE` が掛かる。棟の名前の反映が棟の行を `FOR UPDATE` で取ると、これとぶつかり、待ちの輪(物件の行を持つ保存 × 部屋の行を待つ反映)になりうる。**棟の行は `FOR NO KEY UPDATE` で取ること**(`lockBuildingRow` が `FOR UPDATE` なら、反映用に `FOR NO KEY UPDATE` の版を足す)。テストで SQL に `FOR NO KEY UPDATE` が入ることを確かめる。
 - Consumes: `lockBuildingRow(tx, id)`(`src/lib/edit-lock/row-locks.ts`)・`EDIT_LOCK_HEARTBEAT_GRACE_MS`・`EDIT_LOCK_IDLE_LIMIT_MS`(`src/lib/edit-lock/rules.ts`)・Task 3 の `buildingIdentityKeys`
 - Produces:
 
