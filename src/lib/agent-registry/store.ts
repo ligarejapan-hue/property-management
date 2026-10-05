@@ -49,7 +49,15 @@ export function createPrismaCrawlStore(now: () => Date = () => new Date()): Craw
       if (rows.length === 0) return 0;
       const existing = await prisma.mlitAgent.findMany({
         where: { licenseKey: { in: rows.map((r) => r.licenseKey) } },
-        select: { licenseKey: true, companyName: true, address: true, licenseLabel: true, seenCycle: true, detailAt: true },
+        select: {
+          licenseKey: true,
+          companyName: true,
+          address: true,
+          licenseLabel: true,
+          seenCycle: true,
+          detailAt: true,
+          listed: true,
+        },
       });
       const prev = new Map(existing.map((e) => [e.licenseKey, e]));
       const staleBefore = now().getTime() - DETAIL_MAX_AGE_MS;
@@ -58,6 +66,8 @@ export function createPrismaCrawlStore(now: () => Date = () => new Date()): Craw
           const p = prev.get(r.licenseKey);
           const changed =
             !p ||
+            // 一覧から消えていた会社がまた出てきた=いない間に電話などが変わっていてもおかしくない(@codex #477)。
+            !p.listed ||
             p.companyName !== r.companyName ||
             p.licenseLabel !== r.licenseLabel ||
             (r.isMain && p.address !== r.address);

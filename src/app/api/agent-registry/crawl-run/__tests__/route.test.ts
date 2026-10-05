@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const crawlStep = vi.fn();
-const createRegistryClient = vi.fn((_opts?: { allowRequest?: () => boolean }) => ({ fake: true }));
+const createRegistryClient = vi.fn<(opts?: { allowRequest?: () => boolean }) => { fake: boolean }>(() => ({ fake: true }));
 const loadStates = vi.fn();
 const count = vi.fn();
 

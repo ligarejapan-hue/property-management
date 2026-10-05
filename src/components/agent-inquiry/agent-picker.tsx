@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { agentLabel, hitsForQuery, newAgentAction, type SearchResult } from "@/lib/agent-inquiry/desk-form";
 import { useDeskAccess } from "./desk-access";
 import { agentQueryReady } from "@/lib/agent-inquiry/agent-query";
@@ -96,6 +96,11 @@ export function AgentPicker({
   const [res, setRes] = useState<(SearchResult<AgentHit> & { registry: RegistryHit[] }) | null>(null);
   const [adoptingId, setAdoptingId] = useState<string | null>(null);
   const [adoptError, setAdoptError] = useState<string | null>(null);
+  // 今の検索語(写す返事が届いたときに、押したときと同じかを確かめる)。
+  const queryRef = useRef(query);
+  useEffect(() => {
+    queryRef.current = query;
+  }, [query]);
   const searching = !selected && agentQueryReady(query);
   const { readDenied } = useDeskAccess();
   useEffect(() => {
@@ -127,10 +132,16 @@ export function AgentPicker({
     shown: shown ? { hits: [...shown.hits, ...registryShown], failed: shown.failed } : null,
   });
   const pickRegistry = (h: RegistryHit) => {
+    const asked = query;
     setAdoptingId(h.id);
     setAdoptError(null);
     adoptRegistryAgent(h.id)
-      .then((r) => onPick(r.agent))
+      .then((r) => {
+        // 写している間に検索語を打ち直していたら、古い返事で選ばない(別の業者に反響を付けない・@codex #477)。
+        // 名簿へは写っているので、もう一度探せば名簿の候補として出る。
+        if (queryRef.current !== asked) return;
+        onPick(r.agent);
+      })
       .catch((e) => {
         if (readDenied(e)) return;
         setAdoptError("名簿に入れられませんでした。もう一度探してから選んでください。");

@@ -38,6 +38,7 @@ const prevRow = (key: string, over: Record<string, unknown> = {}) => ({
   licenseLabel: `東京都知事(17)第${key.slice(2)}号`,
   seenCycle: "2026-10",
   detailAt: new Date("2026-10-01T00:00:00Z"),
+  listed: true,
   ...over,
 });
 
@@ -46,9 +47,9 @@ beforeEach(() => vi.clearAllMocks());
 describe("保存(prisma 版)", () => {
   it("新しい会社と、商号・所在地・免許の表示が変わった会社だけ詳細を取り直す印を付ける", async () => {
     agent.findMany.mockResolvedValue([
-      { licenseKey: "13000001", companyName: "会社13000001", address: "住所13000001", licenseLabel: "東京都知事(17)第000001号" },
-      { licenseKey: "13000002", companyName: "旧商号", address: "住所13000002", licenseLabel: "東京都知事(17)第000002号" },
-      { licenseKey: "13000003", companyName: "会社13000003", address: "住所13000003", licenseLabel: "東京都知事(16)第000003号" },
+      prevRow("13000001"),
+      prevRow("13000002", { companyName: "旧商号" }),
+      prevRow("13000003", { licenseLabel: "東京都知事(16)第000003号" }),
     ]);
     const store = createPrismaCrawlStore();
     const n = await store.upsertListRows(
@@ -92,6 +93,14 @@ describe("保存(prisma 版)", () => {
       prevRow("13000001", { detailAt: new Date("2025-09-01T00:00:00Z") }),
       prevRow("13000002", { detailAt: new Date("2026-09-01T00:00:00Z") }),
     ]);
+    const store = createPrismaCrawlStore(() => new Date("2026-10-05T14:00:00Z"));
+    await store.upsertListRows([row("13000001"), row("13000002")], "2026-10");
+    expect(upserts()["13000001"].update.needsDetail).toBe(true);
+    expect(upserts()["13000002"].update).not.toHaveProperty("needsDetail");
+  });
+
+  it("★一覧から消えていた会社がまた出てきたら、見た目が同じでも詳細を取り直す(@codex #477)", async () => {
+    agent.findMany.mockResolvedValue([prevRow("13000001", { listed: false }), prevRow("13000002", { listed: true })]);
     const store = createPrismaCrawlStore(() => new Date("2026-10-05T14:00:00Z"));
     await store.upsertListRows([row("13000001"), row("13000002")], "2026-10");
     expect(upserts()["13000001"].update.needsDetail).toBe(true);

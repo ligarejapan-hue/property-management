@@ -36,4 +36,10 @@ describe("国交省の一覧から来た候補", () => {
     const src = read("src/components/agent-inquiry/agent-picker.tsx");
     expect(src).toMatch(/adoptRegistryAgent\(h\.id\)[\s\S]*onPick\(r\.agent\)/);
   });
+
+  it("★写している間に検索語が変わったら、古い返事で選ばない(別の業者に反響を付けない・@codex #477)", () => {
+    const src = read("src/components/agent-inquiry/agent-picker.tsx");
+    expect(src).toMatch(/const asked = query;[\s\S]*adoptRegistryAgent\(h\.id\)[\s\S]*if \(queryRef\.current !== asked\) return;[\s\S]*onPick\(r\.agent\)/);
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*queryRef\.current = query;\s*\}, \[query\]\)/);
+  });
 });
