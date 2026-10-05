@@ -34,6 +34,7 @@ CREATE TABLE "mlit_crawl_state" (
     "next_page" INTEGER NOT NULL DEFAULT 1,
     "total_pages" INTEGER,
     "total_rows" INTEGER,
+    "last_key" TEXT,
     "fail_streak" INTEGER NOT NULL DEFAULT 0,
     "day_off_until" TIMESTAMP(3),
     "last_error" TEXT,

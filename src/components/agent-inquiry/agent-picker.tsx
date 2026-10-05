@@ -154,7 +154,11 @@ export function AgentPicker({
       <input
         data-guide="agent"
         value={query}
-        onChange={(e) => onQuery(e.target.value)}
+        onChange={(e) => {
+          // 打った瞬間に番号を進める(描画や effect を待たない=返事が描画の直前に届いても古い返事で選ばない・@codex #477)
+          queryGen.current += 1;
+          onQuery(e.target.value);
+        }}
         placeholder="例: 0312345 / 09012 / ○○不動産"
         aria-label="業者を探す"
         className="w-full rounded-md border border-gray-300 px-3 py-2 text-base dark:border-gray-700 dark:bg-gray-900"

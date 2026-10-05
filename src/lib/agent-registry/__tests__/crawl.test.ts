@@ -187,7 +187,8 @@ describe("進め方", () => {
     expect(r1.stopped).toBe("http_5xx");
     expect(log).toEqual(["list 00 1", "list 00 2", "list 13 1", "list 13 2"]);
     await crawlStep({ client, store, now: () => NIGHT, budget: BIG });
-    expect(log[4]).toBe("list 13 2");
+    // 再開はまず前のページ(1)で境目を照らし、合っていれば同じページ(2)から(2ページ目を飛ばさない)
+    expect(log.slice(4, 6)).toEqual(["list 13 1", "list 13 2"]);
   });
 
   it("★詳細の途中で予算切れ → 次の回は取り終えた会社を取り直さない", async () => {
@@ -360,7 +361,8 @@ describe("進め方", () => {
     const before = log.length;
     const r = await crawlStep({ client, store, now: () => nov, budget: BIG });
     expect(r.stopped).toBeNull();
-    expect(log.slice(before, before + 3)).toEqual(["list 13 3", "list 13 1", "list 13 2"]);
+    // 再開: まず前のページ(2)で境目を照らす → 件数が減っている → 1ページ目から
+    expect(log.slice(before, before + 3)).toEqual(["list 13 2", "list 13 1", "list 13 2"]);
     expect(getStates().every((s) => s.phase === "done")).toBe(true);
     expect(recs.get("13000003")!.listed).toBe(true); // ずれた会社は消さない(読み直さなければ消えていた)
     // 廃業した 13000001 は、この一巡の前半(1ページ目)で読んでいるので、消えるのは次の一巡の締め。
@@ -378,8 +380,51 @@ describe("進め方", () => {
     site["13"] = [[row("13000002"), row("13000003")], [row("13000004")]];
     const before = log.length;
     await crawlStep({ client, store, now: () => nov, budget: BIG });
-    expect(log.slice(before, before + 3)).toEqual(["list 13 2", "list 13 1", "list 13 2"]);
+    // 再開: まず前のページ(1)で境目を照らす → 最後の会社が違う → 1ページ目から
+    expect(log.slice(before, before + 3)).toEqual(["list 13 1", "list 13 1", "list 13 2"]);
     expect(recs.get("13000003")!.listed).toBe(true);
+  });
+
+  it("★件数が同じでも並びがずれていたら読み直す(再開時は前のページを読み直して境目を照らす・@codex #477)", async () => {
+    const site = smallSite();
+    site["13"] = [[row("13000001"), row("13000002")], [row("13000003"), row("13000004")]];
+    const { client, log } = fakeClient(site);
+    const { store, recs } = memoryStore();
+    await crawlStep({ client, store, now: () => NIGHT, budget: BIG }); // 10月の一巡を終える
+    const nov = new Date("2026-11-05T14:00:00Z");
+    await crawlStep({ client, store, now: () => nov, budget: { ...BIG, maxRequests: 3 } }); // 00 の2ページ+13 の1ページ目
+    // 13000001 が廃業し 13000009 が新規=件数は同じまま、13000003 が読み終えた1ページ目へずれた
+    site["13"] = [[row("13000002"), row("13000003")], [row("13000004"), row("13000009")]];
+    const before = log.length;
+    const r = await crawlStep({ client, store, now: () => nov, budget: BIG });
+    expect(r.stopped).toBeNull();
+    // 再開: まず前のページ(1)を読み直す → 境目の会社が違う → 1ページ目から
+    expect(log.slice(before, before + 3)).toEqual(["list 13 1", "list 13 1", "list 13 2"]);
+    expect(recs.get("13000003")!.listed).toBe(true);
+    expect(recs.has("13000009")).toBe(true);
+  });
+
+  it("再開時に境目が合っていれば、そのまま続きのページへ(読み直しは1ページだけ)", async () => {
+    const site = smallSite();
+    site["13"] = [[row("13000001"), row("13000002")], [row("13000003"), row("13000004")]];
+    const { client, log } = fakeClient(site);
+    const { store } = memoryStore();
+    await crawlStep({ client, store, now: () => NIGHT, budget: { ...BIG, maxRequests: 3 } });
+    const before = log.length;
+    await crawlStep({ client, store, now: () => NIGHT, budget: BIG });
+    expect(log.slice(before, before + 3)).toEqual(["list 13 1", "list 13 2", "list 14 1"]);
+  });
+
+  it("★同じ回の中でも、次のページの先頭が前のページの最後より進んでいなければ読み直す", async () => {
+    const site = smallSite();
+    site["13"] = [[row("13000001"), row("13000002")], [row("13000002"), row("13000003")]]; // 2ページ目の先頭が戻っている
+    const { client, log } = fakeClient(site);
+    const { store } = memoryStore();
+    await crawlStep({ client, store, now: () => NIGHT, budget: { ...BIG, maxRequests: 4 } });
+    expect(log).toEqual(["list 00 1", "list 00 2", "list 13 1", "list 13 2"]);
+    const after = await crawlStep({ client, store, now: () => NIGHT, budget: { ...BIG, maxRequests: 1 } });
+    expect(after.requests).toBe(1);
+    expect(log[4]).toBe("list 13 1"); // 1ページ目から読み直し(境目を照らす読み直しと兼ねる)
   });
 
   it("★行政庁の件数が0(メンテナンス画面など)→ 推測せず layout で止め、だれも「一覧に無い」にしない", async () => {

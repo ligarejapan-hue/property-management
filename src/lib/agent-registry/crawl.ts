@@ -23,6 +23,8 @@ export interface CrawlState {
   totalPages: number | null;
   /** この一巡で前に読んだときの件数。減っていたら1ページ目から読み直す(前のページへずれた会社を拾う)。 */
   totalRows: number | null;
+  /** 最後に読んだページの最後の会社の免許の鍵。次のページとの境目を照らす(ずれを見つける)。 */
+  lastKey: string | null;
   failStreak: number;
   dayOffUntil: Date | null;
   lastError: string | null;
@@ -91,6 +93,7 @@ function freshState(authority: string, cycle: string): CrawlState {
     nextPage: 1,
     totalPages: null,
     totalRows: null,
+    lastKey: null,
     failStreak: 0,
     dayOffUntil: null,
     lastError: null,
@@ -142,6 +145,16 @@ export async function crawlStep(deps: {
 
   const startRequests = client.requestCount;
   let succeeded = false;
+  /** この回ですでに一覧を読んだ行政庁(再開の境目の照らし直しは、行政庁ごとに1回だけ)。 */
+  const resumed = new Set<string>();
+
+  /** 1ページ目から読み直す(前のページへずれた会社を取りこぼさない)。 */
+  const rewind = (s: CrawlState, page: { pages: number; total: number }) => {
+    s.nextPage = 1;
+    s.totalPages = page.pages;
+    s.totalRows = page.total;
+    s.lastKey = null;
+  };
 
   const stopReason = (): StepResult["stopped"] => {
     const t = now();
@@ -160,23 +173,39 @@ export async function crawlStep(deps: {
           result.stopped = stop;
           break;
         }
-        const p = s.nextPage;
-        const page = p === 1 ? await client.searchFirst(s.authority) : await client.selectPage(s.authority, p);
+        let p = s.nextPage;
         // ⚠成功と数えるのは下の確かめが通ってから(おかしな一覧を成功と数えると、続けての失敗が3回に
         // 届かず、その晩じゅう先方を叩き続ける・@codex #477)。
+        // 前の会社が消えると後ろの会社が読み終えたページへずれる。そのまま進むと、ずれた会社をこの一巡で
+        // 見ないまま締めで「一覧に無い」にしてしまう。見つけ方は3つ(@codex #477):
+        //  (a) 件数が減った(ページ数が同じでも)、続きのページがもう無い → 1ページ目から
+        //  (b) 再開(前の回からの続き)のときは、まず前のページを読み直し、最後の会社が前に読んだときと
+        //      同じかを照らす。違えば(消えた会社と増えた会社で件数が同じでも)1ページ目から
+        //  (c) 次のページの先頭が前のページの最後より進んでいなければ1ページ目から
+        // 先方のデータの更新は月2回ほど=読み直しはまれ。
+        if (p > 1 && !resumed.has(s.authority) && s.lastKey) {
+          const prev = p - 1 === 1 ? await client.searchFirst(s.authority) : await client.selectPage(s.authority, p - 1);
+          if (prev.total === 0) throw new FetchError("layout");
+          const boundary = prev.rows[prev.rows.length - 1]?.licenseKey ?? null;
+          if (prev.page !== p - 1 || boundary !== s.lastKey || prev.total !== s.totalRows) {
+            succeeded = true;
+            rewind(s, prev);
+            await store.saveStates(states);
+            resumed.add(s.authority);
+            continue;
+          }
+        }
+        resumed.add(s.authority);
+        const page = p === 1 ? await client.searchFirst(s.authority) : await client.selectPage(s.authority, p);
         // 対象の5つの行政庁はどれも数千社以上ある。0件=メンテナンス画面など。そのまま進めると
         // 一巡の締めで全社を「一覧に無い」にしてしまうので、推測せず止める(計画 G3)。
         if (page.total === 0) throw new FetchError("layout");
-        // 前に読んだときより件数が減った(ページ数が同じでも)、または続きのページがもう無い
-        // (client が page=p・rows=[] で返す)。前の会社が消えると後ろの会社が読み終えたページへずれる
-        // ので、そのまま進むと締めでまだ免許のある会社を消してしまう。1ページ目から読み直す(@codex #477)。
-        // 先方のデータの更新は月2回ほど=読み直しはまれ。件数が増えたときはずれても読み直しにはならない(二度読むだけ)。
         const shrank = p > 1 && s.totalRows !== null && page.total < s.totalRows;
-        if (shrank || p > page.pages) {
+        const firstKey = page.rows[0]?.licenseKey ?? null;
+        const regressed = p > 1 && s.lastKey !== null && firstKey !== null && firstKey <= s.lastKey;
+        if (shrank || p > page.pages || regressed) {
           succeeded = true;
-          s.nextPage = 1;
-          s.totalPages = page.pages;
-          s.totalRows = page.total;
+          rewind(s, page);
           await store.saveStates(states);
           continue;
         }
@@ -186,8 +215,10 @@ export async function crawlStep(deps: {
         result.listed += await store.upsertListRows(page.rows, cycle);
         s.totalPages = page.pages;
         s.totalRows = page.total;
+        s.lastKey = page.rows[page.rows.length - 1]?.licenseKey ?? s.lastKey;
         if (p >= page.pages) s.phase = "detail";
         else s.nextPage = p + 1;
+        p = s.nextPage;
         await store.saveStates(states);
         continue;
       }

@@ -42,5 +42,7 @@ describe("国交省の一覧から来た候補", () => {
     // 打ち直して元の語に戻した場合も古い返事で選ばない=語の比較ではなく、変わるたびに増える番号で見る
     expect(src).toMatch(/const asked = queryGen\.current;[\s\S]*adoptRegistryAgent\(h\.id\)[\s\S]*if \(queryGen\.current !== asked\) return;[\s\S]*onPick\(r\.agent\)/);
     expect(src).toMatch(/useEffect\(\(\) => \{\s*queryGen\.current \+= 1;\s*\}, \[query\]\)/);
+    // 打った瞬間(描画や effect を待たず)に番号を進める=返事が描画の直前に届いても古い返事で選ばない
+    expect(src).toMatch(/onChange=\{\(e\) => \{[^}]*?queryGen\.current \+= 1;\s*onQuery\(e\.target\.value\);\s*\}\}/);
   });
 });
