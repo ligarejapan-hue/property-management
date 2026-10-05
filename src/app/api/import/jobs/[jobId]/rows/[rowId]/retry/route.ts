@@ -14,8 +14,10 @@ import { writeAuditLog } from "@/lib/audit";
 import { findDuplicateOwner } from "@/lib/owner-dedup";
 import { recalculateJobCounts } from "@/lib/import-job-counts";
 
+import { applyBuildingLink, writeBuildingLinkAudit } from "@/lib/building-link/apply";
 import {
   buildPropertyCreateData,
+  buildingChoiceFromRow,
   buildOwnerCreateData,
 } from "@/lib/import-row-field-map";
 
@@ -74,9 +76,26 @@ export async function POST(
 
       if (row.job.jobType === "property_csv") {
         const createData = buildPropertyCreateData(mergedData, session.id);
-        createdRecord = await prisma.property.create({
-          data: createData as Parameters<typeof prisma.property.create>[0]["data"],
+        // 物件を作るのと同じトランザクションで棟へつなぐ。要確認の画面で選んだ棟
+        // (`__resolved_building_id`)はここで existing として効かせる(以前は読まれず落ちていた)。
+        const { property, buildingLink } = await prisma.$transaction(async (tx) => {
+          const property = await tx.property.create({
+            data: createData as Parameters<typeof prisma.property.create>[0]["data"],
+          });
+          const buildingLink = await applyBuildingLink(tx, {
+            propertyId: property.id,
+            propertyType: property.propertyType,
+            buildingName: property.buildingName,
+            address: property.address,
+            buildingNumber: property.buildingNumber,
+            choice: buildingChoiceFromRow(mergedData),
+            currentBuildingId: null,
+            userId: session.id,
+          });
+          return { property, buildingLink };
         });
+        await writeBuildingLinkAudit(session.id, property.id, buildingLink);
+        createdRecord = property;
       } else if (row.job.jobType === "owner_csv") {
         const createData = buildOwnerCreateData(mergedData);
         const dup = await findDuplicateOwner({

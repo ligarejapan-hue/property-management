@@ -31,12 +31,14 @@ import {
   buildDedupeIndex,
   addToDedupeIndex,
   findPropertyDuplicate,
-  findBuildingByNormalizedName,
   isUpdateEligibleReason,
   UPDATABLE_PROPERTY_FIELDS,
   type UpdatablePropertyField,
 } from "@/lib/import-dedupe";
-import { normalizeBuildingName } from "@/lib/normalize";
+import { normalizeBuildingName } from "@/lib/property-building-name";
+import { resolveCsvBuilding, type CsvBuildingResolution } from "@/lib/building-link/csv-resolve";
+import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
+import { applyBuildingLink, writeBuildingLinkAudit } from "@/lib/building-link/apply";
 import {
   normalizePostalCode,
   isValidPostalCode,
@@ -90,157 +92,6 @@ const JAPANESE_FIELD_MAP: Record<string, string> = {
   "入居状況": "occupancyStatus",
   "持分備考": "ownershipShareNote",
 };
-
-/** When building is not found for a unit import, behaviour config. */
-const UNIT_BUILDING_NOT_FOUND =
-  (process.env.UNIT_IMPORT_BUILDING_NOT_FOUND as
-    | "needs_review"
-    | "auto_create"
-    | undefined) ?? "needs_review";
-
-// ---------------------------------------------------------------------------
-// Building name lookup cache (per-request)
-// ---------------------------------------------------------------------------
-
-type BuildingLookupCache = Map<string, string | null>;
-
-/**
- * Resolve buildingName to buildingId.
- * Strategy: exact match on name, then name + address prefix.
- * Caches results for the duration of a single import.
- */
-interface BuildingCandidate {
-  id: string;
-  name: string;
-  address: string;
-}
-
-interface BuildingResolution {
-  buildingId: string | null;
-  autoCreated: boolean;
-  error?: string;
-  candidates?: BuildingCandidate[];
-}
-
-async function resolveBuildingId(
-  buildingName: string,
-  address: string | undefined,
-  sessionUserId: string,
-  cache: BuildingLookupCache,
-): Promise<BuildingResolution> {
-  const cacheKey = `${buildingName}|||${address ?? ""}`;
-  if (cache.has(cacheKey)) {
-    const cached = cache.get(cacheKey)!;
-    return { buildingId: cached, autoCreated: false };
-  }
-
-  // 1. Try exact name match
-  let candidates = await prisma.building.findMany({
-    where: { name: buildingName },
-    select: { id: true, name: true, address: true },
-    take: 10,
-  });
-
-  // 1b. If raw exact miss, try normalized-name match (全角半角・空白・大小文字ゆれ吸収)
-  if (candidates.length === 0) {
-    const normTarget = normalizeBuildingName(buildingName);
-    if (normTarget) {
-      const pool = await prisma.building.findMany({
-        select: { id: true, name: true, address: true },
-        take: 2000,
-      });
-      const hit = findBuildingByNormalizedName(pool, buildingName);
-      if (hit) {
-        cache.set(cacheKey, hit.id);
-        return { buildingId: hit.id, autoCreated: false };
-      }
-      // Promote normalized-equal pool members as candidates so address narrowing can run next
-      candidates = pool.filter(
-        (b) => normalizeBuildingName(b.name) === normTarget,
-      );
-    }
-  }
-
-  if (candidates.length === 1) {
-    cache.set(cacheKey, candidates[0].id);
-    return { buildingId: candidates[0].id, autoCreated: false };
-  }
-
-  // 2. If multiple matches, narrow by address prefix
-  if (candidates.length > 1 && address) {
-    // Try progressively shorter prefixes: 10 → 8 → 6 chars
-    for (const prefixLen of [10, 8, 6]) {
-      if (address.length >= prefixLen) {
-        const prefix = address.slice(0, prefixLen);
-        const narrowed = candidates.filter((c) => c.address.startsWith(prefix));
-        if (narrowed.length === 1) {
-          cache.set(cacheKey, narrowed[0].id);
-          return { buildingId: narrowed[0].id, autoCreated: false };
-        }
-      }
-    }
-  }
-
-  // 3. If no exact match, try partial name match (contains)
-  if (candidates.length === 0) {
-    const partialCandidates = await prisma.building.findMany({
-      where: {
-        OR: [
-          { name: { contains: buildingName } },
-          { name: { startsWith: buildingName.slice(0, Math.max(3, Math.floor(buildingName.length * 0.7))) } },
-        ],
-      },
-      select: { id: true, name: true, address: true },
-      take: 5,
-    });
-
-    if (partialCandidates.length === 1) {
-      cache.set(cacheKey, partialCandidates[0].id);
-      return { buildingId: partialCandidates[0].id, autoCreated: false };
-    }
-
-    // Return partial matches as candidates for user selection
-    if (partialCandidates.length > 1) {
-      cache.set(cacheKey, null);
-      return {
-        buildingId: null,
-        autoCreated: false,
-        error: `棟名「${buildingName}」に類似する棟が${partialCandidates.length}件見つかりました。レビュー画面で選択してください`,
-        candidates: partialCandidates,
-      };
-    }
-  }
-
-  // 4. Not found: auto-create or needs_review depending on config
-  if (candidates.length === 0 && UNIT_BUILDING_NOT_FOUND === "auto_create" && address) {
-    const newBuilding = await prisma.building.create({
-      data: {
-        name: buildingName,
-        address: address,
-        createdBy: sessionUserId,
-      },
-    });
-    cache.set(cacheKey, newBuilding.id);
-    return { buildingId: newBuilding.id, autoCreated: true };
-  }
-
-  cache.set(cacheKey, null);
-
-  if (candidates.length > 1) {
-    return {
-      buildingId: null,
-      autoCreated: false,
-      error: `棟名「${buildingName}」に一致する棟が${candidates.length}件あり特定できません。レビュー画面で選択してください`,
-      candidates,
-    };
-  }
-
-  return {
-    buildingId: null,
-    autoCreated: false,
-    error: `棟名「${buildingName}」が見つかりません。棟を先に登録するか、レビュー画面で対応してください`,
-  };
-}
 
 /**
  * 解決済みの棟へ郵便番号（正規化済み・妥当 7 桁）を適用する。
@@ -418,7 +269,8 @@ export async function POST(request: NextRequest) {
     }> = [];
 
     // Building name lookup cache for unit imports
-    const buildingCache: BuildingLookupCache = new Map();
+    // ⚠「作る」の結果は覚えない(resolveCsvBuilding 側)=次の行は前の行が作った棟を見つける。
+    const buildingCache = new Map<string, CsvBuildingResolution>();
     // 棟郵便番号を適用済みの buildingId（1 取込あたり棟ごとに 1 回・first-wins）
     const buildingPostalApplied = new Set<string>();
 
@@ -584,42 +436,28 @@ export async function POST(request: NextRequest) {
           mapped.propertyType === "unit" ||
           !!mapped.buildingName;
         let resolvedBuildingId: string | null = null;
+        let buildingChoiceForRow: BuildingChoice | null = null;
 
         if (isUnit && mapped.buildingName) {
           // 新規取込は正式値 apartment_unit に統一（旧 unit は出力しない）
           mapped.propertyType = "apartment_unit";
 
-          const resolution = await resolveBuildingId(
-            mapped.buildingName.trim(),
-            mapped.address,
-            session.id,
-            buildingCache,
-          );
-
-          if (!resolution.buildingId) {
-            // Building not found → needs_review
-            // Include candidates in rawData for review UI
+          // 同じ町丁目・同じ比べる形の棟だけ自動でつなぐ。紛らわしい候補があれば要確認、
+          // 何も無ければ物件を作るトランザクションの中で棟を作る(設計 2026-10-04 §4.4)。
+          const resolution = await resolveCsvBuilding(prisma, mapped.buildingName.trim(), mapped.address, buildingCache);
+          if (resolution.kind === "review") {
             const enrichedRawRow = { ...rawRow };
-            if (resolution.candidates && resolution.candidates.length > 0) {
-              enrichedRawRow["__building_candidates"] = JSON.stringify(
-                resolution.candidates.map((c) => ({
-                  id: c.id,
-                  name: c.name,
-                  address: c.address,
-                })),
-              );
-            }
+            enrichedRawRow["__building_candidates"] = JSON.stringify(resolution.candidates);
             jobRows.push({
-              jobId: job.id,
-              rowNumber,
-              status: "needs_review",
-              rawData: enrichedRawRow,
-              errorMessage: resolution.error ?? "棟名が見つかりません。棟を先に登録してください",
-              createdId: null,
+              jobId: job.id, rowNumber, status: "needs_review", rawData: enrichedRawRow,
+              errorMessage: resolution.error, createdId: null,
             });
             continue;
           }
-          resolvedBuildingId = resolution.buildingId;
+          resolvedBuildingId = resolution.kind === "link" ? resolution.buildingId : null;
+          buildingChoiceForRow = resolution.kind === "link"
+            ? { kind: "existing", buildingId: resolution.buildingId }
+            : AUTO_CHOICE;
         }
 
         // 棟郵便番号は「行が物件 create/update として成功した時のみ」棟へ適用する
@@ -853,7 +691,12 @@ export async function POST(request: NextRequest) {
         if (mapped.introductionRoute) createData.introductionRoute = mapped.introductionRoute;
 
         // Unit-specific fields
-        if (resolvedBuildingId) createData.buildingId = resolvedBuildingId;
+        // 棟(buildingId)は下のトランザクションで applyBuildingLink が入れる。物件名は区分のときだけ。
+        const buildingNameForCreate = normalizeBuildingName(
+          createData.propertyType as string,
+          mapped.buildingName,
+        );
+        if (buildingNameForCreate) createData.buildingName = buildingNameForCreate;
         if (mapped.roomNo) createData.roomNo = mapped.roomNo.trim();
         if (mapped.floorNo) {
           const n = parseInt(mapped.floorNo);
@@ -882,16 +725,36 @@ export async function POST(request: NextRequest) {
         if (mapped.ownershipShareNote)
           createData.ownershipShareNote = mapped.ownershipShareNote;
 
-        const property = await prisma.property.create({
-          data: createData as Parameters<typeof prisma.property.create>[0]["data"],
+        const { property, buildingLink } = await prisma.$transaction(async (tx) => {
+          const property = await tx.property.create({
+            data: createData as Parameters<typeof prisma.property.create>[0]["data"],
+          });
+          const buildingLink = buildingChoiceForRow
+            ? await applyBuildingLink(tx, {
+                propertyId: property.id,
+                propertyType: property.propertyType,
+                buildingName: property.buildingName,
+                address: property.address,
+                buildingNumber: property.buildingNumber,
+                choice: buildingChoiceForRow,
+                currentBuildingId: null,
+                userId: session.id,
+              })
+            : null;
+          return { property, buildingLink };
         });
+        if (buildingLink) {
+          await writeBuildingLinkAudit(session.id, property.id, buildingLink);
+          resolvedBuildingId = buildingLink.building?.id ?? resolvedBuildingId;
+        }
 
         // Reflect newly-created row into dedupe index so later CSV rows catch it
         const newRecord = {
           id: property.id,
           address: property.address,
           roomNo: property.roomNo ?? null,
-          buildingId: property.buildingId ?? null,
+          // 作った直後の property には棟が入っていない(apply がトランザクション内で後から入れる)。
+          buildingId: resolvedBuildingId,
           realEstateNumber: property.realEstateNumber ?? null,
           externalLinkKey: property.externalLinkKey ?? null,
         };

@@ -557,9 +557,11 @@ describe("GET /api/import/jobs/[jobId] — 理由別 filter (Phase 2)", () => {
   );
 
   it("building_unresolved は csv route の実メッセージ全形式に一致し、無関係な理由を拾わない（Codex P2）", () => {
-    // csv/route.ts resolveBuildingId（:192/:217/:225）と fallback（:462）が
-    // 実際に生成する文言の fixture（棟名はダミー値・PII なし）。
+    // CSV 取込の棟の要確認の文言の fixture（棟名はダミー値・PII なし）。先頭=今の文言
+    // (building-link/csv-resolve.ts)。残り4つは置き換え前の resolveBuildingId の文言
+    // (既存の取込行に残っている)。
     const realBuildingMessages = [
+      "棟名「テスト棟」に似た棟が2件あります。同じ建物ならレビュー画面で選んでください",
       "棟名「テスト棟」が見つかりません。棟を先に登録するか、レビュー画面で対応してください",
       "棟名「テスト棟」に一致する棟が2件あり特定できません。レビュー画面で選択してください",
       "棟名「テスト棟」に類似する棟が3件見つかりました。レビュー画面で選択してください",

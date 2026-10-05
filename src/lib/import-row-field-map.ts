@@ -6,6 +6,7 @@
  */
 import { normalizeCaseStatusInput, normalizeIntroductionRouteInput } from "@/lib/property-types";
 import { phoneForStore } from "@/lib/phone-format-jp";
+import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
 
 /** Map Japanese CSV header names to property model field names. */
 export const JAPANESE_FIELD_MAP: Record<string, string> = {
@@ -31,6 +32,10 @@ export const JAPANESE_FIELD_MAP: Record<string, string> = {
   "経度": "gpsLng",
   "備考": "note",
   "リンクキー": "externalLinkKey",
+  // 区分マンションの物件名(CSV 取込 api/import/csv と同じ列名)。
+  "棟名": "buildingName",
+  "マンション名": "buildingName",
+  "物件名": "buildingName",
 };
 
 /** Map Japanese CSV header names to owner model field names. */
@@ -56,7 +61,7 @@ export function resolvePropertyField(key: string): string | undefined {
     "address", "lotNumber", "buildingNumber", "realEstateNumber",
     "propertyType", "registryStatus", "dmStatus", "caseStatus",
     "introductionRoute", "zoningDistrict", "rosenkaValue", "gpsLat", "gpsLng",
-    "note", "externalLinkKey",
+    "note", "externalLinkKey", "buildingName",
   ]);
   if (directFields.has(key)) return key;
   return JAPANESE_FIELD_MAP[key];
@@ -123,6 +128,12 @@ export function buildPropertyCreateData(
   if (normalizedRoute) createData.introductionRoute = normalizedRoute;
   if (mapped.lotNumber) createData.lotNumber = mapped.lotNumber;
   if (mapped.buildingNumber) createData.buildingNumber = mapped.buildingNumber;
+  // ⚠CSV 取込と同じ規則: 物件名がある行は区分マンションとして作る
+  //   (以前は物件名を読まず、要確認から確定すると物件名も棟も落ちていた)。
+  if (mapped.buildingName?.trim()) {
+    createData.propertyType = "apartment_unit";
+    createData.buildingName = mapped.buildingName.trim();
+  }
   if (mapped.realEstateNumber) createData.realEstateNumber = mapped.realEstateNumber;
   if (mapped.externalLinkKey) createData.externalLinkKey = mapped.externalLinkKey;
   if (mapped.zoningDistrict) createData.zoningDistrict = mapped.zoningDistrict;
@@ -132,6 +143,14 @@ export function buildPropertyCreateData(
   if (mapped.note) createData.note = mapped.note;
 
   return createData;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** 要確認の画面で選んだ棟(`__resolved_building_id`)を、確定時の棟の選び方にする。 */
+export function buildingChoiceFromRow(data: Record<string, string>): BuildingChoice {
+  const id = String(data["__resolved_building_id"] ?? "").trim();
+  return UUID_RE.test(id) ? { kind: "existing", buildingId: id.toLowerCase() } : AUTO_CHOICE;
 }
 
 /**

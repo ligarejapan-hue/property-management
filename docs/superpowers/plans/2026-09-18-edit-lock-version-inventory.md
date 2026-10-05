@@ -15,7 +15,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 
 | # | ファイル:行 | 書く項目(編集画面で変えられるもの) | 修正内容 | 追加した振る舞いテスト |
 |---|---|---|---|---|
-| 1 | `src/app/api/import/csv/route.ts:750` | `finalUpdateData`(UPDATABLE_PROPERTY_FIELDS: address/postalCode/lotNumber/buildingNumber/note/…) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/properties-csv-import-postal-code.test.ts`「13. update時にversionを進める」 |
+| 1 | `src/app/api/import/csv/route.ts:588` | `finalUpdateData`(UPDATABLE_PROPERTY_FIELDS: address/postalCode/lotNumber/buildingNumber/note/…) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/properties-csv-import-postal-code.test.ts`「13. update時にversionを進める」 |
 | 2 | `src/app/api/import/jobs/[jobId]/rollback/route.ts:525`(2026-09-21 main合流で行番号ずれ・旧:461→493→外部レビュー対応で502→2026-09-28 業者からの反響の除外で525) | `restoreData`(RESTORABLE_PROPERTY_FIELDS = UPDATABLE_PROPERTY_FIELDS ∩ PROPERTY_TRACKED_FIELDS) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/import-rollback-restore-version.test.ts`(新規) |
 | 3 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:344` | `propertyUpdates`(lotNumber/buildingNumber。roomNoは対象外だが同じ更新に同居) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/manual-link-archive-filter.test.ts`「物件の空欄補完は version を進める」 |
 | 4 | `src/app/api/import/reception-owner/route.ts:354` | `updates`(lotNumber/buildingNumber/roomNo。同上) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/reception-owner-archive-race.test.ts`「物件の空欄補完(lotNumber)は…」 |
@@ -40,7 +40,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/admin/owners/correction/mislink/route.ts:406` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/admin/owners/correction/mislink/route.ts:435` | `property.updatedAt` のみ | 同上。`updatedAt` は `updatePropertySchema` にも `property-edit-form.tsx` の FORM_FIELDS にも無い |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:262` | `owner.updatedAt` のみ | 同上(所有者行ロックtouch) |
-| `src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:180` | `owner.updatedAt` のみ | 同上 |
+| `src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:200` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/import/paste/commit/route.ts:407` | `owner.updatedAt` のみ | 同上(既存所有者へのリンク可否確認のための行ロックtouch) |
 | `src/app/api/import/reception-owner/route.ts:589` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/owners/[id]/memos/route.ts:241` | (コード本体ではない) | **正規表現の誤検出**。`owner.updateMany({ where: { id, isArchived: false } })` という文字列は、実際の呼び出しの使い方を説明する**コードコメント**であり、実行されるコードではない(実際の呼び出しは同ファイル252行目) |
@@ -74,7 +74,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/admin/owners/correction/mislink/route.ts:531` | `owner.version` のみ(target側) |
 | `src/app/api/admin/owners/correction/mislink/route.ts:545` | `property.version` のみ |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:302` | `owner` の住所ペア空欄補完 |
-| `src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:214` | `owner` の住所ペア空欄補完 |
+| `src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:234` | `owner` の住所ペア空欄補完 |
 | `src/app/api/import/reception-owner/route.ts:629` | `owner` の住所ペア空欄補完 |
 | `src/app/api/owners/[id]/corporate-apply/route.ts:368` | `owner` の法人番号適用フィールド(編集画面本体の保存窓口) |
 | `src/app/api/owners/[id]/corporate-cleanup/route.ts:248` | `owner.name`/`address`/`note`/`corporateNumber` |

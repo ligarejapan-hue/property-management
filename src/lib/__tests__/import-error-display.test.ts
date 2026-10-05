@@ -50,11 +50,13 @@ describe("classifyImportError", () => {
     expect(r.field).toBe("建物名");
   });
 
-  // csv/route.ts resolveBuildingId が実際に生成する 4 形式（すべて「棟名」始まり）。
-  //   - csv/route.ts:225 / :217 / :192 / :462（fallback）
+  // CSV 取込の棟の要確認の文言（すべて「棟名」始まり）。先頭=今の文言
+  //   (src/lib/building-link/csv-resolve.ts の decideCsvBuilding・2026-10-04)。
+  // 残り4つは置き換え前の resolveBuildingId の文言=既存の取込行に残っているので引き続き拾う。
   // 旧 predicate（startsWith("棟名が見つかりません") / includes("棟候補") 等）では
   // 「棟名「X」…」始まりの 3 形式が unknown に落ちていた（additive 修正で網羅）。
   it.each([
+    "棟名「○○マンション」に似た棟が2件あります。同じ建物ならレビュー画面で選んでください",
     "棟名「○○マンション」が見つかりません。棟を先に登録するか、レビュー画面で対応してください",
     "棟名「○○マンション」に一致する棟が2件あり特定できません。レビュー画面で選択してください",
     "棟名「○○マンション」に類似する棟が3件見つかりました。レビュー画面で選択してください",

@@ -44,7 +44,7 @@ const VERSIONED: Record<string, string> = {
     "owner(target) の version のみ進める(付け替え先のinvalidation)",
   "src/app/api/admin/owners/correction/mislink/route.ts:545":
     "property の version のみ進める(付け替えのinvalidation)",
-  "src/app/api/import/csv/route.ts:750":
+  "src/app/api/import/csv/route.ts:588":
     "property の UPDATABLE_PROPERTY_FIELDS(CSV重複更新)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
   "src/app/api/import/jobs/[jobId]/rollback/route.ts:525":
@@ -55,7 +55,7 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:344":
     "property.lotNumber/buildingNumber(空欄補完)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:215":
+  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:234":
     "owner の住所ペア空欄補完(fieldPatch)+version increment",
   "src/app/api/import/reception-owner/route.ts:354":
     "property.lotNumber/buildingNumber/roomNo(空欄補完)+version increment" +
@@ -153,7 +153,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },
-  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:181": {
+  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:200": {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },
