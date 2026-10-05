@@ -76,9 +76,30 @@ export function buildingNameKey(name: string | null | undefined): string | null 
 
 const CHOME = new RegExp(`^(.*?)(\\d+|[〇一二三四五六七八九十]+)丁目`);
 
+const PREFECTURE = new RegExp(
+  "^(北海道|東京都|京都府|大阪府|" +
+    "(青森|岩手|宮城|秋田|山形|福島|茨城|栃木|群馬|埼玉|千葉|神奈川|新潟|富山|石川|福井|山梨|長野|岐阜|" +
+    "静岡|愛知|三重|滋賀|兵庫|奈良|和歌山|鳥取|島根|岡山|広島|山口|徳島|香川|愛媛|高知|福岡|佐賀|長崎|" +
+    "熊本|大分|宮崎|鹿児島|沖縄)県)",
+);
+
+/**
+ * 町丁目の key が本当の市区町村から始まっているか。
+ * ⚠「市区町村郡の字がどこかにある」では足りない(「村上1丁目」「上村町」は町名の中の字)。
+ * - 都道府県で始まる → 残りの2文字目以降に市・区・町・村・郡がある(「東京都大島町」も可)
+ * - 都道府県なし → 2文字目以降に「…市」「…区」がある、または「…郡…町/村」
+ * 都道府県も市区も無く町名の頭に「市」が来るだけの住所(「市谷本村町」)は null 側に倒す
+ * (=町丁目不明として新しい棟を作る=取り違えより安全)。
+ */
+function hasMunicipality(key: string): boolean {
+  const pref = key.match(PREFECTURE);
+  if (pref) return /^.+?[市区町村郡]/.test(key.slice(pref[0].length));
+  return /^.+?[市区]/.test(key) || /^.+?郡.+?[町村]/.test(key);
+}
+
 /**
  * 住所から町丁目を取り出す(D2)。丁目が無ければ最初の算用数字(番地)の手前まで。
- * 市区町村(市・区・町・村・郡)を含まないものは短すぎるので null。
+ * 本当の市区町村から始まらないもの(hasMunicipality)は短すぎるので null。
  */
 export function areaKey(address: string | null | undefined): string | null {
   if (address == null) return null;
@@ -94,7 +115,7 @@ export function areaKey(address: string | null | undefined): string | null {
     const d = s.search(/\d/);
     key = d === -1 ? s : s.slice(0, d);
   }
-  if (!/[市区町村郡]/.test(key)) return null;
+  if (!hasMunicipality(key)) return null;
   return key;
 }
 
