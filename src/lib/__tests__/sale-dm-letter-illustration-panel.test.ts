@@ -49,3 +49,15 @@ describe("最終レビュー: 保存の失敗が選択の窓の裏に隠れな�
     expect(close).toBeLessThan(call);
   });
 });
+
+describe("@codex R1: 写真の一覧を読めなかったら選択の窓を開かない", () => {
+  it("走査: loadAssets が成否を返し、成功したときだけ setOpen(true)", () => {
+    const src = code("src/components/sale-dm/letter-illustration-panel.tsx");
+    const open = src.slice(src.indexOf("const openLibrary = async"), src.indexOf("const save = async"));
+    expect(open).toMatch(/if \(!\(await loadAssets\(\)\)\) return;/);
+    expect(open.indexOf("if (!(await loadAssets())) return;")).toBeLessThan(open.indexOf("setOpen(true)"));
+    const load = src.slice(src.indexOf("const loadAssets = async"), src.indexOf("const openLibrary = async"));
+    expect(load).toMatch(/return true;/);
+    expect(load).toMatch(/return false;/);
+  });
+});

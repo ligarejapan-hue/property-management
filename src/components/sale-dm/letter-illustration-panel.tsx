@@ -20,16 +20,21 @@ export default function LetterIllustrationPanel({ scenarioId, illustration, onCh
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadAssets = async () => {
+  // 成否を返す。⚠失敗したまま選択の窓を開くと、空の一覧が「写真が無い」と見え、赤字も窓の裏に隠れる。
+  const loadAssets = async (): Promise<boolean> => {
     try {
       setAssets((await fetchSaleDmLpAssets()).assets);
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "写真の一覧を読み込めませんでした");
+      // 窓を開いたまま(写真を追加した後の読み直し)なら閉じて、赤字を見えるようにする。
+      setOpen(false);
+      return false;
     }
   };
   const openLibrary = async () => {
     setError(null);
-    await loadAssets();
+    if (!(await loadAssets())) return;
     setOpen(true);
   };
   const save = async (assetId: string | null) => {
