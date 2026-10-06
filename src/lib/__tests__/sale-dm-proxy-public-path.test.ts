@@ -30,6 +30,8 @@ describe("proxy public paths(/t/ 追跡リンク)", () => {
   it("/lp-assets/<publicId> は公開(LP の写真は未認証の所有者が見る)", () => {
     expect(isPublicPath("/lp-assets/abcdef")).toBe(true);
     expect(isPublicPath("/lp-assets/")).toBe(true);
+    // 公開LPの会社ロゴ・挿絵(public/lp-assets/brand/ の静的ファイル)
+    expect(isPublicPath("/lp-assets/brand/logo.png")).toBe(true);
   });
   it("/lp-assets/ に前方一致しない近接パスは公開しない", () => {
     expect(isPublicPath("/lp-assets")).toBe(false);
