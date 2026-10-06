@@ -37,6 +37,7 @@ import {
 import type { PasteDraft } from "@/lib/paste-import/types";
 import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
 import { stashBuildingLinkNotice } from "@/lib/building-link/notice";
+import { areaChanged } from "@/lib/building-link/combobox-model";
 // ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む。
 import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
 
@@ -171,7 +172,12 @@ export default function PasteImportPage() {
     setPropertyValues((prev) => (prev ? { ...prev, [key]: value } : prev));
     // 棟の選び方は種別ごとの話なので、種別を変えたら自動に戻す(新規登録と同じ)。
     if (key === "propertyType") setBuildingChoice(AUTO_CHOICE);
-  }, []);
+    // ⚠住所の町丁目が変わったら、選んだ棟(前の丁目での判断)を外して auto に戻す(@codex R4)。
+    //   番地だけの直しでは保つ。
+    if (key === "address" && propertyValues && areaChanged(propertyValues.address, value)) {
+      setBuildingChoice(AUTO_CHOICE);
+    }
+  }, [propertyValues]);
 
   const handleOwnerFieldChange = useCallback((key: OwnerFieldKey, value: string) => {
     setOwnerValues((prev) => (prev ? { ...prev, [key]: value } : prev));

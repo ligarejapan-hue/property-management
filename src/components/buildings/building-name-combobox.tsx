@@ -10,6 +10,7 @@ import {
   isLatestRequest,
   nextActiveIndex,
   pickAtIndex,
+  selectedInArea,
   shouldHandleListKey,
   shouldFetchSuggestions,
   shouldOpenOnArrow,
@@ -131,7 +132,8 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
   const suggestions = state === "ready" && result ? result.data : [];
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
-  const [selected, setSelected] = useState<BuildingSuggestion | null>(null);
+  // 選んだ棟は「どの丁目で選んだか」と一緒に持つ。丁目が変わったら要約に使わない(@codex R4)。
+  const [selected, setSelected] = useState<{ suggestion: BuildingSuggestion; area: string } | null>(null);
   const seqRef = useRef(0);
 
   useEffect(() => {
@@ -171,7 +173,7 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
       setSelected(null);
       onChoiceChange({ kind: "new" });
     } else {
-      setSelected(s);
+      setSelected({ suggestion: s, area });
       onChange(s.name);
       onChoiceChange({ kind: "existing", buildingId: s.id });
     }
@@ -181,7 +183,7 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
 
   const optionCount = suggestions.length + 1;
   const listId = `${id}-suggestions`;
-  const summary = choiceSummary(choice, selected);
+  const summary = choiceSummary(choice, selectedInArea(selected, area));
 
   return (
     <div className="relative">

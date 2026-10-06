@@ -17,6 +17,21 @@ export function suggestQueryString(name: string, address: string): string {
 export function suggestArea(address: string): string {
   return areaKey(address) ?? "";
 }
+/**
+ * 住所の町丁目が変わったか(@codex R4)。変わったら、選んだ棟(既存の棟/新しい棟)は
+ * 前の丁目での判断なので auto に戻す。番地だけの直しでは保つ。
+ * ⚠呼ぶのは住所の入力の**イベントの中**(描画中・effect の中で親の setter を呼ばない)。
+ */
+export function areaChanged(prevAddress: string, nextAddress: string): boolean {
+  return suggestArea(prevAddress) !== suggestArea(nextAddress);
+}
+/** 選んだ棟は、選んだときの丁目と今の丁目が同じときだけ使う(古い要約を出さない)。 */
+export function selectedInArea(
+  selected: { suggestion: BuildingSuggestion; area: string } | null,
+  area: string,
+): BuildingSuggestion | null {
+  return selected && selected.area === area ? selected.suggestion : null;
+}
 /** 丸め済みの町丁目で問い合わせの検索部分を作る。 */
 export function suggestQueryStringForArea(name: string, area: string): string {
   return new URLSearchParams({ name, area }).toString();

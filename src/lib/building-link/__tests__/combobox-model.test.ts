@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shouldFetchSuggestions, isLatestRequest, nextActiveIndex, suggestionBadges, choiceSummary, pickAtIndex, shouldHandleListKey, suggestQueryString, shouldOpenOnArrow, suggestArea, resultMatches, listState, canUseListKeys } from "@/lib/building-link/combobox-model";
+import { shouldFetchSuggestions, isLatestRequest, nextActiveIndex, suggestionBadges, choiceSummary, pickAtIndex, shouldHandleListKey, suggestQueryString, shouldOpenOnArrow, suggestArea, resultMatches, listState, canUseListKeys, areaChanged, selectedInArea } from "@/lib/building-link/combobox-model";
 
 const s = { id: "b1", name: "パーク第一", area: "東京都大田区南雪谷1丁目", unitCount: 3, sameName: true, sameArea: true };
 
@@ -108,5 +108,28 @@ describe("listState(読み込みが終わるまで「新しい棟」を選ばせ
     expect(canUseListKeys("ready")).toBe(true);
     expect(canUseListKeys("loading")).toBe(false);
     expect(canUseListKeys("error")).toBe(false);
+  });
+});
+
+describe("areaChanged(住所の町丁目が変わったか・@codex R4)", () => {
+  it("★町丁目が変わったら true(選んだ棟を外す)", () => {
+    expect(areaChanged("東京都港区六本木1丁目1-2", "東京都港区赤坂2丁目3-4")).toBe(true);
+    expect(areaChanged("", "東京都港区六本木1丁目1-2")).toBe(true);
+    expect(areaChanged("東京都港区六本木1丁目1-2", "")).toBe(true);
+  });
+  it("番地だけの直しは false(選んだ棟を保つ)", () => {
+    expect(areaChanged("東京都港区六本木1丁目1-2", "東京都港区六本木1丁目1-3")).toBe(false);
+    expect(areaChanged("", "")).toBe(false);
+  });
+});
+
+describe("selectedInArea(選んだ丁目と今の丁目が同じときだけ選んだ棟を使う)", () => {
+  const s = { id: "b1", name: "パーク第一", area: "東京都港区六本木1丁目", unitCount: 3, sameName: true, sameArea: true };
+  it("同じ丁目なら選んだ棟", () => {
+    expect(selectedInArea({ suggestion: s, area: "東京都港区六本木1丁目" }, "東京都港区六本木1丁目")).toBe(s);
+  });
+  it("★丁目が変わったら null(古い要約を出さない)", () => {
+    expect(selectedInArea({ suggestion: s, area: "東京都港区六本木1丁目" }, "東京都港区赤坂2丁目")).toBeNull();
+    expect(selectedInArea(null, "東京都港区六本木1丁目")).toBeNull();
   });
 });

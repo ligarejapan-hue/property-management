@@ -1109,6 +1109,11 @@ describe("貼り付け画面: 棟の選び方を送り、知らせを預ける(�
   it("★登録できたら遷移の前に知らせを預ける", () => {
     expect(page).toMatch(/stashBuildingLinkNotice\(result\.propertyId, result\.buildingLink\);\n\s*router\.push/);
   });
+  it("★住所の町丁目が変わったら選んだ棟を外す(@codex R4)", () => {
+    expect(page).toMatch(
+      /if \(key === "address" && propertyValues && areaChanged\(propertyValues\.address, value\)\) \{\s*setBuildingChoice\(AUTO_CHOICE\);/,
+    );
+  });
   it("確認画面へ選び方の受け口を渡す", () => {
     expect(page).toMatch(/onBuildingChoiceChange=\{setBuildingChoice\}/);
   });

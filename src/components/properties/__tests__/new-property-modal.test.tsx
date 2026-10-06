@@ -78,3 +78,16 @@ describe("区分マンションの物件名から棟へつなぐ(棟の自動づ
     );
   });
 });
+
+describe("住所の町丁目が変わったら選んだ棟を外す(@codex R4・走査)", () => {
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../new-property-modal.tsx"),
+    "utf8",
+  ).replace(/\r\n/g, "\n");
+  it("★住所の入力と住所補完の両方が handleAddressChange を通る", () => {
+    expect(src).toMatch(/if \(areaChanged\(address, next\)\) setBuildingChoice\(AUTO_CHOICE\);/);
+    expect(src).toMatch(/handleAddressChange\(e\.target\.value\)/);
+    expect(src).toMatch(/onAddressChange=\{handleAddressChange\}/);
+    expect(src).not.toMatch(/onAddressChange=\{setAddress\}/);
+  });
+});

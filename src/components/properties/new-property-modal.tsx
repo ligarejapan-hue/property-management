@@ -14,6 +14,7 @@ import { createProperty } from "@/lib/api-client";
 import BuildingNameCombobox from "@/components/buildings/building-name-combobox";
 import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
 import { stashBuildingLinkNotice } from "@/lib/building-link/notice";
+import { areaChanged } from "@/lib/building-link/combobox-model";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
 interface Props {
@@ -50,6 +51,14 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 住所の変更(直接入力・住所補完の両方)。⚠町丁目が変わったら選んだ棟を外して auto に
+  // 戻す(@codex R4。前の丁目で選んだ棟へつないだり、新しい丁目に同じ名前の棟があるのに
+  // 新しく作ったりしない)。番地だけの直しでは保つ。
+  const handleAddressChange = (next: string) => {
+    if (areaChanged(address, next)) setBuildingChoice(AUTO_CHOICE);
+    setAddress(next);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -225,7 +234,7 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
               onChange={(e) => {
                 // ユーザーの直接編集＝user-edit signal（住所検索のトリガー）。
                 setAddressEdited(true);
-                setAddress(e.target.value);
+                handleAddressChange(e.target.value);
               }}
               disabled={submitting}
               placeholder="例: 東京都千代田区丸の内1-1-1"
@@ -238,7 +247,7 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
                 zip={postalCode}
                 address={address}
                 onZipChange={setPostalCode}
-                onAddressChange={setAddress}
+                onAddressChange={handleAddressChange}
                 addressEdited={addressEdited}
                 disabled={submitting}
                 mode="both"

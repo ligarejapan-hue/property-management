@@ -12,6 +12,7 @@ import { AddressLookupControls } from "@/components/address/address-lookup-contr
 import BuildingNameCombobox from "@/components/buildings/building-name-combobox";
 import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
 import { relinkConfirmMessage } from "@/lib/building-link/relink";
+import { areaChanged } from "@/lib/building-link/combobox-model";
 // ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む(画面の束に prisma を入れない)。
 import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
@@ -519,6 +520,11 @@ export default function PropertyEditForm({
     });
     // 棟の選び方は種別ごとの話なので、種別を変えたら自動に戻す(新規登録と同じ)。
     if (key === "propertyType") setBuildingChoice(AUTO_CHOICE);
+    // ⚠住所の町丁目が変わったら、選んだ棟(前の丁目での判断)を外して auto に戻す(@codex R4)。
+    //   直接入力も住所補完もここを通る。番地だけの直しでは保つ。
+    if (key === "address" && areaChanged(values.address ?? property.address, value)) {
+      setBuildingChoice(AUTO_CHOICE);
+    }
   };
 
   const handleSave = async () => {

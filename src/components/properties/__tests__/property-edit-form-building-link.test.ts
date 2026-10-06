@@ -50,6 +50,15 @@ describe("編集の画面(property-edit-form)", () => {
   });
 });
 
+describe("編集の画面: 住所の町丁目が変わったら選んだ棟を外す(@codex R4)", () => {
+  it("★住所の変更(直接入力・住所補完とも handleChange を通る)で町丁目が変われば auto に戻す", () => {
+    expect(form).toMatch(
+      /if \(key === "address" && areaChanged\(values\.address \?\? property\.address, value\)\) \{\s*setBuildingChoice\(AUTO_CHOICE\);/,
+    );
+    expect(form).toMatch(/onAddressChange=\{\(a\) => handleChange\("address", a\)\}/);
+  });
+});
+
 describe("物件詳細(properties/[id]/page.tsx)", () => {
   it("★預かった知らせは読み込みの非同期の続きで取り出す(effect 本体・useState 初期化では取らない)", () => {
     const fetchAt = page.indexOf("const fetchProperty = useCallback(async () => {");
