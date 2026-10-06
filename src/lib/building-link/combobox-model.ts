@@ -25,3 +25,13 @@ export function choiceSummary(choice: BuildingChoice, selected: BuildingSuggesti
   }
   return null;
 }
+
+/** 強調中の行から選ぶ候補。範囲外(一覧が縮んだ等)は null=何も選ばない。一番下は「新しい棟」。 */
+export function pickAtIndex(index: number, suggestions: BuildingSuggestion[]): BuildingSuggestion | "new" | null {
+  if (!Number.isInteger(index) || index < 0 || index > suggestions.length) return null;
+  return index === suggestions.length ? "new" : suggestions[index];
+}
+/** 日本語変換中のキー(Enter は変換の確定)は候補の操作として扱わない。 */
+export function shouldHandleListKey(isComposing: boolean): boolean {
+  return !isComposing;
+}

@@ -7,6 +7,8 @@ import {
   choiceSummary,
   isLatestRequest,
   nextActiveIndex,
+  pickAtIndex,
+  shouldHandleListKey,
   shouldFetchSuggestions,
   suggestionBadges,
 } from "@/lib/building-link/combobox-model";
@@ -45,6 +47,7 @@ export function BuildingSuggestionList({
       {suggestions.map((s, i) => (
         <li
           key={s.id}
+          id={`${listId}-opt-${i}`}
           role="option"
           aria-selected={i === activeIndex}
           onMouseDown={(e) => {
@@ -76,6 +79,7 @@ export function BuildingSuggestionList({
         </li>
       ))}
       <li
+        id={`${listId}-opt-${suggestions.length}`}
         role="option"
         aria-selected={activeIndex === suggestions.length}
         onMouseDown={(e) => {
@@ -113,8 +117,12 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
         const qs = new URLSearchParams({ name: value, address });
         const res = await fetch(`/api/buildings/suggest?${qs.toString()}`);
         if (!res.ok || !isLatestRequest(seq, seqRef.current)) return;
-        const body = (await res.json()) as { data: BuildingSuggestion[] };
-        if (isLatestRequest(seq, seqRef.current)) setResult({ query: value, data: body.data });
+        const body = (await res.json()) as { data?: unknown };
+        if (!Array.isArray(body.data)) return;
+        if (isLatestRequest(seq, seqRef.current)) {
+          setResult({ query: value, data: body.data as BuildingSuggestion[] });
+          setActiveIndex(-1);
+        }
       } catch {
         // 候補が出なくても入力と保存は止めない(保存時に自動で判断する)。
       }
@@ -149,6 +157,7 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"
+        aria-activedescendant={open && activeIndex >= 0 ? `${listId}-opt-${activeIndex}` : undefined}
         value={value}
         disabled={disabled}
         placeholder={placeholder}
@@ -158,18 +167,22 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
           // 打ち直したら選択を外して自動の判断に戻す(§6.1)。
           if (choice.kind !== "auto") onChoiceChange({ kind: "auto" });
           setSelected(null);
+          setActiveIndex(-1);
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
         onKeyDown={(e) => {
           if (!open || !shouldFetchSuggestions(value)) return;
+          if (!shouldHandleListKey(e.nativeEvent.isComposing)) return;
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {
             e.preventDefault();
             setActiveIndex((cur) => nextActiveIndex(cur, e.key as "ArrowDown" | "ArrowUp", optionCount));
-          } else if (e.key === "Enter" && activeIndex >= 0) {
+          } else if (e.key === "Enter") {
+            const target = pickAtIndex(activeIndex, suggestions);
+            if (target === null) return;
             e.preventDefault();
-            pick(activeIndex === suggestions.length ? "new" : suggestions[activeIndex]);
+            pick(target);
           } else if (e.key === "Escape") {
             setOpen(false);
           }

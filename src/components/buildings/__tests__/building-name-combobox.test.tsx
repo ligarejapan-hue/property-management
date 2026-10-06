@@ -31,4 +31,9 @@ describe("BuildingSuggestionList", () => {
     expect(empty).toContain("新しい棟として登録する");
     expect(empty).toContain('aria-selected="true"');
   });
+  it("各行に id がある(aria-activedescendant 用)", () => {
+    expect(html).toContain('id="x-suggestions-opt-0"');
+    expect(html).toContain('id="x-suggestions-opt-1"');
+    expect(html).toContain('id="x-suggestions-opt-2"');
+  });
 });
