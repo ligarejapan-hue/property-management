@@ -4,10 +4,24 @@
  * ⚠この2つの route は元は**完全なコピペ重複**だった。列が増えるたびに片方だけ直す
  *   事故（片方の画面からだけ値が入らない）を防ぐため、正本をここ1か所にする。
  */
-import { normalizeCaseStatusInput, normalizeIntroductionRouteInput } from "@/lib/property-types";
+import {
+  normalizeCaseStatusInput,
+  normalizeIntroductionRouteInput,
+  PROPERTY_TYPE_JP_TO_VALUE,
+  PROPERTY_TYPE_VALUES,
+} from "@/lib/property-types";
 import { phoneForStore } from "@/lib/phone-format-jp";
 import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
 import { normalizeBuildingName } from "@/lib/property-building-name";
+import { PROPERTY_CSV_COLUMN_MAP } from "@/lib/csv-parser";
+import { isValidPostalCode, normalizePostalCode } from "@/lib/address-lookup/normalize";
+
+// CSV 取込(api/import/csv)と同じ決まった値。外れた値は落とす(CSV 取込と同じ)。
+const VALID_REGISTRY_STATUS = ["unconfirmed", "scheduled", "obtained"];
+const VALID_DM_STATUS = ["send", "hold", "no_send"];
+const VALID_OCCUPANCY_STATUS = ["vacant", "occupied", "unknown"];
+// 棟郵便番号は棟の欄。確定は物件を作るだけなので読まない。
+const NOT_PROPERTY_FIELDS = new Set(["buildingPostalCode"]);
 
 /** Map Japanese CSV header names to property model field names. */
 export const JAPANESE_FIELD_MAP: Record<string, string> = {
@@ -57,15 +71,22 @@ export const JAPANESE_OWNER_FIELD_MAP: Record<string, string> = {
 /**
  * Resolve a rawData key to a property model field name.
  * Tries direct match first (already an English field name), then Japanese lookup.
+ *
+ * ⚠rawData は CSV の見出しのまま保存されている。CSV 取込が読む見出し(PROPERTY_CSV_COLUMN_MAP)を
+ *   ここでも読む(以前は部屋番号・階・専有面積・郵便番号・`lot_number` などが確定で落ちていた)。
  */
 export function resolvePropertyField(key: string): string | undefined {
   const directFields = new Set([
-    "address", "lotNumber", "buildingNumber", "realEstateNumber",
+    "address", "postalCode", "lotNumber", "buildingNumber", "realEstateNumber",
     "propertyType", "registryStatus", "dmStatus", "caseStatus",
     "introductionRoute", "zoningDistrict", "rosenkaValue", "gpsLat", "gpsLng",
     "note", "externalLinkKey", "buildingName",
+    "roomNo", "floorNo", "exclusiveArea", "balconyArea", "layoutType", "orientation",
+    "managementFee", "repairReserveFee", "occupancyStatus", "ownershipShareNote",
   ]);
   if (directFields.has(key)) return key;
+  const fromCsv = PROPERTY_CSV_COLUMN_MAP[key];
+  if (fromCsv && !NOT_PROPERTY_FIELDS.has(fromCsv)) return fromCsv;
   return JAPANESE_FIELD_MAP[key];
 }
 
@@ -118,14 +139,25 @@ export function buildPropertyCreateData(
     throw new Error("住所が空です");
   }
 
+  // 種別の日本語は値に直し、知らない値は不明にする。登記状況・DM判断の外れた値は既定値にする
+  // (CSV 取込と同じ。以前は「土地」のまま作ろうとして確定が失敗していた)。
+  let propertyType = mapped.propertyType || "unknown";
+  if (PROPERTY_TYPE_JP_TO_VALUE[propertyType]) {
+    propertyType = PROPERTY_TYPE_JP_TO_VALUE[propertyType];
+  } else if (!(PROPERTY_TYPE_VALUES as readonly string[]).includes(propertyType)) {
+    propertyType = "unknown";
+  }
   const createData: Record<string, unknown> = {
     address: mapped.address,
-    propertyType: mapped.propertyType || "unknown",
-    registryStatus: mapped.registryStatus || "unconfirmed",
-    dmStatus: mapped.dmStatus || "hold",
+    propertyType,
+    registryStatus: VALID_REGISTRY_STATUS.includes(mapped.registryStatus) ? mapped.registryStatus : "unconfirmed",
+    dmStatus: VALID_DM_STATUS.includes(mapped.dmStatus) ? mapped.dmStatus : "hold",
     caseStatus: normalizeCaseStatusInput(mapped.caseStatus) ?? "new_case",
     createdBy,
   };
+  if (mapped.postalCode && isValidPostalCode(mapped.postalCode)) {
+    createData.postalCode = normalizePostalCode(mapped.postalCode);
+  }
   const normalizedRoute = normalizeIntroductionRouteInput(mapped.introductionRoute);
   if (normalizedRoute) createData.introductionRoute = normalizedRoute;
   if (mapped.lotNumber) createData.lotNumber = mapped.lotNumber;
@@ -145,6 +177,22 @@ export function buildPropertyCreateData(
   if (mapped.gpsLat) createData.gpsLat = parseFloat(mapped.gpsLat) || null;
   if (mapped.gpsLng) createData.gpsLng = parseFloat(mapped.gpsLng) || null;
   if (mapped.note) createData.note = mapped.note;
+
+  // 部屋の欄(CSV 取込と同じ読み方。数字にできない値は入れない)。
+  if (mapped.roomNo) createData.roomNo = mapped.roomNo.trim();
+  const intOf = (v: string | undefined) => (v ? parseInt(v) : NaN);
+  const floatOf = (v: string | undefined) => (v ? parseFloat(v) : NaN);
+  if (!isNaN(intOf(mapped.floorNo))) createData.floorNo = intOf(mapped.floorNo);
+  if (!isNaN(floatOf(mapped.exclusiveArea))) createData.exclusiveArea = floatOf(mapped.exclusiveArea);
+  if (!isNaN(floatOf(mapped.balconyArea))) createData.balconyArea = floatOf(mapped.balconyArea);
+  if (mapped.layoutType) createData.layoutType = mapped.layoutType.trim();
+  if (mapped.orientation) createData.orientation = mapped.orientation.trim();
+  if (!isNaN(intOf(mapped.managementFee))) createData.managementFee = intOf(mapped.managementFee);
+  if (!isNaN(intOf(mapped.repairReserveFee))) createData.repairReserveFee = intOf(mapped.repairReserveFee);
+  if (mapped.occupancyStatus && VALID_OCCUPANCY_STATUS.includes(mapped.occupancyStatus)) {
+    createData.occupancyStatus = mapped.occupancyStatus;
+  }
+  if (mapped.ownershipShareNote) createData.ownershipShareNote = mapped.ownershipShareNote;
 
   return createData;
 }
