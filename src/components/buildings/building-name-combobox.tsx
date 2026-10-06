@@ -10,7 +10,9 @@ import {
   pickAtIndex,
   shouldHandleListKey,
   shouldFetchSuggestions,
+  shouldOpenOnArrow,
   suggestionBadges,
+  suggestQueryString,
 } from "@/lib/building-link/combobox-model";
 
 export interface BuildingNameComboboxProps {
@@ -114,8 +116,8 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
     if (!shouldFetchSuggestions(value)) return;
     const timer = setTimeout(async () => {
       try {
-        const qs = new URLSearchParams({ name: value, address });
-        const res = await fetch(`/api/buildings/suggest?${qs.toString()}`);
+        // ⚠住所はそのまま送らない(町丁目に丸める=suggestQueryString)。
+        const res = await fetch(`/api/buildings/suggest?${suggestQueryString(value, address)}`);
         if (!res.ok || !isLatestRequest(seq, seqRef.current)) return;
         const body = (await res.json()) as { data?: unknown };
         if (!Array.isArray(body.data)) return;
@@ -173,6 +175,12 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
         onKeyDown={(e) => {
+          // Esc・選んだ後に閉じた一覧は、上下キーで開き直す。
+          if (shouldOpenOnArrow({ open, key: e.key, isComposing: e.nativeEvent.isComposing, value })) {
+            e.preventDefault();
+            setOpen(true);
+            return;
+          }
           if (!open || !shouldFetchSuggestions(value)) return;
           if (!shouldHandleListKey(e.nativeEvent.isComposing)) return;
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {

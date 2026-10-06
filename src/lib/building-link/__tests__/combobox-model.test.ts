@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shouldFetchSuggestions, isLatestRequest, nextActiveIndex, suggestionBadges, choiceSummary, pickAtIndex, shouldHandleListKey } from "@/lib/building-link/combobox-model";
+import { shouldFetchSuggestions, isLatestRequest, nextActiveIndex, suggestionBadges, choiceSummary, pickAtIndex, shouldHandleListKey, suggestQueryString, shouldOpenOnArrow } from "@/lib/building-link/combobox-model";
 
 const s = { id: "b1", name: "パーク第一", area: "東京都大田区南雪谷1丁目", unitCount: 3, sameName: true, sameArea: true };
 
@@ -37,5 +37,33 @@ describe("combobox-model", () => {
   it("日本語変換中は候補のキー操作をしない", () => {
     expect(shouldHandleListKey(true)).toBe(false);
     expect(shouldHandleListKey(false)).toBe(true);
+  });
+});
+
+describe("suggestQueryString(候補の問い合わせに番地を載せない)", () => {
+  it("★住所は町丁目までに丸めて area で送り、address は送らない", () => {
+    const qs = suggestQueryString("パーク第一", "東京都港区六本木1丁目1-2 パーク第一303");
+    const p = new URLSearchParams(qs);
+    expect(p.get("name")).toBe("パーク第一");
+    expect(p.has("address")).toBe(false);
+    expect(qs).not.toContain("address=");
+    expect(p.get("area")).toBe("東京都港区六本木1丁目");
+    expect(qs).not.toContain(encodeURIComponent("1-2"));
+  });
+  it("住所が空なら area は空", () => {
+    expect(new URLSearchParams(suggestQueryString("パーク第一", "")).get("area")).toBe("");
+  });
+});
+
+describe("shouldOpenOnArrow(閉じた一覧を上下キーで開き直す)", () => {
+  it("閉じていて上下キー・変換中でない・候補を引ける長さなら開く", () => {
+    expect(shouldOpenOnArrow({ open: false, key: "ArrowDown", isComposing: false, value: "パーク第一" })).toBe(true);
+    expect(shouldOpenOnArrow({ open: false, key: "ArrowUp", isComposing: false, value: "パーク第一" })).toBe(true);
+  });
+  it("開いている・別のキー・変換中・短すぎるなら開かない", () => {
+    expect(shouldOpenOnArrow({ open: true, key: "ArrowDown", isComposing: false, value: "パーク第一" })).toBe(false);
+    expect(shouldOpenOnArrow({ open: false, key: "Enter", isComposing: false, value: "パーク第一" })).toBe(false);
+    expect(shouldOpenOnArrow({ open: false, key: "ArrowDown", isComposing: true, value: "パーク第一" })).toBe(false);
+    expect(shouldOpenOnArrow({ open: false, key: "ArrowDown", isComposing: false, value: "あ" })).toBe(false);
   });
 });

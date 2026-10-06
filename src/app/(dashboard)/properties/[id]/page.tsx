@@ -421,7 +421,7 @@ export default function PropertyDetailPage({
     setError(null);
     try {
       const data = await fetchPropertyDetail(id);
-      applyRefreshOutcome(
+      const applied = applyRefreshOutcome(
         resolveSuccess(refreshStateRef.current, ticket),
         data as unknown as ApiProperty,
         setProperty,
@@ -430,9 +430,12 @@ export default function PropertyDetailPage({
       // 新規登録・貼り付けから預かった知らせを、読み込みが終わってから1回だけ取り出す。
       // ⚠effect の本体や useState の初期化では取らない(eslint set-state-in-effect /
       //   サーバー描画との食い違い)。⚠無いとき null で上書きしない(保存後の知らせを
-      //   この取り直しで消さない)。
-      const stashed = takeBuildingLinkNotice(id);
-      if (stashed) setBuildingNotice(stashed);
+      //   この取り直しで消さない)。⚠結果を画面に使わなかった(古い読み込みが遅れて
+      //   届いた=別の物件へ移った後など)ときは取り出さない(前の物件の知らせを出さない)。
+      if (applied) {
+        const stashed = takeBuildingLinkNotice(id);
+        if (stashed) setBuildingNotice(stashed);
+      }
     } catch (err) {
       applyRefreshOutcome(
         resolveFailure(

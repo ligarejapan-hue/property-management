@@ -1,10 +1,21 @@
 /** 物件名の候補つき入力欄の判断(設計 §6.1)。React に依存しない。 */
-import { buildingNameKey } from "@/lib/building-identity";
+import { areaKey, buildingNameKey } from "@/lib/building-identity";
 import type { BuildingChoice } from "./resolve";
 import { SUGGEST_MIN_KEY_LENGTH, type BuildingSuggestion } from "./suggest";
 
 export function shouldFetchSuggestions(name: string): boolean {
   return (buildingNameKey(name) ?? "").length >= SUGGEST_MIN_KEY_LENGTH;
+}
+/**
+ * 候補の問い合わせの URL の検索部分。⚠住所はそのまま載せない(番地・部屋番号が
+ * nginx 等の記録に残る)。サーバーが使うのは町丁目だけなので、ここで丸めて area で送る。
+ */
+export function suggestQueryString(name: string, address: string): string {
+  return new URLSearchParams({ name, area: areaKey(address) ?? "" }).toString();
+}
+/** 閉じた一覧(Esc・選んだ後)を上下キーで開き直すか。 */
+export function shouldOpenOnArrow(e: { open: boolean; key: string; isComposing: boolean; value: string }): boolean {
+  return !e.open && (e.key === "ArrowDown" || e.key === "ArrowUp") && !e.isComposing && shouldFetchSuggestions(e.value);
 }
 export function isLatestRequest(seq: number, latest: number): boolean {
   return seq === latest;

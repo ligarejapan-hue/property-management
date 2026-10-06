@@ -79,7 +79,9 @@ describe("GET /api/buildings/suggest", () => {
       },
     ]);
     const res = await call("name=" + encodeURIComponent("パーク第１"));
-    const where = findMany.mock.calls[0][0].where;
+    const orCall = findMany.mock.calls.find((c) => Array.isArray(c[0].where.OR));
+    expect(orCall).toBeDefined();
+    const where = orCall![0].where;
     expect(where.OR).toContainEqual({ nameKey: { contains: "パ-ク第1" } });
     expect((await res.json()).data.map((x: { id: string }) => x.id)).toEqual(["b2"]);
   });
@@ -95,8 +97,48 @@ describe("GET /api/buildings/suggest", () => {
     );
     const res = await call("name=" + encodeURIComponent("パーク第１"));
     const data = (await res.json()).data as { id: string }[];
-    expect(findMany).toHaveBeenCalledTimes(2);
+    expect(findMany).toHaveBeenCalledTimes(3);
     expect(data.map((x) => x.id)).toEqual(["hit"]);
+  });
+
+  it("★部分一致の棟が50件あっても、同じ名前(比較キー一致)の棟は別の枠で必ず読み、先頭に出る", async () => {
+    const row = (id: string, name: string, nameKey: string | null, created: string) => ({
+      id, name, address: "東京都港区六本木1丁目1", nameKey, areaKey: null,
+      createdAt: new Date(created), _count: { properties: 1 },
+    });
+    const partials = Array.from({ length: 50 }, (_, i) => row(`p${i}`, `パーク第１別館${i}`, `パ-ク第1別館${i}`, "2020-01-01"));
+    const exact = row("exact", "パーク第一", "パ-ク第1", "2026-05-01");
+    findMany.mockImplementation(async (args: { where: { nameKey?: unknown; OR?: unknown } }) => {
+      if (args.where.nameKey === null) return [];
+      if (args.where.OR) return partials; // 古い部分一致で枠が埋まり、同じ名前の棟は入らない
+      if (args.where.nameKey === "パ-ク第1") return [exact];
+      return [];
+    });
+    const res = await call("name=" + encodeURIComponent("パーク第１"));
+    const data = (await res.json()).data as { id: string }[];
+    expect(findMany.mock.calls.some((c) => c[0].where.nameKey === "パ-ク第1" && c[0].take === 50)).toBe(true);
+    expect(data[0].id).toBe("exact");
+    expect(data.filter((x) => x.id === "exact")).toHaveLength(1);
+  });
+
+  it("★番地つきの住所(address)は読まず、町丁目(area)だけで同じ丁目を判断する", async () => {
+    const rowA = {
+      id: "a", name: "パーク第一", address: "東京都港区六本木1丁目1", nameKey: "パ-ク第1",
+      areaKey: "東京都港区六本木1丁目", createdAt: new Date("2026-01-01"), _count: { properties: 1 },
+    };
+    findMany.mockImplementation(async (args: { where: { nameKey?: unknown } }) =>
+      args.where.nameKey === "パ-ク第1" ? [rowA] : [],
+    );
+    const viaAddress = await call(
+      "name=" + encodeURIComponent("パーク第１") + "&address=" + encodeURIComponent("東京都港区六本木1丁目1-2"),
+    );
+    const a = (await viaAddress.json()).data as { id: string; sameArea: boolean }[];
+    expect(a[0].sameArea).toBe(false); // address は無視される
+    const viaArea = await call(
+      "name=" + encodeURIComponent("パーク第１") + "&area=" + encodeURIComponent("東京都港区六本木1丁目"),
+    );
+    const b = (await viaArea.json()).data as { id: string; sameArea: boolean }[];
+    expect(b[0].sameArea).toBe(true);
   });
 
   it("名前が合わない古い棟は応答から除く(取得後の絞り込み)", async () => {

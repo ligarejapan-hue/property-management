@@ -68,6 +68,18 @@ describe("物件詳細(properties/[id]/page.tsx)", () => {
     expect(page).toMatch(/const stashed = takeBuildingLinkNotice\(id\);\n\s*if \(stashed\) setBuildingNotice\(stashed\);/);
   });
 
+  it("★読み込み結果を画面に使ったときだけ取り出す(遅れて届いた前の物件の結果では取らない)", () => {
+    expect(page).toMatch(
+      /const applied = applyRefreshOutcome\([\s\S]*?\);[\s\S]*?if \(applied\) \{\s*const stashed = takeBuildingLinkNotice\(id\);/,
+    );
+    // 取り出しは applied の中だけ(条件の外に残っていない)
+    const fetchAt = page.indexOf("const fetchProperty = useCallback(async () => {");
+    const appliedAt = page.indexOf("if (applied) {", fetchAt);
+    const takeAt = page.indexOf("takeBuildingLinkNotice(id)", fetchAt);
+    expect(appliedAt).toBeGreaterThan(fetchAt);
+    expect(takeAt).toBeGreaterThan(appliedAt);
+  });
+
   it("★編集の保存後は onSaved の buildingLink を出す", () => {
     expect(page).toMatch(/onSaved=\{\(r\) => \{\s*setShowEditForm\(false\);\s*setBuildingNotice\(r\?\.buildingLink \?\? null\);/);
   });
