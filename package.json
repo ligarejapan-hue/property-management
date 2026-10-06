@@ -73,5 +73,13 @@
     "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^4.1.4"
+  },
+  "allowScripts": {
+    "@embedded-postgres/linux-x64@18.3.0-beta.16": true,
+    "@prisma/engines@7.6.0": true,
+    "esbuild@0.27.4": true,
+    "prisma@7.6.0": true,
+    "sharp@0.34.5": true,
+    "unrs-resolver@1.11.1": true
   }
 }
