@@ -72,7 +72,8 @@ const AUTHORITY_NAMES: Record<string, string> = {
 
 /** 一覧の「免許行政庁」の欄が、免許の鍵の行政庁と合っているか(対象の5つ以外は確かめない)。 */
 function visibleAuthorityOk(code: string, cellText: string): boolean {
-  if (code === "00") return cellText.includes("大臣");
+  // 大臣も都県と同じく欄そのものと照らす(「大臣」を含むだけでは通さない・@codex #477)。
+  if (code === "00") return cellText === AUTHORITY_NAMES["00"];
   const name = AUTHORITY_NAMES[code];
   return name ? cellText === name.replace(/知事$/, "") : true;
 }

@@ -96,6 +96,14 @@ describe("一覧のページを読む", () => {
     expect(parseListPage(html).rows[0].licenseLabel).toBe("国土交通大臣(17)第000001号");
   });
 
+  it("★大臣免許の行も、見えている欄が「国土交通大臣」そのものでなければ LayoutChanged(「建設大臣」などを通さない・@codex #477)", () => {
+    const html = listHtml
+      .replaceAll("js_ShowDetail('13", "js_ShowDetail('00")
+      .replaceAll(">東京都<", ">建設大臣<");
+    expect(html).not.toBe(listHtml);
+    expect(() => parseListPage(html)).toThrow(LayoutChanged);
+  });
+
   it("0件の画面は空(件数 0)", () => {
     const html = listHtml
       .replace("検索結果：26906件", "検索結果：0件")
