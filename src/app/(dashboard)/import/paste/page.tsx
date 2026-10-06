@@ -35,6 +35,11 @@ import {
   type OwnerValues,
 } from "@/components/import/paste-import-review";
 import type { PasteDraft } from "@/lib/paste-import/types";
+import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
+import { stashBuildingLinkNotice } from "@/lib/building-link/notice";
+import { areaChanged } from "@/lib/building-link/combobox-model";
+// ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む。
+import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
 
 interface PasteApiResponse {
   draft: PasteDraft;
@@ -62,6 +67,8 @@ interface PasteRecheckResponse {
 interface CommitApiResponse {
   propertyId: string;
   ownerId: string | null;
+  /** 棟へつないだ結果(物件詳細の上に1回だけ知らせる)。 */
+  buildingLink?: BuildingLinkOutcome | null;
 }
 
 /** 非2xx応答からエラーメッセージを取り出す（api-client.ts の toApiError と同じ姿勢）。 */
@@ -114,6 +121,8 @@ export default function PasteImportPage() {
   // ---- 登録 ----
   const [registering, setRegistering] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
+  // 建物名から棟へつなぐ選び方(区分マンションのときだけ送る)。
+  const [buildingChoice, setBuildingChoice] = useState<BuildingChoice>(AUTO_CHOICE);
 
   const handleRead = useCallback(async () => {
     setReading(true);
@@ -151,6 +160,7 @@ export default function PasteImportPage() {
       setOwnerMode(defaultOwnerMode(data.draft));
       setLinkedOwner(null);
       setRegisterError(null);
+      setBuildingChoice(AUTO_CHOICE);
     } catch (e) {
       setReadError(e instanceof Error ? e.message : "読み取りに失敗しました");
     } finally {
@@ -160,7 +170,14 @@ export default function PasteImportPage() {
 
   const handlePropertyFieldChange = useCallback((key: PropertyFieldKey, value: string) => {
     setPropertyValues((prev) => (prev ? { ...prev, [key]: value } : prev));
-  }, []);
+    // 棟の選び方は種別ごとの話なので、種別を変えたら自動に戻す(新規登録と同じ)。
+    if (key === "propertyType") setBuildingChoice(AUTO_CHOICE);
+    // ⚠住所の町丁目が変わったら、選んだ棟(前の丁目での判断)を外して auto に戻す(@codex R4)。
+    //   番地だけの直しでは保つ。
+    if (key === "address" && propertyValues && areaChanged(propertyValues.address, value)) {
+      setBuildingChoice(AUTO_CHOICE);
+    }
+  }, [propertyValues]);
 
   const handleOwnerFieldChange = useCallback((key: OwnerFieldKey, value: string) => {
     setOwnerValues((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -381,6 +398,7 @@ export default function PasteImportPage() {
         //   (＝住所での重複判定に委ねられる)。
         externalLinkKey: externalLinkKey.trim() || null,
         linkExistingOwnerId: ownerMode === "link" ? linkedOwnerId : null,
+        buildingChoice: propertyValues.propertyType === "apartment_unit" ? buildingChoice : undefined,
       };
 
       let res: Response;
@@ -399,6 +417,7 @@ export default function PasteImportPage() {
       }
       if (!res.ok) throw new Error(await readApiErrorMessage(res));
       const result = (await res.json()) as CommitApiResponse;
+      stashBuildingLinkNotice(result.propertyId, result.buildingLink);
       router.push(`/properties/${result.propertyId}`);
     } catch (e) {
       setRegisterError(e instanceof Error ? e.message : "登録に失敗しました");
@@ -407,7 +426,7 @@ export default function PasteImportPage() {
     }
   }, [
     draft, propertyValues, ownerValues, note, ownerMode, linkedOwnerId, pdfFile, router,
-    externalLinkKey, recheckDuplicates, similar, ownerCandidates, linkedOwner,
+    externalLinkKey, recheckDuplicates, similar, ownerCandidates, linkedOwner, buildingChoice,
   ]);
 
   return (
@@ -517,6 +536,7 @@ export default function PasteImportPage() {
                 setPropertyValues(null);
                 setOwnerValues(null);
                 setRegisterError(null);
+                setBuildingChoice(AUTO_CHOICE);
               }}
             >
               ← 貼り直す
@@ -549,6 +569,8 @@ export default function PasteImportPage() {
             onRegister={handleRegister}
             registering={registering}
             registerError={registerError}
+            buildingChoice={buildingChoice}
+            onBuildingChoiceChange={setBuildingChoice}
           />
         </>
       )}

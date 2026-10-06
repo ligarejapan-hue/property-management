@@ -6,6 +6,7 @@
 import type { Prisma } from "@/generated/prisma";
 import { areaKey, buildingNameKey } from "@/lib/building-identity";
 import { decideBuildingLink, AUTO_CHOICE, BUILDING_LINK_TARGET_TYPE, type BuildingChoice } from "./resolve";
+import { LEGACY_PAGE_SIZE, readAllLegacyBuildings } from "./suggest";
 
 export type CsvBuildingResolution =
   | { kind: "link"; buildingId: string }
@@ -23,8 +24,6 @@ export interface CsvBuildingRow {
 }
 
 const REVIEW_CANDIDATE_LIMIT = 10;
-/** key が null の古い棟を、1回の判断で見る上限(apply.ts と同じ)。 */
-const NULL_KEY_SCAN_LIMIT = 500;
 
 /**
  * - 同じ町丁目・同じ比べる形の棟がある → link(複数なら decideBuildingLink と同じ選び方)
@@ -183,9 +182,19 @@ export async function resolveCsvBuilding(
   }
   const others: CsvBuildingRow[] = [];
   // key が null の古い棟は、その場で計算して振り分ける(CSV は読むだけ=埋めるのは apply 側)。
-  const unkeyed = await db.building.findMany({
-    where: { nameKey: null }, select, take: NULL_KEY_SCAN_LIMIT, orderBy: { createdAt: "asc" },
-  });
+  // ⚠[@codex R7] 上限なしで全部読む(id 順に200件ずつ・続きは id > 前のページの最後)。件数で切ると、
+  //   枠の外の紛らわしい古い棟を見落として要確認に回せない(apply.ts と同じ読み方)。
+  const { rows: unkeyed } = await readAllLegacyBuildings(
+    ({ cursorId, take }) =>
+      db.building.findMany({
+        where: { nameKey: null, ...(cursorId ? { id: { gt: cursorId } } : {}) },
+        select,
+        orderBy: { id: "asc" },
+        take,
+      }),
+    LEGACY_PAGE_SIZE,
+    Number.POSITIVE_INFINITY,
+  );
   for (const raw of unkeyed) {
     const b = toRow(raw);
     const k = buildingNameKey(b.name);

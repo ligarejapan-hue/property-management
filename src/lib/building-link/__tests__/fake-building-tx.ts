@@ -56,10 +56,16 @@ function buildFake(db: FakeDb, lock?: (key: string) => Promise<void>) {
         const b = db.buildings.find((x) => x.id === where.id);
         return b ? view(b) : null;
       }),
-      findMany: vi.fn(async ({ where, take }: { where: Record<string, unknown>; take?: number }) => {
+      findMany: vi.fn(async ({ where, take, orderBy }: { where: Record<string, unknown>; take?: number; orderBy?: { id?: "asc" } }) => {
+        // 値は一致、または { gt } (id の続きから読む=ページ送り)を写す。
         const rows = db.buildings.filter((b) =>
-          Object.entries(where).every(([k, v]) => (b as unknown as Record<string, unknown>)[k] === v),
+          Object.entries(where).every(([k, v]) => {
+            const field = (b as unknown as Record<string, unknown>)[k];
+            if (v !== null && typeof v === "object" && "gt" in v) return String(field) > String((v as { gt: unknown }).gt);
+            return field === v;
+          }),
         );
+        if (orderBy?.id === "asc") rows.sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
         return rows.slice(0, take ?? rows.length).map(view);
       }),
       create: vi.fn(async ({ data }: { data: Omit<FakeBuilding, "id" | "createdAt"> }) => {

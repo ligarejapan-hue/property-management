@@ -7,7 +7,10 @@ import { debounce } from "@/lib/debounce";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { SalesSheetPropertyPicker } from "@/components/sales-sheet/SalesSheetPropertyPicker";
 import { SalesSheetCreateDialog } from "@/components/sales-sheet/SalesSheetCreateButton";
-import NewPropertyModal from "@/components/properties/new-property-modal";
+import NewPropertyModal, { type PostCreateResult } from "@/components/properties/new-property-modal";
+import { BuildingLinkNotice } from "@/components/buildings/building-link-notice";
+// ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む。
+import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
 import {
   buildPickerListParams,
   buildPickerRows,
@@ -129,6 +132,8 @@ export default function SalesSheetNewEntryPage() {
     kind: SalesSheetTemplateKind;
   } | null>(null);
   const [showRegister, setShowRegister] = useState(false);
+  // 登録した物件を棟へつないだ結果の知らせ(@codex R6)。この画面に留まるので、ここで出す。
+  const [buildingNotice, setBuildingNotice] = useState<BuildingLinkOutcome | null>(null);
 
   const handleSelect = (row: PickerRow) => {
     if (!row.kind) return;
@@ -136,8 +141,9 @@ export default function SalesSheetNewEntryPage() {
   };
 
   // 登録成功 → モーダルを閉じ、一覧を更新し、そのまま作成ダイアログを開く。
-  const handleCreated = (id: string, propertyType: string) => {
+  const handleCreated = (id: string, propertyType: string, result?: PostCreateResult) => {
     setShowRegister(false);
+    setBuildingNotice(result?.buildingLink ?? null);
     setRefreshTick((t) => t + 1);
     const kind = salesSheetTemplateKindFor(propertyType);
     if (kind) setSelected({ id, kind });
@@ -149,6 +155,8 @@ export default function SalesSheetNewEntryPage() {
         title="販売図面を作成"
         description="図面を作成する物件を選択してください（対象: 土地・区分マンション・戸建・一棟）"
       />
+      {/* 棟を新しく作った/つないだ知らせ(「正式な表記か確認してください」+棟の画面へのリンク)。 */}
+      <BuildingLinkNotice outcome={buildingNotice} onClose={() => setBuildingNotice(null)} />
       <SalesSheetPropertyPicker
         rows={rows}
         canWrite={canWriteProperty}

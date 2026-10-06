@@ -1039,3 +1039,82 @@ describe("候補を確認しきれなかったことを画面で伝える（21�
     expect(out).not.toContain('data-section="owner-candidates-truncated"');
   });
 });
+
+describe("区分マンションの建物名に棟の候補を出す(棟の自動づけ Task 12)", () => {
+  const unitValues = {
+    address: "東京都A区B1-2-3",
+    lotNumber: "",
+    buildingName: "グリーンコート",
+    roomNo: "303",
+    propertyType: "apartment_unit",
+    exclusiveArea: "",
+    landArea: "",
+    layoutType: "",
+    occupancyStatus: "",
+    builtYear: "",
+  };
+  const noop = () => {};
+
+  it("★区分マンション+選び方の受け口があると、建物名の欄が候補つき(combobox)になる", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft, rawText: "", propertyValues: unitValues,
+        buildingChoice: { kind: "auto" }, onBuildingChoiceChange: noop,
+      }),
+    );
+    const block = extractFieldBlock(out, "buildingName");
+    expect(block).toContain('role="combobox"');
+    expect(block).toContain('id="paste-field-buildingName"');
+    // 見出しは既存の「建物名」のまま
+    expect(block).toContain("建物名");
+  });
+
+  it("★「新しい棟として登録」を選んでいれば、欄の下にその旨が出る", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft, rawText: "", propertyValues: unitValues,
+        buildingChoice: { kind: "new" }, onBuildingChoiceChange: noop,
+      }),
+    );
+    expect(extractFieldBlock(out, "buildingName")).toContain("新しい棟として登録します");
+  });
+
+  it("区分マンション以外の種別では、ふつうの入力欄のまま", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, {
+        draft, rawText: "", propertyValues: { ...unitValues, propertyType: "apartment_building" },
+        buildingChoice: { kind: "auto" }, onBuildingChoiceChange: noop,
+      }),
+    );
+    const block = extractFieldBlock(out, "buildingName");
+    expect(block).toContain('id="paste-field-buildingName"');
+    expect(block).not.toContain('role="combobox"');
+  });
+
+  it("選び方の受け口を渡さない呼び出し元では、ふつうの入力欄のまま", () => {
+    const out = renderToStaticMarkup(
+      createElement(PasteImportReview, { draft, rawText: "", propertyValues: unitValues }),
+    );
+    expect(extractFieldBlock(out, "buildingName")).not.toContain('role="combobox"');
+  });
+});
+
+describe("貼り付け画面: 棟の選び方を送り、知らせを預ける(走査)", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const page = readFileSync(join(here, "../../../app/(dashboard)/import/paste/page.tsx"), "utf8").replace(/\r\n/g, "\n");
+
+  it("★区分マンションのときだけ buildingChoice を送る", () => {
+    expect(page).toMatch(/buildingChoice: propertyValues\.propertyType === "apartment_unit" \? buildingChoice : undefined/);
+  });
+  it("★登録できたら遷移の前に知らせを預ける", () => {
+    expect(page).toMatch(/stashBuildingLinkNotice\(result\.propertyId, result\.buildingLink\);\n\s*router\.push/);
+  });
+  it("★住所の町丁目が変わったら選んだ棟を外す(@codex R4)", () => {
+    expect(page).toMatch(
+      /if \(key === "address" && propertyValues && areaChanged\(propertyValues\.address, value\)\) \{\s*setBuildingChoice\(AUTO_CHOICE\);/,
+    );
+  });
+  it("確認画面へ選び方の受け口を渡す", () => {
+    expect(page).toMatch(/onBuildingChoiceChange=\{setBuildingChoice\}/);
+  });
+});

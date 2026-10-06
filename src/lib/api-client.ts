@@ -32,6 +32,9 @@ import { safeRandomId } from "./random-id";
 // 編集中の鍵(仕様 4章)。ヘッダ組み立ては editLockHeaders() の1本だけを通す。
 import { editLockHeaders, getScreenToken } from "./edit-lock/screen-token-client";
 import type { AcquireResponse, HeartbeatResponse } from "./edit-lock/ui-state";
+// 棟の選び方・つないだ結果の型のみ(apply.ts は prisma を読むサーバー側のファイル=値は import しない)。
+import type { BuildingChoice } from "./building-link/resolve";
+import type { BuildingLinkOutcome } from "./building-link/apply";
 
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 
@@ -3775,12 +3778,14 @@ export async function createProperty(data: {
   buildingName?: string | null;
   introductionRoute?: string | null;
   note?: string | null;
-}): Promise<{ id: string }> {
+  /** 物件名から棟へつなぐ選び方(区分マンションのときだけ)。省略=auto。 */
+  buildingChoice?: BuildingChoice;
+}): Promise<{ id: string; buildingLink?: BuildingLinkOutcome | null }> {
   if (USE_MOCK) {
     await mockDelay();
     return { id: "mock-new-property-id" };
   }
-  return apiFetch<{ id: string }>("/api/properties", {
+  return apiFetch<{ id: string; buildingLink?: BuildingLinkOutcome | null }>("/api/properties", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
