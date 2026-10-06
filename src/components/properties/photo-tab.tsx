@@ -81,9 +81,15 @@ const MAX_PHOTO_SIZE_MB = 8;
 
 export default function PhotoTab({
   propertyId,
+  propertyType,
   building,
+  onEditProperty,
 }: {
   propertyId: string;
+  /** 案内文の出し分け(区分マンションだけ棟の案内) */
+  propertyType: string;
+  /** 物件編集を開く(編集できないときは渡さない) */
+  onEditProperty?: () => void;
   /** 物件が属する棟。案内文から棟写真へ飛ぶリンクに使う（棟が無ければ null） */
   building?: { id: string; name: string } | null;
 }) {
@@ -299,7 +305,11 @@ export default function PhotoTab({
               </span>
             )}
           </h3>
-          <PhotoTabBuildingHint building={building ?? null} />
+          <PhotoTabBuildingHint
+            propertyType={propertyType}
+            building={building ?? null}
+            onEditProperty={onEditProperty}
+          />
         </div>
         <div className="flex items-center gap-2">
           {photos.length > 1 && (
