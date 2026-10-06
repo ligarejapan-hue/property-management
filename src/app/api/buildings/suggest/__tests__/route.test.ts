@@ -153,3 +153,41 @@ describe("GET /api/buildings/suggest", () => {
     expect((await res.json()).data).toEqual([]);
   });
 });
+
+describe("GET /api/buildings/suggest 同じ町丁目の同じ名前の棟(@codex R1)", () => {
+  const row = (id: string, area: string, created: string) => ({
+    id, name: "パーク第一", address: `${area}1-1`, nameKey: "パ-ク第1", areaKey: area,
+    createdAt: new Date(created), _count: { properties: 1 },
+  });
+
+  it("★別の丁目の同じ名前が50件あっても、指定の丁目の同じ名前の棟を読み、先頭に sameArea で出す", async () => {
+    const others = Array.from({ length: 50 }, (_, i) => row(`o${i}`, `東京都港区赤坂${i + 1}丁目`, "2020-01-01"));
+    const mine = row("mine", "東京都港区六本木1丁目", "2026-05-01");
+    findMany.mockImplementation(async (args: { where: { nameKey?: unknown; areaKey?: unknown; OR?: unknown } }) => {
+      if (args.where.nameKey === null) return [];
+      if (args.where.areaKey === "東京都港区六本木1丁目") return [mine];
+      if (args.where.OR) return others;
+      if (args.where.nameKey === "パ-ク第1") return others; // 古い順で50件=指定の丁目の棟は入らない
+      return [];
+    });
+    const res = await call(
+      "name=" + encodeURIComponent("パーク第１") + "&area=" + encodeURIComponent("東京都港区六本木1丁目"),
+    );
+    const data = (await res.json()).data as { id: string; sameArea: boolean }[];
+    expect(findMany).toHaveBeenCalledTimes(4);
+    expect(
+      findMany.mock.calls.some(
+        (c) => c[0].where.nameKey === "パ-ク第1" && c[0].where.areaKey === "東京都港区六本木1丁目" && c[0].take === 50,
+      ),
+    ).toBe(true);
+    expect(data[0].id).toBe("mine");
+    expect(data[0].sameArea).toBe(true);
+    expect(data.filter((x) => x.id === "mine")).toHaveLength(1);
+  });
+
+  it("area が空なら、丁目つきの問い合わせはしない", async () => {
+    await call("name=" + encodeURIComponent("パーク第１") + "&area=");
+    expect(findMany).toHaveBeenCalledTimes(3);
+    expect(findMany.mock.calls.some((c) => "areaKey" in c[0].where)).toBe(false);
+  });
+});
