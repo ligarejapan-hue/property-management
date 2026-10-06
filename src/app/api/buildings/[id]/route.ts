@@ -18,7 +18,8 @@ import {
   isBuildingRename,
   countEditLockedUnits,
   propagateBuildingName,
-  countUnitsOutsideScope,
+  lockBuildingUnits,
+  unitsOutsideScope,
 } from "@/lib/building-link/rename";
 
 const updateBuildingSchema = z.object({
@@ -169,16 +170,17 @@ export async function PATCH(
         data: updateData,
       });
       if (updated.count === 0 || !renaming) return { count: updated.count, propagated: null };
+      // 部屋の行をロックして読み、以降の確認と反映はこの行だけを対象にする(確認と反映の間に
+      // つながった/担当が変わった部屋が素通りしない)。ロックのあとにつながった部屋は
+      // 次にその部屋を保存するまで古い名前のまま(許容。権限の穴ではない)。
+      const units = await lockBuildingUnits(tx, id);
       // ⚠担当だけ見られる役割は、担当外の部屋の物件名を書き換えられない(物件の編集 API と同じ規則)。
-      if (isPropertyScopedRole(session.role)) {
-        const outside = await countUnitsOutsideScope(tx, id, session.id);
-        if (outside > 0) {
-          throw new ApiError(
-            403,
-            "この棟には担当外の部屋があるため、棟の名前は変えられません。事務の方に依頼してください",
-            "FORBIDDEN",
-          );
-        }
+      if (isPropertyScopedRole(session.role) && unitsOutsideScope(units, session).length > 0) {
+        throw new ApiError(
+          403,
+          "この棟には担当外の部屋があるため、棟の名前は変えられません。事務の方に依頼してください",
+          "FORBIDDEN",
+        );
       }
       const locked = await countEditLockedUnits(tx, id);
       if (locked > 0) {
@@ -189,7 +191,7 @@ export async function PATCH(
         );
       }
       const result = await propagateBuildingName(tx, {
-        buildingId: id,
+        units,
         newName: updateData.name as string,
         userId: session.id,
       });

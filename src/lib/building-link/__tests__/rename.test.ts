@@ -4,7 +4,8 @@ import {
   isBuildingRename,
   countEditLockedUnits,
   propagateBuildingName,
-  countUnitsOutsideScope,
+  lockBuildingUnits,
+  unitsOutsideScope,
 } from "@/lib/building-link/rename";
 import { lockBuildingRow, lockBuildingRowNoKeyUpdate } from "@/lib/edit-lock/row-locks";
 
@@ -34,25 +35,16 @@ describe("rename", () => {
 });
 
 describe("propagateBuildingName", () => {
-  function makeTx(units: { id: string; buildingName: string | null }[]) {
-    return {
-      property: {
-        findMany: vi.fn().mockResolvedValue(units),
-        updateMany: vi.fn().mockResolvedValue({ count: units.length }),
-      },
-    };
+  const U = (id: string, buildingName: string | null) => ({ id, buildingName, createdBy: "c", assignedTo: null });
+  function makeTx() {
+    return { property: { updateMany: vi.fn().mockResolvedValue({ count: 2 }) } };
   }
-  it("物件名が違う部屋と null の部屋を直し、版番号を進め、変更履歴を返す", async () => {
-    const tx = makeTx([
-      { id: "p1", buildingName: "旧" },
-      { id: "p2", buildingName: null },
-    ]);
-    const r = await propagateBuildingName(tx as never, { buildingId: "b1", newName: "新", userId: "u1" });
-    const arg = tx.property.findMany.mock.calls[0][0] as { where: unknown };
-    // null の部屋を拾う条件(SQL の <> は NULL を除くため OR で明示)
-    expect(arg.where).toEqual({
-      buildingId: "b1",
-      OR: [{ buildingName: null }, { NOT: { buildingName: "新" } }],
+  it("渡された行のうち物件名が違う部屋と null の部屋だけを、その id で直し、版番号を進め、変更履歴を返す", async () => {
+    const tx = makeTx();
+    const r = await propagateBuildingName(tx as never, {
+      units: [U("p1", "旧"), U("p2", null), U("p3", "新")],
+      newName: "新",
+      userId: "u1",
     });
     expect(tx.property.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["p1", "p2"] } },
@@ -65,10 +57,36 @@ describe("propagateBuildingName", () => {
     ]);
   });
   it("直す部屋が無ければ書かない", async () => {
-    const tx = makeTx([]);
-    const r = await propagateBuildingName(tx as never, { buildingId: "b1", newName: "新", userId: "u1" });
+    const tx = makeTx();
+    const r = await propagateBuildingName(tx as never, { units: [U("p3", "新")], newName: "新", userId: "u1" });
     expect(r).toEqual({ updated: 0, changeLogs: [] });
     expect(tx.property.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("lockBuildingUnits / unitsOutsideScope", () => {
+  it("部屋の行を id 順に FOR UPDATE で読む", async () => {
+    const rows = [{ id: "p1", buildingName: null, createdBy: "c", assignedTo: null }];
+    const tx = { $queryRaw: vi.fn().mockResolvedValue(rows) };
+    expect(await lockBuildingUnits(tx as never, "b1")).toBe(rows);
+    const sql = (tx.$queryRaw.mock.calls[0][0] as TemplateStringsArray).join("?");
+    expect(sql).toMatch(/FOR UPDATE/);
+    expect(sql).toMatch(/ORDER BY "id"/);
+    expect(sql).toMatch(/"building_id" = \?::uuid/);
+    expect(sql).toMatch(/"created_by" AS "createdBy"/);
+    expect(sql).toMatch(/"assigned_to" AS "assignedTo"/);
+  });
+  const units = [
+    { id: "own", buildingName: "x", createdBy: "u1", assignedTo: null },
+    { id: "assigned", buildingName: "x", createdBy: "z", assignedTo: "u1" },
+    { id: "other", buildingName: "x", createdBy: "z", assignedTo: null },
+    { id: "other2", buildingName: "x", createdBy: "z", assignedTo: "y" },
+  ];
+  it("field_staff は作成者でも担当でもない部屋(担当 null を含む)が担当外", () => {
+    expect(unitsOutsideScope(units, { id: "u1", role: "field_staff" }).map((u) => u.id)).toEqual(["other", "other2"]);
+  });
+  it("field_staff 以外は担当外が無い", () => {
+    expect(unitsOutsideScope(units, { id: "u1", role: "office_staff" })).toEqual([]);
   });
 });
 
@@ -85,19 +103,5 @@ describe("棟の行ロック", () => {
     const sql = sqlOf(tx.$queryRaw.mock.calls[0]);
     expect(sql).toMatch(/FOR UPDATE/);
     expect(sql).not.toMatch(/NO KEY/);
-  });
-});
-
-describe("countUnitsOutsideScope", () => {
-  it("作成者でも担当でもない部屋を数える(担当が null の部屋も含む)", async () => {
-    const tx = { property: { count: vi.fn().mockResolvedValue(3) } };
-    expect(await countUnitsOutsideScope(tx as never, "b1", "u1")).toBe(3);
-    expect(tx.property.count).toHaveBeenCalledWith({
-      where: {
-        buildingId: "b1",
-        createdBy: { not: "u1" },
-        OR: [{ assignedTo: null }, { assignedTo: { not: "u1" } }],
-      },
-    });
   });
 });

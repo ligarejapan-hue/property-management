@@ -50,8 +50,8 @@ vi.mock("@/lib/change-log", () => ({
 vi.mock("@/lib/prisma", () => {
   const prismaMock = {
     building: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
-    // 名前を直す経路(部屋への反映)が使う分。鍵0件・反映する部屋なしの形(件数は n=0)。
-    $queryRaw: vi.fn(async () => [{ n: 0 }]),
+    // 名前を直す経路(部屋への反映)が使う分。部屋も鍵も0件の形。
+    $queryRaw: vi.fn(async () => []),
     property: { findMany: vi.fn(async () => []), updateMany: vi.fn() },
     changeLog: { createMany: vi.fn() },
     $transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb(prismaMock)),

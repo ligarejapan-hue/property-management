@@ -8,6 +8,7 @@
  * ⚠アーカイブ済みの部屋も対象に含める(棟とのつながりは残っており、名前だけ古く残さない)。
  */
 import type { Prisma } from "@/generated/prisma";
+import { canAccessPropertyRecord } from "@/lib/property-access";
 import { EDIT_LOCK_HEARTBEAT_GRACE_MS, EDIT_LOCK_IDLE_LIMIT_MS } from "@/lib/edit-lock/rules";
 
 const GRACE_SEC = EDIT_LOCK_HEARTBEAT_GRACE_MS / 1000;
@@ -40,24 +41,46 @@ export async function countEditLockedUnits(
   return rows[0]?.n ?? 0;
 }
 
+/** 棟の部屋の行(ロック済みの読み取り)。 */
+export interface LockedUnit {
+  id: string;
+  buildingName: string | null;
+  createdBy: string;
+  assignedTo: string | null;
+}
+
 /**
- * 担当外の部屋の数(field_staff 用)。物件の編集 API(properties/[id])は、field_staff が
- * 「自分が作ってもいないし担当でもない」物件を直すのを禁じている。棟の名前の反映は部屋の
- * 物件名を書き換えるので、その禁止を迂回しないよう、1件でもあれば止める。
- * ⚠assignedTo は null があり得る。`assignedTo <> X` だけだと NULL を拾えないので OR で明示する。
+ * 棟につながっている部屋の行を、ロックしながら読む(`FOR UPDATE`・id 順)。
+ * 以降の「担当外の確認」「編集中の鍵の確認」「反映」は**このとき読んだ行だけ**を対象にする。
+ * 別々に読み直すと、確認と反映の間につながった/担当が変わった部屋が確認を素通りして書き換わる。
+ * ⚠ロック順は 棟の行(FOR NO KEY UPDATE) → 部屋の行(id 順)。循環しない理由:
+ *   apply.ts(物件の保存側)は棟の行を待たない(`FOR UPDATE SKIP LOCKED` と外部キーの
+ *   `FOR KEY SHARE` だけ。KEY SHARE は NO KEY UPDATE と衝突しない)。
+ * ⚠ロックのあとにこの棟へつながった部屋は、今回は直らず、次にその部屋を保存したときに
+ *   棟の名前にそろう(許容。権限の穴ではない: 担当外の部屋を書き換えてはいない)。
  */
-export async function countUnitsOutsideScope(
-  tx: Pick<Prisma.TransactionClient, "property">,
+export async function lockBuildingUnits(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw">,
   buildingId: string,
-  userId: string,
-): Promise<number> {
-  return tx.property.count({
-    where: {
-      buildingId,
-      createdBy: { not: userId },
-      OR: [{ assignedTo: null }, { assignedTo: { not: userId } }],
-    },
-  });
+): Promise<LockedUnit[]> {
+  return tx.$queryRaw<LockedUnit[]>`
+    SELECT "id", "building_name" AS "buildingName", "created_by" AS "createdBy", "assigned_to" AS "assignedTo"
+    FROM "properties"
+    WHERE "building_id" = ${buildingId}::uuid
+    ORDER BY "id"
+    FOR UPDATE
+  `;
+}
+
+/**
+ * 担当外の部屋(field_staff 用)。物件の編集 API と同じ規則(`canAccessPropertyRecord`)を
+ * ロック済みの行へ当てる。担当だけ見られる役割でなければ常に空。
+ */
+export function unitsOutsideScope(
+  units: LockedUnit[],
+  session: { id: string; role: string },
+): LockedUnit[] {
+  return units.filter((u) => !canAccessPropertyRecord(session, u));
 }
 
 export interface RenameChangeLog {
@@ -72,24 +95,18 @@ export interface RenameChangeLog {
 
 export async function propagateBuildingName(
   tx: Pick<Prisma.TransactionClient, "property">,
-  input: { buildingId: string; newName: string; userId: string },
+  input: { units: LockedUnit[]; newName: string; userId: string },
 ): Promise<{ updated: number; changeLogs: RenameChangeLog[] }> {
-  const units = await tx.property.findMany({
-    // ⚠`NOT: { buildingName: X }` だけだと物件名が null の部屋を拾わない(SQL の <> は NULL を除く)。
-    where: {
-      buildingId: input.buildingId,
-      OR: [{ buildingName: null }, { NOT: { buildingName: input.newName } }],
-    },
-    select: { id: true, buildingName: true },
-  });
-  if (units.length === 0) return { updated: 0, changeLogs: [] };
+  // ⚠物件名が null の部屋も直す(`!==` なので null は常に対象)。
+  const targets = input.units.filter((u) => u.buildingName !== input.newName);
+  if (targets.length === 0) return { updated: 0, changeLogs: [] };
   const res = await tx.property.updateMany({
-    where: { id: { in: units.map((u) => u.id) } },
+    where: { id: { in: targets.map((u) => u.id) } },
     data: { buildingName: input.newName, version: { increment: 1 } },
   });
   return {
     updated: res.count,
-    changeLogs: units.map((u) => ({
+    changeLogs: targets.map((u) => ({
       targetTable: "properties" as const,
       targetId: u.id,
       fieldName: "buildingName" as const,
