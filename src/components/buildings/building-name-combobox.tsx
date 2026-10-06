@@ -1,0 +1,188 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import type { BuildingChoice } from "@/lib/building-link/resolve";
+import type { BuildingSuggestion } from "@/lib/building-link/suggest";
+import {
+  choiceSummary,
+  isLatestRequest,
+  nextActiveIndex,
+  shouldFetchSuggestions,
+  suggestionBadges,
+} from "@/lib/building-link/combobox-model";
+
+export interface BuildingNameComboboxProps {
+  id: string;
+  testId?: string;
+  value: string;
+  onChange: (name: string) => void;
+  address: string;
+  choice: BuildingChoice;
+  onChoiceChange: (choice: BuildingChoice) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  inputClassName?: string;
+}
+
+/** 候補の一覧(SSR テストのため切り出す)。一番下は常に「新しい棟として登録する」(D8)。 */
+export function BuildingSuggestionList({
+  suggestions,
+  activeIndex,
+  onPick,
+  listId,
+}: {
+  suggestions: BuildingSuggestion[];
+  activeIndex: number;
+  onPick: (s: BuildingSuggestion | "new") => void;
+  listId: string;
+}) {
+  return (
+    <ul
+      id={listId}
+      role="listbox"
+      className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900"
+    >
+      {suggestions.map((s, i) => (
+        <li
+          key={s.id}
+          role="option"
+          aria-selected={i === activeIndex}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            onPick(s);
+          }}
+          className={`flex min-h-[44px] cursor-pointer flex-col justify-center px-3 py-1.5 text-sm ${
+            i === activeIndex ? "bg-indigo-50 dark:bg-indigo-950/40" : "hover:bg-gray-50 dark:hover:bg-gray-800"
+          }`}
+        >
+          <span className="flex flex-wrap items-center gap-1 text-gray-900 dark:text-gray-100">
+            {s.name}
+            {suggestionBadges(s).map((b) => (
+              <span
+                key={b}
+                className={`rounded px-1 text-[10px] ${
+                  b === "丁目が違います"
+                    ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                    : "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300"
+                }`}
+              >
+                {b}
+              </span>
+            ))}
+          </span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">
+            {s.area || "住所不明"}・{s.unitCount}部屋
+          </span>
+        </li>
+      ))}
+      <li
+        role="option"
+        aria-selected={activeIndex === suggestions.length}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          onPick("new");
+        }}
+        className={`flex min-h-[44px] cursor-pointer items-center border-t border-gray-100 px-3 text-sm text-indigo-700 dark:border-gray-800 dark:text-indigo-300 ${
+          activeIndex === suggestions.length ? "bg-indigo-50 dark:bg-indigo-950/40" : "hover:bg-gray-50 dark:hover:bg-gray-800"
+        }`}
+      >
+        新しい棟として登録する
+      </li>
+    </ul>
+  );
+}
+
+export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
+  const { id, testId, value, onChange, address, choice, onChoiceChange, disabled, placeholder, inputClassName } = props;
+  // 候補は「どの入力に対する結果か」と一緒に持つ。入力と一致するときだけ出す
+  // (⚠effect の中で同期的に setState しない=eslint react-hooks/set-state-in-effect)。
+  const [result, setResult] = useState<{ query: string; data: BuildingSuggestion[] }>({ query: "", data: [] });
+  const suggestions = result.query === value ? result.data : [];
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const [selected, setSelected] = useState<BuildingSuggestion | null>(null);
+  const seqRef = useRef(0);
+
+  useEffect(() => {
+    // ⚠打ち直したら古い候補を無効にする(連番を進める)。
+    seqRef.current += 1;
+    const seq = seqRef.current;
+    if (!shouldFetchSuggestions(value)) return;
+    const timer = setTimeout(async () => {
+      try {
+        const qs = new URLSearchParams({ name: value, address });
+        const res = await fetch(`/api/buildings/suggest?${qs.toString()}`);
+        if (!res.ok || !isLatestRequest(seq, seqRef.current)) return;
+        const body = (await res.json()) as { data: BuildingSuggestion[] };
+        if (isLatestRequest(seq, seqRef.current)) setResult({ query: value, data: body.data });
+      } catch {
+        // 候補が出なくても入力と保存は止めない(保存時に自動で判断する)。
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [value, address]);
+
+  const pick = (s: BuildingSuggestion | "new") => {
+    if (s === "new") {
+      setSelected(null);
+      onChoiceChange({ kind: "new" });
+    } else {
+      setSelected(s);
+      onChange(s.name);
+      onChoiceChange({ kind: "existing", buildingId: s.id });
+    }
+    setOpen(false);
+    setActiveIndex(-1);
+  };
+
+  const optionCount = suggestions.length + 1;
+  const listId = `${id}-suggestions`;
+  const summary = choiceSummary(choice, selected);
+
+  return (
+    <div className="relative">
+      <input
+        id={id}
+        data-testid={testId}
+        type="text"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        className={inputClassName}
+        onChange={(e) => {
+          onChange(e.target.value);
+          // 打ち直したら選択を外して自動の判断に戻す(§6.1)。
+          if (choice.kind !== "auto") onChoiceChange({ kind: "auto" });
+          setSelected(null);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={(e) => {
+          if (!open || !shouldFetchSuggestions(value)) return;
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            setActiveIndex((cur) => nextActiveIndex(cur, e.key as "ArrowDown" | "ArrowUp", optionCount));
+          } else if (e.key === "Enter" && activeIndex >= 0) {
+            e.preventDefault();
+            pick(activeIndex === suggestions.length ? "new" : suggestions[activeIndex]);
+          } else if (e.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+      />
+      {open && shouldFetchSuggestions(value) && (
+        <BuildingSuggestionList suggestions={suggestions} activeIndex={activeIndex} onPick={pick} listId={listId} />
+      )}
+      {summary && (
+        <p data-testid={testId ? `${testId}-choice` : undefined} className="mt-1 text-xs text-indigo-700 dark:text-indigo-300">
+          {summary}
+        </p>
+      )}
+    </div>
+  );
+}
