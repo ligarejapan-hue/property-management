@@ -59,6 +59,21 @@ describe("棟の自動つなぎ: 画面の文言が実装と同じ", () => {
   });
 });
 
+describe("棟の自動つなぎ: 受付帳CSVからの物件化は棟につながない(@codex P2)", () => {
+  // 画面に出ている受付帳CSVの取込は物件名を入れず、棟の自動つなぎも呼ばない。
+  // (棟につなぐ汎用CSV取込の画面は利用者には非表示。)取込側で棟につなぐようにしたら、資料もこのテストも直す。
+  const receptionSrc = readRepoFile("src/app/api/import/reception-property/route.ts");
+
+  it("受付帳CSVの取込は棟の自動つなぎを呼ばない", () => {
+    expect(receptionSrc).not.toContain("applyBuildingLink");
+  });
+
+  it("マニュアルは「受付帳CSVでも棟へつなぐ」と書かず、つながらないことを案内する", () => {
+    expect(manualSrc).not.toContain("受付帳CSVの取込でも、物件名から棟へつなぎます");
+    expect(manualSrc).toContain("受付帳CSVから作った物件には物件名が入らないため、棟にはつながりません");
+  });
+});
+
 describe("棟の自動つなぎ: 用語辞典に「棟」がある", () => {
   it("ガイドとマニュアルの両方", () => {
     expect(guideSrc).toContain("<tr><td>棟（とう）</td>");
