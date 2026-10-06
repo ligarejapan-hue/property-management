@@ -119,6 +119,10 @@ export function parseListPage(html: string): ListPage {
   const pageM = select.match(/<option value="(\d+)" selected/);
   if (!pagesM || !pageM) throw new LayoutChanged("ページ数");
   const page = Number(pageM[1]);
+  const pages = Number(pagesM[1]);
+  // ページ数が件数と合っているか(50件ずつ)。合わない(26906件なのに「1/1」など)画面をそのまま進めると、
+  // 1ページで行政庁を終わりにして、残りの会社を締めで消してしまう(@codex #477)。
+  if (pages !== Math.ceil(total / PAGE_SIZE)) throw new LayoutChanged("ページ数が件数と合わない");
   // 表示している範囲が、選んだページと件数に合っているか(50件ずつ・最後のページは件数で終わる)。
   // 合わない=別のページの中身。そのまま進めると間のページを読まずに締めで会社を消してしまう(@codex #477)。
   if (rangeStart !== (page - 1) * PAGE_SIZE + 1 || rangeEnd !== Math.min(page * PAGE_SIZE, total)) {
@@ -164,7 +168,7 @@ export function parseListPage(html: string): ListPage {
   if (dataRows !== (table.match(/js_ShowDetail\(/g) ?? []).length) throw new LayoutChanged("読めなかった行");
   // 表示している範囲の行の数と違う=行が欠けた画面。そのまま進めると締めで欠けた会社を消してしまう(@codex #477)。
   if (dataRows !== expectedRows) throw new LayoutChanged("表示している範囲と行の数が違う");
-  return { total, pages: Number(pagesM[1]), page, rows: [...byKey.values()] };
+  return { total, pages, page, rows: [...byKey.values()] };
 }
 
 /** 詳細(tkGaiyo.do)を読む。開いた会社と違う免許番号なら取り違えとして止める。 */

@@ -125,6 +125,18 @@ describe("一覧のページを読む", () => {
     expect(() => parseListPage(listHtml.replace("1件目～50件目までを表示", ""))).toThrow(LayoutChanged);
   });
 
+  it("★ページ数が件数と合わない(26906件なのに「1/1」)一覧 → LayoutChanged(1ページで終わりにしない・@codex #477)", () => {
+    const onePage = listHtml.replace(
+      '<option value="1" selected="selected">1/539</option><option value="2">2/539</option><option value="3">3/539</option><option value="539">539/539</option>',
+      '<option value="1" selected="selected">1/1</option>',
+    );
+    expect(onePage).not.toBe(listHtml);
+    expect(() => parseListPage(onePage)).toThrow(LayoutChanged);
+    // 1ページ多い・少ないも合わない
+    expect(() => parseListPage(listHtml.replaceAll("/539<", "/540<"))).toThrow(LayoutChanged);
+    expect(() => parseListPage(listHtml.replaceAll("/539<", "/538<"))).toThrow(LayoutChanged);
+  });
+
   it("★件数は0でないのに行が1つも無い一覧 → LayoutChanged(空のページとして進めない・@codex #477)", () => {
     const empty = listHtml.replace(/<tr>\s*<td[\s\S]*<\/tr>\s*<\/table>/, "</table>");
     expect(() => parseListPage(empty)).toThrow(LayoutChanged);
