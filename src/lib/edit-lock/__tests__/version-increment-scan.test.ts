@@ -216,13 +216,13 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
   // ⚠下の2件は「編集画面で書けない項目」ではない(buildingName は書ける)。例外の理由は別:
   //   applyBuildingLink は必ず物件の保存と同じトランザクションで、物件を作った直後(新しい行)
   //   か version を進める更新の直後に呼ばれる。版番号はその保存で1回だけ進む(2回進めない)。
-  "src/lib/building-link/apply.ts:113": {
+  "src/lib/building-link/apply.ts:120": {
     reason:
       "property.buildingId=null のみ(棟から外す。棟の自動づけ。呼び出し側が同じトランザクションで" +
       "物件を作る/version を進める更新をした後に呼ぶ=版番号はその保存で進む)",
     keys: ["buildingId"],
   },
-  "src/lib/building-link/apply.ts:179": {
+  "src/lib/building-link/apply.ts:186": {
     reason:
       "property.buildingId/buildingName(棟へつなぎ、物件名を棟の正式な表記にそろえる。" +
       "理由は上と同じ=同じトランザクションの保存が版番号を進める)",

@@ -59,6 +59,33 @@ describe("applyBuildingLink", () => {
     expect(db.properties[0]).toMatchObject({ buildingId: "b1", buildingName: "パークハウス第一" });
   });
 
+  it("★key が null の古い棟が650件あり、同じ棟が600件目でも見つけてつなぐ(作らない・@codex R7)", async () => {
+    for (let i = 0; i < 650; i++) {
+      db.buildings.push({
+        id: `old-${String(i).padStart(4, "0")}`,
+        name: i === 599 ? "パークハウス第一" : `無関係${i}`,
+        address: "東京都大田区南雪谷1丁目164-2",
+        nameKey: null, areaKey: null, createdAt: new Date("2025-01-01"), createdBy: "u0",
+      });
+    }
+    const tx = createFakeBuildingTx(db);
+    const out = await applyBuildingLink(tx, input());
+    expect(out).toMatchObject({ action: "linked", building: { id: "old-0599" } });
+    expect(db.buildings).toHaveLength(650); // 新しく作っていない
+    // id 順に200件ずつ読む(上限なし)
+    const legacyCalls = tx.building.findMany.mock.calls
+      .map((c) => c[0] as { where: Record<string, unknown>; take?: number; orderBy?: unknown })
+      .filter((a) => a.where.nameKey === null);
+    expect(legacyCalls.length).toBeGreaterThanOrEqual(4);
+    expect(legacyCalls.every((a) => a.take === 200)).toBe(true);
+    expect(legacyCalls[0].orderBy).toEqual({ id: "asc" });
+    expect(legacyCalls[1].where.id).toEqual({ gt: "old-0199" });
+    // 読んだ古い棟はすべて key を埋める(SKIP LOCKED のまま)
+    const backfills = db.executed.filter((sql) => /UPDATE "buildings" SET "name_key"/.test(sql));
+    expect(backfills).toHaveLength(650);
+    expect(backfills.every((sql) => /FOR UPDATE SKIP LOCKED/.test(sql))).toBe(true);
+  });
+
   it("key が null の古い棟も、その場で計算して見つけ、key を埋める(SKIP LOCKED)", async () => {
     db.buildings.push({ id: "old", name: "パークハウス第一", address: "東京都大田区南雪谷1丁目164-2", nameKey: null, areaKey: null, createdAt: new Date("2025-01-01"), createdBy: "u0" });
     const out = await applyBuildingLink(createFakeBuildingTx(db), input());

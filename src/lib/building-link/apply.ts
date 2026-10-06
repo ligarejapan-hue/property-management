@@ -21,9 +21,7 @@ import {
   type BuildingLinkWarning,
   type LinkCandidate,
 } from "./resolve";
-
-/** key が null の古い棟を、1回の判断で見る上限(本番の該当は1件)。 */
-const NULL_KEY_SCAN_LIMIT = 500;
+import { LEGACY_PAGE_SIZE, readAllLegacyBuildings } from "./suggest";
 
 export type BuildingLinkTx = Pick<Prisma.TransactionClient, "$executeRaw"> & {
   building: Pick<Prisma.TransactionClient["building"], "findUnique" | "findMany" | "create">;
@@ -67,12 +65,21 @@ export function buildingIdentityKeys(
 async function loadCandidates(tx: BuildingLinkTx, area: string, nameKey: string): Promise<LinkCandidate[]> {
   const select = { id: true, name: true, address: true, createdAt: true, _count: { select: { properties: true } } } as const;
   const keyed = await tx.building.findMany({ where: { areaKey: area, nameKey }, select });
-  const unkeyed = await tx.building.findMany({
-    where: { nameKey: null },
-    select,
-    orderBy: { createdAt: "asc" },
-    take: NULL_KEY_SCAN_LIMIT,
-  });
+  // ⚠[@codex R7] key が null の古い棟は**上限なしで全部**読む(id 順に200件ずつ)。件数で切ると、
+  //   枠の外の同じ棟を見落として重複の棟を作る(候補の画面は「保存時に自動で判断」と案内している)。
+  //   ページ送りは id の続き(gt)で読む(読んでいる間に他の保存が key を埋めても行がずれない)。
+  //   読んだ行は下ですべて key を埋めるので、古い棟は最初の数回の保存で無くなる。
+  const { rows: unkeyed } = await readAllLegacyBuildings(
+    ({ cursorId, take }) =>
+      tx.building.findMany({
+        where: { nameKey: null, ...(cursorId ? { id: { gt: cursorId } } : {}) },
+        select,
+        orderBy: { id: "asc" },
+        take,
+      }),
+    LEGACY_PAGE_SIZE,
+    Number.POSITIVE_INFINITY,
+  );
   const matched: typeof unkeyed = [];
   for (const b of unkeyed) {
     const keys = buildingIdentityKeys(b.name, b.address);
