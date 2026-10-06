@@ -54,3 +54,19 @@ describe("sales-sheets/new page — 配線", () => {
     expect(PAGE_SRC).toMatch(/setRows\(\[\]\);[\s\S]{0,200}setTotal\(0\);\s*setTotalPages\(1\);/);
   });
 });
+
+describe("sales-sheets/new page — 物件を登録したときの棟の知らせ(@codex R6)", () => {
+  const src = PAGE_SRC.replace(/\r\n/g, "\n");
+  it("★登録の結果(buildingLink)を受け取り、画面の上に知らせとして出す", () => {
+    expect(src).toMatch(/const handleCreated = \(id: string, propertyType: string, result\?: PostCreateResult\) => \{/);
+    expect(src).toMatch(/setBuildingNotice\(result\?\.buildingLink \?\? null\);/);
+    expect(src).toMatch(/<BuildingLinkNotice outcome=\{buildingNotice\} onClose=\{\(\) => setBuildingNotice\(null\)\} \/>/);
+    // 見出しのすぐ下(一覧の上)に出す
+    const noticeAt = src.indexOf("<BuildingLinkNotice");
+    expect(noticeAt).toBeGreaterThan(src.indexOf("<PageHeader"));
+    expect(noticeAt).toBeLessThan(src.indexOf("<SalesSheetPropertyPicker"));
+  });
+  it("apply.ts(prisma を読む)は型だけ読む", () => {
+    expect(src).not.toMatch(/import \{[^}]*\} from "@\/lib\/building-link\/apply"/);
+  });
+});

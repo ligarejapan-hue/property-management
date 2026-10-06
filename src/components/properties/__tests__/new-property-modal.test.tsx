@@ -91,3 +91,22 @@ describe("住所の町丁目が変わったら選んだ棟を外す(@codex R4・
     expect(src).not.toMatch(/onAddressChange=\{setAddress\}/);
   });
 });
+
+describe("onCreated へ棟の結果を渡す(@codex R6)", () => {
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../new-property-modal.tsx"),
+    "utf8",
+  ).replace(/\r\n/g, "\n");
+  it("★登録できたら buildingLink を onCreated(3つめの引数)へ渡す", () => {
+    expect(src).toMatch(
+      /resolvePostCreate\(onCreated, router\)\(result\.id, propertyType, \{ buildingLink: result\.buildingLink \?\? null \}\)/,
+    );
+    expect(src).toMatch(/onCreated\?: \(id: string, propertyType: string, result\?: PostCreateResult\) => void;/);
+  });
+  it("resolvePostCreate は3つめの引数をそのまま onCreated へ渡す", () => {
+    const onCreated = vi.fn();
+    const outcome = { action: "created", warnings: [] } as never;
+    resolvePostCreate(onCreated, { push: vi.fn() })("p1", "apartment_unit", { buildingLink: outcome });
+    expect(onCreated).toHaveBeenCalledWith("p1", "apartment_unit", { buildingLink: outcome });
+  });
+});

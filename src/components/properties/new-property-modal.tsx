@@ -15,6 +15,13 @@ import BuildingNameCombobox from "@/components/buildings/building-name-combobox"
 import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
 import { stashBuildingLinkNotice } from "@/lib/building-link/notice";
 import { areaChanged } from "@/lib/building-link/combobox-model";
+// ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む。
+import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
+
+/** 登録できたときに onCreated へ渡す結果(棟へつないだ結果=知らせに使う)。 */
+export interface PostCreateResult {
+  buildingLink?: BuildingLinkOutcome | null;
+}
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
 interface Props {
@@ -22,14 +29,15 @@ interface Props {
   /** 種別選択肢を制限する（販売図面ピッカー等）。未指定は従来どおり（旧値除く全種別）。 */
   typeFilter?: string[];
   /** 登録成功時の遷移を差し替える。未指定は従来どおり物件詳細へ router.push。 */
-  onCreated?: (id: string, propertyType: string) => void;
+  /** ⚠物件詳細へ移らない呼び出し元は、3つめの引数の buildingLink を自分の画面で知らせる(@codex R6)。 */
+  onCreated?: (id: string, propertyType: string, result?: PostCreateResult) => void;
 }
 
 /** 登録成功後のアクション（onCreated 指定時はそれ・未指定は物件詳細へ遷移）を返す純関数。 */
 export function resolvePostCreate(
-  onCreated: ((id: string, propertyType: string) => void) | undefined,
+  onCreated: ((id: string, propertyType: string, result?: PostCreateResult) => void) | undefined,
   router: { push: (url: string) => void },
-): (id: string, propertyType: string) => void {
+): (id: string, propertyType: string, result?: PostCreateResult) => void {
   if (onCreated) return onCreated;
   return (id) => router.push(`/properties/${id}`);
 }
@@ -91,9 +99,10 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
         buildingChoice: propertyType === "apartment_unit" ? buildingChoice : undefined,
       });
       // 知らせは物件詳細で1回だけ出す。物件詳細へ移らない呼び出し元(onCreated)では
+      // 預けずに、結果を onCreated へ渡す(呼び出し元の画面で知らせる・@codex R6)。
       // 預けない(あとで別の機会に古い知らせが出てしまうため)。
       if (!onCreated) stashBuildingLinkNotice(result.id, result.buildingLink);
-      resolvePostCreate(onCreated, router)(result.id, propertyType);
+      resolvePostCreate(onCreated, router)(result.id, propertyType, { buildingLink: result.buildingLink ?? null });
     } catch (err) {
       setError(err instanceof Error ? err.message : "登録に失敗しました");
       setSubmitting(false);
