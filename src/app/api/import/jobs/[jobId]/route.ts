@@ -87,13 +87,15 @@ const ROW_REASON_WHERE: Record<RowReason, Prisma.ImportJobRowWhereInput> = {
   // 受付帳×所有者のレビュー理由（REVIEW_REASON_LABEL の exact 値）。
   owner_unmatched: { errorMessage: "要レビュー（所有者未突合）" },
   no_key: { errorMessage: "要レビュー（キー不足）" },
-  // 棟未解決（csv unit 行の resolveBuildingId 失敗）。実際の生成文言は
+  // 棟未解決（csv unit 行の要確認）。今の文言は building-link/csv-resolve.ts の
+  //   - `棟名「X」に似た棟がN件あります。同じ建物ならレビュー画面で選んでください`
+  // 旧 resolveBuildingId(2026-10 に廃止)の文言(既存の取込行に残る)も
   // すべて「棟名」始まり（Codex P2: 旧 predicate は実メッセージと不一致だった）:
-  //   - `棟名「X」が見つかりません。棟を先に登録するか、…`        (csv/route.ts:225)
-  //   - `棟名「X」に一致する棟がN件あり特定できません。…`        (csv/route.ts:217)
-  //   - `棟名「X」に類似する棟がN件見つかりました。…`            (csv/route.ts:192)
-  //   - `棟名が見つかりません。棟を先に登録してください`（fallback, csv/route.ts:462）
-  // 「棟名」prefix の生成源は上記4箇所のみ＝prefix 固定（startsWith）なので
+  //   - `棟名「X」が見つかりません。棟を先に登録するか、…`
+  //   - `棟名「X」に一致する棟がN件あり特定できません。…`
+  //   - `棟名「X」に類似する棟がN件見つかりました。…`
+  //   - `棟名が見つかりません。棟を先に登録してください`（fallback）
+  // 「棟名」prefix の生成源は上記のみ＝prefix 固定（startsWith）なので
   // 無関係な行（住所なし/重複/要レビュー等）を拾わない。
   building_unresolved: { errorMessage: { startsWith: "棟名" } },
 };

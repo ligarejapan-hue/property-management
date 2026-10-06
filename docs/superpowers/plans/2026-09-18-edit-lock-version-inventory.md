@@ -15,8 +15,8 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 
 | # | ファイル:行 | 書く項目(編集画面で変えられるもの) | 修正内容 | 追加した振る舞いテスト |
 |---|---|---|---|---|
-| 1 | `src/app/api/import/csv/route.ts:750` | `finalUpdateData`(UPDATABLE_PROPERTY_FIELDS: address/postalCode/lotNumber/buildingNumber/note/…) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/properties-csv-import-postal-code.test.ts`「13. update時にversionを進める」 |
-| 2 | `src/app/api/import/jobs/[jobId]/rollback/route.ts:525`(2026-09-21 main合流で行番号ずれ・旧:461→493→外部レビュー対応で502→2026-09-28 業者からの反響の除外で525) | `restoreData`(RESTORABLE_PROPERTY_FIELDS = UPDATABLE_PROPERTY_FIELDS ∩ PROPERTY_TRACKED_FIELDS) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/import-rollback-restore-version.test.ts`(新規) |
+| 1 | `src/app/api/import/csv/route.ts:616`(2026-10-05 重複更新を棟のつなぎと同じトランザクションへ移して 588→611→import 追加で612→棟郵便番号の書き先・取込の目印で615→2026-10-06 変更ログを同じ tx で書く import 追加で616) | `finalUpdateData`(UPDATABLE_PROPERTY_FIELDS: address/postalCode/lotNumber/buildingNumber/note/…)。棟だけつなぐ行は空の data+version で進め、続けて同じトランザクションで applyBuildingLink | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/properties-csv-import-postal-code.test.ts`「13. update時にversionを進める」 |
+| 2 | `src/app/api/import/jobs/[jobId]/rollback/route.ts:559`(2026-09-21 main合流で行番号ずれ・旧:461→493→外部レビュー対応で502→2026-09-28 業者からの反響の除外で525→2026-10-05 取込が作った空の棟の後始末で536→棟の復元で559) | `restoreData`(RESTORABLE_PROPERTY_FIELDS = UPDATABLE_PROPERTY_FIELDS ∩ PROPERTY_TRACKED_FIELDS、2026-10-05 から CSV 重複更新がつないだ buildingId/buildingName も組で) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/import-rollback-restore-version.test.ts`(新規) |
 | 3 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:344` | `propertyUpdates`(lotNumber/buildingNumber。roomNoは対象外だが同じ更新に同居) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/manual-link-archive-filter.test.ts`「物件の空欄補完は version を進める」 |
 | 4 | `src/app/api/import/reception-owner/route.ts:354` | `updates`(lotNumber/buildingNumber/roomNo。同上) | `data` に `version: { increment: 1 }` を追加 | `src/lib/__tests__/reception-owner-archive-race.test.ts`「物件の空欄補完(lotNumber)は…」 |
 | 5 | `src/app/api/import/reception-owner/route.ts:405` | `dmStatus`(hold→send昇格。PropertyEditForm「DM判断」で編集可能) | `data` に `version: { increment: 1 }` を追加 | 同上「DM○による dmStatus: hold→send の昇格は…」 |
@@ -40,7 +40,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/admin/owners/correction/mislink/route.ts:406` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/admin/owners/correction/mislink/route.ts:435` | `property.updatedAt` のみ | 同上。`updatedAt` は `updatePropertySchema` にも `property-edit-form.tsx` の FORM_FIELDS にも無い |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:262` | `owner.updatedAt` のみ | 同上(所有者行ロックtouch) |
-| `src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:180` | `owner.updatedAt` のみ | 同上 |
+| `src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:202` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/import/paste/commit/route.ts:407` | `owner.updatedAt` のみ | 同上(既存所有者へのリンク可否確認のための行ロックtouch) |
 | `src/app/api/import/reception-owner/route.ts:589` | `owner.updatedAt` のみ | 同上 |
 | `src/app/api/owners/[id]/memos/route.ts:241` | (コード本体ではない) | **正規表現の誤検出**。`owner.updateMany({ where: { id, isArchived: false } })` という文字列は、実際の呼び出しの使い方を説明する**コードコメント**であり、実行されるコードではない(実際の呼び出しは同ファイル252行目) |
@@ -50,6 +50,8 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/properties/[id]/owners/route.ts:58` | `owner.updatedAt` のみ | 所有者リンク時の行ロックtouch |
 | `src/app/api/properties/sale-dm/drafts/[id]/outcome/route.ts:267` | `property.dmUndeliverableAt = null` のみ | 訂正による自動解除。理由は上記2件と同じ |
 | `src/lib/registry-pdf/process.ts:361` | `owner.updatedAt` のみ | 既存所有者再利用時の行ロックtouch |
+| `src/lib/building-link/apply.ts:113` | `property.buildingId = null` のみ | (2026-10-05 棟の自動づけで追加)**編集画面で書けない項目ではない**が、`applyBuildingLink` は必ず物件の保存と同じトランザクションで、物件を作った直後(新しい行)か version を進める更新の直後に呼ばれる。版番号はその保存で1回だけ進む |
+| `src/lib/building-link/apply.ts:179` | `property.buildingId`/`buildingName` | 同上(棟へつなぎ、物件名を棟の正式な表記にそろえる) |
 
 `updatedAt` が編集画面から書けないことの根拠: `src/lib/validators.ts` の `updatePropertySchema`(200-241行)・`updateOwnerSchema`(266-283行)のどちらにも `updatedAt` フィールドが無く、`property-edit-form.tsx` の `FORM_FIELDS`(105-158行)にも該当キーが無い。`dmUndeliverableAt` も両スキーマ・両フォームどちらにも存在しない。
 
@@ -72,13 +74,13 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/admin/owners/correction/mislink/route.ts:531` | `owner.version` のみ(target側) |
 | `src/app/api/admin/owners/correction/mislink/route.ts:545` | `property.version` のみ |
 | `src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:302` | `owner` の住所ペア空欄補完 |
-| `src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:214` | `owner` の住所ペア空欄補完 |
+| `src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:236` | `owner` の住所ペア空欄補完 |
 | `src/app/api/import/reception-owner/route.ts:629` | `owner` の住所ペア空欄補完 |
 | `src/app/api/owners/[id]/corporate-apply/route.ts:368` | `owner` の法人番号適用フィールド(編集画面本体の保存窓口) |
 | `src/app/api/owners/[id]/corporate-cleanup/route.ts:248` | `owner.name`/`address`/`note`/`corporateNumber` |
 | `src/app/api/owners/[id]/route.ts:213` | `owner` の編集画面フィールド一式(編集画面本体の保存窓口) |
 | `src/app/api/properties/[id]/actions/route.ts:157` | `property` のアクション実行結果フィールド |
-| `src/app/api/properties/[id]/route.ts:422` | `property` の編集画面フィールド一式(編集画面本体の保存窓口) |
+| `src/app/api/properties/[id]/route.ts:448` | `property` の編集画面フィールド一式(編集画面本体の保存窓口) |
 | `src/lib/sales-sheet/property-writeback/apply-writeback.ts:30` | `property` の販売条件(販売図面の作成画面で入れた値の書き戻し。F3で追加。呼び出し側が `FOR UPDATE`+担当者スコープを取った上で `where` に version を付けて書く) |
 | `src/app/api/properties/sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts:212` | `property.dmScenarioId`(売却DMの発送の画面から物件単位で「種類を変える」。DMの種類 PR-S2 Task 5。物件行 `FOR UPDATE`+編集中の鍵の確認の後、`where` に読んだ version を付けて書く・変更履歴1行) |
 | `src/app/api/properties/bulk-update/route.ts:87` | `property.caseStatus`/`registryStatus`/`dmStatus`/`assignedTo` |

@@ -201,6 +201,13 @@ vi.mock("@/lib/prisma", () => {
   return { prisma: { $transaction: vi.fn(async (fn: (t: unknown) => unknown) => fn(tx)), ...tx } };
 });
 
+// 棟へのつなぎ(Task 3)は mock。tx の最後で呼ばれること・引数だけを見る。
+const { applyMock, auditLinkMock } = vi.hoisted(() => ({ applyMock: vi.fn(), auditLinkMock: vi.fn() }));
+vi.mock("@/lib/building-link/apply", () => ({
+  applyBuildingLink: applyMock,
+  writeBuildingLinkAudit: auditLinkMock,
+}));
+
 import { POST } from "../route";
 import { NextRequest } from "next/server";
 
@@ -257,6 +264,7 @@ beforeEach(() => {
   //   累積呼び出しを拾って失敗するのを防ぐ(実装の実装をREADME通りにモックの実装
   //   自体はここでは消えない=clearAllMocksは呼び出し履歴だけを消す)。
   vi.clearAllMocks();
+  applyMock.mockResolvedValue({ action: "none", building: null, previousBuildingId: null, renamedFrom: null, warnings: [] });
   mockPerms = FULL_PERMS;
   existingByExternalKey = null;
   storedExternalKey = null;
@@ -1373,5 +1381,53 @@ describe("まとめ取込は重複確認と登録を1つのロックの中で行
   it("★ロックの順序は「共通のロック → 外部キーのロック」(どの経路も同じ順＝待ちの輪ができない)", async () => {
     await POST(req(bulk));
     expect(callOrder.indexOf("bulkLock")).toBeLessThan(callOrder.indexOf("advisoryLock"));
+  });
+});
+
+describe("棟へのつなぎ(区分マンションを同じ棟にまとめる)", () => {
+  const unitBody = {
+    ...baseBody,
+    property: { ...baseBody.property, propertyType: "apartment_unit", buildingName: "n" },
+  };
+  const none = { action: "none", building: null, previousBuildingId: null, renamedFrom: null, warnings: [] };
+
+  it("物件を作った同じ tx の最後で棟へつなぐ(choice 省略=auto)", async () => {
+    applyMock.mockResolvedValue({ action: "created", building: { id: "b1", name: "n" }, previousBuildingId: null, renamedFrom: null, warnings: [] });
+    const res = await POST(req(unitBody));
+    expect(res.status).toBe(200);
+    expect(applyMock).toHaveBeenCalledTimes(1);
+    expect(applyMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      propertyId: "new-prop", propertyType: "apartment_unit", buildingName: "n",
+      choice: { kind: "auto" }, currentBuildingId: null, buildingNumber: null, userId: "user-1",
+    }));
+    const json = await res.json();
+    expect(json.propertyId).toBe("new-prop");
+    expect(json.buildingLink).toMatchObject({ action: "created" });
+    expect(auditLinkMock).toHaveBeenCalledWith("user-1", "new-prop", expect.objectContaining({ action: "created" }));
+  });
+
+  it("つなぎは物件・所有者の紐付けを作った後(tx の最後)", async () => {
+    let ownerLinksAtApply = -1;
+    applyMock.mockImplementation(async () => {
+      ownerLinksAtApply = created.propertyOwner?.length ?? 0;
+      return none;
+    });
+    await POST(req({ ...unitBody, owner: { name: "山田太郎" } }));
+    expect(ownerLinksAtApply).toBe(1);
+  });
+
+  it("確認画面で選んだ棟(existing)を小文字にして渡す", async () => {
+    const id = "11111111-1111-4111-8111-111111111AAA";
+    await POST(req({ ...unitBody, buildingChoice: { kind: "existing", buildingId: id } }));
+    expect(applyMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      choice: { kind: "existing", buildingId: id.toLowerCase() },
+    }));
+  });
+
+  it("buildingChoice の形が不正なら 400(物件は作らない)", async () => {
+    const res = await POST(req({ ...unitBody, buildingChoice: { kind: "existing", buildingId: "x" } }));
+    expect(res.status).toBe(400);
+    expect(applyMock).not.toHaveBeenCalled();
+    expect(created.property).toBeUndefined();
   });
 });

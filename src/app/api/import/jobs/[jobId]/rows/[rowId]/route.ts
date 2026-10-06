@@ -15,8 +15,10 @@ import { findDuplicateOwner } from "@/lib/owner-dedup";
 import { recalculateJobCounts } from "@/lib/import-job-counts";
 import { getStorage } from "@/lib/storage";
 
+import { applyBuildingLink, writeBuildingLinkAudit } from "@/lib/building-link/apply";
 import {
   buildPropertyCreateData,
+  buildingChoiceFromRow,
   buildOwnerCreateData,
   mapOwnerRawData,
 } from "@/lib/import-row-field-map";
@@ -79,9 +81,28 @@ export async function PATCH(
 
       if (row.job.jobType === "property_csv") {
         const createData = buildPropertyCreateData(sourceData, session.id);
-        createdRecord = await prisma.property.create({
-          data: createData as Parameters<typeof prisma.property.create>[0]["data"],
+        // 物件を作るのと同じトランザクションで棟へつなぐ。要確認の画面で選んだ棟
+        // (`__resolved_building_id`)はここで existing として効かせる(以前は読まれず落ちていた)。
+        const { property, buildingLink } = await prisma.$transaction(async (tx) => {
+          const property = await tx.property.create({
+            data: createData as Parameters<typeof prisma.property.create>[0]["data"],
+          });
+          const buildingLink = await applyBuildingLink(tx, {
+            propertyId: property.id,
+            propertyType: property.propertyType,
+            buildingName: property.buildingName,
+            address: property.address,
+            buildingNumber: property.buildingNumber,
+            choice: buildingChoiceFromRow(sourceData),
+            currentBuildingId: null,
+            userId: session.id,
+            // 棟を作ったら同じ tx で取込の目印を書く(取り消しが空の棟を消すとき確実に見つける)。
+            importJobId: jobId,
+          });
+          return { property, buildingLink };
         });
+        await writeBuildingLinkAudit(session.id, property.id, buildingLink, { importJobId: jobId });
+        createdRecord = property;
       } else if (row.job.jobType === "owner_csv") {
         const createData = buildOwnerCreateData(sourceData);
         const dup = await findDuplicateOwner({

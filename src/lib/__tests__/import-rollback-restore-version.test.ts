@@ -55,6 +55,7 @@ vi.mock("@/lib/prisma", () => ({
     importJob: { findUnique: vi.fn(), update: vi.fn() },
     property: { findMany: vi.fn() },
     changeLog: { findMany: vi.fn() },
+    auditLog: { findMany: vi.fn(async () => []) },
     $transaction: vi.fn(),
   },
 }));

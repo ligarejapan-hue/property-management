@@ -71,7 +71,6 @@
 
 | 変数名 | 説明 | デフォルト |
 |--------|------|-----------|
-| `UNIT_IMPORT_BUILDING_NOT_FOUND` | 区分取込時の棟未存在挙動 | `needs_review` |
 | `NTA_ROSENKA_API_URL` | 路線価 API（将来実装） | 未設定 |
 | `ROAD_LEDGER_API_URL` | 道路台帳 API（将来実装） | 未設定 |
 
@@ -107,7 +106,6 @@
 | `STORAGE_SERVER_URL` | 🟢 設定値 | ストレージの公開エンドポイント |
 | `STORAGE_SERVER_BUCKET` | 🟢 設定値 | バケット名 |
 | `KSJ_API_URL` | 🟢 設定値 | 内部 GeoServer URL |
-| `UNIT_IMPORT_BUILDING_NOT_FOUND` | 🟢 設定値 | 動作設定値 |
 
 > 設定値も秘匿不要ではあるが、git 管理を増やすメリットより  
 > **「env はすべてサーバー上」で統一する方が運用ミスが少ない**。
@@ -131,7 +129,6 @@ STORAGE_BACKEND=server
 STORAGE_SERVER_URL="https://files.your-domain.com"
 STORAGE_SERVER_BUCKET=property-management
 KSJ_API_URL="http://your-geoserver.internal/geoserver/ksj/ows"
-UNIT_IMPORT_BUILDING_NOT_FOUND=needs_review
 ```
 
 配置手順:

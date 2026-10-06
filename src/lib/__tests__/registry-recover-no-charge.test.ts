@@ -224,7 +224,7 @@ describe("回収の入口(画面)", () => {
     // ⚠Task 6(編集の鍵)で保存は $transaction(物件行ロック→鍵の確認→更新)に
     //   包まれ、実際の更新呼び出しは tx.property.updateMany になる
     //   (prisma.property.updateMany ではない)。
-    const writeAt = patch.indexOf("return tx.property.updateMany");
+    const writeAt = patch.indexOf("const res = await tx.property.updateMany");
     expect(writeAt).toBeGreaterThan(-1);
     const writeSeg = patch.slice(writeAt, patch.indexOf("});", writeAt));
     expect(writeSeg).toContain("version,");

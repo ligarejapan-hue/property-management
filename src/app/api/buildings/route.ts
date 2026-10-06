@@ -10,6 +10,7 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { buildingIdentityKeys } from "@/lib/building-link/apply";
 
 const createBuildingSchema = z.object({
   name: z.string().min(1, "マンション名は必須です"),
@@ -83,6 +84,7 @@ export async function POST(request: NextRequest) {
       data: {
         name: data.name,
         address: data.address,
+        ...buildingIdentityKeys(data.name, data.address),
         postalCode: data.postalCode,
         lotNumber: data.lotNumber,
         realEstateNumber: data.realEstateNumber,
