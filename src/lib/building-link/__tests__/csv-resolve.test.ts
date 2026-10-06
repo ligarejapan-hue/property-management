@@ -185,3 +185,53 @@ describe("planDuplicateBuildingLink(CSV の重複=既存物件の更新で棟を
     expect(planDuplicateBuildingLink({ existing: unit(), choice: AUTO, buildingName: "  " })).toBeNull();
   });
 });
+
+describe("resolveCsvBuilding: key が null の古い棟を全部見る(@codex R7)", () => {
+  /** take と id の続き(gt)・id 順を写す偽物。 */
+  function pagingDb(buildings: CsvBuildingRow[]) {
+    const calls: Array<{ where: Record<string, unknown>; take?: number; orderBy?: unknown }> = [];
+    return {
+      calls,
+      db: {
+        building: {
+          findMany: async (args: { where: Record<string, unknown>; take?: number; orderBy?: { id?: "asc" } }) => {
+            calls.push(args);
+            const { where } = args;
+            let rows = buildings.filter((b) => {
+              if ("areaKey" in where) return b.areaKey === where.areaKey && b.nameKey === where.nameKey;
+              if (where.nameKey === null) {
+                const gt = (where.id as { gt?: string } | undefined)?.gt;
+                return b.nameKey === null && (gt === undefined || b.id > gt);
+              }
+              return false; // 部分一致の問い合わせ(key のある棟)は今回は空
+            });
+            if (args.orderBy?.id === "asc") rows = [...rows].sort((x, y) => (x.id < y.id ? -1 : 1));
+            return rows.slice(0, args.take ?? rows.length).map((b) => ({ ...b, _count: { properties: b.unitCount } }));
+          },
+        },
+      },
+    };
+  }
+
+  it("★古い棟が650件あり、600件目が部分一致なら review(create にしない)", async () => {
+    const legacy = Array.from({ length: 650 }, (_, i) =>
+      row(`old-${String(i).padStart(4, "0")}`, i === 599 ? "グランパークハイツ本館" : `無関係${i}`, "東京都港区六本木1丁目1"),
+    );
+    const { db, calls } = pagingDb(legacy);
+    const r = await resolveCsvBuilding(db as never, "グランパークハイツ", ADDR, new Map());
+    expect(r).toMatchObject({ kind: "review", candidates: [{ id: "old-0599" }] });
+    const legacyCalls = calls.filter((c) => c.where.nameKey === null);
+    expect(legacyCalls.length).toBeGreaterThanOrEqual(4);
+    expect(legacyCalls.every((c) => c.take === 200)).toBe(true);
+    expect(legacyCalls[0].orderBy).toEqual({ id: "asc" });
+    expect(legacyCalls[1].where.id).toEqual({ gt: "old-0199" });
+  });
+
+  it("古い棟に何も合わなければ create のまま・create は覚えない", async () => {
+    const legacy = Array.from({ length: 450 }, (_, i) => row(`old-${String(i).padStart(4, "0")}`, `無関係${i}`, "東京都港区六本木1丁目1"));
+    const { db } = pagingDb(legacy);
+    const cache = new Map();
+    expect(await resolveCsvBuilding(db as never, "グランパークハイツ", ADDR, cache)).toEqual({ kind: "create" });
+    expect(cache.size).toBe(0);
+  });
+});
