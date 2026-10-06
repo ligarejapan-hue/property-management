@@ -21,7 +21,7 @@ import { unwrapCsvTextCell } from "@/lib/csv-encode";
 const VALID_REGISTRY_STATUS = ["unconfirmed", "scheduled", "obtained"];
 const VALID_DM_STATUS = ["send", "hold", "no_send"];
 const VALID_OCCUPANCY_STATUS = ["vacant", "occupied", "unknown"];
-// 棟郵便番号は棟の欄。確定は物件を作るだけなので読まない。
+// 棟郵便番号は棟の欄。物件には入れない(つないだ棟へは buildingPostalCodeFromRow で入れる)。
 const NOT_PROPERTY_FIELDS = new Set(["buildingPostalCode"]);
 
 /** Map Japanese CSV header names to property model field names. */
@@ -265,6 +265,21 @@ export function buildPropertyCreateData(
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const BUILDING_POSTAL_FIELDS: ReadonlySet<string> = new Set(["buildingPostalCode"]);
+
+/**
+ * 行の「棟郵便番号」を、CSV 取込と同じく妥当な7桁だけハイフンなしにして返す(無い・不正なら null)。
+ * ⚠CSV 取込は棟が決まった行でだけ棟へ入れる(要確認の行では入れずに残す)。確定でつないだ棟へ入れるために読む。
+ */
+export function buildingPostalCodeFromRow(data: Record<string, string>): string | null {
+  const mapped = mapRawData(data, BUILDING_POSTAL_FIELDS, (key) => {
+    if (key === "buildingPostalCode") return key;
+    return PROPERTY_CSV_COLUMN_MAP[key] === "buildingPostalCode" ? "buildingPostalCode" : undefined;
+  });
+  const raw = mapped.buildingPostalCode;
+  return raw && isValidPostalCode(raw) ? normalizePostalCode(raw) : null;
+}
 
 /** 要確認の画面で選んだ棟(`__resolved_building_id`)を、確定時の棟の選び方にする。 */
 export function buildingChoiceFromRow(data: Record<string, string>): BuildingChoice {
