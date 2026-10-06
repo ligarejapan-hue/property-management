@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import type { BuildingChoice } from "@/lib/building-link/resolve";
 import type { BuildingSuggestion } from "@/lib/building-link/suggest";
 import {
+  canUseListKeys,
   choiceSummary,
+  listState,
   isLatestRequest,
   nextActiveIndex,
   pickAtIndex,
@@ -12,9 +14,10 @@ import {
   shouldFetchSuggestions,
   shouldOpenOnArrow,
   suggestionBadges,
-  resultMatches,
   suggestArea,
   suggestQueryStringForArea,
+  type SuggestListState,
+  type SuggestResult,
 } from "@/lib/building-link/combobox-model";
 
 export interface BuildingNameComboboxProps {
@@ -100,14 +103,32 @@ export function BuildingSuggestionList({
   );
 }
 
+/**
+ * 読み込み中・失敗のときの行(@codex R3)。⚠選べる行(option)を持たない=
+ * 「新しい棟として登録する」も出さない(終わる前に選ぶと重複の棟を作りうる)。
+ */
+export function BuildingSuggestionStatus({ state, listId }: { state: Exclude<SuggestListState, "ready">; listId: string }) {
+  return (
+    <div
+      id={listId}
+      role="status"
+      className="absolute z-20 mt-1 w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-500 shadow-lg dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400"
+    >
+      {state === "loading" ? "候補を探しています…" : "候補を読み込めませんでした。保存するときに自動で判断します"}
+    </div>
+  );
+}
+
 export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
   const { id, testId, value, onChange, address, choice, onChoiceChange, disabled, placeholder, inputClassName } = props;
   // 候補は「どの入力に対する結果か」と一緒に持つ。入力と一致するときだけ出す
   // (⚠effect の中で同期的に setState しない=eslint react-hooks/set-state-in-effect)。
   // ⚠どの町丁目で並べた結果かも持つ。住所を変えたら前の丁目の候補は出さない(@codex R2)。
   const area = suggestArea(address);
-  const [result, setResult] = useState<{ query: string; area: string; data: BuildingSuggestion[] }>({ query: "", area: "", data: [] });
-  const suggestions = resultMatches(result, value, area) ? result.data : [];
+  // ⚠成否も持つ。今の名前+丁目の問い合わせが成功で終わるまで、選べる一覧は出さない(@codex R3)。
+  const [result, setResult] = useState<SuggestResult | null>(null);
+  const state = listState(result, value, area);
+  const suggestions = state === "ready" && result ? result.data : [];
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [selected, setSelected] = useState<BuildingSuggestion | null>(null);
@@ -118,19 +139,28 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
     seqRef.current += 1;
     const seq = seqRef.current;
     if (!shouldFetchSuggestions(value)) return;
+    // 失敗は「今の名前+丁目で失敗した」として残す(一覧は「読み込めませんでした」になり、
+    // 「新しい棟」は選べない)。⚠set はこの非同期の続きの中だけ(effect 本体では呼ばない)。
+    const fail = () => {
+      if (!isLatestRequest(seq, seqRef.current)) return;
+      setResult({ query: value, area, status: "error", data: [] });
+      setActiveIndex(-1);
+    };
     const timer = setTimeout(async () => {
       try {
         // ⚠住所はそのまま送らない(町丁目に丸める=suggestQueryString)。
         const res = await fetch(`/api/buildings/suggest?${suggestQueryStringForArea(value, area)}`);
-        if (!res.ok || !isLatestRequest(seq, seqRef.current)) return;
+        if (!isLatestRequest(seq, seqRef.current)) return;
+        if (!res.ok) return fail();
         const body = (await res.json()) as { data?: unknown };
-        if (!Array.isArray(body.data)) return;
+        if (!Array.isArray(body.data)) return fail();
         if (isLatestRequest(seq, seqRef.current)) {
-          setResult({ query: value, area, data: body.data as BuildingSuggestion[] });
+          setResult({ query: value, area, status: "ok", data: body.data as BuildingSuggestion[] });
           setActiveIndex(-1);
         }
       } catch {
         // 候補が出なくても入力と保存は止めない(保存時に自動で判断する)。
+        fail();
       }
     }, 300);
     return () => clearTimeout(timer);
@@ -163,7 +193,7 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"
-        aria-activedescendant={open && activeIndex >= 0 ? `${listId}-opt-${activeIndex}` : undefined}
+        aria-activedescendant={open && state === "ready" && activeIndex >= 0 ? `${listId}-opt-${activeIndex}` : undefined}
         value={value}
         disabled={disabled}
         placeholder={placeholder}
@@ -187,6 +217,12 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
           }
           if (!open || !shouldFetchSuggestions(value)) return;
           if (!shouldHandleListKey(e.nativeEvent.isComposing)) return;
+          if (e.key === "Escape") {
+            setOpen(false);
+            return;
+          }
+          // ⚠読み込み中・失敗のときは上下キー・Enter で何も選ばない(「新しい棟」も)。
+          if (!canUseListKeys(state)) return;
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {
             e.preventDefault();
             setActiveIndex((cur) => nextActiveIndex(cur, e.key as "ArrowDown" | "ArrowUp", optionCount));
@@ -195,13 +231,15 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
             if (target === null) return;
             e.preventDefault();
             pick(target);
-          } else if (e.key === "Escape") {
-            setOpen(false);
           }
         }}
       />
       {open && shouldFetchSuggestions(value) && (
-        <BuildingSuggestionList suggestions={suggestions} activeIndex={activeIndex} onPick={pick} listId={listId} />
+        state === "ready" ? (
+          <BuildingSuggestionList suggestions={suggestions} activeIndex={activeIndex} onPick={pick} listId={listId} />
+        ) : (
+          <BuildingSuggestionStatus state={state} listId={listId} />
+        )
       )}
       {summary && (
         <p data-testid={testId ? `${testId}-choice` : undefined} className="mt-1 text-xs text-indigo-700 dark:text-indigo-300">

@@ -29,6 +29,27 @@ export function suggestQueryStringForArea(name: string, area: string): string {
 export function resultMatches(result: { query: string; area: string }, value: string, area: string): boolean {
   return result.query === value && result.area === area;
 }
+/** 候補の問い合わせの結果(どの名前・町丁目に対するものか+成否)。 */
+export interface SuggestResult {
+  query: string;
+  area: string;
+  status: "ok" | "error";
+  data: BuildingSuggestion[];
+}
+export type SuggestListState = "loading" | "error" | "ready";
+/**
+ * 一覧に何を出すか(@codex R3)。⚠今の名前+町丁目の問い合わせが**成功で終わる**まで
+ * 「新しい棟として登録する」を選べる一覧として出さない。遅い・失敗した問い合わせの間に
+ * 「新しい棟」を選ぶと、同じ丁目に同じ名前の棟があっても新しく作ってしまう(重複)。
+ */
+export function listState(result: SuggestResult | null, value: string, area: string): SuggestListState {
+  if (!result || !resultMatches(result, value, area)) return "loading";
+  return result.status === "ok" ? "ready" : "error";
+}
+/** 上下キー・Enter で候補を動かす/選ぶのは ready のときだけ。 */
+export function canUseListKeys(state: SuggestListState): boolean {
+  return state === "ready";
+}
 /** 閉じた一覧(Esc・選んだ後)を上下キーで開き直すか。 */
 export function shouldOpenOnArrow(e: { open: boolean; key: string; isComposing: boolean; value: string }): boolean {
   return !e.open && (e.key === "ArrowDown" || e.key === "ArrowUp") && !e.isComposing && shouldFetchSuggestions(e.value);

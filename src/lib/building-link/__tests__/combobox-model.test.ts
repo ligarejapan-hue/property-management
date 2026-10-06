@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shouldFetchSuggestions, isLatestRequest, nextActiveIndex, suggestionBadges, choiceSummary, pickAtIndex, shouldHandleListKey, suggestQueryString, shouldOpenOnArrow, suggestArea, resultMatches } from "@/lib/building-link/combobox-model";
+import { shouldFetchSuggestions, isLatestRequest, nextActiveIndex, suggestionBadges, choiceSummary, pickAtIndex, shouldHandleListKey, suggestQueryString, shouldOpenOnArrow, suggestArea, resultMatches, listState, canUseListKeys } from "@/lib/building-link/combobox-model";
 
 const s = { id: "b1", name: "パーク第一", area: "東京都大田区南雪谷1丁目", unitCount: 3, sameName: true, sameArea: true };
 
@@ -84,5 +84,29 @@ describe("resultMatches(手元の候補が今の入力・今の丁目のもの�
     const addr = "東京都港区六本木1丁目1-2";
     expect(new URLSearchParams(suggestQueryString("パーク第一", addr)).get("area")).toBe(suggestArea(addr));
     expect(suggestArea("")).toBe("");
+  });
+});
+
+describe("listState(読み込みが終わるまで「新しい棟」を選ばせない・@codex R3)", () => {
+  const ok = { query: "パーク第一", area: "東京都港区六本木1丁目", status: "ok" as const, data: [] };
+  const err = { ...ok, status: "error" as const };
+  it("結果がまだ無ければ loading", () => {
+    expect(listState(null, "パーク第一", "東京都港区六本木1丁目")).toBe("loading");
+  });
+  it("★前の入力・前の丁目の結果なら loading(古い結果を完了扱いにしない)", () => {
+    expect(listState(ok, "パーク第二", "東京都港区六本木1丁目")).toBe("loading");
+    expect(listState(ok, "パーク第一", "東京都港区赤坂2丁目")).toBe("loading");
+    expect(listState(err, "パーク第二", "東京都港区六本木1丁目")).toBe("loading");
+  });
+  it("★今の名前+丁目で失敗していれば error", () => {
+    expect(listState(err, "パーク第一", "東京都港区六本木1丁目")).toBe("error");
+  });
+  it("今の名前+丁目で成功していれば ready(候補0件でも)", () => {
+    expect(listState(ok, "パーク第一", "東京都港区六本木1丁目")).toBe("ready");
+  });
+  it("★上下キー・Enter で選べるのは ready のときだけ", () => {
+    expect(canUseListKeys("ready")).toBe(true);
+    expect(canUseListKeys("loading")).toBe(false);
+    expect(canUseListKeys("error")).toBe(false);
   });
 });
