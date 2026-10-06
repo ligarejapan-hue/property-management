@@ -28,15 +28,17 @@ function smallSite(): Site {
 
 function fakeClient(
   site: Site,
-  opts: { failAt?: Set<number>; failKind?: FetchError["kind"]; brokenDetail?: string } = {},
+  opts: { failAt?: Set<number>; failKind?: FetchError["kind"]; brokenDetail?: string | ((key: string) => boolean) } = {},
 ) {
   let n = 0;
   const log: string[] = [];
+  const broken = (key: string) =>
+    typeof opts.brokenDetail === "function" ? opts.brokenDetail(key) : opts.brokenDetail === key;
   const hit = (what: string) => {
     n++;
     log.push(what);
     if (opts.failAt?.has(n)) throw new FetchError(opts.failKind ?? "http_5xx");
-    if (opts.brokenDetail && what === `detail ${opts.brokenDetail}`) throw new FetchError("layout");
+    if (what.startsWith("detail ") && broken(what.slice("detail ".length))) throw new FetchError("layout");
   };
   // 本物の client と同じく、ページ数より先のページは空の結果を返す。
   const page = (a: string, p: number): ListPage => {
@@ -114,6 +116,9 @@ function memoryStore() {
     async saveDetail(d, at) {
       const r = recs.get(d.licenseKey)!;
       recs.set(d.licenseKey, { ...r, phone: d.phone, companyKana: d.companyKana, needsDetail: false, detailAt: at, detailFailCount: 0 });
+    },
+    async countDetailExhausted(cycle) {
+      return [...recs.values()].filter((r) => r.needsDetail && r.listed && r.seenCycle === cycle && r.detailFailCount >= 3).length;
     },
     async closeCycle(cycle) {
       let n = 0;
@@ -345,6 +350,41 @@ describe("進め方", () => {
     expect(recs.get("13000001")!.needsDetail).toBe(true);
     expect([...recs.values()].filter((r) => r.phone !== null)).toHaveLength(9);
     expect(log.filter((l) => l === "detail 13000001")).toHaveLength(3);
+  });
+
+  it("★読めない会社が何社あっても、その会社ごとの失敗は晩じゅうの停止に数えない(同じ晩のうちに一巡が終わる・@codex #477)", async () => {
+    const site = smallSite();
+    const brokenKeys = new Set(["13000001", "14000002"]);
+    const { client, log } = fakeClient(site, { brokenDetail: (k) => brokenKeys.has(k) });
+    const { store, recs, getStates } = memoryStore();
+    const results: (string | null)[] = [];
+    for (let i = 0; i < 20; i++) {
+      const r = await crawlStep({ client, store, now: () => NIGHT, budget: BIG });
+      results.push(r.stopped);
+    }
+    expect(results).not.toContain("day_off");
+    expect(getStates().every((s) => s.phase === "done")).toBe(true);
+    expect(getStates().every((s) => s.failStreak === 0 && s.dayOffUntil === null)).toBe(true);
+    for (const k of brokenKeys) {
+      expect(log.filter((l) => l === `detail ${k}`)).toHaveLength(3);
+      expect(recs.get(k)!.needsDetail).toBe(true);
+    }
+    expect([...recs.values()].filter((r) => r.phone !== null)).toHaveLength(8);
+  });
+
+  it("★詳細がどの会社も読めない(先方の画面が変わった)ときは、諦めた会社が20社を超えたら晩じゅう止める(叩き続けない)", async () => {
+    const site = smallSite();
+    site["00"] = [Array.from({ length: 30 }, (_, i) => row(`00${String(i + 1).padStart(6, "0")}`))];
+    const { client, log } = fakeClient(site, { brokenDetail: () => true });
+    const { store } = memoryStore();
+    let stopped: string | null = null;
+    for (let i = 0; i < 200 && stopped !== "day_off"; i++) {
+      stopped = (await crawlStep({ client, store, now: () => NIGHT, budget: BIG })).stopped;
+    }
+    expect(stopped).toBe("day_off");
+    const detailCalls = log.filter((l) => l.startsWith("detail ")).length;
+    const companies = 30 + 4 * 2; // 00 の30社+ほか4行政庁の2社ずつ
+    expect(detailCalls).toBeLessThan(companies * 3); // 全社を3回ずつ試す前に止まる
   });
 
   it("★止まっている間にページ数が減った → その行政庁を1ページ目から読み直す(前のページへずれた会社を消さない・@codex #477)", async () => {

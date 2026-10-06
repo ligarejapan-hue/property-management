@@ -40,6 +40,8 @@ export interface CrawlStore {
   nextNeedingDetail(cycle: string, limit: number): Promise<string[]>;
   /** その会社の詳細が読めなかった回数を1つ増やす(3回でその一巡は諦める=1社のせいで全体を止めない)。 */
   markDetailFailed(licenseKey: string): Promise<void>;
+  /** この一巡で詳細を諦めた(3回失敗した)会社の数。多ければ先方の画面が変わったと見る。 */
+  countDetailExhausted(cycle: string): Promise<number>;
   saveDetail(d: Detail, at: Date): Promise<void>;
   /** その一巡で一度も一覧に出なかった会社を「一覧に無い」にする。 */
   closeCycle(cycle: string): Promise<number>;
@@ -62,6 +64,11 @@ export interface StepResult {
 
 /** 続けて何回失敗したら、その晩は止めるか(計画 G2)。 */
 export const FAIL_STREAK_LIMIT = 3;
+/**
+ * 一巡のうちに詳細を諦めた会社がこれを超えたら、個々の会社ではなく先方の画面が変わったと見て、
+ * 晩じゅうの停止に数える(全社を3回ずつ叩き続けない)。免許を失った会社が一巡に数社あるのは普通。
+ */
+export const DETAIL_EXHAUSTED_LIMIT = 20;
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -145,6 +152,8 @@ export async function crawlStep(deps: {
 
   const startRequests = client.requestCount;
   let succeeded = false;
+  /** その会社だけの詳細の失敗で止めた(晩じゅうの停止には数えない)。 */
+  let rowLocalFail: FetchFail | null = null;
   /** この回ですでに一覧を読んだ行政庁(再開の境目の照らし直しは、行政庁ごとに1回だけ)。 */
   const resumed = new Set<string>();
 
@@ -239,6 +248,13 @@ export async function crawlStep(deps: {
           // 混雑(429/5xx)・時間切れ・つながらないは先方全体の都合なので数えない。どちらもこの回は止める。
           if (e instanceof FetchError && (e.kind === "layout" || e.kind === "http_other")) {
             await store.markDetailFailed(key);
+            // その会社だけの失敗は晩じゅうの停止に数えない(数えると、読めない会社1社ごとに1晩失う・@codex #477)。
+            // ただし諦めた会社が多すぎるときは先方の画面が変わったと見て、全体の失敗として扱う。
+            if ((await store.countDetailExhausted(cycle)) < DETAIL_EXHAUSTED_LIMIT) {
+              rowLocalFail = e.kind;
+              result.stopped = e.kind;
+              break;
+            }
           }
           throw e;
         }
@@ -258,6 +274,7 @@ export async function crawlStep(deps: {
       ...x,
       failStreak: succeeded ? 0 : x.failStreak,
       dayOffUntil: null,
+      lastError: rowLocalFail ?? x.lastError,
       lastRunAt: now(),
     }));
   } catch (e) {

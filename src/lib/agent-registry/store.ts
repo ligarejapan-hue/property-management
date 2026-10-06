@@ -115,6 +115,12 @@ export function createPrismaCrawlStore(now: () => Date = () => new Date()): Craw
       return rows.map((r) => r.licenseKey);
     },
 
+    async countDetailExhausted(cycle: string) {
+      return prisma.mlitAgent.count({
+        where: { needsDetail: true, listed: true, seenCycle: cycle, detailFailCount: { gte: DETAIL_FAIL_LIMIT } },
+      });
+    },
+
     async markDetailFailed(licenseKey: string) {
       await prisma.mlitAgent.updateMany({
         where: { licenseKey },

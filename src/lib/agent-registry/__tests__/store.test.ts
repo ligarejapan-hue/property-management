@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const { agent, crawlState, $transaction } = vi.hoisted(() => ({
   agent: {
     findMany: vi.fn(),
+    count: vi.fn(),
     upsert: vi.fn((a: unknown) => ({ op: "upsert", a })),
     updateMany: vi.fn(),
   },
@@ -131,6 +132,15 @@ describe("保存(prisma 版)", () => {
         orderBy: [{ detailFailCount: "asc" }, { licenseKey: "asc" }],
       }),
     );
+  });
+
+  it("この一巡で詳細を諦めた(3回失敗した)会社の数", async () => {
+    agent.count.mockResolvedValue(21);
+    const store = createPrismaCrawlStore();
+    expect(await store.countDetailExhausted("2026-10")).toBe(21);
+    expect(agent.count).toHaveBeenCalledWith({
+      where: { needsDetail: true, listed: true, seenCycle: "2026-10", detailFailCount: { gte: 3 } },
+    });
   });
 
   it("空のページは何もしない", async () => {
