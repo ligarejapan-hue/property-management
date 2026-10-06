@@ -11,6 +11,9 @@ import {
   supportsBuildingName,
 } from "@/lib/property-building-name";
 import { createProperty } from "@/lib/api-client";
+import BuildingNameCombobox from "@/components/buildings/building-name-combobox";
+import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
+import { stashBuildingLinkNotice } from "@/lib/building-link/notice";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
 interface Props {
@@ -41,6 +44,8 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
   const [lotNumber, setLotNumber] = useState("");
   // 物件名(任意)。集合住宅の種別のときだけ入力欄を出す。
   const [buildingName, setBuildingName] = useState("");
+  // 物件名から棟へつなぐ選び方(区分マンションのときだけ使う)。候補を選ぶ/「新しい棟」で変わる。
+  const [buildingChoice, setBuildingChoice] = useState<BuildingChoice>(AUTO_CHOICE);
   const [introductionRoute, setIntroductionRoute] = useState("");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -74,7 +79,11 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
         buildingName: normalizeBuildingName(propertyType, buildingName),
         introductionRoute: introductionRoute || null,
         note: note.trim() || null,
+        buildingChoice: propertyType === "apartment_unit" ? buildingChoice : undefined,
       });
+      // 知らせは物件詳細で1回だけ出す。物件詳細へ移らない呼び出し元(onCreated)では
+      // 預けない(あとで別の機会に古い知らせが出てしまうため)。
+      if (!onCreated) stashBuildingLinkNotice(result.id, result.buildingLink);
       resolvePostCreate(onCreated, router)(result.id, propertyType);
     } catch (err) {
       setError(err instanceof Error ? err.message : "登録に失敗しました");
@@ -119,6 +128,8 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
                 // ⚠対象外の種別に変えたら物件名を**その場で消す**。隠すだけだと
                 // 画面に無い値を送ることになり、入力した本人にも分からない。
                 if (!supportsBuildingName(next)) setBuildingName("");
+                // 棟の選び方は種別ごとの話なので、種別を変えたら自動に戻す。
+                setBuildingChoice(AUTO_CHOICE);
               }}
               disabled={submitting}
               className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
@@ -146,16 +157,32 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
               >
                 物件名 <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
               </label>
-              <input
-                id="new-property-building-name"
-                data-testid="new-property-building-name"
-                type="text"
-                value={buildingName}
-                onChange={(e) => setBuildingName(e.target.value)}
-                disabled={submitting}
-                placeholder="例: リガーレ西荻マンション"
-                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
-              />
+              {propertyType === "apartment_unit" ? (
+                // 区分マンションは棟へつなぐので、既存の棟の候補を出す。
+                <BuildingNameCombobox
+                  id="new-property-building-name"
+                  testId="new-property-building-name"
+                  value={buildingName}
+                  onChange={setBuildingName}
+                  address={address}
+                  choice={buildingChoice}
+                  onChoiceChange={setBuildingChoice}
+                  disabled={submitting}
+                  placeholder="例: リガーレ西荻マンション"
+                  inputClassName="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                />
+              ) : (
+                <input
+                  id="new-property-building-name"
+                  data-testid="new-property-building-name"
+                  type="text"
+                  value={buildingName}
+                  onChange={(e) => setBuildingName(e.target.value)}
+                  disabled={submitting}
+                  placeholder="例: リガーレ西荻マンション"
+                  className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                />
+              )}
               {/* ⚠maxLength は使わない。生の文字数で打ち切るため、前後に空白の
                   ある上限ちょうどの名前を貼ると**黙って実文字が削られる**。
                   打ち終えてから 422 で返すのも不親切なので、入力中に伝える。 */}

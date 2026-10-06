@@ -9,6 +9,11 @@ import {
   supportsBuildingName,
 } from "@/lib/property-building-name";
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
+import BuildingNameCombobox from "@/components/buildings/building-name-combobox";
+import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
+import { relinkConfirmMessage } from "@/lib/building-link/relink";
+// ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む(画面の束に prisma を入れない)。
+import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
 // 編集中の鍵(仕様 6.1・6.2)。この画面が最初に配線する画面(Task 5)。
 import { useEditLock } from "@/hooks/use-edit-lock";
@@ -99,7 +104,8 @@ interface PropertyData {
 interface PropertyEditFormProps {
   property: PropertyData;
   onClose: () => void;
-  onSaved: () => void;
+  /** 保存できたら呼ぶ。棟へつないだ結果(buildingLink)があれば渡す(物件詳細の上に知らせを出す)。 */
+  onSaved: (result?: { buildingLink?: BuildingLinkOutcome | null }) => void;
 }
 
 interface FormField {
@@ -402,6 +408,9 @@ export default function PropertyEditForm({
   const [error, setError] = useState<string | null>(null);
   const [users, setUsers] = useState<AssigneeOption[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
+  // 物件名から棟へつなぐ選び方(区分マンションのときだけ)。⚠auto のときは送らない
+  //   (サーバーは「送られず・名前が同じ・つながっている」なら今の棟を保つ)。
+  const [buildingChoice, setBuildingChoice] = useState<BuildingChoice>(AUTO_CHOICE);
 
   // 編集中の鍵(仕様 6.1・6.2)。この物件の編集ウィンドウが最初に配線する画面。
   const lock = useEditLock({ resourceType: "property", resourceId: property.id });
@@ -508,6 +517,8 @@ export default function PropertyEditForm({
       }
       return next;
     });
+    // 棟の選び方は種別ごとの話なので、種別を変えたら自動に戻す(新規登録と同じ)。
+    if (key === "propertyType") setBuildingChoice(AUTO_CHOICE);
   };
 
   const handleSave = async () => {
@@ -525,6 +536,15 @@ export default function PropertyEditForm({
         `${tooLong.label}は${tooLong.maxLength}文字以内で入力してください（前後の空白は数えません）`,
       );
       return;
+    }
+    // 棟につながっている区分で物件名を変えた/棟を選び直したら、付け替え(外す)を確かめる(D4)。
+    const isUnit = (values.propertyType ?? property.propertyType) === "apartment_unit";
+    if (isUnit) {
+      const nameChanged = (values.buildingName ?? "") !== (property.buildingName ?? "");
+      const msg = nameChanged || buildingChoice.kind !== "auto"
+        ? relinkConfirmMessage(property.building ?? null, values.buildingName ?? "", buildingChoice)
+        : null;
+      if (msg && !window.confirm(msg)) return;
     }
     setSaving(true);
     setError(null);
@@ -546,6 +566,8 @@ export default function PropertyEditForm({
           payload[f.key] = raw || null;
         }
       }
+      // ⚠auto は送らない(送ると「名前が同じなら今の棟を保つ」の守りが外れる)。
+      if (isUnit && buildingChoice.kind !== "auto") payload.buildingChoice = buildingChoice;
 
       if (USE_MOCK) {
         // Mock: just simulate delay
@@ -572,8 +594,11 @@ export default function PropertyEditForm({
         });
       }
 
+      const saved = (await res.json().catch(() => null)) as
+        | { buildingLink?: BuildingLinkOutcome | null }
+        | null;
       void lock.release();
-      onSaved();
+      onSaved({ buildingLink: saved?.buildingLink ?? null });
     } catch (err) {
       // ⚠コードの写像(期限切れ・強制解除・他の人が取った 等)はTask2の純関数に任せる。
       //   ここでは封筒から読んだコードをそのまま渡すだけ。
@@ -736,6 +761,20 @@ export default function PropertyEditForm({
                             新しく入力することはできません。空にして保存すると、地番（建物は家屋番号）での謄本取得が使えるようになります。
                           </p>
                         </>
+                      ) : field.key === "buildingName" &&
+                        (values.propertyType ?? property.propertyType) === "apartment_unit" ? (
+                        // 区分マンションは棟へつなぐので、既存の棟の候補を出す。
+                        <BuildingNameCombobox
+                          id="edit-property-building-name"
+                          testId="edit-property-building-name"
+                          value={values.buildingName ?? ""}
+                          onChange={(v) => handleChange("buildingName", v)}
+                          address={values.address ?? property.address}
+                          choice={buildingChoice}
+                          onChoiceChange={setBuildingChoice}
+                          disabled={saving}
+                          inputClassName="w-full rounded-md border border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                        />
                       ) : field.type === "textarea" ? (
                         <textarea
                           value={values[field.key] ?? ""}

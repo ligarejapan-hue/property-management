@@ -18,6 +18,8 @@ import Link from "next/link";
 import type { DraftWarningCode, PasteDraft } from "@/lib/paste-import/types";
 import { PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import { Button } from "@/components/ui/button";
+import BuildingNameCombobox from "@/components/buildings/building-name-combobox";
+import type { BuildingChoice } from "@/lib/building-link/resolve";
 
 // ---------------------------------------------------------------------------
 // API 契約（POST /api/import/paste のレスポンスの一部）。
@@ -300,6 +302,7 @@ function FieldRow({
   onBlur,
   selectOptions,
   disabled,
+  building,
 }: {
   fieldKey: string;
   label: string;
@@ -314,6 +317,8 @@ function FieldRow({
   selectOptions?: { value: string; label: string }[];
   /** 登録処理中は編集させない(直したつもりで無視される事故を防ぐ)。 */
   disabled?: boolean;
+  /** 渡すと、入力欄の代わりに棟の候補つきの欄を出す(区分マンションの建物名)。 */
+  building?: { address: string; choice: BuildingChoice; onChoiceChange: (c: BuildingChoice) => void };
 }) {
   const hasValue = value.trim() !== "";
   // ⚠**警告があるときは「元の資料に記載がありません」を出さない**
@@ -334,7 +339,19 @@ function FieldRow({
         {label}
       </label>
       <div>
-        {selectOptions ? (
+        {building ? (
+          // 区分マンションの建物名: 既存の棟の候補を出す(下に「つなぐ先の棟」の一行が出る)。
+          <BuildingNameCombobox
+            id={`paste-field-${fieldKey}`}
+            value={value}
+            onChange={(v) => onChange?.(v)}
+            address={building.address}
+            choice={building.choice}
+            onChoiceChange={building.onChoiceChange}
+            disabled={disabled}
+            inputClassName={boxClass}
+          />
+        ) : selectOptions ? (
           <select
             id={`paste-field-${fieldKey}`}
             className={boxClass}
@@ -442,6 +459,11 @@ export interface PasteImportReviewProps {
   onRegister?: () => void;
   registering?: boolean;
   registerError?: string | null;
+
+  /** 建物名から棟へつなぐ選び方(区分マンションのときだけ使う)。 */
+  buildingChoice?: BuildingChoice;
+  /** 渡したときだけ、区分マンションの建物名に棟の候補を出す。 */
+  onBuildingChoiceChange?: (c: BuildingChoice) => void;
 }
 
 export function PasteImportReview({
@@ -468,6 +490,8 @@ export function PasteImportReview({
   onRegister,
   registering,
   registerError,
+  buildingChoice,
+  onBuildingChoiceChange,
 }: PasteImportReviewProps) {
   const pValues = propertyValues ?? defaultPropertyValues(draft);
   const oValues = ownerValues ?? defaultOwnerValues(draft);
@@ -641,6 +665,11 @@ export function PasteImportReview({
               onChange={(v) => onPropertyFieldChange?.(f.key, v)}
               onBlur={DUPLICATE_INPUT_FIELDS.has(f.key) ? onDuplicateInputBlur : undefined}
               disabled={busy}
+              building={
+                f.key === "buildingName" && pValues.propertyType === "apartment_unit" && onBuildingChoiceChange
+                  ? { address: pValues.address, choice: buildingChoice ?? { kind: "auto" }, onChoiceChange: onBuildingChoiceChange }
+                  : undefined
+              }
               selectOptions={
                 f.key === "propertyType"
                   ? PROPERTY_TYPE_OPTIONS.filter((o) =>
