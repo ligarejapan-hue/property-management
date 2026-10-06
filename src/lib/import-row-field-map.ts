@@ -118,11 +118,22 @@ export function resolveOwnerField(key: string): string | undefined {
  */
 export const ROW_FIELD_MAP_KEY = "__field_map";
 
-/** 行に足す `{ __field_map: "<JSON>" }`。表が空なら何も足さない。 */
-export function rowFieldMapExtra(headerToField: Record<string, string>): Record<string, string> {
-  return Object.keys(headerToField).length > 0
-    ? { [ROW_FIELD_MAP_KEY]: JSON.stringify(headerToField) }
-    : {};
+/**
+ * 行に足す `{ __field_map: "<JSON>" }`。表が空なら何も足さない。
+ * ⚠取込したファイルに実際にある見出しだけ残す(列の対応は利用者が送れる値。使わない対応を
+ *   大量に送られて、それが行ごとに複製されて DB を膨らませないため)。取込ごとに1回だけ作り、
+ *   各行には同じものを付ける。
+ */
+export function rowFieldMapExtra(
+  headerToField: Record<string, string>,
+  headers: readonly string[],
+): Record<string, string> {
+  const present = new Set(headers);
+  const kept: Record<string, string> = {};
+  for (const [header, field] of Object.entries(headerToField)) {
+    if (present.has(header)) kept[header] = field;
+  }
+  return Object.keys(kept).length > 0 ? { [ROW_FIELD_MAP_KEY]: JSON.stringify(kept) } : {};
 }
 
 /** 行に残った表を読む。壊れている・無いときは null(=決まった表で読み替える。以前の行)。 */
