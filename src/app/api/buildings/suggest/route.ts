@@ -22,20 +22,39 @@ export async function GET(request: NextRequest) {
     const nameKey = buildingNameKey(name);
     if (!nameKey || nameKey.length < SUGGEST_MIN_KEY_LENGTH) return apiResponse({ data: [] });
     const target = { nameKey, areaKey: areaKey(url.searchParams.get("address")) };
-    const select = { id: true, name: true, address: true, nameKey: true, areaKey: true, createdAt: true, _count: { select: { properties: true } } } as const;
-    const rows = await prisma.building.findMany({
-      where: {
-        OR: [
-          { nameKey },
-          { nameKey: { contains: nameKey } },
-          { name: { contains: name, mode: "insensitive" } },
-          { nameKey: null },
-        ],
-      },
-      select,
-      take: FETCH_LIMIT,
-      orderBy: { createdAt: "asc" },
-    });
+    const select = {
+      id: true,
+      name: true,
+      address: true,
+      nameKey: true,
+      areaKey: true,
+      createdAt: true,
+      _count: { select: { properties: true } },
+    } as const;
+    // ⚠古い棟(nameKey が null)は名前に関係なく当たるので、別の枠で読む。
+    //   同じ枠だと古い棟が読み込み枠を埋めて、同じ名前の棟が落ちる。
+    const [keyed, legacy] = await Promise.all([
+      prisma.building.findMany({
+        where: {
+          OR: [
+            { nameKey },
+            { nameKey: { contains: nameKey } },
+            { name: { contains: name, mode: "insensitive" } },
+          ],
+        },
+        select,
+        take: FETCH_LIMIT,
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.building.findMany({
+        where: { nameKey: null },
+        select,
+        take: FETCH_LIMIT,
+        orderBy: { createdAt: "asc" },
+      }),
+    ]);
+    const seen = new Set<string>();
+    const rows = [...keyed, ...legacy].filter((b) => !seen.has(b.id) && seen.add(b.id));
     const filtered = rows.filter((b) => {
       const nk = b.nameKey ?? buildingNameKey(b.name);
       return nk === nameKey || b.name.toLowerCase().includes(name.toLowerCase()) || (nk ?? "").includes(nameKey);

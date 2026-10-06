@@ -27,4 +27,15 @@ describe("rankBuildingSuggestions", () => {
     const rows = Array.from({ length: 15 }, (_, i) => r(`x${i}`, `パーク第一${i}`, "東京都港区六本木1丁目1"));
     expect(rankBuildingSuggestions(rows, target)).toHaveLength(10);
   });
+  it("同じ順位なら戸数が多い順、同数なら古い順", () => {
+    const mk = (id: string, units: number, created: string) => ({
+      ...r(id, "パーク第一ハイツ", "東京都港区六本木1丁目1", units), createdAt: new Date(created),
+    });
+    const out = rankBuildingSuggestions([
+      mk("new2", 2, "2026-03-01"),
+      mk("many", 5, "2026-04-01"),
+      mk("old2", 2, "2026-01-01"),
+    ], target);
+    expect(out.map((x) => x.id)).toEqual(["many", "old2", "new2"]);
+  });
 });

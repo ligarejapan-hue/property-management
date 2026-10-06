@@ -83,4 +83,31 @@ describe("GET /api/buildings/suggest", () => {
     expect(where.OR).toContainEqual({ nameKey: { contains: "パ-ク第1" } });
     expect((await res.json()).data.map((x: { id: string }) => x.id)).toEqual(["b2"]);
   });
+
+  it("古い棟(nameKey なし)が50件あっても同じ名前の棟が先頭に出る", async () => {
+    const row = (id: string, name: string, nameKey: string | null) => ({
+      id, name, address: "東京都港区六本木1丁目1", nameKey, areaKey: null,
+      createdAt: new Date("2026-01-01"), _count: { properties: 1 },
+    });
+    const legacy = Array.from({ length: 50 }, (_, i) => row(`old${i}`, `無関係${i}`, null));
+    findMany.mockImplementation(async (args: { where: { nameKey?: null } }) =>
+      args.where.nameKey === null ? legacy : [row("hit", "パーク第１", "パ-ク第1")],
+    );
+    const res = await call("name=" + encodeURIComponent("パーク第１"));
+    const data = (await res.json()).data as { id: string }[];
+    expect(findMany).toHaveBeenCalledTimes(2);
+    expect(data.map((x) => x.id)).toEqual(["hit"]);
+  });
+
+  it("名前が合わない古い棟は応答から除く(取得後の絞り込み)", async () => {
+    findMany.mockResolvedValue([
+      {
+        id: "x", name: "まったく別の建物", address: "東京都港区六本木1丁目1",
+        nameKey: null, areaKey: null, createdAt: new Date("2026-01-01"),
+        _count: { properties: 1 },
+      },
+    ]);
+    const res = await call("name=" + encodeURIComponent("パーク第１"));
+    expect((await res.json()).data).toEqual([]);
+  });
 });
