@@ -1,18 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { agent, crawlState, $transaction } = vi.hoisted(() => ({
-  agent: {
+const { agent, crawlState, $transaction, lockQuery } = vi.hoisted(() => {
+  const agent = {
     findMany: vi.fn(),
     count: vi.fn(),
     upsert: vi.fn((a: unknown) => ({ op: "upsert", a })),
     updateMany: vi.fn(),
-  },
-  crawlState: {
-    findMany: vi.fn(),
-    upsert: vi.fn((a: unknown) => ({ op: "stateUpsert", a })),
-  },
-  $transaction: vi.fn(async (ops: unknown[]) => ops),
-}));
+  };
+  const lockQuery = vi.fn(async () => []);
+  // 配列(まとめて実行)と関数(行をロックして順に実行)の両方の形を受ける。関数の中では同じ mlitAgent を使う。
+  const $transaction = vi.fn(async (arg: unknown) =>
+    Array.isArray(arg) ? arg : (arg as (tx: unknown) => unknown)({ $queryRaw: lockQuery, mlitAgent: agent }),
+  );
+  return {
+    agent,
+    crawlState: {
+      findMany: vi.fn(),
+      upsert: vi.fn((a: unknown) => ({ op: "stateUpsert", a })),
+    },
+    $transaction,
+    lockQuery,
+  };
+});
 
 vi.mock("@/lib/prisma", () => ({
   default: { mlitAgent: agent, mlitCrawlState: crawlState, $transaction },
@@ -69,6 +78,21 @@ describe("保存(prisma 版)", () => {
       expect(u.update.seenCycle).toBe("2026-10");
     }
     expect($transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("★一覧の行の読み比べと更新は、行をロックした1つの取引の中で行う(同時に名簿へ写されても古い電話を写さない・@codex #477)", async () => {
+    agent.findMany.mockResolvedValue([prevRow("13000001", { companyName: "旧商号" })]);
+    const store = createPrismaCrawlStore();
+    await store.upsertListRows([row("13000001"), row("13000002")], "2026-10");
+    expect(typeof $transaction.mock.calls[0][0]).toBe("function"); // 関数の形=1つの取引
+    const q = (lockQuery.mock.calls[0] as unknown as [{ strings?: readonly string[]; sql?: string; values?: unknown[] }])[0];
+    const text = q.sql ?? (q.strings ?? []).join("?");
+    expect(text).toMatch(/FROM "mlit_agents"[\s\S]*license_key[\s\S]*FOR UPDATE/);
+    expect(JSON.stringify(q.values)).toContain("13000001");
+    // ロック → 読み比べ → 更新 の順
+    expect(lockQuery.mock.invocationCallOrder[0]).toBeLessThan(agent.findMany.mock.invocationCallOrder[0]);
+    expect(agent.findMany.mock.invocationCallOrder[0]).toBeLessThan(agent.upsert.mock.invocationCallOrder[0]);
+    expect(upserts()["13000001"].update.needsDetail).toBe(true);
   });
 
   it("★本店の行が無いページ(支店だけ)では所在地を上書きしない・所在地の違いで取り直さない", async () => {
@@ -190,12 +214,12 @@ describe("保存(prisma 版)", () => {
     expect(($transaction.mock.calls[0] as unknown as [unknown[]])[0]).toHaveLength(2);
   });
 
-  it("一巡の締め: その一巡で見なかった会社(と一度も見ていない会社)だけ「一覧に無い」に", async () => {
+  it("一巡の締め: この一巡とその前の一巡のどちらでも見なかった会社(と一度も見ていない会社)だけ「一覧に無い」に(@codex #477)", async () => {
     agent.updateMany.mockResolvedValue({ count: 2 });
     const store = createPrismaCrawlStore();
-    expect(await store.closeCycle("2026-11")).toBe(2);
+    expect(await store.closeCycle("2026-11", "2026-10")).toBe(2);
     expect(agent.updateMany).toHaveBeenCalledWith({
-      where: { listed: true, OR: [{ seenCycle: { not: "2026-11" } }, { seenCycle: null }] },
+      where: { listed: true, OR: [{ seenCycle: { notIn: ["2026-11", "2026-10"] } }, { seenCycle: null }] },
       data: { listed: false },
     });
   });

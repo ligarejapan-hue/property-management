@@ -43,8 +43,12 @@ export interface CrawlStore {
   /** この一巡で詳細を諦めた(3回失敗した)会社の数。多ければ先方の画面が変わったと見る。 */
   countDetailExhausted(cycle: string): Promise<number>;
   saveDetail(d: Detail, at: Date): Promise<void>;
-  /** その一巡で一度も一覧に出なかった会社を「一覧に無い」にする。 */
-  closeCycle(cycle: string): Promise<number>;
+  /**
+   * この一巡とその前の一巡のどちらでも一覧に出なかった会社を「一覧に無い」にする。
+   * 1巡だけ見なかった会社は消さない=ページの境目のずれで1回見落としても、まだ免許のある会社を消さない(@codex #477)。
+   * 本当に免許を失った会社は、次の一巡の締めで消える(1か月遅れ)。
+   */
+  closeCycle(cycle: string, prevCycle: string): Promise<number>;
 }
 
 export interface StepBudget {
@@ -82,6 +86,13 @@ export function inNightWindow(now: Date): boolean {
 /** 一巡の名前=日本時間の年月 "YYYY-MM"。 */
 export function cycleOf(now: Date): string {
   const d = new Date(now.getTime() + JST_OFFSET_MS);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** 前の一巡の名前("2026-01" → "2025-12")。 */
+export function previousCycle(cycle: string): string {
+  const [y, m] = cycle.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 2, 1));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
@@ -265,7 +276,7 @@ export async function crawlStep(deps: {
       }
       // 一覧も詳細も終わった=一巡の締め(5つの行政庁すべての一覧を最後まで終えているときだけ)。
       if (states.some((x) => x.phase === "detail")) {
-        await store.closeCycle(cycle);
+        await store.closeCycle(cycle, previousCycle(cycle));
         for (const x of states) x.phase = "done";
       }
       break;

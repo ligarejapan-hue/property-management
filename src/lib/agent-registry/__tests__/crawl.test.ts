@@ -5,6 +5,7 @@ import {
   cycleOf,
   inNightWindow,
   nextNightStart,
+  previousCycle,
   type CrawlState,
   type CrawlStore,
   type StepBudget,
@@ -125,10 +126,10 @@ function memoryStore() {
     async countDetailExhausted(cycle) {
       return [...recs.values()].filter((r) => r.needsDetail && r.listed && r.seenCycle === cycle && r.detailFailCount >= 3).length;
     },
-    async closeCycle(cycle) {
+    async closeCycle(cycle, prevCycle) {
       let n = 0;
       for (const [k, r] of recs) {
-        if (r.listed && r.seenCycle !== cycle) {
+        if (r.listed && r.seenCycle !== cycle && r.seenCycle !== prevCycle) {
           recs.set(k, { ...r, listed: false });
           n++;
         }
@@ -154,6 +155,10 @@ describe("夜間の判定・一巡の名前", () => {
     expect(inNightWindow(new Date("2026-10-05T13:00:00Z"))).toBe(true); // 22:00
     expect(inNightWindow(new Date("2026-10-05T21:59:00Z"))).toBe(true); // 翌6:59
     expect(inNightWindow(new Date("2026-10-05T22:00:00Z"))).toBe(false); // 翌7:00
+  });
+  it("前の一巡の名前(年をまたぐ)", () => {
+    expect(previousCycle("2026-11")).toBe("2026-10");
+    expect(previousCycle("2026-01")).toBe("2025-12");
   });
   it("一巡は日本時間の年月・次の晩の始まり", () => {
     expect(cycleOf(new Date("2026-10-31T15:30:00Z"))).toBe("2026-11"); // JST 11/1 0:30
@@ -244,7 +249,7 @@ describe("進め方", () => {
     expect(r.requests).toBe(3);
   });
 
-  it("★途中で止まった一巡では「一覧に無い」にしない・最後まで終えた一巡で見なかった会社だけ", async () => {
+  it("★途中で止まった一巡では「一覧に無い」にしない・続けて2巡見なかった会社だけ(1巡の見落としでは消さない・@codex #477)", async () => {
     const site = smallSite();
     const { client } = fakeClient(site);
     const { store, recs } = memoryStore();
@@ -257,6 +262,11 @@ describe("進め方", () => {
     expect(r.stopped).toBe("http_5xx");
     expect(recs.get("13000002")!.listed).toBe(true);
     await crawlStep({ client: c2.client, store, now: () => nov, budget: BIG });
+    // 11月の締め: 10月には見ている=まだ消さない(ページの境目のずれで1巡だけ見落としたかもしれない)
+    expect(recs.get("13000002")!.listed).toBe(true);
+    // 12月の締め: 11月も12月も見なかった=一覧に無い
+    const dec = new Date("2026-12-05T14:00:00Z");
+    await crawlStep({ client: fakeClient(site).client, store, now: () => dec, budget: BIG });
     expect(recs.get("13000002")!.listed).toBe(false);
     expect([...recs.values()].filter((x) => !x.listed)).toHaveLength(1);
   });

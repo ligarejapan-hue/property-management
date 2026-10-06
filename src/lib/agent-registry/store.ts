@@ -1,3 +1,4 @@
+import { Prisma } from "@/generated/prisma";
 import prisma from "@/lib/prisma";
 import type { CrawlPhase, CrawlState, CrawlStore } from "./crawl";
 import type { Detail, ListRow } from "./parse";
@@ -49,22 +50,28 @@ export function createPrismaCrawlStore(now: () => Date = () => new Date()): Craw
 
     async upsertListRows(rows: ListRow[], cycle: string) {
       if (rows.length === 0) return 0;
-      const existing = await prisma.mlitAgent.findMany({
-        where: { licenseKey: { in: rows.map((r) => r.licenseKey) } },
-        select: {
-          licenseKey: true,
-          companyName: true,
-          address: true,
-          licenseLabel: true,
-          seenCycle: true,
-          detailAt: true,
-          listed: true,
-        },
-      });
-      const prev = new Map(existing.map((e) => [e.licenseKey, e]));
+      const keys = rows.map((r) => r.licenseKey);
       const staleBefore = now().getTime() - DETAIL_MAX_AGE_MS;
-      await prisma.$transaction(
-        rows.map((r) => {
+      // 読み比べ→更新を1つの取引で、行をロックしてから行う。名簿へ写す側も同じ行をロックするので、
+      // 「変わった」と判定した直後の隙に古い電話を写される・取り直しの印が付く前に写される、が起きない(@codex #477)。
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM "mlit_agents" WHERE license_key IN (${Prisma.join(keys)}) FOR UPDATE`,
+        );
+        const existing = await tx.mlitAgent.findMany({
+          where: { licenseKey: { in: keys } },
+          select: {
+            licenseKey: true,
+            companyName: true,
+            address: true,
+            licenseLabel: true,
+            seenCycle: true,
+            detailAt: true,
+            listed: true,
+          },
+        });
+        const prev = new Map(existing.map((e) => [e.licenseKey, e]));
+        for (const r of rows) {
           const p = prev.get(r.licenseKey);
           const changed =
             !p ||
@@ -85,7 +92,7 @@ export function createPrismaCrawlStore(now: () => Date = () => new Date()): Craw
           if (changed || stale) update.needsDetail = true;
           // この一巡で初めて見た=前の一巡で詳細を諦めた会社も、もう一度試す。
           if (p && p.seenCycle !== cycle) update.detailFailCount = 0;
-          return prisma.mlitAgent.upsert({
+          await tx.mlitAgent.upsert({
             where: { licenseKey: r.licenseKey },
             create: {
               licenseKey: r.licenseKey,
@@ -100,8 +107,8 @@ export function createPrismaCrawlStore(now: () => Date = () => new Date()): Craw
             },
             update,
           });
-        }),
-      );
+        }
+      });
       return rows.length;
     },
 
@@ -151,9 +158,9 @@ export function createPrismaCrawlStore(now: () => Date = () => new Date()): Craw
       ]);
     },
 
-    async closeCycle(cycle: string) {
+    async closeCycle(cycle: string, prevCycle: string) {
       const res = await prisma.mlitAgent.updateMany({
-        where: { listed: true, OR: [{ seenCycle: { not: cycle } }, { seenCycle: null }] },
+        where: { listed: true, OR: [{ seenCycle: { notIn: [cycle, prevCycle] } }, { seenCycle: null }] },
         data: { listed: false },
       });
       return res.count;
