@@ -281,6 +281,16 @@ describe("進め方", () => {
     expect(log.length).toBeGreaterThan(3);
   });
 
+  it("client が予算切れで止めた(budget)は失敗に数えない・次の回は続きから(@codex #477)", async () => {
+    const { client, log } = fakeClient(smallSite(), { failAt: new Set([3]), failKind: "budget" });
+    const { store, getStates } = memoryStore();
+    const r = await crawlStep({ client, store, now: () => NIGHT, budget: BIG });
+    expect(r.stopped).toBe("budget");
+    expect(getStates().every((s) => s.failStreak === 0 && s.dayOffUntil === null)).toBe(true);
+    await crawlStep({ client, store, now: () => NIGHT, budget: BIG });
+    expect(log[3]).toBe("list 13 1");
+  });
+
   it("client が夜間の外で止めた(outside_window)は失敗に数えない・次の晩は続きから", async () => {
     const { client, log } = fakeClient(smallSite(), { failAt: new Set([3]), failKind: "outside_window" });
     const { store, getStates } = memoryStore();

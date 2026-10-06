@@ -279,11 +279,11 @@ export async function crawlStep(deps: {
     }));
   } catch (e) {
     if (!(e instanceof FetchError)) throw e;
-    if (e.kind === "outside_window") {
-      // client が「夜間の外」で頼む前に止めた=先方の失敗ではない。失敗に数えず、次の晩に続きから。
+    if (e.kind === "outside_window" || e.kind === "budget") {
+      // client が「夜間の外」「予算切れ」で頼む前に止めた=先方の失敗ではない。失敗に数えず、次の回に続きから。
       states = states.map((x) => ({ ...x, failStreak: succeeded ? 0 : x.failStreak, lastRunAt: now() }));
       await store.saveStates(states);
-      return { ...result, requests: client.requestCount - startRequests, stopped: "outside_window" };
+      return { ...result, requests: client.requestCount - startRequests, stopped: e.kind };
     }
     // この回の中で一度でも成功していれば、続けての失敗は数え直し(とびとびの失敗では止めない)。
     const streak = (succeeded ? 0 : states[0].failStreak) + 1;

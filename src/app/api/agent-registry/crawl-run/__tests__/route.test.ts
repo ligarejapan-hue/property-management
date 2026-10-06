@@ -7,7 +7,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const crawlStep = vi.fn();
-const createRegistryClient = vi.fn<(opts?: { allowRequest?: () => boolean }) => { fake: boolean }>(() => ({ fake: true }));
+const createRegistryClient = vi.fn<
+  (opts?: { allowRequest?: () => boolean; budget?: { maxRequests: number; deadlineMs: number } }) => { fake: boolean }
+>(() => ({ fake: true }));
 const loadStates = vi.fn();
 const count = vi.fn();
 
@@ -19,7 +21,8 @@ vi.mock("@/lib/agent-registry/client", async () => {
   const actual = await vi.importActual<typeof import("@/lib/agent-registry/client")>("@/lib/agent-registry/client");
   return {
     ...actual,
-    createRegistryClient: (opts?: { allowRequest?: () => boolean }) => createRegistryClient(opts),
+    createRegistryClient: (opts?: { allowRequest?: () => boolean; budget?: { maxRequests: number; deadlineMs: number } }) =>
+      createRegistryClient(opts),
   };
 });
 vi.mock("@/lib/agent-registry/store", () => ({
@@ -104,6 +107,12 @@ describe("POST /api/agent-registry/crawl-run", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ requests: 3, listed: 50, detailed: 2, stopped: null });
     expect(crawlStep).toHaveBeenCalledTimes(1);
+  });
+
+  it("★client には1回の予算(回数・時間)も渡す(取り直しを含めて 100 回を超えない・@codex #477)", async () => {
+    await POST(req({ secret: SECRET }));
+    const opts = createRegistryClient.mock.calls[0][0] as { budget?: { maxRequests: number; deadlineMs: number } } | undefined;
+    expect(opts?.budget).toEqual({ maxRequests: 100, deadlineMs: 8 * 60 * 1000 });
   });
 
   it("★client には「夜間の内か」を毎回確かめる関数を渡す(取り直しでも 7 時を越えない・@codex #477)", async () => {

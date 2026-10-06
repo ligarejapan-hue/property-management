@@ -235,6 +235,35 @@ describe("先方への取得", () => {
     expect(await client.searchFirst("13").catch((e) => e.kind)).toBe("timeout");
   });
 
+  it("★1回の予算(回数・時間)は、セッションの取り直しを含むどの呼び出しの前にも確かめる(100回を1回も超えない・@codex #477)", async () => {
+    const calls: string[] = [];
+    let clock = 0;
+    const mk = (budget: { maxRequests: number; deadlineMs: number }) =>
+      createRegistryClient({
+        fetchImpl: (async (url: string | URL) => {
+          calls.push(String(url));
+          return html(searchPageHtml); // 検索の返事も検索画面=セッション切れ扱い→取り直しが走る
+        }) as typeof fetch,
+        sleep: async (ms) => {
+          clock += ms;
+        },
+        now: () => clock,
+        decode: (buf) => new TextDecoder("utf-8").decode(buf),
+        budget,
+      });
+    // 回数: 予算2回=セッション GET + 検索で使い切る → 取り直しの GET は頼まず budget で止まる
+    const a = mk({ maxRequests: 2, deadlineMs: 10 ** 9 });
+    expect(await a.searchFirst("13").catch((e) => e.kind)).toBe("budget");
+    expect(calls).toHaveLength(2);
+    expect(a.requestCount).toBe(2);
+    // 時間: 4秒の待ちを含めて期限を過ぎたら頼まない
+    calls.length = 0;
+    clock = 0;
+    const b = mk({ maxRequests: 100, deadlineMs: 5000 });
+    expect(await b.searchFirst("13").catch((e) => e.kind)).toBe("budget");
+    expect(calls).toHaveLength(2); // 1回目(0秒)・2回目(4秒)まで。3回目は8秒=期限5秒を越える
+  });
+
   it("既定の読み方は Shift_JIS(先方の文字コード)", () => {
     expect(new TextDecoder("shift_jis").decode(new Uint8Array([0x82, 0xa0]))).toBe("あ");
   });

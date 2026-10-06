@@ -14,8 +14,16 @@ export const REGISTRY_USER_AGENT = "property-management agent-registry (low-rate
 export const MIN_INTERVAL_MS = 4000;
 const TIMEOUT_MS = 30_000;
 
-/** outside_window=頼んでよい時間の外(先方の失敗ではない=失敗に数えない)。 */
-export type FetchFail = "http_429" | "http_5xx" | "http_other" | "timeout" | "network" | "layout" | "outside_window";
+/** outside_window=頼んでよい時間の外・budget=1回の予算(回数・時間)を使い切った(どちらも先方の失敗ではない=失敗に数えない)。 */
+export type FetchFail =
+  | "http_429"
+  | "http_5xx"
+  | "http_other"
+  | "timeout"
+  | "network"
+  | "layout"
+  | "outside_window"
+  | "budget";
 
 export class FetchError extends Error {
   constructor(public readonly kind: FetchFail) {
@@ -44,6 +52,11 @@ export interface RegistryClientOptions {
    * false なら頼まずに `outside_window` で止める(@codex #477)。
    */
   allowRequest?: () => boolean;
+  /**
+   * 1回の呼び出しの予算(回数・作ってからの時間)。セッションの取り直しを含む**すべての呼び出しの直前**に
+   * 確かめ、使い切っていれば頼まずに `budget` で止める(100回を1回も超えない・@codex #477)。
+   */
+  budget?: { maxRequests: number; deadlineMs: number };
 }
 
 /** 検索の基本の項目(先方の画面のフォームと同じ名前)。値は ASCII だけ。 */
@@ -102,6 +115,8 @@ export function createRegistryClient(opts: RegistryClientOptions = {}): Registry
   const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS;
   const decode = opts.decode ?? ((buf: ArrayBuffer) => new TextDecoder("shift_jis").decode(buf));
   const allowRequest = opts.allowRequest ?? (() => true);
+  const budget = opts.budget ?? null;
+  const createdAt = now();
 
   const cookies = new Map<string, string>();
   let sessionReady = false;
@@ -117,6 +132,9 @@ export function createRegistryClient(opts: RegistryClientOptions = {}): Registry
       if (wait > 0) await sleep(wait);
     }
     if (!allowRequest()) throw new FetchError("outside_window");
+    if (budget && (count >= budget.maxRequests || now() - createdAt >= budget.deadlineMs)) {
+      throw new FetchError("budget");
+    }
     lastStart = now();
     count++;
     const headers: Record<string, string> = { "user-agent": REGISTRY_USER_AGENT };
