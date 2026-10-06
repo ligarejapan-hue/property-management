@@ -13,7 +13,7 @@ import { hasPermission } from "@/lib/permissions";
 import { buildingIdentityKeys } from "@/lib/building-link/apply";
 
 const createBuildingSchema = z.object({
-  name: z.string().min(1, "マンション名は必須です"),
+  name: z.string().trim().min(1, "マンション名は必須です"),
   address: z.string().min(1, "住所は必須です"),
   postalCode: z.string().nullable().optional(),
   lotNumber: z.string().optional(),

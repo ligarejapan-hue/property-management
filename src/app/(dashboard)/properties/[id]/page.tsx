@@ -999,10 +999,14 @@ export default function PropertyDetailPage({
         {activeTab === "photos" && (
           <PhotoTab
             propertyId={property.id}
+            propertyType={property.propertyType}
             building={
               property.building
                 ? { id: property.building.id, name: property.building.name }
                 : null
+            }
+            onEditProperty={
+              propertyEditLockHeld ? undefined : () => setShowEditForm(true)
             }
           />
         )}

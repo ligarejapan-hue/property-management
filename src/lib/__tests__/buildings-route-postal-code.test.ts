@@ -38,16 +38,19 @@ vi.mock("@/lib/change-log", () => ({
   BUILDING_TRACKED_FIELDS: [],
 }));
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
+// ⚠PATCH は棟の更新を $transaction に入れる(棟の名前の反映・段3)。tx には同じ mock を渡す。
+vi.mock("@/lib/prisma", () => {
+  const prismaMock = {
     building: {
       create: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
       findUnique: vi.fn(),
     },
-  },
-}));
+    $transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb(prismaMock)),
+  };
+  return { default: prismaMock };
+});
 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
