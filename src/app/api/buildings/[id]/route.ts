@@ -18,12 +18,13 @@ import {
   isBuildingRename,
   countEditLockedUnits,
   propagateBuildingName,
+  isRetryableTxError,
   lockBuildingUnits,
   unitsOutsideScope,
 } from "@/lib/building-link/rename";
 
 const updateBuildingSchema = z.object({
-  name: z.string().min(1, "棟名は必須です").optional(),
+  name: z.string().trim().min(1, "棟名は必須です").optional(),
   address: z.string().min(1, "住所は必須です").optional(),
   postalCode: z.string().nullable().optional(),
   lotNumber: z.string().nullable().optional(),
@@ -198,6 +199,12 @@ export async function PATCH(
       });
       if (result.changeLogs.length > 0) await tx.changeLog.createMany({ data: result.changeLogs });
       return { count: updated.count, propagated: result };
+    }).catch((e: unknown) => {
+      // 名前の反映で他の保存と重なって落ちたとき(待ちの輪・時間切れ)は、再試行の案内にする。
+      if (renaming && isRetryableTxError(e)) {
+        throw new ApiError(409, "ほかの保存と重なりました。しばらくしてからもう一度保存してください", "RETRY_LATER");
+      }
+      throw e;
     });
     if (count === 0) {
       throw new ApiError(

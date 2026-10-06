@@ -28,6 +28,16 @@ describe("物件写真の案内文: 棟写真へのリンク", () => {
     expect(html).toContain(`href="/buildings/b-2#${BUILDING_PHOTOS_ANCHOR}"`);
   });
 
+  it("旧種別 unit・棟あり: リンクを出す / 棟なし: この物件の写真です。", () => {
+    const withB = renderToStaticMarkup(
+      <PhotoTabBuildingHint propertyType="unit" building={{ id: "b-3", name: "旧マンション" }} />,
+    );
+    expect(withB).toContain(`href="/buildings/b-3#${BUILDING_PHOTOS_ANCHOR}"`);
+    const without = renderToStaticMarkup(<PhotoTabBuildingHint propertyType="unit" building={null} />);
+    expect(without).toContain("この物件の写真です。");
+    expect(without).not.toContain("棟につながり");
+  });
+
   it("区分マンション・棟なし: 物件名を入れると棟につながる案内と編集ボタン", () => {
     const html = renderToStaticMarkup(
       <PhotoTabBuildingHint propertyType="apartment_unit" building={null} onEditProperty={() => {}} />,

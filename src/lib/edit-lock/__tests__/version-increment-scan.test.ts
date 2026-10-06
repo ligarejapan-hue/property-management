@@ -90,9 +90,9 @@ const VERSIONED: Record<string, string> = {
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
   "src/app/api/properties/bulk-update/route.ts:87":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",
-  "src/lib/building-link/rename.ts:106":
+  "src/lib/building-link/rename.ts:116":
     "property.buildingName(棟の名前を直したとき、つながっている全部屋へ反映)+version increment" +
-    "(段3 Task 14。棟の行 FOR NO KEY UPDATE の後・編集中の鍵が0件のときだけ同じトランザクションで書く。" +
+    "(段3 Task 14。部屋の行(id順 FOR UPDATE)→棟の行(FOR NO KEY UPDATE)の後・編集中の鍵が0件のときだけ同じトランザクションで書く。" +
     "反映の直前に新しく鍵を取った人の保存は、この version の増分で 409 になる)",
   "src/lib/sales-sheet/property-writeback/apply-writeback.ts:30":
     "property の販売条件(販売図面の作成画面で入れた値の書き戻し)+version increment" +

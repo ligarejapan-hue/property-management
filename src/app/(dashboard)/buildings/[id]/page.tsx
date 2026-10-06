@@ -228,6 +228,10 @@ export default function BuildingDetailPage({
 
   const handleSave = async () => {
     if (!building) return;
+    if (!editForm.name.trim()) {
+      alert("棟名は必須です");
+      return;
+    }
     // 名前を直すと、つながっている全部屋の物件名も変わる。先に確認する(やめたら何もしない)。
     const msg = renamePropagateConfirmMessage(building.name, editForm.name, building._count.properties);
     if (msg && !window.confirm(msg)) return;

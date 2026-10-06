@@ -20,7 +20,8 @@ export function PhotoTabBuildingHint({
   onEditProperty?: () => void;
 }) {
   const textClass = "mt-0.5 text-xs text-gray-500 dark:text-gray-400";
-  if (propertyType === "apartment_unit" && building) {
+  // 旧種別 "unit" も、棟があれば(従来どおり)リンクを出す。棟なしの案内は区分マンションだけ。
+  if ((propertyType === "apartment_unit" || propertyType === "unit") && building) {
     return (
       <p className={textClass}>
         この物件単体の写真です。共用部・外観などの棟全体写真は

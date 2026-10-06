@@ -42,6 +42,16 @@ export async function countEditLockedUnits(
   return rows[0]?.n ?? 0;
 }
 
+/**
+ * 棟の名前の反映のトランザクションが「重なって」落ちたか(待ちの輪 40P01・Prisma の P2034・
+ * トランザクションの時間切れ P2028)。もう一度保存すれば通るので、500 ではなく再試行の案内にする。
+ */
+export function isRetryableTxError(e: unknown): boolean {
+  const err = e as { code?: unknown; meta?: { code?: unknown }; cause?: { code?: unknown; originalCode?: unknown } } | null;
+  const codes = [err?.code, err?.meta?.code, err?.cause?.code, err?.cause?.originalCode];
+  return codes.some((c) => c === "P2028" || c === "P2034" || c === "40P01");
+}
+
 /** 棟の部屋の行(ロック済みの読み取り)。 */
 export interface LockedUnit {
   id: string;

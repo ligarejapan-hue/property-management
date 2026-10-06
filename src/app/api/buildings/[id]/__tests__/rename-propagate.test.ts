@@ -200,4 +200,29 @@ describe("PATCH /api/buildings/[id] — 名前の反映", () => {
     expect(res.status).toBe(200);
     expect(lockUnitsMock).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["P2028", { code: "P2028" }],
+    ["P2034", { code: "P2034" }],
+    ["40P01(生のエラー)", { code: "P2010", meta: { code: "40P01" } }],
+    ["40P01(cause)", { cause: { originalCode: "40P01" } }],
+  ])("名前の反映が重なって落ちたら(%s) 409 RETRY_LATER", async (_n, err) => {
+    prismaMock.$transaction.mockRejectedValue(err);
+    const res = await callPatch({ name: "新マンション" });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error.code).toBe("RETRY_LATER");
+  });
+
+  it("関係のないエラーは再試行の案内にしない", async () => {
+    prismaMock.$transaction.mockRejectedValue(new Error("boom"));
+    const res = await callPatch({ name: "新マンション" });
+    expect(res.status).toBe(500);
+  });
+
+  it("空白だけの名前は 422。トランザクションも反映も呼ばない", async () => {
+    const res = await callPatch({ name: "   " });
+    expect(res.status).toBe(422);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(propagateMock).not.toHaveBeenCalled();
+  });
 });
