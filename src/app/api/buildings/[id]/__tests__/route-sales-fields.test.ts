@@ -46,17 +46,21 @@ vi.mock("@/lib/change-log", () => ({
   recordChanges: vi.fn(),
   BUILDING_TRACKED_FIELDS: [],
 }));
-vi.mock("@/lib/prisma", () => ({
-  default: {
+// ⚠PATCH は棟の更新を $transaction に入れる(棟の名前の反映・段3)。tx には同じ mock を渡す。
+vi.mock("@/lib/prisma", () => {
+  const prismaMock = {
     building: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
-  },
-}));
+    $transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb(prismaMock)),
+  };
+  return { default: prismaMock };
+});
 
 import prisma from "@/lib/prisma";
 import { PATCH } from "../route";
 
 type PrismaMock = {
   building: { findUnique: Mock; update: Mock; updateMany: Mock };
+  $transaction: Mock;
 };
 const pm = prisma as unknown as PrismaMock;
 const buildingUpdateMock = pm.building.updateMany;

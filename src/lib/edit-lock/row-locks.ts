@@ -27,3 +27,15 @@ export async function lockOwnerRow(tx: TxLike, ownerId: string): Promise<void> {
 export async function lockBuildingRow(tx: TxLike, buildingId: string): Promise<void> {
   await tx.$queryRaw`SELECT id FROM buildings WHERE id = ${buildingId}::uuid FOR UPDATE`;
 }
+
+/**
+ * 棟の名前を全部屋へ反映するとき用の、棟の行のロック(`FOR NO KEY UPDATE`)。
+ * ⚠`lockBuildingRow`(`FOR UPDATE`)を使わない理由: 物件の保存が `building_id` を書くと、
+ * 外部キーの確認で棟の行に `FOR KEY SHARE` が掛かる。`FOR UPDATE` はこれと衝突し、
+ * 「部屋の行を持って棟の行を待つ保存」×「棟の行を持って部屋の行を待つ反映」の待ちの輪に
+ * なりうる。`FOR NO KEY UPDATE` は `FOR KEY SHARE` と衝突せず、棟どうしの書き込みは直列にできる。
+ * 棟が無ければ何もしない(存在確認は呼び出し側の責務)。
+ */
+export async function lockBuildingRowNoKeyUpdate(tx: TxLike, buildingId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM buildings WHERE id = ${buildingId}::uuid FOR NO KEY UPDATE`;
+}

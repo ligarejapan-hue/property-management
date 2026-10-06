@@ -46,11 +46,18 @@ vi.mock("@/lib/change-log", () => ({
   recordChanges: vi.fn(),
   BUILDING_TRACKED_FIELDS: [],
 }));
-vi.mock("@/lib/prisma", () => ({
-  default: {
+// ⚠PATCH は棟の更新を $transaction に入れる(棟の名前の反映・段3)。tx には同じ mock を渡す。
+vi.mock("@/lib/prisma", () => {
+  const prismaMock = {
     building: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
-  },
-}));
+    // 名前を直す経路(部屋への反映)が使う分。鍵0件・反映する部屋なしの形(件数は n=0)。
+    $queryRaw: vi.fn(async () => [{ n: 0 }]),
+    property: { findMany: vi.fn(async () => []), updateMany: vi.fn() },
+    changeLog: { createMany: vi.fn() },
+    $transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb(prismaMock)),
+  };
+  return { default: prismaMock };
+});
 
 import prisma from "@/lib/prisma";
 import { PATCH } from "../route";

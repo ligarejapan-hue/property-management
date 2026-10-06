@@ -30,6 +30,7 @@ import { AddressLookupControls } from "@/components/address/address-lookup-contr
 import { CASE_STATUS_LABELS as CASE_LABELS, OCCUPANCY_STATUS_LABELS } from "@/lib/property-types";
 import { useScreenProtection } from "@/components/screen-protection/screen-protection-provider";
 import { formatBuiltYearMonth } from "@/lib/built-year-month";
+import { renamePropagateConfirmMessage } from "@/lib/building-link/rename";
 
 // ---------- Types ----------
 
@@ -227,6 +228,9 @@ export default function BuildingDetailPage({
 
   const handleSave = async () => {
     if (!building) return;
+    // 名前を直すと、つながっている全部屋の物件名も変わる。先に確認する(やめたら何もしない)。
+    const msg = renamePropagateConfirmMessage(building.name, editForm.name, building._count.properties);
+    if (msg && !window.confirm(msg)) return;
     setSaving(true);
     try {
       await updateBuilding(building.id, {

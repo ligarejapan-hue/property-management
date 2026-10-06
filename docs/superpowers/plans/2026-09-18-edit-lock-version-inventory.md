@@ -83,6 +83,7 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 | `src/app/api/properties/[id]/route.ts:448` | `property` の編集画面フィールド一式(編集画面本体の保存窓口) |
 | `src/lib/sales-sheet/property-writeback/apply-writeback.ts:30` | `property` の販売条件(販売図面の作成画面で入れた値の書き戻し。F3で追加。呼び出し側が `FOR UPDATE`+担当者スコープを取った上で `where` に version を付けて書く) |
 | `src/app/api/properties/sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts:212` | `property.dmScenarioId`(売却DMの発送の画面から物件単位で「種類を変える」。DMの種類 PR-S2 Task 5。物件行 `FOR UPDATE`+編集中の鍵の確認の後、`where` に読んだ version を付けて書く・変更履歴1行) |
+| `src/lib/building-link/rename.ts:66` | `property.buildingName`(棟の名前を直したとき、つながっている全部屋へ反映。段3 Task 14。棟の行 `FOR NO KEY UPDATE` の後・編集中の鍵が0件のときだけ同じトランザクションで書く。`version: { increment: 1 }` を伴う) |
 | `src/app/api/properties/bulk-update/route.ts:87` | `property.caseStatus`/`registryStatus`/`dmStatus`/`assignedTo` |
 | `src/lib/investigation/fetch-investigation.ts:646` | `property.zoningDistrict`/`buildingCoverageRatio`/`floorAreaRatio` |
 | `src/lib/registry-fetch/auto-fetch.ts:4294` | `property.registryStatus = scheduled`(有料取得の予約) |
@@ -95,6 +96,8 @@ Task 7 が直した「謄本取込が所有者の法人番号を版番号を進�
 ⚠追記(F3・販売図面の書き戻し): `apply-writeback.ts:30` を1件足して **55件**。同ファイルの `building.updateMany`(50行目)は走査の対象表(物件・所有者)に入らないため一覧には載らない(版番号は同じく `where` で照合し `increment` している)。
 
 ⚠追記(DMの種類 PR-S2 Task 5・「種類を変える」): `sale-dm/campaigns/[id]/properties/[propertyId]/scenario/route.ts:212` を1件足して **56件**。
+
+⚠追記(棟の自動づけ 段3 Task 14・棟の名前の反映): `building-link/rename.ts:66` を1件足して **57件**(対応済)。
 
 ## 判定の根拠にした資料
 
