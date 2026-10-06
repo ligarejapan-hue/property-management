@@ -4,6 +4,7 @@
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
+const sessionRole = vi.hoisted(() => ({ value: "admin" }));
 vi.mock("@/lib/auth", () => ({ auth: vi.fn() }));
 vi.mock("next/server", () => {
   class MockNextRequest extends Request {
@@ -20,7 +21,7 @@ vi.mock("@/lib/api-helpers", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api-helpers")>("@/lib/api-helpers");
   return {
     ...actual,
-    getApiSession: vi.fn(async () => ({ id: "user-1" })),
+    getApiSession: vi.fn(async () => ({ id: "user-1", role: sessionRole.value })),
     getUserPermissions: vi.fn(async () => []),
   };
 });
@@ -28,18 +29,23 @@ vi.mock("@/lib/permissions", () => ({ hasPermission: () => true }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 vi.mock("@/lib/change-log", () => ({ recordChanges: vi.fn(), BUILDING_TRACKED_FIELDS: [] }));
 
-const { lockMock, countMock, propagateMock, prismaMock } = vi.hoisted(() => {
+const { lockMock, countMock, propagateMock, scopeMock, prismaMock } = vi.hoisted(() => {
   const prismaMock = {
     building: { findUnique: vi.fn(), updateMany: vi.fn() },
     changeLog: { createMany: vi.fn() },
     $transaction: vi.fn(),
   };
-  return { lockMock: vi.fn(), countMock: vi.fn(), propagateMock: vi.fn(), prismaMock };
+  return { lockMock: vi.fn(), countMock: vi.fn(), propagateMock: vi.fn(), scopeMock: vi.fn(), prismaMock };
 });
 vi.mock("@/lib/edit-lock/row-locks", () => ({ lockBuildingRowNoKeyUpdate: lockMock }));
 vi.mock("@/lib/building-link/rename", async () => {
   const actual = await vi.importActual<typeof import("@/lib/building-link/rename")>("@/lib/building-link/rename");
-  return { ...actual, countEditLockedUnits: countMock, propagateBuildingName: propagateMock };
+  return {
+    ...actual,
+    countEditLockedUnits: countMock,
+    propagateBuildingName: propagateMock,
+    countUnitsOutsideScope: scopeMock,
+  };
 });
 vi.mock("@/lib/prisma", () => ({ default: prismaMock }));
 
@@ -71,6 +77,8 @@ beforeEach(() => {
   prismaMock.building.findUnique.mockResolvedValue(EXISTING);
   prismaMock.building.updateMany.mockResolvedValue({ count: 1 });
   prismaMock.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) => cb(prismaMock));
+  sessionRole.value = "admin";
+  scopeMock.mockResolvedValue(0);
   countMock.mockResolvedValue(0);
   propagateMock.mockResolvedValue({ updated: 1, changeLogs: CHANGE_LOGS });
 });
@@ -80,6 +88,11 @@ describe("PATCH /api/buildings/[id] — 名前の反映", () => {
     const res = await callPatch({ name: " 新マンション " });
     expect(res.status).toBe(200);
     expect(lockMock).toHaveBeenCalledWith(prismaMock, "b1");
+    // ロック順: 棟の行ロック → 棟の更新 → 鍵の数え直し
+    const order = (m: Mock) => m.mock.invocationCallOrder[0];
+    expect(order(lockMock)).toBeLessThan(order(prismaMock.building.updateMany));
+    expect(order(prismaMock.building.updateMany)).toBeLessThan(order(countMock));
+    expect(order(countMock)).toBeLessThan(order(propagateMock));
     expect(countMock).toHaveBeenCalledWith(prismaMock, "b1");
     // 前後の空白は落として棟にも部屋にも同じ名前を書く
     expect(prismaMock.building.updateMany.mock.calls[0][0].data.name).toBe("新マンション");
@@ -96,6 +109,8 @@ describe("PATCH /api/buildings/[id] — 名前の反映", () => {
 
   it("編集中の鍵が1件以上なら 409 UNITS_EDIT_LOCKED。反映せず、棟の更新もトランザクションごと失敗する", async () => {
     countMock.mockResolvedValue(2);
+    // ⚠巻き戻し自体は Prisma の対話型トランザクション(コールバックが投げたら rollback)に任せている。
+    //   このテストが確かめるのは「反映・変更履歴は一度も呼ばれず、409 が表に出る」こと。
     // 本物のトランザクションと同じく、投げられたら tx 内の書き込みは無かったことになる
     const committed: string[] = [];
     prismaMock.$transaction.mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) => {
@@ -118,6 +133,8 @@ describe("PATCH /api/buildings/[id] — 名前の反映", () => {
   it("名前を変えない保存では、棟の行ロックも鍵の数え直しも反映もしない", async () => {
     const res = await callPatch({ name: " 旧マンション ", note: "メモ" });
     expect(res.status).toBe(200);
+    // 空白だけの違いでも、余白つきの名前は保存しない
+    expect(prismaMock.building.updateMany.mock.calls[0][0].data.name).toBe("旧マンション");
     expect(lockMock).not.toHaveBeenCalled();
     expect(countMock).not.toHaveBeenCalled();
     expect(propagateMock).not.toHaveBeenCalled();
@@ -141,5 +158,37 @@ describe("PATCH /api/buildings/[id] — 名前の反映", () => {
     expect((await res.json()).error.code).toBe("CONFLICT");
     expect(countMock).not.toHaveBeenCalled();
     expect(propagateMock).not.toHaveBeenCalled();
+  });
+
+  it("field_staff: 担当外の部屋が1件でもあれば 403 で、反映しない", async () => {
+    sessionRole.value = "field_staff";
+    scopeMock.mockResolvedValue(1);
+    const res = await callPatch({ name: "新マンション" });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("FORBIDDEN");
+    expect(scopeMock).toHaveBeenCalledWith(prismaMock, "b1", "user-1");
+    expect(countMock).not.toHaveBeenCalled();
+    expect(propagateMock).not.toHaveBeenCalled();
+  });
+
+  it("field_staff: 自分の部屋だけなら反映できる", async () => {
+    sessionRole.value = "field_staff";
+    const res = await callPatch({ name: "新マンション" });
+    expect(res.status).toBe(200);
+    expect(propagateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("field_staff 以外の役割は担当の確認をしない", async () => {
+    sessionRole.value = "office_staff";
+    const res = await callPatch({ name: "新マンション" });
+    expect(res.status).toBe(200);
+    expect(scopeMock).not.toHaveBeenCalled();
+  });
+
+  it("field_staff でも名前を変えない保存では担当の確認をしない", async () => {
+    sessionRole.value = "field_staff";
+    const res = await callPatch({ note: "メモ" });
+    expect(res.status).toBe(200);
+    expect(scopeMock).not.toHaveBeenCalled();
   });
 });

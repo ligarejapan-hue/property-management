@@ -4,6 +4,7 @@ import {
   isBuildingRename,
   countEditLockedUnits,
   propagateBuildingName,
+  countUnitsOutsideScope,
 } from "@/lib/building-link/rename";
 import { lockBuildingRow, lockBuildingRowNoKeyUpdate } from "@/lib/edit-lock/row-locks";
 
@@ -84,5 +85,19 @@ describe("棟の行ロック", () => {
     const sql = sqlOf(tx.$queryRaw.mock.calls[0]);
     expect(sql).toMatch(/FOR UPDATE/);
     expect(sql).not.toMatch(/NO KEY/);
+  });
+});
+
+describe("countUnitsOutsideScope", () => {
+  it("作成者でも担当でもない部屋を数える(担当が null の部屋も含む)", async () => {
+    const tx = { property: { count: vi.fn().mockResolvedValue(3) } };
+    expect(await countUnitsOutsideScope(tx as never, "b1", "u1")).toBe(3);
+    expect(tx.property.count).toHaveBeenCalledWith({
+      where: {
+        buildingId: "b1",
+        createdBy: { not: "u1" },
+        OR: [{ assignedTo: null }, { assignedTo: { not: "u1" } }],
+      },
+    });
   });
 });

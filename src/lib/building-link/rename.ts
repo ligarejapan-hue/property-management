@@ -40,6 +40,26 @@ export async function countEditLockedUnits(
   return rows[0]?.n ?? 0;
 }
 
+/**
+ * 担当外の部屋の数(field_staff 用)。物件の編集 API(properties/[id])は、field_staff が
+ * 「自分が作ってもいないし担当でもない」物件を直すのを禁じている。棟の名前の反映は部屋の
+ * 物件名を書き換えるので、その禁止を迂回しないよう、1件でもあれば止める。
+ * ⚠assignedTo は null があり得る。`assignedTo <> X` だけだと NULL を拾えないので OR で明示する。
+ */
+export async function countUnitsOutsideScope(
+  tx: Pick<Prisma.TransactionClient, "property">,
+  buildingId: string,
+  userId: string,
+): Promise<number> {
+  return tx.property.count({
+    where: {
+      buildingId,
+      createdBy: { not: userId },
+      OR: [{ assignedTo: null }, { assignedTo: { not: userId } }],
+    },
+  });
+}
+
 export interface RenameChangeLog {
   targetTable: "properties";
   targetId: string;

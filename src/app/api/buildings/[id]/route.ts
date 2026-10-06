@@ -12,11 +12,13 @@ import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
 import { buildingIdentityKeys } from "@/lib/building-link/apply";
 import { recordChanges, BUILDING_TRACKED_FIELDS } from "@/lib/change-log";
+import { isPropertyScopedRole } from "@/lib/property-access";
 import { lockBuildingRowNoKeyUpdate } from "@/lib/edit-lock/row-locks";
 import {
   isBuildingRename,
   countEditLockedUnits,
   propagateBuildingName,
+  countUnitsOutsideScope,
 } from "@/lib/building-link/rename";
 
 const updateBuildingSchema = z.object({
@@ -135,8 +137,9 @@ export async function PATCH(
       if (val !== undefined) updateData[key] = val;
     }
     // 名前を直すときは前後の空白を落とす(棟にも全部屋にも同じ文字列を書く)。
+    // ⚠名前が送られたら、変更の有無にかかわらず trim して書く(空白だけの違いで余白つきの名前を残さない)。
     const renaming = isBuildingRename(existing.name, updateFields.name);
-    if (renaming) updateData.name = String(updateFields.name).trim();
+    if (updateFields.name !== undefined) updateData.name = updateFields.name.trim();
     // 名前か住所が変わったら、比べる形と町丁目を入れ直す(設計 §7)。
     if (updateData.name !== undefined || updateData.address !== undefined) {
       Object.assign(
@@ -166,6 +169,17 @@ export async function PATCH(
         data: updateData,
       });
       if (updated.count === 0 || !renaming) return { count: updated.count, propagated: null };
+      // ⚠担当だけ見られる役割は、担当外の部屋の物件名を書き換えられない(物件の編集 API と同じ規則)。
+      if (isPropertyScopedRole(session.role)) {
+        const outside = await countUnitsOutsideScope(tx, id, session.id);
+        if (outside > 0) {
+          throw new ApiError(
+            403,
+            "この棟には担当外の部屋があるため、棟の名前は変えられません。事務の方に依頼してください",
+            "FORBIDDEN",
+          );
+        }
+      }
       const locked = await countEditLockedUnits(tx, id);
       if (locked > 0) {
         throw new ApiError(
