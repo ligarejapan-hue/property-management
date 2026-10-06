@@ -202,7 +202,9 @@ export async function crawlStep(deps: {
         if (page.total === 0) throw new FetchError("layout");
         const shrank = p > 1 && s.totalRows !== null && page.total < s.totalRows;
         const firstKey = page.rows[0]?.licenseKey ?? null;
-        const regressed = p > 1 && s.lastKey !== null && firstKey !== null && firstKey <= s.lastKey;
+        // ⚠同じ会社(=)は正常: 事務所の多い会社は行がページの境目をまたぐ(前のページの最後と次のページの
+        // 先頭が同じ会社)。等しいのを戻りと見なすと、その境目で永久に読み直す(@codex #477 P1)。
+        const regressed = p > 1 && s.lastKey !== null && firstKey !== null && firstKey < s.lastKey;
         if (shrank || p > page.pages || regressed) {
           succeeded = true;
           rewind(s, page);

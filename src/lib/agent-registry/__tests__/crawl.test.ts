@@ -415,9 +415,9 @@ describe("進め方", () => {
     expect(log.slice(before, before + 3)).toEqual(["list 13 1", "list 13 2", "list 14 1"]);
   });
 
-  it("★同じ回の中でも、次のページの先頭が前のページの最後より進んでいなければ読み直す", async () => {
+  it("★同じ回の中でも、次のページの先頭が前のページの最後より戻っていれば読み直す", async () => {
     const site = smallSite();
-    site["13"] = [[row("13000001"), row("13000002")], [row("13000002"), row("13000003")]]; // 2ページ目の先頭が戻っている
+    site["13"] = [[row("13000002"), row("13000003")], [row("13000001"), row("13000004")]]; // 2ページ目の先頭が戻っている
     const { client, log } = fakeClient(site);
     const { store } = memoryStore();
     await crawlStep({ client, store, now: () => NIGHT, budget: { ...BIG, maxRequests: 4 } });
@@ -425,6 +425,28 @@ describe("進め方", () => {
     const after = await crawlStep({ client, store, now: () => NIGHT, budget: { ...BIG, maxRequests: 1 } });
     expect(after.requests).toBe(1);
     expect(log[4]).toBe("list 13 1"); // 1ページ目から読み直し(境目を照らす読み直しと兼ねる)
+  });
+
+  it("★事務所の多い会社がページの境目をまたぐ(前のページの最後と次のページの先頭が同じ会社)のは正常=読み直さず最後まで進む(@codex #477 P1)", async () => {
+    const site = smallSite();
+    // 13000002 の事務所の行が1ページ目の最後と2ページ目の先頭に分かれている
+    site["13"] = [[row("13000001"), row("13000002")], [row("13000002", "会社13000002", "支店の住所"), row("13000003")]];
+    const { client, log } = fakeClient(site);
+    const { store, getStates } = memoryStore();
+    const r = await crawlStep({ client, store, now: () => NIGHT, budget: BIG });
+    expect(r.stopped).toBeNull();
+    expect(getStates().every((s) => s.phase === "done")).toBe(true);
+    expect(log.filter((l) => l === "list 13 1")).toHaveLength(1); // 読み直していない
+    // 途中で止めて再開しても、境目(同じ会社)で読み直しの無限ループにならない
+    const site2 = smallSite();
+    site2["13"] = site["13"];
+    const c2 = fakeClient(site2);
+    const m2 = memoryStore();
+    await crawlStep({ client: c2.client, store: m2.store, now: () => NIGHT, budget: { ...BIG, maxRequests: 3 } }); // 13 の1ページ目まで
+    const r2 = await crawlStep({ client: c2.client, store: m2.store, now: () => NIGHT, budget: BIG });
+    expect(r2.stopped).toBeNull();
+    expect(m2.getStates().every((s) => s.phase === "done")).toBe(true);
+    expect(c2.log.filter((l) => l === "list 13 1")).toHaveLength(2); // 最初の読み+再開の境目の照らし直しだけ
   });
 
   it("★行政庁の件数が0(メンテナンス画面など)→ 推測せず layout で止め、だれも「一覧に無い」にしない", async () => {
