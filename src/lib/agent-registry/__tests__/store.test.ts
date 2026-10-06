@@ -227,12 +227,12 @@ describe("保存(prisma 版)", () => {
   it("進み具合は行政庁ごとに1行で保存する", async () => {
     const store = createPrismaCrawlStore();
     await store.saveStates([
-      { authority: "00", cycle: "2026-10", phase: "list", nextPage: 3, totalPages: 60, totalRows: 2950, lastKey: "00000100", failStreak: 0, dayOffUntil: null, lastError: null, lastRunAt: null },
+      { authority: "00", cycle: "2026-10", phase: "list", nextPage: 3, totalPages: 60, totalRows: 2950, lastKey: "00000100", lastCompletedCycle: "2026-09", failStreak: 0, dayOffUntil: null, lastError: null, lastRunAt: null },
     ]);
     expect(crawlState.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { authority: "00" },
-        update: expect.objectContaining({ nextPage: 3, phase: "list", totalRows: 2950, lastKey: "00000100" }),
+        update: expect.objectContaining({ nextPage: 3, phase: "list", totalRows: 2950, lastKey: "00000100", lastCompletedCycle: "2026-09" }),
       }),
     );
   });

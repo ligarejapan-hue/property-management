@@ -25,6 +25,8 @@ export interface CrawlState {
   totalRows: number | null;
   /** 最後に読んだページの最後の会社の免許の鍵。次のページとの境目を照らす(ずれを見つける)。 */
   lastKey: string | null;
+  /** 最後に終えた一巡の名前(暦の前月ではない=1か月とばしても「前の一巡」を取り違えない・@codex #477)。 */
+  lastCompletedCycle: string | null;
   failStreak: number;
   dayOffUntil: Date | null;
   lastError: string | null;
@@ -89,13 +91,6 @@ export function cycleOf(now: Date): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-/** 前の一巡の名前("2026-01" → "2025-12")。 */
-export function previousCycle(cycle: string): string {
-  const [y, m] = cycle.split("-").map(Number);
-  const d = new Date(Date.UTC(y, m - 2, 1));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
 /** 次の晩の始まり(日本時間 22:00)。今が 23 時なら翌日の 22 時、深夜 3 時ならその日の 22 時。 */
 export function nextNightStart(now: Date): Date {
   const d = new Date(now.getTime() + JST_OFFSET_MS);
@@ -112,6 +107,7 @@ function freshState(authority: string, cycle: string): CrawlState {
     totalPages: null,
     totalRows: null,
     lastKey: null,
+    lastCompletedCycle: null,
     failStreak: 0,
     dayOffUntil: null,
     lastError: null,
@@ -130,6 +126,7 @@ function alignStates(loaded: CrawlState[], now: Date): CrawlState[] {
       ...freshState(a, cycle),
       failStreak: shared?.failStreak ?? 0,
       dayOffUntil: shared?.dayOffUntil ?? null,
+      lastCompletedCycle: shared?.lastCompletedCycle ?? null,
     };
   });
 }
@@ -157,7 +154,12 @@ export async function crawlStep(deps: {
   // 前の一巡が途中なら、月が変わってもまずそれを終わらせる(締めを飛ばさない)。
   const current = cycleOf(t0);
   if (states.every((s) => s.phase === "done") && states[0].cycle !== current) {
-    states = states.map((s) => ({ ...s, ...freshState(s.authority, current), failStreak: s.failStreak }));
+    states = states.map((s) => ({
+      ...s,
+      ...freshState(s.authority, current),
+      failStreak: s.failStreak,
+      lastCompletedCycle: s.lastCompletedCycle,
+    }));
   }
   const cycle = states[0].cycle;
 
@@ -276,8 +278,12 @@ export async function crawlStep(deps: {
       }
       // 一覧も詳細も終わった=一巡の締め(5つの行政庁すべての一覧を最後まで終えているときだけ)。
       if (states.some((x) => x.phase === "detail")) {
-        await store.closeCycle(cycle, previousCycle(cycle));
-        for (const x of states) x.phase = "done";
+        // 「前の一巡」=最後に終えた一巡(初回は今の一巡=この一巡で見た会社だけが正)。
+        await store.closeCycle(cycle, states[0].lastCompletedCycle ?? cycle);
+        for (const x of states) {
+          x.phase = "done";
+          x.lastCompletedCycle = cycle;
+        }
       }
       break;
     }

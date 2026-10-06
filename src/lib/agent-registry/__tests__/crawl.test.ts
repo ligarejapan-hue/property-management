@@ -5,7 +5,6 @@ import {
   cycleOf,
   inNightWindow,
   nextNightStart,
-  previousCycle,
   type CrawlState,
   type CrawlStore,
   type StepBudget,
@@ -155,10 +154,6 @@ describe("夜間の判定・一巡の名前", () => {
     expect(inNightWindow(new Date("2026-10-05T13:00:00Z"))).toBe(true); // 22:00
     expect(inNightWindow(new Date("2026-10-05T21:59:00Z"))).toBe(true); // 翌6:59
     expect(inNightWindow(new Date("2026-10-05T22:00:00Z"))).toBe(false); // 翌7:00
-  });
-  it("前の一巡の名前(年をまたぐ)", () => {
-    expect(previousCycle("2026-11")).toBe("2026-10");
-    expect(previousCycle("2026-01")).toBe("2025-12");
   });
   it("一巡は日本時間の年月・次の晩の始まり", () => {
     expect(cycleOf(new Date("2026-10-31T15:30:00Z"))).toBe("2026-11"); // JST 11/1 0:30
@@ -422,6 +417,24 @@ describe("進め方", () => {
     const detailCalls = log.filter((l) => l.startsWith("detail ")).length;
     const companies = 30 + 4 * 2; // 00 の30社+ほか4行政庁の2社ずつ
     expect(detailCalls).toBeLessThan(companies * 3); // 全社を3回ずつ試す前に止まる
+  });
+
+  it("★「前の一巡」は暦の前月ではなく、最後に終えた一巡(1か月とばしても1巡の見落としで消さない・@codex #477)", async () => {
+    const site = smallSite();
+    const { client } = fakeClient(site);
+    const { store, recs, getStates } = memoryStore();
+    await crawlStep({ client, store, now: () => NIGHT, budget: BIG }); // 10月の一巡を終える
+    expect(getStates().every((s) => s.lastCompletedCycle === "2026-10")).toBe(true);
+    // 11月は1回も動かなかった。12月に 13000002 が(境目のずれで)見えなかった
+    site["13"] = [[row("13000001")]];
+    const dec = new Date("2026-12-05T14:00:00Z");
+    await crawlStep({ client: fakeClient(site).client, store, now: () => dec, budget: BIG });
+    expect(recs.get("13000002")!.listed).toBe(true); // 最後に終えた10月には見ている=消さない
+    expect(getStates().every((s) => s.lastCompletedCycle === "2026-12")).toBe(true);
+    // 翌1月も見なかった=一覧に無い
+    const jan = new Date("2027-01-05T14:00:00Z");
+    await crawlStep({ client: fakeClient(site).client, store, now: () => jan, budget: BIG });
+    expect(recs.get("13000002")!.listed).toBe(false);
   });
 
   it("★止まっている間にページ数が減った → その行政庁を1ページ目から読み直す(前のページへずれた会社を消さない・@codex #477)", async () => {

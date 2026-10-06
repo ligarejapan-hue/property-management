@@ -1812,6 +1812,8 @@ model MlitCrawlState {
   totalRows   Int?      @map("total_rows")
   /// 最後に読んだページの最後の会社の免許の鍵(次のページとの境目を照らす)
   lastKey     String?   @map("last_key")
+  /// 最後に終えた一巡の名前(「一覧に無い」の判定で前の一巡として使う)
+  lastCompletedCycle String? @map("last_completed_cycle")
   failStreak  Int       @default(0) @map("fail_streak")
   dayOffUntil DateTime? @map("day_off_until")
   /// 失敗の分類コードだけ(先方の本文は残さない)
