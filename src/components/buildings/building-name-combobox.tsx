@@ -12,7 +12,9 @@ import {
   shouldFetchSuggestions,
   shouldOpenOnArrow,
   suggestionBadges,
-  suggestQueryString,
+  resultMatches,
+  suggestArea,
+  suggestQueryStringForArea,
 } from "@/lib/building-link/combobox-model";
 
 export interface BuildingNameComboboxProps {
@@ -102,8 +104,10 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
   const { id, testId, value, onChange, address, choice, onChoiceChange, disabled, placeholder, inputClassName } = props;
   // 候補は「どの入力に対する結果か」と一緒に持つ。入力と一致するときだけ出す
   // (⚠effect の中で同期的に setState しない=eslint react-hooks/set-state-in-effect)。
-  const [result, setResult] = useState<{ query: string; data: BuildingSuggestion[] }>({ query: "", data: [] });
-  const suggestions = result.query === value ? result.data : [];
+  // ⚠どの町丁目で並べた結果かも持つ。住所を変えたら前の丁目の候補は出さない(@codex R2)。
+  const area = suggestArea(address);
+  const [result, setResult] = useState<{ query: string; area: string; data: BuildingSuggestion[] }>({ query: "", area: "", data: [] });
+  const suggestions = resultMatches(result, value, area) ? result.data : [];
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [selected, setSelected] = useState<BuildingSuggestion | null>(null);
@@ -117,12 +121,12 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
     const timer = setTimeout(async () => {
       try {
         // ⚠住所はそのまま送らない(町丁目に丸める=suggestQueryString)。
-        const res = await fetch(`/api/buildings/suggest?${suggestQueryString(value, address)}`);
+        const res = await fetch(`/api/buildings/suggest?${suggestQueryStringForArea(value, area)}`);
         if (!res.ok || !isLatestRequest(seq, seqRef.current)) return;
         const body = (await res.json()) as { data?: unknown };
         if (!Array.isArray(body.data)) return;
         if (isLatestRequest(seq, seqRef.current)) {
-          setResult({ query: value, data: body.data as BuildingSuggestion[] });
+          setResult({ query: value, area, data: body.data as BuildingSuggestion[] });
           setActiveIndex(-1);
         }
       } catch {
@@ -130,7 +134,7 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [value, address]);
+  }, [value, area]);
 
   const pick = (s: BuildingSuggestion | "new") => {
     if (s === "new") {

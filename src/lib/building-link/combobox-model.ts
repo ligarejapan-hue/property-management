@@ -11,7 +11,23 @@ export function shouldFetchSuggestions(name: string): boolean {
  * nginx 等の記録に残る)。サーバーが使うのは町丁目だけなので、ここで丸めて area で送る。
  */
 export function suggestQueryString(name: string, address: string): string {
-  return new URLSearchParams({ name, area: areaKey(address) ?? "" }).toString();
+  return suggestQueryStringForArea(name, suggestArea(address));
+}
+/** 問い合わせに載せる町丁目(住所を丸めた値・分からなければ空)。 */
+export function suggestArea(address: string): string {
+  return areaKey(address) ?? "";
+}
+/** 丸め済みの町丁目で問い合わせの検索部分を作る。 */
+export function suggestQueryStringForArea(name: string, area: string): string {
+  return new URLSearchParams({ name, area }).toString();
+}
+/**
+ * 手元の候補が「今の入力・今の町丁目」に対するものか(@codex R2)。
+ * ⚠名前だけで見ると、住所を変えたあとも前の丁目で並べた候補が出たままになり、
+ *   問い合わせが失敗するとずっと残る(違う棟を選べてしまう)。
+ */
+export function resultMatches(result: { query: string; area: string }, value: string, area: string): boolean {
+  return result.query === value && result.area === area;
 }
 /** 閉じた一覧(Esc・選んだ後)を上下キーで開き直すか。 */
 export function shouldOpenOnArrow(e: { open: boolean; key: string; isComposing: boolean; value: string }): boolean {

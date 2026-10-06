@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shouldFetchSuggestions, isLatestRequest, nextActiveIndex, suggestionBadges, choiceSummary, pickAtIndex, shouldHandleListKey, suggestQueryString, shouldOpenOnArrow } from "@/lib/building-link/combobox-model";
+import { shouldFetchSuggestions, isLatestRequest, nextActiveIndex, suggestionBadges, choiceSummary, pickAtIndex, shouldHandleListKey, suggestQueryString, shouldOpenOnArrow, suggestArea, resultMatches } from "@/lib/building-link/combobox-model";
 
 const s = { id: "b1", name: "パーク第一", area: "東京都大田区南雪谷1丁目", unitCount: 3, sameName: true, sameArea: true };
 
@@ -65,5 +65,24 @@ describe("shouldOpenOnArrow(閉じた一覧を上下キーで開き直す)", () 
     expect(shouldOpenOnArrow({ open: false, key: "Enter", isComposing: false, value: "パーク第一" })).toBe(false);
     expect(shouldOpenOnArrow({ open: false, key: "ArrowDown", isComposing: true, value: "パーク第一" })).toBe(false);
     expect(shouldOpenOnArrow({ open: false, key: "ArrowDown", isComposing: false, value: "あ" })).toBe(false);
+  });
+});
+
+describe("resultMatches(手元の候補が今の入力・今の丁目のものか・@codex R2)", () => {
+  const result = { query: "パーク第一", area: "東京都港区六本木1丁目", data: [] };
+  it("同じ名前+同じ丁目なら出す", () => {
+    expect(resultMatches(result, "パーク第一", "東京都港区六本木1丁目")).toBe(true);
+  });
+  it("★同じ名前でも丁目が変わったら出さない(前の丁目で並べた候補を選ばせない)", () => {
+    expect(resultMatches(result, "パーク第一", "東京都港区赤坂2丁目")).toBe(false);
+    expect(resultMatches(result, "パーク第一", "")).toBe(false);
+  });
+  it("名前が違えば出さない", () => {
+    expect(resultMatches(result, "パーク第二", "東京都港区六本木1丁目")).toBe(false);
+  });
+  it("suggestArea は問い合わせに載せる area と同じ値", () => {
+    const addr = "東京都港区六本木1丁目1-2";
+    expect(new URLSearchParams(suggestQueryString("パーク第一", addr)).get("area")).toBe(suggestArea(addr));
+    expect(suggestArea("")).toBe("");
   });
 });
