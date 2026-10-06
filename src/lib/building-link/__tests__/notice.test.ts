@@ -45,7 +45,17 @@ describe("stash/take", () => {
     expect(() => stashBuildingLinkNotice("p1", o())).not.toThrow();
     expect(takeBuildingLinkNotice("p1")).toBeNull();
   });
+  it("保存値の形が違えば null", () => {
+    const store = new Map<string, string>([["building-link-notice:p1", "{}"]]);
+    vi.stubGlobal("sessionStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: () => {},
+      removeItem: (k: string) => void store.delete(k),
+    });
+    expect(takeBuildingLinkNotice("p1")).toBeNull();
+  });
   it("sessionStorage が存在しなくても落ちない", () => {
+    vi.stubGlobal("sessionStorage", undefined);
     expect(() => stashBuildingLinkNotice("p1", o())).not.toThrow();
     expect(takeBuildingLinkNotice("p1")).toBeNull();
   });

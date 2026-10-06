@@ -39,7 +39,13 @@ export function takeBuildingLinkNotice(propertyId: string): BuildingLinkOutcome 
     const raw = sessionStorage.getItem(KEY_PREFIX + propertyId);
     if (!raw) return null;
     sessionStorage.removeItem(KEY_PREFIX + propertyId);
-    return JSON.parse(raw) as BuildingLinkOutcome;
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      !parsed || typeof parsed !== "object" ||
+      typeof (parsed as { action?: unknown }).action !== "string" ||
+      !Array.isArray((parsed as { warnings?: unknown }).warnings)
+    ) return null;
+    return parsed as BuildingLinkOutcome;
   } catch {
     return null;
   }
