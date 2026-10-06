@@ -151,3 +151,17 @@ describe("取込で画面から指定した列の対応を、確定でも使う(
     expect(owner).toContain("...rowFieldMapExtra(effectiveMapping),");
   });
 });
+
+describe("書き出したCSVの地番・家屋番号(=\"…\")は、確定でも元の値に戻す(@codex P2)", () => {
+  it("地番・家屋番号の =\"4-2\" を 4-2 にする(CSV 取込と同じ unwrapCsvTextCell)", () => {
+    const d = buildPropertyCreateData(
+      { "住所": ADDR, "lot_number": '="4-2"', "家屋番号": '="12-3"' },
+      "u",
+    );
+    expect(d).toMatchObject({ lotNumber: "4-2", buildingNumber: "12-3" });
+  });
+  it("リンクキーは前後の空白だけ落とし、空白だけなら入れない(CSV 取込と同じ)", () => {
+    expect(buildPropertyCreateData({ "住所": ADDR, "リンクキー": " 顧客ー001 " }, "u").externalLinkKey).toBe("顧客ー001");
+    expect(buildPropertyCreateData({ "住所": ADDR, "リンクキー": "  " }, "u")).not.toHaveProperty("externalLinkKey");
+  });
+});

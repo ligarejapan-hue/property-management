@@ -15,6 +15,7 @@ import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
 import { normalizeBuildingName } from "@/lib/property-building-name";
 import { OWNER_CSV_COLUMN_MAP, PROPERTY_CSV_COLUMN_MAP } from "@/lib/csv-parser";
 import { isValidPostalCode, normalizePostalCode } from "@/lib/address-lookup/normalize";
+import { unwrapCsvTextCell } from "@/lib/csv-encode";
 
 // CSV 取込(api/import/csv)と同じ決まった値。外れた値は落とす(CSV 取込と同じ)。
 const VALID_REGISTRY_STATUS = ["unconfirmed", "scheduled", "obtained"];
@@ -210,8 +211,11 @@ export function buildPropertyCreateData(
   }
   const normalizedRoute = normalizeIntroductionRouteInput(mapped.introductionRoute);
   if (normalizedRoute) createData.introductionRoute = normalizedRoute;
-  if (mapped.lotNumber) createData.lotNumber = mapped.lotNumber;
-  if (mapped.buildingNumber) createData.buildingNumber = mapped.buildingNumber;
+  // 本システムが書き出した CSV は Excel 対策で `="4-2"` の形。CSV 取込と同じく元の値に戻す。
+  const lotNumber = mapped.lotNumber ? unwrapCsvTextCell(mapped.lotNumber) : "";
+  const buildingNumber = mapped.buildingNumber ? unwrapCsvTextCell(mapped.buildingNumber) : "";
+  if (lotNumber) createData.lotNumber = lotNumber;
+  if (buildingNumber) createData.buildingNumber = buildingNumber;
   // ⚠CSV 取込と同じ規則: 物件名がある行は区分マンションとして作る
   //   (以前は物件名を読まず、要確認から確定すると物件名も棟も落ちていた)。
   //   物件名の整え方も CSV 取込と同じ normalizeBuildingName を通す。
@@ -221,7 +225,9 @@ export function buildPropertyCreateData(
     createData.buildingName = buildingNameForCreate;
   }
   if (mapped.realEstateNumber) createData.realEstateNumber = mapped.realEstateNumber;
-  if (mapped.externalLinkKey) createData.externalLinkKey = mapped.externalLinkKey;
+  // ⚠リンクキーは trim だけ(正規化しない・CSV 取込と同じ)。
+  const linkKey = mapped.externalLinkKey?.trim();
+  if (linkKey) createData.externalLinkKey = linkKey;
   if (mapped.zoningDistrict) createData.zoningDistrict = mapped.zoningDistrict;
   if (mapped.rosenkaValue) createData.rosenkaValue = parseFloat(mapped.rosenkaValue) || null;
   if (mapped.gpsLat) createData.gpsLat = parseFloat(mapped.gpsLat) || null;
