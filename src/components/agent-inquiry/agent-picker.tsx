@@ -132,6 +132,15 @@ export function AgentPicker({
     searching,
     shown: shown ? { hits: [...shown.hits, ...registryShown], failed: shown.failed } : null,
   });
+  // 名簿の候補を選ぶ・新しく登録する、も検索語が変わるのと同じ=写す途中の古い返事で選び直さない(@codex #477)。
+  const pickAgent = (a: AgentHit) => {
+    queryGen.current += 1;
+    onPick(a);
+  };
+  const createNew = () => {
+    queryGen.current += 1;
+    onCreateNew();
+  };
   const pickRegistry = (h: RegistryHit) => {
     const asked = queryGen.current;
     setAdoptingId(h.id);
@@ -163,7 +172,7 @@ export function AgentPicker({
         aria-label="業者を探す"
         className="w-full rounded-md border border-gray-300 px-3 py-2 text-base dark:border-gray-700 dark:bg-gray-900"
       />
-      {searching && shown && shown.hits.length > 0 && <AgentResults hits={shown.hits} onPick={onPick} />}
+      {searching && shown && shown.hits.length > 0 && <AgentResults hits={shown.hits} onPick={pickAgent} />}
       {searching && registryShown.length > 0 && (
         <RegistryResults hits={registryShown} busyId={adoptingId} onPick={pickRegistry} />
       )}
@@ -171,12 +180,12 @@ export function AgentPicker({
       {searching && shown?.failed && <p className="text-xs text-rose-600">検索できませんでした(通信を確かめてください)</p>}
       {/* 探し終えてから出す=候補を見ずに押して、名簿にある業者を二重に作らない(@codex #459 R21)。 */}
       {createAction === "empty" && (
-        <button type="button" onClick={onCreateNew} className="text-sm text-teal-700 underline dark:text-teal-300">
+        <button type="button" onClick={createNew} className="text-sm text-teal-700 underline dark:text-teal-300">
           ＋ 名簿にない業者を新しく登録
         </button>
       )}
       {createAction === "hasHits" && (
-        <button type="button" onClick={onCreateNew} className="text-xs text-gray-500 underline">
+        <button type="button" onClick={createNew} className="text-xs text-gray-500 underline">
           上の候補に無い(別の支店など)ときだけ、新しく登録
         </button>
       )}

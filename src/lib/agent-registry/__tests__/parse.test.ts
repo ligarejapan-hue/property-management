@@ -48,7 +48,28 @@ describe("一覧のページを読む", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].companyName).toBe("試験建設&興業 株式会社");
     expect(rows[0].address).toBe("東京都渋谷区試験町１－１２－１８");
-    expect(page.rows.map((r) => r.licenseKey)).toEqual(["13000001", "13000044", "13104567"]);
+    expect(page.rows.map((r) => r.licenseKey).slice(0, 3)).toEqual(["13000001", "13000044", "13104567"]);
+    expect(page.rows).toHaveLength(49); // 50行のうち1社が2行=49社
+  });
+
+  it("★表示している範囲(N件目～M件目)が、選んだページと件数に合わなければ LayoutChanged(別のページを読まない・@codex #477)", () => {
+    // 2ページ目が選ばれているのに「1件目～50件目」
+    const wrongPage = listHtml.replace('<option value="1" selected="selected">1/539</option><option value="2">2/539</option>', '<option value="1">1/539</option><option value="2" selected="selected">2/539</option>');
+    expect(wrongPage).not.toBe(listHtml);
+    expect(() => parseListPage(wrongPage)).toThrow(LayoutChanged);
+    // 1ページ目なのに「101件目～150件目」
+    expect(() => parseListPage(listHtml.replace("1件目～50件目までを表示", "101件目～150件目までを表示"))).toThrow(LayoutChanged);
+    // 最後のページは件数で終わる(26906件・539ページ目=26901件目～26906件目・6行)
+    const last = listHtml
+      .replace('<option value="1" selected="selected">1/539</option>', '<option value="1">1/539</option>')
+      .replace('<option value="539">539/539</option>', '<option value="539" selected="selected">539/539</option>')
+      .replace("1件目～50件目までを表示", "26901件目～26906件目までを表示")
+      .replace(/(<tr>\s*<td style="text-align:right;">6<\/td>[\s\S]*?<\/tr>\s*)(?:<tr>[\s\S]*?<\/tr>\s*)*(<\/table>)/, "$1$2");
+    const lastPage = parseListPage(last);
+    expect(lastPage.page).toBe(539);
+    expect(lastPage.rows.length).toBe(5); // 6行のうち1社が2行
+    // 最後のページの範囲が件数を超えている
+    expect(() => parseListPage(last.replace("26901件目～26906件目", "26901件目～26907件目"))).toThrow(LayoutChanged);
   });
 
   it("所在地が空なら null", () => {
@@ -96,12 +117,12 @@ describe("一覧のページを読む", () => {
   });
 
   it("★「1件目～N件目」の表示と読めた行の数が違う(行が欠けた)一覧 → LayoutChanged(@codex #477)", () => {
-    // 見本は4行=「1件目～4件目」。1行欠けた画面
+    // 見本は50行=「1件目～50件目」。1行欠けた画面
     const missing = listHtml.replace(/<tr>(\s*<td style="text-align:right;">4<\/td>[\s\S]*?<\/tr>)/, "");
     expect(missing).not.toBe(listHtml);
     expect(() => parseListPage(missing)).toThrow(LayoutChanged);
     // 範囲の表示そのものが無い
-    expect(() => parseListPage(listHtml.replace("1件目～4件目までを表示", ""))).toThrow(LayoutChanged);
+    expect(() => parseListPage(listHtml.replace("1件目～50件目までを表示", ""))).toThrow(LayoutChanged);
   });
 
   it("★件数は0でないのに行が1つも無い一覧 → LayoutChanged(空のページとして進めない・@codex #477)", () => {

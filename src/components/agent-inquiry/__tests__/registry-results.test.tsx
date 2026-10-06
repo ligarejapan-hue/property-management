@@ -44,5 +44,11 @@ describe("国交省の一覧から来た候補", () => {
     expect(src).toMatch(/useEffect\(\(\) => \{\s*queryGen\.current \+= 1;\s*\}, \[query\]\)/);
     // 打った瞬間(描画や effect を待たず)に番号を進める=返事が描画の直前に届いても古い返事で選ばない
     expect(src).toMatch(/onChange=\{\(e\) => \{[^}]*?queryGen\.current \+= 1;\s*onQuery\(e\.target\.value\);\s*\}\}/);
+    // 名簿の候補を選んだ・新しく登録を押したときも、その瞬間に番号を進める(写す途中の古い返事で上書きしない)
+    expect(src).toMatch(/const pickAgent = \(a: AgentHit\) => \{\s*queryGen\.current \+= 1;\s*onPick\(a\);\s*\};/);
+    expect(src).toMatch(/const createNew = \(\) => \{\s*queryGen\.current \+= 1;\s*onCreateNew\(\);\s*\};/);
+    expect(src).toContain("<AgentResults hits={shown.hits} onPick={pickAgent} />");
+    expect(src).not.toMatch(/onClick=\{onCreateNew\}/);
+    expect(src.match(/onClick=\{createNew\}/g)).toHaveLength(2);
   });
 });

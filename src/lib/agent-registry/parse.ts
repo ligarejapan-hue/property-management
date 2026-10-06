@@ -41,6 +41,8 @@ export class LayoutChanged extends Error {
 }
 
 const LIST_HEADERS = ["No.", "免許行政庁", "免許証番号", "商号又は名称", "代表者名", "事務所名", "所在地"];
+/** 1ページの行数(検索で頼む dispCount と同じ値・client と共有)。 */
+export const PAGE_SIZE = 50;
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 
@@ -107,13 +109,21 @@ export function parseListPage(html: string): ListPage {
   // 「1件目～50件目までを表示」=このページにあるはずの行の数(1件=1行・2026-10-03 の実物で確認)。
   const rangeM = html.match(/(\d+)件目～(\d+)件目/);
   if (!rangeM) throw new LayoutChanged("表示している範囲の文言");
-  const expectedRows = Number(rangeM[2]) - Number(rangeM[1]) + 1;
+  const rangeStart = Number(rangeM[1]);
+  const rangeEnd = Number(rangeM[2]);
+  const expectedRows = rangeEnd - rangeStart + 1;
 
   const select = html.match(/<select id="pageListNo1"[\s\S]*?<\/select>/)?.[0];
   if (!select) throw new LayoutChanged("ページの選択");
   const pagesM = select.match(/>\s*\d+\/(\d+)\s*</);
   const pageM = select.match(/<option value="(\d+)" selected/);
   if (!pagesM || !pageM) throw new LayoutChanged("ページ数");
+  const page = Number(pageM[1]);
+  // 表示している範囲が、選んだページと件数に合っているか(50件ずつ・最後のページは件数で終わる)。
+  // 合わない=別のページの中身。そのまま進めると間のページを読まずに締めで会社を消してしまう(@codex #477)。
+  if (rangeStart !== (page - 1) * PAGE_SIZE + 1 || rangeEnd !== Math.min(page * PAGE_SIZE, total)) {
+    throw new LayoutChanged("表示している範囲がページと合わない");
+  }
 
   const table = html.match(/<table class="re_disp"\s*>([\s\S]*?)<\/table>/)?.[1];
   if (!table) throw new LayoutChanged("一覧の表");
@@ -154,7 +164,7 @@ export function parseListPage(html: string): ListPage {
   if (dataRows !== (table.match(/js_ShowDetail\(/g) ?? []).length) throw new LayoutChanged("読めなかった行");
   // 表示している範囲の行の数と違う=行が欠けた画面。そのまま進めると締めで欠けた会社を消してしまう(@codex #477)。
   if (dataRows !== expectedRows) throw new LayoutChanged("表示している範囲と行の数が違う");
-  return { total, pages: Number(pagesM[1]), page: Number(pageM[1]), rows: [...byKey.values()] };
+  return { total, pages: Number(pagesM[1]), page, rows: [...byKey.values()] };
 }
 
 /** 詳細(tkGaiyo.do)を読む。開いた会社と違う免許番号なら取り違えとして止める。 */

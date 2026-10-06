@@ -1,4 +1,4 @@
-import { LayoutChanged, parseDetail, parseListPage, type Detail, type ListPage } from "./parse";
+import { LayoutChanged, PAGE_SIZE, parseDetail, parseListPage, type Detail, type ListPage } from "./parse";
 
 /**
  * 国交省の宅建業者検索への取得(計画 G1〜G4)。
@@ -60,7 +60,7 @@ function baseForm(authority: string): Record<string, string> {
     kenCode: "",
     sortValue: "1",
     rdoSelectSort: "1",
-    dispCount: "50",
+    dispCount: String(PAGE_SIZE),
     dispPage: "1",
     comNameKanaOnly: "",
     comNameKanjiOnly: "",
