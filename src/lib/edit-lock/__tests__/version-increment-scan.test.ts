@@ -44,7 +44,7 @@ const VERSIONED: Record<string, string> = {
     "owner(target) の version のみ進める(付け替え先のinvalidation)",
   "src/app/api/admin/owners/correction/mislink/route.ts:545":
     "property の version のみ進める(付け替えのinvalidation)",
-  "src/app/api/import/csv/route.ts:616":
+  "src/app/api/import/csv/route.ts:617":
     "property の UPDATABLE_PROPERTY_FIELDS(CSV重複更新。棟だけつなぐ行も同じ更新で進める)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
   "src/app/api/import/jobs/[jobId]/rollback/route.ts:559":

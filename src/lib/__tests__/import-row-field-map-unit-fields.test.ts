@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { buildPropertyCreateData, resolvePropertyField } from "@/lib/import-row-field-map";
+import {
+  buildOwnerCreateData,
+  buildPropertyCreateData,
+  resolvePropertyField,
+  rowFieldMapExtra,
+  ROW_FIELD_MAP_KEY,
+} from "@/lib/import-row-field-map";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { PROPERTY_CSV_COLUMN_MAP } from "@/lib/csv-parser";
 
 // 要確認・エラーの取込行を「作成」「再試行」で確定したとき、CSV 取込で入るはずの欄が落ちていた
@@ -94,5 +102,52 @@ describe("確定側の列の読み替えは CSV 取込と同じ", () => {
 
   it("「物件名」は読まない(戸建が区分になるのを防ぐ・CSV 取込と同じ)", () => {
     expect(resolvePropertyField("物件名")).toBeUndefined();
+  });
+});
+
+describe("取込で画面から指定した列の対応を、確定でも使う(@codex P1)", () => {
+  it("物件: 行に残った表(所在地→住所・号→部屋番号)で読み替える", () => {
+    const fieldMap = rowFieldMapExtra({ "所在地": "address", "号": "roomNo", "物件の名前": "buildingName" });
+    const d = buildPropertyCreateData(
+      { "所在地": ADDR, "号": "201", "物件の名前": "パーク第一", ...fieldMap },
+      "u",
+    );
+    expect(d).toMatchObject({ address: ADDR, roomNo: "201", buildingName: "パーク第一", propertyType: "apartment_unit" });
+  });
+
+  it("物件: 表があるときは、表に無い見出しを読まない(取込と同じ結果にする)", () => {
+    const fieldMap = rowFieldMapExtra({ "所在地": "address" });
+    const d = buildPropertyCreateData({ "所在地": ADDR, "階": "3", ...fieldMap }, "u");
+    expect(d).not.toHaveProperty("floorNo");
+  });
+
+  it("物件: 棟郵便番号など物件に無い欄は、表にあっても入れない", () => {
+    const fieldMap = rowFieldMapExtra({ "住所": "address", "棟〒": "buildingPostalCode", "x": "createdBy" });
+    const d = buildPropertyCreateData({ "住所": ADDR, "棟〒": "1450066", "x": "evil", ...fieldMap }, "u");
+    expect(d).not.toHaveProperty("buildingPostalCode");
+    expect(d.createdBy).toBe("u");
+  });
+
+  it("壊れた表は無視して、決まった表で読む", () => {
+    const d = buildPropertyCreateData({ "住所": ADDR, "部屋番号": "201", [ROW_FIELD_MAP_KEY]: "{壊れ" }, "u");
+    expect(d).toMatchObject({ address: ADDR, roomNo: "201" });
+  });
+
+  it("所有者: 行に残った表(名前→氏名)で読み替える", () => {
+    const fieldMap = rowFieldMapExtra({ "名前": "name", "TEL": "phone" });
+    const d = buildOwnerCreateData({ "名前": "山田太郎", "TEL": "0312345678", ...fieldMap });
+    expect(d).toMatchObject({ name: "山田太郎" });
+    expect(d.phone).toBeTruthy();
+  });
+
+  it("表が空なら何も足さない", () => {
+    expect(rowFieldMapExtra({})).toEqual({});
+  });
+
+  it("CSV取込・所有者CSV取込は、要確認・エラーの行に表を残す", () => {
+    const csv = readFileSync(resolve(process.cwd(), "src/app/api/import/csv/route.ts"), "utf8");
+    const owner = readFileSync(resolve(process.cwd(), "src/app/api/import/owner-csv/route.ts"), "utf8");
+    expect(csv).toContain("...rowFieldMapExtra(headerToField),");
+    expect(owner).toContain("...rowFieldMapExtra(effectiveMapping),");
   });
 });

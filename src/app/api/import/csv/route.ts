@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { rowFieldMapExtra } from "@/lib/import-row-field-map";
 import prisma from "@/lib/prisma";
 import {
   getApiSession,
@@ -866,6 +867,8 @@ export async function POST(request: NextRequest) {
           ? {
               ...(row.rawData as Record<string, unknown>),
               ...buildErrorRawDataExtras(row.errorMessage, row.rawData),
+              // 確定(作成・再試行)で取込と同じ列の対応を使えるよう、見出し→欄の表も残す。
+              ...rowFieldMapExtra(headerToField),
             }
           : row.rawData;
       await prisma.importJobRow.create({
