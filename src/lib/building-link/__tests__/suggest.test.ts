@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildingNameKey } from "@/lib/building-identity";
-import { rankBuildingSuggestions } from "@/lib/building-link/suggest";
+import { rankBuildingSuggestions, readAllLegacyBuildings, LEGACY_PAGE_SIZE, LEGACY_MAX_ROWS } from "@/lib/building-link/suggest";
 
 const r = (id: string, name: string, address: string, unitCount = 1) => ({
   id, name, address, nameKey: null, areaKey: null, unitCount, createdAt: new Date("2026-01-01"),
@@ -37,5 +37,49 @@ describe("rankBuildingSuggestions", () => {
       mk("old2", 2, "2026-01-01"),
     ], target);
     expect(out.map((x) => x.id)).toEqual(["many", "old2", "new2"]);
+  });
+});
+
+describe("readAllLegacyBuildings(古い棟を全部読む・@codex R5)", () => {
+  // findMany の代わり: id 昇順・cursor の次から take 件を返す(cursor 自身は含めない)。
+  const fakeDb = (n: number) => {
+    const rows = Array.from({ length: n }, (_, i) => ({ id: `id${String(i).padStart(5, "0")}`, name: i === 429 ? "パーク第一" : `無関係${i}` }));
+    const calls: { cursorId: string | null; take: number }[] = [];
+    const fetchPage = async (a: { cursorId: string | null; take: number }) => {
+      calls.push(a);
+      const start = a.cursorId === null ? 0 : rows.findIndex((r) => r.id === a.cursorId) + 1;
+      return rows.slice(start, start + a.take);
+    };
+    return { fetchPage, calls };
+  };
+
+  it("★450件のうち430件目にある同じ名前の棟も読み、complete=true", async () => {
+    const { fetchPage, calls } = fakeDb(450);
+    const res = await readAllLegacyBuildings(fetchPage);
+    expect(res.complete).toBe(true);
+    expect(res.rows).toHaveLength(450);
+    expect(res.rows.some((r) => r.name === "パーク第一")).toBe(true);
+    expect(calls.map((c) => c.take)).toEqual([LEGACY_PAGE_SIZE, LEGACY_PAGE_SIZE, LEGACY_PAGE_SIZE]);
+    expect(calls[0].cursorId).toBeNull();
+    expect(calls[1].cursorId).toBe("id00199");
+  });
+
+  it("★2000件を超えると上限で止め、complete=false", async () => {
+    const { fetchPage } = fakeDb(2500);
+    const res = await readAllLegacyBuildings(fetchPage);
+    expect(res.complete).toBe(false);
+    expect(res.rows).toHaveLength(LEGACY_MAX_ROWS);
+  });
+
+  it("ちょうど上限の件数で尽きたら complete=true(続きが無いことを確かめる)", async () => {
+    const { fetchPage } = fakeDb(2000);
+    const res = await readAllLegacyBuildings(fetchPage);
+    expect(res.complete).toBe(true);
+    expect(res.rows).toHaveLength(2000);
+  });
+
+  it("0件なら complete=true", async () => {
+    const { fetchPage } = fakeDb(0);
+    expect(await readAllLegacyBuildings(fetchPage)).toEqual({ rows: [], complete: true });
   });
 });

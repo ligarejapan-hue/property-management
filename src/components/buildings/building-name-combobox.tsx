@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { BuildingChoice } from "@/lib/building-link/resolve";
 import type { BuildingSuggestion } from "@/lib/building-link/suggest";
 import {
+  allowsNewBuilding,
   canUseListKeys,
   choiceSummary,
   listState,
@@ -17,7 +18,6 @@ import {
   suggestionBadges,
   suggestArea,
   suggestQueryStringForArea,
-  type SuggestListState,
   type SuggestResult,
 } from "@/lib/building-link/combobox-model";
 
@@ -40,11 +40,14 @@ export function BuildingSuggestionList({
   activeIndex,
   onPick,
   listId,
+  allowNew = true,
 }: {
   suggestions: BuildingSuggestion[];
   activeIndex: number;
   onPick: (s: BuildingSuggestion | "new") => void;
   listId: string;
+  /** false=一番下の「新しい棟」の代わりに、選べない注記を出す(partial)。 */
+  allowNew?: boolean;
 }) {
   return (
     <ul
@@ -86,20 +89,31 @@ export function BuildingSuggestionList({
           </span>
         </li>
       ))}
-      <li
-        id={`${listId}-opt-${suggestions.length}`}
-        role="option"
-        aria-selected={activeIndex === suggestions.length}
-        onMouseDown={(e) => {
-          e.preventDefault();
-          onPick("new");
-        }}
-        className={`flex min-h-[44px] cursor-pointer items-center border-t border-gray-100 px-3 text-sm text-indigo-700 dark:border-gray-800 dark:text-indigo-300 ${
-          activeIndex === suggestions.length ? "bg-indigo-50 dark:bg-indigo-950/40" : "hover:bg-gray-50 dark:hover:bg-gray-800"
-        }`}
-      >
-        新しい棟として登録する
-      </li>
+      {allowNew ? (
+        <li
+          id={`${listId}-opt-${suggestions.length}`}
+          role="option"
+          aria-selected={activeIndex === suggestions.length}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            onPick("new");
+          }}
+          className={`flex min-h-[44px] cursor-pointer items-center border-t border-gray-100 px-3 text-sm text-indigo-700 dark:border-gray-800 dark:text-indigo-300 ${
+            activeIndex === suggestions.length ? "bg-indigo-50 dark:bg-indigo-950/40" : "hover:bg-gray-50 dark:hover:bg-gray-800"
+          }`}
+        >
+          新しい棟として登録する
+        </li>
+      ) : (
+        // ⚠[@codex R5] 古い棟を全部は確かめられなかった。「新しい棟」は出さない(選べない注記だけ)。
+        <li
+          role="presentation"
+          data-testid="building-suggest-partial-note"
+          className="border-t border-gray-100 px-3 py-2 text-xs text-gray-500 dark:border-gray-800 dark:text-gray-400"
+        >
+          すべての棟を確かめられませんでした。新しい棟は保存するときに自動で判断します
+        </li>
+      )}
     </ul>
   );
 }
@@ -108,7 +122,7 @@ export function BuildingSuggestionList({
  * 読み込み中・失敗のときの行(@codex R3)。⚠選べる行(option)を持たない=
  * 「新しい棟として登録する」も出さない(終わる前に選ぶと重複の棟を作りうる)。
  */
-export function BuildingSuggestionStatus({ state, listId }: { state: Exclude<SuggestListState, "ready">; listId: string }) {
+export function BuildingSuggestionStatus({ state, listId }: { state: "loading" | "error"; listId: string }) {
   return (
     <div
       id={listId}
@@ -129,7 +143,10 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
   // ⚠成否も持つ。今の名前+丁目の問い合わせが成功で終わるまで、選べる一覧は出さない(@codex R3)。
   const [result, setResult] = useState<SuggestResult | null>(null);
   const state = listState(result, value, area);
-  const suggestions = state === "ready" && result ? result.data : [];
+  // partial(@codex R5)=候補は選べるが「新しい棟」は出さない。
+  const selectable = canUseListKeys(state);
+  const allowNew = allowsNewBuilding(state);
+  const suggestions = selectable && result ? result.data : [];
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   // 選んだ棟は「どの丁目で選んだか」と一緒に持つ。丁目が変わったら要約に使わない(@codex R4)。
@@ -154,10 +171,11 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
         const res = await fetch(`/api/buildings/suggest?${suggestQueryStringForArea(value, area)}`);
         if (!isLatestRequest(seq, seqRef.current)) return;
         if (!res.ok) return fail();
-        const body = (await res.json()) as { data?: unknown };
+        const body = (await res.json()) as { data?: unknown; complete?: unknown };
         if (!Array.isArray(body.data)) return fail();
         if (isLatestRequest(seq, seqRef.current)) {
-          setResult({ query: value, area, status: "ok", data: body.data as BuildingSuggestion[] });
+          // complete が無い応答は「全部確かめた」扱い(false のときだけ partial)。
+          setResult({ query: value, area, status: "ok", data: body.data as BuildingSuggestion[], complete: body.complete !== false });
           setActiveIndex(-1);
         }
       } catch {
@@ -181,7 +199,7 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
     setActiveIndex(-1);
   };
 
-  const optionCount = suggestions.length + 1;
+  const optionCount = suggestions.length + (allowNew ? 1 : 0);
   const listId = `${id}-suggestions`;
   const summary = choiceSummary(choice, selectedInArea(selected, area));
 
@@ -195,7 +213,7 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"
-        aria-activedescendant={open && state === "ready" && activeIndex >= 0 ? `${listId}-opt-${activeIndex}` : undefined}
+        aria-activedescendant={open && selectable && activeIndex >= 0 ? `${listId}-opt-${activeIndex}` : undefined}
         value={value}
         disabled={disabled}
         placeholder={placeholder}
@@ -229,7 +247,7 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
             e.preventDefault();
             setActiveIndex((cur) => nextActiveIndex(cur, e.key as "ArrowDown" | "ArrowUp", optionCount));
           } else if (e.key === "Enter") {
-            const target = pickAtIndex(activeIndex, suggestions);
+            const target = pickAtIndex(activeIndex, suggestions, allowNew);
             if (target === null) return;
             e.preventDefault();
             pick(target);
@@ -237,8 +255,8 @@ export default function BuildingNameCombobox(props: BuildingNameComboboxProps) {
         }}
       />
       {open && shouldFetchSuggestions(value) && (
-        state === "ready" ? (
-          <BuildingSuggestionList suggestions={suggestions} activeIndex={activeIndex} onPick={pick} listId={listId} />
+        state === "ready" || state === "partial" ? (
+          <BuildingSuggestionList suggestions={suggestions} activeIndex={activeIndex} onPick={pick} listId={listId} allowNew={allowNew} />
         ) : (
           <BuildingSuggestionStatus state={state} listId={listId} />
         )

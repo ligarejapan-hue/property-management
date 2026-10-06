@@ -3,7 +3,7 @@ import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions, ApiError, handleApiError, apiResponse } from "@/lib/api-helpers";
 import { hasPermission } from "@/lib/permissions";
 import { buildingNameKey } from "@/lib/building-identity";
-import { rankBuildingSuggestions, SUGGEST_MIN_KEY_LENGTH } from "@/lib/building-link/suggest";
+import { rankBuildingSuggestions, readAllLegacyBuildings, SUGGEST_MIN_KEY_LENGTH } from "@/lib/building-link/suggest";
 
 /** 1回に読む棟の上限(並べ替え前)。 */
 const FETCH_LIMIT = 50;
@@ -68,15 +68,20 @@ export async function GET(request: NextRequest) {
         take: FETCH_LIMIT,
         orderBy: { createdAt: "asc" },
       }),
-      prisma.building.findMany({
-        where: { nameKey: null },
-        select,
-        take: FETCH_LIMIT,
-        orderBy: { createdAt: "asc" },
-      }),
+      // ⚠[@codex R5] 古い棟は50件で切らず、id 順に200件ずつ全部読む(上限2000件)。
+      //   上限で止めたら complete=false=画面は「新しい棟」を出さない(保存時の自動判断に任せる)。
+      readAllLegacyBuildings(({ cursorId, take }) =>
+        prisma.building.findMany({
+          where: { nameKey: null },
+          select,
+          take,
+          orderBy: { id: "asc" },
+          ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+        }),
+      ),
     ]);
     const seen = new Set<string>();
-    const rows = [...sameArea, ...exact, ...keyed, ...legacy].filter((b) => !seen.has(b.id) && seen.add(b.id));
+    const rows = [...sameArea, ...exact, ...keyed, ...legacy.rows].filter((b) => !seen.has(b.id) && seen.add(b.id));
     const filtered = rows.filter((b) => {
       const nk = b.nameKey ?? buildingNameKey(b.name);
       return nk === nameKey || b.name.toLowerCase().includes(name.toLowerCase()) || (nk ?? "").includes(nameKey);
@@ -85,7 +90,7 @@ export async function GET(request: NextRequest) {
       filtered.map((b) => ({ ...b, unitCount: b._count.properties })),
       target,
     );
-    return apiResponse({ data });
+    return apiResponse({ data, complete: legacy.complete });
   } catch (error) {
     return handleApiError(error);
   }

@@ -191,3 +191,37 @@ describe("GET /api/buildings/suggest 同じ町丁目の同じ名前の棟(@codex
     expect(findMany.mock.calls.some((c) => "areaKey" in c[0].where)).toBe(false);
   });
 });
+
+describe("GET /api/buildings/suggest 古い棟を全部読む(@codex R5)", () => {
+  const legacyRow = (i: number, name: string) => ({
+    id: `l${String(i).padStart(5, "0")}`, name, address: "東京都港区六本木1丁目1", nameKey: null, areaKey: null,
+    createdAt: new Date("2020-01-01"), _count: { properties: 1 },
+  });
+
+  it("★古い棟が200件を超えても続きを読み、430件目の同じ名前の棟を返す(complete=true)", async () => {
+    const all = Array.from({ length: 450 }, (_, i) => legacyRow(i, i === 429 ? "パーク第１" : `無関係${i}`));
+    findMany.mockImplementation(async (args: { where: { nameKey?: unknown }; take: number; cursor?: { id: string } }) => {
+      if (args.where.nameKey !== null) return [];
+      const start = args.cursor ? all.findIndex((r) => r.id === args.cursor!.id) + 1 : 0;
+      return all.slice(start, start + args.take);
+    });
+    const res = await call("name=" + encodeURIComponent("パーク第１"));
+    const body = await res.json();
+    expect(body.complete).toBe(true);
+    expect(body.data.map((x: { id: string }) => x.id)).toEqual(["l00429"]);
+    const legacyCalls = findMany.mock.calls.filter((c) => c[0].where.nameKey === null);
+    expect(legacyCalls).toHaveLength(3);
+    expect(legacyCalls[0][0].orderBy).toEqual({ id: "asc" });
+    expect(legacyCalls[1][0]).toMatchObject({ cursor: { id: "l00199" }, skip: 1, take: 200 });
+  });
+
+  it("★上限(2000件)を超えたら complete=false", async () => {
+    let n = 0;
+    findMany.mockImplementation(async (args: { where: { nameKey?: unknown }; take: number }) => {
+      if (args.where.nameKey !== null) return [];
+      return Array.from({ length: args.take }, () => legacyRow(n++, `無関係${n}`));
+    });
+    const body = await (await call("name=" + encodeURIComponent("パーク第１"))).json();
+    expect(body.complete).toBe(false);
+  });
+});

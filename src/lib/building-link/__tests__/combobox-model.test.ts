@@ -133,3 +133,38 @@ describe("selectedInArea(選んだ丁目と今の丁目が同じときだけ選�
     expect(selectedInArea(null, "東京都港区六本木1丁目")).toBeNull();
   });
 });
+
+describe("listState partial(古い棟を全部は確かめられなかった・@codex R5)", () => {
+  const base = { query: "パーク第一", area: "東京都港区六本木1丁目", status: "ok" as const, data: [] };
+  it("★complete=false なら partial", () => {
+    expect(listState({ ...base, complete: false }, "パーク第一", "東京都港区六本木1丁目")).toBe("partial");
+  });
+  it("complete=true・省略なら ready", () => {
+    expect(listState({ ...base, complete: true }, "パーク第一", "東京都港区六本木1丁目")).toBe("ready");
+    expect(listState(base, "パーク第一", "東京都港区六本木1丁目")).toBe("ready");
+  });
+  it("partial でも候補は上下キー・Enter で選べる", () => {
+    expect(canUseListKeys("partial")).toBe(true);
+  });
+  it("★partial では一番下の「新しい棟」を選べない(pickAtIndex の allowNew=false)", () => {
+    const s = { id: "b1", name: "パーク第一", area: "", unitCount: 1, sameName: true, sameArea: false };
+    expect(pickAtIndex(0, [s], false)).toBe(s);
+    expect(pickAtIndex(1, [s], false)).toBeNull();
+    expect(pickAtIndex(0, [], false)).toBeNull();
+  });
+});
+
+describe("areaChanged 町丁目が分からない住所(@codex R5)", () => {
+  it("★分からない→分からないでも、住所が変われば true", () => {
+    expect(areaChanged("小笠原村父島字東町", "八丈町大賀郷")).toBe(true);
+  });
+  it("分からない住所で、同じ文字(前後の空白・全角半角の違いだけ)なら false", () => {
+    expect(areaChanged("小笠原村父島字東町", " 小笠原村父島字東町 ")).toBe(false);
+  });
+  it("★空→丁目つきの住所は true", () => {
+    expect(areaChanged("", "東京都港区六本木1丁目1-2")).toBe(true);
+  });
+  it("両方分かるなら町丁目で比べる(番地だけの直しは false)", () => {
+    expect(areaChanged("東京都港区六本木1丁目1-2", "東京都港区六本木1丁目9-9")).toBe(false);
+  });
+});

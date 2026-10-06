@@ -64,8 +64,8 @@ describe("combobox の配線(走査)", () => {
     join(dirname(fileURLToPath(import.meta.url)), "../building-name-combobox.tsx"),
     "utf8",
   ).replace(/\r\n/g, "\n");
-  it("★選べる一覧は ready のときだけ描く", () => {
-    expect(src).toMatch(/state === "ready" \? \(\s*<BuildingSuggestionList/);
+  it("★選べる一覧は ready・partial のときだけ描き、「新しい棟」は allowNew に従う", () => {
+    expect(src).toMatch(/state === "ready" \|\| state === "partial" \? \(\s*<BuildingSuggestionList[^>]*allowNew=\{allowNew\}/);
   });
   it("★上下キー・Enter は ready のときだけ効く", () => {
     expect(src).toMatch(/if \(!canUseListKeys\(state\)\) return;/);
@@ -73,5 +73,59 @@ describe("combobox の配線(走査)", () => {
   it("★失敗(応答が ok でない・形が違う・例外)は今の名前+丁目の error として残す", () => {
     expect(src.match(/status: "error"/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
     expect(src).toMatch(/catch \{[\s\S]*?fail\(\)/);
+  });
+});
+
+describe("BuildingSuggestionList partial(@codex R5)", () => {
+  const partial = renderToStaticMarkup(
+    <BuildingSuggestionList suggestions={[a, b]} activeIndex={-1} onPick={() => {}} listId="p" allowNew={false} />,
+  );
+  it("★候補は選べる行のまま、「新しい棟として登録する」は出さない", () => {
+    expect(partial.match(/role="option"/g)?.length).toBe(2);
+    expect(partial).not.toContain("新しい棟として登録する");
+    expect(partial).not.toContain('id="p-opt-2"');
+  });
+  it("★選べない注記を出す", () => {
+    expect(partial).toContain("すべての棟を確かめられませんでした。新しい棟は保存するときに自動で判断します");
+    expect(partial).toContain('role="presentation"');
+  });
+});
+
+describe("partial の配線(走査)", () => {
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../building-name-combobox.tsx"),
+    "utf8",
+  );
+  it("★応答の complete=false を partial として持ち、Enter は allowNew を渡して選ぶ", () => {
+    expect(src).toContain("complete: body.complete !== false");
+    expect(src).toContain("pickAtIndex(activeIndex, suggestions, allowNew)");
+    expect(src).toContain("suggestions.length + (allowNew ? 1 : 0)");
+  });
+});
+
+describe("BuildingSuggestionList partial(@codex R5)", () => {
+  const partial = renderToStaticMarkup(
+    <BuildingSuggestionList suggestions={[a, b]} activeIndex={-1} onPick={() => {}} listId="p" allowNew={false} />,
+  );
+  it("★候補は選べる行のまま、「新しい棟として登録する」は出さない", () => {
+    expect(partial.match(/role="option"/g)?.length).toBe(2);
+    expect(partial).not.toContain("新しい棟として登録する");
+    expect(partial).not.toContain('id="p-opt-2"');
+  });
+  it("★選べない注記を出す", () => {
+    expect(partial).toContain("すべての棟を確かめられませんでした。新しい棟は保存するときに自動で判断します");
+    expect(partial).toContain('role="presentation"');
+  });
+});
+
+describe("partial の配線(走査)", () => {
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../building-name-combobox.tsx"),
+    "utf8",
+  );
+  it("★応答の complete=false を partial として持ち、Enter は allowNew を渡して選ぶ", () => {
+    expect(src).toContain("complete: body.complete !== false");
+    expect(src).toContain("pickAtIndex(activeIndex, suggestions, allowNew)");
+    expect(src).toContain("suggestions.length + (allowNew ? 1 : 0)");
   });
 });

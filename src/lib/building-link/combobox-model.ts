@@ -23,7 +23,16 @@ export function suggestArea(address: string): string {
  * ⚠呼ぶのは住所の入力の**イベントの中**(描画中・effect の中で親の setter を呼ばない)。
  */
 export function areaChanged(prevAddress: string, nextAddress: string): boolean {
-  return suggestArea(prevAddress) !== suggestArea(nextAddress);
+  const prevArea = suggestArea(prevAddress);
+  const nextArea = suggestArea(nextAddress);
+  if (prevArea !== "" && nextArea !== "") return prevArea !== nextArea;
+  // ⚠[@codex R5] 町丁目を読み取れない住所(島しょ部など・住所より先に棟を選んだ)は
+  //   丁目で比べられない。住所そのもの(areaKey と同じ正規化)が変わったら外す。
+  return normalizeAddressForCompare(prevAddress) !== normalizeAddressForCompare(nextAddress);
+}
+/** 住所の比べ方(areaKey の中と同じ: NFKC+空白をすべて除く)。 */
+function normalizeAddressForCompare(address: string): string {
+  return address.normalize("NFKC").replace(/[\s　]+/g, "");
 }
 /** 選んだ棟は、選んだときの丁目と今の丁目が同じときだけ使う(古い要約を出さない)。 */
 export function selectedInArea(
@@ -50,8 +59,11 @@ export interface SuggestResult {
   area: string;
   status: "ok" | "error";
   data: BuildingSuggestion[];
+  /** 古い棟を全部確かめられたか(@codex R5)。省略=true。 */
+  complete?: boolean;
 }
-export type SuggestListState = "loading" | "error" | "ready";
+/** partial=候補は選べるが、古い棟を全部は確かめられなかったので「新しい棟」は出さない。 */
+export type SuggestListState = "loading" | "error" | "ready" | "partial";
 /**
  * 一覧に何を出すか(@codex R3)。⚠今の名前+町丁目の問い合わせが**成功で終わる**まで
  * 「新しい棟として登録する」を選べる一覧として出さない。遅い・失敗した問い合わせの間に
@@ -59,10 +71,15 @@ export type SuggestListState = "loading" | "error" | "ready";
  */
 export function listState(result: SuggestResult | null, value: string, area: string): SuggestListState {
   if (!result || !resultMatches(result, value, area)) return "loading";
-  return result.status === "ok" ? "ready" : "error";
+  if (result.status !== "ok") return "error";
+  return result.complete === false ? "partial" : "ready";
 }
-/** 上下キー・Enter で候補を動かす/選ぶのは ready のときだけ。 */
+/** 上下キー・Enter で候補を動かす/選ぶのは ready・partial のときだけ。 */
 export function canUseListKeys(state: SuggestListState): boolean {
+  return state === "ready" || state === "partial";
+}
+/** 一番下の「新しい棟として登録する」を出す(選べる)のは ready のときだけ。 */
+export function allowsNewBuilding(state: SuggestListState): boolean {
   return state === "ready";
 }
 /** 閉じた一覧(Esc・選んだ後)を上下キーで開き直すか。 */
@@ -90,9 +107,15 @@ export function choiceSummary(choice: BuildingChoice, selected: BuildingSuggesti
 }
 
 /** 強調中の行から選ぶ候補。範囲外(一覧が縮んだ等)は null=何も選ばない。一番下は「新しい棟」。 */
-export function pickAtIndex(index: number, suggestions: BuildingSuggestion[]): BuildingSuggestion | "new" | null {
+export function pickAtIndex(
+  index: number,
+  suggestions: BuildingSuggestion[],
+  /** false=「新しい棟」の行が無い(partial)。一番下を選んでも何も選ばない。 */
+  allowNew: boolean = true,
+): BuildingSuggestion | "new" | null {
   if (!Number.isInteger(index) || index < 0 || index > suggestions.length) return null;
-  return index === suggestions.length ? "new" : suggestions[index];
+  if (index === suggestions.length) return allowNew ? "new" : null;
+  return suggestions[index];
 }
 /** 日本語変換中のキー(Enter は変換の確定)は候補の操作として扱わない。 */
 export function shouldHandleListKey(isComposing: boolean): boolean {
