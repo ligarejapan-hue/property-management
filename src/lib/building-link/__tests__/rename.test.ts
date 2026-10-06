@@ -20,6 +20,11 @@ describe("rename", () => {
     expect(isBuildingRename("A", undefined)).toBe(false);
     expect(isBuildingRename("A", "B")).toBe(true);
   });
+  it("保存済みの名前に余白があれば、余白を落とした保存は名前の変更として扱う(部屋にも反映する)", () => {
+    expect(isBuildingRename(" A ", "A")).toBe(true);
+    expect(isBuildingRename(" A ", " A ")).toBe(true);
+    expect(renamePropagateConfirmMessage(" A ", "A", 2)).toBe("部屋2件の物件名も「A」に直します。よろしいですか？");
+  });
   it("編集中の鍵の数え方: 解除されておらず、合図と操作が期限内のものだけ(DB の時計で)", async () => {
     const tx = { $queryRaw: vi.fn().mockResolvedValue([{ n: 2 }]) };
     expect(await countEditLockedUnits(tx as never, "b1")).toBe(2);

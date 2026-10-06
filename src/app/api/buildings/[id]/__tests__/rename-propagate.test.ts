@@ -144,6 +144,17 @@ describe("PATCH /api/buildings/[id] — 名前の反映", () => {
     expect(actions).not.toContain("building.rename_propagate");
   });
 
+  it("保存済みの名前に余白があれば、ほかの項目だけの保存でも余白を落とした名前を部屋へ反映する(@codex P1)", async () => {
+    prismaMock.building.findUnique.mockResolvedValue({ ...EXISTING, name: " 旧マンション " });
+    const res = await callPatch({ name: "旧マンション", note: "メモ" });
+    expect(res.status).toBe(200);
+    expect(prismaMock.building.updateMany.mock.calls[0][0].data.name).toBe("旧マンション");
+    expect(lockUnitsMock).toHaveBeenCalledWith(prismaMock, "b1");
+    expect(propagateMock).toHaveBeenCalledWith(prismaMock, {
+      units: UNITS, newName: "旧マンション", userId: "user-1",
+    });
+  });
+
   it("応答にも監査ログにも、編集中の人の名前・住所は入らない", async () => {
     countMock.mockResolvedValue(1);
     const res = await callPatch({ name: "新マンション" });

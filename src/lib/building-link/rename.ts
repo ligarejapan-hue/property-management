@@ -15,8 +15,13 @@ import { EDIT_LOCK_HEARTBEAT_GRACE_MS, EDIT_LOCK_IDLE_LIMIT_MS } from "@/lib/edi
 const GRACE_SEC = EDIT_LOCK_HEARTBEAT_GRACE_MS / 1000;
 const IDLE_SEC = EDIT_LOCK_IDLE_LIMIT_MS / 1000;
 
+/**
+ * 保存すると棟の名前が変わるか。新しい名前は空白を落としてから、**保存済みの名前そのまま**と比べる。
+ * ⚠保存済みが " A " のように余白つきだと、"A" で保存すると棟の名前は変わる(PATCH は trim して書く)。
+ *   ここで両方を trim して比べると「変わらない」と見て部屋へ反映せず、棟と部屋の表記がずれる(@codex P1)。
+ */
 export function isBuildingRename(oldName: string, newName: string | undefined): boolean {
-  return newName !== undefined && newName.trim() !== oldName.trim();
+  return newName !== undefined && newName.trim() !== oldName;
 }
 
 export function renamePropagateConfirmMessage(oldName: string, newName: string, unitCount: number): string | null {
