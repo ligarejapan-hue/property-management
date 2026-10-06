@@ -14,10 +14,14 @@ export const REGISTRY_USER_AGENT = "property-management agent-registry (low-rate
 export const MIN_INTERVAL_MS = 4000;
 const TIMEOUT_MS = 30_000;
 
-/** outside_window=頼んでよい時間の外・budget=1回の予算(回数・時間)を使い切った(どちらも先方の失敗ではない=失敗に数えない)。 */
+/**
+ * http_blocked=401/403(断られた=先方全体の都合・会社ごとの失敗にしない)・http_other=そのほかの 200 以外(404 など・会社ごとの失敗になりうる)。
+ * outside_window=頼んでよい時間の外・budget=1回の予算(回数・時間)を使い切った(どちらも先方の失敗ではない=失敗に数えない)。
+ */
 export type FetchFail =
   | "http_429"
   | "http_5xx"
+  | "http_blocked"
   | "http_other"
   | "timeout"
   | "network"
@@ -160,6 +164,7 @@ export function createRegistryClient(opts: RegistryClientOptions = {}): Registry
       }
       if (res.status === 429) throw new FetchError("http_429");
       if (res.status >= 500) throw new FetchError("http_5xx");
+      if (res.status === 401 || res.status === 403) throw new FetchError("http_blocked");
       if (res.status !== 200) throw new FetchError("http_other");
       return decode(await res.arrayBuffer());
     } catch (e) {

@@ -152,6 +152,8 @@ describe("先方への取得", () => {
     [503, "http_5xx"],
     [500, "http_5xx"],
     [404, "http_other"],
+    [401, "http_blocked"], // 断られた=先方全体の都合(会社ごとの失敗にしない・@codex #477)
+    [403, "http_blocked"],
   ])("先方が %s → %s で止める(取り直さない)", async (status, kind) => {
     const { client, calls } = setup([() => html(searchPageHtml), () => html("busy", { status })]);
     await expect(client.searchFirst("13")).rejects.toMatchObject({ kind });

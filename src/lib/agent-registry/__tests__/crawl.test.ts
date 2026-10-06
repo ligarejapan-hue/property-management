@@ -28,7 +28,12 @@ function smallSite(): Site {
 
 function fakeClient(
   site: Site,
-  opts: { failAt?: Set<number>; failKind?: FetchError["kind"]; brokenDetail?: string | ((key: string) => boolean) } = {},
+  opts: {
+    failAt?: Set<number>;
+    failKind?: FetchError["kind"];
+    brokenDetail?: string | ((key: string) => boolean);
+    brokenKind?: FetchError["kind"];
+  } = {},
 ) {
   let n = 0;
   const log: string[] = [];
@@ -38,7 +43,7 @@ function fakeClient(
     n++;
     log.push(what);
     if (opts.failAt?.has(n)) throw new FetchError(opts.failKind ?? "http_5xx");
-    if (what.startsWith("detail ") && broken(what.slice("detail ".length))) throw new FetchError("layout");
+    if (what.startsWith("detail ") && broken(what.slice("detail ".length))) throw new FetchError(opts.brokenKind ?? "layout");
   };
   // 本物の client と同じく、ページ数より先のページは空の結果を返す。
   const page = (a: string, p: number): ListPage => {
@@ -380,6 +385,18 @@ describe("進め方", () => {
       expect(recs.get(k)!.needsDetail).toBe(true);
     }
     expect([...recs.values()].filter((r) => r.phone !== null)).toHaveLength(8);
+  });
+
+  it("★詳細が 401/403 で断られる(先方全体の都合)ときは、会社ごとではなく続けて3回で晩じゅう止める(@codex #477)", async () => {
+    const { client, log } = fakeClient(smallSite(), { brokenDetail: () => true, brokenKind: "http_blocked" });
+    const { store, recs } = memoryStore();
+    let stopped: string | null = null;
+    for (let i = 0; i < 20 && stopped !== "day_off"; i++) {
+      stopped = (await crawlStep({ client, store, now: () => NIGHT, budget: BIG })).stopped;
+    }
+    expect(stopped).toBe("day_off");
+    expect(log.filter((l) => l.startsWith("detail ")).length).toBe(3); // 3回で止まる(60回叩かない)
+    expect([...recs.values()].every((r) => r.detailFailCount === 0)).toBe(true); // 会社のせいにしない
   });
 
   it("★詳細がどの会社も読めない(先方の画面が変わった)ときは、諦めた会社が20社を超えたら晩じゅう止める(叩き続けない)", async () => {
