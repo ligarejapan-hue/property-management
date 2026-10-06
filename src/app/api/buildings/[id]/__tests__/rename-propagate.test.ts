@@ -50,6 +50,7 @@ vi.mock("@/lib/building-link/rename", async () => {
 vi.mock("@/lib/prisma", () => ({ default: prismaMock }));
 
 import { writeAuditLog } from "@/lib/audit";
+import { recordChanges } from "@/lib/change-log";
 import { PATCH } from "../route";
 
 const EXISTING = {
@@ -142,6 +143,13 @@ describe("PATCH /api/buildings/[id] — 名前の反映", () => {
     expect(propagateMock).not.toHaveBeenCalled();
     const actions = (writeAuditLog as Mock).mock.calls.map((c) => c[0].action);
     expect(actions).not.toContain("building.rename_propagate");
+    // 変更履歴にも余白を落とした名前を渡す(入口の zod が trim する)=保存済みと同じなので履歴は増えない(@codex P2)
+    expect((recordChanges as Mock).mock.calls[0][0].newValues.name).toBe("旧マンション");
+  });
+
+  it("変更履歴には実際に保存した(余白を落とした)名前を渡す(@codex P2)", async () => {
+    await callPatch({ name: " 新マンション " });
+    expect((recordChanges as Mock).mock.calls[0][0].newValues.name).toBe("新マンション");
   });
 
   it("保存済みの名前に余白があれば、ほかの項目だけの保存でも余白を落とした名前を部屋へ反映する(@codex P1)", async () => {
