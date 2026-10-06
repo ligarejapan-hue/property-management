@@ -89,11 +89,11 @@ describe("PATCH /api/buildings/[id] — 名前の反映", () => {
     const res = await callPatch({ name: " 新マンション " });
     expect(res.status).toBe(200);
     expect(lockMock).toHaveBeenCalledWith(prismaMock, "b1");
-    // ロック順: 棟の行ロック → 棟の更新 → 鍵の数え直し
+    // ロック順: 部屋の行 → 棟の行 → 棟の更新 → 鍵の数え直し → 反映(販売図面の書き戻しと同じ向き)
     const order = (m: Mock) => m.mock.invocationCallOrder[0];
+    expect(order(lockUnitsMock)).toBeLessThan(order(lockMock));
     expect(order(lockMock)).toBeLessThan(order(prismaMock.building.updateMany));
-    expect(order(prismaMock.building.updateMany)).toBeLessThan(order(lockUnitsMock));
-    expect(order(lockUnitsMock)).toBeLessThan(order(countMock));
+    expect(order(prismaMock.building.updateMany)).toBeLessThan(order(countMock));
     expect(order(countMock)).toBeLessThan(order(propagateMock));
     expect(countMock).toHaveBeenCalledWith(prismaMock, "b1");
     // 前後の空白は落として棟にも部屋にも同じ名前を書く

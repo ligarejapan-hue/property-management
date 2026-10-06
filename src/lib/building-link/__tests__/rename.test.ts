@@ -36,6 +36,7 @@ describe("rename", () => {
 
 describe("propagateBuildingName", () => {
   const U = (id: string, buildingName: string | null) => ({ id, buildingName, createdBy: "c", assignedTo: null });
+  // ⚠tx に findMany は無い(読み直さずに渡された行だけで書くことの確認を兼ねる)
   function makeTx() {
     return { property: { updateMany: vi.fn().mockResolvedValue({ count: 2 }) } };
   }

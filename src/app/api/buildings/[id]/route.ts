@@ -159,21 +159,22 @@ export async function PATCH(
     // 築月・地下階も毎回送るため、無関係な項目だけ直したつもりの保存でも、図面から
     // 書き戻したばかりの値を黙って消し得る。version を条件にして、0件なら競合として返す。
     // 棟の名前を直すときは、同じトランザクションで全部屋の物件名へ反映する(段3・設計 §6.3)。
-    // ⚠ロック順は 棟の行 → 部屋の行。棟の行は FOR NO KEY UPDATE(row-locks.ts の注記)。
+    // ⚠ロック順は **部屋の行 → 棟の行**(販売図面の書き戻し=sales-sheets/new と同じ向き。逆だと
+    //   待ちの輪になる)。部屋の行を id 順に FOR UPDATE で読んでから、棟の行を FOR NO KEY UPDATE。
     // ⚠編集中の鍵が1件でもあれば 409 で投げ、棟の更新ごと巻き戻す(誰が編集中かは返さない)。
     // ⚠鍵の数え直しと反映の間に新しく鍵を取られても、反映が各部屋の version を進めるので
     //   その人の保存は 409 になる(受け入れ済み)。
     const { count, propagated } = await prisma.$transaction(async (tx) => {
+      // 名前を直すときだけ、先に部屋の行をロックして読み(以降の確認と反映はこの行だけが対象)、
+      // 次に棟の行をロックする。ロックのあとにこの棟へつながった部屋は反映の対象外で、
+      // 次にその部屋を保存するまで古い名前のまま(許容。権限の穴ではない)。
+      const units = renaming ? await lockBuildingUnits(tx, id) : [];
       if (renaming) await lockBuildingRowNoKeyUpdate(tx, id);
       const updated = await tx.building.updateMany({
         where: { id, version },
         data: updateData,
       });
       if (updated.count === 0 || !renaming) return { count: updated.count, propagated: null };
-      // 部屋の行をロックして読み、以降の確認と反映はこの行だけを対象にする(確認と反映の間に
-      // つながった/担当が変わった部屋が素通りしない)。ロックのあとにつながった部屋は
-      // 次にその部屋を保存するまで古い名前のまま(許容。権限の穴ではない)。
-      const units = await lockBuildingUnits(tx, id);
       // ⚠担当だけ見られる役割は、担当外の部屋の物件名を書き換えられない(物件の編集 API と同じ規則)。
       if (isPropertyScopedRole(session.role) && unitsOutsideScope(units, session).length > 0) {
         throw new ApiError(
