@@ -69,28 +69,49 @@ describe("renderFigureHtml", () => {
   it("隣り合う札どうしのすき間がそろい、札は図の外へはみ出さない", () => {
     const ns = partnerNetworkNodes();
     const H = NETWORK_PILL_H;
+    // 札は両端が半円の形(rx = 高さの半分)。中心線(長さ w-H の線分)から H/2 以内が札の中。
+    const inPill = (n: (typeof ns)[number], px: number, py: number) => {
+      const hx = (n.w - H) / 2;
+      const cx = Math.max(n.x - hx, Math.min(n.x + hx, px));
+      return Math.hypot(px - cx, py - n.y) <= H / 2;
+    };
+    // 2つの札のいちばん近いところのすき間(中心線どうしの距離 − H)
     const gap = (a: (typeof ns)[number], b: (typeof ns)[number]) => {
-      const dx = Math.abs(a.x - b.x) - (a.w + b.w) / 2;
-      const dy = Math.abs(a.y - b.y) - H;
-      return dx > 0 && dy > 0 ? Math.hypot(dx, dy) : Math.max(dx, dy);
+      let m = Infinity;
+      for (let i = 0; i <= 40; i++) {
+        const ax = a.x - (a.w - H) / 2 + ((a.w - H) * i) / 40;
+        for (let j = 0; j <= 40; j++) m = Math.min(m, Math.hypot(ax - (b.x - (b.w - H) / 2 + ((b.w - H) * j) / 40), a.y - b.y));
+      }
+      return m - H;
     };
     const gaps = ns.map((n, i) => gap(n, ns[(i + 1) % ns.length]));
-    expect(Math.min(...gaps)).toBeGreaterThan(40);
-    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(8);
+    expect(Math.min(...gaps)).toBeGreaterThan(30);
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(6);
     // 外側の余白は上下左右でほぼ同じ
     const left = Math.min(...ns.map((n) => n.x - n.w / 2));
     const right = NETWORK_VIEW.w - Math.max(...ns.map((n) => n.x + n.w / 2));
     const top = Math.min(...ns.map((n) => n.y - H / 2));
     const bottom = NETWORK_VIEW.h - Math.max(...ns.map((n) => n.y + H / 2));
     for (const m of [left, right, top, bottom]) { expect(m).toBeGreaterThanOrEqual(8); expect(m).toBeLessThanOrEqual(16); }
-    // 真ん中の円から各札までのすき間(線の見える長さ)がそろっている
-    const clear = ns.map((n) => {
-      const dx = Math.max(0, Math.abs(n.x - NETWORK_HUB.x) - n.w / 2);
-      const dy = Math.max(0, Math.abs(n.y - NETWORK_HUB.y) - H / 2);
-      return Math.hypot(dx, dy) - NETWORK_HUB.r;
+    // 線の見える長さ=線に沿って、真ん中の円の縁から札の丸い縁に当たるまで(@codex #488 R8: 軸方向で測らない)
+    const visible = ns.map((n) => {
+      const len = Math.hypot(n.x - NETWORK_HUB.x, n.y - NETWORK_HUB.y);
+      const ux = (n.x - NETWORK_HUB.x) / len;
+      const uy = (n.y - NETWORK_HUB.y) / len;
+      let lo = 0;
+      let hi = len;
+      for (let k = 0; k < 40; k++) {
+        const m = (lo + hi) / 2;
+        if (inPill(n, NETWORK_HUB.x + ux * m, NETWORK_HUB.y + uy * m)) hi = m; else lo = m;
+      }
+      return hi - NETWORK_HUB.r;
     });
-    expect(Math.max(...clear) - Math.min(...clear)).toBeLessThan(4);
-    expect(Math.min(...clear)).toBeGreaterThan(24);
+    expect(Math.max(...visible) - Math.min(...visible), visible.map((v) => v.toFixed(1)).join(",")).toBeLessThan(2);
+    expect(Math.min(...visible)).toBeGreaterThan(30);
+    // 線の長さと札どうしのすき間も、ほぼ同じ(図全体の余白がそろう)
+    const meanGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    const meanLine = visible.reduce((a, b) => a + b, 0) / visible.length;
+    expect(Math.abs(meanGap - meanLine)).toBeLessThan(6);
   });
 
   it("案内役: イメージイラストと明記する", () => {

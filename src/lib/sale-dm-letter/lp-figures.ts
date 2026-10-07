@@ -159,10 +159,10 @@ const RENDERERS: Record<FigureKind, () => string> = {
       FIGURE_LABELS.sell_rent_keep,
     ),
   // 管理画面の見本も公開LPと同じ円形の図(同じ描画関数)を載せる(@codex #488 R7 P2)。
-  // 図の高さ 290 を見出しの下(y=58〜348)に収める。
+  // 図の高さ 269 を見出しの下(y=70〜339)に収める。
   partner_network: () =>
     wrap(
-      `<g transform="translate(${(640 - NETWORK_VIEW.w) / 2} 58)">${partnerRadialInner()}</g>`,
+      `<g transform="translate(${(640 - NETWORK_VIEW.w) / 2} 70)">${partnerRadialInner()}</g>`,
       FIGURE_LABELS.partner_network,
     ),
   consult_guide: () =>
@@ -224,26 +224,27 @@ function brandImg(image: LpBrandImage, cls: string): string {
 /**
  * 「窓口はひとつ」の図(発注者要望 2026-10-07): リガーレジャパンを真ん中の円に、提携先7つを
  * 周りに並べ、真ん中から1本ずつ線でつなぐ。専門家/業者の色分けはしない(発注者指定)。
- * 配置は計算で決めた固定値: ①真ん中の円から各札までのすき間をどれも36にそろえ(線の見える長さが同じ)、
- * ②そのうえで隣り合う札どうしのすき間がそろう角度を選んだ(どこも約44・ばらつき約1)。
+ * 配置は計算で決めた固定値: ①線の見える長さ(真ん中の円の縁から、線に沿って札の丸い縁に当たるまで)を
+ * どれも36にそろえ(@codex #488 R8: 軸方向の距離ではなく線に沿って測る)、②そのうえで隣り合う札どうしの
+ * すき間がそろう角度を選んだ(どこも約39・ばらつき約1)。
  * 長い札(土地家屋調査士)は上、文字数の近い札を左右対称に置く。外側の余白は上下左右とも約12。
  * ⚠提携先の名前(LP_BRAND.partners)を変えたら、この表も作り直す(テストが名前の一致を確かめる)。
  */
-export const NETWORK_VIEW = { w: 403, h: 290 } as const;
+export const NETWORK_VIEW = { w: 372, h: 269 } as const;
 export const NETWORK_PILL_H = 36;
 const NET_FONT = 15;
-export const NETWORK_HUB = { x: 209, y: 146, r: 62 } as const;
+export const NETWORK_HUB = { x: 191, y: 146, r: 62 } as const;
 const NET_CX = NETWORK_HUB.x;
 const NET_CY = NETWORK_HUB.y;
 const NET_CENTER_R = NETWORK_HUB.r;
 const NETWORK_LAYOUT: ReadonlyArray<{ label: string; x: number; y: number }> = [
-  { label: "土地家屋調査士", x: 209, y: 30 },
-  { label: "司法書士", x: 347, y: 101 },
-  { label: "税理士", x: 342, y: 179 },
-  { label: "引っ越し業者", x: 289, y: 260 },
-  { label: "内装工事業者", x: 129, y: 260 },
-  { label: "弁護士", x: 76, y: 179 },
-  { label: "片付け業者", x: 64, y: 99 },
+  { label: "土地家屋調査士", x: 191, y: 30 },
+  { label: "司法書士", x: 315, y: 90 },
+  { label: "税理士", x: 324, y: 164 },
+  { label: "引っ越し業者", x: 269, y: 239 },
+  { label: "内装工事業者", x: 113, y: 239 },
+  { label: "弁護士", x: 58, y: 164 },
+  { label: "片付け業者", x: 64, y: 88 },
 ];
 export function partnerNetworkNodes(): Array<{ label: string; x: number; y: number; w: number }> {
   return NETWORK_LAYOUT.map((n) => ({ ...n, w: n.label.length * NET_FONT + 28 }));
