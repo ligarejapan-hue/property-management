@@ -182,7 +182,7 @@ const CSS = [
   ".unsub a{color:#6b7a7d}",
   ".bar{display:none}",
   "@media (max-width: 767px){",
-  "  .bar{display:grid;grid-template-columns:1fr 1fr;gap:8px;position:fixed;bottom:0;left:0;right:0;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:rgba(255,255,255,.96);border-top:1px solid #d6dedb;backdrop-filter:saturate(1.2) blur(6px)}",
+  "  .bar{display:grid;grid-template-columns:1fr 1fr;gap:8px;position:fixed;bottom:0;left:0;right:0;z-index:50;padding:10px 12px calc(10px + env(safe-area-inset-bottom));background:rgba(255,255,255,.96);border-top:1px solid #d6dedb;backdrop-filter:saturate(1.2) blur(6px)}",
   "  .bar.single{grid-template-columns:1fr}",
   "  .bar .cta{padding:12px;font-size:16px}",
   "}",

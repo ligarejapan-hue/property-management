@@ -181,3 +181,17 @@ describe("ご相談の例(実例)は押すと広がる", () => {
     expect(h.indexOf("cases-head")).toBeLessThan(h.indexOf("<section class=\"case\">"));
   });
 });
+
+// 発注者の実機(iPhone・2026-10-07): スクロールすると期限の年表の札(z-index:1)が画面下の固定ボタンより手前に出た。
+describe("画面下の固定ボタンは、いつもいちばん手前", () => {
+  it("固定バーの z-index は、ページ内のほかのどの z-index より大きい", () => {
+    const html = renderLpPage(input());
+    const bar = /\.bar\{[^}]*position:fixed[^}]*z-index:(\d+)/.exec(html);
+    expect(bar, "固定バーに z-index が無い").not.toBeNull();
+    const barZ = Number(bar![1]);
+    // 規則1つ = 「セレクタ{中身}」。中身に { を含めない(@media の入れ子を1つの規則と見誤らない)。
+    const others = [...html.matchAll(/([^{}]+)\{[^{}]*z-index:(\d+)/g)].filter((m) => !m[1].includes(".bar")).map((m) => Number(m[2]));
+    expect(others.length).toBeGreaterThan(0); // 年表の札(z-index:1)を必ず拾っている
+    for (const z of others) expect(z).toBeLessThan(barZ);
+  });
+});
