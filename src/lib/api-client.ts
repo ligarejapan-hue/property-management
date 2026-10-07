@@ -5004,12 +5004,29 @@ const deskJsonInit = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
-export async function searchDeskAgents(q: string) {
+/** 国交省の一覧から来た業者の候補(名簿に無い会社)。選ぶと名簿へ写す。 */
+export interface RegistryHit {
+  id: string;
+  companyName: string;
+  phone: string;
+  licenseLabel: string;
+}
+/** 業者を探す。registry=true(受付の窓)のときだけ、名簿に無い会社を国交省の一覧からも返す。 */
+export async function searchDeskAgents(q: string, opts: { registry?: boolean } = {}) {
   if (USE_MOCK) {
     await mockDelay();
-    return { agents: [] as AgentHit[] };
+    return { agents: [] as AgentHit[], registry: [] as RegistryHit[] };
   }
-  return apiFetch<{ agents: AgentHit[] }>(`/api/agents?q=${encodeURIComponent(q)}`);
+  const qs = `q=${encodeURIComponent(q)}${opts.registry ? "&registry=1" : ""}`;
+  return apiFetch<{ agents: AgentHit[]; registry?: RegistryHit[] }>(`/api/agents?${qs}`);
+}
+/** 国交省の一覧の会社を名簿へ写す(名簿にあればそれを返す)。 */
+export async function adoptRegistryAgent(id: string) {
+  if (USE_MOCK) {
+    await mockDelay();
+    return { agent: { id: "mock-agent", companyName: "", branchName: null, phone: "", lastContact: null, matchedBy: "text" } as AgentHit, created: true };
+  }
+  return apiFetch<{ agent: AgentHit; created: boolean }>(`/api/agent-registry/${encodeURIComponent(id)}/adopt`, deskJsonInit("POST", {}));
 }
 export async function createDeskAgent(body: DeskAgentInput) {
   if (USE_MOCK) {

@@ -27,6 +27,8 @@ const PUBLIC_EXACT_PATHS = [
   "/api/field-survey/sessions/auto-end-run",
   // 通知 段階4b: Web プッシュの送信(timer 駆動)。x-push-run-secret で保護・未設定なら 503 で休眠。
   "/api/notifications/push-run",
+  // 国交省の業者一覧を集める口(timer 用・合言葉で守る・未設定なら 503)。
+  "/api/agent-registry/crawl-run",
   // 通知 段階1: Service Worker とホーム画面追加の設定。ログイン画面(未ログイン)でも
   // 読む必要がある(共用 PC の通知の後片付け・iPhone のホーム画面追加)。中身は静的・PII なし。
   "/sw.js",

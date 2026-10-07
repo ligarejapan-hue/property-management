@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("next/server", async () => (await import("./agent-inquiry-route-mocks")).nextServerMock());
 vi.mock("@/lib/api-helpers", async () => (await import("./agent-inquiry-route-mocks")).apiHelpersMock());
-const { writeAuditLog } = vi.hoisted(() => ({ writeAuditLog: vi.fn() }));
+const { writeAuditLog, searchRegistry } = vi.hoisted(() => ({ writeAuditLog: vi.fn(), searchRegistry: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ writeAuditLog }));
+vi.mock("@/lib/agent-registry/search", () => ({ searchRegistry }));
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
     agent: {
@@ -184,5 +185,18 @@ describe("業者 API", () => {
   it("検索(q=)の応答の形は変えない(受付の窓が使っている)", async () => {
     const body = await (await SEARCH(new Request("http://x/api/agents?q=" + encodeURIComponent("不動産")))).json();
     expect(Object.keys(body)).toEqual(["agents"]);
+  });
+  it("★国交省の一覧の候補は registry=1 のときだけ・登録できる人だけ(名簿の画面には出さない)", async () => {
+    searchRegistry.mockResolvedValue([{ id: "m1", companyName: "見本", phone: "03-0000-1212", licenseLabel: "東京都知事(17)第000001号" }]);
+    const q = "http://x/api/agents?q=" + encodeURIComponent("見本");
+    expect(Object.keys(await (await SEARCH(new Request(q))).json())).toEqual(["agents"]);
+    expect(searchRegistry).not.toHaveBeenCalled();
+    const withRegistry = await (await SEARCH(new Request(q + "&registry=1"))).json();
+    expect(withRegistry.registry).toEqual([{ id: "m1", companyName: "見本", phone: "03-0000-1212", licenseLabel: "東京都知事(17)第000001号" }]);
+    expect(searchRegistry).toHaveBeenCalledWith("見本");
+    grant("read");
+    const readOnly = await (await SEARCH(new Request(q + "&registry=1"))).json();
+    expect(readOnly.registry).toEqual([]);
+    expect(searchRegistry).toHaveBeenCalledTimes(1);
   });
 });

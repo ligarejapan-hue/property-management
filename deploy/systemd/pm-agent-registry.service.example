@@ -1,0 +1,28 @@
+# =============================================================================
+# 国交省の業者一覧を集める — 実行ユニット
+# =============================================================================
+# 使い方(⚠本番反映のあと、発注者の承認を得てから):
+#   1. app.env に AGENT_REGISTRY_CRAWL_SECRET を設定 → systemctl restart property-management
+#   2. 夜間(22:00〜翌7:00)に手で1回だけ叩き、1ページ+数社で止まる・間隔が4秒以上あることを
+#      journal で確かめる(?dryRun=1 なら先方にアクセスせず進み具合だけ返す)
+#   3. sudo cp deploy/systemd/pm-agent-registry.service.example /etc/systemd/system/pm-agent-registry.service
+#      sudo cp deploy/systemd/pm-agent-registry.timer.example   /etc/systemd/system/pm-agent-registry.timer
+#      sudo systemctl daemon-reload && sudo systemctl enable --now pm-agent-registry.timer
+#   止めるとき: sudo systemctl disable --now pm-agent-registry.timer(合言葉を消して再起動でも止まる)
+#
+# ⚠合言葉が未設定なら route は 503 を返すだけで先方にアクセスしない (安全側)。
+# ⚠1回の呼び出しは最大8分・100回まで。前の回が走っていたら 409 で何もしない。
+# =============================================================================
+
+[Unit]
+Description=Collect MLIT real-estate agent registry at night (property-management)
+After=network.target property-management.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/property-management/app.env
+# ⚠合言葉を curl の引数に置かない(argv は同一ホストの他プロセスに見える)。
+#   値はシェル変数のまま標準入力へ流し、curl には `-H @-` で読ませる。
+# ⚠`%` は必ず `%%` と書く(systemd が `%s` を自分の記法として先に置き換える)。
+ExecStart=/bin/sh -c 'printf "%%s" "x-agent-registry-secret: $AGENT_REGISTRY_CRAWL_SECRET" | /usr/bin/curl --fail --silent --show-error --max-time 600 -X POST http://127.0.0.1:3000/api/agent-registry/crawl-run -H @-'
+# 失敗しても次の回(10分後)が続きから拾うので再起動はしない。

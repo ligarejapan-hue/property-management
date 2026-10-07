@@ -1772,15 +1772,79 @@ model Agent {
   createdById String   @map("created_by_id") @db.Uuid
   /// 押し直しの鍵(二重登録を防ぐ・2026-10-02)。同じ登録者×同じ鍵の2回目は1回目の分を返す。
   clientToken String?  @map("client_token") @db.Uuid
+  /// 国交省の業者一覧から写したときの元の行(2026-10-03)。一覧の行が消えたら NULL に戻る。
+  mlitAgentId String?  @map("mlit_agent_id") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   createdBy User           @relation("AgentCreatedBy", fields: [createdById], references: [id])
   inquiries AgentInquiry[]
+  mlitAgent MlitAgent?     @relation(fields: [mlitAgentId], references: [id], onDelete: SetNull)
 
   @@unique([createdById, clientToken])
   @@index([companyName])
+  @@index([mlitAgentId])
   @@map("agents")
+}
+
+/// 国交省の業者一覧(2026-10-03)。宅建業者検索から夜間に集めた会社の情報だけ(個人名は持たない)。
+/// 名簿(agents)とは別。受付の窓で選んだときだけ名簿へ写す。
+model MlitAgent {
+  id           String    @id @default(uuid()) @db.Uuid
+  /// 行政庁2桁+番号6桁("13000001")。免許の回次を含まない=更新しても変わらない。
+  licenseKey   String    @unique @map("license_key")
+  /// "00"=国土交通大臣 / "11"=埼玉 / "12"=千葉 / "13"=東京 / "14"=神奈川
+  authority    String
+  /// 表示用 "東京都知事(17)第000001号"
+  licenseLabel String    @map("license_label")
+  companyName  String    @map("company_name")
+  companyKana  String?   @map("company_kana")
+  address      String?
+  phone        String?
+  /// 電話の数字だけ(検索用)
+  phoneDigits  String?   @map("phone_digits")
+  validUntil   String?   @map("valid_until")
+  /// 最新の一巡の一覧にあった(一巡を最後まで終えたときだけ false にする)
+  listed       Boolean   @default(true)
+  seenCycle    String?   @map("seen_cycle")
+  /// 詳細(電話・ふりがな)を取る/取り直す必要がある
+  needsDetail  Boolean   @default(true) @map("needs_detail")
+  detailAt     DateTime? @map("detail_at")
+  /// 詳細が読めなかった回数(一巡ごとに0から)。3回でその一巡は諦める=1社のせいで全体を止めない
+  detailFailCount Int    @default(0) @map("detail_fail_count")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  agents Agent[]
+
+  @@index([phoneDigits])
+  @@index([companyName])
+  @@index([needsDetail])
+  @@map("mlit_agents")
+}
+
+/// 国交省の業者一覧を集める進み具合(行政庁ごとに1行)。
+model MlitCrawlState {
+  authority   String    @id
+  /// 今の一巡 "YYYY-MM"(日本時間)
+  cycle       String
+  /// "list" | "detail" | "done"
+  phase       String
+  nextPage    Int       @default(1) @map("next_page")
+  totalPages  Int?      @map("total_pages")
+  /// この一巡で前に読んだときの件数(減っていたら1ページ目から読み直す)
+  totalRows   Int?      @map("total_rows")
+  /// 最後に読んだページの最後の会社の免許の鍵(次のページとの境目を照らす)
+  lastKey     String?   @map("last_key")
+  /// 最後に終えた一巡の名前(「一覧に無い」の判定で前の一巡として使う)
+  lastCompletedCycle String? @map("last_completed_cycle")
+  failStreak  Int       @default(0) @map("fail_streak")
+  dayOffUntil DateTime? @map("day_off_until")
+  /// 失敗の分類コードだけ(先方の本文は残さない)
+  lastError   String?   @map("last_error")
+  lastRunAt   DateTime? @map("last_run_at")
+
+  @@map("mlit_crawl_state")
 }
 
 /// 業者からの反響(設計 §1)。所有者本人からの「査定の申込」(DmInquiry)とは別物。
