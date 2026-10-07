@@ -37,6 +37,9 @@ import { structuredFieldsFor } from "@/lib/paste-import/structured-fields";
 import { countPasteDuplicatesUnscoped } from "@/lib/paste-import-duplicates";
 import type { PropertyType, OccupancyStatus } from "@/generated/prisma";
 import { phoneForStore } from "@/lib/phone-format-jp";
+import { buildingChoiceSchema } from "@/lib/validators";
+import { applyBuildingLink, writeBuildingLinkAudit } from "@/lib/building-link/apply";
+import { AUTO_CHOICE } from "@/lib/building-link/resolve";
 
 // ---------------------------------------------------------------------------
 // 入力の検査（全体レビュー I-3）
@@ -148,6 +151,8 @@ interface CommitBody {
     note?: string | null;
   } | null;
   externalLinkKey: string | null;
+  /** 確認画面で選んだ棟。省略=auto。形は入口で buildingChoiceSchema が検査する。 */
+  buildingChoice?: unknown;
   /** 既存の所有者に紐付ける場合。指定があれば新規作成しない。 */
   linkExistingOwnerId?: string | null;
   /**
@@ -390,6 +395,12 @@ export async function POST(request: NextRequest) {
     //   査定ナンバーは元々半角ASCIIなので、実際に保存される文字列は変わらない。
     //   ⚠この route は画面以外からも呼べるので、下書き側(build-draft.ts)で
     //   正規化済みでも**ここでも必ず通す**。
+    const choiceParsed = buildingChoiceSchema.optional().safeParse(body.buildingChoice);
+    if (!choiceParsed.success) {
+      throw new ApiError(400, "棟の選び方の形式が正しくありません", "BAD_REQUEST");
+    }
+    const buildingChoice = choiceParsed.data ?? AUTO_CHOICE;
+
     const externalLinkKey = normalizeExternalLinkKey(body.externalLinkKey);
     // ⚠**検索だけは全角形も見る**(@codex PR#414 2巡目 P2)。CSV取込
     //   (src/app/api/import/csv/route.ts) は externalLinkKey を**生値のまま**保存する
@@ -617,7 +628,19 @@ export async function POST(request: NextRequest) {
           attachmentId = attachment.id;
         }
 
-        return { propertyId: property.id, ownerId, ownerCreated, attachmentId };
+        // 棟へのつなぎは**最後**に行う(ロック順: この口のロック → 外部キー → 所有者 → 物件 → 棟の順番待ち)。
+        const buildingLink = await applyBuildingLink(tx, {
+          propertyId: property.id,
+          propertyType,
+          buildingName,
+          address: p.address.trim(),
+          buildingNumber: null,
+          choice: buildingChoice,
+          currentBuildingId: null,
+          userId: session.id,
+        });
+
+        return { propertyId: property.id, ownerId, ownerCreated, attachmentId, buildingLink };
       });
     } catch (txError) {
       if (uploadedKey !== null) {
@@ -649,7 +672,13 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return apiResponse({ propertyId: result.propertyId, ownerId: result.ownerId });
+    await writeBuildingLinkAudit(session.id, result.propertyId, result.buildingLink);
+
+    return apiResponse({
+      propertyId: result.propertyId,
+      ownerId: result.ownerId,
+      buildingLink: result.buildingLink,
+    });
   } catch (error) {
     return handleApiError(error);
   }

@@ -21,8 +21,12 @@ export interface ExternalPromptOptions {
   strength: string;
 }
 
+/** 手紙のイラストの位置を外部AIに決めさせる一文(設計 2026-10-05 §6)。種類の手紙だけに入れる。 */
+export const ILLUSTRATION_PROMPT_LINE =
+  "- 手紙の中でイラストを入れるとよい場所に、【イラスト】とだけ書いた行を1行入れてください。場所は文章の流れに合わせて選んでください。";
+
 /** 型の設定から、そのまま外部AIへ貼れる日本語のプロンプトを作る。 */
-export function buildExternalPrompt(options: ExternalPromptOptions): string {
+export function buildExternalPrompt(options: ExternalPromptOptions, extra: { illustrationMarker?: boolean } = {}): string {
   const tagLines = LETTER_TAGS.map(
     (tag) => `  - {{${tag}}}（システムが宛先ごとに差し込みます）`,
   );
@@ -43,6 +47,7 @@ export function buildExternalPrompt(options: ExternalPromptOptions): string {
     "- **署名・社名・連絡先は本文に書かない**（差出人欄は印刷時にシステムが付けます）。自社に触れる場合も「弊社」等にとどめる。",
     "- 無料査定など、相手の負担なく行動できる導線を一つ入れる。",
     "- 出力は手紙の本文のみ。前置きや説明、マークダウン記法は付けない。",
+    ...(extra.illustrationMarker ? [ILLUSTRATION_PROMPT_LINE] : []),
     "",
     "【場所や種別に触れたいとき】",
     "この本文は複数の宛先で共通して使います。特定の物件の情報は書かず、次の記号をそのまま書いてください。",
@@ -52,6 +57,21 @@ export function buildExternalPrompt(options: ExternalPromptOptions): string {
     "【お願い】",
     "所有者の氏名・住所・電話番号や、物件を特定できる情報は、この画面や外部のAIに入力しないでください。場所と種別は上記の記号で自動的に差し込まれます。",
   ].join("\n");
+}
+
+/** 台帳(DMの種類)の手紙の指示文。表示(prompt)と保存時の照合(template)は必ずこれを通す。 */
+export function scenarioLetterPrompt(options: ExternalPromptOptions): string {
+  return buildExternalPrompt(options, { illustrationMarker: true });
+}
+
+/**
+ * 発送の型の手紙の指示文。種類から写した型(scenarioId あり)だけ【イラスト】の一文が入る。
+ * 表示(variants/[variantId]/prompt)と保存時の照合(.../template)は必ずこれを通す。
+ */
+export function variantLetterPrompt(v: ExternalPromptOptions & { scenarioId: string | null }): string {
+  // ⚠未取得(undefined)を「種類から写した」と読まない(select に scenarioId を入れ忘れた経路で
+  //   型A/B の指示文が変わり、保存が PROMPT_STALE で詰まるのを防ぐ)。
+  return buildExternalPrompt(v, { illustrationMarker: Boolean(v.scenarioId) });
 }
 
 /**

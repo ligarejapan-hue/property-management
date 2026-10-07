@@ -63,6 +63,10 @@ const WRITE_GATE_EXCEPTIONS: Record<string, { reason: string; mustContain?: stri
     reason: "台帳の写真と図の枠=管理者のみ(user_management:write)",
     mustContain: "requireScenarioAdmin()",
   },
+  "src/app/api/properties/sale-dm/scenarios/[id]/letter-illustration/route.ts": {
+    reason: "台帳の手紙のイラスト=管理者のみ(user_management:write・設計 2026-10-05)",
+    mustContain: "requireScenarioAdmin()",
+  },
 };
 
 const FILES = routeFiles(ROOT);

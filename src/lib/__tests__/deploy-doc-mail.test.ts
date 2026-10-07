@@ -165,3 +165,120 @@ describe("Task 12 fix round 1: guide.html の現場担当者の通知範囲", ()
     expect(guideSrc).not.toContain("担当外の物件について現場担当者が受け取る通知には、町名までの所在など最小限だけが載ります");
   });
 });
+
+// 2026-10-03: 申込者への受付メール(スイッチ既定OFF)と通知 段階2(次回対応・査定の申込のお知らせ)が
+// 本番に入ったあとも、資料に「自動返信は無い」「次回対応の知らせはこれから」が残っていた。
+describe("反映済みの機能を「無い・これから」と書いていない", () => {
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html は申込者への受付メールを「無い」と書かず、ONにしたときだけ送ると書く", (_name, src) => {
+    expect(src()).not.toContain("自動返信メールはありません");
+    expect(src()).toContain("でONにしたときだけ送ります");
+  });
+
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html は次回対応と査定の申込のお知らせを説明している", (_name, src) => {
+    expect(src()).toContain("新しい査定の申込が◯件あります");
+    expect(src()).toContain("自分の次回対応（今日・期限切れ）");
+  });
+
+  // @codex R1: 再通知は期限から1週間で止まる(reminder-schedule.ts REMINDER_STOP_MS)・
+  // 謄本の一括取得の完了も知らせる(summary-state.ts registry_job_done)。
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html は次回対応の再通知が1週間で止まることと、一括取得の完了の知らせを書いている", (_name, src) => {
+    // @codex R6: 止まるのは単独の知らせだけ。期限切れの件数には完了まで残る(summary.ts overdueCount)。
+    expect(src()).not.toContain("期限から1週間たつと出なくなります");
+    expect(src()).toContain("期限から1週間たった次回対応は、それだけでは知らせを出さなくなります");
+    expect(src()).toContain("「期限切れが◯件」には、完了にするまで数えられます");
+    expect(src()).toContain("謄本の一括取得が完了しました");
+  });
+
+  // @codex R2: ベルの知らせを列挙する行(用語・稼働中)ごとに、6種類の知らせが揃っているかを見る。
+  const lineWith = (src: string, marker: string) => {
+    const lines = src.split("\n").filter((l) => l.includes(marker));
+    expect(lines).toHaveLength(1);
+    return lines[0];
+  };
+  it.each([
+    ["guide 用語", () => lineWith(guideSrc, "<tr><td>お知らせ（ベル）</td>")],
+    ["guide 稼働中", () => lineWith(guideSrc, "<li><b>お知らせ（ベル）と通知</b>")],
+    ["manual 用語", () => lineWith(manualSrc, "<tr><td>お知らせ（ベル）</td>")],
+  ])("%s の行はベルの知らせを全部挙げている", (_name, line) => {
+    const row = line();
+    for (const word of ["自動ログオフ", "編集権限", "次回対応", "査定の申込", "謄本の一括取得の完了"]) {
+      expect(row).toContain(word);
+    }
+  });
+
+  // @codex R3: 右下の知らせは画面を見ているときだけ(summary-poller.tsx show())。
+  // @codex R5: 右下に出るかは「届いた時」ではなく「システムが見つけた時」に画面を見ているかで決まる
+  // (戻った直後にすぐ確かめ直す=summary-poller.tsx の visibilitychange)。
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html は右下に出る条件を「見つけた時点」で書き、戻った直後の分にも触れている", (_name, src) => {
+    expect(src()).not.toContain("と、ベルと画面の右下に出ます");
+    expect(src()).not.toContain("別のタブを見ている間に届いた分は");
+    expect(src()).toContain("別のタブを見ている間にシステムが見つけた分は");
+    expect(src()).toContain("画面に戻るとすぐに確かめ直");
+  });
+
+  // @codex R4: 自動ログオフの予告(小窓)・編集権限(帯/戻ったときの右下)は別の出方なので、
+  // 右下の説明は下の3つ(件数の知らせ)に限る。
+  it("manual.html の右下の説明は件数の知らせ3つに限っている", () => {
+    const line = manualSrc.split("\n").find((l) => l.includes("いまお知らせに出るのは次の6つです。")) ?? "";
+    expect(line).toContain("<b>下の3つ</b>（次回対応・査定の申込・謄本の一括取得の完了）");
+    expect(line).not.toContain("6つです。このシステムの画面を見ているときは画面の右下にも出ます");
+  });
+
+  it("manual.html のお知らせの表は6つ", () => {
+    expect(manualSrc).toContain("いまお知らせに出るのは次の6つです。");
+  });
+
+  it("guide.html は次回対応・査定の申込のお知らせを「これから」に置いていない", () => {
+    expect(guideSrc).not.toContain("次回対応（当日・期限切れ）、新しい査定の申込、謄本の一括取得の完了をベルでお知らせする段");
+    expect(guideSrc).not.toContain("次回対応・査定の申込・謄本の一括取得の完了のお知らせと、画面を閉じていても届く通知は、これから作ります");
+  });
+
+  // 2026-10-04: 通知 段階3(次回対応の時刻)・段階4(画面を閉じていても届く通知)が本番に入った。
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html は画面を閉じていても届く通知を「これから・開いている間だけ」と書かず、自分専用の選択と時刻の知らせを書く", (_name, src) => {
+    expect(src()).not.toContain("画面を閉じていても届く通知は、これから作ります");
+    expect(src()).not.toContain("いまの通知は、このシステムの画面を開いている間だけ出ます");
+    expect(src()).not.toContain("<b>このシステムの画面を開いている間だけ</b>出ます。スマホでアプリを裏に回した");
+    expect(src()).toContain("この端末は自分専用");
+    expect(src()).toContain("画面を閉じていても届きます（閉じてから65分まで）。");
+    expect(src()).toContain("5分前");
+  });
+
+  // @codex #476 R1: 閉じていても届くのは4つだけ(自動ログオフの予告・「まもなく外れます」は画面を開いている間だけ)。
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html の用語は閉じていても届く通知を4つに限っている", (_name, src) => {
+    expect(src()).not.toMatch(/通知を許可した端末には、画面を閉じていても通知欄に届/);
+    expect(src()).toContain("編集権限が外れたことの4つ");
+  });
+
+  it("guide.html は画面を閉じていても届く通知を「これから」に置いていない", () => {
+    expect(guideSrc).not.toContain("画面を閉じていてもPC・スマホに届く通知を作ります");
+  });
+});
+
+describe("手紙のイラスト(2026-10)の説明", () => {
+  it.each([
+    ["guide", () => guideSrc],
+    ["manual", () => manualSrc],
+  ])("%s.html に手紙のイラストと【イラスト】の行の説明がある", (_n, src) => {
+    expect(src()).toContain("手紙のイラスト");
+    expect(src()).toContain("最初の【イラスト】の行");
+    expect(src()).toContain("本文の上");
+  });
+});

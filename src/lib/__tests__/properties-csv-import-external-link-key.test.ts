@@ -59,8 +59,9 @@ vi.mock("@/lib/change-log", async (importActual) => {
   return { ...actual, recordChanges: vi.fn() };
 });
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
+// 物件の作成と棟へのつなぎは1つのトランザクション(tx は同じ偽物を渡す)。
+vi.mock("@/lib/prisma", () => {
+  const db: Record<string, unknown> = {
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
     property: {
@@ -73,8 +74,13 @@ vi.mock("@/lib/prisma", () => ({
       updateMany: vi.fn(),
     },
     building: { findMany: vi.fn(), create: vi.fn() },
-  },
-}));
+    // 重複更新の変更ログは更新と同じトランザクションで書く(@codex P2・取り消しの根拠)。
+    changeLog: { createMany: vi.fn() },
+    $executeRaw: vi.fn(),
+  };
+  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  return { default: db };
+});
 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
@@ -92,6 +98,7 @@ const pm = prisma as unknown as {
     updateMany: Mock;
   };
   building: { findMany: Mock; create: Mock };
+  changeLog: { createMany: Mock };
 };
 
 const PERMS = [{ resource: "import", action: "write", granted: true }];

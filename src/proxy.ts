@@ -25,6 +25,8 @@ const PUBLIC_EXACT_PATHS = [
   "/api/health",
   "/api/attachments/cleanup-run",
   "/api/field-survey/sessions/auto-end-run",
+  // 通知 段階4b: Web プッシュの送信(timer 駆動)。x-push-run-secret で保護・未設定なら 503 で休眠。
+  "/api/notifications/push-run",
   // 国交省の業者一覧を集める口(timer 用・合言葉で守る・未設定なら 503)。
   "/api/agent-registry/crawl-run",
   // 通知 段階1: Service Worker とホーム画面追加の設定。ログイン画面(未ログイン)でも

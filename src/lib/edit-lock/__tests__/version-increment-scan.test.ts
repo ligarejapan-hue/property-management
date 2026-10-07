@@ -44,18 +44,18 @@ const VERSIONED: Record<string, string> = {
     "owner(target) の version のみ進める(付け替え先のinvalidation)",
   "src/app/api/admin/owners/correction/mislink/route.ts:545":
     "property の version のみ進める(付け替えのinvalidation)",
-  "src/app/api/import/csv/route.ts:750":
-    "property の UPDATABLE_PROPERTY_FIELDS(CSV重複更新)+version increment" +
+  "src/app/api/import/csv/route.ts:616":
+    "property の UPDATABLE_PROPERTY_FIELDS(CSV重複更新。棟だけつなぐ行も同じ更新で進める)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/import/jobs/[jobId]/rollback/route.ts:525":
-    "property の RESTORABLE_PROPERTY_FIELDS(ロールバック復元)+version increment" +
+  "src/app/api/import/jobs/[jobId]/rollback/route.ts:559":
+    "property の RESTORABLE_PROPERTY_FIELDS+棟のつなぎ(buildingId/buildingName)(ロールバック復元)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
   "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:302":
     "owner の住所ペア空欄補完(fieldPatch)+version increment",
   "src/app/api/import/jobs/[jobId]/rows/[rowId]/manual-link-reception-owner/route.ts:344":
     "property.lotNumber/buildingNumber(空欄補完)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:215":
+  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:236":
     "owner の住所ペア空欄補完(fieldPatch)+version increment",
   "src/app/api/import/reception-owner/route.ts:354":
     "property.lotNumber/buildingNumber/roomNo(空欄補完)+version increment" +
@@ -86,10 +86,14 @@ const VERSIONED: Record<string, string> = {
   "src/app/api/properties/[id]/dm-logs/[logId]/reaction/route.ts:276":
     "property.dmStatus(undeliverable連動のno_send昇格)+version increment" +
     "(Task 9で修正: 元は進めていなかった)",
-  "src/app/api/properties/[id]/route.ts:422":
+  "src/app/api/properties/[id]/route.ts:448":
     "property の編集画面フィールド一式(編集画面の本体保存窓口)+version increment",
   "src/app/api/properties/bulk-update/route.ts:87":
     "property.caseStatus/registryStatus/dmStatus/assignedTo(一括更新)+version increment",
+  "src/lib/building-link/rename.ts:121":
+    "property.buildingName(棟の名前を直したとき、つながっている全部屋へ反映)+version increment" +
+    "(段3 Task 14。部屋の行(id順 FOR UPDATE)→棟の行(FOR NO KEY UPDATE)の後・編集中の鍵が0件のときだけ同じトランザクションで書く。" +
+    "反映の直前に新しく鍵を取った人の保存は、この version の増分で 409 になる)",
   "src/lib/sales-sheet/property-writeback/apply-writeback.ts:30":
     "property の販売条件(販売図面の作成画面で入れた値の書き戻し)+version increment" +
     "(F3で追加。呼び出し側が FOR UPDATE と担当者スコープを取った上で、" +
@@ -153,11 +157,11 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },
-  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:181": {
+  "src/app/api/import/jobs/[jobId]/rows/[rowId]/route.ts:202": {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },
-  "src/app/api/import/paste/commit/route.ts:525": {
+  "src/app/api/import/paste/commit/route.ts:536": {
     reason: "owner.updatedAt のみ(既存所有者へのリンク可否確認のための touch)",
     keys: ["updatedAt"],
   },
@@ -212,6 +216,21 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
   "src/lib/registry-pdf/process.ts:534": {
     reason: "owner.updatedAt のみ(既存所有者再利用時の行ロックtouch)",
     keys: ["updatedAt"],
+  },
+  // ⚠下の2件は「編集画面で書けない項目」ではない(buildingName は書ける)。例外の理由は別:
+  //   applyBuildingLink は必ず物件の保存と同じトランザクションで、物件を作った直後(新しい行)
+  //   か version を進める更新の直後に呼ばれる。版番号はその保存で1回だけ進む(2回進めない)。
+  "src/lib/building-link/apply.ts:120": {
+    reason:
+      "property.buildingId=null のみ(棟から外す。棟の自動づけ。呼び出し側が同じトランザクションで" +
+      "物件を作る/version を進める更新をした後に呼ぶ=版番号はその保存で進む)",
+    keys: ["buildingId"],
+  },
+  "src/lib/building-link/apply.ts:186": {
+    reason:
+      "property.buildingId/buildingName(棟へつなぎ、物件名を棟の正式な表記にそろえる。" +
+      "理由は上と同じ=同じトランザクションの保存が版番号を進める)",
+    keys: ["buildingId", "buildingName"],
   },
 };
 

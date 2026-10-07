@@ -13,6 +13,7 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission, maskValue } from "@/lib/permissions";
 import { canAccessPropertyRecord } from "@/lib/property-access";
+import { applyBuildingLink, writeBuildingLinkAudit } from "@/lib/building-link/apply";
 
 const createUnitSchema = z.object({
   address: z.string().min(1, "住所は必須です"),
@@ -142,29 +143,44 @@ export async function POST(
     const body = await request.json();
     const data = createUnitSchema.parse(body);
 
-    const property = await prisma.property.create({
-      data: {
-        propertyType: "unit",
+    // ⚠不具合修正(設計 2026-10-04 §4.4): 以前は種別が旧値 "unit"・物件名が空だった。
+    //   区分マンション・物件名=棟の名前で作り、つなぎは共通の処理を通す。
+    const { property, buildingLink } = await prisma.$transaction(async (tx) => {
+      const property = await tx.property.create({
+        data: {
+          propertyType: "apartment_unit",
+          buildingName: building.name,
+          address: data.address,
+          postalCode: data.postalCode,
+          roomNo: data.roomNo,
+          floorNo: data.floorNo,
+          exclusiveArea: data.exclusiveArea,
+          balconyArea: data.balconyArea,
+          layoutType: data.layoutType,
+          orientation: data.orientation,
+          managementFee: data.managementFee,
+          repairReserveFee: data.repairReserveFee,
+          occupancyStatus: data.occupancyStatus,
+          ownershipShareNote: data.ownershipShareNote,
+          realEstateNumber: data.realEstateNumber,
+          note: data.note,
+          registryStatus: "unconfirmed",
+          dmStatus: "hold",
+          caseStatus: "new_case",
+          createdBy: session.id,
+        },
+      });
+      const buildingLink = await applyBuildingLink(tx, {
+        propertyId: property.id,
+        propertyType: "apartment_unit",
+        buildingName: building.name,
         address: data.address,
-        postalCode: data.postalCode,
-        buildingId: id,
-        roomNo: data.roomNo,
-        floorNo: data.floorNo,
-        exclusiveArea: data.exclusiveArea,
-        balconyArea: data.balconyArea,
-        layoutType: data.layoutType,
-        orientation: data.orientation,
-        managementFee: data.managementFee,
-        repairReserveFee: data.repairReserveFee,
-        occupancyStatus: data.occupancyStatus,
-        ownershipShareNote: data.ownershipShareNote,
-        realEstateNumber: data.realEstateNumber,
-        note: data.note,
-        registryStatus: "unconfirmed",
-        dmStatus: "hold",
-        caseStatus: "new_case",
-        createdBy: session.id,
-      },
+        buildingNumber: null,
+        choice: { kind: "existing", buildingId: id },
+        currentBuildingId: null,
+        userId: session.id,
+      });
+      return { property, buildingLink };
     });
 
     await writeAuditLog({
@@ -176,11 +192,13 @@ export async function POST(
         buildingId: id,
         buildingName: building.name,
         roomNo: data.roomNo,
-        propertyType: "unit",
+        propertyType: "apartment_unit",
       },
     });
+    await writeBuildingLinkAudit(session.id, property.id, buildingLink);
 
-    return apiResponse(property, 201);
+    // 作った直後の行は buildingId が空なので、つないだ値を載せる。
+    return apiResponse({ ...property, buildingId: id }, 201);
   } catch (error) {
     return handleApiError(error);
   }

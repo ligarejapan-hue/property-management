@@ -1,0 +1,37 @@
+# =============================================================================
+# 画面を閉じていても届く通知(Web プッシュ)の送信 — 実行ユニット(通知 段階4b)
+# =============================================================================
+# 使い方(docs/deploy.md「画面を閉じていても届く通知」の順番どおりに):
+#   1. app.env に VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT と
+#      NOTIFICATIONS_PUSH_RUN_SECRET を設定し、アプリを再起動する
+#   2. 手で1回だけ実行して、エラーなく終わることを確かめる:
+#        sudo systemctl start pm-push-notify.service && journalctl -u pm-push-notify -n 20
+#   3. 最後に timer を有効にする:
+#        sudo cp deploy/systemd/pm-push-notify.service.example /etc/systemd/system/pm-push-notify.service
+#        sudo cp deploy/systemd/pm-push-notify.timer.example   /etc/systemd/system/pm-push-notify.timer
+#        sudo systemctl daemon-reload
+#        sudo systemctl enable --now pm-push-notify.timer
+#        # 確認: systemctl list-timers pm-push-notify.timer
+# 戻すときは**最初に** timer を止める: sudo systemctl disable --now pm-push-notify.timer
+#
+# ⚠合言葉が未設定なら route は 503(休眠=何も送らない)。VAPID の鍵が欠けていても 503。
+#   どちらも curl --fail で失敗として残る(journalctl で気づける)。
+# ⚠oneshot は実行中に次を起動しない(定期実行が重ならない)。
+# =============================================================================
+
+[Unit]
+Description=Send web push notifications (property-management)
+After=network.target property-management.service
+
+[Service]
+Type=oneshot
+# app.env から合言葉だけを読む(root:600 のまま・値はログに出さない)。
+EnvironmentFile=/etc/property-management/app.env
+# ⚠合言葉を curl の引数に置かない(argv は ps や /proc で他プロセスに見える)。
+#   値はシェル変数のまま標準入力へ流し、curl には `-H @-` で読ませる。
+# ⚠`%` は必ず `%%` と書く(systemd が `%s` 等を先に置き換えるため・巡回の自動終了と同じ)。
+# 応答は件数だけ(宛先・中身は無い)なので、そのまま journal に残してよい。
+# ⚠curl の時間制限(240秒)は、サーバー側の1回分の持ち時間(新しい送信を始めるのは150秒まで・1通は
+#   最大20秒)より長い。中継サービスが遅くても、curl が先に切れて次の起動と処理が重なることはない。
+ExecStart=/bin/sh -c 'printf "%%s" "x-push-run-secret: $NOTIFICATIONS_PUSH_RUN_SECRET" | /usr/bin/curl --fail --silent --show-error --max-time 240 -X POST http://127.0.0.1:3000/api/notifications/push-run -H @-'
+# 失敗しても次回の tick で拾えるので再起動はしない。

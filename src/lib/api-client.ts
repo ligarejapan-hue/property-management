@@ -32,6 +32,9 @@ import { safeRandomId } from "./random-id";
 // 編集中の鍵(仕様 4章)。ヘッダ組み立ては editLockHeaders() の1本だけを通す。
 import { editLockHeaders, getScreenToken } from "./edit-lock/screen-token-client";
 import type { AcquireResponse, HeartbeatResponse } from "./edit-lock/ui-state";
+// 棟の選び方・つないだ結果の型のみ(apply.ts は prisma を読むサーバー側のファイル=値は import しない)。
+import type { BuildingChoice } from "./building-link/resolve";
+import type { BuildingLinkOutcome } from "./building-link/apply";
 
 export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 
@@ -319,6 +322,8 @@ export interface SaleDmVariant {
   bodyTemplate?: string | null;
   // どのDMの種類から写したか(種類つきの発送)。null=今までの型。
   scenarioId: string | null;
+  // 手紙のイラスト(種類から写した型だけ・見本用)。src は /lp-assets/<publicId>。
+  illustration?: { src: string; width: number; height: number } | null;
 }
 
 export interface SaleDmLpVariantOptions {
@@ -784,6 +789,9 @@ export type SaleDmScenario = {
   lpRawTemplate: string | null;
   lpHeadline: string | null;
   lpBodyText: string | null;
+  // 手紙のイラスト(設計 2026-10-05)。描画用(src は /lp-assets/<publicId>)。
+  letterIllustrationAssetId: string | null;
+  letterIllustration: { src: string; width: number; height: number } | null;
 };
 /** PATCH で変えられる項目(サーバーの saleDmScenarioPatchSchema と同じ)。 */
 export type SaleDmScenarioPatch = Partial<
@@ -829,6 +837,7 @@ export async function fetchSaleDmScenario(id: string): Promise<SaleDmScenario> {
       id, name: "モックの種類", autoKey: null, sortOrder: 10, active: true,
       designTemplate: null, tone: null, length: null, appeal: null, strength: null, extraInstruction: null, letterBodyTemplate: null,
       lpTone: null, lpLength: null, lpAppeal: null, lpStrength: null, lpRawTemplate: null, lpHeadline: null, lpBodyText: null,
+      letterIllustrationAssetId: null, letterIllustration: null,
     };
   }
   return (await apiFetch<{ scenario: SaleDmScenario }>(`${SCENARIO_BASE}/${id}`)).scenario;
@@ -855,6 +864,19 @@ export async function fetchSaleDmScenarioPrompt(
 ): Promise<{ prompt: string; digest: string; bodyDigest: string; body: string | null }> {
   if (USE_MOCK) { await mockDelay(); return { prompt: "（モック）指示文", digest: "mock", bodyDigest: "mock", body: null }; }
   return apiFetch(`${SCENARIO_BASE}/${id}/${kind === "letter" ? "prompt" : "lp-prompt"}`);
+}
+
+/** 台帳の手紙のイラストを選ぶ(assetId)/外す(null)。管理者だけ。 */
+export async function saveSaleDmScenarioLetterIllustration(
+  id: string,
+  assetId: string | null,
+): Promise<{ letterIllustrationAssetId: string | null; letterIllustration: { src: string; width: number; height: number } | null }> {
+  if (USE_MOCK) { await mockDelay(); return { letterIllustrationAssetId: assetId, letterIllustration: null }; }
+  return apiFetch(`${SCENARIO_BASE}/${id}/letter-illustration`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ assetId }),
+  });
 }
 
 export async function saveSaleDmScenarioTemplate(
@@ -1206,7 +1228,7 @@ export async function fetchNextActions(
 
 export async function createNextAction(
   propertyId: string,
-  data: { content: string; actionType?: string | null; scheduledAt: string; assignedTo: string },
+  data: { content: string; actionType?: string | null; scheduledAt: string; scheduledTime?: string | null; assignedTo: string },
 ) {
   if (USE_MOCK) {
     await mockDelay();
@@ -3756,12 +3778,14 @@ export async function createProperty(data: {
   buildingName?: string | null;
   introductionRoute?: string | null;
   note?: string | null;
-}): Promise<{ id: string }> {
+  /** 物件名から棟へつなぐ選び方(区分マンションのときだけ)。省略=auto。 */
+  buildingChoice?: BuildingChoice;
+}): Promise<{ id: string; buildingLink?: BuildingLinkOutcome | null }> {
   if (USE_MOCK) {
     await mockDelay();
     return { id: "mock-new-property-id" };
   }
-  return apiFetch<{ id: string }>("/api/properties", {
+  return apiFetch<{ id: string; buildingLink?: BuildingLinkOutcome | null }>("/api/properties", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),

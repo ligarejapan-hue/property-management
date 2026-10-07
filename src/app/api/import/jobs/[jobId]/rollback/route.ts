@@ -22,6 +22,11 @@ import {
 import { extractUpdatedFields } from "@/lib/import-row-display";
 import { deleteEditLocksFor } from "@/lib/edit-lock/service";
 import { lockPropertiesForUpdate } from "@/lib/dm-batch/locks";
+import {
+  findImportAutoCreatedBuildingIds,
+  removeEmptyAutoCreatedBuildings,
+  type BuildingCleanupResult,
+} from "@/lib/building-link/rollback";
 
 interface BlockedDetail {
   rowNumber: number;
@@ -378,6 +383,10 @@ export async function POST(
       fieldNames: p.restorableFields.map((d) => d.fieldName),
     }));
 
+    // この取込が自動で作った棟(区分の棟の自動づけ)。物件を消した後に空になったものを tx の中で消す
+    // (@codex P1・2026-10-05)。残すと中身の無い棟が後の自動づけを引き寄せる。
+    const autoCreatedBuildingIds = await findImportAutoCreatedBuildingIds(prisma, job.id);
+
     if (dryRun) {
       return apiResponse({
         alreadyRolledBack: false,
@@ -391,6 +400,7 @@ export async function POST(
         },
         blockedDetails,
         restoreDetails,
+        autoCreatedBuildingCount: autoCreatedBuildingIds.length,
         executed: false,
       });
     }
@@ -398,6 +408,7 @@ export async function POST(
     let deletedCount = 0;
     let restoredPropertyCount = 0;
     let restoredFieldCount = 0;
+    let buildingCleanup: BuildingCleanupResult = { deletedBuildingIds: [], keptBuildings: [] };
     // recordChanges を tx 外でまとめて呼ぶための退避（recordChanges は prisma 直接利用のため）
     const restoreRecordPayloads: Array<{
       propertyId: string;
@@ -488,6 +499,29 @@ export async function POST(
         for (const d of plan.restorableFields) {
           restoreData[d.fieldName] = d.restoreValue;
         }
+        // CSV の重複更新がつないだ棟を前の棟へ戻すとき、前の棟がもう無ければ棟と物件名は戻さない
+        // (外部キーで tx 全体が落ちて、他の行の取り消しまで巻き添えにしないため。2026-10-05)。
+        if (typeof restoreData.buildingId === "string") {
+          const target = await tx.building.findUnique({
+            where: { id: restoreData.buildingId },
+            select: { id: true },
+          });
+          if (!target) {
+            delete restoreData.buildingId;
+            delete restoreData.buildingName;
+            plan.restorableFields = plan.restorableFields.filter(
+              (d) => d.fieldName !== "buildingId" && d.fieldName !== "buildingName",
+            );
+            if (plan.restorableFields.length === 0) {
+              blockedDetails.push({
+                rowNumber: plan.rowNumbers[0],
+                action: "restore",
+                reason: "前の棟が既に無いため棟と物件名を復元しません (restore_building_missing)",
+              });
+              continue;
+            }
+          }
+        }
         // 現在値（後続編集なしを classify で保証済みのため csv_import 前の値とは別の新規値）
         // を ChangeLog 用に取得する。restoreData を newValues、現在値を oldValues として
         // recordChanges に渡すと "復元前 → 復元後" の正しい diff になる。
@@ -548,6 +582,10 @@ export async function POST(
           fieldNames: plan.restorableFields.map((d) => d.fieldName),
         });
       }
+      // ⚠物件を消した**後**に数える。部屋や写真が残る棟・使用中の棟は残す(rollback.ts)。
+      if (autoCreatedBuildingIds.length > 0) {
+        buildingCleanup = await removeEmptyAutoCreatedBuildings(tx, autoCreatedBuildingIds);
+      }
       await tx.importJob.update({
         where: { id: job.id },
         data: { status: "rolled_back" },
@@ -587,6 +625,9 @@ export async function POST(
         })),
         blocked: blockedDetails.length,
         skipped: skipCount,
+        // 取込が自動で作った棟: 消した id と、残した id+理由(住所・名前は入れない)。
+        deletedBuildingIds: buildingCleanup.deletedBuildingIds,
+        keptBuildings: buildingCleanup.keptBuildings,
       },
     });
 
@@ -616,6 +657,7 @@ export async function POST(
       blockedDetails,
       restoreDetails: restoreDetailsApplied,
       executed: true,
+      buildingCleanup,
       deletedCount,
       restoredPropertyCount,
       restoredFieldCount,

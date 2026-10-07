@@ -1,4 +1,5 @@
 import type { LetterRenderInput } from "./types";
+import { placeIllustration, isSafeIllustrationSrc } from "../letter-illustration";
 
 export const DESIGN_TEMPLATES = ["formal", "soft", "impact"] as const;
 export type DesignTemplate = (typeof DESIGN_TEMPLATES)[number];
@@ -27,6 +28,20 @@ function escapedBodyToHtml(body: string): string {
   return escapeHtml(body).replace(/\r\n|\r|\n/g, "<br />\n");
 }
 
+// 本文の HTML。イラストがあれば最初の【イラスト】の行(無ければ本文の上)に <img> を置く。
+// 本文の前後はそれぞれ escapedBodyToHtml を1回だけ通す(唯一の生 HTML は <br /> と、
+// 検査済みの src・整数の寸法から組む <img> だけ)。
+function bodyHtmlWithIllustration(body: string, illustration: LetterRenderInput["illustration"]): string {
+  const placed = placeIllustration(body);
+  if (!illustration || !isSafeIllustrationSrc(illustration.src)) {
+    return escapedBodyToHtml(placed.stripped);
+  }
+  const w = Number.isInteger(illustration.width) && illustration.width > 0 ? ` width="${illustration.width}"` : "";
+  const h = Number.isInteger(illustration.height) && illustration.height > 0 ? ` height="${illustration.height}"` : "";
+  const img = `<div class="letter-illustration"><img src="${escapeHtml(illustration.src)}" alt=""${w}${h} loading="eager" decoding="sync" /></div>`;
+  return `${escapedBodyToHtml(placed.before)}${img}${escapedBodyToHtml(placed.after)}`;
+}
+
 // テンプレ別の見た目(色/フォント/装飾)。可変要素は CSS 変数で持ち、将来 調整パネルから
 // 上書きできるよう設計(本プランでは固定値)。
 const TEMPLATE_VARS: Record<DesignTemplate, string> = {
@@ -52,7 +67,7 @@ export function renderLetterHtml(input: LetterRenderInput): string {
   const address = escapeHtml(input.recipientAddress);
   const sender = escapeHtml(input.senderName);
   const contact = escapeHtml(input.senderContact);
-  const bodyHtml = escapedBodyToHtml(input.body);
+  const bodyHtml = bodyHtmlWithIllustration(input.body, input.illustration);
 
   return `<div class="${cls}">
   <style>
@@ -66,6 +81,8 @@ export function renderLetterHtml(input: LetterRenderInput): string {
     .letter-page--${design} .letter-addr { font-size: 10pt; color: #555; }
     .letter-page--${design} .letter-addressee { margin-top: 4mm; font-size: 13pt; font-weight: 700; color: var(--accent); }
     .letter-page--${design} .letter-body { white-space: normal; }
+    .letter-page--${design} .letter-illustration { margin: 3mm 0; text-align: center; }
+    .letter-page--${design} .letter-illustration img { display: block; width: 100%; height: auto; max-height: 55mm; object-fit: contain; }
     .letter-page--${design} .letter-sender { margin-top: 16mm; text-align: right; }
     .letter-page--${design} .letter-sender-name { font-weight: 700; color: var(--accent); }
     .letter-page--${design} .letter-sender-contact { font-size: 10pt; color: #555; }

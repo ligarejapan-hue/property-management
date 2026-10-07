@@ -55,14 +55,18 @@ vi.mock("@/lib/change-log", async (importActual) => {
   return { ...actual, recordChanges: vi.fn() };
 });
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
+// 物件の作成と棟へのつなぎは1つのトランザクション(tx は同じ偽物を渡す)。
+vi.mock("@/lib/prisma", () => {
+  const db: Record<string, unknown> = {
     importJob: { create: vi.fn(), update: vi.fn() },
     importJobRow: { create: vi.fn() },
     property: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
     building: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
-  },
-}));
+    $executeRaw: vi.fn(),
+  };
+  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  return { default: db };
+});
 
 import * as XLSX from "xlsx";
 import prisma from "@/lib/prisma";
@@ -74,6 +78,7 @@ import {
   OWNER_CSV_COLUMN_MAP,
 } from "@/lib/csv-parser";
 import { POST } from "../../app/api/import/csv/route";
+import { areaKey, buildingNameKey } from "@/lib/building-identity";
 
 const pm = prisma as unknown as {
   importJob: { create: Mock; update: Mock };
@@ -99,10 +104,16 @@ function lastPropertyCreate(): Record<string, unknown> {
   return pm.property.create.mock.calls.at(-1)?.[0]?.data ?? {};
 }
 
+// 同じ町丁目(東京都港区)・同じ比べる形の既存棟=CSV の棟名は自動でこの棟へつながる
+// (resolveCsvBuilding が読む列+部屋数。key は棟の名前と住所から計算した値)。
 const EXISTING_BUILDING = {
   id: "b1",
   name: "パークタワー",
   address: "東京都港区1-1-1",
+  nameKey: buildingNameKey("パークタワー"),
+  areaKey: areaKey("東京都港区1-1-1"),
+  createdAt: new Date("2026-01-01"),
+  _count: { properties: 1 },
 };
 
 beforeEach(() => {
@@ -119,9 +130,9 @@ beforeEach(() => {
   pm.importJob.update.mockResolvedValue({ id: "job-1" });
   pm.importJobRow.create.mockResolvedValue({ id: "row-1" });
   pm.property.findMany.mockResolvedValue([]); // property dedupe index 空
-  // 棟名一致で 1 件返す（resolveBuildingId が exact 一致で解決）
+  // 棟名一致で 1 件返す（resolveCsvBuilding が同じ町丁目・同じ比べる形で link）
   pm.building.findMany.mockResolvedValue([EXISTING_BUILDING]);
-  pm.building.findUnique.mockResolvedValue({ id: "b1", postalCode: null });
+  pm.building.findUnique.mockResolvedValue({ id: "b1", name: "パークタワー", postalCode: null });
   pm.building.update.mockImplementation(
     ({ data }: { data: Record<string, unknown> }) =>
       Promise.resolve({ id: "b1", ...data }),
@@ -183,10 +194,12 @@ describe("POST /api/import/csv — 棟郵便番号取込（タスク5）", () =>
     pm.importJobRow.create.mockResolvedValue({ id: "row-1" });
     pm.property.findMany.mockResolvedValue([]);
     pm.building.findMany.mockResolvedValue([EXISTING_BUILDING]);
-    pm.building.findUnique.mockResolvedValue({ id: "b1", postalCode: null });
+    pm.building.findUnique.mockResolvedValue({ id: "b1", name: "パークタワー", postalCode: null });
     pm.building.update.mockImplementation(({ data }: { data: Record<string, unknown> }) =>
       Promise.resolve({ id: "b1", ...data }));
-    pm.property.create.mockResolvedValue({ id: "p", address: "x", roomNo: null, buildingId: "b1", realEstateNumber: null, externalLinkKey: null });
+    // 作った物件は保存した値(種別・物件名)を返す=本物の create と同じ形(apply が実際に棟へ入れる)。
+    pm.property.create.mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+      Promise.resolve({ id: "p", roomNo: null, buildingId: null, buildingNumber: null, realEstateNumber: null, externalLinkKey: null, ...data }));
     vi.mocked(getApiSession).mockResolvedValue({ id: "user-1", email: "a", name: "A", role: "admin" } as never);
     vi.mocked(getUserPermissions).mockResolvedValue(PERMS as never);
     await POST(makeRequest({ fileName: "b.csv", csvText: unitCsv("棟郵便番号", "０１０−０４９２") }));
@@ -194,7 +207,7 @@ describe("POST /api/import/csv — 棟郵便番号取込（タスク5）", () =>
   });
 
   it("空欄 → 既存 Building.postalCode 維持（building.update 呼ばれない）", async () => {
-    pm.building.findUnique.mockResolvedValue({ id: "b1", postalCode: "9999999" });
+    pm.building.findUnique.mockResolvedValue({ id: "b1", name: "パークタワー", postalCode: "9999999" });
     const csv = unitCsv("棟郵便番号", "");
     const res = await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
     expect(res.status).toBe(201);
@@ -211,7 +224,7 @@ describe("POST /api/import/csv — 棟郵便番号取込（タスク5）", () =>
   });
 
   it("既存値と同一 → building.update 呼ばれない（変化時のみ）", async () => {
-    pm.building.findUnique.mockResolvedValue({ id: "b1", postalCode: "1000005" });
+    pm.building.findUnique.mockResolvedValue({ id: "b1", name: "パークタワー", postalCode: "1000005" });
     const csv = unitCsv("棟郵便番号", "100-0005");
     await POST(makeRequest({ fileName: "x.csv", csvText: csv }));
     expect(pm.building.update).not.toHaveBeenCalled();

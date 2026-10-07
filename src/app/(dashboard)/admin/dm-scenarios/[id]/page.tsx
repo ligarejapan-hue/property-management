@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import ScenarioTextEditor from "@/components/sale-dm/scenario-text-editor";
 import LpMediaPanel from "@/components/sale-dm/lp-media-panel";
 import LpPreviewPanel from "@/components/sale-dm/lp-preview-panel";
+import LetterIllustrationPanel from "@/components/sale-dm/letter-illustration-panel";
 import {
   fetchSaleDmScenario,
   updateSaleDmScenario,
@@ -114,6 +115,7 @@ export default function AdminDmScenarioDetailPage({ params }: { params: Promise<
       </section>
 
       <ScenarioTextEditor scenario={scenario} kind="letter" onChanged={() => void reloadContent()} />
+      <LetterIllustrationPanel scenarioId={scenario.id} illustration={scenario.letterIllustration} onChanged={() => void reloadContent()} />
       <ScenarioTextEditor scenario={scenario} kind="lp" onChanged={() => void reloadContent()} />
 
       {scenario.lpBodyText && (

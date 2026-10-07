@@ -30,6 +30,8 @@ const FIELD_LABELS: Record<string, string> = {
   address: "住所",
   lotNumber: "地番",
   buildingNumber: "家屋番号",
+  buildingName: "物件名",
+  buildingId: "棟",
   registryStatus: "登記状況",
   dmStatus: "DM判断",
   caseStatus: "案件ステータス",

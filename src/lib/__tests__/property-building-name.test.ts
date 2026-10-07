@@ -199,9 +199,12 @@ describe("配線 — 同じ判定を UI と API の両方が通る", () => {
   });
 
   it("⚠API 側でも normalizeBuildingName を通す (画面だけの制御にしない)", () => {
-    expect(read("src/app/api/properties/route.ts")).toMatch(
-      /buildingName: normalizeBuildingName\(data\.propertyType, data\.buildingName\)/,
+    // 作成は「整えた物件名」を変数に取り、保存にも棟へのつなぎにも同じ値を使う。
+    const create = read("src/app/api/properties/route.ts");
+    expect(create).toMatch(
+      /const buildingName = normalizeBuildingName\(data\.propertyType, data\.buildingName\)/,
     );
+    expect(create).toMatch(/data: \{ \.\.\.data, buildingName, createdBy: session\.id \}/);
     const update = read("src/app/api/properties/[id]/route.ts");
     expect(update).toMatch(/normalizeBuildingName\(\s*effectiveType/);
     // 種別だけ対象外へ変えた更新でも、残っている物件名を消す

@@ -21,6 +21,12 @@ import {
   supportsBuildingName,
 } from "@/lib/property-building-name";
 import { applyDisplayToOwner } from "@/lib/display-level";
+import {
+  applyBuildingLink,
+  finalBuildingFields,
+  writeBuildingLinkAudit,
+} from "@/lib/building-link/apply";
+import { AUTO_CHOICE } from "@/lib/building-link/resolve";
 import { getStorage } from "@/lib/storage";
 import { extractStorageKeyFromUrl } from "@/lib/storage/url-to-key";
 
@@ -211,7 +217,8 @@ export async function PATCH(
 
     const body = await request.json();
     const data = updatePropertySchema.parse(body);
-    const { version, ...updateFields } = data;
+    // buildingChoice は列ではない(棟の選び方)。保存する値から外す。
+    const { version, buildingChoice, ...updateFields } = data;
 
     // Optimistic locking: only update if version matches
     const current = await prisma.property.findUnique({
@@ -229,6 +236,8 @@ export async function PATCH(
         // ⚠変更履歴の「変更前」に使う。選ばないと、物件名を書き換えても
         // 履歴が「空 → 〇〇」になり、元の名前が残らない (@codex #354 P2)。
         buildingName: true,
+        // 棟へのつなぎ直しで「今の棟」として渡す・変更履歴の「変更前」に使う。
+        buildingId: true,
         realEstateNumber: true,
         registryStatus: true,
         dmStatus: true,
@@ -353,6 +362,23 @@ export async function PATCH(
     //   - 正規化(空白除去・上限切り詰め・対象外なら null)後の値でなく生の入力が残る
     const persistedFields = { ...updateFields, ...buildingNamePatch };
 
+    // 棟へのつなぎ直しが要るか(設計 2026-10-04 §4.4)。物件名・種別・住所のどれかが変わったとき、
+    // または画面が棟を選んで送ってきたときだけ。⚠メモだけの保存で棟を触らない。
+    const savedBuildingName =
+      "buildingName" in persistedFields ? (persistedFields.buildingName ?? null) : current.buildingName;
+    const effectiveAddress = updateFields.address ?? current.address;
+    // ⚠つながった区分の部屋で物件名も種別も変えず、棟も選んでいない保存(住所だけ等)は apply を呼ばない(D4)。
+    //   棟の名前を変えた後は部屋の物件名が旧名のまま=比べ直すと別の棟を作って付け替えてしまう。
+    const keepsLinkedRoom =
+      buildingChoice === undefined && savedBuildingName === current.buildingName &&
+      current.buildingId != null && effectiveType === "apartment_unit" && current.propertyType === "apartment_unit";
+    const touchesBuildingLink =
+      !keepsLinkedRoom &&
+      (buildingChoice !== undefined ||
+        savedBuildingName !== current.buildingName ||
+        effectiveType !== current.propertyType ||
+        effectiveAddress !== current.address);
+
     // Build change log entries
     const changeLogs: Array<{
       targetTable: string;
@@ -419,7 +445,7 @@ export async function PATCH(
           throw new ApiError(403, "この物件を編集する権限がありません", "FORBIDDEN");
         }
       }
-      return tx.property.updateMany({
+      const res = await tx.property.updateMany({
         where: {
           id,
           version,
@@ -432,6 +458,22 @@ export async function PATCH(
           version: { increment: 1 },
         },
       });
+      // ⚠**書けたときだけ**棟へつなぐ(0件=版番号違い・取得中は下で 409)。
+      // ⚠ロック順は「物件の行(上の lockPropertyRow)→ アドバイザリロック(apply の中)」。
+      //   apply は版番号を進めない=この更新と同じトランザクションで呼ぶ。
+      if (res.count === 0 || !touchesBuildingLink) return { count: res.count, buildingLink: null };
+      const buildingLink = await applyBuildingLink(tx, {
+        propertyId: id,
+        propertyType: effectiveType,
+        buildingName: savedBuildingName,
+        address: effectiveAddress,
+        buildingNumber:
+          updateFields.buildingNumber !== undefined ? updateFields.buildingNumber ?? null : current.buildingNumber,
+        choice: buildingChoice ?? AUTO_CHOICE,
+        currentBuildingId: current.buildingId,
+        userId: session.id,
+      });
+      return { count: res.count, buildingLink };
     });
     if (guardedUpdate.count === 0) {
       // 0件の理由を弁別する(取得中 / 先に更新された)。
@@ -457,6 +499,8 @@ export async function PATCH(
       include: {
         assignee: { select: { id: true, name: true } },
         creator: { select: { id: true, name: true } },
+        // 棟へつなぎ直した結果を画面が出し直すため。
+        building: { select: { id: true, name: true } },
         propertyOwners: {
           include: {
             owner: {
@@ -491,6 +535,36 @@ export async function PATCH(
       },
     });
 
+    const buildingLink = guardedUpdate.buildingLink;
+    if (buildingLink) {
+      const final = finalBuildingFields(buildingLink, savedBuildingName);
+      // 物件名の履歴は「変更前 → 実際に残った名前(棟の正式な表記)」で作り直す。
+      const idx = changeLogs.findIndex((c) => c.fieldName === "buildingName");
+      if (idx >= 0) changeLogs.splice(idx, 1);
+      if ((current.buildingName ?? null) !== final.buildingName) {
+        changeLogs.push({
+          targetTable: "properties",
+          targetId: id,
+          fieldName: "buildingName",
+          oldValue: current.buildingName ?? null,
+          newValue: final.buildingName,
+          source: "manual",
+          changedBy: session.id,
+        });
+      }
+      if (final.buildingId !== undefined && final.buildingId !== (current.buildingId ?? null)) {
+        changeLogs.push({
+          targetTable: "properties",
+          targetId: id,
+          fieldName: "buildingId",
+          oldValue: current.buildingId ?? null,
+          newValue: final.buildingId,
+          source: "manual",
+          changedBy: session.id,
+        });
+      }
+    }
+
     // Write change logs
     if (changeLogs.length > 0) {
       await prisma.changeLog.createMany({ data: changeLogs });
@@ -504,6 +578,7 @@ export async function PATCH(
       targetId: id,
       detail: { updatedFields: changeLogs.map((c) => c.fieldName) },
     });
+    if (buildingLink) await writeBuildingLinkAudit(session.id, id, buildingLink);
 
     // owner:read gate — GET と同方針（owner:read なしでは owner PII を返さない）
     const canReadOwner = hasPermission(permissions, "owner", "read");
@@ -515,7 +590,11 @@ export async function PATCH(
         : { id: po.owner.id },
     }));
 
-    return apiResponse({ ...updated, propertyOwners: maskedUpdatedPropertyOwners });
+    return apiResponse({
+      ...updated,
+      propertyOwners: maskedUpdatedPropertyOwners,
+      buildingLink: buildingLink ?? null,
+    });
   } catch (error) {
     return handleApiError(error);
   }

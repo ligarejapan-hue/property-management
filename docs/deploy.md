@@ -71,7 +71,6 @@
 
 | 変数名 | 説明 | デフォルト |
 |--------|------|-----------|
-| `UNIT_IMPORT_BUILDING_NOT_FOUND` | 区分取込時の棟未存在挙動 | `needs_review` |
 | `NTA_ROSENKA_API_URL` | 路線価 API（将来実装） | 未設定 |
 | `ROAD_LEDGER_API_URL` | 道路台帳 API（将来実装） | 未設定 |
 
@@ -107,7 +106,6 @@
 | `STORAGE_SERVER_URL` | 🟢 設定値 | ストレージの公開エンドポイント |
 | `STORAGE_SERVER_BUCKET` | 🟢 設定値 | バケット名 |
 | `KSJ_API_URL` | 🟢 設定値 | 内部 GeoServer URL |
-| `UNIT_IMPORT_BUILDING_NOT_FOUND` | 🟢 設定値 | 動作設定値 |
 
 > 設定値も秘匿不要ではあるが、git 管理を増やすメリットより  
 > **「env はすべてサーバー上」で統一する方が運用ミスが少ない**。
@@ -131,7 +129,6 @@ STORAGE_BACKEND=server
 STORAGE_SERVER_URL="https://files.your-domain.com"
 STORAGE_SERVER_BUCKET=property-management
 KSJ_API_URL="http://your-geoserver.internal/geoserver/ksj/ows"
-UNIT_IMPORT_BUILDING_NOT_FOUND=needs_review
 ```
 
 配置手順:
@@ -822,6 +819,37 @@ sudo vim /etc/property-management/app.env
 ```
 
 ---
+
+### 画面を閉じていても届く通知（Web プッシュ・通知 段階4）
+
+設計書 `docs/superpowers/specs/2026-09-27-notifications-design.md` §7.6。**timer は最後に有効にし、戻すときは最初に止める**。
+
+反映の順番:
+
+1. `app.env` に `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT`（`npx web-push generate-vapid-keys` で作る・値は画面やログに出さない）と `NOTIFICATIONS_PUSH_RUN_SECRET`（`openssl rand -base64 32`）を追記する（追記前に `app.env.bak-<日付>` を退避・600 のまま）。まだ timer は置かない。
+2. 通常の更新手順（§6 の差分適用・`prisma migrate deploy` を含む）で反映して再起動する。送信の基準のカーソルは **migration を流した時刻** で初期化される（それより前の査定申込・謄本ジョブは送らない）。migration の中身と止まるもの:
+   - `20261003120000_add_next_action_time`（段階3・次回対応の時刻の欄）: **`next_actions` を押さえて**列を足し、既存の全行に `reminder_rev_at` を埋めてからトリガーを作る。⚠列の追加（`ALTER TABLE`）は最も強い押さえ（ACCESS EXCLUSIVE）を取り、COMMIT まで続くので、**その間は次回対応の読み取りも書き込みも待たされる**（ホームの一覧・次回対応タブ・お知らせの件数が数秒止まる）。押さえるのを10秒待っても取れなければ失敗して何も変わらない（やり直しの手順は migration の先頭のコメント）。本番の件数なら数秒の見込みだが、**反映前に件数を確かめ**（`SELECT count(*) FROM next_actions;`）、利用の少ない時間に流す。戻すときはアプリだけを前の版に戻し、列とトリガーは残す（前の版は列を知らないだけで動く）。
+   - `20261004100500_add_registry_job_completed_index`: 謄本の一括取得の表に索引を足す（`CREATE INDEX CONCURRENTLY`＝書き込みを止めない）。失敗して INVALID の索引が残ったときのやり直しは migration の先頭のコメント。
+   - `20261003130000_add_push_subscriptions` と `20261004100000_add_notification_deliveries`: 表の追加。新しい表から既存の表へ外部キーを張る瞬間だけ、`users`（と `push_subscriptions`）が**短く書き込み止め**になる（読み取りは止めない・行は書き換えない）。`20261004100000` は押さえるのを10秒待っても取れなければ失敗して何も変わらない（やり直しは `npx prisma migrate resolve --rolled-back 20261004100000_add_notification_deliveries` → `npx prisma migrate deploy`）。前の版のアプリとも両立する。
+   - `20261004110000_add_edit_lock_loss_events`（段階4c）: 表の追加と、`notification_deliveries` の種類の CHECK の付け替え（行は変えない・`NOT VALID` で付けて COMMIT の後に読み書きを止めずに確かめる）。外部キーと CHECK の付け替えの一瞬だけ `users`・`notification_deliveries` が押さえられ、10秒待っても取れなければ失敗して何も変わらない（やり直しは `npx prisma migrate resolve --rolled-back 20261004110000_add_edit_lock_loss_events` → `npx prisma migrate deploy`）。⚠ただし最後の確かめ（`VALIDATE CONSTRAINT`・これも10秒まで待つ）**だけ**が失敗したときは、表と制約はもう入っているので `--rolled-back` は使わず、migration の末尾のコメントの2手順（確かめを流し直す → `migrate resolve --applied`）でやり直す。⚠この版から**編集の鍵の取り直し・管理者の解除がこの表に書く**ので、必ず migration を先に流してから再起動する（通常の手順どおり。逆にすると鍵の取得・解除が失敗する）。
+3. 送信を手で1回だけ動かし、エラーなく終わることを確かめる:
+   ```bash
+   sudo cp deploy/systemd/pm-push-notify.service.example /etc/systemd/system/pm-push-notify.service
+   sudo cp deploy/systemd/pm-push-notify.timer.example   /etc/systemd/system/pm-push-notify.timer
+   sudo systemctl daemon-reload
+   sudo systemctl start pm-push-notify.service
+   journalctl -u pm-push-notify -n 20 --no-pager   # 件数の JSON が1行出れば成功（宛先・中身は出ない）
+   ```
+   鍵や合言葉が欠けている・表が無いときは送らずに失敗（503/500）で終わる。
+4. timer を有効にする: `sudo systemctl enable --now pm-push-notify.timer`（確認: `systemctl list-timers pm-push-notify.timer`）。
+
+元に戻す順番:
+
+1. **timer を止める**: `sudo systemctl disable --now pm-push-notify.timer`（止めないまま戻すと定期実行が失敗し続ける）。
+2. アプリを前の版に戻して再起動する。
+3. 追加した表（`notification_deliveries`・`notification_delivery_refs`・`notification_fanout_queue`・`notification_source_events`・`notification_source_cursors`・`edit_lock_loss_events`）は前の版に影響しないので残す。消す場合はこの全部を消す（一部だけ残すと、反映し直したとき migration が「表がもうある」で失敗する。消す手順は各 migration の先頭のコメント。消したあとで反映し直すときは、消した migration ごとに `npx prisma migrate resolve --rolled-back <名前>` で適用済みの印を戻してから `migrate deploy`）。消すと送信の記録と基準のカーソルが失われ、再び反映したときはカーソルの初期化からやり直しになる。
+
+⚠送信の口（`/api/notifications/push-run`）は合言葉で守っている。さらに nginx で外からは 404 にする（`deploy/nginx/property-management.conf.example` の `location = /api/notifications/push-run`。timer は `127.0.0.1:3000` を直接呼ぶので影響しない）。本番の nginx に足すときは `nginx -t` → `systemctl reload nginx`。
 
 ## 10. 定期メンテナンス
 

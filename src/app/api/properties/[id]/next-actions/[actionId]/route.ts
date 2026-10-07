@@ -15,6 +15,7 @@ import {
   lockPropertyRecordForWrite,
   propertyRecordScopeFilter,
 } from "@/lib/property-record-guard";
+import { NEXT_ACTION_TIME_RE } from "@/lib/notifications/reminder-schedule";
 
 const updateNextActionSchema = z.object({
   isCompleted: z.boolean().optional(),
@@ -23,6 +24,8 @@ const updateNextActionSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
+  // 時刻(任意・"HH:MM"・日本時間)。null で時刻を外す。通知 段階3。
+  scheduledTime: z.string().regex(NEXT_ACTION_TIME_RE, "時刻はHH:MM形式で指定してください").optional().nullable(),
   actionType: z.string().max(50).optional().nullable(),
   content: z.string().min(1, "内容は必須です").max(1000, "内容は1000文字以内です").optional(),
 });
@@ -65,6 +68,7 @@ export async function PATCH(
     if (data.actionType !== undefined) updateData.actionType = data.actionType;
     if (data.scheduledAt !== undefined)
       updateData.scheduledAt = new Date(data.scheduledAt);
+    if (data.scheduledTime !== undefined) updateData.scheduledTime = data.scheduledTime;
     // 完了時刻(completedAt)は下の tx の中で今の値を見て決める(完了済みなら触らない)。
     if (data.isCompleted !== undefined) updateData.isCompleted = data.isCompleted;
     if (data.isCompleted === false) updateData.completedAt = null;

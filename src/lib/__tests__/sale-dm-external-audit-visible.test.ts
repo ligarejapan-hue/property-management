@@ -50,6 +50,8 @@ const CASES: Array<{ action: string; detail: Record<string, unknown> }> = [
   },
   // DMの種類(台帳)の写真と図(Task 7)。台帳には campaignId が無い(発送に紐付かない)。
   { action: "sale_dm_scenario_media_update", detail: { assetCount: 2, figureCount: 1 } },
+  // 台帳の手紙のイラストを選ぶ/外す(設計 2026-10-05)。付いたか外れたかだけ。
+  { action: "sale_dm_scenario_letter_illustration_update", detail: { hasIllustration: true } },
   {
     action: "sale_dm_scenario_lp_preview_view",
     detail: { device: "sp", viewedAt: "2026-09-27T00:00:00.000Z" },

@@ -63,9 +63,11 @@ vi.mock("@/lib/permissions", () => ({
 
 vi.mock("@/lib/audit", () => ({ writeAuditLog: vi.fn() }));
 
+// property_csv の create_new は物件の作成と棟へのつなぎを1つのトランザクションで行う
+// (tx は同じ偽物を渡す)。
 vi.mock("@/lib/prisma", () => {
-  return {
-    default: {
+  const db: Record<string, unknown> = {
+      $transaction: vi.fn(),
       owner: {
         findUnique: vi.fn(),
         findFirst: vi.fn(),
@@ -84,8 +86,9 @@ vi.mock("@/lib/prisma", () => {
       importJob: {
         update: vi.fn(),
       },
-    },
   };
+  db.$transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  return { default: db };
 });
 
 import prisma from "@/lib/prisma";

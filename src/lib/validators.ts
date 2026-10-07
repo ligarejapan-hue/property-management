@@ -174,6 +174,14 @@ export const clearOnlyRealEstateNumber = z
 const optionalLatitude = z.number().min(-90, "緯度は -90〜90 の範囲で入力してください").max(90, "緯度は -90〜90 の範囲で入力してください").optional().nullable();
 const optionalLongitude = z.number().min(-180, "経度は -180〜180 の範囲で入力してください").max(180, "経度は -180〜180 の範囲で入力してください").optional().nullable();
 
+// 物件名から棟へつなぐときの選び方(設計 2026-10-04 §4.1)。省略=auto。
+// ⚠uuid は小文字にそろえる(生SQL・他経路の保存値と一致させる)。
+export const buildingChoiceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("auto") }),
+  z.object({ kind: z.literal("existing"), buildingId: z.string().uuid().transform((s) => s.toLowerCase()) }),
+  z.object({ kind: z.literal("new") }),
+]);
+
 export const createPropertySchema = z.object({
   propertyType: z.enum(PROPERTY_TYPE_VALUES),
   address: z.string().min(1, "住所は必須です"),
@@ -199,6 +207,8 @@ export const createPropertySchema = z.object({
   gpsLng: optionalLongitude,
   note: z.string().optional().nullable(),
   assignedTo: z.string().uuid().optional().nullable(),
+  // 棟の選び方(列ではない=保存前に取り除く)。省略=auto。
+  buildingChoice: buildingChoiceSchema.optional(),
 });
 
 // ---------- Convert field-survey pin to property ----------
@@ -287,6 +297,8 @@ export const updatePropertySchema = z.object({
   floorNo: z.number().int().min(-10).max(200).optional().nullable(), // 地下の部屋があるため下限は負
   managementFee: z.number().int().min(0).max(10000000).optional().nullable(), // 円/月
   repairReserveFee: z.number().int().min(0).max(10000000).optional().nullable(), // 円/月
+  // 棟の選び方(列ではない=保存前に取り除く)。省略=auto。
+  buildingChoice: buildingChoiceSchema.optional(),
   version: z.number().int(), // optimistic locking
 });
 

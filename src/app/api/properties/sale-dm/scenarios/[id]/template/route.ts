@@ -9,7 +9,7 @@ import {
   letterOptions,
 } from "@/lib/sale-dm-letter/scenario-guard";
 import {
-  buildExternalPrompt,
+  scenarioLetterPrompt,
   promptDigest,
   bodyTemplateDigest,
 } from "@/lib/sale-dm-letter/external-prompt";
@@ -51,7 +51,7 @@ export async function PUT(request: Request, { params }: Ctx) {
       }
 
       // 表示したときの書き方の設定と、いまの設定が同じか。
-      const prompt = buildExternalPrompt(letterOptions(s));
+      const prompt = scenarioLetterPrompt(letterOptions(s));
       if (promptDigest(prompt) !== parsed.promptDigest) {
         throw new ApiError(
           409,

@@ -38,16 +38,19 @@ vi.mock("@/lib/change-log", () => ({
   BUILDING_TRACKED_FIELDS: [],
 }));
 
-vi.mock("@/lib/prisma", () => ({
-  default: {
+// ⚠PATCH は棟の更新を $transaction に入れる(棟の名前の反映・段3)。tx には同じ mock を渡す。
+vi.mock("@/lib/prisma", () => {
+  const prismaMock = {
     building: {
       create: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
       findUnique: vi.fn(),
     },
-  },
-}));
+    $transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb(prismaMock)),
+  };
+  return { default: prismaMock };
+});
 
 import prisma from "@/lib/prisma";
 import { getApiSession, getUserPermissions } from "@/lib/api-helpers";
@@ -132,6 +135,15 @@ describe("POST /api/buildings — postalCode 受理（21-C PR-1）", () => {
     expect(res.status).toBe(201);
     expect(pm.building.create).toHaveBeenCalledTimes(1);
     expect(pm.building.create.mock.calls[0][0].data.address).toBe("東京都港区");
+  });
+});
+
+describe("POST /api/buildings — 比べる形と町丁目(Task 5)", () => {
+  it("create の data に nameKey・areaKey が入る", async () => {
+    await POST(postReq({ name: "パークハウス第二", address: "東京都港区芝1-2-3" }));
+    const data = pm.building.create.mock.calls[0][0].data;
+    expect(data.nameKey).toBe("パ-クハウス第2");
+    expect(typeof data.areaKey).toBe("string");
   });
 });
 

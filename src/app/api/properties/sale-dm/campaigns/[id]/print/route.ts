@@ -26,6 +26,7 @@ import {
   deriveUnsubscribeKey,
 } from "@/lib/sale-dm-letter/unsubscribe-token";
 import { composeAddresseeHonorific } from "@/lib/sale-dm-letter/recipients";
+import { letterIllustrationFromAsset } from "@/lib/sale-dm-letter/letter-illustration";
 
 // 確定済み(status=confirmed)の全通をページ区切りで連結した印刷用 HTML を返す。
 // PII(本文・宛名・住所)を含むため no-store。本文は AuditLog に残さない。
@@ -48,7 +49,7 @@ export async function GET(
       // confirmed かつ body あり(生成失敗の空letterは印刷しない=空の郵送物を防ぐ)。
       where: { campaignId: id, status: "confirmed", body: { not: "" } },
       orderBy: { createdAt: "asc" },
-      include: { variant: true, property: { select: { createdBy: true, assignedTo: true } }, draftOwners: { select: { ownerId: true } } },
+      include: { variant: { include: { illustrationAsset: { select: { publicId: true, width: true, height: true, deletedAt: true } } } }, property:{ select: { createdBy: true, assignedTo: true } }, draftOwners: { select: { ownerId: true } } },
     });
     // field_staff は現在の物件 record scope の宛先のみ印刷(GET campaign / CSV と統一)。
     const visibleDrafts = filterDraftsByFieldStaffScope(drafts, session);
@@ -189,6 +190,8 @@ export async function GET(
             senderName,
             senderContact,
             trackingToken: d.trackingToken,
+            // 手紙のイラスト(設計 2026-10-05)。種類から写した型だけが持つ。削除済みは null(=イラスト無し)。
+            illustration: letterIllustrationFromAsset(d.variant.illustrationAsset),
             trackingSlotHtml:
               renderTrackingSlotHtml(artifacts, { caption: "スマホで読み取り(無料査定)" }) +
               unsubscribeSlotHtml,

@@ -11,6 +11,17 @@ import {
   supportsBuildingName,
 } from "@/lib/property-building-name";
 import { createProperty } from "@/lib/api-client";
+import BuildingNameCombobox from "@/components/buildings/building-name-combobox";
+import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
+import { stashBuildingLinkNotice } from "@/lib/building-link/notice";
+import { areaChanged } from "@/lib/building-link/combobox-model";
+// ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む。
+import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
+
+/** 登録できたときに onCreated へ渡す結果(棟へつないだ結果=知らせに使う)。 */
+export interface PostCreateResult {
+  buildingLink?: BuildingLinkOutcome | null;
+}
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 
 interface Props {
@@ -18,14 +29,15 @@ interface Props {
   /** 種別選択肢を制限する（販売図面ピッカー等）。未指定は従来どおり（旧値除く全種別）。 */
   typeFilter?: string[];
   /** 登録成功時の遷移を差し替える。未指定は従来どおり物件詳細へ router.push。 */
-  onCreated?: (id: string, propertyType: string) => void;
+  /** ⚠物件詳細へ移らない呼び出し元は、3つめの引数の buildingLink を自分の画面で知らせる(@codex R6)。 */
+  onCreated?: (id: string, propertyType: string, result?: PostCreateResult) => void;
 }
 
 /** 登録成功後のアクション（onCreated 指定時はそれ・未指定は物件詳細へ遷移）を返す純関数。 */
 export function resolvePostCreate(
-  onCreated: ((id: string, propertyType: string) => void) | undefined,
+  onCreated: ((id: string, propertyType: string, result?: PostCreateResult) => void) | undefined,
   router: { push: (url: string) => void },
-): (id: string, propertyType: string) => void {
+): (id: string, propertyType: string, result?: PostCreateResult) => void {
   if (onCreated) return onCreated;
   return (id) => router.push(`/properties/${id}`);
 }
@@ -41,10 +53,20 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
   const [lotNumber, setLotNumber] = useState("");
   // 物件名(任意)。集合住宅の種別のときだけ入力欄を出す。
   const [buildingName, setBuildingName] = useState("");
+  // 物件名から棟へつなぐ選び方(区分マンションのときだけ使う)。候補を選ぶ/「新しい棟」で変わる。
+  const [buildingChoice, setBuildingChoice] = useState<BuildingChoice>(AUTO_CHOICE);
   const [introductionRoute, setIntroductionRoute] = useState("");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 住所の変更(直接入力・住所補完の両方)。⚠町丁目が変わったら選んだ棟を外して auto に
+  // 戻す(@codex R4。前の丁目で選んだ棟へつないだり、新しい丁目に同じ名前の棟があるのに
+  // 新しく作ったりしない)。番地だけの直しでは保つ。
+  const handleAddressChange = (next: string) => {
+    if (areaChanged(address, next)) setBuildingChoice(AUTO_CHOICE);
+    setAddress(next);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,8 +96,13 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
         buildingName: normalizeBuildingName(propertyType, buildingName),
         introductionRoute: introductionRoute || null,
         note: note.trim() || null,
+        buildingChoice: propertyType === "apartment_unit" ? buildingChoice : undefined,
       });
-      resolvePostCreate(onCreated, router)(result.id, propertyType);
+      // 知らせは物件詳細で1回だけ出す。物件詳細へ移らない呼び出し元(onCreated)では
+      // 預けずに、結果を onCreated へ渡す(呼び出し元の画面で知らせる・@codex R6)。
+      // 預けない(あとで別の機会に古い知らせが出てしまうため)。
+      if (!onCreated) stashBuildingLinkNotice(result.id, result.buildingLink);
+      resolvePostCreate(onCreated, router)(result.id, propertyType, { buildingLink: result.buildingLink ?? null });
     } catch (err) {
       setError(err instanceof Error ? err.message : "登録に失敗しました");
       setSubmitting(false);
@@ -119,6 +146,8 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
                 // ⚠対象外の種別に変えたら物件名を**その場で消す**。隠すだけだと
                 // 画面に無い値を送ることになり、入力した本人にも分からない。
                 if (!supportsBuildingName(next)) setBuildingName("");
+                // 棟の選び方は種別ごとの話なので、種別を変えたら自動に戻す。
+                setBuildingChoice(AUTO_CHOICE);
               }}
               disabled={submitting}
               className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
@@ -146,16 +175,32 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
               >
                 物件名 <span className="text-xs text-gray-400 dark:text-gray-500">任意</span>
               </label>
-              <input
-                id="new-property-building-name"
-                data-testid="new-property-building-name"
-                type="text"
-                value={buildingName}
-                onChange={(e) => setBuildingName(e.target.value)}
-                disabled={submitting}
-                placeholder="例: リガーレ西荻マンション"
-                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
-              />
+              {propertyType === "apartment_unit" ? (
+                // 区分マンションは棟へつなぐので、既存の棟の候補を出す。
+                <BuildingNameCombobox
+                  id="new-property-building-name"
+                  testId="new-property-building-name"
+                  value={buildingName}
+                  onChange={setBuildingName}
+                  address={address}
+                  choice={buildingChoice}
+                  onChoiceChange={setBuildingChoice}
+                  disabled={submitting}
+                  placeholder="例: リガーレ西荻マンション"
+                  inputClassName="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                />
+              ) : (
+                <input
+                  id="new-property-building-name"
+                  data-testid="new-property-building-name"
+                  type="text"
+                  value={buildingName}
+                  onChange={(e) => setBuildingName(e.target.value)}
+                  disabled={submitting}
+                  placeholder="例: リガーレ西荻マンション"
+                  className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-50 dark:disabled:bg-gray-800"
+                />
+              )}
               {/* ⚠maxLength は使わない。生の文字数で打ち切るため、前後に空白の
                   ある上限ちょうどの名前を貼ると**黙って実文字が削られる**。
                   打ち終えてから 422 で返すのも不親切なので、入力中に伝える。 */}
@@ -198,7 +243,7 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
               onChange={(e) => {
                 // ユーザーの直接編集＝user-edit signal（住所検索のトリガー）。
                 setAddressEdited(true);
-                setAddress(e.target.value);
+                handleAddressChange(e.target.value);
               }}
               disabled={submitting}
               placeholder="例: 東京都千代田区丸の内1-1-1"
@@ -211,7 +256,7 @@ export default function NewPropertyModal({ onClose, typeFilter, onCreated }: Pro
                 zip={postalCode}
                 address={address}
                 onZipChange={setPostalCode}
-                onAddressChange={setAddress}
+                onAddressChange={handleAddressChange}
                 addressEdited={addressEdited}
                 disabled={submitting}
                 mode="both"

@@ -34,6 +34,10 @@ import RegistryLocationSearchButton from "@/components/properties/registry-locat
 import RegistryOwnerApplyButton from "@/components/properties/registry-owner-apply-button";
 import { isLandPropertyType } from "@/lib/registry-fetch/registry-target";
 import PropertyEditForm from "@/components/properties/property-edit-form";
+import { BuildingLinkNotice } from "@/components/buildings/building-link-notice";
+import { takeBuildingLinkNotice } from "@/lib/building-link/notice";
+// ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む。
+import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
 import InvestigationTab from "@/components/properties/investigation-tab";
 import { fetchPropertyDetail, deleteProperty, updatePropertyOwner, unlinkPropertyOwner, updateOwner, fetchQualityCheck, apiErrorCode, codeFromErrorBody, type EditLockStatusRow } from "@/lib/api-client";
 // 編集中の鍵(仕様 6.1・6.2)。所有者カードは1枚ごとに別資源として鍵を持つ(Task 6)。
@@ -336,6 +340,9 @@ export default function PropertyDetailPage({
   const [error, setError] = useState<string | null>(null);
   const [showEditForm, setShowEditForm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // 棟へつないだ結果の知らせ(設計 §6.2)。編集の保存後か、新規登録・貼り付けから
+  // 預かったもの(読み込みが終わった後に1回だけ取り出す)。
+  const [buildingNotice, setBuildingNotice] = useState<BuildingLinkOutcome | null>(null);
   // 添付ファイルタブへ「一覧を読み直して」と伝える合図（値が変わったときだけ効く）。
   // ⚠あのタブは開いた瞬間に一度だけ読み込むため、開いたまま謄本を取り込んでも
   //   一覧が増えなかった（2026-08-20 に『取り込めていない』と誤解された原因）。
@@ -414,12 +421,21 @@ export default function PropertyDetailPage({
     setError(null);
     try {
       const data = await fetchPropertyDetail(id);
-      applyRefreshOutcome(
+      const applied = applyRefreshOutcome(
         resolveSuccess(refreshStateRef.current, ticket),
         data as unknown as ApiProperty,
         setProperty,
         setError,
       );
+      // 新規登録・貼り付けから預かった知らせを、読み込みが終わってから1回だけ取り出す。
+      // ⚠effect の本体や useState の初期化では取らない(eslint set-state-in-effect /
+      //   サーバー描画との食い違い)。⚠無いとき null で上書きしない(保存後の知らせを
+      //   この取り直しで消さない)。⚠結果を画面に使わなかった(古い読み込みが遅れて
+      //   届いた=別の物件へ移った後など)ときは取り出さない(前の物件の知らせを出さない)。
+      if (applied) {
+        const stashed = takeBuildingLinkNotice(id);
+        if (stashed) setBuildingNotice(stashed);
+      }
     } catch (err) {
       applyRefreshOutcome(
         resolveFailure(
@@ -496,6 +512,8 @@ export default function PropertyDetailPage({
   // このエフェクトは reset のみ: fetchProperty も同じ id 変化で走るため二重 fetch しない。
   useEffect(() => {
     setQualityIssues([]);
+    // 別の物件へ移ったら、前の物件の棟の知らせも消す。
+    setBuildingNotice(null);
   }, [id]);
 
   // 編集中の鍵(仕様 6.1)。複製タブ確認(ensureUniqueScreenToken・最大300ms)は
@@ -919,6 +937,9 @@ export default function PropertyDetailPage({
         </div>
       )}
 
+      {/* 棟へつないだ結果の知らせ(設計 §6.2)。閉じるまで出したまま。 */}
+      <BuildingLinkNotice outcome={buildingNotice} onClose={() => setBuildingNotice(null)} />
+
       {/* Tabs */}
       <div className="mb-4 border-b border-gray-200 dark:border-gray-800">
         <nav className="-mb-px flex gap-0 overflow-x-auto">
@@ -975,7 +996,20 @@ export default function PropertyDetailPage({
             onEditLockReleased={editLockStatus.refresh}
           />
         )}
-        {activeTab === "photos" && <PhotoTab propertyId={property.id} />}
+        {activeTab === "photos" && (
+          <PhotoTab
+            propertyId={property.id}
+            propertyType={property.propertyType}
+            building={
+              property.building
+                ? { id: property.building.id, name: property.building.name }
+                : null
+            }
+            onEditProperty={
+              propertyEditLockHeld ? undefined : () => setShowEditForm(true)
+            }
+          />
+        )}
         {activeTab === "investigation" && (
           <InvestigationTab propertyId={property.id} />
         )}
@@ -1009,8 +1043,9 @@ export default function PropertyDetailPage({
         <PropertyEditForm
           property={property}
           onClose={() => setShowEditForm(false)}
-          onSaved={() => {
+          onSaved={(r) => {
             setShowEditForm(false);
+            setBuildingNotice(r?.buildingLink ?? null);
             fetchProperty();
           }}
         />

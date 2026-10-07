@@ -15,6 +15,8 @@ import {
   createPropertySchema,
 } from "@/lib/validators";
 import { normalizeBuildingName } from "@/lib/property-building-name";
+import { applyBuildingLink, writeBuildingLinkAudit } from "@/lib/building-link/apply";
+import { AUTO_CHOICE } from "@/lib/building-link/resolve";
 import {
   buildPropertyListWhere,
   buildPropertyListOrderBy,
@@ -157,22 +159,38 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const data = createPropertySchema.parse(body);
+    const { buildingChoice, ...data } = createPropertySchema.parse(body);
+    // ⚠物件名は**種別に合うときだけ**保存する。画面は種別で入力欄を出し
+    // 分けるが、それだけだと API を直接叩けば「土地」にも物件名を入れられ、
+    // **画面に出ないデータが DB に残る**(誰も直せず、CSV 出力や DM 差込で
+    // 初めて表に出る)。判定は UI と同じ純関数を通す。
+    const buildingName = normalizeBuildingName(data.propertyType, data.buildingName);
 
-    const property = await prisma.property.create({
-      data: {
-        ...data,
-        // ⚠物件名は**種別に合うときだけ**保存する。画面は種別で入力欄を出し
-        // 分けるが、それだけだと API を直接叩けば「土地」にも物件名を入れられ、
-        // **画面に出ないデータが DB に残る**(誰も直せず、CSV 出力や DM 差込で
-        // 初めて表に出る)。判定は UI と同じ純関数を通す。
-        buildingName: normalizeBuildingName(data.propertyType, data.buildingName),
-        createdBy: session.id,
-      },
-      include: {
-        assignee: { select: { id: true, name: true } },
-        creator: { select: { id: true, name: true } },
-      },
+    // 作成と棟へのつなぎは同じトランザクション(片方だけ残らないように・設計 2026-10-04 §4.4)。
+    const { property, buildingLink } = await prisma.$transaction(async (tx) => {
+      const created = await tx.property.create({
+        data: { ...data, buildingName, createdBy: session.id },
+        select: { id: true },
+      });
+      const buildingLink = await applyBuildingLink(tx, {
+        propertyId: created.id,
+        propertyType: data.propertyType,
+        buildingName,
+        address: data.address,
+        buildingNumber: data.buildingNumber ?? null,
+        choice: buildingChoice ?? AUTO_CHOICE,
+        currentBuildingId: null,
+        userId: session.id,
+      });
+      // 棟の表記にそろえた物件名・棟の id を含めて読み直す。
+      const property = await tx.property.findUniqueOrThrow({
+        where: { id: created.id },
+        include: {
+          assignee: { select: { id: true, name: true } },
+          creator: { select: { id: true, name: true } },
+        },
+      });
+      return { property, buildingLink };
     });
 
     await writeAuditLog({
@@ -182,8 +200,9 @@ export async function POST(request: NextRequest) {
       targetId: property.id,
       detail: { propertyType: data.propertyType, address: data.address },
     });
+    await writeBuildingLinkAudit(session.id, property.id, buildingLink);
 
-    return apiResponse(property, 201);
+    return apiResponse({ ...property, buildingLink }, 201);
   } catch (error) {
     return handleApiError(error);
   }

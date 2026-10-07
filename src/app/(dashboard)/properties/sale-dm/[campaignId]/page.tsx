@@ -96,6 +96,8 @@ export default function SaleDmWorkspacePage() {
       senderName: "",
       senderContact: "",
       trackingToken: selected.id,
+      // 手紙のイラスト(設計 2026-10-05)。印刷と同じ位置に出す。
+      illustration: selectedVariant.illustration ?? null,
     });
   }, [selected, selectedVariant]);
 

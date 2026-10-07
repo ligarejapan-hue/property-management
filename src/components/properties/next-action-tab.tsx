@@ -16,6 +16,17 @@ import {
   updateNextAction,
   deleteNextAction,
 } from "@/lib/api-client";
+import { jstToday, nextActionDeadline } from "@/lib/notifications/reminder-schedule";
+
+/**
+ * 期限切れか。時刻あり=予定日＋時刻(日本時間)を過ぎた、時刻なし=予定日が日本時間の今日より前。
+ * (以前は予定日の UTC 0時=日本時間 9:00 で比べていたため、今日の予定が朝から期限切れに見えた)
+ */
+export function isNextActionOverdue(scheduledAt: string, scheduledTime: string | null | undefined, now: Date): boolean {
+  const date = new Date(scheduledAt);
+  if (scheduledTime) return nextActionDeadline(date, scheduledTime) < now.getTime();
+  return date.toISOString().slice(0, 10) < jstToday(now);
+}
 
 interface ActionData {
   id: string;
@@ -23,6 +34,7 @@ interface ActionData {
   content: string;
   actionType: string | null;
   scheduledAt: string;
+  scheduledTime: string | null;
   isCompleted: boolean;
   completedAt: string | null;
   assignee: { id: string; name: string };
@@ -142,7 +154,7 @@ export default function NextActionTab({
           {actions.map((action) => {
             const isOverdue =
               !action.isCompleted &&
-              new Date(action.scheduledAt) < new Date();
+              isNextActionOverdue(action.scheduledAt, action.scheduledTime, new Date());
             return (
               <div
                 key={action.id}
@@ -182,7 +194,8 @@ export default function NextActionTab({
                     )}
                     <span className="flex items-center gap-0.5">
                       <Calendar className="h-3 w-3" />
-                      {new Date(action.scheduledAt).toLocaleDateString("ja-JP")}
+                      {new Date(action.scheduledAt).toLocaleDateString("ja-JP", { timeZone: "UTC" })}
+                      {action.scheduledTime ? ` ${action.scheduledTime}` : ""}
                     </span>
                     <span>担当: {action.assignee.name}</span>
                   </div>
@@ -216,9 +229,10 @@ function CreateActionForm({
 }) {
   const [content, setContent] = useState("");
   const [actionType, setActionType] = useState("");
-  const [scheduledAt, setScheduledAt] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
+  // 初期値は日本時間の今日(UTC の日付だと朝9時まで前日になっていた)。
+  const [scheduledAt, setScheduledAt] = useState(() => jstToday(new Date()));
+  // 時刻(任意)。入れると、その5分前に知らせる(通知 段階3)。空なら朝9時に知らせる。
+  const [scheduledTime, setScheduledTime] = useState("");
   const [assignedTo, setAssignedTo] = useState("");
   const [users, setUsers] = useState<Array<{ id: string; name: string }>>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -253,6 +267,7 @@ function CreateActionForm({
         content: content.trim(),
         actionType: actionType || null,
         scheduledAt,
+        scheduledTime: scheduledTime || null,
         assignedTo,
       });
       onCreated();
@@ -294,6 +309,19 @@ function CreateActionForm({
             onChange={(e) => setScheduledAt(e.target.value)}
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
           />
+        </div>
+        <div>
+          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+            <span className="shrink-0">時刻（任意）</span>
+            <input
+              type="time"
+              value={scheduledTime}
+              onChange={(e) => setScheduledTime(e.target.value.slice(0, 5))}
+              aria-label="時刻（任意）"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+            />
+          </label>
+          <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">入れるとその5分前に、空なら当日の朝9時にお知らせします。</p>
         </div>
         <div>
           <select

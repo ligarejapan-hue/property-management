@@ -10,10 +10,21 @@ import {
 } from "@/lib/api-helpers";
 import { writeAuditLog } from "@/lib/audit";
 import { hasPermission } from "@/lib/permissions";
+import { buildingIdentityKeys } from "@/lib/building-link/apply";
 import { recordChanges, BUILDING_TRACKED_FIELDS } from "@/lib/change-log";
+import { isPropertyScopedRole } from "@/lib/property-access";
+import { lockBuildingRowNoKeyUpdate } from "@/lib/edit-lock/row-locks";
+import {
+  isBuildingRename,
+  countEditLockedUnits,
+  propagateBuildingName,
+  isRetryableTxError,
+  lockBuildingUnits,
+  unitsOutsideScope,
+} from "@/lib/building-link/rename";
 
 const updateBuildingSchema = z.object({
-  name: z.string().min(1, "棟名は必須です").optional(),
+  name: z.string().trim().min(1, "棟名は必須です").optional(),
   address: z.string().min(1, "住所は必須です").optional(),
   postalCode: z.string().nullable().optional(),
   lotNumber: z.string().nullable().optional(),
@@ -127,6 +138,20 @@ export async function PATCH(
     for (const [key, val] of Object.entries(updateFields)) {
       if (val !== undefined) updateData[key] = val;
     }
+    // 名前を直すときは前後の空白を落とす(棟にも全部屋にも同じ文字列を書く)。
+    // ⚠名前が送られたら、変更の有無にかかわらず trim して書く(空白だけの違いで余白つきの名前を残さない)。
+    const renaming = isBuildingRename(existing.name, updateFields.name);
+    if (updateFields.name !== undefined) updateData.name = updateFields.name.trim();
+    // 名前か住所が変わったら、比べる形と町丁目を入れ直す(設計 §7)。
+    if (updateData.name !== undefined || updateData.address !== undefined) {
+      Object.assign(
+        updateData,
+        buildingIdentityKeys(
+          String(updateData.name ?? existing.name),
+          String(updateData.address ?? existing.address),
+        ),
+      );
+    }
     updateData.version = { increment: 1 };
 
     // @codex P1: **条件は書き込み自体に付ける**。上の事前判定だけでは、判定と書き込みの
@@ -134,11 +159,54 @@ export async function PATCH(
     // ロック解放後に古いフォームの値をそのまま上書きしてしまう。棟の編集フォームは
     // 築月・地下階も毎回送るため、無関係な項目だけ直したつもりの保存でも、図面から
     // 書き戻したばかりの値を黙って消し得る。version を条件にして、0件なら競合として返す。
-    const updated = await prisma.building.updateMany({
-      where: { id, version },
-      data: updateData,
+    // 棟の名前を直すときは、同じトランザクションで全部屋の物件名へ反映する(段3・設計 §6.3)。
+    // ⚠ロック順は **部屋の行 → 棟の行**(販売図面の書き戻し=sales-sheets/new と同じ向き。逆だと
+    //   待ちの輪になる)。部屋の行を id 順に FOR UPDATE で読んでから、棟の行を FOR NO KEY UPDATE。
+    // ⚠編集中の鍵が1件でもあれば 409 で投げ、棟の更新ごと巻き戻す(誰が編集中かは返さない)。
+    // ⚠鍵の数え直しと反映の間に新しく鍵を取られても、反映が各部屋の version を進めるので
+    //   その人の保存は 409 になる(受け入れ済み)。
+    const { count, propagated } = await prisma.$transaction(async (tx) => {
+      // 名前を直すときだけ、先に部屋の行をロックして読み(以降の確認と反映はこの行だけが対象)、
+      // 次に棟の行をロックする。ロックのあとにこの棟へつながった部屋は反映の対象外で、
+      // 次にその部屋を保存するまで古い名前のまま(許容。権限の穴ではない)。
+      const units = renaming ? await lockBuildingUnits(tx, id) : [];
+      if (renaming) await lockBuildingRowNoKeyUpdate(tx, id);
+      const updated = await tx.building.updateMany({
+        where: { id, version },
+        data: updateData,
+      });
+      if (updated.count === 0 || !renaming) return { count: updated.count, propagated: null };
+      // ⚠担当だけ見られる役割は、担当外の部屋の物件名を書き換えられない(物件の編集 API と同じ規則)。
+      if (isPropertyScopedRole(session.role) && unitsOutsideScope(units, session).length > 0) {
+        throw new ApiError(
+          403,
+          "この棟には担当外の部屋があるため、棟の名前は変えられません。事務の方に依頼してください",
+          "FORBIDDEN",
+        );
+      }
+      const locked = await countEditLockedUnits(tx, id);
+      if (locked > 0) {
+        throw new ApiError(
+          409,
+          `この棟の部屋${locked}件が編集中のため、名前を全部屋に反映できません。編集が終わってから保存してください`,
+          "UNITS_EDIT_LOCKED",
+        );
+      }
+      const result = await propagateBuildingName(tx, {
+        units,
+        newName: updateData.name as string,
+        userId: session.id,
+      });
+      if (result.changeLogs.length > 0) await tx.changeLog.createMany({ data: result.changeLogs });
+      return { count: updated.count, propagated: result };
+    }).catch((e: unknown) => {
+      // 名前の反映で他の保存と重なって落ちたとき(待ちの輪・時間切れ)は、再試行の案内にする。
+      if (renaming && isRetryableTxError(e)) {
+        throw new ApiError(409, "ほかの保存と重なりました。しばらくしてからもう一度保存してください", "RETRY_LATER");
+      }
+      throw e;
     });
-    if (updated.count === 0) {
+    if (count === 0) {
       throw new ApiError(
         409,
         "データが他のユーザーにより更新されています。画面をリロードしてください。",
@@ -179,6 +247,16 @@ export async function PATCH(
       targetId: id,
       detail: { updatedFields: Object.keys(updateFields) },
     });
+    if (propagated) {
+      // 件数だけ(物件名・住所は入れない)。
+      await writeAuditLog({
+        userId: session.id,
+        action: "building.rename_propagate",
+        targetTable: "buildings",
+        targetId: id,
+        detail: { updatedUnits: propagated.updated },
+      });
+    }
 
     return apiResponse(building);
   } catch (error) {
