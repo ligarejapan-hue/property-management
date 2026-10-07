@@ -399,9 +399,11 @@ function renderCaseSection(s: LpRenderInput["sections"][number], prefix: string,
   const hasTitleLine = firstLines.length > 1 && firstLines[0].trim().length > 0;
   const title = hasTitleLine ? firstLines[0].trim() : s.heading;
   const bodyParas = hasTitleLine ? [firstLines.slice(1).join("\n"), ...others] : s.paragraphs;
-  const media = s.media?.kind === "asset" ? `<div class="media">${img(s.media.image, "fig", s.heading)}</div>` : "";
+  // 写真も図も落とさない(@codex #488 R1 P2: 管理画面ではどの節にも図を付けられる)。写真は本文の前、図は本文の後。
+  const photo = s.media?.kind === "asset" ? `<div class="media">${img(s.media.image, "fig", s.heading)}</div>` : "";
+  const figure = s.media?.kind === "figure" ? `<div class="figure">${renderFigureHtml(s.media.figureKind)}</div>` : "";
   return `<section class="case"><details><summary><span class="case-tag">${escapeHtml(tag)}</span><strong>${escapeHtml(title)}</strong>` +
-    `<span class="case-more" aria-hidden="true">続きを読む</span></summary><div class="case-body">${media}${paragraphs(bodyParas, cta)}</div></details></section>`;
+    `<span class="case-more" aria-hidden="true">続きを読む</span></summary><div class="case-body">${photo}${paragraphs(bodyParas, cta)}${figure}</div></details></section>`;
 }
 
 function renderSection(s: LpRenderInput["sections"][number], cta: string): string {

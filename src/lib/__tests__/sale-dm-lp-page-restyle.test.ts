@@ -148,6 +148,14 @@ describe("ご相談の例(実例)は押すと広がる", () => {
     expect(h).toContain('<span class="case-tag">実例|東京都・マンション</span><strong>実例:東京都・マンション</strong>');
     expect(h).toContain('<div class="case-body"><p>一行だけの本文。</p></div>');
   });
+  it("実例の節に付けた写真・図も、開いたときの本文に出す(@codex #488 R1 P2)", () => {
+    const withMedia = renderLpPage(input({ sections: [
+      { heading: "ご相談の例(A)", paragraphs: ["題\n本文"], media: { kind: "figure", figureKind: "sale_flow" } },
+      { heading: "ご相談の例(B)", paragraphs: ["題\n本文"], media: { kind: "asset", image: { publicId: "c".repeat(32), width: 800, height: 600 } } },
+    ] }));
+    expect(withMedia).toContain('<p>本文</p><div class="figure"><div class="flow-box">');
+    expect(withMedia).toMatch(new RegExp(`<div class="case-body"><div class="media"><img class="fig" src="/lp-assets/${"c".repeat(32)}"`));
+  });
   it("ふつうの節は今までどおり", () => {
     expect(h).toContain("<section><h2>ふつうの節</h2><p>x</p></section>");
     expect((h.match(/<section class="case">/g) ?? []).length).toBe(2);
