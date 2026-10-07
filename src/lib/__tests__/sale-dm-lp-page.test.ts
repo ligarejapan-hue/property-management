@@ -30,19 +30,20 @@ describe("renderLpPage", () => {
     expect(html).toContain('name="robots" content="noindex,nofollow"');
     expect(html).not.toMatch(/<link\s|src="http|url\(http|@import/);
   });
-  it("段の順番: ヒーロー→見出し→リード→申込ボタン→本文→よくある質問→会社案内+電話→配信停止", () => {
-    const idx = (s: string) => { const i = html.indexOf(s); expect(i, s).toBeGreaterThan(-1); return i; };
-    const order = [idx(`/lp-assets/${"a".repeat(32)}`), idx("<h1"), idx("売却をご検討の方へ"), idx(LP_CTA_LABEL), idx("売却の進め方"), idx("<details"), idx("株式会社リガーレ"), idx("tel:0312345678"), idx("/u/tok.sig")];
+  it("段の順番: 上部(ロゴ・電話)→ヒーロー→見出し→リード→申込ボタン→本文→よくある質問→会社案内+電話→配信停止", () => {
+    const idx = (s: string, from = 0) => { const i = html.indexOf(s, from); expect(i, s).toBeGreaterThan(-1); return i; };
+    const companyAt = idx('id="contact"');
+    const order = [idx('<header class="top"'), idx(`/lp-assets/${"a".repeat(32)}`), idx("<h1"), idx("売却をご検討の方へ"), idx(LP_CTA_LABEL), idx("売却の進め方"), idx("<details"), companyAt, idx("株式会社リガーレ", companyAt), idx("tel:0312345678", companyAt), idx("/u/tok.sig")];
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
   it("動的文字列は escape される", () => {
     expect(html).toContain("ご所有の戸建のご売却について &lt;b&gt;");
     expect(html).toContain("&amp; 売却");
-    expect(html).not.toContain("<b>");
+    expect(html).not.toContain("について <b>");
   });
-  it("写真は公開口の URL・寸法付き、図は inline SVG、枠なしの節には画像が無い", () => {
+  it("写真は公開口の URL・寸法付き、図は HTML(流れの図)、枠なしの節には画像が無い", () => {
     expect(html).toMatch(new RegExp(`<img[^>]*src="/lp-assets/${"b".repeat(32)}"[^>]*width="1200"[^>]*height="900"`));
-    expect(html).toContain('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"');
+    expect(html).toContain('<div class="figure"><div class="flow-box"><ol class="flow">');
     expect(html).not.toContain("/uploads/");
   });
   it("live ではプレビュー帯が無く、電話タップの script が token 付きで1本だけ", () => {
@@ -80,7 +81,7 @@ describe("renderLpPage", () => {
   it("ヒーローは eager+fetchpriority=high、節の写真は lazy のまま", () => {
     expect(html).toMatch(new RegExp(`<img class="hero"[^>]*loading="eager" fetchpriority="high"`));
     expect(html).not.toMatch(new RegExp(`<img class="hero"[^>]*loading="lazy"`));
-    expect(html).toMatch(new RegExp(`<img class=""[^>]*src="/lp-assets/${"b".repeat(32)}"[^>]*loading="lazy"`));
+    expect(html).toMatch(new RegExp(`<img class="fig"[^>]*src="/lp-assets/${"b".repeat(32)}"[^>]*loading="lazy"`));
   });
   it("phoneTapToken に </script> が含まれても script タグを閉じない(</script>-safe な埋め込み)", () => {
     const h = renderLpPage(input({ phoneTapToken: "</script><img>" }));

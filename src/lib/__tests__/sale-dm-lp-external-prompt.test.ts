@@ -11,6 +11,11 @@ describe("buildLpExternalPrompt", () => {
     expect(p).toContain("A.");
     expect(p).toContain("■");
   });
+  it("□ の行(読み手がタップで選べるチェック札)と ・ の行(箇条書き)の書き方を伝える(2026-10 見本)", () => {
+    const p = buildLpExternalPrompt(OPT);
+    expect(p).toContain("行頭に □");
+    expect(p).toContain("行頭に ・");
+  });
   it("文体4項目を日本語で反映する", () => {
     const p = buildLpExternalPrompt(OPT);
     expect(p).toContain("相続");

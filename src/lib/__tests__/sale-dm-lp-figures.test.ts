@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { FIGURE_KINDS, FIGURE_LABELS, isFigureKind, renderFigureSvg } from "../sale-dm-letter/lp-figures";
 
 describe("renderFigureSvg", () => {
-  it("5種すべてが完結した SVG を返し、日本語の名前を持つ", () => {
-    expect(FIGURE_KINDS.length).toBe(5);
+  it("8種すべてが完結した SVG(管理画面の見本)を返し、日本語の名前を持つ", () => {
+    expect(FIGURE_KINDS.length).toBe(8);
     for (const k of FIGURE_KINDS) {
       const svg = renderFigureSvg(k);
       expect(svg.startsWith("<svg ")).toBe(true);
@@ -80,8 +80,10 @@ describe("renderFigureSvg", () => {
     }
     // 相続の期限: 最後の目盛りだけは右端 632 に end 寄せ(中央寄せのままだと縁で切れる)
     const deadlines = renderFigureSvg("inheritance_deadlines");
-    expect(deadlines).toMatch(/<text x="632"[^>]*text-anchor="end"[^>]*>空き家特例の目安<\/text>/);
-    expect(deadlines).toMatch(/<text x="632"[^>]*text-anchor="end"[^>]*>3年目の年末<\/text>/);
+    expect(deadlines).toMatch(/<text x="632"[^>]*text-anchor="end"[^>]*>空き家特例\(条件あり\)<\/text>/);
+    expect(deadlines).toMatch(/<text x="632"[^>]*text-anchor="end"[^>]*>売却期限<\/text>/);
+    // 事実確認(2026-10-06): 1年ずれて読める短縮は使わない
+    expect(deadlines).not.toContain("3年目の年末");
     expect(deadlines).not.toContain('<circle cx="632"');
     expect(deadlines).toContain('<circle cx="592" cy="180" r="8"');
   });

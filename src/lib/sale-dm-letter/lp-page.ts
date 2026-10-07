@@ -1,12 +1,16 @@
 /**
  * 公開LP(設計 2026-09-08 §2.4)。React を使わない純関数。unsubscribe-page.ts と同じ作り。
- *  - 全ての動的値は escapeHtml。図(renderFigureSvg)だけは自前生成の SVG としてそのまま埋める。
+ *  - 全ての動的値は escapeHtml。図(renderFigureHtml)だけは自前生成の固定 HTML/SVG としてそのまま埋める。
+ *  - 見た目は 2026-10 の見本(発注者承認)どおり。会社固有の固定情報(ロゴ・受付時間・提携先など)は lp-brand.ts。
+ *  - 画像は元の縦横比のまま(height:auto・object-fit:cover や aspect-ratio で切り落とさない=発注者ルール 2026-10-06)。
  *  - CSS は inline・外部読み込みなし。スマホ(〜767px)=1列+画面下の固定バー、PC(768px〜)=中央1列 760px。
- *  - <script> は電話タップ送信の固定文字列1本(live のみ)。token は jsString(JSON.stringify を
+ *  - <script> は電話タップ送信の固定文字列(live のみ)・申込フォーム・チェック札(live のみ)。token は jsString(JSON.stringify を
  *    </script>-safe にしたもの)で埋める。
  */
 import { escapeHtml } from "./templates/index";
-import { renderFigureSvg } from "./lp-figures";
+import { renderFigureHtml } from "./lp-figures";
+import { LP_BRAND, type LpBrandImage } from "./lp-brand";
+import { formatPhoneJp } from "../phone-format-jp";
 import type { LpRenderInput, LpImage, LpFormInput } from "./lp-render-input";
 import { PUBLIC_PAGE_HEADERS } from "./unsubscribe-page";
 import { INQUIRY_LIMITS, HONEYPOT_FIELD, INQUIRY_ERROR_MESSAGES } from "./inquiry-input";
@@ -32,31 +36,117 @@ function jsString(s: string): string {
   return JSON.stringify(s).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
 }
 
+// 2026-10 の見本(発注者承認)の色と書体。外部の書体は CSP(default-src 'none')で読めないため、端末の明朝体を使う。
+const SERIF = "'Hiragino Mincho ProN','Yu Mincho','YuMincho','Noto Serif JP','BIZ UDPMincho',serif";
 const CSS = [
   ":root{color-scheme:light}",
   "*{box-sizing:border-box}",
-  "body{margin:0;background:#f6f7f6;color:#1f2a2d;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Hiragino Kaku Gothic ProN','Yu Gothic UI','Noto Sans JP',sans-serif;font-size:16px;line-height:1.9;-webkit-text-size-adjust:100%}",
+  "body{margin:0;background:#f6f1e7;color:#2b2a26;font-family:-apple-system,BlinkMacSystemFont,'Hiragino Kaku Gothic ProN','Yu Gothic UI','Noto Sans JP',sans-serif;font-size:16px;line-height:1.9;-webkit-text-size-adjust:100%}",
   "main{margin:0 auto;padding:0 0 96px}",
-  "h1{font-size:24px;line-height:1.4;margin:0}",
-  "h2{font-size:19px;line-height:1.45;margin:0 0 8px;padding-left:10px;border-left:4px solid #0e6b5c}",
+  `h1,h2,h3,.dl-when,.flow li::before,.faq .q,.faq .a b,.flow-total{font-family:${SERIF}}`,
+  "h1{font-size:25px;line-height:1.5;margin:0 0 12px;letter-spacing:.02em}",
+  "h2{font-size:21px;line-height:1.55;margin:0 0 12px;letter-spacing:.02em}",
+  "h2::before{content:\"\";display:block;width:28px;height:3px;background:#0e6b5c;border-radius:2px;margin-bottom:10px}",
+  "h3{font-size:18px;margin:4px 0 4px}",
   "p{margin:0 0 12px}",
+  "a{color:#0a5246}",
   ".band{background:#f7ebdd;color:#a85f1b;font-weight:700;text-align:center;padding:8px 12px;font-size:14px}",
-  ".hero{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover;background:#e6ebe9}",
-  ".wrap{padding:20px}",
-  ".lead{color:#4a5b5e;font-size:16px}",
+  // ── 上部(ロゴ・電話) ──
+  ".top{background:#fffdf8;border-bottom:1px solid #ddd3bf}",
+  ".top-in{max-width:760px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px}",
+  ".brand-link{display:block;line-height:0}",
+  ".brand img{display:block;width:150px;max-width:40vw;height:auto}",
+  ".brand small{display:block;margin-top:4px;font-size:11px;color:#5d594f;line-height:1.4}",
+  ".top-tel{text-align:right;font-size:12px;color:#5d594f;line-height:1.4}",
+  ".top-tel a{display:block;font-size:19px;font-weight:700;color:#0e6b5c;text-decoration:none;letter-spacing:.04em;font-variant-numeric:tabular-nums}",
+  // ── ヒーロー(画像は元の縦横比のまま=height:auto・切り落としなし。発注者ルール 2026-10-06) ──
+  ".hero{display:block;width:100%;height:auto;background:#ece4d3}",
+  ".wrap{padding:20px 16px}",
+  ".eyebrow{display:inline-block;font-size:13px;font-weight:700;color:#0e6b5c;background:#e3efe9;border-radius:999px;padding:2px 12px;margin:0 0 10px}",
+  ".lead{color:#5d594f;font-size:16px}",
+  ".promises{list-style:none;margin:14px 0 18px;padding:0;display:flex;flex-wrap:wrap;gap:8px}",
+  ".promises li{background:#fffdf8;border:1px solid #ddd3bf;border-radius:999px;padding:4px 12px 4px 30px;font-size:14px;font-weight:700;position:relative}",
+  ".promises li::before{content:\"\";position:absolute;left:11px;top:50%;width:10px;height:6px;margin-top:-5px;border-left:2.5px solid #0e6b5c;border-bottom:2.5px solid #0e6b5c;transform:rotate(-45deg)}",
+  ".cta-row{display:grid;gap:10px;margin:8px 0}",
   ".cta{display:block;background:#0e6b5c;color:#fff;text-align:center;text-decoration:none;border-radius:10px;padding:14px;font-size:17px;font-weight:700;min-height:44px}",
-  ".cta.secondary{background:#fff;color:#0a5246;border:2px solid #0e6b5c}",
-  "section{margin:26px 0}",
+  ".cta.secondary{background:#fffdf8;color:#0a5246;border:2px solid #0e6b5c}",
+  // ── 本文の節 ──
+  "section{margin:36px 0}",
   ".media{margin:10px 0 14px}",
-  ".media img{display:block;width:100%;height:auto;border-radius:10px;background:#e6ebe9}",
-  ".media svg{display:block;width:100%;height:auto;border-radius:10px;border:1px solid #d6dedb;background:#fff}",
-  "details{border:1px solid #d6dedb;border-radius:10px;padding:10px 14px;margin:8px 0;background:#fff}",
-  "summary{cursor:pointer;font-weight:700;min-height:44px;display:flex;align-items:center}",
-  ".company{background:#fff;border:1px solid #d6dedb;border-radius:12px;padding:16px}",
+  ".media img,img.fig{display:block;width:100%;height:auto;border-radius:12px;background:#ece4d3}",
+  ".figure{margin:12px 0}",
+  ".fig-svg svg{display:block;width:100%;height:auto;border-radius:12px;border:1px solid #ddd3bf;background:#fff}",
+  ".dots{margin:0 0 12px;padding-left:1.3em}",
+  ".dots li{margin:2px 0}",
+  ".small-note{font-size:13px;color:#5d594f;line-height:1.7;margin-top:10px}",
+  // チェック札(□ の行)。押すと緑に。選んだ内容はスクリプトが申込欄へ入れる。
+  ".checks{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:8px}",
+  ".check label{display:grid;grid-template-columns:28px 1fr;gap:12px;align-items:start;background:#fffdf8;border:1.5px solid #ddd3bf;border-radius:12px;padding:12px 14px;cursor:pointer;line-height:1.65;min-height:44px;position:relative}",
+  ".check input{position:absolute;opacity:0;width:1px;height:1px}",
+  ".check .box{width:28px;height:28px;border:2px solid #ddd3bf;border-radius:6px;background:#f6f1e7;display:grid;place-items:center}",
+  ".check .box::after{content:\"\";width:12px;height:7px;border-left:3px solid #fffdf8;border-bottom:3px solid #fffdf8;transform:rotate(-45deg) translate(1px,-1px);opacity:0}",
+  ".check input:checked~.box{background:#0e6b5c;border-color:#0e6b5c}",
+  ".check input:checked~.box::after{opacity:1}",
+  ".check input:focus-visible~.box{outline:3px solid #f6d96b;outline-offset:2px}",
+  ".check label:has(input:checked){border-color:#0e6b5c;background:#e3efe9}",
+  ".check-result{background:#e3efe9;border-radius:12px;padding:14px;margin:0 0 12px}",
+  ".check-msg{font-weight:700;margin:0 0 10px}",
+  // 案内役
+  ".guide{display:grid;grid-template-columns:96px 1fr;gap:14px;align-items:start;background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:16px}",
+  ".guide-fig{margin:0;display:grid;gap:4px;justify-items:center}",
+  ".guide-img{display:block;width:96px;height:auto;border-radius:12px;border:3px solid #e3efe9}",
+  ".guide-fig figcaption{font-size:10px;color:#5d594f;text-align:center;line-height:1.3}",
+  ".guide-name{font-weight:700;color:#0e6b5c;font-size:14px;margin:0 0 4px}",
+  ".guide h2{font-size:18px}",
+  ".guide h2::before{display:none}",
+  // 期限の年表
+  ".deadline{background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:18px 14px 8px}",
+  ".dl-list{list-style:none;margin:0;padding:0}",
+  ".dl-item{display:grid;grid-template-columns:96px 1fr;gap:12px;position:relative;padding-bottom:16px}",
+  ".dl-item::before{content:\"\";position:absolute;left:48px;top:32px;bottom:0;width:2px;background:#ddd3bf}",
+  ".dl-item:last-child::before{display:none}",
+  ".dl-when{align-self:start;background:#ece4d3;border-radius:8px;text-align:center;padding:6px 4px;font-weight:700;font-size:14px;line-height:1.35;position:relative;z-index:1}",
+  ".dl-item.key .dl-when{background:#0e6b5c;color:#fffdf8}",
+  ".dl-what strong{display:block;font-size:16px}",
+  ".dl-item.key .dl-what strong{color:#0e6b5c}",
+  ".dl-what span{display:block;font-size:14px;color:#5d594f;line-height:1.6}",
+  ".dl-what span+span{margin-top:4px;font-size:13px}",
+  // 流れ
+  ".flow{list-style:none;margin:0;padding:0;counter-reset:step;display:grid;gap:10px}",
+  ".flow li{counter-increment:step;display:grid;grid-template-columns:40px 1fr;gap:12px;align-items:start;background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;padding:12px 14px}",
+  ".flow li::before{content:counter(step);width:40px;height:40px;border-radius:50%;background:#e3efe9;color:#0e6b5c;font-weight:700;font-size:18px;display:grid;place-items:center}",
+  ".flow strong{display:block}",
+  ".flow span{display:block;font-size:14px;color:#5d594f;line-height:1.65}",
+  ".flow-total{margin:12px 0 0;font-weight:700;color:#0e6b5c;font-size:17px}",
+  // 売る・貸す・しばらく持つ
+  ".options{display:grid;gap:10px}",
+  ".opt-card{background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:14px;text-align:center}",
+  ".opt-img{display:block;width:100%;max-width:200px;height:auto;margin:0 auto 6px;border-radius:10px}",
+  ".opt-card p{font-size:14px;color:#5d594f;line-height:1.7;margin:0}",
+  // 窓口はひとつ
+  ".network{background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:18px 14px;display:grid;gap:14px;justify-items:center;text-align:center}",
+  ".net-center{background:#0e6b5c;color:#fffdf8;border-radius:999px;padding:8px 18px;font-weight:700}",
+  ".net-line{width:2px;height:18px;background:#0e6b5c;margin:-8px 0}",
+  ".net-group{display:grid;gap:6px;justify-items:center;width:100%}",
+  ".net-label{font-size:13px;font-weight:700;color:#5d594f;margin:0}",
+  ".net-row{display:flex;flex-wrap:wrap;justify-content:center;gap:8px}",
+  ".net-row span{border:1.5px solid #0e6b5c;color:#0a5246;border-radius:10px;padding:5px 12px;font-weight:700;font-size:15px;background:#f6f1e7}",
+  // よくある質問
+  ".faq details{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;margin:8px 0}",
+  ".faq summary{cursor:pointer;list-style:none;display:grid;grid-template-columns:24px 1fr;gap:10px;align-items:start;padding:14px;font-weight:700;line-height:1.6;min-height:44px}",
+  ".faq summary::-webkit-details-marker{display:none}",
+  ".faq .q{color:#0e6b5c;font-size:19px;line-height:1.3}",
+  ".faq .a{display:grid;grid-template-columns:24px 1fr;gap:10px;padding:0 14px 14px}",
+  ".faq .a b{font-size:19px;line-height:1.4}",
+  ".faq .a p{margin:0}",
+  // 会社案内
+  ".company{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;padding:16px}",
+  ".company .co-logo{display:block;width:140px;height:auto;margin-bottom:8px}",
   ".company .name{font-weight:700;font-size:17px}",
-  ".company .contact{color:#4a5b5e;white-space:pre-wrap;word-break:break-all}",
+  ".company .contact{color:#5d594f;white-space:pre-wrap;word-break:break-all}",
+  ".company .hours,.company .co-hp{color:#5d594f;margin:4px 0 0}",
   ".tel{display:block;margin-top:12px}",
-  ".inquiry{background:#fff;border:1px solid #d6dedb;border-radius:12px;padding:16px}",
+  ".inquiry{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;padding:16px}",
   ".inquiry fieldset{border:0;margin:0;padding:0;min-width:0}",
   ".inquiry label{display:block;margin:0 0 14px;font-weight:700}",
   ".inquiry .req,.inquiry .opt{display:inline-block;margin-left:8px;font-size:12px;font-weight:700;border-radius:4px;padding:0 6px;vertical-align:2px}",
@@ -91,8 +181,16 @@ const CSS = [
   "  main{max-width:760px;padding:24px 0 64px}",
   "  .hero{border-radius:14px}",
   "  .wrap{padding:24px 8px}",
-  "  h1{font-size:30px}",
+  "  h1{font-size:32px}",
+  "  h2{font-size:24px}",
   "  .cta{max-width:420px;margin:0 auto}",
+  "  .cta-row{grid-template-columns:1fr 1fr}",
+  "  .cta-row .cta{max-width:none;margin:0}",
+  "  .split{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:center}",
+  "  .split .media{margin:0}",
+  "  .guide{grid-template-columns:132px 1fr;padding:20px}",
+  "  .guide-img{width:132px;height:auto}",
+  "  .options{grid-template-columns:repeat(3,1fr)}",
   "}",
   "@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;transition:none!important}}",
   "html{scroll-behavior:smooth}",
@@ -103,8 +201,49 @@ function img(image: LpImage, cls: string, alt: string, priority = false): string
   return `<img class="${cls}" src="/lp-assets/${escapeHtml(image.publicId)}" width="${image.width}" height="${image.height}" alt="${escapeHtml(alt)}" ${loadAttrs} decoding="async" />`;
 }
 
-function paragraphs(ps: string[]): string {
-  return ps.map((p) => `<p>${escapeHtml(p).replace(/\n/g, "<br />")}</p>`).join("");
+const CHECK_DEFAULT_MSG = "ひとつでも当てはまれば、ご相談いただけます。";
+
+function isLineList(p: string, mark: string): boolean {
+  const lines = p.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  return lines.length > 0 && lines.every((l) => l.startsWith(mark));
+}
+
+/**
+ * 段落を描く(2026-10 見本)。行がすべて「□」で始まる段落=タップで選べるチェック札、
+ * すべて「・」=箇条書き、それ以外=段落。チェック札の下には「相談する」ボタン(ctaHtml)を添える。
+ */
+function paragraphs(ps: string[], ctaHtml = ""): string {
+  return ps.map((p) => {
+    const items = p.split("\n").map((l) => l.trim()).filter((l) => l.length > 0).map((l) => l.slice(1).trim()).filter((t) => t.length > 0);
+    if (isLineList(p, "□")) {
+      return `<ul class="checks">` +
+        items.map((t) => `<li class="check"><label><input type="checkbox" data-check="1" value="${escapeHtml(t)}" /><span class="box" aria-hidden="true"></span><span>${escapeHtml(t)}</span></label></li>`).join("") +
+        `</ul><div class="check-result"><p class="check-msg" data-check-msg="1" aria-live="polite">${CHECK_DEFAULT_MSG}</p>${ctaHtml}</div>`;
+    }
+    if (isLineList(p, "・")) return `<ul class="dots">${items.map((t) => `<li>${escapeHtml(t)}</li>`).join("")}</ul>`;
+    return `<p>${escapeHtml(p).replace(/\n/g, "<br />")}</p>`;
+  }).join("");
+}
+
+/**
+ * チェック札のスクリプト(固定文字列)。選んだ数を知らせ、選んだ項目を申込フォームの「ご要望・ご質問」へ入れる。
+ * 人が書き足した欄は上書きしない(空か、前回この仕組みで入れた文のままのときだけ入れる)。表示は textContent だけ。
+ */
+const CHECKLIST_SCRIPT = [
+  "(function(){",
+  'var bs=document.querySelectorAll("input[data-check]");if(!bs.length)return;',
+  'var msgs=document.querySelectorAll("[data-check-msg]");',
+  'var ta=document.querySelector("form[data-inquiry] textarea[name=message]");',
+  `var MAX=${INQUIRY_LIMITS.message};var last="";`,
+  'function up(){var t=[];for(var i=0;i<bs.length;i++){if(bs[i].checked){t.push("・"+bs[i].value)}}',
+  `var s=t.length?t.length+"つ当てはまりました。この内容のまま、ご相談いただけます。":${jsString(CHECK_DEFAULT_MSG)};for(var k=0;k<msgs.length;k++){msgs[k].textContent=s}`,
+  'if(ta&&(ta.value===""||ta.value===last)){var v=t.join("\\n");if(v.length>MAX){v=v.slice(0,MAX)}ta.value=v;last=v}}',
+  'for(var j=0;j<bs.length;j++){bs[j].addEventListener("change",up)}',
+  "})();",
+].join("");
+
+function formatTel(digits: string): string {
+  return formatPhoneJp(digits).value;
 }
 
 /**
@@ -222,21 +361,53 @@ function formSection(form: LpFormInput): string {
     `</fieldset></form></section>`;
 }
 
+/** 会社固有の静的画像(public/lp-assets/brand/)。元の縦横比の実寸を width/height に持つ。 */
+function brandImg(image: LpBrandImage, cls: string, eager = false): string {
+  return `<img class="${cls}" src="${escapeHtml(image.src)}" width="${image.width}" height="${image.height}" alt="${escapeHtml(image.alt)}" ${eager ? 'loading="eager"' : 'loading="lazy"'} decoding="async" />`;
+}
+
+function renderSection(s: LpRenderInput["sections"][number], cta: string): string {
+  const h2 = `<h2>${escapeHtml(s.heading)}</h2>`;
+  const body = paragraphs(s.paragraphs, cta);
+  if (s.media?.kind === "asset") {
+    // 写真つきの節: PC は写真と文章の2列(スマホは縦に積む)。写真は元の比率のまま。
+    return `<section><div class="split"><div class="media">${img(s.media.image, "fig", s.heading)}</div><div class="sec-body">${h2}${body}</div></div></section>`;
+  }
+  if (s.media?.kind === "figure" && s.media.figureKind === "consult_guide") {
+    // 案内役: イメージイラストの横に、名乗り+この節の見出しと文章。
+    return `<section><div class="guide">${renderFigureHtml("consult_guide")}<div><p class="guide-name">${escapeHtml(LP_BRAND.guideName)}</p>${h2}${body}</div></div></section>`;
+  }
+  const figure = s.media?.kind === "figure" ? `<div class="figure">${renderFigureHtml(s.media.figureKind)}</div>` : "";
+  return `<section>${h2}${body}${figure}</section>`;
+}
+
 export function renderLpPage(input: LpRenderInput): string {
   const ctaTarget = input.form ? INQUIRY_SECTION_ID : CONTACT_ID;
   const cta = `<a class="cta" href="#${ctaTarget}">${escapeHtml(LP_CTA_LABEL)}</a>`;
   const telHref = input.company.phone ? `tel:${escapeHtml(input.company.phone)}` : null;
   const telBtn = telHref ? `<a class="cta secondary tel" href="${telHref}" data-phone-tap="1">電話で相談する</a>` : "";
-  const sections = input.sections.map((s) => {
-    let media = "";
-    if (s.media?.kind === "asset") media = `<div class="media">${img(s.media.image, "", s.heading)}</div>`;
-    else if (s.media?.kind === "figure") media = `<div class="media">${renderFigureSvg(s.media.figureKind)}</div>`;
-    return `<section><h2>${escapeHtml(s.heading)}</h2>${media}${paragraphs(s.paragraphs)}</section>`;
-  }).join("");
-  const faq = input.faq.length === 0 ? "" : `<section><h2>よくある質問</h2>${input.faq.map((f) => `<details><summary>${escapeHtml(f.q)}</summary><p>${escapeHtml(f.a).replace(/\n/g, "<br />")}</p></details>`).join("")}</section>`;
+  const header = `<header class="top"><div class="top-in"><div class="brand">` +
+    `<a class="brand-link" href="${escapeHtml(LP_BRAND.homepageUrl)}" target="_blank" rel="noopener">${brandImg(LP_BRAND.logo, "logo", true)}</a>` +
+    `<small>${escapeHtml(LP_BRAND.tagline)}</small></div>` +
+    (telHref && input.company.phone
+      ? `<div class="top-tel">お電話でのご相談(${escapeHtml(LP_BRAND.phoneHours)})<a href="${telHref}" data-phone-tap="1">${escapeHtml(formatTel(input.company.phone))}</a></div>`
+      : "") +
+    `</div></header>`;
+  const heroCopy = `<p class="eyebrow">${escapeHtml(LP_BRAND.heroEyebrow)}</p><h1>${escapeHtml(input.headline)}</h1>` +
+    (input.lead ? `<p class="lead">${escapeHtml(input.lead)}</p>` : "") +
+    `<ul class="promises">${LP_BRAND.promises.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>` +
+    `<div class="cta-row">${cta}${telHref ? `<a class="cta secondary" href="${telHref}" data-phone-tap="1">電話で相談する</a>` : ""}</div>`;
+  const sections = input.sections.map((s) => renderSection(s, cta)).join("");
+  const hasChecks = input.sections.some((s) => s.paragraphs.some((p) => isLineList(p, "□"))) || input.intro.some((p) => isLineList(p, "□"));
+  const faq = input.faq.length === 0 ? "" : `<section><h2>よくあるご質問</h2><div class="faq">${input.faq.map((f) =>
+    `<details><summary><span class="q">Q</span><span>${escapeHtml(f.q)}</span></summary><div class="a"><b>A</b><p>${escapeHtml(f.a).replace(/\n/g, "<br />")}</p></div></details>`,
+  ).join("")}</div></section>`;
   const company = `<section class="company" id="${CONTACT_ID}">` +
+    brandImg(LP_BRAND.logo, "co-logo") +
     (input.company.name ? `<div class="name">${escapeHtml(input.company.name)}</div>` : "") +
     (input.company.contact ? `<div class="contact">${escapeHtml(input.company.contact)}</div>` : "") +
+    (telHref ? `<p class="hours">受付時間 ${escapeHtml(LP_BRAND.phoneHours)}</p>` : "") +
+    `<p class="co-hp">ホームページ <a href="${escapeHtml(LP_BRAND.homepageUrl)}" target="_blank" rel="noopener">${escapeHtml(LP_BRAND.homepageUrl.replace(/^https:\/\//, "").replace(/\/$/, ""))}</a></p>` +
     `<p style="margin-top:10px">${input.form ? "お電話でのご相談も承ります。" : "無料査定のお申し込み・ご相談は、お電話で承ります。"}</p>${telBtn}</section>`;
   const unsub = input.unsubscribeUrl ? `<p class="unsub">今後このようなお手紙が不要な方は <a href="${escapeHtml(input.unsubscribeUrl)}">こちら(配信停止)</a></p>` : "";
   const band = input.mode === "preview" ? `<div class="band">プレビュー ── この宛先はまだ送付前です。お申し込みは受け付けません</div>` : "";
@@ -252,11 +423,11 @@ export function renderLpPage(input: LpRenderInput): string {
   const submitGuard = input.form && !input.form.disabled
     ? `<script>${INQUIRY_SUBMIT_SCRIPT}</script>`
     : "";
-  return `<!doctype html><html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="robots" content="noindex,nofollow" /><meta name="referrer" content="strict-origin" /><title>${escapeHtml(input.headline)}</title><style>${CSS}</style></head><body>${band}<main>` +
+  // チェック札の数の表示・申込欄への写し(live のみ。preview は script を出さない=見た目だけ CSS で切り替わる)。
+  const checklistScript = input.mode === "live" && hasChecks ? `<script>${CHECKLIST_SCRIPT}</script>` : "";
+  return `<!doctype html><html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="robots" content="noindex,nofollow" /><meta name="referrer" content="strict-origin" /><title>${escapeHtml(input.headline)}</title><style>${CSS}</style></head><body>${band}${header}<main>` +
     (input.hero ? img(input.hero, "hero", "", true) : "") +
-    `<div class="wrap"><h1>${escapeHtml(input.headline)}</h1>` +
-    (input.lead ? `<p class="lead">${escapeHtml(input.lead)}</p>` : "") +
-    `<div style="margin:16px 0 8px">${cta}</div>` +
-    paragraphs(input.intro) + sections + faq + (input.form ? formSection(input.form) : "") + company + unsub +
-    `</div></main>${bar}${script}${submitGuard}</body></html>`;
+    `<div class="wrap">${heroCopy}` +
+    paragraphs(input.intro, cta) + sections + faq + (input.form ? formSection(input.form) : "") + company + unsub +
+    `</div></main>${bar}${script}${submitGuard}${checklistScript}</body></html>`;
 }
