@@ -22,6 +22,8 @@ const STATE_KEY = "main";
 const CLEANUP_IDS_MAX = 100;
 const CLEANUP_IDS_TTL_MS = 24 * 60 * 60 * 1000;
 const APP_TAG = "pm";
+// 通知に出す絵(ホーム画面のアイコンと同じ自社ロゴ)。⚠/icons/ はログイン前にも読める(src/proxy.ts で認証を免除)。
+const NOTIFY_ICON = "/icons/icon-192.png";
 
 let queue = Promise.resolve();
 function enqueue(task) {
@@ -189,6 +191,7 @@ self.addEventListener("message", (event) => {
         await self.registration.showNotification(String(data.title || ""), {
           body: String(data.body || ""),
           tag,
+          icon: NOTIFY_ICON,
           data: { app: APP_TAG, gen: state.gen, url: safePath(data.url) },
         });
         // 表示のあとで世代を読み直し、変わっていれば(追い越された後片付け)すぐ閉じる。
@@ -289,6 +292,7 @@ self.addEventListener("push", (event) => {
           body: GENERIC_BODY,
           tag: "pm-push-generic",
           data: { app: APP_TAG, gen: state.gen, url: "/home" },
+          icon: NOTIFY_ICON,
         });
         return;
       }
@@ -296,6 +300,7 @@ self.addEventListener("push", (event) => {
       await self.registration.showNotification(String(payload.title || GENERIC_TITLE).slice(0, 80), {
         body: String(payload.body || "").slice(0, 200),
         tag,
+        icon: NOTIFY_ICON,
         data: { app: APP_TAG, gen: state.gen, url: safePath(payload.url), b: binding },
       });
       const after = await readBinding();
@@ -311,6 +316,7 @@ self.addEventListener("push", (event) => {
         body: GENERIC_BODY,
         tag: "pm-push-generic",
         data: { app: APP_TAG, gen: -1, url: "/home" },
+        icon: NOTIFY_ICON,
       }),
     ),
   );
