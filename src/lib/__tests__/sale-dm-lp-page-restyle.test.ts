@@ -131,3 +131,37 @@ describe("公開LPの新しい作り(2026-10 見本)", () => {
     expect(html).toContain("Hiragino Mincho ProN");
   });
 });
+
+// 発注者要望(2026-10-07): 実例は「押すと広がる」形に。見出しが「ご相談の例」「実例」で始まる節が対象。
+describe("ご相談の例(実例)は押すと広がる", () => {
+  const caseInput = input({ sections: [
+    { heading: "ご相談の例(世田谷区・戸建て・築35年)", paragraphs: ["権利書も見つからない状態から売却\n相続人であるお子様たちは…", "二段落目。"], media: null },
+    { heading: "実例:東京都・マンション", paragraphs: ["一行だけの本文。"], media: null },
+    { heading: "ふつうの節", paragraphs: ["x"], media: null },
+  ] });
+  const h = renderLpPage(caseInput);
+
+  it("見出しの()の中が札、本文の1行目が題、残りは開くと読める", () => {
+    expect(h).toContain('<section class="case"><details><summary><span class="case-tag">ご相談の例|世田谷区・戸建て・築35年</span><strong>権利書も見つからない状態から売却</strong><span class="case-more" aria-hidden="true">続きを読む</span></summary><div class="case-body"><p>相続人であるお子様たちは…</p><p>二段落目。</p></div></details></section>');
+  });
+  it("1行目しか無い本文は、見出しを題にして本文を中に入れる", () => {
+    expect(h).toContain('<span class="case-tag">実例|東京都・マンション</span><strong>実例:東京都・マンション</strong>');
+    expect(h).toContain('<div class="case-body"><p>一行だけの本文。</p></div>');
+  });
+  it("ふつうの節は今までどおり", () => {
+    expect(h).toContain("<section><h2>ふつうの節</h2><p>x</p></section>");
+    expect((h.match(/<section class="case">/g) ?? []).length).toBe(2);
+  });
+  it("続く実例は1つの枠(.cases)にまとめる=PC では左右2列", () => {
+    expect(h).toContain('<h2 class="cases-head">これまでのご相談から</h2><div class="cases"><section class="case">');
+    expect(h).toContain('</details></section></div><section><h2>ふつうの節</h2>');
+    expect(h).toMatch(/.cases{grid-template-columns:1fr 1fr/);
+  });
+  it("売る・貸す・持ち続けるの札はスマホでも横に3つ並ぶ", () => {
+    expect(h).toContain(".options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))");
+  });
+  it("続く実例の先頭にだけ「これまでのご相談から」の見出しを1つ置く", () => {
+    expect(h.split('<h2 class="cases-head">これまでのご相談から</h2>').length - 1).toBe(1);
+    expect(h.indexOf("cases-head")).toBeLessThan(h.indexOf("<section class=\"case\">"));
+  });
+});

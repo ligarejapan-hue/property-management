@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { FIGURE_KINDS, renderFigureHtml, renderFigureSvg } from "../sale-dm-letter/lp-figures";
+import { FIGURE_KINDS, renderFigureHtml, renderFigureSvg, partnerNetworkNodes, NETWORK_VIEW } from "../sale-dm-letter/lp-figures";
 import { LP_BRAND } from "../sale-dm-letter/lp-brand";
 
 // 2026-10 の見本(発注者承認)どおりの HTML 版の図。公開LPはこちらを使う(SVG は管理画面の見本)。
@@ -45,10 +45,23 @@ describe("renderFigureHtml", () => {
     }
   });
 
-  it("窓口はひとつ: 提携先(専門家4・業者3)を全部出す", () => {
+  it("窓口はひとつ: 真ん中のリガーレジャパンから提携先7つへ線、提携先は円周に並ぶ(発注者要望 2026-10-07)", () => {
     const h = renderFigureHtml("partner_network");
-    for (const p of [...LP_BRAND.partners.experts, ...LP_BRAND.partners.vendors]) expect(h).toContain(`<span>${p}</span>`);
-    expect(h).toContain("リガーレジャパン");
+    for (const p of [...LP_BRAND.partners.experts, ...LP_BRAND.partners.vendors]) expect(h).toContain(`>${p}</text>`);
+    expect(h).toContain(">リガーレ</text>");
+    expect((h.match(/<line /g) ?? []).length).toBe(7);
+    const nodes = partnerNetworkNodes();
+    expect(nodes.length).toBe(7);
+    // 円周上(中心からの距離がほぼ同じ)
+    const d = nodes.map((n) => Math.hypot(n.x - 200, n.y - 200));
+    for (const v of d) expect(Math.abs(v - d[0])).toBeLessThan(2);
+    // 札が図の外へはみ出さない
+    for (const n of nodes) {
+      expect(n.x - n.w / 2, n.label).toBeGreaterThanOrEqual(4);
+      expect(n.x + n.w / 2, n.label).toBeLessThanOrEqual(NETWORK_VIEW - 4);
+      expect(n.y - 18).toBeGreaterThanOrEqual(4);
+      expect(n.y + 18).toBeLessThanOrEqual(NETWORK_VIEW - 4);
+    }
   });
 
   it("案内役: イメージイラストと明記する", () => {

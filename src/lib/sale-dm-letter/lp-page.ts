@@ -119,18 +119,18 @@ const CSS = [
   ".flow span{display:block;font-size:14px;color:#5d594f;line-height:1.65}",
   ".flow-total{margin:12px 0 0;font-weight:700;color:#0e6b5c;font-size:17px}",
   // 売る・貸す・しばらく持つ
-  ".options{display:grid;gap:10px}",
-  ".opt-card{background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:14px;text-align:center}",
+  ".options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}",
+  ".opt-card{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;padding:8px;text-align:center}",
+  ".opt-card h3{font-size:16px}",
   ".opt-img{display:block;width:100%;max-width:200px;height:auto;margin:0 auto 6px;border-radius:10px}",
-  ".opt-card p{font-size:14px;color:#5d594f;line-height:1.7;margin:0}",
+  ".opt-card p{font-size:12px;color:#5d594f;line-height:1.6;margin:0;text-align:left}",
   // 窓口はひとつ
-  ".network{background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:18px 14px;display:grid;gap:14px;justify-items:center;text-align:center}",
-  ".net-center{background:#0e6b5c;color:#fffdf8;border-radius:999px;padding:8px 18px;font-weight:700}",
-  ".net-line{width:2px;height:18px;background:#0e6b5c;margin:-8px 0}",
-  ".net-group{display:grid;gap:6px;justify-items:center;width:100%}",
-  ".net-label{font-size:13px;font-weight:700;color:#5d594f;margin:0}",
-  ".net-row{display:flex;flex-wrap:wrap;justify-content:center;gap:8px}",
-  ".net-row span{border:1.5px solid #0e6b5c;color:#0a5246;border-radius:10px;padding:5px 12px;font-weight:700;font-size:15px;background:#f6f1e7}",
+  ".network{background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:14px;display:grid;gap:8px;justify-items:center;text-align:center}",
+  ".net-svg{display:block;width:100%;max-width:420px;height:auto}",
+  ".net-legend{display:flex;gap:16px;justify-content:center;font-size:13px;font-weight:700;color:#5d594f;margin:0}",
+  ".net-legend span::before{content:\"\";display:inline-block;width:14px;height:14px;border:1.5px solid #0e6b5c;border-radius:7px;margin-right:6px;vertical-align:-2px}",
+  ".lg-expert::before{background:#e3efe9}",
+  ".lg-vendor::before{background:#fffdf8}",
   // よくある質問
   ".faq details{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;margin:8px 0}",
   ".faq summary{cursor:pointer;list-style:none;display:grid;grid-template-columns:24px 1fr;gap:10px;align-items:start;padding:14px;font-weight:700;line-height:1.6;min-height:44px}",
@@ -139,6 +139,19 @@ const CSS = [
   ".faq .a{display:grid;grid-template-columns:24px 1fr;gap:10px;padding:0 14px 14px}",
   ".faq .a b{font-size:19px;line-height:1.4}",
   ".faq .a p{margin:0}",
+  // ご相談の例(押すと広がる札)。続く札どうしは詰めて並べる。
+  ".cases{display:grid;gap:12px;margin:0 0 36px}",
+  "section.case{margin:0}",
+  ".cases-head{margin:36px 0 4px}",
+  ".case details{background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px}",
+  ".case summary{cursor:pointer;list-style:none;display:grid;gap:4px;padding:16px;min-height:44px}",
+  ".case summary::-webkit-details-marker{display:none}",
+  ".case-tag{justify-self:start;font-size:12px;font-weight:700;color:#0e6b5c;background:#e3efe9;border-radius:999px;padding:1px 10px}",
+  `.case summary strong{font-family:${SERIF};font-size:18px;line-height:1.55}`,
+  ".case-more{justify-self:start;font-size:14px;font-weight:700;color:#0a5246}",
+  ".case-more::after{content:\" ▾\"}",
+  ".case details[open] .case-more{display:none}",
+  ".case-body{padding:0 16px 8px;border-top:1px dashed #ddd3bf;padding-top:12px;color:#3d3a33}",
   // 会社案内
   ".company{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;padding:16px}",
   ".company .co-logo{display:block;width:140px;height:auto;margin-bottom:8px}",
@@ -190,7 +203,11 @@ const CSS = [
   "  .split .media{margin:0}",
   "  .guide{grid-template-columns:132px 1fr;padding:20px}",
   "  .guide-img{width:132px;height:auto}",
-  "  .options{grid-template-columns:repeat(3,1fr)}",
+  "  .options{gap:12px}",
+  "  .opt-card{padding:14px}",
+  "  .opt-card h3{font-size:18px}",
+  "  .opt-card p{font-size:14px;line-height:1.7}",
+  "  .cases{grid-template-columns:1fr 1fr;align-items:start}",
   "}",
   "@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;transition:none!important}}",
   "html{scroll-behavior:smooth}",
@@ -366,7 +383,30 @@ function brandImg(image: LpBrandImage, cls: string, eager = false): string {
   return `<img class="${cls}" src="${escapeHtml(image.src)}" width="${image.width}" height="${image.height}" alt="${escapeHtml(image.alt)}" ${eager ? 'loading="eager"' : 'loading="lazy"'} decoding="async" />`;
 }
 
+/** 見出しがこの言葉で始まる節は「ご相談の例(実例)」=押すと広がる札で描く(発注者要望 2026-10-07)。 */
+const CASE_PREFIXES = ["ご相談の例", "実例"] as const;
+
+/**
+ * 実例の札。見出しの残り(「(世田谷区・戸建て・築35年)」など)を小さな札に、
+ * 本文の最初の段落が2行以上ならその1行目を題に、残りを開いたときの本文にする。
+ * 1行目しか無いときは見出しを題にして、本文はすべて中に入れる。
+ */
+function renderCaseSection(s: LpRenderInput["sections"][number], prefix: string, cta: string): string {
+  const rest = s.heading.slice(prefix.length).replace(/^[\s:：・|｜（(]+|[\s）)]+$/g, "");
+  const tag = rest ? `${prefix}|${rest}` : prefix;
+  const [first = "", ...others] = s.paragraphs;
+  const firstLines = first.split("\n");
+  const hasTitleLine = firstLines.length > 1 && firstLines[0].trim().length > 0;
+  const title = hasTitleLine ? firstLines[0].trim() : s.heading;
+  const bodyParas = hasTitleLine ? [firstLines.slice(1).join("\n"), ...others] : s.paragraphs;
+  const media = s.media?.kind === "asset" ? `<div class="media">${img(s.media.image, "fig", s.heading)}</div>` : "";
+  return `<section class="case"><details><summary><span class="case-tag">${escapeHtml(tag)}</span><strong>${escapeHtml(title)}</strong>` +
+    `<span class="case-more" aria-hidden="true">続きを読む</span></summary><div class="case-body">${media}${paragraphs(bodyParas, cta)}</div></details></section>`;
+}
+
 function renderSection(s: LpRenderInput["sections"][number], cta: string): string {
+  const casePrefix = CASE_PREFIXES.find((p) => s.heading.startsWith(p));
+  if (casePrefix) return renderCaseSection(s, casePrefix, cta);
   const h2 = `<h2>${escapeHtml(s.heading)}</h2>`;
   const body = paragraphs(s.paragraphs, cta);
   if (s.media?.kind === "asset") {
@@ -397,7 +437,15 @@ export function renderLpPage(input: LpRenderInput): string {
     (input.lead ? `<p class="lead">${escapeHtml(input.lead)}</p>` : "") +
     `<ul class="promises">${LP_BRAND.promises.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>` +
     `<div class="cta-row">${cta}${telHref ? `<a class="cta secondary" href="${telHref}" data-phone-tap="1">電話で相談する</a>` : ""}</div>`;
-  const sections = input.sections.map((s) => renderSection(s, cta)).join("");
+  // 実例の札が続く並びは1つの枠(.cases=PC では左右2列)にまとめ、先頭にまとめの見出しを1つ置く。
+  const isCase = (h: string) => CASE_PREFIXES.some((p) => h.startsWith(p));
+  const sections = input.sections.map((s, i) => {
+    const html = renderSection(s, cta);
+    if (!isCase(s.heading)) return html;
+    const first = !(i > 0 && isCase(input.sections[i - 1].heading));
+    const last = !(i + 1 < input.sections.length && isCase(input.sections[i + 1].heading));
+    return (first ? `<h2 class="cases-head">これまでのご相談から</h2><div class="cases">` : "") + html + (last ? `</div>` : "");
+  }).join("");
   const hasChecks = input.sections.some((s) => s.paragraphs.some((p) => isLineList(p, "□"))) || input.intro.some((p) => isLineList(p, "□"));
   const faq = input.faq.length === 0 ? "" : `<section><h2>よくあるご質問</h2><div class="faq">${input.faq.map((f) =>
     `<details><summary><span class="q">Q</span><span>${escapeHtml(f.q)}</span></summary><div class="a"><b>A</b><p>${escapeHtml(f.a).replace(/\n/g, "<br />")}</p></div></details>`,

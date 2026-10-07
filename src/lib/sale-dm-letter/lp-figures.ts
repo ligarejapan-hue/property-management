@@ -224,6 +224,42 @@ function brandImg(image: LpBrandImage, cls: string): string {
   return `<img class="${cls}" src="${esc(image.src)}" width="${image.width}" height="${image.height}" alt="${esc(image.alt)}" loading="lazy" decoding="async" />`;
 }
 
+/**
+ * 「窓口はひとつ」の図(発注者要望 2026-10-07): リガーレジャパンを真ん中の円に、提携先7つを
+ * その周りの円周に等間隔で並べ、真ん中から各提携先へ線を引く。専門家=緑の札・業者=生成りの札。
+ * viewBox 400x400(画面幅に合わせて縮む)。札の幅は文字数から決め、左右の端からはみ出さない。
+ */
+export const NETWORK_VIEW = 400;
+const NET_C = 200;
+const NET_R = 138;
+const NET_CENTER_R = 64;
+const NET_FONT = 16;
+export function partnerNetworkNodes(): Array<{ label: string; kind: "expert" | "vendor"; x: number; y: number; w: number }> {
+  const all = [
+    ...LP_BRAND.partners.experts.map((label) => ({ label, kind: "expert" as const })),
+    ...LP_BRAND.partners.vendors.map((label) => ({ label, kind: "vendor" as const })),
+  ];
+  return all.map((p, i) => {
+    const a = (-90 + (360 / all.length) * i) * (Math.PI / 180);
+    return { ...p, x: Math.round(NET_C + NET_R * Math.cos(a)), y: Math.round(NET_C + NET_R * Math.sin(a)), w: p.label.length * NET_FONT + 20 };
+  });
+}
+function partnerRadialSvg(): string {
+  const nodes = partnerNetworkNodes();
+  const lines = nodes.map((n) => `<line x1="${NET_C}" y1="${NET_C}" x2="${n.x}" y2="${n.y}" stroke="#0e6b5c" stroke-width="2"/>`).join("");
+  const pills = nodes.map((n) => {
+    const fill = n.kind === "expert" ? "#e3efe9" : "#fffdf8";
+    return `<rect x="${n.x - n.w / 2}" y="${n.y - 18}" width="${n.w}" height="36" rx="18" fill="${fill}" stroke="#0e6b5c" stroke-width="1.5"/>` +
+      `<text x="${n.x}" y="${n.y + 6}" ${FONT} font-size="${NET_FONT}" font-weight="700" fill="#0a5246" text-anchor="middle">${esc(n.label)}</text>`;
+  }).join("");
+  const center = `<circle cx="${NET_C}" cy="${NET_C}" r="${NET_CENTER_R}" fill="#0e6b5c"/>` +
+    `<text x="${NET_C}" y="${NET_C - 6}" ${FONT} font-size="17" font-weight="700" fill="#fffdf8" text-anchor="middle">リガーレ</text>` +
+    `<text x="${NET_C}" y="${NET_C + 16}" ${FONT} font-size="17" font-weight="700" fill="#fffdf8" text-anchor="middle">ジャパン</text>` +
+    `<text x="${NET_C}" y="${NET_C + 36}" ${FONT} font-size="11" fill="#e3efe9" text-anchor="middle">ご相談窓口</text>`;
+  const label = `リガーレジャパンを中心に、${nodes.map((n) => n.label).join("・")}とつながっています`;
+  return `<svg class="net-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${NETWORK_VIEW} ${NETWORK_VIEW}" width="${NETWORK_VIEW}" height="${NETWORK_VIEW}" role="img" aria-label="${esc(label)}">${lines}${center}${pills}</svg>`;
+}
+
 /** 公開LPに埋める図の HTML。consult_guide は節の本文と組むため lp-page.ts 側で並べる(ここは絵の部分だけ)。 */
 export function renderFigureHtml(kind: FigureKind): string {
   switch (kind) {
@@ -243,9 +279,8 @@ export function renderFigureHtml(kind: FigureKind): string {
         LP_BRAND.options.map((o) => `<div class="opt-card">${brandImg(o.image, "opt-img")}<h3>${esc(o.title)}</h3><p>${esc(o.text)}</p></div>`).join("") +
         `</div>`;
     case "partner_network":
-      return `<div class="network"><span class="net-center">${esc("リガーレジャパン(ご相談窓口)")}</span><span class="net-line" aria-hidden="true"></span>` +
-        `<div class="net-group"><p class="net-label">提携の専門家</p><div class="net-row">${LP_BRAND.partners.experts.map((p) => `<span>${esc(p)}</span>`).join("")}</div></div>` +
-        `<div class="net-group"><p class="net-label">提携の業者</p><div class="net-row">${LP_BRAND.partners.vendors.map((p) => `<span>${esc(p)}</span>`).join("")}</div></div>` +
+      return `<div class="network">${partnerRadialSvg()}` +
+        `<p class="net-legend"><span class="lg-expert">提携の専門家</span><span class="lg-vendor">提携の業者</span></p>` +
         `<p class="small-note">必要なときに、提携先へ当社からおつなぎします。</p></div>`;
     case "consult_guide":
       return `<figure class="guide-fig">${brandImg(LP_BRAND.guide, "guide-img")}<figcaption>イメージ<br />イラスト</figcaption></figure>`;
