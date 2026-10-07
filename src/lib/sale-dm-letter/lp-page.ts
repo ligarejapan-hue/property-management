@@ -446,7 +446,9 @@ export function renderLpPage(input: LpRenderInput): string {
     const last = !(i + 1 < input.sections.length && isCase(input.sections[i + 1].heading));
     return (first ? `<h2 class="cases-head">これまでのご相談から</h2><div class="cases">` : "") + html + (last ? `</div>` : "");
   }).join("");
-  const hasChecks = input.sections.some((s) => s.paragraphs.some((p) => isLineList(p, "□"))) || input.intro.some((p) => isLineList(p, "□"));
+  const introHtml = paragraphs(input.intro, cta);
+  // チェック札を実際に描いたかで判定する(元の段落で判定すると、実例の題を切り分けた後にできた札を見落とす=@codex #488 R4 P2)。
+  const hasChecks = /data-check="1"/.test(introHtml + sections);
   const faq = input.faq.length === 0 ? "" : `<section><h2>よくあるご質問</h2><div class="faq">${input.faq.map((f) =>
     `<details><summary><span class="q">Q</span><span>${escapeHtml(f.q)}</span></summary><div class="a"><b>A</b><p>${escapeHtml(f.a).replace(/\n/g, "<br />")}</p></div></details>`,
   ).join("")}</div></section>`;
@@ -476,6 +478,6 @@ export function renderLpPage(input: LpRenderInput): string {
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /><meta name="robots" content="noindex,nofollow" /><meta name="referrer" content="strict-origin" /><title>${escapeHtml(input.headline)}</title><style>${CSS}</style></head><body>${band}${header}<main>` +
     (input.hero ? img(input.hero, "hero", "", true) : "") +
     `<div class="wrap">${heroCopy}` +
-    paragraphs(input.intro, cta) + sections + faq + (input.form ? formSection(input.form) : "") + company + unsub +
+    introHtml + sections + faq + (input.form ? formSection(input.form) : "") + company + unsub +
     `</div></main>${bar}${script}${submitGuard}${checklistScript}</body></html>`;
 }

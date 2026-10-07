@@ -164,6 +164,14 @@ describe("ご相談の例(実例)は押すと広がる", () => {
     expect(sep).toContain('<div class="case-body"><p>本文の段落。</p></div>');
     expect(sep).not.toContain("<p>空行の前の題</p>");
   });
+  it("実例の題のすぐ下の □ 行もチェック札になり、スクリプトも出る(@codex #488 R4 P2)", () => {
+    const c = renderLpPage(input({ sections: [
+      { heading: "ご相談の例(D)", paragraphs: ["題\n□項目1\n□項目2"], media: null },
+    ] }));
+    expect(c).toContain('<strong>題</strong>');
+    expect((c.match(/data-check="1"/g) ?? []).length).toBe(2);
+    expect(c).toContain('querySelectorAll("input[data-check]")');
+  });
   it("ふつうの節は今までどおり", () => {
     expect(h).toContain("<section><h2>ふつうの節</h2><p>x</p></section>");
     expect((h.match(/<section class="case">/g) ?? []).length).toBe(2);
