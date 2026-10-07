@@ -172,6 +172,22 @@ describe("ご相談の例(実例)は押すと広がる", () => {
     expect((c.match(/data-check="1"/g) ?? []).length).toBe(2);
     expect(c).toContain('querySelectorAll("input[data-check]")');
   });
+  it("実例の節に案内役を付けたら、名乗り+本文と組んだ形のまま札の中に置く(@codex #488 R5 P2)", () => {
+    const g = renderLpPage(input({ sections: [
+      { heading: "ご相談の例(E)", paragraphs: ["題\n本文。"], media: { kind: "figure", figureKind: "consult_guide" } },
+    ] }));
+    expect(g).toMatch(/<div class="case-body"><div class="guide"><figure class="guide-fig">[\s\S]*?<p class="guide-name">リガーレジャパン ご相談窓口より<\/p><p>本文。<\/p><\/div><\/div><\/div>/);
+    expect(g).not.toContain('<div class="figure"><figure class="guide-fig">');
+  });
+  it("「実例集のご紹介」のような見出しは札にしない(言葉の直後が区切り・かっこ・数字のときだけ)", () => {
+    const k = renderLpPage(input({ sections: [
+      { heading: "実例集のご紹介", paragraphs: ["x"], media: null },
+      { heading: "ご相談の例1", paragraphs: ["題\n本文"], media: null },
+      { heading: "実例", paragraphs: ["題\n本文"], media: null },
+    ] }));
+    expect(k).toContain("<section><h2>実例集のご紹介</h2>");
+    expect((k.match(/<section class="case">/g) ?? []).length).toBe(2);
+  });
   it("ふつうの節は今までどおり", () => {
     expect(h).toContain("<section><h2>ふつうの節</h2><p>x</p></section>");
     expect((h.match(/<section class="case">/g) ?? []).length).toBe(2);

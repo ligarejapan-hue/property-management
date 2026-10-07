@@ -381,6 +381,11 @@ function brandImg(image: LpBrandImage, cls: string, eager = false): string {
 
 /** 見出しがこの言葉で始まる節は「ご相談の例(実例)」=押すと広がる札で描く(発注者要望 2026-10-07)。 */
 const CASE_PREFIXES = ["ご相談の例", "実例"] as const;
+/** 見出しが実例の札の対象なら、その言葉を返す。言葉の直後は「終わり・区切り記号・かっこ・数字」に限る
+ *  (「実例集のご紹介」のような、ふつうの節を誤って札にしない)。 */
+function casePrefixOf(heading: string): string | undefined {
+  return CASE_PREFIXES.find((p) => heading.startsWith(p) && /^($|[\s:：・|｜()（）「」【】〈〉\-－–—0-9０-９①-⑳])/.test(heading.slice(p.length)));
+}
 
 /**
  * 実例の札。見出しの残り(「(世田谷区・戸建て・築35年)」など)を小さな札に、
@@ -398,14 +403,20 @@ function renderCaseSection(s: LpRenderInput["sections"][number], prefix: string,
   const restOfFirst = firstLines.slice(1).join("\n");
   const bodyParas = hasTitleLine ? [...(restOfFirst.trim() ? [restOfFirst] : []), ...others] : s.paragraphs;
   // 写真も図も落とさない(@codex #488 R1 P2: 管理画面ではどの節にも図を付けられる)。写真は本文の前、図は本文の後。
+  // 案内役は絵だけでなく、名乗り+本文と組んだ形のまま札の中に置く(@codex #488 R5 P2)。
+  const isGuide = s.media?.kind === "figure" && s.media.figureKind === "consult_guide";
   const photo = s.media?.kind === "asset" ? `<div class="media">${img(s.media.image, "fig", s.heading)}</div>` : "";
-  const figure = s.media?.kind === "figure" ? `<div class="figure">${renderFigureHtml(s.media.figureKind)}</div>` : "";
+  const figure = s.media?.kind === "figure" && !isGuide ? `<div class="figure">${renderFigureHtml(s.media.figureKind)}</div>` : "";
+  const text = paragraphs(bodyParas, cta);
+  const inner = isGuide
+    ? `<div class="guide">${renderFigureHtml("consult_guide")}<div><p class="guide-name">${escapeHtml(LP_BRAND.guideName)}</p>${text}</div></div>`
+    : `${photo}${text}${figure}`;
   return `<section class="case"><details><summary><span class="case-tag">${escapeHtml(tag)}</span><strong>${escapeHtml(title)}</strong>` +
-    `<span class="case-more" aria-hidden="true">続きを読む</span></summary><div class="case-body">${photo}${paragraphs(bodyParas, cta)}${figure}</div></details></section>`;
+    `<span class="case-more" aria-hidden="true">続きを読む</span></summary><div class="case-body">${inner}</div></details></section>`;
 }
 
 function renderSection(s: LpRenderInput["sections"][number], cta: string): string {
-  const casePrefix = CASE_PREFIXES.find((p) => s.heading.startsWith(p));
+  const casePrefix = casePrefixOf(s.heading);
   if (casePrefix) return renderCaseSection(s, casePrefix, cta);
   const h2 = `<h2>${escapeHtml(s.heading)}</h2>`;
   const body = paragraphs(s.paragraphs, cta);
@@ -438,7 +449,7 @@ export function renderLpPage(input: LpRenderInput): string {
     `<ul class="promises">${LP_BRAND.promises.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}</ul>` +
     `<div class="cta-row">${cta}${telHref ? `<a class="cta secondary" href="${telHref}" data-phone-tap="1">電話で相談する</a>` : ""}</div>`;
   // 実例の札が続く並びは1つの枠(.cases=PC では左右2列)にまとめ、先頭にまとめの見出しを1つ置く。
-  const isCase = (h: string) => CASE_PREFIXES.some((p) => h.startsWith(p));
+  const isCase = (h: string) => casePrefixOf(h) !== undefined;
   const sections = input.sections.map((s, i) => {
     const html = renderSection(s, cta);
     if (!isCase(s.heading)) return html;
