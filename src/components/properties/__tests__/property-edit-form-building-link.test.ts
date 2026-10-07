@@ -100,3 +100,16 @@ describe("物件詳細(properties/[id]/page.tsx)", () => {
     expect(tabsAt).toBeGreaterThan(noticeAt);
   });
 });
+
+describe("編集の画面: 種別を区分マンション以外へ変えると棟から外れる確認", () => {
+  it("★区分でないときに、元の種別と新しい種別で確かめ、キャンセルなら保存しない", () => {
+    const m =
+      /typeChangeUnlinkConfirmMessage\(\s*property\.building \?\? null,\s*property\.propertyType,\s*values\.propertyType \?\? property\.propertyType,?\s*\)/.exec(form);
+    expect(m).not.toBeNull();
+    const at = m!.index;
+    const savingAt = form.indexOf("setSaving(true);");
+    expect(at).toBeGreaterThan(form.indexOf("if (isUnit) {"));
+    expect(savingAt).toBeGreaterThan(at);
+    expect(form).toMatch(/if \(typeMsg && !window\.confirm\(typeMsg\)\) return;/);
+  });
+});

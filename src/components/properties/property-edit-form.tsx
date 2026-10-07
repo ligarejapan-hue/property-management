@@ -11,7 +11,7 @@ import {
 import { AddressLookupControls } from "@/components/address/address-lookup-controls";
 import BuildingNameCombobox from "@/components/buildings/building-name-combobox";
 import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
-import { relinkConfirmMessage } from "@/lib/building-link/relink";
+import { relinkConfirmMessage, typeChangeUnlinkConfirmMessage } from "@/lib/building-link/relink";
 import { areaChanged } from "@/lib/building-link/combobox-model";
 // ⚠apply.ts は prisma を読むサーバー側のファイル。型だけを読む(画面の束に prisma を入れない)。
 import type { BuildingLinkOutcome } from "@/lib/building-link/apply";
@@ -551,6 +551,14 @@ export default function PropertyEditForm({
         ? relinkConfirmMessage(property.building ?? null, values.buildingName ?? "", buildingChoice)
         : null;
       if (msg && !window.confirm(msg)) return;
+    } else {
+      // 棟につながっている物件の種別を区分マンション以外へ変えたら、棟から外れることを確かめる。
+      const typeMsg = typeChangeUnlinkConfirmMessage(
+        property.building ?? null,
+        property.propertyType,
+        values.propertyType ?? property.propertyType,
+      );
+      if (typeMsg && !window.confirm(typeMsg)) return;
     }
     setSaving(true);
     setError(null);
