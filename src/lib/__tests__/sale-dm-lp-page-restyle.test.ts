@@ -156,6 +156,14 @@ describe("ご相談の例(実例)は押すと広がる", () => {
     expect(withMedia).toContain('<p>本文</p><div class="figure"><div class="flow-box">');
     expect(withMedia).toMatch(new RegExp(`<div class="case-body"><div class="media"><img class="fig" src="/lp-assets/${"c".repeat(32)}"`));
   });
+  it("題のあとに空行があっても、1行目を題にする(@codex #488 R2 P2)", () => {
+    const sep = renderLpPage(input({ sections: [
+      { heading: "ご相談の例(C)", paragraphs: ["空行の前の題", "本文の段落。"], media: null },
+    ] }));
+    expect(sep).toContain('<strong>空行の前の題</strong>');
+    expect(sep).toContain('<div class="case-body"><p>本文の段落。</p></div>');
+    expect(sep).not.toContain("<p>空行の前の題</p>");
+  });
   it("ふつうの節は今までどおり", () => {
     expect(h).toContain("<section><h2>ふつうの節</h2><p>x</p></section>");
     expect((h.match(/<section class="case">/g) ?? []).length).toBe(2);

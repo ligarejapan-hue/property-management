@@ -384,17 +384,19 @@ const CASE_PREFIXES = ["ご相談の例", "実例"] as const;
 
 /**
  * 実例の札。見出しの残り(「(世田谷区・戸建て・築35年)」など)を小さな札に、
- * 本文の最初の段落が2行以上ならその1行目を題に、残りを開いたときの本文にする。
- * 1行目しか無いときは見出しを題にして、本文はすべて中に入れる。
+ * 本文全体の1行目を題に、残りを開いたときの本文にする(題のあとに空行があっても同じ=@codex #488 R2 P2)。
+ * 本文が1行しか無いときは見出しを題にして、その1行を中に入れる。
  */
 function renderCaseSection(s: LpRenderInput["sections"][number], prefix: string, cta: string): string {
   const rest = s.heading.slice(prefix.length).replace(/^[\s:：・|｜（(]+|[\s）)]+$/g, "");
   const tag = rest ? `${prefix}|${rest}` : prefix;
   const [first = "", ...others] = s.paragraphs;
   const firstLines = first.split("\n");
-  const hasTitleLine = firstLines.length > 1 && firstLines[0].trim().length > 0;
+  const totalLines = s.paragraphs.reduce((n, p) => n + p.split("\n").length, 0);
+  const hasTitleLine = totalLines > 1 && firstLines[0].trim().length > 0;
   const title = hasTitleLine ? firstLines[0].trim() : s.heading;
-  const bodyParas = hasTitleLine ? [firstLines.slice(1).join("\n"), ...others] : s.paragraphs;
+  const restOfFirst = firstLines.slice(1).join("\n");
+  const bodyParas = hasTitleLine ? [...(restOfFirst.trim() ? [restOfFirst] : []), ...others] : s.paragraphs;
   // 写真も図も落とさない(@codex #488 R1 P2: 管理画面ではどの節にも図を付けられる)。写真は本文の前、図は本文の後。
   const photo = s.media?.kind === "asset" ? `<div class="media">${img(s.media.image, "fig", s.heading)}</div>` : "";
   const figure = s.media?.kind === "figure" ? `<div class="figure">${renderFigureHtml(s.media.figureKind)}</div>` : "";
