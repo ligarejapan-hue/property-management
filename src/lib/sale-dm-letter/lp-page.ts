@@ -125,12 +125,8 @@ const CSS = [
   ".opt-img{display:block;width:100%;max-width:200px;height:auto;margin:0 auto 6px;border-radius:10px}",
   ".opt-card p{font-size:12px;color:#5d594f;line-height:1.6;margin:0;text-align:left}",
   // 窓口はひとつ
-  ".network{background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:14px;display:grid;gap:8px;justify-items:center;text-align:center}",
+  ".network{background:#fffdf8;border:1px solid #ddd3bf;border-radius:14px;padding:14px 4px;display:grid;gap:8px;justify-items:center;text-align:center}",
   ".net-svg{display:block;width:100%;max-width:420px;height:auto}",
-  ".net-legend{display:flex;gap:16px;justify-content:center;font-size:13px;font-weight:700;color:#5d594f;margin:0}",
-  ".net-legend span::before{content:\"\";display:inline-block;width:14px;height:14px;border:1.5px solid #0e6b5c;border-radius:7px;margin-right:6px;vertical-align:-2px}",
-  ".lg-expert::before{background:#e3efe9}",
-  ".lg-vendor::before{background:#fffdf8}",
   // よくある質問
   ".faq details{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;margin:8px 0}",
   ".faq summary{cursor:pointer;list-style:none;display:grid;grid-template-columns:24px 1fr;gap:10px;align-items:start;padding:14px;font-weight:700;line-height:1.6;min-height:44px}",

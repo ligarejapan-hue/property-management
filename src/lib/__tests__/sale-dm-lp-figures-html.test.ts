@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { FIGURE_KINDS, renderFigureHtml, renderFigureSvg, partnerNetworkNodes, NETWORK_VIEW } from "../sale-dm-letter/lp-figures";
+import { FIGURE_KINDS, renderFigureHtml, renderFigureSvg, partnerNetworkNodes, NETWORK_VIEW, NETWORK_PILL_H, NETWORK_HUB } from "../sale-dm-letter/lp-figures";
 import { LP_BRAND } from "../sale-dm-letter/lp-brand";
 
 // 2026-10 の見本(発注者承認)どおりの HTML 版の図。公開LPはこちらを使う(SVG は管理画面の見本)。
@@ -45,23 +45,44 @@ describe("renderFigureHtml", () => {
     }
   });
 
-  it("窓口はひとつ: 真ん中のリガーレジャパンから提携先7つへ線、提携先は円周に並ぶ(発注者要望 2026-10-07)", () => {
+  it("窓口はひとつ: 真ん中のリガーレジャパンから提携先7つへ線(色分けなし・発注者要望 2026-10-07)", () => {
     const h = renderFigureHtml("partner_network");
-    for (const p of [...LP_BRAND.partners.experts, ...LP_BRAND.partners.vendors]) expect(h).toContain(`>${p}</text>`);
+    for (const p of LP_BRAND.partners) expect(h).toContain(`>${p}</text>`);
     expect(h).toContain(">リガーレ</text>");
     expect((h.match(/<line /g) ?? []).length).toBe(7);
-    const nodes = partnerNetworkNodes();
-    expect(nodes.length).toBe(7);
-    // 円周上(中心からの距離がほぼ同じ)
-    const d = nodes.map((n) => Math.hypot(n.x - 200, n.y - 200));
-    for (const v of d) expect(Math.abs(v - d[0])).toBeLessThan(2);
-    // 札が図の外へはみ出さない
-    for (const n of nodes) {
-      expect(n.x - n.w / 2, n.label).toBeGreaterThanOrEqual(4);
-      expect(n.x + n.w / 2, n.label).toBeLessThanOrEqual(NETWORK_VIEW - 4);
-      expect(n.y - 18).toBeGreaterThanOrEqual(4);
-      expect(n.y + 18).toBeLessThanOrEqual(NETWORK_VIEW - 4);
-    }
+    expect(h).not.toContain("net-legend");
+    expect(h).not.toContain("#fffdf8\" stroke=\"#0e6b5c\" stroke-width=\"1.5\"/><text");
+  });
+
+  it("配置表は提携先の名前と一致する(名前を変えたら配置も作り直す)", () => {
+    expect(partnerNetworkNodes().map((n) => n.label).sort()).toEqual([...LP_BRAND.partners].sort());
+  });
+
+  it("隣り合う札どうしのすき間がそろい、札は図の外へはみ出さない", () => {
+    const ns = partnerNetworkNodes();
+    const H = NETWORK_PILL_H;
+    const gap = (a: (typeof ns)[number], b: (typeof ns)[number]) => {
+      const dx = Math.abs(a.x - b.x) - (a.w + b.w) / 2;
+      const dy = Math.abs(a.y - b.y) - H;
+      return dx > 0 && dy > 0 ? Math.hypot(dx, dy) : Math.max(dx, dy);
+    };
+    const gaps = ns.map((n, i) => gap(n, ns[(i + 1) % ns.length]));
+    expect(Math.min(...gaps)).toBeGreaterThan(40);
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(8);
+    // 外側の余白は上下左右でほぼ同じ
+    const left = Math.min(...ns.map((n) => n.x - n.w / 2));
+    const right = NETWORK_VIEW.w - Math.max(...ns.map((n) => n.x + n.w / 2));
+    const top = Math.min(...ns.map((n) => n.y - H / 2));
+    const bottom = NETWORK_VIEW.h - Math.max(...ns.map((n) => n.y + H / 2));
+    for (const m of [left, right, top, bottom]) { expect(m).toBeGreaterThanOrEqual(8); expect(m).toBeLessThanOrEqual(16); }
+    // 真ん中の円から各札までのすき間(線の見える長さ)がそろっている
+    const clear = ns.map((n) => {
+      const dx = Math.max(0, Math.abs(n.x - NETWORK_HUB.x) - n.w / 2);
+      const dy = Math.max(0, Math.abs(n.y - NETWORK_HUB.y) - H / 2);
+      return Math.hypot(dx, dy) - NETWORK_HUB.r;
+    });
+    expect(Math.max(...clear) - Math.min(...clear)).toBeLessThan(4);
+    expect(Math.min(...clear)).toBeGreaterThan(24);
   });
 
   it("案内役: イメージイラストと明記する", () => {

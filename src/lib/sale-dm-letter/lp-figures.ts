@@ -226,38 +226,44 @@ function brandImg(image: LpBrandImage, cls: string): string {
 
 /**
  * 「窓口はひとつ」の図(発注者要望 2026-10-07): リガーレジャパンを真ん中の円に、提携先7つを
- * その周りの円周に等間隔で並べ、真ん中から各提携先へ線を引く。専門家=緑の札・業者=生成りの札。
- * viewBox 400x400(画面幅に合わせて縮む)。札の幅は文字数から決め、左右の端からはみ出さない。
+ * 周りに並べ、真ん中から1本ずつ線でつなぐ。専門家/業者の色分けはしない(発注者指定)。
+ * 配置は計算で決めた固定値: ①真ん中の円から各札までのすき間をどれも36にそろえ(線の見える長さが同じ)、
+ * ②そのうえで隣り合う札どうしのすき間がそろう角度を選んだ(どこも約44・ばらつき約1)。
+ * 長い札(土地家屋調査士)は上、文字数の近い札を左右対称に置く。外側の余白は上下左右とも約12。
+ * ⚠提携先の名前(LP_BRAND.partners)を変えたら、この表も作り直す(テストが名前の一致を確かめる)。
  */
-export const NETWORK_VIEW = 400;
-const NET_C = 200;
-const NET_R = 138;
-const NET_CENTER_R = 64;
-const NET_FONT = 16;
-export function partnerNetworkNodes(): Array<{ label: string; kind: "expert" | "vendor"; x: number; y: number; w: number }> {
-  const all = [
-    ...LP_BRAND.partners.experts.map((label) => ({ label, kind: "expert" as const })),
-    ...LP_BRAND.partners.vendors.map((label) => ({ label, kind: "vendor" as const })),
-  ];
-  return all.map((p, i) => {
-    const a = (-90 + (360 / all.length) * i) * (Math.PI / 180);
-    return { ...p, x: Math.round(NET_C + NET_R * Math.cos(a)), y: Math.round(NET_C + NET_R * Math.sin(a)), w: p.label.length * NET_FONT + 20 };
-  });
+export const NETWORK_VIEW = { w: 403, h: 290 } as const;
+export const NETWORK_PILL_H = 36;
+const NET_FONT = 15;
+export const NETWORK_HUB = { x: 209, y: 146, r: 62 } as const;
+const NET_CX = NETWORK_HUB.x;
+const NET_CY = NETWORK_HUB.y;
+const NET_CENTER_R = NETWORK_HUB.r;
+const NETWORK_LAYOUT: ReadonlyArray<{ label: string; x: number; y: number }> = [
+  { label: "土地家屋調査士", x: 209, y: 30 },
+  { label: "司法書士", x: 347, y: 101 },
+  { label: "税理士", x: 342, y: 179 },
+  { label: "引っ越し業者", x: 289, y: 260 },
+  { label: "内装工事業者", x: 129, y: 260 },
+  { label: "弁護士", x: 76, y: 179 },
+  { label: "片付け業者", x: 64, y: 99 },
+];
+export function partnerNetworkNodes(): Array<{ label: string; x: number; y: number; w: number }> {
+  return NETWORK_LAYOUT.map((n) => ({ ...n, w: n.label.length * NET_FONT + 28 }));
 }
 function partnerRadialSvg(): string {
   const nodes = partnerNetworkNodes();
-  const lines = nodes.map((n) => `<line x1="${NET_C}" y1="${NET_C}" x2="${n.x}" y2="${n.y}" stroke="#0e6b5c" stroke-width="2"/>`).join("");
-  const pills = nodes.map((n) => {
-    const fill = n.kind === "expert" ? "#e3efe9" : "#fffdf8";
-    return `<rect x="${n.x - n.w / 2}" y="${n.y - 18}" width="${n.w}" height="36" rx="18" fill="${fill}" stroke="#0e6b5c" stroke-width="1.5"/>` +
-      `<text x="${n.x}" y="${n.y + 6}" ${FONT} font-size="${NET_FONT}" font-weight="700" fill="#0a5246" text-anchor="middle">${esc(n.label)}</text>`;
-  }).join("");
-  const center = `<circle cx="${NET_C}" cy="${NET_C}" r="${NET_CENTER_R}" fill="#0e6b5c"/>` +
-    `<text x="${NET_C}" y="${NET_C - 6}" ${FONT} font-size="17" font-weight="700" fill="#fffdf8" text-anchor="middle">リガーレ</text>` +
-    `<text x="${NET_C}" y="${NET_C + 16}" ${FONT} font-size="17" font-weight="700" fill="#fffdf8" text-anchor="middle">ジャパン</text>` +
-    `<text x="${NET_C}" y="${NET_C + 36}" ${FONT} font-size="11" fill="#e3efe9" text-anchor="middle">ご相談窓口</text>`;
+  const lines = nodes.map((n) => `<line x1="${NET_CX}" y1="${NET_CY}" x2="${n.x}" y2="${n.y}" stroke="#0e6b5c" stroke-width="2"/>`).join("");
+  const pills = nodes.map((n) =>
+    `<rect x="${n.x - n.w / 2}" y="${n.y - NETWORK_PILL_H / 2}" width="${n.w}" height="${NETWORK_PILL_H}" rx="${NETWORK_PILL_H / 2}" fill="#e3efe9" stroke="#0e6b5c" stroke-width="1.5"/>` +
+    `<text x="${n.x}" y="${n.y + 5}" ${FONT} font-size="${NET_FONT}" font-weight="700" fill="#0a5246" text-anchor="middle">${esc(n.label)}</text>`,
+  ).join("");
+  const center = `<circle cx="${NET_CX}" cy="${NET_CY}" r="${NET_CENTER_R}" fill="#0e6b5c"/>` +
+    `<text x="${NET_CX}" y="${NET_CY - 6}" ${FONT} font-size="17" font-weight="700" fill="#fffdf8" text-anchor="middle">リガーレ</text>` +
+    `<text x="${NET_CX}" y="${NET_CY + 16}" ${FONT} font-size="17" font-weight="700" fill="#fffdf8" text-anchor="middle">ジャパン</text>` +
+    `<text x="${NET_CX}" y="${NET_CY + 36}" ${FONT} font-size="11" fill="#e3efe9" text-anchor="middle">ご相談窓口</text>`;
   const label = `リガーレジャパンを中心に、${nodes.map((n) => n.label).join("・")}とつながっています`;
-  return `<svg class="net-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${NETWORK_VIEW} ${NETWORK_VIEW}" width="${NETWORK_VIEW}" height="${NETWORK_VIEW}" role="img" aria-label="${esc(label)}">${lines}${center}${pills}</svg>`;
+  return `<svg class="net-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${NETWORK_VIEW.w} ${NETWORK_VIEW.h}" width="${NETWORK_VIEW.w}" height="${NETWORK_VIEW.h}" role="img" aria-label="${esc(label)}">${lines}${center}${pills}</svg>`;
 }
 
 /** 公開LPに埋める図の HTML。consult_guide は節の本文と組むため lp-page.ts 側で並べる(ここは絵の部分だけ)。 */
@@ -280,8 +286,7 @@ export function renderFigureHtml(kind: FigureKind): string {
         `</div>`;
     case "partner_network":
       return `<div class="network">${partnerRadialSvg()}` +
-        `<p class="net-legend"><span class="lg-expert">提携の専門家</span><span class="lg-vendor">提携の業者</span></p>` +
-        `<p class="small-note">必要なときに、提携先へ当社からおつなぎします。</p></div>`;
+                `<p class="small-note">必要なときに、提携の専門家・業者へ当社からおつなぎします。</p></div>`;
     case "consult_guide":
       return `<figure class="guide-fig">${brandImg(LP_BRAND.guide, "guide-img")}<figcaption>イメージ<br />イラスト</figcaption></figure>`;
     default:

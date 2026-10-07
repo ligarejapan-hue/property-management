@@ -20,11 +20,9 @@ export const LP_BRAND = {
   /** 案内役のイラスト(Canva作・実在の人物ではない) */
   guide: { src: "/lp-assets/brand/guide.jpg", width: 480, height: 480, alt: "相談窓口の担当者(イメージイラスト)" },
   guideName: "リガーレジャパン ご相談窓口より",
-  /** 「窓口はひとつ」の提携先(発注者確認済み 2026-10-06) */
-  partners: {
-    experts: ["司法書士", "税理士", "弁護士", "土地家屋調査士"],
-    vendors: ["片付け業者", "引っ越し業者", "内装工事業者"],
-  },
+  /** 「窓口はひとつ」の提携先(発注者確認済み 2026-10-06)。専門家/業者の区別はしない(2026-10-07)。
+   *  ⚠変えたら lp-figures.ts の NETWORK_LAYOUT(配置表)も作り直す。 */
+  partners: ["司法書士", "税理士", "弁護士", "土地家屋調査士", "片付け業者", "引っ越し業者", "内装工事業者"],
   options: [
     { title: "売る", text: "今の価格の目安と、手元に残る金額の見込みをお伝えします。", image: { src: "/lp-assets/brand/opt-sell.jpg", width: 480, height: 480, alt: "契約書の上で家の鍵を手渡すイラスト" } },
     { title: "貸す", text: "貸したときの家賃の目安や、かかる手間もご説明します。", image: { src: "/lp-assets/brand/opt-rent.jpg", width: 480, height: 480, alt: "家の持ち主が入居する夫婦に鍵を渡すイラスト" } },
