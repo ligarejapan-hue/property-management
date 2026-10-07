@@ -4,10 +4,25 @@
  * ⚠この2つの route は元は**完全なコピペ重複**だった。列が増えるたびに片方だけ直す
  *   事故（片方の画面からだけ値が入らない）を防ぐため、正本をここ1か所にする。
  */
-import { normalizeCaseStatusInput, normalizeIntroductionRouteInput } from "@/lib/property-types";
+import {
+  normalizeCaseStatusInput,
+  normalizeIntroductionRouteInput,
+  PROPERTY_TYPE_JP_TO_VALUE,
+  PROPERTY_TYPE_VALUES,
+} from "@/lib/property-types";
 import { phoneForStore } from "@/lib/phone-format-jp";
 import { AUTO_CHOICE, type BuildingChoice } from "@/lib/building-link/resolve";
 import { normalizeBuildingName } from "@/lib/property-building-name";
+import { OWNER_CSV_COLUMN_MAP, PROPERTY_CSV_COLUMN_MAP } from "@/lib/csv-parser";
+import { isValidPostalCode, normalizePostalCode } from "@/lib/address-lookup/normalize";
+import { unwrapCsvTextCell } from "@/lib/csv-encode";
+
+// CSV 取込(api/import/csv)と同じ決まった値。外れた値は落とす(CSV 取込と同じ)。
+const VALID_REGISTRY_STATUS = ["unconfirmed", "scheduled", "obtained"];
+const VALID_DM_STATUS = ["send", "hold", "no_send"];
+const VALID_OCCUPANCY_STATUS = ["vacant", "occupied", "unknown"];
+// 棟郵便番号は棟の欄。物件には入れない(つないだ棟へは buildingPostalCodeFromRow で入れる)。
+const NOT_PROPERTY_FIELDS = new Set(["buildingPostalCode"]);
 
 /** Map Japanese CSV header names to property model field names. */
 export const JAPANESE_FIELD_MAP: Record<string, string> = {
@@ -57,29 +72,110 @@ export const JAPANESE_OWNER_FIELD_MAP: Record<string, string> = {
 /**
  * Resolve a rawData key to a property model field name.
  * Tries direct match first (already an English field name), then Japanese lookup.
+ *
+ * ⚠rawData は CSV の見出しのまま保存されている。CSV 取込が読む見出し(PROPERTY_CSV_COLUMN_MAP)を
+ *   ここでも読む(以前は部屋番号・階・専有面積・郵便番号・`lot_number` などが確定で落ちていた)。
  */
+/** 確定で物件に入れられる欄。 */
+const PROPERTY_ROW_FIELDS: ReadonlySet<string> = new Set([
+  "address", "postalCode", "lotNumber", "buildingNumber", "realEstateNumber",
+  "propertyType", "registryStatus", "dmStatus", "caseStatus",
+  "introductionRoute", "zoningDistrict", "rosenkaValue", "gpsLat", "gpsLng",
+  "note", "externalLinkKey", "buildingName",
+  "roomNo", "floorNo", "exclusiveArea", "balconyArea", "layoutType", "orientation",
+  "managementFee", "repairReserveFee", "occupancyStatus", "ownershipShareNote",
+]);
+
+/** 確定で所有者に入れられる欄。 */
+const OWNER_ROW_FIELDS: ReadonlySet<string> = new Set([
+  "name", "nameKana", "phone", "zip", "address",
+  "currentZip", "currentAddress",
+  "note", "externalLinkKey",
+]);
+
 export function resolvePropertyField(key: string): string | undefined {
-  const directFields = new Set([
-    "address", "lotNumber", "buildingNumber", "realEstateNumber",
-    "propertyType", "registryStatus", "dmStatus", "caseStatus",
-    "introductionRoute", "zoningDistrict", "rosenkaValue", "gpsLat", "gpsLng",
-    "note", "externalLinkKey", "buildingName",
-  ]);
-  if (directFields.has(key)) return key;
+  if (PROPERTY_ROW_FIELDS.has(key)) return key;
+  const fromCsv = PROPERTY_CSV_COLUMN_MAP[key];
+  if (fromCsv && !NOT_PROPERTY_FIELDS.has(fromCsv)) return fromCsv;
   return JAPANESE_FIELD_MAP[key];
 }
 
 /**
  * Resolve a rawData key to an owner model field name.
+ * ⚠所有者 CSV 取込が読む見出し(OWNER_CSV_COLUMN_MAP)もここで読む(物件と同じ理由)。
  */
 export function resolveOwnerField(key: string): string | undefined {
-  const directFields = new Set([
-    "name", "nameKana", "phone", "zip", "address",
-    "currentZip", "currentAddress",
-    "note", "externalLinkKey",
-  ]);
-  if (directFields.has(key)) return key;
+  if (OWNER_ROW_FIELDS.has(key)) return key;
+  const fromCsv = OWNER_CSV_COLUMN_MAP[key];
+  if (fromCsv && OWNER_ROW_FIELDS.has(fromCsv)) return fromCsv;
   return JAPANESE_OWNER_FIELD_MAP[key];
+}
+
+/**
+ * 取込のときに実際に使った「CSV の見出し → 欄」の表を、要確認・エラーの行に一緒に残すキー。
+ * ⚠画面で列の対応を指定した取込(例: 所在地 → 住所)は、見出しだけでは確定で読み替えられない。
+ *   `__` で始まるので画面・エラー行の書き出しには出ない。
+ */
+export const ROW_FIELD_MAP_KEY = "__field_map";
+
+/**
+ * 行に足す `{ __field_map: "<JSON>" }`。表が空なら何も足さない。
+ * ⚠取込したファイルに実際にある見出しだけ残す(列の対応は利用者が送れる値。使わない対応を
+ *   大量に送られて、それが行ごとに複製されて DB を膨らませないため)。取込ごとに1回だけ作り、
+ *   各行には同じものを付ける。
+ */
+export function rowFieldMapExtra(
+  headerToField: Record<string, string>,
+  headers: readonly string[],
+): Record<string, string> {
+  const present = new Set(headers);
+  const kept: Record<string, string> = {};
+  for (const [header, field] of Object.entries(headerToField)) {
+    if (present.has(header)) kept[header] = field;
+  }
+  return Object.keys(kept).length > 0 ? { [ROW_FIELD_MAP_KEY]: JSON.stringify(kept) } : {};
+}
+
+/** 行に残った表を読む。壊れている・無いときは null(=決まった表で読み替える。以前の行)。 */
+function readRowFieldMap(
+  data: Record<string, string>,
+  allowed: ReadonlySet<string>,
+): Record<string, string> | null {
+  const raw = data[ROW_FIELD_MAP_KEY];
+  if (typeof raw !== "string" || raw === "") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const map: Record<string, string> = {};
+  for (const [header, field] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof field === "string" && allowed.has(field)) map[header] = field;
+  }
+  return map;
+}
+
+/**
+ * rawData を欄の名前へ読み替える（空値は落とす）。
+ * 取込で使った表が行に残っていれば、**その表だけ**で読む(取込と同じ結果にする)。
+ */
+function mapRawData(
+  data: Record<string, string>,
+  allowed: ReadonlySet<string>,
+  resolve: (key: string) => string | undefined,
+): Record<string, string> {
+  const rowMap = readRowFieldMap(data, allowed);
+  const mapped: Record<string, string> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (key.startsWith("__")) continue;
+    const field = rowMap ? rowMap[key] : resolve(key);
+    if (field && value) {
+      mapped[field] = value;
+    }
+  }
+  return mapped;
 }
 
 /**
@@ -89,14 +185,7 @@ export function resolveOwnerField(key: string): string | undefined {
 export function mapOwnerRawData(
   data: Record<string, string>,
 ): Record<string, string> {
-  const mapped: Record<string, string> = {};
-  for (const [key, value] of Object.entries(data)) {
-    const field = resolveOwnerField(key);
-    if (field && value) {
-      mapped[field] = value;
-    }
-  }
-  return mapped;
+  return mapRawData(data, OWNER_ROW_FIELDS, resolveOwnerField);
 }
 
 /**
@@ -106,30 +195,38 @@ export function buildPropertyCreateData(
   data: Record<string, string>,
   createdBy: string,
 ): Record<string, unknown> {
-  const mapped: Record<string, string> = {};
-  for (const [key, value] of Object.entries(data)) {
-    const field = resolvePropertyField(key);
-    if (field && value) {
-      mapped[field] = value;
-    }
-  }
+  const mapped = mapRawData(data, PROPERTY_ROW_FIELDS, resolvePropertyField);
 
   if (!mapped.address) {
     throw new Error("住所が空です");
   }
 
+  // 種別の日本語は値に直し、知らない値は不明にする。登記状況・DM判断の外れた値は既定値にする
+  // (CSV 取込と同じ。以前は「土地」のまま作ろうとして確定が失敗していた)。
+  let propertyType = mapped.propertyType || "unknown";
+  if (PROPERTY_TYPE_JP_TO_VALUE[propertyType]) {
+    propertyType = PROPERTY_TYPE_JP_TO_VALUE[propertyType];
+  } else if (!(PROPERTY_TYPE_VALUES as readonly string[]).includes(propertyType)) {
+    propertyType = "unknown";
+  }
   const createData: Record<string, unknown> = {
     address: mapped.address,
-    propertyType: mapped.propertyType || "unknown",
-    registryStatus: mapped.registryStatus || "unconfirmed",
-    dmStatus: mapped.dmStatus || "hold",
+    propertyType,
+    registryStatus: VALID_REGISTRY_STATUS.includes(mapped.registryStatus) ? mapped.registryStatus : "unconfirmed",
+    dmStatus: VALID_DM_STATUS.includes(mapped.dmStatus) ? mapped.dmStatus : "hold",
     caseStatus: normalizeCaseStatusInput(mapped.caseStatus) ?? "new_case",
     createdBy,
   };
+  if (mapped.postalCode && isValidPostalCode(mapped.postalCode)) {
+    createData.postalCode = normalizePostalCode(mapped.postalCode);
+  }
   const normalizedRoute = normalizeIntroductionRouteInput(mapped.introductionRoute);
   if (normalizedRoute) createData.introductionRoute = normalizedRoute;
-  if (mapped.lotNumber) createData.lotNumber = mapped.lotNumber;
-  if (mapped.buildingNumber) createData.buildingNumber = mapped.buildingNumber;
+  // 本システムが書き出した CSV は Excel 対策で `="4-2"` の形。CSV 取込と同じく元の値に戻す。
+  const lotNumber = mapped.lotNumber ? unwrapCsvTextCell(mapped.lotNumber) : "";
+  const buildingNumber = mapped.buildingNumber ? unwrapCsvTextCell(mapped.buildingNumber) : "";
+  if (lotNumber) createData.lotNumber = lotNumber;
+  if (buildingNumber) createData.buildingNumber = buildingNumber;
   // ⚠CSV 取込と同じ規則: 物件名がある行は区分マンションとして作る
   //   (以前は物件名を読まず、要確認から確定すると物件名も棟も落ちていた)。
   //   物件名の整え方も CSV 取込と同じ normalizeBuildingName を通す。
@@ -139,17 +236,50 @@ export function buildPropertyCreateData(
     createData.buildingName = buildingNameForCreate;
   }
   if (mapped.realEstateNumber) createData.realEstateNumber = mapped.realEstateNumber;
-  if (mapped.externalLinkKey) createData.externalLinkKey = mapped.externalLinkKey;
+  // ⚠リンクキーは trim だけ(正規化しない・CSV 取込と同じ)。
+  const linkKey = mapped.externalLinkKey?.trim();
+  if (linkKey) createData.externalLinkKey = linkKey;
   if (mapped.zoningDistrict) createData.zoningDistrict = mapped.zoningDistrict;
   if (mapped.rosenkaValue) createData.rosenkaValue = parseFloat(mapped.rosenkaValue) || null;
   if (mapped.gpsLat) createData.gpsLat = parseFloat(mapped.gpsLat) || null;
   if (mapped.gpsLng) createData.gpsLng = parseFloat(mapped.gpsLng) || null;
   if (mapped.note) createData.note = mapped.note;
 
+  // 部屋の欄(CSV 取込と同じ読み方。数字にできない値は入れない)。
+  if (mapped.roomNo) createData.roomNo = mapped.roomNo.trim();
+  const intOf = (v: string | undefined) => (v ? parseInt(v) : NaN);
+  const floatOf = (v: string | undefined) => (v ? parseFloat(v) : NaN);
+  if (!isNaN(intOf(mapped.floorNo))) createData.floorNo = intOf(mapped.floorNo);
+  if (!isNaN(floatOf(mapped.exclusiveArea))) createData.exclusiveArea = floatOf(mapped.exclusiveArea);
+  if (!isNaN(floatOf(mapped.balconyArea))) createData.balconyArea = floatOf(mapped.balconyArea);
+  if (mapped.layoutType) createData.layoutType = mapped.layoutType.trim();
+  if (mapped.orientation) createData.orientation = mapped.orientation.trim();
+  if (!isNaN(intOf(mapped.managementFee))) createData.managementFee = intOf(mapped.managementFee);
+  if (!isNaN(intOf(mapped.repairReserveFee))) createData.repairReserveFee = intOf(mapped.repairReserveFee);
+  if (mapped.occupancyStatus && VALID_OCCUPANCY_STATUS.includes(mapped.occupancyStatus)) {
+    createData.occupancyStatus = mapped.occupancyStatus;
+  }
+  if (mapped.ownershipShareNote) createData.ownershipShareNote = mapped.ownershipShareNote;
+
   return createData;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const BUILDING_POSTAL_FIELDS: ReadonlySet<string> = new Set(["buildingPostalCode"]);
+
+/**
+ * 行の「棟郵便番号」を、CSV 取込と同じく妥当な7桁だけハイフンなしにして返す(無い・不正なら null)。
+ * ⚠CSV 取込は棟が決まった行でだけ棟へ入れる(要確認の行では入れずに残す)。確定でつないだ棟へ入れるために読む。
+ */
+export function buildingPostalCodeFromRow(data: Record<string, string>): string | null {
+  const mapped = mapRawData(data, BUILDING_POSTAL_FIELDS, (key) => {
+    if (key === "buildingPostalCode") return key;
+    return PROPERTY_CSV_COLUMN_MAP[key] === "buildingPostalCode" ? "buildingPostalCode" : undefined;
+  });
+  const raw = mapped.buildingPostalCode;
+  return raw && isValidPostalCode(raw) ? normalizePostalCode(raw) : null;
+}
 
 /** 要確認の画面で選んだ棟(`__resolved_building_id`)を、確定時の棟の選び方にする。 */
 export function buildingChoiceFromRow(data: Record<string, string>): BuildingChoice {

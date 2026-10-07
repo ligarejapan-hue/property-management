@@ -16,9 +16,11 @@ import { recalculateJobCounts } from "@/lib/import-job-counts";
 import { getStorage } from "@/lib/storage";
 
 import { applyBuildingLink, writeBuildingLinkAudit } from "@/lib/building-link/apply";
+import { applyBuildingPostalCodeInTx } from "@/lib/import-building-postal";
 import {
   buildPropertyCreateData,
   buildingChoiceFromRow,
+  buildingPostalCodeFromRow,
   buildOwnerCreateData,
   mapOwnerRawData,
 } from "@/lib/import-row-field-map";
@@ -99,6 +101,11 @@ export async function PATCH(
             // 棟を作ったら同じ tx で取込の目印を書く(取り消しが空の棟を消すとき確実に見つける)。
             importJobId: jobId,
           });
+          // 行の棟郵便番号は、つないだ棟へ入れる(CSV 取込は要確認の行では入れずに残す)。
+          const buildingPostalCode = buildingPostalCodeFromRow(sourceData);
+          if (buildingLink.building?.id && buildingPostalCode) {
+            await applyBuildingPostalCodeInTx(tx, buildingLink.building.id, buildingPostalCode, session.id);
+          }
           return { property, buildingLink };
         });
         await writeBuildingLinkAudit(session.id, property.id, buildingLink, { importJobId: jobId });

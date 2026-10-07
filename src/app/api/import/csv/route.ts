@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { rowFieldMapExtra } from "@/lib/import-row-field-map";
 import prisma from "@/lib/prisma";
 import {
   getApiSession,
@@ -858,6 +859,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Save job rows
+    // 確定(作成・再試行)で取込と同じ列の対応を使えるよう、要確認・エラーの行に見出し→欄の表も残す
+    // (ファイルにある見出しだけ・取込ごとに1回作る)。
+    const rowFieldMap = rowFieldMapExtra(headerToField, headers);
     for (const row of jobRows) {
       // error / needs_review 行のみ rawData にエラー構造化キー
       // (__error_field / __error_code) を追記する。success 行は不要。
@@ -866,6 +870,7 @@ export async function POST(request: NextRequest) {
           ? {
               ...(row.rawData as Record<string, unknown>),
               ...buildErrorRawDataExtras(row.errorMessage, row.rawData),
+              ...rowFieldMap,
             }
           : row.rawData;
       await prisma.importJobRow.create({
