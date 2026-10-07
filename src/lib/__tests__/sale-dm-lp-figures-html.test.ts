@@ -54,6 +54,14 @@ describe("renderFigureHtml", () => {
     expect(h).not.toContain("#fffdf8\" stroke=\"#0e6b5c\" stroke-width=\"1.5\"/><text");
   });
 
+  it("管理画面の見本(SVG)も、公開LPと同じ円形の図を使う(@codex #488 R7 P2)", () => {
+    const thumb = renderFigureSvg("partner_network");
+    const pub = renderFigureHtml("partner_network");
+    const inner = /<svg class="net-svg"[^>]*>([\s\S]*?)<\/svg>/.exec(pub)![1];
+    expect(thumb).toContain(inner);
+    expect(thumb).not.toContain("当社の相談窓口");
+  });
+
   it("配置表は提携先の名前と一致する(名前を変えたら配置も作り直す)", () => {
     expect(partnerNetworkNodes().map((n) => n.label).sort()).toEqual([...LP_BRAND.partners].sort());
   });

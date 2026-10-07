@@ -158,14 +158,11 @@ const RENDERERS: Record<FigureKind, () => string> = {
       }).join("") + text(24, 310, "それぞれの見通しをお伝えします(絵つき)", 13, MUTED),
       FIGURE_LABELS.sell_rent_keep,
     ),
+  // 管理画面の見本も公開LPと同じ円形の図(同じ描画関数)を載せる(@codex #488 R7 P2)。
+  // 図の高さ 290 を見出しの下(y=58〜348)に収める。
   partner_network: () =>
     wrap(
-      `<rect x="200" y="70" width="240" height="44" rx="22" fill="${ACCENT}"/>` + text(320, 98, "当社の相談窓口", 16, "#ffffff", "middle", "700") +
-      `<path d="M320 114v26M112 140h416M112 140v20M320 140v20M528 140v20" stroke="${ACCENT}" stroke-width="2" fill="none"/>` +
-      ([["司法書士・税理士", 112], ["弁護士・調査士", 320], ["片付け・引越・内装", 528]] as const).map(([t, x]) =>
-        `<rect x="${x - 88}" y="162" width="176" height="44" rx="10" fill="${SOFT}" stroke="${ACCENT}" stroke-width="1.5"/>` + text(x, 190, t, 14, INK, "middle", "700"),
-      ).join("") +
-      text(24, 300, "提携の専門家・業者へ当社からおつなぎします", 13, MUTED),
+      `<g transform="translate(${(640 - NETWORK_VIEW.w) / 2} 58)">${partnerRadialInner()}</g>`,
       FIGURE_LABELS.partner_network,
     ),
   consult_guide: () =>
@@ -251,7 +248,8 @@ const NETWORK_LAYOUT: ReadonlyArray<{ label: string; x: number; y: number }> = [
 export function partnerNetworkNodes(): Array<{ label: string; x: number; y: number; w: number }> {
   return NETWORK_LAYOUT.map((n) => ({ ...n, w: n.label.length * NET_FONT + 28 }));
 }
-function partnerRadialSvg(): string {
+/** 円形の図の中身(線・真ん中の円・札)。公開LPの SVG と管理画面の見本の両方で使う。 */
+function partnerRadialInner(): string {
   const nodes = partnerNetworkNodes();
   const lines = nodes.map((n) => `<line x1="${NET_CX}" y1="${NET_CY}" x2="${n.x}" y2="${n.y}" stroke="#0e6b5c" stroke-width="2"/>`).join("");
   const pills = nodes.map((n) =>
@@ -262,8 +260,11 @@ function partnerRadialSvg(): string {
     `<text x="${NET_CX}" y="${NET_CY - 6}" ${FONT} font-size="17" font-weight="700" fill="#fffdf8" text-anchor="middle">リガーレ</text>` +
     `<text x="${NET_CX}" y="${NET_CY + 16}" ${FONT} font-size="17" font-weight="700" fill="#fffdf8" text-anchor="middle">ジャパン</text>` +
     `<text x="${NET_CX}" y="${NET_CY + 36}" ${FONT} font-size="11" fill="#e3efe9" text-anchor="middle">ご相談窓口</text>`;
-  const label = `リガーレジャパンを中心に、${nodes.map((n) => n.label).join("・")}とつながっています`;
-  return `<svg class="net-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${NETWORK_VIEW.w} ${NETWORK_VIEW.h}" width="${NETWORK_VIEW.w}" height="${NETWORK_VIEW.h}" role="img" aria-label="${esc(label)}">${lines}${center}${pills}</svg>`;
+  return `${lines}${center}${pills}`;
+}
+function partnerRadialSvg(): string {
+  const label = `リガーレジャパンを中心に、${partnerNetworkNodes().map((n) => n.label).join("・")}とつながっています`;
+  return `<svg class="net-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${NETWORK_VIEW.w} ${NETWORK_VIEW.h}" width="${NETWORK_VIEW.w}" height="${NETWORK_VIEW.h}" role="img" aria-label="${esc(label)}">${partnerRadialInner()}</svg>`;
 }
 
 /** 公開LPに埋める図の HTML。consult_guide は節の本文と組むため lp-page.ts 側で並べる(ここは絵の部分だけ)。 */
