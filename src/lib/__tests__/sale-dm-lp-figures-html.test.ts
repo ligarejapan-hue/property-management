@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { FIGURE_KINDS, renderFigureHtml, renderFigureSvg } from "../sale-dm-letter/lp-figures";
+import { FIGURE_KINDS, renderFigureHtml, renderFigureSvg, partnerNetworkNodes, NETWORK_VIEW, NETWORK_PILL_H, NETWORK_HUB } from "../sale-dm-letter/lp-figures";
 import { LP_BRAND } from "../sale-dm-letter/lp-brand";
 
 // 2026-10 の見本(発注者承認)どおりの HTML 版の図。公開LPはこちらを使う(SVG は管理画面の見本)。
@@ -45,10 +45,73 @@ describe("renderFigureHtml", () => {
     }
   });
 
-  it("窓口はひとつ: 提携先(専門家4・業者3)を全部出す", () => {
+  it("窓口はひとつ: 真ん中のリガーレジャパンから提携先7つへ線(色分けなし・発注者要望 2026-10-07)", () => {
     const h = renderFigureHtml("partner_network");
-    for (const p of [...LP_BRAND.partners.experts, ...LP_BRAND.partners.vendors]) expect(h).toContain(`<span>${p}</span>`);
-    expect(h).toContain("リガーレジャパン");
+    for (const p of LP_BRAND.partners) expect(h).toContain(`>${p}</text>`);
+    expect(h).toContain(">リガーレ</text>");
+    expect((h.match(/<line /g) ?? []).length).toBe(7);
+    expect(h).not.toContain("net-legend");
+    expect(h).not.toContain("#fffdf8\" stroke=\"#0e6b5c\" stroke-width=\"1.5\"/><text");
+  });
+
+  it("管理画面の見本(SVG)も、公開LPと同じ円形の図を使う(@codex #488 R7 P2)", () => {
+    const thumb = renderFigureSvg("partner_network");
+    const pub = renderFigureHtml("partner_network");
+    const inner = /<svg class="net-svg"[^>]*>([\s\S]*?)<\/svg>/.exec(pub)![1];
+    expect(thumb).toContain(inner);
+    expect(thumb).not.toContain("当社の相談窓口");
+  });
+
+  it("配置表は提携先の名前と一致する(名前を変えたら配置も作り直す)", () => {
+    expect(partnerNetworkNodes().map((n) => n.label).sort()).toEqual([...LP_BRAND.partners].sort());
+  });
+
+  it("隣り合う札どうしのすき間がそろい、札は図の外へはみ出さない", () => {
+    const ns = partnerNetworkNodes();
+    const H = NETWORK_PILL_H;
+    // 札は両端が半円の形(rx = 高さの半分)。中心線(長さ w-H の線分)から H/2 以内が札の中。
+    const inPill = (n: (typeof ns)[number], px: number, py: number) => {
+      const hx = (n.w - H) / 2;
+      const cx = Math.max(n.x - hx, Math.min(n.x + hx, px));
+      return Math.hypot(px - cx, py - n.y) <= H / 2;
+    };
+    // 2つの札のいちばん近いところのすき間(中心線どうしの距離 − H)
+    const gap = (a: (typeof ns)[number], b: (typeof ns)[number]) => {
+      let m = Infinity;
+      for (let i = 0; i <= 40; i++) {
+        const ax = a.x - (a.w - H) / 2 + ((a.w - H) * i) / 40;
+        for (let j = 0; j <= 40; j++) m = Math.min(m, Math.hypot(ax - (b.x - (b.w - H) / 2 + ((b.w - H) * j) / 40), a.y - b.y));
+      }
+      return m - H;
+    };
+    const gaps = ns.map((n, i) => gap(n, ns[(i + 1) % ns.length]));
+    expect(Math.min(...gaps)).toBeGreaterThan(30);
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(6);
+    // 外側の余白は上下左右でほぼ同じ
+    const left = Math.min(...ns.map((n) => n.x - n.w / 2));
+    const right = NETWORK_VIEW.w - Math.max(...ns.map((n) => n.x + n.w / 2));
+    const top = Math.min(...ns.map((n) => n.y - H / 2));
+    const bottom = NETWORK_VIEW.h - Math.max(...ns.map((n) => n.y + H / 2));
+    for (const m of [left, right, top, bottom]) { expect(m).toBeGreaterThanOrEqual(8); expect(m).toBeLessThanOrEqual(16); }
+    // 線の見える長さ=線に沿って、真ん中の円の縁から札の丸い縁に当たるまで(@codex #488 R8: 軸方向で測らない)
+    const visible = ns.map((n) => {
+      const len = Math.hypot(n.x - NETWORK_HUB.x, n.y - NETWORK_HUB.y);
+      const ux = (n.x - NETWORK_HUB.x) / len;
+      const uy = (n.y - NETWORK_HUB.y) / len;
+      let lo = 0;
+      let hi = len;
+      for (let k = 0; k < 40; k++) {
+        const m = (lo + hi) / 2;
+        if (inPill(n, NETWORK_HUB.x + ux * m, NETWORK_HUB.y + uy * m)) hi = m; else lo = m;
+      }
+      return hi - NETWORK_HUB.r;
+    });
+    expect(Math.max(...visible) - Math.min(...visible), visible.map((v) => v.toFixed(1)).join(",")).toBeLessThan(2);
+    expect(Math.min(...visible)).toBeGreaterThan(30);
+    // 線の長さと札どうしのすき間も、ほぼ同じ(図全体の余白がそろう)
+    const meanGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    const meanLine = visible.reduce((a, b) => a + b, 0) / visible.length;
+    expect(Math.abs(meanGap - meanLine)).toBeLessThan(6);
   });
 
   it("案内役: イメージイラストと明記する", () => {

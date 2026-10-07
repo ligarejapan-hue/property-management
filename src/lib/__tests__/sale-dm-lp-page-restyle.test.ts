@@ -131,3 +131,91 @@ describe("公開LPの新しい作り(2026-10 見本)", () => {
     expect(html).toContain("Hiragino Mincho ProN");
   });
 });
+
+// 発注者要望(2026-10-07): 実例は「押すと広がる」形に。見出しが「ご相談の例」「実例」で始まる節が対象。
+describe("ご相談の例(実例)は押すと広がる", () => {
+  const caseInput = input({ sections: [
+    { heading: "ご相談の例(世田谷区・戸建て・築35年)", paragraphs: ["権利書も見つからない状態から売却\n相続人であるお子様たちは…", "二段落目。"], media: null },
+    { heading: "実例:東京都・マンション", paragraphs: ["一行だけの本文。"], media: null },
+    { heading: "ふつうの節", paragraphs: ["x"], media: null },
+  ] });
+  const h = renderLpPage(caseInput);
+
+  it("見出しの()の中が札、本文の1行目が題、残りは開くと読める", () => {
+    expect(h).toContain('<section class="case"><details><summary><span class="case-tag">ご相談の例 世田谷区・戸建て・築35年</span><strong>権利書も見つからない状態から売却</strong><span class="case-more" aria-hidden="true">続きを読む</span></summary><div class="case-body"><p>相続人であるお子様たちは…</p><p>二段落目。</p></div></details></section>');
+  });
+  it("1行目しか無い本文は、見出しを題にして本文を中に入れる", () => {
+    expect(h).toContain('<span class="case-tag">実例 東京都・マンション</span><strong>実例:東京都・マンション</strong>');
+    expect(h).toContain('<div class="case-body"><p>一行だけの本文。</p></div>');
+  });
+  it("実例の節に付けた写真・図も、開いたときの本文に出す(@codex #488 R1 P2)", () => {
+    const withMedia = renderLpPage(input({ sections: [
+      { heading: "ご相談の例(A)", paragraphs: ["題\n本文"], media: { kind: "figure", figureKind: "sale_flow" } },
+      { heading: "ご相談の例(B)", paragraphs: ["題\n本文"], media: { kind: "asset", image: { publicId: "c".repeat(32), width: 800, height: 600 } } },
+    ] }));
+    expect(withMedia).toContain('<p>本文</p><div class="figure"><div class="flow-box">');
+    expect(withMedia).toMatch(new RegExp(`<div class="case-body"><div class="media"><img class="fig" src="/lp-assets/${"c".repeat(32)}"`));
+  });
+  it("題のあとに空行があっても、1行目を題にする(@codex #488 R2 P2)", () => {
+    const sep = renderLpPage(input({ sections: [
+      { heading: "ご相談の例(C)", paragraphs: ["空行の前の題", "本文の段落。"], media: null },
+    ] }));
+    expect(sep).toContain('<strong>空行の前の題</strong>');
+    expect(sep).toContain('<div class="case-body"><p>本文の段落。</p></div>');
+    expect(sep).not.toContain("<p>空行の前の題</p>");
+  });
+  it("実例の題のすぐ下の □ 行もチェック札になり、スクリプトも出る(@codex #488 R4 P2)", () => {
+    const c = renderLpPage(input({ sections: [
+      { heading: "ご相談の例(D)", paragraphs: ["題\n□項目1\n□項目2"], media: null },
+    ] }));
+    expect(c).toContain('<strong>題</strong>');
+    expect((c.match(/data-check="1"/g) ?? []).length).toBe(2);
+    expect(c).toContain('querySelectorAll("input[data-check]")');
+  });
+  it("実例の節に案内役を付けたら、名乗り+本文と組んだ形のまま札の中に置く(@codex #488 R5 P2)", () => {
+    const g = renderLpPage(input({ sections: [
+      { heading: "ご相談の例(E)", paragraphs: ["題\n本文。"], media: { kind: "figure", figureKind: "consult_guide" } },
+    ] }));
+    expect(g).toMatch(/<div class="case-body"><div class="guide"><figure class="guide-fig">[\s\S]*?<p class="guide-name">リガーレジャパン ご相談窓口より<\/p><p>本文。<\/p><\/div><\/div><\/div>/);
+    expect(g).not.toContain('<div class="figure"><figure class="guide-fig">');
+  });
+  it("「実例集のご紹介」のような見出しは札にしない(言葉の直後が区切り・かっこ・数字のときだけ)", () => {
+    const k = renderLpPage(input({ sections: [
+      { heading: "実例集のご紹介", paragraphs: ["x"], media: null },
+      { heading: "ご相談の例1", paragraphs: ["題\n本文"], media: null },
+      { heading: "実例", paragraphs: ["題\n本文"], media: null },
+    ] }));
+    expect(k).toContain("<section><h2>実例集のご紹介</h2>");
+    expect((k.match(/<section class="case">/g) ?? []).length).toBe(2);
+  });
+  it("ふつうの節は今までどおり", () => {
+    expect(h).toContain("<section><h2>ふつうの節</h2><p>x</p></section>");
+    expect((h.match(/<section class="case">/g) ?? []).length).toBe(2);
+  });
+  it("続く実例は1つの枠(.cases)にまとめる=PC では左右2列", () => {
+    expect(h).toContain('<h2 class="cases-head">これまでのご相談から</h2><div class="cases"><section class="case">');
+    expect(h).toContain('</details></section></div><section><h2>ふつうの節</h2>');
+    expect(h).toMatch(/.cases{grid-template-columns:1fr 1fr/);
+  });
+  it("売る・貸す・持ち続けるの札はスマホでも横に3つ並ぶ", () => {
+    expect(h).toContain(".options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))");
+  });
+  it("続く実例の先頭にだけ「これまでのご相談から」の見出しを1つ置く", () => {
+    expect(h.split('<h2 class="cases-head">これまでのご相談から</h2>').length - 1).toBe(1);
+    expect(h.indexOf("cases-head")).toBeLessThan(h.indexOf("<section class=\"case\">"));
+  });
+});
+
+// 発注者の実機(iPhone・2026-10-07): スクロールすると期限の年表の札(z-index:1)が画面下の固定ボタンより手前に出た。
+describe("画面下の固定ボタンは、いつもいちばん手前", () => {
+  it("固定バーの z-index は、ページ内のほかのどの z-index より大きい", () => {
+    const html = renderLpPage(input());
+    const bar = /\.bar\{[^}]*position:fixed[^}]*z-index:(\d+)/.exec(html);
+    expect(bar, "固定バーに z-index が無い").not.toBeNull();
+    const barZ = Number(bar![1]);
+    // 規則1つ = 「セレクタ{中身}」。中身に { を含めない(@media の入れ子を1つの規則と見誤らない)。
+    const others = [...html.matchAll(/([^{}]+)\{[^{}]*z-index:(\d+)/g)].filter((m) => !m[1].includes(".bar")).map((m) => Number(m[2]));
+    expect(others.length).toBeGreaterThan(0); // 年表の札(z-index:1)を必ず拾っている
+    for (const z of others) expect(z).toBeLessThan(barZ);
+  });
+});
