@@ -142,10 +142,10 @@ describe("ご相談の例(実例)は押すと広がる", () => {
   const h = renderLpPage(caseInput);
 
   it("見出しの()の中が札、本文の1行目が題、残りは開くと読める", () => {
-    expect(h).toContain('<section class="case"><details><summary><span class="case-tag">ご相談の例|世田谷区・戸建て・築35年</span><strong>権利書も見つからない状態から売却</strong><span class="case-more" aria-hidden="true">続きを読む</span></summary><div class="case-body"><p>相続人であるお子様たちは…</p><p>二段落目。</p></div></details></section>');
+    expect(h).toContain('<section class="case"><details><summary><span class="case-tag">ご相談の例 世田谷区・戸建て・築35年</span><strong>権利書も見つからない状態から売却</strong><span class="case-more" aria-hidden="true">続きを読む</span></summary><div class="case-body"><p>相続人であるお子様たちは…</p><p>二段落目。</p></div></details></section>');
   });
   it("1行目しか無い本文は、見出しを題にして本文を中に入れる", () => {
-    expect(h).toContain('<span class="case-tag">実例|東京都・マンション</span><strong>実例:東京都・マンション</strong>');
+    expect(h).toContain('<span class="case-tag">実例 東京都・マンション</span><strong>実例:東京都・マンション</strong>');
     expect(h).toContain('<div class="case-body"><p>一行だけの本文。</p></div>');
   });
   it("実例の節に付けた写真・図も、開いたときの本文に出す(@codex #488 R1 P2)", () => {

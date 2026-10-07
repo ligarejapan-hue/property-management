@@ -394,7 +394,7 @@ function casePrefixOf(heading: string): string | undefined {
  */
 function renderCaseSection(s: LpRenderInput["sections"][number], prefix: string, cta: string): string {
   const rest = s.heading.slice(prefix.length).replace(/^[\s:：・|｜（(]+|[\s）)]+$/g, "");
-  const tag = rest ? `${prefix}|${rest}` : prefix;
+  const tag = rest ? `${prefix} ${rest}` : prefix; // 区切りはスペース(発注者指定 2026-10-07)
   const [first = "", ...others] = s.paragraphs;
   const firstLines = first.split("\n");
   const totalLines = s.paragraphs.reduce((n, p) => n + p.split("\n").length, 0);
