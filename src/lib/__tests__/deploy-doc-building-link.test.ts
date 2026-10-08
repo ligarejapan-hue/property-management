@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { renamePropagateConfirmMessage } from "@/lib/building-link/rename";
+import { typeChangeUnlinkConfirmMessage } from "@/lib/building-link/relink";
 
 function readRepoFile(relPath: string): string {
   return fs.readFileSync(path.resolve(process.cwd(), relPath), "utf8");
@@ -39,6 +40,13 @@ describe("棟の自動つなぎ: 画面の文言が実装と同じ", () => {
     expect(msg).toBeTruthy();
     expect(guideSrc).toContain(msg as string);
     expect(manualSrc).toContain(msg as string);
+  });
+
+  it("種別を区分マンション以外へ変えるときの確認文は実装の関数と同じ形", () => {
+    const msg = typeChangeUnlinkConfirmMessage({ id: "b1", name: "○○" }, "apartment_unit", "house");
+    expect(msg).toBeTruthy();
+    expect(manualSrc).toContain(msg as string);
+    expect(guideSrc).toContain("種別を区分マンション以外に変えると棟から外します");
   });
 
   it("編集中で止まるときの文言", () => {
