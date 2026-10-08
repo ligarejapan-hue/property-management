@@ -72,6 +72,12 @@ export interface PasteDraft {
     currentAddress: DraftField;
   } | null;
   externalLinkKey: string | null;
+  /**
+   * 申込者の氏名(「お名前」の生の値)。所有者の氏名(ご所有者様名を優先)とは別。
+   * ⚠Excel 取込の代わりの鍵(fallbackLinkKey)の材料。所有者の選び方を変えても
+   *   鍵が変わらないように、以前と同じ値(お名前)を渡す(@codex PR#491 6巡目)。
+   */
+  applicantName: string | null;
   warnings: DraftWarning[];
   unmapped: { label: string; value: string }[];
   /**

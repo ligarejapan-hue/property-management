@@ -50,6 +50,11 @@ describe("buildPasteDraft — タカウル 査定依頼", () => {
     expect(draft.warnings.map((w) => w.code)).toContain("owner_differs_from_applicant");
   });
 
+  it("Excel の代わりの鍵の材料(applicantName)は以前と同じ「お名前」の値(@codex PR#491 6巡目)", () => {
+    expect(draft.applicantName).toBe("佐藤　花子");
+    expect(buildPasteDraft("物件所在地：東京都A区1\nご所有者様名：山田").applicantName).toBeNull();
+  });
+
   it("申込者の氏名・フリガナは捨てずに「備考に入れない項目」へ", () => {
     expect(draft.withheldFromNote).toContainEqual({ label: "お名前", value: "佐藤　花子", reason: "label" });
     expect(draft.withheldFromNote).toContainEqual({ label: "フリガナ", value: "サトウ　ハナコ", reason: "label" });

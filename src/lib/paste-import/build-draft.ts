@@ -319,6 +319,7 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
     //   正規化は既存の toHalfWidth + 前後の空白除去だけ(新しい正規化は増やさない)。
     //   査定ナンバーは元々半角ASCIIなので、実際に保存される文字列は変わらない。
     externalLinkKey: normalizeExternalLinkKey(raw("externalLinkKey")),
+    applicantName,
     warnings,
     unmapped,
     withheldFromNote,
