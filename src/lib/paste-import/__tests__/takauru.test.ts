@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { buildPasteDraft } from "../build-draft";
 import { parseLabeledLines } from "../parse-labeled-lines";
 import { splitRoomFromBuildingName, parseOptionsFor } from "../source-profiles";
-import { leadRowStatus } from "../lead-sheet";
+import { leadRowStatus, withFallbackLinkKey } from "../lead-sheet";
 
 const fixture = (name: string) =>
   readFileSync(join(__dirname, "fixtures", name), "utf8").replace(/\r\n/g, "\n");
@@ -104,8 +104,11 @@ describe("buildPasteDraft — タカウル 査定依頼", () => {
     expect(draft.unmapped.map((u) => u.label)).not.toContain("https");
   });
 
-  it("Excel 取込で末尾に足す「反響番号」(二重登録の鍵)が署名欄の後でも読める", () => {
-    const d = buildPasteDraft(`${text}\nお名前：佐藤　花子\n反響番号：lead-abc123`, { maxYear: 2026 });
+  it("Excel 取込が足す「反響番号」(二重登録の鍵)と補いの列が読める", () => {
+    const body = `${text}\nお名前：佐藤　花子`;
+    const d = buildPasteDraft(withFallbackLinkKey(body, buildPasteDraft(body), "lead-abc123"), {
+      maxYear: 2026,
+    });
     expect(d.externalLinkKey).toBe("lead-abc123");
     expect(d.owner?.name.value).toBe("佐藤　太郎");
   });
@@ -243,15 +246,17 @@ describe("parseLabeledLines の読み方の違い", () => {
     expect(r.unlabeled).toEqual(["2行目", "説明の行", "空行の後", "────────"]);
   });
 
-  it("★罫線(━)が奇数本でも、後ろの行(反響番号＝二重登録の鍵)を飲み込まない", () => {
-    const opts = parseOptionsFor("takauru_assessment");
-    const r = parseLabeledLines("お名前：A\n━━━━━━\n運 営：X社\n反響番号：lead-1", opts);
-    expect(r.labeled.map((l) => l.label)).toEqual(["お名前", "運 営", "反響番号"]);
-    const d = buildPasteDraft(
-      "- 査定物件の郵便番号：154-0004\n- 査定物件の所在地：東京都A区B1-2-3\n━━━━━━━━\n　T E L：03-0000-0000\n反響番号：lead-2",
-    );
-    expect(d.sourceProfile).toBe("takauru_assessment");
+  it("★署名欄が途中で切れて閉じる罫線が無くても、運営会社の電話を所有者に入れない・鍵は残る", () => {
+    // 申込者の電話が空のセルが、署名欄の開く罫線の直後で切れている(@codex PR#491 4巡目)。
+    const cut =
+      "- 査定物件の郵便番号：154-0004\n- 査定物件の所在地：東京都A区B1-2-3\n- お名前：山田太郎\n━━━━━━━━\n　T E L：03-6432-0498（代表）";
+    const first = buildPasteDraft(cut);
+    expect(first.sourceProfile).toBe("takauru_assessment");
+    expect(first.owner?.phone.value).toBeNull();
+    expect(first.unlabeled.some((l) => l.includes("03-6432-0498"))).toBe(true);
+    const d = buildPasteDraft(withFallbackLinkKey(cut, first, "lead-2"));
     expect(d.externalLinkKey).toBe("lead-2");
+    expect(d.owner?.phone.value).toBeNull();
   });
 
   it("URL だけの行は、既定でも見出しに割らない", () => {

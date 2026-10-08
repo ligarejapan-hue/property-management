@@ -203,7 +203,10 @@ export function readLeadSheet(sheetName: string, aoa: readonly (readonly string[
  */
 export function withFallbackLinkKey(text: string, draft: PasteDraft, key: string): string {
   if (draft.externalLinkKey !== null) return text;
-  return `${text}\n反響番号：${key}`;
+  // ⚠**先頭に**置く(@codex PR#491 4巡目)。末尾だと、本文が送り元の署名欄の途中で
+  //   切れているとき(閉じる罫線が無い)、署名欄として読み飛ばされて鍵が消える。
+  //   反響番号が読めない文章にだけ足すので、本文の番号と先勝ちで競合しない。
+  return `反響番号：${key}\n${text}`;
 }
 
 /**

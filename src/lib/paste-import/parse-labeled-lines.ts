@@ -73,7 +73,8 @@ export interface ParseOptions {
    */
   joinAfterPostalCode?: boolean;
   /**
-   * 罫線(━)だけの行で挟まれた範囲を、送り元の署名欄として**見出しで割らない**。
+   * 罫線(━)だけの行で挟まれた範囲(閉じる罫線が無ければ文末まで)を、
+   * 送り元の署名欄として**見出しで割らない**。
    * 実サンプル(タカウル): 運営会社の `住 所：` `T E L：` `Mail：` が並ぶ。割ると
    * `TEL` が所有者の電話の見出しに当たる(先勝ちで外れても、伏せた項目に紛れて人を迷わせる)。
    * ⚠捨てない。「読み取れなかった行」として残す。
@@ -99,13 +100,10 @@ export function parseLabeledLines(text: string, options: ParseOptions = {}): Par
   /** 直前の行が「見出し：郵便番号」の行なら、その行(次の1行だけつなぐ)。 */
   let continuable: LabeledLine | null = null;
   let inFooter = false;
-  // ⚠署名欄に入るのは**閉じる罫線が後にあるときだけ**(提出前レビュー)。
-  //   罫線が奇数本だと(Excel のセルが途中で切れている等)、以降が全部「読み取れ
-  //   なかった行」に落ち、Excel 取込が末尾に足す `反響番号：`(二重登録の鍵)まで消える。
-  const heavyRuleAt = options.footerBetweenHeavyRules
-    ? lines.flatMap((l, i) => (HEAVY_RULE_LINE.test(l) ? [i] : []))
-    : [];
-  const lastHeavyRule = heavyRuleAt.length > 0 ? heavyRuleAt[heavyRuleAt.length - 1] : -1;
+  // ⚠閉じる罫線が無くても、開いた後ろは署名欄として読まない(@codex PR#491 4巡目)。
+  //   セルが署名欄の途中で切れていると、運営会社の `T E L：` が所有者の電話に入る。
+  //   読まなかった行は「読み取れなかった行」に残る(捨てない)。Excel 取込の
+  //   鍵(反響番号)は本文の先頭に置くので飲み込まれない(lead-sheet.ts)。
 
   for (let idx = 0; idx < lines.length; idx++) {
     const raw = lines[idx];
@@ -116,8 +114,7 @@ export function parseLabeledLines(text: string, options: ParseOptions = {}): Par
     }
 
     if (options.footerBetweenHeavyRules && HEAVY_RULE_LINE.test(raw)) {
-      // 開く罫線は、後ろに閉じる罫線があるときだけ署名欄の始まりとみなす。
-      inFooter = inFooter ? false : idx < lastHeavyRule;
+      inFooter = !inFooter;
       continuable = null;
       unlabeled.push(trimWide(raw));
       continue;
