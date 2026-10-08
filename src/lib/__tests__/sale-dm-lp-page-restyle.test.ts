@@ -197,8 +197,10 @@ describe("ご相談の例(実例)は押すと広がる", () => {
     expect(h).toContain('</details></section></div><section><h2>ふつうの節</h2>');
     expect(h).toMatch(/.cases{grid-template-columns:1fr 1fr/);
   });
-  it("売る・貸す・持ち続けるの札はスマホでも横に3つ並ぶ", () => {
-    expect(h).toContain(".options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))");
+  it("売る・貸す・持つ・住み続けて売るの4枚: スマホは2列×2段、PC は横に4つ", () => {
+    // 4枚(住み続けて売る を追加・2026-10-08): スマホは2列×2段、PC は横に4つ
+    expect(h).toContain(".options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))");
+    expect(h).toContain(".options{grid-template-columns:repeat(4,minmax(0,1fr))");
   });
   it("続く実例の先頭にだけ「これまでのご相談から」の見出しを1つ置く", () => {
     expect(h.split('<h2 class="cases-head">これまでのご相談から</h2>').length - 1).toBe(1);

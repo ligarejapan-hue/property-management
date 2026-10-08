@@ -119,7 +119,7 @@ const CSS = [
   ".flow span{display:block;font-size:14px;color:#5d594f;line-height:1.65}",
   ".flow-total{margin:12px 0 0;font-weight:700;color:#0e6b5c;font-size:17px}",
   // 売る・貸す・しばらく持つ
-  ".options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}",
+  ".options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}",
   ".opt-card{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;padding:8px;text-align:center}",
   ".opt-card h3{font-size:16px}",
   ".opt-img{display:block;width:100%;max-width:200px;height:auto;margin:0 auto 6px;border-radius:10px}",
@@ -199,7 +199,7 @@ const CSS = [
   "  .split .media{margin:0}",
   "  .guide{grid-template-columns:132px 1fr;padding:20px}",
   "  .guide-img{width:132px;height:auto}",
-  "  .options{gap:12px}",
+  "  .options{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}",
   "  .opt-card{padding:14px}",
   "  .opt-card h3{font-size:18px}",
   "  .opt-card p{font-size:14px;line-height:1.7}",
@@ -250,9 +250,9 @@ const CSS = [
   // 5. 売る・貸す・持つ: 札が順に浮かび、絵がゆっくり揺れる
   ".anim .opt-card{opacity:0;transform:translateY(16px);transition:opacity .6s ease,transform .6s cubic-bezier(.2,.7,.2,1),box-shadow .3s ease}",
   ".anim .options.in .opt-card{opacity:1;transform:none}",
-  ".anim .options.in .opt-card:nth-child(2){transition-delay:.2s}.anim .options.in .opt-card:nth-child(3){transition-delay:.4s}",
+  ".anim .options.in .opt-card:nth-child(2){transition-delay:.2s}.anim .options.in .opt-card:nth-child(3){transition-delay:.4s}.anim .options.in .opt-card:nth-child(4){transition-delay:.6s}",
   ".options.in .opt-img{animation:lp-float 5s ease-in-out 1.2s infinite}",
-  ".options.in .opt-card:nth-child(2) .opt-img{animation-delay:2s}.options.in .opt-card:nth-child(3) .opt-img{animation-delay:2.8s}",
+  ".options.in .opt-card:nth-child(2) .opt-img{animation-delay:2s}.options.in .opt-card:nth-child(3) .opt-img{animation-delay:2.8s}.options.in .opt-card:nth-child(4) .opt-img{animation-delay:3.6s}",
   "@keyframes lp-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}",
   ".opt-card:hover{box-shadow:0 8px 24px rgba(43,42,38,.12)}",
   // 6. 窓口はひとつ: 真ん中から線が伸び(線は pathLength=1)、札が順に現れる。真ん中から波紋

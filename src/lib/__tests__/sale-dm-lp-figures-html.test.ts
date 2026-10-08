@@ -133,3 +133,18 @@ describe("renderFigureHtml", () => {
     }
   });
 });
+
+describe("4枚目の札「住み続けて売る(リースバック)」(2026-10-08 発注者決定)", () => {
+  it("札は4枚で、4枚目はリースバックの説明と絵", () => {
+    const h = renderFigureHtml("sell_rent_keep");
+    expect((h.match(/class="opt-card"/g) ?? []).length).toBe(4);
+    expect(h).toContain("<h3>住み続けて売る</h3>");
+    expect(h).toContain("リースバック");
+    expect(h).toContain('src="/lp-assets/brand/opt-leaseback.jpg"');
+  });
+  it("管理画面の見本(SVG)も4枚で、札の文字が札の幅に収まる", () => {
+    const svg = renderFigureSvg("sell_rent_keep");
+    expect((svg.match(/<rect x="\d+" y="84"/g) ?? []).length).toBe(4);
+    expect(svg).toContain(">住み続けて売る</text>");
+  });
+});
