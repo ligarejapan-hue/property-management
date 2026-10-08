@@ -14,7 +14,7 @@ export const FIGURE_LABELS: Record<FigureKind, string> = {
   inheritance_deadlines: "相続した不動産の期限",
   vacant_burden: "空き家のまま持ち続けたときの負担",
   timing_by_type: "種別ごとの売り時の目安",
-  sell_rent_keep: "売る・貸す・しばらく持つ(絵つきの札)",
+  sell_rent_keep: "売る・貸す・持つ・住み続けて売る(絵つきの札)",
   partner_network: "窓口はひとつ(提携先の図)",
   consult_guide: "案内役(イメージイラスト)と本文",
 };
@@ -151,10 +151,13 @@ const RENDERERS: Record<FigureKind, () => string> = {
   // ↓ 以下3つは公開LPでは renderFigureHtml(絵や本文と組む HTML)で描く。SVG は管理画面の見本(縮小表示)用。
   sell_rent_keep: () =>
     wrap(
-      LP_BRAND.options.map((o, i) => {
-        const x = 24 + i * 204;
-        return `<rect x="${x}" y="84" width="184" height="180" rx="12" fill="${SOFT}" stroke="${ACCENT}" stroke-width="1.5"/>` +
-          text(x + 92, 190, o.title, 20, INK, "middle", "700");
+      LP_BRAND.options.map((o, i, all) => {
+        // 札の数に合わせて横幅を割る(4枚=1枚136)。文字は札の幅に収まる大きさにする。
+        const w = Math.floor((592 - (all.length - 1) * 16) / all.length);
+        const x = 24 + i * (w + 16);
+        const size = Math.min(20, Math.floor((w - 12) / o.title.length));
+        return `<rect x="${x}" y="84" width="${w}" height="180" rx="12" fill="${SOFT}" stroke="${ACCENT}" stroke-width="1.5"/>` +
+          text(x + Math.floor(w / 2), 190, o.title, size, INK, "middle", "700");
       }).join("") + text(24, 310, "それぞれの見通しをお伝えします(絵つき)", 13, MUTED),
       FIGURE_LABELS.sell_rent_keep,
     ),

@@ -27,5 +27,7 @@ export const LP_BRAND = {
     { title: "売る", text: "今の価格の目安と、手元に残る金額の見込みをお伝えします。", image: { src: "/lp-assets/brand/opt-sell.jpg", width: 480, height: 480, alt: "契約書の上で家の鍵を手渡すイラスト" } },
     { title: "貸す", text: "貸したときの家賃の目安や、かかる手間もご説明します。", image: { src: "/lp-assets/brand/opt-rent.jpg", width: 480, height: 480, alt: "家の持ち主が入居する夫婦に鍵を渡すイラスト" } },
     { title: "しばらく持つ", text: "持ち続けるときの費用と、気をつけたい期限を整理します。", image: { src: "/lp-assets/brand/opt-keep.jpg", width: 480, height: 480, alt: "手入れされた庭のある静かな家のイラスト" } },
+    // 4枚目(発注者決定 2026-10-08): 実例2件目のリースバックとつながる選択肢
+    { title: "住み続けて売る", text: "自宅を売った後も、そのまま住み続けられる方法(リースバック)もご案内します。", image: { src: "/lp-assets/brand/opt-leaseback.jpg", width: 480, height: 480, alt: "自宅のリビングで息子夫婦や孫とくつろぐ祖父母のイラスト" } },
   ],
 } as const;
