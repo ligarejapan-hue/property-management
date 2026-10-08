@@ -25,11 +25,21 @@ function has(labels: readonly string[], needle: string): boolean {
   return labels.some((l) => l.replace(/[\s　]/g, "").includes(needle));
 }
 
+const TAKAURU_MARKERS = ["査定物件の郵便番号", "不動産会社からのご希望連絡先", "マンションレビューを見る"];
+
 export function detectSourceProfile(labels: readonly string[]): SourceProfileId {
   if (has(labels, "査定ナンバー")) return "home4u_assessment";
   if (has(labels, "空き家所有者との関係性")) return "home4u_vacant_house";
   // タカウル(マンションレビュー)の査定依頼メール(実物 2026-10-07 で確認)。
-  if (has(labels, "査定物件の所在地")) return "takauru_assessment";
+  // ⚠「査定物件の所在地」だけでは決めない(@codex PR#491 3巡目)。他社にも出うる
+  //   見出しで、タカウル用の読み方(続き行をつなぐ)が他社の文章に掛かるため。
+  //   タカウルに固有の見出しがもう1つあるときだけ。
+  if (
+    has(labels, "査定物件の所在地") &&
+    TAKAURU_MARKERS.some((m) => has(labels, m))
+  ) {
+    return "takauru_assessment";
+  }
   return "generic";
 }
 
@@ -40,7 +50,7 @@ export function detectSourceProfile(labels: readonly string[]): SourceProfileId 
  */
 export function parseOptionsFor(profile: SourceProfileId): ParseOptions {
   if (profile === "takauru_assessment") {
-    return { joinContinuationLines: true, footerBetweenHeavyRules: true };
+    return { joinAfterPostalCode: true, footerBetweenHeavyRules: true };
   }
   return {};
 }

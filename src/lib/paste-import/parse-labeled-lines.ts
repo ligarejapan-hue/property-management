@@ -64,12 +64,14 @@ function firstSeparatorIndex(line: string): number {
  */
 export interface ParseOptions {
   /**
-   * 区切りの無い行が「見出し：値」の行の**すぐ下**(間に空行なし)に続くとき、
-   * 前の値の続きとして空白でつなぐ。
+   * 値が**郵便番号だけ**の「見出し：値」の行のすぐ下(間に空行なし)の1行を、
+   * 住所の本体として空白でつなぐ。
    * 実サンプル(タカウル): `- ご住所：154-0004` の次の行に住所の本体がある。
    * つながないと、現住所が郵便番号だけになり、住所の本体は「読み取れなかった行」へ落ちる。
+   * ⚠**郵便番号の後だけ**に絞る(@codex PR#491 3巡目)。どの行でもつなぐと、
+   *   `お名前：山田太郎` の次の説明文が氏名にくっつく。
    */
-  joinContinuationLines?: boolean;
+  joinAfterPostalCode?: boolean;
   /**
    * 罫線(━)だけの行で挟まれた範囲を、送り元の署名欄として**見出しで割らない**。
    * 実サンプル(タカウル): 運営会社の `住 所：` `T E L：` `Mail：` が並ぶ。割ると
@@ -79,8 +81,10 @@ export interface ParseOptions {
   footerBetweenHeavyRules?: boolean;
 }
 
-/** 罫線だけの行(─ ━ = などの連なり)。続き行としてつながない。 */
+/** 罫線だけの行(─ ━ = などの連なり)。住所の本体としてつながない。 */
 const RULE_LINE = /^[\s　]*[─━═=＝\-－_]{4,}[\s　]*$/;
+/** 郵便番号だけの値(〒の有無・全角半角・ハイフンの有無を問わない)。 */
+const POSTAL_CODE_ONLY = /^〒?[\s　]*[0-9０-９]{3}[\s　]*[-－ー−―‐]?[\s　]*[0-9０-９]{4}$/;
 const HEAVY_RULE_LINE = /^[\s　]*━{4,}[\s　]*$/;
 /**
  * 見出しの位置に URL の方式名だけがある(`https://…` の行の `https`)。
@@ -92,7 +96,7 @@ export function parseLabeledLines(text: string, options: ParseOptions = {}): Par
   const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   const labeled: LabeledLine[] = [];
   const unlabeled: string[] = [];
-  /** 直前の行が「見出し：値」の行(またはその続き)なら、その行。 */
+  /** 直前の行が「見出し：郵便番号」の行なら、その行(次の1行だけつなぐ)。 */
   let continuable: LabeledLine | null = null;
   let inFooter = false;
   // ⚠署名欄に入るのは**閉じる罫線が後にあるときだけ**(提出前レビュー)。
@@ -132,9 +136,9 @@ export function parseLabeledLines(text: string, options: ParseOptions = {}): Par
       sepAt = -1;
     }
     if (sepAt === -1) {
-      if (options.joinContinuationLines && continuable !== null && !RULE_LINE.test(raw)) {
-        const v = trimWide(raw);
-        continuable.value = continuable.value === "" ? v : `${continuable.value} ${v}`;
+      if (continuable !== null && !RULE_LINE.test(raw)) {
+        continuable.value = `${continuable.value} ${trimWide(raw)}`;
+        continuable = null;
         continue;
       }
       continuable = null;
@@ -154,7 +158,7 @@ export function parseLabeledLines(text: string, options: ParseOptions = {}): Par
     }
     const line: LabeledLine = { label, value, lineNumber };
     labeled.push(line);
-    continuable = line;
+    continuable = options.joinAfterPostalCode && POSTAL_CODE_ONLY.test(value) ? line : null;
   }
 
   return { labeled, unlabeled };

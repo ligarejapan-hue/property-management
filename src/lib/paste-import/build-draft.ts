@@ -31,12 +31,16 @@ function occupancyFor(raw: string): string | null {
   const s = raw.replace(/[\s　]/g, "");
   const has = (words: string[]) => words.some((w) => s.includes(w));
   // 打ち消し(「居住していない」)は「居住して」より先に見る(逆に当たるため)。
-  const notLiving = has(["住んでいない", "居住していない", "空いている"]);
+  // ⚠空室とみなすのは**物件全体**について言っているときだけ(@codex PR#491 3巡目)。
+  //   `所有者は居住していない` は、賃借人や家族が住んでいるかもしれない＝決めない。
+  const nobodyLiving = has(["誰も住んでいない", "誰も居住していない", "空いている"]);
+  const someoneNotLiving = has(["住んでいない", "居住していない"]);
   const occupiedMarker = has(["居住中", "入居中", "賃貸中"]);
   // ⚠打ち消しと居住中の印が**両方**あれば決めない(@codex PR#491 2巡目)。
   //   `所有者は居住していない（賃貸中）` は賃貸中＝occupied。どちらとも読めるので
   //   読み取れない扱い(警告+原文を備考へ・Excel は人の確認へ)にする。
-  if (notLiving) return occupiedMarker ? null : "vacant";
+  if (nobodyLiving) return occupiedMarker ? null : "vacant";
+  if (someoneNotLiving) return null;
   if (occupiedMarker) return "occupied";
   // タカウル「現在の物件状況：自身が居住している」(実物 2026-10-07)。
   if (has(["居住している", "入居している", "賃貸している"])) return "occupied";

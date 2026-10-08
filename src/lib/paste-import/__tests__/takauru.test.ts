@@ -122,6 +122,15 @@ describe("「物件の所有者」「ご関係」は値で判定する(見出し
   });
 });
 
+describe("タカウルの見分け方(@codex PR#491 3巡目)", () => {
+  it("「査定物件の所在地」だけでは決めない(他社の文章にタカウル用の読み方を掛けない)", () => {
+    const d = buildPasteDraft("査定物件の所在地：東京都A区B1-2-3\nご住所：154-0004\n説明の行");
+    expect(d.sourceProfile).toBe("generic");
+    expect(d.owner?.currentAddress.value).toBe("154-0004");
+    expect(d.unlabeled).toContain("説明の行");
+  });
+});
+
 describe("所有者と申込者が同じ人のとき", () => {
   it("警告を出さず、フリガナも所有者に入れる", () => {
     const d = buildPasteDraft(
@@ -171,8 +180,13 @@ describe("現在の物件状況の言い換え", () => {
     expect(occ(v).property.occupancyStatus.value).toBe(expected);
   });
 
-  it.each([["所有者は居住していない（賃貸中）"], ["自身は居住していないが、親族が居住中"]])(
-    "打ち消しと居住中の印が両方あれば決めない(読み取れない扱い): %s",
+  it.each([
+    ["所有者は居住していない（賃貸中）"],
+    ["自身は居住していないが、親族が居住中"],
+    ["所有者は居住していない"],
+    ["自身は住んでいない"],
+  ])(
+    "人についての打ち消し・居住中の印との混在は決めない(読み取れない扱い): %s",
     (v) => {
       const d = occ(v);
       expect(d.property.occupancyStatus.value).toBeNull();
@@ -215,13 +229,18 @@ describe("parseLabeledLines の読み方の違い", () => {
     expect(r.unlabeled).toEqual(["東京都A区B1-2-3"]);
   });
 
-  it("続き行は空行・罫線で切れる", () => {
+  it("つなぐのは「値が郵便番号だけ」の行の次の1行だけ", () => {
     const r = parseLabeledLines(
-      "ご住所：154-0004\n東京都A区B1-2-3\n\n説明の行\nメモ：あ\n────────\nい",
+      "ご住所：〒154-0004\n東京都A区B1-2-3\n2行目\nお名前：山田太郎\n説明の行\n郵便：154-0004\n\n空行の後\n郵便：1540004\n────────",
       parseOptionsFor("takauru_assessment"),
     );
-    expect(r.labeled.map((l) => l.value)).toEqual(["154-0004 東京都A区B1-2-3", "あ"]);
-    expect(r.unlabeled).toEqual(["説明の行", "────────", "い"]);
+    expect(r.labeled.map((l) => l.value)).toEqual([
+      "〒154-0004 東京都A区B1-2-3",
+      "山田太郎",
+      "154-0004",
+      "1540004",
+    ]);
+    expect(r.unlabeled).toEqual(["2行目", "説明の行", "空行の後", "────────"]);
   });
 
   it("★罫線(━)が奇数本でも、後ろの行(反響番号＝二重登録の鍵)を飲み込まない", () => {
@@ -229,8 +248,9 @@ describe("parseLabeledLines の読み方の違い", () => {
     const r = parseLabeledLines("お名前：A\n━━━━━━\n運 営：X社\n反響番号：lead-1", opts);
     expect(r.labeled.map((l) => l.label)).toEqual(["お名前", "運 営", "反響番号"]);
     const d = buildPasteDraft(
-      "- 査定物件の所在地：東京都A区B1-2-3\n━━━━━━━━\n　T E L：03-0000-0000\n反響番号：lead-2",
+      "- 査定物件の郵便番号：154-0004\n- 査定物件の所在地：東京都A区B1-2-3\n━━━━━━━━\n　T E L：03-0000-0000\n反響番号：lead-2",
     );
+    expect(d.sourceProfile).toBe("takauru_assessment");
     expect(d.externalLinkKey).toBe("lead-2");
   });
 
