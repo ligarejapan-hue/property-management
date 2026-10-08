@@ -252,16 +252,18 @@ export function partnerNetworkNodes(): Array<{ label: string; x: number; y: numb
 /** 円形の図の中身(線・真ん中の円・札)。公開LPの SVG と管理画面の見本の両方で使う。 */
 function partnerRadialInner(): string {
   const nodes = partnerNetworkNodes();
-  const lines = nodes.map((n) => `<line x1="${NET_CX}" y1="${NET_CY}" x2="${n.x}" y2="${n.y}" stroke="#0e6b5c" stroke-width="2"/>`).join("");
-  const pills = nodes.map((n) =>
-    `<rect x="${n.x - n.w / 2}" y="${n.y - NETWORK_PILL_H / 2}" width="${n.w}" height="${NETWORK_PILL_H}" rx="${NETWORK_PILL_H / 2}" fill="#e3efe9" stroke="#0e6b5c" stroke-width="1.5"/>` +
-    `<text x="${n.x}" y="${n.y + 5}" ${FONT} font-size="${NET_FONT}" font-weight="700" fill="#0a5246" text-anchor="middle">${esc(n.label)}</text>`,
+  // 動き(lp-page.ts の CSS): 線は pathLength=1 で「伸びる」、札は少しずつ遅らせて現れる。動かない端末ではそのまま全部見える。
+  const lines = nodes.map((n, i) => `<line x1="${NET_CX}" y1="${NET_CY}" x2="${n.x}" y2="${n.y}" stroke="#0e6b5c" stroke-width="2" pathLength="1" style="transition-delay:${(0.15 + i * 0.1).toFixed(2)}s"/>`).join("");
+  const pills = nodes.map((n, i) =>
+    `<g class="net-pill" style="transition-delay:${(0.6 + i * 0.1).toFixed(2)}s"><rect x="${n.x - n.w / 2}" y="${n.y - NETWORK_PILL_H / 2}" width="${n.w}" height="${NETWORK_PILL_H}" rx="${NETWORK_PILL_H / 2}" fill="#e3efe9" stroke="#0e6b5c" stroke-width="1.5"/>` +
+    `<text x="${n.x}" y="${n.y + 5}" ${FONT} font-size="${NET_FONT}" font-weight="700" fill="#0a5246" text-anchor="middle">${esc(n.label)}</text></g>`,
   ).join("");
+  const ripple = `<circle class="net-ripple" cx="${NET_CX}" cy="${NET_CY}" r="${NET_CENTER_R}" fill="none" stroke="#0e6b5c" stroke-width="2" opacity="0"/>`;
   const center = `<circle cx="${NET_CX}" cy="${NET_CY}" r="${NET_CENTER_R}" fill="#0e6b5c"/>` +
     `<text x="${NET_CX}" y="${NET_CY - 6}" ${FONT} font-size="17" font-weight="700" fill="#fffdf8" text-anchor="middle">リガーレ</text>` +
     `<text x="${NET_CX}" y="${NET_CY + 16}" ${FONT} font-size="17" font-weight="700" fill="#fffdf8" text-anchor="middle">ジャパン</text>` +
     `<text x="${NET_CX}" y="${NET_CY + 36}" ${FONT} font-size="11" fill="#e3efe9" text-anchor="middle">ご相談窓口</text>`;
-  return `${lines}${center}${pills}`;
+  return `${lines}${ripple}${center}${pills}`;
 }
 function partnerRadialSvg(): string {
   const label = `リガーレジャパンを中心に、${partnerNetworkNodes().map((n) => n.label).join("・")}とつながっています`;

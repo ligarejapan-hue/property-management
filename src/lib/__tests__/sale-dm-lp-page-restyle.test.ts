@@ -78,12 +78,12 @@ describe("公開LPの新しい作り(2026-10 見本)", () => {
     const none = renderLpPage(input({ sections: [] }));
     expect(none).not.toContain("input[data-check]");
     const preview = renderLpPage(input({ mode: "preview", phoneTapToken: null, form: { ...FORM, action: "#", disabled: true } }));
-    expect(preview).not.toContain("<script");
+    expect(preview).not.toContain("input[data-check]");
   });
 
   it("埋め込みスクリプトはすべて構文として正しい・innerHTML を使わない", () => {
     const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
-    expect(scripts.length).toBe(3);
+    expect(scripts.length).toBe(4); // 電話タップ・申込フォーム・チェック札・動き
     for (const s of scripts) expect(() => new Function(s)).not.toThrow();
     expect(html).not.toContain("innerHTML");
   });
@@ -217,5 +217,63 @@ describe("画面下の固定ボタンは、いつもいちばん手前", () => {
     const others = [...html.matchAll(/([^{}]+)\{[^{}]*z-index:(\d+)/g)].filter((m) => !m[1].includes(".bar")).map((m) => Number(m[2]));
     expect(others.length).toBeGreaterThan(0); // 年表の札(z-index:1)を必ず拾っている
     for (const z of others) expect(z).toBeLessThan(barZ);
+  });
+});
+
+// 発注者承認(2026-10-08・見本 https://claude.ai/artifact/YENL8ErHQuMSHP2cjhSXwD): 図やイラストに動きを入れる。
+describe("動き(見本どおり・控えめ)", () => {
+  const live = renderLpPage(input());
+  const preview = renderLpPage(input({ mode: "preview", phoneTapToken: null, form: { ...FORM, action: "#", disabled: true } }));
+
+  it("動きは「動きを減らす」設定でない端末だけ・JS が .anim を付けたときだけ隠す(JS なしでも全部見える)", () => {
+    expect(live).toContain("@media (prefers-reduced-motion: no-preference){");
+    expect(live).toContain(".anim main section{opacity:0");
+    // .anim を付けるのは動きのスクリプトだけ。動きを減らす設定・IntersectionObserver なしでは付けない
+    expect(live).toContain('matchMedia("(prefers-reduced-motion: reduce)").matches');
+    expect(live).toContain("IntersectionObserver");
+    expect(live).toContain('classList.add("anim")');
+  });
+
+  it("動きのスクリプトは live でも社内プレビューでも出る(計測・送信のスクリプトはプレビューでは出さないまま)", () => {
+    for (const h of [live, preview]) expect(h).toContain('classList.add("anim")');
+    expect(preview).not.toContain("sendBeacon");
+    expect(preview).not.toContain("fetch(f.action");
+  });
+
+  it("スクリプトはどれも構文として正しく、innerHTML を使わない", () => {
+    for (const h of [live, preview]) {
+      const scripts = [...h.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+      expect(scripts.length).toBeGreaterThan(0);
+      for (const s of scripts) expect(() => new Function(s)).not.toThrow();
+      expect(h).not.toContain("innerHTML");
+    }
+  });
+
+  it("提携先の図: 線は長さ1として扱い(伸びる動き)、真ん中に波紋の円がある", () => {
+    const h = renderLpPage(input({ sections: [{ heading: "窓口", paragraphs: ["x"], media: { kind: "figure", figureKind: "partner_network" } }] }));
+    expect((h.match(/<line [^>]*pathLength="1"/g) ?? []).length).toBe(7);
+    expect(h).toContain('class="net-ripple"');
+  });
+
+  it("画像を切り取る・拡大する動きは入れない(元の比率のまま)", () => {
+    expect(live).not.toContain("object-fit:cover");
+    expect(live).not.toMatch(/\.hero[^{]*\{[^}]*transform:scale/);
+  });
+});
+
+// 提出前レビュー(2026-10-08): 背の高い節(申込フォーム)が、横向きのスマホなどで永久に見えないままになる穴を塞ぐ。
+describe("動きで中身が見えなくならない(安全網)", () => {
+  const h = renderLpPage(input());
+  it("節は上端が画面に入った時点で出す(threshold 0)=背の高い申込フォームでも必ず出る", () => {
+    expect(h).toContain("threshold:0,");
+    expect(h).not.toContain("threshold:0.18");
+  });
+  it("見張りが動かない閲覧アプリ用に、時間がたてば全部出す。例外が出たら動きをやめて全部見せる", () => {
+    expect(h).toMatch(/setTimeout\(function\(\)\{var h=document\.querySelectorAll\("\.anim main section/);
+    expect(h).toContain('}catch(_){root.classList.remove("anim")}');
+  });
+  it("絵を含む札を縮める動きは使わない(画像は拡大・縮小しない)・送付前の押せないボタンは光らせない", () => {
+    expect(h).not.toMatch(/\.anim \.opt-card\{[^}]*scale/);
+    expect(h).toContain(".inquiry fieldset:disabled .cta::after{display:none}");
   });
 });
