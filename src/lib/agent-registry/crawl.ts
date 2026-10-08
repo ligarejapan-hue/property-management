@@ -56,16 +56,22 @@ export interface CrawlStore {
 export interface StepBudget {
   deadlineMs: number;
   maxRequests: number;
+  /** 先方全体の失敗のあと、次に頼むまで待つ時間(ミリ秒)。無ければ待たない(次の回にすぐ取り直す)。 */
+  retryWaitMs?: number;
 }
 
-/** 1回の呼び出しの既定の予算: 8分・100回(4秒あけるので実際は約6.7分で100回)。timer は10分ごと。 */
-export const DEFAULT_BUDGET: StepBudget = { deadlineMs: 8 * 60 * 1000, maxRequests: 100 };
+/**
+ * 1回の呼び出しの既定の予算: 8分・100回(4秒あけるので実際は約6.7分で100回)。timer は10分ごと。
+ * 先方全体の失敗(混雑・断られた・時間切れ等)のあとは30分あけてから取り直す(発注者 2026-10-08)。
+ */
+export const DEFAULT_BUDGET: StepBudget = { deadlineMs: 8 * 60 * 1000, maxRequests: 100, retryWaitMs: 30 * 60 * 1000 };
 
 export interface StepResult {
   requests: number;
   listed: number;
   detailed: number;
-  stopped: null | FetchFail | "budget" | "day_off" | "outside_window";
+  /** retry_wait=失敗のあとの30分の待ちの間(先方に頼まない)・day_off=続けて3回失敗して翌晩まで止めている */
+  stopped: null | FetchFail | "budget" | "day_off" | "retry_wait" | "outside_window";
 }
 
 /** 続けて何回失敗したら、その晩は止めるか(計画 G2)。 */
@@ -89,6 +95,14 @@ export function inNightWindow(now: Date): boolean {
 export function cycleOf(now: Date): string {
   const d = new Date(now.getTime() + JST_OFFSET_MS);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * その時刻が属する晩の名前(日本時間で、22:00〜翌7:00 を始まりの日付で呼ぶ)。
+ * 日本時間から12時間引いた日付=23時は当日・翌3時も前日(=同じ晩)。
+ */
+export function nightOf(at: Date): string {
+  return new Date(at.getTime() + JST_OFFSET_MS - 12 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 /** 次の晩の始まり(日本時間 22:00)。今が 23 時なら翌日の 22 時、深夜 3 時ならその日の 22 時。 */
@@ -143,12 +157,19 @@ export async function crawlStep(deps: {
   if (!inNightWindow(t0)) return { ...result, stopped: "outside_window" };
 
   let states = alignStates(await store.loadStates(), t0);
+  // dayOffUntil=この時刻までは先方に頼まない。続けて3回失敗した=翌晩まで/それより少ない=失敗から30分(待ち)。
+  const resting = states[0].failStreak >= FAIL_STREAK_LIMIT;
   if (states.some((s) => s.dayOffUntil && s.dayOffUntil.getTime() > t0.getTime())) {
-    return { ...result, stopped: "day_off" };
+    return { ...result, stopped: resting ? "day_off" : "retry_wait" };
   }
-  // 止めていた晩が明けた=失敗の回数を数え直す(次の晩も3回まで試せる・@codex #477)。
-  if (states.some((s) => s.dayOffUntil)) {
-    states = states.map((s) => ({ ...s, failStreak: 0, dayOffUntil: null }));
+  // 失敗の数はその晩のもの。前の晩の失敗(明け方の失敗の待ちが朝をまたいだ等)は持ち越さない(@codex #494)。
+  const lastRun = states[0].lastRunAt;
+  const newNight = !!lastRun && nightOf(lastRun) !== nightOf(t0);
+  if (states.some((s) => s.dayOffUntil) || (newNight && states[0].failStreak > 0)) {
+    // 止めていた晩が明けた・新しい晩になった=失敗の回数を数え直す(次の晩も3回まで試せる・@codex #477)。
+    // 同じ晩の30分の待ちが明けただけなら数え直さない(待ちをはさんでも続けての失敗は3回で晩じゅう止める)。
+    const reset = resting || newNight;
+    states = states.map((s) => ({ ...s, failStreak: reset ? 0 : s.failStreak, dayOffUntil: null }));
   }
   // 前の一巡が終わっていて月が変わったら、次の一巡を一覧の1ページ目から。
   // 前の一巡が途中なら、月が変わってもまずそれを終わらせる(締めを飛ばさない)。
@@ -304,7 +325,13 @@ export async function crawlStep(deps: {
     }
     // この回の中で一度でも成功していれば、続けての失敗は数え直し(とびとびの失敗では止めない)。
     const streak = (succeeded ? 0 : states[0].failStreak) + 1;
-    const dayOffUntil = streak >= FAIL_STREAK_LIMIT ? nextNightStart(now()) : null;
+    // 続けて3回で翌晩まで止める。それより少なければ、30分あけてから取り直す(混んでいる先方を10分おきに叩かない)。
+    const dayOffUntil =
+      streak >= FAIL_STREAK_LIMIT
+        ? nextNightStart(now())
+        : budget.retryWaitMs
+          ? new Date(now().getTime() + budget.retryWaitMs)
+          : null;
     states = states.map((x) => ({ ...x, failStreak: streak, dayOffUntil, lastError: e.kind, lastRunAt: now() }));
     result.stopped = e.kind;
   }

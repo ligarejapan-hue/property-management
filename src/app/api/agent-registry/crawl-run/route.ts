@@ -44,7 +44,10 @@ export async function POST(request: Request) {
     try {
       const result = await crawlStep({
         // 取り直しを含むすべての呼び出しの直前に、夜間か・予算の内かを確かめる(7時を越えない・100回を超えない・@codex #477)。
-        client: createRegistryClient({ allowRequest: () => inNightWindow(new Date()), budget: DEFAULT_BUDGET }),
+        client: createRegistryClient({
+          allowRequest: () => inNightWindow(new Date()),
+          budget: { maxRequests: DEFAULT_BUDGET.maxRequests, deadlineMs: DEFAULT_BUDGET.deadlineMs },
+        }),
         store,
         now: () => new Date(),
         budget: DEFAULT_BUDGET,

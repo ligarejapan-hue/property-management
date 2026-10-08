@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   AUTHORITIES,
+  DEFAULT_BUDGET,
   crawlStep,
   cycleOf,
   inNightWindow,
   nextNightStart,
+  nightOf,
   type CrawlState,
   type CrawlStore,
   type StepBudget,
@@ -155,6 +157,12 @@ describe("夜間の判定・一巡の名前", () => {
     expect(inNightWindow(new Date("2026-10-05T21:59:00Z"))).toBe(true); // 翌6:59
     expect(inNightWindow(new Date("2026-10-05T22:00:00Z"))).toBe(false); // 翌7:00
   });
+  it("晩の名前: 22時と翌3時は同じ晩・翌22時は次の晩", () => {
+    expect(nightOf(new Date("2026-10-05T13:00:00Z"))).toBe("2026-10-05"); // JST 10/5 22:00
+    expect(nightOf(new Date("2026-10-05T18:00:00Z"))).toBe("2026-10-05"); // JST 10/6 03:00
+    expect(nightOf(new Date("2026-10-05T21:59:00Z"))).toBe("2026-10-05"); // JST 10/6 06:59
+    expect(nightOf(new Date("2026-10-06T13:00:00Z"))).toBe("2026-10-06"); // JST 10/6 22:00
+  });
   it("一巡は日本時間の年月・次の晩の始まり", () => {
     expect(cycleOf(new Date("2026-10-31T15:30:00Z"))).toBe("2026-11"); // JST 11/1 0:30
     expect(nextNightStart(new Date("2026-10-05T14:00:00Z")).toISOString()).toBe("2026-10-06T13:00:00.000Z"); // 23時→翌22時
@@ -276,6 +284,76 @@ describe("進め方", () => {
     expect(getStates().every((s) => s.cycle === "2026-10" && s.phase === "done")).toBe(true);
     await crawlStep({ client, store, now: () => nov, budget: { ...BIG, maxRequests: 1 } });
     expect(getStates().every((s) => s.cycle === "2026-11")).toBe(true);
+  });
+
+  describe("★失敗したら30分あけてから取り直す(先方が混んでいるときに10分おきに叩かない・発注者 2026-10-08)", () => {
+    const WAIT: StepBudget = { ...BIG, retryWaitMs: 30 * 60 * 1000 };
+    const at = (min: number) => () => new Date(NIGHT.getTime() + min * 60 * 1000);
+
+    it("本番の既定の待ちは30分", () => {
+      expect(DEFAULT_BUDGET.retryWaitMs).toBe(30 * 60 * 1000);
+    });
+
+    it("1回失敗 → 10分後・20分後の回は先方に頼まずに終わる → 30分後に取り直して進む(失敗の数は0に戻る)", async () => {
+      const { client, log } = fakeClient(smallSite(), { failAt: new Set([1]) });
+      const { store, getStates } = memoryStore();
+      expect((await crawlStep({ client, store, now: at(0), budget: WAIT })).stopped).toBe("http_5xx");
+      expect(getStates()[0].dayOffUntil?.getTime()).toBe(at(30)().getTime());
+      for (const m of [10, 20]) {
+        const r = await crawlStep({ client, store, now: at(m), budget: WAIT });
+        expect(r.stopped).toBe("retry_wait");
+        expect(r.requests).toBe(0);
+      }
+      expect(log).toHaveLength(1);
+      const r = await crawlStep({ client, store, now: at(30), budget: WAIT });
+      expect(r.stopped).toBeNull();
+      expect(getStates().every((s) => s.failStreak === 0 && s.dayOffUntil === null)).toBe(true);
+    });
+
+    it("30分ずつあけて続けて3回失敗したら、その晩は止まる(約1時間で3回)・翌晩は動く", async () => {
+      const { client, log } = fakeClient(smallSite(), { failAt: new Set([1, 2, 3]) });
+      const { store, getStates } = memoryStore();
+      expect((await crawlStep({ client, store, now: at(0), budget: WAIT })).stopped).toBe("http_5xx");
+      expect((await crawlStep({ client, store, now: at(30), budget: WAIT })).stopped).toBe("http_5xx");
+      expect(getStates()[0].failStreak).toBe(2); // 待ちが明けても数え直さない(続けての失敗)
+      expect((await crawlStep({ client, store, now: at(60), budget: WAIT })).stopped).toBe("http_5xx");
+      expect(log).toHaveLength(3);
+      for (const m of [70, 90, 180]) {
+        expect((await crawlStep({ client, store, now: at(m), budget: WAIT })).stopped).toBe("day_off");
+      }
+      expect(log).toHaveLength(3);
+      const tomorrow = await crawlStep({ client, store, now: () => new Date("2026-10-06T13:10:00Z"), budget: WAIT });
+      expect(tomorrow.stopped).toBeNull();
+    });
+
+    it("★明け方の失敗の数は次の晩に持ち越さない(待ちが朝7時をまたいでも、次の晩は3回まで試せる・@codex #494)", async () => {
+      // 失敗1・2回目=JST 06:20・06:50(2回目の待ちは 07:20 まで=朝をまたぐ)。次の晩 22:00 の1回目も失敗。
+      const { client, log } = fakeClient(smallSite(), { failAt: new Set([1, 2, 3]) });
+      const { store, getStates } = memoryStore();
+      const jst = (iso: string) => () => new Date(iso);
+      expect((await crawlStep({ client, store, now: jst("2026-10-05T21:20:00Z"), budget: WAIT })).stopped).toBe("http_5xx");
+      expect((await crawlStep({ client, store, now: jst("2026-10-05T21:50:00Z"), budget: WAIT })).stopped).toBe("http_5xx");
+      expect(getStates()[0].failStreak).toBe(2);
+      const r = await crawlStep({ client, store, now: jst("2026-10-06T13:00:00Z"), budget: WAIT }); // JST 22:00
+      expect(r.stopped).toBe("http_5xx");
+      expect(getStates()[0].failStreak).toBe(1); // 新しい晩の1回目(前の晩の2回を持ち越さない)
+      expect(getStates()[0].dayOffUntil?.getTime()).toBe(new Date("2026-10-06T13:30:00Z").getTime()); // 30分の待ち(翌晩までではない)
+      const next = await crawlStep({ client, store, now: jst("2026-10-06T13:30:00Z"), budget: WAIT });
+      expect(next.stopped).toBeNull();
+      expect(log.length).toBeGreaterThan(3);
+    });
+
+    it("会社ごとの失敗・予算切れ・夜間の外は待たない(次の回にすぐ進む)", async () => {
+      const a = fakeClient(smallSite(), { failAt: new Set([3]), failKind: "budget" });
+      const sa = memoryStore();
+      await crawlStep({ client: a.client, store: sa.store, now: at(0), budget: WAIT });
+      expect(sa.getStates()[0].dayOffUntil).toBeNull();
+      const b = fakeClient(smallSite(), { brokenDetail: "13000001" });
+      const sb = memoryStore();
+      const r = await crawlStep({ client: b.client, store: sb.store, now: at(0), budget: WAIT });
+      expect(r.stopped).toBe("layout");
+      expect(sb.getStates()[0].dayOffUntil).toBeNull(); // その会社だけの失敗=待たない
+    });
   });
 
   it("★3回続けて失敗したら、その晩はもう動かない・翌晩は動く", async () => {

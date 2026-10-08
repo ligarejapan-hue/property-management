@@ -109,6 +109,12 @@ describe("POST /api/agent-registry/crawl-run", () => {
     expect(crawlStep).toHaveBeenCalledTimes(1);
   });
 
+  it("★進め方には本番の既定の予算を渡す(失敗したら30分あけて取り直す)", async () => {
+    await POST(req({ secret: SECRET }));
+    const deps = crawlStep.mock.calls[0][0] as { budget: { maxRequests: number; deadlineMs: number; retryWaitMs?: number } };
+    expect(deps.budget).toEqual({ maxRequests: 100, deadlineMs: 8 * 60 * 1000, retryWaitMs: 30 * 60 * 1000 });
+  });
+
   it("★client には1回の予算(回数・時間)も渡す(取り直しを含めて 100 回を超えない・@codex #477)", async () => {
     await POST(req({ secret: SECRET }));
     const opts = createRegistryClient.mock.calls[0][0] as { budget?: { maxRequests: number; deadlineMs: number } } | undefined;
