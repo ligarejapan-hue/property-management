@@ -89,19 +89,21 @@ describe("一覧のページを読む", () => {
     }
   });
 
-  it("大臣免許の表示", () => {
+  it("★大臣免許の行: 実物の「免許行政庁」の欄は「各地方整備局等」(2026-10-08 本番の1回目で確認)・表示は国土交通大臣", () => {
     const html = listHtml
       .replaceAll("js_ShowDetail('13", "js_ShowDetail('00")
-      .replaceAll(">東京都<", ">国土交通大臣<");
+      .replaceAll(">東京都<", ">各地方整備局等<");
     expect(parseListPage(html).rows[0].licenseLabel).toBe("国土交通大臣(17)第000001号");
   });
 
-  it("★大臣免許の行も、見えている欄が「国土交通大臣」そのものでなければ LayoutChanged(「建設大臣」などを通さない・@codex #477)", () => {
-    const html = listHtml
-      .replaceAll("js_ShowDetail('13", "js_ShowDetail('00")
-      .replaceAll(">東京都<", ">建設大臣<");
-    expect(html).not.toBe(listHtml);
-    expect(() => parseListPage(html)).toThrow(LayoutChanged);
+  it("★大臣免許の行も、見えている欄が実物の書き方そのものでなければ LayoutChanged(「建設大臣」「国土交通大臣」などを通さない)", () => {
+    for (const cell of ["建設大臣", "国土交通大臣", "関東地方整備局"]) {
+      const html = listHtml
+        .replaceAll("js_ShowDetail('13", "js_ShowDetail('00")
+        .replaceAll(">東京都<", `>${cell}<`);
+      expect(html).not.toBe(listHtml);
+      expect(() => parseListPage(html), cell).toThrow(LayoutChanged);
+    }
   });
 
   it("0件の画面は空(件数 0)", () => {
