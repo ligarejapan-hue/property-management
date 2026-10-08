@@ -7,7 +7,8 @@ const fixture = (name: string) =>
   readFileSync(join(process.cwd(), "src/lib/agent-registry/__tests__/fixtures", name), "utf8");
 const listHtml = fixture("list.html");
 /** 見本の一覧(東京都=13)を別の行政庁のページに書き換える。 */
-const VISIBLE: Record<string, string> = { "00": "国土交通大臣", "11": "埼玉県", "12": "千葉県", "13": "東京都", "14": "神奈川県" };
+// 一覧の「免許行政庁」の欄の実物の書き方(2026-10-08 本番で確認・大臣は「各地方整備局等」)
+const VISIBLE: Record<string, string> = { "00": "各地方整備局等", "11": "埼玉県", "12": "千葉県", "13": "東京都", "14": "神奈川県" };
 const listFor = (a: string) =>
   listHtml
     .replaceAll("js_ShowDetail('13", `js_ShowDetail('${a}`)

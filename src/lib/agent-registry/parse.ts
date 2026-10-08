@@ -70,10 +70,16 @@ const AUTHORITY_NAMES: Record<string, string> = {
   "14": "神奈川県知事",
 };
 
+/**
+ * 大臣免許の行の一覧の「免許行政庁」の欄の、実物の書き方(2026-10-08 本番の1回目で確認)。
+ * 一覧では「国土交通大臣」ではなく窓口の「各地方整備局等」と出る(詳細の免許証番号の欄は「国土交通大臣免許」)。
+ */
+const MINISTER_LIST_CELL = "各地方整備局等";
+
 /** 一覧の「免許行政庁」の欄が、免許の鍵の行政庁と合っているか(対象の5つ以外は確かめない)。 */
 function visibleAuthorityOk(code: string, cellText: string): boolean {
-  // 大臣も都県と同じく欄そのものと照らす(「大臣」を含むだけでは通さない・@codex #477)。
-  if (code === "00") return cellText === AUTHORITY_NAMES["00"];
+  // 大臣も都県と同じく欄そのものと照らす(実物の書き方と一字一句・@codex #477)。
+  if (code === "00") return cellText === MINISTER_LIST_CELL;
   const name = AUTHORITY_NAMES[code];
   return name ? cellText === name.replace(/知事$/, "") : true;
 }
