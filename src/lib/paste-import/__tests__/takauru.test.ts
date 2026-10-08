@@ -160,6 +160,27 @@ describe("Excel まとめ取込: 人に確かめる警告がある行は自動�
   });
 });
 
+describe("現在の物件状況の言い換え", () => {
+  const occ = (v: string) => buildPasteDraft(`物件所在地：東京都A区B1-2-3\n現在の物件状況：${v}`);
+  it.each([
+    ["自身が居住している", "occupied"],
+    ["賃貸している", "occupied"],
+    ["誰も住んでいない", "vacant"],
+    ["空いている", "vacant"],
+  ])("%s → %s", (v, expected) => {
+    expect(occ(v).property.occupancyStatus.value).toBe(expected);
+  });
+
+  it.each([["所有者は居住していない（賃貸中）"], ["自身は居住していないが、親族が居住中"]])(
+    "打ち消しと居住中の印が両方あれば決めない(読み取れない扱い): %s",
+    (v) => {
+      const d = occ(v);
+      expect(d.property.occupancyStatus.value).toBeNull();
+      expect(d.warnings.find((w) => w.code === "value_unreadable")?.field).toBe("occupancyStatus");
+    },
+  );
+});
+
 describe("splitRoomFromBuildingName（建物名の末尾の号室）", () => {
   it.each([
     ["東急サンプルハイツ 305号室", "東急サンプルハイツ", "305"],

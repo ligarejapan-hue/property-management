@@ -29,16 +29,18 @@ const field = (value: string | null, sourceLabel: string): DraftField =>
 /** 現況の言い換え → OccupancyStatus。分からなければ null（unknown を推測で入れない）。 */
 function occupancyFor(raw: string): string | null {
   const s = raw.replace(/[\s　]/g, "");
-  // ⚠打ち消し(「居住していない」)を先に見る。「居住して」で先に当てると逆になる。
-  if (s.includes("住んでいない") || s.includes("居住していない") || s.includes("空いている")) {
-    return "vacant";
-  }
-  if (s.includes("居住中") || s.includes("入居中") || s.includes("賃貸中")) return "occupied";
+  const has = (words: string[]) => words.some((w) => s.includes(w));
+  // 打ち消し(「居住していない」)は「居住して」より先に見る(逆に当たるため)。
+  const notLiving = has(["住んでいない", "居住していない", "空いている"]);
+  const occupiedMarker = has(["居住中", "入居中", "賃貸中"]);
+  // ⚠打ち消しと居住中の印が**両方**あれば決めない(@codex PR#491 2巡目)。
+  //   `所有者は居住していない（賃貸中）` は賃貸中＝occupied。どちらとも読めるので
+  //   読み取れない扱い(警告+原文を備考へ・Excel は人の確認へ)にする。
+  if (notLiving) return occupiedMarker ? null : "vacant";
+  if (occupiedMarker) return "occupied";
   // タカウル「現在の物件状況：自身が居住している」(実物 2026-10-07)。
-  if (s.includes("居住している") || s.includes("入居している") || s.includes("賃貸している")) {
-    return "occupied";
-  }
-  if (s.includes("空室") || s.includes("空家") || s.includes("空き家")) return "vacant";
+  if (has(["居住している", "入居している", "賃貸している"])) return "occupied";
+  if (has(["空室", "空家", "空き家"])) return "vacant";
   return null;
 }
 
