@@ -97,6 +97,14 @@ export function cycleOf(now: Date): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+/**
+ * その時刻が属する晩の名前(日本時間で、22:00〜翌7:00 を始まりの日付で呼ぶ)。
+ * 日本時間から12時間引いた日付=23時は当日・翌3時も前日(=同じ晩)。
+ */
+export function nightOf(at: Date): string {
+  return new Date(at.getTime() + JST_OFFSET_MS - 12 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 /** 次の晩の始まり(日本時間 22:00)。今が 23 時なら翌日の 22 時、深夜 3 時ならその日の 22 時。 */
 export function nextNightStart(now: Date): Date {
   const d = new Date(now.getTime() + JST_OFFSET_MS);
@@ -154,10 +162,14 @@ export async function crawlStep(deps: {
   if (states.some((s) => s.dayOffUntil && s.dayOffUntil.getTime() > t0.getTime())) {
     return { ...result, stopped: resting ? "day_off" : "retry_wait" };
   }
-  if (states.some((s) => s.dayOffUntil)) {
-    // 止めていた晩が明けた=失敗の回数を数え直す(次の晩も3回まで試せる・@codex #477)。
-    // 30分の待ちが明けただけなら数え直さない(待ちをはさんでも続けての失敗は3回で晩じゅう止める)。
-    states = states.map((s) => ({ ...s, failStreak: resting ? 0 : s.failStreak, dayOffUntil: null }));
+  // 失敗の数はその晩のもの。前の晩の失敗(明け方の失敗の待ちが朝をまたいだ等)は持ち越さない(@codex #494)。
+  const lastRun = states[0].lastRunAt;
+  const newNight = !!lastRun && nightOf(lastRun) !== nightOf(t0);
+  if (states.some((s) => s.dayOffUntil) || (newNight && states[0].failStreak > 0)) {
+    // 止めていた晩が明けた・新しい晩になった=失敗の回数を数え直す(次の晩も3回まで試せる・@codex #477)。
+    // 同じ晩の30分の待ちが明けただけなら数え直さない(待ちをはさんでも続けての失敗は3回で晩じゅう止める)。
+    const reset = resting || newNight;
+    states = states.map((s) => ({ ...s, failStreak: reset ? 0 : s.failStreak, dayOffUntil: null }));
   }
   // 前の一巡が終わっていて月が変わったら、次の一巡を一覧の1ページ目から。
   // 前の一巡が途中なら、月が変わってもまずそれを終わらせる(締めを飛ばさない)。
