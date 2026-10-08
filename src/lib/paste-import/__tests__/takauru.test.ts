@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { buildPasteDraft } from "../build-draft";
 import { parseLabeledLines } from "../parse-labeled-lines";
 import { splitRoomFromBuildingName, parseOptionsFor } from "../source-profiles";
+import { leadRowStatus } from "../lead-sheet";
 
 const fixture = (name: string) =>
   readFileSync(join(__dirname, "fixtures", name), "utf8").replace(/\r\n/g, "\n");
@@ -136,6 +137,26 @@ describe("所有者と申込者が同じ人のとき", () => {
     const d = buildPasteDraft("- 査定物件の所在地：東京都A区B1-2-3\n- ご所有者様名：山田 太郎");
     expect(d.owner?.name.value).toBe("山田 太郎");
     expect(d.warnings.map((w) => w.code)).not.toContain("owner_name_missing");
+  });
+});
+
+describe("Excel まとめ取込: 人に確かめる警告がある行は自動で登録しない(@codex PR#491)", () => {
+  const none = { blocked: false, similarCount: 0, ownerCandidateCount: 0, ownerCandidatesTruncated: false };
+
+  it("所有者と申込者が別(タカウル見本)なら review", () => {
+    const d = buildPasteDraft(fixture("takauru-assessment.txt"), { maxYear: 2026 });
+    const r = leadRowStatus(d, none);
+    expect(r.status).toBe("review");
+    expect(r.reasons).toEqual(["所有者と申込者が別の方です(連絡先は申込者のもの)"]);
+  });
+
+  it("部屋番号が食い違えば review", () => {
+    const d = buildPasteDraft(
+      "物件所在地：東京都A区B1-2-3グリーンコート303\n建物名：グリーンコート 305号室\n物件種別：マンション\nお名前：山田太郎\n建物（専有）面積：50m2\n現況：居住中",
+    );
+    const r = leadRowStatus(d, none);
+    expect(r.status).toBe("review");
+    expect(r.reasons).toEqual(["部屋番号が所在地と建物名で食い違っています"]);
   });
 });
 

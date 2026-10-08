@@ -261,6 +261,14 @@ export function leadRowStatus(
       if (label) reasons.push(`${label}を読み取れません`);
     }
   }
+  // ⚠人に確かめてもらう前提の警告は、まとめて登録しない(@codex PR#491 1巡目)。
+  //   所有者と申込者が別=申込者の連絡先を所有者名で保存することになる/
+  //   部屋番号の食い違い=どちらが正しいか読み取りでは決められない。
+  const codes = new Set(draft.warnings.map((w) => w.code));
+  if (codes.has("owner_differs_from_applicant")) {
+    reasons.push("所有者と申込者が別の方です(連絡先は申込者のもの)");
+  }
+  if (codes.has("room_no_conflict")) reasons.push("部屋番号が所在地と建物名で食い違っています");
   if (dup.similarCount > 0) reasons.push("同じ住所の物件がすでにあります");
   if (dup.ownerCandidateCount > 0) reasons.push("同じ名前の所有者がすでにいます");
   if (dup.ownerCandidatesTruncated) reasons.push("同じ名前の所有者が多く、確認しきれません");
