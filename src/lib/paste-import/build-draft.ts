@@ -208,6 +208,27 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
         `所有者の氏名は「${ownerNameLabel}」の値にしました。電話・メール・住所は申込者の連絡先です。ご確認ください。`,
     });
   }
+  // ⚠所有者の氏名はあるのに申込者のお名前が無く、フリガナ・連絡先だけがある
+  //   (@codex PR#491 5巡目)。それが所有者本人のものか申込者のものか決められない。
+  //   フリガナは所有者に付けず(画面に出す)、連絡先は警告付きで入れ、人に確かめてもらう。
+  const applicantSideKeys: DraftFieldKey[] = ["ownerNameKana", "ownerPhone", "ownerEmail", "ownerAddress"];
+  if (
+    declaredOwnerName !== null &&
+    applicantName === null &&
+    applicantSideKeys.some((k) => raw(k) !== null)
+  ) {
+    const kana = raw("ownerNameKana");
+    if (kana !== null) {
+      withheldFromNote.push({ label: label("ownerNameKana"), value: kana, reason: "label" });
+    }
+    ownerKanaField = EMPTY;
+    warnings.push({
+      code: "owner_contact_unconfirmed",
+      message:
+        `所有者の氏名（${ownerNameLabel}）はありますが、申込者のお名前がありません。` +
+        "フリガナ・電話・メール・住所が所有者ご本人のものかご確認ください。",
+    });
+  }
   const ownerFieldKeys: DraftFieldKey[] = [
     "ownerName",
     "propertyOwnerName",

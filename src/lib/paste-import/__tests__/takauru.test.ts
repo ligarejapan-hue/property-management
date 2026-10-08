@@ -149,6 +149,22 @@ describe("所有者と申込者が同じ人のとき", () => {
     const d = buildPasteDraft("- 査定物件の所在地：東京都A区B1-2-3\n- ご所有者様名：山田 太郎");
     expect(d.owner?.name.value).toBe("山田 太郎");
     expect(d.warnings.map((w) => w.code)).not.toContain("owner_name_missing");
+    expect(d.warnings.map((w) => w.code)).not.toContain("owner_contact_unconfirmed");
+  });
+
+  it("★ご所有者様名はあるがお名前が空で、フリガナ・連絡先だけある → 決めずに確認へ(@codex PR#491 5巡目)", () => {
+    const d = buildPasteDraft(
+      "- 物件種別：マンション\n- 査定物件の所在地：東京都A区B1-2-3\n- 建物（専有）面積：50m2\n- 現在の物件状況：自身が居住している\n- ご所有者様名：山田 太郎\n- お名前：\n- フリガナ：ヤマダ　ハナコ\n- 電話番号：09012345678",
+    );
+    expect(d.owner?.name.value).toBe("山田 太郎");
+    expect(d.owner?.nameKana.value).toBeNull();
+    expect(d.withheldFromNote).toContainEqual({ label: "フリガナ", value: "ヤマダ　ハナコ", reason: "label" });
+    expect(d.warnings.map((w) => w.code)).toContain("owner_contact_unconfirmed");
+    const none = { blocked: false, similarCount: 0, ownerCandidateCount: 0, ownerCandidatesTruncated: false };
+    expect(leadRowStatus(d, none)).toEqual({
+      status: "review",
+      reasons: ["申込者のお名前が無く、連絡先が所有者本人のものか分かりません"],
+    });
   });
 });
 

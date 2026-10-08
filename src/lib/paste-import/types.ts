@@ -24,6 +24,8 @@ export type DraftWarningCode =
    * し、申込者の氏名・フリガナは withheldFromNote へ。連絡先は申込者のもの。
    */
   | "owner_differs_from_applicant"
+  /** 所有者の氏名はあるが申込者のお名前が無い。フリガナ・連絡先が誰のものか決められない。 */
+  | "owner_contact_unconfirmed"
   /** 部屋番号が所在地の末尾と建物名の末尾で食い違う(所在地の方を採る)。 */
   | "room_no_conflict";
 
