@@ -66,9 +66,13 @@ function fallbackLinkKey(row: LeadRow, draft: PasteDraft): string {
   //   補助の列(姓名・住所 物件名)が空や古いままだと、同じ日の別の反響が同じ鍵になり、
   //   2件目が「登録済み」扱いで黙って飛ばされる。本文はメモや進み具合の書き足しでは
   //   変わらないので、取り込み直しても同じ鍵になる性質は保つ。
+  // ⚠氏名は**申込者(お名前)の生の値**を使う(@codex PR#491 6巡目)。所有者の氏名は
+  //   ご所有者様名を優先するようになったので、それを使うと以前に取り込んだ行と
+  //   鍵が変わり、同じ表を取り込み直したときに二重登録を止められない。
+  //   以前の owner.name はお名前の値そのもの(無ければ空)だったので、これで同じ鍵になる。
   const seed = [
     row.keySeed,
-    draft.owner?.name.value ?? "",
+    draft.applicantName ?? "",
     draft.property.address.value ?? "",
   ].join("|");
   return `xlsx-${createHash("sha256").update(seed).digest("hex").slice(0, 16)}`;

@@ -6,15 +6,18 @@
  *   貼り付け方式では URL もファイル名も当てにならないため。
  */
 import { toHalfWidth } from "./normalize";
+import type { ParseOptions } from "./parse-labeled-lines";
 
 export type SourceProfileId =
   | "home4u_assessment"
   | "home4u_vacant_house"
+  | "takauru_assessment"
   | "generic";
 
 export const SOURCE_PROFILE_LABELS: Record<SourceProfileId, string> = {
   home4u_assessment: "HOME4U 査定依頼",
   home4u_vacant_house: "HOME4U 空き家相談",
+  takauru_assessment: "タカウル 査定依頼",
   generic: "その他（共通の読み取り）",
 };
 
@@ -22,10 +25,55 @@ function has(labels: readonly string[], needle: string): boolean {
   return labels.some((l) => l.replace(/[\s　]/g, "").includes(needle));
 }
 
+const TAKAURU_MARKERS = ["査定物件の郵便番号", "不動産会社からのご希望連絡先", "マンションレビューを見る"];
+
 export function detectSourceProfile(labels: readonly string[]): SourceProfileId {
   if (has(labels, "査定ナンバー")) return "home4u_assessment";
   if (has(labels, "空き家所有者との関係性")) return "home4u_vacant_house";
+  // タカウル(マンションレビュー)の査定依頼メール(実物 2026-10-07 で確認)。
+  // ⚠「査定物件の所在地」だけでは決めない(@codex PR#491 3巡目)。他社にも出うる
+  //   見出しで、タカウル用の読み方(続き行をつなぐ)が他社の文章に掛かるため。
+  //   タカウルに固有の見出しがもう1つあるときだけ。
+  if (
+    has(labels, "査定物件の所在地") &&
+    TAKAURU_MARKERS.some((m) => has(labels, m))
+  ) {
+    return "takauru_assessment";
+  }
   return "generic";
+}
+
+/**
+ * 送り元ごとの読み方(段2)。
+ * ⚠タカウルは「見出し：値」の値が次の行へ続く(ご住所)・運営会社の署名欄に
+ *   `住 所：` `T E L：` が並ぶ。HOME4U の2書式はどちらも無いので従来どおり。
+ */
+export function parseOptionsFor(profile: SourceProfileId): ParseOptions {
+  if (profile === "takauru_assessment") {
+    return { joinAfterPostalCode: true, footerBetweenHeavyRules: true };
+  }
+  return {};
+}
+
+/**
+ * 建物名の末尾に付いた「◯◯号室」を切り出す。
+ * 実サンプル(タカウル): `建物名：東急サンプルハイツ 305号室`
+ *
+ * ⚠**「号室」と明記されたものだけ**を部屋番号とみなす。数字で終わる建物名
+ *   (`パークハウス2`)は建物名の一部のことがあるので切らない。推測しない。
+ */
+const ROOM_SUFFIX = /^(.*?)[\s　]*([0-9]{1,5}[A-Za-z]?|[0-9]{1,3}-[0-9]{1,4})号室$/;
+
+export function splitRoomFromBuildingName(buildingName: string): {
+  buildingName: string;
+  roomNo: string | null;
+} {
+  const original = buildingName.trim();
+  const m = ROOM_SUFFIX.exec(toHalfWidth(original));
+  if (!m || m[1].trim() === "") return { buildingName: original, roomNo: null };
+  // ⚠建物名は**元の表記のまま**返す(全角数字などを半角に変えない)。
+  //   toHalfWidth は1文字を1文字に置き換えるだけなので、長さで切り戻せる。
+  return { buildingName: original.slice(0, m[1].length).trim(), roomNo: m[2] };
 }
 
 /** 部屋番号として認めてよい形（数字、数字+英字、ハイフン区切り）。 */

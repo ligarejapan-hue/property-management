@@ -18,7 +18,16 @@ export type DraftWarningCode =
    *   認識された行は unmapped からも除かれているので、null にすると
    *   確認画面のどこにも出ないまま登録時に消える。
    */
-  | "owner_name_missing";
+  | "owner_name_missing"
+  /**
+   * 所有者の氏名(ご所有者様名)と申込者(お名前)が別の人。所有者の氏名は前者に
+   * し、申込者の氏名・フリガナは withheldFromNote へ。連絡先は申込者のもの。
+   */
+  | "owner_differs_from_applicant"
+  /** 所有者の氏名はあるが申込者のお名前が無い。フリガナ・連絡先が誰のものか決められない。 */
+  | "owner_contact_unconfirmed"
+  /** 部屋番号が所在地の末尾と建物名の末尾で食い違う(所在地の方を採る)。 */
+  | "room_no_conflict";
 
 export interface DraftWarning {
   code: DraftWarningCode;
@@ -63,6 +72,12 @@ export interface PasteDraft {
     currentAddress: DraftField;
   } | null;
   externalLinkKey: string | null;
+  /**
+   * 申込者の氏名(「お名前」の生の値)。所有者の氏名(ご所有者様名を優先)とは別。
+   * ⚠Excel 取込の代わりの鍵(fallbackLinkKey)の材料。所有者の選び方を変えても
+   *   鍵が変わらないように、以前と同じ値(お名前)を渡す(@codex PR#491 6巡目)。
+   */
+  applicantName: string | null;
   warnings: DraftWarning[];
   unmapped: { label: string; value: string }[];
   /**

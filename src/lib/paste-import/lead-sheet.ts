@@ -203,7 +203,10 @@ export function readLeadSheet(sheetName: string, aoa: readonly (readonly string[
  */
 export function withFallbackLinkKey(text: string, draft: PasteDraft, key: string): string {
   if (draft.externalLinkKey !== null) return text;
-  return `${text}\n反響番号：${key}`;
+  // ⚠**先頭に**置く(@codex PR#491 4巡目)。末尾だと、本文が送り元の署名欄の途中で
+  //   切れているとき(閉じる罫線が無い)、署名欄として読み飛ばされて鍵が消える。
+  //   反響番号が読めない文章にだけ足すので、本文の番号と先勝ちで競合しない。
+  return `反響番号：${key}\n${text}`;
 }
 
 /**
@@ -261,6 +264,17 @@ export function leadRowStatus(
       if (label) reasons.push(`${label}を読み取れません`);
     }
   }
+  // ⚠人に確かめてもらう前提の警告は、まとめて登録しない(@codex PR#491 1巡目)。
+  //   所有者と申込者が別=申込者の連絡先を所有者名で保存することになる/
+  //   部屋番号の食い違い=どちらが正しいか読み取りでは決められない。
+  const codes = new Set(draft.warnings.map((w) => w.code));
+  if (codes.has("owner_differs_from_applicant")) {
+    reasons.push("所有者と申込者が別の方です(連絡先は申込者のもの)");
+  }
+  if (codes.has("owner_contact_unconfirmed")) {
+    reasons.push("申込者のお名前が無く、連絡先が所有者本人のものか分かりません");
+  }
+  if (codes.has("room_no_conflict")) reasons.push("部屋番号が所在地と建物名で食い違っています");
   if (dup.similarCount > 0) reasons.push("同じ住所の物件がすでにあります");
   if (dup.ownerCandidateCount > 0) reasons.push("同じ名前の所有者がすでにいます");
   if (dup.ownerCandidatesTruncated) reasons.push("同じ名前の所有者が多く、確認しきれません");
