@@ -18,7 +18,14 @@ export type DraftWarningCode =
    *   認識された行は unmapped からも除かれているので、null にすると
    *   確認画面のどこにも出ないまま登録時に消える。
    */
-  | "owner_name_missing";
+  | "owner_name_missing"
+  /**
+   * 所有者の氏名(ご所有者様名)と申込者(お名前)が別の人。所有者の氏名は前者に
+   * し、申込者の氏名・フリガナは withheldFromNote へ。連絡先は申込者のもの。
+   */
+  | "owner_differs_from_applicant"
+  /** 部屋番号が所在地の末尾と建物名の末尾で食い違う(所在地の方を採る)。 */
+  | "room_no_conflict";
 
 export interface DraftWarning {
   code: DraftWarningCode;

@@ -18,6 +18,7 @@ export type DraftFieldKey =
   | "builtYearRaw"
   | "externalLinkKey"
   | "ownerName"
+  | "propertyOwnerName"
   | "ownerNameKana"
   | "ownerPhone"
   | "ownerEmail"
@@ -32,10 +33,14 @@ export const LABEL_DICTIONARY: Record<DraftFieldKey, readonly string[]> = {
   exclusiveArea: ["建物（専有）面積", "専有面積", "建物面積", "建物(専有)面積"],
   landArea: ["土地面積", "敷地面積"],
   layoutType: ["間取り", "間取"],
-  occupancyRaw: ["現況", "入居状況", "利用状況"],
+  occupancyRaw: ["現況", "入居状況", "利用状況", "現在の物件状況"],
   builtYearRaw: ["築年数", "築年", "築年（西暦）", "築年(西暦)", "建築年"],
   externalLinkKey: ["査定ナンバー", "査定番号", "問合せ番号", "反響番号"],
   ownerName: ["お名前", "氏名", "ご氏名", "お客様名"],
+  // ⚠**申込者(お名前)とは別に書かれた、物件の所有者の氏名**(タカウル 2026-10-07)。
+  //   申込者が所有者の家族のことがある(実物: 所有者=夫・申込者=妻)。
+  //   所有者として登録するのはこちら(発注者決定 2026-10-08)。扱いは build-draft。
+  propertyOwnerName: ["ご所有者様名", "所有者様名", "所有者名", "所有者氏名"],
   ownerNameKana: ["フリガナ", "ふりがな", "カナ", "お名前カナ"],
   ownerPhone: ["電話番号", "TEL", "連絡先電話番号", "ご連絡先"],
   ownerEmail: ["E-mail", "Email", "メールアドレス", "メール"],

@@ -14,7 +14,9 @@ import { fieldKeyForLabel, type DraftFieldKey } from "./label-dictionary";
 import { propertyTypeForRaw } from "./property-type-dictionary";
 import {
   detectSourceProfile,
+  parseOptionsFor,
   splitBuildingAndRoom,
+  splitRoomFromBuildingName,
   SOURCE_PROFILE_LABELS,
 } from "./source-profiles";
 import { judgeOwnerPersonalInfo } from "./owner-personal-info";
@@ -27,7 +29,15 @@ const field = (value: string | null, sourceLabel: string): DraftField =>
 /** 現況の言い換え → OccupancyStatus。分からなければ null（unknown を推測で入れない）。 */
 function occupancyFor(raw: string): string | null {
   const s = raw.replace(/[\s　]/g, "");
+  // ⚠打ち消し(「居住していない」)を先に見る。「居住して」で先に当てると逆になる。
+  if (s.includes("住んでいない") || s.includes("居住していない") || s.includes("空いている")) {
+    return "vacant";
+  }
   if (s.includes("居住中") || s.includes("入居中") || s.includes("賃貸中")) return "occupied";
+  // タカウル「現在の物件状況：自身が居住している」(実物 2026-10-07)。
+  if (s.includes("居住している") || s.includes("入居している") || s.includes("賃貸している")) {
+    return "occupied";
+  }
   if (s.includes("空室") || s.includes("空家") || s.includes("空き家")) return "vacant";
   return null;
 }
@@ -38,7 +48,13 @@ function occupancyFor(raw: string): string | null {
  *   同じ入力には同じ結果を返す（テストは固定値を渡す）。
  */
 export function buildPasteDraft(text: string, options?: YearBoundOptions): PasteDraft {
-  const { labeled, unlabeled } = parseLabeledLines(text);
+  // 送り元は見出しの顔ぶれで決まるので、まず共通の読み方で割ってから見分け、
+  // 送り元に固有の読み方があれば読み直す(HOME4U の2書式は読み直さない＝従来どおり)。
+  const firstPass = parseLabeledLines(text);
+  const sourceProfile = detectSourceProfile(firstPass.labeled.map((l) => l.label));
+  const parseOptions = parseOptionsFor(sourceProfile);
+  const { labeled, unlabeled } =
+    Object.keys(parseOptions).length === 0 ? firstPass : parseLabeledLines(text, parseOptions);
   const warnings: DraftWarning[] = [];
 
   // 見出しごとの最初の値だけを採る（同じ見出しが2回出たら先勝ち）。
@@ -87,14 +103,16 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
     });
   }
 
-  const sourceProfile = detectSourceProfile(labeled.map((l) => l.label));
-
   const raw = (key: DraftFieldKey): string | null => picked.get(key)?.value ?? null;
   const label = (key: DraftFieldKey): string => picked.get(key)?.label ?? "";
 
   // ---- 住所・地番・建物名・部屋番号 ----
   const addressRaw = raw("address");
-  const buildingName = raw("buildingName");
+  // 建物名の末尾の「305号室」は部屋番号の欄へ(タカウル `建物名：東急◯◯ 305号室`)。
+  const buildingNameRaw = raw("buildingName");
+  const fromName =
+    buildingNameRaw === null ? null : splitRoomFromBuildingName(buildingNameRaw);
+  const buildingName = fromName?.buildingName ?? null;
   let address: string | null = null;
   let lotNumber: string | null = raw("lotNumber");
   let roomNo: string | null = null;
@@ -106,6 +124,18 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
     const room = splitBuildingAndRoom(address, buildingName);
     address = room.address;
     roomNo = room.roomNo;
+  }
+  // 所在地から取れた部屋番号を優先する(従来どおり)。取れなければ建物名から。
+  let roomNoLabel = label("address");
+  if (roomNo === null && fromName?.roomNo) {
+    roomNo = fromName.roomNo;
+    roomNoLabel = label("buildingName");
+  } else if (roomNo !== null && fromName?.roomNo && fromName.roomNo !== roomNo) {
+    warnings.push({
+      code: "room_no_conflict",
+      field: "roomNo",
+      message: `部屋番号が所在地（${roomNo}）と建物名（${fromName.roomNo}）で食い違っています。ご確認ください。`,
+    });
   }
 
   if (address === null && !noLabeledLines) {
@@ -143,9 +173,38 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
   //   (新規所有者モードで氏名が空なら登録を止める)がそのまま効くので、
   //   値は事前入力され、氏名の入力を促され、そのまま登録はできない。
   //   「所有者なしで登録する」を選べば従来どおり(人が見たうえで選んだ結果)。
-  const ownerName = raw("ownerName");
+  // ⚠**所有者の氏名が申込者(お名前)と別に書かれていたら、所有者はそちら**
+  //   (発注者決定 2026-10-08・タカウル実物=所有者は申込者の夫)。
+  //   申込者の氏名・フリガナは**捨てずに**「備考に入れない項目」として画面に出す
+  //   (Excel 取込では所有者の備考へ入る)。フリガナは申込者のものなので、
+  //   所有者の欄には入れない(別人の読みが付く)。
+  //   電話・メール・住所は申込者の連絡先のまま所有者の連絡先として入れ、警告で知らせる。
+  const applicantName = raw("ownerName");
+  const declaredOwnerName = raw("propertyOwnerName");
+  const sameName = (a: string, b: string) =>
+    a.normalize("NFKC").replace(/[\s　]/g, "") === b.normalize("NFKC").replace(/[\s　]/g, "");
+  const ownerDiffersFromApplicant =
+    declaredOwnerName !== null && applicantName !== null && !sameName(declaredOwnerName, applicantName);
+  const ownerName = declaredOwnerName ?? applicantName;
+  const ownerNameLabel = declaredOwnerName !== null ? label("propertyOwnerName") : label("ownerName");
+  let ownerKanaField = field(raw("ownerNameKana"), label("ownerNameKana"));
+  if (ownerDiffersFromApplicant) {
+    withheldFromNote.push({ label: label("ownerName"), value: applicantName, reason: "label" });
+    const kana = raw("ownerNameKana");
+    if (kana !== null) {
+      withheldFromNote.push({ label: label("ownerNameKana"), value: kana, reason: "label" });
+    }
+    ownerKanaField = EMPTY;
+    warnings.push({
+      code: "owner_differs_from_applicant",
+      message:
+        `物件の所有者（${ownerNameLabel}）と申込者（${label("ownerName")}）が別の方です。` +
+        `所有者の氏名は「${ownerNameLabel}」の値にしました。電話・メール・住所は申込者の連絡先です。ご確認ください。`,
+    });
+  }
   const ownerFieldKeys: DraftFieldKey[] = [
     "ownerName",
+    "propertyOwnerName",
     "ownerNameKana",
     "ownerPhone",
     "ownerEmail",
@@ -155,8 +214,8 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
   const owner = !hasAnyOwnerField
     ? null
     : {
-        name: field(ownerName, label("ownerName")),
-        nameKana: field(raw("ownerNameKana"), label("ownerNameKana")),
+        name: field(ownerName, ownerNameLabel),
+        nameKana: ownerKanaField,
         phone: field(raw("ownerPhone"), label("ownerPhone")),
         email: field(raw("ownerEmail"), label("ownerEmail")),
         currentAddress: field(raw("ownerAddress"), label("ownerAddress")),
@@ -215,7 +274,7 @@ export function buildPasteDraft(text: string, options?: YearBoundOptions): Paste
       address: field(address, label("address")),
       lotNumber: field(lotNumber, label("lotNumber") || label("address")),
       buildingName: field(buildingName, label("buildingName")),
-      roomNo: field(roomNo, label("address")),
+      roomNo: field(roomNo, roomNoLabel),
       propertyType: field(mappedType?.value ?? null, label("propertyTypeRaw")),
       exclusiveArea: field(area === null ? null : String(area), label("exclusiveArea")),
       landArea: field(landArea === null ? null : String(landArea), label("landArea")),
