@@ -207,7 +207,92 @@ const CSS = [
   "}",
   "@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;transition:none!important}}",
   "html{scroll-behavior:smooth}",
+  // ── 動き(発注者承認 2026-10-08・見本 https://claude.ai/artifact/YENL8ErHQuMSHP2cjhSXwD)──
+  // 「動きを減らす」設定でない端末だけ。隠すのは MOTION_SCRIPT が html に .anim を付けたときだけ
+  // (JS なし・IntersectionObserver なしでは最初から全部見える)。画像は切り取らない・拡大しない。
+  "@media (prefers-reduced-motion: no-preference){",
+  // 1. 節がふわっと浮かび上がる
+  ".anim main section{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.2,1)}",
+  ".anim .cases-head{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.2,1)}",
+  ".anim main section.in,.anim .cases-head.in{opacity:1;transform:none}",
+  // 2. ヒーロー: 絵がやわらかく明るくなり、言葉が順に出る。申込ボタンにときどき光
+  ".anim .hero{opacity:0;filter:saturate(.6) brightness(1.08);transition:opacity 1.2s ease,filter 1.6s ease}",
+  ".anim .hero.in{opacity:1;filter:none}",
+  ".anim .wrap>.eyebrow,.anim .wrap>h1,.anim .wrap>.lead,.anim .promises li,.anim .wrap>.cta-row{opacity:0;transform:translateY(12px);transition:opacity .7s ease,transform .7s ease}",
+  ".anim .hero-go>.eyebrow{transition-delay:.2s}.anim .hero-go>h1{transition-delay:.4s}.anim .hero-go>.lead{transition-delay:.6s}",
+  ".anim .hero-go .promises li:nth-child(1){transition-delay:.8s}.anim .hero-go .promises li:nth-child(2){transition-delay:.95s}.anim .hero-go .promises li:nth-child(3){transition-delay:1.1s}",
+  ".anim .hero-go>.cta-row{transition-delay:1.3s}",
+  ".anim .hero-go>.eyebrow,.anim .hero-go>h1,.anim .hero-go>.lead,.anim .hero-go .promises li,.anim .hero-go>.cta-row{opacity:1;transform:none}",
+  ".cta:not(.secondary){position:relative;overflow:hidden}",
+  ".cta:not(.secondary)::after{content:\"\";position:absolute;top:0;bottom:0;width:40%;left:-60%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.35),transparent);transform:skewX(-20deg);animation:lp-shine 5s ease-in-out 2.5s infinite;pointer-events:none}",
+  "@keyframes lp-shine{0%,70%{left:-60%}85%,100%{left:130%}}",
+  ".inquiry fieldset:disabled .cta::after{display:none}",
+  // 3. 期限の年表: 縦線が伸び、札が順に現れ、「売却期限」がそっと脈打つ
+  ".anim .dl-item{opacity:0;transform:translateX(-12px);transition:opacity .5s ease,transform .5s ease}",
+  ".anim .dl-item::before{transform:scaleY(0);transform-origin:top;transition:transform .6s ease}",
+  ".anim .deadline.in .dl-item{opacity:1;transform:none}",
+  ".anim .deadline.in .dl-item::before{transform:scaleY(1)}",
+  ".anim .deadline.in .dl-item:nth-child(1),.anim .deadline.in .dl-item:nth-child(1)::before{transition-delay:.1s}",
+  ".anim .deadline.in .dl-item:nth-child(2),.anim .deadline.in .dl-item:nth-child(2)::before{transition-delay:.6s}",
+  ".anim .deadline.in .dl-item:nth-child(3),.anim .deadline.in .dl-item:nth-child(3)::before{transition-delay:1.1s}",
+  ".anim .deadline.in .dl-item:nth-child(4){transition-delay:1.6s}",
+  ".anim .deadline.in .dl-item.key .dl-when{animation:lp-pulse 2.2s ease-out 2.3s 2}",
+  "@keyframes lp-pulse{0%{box-shadow:0 0 0 0 rgba(14,107,92,.45)}100%{box-shadow:0 0 0 14px rgba(14,107,92,0)}}",
+  // 4. 流れ: 番号が1つずつ灯る
+  ".anim .flow li{opacity:0;transform:translateY(10px);transition:opacity .5s ease,transform .5s ease}",
+  ".anim .flow li::before{transition:background .4s ease,color .4s ease}",
+  ".anim .flow-box.in .flow li{opacity:1;transform:none}",
+  ".anim .flow-box.in .flow li::before{background:#0e6b5c;color:#fffdf8}",
+  ".anim .flow-box.in .flow li:nth-child(2),.anim .flow-box.in .flow li:nth-child(2)::before{transition-delay:.35s}",
+  ".anim .flow-box.in .flow li:nth-child(3),.anim .flow-box.in .flow li:nth-child(3)::before{transition-delay:.7s}",
+  ".anim .flow-box.in .flow li:nth-child(4),.anim .flow-box.in .flow li:nth-child(4)::before{transition-delay:1.05s}",
+  ".anim .flow-box.in .flow li:nth-child(5),.anim .flow-box.in .flow li:nth-child(5)::before{transition-delay:1.4s}",
+  // 5. 売る・貸す・持つ: 札が順に浮かび、絵がゆっくり揺れる
+  ".anim .opt-card{opacity:0;transform:translateY(16px);transition:opacity .6s ease,transform .6s cubic-bezier(.2,.7,.2,1),box-shadow .3s ease}",
+  ".anim .options.in .opt-card{opacity:1;transform:none}",
+  ".anim .options.in .opt-card:nth-child(2){transition-delay:.2s}.anim .options.in .opt-card:nth-child(3){transition-delay:.4s}",
+  ".options.in .opt-img{animation:lp-float 5s ease-in-out 1.2s infinite}",
+  ".options.in .opt-card:nth-child(2) .opt-img{animation-delay:2s}.options.in .opt-card:nth-child(3) .opt-img{animation-delay:2.8s}",
+  "@keyframes lp-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}",
+  ".opt-card:hover{box-shadow:0 8px 24px rgba(43,42,38,.12)}",
+  // 6. 窓口はひとつ: 真ん中から線が伸び(線は pathLength=1)、札が順に現れる。真ん中から波紋
+  ".anim .net-svg line{stroke-dasharray:1;stroke-dashoffset:1;transition:stroke-dashoffset .7s ease}",
+  ".anim .net-svg .net-pill{opacity:0;transition:opacity .4s ease}",
+  ".anim .network.in .net-svg line{stroke-dashoffset:0}",
+  ".anim .network.in .net-svg .net-pill{opacity:1}",
+  ".net-ripple{transform-box:fill-box;transform-origin:center}",
+  ".network.in .net-ripple{animation:lp-ripple 2.8s ease-out 1.2s infinite}",
+  "@keyframes lp-ripple{0%{transform:scale(1);opacity:.5}100%{transform:scale(1.9);opacity:0}}",
+  // 7. 案内役: ときどき小さく会釈する
+  ".guide-img{transform-origin:50% 90%;animation:lp-nod 6s ease-in-out 1s infinite}",
+  "@keyframes lp-nod{0%,80%,100%{transform:rotate(0)}86%{transform:rotate(-2.5deg)}92%{transform:rotate(1.5deg)}}",
+  // 8. チェック札: チェックがはねる / 9. 実例の札: 開くと中身がすっと出る
+  ".check input:checked~.box{animation:lp-pop .3s ease}",
+  "@keyframes lp-pop{0%{transform:scale(.8)}60%{transform:scale(1.15)}100%{transform:scale(1)}}",
+  ".case details[open] .case-body{animation:lp-drop .4s ease}",
+  "@keyframes lp-drop{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}",
+  "}",
 ].join("\n");
+
+/**
+ * 動きのスクリプト(固定文字列・live/社内プレビューの両方)。「動きを減らす」設定や IntersectionObserver が
+ * 無い端末では何もしない(=.anim を付けない=最初から全部見える)。画面に入った部品に .in を付けるだけ。
+ */
+const MOTION_SCRIPT = [
+  "(function(){",
+  'if(!window.IntersectionObserver||!window.matchMedia||window.matchMedia("(prefers-reduced-motion: reduce)").matches)return;',
+  'var root=document.documentElement;try{',
+  'root.classList.add("anim");',
+  'var ts=document.querySelectorAll("main section,.cases-head,.deadline,.flow-box,.options,.network");',
+  'var io=new IntersectionObserver(function(es){for(var i=0;i<es.length;i++){if(es[i].isIntersecting){es[i].target.classList.add("in");io.unobserve(es[i].target)}}},{threshold:0,rootMargin:"0px 0px -10% 0px"});',
+  "for(var t=0;t<ts.length;t++){io.observe(ts[t])}",
+  'var hero=document.querySelector(".hero"),wrap=document.querySelector("main>.wrap");',
+  'requestAnimationFrame(function(){requestAnimationFrame(function(){if(hero){hero.classList.add("in")}if(wrap){wrap.classList.add("hero-go")}})});',
+  // 安全網: 見張りがうまく動かない閲覧アプリでも、6秒後には全部出す。途中で例外が出たら動きをやめて全部見せる。
+  'setTimeout(function(){var h=document.querySelectorAll(".anim main section,.anim .cases-head,.deadline,.flow-box,.options,.network");for(var i=0;i<h.length;i++){h[i].classList.add("in")}},6000);',
+  '}catch(_){root.classList.remove("anim")}',
+  "})();",
+].join("");
 
 function img(image: LpImage, cls: string, alt: string, priority = false): string {
   const loadAttrs = priority ? `loading="eager" fetchpriority="high"` : `loading="lazy"`;
@@ -490,5 +575,5 @@ export function renderLpPage(input: LpRenderInput): string {
     (input.hero ? img(input.hero, "hero", "", true) : "") +
     `<div class="wrap">${heroCopy}` +
     introHtml + sections + faq + (input.form ? formSection(input.form) : "") + company + unsub +
-    `</div></main>${bar}${script}${submitGuard}${checklistScript}</body></html>`;
+    `</div></main>${bar}${script}${submitGuard}${checklistScript}<script>${MOTION_SCRIPT}</script></body></html>`;
 }

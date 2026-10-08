@@ -46,15 +46,20 @@ describe("renderLpPage", () => {
     expect(html).toContain('<div class="figure"><div class="flow-box"><ol class="flow">');
     expect(html).not.toContain("/uploads/");
   });
-  it("live ではプレビュー帯が無く、電話タップの script が token 付きで1本だけ", () => {
+  it("live ではプレビュー帯が無く、電話タップの script が token 付きで1本だけ(ほかは動きの script のみ)", () => {
     expect(html).not.toContain("プレビュー");
-    expect((html.match(/<script/g) ?? []).length).toBe(1);
+    // 電話タップ1本+動き1本(動き=2026-10-08 発注者承認・計測や送信はしない)
+    expect((html.match(/<script/g) ?? []).length).toBe(2);
+    expect(html.split("sendBeacon(").length - 1).toBe(1);
     expect(html).toContain('sendBeacon("/t/tok/phone-tap")');
   });
-  it("preview ではプレビュー帯が出て、script が無く、tel は押せるが計測されない", () => {
+  it("preview ではプレビュー帯が出て、計測・送信の script が無く、tel は押せるが計測されない(動きの script だけ)", () => {
     const p = renderLpPage(input({ mode: "preview", phoneTapToken: null }));
     expect(p).toContain("プレビュー");
-    expect(p).not.toContain("<script");
+    expect((p.match(/<script/g) ?? []).length).toBe(1);
+    expect(p).toContain('classList.add("anim")');
+    expect(p).not.toContain("sendBeacon");
+    expect(p).not.toContain("/phone-tap"); // 計測の送り先(data-phone-tap 属性は tel の印なので残る)
     expect(p).toContain("tel:0312345678");
   });
   it("PC/スマホの両方の CSS がある(固定バーはスマホだけ・PC は中央 760px)", () => {
@@ -85,7 +90,7 @@ describe("renderLpPage", () => {
   });
   it("phoneTapToken に </script> が含まれても script タグを閉じない(</script>-safe な埋め込み)", () => {
     const h = renderLpPage(input({ phoneTapToken: "</script><img>" }));
-    expect((h.match(/<script/g) ?? []).length).toBe(1);
+    expect((h.match(/<script/g) ?? []).length).toBe(2);
     expect(h).not.toContain("</script><img>");
     expect(h).toContain("sendBeacon(");
   });

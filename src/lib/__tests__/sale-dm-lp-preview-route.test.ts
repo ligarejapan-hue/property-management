@@ -90,7 +90,11 @@ describe("GET LPプレビュー(社内)", () => {
     expect(html).toContain("プレビュー");
     expect(html).toContain("○○区○○町");
     expect(html).not.toContain("1-2-3");
-    expect(html).not.toContain("<script");
+    // 送付前・社内プレビューでは計測(電話タップ)と申込送信のスクリプトを出さない。出るのは動きのスクリプト(2026-10-08)だけ
+    expect(html).not.toContain("sendBeacon");
+    expect(html).not.toContain("fetch(f.action");
+    expect((html.match(/<script/g) ?? []).length).toBe(1);
+    expect(html).toContain('classList.add("anim")');
     expect(writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({
       action: "sale_dm_lp_preview_view",
       targetTable: "dm_lp_variants",
