@@ -9,14 +9,8 @@ const nextConfig: NextConfig = {
   // フレームワーク名の露出を避ける（`X-Powered-By: Next.js` を出さない）。
   poweredByHeader: false,
 
-  experimental: {
-    // ⚠proxy.ts があると、Next.js は受け取ったボディを**この大きさまでしか読まない**
-    //   (既定 10MB・超えた分はエラーにならず黙って切られる)。8MB を超える PDF を
-    //   受け取って自動で縮める(2026-10-10)ので、受け取る上限 50MB + multipart の上乗せ分
-    //   (MULTIPART_OVERHEAD_BYTES=1MB)まで読めるようにする。
-    //   各 route は formData() の前に Content-Length で自分の上限を見る。
-    proxyClientMaxBodySize: 51 * 1024 * 1024,
-  },
+  // ⚠experimental.proxyClientMaxBodySize(既定 10MB)は**上げない**。大きいPDFを受け取る口は
+  //   proxy の対象から外してある(src/proxy.ts の matcher・@codex PR#498 P1)。
 
   // 全レスポンス共通の防御ヘッダ。
   // ⚠あえて入れないもの:

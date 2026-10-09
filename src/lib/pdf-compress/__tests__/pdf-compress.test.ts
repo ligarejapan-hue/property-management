@@ -1,9 +1,21 @@
 import { describe, it, expect, vi } from "vitest";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { compressPdf, parseScriptOutput, type RunDeps } from "../run";
-import { fitPdfToLimit } from "../fit";
-import { compressFailureMessage, pdfTooLargeToAcceptMessage, MAX_PDF_UPLOAD_BYTES } from "../policy";
+import {
+  compressPdf,
+  parseScriptOutput,
+  tryReserveCompressionSlot,
+  MAX_COMPRESSION_SLOTS,
+  type RunDeps,
+} from "../run";
+import { fitPdfToLimit, reserveLargePdfSlot } from "../fit";
+import {
+  compressBusyMessage,
+  compressFailureMessage,
+  isPdfByMimeOrName,
+  pdfTooLargeToAcceptMessage,
+  MAX_PDF_UPLOAD_BYTES,
+} from "../policy";
 import { ApiError } from "@/lib/api-helpers";
 
 // api-helpers は next-auth まで読み込むので、ApiError だけの代わりを置く(他の単体テストと同じ)。
@@ -131,6 +143,58 @@ describe("compressPdf(別プロセスでの圧縮)", () => {
     expect(a.ok).toBe(false);
     expect(b.ok).toBe(true);
     errSpy.mockRestore();
+  });
+});
+
+describe("圧縮の席(@codex PR#498 P1・待ち列に上限)", () => {
+  it("動いている1本+待ち1本まで。3本目は取れない。返せばまた取れる・二重に返しても1回分", () => {
+    const a = tryReserveCompressionSlot();
+    const b = tryReserveCompressionSlot();
+    expect(MAX_COMPRESSION_SLOTS).toBe(2);
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
+    expect(tryReserveCompressionSlot()).toBeNull();
+    a!();
+    a!();
+    const c = tryReserveCompressionSlot();
+    expect(c).not.toBeNull();
+    expect(tryReserveCompressionSlot()).toBeNull();
+    b!();
+    c!();
+  });
+
+  const reqWith = (len: string | null) => ({ headers: { get: () => len } });
+
+  it("申告が上限+上乗せ分以下なら席を取らない(圧縮は要らない)", () => {
+    const reserve = vi.fn(() => () => {});
+    reserveLargePdfSlot(reqWith(String(8 * 1024 * 1024)), reserve);
+    reserveLargePdfSlot(reqWith(null), reserve);
+    expect(reserve).not.toHaveBeenCalled();
+  });
+
+  it("大きい申告なら席を取り、取れなければ 503", () => {
+    const release = () => {};
+    expect(reserveLargePdfSlot(reqWith(String(20 * 1024 * 1024)), () => release)).toBe(release);
+    const err = (() => {
+      try {
+        reserveLargePdfSlot(reqWith(String(20 * 1024 * 1024)), () => null);
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(503);
+    expect((err as ApiError).message).toBe(compressBusyMessage());
+  });
+});
+
+describe("isPdfByMimeOrName", () => {
+  it("MIME が PDF、または MIME が空・不明で拡張子 .pdf のときだけ PDF", () => {
+    expect(isPdfByMimeOrName("application/pdf", "a.bin")).toBe(true);
+    expect(isPdfByMimeOrName("", "A.PDF")).toBe(true);
+    expect(isPdfByMimeOrName("application/octet-stream", "a.pdf")).toBe(true);
+    expect(isPdfByMimeOrName("image/png", "a.pdf")).toBe(false);
+    expect(isPdfByMimeOrName("", "a.xlsx")).toBe(false);
   });
 });
 

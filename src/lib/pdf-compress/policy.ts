@@ -53,6 +53,18 @@ export function compressFailureMessage(
   }
 }
 
+/** 圧縮の席が埋まっているとき(本文を読む前に断る)。 */
+export function compressBusyMessage(): string {
+  return "いま別の大きいPDFを圧縮しています。1分ほど待ってから、もう一度お試しください。";
+}
+
+/** PDF として扱うか: MIME が PDF、または MIME が空・不明(octet-stream)で拡張子が .pdf。 */
+export function isPdfByMimeOrName(mimeType: string, fileName: string): boolean {
+  if (mimeType === "application/pdf") return true;
+  const unknownMime = mimeType === "" || mimeType === "application/octet-stream";
+  return unknownMime && fileName.toLowerCase().endsWith(".pdf");
+}
+
 /** 受け取る前に断るときの文言。 */
 export function pdfTooLargeToAcceptMessage(): string {
   return `PDFが大きすぎます(${formatMb(MAX_PDF_UPLOAD_BYTES).replace(".0MB", "MB")}まで。8MBを超えるPDFは自動で圧縮します)`;

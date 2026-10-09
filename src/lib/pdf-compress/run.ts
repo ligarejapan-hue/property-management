@@ -55,6 +55,27 @@ const defaultDeps: RunDeps = {
   script: path.join(process.cwd(), "scripts", "pdf-compress.py"),
 };
 
+/**
+ * 圧縮の「席」: 動いている1本 + 待っている1本まで(@codex PR#498 P1)。
+ * ⚠列に上限が無いと、大きい PDF が一度に来たとき、待っている分の本文(最大 50MB ずつ)まで
+ *   メモリに抱えたまま何分も待たせることになる。入口は**本文を読む前に**席を取り、
+ *   取れなければすぐ断る(fit.ts の reserveLargePdfSlot)。
+ */
+export const MAX_COMPRESSION_SLOTS = 2;
+let slotsInUse = 0;
+
+/** 席を1つ取る。取れなければ null。返した関数で必ず返す(何度呼んでも1回だけ返す)。 */
+export function tryReserveCompressionSlot(): (() => void) | null {
+  if (slotsInUse >= MAX_COMPRESSION_SLOTS) return null;
+  slotsInUse++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    slotsInUse--;
+  };
+}
+
 // 同時に1本だけ。
 let queue: Promise<unknown> = Promise.resolve();
 function serialize<T>(fn: () => Promise<T>): Promise<T> {

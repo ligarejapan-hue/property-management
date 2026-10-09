@@ -5,18 +5,12 @@
  *   JPEG への書き換えの誤りは捕まえられない(提出前レビュー)。ここで実物を通す。
  * 部品が無い環境(開発機・CI)では skip する。使う Python は PDF_COMPRESS_PYTHON(既定 python3)。
  */
-import { describe, it, expect, vi } from "vitest";
-
-// import-body-size が読む api-helpers は next-auth まで読み込むので、ApiError だけの代わりを置く。
-vi.mock("@/lib/api-helpers", () => ({ ApiError: class ApiError extends Error {} }));
+import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { compressPdf } from "../run";
-import nextConfig from "../../../../next.config";
-import { MAX_PDF_UPLOAD_BYTES } from "../policy";
-import { MULTIPART_OVERHEAD_BYTES } from "@/lib/import-body-size";
 
 const PYTHON = process.env.PDF_COMPRESS_PYTHON || "python3";
 
@@ -111,10 +105,3 @@ describe.skipIf(!available())("scripts/pdf-compress.py(実物)", () => {
   }, 120_000);
 });
 
-describe("受け取る上限と Next.js の設定", () => {
-  it("★proxy.ts があるとボディは proxyClientMaxBodySize で黙って切られる → 受け取る上限+上乗せ分以上にしておく", () => {
-    const v = (nextConfig.experimental as { proxyClientMaxBodySize?: number } | undefined)?.proxyClientMaxBodySize;
-    expect(typeof v).toBe("number");
-    expect(v as number).toBeGreaterThanOrEqual(MAX_PDF_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES);
-  });
-});

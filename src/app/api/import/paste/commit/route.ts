@@ -15,7 +15,7 @@ import { lockPropertyRow } from "@/lib/property-record-guard";
 import { isPdfBuffer } from "@/lib/pdf-extract";
 import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES } from "@/lib/storage";
 import { MAX_PDF_UPLOAD_BYTES, pdfTooLargeToAcceptMessage } from "@/lib/pdf-compress/policy";
-import { fitPdfToLimit } from "@/lib/pdf-compress/fit";
+import { fitPdfToLimit, reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
 import {
   assertImportJsonBodySize,
   assertImportMultipartBodySize,
@@ -183,6 +183,7 @@ const COMMIT_LOCK_KEY = "paste-excel-bulk-commit";
 const MAX_COMMIT_JSON_BODY_BYTES = 2 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
+  let releaseSlot = () => {};
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
@@ -206,6 +207,8 @@ export async function POST(request: NextRequest) {
       //   registry-pdf-bulk と同じく Content-Length を**先に**見る。
       //   上限は自動圧縮の前に受け取ってよい大きさ(50MB)。8MB を超えた分は後で縮める。
       assertImportMultipartBodySize(request, MAX_PDF_UPLOAD_BYTES);
+      // 圧縮が要るかもしれない大きさなら、本文を読む前に圧縮の席を取る(埋まっていれば 503)。
+      releaseSlot = reserveLargePdfSlot(request);
       const form = await request.formData();
       const dataRaw = form.get("data");
       if (typeof dataRaw !== "string") {
@@ -687,5 +690,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     return handleApiError(error);
+  } finally {
+    releaseSlot();
   }
 }

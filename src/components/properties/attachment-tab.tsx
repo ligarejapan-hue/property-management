@@ -195,7 +195,8 @@ export default function AttachmentTab({
       setUploadError("空ファイルはアップロードできません");
       return;
     }
-    const compressible = type === "general" && file.type === "application/pdf";
+    // 種類(MIME)が空でも拡張子が .pdf なら PDF とみなす(サーバーと同じ判定・@codex PR#498 P2)。
+    const compressible = type === "general" && isPdfFile(file);
     const limitMb = compressible ? MAX_PDF_MB : MAX_SIZE_MB;
     if (file.size > limitMb * 1024 * 1024) {
       setUploadError(`ファイルサイズが上限 (${limitMb}MB) を超えています`);

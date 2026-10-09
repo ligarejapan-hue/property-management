@@ -61,8 +61,12 @@ vi.mock("@/lib/storage", () => {
   };
 });
 
-const { fitPdfToLimit } = vi.hoisted(() => ({ fitPdfToLimit: vi.fn() }));
-vi.mock("@/lib/pdf-compress/fit", () => ({ fitPdfToLimit }));
+const { fitPdfToLimit, reserveLargePdfSlot, releaseMock } = vi.hoisted(() => ({
+  fitPdfToLimit: vi.fn(),
+  reserveLargePdfSlot: vi.fn(),
+  releaseMock: vi.fn(),
+}));
+vi.mock("@/lib/pdf-compress/fit", () => ({ fitPdfToLimit, reserveLargePdfSlot }));
 
 vi.mock("@/lib/prisma", () => {
   const db: Record<string, unknown> = {
@@ -95,6 +99,7 @@ const params = { params: Promise.resolve({ id: "p-1" }) };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  reserveLargePdfSlot.mockImplementation(() => releaseMock);
   fitPdfToLimit.mockImplementation(async (buf: Buffer) => {
     if (buf.length <= 8 * MB) return { buffer: buf, originalSize: null, level: null };
     return { buffer: Buffer.alloc(3 * MB), originalSize: buf.length, level: "jpeg85" };
@@ -152,6 +157,60 @@ describe("添付: 大きい PDF の自動圧縮", () => {
     const res = await POST(await req(10, "application/pdf", "x.pdf", undefined, 60 * MB), params);
     expect(res.status).toBe(413);
     expect(fitPdfToLimit).not.toHaveBeenCalled();
+  });
+
+  it("★圧縮の席が埋まっていれば、本文を読む前に 503(縮めも保存もしない)・席は返す", async () => {
+    const { ApiError } = await import("@/lib/api-helpers");
+    reserveLargePdfSlot.mockImplementationOnce(() => {
+      throw new ApiError(503, "いま別の大きいPDFを圧縮しています。", "BUSY");
+    });
+    const res = await POST(await req(12 * MB, "application/pdf", "report.pdf"), params);
+    expect(res.status).toBe(503);
+    expect(fitPdfToLimit).not.toHaveBeenCalled();
+    expect(storageStub.upload).not.toHaveBeenCalled();
+  });
+
+  it("取った席は、成功しても失敗しても必ず返す", async () => {
+    await POST(await req(12 * MB, "application/pdf", "report.pdf"), params);
+    expect(releaseMock).toHaveBeenCalledTimes(1);
+    const { ApiError } = await import("@/lib/api-helpers");
+    fitPdfToLimit.mockRejectedValueOnce(new ApiError(422, "x", "VALIDATION_ERROR"));
+    await POST(await req(12 * MB, "application/pdf", "report.pdf"), params);
+    expect(releaseMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("★MIME が空・不明でも拡張子が .pdf の通常添付は PDF として縮める(@codex PR#498 P2)", async () => {
+    const big = new Uint8Array(12 * MB);
+    big.set(Buffer.from("%PDF-1.7"));
+    const fd = new FormData();
+    fd.append("file", new Blob([big], { type: "application/octet-stream" }), "report.pdf");
+    const blob = await new Response(fd).blob();
+    const r = new Request("http://t/api/properties/p-1/attachments", {
+      method: "POST",
+      body: blob,
+      headers: { "content-type": blob.type, "content-length": String(blob.size) },
+    }) as unknown as NextRequest;
+    const res = await POST(r, params);
+    expect(res.status).toBe(201);
+    expect(fitPdfToLimit).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0][0].data).toMatchObject({ mimeType: "application/pdf", originalSize: 12 * MB });
+  });
+
+  it("拡張子だけ .pdf で中身が PDF でなければ 422(保存しない)", async () => {
+    const res = await POST(await req(1 * MB, "application/octet-stream", "fake.pdf"), params);
+    expect(res.status).toBe(422);
+    expect((await res.json()).error.message).toBe("PDFファイルではありません");
+    expect(storageStub.upload).not.toHaveBeenCalled();
+  });
+
+  it("JSON の登録も、読む前に大きさを見る(この口は proxy を通らないため)", async () => {
+    const r = new Request("http://t/api/properties/p-1/attachments", {
+      method: "POST",
+      body: JSON.stringify({ fileName: "a.pdf" }),
+      headers: { "content-type": "application/json", "content-length": String(1024 * 1024) },
+    }) as unknown as NextRequest;
+    const res = await POST(r, params);
+    expect(res.status).toBe(413);
   });
 
   it("Content-Length の無い multipart は 411(ガードを回り込ませない)", async () => {

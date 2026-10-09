@@ -214,7 +214,11 @@ const { fitMock } = vi.hoisted(() => ({
   // 既定は「上限以下=手を触れない」(clearAllMocks は実装を消さない)。
   fitMock: vi.fn(async (buf: Buffer) => ({ buffer: buf, originalSize: null as number | null, level: null as string | null })),
 }));
-vi.mock("@/lib/pdf-compress/fit", () => ({ fitPdfToLimit: fitMock }));
+vi.mock("@/lib/pdf-compress/fit", () => ({
+  fitPdfToLimit: fitMock,
+  // 席の取り合いは fit の単体テストで見る。ここでは常に取れて、返す関数は何もしない。
+  reserveLargePdfSlot: () => () => {},
+}));
 
 import { POST } from "../route";
 import { NextRequest } from "next/server";
