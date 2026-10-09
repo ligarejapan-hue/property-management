@@ -55,7 +55,7 @@ export function compressFailureMessage(
 
 /** 圧縮の席が埋まっているとき(本文を読む前に断る)。 */
 export function compressBusyMessage(): string {
-  return "いま別の大きいPDFを圧縮しています。1分ほど待ってから、もう一度お試しください。";
+  return "いま別の大きいPDFを処理しています。1分ほど待ってから、もう一度お試しください。";
 }
 
 /** PDF として扱うか: MIME が PDF、または MIME が空・不明(octet-stream)で拡張子が .pdf。 */

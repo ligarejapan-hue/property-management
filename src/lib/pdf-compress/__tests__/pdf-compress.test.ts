@@ -165,11 +165,18 @@ describe("圧縮の席(@codex PR#498 P1・待ち列に上限)", () => {
 
   const reqWith = (len: string | null) => ({ headers: { get: () => len } });
 
-  it("申告が上限+上乗せ分以下なら席を取らない(圧縮は要らない)", () => {
+  it("申告が上限(8MB)以下なら席を取らない(ファイルが上限を超えることは無い)", () => {
     const reserve = vi.fn(() => () => {});
     reserveLargePdfSlot(reqWith(String(8 * 1024 * 1024)), reserve);
     reserveLargePdfSlot(reqWith(null), reserve);
     expect(reserve).not.toHaveBeenCalled();
+  });
+
+  it("★8.1〜8.9MB の PDF の送信(上限+上乗せ分以下)でも席を取る(@codex PR#498 2巡目)", () => {
+    const reserve = vi.fn(() => () => {});
+    reserveLargePdfSlot(reqWith(String(8 * 1024 * 1024 + 1)), reserve);
+    reserveLargePdfSlot(reqWith(String(Math.floor(8.5 * 1024 * 1024))), reserve);
+    expect(reserve).toHaveBeenCalledTimes(2);
   });
 
   it("大きい申告なら席を取り、取れなければ 503", () => {

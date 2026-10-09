@@ -14,6 +14,11 @@
   npm --version
   ```
 - [ ] PostgreSQL **15 以上**であること
+- [ ] 大きいPDFの自動圧縮の部品(OS パッケージ `python3-pikepdf` `python3-pil`)が入っていて、自己診断が通ること(→ [ステップ 0.5](#ステップ-05-大きいpdfの自動圧縮の部品を入れる))
+  ```bash
+  sudo -u www-data python3 /opt/property-management/scripts/pdf-compress.py --self-test
+  # 期待: {"selfTest": "ok", "level": "jpeg85", "pikepdf": "8.7.1"} (pikepdf の版は環境による)
+  ```
 
 ### コード・ビルド
 
@@ -190,6 +195,23 @@ npm --version
 psql --version   # PostgreSQL 15 以上であること
 systemctl --version | head -1
 ```
+
+### ステップ 0.5: 大きいPDFの自動圧縮の部品を入れる
+
+物件の添付(謄本以外)と貼り付けて物件化の PDF は、8MB を超えると `scripts/pdf-compress.py` で
+自動で縮めて保存する(2026-10-10)。この部品は npm ではなく **OS のパッケージ**なので、`npm ci` では入らない。
+入っていないと 8MB を超える PDF はすべて「大きなPDFを圧縮できませんでした」で断られる(アプリは動く)。
+
+```bash
+sudo apt-get install -y python3-pikepdf python3-pil
+# 確認(サービスと同じ www-data で・試験用 PDF を作って実際に縮める)
+sudo -u www-data python3 /opt/property-management/scripts/pdf-compress.py --self-test
+# 期待: {"selfTest": "ok", "level": "jpeg85", "pikepdf": "…"} と終了コード 0
+```
+
+- Ubuntu 24.04 の `python3-pikepdf` は 8.7.1(MPL-2.0)。AGPL の MuPDF は使わない
+- 使う Python を変えるときは app.env に `PDF_COMPRESS_PYTHON=/path/to/python3`(既定 `python3`)
+- 一時ファイルは systemd の `PrivateTmp` の /tmp に作り、毎回消す
 
 ### ステップ 1: app.env を配置
 

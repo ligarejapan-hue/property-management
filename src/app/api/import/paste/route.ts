@@ -15,6 +15,7 @@ import {
   assertImportMultipartBodySize,
 } from "@/lib/import-body-size";
 import { MAX_PDF_UPLOAD_BYTES, pdfTooLargeToAcceptMessage } from "@/lib/pdf-compress/policy";
+import { reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
 
 // ---------- POST /api/import/paste ----------
 // リクエスト形式:
@@ -49,6 +50,7 @@ const MAX_PASTE_JSON_BODY_BYTES = 4 * 1024 * 1024;
 const MAX_PDF_BYTES = MAX_PDF_UPLOAD_BYTES;
 
 export async function POST(request: NextRequest) {
+  let releaseSlot = () => {};
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
@@ -71,6 +73,9 @@ export async function POST(request: NextRequest) {
       //   見ても、巨大なリクエストでメモリを食い潰せる(@codex PR#414 2巡目 P1)。
       //   registry-pdf-bulk と同じく Content-Length を**先に**見る。
       assertImportMultipartBodySize(request, MAX_PDF_BYTES);
+      // ⚠8MB を超える PDF の読み取り(pdf-parse は本体のプロセスで動く)も、圧縮と同じ
+      //   席(実行1+待ち1)を本文を読む前に取る。埋まっていれば 503(@codex PR#498 2巡目)。
+      releaseSlot = reserveLargePdfSlot(request);
       const form = await request.formData();
       const file = form.get("file");
       if (!(file instanceof File)) {
@@ -161,5 +166,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     return handleApiError(error);
+  } finally {
+    releaseSlot();
   }
 }

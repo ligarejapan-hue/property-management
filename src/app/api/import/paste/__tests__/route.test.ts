@@ -717,6 +717,21 @@ describe("PDF 経路（全体レビュー I-2 / I-5 / m-2 / m-6）", () => {
     expect(res.status).toBe(200);
   });
 
+  it("★8MB を超える PDF の読み取りも、席が埋まっていれば本文を読む前に 503(@codex PR#498 2巡目)", async () => {
+    const { tryReserveCompressionSlot } = await import("@/lib/pdf-compress/run");
+    const held = [tryReserveCompressionSlot(), tryReserveCompressionSlot()];
+    try {
+      const res = await POST(await pdfReq(9 * 1024 * 1024));
+      expect(res.status).toBe(503);
+      expect((await res.json()).error.message).toContain("別の大きいPDFを処理しています");
+    } finally {
+      held.forEach((r) => r?.());
+    }
+    // 読み取りが終われば席は返っている(次の大きい PDF は読める)。
+    const again = await POST(await pdfReq(9 * 1024 * 1024));
+    expect(again.status).toBe(200);
+  });
+
   it("★文字が数文字しか取れないPDF(スキャン画像)は、空でなくても断る", async () => {
     // isLikelyScannedPdf は50文字未満を「読めていない」とみなす。
     // trim()==="" 判定では、雑音を数文字吐くスキャンPDFが素通りしていた。

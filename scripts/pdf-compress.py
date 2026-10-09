@@ -137,7 +137,56 @@ def _build(src, dst, quality):
     return pages
 
 
+def _self_test():
+    """反映のときの確認(docs/deploy.md): 試験用の PDF を作り、実際に JPEG 段階まで縮めてみる。
+
+    写真のような図版(600x600・Flate)を4ページに貼った PDF を一時フォルダに作り、
+    大きさの 1/3 を上限にして縮める。縮んでページ数が保たれていれば ok。
+    """
+    import random
+    import tempfile
+    import zlib
+
+    with tempfile.TemporaryDirectory(prefix="pdfc-selftest-") as d:
+        src = os.path.join(d, "in.pdf")
+        dst = os.path.join(d, "out.pdf")
+        pdf = pikepdf.new()
+        images = []
+        for seed in (1, 2):
+            random.seed(seed)
+            rows = bytearray()
+            for y in range(600):
+                for x in range(600):
+                    rows += bytes(((x + seed * 40) % 256, (y * 2) % 256, random.randint(0, 40)))
+            s = pikepdf.Stream(pdf, zlib.compress(bytes(rows)))
+            s.Type = pikepdf.Name.XObject
+            s.Subtype = pikepdf.Name.Image
+            s.Width = 600
+            s.Height = 600
+            s.ColorSpace = pikepdf.Name.DeviceRGB
+            s.BitsPerComponent = 8
+            s.Filter = pikepdf.Name.FlateDecode
+            images.append(s)
+        for i in range(4):
+            page = pdf.add_blank_page(page_size=(600, 600))
+            page.Resources = pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=images[i % 2]))
+            page.Contents = pdf.make_stream(b"q 600 0 0 600 0 0 cm /Im0 Do Q")
+        pdf.save(src)
+        limit = os.path.getsize(src) // 3
+        for level, quality in LEVELS:
+            pages = _build(src, dst, quality)
+            if os.path.getsize(dst) <= limit:
+                ok = pages == 4 and level != "lossless"
+                print(json.dumps({"selfTest": "ok" if ok else "ng", "level": level,
+                                  "pikepdf": pikepdf.__version__}))
+                return 0 if ok else 1
+        print(json.dumps({"selfTest": "ng", "reason": "too_large", "pikepdf": pikepdf.__version__}))
+        return 1
+
+
 def main():
+    if sys.argv[1:] == ["--self-test"]:
+        return _self_test()
     ap = argparse.ArgumentParser()
     ap.add_argument("src")
     ap.add_argument("dst")
