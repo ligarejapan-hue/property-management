@@ -837,6 +837,8 @@ model Attachment {
   fileName   String   @map("file_name")
   fileUrl    String   @map("file_url")
   fileSize   Int      @map("file_size") // bytes
+  // 大きいPDFを自動で縮めたときだけ、圧縮前の大きさ(bytes)。縮めていなければ null(2026-10-10・additive)。
+  originalSize Int?   @map("original_size")
   mimeType   String   @map("mime_type")
   uploadedBy String   @map("uploaded_by") @db.Uuid
   isDeleted  Boolean  @default(false) @map("is_deleted")

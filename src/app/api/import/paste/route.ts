@@ -14,7 +14,7 @@ import {
   assertImportJsonBodySize,
   assertImportMultipartBodySize,
 } from "@/lib/import-body-size";
-import { MAX_FILE_SIZE } from "@/lib/storage";
+import { MAX_PDF_UPLOAD_BYTES, pdfTooLargeToAcceptMessage } from "@/lib/pdf-compress/policy";
 
 // ---------- POST /api/import/paste ----------
 // リクエスト形式:
@@ -42,8 +42,11 @@ const MAX_PASTE_JSON_BODY_BYTES = 4 * 1024 * 1024;
  * (全体レビュー I-2)。ここだけ 10MB にしていたため、9MB の PDF は読み取りに
  * 成功して人が10項目直したあと、登録の瞬間に 8MB 超で弾かれていた。
  * 案内文言も同じ定数から組み立て、数字を二重管理しない。
+ * ⚠2026-10-09 から確定側は 8MB を超えた PDF を自動で縮めるので、受け取る上限は
+ *   両方とも MAX_PDF_UPLOAD_BYTES(50MB)にそろえる(ここだけ 8MB のままだと、
+ *   確定では通る PDF が読み取りの時点で断られる)。
  */
-const MAX_PDF_BYTES = MAX_FILE_SIZE;
+const MAX_PDF_BYTES = MAX_PDF_UPLOAD_BYTES;
 
 export async function POST(request: NextRequest) {
   try {
@@ -74,11 +77,7 @@ export async function POST(request: NextRequest) {
         throw new ApiError(400, "PDFファイルが見つかりません", "BAD_REQUEST");
       }
       if (file.size > MAX_PDF_BYTES) {
-        throw new ApiError(
-          400,
-          `PDFが大きすぎます（${MAX_PDF_BYTES / 1024 / 1024}MBまで）`,
-          "BAD_REQUEST",
-        );
+        throw new ApiError(400, pdfTooLargeToAcceptMessage(), "BAD_REQUEST");
       }
       const buffer = Buffer.from(await file.arrayBuffer());
       if (!isPdfBuffer(buffer)) {

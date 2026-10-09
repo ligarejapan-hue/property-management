@@ -19,6 +19,9 @@ import {
   ALLOWED_ATTACHMENT_MIMES,
 } from "@/lib/storage";
 import { normalizeFileUrlsInRecord } from "@/lib/url-normalize";
+import { assertImportMultipartBodySize } from "@/lib/import-body-size";
+import { MAX_PDF_UPLOAD_BYTES, pdfTooLargeToAcceptMessage } from "@/lib/pdf-compress/policy";
+import { fitPdfToLimit } from "@/lib/pdf-compress/fit";
 
 const ATTACHMENT_TYPES = ["general", "registry"] as const;
 type AttachmentType = (typeof ATTACHMENT_TYPES)[number];
@@ -118,8 +121,12 @@ export async function POST(
     let fileSize: number;
     let mimeType: string;
     let attachmentType: AttachmentType = "general";
+    let originalSize: number | null = null;
 
     if (contentType.includes("multipart/form-data")) {
+      // ⚠formData() はボディ全体をメモリに読む。大きいPDF(自動圧縮の対象)を受けるので、
+      //   読む前に Content-Length で上限(50MB)を見る(取込系と同じ守り方)。
+      assertImportMultipartBodySize(request, MAX_PDF_UPLOAD_BYTES);
       const formData = await request.formData();
       const file = formData.get("file");
       if (!file || !(file instanceof Blob)) {
@@ -154,12 +161,33 @@ export async function POST(
         }
       }
 
-      const validationError = validateFile(fileSize, mimeType, ALLOWED_ATTACHMENT_MIMES);
-      if (validationError) {
-        throw new ApiError(422, validationError, "VALIDATION_ERROR");
+      // ⚠**謄本以外の PDF** は、上限(8MB)を超えていたら自動で縮める(発注者決定 2026-10-09)。
+      //   謄本は課金して取った原本なので縮めない=従来どおり 8MB で断る。
+      //   上限以下の PDF には手を触れない。圧縮前の原本は残さない(決定)。
+      const compressible = attachmentType !== "registry" && mimeType === "application/pdf";
+      if (compressible && fileSize > MAX_PDF_UPLOAD_BYTES) {
+        throw new ApiError(422, pdfTooLargeToAcceptMessage(), "VALIDATION_ERROR");
       }
 
-      const buffer = Buffer.from(await file.arrayBuffer());
+      const validate = () => {
+        const validationError = validateFile(fileSize, mimeType, ALLOWED_ATTACHMENT_MIMES);
+        if (validationError) {
+          throw new ApiError(422, validationError, "VALIDATION_ERROR");
+        }
+      };
+      // 縮めないもの(謄本・PDF以外)は、これまでどおり読む前に断る。
+      if (!compressible) validate();
+
+      let buffer: Buffer = Buffer.from(await file.arrayBuffer());
+      if (compressible) {
+        const fitted = await fitPdfToLimit(buffer);
+        buffer = fitted.buffer;
+        fileSize = buffer.length;
+        originalSize = fitted.originalSize;
+        // 大きさの検査は**縮めた後**の実物で行う。
+        validate();
+      }
+
       const ext = fileName.split(".").pop() ?? "bin";
       const subdir = attachmentType === "registry" ? "registry" : "attachments";
       // key に randomUUID を含め、同一物件・同一ミリ秒の upload でも衝突しない
@@ -211,6 +239,7 @@ export async function POST(
           fileName,
           fileUrl,
           fileSize,
+          originalSize,
           mimeType,
           uploadedBy: session.id,
         },
@@ -225,7 +254,11 @@ export async function POST(
       action: "create",
       targetTable: "attachments",
       targetId: attachment.id,
-      detail: { propertyId, fileName },
+      detail: {
+        propertyId,
+        fileName,
+        ...(originalSize !== null ? { compressedFrom: originalSize, compressedTo: fileSize } : {}),
+      },
     });
 
     return apiResponse(normalizeFileUrlsInRecord(attachment), 201);
