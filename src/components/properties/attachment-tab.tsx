@@ -28,6 +28,7 @@ import {
 } from "@/lib/api-client";
 import { normalizeFileUrl } from "@/lib/url-normalize";
 import { registryDisplayName } from "@/lib/attachments/registry-display-name";
+import { MAX_PDF_UPLOAD_BYTES } from "@/lib/pdf-compress/policy";
 
 type AttachmentType = "general" | "registry";
 
@@ -39,12 +40,20 @@ interface AttachmentData {
   fileName: string;
   fileUrl: string;
   fileSize: number;
+  /** 自動で縮めたときだけ、圧縮前の大きさ(bytes)。 */
+  originalSize?: number | null;
   mimeType: string;
   createdAt: string;
   uploader: { id: string; name: string };
 }
 
 const MAX_SIZE_MB = 8;
+/**
+ * 通常添付の PDF は、8MB を超えてもサーバーが自動で縮める(2026-10-10)ので
+ * ここまで受け付ける(値はサーバーと同じ定数から)。
+ * 謄本PDFは縮めない(課金した原本)ので 8MB のまま。
+ */
+const MAX_PDF_MB = MAX_PDF_UPLOAD_BYTES / 1024 / 1024;
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -118,6 +127,8 @@ export default function AttachmentTab({
   const [error, setError] = useState<string | null>(null);
   // 通常添付 と 謄本PDF で個別の uploading / error 状態を持つ
   const [uploadingGeneral, setUploadingGeneral] = useState(false);
+  // 8MB を超える PDF を送っている間は「圧縮しています」と出す(数秒〜十数秒かかる)。
+  const [compressingGeneral, setCompressingGeneral] = useState(false);
   const [uploadingRegistry, setUploadingRegistry] = useState(false);
   const [uploadErrorGeneral, setUploadErrorGeneral] = useState<string | null>(null);
   const [uploadErrorRegistry, setUploadErrorRegistry] = useState<string | null>(null);
@@ -184,9 +195,15 @@ export default function AttachmentTab({
       setUploadError("空ファイルはアップロードできません");
       return;
     }
-    if (file.size > MAX_SIZE_MB * 1024 * 1024) {
-      setUploadError(`ファイルサイズが上限 (${MAX_SIZE_MB}MB) を超えています`);
+    // 種類(MIME)が空でも拡張子が .pdf なら PDF とみなす(サーバーと同じ判定・@codex PR#498 P2)。
+    const compressible = type === "general" && isPdfFile(file);
+    const limitMb = compressible ? MAX_PDF_MB : MAX_SIZE_MB;
+    if (file.size > limitMb * 1024 * 1024) {
+      setUploadError(`ファイルサイズが上限 (${limitMb}MB) を超えています`);
       return;
+    }
+    if (type === "general") {
+      setCompressingGeneral(compressible && file.size > MAX_SIZE_MB * 1024 * 1024);
     }
     // 謄本PDF はクライアント側でも PDF のみ受け付け（サーバ側でも 422 で再チェック）
     if (type === "registry" && !isPdfFile(file)) {
@@ -275,7 +292,11 @@ export default function AttachmentTab({
           {uploadingGeneral ? (
             <div className="flex items-center justify-center gap-2">
               <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-              <span className="text-sm text-gray-600 dark:text-gray-300">アップロード中...</span>
+              <span className="text-sm text-gray-600 dark:text-gray-300">
+                {compressingGeneral
+                  ? "大きいPDFを圧縮して保存しています…（数十秒かかることがあります）"
+                  : "アップロード中..."}
+              </span>
             </div>
           ) : (
             <>
@@ -285,6 +306,7 @@ export default function AttachmentTab({
               </p>
               <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                 上限 {MAX_SIZE_MB}MB / PDF, Excel, CSV, Word, 画像
+                （{MAX_SIZE_MB}MB を超えるPDFは{MAX_PDF_MB}MBまで自動で圧縮して保存）
               </p>
             </>
           )}
@@ -451,7 +473,8 @@ function AttachmentRow({
           </p>
         )}
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          {formatFileSize(att.fileSize)} ·{" "}
+          {formatFileSize(att.fileSize)}
+          {att.originalSize ? `（自動で圧縮・元 ${formatFileSize(att.originalSize)}）` : ""} ·{" "}
           {att.uploader.name} ·{" "}
           {new Date(att.createdAt).toLocaleDateString("ja-JP")}
         </p>

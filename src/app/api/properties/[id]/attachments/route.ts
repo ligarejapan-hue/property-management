@@ -19,6 +19,14 @@ import {
   ALLOWED_ATTACHMENT_MIMES,
 } from "@/lib/storage";
 import { normalizeFileUrlsInRecord } from "@/lib/url-normalize";
+import { assertImportJsonBodySize, assertImportMultipartBodySize } from "@/lib/import-body-size";
+import {
+  MAX_PDF_UPLOAD_BYTES,
+  isPdfByMimeOrName,
+  pdfTooLargeToAcceptMessage,
+} from "@/lib/pdf-compress/policy";
+import { fitPdfToLimit, reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
+import { isPdfBuffer } from "@/lib/pdf-extract";
 
 const ATTACHMENT_TYPES = ["general", "registry"] as const;
 type AttachmentType = (typeof ATTACHMENT_TYPES)[number];
@@ -91,6 +99,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  let releaseSlot = () => {};
   try {
     const { id: propertyId } = await params;
     const session = await getApiSession();
@@ -118,8 +127,14 @@ export async function POST(
     let fileSize: number;
     let mimeType: string;
     let attachmentType: AttachmentType = "general";
+    let originalSize: number | null = null;
 
     if (contentType.includes("multipart/form-data")) {
+      // ⚠formData() はボディ全体をメモリに読む。大きいPDF(自動圧縮の対象)を受けるので、
+      //   読む前に Content-Length で上限(50MB)を見る(取込系と同じ守り方)。
+      assertImportMultipartBodySize(request, MAX_PDF_UPLOAD_BYTES);
+      // 圧縮が要るかもしれない大きさなら、本文を読む前に圧縮の席を取る(埋まっていれば 503)。
+      releaseSlot = reserveLargePdfSlot(request);
       const formData = await request.formData();
       const file = formData.get("file");
       if (!file || !(file instanceof Blob)) {
@@ -154,12 +169,42 @@ export async function POST(
         }
       }
 
-      const validationError = validateFile(fileSize, mimeType, ALLOWED_ATTACHMENT_MIMES);
-      if (validationError) {
-        throw new ApiError(422, validationError, "VALIDATION_ERROR");
+      // 通常の添付も、MIME が空・不明で拡張子が .pdf なら PDF として扱う(@codex PR#498 P2)。
+      //   ⚠中身が本当に PDF かは、読んだ後に先頭の %PDF- で確かめる(下)。
+      const pdfByName = attachmentType !== "registry" && mimeType !== "application/pdf" &&
+        isPdfByMimeOrName(mimeType, fileName);
+      if (pdfByName) mimeType = "application/pdf";
+
+      // ⚠**謄本以外の PDF** は、上限(8MB)を超えていたら自動で縮める(発注者決定 2026-10-09)。
+      //   謄本は課金して取った原本なので縮めない=従来どおり 8MB で断る。
+      //   上限以下の PDF には手を触れない。圧縮前の原本は残さない(決定)。
+      const compressible = attachmentType !== "registry" && mimeType === "application/pdf";
+      if (compressible && fileSize > MAX_PDF_UPLOAD_BYTES) {
+        throw new ApiError(422, pdfTooLargeToAcceptMessage(), "VALIDATION_ERROR");
       }
 
-      const buffer = Buffer.from(await file.arrayBuffer());
+      const validate = () => {
+        const validationError = validateFile(fileSize, mimeType, ALLOWED_ATTACHMENT_MIMES);
+        if (validationError) {
+          throw new ApiError(422, validationError, "VALIDATION_ERROR");
+        }
+      };
+      // 縮めないもの(謄本・PDF以外)は、これまでどおり読む前に断る。
+      if (!compressible) validate();
+
+      let buffer: Buffer = Buffer.from(await file.arrayBuffer());
+      if (pdfByName && !isPdfBuffer(buffer)) {
+        throw new ApiError(422, "PDFファイルではありません", "VALIDATION_ERROR");
+      }
+      if (compressible) {
+        const fitted = await fitPdfToLimit(buffer);
+        buffer = fitted.buffer;
+        fileSize = buffer.length;
+        originalSize = fitted.originalSize;
+        // 大きさの検査は**縮めた後**の実物で行う。
+        validate();
+      }
+
       const ext = fileName.split(".").pop() ?? "bin";
       const subdir = attachmentType === "registry" ? "registry" : "attachments";
       // key に randomUUID を含め、同一物件・同一ミリ秒の upload でも衝突しない
@@ -172,6 +217,9 @@ export async function POST(
       const result = await storage.upload(buffer, { key, mimeType, fileName });
       fileUrl = result.url;
     } else {
+      // ⚠この口は proxy を通らない(大きいPDFのため・src/proxy.ts)ので、JSON も
+      //   読む前に大きさを見る(メタ情報だけなので 64KB で十分)。
+      assertImportJsonBodySize(request, 64 * 1024);
       const body = await request.json();
       const data = registerAttachmentSchema.parse(body);
       fileName = data.fileName;
@@ -211,6 +259,7 @@ export async function POST(
           fileName,
           fileUrl,
           fileSize,
+          originalSize,
           mimeType,
           uploadedBy: session.id,
         },
@@ -225,11 +274,17 @@ export async function POST(
       action: "create",
       targetTable: "attachments",
       targetId: attachment.id,
-      detail: { propertyId, fileName },
+      detail: {
+        propertyId,
+        fileName,
+        ...(originalSize !== null ? { compressedFrom: originalSize, compressedTo: fileSize } : {}),
+      },
     });
 
     return apiResponse(normalizeFileUrlsInRecord(attachment), 201);
   } catch (error) {
     return handleApiError(error);
+  } finally {
+    releaseSlot();
   }
 }

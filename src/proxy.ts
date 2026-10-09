@@ -70,6 +70,21 @@ export default async function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
+/**
+ * ⚠**大きいPDFを受け取る3つの API は proxy を通さない**(2026-10-10・@codex PR#498 P1)。
+ *   proxy があると Next.js は本文を proxyClientMaxBodySize(既定 10MB)まで先読みし、超えた分を
+ *   黙って切る。上限を全体に上げると、クッキーの「有無」しか見ない proxy の手前で、認証前の
+ *   送信に 51MB までメモリを使わせることになる。そこで対象の口だけを外す。
+ *   ここは API なので proxy の役目(未ログインならログイン画面へ)は要らず、各 route が
+ *   **本文を読む前に** getApiSession で本当の認証を行い、Content-Length で自分の上限を見る。
+ *   ⚠外す口を増やすときも、その route が「認証 → 大きさの事前チェック → formData()」の
+ *   順になっていることを確かめること(proxy-matcher-large-upload.test.ts)。
+ */
+export const LARGE_UPLOAD_API_PATTERN =
+  "api/properties/[^/]+/attachments$|api/import/paste$|api/import/paste/commit$";
+
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|uploads/).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|uploads/|api/properties/[^/]+/attachments$|api/import/paste$|api/import/paste/commit$).*)",
+  ],
 };

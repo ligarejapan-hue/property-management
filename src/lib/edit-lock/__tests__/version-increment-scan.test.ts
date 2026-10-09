@@ -161,7 +161,7 @@ const ALLOWED_WITHOUT_VERSION: Record<string, AllowedEntry> = {
     reason: "owner.updatedAt のみ(行ロック獲得のための touch)",
     keys: ["updatedAt"],
   },
-  "src/app/api/import/paste/commit/route.ts:536": {
+  "src/app/api/import/paste/commit/route.ts:544": {
     reason: "owner.updatedAt のみ(既存所有者へのリンク可否確認のための touch)",
     keys: ["updatedAt"],
   },

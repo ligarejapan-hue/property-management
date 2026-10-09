@@ -145,6 +145,27 @@ function multipartReq(
   return new Request(url, { method: "POST", body: fd }) as unknown as NextRequest;
 }
 
+/**
+ * 添付の入口は formData() の前に Content-Length を見る(2026-10-10・大きいPDFの自動圧縮)。
+ * ブラウザの fetch + FormData は必ず付けるので、添付のテストでは付けて送る。
+ */
+async function multipartReqWithLength(
+  url: string,
+  fileName: string,
+  mime: string,
+  extra: Record<string, string> = {},
+) {
+  const fd = new FormData();
+  fd.append("file", new Blob([new Uint8Array(16)], { type: mime }), fileName);
+  for (const [k, v] of Object.entries(extra)) fd.append(k, v);
+  const blob = await new Response(fd).blob();
+  return new Request(url, {
+    method: "POST",
+    body: blob,
+    headers: { "content-type": blob.type, "content-length": String(blob.size) },
+  }) as unknown as NextRequest;
+}
+
 /** storage.upload に渡された key を順に返す。 */
 function uploadedKeys(): string[] {
   return storageStub.upload.mock.calls.map(
@@ -233,13 +254,13 @@ describe("upload key の同一ミリ秒衝突防止（randomUUID 付与）", () 
 
   it("property attachment (general): Date.now() 固定でも 2 回の storage key が異なり、attachments subdir/拡張子を維持", async () => {
     const req = () =>
-      multipartReq(
+      multipartReqWithLength(
         "http://t/api/properties/p-1/attachments",
         "doc.pdf",
         "application/pdf",
       );
-    const res1 = await postAttachment(req(), paramsP("p-1"));
-    const res2 = await postAttachment(req(), paramsP("p-1"));
+    const res1 = await postAttachment(await req(), paramsP("p-1"));
+    const res2 = await postAttachment(await req(), paramsP("p-1"));
     expect(res1.status).toBe(201);
     expect(res2.status).toBe(201);
 
@@ -254,14 +275,14 @@ describe("upload key の同一ミリ秒衝突防止（randomUUID 付与）", () 
 
   it("property attachment (registry): registry subdir を維持したまま同一 ms 衝突を防止（配信方針は不変）", async () => {
     const req = () =>
-      multipartReq(
+      multipartReqWithLength(
         "http://t/api/properties/p-1/attachments",
         "touhon.pdf",
         "application/pdf",
         { type: "registry" },
       );
-    const res1 = await postAttachment(req(), paramsP("p-1"));
-    const res2 = await postAttachment(req(), paramsP("p-1"));
+    const res1 = await postAttachment(await req(), paramsP("p-1"));
+    const res2 = await postAttachment(await req(), paramsP("p-1"));
     expect(res1.status).toBe(201);
     expect(res2.status).toBe(201);
 

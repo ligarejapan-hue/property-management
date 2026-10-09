@@ -208,6 +208,18 @@ vi.mock("@/lib/building-link/apply", () => ({
   writeBuildingLinkAudit: auditLinkMock,
 }));
 
+// 大きいPDFの自動圧縮(2026-10-10)。部品は別に単体テスト済み。ここでは確定側が
+// 「8MB 超の反響PDFを縮めて保存し、圧縮前の大きさを残す」ことだけを見る。
+const { fitMock } = vi.hoisted(() => ({
+  // 既定は「上限以下=手を触れない」(clearAllMocks は実装を消さない)。
+  fitMock: vi.fn(async (buf: Buffer) => ({ buffer: buf, originalSize: null as number | null, level: null as string | null })),
+}));
+vi.mock("@/lib/pdf-compress/fit", () => ({
+  fitPdfToLimit: fitMock,
+  // 席の取り合いは fit の単体テストで見る。ここでは常に取れて、返す関数は何もしない。
+  reserveLargePdfSlot: () => () => {},
+}));
+
 import { POST } from "../route";
 import { NextRequest } from "next/server";
 
@@ -899,7 +911,7 @@ describe("トランザクションが失敗したら、先に保存したPDFを�
 
 describe("multipart は formData() の前に大きさを見る（P1②）", () => {
   it("★Content-Length が上限超過なら413で、formData() に到達しない", async () => {
-    const { MAX_FILE_SIZE } = await import("@/lib/storage");
+    const { MAX_PDF_UPLOAD_BYTES } = await import("@/lib/pdf-compress/policy");
     // 本文を実際に作らず、ヘッダだけ巨大にする(=ガードが**先に**効いていなければ
     // formData() がヘッダどおりの本文を待って別のエラーになる)。
     const fd = new FormData();
@@ -910,7 +922,7 @@ describe("multipart は formData() の前に大きさを見る（P1②）", () =
       body: blob,
       headers: {
         "content-type": "multipart/form-data; boundary=x",
-        "content-length": String(MAX_FILE_SIZE + 2 * 1024 * 1024),
+        "content-length": String(MAX_PDF_UPLOAD_BYTES + 2 * 1024 * 1024),
       },
     });
     const res = await POST(reqTooBig);
@@ -1429,5 +1441,33 @@ describe("棟へのつなぎ(区分マンションを同じ棟にまとめる)",
     expect(res.status).toBe(400);
     expect(applyMock).not.toHaveBeenCalled();
     expect(created.property).toBeUndefined();
+  });
+});
+
+describe("反響PDFの自動圧縮(2026-10-10)", () => {
+  it("★8MB を超える反響PDFは縮めて保存し、圧縮前の大きさを残す", async () => {
+    const small = Buffer.from("%PDF-1.4 small");
+    fitMock.mockImplementationOnce(async (buf: Buffer) => ({
+      buffer: small,
+      originalSize: buf.length,
+      level: "jpeg85",
+    }));
+    const big = new File([Buffer.concat([Buffer.from("%PDF-1.4 "), Buffer.alloc(9 * 1024 * 1024, 0x20)])], "big.pdf", {
+      type: "application/pdf",
+    });
+    const res = await POST(await multipartReq(baseBody, big));
+    expect(res.status).toBe(200);
+    expect(fitMock).toHaveBeenCalledTimes(1);
+    expect(created.attachment?.[0]).toMatchObject({
+      type: "referral",
+      fileSize: small.length,
+      originalSize: big.size,
+    });
+  });
+
+  it("縮めなかった反響PDFは originalSize が null", async () => {
+    const res = await POST(await multipartReq(baseBody, pdfFile()));
+    expect(res.status).toBe(200);
+    expect(created.attachment?.[0]).toMatchObject({ originalSize: null });
   });
 });

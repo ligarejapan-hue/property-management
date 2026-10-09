@@ -9,6 +9,9 @@ const nextConfig: NextConfig = {
   // フレームワーク名の露出を避ける（`X-Powered-By: Next.js` を出さない）。
   poweredByHeader: false,
 
+  // ⚠experimental.proxyClientMaxBodySize(既定 10MB)は**上げない**。大きいPDFを受け取る口は
+  //   proxy の対象から外してある(src/proxy.ts の matcher・@codex PR#498 P1)。
+
   // 全レスポンス共通の防御ヘッダ。
   // ⚠あえて入れないもの:
   //   - Permissions-Policy: 現地調査がカメラ(getUserMedia)とGPS(geolocation)を使うため、

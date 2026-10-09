@@ -702,14 +702,52 @@ describe("PDF 経路（全体レビュー I-2 / I-5 / m-2 / m-6）", () => {
     expect(body.extractedText).toBeNull();
   });
 
-  it("★PDF の上限は確定側(MAX_FILE_SIZE)と同じで、案内文言もその数字を出す", async () => {
-    const { MAX_FILE_SIZE } = await import("@/lib/storage");
-    const res = await POST(await pdfReq(MAX_FILE_SIZE + 1));
+  it("★PDF の上限は確定側と同じ(MAX_PDF_UPLOAD_BYTES)で、案内文言もその数字を出す", async () => {
+    // 2026-10-10 から確定側は 8MB を超えた PDF を自動で縮めるので、受け取る上限は両方 50MB。
+    const { MAX_PDF_UPLOAD_BYTES } = await import("@/lib/pdf-compress/policy");
+    const res = await POST(await pdfReq(MAX_PDF_UPLOAD_BYTES + 1));
     expect(res.status).toBe(400);
     const body = await res.json();
-    // 「10MBまで」と案内して 8MB で弾く食い違いを作らない。
-    expect(body.error.message).toContain(String(MAX_FILE_SIZE / 1024 / 1024));
+    expect(body.error.message).toContain(String(MAX_PDF_UPLOAD_BYTES / 1024 / 1024) + "MBまで");
     expect(body.error.message).not.toContain("10MB");
+  });
+
+  it("★8MB を超える PDF も読み取れる(確定のときに自動で縮める)", async () => {
+    const res = await POST(await pdfReq(9 * 1024 * 1024));
+    expect(res.status).toBe(200);
+  });
+
+  it("★8MB を超える PDF の読み取りも、席が埋まっていれば本文を読む前に 503(@codex PR#498 2巡目)", async () => {
+    const { tryReserveCompressionSlot } = await import("@/lib/pdf-compress/run");
+    const held = [tryReserveCompressionSlot(), tryReserveCompressionSlot()];
+    try {
+      const res = await POST(await pdfReq(9 * 1024 * 1024));
+      expect(res.status).toBe(503);
+      expect((await res.json()).error.message).toContain("別の大きいPDFを処理しています");
+    } finally {
+      held.forEach((r) => r?.());
+    }
+    // 読み取りが終われば席は返っている(次の大きい PDF は読める)。
+    const again = await POST(await pdfReq(9 * 1024 * 1024));
+    expect(again.status).toBe(200);
+  });
+
+  it("★8MB を超える PDF の展開は2本同時に動かない(席に入った2本目は待つ・@codex PR#498 4巡目)", async () => {
+    const { extractTextFromPdf } = await import("@/lib/pdf-extract");
+    let running = 0;
+    let maxRunning = 0;
+    vi.mocked(extractTextFromPdf).mockImplementation(async () => {
+      running++;
+      maxRunning = Math.max(maxRunning, running);
+      await new Promise((r) => setTimeout(r, 30));
+      running--;
+      return pdfText;
+    });
+    const [a, b] = await Promise.all([POST(await pdfReq(9 * 1024 * 1024)), POST(await pdfReq(9 * 1024 * 1024))]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect(maxRunning).toBe(1);
+    vi.mocked(extractTextFromPdf).mockImplementation(async () => pdfText);
   });
 
   it("★文字が数文字しか取れないPDF(スキャン画像)は、空でなくても断る", async () => {
@@ -964,7 +1002,7 @@ describe("外部キーは全角/半角の別を越えて突き合わせる", () 
 
 describe("下書きAPIの multipart も formData() の前に大きさを見る（P1②）", () => {
   it("★Content-Length が上限超過なら413で、PDFの解析にも到達しない", async () => {
-    const { MAX_FILE_SIZE } = await import("@/lib/storage");
+    const { MAX_PDF_UPLOAD_BYTES } = await import("@/lib/pdf-compress/policy");
     const fd = new FormData();
     fd.append("file", new File([Buffer.from("%PDF-1.4")], "x.pdf", { type: "application/pdf" }));
     const blob = await new Response(fd).blob();
@@ -973,7 +1011,7 @@ describe("下書きAPIの multipart も formData() の前に大きさを見る�
       body: blob,
       headers: {
         "content-type": "multipart/form-data; boundary=x",
-        "content-length": String(MAX_FILE_SIZE + 2 * 1024 * 1024),
+        "content-length": String(MAX_PDF_UPLOAD_BYTES + 2 * 1024 * 1024),
       },
     });
     const res = await POST(tooBig);

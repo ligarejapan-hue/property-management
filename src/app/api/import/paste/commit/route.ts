@@ -13,7 +13,9 @@ import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
 import { lockPropertyRow } from "@/lib/property-record-guard";
 import { isPdfBuffer } from "@/lib/pdf-extract";
-import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES, MAX_FILE_SIZE } from "@/lib/storage";
+import { getStorage, validateFile, ALLOWED_ATTACHMENT_MIMES } from "@/lib/storage";
+import { MAX_PDF_UPLOAD_BYTES, pdfTooLargeToAcceptMessage } from "@/lib/pdf-compress/policy";
+import { fitPdfToLimit, reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
 import {
   assertImportJsonBodySize,
   assertImportMultipartBodySize,
@@ -181,6 +183,7 @@ const COMMIT_LOCK_KEY = "paste-excel-bulk-commit";
 const MAX_COMMIT_JSON_BODY_BYTES = 2 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
+  let releaseSlot = () => {};
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
@@ -202,7 +205,10 @@ export async function POST(request: NextRequest) {
       // ⚠formData() は**ボディ全体をメモリに読み込む**。読み込んだ後で file.size を
       //   見ても、巨大なリクエストでメモリを食い潰せる(@codex PR#414 2巡目 P1)。
       //   registry-pdf-bulk と同じく Content-Length を**先に**見る。
-      assertImportMultipartBodySize(request, MAX_FILE_SIZE);
+      //   上限は自動圧縮の前に受け取ってよい大きさ(50MB)。8MB を超えた分は後で縮める。
+      assertImportMultipartBodySize(request, MAX_PDF_UPLOAD_BYTES);
+      // 圧縮が要るかもしれない大きさなら、本文を読む前に圧縮の席を取る(埋まっていれば 503)。
+      releaseSlot = reserveLargePdfSlot(request);
       const form = await request.formData();
       const dataRaw = form.get("data");
       if (typeof dataRaw !== "string") {
@@ -216,15 +222,11 @@ export async function POST(request: NextRequest) {
 
       const file = form.get("file");
       if (file && typeof file !== "string") {
-        // ⚠案内文言と実際の上限を二重管理しない。実効値は validateFile
-        //   (@/lib/storage) が使う MAX_FILE_SIZE と同じ定数を直接参照する
-        //   (Task 8 レビュー Minor: 10MBと案内しつつ実際は8MBで弾かれていた)。
-        if (file.size > MAX_FILE_SIZE) {
-          throw new ApiError(
-            400,
-            `PDFが大きすぎます(${MAX_FILE_SIZE / 1024 / 1024}MBまで)`,
-            "BAD_REQUEST",
-          );
+        // ⚠案内文言と実際の上限を二重管理しない(Task 8 レビュー Minor)。
+        //   受け取る上限は MAX_PDF_UPLOAD_BYTES、保存の上限は validateFile の MAX_FILE_SIZE
+        //   (8MB を超えた分は下で自動圧縮する・2026-10-09)。
+        if (file.size > MAX_PDF_UPLOAD_BYTES) {
+          throw new ApiError(400, pdfTooLargeToAcceptMessage(), "BAD_REQUEST");
         }
         const buffer = Buffer.from(await file.arrayBuffer());
         if (!isPdfBuffer(buffer)) {
@@ -307,7 +309,13 @@ export async function POST(request: NextRequest) {
         }
       }
     }
+    let pdfOriginalSize: number | null = null;
     if (pdfBuffer) {
+      // ⚠反響PDFも「謄本以外の添付」なので、上限(8MB)を超えていれば自動で縮める
+      //   (発注者決定 2026-10-09・原本は残さない)。縮めた後の実物で上限を確かめる。
+      const fitted = await fitPdfToLimit(pdfBuffer);
+      pdfBuffer = fitted.buffer;
+      pdfOriginalSize = fitted.originalSize;
       const validationError = validateFile(
         pdfBuffer.length,
         "application/pdf",
@@ -620,6 +628,7 @@ export async function POST(request: NextRequest) {
               fileName: referralDisplayName(new Date()),
               fileUrl: uploadedUrl,
               fileSize: pdfBuffer.length,
+              originalSize: pdfOriginalSize,
               mimeType: "application/pdf",
               uploadedBy: session.id,
             },
@@ -681,5 +690,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     return handleApiError(error);
+  } finally {
+    releaseSlot();
   }
 }

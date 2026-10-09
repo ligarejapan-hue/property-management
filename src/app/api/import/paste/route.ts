@@ -14,7 +14,10 @@ import {
   assertImportJsonBodySize,
   assertImportMultipartBodySize,
 } from "@/lib/import-body-size";
-import { MAX_FILE_SIZE } from "@/lib/storage";
+import { MAX_PDF_UPLOAD_BYTES, pdfTooLargeToAcceptMessage } from "@/lib/pdf-compress/policy";
+import { reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
+import { runExclusive } from "@/lib/pdf-compress/run";
+import { MAX_FILE_SIZE } from "@/lib/storage/types";
 
 // ---------- POST /api/import/paste ----------
 // リクエスト形式:
@@ -42,10 +45,14 @@ const MAX_PASTE_JSON_BODY_BYTES = 4 * 1024 * 1024;
  * (全体レビュー I-2)。ここだけ 10MB にしていたため、9MB の PDF は読み取りに
  * 成功して人が10項目直したあと、登録の瞬間に 8MB 超で弾かれていた。
  * 案内文言も同じ定数から組み立て、数字を二重管理しない。
+ * ⚠2026-10-09 から確定側は 8MB を超えた PDF を自動で縮めるので、受け取る上限は
+ *   両方とも MAX_PDF_UPLOAD_BYTES(50MB)にそろえる(ここだけ 8MB のままだと、
+ *   確定では通る PDF が読み取りの時点で断られる)。
  */
-const MAX_PDF_BYTES = MAX_FILE_SIZE;
+const MAX_PDF_BYTES = MAX_PDF_UPLOAD_BYTES;
 
 export async function POST(request: NextRequest) {
+  let releaseSlot = () => {};
   try {
     const session = await getApiSession();
     const perms = await getUserPermissions(session.id);
@@ -68,23 +75,26 @@ export async function POST(request: NextRequest) {
       //   見ても、巨大なリクエストでメモリを食い潰せる(@codex PR#414 2巡目 P1)。
       //   registry-pdf-bulk と同じく Content-Length を**先に**見る。
       assertImportMultipartBodySize(request, MAX_PDF_BYTES);
+      // ⚠8MB を超える PDF の読み取り(pdf-parse は本体のプロセスで動く)も、圧縮と同じ
+      //   席(実行1+待ち1)を本文を読む前に取る。埋まっていれば 503(@codex PR#498 2巡目)。
+      releaseSlot = reserveLargePdfSlot(request);
       const form = await request.formData();
       const file = form.get("file");
       if (!(file instanceof File)) {
         throw new ApiError(400, "PDFファイルが見つかりません", "BAD_REQUEST");
       }
       if (file.size > MAX_PDF_BYTES) {
-        throw new ApiError(
-          400,
-          `PDFが大きすぎます（${MAX_PDF_BYTES / 1024 / 1024}MBまで）`,
-          "BAD_REQUEST",
-        );
+        throw new ApiError(400, pdfTooLargeToAcceptMessage(), "BAD_REQUEST");
       }
       const buffer = Buffer.from(await file.arrayBuffer());
       if (!isPdfBuffer(buffer)) {
         throw new ApiError(400, "PDFファイルではありません", "BAD_REQUEST");
       }
-      text = await extractTextFromPdf(buffer);
+      // 8MB を超える PDF の展開は、圧縮と同じ順番待ちで1本ずつ(席だけでは2本同時に動く)。
+      text =
+        buffer.length > MAX_FILE_SIZE
+          ? await runExclusive(() => extractTextFromPdf(buffer))
+          : await extractTextFromPdf(buffer);
       if (isLikelyScannedPdf(text)) {
         // ⚠無言で空の下書きを返さない。スキャン画像の PDF はここに来る。
         // ⚠判定は既存の isLikelyScannedPdf(@/lib/pdf-extract・50文字未満)を使う
@@ -162,5 +172,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     return handleApiError(error);
+  } finally {
+    releaseSlot();
   }
 }
