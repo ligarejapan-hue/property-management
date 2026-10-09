@@ -5,7 +5,7 @@
  */
 import { LP_BRAND, type LpBrandImage } from "./lp-brand";
 
-export const FIGURE_KINDS = ["sale_flow", "cost_breakdown", "inheritance_deadlines", "vacant_burden", "timing_by_type", "sell_rent_keep", "partner_network", "consult_guide"] as const;
+export const FIGURE_KINDS = ["sale_flow", "cost_breakdown", "inheritance_deadlines", "vacant_burden", "timing_by_type", "sell_rent_keep", "partner_network", "consult_guide", "sell_rent_keep_3"] as const;
 export type FigureKind = (typeof FIGURE_KINDS)[number];
 
 export const FIGURE_LABELS: Record<FigureKind, string> = {
@@ -17,6 +17,7 @@ export const FIGURE_LABELS: Record<FigureKind, string> = {
   sell_rent_keep: "売る・貸す・持つ・住み続けて売る(絵つきの札)",
   partner_network: "窓口はひとつ(提携先の図)",
   consult_guide: "案内役(イメージイラスト)と本文",
+  sell_rent_keep_3: "売る・貸す・しばらく持つ(絵つきの札・3枚)",
 };
 
 export function isFigureKind(v: unknown): v is FigureKind {
@@ -95,6 +96,25 @@ const DEADLINE_MARKS: Array<[label: string, x: number, sub: string]> = [
 ];
 const DEADLINE_LAST_TEXT_X = 632;
 
+type OptionCard = (typeof LP_BRAND.options)[number];
+/** 住んでいない家(空き家など)向け: リースバック(住み続けて売る)の札を除いた札(発注者決定 2026-10-10)。 */
+function optionsWithoutLeaseback(): OptionCard[] {
+  return LP_BRAND.options.filter((o) => o.key !== "leaseback");
+}
+/** 札の見本(管理画面)。札の数に合わせて横幅を割り(4枚=1枚136)、文字は札の幅に収まる大きさにする。 */
+function optionCardsSvg(cards: readonly OptionCard[], title: string): string {
+  return wrap(
+    cards.map((o, i, all) => {
+      const w = Math.floor((592 - (all.length - 1) * 16) / all.length);
+      const x = 24 + i * (w + 16);
+      const size = Math.min(20, Math.floor((w - 12) / o.title.length));
+      return `<rect x="${x}" y="84" width="${w}" height="180" rx="12" fill="${SOFT}" stroke="${ACCENT}" stroke-width="1.5"/>` +
+        text(x + Math.floor(w / 2), 190, o.title, size, INK, "middle", "700");
+    }).join("") + text(24, 310, "それぞれの見通しをお伝えします(絵つき)", 13, MUTED),
+    title,
+  );
+}
+
 const RENDERERS: Record<FigureKind, () => string> = {
   sale_flow: () =>
     wrap(
@@ -149,18 +169,9 @@ const RENDERERS: Record<FigureKind, () => string> = {
       FIGURE_LABELS.timing_by_type,
     ),
   // ↓ 以下3つは公開LPでは renderFigureHtml(絵や本文と組む HTML)で描く。SVG は管理画面の見本(縮小表示)用。
-  sell_rent_keep: () =>
-    wrap(
-      LP_BRAND.options.map((o, i, all) => {
-        // 札の数に合わせて横幅を割る(4枚=1枚136)。文字は札の幅に収まる大きさにする。
-        const w = Math.floor((592 - (all.length - 1) * 16) / all.length);
-        const x = 24 + i * (w + 16);
-        const size = Math.min(20, Math.floor((w - 12) / o.title.length));
-        return `<rect x="${x}" y="84" width="${w}" height="180" rx="12" fill="${SOFT}" stroke="${ACCENT}" stroke-width="1.5"/>` +
-          text(x + Math.floor(w / 2), 190, o.title, size, INK, "middle", "700");
-      }).join("") + text(24, 310, "それぞれの見通しをお伝えします(絵つき)", 13, MUTED),
-      FIGURE_LABELS.sell_rent_keep,
-    ),
+  sell_rent_keep: () => optionCardsSvg(LP_BRAND.options, FIGURE_LABELS.sell_rent_keep),
+  // 空き家など、住んでいない家向け(発注者決定 2026-10-10): リースバックの札を除いた3枚
+  sell_rent_keep_3: () => optionCardsSvg(optionsWithoutLeaseback(), FIGURE_LABELS.sell_rent_keep_3),
   // 管理画面の見本も公開LPと同じ円形の図(同じ描画関数)を載せる(@codex #488 R7 P2)。
   // 図の高さ 269 を見出しの下(y=70〜339)に収める。
   partner_network: () =>
@@ -273,6 +284,12 @@ function partnerRadialSvg(): string {
   return `<svg class="net-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${NETWORK_VIEW.w} ${NETWORK_VIEW.h}" width="${NETWORK_VIEW.w}" height="${NETWORK_VIEW.h}" role="img" aria-label="${esc(label)}">${partnerRadialInner()}</svg>`;
 }
 
+function optionCardsHtml(cards: readonly OptionCard[], cls: string): string {
+  return `<div class="${cls}">` +
+    cards.map((o) => `<div class="opt-card">${brandImg(o.image, "opt-img")}<h3>${esc(o.title)}</h3><p>${esc(o.text)}</p></div>`).join("") +
+    `</div>`;
+}
+
 /** 公開LPに埋める図の HTML。consult_guide は節の本文と組むため lp-page.ts 側で並べる(ここは絵の部分だけ)。 */
 export function renderFigureHtml(kind: FigureKind): string {
   switch (kind) {
@@ -288,9 +305,9 @@ export function renderFigureHtml(kind: FigureKind): string {
         FLOW_STEPS.map(([t, s]) => `<li><div><strong>${esc(t)}</strong><span>${esc(s)}</span></div></li>`).join("") +
         `</ol><p class="flow-total">ご相談からお引き渡しまで、3〜6か月ほどが目安です</p><p class="small-note">期間は物件やご希望の条件によって変わります。</p></div>`;
     case "sell_rent_keep":
-      return `<div class="options">` +
-        LP_BRAND.options.map((o) => `<div class="opt-card">${brandImg(o.image, "opt-img")}<h3>${esc(o.title)}</h3><p>${esc(o.text)}</p></div>`).join("") +
-        `</div>`;
+      return optionCardsHtml(LP_BRAND.options, "options");
+    case "sell_rent_keep_3":
+      return optionCardsHtml(optionsWithoutLeaseback(), "options three");
     case "partner_network":
       return `<div class="network">${partnerRadialSvg()}` +
                 `<p class="small-note">必要なときに、提携の専門家・業者へ当社からおつなぎします。</p></div>`;

@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { FIGURE_KINDS, FIGURE_LABELS, isFigureKind, renderFigureSvg } from "../sale-dm-letter/lp-figures";
 
 describe("renderFigureSvg", () => {
-  it("8種すべてが完結した SVG(管理画面の見本)を返し、日本語の名前を持つ", () => {
-    expect(FIGURE_KINDS.length).toBe(8);
+  it("9種すべてが完結した SVG(管理画面の見本)を返し、日本語の名前を持つ", () => {
+    expect(FIGURE_KINDS.length).toBe(9);
     for (const k of FIGURE_KINDS) {
       const svg = renderFigureSvg(k);
       expect(svg.startsWith("<svg ")).toBe(true);
