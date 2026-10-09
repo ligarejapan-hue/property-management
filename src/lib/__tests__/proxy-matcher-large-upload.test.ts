@@ -49,6 +49,37 @@ describe("proxy の matcher", () => {
   });
 });
 
+describe("nginx の見本(アプリ全体を nginx で出す構成)も、3つの口だけ大きい送信と長い待ちを許す", () => {
+  const conf = readFileSync(path.join(process.cwd(), "deploy/nginx/property-management.conf.example"), "utf8");
+  const m = /location ~ (\^\/api\/[^\s]+) \{([\s\S]*?)\n    \}/.exec(conf);
+
+  it("専用の location があり、上限 52MB・待ち 300 秒", () => {
+    expect(m).not.toBeNull();
+    expect(m![2]).toMatch(/client_max_body_size 52m;/);
+    expect(m![2]).toMatch(/proxy_read_timeout\s+300s;/);
+    expect(m![2]).toMatch(/proxy_send_timeout\s+300s;/);
+  });
+
+  it("対象は proxy の除外と同じ3つの口だけ", () => {
+    const re = new RegExp(m![1]);
+    for (const p of [
+      "/api/properties/0b6f6c1e-0000-4000-8000-000000000000/attachments",
+      "/api/import/paste",
+      "/api/import/paste/commit",
+    ]) {
+      expect(re.test(p), p).toBe(true);
+    }
+    for (const p of ["/api/properties/abc/photos", "/api/import/paste/excel", "/api/properties/abc/attachments/att-1"]) {
+      expect(re.test(p), p).toBe(false);
+    }
+  });
+
+  it("待ち時間は、順番待ち(前の1本+自分)の最大より長い", async () => {
+    const { TIMEOUT_MS } = await import("@/lib/pdf-compress/run");
+    expect(300 * 1000).toBeGreaterThan(TIMEOUT_MS * 2);
+  });
+});
+
 describe("proxy を通さない口は、本文を読む前に認証と大きさの確認をする", () => {
   const root = process.cwd();
   it.each([

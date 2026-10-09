@@ -213,6 +213,10 @@ sudo -u www-data python3 -c "import pikepdf, PIL; print(pikepdf.__version__)"
 - Ubuntu 24.04 の `python3-pikepdf` は 8.7.1(MPL-2.0)。AGPL の MuPDF は使わない
 - 使う Python を変えるときは app.env に `PDF_COMPRESS_PYTHON=/path/to/python3`(既定 `python3`)
 - 一時ファイルは systemd の `PrivateTmp` の /tmp に作り、毎回消す
+- ⚠**nginx でアプリ全体を出す構成**では、`deploy/nginx/property-management.conf.example` の
+  「大きいPDFを受け取る3つの口」の location(上限 52MB・待ち 300 秒)も入れること。全体の上限 12MB・
+  待ち 60 秒のままだと、大きい PDF が手前で断られるか、圧縮の順番待ちの途中で 504 になる。
+  社内の画面・API を Tailscale の入口から出し、nginx では公開の道だけを出す構成(本番 2026-10)では不要
 
 ### ステップ 1: app.env を配置
 
@@ -543,6 +547,7 @@ sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm prune --om
 # 7. 大きいPDFの自動圧縮の部品(OS パッケージ・npm では入らない)と自己診断
 #    ⚠この機能を含む版へ初めて上げるときは必須(入っていないと 8MB 超の PDF がすべて断られる)。
 #    入っていれば apt は何もしない。自己診断は毎回流してよい(数秒)。
+#    nginx でアプリ全体を出す構成なら、nginx の見本の「大きいPDFを受け取る3つの口」も反映する(ステップ 0.5 の注)。
 sudo apt-get install -y python3-pikepdf python3-pil
 sudo -u www-data python3 /opt/property-management/scripts/pdf-compress.py --self-test
 # 期待: {"selfTest": "ok", "level": "jpeg85", "pikepdf": "…"} と終了コード 0
