@@ -84,6 +84,15 @@ function serialize<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/**
+ * 大きいPDFを扱う重い処理を、圧縮と**同じ順番待ち**で1本ずつ動かす。
+ * ⚠席(tryReserveCompressionSlot)は「入れる数」を絞るだけで、入った2本は同時に動けてしまう。
+ *   8MB を超える PDF の読み取り(pdf-parse・本体のプロセス)もここを通す(@codex PR#498 4巡目)。
+ */
+export function runExclusive<T>(fn: () => Promise<T>): Promise<T> {
+  return serialize(fn);
+}
+
 const LEVELS: readonly PdfCompressLevel[] = ["lossless", "jpeg85", "jpeg75"];
 const REASONS: readonly PdfCompressFailure[] = ["too_large", "encrypted", "invalid_pdf"];
 

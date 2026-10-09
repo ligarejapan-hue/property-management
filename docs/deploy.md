@@ -540,7 +540,14 @@ sudo -E -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm run bui
 # 6. devDependencies を落として本番依存へ戻す（next / @prisma/client は dependencies のため残る）
 sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm prune --omit=dev
 
-# 7. サービス再起動
+# 7. 大きいPDFの自動圧縮の部品(OS パッケージ・npm では入らない)と自己診断
+#    ⚠この機能を含む版へ初めて上げるときは必須(入っていないと 8MB 超の PDF がすべて断られる)。
+#    入っていれば apt は何もしない。自己診断は毎回流してよい(数秒)。
+sudo apt-get install -y python3-pikepdf python3-pil
+sudo -u www-data python3 /opt/property-management/scripts/pdf-compress.py --self-test
+# 期待: {"selfTest": "ok", "level": "jpeg85", "pikepdf": "…"} と終了コード 0
+
+# 8. サービス再起動
 sudo systemctl restart property-management
 sudo systemctl status property-management --no-pager
 ```

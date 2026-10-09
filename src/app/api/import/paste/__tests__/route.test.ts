@@ -732,6 +732,24 @@ describe("PDF 経路（全体レビュー I-2 / I-5 / m-2 / m-6）", () => {
     expect(again.status).toBe(200);
   });
 
+  it("★8MB を超える PDF の展開は2本同時に動かない(席に入った2本目は待つ・@codex PR#498 4巡目)", async () => {
+    const { extractTextFromPdf } = await import("@/lib/pdf-extract");
+    let running = 0;
+    let maxRunning = 0;
+    vi.mocked(extractTextFromPdf).mockImplementation(async () => {
+      running++;
+      maxRunning = Math.max(maxRunning, running);
+      await new Promise((r) => setTimeout(r, 30));
+      running--;
+      return pdfText;
+    });
+    const [a, b] = await Promise.all([POST(await pdfReq(9 * 1024 * 1024)), POST(await pdfReq(9 * 1024 * 1024))]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect(maxRunning).toBe(1);
+    vi.mocked(extractTextFromPdf).mockImplementation(async () => pdfText);
+  });
+
   it("★文字が数文字しか取れないPDF(スキャン画像)は、空でなくても断る", async () => {
     // isLikelyScannedPdf は50文字未満を「読めていない」とみなす。
     // trim()==="" 判定では、雑音を数文字吐くスキャンPDFが素通りしていた。

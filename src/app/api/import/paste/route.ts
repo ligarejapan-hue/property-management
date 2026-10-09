@@ -16,6 +16,8 @@ import {
 } from "@/lib/import-body-size";
 import { MAX_PDF_UPLOAD_BYTES, pdfTooLargeToAcceptMessage } from "@/lib/pdf-compress/policy";
 import { reserveLargePdfSlot } from "@/lib/pdf-compress/fit";
+import { runExclusive } from "@/lib/pdf-compress/run";
+import { MAX_FILE_SIZE } from "@/lib/storage/types";
 
 // ---------- POST /api/import/paste ----------
 // リクエスト形式:
@@ -88,7 +90,11 @@ export async function POST(request: NextRequest) {
       if (!isPdfBuffer(buffer)) {
         throw new ApiError(400, "PDFファイルではありません", "BAD_REQUEST");
       }
-      text = await extractTextFromPdf(buffer);
+      // 8MB を超える PDF の展開は、圧縮と同じ順番待ちで1本ずつ(席だけでは2本同時に動く)。
+      text =
+        buffer.length > MAX_FILE_SIZE
+          ? await runExclusive(() => extractTextFromPdf(buffer))
+          : await extractTextFromPdf(buffer);
       if (isLikelyScannedPdf(text)) {
         // ⚠無言で空の下書きを返さない。スキャン画像の PDF はここに来る。
         // ⚠判定は既存の isLikelyScannedPdf(@/lib/pdf-extract・50文字未満)を使う

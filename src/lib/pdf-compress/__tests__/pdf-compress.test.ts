@@ -4,6 +4,7 @@ import { writeFile } from "node:fs/promises";
 import {
   compressPdf,
   parseScriptOutput,
+  runExclusive,
   tryReserveCompressionSlot,
   MAX_COMPRESSION_SLOTS,
   type RunDeps,
@@ -130,6 +131,23 @@ describe("compressPdf(別プロセスでの圧縮)", () => {
     });
     const rs = await Promise.all([1, 2, 3].map(() => compressPdf(Buffer.alloc(10), 5, deps)));
     expect(rs.every((r) => r.ok)).toBe(true);
+    expect(maxRunning).toBe(1);
+  });
+
+  it("runExclusive(大きいPDFの読み取り)と圧縮は同じ順番待ちで、同時に動かない", async () => {
+    let running = 0;
+    let maxRunning = 0;
+    const work = async () => {
+      running++;
+      maxRunning = Math.max(maxRunning, running);
+      await new Promise((r) => setTimeout(r, 20));
+      running--;
+    };
+    const deps = fakeDeps(async () => {
+      await work();
+      return { stdout: okJson("lossless", 10, 4), write: Buffer.alloc(4) };
+    });
+    await Promise.all([runExclusive(work), compressPdf(Buffer.alloc(10), 5, deps), runExclusive(work)]);
     expect(maxRunning).toBe(1);
   });
 
