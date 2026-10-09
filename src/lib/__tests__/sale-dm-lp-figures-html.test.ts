@@ -148,3 +148,26 @@ describe("4枚目の札「住み続けて売る(リースバック)」(2026-10-0
     expect(svg).toContain(">住み続けて売る</text>");
   });
 });
+
+// 発注者決定(2026-10-10): 空き家の LP には「住み続けて売る(リースバック)」は合わない=3枚の札も選べるようにする。
+describe("3枚の札(売る・貸す・しばらく持つ・リースバックなし)", () => {
+  it("図の種類に3枚版があり、日本語の名前を持つ", () => {
+    expect(FIGURE_KINDS).toContain("sell_rent_keep_3");
+  });
+  it("公開LP: 3枚で、リースバックの札は出さない。3枚用の並び(.three)", () => {
+    const h = renderFigureHtml("sell_rent_keep_3");
+    expect((h.match(/class="opt-card"/g) ?? []).length).toBe(3);
+    expect(h).toContain('<div class="options three">');
+    for (const t of ["売る", "貸す", "しばらく持つ"]) expect(h).toContain(`<h3>${t}</h3>`);
+    expect(h).not.toContain("住み続けて売る");
+    expect(h).not.toContain("リースバック");
+  });
+  it("4枚版はこれまでどおり4枚(相続のLPは変わらない)", () => {
+    expect((renderFigureHtml("sell_rent_keep").match(/class="opt-card"/g) ?? []).length).toBe(4);
+  });
+  it("管理画面の見本も3枚", () => {
+    const svg = renderFigureSvg("sell_rent_keep_3");
+    expect((svg.match(/<rect x="\d+" y="84"/g) ?? []).length).toBe(3);
+    expect(svg).not.toContain("住み続けて売る");
+  });
+});

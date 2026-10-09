@@ -120,6 +120,8 @@ const CSS = [
   ".flow-total{margin:12px 0 0;font-weight:700;color:#0e6b5c;font-size:17px}",
   // 売る・貸す・しばらく持つ
   ".options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}",
+  // 3枚版(空き家など・リースバックなし)はスマホでも PC でも横に3つ(PC の4列より強い指定)
+  ".options.three{grid-template-columns:repeat(3,minmax(0,1fr))}",
   ".opt-card{background:#fffdf8;border:1px solid #ddd3bf;border-radius:12px;padding:8px;text-align:center}",
   ".opt-card h3{font-size:16px}",
   ".opt-img{display:block;width:100%;max-width:200px;height:auto;margin:0 auto 6px;border-radius:10px}",

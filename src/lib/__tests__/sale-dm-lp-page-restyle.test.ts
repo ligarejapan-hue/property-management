@@ -279,3 +279,10 @@ describe("動きで中身が見えなくならない(安全網)", () => {
     expect(h).toContain(".inquiry fieldset:disabled .cta::after{display:none}");
   });
 });
+
+describe("3枚の札の並び", () => {
+  it("3枚版はスマホでも PC でも横に3つ(4枚用の2列/4列の規則より強い)", () => {
+    const h = renderLpPage(input());
+    expect(h).toContain(".options.three{grid-template-columns:repeat(3,minmax(0,1fr))}");
+  });
+});
