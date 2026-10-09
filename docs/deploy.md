@@ -204,10 +204,11 @@ systemctl --version | head -1
 
 ```bash
 sudo apt-get install -y python3-pikepdf python3-pil
-# 確認(サービスと同じ www-data で・試験用 PDF を作って実際に縮める)
-sudo -u www-data python3 /opt/property-management/scripts/pdf-compress.py --self-test
-# 期待: {"selfTest": "ok", "level": "jpeg85", "pikepdf": "…"} と終了コード 0
+# 部品が読み込めること(スクリプトはまだ無いので、ここでは読み込みだけ)
+sudo -u www-data python3 -c "import pikepdf, PIL; print(pikepdf.__version__)"
 ```
+
+⚠実際に縮めてみる自己診断は、リポジトリを取得した**後**(ステップ 2 の最後)で行う。
 
 - Ubuntu 24.04 の `python3-pikepdf` は 8.7.1(MPL-2.0)。AGPL の MuPDF は使わない
 - 使う Python を変えるときは app.env に `PDF_COMPRESS_PYTHON=/path/to/python3`(既定 `python3`)
@@ -253,6 +254,10 @@ sudo chown www-data:www-data /var/www/.npm
 #     build 成功後に `npm prune --omit=dev` で本番依存へ戻す（ステップ 6）。
 # ⚠ @tailwindcss/postcss・tailwindcss はビルド時に必要なため dependencies に入っており、prune 後も残る。
 sudo -u www-data env HOME=/var/www npm_config_cache=/var/www/.npm npm ci --include=dev
+
+# 大きいPDFの自動圧縮の自己診断(ステップ 0.5 の部品+取得したスクリプト・www-data で実際に縮める)
+sudo -u www-data python3 /opt/property-management/scripts/pdf-compress.py --self-test
+# 期待: {"selfTest": "ok", "level": "jpeg85", "pikepdf": "…"} と終了コード 0
 
 # Prisma クライアント生成（src/generated/prisma/ に出力）
 # ⚠ postinstall では自動実行されないため必須
