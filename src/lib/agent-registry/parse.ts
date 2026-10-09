@@ -118,7 +118,6 @@ export function parseListPage(html: string): ListPage {
   if (!rangeM) throw new LayoutChanged("表示している範囲の文言");
   const rangeStart = Number(rangeM[1]);
   const rangeEnd = Number(rangeM[2]);
-  const expectedRows = rangeEnd - rangeStart + 1;
 
   const select = html.match(/<select id="pageListNo1"[\s\S]*?<\/select>/)?.[0];
   if (!select) throw new LayoutChanged("ページの選択");
@@ -130,11 +129,15 @@ export function parseListPage(html: string): ListPage {
   // ページ数が件数と合っているか(50件ずつ)。合わない(26906件なのに「1/1」など)画面をそのまま進めると、
   // 1ページで行政庁を終わりにして、残りの会社を締めで消してしまう(@codex #477)。
   if (pages !== Math.ceil(total / PAGE_SIZE)) throw new LayoutChanged("ページ数が件数と合わない");
-  // 表示している範囲が、選んだページと件数に合っているか(50件ずつ・最後のページは件数で終わる)。
+  // 表示している範囲が、選んだページと件数に合っているか(50件ずつ)。
   // 合わない=別のページの中身。そのまま進めると間のページを読まずに締めで会社を消してしまう(@codex #477)。
-  if (rangeStart !== (page - 1) * PAGE_SIZE + 1 || rangeEnd !== Math.min(page * PAGE_SIZE, total)) {
+  // 最後のページの終わりは、実物では件数で切らずにページの終わりで出る(3289件で「3251件目～3300件目」・
+  // 2026-10-10 の実物で確認)。件数で切った形も受け入れる。行の数は件数で切った範囲で数える。
+  const lastOnPage = page * PAGE_SIZE;
+  if (rangeStart !== (page - 1) * PAGE_SIZE + 1 || (rangeEnd !== lastOnPage && rangeEnd !== Math.min(lastOnPage, total))) {
     throw new LayoutChanged("表示している範囲がページと合わない");
   }
+  const expectedRows = Math.min(rangeEnd, total) - rangeStart + 1;
 
   const table = html.match(/<table class="re_disp"\s*>([\s\S]*?)<\/table>/)?.[1];
   if (!table) throw new LayoutChanged("一覧の表");

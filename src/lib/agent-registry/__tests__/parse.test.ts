@@ -72,6 +72,23 @@ describe("一覧のページを読む", () => {
     expect(() => parseListPage(last.replace("26901件目～26906件目", "26901件目～26907件目"))).toThrow(LayoutChanged);
   });
 
+  it("★実物の最後のページは範囲の終わりを件数で切らずにページの終わりで出す(「26901件目～26950件目」で6行)=受け入れる(2026-10-09 本番で大臣の66ページ目が止まった原因)", () => {
+    const last = listHtml
+      .replace('<option value="1" selected="selected">1/539</option>', '<option value="1">1/539</option>')
+      .replace('<option value="539">539/539</option>', '<option value="539" selected="selected">539/539</option>')
+      .replace("1件目～50件目までを表示", "26901件目～26950件目までを表示")
+      .replace(/(<tr>\s*<td style="text-align:right;">6<\/td>[\s\S]*?<\/tr>\s*)(?:<tr>[\s\S]*?<\/tr>\s*)*(<\/table>)/, "$1$2");
+    const lastPage = parseListPage(last);
+    expect(lastPage.page).toBe(539);
+    expect(lastPage.rows.length).toBe(5); // 6行(=件数で切った数)のうち1社が2行
+    // 行が欠けている(5行しかない)は引き続き止める
+    const fewer = last.replace(/<tr>(\s*<td style="text-align:right;">6<\/td>[\s\S]*?<\/tr>)/, "");
+    expect(() => parseListPage(fewer)).toThrow(LayoutChanged);
+    // 最後でないページで終わりが50件にならない・最後のページで終わりがページの終わりを超えるのは止める
+    expect(() => parseListPage(listHtml.replace("1件目～50件目までを表示", "1件目～49件目までを表示"))).toThrow(LayoutChanged);
+    expect(() => parseListPage(last.replace("26901件目～26950件目", "26901件目～26951件目"))).toThrow(LayoutChanged);
+  });
+
   it("所在地が空なら null", () => {
     expect(page.rows.find((r) => r.licenseKey === "13104567")?.address).toBeNull();
   });
