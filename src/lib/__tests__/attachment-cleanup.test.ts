@@ -109,7 +109,8 @@ describe("findPurgeableAttachments", () => {
       { purgeStartedAt: { lte: expect.any(Date) } },
     ]);
     expect(arg.take).toBe(200);
-    expect(arg.select).toEqual({ id: true, fileUrl: true, type: true });
+    expect(arg.select).toEqual({ id: true, fileUrl: true, type: true, deletedAt: true });
+    expect(arg.orderBy).toEqual([{ deletedAt: "asc" }, { id: "asc" }]);
   });
 
   it("物件削除で propertyId=null になった孤児もゴミ箱入りしていれば対象になる（総点検P3）", async () => {
@@ -337,12 +338,17 @@ describe("purgeExpiredAttachments", () => {
     const heldKey = "/uploads/report-inbox/1-abc.pdf";
     const nextKey = "/uploads/properties/p/attachments/next.pdf";
     let purgeableCalls = 0;
-    pm.attachment.findMany.mockImplementation((args: { where?: { fileUrl?: { contains?: string }; id?: { notIn?: string[] } } }) => {
+    const heldAt = new Date("2026-01-01T00:00:00Z");
+    pm.attachment.findMany.mockImplementation((args: { where?: { fileUrl?: { contains?: string }; AND?: unknown[] }; take?: number }) => {
       if (args?.where?.fileUrl?.contains !== undefined) return Promise.resolve([]);
       purgeableCalls++;
-      if (purgeableCalls === 1) return Promise.resolve([{ id: "held", fileUrl: heldKey, type: "report" }]);
-      // 2回目は、残した記録を除いて続きを読む
-      expect(args.where?.id).toEqual({ notIn: ["held"] });
+      if (purgeableCalls === 1) return Promise.resolve([{ id: "held", fileUrl: heldKey, type: "report", deletedAt: heldAt }]);
+      if (purgeableCalls > 2) return Promise.resolve([]);
+      // 2回目は、残した記録の**後ろから**、残した件数だけ続きを読む(回数の上限は無い・17巡目)
+      expect(args.where?.AND).toEqual([
+        { OR: [{ deletedAt: { gt: heldAt } }, { deletedAt: heldAt, id: { gt: "held" } }] },
+      ]);
+      expect(args.take).toBe(1);
       return Promise.resolve([{ id: "next", fileUrl: nextKey, type: "general" }]);
     });
     pm.propertyPhoto.findMany.mockImplementation((args: { where: { OR: [{ fileUrl: { contains: string } }] } }) =>

@@ -11,8 +11,6 @@ export const ATTACHMENT_RETENTION_DAYS = 90;
  * (claim→storage.delete→finalize)所要より十分長く、放置(=leak)より十分短い値。
  */
 export const STALE_PURGE_CLAIM_MS = 60 * 60 * 1000; // 1 hour
-/** 残しておく記録の分を読み足す回数の上限(1回の実行が長引きすぎないように)。 */
-const MAX_HELD_REFILL_ROUNDS = 20;
 
 export interface PurgeResult {
   scanned: number;
@@ -38,11 +36,23 @@ export function purgeableCutoff(
 export async function findPurgeableAttachments(
   now: Date,
   limit: number,
-  excludeIds: readonly string[] = [],
+  /** この行より後ろ(削除日時→id の順)から読む。残した記録の続きを読むときに使う。 */
+  after?: { deletedAt: Date | null; id: string },
 ) {
   return prisma.attachment.findMany({
     where: {
-      ...(excludeIds.length > 0 ? { id: { notIn: [...excludeIds] } } : {}),
+      ...(after && after.deletedAt
+        ? {
+            AND: [
+              {
+                OR: [
+                  { deletedAt: { gt: after.deletedAt } },
+                  { deletedAt: after.deletedAt, id: { gt: after.id } },
+                ],
+              },
+            ],
+          }
+        : {}),
       isDeleted: true,
       type: { not: "registry" }, // 謄本は自動削除しない
       deletedAt: { not: null, lte: purgeableCutoff(now) },
@@ -51,8 +61,8 @@ export async function findPurgeableAttachments(
         { purgeStartedAt: { lte: new Date(now.getTime() - STALE_PURGE_CLAIM_MS) } },
       ],
     },
-    select: { id: true, fileUrl: true, type: true },
-    orderBy: { deletedAt: "asc" },
+    select: { id: true, fileUrl: true, type: true, deletedAt: true },
+    orderBy: [{ deletedAt: "asc" }, { id: "asc" }],
     take: limit,
   });
 }
@@ -156,8 +166,11 @@ export async function purgeExpiredAttachments(opts: {
   // ⚠残しておく記録(反響資料・査定報告書の守りの記録・下の (2))は毎回いちばん古い枠を占めるので、
   //   その分だけ**続きを読み足す**(@codex PR#500 16巡目)。読み足さないと、残す記録が limit 件
   //   たまった時点で、後ろの消すべき書類(個人情報入りを含む)がいつまでも処理されない。
+  //   回数の上限は設けない(上限で止めると、その先の行が同じように取り残される・17巡目)。
+  //   読む位置(削除日時→id)は前にしか進まないので、対象の行の数で必ず終わる。
+  //   念のため、同じ実行で一度見た行がまた来たら止める(読む位置が進まない場合の無限ループ防止)。
   const seen = new Set<string>();
-  for (let round = 0; round < MAX_HELD_REFILL_ROUNDS && rows.length > 0; round++) {
+  while (rows.length > 0) {
     let heldThisRound = 0;
     for (const row of rows) {
       seen.add(row.id);
@@ -239,9 +252,10 @@ export async function purgeExpiredAttachments(opts: {
       purged++;
     }
     if (heldThisRound === 0) break;
-    rows = (await findPurgeableAttachments(opts.now, heldThisRound, [...seen])).filter(
-      (r) => !seen.has(r.id),
-    );
+    const last = rows[rows.length - 1];
+    const next = await findPurgeableAttachments(opts.now, heldThisRound, last);
+    if (next.some((r) => seen.has(r.id))) break;
+    rows = next;
   }
 
   return { scanned, purged, failed, skipped };
