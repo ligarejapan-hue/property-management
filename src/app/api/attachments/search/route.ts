@@ -50,7 +50,7 @@ const OWNER_PII_VISIBLE_LEVELS: ReadonlySet<string> = new Set([
 const querySchema = z.object({
   // ⚠referral(反響資料)は種類フィルタでも選べるようにする。フィルタ未指定なら
   //   従来どおり全種類が出る(where.type は指定時のみ立てる)。
-  type: z.enum(["general", "registry", "referral"]).optional(),
+  type: z.enum(["general", "registry", "referral", "report"]).optional(),
   fileName: z.string().trim().min(1).max(200).optional(),
   targetType: z.enum(["property", "owner", "comment"]).optional(),
   targetId: z.string().uuid().optional(),

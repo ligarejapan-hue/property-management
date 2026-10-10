@@ -5244,3 +5244,68 @@ export async function updateAgent(
   }
   return apiFetch<{ version: number }>(`/api/agents/${id}`, deskJsonInit("PATCH", body));
 }
+
+// ============================================================
+// 査定報告書の受け取り箱(2026-10-10)
+// ============================================================
+
+export interface ReportInboxCandidate {
+  propertyId: string;
+  address: string;
+  buildingName: string | null;
+  roomNo: string | null;
+  propertyType: string;
+  match: "name_room" | "name" | "address_room" | "address";
+}
+
+export interface ReportInboxItem {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  originalSize: number | null;
+  source: "sre" | "unknown";
+  buildingName: string | null;
+  roomNo: string | null;
+  address: string | null;
+  createdAt: string;
+  uploaderName: string | null;
+  candidates: ReportInboxCandidate[];
+}
+
+export interface ReportInboxSearchRow {
+  id: string;
+  address: string;
+  buildingName: string | null;
+  roomNo: string | null;
+  propertyType: string;
+}
+
+export async function fetchReportInbox(): Promise<ReportInboxItem[]> {
+  const json = await apiFetch<{ data: ReportInboxItem[] }>("/api/report-inbox");
+  return json.data;
+}
+
+export async function uploadReportToInbox(file: File): Promise<{ id: string; compressed: boolean }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  return apiFetch("/api/report-inbox", { method: "POST", body: fd });
+}
+
+export async function attachReportInboxItem(id: string, propertyId: string): Promise<{ attachmentId: string }> {
+  return apiFetch(`/api/report-inbox/${id}/attach`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ propertyId }),
+  });
+}
+
+export async function deleteReportInboxItem(id: string): Promise<void> {
+  await apiFetch(`/api/report-inbox/${id}`, { method: "DELETE" });
+}
+
+export async function searchPropertiesForReportInbox(q: string): Promise<ReportInboxSearchRow[]> {
+  const json = await apiFetch<{ data: ReportInboxSearchRow[] }>(
+    `/api/report-inbox/search?q=${encodeURIComponent(q)}`,
+  );
+  return json.data;
+}

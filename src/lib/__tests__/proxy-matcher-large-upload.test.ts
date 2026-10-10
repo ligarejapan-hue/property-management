@@ -21,6 +21,7 @@ describe("proxy の matcher", () => {
     "/api/properties/0b6f6c1e-0000-4000-8000-000000000000/attachments",
     "/api/import/paste",
     "/api/import/paste/commit",
+    "/api/report-inbox",
   ])("大きいPDFを受け取る口は proxy を通さない: %s", (p) => {
     expect(re.test(p)).toBe(false);
   });
@@ -35,6 +36,9 @@ describe("proxy の matcher", () => {
     "/api/import/paste/excel",
     "/api/import/paste-other",
     "/api/import/jobs",
+    "/api/report-inbox/search",
+    "/api/report-inbox/abc/attach",
+    "/api/report-inbox/abc/file",
   ])("それ以外の画面・API は今までどおり proxy を通る: %s", (p) => {
     expect(re.test(p)).toBe(true);
   });
@@ -49,7 +53,7 @@ describe("proxy の matcher", () => {
   });
 });
 
-describe("nginx の見本(アプリ全体を nginx で出す構成)も、3つの口だけ大きい送信と長い待ちを許す", () => {
+describe("nginx の見本(アプリ全体を nginx で出す構成)も、4つの口だけ大きい送信と長い待ちを許す", () => {
   const conf = readFileSync(path.join(process.cwd(), "deploy/nginx/property-management.conf.example"), "utf8");
   const m = /location ~ (\^\/api\/[^\s]+) \{([\s\S]*?)\n    \}/.exec(conf);
 
@@ -60,16 +64,17 @@ describe("nginx の見本(アプリ全体を nginx で出す構成)も、3つの
     expect(m![2]).toMatch(/proxy_send_timeout\s+300s;/);
   });
 
-  it("対象は proxy の除外と同じ3つの口だけ", () => {
+  it("対象は proxy の除外と同じ4つの口だけ", () => {
     const re = new RegExp(m![1]);
     for (const p of [
       "/api/properties/0b6f6c1e-0000-4000-8000-000000000000/attachments",
       "/api/import/paste",
       "/api/import/paste/commit",
+      "/api/report-inbox",
     ]) {
       expect(re.test(p), p).toBe(true);
     }
-    for (const p of ["/api/properties/abc/photos", "/api/import/paste/excel", "/api/properties/abc/attachments/att-1"]) {
+    for (const p of ["/api/properties/abc/photos", "/api/import/paste/excel", "/api/properties/abc/attachments/att-1", "/api/report-inbox/abc/attach"]) {
       expect(re.test(p), p).toBe(false);
     }
   });
@@ -86,6 +91,7 @@ describe("proxy を通さない口は、本文を読む前に認証と大きさ�
     "src/app/api/properties/[id]/attachments/route.ts",
     "src/app/api/import/paste/route.ts",
     "src/app/api/import/paste/commit/route.ts",
+    "src/app/api/report-inbox/route.ts",
   ])("%s", (file) => {
     const src = readFileSync(path.join(root, file), "utf8");
     const post = src.slice(src.indexOf("export async function POST"));

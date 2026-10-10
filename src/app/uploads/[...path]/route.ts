@@ -9,6 +9,7 @@ import { buildUploadsEtag, ifNoneMatchMatches } from "@/lib/uploads-etag";
 import { writeAuditLog } from "@/lib/audit";
 import { registryContentDisposition } from "@/lib/attachments/registry-display-name";
 import { referralContentDisposition } from "@/lib/attachments/referral-display-name";
+import { reportContentDisposition } from "@/lib/attachments/report-display-name";
 
 /**
  * /uploads/[...path] 配信 proxy。
@@ -169,10 +170,15 @@ export async function GET(
             certType: serveMeta.certificateType,
             createdAt: serveMeta.createdAt,
           })
-        : referralContentDisposition({
-            downloadIntent,
-            createdAt: serveMeta.createdAt,
-          });
+        : serveMeta.kind === "report"
+          ? reportContentDisposition({
+              downloadIntent,
+              createdAt: serveMeta.createdAt,
+            })
+          : referralContentDisposition({
+              downloadIntent,
+              createdAt: serveMeta.createdAt,
+            });
   }
 
   if (registryMeta) {

@@ -13,6 +13,7 @@ import {
   escapePrismaLikePattern,
   isEveryOwnerFieldMaskFree,
   referralGatedOwnerFields,
+  isOwnerPiiDocumentType,
 } from "@/lib/uploads-authorization";
 import { __resetStorageForTest } from "@/lib/storage";
 import type { ApiSession, PermissionEntry } from "@/lib/api-helpers";
@@ -1518,5 +1519,72 @@ describe("resolveProtectedServeMeta", () => {
       ],
     });
     expect(await resolveRegistryServeMeta(REF_KEY, prisma)).toBeNull();
+  });
+});
+
+// ============================================================
+// 査定報告書(report・2026-10-10)も反響資料と同じ扱い
+//
+// ⚠報告書には依頼者の氏名が載る。general のままだと物件を読めるだけの利用者全員が開ける。
+//   開ける人(所有者の項目をすべて素通しで見られる人)・キャッシュさせない、を referral と揃える。
+// ============================================================
+describe("査定報告書(report)の守り", () => {
+  const KEY = "report-inbox/1-abc.pdf";
+  const att = (over: Partial<Att> = {}): Att => ({
+    id: "att-rep-1",
+    fileUrl: `/uploads/${KEY}`,
+    isDeleted: false,
+    targetType: "property",
+    targetId: "p1",
+    propertyId: "p1",
+    type: "report",
+    ...over,
+  });
+  const prop: Prop = { id: "p1", createdBy: "u-office", assignedTo: null };
+  const propertyReadOnly: PermissionEntry[] = [{ resource: "property", action: "read", granted: true }];
+  const allPiiVisible: PermissionEntry[] = [
+    ...propertyReadOnly,
+    { resource: "owner", action: "read", granted: true },
+    { resource: "owner_name", action: "full", granted: true },
+    { resource: "owner_name_kana", action: "full", granted: true },
+    { resource: "owner_address", action: "full", granted: true },
+    { resource: "owner_phone", action: "full", granted: true },
+    { resource: "owner_email", action: "full", granted: true },
+    { resource: "owner_zip", action: "full", granted: true },
+    { resource: "owner_note", action: "full", granted: true },
+    { resource: "owner_corporate_number", action: "full", granted: true },
+  ];
+
+  it("種類の一覧: referral と report が対象・general / registry は対象外", () => {
+    expect(isOwnerPiiDocumentType("referral")).toBe(true);
+    expect(isOwnerPiiDocumentType("report")).toBe(true);
+    expect(isOwnerPiiDocumentType("general")).toBe(false);
+    expect(isOwnerPiiDocumentType("registry")).toBe(false);
+    expect(isOwnerPiiDocumentType(null)).toBe(false);
+  });
+
+  it("★物件を読めるだけの人には開けない(forbidden)", async () => {
+    const prisma = makeDb({ attachments: [att()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: KEY, session: officeStaff, permissions: propertyReadOnly, prisma }),
+    ).toBe("forbidden");
+  });
+
+  it("所有者の項目をすべて素通しで見られる人は開ける", async () => {
+    const prisma = makeDb({ attachments: [att()], properties: [prop] });
+    expect(
+      await authorizeUploadAccess({ key: KEY, session: officeStaff, permissions: allPiiVisible, prisma }),
+    ).toBe("ok");
+  });
+
+  it("★配信は kind:'report'(キャッシュさせない・保存名の材料は登録日だけ)", async () => {
+    const created = new Date("2026-10-10T01:00:00.000Z");
+    const prisma = makeDb({ attachments: [att({ createdAt: created } as Partial<Att>)] });
+    expect(await resolveProtectedServeMeta(KEY, prisma)).toEqual({
+      kind: "report",
+      attachmentId: "att-rep-1",
+      propertyId: "p1",
+      createdAt: created,
+    });
   });
 });

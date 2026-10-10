@@ -81,6 +81,19 @@ export function canOpenReferralDocument(permissions: PermissionEntry[]): boolean
   return isEveryOwnerFieldMaskFree({ ...resolveOwnerDisplayConfig(permissions) });
 }
 
+/**
+ * 所有者の個人情報を含む書類として、**反響資料と同じ扱い**(開ける人を絞る・キャッシュさせない)
+ * にする添付の種類。
+ * - referral … 反響資料(査定依頼のPDFなど)
+ * - report   … 査定報告書(SRE AI査定など・依頼者の氏名が載る・2026-10-10)
+ * ⚠種類を足すときはここに足す(ゲートと配信の両方がこれを見る)。
+ */
+export const OWNER_PII_DOCUMENT_TYPES: ReadonlySet<string> = new Set(["referral", "report"]);
+
+export function isOwnerPiiDocumentType(type: string | null | undefined): boolean {
+  return type != null && OWNER_PII_DOCUMENT_TYPES.has(type);
+}
+
 export interface AuthorizeUploadAccessArgs {
   key: string;
   session: ApiSession;
@@ -287,7 +300,8 @@ export async function authorizeUploadAccess(
     //  ⚠registry_pdf 権限は**謄本専用の意味**なので流用しない。所有者PIIを含む
     //    書類を開ける最低権限は owner:read。
     //  上の registry と同じく、下の targetType scope とは独立に AND で課す。
-    if (a.type === "referral") {
+    //  ⚠査定報告書(report・依頼者の氏名が載る)も同じ扱い(2026-10-10)。
+    if (isOwnerPiiDocumentType(a.type)) {
       if (!canOpenReferralDocument(permissions)) {
         decisions.push("forbidden");
         continue;
@@ -410,7 +424,8 @@ export interface RegistryServeMeta {
  *   素通しになる形だった。
  */
 export interface ReferralServeMeta {
-  kind: "referral";
+  /** referral=反響資料 / report=査定報告書(保存名だけが違う・扱いは同じ)。 */
+  kind: "referral" | "report";
   attachmentId: string;
   propertyId: string | null;
   /** 保存名の材料（登録日）。生の fileName は**返さない**。 */
@@ -463,9 +478,9 @@ export async function resolveProtectedServeMeta(
         createdAt: a.createdAt ?? null,
       };
     }
-    if (a.type === "referral") {
+    if (a.type === "referral" || a.type === "report") {
       return {
-        kind: "referral",
+        kind: a.type,
         attachmentId: a.id,
         propertyId: a.propertyId ?? a.targetId ?? null,
         createdAt: a.createdAt ?? null,
